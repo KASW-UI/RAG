@@ -1,0 +1,24 @@
+services:
+
+  # ============ 关系型数据库 ============
+  postgres:
+    image: postgres:18.4
+    container_name: "${CONTAINER_PREFIX:-RAG}-postgres"
+    ports:
+      - "49432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-RAG-DB}
+    restart: unless-stopped
+
+  # ============ 缓存 & 键值存储 ============
+  redis:
+    image: redis:8.6.3
+    container_name: "${CONTAINER_PREFIX:-Sea}-redis"
+    ports:
+      - "49380:6379"
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/redis:/data
+    command: redis-server --appendonly yes --dir /data
+    restart: unless-stopped
