@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>user</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>user-proto</artifactId>
+    <packaging>jar</packaging>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- IDE 默认值；os-maven-plugin:detect 在 initialize 阶段会覆盖成真实平台 -->
+        <os.detected.classifier>osx-x86_64</os.detected.classifier>
+    </properties>
+
+    <dependencies>
+        <!-- 生成代码 extends GeneratedMessageV3 / MessageLite -->
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+        </dependency>
+        <!-- 生成 gRPC service stub（UserServiceGrpc.java 用到） -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-protobuf</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-protobuf-lite</artifactId>
+        </dependency>
+        <!-- 部分 grpc-java 生成代码用到 @javax.annotation.Generated / @Nullable -->
+        <dependency>
+            <groupId>javax.annotation</groupId>
+            <artifactId>javax.annotation-api</artifactId>
+            <version>1.3.2</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- 必须显式声明，否则 ${os.detected.classifier} 不会被设置，protoc 解析不到 native binary -->
+            <plugin>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+            </plugin>
+
+            <!-- ① 编译 user.proto → Java message + gRPC service stub -->
+            <plugin>
+                <groupId>org.xolstice.maven.plugins</groupId>
+                <artifactId>protobuf-maven-plugin</artifactId>
+                <configuration>
+                    <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
+                    <pluginId>grpc-java</pluginId>
+                    <pluginArtifact>io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}</pluginArtifact>
+                </configuration>
+                <executions>
+                    <!-- 生成 *OuterClass（UserInfo / GetUserReq / ...） -->
+                    <execution>
+                        <id>protobuf-compile</id>
+                        <goals><goal>compile</goal></goals>
+                    </execution>
+                    <!-- 生成 *Grpc.java（UserServiceGrpc：含 server ImplBase + client Stub） -->
+                    <execution>
+                        <id>protobuf-compile-custom</id>
+                        <goals><goal>compile-custom</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- ② 把两个 generated-sources 目录加进 compile path -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>add-source</id>
+                        <phase>generate-sources</phase>
+                        <goals><goal>add-source</goal></goals>
+                        <configuration>
+                            <sources>
+                                <source>target/generated-sources/protobuf/java</source>
+                                <source>target/generated-sources/protobuf/grpc-java</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
