@@ -3,6 +3,8 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
+
+    <!-- 对应 Go: go-zero zrpc 服务进程启动入口(由父 pom user-user 接管 Spring Byndication / JPA / Redis / gRPC-Server / Nacos 等) -->
     <parent>
         <groupId>com.rag</groupId>
         <artifactId>user-user</artifactId>
@@ -16,5 +18,16 @@
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
+
+    <dependencies>
+        <!-- 对应 Go: pb/*.pb.go + pb/user_grpc.pb.go
+             由 user-proto 模块的 protobuf-maven-plugin 生成 com.rag.user.user.proto.* 的 message 和 UserServiceGrpc stub。
+             user-rpc 直接 import 它们,不要再自己跑插件,会重复生成两份代码。 -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>user-proto</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
 
 </project>
