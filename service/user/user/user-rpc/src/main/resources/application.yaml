@@ -1,0 +1,77 @@
+# 对应 Go: etc/user.yaml
+# 字段值按 1:1 复刻 Go 端 etc/user.yaml,字段名换成 Spring Boot / grpc-spring-boot-starter 约定的命名。
+server:
+  port: 8080  # Spring Boot HTTP port(Go 没用 HTTP,这里给 Actuator / Nacos 心跳用)
+
+spring:
+  application:
+    name: user-rpc  # 对应 Go: Log.ServiceName = user-rpc
+  datasource:                       # 对应 Go: Postgres{}
+    url: jdbc:postgresql://postgres:5432/RAG-DB  # Go:Host=postgres Port=5432 DBName=first_db
+    username: admin                # Go:User=admin
+    password: ${POSTGRES_PASSWORD} # Go:Password=${POSTGRES_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+  jpa:                             # 对应 Go:gorm.AutoMigrate
+    hibernate:
+      ddl-auto: update             # Go 用 AutoMigrate,Java 用 JPA ddl-auto=update,等效
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          time_zone: Asia/Shanghai  # 对应 Go DSN:TimeZone=Asia/Shanghai
+    open-in-view: false
+    show-sql: false
+  data:
+    redis:                         # 对应 Go:BizRedis{Host=redis:6379, Type=node}
+      host: redis
+      port: 6379
+      password:
+      database: 0
+  cloud:
+    nacos:                         # 对应 Go:Etcd{Hosts=[etcd:2379], Key=user.rpc}
+      # Java 走 Nacos 注册中心,字段名直接换成 nacos 约定,保留"服务名 = user-rpc"
+      server-addr: nacos:8848
+      discovery:
+        namespace: public
+        group: DEFAULT_GROUP
+
+# 对应 Go: grpc-server-spring-boot-starter 提供的 @GrpcService 自动注册
+# 端口 9004 对应 Go:ListenOn=0.0.0.0:9004
+grpc:
+  server:
+    port: 9004
+    reflection-service-enabled: true  # 对应 Go:dev/test 模式 reflection.Register(grpcServer)
+    enable-keep-alive: true
+
+# 对应 Go: UserAuth{AccessSecret, AccessExpire}
+# Java 端自定义配置,会被 @ConfigurationProperties(prefix="user-auth") 的 Config.UserAuth 接收
+user-auth:
+  access-secret: ae0536f9-6450-4606-8e13-5a19ed505da0
+  access-expire: 2592000
+
+# 对应 Go: Telemetry{Name=user-rpc, Endpoint=jaeger:4317, Sampler=1.0, Batcher=otlpgrpc}
+# Java 端用 OpenTelemetry + Micrometer Tracing,具体 exporter 在代码里注入。
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus  # 对应 Go:DevServer{HealthPath=/healthz, MetricsPath=/metrics}
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: user-rpc       # 对应 Go:Prometheus Subsystem=user_rpc
+  observations:
+    annotations:
+      enabled: true
+
+logging:
+  level:
+    com.rag.user: debug
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
