@@ -67,7 +67,7 @@ with the tree.
 | Did this work item already land? | `git log --oneline --grep '<WORK-ITEM-ID>'` |
 | When did this symbol change?     | `git log -S'<symbol>' --oneline -- <path>`  |
 | What happened to this file?      | `git log --follow --oneline -- <path>`      |
-| What is on master that I lack?   | `git log --oneline HEAD..origin/master`     |
+| What is on main that I lack?     | `git log --oneline HEAD..upstream/main`     |
 | Why is this line like this?      | `git log -L '<start>,<end>:<path>'`         |
 | What did that commit change?     | `git show --stat <sha>`                     |
 
@@ -82,7 +82,7 @@ write code, make sure that an issue tracks the work. Open one if none exists.
 Link the issue in three places that must agree: the issue's own `Row:` line, the
 work item's spec, and the pull request body.
 
-**`.agents/issue/open` is the index.** There is no index file. `ls .agents/issue/open/`
+**`GitHub` is the index.** There is no index file. `gh issue list`
 is the intake surface, and the owning work item lives in the issue body as its
 first line:
 
@@ -108,7 +108,7 @@ owning work item in its `Row:` line, or a spec lists it under `## Owed`.
 `scripts/check-agent-record.py` gates that for every issue a change references.
 Filing without fixing is therefore a gate failure rather than a habit. The gate
 is scoped to what a change cites, because a count over every open issue moves
-whenever anyone files one and could only ever fail `master` for reasons no commit
+whenever anyone files one and could only ever fail `main` for reasons no commit
 caused.
 
 **An issue closes when the work lands.** The pull request that lands the fix
@@ -229,8 +229,8 @@ It does not write an implementation that needs independent review.
 `scripts/agent-role.py claim operator` records the coordinator and never refuses
 because another operator exists. The `show` command lists the other operators.
 
-**Never force-push `master`.** Nobody can use `--force` or `--force-with-lease` on
-`master`. A plain `git push` rejects a non-fast-forward update. Git provides the
+**Never force-push `main`.** Nobody can use `--force` or `--force-with-lease` on
+`main`. A plain `git push` rejects a non-fast-forward update. Git provides the
 coordination lock. After a rejected push, fetch, merge again, rerun the gate,
 and push again. Never force the update.
 
@@ -389,7 +389,7 @@ gate run, and a fresh review to say something the landing change already knew.
 This narrows what counts as a unit. It never licenses bundling unrelated work
 into one branch.
 
-Keep the shared checkout on a clean `master`. **Never use it as a work surface.**
+Keep the shared checkout on a clean `main`. **Never use it as a work surface.**
 Other worktrees branch from it, so it must remain current and safe. Never edit,
 commit, or stash in the shared checkout.
 
@@ -399,17 +399,17 @@ can make gates fail when temporary space runs out.
 
 ## Landing work
 
-Move work to `master` from its task branch, never from the shared checkout. A
+Move work to `main` from its task branch, never from the shared checkout. A
 helper opens a reviewed `row/<ID>` pull request. An operator with recorded
 merge authority can merge the branch locally with a commit that names it. This
 local merge keeps an in-flow repair to one step. The task branch still makes the
 change visible, reversible, and attributable.
 
 Run the applicable gate before every push. Chain the successful gate directly
-to the exact-SHA push. **Never force-push `master`, and never add a force option to
-a script that can target it.** The scope is `master`, exactly as in §"How work gets
+to the exact-SHA push. **Never force-push `main`, and never add a force option to
+a script that can target it.** The scope is `main`, exactly as in §"How work gets
 done" -- a task branch you own is yours to rebase and force-push when the project
-allows it. A rejected push on `master` protects another merge. Fetch, merge again,
+allows it. A rejected push on `main` protects another merge. Fetch, merge again,
 rerun the gate, and push again. Hooks are bypassable convenience, not evidence.
 If you cannot query the remote, report `REMOTE_UNVERIFIED`. Unknown is not
 absence or success, and it does not authorize cleanup.
@@ -509,14 +509,13 @@ specific job; guides cannot weaken this file.
 ## Commands
 
 ```sh
-```sh
 scripts/agent-start.py                          # always first
 python3 scripts/agent-role.py show
 scripts/agent-preflight.sh                      # before edits
 scripts/agent-preflight.sh --staged             # before commit
 python3 scripts/agent-ready.py                  # before remote handoff
 python3 scripts/agent-pr-body.py --pr <N>      # before merging: the body IS the message
-python3 scripts/agent-integration.py --base origin/main
+python3 scripts/agent-integration.py --base upstream/main
 ```
 
 Never push, merge, manage services, use external compute, or download large

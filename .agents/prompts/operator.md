@@ -1,7 +1,6 @@
 ---
 prompt-contract-version: 1
 role: operator
-
 ---
 
 ## Task envelope

@@ -1,7 +1,5 @@
 # Developer preferences 
 
-Copy this file to `.agents/developer-preferences.md` and edit it for the current
-developer and workspace. The destination is intentionally ignored by Git.
 `AGENTS.md` defines project invariants; this file controls operational choices
 that legitimately differ between developers. It cannot relax correctness,
 testing, evidence, attribution, or lifecycle requirements.
@@ -20,15 +18,15 @@ choices below; `.env` keeps the paths and hosts.
 ## Git integration
 
 - Commits: allowed.
-- Base ref: `origin/master`.
+- Base ref: `upstream/main`.
 - Working branch: create or reuse a feature branch; do not work on local
-  `master`.
+  `main`.
 - Pull request shape: `<one PR for spec and implementation (recommended), or
   separate spec and implementation PRs>`. Record the answer at row claim and do
   not ask again for that row.
 - Fetch: allowed from `<read-only remote>`.
 - Push: ask first; if allowed, name the remote and permitted ref namespace.
-- Merge to `master`: not allowed unless explicitly requested for the current
+- Merge to `main`: not allowed unless explicitly requested for the current
   task.
 - Force-push or local ref rewrite: ask first.
 - Pull requests and CI inspection: ask first.

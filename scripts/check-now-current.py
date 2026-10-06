@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Keep .agents/NOW.md a short, current, one-Read resume surface.
 
-NOW.md is the single small file a cold session reads first to become productive.
-It is a SNAPSHOT, never a log: it is rewritten in place, and the history it used
-to summarise now lives where history belongs, in git.
+RAG-NOW is a DOMAIN-ADAPTED version of vllm.md's NOW: structural contract
+preserved (stamp + section existence + line budget + entry budget), but the
+information model changed from "system live-claim snapshot" (vllm.md's
+multi-row, multi-agent view) to "single-spec business-project pointer" (this
+project). See the "Adaptations vs upstream" section in NOW.md for the
+explicit mapping.
 
-This checker owns exactly one obligation -- structure and budget, so NOW.md
-cannot decay into another status log. The other half, "NOW.md must be refreshed
-when the live position moves", is owned by the row's spec and Git history,
-already requires NOW.md on a lifecycle change. Splitting one obligation across
-two checkers is how it ends up enforced twice and satisfiable by neither.
+This checker owns one obligation: structure and budget, so NOW.md cannot
+decay into a status log. The other half, "NOW must be refreshed when the
+work moves", is owned by the spec and git history; this checker does not
+duplicate it.
 """
 
 from __future__ import annotations
@@ -24,36 +26,41 @@ ROOT = Path(__file__).resolve().parents[1]
 NOW = ROOT / ".agents/NOW.md"
 NOW_PATH = ".agents/NOW.md"
 
-# Budgets. NOW.md exists to be read in full, every session, by every agent. The
-# moment it stops fitting in one screenful of attention it has become the thing
-# it was meant to replace.
+# Budget rationale (RAG, not vllm.cpp):
 #
-# MAX_CHARS WAS REMOVED 2026-08-11 (ENG-RECORD-CONFLICT-SURFACES, #364). It was
-# 6000, and the tracked file measured EXACTLY 6000: tuned to the byte, with no
-# headroom at all. That made adding a row require EVICTING one, so every PR
-# performed a read-modify-write of a single shared global, and NOW.md conflicted
-# in 5 of the 16 conflicting open PRs measured at origin/main d928e2c3.
+# RAG is a single-spec business project. NOW entries are short: "module +
+# state", "PR + commit", "next verb + path". Typical length 30-100 chars.
+# MAX_LINES = 50 covers the 4-section shape (Current work / Current gate /
+# Next actions / Protocol invariants) with headroom for an Adaptations
+# table.
 #
-# The conflict was the LUCKY outcome. Concurrent read-modify-write loses
-# updates: a clean three-way merge of two such PRs applies BOTH evictions and
-# BOTH additions, silently dropping two live rows and blowing the very budget
-# this constant existed to defend. A gate whose SUCCESS mode is unsafe is worse
-# than no gate.
+# MAX_ENTRY_CHARS = 200 is the local budget. vllm.md's 400 was tied to its
+# row-digest entry shape (levers / commits / multi-figure results, 200-380
+# chars typical); mechanically copying 400 into RAG would be a known
+# anti-pattern. 200 gives headroom for an occasional complex entry while
+# still flagging anything that has grown into a one-line narrative.
 #
-# MAX_LINES and MAX_ENTRY_CHARS are KEPT and carry the obligation between them.
-# A line cap bounds the page just as a byte cap does, but a row costs ONE line
-# rather than a variable number of bytes, so an ordinary edit no longer forces
-# an unrelated deletion; and MAX_ENTRY_CHARS bounds each entry LOCALLY, which is
-# what actually stops a digest decaying into the status log it replaced.
-MAX_LINES = 100
-MAX_ENTRY_CHARS = 400
+# MAX_CHARS IS NOT INTRODUCED. The whole-file budget was retired from
+# vllm.md (ENG-RECORD-CONFLICT-SURFACES, #364) because it made NOW a
+# surface every PR had to touch, and a shared-file budget that turns an
+# ordinary edit into a read-modify-write of a single global is a known
+# conflict surface. The reasoning applies equally to RAG.
+MAX_LINES = 50
+MAX_ENTRY_CHARS = 200
 
+# Required sections. RAG NOW has 4 sections (not vllm.md's 3); vllm.md's
+# "Live claims" maps to "Current work" (snapshot -> pointer).
 REQUIRED_HEADINGS = (
-    "live claims",
+    "current work",
     "current gate",
     "next actions",
+    "protocol invariants",
 )
 
+# Sanity guard, not a primary check. RAG has no ROW-level stable IDs, but
+# if a future agent tries to paste a per-row table back in (the very thing
+# vllm.md retired in #374), this regex catches it before it decays NOW into
+# a status log again. The shape is enforced, not just the state.
 ROW_TABLE_LINE = re.compile(r"^\|\s*`[A-Z0-9][A-Za-z0-9_.-]*`\s*\|")
 
 STAMP = re.compile(r"^<!--\s*now-updated:\s*(\d{4}-\d{2}-\d{2})\s*-->$", re.MULTILINE)
@@ -82,25 +89,18 @@ def structure_errors(text: str) -> list[str]:
     if len(lines) > MAX_LINES:
         errors.append(
             f"is {len(lines)} lines, over the {MAX_LINES}-line budget; move "
-            "detail to the row's spec and keep only the live position here"
+            "detail to the spec and keep only the live position here"
         )
-    # REGROWTH GUARD (ENG-NOW-DERIVED, #374). The per-row claims table left this
-    # file because requiring it made NOW.md a surface every row-advancing PR had
-    # to write -- a lock under AGENTS.md §Records, and 5 of the 16 conflicting
-    # open PRs at d928e2c3. Removing it once is not enough: the decay path is
-    # someone re-adding "just one row", and then the file is a status log again
-    # and every PR is back in it. So the SHAPE is enforced, not just the state.
-    #
-    # A row here is a line whose first cell is a backticked stable ID. Ordinary
-    # tables (the gate, the invariants) have prose first cells and still pass.
+
     for lineno, line in enumerate(lines, 1):
         if ROW_TABLE_LINE.match(line.strip()):
             errors.append(
                 f"line {lineno}: a per-row table row is back in NOW.md "
-                f"({line.strip()[:48]!r}...). The live position is DERIVED -- run "
-                "scripts/now.py -- and a row's next step belongs in that row's "
-                "own spec under `## Now`, which has one writer. Putting rows here "
-                "again makes this file a surface every PR must write"
+                f"({line.strip()[:48]!r}...). RAG is a single-spec project; "
+                "if a multi-row digest appears here it means NOW has decayed "
+                "into a status log. Move per-row detail to that row's own spec "
+                "under `## Now`, which has one writer. Putting rows here again "
+                "makes this file a surface every PR must write"
             )
 
     for line in lines:
@@ -109,17 +109,17 @@ def structure_errors(text: str) -> list[str]:
             errors.append(
                 f"an entry is {len(stripped)} characters, over the "
                 f"{MAX_ENTRY_CHARS}-character budget: {stripped[:60]!r}...; "
-                "link the row's spec instead of inlining the narrative"
+                "link the spec instead of inlining the narrative"
             )
 
     return errors
 
 
 def main(argv: list[str]) -> int:
-    # --base/--head/--commit/--staged are accepted and ignored: CI passes a
-    # range, and this check is range-independent now that freshness coupling
-    # belongs to the row-owned lifecycle records. Silently accepting them keeps the CI
-    # invocation stable.
+    # --base/--head/--commit/--staged are accepted and ignored, same shape as
+    # vllm.md's checker. CI invokes with a range; this check is range-
+    # independent now that freshness coupling is owned by the spec/git side.
+    # Silently accepting them keeps the CI invocation stable.
     del argv
 
     if not NOW.exists():
@@ -135,10 +135,9 @@ def main(argv: list[str]) -> int:
         for failure in failures:
             print(f"ERROR: {failure}", file=sys.stderr)
         print(
-            "NOW.md is the one-Read resume surface: the live claims, the gate "
+            "NOW.md is the one-Read resume surface: the current work, the gate "
             "being chased, and the next actions, rewritten in place. Detail "
-            "belongs in the row's spec and the area matrices; history belongs "
-            "in git.",
+            "belongs in the spec; history belongs in git.",
             file=sys.stderr,
         )
         return 1
