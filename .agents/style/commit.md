@@ -18,7 +18,7 @@ generic writing rules in this guide:
 - Add `Following-Agents-Protocol`, `AI-Assisted`, and `Assisted-by` trailers in
   the exact form that `AGENTS.md` requires.
 - Do not add an AI `Signed-off-by` or `Co-Authored-By` trailer.
-- Never rewrite or force-push `master`.
+- Never rewrite or force-push `main`.
 
 If this guide conflicts with `AGENTS.md`, follow `AGENTS.md`.
 

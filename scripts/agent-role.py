@@ -37,12 +37,12 @@ They are a record and NEVER a refusal (user-directed, issue #285,
 .agents/specs/operator-record.md). This file used to argue for one exclusive
 operator per repo because "the shared case is the operator's primary checkout,
 where one role is the correct answer anyway". That premise is gone: AGENTS.md
-now requires EVERY unit of work to take its own worktree and to reach `master`
+now requires EVERY unit of work to take its own worktree and to reach `main`
 from a task branch, so there is no shared checkout to protect.
 
 What an operator is, is a COORDINATOR. Its powers are merging PRs and
 dispatching sub-agents into separate worktrees; it never rewrites shared
-history, and `master` is never force-pushed. A plain `git push` therefore refuses
+history, and `main` is never force-pushed. A plain `git push` therefore refuses
 any non-fast-forward, so git itself is the interlock and concurrent
 coordinators serialise on it -- the loser fetches, re-merges, re-gates and
 pushes again. A JSON file in `.git/` never provided that guarantee and could
@@ -458,7 +458,7 @@ def cmd_claim(args: argparse.Namespace) -> int:
     if role == "operator":
         # No refusal exists here any more (issue #285). A second coordinator is
         # RECORDED: it merges PRs and dispatches sub-agents into worktrees, and
-        # since `master` is never force-pushed, git's non-fast-forward refusal is
+        # since `main` is never force-pushed, git's non-fast-forward refusal is
         # the interlock this file was pretending to be.
         #
         # Prune first, then read the peers, so a record left by a session that

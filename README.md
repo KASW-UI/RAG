@@ -1,54 +1,148 @@
-# Developer preferences 
+# RAG
 
-`AGENTS.md` defines project invariants; this file controls operational choices
-that legitimately differ between developers. It cannot relax correctness,
-testing, evidence, attribution, or lifecycle requirements.
+## What is it
 
-Delete headings that do not apply, but make every allowed remote or destructive
-action explicit. An absent answer uses the safe default documented in
-`AGENTS.md`.
+RAG is the user service module of the SeaRideTheWind Java reimplementation.
+It exposes user identity and user information through gRPC: registration,
+login, session, profile management, and avatar handling. The service sits
+behind a gRPC server entry and persists into PostgreSQL with Redis and
+MinIO as the supporting stores.
 
-The machine-readable values behind the protocol placeholders
-(`${VLLM_SOURCE}`, `${VLLM_ORACLE}`, `${DEPENDENCY_SOURCE}`, `${GPU_LOCK}`,
-gate host, device arch/toolchain) live in the untracked `.env` at the
-repository root: copy `.env.example` and fill it in. Leave a variable empty
-rather than borrowing another developer's path. This file keeps the policy
-choices below; `.env` keeps the paths and hosts.
+Position in the system:
+- service name: `user-rpc`
+- role: user identity and profile provider
+- main consumers: client-side calls, other microservices via gRPC
+- core capability: registration, login, profile CRUD, avatar handling
 
-## Git integration
+## Features
 
-- Commits: allowed.
-- Base ref: `origin/master`.
-- Working branch: create or reuse a feature branch; do not work on local
-  `master`.
-- Pull request shape: `<one PR for spec and implementation (recommended), or
-  separate spec and implementation PRs>`. Record the answer at row claim and do
-  not ask again for that row.
-- Fetch: allowed from `<read-only remote>`.
-- Push: ask first; if allowed, name the remote and permitted ref namespace.
-- Merge to `master`: not allowed unless explicitly requested for the current
-  task.
-- Force-push or local ref rewrite: ask first.
-- Pull requests and CI inspection: ask first.
+- user registration
+- user login
+- user logout
+- user profile query
+- user profile update
+- user deletion
+- user avatar upload
+- user avatar selection
+- user avatar history query
 
-## Workspace and upstream oracle
+The full list and any per-feature limitations live in
+[docs/FEATURES.md](docs/FEATURES.md).
 
-- Repository root: `<absolute path>`.
-- vLLM source checkout: `${VLLM_SOURCE}` from `.env`.
-- vLLM oracle executable/venv: `${VLLM_ORACLE}` from `.env`.
-- Dependency source/site-packages: `${DEPENDENCY_SOURCE}` from `.env`.
-- Build directories: `<paths or naming rule>`.
-- Model/cache roots: `<paths or unavailable>`.
-- Evidence root: `<path>`.
+## Architecture
 
-## Collaboration
+```
+Client
+   |
+   v
+UserServiceServer (gRPC server entry)
+   |
+   v
+Logic layer (RegisterLogic / LoginLogic / GetUserLogic / UpdateUserLogic /
+             / DeleteUserLogic / LogoutLogic / UploadAvatarLogic /
+             / SelectAvatarLogic / GetAvatarHistoryLogic / AvatarHelpers)
+   |
+   v
+ServiceContext (DB / Redis / MinIO clients)
+   |
+   +---> PostgreSQL (user data)
+   +---> Redis (token store / cache)
+   +---> MinIO (avatar object storage)
+```
 
-- Parallel agents: `<allowed, unavailable, or only when explicitly requested>`.
-- Claims/worktrees: `<required for parallel roadmap work, or local rule>`.
-- Shared build directories: `<policy>`.
+Tech stack:
+- Spring Boot 4.0.8
+- Spring Cloud 2025.1.0
+- Spring Cloud Alibaba 2025.1.0
+- gRPC 3.1.0
+- JWT (jjwt)
+- PostgreSQL 18.4
+- Redis 8.6.3
+- MinIO
 
-## Notes
+## Requirements
 
-Record any persistent developer preference that would otherwise require a
-session-by-session question. Do not put credentials, tokens, private keys, or
-other secrets in this file.
+- Java 21
+- Maven 3.9 or newer
+- PostgreSQL 16 or newer (docker-compose ships 18.4)
+- Redis 7 or newer (docker-compose ships 8.6.3)
+- MinIO (for avatar object storage)
+- Docker / Docker Compose (for the local dependency stack)
+
+## Build
+
+```bash
+mvn clean package
+```
+
+Artifacts land in
+`service/user/user/user-rpc/target/user-rpc-<version>.jar`.
+
+Skip tests when you do not need the full gate:
+
+```bash
+mvn clean package -DskipTests
+```
+
+## Configuration
+
+Credentials and external endpoints live in the untracked `.env`; the
+service shape lives in `application.yml`. See `.env.example` for the
+variable names.
+
+| variable | role | required |
+|---|---|---|
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | database credentials | yes |
+| `JWT_SECRET` | JWT signing key | yes |
+| `MINIO_ENDPOINT` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | avatar object store | yes (if avatars used) |
+| `GRPC_SERVER_PORT` | gRPC listen port | yes |
+
+The full `application.yml` lives in
+`service/user/user/user-rpc/src/main/resources/application.yml`.
+
+## Usage / Run
+
+1. Start the local dependencies:
+   ```bash
+   docker compose up -d postgres redis minio
+   ```
+2. Fill `.env` from `.env.example`.
+3. Start the service:
+   ```bash
+   mvn spring-boot:run -pl service/user/user/user-rpc
+   ```
+4. Confirm startup from the banner line:
+   ```text
+   Started UserRpcApplication in X seconds
+   ```
+5. Smoke-call the server:
+   ```bash
+   grpcurl -plaintext localhost:9090 grpc.USER_SERVICE/Login
+   ```
+
+The full usage notes and recipes live in [docs/USAGE.md](docs/USAGE.md).
+
+## API
+
+The contracts live as `.proto` files in
+`service/user/user/user-proto/src/main/proto/`. The full RPC surface and
+error codes live in [docs/USAGE.md](docs/USAGE.md).
+
+Main RPCs:
+- `Login(LoginRequest) -> LoginResponse`
+- `Register(RegisterRequest) -> RegisterResponse`
+- `GetUser(GetUserRequest) -> GetUserResponse`
+- `UpdateUser(UpdateUserRequest) -> UpdateUserResponse`
+- `DeleteUser(DeleteUserRequest) -> DeleteUserResponse`
+- `Logout(LogoutRequest) -> LogoutResponse`
+- `UploadAvatar(stream UploadAvatarRequest) -> UploadAvatarResponse`
+- `SelectAvatar(SelectAvatarRequest) -> SelectAvatarResponse`
+- `GetAvatarHistory(GetAvatarHistoryRequest) -> GetAvatarHistoryResponse`
+
+Error codes live in
+`service/user/user/user-rpc/src/main/java/com/rag/user/user/rpc/internal/model/UserExceptions.java`.
+
+## Contributing
+
+The development flow lives in [CONTRIBUTING.md](CONTRIBUTING.md). The
+agent-facing protocol entry point is [AGENTS.md](AGENTS.md).

@@ -1,0 +1,544 @@
+#!/usr/bin/env python3
+"""Validate commit messages with Git's own trailer parser."""
+
+from __future__ import annotations
+
+import argparse
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+RAW_PROTOCOL_MARKER = "FOLLOWING_AGENTS_PROTOCOL"
+CHECKER = "scripts/check-commit-trailers.py"
+PROTOCOL_RULE = "trailers"
+ATTRIBUTION_RULE = "attribution"
+FRAMING_RULE = "framing"
+# The exact string the pull request template ships. Only the literal is
+# rejected, and only under --filled, so a real value containing it cannot exist.
+PLACEHOLDER_ASSISTED_BY = "AGENT:MODEL [TOOL]"
+ASSISTED_BY = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9_.-]*:[A-Za-z0-9][A-Za-z0-9_.+-]*"
+    r"(?: \[[A-Za-z0-9][A-Za-z0-9_. +:/-]*\])+\Z"
+)
+# Closed, reviewable vocabulary for obvious agent/vendor/model/tool authorship.
+# Boundaries prevent human names such as "Alice" from matching the token "ai".
+AI_AUTHORSHIP_TOKENS = (
+    "ai",
+    "agent",
+    "anthropic",
+    "bot",
+    "chatgpt",
+    "claude",
+    "claudecode",
+    "codex",
+    "copilot",
+    "gemini",
+    "gpt",
+    "llm",
+    "openai",
+)
+# GitHub writes this address for the ACCOUNT that opened a pull request when it
+# composes a squash-merge message. It is attribution of a submitter, not a claim
+# that a model authored the change -- that claim lives in AI-Assisted and
+# Assisted-by, which are checked above and unaffected here (#418).
+#
+# The exemption is keyed on the FORGE'S OWN DOMAIN rather than on the name, so it
+# cannot be borrowed: a hand-written `Co-authored-by: Claude <claude@anthropic.com>`
+# still fails, and Signed-off-by is never exempted at all, because a sign-off is a
+# legal assertion rather than attribution.
+FORGE_ACCOUNT_EMAIL = re.compile(
+    r"<[^>]*@users\.noreply\.github\.com>\s*$", re.IGNORECASE
+)
+
+AI_IDENTITY = re.compile(
+    r"(?<![a-z0-9])(?:"
+    + "|".join(re.escape(token) for token in AI_AUTHORSHIP_TOKENS)
+    + r")(?![a-z0-9])",
+    re.IGNORECASE,
+    )
+
+
+def _git(repo: Path, *args: str, input_text: str | None = None) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        input=input_text,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or "Git command failed"
+        raise ValueError(detail)
+    return result.stdout.strip()
+
+
+TRAILER_LINE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*:[ \t].+$")
+# The bare rule GitHub writes above the `Co-authored-by:` block it appends to a
+# squash message. Matched as a whole paragraph only, never inside prose (#861).
+FORGE_SEPARATOR = re.compile(r"-{3,}")
+CONTINUATION_LINE = re.compile(r"^[ \t]+\S")
+
+
+def _is_trailer_paragraph(paragraph: str) -> bool:
+    """Whether every line of a paragraph is trailer-shaped."""
+    lines = [line for line in paragraph.splitlines() if line.strip()]
+    if not lines:
+        return False
+    if not TRAILER_LINE.match(lines[0]):
+        return False
+    return all(
+        TRAILER_LINE.match(line) or CONTINUATION_LINE.match(line) for line in lines[1:]
+    )
+
+
+def join_trailing_trailer_paragraphs(message: str) -> str:
+    """Fuse consecutive trailer-shaped paragraphs at the END into one block.
+
+    `git interpret-trailers --parse` reads ONLY the final paragraph, so anything
+    appended after the trailer block hides it completely. GitHub does exactly
+    that on a squash merge: it adds `Co-authored-by:` as a new paragraph, and the
+    protocol trailers above it stop being visible. Measured on main: dbd0d51c,
+    87308dea and f64f2b71 all parse to nothing but that one line, and the gate
+    reported them as missing trailers they plainly carry (#406).
+
+    Only TRAILER-SHAPED paragraphs are fused. A prose paragraph still terminates
+    the block, so trailers buried mid-message remain invalid -- the looseness
+    this gate exists to prevent is untouched.
+    """
+    paragraphs = _paragraphs(message)
+    if not paragraphs:
+        return message
+    fused: list[str] = []
+    while paragraphs:
+        if _is_trailer_paragraph(paragraphs[-1]):
+            fused.insert(0, paragraphs.pop())
+            continue
+        # GitHub writes a bare rule before the `Co-authored-by:` block it appends
+        # to a squash message. Measured on `617d6f452`, the FIRST squash landed
+        # under `squash_merge_commit_message = PR_BODY`: the body appears once,
+        # there is one trailer block, and the separator is still there. So it is
+        # not a separator between concatenated commit messages, which is what
+        # #829 and #850 assumed on the strength of a simulation that omitted it.
+        # It belongs to the co-author block (#861).
+        #
+        # Stepped over ONLY when trailer-shaped paragraphs sit on both sides, so
+        # a prose paragraph still terminates the block and trailers buried
+        # mid-message stay invalid. That is the property this helper exists to
+        # protect, and it is untouched.
+        if (
+                FORGE_SEPARATOR.fullmatch(paragraphs[-1].strip())
+                and fused
+                and len(paragraphs) >= 2
+                and _is_trailer_paragraph(paragraphs[-2])
+        ):
+            paragraphs.pop()
+            continue
+        break
+    if len(fused) < 2:
+        return message
+    return "\n\n".join(paragraphs + ["\n".join(fused)])
+
+
+def parsed_trailers(message: str) -> str:
+    """Return what ``git interpret-trailers --parse`` returns, after fusing any
+    trailer-shaped paragraphs appended below the block (see the helper above)."""
+
+    result = subprocess.run(
+        ["git", "interpret-trailers", "--parse"],
+        input=join_trailing_trailer_paragraphs(message),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    return result.stdout
+
+
+# git's `find_patch_start` (trailer.c) ends a message at the first line that
+# begins `---` and whose NEXT character is whitespace. That is the
+# `git format-patch` divider convention, and `git interpret-trailers --parse`
+# honours it, so a trailer below one is not read. ASCII whitespace only, because
+# C's `isspace` in the default locale is ASCII and `str.isspace` is not: a
+# non-breaking space after `---` is a divider to Python and is not one to git.
+PATCH_DIVIDER_WHITESPACE = " \t\n\r\v\f"
+
+
+def patch_section_line(message: str) -> int | None:
+    """The 1-based line number of git's patch divider, or ``None``.
+
+    Mirrors `find_patch_start` character for character rather than describing
+    it, including the end-of-string case: git tests the character AFTER `---`,
+    and a message ending in a bare `---` with no newline has none, so it is not
+    a divider. `tests/scripts/test_check_commit_trailers.py` asserts every form
+    in this comment against `git interpret-trailers --parse` itself.
+    """
+
+    text = message.replace("\r\n", "\n").replace("\r", "\n")
+    number = 1
+    index = 0
+    while index < len(text):
+        if text.startswith("---", index):
+            following = text[index + 3 : index + 4]
+            if following and following in PATCH_DIVIDER_WHITESPACE:
+                return number
+        break_at = text.find("\n", index)
+        if break_at == -1:
+            break
+        index = break_at + 1
+        number += 1
+    return None
+
+
+def _paragraphs(message: str) -> list[str]:
+    normalized = message.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+    return re.split(r"\n[ \t]*\n+", normalized) if normalized else []
+
+
+def _trailer_map(message: str) -> dict[str, list[tuple[str, str]]]:
+    trailers: dict[str, list[tuple[str, str]]] = {}
+    for line in parsed_trailers(message).splitlines():
+        if ": " not in line:
+            continue
+        key, value = line.split(": ", 1)
+        trailers.setdefault(key.casefold(), []).append((key, value))
+    return trailers
+
+
+def _strict_errors(message: str) -> list[str]:
+    errors: list[str] = []
+    paragraphs = _paragraphs(message)
+    marker_indexes = [
+        index for index, paragraph in enumerate(paragraphs)
+        if paragraph == RAW_PROTOCOL_MARKER
+    ]
+    if len(marker_indexes) != 1 or marker_indexes[0] == len(paragraphs) - 1:
+        errors.append(
+            f"[{PROTOCOL_RULE}] {RAW_PROTOCOL_MARKER} must appear exactly once "
+            "as a separate paragraph before the trailer paragraph"
+        )
+
+    # Reported INSTEAD of everything below, and reported before anything reads
+    # the trailer map. Once git has stopped reading at line N, that map is a
+    # measurement of a message nobody sent: on the body that opened #1563 it
+    # produced "Following-Agents-Protocol must appear exactly once" about a body
+    # carrying it exactly once, which sends the reader to count occurrences
+    # instead of to the framing. The marker check above reads the raw
+    # paragraphs, is unaffected by the truncation, and therefore stays.
+    #
+    # NOT repaired with `git interpret-trailers --no-divider`, which is one flag
+    # and would report the body clean. A `git format-patch`/`git am` round trip
+    # of such a commit returns the subject and the first paragraph with
+    # `%(trailers)` EMPTY, and exits 0. The divider deletes the rest of the
+    # message; the gate's job is to predict what lands (#1563).
+    divider = patch_section_line(message)
+    if divider is not None:
+        line = message.replace("\r\n", "\n").replace("\r", "\n").split("\n")[
+            divider - 1
+            ]
+        errors.append(
+            f"[{FRAMING_RULE}] line {divider} is {line!r}, which git reads as the "
+            "PATCH DIVIDER: everything below it leaves the message, so no "
+            "trailer under it can be parsed and a `git am` round trip deletes "
+            "it. Under `squash_merge_commit_message = PR_BODY` this body IS the "
+            "commit message. Delete the line, or write the horizontal rule as "
+            "`***` or `___`, neither of which is a divider"
+        )
+        return errors
+
+    trailers = _trailer_map(message)
+    protocol = trailers.get("following-agents-protocol", [])
+    if len(protocol) != 1:
+        errors.append(
+            f"[{PROTOCOL_RULE}] Following-Agents-Protocol must appear exactly once"
+        )
+    elif protocol[0][1] != "true":
+        errors.append(
+            f"[{PROTOCOL_RULE}] Following-Agents-Protocol must be exactly true"
+        )
+
+    declarations = trailers.get("ai-assisted", [])
+    assisted = trailers.get("assisted-by", [])
+    if len(declarations) != 1:
+        errors.append(f"[{ATTRIBUTION_RULE}] AI-Assisted must appear exactly once")
+    else:
+        declaration = declarations[0][1]
+        if declaration not in {"true", "false"}:
+            errors.append(f"[{ATTRIBUTION_RULE}] AI-Assisted must be true or false")
+        elif declaration == "true" and not assisted:
+            errors.append(
+                f"[{ATTRIBUTION_RULE}] AI-Assisted true requires Assisted-by"
+            )
+        elif declaration == "false" and assisted:
+            errors.append(
+                f"[{ATTRIBUTION_RULE}] AI-Assisted false must omit Assisted-by"
+            )
+
+    for _, value in assisted:
+        if ASSISTED_BY.fullmatch(value) is None:
+            errors.append(f"[{ATTRIBUTION_RULE}] malformed Assisted-by value {value!r}")
+
+    assisted_identities: set[str] = set()
+    for _, value in assisted:
+        if ASSISTED_BY.fullmatch(value) is None:
+            continue
+        identity, remainder = value.split(":", 1)
+        model = remainder.split(" ", 1)[0]
+        assisted_identities.update((identity.casefold(), model.casefold()))
+        assisted_identities.update(
+            tool.casefold() for tool in re.findall(r"\[([^]]+)\]", value)
+        )
+    for key in ("signed-off-by", "co-authored-by"):
+        for original, value in trailers.get(key, []):
+            if key == "co-authored-by" and FORGE_ACCOUNT_EMAIL.search(value):
+                # Forge-generated attribution of the submitting account.
+                continue
+            folded_value = value.casefold()
+            if AI_IDENTITY.search(value) or any(
+                    identity in folded_value for identity in assisted_identities
+            ):
+                errors.append(
+                    f"[{ATTRIBUTION_RULE}] AI authorship trailer {original} is forbidden"
+                )
+    return errors
+
+
+def validate_commit_message(message: str, *, strict: bool) -> list[str]:
+    """Return trailer-contract errors for one complete commit message."""
+
+    if not strict:
+        marker_count = sum(
+            paragraph == RAW_PROTOCOL_MARKER for paragraph in _paragraphs(message)
+        )
+        if marker_count == 1:
+            return []
+    return _strict_errors(message)
+
+
+def _resolve_commit(repo: Path, revision: str) -> str:
+    if not revision or "\x00" in revision or "\n" in revision:
+        raise ValueError(f"invalid revision {revision!r}")
+    if not revision.startswith("refs/"):
+        candidates = (
+            f"refs/heads/{revision}",
+            f"refs/tags/{revision}",
+            f"refs/remotes/{revision}",
+        )
+        matches = 0
+        for candidate in candidates:
+            result = subprocess.run(
+                ["git", "-C", str(repo), "show-ref", "--verify", "--quiet", candidate],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if result.returncode == 0:
+                matches += 1
+            elif result.returncode not in {1}:
+                raise ValueError(f"could not resolve revision {revision!r}")
+        if matches > 1:
+            raise ValueError(f"ambiguous revision {revision!r}")
+    resolved = _git(
+        repo, "rev-parse", "--verify", "--end-of-options", f"{revision}^{{commit}}"
+    ).splitlines()
+    if len(resolved) != 1 or re.fullmatch(r"[0-9a-f]{40}", resolved[0]) is None:
+        raise ValueError(f"revision {revision!r} did not resolve to one commit")
+    return resolved[0]
+
+
+def _merge_base(repo: Path, a: str, b: str) -> str:
+    """The merge base of two revisions; raises when they share no history."""
+    result = subprocess.run(
+        ["git", "-C", str(repo), "merge-base", a, b],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError("range base and head have no merge base (unrelated histories)")
+    oid = result.stdout.strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", oid):
+        raise ValueError("merge base did not resolve to one commit")
+    return oid
+
+
+def _is_ancestor(repo: Path, older: str, newer: str) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(repo), "merge-base", "--is-ancestor", older, newer],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if result.returncode not in {0, 1}:
+        raise ValueError("could not establish commit ancestry")
+    return result.returncode == 0
+
+
+
+
+# NO LANDED-MESSAGE EXCEPTION REGISTRY. There was one, holding a single commit
+# (`281b4bc76c0e`, #1262), and it existed only because the PUSH lane re-read
+# LANDED history on `main` -- where the sole repair is rewriting `main`, which
+# AGENTS.md forbids, so a violation could never clear itself. Scoping the walk to
+# the pull-request lane (#2322) removes the need: no landed commit is read, so
+# nothing can require excusing. A dead exception list invites a live one, so it
+# goes with the reason it existed for. Attribution is now enforced ONCE, on the
+# pull request body, which is the exact byte string that lands under
+# `squash_merge_commit_message = PR_BODY` and is checked before it freezes.
+
+
+def validate_range(
+        repo: Path,
+        base: str,
+        head: str,
+        *,
+        cutover: str | None,
+) -> list[str]:
+    """Validate an exact first-parent-independent ``BASE..HEAD`` commit set.
+
+    """
+
+    base_oid = _resolve_commit(repo, base)
+    head_oid = _resolve_commit(repo, head)
+    # From the MERGE BASE, not the base tip (#773). CI passes
+    # `pull_request.base.sha`, which stops being an ancestor of head as soon as
+    # main advances past the branch -- so this used to raise and return WITHOUT
+    # READING A SINGLE COMMIT, meaning the trailer contract was never enforced
+    # on any external contribution. Unrelated histories still fail closed: no
+    # merge base means no range, and inventing one would be worse than refusing.
+    base_oid = _merge_base(repo, base_oid, head_oid)
+    cutover_oid = _resolve_commit(repo, cutover) if cutover is not None else None
+    if cutover_oid is not None and not _is_ancestor(repo, cutover_oid, head_oid):
+        raise ValueError("cutover must be reachable from range head")
+
+    commits_text = _git(repo, "rev-list", "--reverse", f"{base_oid}..{head_oid}")
+    failures: list[str] = []
+    for commit in (line for line in commits_text.splitlines() if line):
+        # A merge commit is git's message, not authored content, so it is not
+        # held to a contract about what an author must write. `ci.yml` has said
+        # so since it was written -- "Skip merge commits (>1 parent) -- they are
+        # not authored content" -- and then handed the SAME range to this walk,
+        # which did not (#2157). One job, two walks, one rule between them: a
+        # plain `git merge origin/main` on a row branch, the routine way to take
+        # main, reddened commit-protocol-tag on a message no contributor can edit
+        # without force-pushing. Keyed on PARENT COUNT and never on the message,
+        # so a hand-written commit that merely says "Merge" is still authored.
+        if len(_git(repo, "rev-list", "--parents", "-n1", commit).split()) > 2:
+            continue
+        if cutover_oid is None:
+            strict = True
+        elif _is_ancestor(repo, cutover_oid, commit):
+            strict = True
+        elif _is_ancestor(repo, commit, cutover_oid):
+            strict = False
+        else:
+            raise ValueError(f"commit {commit} is incomparable with cutover")
+
+        message = _git(repo, "show", "-s", "--format=%B", commit) + "\n"
+        for error in validate_commit_message(message, strict=strict):
+            failures.append(f"{commit[:12]}: {error}")
+    return failures
+
+
+def _range(value: str) -> tuple[str, str]:
+    if value.count("..") != 1 or "..." in value:
+        raise argparse.ArgumentTypeError("range must be exactly BASE..HEAD")
+    base, head = value.split("..", 1)
+    if not base or not head:
+        raise argparse.ArgumentTypeError("range must be exactly BASE..HEAD")
+    return base, head
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--range", dest="revision_range", type=_range)
+    parser.add_argument("--cutover")
+    # The repository squashes with `squash_merge_commit_message = PR_BODY`, so a
+    # pull request body BECOMES the landed commit message. Validating it with
+    # the same `validate_commit_message` the range walk uses is the only way the
+    # two cannot drift: there is one rule and one implementation of it, applied
+    # to a message before it is committed and to the same message after (#848).
+    parser.add_argument(
+        "--message-file",
+        help="validate one message read from PATH, or from stdin when PATH is -",
+    )
+    # The template ships the placeholder and must pass without this flag. A
+    # FILLED body must not still be the form: `AGENT:MODEL [TOOL]` satisfies the
+    # Assisted-by grammar while attributing the work to nobody, which is the
+    # exact defect the attribution rule exists to prevent.
+    parser.add_argument(
+        "--filled",
+        action="store_true",
+        help="additionally reject the template's unreplaced Assisted-by placeholder",
+    )
+    args = parser.parse_args()
+
+    if bool(args.revision_range) == bool(args.message_file):
+        parser.error("pass exactly one of --range or --message-file")
+
+    if args.message_file:
+        try:
+            message = (
+                sys.stdin.read()
+                if args.message_file == "-"
+                else Path(args.message_file).read_text(encoding="utf-8")
+            )
+        except OSError as exc:
+            print(f"commit trailer check FAILED: {exc}", file=sys.stderr)
+            return 1
+        if not message.strip():
+            print(
+                "commit trailer check FAILED: the message is empty. Under "
+                "PR_BODY an empty body lands a commit with no trailers at all",
+                file=sys.stderr,
+            )
+            return 1
+        errors = validate_commit_message(message, strict=True)
+        # Compare the PARSED trailer value, never the raw text. A substring
+        # search over the whole message flags any body that merely MENTIONS the
+        # placeholder, which this repository's own specs and pull request bodies
+        # do whenever they document the flag. Found by running this check on the
+        # body of the pull request that introduces it.
+        # Skipped when the framing rule fired, for the same reason that rule
+        # returns early: the trailer map read past a divider is not evidence.
+        if args.filled and not any(
+                error.startswith(f"[{FRAMING_RULE}]") for error in errors
+        ):
+            placeholders = [
+                value
+                for _, value in _trailer_map(message).get("assisted-by", [])
+                if value == PLACEHOLDER_ASSISTED_BY
+            ]
+            if placeholders:
+                errors.append(
+                    f"[{ATTRIBUTION_RULE}] Assisted-by still reads "
+                    f"{PLACEHOLDER_ASSISTED_BY!r}, the template's placeholder. "
+                    "Name the agent and model that did the work"
+                )
+        if errors:
+            print("commit trailer check FAILED:", file=sys.stderr)
+            for error in errors:
+                print(f"  - {error}", file=sys.stderr)
+            return 1
+        print("OK: commit trailer contract")
+        return 0
+
+    try:
+        failures = validate_range(
+            ROOT,
+            *args.revision_range,
+            cutover=args.cutover,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        print(f"commit trailer check FAILED: {exc}", file=sys.stderr)
+        return 1
+    if failures:
+        print("commit trailer check FAILED:", file=sys.stderr)
+        for failure in failures:
+            print(f"  - {failure}", file=sys.stderr)
+        return 1
+    print("OK: commit trailer contract")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

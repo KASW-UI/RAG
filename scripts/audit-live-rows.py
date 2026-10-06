@@ -120,7 +120,7 @@ def main_commits(item_id: str) -> list[str]:
     """
     out = git(
         "log", "--oneline", "-E", f"--grep={id_grep_pattern(item_id)}", "-n", "20",
-        "origin/main",
+        "upstream/main",
     )
     return [line.strip() for line in out.splitlines() if line.strip()]
 
@@ -146,7 +146,7 @@ def head_commits(item_id: str) -> list[str]:
     """
     out = git(
         "log", "--oneline", "-E", f"--grep={id_grep_pattern(item_id)}", "-n", "20",
-        "origin/main..HEAD",
+        "upstream/main..HEAD",
     )
     return [line.strip() for line in out.splitlines() if line.strip()]
 
@@ -160,7 +160,7 @@ def require_origin_main() -> None:
     ACTIVE rows at once. Absence of work and absence of information must never
     look the same.
     """
-    if not git("rev-parse", "--verify", "--quiet", "origin/main").strip():
+    if not git("rev-parse", "--verify", "--quiet", "upstream/main").strip():
         raise SystemExit(
             "origin/main does not resolve -- run `git fetch origin main` first. "
             "Without it every row reports no Git evidence and this audit would "

@@ -2070,7 +2070,7 @@ def owed_issues() -> set[str]:
     return owed
 
 
-def referenced_issues(base: str = "origin/main") -> set[str]:
+def referenced_issues(base: str = "upstream/main") -> set[str]:
     """Issue numbers THIS BRANCH cites, from its own commit messages.
 
     Offline and deterministic: `git log <merge-base>..HEAD`, never a network

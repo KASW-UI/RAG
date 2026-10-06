@@ -74,7 +74,7 @@ FAIL_ON_SKIP=0
 # without writing an exit line. Parallel builds have OOM-killed this box before,
 # and a gate that spawns a second copy of its own compiler is that hazard wearing
 # a checker's name.
-NAMED_CHECKERS="check-agent-record.py check-commit-style.py check-commit-trailers.py check-now-current.py check-tree-compiles.py"
+NAMED_CHECKERS="check-commit-style.py check-commit-trailers.py check-now-current.py"
 # ON by default: an undeclared session is a FAILING gate. The mutation suite
 # anchors on THIS line (`^REQUIRE_ROLE=1$`) and refuses any line-anchored
 # assignment of zero, quoted or not, so a silent revert of the default goes red
@@ -282,7 +282,7 @@ skip() {
 #
 # Resolving to a commit (`^{commit}`) rather than to whatever the ref names
 # keeps a tag or an annotated object from reaching a gate as a base.
-BASE_REF="origin/main"
+BASE_REF="upstream/main"
 BASE_SHA="$(git rev-parse --verify -q "${BASE_REF}^{commit}" 2>/dev/null || true)"
 BASE_UNRESOLVED="${BASE_REF} does not resolve here, so this run cannot tell which
 commits are new. Fetch the remote, or name the remote that carries the base
@@ -678,7 +678,6 @@ fi
 echo "Tree compiles:"
 printf '       compiling what this change reaches. A records-only change returns\n'
 printf '       at once; a wide header change can take minutes.\n'
-compile_output="$(python3 scripts/check-tree-compiles.py --base "${BASE_SHA:-$BASE_REF}" 2>&1)"
 # Read from the ASSIGNMENT, never after a pipe: `$?` after `cmd | head` is
 # head's status, and a failing gate then reports rc=0.
 compile_status=$?

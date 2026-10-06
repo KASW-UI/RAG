@@ -1028,7 +1028,7 @@ repository in this project's history.
 `zai-org/GLM-5.3-Flash` (`Glm5NextForConditionalGeneration` / `glm5_next`)
 publishes no arm that fits any device this project reaches, and no upstream tool
 can make one: llama.cpp has no `glm5_next` at our pin `b10451` or at its
-`master`, and `gguf-py`'s `Q2_K` has a dequantizer and **no** quantizer. So the
+`main`, and `gguf-py`'s `Q2_K` has a dequantizer and **no** quantizer. So the
 converter ships here.
 
 ```sh
