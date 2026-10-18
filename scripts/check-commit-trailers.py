@@ -57,7 +57,7 @@ AI_IDENTITY = re.compile(
     + "|".join(re.escape(token) for token in AI_AUTHORSHIP_TOKENS)
     + r")(?![a-z0-9])",
     re.IGNORECASE,
-    )
+)
 
 
 def _git(repo: Path, *args: str, input_text: str | None = None) -> str:
@@ -128,10 +128,10 @@ def join_trailing_trailer_paragraphs(message: str) -> str:
         # mid-message stay invalid. That is the property this helper exists to
         # protect, and it is untouched.
         if (
-                FORGE_SEPARATOR.fullmatch(paragraphs[-1].strip())
-                and fused
-                and len(paragraphs) >= 2
-                and _is_trailer_paragraph(paragraphs[-2])
+            FORGE_SEPARATOR.fullmatch(paragraphs[-1].strip())
+            and fused
+            and len(paragraphs) >= 2
+            and _is_trailer_paragraph(paragraphs[-2])
         ):
             paragraphs.pop()
             continue
@@ -236,7 +236,7 @@ def _strict_errors(message: str) -> list[str]:
     if divider is not None:
         line = message.replace("\r\n", "\n").replace("\r", "\n").split("\n")[
             divider - 1
-            ]
+        ]
         errors.append(
             f"[{FRAMING_RULE}] line {divider} is {line!r}, which git reads as the "
             "PATCH DIVIDER: everything below it leaves the message, so no "
@@ -296,7 +296,7 @@ def _strict_errors(message: str) -> list[str]:
                 continue
             folded_value = value.casefold()
             if AI_IDENTITY.search(value) or any(
-                    identity in folded_value for identity in assisted_identities
+                identity in folded_value for identity in assisted_identities
             ):
                 errors.append(
                     f"[{ATTRIBUTION_RULE}] AI authorship trailer {original} is forbidden"
@@ -387,11 +387,11 @@ def _is_ancestor(repo: Path, older: str, newer: str) -> bool:
 
 
 def validate_range(
-        repo: Path,
-        base: str,
-        head: str,
-        *,
-        cutover: str | None,
+    repo: Path,
+    base: str,
+    head: str,
+    *,
+    cutover: str | None,
 ) -> list[str]:
     """Validate an exact first-parent-independent ``BASE..HEAD`` commit set.
 
@@ -501,7 +501,7 @@ def main() -> int:
         # Skipped when the framing rule fired, for the same reason that rule
         # returns early: the trailer map read past a divider is not evidence.
         if args.filled and not any(
-                error.startswith(f"[{FRAMING_RULE}]") for error in errors
+            error.startswith(f"[{FRAMING_RULE}]") for error in errors
         ):
             placeholders = [
                 value

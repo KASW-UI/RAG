@@ -7,7 +7,7 @@
 
     <parent>
         <groupId>com.rag</groupId>
-        <artifactId>RAG</artifactId>
+        <artifactId>Sea-RideTheWind_java</artifactId>
         <version>0.0.1-SNAPSHOT</version>
     </parent>
 
@@ -16,6 +16,16 @@
 
     <modules>
         <!-- 子模块后面填 -->
-        <module>user</module>
+        <module>users</module>
+        <module>task</module>
+        <module>article</module>
+        <module>common</module>
+        <module>favorite</module>
+        <module>follow</module>
+        <module>hot</module>
+        <module>points</module>
+        <module>message</module>
+        <module>like</module>
+        <module>security</module>
     </modules>
 </project>

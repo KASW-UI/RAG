@@ -11,10 +11,10 @@
     </parent>
 
     <groupId>com.rag</groupId>
-    <artifactId>RAG</artifactId>
+    <artifactId>Sea-RideTheWind_java</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>RAG</name>
-    <description>RAG</description>
+    <name>Sea-RideTheWind_java</name>
+    <description>Sea-RideTheWind_java</description>
 
     <packaging>pom</packaging>
 
@@ -23,7 +23,12 @@
         <spring-cloud.version>2025.1.0</spring-cloud.version>
         <spring-cloud-alibaba.version>2025.1.0.0</spring-cloud-alibaba.version>
         <jjwt.version>0.12.6</jjwt.version>
-        <grpc.version>1.66.0</grpc.version>
+        <!--
+            grpc 1.66.0 是项目原计划版本，但 devh grpc-spring-boot-starter 3.1.0.RELEASE
+            硬编码 1.63.0（grpc-inprocess 1.63.0 内部类不兼容 1.66）。降到 1.63.0 全栈对齐。
+            升 devh starter 后可重新升回 1.66.0。
+        -->
+        <grpc.version>1.63.0</grpc.version>
         <protobuf.version>3.25.5</protobuf.version>
         <grpc-spring-boot-starter.version>3.1.0.RELEASE</grpc-spring-boot-starter.version>
         <protobuf-maven-plugin.version>0.6.1</protobuf-maven-plugin.version>
@@ -69,6 +74,11 @@
             <dependency>
                 <groupId>io.grpc</groupId>
                 <artifactId>grpc-stub</artifactId>
+                <version>${grpc.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.grpc</groupId>
+                <artifactId>grpc-core</artifactId>
                 <version>${grpc.version}</version>
             </dependency>
             <dependency>

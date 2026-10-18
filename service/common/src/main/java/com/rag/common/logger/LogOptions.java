@@ -1,0 +1,57 @@
+package com.rag.common.logger;
+
+/**
+ * 对应 Go 版 service/common/logger/logger.go 的 LogOptions struct：
+ *
+ * <pre>
+ * type LogOptions struct {
+ *     UserID    string
+ *     ArticleID string
+ * }
+ * </pre>
+ *
+ * <p>该类是函数选项模式（Functional Options）的"载体"——多个 {@link LogOption} 共同修改它。
+ * 比 Go 版多了一个无参构造的便利（Go 是零值即可用）。
+ */
+public class LogOptions {
+
+    /**
+     * 对应 Go 版字段 {@code UserID string}。
+     * 默认值空字符串，等价于 Go 的零值。
+     */
+    private String userId = "";
+
+    /**
+     * 对应 Go 版字段 {@code ArticleID string}。
+     * 默认值空字符串，等价于 Go 的零值。
+     */
+    private String articleId = "";
+
+    /**
+     * 对应 Go 版字段 {@code UserID string}。
+     */
+    public String getUserId() {
+        return userId;
+    }
+
+    /**
+     * 对应 Go 版字段 {@code UserID string}。
+     */
+    public void setUserId(String userId) {
+        this.userId = userId;
+    }
+
+    /**
+     * 对应 Go 版字段 {@code ArticleID string}。
+     */
+    public String getArticleId() {
+        return articleId;
+    }
+
+    /**
+     * 对应 Go 版字段 {@code ArticleID string}。
+     */
+    public void setArticleId(String articleId) {
+        this.articleId = articleId;
+    }
+}

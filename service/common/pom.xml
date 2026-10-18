@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>service</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>common</artifactId>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <opentelemetry.version>1.44.0</opentelemetry.version>
+        <java-json-canonicalization.version>1.1</java-json-canonicalization.version>
+    </properties>
+
+    <!-- 统一管理 OpenTelemetry 各模块版本，避免子模块手写版本号 -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>${opentelemetry.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>2.22.3</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- ============ 0. Spring Boot starter（Spring 化入口，Bean 化所需） ============ -->
+        <!--
+            引入 spring-boot-starter 让 common 模块可以定义 @Component / @Configuration / @Value /
+            @ConfigurationProperties 等 Spring 注入能力。注意这是 common 模块首次引入 Spring 依赖，
+            是不可逆决策——common 不再是"框架无关库"，而是 Spring Boot 模块。
+            当前业务模块继续使用 static 入口；Spring Bean 入口作为未来平滑迁移的备份路径。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+
+        <!-- ============ 1. 日志门面 + 实现（替代 go-zero logx） ============ -->
+        <!--
+            对应 Go 版 logger/logger.go 中 logx.WithContext(ctx).Errorw / Infow 的日志输出：
+            Go 版用 go-zero 自带的 logx（封装 zap），Java 版走 SLF4J 门面 + logback-classic 实现
+        -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>1.6.3</version>
+        </dependency>
+
+        <!-- ============ 2. OpenTelemetry：tracing + context propagation ============ -->
+        <!--
+            对应 Go 版 observability/*.go + communityfact/{logging,authority_http}.go 中
+            go.opentelemetry.io/otel/* 的 Span / TracerProvider / TextMapPropagator 用法
+        -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-api</artifactId>
+            <version>1.62.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-context</artifactId>
+        </dependency>
+
+        <!-- ============ 3. gRPC server interceptor（替代 go-zero zrpc） ============ -->
+        <!--
+            对应 Go 版 observability/rpc.go 的 grpc.UnaryServerInterceptor；
+            grpc-stub 包含 grpc-api，足够写服务端拦截器
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+        </dependency>
+
+        <!-- ============ 4. Jakarta Servlet API（替代 go-zero rest middleware） ============ -->
+        <!--
+            对应 Go 版 observability/http.go 的 rest.Middleware / http.HandlerFunc；
+            Java 侧用 Servlet Filter 等价物，scope=provided 由运行容器提供实现
+        -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- ============ 5. JSON Canonicalization (RFC 8785 / JCS) ============ -->
+        <!--
+            对应 Go 版 communityfact/wire.go 的 github.com/cyberphone/json-canonicalization
+            用于 CanonicalHash 计算事件摘要
+        -->
+        <dependency>
+            <groupId>io.github.erdtman</groupId>
+            <artifactId>java-json-canonicalization</artifactId>
+            <version>${java-json-canonicalization.version}</version>
+        </dependency>
+
+        <!-- ============ 6. Jackson（替换 Go 版 encoding/json + gin 的 JSON 序列化） ============ -->
+        <!--
+            对应 Go 版 communityfact/wire.go + response.go：
+            - encoding/json → Jackson databind
+            - @JsonInclude 注解 → jackson-annotations
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <!-- 版本由 BOM 管理，不再手写 -->
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <!-- 版本由 BOM 管理，不再手写 -->
+        </dependency>
+
+        <!-- ============ 测试：JUnit 5 + Mockito + OTEL SDK 测试 util + spring-test（MockHttpServletRequest 等） ============ -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-testing</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-test</artifactId>
+            <version>7.0.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+            <version>7.0.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

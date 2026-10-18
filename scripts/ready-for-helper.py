@@ -177,10 +177,10 @@ def _parse_contract(text: str) -> tuple[dict[str, list[str]] | None, list[str]]:
     for name in ("gate", "mutation"):
         argv = value.get(name)
         if (
-                not isinstance(argv, list)
-                or not argv
-                or len(argv) > 64
-                or any(not isinstance(arg, str) or not arg or len(arg) > 1024 for arg in argv)
+            not isinstance(argv, list)
+            or not argv
+            or len(argv) > 64
+            or any(not isinstance(arg, str) or not arg or len(arg) > 1024 for arg in argv)
         ):
             errors.append(
                 f"structured {name} must be a nonempty bounded argv string array"
@@ -189,23 +189,23 @@ def _parse_contract(text: str) -> tuple[dict[str, list[str]] | None, list[str]]:
 
 
 def _validate_argv(
-        name: str, argv: list[str], root: Path, commit: str
+    name: str, argv: list[str], root: Path, commit: str
 ) -> list[str]:
     errors: list[str] = []
     for arg in argv:
         path = PurePosixPath(arg)
         if (
-                path.is_absolute()
-                or ".." in path.parts
-                or re.search(r"(?:^|[=/])\.\.(?:/|$)", arg)
-                or re.search(r"(?:^|=)/", arg)
-                or SHELL_META.search(arg)
-                or ENV_ASSIGNMENT.match(arg)
-                or arg == "-c"
-                or arg.startswith("-c")
-                or arg == "--eval"
-                or arg.startswith("--eval=")
-                or "\x00" in arg
+            path.is_absolute()
+            or ".." in path.parts
+            or re.search(r"(?:^|[=/])\.\.(?:/|$)", arg)
+            or re.search(r"(?:^|=)/", arg)
+            or SHELL_META.search(arg)
+            or ENV_ASSIGNMENT.match(arg)
+            or arg == "-c"
+            or arg.startswith("-c")
+            or arg == "--eval"
+            or arg.startswith("--eval=")
+            or "\x00" in arg
         ):
             errors.append(f"unsafe {name} argv element {arg!r}")
     if errors:
@@ -219,11 +219,11 @@ def _validate_argv(
         if executable is None or not Path(executable).resolve().is_file():
             return [f"{name} executable {program!r} is missing or nonregular"]
         if program in {"python3", "python", "bash", "sh"} and (
-                len(argv) < 2 or argv[1].startswith("-")
+            len(argv) < 2 or argv[1].startswith("-")
         ):
             return [f"unsafe {name} argv: {program} requires a relative base script"]
         if program in {"python3", "python", "bash", "sh"} and _base_mode(
-                root, commit, PurePosixPath(argv[1]).as_posix()
+            root, commit, PurePosixPath(argv[1]).as_posix()
         ) not in {"100644", "100755"}:
             return [f"{name} argv path {argv[1]!r} is not a regular base file"]
     else:
@@ -254,19 +254,19 @@ def _safe_tmp_root() -> Path | None:
     except OSError:
         return None
     if (
-            not candidate.is_absolute()
-            or candidate.is_symlink()
-            or not stat.S_ISDIR(info.st_mode)
-            or candidate.resolve() != candidate
-            or info.st_uid not in {0, os.getuid()}
-            or (info.st_mode & stat.S_IWOTH and not info.st_mode & stat.S_ISVTX)
+        not candidate.is_absolute()
+        or candidate.is_symlink()
+        or not stat.S_ISDIR(info.st_mode)
+        or candidate.resolve() != candidate
+        or info.st_uid not in {0, os.getuid()}
+        or (info.st_mode & stat.S_IWOTH and not info.st_mode & stat.S_ISVTX)
     ):
         return None
     return candidate
 
 
 def _execute_contract(
-        root: Path, commit: str, contract: dict[str, list[str]]
+    root: Path, commit: str, contract: dict[str, list[str]]
 ) -> list[str]:
     errors = []
     for name in ("gate", "mutation"):
@@ -346,13 +346,13 @@ def _parse_dependencies(value: str, known_tasks: set[str]) -> tuple[list[str], b
 
 
 def evaluate(
-        row,
-        live_claims: set[str],
-        known_tasks: set[str],
-        task_states: dict[str, str],
-        *,
-        root: Path = ROOT,
-        base: str = "upstream/main",
+    row,
+    live_claims: set[str],
+    known_tasks: set[str],
+    task_states: dict[str, str],
+    *,
+    root: Path = ROOT,
+    base: str = "origin/main",
 ) -> list[str]:
     """Return every failed readiness proof for one candidate row."""
 
@@ -407,11 +407,11 @@ def _rows(root: Path = ROOT) -> list:
 
 
 def queue(
-        prs: list[dict] | None = None,
-        *,
-        root: Path = ROOT,
-        base: str = "upstream/main",
-        expected: dict | None = None,
+    prs: list[dict] | None = None,
+    *,
+    root: Path = ROOT,
+    base: str = "origin/main",
+    expected: dict | None = None,
 ) -> tuple[list, dict[str, int]]:
     if prs is None:
         # Local callers (including onboarding and preflight before Task22's
@@ -456,7 +456,7 @@ def _parser() -> argparse.ArgumentParser:
     mode.add_argument("--check-local", action="store_true")
     mode.add_argument("--check-live", action="store_true")
     parser.add_argument("--pr-json", type=Path, help="offline live-state fixture")
-    parser.add_argument("--base", default="upstream/main")
+    parser.add_argument("--base", default="origin/main")
     return parser
 
 
@@ -470,7 +470,7 @@ def main(argv: list[str] | None = None) -> int:
     local_check = args.check or args.check_local
     if local_check and args.pr_json is not None:
         parser.error("local checks reject --pr-json")
-    if local_check and args.base != "upstream/main":
+    if local_check and args.base != "origin/main":
         parser.error("local checks reject --base")
     if args.pr_json is not None and not args.check_live:
         parser.error("--pr-json requires --check-live")

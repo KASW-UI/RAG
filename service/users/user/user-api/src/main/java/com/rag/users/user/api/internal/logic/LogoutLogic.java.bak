@@ -1,0 +1,84 @@
+package com.rag.users.user.api.internal.logic;
+
+import com.rag.common.logger.Logger;
+import com.rag.users.common.errmsg.ErrorCode;
+import com.rag.users.user.api.internal.svc.ServiceContext;
+import com.rag.users.user.api.internal.types.ApiTypes;
+import com.rag.users.user.proto.LogoutReq;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
+import io.opentelemetry.context.Context;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.stereotype.Service;
+
+/**
+ * 对应 Go 端 internal/logic/user/logoutlogic.go。
+ *
+ * <p>L1 外部契约 + L2 业务语义（四状态机，逐项冻结）：
+ * <pre>
+ *   1. 从 request attribute "jwt_token" 取 token 字符串
+ *      （由 CheckBlacklistFilter 在 JWT 验签通过后写入，对应 Go 端 ctx.Value("jwt_token")）
+ *      → 取不到 → ErrorTokenNotExist (1004) + 日志 "Token不存在"
+ *      （对应 Go: service/user/user/api/internal/logic/user/logoutlogic.go:38-39 用 errmsg.ErrorTokenNotExist=1004；
+ *        <b>注意</b>：errmsg.ErrorTokenTypeWrong=1005 是 user-**rpc** LogoutLogic 用的，不是 user-**api**）
+ *
+ *   2. 调 userRpc.Logout(LogoutReq{Token})
+ *      → 失败：
+ *         gRPC codes.Internal → ErrorServerCommon (5001)
+ *         其它（默认）         → CodeServerBusy   (1015)
+ *
+ *   3. 成功
+ *      → Success (200) + 返回 {success: true}
+ * </pre>
+ *
+ * <p>六个可观察面保留：
+ * <ul>
+ *   <li><b>Return</b>：成功时 {@code data.success} = true；失败时 {@code code} 字段是 3 个 ErrorCode 之一</li>
+ *   <li><b>Error</b>：3 个固定业务码（1004/5001/1015/200）</li>
+ *   <li><b>Log</b>：token 缺失时 logger.LogBusinessErr(ErrorTokenNotExist=1004, "Token不存在")；
+ *       rpc_error 时 logger.LogBusinessErr</li>
+ *   <li><b>Trace</b>：从 {@link Context#current()} 取 OTel ctx</li>
+ *   <li><b>Metric</b>：Go 端 LogoutLogic <b>无 metrics 埋点</b>（与 Login/Register 不同）—— 1:1 不补</li>
+ * </ul>
+ */
+@Service
+public class LogoutLogic {
+
+    private final ServiceContext svcCtx;
+
+    public LogoutLogic(ServiceContext svcCtx) {
+        this.svcCtx = svcCtx;
+    }
+
+    /**
+     * 对应 Go {@code func (l *LogoutLogic) Logout(req *types.LogoutReq) (resp *types.LogoutResp, code int)}。
+     */
+    public LogicResult<ApiTypes.LogoutResp> logout(ApiTypes.LogoutReq req, HttpServletRequest httpRequest) {
+        Context otelCtx = Context.current();
+
+        // 对应 Go: l.ctx.Value("jwt_token")
+        Object tokenAttr = httpRequest.getAttribute("jwt_token");
+        if (tokenAttr == null) {
+            Logger.logBusinessErr(otelCtx, ErrorCode.ERROR_TOKEN_NOT_EXIST.getCode(),
+                    new RuntimeException("Token不存在"));
+            return LogicResult.fail(ErrorCode.ERROR_TOKEN_NOT_EXIST);
+        }
+        String token = (String) tokenAttr;
+
+        LogoutReq rpcReq = LogoutReq.newBuilder().setToken(token).build();
+        try {
+            svcCtx.getUserRpc().logout(rpcReq);
+        } catch (StatusRuntimeException e) {
+            Logger.logBusinessErr(otelCtx, ErrorCode.ERROR.getCode(), e);
+            Status.Code code = e.getStatus().getCode();
+            if (code == Status.Code.INTERNAL) {
+                return LogicResult.fail(ErrorCode.ERROR_SERVER_COMMON);
+            }
+            return LogicResult.fail(ErrorCode.CODE_SERVER_BUSY);
+        }
+
+        ApiTypes.LogoutResp resp = new ApiTypes.LogoutResp();
+        resp.setSuccess(true);
+        return LogicResult.ok(resp);
+    }
+}

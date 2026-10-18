@@ -52,7 +52,7 @@ ROW_LINE = re.compile(r"^\s*Row:\s*`?([A-Z0-9][A-Za-z0-9_.-]*|-)`?\s*$", re.MULT
 # Kept deliberately in step with `check-agent-record.ISSUE_ROW`, which parses the
 # rows this file writes. The snapshot exists to be read by that regex, so the two
 # move together or the gate goes blind.
-REPO_URL = "https://github.com/KASW-UI/RAG"  # RAG: 占位符，请替换为实际仓库
+REPO_URL = "https://github.com/mudler/vllm.cpp"
 
 # A snapshot older than this reports its age and SKIPs rather than gating. It is
 # not a correctness bound -- GitHub is the record -- only the point past which a

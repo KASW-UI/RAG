@@ -1,0 +1,107 @@
+# admin-rpc 启动配置 —— 对齐 Go 端 service/user/admin/rpc/etc/admin.yaml
+
+spring:
+  application:
+    name: admin-rpc
+
+  # ===== 1. Postgres（对齐 Go 端 DataSource）=====
+  datasource:
+    # POSTGRES_ADDR/POSTGRES_PORT 来自 docker-compose.yaml（默认 postgres:5432）
+    url: jdbc:postgresql://${POSTGRES_ADDR:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}?sslmode=disable
+    username: ${POSTGRES_USER:admin}
+    password: ${POSTGRES_PASSWORD:Sea-TryGo}
+    driver-class-name: org.postgresql.Driver
+
+  # ===== 2. JPA / Hibernate（对齐 Go 端 db.AutoMigrate(&Admin{}, &AdminInvite{}, &User{})）=====
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: false
+    open-in-view: false
+    show-sql: false
+
+  # ===== 3. Redis（对齐 Go 端 BizRedis）=====
+  data:
+    redis:
+      host: ${REDIS_ADDR:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3s
+
+  # ===== 4. Nacos 服务注册（修 DRIFT-NEW-001）=====
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost}:${NACOS_PORT:8848}
+        namespace: ${NACOS_NAMESPACE:sea-rtw}
+        group: ${NACOS_GROUP:USER_GROUP}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+
+# ===== 5. gRPC server（对齐 Go 端 ListenOn: 0.0.0.0:8081）=====
+# 选项 C：admin-rpc 严格保持纯 gRPC，不加 spring-boot-starter-web，
+# 因此 application.yaml 里没有 server.port（Spring Web 也不会起）。
+grpc:
+  server:
+    port: 8081
+    reflection-service-enabled: false
+    enable-keep-alive: true
+    keep-alive-time: 30s
+    permit-keep-alive-without-calls: true
+
+# ===== 6. 业务配置（对齐 Go 端 AdminAuth.* + System.*）=====
+# 对应 Go: AdminAuth.AccessSecret / AdminAuth.AccessExpire + System.DefaultPassword
+admin-rpc:
+  admin-auth:
+    access-secret: ${ADMIN_JWT_SECRET:yU-hCm)2*?NQmWG}
+    access-expire: ${ADMIN_JWT_EXPIRE:2592000}    # 30 天
+  system:
+    # 用于 ensureDefaultAdmin bootstrap 时给默认账号加密
+    # Go 端 etc/admin.yaml: System.DefaultPassword = "123456"
+    default-password: ${ADMIN_DEFAULT_PASSWORD:123456}
+
+# ===== 7. Spring Boot Actuator：禁掉 HTTP 端点，admin-rpc 保持纯 gRPC =====
+# Go 端 admin-rpc 没有 HTTP endpoint，Java 侧必须 align。
+# metrics 仍注册到 Micrometer（Metrics.java 显式 Counter.builder），只是无法通过 /actuator/prometheus 抓取。
+management:
+  server:
+    port: -1
+  endpoints:
+    enabled-by-default: false
+  endpoint:
+    health:
+      enabled: false
+    prometheus:
+      enabled: false
+  metrics:
+    enable:
+      prometheus: true
+    tags:
+      application: ${spring.application.name}
+
+# ===== 8. OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）=====
+# Go: Endpoint=jaeger:4317, Batcher=otlpgrpc, Sampler=1.0, Name=admin-rpc
+otel:
+  exporter:
+    otlp:
+      endpoint: http://${OTEL_ADDR:jaeger}:${OTLP_PORT:4317}
+      protocol: grpc
+  resource:
+    attributes:
+      service.name: admin-rpc
+  traces:
+    sampler: always_on
+
+# ===== 9. Snowflake worker ID =====
+# 优先环境变量 SNOWFLAKE_NODE_ID；不设则 Snowflake.java 用 SHA-256(SERVICE_NAME + "-" + PID) 兜底
+# 见 service/common/Snowflake.java
+
+# ===== 10. 日志（Spring Boot 默认走 logback-classic，SLF4J）=====
+# Logger.java 已显式调 Logger.init("admin-rpc")，MDC trace_id 会被自动填入
+logging:
+  level:
+    root: INFO
+    com.rag.users.admin.rpc: INFO
+    com.rag.common: INFO

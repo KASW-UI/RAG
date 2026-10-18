@@ -1,0 +1,31 @@
+# Prometheus scrape config for Sea-RideTheWind_java user microservice.
+# Mounted to /etc/prometheus/prometheus.yml by docker-compose.yaml.
+#
+# 选项 C：scrape target 只有 user-api（HTTP gateway，本来就有 Spring Web，加 actuator 零成本）。
+# user-rpc 不暴露 HTTP 端口（与 Go 端行为一致：Go user-rpc 也是纯 gRPC，metrics 通过
+# 独立 DevServer 暴露，Docker 里也不抓）—— 所以不 scrape user-rpc。
+#
+# 加新的 service 时，按下面的 - job_name 模板复制即可。
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: "Sea-RideTheWind-java"
+
+scrape_configs:
+  # ===== user-api（HTTP gateway + actuator）=====
+  - job_name: user-api
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - user-api:49900
+        labels:
+          service: user-api
+          component: api
+
+  # ===== Prometheus 自身 metrics（可选；默认开）=====
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090

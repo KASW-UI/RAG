@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>user</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>user-rpc</artifactId>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <opentelemetry.version>1.44.0</opentelemetry.version>
+    </properties>
+
+    <!-- 引入 OTel BOM，让下面 opentelemetry-exporter-otlp 等 artifact 不用手写版本 -->
+    <!-- 与 service/common/pom.xml 中的 opentelemetry-bom 保持同版本号 -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>${opentelemetry.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>user-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            users-common：用户模块私有的 PasswordUtil / JwtUtil / ErrorCode
+            对应 Go 端 service/user/common/{cryptx,jwt,errmsg}（user-rpc / user-api / admin-rpc / admin-api 共用）
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>users-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            service/common（artifactId=common）：服务级共享
+            对应 Go 端 service/common/* —— Logger / Observability / RpcInterceptor / Snowflake / OpenTelemetry / Jackson
+            * 通过传递依赖引入 opentelemetry-{api,sdk,context}
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot 基础（gRPC server 不需要 web，纯 gRPC） ============== -->
+        <!--
+            选项 C 决定：user-rpc 严格保持"纯 gRPC service"，不加 spring-boot-starter-web。
+            与 Go 端 service/user/user/rpc 行为 1:1：Go user-rpc 是纯 gRPC 进程，
+            没有任何 HTTP 端点；Go 端 user-rpc 的 metrics 也是通过独立的 DevServer
+            （端口 9094，dev 模式工具，不是主进程一部分）暴露的，Docker 里也不抓。
+            Java user-rpc 同理：metrics 仍注册到 Micrometer（Micrometer 内存里仍可读），
+            但 HTTP 端点不暴露 —— 与 Go 端行为对齐。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <!-- @Valid 入参校验（Go 端无显式校验；Java 侧属"早抛"增强，可移除） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <!--
+            spring-cloud-commons 的 AbstractAutoServiceRegistration（Nacos 自动注册用）
+            通过反射引用 org.springframework.boot.web.server.context.WebServerInitializedEvent。
+            user-rpc 纯 gRPC，不引 spring-boot-starter-web，但 Nacos 这条反射链需要这个类。
+            spring-boot-web-server 只含这个类 + 抽象接口，不会拉 Tomcat/Jetty。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-web-server</artifactId>
+        </dependency>
+        <!-- devh grpc-server-spring-boot-starter 也把 grpc-core 排掉了，
+             io.grpc.internal.ServerImplBuilder 等内部类在 grpc-core 里。
+             根 pom dependencyManagement 已管版本。 -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+
+        <!-- ============== 3. gRPC server（@GrpcService 自动起 gRPC server） ============== -->
+        <!-- 版本由根 pom dependencyManagement 管理（3.1.0.RELEASE） -->
+        <!-- ⚠️ 3.1.0.RELEASE 是 2024 年发版，针对 Spring Boot 3.x；与 Spring Boot 4.0.8 可能不兼容，build 时盯一下 -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-server-spring-boot-starter</artifactId>
+            <!-- 排除 devh 默认拖的 grpc-core 1.63.0（与 user-proto 的 1.66.0 不兼容） -->
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ============== 4. 数据访问：Postgres + Spring Data JPA ============== -->
+        <!-- 对齐 Go 端 Postgres.* 配置 + GORM 模型 -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!-- ============== 5. Redis（仅 Logout 用 Setex） ============== -->
+        <!-- 对齐 Go 端 BizRedis 配置，spring-boot-starter-data-redis 默认 Lettuce client -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- ============== 6. Metrics：复刻 Go 端 user_rpc_register_total / user_rpc_login_total ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 7. 测试：JUnit 5 + Mockito + AssertJ（test scope，不进生产 jar） ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- ============== 8. OpenTelemetry OTLP exporter ============== -->
+        <!--
+            opentelemetry-{api,sdk,context} 已通过 service/common 传递依赖进来
+            这里只补一个：opentelemetry-exporter-otlp —— 让 OTel SDK 把采集到的 span 真正发出去（Jaeger / Tempo / OTel Collector）
+            Go 端用的是 otlgrpc（user.yaml: Telemetry.Batcher: otlpgrpc），Java 侧对应 OTLP/gRPC
+        -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 8. Nacos service discovery（修 DRIFT-NEW-001） ============== -->
+        <!--
+            user-api 通过 Nacos 自动发现 user-rpc 实例需要 user-rpc 先注册到 Nacos。
+            与 user-api 端 spring-cloud-starter-alibaba-nacos-discovery 配套使用。
+            修 DRIFT-NEW-001：把"Go 端 etcd 静态寻址"对齐到 Java 端 Nacos dynamic discovery。
+        -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- 启动类 UserRpcApplication 靠 spring-boot-maven-plugin 打成可执行 jar -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

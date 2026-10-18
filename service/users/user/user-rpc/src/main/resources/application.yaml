@@ -1,0 +1,126 @@
+# user-rpc 启动配置 —— 对齐 Go 端 service/user/user/rpc/etc/user.yaml
+# 这份文件只覆盖"最小可跑"项；后续业务配置（TLS / 限流 / 熔断 / etc.）按需扩展。
+
+spring:
+  application:
+    name: user-rpc
+
+  # ===== 1. Postgres（对齐 Go 端 Postgres.*）=====
+  datasource:
+    # POSTGRES_ADDR/POSTGRES_PORT 来自 docker-compose.yaml（默认 postgres:5432）
+    # 当 CONTAINER_PREFIX=Sea + 复用现有基础设施时，host 实际是 Sea-postgres；
+    # compose 会通过 POSTGRES_ADDR 注入正确值
+    url: jdbc:postgresql://${POSTGRES_ADDR:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}?sslmode=disable
+    username: ${POSTGRES_USER:admin}
+    password: ${POSTGRES_PASSWORD:Sea-TryGo}
+    driver-class-name: org.postgresql.Driver
+
+  # ===== 2. JPA / Hibernate（对齐 Go 端 db.AutoMigrate）=====
+  jpa:
+    hibernate:
+      ddl-auto: update   # Hibernate 启动时按实体 CREATE/ALTER，对齐 Go 端 AutoMigrate(&User{}, &UserAvatarHistory{})
+    properties:
+      hibernate:
+        format_sql: false
+    open-in-view: false
+    show-sql: false
+
+  # ===== 3. Redis（对齐 Go 端 BizRedis）=====
+  data:
+    redis:
+      # REDIS_ADDR/REDIS_PORT 来自 docker-compose.yaml
+      host: ${REDIS_ADDR:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3s
+
+  # ===== 3.5. Nacos 服务注册（修 DRIFT-NEW-001）=====
+  # user-rpc 启动时自动注册到 Nacos，user-api 通过 discovery://user-rpc 发现本服务。
+  # 服务名 user-rpc 与 user-api 端 grpc.client.user-rpc.address 中的 discovery name 对齐。
+  cloud:
+    nacos:
+      discovery:
+        # NACOS_ADDR/NACOS_PORT 来自 docker-compose.yaml
+        server-addr: ${NACOS_ADDR:localhost}:${NACOS_PORT:8848}
+        namespace: ${NACOS_NAMESPACE:sea-rtw}
+        group: ${NACOS_GROUP:USER_GROUP}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+
+# ===== 4. gRPC server（对齐 Go 端 ListenOn: 0.0.0.0:9004）=====
+# 选项 C：user-rpc 严格保持纯 gRPC，不加 spring-boot-starter-web，
+# 因此 application.yaml 里没有 server.port（Spring Web 也不会起）。
+# Go 端 user-rpc 是纯 gRPC 进程，行为 1:1。
+grpc:
+  server:
+    port: 49210                    # 修 INFRA-001：9004 → 49210（Infrastructure.md §3 锁定）
+    # DRIFT-003 修正：Go 端 user.go:39-41 仅当 c.Mode == service.DevMode/service.TestMode 时注册 reflection，
+    # 而 user.yaml 默认 Log.Mode=file（生产），所以生产环境 reflection 是关闭的。
+    # Java 侧默认 false 与 Go 端 1:1；本地调试改 true 或用 GRPC_SERVER_REFLECTION_SERVICE_ENABLED=true 覆盖。
+    reflection-service-enabled: false
+    enable-keep-alive: true
+    keep-alive-time: 30s
+    permit-keep-alive-without-calls: true
+
+# ===== 5. 业务配置（对齐 Go 端 UserAuth.*）=====
+# 对应 Go: UserAuth.AccessSecret / UserAuth.AccessExpire
+# 优先读环境变量 USER_JWT_SECRET / USER_JWT_EXPIRE（docker-compose 注入），找不到再 fallback 到 dev 默认值
+user-rpc:
+  user-auth:
+    access-secret: ${USER_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}
+    access-expire: ${USER_JWT_EXPIRE:2592000}    # 30 天，与 Go 端 etc/user.yaml 一致
+
+# ===== 6. Spring Boot Actuator：禁掉 HTTP 端点，user-rpc 保持纯 gRPC =====
+# Go 端 user-rpc 没有 HTTP endpoint，Java 侧必须 align。
+# ⚠️ 注意：metrics 仍注册到 Micrometer（Metrics.java 显式 Counter.builder），
+# 只是无法通过 /actuator/prometheus 抓取。如未来想 scrape 需先加 spring-boot-starter-web。
+management:
+  server:
+    port: -1                       # 关键：禁用 management HTTP server
+  endpoints:
+    enabled-by-default: false      # 不自动开任何 endpoint
+  endpoint:
+    health:
+      enabled: false
+    prometheus:
+      enabled: false               # 显式禁掉 prometheus HTTP endpoint
+  metrics:
+    enable:
+      prometheus: true             # 但 Counter 注册流程保留（Micrometer 内存里仍可读到）
+    tags:
+      application: ${spring.application.name}
+
+# ===== 7. OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）=====
+# Go: Endpoint=jaeger:4317, Batcher=otlpgrpc, Sampler=1.0, Name=user-rpc
+# Java 侧 opentelemetry-exporter-otlp 默认按 OTLP/gRPC 协议发到 otel.exporter.otlp.endpoint
+# OTEL_ADDR/OTLP_PORT 来自 docker-compose.yaml
+otel:
+  exporter:
+    otlp:
+      endpoint: http://${OTEL_ADDR:jaeger}:${OTLP_PORT:4317}
+      protocol: grpc
+  resource:
+    attributes:
+      service.name: user-rpc
+  traces:
+    sampler: always_on          # 对齐 Go Sampler: 1.0
+
+# ===== 8. Snowflake worker ID（通过环境变量注入）=====
+# 对应 Go 端 bwmarrin/snowflake 的 NodeId。Snowflake.java 已经支持从环境变量读：
+#   export SNOWFLAKE_NODE_ID=0     # 本地开发默认 0
+#   export SNOWFLAKE_NODE_ID=42    # 生产环境按节点编号指定（0~1023）
+# 如果不设置，Snowflake.java 会用 SHA-256(SERVICE_NAME + "-" + PID) 兜底，自动生成一个
+# 0~1023 之间的 ID（同一进程多次重启会变）。
+#
+# Spring Boot 不直接从 application.yaml 注入到 System.getenv；需要在启动脚本里 export。
+# 例：docker run -e SNOWFLAKE_NODE_ID=1 user-rpc:latest
+#
+# 如需在 application.yaml 覆盖，需要改 service/common 的 Snowflake.java 增加 System property fallback。
+
+# ===== 9. 日志（Spring Boot 默认走 logback-classic，SLF4J）=====
+# Logger.java 已显式调 Logger.init("user-rpc")，MDC trace_id 会被自动填入。
+logging:
+  level:
+    root: INFO
+    com.rag.users.user.rpc: INFO
+    com.rag.common: INFO

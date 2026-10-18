@@ -130,12 +130,12 @@ def is_integration_path(path: str) -> bool:
 def is_feature_path(path: str) -> bool:
     candidate = PurePosixPath(path)
     if (
-            not path
-            or candidate.is_absolute()
-            or "\\" in path
-            or "//" in path
-            or candidate.as_posix() != path
-            or any(part in {"", ".", ".."} for part in candidate.parts)
+        not path
+        or candidate.is_absolute()
+        or "\\" in path
+        or "//" in path
+        or candidate.as_posix() != path
+        or any(part in {"", ".", ".."} for part in candidate.parts)
     ):
         return True
     if is_integration_path(path):
@@ -144,7 +144,7 @@ def is_feature_path(path: str) -> bool:
 
 
 def arrives_via_row_pr(
-        parents: list[str], subject: str, body: str, merged_messages: tuple[str, ...] = ()
+    parents: list[str], subject: str, body: str, merged_messages: tuple[str, ...] = ()
 ) -> bool:
     """Whether this commit reached main through a reviewed row/* PR."""
     message = f"{subject}\n{body}"
@@ -169,12 +169,12 @@ def arrives_via_row_pr(
 
 
 def commit_violations(
-        commit: str,
-        parents: list[str],
-        subject: str,
-        body: str,
-        paths: list[str],
-        merged_messages: tuple[str, ...] = (),
+    commit: str,
+    parents: list[str],
+    subject: str,
+    body: str,
+    paths: list[str],
+    merged_messages: tuple[str, ...] = (),
 ) -> list[str]:
     """Return the reasons this commit breaks role discipline (empty if fine)."""
     features = sorted(p for p in paths if is_feature_path(p))
@@ -193,13 +193,13 @@ def commit_violations(
 
 
 def policy_commit_violations(
-        commit: str,
-        parents: list[str],
-        subject: str,
-        body: str,
-        paths: list[str],
-        merged_messages: tuple[str, ...] = (),
-        govern_integration: bool = False,
+    commit: str,
+    parents: list[str],
+    subject: str,
+    body: str,
+    paths: list[str],
+    merged_messages: tuple[str, ...] = (),
+    govern_integration: bool = False,
 ) -> list[str]:
     """Require every tracked repository change to arrive on a task branch.
 

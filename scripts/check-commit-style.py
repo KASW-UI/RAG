@@ -128,11 +128,11 @@ def _is_ancestor(repo: Path, older: str, newer: str) -> bool:
 
 
 def validate_range(
-        repo: Path,
-        base: str,
-        head: str,
-        *,
-        cutover: str | None,
+    repo: Path,
+    base: str,
+    head: str,
+    *,
+    cutover: str | None,
 ) -> list[str]:
     """Validate the non-merge commits in an exact ``BASE..HEAD`` set."""
 

@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>user</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>user-api</artifactId>
+
+    <!--
+        对应 Go 端 service/user/user/api（独立 HTTP gateway 进程，端口 8888）。
+        Java 版作为独立 Spring Boot 进程跑在 49900（见 Infrastructure.md §3）；
+        下游调 user-rpc（:49210 gRPC）。
+        与 user-rpc 是双进程架构，对齐 manage.sh:561/848 的"user=api+rpc"双进程拓扑。
+    -->
+
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>user-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+            <!-- user-proto 已经把 grpc-stub + protobuf-java 传递进来，
+                 user-api 用 ManagedChannel 直接连 user-rpc :49210 -->
+        </dependency>
+        <!-- users-common：JwtUtil（签发）+ ErrorCode 业务码 -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>users-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!-- service/common：Logger + Snowflake + Response envelope + HttpMiddleware + Observability -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot Web（HTTP server） ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- ============== 3. Redis（JWT 黑名单 + 后续扩展） ============== -->
+        <!-- 对齐 Go 端 BizRedis 配置：spring-boot-starter-data-redis 默认 Lettuce client -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- ============== 4. Metrics：复刻 Go 端 user_api_intercept_total ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 5. JWT（签发走 users-common/JwtUtil；校验走 jjwt 原生 API） ============== -->
+        <!-- jjwt 版本由根 pom dependencyManagement 管理（0.12.6） -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- ============== 6. gRPC client（连 user-rpc :49210） ============== -->
+        <!--
+            devh grpc-client-spring-boot-starter 3.1.0.RELEASE
+            与 user-rpc 同款（server 端用 grpc-server-spring-boot-starter，根 pom dependencyManagement 已管）
+            提供 @GrpcClient("user-rpc") 自动注入 UserServiceBlockingStub 的能力
+            ⚠️ 3.1.0.RELEASE 是 2024 年发版，针对 Spring Boot 3.x；与 Spring Boot 4.0.8 可能不兼容
+            启动时若抛 NoClassDef / AbstractMethod，转 fallback（ManagedChannelBuilder 手写）
+            还要 exclude io.grpc:grpc-core —— devh 默认拖 1.63.0，跟 user-proto 的 1.66.0 不兼容
+            还要显式加 io.grpc:grpc-core —— 根 pom dependencyManagement 已经管了版本，不写 version 即可
+        -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot-starter.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- devh starter 自身把 grpc-core 排掉了；ChannelBuilderDefaultPortProvider 等内部类在 grpc-core 里 -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+
+        <!-- ============== 7. OpenTelemetry OTLP exporter ============== -->
+        <!--
+            对齐 Go 端 etc/usercenter.yaml: Telemetry.Endpoint=jaeger:4317, Batcher=otlpgrpc
+            opentelemetry-{api,sdk,context} 已通过 service/common 传递依赖进来
+        -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 7. Nacos service discovery（修 DRIFT-NEW-001） ============== -->
+        <!--
+            devh grpc-client-spring-boot-starter 通过 discovery://<name> 协议把
+            spring-cloud-starter-alibaba-nacos-discovery 装配成 gRPC client name resolver。
+            修 DRIFT-NEW-001：从 static://${USER_RPC_HOST:PORT} 改为 discovery://user-rpc，
+            走 Nacos 自动发现 user-rpc 多副本 / failover / load balancing。
+            版本由根 pom dependencyManagement（spring-cloud-alibaba.version）管理。
+        -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- ============== 8. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <build>
+        <plugins>
+            <!-- 启动类 UserApiApplication 靠 spring-boot-maven-plugin 打成可执行 jar -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

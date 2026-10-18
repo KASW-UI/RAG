@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """Enforce that README.md stays a human-readable, user-facing document.
 
-Per AGENTS.md, README.md is the landing page for the RAG project, not a
-status-tracking log. This checker fails if the README loses one of the
-required user-facing sections (What is it / Features / Architecture /
-Requirements / Build / Configuration / Usage or Run / API / Contributing),
-grows a table cell into a "wall of prose", or contains an em-dash
-(house style).
+Per AGENTS.md, README.md is the LocalAI house-style user-facing document, not a
+status-tracking log. This checker fails if the README loses one of the required
+user-facing sections (Features / Build / usage-CLI / OpenAI server / Consuming),
+grows a table cell into a "wall of prose", or contains an em-dash (house style).
 
-The validation logic is a pure function `readme_errors(text) -> list[str]`
-so it is unit-testable and mutation-testable.
+The validation logic is a pure function `readme_errors(text) -> list[str]` so it
+is unit-testable and mutation-testable (see
+tests/scripts/test_check_readme_structure.py).
 """
 
 from __future__ import annotations
@@ -20,33 +19,37 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / "README.md"
 
-# Each required user-facing section is (label, matchers): the README must have
-# an H2 heading whose lowercased text contains ANY of the matcher substrings.
-#
-# Why these 9 (not vllm.md's 7): vllm.md's checker targets a C++/model/CUDA
-# project (Features / Supported models / Performance / Build / CLI / OpenAI
-# server / C API). RAG is a Java/Spring/gRPC business service; its landing
-# page needs different anchors. Mechanical copy of vllm.md's 7 is a known
-# anti-pattern (see .agents/style/domain-adaptation.md).
+# Each required user-facing section is (label, matchers): the README must have an
+# H2 heading whose lowercased text contains ANY of the matcher substrings.
 REQUIRED_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("What is it", ("what is it",)),
     ("Features", ("features",)),
-    ("Architecture", ("architecture",)),
-    ("Requirements", ("requirements",)),
+    ("Supported models", ("supported models", "models")),
+    ("Performance", ("performance",)),
     ("Build", ("build",)),
-    ("Configuration", ("configuration",)),
-    ("Usage / Run", ("usage", "run")),
-    ("API", ("api",)),
-    ("Contributing", ("contributing",)),
+    ("Usage / CLI", ("cli", "running inference", "usage")),
+    ("OpenAI server", ("server",)),
+    ("Consuming (library / C API)", ("library", "consuming", "c api", "c-api")),
 )
 
-# A table cell longer than this is the "wall of prose" smell: forensic
-# detail belongs in focused documentation, not in a README table cell.
+# A table cell longer than this is the "wall of prose" smell: forensic detail
+# belongs in focused documentation, not in a README table cell.
 MAX_CELL_CHARS = 220
 
-# Per-paragraph budget. Kept at 900 (same as vllm.md's value) because the
-# paragraph shape is project-independent: a single prose paragraph is the
-# thing being bounded, not anything RAG-specific.
+# The README is a landing page, not the status ledger, and what keeps it one is
+# a budget on each ENTRY: one prose paragraph, one table cell. Measured in
+# characters, not lines, so the budget does not move with how the prose happens
+# to be wrapped.
+#
+# There is deliberately NO whole-file budget. `MAX_README_CHARS = 30000` was
+# removed under #498, when README.md stood 7 characters below it. Per AGENTS.md
+# Records a budget on a shared file makes every addition evict someone else's
+# content, and merging two such edits cleanly is worse than conflicting because
+# it applies both evictions. It was the fourth budget of that shape to be
+# retired, after the per-class line limits, `check-now-current.py`'s MAX_CHARS
+# and STATUS_RATCHET (#364), and PageRules `max_chars` (#460). Do not
+# reintroduce it under a larger value:
+# `test_checker_declares_no_whole_file_budget` fails if the constant returns at
+# all. See .agents/specs/readme-budget-retire.md.
 MAX_PARAGRAPH_CHARS = 900
 
 CONTRIBUTOR_LINK = "CONTRIBUTING.md"
@@ -121,7 +124,7 @@ def readme_errors(text: str) -> list[str]:
     if CONTRIBUTOR_LINK not in text:
         errors.append(
             f"README does not link to {CONTRIBUTOR_LINK}; contributors need a "
-            "public entry point to the contributing protocol"
+            "public entry point to the agent protocol"
         )
 
     for lineno, para in _prose_paragraphs(text):

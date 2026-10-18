@@ -15,7 +15,7 @@ A role keys on the **worktree**, never on the session (user-directed correction,
   the primary checkout without any bookkeeping. The marker lives inside it, so
   one worktree is one role and that role survives a new shell, a new process
   and a lost environment.
-* **session** - `RAG_AGENT_SESSION` when set, else the parent process id.
+* **session** - `VLLM_CPP_AGENT_SESSION` when set, else the parent process id.
   Recorded as PROVENANCE only, and nothing gates on it. An earlier version of
   this file called it "stable across tool calls within a session (measured)".
   That was DISPROVEN: at least one real harness gives every tool call a fresh
@@ -50,7 +50,7 @@ not. What it did provide was two hours of blocked coordination every time a
 session died mid-flight, with no remedy but hand-deleting a file.
 
 So the representation is one record per worktree,
-`<git-common-dir>/rag-operators/<sha256(worktree)[:16]>.json`, rather than
+`<git-common-dir>/vllm-cpp-operators/<sha256(worktree)[:16]>.json`, rather than
 one shared file. A writer only ever touches the path derived from its OWN
 worktree -- the identity ownership already keys on -- so two claimants racing
 write two different paths and neither can lose the other's record. Each publish
@@ -115,7 +115,7 @@ RECORD_TTL_SECONDS = 2 * 60 * 60
 
 # One directory of per-worktree records. See the module docstring for why this
 # shape and not one shared file.
-RECORDS_DIRNAME = "rag-operators"
+RECORDS_DIRNAME = "vllm-cpp-operators"
 
 # The pre-#285 single-file lock. Still READ, so a session that claimed operator
 # before this change keeps resolving instead of turning UNDECLARED mid-flight
@@ -132,7 +132,7 @@ def git(*args: str) -> str:
 
 def session_id() -> str:
     """Provenance only: who declared this. NOT stable across tool calls."""
-    explicit = os.environ.get("RAG_AGENT_SESSION")
+    explicit = os.environ.get("VLLM_CPP_AGENT_SESSION")
     return explicit if explicit else f"ppid:{os.getppid()}"
 
 

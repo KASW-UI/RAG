@@ -31,7 +31,7 @@ onboard = _load_onboard()
 
 
 WELCOME = """+------------------------------------------------------------------+
-|                         Welcome to RAG                      |
+|                         Welcome to vllm.cpp                      |
 +------------------------------------------------------------------+
 | Helper   One focused contribution that moves the project forward.|
 | Operator Maintain the project or run a long multi-agent campaign.|
@@ -127,7 +127,7 @@ def _declared_actions(
             "1. Confirm this inherited role fits the current request.",
             "2. Run scripts/agent-preflight.sh.",
             "3. Use the printed .agents/NOW.md as the live snapshot.",
-            "4. Read .agents/developer-preferences(example).md, and create it from",
+            "4. Read .agents/developer-preferences.md, and create it from",
             "   .agents/developer-preferences.example.md when it is absent.",
             "5. Resume the row from .agents/coordination.md and",
             "   structured state event anchors that apply to this claim.",

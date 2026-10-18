@@ -1,0 +1,88 @@
+package com.rag.users.user.api.internal.logic;
+
+import com.rag.common.logger.Logger;
+import com.rag.users.common.errmsg.ErrorCode;
+import com.rag.users.user.api.internal.identity.IdentityResolver;
+import com.rag.users.user.api.internal.svc.ServiceContext;
+import com.rag.users.user.api.internal.types.ApiTypes;
+import com.rag.users.user.proto.DeleteUserReq;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
+import io.opentelemetry.context.Context;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.stereotype.Service;
+
+/**
+ * 对应 Go 端 internal/logic/user/deleteuserlogic.go。
+ *
+ * <p>L1 外部契约 + L2 业务语义（4 状态机，逐项冻结）：
+ * <pre>
+ *   1. 从 request attribute "userId" 取 uid
+ *      → 缺失/类型错/≤0 → ErrorTokenRuntime (1006)
+ *
+ *   2. 调 userRpc.DeleteUser(DeleteUserReq{Uid})
+ *      → 失败 或 rpcResp.Success == false：
+ *         codes.NotFound  → ErrorUserNotExist (1003)
+ *         codes.Internal  → ErrorServerCommon (5001)
+ *         default         → CodeServerBusy    (1015)
+ *
+ *   3. 成功
+ *      → Success (200) + 返回 {success: true}
+ * </pre>
+ *
+ * <p>六个可观察面保留：
+ * <ul>
+ *   <li><b>Return</b>：成功时 {@code data.success} = true；失败时 4 个业务码</li>
+ *   <li><b>Metric</b>：Go 端 DeleteUserLogic <b>无 metrics 埋点</b> —— 1:1 不补</li>
+ * </ul>
+ */
+@Service
+public class DeleteUserLogic {
+
+    private final ServiceContext svcCtx;
+
+    public DeleteUserLogic(ServiceContext svcCtx) {
+        this.svcCtx = svcCtx;
+    }
+
+    /**
+     * 对应 Go {@code func (l *DeleteuserLogic) Deleteuser(req *types.DeleteUserReq) (resp *types.DeleteUserResp, code int)}。
+     */
+    public LogicResult<ApiTypes.DeleteUserResp> deleteUser(ApiTypes.DeleteUserReq req, HttpServletRequest httpRequest) {
+        Context otelCtx = Context.current();
+
+        long uid;
+        try {
+            uid = IdentityResolver.claimedUID(httpRequest);
+        } catch (IdentityResolver.ErrInvalidClaimException e) {
+            Logger.logBusinessErr(otelCtx, ErrorCode.ERROR_TOKEN_RUNTIME.getCode(), e);
+            return LogicResult.fail(ErrorCode.ERROR_TOKEN_RUNTIME);
+        }
+
+        DeleteUserReq rpcReq = DeleteUserReq.newBuilder().setUid(uid).build();
+        com.rag.users.user.proto.DeleteUserResp rpcResp;
+        try {
+            rpcResp = svcCtx.getUserRpc().deleteUser(rpcReq);
+        } catch (StatusRuntimeException e) {
+            Logger.logBusinessErr(otelCtx, ErrorCode.ERROR.getCode(), e);
+            Status.Code code = e.getStatus().getCode();
+            if (code == Status.Code.NOT_FOUND) {
+                return LogicResult.fail(ErrorCode.ERROR_USER_NOT_EXIST);
+            }
+            if (code == Status.Code.INTERNAL) {
+                return LogicResult.fail(ErrorCode.ERROR_SERVER_COMMON);
+            }
+            return LogicResult.fail(ErrorCode.CODE_SERVER_BUSY);
+        }
+
+        // Go 端同时检查 err != nil && rpcResp.Success == false
+        if (!rpcResp.getSuccess()) {
+            // rpcResp.Success == false 但没有 gRPC error —— Go 端走 default 分支
+            return LogicResult.fail(ErrorCode.CODE_SERVER_BUSY);
+        }
+
+        ApiTypes.DeleteUserResp resp = new ApiTypes.DeleteUserResp();
+        resp.setSuccess(true);
+        return LogicResult.ok(resp);
+    }
+}
