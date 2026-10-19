@@ -15,15 +15,26 @@ spring:
     password: ${POSTGRES_PASSWORD:Sea-TryGo}
     driver-class-name: org.postgresql.Driver
 
-  # ===== 2. JPA / Hibernate（对齐 Go 端 db.AutoMigrate）=====
-  jpa:
-    hibernate:
-      ddl-auto: update   # Hibernate 启动时按实体 CREATE/ALTER，对齐 Go 端 AutoMigrate(&User{}, &UserAvatarHistory{})
-    properties:
-      hibernate:
-        format_sql: false
-    open-in-view: false
-    show-sql: false
+  # ===== 2. MyBatis-Plus + Flyway（取代 JPA/Hibernate；对齐 Go 端 GORM + AutoMigrate）=====
+  flyway:
+    enabled: true
+    # SQL 脚本位置（HUMAN_ONLY.MD 要求每个 rpc 模块独立维护自己的 V*__create_*.sql）
+    locations: classpath:db/migration
+    # baseline-on-migrate：已有非空 schema 时自动 baseline，避免首次启动失败
+    baseline-on-migrate: true
+
+# ===== 2.5. MyBatis-Plus 配置 =====
+# HUMAN_ONLY.MD 要求 @MapperScan 自动发现 mapper interface（com.rag.users.user.rpc.mapper 包）
+mybatis-plus:
+  # entity 扫描包（用于 typeAlias 注册）
+  type-aliases-package: com.rag.users.user.rpc.domain
+  # mapper.xml 位置（Phase 1 填肉阶段如有自定义查询 XML 放这里）
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    # 下划线 → 驼峰自动转换（user_name → userName）—— Phase 1 填肉阶段视需求开启
+    map-underscore-to-camel-case: true
+    # 日志实现（默认 NONE；填肉阶段可改 stdout 调试）
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
 
   # ===== 3. Redis（对齐 Go 端 BizRedis）=====
   data:

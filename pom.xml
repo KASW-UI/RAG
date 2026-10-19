@@ -34,6 +34,12 @@
         <protobuf-maven-plugin.version>0.6.1</protobuf-maven-plugin.version>
         <build-helper-maven-plugin.version>3.6.0</build-helper-maven-plugin.version>
         <os-maven-plugin.version>1.7.1</os-maven-plugin.version>
+        <!-- MyBatis-Plus：BOM 统一管理版本；与 Spring Boot 4.0.8 兼容选 3.5.14+ -->
+        <mybatis-plus.version>3.5.14</mybatis-plus.version>
+        <!-- Flyway：不引入 BOM（org.flywaydb 没有 flyway-bom 这个 artifact；用 flyway-parent 但 parent 不适合消费者）
+             改用 Spring Boot 4.0.8 的 spring-boot-dependencies BOM 自带的 Flyway 版本管理。
+             如需显式锁定版本，在子 pom 直接写 <version> 即可。 -->
+        <flyway.version>10.22.0</flyway.version>
     </properties>
 
     <!-- 统一管理版本：子模块加依赖不写版本号 -->
@@ -53,6 +59,23 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!--
+                MyBatis-Plus：BOM 统一管 mybatis-plus-boot-starter / mybatis-plus-extension / mybatis-plus-jsqlparser 版本
+                Spring Boot 4.0.8 还未官方适配（截至 2026-10-18），但 3.5.14 走 mybatis-spring-boot 适配链能跑；
+                后续若 mybatis-plus-bom 给出 4.0 适配版可升
+            -->
+            <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-bom</artifactId>
+                <version>${mybatis-plus.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!--
+                Flyway 不引入 BOM：org.flywaydb:flyway-bom 不存在（maven central 无此 artifact）
+                Spring Boot 4.0.8 的 spring-boot-dependencies BOM 自带 Flyway 版本管理
+                如需在子 pom 显式锁定版本，可直接 <version>${flyway.version}</version>
+            -->
             <dependency>
                 <groupId>io.jsonwebtoken</groupId>
                 <artifactId>jjwt-api</artifactId>

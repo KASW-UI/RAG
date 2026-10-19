@@ -59,6 +59,17 @@ public enum ErrorCode {
         return code;
     }
 
+    /**
+     * 返回枚举对应的提示语（instance 版）。
+     *
+     * <p>与静态 {@link #getMsg(int)} 同结果，但不传 code（直接拿自己）。
+     * 用于 BusinessException 构造这种"我已知自己 enum"的场景：
+     * {@code new BusinessException(ec.getCode(), ec.getMsg())}。
+     */
+    public String getMsg() {
+        return msg;
+    }
+
     /** code -> ErrorCode 缓存，避免每次 values() 新建数组、O(n) 遍历 */
     private static final Map<Integer, ErrorCode> CODE_MAP;
 

@@ -110,16 +110,40 @@
             </exclusions>
         </dependency>
 
-        <!-- ============== 4. 数据访问：Postgres + Spring Data JPA ============== -->
-        <!-- 对齐 Go 端 Postgres.* 配置 + GORM 模型 -->
+        <!-- ============== 4. 数据访问：Postgres + MyBatis-Plus + Flyway ============== -->
+        <!--
+            对齐 Go 端 Postgres.* 配置 + GORM 模型
+            HUMAN_ONLY.MD 强制 MyBatis-Plus 取代 JPA：
+              - @TableName("user_user") + @TableId 取代 @Entity/@Table + @Id
+              - Mapper extends BaseMapper<UserEntity> 取代 EntityManager.createQuery
+              - Flyway V*__create_*.sql 取代 Hibernate ddl-auto: update
+            ⚠️ 注意 strict HUMAN_ONLY 偏离 Go GORM 默认：表名 user_user vs Go users
+        -->
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!--
+            MyBatis-Plus：MyBatis 增强版，提供 BaseMapper / LambdaQueryWrapper / 分页插件
+            版本由根 pom dependencyManagement 管理（3.5.x 系列兼容 Spring Boot 3.x）
+            Phase 1 填肉阶段确认具体版本号
+        -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-jpa</artifactId>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-boot-starter</artifactId>
+        </dependency>
+        <!--
+            Flyway 10+ 拆出独立 PG adapter（不再走 jdbc 内置 driver detection）
+            版本由根 pom dependencyManagement 管理
+        -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
 
         <!-- ============== 5. Redis（仅 Logout 用 Setex） ============== -->

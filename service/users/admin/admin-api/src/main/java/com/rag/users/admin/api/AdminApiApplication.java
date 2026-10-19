@@ -1,30 +1,30 @@
 package com.rag.users.admin.api;
 
-import com.rag.users.admin.api.internal.config.Config;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 
 /**
- * Admin Center HTTP gateway 入口
- * 对应 Go 端 service/user/admin/api/admincenter.go 的 func main()
+ * Admin Center HTTP gateway 入口。
  *
- * <p>Spring 化（业务模块迁移）：
+ * 对应 Go: service/user/admin/api/admincenter.go 的 func main()。
+ *
+ * <p>Spring 化拆分：
  * <ul>
- *   <li>{@code serviceName} 由 {@code spring.application.name}（= admin-api）自动绑定
- *       到 {@code LoggerFactoryBean} Bean —— 无需手写 {@code Logger.init("admin-api")}</li>
- *   <li>HTTP observability filter 由 {@code HttpMiddlewareFilter} Bean 自动注册到 Servlet 容器
- *       （{@code @Order(Ordered.HIGHEST_PRECEDENCE + 5)} 与原 {@code FilterRegistrationBean}
- *       等价）—— 无需手写 {@code @Bean FilterRegistrationBean}</li>
- *   <li>本进程不调 {@code Snowflake.init()}（admin-api 不生成 UID）</li>
+ *   <li>{@code serviceName} 由 spring.application.name（= admin-api）自动绑定到 LoggerFactoryBean</li>
+ *   <li>HTTP observability filter 由 HttpMiddlewareFilter Bean 自动注册到 Servlet 容器</li>
+ *   <li>{@code @EnableDiscoveryClient} 启用 Nacos 自动发现 admin-rpc（grpc.client.admin-rpc.address=discovery:///admin-rpc）</li>
+ *   <li>grpc-spring-boot-starter 通过 @GrpcClient 自动注入 AdminServiceBlockingStub</li>
  * </ul>
+ *
+ * <p>Phase 4 包扫描路径：{@code com.rag.users.admin.api} + {@code com.rag.common}。
  */
 @SpringBootApplication(scanBasePackages = {
         "com.rag.users.admin.api",
         "com.rag.common"
 })
-@EnableConfigurationProperties(Config.class)
+@ConfigurationPropertiesScan("com.rag.users.admin.api.config")
 @EnableDiscoveryClient
 public class AdminApiApplication {
 

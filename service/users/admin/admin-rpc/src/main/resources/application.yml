@@ -12,15 +12,27 @@ spring:
     password: ${POSTGRES_PASSWORD:Sea-TryGo}
     driver-class-name: org.postgresql.Driver
 
-  # ===== 2. JPA / Hibernate（对齐 Go 端 db.AutoMigrate(&Admin{}, &AdminInvite{}, &User{})）=====
-  jpa:
-    hibernate:
-      ddl-auto: update
-    properties:
-      hibernate:
-        format_sql: false
-    open-in-view: false
-    show-sql: false
+  # ===== 2. MyBatis-Plus + Flyway（Phase 3 重构：去 JPA，用 MyBatis-Plus + Flyway DDL）=====
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+
+  # MyBatis-Plus 配置：Map 字段 JSONB 序列化走 JacksonTypeHandler
+  mybatis-plus:
+    configuration:
+      map-underscore-to-camel-case: true
+      default-fetch-size: 100
+    global-config:
+      db-config:
+        id-type: AUTO
+        table-underline: true
+        logic-not-delete-field: deleted
+        logic-delete-value: 1
+        logic-not-delete-value: 0
+    # JacksonTypeHandler 自动注册（在 Phase 3 entity 上 @TableField(typeHandler = JacksonTypeHandler.class) 引用）
+    type-handlers-package: com.baomidou.mybatisplus.extension.handlers
 
   # ===== 3. Redis（对齐 Go 端 BizRedis）=====
   data:

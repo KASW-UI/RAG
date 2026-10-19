@@ -67,6 +67,12 @@ grpc:
       enable-keep-alive: true
       keep-alive-time: 30s
       permit-keep-alive-without-calls: true
+    user-rpc:
+      address: discovery:///user-rpc
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      permit-keep-alive-without-calls: true
 
 # ===== 4. 业务配置（对齐 Go 端 AdminAuth.*）=====
 # 对应 Go: AdminAuth.AccessSecret / AdminAuth.AccessExpire
