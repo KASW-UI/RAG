@@ -10,6 +10,7 @@ import com.rag.users.common.cryptx.PasswordUtil;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
 import org.springframework.stereotype.Component;
 
 /**
@@ -49,6 +50,22 @@ import org.springframework.stereotype.Component;
  * 阶段执行，早于 {@code finishRefresh} 里的 {@code SmartLifecycle.start()}，
  * 且依赖的 {@code AdminMapper} 由 {@code @MapperScan} 注册的 bean definition 已就绪。
  *
+ * <p><b>⚠ 为什么还必须带 {@link DependsOnDatabaseInitialization}</b>：提前到
+ * {@code @PostConstruct} 之后，本类会在 {@code finishBeanFactoryInitialization}
+ * 期间创建，而 Flyway 的迁移是在 {@code flywayInitializer} 这个 bean 被创建时
+ * （{@code InitializingBean.afterPropertiesSet} → {@code flyway.migrate()}）跑的。
+ * <p>两者都是普通 bean，谁先创建取决于 <b>bean definition 的注册顺序</b>：
+ * 组件扫描注册的本类<b>早于</b>自动配置注册的 {@code flywayInitializer}，
+ * 而 MyBatis 的 {@code SqlSessionFactory} 不在 Spring Boot
+ * {@code DatabaseInitializationDependencyConfigurer} 的自动探测清单里
+ * （清单只含 EntityManagerFactory / JdbcOperations / NamedParameterJdbcOperations / JdbcClient），
+ * 因此<b>没有任何机制</b>把二者串起来 —— 若不加这个注解，seeder 可能在
+ * {@code admin_admin} 表建好之前就 SELECT，导致
+ * {@code relation "admin_admin" does not exist} 并让容器启动失败。
+ * <p>加上之后 Flyway 先跑、seeder 后跑，顺序显式化，不再依赖注册顺序的巧合。
+ * 修复前的 {@code ApplicationReadyEvent} 天然没有这个问题（该事件在 {@code finishRefresh} 之后），
+ * <b>也就是说这个风险是 DRIFT-010 的修法本身引入的</b>，必须一并堵上。
+ *
  * <p><b>失败语义</b>：抛异常 → Spring 容器启动失败、进程退出，等价于 Go 端
  * {@code logx.Must(...)} 的 fatal 行为。
  *
@@ -56,6 +73,7 @@ import org.springframework.stereotype.Component;
  *                    插入时若唯一冲突（多实例同时启动）→ 重读一次，存在就 OK，不存在就把原异常抛出去。
  */
 @Component
+@DependsOnDatabaseInitialization
 public class AdminSeederBootstrap {
 
     private static final Logger log = LoggerFactory.getLogger(AdminSeederBootstrap.class);

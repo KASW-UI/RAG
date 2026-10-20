@@ -336,7 +336,7 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 | DRIFT-007 | MISMATCH | 同上 + `GetUserListReq` | API 层 `form:"page,default=1"` 只在**参数缺失**时生效；rpc 层不兜底，`page=0` → 负 OFFSET → PG 报错 → `Internal` | default 上提到 api 层（DTO 改 `Long` 以区分 null / 显式 0，新增 `pageOrDefault()` / `pageSizeOrDefault()`）；rpc 层删掉归一化 |
 | DRIFT-008 | MISMATCH | `AdminDomainService.createAdmin` | 无 username 空校验，空串可建号 | 移除 `INVALID_ARGUMENT` 分支（此前该 code 在 api 层无 case ⇒ 报成 `1015 服务繁忙`） |
 | DRIFT-009 | MISMATCH | `AdminJwtAuthInterceptor` | go-zero `WithJwt` 把 Jwt middleware 追加到切片尾部 + `withMiddlewares` 反向包裹 ⇒ 实际链路 `CheckBlacklist(Jwt(handler))`，**黑名单先执行** | 两段拆开，黑名单前置；各自 fail-open 行为逐条对齐 |
-| DRIFT-010 | MISMATCH | `AdminSeederBootstrap` | `NewServiceContext` 在 `zrpc.MustNewServer` **之前**跑 seeder | `@EventListener(ApplicationReadyEvent)` → `@PostConstruct`（早于 `finishRefresh` 的 `SmartLifecycle.start()`）。**连带修正**：注入 `SnowflakeBean` 强制 bean 创建顺序，否则 `@PostConstruct` 阶段会用静态兜底 workerId 产出与后续不同 workerId 的 ID，存在撞号风险 |
+| DRIFT-010 | MISMATCH | `AdminSeederBootstrap` | `NewServiceContext` 在 `zrpc.MustNewServer` **之前**跑 seeder | `@EventListener(ApplicationReadyEvent)` → `@PostConstruct`（早于 `finishRefresh` 的 `SmartLifecycle.start()`）。**连带修正**：注入 `SnowflakeBean` 强制 bean 创建顺序，否则 `@PostConstruct` 阶段会用静态兜底 workerId产出与后续不同 workerId 的 ID，存在撞号风险。**再连带**：必须补 `@DependsOnDatabaseInitialization` —— 见下方⚠ |
 | A-01 | wire | `AdminListUserService` + `GetUserListResp` | 空结果 → `"list": null`（Go 是 nil slice，且 `json:"list"` **无 omitempty**） | Service 侧空结果置 null；DTO 侧摘掉 `@JsonInclude(NON_NULL)`（否则 null 会变成「字段消失」） |
 | A-02 | wire | `AdminApiSupport.fromProto(AdminInfo)` | Go `types.AdminInfo.Email` 是 `json:"email"`（**无 omitempty**）⇒ 恒输出 `"email":""` | 总是 setEmail。**注意 `UserInfo` 侧不改**：Go `types.UserInfo.Email` 带 `omitempty`，空时应省略 |
 
@@ -347,10 +347,28 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 **效力边界**：本批**仍无真实 PG / Redis 集成测试**。DRIFT-001 / 006 / 007 / 008 的 Go 基线来自静态代码推导，
 只证明了 RAG 侧的**生成 SQL 与调用参数**已对齐，未证明两端在真库上产出相同结果集 —— 见 §6.2.3。
 
+> **⚠ DRIFT-010 的修法本身引入过一个启动期风险（已堵，但值得记住）**
+>
+> 把 seeder 从 `ApplicationReadyEvent` 提前到 `@PostConstruct` 后，它会在
+> `finishBeanFactoryInitialization` 期间创建；而 Flyway 迁移是在
+> `flywayInitializer` bean 创建时（`afterPropertiesSet → flyway.migrate()`）跑的。
+> 两者都是普通 bean，**谁先创建取决于 bean definition 注册顺序**——组件扫描注册的本类
+> 早于自动配置注册的 `flywayInitializer`，且 MyBatis 的 `SqlSessionFactory`
+> **不在** `DatabaseInitializationDependencyConfigurer` 的自动探测清单里
+> （清单只含 EntityManagerFactory / JdbcOperations / NamedParameterJdbcOperations / JdbcClient）。
+> ⇒ 不加约束时，seeder 可能在 `admin_admin` 表建好之前 SELECT，
+> 报 `relation "admin_admin" does not exist` 并让容器启动失败。
+>
+> 修复前的 `ApplicationReadyEvent` 天然没这个问题（该事件在 `finishRefresh` 之后）。
+> **教训与 §3.3 同源**：把机制「提前」比「补上」更危险 —— 提前会静默失去原本成立的隐式时序。
+> 已加 `@DependsOnDatabaseInitialization` 把顺序显式化。
+> **仍未实证**：`admin-rpc` 至今**零 `@SpringBootTest`**，没有真实容器跑过这段时序（见 §6.2.3 A-U2）。
+
 ### 6.2.3 `service/users/admin` 的 UNRESOLVED（不得按「已对齐」处理）
 
 | # | 项 | 未知点 | 需要什么才能定 |
 |---|---|---|---|
+| A-U0 | **`admin-rpc` / `admin-api` 均无真实 Spring 上下文测试** | `admin-rpc` 零 `@SpringBootTest`；`admin-api` 唯一的 Web 测试 `AdminResponseEnvelopeAdviceTest` 用的是 `MockMvcBuilders.standaloneSetup` + 内联 `@RestController`，**不加载真实的 `AdminController` / `WebMvcConfig` / `AdminJwtAuthInterceptor`**。后果：本批对拦截器（DRIFT-009）与启动时序（DRIFT-010）的改动**从未在真实容器里执行过**；单测是直接 `new` 出对象调方法 | 起 Testcontainers PostgreSQL + `@SpringBootTest` 加载 `AdminRpcApplication` / `AdminApiApplication`。**受限于 jsonb / `FOR UPDATE` / `Types.OTHER` 都无法用 H2 替代**，必须真 PG |
 | A-U1 | Go 侧 uid **格式非法**（非缺失）时的 HTTP 状态码 | 已确认**缺失**场景走零值路径（→ `1003` HTTP 200）；但 `uid=abc` 这类解析失败会走 `httpx.ErrorCtx` 的非 `*BindError` 分支，未读到 go-zero v1.10.2 源码原文，不确定是 500 还是 400 | 读 `rest/httpx/responses.go` + `httpx.Parse` 的错误分类 |
 | A-U2 | 两端从未做运行时对拍 | DRIFT-001 看似铁证，但「哪一侧在部署环境里真的生效」取决于既有库里是否已有 `admin` 记录 —— 若已存在，两边都走 no-op 分支，差异不显现 | 起空库，两端各跑一遍 bootstrap + login |
 | A-U3 | `getUserList` 的 LIKE 双重包裹 | 生产代码传 `%keyword%` 给 MP 的 `like()`，MP 再包一层 ⇒ 实际 `LIKE '%%%keyword%%%'`。**连续 `%` 会折叠，与 Go 的 `'%keyword%'` 匹配集合相同**，故判为 IMPLEMENTATION DIFFERENCE 而非漂移；但未在真库上验证过集合相等 | 同一批 keyword 跑两端对拍比对结果集 |
