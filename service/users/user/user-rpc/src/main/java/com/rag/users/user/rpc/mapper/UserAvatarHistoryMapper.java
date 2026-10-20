@@ -95,12 +95,14 @@ public interface UserAvatarHistoryMapper extends BaseMapper<UserAvatarHistoryEnt
     /**
      * UPDATE user.extra_info["avatar"] = avatarURL（D-014：双写 user 表的 JSON 字段）。
      * 对应 createAvatarHistory W4 / selectAvatarHistory W5。
-     * 用 LambdaUpdateWrapper 在 extra_info 上合并键。
      *
-     * 注意：MyBatis-Plus updateWithWrapper 对 Map<String, String> 字段的合并写入有限制，
-     * 这里用原生 UPDATE 把 extra_info 当作 JSON 整体覆盖（GORM 端也是 merge 后覆盖）。
+     * <p>⚠️ {@code CAST(... AS jsonb)} 不能省：参数是 Java String（JDBC 绑成 varchar），
+     * 而列类型是 jsonb，Postgres 会直接拒绝：
+     * {@code ERROR: column "extra_info" is of type jsonb but expression is of type character varying}。
+     * 这个错误发生在 4/5 步原子事务的最后一步，会让 uploadAvatar / selectAvatar 直接返 INTERNAL。
      */
-    @Update("UPDATE users_user SET extra_info = #{extraInfoJson}, update_time = CURRENT_TIMESTAMP WHERE uid = #{uid}")
+    @Update("UPDATE users_user SET extra_info = CAST(#{extraInfoJson} AS jsonb), " +
+            "update_time = CURRENT_TIMESTAMP WHERE uid = #{uid}")
     int updateUserExtraInfo(@Param("uid") Long uid, @Param("extraInfoJson") String extraInfoJson);
 
     /**
@@ -140,17 +142,21 @@ public interface UserAvatarHistoryMapper extends BaseMapper<UserAvatarHistoryEnt
         Map<String, String> extra = user.getExtraInfo();
         if (extra == null) extra = new HashMap<>();
         extra.put("avatar", avatarUrl);
-        // 序列化为 JSON 字符串 —— JacksonTypeHandler 在 mapper 层做序列化，
-        // 这里我们手动做一次以保证 JSON 内容正确（TypeHandler 是在 INSERT/UPDATE 时自动用的）
+        // 序列化成 JSON 字符串交给 updateUserExtraInfo（SQL 里 CAST 成 jsonb）
         try {
             String json = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(extra);
             updateUserExtraInfo(uid, json);
-            // 把 user 实体的 extraInfo 也同步一下（保持内存与 DB 一致）
-            user.setExtraInfo(extra);
-            userMapper.updateById(user);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new RuntimeException("Failed to serialize extraInfo to JSON", e);
         }
+        // 同步内存副本，保持与 DB 一致（user 是局部变量，仅为可读性）
+        user.setExtraInfo(extra);
+        // 注意：这里<b>不能</b>再调 userMapper.updateById(user) 做「第二次写入」。
+        //   1. updateUserExtraInfo 已经把同一份数据写进去了，重复写没有意义；
+        //   2. MyBatis-Plus 生成的 updateById 走 @TableField(typeHandler=JacksonTypeHandler)，
+        //      而 JacksonTypeHandler 是用 setString 绑参的，Postgres 会拒绝
+        //      varchar → jsonb：ERROR: column "extra_info" is of type jsonb but expression
+        //      is of type character varying → 整个事务回滚，uploadAvatar 永远失败。
 
         return history;
     }
@@ -189,11 +195,10 @@ public interface UserAvatarHistoryMapper extends BaseMapper<UserAvatarHistoryEnt
         try {
             String json = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(extra);
             updateUserExtraInfo(uid, json);
-            user.setExtraInfo(extra);
-            userMapper.updateById(user);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new RuntimeException("Failed to serialize extraInfo to JSON", e);
         }
+        // 同 createAvatarHistory：不再补一次 updateById（理由见该方法内注释）
 
         return history;
     }

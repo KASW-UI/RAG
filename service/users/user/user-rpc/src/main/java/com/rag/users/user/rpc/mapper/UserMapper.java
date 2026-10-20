@@ -7,6 +7,8 @@ import com.rag.users.user.rpc.exception.UserExceptions.NotFoundException;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Result;
+import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 
 import java.util.Optional;
@@ -27,7 +29,20 @@ import java.util.Optional;
 @Mapper
 public interface UserMapper extends BaseMapper<UserEntity> {
 
+    /**
+     * 注意 extra_info（jsonb）的 TypeHandler：
+     * 手写 {@code @Select} 必须显式带 {@code @Results} 才能把 jsonb 列正确读成 Map：
+     * MyBatis 不认识 MyBatis-Plus 的 {@code @TableField}，实体字段上的 TypeHandler
+     * 只对 MP 自己生成的 SQL 生效。不声明的话 extraInfo 会静默变成 null（不报错）。
+     *
+     * <p>TypeHandler 用 JsonbTypeHandler 而非 MP 自带的 JacksonTypeHandler：
+     * 后者 setString 会把 jsonb 列绑成 varchar，Postgres 直接拒收。
+     */
     @Select("SELECT * FROM users_user WHERE username = #{username} LIMIT 1")
+    @Results({
+            @Result(property = "extraInfo", column = "extra_info",
+                    javaType = java.util.Map.class, typeHandler = JsonbTypeHandler.class)
+    })
     UserEntity selectByUsernameRaw(@Param("username") String username);
 
     /**
@@ -41,6 +56,10 @@ public interface UserMapper extends BaseMapper<UserEntity> {
     }
 
     @Select("SELECT * FROM users_user WHERE uid = #{uid} LIMIT 1")
+    @Results({
+            @Result(property = "extraInfo", column = "extra_info",
+                    javaType = java.util.Map.class, typeHandler = JsonbTypeHandler.class)
+    })
     UserEntity selectByUidRaw(@Param("uid") Long uid);
 
     default UserEntity findOneByUid(Long uid) {
