@@ -22,11 +22,13 @@ import com.rag.users.user.rpc.exception.UserExceptions.NotFoundException;
 import com.rag.users.user.rpc.mapper.UserAvatarHistoryMapper;
 import com.rag.users.user.rpc.mapper.UserMapper;
 import com.rag.users.user.rpc.metrics.UserRpcMetrics;
+import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
@@ -35,12 +37,16 @@ import java.util.HashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -156,7 +162,17 @@ class UserDomainServiceTest {
                 CreateUserReq.newBuilder().setUsername("newuser").setPassword("password").build());
 
         assertThat(resp.getUid()).isGreaterThan(0L);
-        verify(userMapper, times(1)).insert(any(UserEntity.class));
+
+        ArgumentCaptor<UserEntity> captor = ArgumentCaptor.forClass(UserEntity.class);
+        verify(userMapper, times(1)).insert(captor.capture());
+        UserEntity inserted = captor.getValue();
+        assertThat(inserted.getUsername()).isEqualTo("newuser");
+        assertThat(inserted.getUid()).isEqualTo(resp.getUid());
+        assertThat(inserted.getScore()).isEqualTo(0);
+        assertThat(inserted.getStatus()).isEqualTo(0L);
+        // 密码必须 bcrypt，不能是明文
+        assertThat(inserted.getPassword()).isNotEqualTo("password");
+        assertThat(com.rag.users.common.cryptx.PasswordUtil.check("password", inserted.getPassword())).isTrue();
     }
 
     @Test
@@ -169,6 +185,8 @@ class UserDomainServiceTest {
                 CreateUserReq.newBuilder().setUsername("existing").setPassword("password").build()))
                 .isInstanceOf(StatusRuntimeException.class)
                 .hasMessageContaining("用户名已存在");
+        // 对齐参考 RegisterLogicTest.usernameTaken_throwsAlreadyExists_doesNotInsert
+        verify(userMapper, never()).insert(any(UserEntity.class));
     }
 
     // ============== getUser() ==============
@@ -189,6 +207,9 @@ class UserDomainServiceTest {
         assertThat(resp.getUser().getUid()).isEqualTo(456L);
         assertThat(resp.getUser().getUsername()).isEqualTo("bob");
         assertThat(resp.getUser().getEmail()).isEqualTo("bob@example.com");
+        // D-011：Status 是 proto3 optional，必须显式设置（hasStatus()），identity 解析依赖它
+        assertThat(resp.getUser().hasStatus()).isTrue();
+        assertThat(resp.getUser().getStatus()).isEqualTo(0L);
     }
 
     @Test
@@ -221,7 +242,14 @@ class UserDomainServiceTest {
 
         var resp = service.updateUser(req);
         assertThat(resp.getUser().getUsername()).isEqualTo("newname");
-        verify(userMapper, times(1)).updateUserById(anyLong(), any(UserEntity.class));
+
+        // D-017：只把「显式传入且非空」的字段交给 mapper，未传的必须保持 null
+        ArgumentCaptor<UserEntity> captor = ArgumentCaptor.forClass(UserEntity.class);
+        verify(userMapper, times(1)).updateUserById(eq(789L), captor.capture());
+        UserEntity passed = captor.getValue();
+        assertThat(passed.getUsername()).isEqualTo("newname");
+        assertThat(passed.getPassword()).isNull();
+        assertThat(passed.getExtraInfo()).isNull();
     }
 
     // ============== deleteUser() ==============
@@ -243,6 +271,8 @@ class UserDomainServiceTest {
         assertThatThrownBy(() -> service.deleteUser(DeleteUserReq.newBuilder().setUid(999L).build()))
                 .isInstanceOf(StatusRuntimeException.class)
                 .hasMessageContaining("用户不存在");
+        // D-003：查不到用户时不能继续删
+        verify(userMapper, never()).deleteUserByUid(anyLong());
     }
 
     // ============== logout() ==============
@@ -337,6 +367,8 @@ class UserDomainServiceTest {
         var resp = service.getAvatarHistory(GetAvatarHistoryReq.newBuilder().setUid(1L).setLimit(10).build());
         assertThat(resp.getListList()).hasSize(1);
         assertThat(resp.getList(0).getId()).isEqualTo("h-1");
+        // D-010：domain 层不做 clamp，limit 原样透传（clamp 在 mapper default 方法内）
+        verify(avatarHistoryMapper, times(1)).listAvatarHistory(eq(1L), eq(10));
     }
 
     @Test
@@ -373,5 +405,244 @@ class UserDomainServiceTest {
 
         Counter c = metrics.getLoginUserNotFound();
         assertThat(c.count()).isEqualTo(1.0);
+    }
+
+    // ==================================================================
+    // 以下用例从参考实现 Sea-RideTheWind_java 的 9 个 LogicTest 补回。
+    // 之前「9 个 Logic 合并成 1 个 UserDomainService」时，这批覆盖错误分支
+    // 与 D-004 / D-010 / D-012 / D-013 / D-015 的断言被一并删除，
+    // 导致 db_error 分支与各类输入归一化行为失去证据支撑。
+    // ==================================================================
+
+    // ============== DB 故障分支（db_error → INTERNAL）==============
+
+    @Test
+    void login_dbError_throwsInternal() {
+        when(userMapper.findOneByUserName("alice")).thenThrow(new RuntimeException("connection refused"));
+
+        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () ->
+                service.login(LoginReq.newBuilder().setUsername("alice").setPassword("x").build()));
+
+        assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INTERNAL);
+        assertThat(e.getStatus().getDescription()).isEqualTo("DB查询失败");
+    }
+
+    @Test
+    void getUser_dbError_throwsInternal() {
+        when(userMapper.findOneByUid(456L)).thenThrow(new RuntimeException("connection refused"));
+
+        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () ->
+                service.getUser(GetUserReq.newBuilder().setUid(456L).build()));
+
+        assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INTERNAL);
+    }
+
+    @Test
+    void deleteUser_dbError_throwsInternal() {
+        when(userMapper.findOneByUid(321L)).thenThrow(new RuntimeException("connection refused"));
+
+        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () ->
+                service.deleteUser(DeleteUserReq.newBuilder().setUid(321L).build()));
+
+        assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INTERNAL);
+        // DB 查询失败时不能进入删除
+        verify(userMapper, never()).deleteUserByUid(anyLong());
+    }
+
+    @Test
+    void getAvatarHistory_listDbError_throwsInternal() {
+        UserEntity user = new UserEntity();
+        when(userMapper.findOneByUid(1L)).thenReturn(user);
+        when(avatarHistoryMapper.listAvatarHistory(anyLong(), anyInt()))
+                .thenThrow(new RuntimeException("db error"));
+
+        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () ->
+                service.getAvatarHistory(GetAvatarHistoryReq.newBuilder().setUid(1L).setLimit(30).build()));
+
+        assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INTERNAL);
+    }
+
+    @Test
+    void logout_redisError_throwsInternal() {
+        doThrow(new RuntimeException("redis down")).when(valueOps)
+                .set(anyString(), anyString(), any(java.time.Duration.class));
+
+        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () ->
+                service.logout(LogoutReq.newBuilder().setToken("any.jwt.token").build()));
+
+        assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INTERNAL);
+        assertThat(e.getStatus().getDescription()).isEqualTo("注销失败,Redis写入异常");
+    }
+
+    // ============== selectAvatar ==============
+
+    @Test
+    void selectAvatar_whitespaceHistoryId_throwsInvalidArgument() {
+        assertThrows(StatusRuntimeException.class, () -> service.selectAvatar(
+                SelectAvatarReq.newBuilder().setUid(1L).setHistoryId("   ").build()));
+
+        // 归一化后为空 → 必须在碰 mapper 之前就拒绝
+        verify(avatarHistoryMapper, never()).selectAvatarHistory(any(), anyLong(), anyString());
+    }
+
+    /** D-015：uid 必须一起下传给 mapper，SQL 才有 WHERE uid=? 的越权隔离 */
+    @Test
+    void selectAvatar_passesBothUidAndHistoryIdToMapper() {
+        UserAvatarHistoryEntity hist = new UserAvatarHistoryEntity();
+        hist.setId(7L);
+        hist.setHistoryId("h-100");
+        hist.setUid(1L);
+        hist.setAvatarUrl("https://cdn.example.com/x.png");
+        hist.setContentType("image/png");
+        hist.setIsCurrent(true);
+        when(avatarHistoryMapper.selectAvatarHistory(any(), eq(1L), eq("h-100"))).thenReturn(hist);
+
+        service.selectAvatar(SelectAvatarReq.newBuilder().setUid(1L).setHistoryId("h-100").build());
+
+        ArgumentCaptor<Long> uidCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<String> hidCaptor = ArgumentCaptor.forClass(String.class);
+        verify(avatarHistoryMapper).selectAvatarHistory(any(), uidCaptor.capture(), hidCaptor.capture());
+        assertThat(uidCaptor.getValue()).isEqualTo(1L);
+        assertThat(hidCaptor.getValue()).isEqualTo("h-100");
+    }
+
+    @Test
+    void selectAvatar_userNotFound_throwsNotFound() {
+        when(avatarHistoryMapper.selectAvatarHistory(any(), eq(404L), anyString()))
+                .thenThrow(new NotFoundException("user not found"));
+
+        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () ->
+                service.selectAvatar(SelectAvatarReq.newBuilder().setUid(404L).setHistoryId("h-1").build()));
+
+        assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.NOT_FOUND);
+        assertThat(e.getStatus().getDescription()).isEqualTo("用户不存在");
+    }
+
+    // ============== updateUser（D-004 / D-017）==============
+
+    @Test
+    void updateUser_onlyPassword_carriesBcryptHash() {
+        UserEntity fresh = new UserEntity();
+        fresh.setUid(123L);
+        fresh.setUsername("alice");
+        fresh.setExtraInfo(new HashMap<>());
+        when(userMapper.findOneByUid(123L)).thenReturn(fresh);
+
+        service.updateUser(UpdateUserReq.newBuilder().setUid(123L).setPassword("newpw").build());
+
+        ArgumentCaptor<UserEntity> captor = ArgumentCaptor.forClass(UserEntity.class);
+        verify(userMapper).updateUserById(eq(123L), captor.capture());
+        UserEntity passed = captor.getValue();
+        // D-017：密码必须 bcrypt，且只传 password 一个字段
+        assertThat(passed.getPassword()).isNotEqualTo("newpw");
+        assertThat(com.rag.users.common.cryptx.PasswordUtil.check("newpw", passed.getPassword())).isTrue();
+        assertThat(passed.getUsername()).isNull();
+        assertThat(passed.getEmail()).isNull();
+        assertThat(passed.getExtraInfo()).isNull();
+    }
+
+    /** D-004 quirk：把自己的用户名改成现值也算重名（Go 端行为 1:1 保留） */
+    @Test
+    void updateUser_selfUsernameChange_throwsAlreadyExists() {
+        UserEntity self = new UserEntity();
+        self.setUid(123L);
+        self.setUsername("alice");
+        when(userMapper.findOneByUserName("alice")).thenReturn(self);
+
+        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () ->
+                service.updateUser(UpdateUserReq.newBuilder().setUid(123L).setUsername("alice").build()));
+
+        assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.ALREADY_EXISTS);
+        verify(userMapper, never()).updateUserById(anyLong(), any(UserEntity.class));
+    }
+
+    @Test
+    void updateUser_usernameTakenByOther_throwsAlreadyExists() {
+        UserEntity other = new UserEntity();
+        other.setUid(456L);
+        other.setUsername("alice");
+        when(userMapper.findOneByUserName("alice")).thenReturn(other);
+
+        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () ->
+                service.updateUser(UpdateUserReq.newBuilder().setUid(123L).setUsername("alice").build()));
+
+        assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.ALREADY_EXISTS);
+        verify(userMapper, never()).updateUserById(anyLong(), any(UserEntity.class));
+    }
+
+    @Test
+    void updateUser_userDeletedConcurrently_throwsNotFound() {
+        doThrow(new NotFoundException("not found")).when(userMapper).findOneByUserName(anyString());
+        when(userMapper.findOneByUid(123L)).thenThrow(new NotFoundException("user gone"));
+
+        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () ->
+                service.updateUser(UpdateUserReq.newBuilder().setUid(123L).setUsername("newname").build()));
+
+        assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.NOT_FOUND);
+    }
+
+    // ============== uploadAvatar（D-012 / D-013）==============
+
+    /** D-012：content_type 为空 / 纯空白 → 默认 image/png（静默，不抛异常） */
+    @Test
+    void uploadAvatar_emptyContentType_defaultsToImagePng() {
+        UserAvatarHistoryEntity hist = new UserAvatarHistoryEntity();
+        hist.setId(9L);
+        hist.setHistoryId("100");
+        hist.setUid(1L);
+        hist.setAvatarUrl("https://cdn.example.com/avatar.png");
+        hist.setContentType("image/png");
+        hist.setSizeBytes(1024L);
+        hist.setIsCurrent(true);
+        when(avatarHistoryMapper.createAvatarHistory(
+                any(), eq(1L), anyString(), anyString(), eq("image/png"), eq(1024L))).thenReturn(hist);
+
+        service.uploadAvatar(UploadAvatarReq.newBuilder()
+                .setUid(1L).setAvatarUrl("https://cdn.example.com/avatar.png")
+                .setSizeBytes(1024L).build());
+
+        verify(avatarHistoryMapper).createAvatarHistory(
+                any(), eq(1L), anyString(),
+                eq("https://cdn.example.com/avatar.png"), eq("image/png"), eq(1024L));
+    }
+
+    /** D-013：history_id 由服务端 Snowflake 生成，不接受请求传入 */
+    @Test
+    void uploadAvatar_historyIdIsServerGeneratedSnowflakeId() {
+        UserAvatarHistoryEntity hist = new UserAvatarHistoryEntity();
+        hist.setId(10L);
+        hist.setHistoryId("999");
+        hist.setUid(1L);
+        hist.setAvatarUrl("https://cdn.example.com/x.png");
+        hist.setContentType("image/png");
+        hist.setSizeBytes(1024L);
+        hist.setIsCurrent(true);
+        when(avatarHistoryMapper.createAvatarHistory(
+                any(), anyLong(), anyString(), anyString(), anyString(), any())).thenReturn(hist);
+
+        service.uploadAvatar(UploadAvatarReq.newBuilder()
+                .setUid(1L).setAvatarUrl("https://cdn.example.com/x.png")
+                .setContentType("image/png").setSizeBytes(1024L).build());
+
+        ArgumentCaptor<String> historyIdCaptor = ArgumentCaptor.forClass(String.class);
+        verify(avatarHistoryMapper).createAvatarHistory(
+                any(), eq(1L), historyIdCaptor.capture(), anyString(), anyString(), any());
+        String generated = historyIdCaptor.getValue();
+        assertThat(generated).isNotNull();
+        assertThat(Long.parseLong(generated)).isPositive();
+    }
+
+    @Test
+    void uploadAvatar_userNotFound_throwsNotFound() {
+        when(avatarHistoryMapper.createAvatarHistory(
+                any(), anyLong(), anyString(), anyString(), anyString(), any()))
+                .thenThrow(new NotFoundException("user not found by uid: 404"));
+
+        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () ->
+                service.uploadAvatar(UploadAvatarReq.newBuilder()
+                        .setUid(404L).setAvatarUrl("https://cdn.example.com/x.png").build()));
+
+        assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.NOT_FOUND);
+        assertThat(e.getStatus().getDescription()).isEqualTo("用户不存在");
     }
 }

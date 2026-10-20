@@ -23,6 +23,32 @@ spring:
     # baseline-on-migrate：已有非空 schema 时自动 baseline，避免首次启动失败
     baseline-on-migrate: true
 
+  # ===== 3. Redis（对齐 Go 端 BizRedis）=====
+  # ⚠️ 必须挂在 spring: 下。放错块（如 mybatis-plus:）Spring Boot 完全读不到，
+  #    StringRedisTemplate 会静默退回 localhost:6379，导致 logout 写错 Redis 实例。
+  data:
+    redis:
+      # REDIS_ADDR/REDIS_PORT 来自 docker-compose.yaml
+      host: ${REDIS_ADDR:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3s
+
+  # ===== 3.5. Nacos 服务注册（修 DRIFT-NEW-001）=====
+  # user-rpc 启动时自动注册到 Nacos，user-api 通过 discovery://user-rpc 发现本服务。
+  # 服务名 user-rpc 与 user-api 端 grpc.client.user-rpc.address 中的 discovery name 对齐。
+  # ⚠️ 同上：必须挂在 spring: 下，否则 NacosRegistration 会用默认的 127.0.0.1:8848 + public
+  #    namespace 注册，与 user-api 的 NACOS_NAMESPACE=sea-rtw 对不上，服务发现必然断链。
+  cloud:
+    nacos:
+      discovery:
+        # NACOS_ADDR/NACOS_PORT 来自 docker-compose.yaml
+        server-addr: ${NACOS_ADDR:localhost}:${NACOS_PORT:8848}
+        namespace: ${NACOS_NAMESPACE:sea-rtw}
+        group: ${NACOS_GROUP:USER_GROUP}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+
 # ===== 2.5. MyBatis-Plus 配置 =====
 # HUMAN_ONLY.MD 要求 @MapperScan 自动发现 mapper interface（com.rag.users.user.rpc.mapper 包）
 mybatis-plus:
@@ -35,28 +61,6 @@ mybatis-plus:
     map-underscore-to-camel-case: true
     # 日志实现（默认 NONE；填肉阶段可改 stdout 调试）
     log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
-
-  # ===== 3. Redis（对齐 Go 端 BizRedis）=====
-  data:
-    redis:
-      # REDIS_ADDR/REDIS_PORT 来自 docker-compose.yaml
-      host: ${REDIS_ADDR:redis}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:}
-      timeout: 3s
-
-  # ===== 3.5. Nacos 服务注册（修 DRIFT-NEW-001）=====
-  # user-rpc 启动时自动注册到 Nacos，user-api 通过 discovery://user-rpc 发现本服务。
-  # 服务名 user-rpc 与 user-api 端 grpc.client.user-rpc.address 中的 discovery name 对齐。
-  cloud:
-    nacos:
-      discovery:
-        # NACOS_ADDR/NACOS_PORT 来自 docker-compose.yaml
-        server-addr: ${NACOS_ADDR:localhost}:${NACOS_PORT:8848}
-        namespace: ${NACOS_NAMESPACE:sea-rtw}
-        group: ${NACOS_GROUP:USER_GROUP}
-        username: ${NACOS_USERNAME:}
-        password: ${NACOS_PASSWORD:}
 
 # ===== 4. gRPC server（对齐 Go 端 ListenOn: 0.0.0.0:9004）=====
 # 选项 C：user-rpc 严格保持纯 gRPC，不加 spring-boot-starter-web，
