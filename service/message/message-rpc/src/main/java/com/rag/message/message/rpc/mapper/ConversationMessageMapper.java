@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.annotations.Insert;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -83,4 +84,43 @@ public interface ConversationMessageMapper extends BaseMapper<ConversationMessag
                 .set(ConversationMessageEntity::getReadAt, readAt);
         return update(null, w);
     }
+
+    /**
+     * 对应 Go 端 ListConversations 的 unreadTotal：operator 作为 recipient 的所有未读消息数。
+     */
+    @Select("""
+            SELECT COUNT(*) FROM message_conversation_message
+             WHERE recipient_id   = #{recipientId}
+               AND recipient_role = #{recipientRole}
+               AND is_read        = FALSE
+            """)
+    long countUnreadByRecipientGlobal(@Param("recipientId") long recipientId,
+                                      @Param("recipientRole") int recipientRole);
+
+    /**
+     * 对应 Go 端 GetConversationMessages 用 offset + limit 分页：
+     * 与 {@link #listByConversation} 不同在于这是 "用 offset 不带 cursor"。
+     */
+    default List<ConversationMessageEntity> listByConversationPage(long conversationId,
+                                                                  int offset, int limit) {
+        LambdaQueryWrapper<ConversationMessageEntity> w = new LambdaQueryWrapper<>();
+        w.eq(ConversationMessageEntity::getConversationId, conversationId);
+        w.orderByAsc(ConversationMessageEntity::getId);
+        w.last("LIMIT " + limit + " OFFSET " + offset);
+        return selectList(w);
+    }
+
+    /**
+     * 对应 Go 端 createConversationWithMessageTx / createOrSendMessageTx 的 message INSERT。
+     */
+    @Insert("""
+            INSERT INTO message_conversation_message (
+              id, conversation_id, sender_id, sender_role, recipient_id, recipient_role,
+              content, is_read, read_at, created_at
+            ) VALUES (
+              #{id}, #{conversationId}, #{senderId}, #{senderRole}, #{recipientId}, #{recipientRole},
+              #{content}, #{isRead}, #{readAt}, #{createdAt}
+            )
+            """)
+    int insertMsg(com.rag.message.message.rpc.domain.ConversationMessageEntity msg);
 }

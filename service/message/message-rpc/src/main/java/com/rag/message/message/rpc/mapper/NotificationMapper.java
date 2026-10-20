@@ -3,7 +3,9 @@ package com.rag.message.message.rpc.mapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.rag.message.message.rpc.domain.NotificationEntity;
+import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
@@ -99,4 +101,27 @@ public interface NotificationMapper extends BaseMapper<NotificationEntity> {
         w.set(NotificationEntity::getReadAt, readAt);
         return update(null, w);
     }
+
+    /**
+     * 对应 Go 端 MessageModel.createNotifications(items []Notification)：
+     * 批量 INSERT notification 行；与 markAllNotificationsReadTx 同一事务。
+     *
+     * <p>用 foreach + 多行 VALUES 把多条 INSERT 合并成一条 SQL（性能优于逐条 insert）。
+     */
+    @Insert({
+            "<script>",
+            "INSERT INTO message_notification (",
+            "  id, recipient_id, sender_id, sender_role, kind, title, content,",
+            "  is_read, read_at, extra, created_at, updated_at",
+            ") VALUES ",
+            "<foreach collection='items' item='item' separator=','>",
+            "  (#{item.id}, #{item.recipientId}, #{item.senderId}, #{item.senderRole},",
+            "   #{item.kind}, #{item.title}, #{item.content},",
+            "   #{item.isRead}, #{item.readAt},",
+            "   #{item.extra,typeHandler=com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler},",
+            "   #{item.createdAt}, #{item.updatedAt})",
+            "</foreach>",
+            "</script>"
+    })
+    int insertBatch(@Param("items") List<NotificationEntity> items);
 }
