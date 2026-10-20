@@ -12,27 +12,36 @@ RAG 仓库路径：`/Users/pr/Documents/java&golang/RAG`。
 
 | 项目 | 路径 | 角色 | 实现风格 |
 |---|---|---|---|
-| Sea-RideTheWind_golang | `~/Documents/java&golang/Sea-RideTheWind_golang` | **真理之源**（Go 实现） | go-zero + GORM |
-| Sea-RideTheWind_java | `~/Documents/GitHub/Sea-RideTheWind_java` | 1:1 Go 镜像（Java 实现） | JPA + flat `internal/{logic,model,server,svc}` |
-| **RAG（本仓库）** | `~/Documents/java&golang/RAG` | **理论 Java 树（目标架构）** | **MyBatis-Plus + domain/mapper/service 分层 + Flyway + Bootstrap 抽出** |
+| **Sea-RideTheWind_java** | `/Users/pr/Documents/GitHub/Sea-RideTheWind_java` | **真理之源**（Java 实现，1:1 复刻 Go 仓库） | 现状：JPA + flat `internal/{logic,model,server,svc}`；目标：MyBatis-Plus + domain/mapper/service 分层 + Flyway + Bootstrap 抽出 |
+| Sea-RideTheWind_golang | `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang` | 历史参考基线（仅在 Java 镜像未覆盖某子模块时回退查阅） | go-zero + GORM |
+| **RAG（本仓库）** | `/Users/pr/Documents/java&golang/RAG` | **理论 Java 树落地（率先实施「Java 理论文件树」）** | **MyBatis-Plus + domain/mapper/service 分层 + Flyway + Bootstrap 抽出** |
 
-**RAG 不再是 Sea-RideTheWind_golang 的 1:1 镜像**——它追求的是 Java 圈常见的 Spring 风格 idiom。这是项目差异化的核心。
+**RAG 不再是 1:1 镜像**——它追求的是 Java 圈常见的 Spring 风格 idiom，**永远以 Java 镜像为基线**对齐行为，**只在 Java 镜像尚未覆盖的子模块才回退到 Go 仓库查阅历史**。这是项目差异化的核心，也是真理之源政策的当前形态。
 
-在 2026-10-18 之前，RAG 的 `service/users` 与 `Sea-RideTheWind_java/service/users` **字节一致**（同一份代码复制）。从 2026-10-18 起两条线分叉：
+**2026-10-18** 起三条线分叉：
 
-- **Sea-RideTheWind_java**：保持不变，仍为 Go 1:1 镜像，保留 JPA + Logic/Server 风格。
-- **RAG**：开始按各子模块 `HUMAN_ONLY.MD` 的"Java 理论文件树"重构。
+- **Sea-RideTheWind_java**：升格为真理之源。会按各子模块 `HUMAN_ONLY.MD` 的"Java 理论文件树"逐步把 JPA → MyBatis-Plus 这层先做完，给 RAG 当落基线。
+- **Sea-RideTheWind_golang**：冻结为历史参考。RAG 不再以它为对齐源头，但行为差异的历史溯源仍可查阅。
+- **RAG**：率先把"Java 理论文件树"落到代码。
+- **2026-10-20**：truth source 政策再次切换——明确**所有**子模块（不止 message）的真理之源都是 Java 镜像对应目录，不再对 users / message 做"Go vs Java"分类区别。
 
 ## 二、HUMAN_ONLY.MD：设计目标，不是现状
 
-`service/users/{user-rpc,user-api,admin-rpc,admin-api,users-common}` 每个子模块各有一份 `HUMAN_ONLY.MD`，包含两部分：
+每个非叶子子模块各有一份 `HUMAN_ONLY.MD`，包含两部分：
 
 1. **文件阅读顺序与职责**：描述当前实现下每个文件的角色（这一部分反映现状）。
-2. **Java 理论文件树**：描述目标架构——`domain/Entity + mapper/Mapper + service/DomainService + service/impl/GrpcImpl + bootstrap/* + resources/db/migration/*.sql`。
+2. **Java 理论文件树**：描述目标架构——`domain/Entity + mapper/Mapper + service/DomainService + service/impl/GrpcImpl + bootstrap/* + resources/db/migration/*.sql` 等。
 
-Sea-RideTheWind_java 的代码**从未遵循第 2 部分**——`HUMAN_ONLY.MD` 是 aspirational design，从未被代码落地过。RAG 的本次重构就是把这个目标架构真正实现一遍。
+当前已落 HUMAN_ONLY.MD 的子模块：
 
-## 三、当前重构（service/users → 理论 Java 树）
+- **service/users**：user-rpc / user-api / admin-rpc / admin-api / users-common 共 5 份
+- **service/message**：message-rpc / message-api 共 2 份
+
+未被 HUMAN_ONLY.MD 覆盖的子模块（article / comment / favorite / follow / hot / like / points / security / task / common）暂按 Java 镜像现状对齐即可，**等进入对应 phase 再补 HUMAN_ONLY.MD**。
+
+`Sea-RideTheWind_java` 对应子模块的代码通常**未遵循第 2 部分**——`HUMAN_ONLY.MD` 是 aspirational design，从未被代码落地过。RAG 的本次重构就是把这个目标架构在 RAG 上落地一遍；Java 镜像随后会按 RAG 的成果反向同步（手动或脚本）。
+
+## 三、当前重构（多 phase · 真理之源 = Java 镜像）
 
 ### 3.1 锁定的决策（来自用户问答，2026-10-18）
 
@@ -73,17 +82,31 @@ Sea-RideTheWind_java 的代码**从未遵循第 2 部分**——`HUMAN_ONLY.MD` 
 2. **issue 在 PR 之前**。每个 phase 起手先在 RAG 仓库开 issue 跟踪，PR body 引用 issue。
 3. **worktree + 分支**。每个 phase 在独立 worktree 里做，分支名 `row/users-refactor-<module>`。
 4. **不可越界**：不动 `Sea-RideTheWind_java`、不动 `Sea-RideTheWind_golang`。本次重构仅限 RAG 仓库。
-5. **Go 是真理之源**。所有 proto 字段号、错误码、JWT claims、表结构、HTTP path、Kafka topic 等语义细节以 `Sea-RideTheWind_golang` 为准——RAG 不偏离 Go 行为，只重写 Java 表达方式。
+5. **Java 镜像是真理之源**（2026-10-20 起所有子模块统一适用）。所有 proto 字段号、错误码、JWT claims、表结构、HTTP path、Kafka topic 等语义细节以 `Sea-RideTheWind_java` 对应子模块为准——RAG 不偏离该基线行为，只重写 Java 表达方式；只在 Java 镜像尚未覆盖某子模块时，才回退 `Sea-RideTheWind_golang` 查阅历史。
 6. **session 语言**：用户用中文；技术术语、代码、文件路径保留英文。
 7. **review**：每个 PR 走完本地 `mvn -pl <module> -am package` + 全量 `mvn clean verify` 后，等待用户或独立 review 才能合并。
 
-## 五、当前状态（截至 2026-10-18 22:00）
+## 五、当前状态（截至 2026-10-20 10:45）
 
-- Phase 0-5：**全部未启动**
-- 本文件（`AGENTS.md` 重写）是 Phase 0 的第一步
-- **下一步待用户确认**：
-  - Phase 推进形式（每个 phase 一个 worktree + PR？还是单 worktree 多 phase commit？）
-  - 是否需要先输出 Phase 1 的完整 spec + 新文件预览供 review，再允许动手
+真理之源政策切换 → 已落仓（本次 commit），后续会被 `git worktree add` 的 `row/message-refactor-rpc` 作为新基线。
+
+| 阶段（module） | 状态 | 备注 |
+|---|---|---|
+| **Phase 0-msg：message-rpc** | **进行中**（本次） | worktree `row/message-refactor-rpc` 即将开建；CodeArts 上 1 个 issue 即将开 |
+| Phase 1（user-rpc） | 半成品在 dirty tree（已 `git stash` 进 `stash@{0}`） | `service/users/user/user-rpc` 按 MyBatis-Plus 改造（domain/UserEntity 等）已写，但未 commit；service/users/user/user-api 还没动 |
+| Phase 2（user-api） | 未启动 | — |
+| Phase 3（admin-rpc） | 未启动 | — |
+| Phase 4（admin-api） | 未启动 | — |
+| Phase msg-rpc（与 users 平行） | 见 Phase 0-msg | message-rpc / message-api 都待重构 |
+| Phase 5（全量 + 端到端） | 未启动 | — |
+
+**下一步动作（已与用户拍板）**：
+1. ✅ stash 脏树（保护 users Phase 1 半成品进度）
+2. 改 AGENTS.md 真理之源切换 ← 当前 commit
+3. 建 worktree `row/message-refactor-rpc`
+4. CodeArts RAG repo 上开 1 个 message-rpc 重构 issue
+5. **不写 spec**（用户口头先跳过；如后续需要再补 `RAG/.agents/specs/message-rpc.md`）
+6. 等用户 review 本次 commit + worktree
 
 ## 六、引用清单
 
@@ -93,6 +116,8 @@ Sea-RideTheWind_java 的代码**从未遵循第 2 部分**——`HUMAN_ONLY.MD` 
   - `service/users/admin/admin-rpc/HUMAN_ONLY.MD`
   - `service/users/admin/admin-api/HUMAN_ONLY.MD`
 - **1 份通用规范**：`service/users/users-common/HUMAN_ONLY.MD`
-- **参考基线（Go 真理之源）**：`/Users/pr/Documents/java&golang/Sea-RideTheWind_golang`
-- **保持不变的镜像**：`/Users/pr/Documents/GitHub/Sea-RideTheWind_java`
+- **真理之源（Java 镜像）**：`/Users/pr/Documents/GitHub/Sea-RideTheWind_java`
+  - 对照 RAG 子模块：`service/users` ↔ `<java-mirror>/service/users`、`service/message` ↔ `<java-mirror>/service/message`、…依此类推
+- **历史参考（Go，仅 fallback）**：`/Users/pr/Documents/java&golang/Sea-RideTheWind_golang`
 - **本仓库根目录**：`/Users/pr/Documents/java&golang/RAG`
+- **本仓 Phase 0 入口 worktree**：`row/message-refactor-rpc`（基于本次 policy 切换 commit 开建）
