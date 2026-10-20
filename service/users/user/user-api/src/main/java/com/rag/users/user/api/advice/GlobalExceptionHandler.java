@@ -1,6 +1,7 @@
 package com.rag.users.user.api.advice;
 
 import com.rag.common.exception.BusinessException;
+import com.rag.common.logger.FatalError;
 import com.rag.common.response.Response;
 import com.rag.users.common.errmsg.ErrorCode;
 import com.rag.users.user.api.service.IdentityResolver;
@@ -152,10 +153,39 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).build();
     }
 
-    // ============== 5. 兜底：所有未捕获异常 ===============
+    // ============== 5. 致命错误：绝不转 envelope（H3 修复）==============
+
+    /**
+     * H3 修复：{@link FatalError} 必须原样抛出，<b>不得</b>被转成 200 业务 envelope。
+     *
+     * <p>背景：Go 版 {@code logger.go:296} 在打出 fatal_error 后无条件 {@code os.Exit(1)}，
+     * 「fatal 后必须停止接流量」是硬契约。Java 版改为抛专用异常（不调 System.exit，
+     * 以免绕过 Spring graceful shutdown / {@code @PreDestroy}），
+     * 但如果这里不显式处理，{@link #handleAny} 会把它当成普通业务异常：
+     * 打一条 "unhandled exception"、返回 {@code ERROR_SERVER_COMMON} + HTTP 200 ——
+     * 请求看起来「失败了」，而<b>进程带着致命状态继续正常服务</b>，正是 Go 侧绝不会发生的情况。
+     *
+     * <p>本方法只做一件事：把异常抛回去，让它穿透 DispatcherServlet 冒泡到容器错误页，
+     * 从而对调用方表现为「这个请求没被正常处理完」，而不是「一切正常、只是业务码不对」。
+     *
+     * <p><b>刻意不做 {@code System.exit(1)}</b>：终止决策权留给调用 {@code logFatal} 的位置
+     * （通常是启动期 bootstrap，那时 Spring 容器未就绪，异常自然冒泡出 main → JVM 非零退出）。
+     */
+    @ExceptionHandler(FatalError.class)
+    public void handleFatal(FatalError e) {
+        // 故意不返回 ResponseEntity：让异常继续向上抛
+        throw e;
+    }
+
+    // ============== 6. 兜底：所有未捕获异常 ===============
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Response> handleAny(Exception e) {
+        // FatalError 已在上面被专门处理；这里若仍收到，说明有 advice 未注册 FatalError 分支，
+        // 此时也必须放行而不是包成 envelope。
+        if (e instanceof FatalError fatal) {
+            throw fatal;
+        }
         log.error("unhandled exception", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new Response(ErrorCode.ERROR_SERVER_COMMON.getCode(), ErrorCode.ERROR_SERVER_COMMON.getMsg(), null));

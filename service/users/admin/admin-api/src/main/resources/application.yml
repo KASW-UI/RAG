@@ -125,3 +125,8 @@ logging:
     root: INFO
     com.rag.users.admin.api: INFO
     com.rag.common: INFO
+# ===== observability（对齐 Go service/user/admin/api 的 DisableNativeRestTimeout + NewHTTPMiddleware）=====
+# 取值依据：Go 侧 service/user/admin/api/etc/admincenter.yaml 未配置 Timeout，
+# 实际生效值为 go-zero v1.10.2 `rest/config.go:55` 的 `json:",default=3000"` → 3000ms。
+observability:
+  http-timeout: 3s

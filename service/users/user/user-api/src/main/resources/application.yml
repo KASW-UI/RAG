@@ -109,3 +109,10 @@ logging:
     root: INFO
     com.rag.users.user.api: INFO
     com.rag.common: INFO
+# ===== observability（对齐 Go service/user/user/api 的 DisableNativeRestTimeout + NewHTTPMiddleware）=====
+# 取值依据：Go 侧 service/user/user/api/etc/usercenter.yaml **未配置 Timeout**，
+# 实际生效值来自 go-zero v1.10.2 `rest/config.go:55` 的 `Timeout int64 json:",default=3000"`。
+# 即 Go 的 user-api HTTP 超时是 3000ms，由 observability 中间件单独执行
+# （DisableNativeRestTimeout 已把 go-zero 原生超时中间件关掉，超时只有一个执行者）。
+observability:
+  http-timeout: 3s

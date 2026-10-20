@@ -19,6 +19,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -83,7 +84,14 @@ class HttpMiddlewareTest {
             // 业务线程被 interrupt 后抛 InterruptedException，被 ServletException 包；不影响结果
         }
         assertEquals(503, resp.getStatus(), "deadline exceed must be 503, not 499");
-        assertEquals("Request Timeout", resp.getContentAsString(), "client must only receive \"Request Timeout\", no leaked business body");
+        // D-11：断言值随之变化。Go 的 http.Error 会写 `body + "\n"`
+        // （net/http 源码 errors.go：fmt.Fprintln(w, error)），Java 侧旧实现是裸 write()、
+        // 不带换行也不带 Content-Type。这里改为与 Go 一致的 "Request Timeout\n"。
+        // 关键是**不能**把断言放宽成 contains：必须锁住完整 body，防止将来又漏字段。
+        assertEquals("Request Timeout\n", resp.getContentAsString(),
+                "client must receive exactly Go's http.Error body, no leaked business body");
+        assertTrue(resp.getContentType() != null && resp.getContentType().startsWith("text/plain"),
+                "Go 的 http.Error 会设置 Content-Type: text/plain; charset=utf-8");
     }
 
     /**
@@ -116,7 +124,8 @@ class HttpMiddlewareTest {
         }
         assertEquals(503, resp.getStatus());
         String body = resp.getContentAsString();
-        assertEquals("Request Timeout", body, "no partial business body must leak to client on timeout");
+        // D-11：同 deadlineExceedReturns503，body 现在与 Go 的 http.Error 一致（带尾部换行）
+        assertEquals("Request Timeout\n", body, "no partial business body must leak to client on timeout");
         assertNotNull(body);
         assertTrue(body.length() < 100, "timeout body must be small, no leaked prefix");
     }
@@ -141,6 +150,82 @@ class HttpMiddlewareTest {
         filter.doFilter(req, resp, chain);
         assertEquals(200, resp.getStatus());
         assertTrue(resp.getContentAsString().contains("\"code\":200"), resp.getContentAsString());
+    }
+
+    /**
+     * H4 回归：客户端断连必须<b>真的</b>把 499 写进响应。
+     *
+     * <p>Go 出处 {@code observability/http.go:84-88}：
+     * <pre>
+     * case &lt;-ctx.Done():
+     *     statusCode := http.StatusServiceUnavailable
+     *     if errors.Is(ctx.Err(), context.Canceled) { statusCode = httpClientClosedRequest }  // 499
+     *     MarkTimeout(...)
+     *     http.Error(w, httpTimeoutBody, statusCode)
+     * </pre>
+     * 客户端收到的是 499。
+     *
+     * <p>修复前的 Java 实现在这条分支上只打了 span 属性就 {@code throw new ServletException(panic)}，
+     * 响应从未写出 —— 分支<b>不可达</b>，且原有三个测试全部只断言 503，没有任何一条覆盖 499，
+     * 所以这个缺陷一直没被发现。本用例补上那条缺失的断言。
+     */
+    @Test
+    void clientDisconnectReturns499() throws Exception {
+        Filter filter = HttpMiddleware.newHttpMiddleware("svc", Duration.ofMillis(500), Duration.ofMillis(10));
+        MockHttpServletRequest req = new MockHttpServletRequest("GET", "/aborted");
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+
+        // EOFException 是 isClientCancelledException 认得的客户端断连信号
+        FilterChain chain = (r, w) -> {
+            throw new java.io.EOFException("client closed connection");
+        };
+
+        filter.doFilter(req, resp, chain); // 修复前这里会抛 ServletException
+
+        assertEquals(499, resp.getStatus(),
+                "客户端断连必须返回 499（对齐 Go httpClientClosedRequest），且不得抛异常");
+        assertTrue(resp.getContentAsString().startsWith("Request Timeout"),
+                "499 响应体同样走 http.Error 的 Request Timeout");
+    }
+
+    /**
+     * H5 回归：超时分支把业务换到 worker 线程后，Spring 的请求上下文必须跟着过去。
+     *
+     * <p>Go 侧靠显式 ctx 传参跨 goroutine；Java 的 {@code RequestContextHolder} 是线程局部，
+     * 不搬运就等于清空 —— 业务里的 {@code @RequestScope} bean、{@code LocaleContextHolder}、
+     * 以及将来引入的 {@code SecurityContextHolder} 全部失效，且<b>不报错</b>。
+     *
+     * <p>修复前 HttpMiddleware 直接 {@code HTTP_EXECUTOR.submit(() -> chain.doFilter(...))}，
+     * worker 上 {@code getRequestAttributes()} 恒为 null。
+     */
+    @Test
+    void workerThreadInheritsRequestContext() throws Exception {
+        Filter filter = HttpMiddleware.newHttpMiddleware("svc", Duration.ofMillis(200), Duration.ofMillis(10));
+        MockHttpServletRequest req = new MockHttpServletRequest("GET", "/ctx");
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+
+        AtomicBoolean sawRequestAttrs = new AtomicBoolean(false);
+        AtomicBoolean sawMdc = new AtomicBoolean(false);
+        FilterChain chain = (r, w) -> {
+            sawRequestAttrs.set(org.springframework.web.context.request.RequestContextHolder
+                    .getRequestAttributes() != null);
+            sawMdc.set(org.slf4j.MDC.get("h5-marker") != null);
+            ((HttpServletResponse) w).setStatus(200);
+        };
+
+        org.springframework.web.context.request.RequestContextHolder
+                .setRequestAttributes(new org.springframework.web.context.request.ServletRequestAttributes(req));
+        org.slf4j.MDC.put("h5-marker", "carried");
+        try {
+            filter.doFilter(req, resp, chain);
+        } finally {
+            org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();
+            org.slf4j.MDC.remove("h5-marker");
+        }
+
+        assertTrue(sawRequestAttrs.get(),
+                "worker 线程上的 RequestContextHolder 必须非空（@RequestScope / LocaleContextHolder 依赖它）");
+        assertTrue(sawMdc.get(), "worker 线程上的 MDC 必须继承容器线程的键值");
     }
 
     // ===== handler helpers =====

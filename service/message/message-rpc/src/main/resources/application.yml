@@ -125,3 +125,7 @@ logging:
     root: INFO
     com.rag: INFO
     io.grpc: WARN
+# ===== observability（对齐 Go service/message/message/rpc）=====
+# 取值依据同 user-rpc：Go yaml 未配 Timeout → go-zero `zrpc/config.go:46` 默认 2000ms。
+observability:
+  rpc-timeout: 2s

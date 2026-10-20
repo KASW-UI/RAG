@@ -111,14 +111,18 @@ class LoggerFactoryBeanTest {
     }
 
     /**
-     * Spring 化契约：logFatal 必须抛 IllegalStateException 而非 System.exit(1)。
+     * H3 契约：logFatal 必须抛 {@link com.rag.common.logger.FatalError}
+     * —— 既不是 {@code System.exit(1)}，也不是普通 {@link IllegalStateException}。
+     * 详见 {@link com.rag.common.logger.FatalError} 类注释与 {@code LoggerTest} 的同名用例。
      */
     @Test
-    void logFatalThrowsInsteadOfOnExit() {
+    void logFatalThrowsFatalErrorInsteadOfOnExit() {
         LoggerFactoryBean bean = new LoggerFactoryBean("bean-test-fatal");
-        IllegalStateException ex = assertThrows(
-                IllegalStateException.class,
+        com.rag.common.logger.FatalError ex = assertThrows(
+                com.rag.common.logger.FatalError.class,
                 () -> bean.logFatal(Context.root(), new RuntimeException("bootstrap fail")));
+        assertEquals(com.rag.common.logger.FatalError.class, ex.getClass(),
+                "FatalError 必须是独立类型，不能挂在 IllegalStateException 下");
         assertTrue(ex.getCause() instanceof RuntimeException);
         assertEquals("bootstrap fail", ex.getCause().getMessage());
         assertTrue(ex.getMessage().contains("fatal_error logged"));

@@ -63,6 +63,37 @@ class ObservabilityTest {
         assertFalse(Observability.isTimeoutError(new IllegalArgumentException("x")));
     }
 
+    /**
+     * M1 回归：{@link java.net.http.HttpTimeoutException} 必须被识别为超时。
+     *
+     * <p>Go 出处 {@code observability.go:156-157}：
+     * <pre>
+     * var netErr net.Error
+     * return errors.As(err, &amp;netErr) &amp;&amp; netErr.Timeout()
+     * </pre>
+     * {@code net.Error} 是 Go 标准库接口，涵盖 HTTP transport 的各类超时。
+     *
+     * <p>旧 Java 版只认 {@code TimeoutException} / {@code SocketTimeoutException}，
+     * 而 {@code HttpTimeoutException} 继承 {@link java.io.IOException}、两者都不是，
+     * 于是<b>下游 HTTP 调用超时被判成 system error</b>：{@code sea.error.kind} 写错，
+     * 依赖该字段的重试/告警决策随之走错分支。
+     */
+    @Test
+    void isTimeoutErrorDetectsHttpClientTimeouts() {
+        assertTrue(Observability.isTimeoutError(new java.net.http.HttpTimeoutException("request timed out")),
+                "HttpTimeoutException 必须判为 timeout");
+        assertTrue(Observability.isTimeoutError(new java.net.http.HttpConnectTimeoutException("connect timed out")),
+                "HttpConnectTimeoutException 必须判为 timeout");
+        // 沿 cause 链也要能命中（包装过一层的情况）
+        assertTrue(Observability.isTimeoutError(
+                        new RuntimeException("dc call failed",
+                                new java.net.http.HttpTimeoutException("request timed out"))),
+                "包装在 cause 链里的 HTTP 超时同样要判为 timeout");
+        // InterruptedIOException 覆盖 URLConnection 读超时（syscall ETIMEDOUT）
+        assertTrue(Observability.isTimeoutError(new java.io.InterruptedIOException("read timed out")),
+                "InterruptedIOException 必须判为 timeout");
+    }
+
     @Test
     void durationMillisPreservesSubMillisPrecision() {
         // Go 版用 float64(microsec/1000)；Java 版 toNanos / 1_000_000 也保留亚毫秒

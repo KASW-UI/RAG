@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.function.BiFunction;
 
@@ -117,7 +118,10 @@ public final class AuthorityHandler {
 
         AuthorityServlet(String producer, String token, AuthorityLookup lookup, Logger logger) {
             this.producer = producer;
-            this.tokenBytes = token.getBytes();
+            // M20 修复：M20 之前用 token.getBytes()（平台默认字符集）。
+            // Go 侧 []byte(token) 是 UTF-8 字节切片；在非 UTF-8 默认字符集的平台上
+            // （LANG=C / POSIX locale 的 JVM）两边的字节序列不同，恒定时间比较永远不等 → 合法 token 也 401。
+            this.tokenBytes = token.getBytes(StandardCharsets.UTF_8);
             this.lookup = lookup;
             this.logger = logger;
             this.tracer = GlobalOpenTelemetry.get().getTracer("sea.rtw.communityfact");
@@ -155,7 +159,7 @@ public final class AuthorityHandler {
                     return;
                 }
                 String authz = authzValues.get(0);
-                byte[] presented = authz.substring("Bearer ".length()).getBytes();
+                byte[] presented = authz.substring("Bearer ".length()).getBytes(StandardCharsets.UTF_8);
                 boolean tokenOk = presented.length == tokenBytes.length
                         && java.security.MessageDigest.isEqual(presented, tokenBytes);
                 if (!tokenOk) {

@@ -190,7 +190,9 @@ RAG 每次选择「用更地道的 Spring 写法」时，必须能回答：
 6. **session 语言**：用户用中文；技术术语、代码、文件路径保留英文。
 7. **review**：每个 PR 走完本地 `mvn -pl <module> -am package` + 全量 `mvn clean verify` 后，等待用户或独立 review 才能合并。**review 必须含 Go ↔ RAG 对照**。
 
-## 六、当前状态（截至 2026-10-20 20:10）
+## 六、当前状态（§6.1–§6.3 截至 2026-10-21 核对；§6.4 起为 2026-10-20 快照）
+
+> **状态表纪律见 §6.2 表头的三条约定**——本节任何「已修 / 未修」断言都必须带核对日期，否则按 `UNKNOWN` 处理。
 
 ### 6.1 service/users：行为一致性审计已完成（本次）
 
@@ -216,26 +218,82 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 
 ### 6.2 已知未修（按优先级）
 
-| 优先级 | 项 | 说明 |
+> **⚠️ 本表的阅读约定（2026-10-21 新增）**
+>
+> 1. **每行必须带「最后核对」日期，且该日期必须由一次真实执行产出**——写代码、读代码、推断都不算核对。
+> 2. **无核对日期或日期过期的行，一律按 `UNKNOWN` 处理**，不得直接采信其状态或结论。这与 §3.1「不拿现存代码当对照基准」是同一条纪律：一份没有时效标记的状态表，和未标日期的旧结论一样不可信。
+> 3. 发现状态与本表不符时，**先更新本表再动手**，不要让文档漂移到代码后面。
+
+| 优先级 | 项 | 最后核对 | 说明与证据 |
+|---|---|---|---|
+| ~~P0~~ | ~~`RpcServerInterceptorFactory` 在 user-rpc / admin-rpc 均未注册~~ | **2026-10-21 已修** | `UserRpcApplication` / `AdminRpcApplication` 的 `@Import` 均补 `RpcServerInterceptorFactory` + `ObservabilityProperties` + `ObservabilityLifecycle`；admin-rpc 另补 `SnowflakeBean/SnowflakeProperties/LoggerFactoryBean`（它此前连 `@Import` 都没有）。新增 `ObservabilityWiringTest`（`@SpringBootTest`）断言 `ServerInterceptor` 真是容器里的 Bean。分支 `row/common-fix-semantic-drift` |
+| ~~P0~~ | ~~`ObservabilityProperties` 无 timeout 字段~~ | **2026-10-21 已修** | 新增 `httpTimeout` / `rpcTimeout`；两个 factory 改为读取该配置。**目标值已取证**：Go user 系 yaml 均未配 `Timeout`，实际生效值来自 go-zero v1.10.2 `rest/config.go:55` `default=3000` 与 `zrpc/config.go:46` `default=2000` ⇒ 各模块 yaml 显式落 `http-timeout: 3s` / `rpc-timeout: 2s` |
+| **P1** | user-rpc mapper `default` 方法上的 `@Transactional` 是否真生效 | —（**未核对**） | 与 §6.1 #2 同类风险（头像多步原子性）。修法同 §6.1 #2：抽独立 `@Service` Bean。按约定 2，本行**按 UNKNOWN 处理**；落地前需补一条真正装配 Spring 上下文的测试（纯 Mockito 不算，§3.3） |
+| **P1** | `message-rpc` 6 个 `@Transactional` 方法的 self-invocation 风险 | —（**未核对**） | 同上。按约定 2 按 UNKNOWN 处理 |
+| **P1** | `Logger`（静态）与 `LoggerFactoryBean`（Bean）两份逐行同构实现，重复约 370 行 | **2026-10-21 更正原结论** | ⚠️ 原表写「实际消费者为零」，**该结论错误**：`LoggerFactoryBean` 在 **user-rpc** 有真实消费方 —— `UserDomainService.java:87,95` 注入 + **12 处** `logger.logInfo/logBusinessErr`（`:155,161,170,178,184,218,233,245,268,274,305,308,324`），由 `UserRpcApplication` 的 `@Import` 装配。消费者为**零**的只是静态 `Logger` 路径（`Logger.init` 仅测试调用）。结论修正：本层支撑着 user-rpc 全部登录/注册路径的日志输出，不可按死代码处置。两份实现的重复仍待处理（`FileTree/common.md` §12.5 第 3 条，**动共享库公开 API，需 review 签字**） |
+| **P2** | `MessageRpcSupport.trimPreview` 截断长度错：`String.length() <= 255` vs Go 的 80 runes | 2026-10-21 | Go `model/message.go:233-239` 用 `[]rune(content)[:80]`；RAG `MessageRpcSupport.java:316-325` 用 `substring(0,255)`。根因：255 抄自列宽 `varchar(255)` 而非 Go 规则。附带：`substring` 会在代理对中间切断。**RAG 错**，证据见 `FileTree/message/rpc.md` §12.7 #1 |
+| **P2** | `MessageDomainService.markNotificationRead` 拆成 SELECT + UPDATE | —（**未核对**） | Go 是单条 `UPDATE ... WHERE id + recipient_id`；RAG 拆两步存在竞态窗口。按约定 2 按 UNKNOWN 处理 |
+| ~~P2~~ | ~~`Logger.call_chain` 过滤完全失效~~ | **2026-10-21 已修** | `isFiltered` 改用 `StackFrame.getDeclaringClass().getName()` 全名比对包前缀（短名比对仅作补充）；`getFuncName` 的 `contains("$")` 分支按 Go 两分支差异化。`Logger` 与 `LoggerFactoryBean` 两份同步修改。新增 `LoggerTest.callChainFilterActuallyRemovesFrameworkFrames` 锁定。**留档**：Go 侧 `github.com/zeromicro/go-zero/` 那条前缀**本来也是死的**（`getFuncName` 同样剥掉包路径），Java 版按其**意图**执行 → `call_chain` 内容比 Go 少框架帧，属 OBSERVABLE DIFFERENCE |
+| ~~P2~~ | ~~499 状态码永远到不了客户端~~ | **2026-10-21 已修** | 断连分支改为 `writeTimeoutResponse(resp, 499)`，不再抛 `ServletException`；503/499 body 一并对齐 Go `http.Error`（`text/plain; charset=utf-8` + 尾部换行）。新增 `HttpMiddlewareTest.clientDisconnectReturns499`（此前**零条** 499 断言）。**连带**：两条既有 503 断言的期望值因 D-11 变更，已同步并注明变更原因 |
+| ~~P2~~ | ~~`Observability.isTimeoutError` 漏判 HTTP 超时~~ | **2026-10-21 已修** | 补 `HttpTimeoutException` / `HttpConnectTimeoutException` / `InterruptedIOException`，并沿 cause 链生效。新增 `ObservabilityTest.isTimeoutErrorDetectsHttpClientTimeouts` |
+| **P2** | **admin-api 全部 13 个端点 `@RequestBody` 仍是 `required=true`** | 2026-10-21 | user-api 侧同类问题已修（`UserController.java:118/126/137/153`），admin-api 未同步 ⇒ `/admin/v1/logout` 等空 body 请求返回 400，与 Go 语义漂移 |
+| **P3** | `admin-api` 的 `AdminApiSupport.codeFromRPCError` 未删，且与 `GlobalExceptionHandler.mapRPCStatusToCode` 重复 | 2026-10-21 | 当前靠 service 层精确业务码优先兜底，属**潜在**语义漂移：新增 Service 漏写分支会静默落到 advice 的默认映射 |
+
+### 6.2.1 本次从本表移出（已修或已定案）
+
+| 原优先级 | 项 | 状态 |
 |---|---|---|
-| **P0** | admin-api 默认配置下**起不来** | `AdminJwtAuthInterceptor` 构造器用 15B 原始密钥调 `Keys.hmacShaKeyFor` → `WeakKeyException`。RAG 侧缺陷（`JwtUtil` 已通过 §6.1 #7 补齐，拦截器同样需补齐；建议把 `padToHmacKeySize` 提成 `users-common` public 方法，签发与验签共用一份） |
-| **P1** | user-rpc mapper `default` 方法上的 `@Transactional` 是否真生效 | 与 #2 同类风险（头像 4/5 步原子性）。修法同 #2：抽独立 `@Service` Bean |
-| **P2** | user-api 4 项清理 | 4 个端点 `@RequestBody` 改 `required=false`；删两处从未被调用的 `codeFromRPCError` 死代码 |
-| **P3** | **Flyway 迁移归属** | 双 rpc 服务抢同一 schema 的版本号。见 6.3 |
-| **P3** | `admin-rpc` 直接读写 `users_user`（边界缺失） | 见 6.3 |
+| ~~P0~~ | admin-api 默认配置下起不来（`WeakKeyException`） | ✅ **已修**（commit `71be288`）。`AdminJwtAuthInterceptor.java:67` 与 `JwtAuthInterceptor.java:76` 均已走 `JwtUtil.padToHmacKeySize(...)`；`JwtUtil.java:44` 已是 `public static`——即原表建议的「提成 `users-common` public 方法」方案已实施。**本行此前一直挂在 P0 未修，是过期信息** |
+| ~~P2~~ | user-api 4 项清理 | ⚠️ **半修**。① 4 个端点 `@RequestBody(required=false)` **已完成**（`UserController.java:118/126/137/153`）；② 「删 `codeFromRPCError` 死代码」**未完成，且原文把位置写错**——它在 **admin-api**（`AdminApiSupport.java:66`），不在 user-api。剩余部分已并入本表 P3 |
+| ~~P3~~ | Flyway 迁移归属 | ✅ **已定案** → §6.3 问题 1 |
+| ~~P3~~ | `admin-rpc` 边界缺失 | ✅ **已定案**（不转发，与 Go 一致）→ §6.3 问题 2 |
 
-### 6.3 待定的架构决策（需用户拍板，勿自行执行）
+### 6.3 架构决策（问题 1、2 已于 2026-10-21 拍板；问题 3 为新增留档）
 
-**问题 1：Flyway 迁移归属。** `user-rpc` 的 `V1__create_user` 与 `admin-rpc` 的 `V1__create_admin` 抢同一 `flyway_schema_history` 的版本号，后启动方必然校验和失败。Go 无此问题（`AutoMigrate` 无状态）。候选：① 单一迁移归属 ② 每服务独立 schema。
+**✅ 问题 1：Flyway 迁移归属 —— 单一归属 + 全局唯一版本号。**（原为待定）
 
-**问题 2：`admin-rpc` 边界缺失。** 实测证据：
+| 表 | 归属服务 |
+|---|---|
+| `users_user` / `users_user_avatar_history` | **user-rpc** |
+| `admin_admin` / `admin_invite` | **admin-rpc** |
+| message 三张表 | **message-rpc** |
 
-- RAG 全仓（Java + SQL + proto）**零个 `role` / `permission` 概念**——「是否 admin」完全由「这行存在哪张表」决定
-- `UserEntity` = `AdminEntity` + `status` + `score`，即 **User 就是 Admin 加两个字段**
-- `admin/rpc` 的 `ServiceContext` 只持有 `AdminModel`，而这**一个 model 管三张表**，且 `grep UserRpc admin/rpc` **零命中**（不走 gRPC）
-- 但 `user/identity/resolve.go` **是走 gRPC 的**——Go 自己把「读身份」边界建好了，只漏了「管理用户数据」
+执行要点：
 
-方向：沿**数据所有权**切线（`admin-rpc` 的 7 个用户管控 RPC 改为转发 user-rpc，不再碰 `users_user`），而非合并两张表——后者会破坏 admin 的独立准入（邀请码）与独立凭证模型。
+1. **版本号跨服务全局唯一**（user-rpc V1/V2、admin-rpc V3/V4、message-rpc V5+）。
+2. **admin-rpc 删除 `V3__create_user.sql`**，改由 `bootstrap/AdminSchemaGate` 校验 `users_user` 存在，缺失 fail-fast（**只校验不创建**）。
+3. **候选 ②「每服务独立 schema」已被证据排除** —— admin-rpc 直接查 `users_user`，拆 schema 必须跨 schema 查询或改转发，而 Go 两边都直连同一库。
+
+Go 侧证据：`user/rpc/internal/model/db.go:33` = `AutoMigrate(&User{}, &UserAvatarHistory{})`，`admin/rpc/internal/model/db.go:15` = `AutoMigrate(&Admin{}, &AdminInvite{}, &User{})` —— **Go 两个服务都建 `users_user`**，无冲突只因 `AutoMigrate` 无状态且幂等。
+
+**⚠️ 本问题的实际范围比原记录更宽**：Go 全部服务连同一 `first_db`，共用一张 `flyway_schema_history`，因此 **message-rpc 的 V1/V2/V3 同样与两个 users 模块撞号**。admin-rpc 现有 `V3__create_user.sql` 里的 `IF NOT EXISTS` 只解决建表，**解决不了版本号与 checksum 冲突**。
+
+**✅ 问题 2：`admin-rpc` 边界 —— 不转发，保持直连；RAG 现状即与 Go 一致，不是缺陷。**（原为待定）
+
+实测证据：
+
+- `admin/rpc` 全仓 `UserRpc` / `userpb` / `UserService` **零命中**；`ServiceContext` 只有 `Config` / `AdminModel` / `BizRedis` —— **零出向 gRPC 依赖**
+- 7 个用户管控 RPC（`BanUser` / `UnBanUser` / `UpdateUser` / `DeleteUser` / `ResetUserPassword` / `GetUser` / `GetUserList`）全是 `internal/model/admin.go` 的直接 SQL
+- Go 两份 `User` struct（`user/rpc` 与 `admin/rpc` 的 `internal/model/data_model.go`）**逐字一致** —— Go 自己就有两份同样的表定义
+
+**⚠️ 原记录的前提有误，已更正**：原文称「Go 把『读身份』边界建好了，只漏了『管理用户数据』」。实测 Go 的 gRPC 边界是 **api→rpc**：`identity.UserReader`（`user/identity/resolve.go:60-62`）签名带 `grpc.CallOption`（只能被 gRPC stub 满足），但调用方只有 `user/api`（`svcCtx.UserRpc = userservice.NewUserService(zrpc.MustNewClient(...))`）与 `knowledge/api` —— **都是 api**。Go 里**不存在 rpc→rpc 的用户数据边界**，「读身份」与「管用户数据」不是同一个轴。
+
+**⚠️ 一条常见反对理由已被推翻**：`CreateAdmin` **不建 User**（只做锁邀请码 / 查重 / 插 `Admin` / 标记已用，见 `createadminlogic.go`），7 个管控 RPC 也都是单表独立操作，**无跨边界事务** —— 所以「转发会破坏 `CreateAdmin` 原子性」**不成立**。
+
+若日后仍决定转发，属 §3.4 留档的有意偏离，须单独立 spec；代价是：admin-rpc **新增一个可用性依赖**（user-rpc 挂则管控挂，Go 无此耦合）+ 错误分类跨两层映射 + 7 个 RPC 多一跳延迟。
+
+**📌 问题 3：`RpcServerInterceptorFactory` 注册 —— 显式 `@Import`，不拆包。**（2026-10-21 新增）
+
+Go 侧每个 rpc 服务都在入口显式注册（`user/rpc/user.go:32,43`、`admin/rpc/admin.go:33,43`、`hot/rpc/hot.go:32,42` 三处一致）：
+
+```go
+rpcTimeout := observability.DisableNativeRpcTimeout(&c.RpcServerConf)
+s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, observability.SlowThreshold()))
+```
+
+**Go 里不存在「全局自动注册」**。RAG 把 `@Component` 当自动注册，是一次**无出处 idiomatization**（§3.2）—— `UserRpcApplication` 的 `@Import` 只含 3 个 bean、`AdminRpcApplication` 连 `@Import` 都没有，两者**当前均无 gRPC span / 无 deadline 传播 / 无 gRPC 超时**。
+
+定案（**2026-10-21 已实施**，见 §6.5）：`@Import` 数组补 `RpcServerInterceptorFactory.class`（`@Import` 本就接受普通 `@Component` 类，**零搬迁**）。连带结果：**不再有任何模块扫 `com.rag.common`** ⇒ servlet 类不会被拖进纯 gRPC 进程 ⇒ §12.5 曾提的 `spring/web/` + `spring/grpc/` 拆包**动机自我消解，已撤回**。`message-rpc` 现在能跑属**撞运气**（恰好有 `spring-boot-starter-web-server` 兜住），须一并归一到显式 `@Import`。
 
 ### 6.4 其他子模块
 
@@ -243,6 +301,44 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 |---|---|
 | `service/message` | 未按新政策复核；**下一轮审计必须 Go ↔ RAG 对照** |
 | Phase 5（全量 + 端到端） | 未启动；需真实 PG + Redis 集成测试补上（当前测试全部 mock 数据层） |
+
+### 6.5 `service/common` 语义一致性审计与修复（2026-10-21）
+
+只读审计（Go ↔ RAG 逐行对照，Go 侧 8 个非测试源文件全部通读原文）结论 **SEMANTICALLY NOT EQUIVALENT**，共 20 项偏差。修复在分支 `row/common-fix-semantic-drift`（issue #71186341，spec `.agents/specs/common-semantic-drift-fix.md`）。
+
+**消费者现状（决定了修复优先级）**：
+
+| | Go 侧被谁用 | RAG 侧被谁用 |
+|---|---|---|
+| communityfact | 11 个服务 | **0** |
+| observability | 全部 13 个服务 | 1（user-rpc，且只 import 了 `DeadlineState` 类型） |
+| logger | 全部服务 | `LoggerFactoryBean` ← user-rpc 12 处 |
+| snowflake | 全部服务 | user-rpc / admin-rpc / message-rpc |
+
+**已修 21 项**（5 项 HIGH 全部处理）：
+
+| 组 | 内容 |
+|---|---|
+| HIGH | ① HTTP 超时整体失效（新增 `httpTimeout`/`rpcTimeout` 配置，5 个 yaml 落 3s/2s）② gRPC 拦截器未注册（user-rpc/admin-rpc 补 `@Import`）③ `logFatal` 不终止进程（新增 `FatalError` + users 两处 advice 显式 rethrow）④ 499 分支不可达（改为写响应）⑤ 超时启用后业务跑在无请求上下文的线程（补 `RequestContextHolder`/MDC/OTel Context） |
+| MEDIUM | `isTimeoutError` 漏判 HTTP 超时、`RecordError` 空指针、`biz_msg` 丢 code、span 重复打标、span 二次 `end()`、`DeadlineState` 设在调度线程而非 handler 线程、`MqConsumer` 吞 panic、`shutdown()` 无调用者、`call_chain` 过滤失效、Snowflake 双份生成状态、admin-rpc `SnowflakeBean` 未装配 |
+| LOW | 时钟回拨按 bwmarrin v0.3.0 **真实算法**（无回拨保护，继承 Go 风险并留档）、进程日志 KV 一律 `toString()` 破坏 JSON schema、timestamp 精度与尾零裁剪、trace 字段跨线程丢失、charset 默认编码、64KB 截断多读、`getFuncName` 闭包分支死代码 |
+
+**顺带修掉的潜伏缺陷**（都是本轮改动触发才暴露的）：
+
+- **`logback-classic` 1.6.3 与 `logback-core` 1.5.38 版本错配** → 任何真正启动的 Spring Boot 应用都会在 `LoggingApplicationListener` 抛 `AbstractMethodError: PatternLayout.getDefaultConverterMap()`。此前能长期潜伏，正因为测试全是纯单元测试。已改为交由父 pom 统一管理。
+- `ObservabilityProperties` 同时带 `@Component` + `@ConfigurationProperties`，与 `@EnableConfigurationProperties` 并存会产生**两个同名类型 Bean**。本轮统一走 `@Import` 路径（与 rpc 模块一致），测试也照抄该路径。
+
+**新增测试（§3.3 要求：必须真正装配 Spring 上下文）**：
+
+`service/common` 现有 78 个测试（原 75 + 新增），其中 `ObservabilityWiringTest` 是**全仓第一个 `@SpringBootTest`** —— H1/H2 这类「机制没接上」的缺陷按定义无法被纯单测捕获。新增回归用例：`clientDisconnectReturns499`、`workerThreadInheritsRequestContext`、`isTimeoutErrorDetectsHttpClientTimeouts`、`wireAuthorityUnavailableSentinelMapsTo404`、`callChainFilterActuallyRemovesFrameworkFrames`、`logFatalThrowsFatalErrorInsteadOfOnExit`×2。
+
+验证：`mvn clean verify` 全仓 9 模块 BUILD SUCCESS（common 78 / admin-rpc 24 / admin-api 46 / user-rpc 46 / user-api 30 / users-common 3 / message-rpc 待复核）。
+
+**仍需 review 签字的残留差异**（§3.4 留档）：
+
+1. `logFatal` 等价域收窄 —— Go 是「永远 `os.Exit(1)`」，现为「仅在无人 catch 时终止」（保留 graceful shutdown，用户已拍板）。
+2. Snowflake 时钟回拨 —— 照搬 bwmarrin v0.3.0 的**无保护**行为，继承其「回拨可能撞 ID」的风险。RAG 不擅自加保护，加则须单独立项。
+3. `call_chain` 内容比 Go 少框架帧（Go 的 go-zero 前缀条目本身就是死的）。
 
 ## 七、引用清单
 
@@ -271,6 +367,10 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 ### 7.2 本仓库
 
 - 根目录：`/Users/pr/Documents/java&golang/RAG`
+- **`FileTree/`（13 份，§6.2 多数行的证据出处）** —— 按 §3.1/§3.2 推导的**理论 Java 文件树**，每份含 §12.1–§12.7；**§12.5 是可直接落地的纯文件树**，`§12.7` 是不通过项与 `UNKNOWN` 的汇总。
+  - `common.md`、`message/{api,rpc}.md`、`hot/{api,rpc}.md`、`like/{api,rpc}.md`、`article/{api,rpc}.md`、`users/{user,admin}/{api,rpc}.md`
+  - **状态**：`article` / `hot` / `like` 的 RAG 模块仍是空骨架（仅 pom，0 个 Java 文件），其树为**待实施**目标；`users` / `message` 的树与现存代码对照过，含已知偏差（见各文件 §12.7）
+  - **消费约定**：文件树是**迁移期脚手架**，不是长期规范。按 phase 消费——某 phase 跑绿并 review 后，对应文件即可退休
 - 模块 `HUMAN_ONLY.MD`（7 份）：
   - `service/users/users-common/HUMAN_ONLY.MD`
   - `service/users/user/user-rpc/HUMAN_ONLY.MD`

@@ -71,7 +71,7 @@ public class Logger {
     }
 
     /**
-     * 对应 Go 版字段
+     * 对应 Go 版 {@code var filterPrefixes = []string{...}}：
      * <pre>
      * var filterPrefixes = []string{
      *     "runtime.",
@@ -79,15 +79,37 @@ public class Logger {
      *     "github.com/zeromicro/go-zero/",
      * }
      * </pre>
-     * Java 用静态 {@link List}{@code <String>} 替代；额外补充 Java 侧运行时栈帧前缀（SLF4J / logback / otel / 当前包）。
+     *
+     * <p><b>M10 修复</b>：这三条在 Go 侧<b>本来就是死条目</b> ——
+     * {@code getFuncName} 先用 {@code filepath.Base} / 取最后两段把包路径剥掉了，
+     * 产出的字符串永远不可能以 {@code "github.com/zeromicro/go-zero/"} 开头。
+     * 真正生效的只有 {@code "runtime."} 和 {@code "testing."}，因为那两条恰好是
+     * <b>短名</b>（Go runtime 的函数名就叫 {@code runtime.gopanic}）。
+     *
+     * <p>旧 Java 版照抄了三条，又额外加了 4 条包前缀
+     * （{@code io.opentelemetry.} / {@code org.slf4j.} / {@code ch.qos.logback.} /
+     * {@code com.rag.common.logger.}），但 {@link #getFuncName} 返回的是<b>短类名</b>
+     * （{@code "UserController.getUser"}），于是 7 条前缀<b>一条都匹配不上</b>，
+     * {@link #isFiltered} 恒 false、{@code call_chain} 字段退化成未过滤的完整栈。
+     *
+     * <p>本表改为<b>可命中</b>的形态：每条都以 Java 的包/类全名开头，
+     * 由 {@link #isFiltered} 拿 {@code StackFrame.getDeclaringClass().getName()} 去比对
+     * （见该方法注释）。前三条保留 Go 原文以留存对应关系。
      */
-    private static final List<String> FILTER_PREFIXES = List.of(
+private static final List<String> FILTER_PREFIXES = List.of(
+            // —— Go 版 logger.go:53-58 原文三条 ——
             "runtime.",
             "testing.",
+            "github.com/zeromicro/go-zero/",
+            // —— Java 侧真正的「框架内部帧」，对应 Go 想过滤掉的 go-zero 内部帧 ——
+            "java.lang.Thread",       // 线程启动帧，对应 Go 的 runtime.*
+            "java.util.concurrent.",  // 线程池帧，对应 Go 的 runtime.*
+            "jdk.internal.misc.",
             "io.opentelemetry.",
             "org.slf4j.",
             "ch.qos.logback.",
-            "com.rag.common.logger."
+            "com.rag.common.logger.", // logger 自身帧
+            "com.rag.common.spring."
     );
 
     /**
@@ -297,7 +319,7 @@ public class Logger {
      * <b>Java Spring 化</b>：原 Java 版用 {@link System#exit(int)} 终止 JVM，但
      * {@code System.exit(1)} 会绕过 Spring {@code SpringApplication} 的 graceful shutdown、
      * 绕过所有 {@code @PreDestroy} 与 Bean 生命周期回调，违反 Spring 容器运行模型。
-     * 本方法改为：先输出 fatal_error 日志（语义不变），再抛 {@link IllegalStateException}
+     * 本方法改为：先输出 fatal_error 日志（字段与 Go 逐条一致），再抛 {@link FatalError}
      * 由调用方决定如何终止：
      * <ul>
      *   <li>Spring Boot 业务 main：让异常冒泡到 {@code SpringApplication.run(...)} 之前的调用点，
@@ -306,8 +328,11 @@ public class Logger {
      *       {@code System.exit(1)} 或走 {@code @PreDestroy}。</li>
      * </ul>
      *
-     * <p>调用方语义对齐 Go 版 "fatal 后必须停止接流量"：Spring 化版让"停止"由 JVM 默认行为承担
-     * （main 中未捕获异常导致非 0 退出码），而不是直接调 {@code System.exit(1)}。
+     * <p><b>H3 修复</b>：此前抛的是普通 {@link IllegalStateException}，会被 Spring MVC 的
+     * {@code @ExceptionHandler(RuntimeException.class)} 兜底吞掉并转成 200 业务 envelope，
+     * 进程带着致命状态继续接流量 —— Go 版 {@code os.Exit(1)} 绝不会发生这种事。
+     * 改用 {@link FatalError} 让「不可被静默吞掉」成为类型级约束：
+     * 各模块 {@code GlobalExceptionHandler} 必须显式 rethrow {@link FatalError}。
      */
     void doLogFatal(io.opentelemetry.context.Context otelCtx,
                     Throwable err,
@@ -375,10 +400,10 @@ public class Logger {
             at.log();
         }
 
-        // 对应 Go 版 logx.Errorw 之后 os.Exit(1)
-        // Spring 化：抛 IllegalStateException 让调用方决定进程终止方式，
-        // 避免 System.exit(1) 绕过 SpringApplication 的 graceful shutdown 与 @PreDestroy。
-        throw new IllegalStateException(
+        // H3 修复：抛 FatalError 而不是普通 IllegalStateException。
+        // 见 FatalError 类注释 —— 普通异常会被 @ExceptionHandler(RuntimeException) 吞掉，
+        // 让「fatal 后必须停止接流量」退化成可选项。
+        throw new FatalError(
                 "fatal_error logged: " + errorReason
                         + " (event_id=" + eventIdStr + ", service=" + serviceName + ")",
                 err);
@@ -389,16 +414,19 @@ public class Logger {
      *
      * <p>Go 版用 {@code runtime.FuncForPC(pc).Name()} 拿到 "package.Type.Method" 全名，再按 "." 切分：
      * <ul>
-     *   <li>如果倒数第二段含 "func"（闭包/匿名）：只取最后一段</li>
-     *   <li>否则：取倒数两段拼接（包路径最后一段.方法名）</li>
+     *   <li>如果倒数第二段含 "func"（闭包/匿名）：<b>只取最后一段</b></li>
+     *   <li>否则：<b>取倒数两段拼接</b>（类名.方法名）</li>
      * </ul>
+     *
+     * <p><b>M10 修复</b>：旧 Java 版两个分支 {@code return shortClass + "." + methodName;}
+     * 完全相同，闭包分支是死代码。Java 的 lambda 不像 Go 那样有独立函数名 ——
+     * lambda 被编译成<b>宿主类</b>上的 {@code lambda$xxx$0} 方法，
+     * 所以「对应 Go 匿名函数只取最后一段」= 只返回 lambda 方法名，丢掉宿主类前缀。
      */
     private static String getFuncName(StackWalker.StackFrame frame) {
         if (frame == null) {
             return "unknown";
         }
-        // StackWalker.StackFrame#getDeclaringClass() 返回 Class<?>，调用 getName() 拿到完整类名
-        // 对应 Go 版 runtime.FuncForPC(pc).Name()（拿到 "github.com/xxx.Yyy.FuncName" 这种全限定名）
         String declaringClass = frame.getDeclaringClass().getName();
         String methodName = frame.getMethodName();
         if (declaringClass == null || methodName == null) {
@@ -407,10 +435,10 @@ public class Logger {
 
         String[] parts = declaringClass.split("\\.");
         String shortClass = parts[parts.length - 1];
-        // 对应 Go 版 "如果倒数第二段含 func（闭包/匿名）则只取最后一段"
-        // Java 闭包是 lambda，方法名形如 "lambda$xxx"；含 "$" 视作 lambda
+        // 对齐 Go 版 "如果倒数第二段含 func（闭包/匿名）则只取最后一段"：
+        // Java lambda 的方法名形如 lambda$logBusinessErr$0，只返回它，不带宿主类。
         if (methodName.contains("$")) {
-            return shortClass + "." + methodName;
+            return methodName;
         }
         // 对应 Go 版 parts[len(parts)-2] + "." + parts[len(parts)-1]：取 class.method
         return shortClass + "." + methodName;
@@ -446,7 +474,7 @@ public class Logger {
                         }
                         taken++;
                         String fn = getFuncName(f);
-                        if (isFiltered(fn)) {
+                        if (isFiltered(f, fn)) {
                             continue;
                         }
                         frames.add(fn);
@@ -465,10 +493,22 @@ public class Logger {
 
     /**
      * 对应 Go 版 {@code func isFiltered(funcName string) bool}。
+     *
+     * <p><b>M10 修复</b>：Go 版拿 {@code getFuncName} 的产出（短名）去比前缀。
+     * Java 版若照抄就必然失配 —— {@code getFuncName} 产出 {@code "UserController.getUser"}，
+     * 而 {@link #FILTER_PREFIXES} 全是 {@code "org.slf4j."} 这种<b>包前缀</b>。
+     *
+     * <p>因此 Java 版改为拿 {@link StackWalker.StackFrame#getDeclaringClass()} 的<b>全名</b>比对，
+     * 这才是「包前缀」语义真正作用的对象；短名比对只作为补充（覆盖 Go 那种
+     * {@code runtime.gopanic} 式的短名命中）。
      */
-    private static boolean isFiltered(String funcName) {
+    private static boolean isFiltered(StackWalker.StackFrame frame, String funcName) {
+        String declaringClass = frame != null ? frame.getDeclaringClass().getName() : null;
         for (String prefix : FILTER_PREFIXES) {
-            if (funcName.startsWith(prefix)) {
+            if (declaringClass != null && declaringClass.startsWith(prefix)) {
+                return true;
+            }
+            if (funcName != null && funcName.startsWith(prefix)) {
                 return true;
             }
         }

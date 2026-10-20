@@ -1,28 +1,35 @@
 package com.rag.common.snowflake;
 
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.concurrent.atomic.AtomicLong;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * 对应 Go 版 service/common/snowflake/snowflake.go 的整个包（102 行）。
  *
- * <p>Go 版用 {@code github.com/bwmarrin/snowflake v0.3.0}；Java 版按 bwmarrin/snowflake 的位布局（41 位时间戳 + 10 位 workerId + 12 位 sequence）自己实现，
- * 保证 1:1 同位宽的 int64。
+ * <p>Go 版用 {@code github.com/bwmarrin/snowflake v0.3.0}；Java 版按 bwmarrin/snowflake 的位布局
+ * （41 位时间戳 + 10 位 workerId + 12 位 sequence）自己实现，保证 1:1 同位宽的 int64。
+ *
+ * <p><b>bwmarrin v0.3.0 位布局取证</b>（{@code snowflake.go} 15-33 行）：
+ * <pre>
+ *   Epoch    int64 = 1288834974657
+ *   NodeBits uint8 = 10   → nodeMask / nodeShift = StepBits
+ *   StepBits uint8 = 12   → stepMask / timeShift = NodeBits + StepBits
+ * </pre>
  *
  * <p>框架职责：
  * <ul>
  *   <li>Go 版：bwmarrin/snowflake 是分布式 ID 生成器（Twitter Snowflake 风格的 Go 实现）</li>
- *   <li>Java 版：纯 JDK 实现，无第三方依赖；使用 {@link AtomicLong} 做无锁自旋（Go 版 snowflake.Node 内部也是 mutex + atomic.Uint64）</li>
+ *   <li>Java 版：纯 JDK 实现，无第三方依赖；用 {@code synchronized(state)} 串行化
+ *       （对应 bwmarrin 内部的 {@code n.mu.Lock()}）</li>
  * </ul>
  */
 public final class Snowflake {
 
-    /** DRIFT-001 修复：与 Go 版 logx.Infof("Snowflake initialized with nodeId: %d", nodeId) 对齐。 */
+    /** 对齐 Go 版 {@code logx.Infof("Snowflake initialized with nodeId: %d", nodeId)}。 */
     /**
      * Spring 化 internal：仅供 {@link com.rag.common.spring.SnowflakeBean} 复用启动日志输出。
      * 业务代码请用 {@link #init()} / {@link #nextId()}，不要直接引用此 Logger。
@@ -30,115 +37,74 @@ public final class Snowflake {
     public static final Logger LOG = LoggerFactory.getLogger(Snowflake.class);
 
     /**
-     * 对应 Go 版 {@code snowflake.Epoch}（bwmarrin/snowflake 的起始时间戳）：
+     * 对应 Go 版 {@code snowflake.Epoch}（bwmarrin v0.3.0 snowflake.go:17）：
      * <pre>
-     *     // 1288834974657 = Nov 04 2010 01:42:54.657 UTC
-     *     snowflake.Epoch = 1288834974657
-     *     </pre>
-     * Java 版直接硬编码常量，与 Go 版对齐。
+     *     // Epoch is set to the twitter snowflake epoch of Nov 04 2010 01:42:54 UTC in milliseconds
+     *     Epoch int64 = 1288834974657
+     * </pre>
      */
     static final long EPOCH = 1288834974657L;
 
-    /**
-     * workerId 位数（10 位 → 1024 个节点）。
-     * 对应 Go 版 {@code nodeId = nodeId % 1024} 的注释 "Snowflake nodeId 必须在 [0, 1023] 范围内（10位）"。
-     */
+    /** bwmarrin v0.3.0 {@code NodeBits uint8 = 10}。 */
     static final long WORKER_ID_BITS = 10L;
 
-    /**
-     * sequence 位数（每毫秒 4096 个序号）。
-     * 对应 bwmarrin/snowflake 默认值。
-     */
+    /** bwmarrin v0.3.0 {@code StepBits uint8 = 12}。 */
     static final long SEQUENCE_BITS = 12L;
 
-    /**
-     * workerId 最大值（-1L ^ (-1L << WORKER_ID_BITS) = 1023）。
-     *
-     * <p>Spring 化 internal：仅供 {@link com.rag.common.spring.SnowflakeBean} 计算 mod 时使用。
-     */
+    /** 对应 bwmarrin {@code nodeMax = -1 ^ (-1 << NodeBits)} = 1023。 */
     public static final long MAX_WORKER_ID = -1L ^ (-1L << WORKER_ID_BITS);
 
-    /**
-     * sequence 最大值（-1L ^ (-1L << SEQUENCE_BITS) = 4095）。
-     */
+    /** 对应 bwmarrin {@code stepMask = -1 ^ (-1 << StepBits)} = 4095。 */
     static final long SEQUENCE_MASK = -1L ^ (-1L << SEQUENCE_BITS);
 
-    /**
-     * workerId 偏移量（sequence 占了 12 位）。
-     */
+    /** 对应 bwmarrin {@code nodeShift = StepBits} = 12。 */
     static final long WORKER_ID_SHIFT = SEQUENCE_BITS;
 
-    /**
-     * 时间戳偏移量（workerId + sequence 占 22 位）。
-     */
+    /** 对应 bwmarrin {@code timeShift = NodeBits + StepBits} = 22。 */
     static final long TIMESTAMP_SHIFT = SEQUENCE_BITS + WORKER_ID_BITS;
 
-    /**
-     * Spring 化（决策 6）：{@link com.rag.common.spring.SnowflakeBean} 构造时调用
-     * {@link #bindBean(SnowflakeBean)} 注册；static {@link #nextId()} 优先委托 Bean。
-     * Bean 未注册时 fallback 到 legacy HOLDER 路径。
-     */
-    private static volatile com.rag.common.spring.SnowflakeBean boundBean;
+    // =========================================================================
+    // 进程级唯一状态（对应 Go 版的包级变量 sf / once / sfErr）
+    // =========================================================================
 
     /**
-     * Spring 化钩子：由 {@link com.rag.common.spring.SnowflakeBean} 构造时调用，
-     * 让 {@link #nextId()} 优先走 Bean 路径。
-     */
-    public static void bindBean(com.rag.common.spring.SnowflakeBean bean) {
-        boundBean = bean;
-    }
-
-    /**
-     * 对应 Go 版 {@code var (sf *snowflake.Node; once sync.Once; sfErr error)} 的三个变量合并到一个 holder。
-     * 用 {@code volatile} + 内部类 lazy init（线程安全）替代 {@code sync.Once}。
+     * <b>M11 修复</b>：全进程<b>只有一份</b>生成状态。
      *
-     * <p><b>Spring 化</b>：Bean 存在时 HOLDER 仅用于 {@code init()} 的 fail-fast 校验，
-     * 实际 ID 生成走 Bean 路径。
-     */
-    private static final Holder HOLDER = new Holder();
-
-    /**
-     * 对应 Go 版 {@code var (sf *snowflake.Node; once sync.Once; sfErr error)} 内部状态：
+     * <p>Go 版只有 {@code var sf *snowflake.Node} 一个 node，其内部持有 {@code time} 与 {@code step}，
+     * 进程内所有 {@code GetID()} 共用它。旧 Java 版有两份互不同步的状态：
      * <ul>
-     *   <li>{@code lastTimestamp}：上次生成 ID 的毫秒时间戳</li>
-     *   <li>{@code sequence}：当前毫秒内的序号（0~4095）</li>
+     *   <li>{@code Snowflake.HOLDER.state}（静态，workerId 取 hash 兜底）</li>
+     *   <li>{@code SnowflakeBean.state}（Bean 实例，workerId 取自 Spring 配置）</li>
      * </ul>
+     * {@code nextId()} 靠「Bean 有没有注册」在两者间切换，于是同一个 JVM 里可能出现
+     * <b>两个不同 workerId 的生成器交替产出 ID</b>，且两者各自维护 lastTimestamp/sequence ——
+     * workerId 相同时可撞 ID，不同时则同一条业务流里出现不同节点的 ID。
      *
-     * <p>Spring 化 internal：仅供 {@link com.rag.common.spring.SnowflakeBean} 持有 workerId 状态。
+     * <p>现在收敛为单一 {@link #STATE} + 单一 {@link #workerId}，与 Go 版一一对应。
+     */
+    private static final State STATE = new State();
+
+    /**
+     * 已解析的 workerId；{@code null} 表示尚未初始化（对应 Go 版 {@code sf == nil}）。
+     *
+     * <p>用包装类型而非 {@code long}，是为了区分「workerId=0」（合法）与「未解析」——
+     * 用 primitive 会让 0 同时代表两种状态。
+     */
+    private static volatile Long workerId;
+
+    /** 初始化失败时的原因，对应 Go 版 {@code sfErr}。 */
+    private static volatile Throwable initError;
+
+    /**
+     * 生成器状态，对应 bwmarrin {@code Node.time} / {@code Node.step} 两个字段。
+     *
+     * <p>Spring 化 internal：仅供本类持有。
      */
     public static final class State {
+        /** bwmarrin {@code n.time}：上次生成 ID 的毫秒时间戳（相对 epoch）。 */
         long lastTimestamp;
+        /** bwmarrin {@code n.step}：当前毫秒内的序号（0~4095）。 */
         long sequence;
-    }
-
-    /**
-     * 对应 Go 版的 lazy init 状态机。
-     */
-    private static final class Holder {
-        final long workerId;
-        final State state;
-        final Throwable initError;
-
-        Holder() {
-            long id;
-            Throwable err = null;
-            try {
-                id = generateNodeId();
-            } catch (Throwable t) {
-                id = 0;
-                err = t;
-            }
-            this.workerId = id;
-            this.state = new State();
-            this.initError = err;
-            // DRIFT-001 修复：成功初始化时输出 INFO 日志，对齐 Go 版 logx.Infof
-            if (err == null) {
-                LOG.info("Snowflake initialized with nodeId: {}", id);
-            }
-        }
-    }
-
-    private Snowflake() {
     }
 
     /**
@@ -156,17 +122,46 @@ public final class Snowflake {
      * }
      * </pre>
      *
-     * <p>Go 版用 {@code sync.Once} 保证只跑一次；Java 版用类加载阶段的 static-final field（HOLDER）做 lazy init，
-     * 也保证只跑一次。
-     *
-     * <p>Go 版日志通过 logx；Java 版用 SLF4J（logback-classic 已在 common/pom.xml 引入）。
+     * <p><b>已知有意偏离（需 review 签字）</b>：Go 用 {@code sync.Once} 保证只跑一次；
+     * Java 用 synchronized + 判空做同样的幂等，语义一致。
      */
     public static synchronized void init() {
-        // 触发 Holder 初始化（如果还没初始化过）；重复调用安全
-        Holder h = HOLDER;
-        if (h.initError != null) {
-            throw new IllegalStateException("generate node id failed", h.initError);
+        if (workerId != null || initError != null) {
+            return; // 已初始化过，等价 sync.Once 的第二次调用直接返回
         }
+        long id;
+        try {
+            id = generateNodeId();
+        } catch (Throwable t) {
+            initError = t;
+            LOG.error("Snowflake initialize failed", t);
+            return;
+        }
+        workerId = id;
+        LOG.info("Snowflake initialized with nodeId: {}", id);
+    }
+
+    /**
+     * 显式指定 workerId（对应 Go 版「运维用 {@code SNOWFLAKE_NODE_ID} 指定固定 node」这一档）。
+     *
+     * <p><b>唯一调用者是 {@link com.rag.common.spring.SnowflakeBean}</b>，用于承载
+     * {@code snowflake.worker-id} 这一 Spring 配置档。必须在容器 refresh 期、
+     * 任何 {@link #nextId()} 调用<b>之前</b>完成；重复调用会被忽略（first-wins），
+     * 避免运行中途 workerId 漂移导致 ID 断层。
+     *
+     * @param id 期望的 workerId；{@code null} 或负数表示放弃显式指定
+     */
+    public static synchronized void setWorkerId(Long id) {
+        if (id == null || id < 0) {
+            return;
+        }
+        if (workerId != null) {
+            // 已解析过：保持 first-wins，不再改写（否则已产出的 ID 与新 workerId 不连续）
+            LOG.warn("Snowflake workerId already resolved ({}), ignore explicit set {}", workerId, id);
+            return;
+        }
+        workerId = id % (MAX_WORKER_ID + 1);
+        LOG.info("Snowflake initialized with nodeId: {}", workerId);
     }
 
     /**
@@ -181,80 +176,90 @@ public final class Snowflake {
      * }
      * </pre>
      *
-     * <p><b>Spring 化（决策 6）</b>：当 {@link #bindBean} 已注册 Bean 时优先委托 Bean 路径，
-     * 保证 static 与 Bean 两条路径走同一 workerId（避免 ID 一致性问题）。
-     * Bean 未注册时 fallback 到 legacy HOLDER 路径（独立进程 / 测试场景）。
-     *
-     * @return 生成的 64 位 ID；与 Go 版 bwmarrin/snowflake 同位宽
-     * @throws IllegalStateException 当 {@link #init()} 失败时
+     * @return 生成的 64 位 ID
+     * @throws IllegalStateException 当初始化失败时（对应 Go 返回 error）
      */
     public static long nextId() {
-        com.rag.common.spring.SnowflakeBean bean = boundBean;
-        if (bean != null) {
-            return bean.nextId();
+        if (workerId == null && initError == null) {
+            init(); // 对应 Go 的 GetID() 第一行 Init()
         }
-        if (HOLDER.initError != null) {
-            throw new IllegalStateException("snowflake node is not initialized", HOLDER.initError);
+        if (initError != null) {
+            throw new IllegalStateException("snowflake node is not initialized", initError);
         }
-        return nextIdInternal(HOLDER.workerId, HOLDER.state);
+        Long id = workerId;
+        if (id == null) {
+            throw new IllegalStateException("snowflake node is not initialized");
+        }
+        return nextIdInternal(id, STATE);
     }
 
     /**
-     * 对应 Go 版 bwmarrin/snowflake 的核心算法：
+     * 当前生效的 workerId（未初始化时返回 {@code null}）。供 {@link SnowflakeBean} 与测试观测用。
+     */
+    public static Long currentWorkerId() {
+        return workerId;
+    }
+
+    /**
+     * 对应 bwmarrin v0.3.0 {@code func (n *Node) Generate() ID}（snowflake.go:135-160）。
      *
      * <pre>
-     *   id = ((now - EPOCH) << TIMESTAMP_SHIFT) | (workerId << WORKER_ID_SHIFT) | sequence
+     * n.mu.Lock()
+     * now := time.Since(n.epoch).Nanoseconds() / 1000000
+     * if now == n.time {
+     *         n.step = (n.step + 1) &amp; n.stepMask
+     *         if n.step == 0 {
+     *                 for now &lt;= n.time { now = time.Since(n.epoch).Nanoseconds() / 1000000 }
+     *         }
+     * } else {
+     *         n.step = 0
+     * }
+     * n.time = now
+     * return ID((now &lt;&lt; timeShift) | (node &lt;&lt; nodeShift) | step)
      * </pre>
      *
-     * <p>时钟回拨处理：与 bwmarrin/snowflake 一致，等待回拨的时间过去再生成。
+     * <p><b>M12 修复：时钟回拨的处理必须按 v0.3.0 的真实算法，不能按「更安全」的想象写。</b>
+     * v0.3.0 <b>没有</b>任何回拨保护 —— {@code now &lt; n.time} 时直接落进 {@code else} 分支：
+     * {@code step} 归零、{@code time} 回退到更小的值、照常产出 ID。
+     * 旧 Java 版写成「sleep 直到追上 + 抛 IllegalStateException 拒绝生成」，那是<b>凭空多出来的</b>行为：
+     * <ul>
+     *   <li>会阻塞调用线程（NTP 校正跳变几秒 = 整个进程卡几秒）</li>
+     *   <li>Go 侧永不失败的路径，Java 侧会抛异常</li>
+     * </ul>
+     * 现按 v0.3.0 原文实现。
      *
-     * <p>Spring 化 internal：仅供 {@link com.rag.common.spring.SnowflakeBean} 复用算法。
-     * 业务代码请用 {@link #nextId()}。
+     * <p><b>继承自 Go 的已知风险（不修，如实留档）</b>：时钟回拨时 {@code n.time} 回退且 {@code step}
+     * 归零，若恰好与回拨前某毫秒重合，会产出重复 ID。这是 bwmarrin v0.3.0 自带的性质，
+     * RAG 作为复刻<b>不擅自加保护</b> —— 加了就与 Go 不等价。
+     * 若将来要加，须按 AGENTS.md §3.4 走「有意偏离」留档并单独评审。
+     *
+     * <p>{@code synchronized (state)} 对应 bwmarrin 的 {@code n.mu.Lock()}。
+     *
+     * <p>Spring 化 internal：算法体；业务请用 {@link #nextId()}。
      */
-    public static long nextIdInternal(long workerId, State state) {
+    public static long nextIdInternal(long workerIdArg, State state) {
         synchronized (state) {
-            long timestamp = System.currentTimeMillis();
+            long now = System.currentTimeMillis() - EPOCH;
 
-            if (timestamp < state.lastTimestamp) {
-                // 时钟回拨：bwmarrin/snowflake 是 sleep 直到追上；这里同等待
-                try {
-                    Thread.sleep(state.lastTimestamp - timestamp);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new IllegalStateException("snowflake clock moved backwards, sleep interrupted", e);
-                }
-                timestamp = System.currentTimeMillis();
-                if (timestamp < state.lastTimestamp) {
-                    throw new IllegalStateException(
-                            "snowflake clock moved backwards (refusing to generate id for "
-                                    + (state.lastTimestamp - timestamp) + "ms)");
-                }
-            }
-
-            if (state.lastTimestamp == timestamp) {
+            if (now == state.lastTimestamp) {
                 state.sequence = (state.sequence + 1) & SEQUENCE_MASK;
                 if (state.sequence == 0) {
-                    // 当前毫秒序号耗尽，等到下一毫秒
-                    timestamp = waitNextMillis(state.lastTimestamp);
+                    // 当前毫秒序号耗尽：自旋到下一毫秒（对齐 v0.3.0 的 for now <= n.time）
+                    while (now <= state.lastTimestamp) {
+                        now = System.currentTimeMillis() - EPOCH;
+                    }
                 }
             } else {
+                // 含 now < lastTimestamp（时钟回拨）：v0.3.0 与 now > lastTimestamp 走同一分支
                 state.sequence = 0L;
             }
 
-            state.lastTimestamp = timestamp;
+            state.lastTimestamp = now;
 
-            return ((timestamp - EPOCH) << TIMESTAMP_SHIFT)
-                    | (workerId << WORKER_ID_SHIFT)
+            return (now << TIMESTAMP_SHIFT)
+                    | (workerIdArg << WORKER_ID_SHIFT)
                     | state.sequence;
         }
-    }
-
-    private static long waitNextMillis(long lastTimestamp) {
-        long timestamp = System.currentTimeMillis();
-        while (timestamp <= lastTimestamp) {
-            timestamp = System.currentTimeMillis();
-        }
-        return timestamp;
     }
 
     /**
@@ -267,10 +272,11 @@ public final class Snowflake {
      * </pre>
      *
      * <p>Go 版用 {@code binary.BigEndian.Uint16(hash[:2])} 取前 2 字节，Java 版用
-     * {@link ByteBuffer#wrap(byte[], int, int)}（默认大端）等价实现。
+     * {@code (hash[0] &lt;&lt; 8) | hash[1]}（默认大端）等价实现。
      *
-     * <p>Spring 化 internal：仅供 {@link com.rag.common.spring.SnowflakeBean} 复用
-     * 兜底 hash 算法（Properties 未指定 workerId 时复用此函数）。
+     * <p><b>mod 顺序等价性</b>：Go 是「先 {@code uint16(id)} 截断，再 {@code % 1024}」，
+     * Java 是「先 {@code parseLong}，再 {@code % 1024}」。因为 {@code 65536 = 1024 × 64}，
+     * {@code (x mod 65536) mod 1024 == x mod 1024}，两条路径结果恒等。
      */
     public static long generateNodeId() {
         String explicit = System.getenv("SNOWFLAKE_NODE_ID");
@@ -281,7 +287,7 @@ public final class Snowflake {
                     return parsed % (MAX_WORKER_ID + 1);
                 }
             } catch (NumberFormatException ignore) {
-                // fall through to 显式指定失败就走 hash 兜底（与 Go 版语义一致：parse 失败被忽略）
+                // parse 失败被忽略，按 Go 版语义继续走 hash 兜底
             }
         }
 
@@ -303,5 +309,8 @@ public final class Snowflake {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 not available", e);
         }
+    }
+
+    private Snowflake() {
     }
 }

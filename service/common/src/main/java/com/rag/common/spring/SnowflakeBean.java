@@ -1,7 +1,6 @@
 package com.rag.common.spring;
 
 import com.rag.common.snowflake.Snowflake;
-import com.rag.common.snowflake.Snowflake.State;
 import org.springframework.stereotype.Component;
 
 /**
@@ -14,40 +13,48 @@ import org.springframework.stereotype.Component;
  *   <li>兜底 hash：{@code SERVICE_NAME + PID} sha256 前 2 字节 % 1024</li>
  * </ol>
  *
- * <p><b>主路径语义（决策 6）</b>：本 Bean 是 Snowflake 唯一 workerId owner。static {@code Snowflake.nextId()}
- * 通过 {@link Snowflake#bindBean(SnowflakeBean)} 委托本 Bean，避免同一 JVM 内两个不同
- * workerId 产生 ID 冲突。
+ * <p><b>M11 修复</b>：本 Bean 此前<b>自己持有</b>一份 {@code State}，而
+ * {@code Snowflake} 里还有另一份静态 {@code HOLDER.state}，靠 {@code bindBean} 决定走哪边。
+ * 后果是同一 JVM 可能有两个不同 workerId 的生成器交替产 ID。
  *
- * <p><b>业务模块当前用法</b>：业务 main 调 {@code Snowflake.init()} 触发 legacy HOLDER 初始化
- * （fail-fast 校验），但 ID 实际走 Bean 路径。HOLDER 的 workerId 在 Bean 存在时不被使用。
+ * <p>现在本 Bean <b>不再持有任何生成状态</b>，只负责在容器 refresh 期把 workerId
+ * 解析结果交给 {@link Snowflake#setWorkerId(Long)}，之后全进程共用 {@code Snowflake} 里
+ * 那唯一一份状态 —— 与 Go 版「进程内一个 {@code snowflake.Node}」一一对应。
+ *
+ * <p><b>调用时序要求</b>：本 Bean 必须在任何 {@code Snowflake.nextId()} 调用之前构造完成。
+ * Spring 容器 refresh 期所有单例 Bean 先于应用接受流量初始化，因此这是成立的；
+ * {@code Snowflake.setWorkerId} 本身也做了 first-wins 保护，重复调用不会让 workerId 漂移。
  */
 @Component
 public class SnowflakeBean {
 
-    private final long workerId;
-    private final State state = new State();
-
     public SnowflakeBean(SnowflakeProperties props) {
-        this.workerId = resolveWorkerId(props);
-        // 注册到 Snowflake 静态委托
-        Snowflake.bindBean(this);
-        // 与 Go 版 logx.Infof("Snowflake initialized with nodeId: %d", nodeId) 对齐
-        Snowflake.LOG.info("Snowflake initialized with nodeId: {}", workerId);
+        long workerId = resolveWorkerId(props);
+        // 把解析结果交给 Snowflake 的唯一状态；本 Bean 不再持有 State
+        Snowflake.setWorkerId(workerId);
     }
 
     /**
-     * 生成下一个 64 位 ID；算法与 Go 版 bwmarrin/snowflake 同位宽。
+     * 本进程生效的 workerId；委托 {@link Snowflake#currentWorkerId()}，与全局唯一状态同源。
+     */
+    public long getWorkerId() {
+        Long id = Snowflake.currentWorkerId();
+        if (id == null) {
+            Snowflake.init();
+            id = Snowflake.currentWorkerId();
+        }
+        return id == null ? 0L : id;
+    }
+
+    /**
+     * 生成下一个 64 位 ID；算法与 Go 版 bwmarrin/snowflake v0.3.0 同位宽。
      */
     public long nextId() {
-        return Snowflake.nextIdInternal(workerId, state);
-    }
-
-    public long getWorkerId() {
-        return workerId;
+        return Snowflake.nextId();
     }
 
     /**
-     * 决策 5：env > Properties > 兜底。
+     * 决策 5：env &gt; Properties &gt; 兜底。
      */
     private static long resolveWorkerId(SnowflakeProperties props) {
         // 1. env var（运维契约，最高优先级）

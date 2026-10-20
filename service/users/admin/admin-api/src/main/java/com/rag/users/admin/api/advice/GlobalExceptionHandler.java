@@ -1,6 +1,7 @@
 package com.rag.users.admin.api.advice;
 
 import com.rag.common.exception.BusinessException;
+import com.rag.common.logger.FatalError;
 import com.rag.common.response.Response;
 import com.rag.users.common.errmsg.ErrorCode;
 import com.rag.users.admin.api.service.IdentityResolver;
@@ -110,8 +111,29 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).build();
     }
 
+    /**
+     * H3 修复：{@link FatalError} 必须原样抛出，<b>不得</b>被转成 200 业务 envelope。
+     *
+     * <p>Go 版 {@code logger.go:296} 在打出 fatal_error 后无条件 {@code os.Exit(1)}，
+     * 「fatal 后必须停止接流量」是硬契约。Java 版改为抛专用异常（不调 System.exit，
+     * 以免绕过 Spring graceful shutdown / {@code @PreDestroy}），
+     * 但若不在此显式处理，{@link #handleAny} 会把它当普通业务异常包成 envelope，
+     * 进程带着致命状态继续服务 —— Go 侧绝不会发生。
+     *
+     * <p>刻意不做 {@code System.exit(1)}：终止决策权留给调用 {@code logFatal} 的位置。
+     */
+    @ExceptionHandler(FatalError.class)
+    public void handleFatal(FatalError e) {
+        // 故意不返回 ResponseEntity：让异常继续向上抛
+        throw e;
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Response> handleAny(Exception e) {
+        // FatalError 已被专门处理；此处兜底再放行一次，防止 advice 未注册该分支时静默吞掉
+        if (e instanceof FatalError fatal) {
+            throw fatal;
+        }
         log.error("unhandled exception", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new Response(ErrorCode.ERROR_SERVER_COMMON.getCode(), ErrorCode.ERROR_SERVER_COMMON.getMsg(), null));
