@@ -28,6 +28,6 @@ public interface AdminMapper extends BaseMapper<AdminEntity> {
     // 业务特殊查询（findOneAdminByUsername / findOneAdminByUid 等）在 AdminDomainService 里
     // 通过 LambdaQueryWrapper 实现，不需要写在 Mapper 里。
 
-    // 注：CreateAdminAtomic 4 步事务在 AdminDomainService.createAdminAtomic default 方法里
+    // 注：CreateAdminAtomic 4 步事务在 AdminCreateAtomicService.createAdminAtomic 里编排
     // 编排，调用 mapper 的 updateById / deleteById / 自定义 @Select / @Update。
 }

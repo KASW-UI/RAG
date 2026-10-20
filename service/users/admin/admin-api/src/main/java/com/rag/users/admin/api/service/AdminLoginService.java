@@ -68,6 +68,13 @@ public class AdminLoginService {
             if (code == Status.Code.NOT_FOUND) {
                 throw new BusinessException(ErrorCode.ERROR_USER_NOT_EXIST.getCode(), ErrorCode.ERROR_USER_NOT_EXIST.getMsg());
             }
+            if (code == Status.Code.UNAUTHENTICATED) {
+                // 密码错误：admin-rpc 的 LoginLogic 对 wrong password 抛 Status.UNAUTHENTICATED。
+                // 参考侧 LoginLogic.java:97-101 把它映射成 1002「用户名或密码错误」，
+                // 缺了这个 case 会落到 default 1015「服务繁忙」——把最常见的用户可见失败
+                // 报成服务端故障。
+                throw new BusinessException(ErrorCode.ERROR_LOGIN_WRONG.getCode(), ErrorCode.ERROR_LOGIN_WRONG.getMsg());
+            }
             throw new BusinessException(ErrorCode.CODE_SERVER_BUSY.getCode(), ErrorCode.CODE_SERVER_BUSY.getMsg());
         }
 
@@ -79,9 +86,11 @@ public class AdminLoginService {
         try {
             token = JwtUtil.getToken(accessSecret, nowSec, expireSec, uid);
         } catch (Throwable t) {
+            // 与参考侧 LoginLogic.java:104-115 1:1：JWT 签发失败属于服务端内部错误 → 5001，
+            // 不是 1006「TOKEN已过期」（那是 token 校验失败，语义完全不同）。
             metrics.getLoginInternalError().increment();
             log.error("admin login generate token failed : {}", t.getMessage(), t);
-            throw new BusinessException(ErrorCode.ERROR_TOKEN_RUNTIME.getCode(), ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
+            throw new BusinessException(ErrorCode.ERROR_SERVER_COMMON.getCode(), ErrorCode.ERROR_SERVER_COMMON.getMsg());
         }
 
         metrics.getLoginSuccess().increment();

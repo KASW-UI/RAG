@@ -45,8 +45,9 @@ public class AdminResetUserPasswordService {
                 .setOperatorId(operatorId)
                 .build();
 
+        com.rag.users.admin.proto.ResetUserPasswordResp rpcResp;
         try {
-            adminRpcClient.adminRpc().resetUserPassword(rpcReq);
+            rpcResp = adminRpcClient.adminRpc().resetUserPassword(rpcReq);
         } catch (StatusRuntimeException e) {
             Status.Code code = e.getStatus().getCode();
             metrics.getResetRpcError().increment();
@@ -64,16 +65,13 @@ public class AdminResetUserPasswordService {
         log.info("resetUserPassword success, operator_id={} target_uid={}", operatorId, req.getUid());
 
         ResetUserPasswordResp resp = new ResetUserPasswordResp();
-        resp.setSuccess(true);
+        // 与参考侧 1:1：透传下游 admin-rpc 的 success，不硬编码 true。
+        // （参考侧 ResetUserPasswordLogic.java:84）硬编码会丢掉下游的部分失败信号。
+        resp.setSuccess(rpcResp.getSuccess());
         return resp;
     }
 
     private static long parseUid(String uidStr) {
-        if (uidStr == null || uidStr.isEmpty()) return 0L;
-        try {
-            return Long.parseLong(uidStr);
-        } catch (NumberFormatException e) {
-            return 0L;
-        }
+        return AdminApiSupport.parseUid(uidStr);
     }
 }

@@ -2,7 +2,6 @@ package com.rag.users.user.api.service;
 
 import com.rag.users.user.api.dto.AvatarHistoryItem;
 import com.rag.users.user.api.dto.UserInfo;
-import io.grpc.Status;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Component;
 
@@ -18,7 +17,6 @@ import java.util.Map;
  *
  * HUMAN_ONLY.MD 提到的方法：
  *   - extractUserId：from request attribute "userId"（由 JwtAuthInterceptor 写入）
- *   - codeFromRPCError：把 gRPC Status 映射成 ErrorCode 业务码
  *   - resolveUserId：Identity check
  *
  * 额外提供：
@@ -55,27 +53,6 @@ public class UserApiSupport {
      */
     public long extractUserId(HttpServletRequest request) {
         return IdentityResolver.claimedUID(request);
-    }
-
-    /**
-     * 把 gRPC Status.Code 映射成 ErrorCode 业务码。
-     * Go 端每个 Logic 都有一段 switch（e.getStatus().getCode() → ErrorCode），
-     * 这里抽成一个 helper 让 Service 干净。
-     */
-    public int codeFromRPCError(Status.Code code, int fallbackBusinessCode) {
-        if (code == Status.Code.INTERNAL) {
-            return 5001;   // ErrorServerCommon
-        }
-        if (code == Status.Code.NOT_FOUND) {
-            return 1003;   // ErrorUserNotExist
-        }
-        if (code == Status.Code.ALREADY_EXISTS) {
-            return 1001;   // ErrorUserExist
-        }
-        if (code == Status.Code.INVALID_ARGUMENT) {
-            return 500;    // Error
-        }
-        return fallbackBusinessCode;  // 默认 → CodeServerBusy (1015)
     }
 
     /**

@@ -1,6 +1,5 @@
 package com.rag.users.user.api.service;
 
-import com.rag.users.common.errmsg.ErrorCode;
 import com.rag.users.user.api.client.UserRpcClient;
 import com.rag.users.user.api.dto.RegisterReq;
 import com.rag.users.user.api.dto.RegisterResp;
@@ -68,15 +67,5 @@ public class UserRegisterService {
         RegisterResp resp = new RegisterResp();
         resp.setUid(rpcResp.getUid());
         return resp;
-    }
-
-    /**
-     * 暴露一个静态方法做业务码映射，供 {@code GlobalExceptionHandler} 调用保持 1:1。
-     * 与 Go 端 RegisterLogic 的 switch(code) 分支对齐。
-     */
-    public static ErrorCode codeFromRPCError(io.grpc.Status.Code code) {
-        if (code == io.grpc.Status.Code.INTERNAL) return ErrorCode.ERROR_SERVER_COMMON;
-        if (code == io.grpc.Status.Code.ALREADY_EXISTS) return ErrorCode.ERROR_USER_EXIST;
-        return ErrorCode.CODE_SERVER_BUSY;
     }
 }

@@ -187,6 +187,13 @@ public interface UserAvatarHistoryMapper extends BaseMapper<UserAvatarHistoryEnt
 
         // W4
         markCurrentById(history.getId());
+        // ⚠️ 必须同步回写内存实体：W4 的 UPDATE 只改 DB，不改这里持有的对象。
+        //    若不写回，返回给调用方的 SelectAvatarResp.history.is_current 会是
+        //    "更新前" 的旧值（通常是 false），与刚落库的 is_current=true 自相矛盾，
+        //    而且紧接着调 GetAvatarHistory 又会读到 true。
+        //    参考侧 DataModel.selectAvatarHistory 是先 history.setIsCurrent(true)
+        //    再返回同一个托管实体，所以响应恒为 true。
+        history.setIsCurrent(true);
 
         // W5
         Map<String, String> extra = user.getExtraInfo();

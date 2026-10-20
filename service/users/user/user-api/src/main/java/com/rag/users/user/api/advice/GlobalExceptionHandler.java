@@ -10,6 +10,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -22,7 +25,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * <ul>
  *   <li>把业务异常 / gRPC 异常 / IdentityResolver sentinel 异常 / 兜底 RuntimeException 统一映射成
  *       {@code Response{code, msg, data=null}}</li>
- *   <li>HTTP 状态码：401（token 失效）/ 500（业务失败 / 系统错）</li>
+ *   <li>HTTP 状态码：业务失败一律 200（业务码由 body 表达）；仅框架级错误保留 Spring 默认语义
+ *       （400 / 405 / 415），未捕获异常 500</li>
  *   <li>取代了 Go 端 LogicResult 抛业务码模式 + handler 层 try/catch + filter 短路的三段式</li>
  * </ul>
  *
@@ -52,7 +56,11 @@ public class GlobalExceptionHandler {
         Status.Code code = e.getStatus().getCode();
         int businessCode = mapRPCStatusToCode(code);
         String msg = ErrorCode.getMsg(businessCode);
-        log.error("gRPC StatusRuntimeException code={} mapped to businessCode={} desc={}", code, businessCode, e.getStatus().getDescription(), e);
+        log.error("gRPC StatusRuntimeException code={} mapped to businessCode={} desc={}",
+                code,
+                businessCode,
+                e.getStatus().getDescription(),
+                e);
         return ResponseEntity.status(HttpStatus.OK).body(new Response(businessCode, msg, null));
     }
 
@@ -62,10 +70,14 @@ public class GlobalExceptionHandler {
      * 业务码精确映射放在 Service 内部抛 BusinessException。
      */
     private int mapRPCStatusToCode(Status.Code code) {
-        if (code == Status.Code.INTERNAL) return ErrorCode.ERROR_SERVER_COMMON.getCode();   // 5001
-        if (code == Status.Code.NOT_FOUND) return ErrorCode.ERROR_USER_NOT_EXIST.getCode(); // 1003
-        if (code == Status.Code.ALREADY_EXISTS) return ErrorCode.ERROR_USER_EXIST.getCode(); // 1001
-        if (code == Status.Code.INVALID_ARGUMENT) return ErrorCode.ERROR.getCode();          // 500
+        if (code == Status.Code.INTERNAL)
+            return ErrorCode.ERROR_SERVER_COMMON.getCode();   // 5001
+        if (code == Status.Code.NOT_FOUND)
+            return ErrorCode.ERROR_USER_NOT_EXIST.getCode(); // 1003
+        if (code == Status.Code.ALREADY_EXISTS)
+            return ErrorCode.ERROR_USER_EXIST.getCode(); // 1001
+        if (code == Status.Code.INVALID_ARGUMENT)
+            return ErrorCode.ERROR.getCode();          // 500
         return ErrorCode.CODE_SERVER_BUSY.getCode();                                          // 1015
     }
 
@@ -74,7 +86,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IdentityResolver.ErrInvalidClaimException.class)
     public ResponseEntity<Response> handleErrInvalidClaim(IdentityResolver.ErrInvalidClaimException e) {
         log.error("ErrInvalidClaim : {}", e.getMessage());
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+        return ResponseEntity.status(HttpStatus.OK)
                 .body(new Response(ErrorCode.ERROR_TOKEN_RUNTIME.getCode(), ErrorCode.ERROR_TOKEN_RUNTIME.getMsg(), null));
     }
 
@@ -82,14 +94,18 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Response> handleErrUserNotFound(IdentityResolver.ErrUserNotFoundException e) {
         log.error("ErrUserNotFound : {}", e.getMessage());
         return ResponseEntity.status(HttpStatus.OK)
-                .body(new Response(ErrorCode.ERROR_USER_NOT_EXIST.getCode(), ErrorCode.ERROR_USER_NOT_EXIST.getMsg(), null));
+                .body(new Response(ErrorCode.ERROR_USER_NOT_EXIST.getCode(),
+                        ErrorCode.ERROR_USER_NOT_EXIST.getMsg(),
+                        null));
     }
 
     @ExceptionHandler(IdentityResolver.ErrUserInactiveException.class)
     public ResponseEntity<Response> handleErrUserInactive(IdentityResolver.ErrUserInactiveException e) {
         log.error("ErrUserInactive : {}", e.getMessage());
         return ResponseEntity.status(HttpStatus.OK)
-                .body(new Response(ErrorCode.ERROR_USER_BANNED.getCode(), ErrorCode.ERROR_USER_BANNED.getMsg(), null));
+                .body(new Response(ErrorCode.ERROR_USER_BANNED.getCode(),
+                        ErrorCode.ERROR_USER_BANNED.getMsg(),
+                        null));
     }
 
     @ExceptionHandler(IdentityResolver.ErrStatusUnavailableException.class)
@@ -106,7 +122,37 @@ public class GlobalExceptionHandler {
                 .body(new Response(ErrorCode.ERROR_SERVER_COMMON.getCode(), ErrorCode.ERROR_SERVER_COMMON.getMsg(), null));
     }
 
-    // ============== 4. 兜底：所有未捕获异常 ==============
+    // ============== 4. 框架级错误：交回 Spring 默认语义（参考侧无任何 @ExceptionHandler）==============
+
+    /**
+     * 请求体不可读 / 缺失 → 400。
+     *
+     * <p>参考侧 user-api <b>没有任何</b> {@code @ExceptionHandler}，这类错误由 Spring 默认解析成
+     * 400；若被下面的兜底 {@code Exception} 处理器吞掉就会变成 500，把客户端的请求错误
+     * 误报成服务端故障（并污染错误看板）。目标侧把全部端点改成 {@code @RequestBody} 后，
+     * "忘记带 body" 是最常见的调用错误，这个状态码尤其重要。
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Void> handleUnreadableBody(HttpMessageNotReadableException e) {
+        log.warn("unreadable request body : {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+    }
+
+    /** HTTP 方法不支持 → 405。 */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<Void> handleMethodNotSupported(HttpRequestMethodNotSupportedException e) {
+        log.warn("method not supported : {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
+    }
+
+    /** Content-Type 不支持 → 415。 */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<Void> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException e) {
+        log.warn("media type not supported : {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).build();
+    }
+
+    // ============== 5. 兜底：所有未捕获异常 ===============
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Response> handleAny(Exception e) {
@@ -118,16 +164,17 @@ public class GlobalExceptionHandler {
     // ============== 业务码 → HTTP 状态码 ==============
 
     /**
-     * 业务码 → HTTP 状态码。
-     * 1004 (Token不存在) / 1006 (Token已过期) / 1009 (未登录) → 401；
-     * 其它 → 200（业务码本身就告诉客户端结果）。
+     * 业务码 → HTTP 状态码：<b>一律 200</b>。
+     *
+     * <p>与参考实现 1:1：参考侧所有 Logic 结果都经 {@code LogicResult} 走
+     * {@code envelope(...)} 输出，HTTP 状态码恒为 Spring 默认 200，业务成败完全由 body 里的
+     * {@code code} 表达；只有两个 Servlet {@code Filter} 的鉴权短路才写 401，而那属于
+     * <b>鉴权层</b>语义、不经过本处理器。
+     *
+     * <p>此前这里把 1004 / 1006 / 1009 映射成 401，导致公开路径
+     * {@code /login} 在签发 token 失败时也会返回 401 —— 登录接口答 401 语义不成立。
      */
     private HttpStatus decideStatus(int code) {
-        if (code == ErrorCode.ERROR_TOKEN_NOT_EXIST.getCode()   // 1004
-                || code == ErrorCode.ERROR_TOKEN_RUNTIME.getCode()  // 1006
-                || code == ErrorCode.ERROR_USER_NO_LOGIN.getCode()) { // 1009
-            return HttpStatus.UNAUTHORIZED;
-        }
         return HttpStatus.OK;
     }
 }

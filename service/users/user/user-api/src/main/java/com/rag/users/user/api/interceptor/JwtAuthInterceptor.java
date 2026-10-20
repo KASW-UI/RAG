@@ -2,6 +2,7 @@ package com.rag.users.user.api.interceptor;
 
 import com.rag.common.exception.BusinessException;
 import com.rag.users.common.errmsg.ErrorCode;
+import com.rag.users.common.jwt.JwtUtil;
 import com.rag.users.user.api.config.UserApiProperties;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jws;
@@ -16,7 +17,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import javax.crypto.SecretKey;
-import java.nio.charset.StandardCharsets;
 import java.util.Set;
 
 /**
@@ -64,8 +64,16 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
     private final StringRedisTemplate redisTemplate;
 
     public JwtAuthInterceptor(UserApiProperties properties, StringRedisTemplate redisTemplate) {
-        byte[] secretBytes = properties.getUserAuth().getAccessSecret().getBytes(StandardCharsets.UTF_8);
-        this.key = Keys.hmacShaKeyFor(secretBytes);
+        // L4 idiomatization（强制留痕 + Go ↔ RAG 对照）：
+        //   Go 出处：service/user/common/jwt/jwt.go `token.SignedString([]byte(secretKey))`
+        //     —— Go 侧 golang-jwt 不校验 key 长度，user secret 是 36 字节 UUID 已 ≥ 32 字节，
+        //     走"返回 bytes 原长"分支，padding 是 no-op。
+        //   Java 表达差异：jjwt 0.12 强制 ≥32 字节，所以即便 user secret 已 ≥32 仍统一调
+        //     padToHmacKeySize —— 这样 admin 与 user 的 padding 逻辑收口在 JwtUtil 一份，
+        //     将来若 user secret 也换成短密钥无需再改拦截器。
+        //   语义等价论证：bytes.length ≥ 32 时返回原 bytes，行为与直接 getBytes 一致；
+        //     token 形状、claim、exp 全一致。Go ↔ RAG 无行为差异。
+        this.key = Keys.hmacShaKeyFor(JwtUtil.padToHmacKeySize(properties.getUserAuth().getAccessSecret()));
         this.redisTemplate = redisTemplate;
     }
 

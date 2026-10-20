@@ -25,8 +25,9 @@ import static org.junit.jupiter.api.Assertions.*;
  * <ol>
  *   <li>gRPC codes.Internal → 抛 BusinessException(ErrorServerCommon 5001) + loginRpcError</li>
  *   <li>gRPC codes.NotFound  → 抛 BusinessException(ErrorUserNotExist 1003) + loginRpcError</li>
+ *   <li>gRPC codes.Unauthenticated（密码错）→ 抛 BusinessException(ErrorLoginWrong 1002)</li>
  *   <li>gRPC codes.其它      → 抛 BusinessException(CodeServerBusy 1015) + loginRpcError</li>
- *   <li>JwtUtil.getToken 抛异常 → 抛 BusinessException(ErrorTokenRuntime 1006) + loginInternalError</li>
+ *   <li>JwtUtil.getToken 抛异常 → 抛 BusinessException(ErrorServerCommon 5001) + loginInternalError</li>
  *   <li>成功 → loginSuccess + 返回 LoginResp(token)</li>
  * </ol>
  */
@@ -187,5 +188,49 @@ class AdminLoginServiceTest {
                 () -> svc.login(req, Mockito.mock(HttpServletRequest.class)));
 
         assertEquals(1.0, loginRpcErrorCounter.count());
+    }
+
+    /**
+     * 回归：admin-rpc 的 LoginLogic 对「密码错误」抛 Status.UNAUTHENTICATED，
+     * 参考侧映射成 1002「用户名或密码错误」。
+     * 曾经 admin-api 端漏了这个 case，落到 default 1015「服务繁忙」，
+     * 把最常见的用户可见失败报成服务端故障。
+     */
+    @Test
+    void login_rpcUnauthenticatedError_throwsBusinessException1002() {
+        Mockito.when(stub.login(Mockito.any(com.rag.users.admin.proto.LoginReq.class)))
+                .thenThrow(new StatusRuntimeException(Status.UNAUTHENTICATED));
+
+        com.rag.users.admin.api.dto.LoginReq req = new com.rag.users.admin.api.dto.LoginReq();
+        req.setUsername("alice");
+        req.setPassword("wrong-password");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.login(req, Mockito.mock(HttpServletRequest.class)));
+        assertEquals(ErrorCode.ERROR_LOGIN_WRONG.getCode(), ex.getCode());
+        assertEquals(1002, ex.getCode());
+    }
+
+    /**
+     * 回归：JWT 签发失败属于服务端内部错误 → 5001，与参考侧 LoginLogic:104-115 一致。
+     * 曾经映射成 1006「TOKEN已过期」，那是 token <b>校验</b>失败的码，语义完全不同。
+     *
+     * <p>用 null secret 触发签发异常（JwtUtil 内部 NPE → 被 Service 的 catch(Throwable) 捕获）。
+     */
+    @Test
+    void login_tokenGenerationFailure_throwsBusinessException5001() {
+        properties.getAdminAuth().setAccessSecret(null);
+
+        Mockito.when(stub.login(Mockito.any(com.rag.users.admin.proto.LoginReq.class)))
+                .thenReturn(com.rag.users.admin.proto.LoginResp.newBuilder().setUid(12345L).build());
+
+        com.rag.users.admin.api.dto.LoginReq req = new com.rag.users.admin.api.dto.LoginReq();
+        req.setUsername("alice");
+        req.setPassword("pwd");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.login(req, Mockito.mock(HttpServletRequest.class)));
+        assertEquals(ErrorCode.ERROR_SERVER_COMMON.getCode(), ex.getCode());
+        assertEquals(5001, ex.getCode());
     }
 }

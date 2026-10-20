@@ -1,7 +1,14 @@
 # 文件阅读顺序与理由
 
 阅读顺序：
-`AdminRpcApplication.java` → `bootstrap/NacosRegistration.java` → `bootstrap/SnowflakeBootstrap.java` → `bootstrap/AdminSeederBootstrap.java` → `config/AdminRpcProperties.java` → `domain/AdminEntity.java` → `domain/AdminInviteEntity.java` → `domain/UserEntity.java` → `exception/AdminExceptions.java` → `mapper/AdminMapper.java` → `mapper/AdminInviteMapper.java` → `mapper/UserMapper.java` → `metrics/AdminRpcMetrics.java` → `service/AdminHelpers.java` → `service/AdminDomainService.java` → `service/AdminServiceGrpcImpl.java`
+`AdminRpcApplication.java` → `bootstrap/NacosRegistration.java` 
+→ `bootstrap/SnowflakeBootstrap.java` → `bootstrap/AdminSeederBootstrap.java` 
+→ `config/AdminRpcProperties.java` → `domain/AdminEntity.java` 
+→ `domain/AdminInviteEntity.java` → `domain/UserEntity.java`
+→ `exception/AdminExceptions.java` → `mapper/AdminMapper.java` 
+→ `mapper/AdminInviteMapper.java` → `mapper/UserMapper.java` 
+→ `metrics/AdminRpcMetrics.java` → `service/AdminHelpers.java` 
+→ `service/AdminDomainService.java` → `service/AdminServiceGrpcImpl.java`
 
 文件职责：
 `AdminRpcApplication.java`：负责启动 admin-rpc gRPC server 的 Spring Boot 入口，`scanBasePackages` 扫 `com.rag.users.admin.rpc` 与 `com.rag.common`，加 `@ConfigurationPropertiesScan`。

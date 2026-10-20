@@ -36,6 +36,17 @@
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt-jackson</artifactId>
         </dependency>
+
+        <!--
+          测试。JwtUtil 的 zero-pad 曾被删掉过一次，导致 admin 默认密钥（15 字节）在
+          登录签发时抛 WeakKeyException，而当时的测试用的是 55 字节专用密钥把问题遮住了。
+          这里补一个最小测试依赖，把该不变量钉死。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
 

@@ -64,11 +64,6 @@ public class AdminGetUserService {
     }
 
     private static long parseUid(String uidStr) {
-        if (uidStr == null || uidStr.isEmpty()) return 0L;
-        try {
-            return Long.parseLong(uidStr);
-        } catch (NumberFormatException e) {
-            return 0L;
-        }
+        return AdminApiSupport.parseUid(uidStr);
     }
 }

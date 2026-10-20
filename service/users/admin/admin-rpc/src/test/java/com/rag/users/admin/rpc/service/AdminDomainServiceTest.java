@@ -94,7 +94,8 @@ class AdminDomainServiceTest {
         metrics = new AdminRpcMetrics(new SimpleMeterRegistry());
 
         service = new AdminDomainService(adminMapper, adminInviteMapper, userMapper,
-                redisTemplate, properties, metrics);
+                redisTemplate, properties, metrics,
+                new AdminCreateAtomicService(adminMapper, adminInviteMapper));
     }
 
     // ============== Login 测试 ==============

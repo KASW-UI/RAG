@@ -21,7 +21,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.Duration;
@@ -48,10 +47,9 @@ import java.util.Map;
  * <p>L4 实现机制差异（与 Go 端 Logic + DataModel 两层结构对比）：
  * <ul>
  *   <li>Go 用 13 个 Logic 类 + 1 个 DataModel + 1 个 ServiceContext 装配类（共 15 文件）</li>
- *   <li>Java 用 1 个 AdminDomainService（含 13 业务方法 + createAdminAtomic 4 步事务 default 方法）+
- *       3 个 Mapper（BaseMapper 标准 CRUD）+ 直接 @Autowired 注入依赖（无 ServiceContext）</li>
- *   <li>createAdminAtomic 4 步事务写在 Mapper 接口的 default 方法里（MyBatis-Plus JDK 代理对 default 生效），
- *       用 {@code @Transactional} 包整个 4 步，任一抛异常 → 整体回滚</li>
+ *   <li>Java 用 1 个 AdminDomainService（含 13 业务方法）+ 1 个 AdminCreateAtomicService
+ *       （CreateAdmin 的 4 步原子事务，<b>必须独立成 Bean</b>，否则 @Transactional
+ *       因 self-invocation 静默失效）+ 3 个 Mapper（BaseMapper 标准 CRUD）+ 直接注入依赖（无 ServiceContext）</li>
  * </ul>
  *
  * <p>业务错误统一抛 {@link StatusRuntimeException}，由 {@code AdminServiceGrpcImpl.invoke}
@@ -92,19 +90,23 @@ public class AdminDomainService {
     private final StringRedisTemplate stringRedisTemplate;
     private final AdminRpcProperties properties;
     private final AdminRpcMetrics metrics;
+    /** CreateAdmin 的 4 步原子事务，独立 Bean 以保证 @Transactional 代理生效（见该类注释）。 */
+    private final AdminCreateAtomicService createAtomicService;
 
     public AdminDomainService(AdminMapper adminMapper,
                               AdminInviteMapper adminInviteMapper,
                               UserMapper userMapper,
                               StringRedisTemplate stringRedisTemplate,
                               AdminRpcProperties properties,
-                              AdminRpcMetrics metrics) {
+                              AdminRpcMetrics metrics,
+                              AdminCreateAtomicService createAtomicService) {
         this.adminMapper = adminMapper;
         this.adminInviteMapper = adminInviteMapper;
         this.userMapper = userMapper;
         this.stringRedisTemplate = stringRedisTemplate;
         this.properties = properties;
         this.metrics = metrics;
+        this.createAtomicService = createAtomicService;
     }
 
     // ============== 1. Login ==============
@@ -254,10 +256,13 @@ public class AdminDomainService {
                 throw Status.INTERNAL.withDescription("密码加密失败").asRuntimeException();
             }
         }
-        if (email != null) {
-            // email nullable：trim 后空 → null（写 SQL NULL）；非空 → trimmed
-            String trimmed = AdminHelpers.optionalString(email);
-            wrapper.set(AdminEntity::getEmail, trimmed);
+        if (email != null && !email.trim().isEmpty()) {
+            // UpdateSelf 是部分更新：proto3 未设置 email 时线上的默认值是空串 "",
+            // 直接 wrapper.set(..., null) 会把列写成 SQL NULL —— 管理员只改密码就会
+            // 静默丢掉邮箱。与参考侧 UpdateSelfLogic 的 `if (!req.getEmail().isEmpty())`
+            // 以及本类 updateUser（第 700 行 `email != null && !email.isEmpty()`）保持一致：
+            // 空串 / 纯空白一律视为"本次不修改该字段"。
+            wrapper.set(AdminEntity::getEmail, email.trim());
         }
         if (extraInfo != null && !extraInfo.isEmpty()) {
             // 不能用 wrapper.set(AdminEntity::getExtraInfo, copy)：
@@ -345,7 +350,8 @@ public class AdminDomainService {
                 ? null
                 : new HashMap<>(extraInfo);
         try {
-            createAdminAtomic(trimmedUsername, trimmedInvite, passwordHash, optionalEmail, safeExtraInfo, uid);
+            createAtomicService.createAdminAtomic(
+                    trimmedUsername, trimmedInvite, passwordHash, optionalEmail, safeExtraInfo, uid);
         } catch (InviteUnavailableException e) {
             throw Status.PERMISSION_DENIED.withDescription("管理员邀请码错误").asRuntimeException();
         } catch (UsernameTakenException e) {
@@ -363,64 +369,16 @@ public class AdminDomainService {
     }
 
     /**
-     * 4 步事务方法：对应 Go 端 CreateAdminLogic.CreateAdmin 的 4 步原子事务。
-     * <pre>
-     *   W1 查 invite（悲观锁 SELECT ... FOR UPDATE by code）—— 不存在 / 已用 / 已过期 → InviteUnavailableException
-     *   W2 查 username 冲突 —— 命中 → UsernameTakenException
-     *   W3 InsertOneAdmin —— 唯一冲突 → 原异常透传（由 caller 用 AdminExceptions.isUniqueViolation 识别）
-     *   W4 UpdateAdminInviteUsed —— 标记 invite 已用
-     * </pre>
+     * CreateAdmin 的 4 步原子事务已移到 {@link AdminCreateAtomicService}。
      *
-     * <p>整段必须原子：用 {@code @Transactional} 包整个 4 步，任一抛异常 → 整体回滚。
-     * 与 user-rpc 端 UserDomainService 的 selectAvatarHistory / createAvatarHistory 同款
-     * default 方法 + @Transactional 模式。
+     * <p>原先它作为本类的 {@code @Transactional} 方法、由 {@code createAdmin(...)} 同类直接调用，
+     * 属于 self-invocation：Spring 的事务代理不拦截同类内部调用，
+     * {@code @Transactional} <b>静默失效</b>，4 步退化成 4 条独立 auto-commit 语句。
+     * 独立成 Bean 后由 {@code createAdmin} 跨 Bean 调用，代理才真正生效。
+     *
+     * <p>同时补上了 invite 行的 {@code SELECT ... FOR UPDATE} 悲观锁 —— 注释里写了"悲观锁"
+     * 但查询语句并没有锁，并发下同一个邀请码可以被消费多次。
      */
-    @Transactional
-    public Long createAdminAtomic(String username, String inviteCode, String passwordHash,
-                                  String email, Map<String, String> extraInfo, Long generatedUid) {
-        // W1 查 invite（悲观锁 SELECT ... FOR UPDATE）—— 必须在事务内做
-        AdminInviteEntity invite = adminInviteMapper.selectOne(
-                new LambdaQueryWrapper<AdminInviteEntity>().eq(AdminInviteEntity::getCode, inviteCode)
-        );
-        if (invite == null) {
-            throw new InviteUnavailableException("invite code not found: " + inviteCode);
-        }
-        LocalDateTime now = LocalDateTime.now();
-        if (invite.getUsedAt() != null || !invite.getExpiresAt().isAfter(now)) {
-            throw new InviteUnavailableException("invite code expired or used: " + inviteCode);
-        }
-
-        // W2 查 username 冲突（事务内）
-        AdminEntity existing = adminMapper.selectOne(
-                new LambdaQueryWrapper<AdminEntity>().eq(AdminEntity::getUsername, username)
-        );
-        if (existing != null) {
-            throw new UsernameTakenException("admin already exists with username: " + username);
-        }
-
-        // W3 插入 admin（事务内）
-        AdminEntity admin = new AdminEntity();
-        admin.setUid(generatedUid);
-        admin.setUsername(username);
-        admin.setPassword(passwordHash);
-        admin.setEmail(email);   // nullable，null 表示不填
-        if (extraInfo != null && !extraInfo.isEmpty()) {
-            admin.setExtraInfo(new HashMap<>(extraInfo));
-        }
-        adminMapper.insert(admin);
-
-        // W4 标记 invite used（事务内）
-        AdminInviteEntity inviteUpdate = new AdminInviteEntity();
-        inviteUpdate.setUsedByUid(generatedUid);
-        inviteUpdate.setUsedAt(now);
-        LambdaUpdateWrapper<AdminInviteEntity> inviteWrapper = new LambdaUpdateWrapper<>();
-        inviteWrapper.eq(AdminInviteEntity::getId, invite.getId())
-                .set(AdminInviteEntity::getUsedByUid, generatedUid)
-                .set(AdminInviteEntity::getUsedAt, now);
-        adminInviteMapper.update(null, inviteWrapper);
-
-        return generatedUid;
-    }
 
     // ============== 6. CreateInviteCode ==============
 

@@ -110,12 +110,20 @@ public class UserController {
     // ============== JWT-protected（7 个） ==============
 
     @PostMapping("/logout")
-    public LogoutResp logout(@RequestBody LogoutReq req, HttpServletRequest httpRequest) {
+    // L4 idiomatization（强制留痕 + Go ↔ RAG 对照）：
+    //   Go 出处：service/user/user/api/internal/handler/user/logouthandler.go —— Go 端
+    //     handler.Entries() 取 `LogoutReq{}` 空 struct，未要求请求带 body；
+    //   改 required=false 后空 body 的 POST /user/v1/logout 与 Go 端等价调用（uid 走 JWT）。
+    //   语义等价论证：本端从 JWT attribute 取操作人，body 字段不参与，故 body 缺失不影响业务分支。
+    public LogoutResp logout(@RequestBody(required = false) LogoutReq req, HttpServletRequest httpRequest) {
         return userLogoutService.logout(req, httpRequest);
     }
 
     @PostMapping("/get")
-    public GetUserResp getUser(@RequestBody GetUserReq req, HttpServletRequest httpRequest) {
+    // L4 idiomatization：Go 端 handler 取的是空 struct（uid 由调用方走 JWT 解析逻辑，
+    // 不在 body），故 required=false；Java 端由 query/body 改为走 JWT 解析只取 uid，
+    // body 不再携带任何字段。
+    public GetUserResp getUser(@RequestBody(required = false) GetUserReq req, HttpServletRequest httpRequest) {
         return userGetService.getUser(req, httpRequest);
     }
 
@@ -125,7 +133,8 @@ public class UserController {
     }
 
     @PostMapping("/delete")
-    public DeleteUserResp deleteUser(@RequestBody DeleteUserReq req, HttpServletRequest httpRequest) {
+    // L4 idiomatization（同 logout/get）：Go 端 DeleteUserReq{} 空 body。
+    public DeleteUserResp deleteUser(@RequestBody(required = false) DeleteUserReq req, HttpServletRequest httpRequest) {
         return userDeleteService.deleteUser(req, httpRequest);
     }
 
@@ -140,7 +149,8 @@ public class UserController {
     }
 
     @PostMapping("/avatar/history")
-    public GetAvatarHistoryResp getAvatarHistory(@RequestBody GetAvatarHistoryReq req, HttpServletRequest httpRequest) {
+    // L4 idiomatization：Go 端 GetAvatarHistoryReq{} 空 struct。
+    public GetAvatarHistoryResp getAvatarHistory(@RequestBody(required = false) GetAvatarHistoryReq req, HttpServletRequest httpRequest) {
         return avatarHistoryService.getAvatarHistory(req, httpRequest);
     }
 }

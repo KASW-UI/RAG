@@ -87,7 +87,10 @@ public class AdminUpdateUserService {
         log.info("updateUser success, operator_id={} target_uid={}", operatorId, req.getUid());
 
         UpdateUserResp resp = new UpdateUserResp();
-        resp.setSuccess(rpcResp.getSuccess());
+        // 与参考侧 UpdateUserLogic.java:129 1:1：显式 true。
+        // 不能透传 rpcResp.getSuccess()——admin.proto 的 UpdateSelfResp/UpdateUserResp
+        // 在 admin-rpc 未显式 set 时 proto3 默认值是 false，透传会把"成功"报成失败。
+        resp.setSuccess(true);
         if (rpcResp.hasUser()) {
             UserInfo ui = support.fromProto(rpcResp.getUser());
             resp.setUser(ui);
@@ -96,11 +99,6 @@ public class AdminUpdateUserService {
     }
 
     private static long parseUid(String uidStr) {
-        if (uidStr == null || uidStr.isEmpty()) return 0L;
-        try {
-            return Long.parseLong(uidStr);
-        } catch (NumberFormatException e) {
-            return 0L;
-        }
+        return AdminApiSupport.parseUid(uidStr);
     }
 }

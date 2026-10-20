@@ -23,5 +23,5 @@ import org.apache.ibatis.annotations.Mapper;
 public interface AdminInviteMapper extends BaseMapper<AdminInviteEntity> {
     // 标准 CRUD 由 BaseMapper 提供
     // 复杂方法（findAdminInviteByCodeForUpdate / updateAdminInviteUsedInTx）
-    // 在 AdminDomainService.createAdminAtomic default 方法里编排。
+    // 在 AdminCreateAtomicService.createAdminAtomic 里编排（含 SELECT ... FOR UPDATE 悲观锁）。
 }

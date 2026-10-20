@@ -23,7 +23,20 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
  *   <li>与 {@link GlobalExceptionHandler} 配合：异常路径走业务码 + HTTP 状态码，正常路径走 {@code data} 字段</li>
  * </ul>
  *
- * <p>L1 wire 契约冻结：成功路径 {@code {code: 200, msg: "OK", data: <controller 返回值>}}。
+ * <p>L1 wire 契约冻结：成功路径 {@code {code: 200, msg: "OK", data: <controller 返回值>}}；
+ * 失败路径 {@code {code: <业务码>, msg: <提示语>, data: null}}（由
+ * {@link GlobalExceptionHandler} 直接产出）。两者都<b>只包一层</b>。
+ *
+ * <p><b>为什么必须在 beforeBodyWrite 里判空并放行 {@link Response}</b>：
+ * {@code GlobalExceptionHandler} 的所有 {@code @ExceptionHandler} 返回
+ * {@code ResponseEntity<Response>}。Spring 的 {@code HttpEntityMethodProcessor}
+ * <b>并没有覆写</b> {@code writeWithMessageConverters}，而是继承
+ * {@code AbstractMessageConverterMethodProcessor} 的实现；后者会查询 advice chain，
+ * 因此 {@code ResponseBodyAdvice} 对 {@code ResponseEntity} 同样生效。
+ * 若这里无条件再包一层，错误响应会变成
+ * {@code {"code":200,"msg":"OK","data":{"code":1003,...}}}——
+ * 顶层 code 恒为 200，所有按 {@code code != 200} 判定失败的客户端会全部失效。
+ * 该行为已由 {@code ResponseEnvelopeAdviceTest} 实测确认并锁定为回归用例。
  */
 @RestControllerAdvice
 public class GlobalResponseAdvice implements ResponseBodyAdvice<Object> {
@@ -38,10 +51,12 @@ public class GlobalResponseAdvice implements ResponseBodyAdvice<Object> {
     public Object beforeBodyWrite(Object body, MethodParameter returnType, MediaType selectedContentType,
                                   Class<? extends HttpMessageConverter<?>> selectedConverterType,
                                   ServerHttpRequest request, ServerHttpResponse response) {
-        // body 已经是被 Controller 返回的 DTO；包成 envelope
-        // （如果 Controller 已经返回 Response，beforeBodyWrite 不会再被调用；
-        //   此处不重复包装，因为 Spring 会按返回值类型 chain 多个 advice，
-        //   真正的 Response 包法在 GlobalExceptionHandler.handle 方法里完成）
+        // 已经是 envelope 的（@ExceptionHandler 返回的 ResponseEntity 的 body）不再包；
+        // null body（如框架级错误直接返回无 body 的 ResponseEntity）也不能包，
+        // 否则会把 400/405/415 的空响应体篡改成 {"code":200,...}。
+        if (body == null || body instanceof Response) {
+            return body;
+        }
         return new Response(ErrorCode.SUCCESS.getCode(), ErrorCode.SUCCESS.getMsg(), body);
     }
 }

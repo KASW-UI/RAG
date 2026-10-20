@@ -75,7 +75,9 @@ public class AdminUpdateSelfService {
         }
 
         UpdateSelfResp resp = new UpdateSelfResp();
-        resp.setSuccess(rpcResp.getSuccess());
+        // 与参考侧 UpdateSelfLogic.java:134 1:1：必须显式 true，
+        // 不透传 rpcResp.getSuccess()（proto3 默认 false 会把成功报成失败）。
+        resp.setSuccess(true);
         resp.setAdmin(support.fromProto(rpcResp.getAdmin()));
         return resp;
     }

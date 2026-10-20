@@ -99,11 +99,34 @@ public interface UserMapper extends BaseMapper<UserEntity> {
             any = true;
         }
         if (newUser.getExtraInfo() != null) {
-            wrapper.set(UserEntity::getExtraInfo, newUser.getExtraInfo());
+            // ⚠️ 不能用 wrapper.set(UserEntity::getExtraInfo, map)：
+            //    LambdaUpdateWrapper.set 把参数以 Object 形式塞进 ew.paramNameValuePairs，
+            //    不走实体字段上的 @TableField(typeHandler = JsonbTypeHandler.class)，
+            //    MyBatis 只能按 javaType=Object 猜 handler → 绑成 varchar / hstore，
+            //    Postgres 对 jsonb 列直接拒收（"column extra_info is of type jsonb but
+            //    expression is of type character varying"），UpdateUser 必现失败。
+            //    正确做法与 admin-rpc 端 AdminDomainService 第 268/705 行同款：
+            //    直接写 SQL 片段 + 显式 CAST，参数按 String 绑定再转 jsonb。
+            //    （实体上的 typeHandler 只对 MP 自己生成的 insert/updateById 生效。）
+            wrapper.setSql("extra_info = CAST({0} AS jsonb)", toJson(newUser.getExtraInfo()));
             any = true;
         }
         if (!any) return 0;
         return update(null, wrapper);
+    }
+
+    /**
+     * Map → JSON 文本，供 {@code wrapper.setSql("extra_info = CAST({0} AS jsonb)", ...)} 使用。
+     *
+     * <p>刻意不在这里吞异常：序列化失败属于编程/数据错误，向上抛由 domain 层映射成
+     * {@code Status.INTERNAL "JSON序列化失败"}，与 admin-rpc 端 {@code toJson} 行为一致。
+     */
+    private static String toJson(java.util.Map<String, String> map) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(map);
+        } catch (Exception e) {
+            throw new IllegalStateException("extraInfo JSON serialize failed", e);
+        }
     }
 
     /**

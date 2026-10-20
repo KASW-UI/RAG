@@ -3,6 +3,7 @@ package com.rag.users.admin.api.interceptor;
 import com.rag.common.exception.BusinessException;
 import com.rag.users.admin.api.config.AdminApiProperties;
 import com.rag.users.common.errmsg.ErrorCode;
+import com.rag.users.common.jwt.JwtUtil;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jws;
 import io.jsonwebtoken.Jwts;
@@ -16,7 +17,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import javax.crypto.SecretKey;
-import java.nio.charset.StandardCharsets;
 import java.util.Set;
 
 /**
@@ -55,8 +55,16 @@ public class AdminJwtAuthInterceptor implements HandlerInterceptor {
     private final StringRedisTemplate redisTemplate;
 
     public AdminJwtAuthInterceptor(AdminApiProperties properties, StringRedisTemplate redisTemplate) {
-        byte[] secretBytes = properties.getAdminAuth().getAccessSecret().getBytes(StandardCharsets.UTF_8);
-        this.key = Keys.hmacShaKeyFor(secretBytes);
+        // L4 idiomatization（强制留痕 + Go ↔ RAG 对照）：
+        //   Go 出处：service/user/common/jwt/jwt.go 的 `token.SignedString([]byte(secretKey))`
+        //     —— Go 端 golang-jwt 不校验 key 长度，15 字节 admin secret 能直接签。
+        //   Java 表达差异：jjwt 0.12 强制 ≥32 字节（HS256 / RFC 7518），故拦截器构造器
+        //     调 Keys.hmacShaKeyFor 时必须先补齐；本构造器与 JwtUtil.getToken 共用
+        //     JwtUtil.padToHmacKeySize，强制签发与验签落在同一份 32 字节 key 上，
+        //     否则 admin-api 在默认 15 字节密钥下 Bean 创建即抛 WeakKeyException。
+        //   语义等价论证：padding 是 zero-fill，落到 HS256 上字节一致 → token 形状、
+        //     claim、exp 全一致；Go ↔ RAG 仅在 key 长度这一非行为字段上收敛。
+        this.key = Keys.hmacShaKeyFor(JwtUtil.padToHmacKeySize(properties.getAdminAuth().getAccessSecret()));
         this.redisTemplate = redisTemplate;
     }
 
