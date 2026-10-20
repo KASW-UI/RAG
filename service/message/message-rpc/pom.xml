@@ -17,20 +17,57 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
-    <!--
-        空骨架依赖：仅满足 mvn compile 通过。
-        故意不引入：
-          - message-proto：MessageServiceGrpc stub 还没用到；Impl 在 Phase 1 写
-          - common（service/common）：避免连带编译 ServiceContext / NacosBootstrap；Phase 1 接
-          - devh grpc-server-spring-boot-starter：暂无 @GrpcService Impl；Phase 1 接
-          - grpc-core：同上
-          - spring-cloud-starter-alibaba-nacos-discovery：NacosBootstrap 在 Phase 1 接
-          - users-common / jjwt：message-rpc 是 RPC 端不验 JWT；Phase 1 不需要
-        Phase 1（落到 MyBatis-Plus + 9 合 1 + 接 gRPC/Nacos）时按需追加。
-    -->
-
     <dependencies>
-        <!-- ============== Spring Boot 基础 ============== -->
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <!--
+            message-proto：MessageServiceGrpc（server ImplBase + client Stub）由本模块直接引用。
+            HUMAN_ONLY.MD 强约束：
+              - @TableName("message_*") 取代 GORM @gorm tag
+              - Mapper extends BaseMapper<Entity> 取代 Hibernate EntityManager
+              - Flyway V*__create_*.sql 取代 GORM AutoMigrate
+              - 9 个 Logic 合并为 1 个 MessageDomainService（grpc-java 框架约束），
+                server 入口为 1 个 MessageRpcServiceImpl thin wrapper。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>message-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            user-proto：UserServiceBlockingStub（Facade 调用，校验 user 域 ID）。
+            admin-proto：AdminServiceBlockingStub（Facade 调用，校验 admin 域 ID + GetUserList 广播）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>user-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>admin-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            message-common：MessageErrorCode / MessageErrorMessages / MessageGrpcError。
+            业务错误码 + gRPC code ↔ biz code 双向转换在 message-common 完成（带 focused tests）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>message-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            service/common（artifactId=common）：服务级共享
+            LoggerFactoryBean / SnowflakeBean / OpenTelemetry Tracer / observability。
+            Go 端 snowflake.GetID 对应 SnowflakeBean.nextId。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot 基础（gRPC server 无 web） ============== -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
@@ -39,9 +76,57 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
+        <!--
+            spring-cloud-starter-alibaba-nacos-discovery 通过反射引用
+            org.springframework.boot.web.server.context.WebServerInitializedEvent。
+            message-rpc 不引 spring-boot-starter-web，但 spring-boot-web-server 含这个类 + 抽象接口。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-web-server</artifactId>
+        </dependency>
 
-        <!-- ============== 数据访问：Postgres + MyBatis-Plus + Flyway ============== -->
-        <!-- 版本由根 pom dependencyManagement 管理 -->
+        <!-- ============== 3. gRPC server + client ============== -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+        <!-- @GrpcService 自动起 gRPC server（替代 zrpc.MustNewServer） -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-server-spring-boot-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!--
+            @GrpcClient("user-rpc") / @GrpcClient("admin-rpc") 用：自动发现 + channel pool
+            （替代 Go 端 zrpc.MustNewClient + userservice.NewUserService(...)）
+        -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>3.1.0.RELEASE</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ============== 4. 数据访问：Postgres + MyBatis-Plus + Flyway ============== -->
+        <!--
+            对应 Go 端 Postgres.* 配置 + GORM 模型
+            HUMAN_ONLY.MD 强制 MyBatis-Plus 取代 JPA：
+              - @TableName("message_*") + @TableId 取代 @Entity/@Table + @Id
+              - Mapper extends BaseMapper<Entity> 取代 EntityManager.createQuery
+              - Flyway V*__create_*.sql 取代 Hibernate ddl-auto: update
+            ⚠️ strict HUMAN_ONLY 偏离 Go GORM 默认：表名 message_* 与 Go 同
+        -->
         <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
@@ -59,5 +144,50 @@
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
+
+        <!-- ============== 5. Metrics：Micrometer + Prometheus ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 6. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- ============== 7. OpenTelemetry OTLP exporter ============== -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 8. Nacos service discovery ============== -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- ============== 9. JSONB 字段支持（Notification.extra 列 PG 类型 jsonb） ============== -->
+        <!--
+            对应 Go 端 JSONMap 自定义 driver.Valuer / sql.Scanner。
+            Java 端用 MyBatis-Plus 内置 Jackson TypeHandler（Map<String,String> ↔ PGobject(jsonb））。
+            具体见 NotificationMapper 的 typeHandler 配置 / NotificationEntity extra 字段注解。
+        -->
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
 </project>

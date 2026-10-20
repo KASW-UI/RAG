@@ -1,23 +1,42 @@
 # =============================================================================
-# message-rpc application.yml —— 空骨架
+# message-rpc application.yml —— 对应 Go 端 service/message/rpc/etc/message.yaml
 # =============================================================================
-# 目标树对应 HUMAN_ONLY.MD「Java 理论文件树」。
-# 当前为 Phase 0 空骨架：仅 spring.application.name + 占位 datasource / flyway 段。
-# Phase 1 补 grpc.server.port / grpc.client.{user-rpc,admin-rpc} / nacos.discovery /
-# management.endpoints / otel.* / message.{list,broadcast} 段。
+# 1:1 迁移原则：保留 Go yaml 同名字段；Java 端用 Spring / devh starter /
+# Spring Cloud Alibaba 自身字段名表达相同语义。
 # =============================================================================
 
 spring:
   application:
+    # 对应 Go Name: message.rpc —— 服务发现 / Nacos / OTEL 都按这个名注册
     name: message-rpc
 
-  # Phase 1 补真实 datasource + hikari + mybatis-plus 配置
-  # 这里给个连接字符串占位让 Flyway 能在空骨架下 init 失败也不影响 mvn compile
+  # ============== Postgres ==============
+  # 对应 Go Postgres.*：Host / Port / User / Password / DBName / Mode
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:rag}
-    username: ${POSTGRES_USER:postgres}
-    password: ${POSTGRES_PASSWORD:postgres}
+    url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}
+    username: ${POSTGRES_USER:admin}
+    password: ${POSTGRES_PASSWORD:password}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 100     # 对应 Go sqlDB.SetMaxOpenConns(100)
+      minimum-idle: 10           # 对应 Go sqlDB.SetMaxIdleConns(10)
+
+  # ============== MyBatis-Plus（strict HUMAN_ONLY 取代 JPA） ==============
+  mybatis-plus:
+    configuration:
+      map-underscore-to-camel-case: true   # snake_case 列名 → camelCase 字段
+      default-fetch-size: 100
+    global-config:
+      db-config:
+        # 表名 / 主键策略在 Entity @TableName / @TableId 上显式钉死，不靠全局策略
+        id-type: ASSIGN_ID                 # 雪花 ID（与 Go 端 snowflake.GetID 等价）
+      banner: false
+
+  # 关闭 JPA ddl-auto（HUMAN_ONLY 严格 MyBatis-Plus，不引 spring-data-jpa）
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
 
   flyway:
     enabled: true
@@ -25,7 +44,84 @@ spring:
     locations: classpath:db/migration
     schemas: public
 
+  # ============== Nacos Discovery ==============
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        # 注册到 Nacos 的 group 与 message-api 保持一致
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+
+# ============== gRPC server（devh） ==============
+# 对应 Go ListenOn: 0.0.0.0:8082
+grpc:
+  server:
+    port: 8082
+    address: 0.0.0.0
+    # Go 端 reflection 在 DevMode/TestMode 启用，Java 端由 devh starter 默认注册 reflection
+
+  # ============== gRPC client：user-rpc / admin-rpc（被调） ==============
+  # 对应 Go UserRpc: zrpc.RpcClientConf{ Etcd: { Hosts: [...], Key: "user.rpc" } }
+  # 与 Go AdminRpc: zrpc.RpcClientConf{ Etcd: { Hosts: [...], Key: "admin.rpc" } }
+  # Java 端 devh grpc-client-spring-boot-starter + Nacos discovery：用 service discovery
+  # 解析 "user-rpc" / "admin-rpc"，跟 Go etcd Key 寻址等价。
+  client:
+    user-rpc:
+      address: discovery://user-rpc
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      negotiation-type: plaintext
+    admin-rpc:
+      address: discovery://admin-rpc
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      negotiation-type: plaintext
+
+# ============== message 服务专属配置 ==============
+# 对应 Go List { DefaultLimit: 20, MaxLimit: 100 } / Broadcast { PageSize: 200 }
+message:
+  list:
+    default-limit: 20
+    max-limit: 100
+  broadcast:
+    page-size: 200
+
+# ============== Actuator / Metrics ==============
+# 注意：grpc 进程内 Micrometer 已注册，外部 scrape 由 Prometheus 单独抓
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      # 与 Go prometheus 子系统名对齐：message_rpc_* —— 改这里相当于改 Go 里的
+      # prometheus.NewCounterVec(prometheus.CounterOpts{Subsystem: "message_rpc", ...})
+      application: message-rpc
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# ============== OpenTelemetry OTLP（与 Go Telemetry 字段对齐） ==============
+otel:
+  service:
+    name: message-rpc           # 对应 Go Telemetry.Name: message-rpc
+  exporter:
+    otlp:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:jaeger:4317}
+  traces:
+    exporter: otlp
+    sampler: parentbased_always_on   # 对应 Go Sampler: 1.0
+
 logging:
   level:
     root: INFO
     com.rag: INFO
+    io.grpc: WARN
