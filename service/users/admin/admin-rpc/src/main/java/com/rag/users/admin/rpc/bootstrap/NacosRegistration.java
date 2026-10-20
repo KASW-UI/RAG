@@ -32,7 +32,13 @@ import java.util.Enumeration;
  * 本类用同样路径：{@link NacosServiceManager#getNamingService()} 拿到
  * {@link NamingService}，显式 {@code registerInstance}。
  */
-@Component
+/**
+ * bean 名必须显式错开：NacosServiceRegistryAutoConfiguration 里有个
+ * {@code @Bean nacosRegistration()}，与本类的默认 bean 名（类名首字母小写）撞名 →
+ * BeanDefinitionOverrideException → 应用启动失败。
+ * （user-rpc 同款问题，见该模块 NacosRegistration 的注释。）
+ */
+@Component("adminRpcNacosRegistration")
 public class NacosRegistration {
 
     private static final Logger log = LoggerFactory.getLogger(NacosRegistration.class);

@@ -56,7 +56,7 @@ public class AdminEntity {
     @TableField("email")
     private String email;
 
-    @TableField(value = "extra_info", typeHandler = JacksonTypeHandler.class)
+    @TableField(value = "extra_info", typeHandler = com.rag.users.admin.rpc.mapper.JsonbTypeHandler.class)
     private Map<String, String> extraInfo;
 
     @TableField(value = "create_time", insertStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.NEVER, updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.NEVER)

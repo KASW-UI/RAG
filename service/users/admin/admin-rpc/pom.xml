@@ -103,6 +103,17 @@
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-core</artifactId>
         </dependency>
+        <!--
+            Spring Boot 4 把各技术栈的自动配置拆成了独立 artifact。
+            flyway-core 只是库，真正把 spring.flyway.* 接上的是 spring-boot-flyway
+            里的 org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration。
+            只引 flyway-core 不引它 → 配置完全惰性，Flyway 从不执行，
+            db/migration/V1~V3__create_*.sql 一条都不会跑，admin / admin_invite / user 表不会被建出来。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>

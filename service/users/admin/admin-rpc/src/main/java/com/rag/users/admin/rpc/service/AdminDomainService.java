@@ -260,8 +260,12 @@ public class AdminDomainService {
             wrapper.set(AdminEntity::getEmail, trimmed);
         }
         if (extraInfo != null && !extraInfo.isEmpty()) {
-            Map<String, String> copy = new HashMap<>(extraInfo);
-            wrapper.set(AdminEntity::getExtraInfo, copy);
+            // 不能用 wrapper.set(AdminEntity::getExtraInfo, copy)：
+            //   LambdaUpdateWrapper 的参数以 Object 形式塞进 ew.paramNameValuePairs，
+            //   不走字段上的 @TableField(typeHandler=...)，MyBatis 只能按 javaType=Object
+            //   猜 handler → 猜成 PG 的 hstore → "hstore 扩展尚未安装"。
+            // 改为直接写 SQL 片段 + 显式 CAST，参数按 String 绑定再转 jsonb。
+            wrapper.setSql("extra_info = CAST({0} AS jsonb)", toJson(extraInfo));
         }
 
         try {
@@ -697,8 +701,8 @@ public class AdminDomainService {
             wrapper.set(UserEntity::getEmail, email);
         }
         if (extraInfo != null && !extraInfo.isEmpty()) {
-            Map<String, String> copy = new HashMap<>(extraInfo);
-            wrapper.set(UserEntity::getExtraInfo, copy);
+            // 同 updateSelf：wrapper.set() 走 Object → 被当成 hstore，必须用 setSql + CAST
+            wrapper.setSql("extra_info = CAST({0} AS jsonb)", toJson(extraInfo));
         }
 
         // W5 update
@@ -863,5 +867,18 @@ public class AdminDomainService {
             throw new NotFoundException("user not found by username: " + username);
         }
         return user;
+    }
+
+    /**
+     * Map → JSON 文本，供 {@code wrapper.setSql("extra_info = CAST({0} AS jsonb)", ...)} 使用。
+     * 序列化失败按内部错误处理——extraInfo 是 Map<String,String>，正常不会失败。
+     */
+    private static String toJson(Map<String, String> map) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(map);
+        } catch (Exception e) {
+            log.error("admin extraInfo JSON serialize failed", e);
+            throw Status.INTERNAL.withDescription("JSON序列化失败").asRuntimeException();
+        }
     }
 }

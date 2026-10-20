@@ -3,6 +3,7 @@ package com.rag.users.admin.rpc;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 
 /**
@@ -18,17 +19,22 @@ import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
  *   <li>{@code AdminSeederBootstrap}（{@code @EventListener(ApplicationReadyEvent)}）承载启动期
  *       业务（ensureDefaultAdmin），失败时抛 IllegalStateException 让 SpringApplication 启动失败
  *       （对齐 Go 端 logx.Must 行为）</li>
+ *   <li>{@code @MapperScan} 显式注册 mapper 接口；没有它 AdminMapper / AdminInviteMapper /
+ *       UserMapper 都不会成为 bean</li>
  *   <li>{@code @EnableDiscoveryClient} 启用 Nacos 自动发现（admin-api 通过 discovery://admin-rpc 寻址）</li>
  *   <li>grpc-spring-boot-starter 通过 @GrpcService 自动注入 AdminServiceImplBase 实现类</li>
  * </ul>
  *
- * <p>Phase 3 包扫描路径：{@code com.rag.users.admin.rpc} + {@code com.rag.common}。
+ * <p>包扫描范围：只扫 {@code com.rag.users.admin.rpc} 本模块。
  */
-@SpringBootApplication(scanBasePackages = {
-        "com.rag.users.admin.rpc",
-        "com.rag.common"
-})
+@SpringBootApplication // 只扫本模块。com.rag.common 不能进 scanBasePackages：
+//   那个包下有 HttpMiddlewareFilter（jakarta.servlet.Filter），而 admin-rpc 是纯 gRPC 进程、
+//   pom 里刻意不引 servlet 依赖，全包扫描会把 servlet 类拖进来直接启动失败：
+//     java.io.FileNotFoundException: class path resource [jakarta/servlet/Filter.class] cannot be opened
+//   本模块对 service/common 只用静态工具 com.rag.common.snowflake.Snowflake，
+//   不注入其中任何 bean，因此无需扩大扫描范围。
 @ConfigurationPropertiesScan("com.rag.users.admin.rpc.config")
+@MapperScan("com.rag.users.admin.rpc.mapper") // 没有它 AdminMapper/AdminInviteMapper/UserMapper 都不会注册成 bean
 @EnableDiscoveryClient
 public class AdminRpcApplication {
 
