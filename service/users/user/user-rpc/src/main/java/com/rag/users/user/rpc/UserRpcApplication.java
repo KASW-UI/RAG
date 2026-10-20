@@ -1,10 +1,15 @@
 package com.rag.users.user.rpc;
 
+import com.rag.common.spring.LoggerFactoryBean;
+import com.rag.common.spring.SnowflakeBean;
+import com.rag.common.spring.SnowflakeProperties;
 import com.rag.users.user.rpc.config.UserRpcProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
+import org.springframework.context.annotation.Import;
 
 /**
  * UserService gRPC server 入口。
@@ -22,10 +27,16 @@ import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
  * </ul>
  */
 @SpringBootApplication // 等价于 @SpringBootConfiguration、@EnableAutoConfiguration、@ComponentScan 三者的组合
-                        // @ComponentScan：启用组件扫描，默认扫描启动类所在包及其所有子包，把 @Component、@Service、@Repository、@Controller 等注解的类注册为 Bean。
+                        // @ComponentScan：启用组件扫描，默认扫描启动类所在包及其所有子包（本模块自己的 bean）。
+                        //                      注意：**不能**把 com.rag.common 加进 scanBasePackages —— 那个包下有
+                        //                      HttpMiddlewareFilter（jakarta.servlet.Filter），而 user-rpc 是纯 gRPC
+                        //                      进程、故意不引 web 依赖，全包扫描会把 servlet 类拖进来直接启动失败。
+                        //                      只需要的 bean 用 @Import 精确引入，见下。
                         // @EnableAutoConfiguration：启用 Spring Boot 的自动配置机制，根据 classpath 上的依赖自动装配 Bean（比如引入 grpc-spring-boot-starter 后自动配置 gRPC server）。
 @EnableConfigurationProperties(UserRpcProperties.class) // 让 Spring 识别并注册那些标了 @ConfigurationProperties 的类，把它们变成容器里的 Bean
 @EnableDiscoveryClient // Spring Cloud 提供的通用注解，用来启用服务发现客户端的能力。
+@MapperScan("com.rag.users.user.rpc.mapper") // application.yaml 注释里声明依赖它，但代码一直没加 → UserMapper/UserAvatarHistoryMapper 注册不上
+@Import({SnowflakeBean.class, SnowflakeProperties.class, LoggerFactoryBean.class}) // service/common 里 user-rpc 真正需要的 3 个 bean
 public class UserRpcApplication {
     public static void main(String[] args) {
         SpringApplication.run(UserRpcApplication.class, args);

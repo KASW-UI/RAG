@@ -42,8 +42,18 @@ import java.util.Enumeration;
  *   - 取代了原 internal.svc.NacosBootstrap
  *   - user-api 通过 discovery://user-rpc 发现本进程
  *   - 自定义 metadata: gRPC port（让 user-api 端能找到 49210 而不是默认 9004）
+ *
+ * <p><b>DRIFT-NEW-013</b>：bean 名必须显式指定，不能用类名默认推导。
+ * {@code NacosServiceRegistryAutoConfiguration} 里有个 {@code @Bean nacosRegistration()}，
+ * 而本类叫 {@code NacosRegistration} → {@code @Component} 默认 bean 名恰好也是
+ * {@code nacosRegistration}，两者撞名 → {@code BeanDefinitionOverrideException}
+ * → 整个应用上下文启动失败。保留类名（NacosRegistration 是 HUMAN_ONLY.MD 定的
+ * bootstrap/ 布局），只把 bean 名错开。
+ *
+ * <p>参考侧（Sea-RideTheWind_java）这个类叫 {@code NacosBootstrap}，
+ * bean 名 {@code nacosBootstrap} 不撞——是重构改名时踩到的。
  */
-@Component
+@Component("userRpcNacosRegistration")
 public class NacosRegistration {
 
     private static final Logger log = LoggerFactory.getLogger(NacosRegistration.class);

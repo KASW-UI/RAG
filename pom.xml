@@ -35,7 +35,22 @@
         <build-helper-maven-plugin.version>3.6.0</build-helper-maven-plugin.version>
         <os-maven-plugin.version>1.7.1</os-maven-plugin.version>
         <!-- MyBatis-Plus：BOM 统一管理版本；与 Spring Boot 4.0.8 兼容选 3.5.14+ -->
-        <mybatis-plus.version>3.5.14</mybatis-plus.version>
+        <mybatis-plus.version>3.5.17</mybatis-plus.version>
+        <!--
+            mybatis-spring 必须强制锁版本，不能用 mybatis-plus-boot-starter 自带的那个。
+
+            实测（2026-10-20，user-rpc 真实 jar 启动）：
+              mybatis-plus-boot-starter:3.5.14 → org.mybatis:mybatis-spring:2.1.2
+              Spring Boot 4.0.8 带的是 Spring Framework 7.0.9（spring-beans / spring-context / spring-core 都是 7.0.9）
+              mybatis-spring 2.1.2 的 MapperFactoryBean 把 factoryBeanObjectType 注册成 String，
+              Spring 6+ 要求 Class / ResolvableType
+              → BeanDefinitionStoreException: Invalid value type for attribute 'factoryBeanObjectType'，
+                应用上下文直接启动失败。
+
+            之前 pom 里"Spring Boot 4.0.8 还未官方适配，但 3.5.14 走 mybatis-spring 适配链能跑"的判断，
+            已被实测推翻 —— 跑不起来。4.0.0 是对应 Spring 7 的那条线。
+        -->
+        <mybatis-spring.version>4.0.0</mybatis-spring.version>
         <!-- Flyway：不引入 BOM（org.flywaydb 没有 flyway-bom 这个 artifact；用 flyway-parent 但 parent 不适合消费者）
              改用 Spring Boot 4.0.8 的 spring-boot-dependencies BOM 自带的 Flyway 版本管理。
              如需显式锁定版本，在子 pom 直接写 <version> 即可。 -->
@@ -61,8 +76,8 @@
             </dependency>
             <!--
                 MyBatis-Plus：BOM 统一管 mybatis-plus-boot-starter / mybatis-plus-extension / mybatis-plus-jsqlparser 版本
-                Spring Boot 4.0.8 还未官方适配（截至 2026-10-18），但 3.5.14 走 mybatis-spring-boot 适配链能跑；
-                后续若 mybatis-plus-bom 给出 4.0 适配版可升
+                注意：BOM 里不包含 mybatis-spring 的版本（它不在 MP 的 BOM 管理范围内），
+                必须在这里单独锁，否则会退回 starter 自带的 2.1.2 → Spring Framework 7 下启动失败。
             -->
             <dependency>
                 <groupId>com.baomidou</groupId>
@@ -70,6 +85,12 @@
                 <version>${mybatis-plus.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- 强制把 mybatis-spring 顶到 4.0.0（对应 Spring 7 / Spring Boot 4） -->
+            <dependency>
+                <groupId>org.mybatis</groupId>
+                <artifactId>mybatis-spring</artifactId>
+                <version>${mybatis-spring.version}</version>
             </dependency>
             <!--
                 Flyway 不引入 BOM：org.flywaydb:flyway-bom 不存在（maven central 无此 artifact）

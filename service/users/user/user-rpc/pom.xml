@@ -137,6 +137,18 @@
             Flyway 10+ 拆出独立 PG adapter（不再走 jdbc 内置 driver detection）
             版本由根 pom dependencyManagement 管理
         -->
+        <!--
+            Spring Boot 4 把各技术栈的自动配置拆成了独立 artifact。
+            flyway-core 只是库，真正把 spring.flyway.* 接上的是 spring-boot-flyway
+            里的 org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration。
+            只引 flyway-core 不引它 → 配置完全惰性，Flyway 从不执行，
+            db/migration/V*__create_*.sql 一条都不会跑，表根本不会被建出来。
+            （2026-10-20 实测：应用能启动、mapper 注册成功，但 rag_verify 库里 0 张表。）
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-core</artifactId>
