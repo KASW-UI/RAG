@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.annotations.Insert;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -115,4 +116,36 @@ public interface ConversationMapper extends BaseMapper<ConversationEntity> {
             """)
     int touchUpdatedAt(@Param("conversationId") long conversationId,
                        @Param("now") LocalDateTime now);
+
+    /**
+     * 对应 Go 端 ListConversations 内的 total 计数：统计 operator 作为 p1 OR p2 的会话总数。
+     */
+    default long countByParticipant(int role, long id) {
+        LambdaQueryWrapper<ConversationEntity> w = new LambdaQueryWrapper<>();
+        w.and(q -> q.and(qq -> qq.eq(ConversationEntity::getParticipant1Role, role)
+                                .eq(ConversationEntity::getParticipant1Id, id))
+                     .or(qq -> qq.eq(ConversationEntity::getParticipant2Role, role)
+                                 .eq(ConversationEntity::getParticipant2Id, id)));
+        return selectCount(w);
+    }
+
+    /**
+     * 对应 Go 端 createConversationWithMessageTx 的 conversation INSERT。
+     */
+    @Insert("""
+            INSERT INTO message_conversation (
+              id, participant1_role, participant1_id, participant2_role, participant2_id,
+              status, pending_sender_role, pending_sender_id,
+              created_by_role, created_by_id,
+              last_message_id, last_message_preview, last_message_at,
+              created_at, updated_at
+            ) VALUES (
+              #{id}, #{participant1Role}, #{participant1Id}, #{participant2Role}, #{participant2Id},
+              #{status}, #{pendingSenderRole}, #{pendingSenderId},
+              #{createdByRole}, #{createdById},
+              #{lastMessageId}, #{lastMessagePreview}, #{lastMessageAt},
+              #{createdAt}, #{updatedAt}
+            )
+            """)
+    int insertConv(com.rag.message.message.rpc.domain.ConversationEntity conv);
 }
