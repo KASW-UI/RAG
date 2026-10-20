@@ -87,13 +87,19 @@ public class AdminApiSupport {
 
     /**
      * proto AdminInfo → DTO AdminInfo。
+     *
+     * <p><b>A-02（已修）· email 无条件输出</b>：Go 端 {@code types.AdminInfo} 的
+     * {@code Email string `json:"email"`} —— <b>没有 omitempty</b>，管理员邮箱为空时
+     * 序列化成 {@code "email":""}（字段出现、值为空串）。
+     * 本方法此前的 {@code if (!proto.getEmail().isEmpty())} 会让字段整个消失。
      */
     public AdminInfo fromProto(com.rag.users.admin.proto.AdminInfo proto) {
         if (proto == null) return null;
         AdminInfo dto = new AdminInfo();
         dto.setUid(proto.getUid());
         dto.setUsername(proto.getUsername() == null ? "" : proto.getUsername());
-        if (!proto.getEmail().isEmpty()) dto.setEmail(proto.getEmail());
+        // 总是 set：Go 的 AdminInfo.email 无 omitempty，空值也要输出 ""（DTO 侧 NON_NULL 不拦空串）
+        dto.setEmail(proto.getEmail() == null ? "" : proto.getEmail());
         if (proto.getExtraInfoCount() > 0) {
             Map<String, String> map = new HashMap<>(proto.getExtraInfoMap());
             dto.setExtraInfo(map);
@@ -103,7 +109,13 @@ public class AdminApiSupport {
 
     /**
      * proto UserInfo → DTO UserInfo。
-     * 注：admin.proto UserInfo 多一个 score 字段，但 admin-api DTO 不暴露 score（与 admin-rpc 端 1:1 保留 Go 行为）。
+     *
+     * <p>注：admin.proto UserInfo 多一个 score 字段，但 admin-api DTO 不暴露 score（与 admin-rpc 端 1:1 保留 Go 行为）。
+     *
+     * <p><b>注意与 {@link #fromProto(com.rag.users.admin.proto.AdminInfo)} 的差别</b>：
+     * Go 端 {@code types.UserInfo.Email} 的 tag 是 {@code `json:"email,omitempty"`} —
+     * <b>带 omitempty</b>，所以这里空值时<b>不</b> set，字段省略。
+     * 两者的差别只在 email 一处，不要顺手统一。
      */
     public com.rag.users.admin.api.dto.UserInfo fromProto(com.rag.users.admin.proto.UserInfo proto) {
         if (proto == null) return null;

@@ -78,11 +78,18 @@ public class AdminDomainService {
     /** Redis blacklist key 字面量前缀（D-006：必须与 user-rpc 的 "user:jwt_blacklist:" 区分） */
     private static final String BLACKLIST_KEY_PREFIX = "admin:jwt_blacklist:";
 
-    /** 默认 admin 用户名（与 Go 端 hardcoded "admin" 一致） */
+    /** 默认 admin 用户名（与 Go 端 svc/servicecontext.go 硬编码常量 defaultAdminUsername 一致） */
     public static final String DEFAULT_ADMIN_USERNAME = "admin";
 
-    /** 默认 admin 密码 fallback（Go 端 hardcoded "admin"，这里用 null 判断 fallback） */
-    public static final String DEFAULT_ADMIN_PASSWORD_FALLBACK = "admin";
+    /**
+     * 默认 admin 密码 —— 对应 Go 端 {@code svc/servicecontext.go:18} 的包内常量
+     * {@code defaultAdminPassword = "admin"}。
+     *
+     * <p><b>不是</b> {@code AdminRpcProperties.System.DefaultPassword}：Go 端该配置项
+     * （yaml 里 {@code "123456"}）只供 {@code ResetUserPasswordLogic} 重置<i>普通用户</i>密码，
+     * 与本常量无关。DRIFT-001 即由此处误接配置引发。
+     */
+    public static final String DEFAULT_ADMIN_PASSWORD = "admin";
 
     private final AdminMapper adminMapper;
     private final AdminInviteMapper adminInviteMapper;
@@ -321,10 +328,13 @@ public class AdminDomainService {
             throw Status.PERMISSION_DENIED.withDescription("管理员邀请码错误").asRuntimeException();
         }
 
+        // DRIFT-008（已修）：此处<b>不</b>校验 username 是否为空。
+        // Go 端 createadminlogic.go 没有该校验——username 为空串时会照常进事务、
+        // 查重（通常 not found）并 INSERT 成功，返回 uid。
+        // 本实现此前多加了一道 INVALID_ARGUMENT「用户名不能为空」，而
+        // AdminCreateService 的 switch 没有 INVALID_ARGUMENT case，会落到 default
+        // 被报成 1015「服务繁忙」——把一个本来能成功的建号请求报成服务端故障。
         String trimmedUsername = username == null ? "" : username.trim();
-        if (trimmedUsername.isEmpty()) {
-            throw Status.INVALID_ARGUMENT.withDescription("用户名不能为空").asRuntimeException();
-        }
 
         // bcrypt password（事务外，避免延长事务持有时间）
         String passwordHash;
@@ -550,11 +560,21 @@ public class AdminDomainService {
      * <p>keyword 非空时按 username/email LIKE 查询，否则全量。
      */
     public UserListResult getUserList(int page, int pageSize, String keyword) {
-        if (page <= 0) page = 1;
-        if (pageSize <= 0) pageSize = 20;
+        // DRIFT-006（已修）：keyword <b>不</b> trim。Go 端 model/admin.go:152-155 是
+        //   if len(keyword) > 0 { keyWord := "%" + keyword + "%" }
+        // 空白 keyword（" "）在 Go 侧 len>0 成立 → 走 LIKE '%  %' 过滤；
+        // 本实现此前用 keyword.trim().isEmpty() 判空并把 pattern 也 trim 过，
+        // 导致 keyword=" " 返回全量、keyword=" a " 匹配到不同的行。
+        boolean hasKeyword = keyword != null && !keyword.isEmpty();
+        String pattern = hasKeyword ? "%" + keyword + "%" : null;
 
-        boolean hasKeyword = keyword != null && !keyword.trim().isEmpty();
-        String pattern = hasKeyword ? "%" + keyword.trim() + "%" : null;
+        // DRIFT-007（已修）：此处<b>不</b>对 page/pageSize 做归一化。
+        // Go 端 model/admin.go:159-160 是 offset := (page-1)*pageSize，无任何保护，
+        // page=0 会算出负 offset 并让 PG 抛错，最终映射成 INTERNAL。
+        // 本实现此前的 if (page <= 0) page = 1 会把坏参数静默兜底成第 1 页，
+        // 掩盖调用方的分页 bug。分页默认值已上提到 admin-api 层（对应 Go 的
+        // `form:"page,default=1"` tag），rpc 层保持"不兜底"才是 Go 的语义。
+        //
 
         // count
         long total;

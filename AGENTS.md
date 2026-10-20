@@ -157,6 +157,28 @@ Go → Spring Boot 语义一致性审计 `service/users/user`（9 RPC + 9 HTTP �
 > （1006 在鉴权层与 Service 层都会出现，按码分流必然搅在一起）。
 > 锁定用例：`user-api` 的 `AuthenticationHttpStatusTest`（3 条，含「同码不同型 → 不同状态码」）。
 
+#### 3.4.3 `service/users/admin` 语义审计后的三条新增留档（2026-10-21，issue #71186443）
+
+Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTTP 端点）产出
+**10 项 SEMANTIC MISMATCH + 8 项 OBSERVABLE DIFFERENCE + 3 项 UNRESOLVED**。
+**9 项 MISMATCH + 2 项 wire 契约已修**，新增 **36 条回归测试**
+（`admin-rpc` 的 `AdminSemanticDriftRegressionTest` 12 条 + `admin-api` 的
+`AdminSemanticDriftApiRegressionTest` 24 条）。
+以下三条**是修复后仍然存在的有意偏离**：
+
+| # | 偏离 | 内容 | 理由 | 关闭条件 |
+|---|---|---|---|---|
+| **N-3** | **非法 uid 的错误分类** | Go admin 侧的 uid 走 `form:"uid,string"` 绑定，**key 缺失时静默保留零值**且不报错 ⇒ `uid=0` 进 rpc ⇒ 查无此人 ⇒ 返回 **`1003` 用户不存在**。RAG 对 null / 空 / 非数字一律返回 **`1017` 请求参数错误**（`AdminApiSupport.parseUid`） | **用户 2026-10-21 拍板：保留 RAG 的 1017**。Go 的 0 值路径是 go-zero form 绑定的**副作用**而非业务设计；把它复制过来会重新引入 `user-api` 已在 §6.1 第 9 项修掉的同类回归（坏请求被误分类成业务不存在，且掩盖调用方的参数拼装 bug）。**注意与 `user-api` 的区别**：那条修复成立是因为 user-api 的 Go 确实返回 1017；**admin 侧取参机制不同，不可跨模块套用结论** | 若坚持逐字复刻 Go 的 0 值路径，需把 `AdminApiSupport.parseUid` 改为返回 0，并同步删除 `AdminSemanticDriftApiRegressionTest` 的两条防回退断言 |
+| **N-4** | **`operator_id` 不恒为 0** | Go 的 `updateuser` / `banuser` / `unbanuser` / `delete` / `resetuserpassword` 读 `ctx["uid"]`，而 `rest.WithJwt` 写入 ctx 的 key 是 JWT claim 名 **`userId`** ⇒ 永远取不到 ⇒ `OperatorId` 恒为 **0**。RAG 五个端点都传真实 uid | **用户 2026-10-21 拍板：保留真实 uid**。该字段**不参与任何业务判定**，只写进 OTel span 的 `audit.operator_id` 属性；恒 0 会让审计日志失去操作人信息。影响面 = 可观测性数据，不是业务行为 | 若要求审计 span 与 Go 逐字一致，需在这 5 个 Service 里刻意丢弃 token 中的 uid |
+| **N-5** | **JWT HMAC 密钥长度** | Go 用 15 字节原始 secret 参与 HS256；RAG 用 `JwtUtil.padToHmacKeySize` zero-pad 到 32 字节 | jjwt 0.12 强制 key ≥256 bit。RAG 内部签发与验签共用同一份 padded key、自洽；代价是 **Go 签的 token 在 RAG 验不过，反之亦然**（两套部署各自闭环）。与 `user-api` 同款 | 若需跨部署互认 token，必须统一 key 长度——要么改 Go 侧 secret 到 ≥32 字节，要么 RAG 放弃 padding（jjwt 会抛 `WeakKeyException`） |
+
+> **这三条的共同教训**：与 N-1/N-2 不同，N-3/N-4/N-5 都是**「Go 的行为本身有缺陷」**
+> 而非「Go 表达得更地道」。真源冻结（§2）意味着 Go 的缺陷也会被冻结，于是产生了
+> 「按政策应当对齐、但对齐会让 RAG 变差」的真实张力。
+> **新的处置纪律**：这类项不得由单个 agent 自行判断，必须显式列出、用户签字、写进本节，
+> 并用**防回退测试**（`AdminSemanticDriftApiRegressionTest#parseUid_missingIsRequestParamError`）
+> 锁住现状 —— 否则下一个「语义一致性审计」agent 会把它当成新发现的漂移再「修」一遍。
+
 #### 3.4.1 `service/common` 的 Java 端差异（2026-10-21 逐行审计产出）
 
 Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 RAG 全部主源码，产出 20 项偏差、修复 21 处（分支 `row/common-fix-semantic-drift`，issue #71186341）。**以下 5 条是修复后仍然存在、且无法靠改代码消除的差异**。
@@ -295,6 +317,43 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 | ~~P1~~ | ~~user-rpc mapper `default` 方法上的 `@Transactional` 是否真生效~~ | ✅ **2026-10-21 已验证生效** | 新增 `AvatarTransactionWiringTest`（`@Configuration @EnableTransactionManagement(proxyTargetClass = false) @MapperScan`，与 Boot `TransactionAutoConfiguration` 同构；`MybatisSqlSessionFactoryBean` + `SqlSessionTemplate`；事务管理器换成**记录型**实现）。5 条用例全绿，其中 2 条是**真触发**：DataSource 的 `getConnection()` 抛异常，断言 `createAvatarHistory` / `selectAvatarHistory` 的记录序列恰为 **`begin → rollback`** 且无 `commit`。结论：`@Transactional` **确实生效**，头像 4/5 步原子性成立。**原表建议的修法「抽独立 `@Service` Bean」不需要** —— 问题从来不是自调用，而是**缺证据**。**效力边界**：无真实 PG，故只证明「事务边界装上了、异常走回滚分支」，不证明 jsonb `CAST` 等 PG 行为（§3.3） |
 | **P2** | **admin-api 全部 13 个端点 `@RequestBody` 仍是 `required=true`** | 2026-10-21 | user-api 侧同类问题已修（`UserController.java:118/126/137/153`），admin-api 未同步 ⇒ `/admin/v1/logout` 等空 body 请求返回 400，与 Go 语义漂移 |
 | **P3** | `admin-api` 的 `AdminApiSupport.codeFromRPCError` 未删，且与 `GlobalExceptionHandler.mapRPCStatusToCode` 重复 | 2026-10-21 | 当前靠 service 层精确业务码优先兜底，属**潜在**语义漂移：新增 Service 漏写分支会静默落到 advice 的默认映射。**2026-10-21 审计已实证这不是「潜在」而是「已发生」**：`user-api` 的 `AvatarSelectService` 就因为走通用映射，把 Go 的 `NOT_FOUND → 500` 变成 `1003`（DRIFT-003，已修）。现已在该 Service 显式写出 Go 的整个 switch |
+| ~~P1~~ | ~~**`service/users/admin` 全部 10 项 SEMANTIC MISMATCH**~~ | ✅ **2026-10-21 已修**（issue #71186443） | 见 §6.2.2 |
+| **P3** | `admin-rpc` 三个 Mapper 的 javadoc 与实现不符 | 2026-10-21 | `AdminMapper` / `AdminInviteMapper` / `UserMapper` 的类注释都声称「复杂方法写在 Mapper 的 `default` 方法里，用 `@Select` + `@Transactional`」，实际三个接口都是**空壳**，`findAdminInviteByCodeForUpdate` / `updateAdminInviteUsed` / 分页查询全在 `AdminDomainService` 与 `AdminCreateAtomicService` 里。**不影响行为**（悲观锁实测生效），但属 §3.2「有出处、出处指错位置」的文档级病灶，会让后续 review 误判机制归属 |
+
+### 6.2.2 `service/users/admin` 语义审计修复清单（issue #71186443，2026-10-21）
+
+审计范围：Go `service/user/admin/{rpc,api}` 14 logic + 12 api logic + model + middleware
+↔ RAG `service/users/admin/{admin-rpc,admin-api,admin-proto}`。结论 **SEMANTICALLY NOT EQUIVALENT**。
+**已修 12 项（9 MISMATCH + 2 wire 契约 + 1 处随修复连带纠正的文档病灶）**，留档 3 项见 §3.4.3 的 N-3/N-4/N-5。
+
+| # | 类别 | 位置 | Go 行为 | 修法 |
+|---|---|---|---|---|
+| DRIFT-001 | MISMATCH | `AdminSeederBootstrap` | seeder 用包内常量 `defaultAdminPassword = "admin"`（`svc/servicecontext.go:18`），**不读** `Config.System.DefaultPassword` | seeder 不再依赖 `AdminRpcProperties`，改用 `AdminDomainService.DEFAULT_ADMIN_PASSWORD`；`resetUserPassword` **仍读配置**（Go 侧本就是两个不同来源，已加防回退测试锁住） |
+| DRIFT-002 | MISMATCH | `AdminGetUserService` | api 层写死 `Found: true`（`getuserlogic.go:59`）；rpc 层确实不设（`false`） | 显式 `setFound(true)`；同步修正 `AdminServiceGrpcImpl.getUser` 里「参照了错误层」的注释 |
+| DRIFT-003 | MISMATCH | `AdminUpdateSelfService` | `NotFound → 1003`（`updatelogic.go:61`） | 补 `NOT_FOUND` case（此前落 default `1015`，与 user-api DRIFT-003 同类） |
+| DRIFT-004 | MISMATCH | `update` / `resetuserpassword` / `unbanuser` | 这 3 个端点 `Internal → 5003 查询数据库失败`，其余 9 个 → `5001` | 三处改 5003，并加**防回退测试**断言 `banuser` 仍是 5001 |
+| DRIFT-006 | MISMATCH | `AdminDomainService.getUserList` | `if len(keyword) > 0`，**不 trim**（`model/admin.go:152`） | 去掉 trim |
+| DRIFT-007 | MISMATCH | 同上 + `GetUserListReq` | API 层 `form:"page,default=1"` 只在**参数缺失**时生效；rpc 层不兜底，`page=0` → 负 OFFSET → PG 报错 → `Internal` | default 上提到 api 层（DTO 改 `Long` 以区分 null / 显式 0，新增 `pageOrDefault()` / `pageSizeOrDefault()`）；rpc 层删掉归一化 |
+| DRIFT-008 | MISMATCH | `AdminDomainService.createAdmin` | 无 username 空校验，空串可建号 | 移除 `INVALID_ARGUMENT` 分支（此前该 code 在 api 层无 case ⇒ 报成 `1015 服务繁忙`） |
+| DRIFT-009 | MISMATCH | `AdminJwtAuthInterceptor` | go-zero `WithJwt` 把 Jwt middleware 追加到切片尾部 + `withMiddlewares` 反向包裹 ⇒ 实际链路 `CheckBlacklist(Jwt(handler))`，**黑名单先执行** | 两段拆开，黑名单前置；各自 fail-open 行为逐条对齐 |
+| DRIFT-010 | MISMATCH | `AdminSeederBootstrap` | `NewServiceContext` 在 `zrpc.MustNewServer` **之前**跑 seeder | `@EventListener(ApplicationReadyEvent)` → `@PostConstruct`（早于 `finishRefresh` 的 `SmartLifecycle.start()`）。**连带修正**：注入 `SnowflakeBean` 强制 bean 创建顺序，否则 `@PostConstruct` 阶段会用静态兜底 workerId 产出与后续不同 workerId 的 ID，存在撞号风险 |
+| A-01 | wire | `AdminListUserService` + `GetUserListResp` | 空结果 → `"list": null`（Go 是 nil slice，且 `json:"list"` **无 omitempty**） | Service 侧空结果置 null；DTO 侧摘掉 `@JsonInclude(NON_NULL)`（否则 null 会变成「字段消失」） |
+| A-02 | wire | `AdminApiSupport.fromProto(AdminInfo)` | Go `types.AdminInfo.Email` 是 `json:"email"`（**无 omitempty**）⇒ 恒输出 `"email":""` | 总是 setEmail。**注意 `UserInfo` 侧不改**：Go `types.UserInfo.Email` 带 `omitempty`，空时应省略 |
+
+**回归测试**：`AdminSemanticDriftRegressionTest`（admin-rpc，12 条）+ `AdminSemanticDriftApiRegressionTest`（admin-api，24 条）。
+其中 DRIFT-006/007 的断言打在**MyBatis-Plus 实际生成的 SQL 片段与绑定参数**上，不是 mock 返回值 —— 后者无论 wrapper 里装什么都照常返回预设值，测试必然假绿（§3.3）。
+验证：`mvn -pl admin-rpc,admin-api -am test` + `package` 全绿（**admin-rpc 36 / admin-api 72** / users-common 4 / service-common 78，均为 2026-10-21 实测计数）。
+
+**效力边界**：本批**仍无真实 PG / Redis 集成测试**。DRIFT-001 / 006 / 007 / 008 的 Go 基线来自静态代码推导，
+只证明了 RAG 侧的**生成 SQL 与调用参数**已对齐，未证明两端在真库上产出相同结果集 —— 见 §6.2.3。
+
+### 6.2.3 `service/users/admin` 的 UNRESOLVED（不得按「已对齐」处理）
+
+| # | 项 | 未知点 | 需要什么才能定 |
+|---|---|---|---|
+| A-U1 | Go 侧 uid **格式非法**（非缺失）时的 HTTP 状态码 | 已确认**缺失**场景走零值路径（→ `1003` HTTP 200）；但 `uid=abc` 这类解析失败会走 `httpx.ErrorCtx` 的非 `*BindError` 分支，未读到 go-zero v1.10.2 源码原文，不确定是 500 还是 400 | 读 `rest/httpx/responses.go` + `httpx.Parse` 的错误分类 |
+| A-U2 | 两端从未做运行时对拍 | DRIFT-001 看似铁证，但「哪一侧在部署环境里真的生效」取决于既有库里是否已有 `admin` 记录 —— 若已存在，两边都走 no-op 分支，差异不显现 | 起空库，两端各跑一遍 bootstrap + login |
+| A-U3 | `getUserList` 的 LIKE 双重包裹 | 生产代码传 `%keyword%` 给 MP 的 `like()`，MP 再包一层 ⇒ 实际 `LIKE '%%%keyword%%%'`。**连续 `%` 会折叠，与 Go 的 `'%keyword%'` 匹配集合相同**，故判为 IMPLEMENTATION DIFFERENCE 而非漂移；但未在真库上验证过集合相等 | 同一批 keyword 跑两端对拍比对结果集 |
 
 ### 6.2.1 本次从本表移出（已修或已定案）
 

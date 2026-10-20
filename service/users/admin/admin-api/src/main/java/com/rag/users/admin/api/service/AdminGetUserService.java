@@ -53,10 +53,18 @@ public class AdminGetUserService {
             throw new BusinessException(ErrorCode.CODE_SERVER_BUSY.getCode(), ErrorCode.CODE_SERVER_BUSY.getMsg());
         }
 
-        // Found 字段 1:1 跟随 admin-rpc Go 端：rpcResp 默认 false 时不设 found。
-        // 这里把 resp 原始字段透传给 DTO found（rpc 端没 setFound 时默认 false）
+        // DRIFT-002（已修）：found 显式置 true。
+        //
+        // Go 出处：api/internal/logic/admin/getuserlogic.go:51-60 —— api 层自己构造
+        //   types.GetUserResp{ User: ..., Found: true }
+        // 注意 Go 的「true」写在 **api 层**，而不是 rpc 层：Go 的 rpc 层
+        // getuserlogic.go 只 return &pb.GetUserResp{User: ...}，确实没设 pb 的 found，
+        // proto3 默认 false。本实现此前据此把 rpcResp.getFound() 透传下来 ⇒ 恒 false，
+        // 注释还写着「1:1 跟随 Go 端」——**参照的是错误的层**。
+        //
+        // 可观察影响：客户端若按 found 判定"是否找到"，成功查询时拿到 false 会走反分支。
         GetUserResp resp = new GetUserResp();
-        resp.setFound(rpcResp.getFound());
+        resp.setFound(true);
         if (rpcResp.hasUser()) {
             resp.setUser(support.fromProto(rpcResp.getUser()));
         }

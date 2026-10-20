@@ -77,18 +77,39 @@ class ApiTypesSnakeCaseTest {
         assertTrue(json.contains("\"expires_at\":1893456000"), json);
     }
 
+    /**
+     * DTO <b>自身</b>的字段省略行为。
+     *
+     * <p>注意与 A-02 的区别：本测试只锁定 DTO 的 {@code NON_NULL} 行为——
+     * <b>不 set 就省略</b>。而 {@code AdminApiSupport.fromProto(AdminInfo)} 现在会
+     * <b>总是</b> set email（空值 set成 {@code ""}），因为 Go 的 {@code types.AdminInfo.Email}
+     * 没有 omitempty、空值也要输出 {@code "email":""}。
+     * 两层都要测，端到端的实际输出见 {@code AdminApiSupportConversionTest}。
+     */
     @Test
     void adminInfo_uidIsStringAndOmitsAbsentFields() throws Exception {
         AdminInfo ai = new AdminInfo();
         ai.setUid(42L);
         ai.setUsername("bob");
-        // email / extra_info 不设 → 应不出现
+        // email / extra_info 不设 → DTO 层面应不出现
 
         String json = mapper.writeValueAsString(ai);
         assertTrue(json.contains("\"uid\":\"42\""), json);
         assertTrue(json.contains("\"username\":\"bob\""), json);
         assertFalse(json.contains("email"), json);
         assertFalse(json.contains("extra_info"), json);
+    }
+
+    /** A-02：email 被显式 set 成空串时，字段<b>出现</b>且值为 ""（对齐 Go 的无 omitempty）。 */
+    @Test
+    void adminInfo_emitsEmptyEmailWhenSetToEmptyString() throws Exception {
+        AdminInfo ai = new AdminInfo();
+        ai.setUid(42L);
+        ai.setUsername("bob");
+        ai.setEmail("");
+
+        String json = mapper.writeValueAsString(ai);
+        assertTrue(json.contains("\"email\":\"\""), json);
     }
 
     @Test
@@ -104,6 +125,13 @@ class ApiTypesSnakeCaseTest {
         assertTrue(json.contains("\"extra_info\":{\"k\":\"v\"}"), json);
     }
 
+    /**
+     * UserInfo 的 email <b>带 omitempty</b>，与 AdminInfo 相反 —— DTO 层面不 set 就省略。
+     *
+     * <p>Go 出处：internal/types/types.go 的 {@code UserInfo.Email string `json:"email,omitempty"`}
+     * （而 {@code AdminInfo.Email} 是 {@code `json:"email"`}，无 omitempty）。
+     * 所以 {@code AdminApiSupport} 里两个 fromProto 对 email 的处理必须不同，不要顺手统一。
+     */
     @Test
     void userInfo_uidIsStringAndIncludesStatus() throws Exception {
         UserInfo ui = new UserInfo();
@@ -178,15 +206,35 @@ class ApiTypesSnakeCaseTest {
         assertTrue(json.contains("\"keyword\":\"alice\""), json);
     }
 
+    /**
+     * A-01（已修）：空结果时 list 序列化成<b>字面量 null</b>，不是 []，也不是「字段消失」。
+     *
+     * <p>Go 出处：internal/types/types.go 的 {@code List []UserInfo `json:"list"`} —— <b>无 omitempty</b>；
+     * 空结果时 api 侧 {@code getuserlistlogic.go:51} 的 {@code var list []types.UserInfo} 保持 nil，
+     * 序列化结果就是 {@code "list": null}。
+     *
+     * <p>本断言在 DRIFT-001 批次前锁的是旧行为（NON_NULL ⇒ 字段消失），已按Go 行为改写。
+     */
     @Test
-    void getUserListResp_omitsListWhenNull() throws Exception {
+    void getUserListResp_emitsNullListWhenEmpty() throws Exception {
         GetUserListResp resp = new GetUserListResp();
         resp.setTotal(0L);
-        // list 未设 → 应不出现
+        resp.setList(null);
 
         String json = mapper.writeValueAsString(resp);
         assertTrue(json.contains("\"total\":0"), json);
-        assertFalse(json.contains("\"list\""), json);
+        assertTrue(json.contains("\"list\":null"), json);
+    }
+
+    /** A-01 的另一半：非空时是正常数组，且不为 null。 */
+    @Test
+    void getUserListResp_emitsArrayListWhenPresent() throws Exception {
+        GetUserListResp resp = new GetUserListResp();
+        resp.setTotal(1L);
+        resp.setList(java.util.List.of(new UserInfo()));
+
+        String json = mapper.writeValueAsString(resp);
+        assertTrue(json.contains("\"list\":[{"), json);
     }
 
     @Test

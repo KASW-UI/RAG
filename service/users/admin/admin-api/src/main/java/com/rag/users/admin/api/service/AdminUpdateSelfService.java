@@ -65,11 +65,23 @@ public class AdminUpdateSelfService {
         } catch (StatusRuntimeException e) {
             Status.Code code = e.getStatus().getCode();
             log.error("updateSelf RPC error", e);
-            if (code == Status.Code.INTERNAL) {
-                throw new BusinessException(ErrorCode.ERROR_SERVER_COMMON.getCode(), ErrorCode.ERROR_SERVER_COMMON.getMsg());
-            }
+            // Go 出处：api/internal/logic/admin/updatelogic.go:56-67 的完整 switch
+            //   AlreadyExists → 1001 / NotFound → 1003 / Internal → 5003 / default → 1015
+            //
+            // DRIFT-003（已修）：本 switch 曾缺 NOT_FOUND case，落到 default 被报成
+            // 1015「服务繁忙」——把"token 主体对应的 admin 已不存在"报成服务端故障。
+            // 这与 user-api DRIFT-003 是同一类：无出处的 idiomatization，写法上完全自然。
             if (code == Status.Code.ALREADY_EXISTS) {
                 throw new BusinessException(ErrorCode.ERROR_USER_EXIST.getCode(), ErrorCode.ERROR_USER_EXIST.getMsg());
+            }
+            if (code == Status.Code.NOT_FOUND) {
+                throw new BusinessException(ErrorCode.ERROR_USER_NOT_EXIST.getCode(), ErrorCode.ERROR_USER_NOT_EXIST.getMsg());
+            }
+            // DRIFT-004（已修）：Go 的 update 端点 Internal → ErrorDbSelect(5003)「查询数据库失败」，
+            // 与其余 9 个端点的 5001「系统内部错误」不同。这处不一致是 Go 侧的历史遗留，
+            // 但真源已冻结，RAG 必须逐字跟随，不能"顺手统一成 5001"。
+            if (code == Status.Code.INTERNAL) {
+                throw new BusinessException(ErrorCode.ERROR_DB_SELECT.getCode(), ErrorCode.ERROR_DB_SELECT.getMsg());
             }
             throw new BusinessException(ErrorCode.CODE_SERVER_BUSY.getCode(), ErrorCode.CODE_SERVER_BUSY.getMsg());
         }

@@ -41,8 +41,11 @@ import java.util.Set;
  *     </ul>
  *     以上任一失败都<b>不</b>写 userId / jwt_token attribute。
  *   </li>
- *   <li><b>uid 取值（{@code uid <= 0}）不在本层拒绝</b>：与 Go {@code rest.WithJwt} 一致，
- *       该规则属于 identity 层（{@code identity/resolve.go} {@code ClaimedUID}）。</li>
+ *   <li><b>uid 取值（{@code uid <= 0}）在本层拒绝</b>：抛 {@code BusinessException(1006)}，
+ *       经 {@code GlobalExceptionHandler.handleBusiness} → HTTP 200 + {@code {code:1006}}。
+ *       Go 端 {@code rest.WithJwt} 不做这个校验（uid=0 会原样进 ctx），但 admin-api 侧
+ *       {@code IdentityResolver.claimedUID} 同样拒 {@code uid <= 0} ⇒ 两端最终都在业务层被拒，
+ *       且都是 1006，行为等价。</li>
  * </ol>
  */
 @Component
@@ -57,6 +60,9 @@ public class AdminJwtAuthInterceptor implements HandlerInterceptor {
 
     /** Redis blacklist key 前缀（与 Go 端 1:1：admin:jwt_blacklist:）。 */
     private static final String BLACKLIST_KEY_PREFIX = "admin:jwt_blacklist:";
+
+    /** Authorization 头里的 Bearer 前缀（含尾随空格）。 */
+    private static final String BEARER_PREFIX = "Bearer ";
 
     private final SecretKey key;
     private final StringRedisTemplate redisTemplate;
@@ -83,17 +89,61 @@ public class AdminJwtAuthInterceptor implements HandlerInterceptor {
             return true;
         }
 
+        // ==================================================================
+        // DRIFT-009（已修）：执行顺序改为「黑名单先、验签后」，与 Go 端一致。
+        //
+        // Go 出处：handler/routes.go:32-95 的两段 AddRoutes：
+        //   server.AddRoutes(rest.WithMiddlewares([CheckBlacklistMiddleware], ...),
+        //                     rest.WithJwt(secret), rest.WithPrefix("/admincenter/v1"))
+        // go-zero 的 WithJwt 把 Jwt middleware **追加到切片尾部**，而 withMiddlewares 反向包裹
+        //   → 最终链路是 CheckBlacklist(Jwt(handler))，黑名单是外层、先执行。
+        //
+        // 本实现此前是「验签先、黑名单后」，方向相反。可观察差异：
+        // 一个**签名无效但已在黑名单中**的 token，
+        //   Go   → 黑名单先命中 → 401 + {"code":401,"msg":"登录已失效,请重新登陆"}
+        //   RAG  → 验签先失败     → 401 + envelope{code:1006}
+        // 两者都是 401，但业务码语义完全不同（"已注销" vs "令牌异常"）。
+        //
+        // 两段各自的 fail-open 行为也与 Go 逐条对齐，见下方注释。
+        // ==================================================================
+
+        // ---------- 阶段 1：黑名单检查（对应 Go CheckBlacklistMiddleware.Handle）----------
         String authHeader = request.getHeader("Authorization");
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            log.warn("protected admin path {} without Bearer token", uri);
+        String blacklistCheckedToken = null;
+        if (authHeader != null && !authHeader.isEmpty()) {
+            // Go: strings.TrimPrefix(authHeader, "Bearer ") —— 不校验前缀是否存在，也不 trim 余下部分
+            String token = authHeader.startsWith(BEARER_PREFIX)
+                    ? authHeader.substring(BEARER_PREFIX.length())
+                    : authHeader;
+            if (!token.isEmpty()) {
+                blacklistCheckedToken = token;
+                if (isBlacklisted(token)) {
+                    log.warn("admin token in blacklist, uri={}", uri);
+                    throw new AuthenticationException(
+                            ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
+                            ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
+                }
+            }
+            // token 为空 → Go 直接 next(w, r) 放行，交给 Jwt middleware 拒（见阶段 2）
+        }
+        // header 为空 → Go 直接 next(w, r) 放行，黑名单**完全不查**，交给 Jwt middleware 拒
+
+        // ---------- 阶段 2：JWT 验签（对应 go-zero rest/handler/authhandler.go Handle）----------
+        if (authHeader == null || authHeader.isEmpty()) {
+            log.warn("protected admin path {} without Authorization header", uri);
             throw new AuthenticationException(
                     ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
                     ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
         }
-        // DRIFT-008：Go 出处 admin/api/internal/middleware/checkblacklistmiddleware.go:29
-        // 是 `strings.TrimPrefix(authHeader, "Bearer ")`，<b>不</b> trim 余下部分。
-        // `.trim()` 会让 RAG 接受 Go 会 401 的 token，并让两边算出的 blacklist key 不同。
-        String token = authHeader.substring("Bearer ".length());
+        // Go: strings.SplitN(auth, " ", 2) 且要求 len(parts)==2
+        String[] parts = authHeader.split(" ", 2);
+        if (parts.length != 2) {
+            log.warn("protected admin path {} with malformed Authorization header", uri);
+            throw new AuthenticationException(
+                    ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
+                    ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
+        }
+        String token = parts[1];
         if (token.isEmpty()) {
             log.warn("protected admin path {} with empty Bearer token", uri);
             throw new AuthenticationException(
@@ -133,7 +183,23 @@ public class AdminJwtAuthInterceptor implements HandlerInterceptor {
                     ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
         }
 
-        // Redis blacklist 检查
+        request.setAttribute("jwt_token", token);
+        // 与黑名单阶段检查过的 token 做一致性提示：两者取法不同（TrimPrefix vs SplitN），
+        // 只有在 authHeader 规范写成 "Bearer <token>" 时才相等。与 Go 保持同样的不一致。
+        if (blacklistCheckedToken != null && !blacklistCheckedToken.equals(token)) {
+            log.warn("admin blacklist token != jwt token (auth header is not 'Bearer <token>')");
+        }
+        return true;
+    }
+
+    /**
+     * Redis 黑名单查询 —— fail-open 与 Go 逐条对齐。
+     *
+     * <p>Go: {@code exists, err := m.Redis.ExistsCtx(...); if err == nil && exists { 401 }}。
+     * Redis 故障时 {@code err != nil} ⇒ 条件为 false ⇒ <b>放行</b>，不阻塞业务。
+     * 本实现把异常吞成 {@code null}，随后 {@code exists != null && exists} 同样为 false ⇒ 放行。
+     */
+    private boolean isBlacklisted(String token) {
         String blacklistKey = BLACKLIST_KEY_PREFIX + token;
         Boolean exists;
         try {
@@ -142,14 +208,6 @@ public class AdminJwtAuthInterceptor implements HandlerInterceptor {
             log.warn("admin Redis blacklist check failed : {}", t.getMessage());
             exists = null;
         }
-        if (exists != null && exists) {
-            log.warn("admin token in blacklist, uid={}", uid);
-            throw new AuthenticationException(
-                    ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
-                    ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
-        }
-
-        request.setAttribute("jwt_token", token);
-        return true;
+        return exists != null && exists;
     }
 }

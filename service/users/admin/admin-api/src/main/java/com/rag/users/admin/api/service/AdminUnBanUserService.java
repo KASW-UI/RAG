@@ -55,8 +55,11 @@ public class AdminUnBanUserService {
             if (code == Status.Code.NOT_FOUND) {
                 throw new BusinessException(ErrorCode.ERROR_USER_NOT_EXIST.getCode(), ErrorCode.ERROR_USER_NOT_EXIST.getMsg());
             }
+            // DRIFT-004（已修）：Go 出处 unbanuserlogic.go:50-57，
+            // Internal → ErrorDbSelect(5003)，与 banuser 端点的 5001 不同（Go 自身的不一致）。
+            // 真源冻结 ⇒ 逐字跟随。注意 banuser 侧仍应是 5001，不要连带改。
             if (code == Status.Code.INTERNAL) {
-                throw new BusinessException(ErrorCode.ERROR_SERVER_COMMON.getCode(), ErrorCode.ERROR_SERVER_COMMON.getMsg());
+                throw new BusinessException(ErrorCode.ERROR_DB_SELECT.getCode(), ErrorCode.ERROR_DB_SELECT.getMsg());
             }
             throw new BusinessException(ErrorCode.CODE_SERVER_BUSY.getCode(), ErrorCode.CODE_SERVER_BUSY.getMsg());
         }

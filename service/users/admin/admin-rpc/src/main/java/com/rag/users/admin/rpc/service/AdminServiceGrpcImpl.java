@@ -174,7 +174,11 @@ public class AdminServiceGrpcImpl extends AdminServiceGrpc.AdminServiceImplBase 
     public void getUser(GetUserReq request, StreamObserver<GetUserResp> responseObserver) {
         invoke(() -> {
             UserEntity user = adminDomainService.getUser(request.getUid());
-            // Found 字段不设（Go 端默认 false，1:1 跟随）
+            // DRIFT-002 说明：此处<b>不</b>设 found 是对的 —— Go 的 rpc 层
+            // getuserlogic.go:42-50 确实只 return &pb.GetUserResp{User: ...}，没设 pb 的 found。
+            // 但 Go 的 <b>api 层</b> getuserlogic.go:59 构造 types.GetUserResp 时写死了 Found: true，
+            // 那才是客户端最终看到的值。admin-api 的 AdminGetUserService 已据此显式置 true；
+            // 这里保持 false 只描述"rpc 层行为"，不要据此认为端到端 found 是 false。
             return GetUserResp.newBuilder().setUser(toProtoUser(user)).build();
         }, responseObserver);
     }

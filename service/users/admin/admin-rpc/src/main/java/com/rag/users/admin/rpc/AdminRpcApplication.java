@@ -23,9 +23,13 @@ import org.springframework.context.annotation.Import;
  *   <li>{@code serviceName} 由 spring.application.name（= admin-rpc）自动绑定到 LoggerFactoryBean</li>
  *   <li>Snowflake 由 SnowflakeBean Bean 在容器启动时自动初始化（workerId 计算、fail-fast），
  *       通过 {@link com.rag.users.admin.rpc.bootstrap.SnowflakeBootstrap} 触发</li>
- *   <li>{@code AdminSeederBootstrap}（{@code @EventListener(ApplicationReadyEvent)}）承载启动期
+ *   <li>{@code AdminSeederBootstrap}（{@code @PostConstruct}）承载启动期
  *       业务（ensureDefaultAdmin），失败时抛 IllegalStateException 让 SpringApplication 启动失败
- *       （对齐 Go 端 logx.Must 行为）</li>
+ *       （对齐 Go 端 logx.Must 行为）。<b>DRIFT-010</b>：原为
+ *       {@code @EventListener(ApplicationReadyEvent)}，而该事件在 gRPC server 开始收流量<b>之后</b>
+ *       才发布；{@code @PostConstruct} 在 {@code finishBeanFactoryInitialization} 阶段执行，
+ *       早于 {@code finishRefresh} 里的 {@code SmartLifecycle.start()}，与 Go 端
+ *       {@code NewServiceContext} → {@code ensureDefaultAdmin} → {@code zrpc.MustNewServer} 的次序一致</li>
  *   <li>{@code @MapperScan} 显式注册 mapper 接口；没有它 AdminMapper / AdminInviteMapper /
  *       UserMapper 都不会成为 bean</li>
  *   <li>{@code @EnableDiscoveryClient} 启用 Nacos 自动发现（admin-api 通过 discovery://admin-rpc 寻址）</li>
@@ -38,8 +42,11 @@ import org.springframework.context.annotation.Import;
 //   那个包下有 HttpMiddlewareFilter（jakarta.servlet.Filter），而 admin-rpc 是纯 gRPC 进程、
 //   pom 里刻意不引 servlet 依赖，全包扫描会把 servlet 类拖进来直接启动失败：
 //     java.io.FileNotFoundException: class path resource [jakarta/servlet/Filter.class] cannot be opened
-//   本模块对 service/common 只用静态工具 com.rag.common.snowflake.Snowflake，
-//   不注入其中任何 bean，因此无需扩大扫描范围。
+//   本模块对 service/common 的业务调用主要用静态工具 com.rag.common.snowflake.Snowflake；
+//   AdminSeederBootstrap 例外地<b>注入</b>了 SnowflakeBean（DRIFT-010 修法）——
+//   目的是用 Spring 的 bean 创建顺序保证「workerId 已按配置设定」发生在 seeder 生成 uid 之前，
+//   否则 @PostConstruct 阶段会用静态兜底 workerId 产出与后续不同 workerId 的 ID，存在撞号风险。
+//   这只是构造器注入一个已在 @Import 列表里的 Bean，不需要扩大 scanBasePackages。
 @ConfigurationPropertiesScan("com.rag.users.admin.rpc.config")
 @MapperScan("com.rag.users.admin.rpc.mapper") // 没有它 AdminMapper/AdminInviteMapper/UserMapper 都不会注册成 bean
 @EnableDiscoveryClient
