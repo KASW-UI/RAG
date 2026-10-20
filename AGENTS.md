@@ -137,6 +137,43 @@ RAG 每次选择「用更地道的 Spring 写法」时，必须能回答：
 | HTTP method | 统一 POST（Go 为 GET/DELETE 混合） | 同上 |
 | 表名 | `users_user` / `admin_admin`（Go 为 GORM 默认名） | HUMAN_ONLY.MD 决策 |
 
+#### 3.4.1 `service/common` 的 Java 端差异（2026-10-21 逐行审计产出）
+
+Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 RAG 全部主源码，产出 20 项偏差、修复 21 处（分支 `row/common-fix-semantic-drift`，issue #71186341）。**以下 5 条是修复后仍然存在、且无法靠改代码消除的差异**。
+
+**分类原则**：「有意偏离」= 主动选择与 Go 不同（须签字，不得顺手改回）；「框架限制」= 想对齐但语言/框架做不到；「表述差异」= 语义已对齐、仅字面不同。三者性质不同，review 时不可混谈。
+
+##### A. 有意偏离（需签字）
+
+| # | 位置 | 差异 | Go 行为 | Java 行为 | 理由 | 关闭条件 |
+|---|---|---|---|---|---|---|
+| A-1 | `Logger.doLogFatal` / `LoggerFactoryBean.logFatal` | **等价域收窄** | `logger.go:293-296` 输出 `fatal_error` 后无条件 `os.Exit(1)`，**永远终止** | 抛 `FatalError`，**仅在无人 catch 时**终止 | 用户 2026-10-21 拍板：`System.exit` 会绕过 Spring graceful shutdown 与 `@PreDestroy` | 若业务出现 `catch (FatalError)` 后继续运行的写法，等价性即被打破 |
+| A-2 | `Logger.isFiltered` / `LoggerFactoryBean.isFiltered` | **`call_chain` 内容比 Go 少框架帧** | `logger.go:53-58` 的 `github.com/zeromicro/go-zero/` 前缀**本身是死的**（`getFuncName` 同样剥掉包路径），只有 `runtime.`/`testing.` 生效 | 按该列表的**意图**执行，6 条前缀全部可命中 | Go 侧是 bug；Java 照抄会让「过滤」永远不生效。已在 javadoc 留档 | 若要求逐字复刻 Go 的**实际行为**（即不过滤），需回退本项 |
+
+##### B. 框架限制导致的已知不等价（**不是**有意偏离，无法靠改 `service/common` 消除）
+
+| # | 位置 | 差异 | 影响面 | 关闭条件 |
+|---|---|---|---|---|
+| B-1 | `HttpMiddleware` 超时分支 / `RpcInterceptor` 超时调度 | **超时无法取消在途 IO**。Go 的 `context.WithTimeout` 到点 ctx Done，所有 ctx-aware IO（`http.Client` / `sql.DB` / `grpc.Dial`）立即返回、连接池立刻释放；Java 只能 `Future.cancel(true)` 发 `InterruptedException`，而 **JDBC 驱动、grpc-java 阻塞 stub、`java.net.http.HttpClient` 均不响应线程 interrupt** —— 阻塞在 socket read 上的调用会挂到查询自行结束 | **当前生效**（2026-10-21 前 timeout 为 `ZERO`、该分支从不进入；按 Go 的 3s/2s 打开后转为活跃路径）。同一慢查询：Go 3s 后连接归还，Java 可能占用到 10s | 业务侧主动响应：长耗时方法内周期性查 `DeadlineState.isExpired()`、阻塞 IO 前用 `remainingMillis()` 限流、或捕获 `InterruptedException`。**当前 `user-rpc` 一处都未使用** —— 这是本项尚未关闭的根因 |
+
+##### C. 表述差异（语义已对齐，仅字面不同，无需签字）
+
+| # | 位置 | 差异 |
+|---|---|---|
+| C-1 | `RpcInterceptor.goStyleStatusMessage` | gRPC Java 的 `Code.name()` 返回 `NOT_FOUND`，Go 的 `codes.Code.String()` 返回 `NotFound`。code 与 desc 均已保留（Go 出处 `rpc.go:95`），仅常量表示不同，不做臆造映射 |
+
+##### D. UNRESOLVED（证据不足，**不得**按「已对齐」处理）
+
+| # | 项 | 未知点 | 需要什么才能定 |
+|---|---|---|---|
+| D-1 | `Wire.canonicalHash` 的 JCS 库 | Go 用 `github.com/cyberphone/json-canonicalization`，Java 用 `org.erdtman.jcs`，两者均声称 RFC 8785。**数值边界**（超长小数、指数记法、Unicode 转义）是否真等价，**无差分测试即不可知** | 补 RFC 8785 官方测试向量对拍；或对同一批 payload 同时跑两库比对 hash |
+| D-2 | `communityfact` 整体 | RAG 侧**零消费者**。代码层面已对齐，但**没有任何运行证据**，不能算行为对齐 | 接入 `comment` / `article` 等域后补集成测试 |
+
+##### 本节的效力边界
+
+- 本节记录的是**代码层面**的差异结论。`service/common` **从未做过 Go ↔ RAG 运行时对拍**（两边同时喂同一批输入比对输出），全仓也**没有真实 PG / Redis 集成测试**（现有测试全部 mock 数据层）。因此「已修复 20 项偏差」≠「行为已验证等价」。
+- 尤其 B-1 这类差异，**只有真实慢查询 + 真实超时才能暴露**，静态审查与单测都测不到。
+
 ---
 
 ## 四、当前重构（多 phase · 真理之源 = Go）
@@ -226,16 +263,16 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 
 | 优先级 | 项 | 最后核对 | 说明与证据 |
 |---|---|---|---|
-| **P0** | **`RpcServerInterceptorFactory` 在 user-rpc / admin-rpc 均未注册** —— 两者**当前没有 gRPC span、没有 deadline 传播、没有 gRPC 超时** | 2026-10-21 | `UserRpcApplication.java:39` 的 `@Import` 只含 `SnowflakeBean/SnowflakeProperties/LoggerFactoryBean`；`AdminRpcApplication.java:30` 连 `@Import` 都没有。根因：把 `@Component` 当成自动注册（§3.2 无出处 idiomatization）。**修法已定案**——见 §6.3 问题 3 |
-| **P0** | **`ObservabilityProperties` 无 timeout 字段** —— Go 的 3s HTTP / 2s gRPC 超时在 RAG 全部丢失 | 2026-10-21 | `ObservabilityProperties.java:35` 只有 `slowThreshold`；`HttpMiddlewareFilter.java:52`、`RpcServerInterceptorFactory.java:36` 均硬编码 `Duration.ZERO`。Go 的 `DisableNative*Timeout` 语义是**把 conf.Timeout 交回观测中间件**，RAG 取出后丢弃。证据见 `FileTree/common.md` §12.7 #3 |
+| ~~P0~~ | ~~`RpcServerInterceptorFactory` 在 user-rpc / admin-rpc 均未注册~~ | **2026-10-21 已修** | `UserRpcApplication` / `AdminRpcApplication` 的 `@Import` 均补 `RpcServerInterceptorFactory` + `ObservabilityProperties` + `ObservabilityLifecycle`；admin-rpc 另补 `SnowflakeBean/SnowflakeProperties/LoggerFactoryBean`（它此前连 `@Import` 都没有）。新增 `ObservabilityWiringTest`（`@SpringBootTest`）断言 `ServerInterceptor` 真是容器里的 Bean。分支 `row/common-fix-semantic-drift` |
+| ~~P0~~ | ~~`ObservabilityProperties` 无 timeout 字段~~ | **2026-10-21 已修** | 新增 `httpTimeout` / `rpcTimeout`；两个 factory 改为读取该配置。**目标值已取证**：Go user 系 yaml 均未配 `Timeout`，实际生效值来自 go-zero v1.10.2 `rest/config.go:55` `default=3000` 与 `zrpc/config.go:46` `default=2000` ⇒ 各模块 yaml 显式落 `http-timeout: 3s` / `rpc-timeout: 2s` |
 | **P1** | user-rpc mapper `default` 方法上的 `@Transactional` 是否真生效 | —（**未核对**） | 与 §6.1 #2 同类风险（头像多步原子性）。修法同 §6.1 #2：抽独立 `@Service` Bean。按约定 2，本行**按 UNKNOWN 处理**；落地前需补一条真正装配 Spring 上下文的测试（纯 Mockito 不算，§3.3） |
 | **P1** | `message-rpc` 6 个 `@Transactional` 方法的 self-invocation 风险 | —（**未核对**） | 同上。按约定 2 按 UNKNOWN 处理 |
-| **P1** | `service/common` 的 `Logger` + `LoggerFactoryBean` ≈ 1058 行日志基础设施，**实际消费者为零** | 2026-10-21 | `com.rag.common.logger` 全仓零外部 import；`LoggerFactoryBean` 虽有注入（`MessageDomainService.java:93,103,111`）但 `grep "logger\.log"` 零命中。两者逐行同构，唯一差异是 `serviceName` 来源。处置方案见 `FileTree/common.md` §12.5 第 3 条（**动共享库公开 API，需 review 签字**） |
+| **P1** | `Logger`（静态）与 `LoggerFactoryBean`（Bean）两份逐行同构实现，重复约 370 行 | **2026-10-21 更正原结论** | ⚠️ 原表写「实际消费者为零」，**该结论错误**：`LoggerFactoryBean` 在 **user-rpc** 有真实消费方 —— `UserDomainService.java:87,95` 注入 + **12 处** `logger.logInfo/logBusinessErr`（`:155,161,170,178,184,218,233,245,268,274,305,308,324`），由 `UserRpcApplication` 的 `@Import` 装配。消费者为**零**的只是静态 `Logger` 路径（`Logger.init` 仅测试调用）。结论修正：本层支撑着 user-rpc 全部登录/注册路径的日志输出，不可按死代码处置。两份实现的重复仍待处理（`FileTree/common.md` §12.5 第 3 条，**动共享库公开 API，需 review 签字**） |
 | **P2** | `MessageRpcSupport.trimPreview` 截断长度错：`String.length() <= 255` vs Go 的 80 runes | 2026-10-21 | Go `model/message.go:233-239` 用 `[]rune(content)[:80]`；RAG `MessageRpcSupport.java:316-325` 用 `substring(0,255)`。根因：255 抄自列宽 `varchar(255)` 而非 Go 规则。附带：`substring` 会在代理对中间切断。**RAG 错**，证据见 `FileTree/message/rpc.md` §12.7 #1 |
 | **P2** | `MessageDomainService.markNotificationRead` 拆成 SELECT + UPDATE | —（**未核对**） | Go 是单条 `UPDATE ... WHERE id + recipient_id`；RAG 拆两步存在竞态窗口。按约定 2 按 UNKNOWN 处理 |
-| **P2** | `Logger.call_chain` 过滤**完全失效** | 2026-10-21 | `getFuncName` 返回短类名（不含包名），而 6 个 `FILTER_PREFIXES` 全是包前缀 ⇒ `isFiltered` 恒 false。另有 `contains("$")` 死代码。证据见 `FileTree/common.md` §12.7 #9 |
-| **P2** | 499 状态码永远到不了客户端 | 2026-10-21 | `HttpMiddleware.java:214-220` 无条件抛 `ServletException`；`HttpMiddlewareTest` 的 javadoc 声称覆盖 499 但断言全是 503。证据见 `FileTree/common.md` §12.7 #11 |
-| **P2** | `Observability.isTimeoutError` 漏判 HTTP 超时 | 2026-10-21 | 只认 `TimeoutException`/`SocketTimeoutException`/`DEADLINE_EXCEEDED`；`java.net.http.HttpTimeoutException` 继承 `IOException` 而非前者 ⇒ DC 超时被归类成 system error。证据见 `FileTree/common.md` §12.7 #10 |
+| ~~P2~~ | ~~`Logger.call_chain` 过滤完全失效~~ | **2026-10-21 已修** | `isFiltered` 改用 `StackFrame.getDeclaringClass().getName()` 全名比对包前缀（短名比对仅作补充）；`getFuncName` 的 `contains("$")` 分支按 Go 两分支差异化。`Logger` 与 `LoggerFactoryBean` 两份同步修改。新增 `LoggerTest.callChainFilterActuallyRemovesFrameworkFrames` 锁定。**留档**：Go 侧 `github.com/zeromicro/go-zero/` 那条前缀**本来也是死的**（`getFuncName` 同样剥掉包路径），Java 版按其**意图**执行 → `call_chain` 内容比 Go 少框架帧，属 OBSERVABLE DIFFERENCE |
+| ~~P2~~ | ~~499 状态码永远到不了客户端~~ | **2026-10-21 已修** | 断连分支改为 `writeTimeoutResponse(resp, 499)`，不再抛 `ServletException`；503/499 body 一并对齐 Go `http.Error`（`text/plain; charset=utf-8` + 尾部换行）。新增 `HttpMiddlewareTest.clientDisconnectReturns499`（此前**零条** 499 断言）。**连带**：两条既有 503 断言的期望值因 D-11 变更，已同步并注明变更原因 |
+| ~~P2~~ | ~~`Observability.isTimeoutError` 漏判 HTTP 超时~~ | **2026-10-21 已修** | 补 `HttpTimeoutException` / `HttpConnectTimeoutException` / `InterruptedIOException`，并沿 cause 链生效。新增 `ObservabilityTest.isTimeoutErrorDetectsHttpClientTimeouts` |
 | **P2** | **admin-api 全部 13 个端点 `@RequestBody` 仍是 `required=true`** | 2026-10-21 | user-api 侧同类问题已修（`UserController.java:118/126/137/153`），admin-api 未同步 ⇒ `/admin/v1/logout` 等空 body 请求返回 400，与 Go 语义漂移 |
 | **P3** | `admin-api` 的 `AdminApiSupport.codeFromRPCError` 未删，且与 `GlobalExceptionHandler.mapRPCStatusToCode` 重复 | 2026-10-21 | 当前靠 service 层精确业务码优先兜底，属**潜在**语义漂移：新增 Service 漏写分支会静默落到 advice 的默认映射 |
 
@@ -291,9 +328,11 @@ rpcTimeout := observability.DisableNativeRpcTimeout(&c.RpcServerConf)
 s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, observability.SlowThreshold()))
 ```
 
-**Go 里不存在「全局自动注册」**。RAG 把 `@Component` 当自动注册，是一次**无出处 idiomatization**（§3.2）—— `UserRpcApplication` 的 `@Import` 只含 3 个 bean、`AdminRpcApplication` 连 `@Import` 都没有，两者**当前均无 gRPC span / 无 deadline 传播 / 无 gRPC 超时**。
+**Go 里不存在「全局自动注册」**。RAG 把 `@Component` 当自动注册，是一次**无出处 idiomatization**（§3.2）—— `UserRpcApplication` 的 `@Import` 只含 3 个 bean、`AdminRpcApplication` 连 `@Import` 都没有，两者**当时**均无 gRPC span / 无 deadline 传播 / 无 gRPC 超时。
 
-定案：`@Import` 数组补 `RpcServerInterceptorFactory.class`（`@Import` 本就接受普通 `@Component` 类，**零搬迁**）。连带结果：**不再有任何模块扫 `com.rag.common`** ⇒ servlet 类不会被拖进纯 gRPC 进程 ⇒ §12.5 曾提的 `spring/web/` + `spring/grpc/` 拆包**动机自我消解，已撤回**。`message-rpc` 现在能跑属**撞运气**（恰好有 `spring-boot-starter-web-server` 兜住），须一并归一到显式 `@Import`。
+> **2026-10-21 已实施并验证**：本问题已随 `row/common-fix-semantic-drift` 合并落地（见 §6.5）。`ObservabilityWiringTest` 用 `@SpringBootTest` 断言 `ServerInterceptor` 确实是容器里的 Bean —— 正是这条「自动注册」假设此前无任何测试覆盖，才让缺陷长期静默。`message-rpc` 归一到显式 `@Import` 仍**未做**，见 §3.4.1 效力边界。
+
+定案（**2026-10-21 已实施**，见 §6.5）：`@Import` 数组补 `RpcServerInterceptorFactory.class`（`@Import` 本就接受普通 `@Component` 类，**零搬迁**）。连带结果：**不再有任何模块扫 `com.rag.common`** ⇒ servlet 类不会被拖进纯 gRPC 进程 ⇒ §12.5 曾提的 `spring/web/` + `spring/grpc/` 拆包**动机自我消解，已撤回**。`message-rpc` 现在能跑属**撞运气**（恰好有 `spring-boot-starter-web-server` 兜住），须一并归一到显式 `@Import`。
 
 ### 6.4 其他子模块
 
@@ -301,6 +340,44 @@ s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, obser
 |---|---|
 | `service/message` | 未按新政策复核；**下一轮审计必须 Go ↔ RAG 对照** |
 | Phase 5（全量 + 端到端） | 未启动；需真实 PG + Redis 集成测试补上（当前测试全部 mock 数据层） |
+
+### 6.5 `service/common` 语义一致性审计与修复（2026-10-21）
+
+只读审计（Go ↔ RAG 逐行对照，Go 侧 8 个非测试源文件全部通读原文）结论 **SEMANTICALLY NOT EQUIVALENT**，共 20 项偏差。修复在分支 `row/common-fix-semantic-drift`（issue #71186341，spec `.agents/specs/common-semantic-drift-fix.md`）。
+
+**消费者现状（决定了修复优先级）**：
+
+| | Go 侧被谁用 | RAG 侧被谁用 |
+|---|---|---|
+| communityfact | 11 个服务 | **0** |
+| observability | 全部 13 个服务 | 1（user-rpc，且只 import 了 `DeadlineState` 类型） |
+| logger | 全部服务 | `LoggerFactoryBean` ← user-rpc 12 处 |
+| snowflake | 全部服务 | user-rpc / admin-rpc / message-rpc |
+
+**已修 21 项**（5 项 HIGH 全部处理）：
+
+| 组 | 内容 |
+|---|---|
+| HIGH | ① HTTP 超时整体失效（新增 `httpTimeout`/`rpcTimeout` 配置，5 个 yaml 落 3s/2s）② gRPC 拦截器未注册（user-rpc/admin-rpc 补 `@Import`）③ `logFatal` 不终止进程（新增 `FatalError` + users 两处 advice 显式 rethrow）④ 499 分支不可达（改为写响应）⑤ 超时启用后业务跑在无请求上下文的线程（补 `RequestContextHolder`/MDC/OTel Context） |
+| MEDIUM | `isTimeoutError` 漏判 HTTP 超时、`RecordError` 空指针、`biz_msg` 丢 code、span 重复打标、span 二次 `end()`、`DeadlineState` 设在调度线程而非 handler 线程、`MqConsumer` 吞 panic、`shutdown()` 无调用者、`call_chain` 过滤失效、Snowflake 双份生成状态、admin-rpc `SnowflakeBean` 未装配 |
+| LOW | 时钟回拨按 bwmarrin v0.3.0 **真实算法**（无回拨保护，继承 Go 风险并留档）、进程日志 KV 一律 `toString()` 破坏 JSON schema、timestamp 精度与尾零裁剪、trace 字段跨线程丢失、charset 默认编码、64KB 截断多读、`getFuncName` 闭包分支死代码 |
+
+**顺带修掉的潜伏缺陷**（都是本轮改动触发才暴露的）：
+
+- **`logback-classic` 1.6.3 与 `logback-core` 1.5.38 版本错配** → 任何真正启动的 Spring Boot 应用都会在 `LoggingApplicationListener` 抛 `AbstractMethodError: PatternLayout.getDefaultConverterMap()`。此前能长期潜伏，正因为测试全是纯单元测试。已改为交由父 pom 统一管理。
+- `ObservabilityProperties` 同时带 `@Component` + `@ConfigurationProperties`，与 `@EnableConfigurationProperties` 并存会产生**两个同名类型 Bean**。本轮统一走 `@Import` 路径（与 rpc 模块一致），测试也照抄该路径。
+
+**新增测试（§3.3 要求：必须真正装配 Spring 上下文）**：
+
+`service/common` 现有 78 个测试（原 75 + 新增），其中 `ObservabilityWiringTest` 是**全仓第一个 `@SpringBootTest`** —— H1/H2 这类「机制没接上」的缺陷按定义无法被纯单测捕获。新增回归用例：`clientDisconnectReturns499`、`workerThreadInheritsRequestContext`、`isTimeoutErrorDetectsHttpClientTimeouts`、`wireAuthorityUnavailableSentinelMapsTo404`、`callChainFilterActuallyRemovesFrameworkFrames`、`logFatalThrowsFatalErrorInsteadOfOnExit`×2。
+
+验证：`mvn clean verify` 全仓 9 模块 BUILD SUCCESS（common 78 / admin-rpc 24 / admin-api 46 / user-rpc 46 / user-api 30 / users-common 3 / message-rpc 待复核）。
+
+**残留差异**不在本节重复维护，统一见 **§3.4.1**（按「有意偏离 / 框架限制 / 表述差异 / UNRESOLVED」四类分列，每条带关闭条件）。
+
+其中本轮新增、值得单独强调的一条：**B-1 超时无法取消在途 IO**。它在本轮之前是潜伏的（timeout 为 `ZERO`，分支从不进入），按 Go 的 3s/2s 打开超时后转为**当前生效**，且 `user-rpc` 业务侧一处都未主动响应取消。
+
+另一条：Snowflake 时钟回拨**照搬 bwmarrin v0.3.0 的无保护行为**，继承其「回拨可能撞 ID」的风险。RAG 不擅自加保护（加了即与 Go 不等价），若要加须单独立项。
 
 ## 七、引用清单
 

@@ -139,3 +139,8 @@ logging:
     root: INFO
     com.rag.users.user.rpc: INFO
     com.rag.common: INFO
+# ===== observability（对齐 Go service/user/user/rpc 的 DisableNativeRpcTimeout + NewUnaryServerInterceptor）=====
+# 取值依据：Go 侧 service/user/user/rpc/etc/user.yaml 未配置 Timeout，
+# 实际生效值为 go-zero v1.10.2 `zrpc/config.go:46` 的 `Timeout int64 json:",default=2000"` → 2000ms。
+observability:
+  rpc-timeout: 2s

@@ -101,7 +101,15 @@ public final class Dispatcher {
 
         // 对应 Go 版内层 dispatch 函数：真正包 10s deadline
         java.util.function.Supplier<DispatchAttempt> dispatch = () -> {
-            Span span = tracer.spanBuilder("community.fact_delivery.dispatch").startSpan();
+            // M14 修复：补 setParent(ctx)。
+            // Go process.go:26 是 `otel.Tracer(...).Start(ctx, "community.fact_delivery.dispatch")`，
+            // 第三参数即父 ctx —— 该 span 是调用方 span 的子节点。
+            // 旧 Java 版 `tracer.spanBuilder(...).startSpan()` 不带 parent，
+            // 于是每次投递都开出一条**根 span**，整条 dispatch 的 trace 拓扑与 Go 完全不同
+            // （在 Jaeger 里表现为一批互不相连的孤立 span，且丢失与上游请求的因果链）。
+            Span span = tracer.spanBuilder("community.fact_delivery.dispatch")
+                    .setParent(ctx)
+                    .startSpan();
             Context attemptCtx = ctx.with(span);
             CompletableFuture<Boolean> future = CompletableFuture.supplyAsync(() -> {
                 try {
@@ -155,8 +163,11 @@ public final class Dispatcher {
                 logger.atInfo()
                         .addKeyValue("event", "community.fact_delivery.once")
                         .addKeyValue("outcome", "succeeded")
-                        .addKeyValue("duration_ms",
-                                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started))
+                        // M15 修复：Go process.go:38 用 Microseconds()/1000（亚毫秒浮点），
+                        // 旧 Java 版用 NANOSECONDS.toMillis()（整毫秒，截断亚毫秒部分）。
+                        // 本文件另两处 duration_ms（AuthorityHandler / Dispatcher 内层）都已是浮点，
+                        // 只有 once 这条是整数 —— 同一字段在同一个信封里出现两种精度。
+                        .addKeyValue("duration_ms", elapsedMillisSince(started))
                         .addKeyValue("sent", result.sent)
                         .log("community fact delivery inspected");
                 return handle;
@@ -255,8 +266,24 @@ public final class Dispatcher {
     }
 
     /**
+     * M15：亚毫秒精度的 elapsed 毫秒数，对齐 Go 的 {@code float64(time.Since(started).Microseconds())/1000}。
+     */
+    private static double elapsedMillisSince(long startNanos) {
+        return (System.nanoTime() - startNanos) / 1_000_000.0;
+    }
+
+    /**
      * 对应 Go 版 {@code func deliveryErrorCode(err error) string}：
      * 区分 frozen envelope 阻塞 vs 普通投递失败。
+     *
+     * <p><b>M16 修复</b>：旧实现沿 cause 链做「实例相同 <b>或</b> message 字符串相等」判定。
+     * 字符串相等是多余的且有害 —— 任何业务异常只要文案撞上
+     * "community fact frozen envelope blocked"，就会被误判为 envelope 阻塞，
+     * 错误码从 {@code DELIVERY_ATTEMPT_FAILED} 变成 {@code INVALID_FROZEN_ENVELOPE}，
+     * 上游据此做的重试/隔离决策随之出错。
+     *
+     * <p>现只认 {@link Wire.FrozenEnvelopeBlockedException} 类型（沿 cause 链），
+     * 与 Go 的 {@code errors.Is(err, ErrFrozenEnvelopeBlocked)} 同构。
      */
     public static String deliveryErrorCode(Throwable err) {
         if (err == null) {
@@ -264,11 +291,12 @@ public final class Dispatcher {
         }
         Throwable t = err;
         while (t != null) {
-            if (t == Wire.ERR_FROZEN_ENVELOPE_BLOCKED
-                    || (t.getMessage() != null && t.getMessage().equals(Wire.ERR_FROZEN_ENVELOPE_BLOCKED.getMessage()))) {
+            if (t instanceof Wire.FrozenEnvelopeBlockedException) {
                 return "INVALID_FROZEN_ENVELOPE";
             }
-            t = t.getCause();
+            Throwable next = t.getCause();
+            if (next == t) break;
+            t = next;
         }
         return "DELIVERY_ATTEMPT_FAILED";
     }

@@ -28,6 +28,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.rag.common.observability.Observability.isTimeoutError;
@@ -171,6 +172,11 @@ public final class RpcInterceptor {
                         : Long.MAX_VALUE;
                 AtomicReference<Throwable> timeoutErrRef = new AtomicReference<>();
                 AtomicReference<Boolean> timedOutRef = new AtomicReference<>(Boolean.FALSE);
+                // M6 修复：close() 可能被调用两次 —— 超时调度线程先 close(DEADLINE_EXCEEDED)，
+                // 业务 handler 跑完后再 close(OK/自己的状态)。旧实现每次都 span.end() + 打一遍标，
+                // 结果是同一 span 被 end 两次、属性被后写覆盖、遥测里出现重复事件。
+                // Go 版 rpc.go 的 select 只有一条出口，不存在这个问题。
+                AtomicBoolean spanFinalized = new AtomicBoolean(false);
 
                 // 超时调度：到时把 timedOutRef 设 true 并主动 close call（DEADLINE_EXCEEDED）
                 // 用 holder 数组让 timeoutFuture 可以被匿名类引用（Java 局部变量必须 final/effectively-final）
@@ -181,8 +187,6 @@ public final class RpcInterceptor {
                         TimeoutException te = new TimeoutException("rpc timeout after " + timeoutMs + "ms");
                         timeoutErrRef.set(te);
                         timedOutRef.set(Boolean.TRUE);
-                        // DRIFT-018 修复：把 deadline 时刻挂到 ThreadLocal，业务线程可查 DeadlineState.isExpired()
-                        DeadlineState.markExpired(deadlineEpochMs);
                         // 触发 call 关闭；close 是线程安全的
                         try {
                             call.close(Status.DEADLINE_EXCEEDED
@@ -201,6 +205,11 @@ public final class RpcInterceptor {
                         if (timeoutFutureHolder[0] != null) {
                             timeoutFutureHolder[0].cancel(false);
                         }
+                        // M6：只有第一次 close 负责打标 + end span
+                        if (!spanFinalized.compareAndSet(false, true)) {
+                            super.close(status, trailers);
+                            return;
+                        }
                         Duration duration = Duration.between(start, Instant.now());
                         Map<String, Object> attrs = rpcAttrs(method, status.getCode());
                         if (span.isRecording()) {
@@ -215,11 +224,15 @@ public final class RpcInterceptor {
                             Throwable tErr = err != null ? err : new TimeoutException("rpc deadline exceeded");
                             markTimeout(otelCtx, tErr, duration, attrs);
                         } else if (isBusinessGrpcCode(status.getCode())) {
-                            String msg = status.getDescription() != null ? status.getDescription() : "";
-                            markBusinessError(otelCtx, status.getCode().value(), msg, duration, attrs);
+                            // M4 修复：Go rpc.go:95 传的是 err.Error()，即 status error 的完整串
+                            //   "rpc error: code = NotFound desc = xxx"（含 code）。
+                            // 旧 Java 版只取 getDescription()，把 code 从 biz_msg 里丢了，
+                            // 光看 biz_msg 无法判断是哪个业务码失败。
+                            markBusinessError(otelCtx, status.getCode().value(),
+                                    goStyleStatusMessage(status.getCode(), status.getDescription()),
+                                    duration, attrs);
                         } else {
-                            Throwable sysErr = new RuntimeException(
-                                    status.getDescription() != null ? status.getDescription() : status.getCode().name());
+                            Throwable sysErr = new RuntimeException(goStyleStatusMessage(status.getCode(), status.getDescription()));
                             markSystemError(otelCtx, sysErr, duration, attrs);
                         }
                         try (Scope ignored = otelCtx.makeCurrent()) {
@@ -232,10 +245,39 @@ public final class RpcInterceptor {
                 // 包装 Listener：拦截 onCancel 处理客户端提前断开
                 ServerCall.Listener<ReqT> listener = next.startCall(wrappedCall, headers);
                 return new ForwardingServerCallListener.SimpleForwardingServerCallListener<ReqT>(listener) {
+                    /**
+                     * M7 修复：把 deadline 绑定到<b>真正跑 handler 的线程</b>。
+                     *
+                     * <p>旧实现把 {@code DeadlineState.markExpired(...)} 放在超时调度线程里
+                     * （{@code TIMEOUT_SCHEDULER.schedule(...)} 的 lambda）。{@code DeadlineState} 用的是
+                     * {@code ThreadLocal}，设在调度线程上对 handler 线程<b>完全不可见</b> ——
+                     * 于是 {@code UserDomainService} 里那些「配合 DeadlineState 感知超时」的注释与
+                     * {@code isExpired()} 调用恒为 false，是一个写好了却永远不生效的机制。
+                     *
+                     * <p>grpc-java 的执行模型：{@code interceptCall} 与 {@code onHalfClose}（真正调 handler）
+                     * 通常是同一线程，但框架允许换线程。{@code onHalfClose} 才是 handler 的入口，
+                     * 所以 deadline 必须在它里面绑定。
+                     */
+                    @Override
+                    public void onHalfClose() {
+                        if (deadlineEpochMs == Long.MAX_VALUE) {
+                            super.onHalfClose();
+                            return;
+                        }
+                        try (DeadlineState.Scope ignoredScope = DeadlineState.bindToCurrent(deadlineEpochMs)) {
+                            super.onHalfClose();
+                        }
+                    }
+
                     @Override
                     public void onCancel() {
                         if (timeoutFutureHolder[0] != null) {
                             timeoutFutureHolder[0].cancel(false);
+                        }
+                        // M6：与 close() 共用同一个 finalized 守卫，避免 close + onCancel 双写
+                        if (!spanFinalized.compareAndSet(false, true)) {
+                            super.onCancel();
+                            return;
                         }
                         Duration duration = Duration.between(start, Instant.now());
                         Map<String, Object> attrs = rpcAttrs(method, Code.CANCELLED);
@@ -386,10 +428,32 @@ public final class RpcInterceptor {
             return;
         }
         if (isBusinessGrpcCode(code)) {
-            markBusinessError(ctx, code.value(), err.getMessage() != null ? err.getMessage() : "", duration, attrs);
+            markBusinessError(ctx, code.value(),
+                    goStyleStatusMessage(code, Status.fromThrowable(err).getDescription()),
+                    duration, attrs);
             return;
         }
         markSystemError(ctx, err, duration, attrs);
+    }
+
+    /**
+     * M4 修复：构造对齐 Go 的 status error 文本。
+     *
+     * <p>Go 的 {@code status.Error(codes.NotFound, "xxx").Error()} 产出
+     * {@code "rpc error: code = NotFound desc = xxx"} —— <b>code 与 desc 都在</b>，
+     * {@code rpc.go:95} 直接把它作为 {@code sea.biz_msg}。
+     *
+     * <p>Java 侧两种写法都会丢 code：拦截器路径用 {@code getDescription()}（只剩 desc），
+     * {@code markRpcResult} 路径用 {@code getMessage()}（grpc-java 给的是
+     * {@code "NOT_FOUND: desc"}，格式与 Go 不同但 code 在）。统一收敛到本方法。
+     *
+     * <p>已知残留差异：gRPC Java 的 {@link Code#name()} 返回 {@code "NOT_FOUND"}（全大写），
+     * Go 的 {@code codes.Code.String()} 返回 {@code "NotFound"}（驼峰）。语言常量表示不同，
+     * 不做臆造映射；语义（code + desc 都在）已对齐。
+     */
+    private static String goStyleStatusMessage(Code code, String description) {
+        String desc = description != null ? description : "";
+        return "rpc error: code = " + code.name() + " desc = " + desc;
     }
 
     /**

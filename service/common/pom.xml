@@ -62,10 +62,28 @@
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
         </dependency>
+        <!--
+            logback-classic：**移除硬编码版本号**，交由 spring-boot-starter-parent 的
+            dependencyManagement 统一管理（logback-core 也由它管理）。
+
+            为什么改：此前这里钉死 1.6.3，而同一模块的 logback-core 被 spring-boot-starter-parent
+            解析成 1.5.38（dependencyManagement 优先级高于传递依赖）—— 两者 API 不兼容，
+            任何真正启动的 Spring Boot 应用都会在日志初始化阶段抛：
+                java.lang.AbstractMethodError: Receiver class ch.qos.logback.classic.PatternLayout
+                does not define or inherit an implementation of the resolved method
+                'abstract java.util.Map getDefaultConverterMap()'
+                            of abstract class ch.qos.logback.core.pattern.PatternLayoutBase
+
+            这个缺陷此前能长期潜伏，正是因为 service/common 的 9 个测试全是纯单元测试 ——
+            不起 Spring 容器就永远走不到 LoggingApplicationListener。
+            加了 ObservabilityWiringTest（@SpringBootTest）后第一次被暴露出来。
+
+            能力校验：ProcessLogger 用到的 ILoggingEvent#getKeyValuePairs() 自 logback 1.3.0 起提供，
+            由父 pom 管理的版本满足，无需降级功能。
+        -->
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
-            <version>1.6.3</version>
         </dependency>
 
         <!-- ============ 2. OpenTelemetry：tracing + context propagation ============ -->
@@ -137,6 +155,18 @@
         </dependency>
 
         <!-- ============ 测试：JUnit 5 + Mockito + OTEL SDK 测试 util + spring-test（MockHttpServletRequest 等） ============ -->
+        <!--
+            spring-boot-starter-test：§3.3 要求「凡引入框架机制必须配真正触发该机制的测试」。
+            此前 service/common 的 9 个测试类全是纯单元测试（不装配 Spring 上下文），
+            所以「Bean 根本没被注册」「@ConfigurationProperties 没绑定」这类缺陷天然测不到 ——
+            H1/H2 恰恰就是这两类。
+            @SpringBootTest + @EnableConfigurationProperties 才能真正走一遍 binder + Bean 生命周期。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
@@ -158,11 +188,25 @@
             <version>7.0.0</version>
             <scope>test</scope>
         </dependency>
+        <!--
+            spring-web：H5 修复需要 RequestContextHolder。
+            为什么是 optional 而不是普通 compile：
+              RequestContextHolder 是 Spring Web 把「当前请求」存进 ThreadLocal 的入口，
+              超时分支把 chain.doFilter 换到 worker 线程后必须手工搬运它，否则整条 Spring Web 链
+              （@RequestScope / LocaleContextHolder / 未来引入的 SecurityContextHolder）在 worker 上全空。
+            为什么必须 optional：
+              service/common 同时被纯 gRPC 进程（user-rpc / admin-rpc）依赖。若用普通 compile，
+              spring-web 会沿 Maven 传递进那些模块 —— 那正是 §6.3 定案里
+              「com.rag.common 不能进 scanBasePackages，否则纯 gRPC 进程被拖进 web 类」的同一个坑。
+              optional=true 表示：service/common 自己能编译，但不传递给下游。
+            运行期安全性：RequestContextHolder 只在 HttpMiddleware 的超时分支被引用；
+              纯 gRPC 进程不注册 HttpMiddlewareFilter → 不加载 HttpMiddleware → 该类引用不会被解析。
+        -->
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-web</artifactId>
             <version>7.0.0</version>
-            <scope>test</scope>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>

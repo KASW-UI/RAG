@@ -1,5 +1,6 @@
 package com.rag.common.spring;
 
+import com.rag.common.logger.FatalError;
 import com.rag.common.logger.LogOption;
 import com.rag.common.logger.LogOptions;
 import com.rag.common.snowflake.Snowflake;
@@ -50,10 +51,23 @@ public class LoggerFactoryBean {
 
     /**
      * 调用栈过滤前缀，独立维护（避免 logger 包自身栈帧噪声）。
+     *
+     * <p><b>M10 修复</b>：与 {@link com.rag.common.logger.Logger#FILTER_PREFIXES} 同款修法 ——
+     * 旧版这些全是包前缀，却拿 {@link #getFuncName} 产出的<b>短类名</b>去比，
+     * 永远匹配不上，{@code call_chain} 退化成未过滤的完整栈。
+     * 现改为拿 {@code declaringClass.getName()} 全名比对（见 {@link #isFiltered}）。
+     * 两份实现的清单必须保持一致：{@code Logger} 的清单带 {@code com.rag.common.logger.}，
+     * 本类额外带 {@code com.rag.common.spring.}（本类自身所在包）。
      */
     private static final List<String> FILTER_PREFIXES = List.of(
+            // —— Go 版 logger.go:53-58 原文三条 ——
             "runtime.",
             "testing.",
+            "github.com/zeromicro/go-zero/",
+            // —— Java 侧「框架内部帧」，对应 Go 想过滤掉的 go-zero 内部帧 ——
+            "java.lang.Thread",
+            "java.util.concurrent.",
+            "jdk.internal.misc.",
             "io.opentelemetry.",
             "org.slf4j.",
             "ch.qos.logback.",
@@ -274,8 +288,8 @@ public class LoggerFactoryBean {
             at.log();
         }
 
-        // 与 Logger.doLogFatal 同款：抛 IllegalStateException 让调用方决定进程终止方式
-        throw new IllegalStateException(
+        // H3 修复：与 Logger.doLogFatal 统一抛 FatalError（见 com.rag.common.logger.FatalError）
+        throw new FatalError(
                 "fatal_error logged: " + errorReason
                         + " (event_id=" + eventIdStr + ", service=" + serviceName + ")",
                 err);
@@ -294,8 +308,10 @@ public class LoggerFactoryBean {
         }
         String[] parts = declaringClass.split("\\.");
         String shortClass = parts[parts.length - 1];
+        // M10 修复：旧版两个分支返回完全相同的表达式（闭包分支是死代码）。
+        // Go 版闭包分支只取最后一段，Java lambda 的对应物 = 只返回 lambda 方法名。
         if (methodName.contains("$")) {
-            return shortClass + "." + methodName;
+            return methodName;
         }
         return shortClass + "." + methodName;
     }
@@ -318,7 +334,7 @@ public class LoggerFactoryBean {
                         }
                         taken++;
                         String fn = getFuncName(f);
-                        if (isFiltered(fn)) {
+                        if (isFiltered(f, fn)) {
                             continue;
                         }
                         frames.add(fn);
@@ -332,9 +348,16 @@ public class LoggerFactoryBean {
         return String.join(" -> ", frames);
     }
 
-    private static boolean isFiltered(String funcName) {
+    /**
+     * M10 修复：拿 declaringClass 全名比对包前缀（详见 {@link com.rag.common.logger.Logger} 同名方法）。
+     */
+    private static boolean isFiltered(StackWalker.StackFrame frame, String funcName) {
+        String declaringClass = frame != null ? frame.getDeclaringClass().getName() : null;
         for (String prefix : FILTER_PREFIXES) {
-            if (funcName.startsWith(prefix)) {
+            if (declaringClass != null && declaringClass.startsWith(prefix)) {
+                return true;
+            }
+            if (funcName != null && funcName.startsWith(prefix)) {
                 return true;
             }
         }

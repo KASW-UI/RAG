@@ -89,7 +89,7 @@ public final class Observability {
     public static void markSystemError(Context ctx, Throwable err, Duration duration, Map<String, Object> extraAttrs) {
         String msg = "system error";
         if (err != null) {
-            msg = err.getMessage() != null ? err.getMessage() : err.getClass().getSimpleName();
+            msg = errorMessageOf(err);
         }
         Span span = Span.fromContext(ctx);
         if (!span.isRecording()) return;
@@ -100,7 +100,12 @@ public final class Observability {
         b.put(ATTR_DURATION_DOUBLE, durationMillis(duration));
         addExtraAttrs(b, extraAttrs);
         span.setAllAttributes(b.build());
-        if (err != null) span.recordException(err);
+        // M2 修复：Go 版 observability.go:103 无条件 `span.RecordError(errors.New(msg))`。
+        //   旧 Java 版写成 `if (err != null)`，导致 err==nil 的调用点（msg="system error"）
+        //   在 Go 会产生一条 span event、Java 不产生 —— 可观测的遥测差异。
+        //   语义等价论证：Go 记录的是 errors.New(msg)（一个只有 message 的新 error），
+        //   Java 没有 errors.New；用等价构造补齐，保证「一定有一条 exception event」。
+        span.recordException(err != null ? err : new RuntimeException(msg));
         span.setStatus(StatusCode.ERROR, msg);
     }
 
@@ -110,7 +115,7 @@ public final class Observability {
     public static void markTimeout(Context ctx, Throwable err, Duration duration, Map<String, Object> extraAttrs) {
         String msg = "timeout";
         if (err != null) {
-            msg = err.getMessage() != null ? err.getMessage() : err.getClass().getSimpleName();
+            msg = errorMessageOf(err);
         }
         Span span = Span.fromContext(ctx);
         if (!span.isRecording()) return;
@@ -122,7 +127,8 @@ public final class Observability {
         b.put(ATTR_DURATION_DOUBLE, durationMillis(duration));
         addExtraAttrs(b, extraAttrs);
         span.setAllAttributes(b.build());
-        if (err != null) span.recordException(err);
+        // M2 同上：Go observability.go:126 无条件 RecordError。
+        span.recordException(err != null ? err : new RuntimeException(msg));
         span.setStatus(StatusCode.ERROR, msg);
     }
 
@@ -144,7 +150,26 @@ public final class Observability {
 
     /**
      * 对应 Go 版 {@code func IsTimeoutError(err error) bool}。
-     * <p>沿 cause 链走，对齐 Go 版 {@code errors.Is}。
+     * <p>沿 cause 链走，对齐 Go 版 {@code errors.Is} / {@code errors.As}。
+     *
+     * <p><b>M1 修复</b>：Go 版三分支是
+     * {@code errors.Is(err, context.DeadlineExceeded)} /
+     * {@code status.Code == DEADLINE_EXCEEDED} /
+     * {@code errors.As(err, &netErr) && netErr.Timeout()}。
+     * 第三支的 {@code net.Error} 是 Go 标准库接口，涵盖 {@code *net.OpError}、
+     * {@code *os.SyscallError}、HTTP transport 的各类超时 —— 旧 Java 版只认
+     * {@link java.util.concurrent.TimeoutException} 和 {@link java.net.SocketTimeoutException}，
+     * 漏掉了 {@link java.net.http.HttpTimeoutException}（它继承 {@link java.io.IOException}，
+     * 不属于前两者），导致 <b>下游 HTTP 调用超时被归类成 system error 而非 timeout</b>，
+     * {@code sea.error.kind} 与重试决策都会走错分支。
+     *
+     * <p>{@code net.Error.Timeout()} 的 Java 侧映射，无对应物的语言构造不做臆测：
+     * <ul>
+     *   <li>{@code http.Client 请求超时} → {@link java.net.http.HttpTimeoutException}</li>
+     *   <li>{@code HttpClient 建连超时} → {@link java.net.http.HttpConnectTimeoutException}</li>
+     *   <li>{@code net.Conn SetReadDeadline 超时} → {@link java.net.SocketTimeoutException}</li>
+     *   <li>{@code syscall ETIMEDOUT（URLConnection 读超时）} → {@link java.io.InterruptedIOException}</li>
+     * </ul>
      */
     public static boolean isTimeoutError(Throwable err) {
         if (err == null) return false;
@@ -152,6 +177,9 @@ public final class Observability {
         while (t != null) {
             if (t instanceof java.util.concurrent.TimeoutException) return true;
             if (t instanceof SocketTimeoutException) return true;
+            if (t instanceof java.net.http.HttpTimeoutException) return true;
+            if (t instanceof java.net.http.HttpConnectTimeoutException) return true;
+            if (t instanceof java.io.InterruptedIOException) return true;
             Status st = Status.fromThrowable(t);
             if (st != null && st.getCode() == Code.DEADLINE_EXCEEDED) return true;
             Throwable next = t.getCause();
@@ -159,6 +187,23 @@ public final class Observability {
             t = next;
         }
         return false;
+    }
+
+    /**
+     * M3 修复：对应 Go 版 {@code msg = err.Error()} 的取值语义。
+     *
+     * <p>Go 的 {@code error} 必有 message（{@code errors.New("")} 返回 {@code ""}），
+     * {@code err.Error()} 结果恒为字符串，不存在 null 分支。旧 Java 版写成
+     * {@code getMessage() != null ? getMessage() : getClass().getSimpleName()}，
+     * 对无 message 的异常（如 {@code new RuntimeException()}）会填入类名 ——
+     * 这是 Java 独有的信息，Go 侧对应位置会是空串，属于凭空多出来的 {@code sea.biz_msg} 值。
+     *
+     * <p>这里按 Go 语义取 {@code getMessage()} 原样，null 归一为 {@code ""}；
+     * 异常类型本身仍完整保留在 {@link io.opentelemetry.api.trace.Span#recordException} 的栈里。
+     */
+    private static String errorMessageOf(Throwable err) {
+        String m = err.getMessage();
+        return m != null ? m : "";
     }
 
     /**

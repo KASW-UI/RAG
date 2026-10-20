@@ -61,15 +61,48 @@ public final class Wire {
     }
 
     /**
-     * 错误：frozen envelope 被阻止投递。
+     * frozen envelope 被阻止投递的哨兵异常类型（对应 Go 版 {@code var ErrFrozenEnvelopeBlocked}）。
+     *
+     * <p><b>M16 修复</b>：此前 {@code ERR_FROZEN_ENVELOPE_BLOCKED} 是一个裸
+     * {@code RuntimeException} 实例，{@code Dispatcher.deliveryErrorCode} 靠
+     * 「类型相同 或 message 字符串相等」来识别 —— 后者意味着任何一条<b>恰好同文案</b>的
+     * 业务异常都会被误判成 frozen envelope 阻塞，错误码从
+     * {@code DELIVERY_ATTEMPT_FAILED} 变成 {@code INVALID_FROZEN_ENVELOPE}。
+     * 改成专用类型后，识别方式与 Go 的 {@code errors.Is(err, ErrFrozenEnvelopeBlocked)} 一致：
+     * 只认类型，不看文案。
      */
-    public static  RuntimeException ERR_FROZEN_ENVELOPE_BLOCKED =
-        new RuntimeException("community fact frozen envelope blocked");
+    public static class FrozenEnvelopeBlockedException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        public FrozenEnvelopeBlockedException(String message) {
+            super(message);
+        }
+
+        public FrozenEnvelopeBlockedException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /**
+     * 错误：frozen envelope 被阻止投递。
+     *
+     * <p>{@code final} 是刻意的：哨兵必须是单例常量，否则 {@code ==} 身份比较不成立。
+     */
+    public static final FrozenEnvelopeBlockedException ERR_FROZEN_ENVELOPE_BLOCKED =
+            new FrozenEnvelopeBlockedException("community fact frozen envelope blocked");
+
     /**
      * 错误：authority 不可用。
+     *
+     * <p><b>M13 修复</b>：此前这里声明的是普通 {@code RuntimeException}，而
+     * {@code AuthorityHandler.isAuthorityUnavailable} 只认
+     * {@code AuthorityUnavailableException} —— 于是这个「最顺手的常量」实际上<b>是死的</b>：
+     * 业务按直觉抛 {@code Wire.ERR_AUTHORITY_UNAVAILABLE}，会走到 503 分支而不是 Go 版的 404。
+     * 现在它本身就是 {@link AuthorityHandler.AuthorityUnavailableException} 的实例，
+     * 两条路径识别同一件事。
      */
-    public static  RuntimeException ERR_AUTHORITY_UNAVAILABLE =
-        new RuntimeException("community fact authority unavailable");
+    public static final RuntimeException ERR_AUTHORITY_UNAVAILABLE =
+            new AuthorityHandler.AuthorityUnavailableException("community fact authority unavailable");
 
 
 
@@ -209,8 +242,13 @@ public final class Wire {
         }
 
         /**
-         * 流式读取最多 {@code maxBytes} 字节；超过则截断；输入流被消费到底或抛 IOException。
-         * 对应 Go 版 {@code io.LimitReader} 的语义。
+         * 流式读取最多 {@code maxBytes} 字节后停止；<b>不</b>把剩余字节抽干。
+         *
+         * <p><b>M21 修复</b>：Go 版是 {@code StrictDecode(io.LimitReader(body, 64<<10), &receipt)}，
+         * {@code LimitReader} 读到上限就停，剩余部分由 {@code defer response.Body.Close()} 直接丢弃 ——
+         * <b>从不多读一个字节</b>。旧 Java 版在触到上限后还调 {@code discardUpTo(in, MAX_VALUE)}
+         * 把整个响应体读完：一个超大/慢速的响应体会让投递线程一直挂着，而 Go 侧会立刻返回。
+         * 现与 Go 对齐：读到上限即返回，剩下的交给 try-with-resources 关闭。
          */
         private static byte[] readLimitUpTo(InputStream in, int maxBytes) throws IOException {
             ByteArrayOutputStream buf = new ByteArrayOutputStream(Math.min(maxBytes, 1024));
@@ -223,14 +261,15 @@ public final class Wire {
                 buf.write(chunk, 0, n);
                 total += n;
             }
-            // 截断后丢弃剩余字节，防止 keep-alive 连接卡住
-            if (total == maxBytes) {
-                discardUpTo(in, Integer.MAX_VALUE);
-            }
+            // M21：不抽干剩余字节；剩余部分由 try-with-resources 关闭连接时一并丢弃
             return buf.toByteArray();
         }
 
-        /** 对应 Go 版丢弃 body 防止连接泄漏。 */
+        /**
+         * 对应 Go 版 {@code io.Copy(io.Discard, io.LimitReader(body, 64<<10))}：
+         * <b>仅用于非 2xx 分支</b>——那里 Go 确实主动读了最多 64KB 再关连接（为了让连接能进复用池）。
+         * 2xx 分支走 {@link #readLimitUpTo}，不调用本方法。
+         */
         private static void discardUpTo(InputStream in, int maxBytes) throws IOException {
             byte[] sink = new byte[1024];
             int total = 0;

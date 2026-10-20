@@ -13,6 +13,9 @@ import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpServletResponseWrapper;
+import org.slf4j.MDC;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -24,9 +27,11 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static com.rag.common.observability.Observability.durationMillis;
 import static com.rag.common.observability.Observability.markBusinessError;
@@ -59,8 +64,14 @@ import static com.rag.common.observability.ObservabilityConstants.SUCCESS_BIZ_CO
  *   <li>超时状态码区分：{@link ObservabilityResponseWriter#markTimedOut} 与
  *       {@link ObservabilityResponseWriter#markClientCancelled} 两个独立标志，对齐 Go 版
  *       {@code errors.Is(ctx.Err(), context.Canceled) → 499 / DeadlineExceeded → 503} 语义。</li>
- *   <li>ctx 取消传播（DRIFT-006 限制说明）：Java 版用 Thread.sleep 轮询 + worker.interrupt()，
- *       业务必须响应 {@link InterruptedException} 或周期性查 {@code Thread.isInterrupted()}。</li>
+ *   <li>ctx 取消传播：Go 版 {@code ctx} 显式贯穿全链，所有 ctx-aware 调用（http.Client / sql.DB /
+ *       grpc.Dial）在 cancel 后立即返回；Java 无 ctx 传递，改用
+ *       {@link java.util.concurrent.Future#cancel(boolean) cancel(true)} 中断 worker 线程，
+ *       业务需响应 {@link InterruptedException} 或周期性查 {@link Thread#isInterrupted()}。</li>
+ *   <li><b>H5</b>：worker 线程必须补齐 {@link RequestContextHolder} / {@link org.slf4j.MDC} /
+ *       OTel {@link Context}，否则整条 Spring Web 链在 worker 上丢失请求上下文。</li>
+ *   <li><b>H4</b>：499 / 503 / 容器取消三条分支都要<b>真的把状态码写进响应</b>，
+ *       对齐 Go 版 {@code http.Error(w, httpTimeoutBody, statusCode)}。</li>
  * </ul>
  */
 public final class HttpMiddleware {
@@ -122,20 +133,24 @@ public final class HttpMiddleware {
      *
      * <p>行为与 Go 版完全对齐：
      * <ul>
-     *   <li>timeout <= 0 或 shouldSkipHTTPTimeout → 不开超时，直接链式处理</li>
-     *   <li>否则：独立 worker 线程跑业务，主线程 Thread.sleep(10ms) 轮询</li>
-     *   <li>超时分支（worker 未完成且主线程 timeout 到期）：
+     *   <li>timeout <= 0 或 shouldSkipHTTPTimeout → 不开超时，直接在容器线程上链式处理</li>
+     *   <li>否则：独立 worker 线程跑业务（含上下文传播），容器线程
+     *       {@code CountDownLatch.await(timeout)} 精确等待</li>
+     *   <li>超时分支（worker 未完成且容器线程等到点）：
      *     <ul>
      *       <li>statusCode = 503（HTTP ServiceUnavailable，对齐 Go 版 DeadlineExceeded）</li>
-     *       <li>写"Request Timeout"到 client；调用方观察 http.status_code=503 + sea.error.kind=timeout</li>
+     *       <li>{@link #writeTimeoutResponse} 写"Request Timeout"到 client；
+     *           调用方观察 http.status_code=503 + sea.error.kind=timeout</li>
      *     </ul>
      *   </li>
-     *   <li>客户端断连分支（worker 抛 ClientAbortException / EOFException）：
+     *   <li>客户端断连分支（worker 抛 ClientAbortException / EOFException，或容器线程被 interrupt）：
      *     <ul>
      *       <li>statusCode = 499（HTTP ClientClosedRequest，对齐 Go 版 context.Canceled）</li>
-     *       <li>同样写"Request Timeout"；span 标 timeout</li>
+     *       <li><b>同样把 499 写进响应</b>（H4 修复：旧实现只打 span 属性就抛异常，分支不可达）；
+     *           span 标 timeout</li>
      *     </ul>
      *   </li>
+     *   <li>panic 分支 → 原样重抛（对齐 Go {@code panic(p)}），由容器错误页渲染 500</li>
      *   <li>正常完成 → flushTo 写 captured body 给 client</li>
      * </ul>
      */
@@ -162,39 +177,76 @@ public final class HttpMiddleware {
                 }
 
                 // 对应 Go 版 ctx, cancel := context.WithTimeout(r.Context(), timeout)
-                // Java 版用独立线程跑业务 + 主线程 Thread.sleep(10ms) 轮询，超时则 interrupt 业务线程
+                // Java 版用独立线程跑业务 + 容器线程 CountDownLatch.await(timeout) 精确等待
                 ObservabilityResponseWriter rec = new ObservabilityResponseWriter(httpResp);
                 final Throwable[] panicHolder = new Throwable[1];
-                final boolean[] doneHolder = new boolean[1];
-                final boolean[] timedOutBySchedulerHolder = new boolean[1];
-                // Spring 化：用 HTTP_EXECUTOR 替换裸 new Thread(...)；保留 doneHolder + 主线程 Thread.sleep(10) 轮询
-                // ——servlet 容器线程必须响应 InterruptedException，不能用 Future.get 阻塞。
+                final CountDownLatch doneLatch = new CountDownLatch(1);
+
+                // ===== H5 修复：把「请求上下文」搬进 worker 线程 =====
+                // Go 版把 r.Context()（含 deadline / trace）显式传给下游，靠的是参数传递，跨 goroutine 天然安全。
+                // Java 的 Spring Web 栈把请求上下文放在**线程局部**里（RequestContextHolder / MDC / OTel Context），
+                // 换线程就全丢。旧实现把 chain.doFilter 直接丢进裸 worker 线程，导致：
+                //   · RequestContextHolder.getRequestAttributes() == null
+                //   · @RequestScope / LocaleContextHolder 取不到值
+                //   · 若引入 spring-security，SecurityContextHolder 同样为空
+                // 今天还没爆，只是因为全仓尚未使用这些机制 —— 属于「一旦引入就整条 web 链失效」的雷。
+                final RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+                final Map<String, String> mdcSnapshot = MDC.getCopyOfContextMap();
+                final Context parentOtelCtx = Context.current();
+
                 Future<?> workerFuture = HTTP_EXECUTOR.submit(() -> {
+                    // 先进上下文，再跑业务；finally 必须还原，避免线程池复用时串味
+                    RequestAttributes prevAttrs = RequestContextHolder.getRequestAttributes();
+                    Map<String, String> prevMdc = MDC.getCopyOfContextMap();
                     try {
-                        chain.doFilter(httpReq, rec);
-                        doneHolder[0] = true;
+                        if (requestAttributes != null) {
+                            RequestContextHolder.setRequestAttributes(requestAttributes);
+                        }
+                        if (mdcSnapshot != null) {
+                            MDC.setContextMap(mdcSnapshot);
+                        }
+                        try (io.opentelemetry.context.Scope ignoredScope = parentOtelCtx.makeCurrent()) {
+                            chain.doFilter(httpReq, rec);
+                        }
                     } catch (Throwable t) {
                         // 标记 timedOutByScheduler 已经在主线程里写好了；这里只记异常
                         // IOException 中含 "ClientAbort" / "EOFException" → 视作客户端断连（499）
                         // 其他 → 视作 panic（500）
                         panicHolder[0] = t;
+                    } finally {
+                        doneLatch.countDown();
+                        if (prevAttrs != null) {
+                            RequestContextHolder.setRequestAttributes(prevAttrs);
+                        } else {
+                            RequestContextHolder.resetRequestAttributes();
+                        }
+                        if (prevMdc != null) {
+                            MDC.setContextMap(prevMdc);
+                        } else {
+                            MDC.clear();
+                        }
                     }
                 });
+
                 Instant start = Instant.now();
                 long timeoutMs = timeout.toMillis();
-                long elapsed = 0;
-                while (!doneHolder[0] && panicHolder[0] == null && elapsed < timeoutMs) {
-                    try {
-                        Thread.sleep(10);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                    elapsed = Duration.between(start, Instant.now()).toMillis();
+                // 容器线程等 latch 到点即返回：精度对齐 Go 的 select{<-ctx.Done()}
+                // （旧实现 Thread.sleep(10) 轮询最多晚 10ms 才判超时）
+                boolean workerDone;
+                try {
+                    workerDone = doneLatch.await(timeoutMs, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException ie) {
+                    // 容器关闭 / 请求被容器取消：Go 侧对应 ctx.Err() == context.Canceled
+                    Thread.currentThread().interrupt();
+                    workerFuture.cancel(true);
+                    rec.markClientCancelled();
+                    markTimeout(currentOtelContext(), new java.util.concurrent.TimeoutException("client cancelled: " + ie.getMessage()),
+                            Duration.between(start, Instant.now()), httpAttrs(serviceName, httpReq, HTTP_CLIENT_CLOSED_REQUEST));
+                    writeTimeoutResponse(httpResp, HTTP_CLIENT_CLOSED_REQUEST);
+                    return;
                 }
 
                 Duration duration = Duration.between(start, Instant.now());
-                boolean workerDone = doneHolder[0];
                 Throwable panic = panicHolder[0];
                 if (panic != null) {
                     // 区分"客户端断连"（499）与"系统 panic"（500）
@@ -214,16 +266,24 @@ public final class HttpMiddleware {
                     if (clientCancelled) {
                         markTimeout(pCtx, new java.util.concurrent.TimeoutException("client cancelled: " + panic.getMessage()),
                                 duration, httpAttrs(serviceName, httpReq, statusCode));
-                    } else {
-                        markSystemError(pCtx, new RuntimeException(panic.getMessage(), panic), duration, httpAttrs(serviceName, httpReq, statusCode));
+                        // ===== H4 修复：499 之前是 throw ServletException，响应从未写出 =====
+                        // Go observability/http.go:84-88 的 499 分支是 `http.Error(w, body, 499)`，
+                        // 客户端真的收到 499；旧 Java 版打完 span 属性就抛异常，
+                        // 499 只活在遥测里、永远到不了客户端（分支实际不可达）。
+                        writeTimeoutResponse(httpResp, statusCode);
+                        return;
                     }
-                    throw new ServletException(panic);
+                    markSystemError(pCtx, new RuntimeException(panic.getMessage(), panic), duration, httpAttrs(serviceName, httpReq, statusCode));
+                    // M12 修复：Go 版 observability/http.go:75 是 `panic(p)` 原样重抛，
+                    // 交给 go-zero 的 recovery 中间件渲染 500。旧 Java 版一律包成 ServletException，
+                    // 改变了容器看到的异常类型（IOException/ServletException/RuntimeException 的
+                    // 分派行为不同）。这里只对「容器不认识的」受检异常做包装，其余原样抛出。
+                    rethrowAsServlet(panic);
                 } else if (!workerDone) {
                     // 对齐 Go 版 ctx.Done() == DeadlineExceeded → 503
-                    // Spring 化：用 workerFuture.cancel(true) 替代 worker.interrupt()，等价语义（业务线程被 interrupt）
+                    // 取消业务线程（对应 Go 里 ctx 被 cancel，所有 ctx-aware 调用立即返回）
                     workerFuture.cancel(true);
                     int statusCode = 503;
-                    timedOutBySchedulerHolder[0] = true;
                     rec.markTimedOut();
                     Context tCtx = currentOtelContext();
                     Span tSpan = Span.fromContext(tCtx);
@@ -234,14 +294,47 @@ public final class HttpMiddleware {
                         tSpan.setAttribute(AttributeKey.longKey("http.status_code"), (long) statusCode);
                     }
                     markTimeout(tCtx, new java.util.concurrent.TimeoutException("http timeout"), duration, httpAttrs(serviceName, httpReq, statusCode));
-                    httpResp.setStatus(statusCode);
-                    httpResp.getWriter().write(HTTP_TIMEOUT_BODY);
+                    // D-11 修复：Go 的 http.Error 会写 text/plain + 尾部换行，
+                    // 裸 getWriter().write() 两样都没有，客户端看到的是无 Content-Type 的裸串
+                    writeTimeoutResponse(httpResp, statusCode);
                 } else {
                     markHttpResult(currentOtelContext(), serviceName, httpReq, rec.statusCode(), rec.bodyBytes(), duration, finalSlow);
                     rec.flushTo(httpResp);
                 }
             }
         };
+    }
+
+    /**
+     * M12：把 worker 线程捕获的 Throwable 按类型分派重抛，语义对齐 Go 的 {@code panic(p)}。
+     *
+     * <p>Servlet Filter 的 {@code doFilter} 只能抛
+     * {@link ServletException} / {@link IOException} / {@link RuntimeException} / {@link Error}；
+     * 其它受检异常（业务 handler 里的自定义 checked exception）必须包装。
+     * 已属于这四类的<b>原样抛出</b>，避免改变容器与 Spring MVC 的分派行为
+     * （例如 {@code @ExceptionHandler(IOException.class)} 原本能命中，被包成 ServletException 就命不中）。
+     */
+    private static void rethrowAsServlet(Throwable t) throws ServletException, IOException {
+        if (t instanceof ServletException se) throw se;
+        if (t instanceof IOException io) throw io;
+        if (t instanceof RuntimeException re) throw re;
+        if (t instanceof Error err) throw err;
+        throw new ServletException(t);
+    }
+
+    /**
+     * D-11 修复：对齐 Go 版 {@code http.Error(w, httpTimeoutBody, statusCode)}。
+     *
+     * <p>Go 的 {@code http.Error} 做三件事：① {@code WriteHeader(status)}；
+     * ② {@code Header().Set("Content-Type", "text/plain; charset=utf-8")}；
+     * ③ 写 {@code body + "\n"}。旧 Java 版只做 ① 和裸 write，客户端少两个字段。
+     */
+    private static void writeTimeoutResponse(HttpServletResponse resp, int statusCode) throws IOException {
+        resp.setStatus(statusCode);
+        resp.setContentType("text/plain; charset=utf-8");
+        resp.getWriter().write(HTTP_TIMEOUT_BODY);
+        resp.getWriter().write('\n');
+        resp.getWriter().flush();
     }
 
     /**
@@ -285,13 +378,11 @@ public final class HttpMiddleware {
      */
     private static void markHttpResult(Context ctx, String serviceName, HttpServletRequest r, int statusCode, byte[] body, Duration duration, Duration slowThreshold) {
         Map<String, Object> attrs = httpAttrs(serviceName, r, statusCode);
-        Span span = Span.fromContext(ctx);
-        if (span.isRecording()) {
-            span.setAttribute(AttributeKey.stringKey("service.name"), serviceName);
-            span.setAttribute(AttributeKey.stringKey("http.route"), r.getRequestURI());
-            span.setAttribute(AttributeKey.stringKey("http.method"), r.getMethod());
-            span.setAttribute(AttributeKey.longKey("http.status_code"), (long) statusCode);
-        }
+        // M5 修复：删除此处直接 span.setAttribute 的重复打标。
+        // Go 版 markHTTPResult（http.go:99-113）只把 attrs 传给 MarkBusinessError /
+        // MarkSystemError / MarkDurationAndSlow，由那三个函数统一写入 span；
+        // 旧 Java 版在 markHttpResult 里先 set 一遍、Mark* 里再 set 一遍 —— 同一批属性写两次。
+        // 结果值一致（幂等），但多一次无效写，且让「谁负责打标」这件事在两处出现，review 时容易误判。
         HttpEnvelope env = parseHttpEnvelope(body);
         if (env != null && env.code != 0 && env.code != SUCCESS_BIZ_CODE) {
             markBusinessError(ctx, env.code, env.msg, duration, attrs);

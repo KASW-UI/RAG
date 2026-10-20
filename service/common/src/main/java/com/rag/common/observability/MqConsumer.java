@@ -95,12 +95,16 @@ public final class MqConsumer {
         try (Scope ignored = span.makeCurrent()) {
             Context consumeCtx = Context.current();
             Instant start = Instant.now();
-            Throwable err;
-            try {
-                err = fn.apply(consumeCtx);
-            } catch (Throwable t) {
-                err = t;
-            }
+            // M8 修复：删除原先的 `try { err = fn.apply(ctx) } catch (Throwable t) { err = t; }`。
+            //
+            // Go 版 mq.go:30 是裸的 `err := fn(consumeCtx)`，**没有 recover**：
+            // fn panic 时 panic 继续向上传播（span 仍由 defer span.End() 收尾，但不会被标成 system error），
+            // 由调用方的 recovery 决定后果。
+            // 旧 Java 版 catch 住所有 Throwable 并当作返回值，于是：
+            //   ① panic 被降级成普通 error 返回值，调用方无从区分「业务失败」与「进程级崩溃」；
+            //   ② 连 OutOfMemoryError / StackOverflowError 这类 Error 也被吞掉。
+            // 语义等价论证：Go 侧这两类都不会被转成返回值，Java 侧同样不转，才是一致的。
+            Throwable err = fn.apply(consumeCtx);
             Duration duration = Duration.between(start, Instant.now());
             // markTimeout / markSystemError / markDurationAndSlow 不再传 attrs（caller attrs 已在 span builder 写入）
             if (err != null) {

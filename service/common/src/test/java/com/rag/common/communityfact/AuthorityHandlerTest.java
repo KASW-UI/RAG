@@ -91,6 +91,42 @@ class AuthorityHandlerTest {
         assertEquals(404, resp.getStatus());
     }
 
+    /**
+     * M13 回归：业务按最直觉的方式抛 {@link Wire#ERR_AUTHORITY_UNAVAILABLE}，也必须得到 404。
+     *
+     * <p>Go 出处 {@code authority_http.go:57-62}：
+     * <pre>
+     * if errors.Is(err, ErrAuthorityUnavailable) { status = 404 }
+     * else { status = http.StatusServiceUnavailable }
+     * </pre>
+     *
+     * <p>修复前 {@code Wire.ERR_AUTHORITY_UNAVAILABLE} 是个普通 {@code RuntimeException}，
+     * 而识别函数只认 {@link AuthorityHandler.AuthorityUnavailableException} ——
+     * 这个「最顺手的常量」实际是<b>死的</b>：抛它会落到 503 分支，
+     * 上游把「authority 不可用」误判成「存储故障」，重试与隔离策略随之出错。
+     *
+     * <p>与 {@code mapsLookupUnavailableTo404} 构成对照：同一个 404 语义，
+     * 两条不同的表达路径都必须命中。
+     */
+    @Test
+    void wireAuthorityUnavailableSentinelMapsTo404() throws Exception {
+        AuthorityHandler.AuthorityLookup lookup = (ctx, p, e) -> {
+            throw Wire.ERR_AUTHORITY_UNAVAILABLE;
+        };
+        var servlet = AuthorityHandler.create("rtw.comment-rpc", TOKEN, lookup);
+
+        MockHttpServletRequest req = new MockHttpServletRequest("GET", "/internal/v1/community/facts");
+        req.setQueryString("producer=rtw.comment-rpc&event_id=known");
+        req.addParameter("producer", "rtw.comment-rpc");
+        req.addParameter("event_id", "known");
+        req.addHeader("Authorization", "Bearer " + TOKEN);
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+        servlet.service(req, resp);
+
+        assertEquals(404, resp.getStatus(),
+                "Wire.ERR_AUTHORITY_UNAVAILABLE 必须与 AuthorityUnavailableException 同义（Go: errors.Is → 404）");
+    }
+
     @Test
     void mapsOtherLookupErrorTo503() throws Exception {
         AuthorityHandler.AuthorityLookup lookup = (ctx, p, e) -> {
