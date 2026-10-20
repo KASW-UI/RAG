@@ -50,21 +50,29 @@ import org.springframework.stereotype.Component;
  * 阶段执行，早于 {@code finishRefresh} 里的 {@code SmartLifecycle.start()}，
  * 且依赖的 {@code AdminMapper} 由 {@code @MapperScan} 注册的 bean definition 已就绪。
  *
- * <p><b>⚠ 为什么还必须带 {@link DependsOnDatabaseInitialization}</b>：提前到
- * {@code @PostConstruct} 之后，本类会在 {@code finishBeanFactoryInitialization}
- * 期间创建，而 Flyway 的迁移是在 {@code flywayInitializer} 这个 bean 被创建时
- * （{@code InitializingBean.afterPropertiesSet} → {@code flyway.migrate()}）跑的。
- * <p>两者都是普通 bean，谁先创建取决于 <b>bean definition 的注册顺序</b>：
- * 组件扫描注册的本类<b>早于</b>自动配置注册的 {@code flywayInitializer}，
- * 而 MyBatis 的 {@code SqlSessionFactory} 不在 Spring Boot
- * {@code DatabaseInitializationDependencyConfigurer} 的自动探测清单里
- * （清单只含 EntityManagerFactory / JdbcOperations / NamedParameterJdbcOperations / JdbcClient），
- * 因此<b>没有任何机制</b>把二者串起来 —— 若不加这个注解，seeder 可能在
- * {@code admin_admin} 表建好之前就 SELECT，导致
- * {@code relation "admin_admin" does not exist} 并让容器启动失败。
- * <p>加上之后 Flyway 先跑、seeder 后跑，顺序显式化，不再依赖注册顺序的巧合。
- * 修复前的 {@code ApplicationReadyEvent} 天然没有这个问题（该事件在 {@code finishRefresh} 之后），
- * <b>也就是说这个风险是 DRIFT-010 的修法本身引入的</b>，必须一并堵上。
+ * <p><b>关于 {@link DependsOnDatabaseInitialization}：显式声明，但当前是冗余的。</b>
+ * <p>把 seeder 提前到 {@code @PostConstruct} 后确实会引入一个时序问题：它跑在
+ * {@code finishBeanFactoryInitialization}，而 Flyway 迁移跑在 {@code flywayInitializer}
+ * bean 创建时（{@code afterPropertiesSet → migrate()}）。两者都是普通 bean，
+ * 单看注册顺序（组件扫描早于自动配置）似乎会先跑 seeder。
+ * <p><b>但实测证明不会出问题——框架已经保证了顺序</b>：MyBatis-Plus 自带
+ * {@code com.baomidou.mybatisplus.autoconfigure.MybatisDependsOnDatabaseInitializationDetector}
+ * （继承 {@code AbstractBeansOfTypeDependsOnDatabaseInitializationDetector}，
+ * 监听类型为 {@code org.mybatis.spring.SqlSessionTemplate}），Spring Boot 的
+ * {@code DatabaseInitializationDependencyConfigurer} 会自动给匹配的 bean 打上
+ * 「依赖数据库初始化」标记。因此链路是：
+ * <pre>
+ *   AdminSeederBootstrap
+ *     └─ AdminMapper (MapperFactoryBean)
+ *          └─ SqlSessionTemplate   ← 被检测器自动加上「依赖数据库初始化」
+ *               └─ flywayInitializer 先跑 migrate()
+ * </pre>
+ * <p><b>实证</b>：把本类上的 {@code @DependsOnDatabaseInitialization} 注释掉后重跑
+ * {@code AdminRpcContainerWiringTest}，7 条仍全部通过 —— 该约束并非由本注解提供。
+ * <p><b>那为什么还留着</b>：上面的保证是<b>传递性</b>的，依赖「MyBatis-Plus 提供 detector」
+ * +「Boot 的 configurer 收集 detector」两个前提。任一前提变化（换 ORM、Boot 大版本升级、
+ * detector 被裁掉）都会让 seeder 静默失去排序保护。本注解把约束钉在本类身上，不依赖那条传递链。
+ * <p>要回到「纯靠传递链」的状态，删掉本注解即可 —— 实测行为不变。
  *
  * <p><b>失败语义</b>：抛异常 → Spring 容器启动失败、进程退出，等价于 Go 端
  * {@code logx.Must(...)} 的 fatal 行为。

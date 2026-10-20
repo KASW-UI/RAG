@@ -141,6 +141,25 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+            Testcontainers 2.0.5（版本由 spring-boot-starter-parent 的 testcontainers.version 管理，不写 version）。
+            为什么必须是真 PostgreSQL、不能用 H2：
+              - extra_info 是 jsonb 列，JsonbTypeHandler 走 ps.setObject(..., Types.OTHER)
+              - AdminCreateAtomicService 的 SELECT ... FOR UPDATE 悲观锁
+              - setSql("extra_info = CAST({0} AS jsonb)") 的显式 CAST
+            这三样 H2 都不支持/语义不同，替换掉等于把要验证的东西换没了。
+            对应 AGENTS.md §6.2.3 的 A-U0 / A-U2 / A-U3。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <!-- ============== 9. OpenTelemetry OTLP exporter ============== -->
         <dependency>
@@ -166,6 +185,35 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
+                集成测试必须关掉 Ryuk，否则在本机/CI 上起不了任何容器。
+
+                原因（实测，非推测）：
+                  1. Testcontainers 2.x 的 ResourceReaper.instance() 读的是
+                     **环境变量** System.getenv("TESTCONTAINERS_RYUK_DISABLED")，
+                     字节码里就一句 getenv —— testcontainers.properties 与 -D 都无效，
+                     只有 surefire 注入 env 才有效。
+                  2. Ryuk 镜像 testcontainers/ryuk:0.14.0 需要从 Docker Hub 拉，
+                     本机走镜像加速器拉 Docker Hub 会 EOF 失败，
+                     表现为 "Can't get Docker image: RemoteDockerImage(ryuk:0.14.0)"，
+                     且发生在 @Container 之前 —— 整个类直接 ContainerFetch 失败。
+
+                关掉后的行为：改用 JVMHookResourceReaper（纯 JVM shutdown hook，不起容器）。
+                代价 = 容器不再自动回收，CI 跑完可能残留。测试用的 postgres:16-alpine
+                镜像需在本地已有（或换可达镜像源）。
+
+                恢复方式：删掉下面这段；Ryuk 会自动启用（前提是 Docker Hub 可达）。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
             </plugin>
         </plugins>
     </build>

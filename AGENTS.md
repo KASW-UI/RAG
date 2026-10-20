@@ -336,42 +336,73 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 | DRIFT-007 | MISMATCH | 同上 + `GetUserListReq` | API 层 `form:"page,default=1"` 只在**参数缺失**时生效；rpc 层不兜底，`page=0` → 负 OFFSET → PG 报错 → `Internal` | default 上提到 api 层（DTO 改 `Long` 以区分 null / 显式 0，新增 `pageOrDefault()` / `pageSizeOrDefault()`）；rpc 层删掉归一化 |
 | DRIFT-008 | MISMATCH | `AdminDomainService.createAdmin` | 无 username 空校验，空串可建号 | 移除 `INVALID_ARGUMENT` 分支（此前该 code 在 api 层无 case ⇒ 报成 `1015 服务繁忙`） |
 | DRIFT-009 | MISMATCH | `AdminJwtAuthInterceptor` | go-zero `WithJwt` 把 Jwt middleware 追加到切片尾部 + `withMiddlewares` 反向包裹 ⇒ 实际链路 `CheckBlacklist(Jwt(handler))`，**黑名单先执行** | 两段拆开，黑名单前置；各自 fail-open 行为逐条对齐 |
-| DRIFT-010 | MISMATCH | `AdminSeederBootstrap` | `NewServiceContext` 在 `zrpc.MustNewServer` **之前**跑 seeder | `@EventListener(ApplicationReadyEvent)` → `@PostConstruct`（早于 `finishRefresh` 的 `SmartLifecycle.start()`）。**连带修正**：注入 `SnowflakeBean` 强制 bean 创建顺序，否则 `@PostConstruct` 阶段会用静态兜底 workerId产出与后续不同 workerId 的 ID，存在撞号风险。**再连带**：必须补 `@DependsOnDatabaseInitialization` —— 见下方⚠ |
+| DRIFT-010 | MISMATCH | `AdminSeederBootstrap` | `NewServiceContext` 在 `zrpc.MustNewServer` **之前**跑 seeder | `@EventListener(ApplicationReadyEvent)` → `@PostConstruct`（早于 `finishRefresh` 的 `SmartLifecycle.start()`）。**连带修正**：注入 `SnowflakeBean` 强制 bean 创建顺序，否则 `@PostConstruct` 阶段会用静态兜底 workerId产出与后续不同 workerId 的 ID，存在撞号风险。**再连带**：补 `@DependsOnDatabaseInitialization`（实测证明框架已通过传递链保证该顺序，本注解是冗余保险而非修复 —— 见下方⚠）|
 | A-01 | wire | `AdminListUserService` + `GetUserListResp` | 空结果 → `"list": null`（Go 是 nil slice，且 `json:"list"` **无 omitempty**） | Service 侧空结果置 null；DTO 侧摘掉 `@JsonInclude(NON_NULL)`（否则 null 会变成「字段消失」） |
 | A-02 | wire | `AdminApiSupport.fromProto(AdminInfo)` | Go `types.AdminInfo.Email` 是 `json:"email"`（**无 omitempty**）⇒ 恒输出 `"email":""` | 总是 setEmail。**注意 `UserInfo` 侧不改**：Go `types.UserInfo.Email` 带 `omitempty`，空时应省略 |
 
 **回归测试**：`AdminSemanticDriftRegressionTest`（admin-rpc，12 条）+ `AdminSemanticDriftApiRegressionTest`（admin-api，24 条）。
 其中 DRIFT-006/007 的断言打在**MyBatis-Plus 实际生成的 SQL 片段与绑定参数**上，不是 mock 返回值 —— 后者无论 wrapper 里装什么都照常返回预设值，测试必然假绿（§3.3）。
-验证：`mvn -pl admin-rpc,admin-api -am test` + `package` 全绿（**admin-rpc 36 / admin-api 72** / users-common 4 / service-common 78，均为 2026-10-21 实测计数）。
+**容器集成测试**：`AdminRpcContainerWiringTest`（admin-rpc，7 条，真实 PG 16 + 真实 Spring 容器），见 §6.2.3。
+验证：`mvn -pl admin-rpc,admin-api -am test` + `package` 全绿（**admin-rpc 43 / admin-api 72** / users-common 4 / service-common 78，均为 2026-10-21 实测计数）。
 
-**效力边界**：本批**仍无真实 PG / Redis 集成测试**。DRIFT-001 / 006 / 007 / 008 的 Go 基线来自静态代码推导，
-只证明了 RAG 侧的**生成 SQL 与调用参数**已对齐，未证明两端在真库上产出相同结果集 —— 见 §6.2.3。
+**效力边界（已部分更新）**：DRIFT-001 / 006 / 007 的行为已在真实 PG 上验证（§6.2.3 A-U2 / A-U3）。
+仍缺的：DRIFT-008 的**建号路径**尚未在真库上跑过（需要真实 invite 行 + 并发消费）；
+DRIFT-009 的**鉴权链**未经真实 MVC 管线验证（见 A-U0）。
 
-> **⚠ DRIFT-010 的修法本身引入过一个启动期风险（已堵，但值得记住）**
+> **⚠ DRIFT-010 提前 seeder 后会丢 Flyway 时序吗？—— 曾误判，实测已定论（2026-10-21）**
+>
+> **结论：不会丢。框架本来就保证顺序。**
 >
 > 把 seeder 从 `ApplicationReadyEvent` 提前到 `@PostConstruct` 后，它会在
-> `finishBeanFactoryInitialization` 期间创建；而 Flyway 迁移是在
-> `flywayInitializer` bean 创建时（`afterPropertiesSet → flyway.migrate()`）跑的。
-> 两者都是普通 bean，**谁先创建取决于 bean definition 注册顺序**——组件扫描注册的本类
-> 早于自动配置注册的 `flywayInitializer`，且 MyBatis 的 `SqlSessionFactory`
-> **不在** `DatabaseInitializationDependencyConfigurer` 的自动探测清单里
-> （清单只含 EntityManagerFactory / JdbcOperations / NamedParameterJdbcOperations / JdbcClient）。
-> ⇒ 不加约束时，seeder 可能在 `admin_admin` 表建好之前 SELECT，
-> 报 `relation "admin_admin" does not exist` 并让容器启动失败。
+> `finishBeanFactoryInitialization` 期间创建；而 Flyway 迁移跑在 `flywayInitializer`
+> bean 创建时。单看 bean definition 注册顺序（组件扫描早于自动配置）**看起来**会先跑 seeder。
+> 当时据此写下断言：「没有机制把二者串起来，不加约束会报
+> `relation "admin_admin" does not exist` 并让容器启动失败」。
 >
-> 修复前的 `ApplicationReadyEvent` 天然没这个问题（该事件在 `finishRefresh` 之后）。
-> **教训与 §3.3 同源**：把机制「提前」比「补上」更危险 —— 提前会静默失去原本成立的隐式时序。
-> 已加 `@DependsOnDatabaseInitialization` 把顺序显式化。
-> **仍未实证**：`admin-rpc` 至今**零 `@SpringBootTest`**，没有真实容器跑过这段时序（见 §6.2.3 A-U2）。
+> **那个断言是错的 —— 而它恰好违反 §3.2/§3.3：凭静态推理就断定了一个框架机制。**
+> 加 Testcontainers 集成测试后做负向验证：把 `@DependsOnDatabaseInitialization`
+> 注释掉重跑，**7 条仍全部通过**。真正原因是：
+>
+> MyBatis-Plus 自带 `com.baomidou.mybatisplus.autoconfigure.MybatisDependsOnDatabaseInitializationDetector`
+> （继承 `AbstractBeansOfTypeDependsOnDatabaseInitializationDetector`，监听类型为
+> `org.mybatis.spring.SqlSessionTemplate`），Spring Boot 的
+> `DatabaseInitializationDependencyConfigurer` 会自动给匹配的 bean 打上「依赖数据库初始化」标记：
+> ```
+> AdminSeederBootstrap → AdminMapper → SqlSessionTemplate（被自动标注） → flywayInitializer 先跑
+> ```
+>
+> **处置**：注解**保留**在 seeder 上，但定位从「必需的修复」降级为「不依赖传递链的冗余保险」——
+> 传递链依赖「MyBatis-Plus 提供 detector」+「Boot 收集 detector」两个前提，
+> 任一变化（换 ORM、Boot 大版本升级、detector 被裁掉）都会让 seeder 静默失去保护。
+> javadoc 已按实测结论重写，不再声称它是必需的。
+>
+> **这条教训比结论本身更重要**：上一轮正是用「读代码 → 推理 bean 生命周期 → 断言会失败」
+> 得出的结论，而 §3.3 明写「不得凭注解名称断定机制已启用」。
+> **推理出的机制风险必须配一条能真触发的测试去证实或证伪，否则只能记 UNRESOLVED，不能写成断言。**
 
-### 6.2.3 `service/users/admin` 的 UNRESOLVED（不得按「已对齐」处理）
+### 6.2.3 `service/users/admin` 的 UNRESOLVED（2026-10-21 部分关闭）
 
-| # | 项 | 未知点 | 需要什么才能定 |
+> 下列状态由 `AdminRpcContainerWiringTest`（真实 PostgreSQL 16 容器 + 真实 Spring 容器，7 条）实测产出，
+> 非静态推导。A-U1 与 admin-api 侧仍为 UNRESOLVED。
+
+| # | 项 | 状态 | 证据 / 剩余未知点 |
 |---|---|---|---|
-| A-U0 | **`admin-rpc` / `admin-api` 均无真实 Spring 上下文测试** | `admin-rpc` 零 `@SpringBootTest`；`admin-api` 唯一的 Web 测试 `AdminResponseEnvelopeAdviceTest` 用的是 `MockMvcBuilders.standaloneSetup` + 内联 `@RestController`，**不加载真实的 `AdminController` / `WebMvcConfig` / `AdminJwtAuthInterceptor`**。后果：本批对拦截器（DRIFT-009）与启动时序（DRIFT-010）的改动**从未在真实容器里执行过**；单测是直接 `new` 出对象调方法 | 起 Testcontainers PostgreSQL + `@SpringBootTest` 加载 `AdminRpcApplication` / `AdminApiApplication`。**受限于 jsonb / `FOR UPDATE` / `Types.OTHER` 都无法用 H2 替代**，必须真 PG |
-| A-U1 | Go 侧 uid **格式非法**（非缺失）时的 HTTP 状态码 | 已确认**缺失**场景走零值路径（→ `1003` HTTP 200）；但 `uid=abc` 这类解析失败会走 `httpx.ErrorCtx` 的非 `*BindError` 分支，未读到 go-zero v1.10.2 源码原文，不确定是 500 还是 400 | 读 `rest/httpx/responses.go` + `httpx.Parse` 的错误分类 |
-| A-U2 | 两端从未做运行时对拍 | DRIFT-001 看似铁证，但「哪一侧在部署环境里真的生效」取决于既有库里是否已有 `admin` 记录 —— 若已存在，两边都走 no-op 分支，差异不显现 | 起空库，两端各跑一遍 bootstrap + login |
-| A-U3 | `getUserList` 的 LIKE 双重包裹 | 生产代码传 `%keyword%` 给 MP 的 `like()`，MP 再包一层 ⇒ 实际 `LIKE '%%%keyword%%%'`。**连续 `%` 会折叠，与 Go 的 `'%keyword%'` 匹配集合相同**，故判为 IMPLEMENTATION DIFFERENCE 而非漂移；但未在真库上验证过集合相等 | 同一批 keyword 跑两端对拍比对结果集 |
+| A-U0 | 真实 Spring 上下文测试 | **admin-rpc 已关闭 / admin-api 未关闭** | admin-rpc 新增 `AdminRpcContainerWiringTest`（7 条，真 PG + `@SpringBootTest(AdminRpcApplication)`），本批对 **DRIFT-010 启动时序**的改动首次在真实容器执行。**admin-api 仍缺**：`AdminResponseEnvelopeAdviceTest` 用的是 `MockMvcBuilders.standaloneSetup` + 内联 `@RestController`，不加载真实的 `AdminController` / `WebMvcConfig` / `AdminJwtAuthInterceptor` ⇒ **DRIFT-009 的鉴权链改动仍未经真实 MVC 管线验证**。关闭它需要给 admin-api 也加 Testcontainers（它不需要 PG，需要 Redis 容器或把 `RedisTemplate` 换成内嵌/内存实现） |
+| A-U1 | Go 侧 uid **格式非法**（非缺失）时的 HTTP 状态码 | **仍 UNRESOLVED** | 已确认**缺失**场景走零值路径（→ `1003` HTTP 200）；`uid=abc` 这类解析失败走 `httpx.ErrorCtx` 的非 `*BindError` 分支，未读到 go-zero v1.10.2 源码原文，不确定 500 还是 400。需读 `rest/httpx/responses.go` + `httpx.Parse` 的错误分类 |
+| A-U2 | 两端运行时对拍 | **RAG 侧已关闭 / Go 侧未做** | RAG 侧实证：空库上 seeder 造出的 admin 用 `admin/admin` 登录通过、用 `123456` **不**通过（DRIFT-001 关闭）；重复执行 seeder 不产生第二行（幂等）；`resetUserPassword` 用的是配置值 `123456` 而非 seeder 常量（两个来源未串）。**Go 侧仍需单独起进程跑一遍同样三步**才能做端到端对拍 |
+| A-U3 | `getUserList` 的 LIKE 双重包裹 | **已关闭** | 真 PG 上实测：RAG 的 `%%alice%%` 与 `%%%alice%%%` 命中集合完全相同，且与原生 `LIKE '%alice%'`（Go 写法）结果集一致；已覆盖 username 命中 + email 命中（OR 分支）两个来源。判定为 IMPLEMENTATION DIFFERENCE 而非漂移，已实证 |
+
+##### 搭建容器测试时踩到的环境坑（换机器 / 换网络时必读）
+
+| 坑 | 现象 | 解法 | 出处 |
+|---|---|---|---|
+| **Ryuk 拉不下来** | `Can't get Docker image: RemoteDockerImage(testcontainers/ryuk:0.14.0)`，发生在任何 `@Container` 之前，整类 ContainerFetch | surefire 注入**环境变量** `TESTCONTAINERS_RYUK_DISABLED=true`（见 admin-rpc/pom.xml）。**`testcontainers.properties` 与 `-D` 都无效** —— Testcontainers 2.x 的 `ResourceReaper.instance()` 字节码里就一句 `System.getenv(...)` | 已实测 |
+| **`disabledWithoutDocker` 误判** | Docker 明明可用，日志显示已 Connected，但全部用例 Skipped | 去掉该参数。2.x 的 `DockerAvailableDetector` 在本机判定为不可用，而静态 `@Container` 字段初始化早于条件求值，所以日志顺序具有欺骗性 | 已实测 |
+| **gRPC server 关不掉** | 写 `grpc.server.enabled=false` 无效，仍起 server 去抢 8081 → `BindException: Address already in use` | 改 `grpc.server.port=0` 绑临时端口。devh 3.1.0 的 `GrpcServerLifecycle` **没有** `@ConditionalOnProperty("grpc.server.enabled")`，无开关可用 | 已实测 |
+| **`PullPolicy` 位置变了** | 2.x 里 `PullPolicy` 在 `org.testcontainers.images`，且**没有** `neverPull()` | 用默认的 `DefaultPullPolicy`（本地已有镜像则不拉）。测试用的 `postgres:16-alpine` 需本地预先存在 | 已实测 |
+
+> ⚠ 关掉 Ryuk 的代价是**容器不再自动回收**，CI 跑完可能残留。
+> Docker Hub 可达后删掉 admin-rpc/pom.xml 里那段 surefire 配置即可恢复。
 
 ### 6.2.1 本次从本表移出（已修或已定案）
 
