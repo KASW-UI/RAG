@@ -137,6 +137,43 @@ RAG 每次选择「用更地道的 Spring 写法」时，必须能回答：
 | HTTP method | 统一 POST（Go 为 GET/DELETE 混合） | 同上 |
 | 表名 | `users_user` / `admin_admin`（Go 为 GORM 默认名） | HUMAN_ONLY.MD 决策 |
 
+#### 3.4.1 `service/common` 的 Java 端差异（2026-10-21 逐行审计产出）
+
+Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 RAG 全部主源码，产出 20 项偏差、修复 21 处（分支 `row/common-fix-semantic-drift`，issue #71186341）。**以下 5 条是修复后仍然存在、且无法靠改代码消除的差异**。
+
+**分类原则**：「有意偏离」= 主动选择与 Go 不同（须签字，不得顺手改回）；「框架限制」= 想对齐但语言/框架做不到；「表述差异」= 语义已对齐、仅字面不同。三者性质不同，review 时不可混谈。
+
+##### A. 有意偏离（需签字）
+
+| # | 位置 | 差异 | Go 行为 | Java 行为 | 理由 | 关闭条件 |
+|---|---|---|---|---|---|---|
+| A-1 | `Logger.doLogFatal` / `LoggerFactoryBean.logFatal` | **等价域收窄** | `logger.go:293-296` 输出 `fatal_error` 后无条件 `os.Exit(1)`，**永远终止** | 抛 `FatalError`，**仅在无人 catch 时**终止 | 用户 2026-10-21 拍板：`System.exit` 会绕过 Spring graceful shutdown 与 `@PreDestroy` | 若业务出现 `catch (FatalError)` 后继续运行的写法，等价性即被打破 |
+| A-2 | `Logger.isFiltered` / `LoggerFactoryBean.isFiltered` | **`call_chain` 内容比 Go 少框架帧** | `logger.go:53-58` 的 `github.com/zeromicro/go-zero/` 前缀**本身是死的**（`getFuncName` 同样剥掉包路径），只有 `runtime.`/`testing.` 生效 | 按该列表的**意图**执行，6 条前缀全部可命中 | Go 侧是 bug；Java 照抄会让「过滤」永远不生效。已在 javadoc 留档 | 若要求逐字复刻 Go 的**实际行为**（即不过滤），需回退本项 |
+
+##### B. 框架限制导致的已知不等价（**不是**有意偏离，无法靠改 `service/common` 消除）
+
+| # | 位置 | 差异 | 影响面 | 关闭条件 |
+|---|---|---|---|---|
+| B-1 | `HttpMiddleware` 超时分支 / `RpcInterceptor` 超时调度 | **超时无法取消在途 IO**。Go 的 `context.WithTimeout` 到点 ctx Done，所有 ctx-aware IO（`http.Client` / `sql.DB` / `grpc.Dial`）立即返回、连接池立刻释放；Java 只能 `Future.cancel(true)` 发 `InterruptedException`，而 **JDBC 驱动、grpc-java 阻塞 stub、`java.net.http.HttpClient` 均不响应线程 interrupt** —— 阻塞在 socket read 上的调用会挂到查询自行结束 | **当前生效**（2026-10-21 前 timeout 为 `ZERO`、该分支从不进入；按 Go 的 3s/2s 打开后转为活跃路径）。同一慢查询：Go 3s 后连接归还，Java 可能占用到 10s | 业务侧主动响应：长耗时方法内周期性查 `DeadlineState.isExpired()`、阻塞 IO 前用 `remainingMillis()` 限流、或捕获 `InterruptedException`。**当前 `user-rpc` 一处都未使用** —— 这是本项尚未关闭的根因 |
+
+##### C. 表述差异（语义已对齐，仅字面不同，无需签字）
+
+| # | 位置 | 差异 |
+|---|---|---|
+| C-1 | `RpcInterceptor.goStyleStatusMessage` | gRPC Java 的 `Code.name()` 返回 `NOT_FOUND`，Go 的 `codes.Code.String()` 返回 `NotFound`。code 与 desc 均已保留（Go 出处 `rpc.go:95`），仅常量表示不同，不做臆造映射 |
+
+##### D. UNRESOLVED（证据不足，**不得**按「已对齐」处理）
+
+| # | 项 | 未知点 | 需要什么才能定 |
+|---|---|---|---|
+| D-1 | `Wire.canonicalHash` 的 JCS 库 | Go 用 `github.com/cyberphone/json-canonicalization`，Java 用 `org.erdtman.jcs`，两者均声称 RFC 8785。**数值边界**（超长小数、指数记法、Unicode 转义）是否真等价，**无差分测试即不可知** | 补 RFC 8785 官方测试向量对拍；或对同一批 payload 同时跑两库比对 hash |
+| D-2 | `communityfact` 整体 | RAG 侧**零消费者**。代码层面已对齐，但**没有任何运行证据**，不能算行为对齐 | 接入 `comment` / `article` 等域后补集成测试 |
+
+##### 本节的效力边界
+
+- 本节记录的是**代码层面**的差异结论。`service/common` **从未做过 Go ↔ RAG 运行时对拍**（两边同时喂同一批输入比对输出），全仓也**没有真实 PG / Redis 集成测试**（现有测试全部 mock 数据层）。因此「已修复 20 项偏差」≠「行为已验证等价」。
+- 尤其 B-1 这类差异，**只有真实慢查询 + 真实超时才能暴露**，静态审查与单测都测不到。
+
 ---
 
 ## 四、当前重构（多 phase · 真理之源 = Go）
@@ -334,11 +371,11 @@ s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, obser
 
 验证：`mvn clean verify` 全仓 9 模块 BUILD SUCCESS（common 78 / admin-rpc 24 / admin-api 46 / user-rpc 46 / user-api 30 / users-common 3 / message-rpc 待复核）。
 
-**仍需 review 签字的残留差异**（§3.4 留档）：
+**残留差异**不在本节重复维护，统一见 **§3.4.1**（按「有意偏离 / 框架限制 / 表述差异 / UNRESOLVED」四类分列，每条带关闭条件）。
 
-1. `logFatal` 等价域收窄 —— Go 是「永远 `os.Exit(1)`」，现为「仅在无人 catch 时终止」（保留 graceful shutdown，用户已拍板）。
-2. Snowflake 时钟回拨 —— 照搬 bwmarrin v0.3.0 的**无保护**行为，继承其「回拨可能撞 ID」的风险。RAG 不擅自加保护，加则须单独立项。
-3. `call_chain` 内容比 Go 少框架帧（Go 的 go-zero 前缀条目本身就是死的）。
+其中本轮新增、值得单独强调的一条：**B-1 超时无法取消在途 IO**。它在本轮之前是潜伏的（timeout 为 `ZERO`，分支从不进入），按 Go 的 3s/2s 打开超时后转为**当前生效**，且 `user-rpc` 业务侧一处都未主动响应取消。
+
+另一条：Snowflake 时钟回拨**照搬 bwmarrin v0.3.0 的无保护行为**，继承其「回拨可能撞 ID」的风险。RAG 不擅自加保护（加了即与 Go 不等价），若要加须单独立项。
 
 ## 七、引用清单
 
