@@ -109,4 +109,41 @@ class UserRpcJsonbAndAvatarProjectionTest {
         assertFalse(Boolean.FALSE.equals(returned.getIsCurrent()),
                 "返回值不应仍是 false");
     }
+
+    // ================== DRIFT-001：update_time 必须被推进 ==================
+
+    /**
+     * DRIFT-001 回归：只要真的发出了 UPDATE，SET 子句里就<b>必须</b>含 update_time。
+     *
+     * <p>Go 出处 {@code model/data_model.go:15}：
+     * {@code UpdateTime time.Time `gorm:"column:update_time;autoUpdateTime"`}，
+     * GORM 的 autoUpdateTime 会在每次 {@code Updates()} 时把该列写进 SET。
+     *
+     * <p>修复前 RAG 的 SET 只有 Username/Password/Email/extra_info，{@code update_time}
+     * <b>自注册起永不推进</b>。原注释写的是「依赖 Postgres CURRENT_TIMESTAMP 在 row-level 触发」——
+     * 这在事实层面不成立：普通 UPDATE 不含该列时 Postgres 不会触碰它；
+     * 本仓既无 MetaObjectHandler（本模块零命中）、DDL 也只有 INSERT 时生效的 DEFAULT、无 trigger。
+     */
+    @Test
+    @DisplayName("updateUserById 发出 UPDATE 时必须把 update_time 放进 SET（对齐 GORM autoUpdateTime）")
+    @SuppressWarnings({"unchecked", "unused"})
+    void updateUserById_advancesUpdateTime() {
+        UserMapper mapper = Mockito.mock(UserMapper.class, Mockito.CALLS_REAL_METHODS);
+
+        UserEntity patch = new UserEntity();
+        patch.setEmail("new@example.com");
+        patch.setExtraInfo(Map.of("avatar", "https://cdn/x.png"));
+
+        mapper.updateUserById(1001L, patch);
+
+        ArgumentCaptor<LambdaUpdateWrapper<UserEntity>> captor =
+                ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        Mockito.verify(mapper).update(Mockito.isNull(), captor.capture());
+
+        String sqlSet = captor.getValue().getSqlSet();
+        assertTrue(sqlSet.contains("update_time"),
+                "SET 子句必须含 update_time，否则 update_time 自插入起永不推进。实际 SET = " + sqlSet);
+        assertTrue(sqlSet.contains("CURRENT_TIMESTAMP"),
+                "update_time 应由 CURRENT_TIMESTAMP 推进，实际 SET = " + sqlSet);
+    }
 }

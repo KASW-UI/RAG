@@ -35,6 +35,7 @@ import com.rag.users.user.rpc.mapper.UserAvatarHistoryMapper;
 import com.rag.users.user.rpc.mapper.UserMapper;
 import com.rag.users.user.rpc.metrics.UserRpcMetrics;
 import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
@@ -220,6 +221,17 @@ public class UserDomainService {
                 throw Status.ALREADY_EXISTS.withDescription("用户名已存在").asRuntimeException();
             } catch (NotFoundException e) {
                 // 用户名可用，继续
+            } catch (StatusRuntimeException e) {
+                // 上面刚抛的 ALREADY_EXISTS：原样上抛，不能掉进下面的 db_error 分支
+                throw e;
+            } catch (Exception e) {
+                // DRIFT-009：Go 出处 registerlogic.go:50-54 —— 「非 ErrorNotFound」单独成一支，
+                // 打 db_error 指标 + ErrorDbSelect 日志 + span.RecordError，再返 Internal。
+                // 缺了这一支，DB 抖动在本进程里既无指标也无业务错误日志，完全静默。
+                metrics.getRegisterDbError().increment();
+                span.recordException(e);
+                logger.logBusinessErr(otelCtx, ErrorCode.ERROR_DB_SELECT.getCode(), e);
+                throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
             }
 
             // W2 bcrypt
@@ -309,6 +321,21 @@ public class UserDomainService {
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
         }
 
+        // DRIFT-011：Go 侧 Status 是值类型 int64（GORM 把 NULL 扫进 int64 会直接报错 →
+        // FindOneByUid 返回非 sentinel 错误 → ErrorDbSelect + codes.Internal "DB查询失败"），
+        // 且 protoc 对 `optional int64 status = 6` **只生成 setStatus(long)**（无 Long 重载），
+        // 这里直接 setStatus(user.getStatus()) 会在 status 为 null 时自动拆箱抛 NPE，
+        // 被 UserServiceGrpcImpl 兜底成 INTERNAL + "NullPointerException: ..."，
+        // 既丢了 ErrorDbSelect 日志，description 也与 Go 不同。
+        // 对齐做法：null 视同 Go 的扫描失败，走与 Go 同一条错误路径。
+        // 绝不 fallback 成 0 —— status=0 在 identity 解析里意为「活跃」，
+        // 把 NULL 默认成活跃是朝错误方向的 fail-open。
+        if (user.getStatus() == null) {
+            logger.logBusinessErr(otelCtx, ErrorCode.ERROR_DB_SELECT.getCode(),
+                    new IllegalStateException("users_user.status is NULL for uid=" + req.getUid()));
+            throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
+        }
+
         UserInfo.Builder b = UserInfo.newBuilder()
                 .setUid(user.getUid())
                 .setUsername(user.getUsername() == null ? "" : user.getUsername())
@@ -356,9 +383,17 @@ public class UserDomainService {
                 existing = userMapper.findOneByUserName(req.getUsername());
             } catch (NotFoundException e) {
                 existing = null;
+            } catch (Exception e) {
+                // DRIFT-009：Go 出处 updateuserlogic.go:41-44 —— 查库故障单独成一支
+                logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_SELECT.getCode(), e);
+                throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
             }
             if (existing != null) {
                 // D-004：不排除自己
+                // Go 出处 updateuserlogic.go:38 同样打 ErrorUserExist（它传的 err 是 nil，
+                // 这里传一个描述性异常代替——业务码一致，Throwable 内容不参与 wire）。
+                logger.logBusinessErr(Context.current(), ErrorCode.ERROR_USER_EXIST.getCode(),
+                        new RuntimeException("username already exists: " + req.getUsername()));
                 throw Status.ALREADY_EXISTS.withDescription("用户名已存在").asRuntimeException();
             }
             toUpdate.setUsername(req.getUsername());
@@ -369,6 +404,8 @@ public class UserDomainService {
             try {
                 toUpdate.setPassword(PasswordUtil.encrypt(req.getPassword()));
             } catch (Exception e) {
+                // Go 出处 updateuserlogic.go:50
+                logger.logBusinessErr(Context.current(), ErrorCode.ERROR_SERVER_COMMON.getCode(), e);
                 throw Status.INTERNAL.withDescription("密码生成失败").asRuntimeException();
             }
         }
@@ -389,6 +426,8 @@ public class UserDomainService {
         try {
             userMapper.updateUserById(req.getUid(), toUpdate);
         } catch (Exception e) {
+            // Go 出处 updateuserlogic.go:65
+            logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_UPDATE.getCode(), e);
             throw Status.INTERNAL.withDescription("DB更新失败").asRuntimeException();
         }
 
@@ -397,8 +436,12 @@ public class UserDomainService {
         try {
             fresh = userMapper.findOneByUid(req.getUid());
         } catch (NotFoundException e) {
+            // Go 出处 updateuserlogic.go:73
+            logger.logBusinessErr(Context.current(), ErrorCode.ERROR_USER_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (Exception e) {
+            // Go 出处 updateuserlogic.go:76
+            logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_SELECT.getCode(), e);
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
         }
 
@@ -434,6 +477,10 @@ public class UserDomainService {
         Span span = tracer.spanBuilder("Action-User-Delete")
                 .setAttribute("biz-uid", req.getUid())
                 .startSpan();
+        // Go 出处 deleteuserlogic.go:35-36 —— spanCtx = tracer.Start(l.ctx, ...)，日志全部走 spanCtx，
+        // 这样 LogBusinessErr 里的 trace_id 才能和这个 span 对上。此前 RAG 侧没建 otelCtx，
+        // 新增的 ErrorDbSelect/ErrorDbUpdate 日志会丢失 span 关联。
+        Context otelCtx = Context.current().with(span);
         checkDeadline();
 
         try {
@@ -441,8 +488,13 @@ public class UserDomainService {
             try {
                 userMapper.findOneByUid(req.getUid());
             } catch (NotFoundException e) {
+                // Go 出处 deleteuserlogic.go:43
+                logger.logBusinessErr(otelCtx, ErrorCode.ERROR_USER_NOT_EXIST.getCode(), e);
                 throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
             } catch (Exception e) {
+                // Go 出处 deleteuserlogic.go:48-49（span.RecordError + ErrorDbSelect）
+                span.recordException(e);
+                logger.logBusinessErr(otelCtx, ErrorCode.ERROR_DB_SELECT.getCode(), e);
                 throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
             }
 
@@ -450,6 +502,9 @@ public class UserDomainService {
             try {
                 userMapper.deleteUserByUid(req.getUid());
             } catch (Exception e) {
+                // Go 出处 deleteuserlogic.go:57
+                span.recordException(e);
+                logger.logBusinessErr(otelCtx, ErrorCode.ERROR_DB_UPDATE.getCode(), e);
                 throw Status.INTERNAL.withDescription("DB更新失败").asRuntimeException();
             }
 
@@ -484,10 +539,19 @@ public class UserDomainService {
         try {
             history = avatarHistoryMapper.selectAvatarHistory(userMapper, req.getUid(), historyId);
         } catch (NotFoundException e) {
+            // Go 出处 selectavatarlogic.go:42（ErrorUserNotExist）
+            logger.logBusinessErr(Context.current(), ErrorCode.ERROR_USER_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (AvatarHistoryNotFoundException e) {
+            // Go 出处 selectavatarlogic.go:45 —— 它这里传的是 errmsg.Error(=500)，
+            // 显然是漏填（错误码表里有 ErrorAvatarHistoryNotExist=1018）。
+            // 日志码不参与 wire，用语义正确的 1018；响应码仍由 AvatarSelectService 按 Go 映射。
+            logger.logBusinessErr(Context.current(),
+                    ErrorCode.ERROR_AVATAR_HISTORY_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("头像历史不存在").asRuntimeException();
         } catch (Exception e) {
+            // Go 出处 selectavatarlogic.go:48（ErrorDbUpdate）
+            logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_UPDATE.getCode(), e);
             throw Status.INTERNAL.withDescription("DB更新失败").asRuntimeException();
         }
 
@@ -522,6 +586,8 @@ public class UserDomainService {
         try {
             historyId = String.valueOf(Snowflake.nextId());
         } catch (Exception e) {
+            // Go 出处 uploadavatarlogic.go:41（ErrorSnowflakeID）
+            logger.logBusinessErr(Context.current(), ErrorCode.ERROR_SNOWFLAKE_ID.getCode(), e);
             throw Status.INTERNAL.withDescription("history_id生成失败").asRuntimeException();
         }
 
@@ -532,10 +598,17 @@ public class UserDomainService {
             history = avatarHistoryMapper.createAvatarHistory(
                     userMapper, req.getUid(), historyId, avatarUrl, contentType, req.getSizeBytes());
         } catch (NotFoundException e) {
+            // Go 出处 uploadavatarlogic.go:56（ErrorUserNotExist）
+            logger.logBusinessErr(Context.current(), ErrorCode.ERROR_USER_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (AvatarHistoryNotFoundException e) {
+            // createAvatarHistory 不会抛这个，保留兜底以免落进下面的 db_error 分支
+            logger.logBusinessErr(Context.current(),
+                    ErrorCode.ERROR_AVATAR_HISTORY_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("头像历史不存在").asRuntimeException();
         } catch (Exception e) {
+            // Go 出处 uploadavatarlogic.go:59（ErrorDbInsert）
+            logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_INSERT.getCode(), e);
             throw Status.INTERNAL.withDescription("DB插入失败").asRuntimeException();
         }
 
@@ -563,8 +636,12 @@ public class UserDomainService {
         try {
             userMapper.findOneByUid(req.getUid());
         } catch (NotFoundException e) {
+            // Go 出处 getavatarhistorylogic.go:34（ErrorUserNotExist）
+            logger.logBusinessErr(Context.current(), ErrorCode.ERROR_USER_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (Exception e) {
+            // Go 出处 getavatarhistorylogic.go:37（ErrorDbSelect）
+            logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_SELECT.getCode(), e);
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
         }
 
@@ -573,6 +650,8 @@ public class UserDomainService {
         try {
             histories = avatarHistoryMapper.listAvatarHistory(req.getUid(), req.getLimit());
         } catch (Exception e) {
+            // Go 出处 getavatarhistorylogic.go:43（ErrorDbSelect）
+            logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_SELECT.getCode(), e);
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
         }
 

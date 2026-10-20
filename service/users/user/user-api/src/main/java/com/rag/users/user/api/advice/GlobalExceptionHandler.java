@@ -1,5 +1,6 @@
 package com.rag.users.user.api.advice;
 
+import com.rag.common.exception.AuthenticationException;
 import com.rag.common.exception.BusinessException;
 import com.rag.common.logger.FatalError;
 import com.rag.common.response.Response;
@@ -26,7 +27,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * <ul>
  *   <li>把业务异常 / gRPC 异常 / IdentityResolver sentinel 异常 / 兜底 RuntimeException 统一映射成
  *       {@code Response{code, msg, data=null}}</li>
- *   <li>HTTP 状态码：业务失败一律 200（业务码由 body 表达）；仅框架级错误保留 Spring 默认语义
+ *   <li>HTTP 状态码：<b>鉴权层失败 = 401</b>（{@link AuthenticationException}，由拦截器抛出）；
+ *       其余业务失败一律 200（业务码由 body 表达）；仅框架级错误保留 Spring 默认语义
  *       （400 / 405 / 415），未捕获异常 500</li>
  *   <li>取代了 Go 端 LogicResult 抛业务码模式 + handler 层 try/catch + filter 短路的三段式</li>
  * </ul>
@@ -48,6 +50,28 @@ public class GlobalExceptionHandler {
         log.error("BusinessException code={} msg={}", code, msg);
         HttpStatus status = decideStatus(code);
         return ResponseEntity.status(status).body(new Response(code, msg, null));
+    }
+
+    /**
+     * <b>鉴权层失败 → HTTP 401</b>（DRIFT-004 修复）。
+     *
+     * <p>Spring 按「最具体」挑 handler：{@code AuthenticationException extends BusinessException}，
+     * 因此本方法优先于上面的 {@link #handleBusiness}，只有拦截器抛出的鉴权失败会走这里。
+     *
+     * <p>Go 出处（401 已由 Go 侧源码与 identity_contract.md 双重坐实）：
+     * <ul>
+     *   <li>{@code rest.WithJwt} → {@code rest/handler/authhandler.go:106 unauthorized()}
+     *       → {@code writer.WriteHeader(http.StatusUnauthorized)}</li>
+     *   <li>{@code checkblacklistmiddleware.go:38} → {@code w.WriteHeader(http.StatusUnauthorized)}</li>
+     * </ul>
+     * Go 两处 body 形状不同（JWT 失败空 body / 黑名单 {@code {code:401,msg}}），
+     * 本端统一成完整 envelope，属表达层差异 —— 已按 §3.4 留档。
+     */
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<Response> handleAuthentication(AuthenticationException e) {
+        log.warn("AuthenticationException code={} msg={}", e.getCode(), e.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(new Response(e.getCode(), e.getMessage(), null));
     }
 
     // ============== 2. gRPC 异常（Service 未捕获透传） ==============
@@ -196,13 +220,20 @@ public class GlobalExceptionHandler {
     /**
      * 业务码 → HTTP 状态码：<b>一律 200</b>。
      *
-     * <p>与参考实现 1:1：参考侧所有 Logic 结果都经 {@code LogicResult} 走
-     * {@code envelope(...)} 输出，HTTP 状态码恒为 Spring 默认 200，业务成败完全由 body 里的
-     * {@code code} 表达；只有两个 Servlet {@code Filter} 的鉴权短路才写 401，而那属于
-     * <b>鉴权层</b>语义、不经过本处理器。
+     * <p>与 Go 端 {@code httpx.OkJson} 1:1：Go 侧所有 Logic 结果都经 envelope 输出，
+     * HTTP 状态码恒为 200，业务成败完全由 body 里的 {@code code} 表达。
      *
-     * <p>此前这里把 1004 / 1006 / 1009 映射成 401，导致公开路径
-     * {@code /login} 在签发 token 失败时也会返回 401 —— 登录接口答 401 语义不成立。
+     * <p><b>⚠️ 更正本方法此前那段错误论证（DRIFT-004）</b>。原文写的是：
+     * <blockquote>「只有两个 Servlet Filter 的鉴权短路才写 401，而那属于鉴权层语义、不经过本处理器」</blockquote>
+     * 在本工程里<b>不存在</b> Servlet Filter 鉴权短路 —— 鉴权是
+     * {@code JwtAuthInterceptor}（{@code HandlerInterceptor}），它<b>抛异常</b>，
+     * 必然经过本处理器。于是鉴权失败被降级成 HTTP 200。
+     *
+     * <p>现在鉴权层改抛 {@link AuthenticationException}，由
+     * {@link #handleAuthentication} 单独产出 401，<b>不再依赖本方法按业务码分流</b> ——
+     * 1006 在鉴权层与 Service 层都可能出现，按码分流会把两层重新搅在一起。
+     *
+     * <p>本方法因此可以安全地保持「无条件 200」。
      */
     private HttpStatus decideStatus(int code) {
         return HttpStatus.OK;

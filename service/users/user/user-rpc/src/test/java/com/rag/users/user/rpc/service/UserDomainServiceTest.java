@@ -645,4 +645,149 @@ class UserDomainServiceTest {
         assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.NOT_FOUND);
         assertThat(e.getStatus().getDescription()).isEqualTo("用户不存在");
     }
+
+    // ==================================================================
+    // 2026-10-21 Go → Spring Boot 语义一致性审计新增的回归用例
+    // ==================================================================
+
+    /**
+     * DRIFT-011 回归：{@code status} 为 NULL 时必须走 Go 的
+     * {@code codes.Internal "DB查询失败"}，而不是在 {@code setStatus(Long)} 上自动拆箱炸 NPE。
+     *
+     * <p>Go 出处 model/data_model.go:11 {@code Status int64}（值类型，非指针）+
+     * model/user.go:22-29：GORM 把 NULL 扫进 int64 会直接返回错误 ⇒
+     * {@code FindOneByUid} 返回非 sentinel 错误 ⇒ {@code LogBusinessErr(ErrorDbSelect)}
+     * + {@code codes.Internal "DB查询失败"}。
+     *
+     * <p>而 RAG 侧 {@code UserInfo.Builder} 对 {@code optional int64 status = 6}
+     * <b>只生成 {@code setStatus(long)}</b>（已核对生成代码 UserInfo.java:1166），
+     * 传 {@code Long} 会自动拆箱 → NPE → 被 UserServiceGrpcImpl 兜底成
+     * {@code INTERNAL + "NullPointerException: ..."}，既丢了 ErrorDbSelect 日志，description 也与 Go 不同。
+     *
+     * <p>⚠️ 刻意<b>不</b> fallback 成 0：{@code status=0} 在 identity 解析里意为「活跃」，
+     * 把 NULL 默认成活跃是朝错误方向的 fail-open。
+     */
+    @Test
+    void getUser_nullStatus_throwsInternalNotNPE() {
+        UserEntity user = new UserEntity();
+        user.setUid(456L);
+        user.setUsername("bob");
+        user.setStatus(null);   // DB 里 status 列为 NULL
+        when(userMapper.findOneByUid(456L)).thenReturn(user);
+
+        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () ->
+                service.getUser(GetUserReq.newBuilder().setUid(456L).build()));
+
+        assertThat(e.getStatus().getCode())
+                .as("NULL status 必须与 Go 同码 INTERNAL").isEqualTo(Status.Code.INTERNAL);
+        assertThat(e.getStatus().getDescription())
+                .as("description 必须与 Go 一致").isEqualTo("DB查询失败");
+        assertThat(e.getStatus().getDescription())
+                .as("绝不能是 NullPointerException —— 那说明又退回自动拆箱了")
+                .doesNotContain("NullPointerException");
+        // Go 在这条路径上打的是 ErrorDbSelect（5003）
+        verify(logger).logBusinessErr(any(), eq(com.rag.users.common.errmsg.ErrorCode.ERROR_DB_SELECT.getCode()), any());
+    }
+
+    /**
+     * DRIFT-009 回归：register 查库失败必须打 {@code db_error} 指标。
+     *
+     * <p>Go 出处 registerlogic.go:50-54：「非 ErrorNotFound」单独成一支，
+     * {@code UserRegisterCount.WithLabelValues("db_error").Inc()} +
+     * {@code LogBusinessErr(errmsg.ErrorDbSelect)} + {@code codes.Internal}。
+     *
+     * <p>修复前该分支缺失 ⇒ DB 抖动在本进程既无指标也无业务错误日志，完全静默。
+     */
+    @Test
+    void register_dbError_incrementsRegisterDbErrorCounter() {
+        when(userMapper.findOneByUserName("alice"))
+                .thenThrow(new RuntimeException("connection refused"));
+
+        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () ->
+                service.register(CreateUserReq.newBuilder().setUsername("alice").setPassword("p").build()));
+
+        assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INTERNAL);
+        assertThat(e.getStatus().getDescription()).isEqualTo("DB查询失败");
+
+        assertThat(metrics.getRegisterDbError().count())
+                .as("register 查库失败必须计入 user_rpc_register_total{result=db_error}")
+                .isEqualTo(1.0);
+        assertThat(metrics.getRegisterFailExists().count())
+                .as("查库失败不是重名，不得计入 fail_exists").isEqualTo(0.0);
+        verify(logger).logBusinessErr(any(), eq(com.rag.users.common.errmsg.ErrorCode.ERROR_DB_SELECT.getCode()), any());
+    }
+
+    /** DRIFT-009 回归：updateUser 重名检查阶段的 DB 故障必须与 Go 同码 INTERNAL + ErrorDbSelect。 */
+    @Test
+    void updateUser_dbErrorOnUsernameCheck_throwsInternal() {
+        when(userMapper.findOneByUserName("taken"))
+                .thenThrow(new RuntimeException("connection refused"));
+
+        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () ->
+                service.updateUser(UpdateUserReq.newBuilder().setUid(1L).setUsername("taken").build()));
+
+        assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INTERNAL);
+        assertThat(e.getStatus().getDescription()).isEqualTo("DB查询失败");
+        verify(logger).logBusinessErr(any(), eq(com.rag.users.common.errmsg.ErrorCode.ERROR_DB_SELECT.getCode()), any());
+    }
+
+    /** DRIFT-009 回归：deleteUser W2 的 DB 故障必须打 ErrorDbSelect（Go 侧 deleteuserlogic.go:48-49）。 */
+    @Test
+    void deleteUser_dbError_logsErrorDbSelect() {
+        when(userMapper.findOneByUid(321L)).thenThrow(new RuntimeException("connection refused"));
+
+        assertThrows(StatusRuntimeException.class, () ->
+                service.deleteUser(DeleteUserReq.newBuilder().setUid(321L).build()));
+
+        verify(logger).logBusinessErr(any(), eq(com.rag.users.common.errmsg.ErrorCode.ERROR_DB_SELECT.getCode()), any());
+    }
+
+    /**
+     * DRIFT-006 回归：头像历史的 {@code create_time} 不得带小数秒。
+     *
+     * <p>Go 出处 rpc/internal/logic/avatarhelpers.go:18
+     * {@code item.CreateTime.Format(time.RFC3339)}。{@code time.RFC3339} 的布局是
+     * {@code "2006-01-02T15:04:05Z07:00"}，<b>不含 {@code .999} 段</b>，
+     * 而 {@code Time.Format} 只输出布局指定的字段 ⇒ <b>纳秒被整段丢弃</b>。
+     *
+     * <p>原 RAG 实现用 {@code Instant.toString()}，它在纳秒非零时<b>必带</b>小数部分；
+     * Postgres {@code TIMESTAMP} 是微秒精度、{@code CURRENT_TIMESTAMP} 几乎总是非零
+     * ⇒ 同一份数据两边渲染出的字符串必然不同。该字符串一路透传到 HTTP body。
+     */
+    @Test
+    void avatarHistory_createTime_hasNoFractionalSeconds() {
+        UserAvatarHistoryEntity h = new UserAvatarHistoryEntity();
+        h.setHistoryId("H-1");
+        h.setAvatarUrl("https://cdn/x.png");
+        // 2026-09-23T10:15:30.123456 —— 正是 CURRENT_TIMESTAMP 在 PG 里的典型形态
+        h.setCreateTime(java.time.LocalDateTime.of(2026, 9, 23, 10, 15, 30, 123456000));
+
+        String createTime = avatarDomainService.fromModel(h).getCreateTime();
+
+        assertThat(createTime)
+                .as("必须与 Go 的 time.RFC3339 逐字符一致：秒精度、零偏移标 Z")
+                .isEqualTo("2026-09-23T10:15:30Z");
+        assertThat(createTime).doesNotContain(".");
+    }
+
+    /** 对照组：纳秒本来就为 0 时输出不变（证明上条不是靠"总是截断"蒙对的）。 */
+    @Test
+    void avatarHistory_createTime_secondPrecision_whenNoNanos() {
+        UserAvatarHistoryEntity h = new UserAvatarHistoryEntity();
+        h.setHistoryId("H-2");
+        h.setCreateTime(java.time.LocalDateTime.of(2026, 9, 23, 10, 15, 30));
+
+        assertThat(avatarDomainService.fromModel(h).getCreateTime())
+                .isEqualTo("2026-09-23T10:15:30Z");
+    }
+
+    /** Go 出处 avatarhelpers.go:16-18：CreateTime 为零值时不设置该字段 ⇒ wire 上是空串。 */
+    @Test
+    void avatarHistory_createTime_emptyWhenNull() {
+        UserAvatarHistoryEntity h = new UserAvatarHistoryEntity();
+        h.setHistoryId("H-3");
+        h.setCreateTime(null);
+
+        assertThat(avatarDomainService.fromModel(h).getCreateTime()).isEmpty();
+    }
 }

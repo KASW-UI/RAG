@@ -1,5 +1,6 @@
 package com.rag.users.user.api.interceptor;
 
+import com.rag.common.exception.AuthenticationException;
 import com.rag.common.exception.BusinessException;
 import com.rag.users.common.errmsg.ErrorCode;
 import com.rag.users.common.jwt.JwtUtil;
@@ -27,14 +28,21 @@ import java.util.Set;
  * <p><b>L1 行为冻结（与 Go 端 1:1）</b>：
  * <ol>
  *   <li>public 路径（{@code /user/v1/login}、{@code /user/v1/register}）→ <b>直接放行</b>，不校验 token</li>
- *   <li>protected 路径（其余 7 个）：
+ *   <li>protected 路径（其余 7 个）—— 本层只承担 Go {@code rest.WithJwt} 的职责
+ *     （验签名 + exp + claim 存在且为数字），失败一律 <b>HTTP 401</b>：
  *     <ul>
- *       <li>Authorization 缺失 或 "Bearer " 后 token 为空 → 401 + <b>不</b>设 userId / jwt_token attribute</li>
- *       <li>JWT 签名错 / 过期 / claim 缺失 → 401 + <b>不</b>设 attribute</li>
- *       <li>合法签名 + claim.userId 存在 → 写 attribute "userId" + attribute "jwt_token"</li>
- *       <li>Redis blacklist（{@code user:jwt_blacklist:<token>}）存在 → 401 + <b>不</b>进下游</li>
+ *       <li>Authorization 缺失 / 不以 "Bearer " 开头 → {@code AuthenticationException} → 401</li>
+ *       <li>"Bearer " 后 token 为空 → {@code AuthenticationException} → 401</li>
+ *       <li>JWT 签名错 / 过期 → {@code AuthenticationException} → 401</li>
+ *       <li>claim.userId 缺失或类型不对 → {@code AuthenticationException} → 401</li>
+ *       <li>Redis blacklist（{@code user:jwt_blacklist:<token>}）存在 → {@code AuthenticationException} → 401</li>
  *       <li>Redis 故障 → 不阻塞业务（与 Go 端 {@code err == nil && exists} 行为一致）</li>
  *     </ul>
+ *     以上任一失败都<b>不</b>写 userId / jwt_token attribute。
+ *   </li>
+ *   <li><b>uid 取值（{@code uid <= 0}）不在本层拒绝</b>：Go 的 {@code rest.WithJwt} 同样不校验 claim 取值，
+ *       该规则属于 identity 层（{@code identity/resolve.go} {@code ClaimedUID}），
+ *       由 {@code IdentityResolver.claimedUID} 承担，失败表现为 <b>HTTP 200 + 业务码 1006</b>。
  *   </li>
  * </ol>
  *
@@ -99,15 +107,19 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             // Go 端 rest.WithJwt：缺少 Bearer token → 401
             log.warn("protected path {} without Bearer token, uid cannot be resolved", uri);
-            throw new BusinessException(
+            throw new AuthenticationException(
                     ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
                     ErrorCode.ERROR_TOKEN_RUNTIME.getMsg()
             );
         }
-        String token = authHeader.substring("Bearer ".length()).trim();
+        // DRIFT-008：Go 出处 checkblacklistmiddleware.go:29 是 `strings.TrimPrefix(authHeader, "Bearer ")`，
+        // <b>不</b> trim 余下部分。此前的 `.trim()` 会造成两处可观察差异：
+        //   ① RAG 接受 Go 会因签名不符而 401 的 token（"Bearer  abc " → Go " abc " / RAG "abc"）；
+        //   ② 两边算出的 blacklist key 不同（带/不带尾空格），注销后的黑名单查询会错配。
+        String token = authHeader.substring("Bearer ".length());
         if (token.isEmpty()) {
             log.warn("protected path {} with empty Bearer token", uri);
-            throw new BusinessException(
+            throw new AuthenticationException(
                     ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
                     ErrorCode.ERROR_TOKEN_RUNTIME.getMsg()
             );
@@ -122,17 +134,17 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             Object claim = jws.getPayload().get("userId");
             if (claim instanceof Number) {
                 uid = ((Number) claim).longValue();
-                if (uid <= 0) {
-                    log.warn("JWT claim userId <= 0 : {}", uid);
-                    throw new BusinessException(
-                            ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
-                            ErrorCode.ERROR_TOKEN_RUNTIME.getMsg()
-                    );
-                }
+                // ⚠️ 这里<b>不</b>做 uid <= 0 的拒绝判断。
+                // Go 出处：go-zero 的 rest.WithJwt 只验签名与 exp，不校验 claim 取值；
+                // `uid > 0` 是业务规则，落在 identity 层
+                // （identity/resolve.go:75-77 `if err != nil || uid <= 0 { return 0, ErrInvalidClaim }`）。
+                // 之前的实现放在拦截器里直接 401，导致 Go 返回 200 + 1006 的场景
+                // （get / avatar.history / avatar / avatar.select 四个端点）在 RAG 上变成了 401。
+                // 现在把取值判断交还给 IdentityResolver.claimedUID，与 Go 的层次划分一致。
                 request.setAttribute("userId", Long.valueOf(uid));
             } else {
                 log.warn("JWT claim userId missing or wrong type : {}", claim == null ? "null" : claim.getClass());
-                throw new BusinessException(
+                throw new AuthenticationException(
                         ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
                         ErrorCode.ERROR_TOKEN_RUNTIME.getMsg()
                 );
@@ -142,7 +154,7 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         } catch (Throwable t) {
             // 签名错 / 过期 —— 与 Go 端 silent 行为一致
             log.warn("JWT verify failed : {}", t.getMessage());
-            throw new BusinessException(
+            throw new AuthenticationException(
                     ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
                     ErrorCode.ERROR_TOKEN_RUNTIME.getMsg()
             );
@@ -160,7 +172,7 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         }
         if (exists != null && exists) {
             log.warn("token in blacklist, uid={}", uid);
-            throw new BusinessException(
+            throw new AuthenticationException(
                     ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
                     ErrorCode.ERROR_TOKEN_RUNTIME.getMsg()
             );

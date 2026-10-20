@@ -1,5 +1,6 @@
 package com.rag.users.admin.api.interceptor;
 
+import com.rag.common.exception.AuthenticationException;
 import com.rag.common.exception.BusinessException;
 import com.rag.users.admin.api.config.AdminApiProperties;
 import com.rag.users.common.errmsg.ErrorCode;
@@ -27,15 +28,21 @@ import java.util.Set;
  * <p><b>L1 行为冻结（与 Go 端 1:1）</b>：
  * <ol>
  *   <li>public 路径（{@code /admin/v1/login}、{@code /admin/v1/create}）：<b>直接放行</b>，不校验 token</li>
- *   <li>protected 路径（其余 11 个）：
+ *   <li>protected 路径（其余 11 个）—— 本层只承担 Go {@code rest.WithJwt} 的职责
+ *     （验签名 + exp + claim 存在且为数字），失败一律 <b>HTTP 401</b>
+ *     （抛 {@code AuthenticationException}，与 user-api 同款，见 DRIFT-004）：
  *     <ul>
- *       <li>Authorization 缺失 或 "Bearer " 后 token 为空 → 401 + <b>不</b>设 userId / jwt_token attribute</li>
- *       <li>JWT 签名错 / 过期 → 401 + <b>不</b>设 attribute</li>
- *       <li>合法签名 + claim.userId 存在 → 写 attribute "userId" + attribute "jwt_token"</li>
+ *       <li>Authorization 缺失 / 不以 "Bearer " 开头 → 401</li>
+ *       <li>"Bearer " 后 token 为空 → 401</li>
+ *       <li>JWT 签名错 / 过期 → 401</li>
+ *       <li>claim.userId 缺失或类型不对 → 401</li>
  *       <li>Redis blacklist（{@code admin:jwt_blacklist:<token>}）存在 → 401 + <b>不</b>进下游</li>
  *       <li>Redis 故障 → 不阻塞业务</li>
  *     </ul>
+ *     以上任一失败都<b>不</b>写 userId / jwt_token attribute。
  *   </li>
+ *   <li><b>uid 取值（{@code uid <= 0}）不在本层拒绝</b>：与 Go {@code rest.WithJwt} 一致，
+ *       该规则属于 identity 层（{@code identity/resolve.go} {@code ClaimedUID}）。</li>
  * </ol>
  */
 @Component
@@ -79,14 +86,17 @@ public class AdminJwtAuthInterceptor implements HandlerInterceptor {
         String authHeader = request.getHeader("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             log.warn("protected admin path {} without Bearer token", uri);
-            throw new BusinessException(
+            throw new AuthenticationException(
                     ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
                     ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
         }
-        String token = authHeader.substring("Bearer ".length()).trim();
+        // DRIFT-008：Go 出处 admin/api/internal/middleware/checkblacklistmiddleware.go:29
+        // 是 `strings.TrimPrefix(authHeader, "Bearer ")`，<b>不</b> trim 余下部分。
+        // `.trim()` 会让 RAG 接受 Go 会 401 的 token，并让两边算出的 blacklist key 不同。
+        String token = authHeader.substring("Bearer ".length());
         if (token.isEmpty()) {
             log.warn("protected admin path {} with empty Bearer token", uri);
-            throw new BusinessException(
+            throw new AuthenticationException(
                     ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
                     ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
         }
@@ -110,7 +120,7 @@ public class AdminJwtAuthInterceptor implements HandlerInterceptor {
             } else {
                 log.warn("admin JWT claim userId missing or wrong type : {}",
                         claim == null ? "null" : claim.getClass());
-                throw new BusinessException(
+                throw new AuthenticationException(
                         ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
                         ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
             }
@@ -118,7 +128,7 @@ public class AdminJwtAuthInterceptor implements HandlerInterceptor {
             throw e;
         } catch (Throwable t) {
             log.warn("admin JWT verify failed : {}", t.getMessage());
-            throw new BusinessException(
+            throw new AuthenticationException(
                     ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
                     ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
         }
@@ -134,7 +144,7 @@ public class AdminJwtAuthInterceptor implements HandlerInterceptor {
         }
         if (exists != null && exists) {
             log.warn("admin token in blacklist, uid={}", uid);
-            throw new BusinessException(
+            throw new AuthenticationException(
                     ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
                     ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
         }

@@ -59,14 +59,40 @@ class ApiTypesSnakeCaseTest {
         UserInfo ui = new UserInfo();
         ui.setUid(42L);
         ui.setUsername("bob");
-        // email / extra_info / score 不设 → 应不出现
+        // email / extra_info 不设 → 应不出现（Go 侧是 json:",omitempty"）
 
         String json = mapper.writeValueAsString(ui);
         assertTrue(json.contains("\"uid\":\"42\""), json);
         assertTrue(json.contains("\"username\":\"bob\""), json);
         assertFalse(json.contains("email"), json);
         assertFalse(json.contains("extra_info"), json);
-        assertFalse(json.contains("score"), json);
+    }
+
+    /**
+     * DRIFT-005 回归：Go {@code types.UserInfo.Score uint32 `json:"score"`} 无 omitempty，
+     * 且 get/update 两个 Logic 都不给 Score 赋值 ⇒ Go 的响应恒含 {@code "score":0}。
+     * 之前本字段带 {@code @JsonInclude(NON_NULL)} 且从不赋值 ⇒ key 整个消失。
+     */
+    @Test
+    void userInfo_scoreIsAlwaysPresentLikeGo() throws Exception {
+        UserInfo ui = new UserInfo();
+        ui.setUid(42L);
+        ui.setUsername("bob");
+        // score 不赋值
+
+        String json = mapper.writeValueAsString(ui);
+        assertTrue(json.contains("\"score\":0"),
+                "score 必须恒存在且为 0（对齐 Go 的无 omitempty），实际 = " + json);
+    }
+
+    @Test
+    void userInfo_scoreRoundTripsWhenSet() throws Exception {
+        UserInfo ui = new UserInfo();
+        ui.setUid(42L);
+        ui.setScore(88L);
+
+        String json = mapper.writeValueAsString(ui);
+        assertTrue(json.contains("\"score\":88"), json);
     }
 
     @Test

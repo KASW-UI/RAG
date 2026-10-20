@@ -1,5 +1,6 @@
 package com.rag.users.admin.api.advice;
 
+import com.rag.common.exception.AuthenticationException;
 import com.rag.common.exception.BusinessException;
 import com.rag.common.logger.FatalError;
 import com.rag.common.response.Response;
@@ -40,6 +41,24 @@ public class GlobalExceptionHandler {
         String msg = e.getMessage();
         log.error("BusinessException code={} msg={}", code, msg);
         return ResponseEntity.status(decideStatus(code)).body(new Response(code, msg, null));
+    }
+
+    /**
+     * <b>鉴权层失败 → HTTP 401</b>（DRIFT-004 修复，与 user-api 同款）。
+     *
+     * <p>Spring 挑最具体的 handler，故本方法优先于 {@link #handleBusiness}。
+     *
+     * <p>Go 出处（admin 侧与 user 侧同构）：
+     * {@code rest.WithJwt} → {@code rest/handler/authhandler.go:106 unauthorized()}
+     * → {@code WriteHeader(http.StatusUnauthorized)}；
+     * {@code admin/api/internal/middleware/checkblacklistmiddleware.go:38} 同。
+     * 两处都是 401；body 形状 Go 自身不一致，本端统一成完整 envelope（已按 §3.4 留档）。
+     */
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<Response> handleAuthentication(AuthenticationException e) {
+        log.warn("admin AuthenticationException code={} msg={}", e.getCode(), e.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(new Response(e.getCode(), e.getMessage(), null));
     }
 
     @ExceptionHandler(StatusRuntimeException.class)

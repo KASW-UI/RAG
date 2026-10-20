@@ -78,9 +78,20 @@ public interface UserMapper extends BaseMapper<UserEntity> {
      * D-017 决策点：必须只更新 Username/Password/Email/ExtraInfo 四列。
      * 用 MyBatis-Plus LambdaUpdateWrapper 动态拼 set 子句（取代原 DataModel 的动态 JPQL）。
      *
-     * ⚠️ 注意：调用方需保证 updateTime 在 DB 端自动维护（Flyway DDL 有 DEFAULT CURRENT_TIMESTAMP，
-     *          且 MyBatis-Plus 默认 fill = UPDATE 时填充 update_time，需在 MetaObjectHandler 配置；
-     *          当前实现依赖 Postgres CURRENT_TIMESTAMP 在 row-level 触发）
+     * <p><b>update_time 必须在 SET 子句里显式带上</b>（DRIFT-001 修复）：
+     * <ul>
+     *   <li>Go 出处：{@code service/user/user/rpc/internal/model/data_model.go:15}
+     *       {@code UpdateTime time.Time `gorm:"column:update_time;autoUpdateTime"`}。
+     *       GORM 的 autoUpdateTime 会在每次 {@code Updates()} 时把该列写进 SET 子句。</li>
+     *   <li>原 RAG 实现的注释写的是「依赖 Postgres CURRENT_TIMESTAMP 在 row-level 触发」——
+     *       这句话在事实层面不成立：普通 UPDATE 不含该列时，Postgres 不会触碰它；
+     *       本仓既无 MetaObjectHandler（本模块零命中，message-rpc 才有），
+     *       Flyway DDL 也只有 {@code DEFAULT CURRENT_TIMESTAMP}（仅 INSERT 时生效）、无 trigger。
+     *       结果：RAG 的 update_time 自注册起永不推进，而 Go 会。</li>
+     *   <li>修法：与 extra_info 的 {@code setSql(CAST(...))} 同款，在 wrapper 上显式 setSql。
+     *       放在 {@code any} 判定<b>之后</b>，保证「无字段变更则不发 UPDATE」这一 Go 语义不变
+     *       （GORM 对全零值 struct 同样不发 UPDATE）。</li>
+     * </ul>
      */
     default int updateUserById(Long uid, UserEntity newUser) {
         LambdaUpdateWrapper<UserEntity> wrapper = new LambdaUpdateWrapper<>();
@@ -112,6 +123,8 @@ public interface UserMapper extends BaseMapper<UserEntity> {
             any = true;
         }
         if (!any) return 0;
+        // DRIFT-001：对齐 GORM autoUpdateTime —— 只有真的发出 UPDATE 时才推进 update_time
+        wrapper.setSql("update_time = CURRENT_TIMESTAMP");
         return update(null, wrapper);
     }
 

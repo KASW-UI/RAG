@@ -76,6 +76,29 @@ public class AvatarSelectService {
             rpcResp = userRpcClient.userRpc().selectAvatar(rpcReq);
         } catch (StatusRuntimeException e) {
             log.error("selectAvatar RPC error", e);
+            // DRIFT-003 修复：不能直接 rethrow。
+            // rethrow 会落到 GlobalExceptionHandler.mapRPCStatusToCode 的**通用**映射
+            //   NOT_FOUND        → 1003（用户不存在）  ← 与 Go 不符
+            //   INVALID_ARGUMENT →  500
+            // 而 Go 出处 api/internal/logic/user/selectavatarlogic.go:54-61 的 switch 是：
+            //   case codes.InvalidArgument: return nil, errmsg.Error             // 500
+            //   case codes.NotFound:        return nil, errmsg.Error             // 500
+            //   case codes.Internal:        return nil, errmsg.ErrorServerCommon // 5001
+            //   default:                    return nil, errmsg.CodeServerBusy    // 1015
+            // NOT_FOUND 的差异不是"看起来更合理"的改写，而是**抹掉了 Go 刻意保留的区分**：
+            // 「头像历史不存在」(500) 与「用户不存在」(1003) 被合并后，
+            // 客户端可以据此枚举某个 uid 是否存在。2026-10-21 审计前，
+            // 本类自己的 javadoc 已经写对了（"codes.NotFound → Error (500) ← 注意：这里是
+            // Error 不是 ErrorUserNotExist"），代码没照做。
+            //
+            // INVALID_ARGUMENT 经通用映射也落到 500、与 Go 一致，这里仍显式写出：
+            // 让 Go 的整个 switch 在代码里可见，不再依赖通用映射永远不被改动 ——
+            // 这次的缺陷本身就是"通用映射悄悄覆盖了 per-Service switch"造成的。
+            io.grpc.Status.Code code = e.getStatus().getCode();
+            if (code == io.grpc.Status.Code.NOT_FOUND
+                    || code == io.grpc.Status.Code.INVALID_ARGUMENT) {
+                throw new BusinessException(ErrorCode.ERROR.getCode(), ErrorCode.ERROR.getMsg());
+            }
             throw e;
         }
 
