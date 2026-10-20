@@ -1,0 +1,14 @@
+# service/impl/MessageRpcServiceImpl.java —— Phase 1 落地
+#
+# Phase 0 故意不写。理由：
+# 1. 依赖 message-proto 子模块生成的 MessageServiceGrpc.MessageServiceImplBase
+#    （在 com.rag.message.proto.grpc.MessageServiceGrpc 下）。空骨架不引入
+#    message-proto 依赖，避免 mvn compile 时被强拽。
+# 2. 9 个 RPC 方法（grpc-java 框架约束：单 service 单实现类）合并为 1 个 Impl，
+#    但需要先：
+#    a) 把 9 个 Go 端 Logic 文件翻译为 1 个 Java 类的 9 个方法
+#    b) 接 gRPC server（devh @GrpcService 注解 + grpc-server-spring-boot-starter）
+#    c) 接 message-proto stub 依赖
+#    d) 接 Nacos / Metrics / 3 Mapper / 2 Client
+# 3. Phase 1 完成信号：mvn -pl service/message/message-rpc -am package 跑绿
+#    + 镜像里现存的 3 个 LogicTest 改完跑绿

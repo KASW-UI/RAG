@@ -1,0 +1,31 @@
+# =============================================================================
+# message-rpc application.yml —— 空骨架
+# =============================================================================
+# 目标树对应 HUMAN_ONLY.MD「Java 理论文件树」。
+# 当前为 Phase 0 空骨架：仅 spring.application.name + 占位 datasource / flyway 段。
+# Phase 1 补 grpc.server.port / grpc.client.{user-rpc,admin-rpc} / nacos.discovery /
+# management.endpoints / otel.* / message.{list,broadcast} 段。
+# =============================================================================
+
+spring:
+  application:
+    name: message-rpc
+
+  # Phase 1 补真实 datasource + hikari + mybatis-plus 配置
+  # 这里给个连接字符串占位让 Flyway 能在空骨架下 init 失败也不影响 mvn compile
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:rag}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+    schemas: public
+
+logging:
+  level:
+    root: INFO
+    com.rag: INFO
