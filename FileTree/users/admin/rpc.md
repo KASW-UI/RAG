@@ -50,7 +50,8 @@
 - **ID 生成**：复用 `SnowflakeBean` + `com.rag.common.snowflake.Snowflake.nextId()`
 - **指标底座**：复用 `Observability` + `MeterRegistry`；`AdminRpcMetrics` 只承载 admin 域特有指标
 - **gRPC 可观测性拦截器**：`RpcServerInterceptorFactory` **当前未注册**。`AdminRpcApplication.java:30` 只有 `@SpringBootApplication`（注释明写「只扫本模块」，且拒绝把 `com.rag.common` 放进 `scanBasePackages`），**没有任何 `@Import`** → common 里的 Bean 一个都进不来。
-  > ⚠️ **2026-10-20 更正**：本文件早前版本多处写「已全局注册 / 已自动注册」，经 `FileTree/common.md` 交叉核对**证伪**。实测 admin-rpc **无 gRPC span、无 deadline 传播、无 gRPC 超时**。修法见 `FileTree/common.md` §12.7 #1。
+  > ⚠️ **2026-10-20 更正**：本文件早前版本多处写「已全局注册 / 已自动注册」，经 `FileTree/common.md` 交叉核对**证伪**。实测 admin-rpc **无 gRPC span、无 deadline 传播、无 gRPC 超时**。修法见 `FileTree/common.md` §12.7 #1。 **【已定案 2026-10-21】**
+> **✅ 修法定案：`AdminRpcApplication` 补一行 `@Import(RpcServerInterceptorFactory.class)`，不拆包。** 依据 Go `admin/rpc/admin.go:33,43` 显式 `AddUnaryInterceptors(...)` —— **Go 里不存在全局自动注册**（§3.2）。
 - **异常体系**：复用 `BusinessException` + `AdminExceptions`（业务异常聚合）
 - **密码哈希**：复用 `PasswordUtil.encrypt` / `PasswordUtil.check`
 
@@ -58,8 +59,8 @@
 
 | 项 | 状态 |
 |---|---|
-| Flyway 迁移归属 | `UNKNOWN` —— admin-rpc 的 `V1__create_admin.sql` + `V2__create_admin_invite.sql` + `V3__create_user.sql` 与 user-rpc 的 `V1__create_user.sql` + `V2__create_user_avatar_history.sql` 抢同一 `flyway_schema_history`（AGENTS.md §6.3 待拍板）。当前 RAG **临时**靠 `V3__create_user.sql` 用 `IF NOT EXISTS` 兼容 user-rpc 已建过表，但版本号双服务启动顺序敏感的根问题未解 |
-| admin-rpc 是否应继续直写 `users_user` | `UNKNOWN` —— Go 端 admin-rpc 通过 `internal/model/admin.go` 同时持有 `User` struct 跨表操作（`BanUser` / `UnBanUser` / `UpdateUser` / `DeleteUser` / `ResetUserPassword`），RAG 完全照搬。AGENTS.md §6.3 指出 RAG 全仓零 `role`/`permission` 概念，"是否 admin" 由表归属决定；`grep UserRpc admin/rpc` 零命中：admin-rpc 永不走 user-rpc gRPC |
+| Flyway 迁移归属 | ✅ **已定案 2026-10-21**：**单一归属 + 全局唯一版本号**。`users_user` / `users_user_avatar_history` 归 **user-rpc**；`admin_admin` / `admin_invite` 归 **admin-rpc**。admin-rpc **删除 `V3__create_user.sql`**，改由 `bootstrap/AdminSchemaGate` 校验存在性（缺失 fail-fast）。<br>**证据**：Go `user/rpc/.../db.go:33` = `AutoMigrate(&User{}, &UserAvatarHistory{})`、`admin/rpc/.../db.go:15` = `AutoMigrate(&Admin{}, &AdminInvite{}, &User{})` —— **Go 两个服务都建 `users_user`**，无冲突只因 `AutoMigrate` 无状态幂等。RAG 冲突面比原记录更宽：Go 全部服务连同一 `first_db`，共用一张 `flyway_schema_history`，**message-rpc 的 V1/V2/V3 同样与两个 users 模块撞号**，`IF NOT EXISTS` 只解决建表、解决不了版本号与 checksum。<br>**「每服务独立 schema」已被证据排除**：admin-rpc 直接查 `users_user`，拆 schema 必须跨 schema 查询或改转发，而 Go 两边都直连同一库。 |
+| admin-rpc 是否应继续直写 `users_user` | ✅ **已定案 2026-10-21：不转发，保持直连。** 与 Go 一致，**不是缺陷**。<br>**证据**：`admin/rpc` 全仓 `UserRpc\|userpb\|UserService` **零命中**；`ServiceContext` 只有 `Config`/`AdminModel`/`BizRedis` —— **零出向 gRPC 依赖**；7 个管控操作全是 `internal/model/admin.go` 的直接 SQL；Go 的两份 `User` struct **逐字一致**（diff 空）。<br>**⚠️ 更正 AGENTS.md §6.3 的错误前提**：原文称"Go 把『读身份』边界建好了，只漏了『管理用户数据』"。实测 Go 的 gRPC 边界是 **api→rpc**——`identity.UserReader`（`user/identity/resolve.go:60-62`）签名带 `grpc.CallOption`（只能被 stub 满足），但两个调用方分别是 `user/api`（`svcCtx.UserRpc = userservice.NewUserService(zrpc.MustNewClient(...))`）与 `knowledge/api`，**都是 api**。Go 里**不存在 rpc→rpc 的用户数据边界**。<br>**推翻一条常见反对理由**：`CreateAdmin` **不建 User**（`createadminlogic.go` 只做锁邀请码 / 查重 / 插 Admin / 标记已用），7 个管控 RPC 也都是单表独立操作，**无跨边界事务**——所以"转发会破坏原子性"**不成立**。<br>**若仍要转发**：那是 §3.4 留档的有意偏离，需单独立 spec；代价是 admin-rpc **新增一个可用性依赖**（user-rpc 挂则管控挂，Go 无此耦合）+ 错误分类跨两层映射 + 7 个 RPC 多一跳。 |
 | CreateAdmin 4 步原子事务 Bean 边界 | ✅ 已落地 `AdminCreateAtomicService` 独立 `@Service`（AGENTS.md §6.1 #2+#3 已修复）；`AdminDomainService.createAdmin` 跨 Bean 调用，`@Transactional` 代理生效；`SELECT ... FOR UPDATE` 已显式写在 `AdminInviteMapper`（实际写在 `AdminCreateAtomicService` 内 `LambdaQueryWrapper.last("FOR UPDATE")`） |
 
 ---
@@ -265,7 +266,7 @@ service/user/admin/rpc/
 |---|---|---|---|
 | `admin.go` 进程装配 | `AdminRpcApplication` + Spring 容器 | ABSORB | `@SpringBootApplication` 覆盖 flag/config/server 组装 |
 | `admin.go` 服务注册 | `bootstrap/NacosRegistration` | ADAPT | `@EventListener(ApplicationReadyEvent)` + `@PreDestroy` |
-| `admin.go` UnaryServerInterceptor | `common/spring/RpcServerInterceptorFactory` | **UNKNOWN** | ⚠️ 当前未注册（无 `@Import`、不扫 common）—— 见 §12.1 更正；补装配后方为 REUSE |
+| `admin.go` UnaryServerInterceptor | `common/spring/RpcServerInterceptorFactory` | **ADAPT** | ⚠️ 当前未注册 —— 见 §12.1 更正。**已定案**：`AdminRpcApplication` 补 `@Import(RpcServerInterceptorFactory.class)`（§12.7 #1） |
 | `config.go` 配置绑定 | `config/AdminRpcProperties` | ADAPT | Spring `@ConfigurationProperties(prefix="admin-rpc")` 替代 yaml struct |
 | `config.go` AdminAuth.AccessSecret | **admin-rpc 不验签**，仅签发时复用 | REUSE | 走 `users-common/JwtUtil.getToken` 已含 padding |
 | `servicecontext.go` 依赖持有 | Spring DI（构造器注入） | ABSORB | 无额外业务职责 |
@@ -303,7 +304,7 @@ service/user/admin/rpc/
 | `model/data_model.go` 事务闭包 | Spring `@Transactional`（**必须独立 Bean**） | ADAPT | 框架替代闭包 |
 | `model/data_model.go` AdminModel 方法 | 3 个 Mapper (`AdminMapper` + `AdminInviteMapper` + `UserMapper`) | SPLIT | 按实体拆（admin-rpc 有 3 Mapper —— 用户表单独拆，便于 user-rpc 端零依赖共享 User 表） |
 | `model/data_model.go` SELECT FOR UPDATE | `AdminCreateAtomicService` 内联（**不放在 mapper default 方法**） | ADAPT | 4 步事务在同一 Bean，mapper 留 default 注释指向调用方 |
-| `model/db.go` AutoMigrate | Flyway `V1__create_admin.sql` + `V2__create_admin_invite.sql` + `V3__create_user.sql` | ADAPT | 有状态账本；归属 UNKNOWN |
+| `model/db.go` AutoMigrate | Flyway `V3__create_admin.sql` + `V4__create_admin_invite.sql`（版本号全局唯一） | ADAPT | 有状态账本；**归属已定**：admin 表归 admin-rpc，users 表归 user-rpc，本模块**不再建 `users_user`** |
 | `model/helper.go` IsUniqueViolation | `exception/AdminExceptions.isUniqueViolation` | ADAPT | 遍历 cause 链 + SQLState 字符串匹配 |
 | `model/vars.go` ErrorNotFound sentinel | `exception/AdminExceptions.NotFoundException` (RuntimeException) | ADAPT | Java 用 exception subtype + `instanceof` |
 | `model/*` 异常 | `exception/AdminExceptions` + `common/BusinessException` | MERGE | 按业务含义聚合（NotFoundException + InviteUnavailableException + UsernameTakenException） |
@@ -324,7 +325,8 @@ com/rag/users/admin/rpc/
 ├── bootstrap/
 │   ├── NacosRegistration.java
 │   ├── SnowflakeBootstrap.java
-│   └── AdminSeederBootstrap.java
+│   ├── AdminSeederBootstrap.java
+│   └── AdminSchemaGate.java               # ★ 校验 users_user 存在，缺失 fail-fast（不创建）
 ├── config/
 │   ├── AdminRpcProperties.java
 │   └── MybatisPlusOrderingBridgeAutoConfiguration.java
@@ -377,6 +379,14 @@ com/rag/users/admin/rpc/
 - 承载 Go 职责：`servicecontext.go` 的 `ensureDefaultAdmin`（**L4 推导**：Go 端是 ServiceContext 方法，Java 端拆为独立 Bean 以纳入 Spring 启动期生命周期）
 - 为什么独立：与 `SnowflakeBootstrap` 同属启动期职责，但 ensureDefaultAdmin 涉及业务（admin 表插入）→ 单独成类
 - 依赖：`AdminMapper`、`PasswordUtil`、`SnowflakeBean`、`AdminRpcProperties`
+
+**`bootstrap/AdminSchemaGate.java`**（✅ 已定案 2026-10-21 新增）
+- 所属包：`com.rag.users.admin.rpc.bootstrap`
+- 主要职责：启动期校验 `users_user` 表存在，**缺失则 fail-fast 退出**；**只校验、不创建**
+- 承载 Go 职责：`internal/model/db.go:15` 的 `AutoMigrate(&Admin{}, &AdminInvite{}, &User{})` —— Go 侧 admin-rpc **自己也建 `users_user`**；失败走 `log.Fatalln("数据表迁移失败")`。RAG 侧迁移归属 user-rpc，admin-rpc 无法再建，但**必须保留 fail-fast 语义**：缺表时若无条件启动，所有 7 个用户管控 RPC 会在运行时炸成难懂的 SQL 错误
+- 为什么独立：**L3 语义载体**，不是启动期副作用的补充。Go 的 `AutoMigrate` 兼具"建表 + 缺表即死"两重语义；Flyway 是单一归属的有状态账本，只保得住后半截。若不建这个门禁，Go 的 fail-fast 保证在 RAG 侧静默丢失
+- 依赖：`DataSource` / `JdbcTemplate`（仅查 `information_schema.tables`），不依赖任何 Mapper
+- **测试要求（§3.3）**：需一条真正连库的测试——mock 掉 DataSource 的单测不执行这条路径，等于没测
 
 **`config/AdminRpcProperties.java`**
 - 所属包：`com.rag.users.admin.rpc.config`
@@ -502,7 +512,7 @@ com/rag/users/admin/rpc/
 |---|---|---|---|
 | `admin.go` | `AdminRpcApplication` + Spring 容器 | ABSORB | 进程装配全部由框架承担 |
 | `admin.go`（Nacos 注册） | `bootstrap/NacosRegistration` | ADAPT | 注册语义保留，API 换 Spring 事件 |
-| `admin.go`（UnaryServerInterceptor） | `common/spring/RpcServerInterceptorFactory` | **UNKNOWN** | ⚠️ 当前未注册 —— 见 §12.1 更正 |
+| `admin.go`（UnaryServerInterceptor） | `common/spring/RpcServerInterceptorFactory` | **ADAPT** | ⚠️ 当前未注册 —— 见 §12.1 更正；补 `@Import` 即可 |
 | `config/config.go` | `config/AdminRpcProperties` | ADAPT | 绑定机制换 Spring，字段 1:1 |
 | `config/config.go`（AdminAuth） | `users-common/JwtUtil.getToken`（admin-rpc 仅签发） | REUSE | 签发走同一份 padding |
 | `svc/servicecontext.go` | Spring DI | ABSORB | 纯依赖持有 |
@@ -530,7 +540,7 @@ com/rag/users/admin/rpc/
 | `model/data_model.go`（事务闭包） | `@Transactional`（+ 独立 Bean） | ADAPT | 框架替代闭包 |
 | `model/data_model.go`（AdminModel 方法） | `AdminMapper` + `AdminInviteMapper` + `UserMapper` | SPLIT | 按实体拆 3 Mapper |
 | `model/data_model.go`（SELECT FOR UPDATE） | `AdminCreateAtomicService.createAdminAtomic` 内联 | ADAPT | 锁与事务同 Bean，mapper 留注释指向调用方 |
-| `model/db.go` | Flyway `V1__create_admin.sql` + `V2__create_admin_invite.sql` + `V3__create_user.sql` | ADAPT | 有状态账本；归属 UNKNOWN |
+| `model/db.go` | Flyway `V3__create_admin.sql` + `V4__create_admin_invite.sql` | ADAPT | **归属已定**：删除 `V3__create_user.sql`；`users_user` 的校验归 `bootstrap/AdminSchemaGate`（Go 的 `log.Fatalln` fail-fast 语义 → 只校验不创建） |
 | `model/helper.go` | `exception/AdminExceptions.isUniqueViolation` | ADAPT | SQLState 23505 |
 | `model/vars.go` | `exception/AdminExceptions.NotFoundException` | ADAPT | Java 用 RuntimeException 子类 + `instanceof` |
 | `model/*`（错误路径） | `exception/AdminExceptions` | MERGE | 按业务含义聚合 |
@@ -551,12 +561,12 @@ com/rag/users/admin/rpc/
 | L3 技术语义有承载方案 | ✅ 事务 → `@Transactional`（独立 Bean 规避 self-invocation）；jsonb 绑定 → `JsonbTypeHandler` + `setSql CAST`；Snowflake 复用 → `common/SnowflakeBean` |
 | 业务分支与异常路径已纳入 | ✅ 逐个 logic 核对：用户不存在/密码错/封禁/invite 失效/username 冲突/uid 不存在 |
 | 框架吸收有机制依据 | ✅ `admin.go` → Spring Boot 启动；`servicecontext.go` → Spring DI + 独立 Bootstrap；`adminserviceserver.go` → `@GrpcService` |
-| 复用组件已明确 | ⚠️ 部分 —— `SnowflakeBean`、`JwtUtil`、`BusinessException`、`ErrorCode`、`PasswordUtil` 确为复用；`RpcServerInterceptorFactory` **未注册**，见 §12.1 更正 |
+| 复用组件已明确 | ✅ `SnowflakeBean`、`JwtUtil`、`BusinessException`、`ErrorCode`、`PasswordUtil` 确为复用；`RpcServerInterceptorFactory` **已定案**为补 `@Import` 后复用（§12.1 更正 / `common.md` §12.7 #1） |
 | 新增文件有职责依据 | ✅ `JsonbTypeHandler`（jsonb 映射）、`MybatisPlusOrderingBridgeAutoConfiguration`（框架版本适配）、`AdminCreateAtomicService`（独立事务 Bean）、`AdminSeederBootstrap`（启动期种子化）、`AdminHelpers`（归一化工具）—— 均非"Go 有同名文件故建" |
 | 合并有组织依据 | ✅ 13 logic → `AdminDomainService`：同一变化原因 + 同一依赖边界 + HUMAN_ONLY.MD 决策 |
 | 拆分可解释 | ✅ `updateSelf`/`updateUser` 业务/jsonb 分离；`createAdminAtomic` 独立 Bean；`AdminHelpers` 归一化独立；3 个 Mapper 按实体拆（admin 跨 3 表） |
 | 无"为对应 Go 文件而建"的文件 | ✅ 未创建 `Logic.java` / `Repository.java` / `DataModel.java` / `ServiceContext.java` / `Types.java` / `Server.java` |
-| 未把未实现能力说成现有机制 | ✅ Flyway 归属标 `UNKNOWN`；admin-rpc 直写 users_user 标 `UNKNOWN`（与 AGENTS.md §6.3 一致） |
+| 未把未实现能力说成现有机制 | ✅ Flyway 归属与 admin-rpc 边界均已按 AGENTS.md §6.3（2026-10-21）定案，**未自造结论**——两条都附 Go 侧实测证据 |
 | **`AdminRpcMetrics` 25 Counter 与 Go 端 1:1** | ✅ 含 `"high_risk_action_logal"` typo 保留；4 login + 4 createInvite + 4 update + 3 delete + 4 resetPassword + 3 ban + 3 unban = 25 |
 | **`AdminServiceGrpcImpl` 13 override 与 Go 端 1:1** | ✅ proto3 默认值（Found=false / Success=false）保留；`Success=true` 在响应构造时**显式 set**（非透传 rpcResp.getSuccess()）以避免 proto3 默认 false 误报 |
 

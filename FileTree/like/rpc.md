@@ -96,7 +96,7 @@ Go 侧 `service/like/rpc` 下实测有 **4 个 `main` 包**（不是 3 个）：
 | authority HTTP 监听地址 | 独立 `LIKE_FACT_AUTHORITY_LISTEN` | like-rpc **原本零 HTTP 端口**，要新增 | **wire 面变更**：必须决定是复用 gRPC 端口旁的独立 connector 还是 management port。**UNKNOWN，需拍板** |
 | 进程级 OBS 日志身份 | 4 个独立 `service` 值（`like.rpc` / `like-mq` / `rtw-like-fact-dispatch` / `rtw-like-fact-authority`） | 1 个 SLF4J 树 | **可保真**：`ProcessLogger.newProcessLogger` 的 logger 名由 `service.env.component` 拼（`ProcessLogger.java:114-117`），同一 JVM 可建 4 份独立 appender 写不同流。前提是**不用 SLF4J 全局 MDC**（该文件已明确说明 MDC 会跨线程插值） |
 | 数据库连接池 | 每进程独立 | 共享一个 HikariCP | P3 的 dispatch 事务 `Begin → HTTP 出网 → Commit`（`fact_delivery.go:57-120`）**持有行锁跨网络 I/O**，与 gRPC 请求共池时，故障域耦合加剧 |
-| Flyway 归属 | `AutoMigrate` 无状态，5 张表互不冲突 | 有状态账本 | **UNKNOWN** —— 与 users/message 抢同一 schema 的版本号问题同源（AGENTS.md §6.3 问题 1），**本文件不自行拍板** |
+| Flyway 归属 | `AutoMigrate` 无状态，5 张表互不冲突 | 有状态账本 | ✅ 已按 AGENTS.md §6.3（2026-10-21）定案：单一归属 + 全局唯一版本号。like 的 5 张表**独占**，归 like-rpc。⚠️ 但 like 另有 `cmd/fact-authority` 独立 HTTP 端口待定（见同表下一行） |
 
 | 其他待确认项 | 状态 |
 |---|---|

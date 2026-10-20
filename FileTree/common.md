@@ -291,13 +291,11 @@ com/rag/common/
 ├── snowflake/
 │   └── Snowflake.java                  # CHANGE 306  + bindBean 时序
 └── spring/
-    ├── LoggerFactoryBean.java          # MERGE 369  ← 合并进 logger/（见下）
-    ├── SnowflakeBean.java              # KEEP   71
-    ├── web/                            # ★ 新增包（§3.3 规则 8）
-    │   ├── HttpMiddlewareFilter.java   # SPLIT   61  ← spring/  [需 jakarta.servlet]
-    │   └── AuthorityHandlerFactory.java# SPLIT   49  ← spring/  [需 jakarta.servlet]
-    └── grpc/                           # ★ 新增包（§3.3 规则 8）
-        └── RpcServerInterceptorFactory.java # SPLIT 37 ← spring/  [需 grpc-stub]
+    ├── HttpMiddlewareFilter.java          # KEEP 61   [需 jakarta.servlet] —— 由 api 模块显式 @Import
+    ├── AuthorityHandlerFactory.java       # KEEP 49   [需 jakarta.servlet] —— 同上
+    ├── RpcServerInterceptorFactory.java   # KEEP 37   [需 grpc-stub] —— 由 rpc 模块显式 @Import
+    ├── LoggerFactoryBean.java             # MERGE 369 ← 合并进 logger/（见下）
+    └── SnowflakeBean.java                 # KEEP 71
 ```
 
 ### 新增包说明（§3.3 规则 8）
@@ -308,9 +306,12 @@ com/rag/common/
 **当前 `spring/` 为何承载不了**：`spring/` 下 7 个类的运行时依赖是**三种互斥的**——`HttpMiddlewareFilter` / `AuthorityHandlerFactory` 需要 `jakarta.servlet`，`RpcServerInterceptorFactory` 需要 `grpc-stub`，`LoggerFactoryBean` / `SnowflakeBean` 两者都不需要。把 properties 混在中间，既让它跟着 servlet 走，也让"只想绑 `snowflake.worker-id` 的纯 gRPC 进程"被迫拉进 servlet 类。
 **实际证据**：RAG 全仓每个 api/rpc 模块都把 properties 放在 `config/`（`UserRpcProperties` / `AdminRpcProperties` / `MessageProperties` / `HotRpcProperties` / `ArticleRpcProperties`），**common 是唯一违反项**。且 `pom.xml:105-109` 的 servlet 依赖是 `provided`——编译期在、运行期不在。
 
-**2）`spring/web/` 与 `spring/grpc/`（新增）——职责**：把装配类按**运行时依赖**隔离，使纯 gRPC 进程可以只拿 grpc 装配而不触发 servlet 类加载。
-**证据（决定性）**：`AdminRpcApplication.java:31-33` 明写拒绝 `scanBasePackages` 加 `com.rag.common` 的原因是——全包扫描会把 `HttpMiddlewareFilter` 拖进来，直接 `java.io.FileNotFoundException: class path resource [jakarta/servlet/Filter.class] cannot be opened`。`UserRpcApplication.java:31-34` 同样拒绝，改用 `@Import` 精确引入 3 个 bean（`:38`）。**代价是 `RpcServerInterceptorFactory` 两边都没被引进来**（§12.7 #1）。
-**为什么这两个子包能解决**：`@ComponentScan` 是**递归**的，扫 `com.rag.common` 必然连带扫 `spring.web`；拆开后 rpc 侧改为 `@Import({SnowflakeBean, SnowflakeProperties, LoggerFactoryBean, RpcServerInterceptorFactory})` 即可，servlet 类全程不加载。
+**2）~~`spring/web/` 与 `spring/grpc/`（新增）——已撤回~~**
+
+> **2026-10-21 撤回**：本文件早前提出按运行时依赖拆 `spring/web/` + `spring/grpc/`。经 Go 侧核对，**拆包的原始动机已被自己的修法消解**，故撤回。
+> **撤回理由**：`AdminRpcApplication.java:31-33` 与 `UserRpcApplication.java:31-34` 拒绝扫 `com.rag.common` 的理由是"全包扫描会把 `HttpMiddlewareFilter` 拖进纯 gRPC 进程"。但 §12.7 #1 的定案是**恢复 Go 的显式注册**——rpc 模块一律 `@Import` 精确导入所需 bean，**不再有任何模块扫 `com.rag.common`**。没人扫描 ⇒ servlet 类永远不会被拖进纯 gRPC 进程 ⇒ **classpath 冲突根本不存在** ⇒ 拆包失去必要性。
+> **同时符合 §14.5 最小范围**：`@Import` 本就接受普通 `@Component` 类（`UserRpcApplication.java:39` 已在用 `SnowflakeBean.class` 等 3 个），加第 4 个是同类操作、**零搬迁**。为一个可由注解解决的装配问题新增 2 个包，是把简单问题复杂化。
+> **Go 侧佐证**：Go 每个 rpc 服务都在入口显式 `s.AddUnaryInterceptors(...)`，**不存在"按 classpath 自动分组"这回事**——按运行时依赖分包在 Go 里同样不存在，不属于需要迁移的语义。
 
 **3）`logger/` ← 合并 `LoggerFactoryBean`**——**职责**：服务名来源从"进程内静态初始化"改为"Spring 注入"。
 **为什么不独立成文件**：`LoggerFactoryBean.java:87-282` 的 `logBusinessErr` / `logInfo` / `logFatal` 与 `Logger.java:162-385` 的三个方法**逐行同构**，连 `IMAGE_BASE64_TRUNCATE` 正则（`LoggerFactoryBean.java:64` vs `Logger.java:481`）、`getFuncName` / `getCallChain` / `isFiltered` / `fileBaseName` 5 个 helper 都是复制粘贴，**唯一差异只有 `serviceName` 的来源和第 7 个 filter 前缀**。合并形态：`Logger` 增加一个 `instance` 构造路径，`serviceName` 由构造器传入，删掉 `LoggerFactoryBean`。
@@ -389,7 +390,7 @@ com/rag/common/
 
 | # | 问题 | 详情与证据 |
 |---|---|---|
-| **1** | **P0：`RpcServerInterceptorFactory` 在两个 rpc 模块里都没生效** —— 这是 §3.3 的教科书案例 | `UserRpcApplication.java:31-34` 拒绝扫 `com.rag.common`，`:38` 的 `@Import` 只有 `SnowflakeBean/SnowflakeProperties/LoggerFactoryBean`；`AdminRpcApplication.java:29-40` 连 `@Import` 都没有。**后果：Go 侧 `observability.NewUnaryServerInterceptor` 的超时、7 业务码分类、`sea.slow` 标记在 RAG 的 user-rpc / admin-rpc 中全部丢失。** 兄弟文档把它当成既成事实（见下表）。**最小修复**：user-rpc 的 `@Import` 数组加 `RpcServerInterceptorFactory.class`；admin-rpc 加一行 `@Import(RpcServerInterceptorFactory.class)`。 |
+| **1** | **P0：`RpcServerInterceptorFactory` 在两个 rpc 模块里都没生效** —— 这是 §3.3 的教科书案例 **【已定案 2026-10-21】** | `UserRpcApplication.java:31-34` 拒绝扫 `com.rag.common`，`:39` 的 `@Import` 只有 `SnowflakeBean/SnowflakeProperties/LoggerFactoryBean`；`AdminRpcApplication.java:30` 连 `@Import` 都没有。**后果：Go 侧 `observability.NewUnaryServerInterceptor` 的超时、7 业务码分类、`sea.slow` 标记在 RAG 的 user-rpc / admin-rpc 中全部丢失。**<br>**✅ 定案：显式 `@Import`，不拆包。** 依据：Go 侧每个 rpc 服务都在入口显式 `s.AddUnaryInterceptors(...)`（`user/rpc/user.go:43`、`admin/rpc/admin.go:43`、`hot/rpc/hot.go:42` 三处一致），**Go 里不存在"全局自动注册"** —— RAG 把 `@Component` 当自动注册是一次**无出处 idiomatization**（§3.2）。修法：`UserRpcApplication:39` 的数组加 `RpcServerInterceptorFactory.class`；`AdminRpcApplication` 补 `@Import(RpcServerInterceptorFactory.class)`。`@Import` 本就接受普通 `@Component` 类，**零搬迁**。<br>**⚠️ 连带撤回**：§12.5 原提的 `spring/web/` + `spring/grpc/` 拆包**不再需要**——没人再扫 `com.rag.common` ⇒ servlet 类不会进纯 gRPC 进程 ⇒ classpath 冲突不存在 ⇒ 拆包动机自我消解。`<br>**⚠️ 顺带**：`message-rpc` 现在能跑是**撞运气**（它 `scanBasePackages` 含 `com.rag.common`，却恰好有 `spring-boot-starter-web-server` 兜住 servlet 类），应一并归一到显式 `@Import`。 |
 | **2** | **`logger` 689 行 + `LoggerFactoryBean` 369 行 ≈ 1058 行日志基础设施，实际消费者为零** | 实测：`com.rag.common.logger` 全仓**零外部 import**；`Logger` 是纯静态类、无 `@Component`、无门面，**不存在任何非 import 的装配机制**。`LoggerFactoryBean` 虽有 1 处注入（`MessageDomainService.java:93,103,111`），但 `grep "logger\.log\|logger\.getServiceName" message-rpc` **零命中**——注入后从未被调用。结论：**不成立，判为过度建设**。处置见 §12.5 第 3 条：合并成一个 `Logger`，净减约 370 行。 |
 | **3** | **超时值彻底丢失**（本文件是该缺陷的归属地） | `ObservabilityProperties.java:35` **只有** `slowThreshold` 一个字段；`HttpMiddlewareFilter.java:52` 与 `RpcServerInterceptorFactory.java:36` 都把 `Duration.ZERO` 硬编码传下去。Go 侧 `DisableNativeRestTimeout`（`http.go:30-34` / `rpc.go:19-23`）的**全部语义就是把 `conf.Timeout` 取出来交回给观测中间件**——RAG 取出来之后直接扔了。**后果**：hot-api 的 `RestConf.Timeout=3000`、hot-rpc 的 `RpcServerConf.Timeout=2000` 在 RAG 侧等于**无超时**，慢请求会一直挂到下游超时。<br>**修复形状**：① `config/ObservabilityProperties` 增 `Duration httpTimeout` / `Duration rpcTimeout`；② `HttpMiddlewareFilter` 传 `props.getHttpTimeout()`（null → `ZERO`）、`RpcServerInterceptorFactory` 传 `props.getRpcTimeout()`；③ 各消费模块在自己的 `application.yml` 写 `observability.http-timeout: 3s` / `rpc-timeout: 2s`，值**逐服务**对应 Go 的 yaml。<br>**测试要求（§3.3）**：必须有一条 `@SpringBootTest` 装配 `ObservabilityProperties` 并断言传给 `HttpMiddleware`/`RpcInterceptor` 的 timeout 非 `ZERO`——纯 `new HttpMiddlewareFilter("svc", new ObservabilityProperties())` 的单测**不算**，因为它绕过了 `@ConfigurationProperties` 绑定这条真正会失效的链路。 |
 | **4** | `InstallFrameworkLogger` 行为缺失 | Go `logging.go:104-145` 把 go-zero 全部生命周期输出（含信号停机）路由进 OBS-r3 envelope，并做 `trace→trace_id`/`span→span_id`/`caller→code_location` 字段改名与 10 个保留键丢弃。`ProcessLogger.java:44-45` 的 javadoc 写"Java 端没有 go-zero logx 等价物；删除对应方法，避免为了模仿而再造一层"。**这是拿"框架不同"当理由删掉了 Go 的一个行为保证**——Go 的保证是"框架日志与业务日志同一 envelope"，Java 侧 Logback 的框架日志（启动 banner、`Undertow started` 等）目前**不走** `ProcessLogAppender`。对应 Go 测试 `TestFrameworkLoggerUsesProcessEnvelope`（`authority_http_test.go:24-41`）**无 Java 对应**。需补：在 `ProcessLogAppender` 上开一条 framework logger 通道 + 一个等价测试。 |

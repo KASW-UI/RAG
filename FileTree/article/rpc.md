@@ -41,7 +41,7 @@ RAG 的 `service/article/article-rpc` **只有 `pom.xml`，无任何 Java 代码
 | 项 | 状态 |
 |---|---|
 | `article_domain_outbox` 的投递方 | Go 侧 **article-rpc 只写不投递**，无 dispatcher 进程。`UNKNOWN`：是否需要在本模块内补 `Dispatcher` 运行（`common/communityfact/Dispatcher` 已具备能力） |
-| Flyway 归属 | `UNKNOWN` —— 与 users 同款问题（AGENTS.md §6.3） |
+| Flyway 归属 | ✅ 已按 AGENTS.md §6.3（2026-10-21）定案：单一归属 + 全局唯一版本号。article-rpc 的 `article` / `article_sync_outbox` / `article_revision` / `article_publication` / `article_domain_outbox` 五张表**独占**，不与任何服务重叠 → 归 article-rpc；版本号接入全局唯一号段（当前 message-rpc 占 V1-V3、users 占 V1-V4，article 从 V8 起） |
 | `HotEventPusher` | Go 侧已 wire 但**零调用点** → 不迁移 |
 
 ---

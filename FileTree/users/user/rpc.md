@@ -40,7 +40,8 @@
 
 - `net.devh:grpc-server-spring-boot-starter`：`@GrpcService` 类自动注册为 gRPC server handler；`@GrpcClient("name")` 自动注入 BlockingStub
 - `grpc-spring-boot-starter` 自动收集容器中所有 `ServerInterceptor` Bean —— **前提是该 Bean 真的在容器里**。`RpcServerInterceptorFactory` 是 `com.rag.common.spring` 下的 `@Component`，而 `UserRpcApplication.java:39` 只 `@Import({SnowflakeBean, SnowflakeProperties, LoggerFactoryBean})` 三个 bean、且 `scanBasePackages` 刻意不含 `com.rag.common`（注释说明是为了避免把 servlet 类拖进纯 gRPC 进程）→ **`RpcServerInterceptorFactory` 在 user-rpc 中并未注册**。
-  > ⚠️ **2026-10-20 更正**：本文件早前版本写「已全局注册」，经 `FileTree/common.md` 交叉核对**证伪**。实测 user-rpc 当前**没有 gRPC span、没有 deadline 传播、也没有 gRPC 超时**（`RpcServerInterceptorFactory` 还把 timeout 写死 `Duration.ZERO`）。修法见 `FileTree/common.md` §12.7 #1。
+  > ⚠️ **2026-10-20 更正**：本文件早前版本写「已全局注册」，经 `FileTree/common.md` 交叉核对**证伪**。实测 user-rpc 当前**没有 gRPC span、没有 deadline 传播、也没有 gRPC 超时**（`RpcServerInterceptorFactory` 还把 timeout 写死 `Duration.ZERO`）。修法见 `FileTree/common.md` §12.7 #1。 **【已定案 2026-10-21】**
+> **✅ 修法定案：`@Import` 数组加 `RpcServerInterceptorFactory.class`，不拆包。** 依据 Go `user/rpc/user.go:32,43` 显式 `AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, ...))` —— **Go 里不存在全局自动注册**，RAG 的 `@Component` 假设属无出处 idiomatization（§3.2）。
 - MyBatis-Plus `@Mapper` + `BaseMapper<Entity>` + `@TableName`；`LambdaQueryWrapper` / `LambdaUpdateWrapper`
 - Spring `@ConfigurationProperties` 配置绑定
 - `spring-boot-starter-actuator` / Micrometer `MeterRegistry`
@@ -58,7 +59,7 @@
 
 | 项 | 状态 |
 |---|---|
-| Flyway 迁移归属 | `UNKNOWN` —— user-rpc 与 admin-rpc 抢同一 schema 的 `flyway_schema_history` 版本号（AGENTS.md §6.3 待拍板） |
+| Flyway 迁移归属 | ✅ **已定案 2026-10-21**（AGENTS.md §6.3）：**user-rpc 拥有 `users_user` + `users_user_avatar_history`**，版本号 V1/V2 保持不变；admin-rpc 不再建 `users_user`。⚠️ 原记录范围偏窄——message-rpc 的 V1/V2/V3 同样与本模块撞号（同一 `first_db`、同一 `flyway_schema_history`），message 已迁至 V5-V7 |
 | user-rpc 是否应允许直写 admin 表 | 按 Go 边界：`user/identity/resolve.go` 走 gRPC，故 user-rpc 不碰 admin 表；RAG 已符合 |
 
 ---
@@ -181,7 +182,7 @@ service/user/user/rpc/
 | `getavatarhistorylogic.go` | `UserDomainService.getAvatarHistory` | MERGE | 同上 |
 | `avatarhelpers.go` 三个归一化 | `service/AvatarDomainService`（rpc 侧权威） | SPLIT | 与 api 侧 `UserApiSupport` 的同名方法**同名同义但分层不同**：rpc 侧是权威实现，api 侧是镜像；归一化属业务语义需独立承载类 |
 | `data_model.go` 事务闭包 | Spring `@Transactional` | ADAPT | 框架机制；**代价**：失去显式 tx 传播，需独立 Bean |
-| `db.go` AutoMigrate | Flyway `V*__create_*.sql` | ADAPT | 有状态账本 vs 无状态迁移；归属待拍板 |
+| `db.go` AutoMigrate | Flyway `V1__create_user.sql` + `V2__create_user_avatar_history.sql` | ADAPT | 有状态账本 vs 无状态迁移；**归属已定**（AGENTS.md §6.3）：本模块是 `users_user` 的唯一迁移归属方 |
 | `model/user.go` User 结构 | `domain/UserEntity` | ADAPT | `@TableName("users_user")`；列/约束 1:1 |
 | `model/user.go` UserAvatarHistory | `domain/UserAvatarHistoryEntity` | ADAPT | 同上 |
 | `model/user.go` 查询方法 | `mapper/UserMapper`、`UserAvatarHistoryMapper` | SPLIT | 按实体拆 Mapper（HUMAN_ONLY.MD 决策：user-rpc 2 个 Mapper） |
@@ -189,7 +190,7 @@ service/user/user/rpc/
 | `model/vars.go` 枚举 | `users-common/errmsg/ErrorCode` + 领域常量 | REUSE | 字段值属 L1，不重新定义 |
 | `model/*` 异常 | `exception/UserExceptions` + `common/BusinessException` | MERGE | 不为每个错误分支建类；按业务含义聚合 |
 | `metrics/metrics.go` | `metrics/UserRpcMetrics` | ADAPT | `@Component` + `MeterRegistry`；触发条件保留 |
-| RPC 可观测性 span | `common/observability/RpcInterceptor`（经 `RpcServerInterceptorFactory` 暴露） | **UNKNOWN** | ⚠️ **当前未注册** —— 见 §12.1 更正。`user-rpc` 需在 `@Import` 中补该 bean 才谈得上 REUSE；在此之前该职责**没有承载位置**，属 §12.7 不通过项 |
+| RPC 可观测性 span | `common/observability/RpcInterceptor`（经 `RpcServerInterceptorFactory` 暴露） | **ADAPT** | ⚠️ 当前未注册 —— 见 §12.1 更正。**已定案**：`@Import` 数组加 `RpcServerInterceptorFactory.class`（Go 显式注册，见 §12.7 #1）；common **不拆** `spring/grpc/` |
 | 服务注册 | `bootstrap/NacosRegistration` | ADAPT | `@EventListener(ApplicationReadyEvent)` + `@PreDestroy` |
 | snowflake 初始化 | `bootstrap/SnowflakeBootstrap` | ADAPT | 复用 `SnowflakeBean` |
 
@@ -385,7 +386,7 @@ com/rag/users/user/rpc/
 | 合并有组织依据 | ✅ 9 logic → `UserDomainService`：同一变化原因 + 同一依赖边界 + HUMAN_ONLY.MD 决策 |
 | 拆分可解释 | ✅ `updateUser` 业务/绑定分离、`avatarhelpers` 归一化独立 |
 | 无"为对应 Go 文件而建"的文件 | ✅ 未创建 `Logic.java` / `Repository.java` / `DataModel.java` / `ServiceContext.java` |
-| 未把未实现能力说成现有机制 | ✅ Flyway 归属标 `UNKNOWN`，未声称已解决 |
+| 未把未实现能力说成现有机制 | ✅ Flyway 归属已按 AGENTS.md §6.3 定案；`RpcServerInterceptorFactory` 注册已定案（§12.1 更正），两者均已给出具体修法 |
 
 ### 不通过项（必须显式指出）
 

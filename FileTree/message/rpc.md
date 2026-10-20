@@ -57,6 +57,7 @@
 - **snowflake ID 生成**：`SnowflakeBean` 已存在于 service/common；message-rpc 的 `MessageDomainService.nextSnowflakeId()` 调 `Snowflake.nextId()` 经静态委托调 Bean
 - **指标底座**：Micrometer `MeterRegistry` 自动注入；`MessageMetrics` 只承载 message 特有指标（`message_rpc_*` namespace）
 - **gRPC 可观测性拦截器**：`RpcServerInterceptorFactory` **确实已注册** —— `MessageRpcApplication.java:19` 的 `scanBasePackages` 含 `com.rag.common`。✅ 全仓唯一注册成功的 rpc 模块（`user-rpc` / `admin-rpc` 均未注册，见 `FileTree/common.md` §12.7 #1）。service 层不重复
+- ⚠️ **但属撞运气**：message-rpc 能跑是因为它**恰好**有 `spring-boot-starter-web-server` 兜住了被 `@ComponentScan` 递归拖进来的 `HttpMiddlewareFilter`（`MessageRpcApplication:19` 扫了 `com.rag.common`）。**已定案**：与其余 rpc 模块一并归一到**显式 `@Import`**，不再扫 `com.rag.common`（`common.md` §12.7 #1）
 - **gRPC code ↔ biz code 双向转换**：`MessageGrpcError.grpcError(grpcCode, bizCode)` + `bizCodeFromError(Throwable)` 已在 `message-common` 落地
 - **JsonbTypeHandler 行为**：`JacksonTypeHandler` 内置，无需手写
 - **Nacos 注册**：RAG 端走显式 `NacosRegistration`（不依赖 `WebServerInitializedEvent`，因 message-rpc 无 web 容器）
@@ -65,7 +66,7 @@
 
 | 项 | 状态 |
 |---|---|
-| Flyway 迁移归属 | `UNKNOWN` —— user-rpc 的 `V1__create_user` / `V2__...` 与 message-rpc 的 `V1__create_message_notification` / `V2__create_message_conversation` / `V3__create_message_conversation_message` 不同 schema 可独立维护；但 admin-rpc 是否也注册 Flyway，AGENTS.md §6.3 仍未拍板 |
+| Flyway 迁移归属 | ✅ 已按 AGENTS.md §6.3（2026-10-21）定案：单一归属 + 全局唯一版本号。message 的 3 张表独占 → 归 message-rpc。⚠️ **注意原记录有误**：它们不是「不同 schema」，而是**同一个 `first_db` 的同一张 `flyway_schema_history`** —— message 的 V1/V2/V3 与 user-rpc(V1/V2)、admin-rpc(V1/V2) **实冲突**。定案后 message-rpc 迁到 V5-V7 |
 | `MessageRpcSupport` 是否需拆分 | `UNKNOWN` —— 当前 1 个工具类聚合全部 helper（response factory + normalize + participant logic + util）；如果未来加入「admin 发发到 user 的反向通知」等更多角色，现有 `Notification` 实体可能需要 split。**当前**无独立边界依据 |
 | `MessageExceptions` 与 `MessageGrpcError.CodeError` 的边界 | `UNKNOWN` —— 当前 RAG 端两套异常并存：`MessageExceptions` 4 类给 gRPC 路径内部数据层 try/catch 用，`MessageGrpcError.CodeError` 给 api/外部用。是否需整合 —— 待 audit 后回填 |
 
@@ -500,7 +501,7 @@ message-common/.../errmsg/
 | `internal/model/data_model.go`（ConversationMessage struct） | `domain/ConversationMessageEntity` | ADAPT | 同上 |
 | `internal/model/data_model.go`（JSONMap） | `NotificationEntity.extra` 的 `JacksonTypeHandler`（MP 内置） | REUSE | 不写自定义 typeHandler |
 | `internal/model/db.go`（`InitDB`） | `application.yml` 的 `spring.datasource.*` + `mybatis-plus-spring-boot3-starter` | ADAPT | HikariCP 替代 GORM pool；连接参数 1:1 |
-| `internal/model/db.go`（`AutoMigrate(3 models)`） | Flyway `V1/V2/V3__create_*.sql` | ADAPT | 有状态账本 vs 无状态迁移；**V 号段归属 UNKNOWN** |
+| `internal/model/db.go`（`AutoMigrate(3 models)`） | Flyway `V5/V6/V7__create_*.sql` | ADAPT | 有状态账本 vs 无状态迁移；**归属已定**（AGENTS.md §6.3），3 张表独占归 message-rpc |
 | `internal/model/message.go`（11 个方法） | `mapper/{ConversationMapper, ConversationMessageMapper, NotificationMapper}` 各自对应的 default + `@Insert/@Select/@Update` 方法 | SPLIT | 按实体拆 Mapper（HUMAN_ONLY.MD 决策） |
 | `internal/model/message.go`（`CreateInBatches(items, 200)`） | `NotificationMapper.insertBatch`（`@Insert` + `<script>` foreach） | ADAPT | 行为等价（一 SQL 多行 VALUES） |
 | `internal/model/message.go`（`TrimPreview`，**runes 80**） | `MessageRpcSupport.trimPreview`，**String.length() 255** | **DIVERGE** | **Java 端偏离 Go，需修**；参见 §12.7 #1 |
@@ -526,7 +527,7 @@ message-common/.../errmsg/
 | 合并有组织依据 | ✅ 9 logic → 1 `MessageDomainService`：grpc-java 框架约束（一个 service 一个 Impl 类）+ 同一变化原因 + HUMAN_ONLY.MD 锁定 |
 | 拆分可解释 | ✅ `loadProfile` / `collectBroadcastRecipients` 拆 Client（外部依赖）；事务方法从业务方法拆出（`@Transactional` 边界）；helper 收口（包成类） |
 | 无"为对应 Go 文件而建"的文件 | ✅ 未创建 `Logic.java` / `Repository.java` / `DataModel.java` / `ServiceContext.java` / `Server.java` / `Types.java` |
-| 未把未实现能力说成现有机制 | ✅ Flyway 归属标 `UNKNOWN`；`ServiceContext` 拆分标 `UNKNOWN`；`CodeError` 与 `MessageExceptions` 边界标 `UNKNOWN` |
+| 未把未实现能力说成现有机制 | ✅ Flyway 归属已按 AGENTS.md §6.3 定案（不再悬空）；`ServiceContext` 拆分标 `UNKNOWN`；`CodeError` 与 `MessageExceptions` 边界标 `UNKNOWN` |
 
 ### 不通过项（必须显式指出）
 

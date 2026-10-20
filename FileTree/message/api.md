@@ -614,7 +614,7 @@ com/rag/message/message/api/
 | 合并有组织依据 | ✅ 8 user handler → 1 `MessageController`；5 admin handler → 1 `MessageAdminController`；Logic → Service 1:1（每 Service 单例化 1 用例） |
 | 拆分可解释 | ✅ 双 Controller（user / admin 因 Auth 边界）；双 Interceptor（user secret / admin secret 不同）；admin Service 独立命名空间（`MessageAdmin*Service`）；Helper 收口（`MessageApiSupport`）；投影与业务分离 |
 | 无"为对应 Go 文件而建"的文件 | ✅ 未创建 `Logic.java` / `Handler.java` / `Types.java` / `ServiceContext.java` / `Metrics.java` 文件名 |
-| 未把未实现能力说成现有机制 | ✅ Flyway 归属标 `UNKNOWN`（rpc 端 §12.7）；`MessageErrorCodes` 不强制建（直接用 `message-common` enum） |
+| 未把未实现能力说成现有机制 | ✅ Flyway 归属已按 AGENTS.md §6.3 定案；`MessageErrorCodes` 判为不建、直接复用 `message-common` enum |
 
 ### 不通过项
 
