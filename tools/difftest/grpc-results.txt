@@ -1,0 +1,11 @@
+== §6.2.6 E-2 动态半 ==
+  go  user-rpc = 127.0.0.1:19004
+  rag user-rpc = 127.0.0.1:59210
+  unique test username = rag_e2_1792593134640_e1ee7de9
+
+  ✓ OK: register(fresh username)                                go=OK                      rag=OK                      expected=OK
+  ✓ INVALID_ARGUMENT: logout(token="")                          go=INVALID_ARGUMENT        rag=INVALID_ARGUMENT        expected=INVALID_ARGUMENT
+  ✓ NOT_FOUND: getUser(uid=99999999999)                         go=NOT_FOUND               rag=NOT_FOUND               expected=NOT_FOUND
+  ✓ ALREADY_EXISTS: register(same username as case 1)           go=ALREADY_EXISTS          rag=ALREADY_EXISTS          expected=ALREADY_EXISTS
+
+✓ §3.1 dynamic half closed: 4 档 status code 双端 wire-level 一致
