@@ -2,6 +2,7 @@ package com.rag.users.admin.rpc.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.rag.common.observability.RpcInterceptor.DeadlineState;
 import com.rag.common.snowflake.Snowflake;
 import com.rag.users.admin.rpc.config.AdminRpcProperties;
 import com.rag.users.admin.rpc.domain.AdminEntity;
@@ -116,6 +117,33 @@ public class AdminDomainService {
         this.createAtomicService = createAtomicService;
     }
 
+    /**
+     * DRIFT-018 对齐：admin-rpc 侧此前【零处】调用，而用户域已有 11 处
+     * （2026-10-21 补齐，见 AGENTS.md §3.4.1 B-1）。
+     *
+     * <p>Go 出处：每个 Logic 入口处的 {@code ctx.Done()} 判定
+     * （如 user 域 loginlogic.go 在 W1/W2 之间检查）。
+     *
+     * <p><b>能做 / 不能做</b>（E-4 实测后必须分清，否则会高估它的作用）：
+     * <ul>
+     *   <li><b>能做</b>：在<b>发起</b> DB / Redis 调用之前感知 deadline 已到、提前退出，
+     *       不让请求继续往下跑。</li>
+     *   <li><b>不能做</b>：取消<b>在途</b> IO。E-4 实测
+     *       （{@code tools/difftest/exp-b1-timeout-cancel.sh}，2026-10-21）显示
+     *       RAG 侧客户端已返回超时后，PG 里的阻塞查询<b>还存活了 4455ms</b>，
+     *       而 Go 只有 378ms —— JDBC 驱动不响应线程 interrupt，本方法对此无能为力。</li>
+     * </ul>
+     *
+     * <p>未注册 deadline 时为 no-op（业务不受影响）。
+     */
+    private void checkDeadline() {
+        if (Thread.currentThread().isInterrupted() || DeadlineState.isExpired()) {
+            throw Status.DEADLINE_EXCEEDED
+                    .withDescription("rpc deadline reached")
+                    .asRuntimeException();
+        }
+    }
+
     // ============== 1. Login ==============
 
     /**
@@ -129,6 +157,7 @@ public class AdminDomainService {
      * </ol>
      */
     public Long login(String username, String password) {
+        checkDeadline();
         AdminEntity admin;
         try {
             admin = findOneAdminByUsername(username);
@@ -177,6 +206,7 @@ public class AdminDomainService {
      * <p>D-007：TTL 必须等于 JWT 过期秒数，不能写死 24h。
      */
     public boolean logout(String token) {
+        checkDeadline();
         if (token == null || token.isEmpty()) {
             throw Status.INVALID_ARGUMENT.withDescription("Token不能为空").asRuntimeException();
         }
@@ -204,6 +234,7 @@ public class AdminDomainService {
      * </ol>
      */
     public AdminEntity getSelf(long uid) {
+        checkDeadline();
         AdminEntity admin;
         try {
             admin = findOneAdminByUid(uid);
@@ -235,6 +266,7 @@ public class AdminDomainService {
                                   String password,
                                   String email,
                                   Map<String, String> extraInfo) {
+        checkDeadline();
         AdminEntity self;
         try {
             self = findOneAdminByUid(uid);
@@ -333,6 +365,7 @@ public class AdminDomainService {
      */
     public long createAdmin(String username, String password, String email,
                             Map<String, String> extraInfo, String inviteCode) {
+        checkDeadline();
         // inviteCode 非空
         String trimmedInvite = inviteCode == null ? "" : inviteCode.trim();
         if (trimmedInvite.isEmpty()) {
@@ -415,6 +448,7 @@ public class AdminDomainService {
      * </ol>
      */
     public InviteCodeResult createInviteCode(long operatorId) {
+        checkDeadline();
         // 校验 operator 是有效 admin
         try {
             findOneAdminByUid(operatorId);
@@ -485,6 +519,7 @@ public class AdminDomainService {
      * <p>L2 业务语义：把 user.status 改成 1（封禁）。
      */
     public boolean banUser(long uid, long operatorId) {
+        checkDeadline();
         int rows;
         try {
             LambdaUpdateWrapper<UserEntity> wrapper = new LambdaUpdateWrapper<>();
@@ -513,6 +548,7 @@ public class AdminDomainService {
      * <p>L2 业务语义：把 user.status 改回 0（解封）。
      */
     public boolean unBanUser(long uid, long operatorId) {
+        checkDeadline();
         int rows;
         try {
             LambdaUpdateWrapper<UserEntity> wrapper = new LambdaUpdateWrapper<>();
@@ -545,6 +581,7 @@ public class AdminDomainService {
      * Java 端不显式 setScore（默认 0）。
      */
     public UserEntity getUser(long uid) {
+        checkDeadline();
         UserEntity user;
         try {
             user = findOneUserByUid(uid);
@@ -571,6 +608,7 @@ public class AdminDomainService {
      * <p>keyword 非空时按 username/email LIKE 查询，否则全量。
      */
     public UserListResult getUserList(int page, int pageSize, String keyword) {
+        checkDeadline();
         // DRIFT-006（已修）：keyword <b>不</b> trim。Go 端 model/admin.go:152-155 是
         //   if len(keyword) > 0 { keyWord := "%" + keyword + "%" }
         // 空白 keyword（" "）在 Go 侧 len>0 成立 → 走 LIKE '%  %' 过滤；
@@ -641,6 +679,7 @@ public class AdminDomainService {
     public UserEntity updateUser(long uid, long operatorId,
                                  String username, String password, String email,
                                  Map<String, String> extraInfo) {
+        checkDeadline();
         // W2 查 user
         UserEntity target;
         try {
@@ -725,6 +764,7 @@ public class AdminDomainService {
      * <p>L2 业务语义：deleteUserByUid → RowsAffected=0 抛 NotFound / 其它 DB 错抛 Internal / 成功 → resp{Success=true}。
      */
     public boolean deleteUser(long uid, long operatorId) {
+        checkDeadline();
         int rows;
         try {
             rows = userMapper.delete(new LambdaQueryWrapper<UserEntity>().eq(UserEntity::getUid, uid));
@@ -759,6 +799,7 @@ public class AdminDomainService {
      * 所以 ResetUserPassword 即使 user 在 W2 和 W4 之间被并发删了，仍会返 success。这是 Go 端的语义，1:1 保留。
      */
     public boolean resetUserPassword(long uid, long operatorId) {
+        checkDeadline();
         // W2 查 user
         try {
             findOneUserByUid(uid);

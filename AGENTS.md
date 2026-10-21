@@ -229,6 +229,25 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 对 `service/users` 9 个**基础组件**（JWT 签发 / 错误码表 / 密码哈希 / 身份断言 / 鉴权链 / 响应信封 / 雪花 ID / 事务持久化 / RPC 客户端）做 Go → Spring Boot 语义一致性验证（只读审查），
 结论 **SEMANTICALLY NOT EQUIVALENT**：1 项方向性错误 + 1 项**安全漏洞** + 3 项可观察差异 + 1 项死代码。
 
+##### DRIFT-018 的登记（2026-10-21 补记 · 代码里早已存在、AGENTS.md 零命中）
+
+`UserDomainService` 的 `checkDeadline()` 上方注释写着「**DRIFT-018 修复**」，
+`RpcInterceptor.handle()` 里也写着同一条注释，但 **AGENTS.md 全文 grep `DRIFT-018` 零命中**
+—— 一个被代码引用了、却从没有留档的编号。本条补上它的登记。
+
+| 项 | 内容 |
+|---|---|
+| **做了什么** | `RpcInterceptor.handle()` 在提交业务到 worker 线程时用 try-with-resources 绑定 `DeadlineState.bindToCurrent(deadlineEpochMs)`；业务侧在**发起** DB / bcrypt / snowflake / 下游调用**之前**调 `checkDeadline()`，已过期则抛 `Status.DEADLINE_EXCEEDED` |
+| **Go 对应** | `context.WithTimeout(ctx, timeout)` 的 `ctx.Done()`：每个 Logic 入口 / 关键步骤前的 select |
+| **覆盖情况（2026-10-21 实测）** | `UserDomainService` **11 处**（login/register/update/selectavatar/uploadavatar 等主路径）；`AdminDomainService` 此前 **0 处**，本轮已补到 **13 处**（admin-api 对 admin-rpc 的全部业务调用） |
+| **回归网** | `AdminDomainServiceDeadlineTest`（2 条，13 方法逐个拦 + 反向放行）。**已实证能真红**：删掉 3 处守卫后立刻报 `NullPointer ... metrics is null` —— 即请求走到了业务层、守卫没生效 |
+| **⚠️ 它不能做什么** | **不能取消在途 IO**。E-4 实测：客户端已返回超时后，RAG 侧 PG 里的阻塞查询还存活 **4455ms**（Go 侧仅 378ms）。JDBC 驱动不响应线程 interrupt，这是 Java 侧的结构性限制，属 §3.4.1 B-1，**不是 DRIFT-018 能修的** |
+
+> **为什么单独记这一条**：它说明了 §6.2.6 E-4 那类缺口的典型形态 ——
+> **「框架限制」与「业务侧主动响应」是两件不同的事**，前者改不了，后者能做但容易漏做。
+> B-1 原留档把两者混成一句「当前 user-rpc 一处都未使用」，既高估了缺失（其实 11 处）、
+> 又让人误以为补齐 `checkDeadline` 就能关闭 B-1（不能）。
+
 ##### 已修（4 项，全部带能真正触发机制的回归测试）
 
 | ID | 内容 | Go 行为 | RAG 修复前 | 修复后 |
@@ -296,7 +315,7 @@ Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 R
 
 | # | 位置 | 差异 | 影响面 | 关闭条件 |
 |---|---|---|---|---|
-| B-1 | `HttpMiddleware` 超时分支 / `RpcInterceptor` 超时调度 | **超时无法取消在途 IO**。Go 的 `context.WithTimeout` 到点 ctx Done，所有 ctx-aware IO（`http.Client` / `sql.DB` / `grpc.Dial`）立即返回、连接池立刻释放；Java 只能 `Future.cancel(true)` 发 `InterruptedException`，而 **JDBC 驱动、grpc-java 阻塞 stub、`java.net.http.HttpClient` 均不响应线程 interrupt** —— 阻塞在 socket read 上的调用会挂到查询自行结束 | **当前生效**（2026-10-21 前 timeout 为 `ZERO`、该分支从不进入；按 Go 的 3s/2s 打开后转为活跃路径）。同一慢查询：Go 3s 后连接归还，Java 可能占用到 10s | 业务侧主动响应：长耗时方法内周期性查 `DeadlineState.isExpired()`、阻塞 IO 前用 `remainingMillis()` 限流、或捕获 `InterruptedException`。**当前 `user-rpc` 一处都未使用** —— 这是本项尚未关闭的根因 |
+| B-1 | `HttpMiddleware` 超时分支 / `RpcInterceptor` 超时调度 | **超时无法取消在途 IO**。Go 的 `context.WithTimeout` 到点 ctx Done，所有 ctx-aware IO（`http.Client` / `sql.DB` / `grpc.Dial`）立即返回、连接池立刻释放；Java 只能 `Future.cancel(true)` 发 `InterruptedException`，而 **JDBC 驱动、grpc-java 阻塞 stub、`java.net.http.HttpClient` 均不响应线程 interrupt** —— 阻塞在 socket read 上的调用会挂到查询自行结束 | **已实测坐实（E-4，2026-10-21）**：`tools/difftest/exp-b1-timeout-cancel.sh` 用 ACCESS EXCLUSIVE 表锁造真阻塞，两侧同跑 `user.login`。客户端返回超时后，**Go 侧 PG 里的阻塞查询 378ms 就消失、RAG 侧还存活 4455ms**（持锁事务释放为止）；客户端感知时延 Go 2035ms vs RAG 3047ms。数据与判读见 §6.2.6 E-4。**⚠️ 原留档写「当前 `user-rpc` 一处都未使用 `DeadlineState`」——该句已过时**：user-rpc 实有 **11 处** `checkDeadline()`（代码注释标 DRIFT-018），本轮已把 **admin-rpc 从 0 处补到 13 处**。 但 `checkDeadline` 只能避免**发起**新的慢查询，**对在途 IO 无能为力** —— 这正是 E-4 实测的结论 | **无法靠改 `service/common` 关闭**（Java/JDBC 框架限制）。可选缓解：给 JDBC 设 `socketTimeout` / `Statement.setQueryTimeout`（PG 驱动支持，会主动发 cancel 请求）—— **本轮未做，待评估** |
 
 ##### C. 表述差异（语义已对齐，仅字面不同，无需签字）
 
@@ -918,9 +937,49 @@ SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `t
 | **E-1** | **difftest 有 13/39 步只比状态码、不比 body** | `diff.py:41` 的 `KNOWN_STATUS_ONLY` 白名单（13 条：6 条 N-1 鉴权、2 条畸形 JSON、1 条 `user.delete`、4 条必填校验）。判定逻辑在 `diff.py:554` | 逐条判断 body 是否已可逐字比对。**DRIFT-NEW-016 对齐后那 4 条本应可比对**（两侧都产出 `field "xxx" is not set\n`），仍留在白名单属历史遗留；改它需要先让 `diff_json` 支持 `text/plain` |
 | **E-2** | **gRPC 层没有直接对拍** | difftest 是 HTTP wire 层。proto 字段号、错误码语义、rpc 边界只能**通过 HTTP 结果间接推断** | 起两套 gRPC server，用同一个 client 分别打 Go / RAG 的 rpc，比对响应字节。§3.1 明确要求覆盖的「proto 字段号 / message 名称 / 错误码语义」目前**没有逐条验证** |
 | **E-3** | **39 步不是状态空间穷举** | 是「每个端点一个典型场景」，22 个端点全覆盖，但每端点只跑了 1–3 条路径 | 边界组合（字段全缺 / 部分缺 / 类型错 / 超长 / 特殊字符）需要按 DTO 笛卡尔展开 |
-| **E-4** | **超时路径零覆盖** | 对应 §3.4.1 **B-1**（当前生效，且 `user-rpc` 一处都未用 `DeadlineState` 限流）。difftest 没有任何慢查询场景 | 造一个 `pg_sleep` 或在 mapper 里插延迟的测试端点，两侧同时跑，比对「超时后连接是否立刻释放」与客户端观察到的状态码 |
+| **E-4** | **超时路径 —— 已于 2026-10-21 实测坐实，见下方专节** | ~~零覆盖~~ → 已有数据。**这是 B-1 的运行证据**，此前只有静态分析 | ✅ 已补（`tools/difftest/exp-b1-timeout-cancel.sh`） |
 | **E-5** | **并发路径零覆盖** | 同用户名并发注册、同用户并发改/删/封禁，全部未测。Go 侧靠 GORM 事务 + 行锁，RAG 侧靠 `@Transactional` + 可能的 `FOR UPDATE` | 两侧同时发 N 个并发请求，比对最终数据与错误码分布 |
 | **E-6** | **事务异常回滚只测了 `user-rpc`** | `AvatarTransactionWiringTest`（真 PG）证明了 W3 撞 `UNIQUE(history_id)` 时 W2 的 `clearCurrent` 被回滚。但 `admin-rpc` 侧**没有**同级验证，service/common 的 20 项偏差也没有一条跑在真 PG 上 | 按 admin 侧的写路径逐个造「中间步失败」的真 PG 场景 |
+
+##### E-4 的实测结果（2026-10-21，`exp-b1-timeout-cancel.sh`）
+
+**造阻塞的方式**：不用 `pg_sleep`（需要能执行任意 SQL 的端点，两栈都没有），
+而是用 **`LOCK TABLE ... IN ACCESS EXCLUSIVE MODE`** —— 起一个后台事务独占整张表，
+两端的 `user.login`（`SELECT ... WHERE username=?`）就阻塞在 PG 上。
+这是真实的长事务形态，且不碰任何代码。
+
+> **⚠️ 第一版实验失败了一次，值得记下来**：最初用的是 `SELECT ... FOR UPDATE` 行锁，
+> **两侧 login 都在 150ms 内成功返回了**，实验毫无意义。
+> 原因是 **PostgreSQL 的普通 SELECT 走 MVCC 快照读，不会被 `FOR UPDATE` 持有的行锁挡住** ——
+> 只有 `FOR UPDATE`/`FOR SHARE`/`UPDATE`/`DELETE` 才等行锁。
+> 必须用**表级 ACCESS EXCLUSIVE 锁**才能挡住读。
+> 同一次还踩了两个：`psql "SQL"` 会把 SQL 当成 **dbname**（静默失败、输出空），
+> 必须走 `-c`；Go 库的表名是 `users`（GORM 默认名）而 RAG 是 `users_user`（§3.4 wire 契约偏离）。
+
+**数据**（持锁 12s；两侧各自的用户表上各挂一个 ACCESS EXCLUSIVE 事务）：
+
+| | 客户端返回耗时 | 响应体 | **客户端返回后，PG 里的阻塞查询又存活** |
+|---|---|---|---|
+| **Go** | **2035ms** | `200 + {"code":1015,"msg":"服务繁忙"}` | **378ms** |
+| **RAG** | **3047ms** | `Request Timeout`（`text/plain`） | **4455ms** |
+
+**判读（三个可观测差异，同一个根因）**：
+
+1. **② PG 查询存活时长 = B-1 的核心**。Go 的 ctx cancel 触达 PG、查询立刻消失（378ms）；
+   RAG 的 `cancel(true)` 发不到 JDBC，查询一直挂到持锁事务释放（4455ms）。
+   静态分析预言的「Java 可能占用到 10s」，实测是「**客户端已返回超时、底层连接仍被占 4.5 秒**」。
+
+2. **① 客户端感知时延差 ~1 秒，且是同一个根因的另一个面**。
+   Go：内层 rpc 2s 超时 → ctx cancel 真的让 PG 返回 → 外层立刻收到 → 总计 2035ms。
+   RAG：内层 2s 的 `cancel(true)` **外层感知不到**，拖到自己的 http-timeout 3s 才返回。
+   ⇒ **内层超时不生效 ⇒ 外层多等 1 秒**，不是两个独立问题。
+
+3. **③ 响应体形状不同**（Go `200 + envelope{code:1015}` vs RAG `text/plain`）。
+   这是 ① 的下游后果，但**它是一个独立的 wire 差异，且此前从未被对拍过**
+   （difftest 的 39 步里没有任何超时场景）。**新发现，尚未定性** ——
+   需先确认 `HttpMiddleware` 的超时应不应该对齐 Go 的 envelope 表达，再决定改还是留档。
+
+**复现**：`cd tools/difftest && ./exp-b1-timeout-cancel.sh`（自带 `--serve-only` 起栈与收摊）。
 
 > **这三条为什么是「缺口」而不是「缺陷」**：E-4 的根因 B-1 是**已知且已签字**的框架限制
 > （Java 线程 interrupt 不被 JDBC / grpc-java / HttpClient 响应），它需要的是**业务侧主动响应**

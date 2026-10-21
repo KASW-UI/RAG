@@ -31,10 +31,16 @@ LOGS="$RUN_DIR/logs"
 
 BUILD=1
 KEEP=0
+SERVE_ONLY=0
 for a in "$@"; do
   case "$a" in
     --no-build) BUILD=0 ;;
     --keep)     KEEP=1 ;;
+    # 起完两套栈就停下、不跑对拍、进程留在前台。
+    # 专供 exp-*.sh 这类需要「栈已经在跑」的取证脚本复用编排逻辑
+    # ——它们自己造输入、自己观测，不该各自复制一遍起栈代码。
+    --serve-only) SERVE_ONLY=1 ;;
+    *) echo "未知参数：$a（可选：--no-build / --keep / --serve-only）" >&2; exit 2 ;;
   esac
 done
 
@@ -251,6 +257,15 @@ assert_tables rag_db  users_user_avatar_history      "rag user-rpc"
 assert_tables rag_db  admin_admin                     "rag admin-rpc"
 assert_tables rag_db  admin_invite                    "rag admin-rpc"
 assert_tables go_db       users                      "go user-rpc"
+
+if [[ $SERVE_ONLY -eq 1 ]]; then
+  echo "==> [5/5] --serve-only：跳过对拍，两套栈保持运行（PID ${PIDS[*]}）"
+  echo "     实验脚本用完请 kill 上述 PID 或 Ctrl-C 本脚本。"
+  echo "日志：$LOGS"
+  # 前台等待；被 kill / Ctrl-C 时 trap cleanup 收摊
+  wait
+  exit 0
+fi
 
 echo "==> [5/5] 对拍"
 set +e
