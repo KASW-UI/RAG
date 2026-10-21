@@ -1121,7 +1121,7 @@ SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `t
 | # | 缺口 | 现状 | 要补什么 |
 |---|---|---|---|
 | **E-1** | **difftest 有 13/39 步只比状态码、不比 body** | `diff.py:41` 的 `KNOWN_STATUS_ONLY` 白名单（13 条：6 条 N-1 鉴权、2 条畸形 JSON、1 条 `user.delete`、4 条必填校验）。判定逻辑在 `diff.py:554` | 逐条判断 body 是否已可逐字比对。**DRIFT-NEW-016 对齐后那 4 条本应可比对**（两侧都产出 `field "xxx" is not set\n`），仍留在白名单属历史遗留；改它需要先让 `diff_json` 支持 `text/plain` |
-| **E-2** | **gRPC 层没有直接对拍** | difftest 是 HTTP wire 层。proto 字段号、错误码语义、rpc 边界只能**通过 HTTP 结果间接推断** | 起两套 gRPC server，用同一个 client 分别打 Go / RAG 的 rpc，比对响应字节。§3.1 明确要求覆盖的「proto 字段号 / message 名称 / 错误码语义」目前**没有逐条验证** |
+| **E-2** | **gRPC 层没有直接对拍** | **静态半 ✅ 已关（2026-10-21）。动态半：错误码语义待补**。**静态半**：Go 真源 `proto/{user,admin}.proto` 与 RAG `service/users/{user,admin}/*-proto/.../{users,admin}.proto` 字段号 / message 名 / RPC 签名（user 9 RPC + admin 13 RPC）逐字节一致，详见 `tools/difftest/check-proto-static.sh` | **动态半**：起两套 gRPC server（沿用 §6.4 那一套 `run.sh --serve-only`），用同 stub 双端口打、对比 `Status.getCode()` 与 Go `codes.*` 在 `OK / INVALID_ARGUMENT / NOT_FOUND / ALREADY_EXISTS` 四档下的 wire-level 一致。物证落 `tools/difftest/grpc-dual-port-runner.java` + `tools/difftest/exp-difftest-grpc-errors.sh`（待补） |
 | **E-3** | **39 步不是状态空间穷举** | 是「每个端点一个典型场景」，22 个端点全覆盖，但每端点只跑了 1–3 条路径 | 边界组合（字段全缺 / 部分缺 / 类型错 / 超长 / 特殊字符）需要按 DTO 笛卡尔展开 |
 | **E-4** | **超时路径 —— 已于 2026-10-21 实测坐实，见下方专节** | ~~零覆盖~~ → 已有数据。**这是 B-1 的运行证据**，此前只有静态分析 | ✅ 已补（`exp-b1-timeout-cancel.sh` 端到端 + `probe-jdbc-cancel.java` 纯 JDBC 机制层，三层拆解见 §3.4.1「B-1 补记」） |
 | **E-5** | **并发路径零覆盖** | 同用户名并发注册、同用户并发改/删/封禁，全部未测。Go 侧靠 GORM 事务 + 行锁，RAG 侧靠 `@Transactional` + 可能的 `FOR UPDATE` | 两侧同时发 N 个并发请求，比对最终数据与错误码分布 |
