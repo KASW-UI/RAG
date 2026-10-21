@@ -218,6 +218,11 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 > 若该测试不存在或从未跑过，它只是推测，不得当作事实引用。**
 > 区分「代码里写了什么」与「运行时真的发生什么」——
 > 前者 grep 得到，后者只有真进程能证明。
+>
+> **同一条纪律的反面也必须台账化**：**证据缺口本身要写下来**。
+> 否则下一个 agent 跑完 `tools/difftest` 看到「39/39 全绿」就以为已经验证完了 ——
+> 而 39 步里有 **13 步只比状态码不比 body**，且完全没有**超时 / 并发 / gRPC 层**的对拍。
+> 完整台账见 **§6.2.6「`service/users` 的证据边界台账」**（E-1 ~ E-6）。
 
 #### 3.4.4 `service/users` 基础组件审计后的新增留档（2026-10-21，issue #71186893）
 
@@ -308,8 +313,16 @@ Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 R
 
 ##### 本节的效力边界
 
-- 本节记录的是**代码层面**的差异结论。`service/common` **从未做过 Go ↔ RAG 运行时对拍**（两边同时喂同一批输入比对输出），全仓也**没有真实 PG / Redis 集成测试**（现有测试全部 mock 数据层）。因此「已修复 20 项偏差」≠「行为已验证等价」。
-- 尤其 B-1 这类差异，**只有真实慢查询 + 真实超时才能暴露**，静态审查与单测都测不到。
+- 本节记录的是**代码层面**的差异结论。`service/common` **从未做过 Go ↔ RAG 运行时对拍**（两边同时喂同一批输入比对输出）。因此「已修复 20 项偏差」≠「行为已验证等价」。
+  - ⚠️ **2026-10-21 更正**：本行原写「全仓也**没有真实 PG / Redis 集成测试**（现有测试全部 mock 数据层）」，
+    该句**已被后续工作推翻**，现共 5 个 testcontainers 文件：`UserRpcContainerWiringTest`（真 PG 12 条，
+    见 §6.2 P1 已关闭）、`AvatarTransactionWiringTest`、`AdminRpcContainerWiringTest`、
+    `UserApiMvcPipelineTest` / `AdminApiMvcPipelineTest`（真 Redis 容器 + 真 MVC 管线）。
+    **但覆盖面仍有限**：`admin-rpc` 侧只有 wiring 级验证，`service/common` 的 20 项偏差
+    仍**没有任何一条**跑在真实 PG/Redis 上 —— mock 数据层的单测证明不了 DDL、索引、
+    事务隔离与连接池行为。
+- 尤其 B-1 这类差异，**只有真实慢查询 + 真实超时才能暴露**，静态审查与单测都测不到，
+  `tools/difftest` 也**没有慢查询场景**（见 §6.2.6「证据边界台账」）。
 
 ---
 
@@ -574,7 +587,7 @@ getter 仍为 `isRead()`。实测改后：
 |---|---|---|---|
 | A-U0 | 真实 Spring 上下文测试 | **已关闭（admin-rpc + admin-api 两侧）** | admin-rpc 由 `AdminRpcContainerWiringTest`（7 条，真 PG）关闭；admin-api 由 `AdminApiMvcPipelineTest`（11 条，真 Redis 容器 + `@SpringBootTest(AdminApiApplication)`）关闭，本批**新增**。该测试同时暴露并锁住一个 **共享底层 bug**（DRIFT-FRAMEWORK-001，`HttpMiddleware` 的 status propagation 与 Spring 的 commit 时序冲突：所有 `ExceptionHandler → 401 / 5003` 在 MockHttpServletResponse 的 `!isCommitted()` 守卫下被降级为 200） |
 | A-U1 | Go 侧 uid **格式非法**（非缺失）时的 HTTP 状态码 | **已关闭**（2026-10-21 + §3.4.3 后补行补录） | 已读 go-zero v1.10.2 源码原文：admin 服务 yaml 未注册 `httpx.SetErrorHandler` ⇒ `buildErrorHandler` 返回 `nil` ⇒ `doHandleError` 走到 `http.Error(w, err.Error(), http.StatusBadRequest)` ⇒ Go 输出 **HTTP 400 + text/plain**（无 JSON envelope）。与 user-api 不可跨模块套用结论——user-api 走的是另一个 handler 配置。这里由 `AdminApiMv*cPipelineTest` 里未覆盖，**不进入回归网**——若日后有人加 uid 路径的端到端测试，按 Go 现状写 `uid=abc → HTTP 400 + text/plain` 即可 |
-| A-U2 | 两端运行时对拍 | **已关闭（两侧，2026-10-21）** | RAG 侧实证：空库上 seeder 造出的 admin 用 `admin/admin` 登录通过、用 `123456` **不**通过（DRIFT-001 关闭）；重复执行 seeder 不产生第二行（幂等）；`resetUserPassword` 用的是配置值 `123456` 而非 seeder 常量（两个来源未串）。Go 侧由 `tools/difftest` 补齐：两套栈同时起、各跑同一串 39 步请求序列，逐字段比对响应。最新一次结果 **39 步 / 36 同 / 3 已签字 / 0 未预期差异**，详见 §6.2.5 |
+| A-U2 | 两端运行时对拍 | **已关闭（两侧，2026-10-21）** | RAG 侧实证：空库上 seeder 造出的 admin 用 `admin/admin` 登录通过、用 `123456` **不**通过（DRIFT-001 关闭）；重复执行 seeder 不产生第二行（幂等）；`resetUserPassword` 用的是配置值 `123456` 而非 seeder 常量（两个来源未串）。Go 侧由 `tools/difftest` 补齐：两套栈同时起、各跑同一串 39 步请求序列，逐字段比对响应。最新一次结果 **39 步 / 39 同 / 0 已签字 / 0 未预期差异**（DRIFT-NEW-016 对齐后，原「36 同 / 3 已签字」的 3 条已消解）。**⚠️ 效力边界见 §6.2.6：39 步里有 13 步只比状态码不比 body，且是 HTTP wire 层对拍、gRPC 层未直接对拍** |
 | A-U3 | `getUserList` 的 LIKE 双重包裹 | **已关闭**（双端对拍二次确认） | 真 PG 上实测：RAG 的 `%%alice%%` 与 `%%%alice%%%` 命中集合完全相同，且与原生 `LIKE '%alice%'`（Go 写法）结果集一致；已覆盖 username 命中 + email 命中（OR 分支）两个来源。判定为 IMPLEMENTATION DIFFERENCE 而非漂移，已实证。**2026-10-21 双端对拍二次确认**：`admin.getuserlist` 三种形态（精确匹配 / 前缀 `dt_` / 匹配不到）在两侧返回完全相同的 `list` 与 `total`，含 `extra_info` jsonb 内容逐字段一致 |
 
 ##### 搭建容器测试时踩到的环境坑（换机器 / 换网络时必读）
@@ -832,6 +845,33 @@ SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `t
 | ~~P2~~ | user-api 4 项清理 | ⚠️ **半修**。① 4 个端点 `@RequestBody(required=false)` **已完成**（`UserController.java:118/126/137/153`）；② 「删 `codeFromRPCError` 死代码」**未完成，且原文把位置写错**——它在 **admin-api**（`AdminApiSupport.java:66`），不在 user-api。剩余部分已并入本表 P3 |
 | ~~P3~~ | Flyway 迁移归属 | ✅ **已定案** → §6.3 问题 1 |
 | ~~P3~~ | `admin-rpc` 边界缺失 | ✅ **已定案**（不转发，与 Go 一致）→ §6.3 问题 2 |
+
+### 6.2.6 `service/users` 的**证据边界台账**（2026-10-21 新增）
+
+§3.4.4 末尾那条新纪律管的是「留档声称 RAG 的行为是 X ⇒ 必须有断言 X 的运行测试」。
+**本节管的是它的反面：证据缺口本身必须台账化。**
+动机很具体 —— 一个 agent 跑完 `tools/difftest` 看到「39/39 全绿」，
+若不知道下面第 1 条，就会以为 `service/users` 已经验证完了。
+
+**不要把本节的条目当成「已知缺陷」读**：这里列的绝大多数**不是代码写错了**，
+而是「目前还没有能证明它对（或不对）的运行证据」。
+
+| # | 缺口 | 现状 | 要补什么 |
+|---|---|---|---|
+| **E-1** | **difftest 有 13/39 步只比状态码、不比 body** | `diff.py:41` 的 `KNOWN_STATUS_ONLY` 白名单（13 条：6 条 N-1 鉴权、2 条畸形 JSON、1 条 `user.delete`、4 条必填校验）。判定逻辑在 `diff.py:554` | 逐条判断 body 是否已可逐字比对。**DRIFT-NEW-016 对齐后那 4 条本应可比对**（两侧都产出 `field "xxx" is not set\n`），仍留在白名单属历史遗留；改它需要先让 `diff_json` 支持 `text/plain` |
+| **E-2** | **gRPC 层没有直接对拍** | difftest 是 HTTP wire 层。proto 字段号、错误码语义、rpc 边界只能**通过 HTTP 结果间接推断** | 起两套 gRPC server，用同一个 client 分别打 Go / RAG 的 rpc，比对响应字节。§3.1 明确要求覆盖的「proto 字段号 / message 名称 / 错误码语义」目前**没有逐条验证** |
+| **E-3** | **39 步不是状态空间穷举** | 是「每个端点一个典型场景」，22 个端点全覆盖，但每端点只跑了 1–3 条路径 | 边界组合（字段全缺 / 部分缺 / 类型错 / 超长 / 特殊字符）需要按 DTO 笛卡尔展开 |
+| **E-4** | **超时路径零覆盖** | 对应 §3.4.1 **B-1**（当前生效，且 `user-rpc` 一处都未用 `DeadlineState` 限流）。difftest 没有任何慢查询场景 | 造一个 `pg_sleep` 或在 mapper 里插延迟的测试端点，两侧同时跑，比对「超时后连接是否立刻释放」与客户端观察到的状态码 |
+| **E-5** | **并发路径零覆盖** | 同用户名并发注册、同用户并发改/删/封禁，全部未测。Go 侧靠 GORM 事务 + 行锁，RAG 侧靠 `@Transactional` + 可能的 `FOR UPDATE` | 两侧同时发 N 个并发请求，比对最终数据与错误码分布 |
+| **E-6** | **事务异常回滚只测了 `user-rpc`** | `AvatarTransactionWiringTest`（真 PG）证明了 W3 撞 `UNIQUE(history_id)` 时 W2 的 `clearCurrent` 被回滚。但 `admin-rpc` 侧**没有**同级验证，service/common 的 20 项偏差也没有一条跑在真 PG 上 | 按 admin 侧的写路径逐个造「中间步失败」的真 PG 场景 |
+
+> **这三条为什么是「缺口」而不是「缺陷」**：E-4 的根因 B-1 是**已知且已签字**的框架限制
+> （Java 线程 interrupt 不被 JDBC / grpc-java / HttpClient 响应），它需要的是**业务侧主动响应**
+> 而不是「改代码对齐」；E-5 / E-6 缺的是证据，代码本身可能已经是对的。
+> **三者都不能靠静态审查关闭** —— §3.3 的纪律同样适用于此。
+>
+> **优先次序建议**：E-4（唯一「已签字 + 当前生效 + 零覆盖」三者叠加）→ E-2
+> （§3.1 硬性要求项）→ E-5 / E-6 → E-1 的清理 → E-3。
 
 ### 6.3 架构决策（问题 1、2 已于 2026-10-21 拍板；问题 3 为新增留档）
 
