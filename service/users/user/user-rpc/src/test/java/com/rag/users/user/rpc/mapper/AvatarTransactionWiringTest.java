@@ -78,11 +78,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * </ol>
  *
  * <h2>本测试<b>不</b>覆盖什么（诚实边界）</h2>
- * <p>没有真实 PostgreSQL，所以<b>不</b>验证：jsonb 的 {@code CAST}、{@code FOR UPDATE} 之类
- * 依赖具体 PG 行为的约束，也<b>不</b>验证回滚后数据库的真实状态。
- * 它验证的是「事务边界这个机制有没有被装上、异常时会不会走回滚分支」——
- * 也就是 §3.3 所指的那一类<b>框架机制是否真的生效</b>。
- * 数据库层面的等价性仍属 Phase 5 的真实 PG + Redis 集成测试范围。
+ * <p>本类用「记录型事务管理器」替代真实 DataSource，只验证「事务边界这个机制有没有被装上、
+ * 异常时会不会走回滚分支」—— 也就是 §3.3 所指的那一类<b>框架机制是否真的生效</b>。
+ * <p>它<b>不</b>验证数据库层面的真实状态：jsonb 的 {@code CAST}、
+ * {@code @Results} 是否真把 jsonb 列映射成 {@code Map}、回滚后 PG 里那一行是否真的还在。
+ *
+ * <p><b>2026-10-21 更新</b>：上述缺口已由同模块的
+ * {@code UserRpcContainerWiringTest}（真 Testcontainers PostgreSQL）关闭，
+ * 覆盖 jsonb 写入 / 读取 / CAST、4-5 步事务的<b>真实行回滚</b>、UNIQUE 约束。
+ * 本类保留的价值在于它是<b>纯上下文装配</b>的探针，能在不依赖 Docker 的环境下
+ * 守住「mapper bean 确实被 AOP 代理」这条结构断言；两者互补，不要互相替代。
  */
 class AvatarTransactionWiringTest {
 

@@ -182,6 +182,31 @@
             <scope>test</scope>
         </dependency>
 
+        <!--
+            Testcontainers 2.0.5（版本由 spring-boot-starter-parent 的 testcontainers.version 管理，不写 version）。
+            为什么 user-rpc 必须有真 PostgreSQL、且不能用 H2：
+              - extra_info 是 jsonb 列。JsonbTypeHandler 走 ps.setObject(..., Types.OTHER)，
+                这个绑参方式对不对，**只有真 PG 能证伪**：改成 setString 会被 PG 直接拒收
+                （column "extra_info" is of type jsonb but expression is of type character varying）。
+              - updateUserById 的 wrapper.setSql("extra_info = CAST({0} AS jsonb)") 显式 CAST。
+              - @Select 手写 SQL 读 jsonb 列时，@Results 是否真的把列映射成 Map（而不是 null）。
+              - createAvatarHistory 4 步 / selectAvatarHistory 5 步的**真实回滚**。
+            这几样 H2 都不支持或语义不同，替换掉等于把要验证的东西换没了。
+            此前 AvatarTransactionWiringTest 用的是"记录型事务管理器"，只能证明 begin/rollback
+            被调用过，证明不了 PG 真的回滚了行 —— 那条缺口由本依赖配套的
+            UserRpcContainerWiringTest 关闭。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <!-- ============== 8. OpenTelemetry OTLP exporter ============== -->
         <!--
             opentelemetry-{api,sdk,context} 已通过 service/common 传递依赖进来
@@ -211,6 +236,27 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
+                集成测试必须关掉 Ryuk，否则在本机/CI 上起不了任何容器。
+                理由与 admin-rpc 的同名配置完全相同（那里有完整的实测记录）：
+                  1. Testcontainers 2.x 的 ResourceReaper.instance() 读的是**环境变量**
+                     System.getenv("TESTCONTAINERS_RYUK_DISABLED")，testcontainers.properties
+                     与 -D 都无效，只有 surefire 注入 env 才有效。
+                  2. Ryuk 镜像 testcontainers/ryuk:0.14.0 需从 Docker Hub 拉，本机走加速器拉
+                     Docker Hub 会 EOF 失败，且发生在 @Container 之前 —— 整个类直接挂。
+                关掉后改用 JVMHookResourceReaper（纯 shutdown hook，不起容器）。
+                代价 = 容器不再自动回收，跑完可能残留。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
             </plugin>
         </plugins>
     </build>
