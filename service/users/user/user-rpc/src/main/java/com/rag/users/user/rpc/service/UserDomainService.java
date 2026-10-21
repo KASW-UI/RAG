@@ -165,7 +165,18 @@ public class UserDomainService {
 
             // W2 密码比对
             checkDeadline();
-            if (!PasswordUtil.check(req.getPassword(), user.getPassword())) {
+            PasswordUtil.Outcome pwOutcome =
+                    PasswordUtil.checkDetailed(req.getPassword(), user.getPassword());
+            if (pwOutcome != PasswordUtil.Outcome.MATCHED) {
+                // DRIFT-004（已修，2026-10-21 用户签字）：hash 格式非法时 Go 同样报密码错，
+                // 对外行为逐字一致；但 RAG 额外留一道信号——Go 侧这一路完全静默。
+                // 见 PasswordUtil 的 javadoc（实测行为谱：只有 cost 越界才走这一支）。
+                if (pwOutcome == PasswordUtil.Outcome.MALFORMED_HASH) {
+                    span.setAttribute("auth.malformed_hash", true);
+                    logger.logBusinessErr(otelCtx, ErrorCode.ERROR_REQUEST_PARAM.getCode(),
+                            new IllegalArgumentException(
+                                    "stored bcrypt hash is malformed (username=" + req.getUsername() + ")"));
+                }
                 metrics.getLoginInternalError().increment();
                 // 注：Go 字符串是 "incorrect,username : "（逗号后没空格），保持原样
                 logger.logInfo(otelCtx, "login failed: username or password incorrect,username : " + req.getUsername());

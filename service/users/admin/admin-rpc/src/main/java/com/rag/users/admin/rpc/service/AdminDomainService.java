@@ -141,7 +141,18 @@ public class AdminDomainService {
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
         }
 
-        if (!PasswordUtil.check(password, admin.getPassword())) {
+        // DRIFT-004（已修，2026-10-21 用户签字）：Go 的 cryptx.CheckPassword 对任何 bcrypt
+        // 错误都返回 false，即「hash 格式非法」与「密码错」都表现为 UNAUTHENTICATED。
+        // 本实现对外行为与之逐字一致（不冒泡成 500），但额外打一条 error 日志留信号 ——
+        // admin 侧没有 span 上下文（见本类字段：只有 log + metrics），故只落日志。
+        // 见 users-common 的 PasswordUtil#checkDetailed 的实测行为谱。
+        PasswordUtil.Outcome pwOutcome =
+                PasswordUtil.checkDetailed(password, admin.getPassword());
+        if (pwOutcome != PasswordUtil.Outcome.MATCHED) {
+            if (pwOutcome == PasswordUtil.Outcome.MALFORMED_HASH) {
+                log.error("admin login FAILED due to malformed stored bcrypt hash, "
+                        + "username={} —— 报密码错以对齐 Go，但这条数据需要修", username);
+            }
             metrics.getLoginWrongAnswer().increment();
             throw Status.UNAUTHENTICATED.withDescription("密码错误").asRuntimeException();
         }

@@ -264,7 +264,7 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 |---|---|---|
 | **DRIFT-003** | Go 的 `errmsg.codeMsg`（`errmsg.go:38-68`）**缺 1017 / 1018** ⇒ `GetErrMsg(1017)==GetErrMsg(1018)=="FAIL"`；RAG 的 `ErrorCode` 补了真实中文 | 当前潜伏：Go 从不返回这两个码；RAG 侧 1018 **只作日志码**（`UserDomainService.java:550,607`，线上抛的仍是 `Status.NOT_FOUND`）。**但若 N-3 日后改成对齐 Go，`GetErrMsg(1017)` 会变成 `"FAIL"`，届时 RAG 的提示语必须同步回退。下一个 agent 不得把它当成新发现的漂移再「修」一遍** |
 | **DRIFT-005** | Snowflake workerId 优先级：Go = `env → hash`（`snowflake.go:52-85`），RAG = `env → properties → hash`（多一层配置面）；截断 Go = `uint16(id)` 后 `%1024`，RAG 直接 `%1024` | RAG 是配置超集；Go 的截断对 `>65535` 的值是缺陷。两者都不可观察，不改代码 |
-| **DRIFT-004**（**待签字**） | `cryptx.CheckPassword` 对**任何** bcrypt 错误（含 hash 被污染）返回 false ⇒ 登录报 `1002`；RAG `BCryptPasswordEncoder.matches` 对非 bcrypt 格式抛 `IllegalArgumentException` ⇒ `500 + 5001` | **Go 自身有缺陷、对齐会让 RAG 变差**（把数据损坏伪装成密码错）。按 §3.4.2 纪律不得由单个 agent 自行判断，**用户签字前不动代码** |
+| **DRIFT-004** | ~~`cryptx.CheckPassword` 对任何 bcrypt 错误返回 false，RAG 抛 `IllegalArgumentException` ⇒ `500 + 5001`~~ | ✅ **2026-10-21 已修（用户签字「对外对齐 Go，但保留可观测性」）** | 见下方「DRIFT-004 的处置」小节。**触发面比原留档窄得多**：实测 Spring Security 7.0.7 下只有 **cost 字段越界**（`$2a$99$…`）会抛，空串 / 非 bcrypt / 截断这些形态 Spring 本就返回 false、与 Go 已一致 |
 
 ##### 本批新增的测试（11 条）
 
@@ -435,7 +435,7 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 | ~~P1~~ | ~~**user-api 前缀语义与 Go 不一致（DRIFT-002）**~~ | ✅ **2026-10-21 已修** | 旧 `startsWith("Bearer ")` 大小写敏感 ⇒ 小写 `bearer <有效token>` 被误拒 401；Go 是 `strings.ToUpper(tok[0:7])=="BEARER "` 的大小写不敏感比较。已改走 `BearerTokenExtractor`。锁定用例 `UserApiMvcPipelineTest#bearerPrefixIsCaseInsensitive` |
 | ~~P2~~ | ~~**400 响应体空 vs Go 的 text/plain（DRIFT-006）**~~ | ✅ **2026-10-21 已修** | Go：`service/user` 全树未注册 `httpx.SetErrorHandler` ⇒ `httpx.Parse` 失败走 `doHandleError` 的 `handler==nil` 分支 → `http.Error(w, msg, 400)` = `text/plain; charset=utf-8` + 裸文本 + 尾换行 + `nosniff`。RAG 原为 `ResponseEntity.status(400).build()`（空 body）。已加 `goStylePlainTextBadRequest`，并让 `GlobalResponseAdvice#beforeBodyWrite` 对非 JSON 响应透传（否则 400 文本会被再包成 envelope）。锁定用例 `UserApiMvcPipelineTest#malformedJsonReturnsPlainTextBadRequest` |
 | ~~P3~~ | ~~**`UserApiSupport.extractUserId` / `AdminApiSupport.extractAdminId` 零调用方**~~ | ✅ **2026-10-21 已删** | 二者是 `IdentityResolver.claimedUID` 的薄包装，Go 侧无对应物（Go 直接调 `identity.ClaimedUID`），`src/main` 下各 0 个调用方。按 §3.4.1 D-2 先例「零消费者的代码不能算已对齐」删除，避免留下第二个入口 |
-| **P1** | **`PasswordUtil.check` 对损坏 bcrypt hash 抛异常 vs Go 返回 false（DRIFT-004）** | —（**待用户签字**） | Go `cryptx.CheckPassword` 对任何 bcrypt 错误都返回 false ⇒ 登录报 `1002`；RAG `BCryptPasswordEncoder.matches` 对非 bcrypt 格式抛 `IllegalArgumentException` ⇒ `500 + 5001`。**Go 自身有缺陷、对齐会让 RAG 变差**，按 §3.4.2 纪律不得由单个 agent 自行判断。签字前不动代码，详见 §3.4.4 |
+| ~~P1~~ | ~~`PasswordUtil.check` 对损坏 bcrypt hash 抛异常 vs Go 返回 false（DRIFT-004）~~ | ✅ **2026-10-21 已修**（用户签字「对外对齐 Go + 保留可观测性」） | Go `cryptx.CheckPassword` 对任何 bcrypt 错误都返回 false ⇒ 登录报密码错；RAG `BCryptPasswordEncoder.matches` 对 **cost 越界**的 hash 抛 `IllegalArgumentException` ⇒ `500 + 5001`。已加 `PasswordUtil.checkDetailed` + `Outcome` 枚举，对外行为对齐 Go、额外把「hash 格式非法」记进 span/log。**实测推翻原留档的触发面估计**（只有 cost 越界才抛，空串/非 bcrypt/截断 Spring 本就返回 false）。回归网 11 条，已实证能真红。详见 §3.4.4「DRIFT-004 的处置」 |
 
 ### 6.2.4 本轮（2026-10-21 第二批）取证与附带发现
 
@@ -627,6 +627,59 @@ getter 仍为 `isRead()`。实测改后：
 > `user-rpc` / `user-api` 两个服务**，根本没有 `admin-rpc` / `admin-api`。
 > 单跑 user 域时账本永远是自洽的；admin 域从未被编排放上过，
 > 冲突自然一次都没露过。**这不是「还没测」，是「根本没部署过」。**
+
+##### DRIFT-004 的处置：**已定案（用户 2026-10-21 签字「对外对齐 Go，但保留可观测性」）· 已实施**
+
+**决策**：对外行为与 Go 逐字一致（都报密码错），但**额外**把「hash 格式非法」记进
+log 与 OTel span。理由是 §1「行为以 Go 为准、表达以 Spring 为准」：
+**错误码属行为必须对齐，指标属表达可以比 Go 更强**。Go 侧这一路**完全静默**。
+
+**实测行为谱**（Spring Security **7.0.7** + `spring-security-crypto`，真跑非推断）：
+
+| 输入形态 | 修复前 | Go | 修复后 |
+|---|---|---|---|
+| 合法 hash + 密码匹配 | `true` | `true` | `true` |
+| 合法 hash + 密码不匹配 | `false` | `false` | `false` |
+| 空串 hash | `false` | `false` | `false` |
+| `"abc"`（完全不是 bcrypt） | `false` | `false` | `false` |
+| `"$2a$10$tooshort"`（截断） | `false` | `false` | `false` |
+| **`"$2a$99$…"`（cost 越界）** | **抛异常 → `500+5001`** | `false` | **`false`** |
+| `"$2b$"` / `"$2y$"` 合法 hash | `true` | `true` | `true` |
+| null hash / null 明文 | `false` | `false` | `false` |
+
+> **⚠️ 本次实测推翻了两个广泛流传的猜测，下一轮审计不要重新"发现"它们**：
+> 1. **触发面远窄于原留档**。原留档写「对**任何** bcrypt 错误抛异常」，
+>    实测**只有 cost 字段越界**才抛。Spring 的
+>    `BCRYPT_PATTERN`（`\A\$2(a|y|b)?\$(\d\d)\$[./0-9A-Za-z]{53}`）
+>    在 `matchesNonNull` 里把绝大多数畸形 hash 挡在 `BCrypt.checkpw` 之前并**返回 false**。
+> 2. **「RAG 不认 `$2b$`」是伪漂移**。`BCRYPT_PATTERN` 的 `(a|y|b)?` 已覆盖
+>    `$2$`/`$2a$`/`$2b$`/`$2y$`，与 Go `decodeVersion`（只判 major ≤ `'2'`）接受的集合相同。
+>    老版本 Spring 的 `startsWith("$2a$")` 硬检查在 **7.0.7 已不存在**。
+
+**实现**：`users-common/cryptx/PasswordUtil` 新增 `Outcome` 枚举与
+`checkDetailed(raw, hash)`；`check(raw, hash)` 保留原签名但**契约收紧**为「永不抛异常」。
+两个 rpc 的登录调用点改用 `checkDetailed`：
+- `UserDomainService#login`：`MALFORMED_HASH` 时 `span.setAttribute("auth.malformed_hash", true)`
+  + `logger.logBusinessErr`，**对外仍返回 `status=1`**（与 Go 的 `loginlogic.go` 一致）
+- `AdminDomainService#login`：`MALFORMED_HASH` 时打一条 `log.error`（该类**没有** span 上下文，
+  只有 `log` + `metrics`，见其字段声明），对外仍抛 `UNAUTHENTICATED`
+
+**回归网**（11 条，`mvn clean verify` 全绿）：
+- `PasswordUtilGoCompatibilityTest`（users-common，7 条）—— 上表每一行逐条钉死
+- `LoginMalformedHashDrift004Test`（user-rpc，4 条）—— 端到端证明「报密码错而非 500」，
+  外加「正常密码错不被误吞成 malformed」「正常登录路径未受影响」
+
+**已实证能真红**：临时移除 `checkDetailed` 的 catch 后，
+两条用例立刻报 `IllegalArgumentException: Bad number of rounds` ——
+正是生产上冒泡成 `500 + 5001` 的那个异常（§3.3 要求）。
+
+**残留的已知反向差异（不修，留档）**：无 minor 的 `"$2$"` 前缀。
+实测 RAG 返回 `false`，而 Go 的 `decodeVersion` 在 `sbytes[2] == '$'` 时会接受 ⇒ Go 应返回 `true`。
+**不修的三个理由**：① 方向是「RAG 更严格」，登录场景 fail-closed 更安全，不是漏洞；
+② 修它要绕过 `BCryptPasswordEncoder` 直接调 `BCrypt.checkpw`，等于放弃模式校验，
+为一个几乎不会出现的旧格式牺牲防御；③ `$2$`（无 minor）是 bcrypt 最早的实验格式。
+锁定用例 `PasswordUtilGoCompatibilityTest#barePrefixIsFalseInRagButGoWouldAcceptIt`——
+它断言的是**当前偏差**，所以哪天要对齐 Go，改的是这条测试的期望值而不是删掉它。
 
 ##### DRIFT-NEW-016 的处置：**已定案（用户 2026-10-21 拍板「向 Go 对齐」）· 已实施**
 
