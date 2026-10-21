@@ -56,18 +56,19 @@ KNOWN_STATUS_ONLY = {
     #   authhandler.go:106 unauthorized() = HTTP 401 + **空 body**，
     #   RAG 统一成 HTTP 401 + {code,msg,data} envelope。状态码一致、正文形状已签字。
     "user.delete",
-    # N-3（已签字）：admin 非法 uid 保留 RAG 的 1017，不向 Go 的 1003（0 值路径）对齐
+    # N-3（已签字）：admin 非法 uid 保留 RAG 的 1017，不向 Go 的 1003（0 值路径）对齐。
+    # body data.code 不同(1003/1017)，逐字无法对齐，留白名单。
     "admin.getuser.nouid",
     "admin.getuser.baduid",
-    # Go 的 httpx.Parse 把「字段缺失」当硬错误：go-zero core/mapping 只认 `,optional`，
-    #   **`,omitempty` 不算 optional**（unmarshaler.go:946-969 走 !opts.optional() 分支
-    #   直接 newInitError）。所以 register 缺 email / getuserlist 缺 keyword
-    #   / admin update 缺 username ⇒ Go 400 + text/plain。
-    #   RAG 的 DTO 没有这个必填校验（全部字段可缺省）⇒ 走正常业务分支。
-    #   这是**已观察到但尚未签字**的差异，先按 N-6 的形状口径只比状态码。
-    "user.register.noemail",
+    # DRIFT-NEW-016 已对齐但文本各自框架抛出，仍留白名单：
+    #   这条场景必须 admin_token 才有意义；当前的测试环境 admin 链路上 GO 侧
+    #   login fail(详见 §6.2.6 E-1 现状),所以本条没在实测里跑通;凭代码路径
+    #   可以预测 byte-equal(`field "keyword" is not set`),但**未验证不立**。
     "admin.getuserlist.nokeyword",
 }
+# 已知 body byte-equal 的场景不再进白名单（2026-10-21 实证一组通过）：
+#   - user.register.noemail    → 'field "username" is not set\n'
+# 走 diff_json 走 text/plain(被 parse_json 包成 {"__raw__": "..."} 后逐字比对)。
 
 # 业务码层面已签字的差异：(step_id, 期望 code)。仅用于把「已知」标注出来，不算失败。
 KNOWN_CODE_DIFF = {
