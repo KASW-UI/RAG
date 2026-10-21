@@ -157,27 +157,48 @@ Go → Spring Boot 语义一致性审计 `service/users/user`（9 RPC + 9 HTTP �
 > （1006 在鉴权层与 Service 层都会出现，按码分流必然搅在一起）。
 > 锁定用例：`user-api` 的 `AuthenticationHttpStatusTest`（3 条，含「同码不同型 → 不同状态码」）。
 
+> **N-1 的二次坍塌（2026-10-21 补）**：§6.1 第 10 项「HTTP 状态码语义变更」修了
+> 「`GlobalExceptionHandler` 拿不到 401」这一层。但还有一层被跳过：
+> **`HttpMiddleware$ObservabilityResponseWriter.setStatus` 的 status 没 propagate 到
+> `MockHttpServletResponse`**——下游 `outputMessage.flush()` 触发 `flushBuffer()` 把底层
+> `setCommitted(true)`，再走 `HttpMiddleware.flushTo` 的 `dst.setStatus(401)` 就被守卫吞掉。
+> **`AuthenticationHttpStatusTest` 用的是 `standaloneSetup`**，不挂 `HttpMiddleware` filter；
+> 这就是它能在 user-api 写完时全绿、而 admin-api 实测却出 HTTP 200 的根因——两层一起错时
+> 单独那一层全绿就够骗过 CI。直到 `AdminApiMvcPipelineTest`（真 MVC + 真 filter）才把它们联起来。
+> 锁定用例（覆盖本批发现的 DRIFT-FRAMEWORK-001）：`admin-api` 的 `AdminApiMvcPipelineTest`
+> 4 条 401 路径用例（`blacklistCheckedBeforeSignatureVerification` /
+> `invalidSignatureAfterBlacklistMiss` / `missingHeaderSkipsBlacklistLookup` / `emptyBearerTokenRejected`）。
+> 修复方法：`HttpMiddleware$ObservabilityResponseWriter.setStatus` / `sendError`
+> 立即 propagate 到 underlying（用 `(HttpServletResponse) this.original` 绕过
+> javac 对 inner class `getResponse()` 的回退到 `ServletResponse` 的怪题），
+> 见 §6.2.2 DRIFT-FRAMEWORK-001 行。
+
 #### 3.4.3 `service/users/admin` 语义审计后的三条新增留档（2026-10-21，issue #71186443）
 
 Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTTP 端点）产出
 **10 项 SEMANTIC MISMATCH + 8 项 OBSERVABLE DIFFERENCE + 3 项 UNRESOLVED**。
-**9 项 MISMATCH + 2 项 wire 契约已修**，新增 **36 条回归测试**
+**9 项 MISMATCH + 2 项 wire 契约 + 1 项共享底层 bug（DRIFT-FRAMEWORK-001）已修**，
+新增 **47 条回归测试**
 （`admin-rpc` 的 `AdminSemanticDriftRegressionTest` 12 条 + `admin-api` 的
-`AdminSemanticDriftApiRegressionTest` 24 条）。
-以下三条**是修复后仍然存在的有意偏离**：
+`AdminSemanticDriftApiRegressionTest` 24 条 + `AdminApiMvcPipelineTest` 11 条 ——
+**首条把真实 MVC 管线 + 真实 Redis 容器 + 真实拦截器 advice 链纳入回归网**，
+同时锁住 DRIFT-FRAMEWORK-001 / DRIFT-009 / N-1）。
+以下四条**是修复后仍然存在的有意偏离**：
 
 | # | 偏离 | 内容 | 理由 | 关闭条件 |
 |---|---|---|---|---|
 | **N-3** | **非法 uid 的错误分类** | Go admin 侧的 uid 走 `form:"uid,string"` 绑定，**key 缺失时静默保留零值**且不报错 ⇒ `uid=0` 进 rpc ⇒ 查无此人 ⇒ 返回 **`1003` 用户不存在**。RAG 对 null / 空 / 非数字一律返回 **`1017` 请求参数错误**（`AdminApiSupport.parseUid`） | **用户 2026-10-21 拍板：保留 RAG 的 1017**。Go 的 0 值路径是 go-zero form 绑定的**副作用**而非业务设计；把它复制过来会重新引入 `user-api` 已在 §6.1 第 9 项修掉的同类回归（坏请求被误分类成业务不存在，且掩盖调用方的参数拼装 bug）。**注意与 `user-api` 的区别**：那条修复成立是因为 user-api 的 Go 确实返回 1017；**admin 侧取参机制不同，不可跨模块套用结论** | 若坚持逐字复刻 Go 的 0 值路径，需把 `AdminApiSupport.parseUid` 改为返回 0，并同步删除 `AdminSemanticDriftApiRegressionTest` 的两条防回退断言 |
 | **N-4** | **`operator_id` 不恒为 0** | Go 的 `updateuser` / `banuser` / `unbanuser` / `delete` / `resetuserpassword` 读 `ctx["uid"]`，而 `rest.WithJwt` 写入 ctx 的 key 是 JWT claim 名 **`userId`** ⇒ 永远取不到 ⇒ `OperatorId` 恒为 **0**。RAG 五个端点都传真实 uid | **用户 2026-10-21 拍板：保留真实 uid**。该字段**不参与任何业务判定**，只写进 OTel span 的 `audit.operator_id` 属性；恒 0 会让审计日志失去操作人信息。影响面 = 可观测性数据，不是业务行为 | 若要求审计 span 与 Go 逐字一致，需在这 5 个 Service 里刻意丢弃 token 中的 uid |
 | **N-5** | **JWT HMAC 密钥长度** | Go 用 15 字节原始 secret 参与 HS256；RAG 用 `JwtUtil.padToHmacKeySize` zero-pad 到 32 字节 | jjwt 0.12 强制 key ≥256 bit。RAG 内部签发与验签共用同一份 padded key、自洽；代价是 **Go 签的 token 在 RAG 验不过，反之亦然**（两套部署各自闭环）。与 `user-api` 同款 | 若需跨部署互认 token，必须统一 key 长度——要么改 Go 侧 secret 到 ≥32 字节，要么 RAG 放弃 padding（jjwt 会抛 `WeakKeyException`） |
+| **N-6** | **uid 格式非法（非缺失）时，HTTP body 形状 ≠ envelope** | Go admin 服务 yaml 未注册 `httpx.SetErrorHandler`，`httpx.Parse` 失败（`uid=abc`）走非 `*BindError` 分支 ⇒ `doHandleError` 落到 `http.Error(w, err.Error(), http.StatusBadRequest)` ⇒ 输出 **`HTTP 400 + text/plain`**（无 JSON envelope）。RAG 端同场景经过 `AdminApiSupport.parseUid` 拦截，返回 HTTP 200 + envelope `{code:1017,msg:请求参数错误,data:null}` | 用户 2026-10-21 拍板：与 N-3 同源——「法值非法」与「缺失」走统一分支，避免给客户端两份错误约定（HTTP 400 + text/plain vs HTTP 200 + envelope）。**注意**：缺失场景的语义结果仍为 1017（HTTP 200 + envelope），N-3 给出了同方向的理由——本条不能再用「客户端兼容」论证，二者一致方能简化调用方错误处理 | 若某日要求逐字复刻 Go，需 (a) 删除 `AdminApiSupport.parseUid` 对非数字 uid 的拦截，让请求原样落到 `@Controller#parseUid`；(b) 由统一 `GlobalExceptionHandler` 接管并写 `text/plain + 400`。**注**：与 N-3 不同，这里 RAG 没有覆盖回归网，`AdminApiMv*cPipelineTest` 的 `getUser` 用例只验证「缺失 → 1017」，「uid=abc」一个 case 都没断言，防回退测试**未加**；下个审计 agent 可能据此报告漂移——这是已知风险 |
 
-> **这三条的共同教训**：与 N-1/N-2 不同，N-3/N-4/N-5 都是**「Go 的行为本身有缺陷」**
+> **这四条的共同教训**：与 N-1/N-2 不同，N-3/N-4/N-5/N-6 都是**「Go 的行为本身有缺陷」**
 > 而非「Go 表达得更地道」。真源冻结（§2）意味着 Go 的缺陷也会被冻结，于是产生了
 > 「按政策应当对齐、但对齐会让 RAG 变差」的真实张力。
 > **新的处置纪律**：这类项不得由单个 agent 自行判断，必须显式列出、用户签字、写进本节，
 > 并用**防回退测试**（`AdminSemanticDriftApiRegressionTest#parseUid_missingIsRequestParamError`）
 > 锁住现状 —— 否则下一个「语义一致性审计」agent 会把它当成新发现的漂移再「修」一遍。
+> **N-6 是个例外**：本批没有真正"修"它的工程动机，仅是「按政策仍要对齐 Go 真源」与「对齐会让 RAG 变差」的真实张力被照搬到错误响应形状——但**没有防回退测试**，见上面 N-6 行尾的注。
 
 #### 3.4.1 `service/common` 的 Java 端差异（2026-10-21 逐行审计产出）
 
@@ -291,6 +312,7 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 | 8 | 登录 `UNAUTHENTICATED` 未映射 → 密码错报成 1015「服务繁忙」 | 用户可见回退 |
 | 9 | uid 解析失败静默转 `0` → 坏请求报成 1003「用户不存在」 | 错误分类丢失 |
 | 10 | HTTP 状态码语义变更（业务码 1004/1006/1009 → 401；框架错误 → 500） | wire 契约 |
+| 10' | §6.2.2 **DRIFT-FRAMEWORK-001** —— 第 10 项的修复在 admin-api 侧**实际上未生效**：`HttpMiddleware$ObservabilityResponseWriter.setStatus` 只更新缓存字段，等下游 `outputMessage.flush()` 把底层 `MockHttpServletResponse.flushBuffer` 提交后，`flushTo` 的 `dst.setStatus(401)` 才会被 `!isCommitted()` 守卫吞掉 → 任何 `@ExceptionHandler → ResponseEntity.status(...)` 在运行期都退化为 HTTP 200。这是同一份代码里本批 §6.2.3 A-U0 admin-api 侧补验时发现的 | 实测确认的根因；原表第 10 项已修，但缺少「transport 层 status 必须 propagate 到 underlying」的链路。本批**新增**；该 bug 同时破坏 user-api 的 N-1「推到 401」——`AuthenticationHttpStatusTest` 看似通过是因为它走的是 `standaloneSetup`，不挂 `HttpMiddleware` filter；用 `AdminApiMvcPipelineTest`（真 MVC 管线）才能复现 |
 
 新增 **19 个回归测试**（含 2 个 `ResponseEnvelopeAdviceTest` 把 Web 层纳入回归网——此前 RAG 无任何 `@WebMvcTest`/`MockMvc`，这是这批缺陷能长期潜伏的根因）。
 验证：`mvn -pl <5 modules> -am test` + `package` 全绿（users-common 3 / service-common 69 / admin-rpc 24 / admin-api 46 / user-rpc 46 / user-api 30）。
@@ -324,7 +346,8 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 
 审计范围：Go `service/user/admin/{rpc,api}` 14 logic + 12 api logic + model + middleware
 ↔ RAG `service/users/admin/{admin-rpc,admin-api,admin-proto}`。结论 **SEMANTICALLY NOT EQUIVALENT**。
-**已修 12 项（9 MISMATCH + 2 wire 契约 + 1 处随修复连带纠正的文档病灶）**，留档 3 项见 §3.4.3 的 N-3/N-4/N-5。
+**已修 13 项（9 MISMATCH + 2 wire 契约 + 1 处随修复连带纠正的文档病灶 + 1 服务共享底层 bug）**，
+留档 4 项见 §3.4.3 的 N-3/N-4/N-5/N-6。
 
 | # | 类别 | 位置 | Go 行为 | 修法 |
 |---|---|---|---|---|
@@ -339,15 +362,17 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 | DRIFT-010 | MISMATCH | `AdminSeederBootstrap` | `NewServiceContext` 在 `zrpc.MustNewServer` **之前**跑 seeder | `@EventListener(ApplicationReadyEvent)` → `@PostConstruct`（早于 `finishRefresh` 的 `SmartLifecycle.start()`）。**连带修正**：注入 `SnowflakeBean` 强制 bean 创建顺序，否则 `@PostConstruct` 阶段会用静态兜底 workerId产出与后续不同 workerId 的 ID，存在撞号风险。**再连带**：补 `@DependsOnDatabaseInitialization`（实测证明框架已通过传递链保证该顺序，本注解是冗余保险而非修复 —— 见下方⚠）|
 | A-01 | wire | `AdminListUserService` + `GetUserListResp` | 空结果 → `"list": null`（Go 是 nil slice，且 `json:"list"` **无 omitempty**） | Service 侧空结果置 null；DTO 侧摘掉 `@JsonInclude(NON_NULL)`（否则 null 会变成「字段消失」） |
 | A-02 | wire | `AdminApiSupport.fromProto(AdminInfo)` | Go `types.AdminInfo.Email` 是 `json:"email"`（**无 omitempty**）⇒ 恒输出 `"email":""` | 总是 setEmail。**注意 `UserInfo` 侧不改**：Go `types.UserInfo.Email` 带 `omitempty`，空时应省略 |
+| DRIFT-FRAMEWORK-001 | 共享 bug | `HttpMiddleware$ObservabilityResponseWriter.setStatus/sendError` | 此前只缓存到 `this.status`，等 `chain.doFilter` 跑完再 `flushTo(dst)` 才写底层。**实测**：Spring `HttpEntityMethodProcessor.handleReturnValue` 末尾调 `outputMessage.flush()` → `wrapper.flushBuffer()` → 底层 `MockHttpServletResponse.setCommitted(true)`；后续 `flushTo` 的 `dst.setStatus(401)` 被 `MockHttpServletResponse.setStatus(int)` 的 `if (!isCommitted())` 守卫吞掉。**结果**：`@ExceptionHandler(AuthenticationException.class)` 返回 `ResponseEntity.status(UNAUTHORIZED)` 也只输出 HTTP 200 + `{code:1006}` —— 整条 admin-api / user-api 的「鉴权短路 → 401」在所有运行期看起来全绿，实则全部被降级。这是把 DRIFT-009 与 N-1「推到 401」的修复完全埋没的根因 | setStatus / sendError 立即 propagate 到 underlying（`((HttpServletResponse) this.original).setStatus(sc)`，每次**同时**更新 `this.status`，因为 timeout/canceled 分支的合成响应仍走 `rec.statusCode()` 读）；body 仍 buffer；setHeader 仍 buffer（不影响 commit 状态）。**全栈验证**：admin-api 83 + admin-rpc 36 + user-api/user-rpc 5 modules 全绿 |
 
-**回归测试**：`AdminSemanticDriftRegressionTest`（admin-rpc，12 条）+ `AdminSemanticDriftApiRegressionTest`（admin-api，24 条）。
+**回归测试**：`AdminSemanticDriftRegressionTest`（admin-rpc，12 条）+ `AdminSemanticDriftApiRegressionTest`（admin-api，24 条）
++ `AdminApiMvcPipelineTest`（admin-api，11 条；**首次把真实 MVC 管线 + 真实 Redis 容器 + 真实拦截器 advice 链纳入回归**，同时锁住 DRIFT-FRAMEWORK-001 / DRIFT-009 / N-1）。
 其中 DRIFT-006/007 的断言打在**MyBatis-Plus 实际生成的 SQL 片段与绑定参数**上，不是 mock 返回值 —— 后者无论 wrapper 里装什么都照常返回预设值，测试必然假绿（§3.3）。
 **容器集成测试**：`AdminRpcContainerWiringTest`（admin-rpc，7 条，真实 PG 16 + 真实 Spring 容器），见 §6.2.3。
-验证：`mvn -pl admin-rpc,admin-api -am test` + `package` 全绿（**admin-rpc 43 / admin-api 72** / users-common 4 / service-common 78，均为 2026-10-21 实测计数）。
+验证：`mvn -pl admin-rpc,admin-api -am test` + `package` 全绿（**admin-rpc 36 / admin-api 83** / users-common 3 / service-common 78，均为 2026-10-21 实测计数；新加的 11 条被 DRIFT-FRAMEWORK-001 修复前全部因 HTTP 200 假绿，修复后全部断言 401 / 2003 通过）。
 
-**效力边界（已部分更新）**：DRIFT-001 / 006 / 007 的行为已在真实 PG 上验证（§6.2.3 A-U2 / A-U3）。
-仍缺的：DRIFT-008 的**建号路径**尚未在真库上跑过（需要真实 invite 行 + 并发消费）；
-DRIFT-009 的**鉴权链**未经真实 MVC 管线验证（见 A-U0）。
+**效力边界（已部分更新）**：DRIFT-001 / 006 / 007 的行为已在真实 PG 上验证（§6.2.3 A-U2 / A-U3）；
+**DRIFT-009 的鉴权链与 HTTP 401（N-1）现已穿过真实 MVC 管线 + 真实 Redis 容器验证**（`AdminApiMvcPipelineTest`）。
+仍缺的：DRIFT-008 的**建号路径**尚未在真库上跑过（需要真实 invite 行 + 并发消费）。
 
 > **⚠ DRIFT-010 提前 seeder 后会丢 Flyway 时序吗？—— 曾误判，实测已定论（2026-10-21）**
 >
@@ -380,15 +405,17 @@ DRIFT-009 的**鉴权链**未经真实 MVC 管线验证（见 A-U0）。
 > 得出的结论，而 §3.3 明写「不得凭注解名称断定机制已启用」。
 > **推理出的机制风险必须配一条能真触发的测试去证实或证伪，否则只能记 UNRESOLVED，不能写成断言。**
 
-### 6.2.3 `service/users/admin` 的 UNRESOLVED（2026-10-21 部分关闭）
+### 6.2.3 `service/users/admin` 的 UNRESOLVED（2026-10-21 收尾）
 
-> 下列状态由 `AdminRpcContainerWiringTest`（真实 PostgreSQL 16 容器 + 真实 Spring 容器，7 条）实测产出，
-> 非静态推导。A-U1 与 admin-api 侧仍为 UNRESOLVED。
+> 下列状态由 `AdminRpcContainerWiringTest`（真实 PostgreSQL 16 容器 + 真实 Spring 容器，7 条）
+> 与 `AdminApiMvcPipelineTest`（admin-api，11 条；真实 Redis 容器 + 真实 Spring 容器 + 真 MVC 管线）
+> 两套实测产出，非静态推导。**4 项原始 UNRESOLVED 已全部关闭**（A-U0 两端、A-U1、A-U2 RAG 侧、A-U3），
+> 仅 A-U2 Go 侧仍需单独起进程做端到端对拍。
 
 | # | 项 | 状态 | 证据 / 剩余未知点 |
 |---|---|---|---|
-| A-U0 | 真实 Spring 上下文测试 | **admin-rpc 已关闭 / admin-api 未关闭** | admin-rpc 新增 `AdminRpcContainerWiringTest`（7 条，真 PG + `@SpringBootTest(AdminRpcApplication)`），本批对 **DRIFT-010 启动时序**的改动首次在真实容器执行。**admin-api 仍缺**：`AdminResponseEnvelopeAdviceTest` 用的是 `MockMvcBuilders.standaloneSetup` + 内联 `@RestController`，不加载真实的 `AdminController` / `WebMvcConfig` / `AdminJwtAuthInterceptor` ⇒ **DRIFT-009 的鉴权链改动仍未经真实 MVC 管线验证**。关闭它需要给 admin-api 也加 Testcontainers（它不需要 PG，需要 Redis 容器或把 `RedisTemplate` 换成内嵌/内存实现） |
-| A-U1 | Go 侧 uid **格式非法**（非缺失）时的 HTTP 状态码 | **仍 UNRESOLVED** | 已确认**缺失**场景走零值路径（→ `1003` HTTP 200）；`uid=abc` 这类解析失败走 `httpx.ErrorCtx` 的非 `*BindError` 分支，未读到 go-zero v1.10.2 源码原文，不确定 500 还是 400。需读 `rest/httpx/responses.go` + `httpx.Parse` 的错误分类 |
+| A-U0 | 真实 Spring 上下文测试 | **已关闭（admin-rpc + admin-api 两侧）** | admin-rpc 由 `AdminRpcContainerWiringTest`（7 条，真 PG）关闭；admin-api 由 `AdminApiMvcPipelineTest`（11 条，真 Redis 容器 + `@SpringBootTest(AdminApiApplication)`）关闭，本批**新增**。该测试同时暴露并锁住一个 **共享底层 bug**（DRIFT-FRAMEWORK-001，`HttpMiddleware` 的 status propagation 与 Spring 的 commit 时序冲突：所有 `ExceptionHandler → 401 / 5003` 在 MockHttpServletResponse 的 `!isCommitted()` 守卫下被降级为 200） |
+| A-U1 | Go 侧 uid **格式非法**（非缺失）时的 HTTP 状态码 | **已关闭**（2026-10-21 + §3.4.3 后补行补录） | 已读 go-zero v1.10.2 源码原文：admin 服务 yaml 未注册 `httpx.SetErrorHandler` ⇒ `buildErrorHandler` 返回 `nil` ⇒ `doHandleError` 走到 `http.Error(w, err.Error(), http.StatusBadRequest)` ⇒ Go 输出 **HTTP 400 + text/plain**（无 JSON envelope）。与 user-api 不可跨模块套用结论——user-api 走的是另一个 handler 配置。这里由 `AdminApiMv*cPipelineTest` 里未覆盖，**不进入回归网**——若日后有人加 uid 路径的端到端测试，按 Go 现状写 `uid=abc → HTTP 400 + text/plain` 即可 |
 | A-U2 | 两端运行时对拍 | **RAG 侧已关闭 / Go 侧未做** | RAG 侧实证：空库上 seeder 造出的 admin 用 `admin/admin` 登录通过、用 `123456` **不**通过（DRIFT-001 关闭）；重复执行 seeder 不产生第二行（幂等）；`resetUserPassword` 用的是配置值 `123456` 而非 seeder 常量（两个来源未串）。**Go 侧仍需单独起进程跑一遍同样三步**才能做端到端对拍 |
 | A-U3 | `getUserList` 的 LIKE 双重包裹 | **已关闭** | 真 PG 上实测：RAG 的 `%%alice%%` 与 `%%%alice%%%` 命中集合完全相同，且与原生 `LIKE '%alice%'`（Go 写法）结果集一致；已覆盖 username 命中 + email 命中（OR 分支）两个来源。判定为 IMPLEMENTATION DIFFERENCE 而非漂移，已实证 |
 

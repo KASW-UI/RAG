@@ -120,10 +120,55 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+            Testcontainers（版本由 spring-boot-starter-parent 管理）。
+            admin-api 需要的是 Redis 容器而不是 PG：AdminJwtAuthInterceptor 的黑名单检查
+            走 StringRedisTemplate.hasKey，这是 DRIFT-009 的核心机制，
+            必须对着真 Redis 验证「黑名单先于验签」的顺序。
+            用 GenericContainer（core 自带）即可，无需额外 module。
+            对应 AGENTS.md §6.2.3 的 A-U0。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            Boot 4 把测试切片拆成了独立 artifact：@AutoConfigureMockMvc 已不在
+            spring-boot-test-autoconfigure 里，类也从
+            org.springframework.boot.test.autoconfigure.web.servlet
+            挪到了 org.springframework.boot.webmvc.test.autoconfigure。
+            只引 spring-boot-starter-test 编译不过 —— 实测 m2 里 4.0.8 全部 jar 都没有这个类。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
         <plugins>
+            <!--
+                关掉 Ryuk，理由与 admin-rpc 完全相同：Testcontainers 2.x 的
+                ResourceReaper.instance() 只读环境变量 System.getenv("TESTCONTAINERS_RYUK_DISABLED")，
+                properties 与 -D 都无效；而 ryuk 镜像走 Docker Hub 拉不下来会导致整类 ContainerFetch。
+                代价：容器不再自动回收。Docker Hub 可达后删掉本段即可恢复。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

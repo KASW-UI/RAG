@@ -55,8 +55,12 @@ public class GlobalExceptionHandler {
      * 两处都是 401；body 形状 Go 自身不一致，本端统一成完整 envelope（已按 §3.4 留档）。
      */
     @ExceptionHandler(AuthenticationException.class)
-    public ResponseEntity<Response> handleAuthentication(AuthenticationException e) {
+    public ResponseEntity<Response> handleAuthentication(
+            AuthenticationException e, jakarta.servlet.http.HttpServletResponse response) {
         log.warn("admin AuthenticationException code={} msg={}", e.getCode(), e.getMessage());
+        // 显式钉 401 — 防 gap：若某日 HttpMiddleware status 转发再次失效，这里确保状态码提交
+        // （response 实际就是 HttpMiddleware 的 ORW wrapper，传到此处时仍可能未被 commit）。
+        response.setStatus(HttpStatus.UNAUTHORIZED.value());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(new Response(e.getCode(), e.getMessage(), null));
     }

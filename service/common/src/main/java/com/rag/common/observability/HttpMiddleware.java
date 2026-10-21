@@ -475,6 +475,16 @@ public final class HttpMiddleware {
                 return;
             }
             this.status = sc;
+            // 关键修复（2026-10-21 实测）：status 必须立即 propagate 到 underlying。
+            // 只缓存到 this.status 的旧实现里，下层 chain.doFilter() 跑完时已经
+            // outputMessage.flush() → wrapper.flushBuffer() → 底层 MockHttpServletResponse
+            // 标 committed，HttpMiddleware.flushTo 再写 status 直接被 !isCommitted() 吞掉。
+            // 实测表象：HTTP 401 / 5003 一律降到 200，DRIFT-009 / DRIFT-004 全程不可见。
+            // Go 对应的是 responseWriter.WriteHeader 同步语义，超时分支走未经 wrapper 的
+            // writeTimeoutResponse(httpResp, 503) 兜底，与本改动无冲突。
+            // 用 this.original 显式拿 HttpServletResponse，避免 inner class 字段遮蔽 super.getResponse()
+            // return-type narrowing（javac 在某些版本会回退到 ServletResponseWrapper.getResponse()）。
+            ((HttpServletResponse) this.original).setStatus(sc);
         }
 
         @Override
@@ -483,6 +493,8 @@ public final class HttpMiddleware {
                 return;
             }
             this.status = sc;
+            // 与 setStatus 同步 propagate（见 setStatus 的注释）
+            ((HttpServletResponse) this.original).sendError(sc);
         }
 
         @Override
@@ -491,6 +503,8 @@ public final class HttpMiddleware {
                 return;
             }
             this.status = sc;
+            // 与 setStatus 同步 propagate（见 setStatus 的注释）
+            ((HttpServletResponse) this.original).sendError(sc, msg);
         }
 
         @Override
@@ -597,11 +611,10 @@ public final class HttpMiddleware {
                 // 超时 / 客户端断连时不 flush captured body（避免污染 timeout 响应）
                 return;
             }
+            // 2026-10-21 修复后：setHeader 仍走 buffer（bufferedHeaders 与 buffered body 一同 flush）；
+            // setStatus / sendError 已改为实时 propagate 到 underlying，见上面 setStatus 的注释。
             for (Map.Entry<String, String> e : capturedHeaders.entrySet()) {
                 dst.setHeader(e.getKey(), e.getValue());
-            }
-            if (status != 200) {
-                dst.setStatus(status);
             }
             if (body.size() > 0) {
                 dst.getOutputStream().write(body.toByteArray());
