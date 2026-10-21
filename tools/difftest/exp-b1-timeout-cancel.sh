@@ -50,11 +50,35 @@ psql_go()  { docker exec difftest-postgres psql -U "$PG_U" -d go_db  -qAt -c "$1
 psql_rag() { docker exec difftest-postgres psql -U "$PG_U" -d rag_db -qAt -c "$1"; }
 
 now_ms() { python3 -c 'import time;print(int(time.time()*1000))'; }
+stamp()  { python3 -c 'import time;print(time.strftime("%H:%M:%S",time.localtime())+"."+str(int(time.time()*1000)%1000).zfill(3))'; }
+
+# 该库里「正在等锁」的查询明细 —— 只要把 state / wait_event_type / query_start 打出来，
+# 就能把它和客户端时间戳、worker 日志时间戳放到同一条时间轴上比。
+# ⚠️ 早期版本只统计 count(*) 并在 count 掉到 0 时判定「查询消失」，
+#    那样既看不出是哪条查询、也看不出它什么时候开始的：
+#    2026-10-21 注入组就出现过「客户端 2121ms 返回 / 查询 398ms 消失 /
+#    worker 却 6860ms 后才结束」的三方矛盾，只看 count 根本无从下手。
+pg_lock_rows() {  # db -> "pid:state:waitEventType:query_start + ..."
+  docker exec difftest-postgres psql -U "$PG_U" -d "$1" -qAt -c \
+    "SELECT coalesce(string_agg(pid||':'||state||':'||coalesce(wait_event_type,'-')||':'
+       ||to_char(query_start,'HH24:MI:SS.MS'),' + '),'(无等锁查询)')
+     FROM pg_stat_activity WHERE datname='$1' AND wait_event_type='Lock'" \
+    2>/dev/null | tr -d '[:space:]'
+}
+pg_lock_count() {  # db
+  docker exec difftest-postgres psql -U "$PG_U" -d "$1" -qAt -c \
+    "SELECT count(*) FROM pg_stat_activity WHERE datname='$1' AND wait_event_type='Lock'" \
+    2>/dev/null | tr -d '[:space:]'
+}
 
 # ---------------------------------------------------------------- 起栈
 echo "==> [1/4] 起两套栈（run.sh --serve-only，复用既有编排）"
 mkdir -p "$LOGS"
-"$HERE/run.sh" --serve-only >"$LOGS/exp-b1-serve.log" 2>&1 &
+# EXP_NO_BUILD=1 跳过重建 jar。改 run.sh / 本脚本都不改变 jar 产物，
+# 实验迭代时能省 ~90s；只有改过 Java 代码或产物缺失时才不要用。
+SERVE_ARGS=(--serve-only)
+[[ "${EXP_NO_BUILD:-0}" == "1" ]] && SERVE_ARGS+=(--no-build)
+"$HERE/run.sh" "${SERVE_ARGS[@]}" >"$LOGS/exp-b1-serve.log" 2>&1 &
 SERVE_PID=$!
 
 for _ in $(seq 1 180); do
@@ -103,38 +127,70 @@ echo
 
 probe() {  # label, db, url, path
   local label=$1 db=$2 url=$3 path=$4
-  # 该库中正在等锁的查询数（wait_event_type='Lock'）
-  local before after
-  before=$(docker exec difftest-postgres psql -U "$PG_U" -d "$db" -qAt \
-    -c "SELECT count(*) FROM pg_stat_activity WHERE datname='$db' AND wait_event_type='Lock'")
+  local before
+  before=$(pg_lock_count "$db")
+  echo "  [$label] 发起前该库等锁查询数 = $before"
 
-  local t0 t1 body
+  # curl 放后台：主线程同步采样 PG，这样「客户端在飞」和「PG 查询生死」
+  # 落在同一条时间轴上，而不是先后测两个量再靠猜拼起来。
+  local out; out=$(mktemp)
+  local t0 t1
   t0=$(now_ms)
-  body=$(curl -s -m 30 -X POST "$url$path" -H 'Content-Type: application/json' \
-         -d "{\"username\":\"$USERNAME\",\"password\":\"$PASSWORD\"}" 2>/dev/null)
-  t1=$(now_ms)
-  local client_ms=$(( t1 - t0 ))
+  ( curl -s -m 30 -X POST "$url$path" -H 'Content-Type: application/json' \
+         -d "{\"username\":\"$USERNAME\",\"password\":\"$PASSWORD\"}" >"$out" 2>/dev/null ) &
+  local cpid=$!
 
-  # 客户端返回后，连采几次看查询多久才从 pg_stat_activity 消失
-  local vanished_at="未见消失(>15000ms)"
-  for _ in $(seq 1 40); do
+  # ---- 请求在飞期间：逐次采样
+  while kill -0 "$cpid" 2>/dev/null; do
+    printf '  [%s] %s  等锁明细: %s\n' "$label" "$(stamp)" "$(pg_lock_rows "$db")"
     sleep 0.25
-    local now
-    now=$(docker exec difftest-postgres psql -U "$PG_U" -d "$db" -qAt \
-      -c "SELECT count(*) FROM pg_stat_activity WHERE datname='$db' AND wait_event_type='Lock'")
+  done
+  wait "$cpid" 2>/dev/null
+  t1=$(now_ms)
+  printf '  [%s] %s  ← 客户端此刻返回（耗时 %sms），等锁明细: %s\n' \
+         "$label" "$(stamp)" "$(( t1 - t0 ))" "$(pg_lock_rows "$db")"
+
+  # ---- 请求返回后：继续采样到查询消失
+  local vanished_at="未见消失(>10000ms)"
+  local now
+  for _ in $(seq 1 40); do
+    now=$(pg_lock_count "$db")
     if [[ "$now" -lt "$before" || "$now" == "0" ]]; then
       vanished_at="$(( $(now_ms) - t1 ))ms"
       break
     fi
+    printf '  [%s] %s  等锁明细: %s\n' "$label" "$(stamp)" "$(pg_lock_rows "$db")"
+    sleep 0.25
   done
 
-  printf '%-8s 客户端返回 %sms   响应体=%s\n' "$label" "$client_ms" "$(echo "$body" | head -c 90)"
-  printf '%-8s 客户端返回后，PG 里的阻塞查询又存活了 %s\n' "" "$vanished_at"
+  printf '%-5s 客户端返回 %sms   响应体=%s\n' "$label" "$(( t1 - t0 ))" "$(head -c 100 "$out")"
+  printf '%-5s 客户端返回后，PG 里的阻塞查询又存活了 %s\n' "" "$vanished_at"
+  rm -f "$out"
 }
 
 probe "Go"  go_db  http://127.0.0.1:18888 /usercenter/v1/user/login
 echo
 probe "RAG" rag_db http://127.0.0.1:59900 /user/v1/login
+
+# ---------------------------------------------------------------- 异常形态
+# 用户 2026-10-21 拍板「先不定性映射，先把观察到的异常形态记下来」。
+# setQueryTimeout 生效时，pgjdbc 会抛 PSQLException(57014 query_canceled)，
+# 它在 worker 线程上冒泡（客户端早已收到 DEADLINE_EXCEEDED），
+# 最终被业务层的 catch (Exception) 接住 —— 这里把真实形态抓出来备查。
+echo
+echo "---- RAG worker 线程的业务起止时刻（business_info / business_error）----"
+echo "     用来把 worker 生命周期和上面那条时间轴对齐 —— 客户端返回、"
+echo "     PG 查询消失、worker 退出是三件不同的事，历史上在这里混错过。"
+grep -hE "business_(info|error)|login RPC failed" "$LOGS/rag-user-rpc.log" 2>/dev/null \
+  | cut -c1-120 | tail -6 | sed 's/^/  /' \
+  || echo "  （日志里没有匹配行）"
+
+echo
+echo "---- RAG rpc 侧日志里的取消 / 超时相关行（供定性用，暂不映射）----"
+grep -hiE "cancel|timeout|deadline|57014|query_canceled|SQLException" \
+     "$LOGS/rag-user-rpc.log" 2>/dev/null | tail -12 \
+  | sed 's/^/  /' || echo "  （日志里没有匹配行）"
+echo "----（以上是 worker 线程的真实异常形态；客户端侧早已返回，不影响客户端）----"
 
 echo
 echo "======================================================================"
@@ -144,4 +200,11 @@ echo "  RpcInterceptor 的 catch(TimeoutException) 是【立即】返回 DEADLIN
 echo "  不等 worker 退出。"
 echo "  真正的差异在第二行：Go 的 PG 查询应当【立刻】消失（ctx cancel 触达 PG），"
 echo "  RAG 的应当【继续存活】到持锁事务释放为止（JDBC 不响应线程 interrupt）。"
+echo
+echo "  EXP_RAG_QUERY_TIMEOUT 组（run.sh 注入 mybatis-plus.configuration."
+echo "  default-statement-timeout=N）的额外判据 —— 两条**同时**成立才算生效："
+echo "    ① RAG 的「PG 阻塞查询又存活了」应当 ≪ ${LOCK_SECONDS}s（被 CancelRequest 掐掉）；"
+echo "    ② 上面 grep 段应当捞到 57014 / query_canceled 行。"
+echo "  ⚠️ 只满足 ① 不算证据充分（也可能是锁自己先释放了）；"
+echo "     只满足 ② 也不够（异常可能来自别的语句）。必须两条一起看。"
 echo "======================================================================"

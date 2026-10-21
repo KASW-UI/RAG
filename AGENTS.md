@@ -116,16 +116,38 @@ RAG 每次选择「用更地道的 Spring 写法」时，必须能回答：
 
 **不得凭注解名称断定机制已启用。** Spring Boot 的隐式机制（`@Transactional` AOP 代理、`@ResponseBodyAdvice`、`mybatis-plus` 的 typeHandler）全部是运行期动态装配，出错时**不报错**。
 
-已实证的三类静默失效：
+已实证的四类静默失效：
 
 | 机制 | 静默失效形态 |
 |---|---|
 | `@Transactional` | self-invocation 不经代理 → 注解形同虚设，且**无任何异常** |
 | `@ResponseBodyAdvice` | `HttpEntityMethodProcessor` 继承 `writeWithMessageConverters` 并查询 advice chain → 连 `@ExceptionHandler` 返回的 `ResponseEntity` 也会被二次包裹 |
 | `@TableField(typeHandler=…)` | 只对 MP 自己生成的 SQL 生效；`LambdaUpdateWrapper.set()` 的参数走 `ew.paramNameValuePairs`，**丢掉字段类型信息** |
+| **命令行注入的配置属性** | 前缀写错 ⇒ 落到**不存在的** `@ConfigurationProperties` ⇒ Spring Boot 对未知命令行属性**静默接受** |
+
+**第四类的完整经过（2026-10-21，B-1 实验）**：为验证 `setQueryTimeout` 能否缓解 B-1，
+`run.sh` 注入 `--mybatis.configuration.default-statement-timeout=2`。**前缀错了** ——
+MyBatis-Plus 的前缀是 `mybatis-plus`（`MybatisPlusProperties`），全仓**没有**任何
+`@ConfigurationProperties(prefix="mybatis")`。结果：启动无 warn、无报错、jar 正常起、
+**PG 阻塞查询照旧存活 4.5s，效果恒为零**。改对前缀后同一实验立刻出效果。
+
+> 绑定链路本身是通的、已逐段核实，**不要**误判成「MP 不支持该属性」：
+> `--mybatis-plus.configuration.default-statement-timeout=2`
+> → `MybatisPlusProperties$CoreConfiguration.defaultStatementTimeout`（`Integer`，有 getter+setter）
+> → `MybatisPlusAutoConfiguration.applyConfiguration()` 调 `CoreConfiguration.applyTo(MybatisConfiguration)` 搬运
+> → `MybatisConfiguration.defaultStatementTimeout`
+> → MyBatis `BaseStatementHandler` 调 `statement.setQueryTimeout(int)`
+> → pgjdbc `StatementCancelTimerTask` → 向 PG 发 **CancelRequest**。
+> 另外 `user-rpc/application.yaml` 里 `mybatis-plus.configuration.map-underscore-to-camel-case`
+> 一直生效（否则实体映射全崩），本身就是「`configuration` 子块绑定正常」的现成旁证。
 
 **规则**：凡引入新的框架机制，必须配一条**能真正触发该机制**的测试。
 纯 Mockito mock 数据层的单测**不算**——它不会执行 SQL，也不会装配 Spring 上下文，天然测不到本节三类问题。
+
+**规则（2026-10-21 补）**：判断「一个注入/开关有没有真生效」**不能看启动日志**——
+本节第四类里，注入点的 echo 照打、jar 照起、日志零告警，效果却是零。
+唯一可靠的判据是**运行时证据**（本例是 PG 侧是否出现 `57014 query_canceled`）。
+凡是「注入后实测无变化」的结论，一律先怀疑注入本身没到位，再怀疑机制无效。
 
 ### 3.4 已知偏离（有意为之，需留档）
 
@@ -241,7 +263,7 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 | **Go 对应** | `context.WithTimeout(ctx, timeout)` 的 `ctx.Done()`：每个 Logic 入口 / 关键步骤前的 select |
 | **覆盖情况（2026-10-21 实测）** | `UserDomainService` **11 处**（login/register/update/selectavatar/uploadavatar 等主路径）；`AdminDomainService` 此前 **0 处**，本轮已补到 **13 处**（admin-api 对 admin-rpc 的全部业务调用） |
 | **回归网** | `AdminDomainServiceDeadlineTest`（2 条，13 方法逐个拦 + 反向放行）。**已实证能真红**：删掉 3 处守卫后立刻报 `NullPointer ... metrics is null` —— 即请求走到了业务层、守卫没生效 |
-| **⚠️ 它不能做什么** | **不能取消在途 IO**。E-4 实测：客户端已返回超时后，RAG 侧 PG 里的阻塞查询还存活 **4455ms**（Go 侧仅 378ms）。JDBC 驱动不响应线程 interrupt，这是 Java 侧的结构性限制，属 §3.4.1 B-1，**不是 DRIFT-018 能修的** |
+| **⚠️ 它不能做什么** | **不能取消在途 IO**。E-4 实测（同日同场复测）：客户端已返回超时后，RAG 侧 PG 里的阻塞查询还存活 **4657ms**（Go 侧仅 203ms），worker 比客户端返回晚 4.34s 才退出。JDBC 驱动不响应线程 interrupt，这是 Java 侧的结构性限制，属 §3.4.1 B-1，**不是 DRIFT-018 能修的**。补充：`setQueryTimeout` 可缓解（B-1 补记第二层），但**不能靠补 `checkDeadline` 关闭 B-1** |
 
 > **为什么单独记这一条**：它说明了 §6.2.6 E-4 那类缺口的典型形态 ——
 > **「框架限制」与「业务侧主动响应」是两件不同的事**，前者改不了，后者能做但容易漏做。
@@ -315,7 +337,60 @@ Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 R
 
 | # | 位置 | 差异 | 影响面 | 关闭条件 |
 |---|---|---|---|---|
-| B-1 | `HttpMiddleware` 超时分支 / `RpcInterceptor` 超时调度 | **超时无法取消在途 IO**。Go 的 `context.WithTimeout` 到点 ctx Done，所有 ctx-aware IO（`http.Client` / `sql.DB` / `grpc.Dial`）立即返回、连接池立刻释放；Java 只能 `Future.cancel(true)` 发 `InterruptedException`，而 **JDBC 驱动、grpc-java 阻塞 stub、`java.net.http.HttpClient` 均不响应线程 interrupt** —— 阻塞在 socket read 上的调用会挂到查询自行结束 | **已实测坐实（E-4，2026-10-21）**：`tools/difftest/exp-b1-timeout-cancel.sh` 用 ACCESS EXCLUSIVE 表锁造真阻塞，两侧同跑 `user.login`。客户端返回超时后，**Go 侧 PG 里的阻塞查询 378ms 就消失、RAG 侧还存活 4455ms**（持锁事务释放为止）；客户端感知时延 Go 2035ms vs RAG 3047ms。数据与判读见 §6.2.6 E-4。**⚠️ 原留档写「当前 `user-rpc` 一处都未使用 `DeadlineState`」——该句已过时**：user-rpc 实有 **11 处** `checkDeadline()`（代码注释标 DRIFT-018），本轮已把 **admin-rpc 从 0 处补到 13 处**。 但 `checkDeadline` 只能避免**发起**新的慢查询，**对在途 IO 无能为力** —— 这正是 E-4 实测的结论 | **无法靠改 `service/common` 关闭**（Java 侧数据访问栈的结构性限制）。**字节码级证据（2026-10-21）**：链路是 MyBatis-Plus → MyBatis 执行器 → Spring JDBC → pgjdbc → socket，逐层 `javap -c` 数 `isInterrupted` 命中数为 **MyBatis `BaseExecutor` 0 次 / `SimpleExecutor` 0 次 / pgjdbc 42.6.2 `QueryExecutorImpl` 0 次** —— 即 `Future.cancel(true)` 发的 interrupt **在整条数据访问路径上没有任何一层检查**，不是「JDBC 驱动这一层不响应」而是**全链路都无检查**。可选缓解：给 JDBC 设 `socketTimeout` / `Statement.setQueryTimeout`（pgjdbc 支持，会主动发 CancelRequest）—— **本轮未做，待评估** |
+| B-1 | `HttpMiddleware` 超时分支 / `RpcInterceptor` 超时调度 | **超时无法取消在途 IO**。Go 的 `context.WithTimeout` 到点 ctx Done，所有 ctx-aware IO（`http.Client` / `sql.DB` / `grpc.Dial`）立即返回、连接池立刻释放；Java 只能 `Future.cancel(true)` 发 `InterruptedException`，而 **JDBC 驱动、grpc-java 阻塞 stub、`java.net.http.HttpClient` 均不响应线程 interrupt** —— 阻塞在 socket read 上的调用会挂到查询自行结束 | **已实测坐实（E-4，2026-10-21）**：`tools/difftest/exp-b1-timeout-cancel.sh` 用 ACCESS EXCLUSIVE 表锁造真阻塞，两侧同跑 `user.login`。客户端返回超时后，**Go 侧 PG 里的阻塞查询 378ms 就消失、RAG 侧还存活 4455ms**（持锁事务释放为止）；客户端感知时延 Go 2035ms vs RAG 3047ms。数据与判读见 §6.2.6 E-4。**⚠️ 原留档写「当前 `user-rpc` 一处都未使用 `DeadlineState`」——该句已过时**：user-rpc 实有 **11 处** `checkDeadline()`（代码注释标 DRIFT-018），本轮已把 **admin-rpc 从 0 处补到 13 处**。 但 `checkDeadline` 只能避免**发起**新的慢查询，**对在途 IO 无能为力** —— 这正是 E-4 实测的结论。**⚠️ 本行的两组时长数字已被同日同场复测修正，见下方 B-1 补记** | **无法靠改 `service/common` 关闭**（Java 侧数据访问栈的结构性限制）。**① 字节码级证据**：链路是 MyBatis-Plus → MyBatis 执行器 → Spring JDBC → pgjdbc → socket，逐层 `javap -c` 数 `isInterrupted` 命中数为 **MyBatis `BaseExecutor` 0 次 / `SimpleExecutor` 0 次 / pgjdbc 42.6.2 `QueryExecutorImpl` 0 次** —— 即 `Future.cancel(true)` 发的 interrupt **在整条数据访问路径上没有任何一层检查**。**② 行为级证据（本轮新增，`tools/difftest/probe-jdbc-cancel.java`）**：绕开 HTTP/gRPC/MyBatis 直连 PG，主动 interrupt 一条等锁查询，结果**照常正常返回、耗时 11014ms**（比不 interrupt 的 10022ms 还长 1s）⇒ 静态证据升级为运行时行为证据。**③ 缓解手段已实测**：见下方 B-1 补记，`setQueryTimeout` 有效、`socketTimeout` 不可用 |
+
+##### B-1 补记：机制实验与缓解手段定性（2026-10-21 同日同场三组对照）
+
+B-1 上方的时长数字取自首轮实验。本轮把它拆成三层各测一遍，**结论有实质修正**，此前数字一并更正。
+
+**第一层 —— 纯 JDBC 机制层（`tools/difftest/probe-jdbc-cancel.java`，绕开 HTTP/gRPC/MyBatis）**
+ACCESS EXCLUSIVE 表锁持 10s，三组对照：
+
+| mode | 结果 | 耗时 |
+|---|---|---|
+| `none` | ✅ 正常返回（阻塞到锁释放） | 10022ms |
+| `qto:2` | ❌ **`SQLState=57014`** `canceling statement due to user request` | **2034ms** |
+| `interrupt` | ✅ 正常返回 —— **interrupt 零效果** | 11014ms |
+
+⇒ interrupt 组比 none 组还慢 1s（interrupt 就发生在 1000ms 处），说明 interrupt **连让查询稍早返回都没做到**。B-1 由此从「字节码推断」升级为「行为实测」。
+
+**第二层 —— 同日同场端到端对照（`exp-b1-timeout-cancel.sh`，21:03 一场连跑基线与注入两组）**
+
+| | 客户端返回 | 响应体 | PG 查询总寿命 | 客户端返回后又存活 |
+|---|---|---|---|---|
+| **Go**（基线） | 2190ms | `{"code":1015,"msg":"服务繁忙"}` | ~2.2s | 203ms |
+| **RAG 基线** | 3174ms | `text/plain "Request Timeout"` | **~7.4s** | **4657ms** |
+| **RAG 注入 `default-statement-timeout=2`** | 2449ms | `{"code":5001,"msg":"系统内部错误"}` | ~2.06s | 193ms |
+
+⇒ 注入组 RAG 与 Go 已同量级（worker `business_error` 落在请求发起 +2.06s，与设定值吻合）。
+基线组的 RAG 查询 `pid=113 query_start=21:03:15.203` 一直活到 `21:03:22.600`，而 worker `business_error` 在 `21:03:22.722` —— **worker 是在查询真正结束后才退出的**，比客户端返回（21:03:18.382）晚了 4.34s。
+
+> **⚠️ 本次差点踩的坑：把日志里相邻两行当成同一次请求。**
+> 首轮观测出现「客户端 2121ms 返回 / 查询 398ms 消失 / worker 却 6860ms 后才结束」的「三方矛盾」，
+> 追了很久。真相是：`business_info` 那一行属于 **[2/4] 阶段的注册请求**，
+> `business_error` 才是本轮 login 的 —— 中间隔着整段 Go 探测，**根本不是同一次调用**。
+> **纪律**：任何靠日志两行之差推断耗时的读数，必须先确认两行属于**同一次请求**
+> （本例靠 worker 侧 span 名 / 请求内容区分），否则该读数不可用。
+> 这与 N-3/N-6「留档声称的行为从未存在过」同类：**先证伪读数，再谈结论**。
+
+**第三层 —— 缓解手段定性**
+
+| 手段 | 实现 | 超时后果 | 与 Go 是否等价 |
+|---|---|---|---|
+| **`Statement.setQueryTimeout`** | pgjdbc 起 `StatementCancelTimerTask` → 发 **CancelRequest** | 查询停止，**连接保持可用** | ✅ 等价 Go 的 ctx cancel |
+| `socketTimeout` | `PGStream.setSocketTimeout` → `Socket.setSoTimeout` | socket 读超时 → **连接报废** | ❌ 语义相反，会污染连接池 |
+
+⇒ **只能用 `setQueryTimeout`，不能用 `socketTimeout`。**
+生产落地方式（**尚未实施，待用户拍板**）：在 MyBatis `StatementHandler` 拦截器里按
+`DeadlineState.remainingMillis()` 逐请求 `setQueryTimeout(ceil(rem/1000))`，而不是设一个全局静态值。
+
+> **⚠️ 但全局静态注入会顺带把错误映射改坏**（上表第三行的 5001 就是）。
+> SQL 超时抛的是 `PSQLException(57014)`，会被 `UserDomainService.login` 的
+> `catch (Exception e)` 吞掉并转成 `Status.INTERNAL("DB查询失败")` ⇒ api 层渲染 `5001`。
+> 三种形态互不相同，且**注入后反而离 Go 更远**：
+> Go `{"code":1015,"msg":"服务繁忙"}` / RAG 基线 `text/plain "Request Timeout"` / RAG 注入 `{"code":5001}`。
+> ⇒ 生产方案必须**同时**做两件事：per-request 注入 + 识别 `57014` 并映射为 `DEADLINE_EXCEEDED`。
+> 只做前者会把一个 wire 差异换成另一个。
 
 ##### C. 表述差异（语义已对齐，仅字面不同，无需签字）
 
@@ -937,7 +1012,7 @@ SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `t
 | **E-1** | **difftest 有 13/39 步只比状态码、不比 body** | `diff.py:41` 的 `KNOWN_STATUS_ONLY` 白名单（13 条：6 条 N-1 鉴权、2 条畸形 JSON、1 条 `user.delete`、4 条必填校验）。判定逻辑在 `diff.py:554` | 逐条判断 body 是否已可逐字比对。**DRIFT-NEW-016 对齐后那 4 条本应可比对**（两侧都产出 `field "xxx" is not set\n`），仍留在白名单属历史遗留；改它需要先让 `diff_json` 支持 `text/plain` |
 | **E-2** | **gRPC 层没有直接对拍** | difftest 是 HTTP wire 层。proto 字段号、错误码语义、rpc 边界只能**通过 HTTP 结果间接推断** | 起两套 gRPC server，用同一个 client 分别打 Go / RAG 的 rpc，比对响应字节。§3.1 明确要求覆盖的「proto 字段号 / message 名称 / 错误码语义」目前**没有逐条验证** |
 | **E-3** | **39 步不是状态空间穷举** | 是「每个端点一个典型场景」，22 个端点全覆盖，但每端点只跑了 1–3 条路径 | 边界组合（字段全缺 / 部分缺 / 类型错 / 超长 / 特殊字符）需要按 DTO 笛卡尔展开 |
-| **E-4** | **超时路径 —— 已于 2026-10-21 实测坐实，见下方专节** | ~~零覆盖~~ → 已有数据。**这是 B-1 的运行证据**，此前只有静态分析 | ✅ 已补（`tools/difftest/exp-b1-timeout-cancel.sh`） |
+| **E-4** | **超时路径 —— 已于 2026-10-21 实测坐实，见下方专节** | ~~零覆盖~~ → 已有数据。**这是 B-1 的运行证据**，此前只有静态分析 | ✅ 已补（`exp-b1-timeout-cancel.sh` 端到端 + `probe-jdbc-cancel.java` 纯 JDBC 机制层，三层拆解见 §3.4.1「B-1 补记」） |
 | **E-5** | **并发路径零覆盖** | 同用户名并发注册、同用户并发改/删/封禁，全部未测。Go 侧靠 GORM 事务 + 行锁，RAG 侧靠 `@Transactional` + 可能的 `FOR UPDATE` | 两侧同时发 N 个并发请求，比对最终数据与错误码分布 |
 | **E-6** | **事务异常回滚只测了 `user-rpc`** | `AvatarTransactionWiringTest`（真 PG）证明了 W3 撞 `UNIQUE(history_id)` 时 W2 的 `clearCurrent` 被回滚。但 `admin-rpc` 侧**没有**同级验证，service/common 的 20 项偏差也没有一条跑在真 PG 上 | 按 admin 侧的写路径逐个造「中间步失败」的真 PG 场景 |
 
@@ -956,28 +1031,58 @@ SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `t
 > 同一次还踩了两个：`psql "SQL"` 会把 SQL 当成 **dbname**（静默失败、输出空），
 > 必须走 `-c`；Go 库的表名是 `users`（GORM 默认名）而 RAG 是 `users_user`（§3.4 wire 契约偏离）。
 
-**数据**（持锁 12s；两侧各自的用户表上各挂一个 ACCESS EXCLUSIVE 事务）：
+**数据**（持锁 12s；两侧各自的用户表上各挂一个 ACCESS EXCLUSIVE 事务）。
+**以下是 21:03 同日同场连跑「基线 + 注入」两组的复测值**；首轮曾测得 Go `2035ms/378ms`、
+RAG `3047ms/4455ms`，量级一致、可复现，**但以复测值为准**：
 
 | | 客户端返回耗时 | 响应体 | **客户端返回后，PG 里的阻塞查询又存活** |
 |---|---|---|---|
-| **Go** | **2035ms** | `200 + {"code":1015,"msg":"服务繁忙"}` | **378ms** |
-| **RAG** | **3047ms** | `Request Timeout`（`text/plain`） | **4455ms** |
+| **Go**（基线） | 2190ms | `200 + {"code":1015,"msg":"服务繁忙"}` | 203ms |
+| **RAG 基线** | 3174ms | `Request Timeout`（`text/plain`） | **4657ms** |
+| **RAG 注入 `default-statement-timeout=2`** | 2449ms | `{"code":5001,"msg":"系统内部错误"}` | 193ms |
+
+> 第三行是 B-1 缓解实验，**该机制的三层拆解（纯 JDBC / 端到端 / 手段定性）见 §3.4.1「B-1 补记」**。
+> 一句话：注入组把 RAG 的「查询又存活 4657ms」压到 193ms，与 Go 同量级；
+> 但错误体从 `text/plain` 变成了 `5001`，**离 Go 更远** ⇒ 生产方案不能只做注入，还必须做异常映射。
+
+**观测方法的坑（2026-10-21 记录，值得单独记）**：探针最早只统计
+`count(*) WHERE wait_event_type='Lock'`，并在 count 掉到 0 时判定「查询消失」。
+这个判据太弱 —— 一次实验就撞出「客户端 2121ms 返回 / 查询 398ms 消失 / worker 却 6860ms 后结束」
+的**伪矛盾**。真相是日志里 `business_info` 那一行属于**上一个请求**（[2/4] 阶段的注册），
+不是本次 login。**现在探针改为打印完整明细 `pid:state:wait_event_type:query_start` 并逐次打时间戳**，
+且新增「worker 业务起止时刻」一节与该时间轴对齐 —— 客户端返回 / PG 查询消失 / worker 退出
+是三件不同的事，**混在一起量必然读错**。
 
 **判读（三个可观测差异，同一个根因）**：
 
-1. **② PG 查询存活时长 = B-1 的核心**。Go 的 ctx cancel 触达 PG、查询立刻消失（378ms）；
-   RAG 的 `cancel(true)` 发不到 JDBC，查询一直挂到持锁事务释放（4455ms）。
-   静态分析预言的「Java 可能占用到 10s」，实测是「**客户端已返回超时、底层连接仍被占 4.5 秒**」。
+1. **② PG 查询存活时长 = B-1 的核心**。Go 的 ctx cancel 触达 PG、查询立刻消失（203ms）；
+   RAG 的 `cancel(true)` 发不到 JDBC，查询一直挂到持锁事务释放（4657ms）。
+   静态分析预言的「Java 可能占用到 10s」，实测是「**客户端已返回超时、底层连接仍被占 4.7 秒**」。
+   复测还额外确认：**worker 比客户端返回晚 4.34s 才退出** —— 线程池里这段时间一直占着。
 
 2. **① 客户端感知时延差 ~1 秒，且是同一个根因的另一个面**。
-   Go：内层 rpc 2s 超时 → ctx cancel 真的让 PG 返回 → 外层立刻收到 → 总计 2035ms。
-   RAG：内层 2s 的 `cancel(true)` **外层感知不到**，拖到自己的 http-timeout 3s 才返回。
+   Go：内层 rpc 2s 超时 → ctx cancel 真的让 PG 返回 → 外层立刻收到 → 总计 2190ms。
+   RAG：内层 2s 的 `cancel(true)` **外层感知不到**，拖到自己的 http-timeout 3s 才返回（3174ms）。
    ⇒ **内层超时不生效 ⇒ 外层多等 1 秒**，不是两个独立问题。
+   ⚠️ 注入组反向印证：一旦内层 SQL 真在 2s 被取消，RAG 客户端耗时从 3174ms **回落到 2449ms**，
+   差值消失 —— 这条判读被实验闭环了。
 
 3. **③ 响应体形状不同**（Go `200 + envelope{code:1015}` vs RAG `text/plain`）。
    这是 ① 的下游后果，但**它是一个独立的 wire 差异，且此前从未被对拍过**
    （difftest 的 39 步里没有任何超时场景）。**新发现，尚未定性** ——
    需先确认 `HttpMiddleware` 的超时应不应该对齐 Go 的 envelope 表达，再决定改还是留档。
+
+   > **⚠️ 定性时必须连同注入组一起看，否则会选错方案**。三种形态实测如下，
+   > 它们**不是同一个问题的三种写法**，而是两条不同路径的产物：
+   >
+   > | 场景 | 响应体 | 由哪条路径产出 |
+   > |---|---|---|
+   > | Go | `{"code":1015,"msg":"服务繁忙"}` | rpc 超时 → ctx cancel |
+   > | RAG 基线 | `text/plain "Request Timeout"` | `HttpMiddleware` 超时分支 |
+   > | RAG 注入 `setQueryTimeout` | `{"code":5001,"msg":"系统内部错误"}` | SQL 抛 57014 → 被 `catch (Exception e)` 吞成 `Status.INTERNAL` |
+   >
+   > ⇒ **只做「注入超时」这一个动作，会把这个 wire 差异换成另一个，而且离 Go 更远。**
+   > 任何 B-1 缓解方案都必须同时处理 57014 → `DEADLINE_EXCEEDED` 的映射。
 
 **复现**：`cd tools/difftest && ./exp-b1-timeout-cancel.sh`（自带 `--serve-only` 起栈与收摊）。
 
@@ -986,6 +1091,19 @@ SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `t
 即这条不是「框架大概不响应 interrupt」的推测，而是**整条路径上没有任何一层检查中断标志**。
 注意「RAG 侧 MyBatis-Plus」这个上层 ORM 换成什么都不会改变结论 ——
 **只要底层还是 JDBC socket，就是同一个限制**。
+
+**⚠️ 但字节码仍是「静态证据」，2026-10-21 已补上行为级证据**（`tools/difftest/probe-jdbc-cancel.java`）：
+绕开 HTTP / gRPC / MyBatis 直连 PG，用 `ACCESS EXCLUSIVE` 锁造阻塞，
+在查询跑到 1000ms 时对该线程 `interrupt()`：
+
+| mode | 结果 | 耗时 |
+|---|---|---|
+| `none` | ✅ 正常返回（阻塞到锁释放） | 10022ms |
+| `interrupt` | ✅ **正常返回 —— interrupt 零效果** | 11014ms |
+
+⇒ `interrupt` 组比 `none` 组**还慢 1s**（interrupt 就发生在 1000ms 处），
+说明它连「让查询稍早返回」都没做到。**这才是 B-1 的直接运行证据**，
+字节码只是佐证。复现：`cd tools/difftest && java -cp <pgjdbc> probe-jdbc-cancel.java interrupt`（约 10s）。
 
 > **这三条为什么是「缺口」而不是「缺陷」**：E-4 的根因 B-1 是**已知且已签字**的框架限制
 > （Java 线程 interrupt 不被 JDBC / grpc-java / HttpClient 响应），它需要的是**业务侧主动响应**
@@ -1099,7 +1217,11 @@ s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, obser
 
 **残留差异**不在本节重复维护，统一见 **§3.4.1**（按「有意偏离 / 框架限制 / 表述差异 / UNRESOLVED」四类分列，每条带关闭条件）。
 
-其中本轮新增、值得单独强调的一条：**B-1 超时无法取消在途 IO**。它在本轮之前是潜伏的（timeout 为 `ZERO`，分支从不进入），按 Go 的 3s/2s 打开超时后转为**当前生效**，且 `user-rpc` 业务侧一处都未主动响应取消。
+其中本轮新增、值得单独强调的一条：**B-1 超时无法取消在途 IO**。它在本轮之前是潜伏的（timeout 为 `ZERO`，分支从不进入），按 Go 的 3s/2s 打开超时后转为**当前生效**。
+⚠️ 本行末句「`user-rpc` 业务侧一处都未主动响应取消」**已被 §3.4.4 的 DRIFT-018 登记推翻**
+（`user-rpc` 实有 11 处、`admin-rpc` 已补到 13 处 `checkDeadline()`），
+且 2026-10-21 的机制实验证明 **`checkDeadline` 对在途 IO 无效、缓解手段是 `setQueryTimeout`** ——
+完整结论与数据见 §3.4.1「B-1 补记」。
 
 另一条：Snowflake 时钟回拨**照搬 bwmarrin v0.3.0 的无保护行为**，继承其「回拨可能撞 ID」的风险。RAG 不擅自加保护（加了即与 Go 不等价），若要加须单独立项。
 

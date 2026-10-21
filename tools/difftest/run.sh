@@ -174,10 +174,37 @@ echo "==> [4/5] 启动 RAG 栈（独占端口 59210/58081/59900/58889；gRPC 走
 #
 # POSTGRES_DB 两侧同为 rag_db：admin-rpc 必须能看见 users_user，
 # 否则 getuser/banuser/unbanuser/resetuserpassword/updateuser/delete 全返回「用户不存在」。
+#
+# 【B-1 实验开关】EXP_RAG_QUERY_TIMEOUT=2 时给 RAG 的 rpc 侧注入
+# mybatis-plus.configuration.default-statement-timeout（单位：秒）。
+# 作用：让 pgjdbc 起 StatementCancelTimerTask → 到点向 PG 发
+# CancelRequest，用来验证 setQueryTimeout 对 B-1（超时不能取消
+# 在途 IO）的实际缓解效果。
+# **默认不设** —— 不设时数组为空，生产配置不受影响。
+# 只是单纯的实验注入点，不是生产方案（生产该用
+# DeadlineState.remainingMillis() 注入 per-request 值，待实验结果决定）。
+#
+# ⚠️ 前缀必须是 mybatis-plus，不能写 mybatis（§3.3「不报错的隐式失效」）：
+#   MyBatis-Plus 的 @ConfigurationProperties 前缀是 "mybatis-plus"
+#   （javap: MybatisPlusProperties，字段 configuration 的类型是
+#     MybatisPlusProperties$CoreConfiguration，继承 MyBatis Configuration，
+#     其上有 defaultStatementTimeout: Integer 的 getter+setter，绑定链路通）。
+#   而**没有任何** @ConfigurationProperties(prefix="mybatis")。
+#   Spring Boot 对未知的命令行属性是【静默接受】的 —— 不打 warn、不报错、
+#   启动照常成功。第一版实验就栽在这：写成 --mybatis.configuration.*，
+#   注入点日志照打、jar 照起、PG 查询照旧存活 4.5s，**效果恒为零**。
+#   ⇒ 判断「开关有没有真生效」不能看启动日志，只能看运行时证据
+#     （本实验就是看 PG 侧有没有 57014 query_canceled）。
+QTO_ARG=()
+if [[ -n "${EXP_RAG_QUERY_TIMEOUT:-}" ]]; then
+  QTO_ARG=(--mybatis-plus.configuration.default-statement-timeout="$EXP_RAG_QUERY_TIMEOUT")
+  echo "  · B-1 实验：rpc 侧注入 mybatis-plus.configuration.default-statement-timeout=${EXP_RAG_QUERY_TIMEOUT}s"
+fi
+
 POSTGRES_DB=rag_db GRPC_SERVER_PORT=59210 \
-  java -jar "$RUN_DIR/bin/user-rpc"  >"$LOGS/rag-user-rpc.log" 2>&1 & PIDS+=($!)
+  java -jar "$RUN_DIR/bin/user-rpc"  ${QTO_ARG[@]+"${QTO_ARG[@]}"} >"$LOGS/rag-user-rpc.log" 2>&1 & PIDS+=($!)
 POSTGRES_DB=rag_db GRPC_SERVER_PORT=58081 \
-  java -jar "$RUN_DIR/bin/admin-rpc" >"$LOGS/rag-admin-rpc.log" 2>&1 & PIDS+=($!)
+  java -jar "$RUN_DIR/bin/admin-rpc" ${QTO_ARG[@]+"${QTO_ARG[@]}"} >"$LOGS/rag-admin-rpc.log" 2>&1 & PIDS+=($!)
 sleep 20
 #
 # gRPC 下游地址用 `--` 命令行参数而不是环境变量：
