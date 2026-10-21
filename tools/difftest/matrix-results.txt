@@ -1,0 +1,97 @@
+E-3 DTO 边界矩阵 —— 9.2s  共 273 条   run_id=1792598425189
+端口 go={user:http://127.0.0.1:18888, admin:http://127.0.0.1:18889} rag={user:http://127.0.0.1:59900, admin:http://127.0.0.1:58889}
+
+  MATCH                   121
+  KNOWN_FORM_EMPTY          1
+  KNOWN_FRAMEWORK_TEXT     74
+  NEW_DRIFT                77
+
+  根因聚类:
+    R1    64  JSON 标量被 Jackson 静默强转/截断,Go 一律拒
+    R2     4  显式 null ≠ 字段缺席:Go 对 map 字段也判 null
+    R3     4  DDL 列宽:text vs varchar(255)
+    R4     5  分页越界:Go 的 GORM 静默抑制负 OFFSET/LIMIT,RAG 直传 PG
+
+── NEW_DRIFT 明细 ──
+  [R1] 64 条
+  user.register.Email.type_err_int               go=(400,text,None) rag=(200,envelope,1001)
+  user.register.Email.type_err_float             go=(400,text,None) rag=(200,envelope,1001)
+  user.register.Email.type_err_bool              go=(400,text,None) rag=(200,envelope,1001)
+  user.register.Password.type_err_int            go=(400,text,None) rag=(200,envelope,1001)
+  user.register.Password.type_err_float          go=(400,text,None) rag=(200,envelope,1001)
+  user.register.Password.type_err_bool           go=(400,text,None) rag=(200,envelope,1001)
+  user.register.Username.type_err_int            go=(400,text,None) rag=(200,envelope,5001)
+  user.register.Username.type_err_float          go=(400,text,None) rag=(200,envelope,5001)
+  user.register.Username.type_err_bool           go=(400,text,None) rag=(200,envelope,5001)
+  user.login.Password.type_err_int               go=(400,text,None) rag=(200,envelope,1002)
+  user.login.Password.type_err_float             go=(400,text,None) rag=(200,envelope,1002)
+  user.login.Password.type_err_bool              go=(400,text,None) rag=(200,envelope,1002)
+  user.login.Username.type_err_int               go=(400,text,None) rag=(200,envelope,1002)
+  user.login.Username.type_err_float             go=(400,text,None) rag=(200,envelope,1002)
+  user.login.Username.type_err_bool              go=(400,text,None) rag=(200,envelope,1002)
+  user.update.Email.type_err_int                 go=(400,text,None) rag=(200,envelope,1001)
+  user.update.Email.type_err_float               go=(400,text,None) rag=(200,envelope,1001)
+  user.update.Email.type_err_bool                go=(400,text,None) rag=(200,envelope,1001)
+  user.update.Password.type_err_int              go=(400,text,None) rag=(200,envelope,1001)
+  user.update.Password.type_err_float            go=(400,text,None) rag=(200,envelope,1001)
+  user.update.Password.type_err_bool             go=(400,text,None) rag=(200,envelope,1001)
+  user.update.Username.type_err_int              go=(400,text,None) rag=(200,envelope,200)
+  user.update.Username.type_err_float            go=(400,text,None) rag=(200,envelope,200)
+  user.update.Username.type_err_bool             go=(400,text,None) rag=(200,envelope,200)
+  admin.login.Password.type_err_int              go=(400,text,None) rag=(200,envelope,1002)
+  admin.login.Password.type_err_float            go=(400,text,None) rag=(200,envelope,1002)
+  admin.login.Password.type_err_bool             go=(400,text,None) rag=(200,envelope,1002)
+  admin.login.Username.type_err_int              go=(400,text,None) rag=(200,envelope,1003)
+  admin.login.Username.type_err_float            go=(400,text,None) rag=(200,envelope,1003)
+  admin.login.Username.type_err_bool             go=(400,text,None) rag=(200,envelope,1003)
+  admin.create.Email.type_err_int                go=(400,text,None) rag=(200,envelope,1016)
+  admin.create.Email.type_err_float              go=(400,text,None) rag=(200,envelope,1016)
+  admin.create.Email.type_err_bool               go=(400,text,None) rag=(200,envelope,1016)
+  admin.create.InviteCode.type_err_int           go=(400,text,None) rag=(200,envelope,1016)
+  admin.create.InviteCode.type_err_float         go=(400,text,None) rag=(200,envelope,1016)
+  admin.create.InviteCode.type_err_bool          go=(400,text,None) rag=(200,envelope,1016)
+  admin.create.Password.type_err_int             go=(400,text,None) rag=(200,envelope,1016)
+  admin.create.Password.type_err_float           go=(400,text,None) rag=(200,envelope,1016)
+  admin.create.Password.type_err_bool            go=(400,text,None) rag=(200,envelope,1016)
+  admin.create.Username.type_err_int             go=(400,text,None) rag=(200,envelope,1016)
+  admin.create.Username.type_err_float           go=(400,text,None) rag=(200,envelope,1016)
+  admin.create.Username.type_err_bool            go=(400,text,None) rag=(200,envelope,1016)
+  admin.update.Email.type_err_int                go=(400,text,None) rag=(200,envelope,200)
+  admin.update.Email.type_err_float              go=(400,text,None) rag=(200,envelope,200)
+  admin.update.Email.type_err_bool               go=(400,text,None) rag=(200,envelope,200)
+  admin.update.Password.type_err_int             go=(400,text,None) rag=(200,envelope,200)
+  admin.update.Password.type_err_float           go=(400,text,None) rag=(200,envelope,200)
+  admin.update.Password.type_err_bool            go=(400,text,None) rag=(200,envelope,200)
+  admin.update.Username.type_err_int             go=(400,text,None) rag=(200,envelope,200)
+  admin.update.Username.type_err_float           go=(400,text,None) rag=(200,envelope,200)
+  admin.update.Username.type_err_bool            go=(400,text,None) rag=(200,envelope,200)
+  admin.updateuser.Email.type_err_int            go=(400,text,None) rag=(200,envelope,1003)
+  admin.updateuser.Email.type_err_float          go=(400,text,None) rag=(200,envelope,1003)
+  admin.updateuser.Email.type_err_bool           go=(400,text,None) rag=(200,envelope,1003)
+  admin.updateuser.Password.type_err_int         go=(400,text,None) rag=(200,envelope,1003)
+  admin.updateuser.Password.type_err_float       go=(400,text,None) rag=(200,envelope,1003)
+  admin.updateuser.Password.type_err_bool        go=(400,text,None) rag=(200,envelope,1003)
+  admin.updateuser.Uid.type_err_float            go=(400,text,None) rag=(200,envelope,1003)
+  admin.updateuser.Username.type_err_int         go=(400,text,None) rag=(200,envelope,1003)
+  admin.updateuser.Username.type_err_float       go=(400,text,None) rag=(200,envelope,1003)
+  admin.updateuser.Username.type_err_bool        go=(400,text,None) rag=(200,envelope,1003)
+  admin.getuserlist.Page.type_err_float          go=(400,text,None) rag=(200,envelope,200)
+  admin.getuserlist.PageSize.type_err_float      go=(400,text,None) rag=(200,envelope,200)
+  admin.banuser.Uid.type_err_float               go=(400,text,None) rag=(200,envelope,1003)
+  [R2] 4 条
+  user.register.Extrainfo.null                   go=(400,text,None) rag=(200,envelope,1001)
+  admin.create.Extrainfo.null                    go=(400,text,None) rag=(200,envelope,1016)
+  admin.update.Extrainfo.null                    go=(400,text,None) rag=(200,envelope,200)
+  admin.updateuser.Extrainfo.null                go=(400,text,None) rag=(200,envelope,1003)
+  [R3] 4 条
+  user.update.Username.long5000                  go=(200,envelope,200) rag=(200,envelope,5001)
+  admin.create.Password.long5000                 go=(200,envelope,1016) rag=(200,envelope,5001)
+  admin.update.Email.long5000                    go=(200,envelope,200) rag=(200,envelope,5003)
+  admin.update.Username.long5000                 go=(200,envelope,200) rag=(200,envelope,5003)
+  [R4] 5 条
+  admin.getuserlist.Page.zero                    go=(200,envelope,200) rag=(200,envelope,5001)
+  admin.getuserlist.Page.negative                go=(200,envelope,200) rag=(200,envelope,5001)
+  admin.getuserlist.Page.i64_max                 go=(200,envelope,200) rag=(200,envelope,5001)
+  admin.getuserlist.PageSize.negative            go=(200,envelope,200) rag=(200,envelope,5001)
+  admin.getuserlist.PageSize.i64_max             go=(200,envelope,200) rag=(200,envelope,5001)
+

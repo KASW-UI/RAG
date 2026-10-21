@@ -390,6 +390,53 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 > 旧的 `blacklistCheckedBeforeSignatureVerification` 用「Redis 里有这条 key」当顺序判据，
 > 那条断言在任何实现下都成立，属于**假绿**。
 
+#### 3.4.5 `service/users` **DTO 边界矩阵**产出的 4 条未登记差异（2026-10-21，§6.2.6 **E-3**）
+
+按 DTO 逐字段展开边界组合（字段全缺 / 部分缺 / 类型错 / 超长 / 特殊字符 / 越界），
+Go 与 RAG 双端对拍 **273 条**。产出 **77 条 NEW_DRIFT**，全部收敛到 **4 个根因**，
+**UNCLASSIFIED = 0**（连续三次运行结果逐字一致）。复现：
+
+```bash
+./tools/difftest/run.sh --no-build --keep --serve-only   # 先起两套栈
+python3 tools/difftest/matrix.py          # 运行时半（273 条）
+python3 tools/difftest/check-ddl-static.py  # 静态半（R3 的 DDL 证据）
+```
+
+> **本节 4 条全部「尚未签字」**。按 §3.4.3 末尾那条纪律 —— 签字 + 防回退测试
+> **并不足以保证结论正确**（N-3 / N-6 都签了字、都有防回退测试，而行为从未存在过）——
+> 每条下面都只写**实测到的**行为，并附**独立于矩阵**的取证命令。
+> **未裁决前不要改 RAG 代码，也不要把它们当成「已知偏离」引用。**
+
+| # | 根因 | 实测现象 | Go 出处 | RAG 现状 |
+|---|---|---|---|---|
+| **R1** | **JSON 标量被 Jackson 静默强转 / 截断**（64 条） | `{"username":99999}`、`{"password":true}`：Go `400`；RAG `200`+业务码。`{"page":1.5}`：Go `400`；RAG **按 page=1 执行** | Go 走 `encoding/json` 的类型检查 / go-zero 的 `processNamedFieldWithValueFromString`（先字符串化再 `strconv.ParseInt`） | 字段是 Java `String` / `Long`，Jackson 默认允许 number→String、bool→String，并**向零截断** float→Long |
+| **R2** | **显式 `null` ≠ 字段缺席**（4 条） | `{"extra_info":null}`：Go `400 field "extra_info" mustn't be nil`；**缺席该字段**则 Go `200`。RAG 两种都 `200` | go-zero `core/mapping/unmarshaler.go:856-862`：`mapValue == nil` 且非 `optional` ⇒ `mustn't be nil`，**对 map / slice 一样生效**；而「缺席」走 `processNamedFieldWithoutValue`，Map 分支不报错 | `RegisterReq` / `CreateAdminReq` / `UpdateSelfReq` / `UpdateUserReq` 四处 javadoc 都写着「Extrainfo 是 map ⇒ 不校验」，把 null 与缺席**混为一谈** |
+| **R3** | **DDL 列宽：`text` vs `varchar(255)`**（4 条） | 5000 字符 `username`：Go 写入成功；RAG `5001`/`5003`。反噬读路径：Go 库里有、RAG 存不下 ⇒ 登录时 Go 命中、RAG `1002`/`1003` | Go 的 GORM `AutoMigrate` 给 Go `string` 生成 **`text`**（无上限） | 4 份 `users-common/.../db/*.sql` 的注释自陈「列结构与**原 JPA `@Column`** 注解严格对齐」⇒ `VARCHAR(255)`。**全量 DDL 对比：35 列里 22 列类型不同**（12 列 text→varchar(255)、8 列 timestamptz→timestamp、2 列 text→jsonb） |
+| **R4** | **分页越界：GORM 静默抑制 vs RAG 直传 PG**（5 条） | `page=0` / `page=-1` / `page_size=-5` / `page=9223372036854775807`：Go 全 `200`+`code 200`；RAG 全 `5001` | `service/user/admin/rpc/internal/model/admin.go:159-160`：`Offset(int(offset)).Limit(int(pageSize))` —— GORM 只在 `offset>0` / `limit>=0` 时才生成子句，负值**静默忽略**并返回首页全量 | 负数原样交给 PG ⇒ `22023: OFFSET must not be negative` ⇒ `5001` |
+
+> **R3 的条数依赖环境状态，不是稳定的 4**：写侧那 4 条（5001/5003）任何时候都在；
+> 读路径另有 2 条（`user/admin.login.Username.long5000` 报 1002/1003）**只在 Go 库里
+> 已经存在一条超长用户名行时**才出现 —— 那是**上一轮矩阵自己写进去的**。
+> 本节基线 **4 条**取自 `./run.sh` 刚重建的全新 cluster（`down -v` 后 `serve-only`）；
+> 在被矩阵跑过的库上重跑会变成 **6 条**。**根因分类两处完全一致，不要按总数判断 R3 变了。**
+
+**R1 附一条反直觉的实测**（写下来免得下次又按 `,string` 标签想当然）：
+Go 的 `json:"uid,string"` **不等于「只收字符串」**。go-zero 先把 JSON 值字符串化再
+`strconv.ParseInt`，所以 `{"uid":1}`（数字）**两端都接受**（实测均 `1003`），
+真正的分叉只在浮点。取证：`curl -d '{"uid":1.5}'` → Go `400 strconv.ParseInt: parsing "1.5"` / RAG `200 + 1003`，
+且 RAG 的 `{"uid":1.5}` 与 `{"uid":1}` 响应逐字相同（截断）。
+`page` 侧同款：`{"page":1.5}` 与 `{"page":1}` 响应逐字相同、`{"page":2.9}` 与 `{"page":2}` 相同。
+
+**R1 的 `float→Long` 截断比 `→String` 强转更危险**：前者让请求**成功执行但作用在错误的行上**
+（`banuser {"uid":1.5}` 等价于封禁 `uid=1`），后者只是把错的值存进去。
+
+> **E-3 同时暴露了一个「此前没人查」的层**：§3.1 的对照清单里写着
+> 「数据库表结构 / 索引 / 唯一约束 / NOT NULL / DEFAULT」，但**此前没有任何脚本在查这一层**
+> （`check-proto-static.sh` 只比 proto 契约）。R3 就是从这个缺口里漏出来的 ——
+> 运行时只看到「5001」，顺着查才落到 DDL。现补 `tools/difftest/check-ddl-static.py`，
+> 但它**只查列类型与长度**；索引 / 唯一约束 / NOT NULL / DEFAULT 仍是 **NOT CHECKED**，
+> 不得把该脚本的结论读成「DDL 已一致」。
+
 #### 3.4.1 `service/common` 的 Java 端差异（2026-10-21 逐行审计产出）
 
 Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 RAG 全部主源码，产出 20 项偏差、修复 21 处（分支 `row/common-fix-semantic-drift`，issue #71186341）。**以下 5 条是修复后仍然存在、且无法靠改代码消除的差异**。
@@ -1122,7 +1169,7 @@ SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `t
 |---|---|---|---|
 | **E-1** | **difftest 10/39 步仍只比状态码、不比 body**（2026-10-21 由 13 → 12（b3066ab） → 10（本笔 commit）） | `diff.py:41` KNOWN_STATUS_ONLY 10 条:6 N-1 鉴权 + 1 N-1 user.delete + 2 DRIFT-006 畸形 JSON + 1 DRIFT-006 admin.uid=abc | **逐项定性**:① N-1 七条 401 body 形状不同(Go 空 body / RAG envelope)是**§3.4.2 N-1 有意偏离**,无法逐字对齐;② DRIFT-006 三条(2 畸形 JSON + admin.getuser.baduid)body 来自不同框架的 JSON 解析层(Go stdlib vs Jackson / strconv vs Jackson),**保持 §3.4.1 边界**。**已转走 diff_json 逐字比对(实测 byte-equal)**:user.register.noemail、admin.getuser.nouid、admin.getuserlist.nokeyword ⇒ 全部 `field "xxx" is not set\n` 两端字面相同。**KNOWN_CODE_DIFF 已删除**:历史上 (uid=0 → Go=1003/RAG=1017) 已于 §3.4.3 N-3 行证伪(两侧都 1003),对应白名单条目 admin.getuser.nouid 已转走逐字比对,本常量从此无人引用 → 拿除。**留档一个 SCENARIOS 排序的副作用**:admin.update 在第 28 步把 admin 密码改成 `newadmin123`,**同 cluster 第二次跑** admin_token-using 步骤会因密码不匹配而全 DIFF(本体已经从 stale 状态隔离,**留作 SCENARIOS 排序整治一项**) |
 | **E-2** | **gRPC 层没有直接对拍** | **✅ 已关（2026-10-21）**。拆为两段同时收口：**静态半**（字段号 / message 名）—— Go 真源 `proto/{user,admin}.proto` 与 RAG `*-proto/.../{users,admin}.proto` 字节级对齐，`tools/difftest/check-proto-static.sh` 三秒跑完；**动态半**（错误码语义）—— 同 stub 双端口打 4 档 RPC（`OK` 注册新号 / `INVALID_ARGUMENT` logout 空 token / `NOT_FOUND` getUser 鬼 uid / `ALREADY_EXISTS` 注册重名），4/4 双端口 `Status.getCode()` 一致（首测结果见 `tools/difftest/grpc-results.txt`）。**留档注意点**：Login 三种业务失败（用户不存在 / 密码错 / 被禁）**不**抛 gRPC code、走 `LoginResp.Status = 1|2`，是 go-zero 业务级状态码设计；本实验因此特意不把 login 列进 4 档，避免误把业务码当 wire code 测 |
-| **E-3** | **39 步不是状态空间穷举** | 是「每个端点一个典型场景」，22 个端点全覆盖，但每端点只跑了 1–3 条路径 | 边界组合（字段全缺 / 部分缺 / 类型错 / 超长 / 特殊字符）需要按 DTO 笛卡尔展开 |
+| **E-3** | **39 步不是状态空间穷举** | ✅ **已关（2026-10-21）**。`tools/difftest/matrix.py` 把 9 个 DTO 按**字段**展开边界组合，共 **273 条**（原 39 步只覆盖每端点 1~3 条典型路径）。产出 **77 条 NEW_DRIFT，全部收敛到 4 个根因、UNCLASSIFIED = 0**，连续三次运行结果**逐字一致**（121 MATCH / 1 KNOWN_FORM_EMPTY / 74 KNOWN_FRAMEWORK_TEXT / 77 NEW_DRIFT）。**4 个根因见 §3.4.5**（R1 Jackson 标量强转与截断 64 条、R2 显式 null ≠ 缺席 4 条、R3 DDL `text` vs `varchar(255)` 4 条、R4 GORM 静默抑制负 OFFSET/LIMIT 5 条）—— **均尚未签字**。**已验证与既有 difftest 共存**：全新 cluster 上先跑矩阵再跑 `diff.py`，仍是 **39/39 unexpected=0**。配套静态证据 `tools/difftest/check-ddl-static.py`（35 列 22 列类型不同）。**⚠️ 工具本身的三个坑已记在脚本头**：① token 不可跨端复用（N-5）② method/参数通道必须按端声明（A-03 + `form:` tag）③ 字段来源必须是真源 `types.go` 而非手抄 |
 | **E-4** | **超时路径 —— 已于 2026-10-21 实测坐实，见下方专节** | ~~零覆盖~~ → 已有数据。**这是 B-1 的运行证据**，此前只有静态分析 | ✅ 已补（`exp-b1-timeout-cancel.sh` 端到端 + `probe-jdbc-cancel.java` 纯 JDBC 机制层，三层拆解见 §3.4.1「B-1 补记」） |
 | **E-5** | **并发路径零覆盖** | ✅ **已关（2026-10-21）**。admin-rpc 侧 `AdminRpcConcurrencyWiringTest`（真 PG + Testcontainers，2 条全过）针对 `AdminCreateAtomicService` 双场景：(a) 同一 invite code N=8 并发消费 ⇒ **恰好 1 OK + 7 InviteUnavailable**（W1 悲观锁 `SELECT ... FOR UPDATE` 实证有效），admin 表里 `username LIKE 'u-%'` 严格 1 行；(b) 同一 username N=8 并发注册（各用唯一 invite）⇒ **恰好 1 INSERT 成功 + 7 撞 unique**，最终严格 1 行。Go 一致性靠「同样策略（行锁/UNIQUE 兜底）+ 同样约束」按设计而非按端到端对拍；要做端到端对拍那是 E-2 的范围 |
 | **E-6** | **事务异常回滚只测了 `user-rpc`** | ✅ **已关（2026-10-21）**。`AdminRpcTransactionWiringTest`（真 PG + Testcontainers，4 条全过）在 admin-rpc 侧同款补齐 `AdminCreateAtomicService.createAdminAtomic` 4 步事务的回滚行为：(1) W3 admin uid 唯一冲突 ⇒ invite `used_at`/`used_by_uid` 双 null（rollback 实证）；(2) W1 invite 不存在 ⇒ admin_admin 表行数无变化；(3) W2 username 已存在 ⇒ invite 不被标 used；(4) happy path ⇒ invite 被正确标 used，admin 行被插入。user 侧 `AvatarTransactionWiringTest` + admin 侧本类 ⇒ 两端写路径回滚都有真 PG 实证。**service/common 的 20 项偏差**这条不在 E-6 范围,留作另一笔 |
