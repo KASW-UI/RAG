@@ -548,15 +548,15 @@ getter 仍为 `isRead()`。实测改后：
 
 > 下列状态由 `AdminRpcContainerWiringTest`（真实 PostgreSQL 16 容器 + 真实 Spring 容器，7 条）
 > 与 `AdminApiMvcPipelineTest`（admin-api，11 条；真实 Redis 容器 + 真实 Spring 容器 + 真 MVC 管线）
-> 两套实测产出，非静态推导。**4 项原始 UNRESOLVED 已全部关闭**（A-U0 两端、A-U1、A-U2 RAG 侧、A-U3），
-> 仅 A-U2 Go 侧仍需单独起进程做端到端对拍。
+> 两套实测产出，非静态推导。**4 项原始 UNRESOLVED 已全部关闭**（A-U0 两端、A-U1、A-U2、A-U3），
+> 其中 A-U2 已于 2026-10-21 由 `tools/difftest` 双端运行时对拍补齐（见 §6.2.5）。
 
 | # | 项 | 状态 | 证据 / 剩余未知点 |
 |---|---|---|---|
 | A-U0 | 真实 Spring 上下文测试 | **已关闭（admin-rpc + admin-api 两侧）** | admin-rpc 由 `AdminRpcContainerWiringTest`（7 条，真 PG）关闭；admin-api 由 `AdminApiMvcPipelineTest`（11 条，真 Redis 容器 + `@SpringBootTest(AdminApiApplication)`）关闭，本批**新增**。该测试同时暴露并锁住一个 **共享底层 bug**（DRIFT-FRAMEWORK-001，`HttpMiddleware` 的 status propagation 与 Spring 的 commit 时序冲突：所有 `ExceptionHandler → 401 / 5003` 在 MockHttpServletResponse 的 `!isCommitted()` 守卫下被降级为 200） |
 | A-U1 | Go 侧 uid **格式非法**（非缺失）时的 HTTP 状态码 | **已关闭**（2026-10-21 + §3.4.3 后补行补录） | 已读 go-zero v1.10.2 源码原文：admin 服务 yaml 未注册 `httpx.SetErrorHandler` ⇒ `buildErrorHandler` 返回 `nil` ⇒ `doHandleError` 走到 `http.Error(w, err.Error(), http.StatusBadRequest)` ⇒ Go 输出 **HTTP 400 + text/plain**（无 JSON envelope）。与 user-api 不可跨模块套用结论——user-api 走的是另一个 handler 配置。这里由 `AdminApiMv*cPipelineTest` 里未覆盖，**不进入回归网**——若日后有人加 uid 路径的端到端测试，按 Go 现状写 `uid=abc → HTTP 400 + text/plain` 即可 |
-| A-U2 | 两端运行时对拍 | **RAG 侧已关闭 / Go 侧未做** | RAG 侧实证：空库上 seeder 造出的 admin 用 `admin/admin` 登录通过、用 `123456` **不**通过（DRIFT-001 关闭）；重复执行 seeder 不产生第二行（幂等）；`resetUserPassword` 用的是配置值 `123456` 而非 seeder 常量（两个来源未串）。**Go 侧仍需单独起进程跑一遍同样三步**才能做端到端对拍 |
-| A-U3 | `getUserList` 的 LIKE 双重包裹 | **已关闭** | 真 PG 上实测：RAG 的 `%%alice%%` 与 `%%%alice%%%` 命中集合完全相同，且与原生 `LIKE '%alice%'`（Go 写法）结果集一致；已覆盖 username 命中 + email 命中（OR 分支）两个来源。判定为 IMPLEMENTATION DIFFERENCE 而非漂移，已实证 |
+| A-U2 | 两端运行时对拍 | **已关闭（两侧，2026-10-21）** | RAG 侧实证：空库上 seeder 造出的 admin 用 `admin/admin` 登录通过、用 `123456` **不**通过（DRIFT-001 关闭）；重复执行 seeder 不产生第二行（幂等）；`resetUserPassword` 用的是配置值 `123456` 而非 seeder 常量（两个来源未串）。Go 侧由 `tools/difftest` 补齐：两套栈同时起、各跑同一串 39 步请求序列，逐字段比对响应。最新一次结果 **39 步 / 36 同 / 3 已签字 / 0 未预期差异**，详见 §6.2.5 |
+| A-U3 | `getUserList` 的 LIKE 双重包裹 | **已关闭**（双端对拍二次确认） | 真 PG 上实测：RAG 的 `%%alice%%` 与 `%%%alice%%%` 命中集合完全相同，且与原生 `LIKE '%alice%'`（Go 写法）结果集一致；已覆盖 username 命中 + email 命中（OR 分支）两个来源。判定为 IMPLEMENTATION DIFFERENCE 而非漂移，已实证。**2026-10-21 双端对拍二次确认**：`admin.getuserlist` 三种形态（精确匹配 / 前缀 `dt_` / 匹配不到）在两侧返回完全相同的 `list` 与 `total`，含 `extra_info` jsonb 内容逐字段一致 |
 
 ##### 搭建容器测试时踩到的环境坑（换机器 / 换网络时必读）
 
@@ -569,6 +569,63 @@ getter 仍为 `isRead()`。实测改后：
 
 > ⚠ 关掉 Ryuk 的代价是**容器不再自动回收**，CI 跑完可能残留。
 > Docker Hub 可达后删掉 admin-rpc/pom.xml 里那段 surefire 配置即可恢复。
+
+### 6.2.5 双端运行时对拍 `tools/difftest` 的产出（2026-10-21）
+
+首次把 Go 与 Spring Boot **同时起进程、喂同一串请求、逐字段比对响应**。
+产物在 `tools/difftest/`，读法与踩过的坑都写在那里的 README 里。
+最新一次：**39 步 / 36 同 / 3 已签字 / 0 未预期差异**。
+
+它立刻抓出了三个静态审查完全看不到的东西 —— **前两个是 RAG 的真缺陷，不是对拍环境的产物**。
+
+| ID | 级别 | 内容 | 证据 |
+|---|---|---|---|
+| **DRIFT-NEW-014** | **P0 · 配置缺陷** | **`user-api` 连不上 `user-rpc`。** `user-api/application.yml` 的 `grpc.client.user-rpc` **漏了 `negotiation-type: plaintext`**，而 devh `grpc-client-spring-boot-starter` 3.1.0 的 `grpc.client.GLOBAL.negotiation-type` **默认值就是 TLS**（证据：jar 内 `META-INF/spring-configuration-metadata.json` 的 `defaultValue`）。于是 user-api 发 TLS ClientHello，user-rpc 的 netty 报 `Http2Exception: HTTP/2 client preface string missing or corrupt. Hex dump: 16030301...`（`0x16` = TLS handshake record），所有经 user-rpc 的业务码塌成 `1015 服务繁忙` | `admin-api/application.yml` **有**这一行且带 DRIFT-NEW-008 注释解释为什么必须有 —— 当年 admin 侧踩过并修了，**user 侧单纯被漏掉**。这不是对拍环境特有的：默认值在任何环境都一样 |
+| **DRIFT-NEW-015** | **P0 · 结构性缺陷** | **Flyway 版本号撞车 ⇒ `admin-rpc` 根本无法启动。** 两个模块各自维护 `classpath:db/migration`，`V1/V2` **版本号相同、内容不同**：`user-rpc` = `V1__create_user` / `V2__create_user_avatar_history`；`admin-rpc` = `V1__create_admin` / `V2__create_admin_invite` / `V3__create_user`。`flyway_schema_history` 挂在 schema 上、**一个 schema 只能有一本账**，共用库时后启动的要么报 `version (3) is newer than the latest available migration (2)` 并**静默跳过自己的迁移**（进程照样 Started，表却是空的），要么 checksum mismatch 直接启动失败 | 而 `admin-rpc` **按设计必须**与 `user-rpc` 共用 `users_user` —— 这是它自己 `V3__create_user.sql` 的注释写明的（「admin-rpc 也读写 users_user 表……用 `IF NOT EXISTS 保证幂等：user-rpc 启动时已经建过表」）。⇒ **要满足设计意图就必须共用库，共用库就撞账本，无解**。§4.1 早就警告过这点，现在有实证了 |
+| **DRIFT-NEW-016** | P2 · 可观察差异 | **Go 有必填字段校验，RAG 没有。** go-zero 的 `httpx.Parse` 走 `core/mapping`，只认 `,optional` 标签，**`,omitempty` 不算 optional**（`unmarshaler.go:946-969` 走 `!opts.optional()` 分支直接 `newInitError`）。缺字段 ⇒ `HTTP 400 + text/plain + field "xxx" is not set`。实测命中：`CreateUserReq.email`、`GetUserListReq.keyword`（**空串也不行**）、`UpdateSelfReq`/`UpdateUserReq` 的 `username`/`password`/`email`。RAG 的 DTO 无此校验，直接走业务分支 | 对拍步骤 `user.register.noemail` / `admin.getuserlist.nokeyword`。**倾向保留 RAG 现状**（更宽松不算错），但按 §3.4.2 纪律**需用户签字**，未签字前不得当新漂移「修」掉 |
+
+> **为什么 DRIFT-NEW-015 至今没被发现**：RAG 的 `docker-compose.yaml` 里**只有
+> `user-rpc` / `user-api` 两个服务**，根本没有 `admin-rpc` / `admin-api`。
+> 单跑 user 域时账本永远是自洽的；admin 域从未被编排放上过，
+> 冲突自然一次都没露过。**这不是「还没测」，是「根本没部署过」。**
+
+##### DRIFT-NEW-015 的当前处置（未签字，等用户决定）
+
+对拍环境用的是**关掉 Flyway + 手工应用 DDL** 的绕法：
+`user-rpc` 保留 Flyway（真跑一次，验证迁移本身没问题），
+`admin-rpc` 用 `SPRING_FLYWAY_ENABLED=false`，由 `run.sh` 按顺序 `psql` 它的
+`V1__create_admin.sql` / `V2__create_admin_invite.sql`（`V3__create_user.sql` 跳过 ——
+user-rpc 的 Flyway 已建过同一张表）。5 个 DDL 全是 `CREATE TABLE/INDEX IF NOT EXISTS`，顺序无关。
+
+**这是权宜之计，不是修法。** 真正的修法有三条路，各有代价，需要用户拍板：
+
+| 方案 | 做法 | 代价 |
+|---|---|---|
+| **A · 迁移编号全局化** | 把两个模块的脚本重排成一条全局序列（user = V1/V2/V5，admin = V3/V4/V6 之类），放进同一个迁移源目录 | 破坏 HUMAN_ONLY.MD 要求的「每个 rpc 模块独立维护自己的 V*」布局；两个模块不再能独立部署 |
+| **B · 合并所有权** | 承认 `users_user` 归 user-rpc 所有，admin-rpc 不再自己迁移，改由 user-rpc 建表；admin-rpc 只保留 `admin_admin` / `admin_invite` | 需从 admin-rpc 删掉 `V3__create_user.sql`，并给 admin-rpc 一个「表可能还不存在」的启动顺序约束 |
+| **C · 拆库** | admin-rpc 连自己的库，跨域读用户走 RPC | 直接违反 `V3__create_user.sql` 注释里写明的设计意图，改动面最大 |
+
+> 在用户拍板前，**不得**由单个 agent 自行选一条实施 —— 这正是 §3.4.2 纪律针对的情形：
+> 「按政策应当对齐、但对齐会让 RAG 变差」的真实张力。
+> 对拍 harness 里那条绕法已经在 `initdb.sql` 的注释里写明是权宜之计，不要当成既定结论。
+
+##### 附带发现：冻结 Go 仓库的配置占位符不生效（**不改，只留档**）
+
+`Sea-RideTheWind_golang/service/user/user/rpc/etc/user.yaml:13` 写的是
+`Password: "${POSTGRES_PASSWORD}"`，`admin/rpc/etc/admin.yaml:14` 的 `DataSource`
+更是整条 DSN 都用 `${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_ADDR}:...`。
+但四个入口都是 `conf.MustLoad(*configFile, &c)`（`user/rpc/user.go:29`、
+`admin/rpc/admin.go:30` 等），**没有传 `conf.UseEnv()`**；
+而 go-zero v1.10.2 只在 `opt.env` 为真时才展开（`core/conf/config.go:62-63`
+的 `os.ExpandEnv`、`core/conf/properties.go:58-59` 同理）。
+
+⇒ **这些占位符不会被展开**，密码会被当成字面量字符串 `${POSTGRES_PASSWORD}`，
+SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `tools/difftest/conf/go/*.yaml`
+的副本里换成了字面值**。
+
+记这一条是因为：**任何「起 Go 进程跑一遍」的验证都会先撞上它**，
+而报错信息是 `password authentication failed`，看起来像密码写错了，不像配置没展开 ——
+很容易被误诊成对拍脚本的问题。
 
 ### 6.2.1 本次从本表移出（已修或已定案）
 

@@ -1,0 +1,39 @@
+-- 双端对拍专用初始化。
+--
+-- go_db 由 POSTGRES_DB 环境变量在容器初始化时创建（见 docker-compose.yml）。
+-- 这里只补 RAG 侧的 rag_db —— **一个**，不是两个。
+--
+-- 为什么 RAG 侧两个 rpc 必须共用一个库：
+--   admin-rpc 也读写 users_user 表。出处是它自己的迁移脚本
+--   admin-rpc/src/main/resources/db/migration/V3__create_user.sql 的注释：
+--     「admin-rpc 也读写 users_user 表（BanUser / DeleteUser / ResetUserPassword /
+--       UpdateUser 业务）。两侧 user 表 DDL 必须完全一致……
+--       用 IF NOT EXISTS 保证幂等：user-rpc 启动时已经建过表，admin-rpc 启动时本 SQL 跳过。」
+--   也就是说**设计意图就是共用**。而一旦拆成两个库，admin 的
+--   getuser / banuser / unbanuser / resetuserpassword / updateuser / delete
+--   就会全部返回「用户不存在」—— 第一次跑对拍时正是这样，7 个端点全红。
+--
+-- 为什么共用库时 Flyway 不能用（AGENTS.md §4.1 警告过的有状态账本问题）：
+--   flyway_schema_history 挂在 **schema** 上，一个 schema 只能有一本账。而两个模块
+--   各自维护 classpath:db/migration，两边的 V1/V2 **版本号相同、内容不同**：
+--     user-rpc : V1__create_user.sql  V2__create_user_avatar_history.sql
+--     admin-rpc: V1__create_admin.sql V2__create_admin_invite.sql  V3__create_user.sql
+--   先启动的把自己的 V1/V2 写进账本，后启动的一比对就炸：
+--     「Schema "public" has a version (3) that is newer than the latest available migration (2)」
+--   或者（换个启动顺序）直接 checksum mismatch 启动失败。
+--   ⇒ **这不是对拍环境的问题，是 RAG 的结构性缺陷**：只要 admin-rpc 真的按
+--   docker-compose 的方式连同一个库，它就起不来。而现在的 docker-compose.yaml
+--   里只有 user-rpc / user-api 两个服务，根本没有 admin-rpc / admin-api，
+--   所以这个冲突至今没有在生产编排里暴露过。
+--
+-- 对拍环境的处置：user-rpc 保留 Flyway（真跑一次，验证迁移本身没问题），
+-- admin-rpc 关掉 Flyway，由 run.sh 手工应用它的 V1/V2。
+-- 5 个 DDL 全部是 CREATE TABLE/INDEX IF NOT EXISTS，顺序无关、幂等。
+--
+-- 为什么 Go 与 RAG 之间仍不能共用：
+--   Go 用 GORM AutoMigrate，表名 `users` / `user_avatar_history`
+--     （service/user/user/rpc/internal/model/data_model.go:18-20,34-36）；
+--   RAG 用 Flyway，表名 `users_user` / `users_user_avatar_history`。
+--   表名差异是 AGENTS.md §3.4 已签字的有意偏离（A-03），
+--   所以 Go 与 RAG 物理上无法共用 schema —— 对拍只比 HTTP wire 层的可观察行为。
+CREATE DATABASE rag_db;
