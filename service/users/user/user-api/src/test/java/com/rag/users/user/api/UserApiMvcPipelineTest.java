@@ -259,4 +259,54 @@ class UserApiMvcPipelineTest {
                         .content("{ 这不是合法 JSON"))
                 .andExpect(status().isBadRequest());
     }
+
+    /**
+     * A 类 P2 回归（user 侧）：<b>空 body 的 POST 不得返回 HTTP 400</b>。
+     *
+     * <p>Go 出处（三段实测源码，非推断；<b>与 admin 侧分别取证</b>，未套用 admin 的结论 ——
+     * AGENTS.md §3.4.3 N-3 明确警告过跨模块套用的问题）：
+     * <ol>
+     *   <li>{@code internal/handler/user/*.go} 9 个 handler 一律 {@code var req types.XxxReq} +
+     *       {@code httpx.Parse(r, &req)}</li>
+     *   <li>go-zero v1.10.2 {@code requests.go:153 withJsonBody} = {@code r.ContentLength > 0 && ...}
+     *       ⇒ 空 body 走 {@code UnmarshalJsonMap(nil, v)}，对 struct 是 no-op、<b>不报错</b></li>
+     *   <li>user {@code types.go} 8 个 Req、<b>零个</b> {@code validate:} tag、<b>零个</b>
+     *       {@code Validate()}，且全服务未调 {@code httpx.SetValidator} ⇒ 校验环节不生效</li>
+     * </ol>
+     *
+     * <p>修复前 register / login / update / avatar-select / avatar 共 5 个端点是
+     * {@code required=true} ⇒ {@code HttpMessageNotReadableException} ⇒ HTTP 400 + 空 body。
+     */
+    @Test
+    @DisplayName("A-P2：空 body 的 public 端点 /login 不得 400 —— Go 零值 req 直达 rpc，落 CodeServerBusy")
+    void emptyBodyOnLoginDoesNotReturn400() throws Exception {
+        // Go 出处 loginlogic.go 的 switch：Internal → ErrorServerCommon，default → CodeServerBusy。
+        // 这里给一个不在 switch 里的 code，验证走的是 Go 的 default 分支。
+        when(stub.login(any())).thenThrow(new StatusRuntimeException(Status.UNKNOWN));
+
+        mockMvc.perform(post("/user/v1/login")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1015));
+
+        // 零值 username/password 必须真的透传到 rpc，而不是被本地预校验拦下
+        org.mockito.ArgumentCaptor<com.rag.users.user.proto.LoginReq> captor =
+                org.mockito.ArgumentCaptor.forClass(com.rag.users.user.proto.LoginReq.class);
+        verify(stub).login(captor.capture());
+        assertEquals("", captor.getValue().getUsername(), "零值 LoginReq 应以空用户名抵达 rpc");
+        assertEquals("", captor.getValue().getPassword(), "零值 LoginReq 应以空密码抵达 rpc");
+    }
+
+    /** 同上，protected 端点：证明 required=false 不依赖拦截器顺序，且空 body 能穿过鉴权进 Controller。 */
+    @Test
+    @DisplayName("A-P2：空 body 的 protected 端点 /update 不得 400")
+    void emptyBodyOnUpdateDoesNotReturn400() throws Exception {
+        when(stub.updateUser(any())).thenThrow(new StatusRuntimeException(Status.NOT_FOUND));
+
+        mockMvc.perform(post("/user/v1/update")
+                        .header("Authorization", "Bearer " + validToken())
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1003));
+    }
 }

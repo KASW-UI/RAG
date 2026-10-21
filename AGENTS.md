@@ -364,9 +364,19 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 **RAG 处置**：13 端点全改 `@RequestBody(required = false)` +
 Controller 侧 `if (req == null) req = new XxxReq()`（对齐 Go 的零值 struct，服务层因此不会 NPE）。
 
-> **遗留**：user-api 侧只改了 body 字段不参与业务的 4 个端点，
-> `register` / `login` / `update` / `avatar-select` / `avatar` **仍是 `required=true`**，
-> 按同样三段取证它们**仍与 Go 漂移**（Go 给 200+业务码，RAG 给 400）。本轮未处理，已记入 §6.2。
+> **user 侧同样做了独立取证**（2026-10-21，**未套用 admin 的结论** ——
+> §3.4.3 N-3 明确警告过「admin 侧取参机制不同，不可跨模块套用结论」）：
+> `internal/handler/user/*.go` 9 个 handler 一律 `var req types.XxxReq` + `httpx.Parse`；
+> `types.go` 8 个 Req、**零个** `validate:` tag、**零个** `Validate()`；
+> 整个 user 服务**从未**调 `httpx.SetValidator`。结论与 admin 侧一致 ⇒
+> user-api **9 个端点全部**改为 `required=false` + Controller 侧 `null → new XxxReq()`。
+> 落点验证：`loginlogic.go` 的 switch 是 `Internal → ErrorServerCommon` / `default → CodeServerBusy`，
+> 零值 username/password **直接透传给 rpc**（`UserLoginService` 同样对 null 字段兜底成 `""`）。
+>
+> 新增 2 条真管线断言 `emptyBodyOnLoginDoesNotReturn400` / `emptyBodyOnUpdateDoesNotReturn400`，
+> 并用 `ArgumentCaptor` 断言零值 LoginReq **真的带着空 username/password 抵达 rpc**
+> （而不是被本地预校验拦下）。
+> **负向验证**：把 login / update 退回 `required=true` 后，两条立刻红（`200 → 400`）。
 
 #### ② `NotificationEntity.isRead` → 运行期致命（本轮唯一 P0，附带发现）
 

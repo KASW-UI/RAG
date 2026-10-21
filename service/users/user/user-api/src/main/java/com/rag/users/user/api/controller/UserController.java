@@ -60,6 +60,34 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>JWT 鉴权由 {@code JwtAuthInterceptor} 在进入 Controller 之前完成；userId / jwt_token
  *       写到 request attribute，Service 直接读</li>
  * </ul>
+ *
+ * <p><b>L4 idiomatization：全部 9 个端点用 {@code @RequestBody(required = false)}</b>
+ * <pre>
+ *   Go 出处（三段，全部实测源码，非推断；<b>与 admin 侧分别取证，未套用结论</b> —— AGENTS.md §3.4.3 N-3
+ *   明确警告过「admin 侧取参机制不同，不可跨模块套用结论」）：
+ *   1. service/user/user/api/internal/handler/user/*.go —— 9 个 handler 一律
+ *      {@code var req types.XxxReq} + {@code if err := httpx.Parse(r, &amp;req); err != nil}。
+ *   2. go-zero v1.10.2 rest/httpx/requests.go:153 {@code withJsonBody} =
+ *      {@code r.ContentLength > 0 && ContentType 含 application/json}。
+ *      空 body ⇒ false ⇒ {@code ParseJsonBody} 走 {@code mapping.UnmarshalJsonMap(nil, v)}
+ *      —— 对 struct 是 <b>no-op，不报错</b>。
+ *   3. user 侧 api/internal/types/types.go：8 个 Req struct、<b>零个</b> {@code validate:} tag、
+ *      <b>零个</b> {@code Validate()} 方法；且整个 user 服务<b>从未</b>调 {@code httpx.SetValidator}
+ *      ⇒ {@code getValidator()} 返回 nil，{@code httpx.Parse} 的校验环节整体不生效。
+ *
+ *   结论：Go 对空 body 的 POST 一律 <b>不报错</b>，req 停在<b>零值 struct</b>，由各 Logic 决定业务码。
+ *   以 login 为例（loginlogic.go）：零值 username/password <b>直接透传给 rpc</b>，
+ *   由 rpc 判错后给出业务码，<b>HTTP 恒 200 + envelope</b>；本端不做客户端预校验，与之同构。
+ *
+ *   语义等价论证：{@code required=false} + Controller 侧把 null 归一化成 new XxxReq()，
+ *   得到的正是 Go 的零值 struct，Service 不会 NPE，业务码由 Service 决定，与 Go 逐条一致。
+ *
+ *   <b>修复前</b>：register / login / update / avatar-select / avatar 共 5 个端点是
+ *   {@code required=true}，空 body 触发 {@code HttpMessageNotReadableException}
+ *   → {@code handleUnreadableBody} → <b>HTTP 400 + 空 body</b>，与 Go 不一致，
+ *   且客户端拿不到任何可读的错误原因。另 4 个端点（logout / get / delete / avatar-history）
+ *   因 body 字段本就不参与业务，此前已改成 {@code required=false}。
+ * </pre>
  */
 @RestController
 @RequestMapping("/user/v1")
@@ -98,12 +126,22 @@ public class UserController {
     // ============== public（无 JWT） ==============
 
     @PostMapping("/register")
-    public RegisterResp register(@RequestBody RegisterReq req, HttpServletRequest httpRequest) {
+    // L4 idiomatization（Go 三段取证见下方类 javadoc）：Go 侧 registerhandler.go:20
+    // 用 `var req types.CreateUserReq` + `httpx.Parse`，空 body 不报错、req 停在零值 struct。
+    public RegisterResp register(@RequestBody(required = false) RegisterReq req, HttpServletRequest httpRequest) {
+        if (req == null) {
+            req = new RegisterReq();
+        }
         return userRegisterService.register(req, httpRequest);
     }
 
     @PostMapping("/login")
-    public LoginResp login(@RequestBody LoginReq req, HttpServletRequest httpRequest) {
+    // L4 idiomatization（同 register）：loginlogic.go 对零值 username/password 直接透传给 rpc，
+    // 由 rpc 判错并给出业务码，HTTP 恒 200 + envelope。
+    public LoginResp login(@RequestBody(required = false) LoginReq req, HttpServletRequest httpRequest) {
+        if (req == null) {
+            req = new LoginReq();
+        }
         return userLoginService.login(req, httpRequest);
     }
 
@@ -128,7 +166,11 @@ public class UserController {
     }
 
     @PostMapping("/update")
-    public UpdateUserResp updateUser(@RequestBody UpdateUserReq req, HttpServletRequest httpRequest) {
+    // L4 idiomatization（同 register）：updateuserlogic.go 的零值 UpdateUserReq 直接进业务层。
+    public UpdateUserResp updateUser(@RequestBody(required = false) UpdateUserReq req, HttpServletRequest httpRequest) {
+        if (req == null) {
+            req = new UpdateUserReq();
+        }
         return userUpdateService.updateUser(req, httpRequest);
     }
 
@@ -139,12 +181,20 @@ public class UserController {
     }
 
     @PostMapping("/avatar/select")
-    public SelectAvatarResp selectAvatar(@RequestBody SelectAvatarReq req, HttpServletRequest httpRequest) {
+    // L4 idiomatization（同 register）：selectavatarlogic.go 的零值 SelectAvatarReq 直接进业务层。
+    public SelectAvatarResp selectAvatar(@RequestBody(required = false) SelectAvatarReq req, HttpServletRequest httpRequest) {
+        if (req == null) {
+            req = new SelectAvatarReq();
+        }
         return avatarSelectService.selectAvatar(req, httpRequest);
     }
 
     @PostMapping("/avatar")
-    public UploadAvatarResp uploadAvatar(@RequestBody UploadAvatarReq req, HttpServletRequest httpRequest) {
+    // L4 idiomatization（同 register）：uploadavatarlogic.go 的零值 UploadAvatarReq 直接进业务层。
+    public UploadAvatarResp uploadAvatar(@RequestBody(required = false) UploadAvatarReq req, HttpServletRequest httpRequest) {
+        if (req == null) {
+            req = new UploadAvatarReq();
+        }
         return avatarUploadService.uploadAvatar(req, httpRequest);
     }
 
