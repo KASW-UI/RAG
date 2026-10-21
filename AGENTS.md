@@ -149,6 +149,45 @@ MyBatis-Plus 的前缀是 `mybatis-plus`（`MybatisPlusProperties`），全仓**
 唯一可靠的判据是**运行时证据**（本例是 PG 侧是否出现 `57014 query_canceled`）。
 凡是「注入后实测无变化」的结论，一律先怀疑注入本身没到位，再怀疑机制无效。
 
+**规则（2026-10-22 补 · 由「E-1 收口抓到 text/plain 400 丢 Content-Type」推出）**：
+**「代码里写了」与「客户端收到」之间隔着一次 commit。**
+
+`GlobalExceptionHandler.goStylePlainTextBadRequest` 里明明写着
+`headers.setContentType(TEXT_PLAIN)` + `set("X-Content-Type-Options","nosniff")`，
+而 `ObservabilityResponseWriter.setHeader` 只把 header 收进 `capturedHeaders`、
+等 `flushTo` 再写回 underlying。真实 Tomcat 下 `flushTo` 发生在 `chain.doFilter()`
+**之后**——此时下游 `outputMessage.flush()` 已让底层 committed，
+`dst.setHeader(...)` 被 **静默忽略**（不抛异常、不打日志）。
+
+实测（2026-10-22 curl，两端同请求）：
+
+| | Go | RAG 修复前 |
+|---|---|---|
+| 状态行 | `400 Bad Request` | `400 `（reason phrase 都没有） |
+| Content-Type | `text/plain; charset=utf-8` | **缺失** |
+| X-Content-Type-Options | `nosniff` | 缺失 |
+| 传输 | `Content-Length: 25` | `Transfer-Encoding: chunked` + `Connection: close` |
+
+**它此前 4 轮对拍全绿**，因为 difftest **只比 body 不比响应头**，
+而 body 恰好是对的（DRIFT-006 对齐的正是正文）。缺陷就藏在从未被比对的那一层。
+
+⇒ **两条推论**：
+1. **响应头必须纳入对拍**。body 对齐 ≠ 响应对齐；`Content-Type` 决定客户端怎么解析 body，
+   缺了它等于把「这是 JSON 还是纯文本」的判断权交给客户端默认值。
+2. **这类缺陷 MockMvc 测不到**。实测 `MockHttpServletResponse` 在这个时序上与 Tomcat
+   不同：MockMvc 里 Content-Type 完好（`text/plain;charset=UTF-8` + `nosniff`），
+   真实栈 curl 是空的。⇒ 守门只能用**真实容器**（`tools/difftest/check-plaintext400-headers.sh`）。
+   这是 §3.4.2「N-1 的二次坍塌」的同款陷阱：**层次没对齐时，单独那一层全绿就够骗过 CI。**
+
+**修复**：`setHeader` / `addHeader` / `setContentType` 改为**实时 propagate** 到 underlying，
+与 `setStatus` / `sendError`（2026-10-21 修的那两个）同一策略。
+`capturedHeaders` 保留作兜底二次写入 —— Tomcat 的 `setHeader` 是**覆盖**语义，重复写不产生重复 header。
+
+> ⚠️ **`HttpServletResponseWrapper` 默认的 `setContentType` 是直接透传的**，
+> 本类此前未 override 它，于是同一份响应里存在「`setContentType` 直通 / `setHeader` 进 buffer」
+> **两套语义**。已显式接管 `setContentType`，让三者走同一条路径。
+> 下次再动这个 wrapper，注意它有三个覆写点，不是一个。
+
 **规则（2026-10-21 再补 · 由 H2 假绿事件推出）**：**断言「Bean 存在」不等于断言「机制生效」。**
 
 `ObservabilityWiringTest#grpcInterceptorBeanExists` 长期为绿，因为它断言的是
@@ -348,6 +387,7 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 | **DRIFT-010** | **注销绕过**（安全，本批新发现） | `stripBearerPrefixFromTokenString` 前缀不匹配时**原样返回整串** → 验签必失败 | `split(" ", 2).parts[1]` 取到 `"eyJ..."` **验签通过**，黑名单又用整串查不到 | 按 Go 逐字重写；`uid <= 0` 检查移出拦截器，交给 `IdentityResolver` |
 | **DRIFT-002** | 前缀语义 | 前缀**大小写不敏感**；缺失前缀**不报错**、原样当 token | `startsWith("Bearer ")` 大小写敏感 → 小写 `bearer` 被误拒 | 与 admin 侧共用 `BearerTokenExtractor` |
 | **DRIFT-006** | 400 响应形状 | `http.Error(w, msg, 400)` → `text/plain; charset=utf-8` + 裸文本 + 尾换行 + `nosniff` | `ResponseEntity.status(400).build()` → **空 body** | `goStylePlainTextBadRequest` + advice 对非 JSON 透传 |
+| **DRIFT-024** | **text/plain 400 的响应头丢失**（2026-10-22 E-1 收口时发现，**DRIFT-006 的另一半从未真正对齐**） | 每次 400 都带 `Content-Type: text/plain; charset=utf-8` + `X-Content-Type-Options: nosniff` + `Content-Length` | **`Content-Type` 与 `nosniff` 全部缺失**，状态行连 reason phrase 都没有，传输退化为 `Transfer-Encoding: chunked` + `Connection: close` | `HttpMiddleware$ObservabilityResponseWriter.setHeader` 只收进 `capturedHeaders`、等 `flushTo` 才写回 underlying，而那时底层已 committed，Tomcat **静默忽略**。已改为三个覆写点（`setHeader`/`addHeader`/`setContentType`）实时 propagate，与 `setStatus` 同一策略。守门：`tools/difftest/check-plaintext400-headers.sh`（**必须真实 Tomcat**） |
 
 > **DRIFT-009 的病灶形态与 §3.4.2 N-1 完全同构，但方向相反，值得单独记住**：
 > N-1 是「引用了不存在的机制」，DRIFT-009 是「**引用了真实文件、但把 chain 的内外关系读反了**」。
@@ -1245,7 +1285,7 @@ SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `t
 
 | # | 缺口 | 现状 | 要补什么 |
 |---|---|---|---|
-| **E-1** | **difftest 10/39 步仍只比状态码、不比 body**（2026-10-21 由 13 → 12（b3066ab） → 10（本笔 commit）） | `diff.py:41` KNOWN_STATUS_ONLY 10 条:6 N-1 鉴权 + 1 N-1 user.delete + 2 DRIFT-006 畸形 JSON + 1 DRIFT-006 admin.uid=abc | **逐项定性**:① N-1 七条 401 body 形状不同(Go 空 body / RAG envelope)是**§3.4.2 N-1 有意偏离**,无法逐字对齐;② DRIFT-006 三条(2 畸形 JSON + admin.getuser.baduid)body 来自不同框架的 JSON 解析层(Go stdlib vs Jackson / strconv vs Jackson),**保持 §3.4.1 边界**。**已转走 diff_json 逐字比对(实测 byte-equal)**:user.register.noemail、admin.getuser.nouid、admin.getuserlist.nokeyword ⇒ 全部 `field "xxx" is not set\n` 两端字面相同。**KNOWN_CODE_DIFF 已删除**:历史上 (uid=0 → Go=1003/RAG=1017) 已于 §3.4.3 N-3 行证伪(两侧都 1003),对应白名单条目 admin.getuser.nouid 已转走逐字比对,本常量从此无人引用 → 拿除。**留档一个 SCENARIOS 排序的副作用**:admin.update 在第 28 步把 admin 密码改成 `newadmin123`,**同 cluster 第二次跑** admin_token-using 步骤会因密码不匹配而全 DIFF(本体已经从 stale 状态隔离,**留作 SCENARIOS 排序整治一项**) |
+| **E-1** | **difftest 10/39 步只比状态码、不比 body** （历史轨迹：2026-10-21 由 13 → 12（b3066ab） → 10 → **0（2026-10-22 关闭）**） | ✅ **已关（2026-10-22）**。做法**不是**把两侧 body 改成逐字相同 —— 那 10 步**注定**不同：N-1 七条是 Go 自身两处 401 body 就互不一致（空 body vs `{code:401}` 无 data），DRIFT-006 三条的正文来自两个框架各自的 JSON 解析层。**真正缺的不是「比成一样」，而是「body 连看都没看」** —— 旧写法只断言 `gs == rs`，于是「RAG 把 401 改成 200 空 envelope」「RAG 的 400 变成 JSON」这类回归也能一路绿灯。现改为 `BODY_EXPECTATION` + `check_body_expectation()`：**分别断言两侧各自该是什么样**（N-1：两侧 status 均 401；Go body 必须命中它自己的两种形态之一；RAG 必须是 `{code,msg,data}` 三键齐全且业务码 1006）（DRIFT-006：两侧 status 均 400；两侧 Content-Type 均含 text/plain；两侧 body 均非空裸文本）。`http()` 相应改为返回 `(status, text, resp_headers)` —— 不取响应头就无法断言「形状」。统计口径同步改为 `asserted=10 / byte_equal=29`，**两个数分开报**，避免把「靠断言通过」误读成「两侧 body 逐字相同」。**变异测试**：把 RAG 的 N-1 envelope 拆掉 / 把 400 改回 JSON，10 条全部变红。 **⚠️ 关闭 E-1 当场抓出一条此前不可见的真实漂移**：详见 §3.3 新增的「代码里写了 ≠ 客户端收到」规则 —— RAG 所有 text/plain 400 都**丢 Content-Type 与 nosniff**（真实 Tomcat 证据），根因是 `HttpMiddleware$ObservabilityResponseWriter.setHeader` 只进 buffer、等 `flushTo` 才写回，而那时底层已 committed。**已修**（三个覆写点改实时 propagate）。守门脚本 `tools/difftest/check-plaintext400-headers.sh` —— **必须真实 Tomcat，MockMvc 测不到**（MockMvc 里 Content-Type 完好，会假绿）。**留档一个 SCENARIOS 排序的副作用**：admin.update 在第 28 步把 admin 密码改成 `newadmin123`，**同 cluster 第二次跑** admin_token-using 步骤会因密码不匹配而全 DIFF （本体已从 stale 状态隔离，**留作 SCENARIOS 排序整治一项**） | |
 | **E-2** | **gRPC 层没有直接对拍** | **✅ 已关（2026-10-21）**。拆为两段同时收口：**静态半**（字段号 / message 名）—— Go 真源 `proto/{user,admin}.proto` 与 RAG `*-proto/.../{users,admin}.proto` 字节级对齐，`tools/difftest/check-proto-static.sh` 三秒跑完；**动态半**（错误码语义）—— 同 stub 双端口打 4 档 RPC（`OK` 注册新号 / `INVALID_ARGUMENT` logout 空 token / `NOT_FOUND` getUser 鬼 uid / `ALREADY_EXISTS` 注册重名），4/4 双端口 `Status.getCode()` 一致（首测结果见 `tools/difftest/grpc-results.txt`）。**留档注意点**：Login 三种业务失败（用户不存在 / 密码错 / 被禁）**不**抛 gRPC code、走 `LoginResp.Status = 1|2`，是 go-zero 业务级状态码设计；本实验因此特意不把 login 列进 4 档，避免误把业务码当 wire code 测 |
 | **E-3** | **39 步不是状态空间穷举** | ✅ **已关（2026-10-21）**，**5 个根因全部已修（2026-10-22，用户逐条签字）**。`tools/difftest/matrix.py` 把 9 个 DTO 按**字段**展开边界组合，共 **273 条**（原 39 步只覆盖每端点 1~3 条典型路径）。首轮产出 **77 条 NEW_DRIFT**，UNCLASSIFIED = 0。**根因见 §3.4.5**：R1 Jackson 标量强转与截断 64 条、R2 显式 null ≠ 缺席 4 条、R3 DDL `text` vs `varchar(255)` 4 条、R4 GORM 静默抑制负 OFFSET/LIMIT 5 条，**R5 bcrypt 抢在 invite/username 检查之前 2 条（修复过程中新暴露，曾被误分类进 R3）**。**端到端复测：NEW_DRIFT 77 → 0**（R1/R2/R4/R5 均 0；R3 的 0 由 `r5-order-probe.py` 独立佐证，因为 `classify()` 那条宽规则仍可能误分类）。**已验证与既有 difftest 共存**：全新 cluster 上先跑矩阵再跑 `diff.py`，仍是 **39/39 unexpected=0**。配套静态证据 `tools/difftest/check-ddl-static.py`（列类型差异已从 22 处降到 12 处）。**⚠️ 工具本身的坑已记在脚本头**：① token 不可跨端复用（N-5）② method/参数通道必须按端声明（A-03 + `form:` tag）③ 字段来源必须是真源 `types.go` 而非手抄 ④ **`--no-build` 不拷新 jar，起的是旧副本** ⑤ **`admin.create` 恒用假邀请码 ⇒ 看不到「邀请码有效」分支**，R5 即由此漏掉，补齐靠 `tools/difftest/r5-order-probe.py`（用真邀请码，实测出比矩阵多一倍的 2 处分歧） |
 | **E-4** | **超时路径 —— 已于 2026-10-21 实测坐实，见下方专节** | ~~零覆盖~~ → 已有数据。**这是 B-1 的运行证据**，此前只有静态分析 | ✅ 已补（`exp-b1-timeout-cancel.sh` 端到端 + `probe-jdbc-cancel.java` 纯 JDBC 机制层，三层拆解见 §3.4.1「B-1 补记」） |

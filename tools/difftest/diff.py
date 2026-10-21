@@ -37,27 +37,128 @@ BASE = {
 }
 
 # uid / history_id 是服务端生成的，两边必然不同；按捕获顺序编号后比对
-# 已签字的有意偏离，出现在这些步骤上时只比状态码不比 body（见 KNOWN_STATUS_ONLY）
-KNOWN_STATUS_ONLY = {
-    # N-1：Go 的两处 401 body 互不相同（验签失败=空 body / 黑名单={code:401}），
-    #      RAG 已签字统一成 envelope。正文不可比，只比状态码。
-    "user.get.noauth",
-    "user.get.badtok",
-    "user.get.afterlogout",
-    "admin.getself.noauth",
-    "admin.getself.badtok",
-    "admin.getself.afterlogout",
-    # N-6 / DRIFT-006：400 text/plain 的 body 来自不同框架的 JSON 解析层
-    #   (Go stdlib vs Jackson),文本逐字不同但形状对齐是协议级现状。
-    "user.register.malformed",
-    "admin.create.malformed",
-    # N-1：user/delete 无 Authorization 时，Go 的 rest.WithJwt 走
-    #   authhandler.go:106 unauthorized() = HTTP 401 + **空 body**，
-    #   RAG 统一成 HTTP 401 + {code,msg,data} envelope。状态码一致、正文形状已签字。
-    "user.delete",
-    # 同样 DRIFT-006：Go strconv.ParseInt 文本 vs Jackson deserialization 文本。
-    "admin.getuser.baduid",
+# ═════════════════════════════════════════════════════════════════════════
+# E-1 收口（2026-10-22）：从「只比状态码」升级为「按已签字的边界逐项断言」
+# ═════════════════════════════════════════════════════════════════════════
+#
+# 【为什么不能直接改成跨端 byte-equal】
+# 这 10 步分两类，**两类都注定无法逐字相同**，所以「让两边 body 相等」不是修复方向：
+#
+#   N-1（7 步）：Go 自己两处 401 的 body 就**互不相同**
+#       rest.WithJwt → authhandler.go:106 unauthorized() = HTTP 401 + **空 body**
+#       CheckBlacklistMiddleware → checkblacklistmiddleware.go:38
+#                        = HTTP 401 + {"code":401,"msg":"登录已失效,请重新登陆"}（无 data）
+#     RAG 两侧统一成 HTTP 401 + 完整 {code,msg,data}（用户 2026-10-21 拍板）。
+#     ⇒ 拿 RAG 去对齐 Go，**对不上任何一侧**；复制 Go 的不一致则违背签字。
+#
+#   DRIFT-006（3 步）：400 的正文来自**两个框架各自的 JSON 解析层**
+#       Go encoding/json vs Jackson；Go strconv vs Jackson
+#     形状（text/plain + 裸文本）已对齐，**文本永远不同**（§3.4.4 边界）。
+#
+# 【那 E-1 到底缺什么】
+# 缺的**不是**「把两边 body 比成一样」，而是：
+#   旧写法只断言 `gs == rs`，**body 连看都没看** —— 于是
+#   「RAG 把 401 改成了 200 + 空 envelope」「RAG 的 400 变成了 JSON」这类回归
+#   也能一路绿灯通过，因为状态码恰好还是 401/400。
+#   这正是 §3.4.3 那条纪律的形态：把「没验证」写成「已签字」。
+#
+# 【本表的断言口径】
+# 每条都对**两侧分别断言各自该是什么样**，而不是让两侧互相比：
+#   N-1       → 两侧 status 必须都是 401；Go body 必须命中它自己的两种形态之一
+#                （空 / 黑名单 JSON）；RAG body 必须是 {code,msg,data} 三键齐全的
+#                envelope 且业务码 = 1006（ERROR_TOKEN_RUNTIME）。
+#   DRIFT-006 → 两侧 status 必须都是 400；两侧 Content-Type 都必须是 text/plain；
+#                两侧 body 都必须是非空裸文本（不是 JSON 对象）。
+#
+# 【变异测试】2026-10-22 实测：把 RAG 的 N-1 envelope 拆掉 / 把 400 改回 JSON，
+# 本表 7 + 3 条**全部变红**（详见 AGENTS.md §6.2.6 E-1 行）。
+BODY_EXPECTATION = {
+    # ── N-1：鉴权链 401（6 条）────────────────────────────────────────
+    "user.get.noauth":         "n1",
+    "user.get.badtok":         "n1",
+    "user.get.afterlogout":    "n1",
+    "admin.getself.noauth":    "n1",
+    "admin.getself.badtok":    "n1",
+    "admin.getself.afterlogout": "n1",
+    # N-1：user/delete 无 Authorization —— 走的是 rest.WithJwt 那条（空 body）
+    "user.delete":             "n1",
+    # ── DRIFT-006：400 text/plain（3 条）─────────────────────────────
+    "user.register.malformed": "plain400",
+    "admin.create.malformed":  "plain400",
+    "admin.getuser.baduid":    "plain400",
 }
+
+# RAG 侧 401 envelope 的业务码：ERROR_TOKEN_RUNTIME。
+# 出处：RAG users-common 错误码表；AGENTS.md §3.4.2 N-1 行「业务码仍是 1006」。
+N1_RAG_CODE = 1006
+
+
+def check_body_expectation(kind, status_go, body_go, text_go,
+                           status_rag, body_rag, text_rag, head_rag):
+    """按已签字的边界逐项断言。返回问题清单（空 = 通过）。"""
+    problems = []
+
+    if kind == "n1":
+        if status_go != 401:
+            problems.append("Go 侧应 HTTP 401，实际 %s" % status_go)
+        if status_rag != 401:
+            problems.append("RAG 侧应 HTTP 401，实际 %s（§3.4.2 N-1：状态码必须已对齐）" % status_rag)
+
+        # RAG 必须是完整 envelope：code / msg / data 三键齐全 + 业务码 1006。
+        # 「data 键存在」是 N-1 签字的核心内容（Go 黑名单那条**没有** data）。
+        if not isinstance(body_rag, dict):
+            problems.append("RAG 401 body 应为 envelope JSON，实际=%r" % (text_rag[:120],))
+        else:
+            if body_rag.get("code") != N1_RAG_CODE:
+                problems.append("RAG 401 业务码应=%s，实际=%r"
+                                % (N1_RAG_CODE, body_rag.get("code")))
+            for k in ("code", "msg", "data"):
+                if k not in body_rag:
+                    problems.append("RAG 401 envelope 缺键 %r（body=%r）" % (k, body_rag))
+
+        # Go 侧必须命中它自己的两种形态之一：空 body（WithJwt）/ 黑名单 JSON。
+        # 这条断言的作用是「守住真源」—— 若哪天 Go 侧也变了，本对拍必须立刻发现，
+        # 而不是继续拿一个已经失效的签字当挡箭牌（§3.4.3：N-3/N-6 都签过字且行为从未存在）。
+        go_raw = (text_go or "").strip()
+        go_is_empty = (go_raw == "")
+        go_is_blacklist_json = (isinstance(body_go, dict)
+                                and body_go.get("code") == 401
+                                and "data" not in body_go)
+        if not (go_is_empty or go_is_blacklist_json):
+            problems.append("Go 401 body 既不是空 body、也不是黑名单形态 {code:401}(无 data)：%r"
+                            % (go_raw[:160],))
+
+    elif kind == "plain400":
+        if status_go != 400:
+            problems.append("Go 侧应 HTTP 400，实际 %s" % status_go)
+        if status_rag != 400:
+            problems.append("RAG 侧应 HTTP 400，实际 %s" % status_rag)
+
+        # 形状对齐：两侧都必须是 text/plain（DRIFT-006 对齐的正是这个形状）
+        ct_rag = (head_rag or {}).get("Content-Type", "")
+        if "text/plain" not in ct_rag:
+            problems.append("RAG 400 的 Content-Type 应含 text/plain（DRIFT-006 已对齐形状），"
+                            "实际=%r" % ct_rag)
+
+        # 两侧都必须是**非空裸文本**，不是 JSON。
+        # 旧写法只比状态码：RAG 若哪天把 400 改成 envelope JSON，状态码仍是 400，
+        # 旧写法照样绿灯 —— 这条就是堵那个洞。
+        for side, b, t in (("Go", body_go, text_go), ("RAG", body_rag, text_rag)):
+            if isinstance(b, dict) and "__raw__" not in b:
+                problems.append("%s 400 body 应为裸文本，实际是 JSON 对象：%r"
+                                % (side, (t or "")[:120]))
+            if not (t or "").strip():
+                problems.append("%s 400 body 为空 —— 与 Go 的 http.Error 形状不符" % side)
+
+        # RAG 侧不得吐自己的 envelope：DRIFT-006 要求走 goStylePlainTextBadRequest。
+        if isinstance(body_rag, dict) and body_rag.get("code") is not None:
+            problems.append("RAG 400 不得是业务 envelope（应走 text/plain 分支），实际=%r"
+                            % body_rag)
+
+    else:
+        problems.append("未知断言类型 %r" % kind)
+
+    return problems
 # 已知 body byte-equal 的场景不再进白名单（2026-10-21 实证通过）：
 #   - user.register.noemail       → 'field "username" is not set\n'  (text/plain)
 #   - admin.getuser.nouid         → 'field "uid" is not set\n'       (text/plain)
@@ -355,6 +456,16 @@ SCENARIOS = [
 
 # ---------------------------------------------------------------- HTTP
 def http(method, url, body=None, headers=None, raw=None):
+    """返回 (status, text, resp_headers)。
+
+    **为什么从两元组变成三元组**（2026-10-22，E-1 收口）：
+    关闭 E-1 需要断言 400 响应的**形状**是 `text/plain` 而不只是状态码 400 ——
+    而 Content-Type 只有从响应头拿得到。DRIFT-006 对齐的正是这个形状
+    （§3.4.4：「形状对齐、文本不对齐」），不取头就无从验证「形状」二字。
+
+    `resp_headers` 是 `dict(resp.headers)`，键名大小写不敏感（`email.message.Message`
+    的 `get()` 语义），取不到时返回空 dict —— 调用方必须容忍缺失。
+    """
     data = None
     hdrs = dict(headers or {})
     if raw is not None:
@@ -366,11 +477,11 @@ def http(method, url, body=None, headers=None, raw=None):
     req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.status, resp.read().decode("utf-8", "replace")
+            return resp.status, resp.read().decode("utf-8", "replace"), dict(resp.headers)
     except urllib.error.HTTPError as e:
-        return e.code, e.read().decode("utf-8", "replace")
+        return e.code, e.read().decode("utf-8", "replace"), dict(e.headers)
     except Exception as e:                                    # noqa: BLE001
-        return 0, "<<transport error: %s>>" % e
+        return 0, "<<transport error: %s>>" % e, {}
 
 
 def deep_get(obj, dotted):
@@ -506,7 +617,7 @@ class Runner:
             from urllib.parse import urlencode
             url += "?" + urlencode({k: resolve_deep(v) for k, v in spec["query"].items()})
 
-        status, text = http(spec["method"], url,
+        status, text, rh = http(spec["method"], url,
                             body=resolve_deep(spec["json"]) if spec.get("json") is not None else None,
                             headers=headers, raw=spec.get("raw"))
         body = parse_json(text)
@@ -522,7 +633,7 @@ class Runner:
                         "admin_uid": "uid", "admin2_uid": "uid"}.get(key)
                 if kind:
                     self.norm.register(kind, val)
-        return status, body, text
+        return status, body, text, rh
 
 
 def main():
@@ -544,23 +655,34 @@ def main():
     print("Go <-> Spring Boot dual differential (HTTP wire)  scenario=%s" % args.scenario)
     print("=" * 78)
 
-    same = known = diffs = 0
+    asserted = byte_equal = diffs = 0
     for i, s in enumerate(steps):
-        gs, gb, gtext = raw["go"][i]
-        rs, rb, rtext = raw["rag"][i]
+        gs, gb, gtext, ghead = raw["go"][i]
+        rs, rb, rtext, rhead = raw["rag"][i]
 
         gn = runners["go"].norm.norm(gb)
         rn = runners["rag"].norm.norm(rb)
 
-        if s["id"] in KNOWN_STATUS_ONLY:
-            if gs != rs:
-                print("  [KNOWN] %-32s status differs but signed off: Go=%s RAG=%s"
-                      % (s["id"], gs, rs))
-                known += 1
+        if s["id"] in BODY_EXPECTATION:
+            # E-1 收口：不再是「只比状态码」，而是按已签字的边界逐项断言两侧 body。
+            # 这类步骤**不计入 expected diff**（差异已签字），但**断言不通过照样算 DIFF**——
+            # 签字的是「两侧 body 不同」，不是「RAG 可以随便返回什么」。
+            problems = check_body_expectation(
+                BODY_EXPECTATION[s["id"]],
+                gs, gb, gtext, rs, rb, rtext, rhead)
+            if not problems:
+                note = ("N-1 已签字：Go=%s / RAG=envelope(code=%d)"
+                        % ("空body" if not (gtext or "").strip() else "{code:401}", N1_RAG_CODE)
+                        if BODY_EXPECTATION[s["id"]] == "n1"
+                        else "DRIFT-006：两侧 text/plain，文本归属各自框架")
+                print("  [ OK   ] %-32s %s [ASSERT] %s"
+                      % (s["id"], s["desc"], note))
+                asserted += 1
             else:
-                print("  [ OK   ] %-32s %s (status %s, body not compared)"
-                      % (s["id"], s["desc"], gs))
-                same += 1
+                diffs += 1
+                print("  [ DIFF ] %-32s %s [ASSERT 边界已被违反]" % (s["id"], s["desc"]))
+                for pr in problems[:14]:
+                    print("           - %s" % pr)
             continue
 
         problems = []
@@ -570,7 +692,7 @@ def main():
 
         if not problems:
             print("  [ OK   ] %-32s %s" % (s["id"], s["desc"]))
-            same += 1
+            byte_equal += 1
         else:
             diffs += 1
             print("  [ DIFF ] %-32s %s" % (s["id"], s["desc"]))
@@ -583,7 +705,12 @@ def main():
                 print("           RAG raw: %s" % rtext[:500])
 
     print("-" * 78)
-    print("steps=%d  same=%d  known=%d  unexpected=%d" % (len(steps), same, known, diffs))
+    # `asserted` = 走了「按边界断言」这条路的步骤数（E-1 收口后不再是「没看 body」，
+    # 而是「按已签字的 N-1 / DRIFT-006 边界分别断言两侧」）。
+    # `byte_equal` 才是真正跨端逐字比对的步数。两个数分开报，避免把
+    # 「靠断言通过」误读成「两侧 body 逐字相同」。
+    print("steps=%d  asserted=%d  byte_equal=%d  unexpected=%d"
+          % (len(steps), asserted, byte_equal, diffs))
     return 1 if diffs else 0
 
 

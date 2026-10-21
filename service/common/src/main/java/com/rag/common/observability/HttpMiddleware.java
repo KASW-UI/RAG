@@ -574,12 +574,46 @@ public final class HttpMiddleware {
         public void setHeader(String name, String value) {
             if (timedOut || clientCancelled) return;
             capturedHeaders.put(name, value);
+            // 关键修复（2026-10-22 E-1 实测取证）：与 setStatus 同构的问题，头也要**实时** propagate。
+            //
+            // 旧实现只写 capturedHeaders，等 flushTo 再统一写回 underlying。实测（真实 Tomcat）：
+            //   200 JSON 响应   → Content-Type: application/json 正常
+            //   400 text/plain   → **Content-Type 完全丢失**，且 Transfer-Encoding: chunked
+            //                       + Connection: close
+            // 原因是 flushTo 在 chain.doFilter() **之后**才执行，此时下游
+            // outputMessage.flush() → wrapper.flushBuffer() → 底层 Tomcat 已 committed，
+            // 此时再 dst.setHeader(...) 会被 Tomcat **静默忽略**（不报错、不断言）。
+            //
+            // ⚠️ 这正是 §3.3「框架机制必须验证实际生效」第四类的又一次实例：
+            // 「代码里 headers.set(...) 明明写了」不等于「客户端收到的响应里有」。
+            // 它此前 4 轮对拍全绿，只因为 difftest **只比 body 不比响应头**，
+            // 而 body 恰好是对的（DRIFT-006 对齐的正是正文）。
+            ((HttpServletResponse) this.original).setHeader(name, value);
         }
 
         @Override
         public void addHeader(String name, String value) {
             if (timedOut || clientCancelled) return;
             capturedHeaders.merge(name, value, (a, b) -> a + "," + b);
+            // 与 setHeader 同理：实时 propagate（见上面注释）
+            ((HttpServletResponse) this.original).addHeader(name, value);
+        }
+
+        /**
+         * Content-Type 单独 override。
+         *
+         * <p>{@link jakarta.servlet.http.HttpServletResponseWrapper} 的默认实现
+         * {@code setContentType(type) → response.setContentType(type)} 是<b>直接透传</b>的，
+         * 本类未 override 它。为避免「setContentType 直通、setHeader 进 buffer」这种
+         * 两套语义并存（本轮漂移的间接成因），这里显式接管，走与 setHeader 相同的实时路径。
+         */
+        @Override
+        public void setContentType(String type) {
+            if (timedOut || clientCancelled) return;
+            if (type != null) {
+                capturedHeaders.put("Content-Type", type);
+            }
+            ((HttpServletResponse) this.original).setContentType(type);
         }
 
         int statusCode() {
@@ -611,8 +645,10 @@ public final class HttpMiddleware {
                 // 超时 / 客户端断连时不 flush captured body（避免污染 timeout 响应）
                 return;
             }
-            // 2026-10-21 修复后：setHeader 仍走 buffer（bufferedHeaders 与 buffered body 一同 flush）；
-            // setStatus / sendError 已改为实时 propagate 到 underlying，见上面 setStatus 的注释。
+            // 2026-10-22（E-1）更新：setHeader / addHeader / setContentType 均已改为**实时 propagate**，
+            // 与 setStatus 同一策略。这里保留二次写入作为兜底：Tomcat 的 setHeader 是
+            // **覆盖**语义（不是 add），所以重复写入不会产生重复 header；
+            // 它覆盖的是「下游完全没碰过 underlying」的少数路径。
             for (Map.Entry<String, String> e : capturedHeaders.entrySet()) {
                 dst.setHeader(e.getKey(), e.getValue());
             }
