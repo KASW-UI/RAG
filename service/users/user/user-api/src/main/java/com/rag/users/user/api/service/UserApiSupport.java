@@ -16,7 +16,10 @@ import java.util.Map;
  *   - 取代了原 internal.svc.ServiceContext 中的 helper
  *
  * HUMAN_ONLY.MD 提到的方法：
- *   - extractUserId：from request attribute "userId"（由 JwtAuthInterceptor 写入）
+ *   - claimedUID：from request attribute "userId"（由 JwtAuthInterceptor 写入）
+ *     【DEAD-CODE-001 已删】原 extractUserId 是 IdentityResolver.claimedUID 的零调用方薄包装，
+ *     Go 侧无对应物（Go 直接调 identity.ClaimedUID）。按 §3.4.1 D-2 先例，
+ *     零消费者的代码不能算「已对齐」，且它等于给后人第二个入口 —— 已删除，调用方直接用 claimedUID。
  *   - resolveUserId：Identity check
  *
  * 额外提供：
@@ -45,14 +48,6 @@ public class UserApiSupport {
     /** 与 user-rpc AvatarDomainService.normalizeHistoryId 同款（TrimSpace）。 */
     public String normalizeHistoryId(String value) {
         return value == null ? "" : value.trim();
-    }
-
-    /**
-     * 从 request attribute "userId" 取 uid（由 JwtAuthInterceptor 写入）。
-     * 失败抛 IdentityResolver.ErrInvalidClaimException（与 Go 端 identity.ClaimedUID 1:1）。
-     */
-    public long extractUserId(HttpServletRequest request) {
-        return IdentityResolver.claimedUID(request);
     }
 
     /**

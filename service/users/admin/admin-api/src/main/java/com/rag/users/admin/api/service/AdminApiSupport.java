@@ -15,7 +15,9 @@ import java.util.Map;
  *
  * <p>框架职责：
  * <ul>
- *   <li>{@code extractAdminId}：from request attribute "userId"（由 AdminJwtAuthInterceptor 写入）</li>
+ *   <li>{@code claimedUID}：from request attribute "userId"（由 AdminJwtAuthInterceptor 写入）。
+ *       【DEAD-CODE-001 已删】原 extractAdminId 是 IdentityResolver.claimedUID 的零调用方薄包装，
+ *       Go 侧无对应物。按 §3.4.1 D-2 先例删除，调用方直接用 claimedUID。</li>
  *   <li>{@code parseUid}：uid 字符串解析（6 个 Service 共用同一份实现）</li>
  *   <li>{@code fromProto(AdminInfo proto)} → DTO 转换</li>
  *   <li>{@code fromProto(UserInfo proto)} → DTO 转换（admin.proto.UserInfo，与 dto UserInfo 同名用全限定名）</li>
@@ -60,14 +62,6 @@ public class AdminApiSupport {
                     com.rag.users.common.errmsg.ErrorCode.ERROR_REQUEST_PARAM.getCode(),
                     com.rag.users.common.errmsg.ErrorCode.ERROR_REQUEST_PARAM.getMsg());
         }
-    }
-
-    /**
-     * 从 request attribute "userId" 取 uid（由 AdminJwtAuthInterceptor 写入）。
-     * 失败抛 IdentityResolver.ErrInvalidClaimException（与 Go 端 admin ClaimedUID 1:1）。
-     */
-    public long extractAdminId(HttpServletRequest request) {
-        return IdentityResolver.claimedUID(request);
     }
 
     /**

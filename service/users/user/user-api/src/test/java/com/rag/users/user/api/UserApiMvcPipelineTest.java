@@ -18,6 +18,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -30,6 +31,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -97,7 +101,11 @@ class UserApiMvcPipelineTest {
 
     @Autowired
     private MockMvc mockMvc;
-    @Autowired
+    /**
+     * spy 而非纯 mock：DRIFT-009/010 的语义正是「黑名单<b>有没有被查、用哪个 key 查的</b>」，
+     * 纯 mock 证明不了「一次都没调用」这个顺序断言。spy 保留真容器 Redis 的连接与真 key 命中。
+     */
+    @MockitoSpyBean
     private StringRedisTemplate redisTemplate;
 
     @MockitoBean
@@ -110,6 +118,8 @@ class UserApiMvcPipelineTest {
         Mockito.when(userRpcClient.userRpc()).thenReturn(stub);
         // 每个用例从干净的黑名单开始
         redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        // flushAll 本身会记进 spy 的交互记录，清掉，只留「被测请求」的交互
+        Mockito.clearInvocations(redisTemplate);
     }
 
     private static String validToken() {
@@ -308,5 +318,134 @@ class UserApiMvcPipelineTest {
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(1003));
+    }
+
+    // ==================================================================
+    // DRIFT-009 / DRIFT-010：鉴权两段的顺序与 token 提取（issue #71186893）
+    //
+    // Go 出处（三段）：
+    //   rest/engine.go:101-113 bindRoute 先 appendAuthHandler(JWT) 再 ThenFunc(route.Handler)；
+    //   rest/chain/chain.go 的 Then = m0(m1(...mN(h)))，索引 0 最外层先执行；
+    //   rest/server.go:222-233 WithMiddleware 在构造期把黑名单包进 route.Handler，
+    //   它是 ThenFunc 的参数，比 chain 任何元素都内层。
+    //   ⇒ 真实顺序：Authorize(JWT) → CheckBlacklist → handler
+    //
+    // token 提取：golang-jwt/jwt/v4@v4.5.2/request/oauth2.go:7-12
+    //   前缀大小写不敏感（ToUpper 比较），不匹配时【原样返回整串】
+    // ==================================================================
+
+    /**
+     * DRIFT-009：验签先于黑名单。签名无效时黑名单<b>一次都不查</b>，
+     * 与 Go 一致（Authorize 先失败，CheckBlacklistMiddleware 根本不会被调用）。
+     */
+    @Test
+    @DisplayName("DRIFT-009：验签先于黑名单 —— 无效签名时一次都不查 Redis")
+    void signatureVerifiedBeforeBlacklistLookup() throws Exception {
+        redisTemplate.opsForValue().set("user:jwt_blacklist:not-a-valid-jwt", "banned");
+
+        mockMvc.perform(post("/user/v1/get")
+                        .header("Authorization", "Bearer not-a-valid-jwt")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
+
+        verify(redisTemplate, never()).hasKey(Mockito.anyString());
+        verify(stub, never()).getUser(any());
+    }
+
+    /**
+     * DRIFT-010（安全）：<b>注销绕过</b>。
+     *
+     * <p>Go：{@code "XXBearer eyJ..."} 的验签 token 是<b>整串</b>（oauth2.go 前缀不匹配即原样返回）
+     * ⇒ 必然验签失败 → 401。
+     *
+     * <p>修复前的 RAG 用 {@code startsWith("Bearer ")}（大小写敏感）直接判 401 —— 结果同样是 401，
+     * 但那不是 Go 的机制；真正的漏洞形态在 admin 侧（那里用 split 取 parts[1] 会<b>放行</b>）。
+     * 本用例在 user 侧锁住「非规范前缀不得放行」，两个模块共用 BearerTokenExtractor 后行为一致。
+     */
+    @Test
+    @DisplayName("DRIFT-010：XXBearer 前缀不得绕过黑名单")
+    void nonBearerPrefixedTokenCannotBypassBlacklist() throws Exception {
+        String token = validToken();
+        redisTemplate.opsForValue().set("user:jwt_blacklist:" + token, "banned");
+
+        mockMvc.perform(post("/user/v1/get")
+                        .header("Authorization", "XXBearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
+
+        verify(stub, never()).getUser(any());
+    }
+
+    /**
+     * DRIFT-010：{@code Bearer } 前缀<b>大小写不敏感</b>（Go：{@code strings.ToUpper(tok[0:7]) == "BEARER "}）。
+     * 修复前本模块用大小写敏感的 {@code startsWith("Bearer ")}，小写写法会被误拒为 401。
+     */
+    @Test
+    @DisplayName("DRIFT-010：小写 bearer 前缀应被接受（Go 用 ToUpper 比较）")
+    void bearerPrefixIsCaseInsensitive() throws Exception {
+        when(stub.getUser(any())).thenReturn(com.rag.users.user.proto.GetUserResp.newBuilder()
+                .setFound(true)
+                .setUser(com.rag.users.user.proto.UserInfo.newBuilder()
+                        .setUid(CLAIM_UID).setUsername("u").setStatus(0L))
+                .build());
+
+        mockMvc.perform(post("/user/v1/get")
+                        .header("Authorization", "bearer " + validToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(stub).getUser(any());
+        // 黑名单用的是大小写【敏感】的 TrimPrefix ⇒ 查未剥前缀的整串（Go 自身如此）
+        verify(redisTemplate).hasKey("user:jwt_blacklist:bearer " + validToken());
+    }
+
+    /** 规范写法 + 有效签名 + 在黑名单 → 401，且查的是 Go 的 key 格式。 */
+    @Test
+    @DisplayName("DRIFT-009：有效签名 + 已拉黑 → 401，且用 Go 的 key")
+    void validTokenInBlacklistRejected() throws Exception {
+        String token = validToken();
+        redisTemplate.opsForValue().set("user:jwt_blacklist:" + token, "banned");
+
+        mockMvc.perform(post("/user/v1/get")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
+
+        verify(redisTemplate).hasKey("user:jwt_blacklist:" + token);
+        verify(stub, never()).getUser(any());
+    }
+
+    /**
+     * DRIFT-006：畸形 JSON ⇒ Go 的 {@code http.Error(w, msg, 400)} 形状。
+     *
+     * <p>Go 出处：{@code service/user} 全树未注册 {@code httpx.SetErrorHandler}
+     * ⇒ {@code httpx.Parse} 失败走 {@code doHandleError} 的 {@code handler == nil} 分支
+     * ⇒ {@code text/plain; charset=utf-8} + 裸文本 + 尾随换行，<b>不是</b> envelope。
+     */
+    @Test
+    @DisplayName("DRIFT-006：畸形 JSON → 400 + text/plain + 裸文本（Go 的 http.Error 形状）")
+    void malformedJsonReturnsPlainTextBadRequest() throws Exception {
+        mockMvc.perform(post("/user/v1/get")
+                        .header("Authorization", "Bearer " + validToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"a\":}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"));
+
+        // 关键：body 不能是 envelope —— Go 的这条路径根本没有 {code,msg,data}
+        String body = mockMvc.perform(post("/user/v1/get")
+                        .header("Authorization", "Bearer " + validToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"a\":}"))
+                .andReturn().getResponse().getContentAsString();
+        assertFalse(body.trim().startsWith("{") && body.contains("\"code\""),
+                "400 响应体不得是 envelope，实际 = " + body);
+        assertTrue(body.endsWith("\n"), "Go 的 fmt.Fprintln 会补尾随换行，实际 = " + body);
     }
 }

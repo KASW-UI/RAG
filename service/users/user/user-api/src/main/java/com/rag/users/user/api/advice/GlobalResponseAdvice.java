@@ -57,6 +57,20 @@ public class GlobalResponseAdvice implements ResponseBodyAdvice<Object> {
         if (body == null || body instanceof Response) {
             return body;
         }
+        // 【DRIFT-006】非 JSON 响应必须原样透传，不能包 envelope。
+        //
+        // Go 出处：go-zero rest/httpx/responses.go 的 doHandleError 在 handler == nil 时走
+        //   http.Error(w, err.Error(), http.StatusBadRequest) —— 产出的是
+        //   Content-Type: text/plain; charset=utf-8 + 裸文本，**没有 {code,msg,data} 结构**。
+        //   envelope 只由 httpx.OkJson 产出，而它固定写 Content-Type: application/json
+        //   （同文件 doWriteJson）。
+        //
+        // 因此判定条件是「这次写出的到底是不是 JSON」，而不是「body 是不是字符串」——
+        // 否则 405/415 这类同样走 text/plain 的分支会被漏判。
+        if (selectedContentType != null
+                && !MediaType.APPLICATION_JSON.isCompatibleWith(selectedContentType)) {
+            return body;
+        }
         return new Response(ErrorCode.SUCCESS.getCode(), ErrorCode.SUCCESS.getMsg(), body);
     }
 }

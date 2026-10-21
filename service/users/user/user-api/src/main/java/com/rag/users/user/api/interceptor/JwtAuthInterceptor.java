@@ -3,6 +3,7 @@ package com.rag.users.user.api.interceptor;
 import com.rag.common.exception.AuthenticationException;
 import com.rag.common.exception.BusinessException;
 import com.rag.users.common.errmsg.ErrorCode;
+import com.rag.users.common.jwt.BearerTokenExtractor;
 import com.rag.users.common.jwt.JwtUtil;
 import com.rag.users.user.api.config.UserApiProperties;
 import io.jsonwebtoken.Claims;
@@ -103,20 +104,23 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             return true;
         }
 
+        // ---------- 阶段 1：JWT 验签（对应 go-zero rest.WithJwt → rest/handler/authhandler.go Authorize）----------
         String authHeader = request.getHeader("Authorization");
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            // Go 端 rest.WithJwt：缺少 Bearer token → 401
-            log.warn("protected path {} without Bearer token, uid cannot be resolved", uri);
+        if (authHeader == null || authHeader.isEmpty()) {
+            log.warn("protected path {} without Authorization header", uri);
             throw new AuthenticationException(
                     ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
                     ErrorCode.ERROR_TOKEN_RUNTIME.getMsg()
             );
         }
-        // DRIFT-008：Go 出处 checkblacklistmiddleware.go:29 是 `strings.TrimPrefix(authHeader, "Bearer ")`，
-        // <b>不</b> trim 余下部分。此前的 `.trim()` 会造成两处可观察差异：
-        //   ① RAG 接受 Go 会因签名不符而 401 的 token（"Bearer  abc " → Go " abc " / RAG "abc"）；
-        //   ② 两边算出的 blacklist key 不同（带/不带尾空格），注销后的黑名单查询会错配。
-        String token = authHeader.substring("Bearer ".length());
+        // Go 出处：golang-jwt/jwt/v4@v4.5.2/request/oauth2.go:7-12
+        //   stripBearerPrefixFromTokenString：前缀【大小写不敏感】（strings.ToUpper 比较），
+        //   且【不匹配时原样返回整串】而不是报错。
+        // 本类此前用 startsWith("Bearer ")（大小写敏感）+ substring(7)，
+        // 与 Go 有两处偏差：① "bearer <有效token>"（小写）Go 放行、本类 401；
+        //                        ② 缺前缀时 Go 用整串验签（必失败 401），本类直接 401 —— 结果同但机制不同。
+        // 与 admin 侧共用 BearerTokenExtractor，避免两份实现各自演化出 DRIFT-010 那类缺陷。
+        String token = BearerTokenExtractor.tokenForSignatureVerification(authHeader);
         if (token.isEmpty()) {
             log.warn("protected path {} with empty Bearer token", uri);
             throw new AuthenticationException(
@@ -138,9 +142,7 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
                 // Go 出处：go-zero 的 rest.WithJwt 只验签名与 exp，不校验 claim 取值；
                 // `uid > 0` 是业务规则，落在 identity 层
                 // （identity/resolve.go:75-77 `if err != nil || uid <= 0 { return 0, ErrInvalidClaim }`）。
-                // 之前的实现放在拦截器里直接 401，导致 Go 返回 200 + 1006 的场景
-                // （get / avatar.history / avatar / avatar.select 四个端点）在 RAG 上变成了 401。
-                // 现在把取值判断交还给 IdentityResolver.claimedUID，与 Go 的层次划分一致。
+                // 放在本层会导致 Go 返回 200 + 1006 的场景在 RAG 上变成 401。
                 request.setAttribute("userId", Long.valueOf(uid));
             } else {
                 log.warn("JWT claim userId missing or wrong type : {}", claim == null ? "null" : claim.getClass());
@@ -160,17 +162,18 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             );
         }
 
-        // Redis blacklist 检查（与 CheckBlacklistFilter 一致）
-        String blacklistKey = BLACKLIST_KEY_PREFIX + token;
-        Boolean exists;
-        try {
-            exists = redisTemplate.hasKey(blacklistKey);
-        } catch (Throwable t) {
-            // Redis 故障：不阻塞业务（与 Go 端 err == nil && exists 行为一致）
-            log.warn("Redis blacklist check failed : {}", t.getMessage());
-            exists = null;
-        }
-        if (exists != null && exists) {
+        // ---------- 阶段 2：黑名单检查（对应 Go CheckBlacklistMiddleware.Handle）----------
+        // Go 出处 checkblacklistmiddleware.go:22-44：header 为空 → 直接放行；
+        // TrimPrefix 后为空 → 直接放行且**不写 jwt_token**；否则查 Redis，
+        // 命中即 401；未命中则把【TrimPrefix 结果】写进 ctx["jwt_token"]。
+        //
+        // 顺序说明：Go 的 Authorize 排在黑名单之前
+        // （rest/engine.go:101-113 bindRoute 先 appendAuthHandler 再 ThenFunc(route.Handler)，
+        //  而 chain.Then = m0(m1(...mN(h)) 使索引 0 最外层先执行；黑名单被
+        //  rest/server.go:222-233 WithMiddleware 包进 route.Handler，是 ThenFunc 的参数）。
+        // ⇒ 验签失败时黑名单**从不被查**，Go 也不为畸形 token 产生任何 Redis 读。
+        String jwtToken = BearerTokenExtractor.trimBearerPrefix(authHeader);
+        if (!jwtToken.isEmpty() && isBlacklisted(jwtToken)) {
             log.warn("token in blacklist, uid={}", uid);
             throw new AuthenticationException(
                     ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
@@ -178,8 +181,30 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             );
         }
 
-        // 通过：把 token 字符串写入 request attribute "jwt_token"（与 Go 端 context.WithValue 等价）
-        request.setAttribute("jwt_token", token);
+        request.setAttribute("jwt_token", jwtToken);
+        if (!jwtToken.equals(token)) {
+            // 与 Go 一致的不一致：非 "Bearer " 规范写法下两段取法不同（Go 自身如此）。保留 warn 便于排查。
+            log.warn("user blacklist token != jwt token (auth header is not 'Bearer <token>')");
+        }
         return true;
+    }
+
+    /**
+     * Redis 黑名单查询 —— fail-open 与 Go 逐条对齐。
+     *
+     * <p>Go: {@code exists, err := m.Redis.ExistsCtx(...); if err == nil && exists { 401 }}。
+     * Redis 故障时 {@code err != nil} ⇒ 条件为 false ⇒ <b>放行</b>，不阻塞业务。
+     * 本实现把异常吞成 {@code null}，随后 {@code exists != null && exists} 同样为 false ⇒ 放行。
+     */
+    private boolean isBlacklisted(String token) {
+        String blacklistKey = BLACKLIST_KEY_PREFIX + token;
+        Boolean exists;
+        try {
+            exists = redisTemplate.hasKey(blacklistKey);
+        } catch (Throwable t) {
+            log.warn("Redis blacklist check failed : {}", t.getMessage());
+            exists = null;
+        }
+        return exists != null && exists;
     }
 }

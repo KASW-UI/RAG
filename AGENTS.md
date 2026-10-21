@@ -200,6 +200,61 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 > 锁住现状 —— 否则下一个「语义一致性审计」agent 会把它当成新发现的漂移再「修」一遍。
 > **N-6 是个例外**：本批没有真正"修"它的工程动机，仅是「按政策仍要对齐 Go 真源」与「对齐会让 RAG 变差」的真实张力被照搬到错误响应形状——但**没有防回退测试**，见上面 N-6 行尾的注。
 
+#### 3.4.4 `service/users` 基础组件审计后的新增留档（2026-10-21，issue #71186893）
+
+对 `service/users` 9 个**基础组件**（JWT 签发 / 错误码表 / 密码哈希 / 身份断言 / 鉴权链 / 响应信封 / 雪花 ID / 事务持久化 / RPC 客户端）做 Go → Spring Boot 语义一致性验证（只读审查），
+结论 **SEMANTICALLY NOT EQUIVALENT**：1 项方向性错误 + 1 项**安全漏洞** + 3 项可观察差异 + 1 项死代码。
+
+##### 已修（4 项，全部带能真正触发机制的回归测试）
+
+| ID | 内容 | Go 行为 | RAG 修复前 | 修复后 |
+|---|---|---|---|---|
+| **DRIFT-009** | **鉴权链顺序反了**（SEMANTIC MISMATCH） | `Authorize(JWT)` → `CheckBlacklist` | `CheckBlacklist` → `Authorize` | 改回验签优先 |
+| **DRIFT-010** | **注销绕过**（安全，本批新发现） | `stripBearerPrefixFromTokenString` 前缀不匹配时**原样返回整串** → 验签必失败 | `split(" ", 2).parts[1]` 取到 `"eyJ..."` **验签通过**，黑名单又用整串查不到 | 按 Go 逐字重写；`uid <= 0` 检查移出拦截器，交给 `IdentityResolver` |
+| **DRIFT-002** | 前缀语义 | 前缀**大小写不敏感**；缺失前缀**不报错**、原样当 token | `startsWith("Bearer ")` 大小写敏感 → 小写 `bearer` 被误拒 | 与 admin 侧共用 `BearerTokenExtractor` |
+| **DRIFT-006** | 400 响应形状 | `http.Error(w, msg, 400)` → `text/plain; charset=utf-8` + 裸文本 + 尾换行 + `nosniff` | `ResponseEntity.status(400).build()` → **空 body** | `goStylePlainTextBadRequest` + advice 对非 JSON 透传 |
+
+> **DRIFT-009 的病灶形态与 §3.4.2 N-1 完全同构，但方向相反，值得单独记住**：
+> N-1 是「引用了不存在的机制」，DRIFT-009 是「**引用了真实文件、但把 chain 的内外关系读反了**」。
+> 原 javadoc 写「WithJwt 追加到切片尾部 ⇒ 黑名单是外层、先执行」——
+> `Append` 到尾部确实是 chain 里最内层，但**黑名单根本不在 chain 里**：
+> `rest/server.go:222-233` `WithMiddleware` 在**构造期**就把 `route.Handler` 包成
+> `middleware(route.Handler)`，它是 `ThenFunc` 的**参数**，比 chain 任何元素都靠内。
+> **假出处比无出处更贵**：无出处时 review 会去查；假出处会让 review 直接采信一个方向相反的结论。
+>
+> 更严重的是它还**同时锁死了测试**：`AdminApiMvcPipelineTest#blacklistCheckedBeforeSignatureVerification`
+> 与 `AdminSemanticDriftApiRegressionTest#interceptor_checksBlacklistBeforeSignatureVerification`
+> 两个用例名都把错误顺序写成了规格。**评审纪律的推论：测试名里出现「先后顺序」时，
+> 必须独立回 Go 源码复核一次，不能因为「已有测试锁住」就默认它对。**
+
+> **DRIFT-010 的教训是「安全规则的第二份实现本身就是缺陷来源」**。
+> 同样的前缀提取逻辑当时散在 admin（`split(" ", 2)`）与 user（`startsWith("Bearer ")`）两处，
+> 各错各的。已抽到 `users-common` 的 `BearerTokenExtractor`，两个模块共用一份，
+> 且**刻意保留 Go 内部两套互不相同的取法**（验签用大小写不敏感的 strip，
+> 黑名单用大小写敏感的 `TrimPrefix`）—— 合并成一个方法等于擅自修好 Go 的 bug，
+> 那会制造一处新的语义漂移。
+
+##### 不改代码、只留档（3 项）
+
+| ID | 内容 | 理由 |
+|---|---|---|
+| **DRIFT-003** | Go 的 `errmsg.codeMsg`（`errmsg.go:38-68`）**缺 1017 / 1018** ⇒ `GetErrMsg(1017)==GetErrMsg(1018)=="FAIL"`；RAG 的 `ErrorCode` 补了真实中文 | 当前潜伏：Go 从不返回这两个码；RAG 侧 1018 **只作日志码**（`UserDomainService.java:550,607`，线上抛的仍是 `Status.NOT_FOUND`）。**但若 N-3 日后改成对齐 Go，`GetErrMsg(1017)` 会变成 `"FAIL"`，届时 RAG 的提示语必须同步回退。下一个 agent 不得把它当成新发现的漂移再「修」一遍** |
+| **DRIFT-005** | Snowflake workerId 优先级：Go = `env → hash`（`snowflake.go:52-85`），RAG = `env → properties → hash`（多一层配置面）；截断 Go = `uint16(id)` 后 `%1024`，RAG 直接 `%1024` | RAG 是配置超集；Go 的截断对 `>65535` 的值是缺陷。两者都不可观察，不改代码 |
+| **DRIFT-004**（**待签字**） | `cryptx.CheckPassword` 对**任何** bcrypt 错误（含 hash 被污染）返回 false ⇒ 登录报 `1002`；RAG `BCryptPasswordEncoder.matches` 对非 bcrypt 格式抛 `IllegalArgumentException` ⇒ `500 + 5001` | **Go 自身有缺陷、对齐会让 RAG 变差**（把数据损坏伪装成密码错）。按 §3.4.2 纪律不得由单个 agent 自行判断，**用户签字前不动代码** |
+
+##### 本批新增的测试（11 条）
+
+| 模块 | 测试类 | 条数 | 关键点 |
+|---|---|---|---|
+| admin-api | `AdminApiMvcPipelineTest` | 13 → 17 | 改用 `@MockitoSpyBean` 包真 Redis，使「黑名单**一次都没查**」成为可断言的顺序证据 |
+| admin-api | `AdminSemanticDriftApiRegressionTest` | 24 → 26 | 新增注销绕过 + 大小写不敏感两条 |
+| user-api | `UserApiMvcPipelineTest` | 9 → 14 | 新增顺序 / 绕过 / 大小写 / 黑名单 key / 400 text/plain 五条 |
+
+> **`@MockitoSpyBean` 而非纯 mock Redis 的理由**：纯 mock 只能证明「代码调用了 `hasKey`」，
+> 证明不了「它一次都没调用」—— 而 DRIFT-009 的语义**恰恰是后者**。
+> 旧的 `blacklistCheckedBeforeSignatureVerification` 用「Redis 里有这条 key」当顺序判据，
+> 那条断言在任何实现下都成立，属于**假绿**。
+
 #### 3.4.1 `service/common` 的 Java 端差异（2026-10-21 逐行审计产出）
 
 Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 RAG 全部主源码，产出 20 项偏差、修复 21 处（分支 `row/common-fix-semantic-drift`，issue #71186341）。**以下 5 条是修复后仍然存在、且无法靠改代码消除的差异**。
@@ -344,6 +399,12 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 | ~~P2~~ | ~~`MessageRpcSupport.trimPreview` 截断长度错：255 vs Go 的 80 runes~~ | ✅ **2026-10-21 已修** | Go 出处 `message.go:234-240` 字面量 `80`。旧实现的 255 抄自列宽 `varchar(255)` 而非 Go 规则；且用 `String.length()`/`substring` 按 UTF-16 code unit 切，**中文测不出来、代理对会切出半个非法字符**。改为 `codePointCount` + `offsetByCodePoints`。新增 `MessageRpcSupportTrimPreviewTest` 6 条，其中 `surrogatePairCountedAsOneRune` 用 100 个 emoji 锁住 char≠rune |
 | ~~P2~~ | ~~`markNotificationRead` 拆 SELECT + UPDATE~~ | ✅ **2026-10-21 已修** | Go `message.go:72-86` 是单条 `UPDATE ... WHERE id = ? AND recipient_id = ?` + `RowsAffected == 0 → ErrRecordNotFound`。旧实现 `selectById` 校验归属后再 `updateById` 写入（**TOCTOU 竞态**），且 `updateById` 生成的 WHERE **不含 `recipient_id`**、受影响行数被丢弃。已折成单条原子 UPDATE，归属条件进 WHERE，受影响行数透出并映射 `NotFound`。新增 `MessageMarkNotificationReadTest` 4 条，断言打在 `LambdaUpdateWrapper.getSqlSegment()` 上（§3.3：mock 数据层测不到 SQL） |
 | **P0** | **`NotificationEntity.isRead` 字段名导致 MP lambda 运行期抛异常** | ✅ **2026-10-21 已修（本轮附带发现）** | 见 §6.2.4。这是本轮**唯一的运行期致命项**，且与 §6.2 上表所有条目无关，是修 `markNotificationRead` 时顺带撞出来的 |
+| ~~P0~~ | ~~**admin-api 鉴权链顺序反了（DRIFT-009）**~~ | ✅ **2026-10-21 已修**（issue #71186893） | Go 出处三段：`rest/engine.go:101-113` bindRoute 先 `appendAuthHandler` 再 `ThenFunc(route.Handler)`；`rest/chain/chain.go` 的 `Then = m0(m1(...mN(h))` 索引 0 最外层先执行；`rest/server.go:222-233` `WithMiddleware` 在构造期把黑名单包进 `route.Handler`（`ThenFunc` 的参数，比 chain 任何元素都内层）。⇒ **Authorize 先于 CheckBlacklist**。原 javadoc 的 Go 出处把内外关系读反了。已改回并把两个反向锁定的测试改名反向。详见 §3.4.4 |
+| ~~P0~~ | ~~**admin-api 注销绕过（DRIFT-010，安全）**~~ | ✅ **2026-10-21 已修**（issue #71186893） | `golang-jwt/jwt/v4@v4.5.2/request/oauth2.go:7-12` 的 `stripBearerPrefixFromTokenString` 在前缀不匹配时**原样返回整串**；旧实现 `split(" ",2).parts[1]` 会用 `"eyJ..."` 验签通过，而黑名单又按整串查不到 ⇒ **已注销的管理员 token 加 `XXBearer ` 前缀后仍可调用 admin-api**。已按 Go 逐字重写，并把该逻辑抽到 `users-common/BearerTokenExtractor` 由两个 api 模块共用。锁定用例 `AdminApiMvcPipelineTest#nonBearerPrefixedTokenCannotBypassBlacklist` + `AdminSemanticDriftApiRegressionTest#interceptor_nonBearerPrefixCannotBypassBlacklist` |
+| ~~P1~~ | ~~**user-api 前缀语义与 Go 不一致（DRIFT-002）**~~ | ✅ **2026-10-21 已修** | 旧 `startsWith("Bearer ")` 大小写敏感 ⇒ 小写 `bearer <有效token>` 被误拒 401；Go 是 `strings.ToUpper(tok[0:7])=="BEARER "` 的大小写不敏感比较。已改走 `BearerTokenExtractor`。锁定用例 `UserApiMvcPipelineTest#bearerPrefixIsCaseInsensitive` |
+| ~~P2~~ | ~~**400 响应体空 vs Go 的 text/plain（DRIFT-006）**~~ | ✅ **2026-10-21 已修** | Go：`service/user` 全树未注册 `httpx.SetErrorHandler` ⇒ `httpx.Parse` 失败走 `doHandleError` 的 `handler==nil` 分支 → `http.Error(w, msg, 400)` = `text/plain; charset=utf-8` + 裸文本 + 尾换行 + `nosniff`。RAG 原为 `ResponseEntity.status(400).build()`（空 body）。已加 `goStylePlainTextBadRequest`，并让 `GlobalResponseAdvice#beforeBodyWrite` 对非 JSON 响应透传（否则 400 文本会被再包成 envelope）。锁定用例 `UserApiMvcPipelineTest#malformedJsonReturnsPlainTextBadRequest` |
+| ~~P3~~ | ~~**`UserApiSupport.extractUserId` / `AdminApiSupport.extractAdminId` 零调用方**~~ | ✅ **2026-10-21 已删** | 二者是 `IdentityResolver.claimedUID` 的薄包装，Go 侧无对应物（Go 直接调 `identity.ClaimedUID`），`src/main` 下各 0 个调用方。按 §3.4.1 D-2 先例「零消费者的代码不能算已对齐」删除，避免留下第二个入口 |
+| **P1** | **`PasswordUtil.check` 对损坏 bcrypt hash 抛异常 vs Go 返回 false（DRIFT-004）** | —（**待用户签字**） | Go `cryptx.CheckPassword` 对任何 bcrypt 错误都返回 false ⇒ 登录报 `1002`；RAG `BCryptPasswordEncoder.matches` 对非 bcrypt 格式抛 `IllegalArgumentException` ⇒ `500 + 5001`。**Go 自身有缺陷、对齐会让 RAG 变差**，按 §3.4.2 纪律不得由单个 agent 自行判断。签字前不动代码，详见 §3.4.4 |
 
 ### 6.2.4 本轮（2026-10-21 第二批）取证与附带发现
 

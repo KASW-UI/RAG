@@ -345,19 +345,24 @@ class AdminSemanticDriftApiRegressionTest {
     }
 
     // ==================================================================
-    // DRIFT-009：黑名单先于验签
+    // DRIFT-009：验签先于黑名单（2026-10-21 按 Go 真实顺序回退，见 issue #71186893）
     // ==================================================================
 
     /**
-     * Go 出处：handler/routes.go 的 AddRoutes 中 {@code rest.WithJwt} 把 Jwt middleware
-     * 追加到切片尾部，而 {@code withMiddlewares} 反向包裹 ⇒ 实际链路是
-     * {@code CheckBlacklist(Jwt(handler))}，黑名单是<b>外层</b>、先执行。
-     * <p>本测试用一个"签名无效但已在黑名单中"的 token：Go 侧黑名单先命中直接 401，
-     * 根本走不到验签。可观察的判据 = <b>Redis 被查过</b>，且拒绝发生在验签之前。
+     * DRIFT-009 的核心判据（<b>方向已回退</b>）：一个"签名无效但已在黑名单中"的 token。
+     *
+     * <p>Go 出处（三段）：{@code rest/engine.go:101-113} bindRoute 先 appendAuthHandler(JWT)
+     * 再 {@code ThenFunc(route.Handler)}；{@code rest/chain/chain.go} 的 Then = {@code m0(m1(...mN(h))}
+     * 使索引 0 最外层先执行；{@code rest/server.go:222-233} WithMiddleware 在构造期把黑名单包进
+     * {@code route.Handler} —— 它是 {@code ThenFunc} 的参数，比 chain 任何元素都内层。
+     * ⇒ 真实顺序：<b>Authorize(JWT) → CheckBlacklist</b>。
+     *
+     * <p>本测试此前的断言是"Redis 被查过"（锁的是相反方向）。现在锁 Go 的方向：
+     * 验签先失败 ⇒ <b>黑名单一次都不查</b>，请求在第一阶段就被拒。
      */
     @Test
-    @DisplayName("DRIFT-009：黑名单检查先于 JWT 验签（签名无效的 token 也要先查 Redis）")
-    void interceptor_checksBlacklistBeforeSignatureVerification() {
+    @DisplayName("DRIFT-009：验签先于黑名单 —— 无效签名时黑名单一次都不查")
+    void interceptor_checksBlacklistAfterSignatureVerification() {
         var redis = Mockito.mock(StringRedisTemplate.class);
         Mockito.when(redis.hasKey(Mockito.anyString())).thenReturn(Boolean.TRUE);
         var interceptor = new AdminJwtAuthInterceptor(properties, redis);
@@ -366,14 +371,15 @@ class AdminSemanticDriftApiRegressionTest {
 
         assertThrows(AuthenticationException.class, () -> interceptor.preHandle(request, null, new Object()));
 
-        Mockito.verify(redis).hasKey("admin:jwt_blacklist:not-a-valid-jwt");
+        // Go：Authorize 先失败 ⇒ CheckBlacklistMiddleware 根本不会被调用
+        Mockito.verify(redis, Mockito.never()).hasKey(Mockito.anyString());
         Mockito.verify(request, Mockito.never()).setAttribute(Mockito.eq("userId"), Mockito.any());
     }
 
-    /** 黑名单未命中但签名无效 ⇒ 401，且黑名单确实被查过（说明走了阶段 1）。 */
+    /** 签名无效 ⇒ 401，且在验签阶段就结束、从没进入黑名单阶段。 */
     @Test
-    @DisplayName("DRIFT-009：黑名单未命中 + 签名无效 → 仍 401")
-    void interceptor_invalidSignatureRejectedAfterBlacklistPass() {
+    @DisplayName("DRIFT-009：无效签名 → 401，且未进入黑名单阶段")
+    void interceptor_invalidSignatureRejectedBeforeBlacklistStage() {
         var redis = Mockito.mock(StringRedisTemplate.class);
         Mockito.when(redis.hasKey(Mockito.anyString())).thenReturn(Boolean.FALSE);
         var interceptor = new AdminJwtAuthInterceptor(properties, redis);
@@ -382,7 +388,56 @@ class AdminSemanticDriftApiRegressionTest {
 
         assertThrows(AuthenticationException.class, () -> interceptor.preHandle(request, null, new Object()));
 
-        Mockito.verify(redis).hasKey("admin:jwt_blacklist:not-a-valid-jwt");
+        Mockito.verify(redis, Mockito.never()).hasKey(Mockito.anyString());
+    }
+
+    /**
+     * DRIFT-010（安全）：黑名单命中但请求头带了非规范前缀时，<b>不得放行</b>。
+     *
+     * <p>Go 出处 golang-jwt/jwt/v4@v4.5.2/request/oauth2.go:7-12 ——
+     * {@code stripBearerPrefixFromTokenString} 在前缀不匹配时<b>原样返回整串</b>，
+     * 于是 {@code "XXBearer eyJ..."} 的验签 token 是整串（必然失败 → 401）。
+     *
+     * <p>此前 RAG 用 {@code split(" ", 2).parts[1]} 会取出 {@code "eyJ..."} 验签通过，
+     * 再用整串查黑名单必然查不到 ⇒ 已注销 token 仍可用。本用例锁死修复后的行为。
+     */
+    @Test
+    @DisplayName("DRIFT-010：XXBearer 前缀不能绕过黑名单（Go 验整串必失败）")
+    void interceptor_nonBearerPrefixCannotBypassBlacklist() {
+        var redis = Mockito.mock(StringRedisTemplate.class);
+        Mockito.when(redis.hasKey(Mockito.anyString())).thenReturn(Boolean.TRUE);
+        var interceptor = new AdminJwtAuthInterceptor(properties, redis);
+        Mockito.when(request.getRequestURI()).thenReturn("/admin/v1/getself");
+        // 一个语法合法的 token，外层套一个不是 "Bearer " 的前缀
+        Mockito.when(request.getHeader("Authorization")).thenReturn("XXBearer " + realToken());
+
+        assertThrows(AuthenticationException.class, () -> interceptor.preHandle(request, null, new Object()));
+
+        // 关键：既没放行（没写 userId），也没拿剥出来的 token 去过黑名单
+        Mockito.verify(request, Mockito.never()).setAttribute(Mockito.eq("userId"), Mockito.any());
+    }
+
+    /** Go 出处 oauth2.go:8 的 {@code strings.ToUpper(tok[0:7]) == "BEARER "}：前缀大小写不敏感。 */
+    @Test
+    @DisplayName("DRIFT-010：Bearer 前缀大小写不敏感，小写 bearer 应被接受")
+    void interceptor_bearerPrefixIsCaseInsensitive() {
+        var redis = Mockito.mock(StringRedisTemplate.class);
+        Mockito.when(redis.hasKey(Mockito.anyString())).thenReturn(Boolean.FALSE);
+        var interceptor = new AdminJwtAuthInterceptor(properties, redis);
+        Mockito.when(request.getRequestURI()).thenReturn("/admin/v1/getself");
+        Mockito.when(request.getHeader("Authorization")).thenReturn("bearer " + realToken());
+
+        // 不抛异常 ⇒ 验签通过（小写前缀被剥掉）
+        interceptor.preHandle(request, null, new Object());
+
+        // 黑名单用的是大小写【敏感】的 TrimPrefix ⇒ 查的是未剥前缀的整串（Go 自身如此）
+        Mockito.verify(redis).hasKey("admin:jwt_blacklist:bearer " + realToken());
+        Mockito.verify(request).setAttribute("userId", Long.valueOf(1L));
+    }
+
+    /** 与 {@link #SECRET} 同源的、语法合法的 token，claim userId = 1。 */
+    private static String realToken() {
+        return JwtUtil.getToken(SECRET, System.currentTimeMillis() / 1000L, 2592000L, 1L);
     }
 
     /** Go 出处：CheckBlacklistMiddleware 在 header 缺失 / token 为空时直接放行，不查 Redis。 */

@@ -10,6 +10,8 @@ import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -117,9 +119,40 @@ public class GlobalExceptionHandler {
      * 若被下面的兜底 {@code Exception} 吞掉会变成 500，把客户端调用错误误报成服务端故障。
      */
     @ExceptionHandler(HttpMessageNotReadableException.class)
-    public ResponseEntity<Void> handleUnreadableBody(HttpMessageNotReadableException e) {
+    public ResponseEntity<String> handleUnreadableBody(HttpMessageNotReadableException e) {
         log.warn("unreadable request body : {}", e.getMessage());
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        return goStylePlainTextBadRequest(e.getMessage());
+    }
+
+    /**
+     * Go {@code http.Error(w, msg, 400)} 的逐字等价实现（DRIFT-006）。
+     *
+     * <p>Go 出处：go-zero v1.10.2 {@code rest/httpx/responses.go:doHandleError} 的
+     * {@code handler == nil} 分支。{@code service/user} 全树<b>从未</b>调用
+     * {@code httpx.SetErrorHandler}（grep 零命中），故 {@code httpx.Parse} 失败一定落到
+     * {@code http.Error(w, err.Error(), http.StatusBadRequest)}。
+     *
+     * <p>Go {@code net/http.Error} 的四件事必须都做：
+     * <ol>
+     *   <li>{@code Content-Type: text/plain; charset=utf-8}</li>
+     *   <li>{@code X-Content-Type-Options: nosniff}</li>
+     *   <li>写入 HTTP 状态码</li>
+     *   <li>{@code fmt.Fprintln(w, error)} —— <b>带一个尾随换行</b></li>
+     * </ol>
+     *
+     * <p><b>对齐边界（刻意）</b>：body 的<b>形状</b>（text/plain + 非空文本 + 尾换行）对齐；
+     * 文本<b>内容</b>不对齐、也不试图对齐 —— Go 侧是 go-zero 的解析错误文本，
+     * Java 侧是 Spring 的 {@code HttpMessageNotReadableException.getMessage()}，
+     * 两者来自不同框架，强行凑字面只会制造一处假的「1:1」。
+     *
+     * <p>配套改动见 {@code GlobalResponseAdvice#beforeBodyWrite}：非 JSON 响应不再被包 envelope。
+     */
+    private static ResponseEntity<String> goStylePlainTextBadRequest(String message) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.TEXT_PLAIN);
+        headers.set("X-Content-Type-Options", "nosniff");
+        String body = (message == null || message.isEmpty() ? "bad request" : message) + "\n";
+        return new ResponseEntity<>(body, headers, HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
