@@ -275,11 +275,25 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 
 | 项 | 内容 |
 |---|---|
-| **做了什么** | `RpcInterceptor.handle()` 在提交业务到 worker 线程时用 try-with-resources 绑定 `DeadlineState.bindToCurrent(deadlineEpochMs)`；业务侧在**发起** DB / bcrypt / snowflake / 下游调用**之前**调 `checkDeadline()`，已过期则抛 `Status.DEADLINE_EXCEEDED` |
+| **做了什么** | 两条路径各绑一次：`RpcInterceptor.handle()`（主动调用的路径）在提交 worker 时 `DeadlineState.bindToCurrent(deadlineEpochMs)`；gRPC server 路径在 `newUnaryServerInterceptor` 的 `onHalfClose()` 里绑定（那里才是真正跑 handler 的线程）。业务侧在**发起** DB / bcrypt / snowflake / 下游调用**之前**调 `checkDeadline()`，已过期则抛 `Status.DEADLINE_EXCEEDED` |
 | **Go 对应** | `context.WithTimeout(ctx, timeout)` 的 `ctx.Done()`：每个 Logic 入口 / 关键步骤前的 select |
 | **覆盖情况（2026-10-21 实测）** | `UserDomainService` **11 处**（login/register/update/selectavatar/uploadavatar 等主路径）；`AdminDomainService` 此前 **0 处**，本轮已补到 **13 处**（admin-api 对 admin-rpc 的全部业务调用） |
-| **回归网** | `AdminDomainServiceDeadlineTest`（2 条，13 方法逐个拦 + 反向放行）。**已实证能真红**：删掉 3 处守卫后立刻报 `NullPointer ... metrics is null` —— 即请求走到了业务层、守卫没生效 |
-| **⚠️ 它不能做什么** | **不能取消在途 IO**。E-4 实测（同日同场复测）：客户端已返回超时后，RAG 侧 PG 里的阻塞查询还存活 **4657ms**（Go 侧仅 203ms），worker 比客户端返回晚 4.34s 才退出。JDBC 驱动不响应线程 interrupt，这是 Java 侧的结构性限制，属 §3.4.1 B-1，**不是 DRIFT-018 能修的**。补充：`setQueryTimeout` 可缓解（B-1 补记第二层），但**不能靠补 `checkDeadline` 关闭 B-1** |
+| **⚠️⚠️ 此前从未真正生效** | **这 24 处守卫在 gRPC server 路径上一直是通过死代码在跑**：`onHalfClose()` 从未被调用（gRPC `ServerInterceptor` 压根没挂到 server 上，根因见 §6.4 的 H2 勘误），handler 线程上 `DeadlineState` 恒未设置 ⇒ `checkDeadline()` 的条件恒为 false，**一次都没有拦下过任何请求**。2026-10-21 补 `@Bean GrpcServerConfigurer` 后才第一次真正可达 |
+| **回归网** | `AdminDomainServiceDeadlineTest`（2 条，13 方法逐个拦 + 反向放行）。**但它只能证明「分支逻辑对」，不能证明「生产路径会走到」** —— 这一点已被本轮实测打脸：守卫全绿，而 `onHalfClose` 从未执行。见下 |
+| **⚠️ 它不能做什么** | **不能取消在途 IO**。JDBC 驱动不响应线程 interrupt，这是 Java 侧的结构性限制，属 §3.4.1 B-1，**不是 DRIFT-018 能修的**。B-1 由 `DeadlineQueryTimeoutInjector` 的 `setQueryTimeout` 关闭（已实施并端到端验证：查询滞留 4303ms → **176ms**，与 Go 的 182ms 同量级） |
+
+> **为什么单独记这一条**：它说明了 §6.2.6 E-4 那类缺口的典型形态 ——
+> **「框架限制」与「业务侧主动响应」是两件不同的事**，前者改不了，后者能做但容易漏做。
+> B-1 原留档把两者混成一句「当前 user-rpc 一处都未使用」，既高估了缺失（其实 11 处）、
+> 又让人误以为补齐 `checkDeadline` 就能关闭 B-1（不能）。
+>
+> **⚠️ 本条留档自身也曾踩了 §3.4.4 那条纪律（2026-10-21 补记）**：
+> 「回归网已实证能真红」是**真的**（删掉守卫确实会红），但它证明的只是
+> **「给定 `DeadlineState` 已过期，业务分支会走对」**，
+> 而**没有**证明「`DeadlineState` 真的会在生产请求里被设上」。
+> 这是「单测红 ≠ 生产可达」的又一例，与 `ObservabilityWiringTest` 的假绿同源。
+> **⇒ 补一条判据**：对「超时 / 取消 / deadline」这类**由框架注入的状态**，
+> 必须有一条**端到端**测试证明它真的被注入；只测「拿到该状态之后的行为」不够。
 
 > **为什么单独记这一条**：它说明了 §6.2.6 E-4 那类缺口的典型形态 ——
 > **「框架限制」与「业务侧主动响应」是两件不同的事**，前者改不了，后者能做但容易漏做。
@@ -353,7 +367,7 @@ Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 R
 
 | # | 位置 | 差异 | 影响面 | 关闭条件 |
 |---|---|---|---|---|
-| B-1 | `HttpMiddleware` 超时分支 / `RpcInterceptor` 超时调度 | **超时无法取消在途 IO**。Go 的 `context.WithTimeout` 到点 ctx Done，所有 ctx-aware IO（`http.Client` / `sql.DB` / `grpc.Dial`）立即返回、连接池立刻释放；Java 只能 `Future.cancel(true)` 发 `InterruptedException`，而 **JDBC 驱动、grpc-java 阻塞 stub、`java.net.http.HttpClient` 均不响应线程 interrupt** —— 阻塞在 socket read 上的调用会挂到查询自行结束 | **已实测坐实（E-4，2026-10-21）**：`tools/difftest/exp-b1-timeout-cancel.sh` 用 ACCESS EXCLUSIVE 表锁造真阻塞，两侧同跑 `user.login`。客户端返回超时后，**Go 侧 PG 里的阻塞查询 378ms 就消失、RAG 侧还存活 4455ms**（持锁事务释放为止）；客户端感知时延 Go 2035ms vs RAG 3047ms。数据与判读见 §6.2.6 E-4。**⚠️ 原留档写「当前 `user-rpc` 一处都未使用 `DeadlineState`」——该句已过时**：user-rpc 实有 **11 处** `checkDeadline()`（代码注释标 DRIFT-018），本轮已把 **admin-rpc 从 0 处补到 13 处**。 但 `checkDeadline` 只能避免**发起**新的慢查询，**对在途 IO 无能为力** —— 这正是 E-4 实测的结论。**⚠️ 本行的两组时长数字已被同日同场复测修正，见下方 B-1 补记** | **无法靠改 `service/common` 关闭**（Java 侧数据访问栈的结构性限制）。**① 字节码级证据**：链路是 MyBatis-Plus → MyBatis 执行器 → Spring JDBC → pgjdbc → socket，逐层 `javap -c` 数 `isInterrupted` 命中数为 **MyBatis `BaseExecutor` 0 次 / `SimpleExecutor` 0 次 / pgjdbc 42.6.2 `QueryExecutorImpl` 0 次** —— 即 `Future.cancel(true)` 发的 interrupt **在整条数据访问路径上没有任何一层检查**。**② 行为级证据（本轮新增，`tools/difftest/probe-jdbc-cancel.java`）**：绕开 HTTP/gRPC/MyBatis 直连 PG，主动 interrupt 一条等锁查询，结果**照常正常返回、耗时 11014ms**（比不 interrupt 的 10022ms 还长 1s）⇒ 静态证据升级为运行时行为证据。**③ 缓解手段已实测**：见下方 B-1 补记，`setQueryTimeout` 有效、`socketTimeout` 不可用 |
+| B-1 | `HttpMiddleware` 超时分支 / `RpcInterceptor` 超时调度 | **超时无法取消在途 IO**。Go 的 `context.WithTimeout` 到点 ctx Done，所有 ctx-aware IO（`http.Client` / `sql.DB` / `grpc.Dial`）立即返回、连接池立刻释放；Java 只能 `Future.cancel(true)` 发 `InterruptedException`，而 **JDBC 驱动、grpc-java 阻塞 stub、`java.net.http.HttpClient` 均不响应线程 interrupt** —— 阻塞在 socket read 上的调用会挂到查询自行结束 | **✅ 已实测坐实并已修复（E-4 + issue #71187874，2026-10-21）**。**修前**：`exp-b1-timeout-cancel.sh` 用 ACCESS EXCLUSIVE 表锁造真阻塞、两侧同跑 `user.login`，客户端返回后 **Go 侧 PG 查询 203ms 消失、RAG 侧还存活 4657ms**。**修后**：`DeadlineQueryTimeoutInjector` 按 `DeadlineState.remainingMillis()` 给每条 SQL 设 `setQueryTimeout` ⇒ pgjdbc 发 CancelRequest，**RAG 侧查询 176ms 消失，与 Go 的 182ms 同量级**；响应体也从 `text/plain "Request Timeout"` 变成 Go 的 `{"code":1015,"msg":"服务繁忙"}`。完整三层证据（纯 JDBC / 端到端 / 手段定性）见 §3.4.1「B-1 补记」 | **✅ 已关闭**（本行原写「无法靠改 `service/common` 关闭」，该结论**已过时**）。① **字节码证据**：链路 MyBatis-Plus → MyBatis → Spring JDBC → pgjdbc → socket，逐层 `javap -c` 数 `isInterrupted` 命中**均为 0** —— interrupt 在整条数据访问路径上无人检查。② **行为级证据**（`tools/difftest/probe-jdbc-cancel.java`）：主动 interrupt 一条等锁查询，它**照常正常返回、耗时 11014ms**（比不 interrupt 还长 1s）。③ **修复路径**：拦 `StatementHandler.prepare` 注入 timeout —— 与 Go `database/sql` 的 ctx-aware 取消是**同一条服务端语义且连接保可用**；`socketTimeout` 会让连接报废，语义相反，不可用。⚠️ 修复过程中还暴露更大的前置缺陷：gRPC `ServerInterceptor` 从未挂到 server 上，`DeadlineState` 恒未设置 ⇒ **DRIFT-018 的 24 处守卫此前全部是死代码**，见 §6.4 的 H2 勘误 |
 
 ##### B-1 补记：机制实验与缓解手段定性（2026-10-21 同日同场三组对照）
 
@@ -563,7 +577,7 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 
 | 优先级 | 项 | 最后核对 | 说明与证据 |
 |---|---|---|---|
-| ~~P0~~ | ~~`RpcServerInterceptorFactory` 在 user-rpc / admin-rpc 均未注册~~ | **2026-10-21 已修** | `UserRpcApplication` / `AdminRpcApplication` 的 `@Import` 均补 `RpcServerInterceptorFactory` + `ObservabilityProperties` + `ObservabilityLifecycle`；admin-rpc 另补 `SnowflakeBean/SnowflakeProperties/LoggerFactoryBean`（它此前连 `@Import` 都没有）。新增 `ObservabilityWiringTest`（`@SpringBootTest`）断言 `ServerInterceptor` 真是容器里的 Bean。分支 `row/common-fix-semantic-drift` |
+| ~~P0~~ | ~~`RpcServerInterceptorFactory` 在 user-rpc / admin-rpc 均未注册~~ | ✅ 2026-10-21 已修 · **2026-10-21 二次更正（issue #71187874）** | `UserRpcApplication` / `AdminRpcApplication` 的 `@Import` 均补 `RpcServerInterceptorFactory` + `ObservabilityProperties` + `ObservabilityLifecycle`；admin-rpc 另补 `SnowflakeBean/SnowflakeProperties/LoggerFactoryBean`（它此前连 `@Import` 都没有）。新增 `ObservabilityWiringTest`（`@SpringBootTest`）断言 `ServerInterceptor` 真是容器里的 Bean。分支 `row/common-fix-semantic-drift` **⚠️ 二次更正：本次「已修」不成立。** `@Import` 只让 Bean **存在**，grpc-spring-boot-starter 3.1.0 **从不自动注册**用户提供的 `ServerInterceptor`（`javap GrpcServerFactoryAutoConfiguration` → 只注入 `List<GrpcServerConfigurer>`；`GrpcServerProperties` 无 interceptor 字段）。真实缺陷由 B-1 的端到端实验暴露（见 §3.4.1「B-1 补记」）：`interceptCall` / `onHalfClose` 从未执行。**真正修法**：两个 rpc 模块各补 `@Bean GrpcServerConfigurer { server -> server.intercept(interceptor); }`。原测试之所以假绿，是因为它断言的是「Bean 存在」而非「server 用了它」⇒ §3.3 新增纪律与 `GrpcInterceptorWiringTest`（2 条） |
 | ~~P0~~ | ~~`ObservabilityProperties` 无 timeout 字段~~ | **2026-10-21 已修** | 新增 `httpTimeout` / `rpcTimeout`；两个 factory 改为读取该配置。**目标值已取证**：Go user 系 yaml 均未配 `Timeout`，实际生效值来自 go-zero v1.10.2 `rest/config.go:55` `default=3000` 与 `zrpc/config.go:46` `default=2000` ⇒ 各模块 yaml 显式落 `http-timeout: 3s` / `rpc-timeout: 2s` |
 | **P1** | `message-rpc` 6 个 `@Transactional` 方法的 self-invocation 风险 | —（**未核对**） | 同上。按约定 2 按 UNKNOWN 处理 |
 | ~~P1~~ | ~~`Logger`（静态）与 `LoggerFactoryBean`（Bean）两份逐行同构实现，重复约 370 行~~ | ✅ **2026-10-21 已去重**（用户 2026-10-21 批准动共享库公开 API） | 经方法体逐字比对，两份实现只差三处：方法可见性、方法名自调用、Bean 缺 serviceName 判空守卫。**修法**：给 `Logger` 加 `public Logger(String serviceName)` 构造 + 把 `doLogBusinessErr/doLogInfo/doLogFatal` 由包私有改为 public；`LoggerFactoryBean`（392 行 → 95 行）改为薄委托，同时删掉它自己那份 `FILTER_PREFIXES` / `IMAGE_BASE64_TRUNCATE` / `getFuncName` / `getCallChain` / `isFiltered` / `extractTraceId` / `fileBaseName`。**两套 public API 全部保留**（静态 `Logger.logXxx` 与 Bean 的 `logXxx`），调用方零改动；serviceName 仍各自独立（决策 3 未变）。**委托顺带修正一个 off-by-one**：委托前 Bean 路径栈是 `getCallChain → Bean.logInfo → 业务`，`getCallChain(3)` 跳 3 帧会落在业务调用方的**上一层**（少一帧）；委托后多一层 `doLogXxx`，正好对齐静态入口。锁定用例 `LoggerFactoryBeanTest.callChainStartsAtBusinessCaller`（探针放在未被 `FILTER_PREFIXES` 过滤的 `com.rag.common.verify` 包） |
@@ -1047,6 +1061,7 @@ SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `t
 
 | 原优先级 | 项 | 状态 |
 |---|---|---|
+| ~~P0~~ | ~~**B-1：rpc 超时无法取消在途 IO**~~ | ✅ **2026-10-21 已关闭**（issue #71187373 实验 → #71187874 实施） | 三层证据：① 纯 JDBC 层 `probe-jdbc-cancel.java` 证明 **interrupt 对等锁查询零效果**（照常返回、11014ms）、**`setQueryTimeout` 有效**（2034ms 抛 `SQLState=57014`，与 Go ctx cancel 同一条服务端语义且连接保可用）；② 同日同场端到端；③ 手段定性（`socketTimeout` 会让连接报废，语义相反，不可用）。**实施**：`DeadlineQueryTimeoutInjector`（按 `DeadlineState.remainingMillis()` 注入）+ `SqlTimeoutStatusTranslator`（57014→DEADLINE_EXCEEDED）+ 46 处 `catch (StatusRuntimeException) { throw e; }`（user-rpc 17 + admin-rpc 29）。**api 层零改动** —— `DEADLINE_EXCEEDED` 本就落 `mapRPCStatusToCode` 的 default → 1015。**结果**：客户端 3170ms→**2223ms**（Go 2208ms）、响应体 `text/plain`→**`{"code":1015}`**、PG 查询滞留 4303ms→**176ms**（Go 182ms）；difftest 39/39 unexpected=0；全仓 383→**415 条** 0 failures。⚠️ 过程中发现更大前置缺陷 —— gRPC `ServerInterceptor` 从未挂到 server 上，连带 **DRIFT-018 的 24 处 `checkDeadline()` 此前全是死代码**（见上一行二次更正）。详见 §3.4.1「B-1 补记」 |
 | ~~P0~~ | admin-api 默认配置下起不来（`WeakKeyException`） | ✅ **已修**（commit `71be288`）。`AdminJwtAuthInterceptor.java:67` 与 `JwtAuthInterceptor.java:76` 均已走 `JwtUtil.padToHmacKeySize(...)`；`JwtUtil.java:44` 已是 `public static`——即原表建议的「提成 `users-common` public 方法」方案已实施。**本行此前一直挂在 P0 未修，是过期信息** |
 | ~~P2~~ | user-api 4 项清理 | ⚠️ **半修**。① 4 个端点 `@RequestBody(required=false)` **已完成**（`UserController.java:118/126/137/153`）；② 「删 `codeFromRPCError` 死代码」**未完成，且原文把位置写错**——它在 **admin-api**（`AdminApiSupport.java:66`），不在 user-api。剩余部分已并入本表 P3 |
 | ~~P3~~ | Flyway 迁移归属 | ✅ **已定案** → §6.3 问题 1 |
@@ -1179,8 +1194,11 @@ RAG `3047ms/4455ms`，量级一致、可复现，**但以复测值为准**：
 > 而不是「改代码对齐」；E-5 / E-6 缺的是证据，代码本身可能已经是对的。
 > **三者都不能靠静态审查关闭** —— §3.3 的纪律同样适用于此。
 >
-> **优先次序建议**：E-4（唯一「已签字 + 当前生效 + 零覆盖」三者叠加）→ E-2
-> （§3.1 硬性要求项）→ E-5 / E-6 → E-1 的清理 → E-3。
+> **优先次序建议（2026-10-21 更新）**：E-4 **已完成**（纯 JDBC 机制层 + 同日同场端到端 + 手段定性，
+> 且已据此实施修复并消除 B-1，见 §3.4.1「B-1 补记」）⇒ 下一位是 **E-2**
+> （§3.1 硬性要求项：proto 字段号 / message 名称 / 错误码语义）→ E-5 / E-6 → E-1 的清理 → E-3。
+> ⚠️ E-4 的经历给 E-2 留了一条现成的做法：**不要只做 HTTP 层**，本轮的 B-1 正是
+> 「HTTP 全绿 + gRPC 链路从未执行」才暴露出来的。
 
 ### 6.3 架构决策（问题 1、2 已于 2026-10-21 拍板；问题 3 为新增留档）
 
@@ -1269,7 +1287,7 @@ s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, obser
 
 | 组 | 内容 |
 |---|---|
-| HIGH | ① HTTP 超时整体失效（新增 `httpTimeout`/`rpcTimeout` 配置，5 个 yaml 落 3s/2s）② gRPC 拦截器未注册（user-rpc/admin-rpc 补 `@Import`）③ `logFatal` 不终止进程（新增 `FatalError` + users 两处 advice 显式 rethrow）④ 499 分支不可达（改为写响应）⑤ 超时启用后业务跑在无请求上下文的线程（补 `RequestContextHolder`/MDC/OTel Context） |
+| HIGH | ① HTTP 超时整体失效（新增 `httpTimeout`/`rpcTimeout` 配置，5 个 yaml 落 3s/2s）② gRPC 拦截器未注册（user-rpc/admin-rpc 补 `@Import`）**← ⚠️ 此条结论已被推翻，见下方 H2 勘误小节**③ `logFatal` 不终止进程（新增 `FatalError` + users 两处 advice 显式 rethrow）④ 499 分支不可达（改为写响应）⑤ 超时启用后业务跑在无请求上下文的线程（补 `RequestContextHolder`/MDC/OTel Context） |
 | MEDIUM | `isTimeoutError` 漏判 HTTP 超时、`RecordError` 空指针、`biz_msg` 丢 code、span 重复打标、span 二次 `end()`、`DeadlineState` 设在调度线程而非 handler 线程、`MqConsumer` 吞 panic、`shutdown()` 无调用者、`call_chain` 过滤失效、Snowflake 双份生成状态、admin-rpc `SnowflakeBean` 未装配 |
 | LOW | 时钟回拨按 bwmarrin v0.3.0 **真实算法**（无回拨保护，继承 Go 风险并留档）、进程日志 KV 一律 `toString()` 破坏 JSON schema、timestamp 精度与尾零裁剪、trace 字段跨线程丢失、charset 默认编码、64KB 截断多读、`getFuncName` 闭包分支死代码 |
 
@@ -1284,9 +1302,16 @@ s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, obser
 
 验证：`mvn clean verify` 全仓 9 模块 BUILD SUCCESS（common 78 / admin-rpc 24 / admin-api 46 / user-rpc 46 / user-api 30 / users-common 3 / message-rpc 待复核）。
 
+> **⚠️ 上面这行是 2026-10-21 那轮的快照，数字已过时**。截至 issue #71187874 之后的最新值：
+> `common 97 / admin-rpc 53 / admin-api 97 / user-rpc 84 / user-api 63 / users-common 11 / message-rpc 10`，
+> **全仓 415 条、0 failures**。**但更要紧的不是数字变化，而是本节那句「H1/H2 这类机制没接上的缺陷
+> 按定义无法被纯单测捕获」** —— `ObservabilityWiringTest` 恰恰就是纯装配测试，
+> 而它**漏掉了 H2**：断言 `ctx.getBean(ServerInterceptor.class)` 非空是对的、也是绿的，
+> 但 starter 根本不会用这个 Bean。**装配对了 ≠ 机制接上了**，见本节的 H2 勘误小节。
+
 ##### ⚠️⚠️ 勘误：**H2 当时并未真正修好**（2026-10-21，issue #71187874 期间实测发现）
 
-本节「已修 21 项」里的 **② gRPC 拦截器未注册（user-rpc/admin-rpc 补 `@Import`）** ——**结论是错的**。
+本节「已修 21 项」里的 **② gRPC 拦截器未注册（user-rpc/admin-rpc 补 `@Import`）**← ⚠️ 此条结论已被推翻，见下方 H2 勘误小节**** ——**结论是错的**。
 `@Import(RpcServerInterceptorFactory.class)` 只让 `ServerInterceptor` **Bean 存在**，
 而 **grpc-spring-boot-starter 3.1.0.RELEASE 从不自动把它挂到 server 上**：
 
@@ -1330,7 +1355,13 @@ javap GrpcServerProperties | grep -i intercept → （无字段）
 
 **残留差异**不在本节重复维护，统一见 **§3.4.1**（按「有意偏离 / 框架限制 / 表述差异 / UNRESOLVED」四类分列，每条带关闭条件）。
 
-其中本轮新增、值得单独强调的一条：**B-1 超时无法取消在途 IO**。它在本轮之前是潜伏的（timeout 为 `ZERO`，分支从不进入），按 Go 的 3s/2s 打开超时后转为**当前生效**。
+其中本轮新增、值得单独强调的一条：**B-1 超时无法取消在途 IO**。
+> ⚠️ **本行原写「按 Go 的 3s/2s 打开超时后转为当前生效」—— 该描述本身也是错的**（2026-10-21 补）。
+> 配置确实绑上了（实测 `newUnaryServerInterceptor` 收到 `timeout=PT2S`），
+> 但因为同一个 H2 缺陷（gRPC `ServerInterceptor` 从未挂到 server 上），
+> **`interceptCall` / `onHalfClose` 一次都没执行过** ⇒ 超时**从未生效**，
+> 客户端只能等 api 层 `http-timeout` 3s。
+> ⇒ 结论：这条「潜伏 → 生效」的叙述，以及本节对 H1 的「已修」判断，**都建立在一个从未接通的链路上**。
 ⚠️ 本行末句「`user-rpc` 业务侧一处都未主动响应取消」**已被 §3.4.4 的 DRIFT-018 登记推翻**
 （`user-rpc` 实有 11 处、`admin-rpc` 已补到 13 处 `checkDeadline()`），
 且 2026-10-21 的机制实验证明 **`checkDeadline` 对在途 IO 无效、缓解手段是 `setQueryTimeout`** ——
