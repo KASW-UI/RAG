@@ -315,7 +315,7 @@ Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 R
 
 | # | 位置 | 差异 | 影响面 | 关闭条件 |
 |---|---|---|---|---|
-| B-1 | `HttpMiddleware` 超时分支 / `RpcInterceptor` 超时调度 | **超时无法取消在途 IO**。Go 的 `context.WithTimeout` 到点 ctx Done，所有 ctx-aware IO（`http.Client` / `sql.DB` / `grpc.Dial`）立即返回、连接池立刻释放；Java 只能 `Future.cancel(true)` 发 `InterruptedException`，而 **JDBC 驱动、grpc-java 阻塞 stub、`java.net.http.HttpClient` 均不响应线程 interrupt** —— 阻塞在 socket read 上的调用会挂到查询自行结束 | **已实测坐实（E-4，2026-10-21）**：`tools/difftest/exp-b1-timeout-cancel.sh` 用 ACCESS EXCLUSIVE 表锁造真阻塞，两侧同跑 `user.login`。客户端返回超时后，**Go 侧 PG 里的阻塞查询 378ms 就消失、RAG 侧还存活 4455ms**（持锁事务释放为止）；客户端感知时延 Go 2035ms vs RAG 3047ms。数据与判读见 §6.2.6 E-4。**⚠️ 原留档写「当前 `user-rpc` 一处都未使用 `DeadlineState`」——该句已过时**：user-rpc 实有 **11 处** `checkDeadline()`（代码注释标 DRIFT-018），本轮已把 **admin-rpc 从 0 处补到 13 处**。 但 `checkDeadline` 只能避免**发起**新的慢查询，**对在途 IO 无能为力** —— 这正是 E-4 实测的结论 | **无法靠改 `service/common` 关闭**（Java/JDBC 框架限制）。可选缓解：给 JDBC 设 `socketTimeout` / `Statement.setQueryTimeout`（PG 驱动支持，会主动发 cancel 请求）—— **本轮未做，待评估** |
+| B-1 | `HttpMiddleware` 超时分支 / `RpcInterceptor` 超时调度 | **超时无法取消在途 IO**。Go 的 `context.WithTimeout` 到点 ctx Done，所有 ctx-aware IO（`http.Client` / `sql.DB` / `grpc.Dial`）立即返回、连接池立刻释放；Java 只能 `Future.cancel(true)` 发 `InterruptedException`，而 **JDBC 驱动、grpc-java 阻塞 stub、`java.net.http.HttpClient` 均不响应线程 interrupt** —— 阻塞在 socket read 上的调用会挂到查询自行结束 | **已实测坐实（E-4，2026-10-21）**：`tools/difftest/exp-b1-timeout-cancel.sh` 用 ACCESS EXCLUSIVE 表锁造真阻塞，两侧同跑 `user.login`。客户端返回超时后，**Go 侧 PG 里的阻塞查询 378ms 就消失、RAG 侧还存活 4455ms**（持锁事务释放为止）；客户端感知时延 Go 2035ms vs RAG 3047ms。数据与判读见 §6.2.6 E-4。**⚠️ 原留档写「当前 `user-rpc` 一处都未使用 `DeadlineState`」——该句已过时**：user-rpc 实有 **11 处** `checkDeadline()`（代码注释标 DRIFT-018），本轮已把 **admin-rpc 从 0 处补到 13 处**。 但 `checkDeadline` 只能避免**发起**新的慢查询，**对在途 IO 无能为力** —— 这正是 E-4 实测的结论 | **无法靠改 `service/common` 关闭**（Java 侧数据访问栈的结构性限制）。**字节码级证据（2026-10-21）**：链路是 MyBatis-Plus → MyBatis 执行器 → Spring JDBC → pgjdbc → socket，逐层 `javap -c` 数 `isInterrupted` 命中数为 **MyBatis `BaseExecutor` 0 次 / `SimpleExecutor` 0 次 / pgjdbc 42.6.2 `QueryExecutorImpl` 0 次** —— 即 `Future.cancel(true)` 发的 interrupt **在整条数据访问路径上没有任何一层检查**，不是「JDBC 驱动这一层不响应」而是**全链路都无检查**。可选缓解：给 JDBC 设 `socketTimeout` / `Statement.setQueryTimeout`（pgjdbc 支持，会主动发 CancelRequest）—— **本轮未做，待评估** |
 
 ##### C. 表述差异（语义已对齐，仅字面不同，无需签字）
 
@@ -980,6 +980,12 @@ SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `t
    需先确认 `HttpMiddleware` 的超时应不应该对齐 Go 的 envelope 表达，再决定改还是留档。
 
 **复现**：`cd tools/difftest && ./exp-b1-timeout-cancel.sh`（自带 `--serve-only` 起栈与收摊）。
+
+**机制侧的字节码佐证**（比黑盒更精确）：对数据访问链路逐层 `javap -c` 数 `isInterrupted` 命中 ——
+**MyBatis `BaseExecutor` 0 次 / `SimpleExecutor` 0 次 / pgjdbc 42.6.2 `QueryExecutorImpl` 0 次**。
+即这条不是「框架大概不响应 interrupt」的推测，而是**整条路径上没有任何一层检查中断标志**。
+注意「RAG 侧 MyBatis-Plus」这个上层 ORM 换成什么都不会改变结论 ——
+**只要底层还是 JDBC socket，就是同一个限制**。
 
 > **这三条为什么是「缺口」而不是「缺陷」**：E-4 的根因 B-1 是**已知且已签字**的框架限制
 > （Java 线程 interrupt 不被 JDBC / grpc-java / HttpClient 响应），它需要的是**业务侧主动响应**
