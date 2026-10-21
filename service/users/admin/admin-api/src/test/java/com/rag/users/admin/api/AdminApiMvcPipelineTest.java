@@ -312,6 +312,57 @@ class AdminApiMvcPipelineTest {
         verify(stub, never()).getUser(any());
     }
 
+    /**
+     * A 类 P2 回归：<b>空 body 的 POST 不得返回 HTTP 400</b>。
+     *
+     * <p>Go 出处（三段实测源码，非推断）：
+     * <ol>
+     *   <li>{@code internal/handler/admin/*.go} 13 个 handler 一律 {@code httpx.Parse(r, &req)}，
+     *       {@code req} 是包级 {@code var req types.XxxReq}</li>
+     *   <li>go-zero v1.10.2 {@code rest/httpx/requests.go:153 withJsonBody} =
+     *       {@code r.ContentLength > 0 && ...} ⇒ 空 body 走
+     *       {@code UnmarshalJsonMap(nil, v)}，对 struct 是 no-op、<b>不报错</b></li>
+     *   <li>admin {@code types.go} 13 个 Req <b>零个</b> {@code Validate()}、<b>零个</b>
+     *       {@code validate:} tag，且未调 {@code httpx.SetValidator} ⇒ 校验环节整体不生效</li>
+     * </ol>
+     * 结论：Go 对空 body 一律 <b>HTTP 200 + 业务码</b>。
+     *
+     * <p>修复前 RAG 13 个端点全是 {@code required=true} ⇒ 抛
+     * {@code HttpMessageNotReadableException} ⇒ {@code handleUnreadableBody} ⇒ HTTP 400 + 空 body，
+     * 与 Go 不一致且客户端拿不到任何可读原因。
+     *
+     * <p>这里用 {@code /getuser}（protected）而不是 public 端点：public 端点不挂拦截器，
+     * 测不出「鉴权 + 空 body」叠加时的顺序。
+     */
+    @Test
+    @DisplayName("A-P2：空 body 的 protected 端点不得 400 —— 走业务码 1017（Go 空 body 恒 200）")
+    void emptyBodyDoesNotReturn400() throws Exception {
+        mockMvc.perform(post("/admin/v1/getuser")
+                        .header("Authorization", "Bearer " + validToken())
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1017));
+
+        verify(stub, never()).getUser(any());
+    }
+
+    /** 同上，但 public 端点（无 JWT 拦截器）—— 证明 required=false 不依赖拦截器顺序。 */
+    @Test
+    @DisplayName("A-P2：空 body 的 public 端点 /login 也不得 400")
+    void emptyBodyOnPublicEndpointDoesNotReturn400() throws Exception {
+        // 零值 username/password 直达 rpc；Go 出处 loginlogic.go:54
+        // `codes.Unauthenticated → errmsg.ErrorLoginWrong`，而 ErrorLoginWrong = 1002
+        // （service/*/common/errmsg/errmsg.go:54；不是 1008）
+        when(stub.login(any())).thenThrow(new StatusRuntimeException(Status.UNAUTHENTICATED));
+
+        mockMvc.perform(post("/admin/v1/login")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1002));
+
+        verify(stub).login(any());
+    }
+
     // ==================================================================
     // helper
     // ==================================================================

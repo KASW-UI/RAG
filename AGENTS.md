@@ -330,17 +330,84 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 | ~~P0~~ | ~~`RpcServerInterceptorFactory` 在 user-rpc / admin-rpc 均未注册~~ | **2026-10-21 已修** | `UserRpcApplication` / `AdminRpcApplication` 的 `@Import` 均补 `RpcServerInterceptorFactory` + `ObservabilityProperties` + `ObservabilityLifecycle`；admin-rpc 另补 `SnowflakeBean/SnowflakeProperties/LoggerFactoryBean`（它此前连 `@Import` 都没有）。新增 `ObservabilityWiringTest`（`@SpringBootTest`）断言 `ServerInterceptor` 真是容器里的 Bean。分支 `row/common-fix-semantic-drift` |
 | ~~P0~~ | ~~`ObservabilityProperties` 无 timeout 字段~~ | **2026-10-21 已修** | 新增 `httpTimeout` / `rpcTimeout`；两个 factory 改为读取该配置。**目标值已取证**：Go user 系 yaml 均未配 `Timeout`，实际生效值来自 go-zero v1.10.2 `rest/config.go:55` `default=3000` 与 `zrpc/config.go:46` `default=2000` ⇒ 各模块 yaml 显式落 `http-timeout: 3s` / `rpc-timeout: 2s` |
 | **P1** | `message-rpc` 6 个 `@Transactional` 方法的 self-invocation 风险 | —（**未核对**） | 同上。按约定 2 按 UNKNOWN 处理 |
-| **P1** | `Logger`（静态）与 `LoggerFactoryBean`（Bean）两份逐行同构实现，重复约 370 行 | **2026-10-21 更正原结论** | ⚠️ 原表写「实际消费者为零」，**该结论错误**：`LoggerFactoryBean` 在 **user-rpc** 有真实消费方 —— `UserDomainService.java:87,95` 注入 + **12 处** `logger.logInfo/logBusinessErr`（`:155,161,170,178,184,218,233,245,268,274,305,308,324`），由 `UserRpcApplication` 的 `@Import` 装配。消费者为**零**的只是静态 `Logger` 路径（`Logger.init` 仅测试调用）。结论修正：本层支撑着 user-rpc 全部登录/注册路径的日志输出，不可按死代码处置。两份实现的重复仍待处理（`FileTree/common.md` §12.5 第 3 条，**动共享库公开 API，需 review 签字**） |
+| ~~P1~~ | ~~`Logger`（静态）与 `LoggerFactoryBean`（Bean）两份逐行同构实现，重复约 370 行~~ | ✅ **2026-10-21 已去重**（用户 2026-10-21 批准动共享库公开 API） | 经方法体逐字比对，两份实现只差三处：方法可见性、方法名自调用、Bean 缺 serviceName 判空守卫。**修法**：给 `Logger` 加 `public Logger(String serviceName)` 构造 + 把 `doLogBusinessErr/doLogInfo/doLogFatal` 由包私有改为 public；`LoggerFactoryBean`（392 行 → 95 行）改为薄委托，同时删掉它自己那份 `FILTER_PREFIXES` / `IMAGE_BASE64_TRUNCATE` / `getFuncName` / `getCallChain` / `isFiltered` / `extractTraceId` / `fileBaseName`。**两套 public API 全部保留**（静态 `Logger.logXxx` 与 Bean 的 `logXxx`），调用方零改动；serviceName 仍各自独立（决策 3 未变）。**委托顺带修正一个 off-by-one**：委托前 Bean 路径栈是 `getCallChain → Bean.logInfo → 业务`，`getCallChain(3)` 跳 3 帧会落在业务调用方的**上一层**（少一帧）；委托后多一层 `doLogXxx`，正好对齐静态入口。锁定用例 `LoggerFactoryBeanTest.callChainStartsAtBusinessCaller`（探针放在未被 `FILTER_PREFIXES` 过滤的 `com.rag.common.verify` 包） |
 | **P2** | `MessageRpcSupport.trimPreview` 截断长度错：`String.length() <= 255` vs Go 的 80 runes | 2026-10-21 | Go `model/message.go:233-239` 用 `[]rune(content)[:80]`；RAG `MessageRpcSupport.java:316-325` 用 `substring(0,255)`。根因：255 抄自列宽 `varchar(255)` 而非 Go 规则。附带：`substring` 会在代理对中间切断。**RAG 错**，证据见 `FileTree/message/rpc.md` §12.7 #1 |
 | **P2** | `MessageDomainService.markNotificationRead` 拆成 SELECT + UPDATE | —（**未核对**） | Go 是单条 `UPDATE ... WHERE id + recipient_id`；RAG 拆两步存在竞态窗口。按约定 2 按 UNKNOWN 处理 |
 | ~~P2~~ | ~~`Logger.call_chain` 过滤完全失效~~ | **2026-10-21 已修** | `isFiltered` 改用 `StackFrame.getDeclaringClass().getName()` 全名比对包前缀（短名比对仅作补充）；`getFuncName` 的 `contains("$")` 分支按 Go 两分支差异化。`Logger` 与 `LoggerFactoryBean` 两份同步修改。新增 `LoggerTest.callChainFilterActuallyRemovesFrameworkFrames` 锁定。**留档**：Go 侧 `github.com/zeromicro/go-zero/` 那条前缀**本来也是死的**（`getFuncName` 同样剥掉包路径），Java 版按其**意图**执行 → `call_chain` 内容比 Go 少框架帧，属 OBSERVABLE DIFFERENCE |
 | ~~P2~~ | ~~499 状态码永远到不了客户端~~ | **2026-10-21 已修** | 断连分支改为 `writeTimeoutResponse(resp, 499)`，不再抛 `ServletException`；503/499 body 一并对齐 Go `http.Error`（`text/plain; charset=utf-8` + 尾部换行）。新增 `HttpMiddlewareTest.clientDisconnectReturns499`（此前**零条** 499 断言）。**连带**：两条既有 503 断言的期望值因 D-11 变更，已同步并注明变更原因 |
 | ~~P2~~ | ~~`Observability.isTimeoutError` 漏判 HTTP 超时~~ | **2026-10-21 已修** | 补 `HttpTimeoutException` / `HttpConnectTimeoutException` / `InterruptedIOException`，并沿 cause 链生效。新增 `ObservabilityTest.isTimeoutErrorDetectsHttpClientTimeouts` |
 | ~~P1~~ | ~~user-rpc mapper `default` 方法上的 `@Transactional` 是否真生效~~ | ✅ **2026-10-21 已验证生效** | 新增 `AvatarTransactionWiringTest`（`@Configuration @EnableTransactionManagement(proxyTargetClass = false) @MapperScan`，与 Boot `TransactionAutoConfiguration` 同构；`MybatisSqlSessionFactoryBean` + `SqlSessionTemplate`；事务管理器换成**记录型**实现）。5 条用例全绿，其中 2 条是**真触发**：DataSource 的 `getConnection()` 抛异常，断言 `createAvatarHistory` / `selectAvatarHistory` 的记录序列恰为 **`begin → rollback`** 且无 `commit`。结论：`@Transactional` **确实生效**，头像 4/5 步原子性成立。**原表建议的修法「抽独立 `@Service` Bean」不需要** —— 问题从来不是自调用，而是**缺证据**。**效力边界**：无真实 PG，故只证明「事务边界装上了、异常走回滚分支」，不证明 jsonb `CAST` 等 PG 行为（§3.3） |
-| **P2** | **admin-api 全部 13 个端点 `@RequestBody` 仍是 `required=true`** | 2026-10-21 | user-api 侧同类问题已修（`UserController.java:118/126/137/153`），admin-api 未同步 ⇒ `/admin/v1/logout` 等空 body 请求返回 400，与 Go 语义漂移 |
-| **P3** | `admin-api` 的 `AdminApiSupport.codeFromRPCError` 未删，且与 `GlobalExceptionHandler.mapRPCStatusToCode` 重复 | 2026-10-21 | 当前靠 service 层精确业务码优先兜底，属**潜在**语义漂移：新增 Service 漏写分支会静默落到 advice 的默认映射。**2026-10-21 审计已实证这不是「潜在」而是「已发生」**：`user-api` 的 `AvatarSelectService` 就因为走通用映射，把 Go 的 `NOT_FOUND → 500` 变成 `1003`（DRIFT-003，已修）。现已在该 Service 显式写出 Go 的整个 switch |
+| ~~P2~~ | ~~admin-api 全部 13 个端点 `@RequestBody` 仍是 `required=true`~~ | ✅ **2026-10-21 已修** | Go 三段取证（§6.2.4）证明 Go 对**空 body 一律不报错**，13 个端点全部改 `required=false` + Controller 侧 `null → new XxxReq()` 归一化（对齐 Go 的零值 struct）。新增 2 条真管线断言（`AdminApiMvcPipelineTest.emptyBodyDoesNotReturn400` / `emptyBodyOnPublicEndpointDoesNotReturn400`）。**连带发现**：user-api 侧仍有 5 个端点（register / login / update / avatar-select / avatar）保持 `required=true`，按同样取证**仍与 Go 漂移**，本轮未处理 |
+| ~~P3~~ | ~~`admin-api` 的 `AdminApiSupport.codeFromRPCError` 未删，且与 `GlobalExceptionHandler.mapRPCStatusToCode` 重复~~ | ✅ **2026-10-21 已删** | grep 确认**零调用方**（只有自身声明与 javadoc 提到）。已删除方法与常量依赖，删除理由写进类 javadoc：留着的真实风险不是「重复」而是它是一份**可被误用的错误映射** —— 新 Service 顺手调它就会绕过自身 switch 落进默认值，这正是 `user-api` 的 `AvatarSelectService` 已踩过的坑（Go `NOT_FOUND → 500` 变成 `1003`，DRIFT-003） |
 | ~~P1~~ | ~~**`service/users/admin` 全部 10 项 SEMANTIC MISMATCH**~~ | ✅ **2026-10-21 已修**（issue #71186443） | 见 §6.2.2 |
-| **P3** | `admin-rpc` 三个 Mapper 的 javadoc 与实现不符 | 2026-10-21 | `AdminMapper` / `AdminInviteMapper` / `UserMapper` 的类注释都声称「复杂方法写在 Mapper 的 `default` 方法里，用 `@Select` + `@Transactional`」，实际三个接口都是**空壳**，`findAdminInviteByCodeForUpdate` / `updateAdminInviteUsed` / 分页查询全在 `AdminDomainService` 与 `AdminCreateAtomicService` 里。**不影响行为**（悲观锁实测生效），但属 §3.2「有出处、出处指错位置」的文档级病灶，会让后续 review 误判机制归属 |
+| ~~P3~~ | ~~`admin-rpc` 三个 Mapper 的 javadoc 与实现不符~~ | ✅ **2026-10-21 已修** | 三个接口都改为「空壳接口 + 方法真实归属表」。原注释不仅指错位置，还**与文件末尾的注释自相矛盾**（一个说在 Mapper default 方法里、一个说在 Service 里）。悲观锁的真实位置已写明：`LambdaQueryWrapper.last("FOR UPDATE")` 在 `AdminCreateAtomicService.createAdminAtomic`，`@Transactional` 在该 Service 上。**动机**：注释说在 Mapper 会让后续 review 去 Mapper 找锁、找不到就怀疑锁没生效 |
+| ~~P2~~ | ~~`MessageRpcSupport.trimPreview` 截断长度错：255 vs Go 的 80 runes~~ | ✅ **2026-10-21 已修** | Go 出处 `message.go:234-240` 字面量 `80`。旧实现的 255 抄自列宽 `varchar(255)` 而非 Go 规则；且用 `String.length()`/`substring` 按 UTF-16 code unit 切，**中文测不出来、代理对会切出半个非法字符**。改为 `codePointCount` + `offsetByCodePoints`。新增 `MessageRpcSupportTrimPreviewTest` 6 条，其中 `surrogatePairCountedAsOneRune` 用 100 个 emoji 锁住 char≠rune |
+| ~~P2~~ | ~~`markNotificationRead` 拆 SELECT + UPDATE~~ | ✅ **2026-10-21 已修** | Go `message.go:72-86` 是单条 `UPDATE ... WHERE id = ? AND recipient_id = ?` + `RowsAffected == 0 → ErrRecordNotFound`。旧实现 `selectById` 校验归属后再 `updateById` 写入（**TOCTOU 竞态**），且 `updateById` 生成的 WHERE **不含 `recipient_id`**、受影响行数被丢弃。已折成单条原子 UPDATE，归属条件进 WHERE，受影响行数透出并映射 `NotFound`。新增 `MessageMarkNotificationReadTest` 4 条，断言打在 `LambdaUpdateWrapper.getSqlSegment()` 上（§3.3：mock 数据层测不到 SQL） |
+| **P0** | **`NotificationEntity.isRead` 字段名导致 MP lambda 运行期抛异常** | ✅ **2026-10-21 已修（本轮附带发现）** | 见 §6.2.4。这是本轮**唯一的运行期致命项**，且与 §6.2 上表所有条目无关，是修 `markNotificationRead` 时顺带撞出来的 |
+
+### 6.2.4 本轮（2026-10-21 第二批）取证与附带发现
+
+#### ① Go 对「空 body」的三段取证（支撑 admin-api 13 端点 `required=false`）
+
+不是推断，是逐段读源码得到：
+
+| # | 出处 | 事实 |
+|---|---|---|
+| 1 | `service/user/admin/api/internal/handler/admin/*.go` | 13 个 handler 一律 `if err := httpx.Parse(r, &req); err != nil`，`req` 是包级 `var req types.XxxReq` |
+| 2 | go-zero v1.10.2 `rest/httpx/requests.go:153` `withJsonBody` | `r.ContentLength > 0 && ContentType 含 application/json`。空 body ⇒ false ⇒ `ParseJsonBody` 走 `mapping.UnmarshalJsonMap(nil, v)`，对 struct 是 **no-op、不报错** |
+| 3 | admin `api/internal/types/types.go` | 13 个 Req **零个** `Validate()` 方法、**零个** `validate:` tag；且 admin 服务**从未**调 `httpx.SetValidator` ⇒ `getValidator()` 返回 nil ⇒ `httpx.Parse` 的校验环节整体不生效 |
+
+**结论**：Go 对空 body 的 POST 一律 **HTTP 200 + 业务码**，req 停在**零值 struct**。
+以 `loginlogic.go:37-56` 为例：零值 username/password **直接透传给 rpc**，
+由 rpc 判 `NotFound → 1003` / `Unauthenticated → ErrorLoginWrong`（= **1002**，不是 1008）。
+
+**RAG 处置**：13 端点全改 `@RequestBody(required = false)` +
+Controller 侧 `if (req == null) req = new XxxReq()`（对齐 Go 的零值 struct，服务层因此不会 NPE）。
+
+> **遗留**：user-api 侧只改了 body 字段不参与业务的 4 个端点，
+> `register` / `login` / `update` / `avatar-select` / `avatar` **仍是 `required=true`**，
+> 按同样三段取证它们**仍与 Go 漂移**（Go 给 200+业务码，RAG 给 400）。本轮未处理，已记入 §6.2。
+
+#### ② `NotificationEntity.isRead` → 运行期致命（本轮唯一 P0，附带发现）
+
+修 `markNotificationRead` 时为写「断言打在真实 SQL 上」的测试（§3.3），
+用 `TableInfoHelper.initTableInfo` 初始化 MP 元数据后撞出来的：
+
+```
+### keySet=[content->content, ..., isRead->isRead, readAt->readAt, ...]
+### NotificationEntity::isRead  →  MybatisPlusException:
+        can not find lambda cache for this property [read] of entity [...NotificationEntity]
+### NotificationEntity::getReadAt →  OK
+```
+
+**根因**：MP 的 `LambdaXxxWrapper` 解析 `Entity::method` 时按 JavaBean 约定剥掉
+`get`/`is` 前缀再拿**属性名**查 `TableInfo.propertyMap`。
+字段叫 `isRead` ⇒ 属性名 `isRead`、getter `isRead()` ⇒ lambda 解析成属性 `read` ⇒ 落空。
+
+**影响面**：`NotificationMapper` 的 `countUnread` / `markAllReadByRecipient` / `markRead`
+三处都用 `NotificationEntity::isRead` 构造条件 ⇒
+**`listNotifications(unreadOnly)` / `getUnreadSummary` / `markAllNotificationsRead` /
+`markNotificationRead` 四条业务路径一调即抛异常**。
+
+**为什么长期没暴露**：message-rpc **此前没有任何一条会真正执行 SQL 的测试**，
+全部是纯 Mockito mock —— mock 数据层不装配 MP 元数据，天然测不到这条（§3.3）。
+
+**修法**：字段改名 `isRead` → `read` + `@TableField("is_read")` 显式列映射，
+getter 仍为 `isRead()`。实测改后：
+
+```
+### keySet=[read->is_read, readAt->read_at, recipientId->recipient_id]
+### E::isRead → (is_read = ? AND recipient_id = ?)   ✅
+```
+
+**新增防线**：`MessageMarkNotificationReadTest#entityFieldMustBeNamedReadNotIsRead`
+用反射锁死字段名 + `@TableField` 值（静态引用在编译期看不出问题，只有真正解析 lambda 时才炸）。
+
+> **这条的教训**：`@TableField` / Lambda wrapper 属于 §3.3 点名的「运行期动态装配、不报错」
+> 那一类，但它比 `@Transactional` 更隐蔽 —— `@Transactional` 失效是**静默降级**，
+> 而 lambda 解析失败是**立即抛异常**。也就是说：一个模块只要从来没跑过真实 SQL，
+> 这类问题就<b>完全不会出现在任何测试报告里</b>。判据不是「有没有报错」，
+> 而是「<b>有没有真的执行过这条 SQL</b>」。
 
 ### 6.2.2 `service/users/admin` 语义审计修复清单（issue #71186443，2026-10-21）
 

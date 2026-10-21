@@ -46,6 +46,12 @@ import java.util.Map;
 @Component
 public class MessageRpcSupport {
 
+    /**
+     * 预览截断上限（Go {@code message.go:236} 的字面量 {@code 80}，单位是 <b>rune / 码点</b>）。
+     * 曾被误写成 255（抄了 {@code last_message_preview} 的列宽），见 {@link #trimPreview} 的 javadoc。
+     */
+    private static final int TRIM_PREVIEW_MAX_RUNES = 80;
+
     // =============================================================================
     // 响应工厂 —— successBaseResp / toNotificationItem / toMessageItem / buildConversationItem
     // =============================================================================
@@ -310,18 +316,48 @@ public class MessageRpcSupport {
     }
 
     /**
-     * 对应 Go 端 conversation.last_message_preview 截断：
-     * 超过 255 字符时截断（与列定义 varchar(255) 对齐）。
+     * 对应 Go 端 {@code MessageModel.TrimPreview}（{@code rpc/internal/model/message.go:234-240}）。
+     *
+     * <p><b>Go 出处逐字</b>：
+     * <pre>
+     * func (m *MessageModel) TrimPreview(content string) string {
+     *     content = strings.TrimSpace(content)
+     *     runes := []rune(content)
+     *     if len(runes) <= 80 { return content }
+     *     return string(runes[:80])
+     * }
+     * </pre>
+     *
+     * <p><b>修复前本方法用的是 255，且按 char（UTF-16 code unit）切</b>，两处都错：
+     * <ol>
+     *   <li><b>255 是抄错</b>：注释写「与列定义 varchar(255) 对齐」——那是<b>列宽</b>，
+     *       不是 Go 的截断规则。Go 的规则是 80。<b>§3.2 的典型反例</b>：
+     *       有出处（javadoc 写了依据）但依据指错了地方，review 时无从判断。
+     *       取证：{@code message.go:236} 字面量 {@code 80}。</li>
+     *   <li><b>char ≠ rune</b>：Java 的 {@code String.length()} 与 {@code substring} 按 UTF-16
+     *       code unit 计数，中文/emoji 一个字符算 1（代理对算 2）。Go 的 {@code []rune} 按码点。
+     *       直接切会在代理对中间断开，产生<b>半个代理对</b>（非法字符，序列化即乱码）。</li>
+     * </ol>
+     *
+     * <p><b>语义等价论证</b>：{@code codePointCount} ↔ {@code len([]rune(s))}；
+     * {@code offsetByCodePoints(0, 80)} ↔ {@code runes[:80]}；
+     * {@code String.trim()} 与 Go {@code strings.TrimSpace} 的空白集不同
+     * （Java trim 只去 {@code <= ' '}），这是<b>有意保留的表达层差异</b>，
+     * 不在本项修复范围，避免把一个漂移换成另一个。
      */
     public static String trimPreview(String content) {
         if (content == null) {
             return "";
         }
         String trimmed = content.trim();
-        if (trimmed.length() <= 255) {
+        // 按码点计数，与 Go 的 []rune 对齐（不能用 length()：UTF-16 code unit ≠ rune）
+        int runeCount = trimmed.codePointCount(0, trimmed.length());
+        if (runeCount <= TRIM_PREVIEW_MAX_RUNES) {
             return trimmed;
         }
-        return trimmed.substring(0, 255);
+        // 按码点切边界，保证不会落在代理对中间
+        int endIndex = trimmed.offsetByCodePoints(0, TRIM_PREVIEW_MAX_RUNES);
+        return trimmed.substring(0, endIndex);
     }
 
     /**

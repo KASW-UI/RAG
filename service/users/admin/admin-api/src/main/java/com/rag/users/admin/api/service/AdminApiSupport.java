@@ -17,10 +17,21 @@ import java.util.Map;
  * <ul>
  *   <li>{@code extractAdminId}：from request attribute "userId"（由 AdminJwtAuthInterceptor 写入）</li>
  *   <li>{@code parseUid}：uid 字符串解析（6 个 Service 共用同一份实现）</li>
- *   <li>{@code codeFromRPCError}：把 gRPC Status 映射成 ErrorCode 业务码</li>
  *   <li>{@code fromProto(AdminInfo proto)} → DTO 转换</li>
  *   <li>{@code fromProto(UserInfo proto)} → DTO 转换（admin.proto.UserInfo，与 dto UserInfo 同名用全限定名）</li>
  * </ul>
+ *
+ * <p><b>2026-10-21 删除 {@code codeFromRPCError}</b>（AGENTS.md §6.2 P3）：
+ * 它与 {@code GlobalExceptionHandler.mapRPCStatusToCode} 是<b>两份逐条相同的映射</b>，
+ * 且经 grep 确认<b>零调用方</b>（只有自身声明与 javadoc 提到它）。
+ *
+ * <p>留着的实际风险不是「重复」本身，而是<b>它是一份可以被误用的错误映射</b>：
+ * 任何 Service 新增 {@code catch (StatusRuntimeException)} 时若顺手调它，
+ * 就会绕过该端点自己的 Go switch，落进通用默认值 —— 这正是 user-api 的
+ * {@code AvatarSelectService} 已经踩过的坑（把 Go 的 {@code NOT_FOUND → 500}
+ * 变成 {@code 1003}，DRIFT-003）。
+ * 业务码精确映射必须在 Service 内显式写出 Go 的整个 switch，
+ * 通用 fallback 只保留 advice 里那一份。
  */
 @Component
 public class AdminApiSupport {
@@ -57,32 +68,6 @@ public class AdminApiSupport {
      */
     public long extractAdminId(HttpServletRequest request) {
         return IdentityResolver.claimedUID(request);
-    }
-
-    /**
-     * 把 gRPC Status.Code 映射成 ErrorCode 业务码。
-     * 业务码精确映射在 Service 内部抛 BusinessException 完成；这里是 fallback。
-     */
-    public int codeFromRPCError(Status.Code code, int fallbackBusinessCode) {
-        if (code == Status.Code.INTERNAL) {
-            return 5001;   // ErrorServerCommon
-        }
-        if (code == Status.Code.NOT_FOUND) {
-            return 1003;   // ErrorUserNotExist
-        }
-        if (code == Status.Code.ALREADY_EXISTS) {
-            return 1001;   // ErrorUserExist
-        }
-        if (code == Status.Code.INVALID_ARGUMENT) {
-            return 500;    // Error
-        }
-        if (code == Status.Code.PERMISSION_DENIED) {
-            return 1016;   // ErrorAdminInviteCodeWrong
-        }
-        if (code == Status.Code.UNAUTHENTICATED) {
-            return 1006;   // ErrorTokenRuntime
-        }
-        return fallbackBusinessCode;  // 默认 → CodeServerBusy (1015)
     }
 
     /**

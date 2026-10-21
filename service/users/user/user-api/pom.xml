@@ -136,6 +136,33 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+            Testcontainers（版本由 spring-boot-starter-parent 管理）。
+            user-api 需要的是 Redis 容器而不是 PG：JwtAuthInterceptor 的黑名单检查
+            走 StringRedisTemplate.hasKey，必须对着真 Redis 验证。
+            对应 AGENTS.md 的 C-2（user-api 侧缺真 filter 链的 401 回归网）。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            Boot 4 把测试切片拆成了独立 artifact：@AutoConfigureMockMvc 已不在
+            spring-boot-test-autoconfigure 里，类也从
+            org.springframework.boot.test.autoconfigure.web.servlet
+            挪到了 org.springframework.boot.webmvc.test.autoconfigure。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <properties>
@@ -146,6 +173,21 @@
 
     <build>
         <plugins>
+            <!--
+                关掉 Ryuk，理由与 admin-rpc / admin-api 完全相同：Testcontainers 2.x 的
+                ResourceReaper.instance() 只读环境变量 System.getenv("TESTCONTAINERS_RYUK_DISABLED")，
+                properties 与 -D 都无效；而 ryuk 镜像走 Docker Hub 拉不下来会导致整类 ContainerFetch。
+                代价：容器不再自动回收。Docker Hub 可达后删掉本段即可恢复。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
             <!-- 启动类 UserApiApplication 靠 spring-boot-maven-plugin 打成可执行 jar -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>

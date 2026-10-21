@@ -45,6 +45,43 @@ public class Logger {
     private volatile String serviceName;
 
     /**
+     * 供包级单例 {@link #GLOBAL} 使用的无参构造。
+     *
+     * <p>与 Go 版 {@code var globalLogger = &Logger{}} 同构：serviceName 初始为空，
+     * 须由 {@link #init(String)} 填入。
+     */
+    private Logger() {
+        this.serviceName = null;
+    }
+
+    /**
+     * <b>2026-10-21 新增</b>：显式 serviceName 的实例构造，供
+     * {@code com.rag.common.spring.LoggerFactoryBean} 委托使用。
+     *
+     * <p><b>为什么要这个构造</b>：此前 {@code service/common} 里存在<b>两份逐条同构</b>的日志实现
+     * —— 本类的静态门面 + 包私有 {@code doLogXxx}，以及 {@code LoggerFactoryBean} 的公开实例方法。
+     * 两者除「serviceName 判空」外逻辑完全相同，却各自维护一份
+     * {@code FILTER_PREFIXES} / {@code IMAGE_BASE64_TRUNCATE} / {@code getFuncName} /
+     * {@code getCallChain} / {@code isFiltered} / {@code extractTraceId} / {@code fileBaseName}。
+     * 于是 {@code LoggerFactoryBean} 改为<b>委托</b>，本类开实例 API，
+     * 两套 public API（静态 {@code Logger.logXxx} 与 Bean 的 {@code logXxx}）全部保留，
+     * 实现只剩一份。
+     *
+     * <p>与 Go 的一一对应：Go 侧 {@code Logger} 是结构体，
+     * {@code var globalLogger = &Logger{serviceName: ...}} 与按服务各建一个
+     * {@code &Logger{serviceName: ...}} 是同一种用法，Java 侧此前只实现了前者。
+     *
+     * @param serviceName 服务名；为空时抛 {@link IllegalStateException}
+     *                    （与 {@code LoggerFactoryBean} 原构造器行为一致）
+     */
+    public Logger(String serviceName) {
+        if (serviceName == null || serviceName.isEmpty()) {
+            throw new IllegalStateException("serviceName must not be empty");
+        }
+        this.serviceName = serviceName;
+    }
+
+    /**
      * 对应 Go 版 {@code var globalLogger = &Logger{}}：包级单例。
      * Java 用 static-final 字段确保整个 JVM 只有一个。
      */
@@ -181,7 +218,7 @@ private static final List<String> FILTER_PREFIXES = List.of(
     /**
      * 对应 Go 版 {@code func (l *Logger) logBusinessErr(ctx context.Context, code int, err error, opts ...LogOption)} 私有方法。
      */
-    void doLogBusinessErr(io.opentelemetry.context.Context otelCtx, int code, Throwable err, LogOption... opts) {
+    public void doLogBusinessErr(io.opentelemetry.context.Context otelCtx, int code, Throwable err, LogOption... opts) {
         if (serviceName == null || serviceName.isEmpty()) {
             throw new IllegalStateException("logger not initialized, call logger.Init() first");
         }
@@ -257,7 +294,7 @@ private static final List<String> FILTER_PREFIXES = List.of(
     /**
      * 对应 Go 版 {@code func (l *Logger) logInfo(ctx context.Context, msg string, opts ...LogOption)} 私有方法。
      */
-    void doLogInfo(io.opentelemetry.context.Context otelCtx,
+    public void doLogInfo(io.opentelemetry.context.Context otelCtx,
                    String msg,
                    LogOption... opts) {
         if (serviceName == null || serviceName.isEmpty()) {
@@ -334,7 +371,7 @@ private static final List<String> FILTER_PREFIXES = List.of(
      * 改用 {@link FatalError} 让「不可被静默吞掉」成为类型级约束：
      * 各模块 {@code GlobalExceptionHandler} 必须显式 rethrow {@link FatalError}。
      */
-    void doLogFatal(io.opentelemetry.context.Context otelCtx,
+    public void doLogFatal(io.opentelemetry.context.Context otelCtx,
                     Throwable err,
                     LogOption... opts) {
         if (serviceName == null || serviceName.isEmpty()) {

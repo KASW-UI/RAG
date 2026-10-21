@@ -67,16 +67,40 @@ public interface NotificationMapper extends BaseMapper<NotificationEntity> {
     }
 
     /**
-     * 对应 Go 端 markNotificationReadTx 内的 UPDATE：
-     * markRead(id, readAt) WHERE id = ? AND is_read = false。
-     * 返回受影响行数（0 / 1）；用于判断"是否曾经未读 → 现在已读"。
+     * 对应 Go 端 {@code MessageModel.MarkNotificationRead}（{@code message.go:72-86}）：
+     * <pre>
+     * res := conn.Model(&amp;Notification{}).
+     *      Where("id = ? AND recipient_id = ?", notificationID, recipientID).
+     *      Updates(map[string]any{"is_read": true, "read_at": &amp;now})
+     * if res.Error != nil { return res.Error }
+     * if res.RowsAffected == 0 { return ErrRecordNotFound }
+     * </pre>
+     *
+     * <p><b>修复前</b>：DomainService 先 {@code selectById} 做归属校验、再 {@code updateById}，
+     * 拆成 SELECT + UPDATE 两条语句；且 {@code updateById} 生成的是 {@code WHERE id = ?}，
+     * <b>不含 {@code recipient_id} 归属条件</b>。归属判断与写入之间存在竞态窗口
+     * （TOCTOU），且「更新不到行」被静默当成成功。
+     *
+     * <p><b>修复后</b>：归属条件直接进 UPDATE 的 WHERE，与 Go 同构 —— 单条语句、原子、
+     * 天然免疫竞态；返回受影响行数供上层对齐 Go 的 {@code RowsAffected == 0 → ErrRecordNotFound}。
+     *
+     * <p><b>为什么不用 updateById(patch)</b>：{@code updateById} 只能按主键更新，
+     * 无法附加 {@code recipient_id} 条件（§3.3 记录的
+     * 「{@code LambdaUpdateWrapper.set()} 丢字段类型信息」同源问题）。
      */
-    default int markRead(long id, java.time.LocalDateTime readAt) {
+    default int markRead(long id, long recipientId, java.time.LocalDateTime readAt) {
         NotificationEntity patch = new NotificationEntity();
-        patch.setId(id);
         patch.setRead(true);
         patch.setReadAt(readAt);
-        return updateById(patch);
+        // 用 LambdaUpdateWrapper 而非 update(entity, wrapper)：前者由 MP 逐字段生成
+        // 带类型绑定的 SET 子句，不会踩 §3.3 记录的 typeHandler 丢失问题。
+        com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<NotificationEntity> w =
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
+        w.eq(NotificationEntity::getId, id)
+         .eq(NotificationEntity::getRecipientId, recipientId)
+         .set(NotificationEntity::isRead, true)
+         .set(NotificationEntity::getReadAt, readAt);
+        return update(null, w);
     }
 
     /**

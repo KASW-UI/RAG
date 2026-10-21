@@ -860,40 +860,48 @@ public class MessageDomainService {
     }
 
     private BaseResp doMarkNotificationRead(MarkNotificationReq in) {
-        // ① validate
+        // ① validate（Go 出处 marknotificationreadlogic.go:40-43，逐条一致）
         if (in.getUserId() <= 0L || in.getNotificationId() <= 0L) {
             throw MessageRpcSupport.grpcRuntimeError(Status.Code.INVALID_ARGUMENT,
                     MessageErrorCode.ERROR_INVALID_PARAM.getCode());
         }
 
-        // ② 校验该 notification 是否属于该 user
-        NotificationEntity exist = notificationMapper.selectById(in.getNotificationId());
-        if (exist == null || exist.getRecipientId() != in.getUserId()) {
-            throw new StatusRuntimeException(
-                    Status.NOT_FOUND.withDescription(
-                            MessageErrorMessages.getMsg(
-                                    MessageErrorCode.ERROR_NOTIFICATION_MISS.getCode())));
-        }
-
-        // ③ mark read
+        // ②③ 归属校验 + mark read 合并为<b>单条</b> UPDATE（Go 出处 message.go:72-86）：
+        //     Where("id = ? AND recipient_id = ?") + RowsAffected == 0 → ErrRecordNotFound
+        // 修复前这里是 selectById 校验 + updateById 写入两条语句（TOCTOU 竞态），
+        // 且 updateById 生成的 WHERE 只有 id、不含 recipient_id。
+        int affected;
         try {
-            markNotificationReadTx(in.getNotificationId(), LocalDateTime.now());
+            affected = markNotificationReadTx(in.getNotificationId(), in.getUserId(), LocalDateTime.now());
         } catch (RuntimeException e) {
             metrics.observeDbError("notification", "mark_read");
             throw MessageRpcSupport.grpcRuntimeError(Status.Code.INTERNAL,
                     MessageErrorCode.ERROR_DB_UPDATE.getCode());
         }
 
+        // Go: if res.RowsAffected == 0 { return ErrRecordNotFound } → logic 映射成
+        //     codes.NotFound + ErrorNotificationMiss（marknotificationreadlogic.go:47-51）
+        if (affected == 0) {
+            throw new StatusRuntimeException(
+                    Status.NOT_FOUND.withDescription(
+                            MessageErrorMessages.getMsg(
+                                    MessageErrorCode.ERROR_NOTIFICATION_MISS.getCode())));
+        }
+
         return MessageRpcSupport.successBaseResp();
     }
 
     /**
-     * 对应 Go 端 markNotificationReadTx：单条 notification UPDATE。
+     * 对应 Go 端 {@code MessageModel.MarkNotificationRead}（{@code message.go:72-86}）：
+     * 单条 {@code UPDATE ... WHERE id = ? AND recipient_id = ?}。
+     *
+     * @return 受影响行数；0 表示「不存在或不属于该 recipient」，对齐 Go 的
+     *         {@code res.RowsAffected == 0 → ErrRecordNotFound}
      */
     @Transactional
-    public void markNotificationReadTx(long id, LocalDateTime readAt) {
+    public int markNotificationReadTx(long id, long recipientId, LocalDateTime readAt) {
         try {
-            notificationMapper.markRead(id, readAt);
+            return notificationMapper.markRead(id, recipientId, readAt);
         } catch (RuntimeException e) {
             metrics.observeDbError("notification", "mark_read_tx");
             throw e;

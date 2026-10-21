@@ -45,8 +45,43 @@ public class NotificationEntity {
     /** 对应 Go {@code Content string gorm:"column:content;type:text;not null"}。 */
     private String content;
 
-    /** 对应 Go {@code IsRead bool gorm:"column:is_read;not null;default:false"}。 */
-    private boolean isRead;
+    /**
+     * 对应 Go {@code IsRead bool gorm:"column:is_read;not null;default:false"}。
+     *
+     * <p><b>字段名必须是 {@code read} 而不是 {@code isRead}（2026-10-21 修，运行期致命）</b>：
+     * MyBatis-Plus 的 {@code LambdaXxxWrapper} 解析 {@code Entity::method} 时，
+     * 会按 JavaBean 约定剥掉 {@code get}/{@code is} 前缀再拿<b>属性名</b>去查
+     * {@code TableInfo.propertyMap}。
+     * <ul>
+     *   <li>字段叫 {@code isRead} ⇒ 属性名 {@code isRead}、getter {@code isRead()} ⇒
+     *       lambda 解析成属性 {@code read} ⇒ <b>propertyMap 里没有 ⇒ 运行期抛
+     *       {@code MybatisPlusException: can not find lambda cache for this property [read]}</b></li>
+     *   <li>字段叫 {@code read}、getter {@code isRead()} ⇒ lambda 解析成属性 {@code read} ⇒ 命中。</li>
+     * </ul>
+     *
+     * <p>实测（{@code Probe} 临时探针，MP 3.5.14）：
+     * <pre>
+     * 修复前：keySet=[..., isRead-&gt;isRead, ...]
+     *         NotificationEntity::isRead → FAILED: can not find lambda cache for this property [read]
+     *         NotificationEntity::getReadAt → OK
+     * 修复后（字段 read + @TableField("is_read")）：
+     *         keySet=[read-&gt;is_read, readAt-&gt;read_at, recipientId-&gt;recipient_id]
+     *         E::isRead → (is_read = ? AND recipient_id = ?)   ✅
+     * </pre>
+     *
+     * <p><b>影响面</b>：{@code NotificationMapper.countUnread} /
+     * {@code markAllReadByRecipient} / {@code markRead} 三处都用
+     * {@code NotificationEntity::isRead} 构造条件 ⇒ 修复前
+     * <b>listNotifications(unreadOnly) / getUnreadSummary / markAllNotificationsRead /
+     * markNotificationRead 四条业务路径一调即抛异常</b>。
+     * 之所以长期没暴露：message-rpc <b>此前没有任何一条会真正执行 SQL 的测试</b>，
+     * 全部是纯 Mockito mock（§3.3：mock 数据层不装配 MP 元数据，测不到这条）。
+     *
+     * <p>{@code @TableField("is_read")} 显式指定列名，不依赖
+     * {@code map-underscore-to-camel-case} 的双向推断。
+     */
+    @TableField("is_read")
+    private boolean read;
 
     /** 对应 Go {@code ReadAt *time.Time gorm:"column:read_at"}。 */
     private LocalDateTime readAt;
@@ -81,8 +116,8 @@ public class NotificationEntity {
     public void setTitle(String title) { this.title = title; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
-    public boolean isRead() { return isRead; }
-    public void setRead(boolean read) { isRead = read; }
+    public boolean isRead() { return read; }
+    public void setRead(boolean read) { this.read = read; }
     public LocalDateTime getReadAt() { return readAt; }
     public void setReadAt(LocalDateTime readAt) { this.readAt = readAt; }
     public Map<String, String> getExtra() { return extra; }

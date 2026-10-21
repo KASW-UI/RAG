@@ -14,11 +14,27 @@ import org.apache.ibatis.annotations.Mapper;
  * <ul>
  *   <li>Go 用 GORM 全自动；Java 用 MyBatis-Plus {@code BaseMapper<AdminEntity>} 提供 selectById /
  *       insert / updateById / deleteById 等标准 CRUD</li>
- *   <li>复杂方法（CreateAdminAtomic 4 步事务）写在 Mapper 的 {@code default} 方法里，
- *       用 {@code @Transactional} + 自定义 SQL（{@code @Select / @Insert / @Update}）实现；
- *       MyBatis-Plus 的 JDK 代理对 default 方法生效</li>
- *   <li>{@code findOneAdminByUsernameInTx} 是 default 方法里调用的辅助查询，专门用于事务内</li>
  * </ul>
+ *
+ * <p><b>本接口不声明任何方法</b>（2026-10-21 订正，见 AGENTS.md §6.2 P3）：
+ * 原类注释声称「复杂方法（CreateAdminAtomic 4 步事务）写在 Mapper 的 {@code default} 方法里，
+ * 用 {@code @Transactional} + 自定义 SQL（{@code @Select / @Insert / @Update}）实现」——
+ * <b>与代码不符</b>，且与本文件末尾的注释<b>自相矛盾</b>。
+ * 这属 §3.2「有出处、出处指错位置」的文档级病灶：会让后续 review 误判机制归属
+ * （例如以为悲观锁 / 事务边界装在 Mapper 上，实际在 Service 层）。
+ *
+ * <p><b>方法真实归属</b>：
+ * <table border="1">
+ *   <caption>Go 方法 → RAG 实际位置</caption>
+ *   <tr><th>逻辑</th><th>RAG 位置</th></tr>
+ *   <tr><td>{@code findOneAdminByUsername}</td>
+ *       <td>{@code AdminDomainService} 私有方法，{@code LambdaQueryWrapper} 实现</td></tr>
+ *   <tr><td>{@code findOneAdminByUid}</td><td>同上</td></tr>
+ *   <tr><td>{@code insertAdmin}</td><td>{@code adminMapper.insert(entity)}</td></tr>
+ *   <tr><td>{@code updateAdminByUid}</td><td>{@code adminMapper.updateById(entity)}</td></tr>
+ *   <tr><td>CreateAdmin 4 步事务编排</td>
+ *       <td>{@code AdminCreateAtomicService.createAdminAtomic}；{@code @Transactional} 在该 Service 上</td></tr>
+ * </table>
  */
 @Mapper
 public interface AdminMapper extends BaseMapper<AdminEntity> {
@@ -28,6 +44,6 @@ public interface AdminMapper extends BaseMapper<AdminEntity> {
     // 业务特殊查询（findOneAdminByUsername / findOneAdminByUid 等）在 AdminDomainService 里
     // 通过 LambdaQueryWrapper 实现，不需要写在 Mapper 里。
 
-    // 注：CreateAdminAtomic 4 步事务在 AdminCreateAtomicService.createAdminAtomic 里编排
-    // 编排，调用 mapper 的 updateById / deleteById / 自定义 @Select / @Update。
+    // 注：CreateAdmin 4 步事务在 AdminCreateAtomicService.createAdminAtomic 里编排，
+    //     事务注解在那个 Service 上，不在本接口上。
 }

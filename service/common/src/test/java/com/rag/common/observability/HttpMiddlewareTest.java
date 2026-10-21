@@ -228,6 +228,98 @@ class HttpMiddlewareTest {
         assertTrue(sawMdc.get(), "worker 线程上的 MDC 必须继承容器线程的键值");
     }
 
+    /**
+     * DRIFT-FRAMEWORK-001 回归：<b>非 200 的 status 必须真正到达 underlying response</b>。
+     *
+     * <p><b>这个用例锁的是本类的原生归属</b>。此前本文件 5 条测试全部只覆盖
+     * 「handler 设 200」或「超时 / 断连的合成 503 / 499」，
+     * <b>没有任何一条让 handler 自己设一个非 200 状态码</b>，
+     * 于是 {@code ObservabilityResponseWriter.setStatus} 的「只缓存到 this.status、
+     * 等 flushTo 再写底层」这个实现错误长期无人发现——
+     * 修复前它的实际后果是 admin-api / user-api 的<b>全部鉴权 401 与 gRPC 5003 被静默降级成 200</b>，
+     * 而且全部既有测试全绿（详见 AGENTS.md §6.2.2 DRIFT-FRAMEWORK-001）。
+     *
+     * <p><b>为什么是这个时序</b>：复刻 Spring 7.x {@code HttpEntityMethodProcessor.handleReturnValue}
+     * 的真实调用顺序 —— {@code setStatus(非200)} → 写 body → {@code flushBuffer()}。
+     * 修复前 {@code flushBuffer()} 会把底层 {@code MockHttpServletResponse} 标成 committed，
+     * 之后 {@code HttpMiddleware.flushTo} 里的 {@code dst.setStatus(401)}
+     * 被 {@code MockHttpServletResponse.setStatus(int)} 的 {@code if (!isCommitted())} 守卫静默吞掉。
+     *
+     * <p>Go 出处：{@code observability/http.go} 的 {@code responseWriter.WriteHeader(code)}
+     * 是<b>同步</b>写 header 的，不存在「先 buffer、请求结束后再补写」这种中间态。
+     */
+    @Test
+    void non200StatusSurvivesFlushBufferCommit() throws Exception {
+        Filter filter = HttpMiddleware.newHttpMiddleware("svc", Duration.ZERO, Duration.ofMillis(10));
+        MockHttpServletRequest req = new MockHttpServletRequest("POST", "/admin/v1/getself");
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+
+        // 严格复刻 Spring 的顺序：setStatus → 写 body → flushBuffer（commit）
+        FilterChain chain = (r, w) -> {
+            HttpServletResponse resp0 = (HttpServletResponse) w;
+            resp0.setStatus(401);
+            resp0.setContentType("application/json");
+            resp0.getWriter().write("{\"code\":1006,\"msg\":\"TOKEN已过期\",\"data\":null}");
+            resp0.getWriter().flush();
+            resp0.flushBuffer();
+        };
+
+        filter.doFilter(req, resp, chain);
+
+        assertEquals(401, resp.getStatus(),
+                "非 200 status 必须到达 underlying；被降级成 200 即 DRIFT-FRAMEWORK-001 回归");
+        assertTrue(resp.getContentAsString().contains("\"code\":1006"),
+                "body 仍须正常 flush（buffer 语义未变）：" + resp.getContentAsString());
+    }
+
+    /** DRIFT-FRAMEWORK-001 回归的第二个分支：{@code sendError} 同样必须 propagate。 */
+    @Test
+    void sendErrorPropagatesToUnderlying() throws Exception {
+        Filter filter = HttpMiddleware.newHttpMiddleware("svc", Duration.ZERO, Duration.ofMillis(10));
+        MockHttpServletRequest req = new MockHttpServletRequest("GET", "/boom");
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+
+        FilterChain chain = (r, w) -> {
+            HttpServletResponse resp0 = (HttpServletResponse) w;
+            resp0.sendError(403, "forbidden");
+            resp0.flushBuffer();
+        };
+
+        filter.doFilter(req, resp, chain);
+
+        assertEquals(403, resp.getStatus(), "sendError 的 status 必须同步到达 underlying");
+        assertEquals("forbidden", resp.getErrorMessage());
+    }
+
+    /**
+     * DRIFT-FRAMEWORK-001 的<b>效力边界</b>：status 在 <b>commit 之后</b>才被设置，
+     * Servlet 规范下不可达 —— 本用例把它固化成显式契约，避免下一个人误以为能修。
+     *
+     * <p>Spring 的 {@code HttpEntityMethodProcessor} 永远是先 {@code setStatus} 再写 body，
+     * 所以真实业务路径不落在这一支。这里断言的是「commit 后 status 不变」这个 Servlet 语义，
+     * 而不是 RAG 的行为要求。
+     */
+    @Test
+    void statusSetAfterCommitIsIgnoredByServletSemantics() throws Exception {
+        Filter filter = HttpMiddleware.newHttpMiddleware("svc", Duration.ZERO, Duration.ofMillis(10));
+        MockHttpServletRequest req = new MockHttpServletRequest("GET", "/late");
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+
+        FilterChain chain = (r, w) -> {
+            HttpServletResponse resp0 = (HttpServletResponse) w;
+            resp0.getWriter().write("body");
+            resp0.flushBuffer();   // 先 commit
+            resp0.setStatus(401);  // 再设 —— Servlet 规范下必然被忽略
+        };
+
+        filter.doFilter(req, resp, chain);
+
+        assertEquals(200, resp.getStatus(),
+                "commit 之后设 status 无效是 Servlet 规范本身的行为，不是 RAG 的缺陷；"
+                        + "修复的正确方向是「在 commit 前 propagate」（见 non200StatusSurvivesFlushBufferCommit），"
+                        + "而不是试图绕过 commit 守卫");
+    }
+
     // ===== handler helpers =====
 
     private static class SleepHandler {
