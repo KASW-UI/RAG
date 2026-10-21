@@ -32,10 +32,15 @@ RUN_DIR=/tmp/difftest
 LOGS="$RUN_DIR/logs"
 PG_PORT=55432
 PG_U=admin
-LOCK_SECONDS=12          # 持锁时长：必须 >> 3s 超时，否则看不出差异
+# 24s 而非 12s：本轮要跑 **4 次**探测（Go/RAG × user/admin），
+# 串行下来约 11s。锁留得越久，越能证明「查询消失」不是锁自己释放造成的 ——
+# 若实现没生效，查询会一直活到 24s，观测循环先超时并报「未见消失」。
+LOCK_SECONDS=24
 
 USERNAME="e4_probe"
 PASSWORD="pw123456"
+ADMIN_USERNAME="admin"
+ADMIN_PASSWORD="admin"
 
 cleanup() {
   for p in ${LOCK_PIDS:-}; do kill "$p" 2>/dev/null || true; done
@@ -102,31 +107,50 @@ for side in go rag; do
 done
 
 # ---------------------------------------------------------------- 持锁
-echo "==> [3/4] 起两个后台事务，各持锁 ${LOCK_SECONDS}s"
+echo "==> [3/4] 起后台事务，各持锁 ${LOCK_SECONDS}s（user 表 + admin 表）"
 LOCK_PIDS=""
-# ⚠️ 表名两侧不同：Go 是 GORM 默认名 `users`，RAG 是 `users_user`（§3.4 wire 契约偏离）。
+# ⚠️ 表名两侧不同：Go 是 GORM 默认名 `users`，RAG 是 `users_user`（§3.4 wire 契约偏离）；
+#    `admin_admin` 两侧同名。
 # ⚠️ 必须用 ACCESS EXCLUSIVE 的**表级锁**，不能用 `SELECT ... FOR UPDATE` 行锁 ——
 #    PostgreSQL 的普通 SELECT 走 MVCC 快照读，**不会被 FOR UPDATE 持有的行锁挡住**。
 #    第一版就是死在这里：两侧 login 都在 150ms 内成功返回，实验毫无意义。
 #    ACCESS EXCLUSIVE 挡住一切访问（含 SELECT），才是真实的长事务形态。
+# ⚠️⚠️ **每个 (库, 表) 必须用独立 psql 进程**，不能塞进同一个事务。
+# 第一版把两张表的 LOCK 写在一个 BEGIN…ROLLBACK 里，于是 go_db 上
+# 「admins 不存在」那条 LOCK 报错 → 整个事务 abort → **users 的锁也一起没了**，
+# 表现为 Go/user 在 363ms 就登录成功（根本没被挡住）。
+# 而 RAG 侧看着一切正常 —— 这种「一侧假成功」的偏差极难从结果反推，必须靠进程隔离杜绝。
+#
+# ⚠️ 表名两侧**全部不同**（AGENTS.md §3.4 的 wire 契约偏离 A-03）。
+# Go 真源 service/user/admin/rpc/internal/model/data_model.go 的 TableName()：
+#   Admin → "admins"      AdminInvite → "admin_invites"      User → "users"
+# RAG 侧是 §3.4 记录的 admin_admin / users_user。
+# 最初这里两边都写 admin_admin，于是 go_db 报「不存在」——校验拦下了它，否则又是一轮假数据。
 for db in go_db rag_db; do
-  if [ "$db" = go_db ]; then TBL=users; else TBL=users_user; fi
-  ( echo "BEGIN;"
-    echo "LOCK TABLE $TBL IN ACCESS EXCLUSIVE MODE;"
-    echo "SELECT pg_sleep($LOCK_SECONDS);"
-    echo "ROLLBACK;" ) \
-  | docker exec -i difftest-postgres psql -U "$PG_U" -d "$db" -qAt >/dev/null 2>&1 &
-  LOCK_PIDS="$LOCK_PIDS $!"
+  if [ "$db" = go_db ]; then USER_TBL=users; ADMIN_TBL=admins; else USER_TBL=users_user; ADMIN_TBL=admin_admin; fi
+  for t in "$USER_TBL" "$ADMIN_TBL"; do
+    if ! docker exec difftest-postgres psql -U "$PG_U" -d "$db" -qAt \
+         -c "SELECT to_regclass('public.$t') IS NOT NULL" 2>/dev/null | grep -q t; then
+      echo "  ✗ $db.$t 不存在 —— 该库该表无法加锁（本次实验会偏，务必先修表名映射）" >&2
+      exit 1
+    fi
+    ( echo "BEGIN;"
+      echo "LOCK TABLE $t IN ACCESS EXCLUSIVE MODE;"
+      echo "SELECT pg_sleep($LOCK_SECONDS);"
+      echo "ROLLBACK;" ) \
+    | docker exec -i difftest-postgres psql -U "$PG_U" -d "$db" -qAt >/dev/null 2>&1 &
+    LOCK_PIDS="$LOCK_PIDS $!"
+  done
 done
 sleep 2
-echo "  ✓ 行锁已持有（两侧各一个事务）"
+echo "  ✓ 表锁已持有（2 库 × 2 表 = 4 个独立事务）"
 
 # ---------------------------------------------------------------- 观测
 echo "==> [4/4] 发请求并同时观测客户端耗时 + PG 查询存活时长"
 echo
 
-probe() {  # label, db, url, path
-  local label=$1 db=$2 url=$3 path=$4
+probe() {  # label, db, url, path, json_body
+  local label=$1 db=$2 url=$3 path=$4 body=$5
   local before
   before=$(pg_lock_count "$db")
   echo "  [$label] 发起前该库等锁查询数 = $before"
@@ -137,7 +161,7 @@ probe() {  # label, db, url, path
   local t0 t1
   t0=$(now_ms)
   ( curl -s -m 30 -X POST "$url$path" -H 'Content-Type: application/json' \
-         -d "{\"username\":\"$USERNAME\",\"password\":\"$PASSWORD\"}" >"$out" 2>/dev/null ) &
+         -d "$body" >"$out" 2>/dev/null ) &
   local cpid=$!
 
   # ---- 请求在飞期间：逐次采样
@@ -150,10 +174,10 @@ probe() {  # label, db, url, path
   printf '  [%s] %s  ← 客户端此刻返回（耗时 %sms），等锁明细: %s\n' \
          "$label" "$(stamp)" "$(( t1 - t0 ))" "$(pg_lock_rows "$db")"
 
-  # ---- 请求返回后：继续采样到查询消失
-  local vanished_at="未见消失(>10000ms)"
+  # ---- 请求返回后：继续采样到查询消失（上限 15s > 观测窗口）
+  local vanished_at="未见消失(>15000ms)"
   local now
-  for _ in $(seq 1 40); do
+  for _ in $(seq 1 60); do
     now=$(pg_lock_count "$db")
     if [[ "$now" -lt "$before" || "$now" == "0" ]]; then
       vanished_at="$(( $(now_ms) - t1 ))ms"
@@ -163,14 +187,25 @@ probe() {  # label, db, url, path
     sleep 0.25
   done
 
-  printf '%-5s 客户端返回 %sms   响应体=%s\n' "$label" "$(( t1 - t0 ))" "$(head -c 100 "$out")"
-  printf '%-5s 客户端返回后，PG 里的阻塞查询又存活了 %s\n' "" "$vanished_at"
+  printf '%-9s 客户端返回 %sms   响应体=%s\n' "$label" "$(( t1 - t0 ))" "$(head -c 100 "$out")"
+  printf '%-9s 客户端返回后，PG 里的阻塞查询又存活了 %s\n' "" "$vanished_at"
   rm -f "$out"
 }
 
-probe "Go"  go_db  http://127.0.0.1:18888 /usercenter/v1/user/login
+USER_BODY="{\"username\":\"$USERNAME\",\"password\":\"$PASSWORD\"}"
+ADMIN_BODY="{\"username\":\"$ADMIN_USERNAME\",\"password\":\"$ADMIN_PASSWORD\"}"
+
+echo "---- user 域（user.login → SELECT users/users_user WHERE username=?）----"
+probe "Go/user"  go_db  http://127.0.0.1:18888 /usercenter/v1/user/login "$USER_BODY"
 echo
-probe "RAG" rag_db http://127.0.0.1:59900 /user/v1/login
+probe "RAG/user" rag_db http://127.0.0.1:59900 /user/v1/login "$USER_BODY"
+echo
+# ⚠️ admin 域必须单独跑：admin-rpc 有 29 处 catch(Exception) 放行分支 + 13 处 checkDeadline，
+#    user-rpc 全绿完全不能推出 admin 侧也成立（两个类、两套装配、两套 catch 集合）。
+echo "---- admin 域（admin.login → SELECT admin_admin WHERE username=?）----"
+probe "Go/admin"  go_db  http://127.0.0.1:18889 /admincenter/v1/admin/login "$ADMIN_BODY"
+echo
+probe "RAG/admin" rag_db http://127.0.0.1:58889 /admin/v1/login "$ADMIN_BODY"
 
 # ---------------------------------------------------------------- 异常形态
 # 用户 2026-10-21 拍板「先不定性映射，先把观察到的异常形态记下来」。
@@ -181,14 +216,14 @@ echo
 echo "---- RAG worker 线程的业务起止时刻（business_info / business_error）----"
 echo "     用来把 worker 生命周期和上面那条时间轴对齐 —— 客户端返回、"
 echo "     PG 查询消失、worker 退出是三件不同的事，历史上在这里混错过。"
-grep -hE "business_(info|error)|login RPC failed" "$LOGS/rag-user-rpc.log" 2>/dev/null \
+grep -hE "business_(info|error)|RPC failed" "$LOGS/rag-user-rpc.log" "$LOGS/rag-admin-rpc.log" 2>/dev/null \
   | cut -c1-120 | tail -6 | sed 's/^/  /' \
   || echo "  （日志里没有匹配行）"
 
 echo
 echo "---- RAG rpc 侧日志里的取消 / 超时相关行（供定性用，暂不映射）----"
 grep -hiE "cancel|timeout|deadline|57014|query_canceled|SQLException" \
-     "$LOGS/rag-user-rpc.log" 2>/dev/null | tail -12 \
+     "$LOGS/rag-user-rpc.log" "$LOGS/rag-admin-rpc.log" 2>/dev/null | tail -12 \
   | sed 's/^/  /' || echo "  （日志里没有匹配行）"
 echo "----（以上是 worker 线程的真实异常形态；客户端侧早已返回，不影响客户端）----"
 
@@ -199,11 +234,11 @@ echo "  两侧客户端返回耗时都应当接近各自的 rpc timeout（Go 2s 
 echo "  RpcInterceptor 的 catch(TimeoutException) 是【立即】返回 DEADLINE_EXCEEDED 的，"
 echo "  不等 worker 退出。"
 echo
-echo "  ① PG 查询存活时长 = B-1 的核心。**两侧都应当 ≈ 0ms**"
+echo "  ① PG 查询存活时长 = B-1 的核心。**user 与 admin 两侧都应当 ≈ 0ms**"
 echo "     （Go 靠 ctx cancel；RAG 靠 DeadlineQueryTimeoutInjector 按 deadline 注入的"
 echo "      setQueryTimeout）。若 RAG 这里又是数千毫秒 ⇒ 拦截器没被注册 / 没生效。"
 echo
-echo "  ② 响应体。**两侧都应当是 {\"code\":1015,\"msg\":\"服务繁忙\"}**"
+echo "  ② 响应体。**user 与 admin 两侧都应当是 {\"code\":1015,\"msg\":\"服务繁忙\"}**"
 echo "     RAG 若仍是 text/plain \"Request Timeout\" ⇒ DEADLINE_EXCEEDED 没能穿过"
 echo "     业务层的 catch(Exception)；"
 echo "     若变成 {\"code\":5001} ⇒ 57014 翻译没生效（被吞成了 INTERNAL）。"

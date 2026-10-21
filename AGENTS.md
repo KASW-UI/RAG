@@ -165,6 +165,31 @@ MyBatis-Plus 的前缀是 `mybatis-plus`（`MybatisPlusProperties`），全仓**
 
 锁死用例：`user-rpc` 的 `GrpcInterceptorWiringTest`（2 条）。
 
+**规则（2026-10-21 再补 · 由「46 处批量插入」推出）**：**凡是「脚本批量改 N 处」，
+必须配一条覆盖全部 N 处的守恒断言，而不是逐点行为测试。**
+
+issue #71187874 用脚本往两个 DomainService 插了 46 处
+`catch (StatusRuntimeException e) { throw e; }`（user-rpc 17 + admin-rpc 29）。
+逐点行为测试只覆盖到 8 个方法，**其余 38 处当时只有「代码写进去了」这一层保证** ——
+而「代码存在」正是上一条规则里那个 H2 假绿的形态。
+
+补法：新增两个**结构性元测试**，用 Spring 自带的 `org.springframework.asm`
+读 class 文件的异常表，断言每个 `catch(Exception)` handler **前邻**都有一条
+`catch(StatusRuntimeException)`：
+
+| 用例 | 覆盖 | 断言 |
+|---|---|---|
+| `UserDomainServiceCatchStructureTest` | 18 处 catch(Exception) / 18 处放行 | 前邻断言 + 守恒计数 |
+| `AdminDomainServiceCatchStructureTest` | 29 处 / 29 处 | 同构副本 |
+
+**两条断言必须成对**：只有前邻断言时，删掉一个 `catch(Exception)` 会让总数"看起来对得上"；
+只有计数断言时，新增一处不写放行分支也看不出来。变异测试已实证两者都能变红
+（删掉 `login` 的放行分支后，前邻断言报「catch 序列 = [NotFoundException, Exception]」、
+计数断言 `expected: 18 but was: 17`）。
+
+⚠️ 扫描必须用**字节码**而非源码：javac 生成的异常表里，同一个 try 的多个 catch 共享
+`(from, to)` 且顺序即源码顺序，这才使「前邻」可判定；源码扫描依赖缩进与文本形态。
+
 ### 3.4 已知偏离（有意为之，需留档）
 
 以下偏离经过确认并记录，审查时不必重复质疑，但也不得"顺手修正回旧行为"：
@@ -173,7 +198,22 @@ MyBatis-Plus 的前缀是 `mybatis-plus`（`MybatisPlusProperties`），全仓**
 |---|---|---|
 | HTTP path | `/user/v1/*`、`/admin/v1/*`（Go 为 `/usercenter/v1/user/*`、`/admincenter/v1/admin/*`） | HUMAN_ONLY.MD 决策；路由不属于行为语义，但属 wire 契约变更 |
 | HTTP method | 统一 POST（Go 为 GET/DELETE 混合） | 同上 |
-| 表名 | `users_user` / `admin_admin`（Go 为 GORM 默认名） | HUMAN_ONLY.MD 决策 |
+| 表名 | `users_user` / `admin_admin` | HUMAN_ONLY.MD 决策。**⚠️ 2026-10-21 补全 Go 侧真实表名**（原行只写「Go 为 GORM 默认名」，太笼统，写脚本时容易照抄成同名 —— 见下） |
+
+**表名全映射（2026-10-21 取证自 Go 真源 `service/user/admin/rpc/internal/model/data_model.go`）**：
+
+| 实体 | Go `TableName()` | RAG |
+|---|---|---|
+| User | `users` | `users_user` |
+| Admin | **`admins`** | `admin_admin` |
+| AdminInvite | **`admin_invites`** | `admin_invite` |
+| UserAvatarHistory | `user_avatar_history` | `users_user_avatar_history` |
+
+⚠️ **admin 侧是两端都改名，不是一端改**。扩展超时对拍时我按「admin_admin 两侧同名」写锁脚本，
+`go_db` 立刻报 `relation "admins" does not exist` —— 而 `LOCK` 报错会让**整个事务 abort**，
+连同一进程里已经拿到的 `users` 表锁也一起丢掉，于是 Go/user 在 363ms 就登录成功、
+**看着像"RAG 超时更慢"的假偏差**。最终修法：每个 (库, 表) 用独立 psql 进程 + 加锁前
+`to_regclass()` 校验存在，否则直接 `exit 1`。**教训：造阻塞的脚本必须先证明"锁真的加上了"。**
 
 #### 3.4.2 `service/users` 语义审计后的两条新增留档（2026-10-21）
 
@@ -450,7 +490,8 @@ ACCESS EXCLUSIVE 表锁持 10s，三组对照：
 **新增回归网（32 条）**：
 `DeadlineQueryTimeoutInjectorTest`（7）+ `SqlTimeoutStatusTranslatorTest`（8）+
 `DeadlinePassthroughTest`（user-rpc 7）+ `AdminDeadlinePassthroughTest`（admin-rpc 8）+
-`GrpcInterceptorWiringTest`（2，防 H2 假绿复发）。全仓 383 → **415 条，0 failures**。
+`GrpcInterceptorWiringTest`（2，防 H2 假绿复发）+ 两个结构性元测试（6）。
+全仓 383 → **421 条，0 failures**。
 
 > **实现期踩到的三个坑（均已写进代码注释）**
 > ① `Invocation.proceed()` 声明抛的是 `InvocationTargetException`（反射包装），**不是** `SQLException`
@@ -1061,7 +1102,7 @@ SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `t
 
 | 原优先级 | 项 | 状态 |
 |---|---|---|
-| ~~P0~~ | ~~**B-1：rpc 超时无法取消在途 IO**~~ | ✅ **2026-10-21 已关闭**（issue #71187373 实验 → #71187874 实施） | 三层证据：① 纯 JDBC 层 `probe-jdbc-cancel.java` 证明 **interrupt 对等锁查询零效果**（照常返回、11014ms）、**`setQueryTimeout` 有效**（2034ms 抛 `SQLState=57014`，与 Go ctx cancel 同一条服务端语义且连接保可用）；② 同日同场端到端；③ 手段定性（`socketTimeout` 会让连接报废，语义相反，不可用）。**实施**：`DeadlineQueryTimeoutInjector`（按 `DeadlineState.remainingMillis()` 注入）+ `SqlTimeoutStatusTranslator`（57014→DEADLINE_EXCEEDED）+ 46 处 `catch (StatusRuntimeException) { throw e; }`（user-rpc 17 + admin-rpc 29）。**api 层零改动** —— `DEADLINE_EXCEEDED` 本就落 `mapRPCStatusToCode` 的 default → 1015。**结果**：客户端 3170ms→**2223ms**（Go 2208ms）、响应体 `text/plain`→**`{"code":1015}`**、PG 查询滞留 4303ms→**176ms**（Go 182ms）；difftest 39/39 unexpected=0；全仓 383→**415 条** 0 failures。⚠️ 过程中发现更大前置缺陷 —— gRPC `ServerInterceptor` 从未挂到 server 上，连带 **DRIFT-018 的 24 处 `checkDeadline()` 此前全是死代码**（见上一行二次更正）。详见 §3.4.1「B-1 补记」 |
+| ~~P0~~ | ~~**B-1：rpc 超时无法取消在途 IO**~~ | ✅ **2026-10-21 已关闭**（issue #71187373 实验 → #71187874 实施） | 三层证据：① 纯 JDBC 层 `probe-jdbc-cancel.java` 证明 **interrupt 对等锁查询零效果**（照常返回、11014ms）、**`setQueryTimeout` 有效**（2034ms 抛 `SQLState=57014`，与 Go ctx cancel 同一条服务端语义且连接保可用）；② 同日同场端到端；③ 手段定性（`socketTimeout` 会让连接报废，语义相反，不可用）。**实施**：`DeadlineQueryTimeoutInjector`（按 `DeadlineState.remainingMillis()` 注入）+ `SqlTimeoutStatusTranslator`（57014→DEADLINE_EXCEEDED）+ 46 处 `catch (StatusRuntimeException) { throw e; }`（user-rpc 17 + admin-rpc 29）。**api 层零改动** —— `DEADLINE_EXCEEDED` 本就落 `mapRPCStatusToCode` 的 default → 1015。**结果**：客户端 3170ms→**2223ms**（Go 2208ms）、响应体 `text/plain`→**`{"code":1015}`**、PG 查询滞留 4303ms→**176ms**（Go 182ms）；difftest 39/39 unexpected=0；**admin 域另跑两轮**（RAG 2544ms/179ms vs Go 2181ms/176ms，同样对齐）；全仓 383→**421 条** 0 failures，其中 6 条是**扫描字节码异常表的全量守恒元测试**（`UserDomainServiceCatchStructureTest` / `AdminDomainServiceCatchStructureTest`）—— 46 处放行分支由「逐点人工读」升级为「机器守恒」，变异测试已实证能变红。⚠️ 过程中发现更大前置缺陷 —— gRPC `ServerInterceptor` 从未挂到 server 上，连带 **DRIFT-018 的 24 处 `checkDeadline()` 此前全是死代码**（见上一行二次更正）。详见 §3.4.1「B-1 补记」 |
 | ~~P0~~ | admin-api 默认配置下起不来（`WeakKeyException`） | ✅ **已修**（commit `71be288`）。`AdminJwtAuthInterceptor.java:67` 与 `JwtAuthInterceptor.java:76` 均已走 `JwtUtil.padToHmacKeySize(...)`；`JwtUtil.java:44` 已是 `public static`——即原表建议的「提成 `users-common` public 方法」方案已实施。**本行此前一直挂在 P0 未修，是过期信息** |
 | ~~P2~~ | user-api 4 项清理 | ⚠️ **半修**。① 4 个端点 `@RequestBody(required=false)` **已完成**（`UserController.java:118/126/137/153`）；② 「删 `codeFromRPCError` 死代码」**未完成，且原文把位置写错**——它在 **admin-api**（`AdminApiSupport.java:66`），不在 user-api。剩余部分已并入本表 P3 |
 | ~~P3~~ | Flyway 迁移归属 | ✅ **已定案** → §6.3 问题 1 |
@@ -1112,6 +1153,18 @@ RAG `3047ms/4455ms`，量级一致、可复现，**但以复测值为准**：
 | RAG 注入静态 `default-statement-timeout=2` | 2449ms | `{"code":5001,"msg":"系统内部错误"}` | 193ms |
 | **RAG 生产方案实施后** | **2223ms** | **`{"code":1015,"msg":"服务繁忙"}`** | **176ms** |
 | Go（同场对照） | 2208ms | `{"code":1015,"msg":"服务繁忙"}` | 182ms |
+
+**admin 域同样跑了四轮（2026-10-21 扩展，user 域两轮 + admin 域两轮）**：
+
+| | 客户端返回 | 响应体 | PG 查询又存活 |
+|---|---|---|---|
+| Go / user | 2236ms | `{"code":1015,"msg":"服务繁忙"}` | 161ms |
+| **RAG / user** | 2294ms | 同上 | 191ms |
+| Go / admin | 2181ms | 同上 | 176ms |
+| **RAG / admin** | 2544ms | 同上 | **179ms** |
+
+⇒ **admin-rpc 的 29 处放行分支 + 13 处 `checkDeadline()` 也拿到了端到端证据**，
+不再只是「user 侧全绿所以推断 admin 侧也成立」。admin 域 RAG 与 Go 的查询滞留差 3ms。
 
 > ⚠️ 第三行那个 `{"code":5001}` 曾经让人差点选错方案：它说明**只注入超时而不做异常映射**，
 > 会把 `text/plain` 差异换成一个**离 Go 更远**的差异。
