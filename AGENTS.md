@@ -633,6 +633,31 @@ Caused by: org.postgresql.util.PSQLException:
 > Flyway 原本用 schema history 上的行锁天然挡住了这一层。去掉它就等于去掉这层保护，
 > 这是「丢掉有状态账本」的代价之一 —— 与 §6.3 问题 1 记的「失去升级路径」并列。
 
+##### 「为什么 Go 没有这个问题」—— 准确答案（别再问第二遍）
+
+这是本轮被问到的问题，实测 + 读源码后的结论是：**要分成三件事，别混谈。**
+
+| 问题 | Go 有没有 | 依据 |
+|---|---|---|
+| **① 账本撞车（Flyway 特有）** | **结构性没有** | GORM `AutoMigrate` 无状态：没有版本号、没有 `flyway_schema_history`、没有 checksum、没有 `baseline`。DRIFT-NEW-015 是**本仓库自己引入的复杂度造成的**，不是 PG 或 Go 的固有问题 |
+| **② PG 的 DDL 并发竞态** | **有，只是窗口窄得多** | GORM 的建表 SQL **没有** `IF NOT EXISTS`（`migrator.go:309` 就是 `tx.Exec("CREATE TABLE ? (...")`），保护只来自 `HasTable` 先查（`migrator.go:124` 的 check-then-act）。并发失败形态会是 `relation already exists`，与 RAG 的 `pg_type_typname_nsp_index` 不同 |
+| **③ 真实部署里两个服务同时对空库启动** | **两边都不发生** | Go 与 RAG 的 `docker-compose` **都只有基建、没有应用服务**（Go 侧连 user-rpc / admin-rpc 都没有）。首次初始化通常由单个服务完成 |
+
+**② 的实测**：把 Go 的 user-rpc 与 admin-rpc **同时**对着一个全新空库启动（刻意不 sleep 错开），
+连续 5 轮全部成功，4 张表齐活（`users` / `user_avatar_history` / `admins` / `admin_invites`）。
+脚本见 `tools/difftest/exp-go-concurrent-automigrate.sh`。
+
+**为什么 Go 能扛住（推测，未进一步验证）**：两个服务的模型顺序不同 ——
+user-rpc 是 `AutoMigrate(&User{}, &UserAvatarHistory{})`，**第一个就碰 `users`**；
+admin-rpc 是 `AutoMigrate(&Admin{}, &AdminInvite{}, &User{})`，**`users` 排第三**。
+admin-rpc 要先建完 `admins` + `admin_invites` 才轮到 `users`，
+那时 user-rpc 早已建好、它的 `HasTable(users)` 返回 true 直接跳过。
+**靠的是时序侥幸，不是机制。**
+
+> ⚠️ 所以 RAG 这边加的 advisory lock **比 Go 更强**，不是多余的：
+> Go 那个是「时序恰好错开」，RAG 若照抄同样依赖错开，一旦模型顺序或启动时序变化就会炸。
+> 锁是机制，不靠运气 —— 这条要守住。
+
 **为什么丢而不是留**（用户的取舍）：项目仍在重构期、**无任何已部署环境**
 （`docker-compose.yaml` 里连 admin-rpc 都没有），表结构还会继续动 ——
 升级路径的价值要等到第一次 `ALTER` 才兑现，而那时只有一张库要改，代价可控。
