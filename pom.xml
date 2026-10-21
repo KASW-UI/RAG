@@ -37,6 +37,20 @@
         <!-- MyBatis-Plus：BOM 统一管理版本；与 Spring Boot 4.0.8 兼容选 3.5.14+ -->
         <mybatis-plus.version>3.5.17</mybatis-plus.version>
         <!--
+            MyBatis 本体版本：2026-10-21 实测 user-rpc / admin-rpc 解析到的正是 3.5.19
+            （由 mybatis-plus 传递进来；MP 的 BOM **不管理** mybatis 本体）。
+
+            service/common 的 B-1 缓解拦截器（DeadlineQueryTimeoutInjector /
+            SqlTimeoutStatusTranslator）需要 org.mybatis:mybatis 的 Interceptor 契约，
+            因此必须在这里显式声明。锁成 3.5.19 与既有解析结果一致 ⇒ 本次不改任何
+            运行时行为，只是不再依赖「恰好由 MP 传递到这个版本」。
+
+            ⚠️ 将来升级 mybatis-plus 时这里必须同步核对，否则同一个 org.apache.ibatis
+            接口可能被两个版本各加载一份，拦截器的 type/signature 匹配会**静默失效**
+            ——不抛异常，只是拦截器不起作用（AGENTS.md §3.3 的典型形态）。
+        -->
+        <mybatis.version>3.5.19</mybatis.version>
+        <!--
             mybatis-spring 必须强制锁版本，不能用 mybatis-plus-boot-starter 自带的那个。
 
             实测（2026-10-20，user-rpc 真实 jar 启动）：
@@ -91,6 +105,16 @@
                 <groupId>org.mybatis</groupId>
                 <artifactId>mybatis-spring</artifactId>
                 <version>${mybatis-spring.version}</version>
+            </dependency>
+            <!--
+                mybatis 本体：MP 的 BOM 不含它，Spring Boot 的 BOM 虽然含但版本未必
+                与 MP 传递链一致（实测两者都是 3.5.19）。显式锁一份，让
+                service/common 的 B-1 拦截器与 user-rpc / admin-rpc 用的是同一个 jar。
+            -->
+            <dependency>
+                <groupId>org.mybatis</groupId>
+                <artifactId>mybatis</artifactId>
+                <version>${mybatis.version}</version>
             </dependency>
             <!--
                 Flyway 不引入 BOM：org.flywaydb:flyway-bom 不存在（maven central 无此 artifact）

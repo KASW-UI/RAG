@@ -194,17 +194,20 @@ echo "----（以上是 worker 线程的真实异常形态；客户端侧早已�
 
 echo
 echo "======================================================================"
-echo "判读（见 AGENTS.md §3.4.1 B-1）："
-echo "  两侧客户端返回耗时应当都接近各自的 http-timeout(3s) ——"
+echo "判读（见 AGENTS.md §3.4.1「B-1 补记」）："
+echo "  两侧客户端返回耗时都应当接近各自的 rpc timeout（Go 2s / RAG 2s）——"
 echo "  RpcInterceptor 的 catch(TimeoutException) 是【立即】返回 DEADLINE_EXCEEDED 的，"
 echo "  不等 worker 退出。"
-echo "  真正的差异在第二行：Go 的 PG 查询应当【立刻】消失（ctx cancel 触达 PG），"
-echo "  RAG 的应当【继续存活】到持锁事务释放为止（JDBC 不响应线程 interrupt）。"
 echo
-echo "  EXP_RAG_QUERY_TIMEOUT 组（run.sh 注入 mybatis-plus.configuration."
-echo "  default-statement-timeout=N）的额外判据 —— 两条**同时**成立才算生效："
-echo "    ① RAG 的「PG 阻塞查询又存活了」应当 ≪ ${LOCK_SECONDS}s（被 CancelRequest 掐掉）；"
-echo "    ② 上面 grep 段应当捞到 57014 / query_canceled 行。"
-echo "  ⚠️ 只满足 ① 不算证据充分（也可能是锁自己先释放了）；"
-echo "     只满足 ② 也不够（异常可能来自别的语句）。必须两条一起看。"
+echo "  ① PG 查询存活时长 = B-1 的核心。**两侧都应当 ≈ 0ms**"
+echo "     （Go 靠 ctx cancel；RAG 靠 DeadlineQueryTimeoutInjector 按 deadline 注入的"
+echo "      setQueryTimeout）。若 RAG 这里又是数千毫秒 ⇒ 拦截器没被注册 / 没生效。"
+echo
+echo "  ② 响应体。**两侧都应当是 {\"code\":1015,\"msg\":\"服务繁忙\"}**"
+echo "     RAG 若仍是 text/plain \"Request Timeout\" ⇒ DEADLINE_EXCEEDED 没能穿过"
+echo "     业务层的 catch(Exception)；"
+echo "     若变成 {\"code\":5001} ⇒ 57014 翻译没生效（被吞成了 INTERNAL）。"
+echo
+echo "  ③ RAG worker 的 business_info → business_error 时刻差应当 ≪ ${LOCK_SECONDS}s"
+echo "     （超时在 deadline 处触发、worker 随即退出，而不是挂到持锁事务释放）。"
 echo "======================================================================"

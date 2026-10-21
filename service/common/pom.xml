@@ -115,6 +115,26 @@
             <artifactId>grpc-stub</artifactId>
         </dependency>
 
+        <!-- ============ 3b. MyBatis 拦截器（B-1 超时缓解，2026-10-21） ============ -->
+        <!--
+            对应 Go 版 context.WithTimeout 到点后 database/sql 主动取消查询的语义。
+            Go 侧不需要任何额外依赖（database/sql 内建）；Java 侧必须借 MyBatis 的
+            Interceptor 钩子把 deadline 落到 Statement.setQueryTimeout 上。
+
+            ⚠️ 这里只要 **mybatis 本体**，不要 mybatis-plus-boot-starter：
+            starter 会带 MybatisPlusAutoConfiguration，把所有依赖本模块的服务
+            （含纯 gRPC 进程与无数据源的 api 模块）都拖进自动配置扫描范围。
+            mybatis 本体是纯 jar、零自动配置，任何模块引它都不会凭空多出 Bean。
+
+            ⚠️ 版本必须与 user-rpc / admin-rpc 实际解析到的一致（当前 3.5.19，
+            由 mybatis-plus 传递进来），否则同一个 Executor 接口可能被加载两份
+            —— 拦截器的 type/signature 匹配会静默失效（§3.3：不报错的失效）。
+        -->
+        <dependency>
+            <groupId>org.mybatis</groupId>
+            <artifactId>mybatis</artifactId>
+        </dependency>
+
         <!-- ============ 4. Jakarta Servlet API（替代 go-zero rest middleware） ============ -->
         <!--
             对应 Go 版 observability/http.go 的 rest.Middleware / http.HandlerFunc；

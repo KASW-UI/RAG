@@ -1,5 +1,7 @@
 package com.rag.users.admin.rpc;
 
+import com.rag.common.persistence.DeadlineQueryTimeoutInjector;
+import com.rag.common.persistence.SqlTimeoutStatusTranslator;
 import com.rag.common.spring.LoggerFactoryBean;
 import com.rag.common.spring.ObservabilityLifecycle;
 import com.rag.common.spring.ObservabilityProperties;
@@ -63,9 +65,40 @@ import org.springframework.context.annotation.Import;
         LoggerFactoryBean.class,
         RpcServerInterceptorFactory.class, // gRPC Unary ServerInterceptor（Go admin.go:43）
         ObservabilityProperties.class,     // 承载 observability.rpc-timeout（Go 侧 2000ms）
-        ObservabilityLifecycle.class       // 容器关闭时回收 RpcInterceptor 线程池
+        ObservabilityLifecycle.class,      // 容器关闭时回收 RpcInterceptor 线程池
+
+        // ===== B-1 缓解：超时必须能真正取消在途 SQL（与 user-rpc 同一套，两个 @Import 都缺过东西）=====
+        // DeadlineQueryTimeoutInjector：按线程上的 DeadlineState 给每条 SQL 设 setQueryTimeout，
+        //   令 pgjdbc 到点向 PG 发 CancelRequest（等价 Go ctx cancel；JDBC 不响应线程 interrupt）。
+        // SqlTimeoutStatusTranslator：把随之抛出的 57014 query_canceled 翻成 DEADLINE_EXCEEDED，
+        //   否则被业务层 catch(Exception) 吞成 INTERNAL → api 层渲染 5001（离 Go 的 1015 更远）。
+        DeadlineQueryTimeoutInjector.class,
+        SqlTimeoutStatusTranslator.class
 })
 public class AdminRpcApplication {
+
+    /**
+     * <p><b>把 {@link io.grpc.ServerInterceptor} 真正挂到 gRPC server 上</b>
+     * （2026-10-21 修，见 issue #71187874）。
+     *
+     * <p>与 user-rpc 同款缺陷、同款修法。grpc-spring-boot-starter 3.1.0.RELEASE
+     * <b>不会自动注册</b>容器里的 {@code ServerInterceptor} Bean，唯一入口是
+     * {@code GrpcServerConfigurer}（{@code javap GrpcServerFactoryAutoConfiguration}
+     * 显示它只注入 {@code List<GrpcServerConfigurer>}；{@code GrpcServerProperties}
+     * 里压根没有 interceptor 字段）。
+     *
+     * <p><b>代价不只是少了 span</b>：{@code onHalfClose} 没跑 ⇒ handler 线程上
+     * {@code DeadlineState} 恒未设置 ⇒ admin-rpc 那 13 处 {@code checkDeadline()}
+     * 与 B-1 的 {@code setQueryTimeout} 注入<b>全部失效</b>，gRPC 也没有超时。
+     *
+     * <p>Go 出处：{@code service/user/admin/rpc/admin.go:33,43} 显式注册
+     * {@code NewUnaryServerInterceptor}。
+     */
+    @org.springframework.context.annotation.Bean
+    public net.devh.boot.grpc.server.serverfactory.GrpcServerConfigurer rpcInterceptorConfigurer(
+            io.grpc.ServerInterceptor rpcUnaryServerInterceptor) {
+        return server -> server.intercept(rpcUnaryServerInterceptor);
+    }
 
     public static void main(String[] args) {
         SpringApplication.run(AdminRpcApplication.class, args);

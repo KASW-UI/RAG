@@ -175,14 +175,17 @@ echo "==> [4/5] 启动 RAG 栈（独占端口 59210/58081/59900/58889；gRPC 走
 # POSTGRES_DB 两侧同为 rag_db：admin-rpc 必须能看见 users_user，
 # 否则 getuser/banuser/unbanuser/resetuserpassword/updateuser/delete 全返回「用户不存在」。
 #
-# 【B-1 实验开关】EXP_RAG_QUERY_TIMEOUT=2 时给 RAG 的 rpc 侧注入
+# 【B-1 静态注入开关】EXP_RAG_QUERY_TIMEOUT=2 时给 RAG 的 rpc 侧注入
 # mybatis-plus.configuration.default-statement-timeout（单位：秒）。
-# 作用：让 pgjdbc 起 StatementCancelTimerTask → 到点向 PG 发
-# CancelRequest，用来验证 setQueryTimeout 对 B-1（超时不能取消
-# 在途 IO）的实际缓解效果。
-# **默认不设** —— 不设时数组为空，生产配置不受影响。
-# 只是单纯的实验注入点，不是生产方案（生产该用
-# DeadlineState.remainingMillis() 注入 per-request 值，待实验结果决定）。
+#
+# ⚠️ **2026-10-21 起，本开关已不是生产方案**，生产方案是代码内的
+#    `DeadlineQueryTimeoutInjector`（按 DeadlineState.remainingMillis() 逐请求注入，
+#    见 issue #71187874）。保留本开关只作**对照/兜底**：
+#    拦截器在 `StatementHandler.prepare` 返回之后调 `setQueryTimeout`，
+#    **会覆盖** MyBatis 在 prepare 里按 configuration 设的值
+#    ⇒ 正常情况下这个 env 开关在 RAG 侧不产生任何效果。
+#    只有当拦截器没被注册时，它才兜住底 —— 这也是判断「拦截器到底生效没有」的
+#    一个副证：两组都开，若结果与基线无差别，说明拦截器在起作用。
 #
 # ⚠️ 前缀必须是 mybatis-plus，不能写 mybatis（§3.3「不报错的隐式失效」）：
 #   MyBatis-Plus 的 @ConfigurationProperties 前缀是 "mybatis-plus"
@@ -198,7 +201,8 @@ echo "==> [4/5] 启动 RAG 栈（独占端口 59210/58081/59900/58889；gRPC 走
 QTO_ARG=()
 if [[ -n "${EXP_RAG_QUERY_TIMEOUT:-}" ]]; then
   QTO_ARG=(--mybatis-plus.configuration.default-statement-timeout="$EXP_RAG_QUERY_TIMEOUT")
-  echo "  · B-1 实验：rpc 侧注入 mybatis-plus.configuration.default-statement-timeout=${EXP_RAG_QUERY_TIMEOUT}s"
+  echo "  · B-1 对照：rpc 侧静态注入 default-statement-timeout=${EXP_RAG_QUERY_TIMEOUT}s"
+  echo "    （生产方案是代码内拦截器逐请求注入，本开关只作兜底/对照）"
 fi
 
 POSTGRES_DB=rag_db GRPC_SERVER_PORT=59210 \

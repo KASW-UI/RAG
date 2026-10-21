@@ -13,6 +13,7 @@ import com.rag.users.admin.rpc.exception.AdminExceptions.InviteUnavailableExcept
 import com.rag.users.admin.rpc.exception.AdminExceptions.NotFoundException;
 import com.rag.users.admin.rpc.exception.AdminExceptions.UsernameTakenException;
 import com.rag.users.admin.rpc.mapper.AdminInviteMapper;
+import io.grpc.StatusRuntimeException;
 import com.rag.users.admin.rpc.mapper.AdminMapper;
 import com.rag.users.admin.rpc.mapper.UserMapper;
 import com.rag.users.admin.rpc.metrics.AdminRpcMetrics;
@@ -164,6 +165,9 @@ public class AdminDomainService {
         } catch (NotFoundException e) {
             metrics.getLoginUserNotFound().increment();
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             metrics.getLoginDbError().increment();
             log.error("admin login DB error, username={}", username, e);
@@ -215,6 +219,9 @@ public class AdminDomainService {
         long ttlSeconds = properties.getAdminAuth().getAccessExpire();
         try {
             stringRedisTemplate.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds));
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             log.error("admin logout Redis setex failed", e);
             throw Status.INTERNAL.withDescription("注销失败,Redis写入异常").asRuntimeException();
@@ -240,6 +247,9 @@ public class AdminDomainService {
             admin = findOneAdminByUid(uid);
         } catch (NotFoundException e) {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             log.error("admin getSelf DB error, uid={}", uid, e);
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
@@ -272,6 +282,9 @@ public class AdminDomainService {
             self = findOneAdminByUid(uid);
         } catch (NotFoundException e) {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             log.error("admin updateSelf findOneAdminByUid DB error, uid={}", uid, e);
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
@@ -286,6 +299,9 @@ public class AdminDomainService {
                 }
             } catch (NotFoundException ignored) {
                 // 未被占用，名字可用
+            } catch (StatusRuntimeException e) {
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                throw e;
             } catch (Exception e) {
                 log.error("admin updateSelf findOneAdminByUsername DB error", e);
                 throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
@@ -301,6 +317,9 @@ public class AdminDomainService {
         if (password != null && !password.isEmpty()) {
             try {
                 wrapper.set(AdminEntity::getPassword, PasswordUtil.encrypt(password));
+            } catch (StatusRuntimeException e) {
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                throw e;
             } catch (Exception e) {
                 log.error("admin updateSelf PasswordUtil.encrypt failed", e);
                 throw Status.INTERNAL.withDescription("密码加密失败").asRuntimeException();
@@ -325,6 +344,9 @@ public class AdminDomainService {
 
         try {
             adminMapper.update(null, wrapper);
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             log.error("admin updateSelf update DB error, uid={}", uid, e);
             throw Status.INTERNAL.withDescription("DB更新失败").asRuntimeException();
@@ -336,6 +358,9 @@ public class AdminDomainService {
             newAdmin = findOneAdminByUid(uid);
         } catch (NotFoundException e) {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             log.error("admin updateSelf re-findOneAdminByUid DB error, uid={}", uid, e);
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
@@ -384,6 +409,9 @@ public class AdminDomainService {
         String passwordHash;
         try {
             passwordHash = PasswordUtil.encrypt(password);
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             log.error("admin createAdmin PasswordUtil.encrypt failed", e);
             throw Status.INTERNAL.withDescription("DB添加失败").asRuntimeException();
@@ -393,6 +421,9 @@ public class AdminDomainService {
         long uid;
         try {
             uid = Snowflake.nextId();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             log.error("admin createAdmin Snowflake.nextId failed", e);
             throw Status.INTERNAL.withDescription("DB添加失败").asRuntimeException();
@@ -410,6 +441,9 @@ public class AdminDomainService {
             throw Status.PERMISSION_DENIED.withDescription("管理员邀请码错误").asRuntimeException();
         } catch (UsernameTakenException e) {
             throw Status.ALREADY_EXISTS.withDescription("用户名已存在").asRuntimeException();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             if (AdminExceptions.isUniqueViolation(e)) {
                 throw Status.ALREADY_EXISTS.withDescription("用户名已存在").asRuntimeException();
@@ -455,6 +489,9 @@ public class AdminDomainService {
         } catch (NotFoundException e) {
             metrics.getCreateInviteUserNotFound().increment();
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             metrics.getCreateInviteDbError().increment();
             log.error("admin createInviteCode findOneAdminByUid DB error, operator_id={}", operatorId, e);
@@ -468,6 +505,9 @@ public class AdminDomainService {
             String code;
             try {
                 code = generateInviteCode();
+            } catch (StatusRuntimeException e) {
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                throw e;
             } catch (Exception e) {
                 metrics.getCreateInviteInternalError().increment();
                 log.error("admin createInviteCode SecureRandom failed", e);
@@ -481,6 +521,9 @@ public class AdminDomainService {
 
             try {
                 adminInviteMapper.insert(invite);
+            } catch (StatusRuntimeException e) {
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                throw e;
             } catch (Exception e) {
                 if (AdminExceptions.isUniqueViolation(e)) {
                     // unique violation → 重试（不埋点，对应 Go 端 continue）
@@ -526,6 +569,9 @@ public class AdminDomainService {
             wrapper.eq(UserEntity::getUid, uid)
                     .set(UserEntity::getStatus, 1L);
             rows = userMapper.update(null, wrapper);
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             metrics.getBanDbError().increment();
             log.error("admin banUser update DB error, uid={}", uid, e);
@@ -555,6 +601,9 @@ public class AdminDomainService {
             wrapper.eq(UserEntity::getUid, uid)
                     .set(UserEntity::getStatus, 0L);
             rows = userMapper.update(null, wrapper);
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             metrics.getUnbanDbError().increment();
             log.error("admin unBanUser update DB error, uid={}", uid, e);
@@ -587,6 +636,9 @@ public class AdminDomainService {
             user = findOneUserByUid(uid);
         } catch (NotFoundException e) {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             log.error("admin getUser DB error, uid={}", uid, e);
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
@@ -635,6 +687,9 @@ public class AdminDomainService {
             }
             Long totalLong = userMapper.selectCount(countWrapper);
             total = totalLong == null ? 0L : totalLong;
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             log.error("admin getUserList count DB error", e);
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
@@ -652,6 +707,9 @@ public class AdminDomainService {
             listWrapper.last("LIMIT " + pageSize + " OFFSET " + ((page - 1) * pageSize));
             rows = userMapper.selectList(listWrapper);
             if (rows == null) rows = Collections.emptyList();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             log.error("admin getUserList DB error", e);
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
@@ -687,6 +745,9 @@ public class AdminDomainService {
         } catch (NotFoundException e) {
             metrics.getUpdateUserUserNotFound().increment();
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             metrics.getUpdateUserDbError().increment();
             log.error("admin updateUser findOneUserByUid DB error, uid={}", uid, e);
@@ -702,6 +763,9 @@ public class AdminDomainService {
                 existing = findOneUserByUsername(username);
             } catch (NotFoundException e) {
                 existing = null;
+            } catch (StatusRuntimeException e) {
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                throw e;
             } catch (Exception e) {
                 metrics.getUpdateUserDbError().increment();
                 log.error("admin updateUser findOneUserByUsername DB error", e);
@@ -718,6 +782,9 @@ public class AdminDomainService {
         if (password != null && !password.isEmpty()) {
             try {
                 wrapper.set(UserEntity::getPassword, PasswordUtil.encrypt(password));
+            } catch (StatusRuntimeException e) {
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                throw e;
             } catch (Exception e) {
                 metrics.getUpdateUserInternalError().increment();
                 log.error("admin updateUser PasswordUtil.encrypt failed", e);
@@ -736,6 +803,9 @@ public class AdminDomainService {
         // W5 update
         try {
             userMapper.update(null, wrapper);
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             metrics.getUpdateUserDbError().increment();
             log.error("admin updateUser update DB error, uid={}", uid, e);
@@ -746,6 +816,9 @@ public class AdminDomainService {
         UserEntity newUser;
         try {
             newUser = findOneUserByUid(uid);
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             metrics.getUpdateUserDbError().increment();
             log.error("admin updateUser re-findOneUserByUid DB error, uid={}", uid, e);
@@ -768,6 +841,9 @@ public class AdminDomainService {
         int rows;
         try {
             rows = userMapper.delete(new LambdaQueryWrapper<UserEntity>().eq(UserEntity::getUid, uid));
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             metrics.getDeleteUserDbError().increment();
             log.error("admin deleteUser DB error, uid={}", uid, e);
@@ -806,6 +882,9 @@ public class AdminDomainService {
         } catch (NotFoundException e) {
             metrics.getResetPasswordUserNotFound().increment();
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             metrics.getResetPasswordDbError().increment();
             log.error("admin resetUserPassword findOneUserByUid DB error, uid={}", uid, e);
@@ -821,6 +900,9 @@ public class AdminDomainService {
         String hash;
         try {
             hash = PasswordUtil.encrypt(defaultPassword);
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             metrics.getResetPasswordInternalError().increment();
             log.error("admin resetUserPassword PasswordUtil.encrypt failed", e);
@@ -832,6 +914,9 @@ public class AdminDomainService {
             LambdaUpdateWrapper<UserEntity> wrapper = new LambdaUpdateWrapper<>();
             wrapper.eq(UserEntity::getUid, uid).set(UserEntity::getPassword, hash);
             userMapper.update(null, wrapper);
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             metrics.getResetPasswordDbError().increment();
             log.error("admin resetUserPassword update DB error, uid={}", uid, e);
@@ -906,6 +991,9 @@ public class AdminDomainService {
     private static String toJson(Map<String, String> map) {
         try {
             return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(map);
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             log.error("admin extraInfo JSON serialize failed", e);
             throw Status.INTERNAL.withDescription("JSON序列化失败").asRuntimeException();

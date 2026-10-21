@@ -149,6 +149,22 @@ MyBatis-Plus 的前缀是 `mybatis-plus`（`MybatisPlusProperties`），全仓**
 唯一可靠的判据是**运行时证据**（本例是 PG 侧是否出现 `57014 query_canceled`）。
 凡是「注入后实测无变化」的结论，一律先怀疑注入本身没到位，再怀疑机制无效。
 
+**规则（2026-10-21 再补 · 由 H2 假绿事件推出）**：**断言「Bean 存在」不等于断言「机制生效」。**
+
+`ObservabilityWiringTest#grpcInterceptorBeanExists` 长期为绿，因为它断言的是
+`ctx.getBean(ServerInterceptor.class)` 非空 —— 而真实缺陷是
+**grpc-spring-boot-starter 3.1.0 根本不会把用户提供的 `ServerInterceptor` Bean 挂到 server 上**
+（`javap` 证据见 §6.4 勘误小节）。Bean 在容器里、starter 不用它，两件事都对，机制照样是死的。
+
+⇒ 凡依赖**框架自动注册**的机制（starter 自动装配、`AutoConfiguration.imports`、拦截器链），
+测试必须断言二者之一：
+- **运行时的可观测后果**（最强）：本例即「客户端是否 ≈2s 返回 1015」，由
+  `tools/difftest/exp-b1-timeout-cancel.sh` 端到端覆盖；
+- **对象确实进入了框架的接管点**（次强）：如 `verify(serverBuilder).intercept(interceptor)`，
+  由 `GrpcInterceptorWiringTest` 锁住。
+
+锁死用例：`user-rpc` 的 `GrpcInterceptorWiringTest`（2 条）。
+
 ### 3.4 已知偏离（有意为之，需留档）
 
 以下偏离经过确认并记录，审查时不必重复质疑，但也不得"顺手修正回旧行为"：
@@ -381,16 +397,55 @@ ACCESS EXCLUSIVE 表锁持 10s，三组对照：
 | `socketTimeout` | `PGStream.setSocketTimeout` → `Socket.setSoTimeout` | socket 读超时 → **连接报废** | ❌ 语义相反，会污染连接池 |
 
 ⇒ **只能用 `setQueryTimeout`，不能用 `socketTimeout`。**
-生产落地方式（**尚未实施，待用户拍板**）：在 MyBatis `StatementHandler` 拦截器里按
-`DeadlineState.remainingMillis()` 逐请求 `setQueryTimeout(ceil(rem/1000))`，而不是设一个全局静态值。
 
-> **⚠️ 但全局静态注入会顺带把错误映射改坏**（上表第三行的 5001 就是）。
-> SQL 超时抛的是 `PSQLException(57014)`，会被 `UserDomainService.login` 的
-> `catch (Exception e)` 吞掉并转成 `Status.INTERNAL("DB查询失败")` ⇒ api 层渲染 `5001`。
-> 三种形态互不相同，且**注入后反而离 Go 更远**：
-> Go `{"code":1015,"msg":"服务繁忙"}` / RAG 基线 `text/plain "Request Timeout"` / RAG 注入 `{"code":5001}`。
-> ⇒ 生产方案必须**同时**做两件事：per-request 注入 + 识别 `57014` 并映射为 `DEADLINE_EXCEEDED`。
-> 只做前者会把一个 wire 差异换成另一个。
+##### B-1 补记（续）：生产方案已实施（2026-10-21，issue #71187874）
+
+上述实验结论已落地为代码，**两半缺一不可**：
+
+| # | 组件 | 位置 | 职责 |
+|---|---|---|---|
+| ① | `DeadlineQueryTimeoutInjector` | `service/common` `persistence/` | 拦 `StatementHandler.prepare`，按 `DeadlineState.remainingMillis()` 设 `setQueryTimeout(ceil)`；**无 deadline 时完全不动** |
+| ② | `SqlTimeoutStatusTranslator` | 同上 | 拦 `Executor.query/update`，把 `SQLState=57014` 翻成 `Status.DEADLINE_EXCEEDED` |
+| ③ | 46 处 `catch (StatusRuntimeException e) { throw e; }` | `UserDomainService` 17 + `AdminDomainService` 29 | 让 ①② 的产物、以及 `checkDeadline()` 自己抛的 DEADLINE_EXCEEDED，**不被 `catch (Exception e)` 吞成 INTERNAL** |
+
+**api 层零改动**：`DEADLINE_EXCEEDED` 落到 `mapRPCStatusToCode` 的 default 分支 → 1015，与 Go 一致。
+
+> ⚠️ ③ 顺带修掉一个既有缺陷：`checkDeadline()` 抛的正是 `StatusRuntimeException(DEADLINE_EXCEEDED)`，
+> 而它被写在 `try` 块内 ⇒ 此前会被同方法的 `catch (Exception e)` 吞成 INTERNAL。
+> **即 DRIFT-018 那 24 处守卫里，落在 try 内部的部分从未生效过。**
+
+**端到端结果（修复前 → 修复后，对照 Go）**：
+
+| | 修复前 | 修复后 | Go |
+|---|---|---|---|
+| 客户端返回 | 3170ms（= api 的 3s） | **2223ms**（= rpc 的 2s） | 2208ms |
+| 响应体 | `text/plain "Request Timeout"` | **`{"code":1015,"msg":"服务繁忙"}`** | 同左 |
+| PG 查询滞留 | 4303ms | **176ms** | 182ms |
+| difftest 39 步 | 39/39 | **39/39，unexpected=0** | — |
+
+**⚠️ 但实施过程先撞上一个更大的前置缺陷**：③ 全部补齐、①② 全部就位后，
+端到端**仍然零效果**（3318ms / `text/plain` / 查询滞留 4378ms）。诊断日志显示：
+`newUnaryServerInterceptor` 确实收到 `timeout=PT2S`，可 `interceptCall` 与 `onHalfClose`
+**从未被调用**，`DeadlineState.remainingMillis()` 恒为 `Long.MAX_VALUE`。
+
+**根因不在 B-1，而是 gRPC `ServerInterceptor` 从未真正挂到 server 上** ——
+`@Import` 只保证 Bean 存在，starter 3.1.0 不自动注册。详见 **§6.4 的 H2 勘误小节**。
+⇒ 这条链路上**任何**依赖 gRPC 超时 / deadline 传播的机制此前都是死的，
+包括 §3.4.4 登记的 DRIFT-018（24 处 `checkDeadline()`）——**它们一次都没真正生效过**。
+
+**新增回归网（32 条）**：
+`DeadlineQueryTimeoutInjectorTest`（7）+ `SqlTimeoutStatusTranslatorTest`（8）+
+`DeadlinePassthroughTest`（user-rpc 7）+ `AdminDeadlinePassthroughTest`（admin-rpc 8）+
+`GrpcInterceptorWiringTest`（2，防 H2 假绿复发）。全仓 383 → **415 条，0 failures**。
+
+> **实现期踩到的三个坑（均已写进代码注释）**
+> ① `Invocation.proceed()` 声明抛的是 `InvocationTargetException`（反射包装），**不是** `SQLException`
+>    —— 写 `catch (SQLException)` 编译通过但**永远匹配不上**，翻译器静默失效。
+> ② MyBatis 3.5.19 的 `Invocation` 构造器校验 `method.getDeclaringClass()` ∈ 内部白名单，
+>    测试里自造同名方法会报 `"is not supported as a plugin target"`；必须用 `mock(接口)`。
+> ③ `LambdaUpdateWrapper` 在无 Spring 上下文时缺 MP 的 TableInfo 缓存，抛
+>    `MybatisPlusException: can not find lambda cache` —— 它**不是** StatusRuntimeException，
+>    于是被**正确地**吞成 INTERNAL，测试以「放行分支没生效」的面貌失败，极易误导排查方向。
 
 ##### C. 表述差异（语义已对齐，仅字面不同，无需签字）
 
@@ -1038,12 +1093,26 @@ RAG `3047ms/4455ms`，量级一致、可复现，**但以复测值为准**：
 | | 客户端返回耗时 | 响应体 | **客户端返回后，PG 里的阻塞查询又存活** |
 |---|---|---|---|
 | **Go**（基线） | 2190ms | `200 + {"code":1015,"msg":"服务繁忙"}` | 203ms |
-| **RAG 基线** | 3174ms | `Request Timeout`（`text/plain`） | **4657ms** |
-| **RAG 注入 `default-statement-timeout=2`** | 2449ms | `{"code":5001,"msg":"系统内部错误"}` | 193ms |
+| RAG 基线 | 3174ms | `Request Timeout`（`text/plain`） | **4657ms** |
+| RAG 注入静态 `default-statement-timeout=2` | 2449ms | `{"code":5001,"msg":"系统内部错误"}` | 193ms |
+| **RAG 生产方案实施后** | **2223ms** | **`{"code":1015,"msg":"服务繁忙"}`** | **176ms** |
+| Go（同场对照） | 2208ms | `{"code":1015,"msg":"服务繁忙"}` | 182ms |
+
+> ⚠️ 第三行那个 `{"code":5001}` 曾经让人差点选错方案：它说明**只注入超时而不做异常映射**，
+> 会把 `text/plain` 差异换成一个**离 Go 更远**的差异。
+>
+> **第四行是最终结果（issue #71187874 实施后）**：三项判据与 Go 逐字对齐 ——
+> 耗时差 15ms、查询滞留差 6ms、响应体完全相同；`difftest` 39 步仍 39/39、unexpected=0。
+> 三层拆解（纯 JDBC / 端到端 / 手段定性）与生产方案的组件清单见 §3.4.1「B-1 补记」。
 
 > 第三行是 B-1 缓解实验，**该机制的三层拆解（纯 JDBC / 端到端 / 手段定性）见 §3.4.1「B-1 补记」**。
 > 一句话：注入组把 RAG 的「查询又存活 4657ms」压到 193ms，与 Go 同量级；
 > 但错误体从 `text/plain` 变成了 `5001`，**离 Go 更远** ⇒ 生产方案不能只做注入，还必须做异常映射。
+>
+> **⚠️ 这张表读起来最刺眼的一行是「注入组 ⇒ 5001」**：那正是**差点选错方案**的地方。
+> 若当时只按「资源占用解决了」收工，RAG 的超时响应体会长期停在 5001，
+> 而 5001 在 Go 侧表示**数据库故障**、不表示超时 —— 等于用一个新的 wire 差异替换掉旧的。
+> 生产方案（第 4 行）之所以要做两半，根因就在这里。
 
 **观测方法的坑（2026-10-21 记录，值得单独记）**：探针最早只统计
 `count(*) WHERE wait_event_type='Lock'`，并在 count 掉到 0 时判定「查询消失」。
@@ -1214,6 +1283,50 @@ s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, obser
 `service/common` 现有 78 个测试（原 75 + 新增），其中 `ObservabilityWiringTest` 是**全仓第一个 `@SpringBootTest`** —— H1/H2 这类「机制没接上」的缺陷按定义无法被纯单测捕获。新增回归用例：`clientDisconnectReturns499`、`workerThreadInheritsRequestContext`、`isTimeoutErrorDetectsHttpClientTimeouts`、`wireAuthorityUnavailableSentinelMapsTo404`、`callChainFilterActuallyRemovesFrameworkFrames`、`logFatalThrowsFatalErrorInsteadOfOnExit`×2。
 
 验证：`mvn clean verify` 全仓 9 模块 BUILD SUCCESS（common 78 / admin-rpc 24 / admin-api 46 / user-rpc 46 / user-api 30 / users-common 3 / message-rpc 待复核）。
+
+##### ⚠️⚠️ 勘误：**H2 当时并未真正修好**（2026-10-21，issue #71187874 期间实测发现）
+
+本节「已修 21 项」里的 **② gRPC 拦截器未注册（user-rpc/admin-rpc 补 `@Import`）** ——**结论是错的**。
+`@Import(RpcServerInterceptorFactory.class)` 只让 `ServerInterceptor` **Bean 存在**，
+而 **grpc-spring-boot-starter 3.1.0.RELEASE 从不自动把它挂到 server 上**：
+
+```
+javap GrpcServerFactoryAutoConfiguration
+  → inProcessGrpcServerFactory(GrpcServerProperties, GrpcServiceDiscoverer, List<GrpcServerConfigurer>)
+                                             ↑ 只认 Configurer，没有任何 ServerInterceptor 形参
+javap GrpcServerConfigurer → extends Consumer<ServerBuilder<?>>
+javap GrpcServerProperties | grep -i intercept → （无字段）
+```
+
+唯一注册入口是 `GrpcServerConfigurer` —— 在 `accept(ServerBuilder)` 里调 `server.intercept(...)`。
+已在 `UserRpcApplication` / `AdminRpcApplication` 各补一个 `@Bean GrpcServerConfigurer`。
+
+**代价远不止「少了几个 span」**：`interceptCall` / `onHalfClose` 从未执行 ⇒
+
+1. gRPC **无 deadline 传播** ⇒ handler 线程上 `DeadlineState` 恒未设置
+   （实测 `DeadlineState.remainingMillis() == Long.MAX_VALUE`）；
+2. ⇒ `UserDomainService` 的 11 处 + `AdminDomainService` 的 13 处 **`checkDeadline()` 全部失效**；
+3. ⇒ B-1 的 `setQueryTimeout` 注入无从谈起（它就挂在 `DeadlineState` 上）；
+4. gRPC **无超时**（客户端只能等 api 层 `http-timeout` 3s）⇒ 超时响应体退化成
+   `text/plain "Request Timeout"`，与 Go 的 `{"code":1015}` 不一致。
+
+**实测对照（`exp-b1-timeout-cancel.sh`，修复前 → 修复后）**：
+
+| | 修复前 | 修复后 | Go |
+|---|---|---|---|
+| 客户端返回 | 3170ms（= api 的 3s） | **2223ms**（= rpc 的 2s） | 2208ms |
+| 响应体 | `text/plain "Request Timeout"` | **`{"code":1015,"msg":"服务繁忙"}`** | 同左 |
+| PG 查询滞留 | 4303ms | **176ms** | 182ms |
+
+> **为什么 `ObservabilityWiringTest` 没抓到**：`grpcInterceptorBeanExists` 断言的是
+> `ctx.getBean(ServerInterceptor.class)` 非空 —— 断言的是**Bean 存在**，
+> 而缺陷是**框架没用它**。这类断言在任何实现下都成立，属**结构性假绿**。
+>
+> **由此新增一条纪律（补在 §3.3）**：**断言「Bean 存在」≠ 断言「机制生效」。**
+> 凡依赖框架自动注册的机制（starter 的自动装配、auto-configuration、拦截器链），
+> 测试必须断言**运行时的可观测后果**（本例：客户端是否 ≈2s 返回 1015），
+> 或至少断言「该对象确实进入了框架的接管点」（本例：`verify(builder).intercept(...)`）。
+> 锁死用例：`GrpcInterceptorWiringTest`（2 条）。
 
 **残留差异**不在本节重复维护，统一见 **§3.4.1**（按「有意偏离 / 框架限制 / 表述差异 / UNRESOLVED」四类分列，每条带关闭条件）。
 

@@ -155,6 +155,9 @@ public class UserDomainService {
                 metrics.getLoginUserNotFound().increment();
                 logger.logInfo(otelCtx, "login failed : user not found,username : " + req.getUsername());
                 return LoginResp.newBuilder().setStatus(1L).build();
+            } catch (StatusRuntimeException e) {
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                throw e;
             } catch (Exception e) {
                 metrics.getLoginDbError().increment();
                 span.recordException(e);
@@ -249,6 +252,9 @@ public class UserDomainService {
             String hash;
             try {
                 hash = PasswordUtil.encrypt(req.getPassword());
+            } catch (StatusRuntimeException e) {
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                throw e;
             } catch (Exception e) {
                 metrics.getRegisterInternalError().increment();
                 span.recordException(e);
@@ -261,6 +267,9 @@ public class UserDomainService {
             long uid;
             try {
                 uid = Snowflake.nextId();
+            } catch (StatusRuntimeException e) {
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                throw e;
             } catch (Exception e) {
                 metrics.getRegisterInternalError().increment();
                 span.recordException(e);
@@ -284,6 +293,9 @@ public class UserDomainService {
             }
             try {
                 userMapper.insert(u);
+            } catch (StatusRuntimeException e) {
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                throw e;
             } catch (Exception e) {
                 metrics.getRegisterDbError().increment();
                 span.recordException(e);
@@ -327,6 +339,9 @@ public class UserDomainService {
         } catch (NotFoundException e) {
             logger.logBusinessErr(otelCtx, ErrorCode.ERROR_USER_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             logger.logBusinessErr(otelCtx, ErrorCode.ERROR_DB_SELECT.getCode(), e);
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
@@ -394,6 +409,9 @@ public class UserDomainService {
                 existing = userMapper.findOneByUserName(req.getUsername());
             } catch (NotFoundException e) {
                 existing = null;
+            } catch (StatusRuntimeException e) {
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                throw e;
             } catch (Exception e) {
                 // DRIFT-009：Go 出处 updateuserlogic.go:41-44 —— 查库故障单独成一支
                 logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_SELECT.getCode(), e);
@@ -414,6 +432,9 @@ public class UserDomainService {
         if (!req.getPassword().isEmpty()) {
             try {
                 toUpdate.setPassword(PasswordUtil.encrypt(req.getPassword()));
+            } catch (StatusRuntimeException e) {
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                throw e;
             } catch (Exception e) {
                 // Go 出处 updateuserlogic.go:50
                 logger.logBusinessErr(Context.current(), ErrorCode.ERROR_SERVER_COMMON.getCode(), e);
@@ -436,6 +457,9 @@ public class UserDomainService {
         // W5 Update（D-017：动态 JPQL 只写非空字段）
         try {
             userMapper.updateUserById(req.getUid(), toUpdate);
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             // Go 出处 updateuserlogic.go:65
             logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_UPDATE.getCode(), e);
@@ -450,6 +474,9 @@ public class UserDomainService {
             // Go 出处 updateuserlogic.go:73
             logger.logBusinessErr(Context.current(), ErrorCode.ERROR_USER_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             // Go 出处 updateuserlogic.go:76
             logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_SELECT.getCode(), e);
@@ -502,6 +529,9 @@ public class UserDomainService {
                 // Go 出处 deleteuserlogic.go:43
                 logger.logBusinessErr(otelCtx, ErrorCode.ERROR_USER_NOT_EXIST.getCode(), e);
                 throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
+            } catch (StatusRuntimeException e) {
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                throw e;
             } catch (Exception e) {
                 // Go 出处 deleteuserlogic.go:48-49（span.RecordError + ErrorDbSelect）
                 span.recordException(e);
@@ -512,6 +542,9 @@ public class UserDomainService {
             // W3
             try {
                 userMapper.deleteUserByUid(req.getUid());
+            } catch (StatusRuntimeException e) {
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                throw e;
             } catch (Exception e) {
                 // Go 出处 deleteuserlogic.go:57
                 span.recordException(e);
@@ -560,6 +593,9 @@ public class UserDomainService {
             logger.logBusinessErr(Context.current(),
                     ErrorCode.ERROR_AVATAR_HISTORY_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("头像历史不存在").asRuntimeException();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             // Go 出处 selectavatarlogic.go:48（ErrorDbUpdate）
             logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_UPDATE.getCode(), e);
@@ -596,6 +632,9 @@ public class UserDomainService {
         String historyId;
         try {
             historyId = String.valueOf(Snowflake.nextId());
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             // Go 出处 uploadavatarlogic.go:41（ErrorSnowflakeID）
             logger.logBusinessErr(Context.current(), ErrorCode.ERROR_SNOWFLAKE_ID.getCode(), e);
@@ -617,6 +656,9 @@ public class UserDomainService {
             logger.logBusinessErr(Context.current(),
                     ErrorCode.ERROR_AVATAR_HISTORY_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("头像历史不存在").asRuntimeException();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             // Go 出处 uploadavatarlogic.go:59（ErrorDbInsert）
             logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_INSERT.getCode(), e);
@@ -650,6 +692,9 @@ public class UserDomainService {
             // Go 出处 getavatarhistorylogic.go:34（ErrorUserNotExist）
             logger.logBusinessErr(Context.current(), ErrorCode.ERROR_USER_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             // Go 出处 getavatarhistorylogic.go:37（ErrorDbSelect）
             logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_SELECT.getCode(), e);
@@ -660,6 +705,9 @@ public class UserDomainService {
         List<UserAvatarHistoryEntity> histories;
         try {
             histories = avatarHistoryMapper.listAvatarHistory(req.getUid(), req.getLimit());
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             // Go 出处 getavatarhistorylogic.go:43（ErrorDbSelect）
             logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_SELECT.getCode(), e);
@@ -698,6 +746,9 @@ public class UserDomainService {
         long ttlSeconds = properties.getUserAuth().getAccessExpire();
         try {
             bizRedis.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds));
+        } catch (StatusRuntimeException e) {
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            throw e;
         } catch (Exception e) {
             throw Status.INTERNAL.withDescription("注销失败,Redis写入异常").asRuntimeException();
         }
