@@ -14,7 +14,7 @@ RAG 仓库路径：`/Users/pr/Documents/java&golang/RAG`。
 | 项目 | 路径 | 角色 | 实现风格 |
 |---|---|---|---|
 | **Sea-RideTheWind_golang** | `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang` | **真理之源（唯一真源，2026-10-20 第三次切换）** —— 商用架构的原始实现，2026-10-18 起冻结，所有行为的唯一判定标准 | go-zero + GORM |
-| **RAG（本仓库）** | `/Users/pr/Documents/java&golang/RAG` | **Spring Boot 重构产物** —— 按工作项目标准把 Go 行为用 Spring 生态表达；非 Spring Boot 的 Java 写法（如 JPA + flat `internal/{logic,model,server,svc}`）不在重构范围内 | **MyBatis-Plus + domain/mapper/service 分层 + Flyway + Bootstrap 抽出** |
+| **RAG（本仓库）** | `/Users/pr/Documents/java&golang/RAG` | **Spring Boot 重构产物** —— 按工作项目标准把 Go 行为用 Spring 生态表达；非 Spring Boot 的 Java 写法（如 JPA + flat `internal/{logic,model,server,svc}`）不在重构范围内 | **MyBatis-Plus + domain/mapper/service 分层 + 幂等 DDL 脚本 + Bootstrap 抽出** |
 
 **RAG 的存在范围**：用 Spring 生态表达 Go 的行为。**不**对任何"非 Spring Boot 的 Java 实现"做对照——那些是另一种工作，不属于本项目的范围；也不接收 RAG 反向同步。
 
@@ -114,7 +114,7 @@ RAG 每次选择「用更地道的 Spring 写法」时，必须能回答：
 
 ### 3.3 框架机制必须验证实际生效（强制）
 
-**不得凭注解名称断定机制已启用。** Spring Boot 的隐式机制（`@Transactional` AOP 代理、`@ResponseBodyAdvice`、`mybatis-plus` 的 typeHandler、Flyway）全部是运行期动态装配，出错时**不报错**。
+**不得凭注解名称断定机制已启用。** Spring Boot 的隐式机制（`@Transactional` AOP 代理、`@ResponseBodyAdvice`、`mybatis-plus` 的 typeHandler）全部是运行期动态装配，出错时**不报错**。
 
 已实证的三类静默失效：
 
@@ -305,18 +305,18 @@ Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 R
 | ORM | **严格**：JPA → MyBatis-Plus（`@TableName` + Mapper 接口 `extends BaseMapper<Entity>`） | HUMAN_ONLY.MD 明确写 `@TableName` |
 | Logic 类 | **严格**：合并为 1 个 `UserDomainService`（admin-rpc 是 1 个 `AdminDomainService`） | HUMAN_ONLY.MD 描述的是单一 DomainService，不是 9/13 个独立 Logic |
 | DataModel | **严格**：删除，按实体拆成多个 Mapper 接口（user-rpc：2 个；admin-rpc：3 个） | HUMAN_ONLY.MD 里完全没有 DataModel 痕迹 |
-| 新文件 | **落地**：`bootstrap/SnowflakeBootstrap.java` + Flyway `V*__create_*.sql` DDL | HUMAN_ONLY.MD 列出这两个文件，且当前项目根本没有 Flyway |
+| 新文件 | **落地**：`bootstrap/SnowflakeBootstrap.java` + users 域 DDL 脚本。~~Flyway `V*__create_*.sql`~~ → **2026-10-21 改为幂等重放，见 §6.2.5 DRIFT-NEW-015** | HUMAN_ONLY.MD 列出这两个文件。Bootstrap 保留；**迁移机制被推翻**（有状态账本与「双 rpc 共用一个 schema」不兼容） |
 
-> **⚠️ Flyway 条目已确认会出问题**：Go 用 `AutoMigrate`（无状态），Flyway 是**有状态账本**。双 rpc 服务共享同一 schema 时，版本号必然冲突（已实证）。迁移归属需按「数据所有权」重定，见 §6 待办。
+> **✅ Flyway 条目已于 2026-10-21 处置完毕**：Go 用 `AutoMigrate`（无状态），Flyway 是**有状态账本**，双 rpc 共用同一 schema 时版本号必然冲突（已实证两轮）。最终改成**幂等重放 DDL**（`SchemaInitializer`），无账本无版本号 —— 与 Go 的 AutoMigrate 同构。完整经过与实证见 §6.2.5 DRIFT-NEW-015。
 
 ### 4.2 5 阶段范围
 
 | 阶段 | 内容 | 完成信号 |
 |---|---|---|
 | **Phase 0** | RAG 仓库建 worktree、提交基线、4 个 issue、4 份 spec（`RAG/.agents/specs/<slug>.md`） | 4 个 issue + 4 份 spec 落仓 |
-| **Phase 1（pilot）** | `user-rpc` 落地完整 pattern：JPA→MyBatis-Plus + DataModel→2 Mapper + 9 Logic 合 1 + SnowflakeBootstrap + Flyway V1/V2 | `mvn -pl user-rpc -am package` 通过 + 既有 LogicTest 改完跑绿 |
+| **Phase 1（pilot）** | `user-rpc` 落地完整 pattern：JPA→MyBatis-Plus + DataModel→2 Mapper + 9 Logic 合 1 + SnowflakeBootstrap + users 域 DDL | `mvn -pl user-rpc -am package` 通过 + 既有 LogicTest 改完跑绿 |
 | **Phase 2** | `user-api`：HTTP 层（controller / dto / interceptor / advice / client），不引入 Mapper | `mvn -pl user-api -am package` 通过 |
-| **Phase 3** | `admin-rpc`：平行 user-rpc，13 用例合 1 `AdminDomainService` + 3 Mapper + Flyway V3 | `mvn -pl admin-rpc -am package` 通过 |
+| **Phase 3** | `admin-rpc`：平行 user-rpc，13 用例合 1 `AdminDomainService` + 3 Mapper + admin 域 DDL | `mvn -pl admin-rpc -am package` 通过 |
 | **Phase 4** | `admin-api`：平行 user-api，13 Service + 2 client（admin-rpc + user-rpc） | `mvn -pl admin-api -am package` 通过 |
 | **Phase 5** | 全量 `mvn clean package` + docker-compose 起来跑 gRPC 端到端 | 全绿 |
 
@@ -329,7 +329,7 @@ Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 R
 | ORM 这一层怎么处理？ | 严格按 HUMAN_ONLY：JPA → MyBatis-Plus（重写数据层） |
 | Logic 类怎么处理？ | 严格按 HUMAN_ONLY：9 合 1 |
 | DataModel.java 怎么映射？ | 严格按 HUMAN_ONLY：拆成两个 Mapper（仅在选 MyBatis-Plus 时适用） |
-| SnowflakeBootstrap 与 Flyway 脚本要不要落地？ | 落地：从 UserRpcApplication 抽 SnowflakeBootstrap + 引入 Flyway + 写两份 DDL |
+| SnowflakeBootstrap 与 Flyway 脚本要不要落地？ | 落地：从 UserRpcApplication 抽 SnowflakeBootstrap + 引入 Flyway + 写两份 DDL。**⚠️ 2026-10-21 补充：Bootstrap 保留，Flyway 已被移除**（有状态账本不兼容双 rpc 共库），DDL 改为幂等重放 |
 | 全量 5 阶段怎么走？ | 你先修改 `/Users/pr/Documents/java&golang/RAG/AGENTS.md`，说明是什么情况 |
 | 重构以什么形式落到 RAG 仓库？ | 先等下（暂停，等本文件落地后再议） |
 
@@ -582,7 +582,8 @@ getter 仍为 `isRead()`。实测改后：
 |---|---|---|---|
 | **DRIFT-NEW-014** | **P0 · 配置缺陷 · 已修（2026-10-21 当日）** | **`user-api` 连不上 `user-rpc`。** `user-api/application.yml` 的 `grpc.client.user-rpc` **漏了 `negotiation-type: plaintext`**，而 devh `grpc-client-spring-boot-starter` 3.1.0 的 `grpc.client.GLOBAL.negotiation-type` **默认值就是 TLS**（证据：jar 内 `META-INF/spring-configuration-metadata.json` 的 `defaultValue`）。于是 user-api 发 TLS ClientHello，user-rpc 的 netty 报 `Http2Exception: HTTP/2 client preface string missing or corrupt. Hex dump: 16030301...`（`0x16` = TLS handshake record），所有经 user-rpc 的业务码塌成 `1015 服务繁忙` | `admin-api/application.yml` **有**这一行且带 DRIFT-NEW-008 注释解释为什么必须有 —— 当年 admin 侧踩过并修了，**user 侧单纯被漏掉**。这不是对拍环境特有的：默认值在任何环境都一样 |
 | **DRIFT-NEW-014 修法** | — | `user-api/application.yml` 补 `negotiation-type: plaintext`（含字节码级出处注释）。回归网 `UserApiGrpcNegotiationTest`（3 条）：把 `grpc.client.user-rpc.address` 覆盖成 `static://127.0.0.1:<动态端口>`，起一个**真 plaintext gRPC server**，用容器里**真实的** `UserRpcClient` 打一次**真实调用** —— 走的是 devh `ShadedNettyChannelFactory` 的生产代码路径，不是测试里写死 plaintext。外加一条 **TLS 负向对照**（同一个 server 用 TLS 连必须失败），保证正向用例不是假绿。**已实证能真红**：临时删掉那行配置后，该用例报 `NotSslRecordException: not an SSL/TLS record`、pipeline 里出现 `SslHandler` —— 正是生产上 `HTTP/2 client preface string missing` 的镜像（同根因、客户端侧视角） |
-| **DRIFT-NEW-015** | **P0 · 结构性缺陷** | **Flyway 版本号撞车 ⇒ `admin-rpc` 根本无法启动。** 两个模块各自维护 `classpath:db/migration`，`V1/V2` **版本号相同、内容不同**：`user-rpc` = `V1__create_user` / `V2__create_user_avatar_history`；`admin-rpc` = `V1__create_admin` / `V2__create_admin_invite` / `V3__create_user`。`flyway_schema_history` 挂在 schema 上、**一个 schema 只能有一本账**，共用库时后启动的要么报 `version (3) is newer than the latest available migration (2)` 并**静默跳过自己的迁移**（进程照样 Started，表却是空的），要么 checksum mismatch 直接启动失败 | 而 `admin-rpc` **按设计必须**与 `user-rpc` 共用 `users_user` —— 这是它自己 `V3__create_user.sql` 的注释写明的（「admin-rpc 也读写 users_user 表……用 `IF NOT EXISTS 保证幂等：user-rpc 启动时已经建过表」）。⇒ **要满足设计意图就必须共用库，共用库就撞账本，无解**。§4.1 早就警告过这点，现在有实证了 |
+| **DRIFT-NEW-015** | **P0 · 结构性缺陷 · 已修（2026-10-21，用户拍板去掉 Flyway）** | **Flyway 版本号撞车 ⇒ `admin-rpc` 根本无法启动。** 两个模块各自维护 `classpath:db/migration`，`V1/V2` **版本号相同、内容不同**：`user-rpc` = `V1__create_user` / `V2__create_user_avatar_history`；`admin-rpc` = `V1__create_admin` / `V2__create_admin_invite` / `V3__create_user`。`flyway_schema_history` 挂在 schema 上、**一个 schema 只能有一本账**，共用库时后启动的要么报 `version (3) is newer than the latest available migration (2)` 并**静默跳过自己的迁移**（进程照样 Started，表却是空的），要么 checksum mismatch 直接启动失败 | 而 `admin-rpc` **按设计必须**与 `user-rpc` 共用 `users_user` —— 这是它自己 `V3__create_user.sql` 的注释写明的（「admin-rpc 也读写 users_user 表……用 `IF NOT EXISTS 保证幂等：user-rpc 启动时已经建过表」）。⇒ **要满足设计意图就必须共用库，共用库就撞账本，无解**。§4.1 早就警告过这点，现在有实证了 |
+| **DRIFT-NEW-015 修法** | — | **去掉 Flyway，改为幂等重放 DDL**：4 份 DDL 收归 `users-common/src/main/resources/db/*.sql`，由各 rpc 的 `bootstrap/*SchemaBootstrap` 在 `@PostConstruct` 调 `SchemaInitializer` 原样重放；两个 rpc 的 flyway 三件套依赖全删；`AdminSeederBootstrap` 补显式 `@DependsOn`。详见下方「已定案」小节 |
 | **DRIFT-NEW-016** | P2 · 可观察差异 | **Go 有必填字段校验，RAG 没有。** go-zero 的 `httpx.Parse` 走 `core/mapping`，只认 `,optional` 标签，**`,omitempty` 不算 optional**（`unmarshaler.go:946-969` 走 `!opts.optional()` 分支直接 `newInitError`）。缺字段 ⇒ `HTTP 400 + text/plain + field "xxx" is not set`。实测命中：`CreateUserReq.email`、`GetUserListReq.keyword`（**空串也不行**）、`UpdateSelfReq`/`UpdateUserReq` 的 `username`/`password`/`email`。RAG 的 DTO 无此校验，直接走业务分支 | 对拍步骤 `user.register.noemail` / `admin.getuserlist.nokeyword`。**倾向保留 RAG 现状**（更宽松不算错），但按 §3.4.2 纪律**需用户签字**，未签字前不得当新漂移「修」掉 |
 
 > **为什么 DRIFT-NEW-015 至今没被发现**：RAG 的 `docker-compose.yaml` 里**只有
@@ -590,21 +591,64 @@ getter 仍为 `isRead()`。实测改后：
 > 单跑 user 域时账本永远是自洽的；admin 域从未被编排放上过，
 > 冲突自然一次都没露过。**这不是「还没测」，是「根本没部署过」。**
 
-##### DRIFT-NEW-015 的当前处置（未签字，等用户决定）
+##### DRIFT-NEW-015 的处置：**已定案（用户 2026-10-21 拍板「直接把 Flyway 丢掉」）· 已实施**
 
-对拍环境用的是**关掉 Flyway + 手工应用 DDL** 的绕法：
-`user-rpc` 保留 Flyway（真跑一次，验证迁移本身没问题），
-`admin-rpc` 用 `SPRING_FLYWAY_ENABLED=false`，由 `run.sh` 按顺序 `psql` 它的
-`V1__create_admin.sql` / `V2__create_admin_invite.sql`（`V3__create_user.sql` 跳过 ——
-user-rpc 的 Flyway 已建过同一张表）。5 个 DDL 全是 `CREATE TABLE/INDEX IF NOT EXISTS`，顺序无关。
+**方案 A（保留 Flyway + 单一迁移拥有者）曾被实现并验证通过**，两个 rpc 各自对着空库
+都能应用完整的 4 份迁移。但用户最终选择更彻底的方案 —— 见下面的取舍说明。
 
-**这是权宜之计，不是修法。** 真正的修法有三条路，各有代价，需要用户拍板：
+最终落地：
 
-| 方案 | 做法 | 代价 |
-|---|---|---|
-| **A · 迁移编号全局化** | 把两个模块的脚本重排成一条全局序列（user = V1/V2/V5，admin = V3/V4/V6 之类），放进同一个迁移源目录 | 破坏 HUMAN_ONLY.MD 要求的「每个 rpc 模块独立维护自己的 V*」布局；两个模块不再能独立部署 |
-| **B · 合并所有权** | 承认 `users_user` 归 user-rpc 所有，admin-rpc 不再自己迁移，改由 user-rpc 建表；admin-rpc 只保留 `admin_admin` / `admin_invite` | 需从 admin-rpc 删掉 `V3__create_user.sql`，并给 admin-rpc 一个「表可能还不存在」的启动顺序约束 |
-| **C · 拆库** | admin-rpc 连自己的库，跨域读用户走 RPC | 直接违反 `V3__create_user.sql` 注释里写明的设计意图，改动面最大 |
+| 项 | 做法 |
+|---|---|
+| DDL 位置 | 4 份全部收归 `users-common/src/main/resources/db/`：`01_create_user.sql` / `02_create_user_avatar_history.sql` / `03_create_admin.sql` / `04_create_admin_invite.sql`。数字前缀**只保证执行顺序，不表示版本** |
+| 执行者 | `users-common` 的 `com.rag.users.common.ddl.SchemaInitializer`（静态工具，非 `@Component` —— 两个 rpc 只扫自己的包，且注释里明确禁止扩 `scanBasePackages`）；由各模块的 `bootstrap/UserSchemaBootstrap` / `AdminSchemaBootstrap` 在 `@PostConstruct` 调用 |
+| 失败语义 | 任一 DDL 失败 → 抛 `IllegalStateException` → **进程拒绝启动**（对齐 Go 的 `log.Fatalln`） |
+| 时序 | `AdminSeederBootstrap` 显式 `@DependsOn("adminSchemaBootstrap")`。原先后序靠「MyBatis-Plus detector → SqlSessionTemplate → flywayInitializer」这条**传递**链兜住，去掉 Flyway 后整条链消失，必须点名 |
+| pom | 两个 rpc 的 `spring-boot-flyway` + `flyway-core` + `flyway-database-postgresql` **三件套全删**。⚠️ 只删 `flyway-core` 不够：`spring-boot-flyway` 在 classpath 上就会让 `FlywayAutoConfiguration` 自动 migrate，然后报 `Found non-empty schema(s) "public" but no schema history table.`（本次实测撞过） |
+| 验证 | `UserRpcContainerWiringTest` 12 条 + `AdminRpcContainerWiringTest` 7 条全绿；两份日志里 `schema init` 各打印 4 份脚本全部 applied；整份构建日志 `flyway` 出现 **0** 次 |
+
+##### ⚠️ 丢掉账本丢掉的东西：PG 的 `CREATE TABLE IF NOT EXISTS` **在并发下并不安全**
+
+这是去掉 Flyway 后**必须自己补上**的一层，也是本轮唯一一处「单元测试全绿、端到端才炸」的问题。
+
+实测现象（2026-10-21 双端对拍）：user-rpc 与 admin-rpc **同时**启动、各自对同一个空库
+执行 `CREATE TABLE IF NOT EXISTS users_user`，后到者直接失败：
+
+```
+org.springframework.jdbc.datasource.init.ScriptStatementFailedException:
+  Failed to execute SQL script statement #1 of db/01_create_user.sql
+Caused by: org.postgresql.util.PSQLException:
+  ERROR: duplicate key value violates unique constraint "pg_type_typname_nsp_index"
+```
+
+**为什么单测测不到**：`UserRpcContainerWiringTest` / `AdminRpcContainerWiringTest`
+每次只起一个服务进程，并发窗口根本不存在。
+只有 `tools/difftest` 同时起两套栈才会复现 —— 这正是双端对拍存在的意义。
+
+**修法**：`SchemaInitializer.applyAll` 在跑 DDL 前先取 **PG 会话级 advisory lock**
+（`select pg_advisory_lock(8675309)`），跑完显式 `pg_advisory_unlock`。
+阻塞语义、不需要额外表、不需要事务、连接断开自动释放 —— 比模拟 Flyway 的行锁轻得多。
+键是 `SchemaInitializer` 里的常量，**两个模块必须用同一个**。
+
+> Flyway 原本用 schema history 上的行锁天然挡住了这一层。去掉它就等于去掉这层保护，
+> 这是「丢掉有状态账本」的代价之一 —— 与 §6.3 问题 1 记的「失去升级路径」并列。
+
+**为什么丢而不是留**（用户的取舍）：项目仍在重构期、**无任何已部署环境**
+（`docker-compose.yaml` 里连 admin-rpc 都没有），表结构还会继续动 ——
+升级路径的价值要等到第一次 `ALTER` 才兑现，而那时只有一张库要改，代价可控。
+更接近 Go（Go 用的是无状态 `AutoMigrate`），且去掉了一整类约束
+（版本号唯一、checksum 稳定性、跨进程状态）。
+
+**已知代价（第一次 `ALTER` 之前可以无视）**：脚本要同时承担「建表」与「升级」两件事，
+只能到处加 `ADD COLUMN IF NOT EXISTS`；也没有任何地方记录「这张表现在该长什么样」。
+**第一次 `ALTER` 之前必须重新引入版本化机制。**
+
+被否决的两个方向（记录下来，避免下一个 agent 重提）：
+
+| 方案 | 为什么没选 |
+|---|---|
+| **保留 Flyway + 单一迁移拥有者** | 技术上可行且已验证，但保留了「有状态账本」这一整类约束。**已被用户否决** |
+| **拆库 + 跨域 RPC** | 直接违反设计意图（Go 两个服务都直连同一库建 `users_user`），改动面最大 |
 
 ##### ⚠️ 已被实证证伪的「最省事方案」（别再试第二次）
 
@@ -667,23 +711,37 @@ SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `t
 
 ### 6.3 架构决策（问题 1、2 已于 2026-10-21 拍板；问题 3 为新增留档）
 
-**✅ 问题 1：Flyway 迁移归属 —— 单一归属 + 全局唯一版本号。**（原为待定）
+**✅ 问题 1：建表机制 —— 2026-10-21 用户拍板「直接把 Flyway 丢掉」。**（原为待定，2026-10-20 曾定案为「保留 Flyway + 全局版本号」，该结论已被推翻）
 
-| 表 | 归属服务 |
+| 表 | 谁建 |
 |---|---|
-| `users_user` / `users_user_avatar_history` | **user-rpc** |
-| `admin_admin` / `admin_invite` | **admin-rpc** |
-| message 三张表 | **message-rpc** |
+| `users_user` / `users_user_avatar_history` / `admin_admin` / `admin_invite` | **user-rpc 与 admin-rpc 都会建**（幂等，谁先启动都一样） |
+| message 三张表 | **message-rpc 仍用 Flyway**（本次未动，见下方范围说明） |
 
 执行要点：
 
-1. **版本号跨服务全局唯一**（user-rpc V1/V2、admin-rpc V3/V4、message-rpc V5+）。
-2. **admin-rpc 删除 `V3__create_user.sql`**，改由 `bootstrap/AdminSchemaGate` 校验 `users_user` 存在，缺失 fail-fast（**只校验不创建**）。
-3. **候选 ②「每服务独立 schema」已被证据排除** —— admin-rpc 直接查 `users_user`，拆 schema 必须跨 schema 查询或改转发，而 Go 两边都直连同一库。
+1. **4 份 DDL 收归 `users-common/src/main/resources/db/*.sql`**，编号前缀（`01_`…`04_`）
+   只保证确定性执行顺序，**不表示版本**。
+2. `users-common` 的 `com.rag.users.common.ddl.SchemaInitializer` 用 `ScriptUtils` 原样重放；
+   user-rpc / admin-rpc 各自的 `bootstrap/UserSchemaBootstrap` / `AdminSchemaBootstrap`
+   在 `@PostConstruct` 里调用，任一 DDL 失败即启动失败（对齐 Go 的 `log.Fatalln`）。
+3. `AdminSeederBootstrap` 显式 `@DependsOn("adminSchemaBootstrap")`。
+4. 两个 rpc 的 `spring-boot-flyway` / `flyway-core` / `flyway-database-postgresql`
+   **三件套全部从 pom 移除** —— 只删 `flyway-core` 是不够的，`spring-boot-flyway`
+   在 classpath 上就会让 `FlywayAutoConfiguration` 按默认值自动 migrate。
 
-Go 侧证据：`user/rpc/internal/model/db.go:33` = `AutoMigrate(&User{}, &UserAvatarHistory{})`，`admin/rpc/internal/model/db.go:15` = `AutoMigrate(&Admin{}, &AdminInvite{}, &User{})` —— **Go 两个服务都建 `users_user`**，无冲突只因 `AutoMigrate` 无状态且幂等。
+Go 侧证据：`user/rpc/internal/model/db.go:33` = `AutoMigrate(&User{}, &UserAvatarHistory{})`，`admin/rpc/internal/model/db.go:15` = `AutoMigrate(&Admin{}, &AdminInvite{}, &User{})` —— **Go 两个服务都建 `users_user`**，
+Go 之所以无冲突，正因为 `AutoMigrate` 无状态且幂等。丢掉 Flyway 之后 Java 侧回到同一条路上。
 
-**⚠️ 本问题的实际范围比原记录更宽**：Go 全部服务连同一 `first_db`，共用一张 `flyway_schema_history`，因此 **message-rpc 的 V1/V2/V3 同样与两个 users 模块撞号**。admin-rpc 现有 `V3__create_user.sql` 里的 `IF NOT EXISTS` 只解决建表，**解决不了版本号与 checksum 冲突**。
+**⚠️ 已知代价（第一次 `ALTER` 之前可以无视）**：脚本要同时承担「建表」与「升级」两件事，
+只能到处加 `ADD COLUMN IF NOT EXISTS`；也没有任何地方记录「这张表现在该长什么样」。
+**第一次 `ALTER` 之前必须重新引入版本化机制。**
+
+**⚠️ 本问题的实际范围比原记录更宽**：`message-rpc` **仍在用 Flyway**，本次未动。
+它与 users 域共用同一个 `first_db`，一旦 users 域也留下 Flyway 账本就会撞号 ——
+现在 users 域已经没有账本了，所以 message-rpc 暂时安全。
+若日后 message 域要接入 users 域的数据、或想让 message-rpc 也去掉 Flyway，
+按同一套 `SchemaInitializer` 模式处理即可。
 
 **✅ 问题 2：`admin-rpc` 边界 —— 不转发，保持直连；RAG 现状即与 Go 一致，不是缺陷。**（原为待定）
 

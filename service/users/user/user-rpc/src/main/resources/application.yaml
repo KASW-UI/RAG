@@ -15,13 +15,23 @@ spring:
     password: ${POSTGRES_PASSWORD:Sea-TryGo}
     driver-class-name: org.postgresql.Driver
 
-  # ===== 2. MyBatis-Plus + Flyway（取代 JPA/Hibernate；对齐 Go 端 GORM + AutoMigrate）=====
-  flyway:
-    enabled: true
-    # SQL 脚本位置（HUMAN_ONLY.MD 要求每个 rpc 模块独立维护自己的 V*__create_*.sql）
-    locations: classpath:db/migration
-    # baseline-on-migrate：已有非空 schema 时自动 baseline，避免首次启动失败
-    baseline-on-migrate: true
+  # ===== 2. MyBatis-Plus + 建表（取代 JPA/Hibernate；对齐 Go 端 GORM + AutoMigrate）=====
+  # ⚠️ 建表**不再用 Flyway**（2026-10-21，DRIFT-NEW-015）。
+  #   原因：flyway_schema_history 是 schema 级账本，一个 schema 只能有一本账；
+  #   而 user-rpc 与 admin-rpc 的迁移版本号撞车、内容不同，两个进程又必须连同一个库
+  #   （admin-rpc 也读写 users_user）⇒ 后启动的那个要么静默跳过自己的迁移、
+  #   要么 checksum mismatch 直接启动失败。
+  #   「加 validate-on-migrate=false + out-of-order=true 糊过去」也已实测证伪，
+  #   见 tools/difftest/exp-drift015-flyway-flags.sh。
+  #
+  #   现在的做法：由 bootstrap/UserSchemaBootstrap 在 @PostConstruct 里用
+  #   com.rag.users.common.ddl.SchemaInitializer 把 users-common 里的 4 份
+  #   db/*.sql 幂等重放一遍（全部 CREATE ... IF NOT EXISTS）。
+  #   ⇒ 无账本、无版本号、无跨进程状态，谁先启动都行 —— 这正是 Go 侧
+  #     GORM AutoMigrate 的无状态语义（user/rpc/internal/model/db.go:33）。
+  #
+  #   已知代价：第一次 ALTER 之前可以无视；之后必须重新引入版本化机制，
+  #   因为脚本要同时承担「建表」与「升级」两件事。详见 SchemaInitializer 的 javadoc。
 
   # ===== 3. Redis（对齐 Go 端 BizRedis）=====
   # ⚠️ 必须挂在 spring: 下。放错块（如 mybatis-plus:）Spring Boot 完全读不到，

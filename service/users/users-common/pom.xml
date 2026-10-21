@@ -38,6 +38,32 @@
         </dependency>
 
         <!--
+          SchemaInitializer 用 org.springframework.jdbc.datasource.init.ScriptUtils
+          执行 users 域 DDL（2026-10-21 起取代 Flyway，见 SchemaInitializer 的 javadoc）。
+
+          ⚠️ users-common 是 user-rpc / admin-rpc / user-api / admin-api **四者共用**的模块，
+             加依赖前必须确认它不会把不该拖进来的东西带进来：
+             spring-jdbc 只依赖 spring-core / spring-beans / spring-tx，
+             **不含任何 jakarta.servlet 引用** ——
+             而 admin-rpc 是纯 gRPC 进程、刻意不引 servlet 依赖
+             （见 AdminRpcApplication 上关于 scanBasePackages 的注释）。
+             所以这一项对 admin-rpc 是安全的。
+             对比：spring-boot-starter-data-jpa 会拖进 hibernate 与一堆自动配置，不可用。
+        -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-jdbc</artifactId>
+        </dependency>
+        <!--
+          SchemaInitializer 打启动日志（建哪份脚本、成没成功）。slf4j-api 是纯 API 包、
+          零传递依赖，与 service/common 的用法一致。
+        -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+        <!--
           测试。JwtUtil 的 zero-pad 曾被删掉过一次，导致 admin 默认密钥（15 字节）在
           登录签发时抛 WeakKeyException，而当时的测试用的是 55 字节专用密钥把问题遮住了。
           这里补一个最小测试依赖，把该不变量钉死。

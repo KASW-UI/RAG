@@ -19,6 +19,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -40,10 +41,11 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p><b>本类证明什么</b>：
  * <ul>
- *   <li><b>Flyway 真的先于 seeder 跑了</b> —— 见 {@link #flyway_ranBeforeSeeder()}。
- *       若 {@code @DependsOnDatabaseInitialization} 没生效，seeder 会在
- *       {@code admin_admin} 建表之前 SELECT，<b>容器直接起不来</b>，
- *       本类全部用例会以 context 加载失败告终 —— 「测试能跑起来」本身就是那个断言。</li>
+ *   <li><b>建表真的先于 seeder 跑了</b> —— 见 {@link #schemaAppliedBeforeSeeder()}。
+ *       若 {@link AdminSeederBootstrap} 上的 {@code @DependsOn("adminSchemaBootstrap")}
+ *       没生效，seeder 会在 {@code admin_admin} 建表之前 SELECT，
+ *       <b>容器直接起不来</b>，本类全部用例会以 context 加载失败告终 ——
+ *       「测试能跑起来」本身就是那个断言。</li>
  *   <li><b>DRIFT-001 的运行时实证</b> —— 见 {@link #seeder_createdAdminWithHardcodedPassword()}</li>
  *   <li><b>A-U3 的 LIKE 双重包裹等价性</b> —— 见 {@link #keywordLikeDoubleWrapMatchesSingleWrap()}</li>
  * </ul>
@@ -82,8 +84,6 @@ class AdminRpcContainerWiringTest {
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);
-        // 显式打开：本测试的核心断言之一就是 Flyway 真的执行了
-        r.add("spring.flyway.enabled", () -> "true");
     }
 
     @Autowired
@@ -104,31 +104,46 @@ class AdminRpcContainerWiringTest {
      *
      * <p>DRIFT-010 把 seeder 从 {@code ApplicationReadyEvent} 提前到 {@code @PostConstruct}。
      * 这带来一个风险：{@code @PostConstruct} 在 {@code finishBeanFactoryInitialization}
-     * 期间执行，而 Flyway 迁移跑在 {@code flywayInitializer} bean 创建时，
-     * 两者靠 bean definition 注册顺序决定谁先，<b>没有天然保证</b>。
+     * 期间执行，而建表跑在 {@link AdminSchemaBootstrap} 的 {@code @PostConstruct}，
+     * 两者都是普通 {@code @Component}，
+     * <b>注册顺序只是扫描顺序，不是契约</b> —— 谁先跑不可依赖。
      *
      * <p>因此这里的断言是<b>双向</b>的：
      * <ul>
      *   <li>能跑到方法体 ⇒ 容器 refresh 成功 ⇒ seeder 的 SELECT 没有撞上「表不存在」</li>
-     *   <li>{@code flyway_schema_history} 有 3 条 ⇒ 三份 DDL 确实执行了</li>
+     *   <li>四张表都在 ⇒ users 域 DDL 确实整套执行了</li>
      * </ul>
-     * 若把 {@code @DependsOnDatabaseInitialization} 去掉，本类会在 context 加载阶段就挂，
+     * 若把 {@link AdminSeederBootstrap} 上的
+     * {@code @DependsOn("adminSchemaBootstrap")} 去掉，本类会在 context 加载阶段就挂，
      * 报 {@code relation "admin_admin" does not exist}。
+     *
+     * <p><b>建表方式已在 2026-10-21 从 Flyway 换成幂等重放</b>（DRIFT-NEW-015）：
+     * {@code flyway_schema_history} 那张表<b>已经不存在了</b>，
+     * 所以这里不能再数账本条数，只能直接验「表在不在」。
+     * 无账本、无版本号、无跨进程状态 —— 谁先启动都行。
      */
     @Test
-    @DisplayName("A-U0/DRIFT-010：容器能起来 ⇒ Flyway 先于 seeder 执行（时序约束真实生效）")
-    void flyway_ranBeforeSeeder() {
-        Integer migrations = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM flyway_schema_history WHERE success = true", Integer.class);
-        assertEquals(3, migrations,
-                "V1/V2/V3 三份迁移都应成功执行");
-
-        // 三张表都在 —— 这正是 seeder 依赖的前提
+    @DisplayName("A-U0/DRIFT-010：容器能起来 ⇒ 建表先于 seeder 执行（时序约束真实生效）")
+    void schemaAppliedBeforeSeeder() {
+        // 四张表：admin 域两张 + user 域两张。
+        // admin-rpc 也读写 users_user（BanUser / DeleteUser / ResetUserPassword /
+        // UpdateUser），所以 users_user 必须在场 —— 这正是它与 user-rpc
+        // 必须连同一个库的原因。Go 侧的对应证据是
+        // admin/rpc/internal/model/db.go:15 的 AutoMigrate(&Admin{}, &AdminInvite{}, &User{})：
+        // 那个 &User{} 就是「admin-rpc 也管 users_user」的直接出处。
+        //
+        // 断言点：admin-rpc **单独**对着一个空库启动，users 域四张表都应被幂等建出来。
+        // 改动前这做不到 —— 那时 admin-rpc 只有自己的 3 份 Flyway 迁移，
+        // 且与 user-rpc 的版本号撞车，第二个起来的进程会静默跳过自己的迁移。
         Set<String> tables = Set.copyOf(jdbcTemplate.queryForList(
                 "SELECT table_name FROM information_schema.tables "
                         + "WHERE table_schema = 'public' AND table_name IN "
-                        + "('admin_admin','admin_invite','users_user')", String.class));
-        assertEquals(Set.of("admin_admin", "admin_invite", "users_user"), tables);
+                        + "('admin_admin','admin_invite','users_user','users_user_avatar_history')",
+                String.class));
+        assertEquals(Set.of("admin_admin", "admin_invite",
+                        "users_user", "users_user_avatar_history"),
+                tables,
+                "admin-rpc 单独对着空库启动时，users 域四张表都应被幂等建出来");
     }
 
     // ==================================================================

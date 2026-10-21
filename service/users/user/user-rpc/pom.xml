@@ -134,29 +134,24 @@
             <artifactId>mybatis-plus-boot-starter</artifactId>
         </dependency>
         <!--
-            Flyway 10+ 拆出独立 PG adapter（不再走 jdbc 内置 driver detection）
-            版本由根 pom dependencyManagement 管理
+            建表已移除 Flyway（2026-10-21），详见 AGENTS.md §6.2.5 DRIFT-NEW-015：
+              flyway_schema_history 是 schema 级账本，而 user-rpc 与 admin-rpc 的迁移
+              版本号撞车、内容不同，两个进程又必须连同一个库
+              ⇒ 后启动的那个要么静默跳过自己的迁移，要么 checksum mismatch 启动失败。
+
+            ⚠️ 必须**连 spring-boot-flyway 一起删**，不能只删 flyway-core：
+              只要它还在 classpath 上，FlywayAutoConfiguration 就会用默认值自动装配并
+              migrate()，于是「表已建好但没有 schema history」直接致命：
+              Found non-empty schema(s) "public" but no schema history table.
+
+            现在的做法：bootstrap/UserSchemaBootstrap 在 @PostConstruct 里调
+            users-common 的 com.rag.users.common.ddl.SchemaInitializer，
+            把 users-common/src/main/resources/db/*.sql 幂等重放一遍
+            （全部 CREATE ... IF NOT EXISTS，无账本、无版本号，谁先启动都行）。
+            这正是 Go 侧 service/user/user/rpc/internal/model/db.go:33 的
+            db.AutoMigrate(&User{}, &UserAvatarHistory{}) 的无状态语义。
+            spring-jdbc（ScriptUtils 所在）由 users-common 以 compile scope 传递进来。
         -->
-        <!--
-            Spring Boot 4 把各技术栈的自动配置拆成了独立 artifact。
-            flyway-core 只是库，真正把 spring.flyway.* 接上的是 spring-boot-flyway
-            里的 org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration。
-            只引 flyway-core 不引它 → 配置完全惰性，Flyway 从不执行，
-            db/migration/V*__create_*.sql 一条都不会跑，表根本不会被建出来。
-            （2026-10-20 实测：应用能启动、mapper 注册成功，但 rag_verify 库里 0 张表。）
-        -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-flyway</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-database-postgresql</artifactId>
-        </dependency>
 
         <!-- ============== 5. Redis（仅 Logout 用 Setex） ============== -->
         <!-- 对齐 Go 端 BizRedis 配置，spring-boot-starter-data-redis 默认 Lettuce client -->

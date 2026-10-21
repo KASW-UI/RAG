@@ -21,6 +21,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.HashMap;
 import java.util.Map;
+
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -93,8 +94,6 @@ class UserRpcContainerWiringTest {
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);
-        // 显式打开：本类的 schema 前提就是 Flyway 真跑了
-        r.add("spring.flyway.enabled", () -> "true");
     }
 
     @Autowired
@@ -105,30 +104,34 @@ class UserRpcContainerWiringTest {
     private JdbcTemplate jdbcTemplate;
 
     // ==================================================================
-    // §3.3 缺口 1：extra_info 的列类型与 Flyway
+    // §3.3 缺口 1：extra_info 的列类型与建表脚本
     // ==================================================================
 
     /**
-     * 本类其余用例的前提：V1/V2 迁移真跑了，且 {@code extra_info} 真的是 jsonb。
+     * 本类其余用例的前提：users 域 DDL 真跑了，且 {@code extra_info} 真的是 jsonb。
      *
-     * <p>Go 出处：{@code V1__create_user.sql} 的 {@code extra_info JSONB}，
+     * <p>Go 出处：{@code 01_create_user.sql} 的 {@code extra_info JSONB}，
      * 对应 GORM {@code AutoMigrate} 从 struct tag 推出的 jsonb 列。
      *
-     * <p>顺带证明"类型不是 varchar" —— 若某次迁移被手改成 {@code text}/{@code varchar}，
+     * <p>顺带证明"类型不是 varchar" —— 若某次建表脚本被手改成 {@code text}/{@code varchar}，
      * 下面所有 jsonb 用例都会变成假绿（TypeHandler 的 Types.OTHER 对 text 也能写成功）。
      */
     @Test
-    @DisplayName("§3.3：Flyway 真跑了，且 extra_info 的列类型确实是 jsonb")
-    void flywayCreatedJsonbColumns() {
-        Integer migrations = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM flyway_schema_history WHERE success = true", Integer.class);
-        assertEquals(2, migrations, "V1/V2 两份迁移都应成功执行");
-
+    @DisplayName("§3.3：建表真跑了，且 extra_info 的列类型确实是 jsonb")
+    void schemaInitCreatedJsonbColumns() {
+        // 建表方式已在 2026-10-21 从 Flyway 换成幂等重放（DRIFT-NEW-015）：
+        // flyway_schema_history 那张表已经不存在，所以这里只能验「表在不在」。
+        // 顺带变成一个更强的断言：user-rpc **单独**对着空库启动，
+        // 也能把 admin 域的两张表建出来（Go 侧 AutoMigrate 就是这个行为）。
         Set<String> tables = Set.copyOf(jdbcTemplate.queryForList(
                 "SELECT table_name FROM information_schema.tables "
                         + "WHERE table_schema = 'public' AND table_name IN "
-                        + "('users_user','users_user_avatar_history')", String.class));
-        assertEquals(Set.of("users_user", "users_user_avatar_history"), tables);
+                        + "('users_user','users_user_avatar_history',"
+                        + "'admin_admin','admin_invite')", String.class));
+        assertEquals(Set.of("users_user", "users_user_avatar_history",
+                        "admin_admin", "admin_invite"),
+                tables,
+                "user-rpc 单独对着空库启动时，users 域四张表都应被幂等建出来");
 
         String extraInfoType = jdbcTemplate.queryForObject(
                 "SELECT data_type FROM information_schema.columns "

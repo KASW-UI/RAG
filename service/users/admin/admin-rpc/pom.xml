@@ -94,30 +94,31 @@
             <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
         </dependency>
 
-        <!-- ============== 5. Flyway 数据库迁移 ============== -->
+        <!-- ============== 5. 建表（已移除 Flyway，2026-10-21） ============== -->
         <!--
-            对齐 Go 端 AutoMigrate：把 3 张表 DDL 放进 V1/V2/V3 SQL 文件。
-            Flyway 启动时自动执行，幂等性用 CREATE TABLE IF NOT EXISTS 保证（多进程重启安全）。
+            原先这里是 flyway-core + spring-boot-flyway + flyway-database-postgresql 三件套，
+            现已**全部移除**，理由见 AGENTS.md §6.2.5 DRIFT-NEW-015：
+
+              flyway_schema_history 是 schema 级账本，一个 schema 只能有一本账；
+              而 admin-rpc 与 user-rpc 各自的迁移 V1/V2 版本号相同、内容不同，
+              两个进程又必须连同一个库（admin-rpc 也读写 users_user）
+              ⇒ 后启动的那个要么静默跳过自己的迁移，要么 checksum mismatch 直接启动失败。
+              「加 validate-on-migrate=false + out-of-order=true 糊过去」也已实测证伪，
+              见 tools/difftest/exp-drift015-flyway-flags.sh。
+
+            ⚠️ 这里必须**连 spring-boot-flyway 一起删**，不能只删 flyway-core：
+              Spring Boot 4 把自动配置拆成了独立 artifact，只要 spring-boot-flyway 还在
+              classpath 上，FlywayAutoConfiguration 就会用默认值自动装配并跑 migrate()
+              —— 于是「已经建好表但没有 schema history」直接变成致命错误：
+              Found non-empty schema(s) "public" but no schema history table.
+              （本次改造实测撞到过，见对话记录。）
+
+            现在的做法：bootstrap/AdminSchemaBootstrap 在 @PostConstruct 里调
+            users-common 的 com.rag.users.common.ddl.SchemaInitializer，
+            把 users-common/src/main/resources/db/*.sql 幂等重放一遍
+            （全部 CREATE ... IF NOT EXISTS，无账本、无版本号，谁先启动都行）。
+            spring-jdbc（ScriptUtils 所在）由 users-common 以 compile scope 传递进来。
         -->
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-core</artifactId>
-        </dependency>
-        <!--
-            Spring Boot 4 把各技术栈的自动配置拆成了独立 artifact。
-            flyway-core 只是库，真正把 spring.flyway.* 接上的是 spring-boot-flyway
-            里的 org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration。
-            只引 flyway-core 不引它 → 配置完全惰性，Flyway 从不执行，
-            db/migration/V1~V3__create_*.sql 一条都不会跑，admin / admin_invite / user 表不会被建出来。
-        -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-flyway</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-database-postgresql</artifactId>
-        </dependency>
 
         <!-- ============== 6. Redis（Logout 用 Setex 写 blacklist） ============== -->
         <dependency>

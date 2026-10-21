@@ -121,11 +121,21 @@ go-zero 不会 `os.ExpandEnv`。详见 AGENTS.md §6.2.5 的留档。
 表不存在时直接 `BeanCreationException: ... relation "admin_admin" does not exist`。
 所以 admin 的 DDL 必须在 **admin-rpc 启动之前**建好，不能靠 `sleep` 猜。
 
-### 4.8 RAG 两个 rpc 共用一个库时 Flyway 会炸
+### 4.8 RAG 两个 rpc 同时启动时会撞 PG 的 DDL 竞态
 
-`flyway_schema_history` 一个 schema 只能有一本账，而两个模块的
-`V1/V2` 版本号相同、内容不同。当前绕法是 admin-rpc 关 Flyway + 手工应用 DDL。
-详见 AGENTS.md §6.2.5 DRIFT-NEW-015。
+去掉 Flyway 后，两个 rpc 都靠 `@PostConstruct` 里的 `SchemaInitializer`
+把同一批 `CREATE TABLE IF NOT EXISTS` 打到同一个空库上。
+**PG 的 `IF NOT EXISTS` 在并发下并不安全**，后到者报：
+
+```
+ERROR: duplicate key value violates unique constraint "pg_type_typname_nsp_index"
+```
+
+单测测不到（每次只起一个服务），只有本工具同时起两套栈才复现。
+修法是 `SchemaInitializer` 取 PG 会话级 advisory lock，见 AGENTS.md §6.2.5。
+
+> 本工具**故意让两个 rpc 同时启动**（不加 sleep 错开），就是为了守住这条竞态 ——
+> 生产里 `docker-compose up` 也是同时起。
 
 ### 4.9 Read 工具会吃掉连续空格
 
@@ -144,7 +154,10 @@ go-zero 不会 `os.ExpandEnv`。详见 AGENTS.md §6.2.5 的留档。
   ⇒ user-api 连不上 user-rpc，所有业务码塌成 `1015 服务繁忙`。
   `admin-api` 当年踩过并修了（DRIFT-NEW-008），user 侧被漏掉。
 - **DRIFT-NEW-015（P0）** Flyway 迁移版本号撞车 ⇒ `admin-rpc` 无法启动，
-  而它按设计必须与 user-rpc 共用 `users_user`。
+  而它按设计必须与 user-rpc 共用 `users_user`。已修：用户拍板去掉 Flyway，
+  改为 `SchemaInitializer` 幂等重放 DDL + advisory lock 串行化。
+- **PG 的 `CREATE TABLE IF NOT EXISTS` 并发不安全** —— 丢掉账本丢掉的那层保护，
+  由 advisory lock 补回（见 §4.8）。
 - **DRIFT-NEW-016（P2）** Go 的 `httpx.Parse` 把字段缺失当硬错误
   （只认 `,optional`，`,omitempty` 不算），RAG 无此校验。
 

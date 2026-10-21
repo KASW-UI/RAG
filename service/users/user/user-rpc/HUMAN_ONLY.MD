@@ -28,7 +28,7 @@
 ``
 user-rpc/
 ├── pom.xml                                                              # 依赖 user-proto / users-common / common / grpc-server-spring-boot-starter
-│                                                                          #   + mybatis-plus-boot-starter + flyway-core + mysql-connector-j + nacos-discovery
+│                                                                          #   + mybatis-plus-boot-starter + postgresql + nacos-discovery
 └── src/
     └── main/
         ├── java/
@@ -79,8 +79,16 @@ user-rpc/
         └── resources/
             ├── application.yml                                           # user-rpc.* + grpc.server.port=49210 + nacos.discovery +
             │                                                              #   spring.datasource + mybatis-plus + flyway + redis
-            ├── db/migration/
-            │   ├── V1__init_users_user.sql                              # 建 users_user 表
-            │   └── V2__init_user_avatar_history.sql                     # 建 user_avatar_history 表
+            ├── db/                                                          # ⚠️ 不在本模块，见下
+            │                                                              #   2026-10-21 起 users 域 DDL 全部收归
+            │                                                              #   users-common/src/main/resources/db/：
+            │                                                              #     01_create_user.sql                  建 users_user
+            │                                                              #     02_create_user_avatar_history.sql   建 users_user_avatar_history
+            │                                                              #     03_create_admin.sql                 建 admin_admin
+            │                                                              #     04_create_admin_invite.sql          建 admin_invite
+            │                                                              #   由 bootstrap/UserSchemaBootstrap 在 @PostConstruct 里
+            │                                                              #   调 users-common 的 SchemaInitializer 原样重放
+            │                                                              #   （全部 CREATE ... IF NOT EXISTS，无账本无版本号）
+            │                                                              #   Go 出处：user/rpc/internal/model/db.go:33 AutoMigrate
             └── logback-spring.xml                                        # ServiceName=user-rpc, Mode=file, Path=.../log/user-rpc
 ``

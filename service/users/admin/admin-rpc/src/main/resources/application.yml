@@ -13,11 +13,16 @@ spring:
     driver-class-name: org.postgresql.Driver
 
   # ===== 2. MyBatis-Plus + Flyway（Phase 3 重构：去 JPA，用 MyBatis-Plus + Flyway DDL）=====
-  flyway:
-    enabled: true
-    locations: classpath:db/migration
-    baseline-on-migrate: true
-    validate-on-migrate: true
+  # ⚠️ 建表**不再用 Flyway**（2026-10-21，DRIFT-NEW-015）。
+  #   flyway_schema_history 是 schema 级账本，而 admin-rpc 与 user-rpc 的迁移版本号撞车、
+  #   内容不同，两个进程又必须连同一个库（admin-rpc 也读写 users_user）
+  #   ⇒ admin-rpc 在生产拓扑下根本无法启动。
+  #   现在的做法：bootstrap/AdminSchemaBootstrap 在 @PostConstruct 里用
+  #   com.rag.users.common.ddl.SchemaInitializer 把 users-common 里的 4 份 db/*.sql
+  #   幂等重放一遍（全部 CREATE ... IF NOT EXISTS），无账本、无版本号。
+  #   时序：AdminSeederBootstrap 用 @DependsOn("adminSchemaBootstrap") 显式排在它之后 ——
+  #   以前那条靠 Flyway + MyBatis-Plus detector 的传递链，去掉 Flyway 后已经不存在。
+  #   详见 SchemaInitializer 与 AdminSeederBootstrap 的 javadoc。
 
   # MyBatis-Plus 配置：Map 字段 JSONB 序列化走 JacksonTypeHandler
   mybatis-plus:

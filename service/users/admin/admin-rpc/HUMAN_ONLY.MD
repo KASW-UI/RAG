@@ -32,7 +32,7 @@
 ``
 admin-rpc/
 ├── pom.xml                                                              # 依赖 admin-proto / users-common / common / grpc-server-spring-boot-starter
-│                                                                          #   + mybatis-plus-boot-starter + flyway-core + mysql-connector-j + nacos-discovery
+│                                                                          #   + mybatis-plus-boot-starter + postgresql + nacos-discovery
 └── src/
     └── main/
         ├── java/
@@ -88,9 +88,18 @@ admin-rpc/
         └── resources/
             ├── application.yml                                           # admin-rpc.* + grpc.server.port=49220 + nacos.discovery +
             │                                                              #   spring.datasource + mybatis-plus + flyway + redis
-            ├── db/migration/
-            │   ├── V1__init_admin_admin.sql                              # 建 admin_admin 表
-            │   ├── V2__init_admin_invite.sql                            # 建 admin_invite 表
-            │   └── V3__add_admin_indexes.sql                            # 加索引
+            ├── db/                                                          # ⚠️ 不在本模块，见下
+            │                                                              #   2026-10-21 起 users 域 DDL 全部收归
+            │                                                              #   users-common/src/main/resources/db/：
+            │                                                              #     01_create_user.sql                  建 users_user
+            │                                                              #     02_create_user_avatar_history.sql   建 users_user_avatar_history
+            │                                                              #     03_create_admin.sql                 建 admin_admin
+            │                                                              #     04_create_admin_invite.sql          建 admin_invite
+            │                                                              #   由 bootstrap/AdminSchemaBootstrap 在 @PostConstruct 里
+            │                                                              #   调 users-common 的 SchemaInitializer 原样重放；
+            │                                                              #   AdminSeederBootstrap 用 @DependsOn("adminSchemaBootstrap")
+            │                                                              #   显式排在它之后（先前靠 Flyway 的传递链，去掉后已不存在）
+            │                                                              #   Go 出处：admin/rpc/internal/model/db.go:15
+            │                                                              #   AutoMigrate(&Admin{}, &AdminInvite{}, &User{})
             └── logback-spring.xml                                        # ServiceName=admin-rpc, Mode=file, Path=.../log/admin-rpc
 ``

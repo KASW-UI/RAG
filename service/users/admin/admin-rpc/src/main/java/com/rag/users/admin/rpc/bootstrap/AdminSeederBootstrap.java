@@ -11,6 +11,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 
 /**
@@ -50,29 +51,33 @@ import org.springframework.stereotype.Component;
  * 阶段执行，早于 {@code finishRefresh} 里的 {@code SmartLifecycle.start()}，
  * 且依赖的 {@code AdminMapper} 由 {@code @MapperScan} 注册的 bean definition 已就绪。
  *
- * <p><b>关于 {@link DependsOnDatabaseInitialization}：显式声明，但当前是冗余的。</b>
- * <p>把 seeder 提前到 {@code @PostConstruct} 后确实会引入一个时序问题：它跑在
- * {@code finishBeanFactoryInitialization}，而 Flyway 迁移跑在 {@code flywayInitializer}
- * bean 创建时（{@code afterPropertiesSet → migrate()}）。两者都是普通 bean，
- * 单看注册顺序（组件扫描早于自动配置）似乎会先跑 seeder。
- * <p><b>但实测证明不会出问题——框架已经保证了顺序</b>：MyBatis-Plus 自带
- * {@code com.baomidou.mybatisplus.autoconfigure.MybatisDependsOnDatabaseInitializationDetector}
- * （继承 {@code AbstractBeansOfTypeDependsOnDatabaseInitializationDetector}，
- * 监听类型为 {@code org.mybatis.spring.SqlSessionTemplate}），Spring Boot 的
- * {@code DatabaseInitializationDependencyConfigurer} 会自动给匹配的 bean 打上
- * 「依赖数据库初始化」标记。因此链路是：
+ * <p><b>关于建表时序：本类靠 {@link DependsOn} 显式排在 {@link AdminSchemaBootstrap} 之后。</b>
+ * <p>把 seeder 提前到 {@code @PostConstruct} 后引入了一个时序问题：本类跑在
+ * {@code finishBeanFactoryInitialization}，而建表跑在 {@link AdminSchemaBootstrap}
+ * 的 {@code @PostConstruct}。两者都是普通 {@code @Component}，
+ * <b>注册顺序只是扫描顺序，不是契约</b> —— 谁的 {@code @PostConstruct} 先跑不可依赖。
+ * 若建表排在本类之后，启动就会挂在
+ * {@code PSQLException: relation "admin_admin" does not exist}。
+ *
+ * <p><b>历史（值得记下来，因为方向反过一次）</b>：原先这条约束是<b>传递性</b>的 ——
+ * MyBatis-Plus 自带 {@code MybatisDependsOnDatabaseInitializationDetector}，
+ * Spring Boot 的 {@code DatabaseInitializationDependencyConfigurer} 会给
+ * {@code SqlSessionTemplate} 自动打上「依赖数据库初始化」标记，于是链路是
  * <pre>
  *   AdminSeederBootstrap
  *     └─ AdminMapper (MapperFactoryBean)
- *          └─ SqlSessionTemplate   ← 被检测器自动加上「依赖数据库初始化」
+ *          └─ SqlSessionTemplate   ← detector 自动加标记
  *               └─ flywayInitializer 先跑 migrate()
  * </pre>
- * <p><b>实证</b>：把本类上的 {@code @DependsOnDatabaseInitialization} 注释掉后重跑
- * {@code AdminRpcContainerWiringTest}，7 条仍全部通过 —— 该约束并非由本注解提供。
- * <p><b>那为什么还留着</b>：上面的保证是<b>传递性</b>的，依赖「MyBatis-Plus 提供 detector」
- * +「Boot 的 configurer 收集 detector」两个前提。任一前提变化（换 ORM、Boot 大版本升级、
- * detector 被裁掉）都会让 seeder 静默失去排序保护。本注解把约束钉在本类身上，不依赖那条传递链。
- * <p>要回到「纯靠传递链」的状态，删掉本注解即可 —— 实测行为不变。
+ * 当时还留了一句「把本注解注释掉后 7 条仍全过，该约束并非由本注解提供」。
+ * <p><b>2026-10-21 丢掉 Flyway 之后，那条链整个消失了</b> ——
+ * 没有 {@code flywayInitializer}，{@code DatabaseInitializerDetector} 也就无处可施。
+ * 继续依赖它等于依赖一个已经不存在的机制。
+ * 所以现在改成<b>点名到具体 bean</b>的 {@code @DependsOn("adminSchemaBootstrap")}：
+ * 约束不再经过任何自动配置推断，ORM 换了、Boot 升大版本都不会失效。
+ *
+ * <p>{@link DependsOnDatabaseInitialization} 予以保留：万一将来换回 Flyway 或
+ * {@code spring.sql.init}，它是另一条独立的保护。
  *
  * <p><b>失败语义</b>：抛异常 → Spring 容器启动失败、进程退出，等价于 Go 端
  * {@code logx.Must(...)} 的 fatal 行为。
@@ -81,6 +86,7 @@ import org.springframework.stereotype.Component;
  *                    插入时若唯一冲突（多实例同时启动）→ 重读一次，存在就 OK，不存在就把原异常抛出去。
  */
 @Component
+@DependsOn("adminSchemaBootstrap")
 @DependsOnDatabaseInitialization
 public class AdminSeederBootstrap {
 

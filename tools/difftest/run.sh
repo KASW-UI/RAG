@@ -159,53 +159,20 @@ echo "==> [4/5] 启动 RAG 栈（独占端口 59210/58081/59900/58889；gRPC 走
 # GRPC_SERVER_PORT / SERVER_PORT 用 Spring relaxed binding 覆盖 yml 里的默认值，
 # 避开本机 Sea-* 容器占着的 49210/49900，以及 Sea-RideTheWind_java 占着的 8081/8889。
 #
-# admin-rpc 刻意关掉 Flyway，DDL 由上面手工应用。理由见 initdb.sql：
-#   admin-rpc 的迁移是 V1__create_admin / V2__create_admin_invite / V3__create_user，
-#   user-rpc 的是 V1__create_user / V2__create_user_avatar_history —— 版本号撞车，
-#   同一本 flyway_schema_history 容不下两套编号。
-#   **这不是对拍环境的将就，是 RAG 的结构性缺陷**：只要 admin-rpc 按
-#   docker-compose 的方式连同一个库，它就会起不来；而现有 docker-compose.yaml
-#   里压根没有 admin-rpc / admin-api 服务，所以这个冲突从没在编排里暴露过。
+# 两侧都**不用 Flyway**（2026-10-21，DRIFT-NEW-015）：
+#   flyway_schema_history 是 schema 级账本，而两个模块的迁移版本号撞车、内容不同，
+#   两个进程又必须连同一个库（admin-rpc 也读写 users_user）⇒ 后启动的必然出事。
+#   现在两边都在 @PostConstruct 里把 users-common 的 4 份 db/*.sql 幂等重放一遍，
+#   全部 CREATE ... IF NOT EXISTS，无账本、无版本号，**谁先启动都行**。
+#   ⇒ 这里**不需要**任何手工 DDL、不需要关 Flyway、不需要 sleep 等迁移。
 #
-# POSTGRES_DB 两侧同为 rag_db：admin-rpc 必须能看见 user-rpc 建出来的 users_user，
+# POSTGRES_DB 两侧同为 rag_db：admin-rpc 必须能看见 users_user，
 # 否则 getuser/banuser/unbanuser/resetuserpassword/updateuser/delete 全返回「用户不存在」。
 POSTGRES_DB=rag_db GRPC_SERVER_PORT=59210 \
   java -jar "$RUN_DIR/bin/user-rpc"  >"$LOGS/rag-user-rpc.log" 2>&1 & PIDS+=($!)
-sleep 12
-#
-# 必须等 user-rpc 的 Flyway 跑完再动 admin 侧的表，不能靠 sleep 猜：
-#   1) admin 的表要在 admin-rpc 起来**之前**建好 ——
-#      AdminSeederBootstrap 是 @PostConstruct，在 finishBeanFactoryInitialization 阶段
-#      就执行 SELECT/INSERT，表不存在时直接
-#        BeanCreationException: Error creating bean with name 'adminSeederBootstrap'
-#        Caused by: PSQLException: ERROR: relation "admin_admin" does not exist
-#   2) users_user 又必须先由 user-rpc 的 Flyway 建出来（admin 的 V3 被我们跳过）。
-wait_table() {  # db, table, tries
-  for _ in $(seq 1 "${3:-60}"); do
-    if [[ "$(docker exec difftest-postgres psql -U admin -d "$1" -tAc \
-          "select count(*) from information_schema.tables where table_schema='public' and table_name='$2';" 2>/dev/null | tr -d '[:space:]')" == "1" ]]; then
-      return 0
-    fi
-    sleep 1
-  done
-  echo "  FAIL 等表 ${1}.${2} 超时"; return 1
-}
-wait_table rag_db users_user 60 || exit 1
-echo "  OK   user-rpc Flyway 已建 users_user"
-#
-# 手工应用 admin-rpc 的两份 DDL（V3__create_user.sql 跳过：user-rpc 的 Flyway
-# 已经建过同一张表，且它本身就是 IF NOT EXISTS 的幂等脚本）。
-MIGR="$ROOT/service/users/admin/admin-rpc/src/main/resources/db/migration"
-for sql in V1__create_admin.sql V2__create_admin_invite.sql; do
-  docker exec -i difftest-postgres psql -q -v ON_ERROR_STOP=1 -U admin -d rag_db \
-    < "$MIGR/$sql" || { echo "  FAIL 应用 $sql 失败"; exit 1; }
-done
-echo "  OK   admin-rpc DDL 已手工应用到 rag_db（Flyway 关闭）"
-#
 POSTGRES_DB=rag_db GRPC_SERVER_PORT=58081 \
-  env SPRING_FLYWAY_ENABLED=false \
   java -jar "$RUN_DIR/bin/admin-rpc" >"$LOGS/rag-admin-rpc.log" 2>&1 & PIDS+=($!)
-sleep 12
+sleep 20
 #
 # gRPC 下游地址用 `--` 命令行参数而不是环境变量：
 #   grpc.client.user-rpc.address 的 map key 含连字符，环境变量形态

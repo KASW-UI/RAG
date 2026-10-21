@@ -1,3 +1,15 @@
+-- ============================================================
+-- 迁移归属（DRIFT-NEW-015，2026-10-21）
+--
+-- 本文件原是 admin/admin-rpc 的 V2__create_admin_invite.sql，重编号为 **V4**。
+-- 收归 users-common 单一迁移目录的原因见同目录 V3__create_admin.sql 的头部说明。
+--
+-- Go 出处：对应 Go service/user/admin/rpc/internal/model/admin.go 的
+-- AdminInvite struct（GORM 默认表名 admin_invite）。
+--
+-- ⚠️ CreateAdmin 的 4 步事务里对这张表做 W1 行级悲观锁（SELECT ... FOR UPDATE），
+--    所以 code 列上的唯一约束与索引都不能退化。
+-- ============================================================
 -- V2__create_admin_invite.sql
 --
 -- 对应 Go 端 internal/model/admin.go 的 AdminInvite struct（GORM 默认表名 admin_invite）。
