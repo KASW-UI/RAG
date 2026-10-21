@@ -580,7 +580,8 @@ getter 仍为 `isRead()`。实测改后：
 
 | ID | 级别 | 内容 | 证据 |
 |---|---|---|---|
-| **DRIFT-NEW-014** | **P0 · 配置缺陷** | **`user-api` 连不上 `user-rpc`。** `user-api/application.yml` 的 `grpc.client.user-rpc` **漏了 `negotiation-type: plaintext`**，而 devh `grpc-client-spring-boot-starter` 3.1.0 的 `grpc.client.GLOBAL.negotiation-type` **默认值就是 TLS**（证据：jar 内 `META-INF/spring-configuration-metadata.json` 的 `defaultValue`）。于是 user-api 发 TLS ClientHello，user-rpc 的 netty 报 `Http2Exception: HTTP/2 client preface string missing or corrupt. Hex dump: 16030301...`（`0x16` = TLS handshake record），所有经 user-rpc 的业务码塌成 `1015 服务繁忙` | `admin-api/application.yml` **有**这一行且带 DRIFT-NEW-008 注释解释为什么必须有 —— 当年 admin 侧踩过并修了，**user 侧单纯被漏掉**。这不是对拍环境特有的：默认值在任何环境都一样 |
+| **DRIFT-NEW-014** | **P0 · 配置缺陷 · 已修（2026-10-21 当日）** | **`user-api` 连不上 `user-rpc`。** `user-api/application.yml` 的 `grpc.client.user-rpc` **漏了 `negotiation-type: plaintext`**，而 devh `grpc-client-spring-boot-starter` 3.1.0 的 `grpc.client.GLOBAL.negotiation-type` **默认值就是 TLS**（证据：jar 内 `META-INF/spring-configuration-metadata.json` 的 `defaultValue`）。于是 user-api 发 TLS ClientHello，user-rpc 的 netty 报 `Http2Exception: HTTP/2 client preface string missing or corrupt. Hex dump: 16030301...`（`0x16` = TLS handshake record），所有经 user-rpc 的业务码塌成 `1015 服务繁忙` | `admin-api/application.yml` **有**这一行且带 DRIFT-NEW-008 注释解释为什么必须有 —— 当年 admin 侧踩过并修了，**user 侧单纯被漏掉**。这不是对拍环境特有的：默认值在任何环境都一样 |
+| **DRIFT-NEW-014 修法** | — | `user-api/application.yml` 补 `negotiation-type: plaintext`（含字节码级出处注释）。回归网 `UserApiGrpcNegotiationTest`（3 条）：把 `grpc.client.user-rpc.address` 覆盖成 `static://127.0.0.1:<动态端口>`，起一个**真 plaintext gRPC server**，用容器里**真实的** `UserRpcClient` 打一次**真实调用** —— 走的是 devh `ShadedNettyChannelFactory` 的生产代码路径，不是测试里写死 plaintext。外加一条 **TLS 负向对照**（同一个 server 用 TLS 连必须失败），保证正向用例不是假绿。**已实证能真红**：临时删掉那行配置后，该用例报 `NotSslRecordException: not an SSL/TLS record`、pipeline 里出现 `SslHandler` —— 正是生产上 `HTTP/2 client preface string missing` 的镜像（同根因、客户端侧视角） |
 | **DRIFT-NEW-015** | **P0 · 结构性缺陷** | **Flyway 版本号撞车 ⇒ `admin-rpc` 根本无法启动。** 两个模块各自维护 `classpath:db/migration`，`V1/V2` **版本号相同、内容不同**：`user-rpc` = `V1__create_user` / `V2__create_user_avatar_history`；`admin-rpc` = `V1__create_admin` / `V2__create_admin_invite` / `V3__create_user`。`flyway_schema_history` 挂在 schema 上、**一个 schema 只能有一本账**，共用库时后启动的要么报 `version (3) is newer than the latest available migration (2)` 并**静默跳过自己的迁移**（进程照样 Started，表却是空的），要么 checksum mismatch 直接启动失败 | 而 `admin-rpc` **按设计必须**与 `user-rpc` 共用 `users_user` —— 这是它自己 `V3__create_user.sql` 的注释写明的（「admin-rpc 也读写 users_user 表……用 `IF NOT EXISTS 保证幂等：user-rpc 启动时已经建过表」）。⇒ **要满足设计意图就必须共用库，共用库就撞账本，无解**。§4.1 早就警告过这点，现在有实证了 |
 | **DRIFT-NEW-016** | P2 · 可观察差异 | **Go 有必填字段校验，RAG 没有。** go-zero 的 `httpx.Parse` 走 `core/mapping`，只认 `,optional` 标签，**`,omitempty` 不算 optional**（`unmarshaler.go:946-969` 走 `!opts.optional()` 分支直接 `newInitError`）。缺字段 ⇒ `HTTP 400 + text/plain + field "xxx" is not set`。实测命中：`CreateUserReq.email`、`GetUserListReq.keyword`（**空串也不行**）、`UpdateSelfReq`/`UpdateUserReq` 的 `username`/`password`/`email`。RAG 的 DTO 无此校验，直接走业务分支 | 对拍步骤 `user.register.noemail` / `admin.getuserlist.nokeyword`。**倾向保留 RAG 现状**（更宽松不算错），但按 §3.4.2 纪律**需用户签字**，未签字前不得当新漂移「修」掉 |
 
@@ -604,6 +605,34 @@ user-rpc 的 Flyway 已建过同一张表）。5 个 DDL 全是 `CREATE TABLE/IN
 | **A · 迁移编号全局化** | 把两个模块的脚本重排成一条全局序列（user = V1/V2/V5，admin = V3/V4/V6 之类），放进同一个迁移源目录 | 破坏 HUMAN_ONLY.MD 要求的「每个 rpc 模块独立维护自己的 V*」布局；两个模块不再能独立部署 |
 | **B · 合并所有权** | 承认 `users_user` 归 user-rpc 所有，admin-rpc 不再自己迁移，改由 user-rpc 建表；admin-rpc 只保留 `admin_admin` / `admin_invite` | 需从 admin-rpc 删掉 `V3__create_user.sql`，并给 admin-rpc 一个「表可能还不存在」的启动顺序约束 |
 | **C · 拆库** | admin-rpc 连自己的库，跨域读用户走 RPC | 直接违反 `V3__create_user.sql` 注释里写明的设计意图，改动面最大 |
+
+##### ⚠️ 已被实证证伪的「最省事方案」（别再试第二次）
+
+看上去最该先试的是「给 admin-rpc 加两个 Flyway 开关，让它容忍 user-rpc 的账本」：
+
+```bash
+--spring.flyway.validate-on-migrate=false --spring.flyway.out-of-order=true
+```
+
+**它行不通，而且会让账本更脏。** `tools/difftest/exp-drift015-flyway-flags.sh` 用真 jar +
+真 PG 16 跑过一遍，实测终态：
+
+```
+账本 = [ 1|create user,  2|create user avatar history,  3|create user ]
+        ↑ user-rpc 写的              ↑ user-rpc 写的         ↑ admin-rpc 的 V3（与第 1 行语义重复）
+✗ admin_admin   缺失   ← V1__create_admin.sql        根本没跑
+✗ admin_invite  缺失   ← V2__create_admin_invite.sql  根本没跑
+admin-rpc 启动失败：relation "admin_admin" does not exist
+```
+
+机理：Flyway 只应用「pending」的迁移。admin-rpc 的 V1/V2 版本号已被 user-rpc 占用，
+于是被判定为**已应用而静默跳过** —— 校验开关只关掉 checksum 检查，管不了这一步。
+结果 admin 域两张核心表永远建不出来，`AdminSeederBootstrap`（`@PostConstruct`）起来就炸。
+更糟的是账本里多了一条 `version 3 = create user`，把 schema 永久钉在错误版本上，
+日后想正修还得先人工清账本。
+
+> **教训**：这正是 §3.3 说的「推理出的机制风险必须配一条能真触发的验证去证实或证伪」。
+> 本条最初只是推理（"两个开关应该能糊过去"），实测直接推翻。
 
 > 在用户拍板前，**不得**由单个 agent 自行选一条实施 —— 这正是 §3.4.2 纪律针对的情形：
 > 「按政策应当对齐、但对齐会让 RAG 变差」的真实张力。

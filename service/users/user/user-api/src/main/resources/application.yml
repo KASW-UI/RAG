@@ -50,10 +50,35 @@ server:
 #   address: discovery:///user-rpc   ← 三斜杠（discovery://[authority]/<service-name>）
 #   Nacos 注册的服务名 = user-rpc 本名（与 spring.application.name 对齐）
 # 修 DRIFT-NEW-001：从 Go 端 etcd static 寻址对齐到 Nacos dynamic discovery
+#
+# ⚠️ DRIFT-NEW-014（2026-10-21 双端对拍抓出）：negotiation-type 不能省。
+#   devh 的 GrpcChannelProperties.DEFAULT_NEGOTIATION_TYPE = TLS
+#   （net/devh/boot/grpc/client/config/GrpcChannelProperties 的静态初始化，
+#     字节码 offset 33-36），且 getNegotiationType() 在字段为 null 时
+#     **回落到该默认值**（同文件 offset 1-10）——
+#     所以「不写」不等于「不生效」，它会静默变成 TLS。
+#   而 user-rpc 是 plain gRPC：Go 侧 service/user/user/rpc/user.go:36
+#   zrpc.MustNewServer 全仓无 TLS 配置，RAG 侧 application.yaml 也没有
+#   任何 server 端 TLS 配置。漏掉这一行 ⇒ user-api 发 TLS ClientHello，
+#   user-rpc 的 netty 报
+#     Http2Exception: HTTP/2 client preface string missing or corrupt.
+#     Hex dump: 16030301...        ← 0x16 = TLS handshake record
+#   所有经 user-rpc 的业务码塌成 1015 服务繁忙。
+#
+#   admin-api/application.yml **已经有**这一行，并带 DRIFT-NEW-008 注释
+#   解释了为什么必须有 —— 当年 admin 侧踩过并修了，**user 侧单纯被漏掉**。
+#   对照 ShadedNettyChannelFactory.createChannel：它是直接
+#     builder.negotiationType(shaded NegotiationType.of(properties.getNegotiationType()));
+#   配置值直接决定握手方式，没有任何兜底。
+#
+#   Go 出处：Go user-rpc 为纯 gRPC 明文传输，故 Java 客户端必须同样走明文。
+#   回归锁定：UserApiGrpcNegotiationTest（真 plaintext gRPC server + 真 channel，
+#   外加一条 TLS 负向对照，保证不是假绿）。
 grpc:
   client:
     user-rpc:
       address: discovery:///user-rpc
+      negotiation-type: plaintext
       enable-keep-alive: true
       keep-alive-time: 30s
       permit-keep-alive-without-calls: true

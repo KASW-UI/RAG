@@ -385,6 +385,14 @@ class UserApiMvcPipelineTest {
     @Test
     @DisplayName("DRIFT-010：小写 bearer 前缀应被接受（Go 用 ToUpper 比较）")
     void bearerPrefixIsCaseInsensitive() throws Exception {
+        // ⚠️ 必须复用同一个 token：validToken() 的 iat 是 System.currentTimeMillis()/1000L，
+        //   秒精度。原先这里请求头用 validToken()、断言里又调一次 validToken()，
+        //   两次若跨了秒边界就是两个不同的 token（本轮实测：
+        //   期望 iat=…7939、实际 iat=…7938），断言随机失败 —— 一个纯假红 flake。
+        //   同一类的 nonBearerPrefixedTokenCannotBypassBlacklist 一直是先存局部变量，
+        //   只有这里漏了。
+        String token = validToken();
+
         when(stub.getUser(any())).thenReturn(com.rag.users.user.proto.GetUserResp.newBuilder()
                 .setFound(true)
                 .setUser(com.rag.users.user.proto.UserInfo.newBuilder()
@@ -392,7 +400,7 @@ class UserApiMvcPipelineTest {
                 .build());
 
         mockMvc.perform(post("/user/v1/get")
-                        .header("Authorization", "bearer " + validToken())
+                        .header("Authorization", "bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isOk())
@@ -400,7 +408,7 @@ class UserApiMvcPipelineTest {
 
         verify(stub).getUser(any());
         // 黑名单用的是大小写【敏感】的 TrimPrefix ⇒ 查未剥前缀的整串（Go 自身如此）
-        verify(redisTemplate).hasKey("user:jwt_blacklist:bearer " + validToken());
+        verify(redisTemplate).hasKey("user:jwt_blacklist:bearer " + token);
     }
 
     /** 规范写法 + 有效签名 + 在黑名单 → 401，且查的是 Go 的 key 格式。 */
