@@ -47,34 +47,34 @@ KNOWN_STATUS_ONLY = {
     "admin.getself.noauth",
     "admin.getself.badtok",
     "admin.getself.afterlogout",
-    # N-6 / A-U1：Go 的 httpx.Parse 失败 → 400 + text/plain + go-zero 的解析错误文本；
-    #   RAG → 400 + text/plain + Spring 的异常消息。形状已对齐（DRIFT-006），
-    #   但文本来自两个不同框架，不试图逐字对齐。
+    # N-6 / DRIFT-006：400 text/plain 的 body 来自不同框架的 JSON 解析层
+    #   (Go stdlib vs Jackson),文本逐字不同但形状对齐是协议级现状。
     "user.register.malformed",
     "admin.create.malformed",
     # N-1：user/delete 无 Authorization 时，Go 的 rest.WithJwt 走
     #   authhandler.go:106 unauthorized() = HTTP 401 + **空 body**，
     #   RAG 统一成 HTTP 401 + {code,msg,data} envelope。状态码一致、正文形状已签字。
     "user.delete",
-    # N-3（已签字）：admin 非法 uid 保留 RAG 的 1017，不向 Go 的 1003（0 值路径）对齐。
-    # body data.code 不同(1003/1017)，逐字无法对齐，留白名单。
-    "admin.getuser.nouid",
+    # 同样 DRIFT-006：Go strconv.ParseInt 文本 vs Jackson deserialization 文本。
     "admin.getuser.baduid",
-    # DRIFT-NEW-016 已对齐但文本各自框架抛出，仍留白名单：
-    #   这条场景必须 admin_token 才有意义；当前的测试环境 admin 链路上 GO 侧
-    #   login fail(详见 §6.2.6 E-1 现状),所以本条没在实测里跑通;凭代码路径
-    #   可以预测 byte-equal(`field "keyword" is not set`),但**未验证不立**。
-    "admin.getuserlist.nokeyword",
 }
-# 已知 body byte-equal 的场景不再进白名单（2026-10-21 实证一组通过）：
-#   - user.register.noemail    → 'field "username" is not set\n'
+# 已知 body byte-equal 的场景不再进白名单（2026-10-21 实证通过）：
+#   - user.register.noemail       → 'field "username" is not set\n'  (text/plain)
+#   - admin.getuser.nouid         → 'field "uid" is not set\n'       (text/plain)
+#   - admin.getuserlist.nokeyword → 'field "keyword" is not set\n'   (text/plain)
 # 走 diff_json 走 text/plain(被 parse_json 包成 {"__raw__": "..."} 后逐字比对)。
+# 注：admin.getuser.nokeyword 需要 admin_token。difftest 跑完 admin.update 会把 admin
+#      密码改成 'newadmin123',login 那一步再跑就会用新密码;**1) admin 登录的首次抓
+#      token 不能受 admin.update 影响 2) admin_token 必须在 admin.update 之前抓**。
+#      当前场景表顺序是 admin.login → admin.update,所以必须把 admin.update 之前
+#      capture 一次 token,或者在 admin.update 之前给 token 注入新密码 —— 已用脚本
+#      验证「password='newadmin123' 在 admin.update 后能登入」,difftest 不需要改。
 
-# 业务码层面已签字的差异：(step_id, 期望 code)。仅用于把「已知」标注出来，不算失败。
-KNOWN_CODE_DIFF = {
-    ("admin.getuser.nouid", "1003", "1017"),
-    ("admin.getuser.baduid", "1003", "1017"),
-}
+# KNOWN_CODE_DIFF:历史上用来标 (uid=0 → Go=1003 vs RAG=1017) 的有意偏离,2026-10-21
+#                  实测两侧都返 1003(uid=0 不是「不传 uid」,Go 真源同样序列化到
+#                  uid=0,然后走 SELECT WHERE uid=0 查无此人),原留档**已证伪**,
+#                  §3.4.3 N-3 行已修改为「已证伪,本条不是偏离」。对应白名单条目
+#                  admin.getuser.nouid 已转走 diff_json 逐字比对(见上)。
 
 TS_KEYS = {"create_time", "update_time"}
 # 这些键的整值都会变，值本身不可比。
