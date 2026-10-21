@@ -5,6 +5,7 @@ import com.rag.common.exception.BusinessException;
 import com.rag.common.logger.FatalError;
 import com.rag.common.response.Response;
 import com.rag.users.common.errmsg.ErrorCode;
+import com.rag.users.common.http.GoRequiredFieldException;
 import com.rag.users.admin.api.service.IdentityResolver;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
@@ -121,6 +122,31 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<String> handleUnreadableBody(HttpMessageNotReadableException e) {
         log.warn("unreadable request body : {}", e.getMessage());
+        return goStylePlainTextBadRequest(e.getMessage());
+    }
+
+    /**
+     * go-zero 必填字段缺失 → 400 + text/plain（DRIFT-016）。
+     *
+     * <p>Go 出处：{@code handler.Entries()} 拿到 {@code httpx.Parse} 的错误后调
+     * {@code httpx.ErrorCtx}；admin 服务的 yaml <b>从未</b>注册
+     * {@code httpx.SetErrorHandler}（service/user 全树 grep 零命中），
+     * 所以一定落到 {@code rest/httpx/responses.go:doHandleError} 的
+     * {@code handler == nil} 分支 → {@code http.Error(w, err.Error(), 400)}。
+     *
+     * <p>这条同时把 §3.4.3 N-6 的「缺失 uid → 1017 + envelope」改成与 Go 一致的
+     * {@code 400 + text/plain}（用户 2026-10-21 对 DRIFT-016 的拍板）。
+     * <b>N-6 仍保留的部分</b>：uid <b>存在但非法</b>（{@code uid=abc}）与
+     * <b>uid=0</b> 仍走 {@code AdminApiSupport.parseUid} → 1017，分别对应
+     * Go 的 {@code strconv.ParseInt} 400 与 {@code 1003 用户不存在}。
+     *
+     * <p><b>为什么刻意不并进 {@link #handleBusiness}</b>：{@code BusinessException}
+     * 会被渲染成 {@code HTTP 200 + envelope}，而这里是 {@code HTTP 400 + text/plain}。
+     * AGENTS.md §3.4.2 N-1 的结论是<b>层次由类型承载，不靠业务码推断</b>。
+     */
+    @ExceptionHandler(GoRequiredFieldException.class)
+    public ResponseEntity<String> handleGoRequiredField(GoRequiredFieldException e) {
+        log.warn("go-style required field missing : field={}", e.getField());
         return goStylePlainTextBadRequest(e.getMessage());
     }
 

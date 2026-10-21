@@ -287,30 +287,57 @@ class UserApiMvcPipelineTest {
      * <p>修复前 register / login / update / avatar-select / avatar 共 5 个端点是
      * {@code required=true} ⇒ {@code HttpMessageNotReadableException} ⇒ HTTP 400 + 空 body。
      */
+    /**
+     * <b>⚠️ 2026-10-21 反转（DRIFT-016）· 本用例此前断言的是错误行为。</b>
+     *
+     * <p>原用例名「A-P2：空 body 的 public 端点 /login 不得 400 —— Go 零值 req 直达 rpc」，
+     * 原 javadoc 的三段取证里第 2 段写「空 body 走 {@code UnmarshalJsonMap(nil, v)}，
+     * 对 struct 是 no-op、<b>不报错</b>」。<b>第 2 段的后半句是错的。</b>
+     *
+     * <p>Go 出处（逐行复核）：{@code core/mapping/jsonunmarshaler.go:19-21} 的
+     * {@code UnmarshalJsonMap(m map[string]any, v any)} 收的是<b>有类型的 nil map</b>，
+     * 传进 {@code Unmarshal(i any, ...)} 后在 {@code unmarshaler.go:988} 的 type switch 里
+     * <b>命中 {@code case map[string]any}</b>（不会落到 default 的 errUnsupportedType），
+     * 于是照常 {@code unmarshalValuer} 遍历全部字段；空 map 下 {@code getValue} 全部落空，
+     * {@code LoginReq.Username} 的 opts 非 optional ⇒ 走
+     * {@code unmarshaler.go:966-969} 的 {@code newInitError}。
+     *
+     * <p><b>实测坐实</b>（probe-go-required-fields.py，2026-10-21，真 Go 进程 18888）：
+     * {@code user.login 真空 body（Content-Length: 0）→ HTTP 400 field "username" is not set}。
+     *
+     * <p>这与 AGENTS.md §3.4.4 DRIFT-009 同型：<b>引用了真实文件、但把行为读反了</b> ——
+     * 而且当时正是这个错误结论，让 22 个端点全部设成 {@code required = false} + 零值归一化。
+     * <b>评审纪律</b>：不能因为「已有测试锁住 + 注释写得很完整」就默认它对。
+     */
     @Test
-    @DisplayName("A-P2：空 body 的 public 端点 /login 不得 400 —— Go 零值 req 直达 rpc，落 CodeServerBusy")
-    void emptyBodyOnLoginDoesNotReturn400() throws Exception {
-        // Go 出处 loginlogic.go 的 switch：Internal → ErrorServerCommon，default → CodeServerBusy。
-        // 这里给一个不在 switch 里的 code，验证走的是 Go 的 default 分支。
-        when(stub.login(any())).thenThrow(new StatusRuntimeException(Status.UNKNOWN));
-
-        mockMvc.perform(post("/user/v1/login")
+    @DisplayName("DRIFT-016：空 body 的 public 端点 /login 必须 400 + text/plain（Go 实测一致）")
+    void emptyBodyOnLoginIs400NotPassedThrough() throws Exception {
+        String body = mockMvc.perform(post("/user/v1/login")
                         .contentType(MediaType.APPLICATION_JSON))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(1015));
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                .andReturn().getResponse().getContentAsString();
 
-        // 零值 username/password 必须真的透传到 rpc，而不是被本地预校验拦下
-        org.mockito.ArgumentCaptor<com.rag.users.user.proto.LoginReq> captor =
-                org.mockito.ArgumentCaptor.forClass(com.rag.users.user.proto.LoginReq.class);
-        verify(stub).login(captor.capture());
-        assertEquals("", captor.getValue().getUsername(), "零值 LoginReq 应以空用户名抵达 rpc");
-        assertEquals("", captor.getValue().getPassword(), "零值 LoginReq 应以空密码抵达 rpc");
+        assertEquals("field \"username\" is not set\n", body);
+        // 关键：零值 req 必须【没有】透传到 rpc —— 此前本用例断言的正是相反的事
+        verify(stub, never()).login(any());
     }
 
-    /** 同上，protected 端点：证明 required=false 不依赖拦截器顺序，且空 body 能穿过鉴权进 Controller。 */
+    /**
+     * 同上，但 protected 端点 <b>/update</b> —— 本条<b>不反转</b>，且它是对照组。
+     *
+     * <p>Go 出处：{@code types.go UpdateUserReq} 四个字段<b>全是 {@code ,optional}</b>
+     * ⇒ 一个都不校验 ⇒ 空 body 下 req 停在零值 struct、照常进 business 层。
+     * 实测 probe-go-required-fields.py：{@code user.update drop email → 200}。
+     *
+     * <p>与 {@link #emptyBodyOnLoginIs400NotPassedThrough} 并列看才完整：
+     * <b>同一个「空 body」，两个端点一个 400 一个 200</b>，
+     * 差别只在 DTO 的 tag。这正是「校验必须逐字段按 Go tag 推导、不能一刀切」的证据。
+     */
     @Test
-    @DisplayName("A-P2：空 body 的 protected 端点 /update 不得 400")
-    void emptyBodyOnUpdateDoesNotReturn400() throws Exception {
+    @DisplayName("DRIFT-016 对照组：空 body 的 /update（全 ,optional）仍然 200 直达 rpc")
+    void emptyBodyOnUpdateStillPassesThroughBecauseAllFieldsAreOptional() throws Exception {
         when(stub.updateUser(any())).thenThrow(new StatusRuntimeException(Status.NOT_FOUND));
 
         mockMvc.perform(post("/user/v1/update")
@@ -318,6 +345,8 @@ class UserApiMvcPipelineTest {
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(1003));
+
+        verify(stub).updateUser(any());
     }
 
     // ==================================================================
@@ -455,5 +484,137 @@ class UserApiMvcPipelineTest {
         assertFalse(body.trim().startsWith("{") && body.contains("\"code\""),
                 "400 响应体不得是 envelope，实际 = " + body);
         assertTrue(body.endsWith("\n"), "Go 的 fmt.Fprintln 会补尾随换行，实际 = " + body);
+    }
+
+    // ==================================================================
+    // DRIFT-016 · go-zero 必填字段校验（用户 2026-10-21 拍板「向 Go 对齐」）
+    //
+    // 规则（Go 出处三段，见 users-common 的 GoStyleRequiredFields javadoc）：
+    //   必填 ⟺ tag 不含 ,optional AND tag 不含 ,default= AND 字段是标量
+    //   Map / Slice / Array 永不计必填
+    //
+    // 实测证据全部来自 tools/difftest/probe-go-required-fields.py（真 Go 进程）。
+    // 本块的用例分两类，**都必须有**：
+    //   正向：该 400 的确 400
+    //   反向：该放行的确放行 —— 只写正向的话，一个「所有字段一律必填」的
+    //         粗暴实现也能全绿。
+    // ==================================================================
+
+    /**
+     * Go 出处：{@code types.go CreateUserReq} — username/password 无 tag、
+     * email 是 {@code ,omitempty}（<b>不是 {@code ,optional}</b>）⇒ 三个标量全必填；
+     * {@code Extrainfo} 是 map ⇒ 不校验。
+     *
+     * <p>实测：drop email ⇒ {@code 400 field "email" is not set}；drop extra_info ⇒ 200。
+     */
+    @Test
+    @DisplayName("DRIFT-016：register 缺 email 也必须 400（,omitempty ≠ ,optional）")
+    void registerMissingEmailIsRejectedBecauseOmitemptyIsNotOptional() throws Exception {
+        String body = mockMvc.perform(post("/user/v1/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"alice\",\"password\":\"pw123456\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                .andReturn().getResponse().getContentAsString();
+
+        assertEquals("field \"email\" is not set\n", body);
+        verify(stub, never()).register(any());
+    }
+
+    /** Go 出处：{@code types.go CreateUserReq.Extrainfo} 是 {@code map[string]string}。
+     *  {@code unmarshaler.go:944-948} 的 Array/Map/Slice 分支走
+     *  {@code processFieldNotFromString}、<b>不报错</b>。实测 drop extra_info ⇒ 200。 */
+    @Test
+    @DisplayName("DRIFT-016 反向：extra_info 是 map 字段，缺席【不得】400")
+    void mapFieldExtraInfoIsNeverRequired() throws Exception {
+        when(stub.register(any())).thenReturn(
+                com.rag.users.user.proto.CreateUserResp.newBuilder().setUid(31337L).build());
+
+        mockMvc.perform(post("/user/v1/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"alice\",\"password\":\"pw123456\","
+                                + "\"email\":\"alice@example.com\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(stub).register(any());
+    }
+
+    /**
+     * Go 出处：{@code types.go UpdateUserReq} 四个字段<b>全是 {@code ,optional}</b>
+     * ⇒ 一个都不校验。实测 drop email ⇒ 200。
+     *
+     * <p><b>与 admin 侧 {@code admin.update} 恰好相反</b>（那边三个 string 是
+     * {@code ,omitempty} ⇒ 全必填）。两端同名结构、不同 tag，<b>不要跨模块套用结论</b>
+     * （AGENTS.md §3.4.3 N-3 的同款警告）。
+     */
+    @Test
+    @DisplayName("DRIFT-016 反向：user.update 全字段 ,optional，缺 email 【不得】400")
+    void userUpdateFieldsAreAllOptional() throws Exception {
+        when(stub.updateUser(any())).thenReturn(
+                com.rag.users.user.proto.UpdateUserResp.newBuilder().build());
+
+        mockMvc.perform(post("/user/v1/update")
+                        .header("Authorization", "Bearer " + validToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk());
+
+        verify(stub).updateUser(any());
+    }
+
+    /**
+     * 空串在 Go 的 <b>json 通道</b>里是合法值 —— 实测 {@code user.register email=""} ⇒ 200 注册成功。
+     * 必填校验只判 {@code null}，不判空串。
+     *
+     * <p>实测：{@code email=""} ⇒ 200；{@code email=null} ⇒ 400 {@code field "email" mustn't be nil}。
+     * Java 侧 null 与「缺失」塌缩成同一判据 ⇒ 都返回 {@code is not set}，
+     * 状态码与 Content-Type 一致，仅错误文本不同（与 DRIFT-006 的对齐边界同款）。
+     */
+    @Test
+    @DisplayName("DRIFT-016 反向：email=\"\" 空串【不得】被当缺失（Go json 通道接受空串）")
+    void emptyStringIsAcceptedBecauseGoJsonChannelKeepsIt() throws Exception {
+        when(stub.register(any())).thenReturn(
+                com.rag.users.user.proto.CreateUserResp.newBuilder().setUid(31337L).build());
+
+        mockMvc.perform(post("/user/v1/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"alice\",\"password\":\"pw123456\",\"email\":\"\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(stub).register(any());
+    }
+
+    /** {@code {}} 与真空 body 等价：Content-Length=2 > 0，json 通道进得去，但字段一个都没传。
+     *  真空 body 本身的断言在历史槽位 {@link #emptyBodyOnLoginIs400NotPassedThrough}（已反转）。 */
+    @Test
+    @DisplayName("DRIFT-016：空对象 {} 与真空 body 等价，同样 400")
+    void emptyJsonObjectIsRejected() throws Exception {
+        mockMvc.perform(post("/user/v1/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN));
+
+        verify(stub, never()).login(any());
+    }
+
+    /**
+     * <b>负向对照（§3.3「机制必须真正生效」）</b>：{@code password} 缺失而
+     * {@code username} 存在时，报的必须是 <b>password</b> 而不是 username ——
+     * 证明校验器按字段逐个判、而不是笼统地「必填失败」。
+     */
+    @Test
+    @DisplayName("DRIFT-016：缺 password 时报的是 password（逐字段定位，不是笼统失败）")
+    void errorNamesTheActualMissingField() throws Exception {
+        String body = mockMvc.perform(post("/user/v1/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"alice\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn().getResponse().getContentAsString();
+
+        assertEquals("field \"password\" is not set\n", body);
     }
 }

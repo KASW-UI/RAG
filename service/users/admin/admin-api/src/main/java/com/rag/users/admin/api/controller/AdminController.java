@@ -1,5 +1,6 @@
 package com.rag.users.admin.api.controller;
 
+import com.rag.users.common.http.GoStyleRequest;
 import com.rag.users.admin.api.dto.BanUserReq;
 import com.rag.users.admin.api.dto.BanUserResp;
 import com.rag.users.admin.api.dto.CreateAdminReq;
@@ -77,29 +78,31 @@ import org.springframework.web.bind.annotation.RestController;
  *   2. go-zero v1.10.2 rest/httpx/requests.go:153 {@code withJsonBody} =
  *      {@code r.ContentLength > 0 && ContentType 含 application/json}。
  *      空 body ⇒ {@code withJsonBody} 为 false ⇒ 走 {@code ParseJsonBody} 的
- *      {@code mapping.UnmarshalJsonMap(nil, v)} 分支 —— 对 struct 是 <b>no-op，不报错</b>。
+ *      {@code mapping.UnmarshalJsonMap(nil, v)} 分支。
  *   3. admin 侧 types.go 共 13 个 Req struct，<b>零个</b> {@code Validate()} 方法、
  *      <b>零个</b> {@code validate:} tag；admin 服务也<b>从未</b>调 {@code httpx.SetValidator}
- *      ⇒ {@code getValidator()} 返回 nil，{@code httpx.Parse} 的校验环节整体不生效。
+ *      ⇒ {@code getValidator()} 返回 nil，{@code httpx.Parse} 的校验环节整体不生效
+ *      （即 go-zero 自己的 validation 框架不介入，只剩 mapping 的 tag 必填）。
  *
- *   结论：Go 对空 body 的 POST 一律 <b>不报错</b>，req 停在<b>零值 struct</b>，
- *   由各 Logic 自己决定业务码。以 login 为例（loginlogic.go:37-56）：
- *   零值 username/password <b>直接透传给 rpc</b>，由 rpc 判定
- *   NotFound → 1003 / Unauthenticated → 1008，<b>HTTP 恒 200 + envelope</b>。
+ *   <b>⚠️ 2026-10-21 勘误（DRIFT-016）</b>：本段此前断言「{@code UnmarshalJsonMap(nil, v)}
+ *   对 struct 是 <b>no-op，不报错</b>，所以 Go 对空 body 一律不报错，req 停在零值 struct，
+ *   由 Logic 自己决定业务码，HTTP 恒 200 + envelope」。
  *
- *   语义等价论证：{@code required=false} + Controller 侧把 null 归一化成 new XxxReq()，
- *   得到的正是 Go 的零值 struct，业务码由 Service 决定，与 Go 逐条一致。
+ *   <b>后半句是错的。</b>{@code core/mapping/jsonunmarshaler.go:19-21} 的
+ *   {@code UnmarshalJsonMap(m map[string]any, v any)} 收的是<b>有类型的 nil map</b>，
+ *   传进 {@code Unmarshal(i any, ...)} 后在 {@code unmarshaler.go:988} 的 type switch 里
+ *   <b>命中 {@code case map[string]any}</b>（不会落到 default 的 errUnsupportedType），
+ *   于是照常 {@code unmarshalValuer} 遍历全部字段；空 map 下 {@code getValue} 全部落空，
+ *   标量必填字段照样走 {@code newInitError} ⇒ {@code field %q is not set}。
  *
- *   <b>修复前</b>：13 个端点全是 {@code required=true}，空 body 触发
- *   {@code HttpMessageNotReadableException} → {@code handleUnreadableBody} → <b>HTTP 400 + 空 body</b>。
- *   与 Go 的「200 + 业务码」不一致，且客户端拿不到任何可读的错误原因。
+ *   <b>实测坐实</b>（probe-go-required-fields.py，2026-10-21）：真空 body（Content-Length: 0）
+ *   与 {@code {}} 都返回 {@code 400 field "xxx" is not set}。
+ *
+ *   这与 AGENTS.md §3.4.4 DRIFT-009 是<b>同一类病灶</b>：引用了真实文件、但把行为读反了 ——
+ *   而且当时正是这个错误结论，让 22 个端点全部设成 {@code required = false} + 零值归一化。
+ *   <b>10 个有必填字段的端点现已改走 {@code GoStyleRequest.normalize}</b>，
+ *   3 个空 struct 端点（logout / getself / invite/create）保持原样。
  * </pre>
- *
- * <p><b>与 user-api 的差异说明</b>：user-api 侧只把 body 字段不参与业务的 4 个端点
- * 改成了 {@code required=false}（logout / get / delete / avatar/history），
- * 其余 5 个仍为 {@code required=true}。按上面第 3 条取证，Go 对 login / register / update
- * 等端点的空 body 同样不报错，因此 user-api 那 5 个端点<b>仍与 Go 存在同一处漂移</b>，
- * 本轮未一并处理（见 AGENTS.md §6.2 待办）。
  */
 @RestController
 @RequestMapping("/admin/v1")
@@ -151,22 +154,12 @@ public class AdminController {
 
     @PostMapping("/login")
     public LoginResp login(@RequestBody(required = false) LoginReq req, HttpServletRequest httpRequest) {
-        if (req == null) {
-            // Go 出处：httpx.Parse 在 ContentLength == 0 时走 UnmarshalJsonMap(nil, v)，
-            // 把 req 留在**零值 struct**（不是 null），且不报错。此处归一化保证与 Go 同构。
-            req = new LoginReq();
-        }
-        return adminLoginService.login(req, httpRequest);
+        return adminLoginService.login(GoStyleRequest.normalize(req, LoginReq::new), httpRequest);
     }
 
     @PostMapping("/create")
     public CreateAdminResp createAdmin(@RequestBody(required = false) CreateAdminReq req, HttpServletRequest httpRequest) {
-        if (req == null) {
-            // Go 出处：httpx.Parse 在 ContentLength == 0 时走 UnmarshalJsonMap(nil, v)，
-            // 把 req 留在**零值 struct**（不是 null），且不报错。此处归一化保证与 Go 同构。
-            req = new CreateAdminReq();
-        }
-        return adminCreateService.createAdmin(req, httpRequest);
+        return adminCreateService.createAdmin(GoStyleRequest.normalize(req, CreateAdminReq::new), httpRequest);
     }
 
     // ============== JWT-protected（11 个） ==============
@@ -193,82 +186,42 @@ public class AdminController {
 
     @PostMapping("/update")
     public UpdateSelfResp updateSelf(@RequestBody(required = false) UpdateSelfReq req, HttpServletRequest httpRequest) {
-        if (req == null) {
-            // Go 出处：httpx.Parse 在 ContentLength == 0 时走 UnmarshalJsonMap(nil, v)，
-            // 把 req 留在**零值 struct**（不是 null），且不报错。此处归一化保证与 Go 同构。
-            req = new UpdateSelfReq();
-        }
-        return adminUpdateSelfService.updateSelf(req, httpRequest);
+        return adminUpdateSelfService.updateSelf(GoStyleRequest.normalize(req, UpdateSelfReq::new), httpRequest);
     }
 
     @PostMapping("/updateuser")
     public UpdateUserResp updateUser(@RequestBody(required = false) UpdateUserReq req, HttpServletRequest httpRequest) {
-        if (req == null) {
-            // Go 出处：httpx.Parse 在 ContentLength == 0 时走 UnmarshalJsonMap(nil, v)，
-            // 把 req 留在**零值 struct**（不是 null），且不报错。此处归一化保证与 Go 同构。
-            req = new UpdateUserReq();
-        }
-        return adminUpdateUserService.updateUser(req, httpRequest);
+        return adminUpdateUserService.updateUser(GoStyleRequest.normalize(req, UpdateUserReq::new), httpRequest);
     }
 
     @PostMapping("/delete")
     public DeleteUserResp deleteUser(@RequestBody(required = false) DeleteUserReq req, HttpServletRequest httpRequest) {
-        if (req == null) {
-            // Go 出处：httpx.Parse 在 ContentLength == 0 时走 UnmarshalJsonMap(nil, v)，
-            // 把 req 留在**零值 struct**（不是 null），且不报错。此处归一化保证与 Go 同构。
-            req = new DeleteUserReq();
-        }
-        return adminDeleteUserService.deleteUser(req, httpRequest);
+        return adminDeleteUserService.deleteUser(GoStyleRequest.normalize(req, DeleteUserReq::new), httpRequest);
     }
 
     @PostMapping("/resetuserpassword")
     public ResetUserPasswordResp resetUserPassword(@RequestBody(required = false) ResetUserPasswordReq req, HttpServletRequest httpRequest) {
-        if (req == null) {
-            // Go 出处：httpx.Parse 在 ContentLength == 0 时走 UnmarshalJsonMap(nil, v)，
-            // 把 req 留在**零值 struct**（不是 null），且不报错。此处归一化保证与 Go 同构。
-            req = new ResetUserPasswordReq();
-        }
-        return adminResetUserPasswordService.resetUserPassword(req, httpRequest);
+        return adminResetUserPasswordService.resetUserPassword(GoStyleRequest.normalize(req, ResetUserPasswordReq::new), httpRequest);
     }
 
     @PostMapping("/banuser")
     public BanUserResp banUser(@RequestBody(required = false) BanUserReq req, HttpServletRequest httpRequest) {
-        if (req == null) {
-            // Go 出处：httpx.Parse 在 ContentLength == 0 时走 UnmarshalJsonMap(nil, v)，
-            // 把 req 留在**零值 struct**（不是 null），且不报错。此处归一化保证与 Go 同构。
-            req = new BanUserReq();
-        }
-        return adminBanUserService.banUser(req, httpRequest);
+        return adminBanUserService.banUser(GoStyleRequest.normalize(req, BanUserReq::new), httpRequest);
     }
 
     @PostMapping("/unbanuser")
     public UnBanUserResp unBanUser(@RequestBody(required = false) UnBanUserReq req, HttpServletRequest httpRequest) {
-        if (req == null) {
-            // Go 出处：httpx.Parse 在 ContentLength == 0 时走 UnmarshalJsonMap(nil, v)，
-            // 把 req 留在**零值 struct**（不是 null），且不报错。此处归一化保证与 Go 同构。
-            req = new UnBanUserReq();
-        }
-        return adminUnBanUserService.unBanUser(req, httpRequest);
+        return adminUnBanUserService.unBanUser(GoStyleRequest.normalize(req, UnBanUserReq::new), httpRequest);
     }
 
     @PostMapping("/getuser")
     public GetUserResp getUser(@RequestBody(required = false) GetUserReq req, HttpServletRequest httpRequest) {
-        if (req == null) {
-            // Go 出处：httpx.Parse 在 ContentLength == 0 时走 UnmarshalJsonMap(nil, v)，
-            // 把 req 留在**零值 struct**（不是 null），且不报错。此处归一化保证与 Go 同构。
-            req = new GetUserReq();
-        }
-        return adminGetUserService.getUser(req, httpRequest);
+        return adminGetUserService.getUser(GoStyleRequest.normalize(req, GetUserReq::new), httpRequest);
     }
 
     @PostMapping("/getuserlist")
     public GetUserListResp getUserList(@RequestBody(required = false) GetUserListReq req, HttpServletRequest httpRequest) {
-        if (req == null) {
-            // Go 出处：httpx.Parse 在 ContentLength == 0 时走 UnmarshalJsonMap(nil, v)，
-            // 把 req 留在**零值 struct**（不是 null），且不报错。此处归一化保证与 Go 同构。
-            req = new GetUserListReq();
-        }
-        return adminListUserService.getUserList(req, httpRequest);
+        return adminListUserService.getUserList(GoStyleRequest.normalize(req, GetUserListReq::new), httpRequest);
     }
 
     @PostMapping("/invite/create")

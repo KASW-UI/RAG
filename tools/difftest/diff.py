@@ -251,20 +251,21 @@ SCENARIOS = [
       P("/admin/v1/getuser", {"uid": "{{user_uid}}"}),
       auth="admin_token"),
 
-    S("admin.getuser.nouid", "uid 缺失 → N-3 已签字差异", "admin",
+    S("admin.getuser.nouid", "uid 缺失 → 两侧都 400 text/plain（DRIFT-NEW-016 已对齐）", "admin",
       G("/admincenter/v1/admin/getuser"),
       P("/admin/v1/getuser", {}),
       auth="admin_token"),
 
-    S("admin.getuser.baduid", "uid 非法 → N-3 已签字差异", "admin",
+    S("admin.getuser.baduid", "uid 非法 → 两侧都 400 text/plain（文本来自各自框架，DRIFT-006 边界）", "admin",
       G("/admincenter/v1/admin/getuser", {"uid": "abc"}),
       P("/admin/v1/getuser", {"uid": "abc"}),
       auth="admin_token"),
 
     # GetUserListReq: keyword 是 `form:"keyword,omitempty"` —— omitempty **不是** optional，
     # 所以 Go 必填。每一步都必须带上 keyword。
-    # Go 的 keyword 必填，**空串也会被拒**（`field "keyword" is not set`——
-    # 因为它是 `form:"keyword,omitempty"`，而 go-zero 只认 `,optional`，见上）。
+    # 注意 Go 的 keyword 走 **form 通道**，`httpx.GetFormValues`（util.go:37-43）会丢弃空值，
+    # 所以 `keyword=` 空串也退化成缺席 ⇒ 400；RAG 走 JSON body，`keyword=""` 会被接受。
+    # 这个残留差异刻意不修（§6.2.5「DRIFT-NEW-016 的处置」有留档）。
     # 所以根本不存在「不带过滤条件列全量」这种调用形态，改成三个有意义的过滤用例。
     S("admin.getuserlist", "分页列表（keyword 精确匹配）", "admin",
       G("/admincenter/v1/admin/getuserlist",
@@ -286,8 +287,8 @@ SCENARIOS = [
       P("/admin/v1/getuserlist", {"page": 1, "page_size": 20, "keyword": "zzz_nomatch"}),
       auth="admin_token"),
 
-    # 有意探必填校验：Go 缺 keyword 直接 400，RAG 放行
-    S("admin.getuserlist.nokeyword", "列表缺 keyword：Go 必填校验 vs RAG 放行", "admin",
+    # 探必填校验：Go 缺 keyword 直接 400，RAG 自 DRIFT-NEW-016 起同为 400
+    S("admin.getuserlist.nokeyword", "列表缺 keyword → 两侧都 400（DRIFT-NEW-016 已对齐）", "admin",
       G("/admincenter/v1/admin/getuserlist", {"page": "1", "page_size": "20"}),
       P("/admin/v1/getuserlist", {"page": 1, "page_size": 20}),
       auth="admin_token"),
@@ -341,11 +342,11 @@ SCENARIOS = [
       auth="admin_token"),
 
     # ---- 必须放在最后：以下步骤会**改变数据集或依赖数据集**，不能污染前面的比对 ----
-    # 有意探「必填字段缺失」：Go 的 httpx.Parse 把缺字段当硬错误（400 + text/plain），
-    # RAG 没有这层校验。这是真实可观察差异，等用户签字（见 KNOWN_STATUS_ONLY 注释）。
-    # 放末尾的原因：Go 侧 400 拒掉、RAG 侧却真建了一个用户，两边数据集从此不同，
-    # 早先放在中间导致后面两次 getuserlist 的 total 全部对不上。
-    S("user.register.noemail", "注册缺 email：Go 必填校验 vs RAG 放行", "user",
+    # 探「必填字段缺失」：Go 的 httpx.Parse 把缺字段当硬错误（400 + text/plain），
+    # RAG 自 DRIFT-NEW-016 起行为一致（同样是 400）。本条从「已知差异」转为「回归锁」。
+    # 仍放末尾：万一将来哪边不再拒，两边数据集会从此不同，
+    # 放在中间会导致后面两次 getuserlist 的 total 全部对不上。
+    S("user.register.noemail", "注册缺 email → 两侧都 400（DRIFT-NEW-016 已对齐）", "user",
       P("/usercenter/v1/user/register", {"username": "dt_noemail", "password": "pw123456"}),
       P("/user/v1/register", {"username": "dt_noemail", "password": "pw123456"})),
 ]

@@ -25,9 +25,11 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -385,7 +387,14 @@ class AdminApiMvcPipelineTest {
         mockMvc.perform(post("/admin/v1/update")
                         .header("Authorization", "Bearer " + validToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"alice\"}"))
+                        // ⚠️ DRIFT-016（2026-10-21）：body 必须【完整】。Go 的 UpdateSelfReq
+                        // username/password/email 三个标量的 tag 都是 `,omitempty`，
+                        // 而 go-zero 只认 `,optional` ⇒ 三者全必填
+                        // （实测 probe-go-required-fields.py：drop password ⇒
+                        //   400 field "password" is not set）。
+                        // 本用例此前发 `{"username":"alice"}`，那在 Go 侧根本到不了 business 层。
+                        .content("{\"username\":\"alice\",\"password\":\"pw123456\","
+                                + "\"email\":\"alice@example.com\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(1003))
                 .andExpect(jsonPath("$.msg").value("用户不存在"));
@@ -400,7 +409,9 @@ class AdminApiMvcPipelineTest {
         mockMvc.perform(post("/admin/v1/update")
                         .header("Authorization", "Bearer " + validToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"alice\"}"))
+                        // 同上：body 必须完整，否则被 DRIFT-016 的必填校验拦在 400
+                        .content("{\"username\":\"alice\",\"password\":\"pw123456\","
+                                + "\"email\":\"alice@example.com\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(5003));
     }
@@ -415,7 +426,11 @@ class AdminApiMvcPipelineTest {
         String body = mockMvc.perform(post("/admin/v1/getuserlist")
                         .header("Authorization", "Bearer " + validToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
+                        // ⚠️ DRIFT-016（2026-10-21）：keyword 的 Go tag 是 `form:"keyword,omitempty"`，
+                        // `,omitempty` ≠ `,optional` ⇒ 必填（实测 drop keyword ⇒ 400）。
+                        // 本用例此前发 `{}`，在 Go 侧同样到不了 business 层。
+                        // page / page_size 带 default= ⇒ 不必填，所以这里只补 keyword。
+                        .content("{\"keyword\":\"nobody\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andReturn().getResponse().getContentAsString();
@@ -425,77 +440,252 @@ class AdminApiMvcPipelineTest {
     }
 
     /**
-     * DRIFT-005 已签字：Go 侧 uid 缺失走 form 绑定零值路径 ⇒ {@code 1003}；
-     * RAG 保留 {@code 1017}。本测试锁住现状，防止被无声改回。
-     * <p>Go 出处补证（本次已读 go-zero v1.10.2 源码原文）：
-     * {@code service/user/admin/api/admincenter.go} <b>没有</b>调 {@code httpx.SetErrorHandler}
-     * ⇒ {@code buildErrorHandler} 返回 nil ⇒ {@code doHandleError} 走
-     * {@code http.Error(w, err.Error(), http.StatusBadRequest)}。
-     * 所以 Go 两种非法输入分别是：<b>缺失</b> → uid=0 → {@code 1003}；
-     * <b>格式非法</b> → HTTP {@code 400} + {@code text/plain} 纯文本。
+     * <b>⚠️ 2026-10-21 反转（DRIFT-016）· 本用例此前断言的是错误行为。</b>
+     *
+     * <p>原用例名「A-U0/防回退：uid 缺失端到端走 1017」，原 javadoc 写
+     * 「Go 侧 uid 缺失走 form 绑定零值路径 ⇒ {@code 1003}；RAG 保留 {@code 1017}」，
+     * 并据此把它当作「已签字的防回退测试」。<b>那个理由已被实测推翻</b>：
+     * {@code tools/difftest/probe-go-required-fields.py} 打真实 Go 进程
+     * （2026-10-21，admin-api:18889）三态：
+     * <pre>
+     *   完全不传 uid → HTTP 400  field "uid" is not set
+     *   uid=abc      → HTTP 400  strconv.ParseInt: parsing "abc": invalid syntax
+     *   uid=0        → HTTP 200  {"code":1003,"msg":"用户不存在"}
+     * </pre>
+     * Go 出处：{@code httpx.Parse} → {@code ParseForm} 无条件执行 →
+     * {@code core/mapping/unmarshaler.go:966-969} 的
+     * {@code default: if !opts.optional() { return newInitError(fullName) }}。
+     * 「缺失」<b>不是</b>零值路径 —— 它在进 business 层之前就被 400 拦掉了。
+     *
+     * <p>用户 2026-10-21 对 DRIFT-016 拍板「向 Go 对齐」，故本断言改为 400 + text/plain。
+     * <b>N-3（uid=0 → 1017）仍是有意偏离</b>，由 {@link #uidZeroIs1017NotGoZeroValuePath} 锁住。
      */
     @Test
-    @DisplayName("A-U0/防回退：uid 缺失端到端走 1017（DRIFT-005 已签字）")
-    void missingUidIs1017EndToEnd() throws Exception {
-        mockMvc.perform(post("/admin/v1/getuser")
+    @DisplayName("DRIFT-016：uid 缺失端到端 400 + text/plain（Go 返 400，不是 1017）")
+    void missingUidIs400TextPlainEndToEnd() throws Exception {
+        String body = mockMvc.perform(post("/admin/v1/getuser")
                         .header("Authorization", "Bearer " + validToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(1017));
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                .andReturn().getResponse().getContentAsString();
+
+        // Go 出处：unmarshaler.go:1199 newInitError → fmt.Errorf("field %q is not set", name)
+        assertEquals("field \"uid\" is not set\n", body);
 
         verify(stub, never()).getUser(any());
     }
 
     /**
-     * A 类 P2 回归：<b>空 body 的 POST 不得返回 HTTP 400</b>。
+     * <b>⚠️ 2026-10-21 实证推翻了 N-3 留档（DRIFT-016 审计期间发现）。</b>
      *
-     * <p>Go 出处（三段实测源码，非推断）：
-     * <ol>
-     *   <li>{@code internal/handler/admin/*.go} 13 个 handler 一律 {@code httpx.Parse(r, &req)}，
-     *       {@code req} 是包级 {@code var req types.XxxReq}</li>
-     *   <li>go-zero v1.10.2 {@code rest/httpx/requests.go:153 withJsonBody} =
-     *       {@code r.ContentLength > 0 && ...} ⇒ 空 body 走
-     *       {@code UnmarshalJsonMap(nil, v)}，对 struct 是 no-op、<b>不报错</b></li>
-     *   <li>admin {@code types.go} 13 个 Req <b>零个</b> {@code Validate()}、<b>零个</b>
-     *       {@code validate:} tag，且未调 {@code httpx.SetValidator} ⇒ 校验环节整体不生效</li>
-     * </ol>
-     * 结论：Go 对空 body 一律 <b>HTTP 200 + 业务码</b>。
+     * <p>§3.4.3 的 N-3 写「RAG 在 {@code AdminApiSupport.parseUid} <b>提前拦截 uid=0</b>
+     * → 1017」。<b>代码里没有这个拦截</b>：{@code AdminApiSupport#parseUid} 只拒
+     * null / 空串 / 非数字 / 溢出（见 {@code AdminUidParseTest} 的 5 条），
+     * 全仓 grep {@code uid == 0} 在 admin-api 侧<b>零命中</b>。
      *
-     * <p>修复前 RAG 13 个端点全是 {@code required=true} ⇒ 抛
-     * {@code HttpMessageNotReadableException} ⇒ {@code handleUnreadableBody} ⇒ HTTP 400 + 空 body，
-     * 与 Go 不一致且客户端拿不到任何可读原因。
+     * <p>因此 uid=0 的真实路径是：{@code parseUid("0")} → 0L → 透传给 admin-rpc
+     * → 查无此人 → {@code 1003 用户不存在} ——
+     * <b>与 Go 逐字相同</b>（实测 Go：{@code uid=0 → 200 {"code":1003}}）。
      *
-     * <p>这里用 {@code /getuser}（protected）而不是 public 端点：public 端点不挂拦截器，
-     * 测不出「鉴权 + 空 body」叠加时的顺序。
+     * <p>换句话说：N-3 记的是一个<b>从未存在过的偏离</b>，观测行为反而一直是对的。
+     * 这与 §3.4.4 DRIFT-009 同型——<b>留档不能因为「有签字、有防回退测试」就免于复核</b>。
      */
     @Test
-    @DisplayName("A-P2：空 body 的 protected 端点不得 400 —— 走业务码 1017（Go 空 body 恒 200）")
-    void emptyBodyDoesNotReturn400() throws Exception {
+    @DisplayName("N-3 留档证伪：uid=0 实际透传到 rpc → 1003（与 Go 相同，不是留档所写的 1017）")
+    void uidZeroIsPassedThroughAndMatchesGo() throws Exception {
+        when(stub.getUser(any())).thenThrow(new StatusRuntimeException(Status.NOT_FOUND));
+
         mockMvc.perform(post("/admin/v1/getuser")
                         .header("Authorization", "Bearer " + validToken())
-                        .contentType(MediaType.APPLICATION_JSON))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uid\":\"0\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(1017));
+                .andExpect(jsonPath("$.code").value(1003))
+                .andExpect(jsonPath("$.msg").value("用户不存在"));
 
+        // 关键证据：uid=0 确实【被透传】到了 rpc —— 若有 1017 拦截，这里应该是 never()
+        verify(stub).getUser(argThat(r -> r.getUid() == 0L));
+    }
+
+    /**
+     * <b>⚠️ 2026-10-21 反转（DRIFT-016）· 本用例此前断言「空 body 的 POST 不得 400」。</b>
+     *
+     * <p>原 javadoc 的三段取证里第 2 段写「空 body 走 {@code UnmarshalJsonMap(nil, v)}，
+     * 对 struct 是 no-op、<b>不报错</b>」。<b>第 2 段的后半句是错的</b>：
+     * {@code core/mapping/jsonunmarshaler.go:19-21} 收的是<b>有类型的 nil map</b>，
+     * 在 {@code unmarshaler.go:988} 的 type switch 里命中 {@code case map[string]any}
+     * （不会落到 default 的 errUnsupportedType），照常遍历全部字段 ⇒ 标量必填照样报。
+     *
+     * <p><b>实测坐实</b>（probe-go-required-fields.py）：真空 body（Content-Length: 0）
+     * 与 {@code {}} 都返回 {@code 400 field "xxx" is not set}。
+     *
+     * <p>这与 AGENTS.md §3.4.4 DRIFT-009 同型：<b>引用了真实文件、但把行为读反了</b> ——
+     * 而且当时正是这个错误结论让 22 个端点全部设成 {@code required = false} + 零值归一化。
+     * <b>教训</b>：不能因为「已有测试锁住」就默认它对（与 DRIFT-009 末尾的评审纪律同源）。
+     */
+    @Test
+    @DisplayName("DRIFT-016：空 body 的 protected 端点必须 400 + text/plain（与 Go 逐字一致）")
+    void emptyBodyOnProtectedEndpointIs400TextPlain() throws Exception {
+        String body = mockMvc.perform(post("/admin/v1/getuser")
+                        .header("Authorization", "Bearer " + validToken())
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                .andReturn().getResponse().getContentAsString();
+
+        assertEquals("field \"uid\" is not set\n", body);
         verify(stub, never()).getUser(any());
     }
 
-    /** 同上，但 public 端点（无 JWT 拦截器）—— 证明 required=false 不依赖拦截器顺序。 */
+    /**
+     * 同上，但走 <b>public 端点</b>（无 JWT 拦截器）—— 证明必填校验<b>不依赖鉴权链</b>，
+     * 是在 Controller 参数绑定之后、进入 business 层之前发生的。
+     *
+     * <p>此前本用例期望「零值 username/password 直达 rpc → 1002」，
+     * 那是<b>基于错误的第 2 段取证</b>得出的；Go 实测是
+     * {@code user.login 真空 body → 400 field "username" is not set}。
+     */
     @Test
-    @DisplayName("A-P2：空 body 的 public 端点 /login 也不得 400")
-    void emptyBodyOnPublicEndpointDoesNotReturn400() throws Exception {
-        // 零值 username/password 直达 rpc；Go 出处 loginlogic.go:54
-        // `codes.Unauthenticated → errmsg.ErrorLoginWrong`，而 ErrorLoginWrong = 1002
-        // （service/*/common/errmsg/errmsg.go:54；不是 1008）
+    @DisplayName("DRIFT-016：空 body 的 public 端点 /login 也必须 400（必填校验不依赖鉴权链）")
+    void emptyBodyOnPublicEndpointIs400TextPlain() throws Exception {
+        String body = mockMvc.perform(post("/admin/v1/login")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                .andReturn().getResponse().getContentAsString();
+
+        assertEquals("field \"username\" is not set\n", body);
+        verify(stub, never()).login(any());
+    }
+
+    // ==================================================================
+    // DRIFT-016 · go-zero 必填字段校验（用户 2026-10-21 拍板「向 Go 对齐」）
+    //
+    // 规则（Go 出处三段，见 GoStyleRequiredFields 的 javadoc）：
+    //   必填 ⟺ tag 不含 ,optional AND tag 不含 ,default= AND 字段是标量
+    //   Map / Slice / Array 永不计必填
+    //
+    // 本块的用例分两类，**都必须有**：
+    //   正向：该 400 的确 400
+    //   反向：该放行的确放行（map 字段、default= 字段、空串）
+    // 只写正向的话，一个「全部字段一律必填」的粗暴实现也能全绿。
+    // ==================================================================
+
+    @Test
+    @DisplayName("DRIFT-016 反向：extra_info 是 map 字段，缺席【不得】400")
+    void mapFieldIsNeverRequired() throws Exception {
         when(stub.login(any())).thenThrow(new StatusRuntimeException(Status.UNAUTHENTICATED));
 
+        // 实测：user.register drop extra_info → 200；extra_info={} → 200
         mockMvc.perform(post("/admin/v1/login")
-                        .contentType(MediaType.APPLICATION_JSON))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"a\",\"password\":\"pw123456\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(1002));
 
         verify(stub).login(any());
+    }
+
+    @Test
+    @DisplayName("DRIFT-016 反向：page / page_size 带 default=，缺席【不得】400")
+    void defaultValuedFieldsAreNotRequired() throws Exception {
+        when(stub.getUserList(any())).thenReturn(
+                com.rag.users.admin.proto.GetUserListResp.newBuilder().setTotal(0).build());
+
+        // 实测：缺 page / page_size → 200（unmarshaler.go:918 getDefault() 先命中并返回）
+        mockMvc.perform(post("/admin/v1/getuserlist")
+                        .header("Authorization", "Bearer " + validToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"keyword\":\"alice\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(stub).getUserList(any());
+    }
+
+    /**
+     * 空串在 Go 的 <b>json 通道</b>里是合法值 —— 实测 {@code user.register email=""} ⇒ 200 注册成功。
+     * 必填校验只判 {@code null}，不判空串。
+     *
+     * <p><b>这条与 Go 的 form 通道相反</b>（{@code keyword=} 会被 {@code httpx.GetFormValues}
+     * 丢弃空值而退化成缺席 ⇒ 400），但 RAG 全部走 json body，
+     * 所以按 json 通道语义统一处理，详见 {@code GetUserListReq} 的 javadoc。
+     */
+    @Test
+    @DisplayName("DRIFT-016 反向：email=\"\" 空串【不得】被当缺失（Go json 通道接受空串）")
+    void emptyStringIsNotTreatedAsMissing() throws Exception {
+        when(stub.updateSelf(any())).thenThrow(new StatusRuntimeException(Status.NOT_FOUND));
+
+        mockMvc.perform(post("/admin/v1/update")
+                        .header("Authorization", "Bearer " + validToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"\",\"password\":\"\",\"email\":\"\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1003));
+
+        verify(stub).updateSelf(any());
+    }
+
+    /** 显式 JSON null 在 Go 侧是 400 {@code field "xxx" mustn't be nil}；
+     *  Java 侧 null 与「缺失」塌缩成同一个判据，返回 {@code is not set}。
+     *  <b>状态码与 Content-Type 一致，只有错误文本不同</b>，与 DRIFT-006 的对齐边界同款。 */
+    @Test
+    @DisplayName("DRIFT-016：显式 null 同样 400（错误文本与缺失塌缩，是已知的表述差异）")
+    void explicitNullIsRejected() throws Exception {
+        String body = mockMvc.perform(post("/admin/v1/getuser")
+                        .header("Authorization", "Bearer " + validToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uid\":null}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                .andReturn().getResponse().getContentAsString();
+
+        assertEquals("field \"uid\" is not set\n", body);
+        verify(stub, never()).getUser(any());
+    }
+
+    /**
+     * <b>⚠️ 2026-10-21 实证推翻了 N-6 留档（DRIFT-016 审计期间发现）。</b>
+     *
+     * <p>§3.4.3 的 N-6 写「uid=abc 经过 {@code parseUid} 拦截 → <b>200 + 1017 envelope</b>」。
+     * <b>代码里到不了 {@code parseUid}</b>：{@code GetUserReq.uid} 的类型是 {@link Long}，
+     * admin-api <b>没有</b>自定义 ObjectMapper（grep 零命中），所以 Jackson 默认
+     * 在反序列化阶段就抛 {@code InvalidFormatException} → Spring 包成
+     * {@code HttpMessageNotReadableException} → {@code handleUnreadableBody} →
+     * {@code 400 + text/plain}。
+     *
+     * <p>而 Go 侧 {@code uid=abc} 同样是 {@code HTTP 400 + text/plain}
+     * （实测：{@code strconv.ParseInt: parsing "abc": invalid syntax}），
+     * 只是<b>文本内容</b>来自不同框架 —— 与 DRIFT-006 已确立的「形状对齐、文本不对齐」边界一致。
+     *
+     * <p>本用例的<b>真实价值</b>是双重的：既锁住 400 + text/plain 这个形状，
+     * 又作为「必填校验只判存在性、不判合法性」的负向对照 ——
+     * 若把校验写成值校验（判 {@code abc} 非法），本条会先在别处红掉。
+     */
+    @Test
+    @DisplayName("N-6 留档证伪 + DRIFT-016 负向对照：uid=\"abc\" 是 400（Jackson 拒），且必填校验只判存在性")
+    void nonNumericUidIsRejectedByJacksonNotByRequiredCheck() throws Exception {
+        mockMvc.perform(post("/admin/v1/getuser")
+                        .header("Authorization", "Bearer " + validToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uid\":\"abc\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN));
+
+        // 两条独立证据：
+        //  1) rpc 一次都没被调用 —— 错误发生在到达 business 层之前
+        //  2) 错误文本不是我们自己的 "field \"uid\" is not set" —— 说明它来自 Jackson
+        String body = mockMvc.perform(post("/admin/v1/getuser")
+                        .header("Authorization", "Bearer " + validToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uid\":\"abc\"}"))
+                .andReturn().getResponse().getContentAsString();
+        assertFalse(body.contains("is not set"), "错误文本不应来自必填校验，实际：" + body);
+
+        verify(stub, never()).getUser(any());
     }
 
     // ==================================================================

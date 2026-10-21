@@ -5,6 +5,7 @@ import com.rag.common.exception.BusinessException;
 import com.rag.common.logger.FatalError;
 import com.rag.common.response.Response;
 import com.rag.users.common.errmsg.ErrorCode;
+import com.rag.users.common.http.GoRequiredFieldException;
 import com.rag.users.user.api.service.IdentityResolver;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
@@ -162,6 +163,28 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<String> handleUnreadableBody(HttpMessageNotReadableException e) {
         log.warn("unreadable request body : {}", e.getMessage());
+        return goStylePlainTextBadRequest(e.getMessage());
+    }
+
+    /**
+     * go-zero 必填字段缺失 → 400 + text/plain（DRIFT-016）。
+     *
+     * <p>Go 出处：{@code handler.Entries()} 拿到 {@code httpx.Parse} 的错误后调
+     * {@code httpx.ErrorCtx}；两个 api 服务的 yaml 都<b>从未</b>注册
+     * {@code httpx.SetErrorHandler}（service/user 全树 grep 零命中），
+     * 所以一定落到 {@code rest/httpx/responses.go:doHandleError} 的
+     * {@code handler == nil} 分支 → {@code http.Error(w, err.Error(), 400)}。
+     *
+     * <p>错误文本是 Go 的逐字复刻：{@code unmarshaler.go:1199} 的
+     * {@code newInitError} 产出 {@code fmt.Errorf("field %q is not set", name)}。
+     *
+     * <p><b>为什么刻意不并进 {@link #handleBusiness}</b>：{@code BusinessException}
+     * 会被渲染成 {@code HTTP 200 + envelope}，而这里是 {@code HTTP 400 + text/plain}。
+     * AGENTS.md §3.4.2 N-1 的结论是<b>层次由类型承载，不靠业务码推断</b>。
+     */
+    @ExceptionHandler(GoRequiredFieldException.class)
+    public ResponseEntity<String> handleGoRequiredField(GoRequiredFieldException e) {
+        log.warn("go-style required field missing : field={}", e.getField());
         return goStylePlainTextBadRequest(e.getMessage());
     }
 

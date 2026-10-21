@@ -183,14 +183,17 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 `AdminSemanticDriftApiRegressionTest` 24 条 + `AdminApiMvcPipelineTest` 11 条 ——
 **首条把真实 MVC 管线 + 真实 Redis 容器 + 真实拦截器 advice 链纳入回归网**，
 同时锁住 DRIFT-FRAMEWORK-001 / DRIFT-009 / N-1）。
-以下四条**是修复后仍然存在的有意偏离**：
+以下四条是本节记录过的条目。**注意：其中 N-3 与 N-6 已于 2026-10-21（DRIFT-NEW-016 审计期间）
+被实测证伪并降级** —— 它们描述的 RAG 行为从未存在过，RAG 本来就与 Go 一致。
+**当前真正成立的「有意偏离」只有 N-4、N-5 两条**。
+保留 N-3 / N-6 两行是为了让后人看到「签字 + 防回退测试都齐了，结论仍可能是错的」。
 
 | # | 偏离 | 内容 | 理由 | 关闭条件 |
 |---|---|---|---|---|
-| **N-3** | **`uid=0` 被错误归类为「业务不存在」** | Go admin 侧的 uid 走 `form:"uid,string"` 绑定。**实测**（2026-10-21，`tools/difftest/probe-go-required-fields.py`）：完全不传 uid → `HTTP 400 field "uid" is not set`；传 `uid=abc` → `400 strconv.ParseInt`；**传 `uid=0` 或 `uid=""`（绑成 0）→ rpc 查无此人 → `HTTP 200 {"code":1003,"msg":"用户不存在"}`**。RAG 在 `AdminApiSupport.parseUid` 提前拦截 uid=0 → **HTTP 200 + envelope `{code:1017,msg:请求参数错误,data:null}`** | **用户 2026-10-21 拍板：保留 RAG 的 1017**。Go 把「`uid=0`」当成合法查询（form 绑定后直接进 user-rpc），结果是「业务不存在」语义**掩盖了调用方参数拼装 bug** —— 与 `user-api` §6.1 第 9 项修掉的根因**完全同构**。RAG 显式化、可观察化。**边界**：缺失 / 非数字已在 N-6 + DRIFT-016 覆盖；本条**仅**就 `uid=0` 这一路径保留 RAG 偏离 | 若坚持逐字复刻，需把 `AdminApiSupport.parseUid` 对 `uid=0` 放过（仍判 null/空/非数字），并同步删除 `AdminSemanticDriftApiRegressionTest` 的两条防回退断言 |
+| **N-3** | ~~**`uid=0` 被错误归类为「业务不存在」**~~ **⚠️ 已证伪，本条不是偏离（2026-10-21 DRIFT-016 审计期间）** | 留档曾写「RAG 在 `AdminApiSupport.parseUid` **提前拦截 uid=0** → 1017」。**代码里没有这个拦截**：`parseUid` 只拒 null / 空串 / 非数字 / 溢出，全仓 grep `uid == 0` 在 admin-api 侧**零命中**。实测 RAG 真实行为：`uid=0` → **透传到 rpc** → 查无此人 → `1003`，**与 Go 逐字相同** | **本条降级为「留档与代码不符，已修正」**，不是有意偏离。Go 侧三态（探针实测）：不传 uid → `400 field "uid" is not set`；`uid=abc` → `400 strconv.ParseInt`；`uid=0` → `200 {code:1003}`。**RAG 在这三条上本来就与 Go 一致** ⇒ 无需签字、无需改动行为 | 已闭合。防回退测试 `AdminApiMvcPipelineTest#uidZeroIsPassedThroughAndMatchesGo`（断言 uid=0 **确实被透传**，即证明「没有 1017 拦截」） |
 | **N-4** | **`operator_id` 不恒为 0** | Go 的 `updateuser` / `banuser` / `unbanuser` / `delete` / `resetuserpassword` 读 `ctx["uid"]`，而 `rest.WithJwt` 写入 ctx 的 key 是 JWT claim 名 **`userId`** ⇒ 永远取不到 ⇒ `OperatorId` 恒为 **0**。RAG 五个端点都传真实 uid | **用户 2026-10-21 拍板：保留真实 uid**。该字段**不参与任何业务判定**，只写进 OTel span 的 `audit.operator_id` 属性；恒 0 会让审计日志失去操作人信息。影响面 = 可观测性数据，不是业务行为 | 若要求审计 span 与 Go 逐字一致，需在这 5 个 Service 里刻意丢弃 token 中的 uid |
 | **N-5** | **JWT HMAC 密钥长度** | Go 用 15 字节原始 secret 参与 HS256；RAG 用 `JwtUtil.padToHmacKeySize` zero-pad 到 32 字节 | jjwt 0.12 强制 key ≥256 bit。RAG 内部签发与验签共用同一份 padded key、自洽；代价是 **Go 签的 token 在 RAG 验不过，反之亦然**（两套部署各自闭环）。与 `user-api` 同款 | 若需跨部署互认 token，必须统一 key 长度——要么改 Go 侧 secret 到 ≥32 字节，要么 RAG 放弃 padding（jjwt 会抛 `WeakKeyException`） |
-| **N-6** | **uid 格式非法（非缺失）时，HTTP body 形状 ≠ envelope** | Go admin 服务 yaml 未注册 `httpx.SetErrorHandler`，`httpx.Parse` 失败（`uid=abc`）走非 `*BindError` 分支 ⇒ `doHandleError` 落到 `http.Error(w, err.Error(), http.StatusBadRequest)` ⇒ 输出 **`HTTP 400 + text/plain`**（无 JSON envelope）。RAG 端同场景经过 `AdminApiSupport.parseUid` 拦截，返回 HTTP 200 + envelope `{code:1017,msg:请求参数错误,data:null}` | 用户 2026-10-21 拍板：与 N-3 互补（**注**：N-3 勘误已收窄为「显式 `uid=0`」路径，N-6 覆盖「缺失 / 非数字 / 空串」）—— 在 RAG 端一律走 `parseUid` 拦截、统一返 1017 + envelope，避免给客户端两份错误约定（HTTP 400 + text/plain vs HTTP 200 + envelope）。**注意**：本条不能再用「客户端兼容」论证 —— DRIFT-016 实施后 RAG 也会用 400+text/plain 响应（本条当时基于的「保留 envelope」假设会过期，见 DRIFT-016 行的后续状态）；按当前代码现状为本条。 | 若某日要求逐字复刻 Go，需 (a) 删除 `AdminApiSupport.parseUid` 对非数字 uid 的拦截，让请求原样落到 `@Controller#parseUid`；(b) 由统一 `GlobalExceptionHandler` 接管并写 `text/plain + 400`。**注**：与 N-3 不同，这里 RAG 没有覆盖回归网，`AdminApiMv*cPipelineTest` 的 `getUser` 用例只验证「缺失 → 1017」，「uid=abc」一个 case 都没断言，防回退测试**未加**；下个审计 agent 可能据此报告漂移——这是已知风险 |
+| **N-6** | ~~**uid 格式非法时 body 形状 ≠ envelope**~~ **⚠️ 已证伪，本条不是偏离（2026-10-21 DRIFT-016 审计期间）** | 留档曾写「`uid=abc` 经过 `parseUid` 拦截 → `200 + 1017` envelope」。**代码里到不了 `parseUid`**：`GetUserReq.uid` 类型是 `Long`，admin-api **无自定义 ObjectMapper**（grep 零命中），Jackson 在反序列化阶段就抛 `InvalidFormatException` → Spring 包成 `HttpMessageNotReadableException` → `handleUnreadableBody` → `400 + text/plain`。Go 侧 `uid=abc` **同样**是 `400 + text/plain` | **本条降级为「留档与代码不符，已修正」**，不是有意偏离。**状态码本就一致**，只有错误**文本**来自不同框架（Jackson vs go-zero）—— 与 §3.4.4 DRIFT-006 已确立的「形状对齐、文本不对齐」边界同款 | 已闭合。防回退测试 `AdminApiMvcPipelineTest#nonNumericUidIsRejectedByJacksonNotByRequiredCheck`（同时断言错误文本**不是**我们自己的 `is not set`，以证明来源是 Jackson） |
 
 ##### ⚠️ N-3 勘误（2026-10-21，commit 690ba4c 之后）
 
@@ -201,13 +204,20 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 
 **结论本身不变**（保留 RAG 的 1017），但理由改为「Go 把 `uid=0` 当合法查询，业务不存在语义掩盖参数拼装 bug」。边界也明确收窄到 `uid=0` 这一路径 —— 缺失/非数字/空串的覆盖在 N-6 + DRIFT-016（实施后两边统一 400+text/plain）。**N-3 与 N-6 不再是「同源」**，N-3 单独覆盖「显式 0 被业务路径吃掉」这一边界。
 
-> **这四条的共同教训**：与 N-1/N-2 不同，N-3/N-4/N-5/N-6 都是**「Go 的行为本身有缺陷」**
+> **这四条的共同教训**：与 N-1/N-2 不同，N-3/N-4/N-5/N-6 都被归入「Go 的行为本身有缺陷」
 > 而非「Go 表达得更地道」。真源冻结（§2）意味着 Go 的缺陷也会被冻结，于是产生了
 > 「按政策应当对齐、但对齐会让 RAG 变差」的真实张力。
 > **新的处置纪律**：这类项不得由单个 agent 自行判断，必须显式列出、用户签字、写进本节，
-> 并用**防回退测试**（`AdminSemanticDriftApiRegressionTest#parseUid_missingIsRequestParamError`）
-> 锁住现状 —— 否则下一个「语义一致性审计」agent 会把它当成新发现的漂移再「修」一遍。
-> **N-6 是个例外**：本批没有真正"修"它的工程动机，仅是「按政策仍要对齐 Go 真源」与「对齐会让 RAG 变差」的真实张力被照搬到错误响应形状——但**没有防回退测试**，见上面 N-6 行尾的注。
+> 并用**防回退测试**锁住现状 —— 否则下一个「语义一致性审计」agent 会把它当成新发现的漂移再「修」一遍。
+>
+> **⚠️ 2026-10-21 补一条更硬的纪律（DRIFT-NEW-016 审计的产物）**：
+> 上面那套「签字 + 防回退测试」**并不足以保证结论正确**。
+> **N-3 与 N-6 两条都经过了签字、都有防回退测试、javadoc 出处写得很完整，
+> 而它们描述的行为从未存在过。** 见 §6.2.5「DRIFT-NEW-016 的处置」。
+> 真正的防线是：**任何留档声称「RAG 的行为是 X」时，都必须有一条断言 X 的运行测试；
+> 若该测试不存在或从未跑过，它只是推测，不得当作事实引用。**
+> 区分「代码里写了什么」与「运行时真的发生什么」——
+> 前者 grep 得到，后者只有真进程能证明。
 
 #### 3.4.4 `service/users` 基础组件审计后的新增留档（2026-10-21，issue #71186893）
 
@@ -593,12 +603,92 @@ getter 仍为 `isRead()`。实测改后：
 | **DRIFT-NEW-014 修法** | — | `user-api/application.yml` 补 `negotiation-type: plaintext`（含字节码级出处注释）。回归网 `UserApiGrpcNegotiationTest`（3 条）：把 `grpc.client.user-rpc.address` 覆盖成 `static://127.0.0.1:<动态端口>`，起一个**真 plaintext gRPC server**，用容器里**真实的** `UserRpcClient` 打一次**真实调用** —— 走的是 devh `ShadedNettyChannelFactory` 的生产代码路径，不是测试里写死 plaintext。外加一条 **TLS 负向对照**（同一个 server 用 TLS 连必须失败），保证正向用例不是假绿。**已实证能真红**：临时删掉那行配置后，该用例报 `NotSslRecordException: not an SSL/TLS record`、pipeline 里出现 `SslHandler` —— 正是生产上 `HTTP/2 client preface string missing` 的镜像（同根因、客户端侧视角） |
 | **DRIFT-NEW-015** | **P0 · 结构性缺陷 · 已修（2026-10-21，用户拍板去掉 Flyway）** | **Flyway 版本号撞车 ⇒ `admin-rpc` 根本无法启动。** 两个模块各自维护 `classpath:db/migration`，`V1/V2` **版本号相同、内容不同**：`user-rpc` = `V1__create_user` / `V2__create_user_avatar_history`；`admin-rpc` = `V1__create_admin` / `V2__create_admin_invite` / `V3__create_user`。`flyway_schema_history` 挂在 schema 上、**一个 schema 只能有一本账**，共用库时后启动的要么报 `version (3) is newer than the latest available migration (2)` 并**静默跳过自己的迁移**（进程照样 Started，表却是空的），要么 checksum mismatch 直接启动失败 | 而 `admin-rpc` **按设计必须**与 `user-rpc` 共用 `users_user` —— 这是它自己 `V3__create_user.sql` 的注释写明的（「admin-rpc 也读写 users_user 表……用 `IF NOT EXISTS 保证幂等：user-rpc 启动时已经建过表」）。⇒ **要满足设计意图就必须共用库，共用库就撞账本，无解**。§4.1 早就警告过这点，现在有实证了 |
 | **DRIFT-NEW-015 修法** | — | **去掉 Flyway，改为幂等重放 DDL**：4 份 DDL 收归 `users-common/src/main/resources/db/*.sql`，由各 rpc 的 `bootstrap/*SchemaBootstrap` 在 `@PostConstruct` 调 `SchemaInitializer` 原样重放；两个 rpc 的 flyway 三件套依赖全删；`AdminSeederBootstrap` 补显式 `@DependsOn`。详见下方「已定案」小节 |
-| **DRIFT-NEW-016** | P2 · 可观察差异 | **Go 有必填字段校验，RAG 没有。** go-zero 的 `httpx.Parse` 走 `core/mapping`，只认 `,optional` 标签，**`,omitempty` 不算 optional**（`unmarshaler.go:946-969` 走 `!opts.optional()` 分支直接 `newInitError`）。缺字段 ⇒ `HTTP 400 + text/plain + field "xxx" is not set`。实测命中：`CreateUserReq.email`、`GetUserListReq.keyword`（**空串也不行**）、`UpdateSelfReq`/`UpdateUserReq` 的 `username`/`password`/`email`。RAG 的 DTO 无此校验，直接走业务分支 | 对拍步骤 `user.register.noemail` / `admin.getuserlist.nokeyword`。**倾向保留 RAG 现状**（更宽松不算错），但按 §3.4.2 纪律**需用户签字**，未签字前不得当新漂移「修」掉 |
+| **DRIFT-NEW-016** | P0 · 语义差异 · **已修（2026-10-21，用户拍板「向 Go 对齐」）** | **Go 有必填字段校验，RAG 没有。** go-zero 的 `httpx.Parse` 走 `core/mapping`，只认 `,optional` 标签，**`,omitempty` 不算 optional**（`unmarshaler.go:966-969` 走 `!opts.optional()` 分支直接 `newInitError`）。缺字段 ⇒ `HTTP 400 + text/plain + field "xxx" is not set` | 取证脚本 `tools/difftest/probe-go-required-fields.py`（真 Go 进程，2026-10-21）。修法与完整规则见下方「DRIFT-NEW-016 的处置」小节 |
+| **DRIFT-NEW-016 修法** | — | **新增 `users-common/http/` 四件套**（`GoStyleRequiredFields` 接口 / `GoRequiredFieldException` / `GoStyleRequired.field()` / `GoStyleRequest.normalize()`），14 个 DTO 显式实现必填校验、14 个 controller 端点走 `GoStyleRequest.normalize`，两份 `GlobalExceptionHandler` 各加一个 `@ExceptionHandler(GoRequiredFieldException)` → 复用既有 `goStylePlainTextBadRequest`。**同时推翻了 `UserController` / `AdminController` 类级 javadoc 里的「空 body 是 no-op、不报错」这条错误论证**（详见下方小节） |
 
 > **为什么 DRIFT-NEW-015 至今没被发现**：RAG 的 `docker-compose.yaml` 里**只有
 > `user-rpc` / `user-api` 两个服务**，根本没有 `admin-rpc` / `admin-api`。
 > 单跑 user 域时账本永远是自洽的；admin 域从未被编排放上过，
 > 冲突自然一次都没露过。**这不是「还没测」，是「根本没部署过」。**
+
+##### DRIFT-NEW-016 的处置：**已定案（用户 2026-10-21 拍板「向 Go 对齐」）· 已实施**
+
+**规则（全部经 `tools/difftest/probe-go-required-fields.py` 真进程实测）**：
+
+```
+字段必填  ⟺  tag 不含 ,optional
+              AND tag 不含 ,default=
+              AND 字段类型是【标量】（Map / Slice / Array 永不计必填）
+```
+
+| 输入 | Go 行为 | Go 出处 |
+|---|---|---|
+| 标量必填字段**缺席**（含**真空 body** 与 `{}`） | `400 field "xxx" is not set` | `unmarshaler.go:966-969` → `newInitError`（`:1199`） |
+| 标量字段值 `""`（**json 通道**） | **接受**，继续往下走 | `processFieldPrimitive` → `fillWithSameType`，不查必填 |
+| 标量字段值 `null` | `400 field "xxx" mustn't be nil` | `unmarshaler.go:862` |
+| Map / Slice 字段缺席 | **接受** | `unmarshaler.go:944-948` 走 `processFieldNotFromString` |
+| 带 `,default=` 的字段缺席 | **填默认值**，不报必填 | `unmarshaler.go:918` 先命中 `opts.getDefault()` |
+
+**实测命中的必填字段**（此前注释里标成 optional 的，全部是错的）：
+`CreateUserReq.email`、`CreateAdminReq.email` / `invite_code`、
+`UpdateSelfReq` 的 username / password / email **三个全是**、
+`UpdateUserReq` 的 username / password / email、`GetUserListReq.keyword`、
+`SelectAvatarReq.history_id`、`UploadAvatarReq.avatar_url`。
+**不**必填的：`user.update` 四个字段（全 `,optional`）、
+`GetUserListReq.page` / `page_size`（有 `default=`）、所有 map 字段。
+
+**实现**：`users-common/http/` 四件套 + 14 个 DTO + 14 个 controller 端点。
+刻意**不用反射**：反射读字段名是隐式约定，字段改名时编译器不报错、校验静默失效
+（§3.3「框架机制必须验证实际生效」的同一类病灶）；每个 DTO 显式写出自己的必填字段，
+改名即编译失败。
+
+> **⚠️ 本次同时推翻了 `UserController` / `AdminController` 类级 javadoc 的一条错误论证**
+> （与 §3.4.4 DRIFT-009 **完全同型**：引用了真实文件、但把行为读反了）。
+>
+> 原文写：「空 body ⇒ `withJsonBody` 为 false ⇒ `ParseJsonBody` 走
+> `mapping.UnmarshalJsonMap(nil, v)` ⇒ **对 struct 是 no-op、不报错**」。
+> **前半句对，后半句错**：`core/mapping/jsonunmarshaler.go:19-21` 的
+> `UnmarshalJsonMap(m map[string]any, v any)` 收的是**有类型的 nil map**，
+> 传进 `Unmarshal(i any, ...)` 后在 `unmarshaler.go:988` 的 type switch 里
+> **命中 `case map[string]any`**（不会落到 `default` 的 `errUnsupportedType`），
+> 于是照常 `unmarshalValuer` 遍历全部字段 —— 空 map 下 `getValue` 全部落空，
+> 标量必填照样走 `newInitError`。
+>
+> **实测坐实**：真空 body（Content-Length: 0）与 `{}` 都返回 `400 field "username" is not set`。
+>
+> **代价**：这个错误结论曾让 22 个端点全部设成 `required = false` + 零值归一化，
+> 并被写进 **7 条测试**当作「A-P2 回归」锁住。本批把它们逐条对照 Go 源码 + 探针实测后
+> **反转了 6 条**。**这正是 DRIFT-009 末尾那条评审纪律的第二次应验：
+> 测试名与注释写得再完整，也必须独立回 Go 源码复核一次。**
+> 被反转的 6 条：`AdminApiMvcPipelineTest` 的
+> `emptyBodyDoesNotReturn400` / `emptyBodyOnPublicEndpointDoesNotReturn400` /
+> `missingUidIs1017EndToEnd` / `emptyUserListIsNullEndToEnd` /
+> `updateSelfNotFoundIs1003EndToEnd` / `updateSelfInternalIs5003EndToEnd`，
+> 以及 `UserApiMvcPipelineTest` 的 `emptyBodyOnLoginDoesNotReturn400`
+> （其中 3 条只是**请求 body 不完整**才 400，补全 body 后仍测原目标；另 1 条
+> `/update` 因全 `,optional` **不反转**，留作对照组）。
+
+> **⚠️ 本次同时证伪了 §3.4.3 的 N-3 与 N-6 两条「有意偏离」留档** —— 它们描述的
+> RAG 行为**从未存在过**，观测行为其实一直与 Go 一致：
+>
+> | 留档声称 | 实际代码 | 实际观测 | Go |
+> |---|---|---|---|
+> | N-3：「RAG 在 `AdminApiSupport.parseUid` **提前拦截 uid=0** → 1017」 | `parseUid` 只拒 null / 空串 / 非数字 / 溢出（`AdminUidParseTest` 5 条），**没有 uid==0 分支**；全仓 grep 零命中 | `uid=0` → 透传 rpc → 查无此人 → **`1003`** | **同样是 `1003`** ⇒ **本就一致** |
+> | N-6：「`uid=abc` 经过 `parseUid` 拦截 → 200 + `1017` envelope」 | `GetUserReq.uid` 是 `Long` 且 admin-api **无自定义 ObjectMapper** ⇒ Jackson 在反序列化阶段就抛 `InvalidFormatException`，**到不了 `parseUid`** | `uid=abc` → **`400` + text/plain**（文本来自 Jackson） | **同样 `400` + text/plain**（文本来自 go-zero）⇒ **状态码本就一致**，仅文本不同 |
+>
+> ⇒ **N-3 与 N-6 应从「有意偏离」降级为「留档与代码不符，已修正」**。
+> 这不是改行为，是**改记录**——按 §1「Go 是唯一真源」，RAG 本来就对，
+> 是留档把「本该对齐」写成了「有意偏离」，下一个审计 agent 会据此
+> **主动把 RAG 改坏**去"恢复"一个从未存在的偏离。防回退测试已同步反转，
+> 见 `AdminApiMvcPipelineTest#uidZeroIsPassedThroughAndMatchesGo` 与
+> `#nonNumericUidIsRejectedByJacksonNotByRequiredCheck`。
+
+> **残留的已知差异（不修，留档）**：`GetUserListReq.keyword` 在 Go 侧走 **form 通道**，
+> 而 `rest/httpx/util.go:37-43` 的 `GetFormValues` 会把空值（`len(v) == 0`）整个丢弃，
+> 于是 `keyword=` 退化成「缺席」⇒ 400；RAG 的 keyword 在 JSON body 里，`keyword=""`
+> 会被**接受**。两边是否 400 取决于传输通道，而传输通道差异是 §3.4.1 已签字的 wire 契约偏离。
+> **刻意不为单个字段引入第二套空串规则** —— DRIFT-010 的教训是
+> 「安全规则的第二份实现本身就是缺陷来源」。
 
 ##### DRIFT-NEW-015 的处置：**已定案（用户 2026-10-21 拍板「直接把 Flyway 丢掉」）· 已实施**
 

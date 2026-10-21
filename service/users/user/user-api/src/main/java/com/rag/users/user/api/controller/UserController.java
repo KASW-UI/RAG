@@ -1,5 +1,6 @@
 package com.rag.users.user.api.controller;
 
+import com.rag.users.common.http.GoStyleRequest;
 import com.rag.users.user.api.dto.DeleteUserReq;
 import com.rag.users.user.api.dto.DeleteUserResp;
 import com.rag.users.user.api.dto.GetAvatarHistoryReq;
@@ -61,7 +62,7 @@ import org.springframework.web.bind.annotation.RestController;
  *       写到 request attribute，Service 直接读</li>
  * </ul>
  *
- * <p><b>L4 idiomatization：全部 9 个端点用 {@code @RequestBody(required = false)}</b>
+ * <p><b>全部 9 个端点用 {@code @RequestBody(required = false)}</b>
  * <pre>
  *   Go 出处（三段，全部实测源码，非推断；<b>与 admin 侧分别取证，未套用结论</b> —— AGENTS.md §3.4.3 N-3
  *   明确警告过「admin 侧取参机制不同，不可跨模块套用结论」）：
@@ -69,24 +70,30 @@ import org.springframework.web.bind.annotation.RestController;
  *      {@code var req types.XxxReq} + {@code if err := httpx.Parse(r, &amp;req); err != nil}。
  *   2. go-zero v1.10.2 rest/httpx/requests.go:153 {@code withJsonBody} =
  *      {@code r.ContentLength > 0 && ContentType 含 application/json}。
- *      空 body ⇒ false ⇒ {@code ParseJsonBody} 走 {@code mapping.UnmarshalJsonMap(nil, v)}
- *      —— 对 struct 是 <b>no-op，不报错</b>。
+ *      空 body ⇒ false ⇒ {@code ParseJsonBody} 走 {@code mapping.UnmarshalJsonMap(nil, v)}。
  *   3. user 侧 api/internal/types/types.go：8 个 Req struct、<b>零个</b> {@code validate:} tag、
  *      <b>零个</b> {@code Validate()} 方法；且整个 user 服务<b>从未</b>调 {@code httpx.SetValidator}
- *      ⇒ {@code getValidator()} 返回 nil，{@code httpx.Parse} 的校验环节整体不生效。
+ *      ⇒ {@code getValidator()} 返回 nil，{@code httpx.Parse} 的校验环节整体不生效
+ *      （即 go-zero 自己的 {@code validation} 框架不介入，只剩 mapping 的 tag 必填）。
  *
- *   结论：Go 对空 body 的 POST 一律 <b>不报错</b>，req 停在<b>零值 struct</b>，由各 Logic 决定业务码。
- *   以 login 为例（loginlogic.go）：零值 username/password <b>直接透传给 rpc</b>，
- *   由 rpc 判错后给出业务码，<b>HTTP 恒 200 + envelope</b>；本端不做客户端预校验，与之同构。
+ *   <b>⚠️ 2026-10-21 勘误（DRIFT-016）</b>：本段此前断言「{@code UnmarshalJsonMap(nil, v)}
+ *   对 struct 是 <b>no-op，不报错</b>，所以 Go 对空 body 一律不报错，req 停在零值 struct，
+ *   由 Logic 决定业务码，HTTP 恒 200 + envelope」。
  *
- *   语义等价论证：{@code required=false} + Controller 侧把 null 归一化成 new XxxReq()，
- *   得到的正是 Go 的零值 struct，Service 不会 NPE，业务码由 Service 决定，与 Go 逐条一致。
+ *   <b>后半句是错的。</b>{@code core/mapping/jsonunmarshaler.go:19-21} 的
+ *   {@code UnmarshalJsonMap(m map[string]any, v any)} 收的是<b>有类型的 nil map</b>，
+ *   传进 {@code Unmarshal(i any, ...)} 后在 {@code unmarshaler.go:988} 的 type switch 里
+ *   <b>命中 {@code case map[string]any}</b>（不会落到 default 的 errUnsupportedType），
+ *   于是照常 {@code unmarshalValuer} 遍历全部字段；空 map 下 {@code getValue} 全部落空，
+ *   标量必填字段照样走 {@code newInitError} ⇒ {@code field %q is not set}。
  *
- *   <b>修复前</b>：register / login / update / avatar-select / avatar 共 5 个端点是
- *   {@code required=true}，空 body 触发 {@code HttpMessageNotReadableException}
- *   → {@code handleUnreadableBody} → <b>HTTP 400 + 空 body</b>，与 Go 不一致，
- *   且客户端拿不到任何可读的错误原因。另 4 个端点（logout / get / delete / avatar-history）
- *   因 body 字段本就不参与业务，此前已改成 {@code required=false}。
+ *   <b>实测坐实</b>（probe-go-required-fields.py，2026-10-21）：真空 body（Content-Length: 0）
+ *   与 {@code {}} 都返回 {@code 400 field "username" is not set}。
+ *
+ *   这与 AGENTS.md §3.4.4 DRIFT-009 是<b>同一类病灶</b>：引用了真实文件、但把行为读反了 ——
+ *   而且当时正是这个错误结论，让 22 个端点全部设成 {@code required = false} + 零值归一化。
+ *   <b>4 个有必填字段的端点（register / login / avatar / avatar/select）现已改走
+ *   {@code GoStyleRequest.normalize}</b>，把必填校验加回来。
  * </pre>
  */
 @RestController
@@ -126,23 +133,20 @@ public class UserController {
     // ============== public（无 JWT） ==============
 
     @PostMapping("/register")
-    // L4 idiomatization（Go 三段取证见下方类 javadoc）：Go 侧 registerhandler.go:20
-    // 用 `var req types.CreateUserReq` + `httpx.Parse`，空 body 不报错、req 停在零值 struct。
+    // L4 idiomatization（DRIFT-016）：Go 出处 types.go CreateUserReq — username/password/email
+    // 三个标量都不含 ,optional ⇒ 必填；extra_info 是 map ⇒ 不校验。
+    // 走 GoStyleRequest.normalize 而非手写 if (req == null)，因为「空 body → 零值 struct」
+    // 与「必填校验」必须是同一次调用：Go 侧两者都在 httpx.Parse 内发生。
     public RegisterResp register(@RequestBody(required = false) RegisterReq req, HttpServletRequest httpRequest) {
-        if (req == null) {
-            req = new RegisterReq();
-        }
-        return userRegisterService.register(req, httpRequest);
+        return userRegisterService.register(GoStyleRequest.normalize(req, RegisterReq::new), httpRequest);
     }
 
     @PostMapping("/login")
-    // L4 idiomatization（同 register）：loginlogic.go 对零值 username/password 直接透传给 rpc，
-    // 由 rpc 判错并给出业务码，HTTP 恒 200 + envelope。
+    // L4 idiomatization（DRIFT-016）：Go 出处 types.go LoginReq — username/password 标量必填。
+    // 修复前 loginlogic.go 的零值 username/password 直接透传给 rpc、由 rpc 判错返业务码，
+    // 与 Go 实际的 400 field "xxx" is not set 不一致。
     public LoginResp login(@RequestBody(required = false) LoginReq req, HttpServletRequest httpRequest) {
-        if (req == null) {
-            req = new LoginReq();
-        }
-        return userLoginService.login(req, httpRequest);
+        return userLoginService.login(GoStyleRequest.normalize(req, LoginReq::new), httpRequest);
     }
 
     // ============== JWT-protected（7 个） ==============
@@ -181,21 +185,16 @@ public class UserController {
     }
 
     @PostMapping("/avatar/select")
-    // L4 idiomatization（同 register）：selectavatarlogic.go 的零值 SelectAvatarReq 直接进业务层。
+    // L4 idiomatization（DRIFT-016）：Go 出处 types.go SelectAvatarReq.HistoryId 无 tag ⇒ 必填。
     public SelectAvatarResp selectAvatar(@RequestBody(required = false) SelectAvatarReq req, HttpServletRequest httpRequest) {
-        if (req == null) {
-            req = new SelectAvatarReq();
-        }
-        return avatarSelectService.selectAvatar(req, httpRequest);
+        return avatarSelectService.selectAvatar(GoStyleRequest.normalize(req, SelectAvatarReq::new), httpRequest);
     }
 
     @PostMapping("/avatar")
-    // L4 idiomatization（同 register）：uploadavatarlogic.go 的零值 UploadAvatarReq 直接进业务层。
+    // L4 idiomatization（DRIFT-016）：Go 出处 types.go UploadAvatarReq.AvatarUrl 无 tag ⇒ 必填；
+    // content_type / size_bytes 是 ,optional ⇒ 不校验。
     public UploadAvatarResp uploadAvatar(@RequestBody(required = false) UploadAvatarReq req, HttpServletRequest httpRequest) {
-        if (req == null) {
-            req = new UploadAvatarReq();
-        }
-        return avatarUploadService.uploadAvatar(req, httpRequest);
+        return avatarUploadService.uploadAvatar(GoStyleRequest.normalize(req, UploadAvatarReq::new), httpRequest);
     }
 
     @PostMapping("/avatar/history")
