@@ -5,6 +5,37 @@
 > **2026-10-18 重写**：原文件是从 vLLM 模板继承的、含大量与本项目无关的内容（GGUF、ModelRegistry、FusedChain 等）。本次重写只保留 RAG 实际需要的政策与本次重构的当前状态。
 > **2026-10-20 第三次真理之源切换**：真源退回 **Go**；非 Spring Boot 的 Java 实现（`Sea-RideTheWind_java` 等）从策略中移除，不在 RAG 工作范围内；并新增 §3 语义对齐纪律。起因是 `service/users` Go ↔ RAG 对照发现 **11 处行为回归**，全部集中在「换成更地道的 Spring 写法」的位置。详见 §1.1。
 
+## 〇、当前状态速查（2026-10-22）
+
+> **这一节回答两个问题**：「`service/users` 现在还有漂移吗」与「下一个 agent 该从哪下手」。
+> 详细留档在 §3.4 / §6.2.6，此处只给结论与边界。
+
+**已关闭**（全部有运行证据，不是静态推断）：
+
+| 项 | 结论 | 证据 |
+|---|---|---|
+| **E-3**（DTO 字段边界） | **R1~R5 五个根因全部已修** | 矩阵 273 条 `NEW_DRIFT 77 → 0`；MATCH 121 → 130 |
+| **E-1**（响应未比对） | **10 步「只比状态码」已升级为按边界断言** | `steps=39 asserted=10 byte_equal=29 unexpected=0` |
+| **DRIFT-024**（E-1 附带挖出） | **RAG 所有 text/plain 400 丢 `Content-Type`/`nosniff` 已修** | 真 Tomcat 守门脚本红绿双向实测（修复前 `EXIT=1` → 修复后 `EXIT=0`） |
+| E-2 / E-4 / E-5 / E-6 / D-1 | 已关 | 见 §6.2.6 |
+
+全仓 `mvn -o test`：**469 tests, 0 failures, 0 errors, 0 skipped**。
+
+**⚠️ 但「无漂移」这句话有明确边界**，不得越读：
+
+| 仍然存在的 | 数量 | 性质 |
+|---|---|---|
+| **已签字的有意偏离** | 6+ 条 | N-1 / N-2 / N-4 / N-5 + §3.4 的 path/method/表名。**是决策，不是缺陷**，但确实不一致 |
+| **DDL 已知未处理** | 12 处列类型 | 10 处 `timestamptz→timestamp` + 2 处 `text→jsonb`；**索引 / 唯一约束 / NOT NULL / DEFAULT 完全 NOT CHECKED** |
+| **从未验证过的子模块** | 10 个 | `article / comment / favorite / follow / hot / like / points / security / task / common` —— 连 `HUMAN_ONLY.MD` 都还没补，**从未做过 Go ↔ RAG 对照** |
+
+**⇒ 准确表述是：「`service/users` 的 DTO 字段边界层已无漂移」，不是「整个 `service/users` 无漂移」。**
+
+**下一步建议**：先清 DDL 剩余 12 处（`check-ddl-static.py` 已就位，改完可立即验证），
+再按模块逐个进 phase 补那 10 个未验证子模块。
+⚠️ 其中 `users_user.extra_info` 的 `text→jsonb` **必须单独取证** —— 它涉及 Go 侧 model
+到底是 `string` 还是自定义类型，不能照「RAG 用了 jsonb 所以 Go 也该用」来猜。
+
 ## 一、项目身份与双轨策略
 
 RAG 仓库路径：`/Users/pr/Documents/java&golang/RAG`。
@@ -187,6 +218,22 @@ MyBatis-Plus 的前缀是 `mybatis-plus`（`MybatisPlusProperties`），全仓**
 > 本类此前未 override 它，于是同一份响应里存在「`setContentType` 直通 / `setHeader` 进 buffer」
 > **两套语义**。已显式接管 `setContentType`，让三者走同一条路径。
 > 下次再动这个 wrapper，注意它有三个覆写点，不是一个。
+
+**元教训（2026-10-22 同日）**：**「把没看过的东西变成看过了」本身就能挖出真 bug。**
+
+这一条值得单独说，因为它的收益方向和直觉相反 ——
+E-1 立项时只是「补 10 步的 body 比对」，看着是个机械活，
+结果新断言一上线就红了，**当场挖出一条连续 4 轮对拍都没看见的真实漂移**。
+
+⇒ **不要因为「把待办清干净」而降低验证强度。**
+一个长期挂着「已知无法比对」的条目，往往不是技术债，
+而是**当年就没想清楚该比对什么**的信号。
+本次的做法可复用：
+1. 先问「这条为什么**注定**不同」—— 把不可比的理由**写成断言**（Go 侧必须命中它自己的形态之一），
+   而不是用「跳过」代替；
+2. 为了断言而**扩到此前从未采集的数据**（这次是响应头），往往就撞出新缺陷；
+3. 撞到之后**别急着改断言去迁就现状**——先确认是现状错了还是断言错了。
+   本次正是靠「MockMvc vs 真实 Tomcat 的差异」才判定的。
 
 **规则（2026-10-21 再补 · 由 H2 假绿事件推出）**：**断言「Bean 存在」不等于断言「机制生效」。**
 
