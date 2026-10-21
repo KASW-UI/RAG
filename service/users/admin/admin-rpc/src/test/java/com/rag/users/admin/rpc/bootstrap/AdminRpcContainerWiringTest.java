@@ -270,13 +270,28 @@ class AdminRpcContainerWiringTest {
                 "DRIFT-006 回归：空白 keyword 被当成无过滤条件，返回了全量");
     }
 
-    /** 分页 default 在 api 层、负 OFFSET 交给 PG（DRIFT-007）。 */
+    /**
+     * ⚠️ 本条在 2026-10-22 被推翻重写（E-3 根因 R4）—— 旧断言把「PG 会拒负 OFFSET」当成了规格。
+     *
+     * <p>Go 的 {@code model/admin.go:159-160} 算出 {@code offset := (page-1)*pageSize}，
+     * 但 GORM 在生成 SQL 时有一层静默抑制（gorm.io/gorm@v1.31.1 {@code clause/limit.go}：
+     * {@code LIMIT} 仅在 {@code >=0} 时生成、{@code OFFSET} 仅在 {@code >0} 时生成）。
+     * 所以 page=0 → offset=-20 → 不生成 OFFSET → <b>不报错，返回首页</b>。
+     * 实测：Go admin-api 18889 直打 {@code page=0} / {@code page=-1} /
+     * {@code page_size=-5} / {@code page=int64max}，<b>四种全部 200</b>。
+     *
+     * <p>旧实现原样把负值拼进 SQL，于是 PG 报 22023 → INTERNAL → api 层 5001。
+     * 本条现在断言「<b>真 PG 上不报错</b>」—— 这正是修复前后最容易看出来的差别，
+     * 而且必须真 PG：纯 mock 的 mapper 测试根本不生成 SQL。
+     */
     @Test
-    @DisplayName("DRIFT-007：page=0 在真库上报错（负 OFFSET），不是静默返回首页")
-    void negativeOffsetRejectedByRealPg() {
+    @DisplayName("R4：page=0 在真 PG 上不报错，返回首页（Go 是 200；修复前 RAG 是 5001）")
+    void negativeOffsetSuppressedLikeGo() {
         seedUsers();
-        assertThrows(Exception.class, () -> adminDomainService.getUserList(0, 20, ""),
-                "page=0 应算出 OFFSET -20 并被 PostgreSQL 拒绝");
+        AdminDomainService.UserListResult r = adminDomainService.getUserList(0, 20, "");
+        assertEquals(3L, r.total(), "total 与分页无关");
+        assertFalse(r.users().isEmpty(),
+                "offset=-20 被抑制 ⇒ 等价于首页，应当有数据返回，而不是报错");
     }
 
     // ==================================================================

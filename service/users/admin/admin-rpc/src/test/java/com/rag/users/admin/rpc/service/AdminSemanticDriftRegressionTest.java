@@ -243,18 +243,31 @@ class AdminSemanticDriftRegressionTest {
     // ==================================================================
 
     /**
-     * Go 出处：internal/model/admin.go:159-160
+     * ⚠️ <b>本条在 2026-10-22 被推翻重写（E-3 根因 R4）—— 旧断言是错的</b>。
+     *
+     * <p><b>旧断言</b>：「page=0 算出 OFFSET -20，原样下传给 PG 报错」。
+     * <p><b>它错在哪</b>：Go 的 {@code model/admin.go:159-160} 是真实文件，但那两行<b>不是全部</b> ——
+     * 真实行为还包含 GORM 的一层<b>静默抑制</b>。权威出处是 gorm.io/gorm@v1.31.1
+     * {@code clause/limit.go} 的 {@code Limit.Build}：
      * <pre>
-     *   offset := (page - 1) * pageSize
-     *   db.Order("id desc").Offset(int(offset)).Limit(int(pageSize)).Find(&amp;users)
+     *   if limit.Limit != nil &amp;&amp; *limit.Limit &gt;= 0 { 写 "LIMIT "  }
+     *   if limit.Offset &gt; 0                            { 写 "OFFSET " }
      * </pre>
-     * 无任何保护 ⇒ page=0 算出负 offset，PG 抛 "OFFSET must not be negative"，
-     * 最终由 GetUserListLogic 映射成 {@code codes.Internal}。
-     * <p>本实现此前的 {@code if (page <= 0) page = 1} 把坏参数静默兜底成第 1 页。
+     * 即 page=0 → offset=-20 → <b>不生成 OFFSET</b>，SQL 退化成 {@code ORDER BY id DESC LIMIT 20}，
+     * 返回首页，<b>不报错</b>。
+     *
+     * <p><b>独立实测</b>（Go admin-api 18889 真进程，curl 直打）：
+     * {@code page=0} / {@code page=-1} / {@code page_size=-5} / {@code page=int64max}
+     * <b>四种全部 HTTP 200 + code 200</b>。
+     *
+     * <p>⇒ 这与 §3.4.3 末尾那条纪律同型：<b>引用了真实文件、却把 GORM 的行为读反了</b>，
+     * 与 DRIFT-009（把 advice chain 的内外关系读反）一模一样。
+     * 旧断言之所以能长期为绿，正是因为它<b>与被测代码共享同一个错误前提</b> ——
+     * 断言和实现互相印证，测的是「我们俩想法一致」，不是「和 Go 一致」。
      */
     @Test
-    @DisplayName("DRIFT-007：page=0 不被兜底，负 OFFSET 原样下传给 PG")
-    void getUserList_pageZeroProducesNegativeOffset() {
+    @DisplayName("R4：page=0 → 负 offset 被 GORM 语义抑制，SQL 只剩 LIMIT 20（Go 是 200 不是 5001）")
+    void getUserList_pageZeroSuppressesOffset() {
         service.getUserList(0, 20, "");
 
         @SuppressWarnings("unchecked")
@@ -263,8 +276,27 @@ class AdminSemanticDriftRegressionTest {
         Mockito.verify(userMapper).selectList(captor.capture());
         String sql = captor.getValue().getTargetSql();
 
-        assertTrue(sql.contains("OFFSET -20"),
-                "page=0 应算出 OFFSET (0-1)*20=-20 并交给 PG 报错，实际：" + sql);
+        assertTrue(sql.contains("LIMIT 20"), "pageSize=20 仍应生成 LIMIT 20，实际：" + sql);
+        assertFalse(sql.contains("OFFSET"),
+                "offset=-20 必须被抑制（Go 的 GORM 只在 offset>0 时生成 OFFSET），实际：" + sql);
+    }
+
+    /** 同一条规则的反向：page_size 为负时 LIMIT 也不生成，且 OFFSET 为负时同样不生成。 */
+    @Test
+    @DisplayName("R4：pageSize=-5 → LIMIT 与 OFFSET 双双被抑制（Go 返回全量，不是 400）")
+    void getUserList_negativePageSizeSuppressesLimit() {
+        service.getUserList(1, -5, "");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaQueryWrapper<UserEntity>> captor =
+                ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        Mockito.verify(userMapper).selectList(captor.capture());
+        String sql = captor.getValue().getTargetSql();
+
+        assertFalse(sql.contains("LIMIT"),
+                "pageSize=-5 < 0 ⇒ GORM 不生成 LIMIT，实际：" + sql);
+        assertFalse(sql.contains("OFFSET"),
+                "offset=(1-1)*(-5)=0，不是正数 ⇒ 不生成 OFFSET，实际：" + sql);
     }
 
     @Test
@@ -308,6 +340,13 @@ class AdminSemanticDriftRegressionTest {
      * Go 出处：internal/logic/admin/createadminlogic.go:44-46 只做 {@code strings.TrimSpace}，
      * <b>没有</b>空值判断；空 username 会照常进事务、查重并 INSERT。
      * 本实现此前抛 {@code INVALID_ARGUMENT}，而 AdminCreateService 无该 case ⇒ 被报成 1015。
+     *
+     * <p><b>⚠️ 2026-10-22 R5 修复后，本断言的第 3 个参数语义已变</b>：
+     * 旧断言假定第 3 参是<b>已哈希</b>的密码（{@code any(String.class)} 恰好两者都匹配，
+     * 所以它过去一直是绿的）。R5 把 bcrypt 移进事务后，
+     * {@code createAdmin} 改调 7 参重载，第 3 参是<b>明文</b>。
+     * 现在这里用 {@code eq("pwd")} 显式锁死「传下去的是明文」——
+     * 若有人把明文提前哈希掉再传，这条会红。
      */
     @Test
     @DisplayName("DRIFT-008：username 为空串时不报 INVALID_ARGUMENT，照常进事务")
@@ -317,8 +356,10 @@ class AdminSemanticDriftRegressionTest {
         long uid = service.createAdmin("   ", "pwd", null, null, "ADM-CODE");
 
         assertTrue(uid > 0, "应返回事务外生成的 snowflake uid");
+        // R5：最后一位 passwordIsPlaintext 必须为 true —— 哈希由 AdminCreateAtomicService
+        // 在事务内、W2 查 username 之后执行（对齐 Go createadminlogic.go 的步骤序）
         Mockito.verify(createAtomicService).createAdminAtomic(
-                eq(""), eq("ADM-CODE"), any(String.class), any(), any(), any(Long.class));
+                eq(""), eq("ADM-CODE"), eq("pwd"), any(), any(), any(Long.class), eq(true));
     }
 
     /** 对照：inviteCode 为空仍然必须被拒（Go: PermissionDenied）。 */

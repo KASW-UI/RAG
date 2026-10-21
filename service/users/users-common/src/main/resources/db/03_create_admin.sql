@@ -29,23 +29,28 @@
 -- 对应 Go 端 internal/model/admin.go 的 Admin struct（GORM 默认表名 admin_admin）。
 -- admin-rpc admin 表的 DDL：admin_admin
 --
--- 列结构（与 Phase 3 AdminEntity @TableField 注解严格对齐）：
+-- 列结构：
 --   id          BIGSERIAL PRIMARY KEY (Go 端用 Snowflake 生成的 uid，但这里保留 id 自增；
 --                                       uid 来自 SnowflakeBean.nextId()，作为业务主键)
 --   uid         BIGINT NOT NULL UNIQUE
---   username    VARCHAR(255) UNIQUE
---   password    VARCHAR(255)                       -- bcrypt 哈希（PasswordUtil.encrypt）
---   email       VARCHAR(255) UNIQUE                -- nullable（1:1 保留 Go 端 *string 语义）
+--   username    TEXT UNIQUE
+--   password    TEXT                              -- bcrypt 哈希（PasswordUtil.encrypt）
+--   email       TEXT UNIQUE                       -- nullable（1:1 保留 Go 端 *string 语义）
 --   extra_info  JSONB                              -- PostgreSQL JSONB 列
 --   create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 --   update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 
+-- ⚠️ 2026-10-22（E-3 根因 R3）：字符串列从 VARCHAR(255) 改成 **TEXT**。
+--   原注释里的「与 @Column 注解严格对齐」正是**漂移的来源**：Go 的 GORM AutoMigrate
+--   给 Go `string` 字段生成的是 `text`（无上限），不是 varchar(255)。
+--   `ALTER ... TYPE text` 对已存在的列恒成功且无需 USING 子句，可反复重放。
+
 CREATE TABLE IF NOT EXISTS admin_admin (
     id          BIGSERIAL PRIMARY KEY,
     uid         BIGINT NOT NULL UNIQUE,
-    username    VARCHAR(255) UNIQUE,
-    password    VARCHAR(255),
-    email       VARCHAR(255) UNIQUE,
+    username    TEXT UNIQUE,
+    password    TEXT,
+    email       TEXT UNIQUE,
     extra_info  JSONB,
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -53,3 +58,8 @@ CREATE TABLE IF NOT EXISTS admin_admin (
 
 -- 业务层大部分 findOneByXxx 都按 uid 查，所以单列索引
 CREATE INDEX IF NOT EXISTS idx_admin_admin_uid ON admin_admin (uid);
+
+-- R3 自愈：把历史上按 VARCHAR(255) 建出来的列就地放宽成 TEXT（幂等，可反复重放）
+ALTER TABLE admin_admin ALTER COLUMN username TYPE text;
+ALTER TABLE admin_admin ALTER COLUMN password TYPE text;
+ALTER TABLE admin_admin ALTER COLUMN email    TYPE text;

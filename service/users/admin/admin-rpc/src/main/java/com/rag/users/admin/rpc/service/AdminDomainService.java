@@ -379,7 +379,8 @@ public class AdminDomainService {
      *   <li>trim username + inviteCode</li>
      *   <li>bcrypt password（事务外）+ Snowflake uid（事务外）</li>
      *   <li>DataModel.createAdminAtomic(...) 4 步事务（W1 查 invite 悲观锁 / W2 校验 invite 未用未过期 /
-     *       W3 查 username 冲突 / W4 insert admin / W5 标记 invite used）</li>
+     *       W3 查 username 冲突 / <b>bcrypt 哈希（R5：按 Go 步骤序排在 W2 之后）</b> /
+     *       W4 insert admin / W5 标记 invite used）</li>
      *   <li>错误映射：
      *      - InviteUnavailableException → PERMISSION_DENIED "管理员邀请码错误"
      *      - UsernameTakenException → ALREADY_EXISTS "用户名已存在"
@@ -405,17 +406,24 @@ public class AdminDomainService {
         // 被报成 1015「服务繁忙」——把一个本来能成功的建号请求报成服务端故障。
         String trimmedUsername = username == null ? "" : username.trim();
 
-        // bcrypt password（事务外，避免延长事务持有时间）
-        String passwordHash;
-        try {
-            passwordHash = PasswordUtil.encrypt(password);
-        } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
-            throw e;
-        } catch (Exception e) {
-            log.error("admin createAdmin PasswordUtil.encrypt failed", e);
-            throw Status.INTERNAL.withDescription("DB添加失败").asRuntimeException();
-        }
+        // R5（2026-10-22，用户签字「完全对齐 Go」）：**密码哈希已移进事务**，
+        // 由 AdminCreateAtomicService 在 W1 查 invite / W2 查 username 之后完成。
+        //
+        // 修复前这里在事务外先做 bcrypt，导致 bcrypt 的 72 字节上限抢在
+        // invite / username 检查之前抛错，把本该报 1016 / 1001 的请求报成 5001。
+        // 实测（tools/difftest/r5-order-probe.py，全新 cluster）：
+        //   B 有效邀请码 + 超长密码 + 用户名已存在   Go=1001 / 修复前 RAG=5001
+        //   C 无效邀请码 + 超长密码                 Go=1016 / 修复前 RAG=5001
+        // Go 出处：createadminlogic.go 事务闭包内 PasswordEncrypt 排在
+        //           FindAdminInviteByCodeForUpdate 与 FindOneAdminByUsernameTx 之后。
+        //
+        // ⚠️ 下方原先那条注释「bcrypt password（事务外，避免延长事务持有时间）」
+        // 描述的是一个**未经 Go 出处论证**的优化（§3.2 无出处 idiomatization），
+        // 本次按用户裁决撤销。代价已知并接受：cost=10 约 60~100ms，
+        // 会延长 invite 行 FOR UPDATE 的持锁时间；但该锁只锁单行。
+        //
+        // Snowflake uid 仍留在事务外（见下）：它不触碰 invite 锁，也不参与错误码归属，
+        // 与 Go 放在哈希之后相比不产生可观测差异（Go 侧 GetID 失败同样是 Internal）。
 
         // Snowflake uid（事务外）
         long uid;
@@ -436,7 +444,7 @@ public class AdminDomainService {
                 : new HashMap<>(extraInfo);
         try {
             createAtomicService.createAdminAtomic(
-                    trimmedUsername, trimmedInvite, passwordHash, optionalEmail, safeExtraInfo, uid);
+                    trimmedUsername, trimmedInvite, password, optionalEmail, safeExtraInfo, uid, true);
         } catch (InviteUnavailableException e) {
             throw Status.PERMISSION_DENIED.withDescription("管理员邀请码错误").asRuntimeException();
         } catch (UsernameTakenException e) {
@@ -658,8 +666,13 @@ public class AdminDomainService {
      * </ol>
      *
      * <p>keyword 非空时按 username/email LIKE 查询，否则全量。
+     *
+     * <p><b>参数用 {@code long} 而不是 {@code int}</b>：Go 的 {@code GetUserListReq.Page}
+     * 是 {@code int64}，从 proto 到 model 全程 int64 运算。此前的
+     * {@code (int) request.getPage()} 会把 {@code page=2^32+1} 悄悄变成 1 ——
+     * 算出的 OFFSET 与 Go 完全不同，而症状是「翻页结果不对」，极难归因。
      */
-    public UserListResult getUserList(int page, int pageSize, String keyword) {
+    public UserListResult getUserList(long page, long pageSize, String keyword) {
         checkDeadline();
         // DRIFT-006（已修）：keyword <b>不</b> trim。Go 端 model/admin.go:152-155 是
         //   if len(keyword) > 0 { keyWord := "%" + keyword + "%" }
@@ -669,13 +682,34 @@ public class AdminDomainService {
         boolean hasKeyword = keyword != null && !keyword.isEmpty();
         String pattern = hasKeyword ? "%" + keyword + "%" : null;
 
-        // DRIFT-007（已修）：此处<b>不</b>对 page/pageSize 做归一化。
-        // Go 端 model/admin.go:159-160 是 offset := (page-1)*pageSize，无任何保护，
-        // page=0 会算出负 offset 并让 PG 抛错，最终映射成 INTERNAL。
-        // 本实现此前的 if (page <= 0) page = 1 会把坏参数静默兜底成第 1 页，
-        // 掩盖调用方的分页 bug。分页默认值已上提到 admin-api 层（对应 Go 的
-        // `form:"page,default=1"` tag），rpc 层保持"不兜底"才是 Go 的语义。
+        // ── E-3 根因 R4：offset := (page-1)*pageSize，但**负值不会下推到 PG** ──
         //
+        // Go 端 model/admin.go:159-160：
+        //     offset := (page - 1) * pageSize
+        //     db.Order("id desc").Offset(int(offset)).Limit(int(pageSize)).Find(&users)
+        // 看起来「无任何保护」，**但 GORM 在生成 SQL 时有一层静默抑制** ——
+        // gorm.io/gorm@v1.31.1 clause/limit.go 的 Limit.Build：
+        //     if limit.Limit != nil && *limit.Limit >= 0 { 写 "LIMIT n" }
+        //     if limit.Offset > 0 { 写 "OFFSET n" }
+        // 于是：
+        //     page=0        → offset=-20  负 → 不生成 OFFSET → 返回首页（不报错！）
+        //     page=-1       → offset=-40  负 → 不生成 OFFSET
+        //     page_size=-5  → LIMIT 被抑制、offset=-5 也被抑制 → 返回**全量**
+        //     page=int64max → (page-1)*pageSize 在 int64 下回绕成 -64 → 不生成 OFFSET
+        //
+        // 实测（Go admin-api 18889，curl 直打）以上四种**全部 200 + code 200**。
+        //
+        // ⚠️ 本实现此前的注释写的是「page=0 会算出负 offset 并让 PG 抛错，最终映射成
+        // INTERNAL」—— **那句是错的**，且它引用的 model/admin.go 是真实文件，
+        // 只是把 GORM 的行为读反了。与 §3.4.4 DRIFT-009 同型（引用真文件、读反内外关系）。
+        // 本实现也确实照着这句错误结论把负值原样拼进了 SQL：
+        //     listWrapper.last("LIMIT " + pageSize + " OFFSET " + ((page-1)*pageSize));
+        // ⇒ PG 报 22023: OFFSET must not be negative → 5001，而 Go 是 200。
+        //
+        // offset 的算术刻意用 Java long：它与 Go 的 int64 同样是 64 位二进制补码回绕，
+        // page=int64max 时两边都得到 -64，抑制行为因此一致。
+        long offset = (page - 1) * pageSize;
+        String pagination = goStylePagination(pageSize, offset);
 
         // count
         long total;
@@ -704,7 +738,10 @@ public class AdminDomainService {
                         .or().like(UserEntity::getEmail, pattern));
             }
             listWrapper.orderByDesc(UserEntity::getId);
-            listWrapper.last("LIMIT " + pageSize + " OFFSET " + ((page - 1) * pageSize));
+            // R4：负值按 GORM 的规则抑制，不是原样下推给 PG（见上方注释）
+            if (!pagination.isEmpty()) {
+                listWrapper.last(pagination);
+            }
             rows = userMapper.selectList(listWrapper);
             if (rows == null) rows = Collections.emptyList();
         } catch (StatusRuntimeException e) {
@@ -715,6 +752,49 @@ public class AdminDomainService {
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
         }
         return new UserListResult(rows, total);
+    }
+
+    /**
+     * E-3 根因 **R4**：把 GORM 的 LIMIT/OFFSET <b>静默抑制</b>规则逐字镜像成 SQL 片段。
+     *
+     * <p><b>权威出处</b>（gorm.io/gorm@v1.31.1，{@code clause/limit.go} 的 {@code Limit.Build}）：
+     * <pre>
+     *   if limit.Limit != nil &amp;&amp; *limit.Limit &gt;= 0 { builder.WriteString("LIMIT ");  ... }
+     *   if limit.Offset &gt; 0 {
+     *       if limit.Limit != nil &amp;&amp; *limit.Limit &gt;= 0 { builder.WriteByte(' ') }
+     *       builder.WriteString("OFFSET "); ...
+     *   }
+     * </pre>
+     * 即：**LIMIT 只在 pageSize ≥ 0 时生成；OFFSET 只在 offset &gt; 0 时生成**，
+     * 且两者之间那个空格也只在 LIMIT 真的生成了时才写。
+     *
+     * <p><b>为什么必须照抄而不是「顺手保护一下」</b>：Go 对 {@code page=0} /
+     * {@code page_size=-5} 的回答是 <b>200 + 返回首页/全量</b>，不是 400。
+     * RAG 侧一旦自作主张 clamp 成 400 或悄悄兜底成第 1 页，
+     * 就把「与 Go 一致」改成了「与 Go 不一致」——
+     * 这正是 §3.4 里那 11 处回归的共同成因。
+     *
+     * @param pageSize 已算好的 LIMIT 值（Go 侧 {@code int(pageSize)}）
+     * @param offset   已算好的 OFFSET 值（Go 侧 {@code int(offset)}，int64 回绕后）
+     * @return 可直接喂给 {@code LambdaQueryWrapper.last()} 的片段；两者都被抑制时返回 {@code ""}
+     */
+    public static String goStylePagination(long pageSize, long offset) {
+        boolean hasLimit = pageSize >= 0;
+        boolean hasOffset = offset > 0;
+        if (!hasLimit && !hasOffset) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        if (hasLimit) {
+            sb.append("LIMIT ").append(pageSize);
+        }
+        if (hasOffset) {
+            if (hasLimit) {
+                sb.append(' ');
+            }
+            sb.append("OFFSET ").append(offset);
+        }
+        return sb.toString();
     }
 
     /** GetUserList 返回值 record —— 对应 Go 端 ([]*User, int64) 二元组 */

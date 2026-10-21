@@ -62,7 +62,46 @@ public class GetUserListReq implements GoStyleRequiredFields {
     public void setPageSize(Long pageSize) { this.pageSize = pageSize; }
 
     public String getKeyword() { return keyword; }
-    public void setKeyword(String keyword) { this.keyword = keyword; }
+
+    /**
+     * <b>刻意收 {@code Object} 而不是 {@code String}</b>（E-3 根因 R1 的配套处理）。
+     *
+     * <p><b>为什么</b>：本字段在 Go 侧是 {@code form:"keyword,omitempty"}，
+     * 值来自 <b>query string</b>，所以 {@code keyword=99999} 在 Go 侧就是字符串
+     * {@code "99999"}，<b>完全合法</b>。而 RAG 因 §3.4.1 的 A-03 偏离把这个端点
+     * 放到了 JSON body 上，客户端于是可以发 {@code {"keyword":99999}} ——
+     * 若 setter 收 {@code String}，会被 R1 的「number→String 一律拒」规则挡成 400，
+     * 而 Go 接受 ⇒ 等于把 R1 修成一条新漂移。
+     *
+     * <p><b>为什么不靠 Jackson 的类级配置豁免</b>：实测 Jackson 3.1.5 的
+     * {@code withCoercionConfig(Class, ...)} <b>完全不生效</b>
+     * （详见 {@code GoStyleCoercion} 类注释的「第三个坑」），
+     * R1 的规则是全局的、没法只对某个类关掉，所以只能落到字段上。
+     *
+     * <p><b>语义边界</b>：这里做的正是 Go 在 form 通道上做的事 —— <b>把<b>标量</b>字符串化</b>。
+     * query string 的值只能是标量，所以 array / object 在 Go 侧根本到不了这个字段
+     * （真发过去 Go 会得到 {@code type mismatch for field "keyword"}）。
+     * 因此非标量在这里<b>必须抛错</b>，不能 {@code String.valueOf} —— 那样会把
+     * {@code {"keyword":{"a":1}}} 变成字符串 {@code "{a=1}"} 然后去 LIKE 匹配，
+     * 是个静默的错误结果（E-3 矩阵实测抓到过这一条）。
+     * {@code null} 原样保留，仍由 {@link #assertGoRequiredFields()} 判必填。
+     *
+     * <p>全项目<b>只有这一个字段</b>需要这样处理：另外两个 Go form 通道 DTO
+     * （{@code GetUserListReq.page/page_size}、{@code GetUserReq.uid}）都是整数字段，
+     * 规则 2 在 Go 侧同样拒（{@code strconv.ParseInt}），无豁免必要。
+     */
+    @JsonProperty("keyword")
+    public void setKeyword(Object raw) {
+        if (raw == null || raw instanceof String) {
+            this.keyword = (String) raw;
+        } else if (raw instanceof Number || raw instanceof Boolean) {
+            this.keyword = String.valueOf(raw);
+        } else {
+            throw new IllegalArgumentException(
+                    "keyword must be a scalar (Go form 通道只可能传标量)，实际收到 "
+                            + raw.getClass().getName());
+        }
+    }
 
     /**
      * 取 page 并套用 Go tag 的 default：null（未传）→ 1；显式 0 / 负数<b>原样保留</b>。

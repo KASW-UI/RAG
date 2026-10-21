@@ -55,6 +55,28 @@
             <artifactId>spring-jdbc</artifactId>
         </dependency>
         <!--
+          GoStyleCoercion（E-3 根因 R1）需要 Jackson 的
+          CoercionConfig / LogicalType / DeserializationFeature。
+
+          ⚠️ 必须是 **Jackson 3（tools.jackson.core）**，不是 Jackson 2：
+             本项目是 Spring Boot 4.0.8，spring-boot-starter-jackson 带进来的是
+             tools.jackson:jackson-databind:3.x，MVC 用的就是它；
+             而 com.fasterxml.jackson.core:jackson-databind:2.x 是从 com.rag:common
+             间接来的**另一份**，两套 API 不通用（Jackson 3 的包名是 tools.jackson.databind，
+             且 coercion 只能在 builder 上配、ObjectMapper 上没有 coercionConfigFor）。
+             第一版误用 Jackson 2，编译通过但端点行为一条没变。
+
+          ⚠️ 只声明 databind，**不要**声明 spring-boot-jackson / spring-boot-autoconfigure：
+             admin-rpc 是纯 gRPC 进程，刻意不引 Spring Boot 自动配置（见
+             AdminRpcApplication 关于 scanBasePackages 的注释）。
+             JsonMapperBuilderCustomizer 由两个 api 模块自己注册。
+        -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!--
           SchemaInitializer 打启动日志（建哪份脚本、成没成功）。slf4j-api 是纯 API 包、
           零传递依赖，与 service/common 的用法一致。
         -->

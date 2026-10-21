@@ -390,29 +390,39 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 > 旧的 `blacklistCheckedBeforeSignatureVerification` 用「Redis 里有这条 key」当顺序判据，
 > 那条断言在任何实现下都成立，属于**假绿**。
 
-#### 3.4.5 `service/users` **DTO 边界矩阵**产出的 4 条未登记差异（2026-10-21，§6.2.6 **E-3**）
+#### 3.4.5 `service/users` **DTO 边界矩阵**产出的差异：R1~R4 已修、R5 新发现（2026-10-21 起，§6.2.6 **E-3**）
 
 按 DTO 逐字段展开边界组合（字段全缺 / 部分缺 / 类型错 / 超长 / 特殊字符 / 越界），
-Go 与 RAG 双端对拍 **273 条**。产出 **77 条 NEW_DRIFT**，全部收敛到 **4 个根因**，
-**UNCLASSIFIED = 0**（连续三次运行结果逐字一致）。复现：
+Go 与 RAG 双端对拍 **273 条**。首次产出 **77 条 NEW_DRIFT**，收敛到 **4 个根因**，
+**UNCLASSIFIED = 0**（连续三次运行结果逐字一致）。
+**2026-10-22：R1~R4 全部已修并经端到端复测（NEW_DRIFT 77 → 0）；
+修复过程中又暴露第 5 条根因 R5（曾被分类器误归入 R3）。** 复现：
 
 ```bash
-./tools/difftest/run.sh --no-build --keep --serve-only   # 先起两套栈
-python3 tools/difftest/matrix.py          # 运行时半（273 条）
-python3 tools/difftest/check-ddl-static.py  # 静态半（R3 的 DDL 证据）
+./tools/difftest/run.sh --keep --serve-only   # 起两套栈（**必须完整构建**，见下方警告）
+python3 tools/difftest/matrix.py             # 运行时半（273 条）
+python3 tools/difftest/check-ddl-static.py   # 静态半（R3 的 DDL 证据）
+python3 tools/difftest/r5-order-probe.py     # R5 专项（用**真邀请码**补齐矩阵盲区）
 ```
 
-> **本节 4 条全部「尚未签字」**。按 §3.4.3 末尾那条纪律 —— 签字 + 防回退测试
-> **并不足以保证结论正确**（N-3 / N-6 都签了字、都有防回退测试，而行为从未存在过）——
-> 每条下面都只写**实测到的**行为，并附**独立于矩阵**的取证命令。
-> **未裁决前不要改 RAG 代码，也不要把它们当成「已知偏离」引用。**
+> ⚠️ **不要用 `--no-build`**：该参数**不会把新 jar 拷到 `$RUN_DIR/bin/`**，
+> 起的是旧副本 —— 表现为「修复没生效」，是本项目反复误判的头号来源。
+>
+> ⚠️ **不要在被矩阵跑过的 cluster 上取证**：`admin.update` 的边界用例会真的改写
+> `admin/admin` 的口令，跑过一轮后两侧登录均失败（`1002`）。取证一律用
+> `run.sh` 重建的**全新 cluster**。
+>
+> **本节 5 条均已由用户逐条签字并有防回退测试**。按 §3.4.3 末尾那条纪律 ——
+> 签字 + 防回退测试**并不足以保证结论正确**（N-3 / N-6 都签了字、都有防回退测试，
+> 而行为从未存在过）—— 每条下面都只写**实测到的**行为，并附**独立于矩阵**的取证命令。
 
-| # | 根因 | 实测现象 | Go 出处 | RAG 现状 |
-|---|---|---|---|---|
-| **R1** | **JSON 标量被 Jackson 静默强转 / 截断**（64 条） | `{"username":99999}`、`{"password":true}`：Go `400`；RAG `200`+业务码。`{"page":1.5}`：Go `400`；RAG **按 page=1 执行** | Go 走 `encoding/json` 的类型检查 / go-zero 的 `processNamedFieldWithValueFromString`（先字符串化再 `strconv.ParseInt`） | 字段是 Java `String` / `Long`，Jackson 默认允许 number→String、bool→String，并**向零截断** float→Long |
-| **R2** | **显式 `null` ≠ 字段缺席**（4 条） | `{"extra_info":null}`：Go `400 field "extra_info" mustn't be nil`；**缺席该字段**则 Go `200`。RAG 两种都 `200` | go-zero `core/mapping/unmarshaler.go:856-862`：`mapValue == nil` 且非 `optional` ⇒ `mustn't be nil`，**对 map / slice 一样生效**；而「缺席」走 `processNamedFieldWithoutValue`，Map 分支不报错 | `RegisterReq` / `CreateAdminReq` / `UpdateSelfReq` / `UpdateUserReq` 四处 javadoc 都写着「Extrainfo 是 map ⇒ 不校验」，把 null 与缺席**混为一谈** |
-| **R3** | **DDL 列宽：`text` vs `varchar(255)`**（4 条） | 5000 字符 `username`：Go 写入成功；RAG `5001`/`5003`。反噬读路径：Go 库里有、RAG 存不下 ⇒ 登录时 Go 命中、RAG `1002`/`1003` | Go 的 GORM `AutoMigrate` 给 Go `string` 生成 **`text`**（无上限） | 4 份 `users-common/.../db/*.sql` 的注释自陈「列结构与**原 JPA `@Column`** 注解严格对齐」⇒ `VARCHAR(255)`。**全量 DDL 对比：35 列里 22 列类型不同**（12 列 text→varchar(255)、8 列 timestamptz→timestamp、2 列 text→jsonb） |
-| **R4** | **分页越界：GORM 静默抑制 vs RAG 直传 PG**（5 条） | `page=0` / `page=-1` / `page_size=-5` / `page=9223372036854775807`：Go 全 `200`+`code 200`；RAG 全 `5001` | `service/user/admin/rpc/internal/model/admin.go:159-160`：`Offset(int(offset)).Limit(int(pageSize))` —— GORM 只在 `offset>0` / `limit>=0` 时才生成子句，负值**静默忽略**并返回首页全量 | 负数原样交给 PG ⇒ `22023: OFFSET must not be negative` ⇒ `5001` |
+| # | 根因 | 实测现象 | Go 出处 | RAG 修复前 | 状态 |
+|---|---|---|---|---|---|
+| **R1** | **JSON 标量被 Jackson 静默强转 / 截断**（64 条） | `{"username":99999}`、`{"password":true}`：Go `400`；RAG `200`+业务码。`{"page":1.5}`：Go `400`；RAG **按 page=1 执行** | Go 走 `encoding/json` 的类型检查 / go-zero 的 `processNamedFieldWithValueFromString`（先字符串化再 `strconv.ParseInt`） | 字段是 Java `String` / `Long`，Jackson 默认允许 number→String、bool→String，并**向零截断** float→Long | | ✅ **已修**：新增 `GoStyleCoercion`（Jackson 3）+ 两端 `WebMvcConfig` 注册 `JsonMapperBuilderCustomizer`；锁死用例 `GoStyleParseSemanticsMvcTest`（14 条，真 MVC）
+| **R2** | **显式 `null` ≠ 字段缺席**（4 条） | `{"extra_info":null}`：Go `400 field "extra_info" mustn't be nil`；**缺席该字段**则 Go `200`。RAG 两种都 `200` | go-zero `core/mapping/unmarshaler.go:856-862`：`mapValue == nil` 且非 `optional` ⇒ `mustn't be nil`，**对 map / slice 一样生效**；而「缺席」走 `processNamedFieldWithoutValue`，Map 分支不报错 | `RegisterReq` / `CreateAdminReq` / `UpdateSelfReq` / `UpdateUserReq` 四处 javadoc 都写着「Extrainfo 是 map ⇒ 不校验」，把 null 与缺席**混为一谈** | | ✅ **已修**：4 个 DTO 加 `extraInfoPresent` 标志 + `@JsonProperty` setter，`GoStyleRequired.explicitNull` 判「显式 null」；锁死用例同上
+| **R3** | **DDL 列宽：`text` vs `varchar(255)`**（4 条） | 5000 字符 `username`：Go 写入成功；RAG `5001`/`5003`。反噬读路径：Go 库里有、RAG 存不下 ⇒ 登录时 Go 命中、RAG `1002`/`1003` | Go 的 GORM `AutoMigrate` 给 Go `string` 生成 **`text`**（无上限） | 4 份 `users-common/.../db/*.sql` 的注释自陈「列结构与**原 JPA `@Column`** 注解严格对齐」⇒ `VARCHAR(255)`。**全量 DDL 对比：35 列里 22 列类型不同**（12 列 text→varchar(255)、8 列 timestamptz→timestamp、2 列 text→jsonb） | | ✅ **已修**（用户签字）：4 份 `db/*.sql` 改 `TEXT` + 各补幂等 `ALTER TABLE ... TYPE text` 自愈；锁死用例 `UserRpcSchemaTextColumnTest`（4 条，真 PG）
+| **R4** | **分页越界：GORM 静默抑制 vs RAG 直传 PG**（5 条） | `page=0` / `page=-1` / `page_size=-5` / `page=9223372036854775807`：Go 全 `200`+`code 200`；RAG 全 `5001` | `service/user/admin/rpc/internal/model/admin.go:159-160`：`Offset(int(offset)).Limit(int(pageSize))` —— GORM 只在 `offset>0` / `limit>=0` 时才生成子句，负值**静默忽略**并返回首页全量 | 负数原样交给 PG ⇒ `22023: OFFSET must not be negative` ⇒ `5001` | | ✅ **已修**：`getUserList` 改 `long`、新增 `goStylePagination` 逐字镜像 GORM `clause/limit.go` 抑制规则；锁死用例 `AdminRpcPaginationGormSemanticsTest`（7 条，真 PG）
+| **R5** | **bcrypt 哈希抢在 invite / username 检查之前**（2 条；**曾被分类器误归入 R3**） | 见下方「R5 专节」实测表 | `createadminlogic.go` 事务闭包：`FindAdminInviteByCodeForUpdate` → `FindOneAdminByUsernameTx` → `cryptx.PasswordEncrypt` → `GetID` → insert | 事务外先 `PasswordUtil.encrypt`，72 字节上限抢跑 ⇒ 该报 1016/1001 的报成 5001 | ✅ **已修**（用户签字「完全对齐 Go」）：哈希移进事务、排在 W2 之后；锁死用例 `AdminCreatePasswordOrderRegressionTest`（9 条，真 PG，变异测试实证 6 条真红） |
 
 > **R3 的条数依赖环境状态，不是稳定的 4**：写侧那 4 条（5001/5003）任何时候都在；
 > 读路径另有 2 条（`user/admin.login.Username.long5000` 报 1002/1003）**只在 Go 库里
@@ -429,6 +439,74 @@ Go 的 `json:"uid,string"` **不等于「只收字符串」**。go-zero 先把 J
 
 **R1 的 `float→Long` 截断比 `→String` 强转更危险**：前者让请求**成功执行但作用在错误的行上**
 （`banuser {"uid":1.5}` 等价于封禁 `uid=1`），后者只是把错的值存进去。
+
+##### R1 修复踩的三个坑（Jackson **3**，不是 2）
+
+1. 本工程用的是 **Jackson 3**（`tools.jackson.core:jackson-databind`），API 位置与 2.x 不同：
+   `JsonMapper.builder()` / `MapperBuilder`，不是 `ObjectMapper`。
+2. **`withCoercionConfig(Class, …)` 对全局规则无效**：实测 3.1.5 下完全不起作用，
+   必须用 `LogicalType.Textual` 的 `CoercionInputShape` / `CoercionAction` 逐项配置。
+   `GoStyleCoercion` 类注释里已写死这条，**防止下一个人重试**。
+3. 规则只能**全局生效**：每端在 `WebMvcConfig` 注册一个 `JsonMapperBuilderCustomizer` bean。
+
+**R1 有一条只对 json 通道成立**：Go 走 **form 通道**的字段值本就是字符串，
+所以 `GetUserListReq.setKeyword(Object)` 需要**自己标量化**
+（只接受 String/Number/Boolean，其余抛 `IllegalArgumentException`）——
+全项目仅此一个字段走 form 通道的 `Object` 入参。
+⚠️ 第一版曾用 `String.valueOf` 把 `{"a":1}` 变成 `"{a=1}"`，等于把「拒」变成了「静默接受」，已修。
+
+##### R5 专节：矩阵为什么把它误分类成了 R3，以及真实分歧面（2026-10-22）
+
+R3 修完后矩阵仍报 `R3 = 1`，一度以为 R3 没修干净。**实际是分类器的锅**：
+`matrix.py` 的 `classify()` 有一条宽规则「`long5000` 且 RAG 报 5001/5003 ⇒ R3（列宽）」，
+它把这条**顺序问题**顺手归进了 R3。
+
+**真实分歧面比矩阵看到的大一倍**——因为 `matrix.py` 在 `admin.create` 这一族里
+**恒定使用假邀请码** `MATRIX-INVITE-NOT-A-REAL-CODE`，只能命中「邀请码校验失败」
+这条最早返回的分支，**永远走不到**「邀请码有效 → 后续检查」那一段。
+
+新增 `tools/difftest/r5-order-probe.py` 用**真邀请码**补齐，实测（全新 cluster，两端真实 HTTP）：
+
+| 支 | 场景 | Go | RAG 修复前 | RAG 修复后 |
+|---|---|---|---|---|
+| A | 有效邀请码 + 超长密码 + **新**用户名 | `5001` | `5001` | `5001`（本就一致） |
+| **B** | 有效邀请码 + 超长密码 + **用户名已存在** | `1001`「用户名已存在」 | `5001` ★ | `1001` ✅ |
+| **C** | 无效邀请码 + 超长密码 | `1016`「邀请码错误」 | `5001` ★ | `1016` ✅ |
+
+**根因**：两端 bcrypt 实现**相同**（Go `bcrypt.DefaultCost`=10 / RAG `STRENGTH`=10，
+都拒 >72 字节），分歧**纯粹来自步骤顺序**。
+交集 = 「密码 >72 字节」且「本该先被前置检查拦下的输入」。
+
+**修复（用户 2026-10-22 签字「完全对齐 Go」）**：bcrypt 从 `AdminDomainService` 的事务外
+移进 `AdminCreateAtomicService`，排在 **W2 查 username 之后**。
+Go 步骤序（`createadminlogic.go` 事务闭包）逐条镜像：
+`FindAdminInviteByCodeForUpdate` → `FindOneAdminByUsernameTx` → `PasswordEncrypt` → `GetID` → insert。
+
+> ⚠️ **本次撤销了一条「无出处 idiomatization」**：原注释写着
+> 「bcrypt password（事务外，**避免延长事务持有时间**）」——这是一条**从未对照 Go 出处**
+> 的优化（§3.2 的典型形态：注释写得很有道理，唯独没有出处）。
+> 代价已知并接受：cost=10 约 60~100ms，会延长 invite 行 `SELECT ... FOR UPDATE`
+> 的持锁时间；但该锁**只锁 invite 单行**。
+> **`Snowflake.nextId()` 仍留在事务外**：它不触碰 invite 锁、不参与错误码归属，
+> 与 Go 放在哈希之后相比无可观测差异（Go 侧 `GetID` 失败同样是 Internal）。
+
+**回归网**：`AdminCreatePasswordOrderRegressionTest`（9 条，**真 PG**）。
+变异测试已实证 **6 条能真红**——把哈希挪回 W1 之前，
+B 支报 `expected ALREADY_EXISTS but was INTERNAL`、C 支报 `expected PERMISSION_DENIED but was INTERNAL`，
+与端到端实测的漂移形态逐字一致。
+
+**连带改动（不是回归，是结构变更的必然结果）**：
+`AdminDomainService` 的 `catch(Exception)` 由 **29 → 28**（bcrypt 那处移进了
+`AdminCreateAtomicService`）。`AdminDomainServiceCatchStructureTest` 的守恒期望值已同步，
+并在注释里写明「**不要改回 29，那意味着有人又把 bcrypt 搬回了事务外**」。
+
+> ⚠️ **`matrix.py` 的 `classify()` 那条 R3 宽规则仍有误分类风险**：
+> `long5000` + 5001 的形态既可能是列宽，也可能是顺序。已由独立探针覆盖，
+> 但**不要把「矩阵 R3 = 0」当作「列宽问题全部消失」的充分证据**。
+
+> **R3 修复的副产品**：`check-ddl-static.py` 的列类型差异从 **22 处降到 12 处**
+> （10 个 `varchar(255)` 全部变 `text`）。剩下 10 处 `timestamptz→timestamp` + 2 处 `text→jsonb`
+> 属**范围外**（本轮只修列宽，不动时间精度与 jsonb 归属）。
 
 > **E-3 同时暴露了一个「此前没人查」的层**：§3.1 的对照清单里写着
 > 「数据库表结构 / 索引 / 唯一约束 / NOT NULL / DEFAULT」，但**此前没有任何脚本在查这一层**
@@ -1169,7 +1247,7 @@ SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `t
 |---|---|---|---|
 | **E-1** | **difftest 10/39 步仍只比状态码、不比 body**（2026-10-21 由 13 → 12（b3066ab） → 10（本笔 commit）） | `diff.py:41` KNOWN_STATUS_ONLY 10 条:6 N-1 鉴权 + 1 N-1 user.delete + 2 DRIFT-006 畸形 JSON + 1 DRIFT-006 admin.uid=abc | **逐项定性**:① N-1 七条 401 body 形状不同(Go 空 body / RAG envelope)是**§3.4.2 N-1 有意偏离**,无法逐字对齐;② DRIFT-006 三条(2 畸形 JSON + admin.getuser.baduid)body 来自不同框架的 JSON 解析层(Go stdlib vs Jackson / strconv vs Jackson),**保持 §3.4.1 边界**。**已转走 diff_json 逐字比对(实测 byte-equal)**:user.register.noemail、admin.getuser.nouid、admin.getuserlist.nokeyword ⇒ 全部 `field "xxx" is not set\n` 两端字面相同。**KNOWN_CODE_DIFF 已删除**:历史上 (uid=0 → Go=1003/RAG=1017) 已于 §3.4.3 N-3 行证伪(两侧都 1003),对应白名单条目 admin.getuser.nouid 已转走逐字比对,本常量从此无人引用 → 拿除。**留档一个 SCENARIOS 排序的副作用**:admin.update 在第 28 步把 admin 密码改成 `newadmin123`,**同 cluster 第二次跑** admin_token-using 步骤会因密码不匹配而全 DIFF(本体已经从 stale 状态隔离,**留作 SCENARIOS 排序整治一项**) |
 | **E-2** | **gRPC 层没有直接对拍** | **✅ 已关（2026-10-21）**。拆为两段同时收口：**静态半**（字段号 / message 名）—— Go 真源 `proto/{user,admin}.proto` 与 RAG `*-proto/.../{users,admin}.proto` 字节级对齐，`tools/difftest/check-proto-static.sh` 三秒跑完；**动态半**（错误码语义）—— 同 stub 双端口打 4 档 RPC（`OK` 注册新号 / `INVALID_ARGUMENT` logout 空 token / `NOT_FOUND` getUser 鬼 uid / `ALREADY_EXISTS` 注册重名），4/4 双端口 `Status.getCode()` 一致（首测结果见 `tools/difftest/grpc-results.txt`）。**留档注意点**：Login 三种业务失败（用户不存在 / 密码错 / 被禁）**不**抛 gRPC code、走 `LoginResp.Status = 1|2`，是 go-zero 业务级状态码设计；本实验因此特意不把 login 列进 4 档，避免误把业务码当 wire code 测 |
-| **E-3** | **39 步不是状态空间穷举** | ✅ **已关（2026-10-21）**。`tools/difftest/matrix.py` 把 9 个 DTO 按**字段**展开边界组合，共 **273 条**（原 39 步只覆盖每端点 1~3 条典型路径）。产出 **77 条 NEW_DRIFT，全部收敛到 4 个根因、UNCLASSIFIED = 0**，连续三次运行结果**逐字一致**（121 MATCH / 1 KNOWN_FORM_EMPTY / 74 KNOWN_FRAMEWORK_TEXT / 77 NEW_DRIFT）。**4 个根因见 §3.4.5**（R1 Jackson 标量强转与截断 64 条、R2 显式 null ≠ 缺席 4 条、R3 DDL `text` vs `varchar(255)` 4 条、R4 GORM 静默抑制负 OFFSET/LIMIT 5 条）—— **均尚未签字**。**已验证与既有 difftest 共存**：全新 cluster 上先跑矩阵再跑 `diff.py`，仍是 **39/39 unexpected=0**。配套静态证据 `tools/difftest/check-ddl-static.py`（35 列 22 列类型不同）。**⚠️ 工具本身的三个坑已记在脚本头**：① token 不可跨端复用（N-5）② method/参数通道必须按端声明（A-03 + `form:` tag）③ 字段来源必须是真源 `types.go` 而非手抄 |
+| **E-3** | **39 步不是状态空间穷举** | ✅ **已关（2026-10-21）**，**5 个根因全部已修（2026-10-22，用户逐条签字）**。`tools/difftest/matrix.py` 把 9 个 DTO 按**字段**展开边界组合，共 **273 条**（原 39 步只覆盖每端点 1~3 条典型路径）。首轮产出 **77 条 NEW_DRIFT**，UNCLASSIFIED = 0。**根因见 §3.4.5**：R1 Jackson 标量强转与截断 64 条、R2 显式 null ≠ 缺席 4 条、R3 DDL `text` vs `varchar(255)` 4 条、R4 GORM 静默抑制负 OFFSET/LIMIT 5 条，**R5 bcrypt 抢在 invite/username 检查之前 2 条（修复过程中新暴露，曾被误分类进 R3）**。**端到端复测：NEW_DRIFT 77 → 0**（R1/R2/R4/R5 均 0；R3 的 0 由 `r5-order-probe.py` 独立佐证，因为 `classify()` 那条宽规则仍可能误分类）。**已验证与既有 difftest 共存**：全新 cluster 上先跑矩阵再跑 `diff.py`，仍是 **39/39 unexpected=0**。配套静态证据 `tools/difftest/check-ddl-static.py`（列类型差异已从 22 处降到 12 处）。**⚠️ 工具本身的坑已记在脚本头**：① token 不可跨端复用（N-5）② method/参数通道必须按端声明（A-03 + `form:` tag）③ 字段来源必须是真源 `types.go` 而非手抄 ④ **`--no-build` 不拷新 jar，起的是旧副本** ⑤ **`admin.create` 恒用假邀请码 ⇒ 看不到「邀请码有效」分支**，R5 即由此漏掉，补齐靠 `tools/difftest/r5-order-probe.py`（用真邀请码，实测出比矩阵多一倍的 2 处分歧） |
 | **E-4** | **超时路径 —— 已于 2026-10-21 实测坐实，见下方专节** | ~~零覆盖~~ → 已有数据。**这是 B-1 的运行证据**，此前只有静态分析 | ✅ 已补（`exp-b1-timeout-cancel.sh` 端到端 + `probe-jdbc-cancel.java` 纯 JDBC 机制层，三层拆解见 §3.4.1「B-1 补记」） |
 | **E-5** | **并发路径零覆盖** | ✅ **已关（2026-10-21）**。admin-rpc 侧 `AdminRpcConcurrencyWiringTest`（真 PG + Testcontainers，2 条全过）针对 `AdminCreateAtomicService` 双场景：(a) 同一 invite code N=8 并发消费 ⇒ **恰好 1 OK + 7 InviteUnavailable**（W1 悲观锁 `SELECT ... FOR UPDATE` 实证有效），admin 表里 `username LIKE 'u-%'` 严格 1 行；(b) 同一 username N=8 并发注册（各用唯一 invite）⇒ **恰好 1 INSERT 成功 + 7 撞 unique**，最终严格 1 行。Go 一致性靠「同样策略（行锁/UNIQUE 兜底）+ 同样约束」按设计而非按端到端对拍；要做端到端对拍那是 E-2 的范围 |
 | **E-6** | **事务异常回滚只测了 `user-rpc`** | ✅ **已关（2026-10-21）**。`AdminRpcTransactionWiringTest`（真 PG + Testcontainers，4 条全过）在 admin-rpc 侧同款补齐 `AdminCreateAtomicService.createAdminAtomic` 4 步事务的回滚行为：(1) W3 admin uid 唯一冲突 ⇒ invite `used_at`/`used_by_uid` 双 null（rollback 实证）；(2) W1 invite 不存在 ⇒ admin_admin 表行数无变化；(3) W2 username 已存在 ⇒ invite 不被标 used；(4) happy path ⇒ invite 被正确标 used，admin 行被插入。user 侧 `AvatarTransactionWiringTest` + admin 侧本类 ⇒ 两端写路径回滚都有真 PG 实证。**service/common 的 20 项偏差**这条不在 E-6 范围,留作另一笔 |

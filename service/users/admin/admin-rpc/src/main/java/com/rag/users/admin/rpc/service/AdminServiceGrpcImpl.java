@@ -189,8 +189,8 @@ public class AdminServiceGrpcImpl extends AdminServiceGrpc.AdminServiceImplBase 
     public void getUserList(GetUserListReq request, StreamObserver<GetUserListResp> responseObserver) {
         invoke(() -> {
             AdminDomainService.UserListResult result = adminDomainService.getUserList(
-                    (int) request.getPage(),
-                    (int) request.getPageSize(),
+                    request.getPage(),
+                    request.getPageSize(),
                     request.getKeyword()
             );
             GetUserListResp.Builder builder = GetUserListResp.newBuilder().setTotal(result.total());

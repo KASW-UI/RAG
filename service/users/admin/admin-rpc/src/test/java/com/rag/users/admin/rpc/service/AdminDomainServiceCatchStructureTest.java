@@ -58,9 +58,18 @@ class AdminDomainServiceCatchStructureTest {
      * 且 29 处都紧邻一个 {@code catch(StatusRuntimeException)} 放行分支。
      * 与 user-rpc 不同，admin-rpc 此前**一处放行分支都没有** ——
      * user-rpc 至少在 {@code register} 里因 DRIFT-009 修复留下过一个先例。
+     *
+     * <p><b>2026-10-22 R5 修复后：29 → 28</b>。这一处减少<b>不是</b>漏加了守卫，
+     * 而是 {@code createAdmin} 里那处 {@code catch(Exception)}（包裹 bcrypt 的那个）
+     * <b>整体移进了</b> {@link com.rag.users.admin.rpc.service.AdminCreateAtomicService}
+     * ——R5 要求 bcrypt 在事务内、W2 查 username 之后执行（对齐 Go 的 createadminlogic.go）。
+     * 因此 {@code AdminDomainService.createAdmin} 少了一段 catch，
+     * {@code AdminCreateAtomicService} 多了一段。
+     *
+     * <p><b>不要把它改回 29</b>：那意味着有人又把 bcrypt 搬回了事务外。
      */
-    private static final int EXPECTED_CATCH_EXCEPTION_TOTAL = 29;
-    private static final int EXPECTED_GUARDED = 29;
+    private static final int EXPECTED_CATCH_EXCEPTION_TOTAL = 28;
+    private static final int EXPECTED_GUARDED = 28;
 
     @Test
     @DisplayName("每个 catch(Exception) 前邻都有 catch(StatusRuntimeException){throw e;}")
