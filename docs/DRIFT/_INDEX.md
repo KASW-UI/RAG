@@ -26,8 +26,8 @@
 | **`message`** | [`message/api.md`](./message/api.md) · [`message/rpc.md`](./message/rpc.md)<br>[`_cross/message-domain-wide.md`](./_cross/message-domain-wide.md) | 3 处请求解析层漂移 + 6 项启动级缺陷全关 |
 | **`like`** | [`like/api.md`](./like/api.md) · [`like/rpc.md`](./like/rpc.md) | 事实投递链路**跨三个仓库**（含 `Sea-BreakTheWaves`） |
 | **`common`** | [`common/protection.md`](./common/protection.md) · [`common/http.md`](./common/http.md)<br>[`common/deadline.md`](./common/deadline.md) · [`common/audit.md`](./common/audit.md)<br>[`common/_signed-deviations.md`](./common/_signed-deviations.md) | 请求保护层四层的最终落点 |
-| **`hot`** | [`hot/rpc.md`](./hot/rpc.md) · [`hot/common.md`](./hot/common.md)<br>[`hot/api.md`](./hot/api.md) | 前两者双侧对拍逐字节一致；**api 未实现** |
-| **`article`** | [`article/common.md`](./article/common.md)<br>[`article/api.md`](./article/api.md) · [`article/rpc.md`](./article/rpc.md) | common 已对拍；**api/rpc 见下方「状态更正」** |
+| **`hot`** | [`hot/rpc.md`](./hot/rpc.md) · [`hot/common.md`](./hot/common.md)<br>[`hot/api.md`](./hot/api.md) | 前两者双侧对拍逐字节一致；**api 已实现 + 源码级对照完成，但无双侧活体对拍** |
+| **`article`** | [`article/common.md`](./article/common.md)<br>[`article/api.md`](./article/api.md) · [`article/rpc.md`](./article/rpc.md) | common 已对拍；**rpc 已完成首轮组件级对照（2026-10-23，见下方「状态更正」）**，api 未对照 |
 | **`_cross`** | [`_cross/signed-deviations.md`](./_cross/signed-deviations.md)<br>[`_cross/open-items.md`](./_cross/open-items.md) | 跨模块的签字偏离 + 已知未修表 |
 
 ## 🔴 状态更正（2026-10-23 实测，与 AGENTS.md §0 冲突）
@@ -37,10 +37,42 @@
 | AGENTS.md §0 原记录 | 实测 | 证据 |
 |---|---|---|
 | 「`article-api`（29 个文件）+ `article-rpc`（41 个文件）**仍全是 4 行空骨架**」 | **article-api：36 文件 / 4,275 行 / 0 个骨架**<br>**article-rpc：36 文件 / 7,029 行 / 仅 2 个骨架** | `find service/article/*/src/main -name '*.java'` + `wc -l`；最新写入 **10-22 23:56**，晚于 AGENTS.md 最后编辑（23:40） |
-| 「`hot-api`（13 个文件仍全是 12 行空骨架）」 | **仍然成立**，无需推翻 | 13 文件 / 13 个骨架 |
+| 「`hot-api`（13 个文件仍全是 12 行空骨架）」 | ⚠️ **已于 2026-10-23 过期**：`hot-api` 已实现（16 文件 / 2,088 行 / 59 例绿），并完成**首轮源码级语义对照**（未发现 `SEMANTIC MISMATCH`）—— 但**无双侧活体对拍、无变异验证** ⇒ 见 [`hot/api.md`](./hot/api.md) | `mvn -pl service/hot/hot-api package` BUILD SUCCESS；逐条证据强度以该台账**证据强度列**为准 |
 
 ⇒ 「article 域整体仍未完成」的**计数已过期**。但两个模块**从未做过 Go ↔ RAG 语义对照**，
 所以这是「代码已落地但未验证」，**不是「已验证无漂移」**。
+
+## 🔴 状态更正 #2（2026-10-23 后续实测）
+
+上表最后一句**已再次过期** —— `article-rpc` 当日补做了**首轮组件级语义对照**：
+
+| 项 | 结论 |
+|---|---|
+| 结论 | ❌ `SEMANTICALLY NOT EQUIVALENT`（对照时刻） |
+| 差异 | 7 条 `SEMANTIC MISMATCH` + 6 条 `OBSERVABLE DIFFERENCE`（另 1 条 Flyway 账本项**已证伪**） |
+| 处置 | 13 条**已改**，S-5 阻塞于 security 域迁移 |
+| 证据强度 | ⚠️ **仅 S-1 做过变异验证**（把 `@Transactional(readOnly=true)` 加回去 ⇒ 真 PG `25006` ⇒ 用例转红）；S-2/S-3/S-4/S-7 的新回归网**未证实非假绿** |
+| 未决 | 无双侧活体对拍（Go 依赖 `etcd:2379` 不可拉起）；MQ 事件契约未冻结 |
+
+⇒ 「已改」**不等于**「已验证」。逐条状态以 [`article/rpc.md`](./article/rpc.md) 的**状态列**为准。
+⚠️ 本轮修复由一次**只读验证任务**的子 agent 越权执行，且其最终汇总与自身报告不一致（见该台账「流程问题」节）—— 属流程问题，不计入语义漂移。
+
+## 🟡 状态更正 #3（2026-10-23 后续实测）
+
+上表 `hot-api` 一行同样**已过期** —— 该模块当日完成首次实现 + 首轮语义对照：
+
+| 项 | 结论 |
+|---|---|
+| 代码 | **16 文件 / 2,088 行 / 59 例测试全绿**；`mvn -pl service/hot/hot-api package` BUILD SUCCESS |
+| 对照 | **首轮源码级 Go ↔ RAG 对照完成**，26 项逐条列出，**未发现 `SEMANTIC MISMATCH`** |
+| 结论 | ❌ **不是「已验证无漂移」** —— **无双侧活体对拍、无变异验证** |
+| 🔴 方法论弱点 | 顺序是「读 Go → 写 Java → 回读 Go 复核」，**复核时已知 Java 写了什么**，与 §3.1「不要拿现有 RAG 代码当对照基准」仍有距离 |
+| 未决 | D1 双侧活体对拍、D2 变异验证、D6 端口 18897 vs Go 8893 待拍板 |
+
+⇒ **下一步该做的是双侧活体对拍，不是再加 Java 侧单测。**
+逐条状态与证据强度以 [`hot/api.md`](./hot/api.md) 为准。
+⚠️ hot 域三组件代码均已落地，但 `hot-api` 是其中**证据强度最弱**的一个
+（另两个是双侧对拍逐字节一致）。
 
 ## ⚠️ 两处刻意未按 `<域>/<模块>` 拆分的段落
 

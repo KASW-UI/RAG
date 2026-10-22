@@ -413,6 +413,11 @@ class ArticleTransactionWiringTest {
         String articleId = "pubview-2";
         insertArticle(articleId);
         jdbcTemplate.update("UPDATE article SET status = 2 WHERE id = ?", articleId);
+        insertRevision(articleId, 1L, "pubview-2:r1", "sync-pubview-2", "# Approved", 2000L);
+        jdbcTemplate.update("""
+                INSERT INTO article_publication (article_id, current_revision, pointer_version, state, last_event_id)
+                VALUES (?, 'pubview-2:r1', 1, 'published', 'evt-2')
+                """, articleId);
 
         PublicArticleView view = publicService.getPublicArticle(articleId, false);
 

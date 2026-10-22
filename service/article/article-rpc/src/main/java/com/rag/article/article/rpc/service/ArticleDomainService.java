@@ -215,7 +215,7 @@ public class ArticleDomainService {
                 articleMapper.incrViewCount(in.getArticleId());
             } catch (Exception e) {
                 // ⚠️ 此处**不能记任何指标**。Go get_article_logic.go:70-78 失败时只 LogBusinessErr；
-                //    曾调 minioError("get") —— 那是一次 **DB 写失败**，记到 MinIO 负误计上会脏化
+                //    曾调 minioError("get") —— 那是一次 **DB 写失败**，记到 MinIO 错误计数上会脏化
                 //    「对象存储是否故障」这个核心信号，让 MinIO 告警误报。
                 //    并且 Go 这条路径的该计数器永远是 0。
                 LOG.warn("increment article view count failed (best-effort, ignored): articleId={} err={}",

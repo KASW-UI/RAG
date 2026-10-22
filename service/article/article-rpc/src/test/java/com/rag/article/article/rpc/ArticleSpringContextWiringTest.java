@@ -32,7 +32,6 @@ import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.listener.FailedRecordProcessor;
-import org.springframework.util.backoff.BackOff;
 
 import java.util.List;
 
@@ -250,14 +249,12 @@ class ArticleSpringContextWiringTest {
                         + "设为 false 会让失败消息在 rebalance/重启后无限重投，与 Go 相反。"
                         + "FailedBatchProcessor.seekOrRecover 在 true 分支里 commit 的正是失败记录自己的 offset+1。");
 
-        // 另外锁住「零次进程内重试」：Go 的 kq 没有重试循环（报错后立即 CommitMessages），
-        // Spring Kafka 出厂默认是 SeekUtils.DEFAULT_BACK_OFF = 9 次零延迟。
-        BackOff backOff = processor.getBackOffFunction();
-        long maxAttempts = org.springframework.util.backoff.BackOffExecutionUtils
-                .maxAttempts(backOff.start());
-        assertEquals(0L, maxAttempts,
-                "进程内重试必须为 0 次（Go 无重试循环）；"
-                        + "若是 Spring 的 9 次默认值，同一失败消息会在一个进程内被打 9 次");
+        // ⚠️ 「零次进程内重试」**没有**写成断言：
+        // FailedRecordProcessor 只有 setBackOffFunction 而无公开 getter，BackOffExecutionUtils
+        // 在 Spring 6+ 也已不存在，只能靠反射读私有字段；而 DefaultErrorHandler 的默认实现
+        // 对未分类异常返回 null —— 断言会退化成「测代理代码行为」而非「测被测行为」。
+        // 它在 ArticleRpcApplication#articleNoCommitErrorHandler 里是字面量 new FixedBackOff(0L, 0L)，
+        // 可直接审阅；要变成运行时证据需要真 Kafka（未决，见 unresolved.md）。
     }
 
     @Test

@@ -110,6 +110,15 @@ public interface ArticleMapper extends BaseMapper<ArticleEntity> {
      *
      * <p>二级标签过滤用 {@code secondary_tags @> '["tag"]'}（jsonb 包含算子），
      * 语义与 Go {@code model/article.go:146} 一致。
+     *
+     * <p>🔴 <b>条件里的参数名必须与 {@code @Param} 一致</b>。
+     * 本方法的第二个参数是 {@code @Param("secondaryTagJson")}（为了避开引号转义而声明），
+     * 而条件曾写 {@code secondaryTag} ⇒ MyBatis 找不到该参数，每次调用都报
+     * {@code BindingException: Parameter 'secondaryTag' not found} ⇒ <b>作者视角 ListArticles 100% 报错</b>。
+     * 乊一版 79 条测试全绿也看不到：它们全部 mock 了 mapper，从未让 MyBatis 真的解析过这段 script。
+     * <br>等价形式：Go 的判据是 {@code opt.SecondaryTag != ""}（model/article.go:145），
+     * Java 侧的对应值——调用点在 {@code ArticleDomainService} 里已经把
+     * 空串与 null 都归一为 {@code secondaryTagJson = null}，因此这里只判 null / 空即可。
      */
     @Select("""
             <script>
@@ -118,7 +127,7 @@ public interface ArticleMapper extends BaseMapper<ArticleEntity> {
             <if test="manualTypeTag != null and manualTypeTag != ''">
               AND manual_type_tag = #{manualTypeTag}
             </if>
-            <if test="secondaryTag != null and secondaryTag != ''">
+            <if test="secondaryTagJson != null and secondaryTagJson != ''">
               AND secondary_tags @&gt; CAST(#{secondaryTagJson} AS jsonb)
             </if>
             <if test="authorId != null and authorId != ''">
@@ -169,7 +178,7 @@ public interface ArticleMapper extends BaseMapper<ArticleEntity> {
             <if test="manualTypeTag != null and manualTypeTag != ''">
               AND manual_type_tag = #{manualTypeTag}
             </if>
-            <if test="secondaryTag != null and secondaryTag != ''">
+            <if test="secondaryTagJson != null and secondaryTagJson != ''">
               AND secondary_tags @&gt; CAST(#{secondaryTagJson} AS jsonb)
             </if>
             <if test="authorId != null and authorId != ''">

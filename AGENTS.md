@@ -18,9 +18,14 @@
 | `message` | ✅ api + rpc 双端验证完成 | [`docs/DRIFT/message/`](docs/DRIFT/message/api.md) |
 | `like` | ✅ 已验证；事实投递链路**跨三个仓库** | [`docs/DRIFT/like/`](docs/DRIFT/like/rpc.md) |
 | `common` | ✅ 审计完成 | [`docs/DRIFT/common/`](docs/DRIFT/common/audit.md) |
-| `hot` | ⚠️ common + rpc 双侧对拍逐字节一致；**api 仍是 13 个空骨架** | [`docs/DRIFT/hot/`](docs/DRIFT/hot/api.md) |
-| `article` | ⚠️ common 已对拍；**api/rpc 代码已落地但从未对照**（36 文件 / 4,275 行 / 7,029 行，2026-10-22 夜写入） | [`docs/DRIFT/article/`](docs/DRIFT/article/api.md) |
+| `hot` | ⚠️ common + rpc 双侧对拍逐字节一致；**api 已实现（2026-10-23，16 文件 / 2,088 行 / 59 例绿）+ 首轮源码级对照完成，未发现 SEMANTIC MISMATCH，但无双侧活体对拍、无变异验证** | [`docs/DRIFT/hot/`](docs/DRIFT/hot/api.md) |
+| `article` | ⚠️ **rpc 已完成首轮组件级对照（2026-10-23）**：结论 `SEMANTICALLY NOT EQUIVALENT`，7 条 `SEMANTIC MISMATCH` + 6 条 `OBSERVABLE DIFFERENCE`，其中 13 条**已改**（仅 S-1 做过变异验证，其余新回归网**未证实非假绿**）、S-5 阻塞于 security 域；**api 从未对照** | [`docs/DRIFT/article/`](docs/DRIFT/article/rpc.md) |
 | 其余子模块 | ❌ **从未做过 Go ↔ RAG 对照** | 见 DRIFT 索引 |
+
+> ⚠️ **「已改」≠「已验证」**：`article` 与 `hot/api` 两行的逐条状态与证据强度
+> （真 PG / 纯 Mockito / 静态 / 双侧活体对拍）以台账的**状态列**为准，**勿凭本表下结论**。
+> ⚠️ **源码级对照 ≠ 双侧活体对拍**：前者证明「读 Go 源码读得对」，
+> 后者才证明「跑起来两侧一致」。两者不可互相替代。
 
 **仍未关闭的三类**（明细台账在 DRIFT，**勿凭本表下结论**）：
 

@@ -1,6 +1,15 @@
 # article-rpc 组件级语义一致性验证
 
-> 只读验证。**本次未修改任何源码 / 配置 / pom / 测试。**
+> ⚠️ **本目录是验证阶段的产物，记录的是「修复前」的状态。**
+> 随后已按本目录的结论执行修复（2026-10-23 夜），当前状态见
+> [`../../../../docs/DRIFT/article/rpc.md`](../../../../docs/DRIFT/article/rpc.md) 的
+> 「组件级语义验证 + 修复」一节。下面各文件**未回改**，以保留「发现了什么」的原始证据。
+>
+> 修复后：94 用例全绿（原 79）；S-1/S-2/S-3/S-4/S-6/S-7/O-1/O-2/O-3/O-4/O-5b 已修，S-5 被阻塞。
+>
+> --- 以下为验证阶段原始记录 ---
+>
+> 当时为只读验证，未修改任何源码 / 配置 / pom / 测试。
 > 验证方向：**Go → Spring Boot**。Go = 行为基准，Spring Boot = 待验证的迁移实现。
 > 唯一问题：相同输入 / 相同环境 / 相同依赖状态下，两侧**可观察行为**是否一致。
 
@@ -31,6 +40,13 @@
 `HIGH-RISK DRIFT`：**4 条**（S-1、S-2、S-3、S-5），见
 [`semantic-drifts.md`](semantic-drifts.md) 的「反事实测试」栏。
 
+## 1b. ⚠️ 两条更正（修复阶段实测产生）
+
+| 更正 | 内容 |
+|---|---|
+| **O-5 证伪** | 本文原称「`spring.flyway.table` 全仓零命中、三模块共用一本账」。**这是误报** —— 当初的 `grep … \| head -30` 被截断。实测 `like-rpc`(`application.yml:61`) 与 `message-rpc`(`application.yml:58`) **都已配置**；只有 article-rpc 用默认值，而按 AGENTS.md §6.3 问题 4 的定案，默认值此时恰好归 article 独占 ⇒ **不是缺陷**。 |
+| **新增 S-7（本目录未收录）** | 补测试时撞出 **`countAuthorView` / `selectAuthorView` 的 `<if test="secondaryTag != null">` 引用了不存在的参数**（`@Param` 名是 `secondaryTagJson`）⇒ MyBatis `BindingException` ⇒ **作者视角 `ListArticles` 100% 报错**。既有 79 条测试全部 mock 了 mapper，从未让 MyBatis 真正解析那段 script。**这是本次最严重的一条**，严重级高于 S-1。 |
+
 ## 2. 六条 SEMANTIC MISMATCH 速览
 
 | # | 组件 / operation | 一句话 |
@@ -41,6 +57,7 @@
 | **S-4** | MQ 消费者 · 并发度 | Go `Processors` **默认 8** ⇒ 8 个并发处理协程；RAG `concurrency=1` 串行 |
 | **S-5** | 外部客户端占位 · content security | 两个 gRPC 客户端是**空文件**，唯一实现恒抛异常 ⇒ **审核链路无法完成** |
 | **S-6** | 配置与生命周期 · SQL 超时映射 | `SqlTimeoutStatusTranslator` 产出的 `DEADLINE_EXCEEDED` 被 `invoke` 降级成 `UNKNOWN` ⇒ **业务码 5001 → 1015** |
+| **S-7** | RPC 服务端 · `ListArticles`（作者视角） | MyBatis `<if>` 引用不存在的参数 ⇒ **该接口 100% 报错**（补测试时才发现，见 §1b） |
 
 ## 3. 六条 OBSERVABLE DIFFERENCE 速览
 
@@ -50,7 +67,7 @@
 | **O-2** | metrics 组件 | Go 的 `article_service` 命名空间前缀在 RAG 里**声明但未使用** ⇒ 指标名全部改变 |
 | **O-3** | GetArticle 作者视角 | DB 失败时**多记一个** `minio_request_errors_total{get}`（Go 只记日志） |
 | **O-4** | 发布成功通知 | `extra.author_id` 从原串改成**解析后的数字串** |
-| **O-5** | DDL 迁移 | `spring.flyway.table` 未设 ⇒ 三个模块共用一本 `flyway_schema_history` |
+| ~~**O-5**~~ | ~~DDL 迁移~~ | ~~三个模块共用一本 `flyway_schema_history`~~ ❌ **证伪，见 §1b**；改为「article-rpc 独占默认值 = 既定分配」 |
 | **O-6** | gRPC client 超时 | message-rpc deadline 配 3s，Go 默认是 **2000ms**；yml 注释引错了文件行 |
 
 ## 4. 既有 79 条测试的判定

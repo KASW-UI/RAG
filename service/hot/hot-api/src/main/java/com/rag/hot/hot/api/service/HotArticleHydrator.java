@@ -1,12 +1,245 @@
 package com.rag.hot.hot.api.service;
 
+import com.rag.article.article.proto.Article;
+import com.rag.article.article.proto.ArticleStatus;
+import com.rag.article.article.proto.GetArticleResponse;
+import com.rag.common.spring.LoggerFactoryBean;
+import com.rag.common.logger.WithArticleID;
+import com.rag.hot.hot.api.client.ArticleRpcClient;
+import com.rag.hot.hot.api.dto.HotArticleCard;
+import com.rag.hot.hot.api.metrics.HotApiMetrics;
+import com.rag.hot.hot.common.errmsg.HotErrorCode;
+import com.rag.hot.hot.proto.HotArticleItem;
+import io.opentelemetry.context.Context;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Semaphore;
+
 /**
- * 限流 8 的并发补全；4 条 skip 分支各打 metric；按下标保序；失败 best-effort
+ * 并发补全 + 过滤 —— 对应 Go {@code getHotArticlesLogic.go:91-170} 的
+ * {@code hydrateArticles} 与 {@code buildHotArticleItem}。
  *
- * <p>Go 真源：{@code api/internal/logic/hot/getHotArticlesLogic.go:91-170}
- * <p>推导依据：{@code FileTree/hot/api.md §12.5}
+ * <h2>它拥有三件「其它地方放不下」的事</h2>
+ * <ol>
+ *   <li><b>并发窗口 = 8</b>（Go {@code :93} 的 {@code sem := make(chan struct{}, 8)}）</li>
+ *   <li><b>4 条 skip 分支 + 各自的 metric</b>（Go {@code :126-154}）</li>
+ *   <li><b>skip vs fatal 的不对称</b>：这里失败是 best-effort，hot-rpc 失败才是 fatal</li>
+ * </ol>
+ * 这三件事必须能脱离 HTTP 单独回归，所以本类不依赖任何 Web 层类型。
  *
- * <p><b>本文件是空骨架</b>，仅有类型声明，尚无任何实现；按上面的 FileTree 出处逐个翻译即可。
+ * <h2>并发模型：Go 的 goroutine + channel semaphore 的 Java 等价物</h2>
+ * Go 侧为 100 个 item <b>各起一个 goroutine</b>，用容量 8 的 channel 做信号量
+ * （{@code :96-110}），最后 {@code wg.Wait()} 汇合。
+ * <p>Java 侧的对应做法：<b>共享线程池 + 每请求一个 {@link Semaphore}(8)</b>，
+ * 且<b>先 acquire 再 submit</b>：
+ * <pre>
+ *   for (i = 0; i &lt; n; i++) {
+ *       gate.acquire();                      // ← 在途任务数被本请求的窗口卡住
+ *       futures[i] = pool.submit(() -&gt; { try { ... } finally { gate.release(); } });
+ *   }
+ * </pre>
+ * 为什么是「每请求一个 semaphore」而不是「全局 8 线程的池」：
+ * Go 的信号量是<b>每次调用新建</b>的 ⇒ 并发请求之间<b>互不占用</b>，
+ * 每个请求都享有完整的 8 并发。用一个 8 线程的全局池会让 N 个并发请求共享 8 个槽位
+ * （即「每个请求 8/N 并发」），那是可观察的延迟差异。
+ * <p>为什么「先 acquire 再 submit」而不是「全部 submit，让任务自己 acquire」：
+ * 后者会让 100 个<b>平台线程</b>阻塞在信号量上（Go 的 goroutine 是廉价的，线程不是）。
+ * 先 acquire 保证了「每个请求最多 8 个线程真正在飞」。
+ *
+ * <h2>⚠️ 结果必须按下标保序</h2>
+ * Go 写的是 {@code hydrated[idx] = ...}（{@code :108}）—— 结果落在<b>输入下标</b>上，
+ * 与 goroutine 的完成顺序无关。Java 侧若用「先完成的先 add」，同样 4 条被 skip 的输入
+ * 会产出不同的 rank 分配 ⇒ 可观察差异。因此按数组下标落位、最后按下标过滤。
+ *
+ * <h2>⚠️ best-effort：4 条 skip 分支都不冒泡</h2>
+ * Go 侧这一层<b>没有任何</b> {@code return nil, err}：出错只是让该条为 nil。
+ * {@code hydrateArticles} 的返回值 {@code []types.HotArticleItem} 里用 {@code nil} 表示 skip。
  */
+@Service
 public class HotArticleHydrator {
+
+    /**
+     * Go {@code getHotArticlesLogic.go:29} {@code hydrationConcurrency = 8}。
+     */
+    public static final int HYDRATION_CONCURRENCY = 8;
+
+    private final ArticleRpcClient articleRpcClient;
+    private final HotApiMetrics metrics;
+    private final LoggerFactoryBean logger;
+    private final Executor hydrationExecutor;
+
+    public HotArticleHydrator(ArticleRpcClient articleRpcClient,
+                              HotApiMetrics metrics,
+                              LoggerFactoryBean logger,
+                              @Qualifier("hotHydrationExecutor") Executor hydrationExecutor) {
+        this.articleRpcClient = articleRpcClient;
+        this.metrics = metrics;
+        this.logger = logger;
+        this.hydrationExecutor = hydrationExecutor;
+    }
+
+    /**
+     * 对 hot-rpc 返回的 TopK 做并发补全 —— 对应 Go {@code hydrateArticles}（{@code :91-124}）。
+     *
+     * @param hotItems         Go {@code hotResp.GetItems()}；元素可为 null（对应 Go 的 nil item）
+     * @param remainingBudgetMs 请求剩余预算，显式传给每个补全任务
+     *                         （Go 侧由 ctx 隐式携带，见 {@code getHotArticlesLogic.go:128}）
+     * @return 与输入<b>等长</b>的列表，元素为 {@code null} 表示该条被 skip；
+     *         rank <b>尚未</b>计算（由 {@link HotRankPaginator#assignRanks} 统一做）
+     */
+    public List<HotArticleCard> hydrate(List<HotArticleItem> hotItems, long remainingBudgetMs) {
+        if (hotItems == null || hotItems.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        int n = hotItems.size();
+        HotArticleCard[] hydrated = new HotArticleCard[n];
+        Semaphore gate = new Semaphore(HYDRATION_CONCURRENCY);
+
+        @SuppressWarnings("unchecked")
+        CompletableFuture<Void>[] futures = new CompletableFuture[n];
+        for (int i = 0; i < n; i++) {
+            final int idx = i;
+            final HotArticleItem hotItem = hotItems.get(i);
+            try {
+                gate.acquire();
+            } catch (InterruptedException e) {
+                // Go 侧对应情形是 ctx 被取消；此处保留中断标志并把剩余位置补 nil，
+                // 让本请求按「部分补全」结束而不是整体失败。
+                Thread.currentThread().interrupt();
+                break;
+            }
+            futures[i] = CompletableFuture.runAsync(() -> {
+                try {
+                    hydrated[idx] = buildHotArticleItem(hotItem, remainingBudgetMs);
+                } finally {
+                    gate.release();
+                }
+            }, hydrationExecutor);
+        }
+
+        try {
+            CompletableFuture.allOf(nonNull(futures)).join();
+        } catch (RuntimeException e) {
+            // Go 侧的 wg.Wait() 不会失败（每个 goroutine 内部自己吞掉了所有错误）。
+            // Java 侧理论上到不了这里（任务体不抛），但真到了也不能让整包 500：
+            // best-effort 的语义是「补不全也给结果」，不是「补全失败就报错」。
+            Thread.currentThread().interrupt();
+        }
+
+        List<HotArticleCard> ordered = new ArrayList<>(n);
+        for (HotArticleCard card : hydrated) {
+            ordered.add(card);
+        }
+        return ordered;
+    }
+
+    /**
+     * 单条补全 —— 对应 Go {@code buildHotArticleItem}（{@code getHotArticlesLogic.go:126-170}）。
+     *
+     * @return 成功时的卡片；<b>任何</b> skip 分支都返回 {@code null}
+     */
+    HotArticleCard buildHotArticleItem(HotArticleItem hotItem, long remainingBudgetMs) {
+        // 分支 ①：Go :127-130 —— nil item 或空 article_id
+        if (hotItem == null || hotItem.getArticleId().isEmpty()) {
+            metrics.observeArticleSkip(HotApiMetrics.SKIP_EMPTY_ARTICLE_ID);
+            return null;
+        }
+
+        GetArticleResponse articleResp;
+        try {
+            articleResp = articleRpcClient.getPublicArticle(hotItem.getArticleId(), remainingBudgetMs);
+        } catch (RuntimeException e) {
+            // 分支 ②：Go :137-142 —— RPC 报错。skip 该条 + 两条 metric + 业务错误日志。
+            // ⚠️ 捕获 **RuntimeException** 而不是只捕 StatusRuntimeException：
+            //    Go 的判据是 `rpcErr != nil`（client 返回的任何 error 都算），
+            //    只捕 grpc 状态异常会让「超时 / 被 breaker 拒绝 / 序列化失败」等
+            //    非 StatusRuntimeException 的失败直接冒泡，把 best-effort 变成整包 500。
+            metrics.observeRpcError(HotApiMetrics.CALLEE_ARTICLE_RPC);
+            metrics.observeArticleSkip(HotApiMetrics.SKIP_ARTICLE_RPC_ERROR);
+            logQuietly(() -> logger.logBusinessErr(Context.current(),
+                    HotErrorCode.ERROR_SERVER_COMMON.getCode(), e,
+                    WithArticleID.of(hotItem.getArticleId())));
+            return null;
+        }
+
+        // 分支 ③：Go :143-147 —— resp 或 article 为 nil
+        if (articleResp == null || !articleResp.hasArticle()) {
+            metrics.observeArticleSkip(HotApiMetrics.SKIP_ARTICLE_MISSING);
+            logQuietly(() -> logger.logInfo(Context.current(),
+                    "skip hot article because article detail is missing",
+                    WithArticleID.of(hotItem.getArticleId())));
+            return null;
+        }
+
+        Article article = articleResp.getArticle();
+        // 分支 ④：Go :150-154 —— 状态不是 PUBLISHED
+        // ⚠️ 这里读的是 article-rpc **公开投影**（public_only=true 的 frozen revision）的状态，
+        //    不是可变源行。源行在 REVIEWING 时公开投影仍是 PUBLISHED，
+        //    因此改稿中的文章不会从热榜里消失（Go _test.go:47-60 锁住这条）。
+        if (article.getStatus() != ArticleStatus.PUBLISHED) {
+            metrics.observeArticleSkip(HotApiMetrics.SKIP_ARTICLE_NOT_PUBLISHED);
+            logQuietly(() -> logger.logInfo(Context.current(),
+                    "skip hot article because article is not published",
+                    WithArticleID.of(article.getId())));
+            return null;
+        }
+
+        // 成功：HotScore 取自 hot-rpc（Go :158），其余 11 个字段取自 article 公开投影。
+        // ⚠️ ArticleId 取的是 article.GetId()（Go :157），不是 hotItem.GetArticleId()。
+        HotArticleCard card = new HotArticleCard();
+        card.setArticleId(article.getId());
+        // Go 的类型是 uint32，JSON 写无符号十进制；protobuf-java 把它映射成有符号 int
+        // ⇒ 必须转回无符号，否则 ≥2^31 的热度分会写成负数（详见 HotArticleCard 类注释）。
+        card.setHotScore(Integer.toUnsignedLong(hotItem.getHotScore()));
+        card.setTitle(article.getTitle());
+        card.setBrief(article.getBrief());
+        card.setCoverImageUrl(article.getCoverImageUrl());
+        card.setAuthorId(article.getAuthorId());
+        card.setCreateTime(article.getCreateTime());
+        card.setViewCount(article.getViewCount());
+        card.setLikeCount(article.getLikeCount());
+        card.setCommentCount(article.getCommentCount());
+        card.setManualTypeTag(article.getManualTypeTag());
+        // ⚠️ Go 侧 proto3 repeated 字段在无元素时是 nil slice ⇒ JSON 输出 null 而不是 []。
+        //    protobuf-java 永远返回非 null 列表，必须显式还原成 null。
+        card.setSecondaryTags(article.getSecondaryTagsCount() == 0
+                ? null
+                : new ArrayList<>(article.getSecondaryTagsList()));
+        return card;
+    }
+
+    /**
+     * 日志失败不得改变响应 —— Go 的 logger 不会让请求失败，
+     * Java 侧任何一次日志异常都不该把「skip」变成 500
+     * （与 {@code ArticleAuthorResolver} 的同款取舍）。
+     */
+    private void logQuietly(Runnable action) {
+        try {
+            action.run();
+        } catch (RuntimeException loggingFailure) {
+            // 刻意吞掉
+        }
+    }
+
+    /**
+     * 剔除中断后未提交的空槽 —— {@code CompletableFuture.allOf} 不接受 null 元素。
+     * 被剔除的位置在 {@code hydrated} 里保持 null，即「该条被 skip」，与 best-effort 语义一致。
+     */
+    private static CompletableFuture<Void>[] nonNull(CompletableFuture<Void>[] futures) {
+        List<CompletableFuture<Void>> live = new ArrayList<>(futures.length);
+        for (CompletableFuture<Void> future : futures) {
+            if (future != null) {
+                live.add(future);
+            }
+        }
+        @SuppressWarnings("unchecked")
+        CompletableFuture<Void>[] result = new CompletableFuture[live.size()];
+        return live.toArray(result);
+    }
 }

@@ -270,6 +270,27 @@
 
 ---
 
+## 修复状态（2026-10-23 夜，追加于验证之后）
+
+| ID | 状态 | 做法 |
+|---|---|---|
+| S-1 | ✅ 已修 | 移除 `getPublicArticle` 上的 `@Transactional(readOnly=true)`（Go 该路径本就无事务），并留痕说明**不可加回** |
+| S-2 | ✅ 已修 | ORDER BY 方向改为 `SortBy` 为空时恒 `DESC`，公开路径规则不动 |
+| S-3 | ✅ 已修 | `setSeekAfterError(false)` → **`true`**，javadoc 改为按 `ForceCommit` 默认值论证 |
+| S-4 | ✅ 已修 | `factory.setConcurrency(8)`（`PROCESSOR_CONCURRENCY` 常量） |
+| S-5 | ⛔ **阻塞** | security 域未迁移，无法实现；已把 `ContentSecurityPort` 补上 `success` 字段（S-5b），使 Go 的 `!Success` 分支不再无处安放 |
+| S-6 | ✅ 已修 | `ArticleServiceGrpcImpl.invoke` 增加 `catch (StatusRuntimeException)` 透传，放在 `catch(RuntimeException)` **之前** |
+| S-7 | ✅ 已修 | `<if>` 条件与 `@Param` 名对齐（`secondaryTagJson`） |
+| O-1 | ✅ 已修 | 新增 `ArticleExceptions.articleNotFoundRaw()` → `Raw("record not found")` |
+| O-2 | ✅ 已修 | 6 个 meter name 写掉 Micrometer 后缀，输出与 Go 全名逐条一致 |
+| O-3 | ✅ 已修 | 移除 DB 失败时的 `minioError("get")`，改为仅记日志 |
+| O-4 | ✅ 已修 | `sendArticlePublished` 增加 `authorId` 原串入参 |
+| O-5 | ❌ **证伪** | 见 README §1b，不是缺陷 |
+| O-6 | ✅ 已修 | `deadline: 3s` → `2s`，注释改为指向 `zrpc/config.go:31`（消费点） |
+| U-2 | 🟡 部分 | `retractAndUpdate` 增加 `selectByIdForUpdate`，四条写路径锁序统一为 article → publication；真并发用例仍未写 |
+
+---
+
 # 三、HIGH-RISK DRIFT 汇总
 
 | ID | 为什么「没看过 Go 源码也会这么写」成立 | 为什么危险 |
