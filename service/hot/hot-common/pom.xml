@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>hot</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>hot-common</artifactId>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!--
+            本模块**刻意保持零生产依赖**，与 article-common 同款（其 Go 源同样无 gRPC 错误码）。
+
+            为什么不引 grpc-stub：Go 侧 errmsg.go 的 GRPCError / BizCodeFromError 是唯一的 grpc 使用点，
+            而这两个函数经 grep 验证在 service/hot 全域**零调用点** → 不迁移 → 无需 grpc-stub。
+            ⚠️ 不要照抄 message-common 的 grpc-stub 依赖：那边的 MessageGrpcError 真被调用，
+            两者的差异见 FileTree/hot/common.md §12.5 判据 2。
+
+            为什么不引 jackson-annotations：Go 的 CodeError 带 json 标签，但 Java 侧的异常载体是
+            com.rag.common.exception.BusinessException（不是可序列化 DTO），
+            HotErrorCode / HotErrorMessages 都不参与 JSON 序列化。
+            ⚠️ Go 侧 hotcenter.go 的 httpx.SetErrorHandler 是把 codeErr.Code / codeErr.Msg
+            **逐字段复制**进 response.Response，CodeError 本身从不被 JSON 序列化
+            ⇒ 那两个 json tag 在 hot 域是历史 vestige，无需对齐。
+
+            ✅ 落点已定（2026-10-22 实施）：落在 hot-common，即本模块。
+            依据有三，且互相独立：
+              1) hot-api/pom.xml **早已**声明了对本模块的依赖（消费侧已就位）；
+              2) service/hot/pom.xml **早已**把 hot-common 列为 <module>；
+              3) FileTree/hot/common.md §12.5 的推荐落点即此处，
+                 且 §12.7 的三域口径不通过项 #3 指向「统一到 -common」（users/message/article 三域均如此）。
+            ⇒ common.md §12.5 的「待拍板」已于本次实施消除；api.md 对应两处已同步。
+
+            ⚠️ 落点已定 ≠ 未来不可改：若日后改判为落在 hot-api 的 service 包，
+            本模块退化为空壳，此时**不要**保留这两个类 —— 见 common.md §12.5「不建」的理由。
+        -->
+
+        <!-- 契约等价测试（11 个码值 + 11 条文案逐字锁死 + 未知码回退 + 跨域同码不同义守卫，共 14 条）。版本由 spring-boot-dependencies BOM 管理。 -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

@@ -1,0 +1,152 @@
+# =============================================================================
+# hot-rpc application.yml —— 对应 Go 端 service/hot/rpc/etc/hot.yaml
+#
+# Go 侧有 3 份配置（hot.yaml / hot2.yaml / hot3.yaml），它们是**同一个 consumer group 的
+# 3 个副本**：共享同一个 etcd key(hot.rpc)、同一个 consumer group(article-hot-group)、
+# 同一个 topic(article-hot-events)、同一份 HeavyKeeper/Interaction 参数，
+# 只差 ListenOn(8083/8084/8085) 与 Prometheus.Port(19091/19092/19093)。
+# ⇒ Java 侧收敂为「同一部署 × 3 副本」，端口走环境变量。
+#
+# hot2/hot3.yaml 相对 hot.yaml 的唯一结构差异：Weights 少了 Code 字段。
+# 该字段在 Go 侧零读取（hot.go:47-50 只按 Name 建 map），但 Java 侧在
+# HotRpcProperties.Weight 里保留 code，以免配置结构与真源脱节。
+# =============================================================================
+
+spring:
+  application:
+    name: hot-rpc
+
+  # ============== Redis（对应 Go RedisConf{Host: redis:6379, Pass}）==============
+  # ⚠️ Go 侧 RedisConf.Type 是**死配置**（service_context.go:17-20 只用 Addr + Password），
+  #    所以这里不配 cluster 相关项：Lettuce 默认即单节点直连。
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      timeout: 3s
+
+  # ============== Kafka（对应 Go KqConsumerConf + sarama Config）==============
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:kafka:9092}
+
+    consumer:
+      group-id: article-hot-group        # Go KqConsumerConf.Group
+      # ⚠️ L1 语义：Go 是 sarama.OffsetNewest —— 新 group **从最新位点开始，不回放历史**。
+      #    Spring 对应项就是 latest（默认也是 latest，这里显式写出以锁定契约）。
+      auto-offset-reset: latest
+      # ⚠️ 关掉自动提交，改由容器在 listener 正常返回后提交（ack-mode: record）。
+      #    这与 Go 的「消费完就 MarkMessage」一致。
+      enable-auto-commit: false
+      # ⚠️ payload 用 String 接收：让 JSON 解析失败发生在 HotEventConsumer 内部（被吞），
+      #    而不是发生在 Kafka 反序列化器里（会触发容器重试，改变 Go 的 drop 语义）。
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        # ⚠️ L1 语义：Go 是 sarama.NewBalanceStrategyRoundRobin()。
+        #    Spring 默认是 RangeAssignor —— 会改变分区归属，进而改变 hkMap 布局与热榜分布。
+        partition.assignment.strategy: org.apache.kafka.clients.consumer.RoundRobinAssignor
+
+    listener:
+      # RECORD = listener 正常返回后提交位点。这是 drop 契约的实现载体
+      # （HotEventConsumer 保证永不外抛 ⇒ 任何坏消息的位点都照常推进）。
+      ack-mode: record
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+
+# ============== gRPC server（devh）（对应 Go ListenOn: 0.0.0.0:8083）==============
+grpc:
+  server:
+    # Go 三副本是 8083/8084/8085；Java 侧收敂为同一部署 × 副本，端口走环境变量。
+    # ⚠️ Infrastructure.md §3 目前只给 hot 预占了 18897(HTTP)，**gRPC 端口未分配**。
+    #    这里先沿用 Go 的 8083（8081=admin-rpc / 8082=message-rpc / 8083 空闲）。
+    port: ${HOT_RPC_GRPC_PORT:8083}
+    address: 0.0.0.0
+    # ⚠️ Go 端 reflection 仅在 DevMode/TestMode 注册（hot.go:38-40），
+    #    三份 yaml 均未写 Mode（默认 pro）⇒ **生产不暴露 reflection**。
+    #    与 user-rpc 同款显式关闭；本地调试改 true 或用环境变量覆盖。
+    reflection-service-enabled: false
+
+# ============== 业务配置（对应 Go config.Config 的 HeavyKeeper / Interaction）==============
+hot-rpc:
+  kafka:
+    # Go KqConsumerConf.Topic（三份 yaml 一致）。消费侧的 group 在 spring.kafka.consumer.group-id。
+    topic: article-hot-events
+
+  heavy-keeper:
+    # Go HeavyKeeper{Width:1000, Depth:5, Decay:0.9, TopK:100}
+    width: 1000
+    depth: 5
+    decay: 0.9
+    top-k: 100
+
+  interaction:
+    # Go Interaction{SyncEvery:100, TTL:3600, PartitionCount:3}
+    # ⚠️ sync-every 是**全局**事件计数器阈值（Go hot_handler.go:179），不是每分区计数
+    #    ⇒ 分区越多，单分区的快照越稀疏。
+    sync-every: 100
+    # ⚠️ ttl-seconds 只作用于合并后的大 key hot:articles；
+    #    分片 key hot:articles:p{i} 的 EXPIRE 是**硬编码 300s**（Go hot_handler.go:232），
+    #    两个过期时间不同，切勿统一。
+    ttl-seconds: 3600
+    # ⚠️ 必须等于 topic 的实际分区数：merge 只读 p0..p{N-1}（Go hot_handler.go:361-363）。
+    #    分区数 > 该值时，多出的分片快照照写不合并，那些文章永远不出现在 hot:articles。
+    #    Go 侧同样如此，此处按「不擅自修复 Go 行为」原样保留。
+    partition-count: 3
+    weights:
+      - code: 1          # ⚠️ Go 侧零读取，仅为保留配置结构而存在
+        name: like
+        weight: 1
+      - code: 2
+        name: comment
+        weight: 2
+      - code: 3
+        name: coin
+        weight: 3
+      - code: 4
+        name: share
+        weight: 4
+
+# ============== observability（对齐 Go observability.DisableNativeRpcTimeout）==============
+# 取值依据：Go hot.yaml 未配置 Timeout ⇒ 生效值来自 go-zero zrpc/config.go:46
+# `Timeout int64 `json:",default=2000"`` ⇒ **2000ms**。
+# ⚠️ 漏掉这一项 ⇒ 无 gRPC deadline，且**不报任何错**（RpcServerInterceptorFactory 收到 null
+#    会静默回退 Duration.ZERO = 不限时）。
+observability:
+  rpc-timeout: 2s
+
+# ============== Actuator：hot-rpc 是纯 gRPC 进程，不起 management HTTP server ==============
+# ⚠️ 与 user-rpc 同款取舍：Go 的 prometheus.StartAgent 在 19091/19092/19093 起的是**真的
+#    HTTP 服务**，而纯 gRPC 的 Spring 进程没有 web 容器 ⇒ /actuator/prometheus 没有暴露路径。
+#    Micrometer 里的 Counter 照常注册（PrometheusMeterRegistry 可读），
+#    将来若要 scrape，需引入 spring-boot-starter-web 或独立 sidecar。
+management:
+  server:
+    port: -1                        # 禁用 management HTTP server
+  endpoints:
+    enabled-by-default: false
+    prometheus:
+      enabled: false
+  metrics:
+    enable:
+      prometheus: true              # Counter 仍注册进 Micrometer
+    tags:
+      application: ${spring.application.name}
+  # Go hot.yaml: Telemetry{Name: hot-rpc, Endpoint: jaeger:4317, Sampler: 1.0, Batcher: otlpgrpc}
+  # ⚠️ 必须挂在同一个 management: 下 —— YAML 重复键后者会覆盖前者。
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://jaeger:4317}
+
+# ============== 日志 ==============
+logging:
+  level:
+    root: INFO
+    com.rag: INFO
+    io.grpc: WARN

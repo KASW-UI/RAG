@@ -16,6 +16,8 @@ import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -65,11 +67,53 @@ public class MessageRpcSupport {
     }
 
     /**
-     * 对应 Go {@code toNotificationItem(item model.Notification) *pb.NotificationItem}：
+     * 🔴 <b>DRIFT-MSG-V-007（2026-10-22 修）：无时区墙钟 → epoch 秒，必须按 <b>JVM 本地时区</b>解释</b>
+     *
+     * <p><b>Go 侧怎么做的</b>：
+     * <pre>
+     * GORM/PG 的时间列是 timestamptz（gorm postgres driver postgres.go:251-255 把
+     * schema.Time 映射成 "timestamptz"），DSN 显式钉 TimeZone=Asia/Shanghai（db.go:22）。
+     * 读出来是 time.Time（一个绝对瞬时）⇒ .Unix() 直接就是真实 epoch 秒，**与时区无关**。
+     * </pre>
+     *
+     * <p><b>RAG 侧的差异</b>：DDL 用的是 {@code TIMESTAMP}（无时区），实体是 {@link LocalDateTime}。
+     * pgjdbc 对无时区列<b>不做任何换算</b>，写进去什么墙钟就读出什么墙钟
+     * ⇒ 这是一个<b>无时区墙钟</b>，本身不含 epoch 信息。
+     * 修复前用的是 {@code toEpochSecond(ZoneOffset.UTC)} —— 把墙钟<b>当成 UTC</b>。
+     *
+     * <p><b>后果（部署时区 = Asia/Shanghai，已实测）</b>：
+     * <pre>
+     * JVM default zone       = Asia/Shanghai
+     * 写入的墙钟              = 2026-10-22 19:08:17
+     * 真实瞬时                = 2026-10-22T11:08:17Z
+     * Go  .Unix()            = 1792667297
+     * 修复前 toEpochSecond(UTC)= 1792696097   差 +8 小时 ⇒ <b>RAG 比 Go 晚 8 小时</b>
+     * 修法 atZone(systemDefault)= 1792667297   差  0 小时
+     * </pre>
+     * ⇒ 客户端看到的所有 {@code created_at} / {@code latest_message_at} / {@code updated_at}
+     * <b>都比真源晚 8 小时</b>。
+     *
+     * <p><b>为什么用 {@link ZoneId#systemDefault()} 而不是硬编码 {@code Asia/Shanghai}</b>：
+     * 写侧用的就是 {@code LocalDateTime.now()}（= JVM 本地墙钟），读侧也用本地时区解释，
+     * <b>写读自洽 ⇒ 无论 JVM 跑在哪个时区，epoch 都正确</b>。
+     * 硬编码 Asia/Shanghai 反而在「JVM 改成 UTC」的部署里会错。
+     * 这也是本次决策的结论：<b>不要求部署时区固定，只要求写读用同一个时区解释</b>。
+     *
+     * <p><b>剩下的稳健性缺口（不在本次修复范围）</b>：
+     * 列类型仍是 {@code TIMESTAMP} 而非 {@code TIMESTAMPTZ}。
+     * 在「一个 DB 只由一个时区的 JVM 写」的前提下，上面的自洽成立；
+     * 但一旦出现多时区写入（迁移期新旧实例并存）或换时区回读历史数据，就会重新错位。
+     * 要根治需 {@code V4} 迁移把列改成 {@code TIMESTAMPTZ}（连带修读侧），见 AGENTS.md §6.7.10。
+     */
+    private static long toEpochSecond(LocalDateTime wallClock) {
+        return wallClock.atZone(ZoneId.systemDefault()).toEpochSecond();
+    }
+
+    /** 对应 Go {@code toNotificationItem(item model.Notification) *pb.NotificationItem}：
      * Notification entity → wire DTO 转换。{@code Extra} 走 {@link Map} 1:1 输出。
      *
-     * <p>{@code CreatedAt.toEpochSecond(UTC)} 对应 proto {@code int64 created_at} 秒级时间戳，
-     * 与 Go 端 {@code CreatedAt.Unix()} 1:1。
+     * <p>{@code CreatedAt} 经 {@link #toEpochSecond} 转秒级时间戳，
+     * 与 Go 端 {@code CreatedAt.Unix()} 1:1（见 DRIFT-MSG-V-007 的时区论证）。
      */
     public static NotificationItem toNotificationItem(NotificationEntity item) {
         if (item == null) {
@@ -84,7 +128,7 @@ public class MessageRpcSupport {
                 .setTitle(item.getTitle())
                 .setContent(item.getContent())
                 .setIsRead(item.isRead())
-                .setCreatedAt(item.getCreatedAt() != null ? item.getCreatedAt().toEpochSecond(java.time.ZoneOffset.UTC) : 0L)
+                .setCreatedAt(item.getCreatedAt() != null ? toEpochSecond(item.getCreatedAt()) : 0L)
                 .putAllExtra(safeMap(item.getExtra()))
                 .build();
     }
@@ -103,7 +147,7 @@ public class MessageRpcSupport {
                 .setRecipientRole(SenderRole.forNumber(item.getRecipientRole()))
                 .setContent(item.getContent())
                 .setIsRead(item.isRead())
-                .setCreatedAt(item.getCreatedAt() != null ? item.getCreatedAt().toEpochSecond(java.time.ZoneOffset.UTC) : 0L)
+                .setCreatedAt(item.getCreatedAt() != null ? toEpochSecond(item.getCreatedAt()) : 0L)
                 .build();
     }
 
@@ -142,9 +186,94 @@ public class MessageRpcSupport {
         return limit;
     }
 
-    /** 对应 Go {@code trimContent(content string) string}：strings.TrimSpace 等价。 */
+    /** 对应 Go {@code trimContent(content string) string}：{@code strings.TrimSpace} 等价。 */
     public static String trimContent(String content) {
-        return content == null ? "" : content.trim();
+        return content == null ? "" : trimGoSpace(content);
+    }
+
+    /**
+     * <b>⚠️ DRIFT-MSG-V-008（2026-10-22 修）</b>：复刻 Go {@code strings.TrimSpace} 的空白集合。
+     *
+     * <p><b>为什么不能用 {@link String#trim()} 或 {@link String#strip()}</b>——
+     * 修复前本文件用的是 {@code String.trim()}，两者<b>都不等价</b>，且是<b>双向不等价</b>：
+     * <table border="1">
+     *   <caption>三种 trim 的差异方向</caption>
+     *   <tr><th>字符</th><th>Go TrimSpace</th><th>Java trim()</th><th>Java strip()</th></tr>
+     *   <tr><td>{@code U+00A0} NBSP</td><td>✔ 空白</td><td>✘ <b>漏</b></td><td>✘ <b>漏</b>（non-breaking）</td></tr>
+     *   <tr><td>{@code U+3000} 全角空格</td><td>✔ 空白</td><td>✘ 漏</td><td>✔</td></tr>
+     *   <tr><td>{@code U+2028} / {@code U+2029}</td><td>✔ 空白</td><td>✘ 漏</td><td>✔</td></tr>
+     *   <tr><td>{@code U+0085} NEL</td><td>✔ 空白</td><td>✘ 漏</td><td>✘ 漏</td></tr>
+     *   <tr><td>{@code U+202F} / {@code U+2007}</td><td>✔ 空白</td><td>✘ 漏</td><td>✘ <b>漏</b>（no-break 类）</td></tr>
+     *   <tr><td>{@code U+001C}–{@code U+001F}</td><td>✘ <b>非空白</b></td><td>✔ <b>多删</b></td><td>✔ <b>多删</b></td></tr>
+     * </table>
+     * ⇒ {@code strip()} 也不是答案：它<b>少</b> 5 个码点、<b>多</b> 4 个码点。
+     *
+     * <p><b>可观察影响（这就是本条被登记为语义漂移而不是"表达层差异"的原因）</b>：
+     * <pre>
+     * 输入 content = "\u00A0\u00A0"（两个不换行空格）
+     *   Go  : TrimSpace → "" → content == ""  → INVALID_ARGUMENT + 5003 invalid parameter
+     *   修复前: trim()     → 原样非空          → 继续入库，写进一条只含 NBSP 的消息
+     * </pre>
+     * 它同时改变<b>输入解释</b>（空串判定）与<b>持久化结果</b>，按 AGENTS.md §3.2
+     * 必须作为行为差异处理，不能按"表达层"豁免。
+     *
+     * <p><b>集合的权威来源（不是记忆，是实测）</b>：
+     * Go {@code unicode.IsSpace}（{@code src/unicode/graphic.go:128}）对 {@code r <= 0xFF}
+     * 特判 8 个码点，其余走 {@code White_Space} 表（{@code src/unicode/tables.go:8570}）。
+     * 实测枚举 {@code r ∈ [0, 0x3200]} 得 <b>恰好 25 个</b>，本方法的集合与之一一对应。
+     */
+    private static String trimGoSpace(String s) {
+        int start = 0;
+        int end = s.length();
+        // 按 code point 前进：代理对是 1 个 code point 占 2 个 char，
+        // 按 char 前进会把代理对劈开（虽然代理对不在空白集合里，但边界推进必须正确）。
+        start = skipGoSpaceForward(s, 0);
+        end = skipGoSpaceBackward(s, s.length());
+        return (start >= end) ? "" : s.substring(start, end);
+    }
+
+    private static int skipGoSpaceForward(String s, int index) {
+        int i = index;
+        while (i < s.length()) {
+            int cp = s.codePointAt(i);
+            if (!isGoSpace(cp)) {
+                break;
+            }
+            i += Character.charCount(cp);
+        }
+        return i;
+    }
+
+    private static int skipGoSpaceBackward(String s, int index) {
+        int i = index;
+        while (i > 0) {
+            int cp = s.codePointBefore(i);
+            if (!isGoSpace(cp)) {
+                break;
+            }
+            i -= Character.charCount(cp);
+        }
+        return i;
+    }
+
+    /**
+     * Go {@code unicode.IsSpace} 的逐码点等价判定。
+     *
+     * <p>25 个码点分两段，与 Go 的实现结构一一对应：
+     * {@code r <= 0xFF} 时特判 8 个，其余走 White_Space 表。
+     */
+    private static boolean isGoSpace(int cp) {
+        if (cp <= 0xFF) {
+            return cp == '\t' || cp == '\n' || cp == 0x0B || cp == '\f' || cp == '\r'
+                    || cp == ' ' || cp == 0x85 || cp == 0xA0;
+        }
+        // Go: isExcludingLatin(White_Space, r) —— 表里 0x00A0–0x1680 这一段
+        // 对 Latin-1 已在上一个分支处理完，这里从 0x1680 起算。
+        return cp == 0x1680
+                || (cp >= 0x2000 && cp <= 0x200A)
+                || cp == 0x2028 || cp == 0x2029
+                || cp == 0x202F || cp == 0x205F
+                || cp == 0x3000;
     }
 
     /**
@@ -259,9 +388,9 @@ public class MessageRpcSupport {
                 .setUnreadCount(unreadCount)
                 .setLatestMessage(conv.getLastMessagePreview() == null ? "" : conv.getLastMessagePreview())
                 .setLatestMessageAt(conv.getLastMessageAt() != null
-                        ? conv.getLastMessageAt().toEpochSecond(java.time.ZoneOffset.UTC) : 0L)
+                        ? toEpochSecond(conv.getLastMessageAt()) : 0L)
                 .setUpdatedAt(conv.getUpdatedAt() != null
-                        ? conv.getUpdatedAt().toEpochSecond(java.time.ZoneOffset.UTC) : 0L)
+                        ? toEpochSecond(conv.getUpdatedAt()) : 0L)
                 .setCanSend(canSend(conv, operatorRole, operatorId))
                 .build();
     }
@@ -341,15 +470,15 @@ public class MessageRpcSupport {
      *
      * <p><b>语义等价论证</b>：{@code codePointCount} ↔ {@code len([]rune(s))}；
      * {@code offsetByCodePoints(0, 80)} ↔ {@code runes[:80]}；
-     * {@code String.trim()} 与 Go {@code strings.TrimSpace} 的空白集不同
-     * （Java trim 只去 {@code <= ' '}），这是<b>有意保留的表达层差异</b>，
-     * 不在本项修复范围，避免把一个漂移换成另一个。
+     * 空白集合见 {@link #trimGoSpace}（DRIFT-MSG-V-008）——
+     * <b>修复前本方法用的是 {@code String.trim()} 且被注释定性为「有意保留的表达层差异」，
+     * 那个定性是错的</b>：它同时改变了首条 50 字判定与预览结果。
      */
     public static String trimPreview(String content) {
         if (content == null) {
             return "";
         }
-        String trimmed = content.trim();
+        String trimmed = trimGoSpace(content);
         // 按码点计数，与 Go 的 []rune 对齐（不能用 length()：UTF-16 code unit ≠ rune）
         int runeCount = trimmed.codePointCount(0, trimmed.length());
         if (runeCount <= TRIM_PREVIEW_MAX_RUNES) {

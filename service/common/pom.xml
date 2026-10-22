@@ -115,6 +115,41 @@
             <artifactId>grpc-stub</artifactId>
         </dependency>
 
+        <!-- ============ 3a. gRPC **client** 全局拦截器（Go zrpc client 熔断，2026-10-22） ============ -->
+        <!--
+            对应 Go 版 zrpc 的 client breaker：
+              - zrpc/internal/config.go:14  ClientMiddlewaresConf.Breaker bool `json:",default=true"`
+              - zrpc/internal/client.go:112-113  if c.middlewares.Breaker { append(..., BreakerInterceptor) }
+            ⚠️ Go 的 yaml 里一个字都没写，但 breaker **默认开**（同 §3.3.1）。
+
+            为什么 optional=true（同 spring-web 那条的理由，但后果更严重）：
+              com.rag.common 是**所有**业务模块的公共下游。若用普通 compile，
+              devh grpc-client starter 会沿 Maven 传递给 like-common / users-common /
+              hot-common / message-common …… 即每一个只需要一个错误码表的纯库模块，
+              都会拖进一整套 gRPC 客户端栈 + Nacos + 服务发现自动配置。
+              optional=true 表示：common 自己能编译 com.rag.common.protection 下那个
+              ClientInterceptor，但**不传递给下游**。真正要用它的 api 模块自己显式声明。
+
+            运行期安全性：GoStyleGrpcClientBreakerInterceptor 上挂了
+            @ConditionalOnClass(GrpcGlobalClientInterceptor.class)，
+            没有 devh starter 的进程在**类加载之前**就被条件挡掉，不会 NoClassDefFoundError。
+            这不是预防性洁癖：本模块声明的是 optional，依赖方**不保证**有它，
+            「声明方自己也不该假设下游有」是 optional 的基本契约。
+        -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot-starter.version}</version>
+            <exclusions>
+                <!-- 与 message-api / like-api 同款：devh 默认拖 grpc-core 1.63.0，版本统一由根 pom 管 -->
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+            <optional>true</optional>
+        </dependency>
+
         <!-- ============ 3b. MyBatis 拦截器（B-1 超时缓解，2026-10-21） ============ -->
         <!--
             对应 Go 版 context.WithTimeout 到点后 database/sql 主动取消查询的语义。
@@ -202,6 +237,17 @@
             <artifactId>opentelemetry-sdk-testing</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+            grpc-core：**仅测试**。主源码只需要 grpc-api（grpc-stub 已带），
+            但 GoStyleRequestDeadlineTest 要用 io.grpc.inprocess.InProcessServerBuilder
+            起一个「故意挂住」的真 gRPC server，才能证明 deadline 真的中断了调用。
+            scope=test ⇒ 不会传递给任何下游模块。
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-test</artifactId>
@@ -226,6 +272,44 @@
             <groupId>org.springframework</groupId>
             <artifactId>spring-web</artifactId>
             <version>7.0.0</version>
+            <optional>true</optional>
+        </dependency>
+        <!--
+            spring-webmvc：**Go 风格请求体判据**（com.rag.common.http.GoStyleJsonBodyConverter）需要
+            org.springframework.http.converter.json.JacksonJsonHttpMessageConverter。
+            为什么必须 optional（与上面 spring-web 同理，但对纯 gRPC 进程更致命）：
+              本类继承 Jackson 转换器，class 签名直接引用 spring-webmvc 的类型。
+              若非 optional，它会沿 Maven 传递给只需要一张错误码表的纯库模块，
+              而那些模块的运行期**没有 servlet / 没有 MVC**，一旦该类被加载就是 NoClassDefFoundError。
+            运行期安全性：GoStyleJsonBodyConverterConfig 只在 servlet web 进程里生效
+            （它是 WebMvcConfigurer，Web MVC 栈不装配它就不会被实例化）。
+        -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
+            <!--
+                ⚠️ **刻意不写 version**，交给 spring-boot-dependencies 管理。
+                理由：本仓库离线（-o）可用的是 7.0.5 / 7.0.9，写死 7.0.0 会直接解析失败；
+                更要命的是写死版本等于**在同一个 classpath 上引入第二个 Spring Framework 版本** ——
+                那会让 @ConditionalOnWebApplication、WebMvcConfigurer 等类型出现「同名不同类」，
+                装配结果不可预测（§3.3 同款：不报错的失效）。
+                （旁边那条 spring-web 7.0.0 的硬编码是**既有**技术债，本次不动它，
+                  但绝不能照抄 —— 那正是它想避免的问题。）
+            -->
+            <optional>true</optional>
+        </dependency>
+        <!--
+            Jackson 3（tools.jackson.core:jackson-databind）：编译期需要，
+            因为 GoStyleJsonBodyConverter 的父类 JacksonJsonHttpMessageConverter 的
+            构造器签名里就是 tools.jackson.databind.json.JsonMapper。
+            ⚠️ 本模块同时还声明了 Jackson 2（jackson-databind，communityfact 在用）——
+            两代并存是既有事实，本次只把 Jackson 3 以 optional 补进来，**不删不改** Jackson 2。
+            ⚠️ 同样是 optional：只需要一张错误码表的纯库模块不需要 Jackson 3。
+            运行期安全性：本类的实例只在 servlet web 进程里由 WebMvcConfigurer 创建。
+        -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
             <optional>true</optional>
         </dependency>
         <dependency>

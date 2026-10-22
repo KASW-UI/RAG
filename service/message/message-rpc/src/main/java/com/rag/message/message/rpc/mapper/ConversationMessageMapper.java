@@ -100,12 +100,34 @@ public interface ConversationMessageMapper extends BaseMapper<ConversationMessag
     /**
      * 对应 Go 端 GetConversationMessages 用 offset + limit 分页：
      * 与 {@link #listByConversation} 不同在于这是 "用 offset 不带 cursor"。
+     *
+     * <p><b>⚠️ DRIFT-MSG-V-004（2026-10-22 修）：排序键必须是 {@code created_at}，不是 {@code id}</b>
+     * <pre>
+     * Go   message.go:159-174
+     *      db := Model(&amp;ConversationMessage{}).Where("conversation_id = ?", conversationID).
+     *           Order("created_at asc")                       ← created_at
+     * RAG  修复前
+     *      w.orderByAsc(ConversationMessageEntity::getId)     ← 错用了 id
+     * </pre>
+     * 两者<b>看起来等价</b>（id 是雪花、时间单调），实际不等价：雪花 id 在<b>同一毫秒内</b>
+     * 按 (机器号, 序列号) 排序，与 {@code created_at} 的并列顺序不必一致。
+     * ⇒ {@code created_at} 并列时两侧返回顺序不同，offset 分页的翻页结果也不同。
+     *
+     * <p><b>一个交叉证据</b>：DDL {@code V3__create_message_conversation_message.sql:20-23}
+     * 建的是 {@code idx_message_conversation_time (conversation_id, created_at)}，
+     * 注释写着「用于 GetConversationMessages 的 ORDER BY created_at ASC」——
+     * <b>索引与注释都指向 created_at，只有代码用了 id</b>。这本身就是漂移的可查痕迹。
+     *
+     * <p><b>刻意不加 id 作为 tie-breaker</b>：加了确实能让分页更稳（Go 侧
+     * {@code created_at} 并列时顺序不确定，offset 分页会漏/重），
+     * 但那是<b>新增 Go 不存在的行为</b>，属于 AGENTS.md §3.2 禁止的「顺手改好」。
+     * Go 的不确定性照原样保留，等 Go 侧先改再对齐。
      */
     default List<ConversationMessageEntity> listByConversationPage(long conversationId,
-                                                                  int offset, int limit) {
+                                                                   int offset, int limit) {
         LambdaQueryWrapper<ConversationMessageEntity> w = new LambdaQueryWrapper<>();
         w.eq(ConversationMessageEntity::getConversationId, conversationId);
-        w.orderByAsc(ConversationMessageEntity::getId);
+        w.orderByAsc(ConversationMessageEntity::getCreatedAt);
         w.last("LIMIT " + limit + " OFFSET " + offset);
         return selectList(w);
     }

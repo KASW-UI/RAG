@@ -38,11 +38,24 @@ spring:
       ddl-auto: none
     show-sql: false
 
+  # ============== Flyway ==============
+  # ⚠️ **独立账本表名**（2026-10-23，AGENTS.md §6.3 问题 4）。
+  #    `flyway_schema_history` 是 **schema 级**账本，一个 schema 只能有一本账。
+  #    message-rpc / like-rpc / article-rpc 连同一个 first_db、同一个 public schema，
+  #    共用默认账本时后启动者会把自己的迁移判为「已应用」而静默跳过 ——
+  #    message 与 like 的 V1-V3 版本号直接撞车且内容不同。
+  #    改账本表名即可消除病根，**迁移文件名一个字都不用动**。
+  #    ⛔ 不要用 validate-on-migrate=false / out-of-order=true 绕道：
+  #       已用真 jar + 真 PG 16 实测证伪（会让账本更脏），
+  #       见 tools/difftest/exp-drift015-flyway-flags.sh。
+  # ⚠️ 上面的声明只保证**配置层**不撞；「Flyway 运行时真的按它建表」
+  #    尚未在真 PG 上双模块对启动验证过，按 §3.3 记为 UNKNOWN。
   flyway:
     enabled: true
     baseline-on-migrate: true
     locations: classpath:db/migration
     schemas: public
+    table: flyway_schema_history_message
 
   # ============== Nacos Discovery ==============
   cloud:

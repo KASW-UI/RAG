@@ -19,9 +19,18 @@ import java.util.Map;
  * <p>字段命名 1:1：HUMAN_ONLY.MD 强制 @TableName + @TableId 取代 JPA；
  * 列名 snake_case 与 PG 表 1:1（mybatis-plus config 开启 map-underscore-to-camel-case）。
  *
- * <p>主键：Go 端 Snowflake；Java 端 MyBatis-Plus IdType.ASSIGN_ID（雪花）。
+ * <p><b>主键：Go 端 Snowflake；Java 端 MyBatis-Plus IdType.ASSIGN_ID（雪花）。</p>
+ *
+ * <p><b>🔴 {@code autoResultMap = true} 不是可选项（DRIFT-MSG-V-013）</b>：
+ * MyBatis-Plus <b>只有</b>在 {@code @TableName(autoResultMap = true)} 时，
+ * 才会把 {@code @TableField(typeHandler = ...)} 应用到<b>自动生成的 SELECT 结果映射</b>上。
+ * 少了它，读 {@code jsonb} 列拿到的是 {@code PGobject}，映射成 {@code Map} 直接失败。
+ * 这与 §3.3 记录的「断言 Bean 存在 ≠ 断言机制生效」同源 ——
+ * {@code typeHandler} 写在字段上≠ 它在 SELECT 上生效。
+ *
+ * <p>对应 Go：{@code Notification} 的 {@code TableName()}（{@code data_model.go:45-47}）。
  */
-@TableName("message_notification")
+@TableName(value = "message_notification", autoResultMap = true)
 public class NotificationEntity {
 
     @TableId(type = IdType.ASSIGN_ID)
@@ -88,10 +97,11 @@ public class NotificationEntity {
 
     /**
      * 对应 Go {@code Extra JSONMap gorm:"column:extra;type:jsonb"}。
-     * JSONB 类型：MyBatis-Plus 用 Jackson TypeHandler 自动绑定；
+     * JSONB 类型：用 {@link com.rag.message.message.rpc.mapper.JsonbMapTypeHandler} 绑定
+     * （**不是** MP 自带的 JacksonTypeHandler —— 它用 setString 绑定会被 jsonb 列拒绝，见该类注释）；
      * 入参默认空 map（不为 null），避免 wire 序列化丢字段。
      */
-    @TableField(typeHandler = com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler.class)
+    @TableField(typeHandler = com.rag.message.message.rpc.mapper.JsonbMapTypeHandler.class)
     private Map<String, String> extra = new HashMap<>();
 
     /** 对应 Go {@code CreatedAt time.Time gorm:"column:created_at;autoCreateTime"}。 */

@@ -17,4 +17,126 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <!--
+            hot-proto：HotServiceGrpc client Stub。
+            对应 Go 端 api/internal/svc/serviceContext.go 的 HotRpc 字段。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>hot-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            article-proto：ArticleServiceGrpc client Stub。
+            对应 Go 端 api/internal/svc/serviceContext.go 的 ArticleRpc 字段。
+            ⚠️ ArticleRpcClient 是 Go 侧 svc 里的第二个 client，漏了这个依赖编译不过。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>article-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            hot-common：HotErrorCode / HotErrorMessages（码与文案分离的 2 个类）。
+            对应 Go 端 service/hot/common/errmsg.go —— 本模块的 httpx.SetErrorHandler 等价物
+            （GlobalResponseAdvice / GlobalExceptionHandler）直接依赖这一层。
+            ⚠️ 落点待拍板（FileTree/hot/common.md §12.5）；若改判为 in-module，本依赖删除。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>hot-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            common（artifactId=common）：服务级共享能力，对应 Go 端 service/common/*：
+              - response.Response                          ← Go common/response（{code,msg,data} 信封）
+              - exception.BusinessException                ← Go CodeError 的 Java 等价物
+              - spring.HttpMiddlewareFilter                ← Go observability.NewHTTPMiddleware
+              - logger.Logger / WithArticleID              ← Go common/logger
+            ⚠️ 依赖本模块不等于 scanBasePackages 自动含 com.rag.common：
+               HotApiApplication 必须显式写 scanBasePackages = "com.rag.common"，
+               否则这些 @Component 静默不注册（AGENTS.md §3.3 记录的装配陷阱）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot Web（HTTP server） ============== -->
+        <!-- 对应 Go 端 rest.MustNewServer(c.RestConf) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- ============== 3. Metrics：复刻 Go 端 hot_api_* 5 个 metric ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 4. gRPC client（连 hot-rpc 与 article-rpc） ============== -->
+        <!--
+            与 message-api / user-api / like-rpc 同款：devh + Nacos discovery。
+            ⚠️ 必须 exclude io.grpc:grpc-core（devh 默认拖 1.63.0），版本统一由根 pom 的
+               <grpc.version> 管理。
+            ⚠️ 必须显式写 negotiation-type: plaintext（message-api 的 DRIFT-NEW-014）：
+               devh 的 GrpcChannelProperties 默认值是 TLS，不写会静默变 TLS，
+               而 Go zrpc.MustNewClient 是明文 gRPC。
+            ⚠️ Go 侧 RpcClientConf 未配 Timeout ⇒ 走 go-zero 默认 2000ms。
+               devh starter 没有默认 deadline，HotRpcClient / ArticleRpcClient
+               必须各自显式 withDeadlineAfter(2s)，否则补全会串行堆满 8 并发槽。
+        -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot-starter.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+
+        <!-- ============== 5. Nacos 服务发现 ============== -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- ============== 6. OpenTelemetry OTLP exporter（Go Telemetry.*） ============== -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 7. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            Boot 4 把测试切片拆成独立 artifact：@AutoConfigureMockMvc 在
+            org.springframework.boot.webmvc.test.autoconfigure，不再在
+            spring-boot-test-autoconfigure 里。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>

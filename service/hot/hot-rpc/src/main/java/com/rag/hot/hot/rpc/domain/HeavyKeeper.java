@@ -1,0 +1,279 @@
+package com.rag.hot.hot.rpc.domain;
+
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.PriorityQueue;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.locks.ReentrantLock;
+
+/**
+ * 带衰减的 Top-K sketch：FNV 指纹 + {@code depth × width} 桶表 + 最小堆。
+ *
+ * <p>Go 真源：{@code service/hot/heavykeeper/heavykeeper.go}（210 行，强依赖，必须移植 —— RAG 无等价物）。
+ * <p>推导依据：{@code FileTree/hot/rpc.md §12.3 / §12.5}。
+ *
+ * <h2>为什么必须逐行移植而不是换成 Redis ZADD</h2>
+ * ZADD 是<b>精确计数</b>（无衰减、无有损），会让停止更新的老文章永久霸榜。
+ * 本算法是<b>有损概率 sketch</b>：桶冲突时按 {@code decay^count} 概率让位。
+ * 换成精确计数 = 热榜语义完全改变，属行为变更。
+ *
+ * <h2>三条必须精确复刻的 Go 语义</h2>
+ * <ol>
+ *   <li><b>{@code uint32} 回绕</b>：Go 的 {@code bucket.count} 是 {@code uint32}，
+ *       {@code b.count += weight} 溢出后按模 2^32 回绕。Java 用 {@code int} 存储
+ *       （两补码位模式与 {@code uint32} 逐位相同），<b>加/减同样自然回绕</b>；
+ *       但<b>比较必须显式走无符号</b> —— {@code Integer.compareUnsigned} /
+ *       {@code Integer.toUnsignedLong}。若直接写 {@code count <= weight}，
+ *       在 count ≥ 2^31 时结果与 Go 相反。详见 {@link #unsignedToLong(int)}。</li>
+ *   <li><b>随机分支不可断言精确值</b>：{@code rand.Float64()} 属概率算法。
+ *       Go 自带的 {@code heavykeeper_test.go} 也只断言相对顺序，不断言精确计数；
+ *       本实现的测试沿用同一断言强度。</li>
+ *   <li><b>同 count 之间的顺序不稳定</b>：Go 用 {@code sort.Slice}（非稳定排序）
+ *       且输入来自 map 遍历序。本实现同样不承诺并列项次序。</li>
+ * </ol>
+ *
+ * <h2>已知成本</h2>
+ * {@link #updateTopK} 在 key 已在 Top-K 中时走 {@link #rebuildHeap}，
+ * 是 <b>O(k) 全量重建</b>（Go {@code heavykeeper.go:141,168-175} 同款）。
+ * TopK=100 时是微秒级；扩到万级应改成 {@code key→heapIndex} + {@code heap.fix}（Go 注释自陈）。
+ */
+public class HeavyKeeper {
+
+    /** Go {@code heavykeeper.Config} 的默认值（{@code DefaultConfig()}），对应 {@code etc/hot*.yaml}。 */
+    public static final int DEFAULT_WIDTH = 1000;
+    public static final int DEFAULT_DEPTH = 5;
+    public static final double DEFAULT_DECAY = 0.9;
+    public static final int DEFAULT_TOP_K = 100;
+
+    /**
+     * Top-K 条目。{@code count} 是 Go 的 {@code uint32}，Java 用 {@code int} 存同一批位。
+     */
+    public record Item(String key, int count) {
+    }
+
+    private record HeapItem(String key, int count) {
+    }
+
+    /**
+     * 最小堆比较器：按 count <b>无符号</b> 升序。
+     *
+     * <p>Go 是 {@code func (h minHeap) Less(i, j int) bool { return h[i].count < h[j].count }，
+     * 其中 {@code count} 是 {@code uint32} ⇒ 无符号比较。Java 的 {@code int < int} 是有符号，
+     * 会与 Go 在 count ≥ 2^31 时分岔。
+     */
+    private static final java.util.Comparator<HeapItem> BY_COUNT_UNSIGNED =
+            (a, b) -> Integer.compareUnsigned(a.count, b.count);
+
+    private final int width;
+    private final int depth;
+    private final double decay;
+    private final int k;
+
+    /** {@code fingerprints[row][col]}，对应 Go 的 {@code table[row][col].fingerprint}（uint32）。 */
+    private final int[][] fingerprints;
+    /** {@code counts[row][col]}，对应 Go 的 {@code table[row][col].count}（uint32）。 */
+    private final int[][] counts;
+
+    /** 对应 Go 的 {@code topKMap map[string]uint32}。 */
+    private final Map<String, Integer> topKMap = new HashMap<>();
+    /** 对应 Go 的 {@code topKHeap *minHeap}。 */
+    private final PriorityQueue<HeapItem> topKHeap = new PriorityQueue<>(BY_COUNT_UNSIGNED);
+
+    /** 对应 Go 的 {@code hk.mu sync.Mutex}：全局串行化 sketch 内部状态。 */
+    private final ReentrantLock mu = new ReentrantLock();
+
+    /** ���应 Go {@code heavykeeper.DefaultConfig()}。 */
+    public HeavyKeeper() {
+        this(DEFAULT_WIDTH, DEFAULT_DEPTH, DEFAULT_DECAY, DEFAULT_TOP_K);
+    }
+
+    /**
+     * 对应 Go {@code heavykeeper.New(cfg)}。
+     *
+     * @param width 桶数，Go yaml {@code HeavyKeeper.Width}（1000）
+     * @param depth 行数/哈希函数个数，Go yaml {@code HeavyKeeper.Depth}（5）
+     * @param decay 冲突时的衰减概率基数，Go yaml {@code HeavyKeeper.Decay}（0.9）
+     * @param topK  保留条目数，Go yaml {@code HeavyKeeper.TopK}（100）
+     */
+    public HeavyKeeper(int width, int depth, double decay, int topK) {
+        if (width <= 0) {
+            throw new IllegalArgumentException("width must be positive, got " + width);
+        }
+        this.width = width;
+        this.depth = depth;
+        this.decay = decay;
+        this.k = topK;
+        this.fingerprints = new int[depth][width];
+        this.counts = new int[depth][width];
+    }
+
+    /**
+     * 对应 Go {@code func (hk *HeavyKeeper) Add(key string, weight uint32)}。
+     *
+     * <p>三分支：空桶占位 / 指纹相同累加 / 冲突按 {@code decay^count} 概率让位。
+     * 随后取 {@code maxCount}（只统计指纹匹配行）更新 Top-K。
+     */
+    public void add(String key, int weight) {
+        mu.lock();
+        try {
+            int fp = fingerprint(key);
+            int maxCount = 0;
+
+            for (int row = 0; row < depth; row++) {
+                int col = hash(key, row);
+
+                if (counts[row][col] == 0) {
+                    // 空桶：占用
+                    fingerprints[row][col] = fp;
+                    counts[row][col] = weight;
+                } else if (fingerprints[row][col] == fp) {
+                    // 指纹匹配：累加权重。int 两补码回绕 == Go uint32 回绕（语义保留，见类注释）
+                    counts[row][col] += weight;
+                } else {
+                    // 冲突：以概率 decay^count 衰减
+                    double decayProb = Math.pow(decay, unsignedToDouble(counts[row][col]));
+                    if (ThreadLocalRandom.current().nextDouble() < decayProb) {
+                        if (Integer.compareUnsigned(counts[row][col], weight) <= 0) {
+                            counts[row][col] = weight;
+                            fingerprints[row][col] = fp;
+                        } else {
+                            counts[row][col] -= weight;
+                        }
+                    }
+                }
+
+                if (fingerprints[row][col] == fp && Integer.compareUnsigned(counts[row][col], maxCount) > 0) {
+                    maxCount = counts[row][col];
+                }
+            }
+
+            updateTopK(key, maxCount);
+        } finally {
+            mu.unlock();
+        }
+    }
+
+    /**
+     * 对应 Go {@code func (hk *HeavyKeeper) TopK() []Item}：按 count 降序。
+     *
+     * <p>⚠️ Go 用 {@code sort.Slice}（非稳定）且输入来自 map 遍历序，
+     * <b>同 count 之间次序本就不确定</b>；本实现同样不承诺并列项次序。
+     */
+    public List<Item> topK() {
+        mu.lock();
+        try {
+            List<Item> items = new ArrayList<>(topKMap.size());
+            for (Map.Entry<String, Integer> e : topKMap.entrySet()) {
+                items.add(new Item(e.getKey(), e.getValue()));
+            }
+            items.sort((a, b) -> Integer.compareUnsigned(b.count, a.count));
+            return items;
+        } finally {
+            mu.unlock();
+        }
+    }
+
+    /** 当前 Top-K 条目数（测试与断言用；Go 侧无对应方法，仅暴露观测点）。 */
+    public int topKSize() {
+        mu.lock();
+        try {
+            return topKMap.size();
+        } finally {
+            mu.unlock();
+        }
+    }
+
+    /** 对应 Go {@code updateTopK}（{@code heavykeeper.go:133-163}）。调用方必须已持 {@link #mu}。 */
+    private void updateTopK(String key, int count) {
+        if (count == 0) {
+            return;
+        }
+
+        // 已在 Top-K 中：更新 count
+        if (topKMap.containsKey(key)) {
+            topKMap.put(key, count);
+            rebuildHeap();
+            return;
+        }
+
+        // Top-K 未满：直接加入
+        if (topKMap.size() < k) {
+            topKMap.put(key, count);
+            topKHeap.offer(new HeapItem(key, count));
+            return;
+        }
+
+        // Top-K 已满：与堆顶比较
+        HeapItem minItem = topKHeap.peek();
+        if (minItem != null && Integer.compareUnsigned(count, minItem.count) > 0) {
+            topKMap.remove(minItem.key);
+            topKHeap.poll();
+            topKMap.put(key, count);
+            topKHeap.offer(new HeapItem(key, count));
+        }
+    }
+
+    /** 对应 Go {@code rebuildHeap}（{@code heavykeeper.go:168-175}）：全量重建 O(k)。 */
+    private void rebuildHeap() {
+        PriorityQueue<HeapItem> rebuilt = new PriorityQueue<>(Math.max(1, topKMap.size()), BY_COUNT_UNSIGNED);
+        for (Map.Entry<String, Integer> e : topKMap.entrySet()) {
+            rebuilt.offer(new HeapItem(e.getKey(), e.getValue()));
+        }
+        topKHeap.clear();
+        topKHeap.addAll(rebuilt);
+    }
+
+    /** 对应 Go {@code fingerprint}：FNV-1a 32。 */
+    private int fingerprint(String key) {
+        final int prime = 16777619;
+        // FNV-1a 32 offset basis = 2166136261 = 0x811C9DC5，超过 int 上限，只能用 hex 字面量
+        int h = 0x811C9DC5;
+        for (byte b : key.getBytes(StandardCharsets.UTF_8)) {
+            h ^= (b & 0xFF);
+            h *= prime; // int 溢出回绕 == Go uint32 回绕
+        }
+        return h;
+    }
+
+    /**
+     * 对应 Go {@code hash}：FNV-1a 64 依次写入 {@code key} 的字节与一个 seed 字节，再 {@code % width}。
+     *
+     * <p>⚠️ Go 是 {@code uint64} 取模；Java 的 {@code long} 是有符号的，
+     * FNV 结果最高位为 1 时会变负数 ⇒ 必须先转无符号再取模。
+     */
+    private int hash(String key, int seed) {
+        final long prime = 1099511628211L;
+        // FNV-1a 64 offset basis = 14695981039346656037 = 0xCBF29CE484222325，超过 long 有符号上限
+        long h = 0xCBF29CE484222325L;
+        for (byte b : key.getBytes(StandardCharsets.UTF_8)) {
+            h ^= (b & 0xFFL);
+            h *= prime;
+        }
+        h ^= ((byte) seed) & 0xFFL;
+        h *= prime;
+        // Go 是 uint64 取模；Java 的 long 是有符号的，FNV 结果最高位为 1 时 h 是负数。
+        // ⚠️ 不能写 `h & 0xFFFFFFFFFFFFFFFFL` —— 该字面量的位模式全为 1（即 -1L），
+        //    掩码等于什么都没做，负数取模会得到负下标 ⇒ ArrayIndexOutOfBounds。
+        // 正确做法：对正除数做有符号取模后补正，得到的就是无符号余数。
+        int remainder = (int) (h % width);
+        return remainder < 0 ? remainder + width : remainder;
+    }
+
+    /** Go {@code float64(uint32)} 的等价：无符号数值，不是 int 的符号值。 */
+    private static double unsignedToDouble(int uint32) {
+        return (double) Integer.toUnsignedLong(uint32);
+    }
+
+    /** {@link Item#count()} 到 ZSET score 的换算，等价 Go {@code float64(item.Count)}。 */
+    public static double countToScore(int uint32) {
+        return (double) Integer.toUnsignedLong(uint32);
+    }
+
+    /** ZSET score（Redis float64）到 {@code uint32} 的换算，等价 Go {@code uint32(z.Score)}。 */
+    public static int scoreToCount(double score) {
+        return (int) (long) score;
+    }
+}

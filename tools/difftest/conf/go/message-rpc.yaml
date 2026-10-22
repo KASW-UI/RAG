@@ -1,0 +1,72 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  difftest 专用副本 —— Go 真源 service/message/rpc/etc/message.yaml 的复制品
+#
+#  【铁律】绝不修改冻结的 Go 仓库。Go 的运行时配置全部来自本目录的副本，
+#         启动时用 `-f` 指过来，真源一个字节都不动。
+#  【铁律】Go 不写任何文件进仓库。真源 yaml 的 `Log.Mode: file` + `Path` 是相对 etc/ 的，
+#         会直接落到冻结仓库里，所以副本改成 `Mode: console`。
+#
+#  与 user-rpc.yaml / admin-rpc.yaml 副本的三处差异：
+#    1. Postgres 用 go-zero 的结构化字段（message 域的 Config 定义的是 Postgres 结构体，
+#       不是 admin 域的 DataSource DSN 串）
+#    2. 多两个下游 RPC 客户端（UserRpc / AdminRpc），用 Endpoints 直连
+#    3. 多 List / Broadcast 两段业务配置
+# ═══════════════════════════════════════════════════════════════════════════
+
+Name: message.rpc
+
+# 独占端口段：1808x（Go 侧）。真源是 8082，与本机其它服务冲突。
+ListenOn: 0.0.0.0:18082
+
+# difftest: 绝不写进冻结仓库
+Log:
+  ServiceName: message-rpc
+  Mode: console
+
+Telemetry:
+  Name: message-rpc
+  Endpoint: jaeger:4317
+  Sampler: 1.0
+  Batcher: otlpgrpc
+
+DevServer:
+  Enabled: true
+  Host: 0.0.0.0
+  Port: 19098          # 独占，与 user-rpc 19094 / admin-rpc 19097 不冲突
+  MetricsPath: /metrics
+  HealthPath: /healthz
+  EnableMetrics: true
+  EnablePprof: true
+
+Postgres:
+  Host: "127.0.0.1"
+  Port: "55432"
+  User: "admin"
+  # 真源写的是 "${POSTGRES_PASSWORD}"，这里必须换成字面值。
+  # 原因与 user-rpc.yaml 完全相同：message.go 调的是 conf.MustLoad(*configFile, &c)，
+  # **没带 conf.UseEnv()**，而 go-zero v1.10.x core/conf/config.go:62-63 只在 opt.env 为真时
+  # 才 os.ExpandEnv，properties.go:58-59 同理 ⇒ 占位符不展开，
+  # 密码会被当成字面量字符串 "${POSTGRES_PASSWORD}" ⇒ SASL 认证失败。
+  Password: "difftest"
+  DBName: "go_db"        # Go 侧独立库；message_* 三张表由 GORM AutoMigrate 自建
+  Mode: "disable"
+
+# difftest: Etcd 整块移除 —— zrpc/server.go 的 `if c.HasEtcd()` 不成立 ⇒ 不做注册。
+# 下游客户端改用 Endpoints 直连（go-zero zrpc/config.go:92 BuildTarget：
+#   len(Endpoints)>0 ⇒ resolver.BuildDirectTarget(Endpoints)，**优先于 Etcd 分支**）
+UserRpc:
+  Endpoints:
+    - "127.0.0.1:19004"   # Go user-rpc（difftest 端口）
+
+AdminRpc:
+  Endpoints:
+    - "127.0.0.1:18081"   # Go admin-rpc（difftest 端口）
+
+# normalizeLimit 的兜底值，与 Go 结构体默认值一致
+List:
+  DefaultLimit: 20
+  MaxLimit: 100
+
+# broadcast 通知拉 admin.GetUserList 的页大小
+Broadcast:
+  PageSize: 200

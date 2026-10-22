@@ -17,4 +17,138 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <!--
+            message-proto：MessageServiceGrpc client Stub。
+            对应 Go 端 service/message/api/internal/svc/servicecontext.go 的 MessageRpc 字段。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>message-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            message-common：MessageErrorCode / MessageErrorMessages / MessageGrpcError。
+            对应 Go 端 service/message/common/errmsg.go —— message-api 的 httpx.SetErrorHandler
+            直接依赖这一层（code → msg 反查表 / BizCodeFromError）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>message-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            users-common：复用 4 个<b>跨域通用</b>的 HTTP gateway 工具，避免第 2 份实现：
+              - JwtUtil.padToHmacKeySize   （admin secret 15 字节，jjwt 强制 ≥32）
+              - BearerTokenExtractor      （golang-jwt 的 Bearer 前缀剥离规则）
+              - GoStyleCoercion           （Jackson 3 标量强转规则，对齐 go-zero core/mapping）
+              - GoStyleRequired / GoStyleRequiredFields / GoRequiredFieldException
+            ⚠️ <b>只依赖这几个静态工具类</b>：本模块 scanBasePackages 刻意<b>不含</b>
+            com.rag.users.*，因此 users-common 里的 Bean（如 SchemaInitializer）
+            不会被拖进 message-api 的 Spring 上下文。
+            为什么不把它们下沉到 service/common：那要动 user-rpc / admin-rpc / user-api /
+            admin-api 四个已交付模块，超出本次 Component 迁移的修改范围。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>users-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            service/common（artifactId=common）：Response envelope + BusinessException /
+            AuthenticationException + HttpMiddlewareFilter（Go 端 observability.NewHTTPMiddleware）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot Web（HTTP server） ============== -->
+        <!-- 对应 Go 端 rest.MustNewServer(c.RestConf) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- ============== 3. Metrics：复刻 Go 端 message_api_* 三个 metric ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 4. JWT 验签（jjwt 0.12.6，版本由根 pom 管理） ============== -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- ============== 5. gRPC client（连 message-rpc） ============== -->
+        <!--
+            与 user-api / admin-api / message-rpc 同款：devh 3.1.0.RELEASE + Nacos discovery。
+            ⚠️ 必须 exclude io.grpc:grpc-core（devh 默认拖 1.63.0），版本统一由根 pom 管。
+            ⚠️ 必须显式写 negotiation-type: plaintext（DRIFT-NEW-014）：
+               devh 的 GrpcChannelProperties 默认值是 TLS，不写会静默变 TLS，
+               而 message-rpc 是明文 gRPC（Go zrpc.MustNewServer 无 TLS）。
+        -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot-starter.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+
+        <!-- ============== 6. Nacos 服务发现 ============== -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- ============== 7. OpenTelemetry OTLP exporter（Go Telemetry.*） ============== -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 8. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            Boot 4 把测试切片拆成独立 artifact：@AutoConfigureMockMvc 在
+            org.springframework.boot.webmvc.test.autoconfigure，不再在
+            spring-boot-test-autoconfigure 里。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>

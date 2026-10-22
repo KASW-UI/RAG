@@ -14,8 +14,16 @@
 #          明确排除在 RAG 范围外的另一个实现）—— **绝不能去 kill 它**
 #      所以两侧统一搬到 1xxxx / 5xxxx 两个私有段：
 #        Go : user-rpc 19004  admin-rpc 18081  user-api 18888  admin-api 18889
+#             message-rpc 18082                      (2026-10-22 纳入)
 #        RAG: user-rpc 59210  admin-rpc 58081  user-api 59900  admin-api 58889
+#             message-rpc 58210                      (2026-10-22 纳入)
 #      RAG 侧通过环境变量覆盖：GRPC_SERVER_PORT / SERVER_PORT（Spring relaxed binding）。
+#
+# 【message 域（2026-10-22 纳入，AGENTS.md §6.6）】
+#   message-rpc 是**纯 gRPC**、没有 HTTP 面，所以它进不了 diff.py 的 HTTP 对拍，
+#   只能靠 grpc-message-dual-port-runner.java 单 stub 双端口打（见
+#   exp-difftest-grpc-errors-message.sh）。这里只负责把两端的 message-rpc 拉起来。
+#   端口段同样避开本机：Go 18082 / RAG 58210。
 #
 # 用法：
 #   ./run.sh              # 完整跑（含构建）
@@ -129,7 +137,8 @@ if [[ $BUILD -eq 1 ]]; then
     && CGO_ENABLED=0 go build -o "$RUN_DIR/bin/go-user-rpc"  ./service/user/user/rpc \
     && CGO_ENABLED=0 go build -o "$RUN_DIR/bin/go-user-api"  ./service/user/user/api \
     && CGO_ENABLED=0 go build -o "$RUN_DIR/bin/go-admin-rpc" ./service/user/admin/rpc \
-    && CGO_ENABLED=0 go build -o "$RUN_DIR/bin/go-admin-api" ./service/user/admin/api )
+    && CGO_ENABLED=0 go build -o "$RUN_DIR/bin/go-admin-api" ./service/user/admin/api \
+    && CGO_ENABLED=0 go build -o "$RUN_DIR/bin/go-message-rpc" ./service/message/rpc )
 fi
 
 if [[ $BUILD -eq 1 ]]; then
@@ -137,15 +146,18 @@ if [[ $BUILD -eq 1 ]]; then
   ( cd "$ROOT" && mvn -q -o -DskipTests package )
   # jar 统一收进 $RUN_DIR/bin，让下面的存在性检查和启动逻辑与 Go 二进制同构
   for m in user/user-rpc:user-rpc user/user-api:user-api \
-           admin/admin-rpc:admin-rpc admin/admin-api:admin-api; do
+           admin/admin-rpc:admin-rpc admin/admin-api:admin-api \
+           message/message-rpc:message-rpc; do
     src="$ROOT/service/users/${m%%:*}/target/${m##*:}-0.0.1-SNAPSHOT.jar"
+    # message 域在 service/ 下面而不是 service/users/ 下面，单独算一次路径
+    [[ "$m" == message/* ]] && src="$ROOT/service/${m%%:*}/target/${m##*:}-0.0.1-SNAPSHOT.jar"
     [[ -f "$src" ]] || { echo "缺少 jar：$src"; exit 1; }
     cp "$src" "$RUN_DIR/bin/${m##*:}"
   done
 fi
 
-for j in go-user-rpc go-user-api go-admin-rpc go-admin-api \
-         user-rpc user-api admin-rpc admin-api; do
+for j in go-user-rpc go-user-api go-admin-rpc go-admin-api go-message-rpc \
+         user-rpc user-api admin-rpc admin-api message-rpc; do
   [[ -x "$RUN_DIR/bin/$j" || -f "$RUN_DIR/bin/$j" ]] \
     || { echo "缺少产物 $j，请去掉 --no-build"; exit 1; }
 done
@@ -154,6 +166,13 @@ echo "==> [3/5] 启动 Go 栈（配置来自 conf/go/*.yaml 副本，Etcd 已移
 POSTGRES_DB=go_db "$RUN_DIR/bin/go-user-rpc"  -f "$HERE/conf/go/user-rpc.yaml"  >"$LOGS/go-user-rpc.log" 2>&1 & PIDS+=($!)
 POSTGRES_DB=go_db "$RUN_DIR/bin/go-admin-rpc" -f "$HERE/conf/go/admin-rpc.yaml" >"$LOGS/go-admin-rpc.log" 2>&1 & PIDS+=($!)
 sleep 3
+# message-rpc 必须等 user-rpc / admin-rpc 起来之后再起：
+# Go 侧 NewServiceContext 里 `zrpc.MustNewClient(c.UserRpc)` 默认 NonBlock=false
+# ⇒ 走 grpc.WithBlock()，下游没监听时会一直阻塞拨号。副本已把 Etcd 换成
+# Endpoints 直连（conf/go/message-rpc.yaml），但直连同样要等对端在听。
+POSTGRES_DB=go_db "$RUN_DIR/bin/go-message-rpc" -f "$HERE/conf/go/message-rpc.yaml" >"$LOGS/go-message-rpc.log" 2>&1 & PIDS+=($!)
+sleep 2
+assert_started "$LOGS/go-message-rpc.log" "go message-rpc" || true
 POSTGRES_DB=go_db "$RUN_DIR/bin/go-user-api"  -f "$HERE/conf/go/user-api.yaml"  >"$LOGS/go-user-api.log" 2>&1 & PIDS+=($!)
 POSTGRES_DB=go_db "$RUN_DIR/bin/go-admin-api" -f "$HERE/conf/go/admin-api.yaml" >"$LOGS/go-admin-api.log" 2>&1 & PIDS+=($!)
 assert_started "$LOGS/go-user-api.log"  "go user-api"  || true
@@ -260,6 +279,26 @@ assert_started "$LOGS/rag-admin-api.log" "rag admin-api"
 wait_http "http://127.0.0.1:59900/user/v1/login"  "rag user-api" 120
 wait_http "http://127.0.0.1:58889/admin/v1/login"  "rag admin-api" 120
 
+# ── message 域（2026-10-22 纳入，AGENTS.md §6.6）────────────────────────
+# gRPC 下游同样用 -- 命令行参数（理由见上：map key 含连字符，env 形态的
+# relaxed binding 归属不确定）。negotiation-type=plaintext 是必要的 harness
+# 固定值：devh client 的默认值是 TLS，而两端 message-rpc 都是 plain gRPC。
+#
+# ⚠️ **不能用 spring.cloud.nacos.discovery.enabled=false**：message-rpc 的
+#    bootstrap/NacosRegistration 是自定义 @Component、构造注入 NacosServiceManager，
+#    关掉 starter 会让它装配失败、上下文直接起不来。沿用 register-enabled=false
+#    即可：只关自动注册，starter 的 bean 还在。NACOS_PORT=1 让注册立刻失败并被
+#    register() 的 try/catch 吞掉，进程照常服务。
+POSTGRES_DB=rag_db GRPC_SERVER_PORT=58210 \
+  java -jar "$RUN_DIR/bin/message-rpc" \
+  --grpc.client.user-rpc.address=static://127.0.0.1:59210 \
+  --grpc.client.user-rpc.negotiation-type=plaintext \
+  --grpc.client.admin-rpc.address=static://127.0.0.1:58081 \
+  --grpc.client.admin-rpc.negotiation-type=plaintext \
+  >"$LOGS/rag-message-rpc.log" 2>&1 & PIDS+=($!)
+sleep 15
+assert_started "$LOGS/rag-message-rpc.log" "rag message-rpc"
+
 # 「进程起来了但 schema 是空的」是一类静默失败：RPC 服务照常监听，
 # 只有真正打 SQL 时才炸，而那时候报错长得像业务 bug。
 # 上一版 user-rpc 就是这样：Flyway 认为 schema 已是 v3、跳过自己的迁移、
@@ -288,6 +327,12 @@ assert_tables rag_db  users_user_avatar_history      "rag user-rpc"
 assert_tables rag_db  admin_admin                     "rag admin-rpc"
 assert_tables rag_db  admin_invite                    "rag admin-rpc"
 assert_tables go_db       users                      "go user-rpc"
+assert_tables rag_db  message_notification            "rag message-rpc"
+assert_tables rag_db  message_conversation             "rag message-rpc"
+assert_tables rag_db  message_conversation_message     "rag message-rpc"
+assert_tables go_db       message_notification          "go message-rpc"
+assert_tables go_db       message_conversation           "go message-rpc"
+assert_tables go_db       message_conversation_message   "go message-rpc"
 
 if [[ $SERVE_ONLY -eq 1 ]]; then
   echo "==> [5/5] --serve-only：跳过对拍，两套栈保持运行（PID ${PIDS[*]}）"

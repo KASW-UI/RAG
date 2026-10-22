@@ -1,0 +1,29 @@
+########## httpx.Parse / token / FormFile facts ##########
+full JSON ok                                 -> err=<nil> req={Title:t Brief: Content:x Status:0 Tags:[]}
+missing title                                -> err=field "title" is not set req={Title: Brief: Content: Status:0 Tags:[]}
+title null                                   -> err=field "title" mustn't be nil req={Title: Brief: Content: Status:0 Tags:[]}
+title=123                                    -> err=type mismatch for field "title", expect "string", actual "number" req={Title: Brief: Content: Status:0 Tags:[]}
+brief null (optional)                        -> err=<nil> req={Title:t Brief: Content:x Status:0 Tags:[]}
+CT=text/plain valid JSON                     -> err=field "title" is not set req={Title: Brief: Content: Status:0 Tags:[]}
+no Content-Type                              -> err=field "title" is not set req={Title: Brief: Content: Status:0 Tags:[]}
+CL=0 empty body                              -> err=field "title" is not set req={Title: Brief: Content: Status:0 Tags:[]}
+status="2"                                   -> err=field "title" is not set req={Title: Brief: Content: Status:0 Tags:[]}
+status=null (optional)                       -> err=field "title" is not set req={Title: Brief: Content: Status:0 Tags:[]}
+7MiB JSON body                               -> err=<nil> req={Title:t Brief:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ...[TRUNCATED; original length=7340137 bytes = the 8MiB-truncated JSON echoed by go-zero jsonx.formatError]
+9MiB JSON body                               -> err=string: `{"title":"t","content":"x","brief":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ...[TRUNCATED; original length=8388741 bytes = the 8MiB-truncated JSON echoed by go-zero jsonx.formatError]
+11MiB JSON body                              -> err=string: `{"title":"t","content":"x","brief":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ...[TRUNCATED; original length=8388741 bytes = the 8MiB-truncated JSON echoed by go-zero jsonx.formatError]
+
+Bearer <tok>                                 -> ACCEPTED userId=1001 (type json.Number)
+raw <tok> no Bearer prefix                   -> ACCEPTED userId=1001 (type json.Number)
+lowercase bearer <tok>                       -> ACCEPTED userId=1001 (type json.Number)
+Basic abc                                    -> REJECTED err=illegal base64 data at input byte 5
+Bearer alone                                 -> REJECTED err=token contains an invalid number of segments
+
+upload CT=application/json {}                -> err=request Content-Type isn't multipart/form-data
+upload multipart no image part               -> err=http: no such file
+
+mapping {"status":"2"}                       -> err=field "title" is not set req={Title: Brief: Content: Status:0 Tags:[]}
+mapping {"status":null}                      -> err=field "title" is not set req={Title: Brief: Content: Status:0 Tags:[]}
+mapping {"brief":null}                       -> err=field "title" is not set req={Title: Brief: Content: Status:0 Tags:[]}
+mapping {"title":123}                        -> err=type mismatch for field "title" req={Title: Brief: Content: Status:0 Tags:[]}
+mapping {}                                   -> err=field "title" is not set req={Title: Brief: Content: Status:0 Tags:[]}

@@ -50,10 +50,28 @@ public interface NotificationMapper extends BaseMapper<NotificationEntity> {
     }
 
     /**
-     * 对应 Go 端 CountNotifications(unreadOnly=true)：recipient 未读通知总数。
-     * 用 idx_notification_recipient_read 复合索引命中。
+     * 对应 Go 端 {@code CountNotifications(ctx, recipientID, unreadOnly)}（{@code message.go:29-37}）
+     * 与 {@code ListNotifications} 里的 {@code total} 计数（{@code message.go:40-48}）：
+     * <pre>
+     * query := Model(&amp;Notification{}).Where("recipient_id = ?", recipientID)
+     * if unreadOnly { query = query.Where("is_read = ?", false) }   // ← 过滤先加
+     * var total int64
+     * query.Count(&amp;total)                                         // ← total 复用同一个 query
+     * </pre>
+     *
+     * <p><b>⚠️ DRIFT-MSG-V-001（2026-10-22 修）</b>：Go 侧的 {@code total} 与
+     * {@code items} <b>共用同一个带过滤的 query</b>，所以 {@code unread_only=true} 时
+     * {@code total} 只数未读。修复前本接口的调用点写的是
+     * {@code selectCount(QueryWrapper.eq("recipient_id", uid))}（<b>无 is_read</b>），
+     * 而列表走 {@code listByRecipient(..., unreadOnly, ...)}（<b>有 is_read</b>）——
+     * 于是 {@code unread_only=true} 时 {@code total} 恒等于全部条数，
+     * 前端分页器按它算总页数会多翻出空页。
+     *
+     * <p><b>为什么这里不能"顺手简化"</b>：Go 端「total 跟随 unread_only」不是笔误而是
+     * 真实语义。§6.7.5 纪律 A 由此而来：
+     * <b>分页接口的 total 与 items 必须成对断言</b>，否则 {@code total} 是无人区。
      */
-    default long countUnreadByRecipient(long recipientId, int role, int kind) {
+    default long countByRecipient(long recipientId, int role, int kind, boolean unreadOnly) {
         LambdaQueryWrapper<NotificationEntity> w = new LambdaQueryWrapper<>();
         w.eq(NotificationEntity::getRecipientId, recipientId);
         if (role > 0) {
@@ -62,8 +80,22 @@ public interface NotificationMapper extends BaseMapper<NotificationEntity> {
         if (kind > 0) {
             w.eq(NotificationEntity::getKind, kind);
         }
-        w.eq(NotificationEntity::isRead, false);
+        if (unreadOnly) {
+            w.eq(NotificationEntity::isRead, false);
+        }
         return selectCount(w);
+    }
+
+    /**
+     * 对应 Go 端 CountNotifications(unreadOnly=true)：recipient 未读通知总数。
+     * 用 idx_notification_recipient_read 复合索引命中。
+     *
+     * <p>委托给 {@link #countByRecipient} 而不是各写一份 wrapper：这两个方法的差别
+     * <b>只有 unreadOnly 这一个参数</b>，各写一份就等于给 §6.7 的 DRIFT-MSG-V-001
+     * 留一个"下次改一处忘了另一处"的口子。
+     */
+    default long countUnreadByRecipient(long recipientId, int role, int kind) {
+        return countByRecipient(recipientId, role, kind, true);
     }
 
     /**
@@ -127,10 +159,41 @@ public interface NotificationMapper extends BaseMapper<NotificationEntity> {
     }
 
     /**
-     * 对应 Go 端 MessageModel.createNotifications(items []Notification)：
-     * 批量 INSERT notification 行；与 markAllNotificationsReadTx 同一事务。
+     * 对应 Go 端 MessageModel.CreateNotifications（{@code message.go:22-27}）：
+     * 批量 INSERT notification 行；由 {@code MessageAtomicService#insertNotificationsTx}
+     * 按 {@code INSERT_BATCH_SIZE} 切片后逐片调用（DRIFT-MSG-V-002）。
      *
      * <p>用 foreach + 多行 VALUES 把多条 INSERT 合并成一条 SQL（性能优于逐条 insert）。
+     *
+     * <p>🔴 <b>DRIFT-MSG-V-011（2026-10-22 修）：{@code #{item.isRead}} 让整个发通知功能从未生效</b>
+     * <pre>
+     * 修复前：#{item.isRead}
+     * 现在  ：#{item.read}
+     * </pre>
+     * 实体字段叫 {@code read}（不是 {@code isRead}），getter 是 {@code isRead()}。
+     * MyBatis 的 {@code Reflector} 按 JavaBean 约定把 {@code isRead()} 归到属性
+     * <b>{@code read}</b>，于是 {@code #{item.isRead}} 找不到属性，运行期抛：
+     * <pre>
+     * org.apache.ibatis.reflection.ReflectionException:
+     *   There is no getter for property named 'isRead' in 'class ...NotificationEntity'
+     * </pre>
+     *
+     * <p><b>为什么这个字段名是 {@code read} 而不是 {@code isRead}}</b>：
+     * 见 {@link NotificationEntity} 的类注释 —— MyBatis-Plus 的 {@code LambdaXxxWrapper}
+     * 解析 {@code Entity::method} 时按同样的约定取属性名，字段若叫 {@code isRead}
+     * 会在<b>查询/更新</b>路径上抛 {@code can not find lambda cache for this property [read]}。
+     * 两边约定一致，所以手写 SQL 里也必须写 {@code #{item.read}}。
+     *
+     * <p><b>为什么此前没被发现</b>（§3.3 同款形态）：
+     * <ul>
+     *   <li>{@code insertBatch} 是<b>通知写入的唯一生产路径</b>
+     *       （{@code grep notificationMapper.insert(} 在 main 下零命中），</li>
+     *   <li>而 {@code sendNotification} / {@code SendNotification}
+     *       在 {@code message-rpc} 的 21 条测试里<b>零覆盖</b>，
+     *       {@code tools/difftest} 的 12 档也只覆盖错误码、不覆盖这条 happy path，</li>
+     *   <li>⇒ <b>admin 的定向通知与广播通知在 RAG 端从未成功过一次</b>。
+     *       21 条全绿的测试与一条从未执行过的写路径，可以并存。</li>
+     * </ul>
      */
     @Insert({
             "<script>",
@@ -141,8 +204,12 @@ public interface NotificationMapper extends BaseMapper<NotificationEntity> {
             "<foreach collection='items' item='item' separator=','>",
             "  (#{item.id}, #{item.recipientId}, #{item.senderId}, #{item.senderRole},",
             "   #{item.kind}, #{item.title}, #{item.content},",
-            "   #{item.isRead}, #{item.readAt},",
-            "   #{item.extra,typeHandler=com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler},",
+            // ⚠️ 属性名是 read（getter isRead()），不是 isRead —— 见本方法 javadoc
+            "   #{item.read}, #{item.readAt},",
+            // ⚠️ 不能用 MP 的 JacksonTypeHandler：它 setString(...) ⇒ pgjdbc 按 VARCHAR 发送
+            //    ⇒ Postgres 拒收（column extra is of type jsonb but expression is of type
+            //    character varying）。见 JsonbMapTypeHandler 类注释（DRIFT-MSG-V-013）。
+            "   #{item.extra,typeHandler=com.rag.message.message.rpc.mapper.JsonbMapTypeHandler},",
             "   #{item.createdAt}, #{item.updatedAt})",
             "</foreach>",
             "</script>"

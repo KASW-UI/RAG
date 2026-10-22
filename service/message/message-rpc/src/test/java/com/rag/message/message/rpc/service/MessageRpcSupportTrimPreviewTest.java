@@ -90,4 +90,137 @@ class MessageRpcSupportTrimPreviewTest {
         assertEquals(80, out.codePointCount(0, out.length()));
         assertEquals(78, out.substring(0, out.offsetByCodePoints(0, 78)).codePointCount(0, 78));
     }
+
+    // ==================================================================
+    // DRIFT-MSG-V-008（2026-10-22）：空白集合必须等于 Go strings.TrimSpace
+    // ==================================================================
+
+    /**
+     * <b>为什么上面 6 条测不出 DRIFT-MSG-V-008</b>：它们清一色用 ASCII 空格，
+     * 而 {@code String.trim()}（修复前的实现）与 {@code strings.TrimSpace}
+     * 对 ASCII 空格的判定<b>完全相同</b>。
+     * ⇒ 6 条全绿而缺陷存在，是 §3.3「绿测试守不住空白集合」的直接实例。
+     *
+     * <p>⇒ <b>本组用例的判据不能只写一个字符</b>：必须同时覆盖
+     * 「{@code trim()} 会漏的」与「{@code strip()} 也会漏的」两类，
+     * 否则换一种实现就又绿了。
+     */
+    @Test
+    @DisplayName("DRIFT-MSG-V-008：NBSP(U+00A0) / 全角空格(U+3000) 必须被 TrimSpace 掉")
+    void goTrimSpaceRemovesNbspAndIdeographicSpace() {
+        // U+00A0 NBSP：trim() 不去、strip() 也不去（non-breaking）
+        assertEquals("hello", MessageRpcSupport.trimPreview(pad(NBSP, "hello")),
+                "U+00A0 NBSP 在 Go strings.TrimSpace 里是空白；"
+                        + "String.trim() 与 String.strip() 都不去它");
+        assertEquals("hello", MessageRpcSupport.trimContent(pad(NBSP, "hello")));
+
+        // U+3000 全角空格：trim() 不去、strip() 会去
+        assertEquals("hello", MessageRpcSupport.trimPreview(pad(IDEOGRAPHIC_SPACE, "hello")),
+                "U+3000 全角空格在 Go 里是空白；String.trim() 不去它");
+        assertEquals("hello", MessageRpcSupport.trimContent(pad(IDEOGRAPHIC_SPACE, "hello")));
+    }
+
+    @Test
+    @DisplayName("DRIFT-MSG-V-008：NEL / 行分隔符 / 窄不换行空格 / 数学空格 / 欧甘空格也必须被去掉")
+    void goTrimSpaceRemovesSeparatorCharacters() {
+        int[] alsoMissedByBothJavaTrims = {
+                NEL,               // U+0085 NEXT LINE
+                LINE_SEPARATOR,     // U+2028
+                PARAGRAPH_SEPARATOR,// U+2029
+                NARROW_NBSP,        // U+202F —— strip() 也不去
+                MEDIUM_MATH_SPACE,  // U+205F
+                OGHAM_SPACE_MARK,   // U+1680
+                FIGURE_SPACE};      // U+2007 —— strip() 也不去
+        for (int cp : alsoMissedByBothJavaTrims) {
+            assertEquals("hi", MessageRpcSupport.trimPreview(pad(cp, "hi")),
+                    "Go unicode.IsSpace 含 U+" + hex(cp) + "；Java 两个 trim 变体都漏");
+            assertEquals("hi", MessageRpcSupport.trimContent(pad(cp, "hi")));
+        }
+    }
+
+    /**
+     * <b>反向断言</b>：{@code U+001C}–{@code U+001F}（file/group/record/unit separator）
+     * 在 Go 里<b>不是</b>空白，但 Java 的 {@code trim()} 与 {@code strip()}
+     * <b>都会</b>把首尾的它们删掉。
+     *
+     * <p>⇒ 这条锁的是「不要为了修漏而换成 {@code strip()}」：
+     * {@code strip()} 会把本该保留的内容删掉，是<b>另一个方向</b>的漂移。
+     */
+    @Test
+    @DisplayName("DRIFT-MSG-V-008：U+001C-U+001F 在 Go 里不是空白，必须保留")
+    void goTrimSpaceKeepsAsciiFileSeparators() {
+        for (int cp = 0x1C; cp <= 0x1F; cp++) {
+            String padded = pad(cp, "hi");
+            assertEquals(padded, MessageRpcSupport.trimPreview(padded),
+                    "Go unicode.IsSpace 对 r<=0xFF 只特判 8 个码点，不含 U+001C-U+001F；"
+                            + "换用 String.strip() 会把它们删掉");
+        }
+    }
+
+    /**
+     * 全 Go 空白集合的完整枚举 —— 25 个码点。
+     *
+     * <p><b>来源不是记忆</b>：{@code go run} 枚举 {@code unicode.IsSpace(r), r ∈ [0, 0x3200]}
+     * 的结果（Go 1.25.11 {@code src/unicode/graphic.go:128} + {@code tables.go:8570} 的
+     * {@code _White_Space} 表）。本数组与那份实测输出逐项对应。
+     */
+    @Test
+    @DisplayName("DRIFT-MSG-V-008：25 个 Go 空白码点必须全被去掉")
+    void fullGoWhiteSpaceSetIsTrimmed() {
+        int[] goSpace = {
+                0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x0020, 0x0085, 0x00A0,
+                0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006,
+                0x2007, 0x2008, 0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F,
+                0x3000};
+        assertEquals(25, goSpace.length, "Go unicode.IsSpace 在 r<=0x3200 范围内恰好 25 个码点");
+        for (int cp : goSpace) {
+            assertEquals("x", MessageRpcSupport.trimContent(pad(cp, "x")),
+                    "U+" + hex(cp) + " 必须是 Go 空白");
+            assertEquals("x", MessageRpcSupport.trimPreview(pad(cp, "x")),
+                    "U+" + hex(cp) + " 必须是 Go 空白");
+        }
+    }
+
+    /**
+     * {@code trimContent} 的结果直接决定 {@code SendChatMessage} 走哪条分支：
+     * 全空白 ⇒ {@code content == ""} ⇒ {@code INVALID_ARGUMENT + 5003}。
+     *
+     * <p>⇒ 这就是 DRIFT-MSG-V-008 的<b>可观察出口</b>：
+     * 修复前 {@code "\u00A0\u00A0"} 不被判空，Go 侧则会拒绝。
+     */
+    @Test
+    @DisplayName("DRIFT-MSG-V-008：全 NBSP 的 content 被判为空 ⇒ 与 Go 一样进 5003 分支")
+    void whitespaceOnlyContentCollapsesToEmpty() {
+        assertEquals("", MessageRpcSupport.trimContent(pad(NBSP, "")),
+                "Go: TrimSpace(\"\\u00A0\\u00A0\") = \"\" ⇒ content == \"\" ⇒ 5003");
+        assertEquals("", MessageRpcSupport.trimContent(pad(IDEOGRAPHIC_SPACE, "")),
+                "U+3000 同理");
+        String mixedWs = " \t\r\n" + (char) NBSP + (char) IDEOGRAPHIC_SPACE;
+        assertEquals("", MessageRpcSupport.trimContent(mixedWs),
+                "ASCII + Unicode 空白混合");
+    }
+
+    // ==================================================================
+    // helpers —— 全部按码点构造，**不写不可见字面量**
+    // ==================================================================
+
+    private static final int NBSP = 0x00A0;
+    private static final int NEL = 0x0085;
+    private static final int OGHAM_SPACE_MARK = 0x1680;
+    private static final int FIGURE_SPACE = 0x2007;
+    private static final int LINE_SEPARATOR = 0x2028;
+    private static final int PARAGRAPH_SEPARATOR = 0x2029;
+    private static final int NARROW_NBSP = 0x202F;
+    private static final int MEDIUM_MATH_SPACE = 0x205F;
+    private static final int IDEOGRAPHIC_SPACE = 0x3000;
+
+    /** 用码点构造 {@code ws + mid + ws}；mid 为空串时即"全空白"。 */
+    private static String pad(int ws, String mid) {
+        String w = new String(Character.toChars(ws));
+        return w + mid + w;
+    }
+
+    private static String hex(int cp) {
+        return Integer.toHexString(cp).toUpperCase();
+    }
 }

@@ -39,8 +39,29 @@ import java.util.Enumeration;
  *
  * <p>group 一律 {@code DEFAULT_GROUP}，与 message-api / user-api / follow-api 保持一致，
  * 便于服务发现过滤。
+ *
+ * <p><b>⚠️ Bean 名必须显式指定（2026-10-22 修，DRIFT-MSG-004）</b>：
+ * {@code spring-cloud-starter-alibaba-nacos-discovery} 的
+ * {@code NacosServiceRegistryAutoConfiguration} <b>也会注册一个名为
+ * {@code nacosRegistration} 的 Bean</b>。若本类用裸
+ * {@code @Component}，默认 Bean 名恰好也是 {@code nacosRegistration}
+ * ⇒ 两者撞名 ⇒ <b>Spring Boot 2.1+ 默认 {@code allow-bean-definition-overriding=false}
+ * ⇒ 上下文直接起不来</b>：
+ * <pre>
+ *   The bean 'nacosRegistration', defined in ... NacosServiceRegistryAutoConfiguration.class,
+ *   could not be registered. A bean with that name has already been defined in
+ *   .../bootstrap/NacosRegistration.class and overriding is disabled.
+ * </pre>
+ * <b>同款 Bean 名已在另外两个模块显式指定</b>（{@code @Component("userRpcNacosRegistration")}
+ * / {@code @Component("adminRpcNacosRegistration")}）—— <b>只有本模块漏了</b>。
+ *
+ * <p><b>为什么此前从未暴露</b>：本模块此前<b>没有任何 {@code @SpringBootTest}</b>
+ * （9 条测试全是纯 Mockito 单测，不装配 Spring 上下文），
+ * 而 {@code tools/difftest} 也从未把 message 域纳入对拍 ⇒
+ * 「上下文能不能起」这件事<b>从来没有被真正执行过一次</b>。
+ * 修复由 {@code MessageTransactionWiringTest} 首次装配上下文时暴露。
  */
-@Component
+@Component("messageRpcNacosRegistration") // ← 显式命名，避开 NacosServiceRegistryAutoConfiguration 的同名 Bean
 public class NacosRegistration {
 
     private static final Logger LOG = LoggerFactory.getLogger(NacosRegistration.class);

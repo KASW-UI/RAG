@@ -15,6 +15,7 @@
         <module>like-proto</module>
         <module>like-api</module>
         <module>like-rpc</module>
+        <module>like-common</module>
     </modules>
 
     <properties>

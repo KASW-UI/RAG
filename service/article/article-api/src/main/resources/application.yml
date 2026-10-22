@@ -1,0 +1,189 @@
+# =============================================================================
+# article-api application.yml —— 对应 Go 端 service/article/api/etc/article-api.yaml
+# =============================================================================
+# 1:1 迁移原则：Go yaml 的每个字段都在这里有对应；Spring / devh starter 用自己的
+# 字段名表达同一语义。不新增 Go 侧不存在的开关。
+# =============================================================================
+
+spring:
+  application:
+    name: article-api
+
+  # ============== multipart 上限（Go 侧由 MaxBytes + ParseMultipartForm 承担）==============
+  # ⚠️ 必须与下面 rag.protection.max-bytes **同为 10485760**。
+  #    两条是不同的闸门，缺一不可：
+  #      · rag.protection.max-bytes → 看 **Content-Length 头**，超了裸 413
+  #        （对应 Go rest/handler/maxbyteshandler.go:19 `if r.ContentLength > n`）
+  #      · 这里的 max-file-size → **没有 Content-Length**（chunked）时由容器兜底
+  #        （Go 侧这种情况会一路走到 r.FormFile 失败 ⇒ 400 text/plain）
+  #    写死 10MB 而不写 1MB：Go 的 RestConf.MaxBytes 就是 10485760。
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+  # ============== Nacos 服务发现（用于解析 discovery:///article-rpc 与 /user-rpc）==============
+  # Go 端是 etcd flat key "article.rpc" / "user.rpc"（无 namespace / group 分层）。
+  # Java 端用 Nacos。namespace / group 必须与被调方保持一致，否则解析不到实例，
+  # 所有 RPC 都会塌成 1015（CodeServerBusy）。
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+
+# =============================================================================
+# HTTP server
+# =============================================================================
+# Go: article-api.yaml 的 Host=0.0.0.0 / Port=8889
+server:
+  port: ${ARTICLE_API_PORT:8889}
+  address: 0.0.0.0
+  servlet:
+    context-path: /
+
+# =============================================================================
+# gRPC client（连 article-rpc / user-rpc）
+# =============================================================================
+# Go: ArticleRpcConf / UserRpcConf 的 Etcd{ Hosts: [etcd:2379], Key: … }
+# Java: devh grpc-client-spring-boot-starter + Nacos name resolver。
+# ⚠️ negotiation-type 不能省（DRIFT-NEW-014）：devh 的默认值是 TLS，
+#   不写会静默发 TLS ClientHello，而 article-rpc / user-rpc 都是明文 gRPC
+#   （Go 侧 zrpc.MustNewServer 全仓无 TLS 配置）。
+grpc:
+  client:
+    article-rpc:
+      address: discovery:///article-rpc
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      permit-keep-alive-without-calls: true
+    user-rpc:
+      address: discovery:///user-rpc
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      permit-keep-alive-without-calls: true
+
+# =============================================================================
+# 业务配置（对齐 Go 端 Auth.*）
+# =============================================================================
+# Go: article-api.yaml
+#   Auth.AccessSecret = ae0536f9-6450-4606-8e13-5a19ed505da0（36 字节 UUID）
+#   Auth.AccessExpire = 31536000（365 天）
+#
+# ⚠️ access-secret 必须与**签发方**（user-api）一致：
+#   article-api 只验签、不签发 —— Go 侧本服务没有 login / register 端点。
+#   验签失败表现为 **HTTP 401 + 空 body**（不是业务码），排查时先看这里。
+# ⚠️ access-expire 在本模块**不被读取**：Go 侧同样如此（签发在 user-api）。
+#   保留是为了让两边 yaml 可逐行对照。
+#
+# ⚠️ 36 字节 ≥ 32，jjwt 不需要补齐；JwtUtil.padToHmacKeySize 对它其实是 no-op。
+#   统一调用是为了与其它域共用同一份逻辑。
+article-api:
+  auth:
+    access-secret: ${USER_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}
+    access-expire: ${USER_JWT_EXPIRE:31536000}
+
+# =============================================================================
+# rag.protection —— Go「请求保护层」四道中间件
+# =============================================================================
+# ⚠️⚠️ 下面四项在 Go 的 etc/article-api.yaml 里**只出现了 MaxBytes**，
+#    另外三项一个字都没写，但它们**是开启的**。照 yaml 逐字段对，永远看不见。
+#
+# 证据（go-zero v1.10.2）：
+#   rest/config.go:52      MaxConns     int   `json:",default=10000"`
+#   rest/config.go:53      MaxBytes     int64 `json:",default=1048576"`
+#   rest/config.go:56      CpuThreshold int64 `json:",default=900,range=[0:1000)"`
+#   rest/config.go:12-22   MiddlewaresConf 九个开关**全部** `json:",default=true"`
+#                          （含 MaxConns / Breaker / Shedding / MaxBytes）
+#
+# ⚠️ **max-bytes 必须显式写成 10485760（10 MiB），不能沿用共享默认值 1048576（1 MiB）**：
+#   Go 侧 article-api.yaml 显式写了 `MaxBytes: 10485760`，
+#   且 routes.go 第三段又用 `rest.WithMaxBytes(10 * 1024 * 1024)` 声明了一次。
+#   go-zero 的 `engine.go:165-171 checkedMaxBytes` 取「route 级 > 0 则用之，否则用 conf 级」，
+#   两者同值 ⇒ **全部 7 个端点的 body 上限都是 10 MiB**，不只是 /upload。
+#   若这里漏配成 1 MiB，所有写接口会突然开始返回裸 413 —— 一个只在传大正文时才显形的漂移。
+#
+# ⚠️ 四层的拒绝响应都是**裸状态码 + 空 body + 无 Content-Type**，不走 envelope
+#    （Go 侧是裸 w.WriteHeader）。这与本模块「业务错误恒 200 + 信封」的约定**刻意不同**：
+#    保护层在到达业务逻辑之前就拒绝了，没有信封可包。
+rag:
+  protection:
+    # Go rest/config.go:52（article-api.yaml 未配 ⇒ 走 default）
+    max-conns: 10000
+    # ⚠️ Go article-api.yaml: MaxBytes=10485760（10 MiB），**覆盖** tag 默认的 1 MiB
+    max-bytes: 10485760
+    cpu-shedding:
+      # Go rest/config.go:22 Middlewares.Shedding
+      enabled: true
+      # Go rest/config.go:56（千分比，900 = 90% CPU）
+      cpu-threshold: 900
+      # Go 读整机 CPU（Linux /proc/stat）⇒ SYSTEM 对齐
+      cpu-source: SYSTEM
+    breaker:
+      # Go rest/config.go:15 Middlewares.Breaker
+      enabled: true
+
+# =============================================================================
+# Metrics / Observability 端点
+# =============================================================================
+# Go 侧 article/api **没有** metrics 包（实测：全目录无 metrics.go）；
+# 其 HTTP 指标由 service/common/observability 的中间件产出（OTel span/metric），
+# Java 侧对应 HttpMiddlewareFilter → Micrometer。
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+    enabled-by-default: false
+  endpoint:
+    health:
+      enabled: true
+    info:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    enable:
+      prometheus: true
+    tags:
+      application: article-api
+
+# =============================================================================
+# OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）
+# =============================================================================
+# Go: Telemetry.Name=article-api / Endpoint=jaeger:4317 / Batcher=otlpgrpc / Sampler=1.0
+otel:
+  exporter:
+    otlp:
+      endpoint: http://${OTEL_ADDR:jaeger}:${OTLP_PORT:4317}
+      protocol: grpc
+  resource:
+    attributes:
+      service.name: article-api
+  traces:
+    sampler: always_on
+
+logging:
+  level:
+    root: INFO
+    com.rag.article.article.api: INFO
+    com.rag.common: INFO
+
+# =============================================================================
+# observability
+# =============================================================================
+# ⚠️ 取值 **70s**，不是 go-zero tag 里的 3000ms 默认值：
+#   Go article-api.yaml 显式写了 `Timeout: 70000`，而 message-api 侧那条
+#   「未配置 ⇒ 回落 3s」的注释**不适用于本模块**。照抄 3s 会让所有 RPC 在
+#   70s 预算被砍到 3s —— 一个只在慢下游才显形的漂移。
+#   （这正是 AGENTS.md §3.1「不要拿另一个域的实测结论当对照基准」的又一次发作。）
+#
+# Go: observability.DisableNativeRestTimeout(&c.RestConf) 把 conf.Middlewares.Timeout 置 false，
+#     于是超时只有 observability 一个执行者 → http.Error(w, "Request Timeout", 503)。
+observability:
+  http-timeout: 70s

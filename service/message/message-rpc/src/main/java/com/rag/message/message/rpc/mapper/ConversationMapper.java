@@ -7,7 +7,6 @@ import com.rag.message.message.rpc.domain.ConversationEntity;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
-import org.apache.ibatis.annotations.Update;
 import org.apache.ibatis.annotations.Insert;
 
 import java.time.LocalDateTime;
@@ -53,8 +52,23 @@ public interface ConversationMapper extends BaseMapper<ConversationEntity> {
                                              @Param("p2Id") long p2Id);
 
     /**
-     * 对应 Go 端 ListConversations：分页拉某 operator 作为 p1 OR p2 的会话，按 last_message_at DESC。
+     * 对应 Go 端 ListConversations：分页拉某 operator 作为 p1 OR p2 的会话，
+     * 按 {@code last_message_at DESC, updated_at DESC}。
      * 用 idx_conversation_p1 / idx_conversation_p2 两侧索引命中。
+     *
+     * <p><b>⚠️ DRIFT-MSG-V-005（2026-10-22 修）：次级排序键 {@code updated_at} 曾被漏掉</b>
+     * <pre>
+     * Go   message.go:114-138
+     *      db := query.Order("last_message_at desc").Order("updated_at desc")   ← 两个键
+     * RAG  修复前
+     *      w.orderByDesc(ConversationEntity::getLastMessageAt)                 ← 只有一个键
+     * </pre>
+     * {@code last_message_at} 并列时（批量发消息即产生并列）Go 侧由 {@code updated_at}
+     * 决定顺序；RAG 侧顺序不确定 ⇒ <b>同一份数据连续两次调用可能返回不同顺序</b>，
+     * 翻页时列表项会跳动或重复。
+     *
+     * <p><b>顺序不可颠倒</b>：主键必须仍是 {@code last_message_at}，
+     * 次键才是 {@code updated_at} —— 颠倒会改变「最新会话排最前」这个主语义。
      */
     default List<ConversationEntity> listByParticipant(int role, long id, int limit, int offset) {
         LambdaQueryWrapper<ConversationEntity> w = new LambdaQueryWrapper<>();
@@ -63,6 +77,7 @@ public interface ConversationMapper extends BaseMapper<ConversationEntity> {
                      .or(qq -> qq.eq(ConversationEntity::getParticipant2Role, role)
                                  .eq(ConversationEntity::getParticipant2Id, id)));
         w.orderByDesc(ConversationEntity::getLastMessageAt);
+        w.orderByDesc(ConversationEntity::getUpdatedAt);
         w.last("LIMIT " + limit + " OFFSET " + offset);
         return selectList(w);
     }
@@ -104,18 +119,6 @@ public interface ConversationMapper extends BaseMapper<ConversationEntity> {
                 .set(ConversationEntity::getUpdatedAt, lastMessageAt);
         return update(null, w);
     }
-
-    /**
-     * 对应 Go 端 markConversationReadTx 内的 conversation UPDATE：
-     * 仅更新 conversation.updated_at，message 表由 ConversationMessageMapper 在同一事务内批量更新。
-     */
-    @Update("""
-            UPDATE message_conversation
-                SET updated_at = #{now}
-              WHERE id = #{conversationId}
-            """)
-    int touchUpdatedAt(@Param("conversationId") long conversationId,
-                       @Param("now") LocalDateTime now);
 
     /**
      * 对应 Go 端 ListConversations 内的 total 计数：统计 operator 作为 p1 OR p2 的会话总数。

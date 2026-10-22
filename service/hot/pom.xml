@@ -15,6 +15,7 @@
         <module>hot-proto</module>
         <module>hot-api</module>
         <module>hot-rpc</module>
+        <module>hot-common</module>
     </modules>
 
     <properties>

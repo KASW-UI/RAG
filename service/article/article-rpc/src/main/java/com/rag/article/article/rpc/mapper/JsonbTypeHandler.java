@@ -1,0 +1,177 @@
+package com.rag.article.article.rpc.mapper;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.ibatis.type.BaseTypeHandler;
+import org.apache.ibatis.type.JdbcType;
+import org.postgresql.util.PGobject;
+
+import java.sql.CallableStatement;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * article 域 jsonb 列的 TypeHandler —— 对应 Go 端 {@code model/article.go} 的
+ * {@code StringArray} 与 {@code JSONMap} 两个自定义 {@code driver.Valuer}/{@code sql.Scanner}。
+ *
+ * <h2>为什么不用 MyBatis-Plus 自带的 JacksonTypeHandler</h2>
+ * 本域两个 jsonb 列语义<b>完全不同</b>：{@code secondary_tags} 是<b>数组</b>，
+ * {@code ext_info} 是<b>对象</b>且<b>值必须是 String</b>。MP 的通用 handler 会按目标类型推断，
+ * 对 {@code Map<String, String>} 与 {@code List<String>} 的处理路径不稳定，
+ * 且 {@code ext_info} 的值里混着<b>存成字符串的数值</b>（{@code last_sync_version_ms: "1792…"}）
+ * 和布尔标志（{@code published_once: "true"}）——若被推断成 {@code Object}，
+ * 读回来会变成 Integer/Boolean，与 Go 的 {@code JSONMap map[string]string} 不一致，
+ * 进而让 {@code ext_info.get(ExtLastSyncVersion) != String.valueOf(result.VersionMs)}
+ * 这类判据<b>恒真</b>，静默破坏同步幂等。
+ *
+ * <h2>⚠️ 与 Go 的三条语义对齐点</h2>
+ * <ol>
+ *   <li><b>列为 null 时读成 null 而不是空集合</b>：Go {@code StringArray.Scan} /
+ *       {@code JSONMap.Scan} 在 {@code value == nil} 时 {@code *a = nil}。
+ *       读成空 list 会让 {@code len(in.SecondaryTags) > 0} 与
+ *       {@code cloneStringMap} 的"空则返回 nil"语义漂移。</li>
+ *   <li><b>写入时 null 列</b>：Go 的 {@code Value()} 对 nil map/slice 会
+ *       {@code json.Marshal} 出 {@code "null"}，写入的是 JSON 文本 {@code null}
+ *       而不是 SQL NULL。Java 侧同样写 {@code "null"} 文本，保持两侧列内容一致。</li>
+ *   <li><b>PG 列类型必须显式声明 jsonb</b>：否则 pgjdbc 按 VARCHAR 绑定，
+ *       jsonb 列会因类型不匹配报错（与 like-rpc 的 JsonbTypeHandler 同款理由）。</li>
+ * </ol>
+ *
+ * <p><b>不校验 JSON 合法性</b>：Go 侧也不校验（payload 由 json.Marshal 产生，一定合法）。
+ * 上层传了非法 JSON 应让 PG 在插入时报错，而不是在这里静默吞掉。
+ *
+ * <p>锁死用例：{@code ArticleJsonbMappingTest}（真 PG，验证两侧 null/空/非空三种形态逐字节一致）。
+ */
+public final class JsonbTypeHandler {
+
+    /** PG 的 jsonb 类型名。 */
+    public static final String PG_JSONB = "jsonb";
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private JsonbTypeHandler() {
+    }
+
+    private static PGobject toJsonb(String value) throws SQLException {
+        PGobject jsonb = new PGobject();
+        jsonb.setType(PG_JSONB);
+        jsonb.setValue(value);
+        return jsonb;
+    }
+
+    /**
+     * {@code secondary_tags} jsonb ↔ {@code List<String>}。
+     *
+     * <p>对应 Go {@code type StringArray []string}。
+     */
+    public static class StringListTypeHandler extends BaseTypeHandler<List<String>> {
+
+        @Override
+        public void setNonNullParameter(PreparedStatement ps, int i, List<String> parameter, JdbcType jdbcType)
+                throws SQLException {
+            // Go: json.Marshal(a) —— nil slice 也会写出 "null"，不是 SQL NULL
+            ps.setObject(i, toJsonb(writeJson(parameter)));
+        }
+
+        @Override
+        public List<String> getNullableResult(ResultSet rs, String columnName) throws SQLException {
+            return readList(rs.getString(columnName));
+        }
+
+        @Override
+        public List<String> getNullableResult(ResultSet rs, int columnIndex) throws SQLException {
+            return readList(rs.getString(columnIndex));
+        }
+
+        @Override
+        public List<String> getNullableResult(CallableStatement cs, int columnIndex) throws SQLException {
+            return readList(cs.getString(columnIndex));
+        }
+    }
+
+    /**
+     * {@code ext_info} jsonb ↔ {@code Map<String, String>}。
+     *
+     * <p>对应 Go {@code type JSONMap map[string]string}。
+     */
+    public static class StringMapTypeHandler extends BaseTypeHandler<Map<String, String>> {
+
+        @Override
+        public void setNonNullParameter(PreparedStatement ps, int i, Map<String, String> parameter, JdbcType jdbcType)
+                throws SQLException {
+            ps.setObject(i, toJsonb(writeJson(parameter)));
+        }
+
+        @Override
+        public Map<String, String> getNullableResult(ResultSet rs, String columnName) throws SQLException {
+            return readMap(rs.getString(columnName));
+        }
+
+        @Override
+        public Map<String, String> getNullableResult(ResultSet rs, int columnIndex) throws SQLException {
+            return readMap(rs.getString(columnIndex));
+        }
+
+        @Override
+        public Map<String, String> getNullableResult(CallableStatement cs, int columnIndex) throws SQLException {
+            return readMap(cs.getString(columnIndex));
+        }
+    }
+
+    /**
+     * JSON 文本写列 —— 用于 {@code article_sync_outbox.payload} /
+     * {@code article_domain_outbox.payload} 这类<b>整体冻结</b>的载荷列。
+     *
+     * <p>⚠️ Go 侧 {@code MustMarshalSyncEvent} 产出的是一整段 JSON 文本，
+     * 落库后<b>推送时必须逐字节一致</b>（relay 推的是 {@code event.Payload} 原文，不是重新序列化）。
+     */
+    public static String writeJson(Object value) {
+        try {
+            return MAPPER.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("article jsonb column value is not serializable", e);
+        }
+    }
+
+    /**
+     * 解析 JSON 文本为 {@code List<String>}；{@code null} / 空白 / JSON {@code null} → {@code null}。
+     *
+     * <p>对应 Go {@code StringArray.Scan}：{@code value == nil ⇒ *a = nil}。
+     */
+    public static List<String> readList(String json) throws SQLException {
+        if (json == null || json.isBlank() || "null".equals(json)) {
+            return null;
+        }
+        try {
+            return MAPPER.readValue(json, new TypeReference<List<String>>() {
+            });
+        } catch (Exception e) {
+            throw new SQLException("article jsonb array column is not a JSON string array: " + json, e);
+        }
+    }
+
+    /**
+     * 解析 JSON 文本为 {@code Map<String, String>}；{@code null} / 空白 / JSON {@code null} → {@code null}。
+     *
+     * <p>对应 Go {@code JSONMap.Scan}。
+     *
+     * <p>⚠️ 非字符串值（如 JSON number）<b>不会</b>被静默转成字符串：
+     * Jackson 在此抛异常并冒泡，因为 Go 侧 {@code json.Unmarshal} 进
+     * {@code map[string]string} 遇到 number 同样会失败。两侧一致地拒绝，
+     * 好过一侧悄悄接受 —— 那会让「Go 写不出这种行、Java 写得出」成为数据层漂移。
+     */
+    public static Map<String, String> readMap(String json) throws SQLException {
+        if (json == null || json.isBlank() || "null".equals(json)) {
+            return null;
+        }
+        try {
+            return MAPPER.readValue(json, new TypeReference<Map<String, String>>() {
+            });
+        } catch (Exception e) {
+            throw new SQLException("article jsonb object column is not a JSON string map: " + json, e);
+        }
+    }
+}

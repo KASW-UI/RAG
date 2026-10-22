@@ -1,0 +1,238 @@
+# =============================================================================
+# like-rpc application.yml —— 对应 Go 端两个进程的配置合并
+#   P1  service/like/rpc/etc/like.yaml
+#   P2  service/like/rpc/internal/mq/etc/mq.yaml
+#
+# 本服务是**单 JVM**，承载 Go 侧 4 个 main（gRPC / mq / fact-dispatch / fact-authority）。
+# 配置项按来源分段标注，1:1 保留 Go 同名字段。
+# =============================================================================
+
+spring:
+  application:
+    # 对应 Go Name: like.rpc（服务发现用）；Telemetry.Name 亦为 like-rpc
+    name: like-rpc
+
+  # ============== Postgres ==============
+  # 对应 Go Storage.Postgres.DataSource
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}
+    username: ${POSTGRES_USER:admin}
+    password: ${POSTGRES_PASSWORD:password}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # 对应 Go servicecontext.go:34-35
+      #   sqlDB.SetMaxIdleConns(10) / sqlDB.SetMaxOpenConns(100)
+      maximum-pool-size: 100
+      minimum-idle: 10
+
+  # ============== MyBatis-Plus ==============
+  mybatis-plus:
+    configuration:
+      map-underscore-to-camel-case: true
+      default-fetch-size: 100
+    global-config:
+      db-config:
+        # 像 message-rpc 一样：表名 / 主键策略在 Entity 注解上显式钉死
+        id-type: ASSIGN_ID
+      banner: false
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+
+  # ============== Flyway ==============
+  # ⚠️ **独立账本表名**（2026-10-23，AGENTS.md §6.3 问题 4）。
+  #    `flyway_schema_history` 是 **schema 级**账本，一个 schema 只能有一本账。
+  #    like-rpc / message-rpc / article-rpc 连同一个 first_db、同一个 public schema，
+  #    共用默认账本时后启动者会把自己的迁移判为「已应用」而静默跳过 ——
+  #    like 与 message 的 V1-V3 版本号直接撞车且内容不同（like_record vs
+  #    message_conversation 等），而 like 自己还有 V4/V5。
+  #    改账本表名即可消除病根，**迁移文件名一个字都不用动**。
+  #    ⛔ 不要用 validate-on-migrate=false / out-of-order=true 绕道：
+  #       已用真 jar + 真 PG 16 实测证伪（会让账本更脏），
+  #       见 tools/difftest/exp-drift015-flyway-flags.sh。
+  # ⚠️ 上面的声明只保证**配置层**不撞；「Flyway 运行时真的按它建表」
+  #    尚未在真 PG 上双模块对启动验证过，按 §3.3 记为 UNKNOWN。
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+    schemas: public
+    table: flyway_schema_history_like
+
+  # ============== Redis ==============
+  # 对应 Go Storage.Redis（go-zero rest.RedisConf：Host/Type/Pass）
+  # ⚠️ Type: node 表示单节点直连，不是集群。Go 侧 go-zero 收到 Type=node 时
+  #    走 NewRedis → redis.NewClient（单节点）。Java 端 Lettuce 默认即单节点，
+  #    不要配 cluster 相关项，否则会变成 CLUSTER 拓扑解析。
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      timeout: 3s
+      lettuce:
+        pool:
+          enabled: true
+          max-active: 64
+          max-idle: 16
+          min-idle: 4
+
+  # ============== Kafka ==============
+  # 对应 Go KafkaConf（producer）/ mq.yaml 的 Kafka（consumer）
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:kafka:9092}
+
+    # ---------- 消费者 ----------
+    consumer:
+      # 对应 Go mq.yaml Kafka.Group: like-update-group
+      group-id: like-update-group
+      # 对应 Go Offset: first —— 从最早开始消费。
+      # ⚠️ 这是「至少一次」语义的起点：与 Go kq 一样，位点只在处理成功后提交，
+      #    解析/校验失败的坏消息会被**主动提交**（drop），持久层失败则**不提交**（retry）。
+      #    两者都靠 DefaultErrorHandler + RECORD ack mode 表达，见 LikeUpdateKafkaListener。
+      auto-offset-reset: earliest
+      # ⚠️ 关掉自动提交，改由容器在 listener 正常返回后提交。
+      #    若保留 true，则「持久层失败 → 不提交位点 → retry」这条契约不成立
+      #    （kq 的语义是 Consume 返回 error ⇒ 不确认）。
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Go kq.Pusher.Push 是**同步**阻塞写；Java KafkaTemplate.send 是异步。
+      # 阻塞等待 acks 会把 Kafka 延迟传导到 LikeAction 的响应时间里，
+      # 而 Go 侧失败也只打日志不返回错误 —— 因此这里选 acks=1 + 异步 + 失败回调日志，
+      # 对外可观察行为（响应不被 Kafka 拖慢/拖挂）与 Go 一致。详见 LikeKafkaTopics。
+      acks: 1
+    listener:
+      # RECORD = listener 正常返回后提交位点。这是 drop/retry 契约的实现载体。
+      ack-mode: record
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+
+# ============== gRPC server（devh）==============
+# 对应 Go ListenOn: 0.0.0.0:8082
+grpc:
+  server:
+    port: 8082
+    address: 0.0.0.0
+    # Go 侧 reflection 仅在 DevMode/TestMode 注册（like.go:37-39）；
+    # Java 侧 devh starter 默认即开启 reflection，此处不额外配置。
+  client:
+    # 对应 Go MessageRpc.Etcd.Key: message.rpc → 服务发现名 message-rpc
+    message-rpc:
+      address: discovery://message-rpc
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      negotiation-type: plaintext
+
+# ============== like 服务专属配置 ==============
+# 对应 Go Storage.Redis 的三个自定义字段（非 go-zero 原生，Go 侧靠 json:"CacheTTL" 等 tag 读取）
+like:
+  redis:
+    # Go: CacheTTL int `default=3600`（yaml 显式写 3600）
+    #     —— GetUserTotalLike 的 SETEX / 命中后的 EXPIRE 用它
+    cache-ttl: 3600s
+    # Go: HotspotTTL int `default=1800`
+    # ⚠️ Go 代码里**没有任何地方读 HotspotTTL**（全量 grep 确认）。
+    #    这里保留只为配置面完整，Java 侧同样不读 —— 见 LikeRpcProperties.Redis#hotspotTtl 的注释。
+    hotspot-ttl: 1800s
+    # 列表类 ZSet 的 TTL —— ⚠️ Go 侧是**硬编码常量**，不在 yaml 里：
+    #   getuserlikelistlogic.go:120   Expire(redisKey, 3600*24*7)   // 7 天
+    #   gettargetlikerlistlogic.go:128 Expire(redisKey, 86400*7)     // 7 天
+    # 两处数值相同。提到 yaml 是为了让「改这个值」必须显式可见，而不是藏在代码魔数里。
+    list-ttl: 7d
+    # ⚠️ Go 的 RedisExtConf.BatchSize（yaml 写 1000）**无任何读取点**，
+    #    因此 Java 侧刻意不映射这个属性 —— 映射了会让人误以为批量上限已生效。
+
+  # ---------- Kafka 主题（对应 Go 各 PusherConf 的 Topic）----------
+  kafka:
+    # Go KafkaConf.Topic: like_promotion_topic
+    # ★ 同时也是 Go mq.yaml 的消费 Topic（生产与消费同一个 topic）
+    like-topic: like_promotion_topic
+    # Go KafkaPusher.Topic: like_update_topic —— ⚠️ Go 侧 Config 里虽有 KafkaPusher 字段，
+    #    但 servicecontext.go 建的是 c.KafkaConf 的 pusher，**KafkaPusher 这份配置从未被读取**。
+    #    Java 侧不实现它，并在 LikeKafkaTopics 里留注释说明。
+    # Go TaskUserPusherConf.Topic: task.logs.filtered.User
+    task-user-topic: task.logs.filtered.User
+    # Go TaskArticlePusherConf.Topic: task.logs.filtered.Article
+    task-article-topic: task.logs.filtered.Article
+    # Go mq.yaml HotEventPusherConf.Topic: article-hot-events
+    hot-event-topic: article-hot-events
+
+    # ---------- 可选 producer 的启用开关 ----------
+    # Go newOptionalPusher(conf)：Brokers 为空或 Topic 为空 ⇒ 返回 nil ⇒
+    # 整段 syncTaskProgress / notifyArticleLiked 的推送逻辑被跳过。
+    # 这里用 enabled 把这条「运行期判空」显式化成配置，保持「不配置就完全不推」的语义。
+    task-pushers-enabled: true
+
+  # ---------- 事实流派发（P3 fact-dispatch）----------
+  # Go cmd/fact-dispatch/main.go 要求同时具备：
+  #   LIKE_DATABASE_URL 非空 / DC_PLATFORM_EVENT_URL 非空 / DC_PLATFORM_SERVICE_TOKEN ≥32 字节
+  # 任一不满足即 return error → 进程退出。
+  # Java 侧是单 JVM 合并进程，不能因为缺 DC 配置就让整个 like-rpc 起不来，
+  # 因此改为「默认关闭 + 启动时显式告警」，关闭时该功能完全不参与运行。
+  fact:
+    dispatch-enabled: false
+    # Go: communityfact.NewDCEventSender(endpoint, token, &http.Client{Timeout: 8s})
+    dc-endpoint: ${DC_PLATFORM_EVENT_URL:}
+    dc-token: ${DC_PLATFORM_SERVICE_TOKEN:}
+    dc-timeout: 8s
+
+  # ---------- 权威读（P4 fact-authority）----------
+  # Go cmd/fact-authority/main.go 要求 LIKE_FACT_AUTHORITY_LISTEN / _TOKEN（≥32 字节）。
+  # 默认关闭；关闭时不注册任何额外 HTTP 端口。
+  authority:
+    enabled: false
+    token: ${LIKE_FACT_AUTHORITY_TOKEN:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      # 与 Go prometheus 子系统名对齐（Go 侧 LikeActionCount 的 Subsystem 是 "like-rpc"，
+      # LikeQueryCacheCount 的是 "like_rpc" —— 两处拼写不一致，是 Go 源码的事实，此处保留）
+      application: like-rpc
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+otel:
+  service:
+    name: like-rpc
+  exporter:
+    otlp:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:jaeger:4317}
+  traces:
+    exporter: otlp
+    sampler: parentbased_always_on
+
+logging:
+  level:
+    root: INFO
+    com.rag: INFO
+    io.grpc: WARN
+
+# ===== observability（对齐 Go service/common/observability）=====
+# Go like.go:30 observability.DisableNativeRpcTimeout(&c.RpcServerConf)
+#            + like.go:41 s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(...))
+# Go yaml 未配 Timeout ⇒ go-zero zrpc/config.go 的 default=2000ms。
+observability:
+  rpc-timeout: 2s

@@ -28,7 +28,12 @@ import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -97,11 +102,57 @@ public final class HttpMiddleware {
      * servlet 容器线程必须能立即响应 {@code InterruptedException}（容器关闭 / 请求取消），
      * 用 {@code Future.get} 会阻塞 servlet 主线程直到 timeout 才能退出，违反 servlet 生命周期。
      */
-    private static final ExecutorService HTTP_EXECUTOR = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "obs-http-worker");
-        t.setDaemon(true);
-        return t;
-    });
+    /**
+     * worker 线程数上界（2026-10-22 加；此前是 {@code newCachedThreadPool} ⇒ <b>无上限</b>）。
+     *
+     * <p><b>为什么要上界</b>：⚠️ 本条曾写成「grpc-java 的阻塞 stub <b>不可中断</b>」——
+     * <b>该说法已被实测推翻</b>（见 {@code DeadlineCancellationSemanticsTest}）：
+     * {@code Future.cancel(true)} <b>确实能中断</b>阻塞调用。
+     * 真正的差异是<b>中断产生的 status 是 {@code CANCELLED}</b>，
+     * 而 Go 的 ctx 到期产生的是 {@code DEADLINE_EXCEEDED}，
+     * 后者才在 {@code codes.Acceptable} 的失败名单里（前者不在）——
+     * 即「下游超时」在补 deadline 之前对 client breaker <b>不可见</b>。
+     * <p>上界要解决的是另一个问题：<b>线程被钉住的时间</b>。
+     * 中断信号发出后，调用要等到自己真正收场才释放线程；
+     * 而 {@code newCachedThreadPool} 无上限 ⇒ 线程数按 到达率 × 下游耗时 <b>无界增长</b>。
+     * <p>Go 侧不存在这个问题，原因是它的超时走 <b>ctx 传播</b>：
+     * {@code timeouthandler.go:67} 的 {@code r.WithContext(ctx)} 把 deadline <b>传进业务</b>，
+     * 下游 I/O 立即中止 ⇒ goroutine 迅速释放；而且 goroutine 本身只有 2 KB 初始栈。
+     * ⇒ 上界是「拿不到 ctx 传播」这件事的**兜底**，不是 Go 语义的一部分，别把它当等价物。
+     *
+     * <p><b>为什么取 512</b>：worker 只在请求在途期间被占用，而并发上限由容器的
+     * {@code max-threads}（Tomcat 默认 200）决定。512 ≈ 2.5× 留出余量，
+     * 使<b>正常流量永远不触发拒绝</b>，拒绝只在「下游已卡死 + 高并发」时才出现。
+     * <p>⚠️ 这是常量而非配置项：本类是 static 工具、在 Spring 装配前就初始化，
+     * 挂配置只会得到一个「看起来能配、实际改了没反应」的面板（§3.3 同款形态）。
+     * 真需要调，优先调容器的 {@code max-threads} 保持两者关系明确。
+     */
+    static final int MAX_HTTP_WORKERS = 512;
+
+    /** 供测试与排障观察当前 worker 池的活跃/上限，不参与任何判定。 */
+    static ThreadPoolExecutor httpExecutor() {
+        return (ThreadPoolExecutor) HTTP_EXECUTOR;
+    }
+
+    private static final ExecutorService HTTP_EXECUTOR = new ThreadPoolExecutor(
+            0,
+            MAX_HTTP_WORKERS,
+            60L,
+            TimeUnit.SECONDS,
+            // ⚠️ 必须仍是 SynchronousQueue：与旧的 newCachedThreadPool 保持同一形状
+            //    （提交即交接、不排队）。换成 LinkedBlockingQueue 会引入「排队」语义 ——
+            //    请求在队列里等，超时计时就从「进入业务」推迟到了「开始处理」，那是新行为。
+            new SynchronousQueue<>(),
+            r -> {
+                Thread t = new Thread(r, "obs-http-worker");
+                t.setDaemon(true);
+                return t;
+            },
+            // 饱和 ⇒ 抛 RejectedExecutionException，由调用点转成**裸 503**（见 doFilter）。
+            // 刻意不用 CallerRunsPolicy：那会把业务搬回容器线程，等于「超时保护整条失效」。
+            new ThreadPoolExecutor.AbortPolicy());
+
+    private static final Logger log = LoggerFactory.getLogger(HttpMiddleware.class);
 
     private HttpMiddleware() {
     }
@@ -193,11 +244,23 @@ public final class HttpMiddleware {
                 final RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
                 final Map<String, String> mdcSnapshot = MDC.getCopyOfContextMap();
                 final Context parentOtelCtx = Context.current();
+                final long startNanos = System.nanoTime();
 
-                Future<?> workerFuture = HTTP_EXECUTOR.submit(() -> {
+                // ⚠️ 预算必须在 submit **之前**起算：Go 侧 timeouthandler.go:67 就是在
+                // 起 goroutine 之前 context.WithTimeout 的。若从 worker 真正开始才起算，
+                // 「等线程」这段时间就不算进预算，超时窗口会比 Go 长。
+                Instant start = Instant.now();
+                final long deadlineNanos = startNanos + timeout.toNanos();
+
+                Future<?> workerFuture;
+                try {
+                    workerFuture = HTTP_EXECUTOR.submit(() -> {
                     // 先进上下文，再跑业务；finally 必须还原，避免线程池复用时串味
                     RequestAttributes prevAttrs = RequestContextHolder.getRequestAttributes();
                     Map<String, String> prevMdc = MDC.getCopyOfContextMap();
+                    // ⚠️ deadline 必须设在**worker 线程**上：业务跑在这里，
+                    // 容器线程的 ThreadLocal 对它不可见（最容易写错的一处）。
+                    GoStyleRequestDeadline.begin(deadlineNanos);
                     try {
                         if (requestAttributes != null) {
                             RequestContextHolder.setRequestAttributes(requestAttributes);
@@ -215,6 +278,9 @@ public final class HttpMiddleware {
                         panicHolder[0] = t;
                     } finally {
                         doneLatch.countDown();
+                        // ⚠️ 必须清：worker 来自线程池，残留会把下一个请求的 deadline
+                        // 污染成上一个的（静默串味，§3.3）。
+                        GoStyleRequestDeadline.clear();
                         if (prevAttrs != null) {
                             RequestContextHolder.setRequestAttributes(prevAttrs);
                         } else {
@@ -227,8 +293,29 @@ public final class HttpMiddleware {
                         }
                     }
                 });
+                } catch (RejectedExecutionException saturated) {
+                    // ── worker 池饱和 ⇒ 容量拒绝（2026-10-22 新增路径）──
+                    // 形状刻意对齐 Go rest/handler/maxconnshandler.go:12-36 的裸 503：
+                    //   只有状态码，**无 body、无 Content-Type**、不走 envelope。
+                    // 与「超时 503」刻意**不同**：超时那条走 writeTimeoutResponse（有 body）。
+                    // 理由：两者的可观察含义不同 —— 容量不足是「现在别来」，超时是「来不及了」。
+                    log.warn("http worker pool saturated (max={}), shedding request {}",
+                            MAX_HTTP_WORKERS, httpReq.getRequestURI());
+                    Context rejCtx = currentOtelContext();
+                    Span rejSpan = Span.fromContext(rejCtx);
+                    if (rejSpan.isRecording()) {
+                        rejSpan.setAttribute(AttributeKey.stringKey("service.name"), serviceName);
+                        rejSpan.setAttribute(AttributeKey.stringKey("http.route"), httpReq.getRequestURI());
+                        rejSpan.setAttribute(AttributeKey.stringKey("http.method"), httpReq.getMethod());
+                        rejSpan.setAttribute(AttributeKey.longKey("http.status_code"), 503L);
+                    }
+                    markTimeout(rejCtx, new java.util.concurrent.TimeoutException("http worker pool saturated"),
+                            Duration.between(start, Instant.now()),
+                            httpAttrs(serviceName, httpReq, 503));
+                    httpResp.setStatus(503);
+                    return;
+                }
 
-                Instant start = Instant.now();
                 long timeoutMs = timeout.toMillis();
                 // 容器线程等 latch 到点即返回：精度对齐 Go 的 select{<-ctx.Done()}
                 // （旧实现 Thread.sleep(10) 轮询最多晚 10ms 才判超时）

@@ -15,6 +15,7 @@
         <module>article-proto</module>
         <module>article-rpc</module>
         <module>article-api</module>
+        <module>article-common</module>
     </modules>
 
     <properties>

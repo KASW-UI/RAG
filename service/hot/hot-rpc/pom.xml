@@ -17,4 +17,157 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <!--
+            hot-proto：HotServiceGrpc base + 5 个方法的服务端 Stub
+            （对应 Go 端 rpc/pb/hot_grpc.pb.go + rpc/internal/server/hot_service_server.go）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>hot-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            common（artifactId=common）：服务级共享能力，对应 Go 端 service/common/*：
+              - logger.Logger / LoggerFactoryBean        ← Go common/logger（hot.go:47 的 logger.Init("hot.rpc")）
+              - spring.RpcServerInterceptorFactory         ← Go observability.NewUnaryServerInterceptor（2s deadline）
+              - observability.MqConsumer                   ← Go observability.TraceConsumer（hot_handler.go:105）
+            ⚠️ 依赖本模块不等于 scanBasePackages 自动含 com.rag.common：
+               HotRpcApplication 必须显式写 scanBasePackages = "com.rag.common"
+               或用 @Import 显式引 RpcServerInterceptorFactory（AGENTS.md §3.3 记录的装配陷阱：
+               @Component 不等于自动注册）。
+
+            ⚠️ **刻意不依赖 hot-common** —— service/hot/common/errmsg.go 经 grep 验证在
+               rpc/ 下**零引用**，本模块 3 个互动方法返回的是 gRPC UNIMPLEMENTED status 而非业务码，
+               不需要任何错误码常量类。依据 FileTree/hot/common.md §12.5 判据 2
+               （不给死代码建结构；like-rpc 的 258 行 LikeGrpcError 是反面样本）。
+               ✅ 这条「依赖了但不用」的取舍已定（2026-10-22）：码表落进 hot-common，
+               而本模块**刻意不声明**对它的依赖 ⇒ 「依赖了但不用」并不成立，本段无需改动。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot 基础（纯 gRPC，不带 web） ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <!--
+            spring-boot-web-server：只为满足 nacos-discovery 的反射引用
+            （org.springframework.boot.web.server.context.WebServerInitializedEvent）。
+            不引它启动不了 Nacos 自动配置，但**不会**因此起 web 容器 —— 本服务无 WebApplicationType。
+            与 message-rpc / like-rpc 完全同款。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-web-server</artifactId>
+        </dependency>
+
+        <!-- ============== 3. Redis（对应 Go 端 *redis.Redis） ============== -->
+        <!--
+            ★ Go 侧 svc.ServiceContext.Redis，唯一的 keyspace 是热度榜：
+              - hot:articles        ZSet，GetHotArticles 的读取源
+              - hot:articles:p{i}   分区快照
+              - …:shadow            合并期的影子榜
+              - hot:merge:lock      合并分布式锁
+              - 4 段 Lua（对应 hot_handler.go 的 Redis 快照段）
+
+            ⚠️ 错误语义是真正的缺口，见 HotRedisSnapshotStore 的类注释：
+               Go 的同步失败只 log + return（不抛），而 Spring Data Redis 一律抛异常。
+               必须显式吞掉，否则会把 Go 的「快照失败不影响主流程」变成「消费失败触发重试」。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- ============== 4. Kafka（对应 Go go-queue / sarama ConsumerGroupHandler） ============== -->
+        <!--
+            ★ Go 侧 rpc/internal/mqs/hot_handler.go 是 sarama ConsumerGroupHandler：
+              - topic=article-hot-events，group=article-hot-group，3 个分区对应 3 个实例副本
+              - rebalance 时把该分区的 sketch 落盘 Redis，重新获得分区时从 Redis 回灌
+
+            Spring 侧对应：@KafkaListener（HotEventConsumer）+ partition assign/revoke 回调
+            （HotPartitionSketchRegistry）。ack 模式 / 并发度 / 重试策略都是必须显式声明的
+            独立关注点 —— 见 FileTree/hot/rpc.md §12.5「新增包说明」mq/。
+        -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <!--
+            ⚠️ Spring Boot 4 把 Kafka 自动配置整体搬出了 spring-boot-autoconfigure，
+               改由独立模块 spring-boot-kafka 提供（实测 autoconfigure-4.0.8.jar 内
+               Kafka 类数量为 0；KafkaAutoConfiguration / ConcurrentKafkaListenerContainerFactoryConfigurer
+               都在 spring-boot-kafka 里）。
+               只引 spring-kafka ⇒ **没有 ConsumerFactory Bean、没有 @KafkaListener 后置处理器**，
+               @KafkaListener 会被完全静默忽略，且启动不报错。
+               版本由 spring-boot-dependencies BOM 管理，不显式写 version。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-kafka</artifactId>
+        </dependency>
+
+        <!-- ============== 5. gRPC server ============== -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+        <!-- @GrpcService 自动起 gRPC server（替代 zrpc.MustNewServer） -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-server-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot-starter.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!--
+            ⚠️ 刻意不引 grpc-client-spring-boot-starter：Go 侧 hot-rpc **零下游 gRPC 客户端**
+               （FileTree/hot/rpc.md §12.5「不建 client/」）。引入会多一条永远不用的通道。
+            ⚠️ Go 侧存在 client 熔断（zrpc/internal/config.go:14 default=true），
+               但那作用于下游调用；本模块无下游调用 ⇒ 无需对应拦截器。
+        -->
+
+        <!-- ============== 6. Nacos 服务发现（替代 Go etcd 注册） ============== -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- ============== 7. Metrics：复刻 Go 端 hot_* metric ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 8. OpenTelemetry OTLP exporter（Go Telemetry.*） ============== -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 9. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>

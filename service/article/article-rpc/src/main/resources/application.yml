@@ -1,0 +1,244 @@
+# =============================================================================
+# article-rpc application.yml —— 对应 Go 端 service/article/rpc/etc/article.yaml
+# =============================================================================
+# 1:1 迁移原则：保留 Go yaml 同名字段；Java 端用 Spring / devh starter /
+# Spring Cloud Alibaba / Spring Kafka 自身字段名表达相同语义。
+# =============================================================================
+
+spring:
+  application:
+    # 对应 Go Name: article.rpc —— 服务发现 / Nacos / OTEL 都按这个名注册
+    name: article-rpc
+
+  # ============== Postgres ==============
+  # 对应 Go Postgres.*：Host / Port / User / Password / DBName
+  # ⚠️ Go 的 DSN 带 `TimeZone=Asia/Shanghai`（model/db.go:31），Java 侧用 JVM 参数表达：
+  #    见下方 `time-zone`。这是 DRIFT-MSG-V-007 同类问题的显式落点，不是默认值。
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}
+    username: ${POSTGRES_USER:admin}
+    password: ${POSTGRES_PASSWORD:password}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # 对应 Go sqlDB.SetMaxOpenConns(20) / SetMaxIdleConns(5)
+      # Go 注释写明「保守是为了让 outbox poller 不打爆共享 PG 实例」
+      maximum-pool-size: 20
+      minimum-idle: 5
+      # 对应 Go sqlDB.SetConnMaxIdleTime(5 * time.Minute)
+      idle-timeout: 300000
+      # 对应 Go sqlDB.SetConnMaxLifetime(30 * time.Minute)
+      max-lifetime: 1800000
+
+  # ============== MyBatis-Plus ==============
+  mybatis-plus:
+    configuration:
+      map-underscore-to-camel-case: true
+      default-fetch-size: 100
+    global-config:
+      db-config:
+        # 主键策略在 Entity @TableId 上显式钉死（article / outbox 都是业务侧生成的字符串 ID）
+        id-type: INPUT
+      banner: false
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+
+  # ============== Flyway ==============
+  # ⚠️ 缺 spring-boot-flyway 依赖时（Boot 4 拆模块），这里配了也不会执行，
+  #    且**启动日志里连一行 Flyway 都没有**（不是报错，是根本没加载）。
+  #    依赖已在 pom 里显式引入。表版本从 V8 起（§6.3 定的全局唯一号段：
+  #    message-rpc 占 V1-V3、users 占 V1-V4）。
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+    schemas: public
+
+  # ============== Kafka ==============
+  # 对应 Go 的 4 个 kq 配置（2 pusher + 2 consumer）。
+  # ⚠️ Go 是「每条通道一个 consumer group」，Java 侧同一 topic 的多个用途必须用不同
+  #    group-id；Spring Kafka 的 group-id 是 listener 级别的，不能全局唯一，
+  #    因此各 listener 在 @KafkaListener 上显式声明 groupId。
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:kafka:9092}
+    consumer:
+      # 对应 Go KqConsumerConf.Offset: first（审核消费者与同步结果消费者都是 first）
+      # ⚠️ Spring 的语义是"无已提交位点时从哪里开始"，与 Go 的 Offset: first 等价
+      auto-offset-reset: earliest
+      # Go `Consumers: 1` —— 单消费者；Spring 默认 concurrency=1，行为一致
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # ⚠️ Go 的 kq.Pusher 是**同步** PushWithKey：返回 error 时 logic 直接返回错误。
+      #    Spring Kafka 的 send() 是异步的，"成功"只代表交给客户端。
+      #    这个差异在 ArticleSyncOutboxRelay 的类级注释里有显式留痕，不是悄悄改掉。
+      acks: all
+
+  # ============== Nacos Discovery ==============
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+
+# =============================================================================
+# gRPC server（devh）
+# =============================================================================
+grpc:
+  server:
+    # 对应 Go ListenOn: 0.0.0.0:9001
+    port: 9001
+    address: 0.0.0.0
+    # ⚠️ Go 的 Timeout: 70000 **不在这里**。
+    #    Go 的 RpcServerConf.Timeout 由 go-zero 的 UnaryServerInterceptor 强制执行，
+    #    Java 侧的等价物是 observability.rpc-timeout（见本文件末尾）+ 必须真正挂到
+    #    server 上的 RpcServerInterceptor（见 ArticleRpcApplication#rpcInterceptorConfigurer）。
+    #    devh 的 grpc.server.timeout 是 channel 级，语义不同，不要拿来顶替。
+    # Go 端 reflection 在 DevMode/TestMode 启用，Java 端由 devh starter 默认注册 reflection
+
+  # ============== gRPC client ==============
+  # 对应 Go SecurityConf.Etcd.Key: security.rpc / MessageRpc.Etcd.Key: message.rpc
+  # Java 端用 service discovery 解析，与 Go 等价寻址。
+  client:
+    security-rpc:
+      address: discovery://security-rpc
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      # ⚠️ 对应 Go SecurityConf.Timeout: 10000（yaml 里显式配了，不是框架默认值）
+      deadline: 10s
+    message-rpc:
+      address: discovery://message-rpc
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      # ⚠️ Go 的 MessageRpc **没有**配 Timeout ⇒ 走 go-zero 的默认值 **2000ms（2s）**。
+      #    证据（消费点，不是声明点）：
+      #      声明点：go-zero@v1.10.3/zrpc/config.go:31 —— `Timeout int64 `json:",default=2000"``
+      #      消费点：zrpc client 每次调用用该值设 deadline。
+      #    ⚠️ 之前这里引的是 `zrpc/internal/config.go:14`，那一行在 `ClientMiddlewaresConf` 里，
+      #    是**中间件开关**（`Timeout bool `json:",default=true"``）而非超时值；3s 实际是
+      #    `rest/config.go:55` 的 `RestConf.Timeout`（HTTP 侧），被串到了 RPC 侧。
+      #    同类错误：等不到去读标签的 default，就把别的类型的默认值当成本类型的默认值（AGENTS.md §3.3.1）。
+      deadline: 2s
+
+# =============================================================================
+# article-rpc 业务配置 —— 对应 Go etc/article.yaml 的非基础设施段
+# =============================================================================
+article-rpc:
+  postgres:
+    host: ${POSTGRES_HOST:postgres}
+    port: ${POSTGRES_PORT:5432}
+    user: ${POSTGRES_USER:admin}
+    password: ${POSTGRES_PASSWORD:password}
+    dbname: ${POSTGRES_DB:first_db}
+
+  # Go KqPusherConf：审核事件 push（create / update 入队审核）
+  kq-pusher-conf:
+    name: article-mq-pusher
+    group: article-creation-group
+    brokers: "${KAFKA_BROKERS:kafka:9092}"
+    topic: article-creation-topic
+
+  # Go KqConsumerConf：审核消费者
+  kq-consumer-conf:
+    name: dataclean-consumer
+    brokers: "${KAFKA_BROKERS:kafka:9092}"
+    group: dataclean
+    topic: article-creation-topic
+    offset: first
+
+  # Go ArticleSyncPusherConf
+  article-sync-pusher-conf:
+    name: article-sync-pusher
+    group: article-sync-pusher
+    brokers: "${KAFKA_BROKERS:kafka:9092}"
+    topic: article-sync-events
+
+  # Go ArticleSyncResultConsumerConf
+  article-sync-result-consumer-conf:
+    name: article-sync-result-consumer
+    brokers: "${KAFKA_BROKERS:kafka:9092}"
+    group: article-sync-result
+    topic: article-sync-results
+    offset: first
+
+  security:
+    key: security.rpc
+    timeout: 10000
+  message-rpc:
+    key: message.rpc
+    # 对应 Go 的未配超时 ⇒ zrpc 默认 2000ms（与上方 grpc.client.message-rpc.deadline 保持一致）
+    timeout: 2000
+
+  article-sync-outbox:
+    poll-interval-ms: 1000
+    batch-size: 100
+    max-retry: 10
+
+  minio:
+    endpoint: ${MINIO_ENDPOINT:minio:9000}
+    # 部署环境建议填写对外可访问的静态资源基址；留空时回退到 Endpoint（Go upload_file_logic.go:94-101）
+    public-base-url: ${MINIO_PUBLIC_BASE_URL:http://localhost:39000}
+    access-key-id: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-access-key: ${MINIO_SECRET_KEY:minioadmin}
+    bucket-name: articles
+    use-ssl: false
+    # ⚠️ 两个 path 都**带尾斜杠**，Go 是纯字符串拼接，不做规范化
+    image-path: "articles/images/"
+    article-path: "articles/content/"
+
+# =============================================================================
+# Actuator / Metrics
+# =============================================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+  metrics:
+    tags:
+      # 对齐 Go prometheus 的 Subsystem: article_rpc（metrics/metrics.go）
+      application: article-rpc
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# =============================================================================
+# OpenTelemetry OTLP
+# =============================================================================
+otel:
+  service:
+    name: article-rpc           # 对应 Go Telemetry.Name: article-rpc
+  exporter:
+    otlp:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:jaeger:4317}
+  traces:
+    exporter: otlp
+    # 对应 Go Sampler: 1.0
+    sampler: parentbased_always_on
+
+# =============================================================================
+# observability —— 对齐 Go RpcServerConf.Timeout: 70000
+# =============================================================================
+# ⚠️ Go yaml 配的是 70000ms（不是 message 域那个"未配 ⇒ 默认 2000"）。
+#    这里必须配 70s，配成 2s 会把正常的长审核链路判成超时 —— 那是行为漂移。
+observability:
+  rpc-timeout: 70s
+
+# =============================================================================
+# JVM 时区 —— 对应 Go DSN 里的 TimeZone=Asia/Shanghai
+# =============================================================================
+# ⚠️ Go 的 GORM DSN 显式带 `TimeZone=Asia/Shanghai`（model/db.go:31）。
+#    PostgreSQL 的 timestamptz 本身按 UTC 存储，但**读写时按会话时区转换**；
+#    若 JVM 时区不同，`created_at`/`updated_at`/`published_at` 的 Instant 换算会差一个时区。
+#    这里显式对齐（DRIFT-MSG-V-007 同款问题的预防措施）。
+spring.jackson.time-zone: Asia/Shanghai

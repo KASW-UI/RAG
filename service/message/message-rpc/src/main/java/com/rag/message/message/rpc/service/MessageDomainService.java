@@ -70,7 +70,10 @@ import java.util.Optional;
  *   <li>取代了 internal.svc.ServiceContext —— 本类直接注入所有依赖</li>
  *   <li>9 个方法体一对一从镜像 Logic 翻译，**每方法保留独立 try/finally observeRpc + 独立 metrics + 独立 span**</li>
  *   <li>事务方法（createConversationWithMessageTx / createOrSendMessageTx / markConversationReadTx /
- *       markNotificationReadTx / markAllNotificationsReadTx / insertNotificationsTx）放本类上 @Transactional</li>
+ *       markNotificationReadTx / markAllNotificationsReadTx / insertNotificationsTx）<b>2026-10-22 已迁到
+ *       独立 Bean {@link MessageAtomicService}</b>（DRIFT-MSG-001）。此前它们挂在本类上并由同类
+ *       {@code doXxx(...)} 通过 {@code this.} 调用 —— self-invocation 不经 Spring 代理，
+ *       {@code @Transactional} <b>静默失效</b>，6 处事务全部退化成 auto-commit。</li>
  * </ul>
  *
  * <p>关键 Decision（沿用镜像 Go parity + AGENTS.md 锁定）：
@@ -91,6 +94,7 @@ public class MessageDomainService {
     private final MessageProperties properties;
     private final MessageMetrics metrics;
     private final LoggerFactoryBean logger;
+    private final MessageAtomicService atomicService;
     private final Tracer tracer;
 
     public MessageDomainService(NotificationMapper notificationMapper,
@@ -100,7 +104,8 @@ public class MessageDomainService {
                                 AdminRpcClient adminRpcClient,
                                 MessageProperties properties,
                                 MessageMetrics metrics,
-                                LoggerFactoryBean logger) {
+                                LoggerFactoryBean logger,
+                                MessageAtomicService atomicService) {
         this.notificationMapper = notificationMapper;
         this.conversationMapper = conversationMapper;
         this.messageMapper = messageMapper;
@@ -109,6 +114,9 @@ public class MessageDomainService {
         this.properties = properties;
         this.metrics = metrics;
         this.logger = logger;
+        // 2026-10-22 修 DRIFT-MSG-001：多步写事务必须经由**独立 Bean** 调用，
+        // 否则同类 self-invocation 会让 @Transactional 静默失效。详见 MessageAtomicService 类注释。
+        this.atomicService = atomicService;
         // 对应 Go 端 otel.Tracer("message-rpc")
         this.tracer = GlobalOpenTelemetry.getTracer("message-rpc");
     }
@@ -278,7 +286,7 @@ public class MessageDomainService {
                 conv.setUpdatedAt(now);
 
                 try {
-                    createConversationWithMessageTx(conv, messageItem);
+                    atomicService.createConversationWithMessageTx(conv, messageItem);
                 } catch (RuntimeException e) {
                     metrics.observeDbError("chat", "create_conversation");
                     throw e;
@@ -322,7 +330,7 @@ public class MessageDomainService {
             conv.setUpdatedAt(now);
 
             try {
-                createConversationWithMessageTx(conv, messageItem);
+                atomicService.createConversationWithMessageTx(conv, messageItem);
             } catch (RuntimeException e) {
                 metrics.observeDbError("chat", "create_pending_conversation");
                 throw e;
@@ -358,7 +366,7 @@ public class MessageDomainService {
         }
 
         try {
-            createOrSendMessageTx(conv, messageItem,
+            atomicService.createOrSendMessageTx(conv, messageItem,
                     statusAfterSend.getNumber(),
                     pendingSenderRole.getNumber(),
                     pendingSenderId,
@@ -377,41 +385,6 @@ public class MessageDomainService {
                 .setStatus(statusAfterSend)
                 .setCanSend(statusAfterSend == ConversationStatus.OPEN)
                 .build();
-    }
-
-    /**
-     * 对应 Go 端 createConversationWithMessageTx：新建会话 + 首条消息，一个事务。
-     */
-    @Transactional
-    public void createConversationWithMessageTx(ConversationEntity conv, ConversationMessageEntity msg) {
-        try {
-            conversationMapper.insertConv(conv);
-            messageMapper.insertMsg(msg);
-        } catch (RuntimeException e) {
-            metrics.observeDbError("chat", "create_conversation_with_message");
-            throw e;
-        }
-    }
-
-    /**
-     * 对应 Go 端 createOrSendMessageTx：已有会话内 append 一条消息 + 更新会话 last_message_*。
-     */
-    @Transactional
-    public void createOrSendMessageTx(ConversationEntity conv, ConversationMessageEntity msg,
-                                      int newStatus, int pendingSenderRole, long pendingSenderId,
-                                      String lastMessagePreview) {
-        try {
-            // ① 插入新 message
-            messageMapper.insertMsg(msg);
-            // ② 更新 conversation 的 last_message_* + status + pending_sender_*
-            conversationMapper.updateLastMessage(
-                    conv.getId(), msg.getId(),
-                    lastMessagePreview, msg.getCreatedAt(),
-                    newStatus, pendingSenderRole, pendingSenderId);
-        } catch (RuntimeException e) {
-            metrics.observeDbError("chat", "create_or_send_message");
-            throw e;
-        }
     }
 
     // ============== 2. sendnotificationlogic → sendNotification() ==============
@@ -490,7 +463,7 @@ public class MessageDomainService {
 
         // ④ 批量插入
         try {
-            insertNotificationsTx(items);
+            atomicService.insertNotificationsTx(items);
         } catch (RuntimeException e) {
             metrics.observeDbError("notification", "insert");
             throw e;
@@ -501,19 +474,6 @@ public class MessageDomainService {
                 .setMsg(MessageErrorMessages.getMsg(MessageErrorCode.SUCCESS.getCode()))
                 .setAffected(items.size())
                 .build();
-    }
-
-    /**
-     * 对应 Go 端 createNotifications(items []Notification)：批量 INSERT notification 行。
-     */
-    @Transactional
-    public void insertNotificationsTx(List<NotificationEntity> batch) {
-        try {
-            notificationMapper.insertBatch(batch);
-        } catch (RuntimeException e) {
-            metrics.observeDbError("notification", "insert_batch");
-            throw e;
-        }
     }
 
     // ============== 3. listconversationslogic → listConversations() ==============
@@ -555,9 +515,16 @@ public class MessageDomainService {
         List<ConversationEntity> items;
         long total;
         try {
+            // 🔴 DRIFT-MSG-V-012（2026-10-22 修）：limit / offset 传反了。
+            //    Mapper 签名是 listByParticipant(role, id, limit, offset)，
+            //    而这里传的是 (…, in.getOffset(), limit) ⇒ 实参落到 (limit=offset, offset=limit)。
+            //    结果 SQL 变成 "LIMIT <offset> OFFSET <limit>"，offset=0 时即 **LIMIT 0**
+            //    ⇒ ListConversations **永远返回空列表**（会话列表页全空）。
+            //    这与 DRIFT-MSG-002（conversation_id 恒 0）是同款形态：
+            //    一个被写错的普通值，让整条功能路径静默失效、且不产生任何错误日志。
             items = conversationMapper.listByParticipant(
                     in.getOperatorRole().getNumber(), in.getOperatorId(),
-                    in.getOffset(), limit);
+                    limit, in.getOffset());
             total = conversationMapper.countByParticipant(
                     in.getOperatorRole().getNumber(), in.getOperatorId());
         } catch (RuntimeException e) {
@@ -742,7 +709,7 @@ public class MessageDomainService {
 
         // ④ mark read
         try {
-            markConversationReadTx(in.getConversationId(), in.getOperatorId(),
+            atomicService.markConversationReadTx(in.getConversationId(), in.getOperatorId(),
                     in.getOperatorRole().getNumber(), LocalDateTime.now());
         } catch (RuntimeException e) {
             metrics.observeDbError("conversation", "mark_read");
@@ -751,22 +718,6 @@ public class MessageDomainService {
         }
 
         return MessageRpcSupport.successBaseResp();
-    }
-
-    /**
-     * 对应 Go 端 markConversationReadTx：一个事务。
-     */
-    @Transactional
-    public void markConversationReadTx(long conversationId, long recipientId, int recipientRole,
-                                       LocalDateTime readAt) {
-        try {
-            messageMapper.markReadByConversationAndRecipient(
-                    conversationId, recipientId, recipientRole, readAt);
-            conversationMapper.touchUpdatedAt(conversationId, readAt);
-        } catch (RuntimeException e) {
-            metrics.observeDbError("conversation", "mark_read_tx");
-            throw e;
-        }
     }
 
     // ============== 6. listnotificationslogic → listNotifications() ==============
@@ -805,6 +756,12 @@ public class MessageDomainService {
                 properties.getList().getMaxLimit());
 
         // ③ query
+        // ⚠️ DRIFT-MSG-V-001（2026-10-22 修）：total 必须与 items 共用同一个 unreadOnly 过滤。
+        //    Go（message.go:40-48）先给 query 加 is_read=false 再 query.Count()，
+        //    所以 unread_only=true 时 total 只数未读。修复前这里是
+        //    selectCount(QueryWrapper.eq("recipient_id", uid)) —— 无 is_read，
+        //    与 listByRecipient 的过滤不一致 ⇒ total 恒为全部条数 ⇒ 前端分页多翻空页。
+        //    见 §6.7.2 与 §6.7.5 纪律 A「分页接口的 total 与 items 必须成对断言」。
         List<NotificationEntity> items;
         long total;
         long unread;
@@ -812,9 +769,8 @@ public class MessageDomainService {
             items = notificationMapper.listByRecipient(
                     in.getUserId(), 0, 0, in.getUnreadOnly(),
                     limit, in.getOffset());
-            total = notificationMapper.selectCount(
-                    new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<NotificationEntity>()
-                            .eq("recipient_id", in.getUserId()));
+            total = notificationMapper.countByRecipient(
+                    in.getUserId(), 0, 0, in.getUnreadOnly());
             unread = notificationMapper.countUnreadByRecipient(
                     in.getUserId(), 0, 0);
         } catch (RuntimeException e) {
@@ -872,7 +828,7 @@ public class MessageDomainService {
         // 且 updateById 生成的 WHERE 只有 id、不含 recipient_id。
         int affected;
         try {
-            affected = markNotificationReadTx(in.getNotificationId(), in.getUserId(), LocalDateTime.now());
+            affected = atomicService.markNotificationReadTx(in.getNotificationId(), in.getUserId(), LocalDateTime.now());
         } catch (RuntimeException e) {
             metrics.observeDbError("notification", "mark_read");
             throw MessageRpcSupport.grpcRuntimeError(Status.Code.INTERNAL,
@@ -889,23 +845,6 @@ public class MessageDomainService {
         }
 
         return MessageRpcSupport.successBaseResp();
-    }
-
-    /**
-     * 对应 Go 端 {@code MessageModel.MarkNotificationRead}（{@code message.go:72-86}）：
-     * 单条 {@code UPDATE ... WHERE id = ? AND recipient_id = ?}。
-     *
-     * @return 受影响行数；0 表示「不存在或不属于该 recipient」，对齐 Go 的
-     *         {@code res.RowsAffected == 0 → ErrRecordNotFound}
-     */
-    @Transactional
-    public int markNotificationReadTx(long id, long recipientId, LocalDateTime readAt) {
-        try {
-            return notificationMapper.markRead(id, recipientId, readAt);
-        } catch (RuntimeException e) {
-            metrics.observeDbError("notification", "mark_read_tx");
-            throw e;
-        }
     }
 
     // ============== 8. markallnotificationsreadlogic → markAllNotificationsRead() ==============
@@ -937,7 +876,7 @@ public class MessageDomainService {
         }
 
         try {
-            markAllNotificationsReadTx(in.getUserId(), 0, 0, LocalDateTime.now());
+            atomicService.markAllNotificationsReadTx(in.getUserId(), 0, 0, LocalDateTime.now());
         } catch (RuntimeException e) {
             metrics.observeDbError("notification", "mark_all_read");
             throw MessageRpcSupport.grpcRuntimeError(Status.Code.INTERNAL,
@@ -945,20 +884,6 @@ public class MessageDomainService {
         }
 
         return MessageRpcSupport.successBaseResp();
-    }
-
-    /**
-     * 对应 Go 端 markAllNotificationsReadTx：批量 UPDATE notifications。
-     */
-    @Transactional
-    public void markAllNotificationsReadTx(long recipientId, int senderRole, int kind,
-                                            LocalDateTime readAt) {
-        try {
-            notificationMapper.markAllReadByRecipient(recipientId, senderRole, kind, readAt);
-        } catch (RuntimeException e) {
-            metrics.observeDbError("notification", "mark_all_read_tx");
-            throw e;
-        }
     }
 
     // ============== 9. getunreadsummarylogic → getUnreadSummary() ==============
