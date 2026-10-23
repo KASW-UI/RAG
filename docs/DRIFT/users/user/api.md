@@ -1325,3 +1325,175 @@ steps=17  asserted=5  byte_equal=12  unexpected=0
 | 附录 B 第 7 条（`JwtUtil` zero-pad） | ✅ 仍成立 | 7 条用例的 token 用**同一份** `JwtUtil` 签 + `JwtAuthInterceptor` 验，36 字节密钥下 `padToHmacKeySize` 是 no-op |
 | 附录 B 第 8 条（登录 `UNAUTHENTICATED` 映射） | ✅ 仍成立 | `diff.py` 的 `user.login.wrongpw` 步实测两侧均 1002 |
 | §9 UNRESOLVED-003（需与 user-rpc 合并判读） | ⏳ **仍 unresolved** | 本轮 `user-rpc` 侧未改错误码集合，故本条**不能**因本轮而关闭 |
+
+---
+
+<!-- @fix 2026-10-23 第四轮：UNRESOLVED-002 已由 users-common 组件级对照实测关闭 -->
+
+## 2026-10-23 第四轮：§9 `UNRESOLVED-002` **已关闭**（并**部分证伪**其原文断言）
+
+> 本节只关闭**本组件自身的**那条未决项。归属在 `users-common` 的证据全部在
+> [`../common.md`](./../common.md)（首轮组件级对照，176 条双侧活体）。
+
+### 1. 结论：分叉**真实存在**，但原文的「后果」断言**被实测证伪**
+
+**原文断言**（`api.md` §9 UNRESOLVED-002，2026-10-23 02:xx 写下）：
+
+> 「一旦触发 ⇒ user-api 签的 token 在 Go 侧（及任何按 HS256 验签的组件）**全部验不过**。」
+
+**实测**（`users-common` 第四轮，双侧活体，6 档密钥 × 双向 12 次交叉验签）：
+
+```
+RAG 验 Go 签的： 15B / 32B / 36B / 47B / 48B / 64B   → 全部 VERIFIED
+Go 验 RAG 签的： 15B / 32B / 36B / 47B / 48B / 64B   → 全部 VERIFIED
+```
+
+⇒ **Go ↔ RAG 互验不会被打断。** 原因：两侧库**都按 token header 的 `alg` 选 MAC，
+且都不做算法白名单**（golang-jwt v4 `Parse` 直接 `jwt.GetSigningMethod(alg)`；
+jjwt 0.12 同样取 header 的 alg）。⇒ 各自签、各自验，反而通过。
+
+### 2. 分叉本身：已量化，并**已修**
+
+`JwtUtil.getToken` 此前是 `signWith(key)` 单参重载 ⇒ jjwt 照 `SecretKeySpec` 的 JCA 算法名选签名算法：
+
+| 密钥长度 | Go `alg` | RAG `alg`（修前） | 签名长度 |
+|---|---|---|---|
+| 15 / 16 / 31 / 32 / 36 / 47 | HS256 | HS256 | 43 |
+| **48 / 63** | HS256 | **HS384** | 64 |
+| **64 / 65 / 128** | HS256 | **HS512** | 86 |
+
+**已修**：显式钉 `SignatureAlgorithm.HS256`，且**自己构造** `SecretKeySpec(..., "HmacSHA256")`
+（只传 alg 参数不够 —— `Keys.hmacShaKeyFor` 返回的 key 算法名才是 jjwt 真正采信的来源）。
+修后 **11 档全部与 Go 一致**。守门网 `JwtUtilParityTest` 22 条，变异验证 **9 条变红**。
+详见 [`../common.md`](./../common.md) §3 `DRIFT-USERSCOMMON-004` 与 §5。
+
+### 3. 真正残留的风险（比原文窄，但非零）
+
+原文的「任何按 HS256 验签的组件」需要拆成两类：
+
+| 消费者类型 | 是否受影响 | 实测 |
+|---|---|---|
+| Go ↔ RAG 互验（两侧都认 header 的 alg） | ❌ 不受影响 | 12/12 VERIFIED |
+| **固定 alg 白名单的消费者**（RFC 8725 §3.2 推荐姿态） | 🔴 **受影响** | 48B → `REJECTED: unexpected signing method HS384`；64B → `REJECTED: unexpected signing method HS512` |
+
+**当前是否已触发：否。** 实测两侧配置的密钥：
+- user：`application.yml:91` / Go `usercenter.yaml:11` ⇒ `ae0536f9-…505da0` = **36 字节**
+- admin：`application.yml:82` / Go `admincenter.yaml:11` ⇒ `yU-hCm)2*?NQmWG` = **15 字节**
+
+⇒ 均 < 48 字节。**触发条件 = 密钥加长到 ≥48 字节**，修完后该条件已不再成立。
+
+### 4. 附带关闭的一个连带误解：`padToHmacKeySize` 的补零
+
+原文与 `JwtUtil` 旧 javadoc 都暗示「补零会破坏与 Go 的互通」⇒ 实测**不成立**：
+HMAC 自身对短于分组尺寸（64 字节）的密钥零填充（RFC 2104），
+15 字节原密钥与补零到 32 字节的密钥算出**逐字节相同**的 MAC。
+已在 `JwtUtil.padToHmacKeySize` 的 javadoc 写清机理 + 三条边界条件，并加逐字节断言。
+
+### 5. 本节对 §6 / §10 的影响
+
+- §6.3 / §10 第 16 项的 `UNRESOLVED-002` 依赖项**已消除**；
+- ⚠️ **§7 的 `DRIFT-USERAPI-010` 等条目不受本节影响** —— 本节只关闭「alg 选算法」这一条，
+  其余 OBSERVABLE DIFFERENCE 状态一律以各自条目为准（§0 的纪律：**「已改」≠「已验证」**）。
+
+---
+
+<!-- @fix 2026-10-23 第四轮：DRIFT-USERAPI-003 定性完成（由「条件性」升级为「已确认可达」）+ 已修 -->
+
+## 2026-10-23 第四轮：`DRIFT-USERAPI-003` 定性完成并已修（**不再是「条件性」**）
+
+> 本节回答了 §7 与 §9 `UNRESOLVED-003` 一起悬着的问题：
+> **user-rpc 到底会不会发出那些 code**。做法不是推断，而是
+> ① 枚举 RAG user-rpc **实际抛出**的 gRPC code 全量，② 逐个 Logic 取 Go api 侧 switch 原文，③ 两张表交叉。
+
+### 1. 两侧事实（都是枚举，不是推断）
+
+**RAG user-rpc 实际抛出的 code（`UserDomainService` 按方法归组，grep 全量）**：
+
+| 操作 | 实际抛出的 code |
+|---|---|
+| `login` | `INTERNAL` |
+| `register` | `ALREADY_EXISTS` · `INTERNAL` |
+| `getUser` | `INTERNAL` · `NOT_FOUND` |
+| `updateUser` | `ALREADY_EXISTS` · `INTERNAL` · `NOT_FOUND` |
+| `deleteUser` | `INTERNAL` · `NOT_FOUND` |
+| `selectAvatar` | `INTERNAL` · `INVALID_ARGUMENT` · `NOT_FOUND` |
+| `uploadAvatar` | `INTERNAL` · `INVALID_ARGUMENT` · `NOT_FOUND` |
+| `getAvatarHistory` | `INTERNAL` · `NOT_FOUND` |
+| `logout` | `INTERNAL` · **`INVALID_ARGUMENT`** |
+
+**Go api 侧每个 Logic 的 switch 原文**（`user/api/internal/logic/user/*.go`，逐个 sed 取出）：
+
+| Logic | Internal | AlreadyExists | NotFound | InvalidArgument | default |
+|---|---|---|---|---|---|
+| `loginlogic` | 5001 | →1015 | →1015 | →1015 | 1015 |
+| `registerlogic` | 5001 | 1001 | →1015 | →1015 | 1015 |
+| `updateuserlogic` | 5001 | 1001 | 1003 | →1015 | 1015 |
+| `deleteuserlogic` | 5001 | →1015 | 1003 | →1015 | 1015 |
+| `logoutlogic` | 5001 | →1015 | →1015 | **→1015** | 1015 |
+| `getuserlogic` | 5001 | →1015 | 1003 | →1015 | 1015 |
+| `getavatarhistorylogic` | 5001 | →1015 | 1003 | →1015 | 1015 |
+| `selectavatarlogic` | 5001 | →1015 | **500** | **500** | 1015 |
+| `uploadavatarlogic` | 5001 | →1015 | 1003 | **500** | 1015 |
+
+### 2. 交叉结果：**21 个「实际发生的格子」里，20 格已一致，1 格漂移**
+
+| 操作 | RAG 实际 code | Go 结果 | 修前 RAG 结果 | 判定 |
+|---|---|---|---|---|
+| login | INTERNAL | 5001 | 5001 | ✅ |
+| register | ALREADY_EXISTS / INTERNAL | 1001 / 5001 | 1001 / 5001 | ✅ |
+| getUser | NOT_FOUND / INTERNAL | 1003 / 5001 | 1003 / 5001 | ✅ |
+| updateUser | ALREADY_EXISTS / NOT_FOUND / INTERNAL | 1001 / 1003 / 5001 | 同 | ✅ |
+| deleteUser | NOT_FOUND / INTERNAL | 1003 / 5001 | 同 | ✅ |
+| selectAvatar | INVALID_ARGUMENT / NOT_FOUND / INTERNAL | **500 / 500** / 5001 | 500 / **1003** / 5001 | ✅（`AvatarSelectService:98-99` 已显式修，见旧 DRIFT-003） |
+| uploadAvatar | INVALID_ARGUMENT / NOT_FOUND / INTERNAL | **500** / 1003 / 5001 | 同 | ✅ |
+| getAvatarHistory | NOT_FOUND / INTERNAL | 1003 / 5001 | 同 | ✅ |
+| **logout** | **INVALID_ARGUMENT** / INTERNAL | **1015** / 5001 | **500** / 5001 | 🔴 **漂移（本轮修）** |
+
+⇒ **`UNRESOLVED-003` 就此关闭**：答案不是「user-rpc 会不会发 INVALID_ARGUMENT」，
+而是「**会，而且恰好落在 logout 这一格**」。
+
+### 3. 根因与修法
+
+- **根因**：与旧 `DRIFT-003`（select 头像）**完全同形** —— `UserLogoutService:60-62`
+  只做 `catch (StatusRuntimeException e) { throw e; }`，把映射甩给
+  `GlobalExceptionHandler.mapRPCStatusToCode`，而那个通用映射有 `INVALID_ARGUMENT → 500` 这一格，
+  Go 的 logout switch **没有**。
+- 🔴 **最讽刺的一点**：这个类的 javadoc `:26-28` **自己就写着** Go 的正确映射
+  （「`其它（默认） → CodeServerBusy (1015)`」），**只是代码没照做**。
+  ⇒ §3.2「注释不能替代实现」的又一個实例 —— 且证明**注释写对了也不能当证据**。
+- **修法**：在 `UserLogoutService` 内显式还原 Go 的两格 switch（Internal→5001，其余→1015），
+  与 `AvatarSelectService:98-99` 同一手法。
+
+### 4. 这条漂移是**真实可达**的（不是理论风险）
+
+链路：`POST /user/v1/logout` 带一个合法但 token 为空的上下文
+→ user-rpc `UserDomainService.java:768` 抛 `Status.INVALID_ARGUMENT "Token不能为空"`
+（Go 对应 `user/rpc/internal/logic/logoutlogic.go:33`）→ api 层映射分歧。
+⇒ 修前 Go 返回 **1015 服务繁忙**，RAG 返回 **500 系统内部错误**。
+
+### 5. 守门网与变异验证（§3.3：绿测试必须是错误答案的守卫）
+
+**两层守门，因为只有一层是不够的**：
+
+| 层 | 测试 | 覆盖 | 证据强度 |
+|---|---|---|---|
+| Service 层 | `UserLogoutErrorCodeParityTest`（**新建 4 条**） | Internal→5001；INVALID_ARGUMENT→1015；NOT_FOUND/ALREADY_EXISTS/UNAVAILABLE/DEADLINE_EXCEEDED/UNKNOWN→1015；**对照组** Internal 不得被一起映成 1015 | mock gRPC 边界 |
+| **端到端 MVC 层** | `UserApiClaimSemanticsParityTest.logout_rpcInvalidArgument_isServerBusyNotInternalError` + `…logout_rpcInternal_staysInternalError`（**新增 2 条**） | 真 `MockMvc` + **真 `GlobalExceptionHandler`** + 真 Redis，断言 **HTTP body 的 `$.code`** | 真 MVC 管线 |
+
+⚠️ **为什么必须有 MVC 层那条**：Service 层护网在变异时红的方式是
+「抛出的异常类型不对（`StatusRuntimeException` vs `BusinessException`）」，
+**它分辨不出最终是 1015 还是 500** —— 而后者才是本条漂移的全部内容。
+⇒ 补 MVC 层后，变异实测红得**精准**：
+
+```
+java.lang.AssertionError: JSON path "$.code" expected:<1015> but was:<500>
+```
+
+**这行报错就是这条漂移的实测值**（1015 vs 500），已逐条记入本节。
+
+### 6. 本轮回归
+
+| 模块 | 结果 |
+|---|---|
+| `user-api` | **82** tests / 0 failures / 0 errors / **skipped = 0**（原 76 + 新 6） |
+| 对照：Service 层单独跑 | 4/4；MVC 层单独跑 9/9 |

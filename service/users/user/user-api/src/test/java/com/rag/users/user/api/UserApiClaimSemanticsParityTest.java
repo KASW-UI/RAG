@@ -134,6 +134,53 @@ class UserApiClaimSemanticsParityTest {
     }
 
     // ==================================================================
+    // DRIFT-USERAPI-003：logout 的 gRPC 错误码映射（端到端，走真 advice）
+    // ==================================================================
+
+    /**
+     * <p><b>为什么必须是 MVC 层而不是 Service 层</b>：修前 {@code UserLogoutService} 只是
+     * {@code throw e}，真正的码是 {@code GlobalExceptionHandler.mapRPCStatusToCode} 给的。
+     * 只在 Service 层断言，护网只能证明「Service 没自己映射」，
+     * <b>区分不出最终是 1015 还是 500</b> —— 而这正是本条漂移的全部内容。
+     * ⇒ 必须打到 HTTP body 的 {@code $.code}。
+     *
+     * <p>Go 出处 {@code user/api/internal/logic/user/logoutlogic.go:48-53}：
+     * logout 的 switch <b>只有两格</b> —— Internal→5001、default→1015；
+     * <b>不存在</b> INVALID_ARGUMENT→500 这一格。
+     *
+     * <p>Go 侧 user-rpc 对空 token 抛 INVALID_ARGUMENT
+     * （{@code user/rpc/internal/logic/logoutlogic.go:33}）⇒ 该分支<b>可达</b>。
+     */
+    @Test
+    @DisplayName("Go: logout RPC 抛 InvalidArgument → HTTP 200 + 1015 服务繁忙（修前是 500 系统内部错误）")
+    void logout_rpcInvalidArgument_isServerBusyNotInternalError() throws Exception {
+        Mockito.when(stub.logout(Mockito.any())).thenThrow(new StatusRuntimeException(
+                Status.fromCode(Status.Code.INVALID_ARGUMENT).withDescription("Token不能为空")));
+
+        mockMvc.perform(post("/user/v1/logout")
+                        .header("Authorization", "Bearer " + tokenWithUid(1234567890L))
+                        .contentType("application/json")
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1015));
+    }
+
+    /** 对照组：Internal 仍必须是 5001，防止「全映成 1015」的过度修复。 */
+    @Test
+    @DisplayName("对照组：logout RPC 抛 Internal → 5001 系统内部错误（不得被一起映成 1015）")
+    void logout_rpcInternal_staysInternalError() throws Exception {
+        Mockito.when(stub.logout(Mockito.any())).thenThrow(new StatusRuntimeException(
+                Status.fromCode(Status.Code.INTERNAL).withDescription("注销失败,Redis写入异常")));
+
+        mockMvc.perform(post("/user/v1/logout")
+                        .header("Authorization", "Bearer " + tokenWithUid(1234567890L))
+                        .contentType("application/json")
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(5001));
+    }
+
+    // ==================================================================
     // DRIFT-USERAPI-001：畸形 claim 必须是 200 + 1006，不是 401
     // ==================================================================
 
