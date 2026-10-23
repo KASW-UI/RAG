@@ -147,5 +147,21 @@
             <artifactId>spring-boot-starter-webmvc-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+            真 in-process gRPC server + 真 channel：
+            验证 comment-rpc 的业务码（自定义 trailer `rag-comment-biz-code`）
+            **真的能穿过传输层**抵达 api 侧，并被 CommentApiSupport.rpcError 还原成
+            envelope.code。
+            ⚠️ 只断言 `CommentGrpcError.grpcError(...).getTrailers()` 的值**证明不了**它
+               穿过了传输层 —— 本仓此前已多次栽在「单测全绿但真实链路上没生效」上
+               （AGENTS.md §3.3）。同款写法见 like-common/LikeGrpcErrorTest.java。
+            按项目惯例放在 test scope，comment-api 本身不依赖传输层。
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-inprocess</artifactId>
+            <version>${grpc.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

@@ -8,6 +8,8 @@ import com.rag.comment.comment.proto.ManageCommentReq;
 import com.rag.users.common.jwt.JwtUtil;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,8 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+
+import java.util.Date;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -322,5 +326,83 @@ class CommentApiBehaviorTest {
         verify(stub).deleteComment(captor.capture());
         assertEquals(CLAIM_UID, captor.getValue().getUserId(),
                 "操作人必须是 token 里的身份，不能被 body 里的同名字段覆盖");
+    }
+
+    // ==================================================================
+    // 8. 🔴 userId claim 的严格解析（MISMATCH-API-02）
+    // ==================================================================
+
+    /**
+     * 构造一个 claim 值<b>不是</b> long 的 token。
+     *
+     * <p>⚠️ {@code JwtUtil.getToken} 的 userId 参数是 {@code long}，造不出这些形态，
+     * 所以这里直接用 jjwt 签。
+     */
+    private static String tokenWithRawClaim(Object rawUserId) {
+        return Jwts.builder()
+                .issuedAt(new Date(System.currentTimeMillis()))
+                .expiration(new Date(System.currentTimeMillis() + 3600_000L))
+                .claim("userId", rawUserId)
+                .signWith(Keys.hmacShaKeyFor(JwtUtil.padToHmacKeySize(USER_SECRET)))
+                .compact();
+    }
+
+    private static org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
+            postJsonWithToken(String path, String body, String token) throws Exception {
+        return post(path)
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
+
+    @Test
+    @DisplayName("🔴 浮点 userId claim（1.5）⇒ 1006 —— Go 的 json.Number.Int64() 会报错，不得截断成 1")
+    void floatUserIdClaimIsRejected() throws Exception {
+        // Go：go-zero v1.10.2 rest/token/tokenparser.go:123 用了 jwt.WithJSONNumber()
+        //      ⇒ claim 是 json.Number("1.5") ⇒ strconv.ParseInt("1.5") 报错 ⇒ 1006
+        // 修复前：Double.longValue() 截断成 1 ⇒ 静默产出错误身份（越权面）
+        mockMvc.perform(postJsonWithToken("/comment/v1/comment/delete", """
+                {"comment_id":9,"target_type":"article","target_id":"BV1"}""",
+                        tokenWithRawClaim(1.5d)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1006))
+                .andExpect(jsonPath("$.msg").value("TOKEN已过期"));
+
+        verify(stub, Mockito.never()).deleteComment(any());
+    }
+
+    @Test
+    @DisplayName("🔴 越界整数 userId claim ⇒ 1006 —— Go 的 ParseInt 会溢出，不得回绕成负数")
+    void outOfRangeUserIdClaimIsRejected() throws Exception {
+        // 9223372036854775808 > Long.MAX_VALUE ⇒ Go 的 ParseInt 溢出 ⇒ 1006
+        // 修复前：BigInteger.longValue() 回绕成 -9223372036854775808 ⇒ 拿负身份去调 rpc
+        mockMvc.perform(postJsonWithToken("/comment/v1/comment/delete", """
+                {"comment_id":9,"target_type":"article","target_id":"BV1"}""",
+                        tokenWithRawClaim(new java.math.BigInteger("9223372036854775808"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1006))
+                .andExpect(jsonPath("$.msg").value("TOKEN已过期"));
+
+        verify(stub, Mockito.never()).deleteComment(any());
+    }
+
+    @Test
+    @DisplayName("字符串 userId claim 走 ParseInt：合法数字放行、非法串 ⇒ 1006")
+    void stringUserIdClaimFollowsGoParseInt() throws Exception {
+        when(stub.deleteComment(any()))
+                .thenReturn(DeleteCommentResp.newBuilder().setSubjectTotalCount(1L).build());
+
+        // ✅ 合法：字符串 "31337" ⇒ Go strconv.ParseInt 成功
+        mockMvc.perform(postJsonWithToken("/comment/v1/comment/delete", """
+                {"comment_id":9,"target_type":"article","target_id":"BV1"}""",
+                        tokenWithRawClaim("31337")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        ArgumentCaptor<com.rag.comment.comment.proto.DeleteCommentReq> captor =
+                ArgumentCaptor.forClass(com.rag.comment.comment.proto.DeleteCommentReq.class);
+        verify(stub).deleteComment(captor.capture());
+        assertEquals(CLAIM_UID, captor.getValue().getUserId(),
+                "字符串 claim 必须是精确解析，不能截断");
     }
 }

@@ -20,16 +20,31 @@
 
 | 项 | 值 |
 |---|---|
-| **总体判定** | 🔴 **`SEMANTICALLY NOT EQUIVALENT`** |
-| SEMANTIC MISMATCH | **3 条**（§2）—— 其中 **MISMATCH-API-01 是本轮全域最严重的一条** |
+| **总体判定** | 🔴 **`SEMANTICALLY NOT EQUIVALENT`**（其中 2 条已修，见下） |
+| SEMANTIC MISMATCH | **3 条**（§2）—— **MISMATCH-API-01 / -02 已修并配变异验证**；**-03 未修** |
 | OBSERVABLE DIFFERENCE | **3 条**（§3） |
 | 等价确认 | **约 40 个判定点**（§4） |
 | 组件规模 | Go 1,045 行 / 22 文件 ⇒ RAG 2,838 行 / 33 类 |
-| 构建 + 测试 | `mvn -o -pl service/comment/comment-api -am test` ⇒ **BUILD SUCCESS**，**22 / 0 failures / 0 errors / 0 skipped**（本轮实测） |
+| 构建 + 测试 | `mvn -o -pl service/comment/comment-api -am test` ⇒ **BUILD SUCCESS**，**30 / 0 failures / 0 errors / 0 skipped**（本轮实测；修复前 22 条） |
 
 > 🟥 **MISMATCH-API-01 是「两个模块各自都对、拼起来就错」的典型**：
 > `comment-rpc` 把业务码放进自定义 trailer，`comment-api` 从不读它 ——
 > **两侧的 javadoc 还互相矛盾**，且两侧的绿测试各自都守着自己那一半。
+>
+> ✅ **本轮已修**，并用**变异测试**证明守门网不是假绿（§2.1 / §2.2 各附变异实测）。
+
+---
+
+## 0.1 ✅ 本轮已修（附变异验证）
+
+| # | 修复 | 守门网 | 变异实测（回退修复 ⇒ 必须变红） |
+|---|---|---|---|
+| **MISMATCH-API-01** | `CommentApiSupport.rpcError` 改用 `CommentGrpcError.bizCodeFromError(err)` 取业务码（msg 仍取 `status.getDescription()`） | **新增** `CommentApiGrpcErrorWireTest`（5 例，**真 in-process gRPC server + 真 channel**，非 mock） | ✅ 回退后 **2/5 变红**：`expected: <1012> but was: <2>`、`expected: <5003> but was: <2>` —— **症状与缺陷本体精确一致** |
+| **MISMATCH-API-02** | `CommentApiSupport.userId` 对 `Double` / `Float` / `BigDecimal` / `BigInteger` 一律判 **1006**（不再截断 / 回绕）；并订正了把事实说反的 javadoc | **新增** `CommentApiBehaviorTest` 3 例（真 MockMvc 管线 + 真 JWT 签名） | ✅ 回退后 **2/15 变红**：`expected:<1006> but was:<5001>` —— 截断出的错误身份会让下游报错并退化成 5001 |
+
+> ⚠️ **变异测试是本轮新增的证据强度**：AGENTS.md §3.3 要求「绿测试能证明测试**不是假绿**」，
+> 但「绿测试能证明测试的**期望值是对的**」需要另一条证据 —— 变异测试提供的是前者。
+> 本轮两条修复**都做了变异实测**，故「测试守的是正确的答案」这一点也有证据。
 
 ---
 
@@ -51,10 +66,11 @@
 
 ## 2. 🔴 SEMANTIC MISMATCH（3 条）
 
-### MISMATCH-API-01 · 🔴 **下游业务错误码在 HTTP 出口丢失**（本轮最严重）
+### MISMATCH-API-01 · 🔴 **下游业务错误码在 HTTP 出口丢失**（本轮最严重）· ✅ **已修**
 
 | 项 | 值 |
 |---|---|
+| **状态** | ✅ **已修（2026-10-24）** + 守门网 + 变异验证（见 §0.1） |
 | **Go 事实** | comment-rpc 用 `errmsg.NewGrpcErr(code, msg)`（`service/comment/common/errmsg/errmsg.go:33-35` `status.Error(codes.Code(code), msg)`）⇒ **业务码原样进 `grpc-status`** ⇒ api 侧 `createcommentlogic.go:52-55` 等 6 处的 `int(st.Code())` **原样取回** 5003 / 1012 / 1013 / 1008 / 2001 |
 | **RAG 现状** | comment-rpc 侧 `CommentServiceGrpcImpl.java:118` → `CommentGrpcError.grpcError(bizCode, msg)` ⇒ 业务码进**自定义 trailer** `rag-comment-biz-code`（`CommentGrpcError.java:72`、`:130`），而 `grpc-status` 只能是 `UNKNOWN(2)` / `INVALID_ARGUMENT(3)`（同文件 `:105-110`）。<br>comment-api 侧 `CommentApiSupport.java:139-145` 只读 `status.getCode().value()` ⇒ **从不读 trailer** |
 | **证据** | 全模块 grep `BIZ_CODE_TRAILER` / `trailersFromThrowable`：**只有 `comment-common` 自己的 `bizCodeFromError`（`CommentGrpcError.java:186-196`）与它的测试在读**；`comment-api` **零命中** |
@@ -62,20 +78,25 @@
 | **两侧注释互相矛盾** | `CommentServiceGrpcImpl.java:124` 明写「comment-api 侧从 trailer 取业务码、从 description 取原文」；`CommentApiSupport.java:120-137` 明写「本方法**刻意不**使用 `bizCodeFromError`」—— **两句话互斥** |
 | **现有绿测试为什么没抓到** | `CommentApiBehaviorTest#createMapsGrpcCodeVerbatim` 用 **mock** 抛 `Status.NOT_FOUND`，测的是「Go 侧 rpc 形态」；**测不到 RAG↔RAG 的 trailer 路径** ⇒ 属于 `docs/Pitfalls/_cross/testing-pitfalls.md` 记的「绿测试给错误答案发通行证」 |
 | **修法** | `CommentApiSupport.rpcError` 优先读 `CommentGrpcError.BIZ_CODE_TRAILER`（`Status.trailersFromThrowable`），无 trailer 时再取 `status.getCode().value()`。同时订正两侧相互矛盾的注释，并补一条**真 comment-rpc 驱动**（非 mock）的守门测试 |
+| **✅ 本轮修法（2026-10-24）** | 照抄**同仓已有正确范式** `like-api/.../LikeApiSupport.java:179-186`：<br>① 先判「是不是 status 错误」（Go 的 `ok`）⇒ 不是则 **5001 + 「系统内部错误」**（**不是** `bizCodeFromError` 的 1015）；<br>② 是则 `int bizCode = CommentGrpcError.bizCodeFromError(err)`（三条线索：降级 description → trailer → 标准码原值）；<br>③ `msg` 取 `status.getDescription()`，**不查表**。<br>**同时订正了两处相互矛盾的注释**：`CommentApiSupport#rpcError`（原写「刻意不使用 bizCodeFromError」）与 `comment-rpc/.../CommentServiceGrpcImpl.java:124`（原写「comment-api 侧从 trailer 取业务码」）。 |
+| **✅ 守门网** | **新增** `comment-api/src/test/java/.../CommentApiGrpcErrorWireTest.java`（5 例）—— **真 in-process gRPC server + 真 channel**（`grpc-inprocess` test 依赖已加），锁住三种对端形态：<br>· **RAG-rpc** ⇒ 1012（trailer 路径）<br>· **Go-rpc（灰度）** ⇒ 5003（降级 description 路径）<br>· **标准码** ⇒ 5（原值路径）<br>· 非 status 错误 ⇒ 5001 |
 
 > ⚠️ **不要用 `bizCodeFromError` 整体替换**：它的第一优先级是「降级 description 捞码」
 > （`CommentGrpcError.java:181`、`:209-222`），那是**灰度期 Go-rpc 对端**的兼容路径。
 > RAG↔RAG 场景只需读 trailer。
 
-### MISMATCH-API-02 · JWT 数值 claim **截断 / 回绕**而不是报错
+### MISMATCH-API-02 · JWT 数值 claim **截断 / 回绕**而不是报错 · ✅ **已修**
 
 | 项 | 值 |
 |---|---|
+| **状态** | ✅ **已修（2026-10-24）** + 守门网 + 变异验证（见 §0.1） |
 | **Go 事实** | go-zero v1.10.2 `rest/token/tokenparser.go:123` `jwt.NewParser(jwt.WithJSONNumber())` ⇒ 数值 claim 是 **`json.Number`**；`rest/handler/authhandler.go:72-79` 把**所有非标准 claim 原样**注入 ctx ⇒ `helper.go:17-18` `case json.Number: return value.Int64()`<br>⇒ `json.Number.Int64()` = `strconv.ParseInt` ⇒ **`"1.5"` 与越界值都报错** ⇒ logic 走 `errmsg.NewErrCode(ErrorTokenRuntime)` = **1006** |
 | **RAG 现状** | `CommentApiSupport.java:88-93` `Double.longValue()` **截断**（1.5 ⇒ 1）、`:82-85` `BigInteger.longValue()` **回绕**（⇒ `-9223372036854775808`）—— **均不报错** |
 | **可观察后果** | 非整数 / 越界的数值 claim：Go 返 **200 + `{code:1006, msg:"TOKEN已过期"}`**；RAG **静默产出错误身份**并以该身份调 rpc ⇒ 身份被篡改，属越权面 |
 | **附带缺陷** | `CommentApiSupport.java:59-64` 的 javadoc 断言「golang-jwt **没有**用 `UseNumber()`」—— **与 `tokenparser.go:123` 相反**。这正是 AGENTS.md §3.3.2 点名的「以『Go: …』措辞写的断言本身是高危项」 |
 | **修法** | 数值 claim 走严格 int64 解析，失败 ⇒ `tokenRuntime()`（1006）；**不得**截断或回绕。同时订正该段 javadoc |
+| **✅ 本轮修法（2026-10-24）** | `CommentApiSupport.userId`：`Double` / `Float` / `BigDecimal` / `BigInteger` **一律判 1006**。理由：Go 的 `json.Number.Int64()` 解析的是 **JSON 字面量原文** ⇒ JSON 浮点字面量（原文必带 `.` 或 `e`）与越界整数**必然**解析失败，**没有例外**。<br>`Integer` / `Long` / `Short` / `Byte`（必在 int64 范围内）与 `String`（走 `Long.parseLong`，与 Go 的 `strconv.ParseInt` 同规则）保持原样。<br>**并订正了 `CommentApiSupport.java:59-64` 把事实说反的 javadoc**（原写「golang-jwt 没有用 `UseNumber()`」）。 |
+| **✅ 守门网** | **新增** `CommentApiBehaviorTest` 3 例（真 MockMvc 管线 + 真 jjwt 签名）：<br>· 浮点 claim `1.5` ⇒ `{code:1006, msg:"TOKEN已过期"}`，且**不得**调 rpc<br>· 越界 claim `9223372036854775808` ⇒ 同上<br>· 字符串 claim `"31337"` ⇒ 精确解析成 31337 并下发 rpc |
 
 ### MISMATCH-API-03 · gRPC per-call deadline 缺 **2 秒**上限
 
@@ -174,13 +195,14 @@
 
 | # | 事项 | 类型 |
 |---|---|---|
-| **U1** | MISMATCH-API-01 的修复 + 一条**真 comment-rpc 驱动**（非 mock）的守门测试 | 🔴 修漂移 + 配回归网 |
-| **U2** | MISMATCH-API-02 的严格解析 + 订正 `CommentApiSupport.java:59-64` 的错误断言 | 🔴 修漂移 + 改注释 |
-| **U3** | MISMATCH-API-03 的 2s deadline 上限 | 🔴 修漂移 |
+| **U1** | ~~MISMATCH-API-01 的修复 + 真链路守门测试~~ | ✅ **已完成**（见 §0.1 / §2） |
+| **U2** | ~~MISMATCH-API-02 的严格解析 + 订正错误断言~~ | ✅ **已完成**（见 §0.1 / §2） |
+| **U3** | MISMATCH-API-03 的 2s deadline 上限 | 🔴 **未修** —— 需在 `CommentRpcClient.commentRpc()` 上叠 `withDeadlineAfter(min(remaining, 2000ms))`，或补 `comment.comment-rpc.timeout: 2000` 配置并在此消费 |
 | **U4** | **既有台账的过期结论**：`docs/DRIFT/_cross/new-domains-2026-10-23.md:43-45` 记「已登记未修：gRPC client 熔断缺失（Go `zrpc` `Breaker` 默认 `true`）」—— **实测 RAG 侧熔断已存在**（`application.yml:88-89` + `GoStyleGrpcClientBreakerInterceptor`）⇒ **该结论作废**。⚠️ `_cross/` 是共享文件，本工作树不碰，**合并后由主会话更正** | 🔴 需更正共享台账 |
-| **U5** | `CommentGrpcError.java:97-103` 那段「若未来 comment-api 引入熔断器」的注释**已过时**（熔断早已引入） | ⚠️ 待订正 |
-| **U6** | jjwt 对**缺 `exp` claim** 的 token 的接受性 vs Go `jwt.MapClaims.Valid()`；jjwt 是否接受 HS384/HS512 | ⚠️ 待活体对拍 |
-| **U7** | Go 的 `MaxBytes`/`MaxConns`/`Breaker`/`Shedding` 是 **per-route native middleware**（`rest/engine.go:103-108`），RAG 的 4 个是**全局 servlet Filter** ⇒ 未注册路径（404/405）上保护层覆盖范围不同 | ⚠️ OBSERVABLE（latent） |
+| **U5** | `CommentGrpcError.java:97-103` 那段「若未来 comment-api 引入熔断器」的注释**已过时**（熔断早已引入） | ⚠️ 待订正（属 `comment-common`，本工作树可改） |
+| **U6** | `CommentGrpcError.java:150-162` 的「字面搬运」论证需补一句「对 RAG-rpc 对端应读 trailer」 | ⚠️ 待订正（属 `comment-common`）—— ⚠️ 本轮已**订正 `CommentApiSupport` 侧**，`comment-common` 侧尚未动 |
+| **U7** | jjwt 对**缺 `exp` claim** 的 token 的接受性 vs Go `jwt.MapClaims.Valid()`；jjwt 是否接受 HS384/HS512 | ⚠️ 待活体对拍 |
+| **U8** | Go 的 `MaxBytes`/`MaxConns`/`Breaker`/`Shedding` 是 **per-route native middleware**（`rest/engine.go:103-108`），RAG 的 4 个是**全局 servlet Filter** ⇒ 未注册路径（404/405）上保护层覆盖范围不同 | ⚠️ OBSERVABLE（latent） |
 
 ---
 
