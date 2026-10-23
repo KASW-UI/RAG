@@ -903,7 +903,59 @@ Must Preserve: 至少要明确 500 的 body 形状是「有意统一」还是「
 Recommended Verification: 双侧各制造一次 panic（临时端点或测试钩子），比对原始响应。
 ```
 
-### DRIFT-USERAPI-008 —— go-zero 的 Breaker / Shedding / MaxConns 在 RAG 侧没有任何对应物 —— 🔴 **仍成立，尚未拍板**
+### DRIFT-USERAPI-008 —— 过载保护层 —— ❌ **原断言「RAG 侧没有任何对应物」已证伪（2026-10-24 04:0x）**
+
+> **原断言的证据基础是错的**：它写「RAG 侧 **user-api 模块内**零命中」——
+> **只 grep 了本模块**，漏了 `service/common`（共享模块，`user-api` 依赖它且
+> `scanBasePackages` 含 `com.rag.common`）。
+> ⇒ **与 `DRIFT-USERAPI-004` 同一型错误**：读漏了跨模块的东西。
+>
+> ⚠️ **本条尚未完全关闭** —— 原断言不成立，但它顺带暴露了**三个真问题**（见下），
+> 应拆成新条目跟踪，不要因为「原断言错了」就把整条当已解决。
+
+#### 实证：RAG 侧四个机制**全部存在**，参数与 Go 默认值逐条对齐
+
+| 机制 | Go 真源实配 | RAG 实现 | RAG 默认值 | 运行时证据 |
+|---|---|---|---|---|
+| MaxConns | `MaxConns int json:",default=10000"` | `GoStyleMaxConnsFilter` | **10000** | ✅ **已实测**：`--rag.protection.max-conns=1` + 并发 ⇒ 第 2 个请求 **503** |
+| MaxBytes | `MaxBytes int64 json:",default=1048576"` | `GoStyleMaxBytesFilter` | **1048576** | ✅ 真实请求栈里在链上 |
+| Breaker | `Middlewares.Breaker default=true` | `GoStyleBreakerFilter` + `GoStyleBreaker` | Go 默认阈值 | ⚠️ 未单独实测 |
+| Shedding | `CpuThreshold json:",default=900"` | `GoStyleCpuSheddingFilter` + `GoStyleAdaptiveShedder` | **900** | ⚠️ 未单独实测（CPU 采样需预热，go-zero 的 `load` 包同款） |
+| Timeout | `Timeout json:",default=3000"` | `HttpMiddleware`（+5） | **3s** | ✅ 已在 `application.yml` 显式钉住 |
+| gRPC client 熔断 | Go 无对应物（Go 侧只熔 HTTP 入口） | `GoStyleGrpcClientBreakerInterceptor` | — | ❌ **user-api 无接线测试**（follow-api / message-api 有） |
+
+**中间件顺序也逐条对齐**：Go `engine.go:130-168` 的装配序是
+MaxConns → Breaker → Shedding → Timeout → Recover → Metrics → MaxBytes → Gunzip；
+RAG 的 `@Order` 是 MaxConns(+1) → Breaker(+2) → CpuShedding(+3) → HttpMiddleware(+5) → MaxBytes(+6)
+⇒ **同序**。
+
+⚠️ **Go 侧 `Rest:` 段根本没配**（`usercenter.yaml` 里没有），
+但 go-zero 的 `RestConf` 每个阈值都带 `json:",default=…"` ⇒ 配置加载器会填默认值
+⇒ **真源那三个机制是开着的**（这一点此前也被误判过）。
+
+#### 原断言引出的三个**真**问题（应拆为新条目）
+
+1. **MaxConns 的闸门粒度不同**：Go 是 **per-route** latch
+   （`engine.go:146` 对每条路由各 new 一个），RAG 是**全局一个**。
+   `GoStyleMaxConnsFilter` 的 javadoc 已**显式留痕**为「有意的表达层收敛」，
+   理由是「13 个端点的并发度下差别只在极端场景显现，而 Tomcat `max-threads=200` 早已先成瓶颈」。
+   ⇒ 这是**已留痕的收敛**，不是隐藏缺口，但台账此前完全没提。
+2. **user-api 的 gRPC client breaker 是否真的被装配，未验证** ——
+   `GoStyleGrpcClientBreakerInterceptor` 的 javadoc **自己就写着**
+   「这正是 AGENTS.md §3.3『不能仅凭存在 {@code @Component} 就推断责任已被承担』的形态」，
+   而 follow-api / message-api **有** `GoStyleGrpcClientBreakerWiringTest`，**user-api 没有**。
+3. **逐机制行为等价性从未逐条对照** —— 四个机制各自的触发阈值、拒绝时的响应形状
+   （Go 是 **503 + 空 body + 无 Content-Type**，已实测）、指标口径，都还没逐条比过。
+
+#### 结论
+
+**⇒ 「RAG 侧没有任何对应物」不成立；「过载交给网关/容器」这个方案的前提也不成立** ——
+RAG 侧**已经有**一层 Go 风格保护层，再加网关会与之**重复**，且网关的 503 带 JSON body
+⇒ 反而制造出 Go 没有的 wire 差异。
+
+⇒ **原「Must Preserve: 明确签字放弃（过载行为由上游网关/容器负责）」不再适用** ——
+它基于「RAG 什么都没有」这个错误前提。
+
 
 ```text
 Component:    user-api 的过载保护层
