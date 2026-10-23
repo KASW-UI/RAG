@@ -183,3 +183,49 @@ cd <真源> && CGO_ENABLED=0 \
 > 这条的通用价值：凡「真源在 `internal/` 下、而探针必须不复制源码」的组合，
 > 以前只能放弃取证或退回复制。overlay 把这条路补上了 ——
 > **「拿不到证据」从此不再是「判定为等价」的正当理由。**
+
+---
+
+## PIT-USERS-SHARED-004 🔴 改了跨模块的**资源文件**后跑下游测试，**不带 `-am` ⇒ 测的是 `~/.m2` 里的旧副本**
+
+**症状**：改了 `users-common/src/main/resources/db/01_create_user.sql`（DDL），
+`target/classes` 里也确认是新的，**但 user-rpc 的集成测试仍报**
+```
+ERROR: column "extra_info" is of type jsonb but expression is of type character varying
+```
+且列类型断言直接给出 `expected: <text> but was: <jsonb>`。
+—— DDL 文件明明改了，运行时却还是旧的。
+
+**根因**：`mvn -pl service/users/user/user-rpc test` **不带 `-am`** 时，
+Maven 不会重建上游模块，`users-common` 是从**本地仓库的已安装 jar** 里解析的：
+
+```bash
+# 三处时间戳一比就露馅
+ls -l ~/.m2/repository/com/rag/users-common/0.0.1-SNAPSHOT/users-common-0.0.1-SNAPSHOT.jar
+unzip -p  ~/.m2/repository/com/rag/users-common/0.0.1-SNAPSHOT/users-common-0.0.1-SNAPSHOT.jar \
+      db/01_create_user.sql | grep -n "extra_info  "
+# ⇒ 里面还是   extra_info  JSONB      ← 23:10 的旧副本
+#   而 src 里已经是 extra_info  TEXT    ← 23:29
+```
+
+⚠️ **注意 `target/classes` 是对的也会被骗过**：`compile` 阶段确实刷新了
+`users-common/target/classes/db/01_create_user.sql`，但 **user-rpc 的测试运行时
+classpath 用的是仓库里的 jar，不是那个目录** ⇒ 「看 `target/classes` 确认过了」这个动作
+在这里**给不出任何保证**。
+
+**为什么这条比「测试红了」严重**：它能造出**假绿**。
+本轮若守门断言写的是 `assertEquals("jsonb", …)`，对着旧 jar 就会**通过**，
+而真机上早已是 text —— 测试绿着，漂移留着。
+⇒ 与 §3.3「绿测试可能是错误答案的守卫」同型，但成因在**构建**层而不是断言层。
+
+**处置**：改过**跨模块的资源/配置/DDL**（不只是 `.java`）之后，
+跑下游模块测试**一律先重装上游**：
+
+```bash
+mvn -o -pl service/users/users-common install -DskipTests
+mvn -o -pl service/users/user/user-rpc test
+```
+或直接 `mvn -o -pl service/users/user/user-rpc -am test`（连带跑上游自己的测试）。
+
+**判定口诀**：报错的列/表/配置**刚改过**，而 `target/classes` 看着是新的 ⇒
+**先怀疑 classpath 用的是 `~/.m2` 的旧 jar**，别先去读业务代码。
