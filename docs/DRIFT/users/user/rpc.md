@@ -590,7 +590,7 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 | 半边 | 状态 | 说明 |
 |---|---|---|
 | `users_user.create_time/update_time`（`01_create_user.sql:42-43`） | ✅ **已修** | 列改 `TIMESTAMPTZ`；两个实体 4 字段改 `OffsetDateTime`。守门 `UserRpcUsersUserTimestamptzParityTest`（6 条，真 PG），变异测试已证伪。admin-rpc **84/0**、user-rpc **102/0** |
-| `users_user_avatar_history.create_time/update_time`（`02_create_user_avatar_history.sql:30-31`） | 🔴 **未修** | 这才是本条 **OBSERVABLE** 的那一半（`CASE-27`）。`UserAvatarHistoryEntity:47,50` 仍 `LocalDateTime`，`AvatarDomainService:74` 仍 `atOffset(UTC)` ⇒ wire 恒 `Z`；叠加 JDBC URL 未钉 `TimeZone`（Go `db.go:21` 钉 `Asia/Shanghai`） |
+| `users_user_avatar_history.create_time/update_time`（`02_create_user_avatar_history.sql:30-31`） | ✅ **已修**（第六轮复核更正） | 这才是本条 **OBSERVABLE** 的那一半（`CASE-27`）。DDL 现为 `TIMESTAMPTZ`（`02_...:30-31` + 幂等 ALTER），守门 `UserRpcAvatarHistoryTimestamptzParityTest`（**9 条**，真 PG）。⚠️ 本行此前写「未修」，是**过期状态**（第六轮复核时才发现 DDL 与守门早已到位）。**残留**：DEFAULT 差异（`CURRENT_TIMESTAMP` vs Go 无）仍属 V-011，未修 |`UserAvatarHistoryEntity:47,50` 仍 `LocalDateTime`，`AvatarDomainService:74` 仍 `atOffset(UTC)` ⇒ wire 恒 `Z`；叠加 JDBC URL 未钉 `TimeZone`（Go `db.go:21` 钉 `Asia/Shanghai`） |
 
 ⚠️ **本条原标题「4 个时间列」口径已更正**：那 4 处是 **两份 Go model 各 2 个字段**
 （`user/rpc/.../data_model.go:14-15` 与 `admin/rpc/.../data_model.go:12-13`），
@@ -1113,7 +1113,7 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | **DRIFT-USERRPC-V-002** | `users_user.status` **NOT NULL**（Go 可空） | 🔴 **真库实证确认**（§4） | ⚠️ **动它会立刻激活 admin-rpc 的同款缺陷**：admin-rpc 的 `UserEntity.status` 是 `private Long status = 0L;`（MyBatis `callSettersOnNulls=false` ⇒ NULL 读成 0）⇒ 放开 NOT NULL 会让 admin 侧把 NULL 当成「活跃」。⇒ **必须与 admin 侧一起改**（见 `_shared.md` 的 admin 待裁决节） |
 | **DRIFT-USERRPC-V-003** | `extra_info` `text` ↔ `jsonb` | ✅ **已修**（`ec33159`） | 你随后拍板「一起改成 text」。连带改 `JsonTextTypeHandler` + 去掉 2 处 CAST + 3 条守门（详见 §502）。跨域不对称随之消除 |
 | **DRIFT-USERRPC-V-011（新）** | 时间列 **DEFAULT `CURRENT_TIMESTAMP`**（Go 无 DEFAULT） | 🔴 新发现 | 两侧写入路径都**显式**写这两个列（Go 靠 GORM autoCreateTime；RAG 本轮起靠应用侧时钟）⇒ DEFAULT 只在「有人不写该列」时生效 ⇒ **当前不可观察**。⚠️ 改它要先确认 admin 域与 `users_user` 的写入路径 |
-| **DRIFT-USERRPC-V-006** | `id` 的取值来源（Go `bigserial` 序列 vs RAG `IdType.ASSIGN_ID` 雪花） | 仍成立，wire 零影响 | ⛔ 本轮**未**实测 `users_user_avatar_history.id` 到底谁胜出（`@Options(useGeneratedKeys=true)` vs `ASSIGN_ID`）。**真 PG 直查即可关闭**，本轮时间预算用完，见 §6 |
+| **DRIFT-USERRPC-V-006** | `id` 的取值来源（Go `bigserial` 序列 vs RAG `IdType.ASSIGN_ID` 雪花） | ✅ **已关闭**（第四轮，真 PG 实证：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；**永不进 wire**） | ⚠️ 本行此前写「仍成立」，是**过期状态**（第四轮已关，第六轮复核才发现汇总表没同步） |
 | **DRIFT-USERRPC-V-007** | 超时的 gRPC `description` 不同（`service/common` 组件） | 仍成立 | 归属 `service/common`，不在本组件判定权内 |
 | **DRIFT-USERRPC-V-008** | 死代码 + **伪出处**（3 个异常类 + 2 个 mapper 方法） | ✅ **已修**（`fa2de52`） | 第四轮 §2 已删；且**伪出处是两个，不是一个**（`PasswordMismatchException` 声称的 `ALREADY_EXISTS` 在 Go 恰好相反）。⚠️ 本行此前仍写「仍成立」，属台账脱节，本轮复核更正 |
 | **UNRESOLVED-USERRPC-004 ②** | 启动期 Redis 不可用：Go `MustNewRedis` fail-fast vs RAG 懒连接 | 仍 unresolved | 本轮未做「停掉 Redis 再起进程」的注入实验 |
