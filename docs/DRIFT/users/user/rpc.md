@@ -1075,3 +1075,100 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | `UserRpcSchemaTextColumnTest`（既有） | 4 | R3 列宽 | ✅ |
 | **合计 user-rpc** | **112** | | **skipped = 0** |
 
+
+---
+
+<!-- @fix 2026-10-23 第四轮：V-006 关闭（真 PG）· V-008 已修（删死代码 + 揭出第二个伪出处） -->
+
+## 2026-10-23 第四轮：V-006 关闭 · V-008 已修
+
+> 本轮把 §7 里两条「静态推断 + 未实测」的残留项变成实证结论。
+> **没有引入任何新的 Go↔RAG 行为改动** —— 两项都不影响 wire。
+
+### 1. `DRIFT-USERRPC-V-006` ✅ **关闭** —— `id` 取值来源不同，但**永不进 wire**（真 PG 实证）
+
+台账上一轮把它列为「仍成立，wire 零影响；⛔ 本轮**未**实测」。
+本轮补上真 PG 证据，并回答了 §9 `UNRESOLVED-USERRPC-004①` 追问的那个问题
+（`@Options(useGeneratedKeys=true)` 与 `IdType.ASSIGN_ID` 谁胜出）。
+
+**Go 侧（消费点，非声明点）**：
+
+| 位置 | 事实 |
+|---|---|
+| `service/user/user/rpc/internal/model/data_model.go:6` | `Id uint64 \`gorm:"primaryKey"\`` —— **无 `autoIncrement` 标签** |
+| 同上 `:23` | `UserAvatarHistory.Id uint64 \`gorm:"primaryKey"\` —— 同样无标签 |
+| `registerlogic.go:73` | 只赋 `Uid`，**从不赋 `Id`** ⇒ 恒零值 |
+| `model/user.go:86-94` | 构造 `UserAvatarHistory{HistoryID, Uid, AvatarURL, ContentType, SizeBytes, IsCurrent}` —— **不含 `Id`** |
+
+⇒ GORM 约定「整型单列主键 ⇒ 视作自增」，零值主键**不入 INSERT**，由 DDL 的 `BIGSERIAL` 序列填。
+
+**RAG 侧**：`UserEntity.id` / `UserAvatarHistoryEntity.id` 均为 `@TableId(type = IdType.ASSIGN_ID)`
+⇒ MyBatis-Plus 生成雪花并**显式写进 INSERT**。
+
+**真 PG 实测结论（`UserRpcPrimaryKeySourceParityTest`，4 条，skipped = 0）**：
+
+| 事实 | 实测值 |
+|---|---|
+| `users_user.id` | **雪花量级**（> 1e18），不是 1,2,3… |
+| `users_user_id_seq.last_value` | **仍为 1** ⇒ 序列**根本没被消耗** ⇒ `ASSIGN_ID` 胜出，`useGeneratedKeys` 无效 |
+| `users_user_avatar_history.id` | 同上，雪花量级 |
+| `users_user_avatar_history_id_seq.last_value` | 仍为 1 |
+
+⇒ **台账那个悬而未决的「谁决定 id」有了确定答案：雪花胜出，bigserial 序列是死的。**
+
+**为什么这条不构成可观察差异（关键，也是关闭的依据）**：
+
+1. `users_user.id`：proto 的 `UserInfo` 只有 `uid`，**没有 id**（`users.proto:9-15`）；
+2. `users_user_avatar_history.id`：proto 的 `AvatarHistoryItem.id` 虽然叫 id，
+   但 Go 在 **`avatarhelpers.go:22` 填的是 `item.HistoryID`**（雪花**字符串**），
+   **不是 DB 主键**。
+
+⇒ 两个 `id` 列**永远不进入任何 proto 字段**，取值来源不同**在 wire 上不可观察**。
+**判定：`NOT OBSERVABLE`（可关闭）**，但保留本节记录：若将来 proto 新增 `id` 字段，本条立即复活。
+
+**守恒断言（新增，防「只靠注释」）**：第 4 条用例**直接读 `users.proto` 源文件**，
+断言 `UserInfo` 不含 `int64 id`、`AvatarHistoryItem` 的 id 是 `string id = 1` 且不含 `int64 id`。
+⇒ proto 一改，这条用例立刻红。
+
+### 2. `DRIFT-USERRPC-V-008` ✅ **已修** —— 删死代码；且**伪出处是两个，不是一个**
+
+台账只点名了 `TokenBlacklistedException`。
+本轮按 §3.1「**不要拿台账当基准**」逐个回到 Go 原文复核，**发现了第二个假出处**：
+
+| 类 | 台账怎么说 | **Go 原文实际** | 判定 |
+|---|---|---|---|
+| `TokenBlacklistedException` | 「对应 Go 端 LogoutLogic：token 在黑名单中 → `Status.PERMISSION_DENIED`」 | **PERMISSION_DENIED 在注销链上根本不存在**：<br>`user/api/.../user/logoutlogic.go:34-57`（全文 58 行）只判 `token == nil`；<br>`user/rpc/internal/logic/logoutlogic.go:30-43`（全文 44 行）只判 `in.Token == ""`，之后直接 `Setex` 进 Redis | 🔴 **伪出处** |
+| `PasswordMismatchException` | 「对应 Go 端 password 不匹配抛 `ALREADY_EXISTS`（Register 密码生成失败 / Login 密码错）」 | **Go 恰好相反**：<br>`loginlogic.go:59-64` → `return &pb.LoginResp{Status: 1}, nil`（**err 为 nil，不是异常**）<br>`registerlogic.go:56-62` → `status.Error(codes.Internal, "密码生成失败")`（**是 Internal，不是 AlreadyExists**） | 🔴 **伪出处（台账漏记）** |
+| `UsernameExistsException` | 「对应 Go 端 RegisterLogic W1：用户名已存在 → `Status.ALREADY_EXISTS`」 | `registerlogic.go:48` → `status.Error(codes.AlreadyExists, "用户名已存在")` ✅ | ⚪ **出处准确但零消费者** |
+
+**处置**：三个类**全部删除**（含 `UserDomainService` 的两条未用 import），
+`UserMapper.selectCurrentByUid` / `findCurrentAvatar` 两个零消费者方法**一并删除**，
+并删掉随之失效的 `java.util.Optional` import。
+
+**为什么删而不是留**（§3.2 / §3.4.1 D-2 先例）：
+零消费者的代码不能算已对齐；更要命的是那两个伪出处**指向了真实的 Go 文件、也编造了看起来合理的行号**，
+下一个 agent 会据此「恢复」两个 Go 从未有过的错误码 —— 把潜伏的假结论**扶正成行为回归**。
+删除理由与 Go 行号已写进 `UserExceptions.java` 的注释，不留在台账里就算没了。
+
+**顺带修掉的第三处文档缺陷**（§5「发现明显破损就顺手修」）：
+`UserMapper.findOneByUserName` 的 javadoc 写「用 `Optional` 包装…调用方应 `.orElseThrow(...)`」，
+但实现返回 `UserEntity`、找不到时**在方法内直接抛** —— javadoc 描述的是另一个 API。
+已按实现改正（与 Go 的 `(user, err)` 二元组同构：「找不到」是 error，不是值）。
+
+### 3. 本轮回归
+
+| 模块 | 结果 |
+|---|---|
+| `user-rpc` | **116** tests / 0 failures / 0 errors / **skipped = 0**（删除死代码后用例数**未减少** ⇒ 反证它们确实零消费者） |
+| 新增 `UserRpcPrimaryKeySourceParityTest` | **4** / 0 / 0 / 0 |
+
+### 4. ⚠️ 本轮踩到的一个**共享基础设施**隐患（不属于语义漂移，但会让别的会话假红）
+
+`application.yaml:81` 把 gRPC 端口**钉死在 49210**。本轮跑新测试时该端口被
+**Docker（另一个并行 worktree 会话的栈）**占着 ⇒ `BindException: Address already in use`
+⇒ **整个 `ApplicationContext` 起不来**，4 条用例全部变成
+`ApplicationContext failure threshold exceeded` —— **一条真实断言都没跑到，却显示为 4 errors**。
+
+处置：新测试用 `properties = "grpc.server.port=0"`（内核分配临时端口）。
+⚠️ 本测试只关心 DDL 与主键来源，**不需要真的监听端口**。
+⇒ 详见 [`../../../Pitfalls/users/_shared.md`](../../../Pitfalls/users/_shared.md)。

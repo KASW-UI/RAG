@@ -37,3 +37,47 @@ issue #71187874 用脚本往两个 DomainService 插了 46 处
 ⚠️ 扫描必须用**字节码**而非源码：javac 生成的异常表里，同一个 try 的多个 catch 共享
 `(from, to)` 且顺序即源码顺序，这才使「前邻」可判定；源码扫描依赖缩进与文本形态。
 
+
+---
+
+## PIT-USERS-SHARED-001 🔴 固定 gRPC 端口 + 并行会话 ⇒ 整个 ApplicationContext 起不来，用例显示为「errors」而非「端口冲突」
+
+**症状**：新建的 `UserRpcPrimaryKeySourceParityTest` 4 条用例全部报
+
+```
+IllegalState: ApplicationContext failure threshold (1) exceeded:
+  skipping repeated attempt to load context for [MergedContextConfiguration@2ed9e59b ...]
+```
+
+看着像「测试类本身写错了」或「DDL 没建出来」，**实际上一个断言都没执行**。
+
+**真实原因**：`Failed to start bean 'shadedNettyGrpcServerLifecycle'`
+→ `Failed to bind to address 0.0.0.0/0.0.0.0:49210` → `BindException: Address already in use`。
+
+`service/users/user/user-rpc/src/main/resources/application.yaml:81` 把 gRPC 端口**钉死**在
+`49210`（注释写「修 INFRA-001：9004 → 49210，Infrastructure.md §3 锁定」）。
+而本仓库**同时有 8+ 条并行 worktree 会话 + 外部 difftest 容器**，
+实测 `lsof -iTCP:49210` 显示占用者是 **`com.docke[r]`** —— 另一个会话的容器栈。
+
+**为什么这条特别阴**：根因是「端口」，
+但症状被 Spring 包装成「**上下文加载失败**」，再被 surefire 包装成「**测试 error**」。
+⇒ 你会先去怀疑测试代码、Spring 配置、Testcontainers，而**永远不会想到端口**。
+
+**怎么确认**：`lsof -nP -iTCP:<端口> -sTCP:LISTEN` 看占用者是谁。
+若是 Docker 且**不是自己的容器** ⇒ 是并发会话，不是自己写错了。
+**绝不要去 kill 别人的容器**（§5.3：工作树之间不互相动状态）。
+
+**怎么修**：只关心数据层/装配的测试**根本不需要真的监听端口** ⇒ 用临时端口：
+
+```java
+@SpringBootTest(classes = UserRpcApplication.class,
+        properties = "grpc.server.port=0")   // 0 = 内核分配，天然不会撞
+```
+
+**留下的守门网**：`UserRpcPrimaryKeySourceParityTest` 已如此配置；
+本条同时是对「§5.3 并行 worktree 工作流」的一个副作用提示 ——
+**固定端口 + 并发会话 = 必然互相假红**，端口类资源应当一律临时化。
+
+> 同类的还有 §3.5 里那句「共享索引文件合并后统一更新」：
+> 凡是**多个会话会同时用同一份固定值**的资源（端口、库名、Redis db 号），
+> 都要按「会被别人占/被改」来设计，而不是按「只有我在用」。

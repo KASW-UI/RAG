@@ -11,8 +11,6 @@ import org.apache.ibatis.annotations.Result;
 import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 
-import java.util.Optional;
-
 /**
  * users_user 表的 MyBatis-Plus Mapper。
  *
@@ -47,7 +45,11 @@ public interface UserMapper extends BaseMapper<UserEntity> {
 
     /**
      * 对应 Go 端 UserModel.FindOneByUserName。
-     * 用 Optional 包装显式表达"找不到"语义；调用方应 .orElseThrow(() -> new NotFoundException(...))
+     *
+     * <p><b>2026-10-23 更正</b>：本方法原 javadoc 写「用 {@code Optional} 包装显式表达"找不到"
+     * 语义；调用方应 {@code .orElseThrow(...)}」—— <b>实现从来不是这样</b>：返回类型是
+     * {@code UserEntity}，找不到时在方法内直接抛 {@link NotFoundException}。
+     * 与 Go 的 {@code (user, err)} 返回二元组逐条同构：<b>「找不到」是 error，不是值</b>。
      */
     default UserEntity findOneByUserName(String username) {
         UserEntity u = selectByUsernameRaw(username);
@@ -175,15 +177,11 @@ public interface UserMapper extends BaseMapper<UserEntity> {
         }
     }
 
-    /**
-     * 找出 user 的当前头像（is_current=true 且 uid 匹配）。
-     * 对应原 DataModel.createAvatarHistory W2 步骤（UPDATE 旧 current → false）。
-     */
-    @Select("SELECT * FROM users_user_avatar_history WHERE uid = #{uid} AND is_current = true LIMIT 1")
-    com.rag.users.user.rpc.domain.UserAvatarHistoryEntity selectCurrentByUid(
-            @Param("uid") Long uid);
-
-    default Optional<com.rag.users.user.rpc.domain.UserAvatarHistoryEntity> findCurrentAvatar(Long uid) {
-        return Optional.ofNullable(selectCurrentByUid(uid));
-    }
+    // ── 2026-10-23 删除（DRIFT-USERRPC-V-008）──
+    // 原 selectCurrentByUid(@Select) 与 findCurrentAvatar(default 包装) 全仓零调用点，
+    // 且 Go 侧无对应物：Go 的 W2 只是 UPDATE ... WHERE uid=? AND is_current=true 批量置 false，
+    // 见 service/user/user/rpc/internal/model/user.go:80-84，**不读回当前头像行**。
+    // ⇒ 留着的真实风险不是「多余」，而是它是一份**看起来该用**的查询：
+    // 下一个 agent 实现「查当前头像」时会直接调它，而那条路径 Go 根本没有。
+    // 删除遵循 §3.4.1 D-2 先例（零消费者的代码不能算已对齐）。
 }
