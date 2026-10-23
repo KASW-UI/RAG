@@ -660,7 +660,11 @@ Go 返回 **SUCCESS + 第一页**；RAG 抛 `BadSqlGrammarException` ⇒ `Messag
 
 ---
 
-### DRIFT-MSG-V-015 🆕 gRPC server reflection 的暴露面两侧不对称
+### ✅ DRIFT-MSG-V-015 ✅ **已修（2026-10-23 第四轮）** gRPC server reflection 的暴露面两侧不对称
+
+> **⚠️ 2026-10-24 状态更正**：标题原无状态标记，**实为已修**——
+> `application.yml:103` 已钉 `reflection-service-enabled: false`（对齐 Go `pro` 模式下不注册 reflection），
+> 且**装配层已验**。详见下方「✅ FIX-MSG-V-015」。
 
 **Component**: message-rpc　**Operation**: 全部（服务级能力）
 **Category**: Lifecycle / Attack Surface　**Classification**: **`OBSERVABLE DIFFERENCE`**
@@ -688,7 +692,7 @@ Go 侧同一命令连不上。**同时**：注释给了错误的安全感（§3.
 
 ---
 
-### DRIFT-MSG-V-016 🆕 go-zero 框架级三个 unary 拦截器在 RAG 侧全部缺失
+### ✅ DRIFT-MSG-V-016 ✅ **已修（2026-10-23 recover / 2026-10-24 breaker+shedding）** go-zero 框架级三个 unary 拦截器在 RAG 侧全部缺失
 
 **Component**: message-rpc　**Operation**: 全部
 **Category**: Resilience / Error Identity　**Classification**: **`OBSERVABLE DIFFERENCE`**
@@ -946,7 +950,11 @@ RAG MessageDomainService.java:547-560
 
 ---
 
-### DRIFT-MSG-V-019 🆕 PostgreSQL 连接的 `sslmode` 两侧不一致
+### ✅ DRIFT-MSG-V-019 ✅ **已修（2026-10-23 第四轮）** PostgreSQL 连接的 `sslmode` 两侧不一致
+
+> **⚠️ 2026-10-24 状态更正**：标题原无状态标记，**实为已修**——
+> JDBC URL 已显式带 `sslmode=disable`（对齐 Go `etc/message.yaml` 的 `Mode: "disable"` ⇒ Go **永不尝试 TLS**）。
+> 详见下方「✅ FIX-MSG-V-019」。
 
 **Component**: message-rpc　**Operation**: 全部（数据访问层）
 **Category**: Configuration Semantics　**Classification**: **`OBSERVABLE DIFFERENCE`**
@@ -1022,10 +1030,10 @@ RAG application.yml:16
 |---|---|---|---|
 | **UNRESOLVED-MSG-003**（沿用，**复核仍成立**） | `tools/difftest` 的 message 域 12 档对拍是否真的一致 | 脚本与 runner 都在，但**没有任何结果产物**；且两侧栈要同时起 | 起双栈跑 `./tools/difftest/exp-difftest-grpc-errors-message.sh`，留结果产物 |
 | **UNRESOLVED-MSG-004**（沿用，**复核仍成立**） | 三项「起不来」缺陷是否有**点名式**防回退 | 现存用例只间接锁住「上下文能起」 | 拆一条 `MessageContextWiringTest`，分别断言 `@MapperScan` 值、`NacosRegistration` 的 Bean 名、`spring-boot-flyway` 在 classpath |
-| **UNRESOLVED-MSG-005**（沿用，**复核后加重**） | 已存在的非 Flyway 建表的库上能否启动 | `V2` 的 `ALTER TABLE … ADD CONSTRAINT` 无 `IF NOT EXISTS`；本轮实测用的是全新空库 | 在一个由 GORM `AutoMigrate` 建过表的库上起一次 message-rpc |
+| **UNRESOLVED-MSG-005** ✅ **已关闭（2026-10-23 第四轮，FIX-MSG-V-023）** | ~~已存在的非 Flyway 建表的库上能否启动~~ | —— | ✅ 已关闭：**原问题的前提不成立** —— GORM `AutoMigrate` 建的是**索引**，V2 的 `ADD CONSTRAINT` 在 GORM 建过的库上**本来就能跑**；且 V4 已把约束降回索引（`DROP CONSTRAINT IF EXISTS` + `CREATE UNIQUE INDEX IF NOT EXISTS`），幂等实测 8 次执行全 `exit=0`。⚠️ **残留角落**：仅当外部工具恰好用了同名**约束**时才成立 |
 | **UNRESOLVED-MSG-V-001**（沿用，跨轮次） | Nacos namespace/group 不一致 | 需 user/admin 侧同轮次结论 | 两侧 namespace/group 对齐后再判 |
 | **UNRESOLVED-MSG-006** ✅ **已关闭（2026-10-23 第六轮）** | ~~RAG 侧 handler 抛 `Error`/panic 时客户端到底看到什么~~ | —— | ✅ 已关闭：`GoStyleRecoverInterceptor` 落地后，抛 `Error`（非 `RuntimeException`）也被兜住 ⇒ 客户端见 `INTERNAL` + description 以 `"panic: "` 开头，与 Go 的 `recoverinterceptor.go:39-42` 一致（`MessageRpcRecoverInterceptorWiringTest` 5 例，真 in-process gRPC） |
-| **UNRESOLVED-MSG-007** 🆕 | pgjdbc `sslmode` 默认值对**行为**的实际影响 | 只做了文档层取证，未在**开了 TLS 的 PG** 上跑 | 起一个 `sslmode=require` 的 PG，用当前 JDBC URL 连一次 |
+| **UNRESOLVED-MSG-007** ✅ **前提消失（2026-10-23 第四轮，FIX-MSG-V-019）** | ~~pgjdbc `sslmode` 默认值对**行为**的实际影响~~ | —— | ✅ **不再是未知项**：JDBC URL 现在**显式**钉 `?sslmode=disable`（对齐 Go `etc/message.yaml` 的 `Mode: "disable"`）⇒ **不再依赖 pgjdbc 的文档化默认值 `prefer`** ⇒ 两侧都是「永不尝试 TLS」。⚠️ 口径：原问法是「默认 `prefer` 在开了 TLS 的 PG 上会怎样」，那已不是当前配置 |
 | **UNRESOLVED-MSG-008** 🆕 | `Flyway` 独立账本在**三个模块同库**下真的不撞 | 本轮只证了 **message-rpc 单模块**建出 `flyway_schema_history_message`；`like-rpc` / `article-rpc` 未同时启动 | 三模块同时连同一个 `first_db`，`\dt` 确认三本账 + 各自 3 条 `success` |
 | **UNRESOLVED-MSG-009** 🆕 | 时间列 `TIMESTAMP`（非 `TIMESTAMPTZ`）在**多实例/多时区**下是否仍自洽 | 读侧修法的前提是「一个库只由同一时区 JVM 写」（§6.7.10 已留档） | 补一条 `V4` 迁移 + 双实例时区对拍 |
 
@@ -1040,7 +1048,7 @@ RAG application.yml:16
 | 3 | 边界输入是否一致 | ✅ **负 `offset` 已一致**（V-014 于 2026-10-23 第二轮修好：Go 忽略、RAG 现在也忽略 ⇒ 返回第一页） |
 | 4 | NotFound / Empty / Null 是否一致 | ✅ 会话/通知不存在、extra 为空、时间为 null 三态逐条一致 |
 | 5 | Error meaning 是否一致 | ✅ 业务错误码 21/21 一致；❌ DB 故障码已签字不一致（V-003） |
-| 6 | Error propagation 是否一致 | ⚠️ 业务错误一致；DB 故障的传播形态已签字不同（V-003）；panic 传播 `UNRESOLVED-MSG-006` |
+| 6 | Error propagation 是否一致 | ⚠️ 业务错误一致；DB 故障的传播形态已签字不同（V-003）；panic 传播 ✅ 已关闭（`UNRESOLVED-MSG-006`，recover 落地） |
 | 7 | External dependency failure 是否一致 | ⚠️ user/admin 失败兜底一致；**下游故障时两侧都无超时兜底**（共同缺陷，非漂移） |
 | 8 | Cache hit / miss 是否一致 | N/A（本组件无缓存） |
 | 9 | Transaction boundary 是否一致 | ✅ 保护的操作集合与语句序都一致（真 PG 8 条 + 历史变异测试） |

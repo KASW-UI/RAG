@@ -682,7 +682,12 @@ Tomcat
 
 ---
 
-### DRIFT-MSGAPI-005（2026-10-23 新发现 · **未修**）布尔字段收 JSON **整数**：Go 拒 / RAG 收
+### ✅ DRIFT-MSGAPI-005 ✅ **已修（2026-10-23 第三轮）** 布尔字段收 JSON **整数**：Go 拒 / RAG 收
+
+> **⚠️ 2026-10-24 状态更正**：本节标题原写「未修」，**实为已修**——代码里早有「补强 3（2026-10-23，DRIFT-MSGAPI-005）」（`MessageGoStyleCoercion` 的
+> `LogicalType.Boolean + CoercionInputShape.Integer → Fail`），探针 A 组 7 例**两侧全部 REJECTED**，
+> `MessageApiMvcPipelineTest#adminBroadcastRejectsJsonNumber` 也已锁 ⇒ **代码早于台账**。
+> 详见下方「2026-10-23 第三轮」第二节。
 
 - **Component**：`message-api` 请求解析
 - **Operation**：OP-01 / OP-05 / OP-09（`PageReq.unread_only`）、OP-13（`AdminSendNotificationReq.broadcast`）
@@ -722,7 +727,12 @@ Tomcat
 
 ---
 
-### DRIFT-MSGAPI-006（2026-10-23 新发现 · **未修**）`map[string]string` **值**收 JSON 数字：Go 收 / RAG 拒
+### ✅ DRIFT-MSGAPI-006 ✅ **已修（2026-10-23 第三轮）** `map[string]string` **值**收 JSON 数字：Go 收 / RAG 拒
+
+> **⚠️ 2026-10-24 状态更正**：标题原写「未修」，**实为已修**——新增 `GoStyleMapStringValueDeserializer`
+> （字段级 `contentUsing` 挂点）。⚠️ 修法**不能**放在共享 coercion 规则里（Jackson 的 `LogicalType` 维度
+> **无法区分**顶层 String 字段与 map 元素 ⇒ 放行 map 元素会让 `DRIFT-MSGAPI-002` 回退）。
+> 详见下方「2026-10-23 第三轮」第三节。
 
 - **Component**：`message-api` 请求解析
 - **Operation**：OP-13（`AdminSendNotificationReq.extra`）
@@ -750,7 +760,13 @@ Tomcat
 
 ---
 
-### DRIFT-MSGAPI-007（2026-10-23 新发现 · **未修**）`map[string]string` **值**显式 null：Go 拒 / RAG 收
+### ✅ DRIFT-MSGAPI-007 ✅ **已修（2026-10-23 第三轮）** `map[string]string` **值**显式 null：Go 拒 / RAG 收
+
+> **⚠️ 2026-10-24 状态更正**：标题原写「未修」，**实为已修**。
+> 🔴 **修它踩的 Jackson 细节**：map 元素为 `null` 时 Jackson **不走 `deserialize`**，而走 `getNullValue`
+> ⇒ **只覆写 `deserialize` 不会被修掉**，必须同时覆写 `getNullValue` 抛错；且 `getNullValue` 里
+> **不能**调 `handleUnexpectedToken(…, p)`（该路径 Jackson 没给 parser，传 `null` 会 NPE）。
+> 详见下方「2026-10-23 第三轮」第三节。
 
 - **Component**：`message-api` 请求解析
 - **Operation**：OP-13（`AdminSendNotificationReq.extra`）
@@ -772,7 +788,13 @@ Tomcat
 
 ---
 
-### DRIFT-MSGAPI-008（2026-10-23 新发现 · **未修**）`,optional` 标量字段**显式 null**：Go 收（零值）/ RAG 拒
+### ✅ DRIFT-MSGAPI-008 ✅ **已修（2026-10-23 第三轮）** `,optional` 标量字段**显式 null**：Go 收（零值）/ RAG 拒
+
+> **⚠️ 2026-10-24 状态更正**：标题原写「未修」，**实为已修**——关掉 Jackson 的
+> `FAIL_ON_NULL_FOR_PRIMITIVES`（默认 true ⇒ `{"offset":null}` 等全被拒）。
+> ⚠️ **为什么全局关掉是安全的**（逐字段核过 `types.go`，非拍脑袋）：本模块**没有任何必填的原始类型字段**；
+> 必填的 `title`/`content`/`conversation_id` **全是引用类型**，其显式 null 的拒绝靠 `GoStyleRequired`
+> （Controller 层），**不靠这个 feature**。详见下方「2026-10-23 第三轮」第四节。
 
 - **Component**：`message-api` 请求解析
 - **Operation**：OP-01/05/09（`PageReq.offset` / `limit` / `unread_only`）、OP-13（`kind`）
@@ -806,7 +828,12 @@ Tomcat
 
 ---
 
-### DRIFT-MSGAPI-009（2026-10-23 新发现 · **未修**）出参 `affected`：Go **数字** / RAG **字符串**
+### ⏸ DRIFT-MSGAPI-009 ⏸ **已签字（`SD-2026-10-23-03`）· 不是待修项** 出参 `affected`：Go **数字** / RAG **字符串**
+
+> **⚠️ 2026-10-24 状态更正**：标题原写「未修 · 必须改成 JSON 数字」，**该结论已作废**——
+> 用户已逐条拍板「**保留 RAG 的字符串形态，不改 wire 契约**」（`SD-2026-10-23-03`）。
+> ⇒ **按 Go 改反而是制造未受控漂移**。探针把 `X1`/`X2` 放进 `known-dev` 白名单 ⇒ 对拍时必然为红但不计失败。
+> 详见下方「2026-10-23 第三轮」第五节。
 **🔴 本项目第二次「绿测试守卫错误答案」，形态与首轮 DRIFT-MSGAPI-003 完全同构**
 
 - **Component**：`message-api` 响应序列化
@@ -855,7 +882,7 @@ Tomcat
 
 ---
 
-### DRIFT-MSGAPI-010（2026-10-23 新发现 · **未修**）成功 / 错误响应的 `Content-Type` 缺 `charset`
+### 🔴 DRIFT-MSGAPI-010 🔴 **仍 OPEN（2026-10-23 第三轮复核：未动）** 成功 / 错误响应的 `Content-Type` 缺 `charset`
 
 - **Component**：`message-api` 响应头
 - **Operation**：全部 13 个（成功与 envelope 错误两条路径）
