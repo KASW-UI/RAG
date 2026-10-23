@@ -1278,3 +1278,92 @@ message-rpc：54 tests（原 52 + 新增 2 条真 PG 列级守门）/ 0 failures
 
 「先把 v020 解决再来探讨 v016」⇒ 本轮**未动** V-016（三个 go-zero 框架拦截器）。
 其分析、Go 出处与三条拆解建议已备好，等下一轮单独决策。
+
+---
+
+<!-- @plan 2026-10-23 23:4x · V-016 处置方案（待用户拍板，尚未实施） -->
+
+## `DRIFT-MSG-V-016` 处置方案（三条拆开决，因为成本与风险差一个数量级）
+
+> **状态：待决策。本节只是方案，一行代码都还没改。**
+> 与上一节的 `DRIFT-MSG-V-015/019/020/023` 不同 —— 那几条是「对齐既有行为」，
+> 这条是「**新增框架能力**」，两者的决策性质不一样。
+
+### 现状（两侧事实，均已读到消费点）
+
+```
+Go  zrpc/server.go:144-163 setupUnaryInterceptors —— 按配置逐个挂：
+      c.Middlewares.Trace      default=true   → UnaryTracingInterceptor
+      c.Middlewares.Recover    default=true   → UnaryRecoverInterceptor
+      c.Middlewares.Stat       default=true
+      c.Middlewares.Prometheus default=true
+      c.Middlewares.Breaker    default=true   → UnaryBreakerInterceptor
+      c.CpuThreshold > 0       default=900    → UnarySheddingInterceptor
+      c.Timeout > 0            default=2000   → UnaryTimeoutInterceptor  ← 被 Disable 清零
+    默认值出处：zrpc/internal/config.go:19-26（Middlewares 五个都是 default=true）
+                zrpc/config.go:46-47（Timeout 2000 / CpuThreshold 900, range=[0:1000)）
+    etc/message.yaml 一个都没配 ⇒ 全取默认
+    ⚠️ service/common/observability/rpc.go:19-23 的 DisableNativeRpcTimeout **只清 Timeout 一个字段**
+       ⇒ recover / breaker / shedding 在真源上是**生效**的
+
+RAG message-rpc 只有一个自研的观测拦截器（超时 + trace），由
+     MessageRpcApplication#rpcInterceptorConfigurer（:106-108）挂上
+     ⇒ recover / breaker / shedding **三个全缺**
+```
+
+### 拆解一：recover —— **建议本轮就做**
+
+| 项 | 内容 |
+|---|---|
+| **Go 行为** | `recoverinterceptor.go:34-41`：`if r := recover(); r != nil` → `status.Errorf(codes.Internal, "panic: %v", r)`。**进程存活** |
+| **实现** | `service/common` 新增 `GoStyleRecoverInterceptor implements ServerInterceptor`（放 common，与既有 `RpcServerInterceptorFactory` 同源，16 个 rpc 组件都能用）→ catch `Throwable` → `Status.INTERNAL.withDescription("panic: " + r).asRuntimeException()` |
+| **必须逐字对齐的点** | description 前缀必须是 `"panic: "`（Go 的 `%v` 对 `error` 打印 `err.Error()`）—— **wire 可见**，`message-api` 的 `bizCodeFromError` 会把 `INTERNAL` 映射成 5001，与 Go 一致 |
+| **装配顺序（易错）** | grpc 拦截器按注册顺序**由外到内**执行。go-zero 的注册序是 Trace→**Recover**→…→Breaker→Shedding⇒ **Recover 必须在 Breaker/Shedding 的外层**，否则它们的 panic 漏出去。Java 侧 `server.intercept(a, b, …)` 同理 ⇒ 现有的 `rpcInterceptorConfigurer` 要改成按序接多个 |
+| **测试（能真触发）** | 真 in-process gRPC server + 一个必 panic 的 handler ⇒ 断言 ① 客户端 `Status.Code == INTERNAL` ② description 以 `"panic: "` 开头 ③ 进程存活、能继续服务下一个请求。**顺带关闭 `UNRESOLVED-MSG-006`**（那一条至今「未取证 RAG 抛 Error 时客户端看到什么」） |
+| **成本 / 风险** | 1 个类 + 1 处装配改动 + 2~3 例测试。**低**。唯一要小心的是别让它吞掉业务异常（只接 `Throwable` 里非 `StatusException` 的那些） |
+
+### 拆解二：breaker —— **建议签字挂起，不建议现在补**
+
+**核心理由：go-zero 的服务端 breaker 不是经典熔断器。** `core/breaker/googlebreaker.go`：
+
+```go
+window  = time.Second * 10
+buckets = 40
+minK    = 1.1
+// accept(): w = k - (k-minK)*failingBuckets/buckets  ⇒ 阈值随失败历史**自适应**
+// 再叠加 proba.NewProba() 的**概率性丢弃**
+```
+
+⇒ 它实际上是「由失败历史驱动的**自适应概率限流**」，而非常见的「错误率 > 50% ⇒ 开路 N 秒」。
+
+- Java 侧要复刻只能引 `resilience4j`（**本仓当前零熔断依赖**，已 grep 全仓确认），
+  而 resilience4j 是**固定阈值 + 固定开路时长** ⇒ **算法不同、参数不可能逐字对齐**；
+- 可观察契约其实只有一条：**开路时返回 `UNAVAILABLE`**（`breakerinterceptor.go:47`），
+  且 `serverSideAcceptable`（`:53-58`）把 `DeadlineExceeded` 与 `ErrServiceUnavailable` 判为「不可接受」、
+  其余交给 `codes.Acceptable(err)`（只有 5xx 类才算失败）；
+- ⚠️ **连锁风险**：`DRIFT-MSGAPI-004` 刚给 api 侧加了客户端熔断。
+  服务端一旦开始吐 `UNAVAILABLE`，api 侧客户端熔断可能被打开 ⇒ **两条必须一起设计**，
+  单独补服务端会引入一条没人设计过的新失效模式。
+
+### 拆解三：CPU shedding —— **建议签字挂起**
+
+| 项 | 内容 |
+|---|---|
+| **Go 行为** | `load.AdaptiveShedder`（CPU 采样 + BBR 式判定），阈值 `CpuThreshold default=900`（千分比，`range=[0:1000)`）⇒ 拒绝时 `sheddinginterceptor.go:33` 返回 `RESOURCE_EXHAUSTED` |
+| **为什么难** | grpc-java **没有** CPU 自适应限流；resilience4j 的 Bulkhead 是**并发数**限流，语义完全不同（它不看 CPU） |
+| **风险** | 阈值配错会**主动丢真实流量**，而且这类误判在生产上极难归因 |
+| **判断** | 这属于**运维策略**（要多严的降载），不该由「对齐 Go」顺手带进来 ⇒ 若要补，单独一轮 + 阈值由用户定 |
+
+### 无论做不做都该做（便宜，本轮就该做）
+
+1. **把方案写进本节**（已完成）—— 否则「为什么没补」只活在对话里，后人会当成漏做；
+2. **登记签字偏离**（若 breaker/shedding 决定不补）：写明「真源过载/批量失败时会 `UNAVAILABLE` 主动拒流并保住进程，
+   RAG 会继续把请求打进 PG 直到池耗尽」—— 这样后人不会把它当新 bug 去「顺手修」
+   （这正是 `SD-01/02/03` 与 `SD-06` 的做法）。
+
+### 待用户拍板的三个问题
+
+1. **recover 现在做吗？**（建议：是，成本低、无歧义、顺带关掉 `UNRESOLVED-MSG-006`）
+2. **breaker / shedding：签字挂起？**（建议：是。若不签，将来必然有人「顺手补上」并踩 §6.7 记过的坑）
+3. 若决定补 breaker —— 用 resilience4j（引入新依赖、算法不等价）还是自己实现一个贴近 go-zero 的
+   自适应概率丢弃（无新依赖，但要自己维护，且要与 api 侧客户端熔断一起设计）？
