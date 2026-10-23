@@ -88,6 +88,62 @@ public final class GoFormValues {
     }
 
     /**
+     * Go 的「同名 key 多值 ⇒ <b>取第一个</b>」规则。
+     *
+     * <h2>Go 出处（两段，缺一不可）</h2>
+     * <pre>
+     * // ① rest/httpx/util.go:35-62 —— 同名 key 的多个值收成 []string 存进 map
+     *   for name, values := range r.Form {
+     *       filtered := make([]string, 0, len(values))
+     *       for _, v := range values {
+     *           if len(v) == 0 { continue }        // ← 空值先被**整个丢掉**
+     *           filtered = append(filtered, v)
+     *       }
+     *       if len(filtered) > 0 { params[name] = filtered }   // ← 值存的是**切片**
+     *   }
+     *
+     * // ② core/mapping/unmarshaler.go:835-846（消费点）—— 目标不是 slice 时取 Index(0)
+     *   if u.opts.fromArray {
+     *       fieldKind := field.Type.Kind()
+     *       if fieldKind != reflect.Slice &amp;&amp; fieldKind != reflect.Array {
+     *           valueKind := reflect.TypeOf(mapValue).Kind()
+     *           if valueKind == reflect.Slice || valueKind == reflect.Array {
+     *               val := reflect.ValueOf(mapValue)
+     *               if val.Len() > 0 { mapValue = val.Index(0).Interface() }   // ← **取第一个**
+     *           }
+     *       }
+     *   }
+     * </pre>
+     * ⇒ {@code ?page=1&page=2} ⇒ Go 得 {@code page=1}（HTTP 200），<b>不是</b> 400。
+     *
+     * <h2>⚠️ 顺序不能反：先丢空值，再取第一个</h2>
+     * <p>Go 的两步是<b>先过滤后取首</b>，所以 {@code ?page=&page=2} 落进 map 的是
+     * {@code ["2"]}（空的 {@code ""} 在第 ① 步就被 {@code continue} 掉了）⇒ Go 得 {@code 2}。
+     * <p>若先取第一个再过滤，{@code ?page=&page=2} 会得到 {@code null}（走默认值）——
+     * 与 Go 不同。
+     *
+     * <h2>⚠️ 为什么 Spring 的默认转换不满足</h2>
+     * <p>Spring 的 {@code @RequestParam String} 拿到多值时会走转换服务把它拼成一个字符串
+     * （形如 {@code "1,2"}）⇒ 本域的 {@link #int32} 会 {@code parseInt("1,2")} 抛 ⇒ <b>400</b>。
+     * <p>⇒ controller 的这些参数必须声明成 {@code String[]}，再由本方法按 Go 规则取首。
+     *
+     * @param values Spring 解析出的多值数组（可能为 {@code null} = 参数缺席）
+     * @return 第一个<b>非空</b>值；没有非空值时返回 {@code null}（= Go 侧该 key 不进 map）
+     */
+    public static String first(String[] values) {
+        if (values == null) {
+            return null;
+        }
+        for (String v : values) {
+            // Go: util.go:44-45 —— len(v) == 0 的值先被丢掉
+            if (v != null && !v.isEmpty()) {
+                return v;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Go {@code convertTypeFromString} 的 {@code reflect.Bool} 分支。
      *
      * @param rawValue Spring {@code @RequestParam} 拿到的原始值（可能为 {@code null} 或 {@code ""}）

@@ -10,6 +10,7 @@ import com.rag.article.article.api.dto.ListArticlesResp;
 import com.rag.article.article.api.dto.UpdateArticleReq;
 import com.rag.article.article.api.dto.UpdateArticleResp;
 import com.rag.article.article.api.dto.UploadImageResp;
+import com.rag.article.article.api.form.GoFormValues;
 import com.rag.article.article.api.service.ArticleApiSupport;
 import com.rag.article.article.api.service.ArticleCreateService;
 import com.rag.article.article.api.service.ArticleDeleteService;
@@ -174,12 +175,13 @@ public class ArticleController {
     /**
      * Go {@code GetArticleHandler}（公开读详情）。
      *
-     * @param incrView <b>原始</b> query 值，交给 {@code GoFormValues.bool} 按 Go 规则解释
+     * @param incrView <b>原始</b> query 值（多值数组），交给 {@link GoFormValues#first(String[])}
+     *                 按 Go 规则取首，再由 {@code GoFormValues.bool} 按 Go 真值表解释
      */
     @GetMapping("/article/{id}")
     public GetArticleResp getArticle(@PathVariable("id") String id,
-                                     @RequestParam(name = "incr_view", required = false) String incrView) {
-        return getService.getArticle(id, incrView);
+                                     @RequestParam(name = "incr_view", required = false) String[] incrView) {
+        return getService.getArticle(id, GoFormValues.first(incrView));
     }
 
     /**
@@ -189,20 +191,28 @@ public class ArticleController {
      * 因为 Go 的默认值与真值表规则（空值丢弃 / {@code 1,0} / base-10）由那一处统一处理。
      * 这里<b>不</b>用 {@code @RequestParam(defaultValue = "1")} ——
      * 那会让「默认值」这件事散到 4 个注解上，且 {@code desc} 的 {@code "1"} 就变成 400。
+     *
+     * <h2>⚠️ 为什么声明成 {@code String[]} 而不是 {@code String}</h2>
+     * Go 侧同名 key 出现多次时<b>取第一个</b>（{@code unmarshaler.go:835-846}），
+     * 而 Spring 的 {@code @RequestParam String} 会把多值<b>拼成一个字符串</b>
+     * （形如 {@code "1,2"}）⇒ 本域的 {@code GoFormValues.int32} 解析失败 ⇒ <b>400</b>。
+     * <p>⇒ 声明成数组，再用 {@link GoFormValues#first(String[])} 按 Go 规则取首。
      */
     @GetMapping("/articles")
     public ListArticlesResp listArticles(
-            @RequestParam(name = "manual_type_tag", required = false) String manualTypeTag,
-            @RequestParam(name = "secondary_tag", required = false) String secondaryTag,
-            @RequestParam(name = "related_game_id", required = false) String relatedGameId,
-            @RequestParam(name = "author_id", required = false) String authorId,
-            @RequestParam(name = "page", required = false) String page,
-            @RequestParam(name = "page_size", required = false) String pageSize,
-            @RequestParam(name = "sort_by", required = false) String sortBy,
-            @RequestParam(name = "desc", required = false) String desc) {
+            @RequestParam(name = "manual_type_tag", required = false) String[] manualTypeTag,
+            @RequestParam(name = "secondary_tag", required = false) String[] secondaryTag,
+            @RequestParam(name = "related_game_id", required = false) String[] relatedGameId,
+            @RequestParam(name = "author_id", required = false) String[] authorId,
+            @RequestParam(name = "page", required = false) String[] page,
+            @RequestParam(name = "page_size", required = false) String[] pageSize,
+            @RequestParam(name = "sort_by", required = false) String[] sortBy,
+            @RequestParam(name = "desc", required = false) String[] desc) {
         return listService.listArticles(new ListArticlesReq(
-                manualTypeTag, secondaryTag, relatedGameId, authorId,
-                page, pageSize, sortBy, desc));
+                GoFormValues.first(manualTypeTag), GoFormValues.first(secondaryTag),
+                GoFormValues.first(relatedGameId), GoFormValues.first(authorId),
+                GoFormValues.first(page), GoFormValues.first(pageSize),
+                GoFormValues.first(sortBy), GoFormValues.first(desc)));
     }
 
     // ============== 第三段：公开 multipart ==============

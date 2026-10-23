@@ -806,3 +806,234 @@ Risk        HIGH
 ⇒ 按 AGENTS.md §6.3 状态表纪律：**未标注证据强度的断言一律按 `UNKNOWN` 处理**；
 本台账 §4 矩阵中所有 EQUIVALENT 行的证据强度均为「静态源码」，
 **它们是「读 Go 读得对」的证明，不是「双侧行为一致」的证明**。
+---
+
+<!-- @fix 2026-10-24 · 由 align/article 工作树产出 · 基线 commit 8422116 -->
+
+## 2026-10-24 修复轮：4 条未修漂移已修 + 1 条新发现，全部经**变异验证**
+
+> 本节是**增量追加**，上文 §0~§10 任何结论**一字未删**（含 §7.1 DRIFT-001 的原始描述）。
+> **核对日期 = 2026-10-24。** 基线 commit `8422116`（`align/article` 工作树，从 `do-my-own-gh` 切出）。
+>
+> **证据强度四档**（比上一轮强一档）：
+> **真 MVC 管线（MockMvc）+ Mockito**（本轮）· 纯 Mockito · 静态源码（Go 侧逐行读到消费点）· 双侧活体对拍（**仍 0 条**）。
+
+### 0. 本轮做了什么
+
+| # | 条目 | 上一轮状态 | 本轮状态 | 守门网 | 变异验证 |
+|---|---|---|---|---|---|
+| **F-1** | `DRIFT-ARTICLE-API-001` 上传失败恒 400 | ❌ 未修 | ✅ **已修** | `ArticleApiMvcPipelineTest` × 3 | ✅ **3/3 转红** |
+| **F-1b** | 🆕 **F-1 顺带发现**：熔断打开时 Go 400 / RAG **500** | — | ✅ **已修** | 同上 × 1 | ✅ 转红 |
+| **F-2** | `DRIFT-ARTICLE-API-002` `user-rpc` 超时 2s vs 70s | ❌ 未修 | ✅ **已修** | `UserRpcClientDeadlineTest` × 5 | ✅ **2/2 转红** |
+| **F-3** | `DRIFT-ARTICLE-API-003` 重复 query key → 400 | ❌ 未修 | ✅ **已修** | `ArticleApiMvcPipelineTest` × 3 | ✅ **2/2 转红** |
+| **F-4** | `DRIFT-ARTICLE-API-004` 锁死错误答案的绿测试 | ❌ 未改 | ✅ **已改断言** | 随 F-1 | — |
+
+⇒ `mvn -o -pl service/article/article-api test` ⇒ **60 tests / 0 failures / 0 errors / 0 skipped**（原 50）。
+⚠️ 按 §3.3：**「60 条全绿」本身不是证据**；本轮的证据是**下面那 7 条变异全部转红**。
+
+---
+
+### F-1 —— `DRIFT-ARTICLE-API-001` 已修：上传失败按 gRPC 码映射状态码
+
+**Go 侧证据（读到消费点，非推断）**
+
+```
+go-zero v1.10.2 · rest/httpx/responses.go:142-159
+  if handler == nil {                                  // ← article-api 没有注册 error handler
+      if len(fns) > 0 { … }
+      else if errcode.IsGrpcError(err) {               // ① 先问「是不是 gRPC 错误」
+          http.Error(w, err.Error(), errcode.CodeFromGrpcError(err))   // ② 按 gRPC 码映射
+      } else {
+          http.Error(w, err.Error(), http.StatusBadRequest)            // ③ 非 gRPC ⇒ 恒 400
+      }
+  }
+```
+
+判据链（逐环实测）：
+- `rest/internal/errcode/grpc.go:45-55` `IsGrpcError` ⇒ 判 `err` 是否实现 `GRPCStatus() *status.Status`；
+- `rpc/articleservice/article_service.go:76-79` `UploadFile` **原样返回**该错误、**不包装**；
+- `zrpc/internal/clientinterceptors/` 的 `duration/prometheus/tracing` 三个拦截器**都是 `return err`**，不包装 ⇒ ② 命中；
+- 映射表 `rest/internal/errcode/grpc.go:12-42`：`Unavailable⇒503`、`Internal⇒500`、`DeadlineExceeded⇒504`、
+  `ResourceExhausted⇒429`、`NotFound⇒404`、未知码⇒**500**（Go 的 switch **没有 default**，落 `:41`）。
+
+**修法**：`GoStyleGrpcStatusMapper`（新增，逐条复刻映射表）+ `GoStyleHttpErrorException`（新增，携带 HTTP 状态码）
++ `GlobalExceptionHandler#handleGoStyleHttpError`（新增，走 `GoStylePlainTextErrors.text(status, msg)`）。
+`ArticleUploadService` 的 `catch (StatusRuntimeException)` 改为抛 `GoStyleHttpErrorException`。
+
+**🔴 body 文案也必须逐字对齐（wire 层可见，上一轮没查到）**
+
+Go 写的是 `err.Error()`，而 grpc-go 的 `*status.Error.Error()`（`internal/status/status.go:211-212`）
+转发到 `Status.String()`（`:201-203`）：
+
+```go
+fmt.Sprintf("rpc error: code = %s desc = %s", s.Code(), s.Message())
+```
+
+⇒ Go 的 body 形如 `rpc error: code = Unavailable desc = minio down`。
+⚠️ Java 的 `StatusRuntimeException.getMessage()` 是 `UNAVAILABLE: minio down` ⇒ **字面不同**。
+且 Go 的 `codes.Code.String()`（`codes/code_string.go:31+`）用的是 **CamelCase**（`Canceled` / `DeadlineExceeded`），
+Java 的 `Status.Code.name()` 是 **SCREAMING_SNAKE** ⇒ 照抄 `name()` 仍不一致。
+⇒ 新增 `GoStyleGrpcStatusMapper#goCodeName` 显式维护 Go 的规范名表。
+
+**守门网**：`ArticleApiMvcPipelineTest` 3 条
+（`codes.Internal⇒500` + body 逐字断言、`codes.Unavailable⇒503`、非 gRPC⇒400）。
+
+---
+
+### F-1b —— 🆕 顺带发现：**熔断打开**时 Go 是 400、RAG 却是 500
+
+上一轮只查到「gRPC 错误 → 按码映射」，**漏了非 gRPC 错误这一侧**。实测：
+
+- Go：熔断打开时 `breaker.DoWithAcceptableCtx` 返回
+  `breaker.ErrServiceUnavailable = errors.New("circuit breaker is open")`（`core/breaker/breaker.go:19`）
+  —— **普通 error**，不实现 `GRPCStatus()` ⇒ `IsGrpcError` 为**假** ⇒ 走 ③ 分支 ⇒ **400**。
+- RAG：`GoStyleCircuitOpenException`（`service/common`，**刻意**不是 `StatusRuntimeException`）
+  ⇒ 原先无人接住 ⇒ 一路落到 `GlobalExceptionHandler#handleAny` ⇒ **裸 500**。
+
+⇒ 修法：`ArticleUploadService` 增接 `catch (GoStyleCircuitOpenException)` ⇒ 400。
+
+> ⚠️ **注意 RAG 侧的熔断拦截器是真装上了的**：
+> `GoStyleGrpcClientBreakerInterceptor` 同时带 `@Component` + `@GrpcGlobalClientInterceptor`
+> （devh 的 `AnnotationGlobalClientInterceptorConfigurer` **只认这个注解**，不认「是不是 ClientInterceptor」）
+> ⇒ 该路径**可达**，不是理论分支。
+
+**守门网**：`uploadNonGrpcFailureIs400`（注入 `GoStyleCircuitOpenException` ⇒ 断言 400 + body 前缀）。
+
+---
+
+### F-2 —— `DRIFT-ARTICLE-API-002` 已修：`user-rpc` 单次调用预算 2s
+
+**Go 侧证据（三段，缺一不可）**
+
+```
+① 声明点：go-zero v1.10.2 · zrpc/config.go:31
+     Timeout int64 `json:",default=2000"`
+② yaml：service/article/api/etc/article-api.yaml:20-24 —— UserRpcConf **没有** Timeout 字段
+     ⇒ 走 ① 的 tag 默认 = 2000ms
+     （⚠️ 同一份 yaml 里 ArticleRpcConf.Timeout 是**显式** 70000 ⇒ 两个 client 差 35 倍）
+③ 消费点：zrpc/client.go:70-71 → zrpc/internal/client.go:83（buildUnaryInterceptors）
+        → zrpc/internal/clientinterceptors/timeoutinterceptor.go:25
+     ctx, cancel := context.WithTimeout(ctx, t)
+```
+
+**🔴 修法上最关键的一点：不能链式 `withDeadlineAfter`**
+
+Go 的 `context.WithTimeout(ctx, 2s)` 语义是**取父子 deadline 中较早的**。
+而 grpc-java 的 `io.grpc.CallOptions.withDeadline`（**grpc-api 1.66.0 字节码实测**）是：
+
+```
+builder.deadline = deadline;        // ← **直接覆盖**，不是取最小
+```
+
+⇒ `applyTo(stub).withDeadlineAfter(2, SECONDS)` 会把 HTTP 剩余预算**顶掉**
+（剩 0.5s 时反而给 2s）⇒ 请求可能**超出 HTTP 总预算**。
+
+⇒ 修法：`UserRpcClient#userRpc()` **显式算 min**：
+
+```java
+long remaining = GoStyleRequestDeadline.remainingMillis();   // 无预算 ⇒ -1
+long effective = remaining < 0L ? 2000L : Math.min(remaining, 2000L);
+return userServiceBlockingStub.withDeadlineAfter(effective, TimeUnit.MILLISECONDS);
+```
+
+**守门网**：`UserRpcClientDeadlineTest` 5 条
+（无预算⇒2s / 预算 10s⇒仍 2s / 预算 500ms⇒500ms / 预算耗尽⇒立即到期 / 常量防漂移）。
+
+---
+
+### F-3 —— `DRIFT-ARTICLE-API-003` 已修：重复 query key 取第一个
+
+**Go 侧证据（两段，顺序不能反）**
+
+```
+① rest/httpx/util.go:35-62 —— 同名 key 的多值收成 []string；**空值先被整个丢掉**
+     for _, v := range values { if len(v) == 0 { continue }; filtered = append(filtered, v) }
+     if len(filtered) > 0 { params[name] = filtered }        // ← 存的是**切片**
+② core/mapping/unmarshaler.go:835-846（消费点）—— 目标不是 slice 时取 Index(0)
+     if u.opts.fromArray { if fieldKind != Slice && != Array { mapValue = val.Index(0).Interface() } }
+```
+
+⚠️ **顺序**：先过滤空值、再取首个 ⇒ `?page=&page=2` 落进 map 的是 `["2"]` ⇒ Go 得 **2**。
+若先取首个再过滤，会得到默认值 1 ⇒ 与 Go 不同。
+
+**RAG 侧原状**：`@RequestParam String` ⇒ Spring 把多值**拼成一个字符串**（`"1,2"`）
+⇒ `GoFormValues.int32("1,2")` ⇒ `parseInt` 抛 ⇒ **400**。
+
+**修法**：`GoFormValues.first(String[])`（新增）+ controller 的 9 个 query 参数改成 `String[]` 再取首。
+⚠️ 这条**不能**只改 `GoFormValues` —— Spring 的拼接发生在**参数解析阶段**，
+必须让 controller 拿到**原始数组**才拿得到「第一个」。
+
+**守门网**：`ArticleApiMvcPipelineTest` 3 条
+（`?page=1&page=2⇒page=1` / `?incr_view=1&incr_view=0⇒true` / `?page=&page=2⇒page=2`）。
+
+---
+
+### F-4 —— `DRIFT-ARTICLE-API-004` 已改：那条**锁死错误答案**的绿测试
+
+原用例 `uploadRpcFailureIsBareTextPlain400` 的 `@DisplayName` 写
+「upload 的 RPC 失败 ⇒ **400 text/plain**（Go 无 error handler）」——
+它把 **RAG 的行为**写成了 **Go 的事实**（AGENTS.md §3.3.2 点名的形态）。
+
+⇒ 本轮**先改断言**（按 §3.3「先改/删错误断言，再改实现」的顺序），
+拆成 3 条按 gRPC 码分别断言的用例，再改实现。
+
+> ⚠️ **上一轮的 P-1 坑档（`docs/Pitfalls/article/api.md`）早就把这条写清楚了** ——
+> 也就是说 **2026-10-23 那轮「记了坑、没修漂移」**。
+> ⇒ **坑档 ≠ 修复**；本条是本轮补上的最后一环。
+
+---
+
+### 变异验证（§3.3 硬要求：证明新回归网**非假绿**）
+
+方法：把修复**改回去**（或改成等价错误实现），重跑对应用例，看是否转红。
+
+| # | 变异内容 | 结果 |
+|---|---|---|
+| 1 | `GoStyleGrpcStatusMapper.httpStatusOf` 恒返回 400 | ✅ **转红**（`expected:<500> but was:<400>`） |
+| 2 | `goErrorMessage` 改用 Java 的 `"X: Y"` 格式 | ✅ **转红** |
+| 3 | `ArticleUploadService` 不再接住 `GoStyleCircuitOpenException` | ✅ **转红**（`expected:<400> but was:<500>`） |
+| 4 | `UserRpcClient` 去掉 `min`（恒 2s）· 预算 500ms 场景 | ✅ **转红**（实际 1999ms） |
+| 5 | `UserRpcClient` 去掉 `min`（恒 2s）· 预算耗尽场景 | ✅ **转红**（实际 1999ms） |
+| 6 | `GoFormValues.first` 不丢空值（先取首再过滤） | ✅ **转红**（`expected:<2> but was:<1>`） |
+| 7 | `GoFormValues.first` 改成取**最后一个** | ✅ **转红**（`expected:<1> but was:<2>`） |
+
+⇒ **7/7 全部转红** ⇒ 本轮新增的回归网**非假绿**。
+
+⚠️ **一条方法论教训**：首轮变异脚本用 `sed` 做多行替换，BSD sed 不支持 `\n` ⇒
+把文件改坏导致**编译失败**，脚本把「没跑到测试」误判成「仍全绿」。
+⇒ **变异验证脚本必须三态判定**（转红 / 仍全绿 / **变异无效导致编译失败**），
+否则会产出一条**假的「假绿」结论**。
+
+---
+
+### 本轮**未**关掉的（保持 OPEN，不得当已修）
+
+| 条目 | 状态 | 说明 |
+|---|---|---|
+| `DRIFT-ARTICLE-API-005` query 参数总数上限 2048 | 🔴 OPEN（LOW，实际不可达） | 本轮未动 |
+| `DRIFT-ARTICLE-API-006` 8–10 MiB body 文案 | 🔴 OPEN（LOW） | 本轮未动 |
+| `DRIFT-ARTICLE-API-007` `ext_info` key 排序（非 BMP） | 🔴 OPEN（极低） | 本轮未动 |
+| `UNRESOLVED-001` / `-005` 真实 Tomcat 下的 400/401/404 响应头 | 🔴 OPEN | MockMvc 测不到，**必须真容器** |
+| `UNRESOLVED-003` Filter 链实际 `@Order` 全序 | 🔴 OPEN | 同为容器级 |
+| `UNRESOLVED-004` `@GrpcClient` 真装配 + Nacos 寻址 | 🔴 OPEN | 本轮 60 条测试仍**全部**用 `@MockitoBean` 把 client 换掉了 —— **恰好把要验证的那一段替换掉了** |
+| `UNRESOLVED-006` 共享层 `com.rag.common` 真被扫到 | 🔴 OPEN | 同上 |
+| `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | 本轮**已在 rpc 侧**核对 `public_only` / `status` 的消费方式（见 [`rpc.md`](./rpc.md) 与 [`proto.md`](./proto.md)） |
+| `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | 仍查无对应台账 |
+| `UNRESOLVED-009` `UpdateArticleReq.java:8` 的 Go 行号引用有误 | 🔴 OPEN | 本轮**只读不写**该文件；建议下一轮顺手改 |
+
+### 判定变化
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `DRIFT-001` 上传失败状态码 | ❌ SEMANTIC MISMATCH（HIGH） | ✅ 已修 + 变异验证 |
+| `DRIFT-002` `user-rpc` 超时作用域 | ❌ SEMANTIC MISMATCH（MEDIUM-HIGH） | ✅ 已修 + 变异验证 |
+| `DRIFT-003` 重复 query key | ❌ SEMANTIC MISMATCH（MEDIUM） | ✅ 已修 + 变异验证 |
+| `DRIFT-004` 锁死错误答案的绿测试 | 🔴 OBSERVABLE DIFFERENCE | ✅ 已改断言 |
+| **F-1b** 熔断打开时的状态码 | ❌ **未记录**（RAG 500 vs Go 400） | ✅ 已修 + 变异验证 |
+| 其余 005~007 / UNRESOLVED-* | OPEN | **OPEN** |
+| **组件判定** | `SEMANTICALLY NOT EQUIVALENT` | **`SEMANTICALLY NOT EQUIVALENT`（不变）** |
+
+⚠️ **判定不变的理由**：本轮只关掉 4 条**已记录**漂移 + 1 条**新发现**；
+`DRIFT-005~007` 与 8 条 `UNRESOLVED-*` 仍在，且**证据强度上限仍是 MockMvc/Mockito**
+（**无双侧活体对拍、无真实 Tomcat、无装配层测试**）⇒
+本轮全部 ✅ 一律读作「**在 MockMvc 级证据下一致**」，不是「已闭环」。

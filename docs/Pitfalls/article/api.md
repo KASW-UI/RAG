@@ -418,3 +418,95 @@ Jackson 的 coercion 要作用在**声明的目标类型**上，形参是 `Objec
 1. 补强前先跑一次「真源逐字段扫描」，确认该域**确实没有**触发共享豁免的前提。
 2. 补强写成域内 `XxxGoStyleCoercion`，共享层**一行不动**。
 3. 每条 coercion 规则配一条「该形状必须被拒」的用例 —— 尤其检查**形参是 `Object` 的字段**。
+---
+
+## P-13 grpc-java 的 `withDeadline` 是**覆盖**，不是「取最小」
+
+> ⚠️ **本条对所有域适用**（凡同时用「请求级 deadline」+「per-client 超时上限」的地方）。
+> 合并时建议搬到 `docs/Pitfalls/_cross/`。
+
+**现象**
+给 `user-rpc` 的 stub 补 Go 侧的 per-client 上限（2s）时，最自然的写法是：
+
+```java
+GoStyleRequestDeadline.applyTo(stub).withDeadlineAfter(2, TimeUnit.SECONDS)
+```
+
+⇒ 看起来「HTTP 预算与 2s 上限都设上了」。但实测发现：**HTTP 剩余预算被顶掉了**。
+HTTP 只剩 0.5s 时，这个 stub 拿到的是 **2s** ⇒ 单次调用可能**超出 HTTP 总预算**。
+
+**根因（框架机制）**
+
+Go 侧（`zrpc/internal/clientinterceptors/timeoutinterceptor.go:25`）：
+
+```go
+ctx, cancel := context.WithTimeout(ctx, t)      // ← 取父子 deadline 中**较早**的
+```
+
+Java 侧（**grpc-api 1.66.0 字节码实测**，`io.grpc.CallOptions`）：
+
+```
+withDeadlineAfter(duration, unit) → Deadline.after(...) → withDeadline(deadline)
+withDeadline(deadline)            → builder.deadline = deadline;   // ← **直接覆盖**
+```
+
+⇒ Go 的 `context.WithTimeout` 是「**父子取小**」，
+grpc-java 的 `withDeadlineAfter` 是「**新的覆盖旧的**」。**语义不同，且没有任何告警。**
+
+**为什么测试抓不到**
+「不顶掉预算」是一个**否定式**断言：
+「deadline ≤ HTTP 剩余预算」。若测试只断言「deadline ≈ 2s」，
+覆盖行为与取小行为**都满足** ⇒ 假绿。
+⇒ 必须**显式构造「HTTP 预算 < client 上限」的场景**才能测出来。
+
+**元教训**
+> **「设置一个上限」在不同框架里可能是完全不同的两件事。**
+> Go 的 `context.WithTimeout` = 取小；grpc-java 的 `withDeadlineAfter` = 覆盖。
+> ⇒ 迁移时**不能假设语义等价**，必须回到两边各自的**消费点**确认。
+
+**下次怎么防**
+1. 凡是「请求级 deadline」与「per-client 上限」**并存**，一律**显式算 `min`**，不依赖框架合并。
+2. 回归网必须包含**「HTTP 预算更短」**与**「预算已耗尽」**两个场景 ——
+   只测「上限生效」测不出覆盖。
+3. 断言用**相对量**（`remaining ≤ min(预算, 上限)`），不要用绝对值。
+
+---
+
+## P-14 Go 的 `codes.Code.String()` 是 CamelCase，Java 的 `Status.Code.name()` 是 SCREAMING_SNAKE
+
+**现象**
+把 gRPC 错误映射成 HTTP 状态码后，还要复刻 Go 的**错误文案**。
+Go 的 `http.Error(w, err.Error(), …)` 写的是 `err.Error()`，
+而 grpc-go 的 `*status.Error.Error()` 转发到 `Status.String()`：
+
+```go
+fmt.Sprintf("rpc error: code = %s desc = %s", s.Code(), s.Message())
+```
+
+⇒ Go 的 body 形如 `rpc error: code = Unavailable desc = minio down`。
+
+Java 侧最自然的写法 `code.name()` 给的是 **`UNAVAILABLE`** ⇒ **wire 上字面不同**。
+再叠加 `StatusRuntimeException.getMessage()` 给的是 `UNAVAILABLE: minio down`（**另一种**形状），
+一共三种可能写法，**没有一种是 Go 的**。
+
+**根因（语言映射）**
+两边的**枚举命名约定**不同（Go 的 `codes` 用 CamelCase 的 `String()`，Java 用 SCREAMING_SNAKE 的 `name()`），
+且**异常类的 `getMessage()` 约定**也不同（grpc-go 把 code+desc 编进 `Error()`，
+grpc-java 把它编进 `Status.toString()`，`StatusRuntimeException.getMessage()` 又另走一路）。
+
+**为什么测试抓不到**
+状态码（400/503）对了就容易收工 —— 但 **body 是另一层**。
+若测试只断言状态码，body 的差异**完全不可见**。
+⇒ 而且 body 的差异**只有在客户端解析这段文案时**才显形（本域的
+`extractArticleIDFromStatusMessage` 就是从 status 文案里抠 article_id 的那类协议）。
+
+**元教训**
+> **「错误语义」至少有三层：状态码 · 错误码 · 文案。**
+> 只对齐第一层就收工，是这类漂移最常见的形态 ——
+> 状态码对了，客户端仍可能因为文案不同而解析失败。
+
+**下次怎么防**
+1. 断言错误响应时，**状态码与 body 逐字**都要断（body 断言用 `startsWith`，不要只断 `contains`）。
+2. 需要复刻 Go 文案时，**显式维护一张规范名映射表**，不要用 `name()` / `toString()` 顶替。
+3. 文案差异按 §3.1 归类：若只是**文案**不同而码与状态码一致，可记为
+   `IMPLEMENTATION DIFFERENCE`；若文案被下游协议依赖（如抠 ID），按 `SEMANTIC MISMATCH` 记。

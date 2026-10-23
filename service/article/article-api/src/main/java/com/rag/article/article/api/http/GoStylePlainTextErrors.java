@@ -65,7 +65,13 @@ public final class GoStylePlainTextErrors {
         return text(HttpStatus.BAD_REQUEST, message);
     }
 
-    /** 任意状态的 {@code http.Error} 形状（当前只有 400 在用）。 */
+    /**
+     * 任意状态的 {@code http.Error} 形状。
+     *
+     * <p>⚠️ <b>不止 400 在用</b>：Go {@code rest/httpx/responses.go:150-153} 的
+     * {@code IsGrpcError} 分支会按 gRPC 码映射出 500 / 503 / 504 / 429 / 404 等，
+     * 由 {@link GoStyleHttpErrorException} 携带状态码进来。
+     */
     public static ResponseEntity<byte[]> text(HttpStatus status, String message) {
         byte[] body = ((message == null ? "" : message) + "\n").getBytes(StandardCharsets.UTF_8);
         return ResponseEntity.status(status)

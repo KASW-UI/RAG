@@ -2,6 +2,7 @@ package com.rag.article.article.api.advice;
 
 import com.rag.article.article.api.http.GoStyleBadRequestException;
 import com.rag.article.article.api.service.ArticleCreateService;
+import com.rag.article.article.api.http.GoStyleHttpErrorException;
 import com.rag.article.article.api.http.GoStylePlainTextErrors;
 import com.rag.common.exception.AuthenticationException;
 import com.rag.common.exception.BusinessException;
@@ -182,6 +183,30 @@ public class GlobalExceptionHandler {
     public ResponseEntity<byte[]> handleGoStyleBadRequest(GoStyleBadRequestException e) {
         log.warn("go-style bad request : {}", e.getMessage());
         return GoStylePlainTextErrors.badRequest(e.getMessage());
+    }
+
+    /**
+     * Go {@code httpx.ErrorCtx} 落在 <b>IsGrpcError 分支</b>时的落点
+     * —— 状态码由 gRPC 码映射而来，<b>不是</b>恒 400。
+     *
+     * <pre>
+     * // go-zero v1.10.2 · rest/httpx/responses.go:150-153
+     * } else if errcode.IsGrpcError(err) {
+     *     http.Error(w, err.Error(), errcode.CodeFromGrpcError(err))
+     * }
+     * </pre>
+     *
+     * <p>⚠️ <b>本方法与 {@link #handleGoStyleBadRequest} 的先后无关</b> ——
+     * Spring 按「最具体的 handler」匹配，两者是不同类型，不存在歧义。
+     *
+     * <p>⚠️ 映射表见 {@link com.rag.article.article.api.http.GoStyleGrpcStatusMapper}：
+     * {@code Unavailable⇒503}、{@code Internal⇒500}、{@code DeadlineExceeded⇒504}、
+     * {@code ResourceExhausted⇒429}、{@code NotFound⇒404}、未知码⇒500。
+     */
+    @ExceptionHandler(GoStyleHttpErrorException.class)
+    public ResponseEntity<byte[]> handleGoStyleHttpError(GoStyleHttpErrorException e) {
+        log.warn("go-style http error status={} : {}", e.getStatus(), e.getMessage());
+        return GoStylePlainTextErrors.text(e.getStatus(), e.getMessage());
     }
 
     /**
