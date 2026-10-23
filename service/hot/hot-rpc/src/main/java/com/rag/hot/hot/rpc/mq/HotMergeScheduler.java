@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import com.rag.hot.hot.rpc.config.HotRpcProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.SessionCallback;
@@ -118,7 +119,7 @@ public class HotMergeScheduler {
 
     public HotMergeScheduler(StringRedisTemplate redis,
                              HotRpcProperties props,
-                             TaskExecutor taskExecutor) {
+                             @Qualifier("applicationTaskExecutor") TaskExecutor taskExecutor) {
         this.redis = redis;
         this.props = props;
         this.taskExecutor = taskExecutor;

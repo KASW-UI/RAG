@@ -341,6 +341,8 @@ public class AdminDomainService {
             // 改为直接写 SQL 片段 + 显式 CAST，参数按 String 绑定再转 jsonb。
             wrapper.setSql("extra_info = CAST({0} AS jsonb)", toJson(extraInfo));
         }
+        // DRIFT-ADMIN-RPC-003：对齐 GORM autoUpdateTime（见本类末尾 updateTimeAdvance 注释块）
+        wrapper.setSql("update_time = CURRENT_TIMESTAMP");
 
         try {
             adminMapper.update(null, wrapper);
@@ -575,7 +577,8 @@ public class AdminDomainService {
         try {
             LambdaUpdateWrapper<UserEntity> wrapper = new LambdaUpdateWrapper<>();
             wrapper.eq(UserEntity::getUid, uid)
-                    .set(UserEntity::getStatus, 1L);
+                    .set(UserEntity::getStatus, 1L)
+                    .setSql("update_time = CURRENT_TIMESTAMP");
             rows = userMapper.update(null, wrapper);
         } catch (StatusRuntimeException e) {
             // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
@@ -607,7 +610,8 @@ public class AdminDomainService {
         try {
             LambdaUpdateWrapper<UserEntity> wrapper = new LambdaUpdateWrapper<>();
             wrapper.eq(UserEntity::getUid, uid)
-                    .set(UserEntity::getStatus, 0L);
+                    .set(UserEntity::getStatus, 0L)
+                    .setSql("update_time = CURRENT_TIMESTAMP");
             rows = userMapper.update(null, wrapper);
         } catch (StatusRuntimeException e) {
             // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
@@ -879,6 +883,8 @@ public class AdminDomainService {
             // 同 updateSelf：wrapper.set() 走 Object → 被当成 hstore，必须用 setSql + CAST
             wrapper.setSql("extra_info = CAST({0} AS jsonb)", toJson(extraInfo));
         }
+        // DRIFT-ADMIN-RPC-003：对齐 GORM autoUpdateTime
+        wrapper.setSql("update_time = CURRENT_TIMESTAMP");
 
         // W5 update
         try {
@@ -992,7 +998,9 @@ public class AdminDomainService {
         // W4 update（不检查 RowsAffected，1:1 跟随 Go 端语义）
         try {
             LambdaUpdateWrapper<UserEntity> wrapper = new LambdaUpdateWrapper<>();
-            wrapper.eq(UserEntity::getUid, uid).set(UserEntity::getPassword, hash);
+            wrapper.eq(UserEntity::getUid, uid).set(UserEntity::getPassword, hash)
+                    // DRIFT-ADMIN-RPC-003：对齐 GORM autoUpdateTime
+                    .setSql("update_time = CURRENT_TIMESTAMP");
             userMapper.update(null, wrapper);
         } catch (StatusRuntimeException e) {
             // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
@@ -1079,4 +1087,56 @@ public class AdminDomainService {
             throw Status.INTERNAL.withDescription("JSON序列化失败").asRuntimeException();
         }
     }
+
+    // ==================================================================
+    // DRIFT-ADMIN-RPC-003：update_time 自动推进 —— 本类所有 UPDATE 收口点的统一说明
+    // ==================================================================
+
+    /*
+     * 🔴 <b>修掉的是什么</b>：{@code UserEntity.updateTime} / {@code AdminEntity.updateTime}
+     * 标的是 {@code updateStrategy = FieldStrategy.NEVER}（见 {@code domain/UserEntity.java:71}），
+     * 本意是<b>不让实体自动写这一列</b>。但 MyBatis-Plus <b>没有 GORM 的 autoUpdateTime</b> ——
+     * {@code NEVER} 的效果是「<b>永远不更新</b>」，而不是「<b>只在我没赋值时不更新</b>」。
+     * 结果：Go 侧每次 {@code Updates} 都推进的 update_time，在本类<b>全部 5 个 UPDATE 入口</b>
+     * 上<b>永远停在建行那一刻</b>。不报错、不告警、SQL 全部成功。
+     *
+     * <h3>Go 出处（声明点 + 消费点）</h3>
+     * <ul>
+     *   <li><b>声明点</b>：{@code service/user/admin/rpc/internal/model/data_model.go:12-13}
+     *       （Admin）与 {@code :27-28}、{@code :44-45}（User）：
+     *       {@code CreateTime time.Time `gorm:"column:create_time;autoCreateTime"`} /
+     *       {@code UpdateTime time.Time `gorm:"column:update_time;autoUpdateTime"`}；</li>
+     *   <li><b>消费点</b>：{@code gorm@v1.31.2/callbacks/update.go:243-259}
+     *       （{@code Updates(map)} / {@code Update(col, val)} 路径）与 {@code :279-281}
+     *       （{@code Updates(struct)} 路径）。</li>
+     * </ul>
+     *
+     * <h3>为什么用 setSql 而不是 MetaObjectHandler（与 article-rpc 的做法不同，这是对的）</h3>
+     * 本类 5 处写路径<b>全部</b>是 {@code update(null, wrapper)} —— <b>第一个参数是 null</b>。
+     * MyBatis-Plus 的 {@code MetaObjectHandler.updateFill} 需要一个<b>实体</b>去填字段，
+     * 实体为 null 时<b>根本不会被调用</b>（实测：无参 {@code update(null, wrapper)} 是 wrapper-only 路径）。
+     * ⇒ 在本类加 handler 是<b>无效功</b>，必须走 {@code setSql}。
+     * <br>article-rpc 那边 8 处写路径<b>全部</b>是 {@code updateById(entity)}，实体非 null ⇒ 反过来，
+     * 那里用 handler 才是对的。<b>两处修法不同不是不一致，是各自路径形态决定的</b>。
+     *
+     * <h3>放置位置的纪律</h3>
+     * user-rpc 的同款修法（{@code UserMapper#updateUserById}）把 setSql 放在
+     * 「无变更则不发 UPDATE」判定<b>之后</b>：{@code if (!any) return 0;}。
+     * 本类 5 处<b>没有</b>这个判定（admin 侧部分更新直接发 UPDATE），
+     * 所以 setSql 无条件跟在其后 —— 每一次真正发出的 UPDATE 都会推进时间戳。
+     *
+     * <p>⚠️ <b>已知残留分歧（未修，另立条目跟踪）</b>：Go 的
+     * {@code UpdateOneAdminByUid}/{@code UpdateOneUserByUid}（{@code internal/model/admin.go:58}/{@code :96}）
+     * 用 {@code Updates(struct)}，GORM 会<b>跳过零值字段</b>，全零时<b>根本不发出 UPDATE</b> ⇒
+     * update_time 不变。本类对应两处在<b>参数全空</b>时仍会发出一条只更新 update_time 的 UPDATE。
+     * 这与本次修复无关（修复前它们连 SET 子句都是空的），且补齐它需要先确定
+     * 「空更新该不该短路」的返回语义 ⇒ <b>不在本条目内猜</b>。
+     *
+     * <p>⚠️ <b>本段说明对应 5 处</b>：{@code updateSelf}（Admin 表）、
+     * {@code banUser}、{@code unBanUser}、{@code updateUser}、{@code resetUserPassword}。
+     * Go 侧对应：{@code internal/model/admin.go:104}（status）、
+     * {@code :112}（password）、{@code :58}/{@code :96}（结构体部分更新）。
+     * admin-rpc 侧 <b>零 {@code UpdateColumn}</b>（Go 侧同样实测为零）
+     * ⇒ 全部落在 GORM 会推进时间戳的那一侧，无需像 article-rpc 那样排除 SkipHooks 路径。
+     */
 }

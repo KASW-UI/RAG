@@ -34,6 +34,13 @@ Go 的死锁会变成「能正常跑」，两套实现行为不一致且**零告
 | 层 | 手段 | 结果 |
 |---|---|---|
 | **双侧对拍** | `go run` 跑真源 `sea-try-go/service/hot/heavykeeper`（探针放 `/tmp`，**不入 Go 仓**）+ Java 探针同输入 | **逐字节一致**（含中文键 UTF-8、weight=0 早退、TopK 顺序与计数） |
+
+> 🟥 **2026-10-23 复核：原结论修正为「在 width=100000 / 6 个 key 的无冲突口径下逐字节一致」，不可外推。**
+> 该轮探针（`/tmp/hkparity/go/main.go` 原文留存）刻意取 `Width: 100000`，注释自陈
+> 「width 取很大值避免桶冲突 ⇒ 不触发概率衰减分支」⇒ **它根本没有走到 `hash()` 影响结果的那条路**。
+> 本轮用生产口径 `Width:1000 / Depth:5 / TopK:100` 灌 400 个 key 重做双侧对拍，
+> **100 条榜单里 16 条与 Go 不同** ⇒ 见 **`DRIFT-HOTRPC-001`**。
+> ⇒ 「逐字节一致」是**一个输入区间**的结论，不是组件级结论（AGENTS.md §0「勿凭本表下结论」的第 N 次复现）。
 | **契约测试** | **46 条** / 8 个类（`HeavyKeeperTest` 5 / `HeavyKeeperUint32OverflowTest` 4 / `HotEventConsumerDropTest` 12 / `HotPartitionSketchRegistryDeadlockTest` 6 / `HotRevokeFlushOutsideLockTest` 1 / `HotRankingQueryServiceTest` 9 / `InteractionStubServiceTest` 4 / `HotServiceGrpcImplErrorMappingTest` 5） | 全绿 |
 | **变异验证** | **10/10 全部变红**：无符号比较（`maxCount` / 最小堆比较器 ×2）、指标 Inc 与 hkMap 查找次序、`UNKNOWN→INTERNAL`、去掉 TopK 归一、`scoreToCount→round`、指标名漂移、revoke 不移除分区、落盘挪回写锁内、坏消息不再返回 error | 守门有效，**非假绿** |
 | **编译** | `hot-proto` / `hot-common` / `hot-rpc` / `hot-api` 四模块 `install` | BUILD SUCCESS |
@@ -44,12 +51,30 @@ Go 的死锁会变成「能正常跑」，两套实现行为不一致且**零告
 ⚠️ **它是被「永不外抛」契约吞掉的**：消费者把异常降级成返回值 ⇒ 表现为**事件静默丢弃、热榜永不更新、启动零报错**。
 ⇒ 这是 §3.3 那条纪律的加强版：**「异常被降级处理」会同时遮蔽下游 bug**。
 
+> 🟥 **2026-10-23 复核：这条修复「只修了一半」，且修法本身是错的。**
+> 原结论把它当作已闭环的 bug；本轮双侧对拍证明：改成
+> `int remainder = (int)(h % width); return remainder < 0 ? remainder + width : remainder;`
+> （`HeavyKeeper.java:261-262`）**在 `h < 0`（FNV-64 最高位为 1，约 **49.5%** 的 key）时给出错误的列号**：
+> `(-a) mod w + w` 等于 `Euclidean(-a, w)`，而 Go 要的是 `Euclidean(2^64 - a, w)`，
+> 两者差 `2^64 mod w`（w=1000 时是 616，w=7 时是 2，**永不为 0**）。
+> ⇒ 不崩、不越界、**静默算错**，所以既有 46 条绿测试与 10/10 变异一个都抓不到。
+> ⇒ 详见 **`DRIFT-HOTRPC-001`**（含实测：Top-100 里 16 条与 Go 不同）。
+> ⚠️ 顺带修正：修复**不能**用 `Math.floorMod(h, width)` —— 本轮实测它与原写法结果**完全相同**（同样错），
+> 唯一正确的是 `Long.remainderUnsigned(h, (long) width)`（实测 0/51 列号不一致、Top-100 集合完全一致）。
+
 #### ⚠️ 四条边界（**不得越读成「hot 域已完成」**）
 
 1. **无真 Redis / 真 Kafka 的集成验证** —— 4 段 Lua、两个 TTL、`RENAME` 原子性、`EXISTS` 守卫、RoundRobin 分配、零重试 handler 目前**只有代码级证据**。§6.8 #5。
 2. **`/actuator/prometheus` 无暴露路径** —— 纯 gRPC 进程不起 web 容器（与 `user-rpc` 同款取舍 `management.server.port: -1`），而 Go 的 `prometheus.StartAgent` 在 19091/19092/19093 是**真起 HTTP** 的。L1 抓取端点暂缺。
 3. **gRPC 端口未经分配** —— `Infrastructure.md §3` 只给 hot 预占 18897(HTTP)。本次暂沿用 Go 的 `8083`（8081=admin-rpc / 8082=message-rpc / 8083 空闲），走 `HOT_RPC_GRPC_PORT` 环境变量。
 4. **`hot-api` 仍是 12 行空骨架**（13 个文件），`hot-rpc` 的事实**没有 HTTP 消费方**。
+
+> 🟥 **2026-10-23 复核：第 2 条的推理链有一环被实测推翻，结论本身仍然成立但理由要换。**
+> 「不起 web 容器」原本只是**推断**（pom 注释自陈「本服务无 WebApplicationType」）。
+> 本轮用 `mvn dependency:tree` 实测：classpath 上**没有** `jakarta.servlet`、没有 `tomcat-embed-core`、
+> `spring-boot-web-server:4.0.8` 只带 `spring-boot` + `spring-web` ⇒ `deduceWebApplicationType()` 必然得到 `NONE`
+> ⇒ 结论成立，且现在是**实测**而非推断。Actuator 侧 `ManagementServer*` 全部 `@ConditionalOnWebApplication`
+> ⇒ `management.server.port: -1` 在 NONE 下是**空配置**，不报错也不生效（不是「禁用了 management server」）。
 
 <!-- @move AGENTS.md L3901-L4024 · §6.8 hot-rpc 首次实现 L1~L3 -->
 ### 6.8 `service/hot/hot-rpc` 首次实现：Go `rpc` + `heavykeeper` → Spring Boot（2026-10-22 晚）
@@ -175,4 +200,624 @@ Go 形态：`Lock()` → 内部函数 `RLock()` ⇒ `sync.RWMutex` 不可重入 
 ⚠️ 同理 `long` 的无符号取模**不能**写 `h & 0xFFFFFFFFFFFFFFFFL`（该字面量位模式全 1，即 `-1L`，掩码无效）。
 
 ---
+
+<!-- ====================================================================================
+     ↓↓↓ 以下为 2026-10-23「Go ↔ Spring Boot 语义一致性验证」轮次新增（spec §31-b 结构）
+     ↑ 上方 L1–L203 是 2026-10-22 首次实现的历史记录，一条未删未改（仅就地加了复核批注）
+     ==================================================================================== -->
+
+# `hot-rpc` 语义对照台账
+
+> **范围**：Go `service/hot/rpc/`（+ 强依赖 `service/hot/heavykeeper/`） ↔ RAG `service/hot/hot-rpc/`。
+> **核对日期**：2026-10-23（第二轮验证；第一轮 = 2026-10-22 首次实现记录，见本文件上半部分）。
+> **方法论**：`.agents/specs/semantic-verification-prompt.md` 全部 40 章 + 本项目 8 条硬约束。
+> **只读边界**：本轮**未修改任何源码**，只改本文件与 `docs/Pitfalls/hot/rpc.md`。
+> 探针全部落在 `/tmp/hk-verify-20261023/`（Go 侧 `go.mod` 用 `replace` 指向真源，**Go 仓零改动**）。
+
+## 证据强度声明（本文件每条结论都带其中一个）
+
+| 标记 | 含义 | 本轮是否取得 |
+|---|---|---|
+| 【双侧活体对拍】 | Go 真源与 RAG **两侧同时运行**、同输入比对输出 | ✅ 是（HeavyKeeper 8 组输入） |
+| 【RAG 运行证据】 | RAG 进程**真的启动过**，日志 / 运行时对象为证 | ✅ 是（含一次**启动失败**，见 DRIFT-HOTRPC-002） |
+| 【静态源码 + 依赖树】 | 只读源码 + `mvn dependency:tree` + jar/源码反查，**未运行** | ✅ 是 |
+| 【纯 Mockito / 手 new 单测】 | 单测级证据，**不装配 Spring 上下文、不执行 SQL/Kafka/Redis** | ✅ 是（既有 46 条全部属此类） |
+| 【真 Redis / 真 Kafka IT】 | 真实中间件集成测试 | ❌ **无**（本轮仍没有，Docker 不可用） |
+
+⚠️ **本轮没有取得任何一条【真 Redis / 真 Kafka IT】。**
+凡「4 段 Lua / 两个 TTL / `EXISTS` 守卫 / RoundRobin 实际分配 / 零重试 handler 实际效果」类结论，
+本轮**仍然只有静态源码证据**，与第一轮边界 #1 相同，**未收口**。
+
+---
+
+## 1. Component Contract（§4 + §5）
+
+| 项 | Go（真源） | RAG | 证据 |
+|---|---|---|---|
+| Purpose | 消费 Kafka 互动事件 → HeavyKeeper 有损 Top-K sketch → 周期落 Redis 分片 → 跨分片合并出 `hot:articles` → gRPC 暴露 Top-N 查询 | 同 | 静态源码 |
+| Public Operations | 5 个 gRPC：`GetHotArticles` / `LikeArticle` / `CommentArticle` / `CoinArticle` / `ShareArticle` | 同（`HotServiceGrpcImpl`） | proto diff 逐条一致 + 静态源码 |
+| Inputs | `int32 top_k`；Kafka value = `{"article_id","type",…}` | 同 | proto / 静态 |
+| Outputs | `repeated HotArticleItem{article_id, uint32 hot_score}`；4 个互动方法 3×`UNIMPLEMENTED` + 1×`success=true` | 同 | 静态 + 纯单测 |
+| Dependencies | Redis（读+写+Lua）、Kafka consumer group、etcd/zrpc、Prometheus、OTel | Redis(Lettuce)、Kafka(spring-kafka + **spring-boot-kafka**)、Nacos、Micrometer、OTel | dependency:tree |
+| State | 进程内：`hkMap[int]*HeavyKeeper`、`counter atomic.Int64`、`lockCancel`；进程外：Redis 5 个 key | 同构（`HotPartitionSketchRegistry` / `AtomicLong` / 世代号） | 静态源码 |
+| Side Effects | 写 5 个 Redis key；推进 Kafka 位点；注册 etcd；起 19091/19092/19093 指标 HTTP | 写同 5 个 key；推进位点；注册 Nacos；**指标无暴露端点**（既有边界 #2） | 静态 + 实测依赖树 |
+| Failure Model | 消费端**永不外抛**、坏消息永久 drop；Redis 失败只 `Inc("fail")` 后 return | 逐条照抄且有测试锁死 | 纯单测 + 静态 |
+| 🆕 **组件当前是否可运行** | ✅ `go run` 可跑 | ❌ **启动即失败**（缺 `ObjectMapper` Bean） | 【RAG 运行证据】 |
+
+**一句话契约**：`hot-rpc` 是一份**统计型、有损、最终一致**的读模型。
+它**没有事务、没有鉴权、没有 DB、没有 HTTP**；全部行为落在「Redis keyspace + Kafka 位点 + gRPC 响应」三处可观察面上。
+
+---
+
+## 2. GO-SEMANTIC-MODEL（§7 / §33）
+
+### OP-G1 `GetHotArticles`
+- **Input**：`in.TopK`（proto `int32`，可为负）
+- **Processing**：`:34-40` 归一（`k<=0→20`，`k>100→100`）→ `:43` `ZREVRANGE hot:articles 0 k-1 WITHSCORES`
+- **Branch**：`:45` `err == redis.Nil` ⇒ 返回**空 items、不报错**；`:50` 其它 err ⇒ **裸 error 上抛**
+- **Result**：`:55-59` member 非 string 跳过；`:62` `uint32(z.Score)` **向零截断**
+- **External**：Redis 单命令 ZREVRANGE
+- **Error**：裸 `error` ⇒ grpc-go `status.FromError` 返回 `ok=false` ⇒ **`codes.Unknown`**
+- **Timeout / Retry / Concurrency**：无本地状态；Redis 超时/重试见 §6.6 / §6.7；
+  `zrpc` 侧 2s deadline 由观测拦截器施加（`hot.go:32,42`）
+- **Evidence**：`get_hot_articles_logic.go:34,38,43,45-48,50,55-59,62`
+
+### OP-G2 `LikeArticle` / `CoinArticle` / `ShareArticle`
+- `status.Error(codes.Unimplemented, "<X> not implemented yet")`，request 全部忽略
+- `like_article_logic.go:44` / `coin_article_logic.go:36` / `share_article_logic.go:36`
+
+### OP-G3 `CommentArticle`
+- `return &pb.CommentArticleResponse{Success: true}, nil` —— **唯一不对称的一个**
+- `comment_article_logic.go:30`
+
+### OP-G4 消费面 `ConsumeClaim → consumeMessage`
+1. `TraceConsumer(span)` 包住（`:105`）
+2. `json.Unmarshal`（`:152`）失败 ⇒ 返回 err
+3. `ArticleID == ""`（`:157`）⇒ 返回 err
+4. `weights[type]` 缺失或 `<=0`（`:162`）⇒ 返回 err
+5. **`:168` `eventConsumeTotal.Inc(type)`**
+6. **`:170-172` `RLock` 查 `hkMap`**；不存在 ⇒ `:174` **静默 return nil**
+7. `:177` `hk.Add(articleID, weight)`
+8. `:179` **全局** `counter % syncEvery == 0` ⇒ `:180` `go syncToRedis(...)`
+9. `:108` **无条件** `MarkMessage`（在 `TraceConsumer` 返回之后、不看 err）
+
+### OP-G5 分区生命周期
+- `Setup → OnPartitionsAssigned`（`:113-126`）：持写锁；已存在 `continue`；建 sketch 后**持锁** `loadFromRedis`
+- `Cleanup → OnPartitionsRevoked`（`:128-140`）：**持写锁 → 调 `syncToRedis`（内部 RLock）⇒ 必然自死锁**（G-HOT-001）
+
+### OP-G6 快照 / 合并
+- `syncToRedis`（`:195-242`）：`TopK` 空则不写 → pipeline `DEL shadow` + `ZADD shadow` → Lua `EXISTS` 守卫 + `RENAME` + **`EXPIRE 300`（硬编码）**
+- `loadFromRedis`（`:265-283`）：`ZREVRANGE p{i} 0 -1`，score **当新权重回灌**（二次有损）
+- `periodicSync`（`:244-263`）：**30s** ticker，每分区一个 goroutine
+- `periodicMerge`（`:338-354`）：**10s** ticker；`SETNX lock TTL 10s` → 3s 看门狗续期 → 合并 → compare-and-`DEL`
+- `mergePartitions`（`:356-415`）：pipeline 读 `p0..p{N-1}` 各 top-1000（`0..999`）→ 按 member 求和 →
+  `sort.Slice` → 截断 100 → 写 shadow → Lua `GET "hot:merge:lock"` 比对 instanceID → `RENAME` → `EXPIRE TTL(3600)`
+- **两个 goroutine 互相独立**（`:76-77`），Go 调度器天然并行
+
+---
+
+## 3. SPRINGBOOT-SEMANTIC-MODEL（§7 / §34）
+
+结构与 §2 **逐字段对齐**（这是 spec §34 的目的：不因两边文档结构不同而漏维度）。
+
+| OP | Java 落点 | 关键行 |
+|---|---|---|
+| OP-G1 | `HotRankingQueryService.getHotArticles` + `HotServiceGrpcImpl.invoke` | `HotRankingQueryService.java:59-91`、`HotServiceGrpcImpl.java:109-123` |
+| OP-G2/G3 | `InteractionStubService` | `InteractionStubService.java:42-64` |
+| OP-G4 | `HotEventConsumer.onMessage → consumeMessage` | `HotEventConsumer.java:100-196` |
+| OP-G5 | `HotKafkaConfig.rebalanceListener` + `HotEventConsumer.onPartitionsAssigned/Revoked` + `HotPartitionSketchRegistry` | `HotKafkaConfig.java:93-115`、`HotPartitionSketchRegistry.java:86-128` |
+| OP-G6 | `HotRedisSnapshotStore`（快照）+ `HotMergeScheduler`（合并） | `HotRedisSnapshotStore.java:122-237`、`HotMergeScheduler.java:146-288` |
+
+**与 Go 的结构性对应与偏离**
+
+| 项 | Go | Java | 判定 |
+|---|---|---|---|
+| 消费入口 | sarama `ConsumeClaim` 循环 | `@KafkaListener`（String payload + 手动 `ObjectMapper`） | 实现差异 |
+| 位点 | `:108` 无条件 `MarkMessage` | `enable-auto-commit:false` + `ack-mode:record` + `DefaultErrorHandler(FixedBackOff(0,0))` + `setAckAfterHandle(true)` + listener 永不外抛 | 语义等价，**提交节奏不同**（DRIFT-HOTRPC-005） |
+| 分区分配 | `sarama.NewBalanceStrategyRoundRobin()`（`hot.go:57`） | `partition.assignment.strategy=RoundRobinAssignor`（`application.yml:49`） | 等价【静态源码，未实测 → UNR-4】 |
+| 分区回调 | `Setup / Cleanup` | `ConsumerRebalanceListener`（`HotKafkaConfig.java:72`） | 等价 |
+| 撤销落盘 | 持写锁再取读锁（**自死锁**，G-HOT-001） | `detach()` 锁内摘引用 + 锁外 `flush` | **有意偏离**，见 §7 SD-1 |
+| 定时任务 | 两条独立 goroutine（`:76-77`） | 两条 `@Scheduled`，**共用单线程调度器** | **DRIFT-HOTRPC-003** |
+| Redis 客户端 | go-redis（**MaxRetries 默认 3**） | Lettuce（**无重试**） | **DRIFT-HOTRPC-004** |
+| panic | claim goroutine **无 recover** ⇒ 崩进程 | `catch (RuntimeException)` ⇒ 降级 drop | **DRIFT-HOTRPC-006** |
+| 🔴 Bean 装配 | — | `ObjectMapper` Bean 缺失 ⇒ **上下文起不来** | **DRIFT-HOTRPC-002** |
+| 🔴 sketch 桶位 | `hash()` = `uint64 % width` | `hash()` 无符号取模仿真**写错** | **DRIFT-HOTRPC-001** |
+
+---
+
+## 4. Equivalence Matrix（§24 + §35）
+
+`Result` 只用 5 个枚举值（§35 规定）。
+
+| # | Operation | Semantic Dimension | Go | Java | Result | Evidence |
+|---|---|---|---|---|---|---|
+| 1 | GetHotArticles | TopK 归一 `<=0→20` | `:35-37` | `HotRankingQueryService.java:61-63` | EQUIVALENT | 纯 Mockito 单测 |
+| 2 | GetHotArticles | TopK 归一 `>100→100` | `:38-40` | `:64-66` | EQUIVALENT | 纯 Mockito 单测 |
+| 3 | GetHotArticles | 读取 key 与范围 | `:43` | `:69` | EQUIVALENT | 纯 Mockito 单测 |
+| 4 | GetHotArticles | key 不存在 → 空列表不报错 | `:45-48` | `:70-72` | EQUIVALENT | 纯 Mockito 单测 |
+| 5 | GetHotArticles | 其它 Redis 错误 → 裸 error → **UNKNOWN** | `:50` | `HotServiceGrpcImpl.java:118` | EQUIVALENT | 纯 Mockito 单测 |
+| 6 | GetHotArticles | `hot_score` 向零截断 | `:62` | `HeavyKeeper.java:276-278` | EQUIVALENT | 纯 Mockito 单测 |
+| 7 | GetHotArticles | member 非字符串跳过 | `:55-59` | `:77-81` | EQUIVALENT | 纯 Mockito 单测 |
+| 8 | GetHotArticles | **端到端可被调用** | 服务在跑 | **进程起不来** | SEMANTIC MISMATCH | 【RAG 运行证据】→ DRIFT-HOTRPC-002 |
+| 9 | Like/Coin/Share | `UNIMPLEMENTED` + 描述逐字 | `like:44`/`coin:36`/`share:36` | `InteractionStubService.java:43,48,53` | EQUIVALENT | 纯 Mockito 单测 |
+| 10 | CommentArticle | `success=true`（不对称） | `comment:30` | `:63` | EQUIVALENT | 纯 Mockito 单测 |
+| 11 | Consume | JSON 解析失败 → drop、位点推进 | `:152-155` + `:108` | `:156-159` + `:97-128` | EQUIVALENT | 纯 Mockito 单测（**无容器**） |
+| 12 | Consume | `article_id` 空 → drop | `:157-160` | `:161-164` | EQUIVALENT | 纯 Mockito 单测 |
+| 13 | Consume | 未知 / 零权重 type → drop | `:162-166` | `:166-172` | EQUIVALENT | 纯 Mockito 单测 |
+| 14 | Consume | **指标 Inc 早于 hkMap 查找** | `:168` → `:170` | `:175` → `:177` | EQUIVALENT | 纯 Mockito 单测 + 变异 M4 |
+| 15 | Consume | 未知字段被忽略 | `encoding/json` 默认 | `@JsonIgnoreProperties`（`ArticleHotEvent.java:22`） | EQUIVALENT | 纯 Mockito 单测 |
+| 16 | Consume | 全局（非每分区）`% syncEvery` | `:179` | `:185-189` | EQUIVALENT | 静态源码 |
+| 17 | Consume | span 把三类坏消息标成 error | `:105` `TraceConsumer` | `:115-127` + `MqConsumer.java:110-117` | EQUIVALENT | 纯 Mockito 单测 |
+| 18 | Consume | 单条 >100ms 慢日志 | `:143-149` | `:57,191-194` | EQUIVALENT | 静态源码 |
+| 19 | Consume | 消费 panic 的后果 | **claim goroutine 无 recover ⇒ 崩进程** | 吞掉并 drop | OBSERVABLE DIFFERENCE | 【静态源码 + sarama 源码】→ DRIFT-HOTRPC-006 |
+| 20 | Consume | **listener 真进容器 registry** | — | **无装配层测试** | UNKNOWN | 【静态源码】→ DRIFT-HOTRPC-007 |
+| 21 | 分区 | assign 幂等、不重复回灌 | `:118-120` | `HotPartitionSketchRegistry.java:91-93` | EQUIVALENT | 纯 Mockito 单测 |
+| 22 | 分区 | revoke 后不再持有 | `:137`（死锁，永不执行） | `:118` | OBSERVABLE DIFFERENCE | 有意偏离 SD-1；纯 Mockito 单测 |
+| 23 | 分区 | 撤销时锁的持有时长 | 永久持锁（自死锁） | 锁内只摘引用 | OBSERVABLE DIFFERENCE | 有意偏离 SD-1；纯 Mockito 单测（`HotRevokeFlushOutsideLockTest`） |
+| 24 | 快照 | 分片 key 模板 | `:208-209` | `HotRedisSnapshotStore.java:54,57` | EQUIVALENT | 静态源码 |
+| 25 | 快照 | `EXISTS` 守卫（**首次快照必丢**） | `:228-230` | `:75-77` | EQUIVALENT | 静态源码 |
+| 26 | 快照 | 分片 TTL **硬编码 300**（≠ 配置 TTL） | `:232` | `:63,79` | EQUIVALENT | 静态源码 |
+| 27 | 快照 | 大 key TTL = 配置 `Interaction.TTL` | `:410` | `HotMergeScheduler.java:279` | EQUIVALENT | 静态源码 |
+| 28 | 快照 | `TopK` 空则不写（旧 key 陈旧） | `:204-206` | `:127-130` | EQUIVALENT | 静态源码 |
+| 29 | 快照 | 失败只 `Inc("fail")` 不抛 | `:220-224,236-241` | `:151-155,161-171` | EQUIVALENT | 静态源码 |
+| 30 | 快照 | 周期 **30s** | `:245` | `HotRedisSnapshotStore.java:66,230` | EQUIVALENT | 静态源码 |
+| 31 | 回灌 | `ZREVRANGE p{i} 0 -1`，score 当新权重 | `:268-279` | `HotRedisSnapshotStore.java:195-216` | EQUIVALENT | 静态源码 |
+| 32 | 合并 | 每片读 `0..999`（1000 条） | `:362` | `HotMergeScheduler.java:70,248` | EQUIVALENT | 静态源码 |
+| 33 | 合并 | 按 member 求和、排序、截断 100 | `:366-385` | `:264-268` | EQUIVALENT | 静态源码 |
+| 34 | 合并 | 空结果直接 return（连 shadow 都不写） | `:386-388` | `:269-272` | EQUIVALENT | 静态源码 |
+| 35 | 合并 | Lua 用**字面量** `"hot:merge:lock"` | `:401` | `:98` | EQUIVALENT | 静态源码 |
+| 36 | 合并 | 读阶段错误被忽略（`pipe.Exec` 返回值都没接） | `:364,368` | `:259-262,293-295` | EQUIVALENT | 静态源码 |
+| 37 | 合并 | Lua 报错被误报成「lock lost」 | `:408` `result,_ :=` | `:280-287` | EQUIVALENT | 缺陷照抄（G-HOT-003）；静态源码 |
+| 38 | 合并 | `z.Member.(string)` 裸断言 panic | `:370` | 跳过（`:305-307`） | IMPLEMENTATION DIFFERENCE | 等价性论证见 SD-2；静态源码 |
+| 39 | 合并 | 抢不到锁 → 跳过本轮 | `:345-347` `continue` | `HotMergeScheduler.java:148-150` | EQUIVALENT | 静态源码 |
+| 40 | 合并 | 看门狗 3s 续期、丢失即退出 | `:297-321` | `:187-212` | EQUIVALENT | 静态源码 |
+| 41 | 合并 | 周期 **10s** | `:339` | `HotMergeScheduler.java:67,146` | EQUIVALENT | 静态源码 |
+| 42 | 定时 | **两条任务是否互相独立** | 两条 goroutine | **单线程调度器（pool=1）** | **OBSERVABLE DIFFERENCE** | 【Boot 4 源码】→ DRIFT-HOTRPC-003 |
+| 43 | sketch | FNV-1a 32 指纹 | `heavykeeper.go:178-182` | `HeavyKeeper.java:230-239` | EQUIVALENT | 【双侧活体对拍】17/17 一致 |
+| 44 | sketch | FNV-1a 64 + **无符号取模** | `:185-190` | `:247-263` | SEMANTIC MISMATCH | 【双侧活体对拍】→ DRIFT-HOTRPC-001 |
+| 45 | sketch | `uint32` 加 / 减自然回绕 | `:94,103` | `:134,143` | EQUIVALENT | 【双侧活体对拍】 |
+| 46 | sketch | 无符号比较（`maxCount` / 堆 / 冲突分支） | `:108,155` | `:139,148,211` | EQUIVALENT | 【双侧活体对拍】+ 纯单测 |
+| 47 | sketch | `decay^count` 概率让位 | `:97-105` | `:137-145` | EQUIVALENT | 概率算法，断言强度同 Go 自带测试；纯 Mockito 单测 |
+| 48 | sketch | `TopK` 并列项次序不稳定 | `:126-128` | `:172` | EQUIVALENT | 【双侧活体对拍】并列项两侧顺序都不同 |
+| 49 | sketch | `count==0` 不进 TopK | `:134-136` | `:191-193` | EQUIVALENT | 【双侧活体对拍】weight=0 组两侧同为空 |
+| 50 | sketch | Top-K 淘汰门槛（`>`堆顶才换） | `:153-162` | `:210-216` | EQUIVALENT | 【双侧活体对拍】 |
+| 51 | 配置 | 权重按 `Name` 建 map、`Code` 丢弃 | `hot.go:47-50` | `HotEventConsumer.java:84-88` | EQUIVALENT | 纯 Mockito 单测 |
+| 52 | 配置 | 死配置不迁（`RedisConf.Type` / `KqPusher` / `KqConsumerConf.Name`） | `service_context.go:17-20` | `HotRpcProperties` 无对应字段 | EQUIVALENT | 静态源码 |
+| 53 | 配置 | gRPC deadline **2000ms** | `zrpc/config.go:46` `default=2000`（`hot.yaml` 未写） | `application.yml:122` `rpc-timeout: 2s` | EQUIVALENT | 【静态源码 + 默认值取证】 |
+| 54 | 配置 | reflection 仅 Dev/Test 模式注册 | `hot.go:38-40`（三份 yaml 均无 `Mode` ⇒ pro） | `application.yml:74` `false` | EQUIVALENT | 静态源码 |
+| 55 | 配置 | Redis 命令超时 + **重试** | go-redis `Read/Write=3s`、`Dial=5s`、**`MaxRetries=3`** | `timeout: 3s`、**无重试** | **OBSERVABLE DIFFERENCE** | 【静态源码 + 库默认】→ DRIFT-HOTRPC-004 |
+| 56 | 配置 | `Prometheus.Port` / `Telemetry` 的对外表现 | `hot{1,2,3}.yaml` 起真 HTTP 19091/19092/19093 | `management.*` 在 NONE web 下**是空配置** | **OBSERVABLE DIFFERENCE** | 实测依赖树 + Boot 4 源码 |
+| 57 | 指标 | Prometheus 指标名逐字一致 | `hot_handler.go:30-45` | `HotRpcMetrics.java:37,40` | EQUIVALENT | 【RAG 运行证据】实跑 scrape，3 行名字与标签逐字一致 |
+| 58 | 指标 | `type` 标签只在权重校验后才出现 | `:168` | `HotRpcMetrics.java:54-57` | EQUIVALENT | 纯 Mockito 单测 |
+| 59 | 生命周期 | **能否启动** | ✅ | ❌ | SEMANTIC MISMATCH | 【RAG 运行证据】→ DRIFT-HOTRPC-002 |
+| 60 | 生命周期 | 进程关闭时后台任务停止 | 两条 goroutine **永不退出**（`context.Background()`） | 随容器关闭 | IMPLEMENTATION DIFFERENCE | 更正确，类注释已标有意收敛；静态源码 |
+
+**统计**：60 行中 EQUIVALENT 46 · IMPLEMENTATION DIFFERENCE 3 · OBSERVABLE DIFFERENCE 8 · SEMANTIC MISMATCH 4（3 行） · UNKNOWN 1。
+**支撑它们的独立 DRIFT 条目 = 7 条**（见 §7），多条 DRIFT 会同时点亮多行矩阵。
+
+---
+
+## 5. External Interaction & Error Flow（§8 + §10）
+
+### 5.1 External System: Redis（5 个 key）
+
+| Operation | Go | Java | 参数一致 | 结果影响分支 | 失败是否阻断 |
+|---|---|---|---|---|---|
+| `ZREVRANGE hot:articles 0 k-1` | `:43` | `HotRankingQueryService.java:69` | ✅ | ✅ | **是**（→UNKNOWN） |
+| `ZREVRANGE hot:articles:p{i} 0 -1` | `:268` | `HotRedisSnapshotStore.java:195` | ✅ | ✅ | 否（`:270` log 后 return） |
+| pipeline `DEL + ZADD :shadow` | `:217-219` | `:142-150` | ✅ | ✅ | 否（`Inc("fail")` 后 return） |
+| Lua `EXISTS / RENAME / EXPIRE 300` | `:227-234` | `HotRedisSnapshotStore.java:74-81` | ✅（逐字） | ✅ | 否 |
+| Lua `GET lock / RENAME / EXPIRE TTL` | `:400-407` | `HotMergeScheduler.java:97-104` | ✅（**锁名是字面量**） | ✅ | 否（只打日志） |
+| `SETNX lock EX 10` | `:286` | `HotMergeScheduler.java:162-163` | ✅ | ✅ | 否（`continue`） |
+| Lua compare-and-`EXPIRE` | `:301-306` | `:76-81` | ✅ | ✅ | 否（`result,_` ⇒ 误报 lock lost） |
+| Lua compare-and-`DEL` | `:329-334` | `:84-89` | ✅ | ✅ | 否 |
+
+⚠️ **「Redis 连接失败」与「key 不存在」必须分开**：Go 在 `GetHotArticles` 上正是这么做的
+（`:45` 判 `redis.Nil`、`:50` 其余上抛）。Java 侧 Spring Data Redis 对不存在的 key 返回空集合、
+对连接失败抛 `DataAccessException` ⇒ **两个分支天然分离**，语义一致。**无「把失败当 miss」的漂移。**
+
+### 5.2 Error Flow（每类 failure 的 Go / Java 最终输出）
+
+| Failure | Go 最终输出 | Java 最终输出 | 等价 |
+|---|---|---|---|
+| Redis 读失败（查询面） | `codes.Unknown` | `Status.UNKNOWN` | ✅ |
+| Redis 读写失败（快照面） | `Inc("fail")` + return | `redisSyncFail()` + return | ✅ |
+| Redis 脚本失败（合并面） | `[Merge] lock lost, abort` | 同（照抄 `result,_`） | ✅（缺陷照抄） |
+| Redis 脚本失败（看门狗） | `[Lock] lost lock` + return | 同 | ✅ |
+| 三类坏 Kafka 消息 | span error + 位点推进 + drop | 同 | ✅ |
+| `hk.Add` 内部 panic | **进程崩溃** | 吞掉并 drop | ❌ → DRIFT-HOTRPC-006 |
+| 未持有分区 | 静默 return nil | 静默 return null | ✅ |
+| 抢不到合并锁 | 本轮跳过 | 本轮跳过 | ✅ |
+| `@KafkaListener` 的容器错误 | — | `DefaultErrorHandler(FixedBackOff(0,0))` + `ackAfterHandle` | UNKNOWN（无容器证据） |
+
+### 5.3 Result Semantics（§9：Success / NotFound / Empty / Null / Default / Failure / Timeout）
+
+| 概念 | Go | Java | 等价 |
+|---|---|---|---|
+| key 不存在（查询面） | `Items: []`，**无 error** | `items: []`，**无 error** | ✅ |
+| `TopK` 为空（快照面） | 不写，旧 key 陈旧 | 同 | ✅ |
+| `mergePartitions` 结果空 | 连 shadow 都不写 | 同 | ✅ |
+| 分区未持有 | 返回 nil（= 正常成功） | 返回 null | ✅ |
+| 3 个互动方法 | `UNIMPLEMENTED` | `UNIMPLEMENTED` | ✅ |
+| `CommentArticle` | `success=true` | `success=true` | ✅ |
+
+---
+
+## 6. 逐维度结论（§12–§21）
+
+### 6.1 State Semantics（§12）
+- `MISS(hkMap 无该分区) → 已计数 → 不入 sketch`：两侧一致（矩阵 14）。
+- 初始状态：Go 启动时 `hkMap` 为空，直到第一次 rebalance；Java 相同。
+- **⚠️ 分区状态在 Go 上永远走不到「被 revoke」那一步（G-HOT-001 死锁），Java 能走到。**
+  ⇒ 状态机不是同一个：Go 的 `OnPartitionsAssigned` 一旦执行过，第一次 `Cleanup` 就把进程冻住；
+  Java 的状态机完整且可反复循环。**这是 G-HOT-001 有意偏离的直接后果，不是新缺陷**（已签字，见 SD-1）。
+
+### 6.2 Cache Semantics（§13）
+- 本组件**无进程内缓存**；Redis 既是存储也是快照通道。
+- 「miss → 查询 → 回写」的对应物是 **`loadFromRedis` 的有损回灌**：sketch 桶计数与真实次数无可逆关系（`:279` 用 score 当新权重）。
+- 两侧一致。**不得**改成「精确恢复」——那是行为变更。
+- ⚠️ **两个 TTL 不可统一**：分片 300s 硬编码、大 key 3600s 配置值（矩阵 26 / 27）。
+
+### 6.3 Auth / Authorization（§14）
+- **本组件两侧都无鉴权。** Go `hot.yaml` 的 `Auth` 走 `zrpc.RpcServerConf.Auth`（默认 false，三份 yaml 未写）；
+  Java 无任何安全依赖（dependency:tree 实测无 `spring-security`，`spring-security-crypto` 是 nacos 的传递依赖）。
+- ⇒ EQUIVALENT（N/A）。**上游是否有网关兜底属跨组件不变量，不在本轮范围。**
+
+### 6.4 Transaction Semantics（§15）
+- **本组件无事务**，两侧都没有。Redis pipeline **不是事务**（Go `pipe.Exec` / Java `executePipelined` 都不包 MULTI）。
+- `RENAME` 的原子性由 Redis 单命令保证，两侧都靠它做「影子榜 → 正式榜」的原子切换。
+- ⇒ EQUIVALENT（N/A）。**不要给 `flush` 加 `@Transactional`，那会改变失败语义。**
+
+### 6.5 Concurrency Semantics（§16）
+- 分区内 sketch：Go `hk.mu` / Java `ReentrantLock` —— **两侧都串行** ✅
+- `hkMap`：Go `RWMutex` / Java `ReentrantReadWriteLock` —— **Go 不可重入、Java 可降级**，差异已由 G-HOT-001 登记（有意偏离）。
+- `counter`：Go `atomic.Int64` / Java `AtomicLong` ✅
+- 消费路径：`go syncToRedis` / `taskExecutor.execute` —— 都是「提交即返回、不等待」 ✅
+- **⚠️ 定时任务的并行度不同** ⇒ DRIFT-HOTRPC-003。
+- **⚠️ panic 的后果不同** ⇒ DRIFT-HOTRPC-006。
+
+### 6.6 Timeout Semantics（§17）
+
+| 项 | Go | Java | 判定 |
+|---|---|---|---|
+| gRPC deadline | `zrpc` 默认 2000ms（`zrpc/config.go:46`，`hot.yaml` 未写 ⇒ 走 struct default） | `observability.rpc-timeout: 2s` → `RpcServerInterceptorFactory` | EQUIVALENT（**默认值取证**：读到 `json:",default=2000"` 的消费点 `hot.go:32`） |
+| Redis 读 / 写超时 | go-redis `ReadTimeout=WriteTimeout=3s`（`Options.init()` 默认） | `spring.data.redis.timeout: 3s` | EQUIVALENT |
+| Redis 连接超时 | go-redis `DialTimeout=5s` | Lettuce `connectTimeout` 默认 10s（`application.yml` 未配） | **OBSERVABLE DIFFERENCE（低）**，见 UNR-3 |
+| Redis 重试 | **`MaxRetries` 默认 3** | 无 | **OBSERVABLE DIFFERENCE** → DRIFT-HOTRPC-004 |
+| Kafka 消费 | 无单条超时 | 同 | EQUIVALENT |
+| 看门狗 / 合并 | 10s tick、3s 续期 | 同 | EQUIVALENT |
+| `OnPartitionsRevoked` 的 500ms context | `hot_handler.go:129` `context.WithTimeout(…, 500ms)` | **无**（`detach` 不做 I/O） | 随 SD-1 一并处置 |
+
+### 6.7 Retry Semantics（§18）
+
+| 项 | Go | Java | 判定 |
+|---|---|---|---|
+| Kafka 坏消息 | **0 重试**（`:108` 无条件 `MarkMessage`） | `FixedBackOff(0L,0L)` + `ackAfterHandle(true)` + listener 永不外抛 | EQUIVALENT（**零重试是刻意的**，`HotKafkaConfig.java:33-42` 有完整论证） |
+| Redis 命令 | **最多 3 次**（go-redis 默认 `MaxRetries=3`） | **0 次** | **OBSERVABLE DIFFERENCE** → DRIFT-HOTRPC-004 |
+| 合并锁 | 无退避、不排队（`continue`） | 同 | EQUIVALENT |
+
+### 6.8 Serialization Semantics（§19）
+
+| 项 | Go | Java | 判定 |
+|---|---|---|---|
+| Kafka payload | `json.Unmarshal`（`types.go` 两个字段） | Jackson 2 `ObjectMapper.readValue`（`ArticleHotEvent` record） | EQUIVALENT |
+| 未知字段 | 忽略（`encoding/json` 默认） | 忽略（`@JsonIgnoreProperties(ignoreUnknown=true)`，`ArticleHotEvent.java:22`） | EQUIVALENT（**硬要求**：生产端 `producer.go:18-23` 发 4 字段） |
+| null vs missing | `article_id` 缺失 ⇒ `""` ⇒ 触发 `:157` 分支 | `null` ⇒ `:161` 的 `null \|\| isEmpty()` | EQUIVALENT |
+| protobuf | `hot.proto` 逐字段一致（剥离 option/注释/缩进/空白后 `diff` 为空） | 同 | EQUIVALENT（**注意**：`AGENTS.md §3.4` 把 `hot` 列在「只有一次性实测、无回归网」档 ⇒ UNR-8） |
+| `uint32` ↔ float64 score | `float64(uint32)` / `uint32(float64)` | `Integer.toUnsignedLong` / `(int)(long)` | EQUIVALENT【双侧活体对拍】 |
+| **FNV 哈希与桶位** | `fnv` + `uint64 % width` | 自实现 FNV + **有符号 long 取模（错）** | **SEMANTIC MISMATCH** → DRIFT-HOTRPC-001 |
+
+### 6.9 Config Semantic Equivalence（§20）
+见矩阵 51–56。两处值得点名：
+- **默认值藏在 struct tag 里**：`SyncEvery=100` / `TTL=3600` / `PartitionCount=3`（`config.go:30-32` 的 `json:",default=…"`）
+  与 `zrpc` 的 `Timeout=2000`。三份 yaml 全部**写死**了这些值 ⇒ 两侧一致，
+  但取证必须读 `config.go` 与 `hot.go:32` 这两个**消费点**，不能只贴 `hot.yaml`（§3.3.1）。
+- **`PartitionCount` 与 topic 实际分区数必须相等**（`hot_handler.go:361-363` 只读 `p0..p{N-1}`）。
+  两侧都保留了这个约束、也都在配置注释里留痕。**Go 侧同样如此 ⇒ 不是 RAG 的缺陷。**
+
+### 6.10 Lifecycle Semantic Equivalence（§21）
+- Go：`hot.go:32` 读配置 → `:33` 建 Redis client → `:35` `zrpc.MustNewServer`（**注册 etcd**）→ `:60` 建 consumer group
+  → `:65-71` 起消费 goroutine → `:74` `serviceGroup.Start()` 阻塞。⚠️ **消费 goroutine 在 `Start()` 之前就起了。**
+- Java：`HotRpcApplication` → Bean 装配 → gRPC server 随 `@GrpcService` 自动起
+  → `NacosRegistration` 在 `ApplicationReadyEvent` 注册 → `@Scheduled` 开始。
+  ⚠️ `NacosRegistration.java:92-94` **捕获 `NacosException` 后只打日志**，Nacos 不可用时进程照常起来（Go 侧是否 `Fatal` 见 UNR-7）。
+- **🔴 致命项：Java 根本走不到上面任何一步** —— 见 DRIFT-HOTRPC-002。
+
+---
+
+## 7. Semantic Drifts（§27 + §36）
+
+> 编号从本域**未占用的最大编号继续**（本文件历史只有 `G-HOT-001/002/003`，无任何 `DRIFT-*`）⇒ 从 `DRIFT-HOTRPC-001` 起。
+
+### DRIFT-HOTRPC-001 🔴 SEMANTIC MISMATCH · HIGH · 已实测
+- **Component**：`HeavyKeeper`（`service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/domain/HeavyKeeper.java`）
+- **Operation**：`hash(key, seed)` → `Add` 的桶定位
+- **Category**：数值语义 / 无符号算术移植
+- **Go Behavior**：`heavykeeper.go:189` `return int(h.Sum64() % uint64(hk.width))`
+  —— `Sum64()` 是**无符号** 64 位，结果与「对 2^64 取余」一致。
+- **Java Behavior**：`HeavyKeeper.java:261-262`
+  ```java
+  int remainder = (int) (h % width);
+  return remainder < 0 ? remainder + width : remainder;
+  ```
+  Java 的 `%` 是**向零截断**，且 `h` 是有符号 `long`。当 FNV-64 最高位为 1 时 `h < 0`，
+  该式算的是 `Euclidean(-a, width)`，而 Go 要的是 `Euclidean(2^64 - a, width)`；
+  两者相差 `2^64 mod width`（width=1000 → **616**，width=7 → **2**，**永不为 0**）。
+- **Observable Impact（已实测）**：生产口径 `Width:1000 / Depth:5 / TopK:100`，灌 400 个 key 后
+  **Go 与 RAG 的 Top-100 榜单有 16 条不同**（各 16 条只出现在一侧，84 条重合，分数全同）。
+  实测受影响 key 比例 **49.5%**（5000 个样本里 2473 个 FNV-64 最高位为 1）。
+  ⇒ **热榜内容与真源不一致**，而热榜是本组件唯一的对外业务产物。
+- **根因定位过程（值得当反面教材记）**：按直觉改成 `Math.floorMod(h, width)` ⇒ **实测结果与原写法完全相同（仍然错）**，
+  因为 `floorMod` 同样作用在有符号 `h` 上。**唯一正确的是 `Long.remainderUnsigned(h, (long) width)`**。
+- **Must Preserve**：`hash(key,seed) ∈ [0,width)` 且**逐 key 等于 Go 的 `uint64 % width`**。
+- **Recommended Verification（已做完）**：把 `HeavyKeeper.hash` 换成 `Long.remainderUnsigned` 后
+  ① 51/51 个 (key,seed) 的列号与 Go 逐条一致；② 生产口径 Top-100 **集合完全一致**（仅并列项顺序不同，
+  两侧都由 map 遍历序 + 非稳定排序决定，不构成差异）。
+- **Recommended Fix**：一行 —— `return (int) Long.remainderUnsigned(h, (long) width);`
+  并补一条**对拍式守门测试**（不是行为测试）：把 Go 侧算出的 `hash(key,seed)` 值表固化成 fixture。
+- **Why It Matters**：不崩、不越界、**静默算错** ⇒ 46 条绿测试、10/10 变异验证**全部无法捕获**
+  （`HeavyKeeperTest` 只断言相对次序，从不断言桶位）。这是「绿测试 ≠ 已验证」的又一实例。
+- **Evidence**：【双侧活体对拍】Go `go run`（`/tmp/hk-verify-20261023/go3/main.go`，`replace` 指向真源）
+  vs Java 生产 `HeavyKeeper`（`/tmp/hk-verify-20261023/java/HeavyKeeperProbe3.java`）；
+  列号逐条比对用**反射调用生产的 private `hash` / `fingerprint`**；
+  根因确认用 `fix2`（floorMod，错）与 `fix3`（`remainderUnsigned`，对）两份 /tmp 副本。
+
+### DRIFT-HOTRPC-002 🔴 SEMANTIC MISMATCH · BLOCKING · 已实测（启动失败）
+- **Component**：进程 / Bean 装配
+- **Operation**：`SpringApplication.run` → 上下文启动
+- **Category**：框架依赖缺失 / Boot 4 模块化
+- **Go Behavior**：无对应物（Go 侧 `encoding/json` 是语言内建，无 DI）。
+- **Java Behavior**：`HotEventConsumer.java:59,72,77` 构造注入 `com.fasterxml.jackson.databind.ObjectMapper`，
+  而 **Boot 4.0.8 已把 Jackson 自动配置搬出 `spring-boot-autoconfigure`**（实测该 jar 内 Kafka 类数 = 0 的同款结论对 Jackson 同样成立：
+  `JacksonAutoConfiguration` 不在 `spring-boot-autoconfigure` 内，而在独立模块 `spring-boot-jackson`），
+  且它装配出来的是 **Jackson 3 的 `tools.jackson.databind.json.JsonMapper`**
+  （`JacksonAutoConfiguration` 上是 `@ConditionalOnClass(JsonMapper.class)`，`@Bean` 返回 `JsonMapper`），
+  **不是 Jackson 2 的 `ObjectMapper`**。`hot-rpc/pom.xml` 既没有 `spring-boot-jackson`，也没有 `spring-boot-starter-json`
+  （classpath 上的 Jackson 2 只有从 `com.rag:common` 传递来的 `jackson-databind:2.21.5`，**只有 jar，没有 Bean**）。
+- **Difference**：上下文在 `hotEventConsumer` 这一个 Bean 上就失败。
+- **Observable Impact**：**进程根本起不来** ⇒ Kafka listener 从未注册、30s/10s 定时任务从未跑过、
+  gRPC server 从未监听、Nacos 从未注册 ⇒ **组件当前的可观察行为为零**。
+- **实测日志**（探针跑在 `/tmp`，仓库源码零改动）：
+  ```
+  UnsatisfiedDependencyException: Error creating bean with name 'hotEventConsumer' …
+    No qualifying bean of type 'com.fasterxml.jackson.databind.ObjectMapper'
+  APPLICATION FAILED TO START
+  ```
+  ⚠️ **补强证据**：把 `spring-boot-jackson` 加到**探针 classpath** 上重跑，**仍然同一个失败**
+  ⇒ 证明「加 `spring-boot-jackson` 依赖」**不是**这个缺口的解法（它给的是 Jackson 3）。
+- **Likely Cause**：与已登记的 `spring-boot-kafka` 同款（Boot 4 拆模块），
+  但**上一轮没被发现，因为没人启动过这个进程**——`AGENTS.md §0` 那句「每个模块接手的第一件事是先让它真的启动一次」。
+- **Must Preserve**：进程能起；且 JSON 解析仍应是「坏消息在 listener 内被吞」而不是「在反序列化器里抛」。
+- **Recommended Fix**：`article-rpc` 已有现成正确范式 ——
+  `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/config/Jackson2ObjectMapperConfiguration.java`
+  （显式 `@Bean ObjectMapper`，且显式关掉 `FAIL_ON_UNKNOWN_PROPERTIES`）。hot-rpc 应照抄该模式。
+- **Cross-component（同款缺口，不在本轮 scope）**：
+  `like-rpc` 有 6 处构造注入同一个 `ObjectMapper`（`LikeUpdateKafkaListener` / `LikeDomainService` /
+  `LikeMessageDigest` / `LikeDomainFactService` / `LikeTaskProgressPublisher` / `GoCompatibleJson`），
+  **同样没有该 Bean** ⇒ 该组件的上下文同样起不来。**必须进 issue。**
+- **Evidence**：【RAG 运行证据】真实启动进程两次（含补 `spring-boot-jackson` 的对照组）均失败；
+  【静态源码 + 依赖树】`mvn dependency:tree` + `spring-boot-jackson-4.0.8.jar` 内 `JacksonAutoConfiguration` 源码。
+
+### DRIFT-HOTRPC-003 🟠 OBSERVABLE DIFFERENCE · MEDIUM · 已取证（Boot 4 默认值）
+- **Component**：定时任务调度
+- **Operation**：`periodicSync`（30s） / `periodicMerge`（10s）
+- **Go Behavior**：`hot_handler.go:76-77` `go h.periodicSync(...)` + `go h.periodicMerge(...)`
+  —— **两条独立 goroutine**，各自的 ticker 互不影响。
+- **Java Behavior**：`HotRedisSnapshotStore.java:230` 与 `HotMergeScheduler.java:146` 都是 `@Scheduled(fixedRate=…)`，
+  共用 Boot 的 `taskScheduler`。`TaskSchedulingProperties$Pool.size` 的**默认值是 `1`**
+  （Boot 4.0.8 源码 `spring-boot-autoconfigure-4.0.8-sources.jar` → `TaskSchedulingProperties.java`，`private int size = 1;`），
+  而 `hot-rpc/application.yml` **没有配 `spring.task.scheduling.pool.size`**。
+- **Difference**：**单线程调度器 ⇒ 合并慢会推迟快照**。
+  `mergePartitions` 一次要 pipeline 读 N 个分片 + 写 shadow + 跑 Lua，Redis 命令超时 3s（矩阵 55）
+  ⇒ 最坏情况合并可占用调度线程数秒，而 `periodicSync` 的 30s tick 只能排队。
+- **Observable Impact**：Redis 抖动期间，**分片快照的实际间隔可能显著大于 30s**，直接影响 rebalance 回灌时效
+  ⇒ 分片 key 的 300s TTL 更容易被吃掉。Go 侧不会发生。
+- **Must Preserve**：两条周期任务的执行互不阻塞。
+- **Recommended Fix**：`spring.task.scheduling.pool.size: 2`（或显式声明一个 `ThreadPoolTaskScheduler`）。
+- **Counterfactual（§26）**：一个正常 Spring 开发者**几乎必然**会默认「`@Scheduled` 之间是并发的」
+  ⇒ **HIGH-RISK DRIFT**。
+- **Evidence**：【静态源码 + Boot 4 源码】默认值来自 `TaskSchedulingProperties` 源码行 `private int size = 1;`，
+  而非文档或记忆（§3.3.1）。
+
+### DRIFT-HOTRPC-004 🟠 OBSERVABLE DIFFERENCE · MEDIUM · 已取证
+- **Component**：Redis 访问
+- **Operation**：全部 Redis 命令
+- **Go Behavior**：`svc/service_context.go:17-20` `redis.NewClient(&redis.Options{Addr, Password})` —— **只给两项**，
+  其余全走 go-redis v9.20.0 `Options.init()` 的默认值，其中 **`MaxRetries = 3`**
+  （`go-redis@v9.20.0/options.go` 的 `init()`：`if opt.MaxRetries == 0 { opt.MaxRetries = 3 }`）。
+  ⇒ 网络错误 / 超时会**自动重试最多 3 次**，**不报错、不进 `fail` 分支**。
+- **Java Behavior**：`spring-boot-starter-data-redis`（Lettuce 6.8.2）**默认不重试**，
+  `application.yml` 也没配任何 `RetryTemplate`。
+- **Difference**：瞬时 Redis 故障下，Go 会自愈；RAG 会立刻落 `article_hot_redis_sync_total{status="fail"}` 并丢弃该次快照。
+- **Observable Impact**：
+  ① `redis_sync_total{status}` 的值**不可跨实现直接比较**；
+  ② 弱网下 RAG 的热榜刷新率**低于** Go；
+  ③ 查询面 Go 重试 3 次仍失败才返回 `UNKNOWN`，RAG 第一次失败就返回 `UNKNOWN`
+  ⇒ **客户端看到的失败时机不同**。
+- **Must Preserve**：失败时机与指标口径。**不建议**为了让 RAG「更健壮」去加 `RetryTemplate`——
+  那会让它比 Go 更健壮，同样是漂移。
+- **Recommended Fix**：两条路，**必须选一条并记账**：(a) 显式配 Lettuce 关闭重试（= 现状）并把口径写进台账；
+  (b) 配成 3 次并接受口径变化。**建议 (a)**——按 §5.5「RAG 以 Go 为准」，现状是「RAG 错」，
+  但至少要**显式化**，而不是留成偶然。
+- **Evidence**：【静态源码 + 库默认】go-redis `options.go` `init()` 消费点；
+  Lettuce 侧由 dependency:tree（`io.lettuce:lettuce-core:6.8.2.RELEASE`）+ 未配 retry 推出，
+  **未做真 Redis 实测** ⇒ 见 UNR-1。
+
+### DRIFT-HOTRPC-005 🟡 OBSERVABLE DIFFERENCE · LOW · 已取证
+- **Component**：Kafka 位点提交
+- **Operation**：`ConsumeClaim` 的位点推进
+- **Go Behavior**：`hot.go:55-58` 用的是 `sarama.NewConfig()` 默认值：
+  `Consumer.Offsets.AutoCommit.Enable = true`、`AutoCommit.Interval = 1 * time.Second`
+  （`sarama@v1.50.2/config.go:588-589`，**消费点**），配合 `:108` 的 `sess.MarkMessage(msg, "")`。
+  ⇒ **位点每 1 秒批量提交一次**。
+- **Java Behavior**：`enable-auto-commit: false` + `ack-mode: record`（`application.yml:41,54`）⇒ **每条处理完立刻提交**。
+- **Difference**：「处理完两条消息 → 进程随即被 kill」的场景下，
+  **Go 会重投最多 1 秒内已处理的 Kafka 消息，RAG 不会**。
+- **Observable Impact**：`hk.Add` **不是幂等**（同一事件计两次权）
+  ⇒ **Go 在崩溃恢复后会重复计入，RAG 不会** ⇒ 崩溃前后热榜分数分布不同。
+- **Must Preserve**：这是一个**方向明确、幅度有界**的差异（Java 更接近 exactly-once）。
+  它不是 RAG 的「回归」，但**不是等价**，必须登记而不是假装没有。
+- **Recommended Fix**：**不改**。强行把 Go 也改成逐条提交 = 反向修改真源语义（禁止）。
+  保留登记即可。
+- **Evidence**：【静态源码 + 库默认】`sarama@v1.50.2/config.go:588-589`。
+
+### DRIFT-HOTRPC-006 🟠 OBSERVABLE DIFFERENCE · MEDIUM · 已取证
+- **Component**：消费面异常处理
+- **Operation**：`consumeMessage` 内部抛出非预期异常
+- **Go Behavior**：`TraceConsumer`（`observability/mq.go:30`）是**裸的 `err := fn(consumeCtx)`，没有 recover**；
+  而 sarama 的 claim 消费 goroutine **也没有 recover** ——
+  实测 `sarama@v1.50.2` 全模块 `recover()` 只出现在 `interceptors.go:27,37` 与 `utils.go:44`，
+  **`consumer_group.go` 里一处都没有**；`newConsumerGroupSession` 起的 goroutine 直接调 `sess.consume(...)` → `handler.ConsumeClaim(...)`。
+  ⇒ **panic 直接崩进程**。
+- **Java Behavior**：`HotEventConsumer.java:117-123`
+  ```java
+  try { return consumeMessage(partitionId, value); }
+  catch (RuntimeException e) { return e; }   // 降级成返回值
+  ```
+  ⇒ **span 被标成 error、位点推进、事件丢弃，分区继续消费**。
+- **Difference**：同一段逻辑崩不崩。
+- **Observable Impact**：sketch 层异常下，**Go 会重启并重投，RAG 会静默丢事件**。
+  与 DRIFT-HOTRPC-005 叠加 ⇒ 同一场景下两侧热榜**必然不同**。
+- **Likely Cause**：Java 侧的 catch 是**刻意**的（类注释第 120 行明写「非预期异常也降级成返回值」），
+  但**注释里没有写「Go 侧其实会崩」** ⇒ 这是**未经签字的有意偏离**，不是疏忽。
+- **Must Preserve**：先决定要不要签字。若签字（认为「崩进程」不是想要的行为），
+  应同时在类注释里写明「Go 侧此处无 recover、会崩进程，本条为有意偏离」。
+- **Related**：这一条正是第一轮「`ArrayIndexOutOfBounds` 被 drop 契约吞掉」的**放大器**——
+  **正因为 Java 侧吞异常，DRIFT-HOTRPC-001 这种「静默算错」才完全没有症状。**
+- **Evidence**：【静态源码】Go `observability/mq.go:30` + sarama `consumer_group.go` 全模块 `recover()` 检索为空。
+
+### DRIFT-HOTRPC-007 ⚪ 证据缺口（非行为漂移）· HIGH
+- **Component**：`@KafkaListener` 装配层
+- **Finding**：`AGENTS.md §3.3.3` 强制「凡用 `@KafkaListener`，必须有一条**装配层**测试断言 listener 真的进了容器的 registry」。
+  实测：`hot-rpc/src/test` 下 **8 个测试类全部是纯 JUnit + Mockito / 手 new**，
+  **`@SpringBootTest` / `ContextConfiguration` / `ApplicationContextRunner` 命中数 = 0**
+  ⇒ **没有装配层测试**。
+- **好消息（须记录，避免被误判为坏消息）**：**Kafka 依赖本身是齐的**。
+  `hot-rpc/pom.xml:115-118` 声明了 `org.springframework.boot:spring-boot-kafka`，
+  `mvn dependency:tree` 实测在 compile classpath 上，
+  且 `spring-boot-kafka-4.0.8.jar` 内确实含 `KafkaAutoConfiguration` 与
+  `ConcurrentKafkaListenerContainerFactoryConfigurer`（包名 `org.springframework.boot.kafka.autoconfigure`，
+  与 `HotKafkaConfig.java:12` 的 import 精确匹配），同时 `spring-boot-autoconfigure-4.0.8.jar` 内 kafka 条目数实测 **0**
+  （**印证** §3.3.3 的历史结论）。
+  ⇒ **「上一轮修好了 Kafka 依赖」这件事本身是对的**；问题在于**没有任何测试守住它**。
+- **Why It Matters**：一旦有人「清理 pom」，`@KafkaListener` 会**静默失效且启动不报错**，
+  而现有 46 条绿测试**全部照样全绿**。这正是 `AGENTS.md §0` 点名的「绿测试不是质量指标」。
+- **Recommended Verification**：加一条 `@SpringBootTest`（避免真连 Kafka：mock `ConsumerFactory`
+  或用 `spring.kafka.listener.auto-startup=false`），断言 `KafkaListenerEndpointRegistry` 里
+  存在 `hotEventConsumer.onMessage`，且 topic / group 占位符解析正确。
+- **Evidence**：【静态源码】`grep -rl "SpringBootTest|ContextConfiguration|ApplicationContextRunner" src/test/` → 无命中。
+
+---
+
+### SD-1 / SD-2 / SD-3：第一轮已签字的有意偏离（本轮复核，全部仍成立）
+
+| ID | 内容 | 复核结论 |
+|---|---|---|
+| **G-HOT-001 / SD-1** | 撤销路径的锁升级（Go 自死锁 → Java 锁外落盘） | ✅ **复核通过**。Go `hot_handler.go:132` 写锁 → `:136` 调 `syncToRedis` → `:196` 取读锁；Go `sync.RWMutex` 不可重入 ⇒ 必然自死锁。Java `ReentrantReadWriteLock` 允许降级 ⇒ 直译会把死锁悄悄变「能跑」。偏离形态正确，`HotRevokeFlushOutsideLockTest` 的判据（锁持有时长）也是对的。状态机差异记在 §6.1。 |
+| **G-HOT-002 / SD-2** | `z.Member.(string)` 裸断言 panic → 跳过 | ✅ **复核通过，且等级可下调**：go-redis 读 ZSet 的 member **恒为 string**（Redis 协议里 ZSET member 就是字符串字节）⇒ 该 panic 在真实环境不可达 ⇒ Java 的「跳过」与 Go 的「不发生」**等价**，属 IMPLEMENTATION DIFFERENCE 而非漂移。 |
+| **G-HOT-003 / SD-3** | Redis 脚本报错被误报成「lock lost」 | ✅ **复核通过**，Java `HotMergeScheduler.java:280-287` 确实照抄（连 `catch` 分支也打 `lock lost`）。 |
+
+---
+
+## 8. Test Cases（§29 + §30）
+
+### 8.1 已有的 46 条（**全部属【纯 Mockito / 手 new】，无一条装配上下文**）
+分布见本文件上半部分 L37 的表。**它们锁死的语义是真的**（drop 契约、指标次序、TopK 归一、UNKNOWN 映射、`uint32` 回绕），
+但**不能**证明：(a) 进程能起（已证伪：DRIFT-HOTRPC-002）；(b) listener 进了容器（DRIFT-HOTRPC-007）；
+(c) sketch 的桶位正确（本轮才第一次被证伪：DRIFT-HOTRPC-001）。
+
+### 8.2 本轮新增的 CASE（双侧活体对拍 + 进程实跑）
+
+| CASE | Input | Environment | Go | Spring Boot | Expected Semantic Result | Equivalent | Evidence |
+|---|---|---|---|---|---|---|---|
+| CASE-HK-01 | 6 key / w=1,3,1,100,0,7；`width=100000 depth=5 decay=0.9 topK=100` | 无碰撞 | `article-4=500 / article-3=91 / article-1=37 / article-2=33 / 文章-中文键=7` | 同（逐字节） | TopK 降序、weight=0 不入榜 | **YES** | 双侧活体对拍 |
+| CASE-HK-02 | 17 key（含 `""`、中文、emoji）；`width=7 depth=3 decay=0 topK=4` | 必冲突、确定性 | 4 条 | 4 条（**集合相同、并列序不同**） | 冲突分支可跑、不崩、TopK=4 截断 | **YES** | 双侧活体对拍 |
+| CASE-HK-03 | 同上 17 key；`topK=100` | 同上 | **12 条** | **11 条**（Go 多一条 `""=3`） | 集合应一致 | **NO** 🔴 | 双侧活体对拍 → DRIFT-HOTRPC-001 |
+| CASE-HK-04 | 400 key，`width=1000 depth=5 decay=0 topK=100` | **生产口径** | 100 条 | 100 条，**各 16 条只在一侧** | 集合应完全一致 | **NO** 🔴 | 双侧活体对拍 → DRIFT-HOTRPC-001 |
+| CASE-HK-05 | 修正为 `Long.remainderUnsigned` 后重跑 CASE-HK-04 | 同 | 100 条 | 100 条，**集合完全一致（仅Go=0, 仅Java=0）** | 一致 | **YES** | 双侧活体对拍（根因确认） |
+| CASE-HK-06 | 修正后逐条比对列号 | 同上 | 51/51 | 51/51 一致 | 列号逐条一致 | **YES** | 反射调用生产 private `hash` |
+| CASE-HK-07 | 2 key，weight=`0x80000000` | `width=100000` | `overflow-a/b = 2147483648` | 同 | `uint32` 溢出回绕 | **YES** | 双侧活体对拍 |
+| CASE-HK-08 | 2 key，weight=`0` | 同 | 空 | 空 | `count==0` 不入 TopK | **YES** | 双侧活体对拍 |
+| CASE-BOOT-01 | 启动 `HotRpcApplication`（原样） | 无 Redis/Kafka/Nacos | — | **FAILED TO START**（缺 `ObjectMapper`） | 能起 | **NO** 🔴 | RAG 运行证据 → DRIFT-HOTRPC-002 |
+| CASE-BOOT-02 | 同上 + 探针 classpath 追加 `spring-boot-jackson` | 同 | — | **仍 FAILED**（同一缺 Bean） | 证明「加依赖」不是解法 | — | RAG 运行证据 |
+| CASE-CFG-01 | `PrometheusMeterRegistry` 实跑 `scrape()` | 纯内存 | 指标名 `article_hot_kafka_consume_total` / `article_hot_redis_sync_total` | 同（逐字节，含标签值） | 名字一致 | **YES** | RAG 运行证据 |
+| CASE-CFG-02 | `TaskSchedulingProperties$Pool.size` 源码取值 | — | 两条 goroutine | **默认 1** | 两任务独立 | **NO** 🟠 | Boot 4 源码 → DRIFT-HOTRPC-003 |
+| CASE-CFG-03 | proto diff（剥离 option / 注释 / 缩进 / 空行） | — | `proto/hot.proto` | `hot-proto/src/main/proto/hot.proto` | **diff 为空** | **YES** | 静态 |
+| CASE-CFG-04 | dependency tree 有无 servlet / tomcat | — | 无 web | **无 `jakarta.servlet`、无 `tomcat-embed-core`** ⇒ `deduceWebApplicationType()=NONE` | 不起 web 容器 | **YES** | 实测依赖树（**把既有边界 #2 的推断升级为实测**） |
+
+### 8.3 §30 的 15 个标准 CASE 在本组件的适用性
+`CASE-01 正常` ✅(HK-01) · `CASE-02 空输入` ✅(HK-08) · `CASE-03 不存在` ✅(Redis Nil 分支，单测) ·
+`CASE-04 重复` ✅(重复 assign，单测) · `CASE-05 依赖失败` ⚠️(仅单测，**无真 Redis**) · `CASE-06 超时` ⚠️(仅库默认取证) ·
+`CASE-07 Retry` ✅(零重试 handler，单测) · `CASE-08/09 Cache Hit/Miss` N/A（本组件无缓存层） ·
+`CASE-10 权限` N/A（两侧都无鉴权） · `CASE-11 并发` ⚠️(锁测试有，**但掩盖了 G-HOT-001 的真实后果**) ·
+`CASE-12 重复调用` ✅(assign 幂等) · `CASE-13 部分成功` ✅(pipeline 失败后 return) ·
+`CASE-14 事务回滚` N/A（两侧都无事务） · `CASE-15 序列化边界` ✅(未知字段 / 坏 JSON / null / uint32 溢出)
+
+---
+
+## 9. Unresolved（§37）——**本节非空，故不得给 `EQUIVALENT`**
+
+| ID | Question | Go Evidence | Java Evidence | Why Unknown | Impact | Required Confirmation |
+|---|---|---|---|---|---|---|
+| **UNR-1** | go-redis `MaxRetries=3` 的**实际重试面**：哪些命令会重试、pipeline 内部失败重试会不会留下半成品（`DEL` 成功但 `ZADD` 失败 ⇒ shadow key 残留）？ | `go-redis@v9.20.0/options.go` `init()` + `shouldRetry` | Lettuce 无重试；`flush` 用 `executePipelined` | 静态能读出默认值，但**重试是否命中 pipeline 内部**需真 Redis | 决定 DRIFT-HOTRPC-004 的严重度；也可能暴露 Go 侧独有的 shadow 残留 | 起真 Redis，用 `CLIENT PAUSE` 制造半程失败，观察两侧 keyspace |
+| **UNR-2** | 4 段 Lua 的**逐条行为**（`EXISTS` 守卫 / `RENAME` 原子性 / `EXPIRE` 与 `RENAME` 的先后） | `hot_handler.go:227-234,301-306,329-334,400-407` | `HotRedisSnapshotStore.java:74-81`、`HotMergeScheduler.java:76-104` | 两侧源码**逐字一致**，但 `DefaultRedisScript` 的 `resultType=Long` 与 Lua 整数返回的映射未经真 Redis 验证 | 若映射出错，`result==0` 分支判定会翻转 ⇒ 快照 / 合并行为改变 | 真 Redis IT：跑 `EVALSHA` 并断言返回类型 |
+| **UNR-3** | Lettuce `connectTimeout` 默认 10s vs go-redis `DialTimeout=5s` | `go-redis@v9.20.0/options.go` `init()`：`DialTimeout = 5s` | `application.yml:28` 只配 `timeout: 3s`，未配 `connect-timeout` | Lettuce 侧默认值本轮未从源码确认 | 连接阶段失败时机不同（低） | 读 `spring-boot-data-redis` 的 `LettuceClientConfiguration` 默认值源码 |
+| **UNR-4** | `RoundRobinAssignor` 配置**是否真的落到 consumer**（Boot 4 的 `KafkaProperties.Consumer.buildConsumerProperties()` 是否仍消费 `spring.kafka.consumer.properties.*`） | `hot.go:57` `NewBalanceStrategyRoundRobin` | `application.yml:49` | 配置**写了**，但「写了 ≠ 生效」是本项目第 N 次同款陷阱（§3.3.1） | 分配策略改变 ⇒ `hkMap` 布局与热榜分布改变 | 修好 002 后启动进程 dump `ConsumerConfig` 实际值，或加断言 |
+| **UNR-5** | `@KafkaListener` 若能起来，**容器并发度**是否等价于 Go 的「每分区一个 goroutine」 | sarama 每分区一个 goroutine（`consumer_group.go`） | `@KafkaListener` 默认 `concurrency=1` | 未起进程（被 DRIFT-HOTRPC-002 挡住） | 影响消费顺序保证 | 修好 002 之后再验 |
+| **UNR-6** | `hot2.yaml` / `hot3.yaml` 与 `hot.yaml` 只差 `ListenOn` 与 `Prometheus.Port`（历史结论），本轮**未复核**该 diff | `etc/hot{1,2,3}.yaml` | — | 本轮没跑这个 diff | 若三份 yaml 还有别的差异，「同一部署 × 3 副本」的收敛论证会有洞 | `diff etc/hot.yaml etc/hot2.yaml` |
+| **UNR-7** | Go 的 `zrpc` 在注册 etcd 失败时是否 `Fatal`（⇒ 进程退出） | `hot.go:35` `zrpc.MustNewServer` | `NacosRegistration.java:92-94` 只 log | 未读 go-zero `zrpc` 的注册失败路径实现 | 注册失败时两侧存活行为不同 | 读 `go-zero@v1.10.2` 的 `internal/rpcpub` 注册路径 |
+| **UNR-8** | `AGENTS.md §3.4` 把 `hot` 列在「只有一次性实测、**无回归网**」档 | proto diff 本轮重做仍为空 | 同 | 本轮的 diff **未进脚本** | proto 可能随时被改坏而无人知晓 | 按 `user` / `admin` 的写法扩 `tools/difftest/check-proto-static.sh` |
+
+---
+
+## 10. 最终判定（§39 · 18 项 checklist）
+
+| # | 检查项 | 结论 | 依据 |
+|---|---|---|---|
+| 1 | 两边的 public behavior 是否一致？ | ❌ **否** | **DRIFT-HOTRPC-001**：Top-100 有 16/100 与 Go 不同 |
+| 2 | 正常路径是否一致？ | ⚠️ **无法确认** | DRIFT-HOTRPC-002 ⇒ 进程从未跑起来过；001 已证伪「一致」 |
+| 3 | 边界输入是否一致？ | ⚠️ **部分** | 空 / 未知字段 / 零权重 / `topK` 负数一致；sketch 桶位不一致 |
+| 4 | NotFound / Empty / Null 是否一致？ | ✅ 一致 | 矩阵 4/28/34；`redis.Nil` 与 Spring 空集合语义等价 |
+| 5 | Error meaning 是否一致？ | ⚠️ **部分** | 查询面 UNKNOWN 一致；**panic 面不一致**（006）；Redis 重试面不一致（004） |
+| 6 | Error propagation 是否一致？ | ⚠️ **部分** | 同上；另外 listener 的容器错误处理**无运行证据**（007） |
+| 7 | External dependency failure 是否一致？ | ❌ **否** | 004（重试）+ 005（位点提交节奏） |
+| 8 | Cache hit / miss 是否一致？ | ✅ N/A 一致 | 本组件无缓存层 |
+| 9 | Transaction boundary 是否一致？ | ✅ N/A 一致 | 两侧都无事务 |
+| 10 | State transition 是否一致？ | ⚠️ **部分** | 消费侧一致；分区状态机因 SD-1 不同（Go 走不到 revoke） |
+| 11 | Side effects 是否一致？ | ⚠️ **部分** | Redis keyspace 一致；Kafka 位点窗口不同；指标**无暴露端点** |
+| 12 | Ordering 是否一致？ | ✅ 一致 | proto message / 字段号逐条一致；TopK 并列项两侧都不承诺次序 |
+| 13 | Retry 是否一致？ | ❌ **否** | Kafka 侧一致（都 0 重试）；**Redis 侧 Go 3 次 / RAG 0 次**（004） |
+| 14 | Timeout scope 是否一致？ | ⚠️ **部分** | gRPC deadline 2s 一致；Redis 命令 3s 一致；**连接超时 5s vs 10s**（UNR-3） |
+| 15 | Concurrency semantics 是否一致？ | ❌ **否** | 003（单线程调度器）+ SD-1（锁）+ 006（panic） |
+| 16 | Authentication / Authorization 是否一致？ | ✅ N/A 一致 | 两侧都无鉴权（实测依赖树无安全组件） |
+| 17 | Serialization semantics 是否一致？ | ❌ **否** | JSON 层一致；但 **DRIFT-HOTRPC-001 就在哈希 / 桶位这一层**；proto 无回归网（UNR-8） |
+| 18 | Lifecycle 是否一致？ | ❌ **否** | **DRIFT-HOTRPC-002：RAG 进程启动失败** |
+
+### 判定
+
+```text
+SEMANTICALLY NOT EQUIVALENT
+```
+
+**判定依据（三条，任一即足以否定）**：
+1. **DRIFT-HOTRPC-001** —— 核心算法的桶位在约 **49.5%** 的 key 上与真源不同，
+   双侧活体对拍实测 **Top-100 榜单 16 条不同**。热榜是本组件唯一的对外产物。
+2. **DRIFT-HOTRPC-002** —— 进程**启动失败**，当前可观察行为为零。
+   §39 第 2 项「正常路径是否一致」因此**无法确认**（比「不一致」更糟）。
+3. **DRIFT-HOTRPC-003 / 004 / 005 / 006** —— 4 条 OBSERVABLE DIFFERENCE
+   落在并发度、外部依赖失败、位点副作用、异常路径四个维度上。
+
+**⚠️ 不得被下列事实误导**：
+- 「46 条绿测试全绿」「10/10 变异全变红」「proto 逐字节一致」「指标名逐字节一致」
+  —— 这四项**全部仍然成立**，且**全部与本次判定不矛盾**。它们分别锁住了：
+  drop 契约与指标次序、`uint32` 比较路径、wire contract、指标名。
+  它们**没有**覆盖：桶位哈希、进程启动、装配层、Redis 重试、位点提交节奏。
+- 本轮**没有推翻**第一轮的 SD-1 / SD-2 / SD-3 三条有意偏离 —— 复核后仍成立（SD-2 还可降级）。
+
+**收口本判定需要的最小动作（按依赖排序）**：
+1. 修 `DRIFT-HOTRPC-002`（照抄 `article-rpc` 的 `Jackson2ObjectMapperConfiguration`）⇒ **先让进程能起**；
+2. 起一次进程 + 补 `DRIFT-HOTRPC-007` 要求的装配层测试 ⇒ 把「注解存在」变成「机制生效」；
+3. 修 `DRIFT-HOTRPC-001`（`Long.remainderUnsigned`）+ 补一条**对拍 fixture 测试**（不是行为测试）；
+4. 决定 `DRIFT-HOTRPC-004` 的口径（建议显式化现状）、`DRIFT-HOTRPC-006` 要不要签字；
+5. 起真 Redis + 真 Kafka 做 IT，消掉 UNR-1 / 2 / 4 / 5。
 

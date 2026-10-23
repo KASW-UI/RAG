@@ -103,14 +103,22 @@ public interface ArticlePublicMapper {
             + "LEFT JOIN article_publication p ON p.article_id = a.id\n"
             + "WHERE a.deleted_at IS NULL AND\n"
             + PUBLIC_ARTICLE_PREDICATE_CDATA + "\n"
-            + "<where>"
+            // 🔴 刻意<b>不用</b> MyBatis 的 <where> 元素。
+            //    <where> 的职责是「本段非空时补一个 WHERE 关键字并剥掉开头的 AND」，
+            //    而本查询的基础 SQL 里**已经有** `WHERE a.deleted_at IS NULL AND <可见谓词>`，
+            //    再套一层 <where> 就会生成**两个 WHERE 关键字** ⇒
+            //    `syntax error at or near "WHERE"`（PG 直接拒收）。
+            //    三个 <if> 各自以 ` AND (...)` 开头，直接顺序拼接即可。
+            //    也不存在「<where> 空内容要剥前缀」的问题：基础 WHERE 无条件存在。
+            //    Go 出处：internal/model/article_public.go:62-88 是链式 query.Where(...)，
+            //    由 GORM 以 AND 组合，语义与这里的顺序拼接同构。
             + "<if test=\"manualTypeTag != null and manualTypeTag != ''\">"
             + "<![CDATA[" + " AND ((p.state = 'published' AND EXISTS (\n"
             + "        SELECT 1 FROM article_revision r WHERE r.article_id = a.id\n"
             + "          AND r.revision_id = p.current_revision AND r.manual_type_tag = #{manualTypeTag}))\n"
             + "   OR (p.article_id IS NULL AND a.manual_type_tag = #{manualTypeTag}))" + "]]>"
             + "</if>"
-            + "<if test=\"secondaryTag != null and secondaryTag != ''\">"
+            + "<if test=\"secondaryTagJson != null and secondaryTagJson != ''\">"
             + "<![CDATA[" + " AND ((p.state = 'published' AND EXISTS (\n"
             + "        SELECT 1 FROM article_revision r WHERE r.article_id = a.id\n"
             + "          AND r.revision_id = p.current_revision\n"
@@ -120,7 +128,6 @@ public interface ArticlePublicMapper {
             + "<if test=\"authorId != null and authorId != ''\">"
             + "<![CDATA[ AND a.author_id = #{authorId}]]>"
             + "</if>"
-            + "</where>"
             + "</script>")
     long countPublic(@Param("manualTypeTag") String manualTypeTag,
                      @Param("secondaryTagJson") String secondaryTagJson,
@@ -146,14 +153,16 @@ public interface ArticlePublicMapper {
             + "LEFT JOIN article_publication p ON p.article_id = a.id\n"
             + "WHERE a.deleted_at IS NULL AND\n"
             + PUBLIC_ARTICLE_PREDICATE_CDATA + "\n"
-            + "<where>"
+            // 🔴 刻意<b>不用</b> <where> 元素 —— 理由与 countPublic 处完全相同：
+            //    基础 SQL 已有 WHERE，再套 <where> 会生成两个 WHERE 关键字（PG 语法错）。
+            //    count 与 page 必须共用同一套拼接方式，否则 total 与页内容会对不上。
             + "<if test=\"manualTypeTag != null and manualTypeTag != ''\">"
             + "<![CDATA[" + " AND ((p.state = 'published' AND EXISTS (\n"
             + "        SELECT 1 FROM article_revision r WHERE r.article_id = a.id\n"
             + "          AND r.revision_id = p.current_revision AND r.manual_type_tag = #{manualTypeTag}))\n"
             + "   OR (p.article_id IS NULL AND a.manual_type_tag = #{manualTypeTag}))" + "]]>"
             + "</if>"
-            + "<if test=\"secondaryTag != null and secondaryTag != ''\">"
+            + "<if test=\"secondaryTagJson != null and secondaryTagJson != ''\">"
             + "<![CDATA[" + " AND ((p.state = 'published' AND EXISTS (\n"
             + "        SELECT 1 FROM article_revision r WHERE r.article_id = a.id\n"
             + "          AND r.revision_id = p.current_revision\n"
@@ -163,7 +172,6 @@ public interface ArticlePublicMapper {
             + "<if test=\"authorId != null and authorId != ''\">"
             + "<![CDATA[ AND a.author_id = #{authorId}]]>"
             + "</if>"
-            + "</where>"
             + " ORDER BY\n"
             + "<choose>"
             + "  <when test=\"sortBy == 'view_count'\">a.view_count</when>\n"
@@ -209,6 +217,7 @@ public interface ArticlePublicMapper {
             + "WHERE p.state = 'published' AND r.article_id IN\n"
             + "<foreach item='id' collection='articleIds' open='(' separator=',' close=')'>#{id}</foreach>\n"
             + "</script>")
+    @ResultMap("com.rag.article.article.rpc.mapper.ArticleRevisionMapper.articleRevisionEntityResultMap")
     List<ArticleRevisionEntity> selectRevisionsForPublished(@Param("articleIds") List<String> articleIds);
 
     /**

@@ -480,6 +480,98 @@ class ArticleTransactionWiringTest {
     }
 
     // ==================================================================
+    // 7. article.updated_at 自动推进（Go gorm:"autoUpdateTime" 的 Java 对应物）
+    // ==================================================================
+
+    /**
+     * 🔴 S-3：{@code updateById} 必须真的推进 {@code updated_at}。
+     *
+     * <p><b>Go 出处</b>：声明点 {@code service/article/rpc/internal/model/article.go:31}
+     * {@code UpdatedAt time.Time `gorm:"autoUpdateTime"`}；
+     * <b>消费点</b> {@code gorm@v1.31.2/callbacks/update.go:243-259}：
+     * <pre>{@code
+     * if field.AutoUpdateTime > 0 && value[field.Name] == nil && value[field.DBName] == nil {
+     *     if v, ok := selectColumns[field.DBName]; (ok && v) || !ok {
+     *         now := stmt.DB.NowFunc(); assignValue(field, now)
+     *         set = append(set, clause.Assignment{Column: …, Value: now})
+     * }}}</pre>
+     *
+     * <p><b>修复前为什么静默不推进</b>：{@code ArticleEntity.updatedAt} 没有
+     * {@code @TableField(fill = INSERT_UPDATE)}，而 {@code updateById} 的默认
+     * {@code updateStrategy = NOT_NULL} 会把实体里那个<b>从库里读回来的陈旧值原样写回</b>
+     * ⇒ {@code updated_at} 永远停在建行那一刻。实测手段：把 {@code updated_at}
+     * 手工推到过去，再走一次真实更新，看它有没有往前走。
+     *
+     * <p>⚠️ <b>本用例的形状是被缺陷决定的</b>：必须<b>先读出实体</b>（携带陈旧值）
+     * 再 {@code updateById} 回去 —— 直接 new 一个 {@code updatedAt = null} 的实体
+     * 测不出问题，因为那样 {@code NOT_NULL} 会跳过该列，恰好「看起来是好的」。
+     */
+    @Test
+    @DisplayName("🔴 Go: updateById 推进 updated_at（autoUpdateTime 的 Java 对应）")
+    void updateByIdAdvancesUpdatedAt() {
+        String articleId = "ts-advance";
+        insertArticle(articleId);
+        // 把 updated_at 推到 2020，让「有没有前进」无歧义
+        jdbcTemplate.update("UPDATE article SET updated_at = TIMESTAMPTZ '2020-01-01 00:00:00+00' "
+                + "WHERE id = ?", articleId);
+        OffsetDateTime before = updatedAtOf(articleId);
+
+        // 关键：走真实读-改-写路径（域服务 8 处写路径全是这个形状）
+        ArticleEntity loaded = articleMapper.selectById(articleId);
+        assertEquals(before, loaded.getUpdatedAt(), "前置校验：实体确实携带了陈旧值");
+
+        loaded.setBrief("brief-changed");
+        articleMapper.updateById(loaded);
+
+        OffsetDateTime after = updatedAtOf(articleId);
+        assertTrue(after.isAfter(before),
+                "updated_at 必须前进（GORM autoUpdateTime 的语义）；"
+                        + "若仍等于 " + before + "，说明 MetaObjectHandler 没触发"
+                        + "或 @TableField(fill=INSERT_UPDATE) 没生效 —— 注意这两者都是静默的");
+        assertEquals("brief-changed", jdbcTemplate.queryForObject(
+                "SELECT brief FROM article WHERE id = ?", String.class, articleId),
+                "同一句 UPDATE 里的业务列必须真的写进去（否则本用例可能只是在测一个空转的语句）");
+    }
+
+    /**
+     * 🔴 S-4：{@code UpdateColumn} 式的「只改一列」<b>不许</b>顺带推进 {@code updated_at}。
+     *
+     * <p><b>这是 S-3 的镜像约束</b>，也是 Go 侧 {@code !stmt.SkipHooks} 那一半：
+     * {@code UpdateColumn} 会置 {@code SkipHooks=true}，{@code autoUpdateTime} 因此不生效
+     * ——Go 侧只有两处这样的路径：
+     * {@code internal/model/article.go:123} 与 {@code internal/model/article_public.go:159}，
+     * 两处都是 {@code UpdateColumn("view_count", gorm.Expr("view_count + 1", 1))}。
+     *
+     * <p>Java 侧的对应实现是<b>原生 {@code @Update} 注解</b>（{@link ArticleMapper#incrViewCount}），
+     * 完全绕开 MyBatis-Plus ⇒ handler 天然不会在它上面触发。
+     *
+     * <p>⚠️ <b>为什么必须单独锁</b>：若有人日后把 {@code incrViewCount} 改写成
+     * {@code LambdaUpdateWrapper} + {@code update(null, wrapper)}，或把 MetaObjectHandler
+     * 改成无条件改写，两条用例会<b>只有这一条变红</b>。只测 S-3 抓不到那个改动。
+     */
+    @Test
+    @DisplayName("🔴 Go: view_count 自增不推进 updated_at（等价于 UpdateColumn 的 SkipHooks）")
+    void viewCountIncrementDoesNotTouchUpdatedAt() {
+        String articleId = "ts-skiphooks";
+        insertArticle(articleId);
+        jdbcTemplate.update("UPDATE article SET updated_at = TIMESTAMPTZ '2020-01-01 00:00:00+00' "
+                + "WHERE id = ?", articleId);
+        OffsetDateTime before = updatedAtOf(articleId);
+
+        articleMapper.incrViewCount(articleId);
+
+        assertEquals(1, viewCountOf(articleId), "前置校验：阅读量确实自增了");
+        assertEquals(before, updatedAtOf(articleId),
+                "Go 的 UpdateColumn 置 SkipHooks=true ⇒ autoUpdateTime 不生效；"
+                        + "若这里也前进了，说明 handler 的作用面比 Go 更宽");
+    }
+
+    private OffsetDateTime updatedAtOf(String articleId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT updated_at FROM article WHERE id = ?", OffsetDateTime.class, articleId);
+    }
+
+    // ==================================================================
     // 辅助
     // ==================================================================
 

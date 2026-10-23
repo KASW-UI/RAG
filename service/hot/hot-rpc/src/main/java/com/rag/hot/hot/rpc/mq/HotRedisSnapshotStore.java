@@ -7,6 +7,7 @@ import com.rag.hot.hot.rpc.domain.HeavyKeeper;
 import com.rag.hot.hot.rpc.metrics.HotRpcMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
@@ -88,7 +89,7 @@ public class HotRedisSnapshotStore {
     public HotRedisSnapshotStore(StringRedisTemplate redis,
                                  HotPartitionSketchRegistry registry,
                                  HotRpcMetrics metrics,
-                                 TaskExecutor taskExecutor) {
+                                 @Qualifier("applicationTaskExecutor") TaskExecutor taskExecutor) {
         this.redis = redis;
         this.registry = registry;
         this.metrics = metrics;

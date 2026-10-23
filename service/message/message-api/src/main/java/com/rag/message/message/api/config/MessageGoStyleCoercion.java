@@ -71,6 +71,23 @@ public final class MessageGoStyleCoercion {
 
         // 补强 2：JSON 字符串不进布尔字段
         builder.withCoercionConfig(LogicalType.Boolean, cfg -> cfg
-                .setCoercion(CoercionInputShape.String, CoercionAction.Fail));
+                .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+                // 🔴 补强 3（2026-10-23，DRIFT-MSGAPI-005）：JSON **数字**也不进布尔字段。
+                //
+                // Go 出处：Go 的 encoding/json 对 number → bool 是**报错**：
+                //   json: cannot unmarshal number into Go struct field ... of type bool
+                // 而 Jackson 3 默认**接受**并静默转换（1 ⇒ true、0 ⇒ false）。
+                //
+                // ⚠️ 为什么这条是**投放事故级**的：message 域的
+                // `AdminSendNotificationReq.broadcast`（Go: `Broadcast bool json:"broadcast,optional"`）
+                // 决定「定向通知」还是「**全量广播**」。
+                // 一条本意为定向的请求写成 {"broadcast":1} ⇒ Java 侧静默变成 true ⇒
+                // **单播变全站广播**，而 Go 侧会直接拒绝这条请求。
+                //
+                // 📌 为什么可以**全域**加这条规则（而不是只针对 broadcast）：
+                // Go 的 encoding/json 对 bool 字段的 number 输入是**一律拒绝**的，
+                // 没有 `,string` 之类的例外（`stringOption` 只对数字类型生效，对 bool 无效）
+                // ⇒ 这条规则在 message 域是**全字段**成立的，不存在误伤。
+                .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail));
     }
 }

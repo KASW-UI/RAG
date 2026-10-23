@@ -433,6 +433,44 @@ class MessageApiMvcPipelineTest {
     }
 
     /**
+     * 🔴 <b>DRIFT-MSGAPI-005（2026-10-23 修）：JSON <b>数字</b>进布尔字段必须被拒。</b>
+     *
+     * <p><b>Go 出处</b>：Go 的 {@code encoding/json} 对 number → bool 是<b>报错</b>：
+     * <pre>
+     * json: cannot unmarshal number into Go struct field ... of type bool
+     * </pre>
+     * 而 Jackson 3 默认<b>接受</b>并静默转换（{@code 1 ⇒ true}、{@code 0 ⇒ false}）。
+     *
+     * <p><b>为什么这条是投放事故级</b>：{@code AdminSendNotificationReq.broadcast}
+     * （Go: {@code Broadcast bool \`json:"broadcast,optional"\`}）决定「定向通知」还是「<b>全量广播</b>」。
+     * 一条本意为定向的请求写成 {@code {"broadcast":1}} ⇒
+     * <b>修复前</b>：Java 侧静默变成 {@code true} ⇒ <b>单播变全站广播</b>，而 Go 侧会直接拒绝这条请求。
+     * <b>修复后</b>：解析失败 ⇒ 5001 ⇒ 零次下游调用。
+     *
+     * <p>⚠️ 与上面那条 {@code adminPlainScalarsRejectJsonString} 是<b>不同的输入形态</b>：
+     * 那条测的是 JSON <b>字符串</b>（{@code "true"}），这条测的是 JSON <b>数字</b>（{@code 1}）。
+     * 两条分别对应 {@code CoercionInputShape.String} 与 {@code CoercionInputShape.Integer}
+     * 两条独立的 coercion 配置，缺一不可。
+     */
+    @Test
+    @DisplayName("🔴 DRIFT-005：broadcast 收 JSON 数字 → 5001 且零次下游调用（防单播变全量广播）")
+    void adminBroadcastRejectsJsonNumber() throws Exception {
+        for (String body : new String[]{
+                "{\"broadcast\":1,\"title\":\"t\",\"content\":\"c\"}",
+                "{\"broadcast\":0,\"title\":\"t\",\"content\":\"c\"}"}) {
+            mockMvc.perform(post("/message/v1/admin/notifications/send")
+                            .header("Authorization", "Bearer " + adminToken())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(5001));
+        }
+        // 🔴 关键：不只是返回码要对，**下游必须一次都没被调用** ——
+        //    否则「误发全量」这个后果已经发生了，状态码再对也只是事后补救。
+        verify(stub, never()).sendNotification(any());
+    }
+
+    /**
      * {@code ,string} 字段<b>不受</b>补强规则影响：数字与字符串都放行。
      *
      * <p>这条是对 {@link com.rag.message.message.api.config.MessageGoStyleCoercion}

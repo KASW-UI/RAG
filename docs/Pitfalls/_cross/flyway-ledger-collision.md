@@ -1,8 +1,8 @@
 # 🔴 Pitfall：多个服务共用同一个 PG schema 时，Flyway 账本必然撞号
 
 > **归档时间**：2026-10-23 · **性质**：跨模块基础设施坑（影响 `message-rpc` / `like-rpc` / `article-rpc`）
-> **决策记录**：AGENTS.md §6.3 问题 4 · **状态**：**已定案，未实施**
-> **守门**：`tools/difftest/check-flyway-ledger.py`（未修复态实测 `EXIT=1`）
+> **决策记录**：AGENTS.md §6.3 问题 4 · **状态**：**配置层已修**（2026-10-23 实测 `EXIT=0`），**运行时验证仍缺 ⇒ 记 `UNKNOWN`**
+> **守门**：`tools/difftest/check-flyway-ledger.py`（由 `EXIT=1` 转 `EXIT=0`）
 
 ## 一句话
 
@@ -95,10 +95,20 @@ spring:
 - 要改 8 个 SQL 文件名，却**不解决**「账本是 schema 级」这个根因——
   只要还有第二个模块往同一 schema 放迁移，撞号就会再现
 
-## ⚠️ 实施前必读：本条尚未修
+## ✅ 实施状态（2026-10-23 01:32 实测核对）
 
-**三个 `application.yml` 的 `spring.flyway.table` 至今未添加。**
-下一个接手者请先跑 `tools/difftest/check-flyway-ledger.py` 确认现状为红，再实施。
+- **配置层已修**：`message-rpc` → `flyway_schema_history_message`、`like-rpc` → `flyway_schema_history_like`，
+  两个 `application.yml` 各加一行 `spring.flyway.table`，**未改任何迁移文件名**。
+- **`article-rpc` 按指示未动**，保持默认表名。这**不影响病根消除**：此时默认账本由 article 独占，
+  message/like 已各自让开 ⇒ 三本账互不共享。
+  代价是 article 的表名仍是默认值，**将来新增第 4 个模块若忘加 `table` 就会直接撞上 article**。
+- **守门脚本转绿**：`check-flyway-ledger.py` 由 `EXIT=1` → **`EXIT=0`**（同组三本账表名两两不同）。
+- ❌ **运行时验证仍未做 ⇒ 按 AGENTS.md §3.3 记 `UNKNOWN`，不得写成「已修复」**：
+  静态脚本只证明**声明层**不撞，不证明 Flyway 运行时真的按 `spring.flyway.table` 建账本。
+  真正的证明需要**真 PG 上 message-rpc 与 like-rpc 对启动**。
+- ⚠️ **文档缺陷**：多处文档声称运行时那一条「由各模块的 `FlywayLedgerIsolationTest` 负责」，
+  **该测试类全仓不存在**（`grep -r FlywayLedgerIsolationTest` 只命中文档自身）
+  —— 又一条「文件已写」型未核实断言。真要闭环：要么真写这个测试，要么改掉这句声明。
 
 **效力边界**：静态检查只保证**声明层**账本表名两两不同；
 **不证明 Flyway 运行时真的按 `spring.flyway.table` 建表** ——

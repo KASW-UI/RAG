@@ -4,6 +4,9 @@ import com.rag.article.article.rpc.domain.ArticleRevisionEntity;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Result;
+import org.apache.ibatis.annotations.ResultMap;
+import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
@@ -30,8 +33,22 @@ public interface ArticleRevisionMapper {
      * Go 侧显式带上了 article_id。
      *
      * @return null 表示不存在（Go 侧对应 {@code gorm.ErrRecordNotFound}）
+     *
+     * <p>🔴 <b>本方法承载 {@code articleRevisionEntityResultMap} 的声明</b> ——
+     * 与 {@link ArticleMapper#selectById} 承载 {@code articleEntityResultMap} 同理。
+     * 声明理由（以及为什么 {@code @TableName(autoResultMap = true)} 救不了这里）见
+     * {@link ArticleMapper#selectById} 上方那段说明：本接口自定义 {@code @Select} 若不带
+     * {@code @ResultMap}，{@code secondary_tags} 会因 {@code List<String>} 不在 TypeHandler
+     * 全局注册表里而被<b>静默跳过</b>，实体字段恒为 {@code null}。
+     *
+     * <p>⚠️ 只列 jsonb 列；其余列走 MyBatis 的 {@code autoMappingBehavior=PARTIAL} 自动补齐，
+     * 所以新增普通列时不需要来这里加一行。
      */
     @Select("SELECT * FROM article_revision WHERE article_id = #{articleId} AND revision_id = #{revisionId}")
+    @Results(id = "articleRevisionEntityResultMap", value = {
+            @Result(column = "secondary_tags", property = "secondaryTags",
+                    typeHandler = JsonbTypeHandler.StringListTypeHandler.class)
+    })
     ArticleRevisionEntity selectByRevisionId(@Param("articleId") String articleId,
                                              @Param("revisionId") String revisionId);
 
@@ -93,5 +110,6 @@ public interface ArticleRevisionMapper {
      * 必须能数出行数。
      */
     @Select("SELECT * FROM article_revision WHERE article_id = #{articleId} ORDER BY revision")
+    @ResultMap("articleRevisionEntityResultMap")
     List<ArticleRevisionEntity> selectByArticleId(@Param("articleId") String articleId);
 }

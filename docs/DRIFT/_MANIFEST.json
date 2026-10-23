@@ -120,7 +120,7 @@
         1864,
         1888
       ],
-      "dst": "docs/DRIFT/_cross/signed-deviations.md",
+      "dst": "docs/Intentional_Deviations/_cross/signed-deviations.md",
       "label": "§3.4 已知偏离主表（N-1..N-5）"
     },
     {
@@ -160,7 +160,7 @@
         2192,
         2331
       ],
-      "dst": "docs/DRIFT/common/_signed-deviations.md",
+      "dst": "docs/Intentional_Deviations/common/_signed-deviations.md",
       "label": "§3.4.1 service/common 的 Java 端差异"
     },
     {
@@ -314,6 +314,15 @@
       ],
       "dst": "docs/Pitfalls/like/rpc.md",
       "label": "§3.3.3 Boot 4 把 Kafka 自动配置搬出 autoconfigure ⇒ @KafkaListener 静默失效"
+    },
+    {
+      "src": [
+        54,
+        101
+      ],
+      "dst": "docs/DRIFT/_cross/fix-round-2026-10-23.md",
+      "label": "2026-10-23 修复轮逐组件记录（含仍未修清单）",
+      "note": "元教训部分另入 docs/Pitfalls/_cross/fix-round-lessons.md"
     }
   ],
   "_kept_in_agents_md": [
@@ -366,5 +375,11 @@
     "moved_at": "2026-10-23 00:3x",
     "new_entries": 6,
     "note": "§3.3 的案例段进 docs/Pitfalls/（踩坑档案），规则条文留在 AGENTS.md §3.3 并加指针。"
+  },
+  "_rehomed": {
+    "signed_deviations": {
+      "moved_at": "2026-10-23 02:5x",
+      "note": "§3.4「已知偏离（有意为之，需留档）」独立成 docs/Intentional_Deviations/ 档案；台账保留源行区间不变。"
+    }
   }
 }

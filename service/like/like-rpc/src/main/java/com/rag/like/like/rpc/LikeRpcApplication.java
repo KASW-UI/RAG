@@ -8,6 +8,7 @@ import com.rag.common.spring.ObservabilityProperties;
 import com.rag.common.spring.RpcServerInterceptorFactory;
 import com.rag.common.spring.SnowflakeBean;
 import com.rag.common.spring.SnowflakeProperties;
+import com.rag.like.like.rpc.config.Jackson2ObjectMapperConfiguration;
 import com.rag.like.like.rpc.mq.LikeUpdateKafkaListener;
 import io.grpc.ServerInterceptor;
 import net.devh.boot.grpc.server.serverfactory.GrpcServerConfigurer;
@@ -70,7 +71,10 @@ import org.mybatis.spring.annotation.MapperScan;
 
         // ===== 超时必须能真正取消在途 SQL =====
         DeadlineQueryTimeoutInjector.class, // 按线程 DeadlineState 给每条 SQL 设 setQueryTimeout
-        SqlTimeoutStatusTranslator.class    // 把 57014 query_canceled 翻成 DEADLINE_EXCEEDED
+        SqlTimeoutStatusTranslator.class,   // 把 57014 query_canceled 翻成 DEADLINE_EXCEEDED
+
+        // ===== Jackson 2 的 ObjectMapper Bean =====
+        Jackson2ObjectMapperConfiguration.class // Boot 4 拆模块后 Jackson 自动配置只产 Jackson 3，缺它上下文起不来
 })
 public class LikeRpcApplication {
 

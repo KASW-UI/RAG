@@ -1,3 +1,1089 @@
+# 语义对照台账 · `service/users/user/user-api`
+
+| | |
+|---|---|
+| **Go 侧** | `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/user/user/api`（含 `service/user/user/identity/`，该组件的一部分） |
+| **RAG 侧** | `/Users/pr/Documents/java&golang/RAG/service/users/user/user-api` |
+| **核对日期** | **2026-10-23**（本轮） |
+| **判定** | **SEMANTICALLY NOT EQUIVALENT** —— 2 项 SEMANTIC MISMATCH + 7 项 OBSERVABLE DIFFERENCE + 5 项 UNRESOLVED |
+| **规模** | 9 个 HTTP 端点 / 9 个 gRPC 出向调用 / 1 个 Redis 出向 / 7 个业务码分支族 |
+
+## 证据强度声明（本台账每条结论都带标注）
+
+| 标记 | 含义 | 本轮占比 |
+|---|---|---|
+| `静态源码` | 只读了两侧源码，未运行任何一侧 | **绝大多数条目** |
+| `字节码核实` | 对 Spring jar 做了 `javap` 反汇编取证（不是靠记忆/文档） | DRIFT-USERAPI-006 |
+| `真 PG` | 真 PostgreSQL 参与 | 本组件无 DB 访问 → 0 条 |
+| `纯 Mockito` | 数据层被 mock | 0 条（本组件无 DB） |
+| `双侧活体对拍` | Go 进程与 RAG 进程同时跑 | **0 条** |
+
+> ⚠️ **本轮没有任何一条结论来自双侧活体对拍。** 全部是 `静态源码` + 1 条 `字节码核实`。
+> 按 `AGENTS.md` §3.3 / spec 硬约束 1、3：**「静态对照」不等于「已闭环」**。
+> 下列 UNRESOLVED 不是客套话，是这份台账的诚实边界。
+
+> ⚠️ **依赖前提（用户任务书给定，必须原样保留）**：`user-rpc` 由**另一个并行会话**审查。
+> 本组件**不假设对端 rpc 是正确的**。凡结论依赖 `user-rpc` 响应语义的，一律进 §9 并注明「需合并判读」。
+
+## 编号说明（为什么不用 `DRIFT-003/004/005/...`）
+
+本文件此前**没有任何 `DRIFT-*` 编号条目**（只有 §0 的搬移留档 N-1/N-2 与 §6.1 表格）。
+但 RAG 源码 javadoc 已在引用 users 域的**全局**编号：
+`DRIFT-003`（`AvatarSelectService.java:79`）、`DRIFT-004`（`GlobalExceptionHandler.java:59,282`）、
+`DRIFT-005`（`UserInfo.java:15`、`HttpMiddleware.java:543`）、`DRIFT-006`（`GlobalResponseAdvice.java:60`、`GlobalExceptionHandler.java:192`）、
+`DRIFT-009`（`BearerTokenExtractor.java:14,72`）、`DRIFT-010`（同上）、
+`DRIFT-016`（`GoStyleRequest.java:34`、`UserController.java:67`）、
+`DRIFT-NEW-001/008/014/015/016`（`docs/DRIFT/users/_shared.md`）。
+
+⇒ 本轮新条目**统一使用 `DRIFT-USERAPI-0xx`**，与上述全部已有编号零冲突。
+（若日后收敛到全局号段，`USERAPI-00x` 是本组件的稳定映射键。）
+
+---
+
+## 1. Component Contract（§4 + §5）
+
+```text
+Component:   user-api —— User Center 的 HTTP 网关
+Purpose:     ① 认证（登录/注销，令牌签发与拉黑）
+             ② 身份解析（JWT claim → 权威 user-rpc 的活跃用户）
+             ③ 用户资料读写的事务编排代理（自身不持有任何 DB）
+             ④ 头像三端点的编排代理
+             ⑤ 统一响应信封 {code,msg,data} + 业务埋点
+
+Public API:  9 个 HTTP 端点（Go 9 个 / RAG 9 个，数量一致）
+Dependencies:
+  - user-rpc（gRPC，9 个方法）—— 唯一的业务真相
+  - Redis（黑名单 EXISTS）—— 唯一的鉴权外部依赖
+  - 无 DB、无 MQ、无外部 HTTP
+State:       无状态。Service / Interceptor / Advice 均无可变字段
+             （计数器在 Micrometer 内部，逻辑上无状态）
+Side Effects: ① 登录成功时签发 JWT（无持久化）
+              ② 注销把 token 写进 Redis 黑名单（副作用发生在 **user-rpc** 侧）
+              ③ metrics 计数（login 5 个 + register 2 个）
+              ④ OTel span / access log（HttpMiddleware）
+Failure Model:
+  - 输入错误 → HTTP 400 + text/plain（Go `http.Error` 形状）
+  - 业务错误 → HTTP 200 + {code, 业务码, data:null}
+  - 鉴权错误 → HTTP 401 + {code:1006, ...}
+  - 框架错误 → 405 / 415 / 500
+```
+
+**成功意味着什么**：Go 侧成功 = `httpx.OkJson` 写出 HTTP 200 + `code==200`。
+`data` 里的 `success` 布尔只出现在 delete / logout 两个端点，且**只可能是 `true`**（见 §6.11）。
+
+---
+
+## 2. GO-SEMANTIC-MODEL（§7）
+
+### 2.1 路由与鉴权拓扑
+
+```text
+usercenter.go:35-41
+  httpTimeout := observability.DisableNativeRestTimeout(&c.RestConf)   // 读 conf.Timeout
+  server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, ...))  // 全局 Use
+  handler.RegisterHandlers(server, ctx)
+```
+
+`rest/engine.go:101-116 bindRoute` 决定链序：
+
+```text
+chn := ng.buildChainWithNativeMiddlewares(...)   // Trace/Log/Prometheus/MaxConns/
+                                                  // Breaker/Shedding/Timeout(已关)/Recover/
+                                                  // Metrics/MaxBytes/Gunzip   ← 索引 0，最外层
+chn  = ng.appendAuthHandler(fr, chn, ...)        // handler.Authorize(JWT)   ← 追加
+for _, mw := range ng.middlewares { chn = chn.Append(...) }   // observability  ← 再追加
+handle := chn.ThenFunc(route.Handler)            // route.Handler 内含黑名单包装
+```
+
+`rest/chain/chain.go` 的 `Then = m0(m1(...mN(h)))` ⇒ 索引 0 最外层先执行：
+
+```text
+执行序：原生中间件 → MaxBytes → … → JWT 验签 → observability(3s) → 黑名单 → handler
+```
+
+⚠️ **两个可观察推论**（本轮多处结论的根）：
+1. **JWT 401 不经过 observability** ⇒ 不计入 `markHTTPResult`。
+2. **黑名单在 3s 预算之内、JWT 验签在 3s 预算之外。**
+
+### 2.2 public / protected 路径集合（`internal/handler/routes.go`）
+
+| 路径 | Method | 中间件 |
+|---|---|---|
+| `/usercenter/v1/user/login` | POST | **无** |
+| `/usercenter/v1/user/register` | POST | **无** |
+| `/usercenter/v1/user/delete` | DELETE | WithJwt + CheckBlacklist |
+| `/usercenter/v1/user/get` | GET | WithJwt + CheckBlacklist |
+| `/usercenter/v1/user/avatar/history` | GET | WithJwt + CheckBlacklist |
+| `/usercenter/v1/user/logout` | POST | WithJwt + CheckBlacklist |
+| `/usercenter/v1/user/avatar` | POST | WithJwt + CheckBlacklist |
+| `/usercenter/v1/user/avatar/select` | POST | WithJwt + CheckBlacklist |
+| `/usercenter/v1/user/update` | POST | WithJwt + CheckBlacklist |
+
+### 2.3 逐 OP 的 Go 语义模型（§6 字段）
+
+<details><summary><b>OP-01 Login</b>（public）</summary>
+
+```text
+Operation:   POST /usercenter/v1/user/login
+Input:       LoginReq{Username string `json:"username"`, Password string `json:"password"`}  ← 无 ,optional ⇒ 标量必填
+Precondition: 无（public）
+Trigger:     handler 调 httpx.Parse → Logic.Login
+Processing:  1) Parse 失败 → httpx.ErrorCtx → 400 text/plain（见 §2.0）
+             2) UserRpc.Login({Username, Password})
+             3) err → metrics rpc_error；Internal→5001 / default→1015      (loginlogic.go:49-55)
+             4) rpcResp.Status==1 → metrics wrong_password → 1002         (loginlogic.go:58-62)
+             5) rpcResp.Status==2 → metrics user_banned → 1011           (loginlogic.go:64-68)
+             6) jwt.GetToken(secret, now, AccessExpire, rpcResp.Uid)     (loginlogic.go:74)
+                失败 → metrics token_error → 1006
+             7) 成功 → metrics success
+External:    user-rpc.Login；Redis 无
+Result:      200 + {code:200, msg:"OK", data:{token:"<HS256 JWT>"}}
+Timeout:     受 observability 3s 预算约束（config.go:55 `Timeout json:",default=3000"`）
+Retry:       无
+Concurrency: 无
+```
+</details>
+
+<details><summary><b>OP-02 Register</b>（public）</summary>
+
+```text
+Input:       CreateUserReq{Username, Password 无 tag；Email `,omitempty`；Extrainfo map `,omitempty`}
+             ⚠️ go-zero 只认 `,optional`（core/mapping/utils.go:18-20 optionalOption）；
+                `,omitempty` 不在选项表里、被静默忽略 ⇒ Username/Password/Email **三者全必填**；
+                Extrainfo 是 map ⇒ 走 unmarshaler.go 的 Map 分支、**缺席不校验**，但显式 null 报 mustn't be nil
+External:    user-rpc.Register
+Result:      200 + {code:200, msg:"OK", data:{uid:"<string>"}}     ← CreateUserResp.Uid `json:"uid,string"`
+Error map:   Internal→5001 / AlreadyExists→1001 / default→1015      (registerlogic.go:49-56)
+             ⚠️ **没有 NotFound 分支** ⇒ NotFound 落 default→1015
+```
+</details>
+
+<details><summary><b>OP-03 Get</b>（protected）</summary>
+
+```text
+Input:       GetUserReq{}（零字段，handler 仍调 httpx.Parse）
+Processing:  identity.ResolveUser(ctx, UserRpc)   —— getuserlogic.go:36
+             5 个 sentinel + 1 个 gRPC 分支，逐条见 OP-08
+Result:      200 + {code:200, msg:"OK", data:{user:{uid:"…",score:0,username,email?,extra_info?}, found:true}}
+             ⚠️ UserInfo.Score `json:"score"` 无 omitempty ⇒ **恒输出 0**
+                （getuserlogic.go:66-71 构造时不赋 Score）
+Metrics:     不写（1:1）
+```
+</details>
+
+<details><summary><b>OP-04..OP-09（update / delete / logout / avatar ×3）</b></summary>
+
+```text
+update   Input UpdateUserReq 四字段全 `,optional` ⇒ 一个都不校验
+         uid ← ctx["userId"].(json.Number).Int64()      ← updateuserlogic.go:36-46 【无 uid<=0 判定】
+         Error Internal→5001 / AlreadyExists→1001 / NotFound→1003 / default→1015
+
+delete   Input DeleteUserReq{}（空 struct）
+         uid ← ctx["userId"].(json.Number).Int64()      ← deleteuserlogic.go:37-47 【无 uid<=0 判定】
+         Error 条件是 `err != nil || rpcResp.Success == false`
+               NotFound→1003 / Internal→5001 / default→1015   ← deleteuserlogic.go:54-64
+               （err==nil 且 Success==false 时 status.FromError(nil)=OK ⇒ default⇒1015）
+         成功 → data:{success:true}
+
+logout   token ← ctx["jwt_token"]（黑名单中间件写入）；nil → 1004    ← logoutlogic.go:36-40
+         Error Internal→5001 / default→1015                        ← logoutlogic.go:48-53
+         成功 → data:{success:true}
+
+avatar/history  uid ← identity.ClaimedUID(ctx)【有 uid<=0 判定】
+                Limit 硬编码 30（getavatarhistorylogic.go:40）
+                Error NotFound→1003 / Internal→5001 / default→1015
+                空 list ⇒ make([]…,0,0) ⇒ "list":[]
+
+avatar/upload   avatar_url TrimSpace=="" → 500（uploadavatarlogic.go:40-43）
+                uid ← identity.ClaimedUID(ctx)【有 uid<=0 判定】
+                InvalidArgument→500 / NotFound→1003 / Internal→5001 / default→1015
+
+avatar/select   history_id TrimSpace=="" → 500（selectavatarlogic.go:40-43）
+                uid ← identity.ClaimedUID(ctx)【有 uid<=0 判定】
+                InvalidArgument→500 / NotFound→**500** / Internal→5001 / default→1015
+                ⚠️ NotFound→500 是 Go 刻意保留的区分（不是笔误）
+```
+
+### 2.4 identity 层的两套 uid 语义（**本轮最重要的 Go 侧事实**）
+
+| 入口 | 取值方式 | 出处 | `uid <= 0` |
+|---|---|---|---|
+| `get` | `identity.ResolveUser → ClaimedUID` | `identity/resolve.go:66-79` | **拒绝**（`:75`） |
+| `avatar/history` `avatar` `avatar/select` | `currentUserID → identity.ClaimedUID` | `avatarhelpers.go:11-13` | **拒绝** |
+| **`delete`** | **Logic 内联** `ctx.Value("userId").(json.Number)` + `Int64()` | `deleteuserlogic.go:37-47` | **不拒绝** |
+| **`update`** | **Logic 内联**，同上 | `updateuserlogic.go:36-46` | **不拒绝** |
+
+Go 侧自己已经实测过这条：`internal/logic/user/getuserlogic_test.go:51-52`
+（`{"zero", json.Number("0"), …, errmsg.ErrorTokenRuntime, 0}` 与
+`{"client-value-not-jwt", int64(9123), …, errmsg.ErrorTokenRuntime, 0}`）
+——但**只覆盖了 `get`**，delete/update 从未被测过，所以两套语义在 Go 侧一直并存。
+
+---
+
+## 3. SPRINGBOOT-SEMANTIC-MODEL（§7 / §34，与 §2 同构）
+
+### 3.1 路由与鉴权拓扑
+
+```text
+UserApiApplication.java:21-24  scanBasePackages = {com.rag.users.user.api, com.rag.common}
+WebMvcConfig.java:56-59        registry.addInterceptor(jwtAuthInterceptor).addPathPatterns("/user/v1/**")
+com.rag.common.spring.HttpMiddlewareFilter:36-37   @Component @Order(HIGHEST_PRECEDENCE + 5)  → Servlet Filter
+com.rag.common.protection.GoStyleMaxBytesFilter:82-83  @Component @Order(+6)              → Servlet Filter
+```
+
+```text
+执行序：全部 Servlet Filter（MaxBytes → HttpMiddleware 3s）→ DispatcherServlet
+        → JwtAuthInterceptor.preHandle（JWT → 黑名单）→ Controller → Service
+```
+
+⚠️ **与 Go 的结构性差异**：RAG 的 Filter 一律在 `DispatcherServlet` **外**，
+Go 的 MaxBytes 原生中间件在 JWT **外**（同为 index 0 侧）⇒ MaxBytes↔401 关系一致 ✅；
+但 **observability 在 Go 侧是 JWT 之内、RAG 侧是 JWT 之外** ⇒ 见 DRIFT-USERAPI-009。
+
+### 3.2 逐 OP 的 RAG 语义模型
+
+<details><summary><b>9 个端点的 RAG 侧入口</b>（`UserController.java`）</summary>
+
+| RAG 端点 | Method | JWT | 必填校验 | Service | 对应 Go |
+|---|---|---|---|---|---|
+| `/user/v1/register` | POST | ✗ | `GoStyleRequest.normalize` | `UserRegisterService` | OP-02 |
+| `/user/v1/login` | POST | ✗ | `GoStyleRequest.normalize` | `UserLoginService` | OP-01 |
+| `/user/v1/logout` | POST | ✓ | 无 | `UserLogoutService` | OP-07 |
+| `/user/v1/get` | POST | ✓ | 无（零字段 DTO） | `UserGetService` | OP-03 |
+| `/user/v1/update` | POST | ✓ | 无（全 `,optional`） | `UserUpdateService` | OP-05 |
+| `/user/v1/delete` | POST | ✓ | 无 | `UserDeleteService` | OP-06 |
+| `/user/v1/avatar/select` | POST | ✓ | `normalize` | `AvatarSelectService` | OP-09 |
+| `/user/v1/avatar` | POST | ✓ | `normalize` | `AvatarUploadService` | OP-08 |
+| `/user/v1/avatar/history` | POST | ✓ | 无 | `AvatarHistoryService` | OP-04 |
+
+public 路径集合（`JwtAuthInterceptor.java:65-67`）：
+`Set.of("/user/v1/register", "/user/v1/login")` ⇒ **与 Go 的 2 条 public 集合逐条一致** ✅
+（路径前缀不同属已签字偏离，见 §6.2）。
+
+</details>
+
+<details><summary><b>RAG 侧的 uid / token 取值</b></summary>
+
+```text
+JwtAuthInterceptor.java:146   request.setAttribute("userId", Long.valueOf(uid))
+JwtAuthInterceptor.java:184   request.setAttribute("jwt_token", jwtToken)
+IdentityResolver.java:97-110  claimedUID: 必须 instanceof Long 且 uid > 0，否则 ErrInvalidClaimException
+UserLogoutService.java:49-54 tokenAttr==null → 1004；(String) tokenAttr
+```
+
+⚠️ **RAG 把 Go 的两套 uid 语义合并成了一套**（`claimedUID` 全部端点共用）⇒ DRIFT-USERAPI-002。
+
+</details>
+
+<details><summary><b>RAG 的响应出口（3 条路径逐条核对）</b></summary>
+
+```text
+成功路径：Controller 返回 DTO
+        → GlobalResponseAdvice.beforeBodyWrite  包成 Response(200,"OK",body)
+        → HTTP 200 + application/json
+
+业务异常：Service 抛 BusinessException
+        → GlobalExceptionHandler.handleBusiness:49-56
+        → ResponseEntity(200).body(Response(code,msg,null))
+        → beforeBodyWrite 判 body instanceof Response ⇒ 放行【不二次包裹】
+        → HTTP 200 + application/json
+
+鉴权异常：JwtAuthInterceptor 抛 AuthenticationException
+        → handleAuthentication:73-78 → HTTP 401 + Response(1006,…)
+
+输入错误：GoStyleRequest.normalize 抛 GoRequiredFieldException
+        → handleGoRequiredField:185-189 → goStylePlainTextBadRequest:214-220
+        → HTTP 400 + text/plain + nosniff
+        → beforeBodyWrite 因 contentType 非 JSON 放行
+
+框架错误：HttpMessageNotReadable / 405 / 415 / Exception
+        → 400 text/plain / 405 空 / 415 空 / 500 + envelope(5001)
+```
+
+✅ **`@ResponseBodyAdvice` 二次包裹已修**：`GlobalResponseAdvice.java:57-59`（`null` 或 `Response` 直接放行）
++ `:70-73`（非 JSON contentType 放行）。
+✅ **HTTP 状态码语义已修**：`GlobalExceptionHandler.decideStatus:294-296` 恒 200，鉴权层单独走 401，
+且 `HttpMiddleware.ObservabilityResponseWriter.setStatus:560-575` 立即 propagate 到 underlying
+（DRIFT-FRAMEWORK-001 的修法），`setHeader/setContentType:660-704` 同样立即 propagate。
+
+</details>
+
+---
+
+## 4. Equivalence Matrix（§24 + §35）
+
+Result 只用 5 个枚举值。Evidence 列的强度标记见文件头。
+
+| # | Operation | Semantic Dimension | Go | Spring Boot | Result | Evidence |
+|---|---|---|---|---|---|---|
+| 1 | ALL | 路由前缀 `/usercenter/v1` → `/user/v1` | `/usercenter/v1/user/*` | `/user/v1/*` | OBSERVABLE DIFFERENCE（**已签字**） | `signed-deviations.md:8`；`routes.go:29,74` vs `UserController.java:100` · 静态源码 |
+| 2 | ALL | HTTP method（GET/DELETE 混用 → 全 POST） | 5 GET/DELETE | 全 POST | OBSERVABLE DIFFERENCE（**已签字**） | `signed-deviations.md:9`；`routes.go:36-70` · 静态源码 |
+| 3 | ALL | public 路径集合 | login, register | register, login | **EQUIVALENT** | `routes.go:16-30` vs `JwtAuthInterceptor.java:65-67` · 静态源码 |
+| 4 | ALL | protected 路径集合（7 条） | delete/get/history/logout/avatar/select/update | 同 7 条 | **EQUIVALENT**（前缀已计入 #1） | `routes.go:32-75` vs `UserController.java:154-204` · 静态源码 |
+| 5 | ALL | 响应信封 `{code,msg,data}` | `response.Response`（`common/response/response.go:3-7`，`data` 无 omitempty） | `com.rag.common.response.Response`（无 `@JsonInclude`） | **EQUIVALENT** | Go `httpx.OkJson` + RAG `GlobalResponseAdvice:74` · 静态源码 |
+| 6 | ALL | 业务失败的 HTTP 状态码 | 恒 200（`OkJson`） | 恒 200（`decideStatus:294-296`） | **EQUIVALENT** | `rest/httpx/responses.go:52` · 静态源码 |
+| 7 | Login | `Status==1 → 1002` | `loginlogic.go:58-62` | `UserLoginService.java:101-105` | **EQUIVALENT** | 静态源码 |
+| 8 | Login | `Status==2 → 1011` | `loginlogic.go:64-68` | `UserLoginService.java:108-112` | **EQUIVALENT** | 静态源码 |
+| 9 | Login | JWT 签发（HS256 / claim `userId` / `exp`+`iat`） | `jwt/jwt.go:7-15` | `JwtUtil.java:12-23` | **EQUIVALENT**（条件项见 U-002） | 静态源码 |
+| 10 | Register | email 必填（`,omitempty` ≠ `,optional`） | `types.go:9` | `RegisterReq.java:58` | **EQUIVALENT** | `core/mapping/utils.go:18-20`（消费点）· 静态源码 |
+| 11 | Register | `extra_info` 缺席不校验 / 显式 null 报错 | `unmarshaler.go` Map 分支 | `GoStyleRequired.explicitNull:67-71` | **EQUIVALENT** | `RegisterReq.java:61` · 静态源码 |
+| 12 | Register | `uid` 序列化为 **字符串** | `types.go:14 json:"uid,string"` | `RegisterResp.java:17-19` `String` | **EQUIVALENT** | 静态源码 |
+| 13 | Get | 5 个 identity sentinel → 5 个业务码 | `identity/resolve.go:99-111` | `IdentityResolver.java:131-148` | **EQUIVALENT** | 静态源码 |
+| 14 | Get | `status` presence（缺失 → 1015） | `resolve.go:105-107` | `IdentityResolver.java:142-144` `hasStatus()` | **EQUIVALENT** | 静态源码 |
+| 15 | Get | `user.Uid != claim → 5001` | `resolve.go:102-104` | `IdentityResolver.java:138-140` | **EQUIVALENT** | 静态源码 |
+| 16 | Get | `score` **恒输出 0** | `types.go:94` 无 omitempty + 不赋值 | `UserInfo.java:57` `getScore()` 兜底 0L | **EQUIVALENT** | 静态源码 |
+| 17 | Get/History | `uid <= 0 → 1006` | `resolve.go:75` | `IdentityResolver.java:106-108` | **EQUIVALENT** | 静态源码 |
+| 18 | **Update/Delete** | **`uid <= 0` 不拒绝，透传给 rpc** | `updateuserlogic.go:36-46` / `deleteuserlogic.go:37-47` | `IdentityResolver.claimedUID` **拒绝** | **SEMANTIC MISMATCH** | **DRIFT-USERAPI-002** · 静态源码 |
+| 19 | **ALL protected** | **`userId` claim 缺失/非数字 → 200 + 1006** | `authhandler.go:65-79` 不校验 claim；Logic 报 1006 走 `OkJson` | `JwtAuthInterceptor.java:138-153` 抛异常 → **401** | **SEMANTIC MISMATCH** | **DRIFT-USERAPI-001** · 静态源码 |
+| 20 | Delete | `Success==false` 且无 err → 1015 | `deleteuserlogic.go:54-64` | `UserDeleteService.java:67-70` | **EQUIVALENT** | 静态源码 |
+| 21 | Update | 全字段 `,optional`；缺席 vs 空串都不校验 | `types.go:48-53` | `UpdateUserReq`（无 `assertGoRequiredFields`） | **EQUIVALENT** | 静态源码 |
+| 22 | Update | `extra_info` map 透传 | `updateuserlogic.go:53` | `UserUpdateService.java:61` | **EQUIVALENT** | 静态源码 |
+| 23 | Logout | 无 `jwt_token` → 1004 | `logoutlogic.go:36-40` | `UserLogoutService.java:49-53` | **EQUIVALENT** | 静态源码 |
+| 24 | Logout | 成功 → `data:{success:true}` | `logoutlogic.go:55-57` | `UserLogoutService.java:65-67` | **EQUIVALENT** | 静态源码 |
+| 25 | Avatar/select | `NotFound → **500**`（非 1003） | `selectavatarlogic.go:53-56` | `AvatarSelectService.java:97-101` 显式 | **EQUIVALENT** | 静态源码（DRIFT-003 已修） |
+| 26 | Avatar/* | `history_id`/`avatar_url` TrimSpace 空 → 500 | `selectavatarlogic.go:40-43` / `uploadavatarlogic.go:40-43` | `AvatarSelectService.java:63-67` / `AvatarUploadService.java:65-69` | **EQUIVALENT** | 静态源码 |
+| 27 | Avatar/history | `Limit` 硬编码 30 | `getavatarhistorylogic.go:40` | `AvatarHistoryService.java:48,69` | **EQUIVALENT** | 静态源码 |
+| 28 | Avatar/* | 空列表 → `[]`（非 null） | `getavatarhistorylogic.go:55` `make(…,0,n)` | `AvatarHistoryService.java:80` `new ArrayList<>(0)` | **EQUIVALENT** | 静态源码 |
+| 29 | Avatar/* | `history` 字段不会是 null | `avatarhelpers.go:15-27`（nil→零值 struct） | `UserApiSupport.java:62`（proto3 `getHistory()` 返默认实例，永不为 null） | **EQUIVALENT** | 静态源码（proto `users.proto:105-108`） |
+| 30 | **ALL 6 个 rethrow 端点** | **gRPC code → 业务码** | 每个 Logic 自己的 switch（`default` 收窄） | `mapRPCStatusToCode:100-110` **通用**映射 | **OBSERVABLE DIFFERENCE**（条件性） | **DRIFT-USERAPI-003** · 静态源码 + 依赖 U-003 |
+| 31 | **ALL** | **请求绑定面（path/query/header/body）** | `Parse` = Path + **Form** + **Headers** + Body | 仅 JSON body | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-004** · 静态源码 |
+| 32 | Avatar/history | **body 是否被解析** | handler **不调** `httpx.Parse` | `@RequestBody` 会解析 | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-005** · 静态源码 |
+| 33 | 必填缺失 | HTTP 400 + text/plain + nosniff + 尾换行 | `http.Error` 形状 | `goStylePlainTextBadRequest:214-220` | **EQUIVALENT** | 静态源码 |
+| 34 | 必填缺失 | **`Content-Type` 字面量** | `text/plain; **charset=utf-8**` | `text/plain`（**无 charset**） | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-006** · 字节码核实 |
+| 35 | 必填缺失 | **body 编码字符集** | UTF-8 | ISO-8859-1（`StringHttpMessageConverter.DEFAULT_CHARSET`） | **OBSERVABLE DIFFERENCE**（当前不可见，见 DRIFT-USERAPI-006） | **DRIFT-USERAPI-006** · 字节码核实 |
+| 36 | 鉴权 | HTTP 状态码 401 | `authhandler.go:121` / `checkblacklistmiddleware.go:38` | `handleAuthentication:73-78` | **EQUIVALENT** | 静态源码 + `UserApiMvcPipelineTest` |
+| 37 | 鉴权 | 401 的 **body 形状** | JWT: **空 body**；黑名单: `{code:401,msg}` | 统一完整 envelope | OBSERVABLE DIFFERENCE（**已签字 N-1**） | `signed-deviations` / `docs/DRIFT/users/user/api.md` §0 · 静态源码 |
+| 38 | 鉴权 | 黑名单 key 前缀 | `user:jwt_blacklist:%s`（`checkblacklistmiddleware.go:34`） | `BLACKLIST_KEY_PREFIX`（`JwtAuthInterceptor.java:70`） | **EQUIVALENT** | 静态源码 + `UserApiMvcPipelineTest:456`（真 Redis） |
+| 39 | 鉴权 | 黑名单 **fail-open**（err → 放行） | `checkblacklistmiddleware.go:36` `err == nil && exists` | `JwtAuthInterceptor.java:204-208` 吞异常→null | **EQUIVALENT** | 静态源码 |
+| 40 | 鉴权 | 验签先于黑名单 | `engine.go:101-113` | `JwtAuthInterceptor.java:132-182` | **EQUIVALENT** | 静态源码 + `UserApiMvcPipelineTest:371` |
+| 41 | 鉴权 | Bearer 前缀两套取法（验签大小写不敏感 / 黑名单敏感） | `golang-jwt/request/oauth2.go` vs `strings.TrimPrefix` | `BearerTokenExtractor:74-81` vs `:95-99` | **EQUIVALENT** | 静态源码 + 2 条 `UserApiMvcPipelineTest` |
+| 42 | 鉴权 | 黑名单 401 的 `Content-Type` | `appliaction/json;charset=utf-8`（**Go 侧拼写错误**） | `application/json` | OBSERVABLE DIFFERENCE（有意不复刻） | **DRIFT-USERAPI-010** · 静态源码 |
+| 43 | 异常 | panic / 兜底异常的响应形状 | `recoverhandler.go:17` → **500 空 body** | `handleAny:262-272` → **500 + envelope(5001)** | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-007** · 静态源码 |
+| 44 | 过载 | Breaker / Shedding / MaxConns | `rest/config.go:12-23` 全 `default=true`；`sheddinghandler.go:40` 过载 → 503 空 body | **无任何对应物** | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-008** · 静态源码 |
+| 45 | 请求体上限 | MaxBytes 1 MiB，**413 压过 401** | `rest/config.go:53` `default=1048576`；`engine.go:164` 在 JWT 之外 | `GoStyleMaxBytesFilter:84-117` `@Component @Order(+6)` | **EQUIVALENT** | 静态源码（层次等价：Filter ⊃ Interceptor） |
+| 46 | 超时 | 3s 预算的**作用域** | **不覆盖** JWT 验签 | **覆盖** 验签 + 黑名单 + handler | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-009** · 静态源码 |
+| 47 | 可观测性 | 401 是否计入 `markHTTPResult` | **否**（Authorize 在 obs 外层） | **是**（Filter 在 DispatcherServlet 外） | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-009** · 静态源码 |
+| 48 | Metrics | login 5 + register 2 埋点 | `metrics.go` + `loginlogic.go:47,59,65,77,82` / `registerlogic.go:46,58` | `UserApiMetrics` 7 个 Counter，调用点逐条对应 | **EQUIVALENT** | 静态源码 |
+| 49 | Metrics | 其余 7 个 RPC 不埋点 | 不埋 | 不埋（1:1 不补） | **EQUIVALENT** | 静态源码 |
+| 50 | 配置 | JWT secret / expire | `etc/usercenter.yaml:11-12` | `application.yml:91-92`（同值 + env 覆盖） | **EQUIVALENT** | 静态源码 |
+| 51 | 配置 | HTTP 超时 3000ms | `rest/config.go:55` `default=3000`（yaml 未写） | `application.yml:142-143` `observability.http-timeout: 3s` | **EQUIVALENT**（配置层） | 静态源码，**运行时未验**（见 §6.7） |
+| 52 | 配置 | gRPC 传输 | Go `zrpc` = plain | `application.yml:81` `negotiation-type: plaintext` | **EQUIVALENT** | 静态源码 + `UserApiGrpcNegotiationTest` |
+| 53 | 错误码表 | code→msg 全表 | `errmsg.go:38-68` | `ErrorCode` 枚举（users-common） | **EQUIVALENT**（以 users-common 为公理，不在本组件复验） | 逐条比对 30 项常量一致 · 静态源码 |
+| 54 | 错误码表 | 未知码 → "FAIL" | `errmsg.go:70-76` `codeMsg[Error]` | `ErrorCode.of` → `ERROR`（`getMsg` 500→"FAIL"） | **EQUIVALENT** | 静态源码 |
+| 55 | 并发 | 本组件的并发语义 | 无状态、无写、无幂等键 | 同 | **EQUIVALENT** | 静态源码 |
+| 56 | 生命周期 | 启动顺序 / 关闭 | `usercenter.go:24-45` | `UserApiApplication.main` + `ObservabilityLifecycle:47` | **EQUIVALENT**（表达层） | 静态源码 |
+| 57 | 并发/事务 | user-rpc 的事务边界、`FOR UPDATE`、`extra_info` jsonb、`is_current` 陈旧 | — | — | **UNKNOWN**（不在本组件职责） | U-005 |
+
+---
+
+## 5. External Interaction & Error Flow（§8 + §10）
+
+### 5.1 user-rpc（gRPC，9 个方法）
+
+```text
+External System: user-rpc
+Operation:       UserService/{Login,Register,GetUser,UpdateUser,DeleteUser,
+                          Logout,UploadAvatar,SelectAvatar,GetAvatarHistory}
+Input:           proto message（users.proto，与 Go 侧逐条一致 —— 见 AGENTS.md §3.4）
+Parameters:      与 Go 侧逐条对应（本轮逐字段核对，见 §6.1）
+Expected Result: resp + nil error
+Failure Result:  StatusRuntimeException
+Does Failure Block Operation: 是（两侧都直接转业务码，不重试、不 fallback）
+Side Effect:     Delete/Update/Logout 的状态变更全部在 user-rpc 的事务内 —— **本组件无事务**
+```
+
+⚠️ **本组件没有事务边界可对照**（§15 不适用）：`user-api` 不碰 DB。
+所有写都是「一次 gRPC + 一次响应」，Go 与 RAG 的事务边界都在 user-rpc ⇒ 归 rpc 台账。
+
+### 5.2 Redis（黑名单 EXISTS）
+
+```text
+External System: Redis
+Operation:       EXISTS user:jwt_blacklist:<token>
+Input:           token（黑名单取法：大小写敏感的 TrimPrefix）
+Expected Result: true / false
+Failure Result:  error
+Semantic:        ⚠️ **error ≠ 黑名单命中**。Go 的判据是 `err == nil && exists`，
+                 所以 Redis 挂了会 **fail-open 放行**（checkblacklistmiddleware.go:36）。
+                 RAG `JwtAuthInterceptor.java:204-208` 把异常吞成 null，判据同构 ⇒ fail-open。
+Does Failure Block Operation: 否（两侧都不阻塞）
+Side Effect:     无（只读）
+```
+
+### 5.3 关键 ERROR FLOW 逐条
+
+| Failure | 触发条件 | Go 最终输出 | RAG 最终输出 | 等价？ |
+|---|---|---|---|---|
+| 必填字段缺失 | body 缺 `username` 等 | 400 `field "x" is not set\n` text/plain | 同（文本逐字） | ✅（header 见 #34） |
+| 畸形 JSON | body 不可解析 | 400 + Go 的 json 错误文本 | 400 + Spring 的文本 | ⚠️ 形状同、文本不同（**有意不对齐**，已留档） |
+| JWT 验签失败 | 签名错/过期 | **401 空 body** | 401 + envelope(1006) | ⚠️ 已签字 N-1 |
+| `userId` claim 缺失/非数字 | token 合法但 claim 畸形 | **200 + 1006** | **401 + 1006** | ❌ **DRIFT-USERAPI-001** |
+| 黑名单命中 | token 被拉黑 | 401 + `{code:401,msg}`，Content-Type 有拼写错误 | 401 + envelope(1006)，`application/json` | ⚠️ 已签字 N-1 + DRIFT-USERAPI-010 |
+| Redis 故障 | 黑名单查不通 | fail-open 放行 | fail-open 放行 | ✅（最终行为见 U-004） |
+| `uid <= 0` | token 合法、`userId:0` | get/avatar 路径 → 1006；**delete/update → 透传 rpc** | 全部路径 → 1006 | ❌ **DRIFT-USERAPI-002** |
+| rpc 失败 | user-rpc 报错 | 按 per-Logic switch | 多数按通用映射 | ⚠️ **DRIFT-USERAPI-003** |
+| panic | 未预期异常 | 500 空 body | 500 + envelope(5001) | ⚠️ **DRIFT-USERAPI-007** |
+| CPU 过载 | Shedding 触发 | 503 空 body | 无此层 | ⚠️ **DRIFT-USERAPI-008** |
+| 超时 | > 3s | 503 `http.Error(httpTimeoutBody)` | 503（走 `HttpMiddleware` 的 timeout 分支） | ⚠️ 作用域不同 **DRIFT-USERAPI-009** |
+
+---
+
+## 6. 逐维度结论（§12–§21）
+
+### 6.1 Serialization（§19）
+
+- **字段名**：Go 全 snake_case（`json:"avatar_url"` 等）；RAG DTO 逐字段 `@JsonProperty`。
+  ⚠️ `is_current` / `size_bytes` 是 Jackson bean 推断会搞错的两个（`isCurrent()` → `current`），
+  已在 `AvatarHistoryItem.java:39-41` 显式标注 ⇒ **EQUIVALENT**。
+- **`uid` 的 `,string`**：`CreateUserResp.Uid` 与 `UserInfo.Uid` 都是 `int64 json:",...,string"` ⇒
+  Go 输出 JSON **字符串**。RAG `RegisterResp.getUid()` / `UserInfo.getUid()` 返回 `String` ⇒ **EQUIVALENT**。
+- **`null` vs `empty` vs `missing`**：
+  - `score`：Go 无 `omitempty` ⇒ 恒 `0`；RAG `getScore()` 兜底 `0L` ⇒ **恒 `0`** ✅（DRIFT-005 已修）
+  - `email` / `extra_info`：Go 有 `omitempty`；RAG `@JsonInclude(NON_NULL)` + Service 只在非空时 set ✅
+  - `data`：Go `Data interface{}` 无 `omitempty` ⇒ 失败时是 `"data":null`；RAG `Response.data` 无注解 ⇒ 同 ✅
+  - `list`：Go `make([]…,0,n)` ⇒ `[]`；RAG `new ArrayList<>(0)` ⇒ `[]` ✅
+  - `user`：`json:"user,omitempty"` 对**结构体**无效 ⇒ Go 恒输出；RAG `NON_NULL` + 成功路径恒 set ✅
+- **`size_bytes` 类型**：Go `int64`；RAG `long` ✅。RAG `UploadAvatarReq.sizeBytes` 是 `Long`（可空）
+  以区分「缺席」，Go 的 `,optional` 也是这个语义 ✅。
+
+### 6.2 Configuration（§20）
+
+| 项 | Go | RAG | 结论 |
+|---|---|---|---|
+| JWT secret | `etc/usercenter.yaml:11` | `application.yml:91`（同值 + env 覆盖） | EQUIVALENT |
+| JWT expire | 2592000 | 2592000 | EQUIVALENT |
+| HTTP 超时 | `rest/config.go:55` tag 默认 3000ms（yaml 未写） | `observability.http-timeout: 3s` | EQUIVALENT（配置层） |
+| MaxBytes | `rest/config.go:53` 默认 1048576 | `GoStyleMaxBytesFilter`（`GoStyleProtectionProperties.getMaxBytes()`） | EQUIVALENT |
+| gRPC 寻址 | `zrpc.MustNewClient` + etcd `user.rpc` | Nacos `discovery:///user-rpc` | OBSERVABLE DIFFERENCE（**已签字 DRIFT-NEW-001**） |
+| gRPC 协商 | plain | `negotiation-type: plaintext` | EQUIVALENT（漏写会静默变 TLS，见 DRIFT-NEW-014） |
+| 监听端口 | 8888 | 49900 | OBSERVABLE DIFFERENCE（**已签字**，Infrastructure.md §3） |
+| ⚠️ 超时 | — | `observability.slow-threshold` **未在 user-api 的 yml 里配** | UNKNOWN（回落 `Observability.slowThreshold()` 的 env 兜底） |
+
+### 6.3 Authentication / Authorization（§14）—— 本组件最高风险面
+
+- **身份来源**：两侧都**只**来自 JWT claim，body / header / query 里的 uid 一律不参与 ✅
+- **Claim 提取**：`userId`（非标准 claim，被 `authhandler.go:72-79` 的循环放进 ctx）✅
+- ⚠️ **标准 claim 被 Go 显式忽略**：`authhandler.go:74` 的 switch 把
+  `aud/exp/jti/iat/iss/nbf/sub` 全部 skip ⇒ **token 里的 `sub` 永远不会进 ctx**。
+  RAG 侧 jjwt 只读 `get("userId")`，其余 claim 一概不读 ⇒ 结论一致 ✅（两边都只看 `userId`）。
+- **签名算法**：HS256（Go `jwt.go:12` 显式 `jwt.SigningMethodHS256`）⚠️ 见 U-002
+- **密钥 padding**：`JwtUtil.padToHmacKeySize` 存在且 public（`JwtUtil.java:44-53`），
+  user 默认 secret 36B ≥ 32 ⇒ padding 对 user 是 **no-op** ⇒ 与 Go 等价 ✅（见 §11 复核 1）
+- **claim 缺失 / 类型错**：❌ **DRIFT-USERAPI-001**
+- **`uid <= 0`**：❌ **DRIFT-USERAPI-002**（delete/update）
+- **角色/权限**：本组件**无**任何角色/权限概念，两侧都只有「验签通过与否」✅
+- **资源归属**：uid 只来自 token，不来自请求体 ✅
+
+### 6.4 Error Identity（§11）
+
+- Go 的业务码来自 `errmsg` 常量；RAG 的来自 `users-common.ErrorCode`（逐条比对 30 项，值与文案全一致）。
+- ⚠️ 但**映射路径**不同：Go 每个 Logic 一个 switch；RAG 5 个 Service 直接 `throw e` 交给
+  `GlobalExceptionHandler.mapRPCStatusToCode` 的**通用**映射 ⇒ **DRIFT-USERAPI-003**。
+- `AvatarSelectService` 是唯一显式写全 Go switch 的（`AvatarSelectService.java:97-101`，DRIFT-003 已修），
+  其余 6 个没有。
+
+### 6.5 State Semantics（§12）
+
+本组件**无内部状态**。唯一跨请求状态是 Redis 黑名单（由 user-rpc 写入、本组件只读）。
+⇒ 状态语义不适用；user-rpc 侧的状态机归 rpc 台账（U-005）。
+
+### 6.6 Cache（§13）
+
+本组件**无缓存**。黑名单是一次性 `EXISTS`，不是缓存（无 TTL、无回填、无 miss 语义）。
+⇒ 不适用。
+
+### 6.7 Timeout（§17）
+
+| | Go | RAG |
+|---|---|---|
+| 来源 | `rest/config.go:55` tag 默认 3000ms | `application.yml:143` `3s` |
+| 执行者 | `observability.NewHTTPMiddleware`（原生超时中间件已被 `DisableNativeRestTimeout` 关掉） | `HttpMiddleware`（Filter） |
+| **作用域** | 黑名单 + handler（**不含** JWT 验签） | 验签 + 黑名单 + handler |
+| 超时结果 | 503 + `http.Error(httpTimeoutBody, 503)` | 503（`writeTimeoutResponse`） |
+| 客户端断连 | 499 | 499（`markClientCancelled`） |
+
+⚠️ 作用域差异见 **DRIFT-USERAPI-009**，其后果之一（Redis 慢时的 fail-open vs 503）见 **U-004**。
+⚠️ **运行时未验**：两侧都没有对 3s 超时做过活体对拍 ⇒ 按 §3.3 记 **UNKNOWN**。
+
+### 6.8 Retry（§18）
+
+两侧**均无重试**（Go 的 `zrpc` client 与 RAG 的 devh stub 都没配 retry policy）。
+⇒ **EQUIVALENT**。gRPC 失败即转业务码，不重试、不 fallback、不熔断。
+
+### 6.9 Concurrency（§16）
+
+本组件无共享可变状态 ⇒ **EQUIVALENT**（N/A）。见 U-005。
+
+### 6.10 Transaction（§15）
+
+**不适用** —— 本组件不访问 DB，无事务边界。
+
+### 6.11 Side Effects（§22）与 `success` 字段语义复核
+
+```text
+Go：DeleteUserResp.Success / LogoutResp.Success 只在成功分支被赋 true
+    （deleteuserlogic.go:67-69 / logoutlogic.go:55-57）；失败分支 resp=nil ⇒ data 为 null，
+    success 字段根本不出现。
+RAG：DeleteUserResp.success / LogoutResp.success 同样只在成功路径 setSuccess(true)
+     （UserDeleteService.java:72-74 / UserLogoutService.java:65-67）；失败路径
+     GlobalExceptionHandler 产出 Response(code,msg,null) ⇒ data 为 null。
+```
+
+⇒ **`success` 的取值方向与可见性两侧完全一致：永远只会是 `true`，且只在成功时出现。**
+**AGENTS.md §1.1 记录的「success 字段语义反转」在本组件未复现**（详见 §11 复核 5）。
+
+### 6.12 Lifecycle（§21）
+
+Go：`metrics.InitMetrics()` → `flag.Parse` → `conf.MustLoad` → `logx.MustSetup` → `logger.Init` →
+`DisableNativeRestTimeout` → `rest.MustNewServer` → `server.Use(obs)` → `svc.NewServiceContext`
+（**Redis 连接 + gRPC 客户端在此建立**）→ `RegisterHandlers` → `server.Start`。
+RAG：Spring 容器装配（`UserRpcClient` 的 `@GrpcClient` + `JwtAuthInterceptor` 构造时的
+`Keys.hmacShaKeyFor` + `StringRedisTemplate`）全部在 `refresh()` 内完成，
+`ObservabilityLifecycle:47` 注册关闭钩子。
+⇒ 依赖都在开始收流量之前就绪，**EQUIVALENT**（表达层差异）。
+
+---
+
+## 7. Semantic Drifts（§27 + §36）
+
+### DRIFT-USERAPI-001 —— `userId` claim 缺失/非数字：Go 走业务层（200+1006），RAG 在鉴权层直接 401
+
+```text
+Component:    JwtAuthInterceptor + 9 个 Logic 的 uid 提取
+Operation:    全部 7 个 protected 端点
+Category:     Authentication · claim presence 语义
+
+Go Behavior:
+  authhandler.go:54-63   parser.ParseToken 成功（签名对、exp 未过）⇒ 继续，不看任何 claim
+  authhandler.go:65-79   claims 里所有**非标准** claim 塞进 ctx（"userId" 在其中）
+  authhandler.go:81      next.ServeHTTP ⇒ 请求**到达 Logic**
+  identity/resolve.go:70-73   ClaimedUID: ctx["userId"].(json.Number) 失败 ⇒ ErrInvalidClaim
+  deleteuserlogic.go:38-41    同上 ⇒ return nil, errmsg.ErrorTokenRuntime
+  handler *.go:27-31           httpx.OkJson ⇒ **HTTP 200** + {"code":1006,...,"data":null}
+  ⇒ 结论：**token 签名合法但 userId claim 缺失/是字符串 ⇒ 200 + 1006**
+
+Spring Boot Behavior:
+  JwtAuthInterceptor.java:138  Object claim = jws.getPayload().get("userId")
+  JwtAuthInterceptor.java:139  if (claim instanceof Number) {...} else {
+  JwtAuthInterceptor.java:149-152     throw new AuthenticationException(1006, …)
+  GlobalExceptionHandler.java:73-78    ⇒ **HTTP 401** + {"code":1006,"msg":"TOKEN已过期","data":null}
+
+Difference:   HTTP 状态码 200 → 401。业务码两侧都是 1006（body 形状本身已按 N-1 签字收敛）。
+Semantic Impact:
+  ① 按状态码判「未登录 → 刷新 token / 跳登录页」的客户端与网关，会把「令牌存在但 claim 畸形」
+     误判成「令牌无效」，触发一次无意义的刷新循环。
+  ② 本组件的拦截器 javadoc（`JwtAuthInterceptor.java:33,38`）把「claim 缺失/类型不对 → 401」
+     写成 L1 冻结行为，但同一段 javadoc（`:44-46`）又说「uid<=0 的拒绝不在本层，Go 同样不校验 claim 取值」。
+     **这两句自相矛盾**：Go 对 claim「取值」不校验，对 claim「存在性/类型」也不校验，
+     两类问题都被推迟到业务层。RAG 只搬了前半句，后半句在鉴权层就提前终止了。
+Risk:         HIGH —— Counterfactual（§26）：一个没读过 Go 的 Spring 开发者，
+              几乎必然会写「拦截器里把不可用 claim 拒掉」，这是最自然的 Spring 写法。
+Evidence:     静态源码，两侧均带 消费点 行号。
+Must Preserve: 「签名合法 + claim 畸形」必须走业务层产出 200 + 1006，
+               而不是变成鉴权层的 401。
+Recommended Verification: 用 JwtUtil.getToken 造一个**不含 userId** / `userId` 为字符串的 token，
+               双侧各打一次请求，断言 HTTP 状态码与 body 全文。
+```
+
+### DRIFT-USERAPI-002 —— delete / update 的 `uid` 合法域被收窄（Go 不拒绝 `uid <= 0`）
+
+```text
+Component:    UserDeleteService / UserUpdateService
+Operation:    delete, update
+Category:     Authentication · uid 提取语义
+
+Go Behavior:
+  deleteuserlogic.go:37   userId, ok := l.ctx.Value("userId").(json.Number)
+  deleteuserlogic.go:42-47 uid, err := userId.Int64(); if err != nil { return 1006 }
+                          ⚠️ **没有 uid <= 0 的判定** ⇒ uid=0 / 负数照常进 rpc
+  updateuserlogic.go:36-46 同上
+  （对照：avatarhelpers.go:11-13 → identity/resolve.go:75 的 ClaimedUID **有** uid <= 0 判定）
+
+Spring Boot Behavior:
+  UserDeleteService.java:50   IdentityResolver.claimedUID(httpRequest)
+  UserUpdateService.java:51   同
+  IdentityResolver.java:106-108  if (uid <= 0) throw new ErrInvalidClaimException(…)
+  UserDeleteService.java:51-54  catch ⇒ BusinessException(1006)
+  UserUpdateService.java:52-55  同
+  ⇒ **rpc 一次都不会被调用**
+
+Difference:   Go 内部本来就存在两套 uid 语义（get/avatar 拒绝、delete/update 不拒绝）；
+              RAG 把它们统一成「一律拒绝」。
+Semantic Impact:
+  对一个**签名合法、userId:0 或负数**的 token 打 /user/delete：
+    Go  → uid=0 进 rpc，最终业务码由 user-rpc 决定（大概率 NotFound ⇒ 1003）
+    RAG → 1006，且 0 次 rpc 调用
+  差异不止于返回值，还包括**是否触达下游**（可观测的下游调用次数）。
+Risk:         HIGH —— 「抽一个 claimedUID 统一全端点」是最自然的重构动作，
+              而 Go 的两套语义恰恰是它会「顺手抹平」的东西。
+Evidence:     静态源码（Go: deleteuserlogic.go:37-47 / updateuserlogic.go:36-46 /
+              identity/resolve.go:75；RAG: IdentityResolver.java:106-108 +
+              UserDeleteService.java:50-54 / UserUpdateService.java:51-55）。
+              ⚠️ Go 侧从未对 delete/update 的 uid<=0 写过测试（唯一那份
+              getuserlogic_test.go:51-52 只覆盖 get）⇒ 本条在 Go 侧也是无网状态。
+Must Preserve: 两端点各自的 uid 合法域；RAG 侧需要 delete/update 各自一条「uid=0 透传」断言。
+Recommended Verification: 双侧各起真进程，用 userId=0 的 token 打 delete/update，
+               比对 HTTP 状态码 + body + **rpc 调用次数**（Go 侧看 rpc 日志 / RAG 侧看 stub 计数）。
+```
+
+### DRIFT-USERAPI-003 —— gRPC 错误码通用映射比 Go 的 per-Logic switch 宽
+
+```text
+Component:    GlobalExceptionHandler.mapRPCStatusToCode + 6 个 Service 的 catch-rethrow
+Operation:    login, register, delete, update, logout, avatar/history
+Category:     Error Identity · 错误码映射
+
+Go Behavior（每个 Logic 自己 switch，未列出的 code 落 default ⇒ 一律 1015）:
+  loginlogic.go:50-55        Internal→5001, default→1015
+  registerlogic.go:49-56     Internal→5001, AlreadyExists→1001, default→1015
+  updateuserlogic.go:60-69   Internal→5001, AlreadyExists→1001, NotFound→1003, default→1015
+  deleteuserlogic.go:57-64   NotFound→1003, Internal→5001, default→1015
+  logoutlogic.go:48-53       Internal→5001, default→1015
+  getavatarhistorylogic.go:45-52  NotFound→1003, Internal→5001, default→1015
+
+Spring Boot Behavior:
+  GlobalExceptionHandler.java:100-110（通用映射，无 per-Service 上下文）
+    INTERNAL→5001  NOT_FOUND→1003  ALREADY_EXISTS→1001  INVALID_ARGUMENT→500  default→1015
+  6 个 Service catch 后 `throw e`（UserLoginService:83-98 仅特判 INTERNAL；
+  UserRegisterService:58-63 / UserDeleteService:61-64 / UserUpdateService:66-69 /
+  UserLogoutService:60-63 / AvatarHistoryService:75-78 全部直接 rethrow）
+  ⇒ AvatarSelectService 已显式写全 Go 的 switch（:97-101，DRIFT-003 已修），
+    其余 6 个没有
+
+Difference（逐端点列出 Go 会落 default、RAG 却单独给码的 code）:
+  login            : NOT_FOUND(→1003) / ALREADY_EXISTS(→1001) / INVALID_ARGUMENT(→500)
+  register         : NOT_FOUND(→1003) / INVALID_ARGUMENT(→500)
+  delete           : INVALID_ARGUMENT(→500) / ALREADY_EXISTS(→1001)
+  update           : INVALID_ARGUMENT(→500)
+  logout           : NOT_FOUND(→1003) / ALREADY_EXISTS(→1001) / INVALID_ARGUMENT(→500)
+  avatar/history   : INVALID_ARGUMENT(→500) / ALREADY_EXISTS(→1001)
+  ⇒ 这些 code 在 Go 侧一律是 **1015 服务繁忙**，在 RAG 侧变成 1003 / 1001 / 500。
+Semantic Impact: 分类：OBSERVABLE DIFFERENCE（条件性）。
+  ⚠️ **是否真的可观察，取决于 user-rpc 实际会不会发这些 code** ⇒ 见 **UNRESOLVED-003**。
+  若 user-rpc 确实发得出，本条即升级为 SEMANTIC MISMATCH。
+  注意 Go 侧刻意保留的区分（select 的 NotFound→500、upload 的 NotFound→1003）
+  正是「用业务码区分可枚举性」的设计意图，通用映射会把它抹掉。
+Risk:         MEDIUM —— 根因与已修的 DRIFT-003 完全同形（通用映射悄悄覆盖 per-Service switch）。
+Evidence:     静态源码（两侧 switch 行号已列）。
+Must Preserve: 每个端点自己的 switch；通用映射只能当兜底，不能当唯一来源。
+Recommended Verification: 从 user-rpc 台账取每个 RPC 实际发出的 code 集合，
+               与上表逐格比对；发得出的格子全部补 per-Service 分支。
+```
+
+### DRIFT-USERAPI-004 —— 请求绑定面：Go 接受 path/query/form/HTTP header，RAG 只接受 JSON body
+
+```text
+Component:    httpx.Parse（Go） / @RequestBody（RAG）
+Operation:    全部 8 个带 httpx.Parse 的端点
+Category:     Serialization · 输入来源
+
+Go Behavior:
+  rest/httpx/requests.go:50-69
+    Parse = ParsePath → **ParseForm** → **ParseHeaders** → ParseJsonBody
+  requests.go:18,27-31   formUnmarshaler 的 tag key 是 "form"
+  rest/internal/encoding/parser.go:10,12  headerUnmarshaler 的 tag key 是 "header"
+  core/mapping/utils.go:271-275  parseKeyAndOptions：tag 缺失时 **回落到 Go 字段名**
+  → user-api 的 9 个 Req struct **只有 json tag**（types.go），没有 form/header tag
+    ⇒ form 通道的 key 是字段名 `Username`/`Password`/`Email`/`Extrainfo`/`HistoryId`/`AvatarUrl`
+    ⇒ header 通道再过 textproto.CanonicalMIMEHeaderKey（大小写规范化）
+  ⇒ `POST /usercenter/v1/user/login?Username=a&Password=b`（空 body）**能登录成功**
+  ⇒ `POST /usercenter/v1/user/login` + header `Username: a` / `Password: b` **也能登录成功**
+
+Spring Boot Behavior:
+  UserController.java:140,148,160,168,174,183,189,196,202 —— 全部只有 @RequestBody
+  ⇒ query 参数与同名 header **完全不参与**取值
+
+Difference: 同一请求在 Go 侧成功、在 RAG 侧 400 `field "username" is not set`。
+Semantic Impact: 客户端契约面收窄。若有客户端（脚本 / 网关 / 老 SDK）用 query 或 header 传凭据，
+            两侧行为分叉。这属于 §19 的「输入解释」差异，不是纯实现差异。
+Risk:         LOW-MEDIUM（实际是否有客户端这么做，取决于部署现状；真源未改 ⇒ 默认 RAG 侧需对齐）
+Evidence:     静态源码（go-zero 消费点：requests.go:50-69、utils.go:271-275、
+              rest/internal/encoding/parser.go:10-13；RAG：UserController 9 处签名）。
+Must Preserve: Go 的完整绑定面，或逐条签字放弃。
+Recommended Verification: 真进程各打一次 `?Username=a&Password=b`（空 body），
+               断言两侧的 HTTP 状态码与 body。
+```
+
+### DRIFT-USERAPI-005 —— `/user/avatar/history` 在 Go 侧根本不读 body，RAG 侧会解析
+
+```text
+Component:    getavatarhistoryhandler.go / UserController.getAvatarHistory
+Operation:    avatar/history
+Category:     Serialization · 输入通道
+
+Go Behavior:
+  internal/handler/user/getavatarhistoryhandler.go:17-25
+    func 内 **没有 var req / 没有 httpx.Parse**，直接 NewGetavatarhistoryLogic
+    ⇒ 请求体**完全不被读取**
+    ⇒ 畸形 JSON body、非 JSON Content-Type、超大 body 一律不影响该端点
+
+Spring Boot Behavior:
+  UserController.java:200-204
+    @RequestBody(required = false) GetAvatarHistoryReq req
+    ⇒ Spring 会按 Content-Type 尝试反序列化；畸形 JSON ⇒ HttpMessageNotReadableException
+      ⇒ 400 text/plain
+
+Difference:  发一个 `{"a":}`（Content-Type: application/json）：
+  Go  → 200（body 被完全忽略，直接走 Logic）
+  RAG → 400 + text/plain
+Semantic Impact: OBSERVABLE DIFFERENCE。这是 9 个 handler 里**唯一**不 Parse 的一个，
+            其余 8 个都 Parse（getavatarhistoryhandler.go 是唯一例外），
+            所以不能用「其余 8 个都对」来推这一个也对。
+Risk:         MEDIUM —— 「9 个端点统一加上 @RequestBody」是最自然的写法，
+              而它恰好抹掉了唯一的例外。
+Evidence:     静态源码（Go: getavatarhistoryhandler.go:17-25 全文；RAG: UserController.java:200-204）。
+Must Preserve: 该端点忽略 body 的事实。
+Recommended Verification: 双侧对该端点发畸形 JSON，断言状态码差异是否真实存在。
+```
+
+### DRIFT-USERAPI-006 —— 400 响应的 `Content-Type` 少 `charset` 参数，且 body 用 ISO-8859-1 编码
+
+```text
+Component:    GlobalExceptionHandler.goStylePlainTextBadRequest
+Operation:    全部 4 个产出 400 的分支
+Category:     Serialization · 响应头与编码
+
+Go Behavior:
+  Go net/http.Error 的四件事：
+    Content-Type: text/plain; charset=utf-8   ← **带 charset**
+    X-Content-Type-Options: nosniff
+    写入 400
+    fmt.Fprintln(w, error) → 字节按 UTF-8
+
+Spring Boot Behavior:
+  GlobalExceptionHandler.java:214-220
+    headers.setContentType(MediaType.TEXT_PLAIN)   ← MediaType.TEXT_PLAIN 的字面量就是 "text/plain"
+    ⇒ 响应头的 Content-Type 是 **text/plain（无 charset 参数）**
+
+  ⛔ 关键证据（字节码核实，非记忆）：
+    javap -c org/springframework/mock/web/MockHttpServletResponse.class（spring-test 7.0.9）
+      setContentType("text/plain")：
+        MediaType.parseMediaType("text/plain").getCharset() == null
+        且既不兼容 MediaType.APPLICATION_JSON 也不兼容 "application/*+json"
+        ⇒ 不进入 setExplicitCharacterEncoding 分支
+        ⇒ updateContentTypePropertyAndHeader() 在 characterEncodingSet==false 时
+          **原样** doAddHeaderValue("Content-Type", "text/plain")
+    ⇒ 也就是说 MockMvc 的 getResponse().getContentType() 拿到的就是这串字面量，
+      **与真 Tomcat 是否追加 charset 无关**（真容器走 Response.setContentType，同样原样保留）。
+
+    ⇒ 因此 UserApiGoStyleBodyContentTypeTest.java:166 的
+      assertEquals("text/plain", asPlainText.getResponse().getContentType(),
+                   "Go 的 http.Error 写的是 Content-Type: text/plain; charset=utf-8")
+      这条断言**在结构上无法发现该差异**：它断言的是 MockMvc 存下来的字面量，
+      而它自己的说明文字描述的是 Go 的字面量 —— 两者不是同一个东西。
+
+  编码侧（字节码核实）：
+    javap -c org/springframework/http/converter/StringHttpMessageConverter.class（spring-web 7.0.9）
+      static { DEFAULT_CHARSET = StandardCharsets.ISO_8859_1; }
+      getContentTypeCharset(text/plain 无 charset) → 既非 JSON 兼容 → 返回 getDefaultCharset()
+      ⇒ **ISO-8859-1**
+    ⇒ RAG 的 400 body 按 ISO-8859-1 编码，Go 按 UTF-8。
+
+Semantic Impact:
+  ① 响应头字面量可比对（文本全部兼容 ASCII 时，body 相同、只有 header 不同）。
+  ② body 字节：当前 `GoRequiredFieldException` 的文案全是 ASCII ⇒ 不可见；
+     但 `HttpMessageNotReadableException.getMessage()`（handleUnreadableBody:163-167
+     直接把它写进 body）**可能包含非 ASCII**（例如畸形 JSON 里带中文）
+     ⇒ 那种输入下 RAG 会输出乱码而 Go 不会。
+Risk:         MEDIUM（① 立即可见；② 条件性）。
+Evidence:     字节码核实（spring-test 7.0.9 / spring-web 7.0.9 静态块）+ 静态源码。
+              ⚠️ 未做真 Tomcat 活体探针 ⇒ 线上**精确**header 值仍需 U-001 关闭。
+Must Preserve: `text/plain; charset=utf-8`；以及 body 按 UTF-8 编码。
+Recommended Verification: (a) 真 Tomcat 起 user-api，curl -i 打一个必填缺失请求，
+               抓原始响应头；(b) 发一个含中文的畸形 JSON，比对 body 字节。
+```
+
+### DRIFT-USERAPI-007 —— panic / 兜底异常的响应形状
+
+```text
+Component:    GlobalExceptionHandler.handleAny / go-zero RecoverHandler
+Operation:    全部端点的异常兜底
+Category:     Error Flow · 结果映射
+
+Go Behavior:
+  rest/handler/recoverhandler.go:12-23
+    defer recover() → w.WriteHeader(http.StatusInternalServerError)
+    ⇒ **HTTP 500 + 空 body**（无 Content-Type、无 envelope）
+
+Spring Boot Behavior:
+  GlobalExceptionHandler.java:262-272
+    @ExceptionHandler(Exception.class) ⇒ ResponseEntity(500).body(Response(5001,"系统内部错误",null))
+    ⇒ **HTTP 500 + 完整 envelope**
+
+Difference:  状态码一致（500）；body 形状不同（空 vs envelope）。
+Semantic Impact: OBSERVABLE DIFFERENCE。低危（异常路径本身不该发生），
+            但它是「响应契约」的一部分，任何按 body 结构统一解析的客户端都会在这里踩空。
+Risk:         LOW
+Evidence:     静态源码（recoverhandler.go:17 vs GlobalExceptionHandler.java:270-271）。
+Must Preserve: 至少要明确 500 的 body 形状是「有意统一」还是「漏对齐」。
+Recommended Verification: 双侧各制造一次 panic（临时端点或测试钩子），比对原始响应。
+```
+
+### DRIFT-USERAPI-008 —— go-zero 的 Breaker / Shedding / MaxConns 在 RAG 侧没有任何对应物
+
+```text
+Component:    user-api 的过载保护层
+Operation:    全部端点在过载时的行为
+Category:     Lifecycle / External Interaction · 可用性
+
+Go Behavior:
+  rest/config.go:12-23   MiddlewaresConf 十项**全部** `default=true`
+  rest/engine.go:130-168 逐项装配（MaxConns → Breaker → Shedding …）
+  rest/handler/sheddinghandler.go:34-41  shedder.Allow() 失败 ⇒ w.WriteHeader(503) + return
+  rest/handler/maxconnshandler.go         连接数超限 ⇒ 503
+
+Spring Boot Behavior:
+  user-api 侧无任何 breaker / shedding / max-conns 组件。
+  唯一相近的是 HttpMiddleware 的 3s 超时（超时后 503），但那是**单请求**超时，不是负载卸载。
+
+Difference:  Go 在 CPU 过载 / 连接数超限时**主动丢弃**请求并立即 503（空 body）；
+             RAG 只会把请求排队直到 3s 超时再 503（且 body 文本不同）。
+Semantic Impact: OBSERVABLE DIFFERENCE。过载场景下的错误率、延迟分布与错误 body 都不同。
+            注：这是 go-zero 的**框架默认能力**，不是本项目的业务决策 —— 真源冻结 ⇒ 默认判定 RAG 缺。
+Risk:         MEDIUM（低频但影响面大；且验收环境的压测通常压不出来）。
+Evidence:     静态源码（rest/config.go:12-23、engine.go:145-153、sheddinghandler.go:34-41；
+              RAG 侧 user-api 模块内零命中）。
+Must Preserve: 或明确签字放弃（并写清「过载行为由上游网关/容器负责」）。
+Recommended Verification: CPU 打满 / 连接数打满条件下双侧压测，比对 503 比例与响应体。
+```
+
+### DRIFT-USERAPI-009 —— observability 的位置：Go 在鉴权之内，RAG 在鉴权之外
+
+```text
+Component:    HttpMiddleware(Filter) vs go-zero server.Use 中间件
+Operation:    全部端点的 401 路径 + 超时作用域
+Category:     Lifecycle · 观测面 + Timeout scope
+
+Go Behavior:
+  rest/engine.go:101-113 bindRoute：
+    chn = buildChainWithNativeMiddlewares(...)   // 索引 0，最外层
+    chn = appendAuthHandler(...)                 // JWT
+    for _, mw := range ng.middlewares { chn = chn.Append(...) }   // observability，再往内
+    handle = chn.ThenFunc(route.Handler)
+  chain.Then = m0(m1(...mN(h)))，索引 0 先执行
+  ⇒ 执行序：… → **JWT 验签** → **observability(3s)** → 黑名单 → handler
+  ⇒ ① handler.Authorize 的 401 **不经过** observability ⇒ 不进 markHTTPResult
+    ② 3s 预算**不覆盖** JWT 验签
+
+Spring Boot Behavior:
+  HttpMiddlewareFilter.java:36-37  @Component @Order(HIGHEST_PRECEDENCE+5) ⇒ **Servlet Filter**
+  ⇒ Servlet 的**所有** Filter 都在 DispatcherServlet 外，HandlerInterceptor 在内
+  ⇒ 执行序：**MaxBytes → HttpMiddleware(3s)** → DispatcherServlet → **JwtAuthInterceptor** → Controller
+  ⇒ ① 401 **计入** markHTTPResult
+    ② 3s 预算**覆盖**验签 + 黑名单 + handler
+
+Difference:
+  ① 可观测性：Go 的「JWT 验签失败」请求不出现在 access log / span / HTTP 指标里；RAG 会出现。
+     ⇒ 鉴权失败率的看板两边口径不同。
+  ② 超时作用域：见 §6.7 表。潜在后果见 UNRESOLVED-004（Redis 慢时 Go fail-open，RAG 可能 503）。
+Semantic Impact: OBSERVABLE DIFFERENCE（观测面）+ Timeout scope 差异（行为面，条件性）。
+Risk:         MEDIUM。① 是永远可见的差异；② 是「只有在 Redis 也慢时才可见」的差异。
+Evidence:     静态源码（Go: engine.go:101-113 + chain.go 的 Then 语义；
+              RAG: HttpMiddlewareFilter.java:36-37 + WebMvcConfig.java:56-59）。
+Must Preserve: 或明确签字接受「RAG 的观测面更大」（这通常是好事，但要写下来）。
+Recommended Verification: 真进程各打一次无 token 请求，比对 access log / /actuator 指标里是否出现。
+```
+
+### DRIFT-USERAPI-010 —— 黑名单 401 的 `Content-Type` 拼写错误，RAG 有意不复刻
+
+```text
+Component:    CheckBlacklistMiddleware
+Operation:    全部 protected 端点的黑名单 401
+Category:     Serialization · 响应头
+
+Go Behavior:
+  checkblacklistmiddleware.go:37
+    w.Header().Set("Content-Type", "appliaction/json;charset=utf-8")
+    ⚠️ **Go 侧拼写错误**：application 少了一个 c，写成了 appliaction。
+  :38-39  w.WriteHeader(401) + 写 {"code":401, "msg":"登录已失效,请重新登陆"}
+
+Spring Boot Behavior:
+  走统一 envelope（handleAuthentication:73-78）⇒ Content-Type: application/json
+
+Difference:  响应头字面量不同 + body 形状不同。
+Semantic Impact: OBSERVABLE DIFFERENCE（有意）。Go 的 Content-Type 是无效 MIME，
+            客户端按它解析必然失败 —— 这不是「要保留的语义」，是 Go 侧的笔误。
+            body 形状的收敛已由 §0 的 **N-1** 签字；本条只补记「Content-Type 也不复刻」，
+            让 N-1 的覆盖范围从 body 扩到 header。
+Risk:         LOW
+Evidence:     静态源码（checkblacklistmiddleware.go:37-39）。
+Must Preserve: 不复刻拼写错误。若要求逐字复刻，需在拦截器里为黑名单路径单写响应。
+Recommended Verification: 无需验证（属已决策项），但建议在 N-1 的「关闭条件」里补上这一句。
+```
+
+---
+
+## 8. Test Cases（§29 + §30）
+
+⚠️ **本节的 CASE 是「应当成立的语义对」，不是「已跑过的测试」。**
+本轮**未运行任何一侧的进程**，全部为静态推导。标 ✅ 的表示两侧源码一致（静态可判）；
+标 ❌ 的对应 §7 的 DRIFT 条目；标 ? 的进 §9。
+
+| CASE | 场景 | Go 期望 | RAG 期望 | 等价 | 备注 |
+|---|---|---|---|---|---|
+| CASE-01 正常成功 | 合法 body + 合法 token | 200 + `{code:200,msg:OK,data:…}` | 同 | ✅ | |
+| CASE-02 空输入（零字段 DTO） | `{}` 打 `/get` | 200（零必填） | 200 | ✅ | |
+| CASE-02b 空输入（必填 DTO） | `{}` 打 `/login` | 400 `field "username" is not set\n` | 同 | ✅ | 文本逐字对齐 |
+| CASE-02c 空输入（真空 body） | Content-Length 0 打 `/login` | 400 同上 | 400 同上 | ✅ | |
+| CASE-03 不存在 | token 合法、用户已删 | 1003 @200 | 1003 @200 | ✅ | |
+| CASE-04 重复调用 | 同一 `/get` 调两次 | 两次一致，无副作用 | 同 | ✅ | |
+| CASE-05 外部依赖失败（Redis） | 黑名单查询报错 | fail-open 放行 | fail-open 放行 | ✅ | 但超时作用域不同，见 U-004 |
+| CASE-06 超时 | handler 睡 > 3s | 503 | 503 | ✅ 状态码；⚠️ 作用域 | DRIFT-USERAPI-009 |
+| CASE-07 Retry | rpc 失败 | 不重试 | 不重试 | ✅ | |
+| CASE-08/09 Cache | — | N/A | N/A | — | 本组件无缓存 |
+| CASE-10 权限失败（无 token） | protected 端点不带 Authorization | 401 **空 body** | 401 + envelope(1006) | ⚠️ 已签字 N-1 | |
+| CASE-10b 权限失败（签名错） | 带错签名 | 401 空 body | 401 + envelope(1006) | ⚠️ 已签字 N-1 | |
+| CASE-10c **权限失败（claim 畸形）** | 合法签名、无 `userId` claim | **200 + 1006** | **401 + 1006** | ❌ | **DRIFT-USERAPI-001** |
+| CASE-10d 黑名单命中 | token 在黑名单 | 401 + `{code:401,msg}` | 401 + envelope(1006) | ⚠️ 已签字 N-1 | Content-Type 见 DRIFT-USERAPI-010 |
+| CASE-10e **`uid <= 0`（delete）** | 合法签名、`userId:0` | 透传 rpc（0 不被拒） | 1006，0 次 rpc | ❌ | **DRIFT-USERAPI-002** |
+| CASE-10f **`uid <= 0`（get）** | 同上打 `/get` | 1006 @200 | 1006 @200 | ✅ | |
+| CASE-11 并发调用 | 同 uid 并发 10 次 `/get` | 10 次一致，无锁 | 同 | ✅ | 本组件无状态 |
+| CASE-12 重复调用（注销） | 同 token 注销两次 | 第一次成功；第二次取决于 user-rpc | 同 | ? | **依赖 user-rpc**（U-003） |
+| CASE-13 部分操作成功 | — | N/A | N/A | — | 本组件无多步写 |
+| CASE-14 事务回滚 | — | N/A | N/A | — | 本组件无事务 |
+| CASE-15 序列化边界（`uid` 字符串） | 注册成功 | `"uid":"123…"`（字符串） | `"uid":"123…"`（字符串） | ✅ | `,string` 已对齐 |
+| CASE-15b 序列化边界（`score`） | `/get` 成功 | `"score":0` 恒存在 | `"score":0` 恒存在 | ✅ | |
+| CASE-15c **序列化边界（400 header）** | 必填缺失 | `Content-Type: text/plain; charset=utf-8` | `Content-Type: text/plain` | ❌ | **DRIFT-USERAPI-006** |
+| CASE-15d **序列化边界（绑定面）** | `?Username=a&Password=b` 空 body | 登录成功 | 400 | ❌ | **DRIFT-USERAPI-004** |
+| CASE-15e **序列化边界（history 的 body）** | `/avatar/history` 发畸形 JSON | 200 | 400 | ❌ | **DRIFT-USERAPI-005** |
+
+---
+
+## 9. Unresolved（§37）—— 此节不为空，故最终判定不给 `SEMANTICALLY EQUIVALENT`
+
+### UNRESOLVED-001 —— 真 Tomcat 下 400 响应的精确 `Content-Type` 与 body 字节
+
+```text
+Question:    真实容器返回的 400 响应，Content-Type 到底是 "text/plain" 还是
+             "text/plain; charset=utf-8"？body 按什么编码落字节？
+Go Evidence: net/http.Error 固定写 "text/plain; charset=utf-8"。
+RAG Evidence: GlobalExceptionHandler.java:216 setContentType(MediaType.TEXT_PLAIN)。
+Why Unknown: 本轮只能证明「传给 setContentType 的字面量没有 charset」。
+             「容器/转换器会不会再补」属于运行期行为，MockMvc 结构上测不到
+             （UserApiGoStyleBodyContentTypeTest:166 断言的就是 MockMvc 的字段）。
+             已用 javap 排除了 MockMvc 自己加 charset 的可能（spring-test 7.0.9），
+             但**真 Tomcat** 的 Response.setContentType 与 StringHttpMessageConverter 的
+             交互未做活体验证。
+Impact:      响应头可比对性；含非 ASCII 的错误文案的正确性（见 DRIFT-USERAPI-006 的 ②）。
+Required Confirmation: 真 Tomcat 起 user-api，curl -i 打 /user/v1/login（空 body）
+             与一个含中文的畸形 JSON，抓原始响应头与 body 字节。
+```
+
+### UNRESOLVED-002 —— jjwt `signWith` 按 key 长度选算法，可能与 Go 的 HS256 分叉
+
+```text
+Question:    若 user-api 的 JWT secret 换成 ≥64 字节，RAG 签出的 token 还会是 HS256 吗？
+Go Evidence: service/user/common/jwt/jwt.go:12 **显式** jwt.SigningMethodHS256 —— 恒 HS256。
+RAG Evidence: JwtUtil.java:21 `.signWith(key)`，不传 alg ⇒ jjwt 按 key 长度自动选
+             （<32B HS256，32~47B HS256，≥48B HS512/384）。
+Why Unknown: 当前默认 secret 是 36 字节 UUID（application.yml:91）⇒ 两侧都是 HS256，一致。
+             但 RAG 的选算法规则与 Go 的显式指定**不是同一条规则**，一旦密钥长度跨过阈值就会分叉，
+             且**两侧的 token 将互相验不过**。静态分析无法判定运维是否会改这个值。
+Impact:      一旦触发 ⇒ user-api 签的 token 在 Go 侧（及任何按 HS256 验签的组件）全部验不过。
+Required Confirmation: 确认 secret 是否有变更计划；若有，则必须显式传 alg 并加跨侧验签用例。
+```
+
+### UNRESOLVED-003 —— user-rpc 实际发出的 gRPC code 集合（**需与 user-rpc 审计合并判读**）
+
+```text
+Question:    user-rpc 对 login / register / delete / update / logout / avatar-history
+             这 6 个 RPC，实际会返回哪些 gRPC code？
+Go Evidence: 6 个 Logic 的 switch 只列了 Internal / AlreadyExists / NotFound 三种（见 §7 DRIFT-USERAPI-003 的表）。
+RAG Evidence: GlobalExceptionHandler.mapRPCStatusToCode 覆盖 5 种码。
+Why Unknown: ⚠️ **本组件不假设对端 rpc 是正确的**（用户任务书给定）。
+             是否可观察完全取决于 user-rpc 会不会发 INVALID_ARGUMENT / NOT_FOUND / ALREADY_EXISTS
+             落在 Go switch 的 default 格子里。本组件**无权也不应**替 user-rpc 下结论。
+Impact:      决定 DRIFT-USERAPI-003 保持 OBSERVABLE DIFFERENCE 还是升级为 SEMANTIC MISMATCH。
+Required Confirmation: 与 user-rpc 审计会话合并判读 —— 逐个 RPC 对照其 logic 的
+             status.Error(...) 调用点，列出实际 code 集合，再与 §7 的表逐格比对。
+```
+
+### UNRESOLVED-004 —— Redis 慢/断连时两侧的最终可观察行为
+
+```text
+Question:    Redis 不可用（不是报错，而是慢到超过预算）时，两侧分别返回什么？
+Go Evidence: checkblacklistmiddleware.go:36 判据 `err == nil && exists` ⇒ 出错即放行（fail-open）。
+             该查询在 observability 的 3s 预算**之内**（黑名单由 WithMiddleware 包进 route.Handler）。
+RAG Evidence: JwtAuthInterceptor.java:204-208 异常吞成 null ⇒ 同样 fail-open。
+             但整个拦截器在 HttpMiddleware 的 3s 预算**之内**（DRIFT-USERAPI-009）。
+             Redis 客户端超时由 application.yml:18 `timeout: 3s` 控制。
+Why Unknown: 若 Lettuce 的命令超时与 3s 预算同量级，谁先触发取决于线程调度；
+             RAG 可能先被 obs 预算打断成 **503**，而 Go 会 fail-open **放行**。
+             这需要真 Redis（人为加延迟/断连）才能判定，静态不可定。
+Impact:      Redis 故障时的可用性语义分叉（放行 vs 503）。
+Required Confirmation: 双侧真 Redis 故障注入（iptables DROP 或 redis-cli CLIENT PAUSE）
+             + 一个被拉黑的合法 token，比对最终状态码。
+```
+
+### UNRESOLVED-005 —— user-rpc 的事务/并发语义不在本组件职责内
+
+```text
+Question:    delete / update / select 的事务边界、`extra_info` jsonb 写入、
+             `is_current` 派生字段是否实时、`FOR UPDATE` 行锁 —— 这些全在 user-rpc。
+Go Evidence: 本组件 0 处 DB 访问（grep 零命中），无法提供对照面。
+RAG Evidence: 同上；UserRpcClient.java:18 自己也写着「Phase 2b 填肉阶段：可加 retry /
+             circuit breaker / deadline propagation（DRIFT-018）」—— 即这三项本组件**明确未实现**。
+Why Unknown: 超出本组件组件边界（§2 strict scope）。
+             ⚠️ AGENTS.md §3.5 要求** rpc 必须先于 api **，本条正是该排序约束的体现：
+             在 user-rpc 判读完成前，§4 矩阵第 57 行必须留 UNKNOWN。
+Impact:      §4 矩阵第 18/20/22 行（delete/update 的 rpc 响应语义）最终定性取决于 rpc 侧。
+Required Confirmation: 引用 `docs/DRIFT/users/user/rpc.md`（另一会话产出）后回填本节。
+```
+
+---
+
+## 10. 最终判定（§39 · 18 项 checklist + 三值结论）
+
+### §39 逐项
+
+| # | 检查项 | 结论 | 依据 / 缺口 |
+|---|---|---|---|
+| 1 | 两边的 public behavior 是否一致 | ❌ | DRIFT-USERAPI-001 / 002 / 004 |
+| 2 | 正常路径是否一致 | ✅ | §4 #5,6,7,8,9,12,16,21,22,24 |
+| 3 | 边界输入是否一致 | ❌ | DRIFT-USERAPI-004（query/header 绑定面）、005（history 的 body） |
+| 4 | NotFound / Empty / Null 是否一致 | ✅ | §4 #28,29；`list`→`[]`、`history` 不会 null、`data`→null 一致 |
+| 5 | Error meaning 是否一致 | ⚠️ | 主干一致（§4 #7,8,13,14,15,25）；条件性不一致见 DRIFT-USERAPI-003 |
+| 6 | Error propagation 是否一致 | ❌ | DRIFT-USERAPI-001（业务层 200+1006 → 鉴权层 401） |
+| 7 | External dependency failure 是否一致 | ✅ | Redis fail-open 对齐（§4 #39）；⚠️ 超时边界见 U-004 |
+| 8 | Cache hit / miss 是否一致 | — | **N/A**：本组件无缓存 |
+| 9 | Transaction boundary 是否一致 | — | **N/A**：本组件无 DB；见 U-005 |
+| 10 | State transition 是否一致 | ⚠️ | 本组件无状态；user-rpc 侧见 U-005 |
+| 11 | Side effects 是否一致 | ✅ | §6.11 `success` 字段逐条对齐；metrics 7 个 Counter 对齐（§4 #48,49） |
+| 12 | Ordering 是否一致 | ✅ | 验签 → 黑名单 → handler 两侧同序（§4 #40）；⚠️ Filter/Interceptor 层次差异见 DRIFT-USERAPI-009 |
+| 13 | Retry 是否一致 | ✅ | 两侧均无重试（§6.8） |
+| 14 | Timeout scope 是否一致 | ❌ | DRIFT-USERAPI-009（Go 不含验签、RAG 含） |
+| 15 | Concurrency semantics 是否一致 | ✅ | 本组件无状态无写（N/A 性质的等价）；见 U-005 |
+| 16 | Authentication / Authorization 是否一致 | ❌ | DRIFT-USERAPI-001（claim presence）、002（uid 合法域）；✅ 集合/前缀/fail-open/顺序一致 |
+| 17 | Serialization semantics 是否一致 | ❌ | DRIFT-USERAPI-004 / 005 / 006；✅ `uid,string` / `score` / `data:null` 一致 |
+| 18 | Lifecycle 是否一致 | ⚠️ | 启动顺序等价（§6.12）；❌ 过载能力 DRIFT-USERAPI-008 |
+
+**统计**：✅ 8 项 / ❌ 7 项 / ⚠️ 3 项 / — 2 项（N/A）
+
+### 结论
+
+```text
+SEMANTICALLY NOT EQUIVALENT
+```
+
+- **SEMANTIC MISMATCH：2 条** —— DRIFT-USERAPI-001、DRIFT-USERAPI-002
+- **OBSERVABLE DIFFERENCE：7 条** —— DRIFT-USERAPI-003 ~ 010
+  （其中 #003 条件性成立与否取决于 UNRESOLVED-003；#001/#002 所在族的 #010 已并入 §0 的 N-1 范围说明）
+- **UNRESOLVED：5 条** —— UNRESOLVED-001 ~ 005
+- **双侧活体对拍证据：0 条**（本轮全部为 `静态源码` + 1 条 `字节码核实`）
+
+> ⚠️ **结论的适用边界**：这是一份**源码级**对照台账，不是「已闭环」。
+> 按 `AGENTS.md` §3.3 的纪律，凡「与 Go 一致」的断言都必须有双侧同时跑的探针支撑 ——
+> 本台账里所有 ✅ 都应读作「**源码一致**」，不是「**运行一致**」。
+> 关闭本组件至少需要：U-001（真 Tomcat 探针）、U-003（与 rpc 台账合并）、
+> 以及为 DRIFT-USERAPI-001/002 各补一组双侧活体对拍。
+
+---
+
+## 附录 A：搬移留档（原样保留，未改动一个字节）
+
+> 以下三段是从 `AGENTS.md` 搬来的历史留档。
+> **本轮不对它们做任何「顺手修正」** —— 新结论一律走 §7 的新编号，或就地标注「2026-10-23 复核」。
+
 <!-- @move AGENTS.md L1889-L1924 · §3.4.2 service/users 语义审计后两条新增留档 -->
 #### 3.4.2 `service/users` 语义审计后的两条新增留档（2026-10-21）
 
@@ -59,3 +1145,22 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 新增 **19 个回归测试**（含 2 个 `ResponseEnvelopeAdviceTest` 把 Web 层纳入回归网——此前 RAG 无任何 `@WebMvcTest`/`MockMvc`，这是这批缺陷能长期潜伏的根因）。
 验证：`mvn -pl <5 modules> -am test` + `package` 全绿（users-common 3 / service-common 69 / admin-rpc 24 / admin-api 46 / user-rpc 46 / user-api 30）。
 
+---
+
+## 附录 B：2026-10-23 本轮对 §6.1 十条 + N-1/N-2 的复核（**只复核 user-api 相关的部分**）
+
+> 复核方法：对每一条重新取当前源码证据，**不采信「已修」的既有措辞**（`AGENTS.md` §3.3 纪律）。
+> 非 user-api 归属的条目（admin-rpc / admin-api / users-common 内部）标注「不属本组件」，**不改判**。
+
+| §6.1 / N 条 | 是否属 user-api | **2026-10-23 复核结论** | 证据（消费点行号） |
+|---|---|---|---|
+| **1 `@ResponseBodyAdvice` 二次包裹** | ✅ 是 | **已修，且两条防线都在** | `GlobalResponseAdvice.java:57-59`（`body == null \|\| body instanceof Response` ⇒ 放行）+ `:70-73`（非 JSON contentType ⇒ 放行）。回归网：`ResponseEnvelopeAdviceTest` 2 条（Web 层）+ `UserApiMvcPipelineTest` 的 400 用例（真 MVC + 真 filter）。⚠️ 保留意见见 P-3 |
+| **5 `SelectAvatar` 的 `is_current` 陈旧** | ❌ **不属本组件** | **本组件无此职责，判定 EQUIVALENT / N/A** | user-api 只做透传：`AvatarSelectService.java:107` → `UserApiSupport.fromProto:61-71` 逐字段复制，**不重算 `is_current`**。陈旧若存在必在 user-rpc ⇒ 归 `user/rpc.md`（另一会话）。⚠️ 不要因为这条在 §6.1 里列着就认为 user-api 有缺陷 |
+| **7 `JwtUtil` zero-pad 被删** | ✅ 是（跨 users-common） | **已修** | `JwtUtil.padToHmacKeySize` 存在且 **public**（`JwtUtil.java:44-53`），签发端 `JwtUtil.java:16` 与验签端 `JwtAuthInterceptor.java:85` **共用同一份**。对 user 侧：默认 secret 36 字节 UUID ≥ 32 ⇒ `padToHmacKeySize` 是 **no-op** ⇒ 与 Go（golang-jwt 不校验 key 长度）等价。⚠️ 新增条件项见 U-002 |
+| **8 登录 `UNAUTHENTICATED` 未映射** | ⚠️ 部分 | **user-api 侧未复现；但下挂着 DRIFT-USERAPI-003** | `UserLoginService.java:89-97` 只对 `INTERNAL` 特判，其余一律 `default → 1015`，与 Go `loginlogic.go:50-55` **逐条一致** ✅。但 `UNAUTHENTICATED` 恰好落在「两侧都给 1015」的交集里，所以对齐了；若 user-rpc 改发别的码，通用映射就会分叉（U-003） |
+| **9 uid 解析失败静默转 0** | ✅ 是 | **已修，且本轮发现了它的残留面** | 已修证据：`IdentityResolver.java:102-108` 对 `!(v instanceof Long)` 与 `uid <= 0` **都抛 `ErrInvalidClaimException`**，无静默转换 ✅。⚠️ **但 Go 侧本来就允许 delete/update 透传 `uid<=0`**，RAG 把这条也一并拒了 ⇒ **DRIFT-USERAPI-002**。换句话说：这条历史回归的修法**过度收紧了一个端点组** |
+| **10 HTTP 状态码语义变更** | ✅ 是 | **已修，且经真 MVC 管线验证** | `GlobalExceptionHandler.decideStatus:294-296` 恒 200；鉴权层走 `handleAuthentication:73-78` ⇒ 401；transport 层 `HttpMiddleware.java:560-575 setStatus` / `:660-704 setHeader,setContentType` **立即 propagate**（DRIFT-FRAMEWORK-001 的修法在位）。回归网：`UserApiMvcPipelineTest`（`@SpringBootTest` + `@AutoConfigureMockMvc` + 真 Testcontainers Redis）4 条 401 路径。⚠️ 401 的 **body 形状**仍是 N-1 签字偏离 |
+| **10' DRIFT-FRAMEWORK-001** | ✅ 是 | **已修**（`HttpMiddleware.java:560-575`） | `setStatus` / `sendError(int)` / `sendError(int,String)` 三个重载全部立即 `((HttpServletResponse) this.original).…`；`setHeader` / `addHeader` / `setContentType` 同构（`:660-704`）。`HttpMiddlewareTest.non200StatusSurvivesFlushBufferCommit` 锁住时序 |
+| **N-1 鉴权失败 body 形状** | ✅ 是 | **仍然成立（未变）**，但本轮**扩大了它的覆盖范围** | 事实复核通过：`service/user` 全树 `grep WithUnauthorizedCallback` **零命中** ⇒ `engine.unauthorizedCallback` 为 nil ⇒ `authhandler.go:116-121` 只写 401、**不写 body** ⇒ Go 的 JWT 401 确为空 body。新增：**DRIFT-USERAPI-010** 把 N-1 的范围从 body 扩到 Content-Type 头 |
+| **N-2 Go 中文乱码** | ❌ **不属本组件** | 不改判 | 9 处乱码全在 `user/rpc/internal/logic/`，**没有一处在 user-api**。user-api 只按 `status.Code` 分支、不透传 `status.Message` ⇒ 本轮 6 条 rethrow 端点也只取 `getStatus().getCode()` |
+| **§6.1 的 2 / 3 / 4 / 6（admin-rpc 事务 / 邀请码 FOR UPDATE / extra_info jsonb / UpdateSelf 空 email）** | ❌ **不属本组件** | 不改判 | 全部发生在 admin-rpc 的 SQL 层，user-api 零 DB 访问 |

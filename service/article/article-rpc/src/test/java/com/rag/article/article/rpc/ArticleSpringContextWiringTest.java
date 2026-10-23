@@ -315,4 +315,58 @@ class ArticleSpringContextWiringTest {
                         + "否则与 NacosServiceRegistryAutoConfiguration 的 nacosRegistration 撞车");
         assertFalse(context.containsBean("nacosRegistration") && !context.containsBean("articleRpcNacosRegistration"));
     }
+
+    // ==================================================================
+    // 7. MetaObjectHandler 必须被 MyBatis-Plus 真的接住（DRIFT-ARTICLE-RPC-002）
+    // ==================================================================
+
+    /**
+     * 🔴 <b>两级断言，缺一不可</b>：Bean 存在 ≠ MP 接住了它。
+     *
+     * <p><b>消费点（不是声明点）</b>：MyBatis-Plus 3.5.17 的
+     * {@code com.baomidou.mybatisplus.autoconfigure.MybatisPlusAutoConfiguration:216}：
+     * <pre>{@code
+     * GlobalConfig globalConfig = this.properties.getGlobalConfig();
+     * this.getBeanThen(MetaObjectHandler.class, globalConfig::setMetaObjectHandler);
+     * ...
+     * factory.setGlobalConfig(globalConfig);}</pre>
+     * 而 {@code getBeanThen}（同文件 {@code :233-237}）是
+     * {@code if (getBeanNamesForType(clazz, false, false).length > 0) consumer.accept(getBean(clazz));}
+     * —— <b>找不到就静默跳过</b>，不抛异常、不打日志。
+     *
+     * <p>消费侧在 {@code com.baomidou.mybatisplus.core.MybatisParameterHandler:114}：
+     * {@code updateFill(metaObject, tableInfo)} → {@code :170} 从 {@code GlobalConfig} 取 handler。
+     *
+     * <p>⇒ 只有第 2 条断言（从<b>真正的 {@code SqlSessionFactory}</b> 里把 handler 读回来）
+     * 才能证明链路通了；第 1 条只证明容器里有这个类。
+     * 这正是 AGENTS.md §3.3.3「断言 Bean 存在不等于断言机制生效」的直接用例 ——
+     * 本模块修复前 {@code @TableField(fill=INSERT_UPDATE)} 加了、Handler 类写了，
+     * {@code updated_at} 依然纹丝不动，两处都<b>零告警</b>。
+     */
+    @Test
+    @DisplayName("🔴 MetaObjectHandler 被容器注册 且 被 MyBatis-Plus 的 GlobalConfig 接住")
+    void metaObjectHandlerIsRegisteredAndConsumedByMybatisPlus() {
+        // 第 1 级：容器里有这个 Bean
+        assertNotNull(context.getBean(
+                        com.rag.article.article.rpc.config.ArticleMetaObjectHandler.class),
+                "ArticleMetaObjectHandler 必须是一个 Bean（@Component 在 config 包下，"
+                        + "由 @SpringBootApplication 的默认扫描覆盖）");
+
+        // 第 2 级：MyBatis-Plus 真的把它接住了 —— 这才是「机制生效」的证据。
+        // ⚠️ 必须取**上下文里那个真的** SqlSessionFactory，另起一个 factory 只能证明
+        //    「MP 在手工装配下会接住它」，证明不了本进程实际用的那个接住了。
+        org.apache.ibatis.session.SqlSessionFactory sf =
+                context.getBean(org.apache.ibatis.session.SqlSessionFactory.class);
+        java.util.Optional<com.baomidou.mybatisplus.core.handlers.MetaObjectHandler> handler =
+                com.baomidou.mybatisplus.core.toolkit.GlobalConfigUtils
+                        .getMetaObjectHandler(sf.getConfiguration());
+
+        assertTrue(handler.isPresent(),
+                "MP 的 GlobalConfig 里没有 MetaObjectHandler ⇒ updateFill 永远不会被调用 ⇒ "
+                        + "ArticleEntity.updatedAt 的 fill=INSERT_UPDATE 静默空转。"
+                        + "消费点：MybatisPlusAutoConfiguration:216 getBeanThen(...)");
+        assertTrue(handler.get() instanceof
+                        com.rag.article.article.rpc.config.ArticleMetaObjectHandler,
+                "接住的必须是本模块的 Handler，而不是别的实现");
+    }
 }

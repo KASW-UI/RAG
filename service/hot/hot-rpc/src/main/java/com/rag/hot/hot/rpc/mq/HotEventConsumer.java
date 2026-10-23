@@ -15,6 +15,7 @@ import io.opentelemetry.context.Context;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
@@ -74,7 +75,7 @@ public class HotEventConsumer {
                             HotRpcMetrics metrics,
                             HotPartitionSketchRegistry registry,
                             HotRedisSnapshotStore store,
-                            TaskExecutor taskExecutor) {
+                            @Qualifier("applicationTaskExecutor") TaskExecutor taskExecutor) {
         this.objectMapper = objectMapper;
         this.props = props;
         this.metrics = metrics;

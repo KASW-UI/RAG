@@ -1,5 +1,6 @@
 package com.rag.article.article.rpc.domain;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -127,7 +128,27 @@ public class ArticleEntity {
      */
     private OffsetDateTime createdAt;
 
-    /** 对应 Go {@code UpdatedAt time.Time `gorm:"autoUpdateTime"`}。 */
+    /**
+     * 对应 Go {@code UpdatedAt time.Time `gorm:"autoUpdateTime"`}
+     * （声明点 {@code service/article/rpc/internal/model/article.go:31}）。
+     *
+     * <p>🔴 <b>{@code fill = INSERT_UPDATE} 不是可选项</b>，它是 {@code autoUpdateTime} 的 Java 对应物。
+     * MyBatis-Plus 没有「GORM 那个 tag」，自动填充必须<b>显式声明</b>，
+     * 且<b>必须同时存在 {@link com.rag.article.article.rpc.config.ArticleMetaObjectHandler}</b> ——
+     * 只加注解而没有 handler，{@code fill} 同样<b>静默空转</b>。
+     *
+     * <p><b>不加会怎样（静默失效，不是报错）</b>：本域 8 处写 article 表全部走
+     * {@code articleMapper.updateById(entity)}，而实体里的 {@code updatedAt} 是
+     * <b>从库里读出来的陈旧值</b>；{@code updateById} 的默认
+     * {@code updateStrategy = NOT_NULL} 会把这个陈旧值<b>原样写回</b>
+     * ⇒ {@code updated_at} <b>永远停在建行那一刻</b>。
+     *
+     * <p>⚠️ <b>刻意不加到 {@code createdAt} 上</b>：Go 侧 {@code autoCreateTime} 与
+     * {@code autoUpdateTime} 是两个独立 tag（{@code model/article.go:30-31}），
+     * 且插入路径由调用方显式给值。给 {@code createdAt} 加 {@code fill = INSERT}
+     * 会让 handler 在<b>插入时也覆盖</b>调用方的显式赋值 —— 那才是真的引入漂移。
+     */
+    @TableField(fill = FieldFill.INSERT_UPDATE)
     private OffsetDateTime updatedAt;
 
     /**

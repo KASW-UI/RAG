@@ -74,7 +74,13 @@ public class LikeUpdateKafkaListener {
      * @param value 消息体（{@code KafkaLikeMsg} 的 JSON）
      */
     @KafkaListener(id = "like-update-consumer",
-            topics = "#{@likeKafkaTopics.likeTopic}",
+            // ⚠️ 用 ${} 占位符而不是 SpEL 的 #{@likeKafkaTopics.likeTopic}：
+            //    SpEL 里的 BeanFactory 引用由 KafkaListenerAnnotationBeanPostProcessor 在
+            //    **Bean 后处理阶段**求值，那时 ConfigurationPropertiesScan 注册的定义
+            //    未必可见，实测直接抛 EL1058E / NoSuchBeanDefinitionException。
+            //    ${} 走 Environment，不依赖注册顺序。两条路径读的是同一个 yml 键，值完全相同。
+            //    同款修法见 article-rpc 的 ArticleReviewConsumer（它早已踩过并改掉，本模块漏了）。
+            topics = "${like.kafka.like-topic}",
             groupId = "${spring.kafka.consumer.group-id}",
             containerFactory = "kafkaListenerContainerFactory")
     public void onMessage(ConsumerRecord<String, String> record, String value) {

@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.kafka.autoconfigure.ConcurrentKafkaListenerContainerFactoryConfigurer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.listener.DefaultErrorHandler;
@@ -51,13 +52,45 @@ public class HotKafkaConfig {
      *
      * <p>用具名 bean 而非覆盖 Boot 的默认 {@code kafkaListenerContainerFactory}，
      * 避免影响上下文里其它可能的 listener；由 {@code @KafkaListener(containerFactory=...)} 显式引用。
+     *
+     * <h2>⚠️ 为什么 {@code consumer} 参数上必须有 {@link Lazy}</h2>
+     * <p>本方法第 4 个参数注入 {@link HotEventConsumer}，是为了给 rebalance 回调一个接收方
+     * （{@code consumer.onPartitionsAssigned / onPartitionsRevoked}）。
+     * 而 {@code HotEventConsumer} 上的
+     * {@code @KafkaListener(containerFactory = "hotKafkaListenerContainerFactory")}
+     * 又让 Spring 在创建该 Bean 时去解析<b>本工厂</b> ⇒
+     * <b>工厂 → consumer → 工厂</b> 的循环依赖。
+     *
+     * <p>不加 {@code @Lazy} 时的实测报错：
+     * <pre>
+     * BeanCreationException: hotKafkaListenerContainerFactory
+     *   └─ parameter 3 → hotEventConsumer
+     *        └─ BeanCurrentlyInCreationException: Requested bean is currently in creation
+     * </pre>
+     *
+     * <p><b>{@code @Lazy} 在这里安全，且不改变任何可观察行为</b>，依据是<b>时序</b>：
+     * {@link ConsumerRebalanceListener} 的两个回调<b>只在 consumer 容器已经启动、
+     * 并加入消费组拿到分区之后</b>才可能被触发；
+     * 那时 {@code HotEventConsumer} 必然已经创建完毕 ⇒ 延迟解析拿到的是真实 Bean，
+     * 既不会 NPE，也不会改变回调触发时机与次数。
+     * 反之，若在 Bean 创建期就解析 consumer，则必然循环、上下文根本起不来。
+     *
+     * <p>📌 <b>不要改成「让 factory 不依赖 consumer」</b>（例如把分区回调整体搬走）：
+     * 那会改变 {@code HotEventConsumer} 的职责边界，而它正是 Go 侧
+     * {@code HotHandler}（{@code hot_handler.go:83-99}）的对位物 ——
+     * 分区回调留在 consumer 上，与 Go 的归属一致。
+     *
+     * <p>⚠️ 修这一条时同时发现：本模块此前<b>没有任何 {@code @SpringBootTest}</b>，
+     * 所以这条循环依赖<b>连同 Jackson 缺口、TaskExecutor 歧义</b>一起，
+     * 在全绿的测试套件下<b>完全无人察觉</b>。
+     * 锁死用例：{@code HotRpcSpringContextWiringTest}。
      */
     @Bean
     public ConcurrentKafkaListenerContainerFactory<Object, Object> hotKafkaListenerContainerFactory(
             ConcurrentKafkaListenerContainerFactoryConfigurer configurer,
             ConsumerFactory<Object, Object> consumerFactory,
             HotRpcProperties props,
-            HotEventConsumer consumer) {
+            @Lazy HotEventConsumer consumer) {
         // Boot 的 ConcurrentKafkaListenerContainerFactoryConfigurer.configure 签名就是
         // <Object,Object>，这也是 Spring Boot 默认工厂的形状；listener 方法签名里的
         // String 由 MessagingMessageListenerAdapter 按方法参数类型处理。

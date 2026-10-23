@@ -2,6 +2,7 @@ package com.rag.hot.hot.rpc;
 
 import com.rag.common.spring.ObservabilityProperties;
 import com.rag.common.spring.RpcServerInterceptorFactory;
+import com.rag.hot.hot.rpc.config.Jackson2ObjectMapperConfiguration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Import;
@@ -41,8 +42,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication
 @EnableScheduling
 @Import({
-        RpcServerInterceptorFactory.class, // 产出 ServerInterceptor Bean：gRPC span + 2s deadline
-        ObservabilityProperties.class,    // 承载 observability.rpc-timeout
+        RpcServerInterceptorFactory.class,       // 产出 ServerInterceptor Bean：gRPC span + 2s deadline
+        ObservabilityProperties.class,          // 承载 observability.rpc-timeout
+        Jackson2ObjectMapperConfiguration.class, // 产出 Jackson 2 的 ObjectMapper Bean（Boot 4 拆模块后的缺口）
 })
 public class HotRpcApplication {
 

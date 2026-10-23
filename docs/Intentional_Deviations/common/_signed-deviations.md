@@ -1,4 +1,12 @@
 <!-- @move AGENTS.md L2192-L2331 · §3.4.1 service/common 的 Java 端差异 -->
+
+> **本文件属于 `docs/Intentional_Deviations/` 档案**。
+> ⚠️ **本文件混合了三类性质不同的差异，review 时不可混谈**（原文已声明，此处重申）：
+> ① **有意偏离** = 主动选择与 Go 不同（须签字）；② **框架限制** = 想对齐但语言/框架做不到；
+> ③ **表述差异** = 语义已对齐、仅字面不同。
+
+---
+
 #### 3.4.1 `service/common` 的 Java 端差异（2026-10-21 逐行审计产出）
 
 Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 RAG 全部主源码，产出 20 项偏差、修复 21 处（分支 `row/common-fix-semantic-drift`，issue #71186341）。**以下 5 条是修复后仍然存在、且无法靠改代码消除的差异**。

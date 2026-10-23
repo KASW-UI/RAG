@@ -53,10 +53,10 @@
 | 项 | 值 |
 |---|---|
 | 优先级 | **P0**（三个服务里任意两个同时对空库启动即触发） |
-| 最后核对 | **2026-10-23 00:22**（真实执行产出：`tools/difftest/check-flyway-ledger.py` 修前 `EXIT=1`） |
-| 状态 | **未修复** —— 决策已定（AGENTS.md §6.3 问题 4），**代码一行未改**；三个 `application.yml` 的 `spring.flyway.table` 尚未添加 |
+| 最后核对 | **2026-10-23 01:32**（真实执行产出：`check-flyway-ledger.py` 由 `EXIT=1` 转 `EXIT=0`） |
+| 状态 | **配置层已修** —— `message-rpc`/`like-rpc` 已加 `spring.flyway.table`；`article-rpc` 按指示未动（此时默认账本由它独占）。❌ **运行时验证仍缺 ⇒ 按 §3.3 记 `UNKNOWN`** |
 | 决策记录 | AGENTS.md §6.3 **问题 4** |
-| 守门 | `tools/difftest/check-flyway-ledger.py` **已落盘**（未修复态实测 `EXIT=1`）；各模块 `FlywayLedgerIsolationTest` **未编写** |
+| 守门 | `tools/difftest/check-flyway-ledger.py` **已转绿 `EXIT=0`**；各模块 `FlywayLedgerIsolationTest` **全仓不存在**（文档误称其存在） |
 
 ### 实测证据
 
@@ -106,7 +106,7 @@ users 占 V1-V4」，**该注释两处失真**：
 
 | 方案 | 结论 |
 |---|---|
-| **每模块独立账本表名** `spring.flyway.table` | ✅ **定案采纳（2026-10-23，⚠️ 尚未实施）**。改动面 = 3 个 yml 各加一行；不动任何 SQL 文件名；各模块版本号从 V1 各自重来也互不干扰；**直接消除病根** |
+| **每模块独立账本表名** `spring.flyway.table` | ✅ **采纳并已实施（2026-10-23）**。改动面 = 3 个 yml 各加一行；不动任何 SQL 文件名；各模块版本号从 V1 各自重来也互不干扰；**直接消除病根** |
 | 排全局唯一号段 | ❌ 否决。是 2026-10-20 的旧结论、**10-21 已被推翻过一次**；要改 8 个 SQL 文件名，却不解决「账本是 schema 级」这个根因 —— 只要还有第二个模块往同一 schema 放迁移，撞号就再现 |
 | 全仓统一丢 Flyway | ⏸ 未采纳（与 Go 的 `AutoMigrate` 同构、最彻底，但要重做 13 个迁移脚本，超出本次修复范围） |
 | ⛔ `validate-on-migrate=false` + `out-of-order=true` | ❌ **已被实测证伪，禁止再提**。`tools/difftest/exp-drift015-flyway-flags.sh`：不但修不好，还往账本塞一条语义重复的 `version 3 = create user`，把 schema 永久钉在错误版本上，日后正修得先人工清账本 |

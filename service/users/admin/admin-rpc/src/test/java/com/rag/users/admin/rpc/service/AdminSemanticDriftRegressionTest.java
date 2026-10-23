@@ -405,7 +405,16 @@ class AdminSemanticDriftRegressionTest {
         Mockito.verify(userMapper).update(Mockito.isNull(), captor.capture());
         LambdaUpdateWrapper<UserEntity> w = captor.getValue();
 
-        assertEquals("password=#{ew.paramNameValuePairs.MPGENVAL1}", w.getSqlSet());
+        // ⚠️ 本断言原先写死 `"password=#{ew.paramNameValuePairs.MPGENVAL1}"`，
+        // 那是一条**把缺陷锁死**的绿测试：它断言 UPDATE 的 SET 子句**不含** update_time，
+        // 而 Go 侧 `gorm:"autoUpdateTime"`（data_model.go:13，消费点
+        // gorm@v1.31.2/callbacks/update.go:243-259）每次 Updates 都会推进它。
+        // ⇒ 修复 DRIFT-ADMIN-RPC-003 时**必须先改这条断言**（AGENTS.md §3.3.2：
+        // 「修复漂移时先改/删错误断言，再改实现」），否则会先撞上「测试红了」而误以为改错了方向。
+        // 这里改成包含 update_time 的正确形状，并保留「只改密码时也推进时间戳」这层含义。
+        assertEquals("password=#{ew.paramNameValuePairs.MPGENVAL1},update_time = CURRENT_TIMESTAMP",
+                w.getSqlSet(),
+                "SET 子句必须同时含 password 与 update_time（DRIFT-ADMIN-RPC-003 / GORM autoUpdateTime）");
         String hash = String.valueOf(w.getParamNameValuePairs().get("MPGENVAL1"));
         assertTrue(PasswordUtil.check("cfg-pwd-123456", hash),
                 "重置密码应使用配置的 system.default-password");

@@ -103,6 +103,28 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
+        <!--
+            ⚠️ commons-pool2 **不可省**：本模块的 application.yml 配了
+               `spring.data.redis.lettuce.pool.enabled: true`
+               ⇒ Boot 4 的 LettuceConnectionConfiguration 会构造
+               `org.apache.commons.pool2.impl.GenericObjectPoolConfig`，
+               而 Boot 4 的 starter **不再传递** commons-pool2。
+
+            实测（2026-10-23，docs/DRIFT/like/rpc.md）：
+            缺它时启动报
+            `NoClassDefFoundError: org/apache/commons/pool2/impl/GenericObjectPoolConfig`
+            ⇒ **组件起不来**，而在此之前的测试全是全绿的。
+
+            ⚠️ hot-rpc 用的是同一个 starter 却不需要它 ——
+            因为 hot-rpc **没有配 lettuce.pool**（不池化 ⇒ 不碰 GenericObjectPoolConfig）。
+            ⇒ 「用同一个 starter」不等于「依赖集合相同」。
+
+            版本由 spring-boot-dependencies BOM 管理（2.12.1），不写 <version>。
+        -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-pool2</artifactId>
+        </dependency>
 
         <!-- ============== 4. Kafka（对应 Go go-queue kq.Pusher / kq.Queue）============== -->
         <!--
@@ -119,6 +141,21 @@
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <!--
+            ⚠️ spring-boot-kafka **不可省**：Boot 4 把 Kafka 的自动配置拆成了独立模块，
+            只有 spring-kafka（底层库）时 **KafkaTemplate / ConsumerFactory /
+            ConcurrentKafkaListenerContainerFactory 全都没有**。
+
+            实测（2026-10-23，docs/DRIFT/like/rpc.md DRIFT-LIKE-013）：
+            缺它时启动报 `NoSuchBeanDefinitionException: KafkaTemplate`，
+            `LikeHotEventOutboxRelay` 构造失败 ⇒ **组件根本起不来**，
+            而在此之前的测试全是全绿的。
+            同款见 service/article/article-rpc/pom.xml 与 service/hot/hot-rpc/pom.xml。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-kafka</artifactId>
         </dependency>
 
         <!-- ============== 5. gRPC server + client ============== -->

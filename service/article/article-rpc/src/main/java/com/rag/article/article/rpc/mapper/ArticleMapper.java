@@ -199,6 +199,7 @@ public interface ArticleMapper extends BaseMapper<ArticleEntity> {
             LIMIT #{limit} OFFSET #{offset}
             </script>
             """)
+    @ResultMap("articleEntityResultMap")
     List<ArticleEntity> selectAuthorView(@Param("manualTypeTag") String manualTypeTag,
                                           @Param("secondaryTagJson") String secondaryTagJson,
                                           @Param("authorId") String authorId,

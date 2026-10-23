@@ -11,7 +11,7 @@
 
 | 文件 | 坑 | 状态 |
 |---|---|---|
-| [`_cross/flyway-ledger-collision.md`](_cross/flyway-ledger-collision.md) | 🔴 多服务共用同一 PG schema ⇒ **Flyway 账本必然撞号**，后启动者的迁移被**静默跳过**（跨 message/like/article 三域） | **已定案，未实施** |
+| [`_cross/flyway-ledger-collision.md`](_cross/flyway-ledger-collision.md) | 🔴 多服务共用同一 PG schema ⇒ **Flyway 账本必然撞号**，后启动者的迁移被**静默跳过**（跨 message/like/article 三域） | **配置层已修** `EXIT=0`；运行时验证仍缺 |
 | [`_cross/testing-pitfalls.md`](_cross/testing-pitfalls.md) | 「把没看过的东西变成看过了」本身就能挖出真 bug；断言「Bean 存在」≠ 断言「机制生效」 | 已有 2 段 |
 | [`users/_shared.md`](users/_shared.md) | ① 命令行属性**前缀写错 ⇒ 静默归零**（MyBatis-Plus 是 `mybatis-plus` 不是 `mybatis`）；② 脚本批量改 N 处 ⇒ 必须配**守恒断言**而非逐点测试 | 已有 2 段 |
 | [`common/http.md`](common/http.md) | 「代码里写了」≠「客户端收到」：响应已 committed 后 `setHeader` 被**静默忽略** ⇒ text/plain 400 丢 `Content-Type`（4 轮对拍全绿） | 已有 1 段 |
