@@ -411,9 +411,12 @@ Result 只用 5 个枚举值。证据列的记号：
 
 ### 6.7 Retry Semantic Equivalence
 **两侧都无 Retry**（N/A）。⚠️ 明确记录：Go 的 `mustNewRedis` 在启动期失败会 `log.Fatalln`，
-RAG 的 Redis 是懒连接 —— **首次 `logout` 才会暴露连接问题**。这是**启动期 fail-fast 语义的差异**，
-Go 侧 `svc.NewServiceContext`（`servicecontext.go:29` `redis.MustNewRedis`）在 `zrpc.MustNewServer` **之前**执行，
+RAG 的 Redis 是懒连接 —— **首次 `logout` 才会暴露连接问题**。Go 侧 `svc.NewServiceContext`
+（`servicecontext.go:29` `redis.MustNewRedis`）在 `zrpc.MustNewServer` **之前**执行，
 RAG 侧无对应物。记为 V-008 的姊妹项，见 §9 UNRESOLVED-USERRPC-004。
+> ⚠️ **2026-10-24 更正（§9.3）**：本段原推断「Go 侧是**启动期 fail-fast**」**已被活体实验证伪** ——
+> go-zero `RedisConf.NonBlock` 的 struct tag 默认是 `true` ⇒ `MustNewRedis` **不做连接检查**
+> ⇒ **两侧都是「启动成功」**。上面这段保留原文供追溯，**不要再当结论引用**。
 
 ### 6.8 Serialization Semantic Equivalence
 | 维度 | Go | Spring Boot | 结果 |
@@ -631,9 +634,10 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
   （`AvatarHistoryItem.id` 取的是字符串 `history_id`，见 `avatarhelpers.go:22`）。仅 DB 层可见。
 - **Classification**: **OBSERVABLE DIFFERENCE**（仅 DB 层）
 - **Evidence**: `[GO]` `data_model.go:6,23`；`[RAG]` `UserEntity.java:33`。证据强度：**静态源码**。
-- **⚠️ 未解**：`users_user_avatar_history` 走手写 `@Insert` + `@Options(useGeneratedKeys=true)`
-  （`UserAvatarHistoryMapper.java:88-93`）时，`IdType.ASSIGN_ID` 与 `Jdbc3KeyGenerator` **谁最终胜出**
-  本轮未验证 ⇒ `UNRESOLVED-USERRPC-004`。
+- **✅ 已解（2026-10-23 第四轮 = V-006 关闭）**：`users_user_avatar_history` 走手写 `@Insert` +
+  `@Options(useGeneratedKeys=true)`（`UserAvatarHistoryMapper.java:88-93`）时，
+  `IdType.ASSIGN_ID` 与 `Jdbc3KeyGenerator` **谁最终胜出** ⇒ **V-006 已关闭**
+  （真 PG：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；**永不进 wire**）⇒ `UNRESOLVED-USERRPC-004①` 已闭环。
 
 ### DRIFT-USERRPC-V-007（跨组件 `service/common`）超时路径的 gRPC **status description** 不同 —— 🔴 **仍成立，但不在本组件判定权内**
 
@@ -717,7 +721,7 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 | CASE-32 | PG 被 ACCESS EXCLUSIVE 锁住 12s | 客户端 2000ms 返回；PG 查询 203ms 后消失 | 客户端 2000ms 返回；PG 查询 176ms 后消失 | 同量级 | YES | `_shared.md` §6.2.6 E-4 **实测**（2026-10-21，本轮未重跑） |
 | CASE-33 | 同一 uid 并发 `UploadAvatar` ×2 | 可能两条 `is_current=true` | 同 | **共有缺陷，非漂移** | YES（缺陷等价） | `[GO][RAG]` 静态：两侧都无 `FOR UPDATE` |
 | CASE-34 | 同一 username 并发 `Register` ×2 | 恰好 1 成功 + 1 `INTERNAL`（撞 UNIQUE） | 同 | 同 | YES | `[PG]` `uniqueConstraintsAreEnforcedOnRealPg`（约束层）+ 静态 |
-| CASE-35 | 进程启动时 Redis 不可用 | **启动失败**（`MustNewRedis`） | 启动成功，首个 `logout` 才失败 | **应当等价** | **NO** | **V-008 姊妹项 / `UNRESOLVED-USERRPC-004`** |
+| CASE-35 | 进程启动时 Redis 不可用 | **启动成功**（`NonBlock` 默认 `true` ⇒ `MustNewRedis` **不做连接检查**） | 启动成功（懒连接） | ✅ **一致**（原记 **NO**，**2026-10-24 活体实验证伪**） | **§9.3** |
 | CASE-36 | 进程启动时 `status` DDL 已存在但列宽是 varchar(255) | — | 幂等 `ALTER ... TYPE text` 自愈 | RAG 单侧特性 | N/A | `[PG]` `UserRpcSchemaTextColumnTest#alterSelfHealsAnExistingVarcharColumn` |
 
 ---
@@ -729,9 +733,9 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 | **UNRESOLVED-USERRPC-001** | **V-001（`Login` 的 status==NULL fail-open）端到端是否真的可达** | `data_model.go:11`（无 NOT NULL）⇒ 列可空 ⇒ 机制上可达 | `01_create_user.sql:39` `NOT NULL` ⇒ RAG 自建库不可达 | 两条静态证据**互相矛盾**：Go 机制可达、RAG 机制不可达。需真实数据才能判 | HIGH（安全方向） | 在 RAG 库 `DROP NOT NULL` + 插 NULL 行，两侧各打一次 `Login` 比对 `Status.getCode()`。**在跑通前不得把 V-001 按「不可达」销掉** |
 | **UNRESOLVED-USERRPC-002** | **V-004 的时区偏移量到底是多少** | DSN 钉 `TimeZone=Asia/Shanghai`（`db.go:21`）；列类型 `timestamptz` | JDBC URL 无 `TimeZone`（`application.yaml:13`）；列类型 `timestamp`；渲染恒 `Z`（`AvatarDomainService.java:74`） | JVM 默认时区、PG 会话 `TimeZone`、容器 TZ 三者都未实测 | MEDIUM（客户端可见字符串） | 查部署环境 `TZ` / `-Duser.timezone` / `SHOW TimeZone`；或两端各发一次 `UploadAvatar` + `GetAvatarHistory` 直接比 `create_time`。**同构先例 `DRIFT-MSG-010` / `UNRESOLVED-MSG-001`** |
 | **UNRESOLVED-USERRPC-003** | **V-005 的 wire 可达性**：protobuf 编码器会为「显式空 map」产出字段 tag 吗 | protobuf-go 对非 nil map 视为「已设置」⇒ 会编码 ⇒ 服务端解出非 nil 空 map | protobuf-java 的 `MapField` 写出条件本轮**未读源码** | 只做了分支层静态对照，未构造 wire 输入 | LOW | 构造 `extra_info: {}` 的请求（或用 grpcurl 手写 wire）打两侧，比对 `update_time` 是否推进 |
-| **UNRESOLVED-USERRPC-004** | **① `IdType.ASSIGN_ID` 与 `useGeneratedKeys=true` 谁决定 `users_user_avatar_history.id`（V-006）；② 启动期 Redis 不可用时两侧的失败时机（CASE-35）** | `servicecontext.go:29` `redis.MustNewRedis` 在 `MustNewServer` **之前** ⇒ 启动即失败 | Redis 为懒连接；`insertHistory` 的两种 id 来源并存 | 两条都需要真容器 / 真 jar 才能判 | LOW | ① 真 PG 下插入一条后 `SELECT id FROM users_user_avatar_history` 看量级；② 停掉 Redis 起进程看是否 fail-fast |
+| ~~**UNRESOLVED-USERRPC-004**~~ | ✅ **已闭环（2026-10-24）** —— ① 由第四轮 V-006 关闭；② 由**活体实验**关闭 | — | — | ① id 的取值来源：**V-006 已关闭**（真 PG：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；永不进 wire）。② 启动期 Redis 不可用：**两侧都启动成功 ⇒ 一致**（原推断「Go fail-fast」**被证伪** —— go-zero `RedisConf.NonBlock` 的 struct tag 默认是 `true` ⇒ `MustNewRedis` **不做连接检查**） | ~~LOW~~ → 已闭环 | ⇒ **§9.3**（活体：把两侧 Redis 都指到死端口后起进程） |
 | **UNRESOLVED-USERRPC-005** | **建表责任交叉**：`users_user` 由 **user-rpc 与 admin-rpc 都建**（幂等重放 + 同一个 advisory lock 键 `8_675_309`） | Go 两个服务**各有各的表名**（`users` vs `users_user` 不冲突；admin-rpc 也建 `users`）⇒ 靠 `HasTable` 的**时序侥幸**（`_shared.md` §6.2.5 第 ②③ 段已实测 5 轮） | 两侧**表名相同** ⇒ 真正共享同一张表；靠 `SchemaInitializer` 的 advisory lock 串行化 | **本组件单侧验不完**：必须与 `admin-rpc` 的结论合并判读。RAG 的锁比 Go 的「时序侥幸」强，但那是**机制更强**，不是「与 Go 等价」 | HIGH（跨组件不变量） | 与 admin-rpc 组件的台账合并判读；跑 `tools/difftest` 双栈并发启动（`_shared.md` 已有实测记录，但那是 2026-10-21 的，需在当前代码上复跑） |
-| **UNRESOLVED-USERRPC-006** | **索引 / 唯一约束 / NOT NULL / DEFAULT 四项仍未逐列核对** | 需查 `information_schema` 的 `indexes` / `constraints` | 同 | `tools/difftest/check-ddl-static.py` 的文件头**自陈只查 `data_type` 与 `character_maximum_length`**，其余标 `NOT CHECKED` | MEDIUM | 起两侧容器后跑一条 psql 查询逐列比对。⚠️ **不要把该脚本「全绿」读成「DDL 已一致」**（该脚本当前在有差异时是 EXIT=1） |
+| ~~**UNRESOLVED-USERRPC-006**~~ | ✅ **已闭环（2026-10-23 第五轮 §4，2026-10-24 独立复现）** | — | — | **已逐项核对**（真库对照：两侧各用自己的建表机制把表建出来，再查 `information_schema` + `pg_indexes` + `pg_constraint`）。⚠️ **不要把 `check-ddl-static.py`「全绿」读成「DDL 已一致」** —— 该脚本文件头**自陈**只查 `data_type` 与 `character_maximum_length`，其余标 **NOT CHECKED** | ~~MEDIUM~~ → 已闭环 | ⇒ 结论见本文件 §「2026-10-23 第五轮」§4；**2026-10-24 用本轮自建的一对全新库（`uu_both_go_db` / `uu_both_rag_db`）独立复现，结论逐条一致**：`status` 的 NOT NULL 差异（**V-002**，需与 admin 域同改）、两个时间列的 DEFAULT 差异（**V-011**，Go 无 DEFAULT / RAG 有 `CURRENT_TIMESTAMP`，**当前不可观察**）、唯一约束与索引**功能等价** |
 | ~~**UNRESOLVED-USERRPC-007**~~ | ✅ **已闭环（2026-10-24）** | — | — | 双侧活体对拍已跑（真进程 + 真 PG + 真 Redis，**自带容器 / 自带库 / 自带端口**）：**43 场景 / 39 等价 / 4 处差异**，4 处**全部**是 N-2 已签字的 Go 源码乱码文案 ⇒ **无新漂移** | ~~HIGH（本轮最大的证据缺口）~~ → 已闭环 | ⇒ **§9.1**（含首轮 2 处**假漂移**的辨伪记录 + 守网清单） |
 | ~~**UNRESOLVED-USERRPC-005**~~ | ✅ **已闭环（2026-10-24）** | — | — | **双侧对称并发启动实测**：Go 侧 `go-user-rpc`+`go-admin-rpc` 与 RAG 侧 `user-rpc`+`admin-rpc` **各自同时**对**同一个空库**启动 ⇒ 两侧都起来、表都建齐（各 4 张）、**0 致命错误**（共 9 轮：Go 5 轮 + RAG 6 轮） | ~~HIGH（跨组件不变量）~~ → 已闭环 | ⇒ **§9.2**（含 advisory lock 串行化的时间戳证据 + Go 侧「时序侥幸」的机制差异 + admin 域的复核提示） |
 
@@ -930,6 +934,81 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 （只运行其二进制与 jar，**未改它的任何代码/台账**）⇒
 admin 域台账的 **`UNRESOLVED-ARPC-005`**（`docs/DRIFT/users/admin/rpc.md`）应当据此复核并关闭。
 （§5.3：工作树内只写自己域的台账文件 ⇒ 本会话**没有**动 admin 的台账。）
+
+---
+
+## 9.3 UNRESOLVED-USERRPC-004 闭环记录（2026-10-24 · 活体**证伪**了一条旧结论）
+
+> §9 那条 UNRESOLVED 的闭环记录。**这条特别值得单列**：它不是「补上了缺的证据」，
+> 而是**证伪了台账里一条已经写了好几轮的结论**（CASE-35 原记 `NO` / 「Go 启动期 fail-fast」）。
+
+### 9.3.1 问题
+
+进程启动时 Redis 不可用，**两侧的失败时机**是否不同？
+
+### 9.3.2 原结论（静态推断，写了好几轮）
+
+> Go：`service/user/user/rpc/internal/svc/servicecontext.go:29` `redis.MustNewRedis(c.BizRedis)`
+> 在 `MustNewServer` **之前** ⇒ **启动即失败**；RAG 是懒连接 ⇒ **启动成功** ⇒ **两侧不一致**。
+
+### 9.3.3 活体实验（`tools/difftest/exp-difftest-redis-failfast.sh`）
+
+把**两侧**的 Redis 都指到一个**死端口**（`127.0.0.1:56999`，启动前确认无监听者 ⇒ connection refused），
+再起进程，看**到底起没起来**：
+
+| | 指向死端口后的启动结果 |
+|---|---|
+| Go `go-user-rpc` | ✅ **起来了**（日志原文：`Starting rpc server at 0.0.0.0:19005...`） |
+| RAG `user-rpc` | ✅ **起来了** |
+
+⚠️ **为什么用「死端口」而不是「停掉 Redis 容器」**：停容器会**同时影响别的会话**
+（本机多个会话共用 Redis）⇒ 死端口只影响本脚本自己起的进程，**零副作用**。
+（但要记住：这测的是「**连不上**」；「**连得上但慢**」是另一种故障，**不可互相替代**。）
+
+### 9.3.4 根因：漏读了 go-zero 的 **struct tag 默认值**
+
+go-zero v1.10.2 `core/stores/redis/conf.go`：
+```go
+RedisConf struct {
+    Host     string
+    Type     string `json:",default=node,options=node|cluster"`
+    ...
+    NonBlock bool   `json:",default=true"`      // ← ⚠️ 默认就是 true
+    PingTimeout time.Duration `json:",default=1s"`
+}
+```
+而 `core/stores/redis/redis.go:122-148`：
+```go
+rds := newRedis(conf.Host, opts...)
+if !conf.NonBlock {                     // ← 默认 true ⇒ **整个连接检查被跳过**
+    if err := rds.checkConnection(conf.PingTimeout); err != nil {
+        return nil, errorx.Wrap(err, ...)
+    }
+}
+```
+⇒ **`MustNewRedis` 默认根本不去 ping Redis** ⇒ Redis 不可达**不会**让 Go 启动失败。
+
+⚠️ **旧结论错在哪**：它读了 `MustNewRedis` 的**调用点**（`servicecontext.go:29` 在 `MustNewServer` 之前）
+和 `MustNewRedis` 的**名字**（"Must" 看起来像「必须成功」），
+**却没读 `RedisConf` 的 struct tag 默认值** ⇒ 以为 `NonBlock` 是 `false`（零值）⇒ 以为会做连接检查。
+⇒ 这正是 AGENTS.md §3.3.1 那条纪律的**反面**：
+**「配置里没写」≠「没开」** —— 在 Go 侧，**默认值藏在 struct tag 里**，
+而 `NonBlock` 的默认是 `true`（= **跳过**检查）⇒ 「Must」这个名字**不构成证据**。
+
+### 9.3.5 判定
+
+**UNRESOLVED-USERRPC-004 关闭**：
+- ①（id 谁胜出）⇒ **V-006 已关闭**（第四轮，真 PG 实证：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；**永不进 wire**）。
+- ②（启动期 Redis 不可用）⇒ **两侧都是「启动成功」⇒ 一致**。
+
+⇒ **CASE-35 由 `NO` 改为 `YES（一致）`**；
+⇒ 顺带**少了一条假漂移**（原先被记成「Go 启动失败 / RAG 启动成功」的 OBSERVABLE DIFFERENCE，**实际上不存在**）。
+
+⚠️ **仍然成立的那一半**（**运行期**，不是启动期）：
+两侧的 Redis 都是**首次真正被用到**时才会失败 ——
+Go `logout` 写黑名单失败 ⇒ `INTERNAL "注销失败,Redis写入异常"`（`logoutlogic.go:40`）；
+RAG `UserDomainService.logout:780` ⇒ 同样的 `INTERNAL "注销失败,Redis写入异常"` ⇒ **一致**。
+⇒ **失败时机两侧都是「首次使用时」**，不是启动时。
 
 ---
 
@@ -1313,7 +1392,7 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | **DRIFT-USERRPC-V-006** | `id` 的取值来源（Go `bigserial` 序列 vs RAG `IdType.ASSIGN_ID` 雪花） | ✅ **已关闭**（第四轮，真 PG 实证：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；**永不进 wire**） | ⚠️ 本行此前写「仍成立」，是**过期状态**（第四轮已关，第六轮复核才发现汇总表没同步） |
 | **DRIFT-USERRPC-V-007** | 超时的 gRPC `description` 不同（`service/common` 组件） | 仍成立 | 归属 `service/common`，不在本组件判定权内 |
 | **DRIFT-USERRPC-V-008** | 死代码 + **伪出处**（3 个异常类 + 2 个 mapper 方法） | ✅ **已修**（`fa2de52`） | 第四轮 §2 已删；且**伪出处是两个，不是一个**（`PasswordMismatchException` 声称的 `ALREADY_EXISTS` 在 Go 恰好相反）。⚠️ 本行此前仍写「仍成立」，属台账脱节，本轮复核更正 |
-| **UNRESOLVED-USERRPC-004 ②** | 启动期 Redis 不可用：Go `MustNewRedis` fail-fast vs RAG 懒连接 | 仍 unresolved | 本轮未做「停掉 Redis 再起进程」的注入实验 |
+| **UNRESOLVED-USERRPC-004 ②** | 启动期 Redis 不可用：Go `MustNewRedis` fail-fast vs RAG 懒连接 | ✅ **已闭环（2026-10-24，§9.3）** —— **原推断被活体实验证伪**：go-zero `RedisConf.NonBlock` 的 struct tag 默认 `true` ⇒ `MustNewRedis` **不做连接检查** ⇒ **两侧都启动成功** ⇒ **无差异** | 本轮做了「把两侧 Redis 都指到死端口再起进程」的注入实验（`tools/difftest/exp-difftest-redis-failfast.sh`） |
 | **UNRESOLVED-USERRPC-005** | `users_user` 建表责任交叉（user-rpc ↔ admin-rpc） | 仍 unresolved | 跨组件不变量；本轮的隔离 harness 是**单 rpc** 的，**证明不了**两 rpc 同库共存。⇒ 属 admin 会话范围 |
 
 ### 5b. 跨域状态更新（2026-10-23 晚）：V-003 的跨域不对称**已消除** ✅
@@ -1505,7 +1584,7 @@ admin 域拥有 `03_create_admin.sql` / `04_create_admin_invite.sql`，**四个�
 
 | # | 为什么仍 open |
 |---|---|
-| `UNRESOLVED-USERRPC-004` ② | 启动期 Redis 不可用时两侧的失败时机（Go `MustNewRedis` fail-fast vs RAG 懒连接）。<br>**①（id 谁胜出）已由本轮 V-006 关闭**（真 PG：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出）。② 需「停掉 Redis 再起进程」的注入实验，未做 |
+| `UNRESOLVED-USERRPC-004` ② | 启动期 Redis 不可用时两侧的失败时机（Go `MustNewRedis` fail-fast vs RAG 懒连接）。<br>**①（id 谁胜出）已由本轮 V-006 关闭**（真 PG：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出）。<br>② ✅ **已于 2026-10-24 闭环并**证伪原推断**（§9.3）：go-zero `RedisConf.NonBlock` 的 struct tag 默认 `true` ⇒ `MustNewRedis` **不做连接检查** ⇒ 活体实测**两侧都启动成功** ⇒ **无差异**。本行原写「需注入实验，未做」是**过期状态** |
 | `UNRESOLVED-USERRPC-005` | `users_user` 建表责任交叉（user-rpc ↔ admin-rpc）。**跨组件**：必须两个 rpc **同库并发启动**才能验，单侧 harness 证明不了 |
 | `UNRESOLVED-USERRPC-007` | 9 个 RPC 的 **gRPC 层错误 message 逐字对拍**。第三轮 §6.1 明写「`grpc-message-dual-port-runner.java` 本轮**未**跑」；已覆盖的只是 HTTP wire 层 |
 

@@ -509,3 +509,61 @@ Error response from daemon: No such container: difftest-postgres
 💡 **本轮真正的救命动作**：不是去读 `SchemaInitializer` 的代码，而是**问「这轮和上一轮有什么不同」** ——
 上一轮是**第一次**跑（没有残留），那 1 轮是好的 ⇒ 差异必然在「轮次之间」⇒ 而轮次之间只差「残留」。
 ⇒ **复现失败时，先做「第一次 vs 第 N 次」的对照**，比直接读实现快得多。
+
+---
+
+## PIT-USERS-SHARED-011 🔴 函数名里的「Must」**不构成证据** —— Go 的 struct tag 默认值会**静默改写**行为
+
+**症状**：台账里有一条写了好几轮的结论：
+
+> 「Go 侧 `servicecontext.go:29` 的 `redis.MustNewRedis(c.BizRedis)` 在 `MustNewServer` **之前**
+> ⇒ Redis 不可用时**启动即失败**；RAG 是懒连接 ⇒ **启动成功** ⇒ **两侧不一致**（CASE-35 记 `NO`）。」
+
+**这条结论是错的。** 2026-10-24 的活体实验（把两侧 Redis 都指到死端口再起进程）实测：
+**Go 侧照样起来了**（日志原文 `Starting rpc server at 0.0.0.0:19005...`）。
+
+**根因**：
+```go
+// go-zero v1.10.2 core/stores/redis/conf.go
+RedisConf struct {
+    Host     string
+    Type     string `json:",default=node,options=node|cluster"`
+    ...
+    NonBlock bool   `json:",default=true"`      // ← ⚠️ 默认就是 true
+}
+// core/stores/redis/redis.go:140-147
+rds := newRedis(conf.Host, opts...)
+if !conf.NonBlock {                     // ← 默认 true ⇒ **整个连接检查被跳过**
+    if err := rds.checkConnection(conf.PingTimeout); err != nil { return nil, ... }
+}
+```
+⇒ **`MustNewRedis` 默认根本不去 ping Redis** ⇒ Redis 不可达**不会**让 Go 启动失败。
+
+⚠️ **旧结论错在哪（两个具体的错）**：
+1. **只读了调用点，没读被调方的默认行为** ——
+   `servicecontext.go:29` 的**位置**（在 `MustNewServer` 之前）是对的，
+   但「`MustNewRedis` 会失败」这件事**依赖 `RedisConf` 的默认值**，而那个默认值在
+   **另一个包的 struct tag 里**（`core/stores/redis/conf.go`），不在真源仓库里；
+2. **被函数名骗了** —— `MustNewRedis` 里的 "Must" 让人以为「必须连上才会返回」，
+   而它只是「**出错就 `logx.Must` 退出**」；**出不出错取决于调用参数**，而参数带默认值。
+
+⇒ 这正是 AGENTS.md §3.3.1 那条纪律的**反面**，值得单独强调：
+> **「配置里没写」≠「没开」** —— 在 Go 侧，**默认值藏在 struct tag 里**，
+> 而这里 `NonBlock` 的默认是 `true`（= **跳过**检查）。
+> ⇒ 「Go 侧的行为」要读到**消费点 + 被消费对象的默认值**两处，才算读全。
+
+⚠️ **更一般的形态**（本仓不止这一处）：
+Go 的 `conf` 包会按 struct tag 施加默认值（`default=` / `options=`），
+所以**「yaml 里没出现的字段」不等于「零值」**。
+凡是要断言 Go 某个配置项的**生效值**，**必须去读那个 struct 的 tag**，
+不能拿「yaml 里没写 ⇒ 取零值」当推理前提。
+
+**处置**：
+- 台账 CASE-35 由 `NO` 改为 `YES（一致）`；`UNRESOLVED-USERRPC-004` 关闭（§9.3）；
+- 顺带**少了一条假漂移**（原先被记成 OBSERVABLE DIFFERENCE 的那条，**实际上不存在**）；
+- 新增活体实验脚本 `tools/difftest/exp-difftest-redis-failfast.sh`
+  （把两侧 Redis 都指到**死端口**再起进程 —— **不用停容器**，零副作用，不影响别的会话）。
+
+💡 **本轮真正的救命动作**：不是去读 go-zero 的源码，而是**先把进程起起来看它到底起没起来** ——
+静态读出来的「Must ⇒ 必失败」和活体结果冲突时，**先信活体**，再去查「我漏读了哪个默认值」。
+⇒ **一条「看起来很确定」的结论，越顺手越要拿实验去撞它。**
