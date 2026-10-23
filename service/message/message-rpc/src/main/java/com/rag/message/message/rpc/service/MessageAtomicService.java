@@ -9,7 +9,7 @@ import com.rag.message.message.rpc.mapper.NotificationMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 /**
@@ -221,7 +221,7 @@ public class MessageAtomicService {
      */
     @Transactional
     public void markConversationReadTx(long conversationId, long recipientId, int recipientRole,
-                                       LocalDateTime readAt) {
+                                       OffsetDateTime readAt) {
         messageMapper.markReadByConversationAndRecipient(
                 conversationId, recipientId, recipientRole, readAt);
     }
@@ -244,7 +244,7 @@ public class MessageAtomicService {
      * @return 受影响行数；0 = 不存在或不归属该 recipient，由上层映射成 NOT_FOUND(5203)。
      */
     @Transactional
-    public int markNotificationReadTx(long id, long recipientId, LocalDateTime readAt) {
+    public int markNotificationReadTx(long id, long recipientId, OffsetDateTime readAt) {
         return notificationMapper.markRead(id, recipientId, readAt);
     }
 
@@ -263,7 +263,7 @@ public class MessageAtomicService {
      */
     @Transactional
     public void markAllNotificationsReadTx(long recipientId, int senderRole, int kind,
-                                           LocalDateTime readAt) {
+                                           OffsetDateTime readAt) {
         notificationMapper.markAllReadByRecipient(recipientId, senderRole, kind, readAt);
     }
 }

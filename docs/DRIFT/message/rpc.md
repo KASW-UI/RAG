@@ -1060,7 +1060,7 @@ Go DSN（`db.go:21-29`）实际是：
 **为什么它要紧**：本域时间列当前是 `TIMESTAMP`（**无时区**，见 V-020），
 会话时区直接决定读出来的是哪一刻 ⇒ Go 把会话钉在 Asia/Shanghai，RAG 却吃 PG 服务器默认值。
 
-### 🔴 新增 V-020 —— **9 个时间列：`timestamptz` vs `timestamp`（外加 NOT NULL 与 DEFAULT 也不同）**
+### 🔴 新增 V-020 —— **8 个时间列：`timestamptz` vs `timestamp`（外加 NOT NULL 与 DEFAULT 也不同）**
 
 **Go 侧证据（消费点）**：`gorm.io/driver/postgres@v1.6.0/postgres.go:251-255`
 
@@ -1088,8 +1088,12 @@ case schema.Time:
 + `默认值`（Go 没有，RAG 有 `CURRENT_TIMESTAMP`）。
 这三者**互相咬合**：改成 `timestamptz` 后，读路径的 epoch 换算必须同步，
 否则会**多修一次错**（§6.7.10 记的「读侧修法的前提是一个库只由同一时区 JVM 写」）。
-⇒ **本轮只登记，未改**：这属于「改一处必须同步三处 + 双侧对拍」的量级，
-且 users 域已有同类处置先例（`users_user` 两列 `⇒TIMESTAMPTZ`），应照该先例的规格做，不宜在本轮顺手改。
+⇒ **2026-10-23 已按 users 域规格修复**（用户拍板「照 users 域规格单开，配真 PG 双侧对拍」）：
+新增 `V5__message_time_columns_timestamptz.sql` + 实体 8 字段 `LocalDateTime⇒OffsetDateTime`
++ 读路径去掉 `systemDefault()` 假设 + 真 PG 守门。详见下方「第五轮」一节。
+⚠️ **口径更正**：本节初稿写的是「9 个时间列」，**实测是 8 列**
+（`message_notification` 3 + `message_conversation` 3 + `message_conversation_message` 2）。
+同口径更正：`DROP NOT NULL` 的是 **5** 列，不是 6；`DEFAULT` 残差是 **6** 列，不是 7。
 
 ### 🔴 新增 V-021 —— 两个索引的**名字**不同（列相同）
 
@@ -1191,3 +1195,86 @@ semantic-probe：56 例 → 一致 54，不一致 0，已签字偏离 2         
 DDL 对拍：Go AutoMigrate 55 行 vs RAG V1~V4，**归一化后剩余 23 行差异**
           （= V-020 时间列 8 列 × 3 维 + V-021 索引名 2 + V-022 索引列 1 + 表头/格式噪声）
 ```
+
+---
+
+<!-- @fix 2026-10-23 23:2x 第五轮 · V-020 已修（照 users 域规格） · V-016 按用户指示推迟 -->
+
+## 2026-10-23 第五轮：`DRIFT-MSG-V-020` 已修（照 users 域规格单开）
+
+> **用户指示**：「v020 照 users 域的规格单开，配真 PG 双侧对拍，别混在语义修复里」
+> ＋「先把 v020 解决再来探讨 v016」
+> **规格来源**：`docs/DRIFT/users/_shared.md:718-724`（users 域同款处置），本轮**照抄那一轮的规格**，未重新设计。
+
+### 改了什么（三处必须同提交，否则更糟 —— users 域的原话）
+
+| # | 改了什么 | 文件 | 守门 |
+|---|---|---|---|
+| 1 | 新增 `V5`：8 列 `TYPE TIMESTAMPTZ USING … AT TIME ZONE 'Asia/Shanghai'` + 5 列 `DROP NOT NULL` | `message-rpc/…/db/migration/V5__message_time_columns_timestamptz.sql` | `MessageRpcTimeColumnParityTest`（真 PG 查 `information_schema`） |
+| 2 | 实体 **8 个字段** `LocalDateTime ⇒ OffsetDateTime` | `NotificationEntity` / `ConversationEntity` / `ConversationMessageEntity` | 同上（反射断言声明类型） |
+| 3 | 读路径去掉「猜时区」：`toEpochSecond(LocalDateTime)` → `toEpochSecond(OffsetDateTime)` | `MessageRpcSupport` | `MessageRpcSupportTimeZoneTest`（7 例，含**时区无关性**断言） |
+
+**⚠️ 为什么是 `V5` 而不是改 `V1`~`V3`**：message 用 **Flyway**，改已应用迁移会撞校验和
+（users 域那些是 `SchemaInitializer` 重放文件，可以原地改 —— **外形像不等于机制像**）。
+新鲜库照样是「V1~V3 建 TIMESTAMP → V5 立刻转成 TIMESTAMPTZ」，终态一致。
+
+**⚠️ 照抄 users 规格时必须换掉时区参数**：users 用 `'UTC'`，**message 必须用 `'Asia/Shanghai'`**。
+转换语义 = 「把**当初写入时用的那个时区**下的墙钟重新解释成瞬时」，
+message 的写入侧是 `LocalDateTime.now()`（JVM 本地墙钟）、部署时区 = Asia/Shanghai、
+Go DSN 也钉 `Asia/Shanghai`（`db.go:22`）⇒ 只能按 `Asia/Shanghai` 解释。
+
+**⚠️ users 踩过的坑一并继承**：裸 `ALTER` 在重放时**会累积平移整列**
+（`timestamptz --AT TIME ZONE 'X'--> timestamp --按会话 TZ 铸回--> 偏移`），
+所以必须 `SET TIME ZONE 'Asia/Shanghai'; … RESET TIME ZONE;` 包夹，使两条路径都恒等。
+
+### 真正买到的东西
+
+```
+修复前：TIMESTAMP（无时区墙钟）→ 必须**猜一个时区**才能算瞬时 → 多出一条不变量
+        「同一个库只能由同一时区的 JVM 写读」
+修复后：TIMESTAMPTZ → 值自带 offset → OffsetDateTime.toEpochSecond() 直接给瞬时
+        → **该不变量消失**，与 Go 的 time.Time.Unix() 是同一语义
+```
+
+⇒ `MessageRpcSupportTimeZoneTest` 的断言因此**被整体重写**（不是跟着改）：
+旧断言写的是「墙钟必须按 JVM 本地时区解释」（那是给「猜」这个动作写守门），
+新断言是**更强**的性质 —— **把 JVM 默认时区换成 UTC / Asia/Shanghai / America/New_York，
+epoch 必须完全相同**，并附一条反事实用例证明「把墙钟当 UTC」会差整整 8 小时
+（符号方向与 `DRIFT-MSG-V-007` 记录的「RAG 比 Go 晚 8 小时」同向）。
+
+### 残留（刻意保留，非静默放过）
+
+| 残差 | 数量 | 为什么不动 |
+|---|---|---|
+| `DEFAULT CURRENT_TIMESTAMP` | **6 列** | Go 侧无默认。删除只对「省略该列的 INSERT」有意义，而两侧 INSERT 都**显式绑定**这些列（`ConversationMapper#insertConv` 的 VALUES 列表）⇒ 默认永不触发。为一个不可观测维度冒「有人依赖了裸 SQL 默认」的风险不划算 |
+
+### 不可逆的信息损失（必须知情）
+
+历史 `timestamp` 值**不携带时区**，转换只能按「当初写入时的 JVM 时区 = Asia/Shanghai」这一个假设解释。
+若生产库中存在**其它时区写入**的墙钟，那部分**事后无法分辨**，转换结果必然错。
+本轮无法从库内区分（数据里没有这个信息）⇒ 若该风险存在，需人工核对。
+
+### 🔴 本轮自己踩的两个坑（都是测试代码的错，不是实现的错）
+
+1. **`OffsetDateTime.equals()` 比的是「瞬时 **且** offset」**，不是瞬时。
+   刻意写 `+08:00`、连接会话时区是 UTC ⇒ 读回必然是 `Z` 表示 ⇒ `equals` 必假。
+   ⇒ 判瞬时必须用 `isEqual()`。
+2. **列数数错**：初稿按「9 列」写，实测是 **8 列**；连带 `DROP NOT NULL` 是 **5** 列不是 6、
+   `DEFAULT` 残差是 **6** 列不是 7。台账四处口径已一并订正。
+   ⚠️ 这正是 §6.2 约定 2 的价值：**没有核对日期/实测口径的断言一律按 `UNKNOWN` 处理**。
+
+### 实测数据
+
+```
+双侧活体 DDL 对拍（Go AutoMigrate vs RAG V1~V5）：
+  归一化差异 23 行 → **19 行**；剩余 = 6 列 DEFAULT（刻意保留）+ 2 个索引名（V-021）
+                      + 1 个索引列（V-022，已签字）
+  **类型与可空性：完全一致（0 差异）**
+迁移幂等：V1~V5 连跑两遍，10 次执行全部 exit=0
+message-rpc：54 tests（原 52 + 新增 2 条真 PG 列级守门）/ 0 failures / 0 errors / 0 skipped
+```
+
+### 按用户指示推迟：`DRIFT-MSG-V-016`
+
+「先把 v020 解决再来探讨 v016」⇒ 本轮**未动** V-016（三个 go-zero 框架拦截器）。
+其分析、Go 出处与三条拆解建议已备好，等下一轮单独决策。

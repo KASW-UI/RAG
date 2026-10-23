@@ -6,7 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /**
  * 会话表 ORM 实体。
@@ -59,13 +59,13 @@ public class ConversationEntity {
     private String lastMessagePreview = "";
 
     /** 对应 Go {@code LastMessageAt time.Time gorm:"column:last_message_at;not null;index"}。 */
-    private LocalDateTime lastMessageAt;
+    private OffsetDateTime lastMessageAt;
 
     @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updatedAt;
+    private OffsetDateTime updatedAt;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -91,10 +91,10 @@ public class ConversationEntity {
     public void setLastMessageId(long lastMessageId) { this.lastMessageId = lastMessageId; }
     public String getLastMessagePreview() { return lastMessagePreview; }
     public void setLastMessagePreview(String lastMessagePreview) { this.lastMessagePreview = lastMessagePreview; }
-    public LocalDateTime getLastMessageAt() { return lastMessageAt; }
-    public void setLastMessageAt(LocalDateTime lastMessageAt) { this.lastMessageAt = lastMessageAt; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    public OffsetDateTime getLastMessageAt() { return lastMessageAt; }
+    public void setLastMessageAt(OffsetDateTime lastMessageAt) { this.lastMessageAt = lastMessageAt; }
+    public OffsetDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
+    public OffsetDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

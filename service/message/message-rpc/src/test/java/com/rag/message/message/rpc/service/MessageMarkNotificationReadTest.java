@@ -8,7 +8,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -77,7 +78,7 @@ class MessageMarkNotificationReadTest {
         // 默认返回值给 1（命中）
         org.mockito.Mockito.doReturn(1).when(mapper).update(isNull(), cap.capture());
 
-        LocalDateTime readAt = LocalDateTime.of(2026, 10, 21, 8, 0);
+        OffsetDateTime readAt = OffsetDateTime.of(2026, 10, 21, 8, 0, 0, 0, ZoneOffset.UTC);
         int affected = mapper.markRead(123L, 456L, readAt);
 
         assertEquals(1, affected);
@@ -100,7 +101,7 @@ class MessageMarkNotificationReadTest {
         ArgumentCaptor<LambdaUpdateWrapper<NotificationEntity>> cap = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
         org.mockito.Mockito.doReturn(1).when(mapper).update(isNull(), cap.capture());
 
-        LocalDateTime readAt = LocalDateTime.of(2026, 10, 21, 8, 0);
+        OffsetDateTime readAt = OffsetDateTime.of(2026, 10, 21, 8, 0, 0, 0, ZoneOffset.UTC);
         mapper.markRead(1L, 2L, readAt);
 
         String setPart = cap.getValue().getSqlSet();
@@ -114,7 +115,7 @@ class MessageMarkNotificationReadTest {
         NotificationMapper mapper = mock(NotificationMapper.class, CALLS_REAL_METHODS);
         org.mockito.Mockito.doReturn(0).when(mapper).update(isNull(), any(LambdaUpdateWrapper.class));
 
-        int affected = mapper.markRead(999L, 888L, LocalDateTime.now());
+        int affected = mapper.markRead(999L, 888L, OffsetDateTime.now(ZoneOffset.UTC));
         assertEquals(0, affected,
                 "受影响行数必须透出，上层据此映射 NotFound；静默丢弃会让「不存在」被当成成功");
     }

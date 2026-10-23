@@ -42,7 +42,8 @@ import io.opentelemetry.api.trace.Tracer;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -247,7 +248,7 @@ public class MessageDomainService {
 
         // ③ 分配 message_id，构造 ConversationMessage
         long messageId = nextSnowflakeId();
-        LocalDateTime now = LocalDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         ConversationMessageEntity messageItem = new ConversationMessageEntity();
         messageItem.setId(messageId);
         messageItem.setSenderId(in.getSenderId());
@@ -451,7 +452,7 @@ public class MessageDomainService {
         }
 
         // ③ 构造 records
-        LocalDateTime now = LocalDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         List<NotificationEntity> items = new ArrayList<>(recipients.size());
         for (Long rid : recipients) {
             long snowflakeId = nextSnowflakeId();
@@ -710,7 +711,7 @@ public class MessageDomainService {
         // ④ mark read
         try {
             atomicService.markConversationReadTx(in.getConversationId(), in.getOperatorId(),
-                    in.getOperatorRole().getNumber(), LocalDateTime.now());
+                    in.getOperatorRole().getNumber(), OffsetDateTime.now(ZoneOffset.UTC));
         } catch (RuntimeException e) {
             metrics.observeDbError("conversation", "mark_read");
             throw MessageRpcSupport.grpcRuntimeError(Status.Code.INTERNAL,
@@ -828,7 +829,7 @@ public class MessageDomainService {
         // 且 updateById 生成的 WHERE 只有 id、不含 recipient_id。
         int affected;
         try {
-            affected = atomicService.markNotificationReadTx(in.getNotificationId(), in.getUserId(), LocalDateTime.now());
+            affected = atomicService.markNotificationReadTx(in.getNotificationId(), in.getUserId(), OffsetDateTime.now(ZoneOffset.UTC));
         } catch (RuntimeException e) {
             metrics.observeDbError("notification", "mark_read");
             throw MessageRpcSupport.grpcRuntimeError(Status.Code.INTERNAL,
@@ -876,7 +877,7 @@ public class MessageDomainService {
         }
 
         try {
-            atomicService.markAllNotificationsReadTx(in.getUserId(), 0, 0, LocalDateTime.now());
+            atomicService.markAllNotificationsReadTx(in.getUserId(), 0, 0, OffsetDateTime.now(ZoneOffset.UTC));
         } catch (RuntimeException e) {
             metrics.observeDbError("notification", "mark_all_read");
             throw MessageRpcSupport.grpcRuntimeError(Status.Code.INTERNAL,

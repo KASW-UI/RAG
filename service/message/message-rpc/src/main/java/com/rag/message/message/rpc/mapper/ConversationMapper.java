@@ -9,7 +9,7 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Insert;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -110,7 +110,7 @@ public interface ConversationMapper extends BaseMapper<ConversationEntity> {
      * 用 wrapper + 手写条件 UPDATE。
      */
     default int updateLastMessage(long conversationId, long lastMessageId,
-                                   String lastMessagePreview, LocalDateTime lastMessageAt,
+                                   String lastMessagePreview, OffsetDateTime lastMessageAt,
                                    int newStatus, int pendingSenderRole, long pendingSenderId) {
         LambdaUpdateWrapper<ConversationEntity> w = new LambdaUpdateWrapper<>();
         w.eq(ConversationEntity::getId, conversationId)

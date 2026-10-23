@@ -19,7 +19,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -270,7 +271,7 @@ class MessageTransactionWiringTest {
         ConversationEntity seed = newConversation(900_000_000_002L, 3L, 4L);
         seed.setLastMessageId(111L);
         seed.setLastMessagePreview("original");
-        seed.setLastMessageAt(LocalDateTime.of(2026, 10, 1, 0, 0));
+        seed.setLastMessageAt(OffsetDateTime.of(2026, 10, 1, 0, 0, 0, 0, ZoneOffset.UTC));
         atomicService.createConversationWithMessageTx(seed, newMessage(seed.getId(), 3L, 4L));
 
         // 尝试 append 一条会失败的消息
@@ -387,7 +388,7 @@ class MessageTransactionWiringTest {
         c.setCreatedById(p1Id);
         c.setLastMessageId(0L);
         c.setLastMessagePreview("");
-        LocalDateTime now = LocalDateTime.of(2026, 10, 22, 10, 0);
+        OffsetDateTime now = OffsetDateTime.of(2026, 10, 22, 10, 0, 0, 0, ZoneOffset.UTC);
         c.setLastMessageAt(now);
         c.setCreatedAt(now);
         c.setUpdatedAt(now);
@@ -404,7 +405,7 @@ class MessageTransactionWiringTest {
         m.setRecipientRole(1);
         m.setContent("content");
         m.setRead(false);
-        m.setCreatedAt(LocalDateTime.of(2026, 10, 22, 10, 0));
+        m.setCreatedAt(OffsetDateTime.of(2026, 10, 22, 10, 0, 0, 0, ZoneOffset.UTC));
         return m;
     }
 }

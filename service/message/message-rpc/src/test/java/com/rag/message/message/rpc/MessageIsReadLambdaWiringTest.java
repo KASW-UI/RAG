@@ -14,7 +14,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -100,7 +101,7 @@ class MessageIsReadLambdaWiringTest {
                     (id, conversation_id, sender_id, sender_role, recipient_id, recipient_role,
                      content, is_read, created_at)
                 VALUES (?, ?, 6001, 2, 5001, 1, ?, ?, ?)
-                """, id, CONV, "c" + id, isRead, LocalDateTime.of(2026, 1, 1, 0, 0));
+                """, id, CONV, "c" + id, isRead, OffsetDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC));
     }
 
     // ==================================================================
@@ -115,7 +116,7 @@ class MessageIsReadLambdaWiringTest {
     @Test
     @DisplayName("🔴 markAllReadByRecipient 的 lambda 能解析（DRIFT-MSG-V-017）")
     void markAllReadByRecipientLambdaResolves() {
-        int rows = messageMapper.markAllReadByRecipient(5001L, 1, LocalDateTime.of(2026, 2, 1, 0, 0));
+        int rows = messageMapper.markAllReadByRecipient(5001L, 1, OffsetDateTime.of(2026, 2, 1, 0, 0, 0, 0, ZoneOffset.UTC));
 
         assertEquals(3, rows, "只有 3 条未读应被置为已读（种子里的第 4 条本来就是已读，不该再计入）");
         assertEquals(4L, countRead(), "UPDATE 真落地了 3 条 ⇒ 加上原本就已读的那条共 4 条");
@@ -132,7 +133,7 @@ class MessageIsReadLambdaWiringTest {
     @Test
     @DisplayName("🔴 lambda 解析出的列名是 is_read（不是属性名 read）")
     void lambdaResolvesToSnakeCaseColumn() {
-        messageMapper.markAllReadByRecipient(5001L, 1, LocalDateTime.of(2026, 2, 1, 0, 0));
+        messageMapper.markAllReadByRecipient(5001L, 1, OffsetDateTime.of(2026, 2, 1, 0, 0, 0, 0, ZoneOffset.UTC));
 
         Boolean viaColumn = jdbcTemplate.queryForObject(
                 "SELECT bool_and(is_read) FROM message_conversation_message WHERE recipient_id = 5001",
@@ -152,7 +153,7 @@ class MessageIsReadLambdaWiringTest {
     @Test
     @DisplayName("对照：读路径 getIsRead() 能正确还原（不是恒 false）")
     void readPathMapsIsRead() {
-        messageMapper.markAllReadByRecipient(5001L, 1, LocalDateTime.of(2026, 2, 1, 0, 0));
+        messageMapper.markAllReadByRecipient(5001L, 1, OffsetDateTime.of(2026, 2, 1, 0, 0, 0, 0, ZoneOffset.UTC));
 
         List<ConversationMessageEntity> rows = messageMapper.selectList(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ConversationMessageEntity>()
