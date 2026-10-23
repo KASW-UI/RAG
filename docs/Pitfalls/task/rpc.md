@@ -159,3 +159,66 @@ when(ops.increment(anyString())).thenAnswer(...)   // redis-pipe-max → 1234 �
 |---|---|
 | 本域 DRIFT | [`../../DRIFT/task/rpc.md`](../../../../DRIFT/task/rpc.md) · [`api.md`](../../../../DRIFT/task/api.md) |
 | 全仓共性踩坑 | [`../../Pitfalls/_cross/testing-pitfalls.md`](../../_cross/testing-pitfalls.md) · [`../../Pitfalls/_cross/framework-mechanism-evidence.md`](../../_cross/framework-mechanism-evidence.md) |
+
+---
+
+## 🔴 PITFALL-TASK-RPC-04 · 探针自己也会撒谎：Python `urllib` 会自动补 `Content-Type`
+
+> 场景：2026-10-23 `task` 域双侧活体对拍（见 [`../../DRIFT/task/api.md`](../../../../DRIFT/task/api.md) §二·五）
+
+### 现象
+
+第一版对拍脚本想测「POST **不带** `Content-Type`」，结果两侧都返回 200，**看起来一致**。
+换成 `curl -H 'Content-Type:'` 复验才发现：RAG 侧在 `application/x-www-form-urlencoded`
+下**返回 400**，Go 返回 200 —— 一条真实差异差点被放过。
+
+### 根因
+
+```python
+req = urllib.request.Request(url, data=b'{"id":1001}', method="POST")
+# 没有显式 add_header("Content-Type")
+# ⇒ urllib **自动**补上 Content-Type: application/x-www-form-urlencoded
+```
+
+⇒ 测的其实是「带 form-urlencoded」，不是「不带 Content-Type」。**用例名与被测行为不符。**
+
+### 为什么会漏掉
+
+脚本里明明写了 `content_type=None` 分支「不发这个头」，
+但 HTTP 客户端在**更下面一层**补上了 —— 探针断言的是「我没设这个 header」，
+而线上真正发生的是「客户端帮我设了一个我没预期的 header」。
+
+### 元教训
+
+1. **探针必须对「我以为由我控制的东西」做端到端验证** ——
+   用 `urllib` 这类会自动补默认值的客户端时，要么显式覆盖，要么用 `curl` 这种可控的。
+2. **和 `positive control` 是同一条纪律的两面**：
+   - 阳性对照回答「探针能不能**看见**差异」（见 PITFALL-TASK-RPC-02）；
+   - 本条回答「探针是不是在**测你以为在测的东西**」。
+   两者都要做，缺一个结论就不可信。
+3. ⚠️ 这与 `tools/difftest/README.md §4.1`（把 404 当就绪）同源：
+   **「探针返回了东西」不等于「探针测的是那件事」。**
+
+---
+
+## ⚠️ PITFALL-TASK-RPC-05 · 对拍「红了 42/43」可能全是 header 格式，别淹没真正的差异
+
+> 场景：2026-10-23 `task` 域对拍首跑：`MATCH 1 / DIFF 42`
+
+### 现象
+
+43 条用例里 42 条标红，逐条看下去会发现：
+**40 条只差 `Content-Type` 的 charset 参数与分号后空格，2 条差状态码，body 43/43 逐字节一致。**
+
+- Go：`application/json; charset=utf-8`（分号后**有空格**）
+- RAG：`application/json`（无 charset）/ `text/plain;charset=utf-8`（**无空格**）
+
+### 教训
+
+1. **对拍的「红」必须分类再看**：状态码 / 响应体 / 业务 header / 纯格式，
+   只有前三类值得开单子；最后一类是**全域共性**（别的 api 域也一样），
+   单独修会造成「本域与其它域不一致」的新问题。
+2. `tools/difftest/diff.py` 里的 `Normalizer` 就是干这个的 ——
+   **先把 header 归一，再看还剩什么**。没有这一步，42 条噪声会把 2 条真差异埋掉。
+3. ⚠️ 反过来也成立：**不要因为「大部分红的是格式」就草率收工** ——
+   本轮那 2 条状态码差异恰恰就是从这堆噪声里筛出来的。

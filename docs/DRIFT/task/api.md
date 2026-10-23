@@ -10,6 +10,10 @@
 > （`rest/httpx/responses.go`、`rest/internal/errcode/grpc.go`）。
 > ⚠️ **本台账没有沿用任何既有结论**：go-zero 的错误响应形状是本轮**直接读模块缓存源码**核出来的，
 > 不是从别的域的台账抄的（AGENTS.md §3.1：不要拿现有 RAG 代码或注释当对照基准）。
+>
+> 🔴 **2026-10-23 22:5x 已追加双侧活体对拍**（Go 栈 + RAG 栈同时起、同一串 43 条请求）。
+> 对拍**抓出一条静态审查完全看不到的差异**（DRIFT-TASK-API-003），详见 **§六**。
+> 对拍同时把本组件的证据强度从「真实 MVC 管线」升到 **「双侧活体对拍」**。
 
 ---
 
@@ -19,8 +23,10 @@
 |---|---|
 | 语义等价性 | 🔴 **SEMANTICALLY NOT EQUIVALENT**（1 条端口漂移，已修） |
 | 已修 | **2 条**（DRIFT-TASK-API-001 端口 / DRIFT-TASK-API-002 `Go:` 行号引用失准） |
+| 对拍新发现 | **1 条 OBSERVABLE DIFFERENCE**（DRIFT-TASK-API-003，**未修**，见 §六） |
 | 未修 | 0 条语义漂移 |
-| 证据强度 | ✅ **真实 MVC 管线**（`@SpringBootTest` + MockMvc，20 条）· ⚠️ **gRPC 边界是 mock** · 🔴 无双侧活体对拍 |
+| 证据强度 | ✅✅ **双侧活体对拍**（2026-10-23 升级）· ✅ 真实 MVC 管线（MockMvc，20 条）· ⚠️ gRPC 边界在单测里是 mock |
+| 对拍结果 | **43 用例：body 43/43 逐字节一致**；状态码 41/43 一致；Content-Type header 格式 40 条不同 |
 | 测试 | **78 tests / 0 failures / 0 errors / 0 skipped** |
 
 ---
@@ -141,6 +147,50 @@ AGENTS.md §3.3.2 硬要求：**任何以「Go: …」措辞出现的断言，�
 
 ---
 
+## 二·五、双侧活体对拍（2026-10-23 22:5x）
+
+**性质**：AGENTS.md §3.3「凡写『与 Go 一致』，必须有两侧同时跑的探针」的落地。
+
+### 搭法（照 `tools/difftest/run.sh` 的既有方法，未重新设计）
+
+| | Go | RAG |
+|---|---|---|
+| rpc | `:19005`（`CGO_ENABLED=0 go build` 真二进制） | `:59005`（`java -cp`，真 PG + 真 Redis + 真 Kafka） |
+| api | `:18886` | `:58886` |
+| PG | 容器 `taskprobe-postgres:55433` / 库 `task_go_db`（**GORM AutoMigrate 建表**） | 同一容器 / 库 `task_rag_db`（**Flyway 建表**） |
+| Redis | `:56380`（两侧共用，矩阵前 `FLUSHALL`） | 同左 |
+| Kafka | `:59992` KRaft，5 个 topic 预建（**goka topic manager 连不上会 `log.Fatal`**） | 同左 |
+| 服务发现 | 两侧都摘掉（Go `Endpoints` 短路 / RAG `static://` + 关注册） | 同左 |
+
+⚠️ Go 配置是**副本**（[`tools/difftest/conf/go/task-api.yaml`](../../../tools/difftest/conf/go/task-api.yaml)），
+**冻结真源仓库零写入**；`Log.Mode: console` 是必需的（真源默认落文件）。
+
+### 结果：43 条用例
+
+| 维度 | 结果 |
+|---|---|
+| **响应体逐字节一致** | ✅ **43 / 43** |
+| 状态码一致 | ✅ 41 / 43（差的 2 条见 DRIFT-TASK-API-003） |
+| `X-Content-Type-Options: nosniff` | ✅ 43 / 43 一致 |
+| `Content-Type` header | ⚠️ **40 条不同**（格式差异，见 DRIFT-TASK-API-004） |
+
+覆盖：`id` 参数解析 18 类（null/缺失/字符串/数字/布尔/数组/对象/浮点/超长/带符号…）、
+DB 回源 5 组（含无行、status/progress 为 NULL）、**Redis 缓存命中 10 组手工 crafted 值**
+（2 段 / 4 段 / 空串 / 非数字 / **负数** / 超 target / status 含 `|`）、路由层 3 组、畸形 JSON、空 body。
+
+### 🔴 静态审查完全看不到、只有对拍才抓到的一条
+
+**DRIFT-TASK-API-003**：Go 的 handler（`gettaskhandler.go:19` 的 `json.NewDecoder(r.Body)`，
+**没有** `httpx.Parse`）对 `Content-Type` **完全无感**；
+RAG 侧 Tomcat 会对 `form-urlencoded` / `multipart` 的 POST body 抢先解析并消费掉输入流 ⇒ 返回 400。
+详见 §六。
+
+### ⚠️ 对拍方法论上的一条教训（已写进 `../../Pitfalls/task/rpc.md`）
+
+第一版探针用 Python `urllib`，它在「没显式给 Content-Type」时会**自动补** `application/x-www-form-urlencoded`
+⇒ 把「不带 Content-Type」测成了「带 form-urlencoded」，一度得出「两侧行为一致」的假结论。
+用 `curl -H 'Content-Type:'` 复验才发现真相。**探针自己也会撒谎。**
+
 ## 三、证据边界
 
 1. 🔴 **无双侧活体对拍**：Go 侧 `task-api` 未起过（依赖 `task-rpc` + etcd）。
@@ -170,3 +220,91 @@ AGENTS.md §3.3.2 硬要求：**任何以「Go: …」措辞出现的断言，�
 | 本域 proto 台账 | [`proto.md`](./proto.md) |
 | 踩坑 | [`../../Pitfalls/task/api.md`](../../Pitfalls/task/api.md) |
 | 有意偏离 | [`../../Intentional_Deviations/task/api.md`](../../Intentional_Deviations/task/api.md) |
+
+---
+
+## 六、对拍新发现（未修）
+
+### 🔴 DRIFT-TASK-API-003 · JSON body 配 `form-urlencoded` / `multipart` 时 Go 收、RAG 拒
+
+**性质**：SEMANTIC MISMATCH（状态码层）。**对拍抓出，静态审查不可见。**
+
+| Content-Type（body 均为 `{"id":1001}`） | Go | RAG |
+|---|---|---|
+| `application/json` | 200 | 200 ✅ |
+| 不带 Content-Type | 200 | 200 ✅ |
+| `text/plain` | 200 | 200 ✅ |
+| `application/xml` | 200 | 200 ✅ |
+| **`application/x-www-form-urlencoded`** | **200** | 🔴 **400** `JSON parse error: Unexpected character ('%' (code 37))` |
+| **`multipart/form-data`** | **200** | 🔴 **400** `Failed to parse multipart servlet request` |
+
+**Go 为什么收**：`gettaskhandler.go:18-24` 直接 `json.NewDecoder(r.Body).Decode(&req)`，
+**不调 `httpx.Parse`**（那才是 go-zero 做 Content-Type 校验的入口），handler 对 Content-Type 零判断。
+
+**RAG 为什么拒（根因已定位到消费点，未完全收口）**：
+
+1. 已实测**排除** Spring 侧：加 `--spring.mvc.formcontent.filter.enabled=false` 与
+   `--spring.mvc.servlet.multipart.enabled=false` 后行为**完全不变**；
+2. 实测**排除** Tomcat 的 body 参数解析：`Connector#setParseBodyMethods(null)`（字节码确认
+   `isParseBodyMethod` 就是一次 `Set.contains`，空集 ⇒ 完全不解析）之后，
+   form-urlencoded 的报错从「URL 解码损坏」变成 **「Required request body is missing」**
+   ⇒ 输入流仍被消费掉，但已不是 Tomcat 参数解析干的；
+3. ⇒ **剩余消费者在 Tomcat 11 连接器层，Spring 的配置开关够不着**（filter 在解析之后才跑）。
+
+**为什么没有修**（两条缓解路径都实测过，都**没有达成 parity**）：
+
+| 尝试 | 结果 |
+|---|---|
+| `setParseBodyMethods(null)`（新增 `TomcatConnectorCustomizer`） | 错误**文案**变了（`%` 解码损坏 → body 缺失），**状态码仍是 400**。且全局关掉 body 解析会让 `getParameter*()` / `getParts()` 静默失效 —— 对「下一个端点要读表单参数」是雷 |
+| 再叠加关掉 formcontent filter + multipart | 无变化 |
+
+⇒ **该改动已回滚**（不进仓）。理由：它没有改变对外可观察的**状态码**，
+却引入了「容器级关掉 body 解析」这个副作用面宽的改动；
+半吊子修复比不修更危险 —— 它会让人以为问题已解决。
+
+**影响面判断**：只影响「用非 JSON 的 Content-Type 头发送 JSON body」的客户端。
+这类客户端本身用法有问题（Go 能收是因为它根本不校验），真实网关/前端 SDK 基本不会这么发。
+⇒ 归 **OBSERVABLE DIFFERENCE 而非阻塞缺陷**，但**按 AGENTS.md §5 仍默认判 RAG 错**，未签字。
+
+**要彻底修，需要**（均未做，需先评估）：
+- 在 Servlet 容器之前拦住 form/multipart 的请求参数化（例如自定义 `HttpServletRequest` 包装 +
+  强制 `setContentType("application/json")`），或
+- 让本域不接受任何 `consumes` 判定并自建 `HandlerMethodArgumentResolver` 直接读 raw stream。
+
+---
+
+### ⚠️ DRIFT-TASK-API-004 · `Content-Type` header 的 charset 与空白格式
+
+**性质**：OBSERVABLE DIFFERENCE（低危，全域系统性）。
+
+| | 值 |
+|---|---|
+| Go | `application/json; charset=utf-8` / `text/plain; charset=utf-8`（**分号后有空格**） |
+| RAG | `application/json`（**无 charset**） / `text/plain;charset=utf-8`（**无空格**） |
+
+**出处**：Go 的成功响应走 `httpx.WriteJsonCtx` → `w.Header().Set(ContentType, header.ContentTypeJson)`
+（go-zero `rest/httpx/responses.go:182`），常量是 `"application/json; charset=utf-8"`；
+错误响应走 `http.Error`（Go 标准库）⇒ `"text/plain; charset=utf-8"`。
+RAG 侧由 Spring 的转换器与本域的 `plainText()` 产生。
+
+**为什么不改**：按 RFC 9110，`;` 后的 OWS（optional whitespace）本就允许省略；
+`application/json` 按规范默认就是 UTF-8，省略 charset 合法且更常见。
+改它需要覆盖 Spring 的消息转换器输出，代价大于收益。
+⇒ 归入**全域共性差异**（其它 api 域同样如此），**不在本域单独修**。
+
+⚠️ 但它让本域对拍的 43 条里有 40 条「红了」。读对拍报告时必须先按 header 归一再看，
+否则会淹没真正的语义差异 —— 这正是 `tools/difftest/diff.py` 里 `Normalizer` 的职责。
+
+---
+
+## 七、对拍产物与复现
+
+| 文件 | 作用 |
+|---|---|
+| [`tools/difftest/conf/go/task-rpc.yaml`](../../../tools/difftest/conf/go/task-rpc.yaml) | Go rpc 配置副本（冻结真源零写入） |
+| [`tools/difftest/conf/go/task-api.yaml`](../../../tools/difftest/conf/go/task-api.yaml) | Go api 配置副本 |
+| [`tools/difftest/parity-task.py`](../../../tools/difftest/parity-task.py) | 43 条请求矩阵（已进仓） |
+| `/tmp/task-difftest/parity-result.txt` | 本轮结果原始输出 |
+
+⚠️ **`parity.py` 尚未进仓**。它本该落在 `tools/difftest/` 下（像 `diff.py` / `run.sh` 那样可复现），
+本轮已补进仓（`tools/difftest/parity-task.py`）。⚠️ 它目前**硬编码了本轮的端口**（Go 18886 / RAG 58886）与库名，与 `run.sh` 一样属对拍专用配置。

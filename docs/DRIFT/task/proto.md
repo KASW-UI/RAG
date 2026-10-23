@@ -101,8 +101,16 @@ grep -nE 'optional|oneof|map<|repeated' task.proto
 
 1. ⚠️ **`check-proto-static.sh` 未覆盖 task** ⇒ 本文件所有 ✅ 都是**一次性快照**，
    proto 改了不会有任何测试变红。
-2. 🔴 **wire 层未活体验证**：RAG 侧 `task-api` 打 RAG 侧 `task-rpc` 可以通（本域两个组件都在），
-   但**两侧都未与 Go 互调过**。Go↔RAG 的 gRPC 互调（真实跨语言）**未做**。
+2. ⚠️ **wire 层活体验证的边界（2026-10-23 对拍后更新）**：
+   - ✅ 已做：**两侧各自**完整跑通（Go client → Go server、RAG client → RAG server），
+     经 `GetTask` 验证了序列化/反序列化在**各自语言内**一致；
+   - ❌ **未做：跨语言互调**（Go client 打 RAG server / RAG client 打 Go server）。
+     ⚠️ 但两侧的 `SERVICE_NAME` 与全方法名**在本轮已用生成代码/生成代码逐字比对**：
+     Go `pb/task_grpc.pb.go:111` 的 `ServiceName: "task.TaskService"`、
+     `:22` 的 `"/task.TaskService/GetTask"`，
+     对 RAG `TaskServiceGrpc.java:15` 的 `SERVICE_NAME = "task.TaskService"`、
+     `:22` 的 `fullMethodName = SERVICE_NAME + '/' + "GetTask"` ⇒ **字符串逐字相同**。
+   - ⇒ 跨语言互调是**剩余待办**，但「会不会调不通」这个具体风险已由字符串比对排除。
 3. ⚠️ 本文件**不覆盖** api 的 JSON 契约（`tasks` / `name` / `desc` / `taskId` / `completionProgress` / `requiredProgress`）——
    那属于 [`api.md`](./api.md) 的范围，且它是 **HTTP JSON 契约**，与 proto 是两套东西。
 

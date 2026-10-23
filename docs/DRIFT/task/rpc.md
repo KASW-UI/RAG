@@ -18,7 +18,9 @@
 | 语义等价性 | 🔴 **SEMANTICALLY NOT EQUIVALENT**（首轮即如此，**不是**「基本一致」） |
 | 已修 | **3 条**（DRIFT-TASK-RPC-001 / 002 / 003），每条配守门测试 |
 | 未修 | 0 条语义漂移；另有 1 条签字偏离（见下）+ 1 条有意偏离待登记 |
-| 证据强度 | ✅ **真启动 + 真 PostgreSQL 16 容器**（本域最高档）· 🔴 **无双侧活体对拍**（Go 侧未起，理由见 §五） |
+| 证据强度 | ✅✅ **双侧活体对拍**（2026-10-23 22:5x 升级，Go 栈真起了）· ✅ 真启动 + 真 PG 16 容器 |
+| DDL 对拍 | ✅ **GORM AutoMigrate 产物 vs Flyway 产物逐列一致**（本轮实测，见 §四·二） |
+| ⚠️ 仍未覆盖 | **Kafka 消息链路**（goka 三段 + 两个 sink）只验到「装配起来 + 各自消费自己那一段」，**未做端到端消息对拍** |
 | 测试 | **81 tests / 0 failures / 0 errors / 0 skipped**（其中 15 条真 PG） |
 
 ---
@@ -260,8 +262,12 @@ SqlSessionFactory + `ON CONFLICT`/`GREATEST`/`COALESCE` 真按 PG 语义执行�
 
 ## 五、证据边界（必须读，否则会高估本台账）
 
-1. 🔴 **无双侧活体对拍**。Go 侧 `task-rpc` 未在本机起过（依赖 etcd + Kafka + Redis + 真 PG 的完整编排）。
-   本台账的 ✅ 含义是「**逐行源码对照 + RAG 侧运行时验证**」，不是「两侧跑起来行为相同」。
+1. ✅ **双侧活体对拍已于 2026-10-23 22:5x 完成**（Go `task-rpc:19005` + `task-api:18886`，
+   RAG `task-rpc:59005` + `task-api:58886`，共用 PG 容器 / Redis / Kafka，43 条请求矩阵）。
+   ⚠️ 但覆盖面**只到 HTTP wire 层**：经由 `GetTask` 这条链路验证了
+   **Redis HGETALL → PG 回源 → packProgress/unpackProgress → 任务定义合并 → gRPC 序列化 → HTTP 响应**。
+   **Kafka 消息链路（goka 三段路由 + 两个 sink 的消费/刷盘/幂等）不在对拍面内** ——
+   那条链路要往 Kafka 灌 raw 日志再比对两侧的 Redis/PG 最终态，本轮**未做**，仍是纯源码对照。
 2. ⚠️ **Kafka / Redis 侧为「装配已验证、行为未活体验证」**。测试里 Kafka 指向 `127.0.0.1:1`、
    Redis 指向 `127.0.0.1:1`，验证的是**容器能装配起来**（这正是 §3.3 要求的），
    **不是**「一条消息真的从 Kafka 流到 Redis」。
@@ -305,3 +311,64 @@ SqlSessionFactory + `ON CONFLICT`/`GREATEST`/`COALESCE` 真按 PG 语义执行�
 | 踩坑（Ryuk 静默 skip / 死配置） | [`../../Pitfalls/task/rpc.md`](../../Pitfalls/task/rpc.md) |
 | 有意偏离 | [`../../Intentional_Deviations/task/rpc.md`](../../Intentional_Deviations/task/rpc.md) |
 | 四域排序与本域定位 | [`../_cross/component-coverage-matrix.md`](../_cross/component-coverage-matrix.md) |
+
+---
+
+## 四·二、DDL 活体对拍：GORM `AutoMigrate` 产物 vs Flyway 产物（2026-10-23 实测）
+
+**这一节直接关闭了上一版台账 §五 的第 3 条证据缺口。**
+
+做法：两侧各连同一个 PG 容器的**不同库**（`task_go_db` 走 Go 的 `AutoMigrate`，
+`task_rag_db` 走 RAG 的 Flyway），然后 `\d` 逐列读真实建表结果再对拍。
+
+| 表 | 列 | Go `AutoMigrate` | RAG `Flyway` | 结论 |
+|---|---|---|---|---|
+| `task_progress` | `user_id` | `bigint not null` | `bigint not null` | ✅ |
+| | `task_id` | `bigint not null` | `bigint not null` | ✅ |
+| | `status` | `text`（可空） | `text`（可空） | ✅ |
+| | `progress` | `bigint` | `bigint` | ✅ |
+| | `target` | `bigint` | `bigint` | ✅ |
+| | `done_at` | **`timestamp with time zone`** | **`timestamp with time zone`** | ✅ |
+| | `created_at` | `timestamp with time zone` | `timestamp with time zone` | ✅ |
+| | `updated_at` | `timestamp with time zone` | `timestamp with time zone` | ✅ |
+| | 主键 | `PRIMARY KEY (user_id, task_id)` | `PRIMARY KEY (user_id, task_id)` | ✅ |
+| | 约束名 | `task_progress_pkey`（GORM 默认） | `pk_task_progress`（显式命名） | ⚠️ 仅**名字**不同 |
+
+| 表 | 列 | Go | RAG | 结论 |
+|---|---|---|---|---|
+| `user_like_count` | `user_id` | `text not null` | `text not null` | ✅ |
+| | `like_count` | `bigint` | `bigint` | ✅ |
+| | `updated_at` | `timestamp with time zone` | `timestamp with time zone` | ✅ |
+| | 主键 | `PRIMARY KEY (user_id)` | `PRIMARY KEY (user_id)` | ✅ |
+
+**结论**：✅ **列类型 / 可空性 / 主键构成逐项一致**。
+⚠️ 主键**约束名**不同，但 `ON CONFLICT (user_id, task_id)` 走的是**列**而不是约束名 ⇒ 行为无差异。
+⇒ 这**印证**了台账里「`time.Time ⇒ TIMESTAMPTZ`」「`string ⇒ TEXT`」「无 tag ⇒ 可空」的判断。
+
+⚠️ 仍未覆盖：索引 / 唯一约束 / CHECK —— 两侧都**没有**建（Go 的 `AutoMigrate` 不为无 tag 列生成 CHECK，
+RAG 的迁移脚本刻意不加），所以这一项是「两侧一致地没有」，而不是「漏检」。
+
+---
+
+## 四·三、Kafka 链路：Go 栈真起了，但消息链路未做端到端对拍
+
+**已验证的部分（实测）**：
+
+- Go 侧三个 goka processor **真的认领了分区**：
+  ```
+  [Processor task.rpc.consumer71] setup generation 1, claims=map[string][]int32{"task.logs.raw.Article":[]int32{0}}
+  [Processor task.rpc.consumer61] setup generation 1, claims=map[string][]int32{"task.logs.raw.User":[]int32{0}}
+  [Processor task.rpc.consumer41] setup generation 1, claims=map[string][]int32{"task.logs.raw":[]int32{0}}
+  ```
+- RAG 侧 6 个 consumer group（`consumer31/41/61/71/81/101`）全部在容器里装配并持续连接。
+- 🔴 **因此也实测到了一条启动硬依赖**：Go 侧**没有真 Kafka 就根本起不来**
+  （goka 的 topic manager 连不上在 `initGoKa.go:143-145 / :183-185 / :217-219` 直接 `log.Fatal`；
+  首次实测报 `Error fetching partitions for topic task.logs.raw: requested topic was not found` 后进程退出）。
+  ⇒ task 域的对拍**不能**像 user 域那样只起 PG + Redis。
+
+**未验证的部分（下一轮做）**：往 `task.logs.raw` 灌一条 raw 日志，比对两侧的
+`task.logs.raw.User` / `raw.Article` → `filtered.User` / `filtered.Article` 载荷，
+以及最终 Redis（`like:total` / `task:progress:*` / `task:done:*`）与 PG（`task_progress` / `user_like_count`）的落点。
+
+⚠️ 这条链路覆盖了本轮修的 DRIFT-TASK-RPC-001（Redis INCR 计数器）**唯一还没有真 Redis 验证**的部分 ——
+对拍矩阵里的 Redis 是**手工灌值**的，计数器的 INCR 路径只验到装配。**这是当前最大的证据缺口。**
