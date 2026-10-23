@@ -1,7 +1,7 @@
 # `hot-rpc` 有意偏离台账
 
 > **范围**：`service/hot/hot-rpc`（Go `service/hot/rpc/` + `service/hot/heavykeeper/`）。
-> **核对日期**：2026-10-23（第三轮修复轮）。
+> **核对日期**：2026-10-24（第五轮 UNR-1 闭合后复核；SD-HOT-RPC-001..004 为第三/四轮签字）。
 > **差异本体**（未签字的缺陷）在 [`../../DRIFT/hot/rpc.md`](../../DRIFT/hot/rpc.md)。
 > 本文件只登记**明知与 Go 不同、经签字批准**的偏离。
 >
@@ -10,7 +10,9 @@
 | ID | 一句话 | 方向 | 状态 |
 |---|---|---|---|
 | **SD-HOT-RPC-001** | 消费路径的非预期异常**降级成 drop**，不崩进程（Go 会崩） | RAG 更稳 | ✅ 已签字（2026-10-23） |
-| **SD-HOT-RPC-002** | Redis 命令**不做** go-redis 式的 3 次自动重试 | RAG 少一次自愈 | ✅ 已签字（2026-10-23） |
+| **SD-HOT-RPC-002** | Redis 命令**不做** go-redis 式的 3 次自动重试 | RAG 少一次自愈（⚠️ 第五轮复核：**双向**差异） | ✅ 已签字（2026-10-23）+ 第五轮复核批注 |
+| **SD-HOT-RPC-003** | 容器并发度 `concurrency=1`（Go 是**每分区一个 goroutine**） | RAG 单实例下串行消费 | ✅ 已签字（2026-10-24） |
+| **SD-HOT-RPC-004** | 注册中心注册失败 ⇒ **进程存活 + 健康检查报 NOT_SERVING**（Go 是 panic 退出） | RAG 更稳 + 探针可见 | ✅ 已签字（2026-10-24） |
 | **SD-1**（第一轮） | 分区撤销路径的锁升级：Go 持写锁再取读锁 ⇒ **必然自死锁**；RAG 改为「锁内取引用 → 锁外落盘」 | RAG 能跑 | ✅ 已签字（2026-10-22） |
 | **SD-2**（第一轮） | Redis ZSet member 非字符串时**跳过**（Go 是裸类型断言 ⇒ panic） | RAG 不崩 | ✅ 复核通过（2026-10-23，等级可下调为 IMPLEMENTATION DIFFERENCE） |
 | **SD-3**（第一轮） | Redis 脚本报错被**误报成「lock lost」**（Go 的 `result, _ :=`） | 两边一样错 | ✅ 复核通过（2026-10-23，照抄 Go） |
@@ -63,4 +65,81 @@
   2. 弱网下 RAG 的热榜刷新率**低于** Go；
   3. 查询面：Go 重试 3 次仍失败才返回 `UNKNOWN`，RAG 第一次失败就返回 `UNKNOWN`
      ⇒ **客户端看到的失败时机不同**。
+- ⚠️ **第五轮复核批注（2026-10-24 · UNR-1 闭合）**：**签字口径不变**（Lettuce 无重试入口仍是事实 ⇒ 仍然不复刻），
+  但 **DRIFT-HOTRPC-004 的严重度 MEDIUM → LOW**，且**新增第 4 条可观察影响**：
+  4. ⚠️ **Go 会重发「非幂等」的 rename 脚本** ⇒ 若首次已在服务端执行成功、但回复在回程丢失，
+     重试再执行时 `EXISTS shadow == 0` ⇒ 脚本返回 `0`
+     ⇒ Go `hot_handler.go:236-238` **记 `fail`** ⇒ **实际 RENAME 已成功、指标却记 fail**（指标误计）。
+     **RAG 不产生该形态**（Lettuce 无重试 ⇒ 脚本只执行一次）。
+  ⇒ 也就是说这条偏离是**双向**的：**Go 更稳**（网络错自动重试）+ **Go 更不稳**（非幂等脚本被重发）。
+  ⚠️ 证据强度：**真 Redis 实测 + go-redis v9.20.0 依赖源码逐行**（**不是**双侧活体对拍），
+  详见 [`../../DRIFT/hot/rpc.md`](../../DRIFT/hot/rpc.md) 第五轮章节。
 - **留痕位置**：`docs/DRIFT/hot/rpc.md` 的 DRIFT-HOTRPC-004 条目。
+
+---
+
+## SD-HOT-RPC-003 · 容器并发度 `concurrency=1`（Go 是每分区一个 goroutine）
+
+- **Component**：Kafka 消费并发度（`@KafkaListener` 的 `concurrency`）
+- **Go 出处**：
+  - `service/hot/rpc/internal/mqs/hot_handler.go:101-111` —— `ConsumeClaim` 是 **claim 级**的循环；
+  - sarama 的 `consumerGroupSession.consume()` **每个 partition claim 起一个 goroutine**
+    ⇒ 单进程持有 N 个分区时，**N 路并行消费**。
+- **RAG 形态**：`@KafkaListener` 默认 `concurrency=1` ⇒ **单消费者线程串行轮询**它持有的全部分区。
+  （真 Kafka 实测：生产容器独占 3 个分区 ⇒ `HotPartitionSketchRegistry.size() == 3`，事件处理串行。）
+- **差异何时可见**（**这是本条的关键，不能简单写成「不等价」**）：
+  | 部署形态 | Go | RAG | 是否等价 |
+  |---|---|---|---|
+  | **单实例**（1 JVM 持 3 个分区） | 3 路并行 | 1 路串行 | ❌ **不等价** |
+  | **实际部署「同一部署 × 3 副本」**（3 JVM 同组、RoundRobin ⇒ 每 JVM 恰好 1 个分区） | 每 JVM 1 路 | 每 JVM 1 路 | ✅ **等价** |
+- **同分区内顺序保证**：两侧都是分区有序 ⇒ **一致**（这条不受影响）。
+- **签字理由**：用户 2026-10-24 拍板「保持 + 签字」。
+  理由：① 实际部署形态下等价，改 `concurrency` **改不到实际行为**；
+  ② `concurrency` 是**静态值**，而分区数会随部署变化 ⇒ 绑死 `partition-count` 反而引入新的耦合；
+  ③ 跨分区并行度只影响吞吐，不改热榜内容语义。
+- **⚠️ 残留风险**：若将来出现**单实例部署**（或副本数 < 分区数），并行度差异会显现
+  ⇒ 届时应重新评估，而不是默认本条永远成立。
+- **可观察影响**：低（吞吐 / 跨分区并行度）。
+- **留痕位置**：`docs/DRIFT/hot/rpc.md` 的 DRIFT-HOTRPC-009 条目。
+
+---
+
+## SD-HOT-RPC-004 · 注册失败 ⇒ 进程存活 + 健康检查 NOT_SERVING（Go 是 panic 退出）
+
+- **Component**：服务注册（etcd / Nacos）
+- **Go 出处**（逐条读到**消费点**）：
+  1. `service/hot/rpc/hot.go:74` —— `serviceGroup.Start()`；
+  2. `zrpc/server.go:88-93` —— `Start()` 里 `panic(err)` ⇒ **进程退出**；
+  3. `zrpc/internal/rpcpubserver.go:48-53` —— `keepAliveServer.Start` **先**跑 `registerEtcd()`，失败即 return error；
+  4. `core/discov/publisher.go` —— `KeepAlive()` → `doRegister()` → `GetConn(endpoints)`，etcd 连不上即 error。
+  ⚠️ **边界**：`MustNewServer` 构造期**不连** etcd（只有 `Start()` 才注册）；
+  ⚠️ **运行期**掉线走 `doKeepAlive()` ⇒ `logc.Errorf` + 重试，**不退出** ⇒ 只有「首次注册失败」才 panic。
+- **RAG 形态**：`NacosRegistration.register()` 捕获 `NacosException | RuntimeException` ⇒
+  **只打 ERROR、进程继续存活**。
+- **差异**：
+  | | Go | RAG |
+  |---|---|---|
+  | 首次注册失败 | **进程退出**（探针**连不上**） | **进程存活**（探针**连得上**） |
+  | 探针结果 | 失败 | **必须**失败 —— 由 gRPC health 状态表达 |
+- **签字理由**：用户 2026-10-24 拍板「保持 + 签字 + 补『注册失败 ⇒ 健康检查 NOT_READY』」。
+  理由：**崩进程不是想要的语义**（注册中心抖动不该让整个副本反复重启），
+  但「进程活着却注册不上」若**探针还是绿的**，就成了**假活** ——
+  进程在、端口在、服务发现里没有它 ⇒ 上游按端口判断健康就会误判为可用。
+  ⇒ 两条合起来才是完整语义：**进程不死，但探针必须看得见失败**。
+- **✅ 配套实现（本轮同批落地）**：
+  - `NacosRegistration.markHealth(...)` ⇒ 注册失败时
+    `HealthStatusManager.setStatus(SERVICE_NAME_ALL_SERVICES, NOT_SERVING)`；
+  - 走 **grpc 标准 health service**，与 Go 侧**同构**：
+    Go = `google.golang.org/grpc/health.Server`（`zrpc/internal/server.go:36-38` +
+    `zrpc/internal/rpcserver.go:61-63` 的 `RegisterHealthServer` + `Resume`），
+    RAG = `io.grpc.protobuf.services.HealthStatusManager`（devh starter 的
+    `GrpcHealthServiceAutoConfiguration`，条件 `grpc.server.health-service-enabled` 默认 true）；
+  - **两侧都只登记整体状态**（service 名 = `""`）⇒ 查具体服务名一律 `NOT_FOUND`，
+    **刻意不**多登记 `"hot-rpc"`，以免造出 Go 侧没有的行为。
+- **守门测试**：`NacosRegistrationHealthGateTest`（2 例）——
+  ① 注册失败 ⇒ 用 `HealthGrpc` 走**真实 gRPC health 协议**查整体状态 ⇒ `NOT_SERVING`；
+  ② 查具体服务名 ⇒ `NOT_FOUND`（证明没有多登记条目）。
+  **变异验证**：抽掉 `markHealth(NOT_SERVING)` ⇒ 用例变红（`expected: <NOT_SERVING> but was: <SERVING>`）。
+- **可观察影响**：**低且是修复方向**（把「假活」变成「探针可见的失败」）——
+  唯一残留差异是失败时 gRPC 端口仍可连、方法仍可调（Go 是直接断连）。
+- **留痕位置**：`docs/DRIFT/hot/rpc.md` 的 DRIFT-HOTRPC-010 条目 + `NacosRegistration` 的 javadoc。

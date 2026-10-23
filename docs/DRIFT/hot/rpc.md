@@ -770,14 +770,14 @@ Go 形态：`Lock()` → 内部函数 `RLock()` ⇒ `sync.RWMutex` 不可重入 
 
 | ID | Question | Go Evidence | Java Evidence | Why Unknown | Impact | Required Confirmation |
 |---|---|---|---|---|---|---|
-| **UNR-1** | go-redis `MaxRetries=3` 的**实际重试面**：哪些命令会重试、pipeline 内部失败重试会不会留下半成品（`DEL` 成功但 `ZADD` 失败 ⇒ shadow key 残留）？ | `go-redis@v9.20.0/options.go` `init()` + `shouldRetry` | Lettuce 无重试；`flush` 用 `executePipelined` | ⚠️ **部分闭合（第四轮）**：**RAG 侧「无重试」已在真 Redis 确认**（4 段 Lua / pipeline / TTL 全路径无隐式重试）；**Go 侧 `MaxRetries=3` 的实际重试面仍未实测** | 决定 DRIFT-HOTRPC-004 的严重度；也可能暴露 Go 侧独有的 shadow 残留 | **仍需**：起 Go 真源 + 真 Redis，用 `CLIENT PAUSE` 制造半程失败，观察两侧 keyspace |
+| **UNR-1** | go-redis `MaxRetries=3` 的**实际重试面**：哪些命令会重试、pipeline 内部失败重试会不会留下半成品（`DEL` 成功但 `ZADD` 失败 ⇒ shadow key 残留）？ | `go-redis@v9.20.0/options.go` `init()` + `shouldRetry` | Lettuce 无重试；`flush` 用 `executePipelined` | ✅ **已闭合（第五轮）**：**重试面已逐条钉到依赖源码**（`options.go:393-398` / `redis.go:842,1002,1114-1119,1130-1201,1204-1227` / `error.go:84-153`）；**pipeline 重试 = 整组重发**（`pipelineProcessCmds` 每次 `writeCmds` 全量）；**「shadow 半成品」不可达**（DEL 先于 ZADD ⇒ 撞不出 WRONGTYPE；网络错 ⇒ 幂等整组重放 ⇒ 终态一致）。⚠️ 台账原定的验证手段被**证伪**：`CLIENT PAUSE` 只延迟不失败 | **重试面结案为「Go 重试的终态不可观察」** ⇒ DRIFT-HOTRPC-004 严重度 MEDIUM→**LOW**；并**反向查出** Go 会重发**非幂等**的 rename 脚本 ⇒ 可能「实际成功却记 fail」 | ✅ 已完成（第五轮）。**证据强度：真 Redis 实测 + 依赖源码逐行**（⚠️ **不是**双侧活体对拍 —— 真源冻结且无法注入网络故障） |
 | **UNR-2** | 4 段 Lua 的**逐条行为**（`EXISTS` 守卫 / `RENAME` 原子性 / `EXPIRE` 与 `RENAME` 的先后） | `hot_handler.go:227-234,301-306,329-334,400-407` | `HotRedisSnapshotStore.java:74-81`、`HotMergeScheduler.java:76-104` | ✅ **已闭合（第四轮）**：真 Redis IT 逐条跑通 4 段 Lua，`DefaultRedisScript` 的 `resultType=Long` 映射已验证；**并证伪了台账对 `EXISTS` 守卫的描述** | 若映射出错，`result==0` 分支判定会翻转 ⇒ 快照 / 合并行为改变 | ✅ 已完成（`HotRedisLuaGateTest`，12 例 + 变异验证） |
 | **UNR-3** | Lettuce `connectTimeout` 默认 10s vs go-redis `DialTimeout=5s` | `go-redis@v9.20.0/options.go` `init()`：`DialTimeout = 5s` | `application.yml:28` 只配 `timeout: 3s`，未配 `connect-timeout` | ✅ **已闭合（第四轮取证）**：消费点 `LettuceConnectionConfiguration.createClientOptions`（字节码：`DataRedisProperties.getConnectTimeout()` → `ifnull` ⇒ 未配置时**不调** `SocketOptions.Builder.connectTimeout`）⇒ 落 Lettuce **6.8.2** `SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION = Duration.ofSeconds(10)`（字节码 `ldc2_w 10l → Duration.ofSeconds`） | 连接阶段失败时机不同（低） | ✅ 已完成。**结论：差异确认存在（10s vs 5s），低影响，未修** |
 | **UNR-4** | `RoundRobinAssignor` 配置**是否真的落到 consumer**（Boot 4 的 `KafkaProperties.Consumer.buildConsumerProperties()` 是否仍消费 `spring.kafka.consumer.properties.*`） | `hot.go:57` `NewBalanceStrategyRoundRobin` | `application.yml:49` | ✅ **已闭合（第四轮）**：真 Kafka IT 用**生产 `ConsumerFactory`** 建 2 个消费者 + 3 分区 topic ⇒ 实测分配 `[0,2]/[1]`（RoundRobin 形状）；**变异**把策略改成 `RangeAssignor` ⇒ 用例立刻变红（实际 `[0,1]/[2]`）⇒ 证明断言对策略敏感、不是恒真 | 分配策略改变 ⇒ `hkMap` 布局与热榜分布改变 | ✅ 已完成（`HotKafkaConsumerGateTest#productionConsumerFactoryReallyUsesRoundRobinAssignor`） |
 | **UNR-5** | `@KafkaListener` 若能起来，**容器并发度**是否等价于 Go 的「每分区一个 goroutine」 | sarama 每分区一个 goroutine（`consumer_group.go` 的 `consume()` 每 claim 一个 goroutine） | `@KafkaListener` 默认 `concurrency=1`（实测：单容器线程持有全部 3 个分区 ⇒ 串行消费） | ✅ **已回答（第四轮）**，**但结论不是「等价」**：单实例部署下 Go 并行消费 3 个分区、RAG 串行消费 ⇒ **不等价**；在「同一部署 × 3 副本」（3 JVM 同组、每 JVM 恰好 1 个分区）下才等价 ⇒ 登记为 **DRIFT-HOTRPC-009** | 影响跨分区的消费并行度（同分区内的顺序保证两侧一致） | ✅ 已回答；**是否把 `concurrency` 调成 `partition-count` 需单独决策**（会改并发语义，本轮未擅改） |
 | **UNR-6** | 三份 yaml 的**真实差异**到底是什么 | `etc/hot{1,2,3}.yaml` | `application.yml` 收敛为一份 + 环境变量 | ✅ **已闭合（第四轮复核）**：实测 `diff` —— 差异**不止两项**，还有 **`Interaction.Weights[].Code` 字段的缺失**（hot2/hot3 的 4 条权重都没有 `Code`，hot.yaml 有）；`ListenOn` 8083/8084/8085、`Prometheus.Port` 19091/19092/19093 | —— | 历史结论「只差 `ListenOn` 与 `Prometheus.Port`」**不成立** | 若照历史结论收敛，会把 `Code` 字段当噪声丢掉 ⇒ RAG 侧「保留 code 字段」的做法**反而是对的**（与 `application.yml` 注释、`HotRpcProperties.Weight.code` 一致） | ✅ 已完成（`diff etc/hot.yaml etc/hot2.yaml` / `hot3.yaml`） |
 | **UNR-7** | Go 的 `zrpc` 在注册 etcd 失败时是否 `Fatal`（⇒ 进程退出） | `hot.go:35` `zrpc.MustNewServer` | `NacosRegistration.java:92-94` 只 log | ✅ **已闭合（第四轮取证）**：Go 侧「**首次注册失败 ⇒ panic 退出**」，链路 = `zrpc/server.go:88-93`（`Start()` 里 `panic(err)`）→ `zrpc/internal/rpcpubserver.go:48-53`（`keepAliveServer.Start` 先跑 `registerEtcd()`，失败即 return error）→ `core/discov/publisher.go` 的 `KeepAlive→doRegister→GetConn`（etcd 连不上即 error）。⚠️ **运行期**掉线则只 `logc.Errorf` + 重试，**不退出** | 注册失败时两侧存活行为不同 | ✅ 已完成 ⇒ 登记为 **DRIFT-HOTRPC-010** |
-| **UNR-8** | `AGENTS.md §3.4` 把 `hot` 列在「只有一次性实测、**无回归网**」档 | proto diff 本轮重做仍为空 | 同 | 本轮的 diff **未进脚本** | proto 可能随时被改坏而无人知晓 | 按 `user` / `admin` 的写法扩 `tools/difftest/check-proto-static.sh` |
+| **UNR-8** | `AGENTS.md §3.4` 把 `hot` 列在「只有一次性实测、**无回归网**」档 | proto diff 本轮重做仍为空 | 同 | 🚫 **用户 2026-10-24 决定：不做** —— 「proto 是复制粘贴过来的，不用测」 | proto 可能随时被改坏而无人知晓（**用户已接受该风险**） | 🚫 **关闭**。⚠️ 附带发现：`tools/difftest/check-proto-static.sh` 现在**只覆盖 users 域**，且**即使发现差异也退出 0**（`verdict()` 的 `else` 分支最后一条是 `cat`，恒成功）⇒ 它目前**不能直接当 CI 门禁用**；若日后别的域要用它，需先修退出码 |
 
 ---
 
@@ -797,7 +797,7 @@ Go 形态：`Lock()` → 内部函数 `RLock()` ⇒ `sync.RWMutex` 不可重入 
 | 10 | State transition 是否一致？ | ⚠️ **部分** | 消费侧一致；分区状态机因 SD-1 不同（Go 走不到 revoke） |
 | 11 | Side effects 是否一致？ | ⚠️ **部分** | Redis keyspace 一致；Kafka 位点窗口不同；指标**无暴露端点** |
 | 12 | Ordering 是否一致？ | ✅ 一致 | proto message / 字段号逐条一致；TopK 并列项两侧都不承诺次序 |
-| 13 | Retry 是否一致？ | ❌ **否** | Kafka 侧一致（都 0 重试）；**Redis 侧 Go 3 次 / RAG 0 次**（004） |
+| 13 | Retry 是否一致？ | ❌ **否** | Kafka 侧一致（都 0 重试）；**Redis 侧 Go 3 次 / RAG 0 次**（004）—— ⚠️ **第五轮复核**：Go 的重试在 shadow 写入路径上**终态不可观察** ⇒ 004 降级 **LOW**；但反向查出 Go 会重发**非幂等**脚本 ⇒ 可能「实际成功却记 fail」 |
 | 14 | Timeout scope 是否一致？ | ⚠️ **部分** | gRPC deadline 2s 一致；Redis 命令 3s 一致；**连接超时 5s vs 10s**（UNR-3） |
 | 15 | Concurrency semantics 是否一致？ | ❌ **否** | 003（单线程调度器）+ SD-1（锁）+ 006（panic） |
 | 16 | Authentication / Authorization 是否一致？ | ✅ N/A 一致 | 两侧都无鉴权（实测依赖树无安全组件） |
@@ -831,9 +831,10 @@ SEMANTICALLY NOT EQUIVALENT
 3. 修 `DRIFT-HOTRPC-001`（`Long.remainderUnsigned`）+ 补一条**对拍 fixture 测试**（不是行为测试）；
 4. 决定 `DRIFT-HOTRPC-004` 的口径（建议显式化现状）、`DRIFT-HOTRPC-006` 要不要签字；
 5. 起真 Redis + 真 Kafka 做 IT，消掉 UNR-1 / 2 / 4 / 5。
-   ✅ **第四轮已做**：UNR-2 / 3 / 4 **已闭合**；UNR-1 **部分闭合**（Go 侧重试面仍未实测）；
-   UNR-5 **已回答且结论为「非等价」**（⇒ DRIFT-HOTRPC-009）。
-   ⇒ 本条的**剩余动作**只剩「Go 侧 `CLIENT PAUSE` 半程失败对拍」一项。
+   ✅ **第四轮已做**：UNR-2 / 3 / 4 **已闭合**；UNR-5 **已回答且结论为「非等价」**（⇒ DRIFT-HOTRPC-009）。
+   ✅ **第五轮已做**：UNR-1 **已闭合**（Go 侧重试面钉到 go-redis v9.20.0 依赖源码 + 真 Redis 实测；
+   **「shadow 半成品」不可达**；⚠️ 台账原定的 `CLIENT PAUSE` 手段**被证伪** ⇒ 该子问以**源码级结论**结案，
+   **明确不越读为「已实测」**）⇒ **本条的剩余动作已清零**。
 
 
 ---
@@ -919,7 +920,7 @@ SEMANTICALLY NOT EQUIVALENT
 
 ---
 
-## DRIFT-HOTRPC-004 📝 已签字（不复刻）· OBSERVABLE DIFFERENCE · MEDIUM
+## DRIFT-HOTRPC-004 📝 已签字（不复刻）· OBSERVABLE DIFFERENCE · ~~MEDIUM~~ → **LOW**（2026-10-24 第五轮复核下调）
 
 - **Go**：`svc/service_context.go:17-20` 只给 `Addr`+`Password` ⇒ `MaxRetries` 走 go-redis v9.20.0
   `Options.init()` 的默认 **3**（`if opt.MaxRetries == 0 { opt.MaxRetries = 3 }`）⇒ 网络错误/超时会**自动重试最多 3 次**。
@@ -936,6 +937,22 @@ SEMANTICALLY NOT EQUIVALENT
   ⇒ [`docs/Intentional_Deviations/hot/rpc.md`](../../Intentional_Deviations/hot/rpc.md) `SD-HOT-RPC-002`。
 - **遗留口径提醒**：`article_hot_redis_sync_total{status}` 的值**不可跨实现直接比较**；
   弱网下 RAG 的热榜刷新率**低于** Go。
+
+### ⚠️ 第五轮复核批注（2026-10-24 · UNR-1 闭合后）
+
+**签字口径不变**（Lettuce 无重试入口仍是事实 ⇒ 仍然不复刻），但**严重度 MEDIUM → LOW**，并**新增一条反向差异**。
+
+| | 第五轮之前的认知 | 第五轮实测 / 取证后的认知 |
+|---|---|---|
+| Go 的 3 次重试影响多大 | 「网络错误/超时会自动重试最多 3 次」⇒ 暗示 RAG 会丢写 | **在 shadow 写入这条路径上「终态不可观察」**：pipeline 重试是**整组重发**（`redis.go:1204-1227`），`DEL`+`ZADD` **幂等** ⇒ 重放后终态与一次成功**完全一致** |
+| RAG 少一次重试 ⇒ 会丢数据 | 担心 RAG 丢写 | **丢不了**：shadow 是从**内存 sketch** 派生的，下一个 30s tick（`HotRedisSnapshotStore.periodicSync()`，Go `hot_handler.go:244-263`）会**重新 flush** ⇒ **自愈** |
+| Go 侧独有的 shadow 半成品 | UNR-1 的核心担忧 | **不存在**：两侧 pipeline 命令序相同（DEL 先于 ZADD）⇒ `ZADD` 撞不出 `WRONGTYPE`；网络错 ⇒ 幂等整组重放 |
+| ⚠️ 反向差异（**新查出**） | 未知 | Go 会重发**非幂等**的 rename 脚本 ⇒ 若首次已执行成功但回复丢失，重试再执行时 `EXISTS shadow == 0` ⇒ **返回 0** ⇒ Go `hot_handler.go:236-238` **记 `fail`** ⇒ **实际成功却记 fail**（指标误计）。RAG 无重试 ⇒ **不产生**该形态 |
+
+⇒ **降级理由**：① Go 的重试在终态上不可观察；② RAG 侧失败后果自愈；
+③ 残留差异只剩「网络抖动瞬间的行为」与「非幂等脚本被重发的指标误计」⇒ 都是**低频、低影响**。
+⚠️ **证据强度**：真 Redis 实测 + go-redis v9.20.0 依赖源码逐行；
+**不是**双侧活体对拍（真源冻结，无法注入网络故障）⇒ 详见[第五轮章节](#第五轮unr-1-闭合轮go-侧重试面取证)。
 
 ---
 
@@ -957,11 +974,13 @@ SEMANTICALLY NOT EQUIVALENT
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| **真 Redis / 真 Kafka 集成测试** | ✅ **第四轮已闭合** | 真 `redis:7-alpine`（12 例）+ 真 `apache/kafka:3.7.2`（4 例），全部默认跑、不 skip，均配变异验证。⚠️ 残留：Go 侧 `MaxRetries=3` 的实际重试面（UNR-1 的 Go 侧）仍需 `CLIENT PAUSE` 半程失败对拍 |
+| **真 Redis / 真 Kafka 集成测试** | ✅ **第四轮已闭合** | 真 `redis:7-alpine`（12 例）+ 真 `apache/kafka:3.7.2`（4 例），全部默认跑、不 skip，均配变异验证。✅ **残留已清**：Go 侧 `MaxRetries=3` 的实际重试面（UNR-1）**第五轮已闭合** |
+| **UNR-1（Go 侧重试面 / shadow 半成品）** | ✅ **第五轮已闭合** | Go 重试面已逐条钉到 go-redis v9.20.0 源码；**「shadow 半成品」不可达**（两侧 DEL 先于 ZADD + 幂等整组重发）；反向查出「Go 重发**非幂等** rename 脚本 ⇒ 实际成功却记 fail」⇒ **DRIFT-HOTRPC-004 降级 LOW**。⚠️ 台账原定的 `CLIENT PAUSE` 验证手段**被证伪**（只延迟、不能失败） |
 | **Go 侧 `?page` 之外的入口面** | — | 本轮只对照了消费面与查询面；`HotRankingQueryService` 的 Redis 分支仍只有 Mockito 单测 |
-| **proto 回归网** | ❌ 仍缺 | `hot.proto` 无自动对照测试（UNR-8）；本轮未补 |
+| **proto 回归网** | 🚫 **用户决定不做**（2026-10-24） | 「proto 是复制粘贴过来的，不用测」⇒ 关闭。⚠️ 附带发现：现有 `check-proto-static.sh` **只覆盖 users 域**且**恒退出 0**，不能直接当 CI 门禁 |
+| **DRIFT-HOTRPC-009（容器并发度）** | 📝 已签字 | 用户 2026-10-24 拍板保持现状 ⇒ `SD-HOT-RPC-003`；实际「×3 副本」部署下等价。⚠️ **单实例部署下不等价** ⇒ 残留风险 |
+| **DRIFT-HOTRPC-010（注册失败存活语义）** | 📝 已签字 **+ 已补健康检查** | 用户 2026-10-24 拍板「保持 + 签字 + 补 NOT_READY」⇒ `SD-HOT-RPC-004`；配套实现与守门测试已落地 |
 | **DRIFT-HOTRPC-005（Kafka 位点节奏）** | ⏸ 保持不修 | Go 每 1s 批量提交、RAG 逐条提交 ⇒ 崩溃恢复时 Go 会重复计入。方向明确、幅度有界，**登记不修** |
-| **DRIFT-HOTRPC-009（容器并发度）** | 🆕 **新登记，未修** | 第四轮 IT 查出：单实例下 Go 每分区一个 goroutine（并行）vs RAG `concurrency=1`（串行）。**实际「×3 副本」部署下等价**，单实例不等价 ⇒ 需单独决策是否改 `concurrency` |
 
 ---
 
@@ -1005,6 +1024,7 @@ SEMANTICALLY NOT EQUIVALENT
 | **UNR-5**（容器并发度 vs 每分区一个 goroutine） | ✅ 已回答，**结论非等价** | 实测 `concurrency=1`；⇒ 登记 DRIFT-HOTRPC-009 |
 | **UNR-6**（三份 yaml 的真实差异） | ✅ 闭合，**且历史结论被推翻** | 实测 diff：除 `ListenOn` / `Prometheus.Port` 外还有 `Weights[].Code` 字段缺失 ⇒ 「只差两项」不成立 |
 | **UNR-7**（Go 注册失败是否 Fatal） | ✅ 闭合，**结论：会退出** | go-zero `zrpc/server.go:88-93` + `rpcpubserver.go:48-53` + `discov/publisher.go`；⇒ 登记 DRIFT-HOTRPC-010 |
+| **UNR-8**（proto 回归网） | 🚫 **用户决定不做** | 「proto 是复制粘贴过来的，不用测」（2026-10-24）；⇒ 关闭，**风险由用户接受** |
 
 ## 变异验证（三条，全部按预期变红）
 
@@ -1040,7 +1060,7 @@ SEMANTICALLY NOT EQUIVALENT
 
 ---
 
-## DRIFT-HOTRPC-009 🟡 OBSERVABLE DIFFERENCE · LOW · 已实测（**部署相关**）
+## DRIFT-HOTRPC-009 📝 已签字（保持现状）· OBSERVABLE DIFFERENCE · LOW · 已实测（**部署相关**）
 
 - **Component**：Kafka 消费并发度
 - **Go Behavior**：`sarama` 的 `consumerGroupSession.consume()` **每个 partition claim 起一个 goroutine**
@@ -1054,13 +1074,14 @@ SEMANTICALLY NOT EQUIVALENT
     ⇒ 每 JVM 1 线程 1 分区 ⇒ **等价**。
 - **同分区内顺序保证**：两侧都是分区有序 ⇒ **一致**。
 - **影响**：低（吞吐 / 跨分区并行度；不改热榜内容语义）。
-- **处置**：**登记不修** —— 改 `concurrency` 会**改变并发语义**（且 `concurrency` 是静态值、
-  分区数可随部署变化），需要单独决策与单独 PR；本轮**不擅自改**。
-  ⇒ 建议下一轮评估 `spring.kafka.listener.concurrency` 与 `hot-rpc.interaction.partition-count` 的绑定方式。
+- **处置**：📝 **已签字（用户 2026-10-24 拍板「保持 + 签字」）** —— 改 `concurrency` 会**改变并发语义**
+  （且 `concurrency` 是静态值、分区数可随部署变化）；**实际「×3 副本」部署下两者本就等价** ⇒ 改不到实际行为。
+  ⇒ 登记为 [`docs/Intentional_Deviations/hot/rpc.md`](../../Intentional_Deviations/hot/rpc.md) **SD-HOT-RPC-003**。
+  ⚠️ **残留风险**：若出现**单实例部署**（或副本数 < 分区数），并行度差异会显现 ⇒ 届时重新评估。
 
 ---
 
-## DRIFT-HOTRPC-010 🟠 OBSERVABLE DIFFERENCE · MEDIUM · 已取证（**存活语义**）
+## DRIFT-HOTRPC-010 📝 已签字（保持 + 补健康检查）· OBSERVABLE DIFFERENCE · MEDIUM · 已取证（**存活语义**）
 
 - **Component**：服务注册（etcd / Nacos）
 - **Go Behavior**：**首次注册失败 ⇒ 进程 panic 退出**。链路（全部已读到**消费点**）：
@@ -1084,10 +1105,188 @@ SEMANTICALLY NOT EQUIVALENT
   RAG 的 hot-rpc **照常起来**（对外表现为「该副本存在但注册不上」⇒ 客户端按 Nacos 列表找它会失败）。
 - **Observable Impact**：中等 —— **不是「更健壮」，而是「假活」**：进程在、端口在、但服务发现里没有它；
   若上游按「端口可连」判断健康，会误判为可用。
-- **修法候选（需拍板，本轮未擅改）**：
-  - (a) 注册失败即 `System.exit` / 抛异常让容器重启 —— **与 Go 一致**，但会把「Nacos 抖动」变成「Pod 反复重启」；
-  - (b) 保持现状 + **显式化**为签字偏离，并补一条「注册失败 ⇒ 健康检查报 NOT_READY」的机制（**语义更好，但 Go 没有**）。
+- **处置**：📝 **已签字（用户 2026-10-24 拍板「保持 + 签字 + 补『注册失败 ⇒ 健康检查 NOT_READY』」）**
+  ⇒ 选 (b)：**进程存活 + 健康检查报 NOT_SERVING**。
+  ⇒ 登记为 [`docs/Intentional_Deviations/hot/rpc.md`](../../Intentional_Deviations/hot/rpc.md) **SD-HOT-RPC-004**。
+  ✅ **配套实现已同批落地**：`NacosRegistration.markHealth(...)` →
+  `HealthStatusManager.setStatus(SERVICE_NAME_ALL_SERVICES, NOT_SERVING)`（**grpc 标准 health service，与 Go 同构**）。
+  守门测试 `NacosRegistrationHealthGateTest`（2 例，走**真实 gRPC health 协议**查询）；
+  变异验证：抽掉 `markHealth(NOT_SERVING)` ⇒ 变红（`expected: <NOT_SERVING> but was: <SERVING>`）。
 - **Evidence**：【静态源码 + 依赖源码逐行】go-zero `v1.10.2`
   `zrpc/server.go:88-93` / `zrpc/internal/rpcpubserver.go:48-53` / `core/discov/publisher.go` 的 `KeepAlive→doRegister→GetConn`。
 - ⚠️ **与 SD-HOT-RPC-001 的同构性**：「Go 会崩、RAG 降级存活」这同一个取舍，已经在**消费侧**签过一次字
   （`SD-HOT-RPC-001` 消费异常降级 drop）⇒ **本条建议按同一口径签字**，而不是各写各的。
+
+---
+
+<!-- ====================================================================================
+     ↓↓↓ 第五轮：2026-10-24「UNR-1 闭合轮」（align/hot 分支）
+     ↑ 上方第四轮及更早的历史条目与编号一条未删（仅就地加了复核批注）
+     ==================================================================================== -->
+
+# 第五轮：UNR-1 闭合轮（Go 侧重试面取证）
+
+> **范围**：`docs/`（本台账 + `docs/Pitfalls/hot/rpc.md` + `docs/Intentional_Deviations/hot/rpc.md`）；
+> **探针**在 `/tmp/redis-retry-probe/`（**Go 真源仓零改动**，真源 `tracked diff` 为空）。
+> **分支**：`align/hot`（worktree `../RAG.worktrees/hot`）。
+> **本轮性质**：把第四轮唯一剩下的 UNR-1 做掉 —— ⚠️ **但不是用第四轮台账指定的方法**（那个方法被实测证伪）。
+>
+> **⚠️ 证据强度声明**：**真 Redis 实测 + go-redis v9.20.0 依赖源码逐行**。
+> **不是**「双侧活体对拍」—— 真源冻结且**无法注入网络故障** ⇒ 该子问以**源码级结论**结案，
+> **明确不越读为「已实测」**（§3.3 证据强度分层）。
+
+## 本轮一句话
+
+**UNR-1 闭合：Go 的 3 次重试在 shadow 写入这条路径上「终态不可观察」；
+UNR-1 担心的「Go 侧独有的 shadow 半成品」不存在；
+⚠️ 但反向查出 Go 会重发「非幂等」的 rename 脚本 ⇒ 可能「实际 RENAME 成功却记 fail」
+⇒ DRIFT-HOTRPC-004 严重度 MEDIUM → LOW（签字口径不变）。**
+
+## 一、Go 侧重试面（依赖源码逐行钉死）
+
+### 1.1 重试次数
+
+| 事实 | 出处 |
+|---|---|
+| `MaxRetries` 默认 **3**（`-1` ⇒ 0） | `options.go:393-398`；Go 侧 `svc/service_context.go:17-20` **只给** `Addr`+`Password` ⇒ 走默认 |
+| 单命令尝试次数 = `MaxRetries+1` = **4** | `redis.go:842` `for attempt := 0; attempt <= c.opt.MaxRetries` |
+| pipeline 尝试次数 = 同上 | `redis.go:1143`（同一个 `for`） |
+
+### 1.2 哪些错误会重试（`shouldRetry`，`error.go:84-153`）
+
+| 错误类别 | pipeline 路径 | 单命令路径 | 出处 |
+|---|---|---|---|
+| `io.EOF` / `io.ErrUnexpectedEOF` | ✅ 重试 | ✅ 重试 | `error.go:90-92` |
+| dial 失败（`net.OpError{Op:"dial"}`） | ✅ 重试 | ✅ 重试 | `error.go:97-100` |
+| 连接池超时（`pool.ErrPoolTimeout`） | ✅ 重试 | ✅ 重试 | `error.go:108-111` |
+| `context.Canceled` / `context.DeadlineExceeded` | ❌ **不重试** | ❌ **不重试** | `error.go:103-105`（**优先于**超时判定） |
+| 带 timeout flag 的错误 | ✅ **重试** | ⚠️ 写超时 ⇒ 重试；读超时 ⇒ **命令自带 readTimeout 时不重试** | pipeline：`redis.go:1171` 传字面量 `true`；单命令：`redis.go:971`（写）/ `redis.go:992-996`（读）/ `redis.go:1002` |
+| `MaxClients` / `LOADING` / `READONLY` / `MasterDown` / `ClusterDown` / `TryAgain` / `NoReplicas` | ✅ 重试 | ✅ 重试 | `error.go:122-142` |
+| 其余 Redis 逻辑错误（`WRONGTYPE` / `NOPERM` / …） | ❌ **不重试** | ❌ **不重试** | `shouldRetry` 无命中 ⇒ `false` |
+
+> ⚠️ **本轮订正第四轮的一处错记**：第四轮台账写「单命令路径传 `c.opt.RetryTimeout`」——
+> **在 v9.20.0 里不成立**：`options.go` 全文检索 `RetryTimeout` **只命中 `DialerRetryTimeout`**
+> ⇒ v9.20.0 **没有** `Options.RetryTimeout` 字段。
+> 单命令的「timeout flag 是否重试」由 `cmd.readTimeout()` 是否为 `nil` 决定（`redis.go:992-996`）。
+> ⇒ 这正是 §3.3.1 的老坑：**「配置里没写」≠「没这个概念」** —— 先读到**消费点**再下结论。
+
+### 1.3 重试粒度 = **整组**（pipeline）
+
+调用链（全部读到**消费点**）：
+
+```text
+Client.Pipeline()                      redis.go:1508-1514   exec = c.processPipelineHook
+  └─ processPipeline                   redis.go:1114-1119
+       └─ generalProcessPipeline(..., c.pipelineProcessCmds, "PIPELINE")   redis.go:1130
+            └─ pipelineProcessCmds     redis.go:1204-1227
+                 ├─ cn.WithWriter(...) → writeCmds(wr, cmds)   ← ★ 每次重试都写全量
+                 └─ cn.WithReader(...) → pipelineReadCmds(...)
+```
+
+⇒ **每次重试都把整组命令重新写一遍** ⇒ **`DEL` + `ZADD` 一起重放**。
+
+> ✅ **官方注释同证**（`pipeline.go:19-21`，v9.20.0 原文）：
+> 「Redis client has retransmission logic in case of timeouts,
+> **pipeline can be retransmitted and commands can be executed more then once**.」
+
+### 1.4 pipeline 内的错误落点
+
+- `pipelineReadCmds`（`redis.go:1229-1244`）：**网络错误** ⇒ `setCmdsErr` + `return err`（整组失败）；
+  **Redis 逻辑错误** ⇒ 只落在 `cmds[i].Err()`，循环继续（后续命令照常执行）；
+- `Exec` 返回的是 `cmds[0].Err()`（`redis.go:1243` 的 `return cmds[0].Err()`）
+  ⇒ ⚠️ **若第一个命令（`DEL`）出逻辑错，`Exec` 会返回该错**；
+  若只有后面的 `ZADD` 出逻辑错，`Exec` 返回 `nil`，错误只在 `cmds[1].Err()` 里。
+  ⚠️ Go 真源 `hot_handler.go:219-224` **只判 `err != nil`** ⇒ **`ZADD` 的逻辑错会被 Go 漏检**（当成成功）。
+  ⇒ RAG 侧 `HotRedisSnapshotStore.java:150-163` 同样只判 `executePipelined` 是否抛异常 ⇒ **两侧同构**，不是漂移。
+
+## 二、「shadow 半成品」不可达（两侧同构）
+
+- 两侧的 pipeline **命令序完全相同**：
+  - Go `service/hot/rpc/internal/mqs/hot_handler.go:216-219`：`pipe.Del(ctx, shadowKey)` → `pipe.ZAdd(ctx, shadowKey, zMembers...)`；
+  - RAG `HotRedisSnapshotStore.java:150-158`：`operations.delete(shadowKey)` → `operations.opsForZSet().add(shadowKey, tuples)`。
+- ⇒ **DEL 先于 ZADD** ⇒ `ZADD` **不可能**撞 `WRONGTYPE`（DEL 已把 string 型 shadow 删掉）⇒ **逻辑错误路径不产生半成品**。
+- 唯一能让「DEL 生效但 ZADD 未生效」的失败 = **网络层错误** ⇒ 触发**整组重发** ⇒
+  `DEL`+`ZADD` **幂等** ⇒ 重放后终态与「一次成功」**完全一致**。
+- **真 Redis 实测**（`redis:7-alpine` @ 宿主端口 16379，探针 `/tmp/redis-retry-probe/`；
+  真源 pipeline 序列用 sha256 `8e82333a1a2405bd9cd0fa78d79361042036435035825f8a41da3be7f667fa85` 绑定）：
+
+  | 组 | `MaxRetries` | `Exec` err | `cmds[i].Err()` | shadow 终态 |
+  |---|---|---|---|---|
+  | A | **3** | `''` | `['', '']` | **zset / 2 members** |
+  | B | **0** | `''` | `['', '']` | **zset / 2 members** |
+
+  ⇒ **两组终态逐项相同** ⇒ **重试开关对可观察终态无影响**。
+- **Redis 逻辑错误**（如 ACL 只禁 DEL）⇒ 两侧**都不重试**，但那时 DEL 也失败 ⇒
+  shadow **原样保留**（陈旧但完整，**不是半成品**）。
+- ⇒ ✅ **UNR-1 担心的「Go 侧独有的 shadow 残留」不存在**。
+
+> ⚠️ **台账措辞的方向要修正**：原写「`DEL` 成功但 `ZADD` 失败 ⇒ shadow key **残留**」——
+> **方向反了**：DEL 成功 ⇒ 旧数据已清空 ⇒ shadow 是**不存在**（不是残留）；
+> 真正会「残留旧 member」的形态是 **DEL 失败**（如 ACL 只禁 DEL）而 ZADD 成功 ⇒ 新旧 member 混在一个 zset 里。
+
+## 三、⚠️ 反向发现：Go 会重发**非幂等**的 rename 脚本 ⇒ 可能「实际成功却记 fail」
+
+- rename 脚本是**单命令**（`EVALSHA`），走 `redis.go:830/842` 的单命令路径 ⇒ **同样会被重发**。
+- 脚本**非幂等**（`hot_handler.go:227-234`）：
+  ```lua
+  if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+  redis.call('RENAME', KEYS[1], KEYS[2])
+  redis.call('EXPIRE', KEYS[2], 300)
+  return 1
+  ```
+  第一次执行成功 ⇒ shadow 已被 RENAME 走 ⇒ **重试再执行时 `EXISTS shadow == 0` ⇒ 返回 0**。
+- Go `hot_handler.go:236-238` 判 `result == 0` ⇒ **`redisSyncTotal.Inc("fail")`**
+  ⇒ **实际 RENAME 已成功，指标却记 fail**。
+- **RAG 不产生该形态**：Lettuce 无重试 ⇒ 脚本只执行一次 ⇒ `result==0` 只在 shadow **真的**不存在时出现
+  （`HotRedisSnapshotStore.java:169-175`）。
+- ⇒ ⇒ **DRIFT-HOTRPC-004 是双向差异**：
+
+  | 方向 | 现象 | 触发条件 |
+  |---|---|---|
+  | **Go 更稳** | 网络错误 ⇒ 自动重试 ⇒ 写入更可能最终成功 | 网络层错误（EOF / dial / 池超时 / 带 flag 的超时） |
+  | **Go 更不稳** | 非幂等脚本被重发 ⇒ **实际成功却记 fail**（指标误计） | 恰在「命令已执行、回复丢失」的窗口 |
+
+## 四、⚠️ 验证手段被**证伪**（这本身是产出）
+
+第四轮台账给 UNR-1 指定的手段是「起 Go 真源 + 真 Redis，用 `CLIENT PAUSE` 制造半程失败」。
+**实测：这条路径不成立。**
+
+| 手段 | 实测结果 | 结论 |
+|---|---|---|
+| `CLIENT PAUSE <ms> WRITE` | 只暂停**其它客户端**的写命令；**发起方自己**照常执行 | ❌ 证伪 |
+| `CLIENT PAUSE <ms> ALL` | **只延迟执行，客户端不超时** ⇒ 造不出失败 | ❌ **证伪** |
+| `CLIENT KILL <id>` | go-redis **连接池透明重拨** + pipeline 落到池中另一条连接 ⇒ `Exec err=''`、终态完整 | ❌ 证伪 |
+
+⇒ **「命令已执行、回复丢失」这个窗口，无法用 Redis 服务端命令稳定制造**；
+要观测到它需要**网络层注入**（iptables / toxiproxy）或改真源加钩子 ——
+**真源冻结，不做**（§15：不擅自改 Go 行为）⇒ 该子问以**源码级结论**结案，**明确标注不越读为「已实测」**。
+
+⇒ 教训见 `docs/Pitfalls/hot/rpc.md` **P-HOTRPC-11**。
+
+## 五、对既有条目的影响
+
+| 条目 | 影响 | 处置 |
+|---|---|---|
+| **DRIFT-HOTRPC-004** | 严重度 **MEDIUM → LOW**（**签字口径不变**：Lettuce 无重试入口仍是事实） | 已就地加复核批注 |
+| **SD-HOT-RPC-002** | 可观察影响清单**新增**一条（Go 的「实际成功却记 fail」） | 已就地加复核批注 |
+| **UNR-1** | ✅ **闭合** | 本节 |
+
+**降级理由**：
+1. Go 的 3 次重试在 shadow 写入路径上**终态不可观察**（幂等 + 整组重发）；
+2. RAG 侧失败的后果**自愈** —— shadow 本来就是从**内存 sketch** 派生的，
+   下一个 30s tick（`HotRedisSnapshotStore.periodicSync()`，Go `hot_handler.go:244-263`）会**重新 flush**，
+   不会留下持久损伤；
+3. 残留差异只剩「网络抖动瞬间的行为」与「非幂等脚本被重发的指标误计」⇒ 都是**低频、低影响**。
+
+## 六、探针位置（可复现）
+
+| 项 | 路径 |
+|---|---|
+| 探针工程 | `/tmp/redis-retry-probe/`（`main.go` + `go.mod` + `go.sum` + 二进制 `unr1probe`） |
+| 构建命令 | `cd /tmp/redis-retry-probe && GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off GOPRIVATE='*' go build -o unr1probe .` |
+| 真源 pipeline 序列（含 sha256 绑定） | `/tmp/unr1-pipeline-src.txt`（取自 `hot_handler.go:216-219`） |
+| 最近一次输出 | `/tmp/unr1-result.jsonl` |
+| Redis 容器 | `docker run -d --name hot-unr1-redis -p 16379:6379 redis:7-alpine` |
+
+⚠️ **复现提示**：探针复刻真源 pipeline 序列时用 **sha256 绑定真源原文**，
+避免「复刻本身漂移」—— 这是本轮唯一能防「拿自己的复刻当真源」的手段。
