@@ -104,7 +104,54 @@ public class MessageRpcApplication {
     @org.springframework.context.annotation.Bean
     public net.devh.boot.grpc.server.serverfactory.GrpcServerConfigurer rpcInterceptorConfigurer(
             io.grpc.ServerInterceptor rpcUnaryServerInterceptor) {
-        return server -> server.intercept(rpcUnaryServerInterceptor);
+        // ⚠️ **顺序在这里被显式钉死，不用 server.intercept(a, b) 的多次调用**。
+        //
+        // Go 侧的注册序（zrpc/server.go:144-163 + zrpc/internal/server.go:58「append 到尾部」
+        // ⇒ 先注册的最外层）：Trace → Recover → Stat → Prometheus → Breaker → Shedding
+        //   → Timeout → observability（本仓的观测拦截器是最后加的，因此最内层）
+        // ⇒ recover 必须在业务观测拦截器之**外**：否则观测拦截器自身或业务链上的 panic 兜不住。
+        //
+        // 为什么手工串链而不直接 server.intercept(recover, observability)：
+        // io.grpc.ServerBuilder#intercept 每次只收一个，且多次调用的执行顺序是
+        // 「added in reverse order」—— 依赖它等于把嵌套关系交给一个容易记错的细节。
+        // 顺序由 recoverThen(...) 的代码结构写死（见其 javadoc）。
+        return server -> server.intercept(recoverThen(rpcUnaryServerInterceptor));
+    }
+
+    /**
+     * 把 {@code recover} 显式串在 {@code inner} 的<b>外层</b>，返回单一拦截器。
+     *
+     * <p><b>为什么写成一个显式匿名类，而不是两次 server.intercept(...)</b>：
+     * {@code io.grpc.ServerBuilder#intercept} 每次只收一个拦截器，
+     * 而多次调用的执行顺序是「<b>added in reverse order</b>」——
+     * 把嵌套关系交给一个容易记错的 API 细节，等于把 recover 的正确性押在记忆上。
+     * 这里用代码结构把顺序写死：<b>recover 在外，业务观测拦截器在内</b>。
+     *
+     * <p>⚠️ 用匿名类而不是 lambda：{@code ServerInterceptor#interceptCall} 与
+     * {@code ServerCallHandler#startCall} <b>各自是泛型方法</b>，
+     * 三层 lambda 嵌套时 javac 推断不出函数描述符（实测报「函数描述符无效」）。
+     */
+    public static io.grpc.ServerInterceptor recoverThen(io.grpc.ServerInterceptor inner) {
+        final io.grpc.ServerInterceptor outer = new com.rag.common.observability.GoStyleRecoverInterceptor();
+        return new io.grpc.ServerInterceptor() {
+            @Override
+            public <ReqT, RespT> io.grpc.ServerCall.Listener<ReqT> interceptCall(
+                    io.grpc.ServerCall<ReqT, RespT> call,
+                    io.grpc.Metadata headers,
+                    io.grpc.ServerCallHandler<ReqT, RespT> next) {
+                // ⚠️ ServerCallHandler 的类型参数在**接口声明处**（ServerCallHandler<ReqT, RespT>），
+                //    不是方法级泛型 —— 这里若再写一次 <Q, S> 会与父类型「同名但互不覆盖」而编译失败。
+                io.grpc.ServerCallHandler<ReqT, RespT> delegateToInner =
+                        new io.grpc.ServerCallHandler<ReqT, RespT>() {
+                            @Override
+                            public io.grpc.ServerCall.Listener<ReqT> startCall(
+                                    io.grpc.ServerCall<ReqT, RespT> c, io.grpc.Metadata h) {
+                                return inner.interceptCall(c, h, next);
+                            }
+                        };
+                return outer.interceptCall(call, headers, delegateToInner);
+            }
+        };
     }
 
     public static void main(String[] args) {

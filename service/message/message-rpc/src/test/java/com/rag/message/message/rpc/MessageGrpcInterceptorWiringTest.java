@@ -5,9 +5,12 @@ import net.devh.boot.grpc.server.serverfactory.GrpcServerConfigurer;
 import net.devh.boot.grpc.server.serverfactory.InProcessGrpcServerFactory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
@@ -35,7 +38,9 @@ import static org.mockito.Mockito.verify;
  * ⇒ gRPC 慢查询无上界。
  *
  * <p><b>本测试的边界（诚实声明）</b>：它验证两件事 ——
- * ① 本模块的 {@code GrpcServerConfigurer} Bean 确实把 interceptor 交给了 ServerBuilder；
+ * ① 本模块的 {@code GrpcServerConfigurer} Bean 确实把**含业务 interceptor 的那条链**交给了 ServerBuilder
+ * （⚠️ 2026-10-23 起交出去的不再是「那一个对象」而是 {@code recoverThen(businessInterceptor)}，
+ * 见本类第一个用例的 javadoc；断言相应地从「同一个对象」升级为「**链里真的会被调用**」）；
  * ② starter 的 factory 构造器<b>没有</b> ServerInterceptor 形参（即必须自己写 Configurer）。
  * 「starter 会在 build 阶段 apply 所有 Configurer」属于 starter 自身契约，
  * 端到端层面由 {@code tools/difftest/} 的 message 域双端口对拍兜底。
@@ -43,18 +48,60 @@ import static org.mockito.Mockito.verify;
 @DisplayName("§6.6.1 DRIFT-MSG-003 gRPC ServerInterceptor 必须真的挂到 server 上（不是只存在于容器里）")
 class MessageGrpcInterceptorWiringTest {
 
+    /**
+     * <b>⚠️ 2026-10-23（DRIFT-MSG-V-016）本断言的形状变了，但语义没放松。</b>
+     *
+     * <p><b>为什么改</b>：DRIFT-MSG-V-016 要求 recover 挂在业务观测拦截器的<b>外层</b>
+     * （Go 侧 {@code zrpc/internal/server.go:58} 的 append 序 ⇒ 先注册的最外层），
+     * 于是 {@code rpcInterceptorConfigurer} 从
+     * {@code server -> server.intercept(businessInterceptor)}
+     * 改成 {@code server -> server.intercept(recoverThen(businessInterceptor))}。
+     * ⇒ 交给 builder 的<b>不再是那一个对象</b>，老的
+     * {@code verify(builder).intercept(same(interceptor))} 必然转红。
+     *
+     * <p><b>语义有没有放松？—— 没有，是从「同一个对象」升级为「链里真的会被调用」</b>：
+     * <ol>
+     *   <li>老写法只验「builder 收到了那个 Bean」—— 它<b>无法</b>区分
+     *       「业务 interceptor 在链里」与「业务 interceptor 被换成了别的什么」；
+     *       也无法发现「链被拼反了（recover 在内层）」。</li>
+     *   <li>新写法把捕获到的链<b>真跑一遍</b>（{@code interceptCall}），
+     *       再断言业务 interceptor 的 {@code interceptCall} <b>确实被调到</b>
+     *       —— 这才是 DRIFT-MSG-003 的原意：「超时/trace 所在的 interceptor 真的在链上」。</li>
+     * </ol>
+     * ⇒ 保留「链顺序」语义的另一半由
+     * {@code MessageRpcRecoverInterceptorWiringTest#recoverWrapsTheInnerInterceptor} 承担
+     * （它让<b>内层</b>抛异常，只有 recover 在外层时才兜得住）。
+     */
     @Test
-    @DisplayName("本模块的 GrpcServerConfigurer 必须把 interceptor 交给 ServerBuilder")
+    @DisplayName("本模块的 GrpcServerConfigurer 必须把 interceptor 交给 ServerBuilder（且链里真的能调到它）")
     void configurerPassesInterceptorToBuilder() {
         io.grpc.ServerInterceptor interceptor = mock(io.grpc.ServerInterceptor.class);
+        io.grpc.ServerCall.Listener<Object> listener = new io.grpc.ServerCall.Listener<Object>() {};
+        // ⚠️ 必须打桩：Mockito 对返回类型 ServerCall.Listener 的默认答案是 null，
+        //    而 SimpleForwardingServerCallListener 的构造器 checkNotNull(delegate) ⇒ 不打桩会 NPE。
+        doReturn(listener).when(interceptor).interceptCall(any(), any(), any());
+
         GrpcServerConfigurer configurer =
                 new MessageRpcApplication().rpcInterceptorConfigurer(interceptor);
 
         ServerBuilder<?> builder = mock(ServerBuilder.class);
+        ArgumentCaptor<io.grpc.ServerInterceptor> captor =
+                ArgumentCaptor.forClass(io.grpc.ServerInterceptor.class);
 
         configurer.accept(builder);
 
-        verify(builder).intercept(same(interceptor));
+        verify(builder).intercept(captor.capture());
+        io.grpc.ServerInterceptor chained = captor.getValue();
+
+        // 真跑一遍被交给 builder 的那个拦截器：
+        // 它在被调用时必须**真的调用到**业务 interceptor（否则超时/trace 静默消失）。
+        io.grpc.ServerCall<Object, Object> call = mock(io.grpc.ServerCall.class);
+        io.grpc.ServerCallHandler<Object, Object> next = mock(io.grpc.ServerCallHandler.class);
+        doReturn(listener).when(next).startCall(any(), any());
+
+        chained.interceptCall(call, new io.grpc.Metadata(), next);
+
+        verify(interceptor).interceptCall(same(call), any(), same(next));
     }
 
     @Test

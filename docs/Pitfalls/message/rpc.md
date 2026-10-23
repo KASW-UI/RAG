@@ -368,3 +368,98 @@ RAG message_notification.created_at | timestamp   | NOT NULL | DEFAULT CURRENT_T
 但该注解理应删掉：它唯一的作用是把「Docker 不可用」与「Ryuk 镜像拉不下来」
 压成同一个 `false`。**本轮未删** —— 它现在无害，而删它会让本轮的测试计数变化混进语义修复里，
 不如单独一轮处理干净。
+
+---
+
+<!-- @new 2026-10-23 23:5x 第六轮（V-016 recover）新增 2 条 -->
+
+## PITFALL-MSG-R-012 grpc-java 的 unary 响应**必须** `onNext` + `onCompleted` 成对 —— 漏了会**挂死**而不是失败
+
+**现象**：本轮新写 `MessageRpcRecoverInterceptorWiringTest`（真 in-process gRPC server），
+第一次跑 —— **不报失败、不报错，整轮 surefire 挂死 4 分钟**（只能 `jstack` 找到）。
+
+```
+"main" ... WAITING (parking)
+  at io.grpc.stub.ClientCalls$ThreadlessExecutor.waitAndDrain(ClientCalls.java:717)
+  at io.grpc.stub.ClientCalls.blockingUnaryCall(ClientCalls.java:159)
+  at MessageRpcRecoverInterceptorWiringTest.processSurvivesAndServesNextRequest(...:167)
+```
+
+**根因**：service impl 只写了 `observer.onNext(resp)`，**没写 `observer.onCompleted()`**。
+grpc-java 的 `ServerCalls.java:394`：
+
+```java
+@Override
+public void onCompleted() {
+  call.close(Status.OK, new Metadata());   // ← 只有这里才关 call
+  completed = true;
+}
+```
+
+⇒ `onNext` 只 `call.sendMessage(...)`，**call 永不关闭** ⇒ 客户端 `blockingUnaryCall` 无限等待。
+
+**为什么特别阴**：
+
+1. **不是失败，是挂起** —— CI 上表现为「这个测试类卡住」，而不是「红了」；
+   本轮整轮构建因此超时，只能手动 `pkill` surefire。
+2. **只在「成功路径」上挂** —— panic 路径因为 recover 主动 `call.close(...)`，
+   反而**正常返回** ⇒ 第一条 panic 用例是绿的，挂的是**后面那条「panic 后还能继续服务」**的用例。
+3. **生成的 stub 不会提醒你** —— `MessageServiceImplBase` 的抽象方法签名是 `StreamObserver<RespT>`，
+   生成的示例代码是 `onNext` + `onCompleted` 成对，但**编译器不强制**。
+
+**⇒ 元规则**：**写 in-process gRPC 测试时，service impl 的 `onNext` 与 `onCompleted` 必须成对出现。**
+panic / error 路径靠 recover 兜住时尤其容易漏 —— 因为那条路径自己会 `close`。
+
+**下次怎么防**（本轮已落地两道护栏）：
+
+1. **stub 上加 deadline**：`stub.withDeadlineAfter(10, TimeUnit.SECONDS)`
+   ⇒ 漏 `onCompleted` 时会抛 `DEADLINE_EXCEEDED`（**失败**）而不是挂死。
+   （`follow` 域的 `FollowGrpcInterceptorWiringTest` 早就在用这招，本域是跟着它学的。）
+2. **类级 `@Timeout`**：`@Timeout(value = 60, unit = TimeUnit.SECONDS)`
+   ⇒ 连 deadline 都没生效时的最后一道。
+3. ⚠️ **别只靠 `assertThrows`**：本轮第一版的 `assertThrows(StatusRuntimeException.class, …)`
+   在 panic 路径上是对的，**恰恰因此掩盖了后面那条用例的挂死**。
+
+---
+
+## PITFALL-MSG-R-013 判「有没有等价实现」必须 grep **实现**，不是 grep **依赖**
+
+**现象**：本轮写 V-016 处置方案时，对 breaker / shedding 下了这个判断：
+
+> 「Java 侧要复刻**只能引 `resilience4j`**（**本仓当前零熔断依赖**，已 grep 全仓确认），
+>  而 resilience4j 是固定阈值 + 固定开路时长 ⇒ **算法不同、参数不可能逐字对齐**」
+
+**这个判断是错的** —— 而且是**事实性错误**，写进了台账，险些让用户按错误成本估计拍板。
+
+**实测事实**：
+
+```
+service/common/src/main/java/com/rag/common/protection/
+  GoStyleBreaker.java          278 行  ← go-zero core/breaker/googlebreaker.go 的逐行复刻
+  GoStyleAdaptiveShedder.java  373 行  ← go-zero core/load/adaptiveshedder.go 的判据复刻
+  GoStyleBreakerFilter.java    130 行  ← REST 侧的 servlet Filter 壳
+  GoStyleCpuSheddingFilter.java 110 行  ← 同上
+```
+
+两者的类注释里逐字列了 Go 的常量（`window=10s / buckets=40 / k=1.5 / minK=1.1 / protection=5 /
+forcePassDuration=1s`）与 `accept()` 的同构运算顺序，还专门标出「**最容易被顺手改好的三处语义**」
+（概率性拒绝 / force-pass 保底 / 只算已完成桶）—— **算法就是同一套，参数逐个照抄**。
+并且都有测试（`GoStyleBreakerTest` 8 例、`GoStyleAdaptiveShedderTest` 10 例，本轮实测全绿）。
+
+**根因**：**只查了 `pom.xml` 里有没有 resilience4j，就断言「无等价物」**。
+而**本仓的既定策略恰恰是「不引依赖、自己逐行复刻」** ——
+`service/common/protection` 整个包（1790 行）就是这么来的。
+
+**⇒ 元规则**：
+
+1. **判「有没有等价物」要 grep 实现，不是 grep 依赖清单。**
+   尤其在本仓：**没有某个第三方依赖 ≠ 没有对应能力**，因为能力可能是手写复刻的。
+2. **下「成本高 / 不可能对齐」这种结论前，必须把候选实现逐个读完**
+   （本轮读了类注释 + API 表面 + 既有测试，三个信息加起来 5 分钟就能推翻那个判断）。
+3. ⚠️ **推论**：台账里凡是「只能引 X」「Y 不可能对齐」这类**否定式断言**，
+   都应当被视为**高危待验项** —— 它们既没有被机械检查保护，又最容易让用户基于错误前提拍板。
+
+**⇒ 顺带产出**：`DRIFT/message/rpc.md` 的「状态更正 #7」已把那条错误判断连同证据一起更正，
+并在 `SD-2026-10-23-07` 里写明「补这两条**不得**引入 resilience4j」。
+
+---

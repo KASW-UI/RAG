@@ -671,23 +671,67 @@ Go 侧同一命令连不上。**同时**：注释给了错误的安全感（§3.
 **Category**: Resilience / Error Identity　**Classification**: **`OBSERVABLE DIFFERENCE`**
 **Risk**: **MEDIUM-HIGH**（过载与崩溃时的可观察行为不同）
 
-| 拦截器 | Go 侧装配点（消费点） | 默认值来源 | 拒绝/异常时的可观察行为 | RAG 侧 |
+> **⚠️ 处置状态（2026-10-23 23:5x 更新）**：
+> **① recover 半边 ✅ 已修**（用户指示「做recover」）——
+> 新增 `service/common/.../observability/GoStyleRecoverInterceptor.java` +
+> `MessageRpcApplication#recoverThen` 显式串链 + `MessageRpcRecoverInterceptorWiringTest`（5 例，**真 in-process gRPC**）。
+> **② breaker / CPU shedding ⏸️ 挂起**（用户指示「breaker/shedding 先放着」）⇒ 登记为签字档
+> [`SD-2026-10-23-07`](../../Intentional_Deviations/message/rpc.md)。
+> ⇒ 本条从「三条全缺」拆成「**一条已修 + 两条已签字挂起**」，不再是 OPEN。
+
+| 拦截器 | Go 侧装配点（消费点） | 默认值来源 | 拒绝/异常时的可观察行为 | RAG 侧（2026-10-23 23:5x 后） |
 |---|---|---|---|---|
-| panic 恢复 | `zrpc/server.go:131-133` | `zrpc/internal/config.go:21` `Recover json:",default=true"` | `INTERNAL` + `"panic: %v"`（`recoverinterceptor.go:39-42`），**进程存活** | ❌ 无 |
-| 服务端熔断 | `zrpc/server.go:157-159` | `config.go:25` `Breaker json:",default=true"` | `UNAVAILABLE`（`breakerinterceptor.go:46-48`） | ❌ 无 |
-| CPU 自适应限流 | `zrpc/server.go:160-162` | `zrpc/config.go:47` `CpuThreshold json:",default=900"` | `RESOURCE_EXHAUSTED`（`sheddinginterceptor.go:30-35`） | ❌ 无 |
+| panic 恢复 | `zrpc/server.go:131-133` | `zrpc/internal/config.go:21` `Recover json:",default=true"` | `INTERNAL` + `"panic: %v"`（`recoverinterceptor.go:39-42`），**进程存活** | ✅ **已修**（`GoStyleRecoverInterceptor`；5 例真触发 + 3 轮变异验证） |
+| 服务端熔断 | `zrpc/server.go:157-159` | `config.go:25` `Breaker json:",default=true"` | `UNAVAILABLE` + `"circuit breaker is open"`（`breakerinterceptor.go:46-48`、`core/breaker/breaker.go:19`） | ⏸️ **签字挂起**（`SD-2026-10-23-07`） |
+| CPU 自适应限流 | `zrpc/server.go:160-162` | `zrpc/config.go:47` `CpuThreshold json:",default=900"` | `RESOURCE_EXHAUSTED` + `"service overloaded"`（`sheddinginterceptor.go:30-35`、`core/load/adaptiveshedder.go:34`） | ⏸️ **签字挂起**（`SD-2026-10-23-07`） |
 
 **⚠️ 特别值得记的一点**：`message.go:34` 的 `DisableNativeRpcTimeout` 只把 `Timeout` 清零，
 **`CpuThreshold` / `Middlewares.*` 全部原样保留** ⇒ 这三个拦截器在真源上是**生效**的。
 审到这里容易误以为「Go 的中间件都被关了」—— **只关了超时一个**。
 
-**Observable Impact**：同一台机器 CPU 打满时，Go 会以 `RESOURCE_EXHAUSTED` 主动拒流并保住进程；
-RAG 会继续把请求打进 DB，直到 Hikari 池耗尽 / 超时。panic 时 Go 记日志后返回 `INTERNAL`，
-RAG 的行为取决于 grpc-java 自身（**本轮未取证**，见 `UNRESOLVED-MSG-006`）。
+**Observable Impact**：
+- **panic（已对齐）**：Go 记日志后返回 `INTERNAL` + `"panic: %v"`；RAG 现在**完全一致**，
+  且 `UNRESOLVED-MSG-006`（RAG 抛 Error 时客户端看到什么）**已关闭** —— 实测也是 `INTERNAL`。
+- **过载（仍缺，已签字）**：同一台机器 CPU 打满时，Go 会以 `RESOURCE_EXHAUSTED` 主动拒流并保住进程；
+  RAG 会继续把请求打进 DB，直到 Hikari 池耗尽 / 超时。熔断侧同理：Go 开路时返回 `UNAVAILABLE`。
 
 **Evidence**: `[CODE]` go-zero v1.10.2 三个文件的具体行；`[CODE]` `message.go:34-44` 证明只清了 Timeout。
 **Counterfactual = YES**：Spring 侧开发者通常只会挂「一个观测拦截器」，
 不会想到要在纯 gRPC 服务里补 recover / 限流 / 熔断三件套。
+
+#### V-016（recover 半边）已修的落地明细（2026-10-23 23:5x）
+
+| # | 改了什么 | 文件 | 守门 |
+|---|---|---|---|
+| 1 | 新增 `GoStyleRecoverInterceptor implements ServerInterceptor`：包 `startCall` / `onMessage` / **`onHalfClose`** / `onReady`；`onComplete`/`onCancel` **刻意不兜** | `service/common/.../observability/GoStyleRecoverInterceptor.java` | `MessageRpcRecoverInterceptorWiringTest`（5 例，真 in-process gRPC） |
+| 2 | 输出 `Status.INTERNAL` + description 前缀 `"panic: "`；**复刻 Go `%v`**（有 message 用 message、无则 `toString()` ⇒ 不带 Java 类型名） | 同上 | 同上第 1/2/4 例 |
+| 3 | 装配改为 `server -> server.intercept(recoverThen(businessInterceptor))`；`recoverThen` 是**链顺序唯一定义点**（显式手工串，不依赖 `ServerBuilder#intercept` 的多次调用顺序） | `MessageRpcApplication.java` | `MessageGrpcInterceptorWiringTest`（链里真的能调到业务 interceptor）+ `MessageRpcRecoverInterceptorWiringTest#recoverWrapsTheInnerInterceptor` |
+
+**⚠️ 三个最容易踩的点（都已在测试里钉死）**：
+
+1. **不包 `onHalfClose` 等于没做**。grpc-java 的 unary handler 是在 `onHalfClose()` 里执行的
+   （`ServerCalls.java:170` `method.invoke(request, responseObserver)`），
+   不是在 `interceptCall` 里。⇒ 只包 `startCall` 的话，**用户 handler 里的 panic 一条都兜不住**，
+   而 `interceptCall` 照样被调用、Bean 照样存在 —— 正是 §3.3「断言 Bean 存在 ≠ 机制生效」的反面教材。
+   **变异验证实测**：摘掉 `onHalfClose` 兜底 ⇒ 5 例中 **2 例转红**（`expected: <INTERNAL> but was: <UNKNOWN>`）。
+2. **`onComplete`/`onCancel` 刻意不兜**：那是**清理路径**（状态已定），Go 的 `defer recover` 也管不到；
+   更重要的是此时 `ServerCall` 多半已 close，再 close 一次会抛 `IllegalStateException`。
+3. **只 close 一次**：用 `WeakHashMap<ServerCall, AtomicBoolean>` 做实例级守卫，
+   避免 listener 的多个回调先后抛出时重复 close。
+
+**⚠️ `Status.withCause(t)` 的安全性已核实**：grpc-java **1.63.0** 的
+`Status.withCause` 实现是 `new Status(this.code, this.description, cause)` ——
+**保留原 code，不从 cause 反推**（`grpc-api-1.63.0-sources.jar` `io/grpc/Status.java`）。
+⇒ panic 的 cause 即使是 `StatusException` 也**不会**把 `INTERNAL` 改掉，
+与 Go `status.Errorf(codes.Internal, "panic: %v", r)` 的「**恒定 INTERNAL**」一致。
+
+**Evidence**: `[TEST]` `MessageRpcRecoverInterceptorWiringTest` 5 例 / 0 failures / 0 errors / 0 skipped；
+`[MUTATION]` 3 轮变异全部命中（摘 `onHalfClose` → 2 红；改前缀 `panic: `→`boom: ` → 2 红；
+不复刻 Go `%v` → 1 红）；
+`[CODE]` grpc-java `ServerCalls.java:394`（`onCompleted()` 才 `call.close(Status.OK)`）；
+`[CODE]` `grpc-api-1.63.0` `Status.withCause` 保留 code。
+**Counterfactual = YES**：`recover` 挂在**内层**同样能兜住业务 handler 的 panic，
+但兜不住**业务观测拦截器自己**的 panic —— Go 侧 recover 在最外层（`zrpc/internal/server.go:58`）。
 
 ---
 
@@ -1170,10 +1214,11 @@ Flyway 本身每个迁移只跑一次，生产上不会重放。
 
 | 编号 | 状态 | 本轮核实结论 |
 |---|---|---|
-| `DRIFT-MSG-V-016`（go-zero 三个 unary 拦截器：recover / breaker / CPU shedding 全缺） | 🔴 **OPEN** | 确认仍缺。`MessageGrpcInterceptorWiringTest` 验的是 `DRIFT-MSG-003` 的**观测**拦截器（超时/trace），**不是**这三个。三者各自的 Go 出处与默认值已在台账 §7 列全（`zrpc/internal/config.go:21/25`、`zrpc/config.go:47`）。**属架构级新增（要给纯 gRPC 服务补三件套框架能力），不在本轮「对齐既有行为」的范围内**，留待下一轮单独决策 |
+| `DRIFT-MSG-V-016`（go-zero 三个 unary 拦截器：recover / breaker / CPU shedding） | 🟡 **部分已处置**（2026-10-23 23:5x） | **recover ✅ 已修**（`GoStyleRecoverInterceptor` + `recoverThen` 显式串链；5 例真 in-process gRPC + 3 轮变异验证；顺带关闭 `UNRESOLVED-MSG-006`）；**breaker / CPU shedding ⏸️ 签字挂起**（`SD-2026-10-23-07`，用户指示「breaker/shedding 先放着」）⇒ **不再是 OPEN，但也不是「三条全齐」** |
 | `DRIFT-MSG-V-017`（`isRead` 字段名） | ✅ 已修（上一轮），**本轮复核仍绿** | `MessageIsReadLambdaWiringTest` 3/3 绿、skipped=0 |
 | `DRIFT-MSG-V-018`（`ListConversations` 少一次 `count_unread` 埋点） | 🔴 **OPEN** | 确认仍缺。**副作用已加重**：本轮把时间列与会话时区都摊开（V-019/V-020）后可以确定，该路径当前**不可达**（列表已按参与者过滤，`peerOf` 不会失败），所以它今天只表现为「一条永远不会增长的指标」。修它的收益低于风险，**建议与 V-016 一起决策** |
 | `UNRESOLVED-MSG-004`（三项「起不来」缺陷无点名式防回退） | 🔴 仍成立 | 本轮新增的 `MessageGrpcReflectionExposureWiringTest` 是**配置绑定**层的点名式用例，可作为该条「点名式守门」的样板；`@MapperScan` / `NacosRegistration` Bean 名两项目前仍未点名 |
+| `UNRESOLVED-MSG-006`（「RAG 抛 Error 时客户端看到什么」未取证） | ✅ **已关闭**（2026-10-23 23:5x） | recover 落地后**顺带关掉**：实测 `throw new StackOverflowError()`（`Error` 而非 `Exception`）也被兜住 ⇒ 客户端看到 `INTERNAL` + `"panic: "` 前缀（`MessageRpcRecoverInterceptorWiringTest#nonRuntimeExceptionErrorIsAlsoRecovered`）。⚠️ 关闭口径 = **在 recover 已装配的前提下**；若哪天 recover 被摘掉，这条要重新打开 |
 
 ### 🟡 附带观察（不改，只记）
 
@@ -1186,14 +1231,27 @@ Flyway 本身每个迁移只跑一次，生产上不会重放。
 
 ### 本轮实测数据
 
+> ⚠️ **2026-10-23 23:5x 状态更正 #6**：下面这两个数字**之前是过期的**，本轮实测后已改。
+> 原记录「message-rpc：51 tests（原 49 + 新增 2）」与「DDL 对拍 V1~V4 / 23 行差异」**都停留在 V-020 那一轮之前**：
+> ① V-020 那轮实际还改了 `MessageRpcSupportTimeZoneTest`（6 → 7 例，**+1**），台账漏记 ⇒ 真实基线是 **54** 而非 51；
+> ② DDL 对拍在 `V5` 落地后**类型与可空性已 0 差异**，差异从 23 行降到 **19 行**。
+> ⇒ **教训**（与 §6.2 同源）：测试计数与对拍数字是**会随每轮改动漂移的实测量**，
+> **引用时必须带核对日期 + 当场实测**，不能沿用上一轮的数。
+
 ```
-message-rpc：51 tests（原 49 + 新增 2）/ 0 failures / 0 errors / 0 skipped   BUILD SUCCESS
+message-rpc：54 tests（V-020 轮后的真实基线，2026-10-23 23:5x 实测）
+              → 本轮 +5（recover 守门）= 59 tests / 0 failures / 0 errors / 0 skipped   BUILD SUCCESS
               ← skipped=0 是硬要求：§状态更正#5 规定「绿灯必须额外断言 skipped 数 = 0」
 message-api：84 tests / 0 failures / 0 errors / 0 skipped
 message-common：21 tests（本轮从 0 建起）/ 0 failures / 0 errors / 0 skipped
+service/common：146 tests / 0 failures / 0 errors / 0 skipped   ← 本轮新增 GoStyleRecoverInterceptor 所在模块
 semantic-probe：56 例 → 一致 54，不一致 0，已签字偏离 2                      EXIT=0
-DDL 对拍：Go AutoMigrate 55 行 vs RAG V1~V4，**归一化后剩余 23 行差异**
-          （= V-020 时间列 8 列 × 3 维 + V-021 索引名 2 + V-022 索引列 1 + 表头/格式噪声）
+DDL 对拍：Go AutoMigrate 55 行 vs RAG **V1~V5**，**归一化后剩余 19 行差异**
+          = 6 列 DEFAULT（RAG 有 / Go 无，各占 6 行）12
+          + V-021 索引名 2 处（Go 带 message_ 前缀）4
+          + V-022 索引列数（已签字）2
+          + 表头噪声（### COLUMNS）1
+          ⇒ **类型与可空性 0 差异**（V-020 的目标已达成）
 ```
 
 ---
@@ -1274,10 +1332,16 @@ epoch 必须完全相同**，并附一条反事实用例证明「把墙钟当 UT
 message-rpc：54 tests（原 52 + 新增 2 条真 PG 列级守门）/ 0 failures / 0 errors / 0 skipped
 ```
 
-### 按用户指示推迟：`DRIFT-MSG-V-016`
+### 按用户指示推迟：`DRIFT-MSG-V-016`（**已于下一轮部分落地**）
 
-「先把 v020 解决再来探讨 v016」⇒ 本轮**未动** V-016（三个 go-zero 框架拦截器）。
-其分析、Go 出处与三条拆解建议已备好，等下一轮单独决策。
+> **V-020 那轮**：「先把 v020 解决再来探讨 v016」⇒ 该轮**未动** V-016（三个 go-zero 框架拦截器），
+> 只把分析、Go 出处与三条拆解建议备好，等下一轮单独决策。
+>
+> **2026-10-23 23:4x**：方案成形（本文件「`DRIFT-MSG-V-016` 处置方案」一节）。
+> **2026-10-23 23:5x**：用户拍板「做recover，breaker/shedding先放着」⇒
+> **recover 半边已实施**（见上文「V-016（recover 半边）已修的落地明细」），
+> **breaker / shedding 转为签字挂起**（`SD-2026-10-23-07`）。
+> ⇒ 本小节保留为历史脉络，**当前状态看上面 V-016 主节**。
 
 ---
 
@@ -1336,34 +1400,131 @@ minK    = 1.1
 
 ⇒ 它实际上是「由失败历史驱动的**自适应概率限流**」，而非常见的「错误率 > 50% ⇒ 开路 N 秒」。
 
-- Java 侧要复刻只能引 `resilience4j`（**本仓当前零熔断依赖**，已 grep 全仓确认），
-  而 resilience4j 是**固定阈值 + 固定开路时长** ⇒ **算法不同、参数不可能逐字对齐**；
-- 可观察契约其实只有一条：**开路时返回 `UNAVAILABLE`**（`breakerinterceptor.go:47`），
-  且 `serverSideAcceptable`（`:53-58`）把 `DeadlineExceeded` 与 `ErrServiceUnavailable` 判为「不可接受」、
-  其余交给 `codes.Acceptable(err)`（只有 5xx 类才算失败）；
-- ⚠️ **连锁风险**：`DRIFT-MSGAPI-004` 刚给 api 侧加了客户端熔断。
-  服务端一旦开始吐 `UNAVAILABLE`，api 侧客户端熔断可能被打开 ⇒ **两条必须一起设计**，
-  单独补服务端会引入一条没人设计过的新失效模式。
+> #### 🔴🔴 状态更正 #7（2026-10-23 23:5x）：**本节上一版的核心判断是错的，已被推翻**
+>
+> 上一版写的是：
+> > 「Java 侧要复刻**只能引 `resilience4j`**（**本仓当前零熔断依赖**，已 grep 全仓确认），
+> >  而 resilience4j 是**固定阈值 + 固定开路时长** ⇒ **算法不同、参数不可能逐字对齐**」
+>
+> **这句话两处都错**，且是**事实性错误**（不是措辞问题）：
+>
+> | 上一版的说法 | 实测事实 | 证据 |
+> |---|---|---|
+> | 「本仓零熔断依赖 ⇒ 没有等价实现，只能引 resilience4j」 | **仓里已有一份 go-zero `googlebreaker.go` 的逐行 Java 复刻**，且**带 8 例测试** | `service/common/.../protection/GoStyleBreaker.java`（278 行）+ `GoStyleBreakerTest`（8 例，**实测绿**）。类注释逐字列了 `window=10s / buckets=40 / k=1.5 / minK=1.1 / protection=5 / forcePassDuration=1s`（`googlebreaker.go:12-21`）与 `accept()` 的**同构运算顺序**，还专门标出「**最容易被顺手改好的三处语义**」（概率性拒绝 / force-pass 保底 / 只算已完成桶）全部保持 Go 原样 |
+> | 「算法不同、参数不可能逐字对齐」 | **算法就是同一套**（自适应概率丢弃），参数也逐个照抄 | 同上；`GoStyleAdaptiveShedder.java`（373 行）同理复刻了 `core/load/adaptiveshedder.go` 的**判据部分**（`shouldDrop()` 的三条件、flying β=0.9、cool-off 1s、cpuMax 1000 等），并带 10 例测试 |
+>
+> ⇒ **真实成本不是「引新依赖 + 算法不等价」，而是「各包一层 `ServerInterceptor` 薄壳」**。
+> ⚠️ **教训**（值得单独立一条 Pitfall）：**grep 依赖清单 ≠ grep 实现**。
+> 上一版只查了 `pom.xml` 里有没有 resilience4j，就断言「无等价物」——
+> **而本仓的策略恰恰是「不引依赖、自己逐行复刻」**（`service/common/protection` 整个包都是这么来的）。
+> ⇒ **判「有没有等价物」必须 grep 实现，不是 grep 依赖。**
+
+**那么补 zrpc 侧还差什么（已核到消费点）**：
+
+| 项 | Go 侧事实 | 仓里现成的部分 | 还差什么 |
+|---|---|---|---|
+| **隔离单位** | `breakerinterceptor.go:34` `breakerName := info.FullMethod` ⇒ **按 gRPC 全方法名** | `GoStyleBreaker(String name)` 本身与 key 无关；`GoStyleBreakerFilter`（REST 侧）用 `METHOD://path`（`rest/handler/breakerhandler.go:21`） | 薄壳要自己维护 `Map<String, GoStyleBreaker>`，key 换成 `call.getMethodDescriptor().getFullMethodName()` |
+| **失败判据** | `breakerinterceptor.go:53-58` `serverSideAcceptable`：`DeadlineExceeded` 与 `ErrServiceUnavailable` ⇒ **不算失败**；其余交给 `codes.Acceptable(err)`（只有 5xx 才算） | `GoStyleBreaker` 只提供 `accept()`/`markSuccess()`/`markFailure()`，**判据在调用方** | 薄壳要实现 `serverSideAcceptable` |
+| **拒绝时的 wire 契约** | `breakerinterceptor.go:45-48` + `core/breaker/breaker.go:19` ⇒ `UNAVAILABLE` + description **`"circuit breaker is open"`** | — | 薄壳要映射 |
+| **类可见性** | — | `GoStyleBreaker` 是 **`final class`（包私有）** | 薄壳**必须放在 `com.rag.common.protection` 包内**，否则要改可见性（改可见性 = 动共享模块的公共面，风险更高） |
+| **⚠️ 连锁风险（仍然成立，且比上一版说得更具体）** | — | `DRIFT-MSGAPI-004` 已给 api 侧加了**客户端**熔断（`GoStyleGrpcClientBreakerInterceptor`） | 服务端一旦开始吐 `UNAVAILABLE`，api 侧客户端熔断可能被打开 ⇒ **两条必须一起设计**；单独补服务端会引入一条**没人设计过的新失效模式**（客户端刚因熔断拒流、服务端也拒流 ⇒ 双侧重试放大） |
+
+⇒ **修正后的成本判断**：breaker 侧 ≈ 1 个 ~100 行的 `ServerInterceptor` 薄壳（无新依赖、算法已对齐），
+**但仍不建议本轮做** —— 理由**不是**成本高，而是上面最后那条**连锁风险**：
+客户端熔断已在 api 侧就位，服务端熔断必须与之一起设计，否则会造出一条新的失效模式。
+⇒ 这属于**跨组件不变量**（§3.5），单组件内闭环不了。
 
 ### 拆解三：CPU shedding —— **建议签字挂起**
 
 | 项 | 内容 |
 |---|---|
-| **Go 行为** | `load.AdaptiveShedder`（CPU 采样 + BBR 式判定），阈值 `CpuThreshold default=900`（千分比，`range=[0:1000)`）⇒ 拒绝时 `sheddinginterceptor.go:33` 返回 `RESOURCE_EXHAUSTED` |
-| **为什么难** | grpc-java **没有** CPU 自适应限流；resilience4j 的 Bulkhead 是**并发数**限流，语义完全不同（它不看 CPU） |
+| **Go 行为** | `load.AdaptiveShedder`（CPU 采样 + BBR 式判定），阈值 `CpuThreshold default=900`（千分比，`range=[0:1000)`）⇒ 拒绝时 `sheddinginterceptor.go:33` 返回 `RESOURCE_EXHAUSTED` + description **`"service overloaded"`**（`core/load/adaptiveshedder.go:34`） |
+| **⚠️ 上一版说「grpc-java 没有 CPU 自适应限流 ⇒ 难」—— 也要更正一半** | **仓里已复刻了判据**：`GoStyleAdaptiveShedder`（373 行，`allow()`/`pass(rtMs)`/`fail()`），且**刻意保留**了 Go 的三条件语义（`systemOverloaded() \|\| stillHot()` **且** `highThru()`）—— 单看 CPU 的简化移植会在「CPU 高但在途很少」时误丢请求 |
+| **仍然难在哪** | **不是算法**，而是**装配语义**：① zrpc 侧是**每 server 一个全局 shedder**（`zrpc/server.go:161` `load.NewAdaptiveShedder(...)`），与 REST 侧一致；② 但 **zrpc 侧 `promise.Fail()` 的判据是 `context.DeadlineExceeded`**（`sheddinginterceptor.go:38-42`），而 **REST 侧是「响应码 == 503」**（`rest/handler/sheddinghandler.go:45`）—— **两者刻意不同**，不能照抄 Filter 的判据 |
 | **风险** | 阈值配错会**主动丢真实流量**，而且这类误判在生产上极难归因 |
 | **判断** | 这属于**运维策略**（要多严的降载），不该由「对齐 Go」顺手带进来 ⇒ 若要补，单独一轮 + 阈值由用户定 |
 
 ### 无论做不做都该做（便宜，本轮就该做）
 
 1. **把方案写进本节**（已完成）—— 否则「为什么没补」只活在对话里，后人会当成漏做；
-2. **登记签字偏离**（若 breaker/shedding 决定不补）：写明「真源过载/批量失败时会 `UNAVAILABLE` 主动拒流并保住进程，
+2. **登记签字偏离**（若 breaker/shedding 决定不补）：写明「真源过载/批量失败时会 `UNAVAILABLE` / `RESOURCE_EXHAUSTED` 主动拒流并保住进程，
    RAG 会继续把请求打进 PG 直到池耗尽」—— 这样后人不会把它当新 bug 去「顺手修」
    （这正是 `SD-01/02/03` 与 `SD-06` 的做法）。
 
-### 待用户拍板的三个问题
+### 拍板结果（2026-10-23 23:5x，用户指示）
 
-1. **recover 现在做吗？**（建议：是，成本低、无歧义、顺带关掉 `UNRESOLVED-MSG-006`）
-2. **breaker / shedding：签字挂起？**（建议：是。若不签，将来必然有人「顺手补上」并踩 §6.7 记过的坑）
-3. 若决定补 breaker —— 用 resilience4j（引入新依赖、算法不等价）还是自己实现一个贴近 go-zero 的
-   自适应概率丢弃（无新依赖，但要自己维护，且要与 api 侧客户端熔断一起设计）？
+> **用户原话**：「做recover，breaker/shedding先放着」
+
+| 问题 | 上一版的建议 | 用户拍板 | 落地 |
+|---|---|---|---|
+| 1. recover 现在做吗？ | 是（成本低、无歧义、顺带关掉 `UNRESOLVED-MSG-006`） | ✅ **做** | 已实施：见本文件「V-016（recover 半边）已修的落地明细」 |
+| 2. breaker / shedding 签字挂起？ | 是（若不签，将来必然有人「顺手补上」） | ⏸️ **「先放着」** —— 按**签字挂起**处理 | 登记为 [`SD-2026-10-23-07`](../../Intentional_Deviations/message/rpc.md)（含「重新评估的前置条件」） |
+| 3. 若补 breaker 用什么？ | resilience4j vs 自己实现 | ⏸️ **本轮不决定** | 已被状态更正 #7 改变：**不需要 resilience4j**，用仓里已有的 `GoStyleBreaker` 复刻版 + 薄壳即可 |
+
+**⚠️ 关于问题 2 的解读边界（请用户确认）**：用户说的是「**先放着**」，
+本轮**按「挂起 = 签字」处理**（理由：签字档的作用正是「阻止后人顺手修」，
+而这两条最容易被顺手补 —— breaker 看上去只差一个类）。
+若用户本意是「只搁置、不算签字」，把 `SD-2026-10-23-07` 降回 `DRIFT OPEN` 即可，
+**代码与测试都不受影响**（本轮对 breaker/shedding 一行代码没动）。
+
+---
+
+<!-- @fix 2026-10-23 23:5x 第六轮 · V-016 recover 半边已修 · breaker/shedding 转签字挂起 -->
+
+## 2026-10-23 第六轮：`DRIFT-MSG-V-016` recover 半边已修（breaker/shedding 签字挂起）
+
+> **用户指示**：「做recover，breaker/shedding先放着」
+> ⇒ 本轮**只做 recover**，breaker / shedding **一行代码没动**，转签字档 `SD-2026-10-23-07`。
+
+### 改了什么（3 处，同提交）
+
+| # | 改了什么 | 文件 | 守门 |
+|---|---|---|---|
+| 1 | 新增 `GoStyleRecoverInterceptor implements ServerInterceptor` | `service/common/src/main/java/com/rag/common/observability/GoStyleRecoverInterceptor.java`（**新增 233 行**） | `MessageRpcRecoverInterceptorWiringTest`（5 例） |
+| 2 | 装配改为 `server -> server.intercept(recoverThen(businessInterceptor))`；`recoverThen` 为 **public static** 的**链顺序唯一定义点** | `MessageRpcApplication.java`（改） | `MessageGrpcInterceptorWiringTest`（链里真能调到业务 interceptor）+ `…#recoverWrapsTheInnerInterceptor`（顺序） |
+| 3 | 老断言从「交给 builder 的就是那一个 Bean」升级为「**链里真的会被调用**」 | `MessageGrpcInterceptorWiringTest.java`（改） | 见上 |
+
+### 语义对齐的三处硬点（全部有断言）
+
+1. **`INTERNAL` + `"panic: "` 前缀**（Go `recoverinterceptor.go:39` `status.Errorf(codes.Internal, "panic: %v", r)`）—— **wire 可见**。
+   `message-api` 的 `bizCodeFromError` 会把 `INTERNAL` 映射成 5001，与 Go 一致。
+2. **复刻 Go `%v` 的取值语义**：Go 的 `panic("boom")` 打印 `boom`（**不带类型名**），
+   Java 直接 `toString()` 会变成 `java.lang.IllegalStateException: boom` ⇒ **wire 可见差异**，已钉死。
+3. **必须包 `onHalfClose`**：grpc-java 的 unary handler 是在 `onHalfClose()` 里跑的
+   （`ServerCalls.java:170` `method.invoke(request, responseObserver)`），不是在 `interceptCall` 里。
+
+### 变异验证（3 轮，全部命中 ⇒ 不是假绿）
+
+| 变异 | 改了什么 | 结果 |
+|---|---|---|
+| MUTATION-1 | 摘掉 `onHalfClose` 的兜底（模拟「只包 startCall」的经典错法） | **2/5 转红**：`expected: <INTERNAL> but was: <UNKNOWN>` |
+| MUTATION-2 | description 前缀 `"panic: "` → `"boom: "` | **2/5 转红**：`description 必须以 "panic: " 开头，实际=boom: 测试用 panic` |
+| MUTATION-3 | 不复刻 Go `%v`（直接 `t.toString()`） | **1/5 转红**：`Go 的 panic 值不带类型名；RAG 直接 toString() 会多出类型名` |
+
+### ⚠️ 本轮踩的坑（已记入 `docs/Pitfalls/message/rpc.md`）
+
+**grpc-java 的 unary 响应必须显式 `observer.onCompleted()`** —— `ServerCalls.java:394`
+`onCompleted()` 才 `call.close(Status.OK)`，只 `onNext` 的话 call 永不关闭 ⇒
+**客户端 blocking stub 永久挂起**。
+本类第一版就漏了这一句 ⇒ 整轮 surefire **挂死 4 分钟**（不是失败，是挂住）。
+⇒ 已在测试里加两道护栏：① stub 上 10s deadline（会抛 `DEADLINE_EXCEEDED`，失败而非挂死）；
+② 类级 `@Timeout(60s)`。
+**教训**：**写 in-process gRPC 测试时，service impl 必须 `onNext` + `onCompleted` 成对出现** ——
+生成的 stub 只保证「方法体」不保证「响应完成」。
+
+### 本轮连带的状态变更
+
+| 条目 | 变更 |
+|---|---|
+| `DRIFT-MSG-V-016` | 🟡 OPEN → **部分已处置**（recover ✅ / breaker+shedding ⏸️ 签字挂起） |
+| `UNRESOLVED-MSG-006` | 🔴 未取证 → ✅ **已关闭**（`Error` 也被兜住 ⇒ `INTERNAL` + `"panic: "` 前缀） |
+| `SD-2026-10-23-07` | 🆕 新增（breaker / CPU shedding 挂起） |
+| 台账实测数字 | 🔴 **两处过期值已更正**（message-rpc 51 → 54；DDL 差异 23 行 → 19 行），详见上文「状态更正 #6」 |
+
+### ⚠️ 跨域风险提示（本轮新增共享模块代码）
+
+`GoStyleRecoverInterceptor` 落在 **`service/common`** —— 该模块被 **16 个 rpc 组件**依赖，
+按 `docs/Worktree.md` §三 它属于**共享面**。其它域的并发会话也可能同时改 `service/common`
+⇒ **合并时需人工确认无冲突**。本轮对 `service/common` 的改动**只有「新增一个类」**，
+未改动任何既有文件 ⇒ 冲突面仅限新增文件名。
+
