@@ -21,6 +21,8 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.nio.charset.StandardCharsets;
+
 /**
  * 全局异常处理器 —— @RestControllerAdvice + @ExceptionHandler。
  *
@@ -210,10 +212,28 @@ public class GlobalExceptionHandler {
      * 两者来自不同框架，强行凑字面只会制造一处假的「1:1」。
      *
      * <p>配套改动见 {@code GlobalResponseAdvice#beforeBodyWrite}：非 JSON 响应不再被包 envelope。
+     *
+     * <p>🔴 <b>2026-10-23 修正（DRIFT-USERAPI-006）</b>：上面第 ① 条
+     * 「{@code Content-Type: text/plain; charset=utf-8}」<b>此前只是注释里的一句话，
+     * 代码写的是 {@code MediaType.TEXT_PLAIN}—— 它的字面量就是 {@code "text/plain"}，
+     * <b>没有 charset</b>。即：<b>注释声称做的事，代码一件都没做</b>（§3.2 无出处 idiomatization）。
+     *
+     * <p>连带第二处：{@code ResponseEntity<String>} 的 body 由 {@code StringHttpMessageConverter}
+     * 写出，它在没有 charset 时回落到 {@code DEFAULT_CHARSET = ISO_8859_1}
+     * （spring-web 7.0.9 字节码核实）⇒ <b>body 按 ISO-8859-1 编码</b>，
+     * 而 Go 的 {@code fmt.Fprintln} 写的是 UTF-8 字节。
+     * 当前文案恰好全是 ASCII 所以看不出来，但 {@code handleUnreadableBody}
+     * 会把 {@code HttpMessageNotReadableException.getMessage()}（含畸形 JSON 原文，
+     * 可能带中文）直接写进 body ⇒ 那种输入下 RAG 输出乱码、Go 不乱码。
+     *
+     * <p><b>修法</b>：给 Content-Type 显式钉上 charset。
+     * {@code StringHttpMessageConverter} 见到 {@code text/plain;charset=UTF-8}
+     * 就按 UTF-8 写 body，①②同时解决。
      */
     private static ResponseEntity<String> goStylePlainTextBadRequest(String message) {
         HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.TEXT_PLAIN);
+        // 显式带 charset：既对齐 Go 的 header 字面量，也让 StringHttpMessageConverter 改用 UTF-8
+        headers.setContentType(new MediaType(MediaType.TEXT_PLAIN, StandardCharsets.UTF_8));
         headers.set("X-Content-Type-Options", "nosniff");
         String body = (message == null || message.isEmpty() ? "bad request" : message) + "\n";
         return new ResponseEntity<>(body, headers, HttpStatus.BAD_REQUEST);

@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -20,7 +21,12 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -163,8 +169,7 @@ class UserApiGoStyleBodyContentTypeTest {
                         + "说明响应被共享转换器按 JSON 字符串写出（2026-10-22 的 canWrite 回归）。\n"
                         + "     那种回归的状态码与 Content-Type 都对，只看响应头会以为没问题。");
 
-        assertEquals("text/plain", asPlainText.getResponse().getContentType(),
-                "Go 的 http.Error 写的是 Content-Type: text/plain; charset=utf-8");
+        assertGoPlainTextUtf8(asPlainText.getResponse());
         assertEquals("nosniff", asPlainText.getResponse().getHeader("X-Content-Type-Options"),
                 "Go 的 http.Error 同时写 X-Content-Type-Options: nosniff");
 
@@ -250,7 +255,7 @@ class UserApiGoStyleBodyContentTypeTest {
 
         assertEquals(400, r.getResponse().getStatus());
         assertEquals(USERNAME_MISSING, r.getResponse().getContentAsString());
-        assertEquals("text/plain", r.getResponse().getContentType());
+        assertGoPlainTextUtf8(r.getResponse());
         assertEquals("nosniff", r.getResponse().getHeader("X-Content-Type-Options"));
 
         verify(stub, never()).login(any());
@@ -295,5 +300,83 @@ class UserApiGoStyleBodyContentTypeTest {
                 .andExpect(status().isUnauthorized());
 
         verify(stub, never()).getUser(any());
+    }
+
+    /**
+     * 🔴 <b>守 Go {@code http.Error} 的第 ① 与 ④ 件事（DRIFT-USERAPI-006）</b>。
+     *
+     * <p><b>为什么断言「语义」而不是字节相等</b>：
+     * Go 写的是 {@code text/plain; charset=utf-8}（分号后有空格、charset 小写）；
+     * Spring 的 {@code MediaType.toString()} 输出 {@code text/plain;charset=UTF-8}
+     * （无空格、大写）。二者<b>逐字不同</b>，但按 RFC 9110：
+     * 参数分隔符后的 OWS 不显著、charset 取值<b>大小写不敏感</b>
+     * ⇒ **同一个媒体类型、同一个字符集**，属「表述差异」而非语义漂移。
+     * 强行把 Spring 拼成带空格的小写字面量，只能靠绕过 {@code MediaType} 直接塞裸 header，
+     * 换来的是「字节相同」而丢掉类型安全 —— 不划算，故登记不修。
+     *
+     * <p><b>真正要守的是 charset 必须存在</b>：它<b>不是</b>表述问题。
+     * 没有它，{@code StringHttpMessageConverter} 会回落到 {@code DEFAULT_CHARSET = ISO_8859_1}，
+     * body 按 ISO-8859-1 写出 ⇒ 畸形 JSON 里带中文时客户端收到乱码，Go 不会。
+     * ⚠️ 本类其余用例的文案恰好全是 ASCII，<b>看不出这个差别</b> ——
+     * 所以「charset 在不在」必须单独断言，不能靠别的用例顺带覆盖。
+     */
+    private static void assertGoPlainTextUtf8(MockHttpServletResponse result) {
+        String raw = result.getContentType();
+        MediaType ct = MediaType.parseMediaType(raw);
+        assertEquals("text/plain", ct.getType() + "/" + ct.getSubtype(),
+                "Go 的 http.Error 写的是 Content-Type: text/plain; charset=utf-8。实际 = " + raw);
+        assertEquals(StandardCharsets.UTF_8, ct.getCharset(),
+                "⚠️ charset 必须显式存在：缺了它 StringHttpMessageConverter 会按 ISO-8859-1 "
+                        + "写 body，畸形 JSON 带中文时输出乱码而 Go 不乱。实际 = " + raw);
+        assertEquals("nosniff", result.getHeader("X-Content-Type-Options"),
+                "Go 的 http.Error 同时写 X-Content-Type-Options: nosniff");
+    }
+
+    /**
+     * 🔴 <b>守 DRIFT-USERAPI-006 ②「body 字节编码」那条差异的<b>前提</b></b>。
+     *
+     * <p><b>本轮实测推翻了旧台账的一条断言</b>：旧台账写
+     * 「{@code HttpMessageNotReadableException.getMessage()} <b>可能包含非 ASCII</b>
+     * （例如畸形 JSON 里带中文）⇒ 那种输入下 RAG 会输出乱码而 Go 不会」。
+     * <b>实测不成立</b>：Jackson 2.21 的 {@code StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION}
+     * <b>默认关闭</b>，异常文案里原始输入被替换成 {@code Source: REDACTED}
+     * ⇒ <b>非 ASCII 进不了 body</b>。
+     *
+     * <p>⇒ 于是「ISO-8859-1 vs UTF-8」这条 body 编码差异<b>当前【不可观察】</b>：
+     * body 全是 ASCII，两种编码逐字节相同。
+     * <b>可观察的只有 header</b> —— 这正是本类另一条 {@code assertGoPlainTextUtf8} 守的东西。
+     *
+     * <p><b>本用例的作用是钉住这个前提</b>：哪天有人显式打开
+     * {@code INCLUDE_SOURCE_IN_LOCATION}（或换成 Jackson 3 的相关开关），
+     * 本用例会红 ⇒ 届时 body 编码差异<b>从潜伏变成可观察</b>，
+     * 必须回头核对 charset 是否仍然钉着 UTF-8。
+     *
+     * <p>⚠️ 断言直接比<b>原始字节</b>而不是 {@code getContentAsString()} ——
+     * 后者会用响应自报的 charset 解码，<b>把编码错配自己吞掉</b>。
+     */
+    @Test
+    @DisplayName("DRIFT-006：畸形 body 的错误文案不含原始 JSON ⇒ 非 ASCII 路径当前不可达（前提守门）")
+    void unreadableBodyMessageDoesNotLeakRawSource() throws Exception {
+        String malformed = "{\"username\":\"中文密码\"";
+        byte[] content = malformed.getBytes(StandardCharsets.UTF_8);
+
+        byte[] raw = mockMvc.perform(post(LOGIN_PATH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(content))
+                .andExpect(status().isBadRequest())
+                .andReturn()
+                .getResponse()
+                .getContentAsByteArray();
+
+        String decodedAsUtf8 = new String(raw, StandardCharsets.UTF_8);
+        assertFalse(decodedAsUtf8.contains("中文"),
+                "⚠️ 前提变了：原始 JSON 进了错误文案 ⇒ body 里出现非 ASCII ⇒ "
+                        + "「body 编码差异不可观察」不再成立，body 编码差异变成【可观察】，"
+                        + "必须重新核对 charset 是否仍钉着 UTF-8。实际 body = " + decodedAsUtf8);
+        assertFalse(decodedAsUtf8.contains("�"),
+                "body 里出现替换字符：声明了 charset 却用别的编码写。实际 bytes = " + Arrays.toString(raw));
+        // 顺带把「ASCII 下两种编码等价」这件事写实：body 全 ASCII ⇒ UTF-8 解码必须无损
+        assertTrue(decodedAsUtf8.contains("JSON parse error"),
+                "body 应当是 Spring 的解析错误文案。实际 body = " + decodedAsUtf8);
     }
 }
