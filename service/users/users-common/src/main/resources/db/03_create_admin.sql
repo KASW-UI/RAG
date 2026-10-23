@@ -7,11 +7,15 @@
 --   UpdateUser 业务），所以它与 user-rpc **必须连同一个库**；
 --   而 flyway_schema_history 挂在 schema 上、一个 schema 只能有一本账。
 --   两个模块各维护一套 classpath:db/migration 时 V1/V2 **版本号相同、内容不同**，
---   共用库必然出���（实测见 AGENTS.md §6.2.5 DRIFT-NEW-015）。
+--   共用库必然出现（实测见 AGENTS.md §6.2.5 DRIFT-NEW-015）。
 --   ⇒ 单一账本 + 单一脚本集，谁先启动都正确。
 --
---   Go 出处：admin 表对应 Go service/user/admin/rpc/internal/model/admin.go 的
---   Admin struct（GORM 默认表名 admin_admin）。
+--   Go 出处：admin 表对应 Go service/user/admin/rpc/internal/model/data_model.go 的
+--   Admin struct。⚠️ **表名两侧不同（不是笔误）**：Go 的 TableName() 返回 **admins**
+--   （data_model.go:16-18），本脚本建的是 **admin_admin** ⇒ users 域统一的
+--   「表名加前缀」约定（同族的还有 users → users_user、admin_invites → admin_invite）。
+--   ⚠️ 原注释写「GORM 默认表名 admin_admin」是**错的**：GORM 默认名是 admins，
+--   admin_admin 是 RAG 侧按域约定起的名。两侧**物理上不共用 schema**。
 --
 -- 全局编号（**不要在没有同步改全部脚本的情况下插号**，改版本号等于改 checksum）：
 --   V1  create_user                  users_user                    （原 user-rpc 的 V1）
@@ -26,8 +30,8 @@
 -- ============================================================
 -- V1__create_admin.sql
 --
--- 对应 Go 端 internal/model/admin.go 的 Admin struct（GORM 默认表名 admin_admin）。
--- admin-rpc admin 表的 DDL：admin_admin
+-- 对应 Go 端 internal/model/data_model.go 的 Admin struct（Go 的 TableName() 返回 admins）。
+-- admin-rpc admin 表的 DDL：admin_admin（⚠️ 两侧表名不同，见文件头说明）
 --
 -- 列结构：
 --   id          BIGSERIAL PRIMARY KEY (Go 端用 Snowflake 生成的 uid，但这里保留 id 自增；

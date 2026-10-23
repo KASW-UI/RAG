@@ -14,8 +14,15 @@ import java.util.Map;
 /**
  * user user 表的 MyBatis-Plus 实体（admin-rpc 端独立持有）。
  *
- * <p>对应 Go 端 internal/model/admin.go 的 User struct（GORM 默认表名 user_user，
- * HUMAN_ONLY.MD 2026-10-22 改名为 users_user）。
+ * <p>对应 Go 端 {@code internal/model/data_model.go:48-50} 的 {@code User} struct。
+ *
+ * <p><b>⚠️ 表名两侧不同（不是笔误）</b>：Go 的 {@code User.TableName()} 返回
+ * <b>{@code users}</b>，本实体映射的是 <b>{@code users_user}</b>
+ * （{@code users-common/.../01_create_user.sql:33}；HUMAN_ONLY.MD 2026-10-22 改名）。
+ * ⇒ 这是 users 域统一的表名加前缀约定（同族的还有 {@code admins → admin_admin}、
+ * {@code admin_invites → admin_invite}），**两侧物理上不共用 schema**，
+ * 比对 DDL 时必须按「列对列」而非「表名对表名」。
+ * ⇒ ⚠️ 原注释写「GORM 默认表名 user_user」是<b>错的</b>：GORM 默认名是 {@code users}。
  *
  * <p>admin-rpc 持 User 表虽然语义上奇怪（用户表通常归 user-rpc 管），但 Go 端 admin-rpc
  * 通过 internal/model/admin.go 同时持有 User struct，本质是把 admin-rpc 当作

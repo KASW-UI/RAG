@@ -706,6 +706,37 @@ Required Confirm: 与 user-rpc 台账合并；并跑一次「两个 rpc 同时�
                 （AGENTS.md §6.2.5 记的 exp-go-concurrent-automigrate.sh 是 Go 侧版本）。
 ```
 
+> ✅ **2026-10-23 验证轮 §1 已关闭**（本条是「单侧验不完」的跨组件条目，现两侧都跑过了）。
+>
+> **关闭依据（两侧各自的实测，不是推断）**：
+> 1. **RAG 侧**：`rag-admin-rpc` / `rag-user-rpc` **两个进程真并发**启动
+>    （`schema init starting` 分别是 `16.292` / `16.632`，PID 91018 / 91017），
+>    但 advisory lock `8675309` **严格串行**：admin `17.610` 拿到锁 → `19.825` 释放，
+>    user `19.825` 才拿到（`19.825` 与 admin 的 `19.825` 首尾相接）⇒ **不会撞**。
+> 2. **Go 侧**：`exp-go-concurrent-automigrate.sh` 真并发起两个 rpc
+>    （**共跑 4 轮**：`23:57:27.886`/`28.001`、`00:00:51.769`/`51.886`、
+>    `00:01:07.845`/`07.976`、`00:01:23.698`/`23.801` —— 每轮两进程相差约 100ms，
+>    确实是并发而非串行），**4 轮全部：两边都未报建表失败、4 张表
+>    （`admin_invites,admins,user_avatar_history,users`）全建出、无撞**。
+>
+> **⚠️ 效力边界（关闭 ≠ 两侧性质相同，这条必须一起记）**：
+> - **RAG 侧是「机制性保证」** —— advisory lock 让并发建表**在结构上**不可能撞；
+> - **Go 侧是「本次没撞」** —— GORM AutoMigrate 的
+>   `if !HasTable(value) { createTable(value) }` 是 **check-then-act**，
+>   且 `createTable` 发的是**不带 `IF NOT EXISTS`** 的 `CREATE TABLE`
+>   ⇒ **机制上仍有竞态窗口**，本次未撞只是时序没对上，**不构成保证**。
+>
+> ⇒ **结论只能写成「两侧在本次实测中都没有撞；RAG 侧有机制性保证，Go 侧没有」**，
+> **不得**写成「两侧等价安全」。这条差异若将来 Go 侧真撞上，根因就在这里。
+>
+> **⚠️ 原脚本的一个坑（本轮修掉，否则会得出假结论）**：
+> `exp-go-concurrent-automigrate.sh` 原来等库用 `pg_isready -U admin`（**不带库名**），
+> 而 `pg_isready` 在 PG 的**初始化临时服务**阶段就返回 OK ⇒ 脚本会在数据库系统
+> 还没起来时就把两个 rpc 放出去，实测报 `57P03 the database system is starting up`，
+> **两边都连库失败、一张表都没建出来** ⇒ 判定列全是「?」，
+> 也就是**实验根本没发生**（不是「Go 没问题」）。修法：带 `-d "$PG_DB"` 再等一轮 + 沉降 2s。
+> —— 这是 AGENTS.md §3.3「跑绿/跑通 ≠ 结论对」的又一个形态：**实验失败时它看起来像结论**。
+
 ---
 
 ## 10. 最终判定（spec §39 · 18 项 checklist）
@@ -1206,16 +1237,16 @@ Username="zzz_null_status_go"
 
 | # | 项 | 状态 | 原因 / 下一步 |
 |---|---|---|---|
-| 1 | `admin_admin` / `admin_invite` 的**时间列** `timestamp` → `timestamptz`（DRIFT-ARPC-004 里的 6 处） | 🔴 未修 | DDL 在 `users-common`（`03_create_admin.sql:55-56`、`04_create_admin_invite.sql:37-41`）。⚠️ **不能照抄 `users_user` 那轮的改法**：`users_user` 的时间值**不进入任何 proto/DTO**（`_shared.md` 已核），而 **`admin_invite.expires_at` 是 wire 可见的**（`CreateInviteCodeResp.expires_at` = Unix 秒 ⇒ 两侧算法一致、**当前 wire 不可见差异**），但 `expires_at` 的**比较**（10 分钟有效期）在跨时区多实例下会偏一个时区差 ⇒ 每张表的敏感点不同，必须逐表评估 |
-| 2 | `admin_admin.extra_info` jsonb → text | 🔴 未修（见 §4） | DDL 归属 `users-common` |
+| 1 | `admin_admin` / `admin_invite` 的**时间列** `timestamp` → `timestamptz`（DRIFT-ARPC-004 里的 6 处） | ~~🔴 未修~~ **✅ 修复轮 §1.2 已修** | | DDL 在 `users-common`（`03_create_admin.sql:55-56`、`04_create_admin_invite.sql:37-41`）。⚠️ **不能照抄 `users_user` 那轮的改法**：`users_user` 的时间值**不进入任何 proto/DTO**（`_shared.md` 已核），而 **`admin_invite.expires_at` 是 wire 可见的**（`CreateInviteCodeResp.expires_at` = Unix 秒 ⇒ 两侧算法一致、**当前 wire 不可见差异**），但 `expires_at` 的**比较**（10 分钟有效期）在跨时区多实例下会偏一个时区差 ⇒ 每张表的敏感点不同，必须逐表评估 |
+| 2 | `admin_admin.extra_info` jsonb → text | ~~🔴 未修~~ **✅ 修复轮 §1.1 已修** | | DDL 归属 `users-common` |
 | 3 | `admin_admin` / `admin_invite` 的**表名**两侧不同（Go `admins`/`admin_invites` vs RAG `admin_admin`/`admin_invite`） | ⚠️ 已确认为**族内约定**（同 `users`→`users_user`），非缺陷；`check-ddl-static.py` 有映射表 | 已在本组件的实体 javadoc 里改正（原先写「GORM 默认表名 admin_admin / admin_invite」是**错的**：Go 的 `TableName()` 返回 `admins` / `admin_invites`，见 `data_model.go:16-18` / `:31-33`） |
 | 4 | `DRIFT-ARPC-002`（`UpdateUserResp.success`：Go=false / RAG=true） | 🟡 **待用户裁决**（未签字） | 本轮补了**双侧活体对拍证据** + **决策 tripwire** 测试；HTTP 面不可见（admin-api 硬编码 `success=true`，Go 侧同样硬编码） |
-| 5 | `DRIFT-ARPC-003`（`system.default-password` 为空 ⇒ Go 成功 / RAG INTERNAL） | 🟡 未修 | 需显式把配置置空才触发；本轮未加入对拍矩阵（要改配置重起两侧栈，代价大于收益） |
-| 6 | `DRIFT-ARPC-005`（启动期建表 3 张 vs 4 张） | 🟡 未修（低风险） | RAG 多建 `users_user_avatar_history`（Go admin-rpc 不建）；全部 `CREATE … IF NOT EXISTS`，不破坏任何东西 |
-| 7 | `DRIFT-ARPC-006`（RAG 侧零手写 span，Go 逐 Logic 打 `audit.*` 属性） | 🟡 未修 | 需要动 `service/common` 的 OTel 装配（不在本组件），且与 N-4 的签字理由直接相关 ⇒ 建议与 N-4 一起裁决 |
-| 8 | `UNRESOLVED-ARPC-002`（超时是否 min 客户端 deadline） | 🟡 仍未定 | 本轮的 gRPC 对拍**没有**加客户端 deadline 档（`exp-difftest-grpc-admin-errors.sh` 用默认 deadline）⇒ 结论未变 |
-| 9 | `UNRESOLVED-ARPC-003`（Redis 客户端超时配置） | 🟡 仍未定 | 本轮未做 Redis 故障注入 |
-| 10 | `UNRESOLVED-ARPC-005`（`users_user` 建表责任交叉） | 🟡 跨组件 | 需要 user-rpc 侧结论后合并判读 |
+| 5 | `DRIFT-ARPC-003`（`system.default-password` 为空 ⇒ Go 成功 / RAG INTERNAL） | ~~🟡 未修~~ **📌 实施轮：用户签字保留，SD-2026-10-23-06** | | 需显式把配置置空才触发；本轮未加入对拍矩阵（要改配置重起两侧栈，代价大于收益） |
+| 6 | `DRIFT-ARPC-005`（启动期建表 3 张 vs 4 张） | ~~🟡 未修~~ **✅ 修复轮 §3 关闭为实现差异（非缺陷）** | | RAG 多建 `users_user_avatar_history`（Go admin-rpc 不建）；全部 `CREATE … IF NOT EXISTS`，不破坏任何东西 |
+| 7 | `DRIFT-ARPC-006`（RAG 侧零手写 span，Go 逐 Logic 打 `audit.*` 属性） | ~~🟡 未修~~ **✅ 实施轮 §2 已修（8 处，非 13 处）** | | 需要动 `service/common` 的 OTel 装配（不在本组件），且与 N-4 的签字理由直接相关 ⇒ 建议与 N-4 一起裁决 |
+| 8 | `UNRESOLVED-ARPC-002`（超时是否 min 客户端 deadline） | ~~🟡 仍未定~~ **✅ 定性轮 §1：CONFIRMED SEMANTIC MISMATCH（修法在 service/common）** | | 本轮的 gRPC 对拍**没有**加客户端 deadline 档（`exp-difftest-grpc-admin-errors.sh` 用默认 deadline）⇒ 结论未变 |
+| 9 | `UNRESOLVED-ARPC-003`（Redis 客户端超时配置） | ~~🟡 仍未定~~ **✅ 定性轮 §2 + 实施轮 §1：已定性并实施 connect-timeout** | | 本轮未做 Redis 故障注入 |
+| 10 | `UNRESOLVED-ARPC-005`（`users_user` 建表责任交叉） | ~~🟡 跨组件~~ **✅ 验证轮 §1 已关闭** | | 已跑双侧并发实测：RAG 侧 advisory lock 串行、Go 侧实测未撞但机制上仍有竞态窗口 |
 
 ## 6. 本轮实测数字（**收尾跑**，可复现）
 
@@ -1231,7 +1262,7 @@ Username="zzz_null_status_go"
 > 且实测 `skipped=0` ⇒ 真 PG **确实跑了**，不是假绿。
 > 复核命令：`grep -ho 'skipped="[0-9]*"' service/users/admin/*/target/surefire-reports/*.xml`
 
-## 7. 本轮新增/修改的文件
+## 8. 本轮新增/修改的文件
 
 | 文件 | 性质 |
 |---|---|
@@ -1423,11 +1454,11 @@ users 域 DDL，多建 `users_user_avatar_history`。
 | # | 项 | 状态 | 原因 / 下一步 |
 |---|---|---|---|
 | 1 | 🔴 **`users_user.extra_info` 也是 jsonb，而 Go 是 text**（`serializer:json`） | **跨域 · 未修** | DDL 归 users/user 域（`01_create_user.sql:41`），本 worker 无权改。**与本轮 ① 完全同型**：Go 落库成功 / RAG 被 jsonb 以 22P02 拒收。⇒ 建议 users-user 域照本节 §1.1 的三处同提交改法处理。**注意 `admin-rpc` 的 `updateUser` 也要跟着去掉那处 CAST**，否则跨域合并时会产生行为分叉 |
-| 2 | 🟡 **DRIFT-ARPC-006**（RAG 侧零手写 span，Go 逐 Logic 打 `audit.*` 属性） | 未修 | 需动 `service/common` 的 OTel 装配，不在本域。⚠️ 但 **SD-2026-10-23-01/06 签字后，`audit.operator_id` 的缺失对审计的影响更大** ⇒ 建议与 N-4 一起在 users 域层面裁决 |
-| 3 | 🟡 **UNRESOLVED-ARPC-002**（超时是否 min 客户端 deadline） | 仍未定 | 本轮 gRPC 对拍未加客户端 deadline 档，结论未变 |
-| 4 | 🟡 **UNRESOLVED-ARPC-003**（Redis 客户端超时配置） | 仍未定 | 本轮未做 Redis 故障注入 |
-| 5 | 🟡 **UNRESOLVED-ARPC-005**（`users_user` 建表责任交叉） | 跨组件 | 需 user-rpc 侧结论后合并判读。⚠️ 本轮已改 `admin_admin`/`admin_invite` 的 DDL，**共享账本仍只有一套 users 域脚本**，机制不变 |
-| 6 | 🟡 **DDL 的 `SET TIME ZONE` 副作用** | 已记录未验证 | 本轮新增的 `SET/RESET TIME ZONE` 与 `01`/`02` 同款；`SchemaInitializer` 四份脚本共用**一条连接**依次执行 ⇒ `03`/`04` 的 `SET` 只影响其自身语句区间，随后 `RESET` 还原。**未做「多实例并发建表 + 非 UTC 会话时区」的运行时验证** |
+| 2 | 🟡 **DRIFT-ARPC-006**（RAG 侧零手写 span，Go 逐 Logic 打 `audit.*` 属性） | ~~未修~~ **✅ 实施轮 §2 已修（8 处 span）** | | ⚠️ **本条原先的判断「需动 `service/common`、不在本域」已被推翻** —— `admin-rpc` 自己的 `pom.xml` 已引 `opentelemetry-bom`，`GlobalOpenTelemetry.getTracer` 与 Go `otel.Tracer` 是同一套 API ⇒ 在 admin-rpc 内即可补齐，不动 `service/common`。另**订正计数**：Go 是 **8 个 logic** 有 span，不是 13（13 是 attribute 条数）⇒ 刻意不给 getself/getuser/getuserlist/logout/updateself 加 span，用负向断言钉死 |
+| 3 | 🟡 **UNRESOLVED-ARPC-002**（超时是否 min 客户端 deadline） | ~~仍未定~~ **✅ 定性轮 §1：CONFIRMED SEMANTIC MISMATCH** | | 修法落在 `service/common` 的 `RpcInterceptor`（不继承入站 deadline），**不在本域**，故本 worker 无权改。⚠️ 现有对拍工具在结构上抓不到这条（见定性轮 §1.4）⇒ 不得以「对拍全绿」当它已闭环 |
+| 4 | 🟡 **UNRESOLVED-ARPC-003**（Redis 客户端超时配置） | ~~仍未定~~ **✅ 定性轮 §2 定性 + 实施轮 §1 实施 + 验证轮 §2 补绑定证据** | | 读超时 3s 两侧一致（但**一致是巧合**，无出处无回归网）；连接超时已补 `connect-timeout: 5s`。⚠️ **Lettuce socket 层的实际超时行为仍未证**（需黑洞 IP 实测）⇒ 该尾巴仍挂 UNRESOLVED |
+| 5 | 🟡 **UNRESOLVED-ARPC-005**（`users_user` 建表责任交叉） | ~~跨组件~~ **✅ 验证轮 §1 已关闭（双侧并发实测）** | | RAG 侧 advisory lock **机制性**串行（同一把锁 8675309，两进程严格错开）；Go 侧 GORM AutoMigrate 是 check-then-act，**机制上仍有竞态窗口**，实测未撞≠机制保证 ⇒ 两侧性质不同，不可混谈 |
+| 6 | 🟡 **DDL 的 `SET TIME ZONE` 副作用** | ~~已记录未验证~~ **✅ 修复轮 §8 已闭环（变异实测偏移 28800 秒）** | | 本轮新增的 `SET/RESET TIME ZONE` 与 `01`/`02` 同款；`SchemaInitializer` 四份脚本共用**一条连接**依次执行 ⇒ `03`/`04` 的 `SET` 只影响其自身语句区间，随后 `RESET` 还原。**未做「多实例并发建表 + 非 UTC 会话时区」的运行时验证** |
 | 7 | ⚠️ **`users_user` 时间列的 3 张表** | 跨域 | `01`/`02` 已由 users/user 域于 2026-10-23 改为 TIMESTAMPTZ；本 worker **未复核**其正确性，只确认了 DDL 文本已是 `TIMESTAMPTZ` |
 
 ## 6. 本轮新增/修改的文件
@@ -2004,5 +2035,352 @@ Go 的 `span.RecordError(err)` 分布在**具体错误分支**上（全 8 个 lo
 ✅ 文件已还原
 ```
 
-⇒ 「span 真的被导出」与「属性真的被带上」**双���都有运行期证据**，
+⇒ 「span 真的被导出」与「属性真的被带上」**双侧都有运行期证据**，
 不是「代码里写了」的推测。
+
+---
+
+# 2026-10-23 验证轮：把「能验证的未知」验证掉
+
+> **本轮目标**（用户指令：「把能验证的未知验证了，然后修台账」）：
+> 把上一轮留下的 UNRESOLVED 里**在本域内可验证**的做掉，**做不掉的写清 recipe**，
+> 然后把全台账里过期的「未修 / 仍未定」标记扫干净。
+>
+> **本轮做完的**：A（UNRESOLVED-ARPC-005 关闭）、B（Redis connect-timeout 绑定证据）。
+> **本轮没做但已写清 recipe 的**：C（ARPC-002 的 PG 侧阻塞探针，见 §3）。
+
+## 1. ✅ UNRESOLVED-ARPC-005 关闭 —— 双 rpc 同时对空库启动的并发实测
+
+### 1.1 提问（原文）
+
+> admin-rpc 与 user-rpc 都建 `users_user`，两侧同时对空库启动会不会撞？
+
+### 1.2 RAG 侧实测：两进程真并发，但 advisory lock 严格串行
+
+**证据源**：`/tmp/difftest/logs/rag-{admin,user}-rpc.log`（同一次 difftest 运行内两进程并发起跑）。
+
+| 进程 | PID | `schema init starting` | `acquired advisory lock 8675309` | `all 4 scripts applied` | `schema init done` |
+|---|---|---|---|---|---|
+| `admin-rpc` | 91018 | `23:30:16.292` | **`17.610`** | `19.825` | `19.835` |
+| `user-rpc` | 91017 | `23:30:16.632` | **`19.825`** | `20.978` | `20.985` |
+
+**读法（这一步别读错）**：
+1. 两个 `schema init starting` 相差 **340ms** ⇒ **确实并发**，不是排队启动；
+2. 值得注意：`user-rpc` 的 init **发起得更早**（`16.632` vs `16.292`？—— 不，admin 更早 `16.292`），
+   但**拿到锁的是 admin**（`17.610`），user 一直等到 `19.825`；
+3. `user` 拿到锁的时刻 `19.825` **正好等于** admin `all 4 scripts applied` 的时刻
+   ⇒ 锁是**首尾相接**交接的，中间没有重叠 ⇒ **没撞**。
+
+⇒ **RAG 侧结论：并发建表不会撞，且这是「机制性保证」** ——
+`pg_advisory_lock(8675309)` 让两个进程**在结构上**不可能同时执行 DDL。
+
+### 1.3 Go 侧实测：4 轮真并发，4 轮全都没撞
+
+**证据源**：`tools/difftest/exp-go-concurrent-automigrate.sh`（本轮修过等待逻辑，见 §1.5）。
+
+| 轮次 | user-rpc 起 | admin-rpc 起 | 间隔 | 建表失败? | 建出的表 |
+|---|---|---|---|---|---|
+| 1 | `23:57:27.886` | `23:57:28.001` | 115ms | 两边都没有 | `admin_invites,admins,user_avatar_history,users` |
+| 2 | `00:00:51.769` | `00:00:51.886` | 117ms | 两边都没有 | 同上 4 张 |
+| 3 | `00:01:07.845` | `00:01:07.976` | 131ms | 两边都没有 | 同上 4 张 |
+| 4 | `00:01:23.698` | `00:01:23.801` | 103ms | 两边都没有 | 同上 4 张 |
+
+⇒ **Go 侧结论：4 轮真并发，两边都没报「数据表迁移失败」，4 张表全建出来。**
+
+### 1.4 🔴 效力边界：**两侧性质不同，不可混谈**（这条必须一起记）
+
+| | RAG 侧 | Go 侧 |
+|---|---|---|
+| 机制 | `pg_advisory_lock(8675309)` + 4 份 `CREATE … IF NOT EXISTS` | GORM `AutoMigrate`：`if !HasTable(value) { createTable(value) }` |
+| 性质 | **机制性保证** —— 结构上不可能撞 | **check-then-act** —— **机制上仍有竞态窗口** |
+| 本次观测 | 1 次，严格串行 | 4 次全未撞 |
+
+GORM 的 `createTable` 发的是**不带 `IF NOT EXISTS`** 的 `CREATE TABLE ? (...)`
+（只有 `createIndex` 是 `IF NOT EXISTS ? ON ?`）⇒ 两个进程若同时看到「表不存在」，
+就会**同时发 CREATE** ⇒ 撞的是 PG 的 `pg_type_typname_nsp_index` 唯一约束。
+
+⇒ **结论只能写成**：「两侧在实测中都没有撞；**RAG 侧有机制性保证，Go 侧没有**」。
+⇒ **不得**写成「两侧等价安全」。这条差异若将来 Go 侧真撞上，根因就在 check-then-act。
+
+### 1.5 🔴 顺带修掉的一个「假实验」陷阱（本轮最大的副产品）
+
+原脚本等库用的是：
+
+```bash
+until docker exec gorace-pg pg_isready -U "$PG_USER" >/dev/null 2>&1; do sleep 1; done
+```
+
+**`pg_isready` 不带 `-d` 时，在 PG 的「初始化临时服务」阶段就已经返回 OK** ⇒
+脚本会在数据库系统还没真正起来时就把两个 rpc 放出去。实测症状：
+
+```
+57P03 the database system is starting up
+unexpected EOF
+```
+
+⇒ **两边都连库失败、一张表都没建出来**，判定列全是「?」。
+
+🔴 **这个形态比「跑绿」更危险**：判定输出是「**两边都连库失败**」，
+读起来像「**Go 侧连不上、结论待查**」，实际上**实验根本没发生** ——
+既不能推出「Go 没问题」，也不能推出「Go 有问题」。
+⇒ 与 AGENTS.md §3.3「跑绿 ≠ 结论对」同源：**实验失败时，它长得像结论**。
+
+**修法**（本轮已改）：
+
+```bash
+until docker exec gorace-pg pg_isready -U "$PG_USER" -d "$PG_DB" >/dev/null 2>&1; do sleep 1; done
+sleep 2
+```
+
+带 `-d "$PG_DB"` 等**目标库真的可连接**，再沉降 2s。
+
+## 2. ✅ connect-timeout 的绑定证据：从「yml 里有键」升到「Spring 真绑进去了」
+
+### 2.1 上一轮的断言只到「yml 里写了」
+
+`AdminRedisTimeoutConfigTest` 第 1 条断言的是
+`spring.data.redis.connect-timeout == "5s"` —— 它证明**yml 里有这个键**，
+**不证明**属性名写对、relaxed binding 匹配得上、值能被塞进
+`DataRedisProperties.connectTimeout`。这三件事任何一件错了，
+**Spring 都会静默保持默认值、不报错**（§3.3 的典型形态）。
+
+### 2.2 本轮补的第 2 条：走 Spring Boot 真实的 `Binder`
+
+新增用例 `springBootBinderConsumesConnectTimeout`：
+
+```java
+MapConfigurationPropertySource src =
+        new MapConfigurationPropertySource(flatten(load("application.yml")));
+DataRedisProperties props = new Binder(src)
+        .bind("spring.data.redis", DataRedisProperties.class)
+        .orElseThrow(() -> new AssertionError("spring.data.redis 绑不上 —— "
+                + "若属性名写错，Spring 会静默用默认值且不报错"));
+
+assertEquals(Duration.ofSeconds(5), props.getConnectTimeout(), ...);
+assertEquals(Duration.ofSeconds(3), props.getTimeout(), ...);
+```
+
+**为什么必须用真 `Binder` 而不是自己解析 yml**：
+relaxed binding 规则（`connect-timeout` → `connectTimeout`）是 Spring 自己实现的，
+自己解析就等于**把自己的期望当成被验证对象**。
+
+**顺带处理的一个细节**：yml 里 `host`/`port`/`password` 是 `${REDIS_PORT:6379}` 这种
+**占位符形态**，不解析就没法把 `port` 绑成 `int` ⇒ 辅助方法 `resolvePlaceholder`
+按 Spring 的语义取默认值。
+
+### 2.3 ⚠️ 效力边界：**仍未证到 socket 层**
+
+| 层 | 状态 |
+|---|---|
+| yml 里写了这两个值 | ✅ 已证（第 1 条断言） |
+| Spring `Binder` 真把它们绑进 `DataRedisProperties` | ✅ **已证（本轮第 2 条）** |
+| **Lettuce 客户端在 socket 层真按 5s 超时** | ❌ **仍未证** |
+
+最后一层是 Lettuce 的内部行为，要拿运行期证据只能**把连接指向黑洞 IP**、
+实测失败耗时落在 5s 而不是 3s。**本轮未做** ⇒ 该尾巴仍挂 UNRESOLVED，
+见「定性轮 §2.4」。
+
+⇒ 🔴 **不得**因为本条绿了就写「Redis 超时已完全对齐」——
+现在只到「**配置值已正确进入 Boot 的配置 POJO**」。
+
+## 3. ❌ C 项（ARPC-002 的 PG 侧阻塞探针）：本轮**未做**，recipe 在此
+
+**为什么做不了**：这个探针要求**同时起 Go + RAG 两套栈**、用**另一个 psql 会话**
+持 `SELECT … FOR UPDATE` 行锁、发一个短 deadline 请求、再查 PG 侧
+`pg_stat_activity` 看查询是否被取消。在本轮的预算与时长内**跑不完**。
+⇒ 按 §3.3「不许只跑 RAG 侧探针」的要求，**跑一半的探针没有证据价值**，
+所以选择**不做**，而不是做个残缺的。
+
+**可复现 recipe**（留给下一轮/别的 worker）：
+
+1. 起 RAG `admin-rpc` + Go `admin-rpc`（`tools/difftest/run.sh` 已能起两侧栈）；
+2. 用**第三个** psql 会话：`BEGIN; SELECT id FROM users_user WHERE id = <uid> FOR UPDATE;`（**不提交**）；
+3. 对两侧各发一个 **client deadline = 100ms** 的 `UpdateUser` 请求；
+4. 比对**两件事**：
+   a. 响应是否在 ~100ms 返回（Go 应返回 `DeadlineExceeded`；RAG 侧因 `RpcInterceptor`
+      **不继承入站 deadline**（`RpcInterceptor.java:170-172`），会等到自己那 2s）；
+   b. PG 侧 `pg_stat_activity` 里那条 `UPDATE` 是否被 `cancel`（Go 会，RAG 不会）。
+5. **期望差异**：Go 侧查询被取消、RAG 侧查询**跑满 2s** ⇒ 这就是
+   「CONFIRMED SEMANTIC MISMATCH」在 PG 侧的可观察形态。
+
+⚠️ **不要**用 `exp-difftest-grpc-admin-errors.sh` 验这条 —— 它**结构上抓不到**
+（见「定性轮 §1.4」：现有对拍脚本不设置客户端 deadline）。
+
+## 4. ✅ 顺手修掉的一类「事实错误注释」：GORM 的**默认表名**从来不是 `admin_admin`
+
+**核对日期：2026-10-23（验证轮）**
+
+审计轮 §5 第 3 项已经发现「实体 javadoc 里的表名说法是错的」，并订正了
+`AdminEntity` / `AdminInviteEntity`。**本轮把同一类错误在另外 3 个文件里找齐并修掉** ——
+它们都写着同一句话：**「GORM 默认表名 X」**。
+
+### 4.1 事实核对（逐字读 Go 源码）
+
+```go
+// service/user/admin/rpc/internal/model/data_model.go
+func (Admin) TableName() string      { return "admins" }         // :16-18
+func (AdminInvite) TableName() string { return "admin_invites" }  // :31-33
+func (User) TableName() string        { return "users" }          // :48-50
+```
+
+⇒ Go 的表名**既不是 `admin_admin`，也不是 GORM 的默认名** —— GORM 的默认名是
+`admins`（结构体名 Admin → admins），Go 只是**显式覆盖**成了同一个值。
+而 RAG 侧叫 `admin_admin` / `admin_invite` / `users_user` ——
+**两侧物理上不共用 schema**，这是 users 域的「表名加前缀」约定。
+
+### 4.2 修掉的三处 + 一处
+
+| 文件 | 原文 | 改成 |
+|---|---|---|
+| `03_create_admin.sql:14` | `Admin struct（GORM 默认表名 admin_admin）` | 写明 Go `TableName()` 返回 `admins`、本脚本建 `admin_admin`，并点明原说法是**错的** |
+| `03_create_admin.sql:33` | `Admin struct（GORM 默认表名 admin_admin）` | 同上 |
+| `04_create_admin_invite.sql:8` | `AdminInvite struct（GORM 默认表名 admin_invite）` | 同上（Go 是 `admin_invites`） |
+| `04_create_admin_invite.sql:15` | `AdminInvite struct（GORM 默认表名 admin_invite）` | 同上 |
+| `domain/UserEntity.java:17-18` | `User struct（GORM 默认表名 user_user，HUMAN_ONLY.MD 2026-10-22 改名为 users_user）` | 改为与 `AdminEntity` **同款**的写法：Go `TableName()` 返回 `users`、本实体映射 `users_user` |
+
+### 4.3 为什么值得修（这不是洁癖）
+
+「GORM 默认表名」这个说法会让人**以为两侧物理表同名**，
+于是拿表名去对 DDL、拿 `admins` 去查 PG 表 ⇒ **查不到**，
+或者更糟：以为两侧同表而**直接把 Go 的 DDL 贴过来**，
+从而把 RAG 侧的 `admin_admin` 改没了。
+⇒ 这是一句**会误导后续动作**的错误注释，不只是措辞问题。
+
+⚠️ **顺带订正**：`_shared.md` §5 的 U-5 行原本写的是
+「`03_create_admin.sql:14`、`04_create_admin_invite.sql:8/15` 的注释写错了 Go 的表名」——
+本轮把 `03` 的**第 29 行**（第二处）也一并修了，那一行原文没被点出来。
+
+## 5. ⚠️ 跨域观察（**只报告，不改**）：两域各有一份**逻辑完全相同**的 `JsonTextTypeHandler`
+
+**核对日期：2026-10-23**
+
+| | 位置 | 归属域 |
+|---|---|---|
+| 副本 1 | `service/users/admin/admin-rpc/.../mapper/JsonTextTypeHandler.java` | **users/admin（本域）** |
+| 副本 2 | `service/users/user/user-rpc/.../mapper/JsonTextTypeHandler.java` | users/user |
+
+**两份的 `setNonNullParameter` / `getNullableResult` / `toJson` / `parse` 逐行相同**，
+只有包名与 javadoc 不同（副本 2 是从 `JsonbTypeHandler` 改名而来，
+javadoc 里记了改名理由与 Go 出处）。
+
+⇒ **理想形态**是上提到 `service/users/users-common`（两个域都依赖它），
+但那要改**两个域**的实体引用（`@TableField(typeHandler = ...)` 的 import）
+⇒ **越本域边界**，按 §5.3「一域一 worktree、只写自己域」**本轮不改**，
+仅记录供合并时裁决。
+
+⚠️ **注意**：这不是「同一个类被复制到两个仓库」那种无害重复 ——
+它是**同一段行为契约写了两遍**。若将来 Go 侧的 `serializer:json` 行为变了，
+两份 javadoc 里的 Go 出处引用**要改两处**，漏一处就会留下一句假话。
+（与 Pitfalls P-3「同一句话错了要一次改三处」同型。）
+
+## 6. 🔴 新发现（本域已修，其余域只报告）：**RAG 侧源文件自身含 U+FFFD 替换字符**
+
+**核对日期：2026-10-23（验证轮）**
+
+### 6.1 现象
+
+扫全仓（排除 `.git` / `target`）找 UTF-8 替换字符 `U+FFFD`（`EF BF BD`）：
+
+```
+含 U+FFFD 的文件数: 15    总替换字符数: 42
+```
+
+**本域的两处**（已修）：
+
+| 文件 | 原文（损坏） | 修成 | 性质 |
+|---|---|---|---|
+| `service/users/users-common/src/main/resources/db/03_create_admin.sql:10` | `共用库必然出⟪U+FFFD×3⟫（实测见…）` | `共用库必然出现（…）` | SQL **注释**，功能无影响 |
+| `docs/DRIFT/users/admin/rpc.md:2038` | `**双⟪U+FFFD×3⟫都有运行期证据**` | `**双侧都有运行期证据**` | 台账正文 |
+
+⚠️ **两处都是「一个 3 字节 UTF-8 字符被替换成 3 个 U+FFFD」** ——
+这是**有损解码**的典型形态（原始字节被丢弃、每个坏字节各补一个替换符），
+不是「有人手滑打错字」。
+
+⚠️ **本表里用 `⟪U+FFFD×3⟫` 记号表示损坏样本，刻意不把真的替换字符写进本文件** ——
+否则将来加「全仓字节合法性扫描」（见 §6.5）时，**本文件自己会变成假阳性**，
+守门网会被一条「文档里引用了损坏样本」的记录挡住。
+⇒ **记号约定**：凡要在文档里展示损坏字节，一律用 `⟪U+FFFD×n⟫` 之类的可见记号。
+
+### 6.2 其余 13 处（**跨域，只报告，不改**）
+
+| 文件 | 替换字符数 |
+|---|---|
+| `component-semantic-verification/springboot-semantic-model.md` | 5 |
+| `tools/errmsg-probe/README.md` | 3 |
+| `service/users/user/user-rpc/.../UserRpcLoginNullStatusReadsAsZeroTest.java` | 3 |
+| `service/message/message-api/.../GoStyleGrpcClientBreakerE2ETest.java` | 3 |
+| `service/like/like-rpc/.../LikeOutboxEventEntity.java` | 3 |
+| `service/hot/hot-rpc/.../HeavyKeeper.java` | 3 |
+| `service/favorite/favorite-rpc/.../FavoriteFactSemanticsTest.java` | 3 |
+| `service/favorite/favorite-rpc/.../FavoriteRpcLabels.java` | 3 |
+| `service/comment/comment-rpc/.../CommentAuditPublisher.java` | 3 |
+| `service/hot/hot-rpc/.../Jackson2ObjectMapperConfiguration.java` | 2 |
+| `service/favorite/favorite-rpc/.../FavoriteRpcSupport.java` | 2 |
+| `service/favorite/favorite-rpc/.../FavoriteItemMapper.java` | 2 |
+| `docs/Pitfalls/users/user/rpc.md` | 1 |
+
+⚠️ **其中 8 处在 `src/main/java` 的生产代码里**（like / hot / favorite / comment 四域）
+⇒ 需各自域的 owner 判定「是注释/字符串字面量还是会影响行为」。
+若落在**用户可见的字符串字面量**里，就是 §3.3 意义上的**行为漂移**，不能只当排版问题。
+
+### 6.3 与 DRIFT-ARPC-007 的关系（**同族、不同机制**）
+
+| | DRIFT-ARPC-007 | 本条 |
+|---|---|---|
+| 损坏发生在 | **Go 真源**的字面量 | **RAG 侧**的源文件 |
+| 表现 | Go 吐乱码、RAG 吐正常中文 | RAG 源码里直接有 `U+FFFD` |
+| 可观察 | **wire 层可见** | 大多在**注释**里 ⇒ 不可观察 |
+
+⇒ 两者是**同一条流水线**（从 Go 抄文本 / 从终端粘文本）的两次翻车，
+但**危害面不同**：ARPC-007 会改行为，本条多数只是「源文件里有乱码」。
+
+### 6.4 为什么值得专门扫一遍（不是洁癖）
+
+1. **`U+FFFD` 是有损解码的指纹** —— 它的存在说明**某一步搬运过程中丢过字节**。
+   同一批搬运里，**可能还有丢字节但没变成 `U+FFFD` 的地方**（例如丢在不可见位置）。
+   ⇒ 扫 `U+FFFD` 是**定位「哪里出过事」的探针**，不是「把乱码改好看」。
+2. 一句 Java 源码里的乱码若落在**字符串字面量**里 ⇒ 线上吐出的就是乱码，
+   **和 ARPC-007 的可观察形态一模一样**（只是方向反了）。
+3. `check-ddl-static.py` / `check-proto-static.sh` 都**查不出**这个 ——
+   它们查列类型和字段号，**不查字节合法性**。
+
+### 6.5 留下的守门网（建议，**未实施**）
+
+一条全仓字节合法性扫描（找出所有含 `U+FFFD` 的**非 `target/`** 文件即失败），
+挂进 `tools/difftest/`。⚠️ **本轮未做** —— 它会**立刻让构建变红**（现有 13 处跨域），
+属于需要各域先修完才能加的守门 ⇒ 记录备查。
+
+## 7. 本轮实测数字
+
+| 项 | 数字 |
+|---|---|
+| **admin-rpc 全量** | **98 / 0 failures / 0 errors / 0 skipped**（16 个测试类；上一轮 97 ⇒ 本轮 +1） |
+| **admin-api 全量** | **121 / 0 failures / 0 errors / 0 skipped**（11 个测试类；未变） |
+| `AdminRedisTimeoutConfigTest` | **2 条**（新增 Binder 绑定用例），`Tests run: 2, Failures: 0, Errors: 0, Skipped: 0` |
+| Go 并发建表 | **4 轮全绿**（两边都没报建表失败、4 张表全建出） |
+| RAG 并发建表 | **1 轮**（两进程严格串行，锁 `8675309`） |
+| 本轮改动文件 | 8 个（台账 3 + 代码 3 + DDL 2 + 工具脚本 1，见下） |
+
+> ⚠️ **`skipped=0` 是硬门槛**（AGENTS.md §3.3）：本轮**逐个测试类核过** `Skipped` 数，
+> 确认没有 `@EnabledIfDockerAvailable` 之类的整类静默跳过。
+> 上表里 admin-rpc / admin-api 的数字均由 `target/surefire-reports/*.txt` 汇总而来，
+> **不是**从 Maven 控制台摘要抄的（控制台摘要会因多模块聚合而对不上单个模块）。
+
+## 8. 本轮新增/修改的文件
+
+| 文件 | 性质 |
+|---|---|
+| `service/users/admin/admin-rpc/src/test/.../AdminRedisTimeoutConfigTest.java` | **+1 条**：用真 `Binder` 证明 `connect-timeout` 被绑进 `DataRedisProperties` |
+| `tools/difftest/exp-go-concurrent-automigrate.sh` | **修等待逻辑**：等库加 `-d "$PG_DB"` + 沉降 2s（原写法让实验根本没发生） |
+| `service/users/admin/admin-rpc/src/main/.../domain/UserEntity.java` | **订正 javadoc**：「GORM 默认表名 user_user」是错的（Go 返回 `users`） |
+| `service/users/users-common/src/main/resources/db/03_create_admin.sql` | **订正 2 处注释**（`:14` / `:33`）：Go 表名是 `admins`，不是 `admin_admin`；**另修 1 处 U+FFFD 乱码**（`:10`「共用库必然出现」） |
+| `service/users/users-common/src/main/resources/db/04_create_admin_invite.sql` | **订正 2 处注释**（`:8` / `:15`）：Go 表名是 `admin_invites` |
+| `docs/DRIFT/users/admin/rpc.md` | 本文件：扫 8+4 处过期标记、关闭 UNRESOLVED-ARPC-005、新增验证轮 §1–§8、**修 1 处 U+FFFD** |
+| `docs/DRIFT/users/admin/_shared.md` | §5 汇总表：U-3 / U-4 / U-5 / A-2 四行状态订正 |
+| `docs/Pitfalls/users/admin/rpc.md` | **新增 P-10**（实验失败时它长得像结论）、**P-11**（yml 有键 ≠ 属性被绑进 POJO） |
+
+> ⚠️ **共享文件一律未动**：`AGENTS.md`、三个 `_INDEX.md`、`docs/DRIFT/_MANIFEST.json`
+> 本轮**未改**（按 §5.3「共享索引合并后统一更新」）。
+> ⚠️ **未改 `docs/DRIFT/users/_shared.md` 与 `docs/Pitfalls/users/_shared.md`** ——
+> 这两个是 users 域**共享**文件，`align/users-user` 分支**正在改它们**
+> ⇒ 本 worker 不写，避免并发互撞。

@@ -46,7 +46,15 @@ docker rm -f gorace-pg >/dev/null 2>&1
 docker run -d --name gorace-pg \
   -e POSTGRES_USER=$PG_USER -e POSTGRES_PASSWORD=$PG_PASS -e POSTGRES_DB=$PG_DB \
   -p "127.0.0.1:${PG_PORT}:5432" postgres:16-alpine >/dev/null
-until docker exec gorace-pg pg_isready -U "$PG_USER" >/dev/null 2>&1; do sleep 1; done
+# ⚠️ 2026-10-23 修正：原来的等待 `pg_isready -U admin` **不带库名**，
+#    而 pg_isready 在 PG 的**初始化临时服务**阶段就已经返回 OK ⇒ 脚本会在
+#    数据库系统还没起来时就把两个 rpc 放出去，实测报
+#    `57P03 the database system is starting up` / `unexpected EOF`，
+#    两边都连库失败、**一张表都没建出来** —— 判定列全是「?」，
+#    也就是**实验根本没发生**（不是「Go 没问题」，也不是「Go 有问题」）。
+#    ⇒ 必须等「目标库真的可连接」：带 -d "$PG_DB" 再等一轮，并多留 2s 沉降。
+until docker exec gorace-pg pg_isready -U "$PG_USER" -d "$PG_DB" >/dev/null 2>&1; do sleep 1; done
+sleep 2
 echo "== 空库就绪 =="
 
 echo

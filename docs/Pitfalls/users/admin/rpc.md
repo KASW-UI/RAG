@@ -353,3 +353,132 @@ docs/Intentional_Deviations/_INDEX.md      ← 索引
 
 > ⚠️ 同型洞仍在：`docs/Intentional_Deviations/users/user/{api,rpc}.md`
 > 与 `users/_shared.md` **仍是 0 字节** ⇒ 归 users/user 域，未处理。
+
+---
+
+## P-10 · **实验失败时，它长得像结论** —— 「等待条件写错」让并发建表实验根本没发生
+
+**核对日期：2026-10-23**（修 UNRESOLVED-ARPC-005 时踩到）
+
+### 症状
+
+跑 Go 侧并发建表实验（`tools/difftest/exp-go-concurrent-automigrate.sh`），
+判定输出是：
+
+```
+  ? user-rpc 连库失败（配置问题，另查）
+  ? admin-rpc 连库失败（配置问题，另查）
+```
+
+进程日志里是：
+
+```
+57P03 the database system is starting up
+unexpected EOF
+```
+
+### 根因（等待条件写错，不是 Go 的问题）
+
+原脚本等待数据库就绪用的是：
+
+```bash
+until docker exec gorace-pg pg_isready -U "$PG_USER" >/dev/null 2>&1; do sleep 1; done
+```
+
+🔴 **`pg_isready` 不带 `-d` 时，在 PG 的「初始化临时服务」阶段就已经返回 OK** ——
+此时数据库系统**还没起来**，连上去必然报 `57P03`。
+⇒ 脚本在库真正可用之前就把两个 rpc 放了出去 ⇒ **两边都连库失败、一张表都没建出来**。
+
+### 为什么这个形态比「跑绿」更危险
+
+判定输出写的是「**连库失败（配置问题，另查）**」——
+读起来像「**Go 侧连不上、结论待查**」，是一个**待办**；
+实际上**实验根本没发生**，既不能推出「Go 没问题」，也不能推出「Go 有问题」。
+
+⇒ 与 AGENTS.md §3.3「跑绿 ≠ 结论对」同源，但**方向相反**：
+§3.3 说的是「绿可能是错误答案的守卫」，这条是「**失败也可能是结论的伪装**」。
+**两种情况下「脚本有输出」都不等于「脚本测到了东西」。**
+
+### 怎么确认实验真的发生了（下次怎么防）
+
+1. **等待条件必须指向「目标对象」而不是「同类里任意一个」**：
+   `pg_isready` 要带 `-d "$PG_DB"`（等**目标库**可连接），不是只等 server 活着。
+2. **断言「被测对象真的动了」**，而不只是「脚本跑完了」：
+   本脚本最后会 `select ... from pg_tables` ⇒ **必须确认表列表非空**。
+   判定列全是「?」时，先怀疑「实验没发生」，而不是「被测对象有问题」。
+3. **失败时的输出里要能区分「连不上」和「连上了但结果不对」** ——
+   前者是**实验基础设施坏了**，必须先修基础设施再谈结论。
+
+### 留下的守门网
+
+修法（已落地）：
+
+```bash
+until docker exec gorace-pg pg_isready -U "$PG_USER" -d "$PG_DB" >/dev/null 2>&1; do sleep 1; done
+sleep 2
+```
+
+本轮修完后**连跑 4 轮**，每轮两进程间隔约 100ms（真并发），
+4 轮全部「两边都未报建表失败 + 4 张表全建出」⇒ 这次才是真的测到了东西。
+
+---
+
+## P-11 · 「yml 里写了这个键」**不等于**「属性被绑进了 POJO」，更不等于「框架真的用它」
+
+**核对日期：2026-10-23**（UNRESOLVED-ARPC-003 的第二层证据）
+
+### 症状（与 §3.3 的「配置里没写 ≠ 没开」互为镜像）
+
+`AdminRedisTimeoutConfigTest` 最初只有一条断言：
+
+```java
+assertEquals("5s", dig(root, "spring", "data", "redis", "connect-timeout"), ...);
+```
+
+它证明的是「**yml 里有这个键**」。
+但这三件事**任何一件错了，Spring 都会静默保持默认值、不报错**：
+
+1. 属性名写错（`connect-timeout` vs `connectTimeout` vs `connecttimeout`）；
+2. relaxed binding 规则不匹配（`spring.data.redis.*` 前缀层级不对）；
+3. 值塞不进 `DataRedisProperties.connectTimeout`（类型不匹配 / Boot 4 里这个字段被搬走了）。
+
+⚠️ **Boot 4 特别容易踩**：`DataRedisProperties` 所在的 `RedisProperties` 已从
+`spring-boot-autoconfigure` **拆出**到 `spring-boot-data-redis` 模块
+⇒ 依赖没引对时，**整个属性类都不存在**，而应用照常启动。
+
+### 怎么证伪 / 怎么确认
+
+**不要自己解析 yml 再断言** —— 自己解析就等于「把自己的期望当成被验证对象」，
+relaxed binding 是 Spring 自己实现的，绕开它就没有验证力。
+
+用 **Spring Boot 真实的 `Binder`** 走一遍：
+
+```java
+MapConfigurationPropertySource src =
+        new MapConfigurationPropertySource(flatten(load("application.yml")));
+DataRedisProperties props = new Binder(src)
+        .bind("spring.data.redis", DataRedisProperties.class)
+        .orElseThrow(() -> new AssertionError("spring.data.redis 绑不上 —— "
+                + "若属性名写错，Spring 会静默用默认值且不报错"));
+
+assertEquals(Duration.ofSeconds(5), props.getConnectTimeout());
+assertEquals(Duration.ofSeconds(3), props.getTimeout());
+```
+
+⚠️ 细节：yml 里 `host`/`port`/`password` 是 `${REDIS_PORT:6379}` 这种**占位符形态**，
+不解析就没法把 `port` 绑成 `int` ⇒ 辅助方法按 Spring 语义取默认值。
+
+### 下次怎么防
+
+1. **配置类断言要分层**，每层一条测试：
+
+   | 层 | 断言什么 |
+   |---|---|
+   | 文本层 | yml 里有这个键、值写对了 |
+   | 绑定层 | **真 `Binder`** 能把它绑进配置 POJO |
+   | 消费层 | 框架的客户端**真的**按这个值工作（socket 层实测） |
+
+2. **从静态断言升到绑定断言**，成本极低（本例几十行），能挡掉一整类静默失效。
+3. **消费层证据要诚实标边界**：本轮只做到绑定层，
+   「Lettuce 在 socket 层真的按 5s 超时」**仍未证**（需指向黑洞 IP 实测失败耗时）
+   ⇒ 台账里明确写「不得因为绑定层绿了就写『Redis 超时已完全对齐』」。

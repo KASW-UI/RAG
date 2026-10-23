@@ -1,10 +1,14 @@
 package com.rag.users.admin.rpc;
 
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
+import org.springframework.boot.data.redis.autoconfigure.DataRedisProperties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.InputStream;
+import java.time.Duration;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -93,5 +97,76 @@ class AdminRedisTimeoutConfigTest {
                 "连接超时应为 5s（= go-redis DialTimeout 默认）。"
                         + "Boot 4 里它是 DataRedisProperties.connectTimeout 这个**独立字段**；"
                         + "不配就会回落到 timeout=3s，与 Go 不一致");
+    }
+
+    /**
+     * 🔴 比上一条更强一档：**证明 Spring Boot 的 Binder 真的把这个属性吃进去了。**
+     *
+     * <p>上一条只证明「yml 里有这个键」，<b>不证明</b>属性名写对、
+     * relaxed binding 规则匹配得上、值能被塞进 {@link DataRedisProperties#setConnectTimeout}。
+     * 这三件事任何一件错了，Spring 都<b>静默</b>保持默认值、不报错 ——
+     * 正是 §3.3「不得凭配置名称断定机制已启用」的形态。
+     *
+     * <p>本条用 Spring Boot 真实的 {@code Binder} 走一遍 relaxed binding，
+     * 然后断言 {@code connectTimeout} 拿到了 5s、{@code timeout} 拿到了 3s。
+     *
+     * <p>⚠️ <b>仍然不是全部</b>：它证明「属性被绑定进配置 POJO」，
+     * <b>不证明</b>「Lettuce 客户端在 socket 层真的按这个值超时」。
+     * 后者是 Lettuce 的内部行为，要拿到运行期证据只能指向一个黑洞地址测失败耗时，
+     * 本轮<b>未做</b> ⇒ 该尾巴仍记 UNRESOLVED。
+     */
+    @Test
+    @DisplayName("✅ Spring Boot 的 Binder 真把 connect-timeout 绑进 DataRedisProperties（不是只写在 yml 里）")
+    void springBootBinderConsumesConnectTimeout() {
+        MapConfigurationPropertySource src =
+                new MapConfigurationPropertySource(flatten(load("application.yml")));
+        DataRedisProperties props = new Binder(src)
+                .bind("spring.data.redis", DataRedisProperties.class)
+                .orElseThrow(() -> new AssertionError("spring.data.redis 绑不上 —— "
+                        + "若属性名写错，Spring 会静默用默认值且不报错"));
+
+        assertEquals(Duration.ofSeconds(5), props.getConnectTimeout(),
+                "connect-timeout 必须被 relaxed binding 吃进 DataRedisProperties.connectTimeout。"
+                        + "拿到 null 就说明属性名/前缀写错了，而 Spring 不会报错 —— 那正是本用例要挡的静默失效");
+        assertEquals(Duration.ofSeconds(3), props.getTimeout(),
+                "timeout 同理：读命令超时 3s（= go-redis ReadTimeout 默认）");
+    }
+
+    /**
+     * 把 {@code ${VAR:default}} 取成 default（与 Spring 的行为一致）。
+     * yml 里 host/port/password 都是这种占位符形态，不解析就没法绑成 int。
+     */
+    private static String resolvePlaceholder(String v) {
+        if (!v.startsWith("${")) {
+            return v;
+        }
+        int close = v.lastIndexOf('}');
+        if (close < 0) {
+            return v;
+        }
+        String body = v.substring(2, close);
+        int colon = body.indexOf(':');
+        return colon < 0 ? "" : body.substring(colon + 1);
+    }
+
+    /** {@code a.b.c=v} 打平成 {@code {a.b.c=v}}，供 Spring 的 PropertySource 使用。 */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> flatten(Map<String, Object> in) {
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        walk(in, "", out);
+        return out;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void walk(Map<String, Object> in, String prefix, Map<String, Object> out) {
+        for (Map.Entry<String, Object> e : in.entrySet()) {
+            String key = prefix.isEmpty() ? e.getKey() : prefix + "." + e.getKey();
+            Object v = e.getValue();
+            if (v instanceof Map) {
+                walk((Map<String, Object>) v, key, out);
+            } else if (v != null) {
+                out.put(key, resolvePlaceholder(String.valueOf(v)));
+            }
+        }
     }
 }
