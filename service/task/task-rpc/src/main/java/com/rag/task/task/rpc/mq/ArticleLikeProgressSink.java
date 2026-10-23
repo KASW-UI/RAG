@@ -310,7 +310,11 @@ public class ArticleLikeProgressSink {
         fields.put("createAt", String.valueOf(now));
         fields.put("updateAt", String.valueOf(now));
 
-        RedisPipelines.execQuietly(redis, ops -> {
+        // ⚠️ 出错必须抛出，不能吞：Go 出处 article_sink.go:308-310
+        //    `if _, err := pipe2.Exec(ctx); err != nil { return err }`，
+        //    而 Go 的 flushOnce 在 lazyInit 出错时直接 return，后面的 flushRedis /
+        //    flushPostgres 都不会执行 ⇒ 吞掉会让 RAG 变成「PG 有初始行、Redis Hash 缺失」。
+        RedisPipelines.exec(redis, ops -> {
             for (InitCandidate c : newOnes) {
                 ops.opsForHash().putAll(
                         TaskRedisKeys.articleTaskProgress(taskId, c.userId(), c.articleId()), fields);

@@ -250,15 +250,21 @@ class TaskDomainServiceTest {
         svc.getTask(GetTaskReq.newBuilder().setUserId(1L).build());
 
         // 取出真正提交给 Redis 的 SessionCallback，在记录型 RedisOperations 上跑一遍
+        // ⚠️ 2026-10-23：捕获点从 `execute(SessionCallback)` 改成 `executePipelined(SessionCallback)`。
+        //    原因：RedisPipelines.execQuietly 原先走 `execute`（**非 pipeline**）且在回调里
+        //    多调了一次 `operations.exec()` ⇒ 服务端回 ERR EXEC without MULTI ⇒
+        //    整条回填链路是死的（详见 RedisPipelines 类注释 / DRIFT-TASK-RPC-005）。
+        //    本用例真正要锁的契约是**回填命中的 key 与 TTL**（Go get_task_logic.go:73-76），
+        //    批量机制本身由 RedisPipelinesRealRedisGateTest 用**真 Redis** 单独锁住 ——
+        //    两边分工明确，不让 mock 用例去承担它证明不了的东西。
         @SuppressWarnings("unchecked")
         ArgumentCaptor<SessionCallback<Object>> cap = ArgumentCaptor.forClass(SessionCallback.class);
-        verify(redis).execute(cap.capture());
+        verify(redis).executePipelined(cap.capture());
 
         RedisOperations<String, String> ops = mock(RedisOperations.class);
         @SuppressWarnings("unchecked")
         HashOperations<String, Object, Object> hashOps = mock(HashOperations.class);
         when(ops.opsForHash()).thenReturn(hashOps);
-        when(ops.exec()).thenReturn(List.of());
         cap.getValue().execute(ops);
 
         // ⚠️ key 必须是 task:progress:1 —— 写路径用的是另一个 key（见 TaskRedisKeys 类注释）
@@ -278,6 +284,7 @@ class TaskDomainServiceTest {
 
         // 该分支走的是单条 expire（不是 pipeline），Redis 异常也被吞掉
         verify(redis).expire("task:progress:9", TaskRedisKeys.EMPTY_PROGRESS_CACHE_TTL);
+        verify(redis, never()).executePipelined(any(SessionCallback.class));
         verify(redis, never()).execute(any(SessionCallback.class));
     }
 
@@ -285,7 +292,11 @@ class TaskDomainServiceTest {
     @DisplayName("回填失败不影响返回（Go: _, _ = pipe.Exec(ctx)）")
     void backfillFailureDoesNotBreakResponse() {
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
-        doThrow(new RuntimeException("redis down on write")).when(redis).execute(any(SessionCallback.class));
+        // ⚠️ 2026-10-23：打桩点跟着 RedisPipelines 的机制一起改（execute → executePipelined）。
+        //    若不打在这个方法上，这条用例会**因为没有异常可抛而假绿** ——
+        //    那正是本仓反复吃过的亏（见 docs/Pitfalls/）。
+        doThrow(new RuntimeException("redis down on write"))
+                .when(redis).executePipelined(any(SessionCallback.class));
 
         TaskProgressMapper mapper = mock(TaskProgressMapper.class);
         when(mapper.selectByUserId(1L)).thenReturn(List.of(row(1L, 190L, "doing", 4L, 3L)));
