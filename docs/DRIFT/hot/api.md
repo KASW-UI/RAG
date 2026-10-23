@@ -87,7 +87,7 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | 25 | `secondary_tags` 空时是 `null` 不是 `[]` | Go proto3 nil slice + tag 无 `omitempty` | 构造处显式置 null | ✅ 裸 `ObjectMapper` 断言 |
 | 26 | `hot_score` 是 **uint32** | `hot.proto:17` | `long` + `Integer.toUnsignedLong` | ✅ 对 `0xFFFFFFFF` → `4294967295` 断言 |
 
-> ⚠️ **第 25 行的证据强度本轮下调**：见第 12 节 DRIFT-HOTAPI-012 ——
+> ⚠️ **第 25 行的证据强度本轮下调**：见第三轮 DRIFT-HOTAPI-015-B ——
 > `HotApiWireContractTest` 用的是**裸 `ObjectMapper`**，而**运行时用的是 Spring Boot 装配的 mapper**，
 > 两者在本项目实测出**不同行为**（字段顺序）。该测试因此**证明不了运行时**的字节形状。
 
@@ -109,7 +109,7 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | # | 项 | 状态 | 备注 |
 |---|---|---|---|
 | D1 | **双侧活体对拍** | ❌ 未做（2026-10-23） | Go 侧依赖 `etcd:2379` + Nacos；**优先级高于再加单测**。⚠️ 第二轮已把**解析层/分页层/wire 层**用双侧探针对拍掉（见第 11 节），但**端到端 HTTP 栈**仍未对拍 |
-| D2 | **变异验证** | ❌ 未做（2026-10-23） | 测试是否假绿未证实。⚠️ 第二轮已**间接证实一处假绿**（DRIFT-HOTAPI-012 的裸 mapper），但**系统变异仍未做** |
+| D2 | **变异验证** | ❌ 未做（2026-10-23） | 测试是否假绿未证实。⚠️ 第二轮已**间接证实一处假绿**（DRIFT-HOTAPI-015-B 的裸 mapper），但**系统变异仍未做** |
 | D3 | 客户端**断连**取消不再传播 | ⚠️ 已留痕（2026-10-23） | Go 把请求 ctx 传进 100 次补全，Servlet 断连不会自动取消在飞的 gRPC。已用「请求线程取一次预算 + 显式下传」保住**超时**语义，**断连**语义不等价 |
 | D4 | Go panic 时指标误记为 `success` | ⚠️ 有意差异（2026-10-23） | Go 的 `defer` 读命名返回值 `err`，panic 展开时仍为 nil；Java 按客户端实际看到的结果记 `fail`。该路径无代码可达 |
 | D5 | 指标**暴露**是单向增强 | ⚠️ 有意偏离（2026-10-23） | Go 的 5 个指标注册了但**无端点暴露**（yaml 的 Prometheus 块无 Host；`DevServer` 块在 go-zero v1.10.2 无对应字段）。分桶边界已对齐回 `prometheus.DefBuckets` |
@@ -124,7 +124,7 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | # | 项 | 类别 | 状态 |
 |---|---|---|---|
 | **D11** | **重复 query 参数 → Go 取首值，RAG 拼成 `"首,次"` 后整包 5001** | **SEMANTIC MISMATCH** | 🔴 需修（真 Boot 上下文已复现） |
-| **D12** | form 参数总数上限 **2048** 在 RAG 侧不存在 | OBSERVABLE DIFFERENCE | 🟡 需拍板（Go 拒绝 / RAG 接受） |
+| **D12** | form 参数总数上限 **2048** | OBSERVABLE DIFFERENCE | ✅ **已实现**（2026-10-24 复核：`GoFormValues.requireFormValueCountWithinLimit` + `HotApiGoParseParityTest` 的 2048/2049 边界用例；⚠️ 本行原记「RAG 侧不存在 / 需拍板」**是错的** —— 实现与测试都在，只是台账没回填） |
 | **D13** | **畸形 JSON body** → Go 拒绝 5001，RAG 完全忽略 body | OBSERVABLE DIFFERENCE | 🟡 需拍板 |
 | **D14** | 超时 / 499 响应缺 `X-Content-Type-Options: nosniff` | OBSERVABLE DIFFERENCE | 🟡 静态可确证，待真 Tomcat 取证 |
 | **D15** | 运行时 JSON **字段顺序**与 Go 声明序不同（裸 mapper 测不出来） | OBSERVABLE DIFFERENCE | 🟡 已知取舍，需登记 |
@@ -500,7 +500,7 @@ Recommended Verification:
   并补一条 ?page=5&page=3 的 MockMvc 断言（当前 59 例里**没有**这条）。
 ```
 
-### DRIFT-HOTAPI-012 —— form 参数总数上限 2048 在 RAG 侧不存在
+### DRIFT-HOTAPI-012 —— form 参数总数上限 2048（✅ 已实现，见下方状态段）
 
 ```text
 Component:    hot-api / GET /hot/v1/articles
@@ -519,7 +519,19 @@ Java Behavior:
 Must Preserve:
   「超过 2048 个 form 值 ⇒ 5001」这条拒绝路径。
   ⚠️ 但它也可以被判定为**不值得复刻的 Go 既有怪癖**——需要一次显式决策，不要默认忽略。
-Evidence: ✅ Go 侧活体探针（2048 OK / 2049 ERR）；⚠️ RAG 侧为静态判定（无对应代码）。
+Evidence: ✅ Go 侧活体探针（2048 OK / 2049 ERR）；✅ RAG 侧已实现并有真实 MVC 管线测试。
+
+**✅ 状态（2026-10-24 复核）：本条早已实现，台账此前记成「RAG 侧无对应代码 / 需拍板」是错的。**
+- **实现**：`GoFormValues.requireFormValueCountWithinLimit(HttpServletRequest)`
+  —— 遍历 `request.getParameterMap()`（Servlet 侧 query + POST form 合并，与 Go 的 `r.Form` 同域），
+  空值跳过（Go `util.go:44-45`），`n > 2048` 即抛 `BusinessException(5001)`；
+- **调用点**：`HotArticleController.java:88`（在解析 `page` / `page_size` **之前**）；
+- **边界与 Go 一致**：Go 是 `if n < 2048 { append; n++ } else { error }`
+  ⇒ 第 **2049** 个非空值报错；RAG 是 `n++; if (n > 2048) throw` ⇒ 同样是第 **2049** 个报错；
+- **错误形状与 Go 一致**：Go 的 `fmt.Errorf` 是**普通 error**（非 `*CodeError`）
+  ⇒ `SetErrorHandler` 只取 code/msg ⇒ 恒 `5001 + "internal server error"`，**错误详情不进 wire**；
+- **守门测试**：`HotApiGoParseParityTest#formValueCountAtLimitIsAccepted`（2048 → 200）
+  与 `#formValueCountOverLimitIsRejected`（2049 → 5001 + `internal server error`）。
 ```
 
 ### DRIFT-HOTAPI-013 —— 畸形 JSON body：Go 拒绝，RAG 完全忽略 body
@@ -656,6 +668,12 @@ Recommended Verification:
 | CASE-19 body | 畸形 JSON | **5001** | 成功 | ❌ **D13** |
 | CASE-20 路由层 | 404 / 405 | 裸响应 | 裸响应（真实 Boot 实测同） | ✅（⚠️ 待真 Tomcat） |
 
+> 🟥 **2026-10-24 复核：本表是「第二轮」的快照，CASE-15d / CASE-17 / CASE-19 三行的 ❌ 已被第三轮推翻。**
+> 现状态：D15 字段序 ✅ 已修（`@JsonPropertyOrder` + `HotApiGoWireOrderTest`）、
+> D12 参数上限 ✅ **早已实现**（`GoFormValues.requireFormValueCountWithinLimit` + `HotApiGoParseParityTest`
+> 的 2048/2049 边界用例 —— 本表原写「Java: OK / OK」**是错的**）、D13 畸形 body ✅ 已修。
+> ⇒ 三行现均为 ✅；未闭合的只有 **D14 缺 nosniff**（已移交 common 域）与 **真 Tomcat 取证**。
+
 ## 9. Unresolved（§37）
 
 > 按 §31-a：**没有实际读过两边源码得出的结论不得写成 SEMANTIC MISMATCH**。以下逐条说明缺什么证据。
@@ -670,7 +688,7 @@ Recommended Verification:
 | **U6** | 404 / 405 在**真 Tomcat** 下的响应头与 body 是否逐字节同？ | `http.Error` 四行（server.go:2337-2356） | MockMvc 实测：`404 page not found\n` + text/plain + nosniff；405 无 body | **MockMvc 不走真容器**；`HttpMiddleware:664-678` 的注释自己就记着一次「MockMvc 全绿、真 Tomcat 丢 Content-Type」的教训 | 真起 Tomcat，`curl -sv` 抓完整响应头（含 `Content-Length` / `Transfer-Encoding` / `Connection`） |
 | **U7** | `TopK=100` 被 hot-rpc 如何解释？items 是否按热度降序？ | `logic:62-64` 硬编码 100；`hot.proto:10` 注释「默认 20，最大 100」 | `HotRpcClient:63` 硬编码 100 | **本轮按简报要求未假设对端 rpc 正确**；这属 hot-rpc 组件 | **必须与 [`hot/rpc.md`](rpc.md) 合并判读**：确认 hot-rpc 是否 clamp 到 100、是否排序、是否分页 |
 | **U8** | percent-encoding 在真 Tomcat 下的绑定值 | `url.ParseQuery` 解 `%2B`→`+` ⇒ 5 | MockMvc **不解码**（`%2B5` 原样传入）；但 `.param("page","+5")` ⇒ 5 | 两个原因叠加：① 测试夹具不解码；② `Integer.parseInt("+5")` 与 `strconv.ParseInt("+5")` **都接受前导 +** ⇒ 真 Tomcat 下**预期等价** | 真 Tomcat 下 `curl '/hot/v1/articles?page=%2B5'` 与 `?page=%20 5` 各一条；**不要**据 MockMvc 结果去「修」`GoFormValues`（见 Pitfall P4） |
-| **U9** | 59 条测试是否假绿？ | — | 本轮**间接证实过一处**：DRIFT-HOTAPI-012 的裸 mapper 让字段序测试永久无效 | 未做系统变异（D2） | 对 `HotRankPaginator` / `GlobalResponseAdvice` / `GoFormValues` 做定向变异；并把 `HotApiWireContractTest` 换成运行时 mapper 后重跑 |
+| **U9** | 59 条测试是否假绿？ | — | 本轮**间接证实过一处**：DRIFT-HOTAPI-015-B 的裸 mapper 让字段序测试永久无效 | 未做系统变异（D2） | 对 `HotRankPaginator` / `GlobalResponseAdvice` / `GoFormValues` 做定向变异；并把 `HotApiWireContractTest` 换成运行时 mapper 后重跑 |
 | **U10** | 极端并发下补全的延迟分布是否可比？ | Go：100 goroutine + 每请求新建 chan(8)，无池上限 | Java：每请求 Semaphore(8) + **32 共享池** + 64 队列 + `CallerRunsPolicy` | 常态窗口都是 8；**池满时 Java 会在请求线程上串行跑补全**，Go 是纯排队 | 8 并发请求 × 100 items 的压测，比 p99 而非成功率；确认没有请求被 `CallerRunsPolicy` 拖成串行 |
 | **U11** | Prometheus 实际导出形态是否同 Go | Go：`HistogramVec` 带 `_bucket{le=}` | Micrometer `publishPercentileHistogram` + `serviceLevelObjectives(GO_DEF_BUCKETS)` | 只断言了 meter 定义，未抓过 `/actuator/prometheus` | curl `/actuator/prometheus`，比 `_bucket{le}` 边界序列与 `_total_total` 命名 |
 
@@ -678,12 +696,12 @@ Recommended Verification:
 
 | # | 检查项 | 结论 | 依据 |
 |---|---|---|---|
-| 1 | 两边的 public behavior 是否一致？ | ⚠️ **否** | D11（重复键：Go 成功 / Java 5001） |
+| 1 | 两边的 public behavior 是否一致？ | ⚠️ **否** → ✅ **已修** | 原判依据 D11（重复键：Go 成功 / Java 5001）｜🟥 2026-10-24：D11 已修（`GoFormValues.firstFormValue`） |
 | 2 | 正常路径是否一致？ | ✅ 一致 | CASE-01 双侧实测 |
-| 3 | 边界输入是否一致？ | ❌ 否 | D11 / D12 / D13 |
+| 3 | 边界输入是否一致？ | ❌ 否 → ✅ **已修** | 原判依据 D11 / D12 / D13｜🟥 2026-10-24：三条**均已修**（D12 更是早已实现，是台账没回填） |
 | 4 | NotFound / Empty / Null 是否一致？ | ✅ 一致 | 空页 `[]`、`secondary_tags:null`、`items` 非 null 全部双侧 wire 实测 |
 | 5 | Error meaning 是否一致？ | ✅ 一致 | 解析失败与下游失败都归 5001 + `internal server error`（E1/E5/E6） |
-| 6 | Error propagation 是否一致？ | ⚠️ 部分 | fatal/best-effort 不对称一致；但 D13 少一条 Go 的拒绝路径 |
+| 6 | Error propagation 是否一致？ | ⚠️ 部分 → ✅ **已修** | 原判依据：D13 少一条 Go 的拒绝路径｜🟥 2026-10-24：D13 已修（`GoFormValues.requireParsableJsonBody`） |
 | 7 | External dependency failure 是否一致？ | ✅ 一致 | 两个下游的 fatal / skip 方向均同（E5–E9） |
 | 8 | Cache hit / miss 是否一致？ | — | 两侧均无缓存 |
 | 9 | Transaction boundary 是否一致？ | — | 两侧均无事务 |
@@ -710,6 +728,16 @@ SEMANTICALLY NOT EQUIVALENT
 另有 **4 条 OBSERVABLE DIFFERENCE**（D12 参数上限、D13 畸形 body、D14 缺 nosniff、D15 字段序），
 其中 D14 / D15 需拍板取舍，D12 / D13 建议签字为「不复刻的 Go 既有怪癖」。
 
+> 🟥 **2026-10-24 复核：上段是「第二轮」当时的结论，现已被第三轮 + 第四轮推翻，其中一条还记错了。**
+> - **D12 参数上限**：结论**相反** —— Go 侧那条 2048 上限**在 RAG 侧早已实现**
+>   （`GoFormValues.requireFormValueCountWithinLimit`，controller 调用，`HotApiGoParseParityTest` 覆盖 2048/2049 边界），
+>   本轮**不需要**签字为「不复刻的怪癖」，也**不需要**修 —— 是台账没回填。已更正 §7 与 D12 行。
+> - **D13 畸形 body**：✅ 已修（`GoFormValues.requireParsableJsonBody`）。
+> - **D15 字段序**：✅ 已修（`@JsonPropertyOrder` + `HotApiGoWireOrderTest`，去掉注解即变红）。
+> - **D14 缺 nosniff**：🔁 **跨域移交 common 域**（代码在 `service/common` 的 `HttpMiddleware.writeTimeoutResponse`）
+>   ⇒ **hot 域内不可修**，需 common 域接手。
+> ⇒ 本组件**域内**已无可修的语义漂移；未闭合项全部是「证据缺口」或「跨域移交」。
+
 ### ⚠️ 本结论的效力边界（三条，越界即失效）
 
 1. **「NOT EQUIVALENT」只覆盖到本轮实测过的输入面。**
@@ -718,7 +746,7 @@ SEMANTICALLY NOT EQUIVALENT
 2. **「已双侧实测」≠「双侧服务同时跑起来对拍」。**
    本轮是**分层双侧探针**（Go 真库 + RAG 真上下文，同输入逐行比对），
    强度高于源码对照、低于端到端对拍（U1/D1 仍未做）。
-3. **RAG 侧证据的 mapper 依赖已暴露一次假绿（DRIFT-HOTAPI-012）。**
+3. **RAG 侧证据的 mapper 依赖已暴露一次假绿（DRIFT-HOTAPI-015-B）。**
    凡本文件标 ✅ 的 RAG 行，均注明了**用的是哪个 mapper / 哪套上下文**；
    未注明的仍按 AGENTS.md §3.3 记 `UNKNOWN`。
 ---
@@ -747,7 +775,7 @@ SEMANTICALLY NOT EQUIVALENT
 | ID | 上一轮判定 | 本轮处置 | 证据 |
 |---|---|---|---|
 | **DRIFT-HOTAPI-011** | 🔴 SEMANTIC MISMATCH | ✅ **已修** | Go 活体探针 + 真实 MVC 管线 4 例 |
-| **DRIFT-HOTAPI-012** | ⚠️ 证据缺口（测试永久无效） | ✅ **已补** | 新增 `HotApiGoWireOrderTest`（真实上下文 + 原始字节） |
+| **DRIFT-HOTAPI-015-B** | ⚠️ 证据缺口（测试永久无效） | ✅ **已补** | 新增 `HotApiGoWireOrderTest`（真实上下文 + 原始字节）｜⚠️ 2026-10-24 改号：原编为 012，与「2048 上限」撞车 |
 | **DRIFT-HOTAPI-013** | 🟠 OBSERVABLE DIFFERENCE | ✅ **已修** | Go 活体探针 + 真实 MVC 管线 2 例 |
 | **DRIFT-HOTAPI-014** | 🟡 OBSERVABLE DIFFERENCE | 🔁 **跨域移交 common 域** | 本域无权改（代码在 `service/common`） |
 | **DRIFT-HOTAPI-015** | 🟡 OBSERVABLE DIFFERENCE | ✅ **已修** | `@JsonPropertyOrder` + 真实运行时断言 + 变异变红 |
@@ -784,7 +812,12 @@ SEMANTICALLY NOT EQUIVALENT
 
 ---
 
-## DRIFT-HOTAPI-012 ✅ 已补 · 证据缺口（测试永久无效）
+## DRIFT-HOTAPI-015-B ✅ 已补 · 证据缺口（裸 mapper 让字段序测试永久无效）
+
+> ⚠️ **本条曾被错编成 `DRIFT-HOTAPI-012`**（标题写「012 · 证据缺口（测试永久无效）」）——
+> 但主题讲的是**字段序测试永久无效**，那属于 **DRIFT-HOTAPI-015** 的证据缺口；
+> 而 **012 的真正主题是「form 值个数上限 2048」**，它早已实现（见 §7 的 DRIFT-HOTAPI-012 条目）。
+> ⇒ 同一编号被用于两件不同的事，**已于 2026-10-24 改号为 015-B**，并在此显式说明，避免下一个人读错。
 
 - **原问题**：`HotApiWireContractTest` 用**裸 `ObjectMapper`** 断言字段序，
   而运行时用的是 Spring Boot 装配的 mapper ⇒ 该测试**永远绿**，运行时是字母序它也测不出来。

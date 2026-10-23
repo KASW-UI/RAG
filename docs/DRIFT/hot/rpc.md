@@ -775,8 +775,8 @@ Go 形态：`Lock()` → 内部函数 `RLock()` ⇒ `sync.RWMutex` 不可重入 
 | **UNR-3** | Lettuce `connectTimeout` 默认 10s vs go-redis `DialTimeout=5s` | `go-redis@v9.20.0/options.go` `init()`：`DialTimeout = 5s` | `application.yml:28` 只配 `timeout: 3s`，未配 `connect-timeout` | ✅ **已闭合（第四轮取证）**：消费点 `LettuceConnectionConfiguration.createClientOptions`（字节码：`DataRedisProperties.getConnectTimeout()` → `ifnull` ⇒ 未配置时**不调** `SocketOptions.Builder.connectTimeout`）⇒ 落 Lettuce **6.8.2** `SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION = Duration.ofSeconds(10)`（字节码 `ldc2_w 10l → Duration.ofSeconds`） | 连接阶段失败时机不同（低） | ✅ 已完成。**结论：差异确认存在（10s vs 5s），低影响，未修** |
 | **UNR-4** | `RoundRobinAssignor` 配置**是否真的落到 consumer**（Boot 4 的 `KafkaProperties.Consumer.buildConsumerProperties()` 是否仍消费 `spring.kafka.consumer.properties.*`） | `hot.go:57` `NewBalanceStrategyRoundRobin` | `application.yml:49` | ✅ **已闭合（第四轮）**：真 Kafka IT 用**生产 `ConsumerFactory`** 建 2 个消费者 + 3 分区 topic ⇒ 实测分配 `[0,2]/[1]`（RoundRobin 形状）；**变异**把策略改成 `RangeAssignor` ⇒ 用例立刻变红（实际 `[0,1]/[2]`）⇒ 证明断言对策略敏感、不是恒真 | 分配策略改变 ⇒ `hkMap` 布局与热榜分布改变 | ✅ 已完成（`HotKafkaConsumerGateTest#productionConsumerFactoryReallyUsesRoundRobinAssignor`） |
 | **UNR-5** | `@KafkaListener` 若能起来，**容器并发度**是否等价于 Go 的「每分区一个 goroutine」 | sarama 每分区一个 goroutine（`consumer_group.go` 的 `consume()` 每 claim 一个 goroutine） | `@KafkaListener` 默认 `concurrency=1`（实测：单容器线程持有全部 3 个分区 ⇒ 串行消费） | ✅ **已回答（第四轮）**，**但结论不是「等价」**：单实例部署下 Go 并行消费 3 个分区、RAG 串行消费 ⇒ **不等价**；在「同一部署 × 3 副本」（3 JVM 同组、每 JVM 恰好 1 个分区）下才等价 ⇒ 登记为 **DRIFT-HOTRPC-009** | 影响跨分区的消费并行度（同分区内的顺序保证两侧一致） | ✅ 已回答；**是否把 `concurrency` 调成 `partition-count` 需单独决策**（会改并发语义，本轮未擅改） |
-| **UNR-6** | `hot2.yaml` / `hot3.yaml` 与 `hot.yaml` 只差 `ListenOn` 与 `Prometheus.Port`（历史结论），本轮**未复核**该 diff | `etc/hot{1,2,3}.yaml` | — | 本轮没跑这个 diff | 若三份 yaml 还有别的差异，「同一部署 × 3 副本」的收敛论证会有洞 | `diff etc/hot.yaml etc/hot2.yaml` |
-| **UNR-7** | Go 的 `zrpc` 在注册 etcd 失败时是否 `Fatal`（⇒ 进程退出） | `hot.go:35` `zrpc.MustNewServer` | `NacosRegistration.java:92-94` 只 log | 未读 go-zero `zrpc` 的注册失败路径实现 | 注册失败时两侧存活行为不同 | 读 `go-zero@v1.10.2` 的 `internal/rpcpub` 注册路径 |
+| **UNR-6** | 三份 yaml 的**真实差异**到底是什么 | `etc/hot{1,2,3}.yaml` | `application.yml` 收敛为一份 + 环境变量 | ✅ **已闭合（第四轮复核）**：实测 `diff` —— 差异**不止两项**，还有 **`Interaction.Weights[].Code` 字段的缺失**（hot2/hot3 的 4 条权重都没有 `Code`，hot.yaml 有）；`ListenOn` 8083/8084/8085、`Prometheus.Port` 19091/19092/19093 | —— | 历史结论「只差 `ListenOn` 与 `Prometheus.Port`」**不成立** | 若照历史结论收敛，会把 `Code` 字段当噪声丢掉 ⇒ RAG 侧「保留 code 字段」的做法**反而是对的**（与 `application.yml` 注释、`HotRpcProperties.Weight.code` 一致） | ✅ 已完成（`diff etc/hot.yaml etc/hot2.yaml` / `hot3.yaml`） |
+| **UNR-7** | Go 的 `zrpc` 在注册 etcd 失败时是否 `Fatal`（⇒ 进程退出） | `hot.go:35` `zrpc.MustNewServer` | `NacosRegistration.java:92-94` 只 log | ✅ **已闭合（第四轮取证）**：Go 侧「**首次注册失败 ⇒ panic 退出**」，链路 = `zrpc/server.go:88-93`（`Start()` 里 `panic(err)`）→ `zrpc/internal/rpcpubserver.go:48-53`（`keepAliveServer.Start` 先跑 `registerEtcd()`，失败即 return error）→ `core/discov/publisher.go` 的 `KeepAlive→doRegister→GetConn`（etcd 连不上即 error）。⚠️ **运行期**掉线则只 `logc.Errorf` + 重试，**不退出** | 注册失败时两侧存活行为不同 | ✅ 已完成 ⇒ 登记为 **DRIFT-HOTRPC-010** |
 | **UNR-8** | `AGENTS.md §3.4` 把 `hot` 列在「只有一次性实测、**无回归网**」档 | proto diff 本轮重做仍为空 | 同 | 本轮的 diff **未进脚本** | proto 可能随时被改坏而无人知晓 | 按 `user` / `admin` 的写法扩 `tools/difftest/check-proto-static.sh` |
 
 ---
@@ -1003,6 +1003,8 @@ SEMANTICALLY NOT EQUIVALENT
 | **UNR-4**（RoundRobin 是否落到 consumer） | ✅ 闭合 | 真 Kafka 实测 `[0,2]/[1]`；变异改 Range ⇒ 变红 |
 | **UNR-1**（go-redis `MaxRetries=3` 的实际重试面） | ⚠️ 部分闭合 | RAG 侧「无重试」已实测；**Go 侧仍需 `CLIENT PAUSE` 半程失败对拍** |
 | **UNR-5**（容器并发度 vs 每分区一个 goroutine） | ✅ 已回答，**结论非等价** | 实测 `concurrency=1`；⇒ 登记 DRIFT-HOTRPC-009 |
+| **UNR-6**（三份 yaml 的真实差异） | ✅ 闭合，**且历史结论被推翻** | 实测 diff：除 `ListenOn` / `Prometheus.Port` 外还有 `Weights[].Code` 字段缺失 ⇒ 「只差两项」不成立 |
+| **UNR-7**（Go 注册失败是否 Fatal） | ✅ 闭合，**结论：会退出** | go-zero `zrpc/server.go:88-93` + `rpcpubserver.go:48-53` + `discov/publisher.go`；⇒ 登记 DRIFT-HOTRPC-010 |
 
 ## 变异验证（三条，全部按预期变红）
 
@@ -1055,3 +1057,37 @@ SEMANTICALLY NOT EQUIVALENT
 - **处置**：**登记不修** —— 改 `concurrency` 会**改变并发语义**（且 `concurrency` 是静态值、
   分区数可随部署变化），需要单独决策与单独 PR；本轮**不擅自改**。
   ⇒ 建议下一轮评估 `spring.kafka.listener.concurrency` 与 `hot-rpc.interaction.partition-count` 的绑定方式。
+
+---
+
+## DRIFT-HOTRPC-010 🟠 OBSERVABLE DIFFERENCE · MEDIUM · 已取证（**存活语义**）
+
+- **Component**：服务注册（etcd / Nacos）
+- **Go Behavior**：**首次注册失败 ⇒ 进程 panic 退出**。链路（全部已读到**消费点**）：
+  1. `hot.go:74` `serviceGroup.Start()` → `zrpc/server.go:88-93`
+     ```go
+     func (rs *RpcServer) Start() {
+         if err := rs.server.Start(rs.register); err != nil {
+             logx.Error(err)
+             panic(err)          // ← 进程退出
+         }
+     }
+     ```
+  2. `zrpc/internal/rpcpubserver.go:48-53` —— `keepAliveServer.Start` **先**跑 `registerEtcd()`，失败即 return error；
+  3. `core/discov/publisher.go` —— `KeepAlive()` → `doRegister()` → `internal.GetRegistry().GetConn(endpoints)`
+     ⇒ **etcd 连不上即 error**（注册发生在 `Start()`，**不是** `MustNewServer` 构造期）。
+  ⚠️ **边界**：`MustNewServer` 构造期只做 `NewRpcPubServer`（**不连 etcd**）⇒ 连接失败**不在构造期**暴露。
+  ⚠️ **运行期**掉线走 `doKeepAlive()` ⇒ `logc.Errorf` + 重试，**不退出** ⇒ 只有「首次注册失败」才 panic。
+- **RAG Behavior**：`NacosRegistration.java:92-94` —— `registerInstance` 抛 `NacosException` 时
+  **只 `LOG.error`**，进程**照常存活并继续服务**。
+- **Difference**：注册中心不可用时，Go 的 hot-rpc **起不来**（对外表现为「该副本不存在」），
+  RAG 的 hot-rpc **照常起来**（对外表现为「该副本存在但注册不上」⇒ 客户端按 Nacos 列表找它会失败）。
+- **Observable Impact**：中等 —— **不是「更健壮」，而是「假活」**：进程在、端口在、但服务发现里没有它；
+  若上游按「端口可连」判断健康，会误判为可用。
+- **修法候选（需拍板，本轮未擅改）**：
+  - (a) 注册失败即 `System.exit` / 抛异常让容器重启 —— **与 Go 一致**，但会把「Nacos 抖动」变成「Pod 反复重启」；
+  - (b) 保持现状 + **显式化**为签字偏离，并补一条「注册失败 ⇒ 健康检查报 NOT_READY」的机制（**语义更好，但 Go 没有**）。
+- **Evidence**：【静态源码 + 依赖源码逐行】go-zero `v1.10.2`
+  `zrpc/server.go:88-93` / `zrpc/internal/rpcpubserver.go:48-53` / `core/discov/publisher.go` 的 `KeepAlive→doRegister→GetConn`。
+- ⚠️ **与 SD-HOT-RPC-001 的同构性**：「Go 会崩、RAG 降级存活」这同一个取舍，已经在**消费侧**签过一次字
+  （`SD-HOT-RPC-001` 消费异常降级 drop）⇒ **本条建议按同一口径签字**，而不是各写各的。
