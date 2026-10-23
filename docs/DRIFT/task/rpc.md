@@ -20,12 +20,12 @@
 | 未修 | **0 条语义漂移**；另有 2 条**已签字偏离**（`SD-2026-10-23-TASK-01` 与 `SD-2026-10-24-TASK-01`，见 §二） |
 | 证据强度 | ✅✅✅ **Kafka 端到端活体对拍**（2026-10-23 23:4x，真 Kafka + 真 Redis + 真 PG，两侧同批消息比最终态，见 §四·三）· ✅✅✅ **Kafka 畸形消息活体对拍**（2026-10-24，五个用例，见 §四·五·二）· ✅✅ **gRPC 双向跨语言对拍**（2026-10-24，Java 客户端 + **Go 客户端**各打两端，见 §四·五·一）· ✅ 真启动 + 真 PG 16 容器 |
 | DDL 对拍 | ✅ **GORM AutoMigrate 产物 vs Flyway 产物逐列一致**（本轮实测，见 §四·二） |
-| ⚠️ 仍未覆盖 | ⓿ **「Kafka 写入 → task-api 读到」这条跨域闭环**未做活体对拍 —— 但两侧的读写 Redis key **本来就不一致**（Go 侧也读不到自己写的缓存），⇒ **不是 RAG 的缺陷**，见 §五 第 7 条；① ⚠️ **goka 的「表 topic」config（`cleanup.policy` / `retention.ms`）未做逐项对照** —— 但已实测「compact 不按时间删」且 Go 侧**不创建** topic（§四·七）⇒ 两侧**都不管** topic 生命周期 ⇒ 一致 |
-| 测试 | **90 tests / 0 failures / 0 errors / 0 skipped**（其中 15 条真 PG、**9 条真 Redis**） |
+| ⚠️ 仍未覆盖 | ⓿ **「Kafka 写入 → task-api 读到」这条跨域闭环**未做活体对拍 —— 但两侧的读写 Redis key **本来就不一致**（Go 侧也读不到自己写的缓存），⇒ **不是 RAG 的缺陷**，见 §五 第 7 条；① ⚠️ **goka 的「表 topic」config（`cleanup.policy` / `retention.ms`）未做逐项对照** —— 但已实测「compact 不按时间删」且 Go 侧**不创建** topic（§四·七）⇒ 两侧**都不管** topic 生命周期 ⇒ 一致；② ⚠️ **yaml 里查出了三类「死配置」**（`spring.mybatis-plus.*` / `otel.*` / `spring.jpa.*`，§四·九）—— **零行为影响**（三处逐一核过），但 `otel.*` **与 Go 存在观测差异**（Go 真导出 span，Java 侧 no-op）⇒ **全部是跨域共性**（8~20 个模块同款），本域不单方面修 |
+| 测试 | **104 tests / 0 failures / 0 errors / 0 skipped**（其中 15 条真 PG、**9 条真 Redis**；task-api 另 90 条，合计 **194**） |
 
 ---
 
-## 一、已修（5 条）
+## 一、已修（6 条）
 
 ### 🔴 DRIFT-TASK-RPC-001 · `TaskCountStore` 内存单例 ⇒ 两个 goka group 串号 + 重启归零
 
@@ -539,6 +539,15 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
    `check-plaintext400-headers.sh`（加 task 段）、`run.sh`（2 处 bug 修复），
    外加**新增** `docker-compose.task-kafka.yml` 的 `name: taskprobe`（修跨域误删）。
    ⇒ 清单见 [`./_README.md`](./_README.md) 的「共享工具改动清单」。
+9. ⚠️ **yaml 的三类「死配置」跨域统一修**（§四·九）：
+   - `spring.mybatis-plus.*` → 应为顶层 `mybatis-plus.*`（**8 个 rpc 模块同款**，零行为影响）；
+   - `otel.*` → **Boot 4.0.8 完全没有 OTel 自动配置**（`OtelProperties` / `OtelAutoConfiguration`
+     命中数 0；Boot 3.2.5 尚有 `OpenTelemetryAutoConfiguration`）⇒ **20 个 yaml 同款**，
+     ⚠️ **这一条与 Go 存在观测差异**（Go `serviceconf.go:67 trace.StartAgent` 真的导出 span，
+     Java 侧 `GlobalOpenTelemetry.get()` 拿到的是 no-op）⇒ **需要全仓统一接线**，不属 task 域；
+   - `spring.jpa.*` → 本模块无 JPA 依赖（**6 个 rpc 模块同款**，零行为影响）。
+   ⇒ **本域已把扫描固化成守门测试**（`TaskConfigKeyBindingContractTest`，5 条 + ✅ 三种变异测试），
+   ⇒ 新增死配置会被立刻抓住；**已登记的孤儿键是显式台账**（带出处与定性）。
 
 ---
 
@@ -1003,3 +1012,109 @@ KEEP_UP=1 ./tools/difftest/run-task-offset-oldest.sh # 跑完保留服务与容�
 
 ⚠️ 脚本会**重建 `taskprobe-*` 三个容器**（⇒ 该容器上的既有数据会被丢弃），
 并**只**停自己起的两个进程（按 `$WORK` 目录路径匹配 ⇒ 不会误杀别的域的同名进程）。
+
+## 四·九、🔴 配置键名扫描：yaml 里的「死配置」是怎么被查出来的（2026-10-24 实测）
+
+> 本节是 [DRIFT-TASK-RPC-006](#🔴-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)
+> 的**家族性排查**：那一条是 Kafka 侧的键名写错（连字符 vs 点分）⇒ 静默失效。
+> 本节把同一失效家族在 **yaml 侧**扫了一遍，并固化成守门测试。
+
+### 四·九·一、扫描方法：三源交叉
+
+一个 yaml 键要算「**有消费方**」，必须落在下面三类之一：
+
+| 源 | 依据 | 覆盖 |
+|---|---|---|
+| **框架元数据** | classpath 上任意 jar 的 `META-INF/spring-configuration-metadata.json` | Boot 4 每个 starter 都带这个文件 ⇒ 框架键的**权威清单** |
+| **自有前缀** | `@ConfigurationProperties(prefix = "...")` | 本域 `task.definitions` / `task.kafka`；跨域共享 `observability` / `rag.protection` |
+| **`@Value` 占位符** | 源码里 `@Value("${key}")` | 逐个消费点 |
+
+### 四·九·二、查出的三类孤儿键（**都不是 task 域独有 ⇒ 跨域共性**）
+
+#### ① 🔴 `spring.mybatis-plus.*` —— **前缀层级写错，三个键全是死键**
+
+| 事实 | 出处 |
+|---|---|
+| MyBatis-Plus 的真实前缀是**顶层** `mybatis-plus` | `MybatisPlusProperties` 的 `@ConfigurationProperties(prefix = "mybatis-plus")`（javap 实测字节码） |
+| 框架元数据里也是顶层 | `mybatis-plus-spring-boot-autoconfigure-3.5.17.jar` 的 metadata：`mybatis-plus.configuration.map-underscore-to-camel-case` |
+| **RAG 写成了 `spring.mybatis-plus.`** | `application.yml:40-45`（写在 `spring:` 段下）⇒ 层级多了一层 |
+| 探针实测：写错的层级**能读到值**、正确层级**读不到** | 用 `Binder` 直接读：`spring.mybatis-plus.configuration.map-underscore-to-camel-case = true`，而 `mybatis-plus.configuration.map-underscore-to-camel-case = null` |
+| ⚠️ **全仓 8 个 rpc 模块同款** | article / comment / favorite / follow / like / message / task / admin-rpc，**全部**写在 `spring:` 段下 |
+
+**行为影响：零**（三处逐一核过）：
+
+| 键 | 若真生效会怎样 | 实际（因为不生效） | 是否有差异 |
+|---|---|---|---|
+| `map-underscore-to-camel-case: true` | 开启驼峰映射 | MyBatis-Plus 的 `MybatisConfiguration` 构造器里**本来就是** `mapUnderscoreToCamelCase = true`（javap 实测字节码：`iconst_1; putfield mapUnderscoreToCamelCase`） | ❌ 无 |
+| `global-config.banner: false` | 关掉启动横幅 | 横幅照打（只影响启动日志） | ❌ 无（仅日志噪音） |
+| `global-config.db-config.id-type: INPUT` | 不用雪花 ID | task-rpc **全部写显式 SQL、不用 BaseMapper**（`TaskProgressMapper` / `UserLikeCountMapper` 都是 `@Insert`）⇒ `id-type` 无使用点 | ❌ 无 |
+
+⇒ **判定：不是行为漂移，是「配置面是死的」**（运维改 yaml 不报错也不生效，AGENTS.md §3.3.1 同款形态）。
+⇒ **不在本域单方面修**：全仓 8 个 rpc 模块同款，单改 task-rpc 会让本域与其它域**不一致**（与 DRIFT-TASK-API-004 同款处置）。
+
+#### ② 🔴 `otel.*` —— **Boot 4 根本没有 OTel 自动配置**（与 Go 有**观测差异**）
+
+| 事实 | 出处 |
+|---|---|
+| **Boot 4.0.8 全 jar 搜不到任何 `Otel*` 自动配置类** | 遍历 `~/.m2` 下所有 `org/springframework/boot/*/4.0.8/*.jar`，`OtelProperties` / `OtelAutoConfiguration` 命中数 = **0** |
+| Boot 3.2.5 至少还有 | `spring-boot-actuator-autoconfigure-3.2.5.jar` 里有 `actuate/autoconfigure/tracing/OpenTelemetryAutoConfiguration` |
+| Boot 4 的 actuator-autoconfigure 里 **0 个** tracing 类 | 实测 |
+| 本仓**无任何 Java 代码**读 `otel.*` 键 | 全仓 grep `getProperty("otel` / `@Value("${otel` ⇒ 空 |
+| 本仓**不注册**全局 OTel SDK | `GlobalOpenTelemetry.set` / `OpenTelemetrySdk.builder` 只出现在 `service/common` 的**测试**与 `communityfact/ProcessLogger`（后者无调用点）⇒ `GlobalOpenTelemetry.get()` 拿到的是 **no-op** 实现 |
+| ⚠️ **全仓 20 个 yaml 都有 otel 段** | article / comment / favorite / follow / hot / like / message / task / users 全部 |
+| **Go 侧确实导出 span** | `zrpc.MustNewServer(c.RpcServerConf, ...)` → `RpcServerConf` 继承 `ServiceConf` → `core/service/serviceconf.go:67 trace.StartAgent(sc.Telemetry)` ⇒ `Telemetry{Endpoint: jaeger:4317, Batcher: otlpgrpc}` **生效** |
+
+⇒ **判定：存在观测差异**（Go 把 span 发到 jaeger，Java 侧是 no-op tracer）。
+⇒ ⚠️ **但这不是 task 域能单方面修的**：① 缺的是 `spring-boot` 的 OTel 自动配置模块（**共享构建基建**）；
+② 修复方式必然是**全仓统一**（20 个 yaml + 共同依赖）⇒ 属**跨域**。
+
+#### ③ ⚠️ `spring.jpa.hibernate.ddl-auto` —— 本模块**无 JPA 依赖**
+
+- task-rpc 用 MyBatis-Plus，pom 里**没有** `spring-boot-starter-data-jpa` ⇒ `ddl-auto` 无人绑定。
+- **无行为影响**：本就没有 JPA，不存在「自动建表」风险。（⚠️ 但 `spring.jpa.*` 在 6 个 rpc 模块的 yaml 里都有 —— 同款共性。）
+
+#### ④ ⚠️ `task.reward.group-name` —— **两侧都是死配置**（不是漂移）
+
+| 事实 | 出处 |
+|---|---|
+| Go 侧 `GroupName` 是**写死的常量**，Go yaml 里**根本没有**这个字段 | `service/task/rpc/internal/reward/type.go:10 GroupName = "task-reward-group"` |
+| 唯一消费点是**未启动**的 Worker | `reward/worker.go:39,57,87` 用 `GroupName`；而 `task.go:35 //go Init.StartInitReward(ctx)` **被注释**、`initReward.go` **整文件是注释** |
+| RAG 侧保留它只为配置面完整 | `application.yml:220` 的注释自己写了「只被 Worker 使用，而 Worker 没有被启动」 |
+
+⇒ **判定：不是漂移**（Go 是「压根没这个字段」，RAG 是「有但不生效」）⇒ 行为一致。
+
+### 四·九·三、固化成守门测试
+
+新增 [`TaskConfigKeyBindingContractTest`](../../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/config/TaskConfigKeyBindingContractTest.java)
+（**5 条，全绿**），断言四层：
+
+| # | 断言 | 作用 |
+|---|---|---|
+| 1 | 框架元数据**真的被读到**（> 500 个属性名 + 三个定点） | 阳性对照：证明扫描器不是空跑 |
+| 2 | 扫描器**能**识别孤儿键（不存在的键 / 错层级的键 ⇒ 判为孤儿） | 阳性对照：证明扫描器有识别能力 |
+| 3 | **主断言**：yaml 不得出现「无人认领且未登记」的键 | 以后新增死配置会被立刻抓住 |
+| 4 | **白名单纪律**：每条登记都必须**真的盖住至少一个孤儿键**，且写明原因 | 防止白名单写成空壳 / 变成「什么都往里塞」的逃生舱 |
+| 5 | 自有前缀（`task.*`）的每个键都**必须绑得到** `@ConfigurationProperties` 类的某个属性 | 守住 `initTtlDays ↔ init-ttl` 那类历史缺陷 |
+
+**白名单是「已知孤儿键」的显式台账**（每条带出处与定性），新增死配置必须显式登记才能过
+⇒ **静默放过 = 把「配置面看起来在管事、实际没在管事」重新引进来**（AGENTS.md §3.3.1）。
+
+#### ✅ 变异测试（三种都精确命中 ⇒ 非假绿）
+
+| 变异 | 期望 | 实测 |
+|---|---|---|
+| **① 把 `mybatis-plus` 段移回顶层**（修正前缀） | `spring.mybatis-plus.` 三个键不再是孤儿 ⇒ 白名单纪律断言必须红 | ✅ 红，报「白名单项 'spring.mybatis-plus.' 一个孤儿键都没盖到 ⇒ 该删这条登记」 |
+| **② 新增 `spring.kafka.consumer.bogus-typo-key`** | 主断言必须红并点名该键 | ✅ 红，报「出现「无人认领且未登记」的键：[spring.kafka.consumer.bogus-typo-key]」 |
+| **③ `init-ttl` → `init-ttl-days`**（复现历史缺陷 `initTtlDays`） | 绑定断言必须红 | ✅ 红，报「键 task.definitions.like.init-ttl-days 在 yaml 里存在，但绑不到 TaskSinkProperties」 |
+
+⚠️ **本测试自己踩过 3 个坑**（第一版 4 条红，其中 3 条是**测试自己的缺陷**、不是配置的）：
+1. **元数据分段前缀匹配是错的** —— Boot 4 的 metadata 只列**叶子**属性名（`spring.kafka.consumer` **不存在**），
+   若按「逐段前缀命中即放行」⇒ 任何 `spring.kafka.consumer.<随便>` 都被判成「有消费方」⇒ 扫描器形同虚设。
+   ⇒ 改为**精确匹配 + 显式登记的 map 型前缀**（`logging.level` / `management.metrics.tags` / `spring.kafka.*.properties`）。
+2. **不能用 `binder.bind(prefix + "." + subKey, Target.class)` 判绑定** —— 本域属性是**嵌套**的
+   （`TaskSinkProperties.like.initTtl`）⇒ 那样判必然全部「绑不上」。
+   ⇒ 改用 `binder.bind(prefix, Bindable.of(Target), BoundPropertiesTrackingBindHandler)`
+   记录**真正被绑定的属性名**再比对。
+3. **`BoundPropertiesTrackingBindHandler` 的消费者是 `ConfigurationProperty`**（`getName()` 返回
+   `ConfigurationPropertyName`，不是 String）⇒ 必须 `.toString()`。
+⇒ 详见 [`docs/Pitfalls/task/rpc.md`](../../Pitfalls/task/rpc.md) 的 PITFALL-TASK-RPC-23 ~ 25。

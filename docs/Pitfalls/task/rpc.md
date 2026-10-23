@@ -967,3 +967,97 @@ bash 的变量名解析会把**非 ASCII 字节**也算进名字 ⇒ `$off，` �
 4. ⇒ 落地：`tools/difftest/run-task-offset-oldest.sh`
    —— 阶段 B「先灌消息」→ 阶段 C「再起消费者」，并配**阴性对照**（kq 必须跳过预灌消息）
    与**阳性对照**（启动后投递的消息必须被消费）⇒ 探针**有区分力**。
+
+---
+
+## 🔴 PITFALL-TASK-RPC-23 · 「按段前缀匹配元数据」会让配置键扫描器**形同虚设**
+
+### 现象
+
+写「yaml 键是否有消费方」的扫描器时，第一版把框架元数据（`spring-configuration-metadata.json`）
+按**分段前缀**匹配：只要 `spring`、`spring.kafka`、`spring.kafka.consumer` 里有任意一段命中元数据，
+就认为该键**任意深度**的后代都有消费方。
+
+⇒ 结果：`spring.kafka.consumer.this-key-does-not-exist` 也被判成「有消费方」
+⇒ **扫描器抓不到任何孤儿键**，测试形同虚设。
+
+### 根因
+
+**Boot 4 的元数据只列叶子属性名**，父节点**根本不存在**：
+
+```
+'spring'                      in metadata: False
+'spring.kafka'                in metadata: False
+'spring.kafka.consumer'       in metadata: False
+'spring.kafka.consumer.auto-offset-reset'  in metadata: True
+```
+
+⇒ 「父节点在元数据里」这件事**不成立** ⇒ 按段前缀匹配等于「无条件放行」。
+
+### 教训
+
+1. ⭐ 元数据匹配必须**精确名**；真正「任意子键」的只有 **map 型属性**，
+   且那些在元数据里也只列**父节点**（如 `logging.level`、`management.metrics.tags`）
+   ⇒ 这类必须**显式登记成 map 型前缀**，不能靠猜。
+2. ⭐ **扫描器自己必须被阳性对照验证**：造一个**故意不存在**的键，断言它被判为孤儿。
+   没有这一步，扫描器可能「什么都没扫到」而测试全绿。
+3. ⇒ 落地：`TaskConfigKeyBindingContractTest` 的断言 1（阳性对照：元数据真被读到）
+   与断言 2（阳性对照：扫描器能识别孤儿键）。
+
+---
+
+## 🔴 PITFALL-TASK-RPC-24 · 用 `binder.bind(prefix + "." + subKey, Target.class)` 判「绑得上」**必然误判**
+
+### 现象
+
+想验证「yaml 里这个键能不能绑到某个属性上」，第一版写成：
+
+```java
+binder.bind(prefix + "." + subKey, Target.class).isBound()
+```
+
+⇒ 对 `task.definitions.article.done-ttl` 这种**嵌套**属性，**永远返回 false** ——
+即便 `TaskSinkProperties.Article` 里**确实有** `doneTtl` 字段。
+
+⇒ 第一版测试直接报「`task.definitions.article.done-ttl` 绑不到 TaskSinkProperties」，
+**看起来像配置有缺陷，实际是判定逻辑错了**。
+
+### 根因
+
+`Target.class` 是**根类**；`prefix + "." + subKey` 要求 Target 自身有**扁平的**属性名。
+而本域的属性是嵌套的（`TaskSinkProperties` → `like` / `article` → `initTtl`）
+⇒ 必须**先绑整个前缀**，再按嵌套结构走。
+
+### 教训
+
+1. ⭐ 判「某个 yaml 键是否被绑上」的正确姿势：
+   `binder.bind(prefix, Bindable.of(Target), new BoundPropertiesTrackingBindHandler(names::add))`
+   ⇒ handler 会记录**真正被绑定的属性名**，再拿 yaml 的键去比对
+   （比对时按 relaxed binding 口径归一化：去 `-`/`_` + 小写）。
+2. ⭐ Boot 4 的 `Binder.bind` **不接受裸 `Class`**，要 `Bindable.of(target)`。
+3. ⭐ **`BoundPropertiesTrackingBindHandler` 的消费者是 `ConfigurationProperty`**
+   （`getName()` 返回 `ConfigurationPropertyName`，**不是 String**）⇒ 必须 `.toString()`。
+4. ⭐ **「判定逻辑报错」与「被测对象有缺陷」要分开** —— 先证明判定逻辑本身是对的
+   （用一个**已知正确**的键做阳性对照），再让它去判别的键。
+   本例若没有阳性对照，就会把「测试写错」当成「配置有缺陷」⇒ **修错方向**。
+
+---
+
+## 🔴 PITFALL-TASK-RPC-25 · 「白名单」必须带**反向纪律**，否则会变成逃生舱
+
+### 现象
+
+配置键扫描器必然需要一张「已知孤儿键」白名单（否则框架特有的键会一直误报）。
+
+⚠️ **只登记不校验**的话，白名单会退化成「什么都往里塞 ⇒ 测试永远绿」的逃生舱。
+
+### 教训
+
+1. ⭐ 白名单每一条都必须**真的盖住至少一个当前的孤儿键**
+   ⇒ 孤儿键消失了（被修好了）就必须**删掉这条登记**，否则登记会变成永久性的例外。
+2. ⭐ 每条登记**必须写明原因与出处**（空原因 = 没查过）。
+3. ⭐ 新增 yaml 键若无人认领 ⇒ **必须显式登记才能过**
+   ⇒ 「静默放过」正是把「配置面看起来在管事、实际没在管事」重新引进来（AGENTS.md §3.3.1）。
+4. ⇒ 落地：`TaskConfigKeyBindingContractTest` 的断言 4（白名单纪律）。
+   ✅ 变异测试「把 `mybatis-plus` 段移回顶层」⇒ 该条登记立刻失效 ⇒ **测试变红**
+   ⇒ 证明白名单纪律**真的在生效**，不是摆设。
