@@ -622,6 +622,26 @@ Required Confirm: 跑 tools/difftest/exp-difftest-grpc-errors.sh（该脚本此�
                 对 admin 的 13 个 rpc 补一轮双侧 gRPC 对拍。
 ```
 
+> ✅ **2026-10-23 22:4x「台账 vs 实际」复核：本条已关闭（本条长期未销号，属台账病灶）。**
+>
+> **关闭依据**：
+> 1. 「2026-10-23 审计轮 §0」已实跑 `tools/difftest/exp-difftest-grpc-admin-errors.sh --stacks-up`
+>    ⇒ **18 个用例**的 gRPC 层双侧活体对拍，`cases=18 / code_mismatch=0 / payload_diff=0`；
+> 2. 「修复轮 §7.3」复跑同一脚本，数字**逐项相同**。
+>
+> **⚠️ 效力边界（关闭 ≠ 全覆盖）**：那 18 个用例**只覆盖错误路径**
+> （`*.notfound` / 空 invite / 坏 invite），成功路径只有 `login.ok` / `logout.ok` /
+> `getself.ok` / `getuserlist.empty`。⇒ 结论应读作
+> 「**13 个 RPC 的错误路径已双侧活体对拍**」，不是「13 个 RPC 全部闭环」。
+> 成功路径的已知缺口见「修复轮 §7.4」（`updateuser.ok` 缺失）。
+>
+> **本条长期挂着不销号这件事本身是个病灶**：Required Confirm 写的是
+> 「跑 `exp-difftest-grpc-errors.sh`」—— 而审计轮**已经跑了**（用的是新增的
+> `-admin-` 变体），却没人回来把本条销掉。
+> ⇒ 与 AGENTS.md §6.3「状态表纪律」同源：**未核对 ⇒ 按 UNKNOWN 处理**，
+> 而 UNKNOWN 条目不销号，下一轮 agent 会重复投入。
+> **本轮起：每轮结束必须回头销 UNRESOLVED。**
+
 ### UNRESOLVED-ARPC-002 —— 超时是否 min 客户端 deadline
 
 ```
@@ -1180,6 +1200,10 @@ Username="zzz_null_status_go"
 
 ## 5. 本轮未闭环的项（逐条带原因）
 
+> ⚠️ **2026-10-23 22:4x「台账 vs 实际」复核：本表已被「修复轮 §5」取代，勿按本表判现状。**
+> 本表写于审计轮结束时；其后修复轮已关闭其中第 1、2、4、6 项（并新增了跨域上报项）。
+> **权威现状见「修复轮 §5」，逐条对照表见「复核轮 §9」。**
+
 | # | 项 | 状态 | 原因 / 下一步 |
 |---|---|---|---|
 | 1 | `admin_admin` / `admin_invite` 的**时间列** `timestamp` → `timestamptz`（DRIFT-ARPC-004 里的 6 处） | 🔴 未修 | DDL 在 `users-common`（`03_create_admin.sql:55-56`、`04_create_admin_invite.sql:37-41`）。⚠️ **不能照抄 `users_user` 那轮的改法**：`users_user` 的时间值**不进入任何 proto/DTO**（`_shared.md` 已核），而 **`admin_invite.expires_at` 是 wire 可见的**（`CreateInviteCodeResp.expires_at` = Unix 秒 ⇒ 两侧算法一致、**当前 wire 不可见差异**），但 `expires_at` 的**比较**（10 分钟有效期）在跨时区多实例下会偏一个时区差 ⇒ 每张表的敏感点不同，必须逐表评估 |
@@ -1572,3 +1596,123 @@ AssertionFailedError: … before=1767323045 after=1767294245
 ✓ inviteExpiryJudgedOnAbsoluteInstantNotWallClock 跨时区未过期邀请码被接受 / 已过期被拒（PERMISSION_DENIED）
 ✓ ddlReplayDoesNotShiftInstantsUnderNonUtcSession 非 UTC 会话下重放 DDL，时刻不漂移（变异实测会红）
 ```
+
+---
+
+# 2026-10-23 复核轮（台账 vs 实际 · 逐条打回代码）
+
+> **核对日期**：2026-10-23 22:4x–23:1x　**分支**：`align/users-admin`
+> **方法**：把三档台账里每一条「已修 / 未修 / 已关闭 / N 处」断言**逐条打回代码、DDL、Go 源码核**，
+> 核不上的当场改。**不新增对齐项**，只判「台账说的是否等于代码是的那样」。
+> 依据：AGENTS.md §6.3 状态表纪律 —— **任何「已修/未修」断言都必须带核对日期，否则按 UNKNOWN 处理**。
+
+## 1. 抽样复核通过的断言（不必改）
+
+| 台账断言 | 核验方式 | 结果 |
+|---|---|---|
+| FIX-ARPC-001「5 处 `update_time = CURRENT_TIMESTAMP`」 | `grep -c` 实测 | ✅ **5 处**，全在 `AdminDomainService` |
+| DRIFT-ARPC-008「admin-rpc 的 `status = 0L` 与 Go 等价，不要删」 | 看 `domain/UserEntity.java:109` | ✅ `= 0L` 在，javadoc 的三段 Go 出处完整 |
+| DRIFT-ADMINAPI-011「400 的 `Content-Type` 已带 charset」 | `GlobalExceptionHandler.java:192` | ✅ `headers.set(CONTENT_TYPE, "text/plain; charset=utf-8")` |
+| A-1「`user-api` 同款 charset 缺失仍在」 | `user-api/.../GlobalExceptionHandler.java:216` | ✅ 仍是 `setContentType(MediaType.TEXT_PLAIN)`，**A-1 仍有效** |
+| 「`AdminEntity` 用 text handler、`UserEntity` 用 jsonb handler」 | 两个 `@TableField` 实读 | ✅ 拆分正确，**没误改 users_user 那张表** |
+| 「`users_user.extra_info` 仍是 JSONB（跨域漂移仍在）」 | `01_create_user.sql:41` | ✅ 仍 `JSONB`，§5 第 1 项**仍然成立** |
+| N-1 / SD-08「黑名单 401 业务码是 1006」 | `AdminJwtAuthInterceptor.java:124` 注释 + 对拍实测 | ✅ |
+
+## 2. 🔴 新发现（台账**从未记录**）：`admin_invite.update_time` 不推进
+
+**这是本轮唯一的「新漂移」，且它一直就在 FIX-ARPC-001 的射程内被漏掉了。**
+
+| | 内容 |
+|---|---|
+| **Go 行为** | `UpdateAdminInviteUsedTx`（`admin.go:141-146`）用 **`Updates(map[string]any{…})`** 标记 invite 已用，**同时补写 `update_time`** |
+| **Go 消费点** | `gorm.io/gorm@v1.31.1/callbacks/update.go:235-255` —— autoUpdateTime 的补写逻辑位于 **map 更新分支**内（`default:` 结构体分支**之前**）；本调用无 `Select` ⇒ `selectColumns` 空、`restricted=false` ⇒ **条件成立** |
+| **RAG 行为** | `AdminCreateAtomicService` W4 只 set 了 `used_by_uid` / `used_at`，**没有 `update_time`** |
+| **可观察性** | ❌ **不可观察** —— `admin_invite.update_time` 不在 `admin.proto` 任何 message 里，业务代码也从没读过它 |
+| **处置** | ✅ **已补**（`.setSql("update_time = CURRENT_TIMESTAMP")`）+ 守门测试 |
+
+> ⚠️ **本条的价值不在「修了什么」，而在「为什么静态 review 连续两轮都漏了它」**：
+> ① 不可观察 ⇒ 对拍永远看不到；② 它在**另一个类**里（`AdminCreateAtomicService`），
+> 而 FIX-ARPC-001 的修复范围只盯着 `AdminDomainService`；
+> ③ 「map 更新不推进 autoUpdateTime」是个**看起来很合理**的误解。
+> ⇒ 与 P-5「79 条全绿仍漏 6 条」同型：**绿测试抓不到不可观察的漂移**。
+
+### 连带订正：「5 处 UPDATE」这个计数是错的
+
+`AdminDomainService.java` 的注释与本台账 FIX-ARPC-001 都写「全部 **5** 个 UPDATE 入口」——
+那是**只数了 `AdminDomainService` 自己**。⇒ **全组件正确总数是 6 处**
+（本类 5 + `AdminCreateAtomicService` 1）。两处注释均已订正。
+
+**新增守门**：`AdminRpcGoWireParityTest#createAdminAdvancesInviteUpdateTimeLikeGo`
+（真 PG + 真 gRPC）：造一条 `update_time=2020-01-01` 的 invite → 真调 `createAdmin`
+→ 断言 `update_time` 前进，且 `used_by_uid` 已被写入（防「改坏 W4 主行为」）。
+
+## 3. 🟡 陈旧断言：api.md 的 A-2 与本轮结论**自相矛盾**
+
+`docs/DRIFT/users/admin/api.md` 有**两处**仍写着
+「`docs/Intentional_Deviations/users/**` 下 **6 个文件全是 0 字节**」
+（原第 999 行正文 + §5 表格的 A-2 行）。
+
+而本轮已把 **admin 域 3 个补成正式签字档** ⇒ **同一文件内两处断言直接打架**。
+⇒ 已加删除线 + 订正批注（admin 3 个已补，`users/user` 3 个仍空）。
+
+> ⚠️ **这类矛盾比「漏写」危险**：后来者读到 §5 表格会以为洞还在，
+> 可能重做一遍补档工作；读到正文又以为已补。**同一文件内必须自洽。**
+
+## 4. 🟡 陈旧 + 悬空引用：`UserEntity.java` 的跨域描述
+
+`domain/UserEntity.java` 的 javadoc 原文：
+
+> 「⚠️ 反向提醒：`users/user` 域在 2026-10-23 把同名字段的 `= 0L` 删掉、并加了
+> fail-closed 守卫……已作为跨组件问题上报（见 `docs/DRIFT/users/admin/rpc.md` **§11**）。」
+
+**两处都错了**：
+
+1. **内容已失效** —— `users/user` 域随后**撤销**了那个改动
+   （主仓 commit `9ae121d`「撤销 V-001 反向判定 —— Go 侧 NULL status 是 fail-open 而非 fail-closed」）。
+   实测：主仓与 `align/users-user` **两条分支**上 `user-rpc` 的 `status` 字段
+   **都已恢复 `= 0L`** ⇒ 两侧现在一致，**都不应删**。
+2. **指针悬空** —— `rpc.md` 最高只到 **§10**，且三个追加轮次各自从 §0 重启，
+   **`§11` 从来不存在**。
+
+⇒ 已重写为准确描述，并改指真正的权威位置（「审计轮 §3 DRIFT-ARPC-008」）。
+
+> ⚠️ **元教训**：跨域引用是台账腐坏的**头号来源**。
+> 本域的结论会被别人改掉，而**本域的注释仍在断言那个旧世界**。
+> ⇒ 凡 javadoc/台账里引用**别的域的行为**，必须标注核对日期，
+> 并在写「跨域问题上报」时**注明该上报是否已被对方撤销**。
+
+## 5. 🟡 未销号：`UNRESOLVED-ARPC-001` 早已被推翻，却一直挂着
+
+该条写「admin-rpc **没有任何**双侧活体对拍证据」，
+Required Confirm 是「跑 `exp-difftest-grpc-errors.sh`」。
+
+**而「2026-10-23 审计轮 §0」已经跑了**（用的是新增的 `-admin-` 变体，18 用例），
+只是**没人回头销这条**。⇒ 本轮已补销号，并写明效力边界
+（18 例**只覆盖错误路径**，成功路径只有 4 个 ⇒ 不是「13 个 RPC 全部闭环」）。
+
+> **这条本身是个流程病灶**：UNKNOWN 条目不销号 ⇒ 下一轮 agent 会重复投入。
+> ⇒ **纪律（本轮起）**：每轮结束必须回头销 UNRESOLVED，
+> 哪怕结论是「只关闭了一部分」也要写清边界。
+
+## 6. 🟡 未标注取代：审计轮 §5 的「本轮未闭环的 10 项」
+
+审计轮 §5 写于 22:0x 前后；修复轮已关闭其中第 1（时间列）、2（extra_info）、
+4（ARPC-002）、6（ARPC-005）项，并新增了跨域上报项。
+但**旧表没有任何「已被取代」的标注** ⇒ 后来者可能按旧表判现状。
+⇒ 已在该节顶部加取代提示 + 指向修复轮 §5 与本节。
+
+## 7. 本轮未做（明确留给下一轮 / 别人）
+
+| # | 项 | 原因 |
+|---|---|---|
+| 1 | 🔴 `users_user.extra_info` jsonb→text | 跨域，DDL 归 users/user 域。**复核确认该漂移仍在**（`01_create_user.sql:41` 仍 `JSONB`），§5 第 1 项**继续有效** |
+| 2 | ARPC-006 零手写 span | 需 `service/common` 的 OTel 装配，不在本域 |
+| 3 | UNRESOLVED-ARPC-002 / -003 / -005 | 未做故障注入 / 需 user-rpc 侧结论 |
+| 4 | `updateuser.ok` gRPC 对拍用例 | `tools/` 共享资产，按 §5.3 不在本 worker 所有权内 |
+| 5 | **给 `AGENTS.md` §0 销账** | 共享索引/政策文件，须合并时统一更新；已把依据备在本节 |
+
+## 8. 本轮实测数字（复核轮）
+
+| 模块 | 测试类 | tests | failures | errors | **skipped** |
+|---|---|---|---|---|---|
+| `admin-rpc` | 14 | **93**（92 + 本轮 W4 守门 1） | **0** | **0** | **0** |

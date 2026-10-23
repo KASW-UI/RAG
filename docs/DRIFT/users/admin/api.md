@@ -996,7 +996,9 @@ RAG 是 `{"code":1006,"msg":"TOKEN已过期","data":null}`。
 - `diff.py` 的 assert 消息写「N-1 已签字」，指的是 `admin/_shared.md` 的 **N-1**（401 的 **body 形状**）；
 - 而 **N-1 从未声明「业务码 401 → 1006」** —— 上文 §7 的 DRIFT-ADMINAPI-004 自己就写了
   「⚠️ 留档口径与实际输出不一致 …… **它从未声明「业务码 401 → 1006」** ⇒ 属于未签字的语义改变」；
-- 且 `docs/Intentional_Deviations/users/**` 下 **6 个文件全是 0 字节**（空占位）：
+- ~~且 `docs/Intentional_Deviations/users/**` 下 **6 个文件全是 0 字节**（空占位）~~
+  **（2026-10-23 22:4x「台账 vs 实际」复核：本行已过期 —— admin 域 3 个已补，
+  `users/user` 域 3 个仍空，详见本文件末尾「修复轮 §4」）**：
   `users/_shared.md`、`users/admin/{_shared,api,rpc}.md`、`users/user/{api,rpc}.md`
   ⇒ **没有任何一份正式的签字文件覆盖它**。
 
@@ -1031,7 +1033,7 @@ RAG 是 `{"code":1006,"msg":"TOKEN已过期","data":null}`。
 | # | 问题 | 证据 | 建议 |
 |---|---|---|---|
 | **A-1** | 🔴 **`user-api` 有**同款 charset 缺失**：`user-api/.../advice/GlobalExceptionHandler.java:216` 也是 `headers.setContentType(MediaType.TEXT_PLAIN)` ⇒ 400 的 `Content-Type` 同样没有 charset | 与本文件 §1 同型（同一段 javadoc 都写着「Go 的 `net/http.Error` 设 `text/plain; charset=utf-8`」，但代码没做） | 归 users/user owner。⚠️ `tools/difftest/check-plaintext400-headers.sh` **只打 user-api** ⇒ 修 user-api 时顺手把该脚本的断言加严（断言 charset 存在）才是根治 |
-| **A-2** | ⚠️ **`docs/Intentional_Deviations/users/**` 下 6 个文件全是 0 字节**（空占位） | `wc -c` 实测全为 0 | N-1 / N-4 / N-5 等「已签字」条目目前**只存在于 `docs/DRIFT/users/admin/_shared.md`**，没有进签字档 ⇒ 下一个 agent 按 `docs/Intentional_Deviations/_INDEX.md` 检索会查不到。**该目录不在本 worker 所有权内 ⇒ 只报告** |
+| **A-2** | ⚠️ **~~`docs/Intentional_Deviations/users/**` 下 6 个文件全是 0 字节（空占位）~~**<br>**2026-10-23 22:4x 复核订正：admin 域 3 个已补齐，`users/user` 域 3 个仍空** | `wc -c` 实测全为 0 | N-1 / N-4 / N-5 等「已签字」条目目前**只存在于 `docs/DRIFT/users/admin/_shared.md`**，没有进签字档 ⇒ 下一个 agent 按 `docs/Intentional_Deviations/_INDEX.md` 检索会查不到。**该目录不在本 worker 所有权内 ⇒ 只报告** |
 | **A-3** | ⚠️ **DRIFT-ADMINAPI-004（黑名单 401 的业务码 `401`→`1006`）在 `diff.py` 里被标成「N-1 已签字」**，但 N-1 只签了 body 形状 | §3 | 要么补一份正式签字，要么改 `diff.py` 的 assert 措辞（**`tools/` 是共享资产，不在本 worker 所有权内 ⇒ 只报告**） |
 | **A-4** | ⚠️ **§9 UNRESOLVED-002（admin-api 的 text/plain 400 没有真实 Tomcat 守门）** —— **本轮已部分关闭** | 本轮用 `curl -i` 直打真实 Tomcat 两侧栈，抓到了 `Content-Type` / `nosniff` / `Content-Length` / body 逐字节 | **仍缺一条可重复执行的脚本**：`tools/difftest/check-plaintext400-headers.sh` 的两个端口常量是 user-api 的（`RAG_USER=59900` / `GO_USER=18888`），**没有 admin 入口** ⇒ 补 admin 入口需要改共享脚本 ⇒ 归 `tools/` owner。⚠️ 但本轮已证明：**MockMvc 断言完整头值字符串是错的**（见 §1「测试方法论」）⇒ 补脚本时也要注意断言形状 |
 

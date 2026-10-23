@@ -1145,6 +1145,12 @@ public class AdminDomainService {
      * 结果：Go 侧每次 {@code Updates} 都推进的 update_time，在本类<b>全部 5 个 UPDATE 入口</b>
      * 上<b>永远停在建行那一刻</b>。不报错、不告警、SQL 全部成功。
      *
+     * ⚠️ <b>「5 个」是本类的口径，不是全组件的口径</b>（2026-10-23「台账 vs 实际」复核订正）：
+     * {@link AdminCreateAtomicService} 的 W4（标记 invite 已用）<b>也是一条 UPDATE</b>，
+     * 此前同样漏了 —— 该轮复核才发现并补上。
+     * ⇒ <b>全组件正确总数是 6 处</b>：本类 5 + {@code AdminCreateAtomicService} 1。
+     * <b>凡引用「5 处 UPDATE」的地方（含 DRIFT-ARPC-001 / FIX-ARPC-001）都应读作 6 处。</b>
+     *
      * <h3>Go 出处（声明点 + 消费点）</h3>
      * <ul>
      *   <li><b>声明点</b>：{@code service/user/admin/rpc/internal/model/data_model.go:12-13}

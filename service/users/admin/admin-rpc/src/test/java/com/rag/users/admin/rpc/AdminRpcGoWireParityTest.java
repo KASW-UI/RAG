@@ -381,6 +381,69 @@ class AdminRpcGoWireParityTest {
     }
 
     // ==================================================================
+    // 4b. createAdmin 的 W4 —— admin_invite.update_time 必须推进
+    // ==================================================================
+
+    /**
+     * 🔴 2026-10-23「台账 vs 实际」复核新发现：这条 UPDATE 此前<b>被漏掉了</b>。
+     *
+     * <p><b>Go 出处（消费点，不是 struct tag 声明行）</b>：
+     * <pre>
+     *   service/user/admin/rpc/internal/model/admin.go:141-146
+     *     tx.Model(&amp;AdminInvite{}).Where("id = ?", id).Updates(map[string]any{
+     *         "used_by_uid": …, "used_at": … })
+     *
+     *   gorm.io/gorm@v1.31.1/callbacks/update.go:235-255
+     *     if !stmt.SkipHooks &amp;&amp; stmt.Schema != nil {
+     *       for _, dbName := range stmt.Schema.DBNames {
+     *         field := stmt.Schema.LookUpField(dbName)
+     *         if field.AutoUpdateTime &gt; 0 &amp;&amp; value[field.Name] == nil &amp;&amp; value[field.DBName] == nil {
+     *           … set = append(set, clause.Assignment{Column: …update_time…, Value: now})
+     *   } }
+     * </pre>
+     * 关键：这段位于 <b>map 更新分支</b>内（{@code default:} 结构体分支<b>之前</b>），
+     * 而本调用既无 {@code Select}（⇒ {@code selectColumns} 空、{@code restricted=false}）
+     * 也没在 map 里带 {@code update_time} ⇒ <b>条件成立，Go 确实会补写</b>。
+     * ⇒ <b>「map 更新不推进 autoUpdateTime」是个常见误解</b>，本条把它钉死。
+     *
+     * <p><b>可观察性</b>：{@code admin_invite.update_time} 不在 {@code admin.proto}
+     * 的任何 message 里、业务代码也从没读过它 ⇒ 补它<b>不改变任何可观察行为</b>，
+     * 属「让 DDL 行为与 Go 同构」的纯对齐。
+     *
+     * <p><b>为什么仍要测</b>：正因为不可观察，静态 review 极容易再漏一次
+     * —— 而它一旦漂移，将来若有人给 invite 加「最后使用时间」类字段就会读到错值。
+     */
+    @Test
+    @DisplayName("✅ createAdmin 的 W4 推进 admin_invite.update_time（对齐 Go 的 map 分支 autoUpdateTime）")
+    void createAdminAdvancesInviteUpdateTimeLikeGo() {
+        String code = "ADM-UPDATETIME-0001";
+        seedUsableInvite(code);
+        Long before = jdbcTemplate.queryForObject(
+                "select extract(epoch from update_time)::bigint from admin_invite where code = ?",
+                Long.class, code);
+        assertNotNull(before, "种子数据必须存在");
+
+        Outcome o = capture((Consumer<StreamObserver>) obs -> grpc.createAdmin(CreateAdminReq.newBuilder()
+                .setUsername("invite-time-boss").setPassword("p")
+                .setInviteCode(code).build(), obs));
+        assertNull(o.error, "用有效邀请码建号应成功: " + o.error);
+
+        Long after = jdbcTemplate.queryForObject(
+                "select extract(epoch from update_time)::bigint from admin_invite where code = ?",
+                Long.class, code);
+        assertNotNull(after, "invite 行必须还在");
+        assertTrue(after > before,
+                "W4 标记 invite 已用时必须同时推进 update_time（Go 的 GORM map 分支会补写）。"
+                        + "before=" + before + " after=" + after
+                        + " —— 若本断言失败，说明 W4 的 setSql(\"update_time = CURRENT_TIMESTAMP\") 被删了");
+
+        // 顺带确认 W4 的主行为没被这次改动影响
+        Long usedBy = jdbcTemplate.queryForObject(
+                "select used_by_uid from admin_invite where code = ?", Long.class, code);
+        assertNotNull(usedBy, "邀请码必须被标记为已用");
+    }
+
+    // ==================================================================
     // 辅助
     // ==================================================================
 

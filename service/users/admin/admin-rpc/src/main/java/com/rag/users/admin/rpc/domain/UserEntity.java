@@ -97,10 +97,18 @@ public class UserEntity {
      * <p><b>⇒ 本字段的 {@code = 0L} 与 Go 等价，<b>不要</b>删</b>：
      * 删掉它会让本组件读出 {@code null}（而 Go 读出 0），
      * 在「users_user.status 可空」的部署形态下就是<b>新的漂移</b>。
-     * ⚠️ 反向提醒：{@code users/user} 域在 2026-10-23 把同名字段的 {@code = 0L} 删掉、
-     * 并加了「status 为 null ⇒ fail-closed 抛 INTERNAL」的守卫
-     * （{@code UserDomainService#login}）—— 那一条<b>与 Go 的实际行为相反</b>，
-     * 已作为跨组件问题上报（见 {@code docs/DRIFT/users/admin/rpc.md} §11）。
+     * <p><b>跨域现状（2026-10-23 22:4x「台账 vs 实际」复核订正）</b>：
+     * 本注释此前写「{@code users/user} 域把同名字段的 {@code = 0L} 删掉、并加了
+     * fail-closed 守卫，那条与 Go 相反，已作跨组件问题上报」——
+     * <b>该描述现已失效</b>：{@code users/user} 域随后<b>撤销</b>了那个改动
+     * （主仓 commit {@code 9ae121d}「撤销 V-001 反向判定 —— Go 侧 NULL status 是
+     * fail-open 而非 fail-closed」），主仓与 {@code align/users-user} 两条分支上
+     * {@code user-rpc} 的 {@code status} 字段<b>都已恢复 {@code = 0L}</b>。
+     * ⇒ <b>两侧现在一致，且都不应删 {@code = 0L}</b>。
+     * <br>⚠️ 原文引用的台账章节「{@code docs/DRIFT/users/admin/rpc.md §11}」<b>不存在</b>
+     * （该文件最高只到 §10，且三个追加轮次各自从 §0 重启）⇒ 已删除该悬空指针。
+     * 本条结论的权威记录改指
+     * {@code docs/DRIFT/users/admin/rpc.md}「2026-10-23 审计轮 §3 DRIFT-ARPC-008」。
      *
      * <p><b>守门</b>：{@code AdminRpcGoWireParityTest#nullStatusColumnReadsAsZeroLikeGo}
      * （真 PG）把本行为钉死。
