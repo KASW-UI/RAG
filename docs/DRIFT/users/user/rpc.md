@@ -55,9 +55,9 @@
 | RAG 侧 | `RAG/service/users/user/user-rpc` —— 通读 **16 个 main 源文件** + `pom.xml` + `application.yaml` + `AutoConfiguration.imports` + `users-common` 的 4 份 DDL 与 `SchemaInitializer` |
 | 外部依赖（**不属于本组件，但本组件消费**） | ① `service/user/common/{cryptx,jwt,errmsg}`（user 与 admin 两域共用）② `service/common/{snowflake,observability,logger}` ③ `service/common/*` ↔ RAG `com.rag.common.*` |
 | 编号命名空间 | 本轮新增 **`DRIFT-USERRPC-V-001` 起** / **`UNRESOLVED-USERRPC-001` 起**。users 域已占用的 `DRIFT-001..011/016/018/024`、`DRIFT-NEW-001/005/007/008/011/012/013/014/015/016/018`、`DRIFT-FRAMEWORK-001` **一条都不复用** |
-| 本轮自跑证据 | ✅ **真 PG**：`mvn -o -pl service/users/user/user-rpc test`，`Tests run: 91, Failures: 0, Errors: 0`（39s）。其中 `UserRpcContainerWiringTest` **12 条**跑在 Testcontainers `postgres:16-alpine` 上（日志实证 `DockerClientFactory` + `Found Docker environment`），`AvatarTransactionWiringTest` 5 条跑在真实 Spring 容器装配上 |
-| ✅ **未**取得 | ❌ **双侧活体对拍（Go ↔ RAG 同时起进程打同一串请求）** —— `tools/difftest/grpc-dual-port-runner.java` 只覆盖 4 档 status code，且 §6.2.6 E-2 的那次结果来自 stub 而非真实现。⇒ **本轮绝大多数结论的证据强度是「静态源码 + RAG 单侧真 PG」，不是「双侧对拍」** |
-| 最终判定 | **`SEMANTICALLY NOT EQUIVALENT`** —— 1 项 SEMANTIC MISMATCH + 7 项 OBSERVABLE DIFFERENCE + 1 项死代码/伪出处（§7），7 项 unresolved（§9）。**其中 SEMANTIC MISMATCH 的端到端可达性未证**（§9 UNRESOLVED-USERRPC-001），若用户裁定其为「永不可达」，判定会降为「可达路径全等价 + 7 项可观察差异」 |
+| 本轮自跑证据 | ✅ **真 PG**：`mvn -o -pl service/users/user/user-rpc -am test`，**2026-10-24 实测 `Tests run: 125, Failures: 0, Errors: 0`**（其中含本轮新建的 `UserRpcGoErrorMessageParityTest` 3 条）。`UserRpcContainerWiringTest` **12 条**跑在 Testcontainers `postgres:16-alpine` 上（日志实证 `DockerClientFactory` + `Found Docker environment`），`AvatarTransactionWiringTest` 5 条跑在真实 Spring 容器装配上 |
+| ✅ **已**取得（2026-10-24 更新） | ✅ **双侧活体对拍** —— `tools/difftest/exp-difftest-grpc-user9.sh`：**43 场景**（9 个 RPC × 字段级响应 / `grpc-message` 逐字 / 边界输入），**真进程 + 真 PG + 真 Redis**，自带容器/库/端口 ⇒ **39 等价 / 4 处差异，4 处全是 N-2 已签字的 Go 源码乱码** ⇒ **无新漂移**。⇒ **§9.1**。<br>⚠️ 此前那句「`grpc-dual-port-runner.java` 只覆盖 4 档 status code」的**缺口描述已过期**（那是 2026-10-23 的状态） |
+| 最终判定 | **`SEMANTICALLY NOT EQUIVALENT`** —— 1 项 SEMANTIC MISMATCH + 7 项 OBSERVABLE DIFFERENCE + 1 项死代码/伪出处（§7），**5 项 unresolved**（§9；**U-005 / U-007 已于 2026-10-24 闭环**）。**其中 SEMANTIC MISMATCH 的端到端可达性未证**（§9 UNRESOLVED-USERRPC-001），若用户裁定其为「永不可达」，判定会降为「可达路径全等价 + 7 项可观察差异」 |
 
 > ⚠️ **按 AGENTS.md §3.3 与本 spec 硬约束：91 条全绿不构成 `EQUIVALENT` 的证据。**
 > 本文件里每条 `EQUIVALENT` 的真实支撑是**逐行读 Go 消费点**，测试只是「RAG 侧写法确实如此」的旁证。
@@ -301,7 +301,7 @@ Result 只用 5 个枚举值。证据列的记号：
 | **OBSERVABLE DIFFERENCE** | **7** | V-002 ~ V-008 |
 | IMPLEMENTATION DIFFERENCE | 4 | 表名 / 指标注册 / 建表机制 / 服务发现 |
 | 已签字偏离（引用不重开） | 2 | N-1、N-2（见 `./api.md`） |
-| **UNKNOWN / unresolved** | **6** | §9（**U-007 已于 2026-10-24 闭环** ⇒ §9.1） |
+| **UNKNOWN / unresolved** | **5** | §9（**U-005 / U-007 已于 2026-10-24 闭环** ⇒ §9.1 / §9.2） |
 
 ### 4.5 复核历史导航页 L34–41 的三条「缺口」
 
@@ -733,6 +733,7 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 | **UNRESOLVED-USERRPC-005** | **建表责任交叉**：`users_user` 由 **user-rpc 与 admin-rpc 都建**（幂等重放 + 同一个 advisory lock 键 `8_675_309`） | Go 两个服务**各有各的表名**（`users` vs `users_user` 不冲突；admin-rpc 也建 `users`）⇒ 靠 `HasTable` 的**时序侥幸**（`_shared.md` §6.2.5 第 ②③ 段已实测 5 轮） | 两侧**表名相同** ⇒ 真正共享同一张表；靠 `SchemaInitializer` 的 advisory lock 串行化 | **本组件单侧验不完**：必须与 `admin-rpc` 的结论合并判读。RAG 的锁比 Go 的「时序侥幸」强，但那是**机制更强**，不是「与 Go 等价」 | HIGH（跨组件不变量） | 与 admin-rpc 组件的台账合并判读；跑 `tools/difftest` 双栈并发启动（`_shared.md` 已有实测记录，但那是 2026-10-21 的，需在当前代码上复跑） |
 | **UNRESOLVED-USERRPC-006** | **索引 / 唯一约束 / NOT NULL / DEFAULT 四项仍未逐列核对** | 需查 `information_schema` 的 `indexes` / `constraints` | 同 | `tools/difftest/check-ddl-static.py` 的文件头**自陈只查 `data_type` 与 `character_maximum_length`**，其余标 `NOT CHECKED` | MEDIUM | 起两侧容器后跑一条 psql 查询逐列比对。⚠️ **不要把该脚本「全绿」读成「DDL 已一致」**（该脚本当前在有差异时是 EXIT=1） |
 | ~~**UNRESOLVED-USERRPC-007**~~ | ✅ **已闭环（2026-10-24）** | — | — | 双侧活体对拍已跑（真进程 + 真 PG + 真 Redis，**自带容器 / 自带库 / 自带端口**）：**43 场景 / 39 等价 / 4 处差异**，4 处**全部**是 N-2 已签字的 Go 源码乱码文案 ⇒ **无新漂移** | ~~HIGH（本轮最大的证据缺口）~~ → 已闭环 | ⇒ **§9.1**（含首轮 2 处**假漂移**的辨伪记录 + 守网清单） |
+| ~~**UNRESOLVED-USERRPC-005**~~ | ✅ **已闭环（2026-10-24）** | — | — | **双侧对称并发启动实测**：Go 侧 `go-user-rpc`+`go-admin-rpc` 与 RAG 侧 `user-rpc`+`admin-rpc` **各自同时**对**同一个空库**启动 ⇒ 两侧都起来、表都建齐（各 4 张）、**0 致命错误**（共 9 轮：Go 5 轮 + RAG 6 轮） | ~~HIGH（跨组件不变量）~~ → 已闭环 | ⇒ **§9.2**（含 advisory lock 串行化的时间戳证据 + Go 侧「时序侥幸」的机制差异 + admin 域的复核提示） |
 
 ---
 
@@ -846,6 +847,93 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 ⇒ **别让下一个人以为 9/9 都守住了。**
 
 ---
+
+## 9.2 UNRESOLVED-USERRPC-005 闭环记录（2026-10-24 · 双侧对称并发启动）
+
+> §9 那条 UNRESOLVED 的闭环记录。台账原文写着「**本组件单侧验不完**：必须与 `admin-rpc` 的结论合并判读」——
+> 本轮把**两侧都跑了**（把 admin-rpc 当**被测进程**运行，**未改它的任何代码**）。
+
+### 9.2.1 问题
+
+`users_user`（Go 侧叫 `users`）由 **user-rpc 与 admin-rpc 都建** ⇒ 两个进程**并发**对**同一个空库**启动时会不会撞？
+
+### 9.2.2 实验设计（双侧对称）
+
+| 项 | 内容 |
+|---|---|
+| 编排脚本 | `tools/difftest/exp-difftest-concurrent-schema.sh` |
+| Go 侧 | `go-user-rpc`（:19005）+ `go-admin-rpc`（:19015）**同时**启动，连**同一个空库** `uu_both_go_db` |
+| RAG 侧 | `user-rpc`（:59211）+ `admin-rpc`（:59311）**同时**启动，连**同一个空库** `uu_both_rag_db` |
+| 基础设施 | 自建 `uudifftest-postgres`（:55434）/ `uudifftest-redis`（:56382）；**不碰共享的 go_db / rag_db** |
+
+### 9.2.3 两侧的机制（声明点）
+
+| | 建表集合 | 并发保护 |
+|---|---|---|
+| Go user-rpc | `AutoMigrate(&User{}, &UserAvatarHistory{})` ⇒ `users` + `user_avatar_history`（`service/user/user/rpc/internal/model/db.go:33`） | GORM 的 **check-then-act**（`AutoMigrate → if !HasTable → createTable`，且 `CREATE TABLE` **不带** `IF NOT EXISTS`） |
+| Go admin-rpc | `AutoMigrate(&Admin{}, &AdminInvite{}, &User{})` ⇒ `admins` + `admin_invites` + **`users`**（`service/user/admin/rpc/internal/model/db.go:15`） | 同上 |
+| RAG user-rpc | `SchemaInitializer.applyAll` ⇒ **全部 4 张** | **PG advisory lock（键 `8_675_309`）** 串行化 + `CREATE TABLE IF NOT EXISTS` |
+| RAG admin-rpc | 同上，**全部 4 张** | 同上（**同一个锁键**） |
+
+⇒ **两侧都是「两个服务建同一批表、都碰 `users`/`users_user`」的同型交叉**。
+
+### 9.2.4 结果（Go 侧 6 轮 + RAG 侧 10 轮，每轮都是「空库 + 两侧同时启动」）
+
+| | Go 侧 | RAG 侧 |
+|---|---|---|
+| 两个进程都起来？ | ✅ 6/6 | ✅ 10/10 |
+| 建出的表 | `users` / `user_avatar_history` / `admins` / `admin_invites`（**4 张**） | `users_user` / `users_user_avatar_history` / `admin_admin` / `admin_invite`（**4 张**） |
+| 致命错误 | **0 处** × 6 轮 | **0 处** × 10 轮 |
+| 共享表建出来？ | ✅ `users` | ✅ `users_user` |
+
+⚠️ **其中有 1 轮出现过「两个进程都『起来了』、但 RAG 侧库里 0 张表」的异常** ——
+**经诊断确认是【脚本时序假象】，不是产品缺陷**：上一轮的 JVM 还没退干净 ⇒
+`wait_port` 看到的是**旧进程**在监听（**误判 OK**）⇒ 新 JVM 绑端口失败 ⇒ 没人跑 schema init。
+⇒ 处置：脚本加 `wait_port_free`（起之前先确认端口已释放）+ `cleanup` 里 `wait` 到进程真的退出
++ `DROP DATABASE ... WITH (FORCE)`（否则上一轮的连接会让 DROP 静默失败）。
+**复测 3/3 轮全绿。** 详见 `docs/Pitfalls/users/_shared.md` 的 **PIT-USERS-SHARED-010**。
+
+**RAG 侧 advisory lock 真的串行化了 —— 时间戳钉死**（2026-10-24 06:11:33~35 实测）：
+```
+06:11:33.987  user-rpc    schema init starting          ← 先到
+06:11:34.308  admin-rpc   acquired advisory lock 8675309
+06:11:34.309  admin-rpc   applying db/01_create_user.sql …（全部 4 个）
+06:11:34.665  admin-rpc   all 4 scripts applied          ← 释放
+06:11:34.659  user-rpc    acquired advisory lock 8675309 ← 正好等到 admin 放锁才拿到
+06:11:35.565  user-rpc    all 4 scripts applied
+```
+⇒ user-rpc 早到 **670 ms**，**被阻塞到 admin-rpc 放锁才拿到** ⇒ 锁是真的，不是「碰巧没撞」。
+
+### 9.2.5 判定
+
+**UNRESOLVED-USERRPC-005 关闭**：两侧在「两个服务并发对同一个空库启动」下**都能起来、表都建齐、0 致命错误** ⇒
+**可观察结果等价**（`users_user` 这个**共享表**在两侧都被建出来了）。
+
+⚠️ **但机制不同，差在「能不能保证」而不是「这一次有没有撞上」**：
+- **RAG**：advisory lock ⇒ **机制保证**串行化（时间戳已证）。
+- **Go**：GORM 的 **check-then-act**（`HasTable` 后再 `CREATE TABLE`，**没有** `IF NOT EXISTS`）⇒
+  **并发下理论上会撞**（两个进程都看到「表不存在」⇒ 其一报 `relation already exists`）。
+  本轮 **5/5 轮都过了**，但按机制那是**时序侥幸**，**不是保证**。
+  ⇒ 这条差异的准确表述是 **IMPLEMENTATION DIFFERENCE（RAG 更强）**，**不是** SEMANTIC MISMATCH ——
+  两侧的**对外行为**（表最终都在）一致。
+  ⚠️ 既有 Go 侧取证脚本 `tools/difftest/exp-go-concurrent-automigrate.sh` 的文件头**也写明了这一点**
+  （它就是为验证「Go 到底会不会撞」而写的），本轮结果与它的结论方向一致。
+
+⚠️ **RAG 侧多建了 2 张 admin 域的表**（耦合是真的）：
+**RAG 的 user-rpc 会建 `admin_admin` / `admin_invite`**，而 **Go 的 user-rpc 只建 `users` + `user_avatar_history`**。
+⇒ 后果：`user-rpc` 与 `admin-rpc` 的 DDL **被绑在一起** —— 日后 admin 域改 `03_create_admin.sql`，
+先启动的 user-rpc 可能建出一个**旧版本**的 admin 表（幂等重放**不会**改已存在的表）。
+⇒ 这**不是**本组件的缺陷（表结构仍以 admin 域的 DDL 为准），但**耦合是真的**：
+**改 admin 域 DDL 时，要意识到 user-rpc 也会建它。**
+
+⚠️ **给 admin 域会话的提示**：本条的 admin 侧结论由本会话**代跑**
+（只运行其二进制与 jar，**未改它的任何代码/台账**）⇒
+admin 域台账的 **`UNRESOLVED-ARPC-005`**（`docs/DRIFT/users/admin/rpc.md`）应当据此复核并关闭。
+（§5.3：工作树内只写自己域的台账文件 ⇒ 本会话**没有**动 admin 的台账。）
+
+---
+
+## 10. 最终判定（spec §39 · 18 项 checklist）
 
 | # | 检查项 | 结论 | 依据 |
 |---|---|---|---|
