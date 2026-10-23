@@ -717,21 +717,53 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 - **Impact**：漏扫 ⇒ 保护层**静默消失**且不报错（AGENTS.md §3.3）。
 - **Required Confirmation**：补一条「上下文里这些 Bean 都存在」的装配层测试。
 
-### UNRESOLVED-007 —— `SecurityRpc` 的启动期行为在 `NonBlock:false` 下的差异
+### UNRESOLVED-007 —— `SecurityRpc` 的启动期行为在 `NonBlock:false` 下的差异 ✅ **已关闭（2026-10-24，零新代码）**
 - **Question**：若 Go 侧日后给 `SecurityRpcConf` 显式写 `NonBlock: false`，`zrpc.MustNewClient`
   会在 etcd 解析不到 `security.rpc` 时 **panic**，而 RAG 侧无此 client ⇒ **启动失败 vs 启动成功**。
-- **Why Unknown**：当前 yaml 未配 ⇒ 走 default `true`（`zrpc/config.go:30`）⇒ 不阻塞 dial。
+- **Why Unknown**（原文）：当前 yaml 未配 ⇒ 走 default `true`（`zrpc/config.go:30`）⇒ 不阻塞 dial。
   结论**依赖默认值**，不是设计对齐。
-- **Impact**：当前为零；改动 yaml 后立刻显形。
-- **Required Confirmation**：与真源维护者确认 `NonBlock` 是否会变；变更时同步登记为 DRIFT。
+- **✅ 关闭依据（2026-10-24 实测到消费点，结论已定）**：
+  | 事实 | 出处（消费点） |
+  |---|---|
+  | `NonBlock` 的 tag 默认值 = **true** | `go-zero@v1.10.2/zrpc/config.go:30` `NonBlock bool \`json:",default=true"\`` |
+  | 消费点：`NonBlock` ⇒ `WithNonBlock()` / `WithBlock()` | `zrpc/client.go:65-69` |
+  | `WithBlock()` ⇒ `options.NonBlock = false`（**阻塞 dial**） | `zrpc/internal/client.go:147-151` |
+  | `MustNewClient` ⇒ `logx.Must(err)` ⇒ **panic** | `zrpc/client.go:50-54` |
+  | Go 的 api **零消费者**：`SecurityRpc` 在 `api/` 下除定义/配置外**引用数 = 0** | `api/internal/svc/service_context.go:17,25` + 全目录 grep |
+  | yaml 未配 `NonBlock` ⇒ 取默认 true ⇒ 非阻塞 dial ⇒ **启动不 panic** | `api/etc/article-api.yaml:14-18` |
+  ⇒ **今天的实际行为：两侧都启动成功 ⇒ 无差异** ✅
+  ⇒ 差异**只在**「yaml 显式写 `NonBlock: false`」时显形 ⇒ **条件性（config-gated）**，
+  且作用在一个**零消费者**的 client 上。
+- **判定**：**条件性差异，当前不可达**（与 `DRIFT-ARTICLE-RPC-007`「配置面误导，今天无行为差异」同类）。
+  ⇒ 不是"未验证"，而是"**已验证且当前无差异**" ⇒ 本条关闭。
+- **⚠️ 遗留的登记要求**：若真源日后给 `SecurityRpcConf` 显式写 `NonBlock: false`
+  ⇒ 立刻登记为一条 DRIFT（启动失败 vs 启动成功），**不要**再留在 UNRESOLVED 里。
+- **⚠️ 为什么不"顺手补一个 client"**：devh 的 `@GrpcClient` 默认也是**非阻塞**建 channel
+  ⇒ 即使补上，RAG 也**不会**像 Go 那样 panic ⇒ 补了也不产生对齐效果，
+  反而引入一个**零消费者**的启动期依赖 ⇒ 不做。
 
-### UNRESOLVED-008 —— 上游注释引用的 `DRIFT-024` 在本仓无对应台账
-- **Question**：`GlobalExceptionHandler.java:118` 的「DRIFT-024 同款教训（多出来的 Content-Type / nosniff）」
+### UNRESOLVED-008 —— 上游注释引用的 `DRIFT-024` 在本仓无对应台账 ✅ **已关闭（2026-10-24，零新代码）**
+- **Question**（原文）：`GlobalExceptionHandler.java:118` 的「DRIFT-024 同款教训（多出来的 Content-Type / nosniff）」
   指向何处？
-- **Why Unknown**：`docs/DRIFT/` 全树无 `DRIFT-024` 条目；`docs/DRIFT/_MANIFEST.json` 亦未登记。
-- **Impact**：低（只是一条引用注释），但意味着**存在一份未入库的历史漂移清单**，
-  可能包含本轮重复发现或遗漏的条目。
-- **Required Confirmation**：向实现该层的会话索取原始清单，或全仓检索同款文案。
+- **Why Unknown**（原文）：`docs/DRIFT/` 全树无 `DRIFT-024` 条目；`docs/DRIFT/_MANIFEST.json` 亦未登记。
+- 🔴 **原结论「查无此编号」是错的** —— 2026-10-24 全仓 + 全部工作树搜索后找到：
+  | 位置 | 内容 |
+  |---|---|
+  | **`docs/DRIFT/users/_shared.md:103`** | **DRIFT-024 =「text/plain 400 的响应头丢失」**（2026-10-22 E-1 收口时发现，*DRIFT-006 的另一半从未真正对齐*）<br>症状：`Content-Type` 与 `nosniff` **全部缺失**，状态行连 reason phrase 都没有，传输退化为 `Transfer-Encoding: chunked` + `Connection: close`<br>根因：`HttpMiddleware$ObservabilityResponseWriter.setHeader` 只收进 `capturedHeaders`、等 `flushTo` 才写回 underlying，而那时底层已 committed ⇒ Tomcat **静默忽略**<br>已改为三个覆写点（`setHeader`/`addHeader`/`setContentType`）实时 propagate<br>守门：`tools/difftest/check-plaintext400-headers.sh`（**必须真实 Tomcat**） |
+  | `docs/DRIFT/common/http.md:117` | 引用它当**类比**（「响应对了不代表 body 对」） |
+  | `docs/DRIFT/_cross/status-snapshot-2026-10-22.md:29,46` | 跨域快照里登记了它的修复结论 |
+  | `docs/DRIFT/users/admin/api.md:60,723` | 指出 **admin-api 上没有任何守门** |
+  ⇒ ⇒ **`DRIFT-024` 是 users 域的编号**（域内编号会重复，跨域引用必须带域前缀才查得到）
+  ⇒ **不存在"未入库的历史漂移清单"** —— 原文的这个推断**作废**。
+- **✅ 本域是否受影响：不受影响**（2026-10-24 实测确认）
+  - 共享层 `service/common/.../observability/HttpMiddleware.java:661-678`
+    的 `ObservabilityResponseWriter.setHeader` **已改成实时 propagate**（原缺陷已修，**全域受益**）。
+  - `ArticleApiAssemblyWiringTest`（**真 Tomcat**）已断言 article-api 的 400 带
+    `Content-Type: text/plain;charset=utf-8` + `X-Content-Type-Options: nosniff` ✅
+    ⇒ 本域**不存在**该缺陷。
+  - ⚠️ 唯一残留是**已登记**的 LOW 漂移：Go 写 `text/plain; charset=utf-8`（**带空格**），
+    实测是 `text/plain;charset=utf-8`（**无空格**）⇒ Tomcat 规范化 ⇒ **决定不修**。
+- **判定**：引用有效、缺陷已修、本域不受影响 ⇒ 本条关闭。
 
 ### UNRESOLVED-009 —— RAG 侧 `dto/UpdateArticleReq.java` 的 Go 行号引用有误
 - **Question**：`UpdateArticleReq.java:8` 的 javadoc 写「Go `types.go:61-71`」，
@@ -1034,7 +1066,7 @@ return userServiceBlockingStub.withDeadlineAfter(effective, TimeUnit.MILLISECOND
 | `UNRESOLVED-004` `@GrpcClient` 真装配 + Nacos 寻址 | 🔴 OPEN | 本轮 60 条测试仍**全部**用 `@MockitoBean` 把 client 换掉了 —— **恰好把要验证的那一段替换掉了** |
 | `UNRESOLVED-006` 共享层 `com.rag.common` 真被扫到 | 🔴 OPEN | 同上 |
 | `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | 本轮**已在 rpc 侧**核对 `public_only` / `status` 的消费方式（见 [`rpc.md`](./rpc.md) 与 [`proto.md`](./proto.md)） |
-| `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | 仍查无对应台账 |
+| `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | ✅ **已关闭**（2026-10-24）：`DRIFT-024` = **users 域** `docs/DRIFT/users/_shared.md:103`「text/plain 400 响应头丢失」⇒ 域内编号跨域引用必须带域前缀才查得到；原「查无此编号 ⇒ 存在未入库清单」的推断作废 |
 | `UNRESOLVED-009` `UpdateArticleReq.java:8` 的 Go 行号引用有误 | 🔴 OPEN | 本轮**只读不写**该文件；建议下一轮顺手改 |
 
 ### 判定变化
@@ -1224,8 +1256,8 @@ chn = chn.Append(GunzipHandler)          // ⑪
 | `UNRESOLVED-004` `@GrpcClient` 真装配 | 🔴 OPEN（UNKNOWN） | ✅ **已关闭** |
 | `UNRESOLVED-006` 共享层真被扫到 | 🔴 OPEN（UNKNOWN） | ✅ **已关闭** |
 | `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | 🟡 部分关闭（本轮在 rpc 侧核对了 `public_only`/`status` 的消费方式） |
-| `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` 差异 | 🔴 OPEN | 🔴 OPEN（当前 yaml 未配 ⇒ 影响为零） |
-| `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | 🔴 OPEN（仍查无对应台账） |
+| `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` 差异 | 🔴 OPEN | ✅ **已关闭**（2026-10-24，零新代码）：已读到消费点（`zrpc/config.go:30` tag 默认 true → `client.go:65-69` → `internal/client.go:147-151` → `MustNewClient` panic）⇒ **条件性差异，当前不可达** |
+| `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | ✅ **已关闭**（2026-10-24，零新代码）：已定位到 users 域台账条目 + 共享层已修 + 本域真 Tomcat 用例已断言 400 响应头 |
 | `UNRESOLVED-009` `UpdateArticleReq.java:8` 的 Go 行号引用有误 | 🔴 OPEN | 🔴 OPEN（本轮只读不写该文件） |
 | `DRIFT-005~007` | 🔴 OPEN | 🔴 OPEN |
 | **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
@@ -1252,8 +1284,8 @@ chn = chn.Append(GunzipHandler)          // ⑪
 | `DRIFT-006` 8–10 MiB body 文案 | 🔴 OPEN（LOW） | 可观察契约相同（400 + text/plain + nosniff），差异仅在 body 文案（Go 是截断后解析失败 ⇒ `unexpected EOF`） |
 | `DRIFT-007` `ext_info` key 排序（非 BMP） | ✅ **已修**（2026-10-24） | 已按**码点序**比较（= Go 的 UTF-8 字节序），见本文件末尾「第三轮」节；`DRIFT-005` / `DRIFT-006` 仍 🔴 OPEN |
 | `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | rpc 侧已核过 `public_only` / `status` 的消费方式（见 [`proto.md`](./proto.md)）；仍缺**跨栈活体对拍** |
-| `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` | 🔴 OPEN（当前影响为零） | 结论依赖 go-zero 的 tag 默认值，不是设计对齐 |
-| `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | `docs/DRIFT/` 全树仍查无此编号 ⇒ 存在一份未入库的历史漂移清单 |
+| `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` | ✅ **已关闭**（2026-10-24） | 结论依赖 go-zero 的 tag 默认值，不是设计对齐 ⇒ 已读到消费点确认为**条件性差异、当前不可达**（详见 §9） |
+| `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | ✅ **已关闭**（2026-10-24） | 🔴 **原结论作废**：`DRIFT-024` 在 **users 域** `docs/DRIFT/users/_shared.md:103`，common 域与 `_cross` 快照都在引用它；本域**不受影响**（共享层已修 + 真 Tomcat 已断言） |
 | 🔴 **新增确认**：`Content-Type` 少一个空格 | 🟡 **已确认为 LOW OBSERVABLE DIFFERENCE** | 本轮首次由真 Tomcat 确认；**决定不修**（理由见上节），已用 characterization test 锁住实测现状 |
 
 ---
@@ -1495,3 +1527,48 @@ go-zero@v1.10.2/rest/httpx/util.go:44-56  GetFormValues
 > 因为 RAG 跑在**容器**里，容器自带一堆上限。
 > ⇒ 同 AGENTS.md §3.3.1「配置里没写 ≠ 没开」的镜像版：
 > **「你的代码里没写 ≠ 运行时没有」**。
+
+---
+
+<!-- @fix 2026-10-24 第五轮 · 由 align/article 工作树产出 · 基线 commit d8c382b -->
+
+## 2026-10-24 第五轮：两条 UNRESOLVED 关闭（**零新代码**，靠把 Go 侧读到消费点 + 全仓检索）
+
+### ✅ FIX-11 —— `UNRESOLVED-007` 关闭（`SecurityRpc` 的 `NonBlock` 条件性差异）
+
+结论：**条件性差异，当前不可达** ⇒ 今天的实际行为两侧一致（都启动成功）。
+详细取证见 §9 的 `UNRESOLVED-007`。
+
+### ✅ FIX-12 —— `UNRESOLVED-008` 关闭（`DRIFT-024` **查到了**，且本域不受影响）
+
+🔴 **原结论「全树查无此编号 ⇒ 存在一份未入库的历史漂移清单」是错的**：
+`DRIFT-024` 在 **users 域**的 `docs/DRIFT/users/_shared.md:103`（域内编号会重复，
+跨域引用**必须带域前缀**才查得到）。
+
+⇒ 本域**不受影响**（共享层 `HttpMiddleware` 的 writer 已修为实时 propagate；
+article-api 的真 Tomcat 用例已断言 400 带 `Content-Type` + `nosniff`）。
+
+### 判定变化（FIX-11 / FIX-12）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` | 🔴 OPEN | ✅ **已关闭**（条件性差异，当前不可达） |
+| `UNRESOLVED-008` `DRIFT-024` 查无台账 | 🔴 OPEN | ✅ **已关闭**（已定位到 users 域条目；本域不受影响） |
+| `UNRESOLVED-002` 跨栈活体对拍 | 🟡 部分关闭 | 🟡 **部分关闭**（仍缺跨栈活体对拍） |
+| `UNRESOLVED-010` Go `net/url` 的三条相邻行为 | 🔴 OPEN | 🔴 **OPEN**（本轮登记） |
+| `DRIFT-006` 8–10 MiB body 文案 | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
+| **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
+
+⚠️ **判定不变的理由**：本轮关闭的两条**都没有改变任何运行时行为**
+（一条是"条件性但当前不可达"，一条是"引用有效且本域不受影响"），
+且其余 `DRIFT` / `UNRESOLVED` 仍在，也**无双侧活体对拍**。
+
+#### 📌 一条可复用的元教训
+
+> **域内编号（`DRIFT-0xx` / `UNRESOLVED-0xx`）在跨域时会撞号。**
+> ⇒ 跨域引用**必须带域前缀**（`users` 域的 `DRIFT-024` ≠ `article` 域的 `DRIFT-005`）。
+> ⇒ 检索"查无此编号"时，**必须全仓 + 全部工作树**一起搜
+> （本轮就是只搜了本域 ⇒ 误判成"存在一份未入库的历史清单"，
+> 而那份清单根本不存在 —— 那条线索在 users 域的台账里）。
+> ⇒ 反过来：**凡是在注释里引用别的域的编号**，要么写全 `docs/DRIFT/<域>/…` 的路径，
+> 要么别引（否则下一个 agent 会和你一样查不到）。
