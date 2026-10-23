@@ -348,6 +348,14 @@ public final class Wire {
                 || receipt.offset < 1L) {
             return new Result(null, false);
         }
+        // DRIFT-COMMON-002 修复：receivedAt 缺失时 Go 返回 (零值, false)，不抛。
+        // Go 出处 wire.go:148-149 `received, err := time.Parse(time.RFC3339Nano, receipt.ReceivedAt);
+        // return received.UTC(), err == nil` —— "" 走的是 err != nil 分支。
+        // Java 侧 Instant.parse(null) 抛 NullPointerException，不在 DateTimeParseException 的
+        // catch 范围内 ⇒ 异常向上冒泡。上面那个守卫块对另外 7 个字段都做了 null 防御，唯独漏了它。
+        if (receipt.receivedAt == null || receipt.receivedAt.isEmpty()) {
+            return new Result(null, false);
+        }
         Instant received;
         try {
             received = Instant.parse(receipt.receivedAt);

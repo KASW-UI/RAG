@@ -181,6 +181,15 @@ public final class RpcInterceptor {
                 // 超时调度：到时把 timedOutRef 设 true 并主动 close call（DEADLINE_EXCEEDED）
                 // 用 holder 数组让 timeoutFuture 可以被匿名类引用（Java 局部变量必须 final/effectively-final）
                 final ScheduledFuture<?>[] timeoutFutureHolder = new ScheduledFuture<?>[1];
+                // 🔴 DRIFT-COMMON-001 修复：超时必须走 wrappedCall，而不是原始 call。
+                // 原始 call 是 wrappedCall 的委托目标，close 它会<b>绕过</b>下面的 span 打标与
+                // span.end()（:238-240）⇒ 超时调用的 span 永不结束、永不导出 ⇒ 超时在遥测里不可见。
+                // Go 出处：rpc.go:68-71 的 select 超时分支同样走 markRPCResult/MarkTimeout，
+                // 与 done 分支共用同一条打标出口（Go 由 otel 插桩管 span 生命周期，
+                // 但「超时要打 timeout 属性」这件事两侧一致）。
+                // wrappedCall 在下方才创建，故用 AtomicReference 中转；万一调度器先于赋值开火
+                // （timeout 极短时），退回 call 至少保证客户端仍能收到 DEADLINE_EXCEEDED。
+                final AtomicReference<ServerCall<ReqT, RespT>> wrappedCallRef = new AtomicReference<>();
                 if (timeout != null && timeout.compareTo(Duration.ZERO) > 0) {
                     long timeoutMs = timeout.toMillis();
                     timeoutFutureHolder[0] = TIMEOUT_SCHEDULER.schedule(() -> {
@@ -189,7 +198,9 @@ public final class RpcInterceptor {
                         timedOutRef.set(Boolean.TRUE);
                         // 触发 call 关闭；close 是线程安全的
                         try {
-                            call.close(Status.DEADLINE_EXCEEDED
+                            ServerCall<ReqT, RespT> target =
+                                    wrappedCallRef.get() != null ? wrappedCallRef.get() : call;
+                            target.close(Status.DEADLINE_EXCEEDED
                                             .withDescription("rpc timeout after " + timeoutMs + "ms"),
                                     new Metadata());
                         } catch (Throwable ignored) {
@@ -243,6 +254,9 @@ public final class RpcInterceptor {
                 };
 
                 // 包装 Listener：拦截 onCancel 处理客户端提前断开
+                // DRIFT-COMMON-001：把 wrappedCall 交给超时调度器，使超时与业务 close 共用同一条
+                // span 打标 + span.end() 出口（M6 的 spanFinalized CAS 保证只会执行一次）。
+                wrappedCallRef.set(wrappedCall);
                 ServerCall.Listener<ReqT> listener = next.startCall(wrappedCall, headers);
                 return new ForwardingServerCallListener.SimpleForwardingServerCallListener<ReqT>(listener) {
                     /**

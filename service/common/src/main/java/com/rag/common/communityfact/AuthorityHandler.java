@@ -78,17 +78,6 @@ public final class AuthorityHandler {
     }
 
     /**
-     * 沿 cause 链取根因（对齐 Go 版 errors.Unwrap）。
-     */
-    private static Throwable unwrapCause(Throwable err) {
-        Throwable t = err;
-        while (t.getCause() != null && t.getCause() != t) {
-            t = t.getCause();
-        }
-        return t;
-    }
-
-    /**
      * 对应 Go 版 {@code func NewAuthorityHandler(producer, token string, lookup AuthorityLookup, logger *slog.Logger) (http.Handler, error)}。
      *
      * <p>工厂方法：传入 producer/token/lookup，返回一个 Servlet，由业务模块注册到 servlet 容器上。
@@ -192,10 +181,15 @@ public final class AuthorityHandler {
                 try {
                     fact = lookup.lookup(ctx, producerParam, eventIdParam);
                 } catch (Exception ex) {
-                    Throwable cause = unwrapCause(ex);
-                    // DRIFT-012 修复：原版用 cause.getMessage().contains(...) 做字符串匹配，
-                    // 业务模块 wrap 异常后容易误判。改用 sentinel 异常类型识别。
-                    if (isAuthorityUnavailable(cause)) {
+                    // DRIFT-COMMON-003 修复：判定必须从**原始异常 ex** 起遍历整条 cause 链。
+                    // Go 出处 authority_http.go:58 `errors.Is(err, ErrAuthorityUnavailable)` ——
+                    // errors.Is 从 err 出发沿 Unwrap 链逐个比对。
+                    // 旧实现先 unwrapCause(ex) 走到链**最深**，再拿那个末端元素去判：
+                    // AuthorityUnavailableException 有 (String, Throwable) 构造器（:61），
+                    // 一旦它自己带 cause，它就在链的**中间**而被 unwrapCause 跳过
+                    // ⇒ 404 误降级成 503，客户端可见。
+                    // isAuthorityUnavailable 本身已经沿链遍历，不需要任何预遍历。
+                    if (isAuthorityUnavailable(ex)) {
                         status = 404;
                         outcome = "rejected";
                         resp.setStatus(status);
