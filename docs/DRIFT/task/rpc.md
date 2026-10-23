@@ -15,12 +15,12 @@
 
 | 项 | 结论 |
 |---|---|
-| 语义等价性 | 🔴 **SEMANTICALLY NOT EQUIVALENT**（首轮即如此，**不是**「基本一致」） |
-| 已修 | **5 条**（DRIFT-TASK-RPC-001 / 002 / 003 / 005 / 006），每条配守门测试 |
-| 未修 | 0 条语义漂移；另有 1 条签字偏离（见下）+ 1 条有意偏离待登记 |
+| 语义等价性 | ✅ **首轮为 🔴 NOT EQUIVALENT（5 条漂移），现已全部修复并复核**（2026-10-24：Kafka 端到端 + HTTP 双侧对拍均 0 DIFF）⚠️ 效力边界见 §五 |
+| 已修 | **5 条**（DRIFT-TASK-RPC-001 / 002 / 003 / **004** / 005），每条配守门测试 |
+| 未修 | **0 条语义漂移**；另有 1 条**已签字偏离**（`SD-2026-10-23-TASK-01`，见 §二） |
 | 证据强度 | ✅✅✅ **Kafka 端到端活体对拍**（2026-10-23 23:4x，真 Kafka + 真 Redis + 真 PG，两侧同批消息比最终态，见 §四·三）· ✅✅✅ **Kafka 畸形消息活体对拍**（2026-10-24，五个用例，见 §四·五·二）· ✅✅ **gRPC 双向跨语言对拍**（2026-10-24，Java 客户端 + **Go 客户端**各打两端，见 §四·五·一）· ✅ 真启动 + 真 PG 16 容器 |
 | DDL 对拍 | ✅ **GORM AutoMigrate 产物 vs Flyway 产物逐列一致**（本轮实测，见 §四·二） |
-| ⚠️ 仍未覆盖 | ⓿ **「Kafka 写入 → task-api 读到」这条跨域闭环**仍未做活体对拍 —— 但两侧的读写 Redis key **本来就不一致**（Go 侧也读不到自己写的缓存），⇒ **不是 RAG 的缺陷**，见 §五 第 7 条；① Kafka 链路只对拍了**用户点赞路**（`like:total` / `task:progress` / `task:done` / PG 两表）；**文章路**（`article:like:cnt` / `task:inits` / `task:progress:<taskId>:<uid>:<articleId>`）**未纳入本轮对拍矩阵**；② goka 计数表 topic（`task.rpc.consumer*-table`）与 RAG 的 `task:goka:count:*` **未做逐值对拍**（两侧计数载体不同：Go 是 Kafka compacted topic，RAG 是 Redis INCR） |
+| ⚠️ 仍未覆盖 | ⓿ **「Kafka 写入 → task-api 读到」这条跨域闭环**未做活体对拍 —— 但两侧的读写 Redis key **本来就不一致**（Go 侧也读不到自己写的缓存），⇒ **不是 RAG 的缺陷**，见 §五 第 7 条；① ⚠️ **goka `OffsetOldest` 的「首次消费无位点」分支未做活体验证**（§三 末条）—— 本轮只核到「配置意图一致」 |
 | 测试 | **90 tests / 0 failures / 0 errors / 0 skipped**（其中 15 条真 PG、**9 条真 Redis**） |
 
 ---
@@ -501,8 +501,8 @@ Go 侧同一批消息能正常落库，RAG 侧一条不落。
 ⚠️ 主键**约束名**不同，但 `ON CONFLICT (user_id, task_id)` 走的是**列**而不是约束名 ⇒ 行为无差异。
 ⇒ 这**印证**了台账里「`time.Time ⇒ TIMESTAMPTZ`」「`string ⇒ TEXT`」「无 tag ⇒ 可空」的判断。
 
-⚠️ 仍未覆盖：索引 / 唯一约束 / CHECK —— 两侧都**没有**建（Go 的 `AutoMigrate` 不为无 tag 列生成 CHECK，
-RAG 的迁移脚本刻意不加），所以这一项是「两侧一致地没有」，而不是「漏检」。
+⚠️ 索引 / 唯一约束 / CHECK：两侧**一致地没有**（Go 的 `AutoMigrate` 不为无 tag 列生成 CHECK，
+RAG 的迁移脚本刻意不加）⇒ 这一项**已闭合**，**不是「漏检」**。
 
 ---
 

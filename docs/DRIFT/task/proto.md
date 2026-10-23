@@ -16,7 +16,7 @@
 | `.proto` 文件本身 | ✅ **行为层零差异**（本轮重跑逐行 diff 复核） |
 | 生成代码是否真产出 | ✅ 真构建实测：7 个 java + `TaskServiceGrpc` |
 | **消费方式** | ✅ **本轮首次核对，未发现差异**（3 个风险面逐条核，见下） |
-| 已知未跑 | `tools/difftest/check-proto-static.sh` **未覆盖 task** ⇒ 「一致」是一次性快照，不可持续 |
+| 已知未跑 | ✅ **无**（2026-10-24：`check-proto-static.sh` 已扩到 task 域，实测 `EXIT=0` ⇒ 「一致」已可持续，不再是一次性快照） |
 
 ---
 
@@ -99,18 +99,18 @@ grep -nE 'optional|oneof|map<|repeated' task.proto
 
 ## 四、证据边界
 
-1. ⚠️ **`check-proto-static.sh` 未覆盖 task** ⇒ 本文件所有 ✅ 都是**一次性快照**，
-   proto 改了不会有任何测试变红。
-2. ⚠️ **wire 层活体验证的边界（2026-10-23 对拍后更新）**：
-   - ✅ 已做：**两侧各自**完整跑通（Go client → Go server、RAG client → RAG server），
+1. ✅ **`check-proto-static.sh` 已覆盖 task**（2026-10-24，实测 `EXIT=0`）⇒ 本文件的 ✅ 不再是**一次性快照**，
+   proto 改动会让守门脚本返回**非零**。
+2. ✅ **wire 层活体验证已双向做完**（2026-10-24 更新）：
+   - ✅ **两侧各自**完整跑通（Go client → Go server、RAG client → RAG server），
      经 `GetTask` 验证了序列化/反序列化在**各自语言内**一致；
-   - ❌ **未做：跨语言互调**（Go client 打 RAG server / RAG client 打 Go server）。
-     ⚠️ 但两侧的 `SERVICE_NAME` 与全方法名**在本轮已用生成代码/生成代码逐字比对**：
-     Go `pb/task_grpc.pb.go:111` 的 `ServiceName: "task.TaskService"`、
-     `:22` 的 `"/task.TaskService/GetTask"`，
-     对 RAG `TaskServiceGrpc.java:15` 的 `SERVICE_NAME = "task.TaskService"`、
-     `:22` 的 `fullMethodName = SERVICE_NAME + '/' + "GetTask"` ⇒ **字符串逐字相同**。
-   - ⇒ 跨语言互调是**剩余待办**，但「会不会调不通」这个具体风险已由字符串比对排除。
+   - ✅ **跨语言互调已做**（`tools/difftest/run-task-grpc-xlang.sh`，**7/7 一致**）：
+     **Go 客户端 → Go server / RAG server** 两端都打（本轮新增方向），
+     加上首轮的 **RAG 客户端 → 两端** ⇒ grpc-go ↔ grpc-java 的**双向**互操作都已验证。
+     ⚠️ Go 客户端用的是**真源自己生成的桩**（`go.mod` 的 `replace` 引用，真源零写入），
+     包名是 goctl 占位符 `package __` ⇒ import 必须带别名。
+   - ⇒ 「`SERVICE_NAME` / 字段号在真实网络上会不会对不上」这个风险
+     **已由活体对拍排除**，不再是待办。
 3. ⚠️ 本文件**不覆盖** api 的 JSON 契约（`tasks` / `name` / `desc` / `taskId` / `completionProgress` / `requiredProgress`）——
    那属于 [`api.md`](./api.md) 的范围，且它是 **HTTP JSON 契约**，与 proto 是两套东西。
 
@@ -118,9 +118,9 @@ grep -nE 'optional|oneof|map<|repeated' task.proto
 
 ## 五、待办
 
-1. **`tools/difftest/check-proto-static.sh` 扩到 `task`**（照 `user` / `admin` 的写法加 `verdict`）——
-   否则本文件无法持续。
-2. Go↔RAG 跨语言 gRPC 互调（Go 客户端打 RAG server，验 `SERVICE_NAME` 与字段号在真实网络上成立）。
+1. ~~**`tools/difftest/check-proto-static.sh` 扩到 `task`**~~ ⇒ **2026-10-24 已做**（实测 `EXIT=0`）。
+2. ~~**Go↔RAG 跨语言 gRPC 互调**~~ ⇒ **2026-10-24 已做**
+   （`tools/difftest/run-task-grpc-xlang.sh`，Go 客户端 → 两端服务端，**7/7 一致**）。
 3. 若将来有人想把 `package task` 改成 `task.proto` 之类（像 `comment` 域那样归一），
    **必须先改本文件并同步改 Go 侧** —— 那会直接断链。
 
