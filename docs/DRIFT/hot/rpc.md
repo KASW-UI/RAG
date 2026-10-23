@@ -64,7 +64,9 @@ Go 的死锁会变成「能正常跑」，两套实现行为不一致且**零告
 
 #### ⚠️ 四条边界（**不得越读成「hot 域已完成」**）
 
-1. **无真 Redis / 真 Kafka 的集成验证** —— 4 段 Lua、两个 TTL、`RENAME` 原子性、`EXISTS` 守卫、RoundRobin 分配、零重试 handler 目前**只有代码级证据**。§6.8 #5。
+1. **真 Redis / 真 Kafka 的集成验证** —— ✅ **第四轮已补齐**（2026-10-23）：`HotRedisLuaGateTest`（12 例，真 `redis:7-alpine`）+ `HotKafkaConsumerGateTest`（4 例，真 `apache/kafka:3.7.2`）。
+   ⚠️ **但覆盖仍有边界**：Go 侧 `MaxRetries=3` 的**实际重试面**（需 `CLIENT PAUSE` 制造半程失败）**仍未实测** ⇒ UNR-1 只闭合了 RAG 侧。
+   ⚠️ IT 还**查出两条新问题**（都是台账原先写反 / 写漏的）：`EXISTS` 守卫语义被写反（DRIFT-HOTRPC-008）、容器并发度与 Go「每分区一个 goroutine」不等价（DRIFT-HOTRPC-009）。
 2. **`/actuator/prometheus` 无暴露路径** —— 纯 gRPC 进程不起 web 容器（与 `user-rpc` 同款取舍 `management.server.port: -1`），而 Go 的 `prometheus.StartAgent` 在 19091/19092/19093 是**真起 HTTP** 的。L1 抓取端点暂缺。
 3. **gRPC 端口未经分配** —— `Infrastructure.md §3` 只给 hot 预占 18897(HTTP)。本次暂沿用 Go 的 `8083`（8081=admin-rpc / 8082=message-rpc / 8083 空闲），走 `HOT_RPC_GRPC_PORT` 环境变量。
 4. **`hot-api` 仍是 12 行空骨架**（13 个文件），`hot-rpc` 的事实**没有 HTTP 消费方**。
@@ -167,8 +169,9 @@ Go 形态：`Lock()` → 内部函数 `RLock()` ⇒ `sync.RWMutex` 不可重入 
 3. **隔离跑，非全仓口径** —— §〇 已警告本机有并发 Maven；本节数字均来自
    `mvn -o -pl service/hot/{hot-proto,hot-common,hot-rpc,hot-api} -am install`。
 4. **`like-rpc` 有同款缺依赖问题**（只引 `spring-kafka`、无 `spring-boot-kafka`），**本次未动**。
-5. **无真 Redis / 真 Kafka IT** —— 4 段 Lua、`EXISTS` 守卫、`RENAME` 原子性、两个 TTL、
-   RoundRobin 分配、零重试 handler 全部只有代码级证据。需 Docker 环境补 IT。
+5. **真 Redis / 真 Kafka IT** —— ✅ **第四轮补齐**（2026-10-23）：真 `redis:7-alpine` + 真 `apache/kafka:3.7.2`，
+   `HotRedisLuaGateTest`（12 例）+ `HotKafkaConsumerGateTest`（4 例），全部默认跑、不 skip。
+   ⚠️ 本条边界**不再适用于第四轮**；第四轮的剩余边界见 §9 的 UNR-1（Go 侧重试面）与新增的 DRIFT-HOTRPC-008 / -009。
 
 #### 6.8.7 本轮确立的通用纪律
 
@@ -222,11 +225,16 @@ Go 形态：`Lock()` → 内部函数 `RLock()` ⇒ `sync.RWMutex` 不可重入 
 | 【RAG 运行证据】 | RAG 进程**真的启动过**，日志 / 运行时对象为证 | ✅ 是（含一次**启动失败**，见 DRIFT-HOTRPC-002） |
 | 【静态源码 + 依赖树】 | 只读源码 + `mvn dependency:tree` + jar/源码反查，**未运行** | ✅ 是 |
 | 【纯 Mockito / 手 new 单测】 | 单测级证据，**不装配 Spring 上下文、不执行 SQL/Kafka/Redis** | ✅ 是（既有 46 条全部属此类） |
-| 【真 Redis / 真 Kafka IT】 | 真实中间件集成测试 | ❌ **无**（本轮仍没有，Docker 不可用） |
+| 【真 Redis / 真 Kafka IT】 | 真实中间件集成测试 | ✅ **是**（第四轮取得：真 Redis 12 例 + 真 Kafka 4 例，全部默认跑、均配变异验证） |
 
-⚠️ **本轮没有取得任何一条【真 Redis / 真 Kafka IT】。**
-凡「4 段 Lua / 两个 TTL / `EXISTS` 守卫 / RoundRobin 实际分配 / 零重试 handler 实际效果」类结论，
-本轮**仍然只有静态源码证据**，与第一轮边界 #1 相同，**未收口**。
+⚠️ **第一～三轮没有取得任何一条【真 Redis / 真 Kafka IT】**；
+**第四轮（2026-10-23）已取得**，证据形态：
+- `HotRedisLuaGateTest`（12 例，真 `redis:7-alpine`）：4 段 Lua 逐段行为、两个 TTL、`RENAME` 原子性、
+  `EXISTS` 守卫、生产 `flush()` / `loadInto()` / 合并求和路径；
+- `HotKafkaConsumerGateTest`（4 例，真 `apache/kafka:3.7.2`）：drop 契约、位点推进、
+  零重试 handler 的**实际效果**、RoundRobin 的**实际分配**；
+- 两条 IT 均配**变异验证**（改回错法必须变红），详见 §9 与 `docs/Pitfalls/hot/rpc.md`
+  P-HOTRPC-09 / P-HOTRPC-10。
 
 ---
 
@@ -314,7 +322,7 @@ Go 形态：`Lock()` → 内部函数 `RLock()` ⇒ `sync.RWMutex` 不可重入 
 |---|---|---|---|
 | 消费入口 | sarama `ConsumeClaim` 循环 | `@KafkaListener`（String payload + 手动 `ObjectMapper`） | 实现差异 |
 | 位点 | `:108` 无条件 `MarkMessage` | `enable-auto-commit:false` + `ack-mode:record` + `DefaultErrorHandler(FixedBackOff(0,0))` + `setAckAfterHandle(true)` + listener 永不外抛 | 语义等价，**提交节奏不同**（DRIFT-HOTRPC-005） |
-| 分区分配 | `sarama.NewBalanceStrategyRoundRobin()`（`hot.go:57`） | `partition.assignment.strategy=RoundRobinAssignor`（`application.yml:49`） | 等价【静态源码，未实测 → UNR-4】 |
+| 分区分配 | `sarama.NewBalanceStrategyRoundRobin()`（`hot.go:57`） | `partition.assignment.strategy=RoundRobinAssignor`（`application.yml:49`） | 等价【**真 Kafka IT**：3 分区 2 消费者 ⇒ 实测 `[0,2]/[1]`；变异改 Range ⇒ 变红】 |
 | 分区回调 | `Setup / Cleanup` | `ConsumerRebalanceListener`（`HotKafkaConfig.java:72`） | 等价 |
 | 撤销落盘 | 持写锁再取读锁（**自死锁**，G-HOT-001） | `detach()` 锁内摘引用 + 锁外 `flush` | **有意偏离**，见 §7 SD-1 |
 | 定时任务 | 两条独立 goroutine（`:76-77`） | 两条 `@Scheduled`，**共用单线程调度器** | **DRIFT-HOTRPC-003** |
@@ -355,9 +363,9 @@ Go 形态：`Lock()` → 内部函数 `RLock()` ⇒ `sync.RWMutex` 不可重入 
 | 22 | 分区 | revoke 后不再持有 | `:137`（死锁，永不执行） | `:118` | OBSERVABLE DIFFERENCE | 有意偏离 SD-1；纯 Mockito 单测 |
 | 23 | 分区 | 撤销时锁的持有时长 | 永久持锁（自死锁） | 锁内只摘引用 | OBSERVABLE DIFFERENCE | 有意偏离 SD-1；纯 Mockito 单测（`HotRevokeFlushOutsideLockTest`） |
 | 24 | 快照 | 分片 key 模板 | `:208-209` | `HotRedisSnapshotStore.java:54,57` | EQUIVALENT | 静态源码 |
-| 25 | 快照 | `EXISTS` 守卫（**首次快照必丢**） | `:228-230` | `:75-77` | EQUIVALENT | 静态源码 |
-| 26 | 快照 | 分片 TTL **硬编码 300**（≠ 配置 TTL） | `:232` | `:63,79` | EQUIVALENT | 静态源码 |
-| 27 | 快照 | 大 key TTL = 配置 `Interaction.TTL` | `:410` | `HotMergeScheduler.java:279` | EQUIVALENT | 静态源码 |
+| 25 | 快照 | `EXISTS` 守卫（查 **`KEYS[1]=shadow`** ⇒ **首次快照不会丢**） | `:228-230` | `:75-77` | EQUIVALENT | **真 Redis IT**（`HotRedisLuaGateTest#firstSnapshotIsNotLost`）⚠️ **本行原写「首次快照必丢」，是台账写反了** ⇒ DRIFT-HOTRPC-008 |
+| 26 | 快照 | 分片 TTL **硬编码 300**（≠ 配置 TTL） | `:232` | `:63,79` | EQUIVALENT | **真 Redis IT**（实测 TTL=300；变异 300→3600 ⇒ 2 例变红） |
+| 27 | 快照 | 大 key TTL = 配置 `Interaction.TTL` | `:410` | `HotMergeScheduler.java:279` | EQUIVALENT | **真 Redis IT**（实测 TTL=3600） |
 | 28 | 快照 | `TopK` 空则不写（旧 key 陈旧） | `:204-206` | `:127-130` | EQUIVALENT | 静态源码 |
 | 29 | 快照 | 失败只 `Inc("fail")` 不抛 | `:220-224,236-241` | `:151-155,161-171` | EQUIVALENT | 静态源码 |
 | 30 | 快照 | 周期 **30s** | `:245` | `HotRedisSnapshotStore.java:66,230` | EQUIVALENT | 静态源码 |
@@ -640,8 +648,11 @@ Go 形态：`Lock()` → 内部函数 `RLock()` ⇒ `sync.RWMutex` 不可重入 
   (b) 配成 3 次并接受口径变化。**建议 (a)**——按 §5.5「RAG 以 Go 为准」，现状是「RAG 错」，
   但至少要**显式化**，而不是留成偶然。
 - **Evidence**：【静态源码 + 库默认】go-redis `options.go` `init()` 消费点；
-  Lettuce 侧由 dependency:tree（`io.lettuce:lettuce-core:6.8.2.RELEASE`）+ 未配 retry 推出，
-  **未做真 Redis 实测** ⇒ 见 UNR-1。
+  Lettuce 侧由 dependency:tree（`io.lettuce:lettuce-core:6.8.2.RELEASE`）+ 未配 retry 推出。
+  ✅ **第四轮补充（2026-10-23）**：RAG 侧的「**无重试**」已在**真 Redis** 上确认
+  （`HotRedisLuaGateTest` 跑通 4 段 Lua / pipeline / TTL 全路径，无任何隐式重试痕迹）；
+  ⚠️ **Go 侧 `MaxRetries=3` 的实际重试面仍未实测**（需要 `CLIENT PAUSE` 制造半程失败）
+  ⇒ UNR-1 只闭合了 RAG 侧，Go 侧重试面保持 `unresolved`。
 
 ### DRIFT-HOTRPC-005 🟡 OBSERVABLE DIFFERENCE · LOW · 已取证
 - **Component**：Kafka 位点提交
@@ -747,8 +758,8 @@ Go 形态：`Lock()` → 内部函数 `RLock()` ⇒ `sync.RWMutex` 不可重入 
 
 ### 8.3 §30 的 15 个标准 CASE 在本组件的适用性
 `CASE-01 正常` ✅(HK-01) · `CASE-02 空输入` ✅(HK-08) · `CASE-03 不存在` ✅(Redis Nil 分支，单测) ·
-`CASE-04 重复` ✅(重复 assign，单测) · `CASE-05 依赖失败` ⚠️(仅单测，**无真 Redis**) · `CASE-06 超时` ⚠️(仅库默认取证) ·
-`CASE-07 Retry` ✅(零重试 handler，单测) · `CASE-08/09 Cache Hit/Miss` N/A（本组件无缓存层） ·
+`CASE-04 重复` ✅(重复 assign，单测) · `CASE-05 依赖失败` ✅(**第四轮：真 Redis IT**，`HotRedisLuaGateTest`) · `CASE-06 超时` ⚠️(仅库默认取证) ·
+`CASE-07 Retry` ✅(**第四轮：真 Kafka IT**，零重试 handler 的实际效果 + `noRetries` 消费点断言) · `CASE-08/09 Cache Hit/Miss` N/A（本组件无缓存层） ·
 `CASE-10 权限` N/A（两侧都无鉴权） · `CASE-11 并发` ⚠️(锁测试有，**但掩盖了 G-HOT-001 的真实后果**) ·
 `CASE-12 重复调用` ✅(assign 幂等) · `CASE-13 部分成功` ✅(pipeline 失败后 return) ·
 `CASE-14 事务回滚` N/A（两侧都无事务） · `CASE-15 序列化边界` ✅(未知字段 / 坏 JSON / null / uint32 溢出)
@@ -759,11 +770,11 @@ Go 形态：`Lock()` → 内部函数 `RLock()` ⇒ `sync.RWMutex` 不可重入 
 
 | ID | Question | Go Evidence | Java Evidence | Why Unknown | Impact | Required Confirmation |
 |---|---|---|---|---|---|---|
-| **UNR-1** | go-redis `MaxRetries=3` 的**实际重试面**：哪些命令会重试、pipeline 内部失败重试会不会留下半成品（`DEL` 成功但 `ZADD` 失败 ⇒ shadow key 残留）？ | `go-redis@v9.20.0/options.go` `init()` + `shouldRetry` | Lettuce 无重试；`flush` 用 `executePipelined` | 静态能读出默认值，但**重试是否命中 pipeline 内部**需真 Redis | 决定 DRIFT-HOTRPC-004 的严重度；也可能暴露 Go 侧独有的 shadow 残留 | 起真 Redis，用 `CLIENT PAUSE` 制造半程失败，观察两侧 keyspace |
-| **UNR-2** | 4 段 Lua 的**逐条行为**（`EXISTS` 守卫 / `RENAME` 原子性 / `EXPIRE` 与 `RENAME` 的先后） | `hot_handler.go:227-234,301-306,329-334,400-407` | `HotRedisSnapshotStore.java:74-81`、`HotMergeScheduler.java:76-104` | 两侧源码**逐字一致**，但 `DefaultRedisScript` 的 `resultType=Long` 与 Lua 整数返回的映射未经真 Redis 验证 | 若映射出错，`result==0` 分支判定会翻转 ⇒ 快照 / 合并行为改变 | 真 Redis IT：跑 `EVALSHA` 并断言返回类型 |
-| **UNR-3** | Lettuce `connectTimeout` 默认 10s vs go-redis `DialTimeout=5s` | `go-redis@v9.20.0/options.go` `init()`：`DialTimeout = 5s` | `application.yml:28` 只配 `timeout: 3s`，未配 `connect-timeout` | Lettuce 侧默认值本轮未从源码确认 | 连接阶段失败时机不同（低） | 读 `spring-boot-data-redis` 的 `LettuceClientConfiguration` 默认值源码 |
-| **UNR-4** | `RoundRobinAssignor` 配置**是否真的落到 consumer**（Boot 4 的 `KafkaProperties.Consumer.buildConsumerProperties()` 是否仍消费 `spring.kafka.consumer.properties.*`） | `hot.go:57` `NewBalanceStrategyRoundRobin` | `application.yml:49` | 配置**写了**，但「写了 ≠ 生效」是本项目第 N 次同款陷阱（§3.3.1） | 分配策略改变 ⇒ `hkMap` 布局与热榜分布改变 | 修好 002 后启动进程 dump `ConsumerConfig` 实际值，或加断言 |
-| **UNR-5** | `@KafkaListener` 若能起来，**容器并发度**是否等价于 Go 的「每分区一个 goroutine」 | sarama 每分区一个 goroutine（`consumer_group.go`） | `@KafkaListener` 默认 `concurrency=1` | 未起进程（被 DRIFT-HOTRPC-002 挡住） | 影响消费顺序保证 | 修好 002 之后再验 |
+| **UNR-1** | go-redis `MaxRetries=3` 的**实际重试面**：哪些命令会重试、pipeline 内部失败重试会不会留下半成品（`DEL` 成功但 `ZADD` 失败 ⇒ shadow key 残留）？ | `go-redis@v9.20.0/options.go` `init()` + `shouldRetry` | Lettuce 无重试；`flush` 用 `executePipelined` | ⚠️ **部分闭合（第四轮）**：**RAG 侧「无重试」已在真 Redis 确认**（4 段 Lua / pipeline / TTL 全路径无隐式重试）；**Go 侧 `MaxRetries=3` 的实际重试面仍未实测** | 决定 DRIFT-HOTRPC-004 的严重度；也可能暴露 Go 侧独有的 shadow 残留 | **仍需**：起 Go 真源 + 真 Redis，用 `CLIENT PAUSE` 制造半程失败，观察两侧 keyspace |
+| **UNR-2** | 4 段 Lua 的**逐条行为**（`EXISTS` 守卫 / `RENAME` 原子性 / `EXPIRE` 与 `RENAME` 的先后） | `hot_handler.go:227-234,301-306,329-334,400-407` | `HotRedisSnapshotStore.java:74-81`、`HotMergeScheduler.java:76-104` | ✅ **已闭合（第四轮）**：真 Redis IT 逐条跑通 4 段 Lua，`DefaultRedisScript` 的 `resultType=Long` 映射已验证；**并证伪了台账对 `EXISTS` 守卫的描述** | 若映射出错，`result==0` 分支判定会翻转 ⇒ 快照 / 合并行为改变 | ✅ 已完成（`HotRedisLuaGateTest`，12 例 + 变异验证） |
+| **UNR-3** | Lettuce `connectTimeout` 默认 10s vs go-redis `DialTimeout=5s` | `go-redis@v9.20.0/options.go` `init()`：`DialTimeout = 5s` | `application.yml:28` 只配 `timeout: 3s`，未配 `connect-timeout` | ✅ **已闭合（第四轮取证）**：消费点 `LettuceConnectionConfiguration.createClientOptions`（字节码：`DataRedisProperties.getConnectTimeout()` → `ifnull` ⇒ 未配置时**不调** `SocketOptions.Builder.connectTimeout`）⇒ 落 Lettuce **6.8.2** `SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION = Duration.ofSeconds(10)`（字节码 `ldc2_w 10l → Duration.ofSeconds`） | 连接阶段失败时机不同（低） | ✅ 已完成。**结论：差异确认存在（10s vs 5s），低影响，未修** |
+| **UNR-4** | `RoundRobinAssignor` 配置**是否真的落到 consumer**（Boot 4 的 `KafkaProperties.Consumer.buildConsumerProperties()` 是否仍消费 `spring.kafka.consumer.properties.*`） | `hot.go:57` `NewBalanceStrategyRoundRobin` | `application.yml:49` | ✅ **已闭合（第四轮）**：真 Kafka IT 用**生产 `ConsumerFactory`** 建 2 个消费者 + 3 分区 topic ⇒ 实测分配 `[0,2]/[1]`（RoundRobin 形状）；**变异**把策略改成 `RangeAssignor` ⇒ 用例立刻变红（实际 `[0,1]/[2]`）⇒ 证明断言对策略敏感、不是恒真 | 分配策略改变 ⇒ `hkMap` 布局与热榜分布改变 | ✅ 已完成（`HotKafkaConsumerGateTest#productionConsumerFactoryReallyUsesRoundRobinAssignor`） |
+| **UNR-5** | `@KafkaListener` 若能起来，**容器并发度**是否等价于 Go 的「每分区一个 goroutine」 | sarama 每分区一个 goroutine（`consumer_group.go` 的 `consume()` 每 claim 一个 goroutine） | `@KafkaListener` 默认 `concurrency=1`（实测：单容器线程持有全部 3 个分区 ⇒ 串行消费） | ✅ **已回答（第四轮）**，**但结论不是「等价」**：单实例部署下 Go 并行消费 3 个分区、RAG 串行消费 ⇒ **不等价**；在「同一部署 × 3 副本」（3 JVM 同组、每 JVM 恰好 1 个分区）下才等价 ⇒ 登记为 **DRIFT-HOTRPC-009** | 影响跨分区的消费并行度（同分区内的顺序保证两侧一致） | ✅ 已回答；**是否把 `concurrency` 调成 `partition-count` 需单独决策**（会改并发语义，本轮未擅改） |
 | **UNR-6** | `hot2.yaml` / `hot3.yaml` 与 `hot.yaml` 只差 `ListenOn` 与 `Prometheus.Port`（历史结论），本轮**未复核**该 diff | `etc/hot{1,2,3}.yaml` | — | 本轮没跑这个 diff | 若三份 yaml 还有别的差异，「同一部署 × 3 副本」的收敛论证会有洞 | `diff etc/hot.yaml etc/hot2.yaml` |
 | **UNR-7** | Go 的 `zrpc` 在注册 etcd 失败时是否 `Fatal`（⇒ 进程退出） | `hot.go:35` `zrpc.MustNewServer` | `NacosRegistration.java:92-94` 只 log | 未读 go-zero `zrpc` 的注册失败路径实现 | 注册失败时两侧存活行为不同 | 读 `go-zero@v1.10.2` 的 `internal/rpcpub` 注册路径 |
 | **UNR-8** | `AGENTS.md §3.4` 把 `hot` 列在「只有一次性实测、**无回归网**」档 | proto diff 本轮重做仍为空 | 同 | 本轮的 diff **未进脚本** | proto 可能随时被改坏而无人知晓 | 按 `user` / `admin` 的写法扩 `tools/difftest/check-proto-static.sh` |
@@ -820,6 +831,9 @@ SEMANTICALLY NOT EQUIVALENT
 3. 修 `DRIFT-HOTRPC-001`（`Long.remainderUnsigned`）+ 补一条**对拍 fixture 测试**（不是行为测试）；
 4. 决定 `DRIFT-HOTRPC-004` 的口径（建议显式化现状）、`DRIFT-HOTRPC-006` 要不要签字；
 5. 起真 Redis + 真 Kafka 做 IT，消掉 UNR-1 / 2 / 4 / 5。
+   ✅ **第四轮已做**：UNR-2 / 3 / 4 **已闭合**；UNR-1 **部分闭合**（Go 侧重试面仍未实测）；
+   UNR-5 **已回答且结论为「非等价」**（⇒ DRIFT-HOTRPC-009）。
+   ⇒ 本条的**剩余动作**只剩「Go 侧 `CLIENT PAUSE` 半程失败对拍」一项。
 
 
 ---
@@ -943,7 +957,101 @@ SEMANTICALLY NOT EQUIVALENT
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| **真 Redis / 真 Kafka 集成测试** | ❌ 仍缺 | 4 段 Lua、两个 TTL、`EXISTS` 守卫、`RENAME` 原子性、RoundRobin 实际分配、零重试 handler 的**实际效果**，全部仍只有静态源码证据。本机 Docker 可用，但本轮未拉起中间件 ⇒ 证据强度未提升 |
+| **真 Redis / 真 Kafka 集成测试** | ✅ **第四轮已闭合** | 真 `redis:7-alpine`（12 例）+ 真 `apache/kafka:3.7.2`（4 例），全部默认跑、不 skip，均配变异验证。⚠️ 残留：Go 侧 `MaxRetries=3` 的实际重试面（UNR-1 的 Go 侧）仍需 `CLIENT PAUSE` 半程失败对拍 |
 | **Go 侧 `?page` 之外的入口面** | — | 本轮只对照了消费面与查询面；`HotRankingQueryService` 的 Redis 分支仍只有 Mockito 单测 |
 | **proto 回归网** | ❌ 仍缺 | `hot.proto` 无自动对照测试（UNR-8）；本轮未补 |
 | **DRIFT-HOTRPC-005（Kafka 位点节奏）** | ⏸ 保持不修 | Go 每 1s 批量提交、RAG 逐条提交 ⇒ 崩溃恢复时 Go 会重复计入。方向明确、幅度有界，**登记不修** |
+| **DRIFT-HOTRPC-009（容器并发度）** | 🆕 **新登记，未修** | 第四轮 IT 查出：单实例下 Go 每分区一个 goroutine（并行）vs RAG `concurrency=1`（串行）。**实际「×3 副本」部署下等价**，单实例不等价 ⇒ 需单独决策是否改 `concurrency` |
+
+---
+
+<!-- ====================================================================================
+     ↓↓↓ 第四轮：2026-10-24 00:0x「真中间件集成测试轮」（align/hot 分支）
+     ↑ 上方第三轮及更早的历史条目与编号一条未删（仅就地加了复核批注）
+     ==================================================================================== -->
+
+# 第四轮：真 Redis / 真 Kafka 集成测试轮（2026-10-23 夜 ~ 2026-10-24 凌晨）
+
+> **范围**：`service/hot/hot-rpc`（测试 + 两处生产注释修正）；**只改 hot 域文件**。
+> **分支**：`align/hot`（worktree `../RAG.worktrees/hot`）。
+> **本轮性质**：把第二轮台账里**只有静态源码证据**的六项语义位（4 段 Lua / 两个 TTL /
+> `EXISTS` 守卫 / `RENAME` 原子性 / RoundRobin 实际分配 / 零重试 handler 实际效果）
+> **升级为真中间件证据**，并按 §3.3 纪律给每条配**变异验证**。
+> **只读边界**：**Go 真源仓库零改动**。
+
+## 本轮一句话
+
+**UNR-2 / 3 / 4 已闭合，UNR-1 部分闭合，UNR-5 已回答且结论为「非等价」；
+同时真 Redis 证伪了台账对 `EXISTS` 守卫的描述（⇒ DRIFT-HOTRPC-008）。**
+
+## 产出
+
+| 文件 | 性质 | 规模 |
+|---|---|---|
+| `HotRedisLuaGateTest.java` | **新增** 真 Redis 守门测试 | 12 例 |
+| `HotKafkaConsumerGateTest.java` | **新增** 真 Kafka 守门测试 | 4 例 |
+| `HotRedisSnapshotStore.java` | **改** 生产注释（`EXISTS` 守卫语义修正 + 170 行残留措辞） | 3 处 |
+| `HotMergeScheduler.java` | **改** `LOCK_TTL_SECONDS` 可见性（private → 包可见，供测试引用） | 1 行 |
+| `hot-rpc/pom.xml` | **改** testcontainers 依赖 + surefire `TESTCONTAINERS_RYUK_DISABLED` | — |
+
+## 逐条处置
+
+| 原 UNR | 处置 | 证据 |
+|---|---|---|
+| **UNR-2**（4 段 Lua 逐条行为） | ✅ 闭合 | 真 Redis 逐段跑通；`resultType=Long` 映射已验；TTL 300 vs 3600 实测 |
+| **UNR-3**（Lettuce connectTimeout） | ✅ 闭合 | 消费点字节码 + Lettuce 6.8.2 `DEFAULT_CONNECT_TIMEOUT_DURATION=10s` |
+| **UNR-4**（RoundRobin 是否落到 consumer） | ✅ 闭合 | 真 Kafka 实测 `[0,2]/[1]`；变异改 Range ⇒ 变红 |
+| **UNR-1**（go-redis `MaxRetries=3` 的实际重试面） | ⚠️ 部分闭合 | RAG 侧「无重试」已实测；**Go 侧仍需 `CLIENT PAUSE` 半程失败对拍** |
+| **UNR-5**（容器并发度 vs 每分区一个 goroutine） | ✅ 已回答，**结论非等价** | 实测 `concurrency=1`；⇒ 登记 DRIFT-HOTRPC-009 |
+
+## 变异验证（三条，全部按预期变红）
+
+| # | 变异 | 预期红 | 实测 |
+|---|---|---|---|
+| **M1** | `application.yml` 的 `partition.assignment.strategy` 改 `RangeAssignor` | RoundRobin 分配用例 | ✅ 变红：`expected: <[2, 0]> but was: <[0, 1]>` |
+| **M2** | `HotKafkaConfig.zeroRetryErrorHandler()` 改 `FixedBackOff(0,9)` | 零重试用例 + 装配层用例 | ✅ 变红 2 条：`expected: <1> but was: <7>`（被重投 7 次）、`noRetries expected: <true> but was: <false>` |
+| **M3** | `HotEventConsumer` 去掉「缺 `article_id` 就 drop」校验 | drop 契约用例 | ✅ 变红：`expected: <1.0> but was: <2.0>`（坏消息被计数） |
+| **M-redis-1** | 分片 TTL 300 → 3600 | TTL 用例 | ✅ 2 例变红 |
+| **M-redis-2** | `EXISTS` 守卫改查 `KEYS[2]` | 守卫用例 | ✅ 2 例变红 |
+
+> ⚠️ **M3 第一轮没红** —— 暴露的是**断言自身的观察窗口有洞**（轮询撞上中间态），
+> 不是生产代码对。修法见 `docs/Pitfalls/hot/rpc.md` **P-HOTRPC-10**。
+
+---
+
+## DRIFT-HOTRPC-008 ⚪ 台账/注释写反（**非行为漂移**）· 已实测证伪
+
+- **Component**：Redis 快照（`EXISTS` 守卫）
+- **Go Behavior**：`hot_handler.go:227-234` 的改名脚本首行 `if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end`，
+  调用处 `keys := []string{shadowKey, partitionKey}` ⇒ **`KEYS[1] = shadow`**；
+  而 shadow 在同一次 pipeline 里刚被 `ZADD` 写入 ⇒ **守卫恒为 1** ⇒ **首次快照不会被丢**。
+- **RAG Behavior**：**生产代码本来就与 Go 一致**（同样传 `List.of(shadowKey, partitionKey)`）。
+  ⚠️ **错的是本台账与生产代码注释**：两者都写成「守卫检查目标分片 key ⇒ 首次快照必丢」。
+- **证伪证据（真 Redis）**：`HotRedisLuaGateTest#firstSnapshotIsNotLost` —— 先 `DEL`+`ZADD` 写 shadow
+  再跑改名脚本 ⇒ 返回 `1`、分区 key 正常落地；
+  **变异**：把守卫改成检查 `KEYS[2]` ⇒ 该用例立刻变红 ⇒ 证明用例确实在测「守卫查哪个 key」。
+- **处置**：① 修正 `HotRedisSnapshotStore` 的三处注释；② 修正本台账 Equivalence Matrix 第 25 行；
+  ③ **不改生产逻辑**（它本来就是对的）。
+- ⚠️ **为什么这条值得单列**：**台账的错误结论会主动制造回归** ——
+  照着旧台账去「修」生产代码，会把本来正确的实现改坏。
+  ⇒ 教训见 `docs/Pitfalls/hot/rpc.md` **P-HOTRPC-09**。
+
+---
+
+## DRIFT-HOTRPC-009 🟡 OBSERVABLE DIFFERENCE · LOW · 已实测（**部署相关**）
+
+- **Component**：Kafka 消费并发度
+- **Go Behavior**：`sarama` 的 `consumerGroupSession.consume()` **每个 partition claim 起一个 goroutine**
+  ⇒ 单进程持有 N 个分区时，**N 个分区并行消费**。
+- **RAG Behavior**：`@KafkaListener` 默认 `concurrency=1` ⇒ **单消费者线程串行轮询它持有的全部分区**。
+- **实测**：真 Kafka IT 中生产容器（concurrency=1）**独占了全部 3 个分区**
+  ⇒ `HotPartitionSketchRegistry.size() == 3` 且事件处理是串行的。
+- **差异何时可见**：
+  - **单实例部署**（1 个 JVM 持 3 个分区）⇒ Go 并行 3 路、RAG 串行 1 路 ⇒ **不等价**；
+  - **实际部署「同一部署 × 3 副本」**（3 个 JVM 同一个消费组，RoundRobin ⇒ 每 JVM 恰好 1 个分区）
+    ⇒ 每 JVM 1 线程 1 分区 ⇒ **等价**。
+- **同分区内顺序保证**：两侧都是分区有序 ⇒ **一致**。
+- **影响**：低（吞吐 / 跨分区并行度；不改热榜内容语义）。
+- **处置**：**登记不修** —— 改 `concurrency` 会**改变并发语义**（且 `concurrency` 是静态值、
+  分区数可随部署变化），需要单独决策与单独 PR；本轮**不擅自改**。
+  ⇒ 建议下一轮评估 `spring.kafka.listener.concurrency` 与 `hot-rpc.interaction.partition-count` 的绑定方式。

@@ -59,7 +59,8 @@ public class HotMergeScheduler {
     public static final String MERGE_LOCK_KEY = "hot:merge:lock";
 
     /** 对应 Go {@code lockTTL = 10 * time.Second}（{@code hot_handler.go:26}）。 */
-    private static final long LOCK_TTL_SECONDS = 10L;
+    /** 包可见（不是 private）：真 Redis 守门测试需要引用它来断言续期 TTL。 */
+    static final long LOCK_TTL_SECONDS = 10L;
 
     /** 对应 Go {@code renewInterval = 3 * time.Second}（{@code hot_handler.go:27}）。 */
     private static final long RENEW_INTERVAL_MILLIS = 3_000L;

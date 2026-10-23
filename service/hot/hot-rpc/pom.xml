@@ -169,5 +169,78 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+            🔴 真 Redis / 真 Kafka 守门测试（Testcontainers）。
+
+            本组件此前最大的证据缺口就是「4 段 Lua / 两个 TTL / EXISTS 守卫 / RENAME 原子性 /
+            RoundRobin 实际分配 / 零重试 handler 只有静态源码证据」（DRIFT/hot/rpc.md UNR-1/2/4/5）。
+            这些语义位**无法**用 mock 或手写假 Redis 代替：
+              · Lua 里 KEYS[1]/KEYS[2] 绑反 ⇒ 结果 key 写错，不报错；
+              · EXPIRE 写死 300 vs 配置 3600 ⇒ 两个 TTL 被"统一"成一个，静态读代码看不出来；
+              · RENAME 的原子性是 Redis 单命令保证的；
+              · compare-and-EXPIRE / compare-and-DEL 的"值不匹配就不动手"必须真 Redis 才能验；
+              · 分区分配策略（RoundRobin vs Range）必须真 Kafka + 多消费者才能观察。
+
+            ⚠️ 与本仓其它域的真 PG 守门测试同口径（见 comment-rpc 的 CommentSchemaPgGateTest）：
+               **默认跑、不 skip**。理由是 Go 侧那三个 _test.go 在没有 DSN 时 t.Skip，
+               于是"没人验证过"的状态长期存在 —— 静默 skip 会让缺口重新变成缺口。
+
+            版本由 spring-boot-starter-parent 的 testcontainers.version 管理，不写 <version>。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                ⚠️ 显式关掉 Testcontainers 的 Ryuk 资源回收器。
+
+                理由（实测 2026-10-23）：
+                  · Ryuk 镜像 testcontainers/ryuk:0.14.0 需要从 Docker Hub 拉；
+                  · 本机 Docker Hub 直连不通（registry-1.docker.io 超时），
+                    虽然 daemon 配了 3 个镜像加速器，但 TC 自带的 30s 拉取看门狗
+                    仍会在「无进度」时直接 abort ⇒ 整轮 IT 挂 4.5 分钟才失败。
+                  · 而本模块用到的两个镜像（redis:7-alpine / apache/kafka:3.7.2）
+                    **本地已有**，不需要拉。
+
+                关掉 Ryuk 是否安全？
+                  · Ryuk 只是「JVM 崩溃后回收孤儿容器」的安全网；
+                  · 本模块的容器是 @Container 托管的，由 JUnit 扩展在类结束时
+                    显式 stop() ⇒ 正常路径不依赖 Ryuk；
+                  · 遗留风险：测试进程被 kill -9 时容器会残留 ⇒ 可用 docker ps
+                    配合 label org.testcontainers=true 手工清理。
+
+                ⚠️ 这是**显式取舍**，不是「图省事」：把它写进 pom 是为了让
+                   「这个模块的 IT 不需要访问 Docker Hub」这件事**可复现**，
+                   而不是依赖某个开发者的 shell 环境变量。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!--
+                        ⚠️ 必须用**环境变量**而不是 system property：
+                        Testcontainers 2.0.5 的 ResourceReaper.instance() 只读
+                            System.getenv("TESTCONTAINERS_RYUK_DISABLED")
+                        （字节码取证：ResourceReaper.class 的 instance() 方法，
+                          ldc "TESTCONTAINERS_RYUK_DISABLED" → System.getenv → Boolean.parseBoolean）
+                        ⇒ 写成 <ryuk.disabled>true</ryuk.disabled> 这种 system property
+                          **完全无效**（实测：仍然去拉 ryuk 并挂 4.5 分钟后失败）。
+                    -->
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>
