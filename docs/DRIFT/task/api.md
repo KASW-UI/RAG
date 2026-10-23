@@ -29,6 +29,24 @@
 | 对拍结果 | **44 用例：MATCH 44 / DIFF 0**（判定口径：状态码 + **归一后**的 Content-Type 媒体类型 + nosniff + 响应体逐字节） |
 | 测试 | **90 tests / 0 failures / 0 errors / 0 skipped**（task-api；原 78 + 新增 12） |
 
+### 〇·一、本组件的守门测试清单（2026-10-24 复核补登）
+
+> ⚠️ 此前台账**只点名了部分测试类**，其余在册但没登记 ⇒ 复核时判定为「覆盖缺口」。
+> 本节把 task-api 的**全部**测试类登记在此，每个都写清它**锁住哪一条契约**。
+
+| 测试类 | 条数 | 锁住的契约 | 类型 |
+|---|---|---|---|
+| `TaskApiContentTypeTest` | **12** | **DRIFT-TASK-API-003**：任何 Content-Type（含 `form-urlencoded` / `multipart`）的 JSON body 都应被收下（Go `gettaskhandler.go:19` 裸 decoder）＋ `spring.servlet.multipart.enabled` **真的**被解析成 false | 变异测试 |
+| `TaskApiMvcPipelineTest` | **20** | **真实 MVC 管线**（非 `standaloneSetup`）：请求体转换器插在 Boot 的 Jackson 转换器**之前** ＋ 共享的 `GoStyleJsonBodyConverterConfig` **真的被排除** ＋ 404 裸 `text/plain` / 405 裸状态码 | 装配 + 端点级 |
+| `TaskApiWiringTest` | **5** | **装配层**：HTTP 3s 超时中间件 + 四道请求保护闸门**真的在容器里**（Go `rest/config.go:12-23` tag 默认全开）＋ 端点映射在 `/taskcenter/v1/task/get` | 装配层 |
+| `GetTaskReqParsingTest` | **23** | **解析层**（用 Jackson 3 = Boot 4 MVC 边界同一个 mapper）：`{"id":"123"}` 接受 + `TrimSpace`（Go `types.go:24-25`） | 契约层 |
+| `GrpcStatusHttpMappingTest` | **23** | gRPC code → HTTP 状态码的映射（Go `responses.go:143-160`） | 契约层 |
+| `TaskGetServiceTest` | **7** | `GetTask` 的领域逻辑（合并任务定义、pack/unpack 进度） | 领域层 |
+| `TaskApiRawBodyConfig` / `GoStyleRawBodyArgumentProcessor` | — | （生产代码）请求体转换器本体 | — |
+
+⚠️ **「装配层」与「装配生效」是两条不同的断言**（`TaskApiWiringTest` 答「装上了吗」、
+`TaskApiMvcPipelineTest` 答「生效了吗」）⇒ 两条缺一不可，别只留一条。
+
 ---
 
 ## 一、已修（2 条）

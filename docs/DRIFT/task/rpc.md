@@ -23,6 +23,29 @@
 | ⚠️ 仍未覆盖 | ⓿ **「Kafka 写入 → task-api 读到」这条跨域闭环**未做活体对拍 —— 但两侧的读写 Redis key **本来就不一致**（Go 侧也读不到自己写的缓存），⇒ **不是 RAG 的缺陷**，见 §五 第 7 条；① ⚠️ **goka 的「表 topic」config（`cleanup.policy` / `retention.ms`）未做逐项对照** —— 但已实测「compact 不按时间删」且 Go 侧**不创建** topic（§四·七）⇒ 两侧**都不管** topic 生命周期 ⇒ 一致；② ⚠️ **yaml 里查出了三类「死配置」**（`spring.mybatis-plus.*` / `otel.*` / `spring.jpa.*`，§四·九）—— **零行为影响**（三处逐一核过），但 `otel.*` **与 Go 存在观测差异**（Go 真导出 span，Java 侧 no-op）⇒ **全部是跨域共性**（8~20 个模块同款），本域不单方面修 |
 | 测试 | **104 tests / 0 failures / 0 errors / 0 skipped**（其中 15 条真 PG、**9 条真 Redis**；task-api 另 90 条，合计 **194**） |
 
+### 〇·一、本组件的守门测试清单（2026-10-24 复核补登）
+
+> ⚠️ 此前台账**只点名了部分测试类**，其余在册但没登记 ⇒ 复核时判定为「覆盖缺口」。
+> 本节把 task-rpc 的**全部**测试类登记在此，每个都写清它**锁住哪一条契约**。
+> ⚠️ 「**测试全绿**」≠「这些契约被验证过」—— 每个测试类的**触发条件**才是关键
+> （例如 `RedisPipelinesRealRedisGateTest` 必须接**真 Redis**，`TaskProgressUpsertParityTest` 必须有 **真 PG**）。
+
+| 测试类 | 锁住的契约 | 关键前提 |
+|---|---|---|
+| `TaskKafkaOffsetResetContractTest`（5） | **DRIFT-TASK-RPC-006**：六个 listener 的 `auto.offset.reset` 必须是**点分**（连字符被 Kafka 静默忽略）＋ 通用断言（所有 per-listener 键必须属 `ConsumerConfig.configNames()`） | 阳性对照用 Kafka 自己的 `ConsumerConfig` |
+| `TaskCountStoreRetentionContractTest`（4） | **保留策略定案**：`task:goka:count:*` **不设 TTL**（加了会造成业务错误） | **真 Redis**（非 mock） |
+| `TaskConfigKeyBindingContractTest`（5） | **yaml 键名不得静默失效**：每个键都要有消费方（框架元数据 ∪ `@ConfigurationProperties` 前缀 ∪ `@Value`）＋ 白名单反向纪律 | 框架元数据来自 classpath 各 jar 的 `spring-configuration-metadata.json` |
+| `RedisPipelinesRealRedisGateTest`（9） | **DRIFT-TASK-RPC-004/005**：pipeline 语义（**不是** MULTI/EXEC）＋ 错误**向上抛**不吞 | **真 Redis**（非 mock）—— 这是「整条消息链路是死的而 81 条测试全绿」那次的教训 |
+| `TaskProgressUpsertParityTest`（15） | **DRIFT-TASK-RPC-003**：两条 upsert 与 Go 的 `AutoMigrate` 产物逐字对齐 | **真 PG** ＋ `@EnabledIfDockerAvailable` ⇒ **无 Docker 时会静默全跳** ⇒ CI 必须有 Docker |
+| `TaskServiceGrpcImplWireTest`（4） | **wire 层**：客户端真正收到的 gRPC code + description（Go `get_task_logic.go` 的 `codes.InvalidArgument` / `"user_id invalid"`） | **真 channel**（InProcess）—— 领域层抛对了 ≠ 客户端收到了 |
+| `TaskSinkConsumeTest`（19） | 两个 sink 的消费路径（进度写 Redis + `like:cnt` 语义） | mock 领域层 |
+| `TaskDomainServiceTest`（19） | `GetTask` 的领域逻辑（合并任务定义、pack/unpack 进度） | mock 数据层 |
+| `TaskEventParsingTest`（21） | `LogEvent` 解析（`uid <= 0` / `total <= 0` 的拒绝语义） | 纯函数 |
+| `TaskSinkPropertiesBindingTest`（3） | **DRIFT-TASK-RPC-002**：`task.definitions.*` 的 TTL 键**真的绑得上**（`init-ttl` ↔ `initTtl`） | 加载**真实** `application.yml`（非测试专用 yml） |
+
+⚠️ **`TaskProgressUpsertParityTest` 的 15 条在无 Docker 环境下是 `skipped` 而非 `failed`**
+⇒ 「全绿」可能意味着「一条没跑」⇒ 复核测试数字时**必须看 `skipped`**，不能只看 `failures=0`。
+
 ---
 
 ## 一、已修（6 条）
@@ -1118,3 +1141,75 @@ KEEP_UP=1 ./tools/difftest/run-task-offset-oldest.sh # 跑完保留服务与容�
 3. **`BoundPropertiesTrackingBindHandler` 的消费者是 `ConfigurationProperty`**（`getName()` 返回
    `ConfigurationPropertyName`，不是 String）⇒ 必须 `.toString()`。
 ⇒ 详见 [`docs/Pitfalls/task/rpc.md`](../../Pitfalls/task/rpc.md) 的 PITFALL-TASK-RPC-23 ~ 25。
+
+---
+
+## 四·十、「台账 vs 实际」的复核（2026-10-24 实测）
+
+> ⚠️ **为什么需要这一节**
+> 台账里的「已修 / 未修 / N 条 / `file:line`」这类断言**过期时不会报错** ——
+> 代码被回退了、测试数变了、Go 侧行号漂了，**没有任何东西会报警**。
+> AGENTS.md §6 要求「任何『已修 / 未修』断言都必须带**核对日期**，否则按 `UNKNOWN` 处理」
+> ⇒ 这一节把那条例外**机械化**：把台账的断言逐条拿去和仓库/Go 真源对拍。
+
+### 四·十·一、复核器：`tools/check-ledger-selfcheck.py`
+
+五层检查（**只读**，不改任何文件）：
+
+| 层 | 检查什么 | 判据 |
+|---|---|---|
+| 1 | 台账引用的**仓库内路径**是否存在 | 文件存在 |
+| 2 | 台账的「已修」断言 → 仓库里**能不能查到对应物** | 代码里能查到（**注释里的反面教材不算**） |
+| 3 | 台账的**数字断言**（测试数 / 条数 / 编号连续性 / commit 数） | 与 surefire 报告、git 实测一致 |
+| 4 | 台账的 **Go 侧 `file:line`** 是否悬空 | 文件存在 + 行号在范围内（真源仓库 + 第三方库，按**真源 go.mod 的精确版本**） |
+| 5 | 仓库里**存在但台账从未点名**的测试类 | 列出（覆盖缺口） |
+
+**实测结果（2026-10-24）**：层 1~4 **全部通过**，层 5 **0 个缺口**（补登记后）。
+
+### 四·十·二、本轮复核查出的 4 处台账缺陷（**已全部修掉**）
+
+| # | 位置 | 台账写的 | 实际 | 性质 |
+|---|---|---|---|---|
+| 1 | `_README.md` 章节标题 | 「共 **24 个 commit**」 | **31** | 数字过期 |
+| 2 | `_README.md` 第三轮/第四轮清单 | commit 栏写着「（本轮）」「（本次）」**占位符** | 应为真实哈希（第二轮起就已改用哈希，**本轮反而回退了**） | 占位符未落实 |
+| 3 | `_README.md` 开放项表上方 | 「第四轮又查出…（**§三·第四轮**）」 | 该节在 **rpc.md §四·九**；`_README` 里**没有 §三** | 章节号失准 |
+| 4 | rpc.md / api.md | 4 个测试类**在册但从未被台账点名** | `TaskApiMvcPipelineTest` / `TaskApiWiringTest` / `GetTaskReqParsingTest` / `TaskServiceGrpcImplWireTest` | **覆盖缺口** |
+
+⇒ 4 处都已修：① 改成 31；② 第三轮 5 行填 `6fc73e5`/`0ba9c0b`/`8959779`/`a02a326`/`a75fcb9`、
+第四轮合并为 1 行 `f3d4cb4`（**原写成 4 行，实际只对应 1 个 commit** —— 会误导读者）；
+第二轮两条填 `e5e47f9` / `14b9560`；③ 改成指向 `rpc.md §四·九`；④ 在两个台账各加一节
+「**〇·一、本组件的守门测试清单**」，把**全部**测试类逐个登记（写清锁住哪条契约 + 关键前提）。
+
+### 四·十·三、✅ 复核器自身的变异测试（证明它不是假绿）
+
+| 变异 | 期望 | 实测 |
+|---|---|---|
+| **① 把某个 listener 的 `auto.offset.reset` 改回连字符**（模拟修复被回退） | 第 2 层必须红 | ✅ 红：「**代码里**仍有 1 处 auto-offset-reset ⇒ 修复被回退」 |
+| **② 把台账里的测试数 104 改成 99** | 第 3 层必须红 | ✅ 红：「台账 99 / 实测 104」 |
+| **③ 把 Go 侧 `initGoKa.go:131` 改成 `:99999`** | 第 4 层必须红 | ✅ 红：「行号超出文件范围」 |
+
+⇒ 三个变异**全部精确命中** ⇒ 该复核器**有区分力**。
+
+### 四·十·四、⚠️ 复核器的**效力边界**（别高估它）
+
+1. ⚠️ 第 2/4 层只保证「**引用不悬空**」与「**断言有对应物**」，
+   **不保证「内容完全对得上」** ⇒ 关键断言仍需**人工抽验**。
+   （本轮人工抽验了 4 条核心出处：`goka/processor.go:1012` = `ensureCopartitioned`、
+   `goka/options.go:361-363` = `StorageBuilder not set`、
+   `kafka-go/reader.go:811-812` = `FetchMessage does not commit offsets automatically`、
+   `go-queue/kq/queue.go:264` = `consume()` 里的 `FetchMessage` —— **内容全部对得上**。）
+2. ⚠️ 第 4 层里「同名文件在多个库都存在」的 **10 条**会单独列出 ⇒ **归属需人工确认**
+   （脚本只保证行号在某个候选文件里合法）。
+3. ⚠️ 第三方库必须按**真源 `go.mod` 的精确版本**去核对 ——
+   ⚠️ **本机 module cache 里当时只有 go-zero v1.10.3，而真源用的是 v1.10.2**
+   ⇒ 用错版本核对会得出错误结论（本轮已按 `go.mod` 下载 v1.10.2 / kafka-go v0.4.47 / go-queue v1.2.2）。
+4. ⚠️ 第 5 层只覆盖 **task 域**；其它域要复核得各自扩展 `LEDGER_FILES` 与 `CLAIMS`。
+
+### 四·十·五、复核时踩到的 3 个坑（**都在脚本自己身上**）
+
+1. ⚠️ **禁模式检查必须剥离注释** —— 否则 `auto-offset-reset`（作为反面教材写在注释里）
+   会被误判成「修复被回退」。
+2. ⚠️ **`go-queue` 不是本仓自研** —— 它是 `github.com/zeromicro/go-queue@v1.2.2`（go-zero 官方队列库），
+   索引错了会把它错配到 goka 的同名文件上 ⇒ 报出假的「行号超出」。
+3. ⚠️ **shell 里的 `&` 会拆路径** —— `Sea-RideTheWind_golang` 里的 `&` 不加引号会被 bash 拆成两段
+   ⇒ 脚本参数变空 ⇒ 报出「107 条全部找不到」的假警报。

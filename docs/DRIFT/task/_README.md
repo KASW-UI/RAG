@@ -15,7 +15,7 @@
 **task 域没有 `-common`** —— Go 侧 `service/task` 下只有 `api` 与 `rpc`，**不是遗漏**。
 ⇒ 错误全部是标准 gRPC code（`INVALID_ARGUMENT` / `UNKNOWN`），不需要 like/message 那种业务码 ↔ gRPC code 转换类。
 
-## 本轮改了什么（首轮 + 第二轮 + 盘点收口 + 第三轮，共 **24 个 commit**）
+## 本轮改了什么（首轮 + 第二轮 + 盘点收口 + 第三轮 + 第四轮，共 **31 个 commit**）
 
 ### 首轮（2026-10-23）
 
@@ -47,13 +47,13 @@
 | `8d89170` | **编排脚本**：pkill 后只 sleep 2 ⇒ 新进程抢不到端口，症状却是「api 503」⇒ 改成轮询等端口释放 / 等端口监听 |
 | `a50b6cb` | 台账：rpc.md 加 §四·五（跨语言 gRPC + 畸形消息活体对拍）+ 证据边界与待办更新 |
 | `546457b` | **Nacos 真注册中心对拍**（注册 → 注销，EXIT=0）+ 修既有 `run.sh` 里 2 处同款潜伏 bug（`$var` 紧跟多字节字符） |
-| `（本次）` | 台账：api.md 加 §四·六（Nacos 证据）+ Pitfalls 15·补 / 17 + 本 README |
+| `e5e47f9` | 台账：api.md 加 §四·六（Nacos 证据）+ Pitfalls 15·补 / 17 + 本 README |
 
 ### 第二轮之二（2026-10-24 · 台账盘点收口）
 
 | commit | 内容 |
 |---|---|
-| `（本次）` | **全量盘点「task 域还剩多少可修复的漂移与未知」** ⇒ 结论：**语义漂移 0 条**；修掉台账里 **8 处过期/自相矛盾**的断言（见下） |
+| `14b9560` | **全量盘点「task 域还剩多少可修复的漂移与未知」** ⇒ 结论：**语义漂移 0 条**；修掉台账里 **8 处过期/自相矛盾**的断言（见下） |
 
 **盘点修掉的 8 处台账自身问题**（全是**文档过期**，不是代码缺陷）：
 
@@ -97,26 +97,34 @@
 
 | commit | 内容 |
 |---|---|
-| `（本轮）` | 🔴 **修 DRIFT-TASK-RPC-006**：六个 listener 的 `properties` 写成了**连字符** `auto-offset-reset` ⇒ **Kafka 直接忽略** ⇒ goka 三处的 `earliest` **从未生效**（kq 三处的 `latest` 属「碰巧对」）。改成**点分**的 `auto.offset.reset` + 新增 5 条契约守门测试（含阳性对照 + ✅ 变异测试） |
-| `（本轮）` | **「首次消费无位点」活体对拍**：新脚本 `tools/difftest/run-task-offset-oldest.sh`（**先灌消息、再起消费者**）⇒ **8 条断言全过、失败项 0**；修复前 A2/A4 是 `<absent>` FAIL |
-| `（本轮）` | **定案「goka 表的保留策略」**：`cleanup.policy=compact` 单独使用时 **Kafka 不按时间删**（带阳性对照的对照实验）⇒ **Go 的计数表永不过期** ⇒ **RAG 的 `task:goka:count:*` 不设 TTL 才是对齐**（加了会造成业务错误）⇒ 新增 4 条真 Redis 契约守门测试（含 ✅ 变异测试） |
-| `（本轮）` | 🔴 **修跨域隐患**：`tools/difftest/` 下两个 compose 文件**项目名撞车**（都叫 `difftest`）⇒ `up -d` 会**删掉 user 域的容器**、`down -v` 还会删卷 ⇒ 给 task 域的 compose 加 `name: taskprobe` |
-| `（本轮）` | 台账：rpc.md 加 §四·七（保留策略）+ §四·八（OffsetOldest 对拍）+ DRIFT-TASK-RPC-006；Intentional_Deviations 加 `SD-2026-10-24-TASK-01`；Pitfalls 加 **5 条**（18~22） |
+| `6fc73e5` | 🔴 **修 DRIFT-TASK-RPC-006**：六个 listener 的 `properties` 写成了**连字符** `auto-offset-reset` ⇒ **Kafka 直接忽略** ⇒ goka 三处的 `earliest` **从未生效**（kq 三处的 `latest` 属「碰巧对」）。改成**点分**的 `auto.offset.reset` + 新增 5 条契约守门测试（含阳性对照 + ✅ 变异测试） |
+| `0ba9c0b` | **「首次消费无位点」活体对拍**：新脚本 `tools/difftest/run-task-offset-oldest.sh`（**先灌消息、再起消费者**）⇒ **8 条断言全过、失败项 0**；修复前 A2/A4 是 `<absent>` FAIL |
+| `8959779` | **定案「goka 表的保留策略」**：`cleanup.policy=compact` 单独使用时 **Kafka 不按时间删**（带阳性对照的对照实验）⇒ **Go 的计数表永不过期** ⇒ **RAG 的 `task:goka:count:*` 不设 TTL 才是对齐**（加了会造成业务错误）⇒ 新增 4 条真 Redis 契约守门测试（含 ✅ 变异测试） |
+| `a02a326` | 🔴 **修跨域隐患**：`tools/difftest/` 下两个 compose 文件**项目名撞车**（都叫 `difftest`）⇒ `up -d` 会**删掉 user 域的容器**、`down -v` 还会删卷 ⇒ 给 task 域的 compose 加 `name: taskprobe` |
+| `a75fcb9` | 台账：rpc.md 加 §四·七（保留策略）+ §四·八（OffsetOldest 对拍）+ DRIFT-TASK-RPC-006；Intentional_Deviations 加 `SD-2026-10-24-TASK-01`；Pitfalls 加 **5 条**（18~22） |
 ### 第四轮（2026-10-24 · 固化「配置键名扫描」，并查出三类 yaml 死配置）
 
 | commit | 内容 |
 |---|---|
-| `（本轮）` | 🔴 **新增守门测试 `TaskConfigKeyBindingContractTest`（5 条全绿）**：yaml 的每一个键都必须有消费方（框架元数据 ∪ 自有 `@ConfigurationProperties` 前缀 ∪ `@Value` 占位符）⇒ **新增死配置会被立刻抓住**；白名单是**显式台账**（带出处与定性）+ **反向纪律**（每条登记必须真的盖住至少一个孤儿键） |
-| `（本轮）` | ✅ **三种变异测试全部精确命中**（非假绿）：① `mybatis-plus` 段移回顶层 ⇒ 白名单纪律红；② 新增 `bogus-typo-key` ⇒ 主断言红并点名；③ `init-ttl` → `init-ttl-days` ⇒ 绑定断言红（复现历史缺陷 `initTtlDays`） |
-| `（本轮）` | 🔴 **查出三类 yaml「死配置」**（§四·九）：`spring.mybatis-plus.*`（**前缀层级写错** ⇒ 三个键全死，但**零行为影响**，8 个 rpc 模块同款）· `otel.*`（**Boot 4.0.8 完全没有 OTel 自动配置** ⇒ 20 个 yaml 同款，⚠️ **与 Go 有观测差异**：Go `serviceconf.go:67 trace.StartAgent` 真导出 span）· `spring.jpa.*`（本模块无 JPA 依赖，6 个模块同款）⇒ **全部跨域共性，本域不单方面修** |
-| `（本轮）` | 台账：rpc.md 加 §四·九 + 更新 §〇/§一/§七；Pitfalls 加 **3 条**（23~25，记的是**扫描器与判定逻辑自己踩的坑**） |
+| `f3d4cb4` | 🔴 **新增守门测试 `TaskConfigKeyBindingContractTest`（5 条全绿）**：yaml 的每一个键都必须有消费方（框架元数据 ∪ 自有 `@ConfigurationProperties` 前缀 ∪ `@Value` 占位符）⇒ **新增死配置会被立刻抓住**；白名单是**显式台账**（带出处与定性）+ **反向纪律**（每条登记必须真的盖住至少一个孤儿键）<br>✅ **三种变异测试全部精确命中**（非假绿）：① `mybatis-plus` 段移回顶层 ⇒ 白名单纪律红；② 新增 `bogus-typo-key` ⇒ 主断言红并点名；③ `init-ttl` → `init-ttl-days` ⇒ 绑定断言红（复现历史缺陷 `initTtlDays`）<br>🔴 **查出三类 yaml「死配置」**（§四·九）：`spring.mybatis-plus.*`（**前缀层级写错** ⇒ 三个键全死，但**零行为影响**，8 个 rpc 模块同款）· `otel.*`（**Boot 4.0.8 完全没有 OTel 自动配置** ⇒ 20 个 yaml 同款，⚠️ **与 Go 有观测差异**：Go `serviceconf.go:67 trace.StartAgent` 真导出 span）· `spring.jpa.*`（本模块无 JPA 依赖，6 个模块同款）⇒ **全部跨域共性，本域不单方面修**<br>台账：rpc.md 加 §四·九 + 更新 §〇/§一/§七；Pitfalls 加 **3 条**（23~25，记的是**扫描器与判定逻辑自己踩的坑**） |
+### 第五轮（2026-10-24 · 「台账 vs 实际」的复核）
+
+| commit | 内容 |
+|---|---|
+| `（本轮）` | 🔴 **新增复核器 `tools/check-ledger-selfcheck.py`**（五层：路径存在性 / 「已修」断言→仓库证据 / 数字断言 / Go 侧 `file:line` / 未点名测试类）⇒ **解决「台账过期时没有任何东西会报警」**（AGENTS.md §6 的「核对日期」纪律的机械化）<br>✅ **三种变异测试全部精确命中**：① 修复被回退 ⇒ 第 2 层红；② 台账测试数造假 ⇒ 第 3 层红；③ Go 侧行号越界 ⇒ 第 4 层红 |
+| `（本轮）` | 🔴 **复核查出 4 处台账缺陷并全部修掉**：① 章节标题「24 个 commit」**过期**（实际 31）② 第三/四轮清单的 commit 栏是**占位符**「（本轮）」（第二轮起就已改用真实哈希 ⇒ 本轮反而回退）；且第四轮**写成 4 行却只对应 1 个 commit** ⇒ 会误导读者 ③ 开放项表上方引用「§三·第四轮」**章节号失准**（该节在 rpc.md §四·九）④ **4 个测试类在册但从未被台账点名** ⇒ 两个台账各加一节「〇·一、**守门测试清单**」逐个登记（含条数 + 锁住哪条契约 + 关键前提） |
+| `（本轮）` | 台账：rpc.md 加 §四·十（复核方法 + 查出的 4 处缺陷 + 变异测试 + **效力边界** + 脚本自身的 3 个坑）；_README 加第五轮清单 + 复核器登记 |
+
+⚠️ **本轮复核的结论**：task 域台账的**内容**是可信的（114 条 Go 侧出处**全部不悬空**，
+其中 4 条核心断言人工抽验**内容对得上**），但**元信息**（commit 数 / 章节号 / 覆盖登记）**过期了 4 处**。
+⇒ 这恰好印证了 AGENTS.md §6：**台账的「已修 / 未修」断言必须能被机械复核，否则它只是文字**。
 
 
 ## 🔓 本域**当前仍开放**的项（2026-10-24 盘点结论）
 
 > **一句话**：**语义漂移 0 条**（⚠️ 注意：盘点之后**又验出并修掉了第 6 条** —— `auto-offset-reset` 连字符被 Kafka 忽略，
 > ⇒ 「goka 的 earliest 从未生效」；详见 §三·第三轮）。
-> ⚠️ **第四轮又查出 yaml 侧的三类「死配置」**（§三·第四轮）—— **零行为影响**，但 `otel.*` 与 Go 有**观测差异**
+> ⚠️ **第四轮又查出 yaml 侧的三类「死配置」**（见 [rpc.md §四·九](rpc.md#四九-🔴-配置键名扫描yaml-里的死配置是怎么被查出来的2026-10-24-实测)）—— **零行为影响**，但 `otel.*` 与 Go 有**观测差异**
 > ⇒ **全部是跨域共性**（8~20 个模块同款），本域**不单方面修**。
 > 剩下的全是「证据缺口 / 待办 / 跨域」，**没有一条是已知的、只属于本域的行为缺陷**。
 
@@ -173,5 +181,19 @@
 | `parity-task.py` | task 域私有脚本 | 无 |
 | `docker-compose.task-kafka.yml` | **加 `name: taskprobe`**（修跨域误删：同目录的两个 compose 文件项目名原本都叫 `difftest`） | ⚠️ **合并时若与其它域同时改这个文件，注意别把 `name:` 行删掉** |
 | `run-task-offset-oldest.sh` | **新建**（task 域私有） | 无 |
+| `tools/check-ledger-selfcheck.py` | **新建**（**台账 vs 实际**的复核器，五层 + 自检层；当前只覆盖 task 域，**其它域可直接复用**） | 无（纯只读脚本）<br>⚠️ **放在 `tools/` 根**（与 `drift-move.py` 同级）⇒ 合并后建议在 **`AGENTS.md` §7.2 的工具档表**加一行（**本工作树不碰 AGENTS.md**，留给合并后统一处理） |
 
 ⇒ 合并时若其它域也在改这三个文件，需要人工合。
+
+### 复核器（可重复跑）
+
+```bash
+python3 tools/check-ledger-selfcheck.py            # task 域，退出码 0=通过 / 1=有不一致
+python3 tools/check-ledger-selfcheck.py --domain task --go-root /path/to/Sea-RideTheWind_golang
+```
+
+⚠️ **它解决的是「台账过期时没有任何东西会报警」这个问题**（AGENTS.md §6 的「核对日期」纪律的机械化）。
+⚠️ **效力边界**：只保证「引用不悬空 / 断言有对应物」，**不保证「内容完全对得上」** ⇒ 关键断言仍需人工抽验。
+⚠️ 第三方库必须按**真源 `go.mod` 的精确版本**核对（⚠️ 本机 cache 里当时只有 go-zero v1.10.3，真源用的是 **v1.10.2**）。
+⚠️ **其它域要复核**：改脚本里的 `LEDGER_FILES` 与 `CLAIMS` 两张表即可（`--domain` 参数已预留）。
+⇒ 详见 [rpc.md §四·十](rpc.md#四十台账-vs-实际的复核2026-10-24-实测)。
