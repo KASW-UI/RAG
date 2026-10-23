@@ -1589,3 +1589,113 @@ Neo4j 399 MiB、Grafana 362 MiB …… 已吃掉大半 ⇒ 小容器也分不到
 |---|---|
 | `user-api` | **88** tests / 0 failures / 0 errors / **skipped = 0**（82 + 新 6） |
 | 切片层单独跑 | 4/4，**零容器**，4.7s |
+
+---
+
+<!-- @fix 2026-10-23 第四轮：DRIFT-007 定性为「待签字偏离」并加护网 · DRIFT-009 执行链逐行追完 -->
+
+## 2026-10-23 第四轮（补）：`DRIFT-007` 定性 · `DRIFT-009` 执行链核实
+
+### 1. `DRIFT-USERAPI-007` —— **定性为「有意偏离（待签字）」，本轮不改行为，但加了护网钉住**
+
+**Go 出处（本轮回原文复核，全文 23 行）**：
+`go-zero@v1.10.2/rest/handler/recoverhandler.go:12-23`
+
+```go
+func RecoverHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if result := recover(); result != nil {
+				internal.Error(r, fmt.Sprintf("%v\n%s", result, debug.Stack()))
+				w.WriteHeader(http.StatusInternalServerError)   // ← 只写状态码
+			}                                                  // ← 全函数没有任何 w.Write(...)
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+```
+
+⇒ Go 侧确认：**HTTP 500 + 空 body**（连 `Content-Type` 都不是这个 handler 设的）。
+RAG 侧 `GlobalExceptionHandler#handleAny:262-272` ⇒ **HTTP 500 + 完整 envelope**。
+**状态码一致，body 形状不同** —— 与原台账记载一致。
+
+**为什么不改成对齐 Go（这需要你签字）**：
+
+| 论点 | 内容 |
+|---|---|
+| 原台账自己写了 | 「任何按 body 结构统一解析的客户端都会在这里**踩空**」 |
+| 推论 | Go 的空 body 正是「让客户端踩空」的那一版 |
+| 修法代价 | 要对齐就得让 `handleAny` **返回 null body**，同时 `GlobalResponseAdvice` 必须对该响应透传 —— 与 `DRIFT-006`（400 文本）同类改动，但这次是**主动降低**信息量 |
+| 已有先例 | 项目对 `401` 的 body 形状做过同款决策并签字（`N-1`，见 §0 与 `Intentional_Deviations`） |
+
+⚠️ **本轮没有擅自改，也没有擅自签字**：
+- 代码保持原样；
+- 新增 `PanicFallbackResponseShapeTest`（2 条）**把「已签字保留」的行为钉死**，
+  防止它在无人察觉时漂走（这正是 §3.3「绿测试必须是错误答案的守卫」的反面用法：
+  **当一个行为被有意偏离时，护网的作用从「守正确」变成「守不漂」**）。
+
+**守门网**：
+
+| # | 用例 | 作用 |
+|---|---|---|
+| 1 | 未捕获异常 → 500 + `application/json` + `{code:5001, msg:系统内部错误}` | 钉住已签字行为 |
+| 2 | **对照组**：正常端点仍 200 + envelope | 防「为了让 500 更像 Go 而动 advice，把 200 路径一起改坏」—— 即 `DRIFT-006` 修 400 时踩过的形态 |
+
+零容器依赖（`standaloneSetup` + 真 advice），**0.6 秒**。
+
+**⇒ 待你拍板**：`DRIFT-007` 是「签字保留 envelope」还是「对齐 Go 的空 body」。
+若选前者，应收编进 `docs/Intentional_Deviations/users/`（当前该文件为空）。
+
+### 2. `DRIFT-USERAPI-009` —— 执行链已**逐行追完**（原台账为「静态断言」，本轮升级为「完整链路 + 行号」）
+
+**Go 侧装配链（五个文件、全部读到原文）**：
+
+| # | 位置 | 事实 |
+|---|---|---|
+| 1 | `handler/routes.go:32-75` | protected 路由经 `rest.WithMiddlewares([]rest.Middleware{serverCtx.CheckBlacklistMiddleware}, routes...)` 包装；同处 `:73` `rest.WithJwt(...)` |
+| 2 | `rest/server.go:221-235` `WithMiddleware` | `Handler: middleware(route.Handler)` ⇒ **黑名单包在 `route.Handler` 里面** |
+| 3 | `rest/engine.go:101-113` `bindRoute` | 顺序：① `buildChainWithNativeMiddlewares` ② `appendAuthHandler` ③ `for _, mw := range ng.middlewares { chn = chn.Append(...) }` |
+| 4 | `rest/engine.go:70-84` `appendAuthHandler` | `chn = chn.Append(handler.Authorize(...))` ⇒ **JWT 用 Append，不是 Prepend** |
+| 5 | `user/api/usercenter.go:37` | `server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, ...))` ⇒ observability 进 `ng.middlewares` |
+| 6 | `rest/chain/chain.go:81-91` `Then` | `for i := range { h = c.middlewares[len-1-i](h) }` ⇒ **索引 0 最外层、先执行** |
+
+**⇒ Go 的最终执行序（本轮逐环推出）**：
+
+```
+[native: trace / log / recover / prometheus]
+  → JWT Authorize                      ← engine.go:74 Append
+    → observability (3s 预算)          ← usercenter.go:37 Append，在 JWT 之后
+      → CheckBlacklist                  ← server.go:229 包在 route.Handler 里
+        → route handler logic
+```
+
+**⇒ 三条断言的核实结果**：
+
+| 原台账断言 | 核实 | 依据 |
+|---|---|---|
+| ① JWT 验签失败**不经过** observability ⇒ 401 不进 `markHTTPResult` | ✅ **成立** | JWT 索引在 observability **外层**，先执行且直接短路 |
+| ② 3s 预算**不覆盖** JWT 验签 | ✅ **成立** | 同上 |
+| （原台账未写）**黑名单在 3s 预算之内** | 🆕 **两侧相同** | Go：黑名单在 `route.Handler` 内、在 observability 内层；RAG：黑名单在 `JwtAuthInterceptor` 内、在 `HttpMiddlewareFilter` 内 |
+
+⇒ **第 3 条修正了一个此前没人点明的等式**：黑名单那次 Redis 调用**两侧都被 3s 预算覆盖**。
+这让 `UNRESOLVED-004`（Redis 慢时 Go fail-open / RAG 503）的**担忧面显著缩小** ——
+两侧在同一位置做同一次 Redis 调用、都受同一份预算约束 ⇒ 不会因为「位置差」而分叉。
+
+⚠️ **但 `UNRESOLVED-004` 仍不能就此关闭**：要判「慢到超过预算时谁先触发」，
+仍需台账要求的真 Redis 故障注入（`CLIENT PAUSE` / `iptables DROP`）。
+本节**只收窄了假设面，没有替代那个实验**。⇒ 保持 `unresolved`。
+
+**为什么 ①② 至今无法用运行证据关闭**：它们的可观察产物是 **span 属性 / access log / HTTP 指标**，
+本仓没有接入任何 metrics 后端 ⇒ 无法在测试里断言。
+⚠️ 按 §3.3「不得凭注解/配置断定机制生效」，本轮**不写**「①②已验证」，
+只把静态链路从「断言」升级为「五个文件逐行可追的推导」。
+
+**顺带记录**：RAG 侧 `HttpMiddleware#parseHttpEnvelope` 处已有一处
+「DRIFT-009 修复：用 Jackson 替代手写 regex」的注释 —— 说明上一轮已修过该组件内
+与本条同号的另一个子问题（envelope 解析），**与本条的①②无关，不要混为一谈**。
+
+### 3. 本轮回归
+
+| 模块 | 结果 |
+|---|---|
+| `user-api` | 新增 `PanicFallbackResponseShapeTest` 2 条全绿（0.6s，零容器） |
