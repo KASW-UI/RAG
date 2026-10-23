@@ -920,8 +920,8 @@ Recommended Verification: 双侧各制造一次 panic（临时端点或测试钩
 |---|---|---|---|---|
 | MaxConns | `MaxConns int json:",default=10000"` | `GoStyleMaxConnsFilter` | **10000** | ✅ **已实测**：`--rag.protection.max-conns=1` + 并发 ⇒ 第 2 个请求 **503** |
 | MaxBytes | `MaxBytes int64 json:",default=1048576"` | `GoStyleMaxBytesFilter` | **1048576** | ✅ 真实请求栈里在链上 |
-| Breaker | `Middlewares.Breaker default=true` | `GoStyleBreakerFilter` + `GoStyleBreaker` | Go 默认阈值 | ⚠️ 未单独实测 |
-| Shedding | `CpuThreshold json:",default=900"` | `GoStyleCpuSheddingFilter` + `GoStyleAdaptiveShedder` | **900** | ⚠️ 未单独实测（CPU 采样需预热，go-zero 的 `load` 包同款） |
+| Breaker | `Middlewares.Breaker default=true` | `GoStyleBreakerFilter` + `GoStyleBreaker` | Go 默认阈值 | ✅ **算法逐行对照一致**（`googlebreaker.go:53-80`）；⚠️ **键空间无界**（`DRIFT-USERAPI-013 ②`） |
+| Shedding | `CpuThreshold json:",default=900"` | `GoStyleCpuSheddingFilter` + `GoStyleAdaptiveShedder` | **900** | ✅ **已实测**（2026-10-24 第八轮：`GoStyleCpuSheddingFilterTest` 过载 ⇒ **503 空 body** + 不触达下游）；⚠️ **RT 统计口径已修**（`DRIFT-USERAPI-012`） |
 | Timeout | `Timeout json:",default=3000"` | `HttpMiddleware`（+5） | **3s** | ✅ 已在 `application.yml` 显式钉住 |
 | gRPC client 熔断 | Go 无对应物（Go 侧只熔 HTTP 入口） | `GoStyleGrpcClientBreakerInterceptor` | — | ❌ **user-api 无接线测试**（follow-api / message-api 有） |
 
@@ -937,10 +937,13 @@ RAG 的 `@Order` 是 MaxConns(+1) → Breaker(+2) → CpuShedding(+3) → HttpMi
 #### 原断言引出的三个**真**问题（应拆为新条目）
 
 1. **MaxConns 的闸门粒度不同**：Go 是 **per-route** latch
-   （`engine.go:146` 对每条路由各 new 一个），RAG 是**全局一个**。
+   （`engine.go` 的 `buildChainWithNativeMiddlewares` **逐路由**调用 ⇒ 每条路由各 new 一个），
+   RAG 是**全局一个**。
    `GoStyleMaxConnsFilter` 的 javadoc 已**显式留痕**为「有意的表达层收敛」，
    理由是「13 个端点的并发度下差别只在极端场景显现，而 Tomcat `max-threads=200` 早已先成瓶颈」。
    ⇒ 这是**已留痕的收敛**，不是隐藏缺口，但台账此前完全没提。
+   🔴 **2026-10-24 第八轮复核：该论证自相矛盾**（理由与「保留本层的场景」互斥）
+   ⇒ 已与 ② 合并为 `DRIFT-USERAPI-013`（**待决策**）⇒ **详见 §「第八轮」**。
 2. **user-api 的 gRPC client breaker 是否真的被装配，未验证** ——
    `GoStyleGrpcClientBreakerInterceptor` 的 javadoc **自己就写着**
    「这正是 AGENTS.md §3.3『不能仅凭存在 {@code @Component} 就推断责任已被承担』的形态」，
@@ -951,6 +954,10 @@ RAG 的 `@Order` 是 MaxConns(+1) → Breaker(+2) → CpuShedding(+3) → HttpMi
    **详见 §「2026-10-24 第七轮」**。
 3. **逐机制行为等价性从未逐条对照** —— 四个机制各自的触发阈值、拒绝时的响应形状
    （Go 是 **503 + 空 body + 无 Content-Type**，已实测）、指标口径，都还没逐条比过。
+   ✅ **2026-10-24 第八轮已逐条对照完成**（四个机制 × 40 格：**37 格 EQUIVALENT**、
+   **1 格已修** = `DRIFT-USERAPI-012`、**2 格待决策** = `DRIFT-USERAPI-013`）
+   ⇒ **详见 §「2026-10-24 第八轮」**。
+   ⚠️ **连带查出 ① 与 ② 是同一件事的两面**（都关于「per-route 键空间」）⇒ 不宜分开修。
 
 #### 结论
 
@@ -2129,3 +2136,210 @@ users-common **33** · user-rpc **122** · user-api **99**（+3：2 条接线 + 
 它们证明的是「拦截器进了 starter 的 registry」与「默认开关是开的」，
 **不证明**任何行为；行为由那条端到端测试负责。
 ⇒ 分层写清楚，避免「有测试」被读成「测过了」。
+
+## 2026-10-24 第八轮：四个过载保护机制逐条 Go ↔ RAG 对照（`DRIFT-USERAPI-008 ③`）
+
+| 项 | 结果 |
+|---|---|
+| **DRIFT-USERAPI-008 ③** | ✅ **逐条对照完成** —— 四个机制 × 8~11 个维度共 **40 格**：**37 格 EQUIVALENT**、**1 格已修**、**2 格待决策** |
+| **DRIFT-USERAPI-012**（新） | ✅ **已修** —— 降载的 **RT 统计口径**：Go 是「**浮点**毫秒 + `math.Ceil`」，RAG 是「**整型截断** + 至少记 1」⇒ 系统性少记约 1ms ⇒ `minRt` 偏小 ⇒ **在途上限偏低 ⇒ RAG 比 Go 更早降载** |
+| **DRIFT-USERAPI-013**（新） | 🔴 **待决策** —— ① MaxConns 闸门粒度（Go **per-route** vs RAG **全局一个**）② breaker 按**请求 URI** 建 key ⇒ **未匹配路径也会建** ⇒ 键空间**无界**（Go 只在**路由注册时**建 ⇒ 有界） |
+
+### 1. 对照的**范围**与**证据强度**
+
+| 项 | 值 |
+|---|---|
+| 对照面 | `service/common/src/main/java/com/rag/common/protection/`（4 个 Filter + 2 个算法类 + 配置类） |
+| Go 对照面 | go-zero v1.10.2：`rest/config.go`、`rest/engine.go`、`rest/handler/{maxconnshandler,breakerhandler,sheddinghandler,maxbyteshandler}.go`、`core/breaker/{googlebreaker,breaker}.go`、`core/load/adaptiveshedder.go`、`core/collection/rollingwindow.go`、`zrpc/internal/{config,client}.go`、`zrpc/internal/clientinterceptors/breakerinterceptor.go`、`zrpc/internal/codes/accept.go`、`core/stat/{metrics,usage}.go` |
+| 证据强度 | ✅ **源码逐行对照**（两侧全部读原文，非凭记忆）+ 🆕 **运行时证据**（Shedding 层本轮首次拿到） |
+| ⚠️ **证据边界** | 本轮**没有**做「双侧活体压测对拍」—— 四个机制都是**过载路径**，真源那侧要复现同一条过载曲线需要独占 CPU；⇒ 本轮结论的性质是「**源码逐行等价性**」，不是「同输入同输出」的实测 |
+
+### 2. 逐条对照 · MaxConns
+
+| 维度 | Go | RAG | 判定 |
+|---|---|---|---|
+| 阈值来源 | `rest/config.go:52` `MaxConns int json:",default=10000"` | `GoStyleProtectionProperties.maxConns = 10000` | ✅ |
+| yaml 是否显式配置 | ❌ 未写（走 tag 默认） | ❌ 未写 | ✅ |
+| **闸门粒度** | **per-route**：`engine.go` 的 `buildChainWithNativeMiddlewares` **逐路由**调用 ⇒ 每条路由各 new 一个 `syncx.NewLimit(n)` | **全局一个** `Semaphore` | ❌ **DRIFT-013 ①** |
+| 获取方式 | `latch.TryBorrow()`（非阻塞） | `latch.tryAcquire()`（非阻塞） | ✅ |
+| 归还 | `defer latch.Return()` | `finally latch.release()` | ✅ |
+| `<=0` 语义 | no-op（`maxconnshandler.go:13-17`） | no-op（`latch == null`） | ✅ |
+| 拒绝形状 | `w.WriteHeader(503)` ⇒ **503 空 body、无 Content-Type** | `setStatus(503)` ⇒ 同 | ✅（已实测） |
+| 拒绝时是否触达下游 | 否 | 否 | ✅ |
+
+### 3. 逐条对照 · MaxBytes
+
+| 维度 | Go | RAG | 判定 |
+|---|---|---|---|
+| 阈值来源 | `rest/config.go:53` `MaxBytes int64 json:",default=1048576"` | `maxBytes = 1048576L` | ✅ |
+| 判据 | `r.ContentLength > n`（`maxbyteshandler.go:19`） | `getContentLengthLong() > maxBytes` | ✅ |
+| **chunked 绕过** | `ContentLength == -1` ⇒ `-1 > n` 恒 false ⇒ **放行** | 同样 `-1` ⇒ **放行** | ✅（**刻意不修**：修正它＝新增行为＝漂移） |
+| `<=0` 语义 | no-op | no-op | ✅ |
+| 拒绝形状 | `w.WriteHeader(413)` ⇒ **413 空 body** | `setStatus(413)` ⇒ 同 | ✅ |
+| 相对鉴权的次序 | native middleware ⇒ **在 JWT 之外**（413 压过 401） | Filter ⊃ Interceptor ⇒ 同 | ✅ |
+| 运行时证据 | ⚠️ 静态 | ⚠️ 静态（真容器由 `tools/difftest/check-protection-layer.sh` 守） | ⚠️ |
+
+### 4. 逐条对照 · Breaker（入口）
+
+| 维度 | Go | RAG | 判定 |
+|---|---|---|---|
+| 隔离单位 | **per-route**，`breakerhandler.go:19` 名字 = `method://path` | **per-route**，`method://URI` | ✅（粒度同；键的**取值**不同见下） |
+| **键的取值** | `route.Path` = **去掉组前缀**的路径（如 `user/login`） | `request.getRequestURI()` = **完整 URI**（如 `/usercenter/v1/user/login`） | ⚠️ 本域 9 条路由**无重名** ⇒ 等价；若将来两个前缀下出现**同名子路径**，Go 会**共用**一个 breaker 而 RAG 会**各建**一个 |
+| **算法** | `core/breaker/googlebreaker.go:53-80` | `GoStyleBreaker.accept()` | ✅ **逐行一致**（含「`dropRatio <= 0` 的早退**不**更新 `lastPass`」这个极易被顺手改好的细节） |
+| 常量 | window 10s / 40 桶（250ms）/ k 1.5 / minK 1.1 / protection 5 / forcePass 1s | 同 | ✅ |
+| 拒绝形状 | `w.WriteHeader(503)` ⇒ 503 空 body | `setStatus(503)` ⇒ 同 | ✅ |
+| 成败判据 | `cw.Code < 500` ⇒ `promise.Accept()` | `capturedStatus < 500` ⇒ `markSuccess()` | ✅ |
+| 窗口 | `IgnoreCurrentBucket`（忽略当前桶） | `completedSlots()` 跳过 `currentSlot` | ✅ |
+| **键空间** | **有界**：只在**路由注册时**建 breaker（`engine.go`） | **无界**：每个**请求 URI** 都 `computeIfAbsent` 建一个 ⇒ **未匹配路径（404）也会建** | ❌ **DRIFT-013 ②** |
+| 运行时证据 | ⚠️ 静态 | ⚠️ 静态（算法本身有 `GoStyleBreakerTest` 8 条） | ⚠️ |
+
+### 5. 逐条对照 · CpuShedding
+
+| 维度 | Go | RAG | 判定 |
+|---|---|---|---|
+| 共享范围 | **全局一个**（`engine.go` 的 `newEngine` 里建一个 shedder，`getShedder` 直接取它） | 全局一个 | ✅ |
+| 阈值 | `rest/config.go:56` `CpuThreshold default=900,range=[0:1000)` | `cpuThreshold = 900`，越界夹到 `[0,1000)` | ✅（越界处理是表达层加固：Go 在**配置加载期**报错拒绝启动，Java 不夹会变成「永不降载」的静默失效） |
+| CPU 口径 | **整机**（`stat.CpuUsage()` ← cgroup / `/proc/stat`） | `getSystemCpuLoad()` 整机 | ✅ |
+| 读不到 CPU | `CpuUsage()` 返回 0 ⇒ `0 >= 900` false ⇒ **不过载** | `-1` ⇒ fail-open | ✅ 同向 |
+| 拒绝条件 | `systemOverloaded() \|\| stillHot()` **且** `highThru()` | 同 | ✅ |
+| `highThru` | `avgFlying > cap && flying > cap` | 同 | ✅ |
+| `maxFlight` | `max(maxPass * minRt * windowScale, 1)`，`windowScale = 1s/100ms/1000 = 0.01` | 同 | ✅ |
+| `overloadFactor` | `clamp((1000-cpu)/(1000-threshold), 0.1, 1)` | 同 | ✅ |
+| `promise.Fail` 判据 | `cw.Code == 503` ⇒ `Fail()` | `capturedStatus == 503` ⇒ `fail()` | ✅（Go 看 `==503`、breaker 看 `<500`，两处**刻意不同**，都照搬了） |
+| **`Fail` 不记 RT/QPS** | `promise.Fail()` 只 `addFlying(-1)` | 同 | ✅ |
+| **RT 统计口径** | `rt := float64(timex.Since(p.start)) / float64(time.Millisecond)` ⇒ **`math.Ceil`（向上取整）** | **整型截断**（`/ 1_000_000L`）+ `Math.max(1L, ·)` | ❌ **DRIFT-012**（已修） |
+| 运行时证据 | ⚠️ 静态 | ✅ **本轮首次**（`GoStyleCpuSheddingFilterTest`：过载 ⇒ **503 空 body** + 不触达下游） | ✅ |
+
+### 6. `DRIFT-USERAPI-012`（已修）：降载的 RT 统计口径
+
+**Go 侧**（`core/load/adaptiveshedder.go:284-289`）：
+
+```go
+func (p *promise) Pass() {
+	rt := float64(timex.Since(p.start)) / float64(time.Millisecond)   // ← float64 毫秒
+	p.shedder.addFlying(-1)
+	p.shedder.rtCounter.Add(int64(math.Ceil(rt)))                    // ← 向上取整
+	p.shedder.passCounter.Add(1)
+}
+```
+
+**RAG 侧（修前）**：
+
+```java
+long rtMs = (System.nanoTime() - startNanos) / 1_000_000L;   // ← 整型截断
+...
+rtSlots[currentSlot][0] += Math.max(1L, (long) Math.ceil(rtMs));   // ← 至少记 1
+```
+
+⇒ **系统性少记最多 1ms** ⇒ `minRt()` 偏小 ⇒
+`maxFlight = maxPass * minRt * 0.01` 偏小 ⇒ **在途上限偏低** ⇒
+**RAG 比 Go 更早降载**（在同一份真实负载下，RAG 会比 Go 多丢一批请求）。
+
+⚠️ **为什么这个差别很容易被漏掉**：它**不改变任何一次请求的输出**，
+只改变「在什么时候开始降载」—— 属于**纯行为**差异，且**只在过载路径上可见**。
+⇒ 与 `DRIFT-USERAPI-008` 原先那三条（MaxConns 粒度 / 接线未验 / 未逐条对照）是**同一族的盲区**。
+
+**修法（两处，缺一不可）**：
+
+| # | 位置 | 改动 |
+|---|---|---|
+| 1 | `GoStyleCpuSheddingFilter.elapsedRtMs(startNanos, endNanos)` | 整型除法 → **浮点**除法 `/ 1_000_000.0D` |
+| 2 | `GoStyleAdaptiveShedder.pass(double rtMs)` | `Math.max(1L, ceil(rt))` → **`(long) Math.ceil(rt)`**（**无下限**：Go 的 `Add(0)` 是合法的 —— `Count` 照样 +1，只是 `Sum` 不加） |
+
+⚠️ **第 2 处的「去掉下限」不是笔误**：Go 侧 `Bucket.Add(v)` 是
+`Sum += v; Count++` ⇒ `v == 0` 时 **`Sum` 不动、`Count` 照加**。
+RAG 原先的 `Math.max(1L, ·)` 是在**替整型截断擦屁股**，掩盖了第 1 处的根因；
+⇒ 修第 1 处（浮点）+ 去掉下限，才是**逐字**对齐。
+
+**守网（新建 4 条）**：
+
+| 测试 | 条数 | 断言 |
+|---|---|---|
+| `GoStyleAdaptiveShedderTest`（扩） | **+3** | `pass(1.2)` ⇒ 记 **2**（不是整型截断的 1）；`pass(0.0)` ⇒ 记 **0**（不是「至少记 1」）；`pass(2.0)` ⇒ 记 **2** |
+| `GoStyleCpuSheddingFilterTest`（新建） | **2** | ① `elapsedRtMs` 是**浮点**毫秒（`1.2ms` 原样保留、`0.999999ms` 不被截断成 0）② **过载 ⇒ 裸 503 空 body + 不触达下游** |
+
+⚠️ **为什么需要 `recordedRtSum()` 这个测试接缝**：
+`minRt()` 只统计**已完成**的桶（Go 的 `IgnoreCurrentBucket` 同语义），
+所以「**刚**记进去的 RT」**当场读不出来**：
+断言它要么靠 sleep 等桶翻页（CI 上可能不稳），
+要么只能经 `minRt()` 间接反推 —— 而**恰恰是「0ms 记 0 还是记 1」这种差别会被反推吃掉**
+（`minRt` 取的是桶内**平均**）。
+⇒ 加一个只读接缝，把口径**逐条**钉死。
+
+### 7. `DRIFT-USERAPI-013`（待决策）：per-route 闸门 + 键空间
+
+**① MaxConns 闸门粒度**：Go 是 **per-route**，RAG 是**全局一个**。
+
+⚠️ **原 javadoc 的论证有一处自相矛盾**（值得记一笔）：
+它说「两种口径的差别只在单个端点打满 10000 且另一端点也接近 10000 时才显现，
+而那时 Tomcat 的 `max-threads=200` 早已先成为瓶颈」——
+**前半句是对的，后半句与「保留本层的理由」冲突**：
+本层存在的理由恰恰是「运维把 `max-threads` 调到万级做压测时」，
+**在那正是两种口径分道扬镳的场景**：
+Go 允许**每路由** 10000（9 条路由 ⇒ 合计 90000），RAG 只允许**全局** 10000。
+
+**② breaker 的键空间无界**：`GoStyleBreakerFilter.breakerFor(request)` 对
+**每一个请求 URI** 都 `computeIfAbsent` 建一个 breaker ——
+包括**未匹配的路径**（Filter 跑在 `DispatcherServlet` **外面**，此时还不知道路由匹不匹配）⇒
+一个 404 扫描器就能让这个 map **无界增长**（每个 breaker 含 40 个 Bucket ≈ 1.6 KB）。
+Go 侧 `breaker.NewBreaker` 在**路由注册时**调用 ⇒ **有界**。
+
+⚠️ **这两条是同一件事的两面**：正因为「按请求 URI 建键」不可行（②），
+把 MaxConns 也改成 per-route（①）就会**再造一个无界 map**。
+
+⇒ **因此本轮不擅自改**，需要一次设计决策。三个候选：
+
+| 方案 | 做法 | 代价 / 风险 |
+|---|---|---|
+| **A. 键空间有界化** | 给 breaker/latch 的 map 设**上限**（如 4096），超限后回落到一个**共享的溢出 breaker** | 引入「溢出」这一新状态（Go 没有）；但**最省事**、不改现有键的语义 |
+| **B. 只为已注册路由建键** | 从 Spring 的 `HandlerMapping` 取**匹配后的路由模板**当键（而不是原始 URI） | Filter 在 DispatcherServlet 外面 ⇒ 要提前跑一次映射（**每请求两次匹配**）；有副作用风险 |
+| **C. 两条都签成有意偏离** | 承认「RAG 的过载闸门比 Go 更严」并签字 | 需要用户签字；且**键空间无界**这一条**不宜签字**（它是健壮性问题，不是口径分歧） |
+
+⇒ **建议：A（键空间有界化）+ MaxConns 改 per-route**，但这是**共享层（影响全部 10 个 api 服务）**的设计变更 ⇒ 交由用户拍板。
+
+### 8. 本轮的一条方法论收获
+
+**「四个机制都有实现」不等于「四个机制都被对照过」。**
+本轮逐条读下来发现：**37 格 EQUIVALENT**，但那 37 格里**每一格都曾是「没人读过」的状态**；
+而真正的差异（`DRIFT-012`）恰恰落在一个**没人会去看**的地方 ——
+`pass()` 里那个 `Math.max(1L, ·)`，它读起来像一行无害的防御性代码。
+⇒ **印证 §3.3.1**：**读到「有一行代码处理了这件事」不能推出「它处理的方式与 Go 相同」**。
+
+### 9. 变异验证（能编译 + 测试变红，非构建红）
+
+| # | 变异 | 结果 |
+|---|---|---|
+| **M10** | `pass()` 恢复「至少记 1」的下限（`Math.max(1L, ceil(rt))`） | 🔴 **RED** —— `GoStyleAdaptiveShedderTest` **Failures=1**：`expected: <0> but was: <1>`（红在「RT=0 记 0」那条） |
+| **M11** | `pass()` 改成整型截断（`(long) rtMs`） | 🔴 **RED** —— `GoStyleAdaptiveShedderTest` **Failures=1**：`expected: <2> but was: <1>`（红在「1.2ms 记 2」那条） |
+| **M12** | `elapsedRtMs` 改成整型除法（`/ 1_000_000L`） | 🔴 **RED** —— `GoStyleCpuSheddingFilterTest` **Failures=1**：`expected: <1.2> but was: <1.0>` |
+
+⇒ 复原后回归：两个测试类 **Failures 合计 = 0**，**报告齐全**。
+
+⚠️ **M10 / M11 / M12 各自红在「对应那一条」断言上**（不是「整类挂掉」）⇒
+证明这三道网是**三条独立语义各有一道网**：
+「RT=0 记 0」「1.2ms 记 2」「filter 侧是浮点」。
+
+⚠️ **本轮变异脚本本身栽了两次坑**（详见
+[`docs/Pitfalls/users/_shared.md` 的 `PIT-USERS-SHARED-006`）：
+① `-Dtest=A+B`（surefire 只认逗号）⇒ **测试一次没跑**，报告缺失却被判成「红」；
+② 修好命令后，判定又在**合并字符串**里找 `"Failures: 0"` ⇒ 通过的那个类仍带 `Failures: 0`
+⇒ 永远判成「不红」。
+⇒ **两次都是「自动判定给了错答案」，而两次的救命动作都是「往下读断言消息原文」。**
+（第一版的脚本输出「RED ✅」且三次消息内容完全相同 —— 那条重复本身就是破绽。）
+
+### 10. 回归
+
+| 模块 | 测试数 | failures | errors |
+|---|---|---|---|
+| `service/common` | **151**（21 个测试类；**+5** = 3 条 RT 口径 + 2 条 shedding） | **0** | **0** |
+| `service/users/users-common` | **33** | **0** | **0** |
+| `service/users/user/user-rpc` | **122** | **0** | **0** |
+| `service/users/user/user-api` | **99** | **0** | **0** |
+
+⚠️ **本轮改的是 `service/common`（共享层，影响全部 10 个 api 服务）**，
+所以回归必须**跨模块**跑 —— 只跑 `service/common` 自己的测试**不足以**证明
+下游 api 服务没被带崩（它们才是使用者）。
+⚠️ 另：`service/common` 自己的测试数是 **151**（21 个测试类），
+不是本节早先草稿里写的 92 —— 92 只是 `protection` + 几个相邻类的子集，
+**以本表为准**。
+

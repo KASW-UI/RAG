@@ -100,18 +100,33 @@ final class GoStyleAdaptiveShedder {
     }
 
     /**
-     * {@code promise.Pass()}（{@code adaptiveshedder.go:249-254}）：
+     * {@code promise.Pass()}（{@code adaptiveshedder.go:284-289}）：
      * 在途 -1，并把本次 RT 与 QPS 记进窗口。
      *
      * <p>⚠️ <b>只有 Pass 才记 RT 与 QPS</b>，Fail 只减在途。照搬这一点很关键：
      * 若让 Fail 也记 QPS，降载期的 QPS 会被「被丢的请求」抬高，
      * 进而抬高 {@code maxPass} → 抬高飞行上限 → <b>越降载越不降</b>，正好抵消降载效果。
+     *
+     * <p><b>⚠️ RT 必须是「浮点毫秒 + 向上取整」，不能是「整型毫秒」</b>
+     * （Go {@code adaptiveshedder.go:285-287}）：
+     * <pre>
+     *   rt := float64(timex.Since(p.start)) / float64(time.Millisecond)
+     *   p.shedder.rtCounter.Add(int64(math.Ceil(rt)))
+     * </pre>
+     * Go 是 <b>float64 毫秒</b> 再 {@code math.Ceil} ⇒ <b>向上</b>取整。
+     * <p>⚠️ <b>本类此前是「整型毫秒截断 + 至少记 1」</b>
+     * （{@code long rtMs = nanos / 1_000_000L} ⇒ 截断；再 {@code Math.max(1L, ceil(rtMs))}）
+     * ⇒ <b>系统性比 Go 少记约 1ms</b> ⇒ {@code minRt()} 偏小 ⇒
+     * {@code maxFlight = maxPass * minRt * 0.01} 偏小 ⇒
+     * <b>在途上限系统性偏低 ⇒ RAG 比 Go 更早降载</b>。
+     * <p>⇒ 现按 Go 逐字实现：<b>浮点毫秒 + ceil，无下限</b>
+     * （Go 的 {@code Add(0)} 是合法的：{@code Count} 照样 +1，只是 {@code Sum} 不加）。
      */
-    void pass(long rtMs) {
+    void pass(double rtMs) {
         addFlying(-1);
         synchronized (lock) {
             rollTo(System.currentTimeMillis());
-            rtSlots[currentSlot][0] += Math.max(1L, (long) Math.ceil(rtMs));
+            rtSlots[currentSlot][0] += (long) Math.ceil(rtMs);
             rtSlots[currentSlot][1] += 1L;
             passSlots[currentSlot] += 1L;
         }
@@ -370,5 +385,35 @@ final class GoStyleAdaptiveShedder {
     /** 排障用：窗口长度（ms）。 */
     static long windowMs() {
         return WINDOW_MS;
+    }
+
+    /**
+     * <b>测试接缝</b>：当前时间片内记录的 RT 之和 / 请求数。
+     *
+     * <p>对应 Go {@code adaptiveshedder.go:287} 的
+     * {@code p.shedder.rtCounter.Add(int64(math.Ceil(rt)))}
+     * 落在<b>当前桶</b>里的 {@code Sum} 与 {@code Count}。
+     *
+     * <p><b>为什么需要这个接缝</b>：{@link #minRt()} 只统计<b>已完成</b>的桶
+     * （Go 的 {@code IgnoreCurrentBucket} 同语义），
+     * 所以「<b>刚</b>记进去的 RT」<b>当场读不出来</b> ——
+     * 断言它要么靠 sleep 等桶翻页（CI 上可能不稳：机器被挂起 >5s 就会因「陈旧桶被跳过」而假红），
+     * 要么就只能经 {@code minRt()} 间接反推 ——
+     * 而<b>恰恰是「0ms 记 0 还是记 1」这种差别会被反推吃掉</b>
+     * （{@code minRt} 取的是桶内<b>平均</b>，单个样本的差别会被平均掉）。
+     *
+     * <p>⇒ 本接缝让「RT 统计口径」可以被<b>逐条</b>断言，而不是只能看最终效果。
+     */
+    long recordedRtSum() {
+        synchronized (lock) {
+            return currentSlot < 0 ? 0L : rtSlots[currentSlot][0];
+        }
+    }
+
+    /** 测试接缝：当前时间片内记录的请求数（对应 Go 当前桶的 {@code Count}）。 */
+    long recordedRtCount() {
+        synchronized (lock) {
+            return currentSlot < 0 ? 0L : rtSlots[currentSlot][1];
+        }
     }
 }
