@@ -31,5 +31,7 @@ import org.apache.ibatis.annotations.Mapper;
  */
 @Mapper
 public interface UserMapper extends BaseMapper<UserEntity> {
-    // 动态更新 / 分页查询 / 单字段更新 在 AdminDomainService 里用 wrapper + @Update 实现。
+    // 动态更新 / 分页查询 / 单字段更新 全部在 AdminDomainService 里用
+    // LambdaQueryWrapper / LambdaUpdateWrapper 实现（本接口不声明任何方法）。
+    // 事务边界在 Service 层（AdminCreateAtomicService 的 @Transactional）。
 }

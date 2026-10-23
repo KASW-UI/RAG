@@ -12,7 +12,6 @@ import io.grpc.StatusRuntimeException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -175,7 +174,22 @@ public class GlobalExceptionHandler {
      */
     private static ResponseEntity<String> goStylePlainTextBadRequest(String message) {
         HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.TEXT_PLAIN);
+        // 🔴 2026-10-23 双侧活体对拍（真实 Tomcat，admin-api 58889 vs Go admin-api 18889）实测：
+        //   Go  : Content-Type: text/plain; charset=utf-8
+        //   RAG : Content-Type: text/plain            ← 少了 charset 参数
+        // Go 出处：net/http.Error 的实现（Go 1.x）—— `h.Set("Content-Type", "text/plain; charset=utf-8")`
+        //   是**逐字**写死的字符串，不是由框架推导出来的。
+        //
+        // ⚠️ 为什么不用 MediaType.TEXT_PLAIN：Spring 会把它渲染成 `text/plain`（无 charset），
+        //   而 `new MediaType("text","plain",UTF_8)` 渲染成 `text/plain;charset=UTF-8`
+        //   （**无空格 + 大写 UTF-8**）—— 与 Go 的 `text/plain; charset=utf-8` 仍不是逐字节相同。
+        //   ⇒ 直接写原始字符串，才是「与 Go 一致」而不是「与 Go 大致一致」。
+        //
+        // ⚠️ 严重度 LOW：400 的 body 全是 ASCII（`field "x" is not set` / Jackson 的解析文本），
+        //   任何 charset 解释都得到同一串字节 ⇒ **无字节级歧义**，只是响应头与 Go 不逐字相同。
+        //   ⚠️ 现有守门脚本 `tools/difftest/check-plaintext400-headers.sh` 只断言
+        //   「Content-Type 含 text/plain」，**抓不到 charset 的差异** ⇒ 本条需要独立守门。
+        headers.set(HttpHeaders.CONTENT_TYPE, "text/plain; charset=utf-8");
         headers.set("X-Content-Type-Options", "nosniff");
         String body = (message == null || message.isEmpty() ? "bad request" : message) + "\n";
         return new ResponseEntity<>(body, headers, HttpStatus.BAD_REQUEST);

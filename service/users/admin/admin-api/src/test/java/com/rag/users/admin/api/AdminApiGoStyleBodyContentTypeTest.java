@@ -175,8 +175,28 @@ class AdminApiGoStyleBodyContentTypeTest {
                         + "说明响应被共享转换器按 JSON 字符串写出（2026-10-22 的 canWrite 回归）。\n"
                         + "     那种回归的状态码与 Content-Type 都对，只看响应头会以为没问题。");
 
-        assertEquals("text/plain", asPlainText.getResponse().getContentType(),
-                "Go 的 http.Error 写的是 Content-Type: text/plain; charset=utf-8");
+        // 🔴 2026-10-23（DRIFT-ADMINAPI-011）：本断言**原先锁死了缺陷**。
+        //
+        // 原值是 `assertEquals("text/plain", …)`，而它自己的失败消息写着
+        // 「Go 的 http.Error 写的是 Content-Type: text/plain; charset=utf-8」——
+        // **断言值与自己的消息互相矛盾**，等于把「少了 charset 参数」这个缺陷
+        // 固化成了一条绿测试（AGENTS.md §3.3.3「绿测试可能是错误答案的守卫」的原型案例）。
+        //
+        // 2026-10-23 的双侧活体对拍（真实 Tomcat）实测：
+        //   Go  : Content-Type: text/plain; charset=utf-8
+        //   RAG : Content-Type: text/plain            ← 少了 charset
+        // ⇒ 已修 `GlobalExceptionHandler#goStylePlainTextBadRequest`（改用原始字符串 set）。
+        //
+        // ⚠️ 断言写成**语义**（media type + charset）而不是完整头值字符串：
+        // MockMvc 原样透传 `text/plain; charset=utf-8`，而**真 Tomcat 会重渲染**成
+        // `text/plain;charset=utf-8`（少一个空格）⇒ 断言完整字符串会因容器而异。
+        // charset 的有无不因容器而变 ⇒ 断言它才稳。
+        MediaType plainText = MediaType.parseMediaType(asPlainText.getResponse().getContentType());
+        assertEquals("plain", plainText.getSubtype(), "Go 的 http.Error 用的是 text/plain");
+        assertEquals(java.nio.charset.StandardCharsets.UTF_8, plainText.getCharset(),
+                "Go 的 http.Error 写的是 Content-Type: text/plain; charset=utf-8 —— "
+                        + "本实现此前用 MediaType.TEXT_PLAIN ⇒ 渲染成 `text/plain`（**完全没有 charset**），"
+                        + "而这条绿测试当时恰好把那个缺陷锁住了 ⇒ 本轮随 DRIFT-ADMINAPI-011 一并改正。");
         assertEquals("nosniff", asPlainText.getResponse().getHeader("X-Content-Type-Options"),
                 "Go 的 http.Error 同时写 X-Content-Type-Options: nosniff");
 

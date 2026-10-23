@@ -45,6 +45,12 @@ import java.util.Map;
  * <p>L4 实现机制差异：与 user-rpc 端 UserEntity 字段类型逐条一致（同一张物理表两侧共同读写），
  * 但<b>仍有一处未对齐</b>：本类 {@code status = 0L} 字段初始化值未删，
  * user-rpc 端已于 2026-10-23 删除（DRIFT-USERRPC-V-001）。见 {@link #status} 的说明。
+ * </p>
+ *
+ * <p>⚠️ <b>2026-10-23 更正</b>：上面那句「未对齐」已被双侧活体对拍<b>证伪</b> ——
+ * Go 侧把 {@code status IS NULL} 读成 <b>0</b>（不是「读不出来」），
+ * 所以<b>本类的 {@code = 0L} 才与 Go 一致</b>，而 user-rpc 端删掉它 + fail-closed
+ * 才是偏离。详见 {@link #status} 的完整论证。
  */
 @Data
 @TableName(value = "users_user", autoResultMap = true)
@@ -66,20 +72,38 @@ public class UserEntity {
     private String email;
 
     /**
-     * 🔴 <b>此处的 {@code = 0L} 是同款缺陷，未修</b>（跨组件待办，见台账
-     * {@code docs/DRIFT/users/_shared.md}）。
+     * 🔴 <b>这里的 {@code = 0L} 不是缺陷</b>（2026-10-23 双侧活体对拍证伪了此前的判断）。
      *
-     * <p>user-rpc 端同名字段已因 DRIFT-USERRPC-V-001 删掉初始化值（2026-10-23）。成因：
-     * MyBatis {@code DefaultResultSetHandler} 在 {@code value == null && !callSettersOnNulls}
-     * 时跳过 setter（{@code callSettersOnNulls} 默认 false）⇒ {@code status IS NULL} 的行
-     * 读出来是 {@code 0L} 而非 {@code null}。
+     * <p><b>此前台账的说法</b>：{@code users/user/rpc.md} 的 DRIFT-USERRPC-V-001 写
+     * 「Go 的语义是『NULL 读不出来』⇒ Java 侧必须让 null 真传上来」，并把 admin-rpc
+     * 标成「同款缺陷，未修」。
      *
-     * <p>Go 侧语义是「NULL 读不出来」：{@code gorm@v1.31.2/scan.go:153} 对
-     * 「NULL → int64」直接返回错误 ⇒ 整条查询走 db_error 支。
+     * <p><b>证伪过程（两侧同时跑的探针）</b>：
+     * <ul>
+     *   <li><b>Go 侧机制</b>（{@code gorm.io/gorm@v1.31.1/scan.go:19} 的 {@code prepareValues}）：
+     *       {@code values[idx] = reflect.New(reflect.PointerTo(field.FieldType)).Interface()}
+     *       ⇒ 对 {@code int64} 字段造出来的是 <b>{@code **int64}</b>（<b>双</b>指针），
+     *       不是 {@code *int64}；{@code database/sql} 的 {@code convertAssign} 对
+     *       「dest 是指针、src 为 nil」走 {@code case reflect.Pointer: if src == nil
+     *       { dv.SetZero(); return nil }} ⇒ <b>不报错</b>；GORM 的 int setter 随后
+     *       把字段留在<b>零值 0</b>。⇒ <b>Go 把 NULL 读成 0，且不报错。</b></li>
+     *   <li><b>Go 侧活体</b>：2026-10-23 在 {@code tools/difftest} 的两套真栈上，
+     *       往 {@code go_db.users} 插一行 {@code status IS NULL}，打 Go admin-api
+     *       {@code GET /admincenter/v1/admin/getuser?uid=…}
+     *       ⇒ {@code {"code":200,…,"user":{…,"status":0}}}；同一时刻打 RAG admin-api
+     *       ⇒ 同样是 {@code "status":0}。<b>两侧一致。</b></li>
+     * </ul>
      *
-     * <p><b>本组件是否可观察取决于读路径</b>：admin-rpc 的读点必须逐个核到
-     * 「拿到 {@code 0L} 之后会不会误判为未封禁」，<b>不能照抄 user-rpc 的结论</b>
-     * （§3.1：不得拿现有 RAG 代码当对照基准）。未核完之前不改，先把缺陷标在这里。
+     * <p><b>⇒ 本字段的 {@code = 0L} 与 Go 等价，<b>不要</b>删</b>：
+     * 删掉它会让本组件读出 {@code null}（而 Go 读出 0），
+     * 在「users_user.status 可空」的部署形态下就是<b>新的漂移</b>。
+     * ⚠️ 反向提醒：{@code users/user} 域在 2026-10-23 把同名字段的 {@code = 0L} 删掉、
+     * 并加了「status 为 null ⇒ fail-closed 抛 INTERNAL」的守卫
+     * （{@code UserDomainService#login}）—— 那一条<b>与 Go 的实际行为相反</b>，
+     * 已作为跨组件问题上报（见 {@code docs/DRIFT/users/admin/rpc.md} §11）。
+     *
+     * <p><b>守门</b>：{@code AdminRpcGoWireParityTest#nullStatusColumnReadsAsZeroLikeGo}
+     * （真 PG）把本行为钉死。
      */
     @TableField("status")
     private Long status = 0L;

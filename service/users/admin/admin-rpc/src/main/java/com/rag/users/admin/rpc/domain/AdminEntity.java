@@ -13,23 +13,36 @@ import java.util.Map;
 /**
  * admin admin 表的 MyBatis-Plus 实体。
  *
- * <p>对应 Go 端 internal/model/admin.go 的 Admin struct（GORM 默认表名 admin_admin）。
+ * <p>对应 Go 端 internal/model/data_model.go 的 Admin struct。
  *
- * <p>L1 表结构冻结（与 Phase 3 V1__create_admin.sql DDL 严格对齐）：
+ * <p><b>⚠️ 表名两侧不同（不是笔误）</b>：Go 的 {@code Admin.TableName()} 返回
+ * <b>{@code admins}</b>（{@code service/user/admin/rpc/internal/model/data_model.go:16-18}），
+ * 本实体映射的是 <b>{@code admin_admin}</b>（{@code users-common/.../03_create_admin.sql:48}）。
+ * ⇒ 这是 users 域统一的表名加前缀约定（同族的还有 {@code users → users_user}、
+ * {@code admin_invites → admin_invite}），**两侧物理上不共用 schema**，
+ * 所以对拍只能落在 HTTP wire 层（{@code tools/difftest/README.md} §1）。
+ *
+ * <p>L1 表结构（权威来源＝共用 DDL {@code users-common/src/main/resources/db/03_create_admin.sql}）：
  * <pre>
  *   id          BIGSERIAL PRIMARY KEY
  *   uid         BIGINT NOT NULL UNIQUE         -- Snowflake uid（admin-rpc 业务主键）
- *   username    VARCHAR(255) UNIQUE            -- nullable（admin 可没 username）
- *   password    VARCHAR(255)                   -- bcrypt 哈希（PasswordUtil.encrypt）
- *   email       VARCHAR(255) UNIQUE            -- nullable（1:1 保留 Go 端 *string 语义）
- *   extra_info  JSONB                          -- @TableField(typeHandler = JacksonTypeHandler)
+ *   username    TEXT UNIQUE                    -- nullable（admin 可没 username）
+ *   password    TEXT                           -- bcrypt 哈希（PasswordUtil.encrypt）
+ *   email       TEXT UNIQUE                    -- nullable（1:1 保留 Go 端 *string 语义）
+ *   extra_info  JSONB                          -- JsonbTypeHandler
  *   create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
  *   update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
  * </pre>
  *
+ * <p><b>⚠️ 两个时间列是 {@code timestamp}（无时区），Go 侧是 {@code timestamptz}</b>
+ * —— 属 DRIFT-ARPC-004 ②③，**修法归属 {@code users-common} 的 DDL**（本组件无 DDL 所有权）。
+ * Go 出处：{@code data_model.go:12-13} 的 {@code time.Time} 无 type tag
+ * ⇒ GORM 的 postgres driver（{@code postgres.go:251-256}）生成 {@code timestamptz}。
+ *
  * <p>L4 实现机制差异：
  * <ul>
- *   <li>Hibernate {@code @JdbcTypeCode(SqlTypes.JSON)} → MyBatis-Plus {@code JacksonTypeHandler} + 全局配置</li>
+ *   <li>Hibernate {@code @JdbcTypeCode(SqlTypes.JSON)} → MyBatis-Plus {@code JsonbTypeHandler}
+ *       （Go 侧是 {@code serializer:json} 写进 <b>text</b> 列 ⇒ 边界行为不同，见 DRIFT-ARPC-004 ①）</li>
  *   <li>JPA {@code @Entity} → MyBatis-Plus {@code @TableName}（无状态 entity，纯 POJO + Lombok @Data）</li>
  * </ul>
  *

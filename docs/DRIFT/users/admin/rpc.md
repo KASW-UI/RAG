@@ -923,3 +923,316 @@ RAG 对应两处在**参数全空**时仍会发出一条只更新 `update_time` 
 
 admin-rpc 当前：`mvn -o -pl service/users/admin/admin-rpc -am test` ⇒
 **81 tests / 0 failures / 0 errors**，BUILD SUCCESS。
+
+
+---
+
+<!-- @round 2026-10-23 20:41–21:35 · users/admin 域审计轮 · 证据强度升级轮 -->
+
+# 2026-10-23 审计轮（users/admin 域 · 证据强度升级）
+
+> **核对日期**：2026-10-23　　**范围**：`admin-rpc` + `admin-api` + `admin-proto`
+> **本轮目标（用户 2026-10-23 指定）**：把本域推到**真 PG 守门测试 + Go ↔ RAG 双侧活体对拍**
+> —— 这是 §3.3 的理想态；此前 admin-rpc 的**双侧活体对拍证据为零**（UNRESOLVED-ARPC-001）。
+>
+> ⚠️ **本节是增量追加**，上文 §1–§10 的原始记录**一字未删**。
+> 新编号一律走 `DRIFT-ARPC-007` 起；与 `admin/_shared.md` 的共享台账零冲突。
+
+## 0. 本轮实跑的命令与观察结果（**每条都可复现**）
+
+| 命令 | 结果 |
+|---|---|
+| `mvn -o -pl service/users/admin/admin-rpc -am test`（本轮**基线**，改代码之前） | 12 个测试类 **84 tests / 0 failures / 0 errors / 0 skipped**。真 PG 容器用例 29 条（`AdminCreatePasswordOrderRegressionTest` 9 + `AdminRpcConcurrencyWiringTest` 2 + `AdminRpcPaginationGormSemanticsTest` 7 + `AdminRpcTransactionWiringTest` 4 + `AdminRpcUpdateTimeAdvanceWiringTest` 5 + `AdminRpcContainerWiringTest` 7）—— **Skipped=0**，即 `@EnabledIfDockerAvailable` **确实放行**（`admin-rpc/pom.xml:212-217` 已注入 `TESTCONTAINERS_RYUK_DISABLED=true`） |
+| `tools/difftest/run.sh --keep --serve-only` | 两套真栈起来：**Go** user-rpc 19004 / admin-rpc 18081 / user-api 18888 / admin-api 18889；**RAG** user-rpc 59210 / admin-rpc 58081 / user-api 59900 / admin-api 58889。基建 = `difftest-postgres`(go_db + rag_db) + `difftest-redis` |
+| `tools/difftest/diff.py --scenario all` | **steps=39 / asserted=10 / byte_equal=29 / unexpected=0**，`EXIT=0` —— **admin 域 HTTP wire 层的双侧活体对拍，全绿** |
+| `tools/difftest/exp-difftest-grpc-admin-errors.sh --stacks-up`（**本轮新建**） | **cases=18 / code_mismatch=0 / payload_diff=0 / description_diff=5**，`EXIT=0` —— **admin-rpc gRPC 层的双侧活体对拍**（本轮首次） |
+| `mvn -o -pl service/users/admin/admin-rpc,service/users/admin/admin-api -am test`（本轮**收尾**） | 见 §6 |
+
+> ⚠️ **一个必须记下来的坑（不是语义，但会让下一轮的数字全是假的）**：
+> `diff.py` **不是可重复运行**的 —— 它的 `admin.update` 步骤会把 admin 的密码改成
+> `newadmin123`、`admin.delete` 会删掉被测用户 ⇒ 在**同一个库**上**第二次**跑
+> `admin.login` 就用旧密码失败；**两侧同时**返回 `{code:1002}` ⇒ diff.py 判「两侧相同 ⇒ OK」
+> ⇒ **后续所有带 token 的步骤全部变成 401**，报告上却是一片 OK。
+> 本轮第一次单独跑 `--scenario admin` 时踩到了（5 条 DIFF 全是
+> `Go='strconv.ParseInt: parsing "": invalid syntax'` vs `RAG='field "uid" is not set'` ——
+> 那是 `{{user_uid}}` 占位符为空造成的，**不是语义差异**）。
+> ⇒ **正确姿势**：每轮先 `run.sh --keep --serve-only`（它会 `docker compose down -v` 重建库）
+> 再跑 `diff.py`，**且只跑一次**。本轮的 39 步 0 差异就是在一个全新库上跑出来的。
+
+## 1. 本轮结论概览
+
+| | 结论 | 证据强度 |
+|---|---|---|
+| **admin-rpc（gRPC 层）** | 🔴 **NOT EQUIVALENT** —— 但**全部差异集中在 `status.description`**；**gRPC code 18/18 两侧全同** | ✅ **双侧活体对拍**（本轮首次） |
+| **admin-api（HTTP 层）** | ✅ **EQUIVALENT**（在「路径前缀 / method / 参数通道 / 401 body 形状 / 黑名单业务码」这 5 条**已签字**偏离之外的范围内） | ✅ **双侧活体对拍**（39 步） |
+| **admin-proto** | ✅ wire 契约逐字节一致（`check-proto-static.sh` EXIT=0，13 rpc） | ✅ 静态双侧 |
+| **DDL 列类型**（`admin_admin` / `admin_invite` 的时间列、`extra_info` 的 jsonb/text） | 🔴 仍未修 —— **修法归属 `users-common`，本组件无 DDL 所有权** | ✅ 真 PG schema 对照 + **双侧活体对拍**（jsonb 边界已实测） |
+
+> ⚠️ **「admin-api 等价」这句话的效力边界**：它只覆盖 HTTP wire 层。
+> gRPC 层仍有一条**未签字**的差异（黑名单 401 的业务码 `401` → `1006`，
+> DRIFT-ADMINAPI-004）—— **HTTP 对拍看不到它**，因为两侧都把它映射成了 401；
+> 只有直连 admin-api 的客户端去看 body 才知道业务码不同。
+> ⇒ 「39 步全绿」**不等于**「admin 域无漂移」。
+
+## 2. 🔴 DRIFT-ARPC-007 —— Go 真源的 12 处字面量被转码损坏，RAG 吐的是正常中文
+
+```
+Component:   admin-rpc（gRPC status description）
+Category:    Serialization / Error Identity（**只在 gRPC 层可见**）
+Risk:        LOW（业务语义等价；但 wire 契约不一致 ⇒ §3.1 要求覆盖的项目）
+Classification: OBSERVABLE DIFFERENCE（description 层） + gRPC code 层 EQUIVALENT
+```
+
+### 现象
+
+Go 真源仓库 `Sea-RideTheWind_golang` 里 **admin/rpc 的 4 个文件、12 处中文字面量**
+在磁盘上就是**乱码字节** —— 提交进 git HEAD 的就是乱码（`git show HEAD:…` 复核过），
+不是本地工作区损坏。
+
+### Go 出处（**原始字节**，从 Go 源文件逐字节读出；hex 可用 `python3` 复核）
+
+| Go 文件:行 | Go 实际字节（hex） | Go 实际字面量 | RAG 吐出的 |
+|---|---|---|---|
+| `internal/logic/getselflogic.go:37` | `e990a2e384a6e59f9be6b693e5b685e793a8e98da63f` | `鐢ㄦ埛涓嶅pscene鍦?` | `用户不存在` |
+| `internal/logic/updateselflogic.go:37` / `:83` | 同上 | `鐢ㄦ埛涓嶅pscene鍦?` | `用户不存在` |
+| `internal/logic/createinvitecodelogic.go:55` | 同上 | `鐢ㄦ埛涓嶅pscene鍦?` | `用户不存在` |
+| `internal/logic/createadminlogic.go:73` / `:99` | `e990a2e384a6e59fbe98d9ae5b685e587a1e7809be6a8bae6b9aa` | `鐢ㄦ埛鍚嶅凡瀛樺湪` | `用户名已存在` |
+| `internal/logic/createadminlogic.go:119` | `4442e5a8a3e8afb2e5a79ee6beb6e8beabe8a7a6` | `DB娣诲姞澶辫触` | `DB添加失败` |
+| `internal/logic/createinvitecodelogic.go:70` / `:101` | `e7bba0efbc84e6828ae98d9be6a980e5808be79287e9a38ee7889ce990a2e786b8e59e9ae6beb6e8beabe8a7a6` | `绠＄悊鍛橀個璇风爜鐢熸垚澶辫触` | `管理员邀请码生成失败` |
+| `internal/logic/createinvitecodelogic.go:94` | `4442e98d90e6ac8fe58f86e6beb6e8beabe8a7a6` | `DB鍐欏叆澶辫触` | `DB写入失败` |
+| `internal/logic/updateselflogic.go:63` | `e780b5e59799e7889ce98d94e78ab2e79891e6beb6e8beabe8a7a6` | `瀵嗙爜鍔犲瘑澶辫触` | `密码加密失败` |
+| `internal/logic/updateselflogic.go:77` | `4442e98f87e5ad98e69f8ae6beb6e8beabe8a7a6` | `DB鏇存柊澶辫触` | `DB更新失败` |
+| `internal/logic/getselflogic.go:40` / `createinvitecodelogic.go:60` | `4442e98f8ce383a8ee8797e6beb6e8beabe8a7a6` | `DB鏌ヨ澶辫触` | `DB查询失败` |
+| `internal/logic/createadminlogic.go:50` / `:59` / `:67` | `e7bba0efbc84e6828ae98d9be6a980e5808be79287e9a38ee7889ce996bfe6ac92ee87a4` | `绠＄悊鍛橀個璇风爜閿欒`（**部分损坏**） | `管理员邀请码错误` |
+
+> ⚠️ 「Go 实际字面量」一栏在终端里显示为乱码 —— 那**就是**文件里的内容。
+> hex 一栏是从源文件逐字节读出的真值（`python3` 对 `status.Error(…, "…")` 的字面量取 UTF-8 字节）。
+
+### 根因（**不是作者写的，是转码往返弄坏的**）
+
+损坏是**逐字符**的：有的字符变成了 GBK 误解码产物（`鐢ㄦ埛`），有的字符只坏了一半
+（`绠＄悊…` 里的 `＄` 是 **U+FF04 FULLWIDTH DOLLAR SIGN**，`閿欒` 也是半坏的）。
+⇒ 这是 **UTF-8 → 被当作 GBK 解码 → 再编码成 UTF-8** 的**有损**往返的签名，
+**不是**任何写作意图。
+全仓共 **7 个文件**中招：
+`admin/rpc/internal/logic/{getselflogic,updateselflogic,createinvitecodelogic,createadminlogic}.go`
+（4 个，**本组件**）+
+`user/rpc/internal/logic/{selectavatarlogic,uploadavatarlogic,getavatarhistorylogic}.go`
+（3 个，**属 users/user 域 —— 另一 worker 所有**）。
+`service/user/admin/api/**` 与 `service/user/common/**` **零命中**。
+
+### RAG 出处
+
+`AdminDomainService.java:167/249/284/325/354/362/400/439/453/459/462/501/524/544/555/589/593/622/626/650/831/860/875`
+—— 全部是 `Status.X.withDescription("正常中文")`。
+
+### 双侧活体对拍实测（**本轮的核心证据**）
+
+`tools/difftest/exp-difftest-grpc-admin-errors.sh --stacks-up`（**本轮新建**）：
+
+```
+cases=18  code_mismatch=0  payload_diff=0  description_diff=5
+```
+
+5 条 description 差异分别是 `getself.notfound` / `updateself.notfound` /
+`createinvitecode.notfound`（Go = `鐢ㄦ埛涓嶅pscene鍦?`）与
+`createadmin.emptyinvite` / `createadmin.badinvite`（Go = `绠＄悊鍛橀個璇风爜閿欒`）。
+
+### 效力边界（**这条差异只在哪一层可见**）
+
+| 面 | 是否可见 | 证据 |
+|---|---|---|
+| **gRPC 直连 admin-rpc** | ✅ 可见（description 不同，**code 全同**） | `exp-difftest-grpc-admin-errors.sh` 实测 5 条 |
+| **HTTP（admin-api）** | ❌ **不可见** | `admin-api/.../advice/GlobalExceptionHandler.java:74-75`：响应体的 `msg` 取自 `ErrorCode.getMsg(businessCode)`，**不是** `e.getStatus().getDescription()` ⇒ description 只进日志（`:76-77`），不进响应体 |
+| **业务判定** | ❌ 不可见 | 两侧 **gRPC code 18/18 全同**；admin-api 的业务码映射只看 code（`GlobalExceptionHandler.mapRPCStatusToCode:84-92`） |
+
+⇒ **业务影响：零**。它是 **wire 契约层**的不一致（§3.1 明确要求覆盖「错误码语义」）。
+
+### 处置（**本轮不改行为，升级为待签字项**）
+
+**RAG 保持正常中文，不复刻乱码。** 理由三条：
+
+1. **Go 那一侧是仓库级数据损坏，不是设计** —— 损坏的逐字符特征已经证明（见「根因」）。
+   把乱码搬进产品是把数据损坏当规范。
+2. **无业务影响**（code 全同、HTTP 不可见）⇒ 不值得用它换「一致性」。
+3. **§3.4.3 N-7 已有同型先例**：「Go 的空列表是缺陷不是设计 ⇒ Java 现状即为已修正的 bug，
+   两侧不一致属有意，不再对齐」。本条同型，但**尚未签字** ⇒ 列为**待用户裁决**。
+
+> ⚠️ **不要在没有签字的情况下「对齐」**：把 RAG 的 description 改成乱码不是对齐，
+> 是把一条**别的组件的测试**（`AdminRpcGoWireParityTest` 的 tripwire）逼红。
+> 那条 tripwire 的作用正是：有人改了 RAG 的 description ⇒ 立刻红 ⇒ 逼他先改台账。
+
+### 守门
+
+`AdminRpcGoWireParityTest#errorStatusTableMatchesGoWireBytes`（**本轮新建**，真 PG）：
+- 9 处**未损坏**的：断言 RAG 的 description 与 **Go 原始字节（hex 常量）逐字节相等** ——
+  不是「与中文字面量相等」，而是与**从 Go 侧读出来的字节**相等；
+- 5 处**已损坏**的：断言 RAG 仍吐正常中文，**且断言它与 Go 的损坏字节不同**（决策 tripwire）。
+- 另加 `#createAdminUsernameTakenDescriptionIsStillChinese` 覆盖第 6 处损坏字面量（ALREADY_EXISTS）。
+
+## 3. 🔴 DRIFT-ARPC-008 —— `status IS NULL` 的读法：Go 读成 **0**，不是「读不出来」
+
+```
+Component:   admin-rpc（users_user 的读路径）/ **同时证伪 users/user 域的一条结论**
+Category:    State Semantics / Serialization
+Risk:        MEDIUM（结论错误 ⇒ 会把人引向「修」错方向）
+Classification: EQUIVALENT（两侧实测一致）
+```
+
+### 背景：被证伪的前提
+
+`AGENTS.md` §0 标红「⚠️ admin-rpc 同款 `status=0L` 未修」，
+`docs/DRIFT/users/user/rpc.md` 的 **DRIFT-USERRPC-V-001** 写：
+
+> Go 的语义不是「NULL 当 0」，而是「**NULL 读不出来**」（`gorm@v1.31.2/scan.go:153`
+> `db.AddError(rows.Scan(values...))` → `database/sql` 对「NULL → int64」返回 unsupported 错误）
+
+⇒ 本轮**双侧活体对拍 + 独立 Go 探针**两条路都否掉了这个前提。
+
+### Go 侧机制（三段，逐段指向消费点）
+
+| # | 位置 | 事实 |
+|---|---|---|
+| 1 | `gorm.io/gorm@v1.31.1/scan.go:19`（`prepareValues`） | `values[idx] = reflect.New(reflect.PointerTo(field.FieldType)).Interface()` ⇒ 对 `int64` 字段造出来的是 **`**int64`（双指针）**，不是 `*int64` |
+| 2 | `database/sql` 的 `convertAssign` | dest 是指针、src 为 nil ⇒ 走 `case reflect.Pointer: if src == nil { dv.SetZero(); return nil }` ⇒ **不报错**，只把内层指针置 nil |
+| 3 | GORM 的 int setter（`schema/field.go`） | 收到 `**int64` 且 `*data == nil` ⇒ **字段保持零值 0**，同样不报错 |
+
+⇒ **Go 的语义是「NULL 当 0」**，不是「读不出来」。
+（关键点：GORM 造的是**双指针**，而 `database/sql` 只对**单指针** dest 报 unsupported 错误。）
+
+### 双侧活体对拍实测（2026-10-23）
+
+1. `go_db.users` 插一行 `status IS NULL`（该列在 Go 的 DDL 里**可空**：
+   `data_model.go:41` 的 `Status int64 \`gorm:"column:status;default:0"\`` **无 `not null`**）；
+2. `rag_db.users_user` 同样插一行（该列在 RAG 的 DDL 里是 `NOT NULL` ⇒ 先
+   `ALTER TABLE users_user ALTER COLUMN status DROP NOT NULL`）；
+3. 打两侧 admin-api：
+
+```
+Go  : GET  /admincenter/v1/admin/getuser?uid=7770000000000000001
+      → {"code":200,"msg":"OK","data":{"user":{…,"status":0},"found":true}}
+RAG : POST /admin/v1/getuser  {"uid":"7770000000000000002"}
+      → {"code":200,"msg":"OK","data":{"found":true,"user":{…,"status":0}}}
+```
+
+⇒ **两侧都是 `status: 0`，一致。**
+
+另有一条**独立可复现的 Go 探针**（不依赖服务起停，直接用 GORM v1.31.1 + Go 的结构体标签）：
+
+```
+$ DSN="host=127.0.0.1 port=55432 user=admin password=difftest dbname=go_db ..." go run .
+err=<nil>
+Status=0
+Username="zzz_null_status_go"
+```
+
+（探针跑法：`/tmp/gorm-null-probe` —— 用冻结仓库的 `go.mod`/`go.sum` + 同版本 GORM，
+**不写入冻结仓库一个字节**；探针里逐字照抄 `data_model.go:35-46` 的 `User` struct 与
+`admin.go:27` 的 `Where("uid = ?", uid).First(&user)`。）
+
+### 结论与处置
+
+| 侧 | 现状 | 判定 |
+|---|---|---|
+| **admin-rpc**（`domain/UserEntity.java:85` 的 `= 0L`） | NULL → 0 | ✅ **与 Go 一致，不是漂移** ⇒ **不改** |
+| **users/user**（user-rpc 端已删 `= 0L`，并加「status 为 null ⇒ fail-closed 抛 INTERNAL」） | NULL → INTERNAL「DB查询失败」 | 🔴 **与 Go 相反** ⇒ 已作为**跨组件问题上报**（§8），本组件**无权改** |
+
+⇒ **AGENTS.md §0 的「admin-rpc 同款 `status=0L` 未修」这一行应当撤销**（依据已备好，见本节）。
+本轮**没有改** AGENTS.md（超 32 KB 预算，且不在本 worker 的所有权内）。
+
+### 守门
+
+`AdminRpcGoWireParityTest#nullStatusColumnReadsAsZeroLikeGo`（**本轮新建**，真 PG）：
+- 前提断言：这一行的 `status` 在 DB 里**真的是 NULL**（否则本用例什么也没测到）；
+- 断言 `getUser` 读到 **0**（不是 null、不抛错）；
+- 断言 `getUserList` 走同一条扫描路径也是 0。
+
+## 4. ✅ UNRESOLVED-ARPC-004 已关闭 —— `extra_info` 的 jsonb 边界（双侧活体对拍实测）
+
+### 提问
+
+`extra_info` 的值含 `\u0000` / 非法 UTF-8 时，两侧分别成不成功？
+
+### 回答（**实测**）
+
+`admin_admin.extra_info` 在 Go 侧是 **`text`** 列（`serializer:json` 写 JSON 串），
+在 RAG 侧是 **`jsonb`** 列（`JsonbTypeHandler` → `ps.setObject(…, Types.OTHER)`）。
+
+2026-10-23 双侧活体对拍（同一份请求体，`extra_info = {"k":" "}`；
+`encoding/json` 把 U+0000 转义成 6 个 ASCII 字符 `\u0000` ⇒ **不是**裸 NUL 字节）：
+
+| | 结果 | 落库 |
+|---|---|---|
+| **Go** admin-api `POST /admincenter/v1/admin/create` | **HTTP 200 `{code:200,…,"uid":"…"}`** | ✅ 行已落库：`extra_info = {"k":" "}`（**text 列照收**） |
+| **RAG** admin-api `POST /admin/v1/create` | **HTTP 200 `{code:5001,"msg":"系统内部错误"}`** | ❌ **无行**；PG 报 `ERROR: unsupported Unicode escape sequence`（**22P02**，jsonb 列拒收） |
+
+⇒ **确认是 OBSERVABLE DIFFERENCE**（Go 成功 / RAG 失败）。
+且 **错误码分类正确**：22P02 ≠ 23505 ⇒ 没被 `AdminExceptions.isUniqueViolation`
+误判成 ALREADY_EXISTS ⇒ 落在 `INTERNAL` → api 层 `5001`（与 Go 的 `Internal→5001` 一致，
+见 `admin/_shared.md` §6.2.2 DRIFT-004 的不对称映射表）。
+
+### 修法与归属
+
+**修法 = 把 `admin_admin.extra_info` 从 `jsonb` 改成 `text`**（与 Go 的 `serializer:json` 同构）
++ `JsonbTypeHandler` 改成写 JSON 串。
+🔴 **但 DDL 在 `service/users/users-common/src/main/resources/db/03_create_admin.sql:50`**
+⇒ **归属另一个 worker**，本组件无 DDL 所有权 ⇒ **只报告，不实施**（见 §8）。
+
+## 5. 本轮未闭环的项（逐条带原因）
+
+| # | 项 | 状态 | 原因 / 下一步 |
+|---|---|---|---|
+| 1 | `admin_admin` / `admin_invite` 的**时间列** `timestamp` → `timestamptz`（DRIFT-ARPC-004 里的 6 处） | 🔴 未修 | DDL 在 `users-common`（`03_create_admin.sql:55-56`、`04_create_admin_invite.sql:37-41`）。⚠️ **不能照抄 `users_user` 那轮的改法**：`users_user` 的时间值**不进入任何 proto/DTO**（`_shared.md` 已核），而 **`admin_invite.expires_at` 是 wire 可见的**（`CreateInviteCodeResp.expires_at` = Unix 秒 ⇒ 两侧算法一致、**当前 wire 不可见差异**），但 `expires_at` 的**比较**（10 分钟有效期）在跨时区多实例下会偏一个时区差 ⇒ 每张表的敏感点不同，必须逐表评估 |
+| 2 | `admin_admin.extra_info` jsonb → text | 🔴 未修（见 §4） | DDL 归属 `users-common` |
+| 3 | `admin_admin` / `admin_invite` 的**表名**两侧不同（Go `admins`/`admin_invites` vs RAG `admin_admin`/`admin_invite`） | ⚠️ 已确认为**族内约定**（同 `users`→`users_user`），非缺陷；`check-ddl-static.py` 有映射表 | 已在本组件的实体 javadoc 里改正（原先写「GORM 默认表名 admin_admin / admin_invite」是**错的**：Go 的 `TableName()` 返回 `admins` / `admin_invites`，见 `data_model.go:16-18` / `:31-33`） |
+| 4 | `DRIFT-ARPC-002`（`UpdateUserResp.success`：Go=false / RAG=true） | 🟡 **待用户裁决**（未签字） | 本轮补了**双侧活体对拍证据** + **决策 tripwire** 测试；HTTP 面不可见（admin-api 硬编码 `success=true`，Go 侧同样硬编码） |
+| 5 | `DRIFT-ARPC-003`（`system.default-password` 为空 ⇒ Go 成功 / RAG INTERNAL） | 🟡 未修 | 需显式把配置置空才触发；本轮未加入对拍矩阵（要改配置重起两侧栈，代价大于收益） |
+| 6 | `DRIFT-ARPC-005`（启动期建表 3 张 vs 4 张） | 🟡 未修（低风险） | RAG 多建 `users_user_avatar_history`（Go admin-rpc 不建）；全部 `CREATE … IF NOT EXISTS`，不破坏任何东西 |
+| 7 | `DRIFT-ARPC-006`（RAG 侧零手写 span，Go 逐 Logic 打 `audit.*` 属性） | 🟡 未修 | 需要动 `service/common` 的 OTel 装配（不在本组件），且与 N-4 的签字理由直接相关 ⇒ 建议与 N-4 一起裁决 |
+| 8 | `UNRESOLVED-ARPC-002`（超时是否 min 客户端 deadline） | 🟡 仍未定 | 本轮的 gRPC 对拍**没有**加客户端 deadline 档（`exp-difftest-grpc-admin-errors.sh` 用默认 deadline）⇒ 结论未变 |
+| 9 | `UNRESOLVED-ARPC-003`（Redis 客户端超时配置） | 🟡 仍未定 | 本轮未做 Redis 故障注入 |
+| 10 | `UNRESOLVED-ARPC-005`（`users_user` 建表责任交叉） | 🟡 跨组件 | 需要 user-rpc 侧结论后合并判读 |
+
+## 6. 本轮实测数字（**收尾跑**，可复现）
+
+| 模块 | 测试类 | tests | failures | errors | skipped | 真 PG 容器用例 |
+|---|---|---|---|---|---|---|
+| `admin-rpc` | 13 | **88**（基线 84 + 本轮新建 `AdminRpcGoWireParityTest` 4） | **0** | **0** | **0** | **33**（29 + 4） |
+| `admin-api` | 10 | **119** | **0** | **0** | **0** | 0（本组件无 SQL） |
+
+> ⚠️ **「skipped = 0」是本轮硬门槛**（AGENTS.md §0 的 2026-10-23 新纪律）：
+> `task-rpc` 曾因漏配 `RYUK_DISABLED` 被 `@EnabledIfDockerAvailable` **静默全跳**而 reactor 仍报
+> `BUILD SUCCESS`。admin-rpc / admin-api 的 pom **都注入了**
+> `TESTCONTAINERS_RYUK_DISABLED=true`（`admin-rpc/pom.xml:212-217`、`admin-api/pom.xml:165-170`），
+> 且实测 `skipped=0` ⇒ 真 PG **确实跑了**，不是假绿。
+> 复核命令：`grep -ho 'skipped="[0-9]*"' service/users/admin/*/target/surefire-reports/*.xml`
+
+## 7. 本轮新增/修改的文件
+
+| 文件 | 性质 |
+|---|---|
+| `service/users/admin/admin-rpc/src/test/java/…/AdminRpcGoWireParityTest.java` | **新增**，真 PG 守门测试（4 条） |
+| `service/users/admin/admin-rpc/src/main/java/…/domain/UserEntity.java` | javadoc 改写（`status = 0L` 的结论从「缺陷」改为「与 Go 等价」，含三段 Go 出处） |
+| `service/users/admin/admin-rpc/src/main/java/…/domain/AdminEntity.java` | javadoc 改写（Go 表名 `admins`、DDL 权威来源、`extra_info` 边界） |
+| `service/users/admin/admin-rpc/src/main/java/…/domain/AdminInviteEntity.java` | javadoc 改写（Go 表名 `admin_invites`、4 个时间列的类型差异与可观察性边界） |
+| `service/users/admin/admin-rpc/src/main/java/…/mapper/AdminMapper.java` | 注释订正（`selectById(uid)` → `selectById(id)`：主键是自增 `id`，不是 `uid`） |
+| `service/users/admin/admin-rpc/src/main/java/…/mapper/UserMapper.java` | 注释订正（删掉不存在的 `@Update`） |
+| `tools/difftest/GrpcAdminDualPortRunner.java` | **新增**，gRPC 层双侧活体对拍执行体（18 用例） |
+| `tools/difftest/exp-difftest-grpc-admin-errors.sh` | **新增**，上面的编排脚本 |
+| `tools/difftest/grpc-admin-results.txt` | 本轮实测输出留档 |
+
+> ⚠️ **三个 Mapper 的 javadoc 复核结论（待办里那条「曾与实现不符」）**：
+> **已确认为「已修且当前成立」** —— 三个接口现在都**零方法声明**，且类注释里都显式写着
+> 「本接口不声明任何方法（2026-10-21 订正）」并把方法真实归属列成表。
+> ⇒ 本轮只需修两处残留的措辞（`selectById(uid)`、不存在的 `@Update`），见上表。
+
+## 8. user 侧 / users-common 待裁决问题（**本 worker 无权改**）
+
+| # | 问题 | 证据 | 建议 |
+|---|---|---|---|
+| **U-1** | 🔴 **`users/user` 的 DRIFT-USERRPC-V-001 结论被证伪**：`status IS NULL` 时 **Go 读成 0**（不是「读不出来」），而 user-rpc 端把 `= 0L` 删掉并加了 **fail-closed 抛 INTERNAL「DB查询失败」** ⇒ **user-rpc 与 Go 相反** | §3 的三段机制 + 双侧活体对拍 + 独立 Go 探针（三路一致） | **撤销 user-rpc 的 fail-closed 守卫**（或在签字后保留并明确写「RAG 有意 fail-closed」）。⚠️ 注意那条守卫的守门测试 `UserRpcLoginNullStatusFailClosedTest` 锁的是**错误答案**（§3.3.3「绿测试可能是错误答案的守卫」的又一个实例）⇒ 若决定撤销，测试与台账必须同步 |
+| **U-2** | 🔴 **`users_user.status` 的 `NOT NULL` 与 Go 的可空不一致**（Go `default:0` 无 `not null`） | 本轮实测：`go_db.users.status` 可空（RAG 侧要先 `ALTER … DROP NOT NULL` 才能复现） | DDL 归属 `users-common`；本轮已把 admin-rpc 侧的 `users_user` 行为钉成「与 Go 一致（读成 0）」，**但 DDL 若改成可空，user-rpc 的守卫会变成常态路径** ⇒ U-1 与 U-2 必须一起裁决 |
+| **U-3** | 🔴 **`admin_admin.extra_info` 应从 `jsonb` 改 `text`**（Go 用 `serializer:json` 写 text 列） | §4 的双侧活体对拍：Go 成功 / RAG 22P02 失败 | DDL 在 `users-common/.../03_create_admin.sql:50` ⇒ 归 users-common owner |
+| **U-4** | 🔴 **`admin_admin` / `admin_invite` 的 6 个时间列应改 `timestamptz`** | `check-ddl-static.py` 的 7 处差异 + Go `data_model.go:12-13/27-28`（`time.Time` 无 type tag ⇒ postgres driver 生成 `timestamptz`） | DDL 在 `users-common` ⇒ 归 users-common owner。⚠️ **不要照抄 `users_user` 那轮的改法**：`admin_invite.expires_at` 是 wire 可见的，必须逐表评估 |
+| **U-5** | ⚠️ **`users-common/.../03_create_admin.sql:14` 与 `04_create_admin_invite.sql:8/15` 的注释写错了 Go 的表名**（「GORM 默认表名 admin_admin / admin_invite」；Go 的 `TableName()` 实际返回 `admins` / `admin_invites`） | `data_model.go:16-18` / `:31-33` | 注释级病灶，在 users-common owner 的文件里 ⇒ 只报告 |
+| **U-6** | ⚠️ **`users/user` 域另有 3 个 Go 文件的字面量同样被转码损坏**（`user/rpc/internal/logic/{selectavatarlogic,uploadavatarlogic,getavatarhistorylogic}.go`） | 全仓扫描（7 个文件命中） | 与 DRIFT-ARPC-007 同型；归 users/user owner。⚠️ **先确认那 3 个字面量是否会进 wire**（`getavatarhistorylogic` 的 `create_time` 可能是客户端可见字段） |

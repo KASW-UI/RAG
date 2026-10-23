@@ -40,7 +40,8 @@ import org.apache.ibatis.annotations.Mapper;
 public interface AdminMapper extends BaseMapper<AdminEntity> {
 
     // 标准 CRUD 全部由 BaseMapper 提供：
-    //   selectById(uid), insert(admin), updateById(admin), deleteById(id)
+    //   selectById(id)   ← 主键是 id（BIGSERIAL 自增），**不是 uid**
+    //   insert(admin) / updateById(admin) / deleteById(id)
     // 业务特殊查询（findOneAdminByUsername / findOneAdminByUid 等）在 AdminDomainService 里
     // 通过 LambdaQueryWrapper 实现，不需要写在 Mapper 里。
 

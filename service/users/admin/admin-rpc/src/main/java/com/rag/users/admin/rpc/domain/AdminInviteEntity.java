@@ -11,19 +11,33 @@ import java.time.LocalDateTime;
 /**
  * admin invite 表的 MyBatis-Plus 实体。
  *
- * <p>对应 Go 端 internal/model/admin.go 的 AdminInvite struct（GORM 默认表名 admin_invite）。
+ * <p>对应 Go 端 internal/model/data_model.go 的 AdminInvite struct。
  *
- * <p>L1 表结构冻结（与 Phase 3 V2__create_admin_invite.sql DDL 严格对齐）：
+ * <p><b>⚠️ 表名两侧不同（不是笔误）</b>：Go 的 {@code AdminInvite.TableName()} 返回
+ * <b>{@code admin_invites}</b>（{@code service/user/admin/rpc/internal/model/data_model.go:31-33}），
+ * 本实体映射的是 <b>{@code admin_invite}</b>（{@code users-common/.../04_create_admin_invite.sql:33}）。
+ * ⇒ 与 {@code admins → admin_admin}、{@code users → users_user} 同族的表名加前缀约定，
+ * **两侧物理上不共用 schema** ⇒ 对拍只能落在 HTTP wire 层。
+ *
+ * <p>L1 表结构（权威来源＝共用 DDL {@code users-common/src/main/resources/db/04_create_admin_invite.sql}）：
  * <pre>
  *   id           BIGSERIAL PRIMARY KEY
- *   code         VARCHAR(255) NOT NULL UNIQUE  -- 前缀 "ADM-" + 8 字节 hex（大写）
- *   inviter_uid  BIGINT NOT NULL               -- 创建邀请码的 admin uid
- *   expires_at   TIMESTAMP NOT NULL
- *   used_by_uid  BIGINT                        -- nullable，使用该 invite 的新 admin uid
- *   used_at      TIMESTAMP                     -- nullable，使用时间
+ *   code         TEXT NOT NULL UNIQUE            -- 前缀 "ADM-" + 8 字节 hex（大写）
+ *   inviter_uid  BIGINT NOT NULL                 -- 创建邀请码的 admin uid
+ *   expires_at   TIMESTAMP NOT NULL              -- ⚠️ Go 侧是 timestamptz，见下
+ *   used_by_uid  BIGINT                          -- nullable，使用该 invite 的新 admin uid
+ *   used_at      TIMESTAMP                       -- nullable，使用时间；⚠️ Go 侧是 timestamptz
  *   create_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
  *   update_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
  * </pre>
+ *
+ * <p><b>⚠️ 四个时间列两侧类型不同</b>（Go {@code timestamptz} vs 本侧 {@code timestamp}）
+ * —— 属 DRIFT-ARPC-004 ②，<b>修法归属 {@code users-common} 的 DDL</b>（本组件无 DDL 所有权）。
+ * Go 出处：{@code data_model.go:24,26,27,28} 的 {@code time.Time} 无 type tag。
+ *
+ * <p><b>可观察性边界</b>：{@code expires_at} 在 wire 上是 <b>Unix 秒</b>
+ * （{@code CreateInviteCodeResp.expires_at}），两侧算法一致 ⇒ HTTP 层不可见差异；
+ * 差异只在「跨时区多实例部署」时影响 10 分钟有效期的判定（Go 绝对时刻比较 vs 本侧墙钟比较）。
  *
  * <p>行为约束（来自 CreateInviteCode + CreateAdminLogic）：
  * <ul>

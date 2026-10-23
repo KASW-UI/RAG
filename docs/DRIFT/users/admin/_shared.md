@@ -143,3 +143,78 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 > ⚠ 关掉 Ryuk 的代价是**容器不再自动回收**，CI 跑完可能残留。
 > Docker Hub 可达后删掉 admin-rpc/pom.xml 里那段 surefire 配置即可恢复。
 
+
+
+---
+
+<!-- @round 2026-10-23 21:45 · users/admin 域审计轮 · 共享台账 -->
+
+# 2026-10-23 审计轮（users/admin 域 · 共享台账增补）
+
+> **核对日期**：2026-10-23　　**范围**：`admin-rpc` + `admin-api` + `admin-proto`
+> ⚠️ **本节是增量追加**，上文 §3.4.3 / §6.2.2 / §6.2.3 的原始记录**一字未删**。
+> 逐条结论见 [`rpc.md`](rpc.md) 与 [`api.md`](api.md)；本节只放**跨组件**的部分。
+
+## 1. 本轮的证据强度（**域级**）
+
+| 面 | 证据强度 | 命令 / 产物 |
+|---|---|---|
+| **admin-rpc（gRPC 层）** | ✅ **双侧活体对拍**（本轮首次） | `tools/difftest/exp-difftest-grpc-admin-errors.sh --stacks-up` ⇒ **cases=18 / code_mismatch=0 / payload_diff=0 / description_diff=5**，`EXIT=0`；产物 `tools/difftest/grpc-admin-results.txt` |
+| **admin-api（HTTP 层）** | ✅ **双侧活体对拍** | `tools/difftest/diff.py --scenario all` ⇒ **steps=39 / asserted=10 / byte_equal=29 / unexpected=0**，`EXIT=0` |
+| **admin-proto** | ✅ 静态双侧（逐字节） | `tools/difftest/check-proto-static.sh` ⇒ `EXIT=0`（13 rpc） |
+| **admin-rpc（真 PG 守门）** | ✅ 真 PG 16 容器 | `mvn -o -pl service/users/admin/admin-rpc -am test` ⇒ **88 tests / 0 failures / 0 errors / 0 skipped**（真 PG 用例 **33** 条） |
+| **admin-api（真容器守门）** | ✅ 真 Redis 容器 + 真 Spring 上下文 | 同上 ⇒ **121 tests / 0 failures / 0 errors / 0 skipped** |
+
+> ⚠️ **「skipped = 0」是本轮硬门槛**（AGENTS.md §0 的 2026-10-23 新纪律）：
+> `task-rpc` 曾因漏配 `RYUK_DISABLED` 被 `@EnabledIfDockerAvailable` **静默全跳**，
+> 而 reactor 仍报 `BUILD SUCCESS`。
+> 本域两个模块的 pom **都注入了** `TESTCONTAINERS_RYUK_DISABLED=true`
+> （`admin-rpc/pom.xml:212-217`、`admin-api/pom.xml:165-170`），
+> 且实测 `skipped=0` ⇒ **真 PG / 真 Redis 确实跑了**，不是假绿。
+> 复核命令：`grep -ho 'skipped="[0-9]*"' service/users/admin/*/target/surefire-reports/*.xml`
+
+## 2. 🔴 本轮推翻的三条既有结论（**均在本域内**）
+
+| # | 既有结论 | 位置 | 本轮实测 | 处置 |
+|---|---|---|---|---|
+| 1 | 「admin-rpc 同款 `status=0L` 未修」 | `AGENTS.md` §0 | 🔴 **证伪**：Go 把 `status IS NULL` 读成 **0**（不是「读不出来」），RAG 也是 0 ⇒ **一致** | 本组件**不改**；`AGENTS.md` 那行建议撤销（不在本 worker 所有权内） |
+| 2 | 「Go 的语义是『NULL 读不出来』⇒ Java 应 fail-closed」 | `users/user/rpc.md` DRIFT-USERRPC-V-001 | 🔴 **证伪**（GORM 机制 + 双侧活体对拍 + 独立 Go 探针，三路一致） | **跨组件上报**（见 `users/user` owner）⇒ 与 §3.4.3 的教训同款：**「签字 + 防回退测试都齐了，结论仍可能是错的」** |
+| 3 | §5.1 错误映射全表的「Go desc」一栏写中文并判 EQUIVALENT | `admin/rpc.md` §5.1 | 🔴 **5 处错**：Go 那几处的字面量在仓库里是**乱码字节**（UTF-8→GBK 误解码往返） | 见 `admin/rpc.md` §2（DRIFT-ARPC-007） |
+
+> ⚠️ **第 2 条值得单独强调**：它与 §3.4.3 末尾那段教训（「N-3 / N-6 都经过了签字、都有防回退测试，
+> 而它们描述的行为**从未存在过**」）**完全同型** —— 这次是**反方向**：
+> 这次是一条**真实存在**的行为被台账误判成不存在，于是「按台账修」会**制造**新的漂移。
+> ⇒ **台账里的「Go 行为是什么」这一栏，本身也需要运行证据**，
+> 不能只靠「读源码 → 推机制」—— §3.3.1 的纪律同样适用于**对 Go 侧的断言**。
+
+## 3. ⚠️ §3.4.3 的 N-4 / N-5 需要重新审视（**本轮新增证据**）
+
+| 条目 | 原签字文本 | 本轮相关证据 | 建议 |
+|---|---|---|---|
+| **N-4**（`operator_id` 不恒为 0） | 「Go 的 `ctx["uid"]` 永远取不到 ⇒ `OperatorId` 恒 0；RAG 传真实 uid。该字段不参与任何业务判定，只写进 OTel span 的 `audit.operator_id`」 | ① admin-rpc 侧核到：`operator_id` **只在 `createInviteCode` 里用于查 admin**，其余 5 个方法只是审计字段 ⇒ 「不参与业务判定」**成立**；② 但 `admin/rpc.md` DRIFT-ARPC-006 实测：**RAG 侧一个 `audit.*` 属性都没有** ⇒ N-4 的原始理由（「恒 0 会让审计日志失去操作人信息」）在 RAG 侧**并不成立** —— RAG 本来就没有那个 span | N-4 的**行为**（RAG 传真实 uid）可以保留，但签字文本里「只写进 OTel span 的 `audit.operator_id` 属性」这一句**需要更正**（RAG 侧没有手写 span）。⇒ 建议与 DRIFT-ARPC-006 一起重签 |
+| **N-5**（JWT HMAC 密钥长度） | 「Go 用 15 字节原始 secret；RAG zero-pad 到 32 字节 ⇒ 两侧 token 互不认」 | 本轮未复验（未涉及 admin-api 的登录 token 互认测试） | 结论未变，但本轮**未复跑** ⇒ 按 §6.2 记 `UNKNOWN` |
+
+## 4. ⚠️ §6.2.3 A-U2 的记录需要更新（**证据强度变了**）
+
+| 项 | 原记录（2026-10-21） | 本轮（2026-10-23） |
+|---|---|---|
+| **A-U2**（两端运行时对拍） | 「已关闭（两侧）：RAG 侧实证 + Go 侧由 `tools/difftest` 补齐，39 步 / 39 同 / 0 已签字 / 0 未预期差异」 | **重跑并更新**：`steps=39 / asserted=10 / byte_equal=29 / unexpected=0`。⚠️ **「39 步」这个数字没变，但内容变了**：现在有 10 步是**已登记的签字差异**（不再算「同」），29 步是逐字节相同。⚠️ **且这 39 步只是 HTTP 层** —— gRPC 层此前**零证据**，本轮才补上（18 用例，code 全同） |
+
+> ⚠️ **`diff.py` 不是可重复运行的**（`admin.update` 会改 admin 密码、`admin.delete` 会删用户）
+> ⇒ 同一库上第二次跑会让后续带 token 的步骤全变 401，而 diff.py 仍判「两侧相同 ⇒ OK」。
+> ⇒ **每轮必须先 `run.sh --keep --serve-only`（重建库）再跑，且只跑一次。**
+
+## 5. user 侧 / users-common 待裁决问题（汇总，**本 worker 无权改**）
+
+| # | 问题 | 归属 | 出处 |
+|---|---|---|---|
+| **U-1** | 🔴 `users/user` 的 **DRIFT-USERRPC-V-001 结论被证伪** ⇒ user-rpc 的「status 为 null ⇒ fail-closed 抛 INTERNAL」**与 Go 相反** | users/user owner | `admin/rpc.md` §3 |
+| **U-2** | 🔴 `users_user.status` 的 `NOT NULL` 与 Go 的可空不一致 | users-common owner | `admin/rpc.md` §3 |
+| **U-3** | 🔴 `admin_admin.extra_info` 应 `jsonb` → `text`（Go 用 `serializer:json` 写 text 列）⇒ 当前 Go 成功 / RAG 22P02 失败 | users-common owner | `admin/rpc.md` §4 |
+| **U-4** | 🔴 `admin_admin` / `admin_invite` 的 **6 个时间列**应改 `timestamptz` | users-common owner | `admin/rpc.md` §5 |
+| **U-5** | ⚠️ `users-common/.../03_create_admin.sql:14`、`04_create_admin_invite.sql:8/15` 的注释**写错了 Go 的表名** | users-common owner | `admin/rpc.md` §5 |
+| **U-6** | ⚠️ `users/user` 域另有 **3 个 Go 文件**的字面量同样被转码损坏 | users/user owner | `admin/rpc.md` §5 |
+| **A-1** | 🔴 `user-api` 的 400 响应**同样缺 `charset`**（`GlobalExceptionHandler.java:216`） | users/user owner | `admin/api.md` §5 |
+| **A-2** | ⚠️ `docs/Intentional_Deviations/users/**` 下 **6 个文件全是 0 字节**（空占位）⇒ 「已签字」的条目查不到 | 文档 owner | `admin/api.md` §5 |
+| **A-3** | ⚠️ `tools/difftest/diff.py` 把 DRIFT-ADMINAPI-004 标成「N-1 已签字」，但 N-1 只签了 body 形状 | tools owner | `admin/api.md` §5 |
+| **A-4** | ⚠️ `tools/difftest/check-plaintext400-headers.sh` 只打 user-api，**没有 admin 入口**；且只断言「Content-Type 含 text/plain」，**抓不到 charset 差异** | tools owner | `admin/api.md` §5 |

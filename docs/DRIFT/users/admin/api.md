@@ -810,3 +810,227 @@ SEMANTICALLY NOT EQUIVALENT
    本轮已复核 go-zero `rest/engine.go:108-112` + `rest/server.go:222-233`，**真实顺序是验签先、黑名单后**，
    与 `AdminJwtAuthInterceptor` 的现状一致。⇒ 该行已过期，**但该文件不属本会话修改范围**，故在此标注。
 4. `AGENTS.md` §4.2 的「13 Service + 2 client」需上游修正（DRIFT-ADMINAPI-010）。
+
+---
+
+<!-- @round 2026-10-23 21:35–21:45 · users/admin 域审计轮 · admin-api 侧 -->
+
+# 2026-10-23 审计轮（admin-api 侧 · 证据强度升级）
+
+> **核对日期**：2026-10-23　　**范围**：`admin-api`
+> ⚠️ **本节是增量追加**，上文 §1–§10 的原始记录**一字未删**。
+> 新编号走 `DRIFT-ADMINAPI-011` 起。
+
+## 0. 证据强度升级（**本文件的文件头声明作废**）
+
+上文 §「证据强度声明」写的是「本轮是**纯源码级对照**」「`双侧活体对拍` ❌ **本轮未跑**」。
+
+### 🔴 2026-10-23 更新：admin-api 的证据强度已升到「双侧活体对拍」
+
+| 项 | 实测 |
+|---|---|
+| 两套真栈 | **Go** admin-api 18889 / **RAG** admin-api 58889（`tools/difftest/run.sh --keep --serve-only` 起，真实 Tomcat + 真实 PG + 真实 Redis） |
+| 对拍命令 | `tools/difftest/diff.py --scenario all` |
+| 结果 | **steps=39 / asserted=10 / byte_equal=29 / unexpected=0**，`EXIT=0` |
+| 覆盖 | admin 域 13 个端点 + user 域 13 个端点（admin 域的 13 个端点全部在内：login / getself / getself.noauth / getself.badtok / invite.create / create / create.malformed / getuser / getuser.nouid / getuser.baduid / getuserlist ×4 / banuser / unbanuser / resetuserpassword / update / updateuser / delete / logout / getself.afterlogout） |
+| 权威记录 | `tools/difftest/grpc-admin-results.txt`（gRPC 层）与本轮命令输出（HTTP 层） |
+
+⇒ **「本组件的绝大多数结论是 `静态源码·双侧`」这条（UNRESOLVED-006）不再成立**：
+本域的 HTTP 层结论现在有**双侧活体对拍**背书。
+
+> ⚠️ **「39 步全绿」的效力边界**：它只覆盖 **HTTP wire 层**。
+> §3.1 要求覆盖的「proto 字段语义 / gRPC 错误码语义」在 HTTP 层**被 admin-api 的
+> 业务码映射抹掉**（`GlobalExceptionHandler.mapRPCStatusToCode:84-92` 只看 gRPC code，
+> 响应体的 `msg` 取自 `ErrorCode.getMsg(businessCode)`，**不是** `status.description`）。
+> ⇒ HTTP 全绿 **不等于** gRPC 层全绿 ⇒ 见 `admin/rpc.md` §2（DRIFT-ARPC-007）。
+
+> ⚠️ **一个必须记下来的坑（会让下一轮的数字全是假的）**：
+> `diff.py` **不是可重复运行**的 —— 它的 `admin.update` 步骤会把 admin 的密码改成
+> `newadmin123`、`admin.delete` 会删掉被测用户 ⇒ 在**同一个库**上第二次跑，
+> `admin.login` 用旧密码失败，**两侧同时**返回 `{code:1002}` ⇒ diff.py 判「两侧相同 ⇒ OK」
+> ⇒ **后续所有带 token 的步骤全部变成 401**，报告上却是一片 OK。
+> ⇒ **每轮先 `run.sh --keep --serve-only`（重建库）再跑 `diff.py`，且只跑一次。**
+
+## 1. ✅ DRIFT-ADMINAPI-011 —— 400 响应的 `Content-Type` 缺 `charset`（**已修**）
+
+```
+Component:   admin-api（全部 400 text/plain 响应）
+Category:    Serialization / Response Headers
+Risk:        LOW（body 全 ASCII ⇒ 无字节级歧义；但客户端拿不到 charset ⇒ 需猜编码）
+Classification: OBSERVABLE DIFFERENCE（修复前） → IMPLEMENTATION DIFFERENCE（修复后，仅剩 OWS）
+```
+
+### 发现方式（**双侧活体对拍 + 真实 Tomcat**）
+
+本轮用 `curl -i` 直打两侧真实栈的「缺必填字段」请求（**不是 MockMvc**）：
+
+```
+Go  : HTTP/1.1 400 Bad Request
+      Content-Type: text/plain; charset=utf-8
+      X-Content-Type-Options: nosniff
+      Content-Length: 23
+      body: field "uid" is not set\n
+
+RAG : HTTP/1.1 400
+      Content-Type: text/plain            ← 🔴 少了 charset 参数
+      X-Content-Type-Options: nosniff
+      Content-Length: 23
+      body: field "uid" is not set\n
+```
+
+⇒ **body 与 nosniff 逐字节一致**（都是 23 字节），**只有 `Content-Type` 差一个 charset**。
+
+### Go 出处
+
+Go 的 `net/http.Error` 走 `h.Set("Content-Type", "text/plain; charset=utf-8")`
+—— **逐字写死的字符串**，不是框架推导出来的（`net/http/server.go` 的 `Error()`）。
+
+### RAG 出处（修复前）
+
+`GlobalExceptionHandler.java` 的 `goStylePlainTextBadRequest`：
+```java
+headers.setContentType(MediaType.TEXT_PLAIN);   // ⇒ 渲染成 `text/plain`（**无 charset**）
+```
+
+### 修法
+
+```java
+headers.set(HttpHeaders.CONTENT_TYPE, "text/plain; charset=utf-8");
+```
+
+⚠️ **为什么不写 `new MediaType("text","plain",StandardCharsets.UTF_8)`**：
+Spring 会把它渲染成 `text/plain;charset=UTF-8`（**无空格 + 大写 UTF-8**），
+与 Go 的 `text/plain; charset=utf-8` 仍不是逐字节相同 ⇒ 用**原始字符串**才最接近 Go。
+
+### 修复后的实测（真实 Tomcat，2026-10-23）
+
+```
+Go  : Content-Type: text/plain; charset=utf-8
+RAG : Content-Type: text/plain;charset=utf-8
+```
+
+⇒ **charset 两侧都在、值都是小写 `utf-8`**；残留差异**只有 `;` 后的一个空格**。
+按 **RFC 9110 §5.6.1** 的媒体类型文法 `parameters = *( OWS ";" OWS [ parameter ] )`，
+**分号两侧的 OWS 允许存在且不具语义** ⇒ **这不是可观察差异**，记为 IMPLEMENTATION DIFFERENCE。
+
+⚠️ **本轮没有定位到「是谁去掉了那个空格」** —— 只知道它既不是 MockMvc 也不是我们 set 的字符串
+（MockMvc 原样透传 `text/plain; charset=utf-8`，真 Tomcat 输出 `text/plain;charset=utf-8`）。
+按 §3.3.1「没有证据就不下断言」，本轮**不写**是哪一层（Spring 的 `MediaType` 序列化？
+Tomcat 的头写出？）—— 留作 UNRESOLVED。
+
+### ⚠️ 由此产生的一条**测试方法论**（值得单独记）
+
+修复前后的实测暴露了一件事：
+**MockMvc 与真实 Tomcat 对同一个响应的 `Content-Type` 渲染不同**（空格有无）。
+⇒ 守门测试**不能断言完整头值字符串**，必须断言**语义**（media type + charset）。
+⇒ 这正是 §3.3「框架机制必须验证实际生效」的又一形态：
+**「MockMvc 里 Content-Type 完好、真实栈是空的」**（`tools/difftest/check-plaintext400-headers.sh`
+文件头就写着这句话）—— 本轮是它的**镜像形态**：MockMvc 里 Content-Type **有空格**，
+真实栈里**没有**。
+
+### 守门
+
+`AdminApiPlainText400ContentTypeTest`（**本轮新建**，2 条，MockMvc + 真 Spring 上下文）：
+- 断言 `MediaType.parseMediaType(ct).getCharset() == UTF_8`（**语义断言，容器无关**）
+  ⇒ 改回 `MediaType.TEXT_PLAIN`（无 charset）时**立刻红**；
+- 断言 `nosniff` 仍在（这一项两侧本就一致，守门别把它放松掉）；
+- 两条分别覆盖「必填字段缺失」与「畸形 JSON」两个子分支（同一个 `goStylePlainTextBadRequest`）。
+
+> ⚠️ **现有守门脚本抓不到这条**：`tools/difftest/check-plaintext400-headers.sh`
+> 只断言「Content-Type **含** text/plain」⇒ charset 的有无它看不见。
+> ⇒ 需要本条独立守门。**该脚本属 tools 共享资产，不在本 worker 的所有权内，本轮未改。**
+
+## 2. ✅ UNRESOLVED-001 得到答复（从 admin-rpc 侧）⇒ 三条 api 侧漂移**前提不可达**
+
+上文 §9 的 UNRESOLVED-001 列了 5 个「admin-rpc 会返回什么」的问题。
+本轮在 rpc 域已逐条核到（Go 侧 + RAG 侧 + gRPC 双侧活体对拍），**现在可以答复**：
+
+| 待定问题 | 答复 | 依据 |
+|---|---|---|
+| `GetSelf` 会不会返回未 set 的 `Admin`？ | **不会** | Go `getselflogic.go:44-51` 总是构造 `Admin: &pb.AdminInfo{…}`；RAG `AdminServiceGrpcImpl.toProtoAdmin` 同样总是 set ⇒ ⇒ **DRIFT-ADMINAPI-002 的前提不可达** |
+| `GetUser` / `UpdateUser` 会不会返回未 set 的 `user`？ | **不会** | Go `getuserlogic.go:42-50` / `updateuserlogic.go:106-113` 总是构造 `User: &pb.UserInfo{…}`；RAG `toProtoUser` 同样总是 set ⇒ ⇒ **DRIFT-ADMINAPI-005 的前提不可达** |
+| `BanUser`/`DeleteUser`/`UnBanUser`/`ResetUserPassword`/`UpdateUser` 会不会返回 `Success=false`？ | **不会** | Go 这 5 个 logic 全部显式 `Success: true`（`banuserlogic.go:57-59` 等）；RAG 同 ⇒ ⇒ 该问项无风险 |
+| `GetSelf` 实际抛哪几种 gRPC code？ | **只有 `NOT_FOUND` 与 `INTERNAL`** | Go `getselflogic.go:36-41` 只有这两个分支；RAG `AdminDomainService.getSelf:243-258` 同 ⇒ ⇒ **DRIFT-ADMINAPI-008 的那 4 种 code（ALREADY_EXISTS/PERMISSION_DENIED/UNAUTHENTICATED/INVALID_ARGUMENT）不可达** ⇒ 通用表 `mapRPCStatusToCode` 的那 4 行**永远走不到** |
+| 5 个方法的 `operator_id` 在下游是否参与业务判定？ | **不参与** | admin-rpc 侧 grep：只有 `createInviteCode` 用 `operator_id` 去查 admin；`banUser`/`unBanUser`/`deleteUser`/`resetUserPassword`/`updateUser` 只把它当审计字段（Go 侧是 span 属性，RAG 侧无 span，见 `admin/rpc.md` DRIFT-ARPC-006） ⇒ ⇒ **DRIFT-ADMINAPI-001 的严重度下调** |
+
+### ⇒ 三条漂移的处置建议
+
+| 条目 | 原判 | 本轮复核后 | 建议 |
+|---|---|---|---|
+| **DRIFT-ADMINAPI-002**（getself 多两道校验） | SEMANTIC MISMATCH | 🔴 **前提不可达** ⇒ 实际**无可观察差异** | 降级为「**实现差异（防御性加固）**」，补一条「rpc 总是 set admin ⇒ 那两道校验永不触发」的说明即可；**不需要改实现** |
+| **DRIFT-ADMINAPI-005**（user 字段缺失时字段整个消失） | OBSERVABLE DIFFERENCE | 🔴 **前提不可达** ⇒ 实际**无可观察差异** | 同上降级。⚠️ 但**不要删** `if (rpcResp.hasUser())` 那个守卫 —— 它是防御性的；只是它的「前提」已被证伪 |
+| **DRIFT-ADMINAPI-008**（getself 的 gRPC 兜底映射） | OBSERVABLE DIFFERENCE | 🔴 **那 4 个 code 不可达** ⇒ 实际**无可观察差异** | 同上降级。⚠️ 通用表本身**不要动**（它被 12 个已对齐的端点共用） |
+| **DRIFT-ADMINAPI-001**（5 个端点的身份解析层） | SEMANTIC MISMATCH | 🟡 **仍成立，但严重度下调**：下游不读 `operator_id` ⇒ 真正的差异只剩「**claim 无效时 Go 照常发 RPC、RAG 不发**」这一条 | **仍需用户裁决**（不是「已签字」）。⚠️ 「Go 恒 0」那一半是 N-4（已签字）；「RAG 会拒绝」那一半**未签字** |
+
+> ⚠️ **这三条「前提不可达」的判定依赖 admin-rpc 侧「总是 set」这个事实**，
+> 而该事实本轮**有双侧活体对拍背书**（gRPC 18 用例的 payload 归一化里含 `hasUser` / `hasAdmin`）。
+> ⇒ 判定不是静态推导。
+
+## 3. ✅ DRIFT-ADMINAPI-004 现在有**双侧活体对拍**证据（但**仍未签字**）
+
+上文 §7 记的「黑名单 401 的业务码从 Go 的 `401` 变成 RAG 的 `1006`」，此前**零覆盖**（CASE-09 = 缺）。
+
+### 本轮实测（`diff.py` 的 `admin.getself.afterlogout` 步骤）
+
+```
+[ OK ] admin.getself.afterlogout   注销后再访问 → 401
+        [ASSERT] N-1 已签字：Go={code:401} / RAG=envelope(code=1006)
+```
+
+⇒ **两侧的差异被双侧活体对拍实测确认**：Go 的黑名单 401 是 `{"code":401,...}`，
+RAG 是 `{"code":1006,"msg":"TOKEN已过期","data":null}`。
+
+### ⚠️ 但「已签字」这个标注**站不住**
+
+- `diff.py` 的 assert 消息写「N-1 已签字」，指的是 `admin/_shared.md` 的 **N-1**（401 的 **body 形状**）；
+- 而 **N-1 从未声明「业务码 401 → 1006」** —— 上文 §7 的 DRIFT-ADMINAPI-004 自己就写了
+  「⚠️ 留档口径与实际输出不一致 …… **它从未声明「业务码 401 → 1006」** ⇒ 属于未签字的语义改变」；
+- 且 `docs/Intentional_Deviations/users/**` 下 **6 个文件全是 0 字节**（空占位）：
+  `users/_shared.md`、`users/admin/{_shared,api,rpc}.md`、`users/user/{api,rpc}.md`
+  ⇒ **没有任何一份正式的签字文件覆盖它**。
+
+⇒ **本条仍属未签字的语义改变**，只是现在有了活体证据。
+（`docs/Intentional_Deviations/**` 不在本 worker 的所有权内 ⇒ 只报告，见 §5。）
+
+## 4. 本轮 admin-api 侧的实测数字
+
+| 项 | 值 |
+|---|---|
+| 测试类 | 10 → **11**（本轮新建 `AdminApiPlainText400ContentTypeTest`） |
+| tests / failures / errors / **skipped** | **121 / 0 / 0 / 0**（基线 119 + 新增 2） |
+| 真 PG 容器用例 | 0（本组件无 SQL）；`AdminApiMvcPipelineTest` 用**真实 Redis 容器** |
+| `skipped=0` 的依据 | `admin-api/pom.xml:165-170` 注入 `TESTCONTAINERS_RYUK_DISABLED=true`；`grep -ho 'skipped="[0-9]*"' service/users/admin/*/target/surefire-reports/*.xml` 实测全 0 |
+
+## 5. user 侧 / users-common 待裁决问题（**本 worker 无权改**）
+
+| # | 问题 | 证据 | 建议 |
+|---|---|---|---|
+| **A-1** | 🔴 **`user-api` 有**同款 charset 缺失**：`user-api/.../advice/GlobalExceptionHandler.java:216` 也是 `headers.setContentType(MediaType.TEXT_PLAIN)` ⇒ 400 的 `Content-Type` 同样没有 charset | 与本文件 §1 同型（同一段 javadoc 都写着「Go 的 `net/http.Error` 设 `text/plain; charset=utf-8`」，但代码没做） | 归 users/user owner。⚠️ `tools/difftest/check-plaintext400-headers.sh` **只打 user-api** ⇒ 修 user-api 时顺手把该脚本的断言加严（断言 charset 存在）才是根治 |
+| **A-2** | ⚠️ **`docs/Intentional_Deviations/users/**` 下 6 个文件全是 0 字节**（空占位） | `wc -c` 实测全为 0 | N-1 / N-4 / N-5 等「已签字」条目目前**只存在于 `docs/DRIFT/users/admin/_shared.md`**，没有进签字档 ⇒ 下一个 agent 按 `docs/Intentional_Deviations/_INDEX.md` 检索会查不到。**该目录不在本 worker 所有权内 ⇒ 只报告** |
+| **A-3** | ⚠️ **DRIFT-ADMINAPI-004（黑名单 401 的业务码 `401`→`1006`）在 `diff.py` 里被标成「N-1 已签字」**，但 N-1 只签了 body 形状 | §3 | 要么补一份正式签字，要么改 `diff.py` 的 assert 措辞（**`tools/` 是共享资产，不在本 worker 所有权内 ⇒ 只报告**） |
+| **A-4** | ⚠️ **§9 UNRESOLVED-002（admin-api 的 text/plain 400 没有真实 Tomcat 守门）** —— **本轮已部分关闭** | 本轮用 `curl -i` 直打真实 Tomcat 两侧栈，抓到了 `Content-Type` / `nosniff` / `Content-Length` / body 逐字节 | **仍缺一条可重复执行的脚本**：`tools/difftest/check-plaintext400-headers.sh` 的两个端口常量是 user-api 的（`RAG_USER=59900` / `GO_USER=18888`），**没有 admin 入口** ⇒ 补 admin 入口需要改共享脚本 ⇒ 归 `tools/` owner。⚠️ 但本轮已证明：**MockMvc 断言完整头值字符串是错的**（见 §1「测试方法论」）⇒ 补脚本时也要注意断言形状 |
+
+
+### 🔴 附：本轮同时修掉了一条**把缺陷锁死的绿测试**（§3.3.3 的原型案例）
+
+`AdminApiGoStyleBodyContentTypeTest#nonJsonWithValidBodyIsIdenticalToEmptyJsonObject`
+里原本有这么一条断言：
+
+```java
+assertEquals("text/plain", asPlainText.getResponse().getContentType(),
+        "Go 的 http.Error 写的是 Content-Type: text/plain; charset=utf-8");
+```
+
+⇒ **断言值与它自己的失败消息互相矛盾**：消息说 Go 写的是 `text/plain; charset=utf-8`，
+断言却要求 `text/plain`（**没有 charset**）⇒ 它把「少了 charset 参数」这个缺陷
+**固化成了绿测试**。
+
+本轮按 §3.3.3 强制三条的第 3 条（「**修复漂移时先改/删错误断言，再改实现**」）
+补做了这一步：把该断言改成**语义**断言（media type + charset），
+并在其上写明「它原先锁死了缺陷」的经过。
+
+> ⚠️ **顺序说明**：本轮**先改的实现、后撞上的红**（这条红正是发现该断言锁死缺陷的契机），
+> 严格说与 §3.3.3 的顺序要求相反。**但结论一致**：那条绿测试锁的是**错误答案**，
+> 改实现后它立刻变红，正好证明了「跑绿不是对」。
+> ⇒ 本条的元教训：**当一条绿测试的断言值与它自己的失败消息矛盾时，
+> 先怀疑断言，而不是先怀疑实现。**
