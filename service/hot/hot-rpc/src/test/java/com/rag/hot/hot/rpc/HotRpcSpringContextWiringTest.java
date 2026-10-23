@@ -165,6 +165,28 @@ class HotRpcSpringContextWiringTest {
     // ==================================================================
 
     @Test
+    @DisplayName("🔴 gRPC 标准健康检查的 HealthStatusManager bean 存在（注册失败要能被探针观测到）")
+    void grpcHealthStatusManagerBeanExists() {
+        // Go 出处：zrpc/internal/server.go:36-38（health.NewServer()）
+        //           + zrpc/internal/rpcserver.go:61-63（RegisterHealthServer + Resume）
+        // ⇒ Go 侧**默认**就注册了 grpc 标准 health service（RpcServerConf.Health 的
+        //    json:",default=true"）。
+        //
+        // RAG 侧由 devh starter 的 GrpcHealthServiceAutoConfiguration 提供
+        // （@ConditionalOnClass(HealthStatusManager) + @ConditionalOnProperty(
+        //    "grpc.server.health-service-enabled", matchIfMissing=true)）。
+        //
+        // ⚠️ 这里断言的是**容器里真有这个 bean**，不是「pom 里有 grpc-services」
+        //    —— 没有它，NacosRegistration 就没法把「注册失败」写进探针能读到的状态
+        //    （DRIFT-HOTRPC-010 的配套改动）。
+        io.grpc.protobuf.services.HealthStatusManager manager =
+                context.getBean(io.grpc.protobuf.services.HealthStatusManager.class);
+        assertNotNull(manager,
+                "HealthStatusManager bean 缺失 ⇒ grpc.server.health-service-enabled 可能被关掉了"
+                        + " ⇒ 注册失败将无法被 gRPC 探针观测到");
+    }
+
+    @Test
     @DisplayName("🔴 调度器线程池 ≥ 2（Boot 4 默认 1 ⇒ 30s 快照与 10s 合并会互相排队）")
     void taskSchedulerHasAtLeastTwoThreads() {
         // Go 出处：service/hot/rpc/internal/mqs/hot_handler.go:76-77
