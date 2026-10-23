@@ -1024,6 +1024,25 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | `users.create_time` / `update_time` | `timestamptz` / is_nullable=YES / **default `<none>`** | `timestamptz` / is_nullable=YES / **default `CURRENT_TIMESTAMP`** | 🔴 **新发现（V-011）**：Go 的 AutoMigrate **不给**时间列 DEFAULT；RAG 给了 |
 | `users_user_avatar_history.create_time` / `update_time` | `timestamptz` / default `<none>` | `timestamptz` / default `CURRENT_TIMESTAMP` | 同上（本轮已修列类型；DEFAULT 差异仍在） |
 
+> **2026-10-23 晚独立复现（换了取证路径，结论一致）**：用
+> `go run -overlay` 把探针虚拟挂进真源模块树，直接调真源自己的 `model.InitDB`
+> （内含 `AutoMigrate`），并开 PG `log_statement=all` **抓建表语句原文**，
+> 得到比 `information_schema` 更硬的一手证据：
+> ```sql
+> CREATE TABLE "users" ("id" bigserial,"uid" bigint NOT NULL,"username" text,
+>   "password" text,"email" text,"status" bigint DEFAULT 0,"score" integer,
+>   "extra_info" text,"create_time" timestamptz,"update_time" timestamptz,
+>   PRIMARY KEY ("id"),CONSTRAINT "uni_users_username" UNIQUE ("username"),
+>   CONSTRAINT "uni_users_email" UNIQUE ("email"))
+> ```
+> ⇒ **`extra_info text` 逐字确认**；`status` 可空、`create_time`/`update_time` 无 DEFAULT 也逐字确认。
+> 探针方法与踩坑 ⇒ [`PIT-USERS-SHARED-003`](../../../Pitfalls/users/_shared.md)。
+> ⚠️ **这条复现的价值不在「结论变了」（没变），而在「结论不再依赖推导链」** ——
+> 原来的依据是 `serializer:json` ⇒ `DataType=String`（`schema/field.go:195-200`）
+> → `Size` 因 `reflect.Map` 不在默认分支而保持 0（`:330-340`）
+> → `DataTypeOf` 走 `field.Size > 0` 为假 ⇒ `text`（`postgres.go:245-250`）。
+> 推导链每一环都对，但**现在有了一条不依赖它的实证**。
+
 **索引 / 约束对照结论：功能等价，RAG 略强**：
 
 | 语义 | Go | RAG | 判定 |
@@ -1049,6 +1068,30 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | **DRIFT-USERRPC-V-008** | 死代码 + **伪出处**（3 个异常类 + 2 个 mapper 方法） | 仍成立 | 低危；但**建议**下轮删掉 `TokenBlacklistedException` 的**假 Go 出处**（它会让下一个 agent「恢复」一个 Go 从未有过的行为） |
 | **UNRESOLVED-USERRPC-004 ②** | 启动期 Redis 不可用：Go `MustNewRedis` fail-fast vs RAG 懒连接 | 仍 unresolved | 本轮未做「停掉 Redis 再起进程」的注入实验 |
 | **UNRESOLVED-USERRPC-005** | `users_user` 建表责任交叉（user-rpc ↔ admin-rpc） | 仍 unresolved | 跨组件不变量；本轮的隔离 harness 是**单 rpc** 的，**证明不了**两 rpc 同库共存。⇒ 属 admin 会话范围 |
+
+### 5b. 跨域状态更新（2026-10-23 晚）：V-003 的「需与 admin 域一起判」已**部分落地**
+
+§5 写「⚠️ 需与 admin 域的 `admin_admin.extra_info` 一起判」时，两边都还是 `jsonb`。
+**此后 admin 会话单方面判了并已提交**（分支 `align/users-admin`，`c10f639` / `d7b2b45`，
+`03_create_admin.sql:54,99`：`extra_info TEXT` + `ALTER … TYPE text USING extra_info::text`，
+其台账编号 `DRIFT-ARPC-004①`，并自陈「`users_user.extra_info` 的 DDL 归属 users/user 域」）。
+
+⇒ **当前跨域状态是「不对称」的**：
+
+| 表 | 归属域 | 现状 | 相对 Go（`text`） |
+|---|---|---|---|
+| `admin_admin.extra_info` | admin | **`text`**（已改已提交） | ✅ 一致 |
+| `users_user.extra_info` | user（本组件） | **`jsonb`**（未改） | 🔴 **V-003 仍在** |
+
+⇒ 两侧列类型**现已不一致**（这正是本组件上轮向你提的那个问题）。
+本轮**未改** —— 依据是你已拍板的口径：**V-002 / V-003 / V-011 三条 DDL 一条不动，只取证写台账**。
+
+⚠️ **因此这不是「本组件单方面能定」的项**：把 `users_user` 也改成 `text` 会连带
+`JsonbTypeHandler` / `CAST({0} AS jsonb)` / `UserAvatarHistoryMapper:127` /
+`UserEntity:113` 共 4 处生产代码 + 5 个测试类一起动（其中
+`UserRpcContainerWiringTest:141` 断言的正是「`extra_info` 必须是 jsonb」），
+会与 admin 会话**产生同一张 `users-common/db/*.sql` 的双写冲突**（§5.3 共享文件纪律）。
+⇒ **需你在三个选项里裁定**（见本轮回复正文）。
 
 ### 6. 本轮没做成 / 没验的事（诚实边界）
 
