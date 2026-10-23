@@ -272,23 +272,46 @@ def layer3_numbers(root, texts):
             if not good:
                 print(f'       ⚠️ skipped={r["skipped"]} ⇒ 「全绿」可能意味着「没跑」')
 
-    # commit 数与台账标题声明（对**分支基线**计数，不是 HEAD^）
-    # ⚠️ 只认**章节标题行**（以 # 开头）—— 否则会误匹配到「历史描述」里引用的旧数字
-    #    （本轮就踩到：台账正文里写着「① 章节标题「24 个 commit」过期（实际 31）」）
-    m = re.search(r'^#.*共 \*\*(\d+) 个 commit\*\*', txt, re.M)
-    if m:
-        claimed_commits = int(m.group(1))
-        branch = git(root, 'rev-parse', '--abbrev-ref', 'HEAD')
-        # 基线取「与主干分叉点」⇒ 与台账口径一致
-        merge_base = git(root, 'merge-base', 'HEAD', 'do-my-own-gh')
-        if merge_base:
-            n = int(git(root, 'rev-list', '--count', f'{merge_base}..HEAD') or 0)
-            good = claimed_commits == n
-            bad += 0 if good else 1
-            print(f'  {"✅" if good else "❌"} 台账标题的 commit 数: 声明 {claimed_commits} / 实测 {n}'
-                  f'（分支 {branch}，基线 {merge_base[:7]}）')
+    # commit **覆盖**检查（不是比对写死的计数 —— 那个必然自指滞后）
+    #   不变式：分支上的**每个** commit 都必须在台账的 commit 清单里出现过
+    #   ⇒ 漏登记立刻被抓到；且改台账的那次提交本身不会造成假警报
+    branch = git(root, 'rev-parse', '--abbrev-ref', 'HEAD')
+    merge_base = git(root, 'merge-base', 'HEAD', 'do-my-own-gh')
+    if merge_base:
+        hashes = git(root, 'rev-list', '--abbrev-commit', '--no-merges',
+                     f'{merge_base}..HEAD').splitlines()
+        hashes = [h.strip() for h in hashes if h.strip()]
+        # ⚠️ **只查 `_README.md` 的 commit 清单表格行**（行首 `| \`hash\` |`）。
+        #    ⚠️ 纯文本匹配会误判：正文里**引用**某个哈希（如「由复核器抓出的 b0350ea」）
+        #    会被当成「已登记」⇒ 判定的**粒度错了**（本轮实测踩到）。
+        #    ⇒ 只认**表格行**：那是「登记」的固定形态。
+        readme = read(os.path.join(root, 'docs/DRIFT/task/_README.md'))
+        in_ledger = set(re.findall(r'^\|\s*`([0-9a-f]{7,40})`', readme, re.M))
+        missing = [h for h in hashes if h not in in_ledger and h[:7] not in in_ledger]
+        # ⚠️ **允许 1 个未登记** —— 那个必然是「刚做完、还没提交」的这一轮
+        #    （台账里用「（本轮）」占位 ⇒ 它在提交那一刻才有哈希）
+        #    ⇒ 写死「必须全部登记」会让脚本在**每次提交后**都报一次 ⇒ 变成噪声 ⇒ 没人看
+        #    ⇒ 真正要抓的是「**漏登记了历史 commit**」（≥2 个才是问题）
+        head = git(root, 'rev-parse', '--short=7', 'HEAD')
+        if len(missing) > 1:
+            bad += 1
+            print(f'  ❌ 有 {len(missing)} 个 commit **未在台账里登记**（分支 {branch}，共 {len(hashes)} 个）')
+            for h in missing:
+                subj = git(root, 'log', '-1', '--format=%s', h)
+                print(f'      {h}  {subj}')
+        elif len(missing) == 1:
+            head_missing = missing[0][:7] == head
+            if head_missing:
+                print(f'  ✅ 分支上 {len(hashes)} 个 commit 已登记'
+                      f'（1 个待登记 = 本次「（本轮）」占位 {head}，允许）')
+            else:
+                bad += 1
+                print(f'  ❌ 有 1 个 commit 未登记，且**不是** HEAD（{missing[0][:7]} ≠ {head}）'
+                      f' ⇒ 那是**漏登记的历史 commit**，不是本轮占位')
         else:
-            print(f'  ℹ️  台账标题声明 commit 数 {claimed_commits}（未找到主干分叉点，跳过比对）')
+            print(f'  ✅ 分支上 {len(hashes)} 个 commit **全部**在台账里有登记（分支 {branch}）')
+    else:
+        print('  ⚠️  未找到主干分叉点 ⇒ 跳过 commit 覆盖检查')
     return bad
 
 
@@ -404,15 +427,15 @@ def layer0_selfcheck(root):
         print('    ❌ 层 1 存在性判定异常')
         bad += 1
 
-    # ③ 层 3：数字断言的正则必须锚定标题行（否则会误匹配正文里引用的旧值）
-    #    ⇒ 判据：**锚定版**要命中标题、**非锚定版**要能命中正文（那正是它要避免的误匹配）
-    #    ⇒ 真正要断言的是：锚定版**不**命中正文里的旧值
-    anchored = re.compile(r'^#.*共 \*\*(\d+) 个 commit\*\*', re.M)
-    body_old = '正文里提到 共 **24 个 commit**'
-    if anchored.search('# 标题 共 **31 个 commit**') and not anchored.search(body_old):
-        print('    ✅ 层 3 的 commit 数正则已锚定标题行（不会误匹配正文引用的旧值）')
+    # ③ 层 3：commit 覆盖检查必须能识别「未登记的 commit」（阳性对照）
+    #    ⇒ 判据：一个**虚构的**哈希不应被判为已登记
+    def registered(hashes_in_ledger, h):
+        return h in hashes_in_ledger or h[:7] in hashes_in_ledger
+    ledger_hashes = {'abc1234'}
+    if not registered(ledger_hashes, 'deadbee') and registered(ledger_hashes, 'abc1234'):
+        print('    ✅ 层 3 的 commit 覆盖判定有区分力（未登记的能被抓到）')
     else:
-        print('    ❌ 层 3 的 commit 数正则未锚定 ⇒ 会把「引用旧值」当成「声明旧值」')
+        print('    ❌ 层 3 的 commit 覆盖判定无区分力')
         bad += 1
 
     # ④ 层 4：行号越界必须被判为问题（用一个**越界**样本验证判定函数）
