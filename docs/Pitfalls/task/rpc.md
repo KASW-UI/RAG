@@ -605,3 +605,44 @@ UTF-8 首字节 `0xEF`）会被算进变量名** ⇒ 变量名变成 `g\xef` ⇒
    ⇒ 已用一条正则把仓内脚本扫了一遍（`\$[A-Za-z_][A-Za-z0-9_]*(?=[^\x00-\x7f])`），
    本轮只命中 1 处。
 2. ⇒ **脚本里凡是会打印中文的变量，一律用 `${}` 显式界定边界** —— 别赌 bash 的解析。
+
+---
+
+## 🔴 PITFALL-TASK-RPC-16 · `pkill` 之后只 `sleep 2` ⇒ 新进程抢不到端口，而症状是「应用 503」
+
+### 现象
+
+跑 HTTP 对拍编排脚本时，**RAG api 一直返回 503**（`grpcCode=UNAVAILABLE http=503 desc=io exception`），
+就绪探针轮询 120 秒仍不通。看起来像「应用起不来 / gRPC 客户端连不上」。
+
+### 真因
+
+**RAG task-rpc 根本没起来**，日志里是：
+```
+Caused by: java.net.BindException: Address already in use
+```
+⇒ 上一轮 `KEEP_UP=1` 留下的旧 rpc 进程**还在监听 59005**。
+
+⚠️ 编排脚本第 5 步确实 `pkill` 了，但之后只 `sleep 2` ⇒
+**JVM 的优雅关闭要 3~4 秒**（Spring 上下文 close → Hikari 关池 → Kafka 消费者下线 →
+`ObservabilityLifecycle` 的 destroy 回调）⇒ 新进程在旧进程还没放端口时就去 bind ⇒ 失败。
+
+实测时间线：旧 rpc **03:56:47** 才关完（`HikariPool-1 - Shutdown completed`），
+新 rpc **03:56:46** 就去 bind 了 ⇒ 差了 1 秒就撞上。
+
+### 为什么这个坑特别贵
+
+**症状离病根很远**：报出来的是「api 503」，而病根是「rpc 端口没释放」。
+中间还隔着一层「api 依赖 rpc」⇒ 极易误判成
+「RAG 的 gRPC 客户端配错了」「服务发现没通」「上一轮的改动把 rpc 弄坏了」。
+
+### 教训
+
+1. **停服务后要等端口真的释放，不能只 sleep 固定秒数** ——
+   ⇒ 编排脚本改成 `wait_port_free()`（轮询 `lsof -iTCP:<port> -sTCP:LISTEN`）。
+2. **起服务后要等端口真的开始监听，并盯住进程是否已死** ——
+   ⇒ `wait_port_listen()`，且一旦日志里出现 `Application run failed` / `BindException`
+   就**立刻失败并打出日志尾部**，而不是让下游探针空转两分钟。
+3. ⇒ 本条已固化进
+   [`tools/difftest/run-task-http-parity.sh`](../../../tools/difftest/run-task-http-parity.sh)
+   的注释与函数里（`wait_port_free` / `wait_port_listen`）。

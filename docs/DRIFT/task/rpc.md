@@ -18,9 +18,9 @@
 | 语义等价性 | 🔴 **SEMANTICALLY NOT EQUIVALENT**（首轮即如此，**不是**「基本一致」） |
 | 已修 | **5 条**（DRIFT-TASK-RPC-001 / 002 / 003 / 005 / 006），每条配守门测试 |
 | 未修 | 0 条语义漂移；另有 1 条签字偏离（见下）+ 1 条有意偏离待登记 |
-| 证据强度 | ✅✅✅ **Kafka 端到端活体对拍**（2026-10-23 23:4x，真 Kafka + 真 Redis + 真 PG，两侧同批消息比最终态，见 §四·三）· ✅ 双侧活体 gRPC 对拍 · ✅ 真启动 + 真 PG 16 容器 |
+| 证据强度 | ✅✅✅ **Kafka 端到端活体对拍**（2026-10-23 23:4x，真 Kafka + 真 Redis + 真 PG，两侧同批消息比最终态，见 §四·三）· ✅✅✅ **Kafka 畸形消息活体对拍**（2026-10-24，五个用例，见 §四·五·二）· ✅✅ **gRPC 双向跨语言对拍**（2026-10-24，Java 客户端 + **Go 客户端**各打两端，见 §四·五·一）· ✅ 真启动 + 真 PG 16 容器 |
 | DDL 对拍 | ✅ **GORM AutoMigrate 产物 vs Flyway 产物逐列一致**（本轮实测，见 §四·二） |
-| ⚠️ 仍未覆盖 | ① Kafka 链路只对拍了**用户点赞路**（`like:total` / `task:progress` / `task:done` / PG 两表）；**文章路**（`article:like:cnt` / `task:inits` / `task:progress:<taskId>:<uid>:<articleId>`）**未纳入本轮对拍矩阵**；② goka 计数表 topic（`task.rpc.consumer*-table`）与 RAG 的 `task:goka:count:*` **未做逐值对拍**（两侧计数载体不同：Go 是 Kafka compacted topic，RAG 是 Redis INCR） |
+| ⚠️ 仍未覆盖 | ⓿ **「Kafka 写入 → task-api 读到」这条跨域闭环**仍未做活体对拍 —— 但两侧的读写 Redis key **本来就不一致**（Go 侧也读不到自己写的缓存），⇒ **不是 RAG 的缺陷**，见 §五 第 7 条；① Kafka 链路只对拍了**用户点赞路**（`like:total` / `task:progress` / `task:done` / PG 两表）；**文章路**（`article:like:cnt` / `task:inits` / `task:progress:<taskId>:<uid>:<articleId>`）**未纳入本轮对拍矩阵**；② goka 计数表 topic（`task.rpc.consumer*-table`）与 RAG 的 `task:goka:count:*` **未做逐值对拍**（两侧计数载体不同：Go 是 Kafka compacted topic，RAG 是 Redis INCR） |
 | 测试 | **90 tests / 0 failures / 0 errors / 0 skipped**（其中 15 条真 PG、**9 条真 Redis**） |
 
 ---
@@ -391,13 +391,17 @@ Go 侧同一批消息能正常落库，RAG 侧一条不落。
 2. ✅ **gRPC 单组件对拍**（2026-10-23 23:0x）：同 stub 连两个端口，比 **code + description + 载荷**，
    7 条用例全一致 —— 含 **3 组 HTTP 面永远走不到的 `INVALID_ARGUMENT`**（`description` 逐字节为
    `user_id invalid`）。⇒ HTTP 面被抹掉的 gRPC 层语义已单独验过。
+   ✅✅ **跨语言方向也补齐了**（2026-10-24，见 §四·五·一）：新增 **Go 客户端 → 两端服务端**
+   （真源自己的生成桩、真源零写入），7/7 一致 ⇒ grpc-go ↔ grpc-java 的**双向**互操作都验过
+   （原先只有「Java 客户端 → Go 服务端」这一个跨语言方向）。
 3. ✅✅ **Kafka 消息链路端到端对拍**（2026-10-23 23:4x）：真 Kafka + 真 Redis + 真 PG，
    同一批 7 条 raw 日志灌两侧 in-topic，比对 **Redis 全 key + 奖励流 + PG 两表 + goka 计数值**
    ⇒ **完全一致**（§四·三）。
-   ⚠️ 但覆盖面**只到「一批正常 raw 日志」**：未覆盖**畸形消息**（`LogEvent` 解析失败、
-   `uid <= 0`、`total <= 0`、key 解析失败）在两侧 Kafka 链路上的**位点提交行为**差异
-   （Go kq `return err` ⇒ 不提交 vs RAG 抛异常 ⇒ `AckMode.RECORD` 不提交）——
-   那部分只有**源码级**对照（[§三 Kafka 拓扑](#三逐条对照结论已核为一致的部分)），未做活体对拍。
+   ✅ **畸形消息也已做活体对拍**（2026-10-24，见 §四·五·二）：`LogEvent` 解析失败 / `uid <= 0` /
+   `total <= 0` / key 解析失败 / 毒丸之后再来一条合法消息 —— **五个用例两侧行为完全一致**。
+   ⇒ 此前「只有源码级对照」的那条缺口**已关闭**。
+   ⚠️ 但覆盖面**仍只到「读路径 + 消息消费路径」**：未覆盖**「Kafka 写入 → task-api 读到」这条闭环**
+   （见本节第 7 条）—— 那条受限于 Go 侧读写 Redis key 本来就不一致，**不是 RAG 的缺陷**。
 4. ✅ **DDL 逐列活体对拍**（§四·二）：GORM `AutoMigrate` 产物 vs Flyway 产物，
    类型 / 可空性 / 复合主键**逐项一致**；仅**主键约束名**不同（`ON CONFLICT` 走列，行为无差异）。
    ⚠️ 索引 / 唯一约束 / CHECK：两侧**一致地没有**（不是漏检）。
@@ -424,9 +428,12 @@ Go 侧同一批消息能正常落库，RAG 侧一条不落。
 
 ## 七、待办
 
-1. **Kafka 链路的畸形消息活体对拍**：`LogEvent` 解析失败 / `uid <= 0` / `total <= 0` /
-   key 解析失败时，两侧的**位点提交行为**是否一致（Go kq `return err` ⇒ 不提交；
-   RAG 抛异常 ⇒ `AckMode.RECORD` 不提交）。目前只有源码级对照（§五 第 3 条）。
+1. ~~**Kafka 链路的畸形消息活体对拍**~~ ⇒ **2026-10-24 已做**（见 §四·五·二）：
+   五个用例（`LogEvent` 解析失败 / `uid <= 0` / `total <= 0` / key 解析失败 / 毒丸后再来一条合法消息）
+   **两侧行为完全一致**，`EXIT=0`。
+   ⚠️ 顺带**推翻了本仓 javadoc 里一条错误断言**（「Go 会被 kafka-go 的自动提交抵消」）——
+   kafka-go 用 `FetchMessage` 时自动提交不生效（`reader.go:811-812`），活体实测也证实
+   ⇒ 已改写为源码 + 活体双出处的说法。
 2. **「Kafka 写入 → task-api 读到」的闭环对拍**：本轮 Kafka 对拍只到 `task-rpc`；
    `task-api` 的读路径（`task:progress:<uid>`，与 sink 写的 `task:progress:<uid>:<taskId>` **不是同一个 key**）
    只由 HTTP 对拍间接覆盖。这是 Go 侧既有的读写 key 不一致，**不要「顺手统一」**。
@@ -630,3 +637,106 @@ userSinkCompletesWhenTargetReached
 但它们真正要守的契约（回填命中的 **key** 与 **TTL**）保持不变。
 
 ---
+
+---
+
+## 四·五、跨语言 gRPC 互调 + Kafka 畸形消息活体对拍（2026-10-24 实测）
+
+**这一节关闭了此前两条「只有源码级对照」的缺口**（原 §七 待办第 1 条与 §五 证据边界第 2/3 条）。
+
+### 四·五·一、gRPC **跨语言**互调：Go 客户端 → 两端服务端
+
+**此前只覆盖了一个方向**：仓库里的
+[`tools/difftest/GrpcTaskDualPortRunner.java`](../../../tools/difftest/GrpcTaskDualPortRunner.java)
+是 **Java 客户端**打两侧（`RAG client → Go server` + `RAG client → RAG server`）
+⇒ **缺**「Go 客户端 → RAG 服务端」这一方向。
+
+**为什么这不是同一件事**：两个方向的互操作风险不同 ——
+grpc-go 与 grpc-java 的 wire 行为（metadata / 压缩 / deadline / error 传播）、
+go-zero 的 zrpc 客户端能不能把 RAG 端的错误码与描述**原样**带回来。
+
+**做法**：在**冻结真源之外**写一个 Go 客户端
+（[`tools/difftest/grpcxlang/main.go`](../../../tools/difftest/grpcxlang/main.go)），
+用 `go.mod` 的 `replace` 引用真源**自己生成**的桩（`sea-try-go/service/task/rpc/pb`）
+⇒ 真源**零写入**，而且用的是真源的桩（不是手抄的 proto）。
+⚠️ 真源的 pb 包名是 goctl 的占位符 `package __` ⇒ import 必须带别名（真源自己也这么写）。
+
+**结果（2026-10-24 实测，`EXIT=0`）**：
+
+| 用例 | Go client → Go server | Go client → **RAG** server | 判定 |
+|---|---|---|---|
+| `uid=0` | `InvalidArgument` / `"user_id invalid"` | `InvalidArgument` / `"user_id invalid"` | ✅ code+description 逐字节一致 |
+| `uid=-1` | 同上 | 同上 | ✅ |
+| `uid=MinInt64` | 同上 | 同上 | ✅ |
+| `uid=MaxInt64` | `OK` | `OK` | ✅ 载荷逐字段一致 |
+| `uid=1` | `OK` | `OK` | ✅ |
+| `uid=1001` | `OK` | `OK` | ✅ |
+| `uid=1003` | `OK` | `OK` | ✅ |
+
+⇒ **7/7 一致，`CODE_MISMATCH=0`、`DESCRIPTION_DIFF=0`、`载荷不一致=0`**。
+⇒ 与 Java 版 runner 的 uid 矩阵、载荷渲染格式**完全同款** ⇒ 两份报告可直接并读。
+
+**复现**：
+```bash
+./tools/difftest/run-task-grpc-xlang.sh     # 需两侧 task-rpc 已起
+```
+
+### 四·五·二、Kafka **畸形消息**活体对拍（五个用例）
+
+**此前只有源码级对照**，而源码级对照有个致命盲区：
+**「Go 声明的契约」与「Go 实际的行为」不是一回事** ——
+本节就是为了把这类差异**量化**出来。
+
+**做法**：往两侧**同一批**注入「坏消息」，比对可观察后果
+（consumer group 的 committed offset + Redis 有没有写出副作用）。
+脚本：[`tools/difftest/run-task-kafka-malformed.sh`](../../../tools/difftest/run-task-kafka-malformed.sh)。
+
+| 用例 | 注入 | Go 期望（出处） | 实测（Go / RAG） | 判定 |
+|---|---|---|---|---|
+| **A** `uid <= 0` | filtered.User key=`0` | `return nil` ⇒ **提交位点**、跳过（`like_sink.go:87-89`） | 位点都推进 / `like:total:0` 都不存在 | ✅ |
+| **B** `total <= 0` | filtered.User key=`6002` value=`0` | `return nil` ⇒ **提交位点**、跳过（`like_sink.go:97-99`） | 位点都推进 / `like:total:6002` 都不存在 | ✅ |
+| **C** `key` 解析失败 | filtered.User key=`not-a-number` | `return err` ⇒ **不提交**（`like_sink.go:83-85`） | 两侧 committed 都**停在基线**（3 → 2s 后 3 → 10s 后 3） | ✅ |
+| **D** `LogEvent` 解析失败 | in-topic value=`{not json` | `log.Println(err)` 后**照样 Emit** ⇒ 提交 + 转发（`initGoKa.go:63-69`） | in-topic 位点都推进；raw.User 各 **+1** 条、**key 为空串**、**value 是 raw 原文** | ✅ |
+| **E** 毒丸后再来一条合法消息 | filtered.User key=`6003` value=`2` | 两侧都**继续处理下一条**，提交时**跨过**失败那条 | Go 基线 3 → **5**；RAG 基线 3 → **5**；`like:total:6003` 两侧都写出 | ✅ |
+
+⇒ **五个用例两侧行为完全一致，`EXIT=0`**。
+
+#### 🔴 本轮**推翻了一条写在本仓 javadoc 里的断言**（AGENTS.md §3.3.2 的高危项）
+
+`TaskRpcApplication#noCommitErrorHandler` 的 javadoc 此前写着：
+
+> Go 用的 segmentio/kafka-go Reader 带 `CommitInterval: 1s`（`go-queue/kq/queue.go:125,151`），
+> 它会周期性自动提交已 fetch 的位点，因此 Go 那句「error ⇒ 不 CommitMessages」
+> 在实践中**会被自动提交抵消**（约 1 秒后照样提交）。
+> Java 侧 … 是**严格更强**的「失败不提交」。
+
+**这条是错的**，两处独立证据：
+
+1. **kafka-go 自己的文档**（segmentio/kafka-go@v0.4.47 `reader.go:811-812`）：
+   > `FetchMessage does not commit offsets automatically when using consumer groups.
+   > Use CommitMessages to commit the offset.`
+
+   而 kq 用的**正是** `FetchMessage`（`go-queue/kq/queue.go:264`）
+   ⇒ `CommitInterval` 的自动提交路径**根本不生效**。
+2. **本节的活体实测**（用例 C）：注入 key 解析失败的消息后，
+   **两侧**的 committed offset 都不推进（基线 3，2s 后 3，10s 后 3）
+   ⇒ Go 侧**并没有**「被自动提交抵消」。
+
+⇒ **两侧的真实差异只有一处**：失败的那一刻**都**不提交位点，
+但**都**会继续处理下一条；下一条成功时提交会**跨过**失败那条
+⇒ 失败那条实质被跳过（运行期不重投）。
+⇒ 已把该 javadoc 改写为**实测证实的**说法（源码 + 活体双出处）。
+
+#### ⚠️ 本节的副作用（必须知道再跑）
+
+用例 C 会往 `filtered.User` 投「毒丸」（key 解析失败那条），
+该分区的消费者会一直重投 ⇒ **跑完两侧栈都需要重启**才能恢复正常。
+脚本结尾已写明；重启用 `./tools/difftest/run-task-http-parity.sh`（会重建容器与栈）。
+
+#### ⚠️ 顺带修掉了编排脚本的一个真坑
+
+`run-task-http-parity.sh` 此前 `pkill` 之后只 `sleep 2` ⇒
+**JVM 的优雅关闭（Spring close + Hikari 关池 + Kafka 消费者下线）实测要 3~4 秒**
+⇒ 新进程 `BindException: Address already in use` ⇒ 整轮对拍白跑，
+而症状是「api 一直 503」，很容易误判成应用问题。
+⇒ 已改成**轮询等端口释放 + 等端口开始监听**，且进程起不来时**立刻失败并打日志尾部**。
