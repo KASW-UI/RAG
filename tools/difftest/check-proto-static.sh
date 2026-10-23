@@ -31,8 +31,13 @@ USER_GO="$GO_PROTO_DIR/user.proto"
 USER_RAG="$ROOT/service/users/user/user-proto/src/main/proto/users.proto"
 ADMIN_GO="$GO_PROTO_DIR/admin.proto"
 ADMIN_RAG="$ROOT/service/users/admin/admin-proto/src/main/proto/admin.proto"
+# task 域（2026-10-24 扩）：Go proto/task.proto ↔ RAG service/task/task-proto/src/main/proto/task.proto
+# ⚠️ 与 like 域不同：task 两侧的 `package task;` **逐字相同** ⇒ 无需像 like 那样额外排除 package 行。
+#    实际差异只有 option 块（go_package → java_package + java_multiple_files），已被 normalize 吃掉。
+TASK_GO="$GO_PROTO_DIR/task.proto"
+TASK_RAG="$ROOT/service/task/task-proto/src/main/proto/task.proto"
 
-for f in "$USER_GO" "$USER_RAG" "$ADMIN_GO" "$ADMIN_RAG"; do
+for f in "$USER_GO" "$USER_RAG" "$ADMIN_GO" "$ADMIN_RAG" "$TASK_GO" "$TASK_RAG"; do
   if [[ ! -f "$f" ]]; then
     echo "缺少真源/对端文件:$f" >&2
     exit 2
@@ -77,6 +82,10 @@ print('\n'.join(out))
 PY
 }
 
+# ⚠️ 计数而不是「直接 exit」：一个域不一致也要把**其余域**的结果打出来，
+#    否则第一个 ✗ 就把后面的覆盖判据全挡了（看不到就等于没查）。
+FAILED=0
+
 verdict() {
   local go=$1 rag=$2 label=$3
   if diff -u <(normalize "$go") <(normalize "$rag") >/tmp/check-proto-static.$$ 2>&1; then
@@ -84,6 +93,7 @@ verdict() {
   else
     echo "  ✗ ${label}:存在差异"
     cat /tmp/check-proto-static.$$
+    FAILED=1
   fi
   rm -f /tmp/check-proto-static.$$
 }
@@ -92,6 +102,8 @@ echo "== user(9 RPC) =="
 verdict "$USER_GO" "$USER_RAG" "user.proto ↔ users.proto"
 echo "== admin(13 RPC) =="
 verdict "$ADMIN_GO" "$ADMIN_RAG" "admin.proto ↔ admin.proto"
+echo "== task(1 RPC) =="
+verdict "$TASK_GO" "$TASK_RAG" "task.proto ↔ task.proto"
 
 cat <<'NOTE'
 NOTE:
@@ -100,3 +112,11 @@ NOTE:
   §3.1 静态两半(字段号 / message 名)正式关闭。
   剩 错误码语义(动态)留 exp-difftest-grpc-errors.sh。
 NOTE
+
+# ⚠️ 必须以退出码表达结论：只打印 ✗ 而返回 0 ⇒ 这个脚本没法当门禁用
+#    （「跑绿」不等于「对」——AGENTS.md §3.3）。
+if [ "$FAILED" != "0" ]; then
+  echo "✗ 至少一个域的 proto wire 契约存在差异" >&2
+  exit 1
+fi
+echo "✓ 全部域的 proto wire 契约逐字节一致"
