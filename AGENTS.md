@@ -76,7 +76,6 @@ RAG 仓库路径：`/Users/pr/Documents/java&golang/RAG`。
 `task` 域无 `-common`（Go 侧同样没有，不是遗漏）。Go 侧 `knowledge`/`points`/`security` **范围外 ⇒ 不是待办**。
 
 ⚠️ **「未翻译」≠「该做」**：范围是**决策**，不是进度。
-
 ### 1.1 三次真理之源切换的结论
 
 真源三次切换（10-18 前 Go → 10-18~10-20 Java 镜像 → **10-20 起回到 Go**）。
@@ -138,11 +137,10 @@ Go 侧大量行为的默认值**藏在 struct tag 里**而不是 yaml 里；反�
 而不是注解里。只看配置文件/注解名称做双向推断，两头都会错。
 
 ⇒ **强制要求**：
-1. 判断某个 Go 默认行为是否生效，**必须读到消费该 tag 的那段控制流**，
-   只贴 struct 定义行不算证据；
+1. 判断某个 Go 默认行为是否生效，**必须读到消费该 tag 的那段控制流**，只贴 struct 定义行不算证据；
 2. 判断某个 Java 框架能力是否生效，**必须有运行证据**（真实管线 / 真容器），
    「pom 里有依赖」「类上有注解」都不算（§3.3 原有纪律）；
-3. 写 `文件:行号` 证据时，行号要指向**消费点**而不是**声明点**。
+3. 写 `文件:行号` 证据时，行号指向**消费点**而非**声明点**。
 
 **3.3.2（2026-10-22 新增）以「Go: …」形式写在 `@DisplayName` / javadoc 里的断言，本身是高危项**
 
@@ -151,8 +149,7 @@ Go 侧大量行为的默认值**藏在 struct tag 里**而不是 yaml 里；反�
 
 #### 3.3.3 原有纪律（2026-10-20 起）
 
-**不得凭注解名称断定机制已启用。** Spring Boot 的隐式机制（`@Transactional` AOP 代理、`@ResponseBodyAdvice`、`mybatis-plus` 的 typeHandler）全部是运行期动态装配，出错时**不报错**。
-（四类静默失效的实证 ⇒ 同上文件）
+**不得凭注解名称断定机制已启用。** Spring Boot 的隐式机制（`@Transactional` AOP 代理、`@ResponseBodyAdvice`、`mybatis-plus` 的 typeHandler）全部是运行期动态装配，出错时**不报错**（四类静默失效的实证 ⇒ 同上文件）。
 
 **规则**：凡引入新的框架机制，必须配一条**能真正触发该机制**的测试。
 纯 Mockito mock 数据层的单测**不算**——它不会执行 SQL，也不会装配 Spring 上下文，天然测不到本节三类问题。
@@ -160,18 +157,13 @@ Go 侧大量行为的默认值**藏在 struct tag 里**而不是 yaml 里；反�
 **规则（2026-10-21 补）**：判断「一个注入/开关有没有真生效」**不能看启动日志**——
 本节第四类里，注入点的 echo 照打、jar 照起、日志零告警，效果却是零。
 唯一可靠的判据是**运行时证据**（本例是 PG 侧是否出现 `57014 query_canceled`）。
-凡是「注入后实测无变化」的结论，一律先怀疑注入本身没到位，再怀疑机制无效。
 
-**规则（2026-10-22 补 · 由「E-1 收口抓到 text/plain 400 丢 Content-Type」推出）**：
-**「代码里写了」与「客户端收到」之间隔着一次 commit。**
+**规则（2026-10-21 再补）**：**断言「Bean 存在」不等于断言「机制生效」**（H2 假绿事件推出）；
+**「脚本批量改 N 处」必须配一条覆盖全部 N 处的守恒断言**，而不是逐点行为测试（「46 处批量插入」推出）。
 
-**规则（2026-10-21 再补 · 由 H2 假绿事件推出）**：**断言「Bean 存在」不等于断言「机制生效」。**
-
-**规则（2026-10-21 再补 · 由「46 处批量插入」推出）**：**凡是「脚本批量改 N 处」，
-必须配一条覆盖全部 N 处的守恒断言，而不是逐点行为测试。**
-
-**规则（2026-10-22 补 · 由 message-api 的 `,string` 漂移推出）**：
-**绿测试可能是「错误答案的守卫」，比没有测试更危险。**
+**规则（2026-10-22 补）**：**「代码里写了」与「客户端收到」之间隔着一次 commit**
+（「E-1 收口抓到 text/plain 400 丢 Content-Type」推出）；
+**绿测试可能是「错误答案的守卫」，比没有测试更危险**（message-api 的 `,string` 漂移推出）。
 
 **强制三条**：
 1. 论证里的每个 Go 事实都必须带 `文件:行号`，**不许只写结论**；
@@ -181,8 +173,8 @@ Go 侧大量行为的默认值**藏在 struct tag 里**而不是 yaml 里；反�
 
 （案例与完整经过见 `docs/Pitfalls/_cross/testing-pitfalls.md`。）
 
-⚠️ **「只跑 RAG 的探针」同样不算数**：它证明的只是「代码写成了这样」，
-证明不了「Go 是这样」。§docs/DRIFT/message/rpc.md 的变异测试是同一问题的另一半 ——
+⚠️ **「只跑 RAG 的探针」同样不算数**：它证明的只是「代码写成了这样」，证明不了「Go 是这样」。
+§docs/DRIFT/message/rpc.md 的变异测试是同一问题的另一半 ——
 变异测试能证明测试**不是假绿**，但**不能证明测试的期望值是对的**。两者缺一不可。
 
 **规则（2026-10-22 晚补 · 由 `hot-rpc` 的 Spring Boot 4 模块化迁移推出）**：
@@ -195,13 +187,10 @@ Go 侧大量行为的默认值**藏在 struct tag 里**而不是 yaml 里；反�
    已被拆走的必须显式补对应模块（版本由 BOM 管理，不写 `<version>`）；
 3. **不得**把「编译通过 / 上下文能启动」当作「注解已生效」的证据。
 
-⚠️ **`like-rpc` 的缺依赖已实测（2026-10-23）：不是「静默失效」，是硬启动失败。**
+⚠️ **`like-rpc` 的缺依赖已实测（2026-10-23）：这类 Boot 4 拆模块缺口是硬启动失败，不是静默失效。**
 `service/like/like-rpc/pom.xml` 只引 `spring-kafka`、缺 `spring-boot-kafka`，实测
-`NoSuchBeanDefinitionException: KafkaTemplate` ⇒ **组件起不来**。
-⚠️ **这条修正了本节此前的表述**：原文把它归入「静默失效（照常启动不消费）」，
-实测证明这类 Boot 4 拆模块缺口在本项目表现为**硬失败**——反而更容易发现，不会带病上线。
-`hot-rpc` 同款（Jackson 3 ⇒ `ObjectMapper` Bean 缺失）亦为硬失败。
-⇒ 判定时**先实测启动，再决定风险等级**，不要凭形态推定。
+`NoSuchBeanDefinitionException: KafkaTemplate` ⇒ **组件起不来**；`hot-rpc` 同款（Jackson 3 ⇒ `ObjectMapper` Bean 缺失）。
+⇒ **判定时先实测启动，再决定风险等级**，不要凭形态推定。
 明细见 [docs/DRIFT/like/rpc.md](docs/DRIFT/like/rpc.md) 与 [docs/DRIFT/hot/rpc.md](docs/DRIFT/hot/rpc.md)。
 
 ### 3.4 proto 是**复制粘贴**，不是翻译（2026-10-23 实测）
@@ -228,7 +217,7 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 共享 DTO、错误码契约、wire 契约）—— 少审它们 = **拿一面没人校过的镜子照自己**，与 §3.1 禁止的
 「拿现有 RAG 代码当对照基准」同源。
 
-**范围内组件清单（权威，审查任务按此拆分）** —— 10 微服务 / **38 个组件** = 10 api + 10 rpc + 8 common + 10 proto：
+**范围内组件清单（权威，审查任务按此拆分）** —— 10 微服务 / **38 个组件**：
 `article` 4 · `hot` 4 · `like` 4 · `message` 4 · `users` 7（含 `user`+`admin` 两套 api/rpc/proto）·
 `comment` 4 · `favorite` 4 · `follow` 4 · `task` 3（**无 `-common`**，Go 侧同样没有，不是遗漏）。
 
@@ -277,18 +266,21 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 
 ### 4.3 用户问答原话
 
-> 📖 原话已搬出存档（防止后续被「优化」掉）：
-> [`docs/DRIFT/_cross/user-qa-verbatim.md`](docs/DRIFT/_cross/user-qa-verbatim.md)
+> 📖 原话存档（防被「优化」掉）⇒ [`docs/DRIFT/_cross/user-qa-verbatim.md`](docs/DRIFT/_cross/user-qa-verbatim.md)
 
 ## 五、用户协作规则（精简）
 
 1. **每个 phase 一个 PR**；PR 自带 spec（`RAG/.agents/specs/<slug>.md`），提交前 spec 已落仓。
 2. **issue 在 PR 之前**；PR body 引用 issue。
 3. **分支策略（2026-10-23 改写，取代「不开 worktree + git stash」）**：串行仍在 `do-my-own-gh`；**多域并发对齐时一域一 worktree** ——
-   `align/<域>` + `../RAG.worktrees/<域>`，均从 `do-my-own-gh` 切，主干只在最后接合并。**工作树内只写 `docs/DRIFT/<域>/<组件>.md`；
-   共享索引（`_INDEX.md`/`AGENTS.md`/`_MANIFEST.json`）合并后统一更新** ⇒ 多路并发必撞，且事后无法区分台账归属。
+   `align/<域>` + `../RAG.worktrees/<域>`，均从 `do-my-own-gh` 切，主干只在最后接合并。**工作树内只写自己域的台账文件；
+   共享索引（各 `_INDEX.md`/`AGENTS.md`/`_MANIFEST.json`）合并后统一更新** ⇒ 多路并发必撞，且事后无法区分台账归属。
    ⚠️ `git stash` 是工作区级状态，会被并发 agent 互偷 ⇒ 不再作隔离手段。⚠️ **共享文件的改动要尽早提交** ——
    实测已被并发会话 `git checkout` 整体回滚过一次。操作手册 ⇒ [`docs/Worktree.md`](docs/Worktree.md)。历史 `row/*` 已合并（实测）。
+3b. **三档台账：每域必读 + 必写**（2026-10-23 用户定）—— 开工前**必读** `docs/DRIFT/` + `docs/Intentional_Deviations/` +
+   `docs/Pitfalls/` 的**本域子目录 + `_cross/`**（否则会重复已修项、误把签字偏离当新漂移「顺手修回」）；
+   产出**必写回**同名的**本域子目录**：`<台账>/<域>/<组件>.md`（不一致 / 签字偏离 / 踩坑各归各档）。
+   ⚠️ **只写自己域，三个 `_INDEX.md` 合并后统一更新** ⇒ 落点详见 [`docs/Worktree.md`](docs/Worktree.md)。
 4. **作用范围**：仅限 RAG 仓库。`Sea-RideTheWind_golang` 已冻结只读；其他非 Spring Boot 的 Java 实现不在范围内。
 5. **Go 是真理之源**（2026-10-20 第三次切换，全子模块适用）。proto 字段号、错误码、JWT claims、表结构、HTTP path、
    Kafka topic 等语义细节一律以 Go 对应子模块为准；差异**只允许出现在表达层**，出现行为差异时默认判 **RAG 错**。
@@ -314,7 +306,6 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 ⚠️ 该根因在 `message-rpc` / `like-rpc` / `article-rpc` **原封不动成立**——三者同库 `first_db`、
 同 schema `public`、同账本表（**发现时** `spring.flyway.table` 全仓零命中），且 message 与 like 的 **V1–V3 直接撞号**。
 任一方先启动，另一方的表就永远建不出来。
-
 **定案**：每模块独立账本表名 `spring.flyway.table: flyway_schema_history_<模块>` ——
 不动任何迁移文件名，各模块从 V1 各自重来也互不干扰，**直接消除病根**。
 （否决「排全局唯一号段」：那是 10-20 已被 10-21 推翻的旧结论，且不解决根因。）
@@ -327,6 +318,7 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 > ⚠️ **残留风险**：新增第 4 个模块若忘加 `table`，会直接撞上仍用默认表名的 article。
 > ⚠️ **文档缺陷**：多处声称由 `FlywayLedgerIsolationTest` 负责，**该测试类全仓不存在**。
 > 完整经过与证据 ⇒ `docs/Pitfalls/_cross/flyway-ledger-collision.md`
+
 ### 6.4 其他子模块
 
 `service/message` 台账见 [`docs/DRIFT/message/`](docs/DRIFT/message/rpc.md)（与 §0 域表同源，不重复）。

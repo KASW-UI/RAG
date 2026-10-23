@@ -73,8 +73,58 @@ RAG.worktrees/          ← 11 个工作树（在 RAG 外面，不进版本库�
 | `AGENTS.md` | ❌ 同上 |
 | `docs/DRIFT/_MANIFEST.json` | ❌ 同上 |
 
-理由：11 路并发合并必撞，且事后分不清哪段台账是谁写的。
+理由：多路并发合并必撞，且事后分不清哪段台账是谁写的。
 ⇒ 各工作树的台账要能自证归属：**每份台账首行标注「由 `align/<域>` 工作树产出 + 基线 commit」**。
+
+---
+
+## 二·五、三档台账：每域必读 + 必写（2026-10-23 用户定）
+
+`docs/` 下的三个目录**同构**，每个域下都是组件级命名（`api.md` / `rpc.md` / `common.md` / `proto.md`）。
+**它们不是三个可选的档案柜，是三个职能不同的档案柜**：
+
+| 目录 | 记什么 | 读它的后果（不读会怎样） |
+|---|---|---|
+| `docs/DRIFT/` | 「RAG 与 Go 不一致」——**需要对齐的差异** | 重复劳动：把已修项当新漂移重查一遍 |
+| `docs/Intentional_Deviations/` | 「明知与 Go 不同、**经签字批准**」——**决定不对齐的差异** | 🔴 **最危险**：把签字偏离当新回归「顺手修回 Go 行为」，**制造新漂移** |
+| `docs/Pitfalls/` | 「为什么会踩」——框架机制静默失效、绿测试锁死错误答案、基础设施误用 | 重复踩同一个坑（尤其「跑绿 ≠ 对」） |
+
+### 开工前必读（本域 + 跨域）
+
+```
+docs/DRIFT/<本域>/                    ← 本域已有台账：哪些已修、哪些还 OPEN
+docs/Intentional_Deviations/<本域>/   ← 本域签字偏离：哪些「看着像 bug」其实是决策
+docs/Pitfalls/<本域>/                 ← 本域踩过的坑：这个域特有的陷阱
+docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：共享 Flyway 账本 / 建表责任交叉 / 事实投递链路）
+```
+
+⚠️ `_cross/` 必看的原因：跨组件不变量不属于任何单个组件，**塞进组件任务里就会被漏掉**。
+
+### 产出必写回（只写自己域的子目录）
+
+| 产出类型 | 落点 | 例 |
+|---|---|---|
+| 发现的不一致（待对齐） | `docs/DRIFT/<域>/<组件>.md` | `docs/DRIFT/comment/rpc.md` |
+| 签字批准的偏离 | `docs/Intentional_Deviations/<域>/<组件>.md` | `docs/Intentional_Deviations/comment/proto.md` |
+| 踩坑（为什么会这样） | `docs/Pitfalls/<域>/<组件>.md` | `docs/Pitfalls/comment/rpc.md` |
+
+- `<组件>` = `api` / `rpc` / `common` / `proto`，**与被审组件同名**。
+- `<域>` = 微服务名；`users` 域有两套 ⇒ `users/user/` 与 `users/admin/`（见现有结构）。
+- **三档之间不要互相搬运**：一条问题只在**一个**档里落笔，在另一档里**链接**过去。
+
+### 🔴 三条硬边界
+
+1. **三个 `_INDEX.md` 一律合并后统一更新** —— 工作树内谁都不许碰（同上节的共享面规则）。
+2. **不要在 `docs/DRIFT/` 里记「决定不对齐」的偏离** —— 那是 `Intentional_Deviations` 的职能。
+   判据：**这条差异要不要「修回去」？** 要 ⇒ DRIFT；不要（有意）⇒ Intentional_Deviations。
+3. **空文件即坑位**（`Intentional_Deviations` 现有 26 个 0 字节占位、`Pitfalls` 10 个）——
+   填了就是新坑位，不填就别建空壳文件。
+
+### ⚠️ 当前缺口（2026-10-23 实测）
+
+`comment` / `favorite` / `follow` / `task` 四个新域在 `DRIFT/` 与 `Pitfalls/` 下**尚无子目录**
+（`Intentional_Deviations/comment/` 已有 `proto.md`）。
+⇒ 这四个域开工时**顺手建目录**，别把台账塞进别的域或 `_cross/`。
 
 ### 2. 域内顺序：`rpc → common → api → proto 消费`
 
