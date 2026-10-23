@@ -264,6 +264,29 @@ def layer3_numbers(root, texts):
         bad += 0 if good else 1
         print(f'  {"✅" if good else "❌"} DRIFT-TASK-RPC 编号连续: {ids}')
 
+    # ⚠️ **api 域要单独查** —— §〇 的「已修 N 条」与 §一 的实际条数必须对得上
+    #    （本轮实测抓到过：api.md §〇 写「已修 3 条」而 §一 标题写「已修（2 条）」，
+    #      而 §一 下面实际有 4 条 ⇒ **标题与内容不符**）
+    api_md = read(os.path.join(root, 'docs/DRIFT/task/api.md'))
+    if api_md:
+        m_fixed = re.search(r'已修 \| \*\*(\d+) 条\*\*（DRIFT-TASK-API', api_md)
+        # ⚠️ 标题的措辞会变（「已修（N 条）」/「逐条对照（N 条：…）」）
+        #    ⇒ 只抓「## 一、…（N 条」里的那个 N，**不要**锚定具体措辞
+        m_sec = re.search(r'^## 一、[^\n（]*（(\d+) 条', api_md, re.M)
+        m_items = len(re.findall(r'^### .*DRIFT-TASK-API-\d{3}', api_md, re.M))
+        if m_sec and m_items:
+            good = int(m_sec.group(1)) == m_items
+            bad += 0 if good else 1
+            print(f'  {"✅" if good else "❌"} api.md §一 标题条数: 声明 {m_sec.group(1)} / 实际小节 {m_items}')
+        elif m_items:
+            print(f'  ⚠️ api.md §一 标题里没解析出条数（实际小节 {m_items} 个）⇒ 标题措辞可能又变了')
+        if m_fixed:
+            ids_api = sorted(set(int(x) for x in re.findall(r'DRIFT-TASK-API-(\d{3})', api_md)))
+            if ids_api:
+                good = ids_api == list(range(1, len(ids_api) + 1))
+                bad += 0 if good else 1
+                print(f'  {"✅" if good else "❌"} DRIFT-TASK-API 编号连续: {ids_api}')
+
     for name, r in (('task-rpc', rpc), ('task-api', api)):
         if r:
             good = r['failures'] == 0 and r['errors'] == 0 and r['skipped'] == 0
