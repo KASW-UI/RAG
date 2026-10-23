@@ -111,7 +111,7 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 |---|---|---|---|
 | D1 | **双侧活体对拍** | ✅ **已做（2026-10-24 第五轮）** | 端到端 HTTP 栈两侧**同时拉起**（Go hot-api + RAG hot-api + 下游桩），29 条用例逐字节比响应体 + 关键响应头 ⇒ **24/29 通过**，并**新查出 4 条漂移**（D21~D24）。详见「第五轮」一节。⚠️ 第二轮的**解析层/分页层/wire 层**双侧探针对拍仍然有效，但**第二轮的 CASE 表有 4 行结论被本轮推翻**（MockMvc 测不到真 Tomcat 的请求行校验） |
 | D2 | **变异验证** | ❌ 未做（2026-10-23） | 测试是否假绿未证实。⚠️ 第二轮已**间接证实一处假绿**（DRIFT-HOTAPI-015-B 的裸 mapper），但**系统变异仍未做** |
-| D3 | 客户端**断连**取消不再传播 | ⚠️ 已留痕（2026-10-23） | Go 把请求 ctx 传进 100 次补全，Servlet 断连不会自动取消在飞的 gRPC。已用「请求线程取一次预算 + 显式下传」保住**超时**语义，**断连**语义不等价 |
+| D3 | 客户端**断连**取消不再传播 | ✅ **活体坐实**（2026-10-24 第七轮） | Go 把请求 ctx 传进 100 次补全，Servlet 断连不会自动取消在飞的 gRPC。已用「请求线程取一次预算 + 显式下传」保住**超时**语义，**断连**语义不等价 ⇒ **第七轮用裸 socket 强制 RST 实测**：Go 侧断连后 **1~3ms** 内 8 个在飞 gRPC 全部取消；RAG 侧**等到 2s deadline** 才结束，**且断连后继续发第二批** ⇒ 差异由「静态推断」升级为「活体证据」。连带产出 **DRIFT-HOTAPI-025** |
 | D4 | Go panic 时指标误记为 `success` | ⚠️ 有意差异（2026-10-23） | Go 的 `defer` 读命名返回值 `err`，panic 展开时仍为 nil；Java 按客户端实际看到的结果记 `fail`。该路径无代码可达 |
 | D5 | 指标**暴露**是单向增强 | ⚠️ 有意偏离（2026-10-23） | Go 的 5 个指标注册了但**无端点暴露**（yaml 的 Prometheus 块无 Host；`DevServer` 块在 go-zero v1.10.2 无对应字段）。分桶边界已对齐回 `prometheus.DefBuckets` |
 | D6 | **端口** | ✅ **已签字**（2026-10-24 第六轮，用户拍板「保持」） | Go `hotcenter.yaml` = 8893；`Infrastructure.md §3` 给 hot 预占 18897 ⇒ **保持 18897**（`HOT_API_PORT` 可覆盖）⇒ `SD-HOT-API-009`。⚠️ HTTP 端口**不是 wire 契约**（各自独立）⇒ 无行为差异 |
@@ -706,7 +706,7 @@ Recommended Verification:
 |---|---|---|---|---|---|
 | **U1** | 端到端 HTTP 栈两侧是否逐字节一致？ | `hotcenter.go` 全链路已读 | 真 Boot 上下文已跑 | ⚠️ **已闭合（第五轮）**：两套栈**同时拉起**（Go hot-api + RAG hot-api + 下游同构双桩），29 条用例逐字节比**响应体 + 关键响应头** + 期望值 + **下游调用序列** ⇒ 默认 **24/29**，带修正配方 **28/29**。⇒ **查出 4 条新漂移**（D21~D24），并**推翻第二轮 4 条 ✅ 结论** | ✅ **已完成**（`tools/difftest/run-hot.sh` + `diff-hot.py`；详见「第五轮」一节） |
 | **U2** | 3s 超时真的产出 `503 + Request Timeout`？ | `http.go:88` + `rest/config.go:55` | `HttpMiddleware:419-425` | ⚠️ **已闭合（第五轮）**：`CASE-21` 用「20 条热榜 + article-rpc 睡 30s」把请求**真的拖过 3s** ⇒ 两侧**都**产出 `HTTP 503 + "Request Timeout\n"`（**body 逐字节相同**）。⚠️ 唯一差异 = **缺 `X-Content-Type-Options: nosniff`** ⇒ 即 **D14**（代码在 `service/common` ⇒ **已移交 common 域**） | ✅ **已完成**（第五轮 `CASE-21`） |
-| **U3** | 客户端断连是否真产出 499，且 gRPC 真的被取消？ | `http.go:84-86` `errors.Is(Canceled)`→499 | `HttpMiddleware:332` IOException→499 | 静态两侧一致，但 Servlet 断连**不会**自动取消在飞的阻塞 gRPC（D3 已留痕） | curl `--max-time 0.5` 撞慢下游，抓 499 + PG/服务端观察 gRPC 是否被取消 |
+| **U3** | 客户端断连是否真产出 499，且 gRPC 真的被取消？ | `http.go:84-86` `errors.Is(Canceled)`→499 | `HttpMiddleware:332` IOException→499 | ✅ **已闭合（第七轮，2026-10-24）**：**裸 socket + SO_LINGER=0 强制 RST**（urllib/httpclient 都做不到「发到一半就消失」）⇒ 两侧都**实测**了：Go 侧 8 个在飞 gRPC 在**断连后 1~3ms** 全部被取消、且**日志里有** `[HTTP] 499 ... duration 503.3ms`；RAG 侧则**要等到 2s 调用 deadline** 才结束、**并在断连后继续发第二批**下游调用、且**没有任何 499 记录** ⇒ **D3 坐实**，并连带查出 **DRIFT-HOTAPI-025** | ✅ **已完成**（`tools/difftest/probe-hot-disconnect.py`） |
 | **U4** | client breaker 是否真在链上并会因超时打开？ | `zrpc/internal/client.go:112-113` + `breakerinterceptor.go:16-18` | 依赖「扫到 `com.rag.common`」+ `@GrpcGlobalClientInterceptor` | ⚠️ **部分闭合（第四轮）**：**装配层已补**（hot-api 此前**没有** wiring 测试 —— 而 `follow-api` / `message-api` 各有一份 ⇒ 正是本域缺口）⇒ 新增 `GoStyleGrpcClientBreakerWiringTest`（3 例：拦截器在 starter 的 `GlobalClientInterceptorRegistry` 里 + factory 认识本域两个 `@GrpcClient` 锚点 + 熔断默认开启）。⚠️ **「熔断真的打开」的行为级证据仍未做** | 决定 DRIFT-HOTRPC-004 的严重度；也可能暴露 Go 侧独有的 shadow 残留 | **仍需**：内嵌一个恒返 INTERNAL 的 gRPC server，连续调用直到 breaker 打开 ⇒ 观察 `interceptor.trackedMethods()`（参照 `message-api` 的 `GoStyleGrpcClientBreakerE2ETest` 范式）。⚠️ hot-api 侧响应体**看不出**熔断（前后都是 5001）⇒ 只能看拦截器/指标 |
 | **U5** | 保护层四闸（MaxConns/MaxBytes/CpuShedding/Breaker）真触发？ | `rest/config.go:12-22,52-56` tag 默认 | `rag.protection.*`（静态同值） | 未构造超限请求（D9） | 并发 10001 连接 / 发送 >1 MiB body / CPU 打满，各观察裸状态码 |
 | **U6** | 404 / 405 在**真 Tomcat** 下的响应头与 body 是否逐字节同？ | `http.Error` 四行（server.go:2337-2356） | MockMvc 实测：`404 page not found\n` + text/plain + nosniff；405 无 body | ✅ **已闭合（第四轮）**：**真 Tomcat**（`RANDOM_PORT` + JDK `HttpClient`）⇒ 404 = `404 page not found\n` + `text/plain` + **`nosniff`**；405 = 裸状态码 + `Allow`、**无 body** | ✅ 已完成（`HotApiRealTomcatGateTest` 的 `#notFoundIsBareGoStyleResponse` / `#methodNotAllowedIsBareStatusCode`） |
@@ -1148,6 +1148,7 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 |---|---|---|
 | **端到端双侧活体对拍**（D1/U1） | ✅ **本轮已闭合** | 两套栈**同时拉起**（Go hot-api + RAG hot-api + 下游同构双桩），29 条用例逐字节比**响应体 + 关键响应头** + 期望值 + **下游调用序列** ⇒ 默认配置 **24/29 通过**，并**新查出 4 条漂移**（D21~D24）；带修正配方时 **28/29**（剩下的 1 条 = D14，已移交 common 域） |
 | **超时 / 保护层四闸的活体观测**（D9/U2/U5） | 🟡 **部分闭合（第五轮）** | **超时分支已活体触发**：`CASE-21` 让请求真的拖过 3s ⇒ 两侧**都**产出 `503 + "Request Timeout\n"`（body 逐字节相同），**只差 `nosniff`**（= D14，跨域移交 common 域）。⚠️ **保护层四闸**（MaxConns / MaxBytes / CpuShedding / Breaker）**仍未构造超限请求** ⇒ 仍是静态确认 |
+| **客户端断连**（D3/U3） | ✅ **第七轮已闭合** | 裸 socket + SO_LINGER=0 强制 RST ⇒ Go 侧 8 个在飞 gRPC 在**断连后 1~3ms** 全部取消、**日志有 `[HTTP] 499`**；RAG 侧**等 2s deadline**、**断连后继续发下游调用**、**无任何 499 记录** ⇒ **D3 坐实** + 新产出 **DRIFT-HOTAPI-025** |
 | **变异验证**（D2/U9） | 🟡 部分 | 已对**新增的 6 条修复**做了定向变异（hash 5/5、字段序 1/1、日志面 3/3、bucket 边界 3/3）；**全组件系统变异仍未做** |
 | **端口归属**（D6） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「保持」⇒ `SD-HOT-API-009`：保持 18897（`HOT_API_PORT` 可覆盖）。⚠️ HTTP 端口**不是 wire 契约** |
 | **下游 gRPC 错误串形态**（DRIFT-HOTAPI-017） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「不复刻」⇒ `SD-HOT-API-005`。库层差异（grpc-go `"rpc error: code = Unavailable desc = …"` vs grpc-java `"UNAVAILABLE: …"`）|
@@ -1364,3 +1365,75 @@ percent-encoding 两侧**确实**逐字节一致。）
 | **变异验证**（D2/U9） | 🟡 部分 | 已对**新增的修复**做过定向变异；**全组件系统变异仍未做** |
 | **Go 侧 `hot.api` 的 `Log.Mode` 等配置项** | ✅ 已对齐副本 | 真源 yaml 零改动（纪律 1 自检通过：跑完 `git status --porcelain -uno` 为空） |
 
+
+---
+
+## DRIFT-HOTAPI-025 —— 客户端断连时 RAG 侧**不产出 499**，且断连事件**完全不可见**
+
+> **发现轮次**：2026-10-24 第七轮（U3/D3 断连取证）
+> **类别**：OBSERVABLE DIFFERENCE（**可观测性 + 资源浪费**；**无 wire 差异** —— 客户端已走，收不到 499）
+> **严重度**：MEDIUM
+> **归属**：代码在 `service/common` 的 `HttpMiddleware` ⇒ **跨域**
+
+### 活体实测（第七轮，`tools/difftest/probe-hot-disconnect.py`）
+
+做法：桩切 `article-slow`（article-rpc 睡 30s ⇒ 请求一定在飞）⇒ **裸 socket** 发
+`GET /hot/v1/articles`，500ms 后用 `SO_LINGER={1,0}` 强制 **RST**
+（`urllib` / JDK `HttpClient` 都做不到「发到一半就消失」）⇒ 读桩的**带时间戳事件日志**。
+
+| | **Go 真源** | **RAG** |
+|---|---|---|
+| 客户端断连时刻 | +504 ms | +502 ms |
+| 在飞 gRPC 被取消的时刻 | **+505 ~ 507 ms**（断连后 **1~3 ms**） | **+2155 ~ 2188 ms**（= **2s 调用 deadline**） |
+| 断连后是否**继续发下游调用** | **否**（ctx 取消 ⇒ 立即停） | **是**（+2198 ms 又发了 `slow-09..16` 一批） |
+| 499 是否产出 | ✅ **是**，且**进日志**：`[HTTP] 499 - GET /hot/v1/articles - 127.0.0.1:53546 - duration 503.3ms` | ❌ **未产出**（日志里连 499 / broken pipe / ClientAbort 字样都没有） |
+
+### 根因：499 的**触发条件**与「**谁写 socket**」绑死
+
+**Go**（`service/common/observability/http.go:84-88`）：
+```go
+case <-ctx.Done():
+    statusCode := http.StatusServiceUnavailable
+    if errors.Is(ctx.Err(), context.Canceled) {
+        statusCode = httpClientClosedRequest      // 499
+    }
+    http.Error(w, httpTimeoutBody, statusCode)
+```
+⇒ 499 由 **ctx 被取消**驱动。HTTP 断连 ⇒ Go 的 `http.Server` 取消请求 ctx ⇒ **必定**产出 499。
+（`http.Error` 写给已走的客户端会失败，但那不影响 499 **已被决定**这件事。）
+
+**RAG**（`service/common/observability/HttpMiddleware.java:338-364`）：
+```java
+Throwable panic = panicHolder[0];              // ← worker 线程抛出的异常
+if (panic != null) {
+    boolean clientCancelled = isClientCancelledException(panic);   // IOException
+    int statusCode = clientCancelled ? HTTP_CLIENT_CLOSED_REQUEST : 500;
+    ...
+    writeTimeoutResponse(httpResp, statusCode);
+```
+⇒ 499 由「**worker 线程**里抛了 IOException（写响应失败）」驱动。
+
+⚠️ **但本组件的 worker 从不写 socket**：
+`ObservabilityResponseWriter` 把响应体**写进内存缓冲**，真正写 socket 的是
+**filter 线程**的 `rec.flushTo(httpResp)`（`HttpMiddleware.java:389`）⇒
+写失败抛在 **filter** 上，**不在 worker 的 panic 通道里** ⇒
+`panicHolder[0]` 永远是 `null` ⇒ **永远进不了 499 分支**。
+
+⇒ **这不是配置问题，是结构性差异**：Go 的 499 由 **ctx** 驱动（与写在哪一层无关），
+RAG 的 499 由 **worker 内的写失败**驱动（而本组件的写发生在 worker 之外）。
+
+### 影响
+
+1. **无 wire 差异** —— 客户端已断连，两侧都收不到 499；
+2. **可观测性差异（实质）** —— Go 的日志里有 `[HTTP] 499`，**RAG 侧什么都没有**
+   ⇒ **断连事件在 RAG 侧完全不可见**（499 只落在 span 属性里，且未接 trace 后端时连 span 也没有）；
+3. **资源浪费** —— 断连后 RAG 继续把剩余条目的补全做完（还**继续发新的下游调用**）
+   ⇒ 下游被无谓地压；Go 侧 ctx 一取消就停。
+
+### 处置
+
+🆕 **跨域登记，hot 域不可修**（代码在 `service/common` 的 `HttpMiddleware`）。
+建议 common 域考虑把 499 的判定从「worker 内的写失败」改成
+「**filter 写 socket 失败**（`flushTo` 抛 `IOException`）」或
+「**容器侧的客户端断连信号**」—— ⚠️ 具体方案由 common 域定，
+hot 域只提供**活体复现脚本**（`tools/difftest/probe-hot-disconnect.py`）。

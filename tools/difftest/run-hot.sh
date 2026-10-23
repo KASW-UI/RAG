@@ -51,6 +51,9 @@ RAG_STUB_PORT=19904
 MODE_FILE="$RUN_DIR/stub-mode"
 GO_CALLS="$RUN_DIR/calls-go.log"
 RAG_CALLS="$RUN_DIR/calls-rag.log"
+# 计时取证用的**事件**日志（带时间戳）—— 与主调用日志分开，主日志要跨侧逐行比对
+GO_EVENTS="$RUN_DIR/calls-go.log.events"
+RAG_EVENTS="$RUN_DIR/calls-rag.log.events"
 
 BUILD=1
 KEEP=0
@@ -161,17 +164,20 @@ APP_CP="$(cat "$RUN_DIR/app-cp.txt" 2>/dev/null)"
 echo "==> [4/5] 起下游桩 + 两侧 hot-api"
 : > "$MODE_FILE"; echo "normal" > "$MODE_FILE"
 : > "$GO_CALLS"; : > "$RAG_CALLS"
+: > "$GO_EVENTS"; : > "$RAG_EVENTS"
 
 STUB_CP="$BUILD_DIR:$PROTO_CP:$LIBCP"
 java -cp "$STUB_CP" \
   -Dstub.port="$GO_STUB_PORT" \
   -Dstub.mode.file="$MODE_FILE" \
   -Dstub.call.log="$GO_CALLS" \
+  -Dstub.event.log="$GO_EVENTS" \
   tools.difftest.HotStubServer >"$LOGS/stub-go.log" 2>&1 & PIDS+=($!)
 java -cp "$STUB_CP" \
   -Dstub.port="$RAG_STUB_PORT" \
   -Dstub.mode.file="$MODE_FILE" \
   -Dstub.call.log="$RAG_CALLS" \
+  -Dstub.event.log="$RAG_EVENTS" \
   tools.difftest.HotStubServer >"$LOGS/stub-rag.log" 2>&1 & PIDS+=($!)
 sleep 3
 grep -q READY "$LOGS/stub-go.log"  || { echo "  FAIL Go 侧桩没起来"; cat "$LOGS/stub-go.log"; exit 1; }

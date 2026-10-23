@@ -106,11 +106,20 @@ final class HotStubServer {
 
     private static final Path MODE_FILE;
     private static final Path CALL_LOG;
+    /**
+     * 带时间戳的**事件**日志。
+     *
+     * <p>⚠️ <b>为什么与 CALL_LOG 分开</b>：CALL_LOG 要被两侧**逐行比对**（跨侧调用序列），
+     * 里面**不能**带时间戳（两侧时间必然不同）⇒ 计时证据另开一份。
+     */
+    private static final Path EVENT_LOG;
     private static final Object CALL_LOG_LOCK = new Object();
 
     static {
         MODE_FILE = Paths.get(System.getProperty("stub.mode.file", "/tmp/hot-difftest/stub-mode"));
         CALL_LOG = Paths.get(System.getProperty("stub.call.log", "/tmp/hot-difftest/calls.log"));
+        EVENT_LOG = Paths.get(System.getProperty("stub.event.log",
+                System.getProperty("stub.call.log", "/tmp/hot-difftest/calls.log") + ".events"));
     }
 
     private HotStubServer() {
@@ -154,6 +163,22 @@ final class HotStubServer {
                         StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             } catch (IOException ignored) {
                 // 取证辅助程序：写日志失败不得影响桩的应答
+            }
+        }
+    }
+
+    /**
+     * 记一条**带时间戳**的事件（用于计时取证，如「客户端断连后 gRPC 何时被取消」）。
+     *
+     * <p>格式：{@code <epochMillis>\t<事件描述>}。
+     */
+    private static void event(String line) {
+        synchronized (CALL_LOG_LOCK) {
+            try {
+                Files.writeString(EVENT_LOG, System.currentTimeMillis() + "\t" + line + System.lineSeparator(),
+                        StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            } catch (IOException ignored) {
+                // 同上
             }
         }
     }
@@ -253,11 +278,36 @@ final class HotStubServer {
             if (MODE_ARTICLE_SLOW.equals(m)) {
                 record("GetArticle article_id=" + id + " public_only=" + publicOnly
                         + " incr_view=" + incrView + " -> SLOW");
+                // ── 计时取证：这次调用**何时**被取消？────────────────────────────────
+                // 用途：判定「客户端断连 ⇒ 在飞的 gRPC 是否被取消」（DRIFT-HOTAPI 的 D3）。
+                //   · Go 侧：HTTP 请求 ctx 被取消 ⇒ ctx 一路传到 zrpc ⇒ gRPC 立刻取消
+                //            ⇒ 事件时间 ≈ 客户端断开的那一刻；
+                //   · RAG 侧：Servlet 断连**不**取消在飞的阻塞 gRPC ⇒ 只能等到 2s 调用
+                //            deadline 才结束 ⇒ 事件时间 ≈ deadline。
+                // ⇒ **时间戳**就能把两者分开（不能只看「有没有被取消」——
+                //    两边最终都会被取消，只是**原因与时刻**不同）。
+                final java.util.concurrent.atomic.AtomicBoolean cancelled =
+                        new java.util.concurrent.atomic.AtomicBoolean(false);
+                io.grpc.Context rpcCtx = io.grpc.Context.current();
+                // ⚠️ grpc-java 的签名是 addListener(Context.CancellationListener, Executor)，
+                //    且 CancellationListener 的方法名是 cancelled(Context) —— **带一个 Context 参数**
+                rpcCtx.addListener((io.grpc.Context.CancellationListener) (ctxOnCancel) -> {
+                    if (cancelled.compareAndSet(false, true)) {
+                        event("ARTICLE_CALL_CANCELLED id=" + id);
+                    }
+                }, Runnable::run);
+                event("ARTICLE_CALL_ENTER id=" + id);
                 try {
                     Thread.sleep(SLOW_SLEEP_MS);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
+                if (cancelled.get()) {
+                    // 已被取消：再写响应会抛异常（grpc-java 对已取消的 call 禁止 send）
+                    event("ARTICLE_CALL_ABORTED id=" + id);
+                    return;
+                }
+                event("ARTICLE_CALL_EXIT id=" + id);
                 observer.onNext(GetArticleResponse.newBuilder()
                         .setArticle(articleOf(id, ArticleStatus.PUBLISHED)).build());
                 observer.onCompleted();
