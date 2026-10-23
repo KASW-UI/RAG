@@ -2,6 +2,7 @@ package com.rag.article.article.rpc;
 
 import com.rag.article.article.rpc.domain.ArticleEntity;
 import com.rag.article.article.rpc.domain.ArticleSyncOutboxEntity;
+import com.rag.article.article.rpc.exception.ArticleExceptions;
 import com.rag.article.article.rpc.mapper.ArticleMapper;
 import com.rag.article.article.rpc.mapper.ArticlePublicationMapper;
 import com.rag.article.article.rpc.mapper.ArticleSyncOutboxMapper;
@@ -423,6 +424,85 @@ class ArticleTransactionWiringTest {
 
         assertNotNull(view);
         assertEquals(0, viewCountOf(articleId), "不请求计数时不应写入");
+    }
+
+    // =====================================================================
+    // 🔴 DRIFT-ARTICLE-RPC-003：公开读的 DB 失败 ⇒ 必须是 INTERNAL（5001），不是 UNKNOWN（1015）
+    // =====================================================================
+    //
+    // Go 出处（逐行读过消费点）：
+    //   model/article_public.go:34-57        FindPublicOne —— 三处 DB 失败返回**同一种** error
+    //   internal/logic/get_article_logic.go:129-135
+    //       if err == gorm.ErrRecordNotFound { return nil, status.Error(codes.NotFound, "article not published") }
+    //       if err != nil { …; return nil, status.Error(codes.Internal, "read publication failed") }
+    //   internal/logic/get_article_logic.go:157-163
+    //       increased, err := …IncrPublicViewCount(l.ctx, in.ArticleId)
+    //       if err != nil { …; return nil, status.Error(codes.Internal, "increment public view failed") }
+    //       if !increased { return nil, status.Error(codes.NotFound, "article no longer published") }
+    //
+    // ⚠️ 修之前的形状：DataAccessException 一路冒到 ArticleServiceGrpcImpl 的 catch(RuntimeException)
+    //    ⇒ 落 UNKNOWN ⇒ api 侧 default 分支 ⇒ 业务码 **1015**（Go 是 5001）。
+    //    ⇒ DB 抖动被计成「服务繁忙/限流」，两套告警口径混用。
+    //
+    // ⚠️ 为什么**不能用 Mockito 把 mapper 打桩**：那样测不到「真 SQL 失败会不会被翻译成 INTERNAL」。
+    //    本组用例让**真 PG 真的报错**（表改名 / CHECK 约束），走真 MyBatis + 真异常翻译。
+
+    @Test
+    @DisplayName("🔴 Go: 公开读的 DB 失败 ⇒ INTERNAL \"read publication failed\"（不是 UNKNOWN ⇒ 业务码 1015）")
+    void publicReadDbFailureIsInternalNotUnknown() {
+        String articleId = "pubfail-1";
+        insertArticle(articleId);
+        jdbcTemplate.update("UPDATE article SET status = 2 WHERE id = ?", articleId);
+        insertRevision(articleId, 1L, "pubfail-1:r1", "sync-pubfail-1", "# Approved", 1000L);
+        jdbcTemplate.update("""
+                INSERT INTO article_publication (article_id, current_revision, pointer_version, state, last_event_id)
+                VALUES (?, 'pubfail-1:r1', 1, 'published', 'evt-1')
+                """, articleId);
+
+        // 让公开读用到的表**真的不存在** ⇒ 真 SQL 错误（42P01）⇒ 真 DataAccessException
+        jdbcTemplate.execute("ALTER TABLE article_publication RENAME TO article_publication_hidden");
+        try {
+            ArticleExceptions.Rpc ex = assertThrows(ArticleExceptions.Rpc.class,
+                    () -> publicService.getPublicArticle(articleId, false),
+                    "公开读的 DB 失败必须被翻译成 gRPC INTERNAL，而不是裸 UNKNOWN");
+            assertEquals(io.grpc.Status.Code.INTERNAL, ex.getCode(),
+                    "Go: status.Error(codes.Internal, \"read publication failed\")");
+            assertEquals("read publication failed", ex.getMessage(),
+                    "Go 的文案逐字：get_article_logic.go:133");
+        } finally {
+            jdbcTemplate.execute("ALTER TABLE article_publication_hidden RENAME TO article_publication");
+        }
+    }
+
+    @Test
+    @DisplayName("🔴 Go: 公开读计阅读量的 DB 失败 ⇒ INTERNAL \"increment public view failed\"（不是 UNKNOWN）")
+    void publicViewIncrementDbFailureIsInternalNotUnknown() {
+        String articleId = "pubfail-2";
+        insertArticle(articleId);
+        jdbcTemplate.update("UPDATE article SET status = 2 WHERE id = ?", articleId);
+        insertRevision(articleId, 1L, "pubfail-2:r1", "sync-pubfail-2", "# Approved", 2000L);
+        jdbcTemplate.update("""
+                INSERT INTO article_publication (article_id, current_revision, pointer_version, state, last_event_id)
+                VALUES (?, 'pubfail-2:r1', 1, 'published', 'evt-2')
+                """, articleId);
+
+        // 只让 **UPDATE** 失败、SELECT 仍成功 ⇒ 精确命中 incrPublicViewCount 这一条路径
+        // （若改名 article 表，前面的 SELECT 会先失败 ⇒ 测不到计数那条路径）
+        // ⚠️ NOT VALID 是必需的：既有行的 view_count=0 不满足 view_count<0，
+        //    不加 NOT VALID 的话 ALTER 自己就会失败。
+        jdbcTemplate.execute(
+                "ALTER TABLE article ADD CONSTRAINT chk_force_view_fail CHECK (view_count < 0) NOT VALID");
+        try {
+            ArticleExceptions.Rpc ex = assertThrows(ArticleExceptions.Rpc.class,
+                    () -> publicService.getPublicArticle(articleId, true),
+                    "计阅读量的 DB 失败必须被翻译成 gRPC INTERNAL");
+            assertEquals(io.grpc.Status.Code.INTERNAL, ex.getCode(),
+                    "Go: status.Error(codes.Internal, \"increment public view failed\")");
+            assertEquals("increment public view failed", ex.getMessage(),
+                    "Go 的文案逐字：get_article_logic.go:160");
+        } finally {
+            jdbcTemplate.execute("ALTER TABLE article DROP CONSTRAINT IF EXISTS chk_force_view_fail");
+        }
     }
 
     /**

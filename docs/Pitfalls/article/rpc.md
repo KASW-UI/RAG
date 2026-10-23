@@ -282,3 +282,57 @@ S-3 的修复**结论**（对齐 Go 的 `ForceCommit=true`，失败即提交位�
    种子必须**非空**、断言必须比对**内容**。
 3. **对照表要有「归一映射」这一行。** Go 用一段 `if err != nil` 把一整类错误
    归一到某个 code 的写法，逐个 `return` 点对照是**对不完的**（PF-ARTICLE-RPC-003）。
+---
+
+## PF-ARTICLE-RPC-005 —— 「改的是 bean，读的是 Environment」：一种不会变红的假绿
+
+**现象**
+给 outbox 中继的 `@Scheduled` 补「配置 ≤ 0 ⇒ 兜底 1s」的语义时，
+本轮写了这样一条测试：
+
+```java
+@Bean ArticleRpcProperties articleRpcProperties() {
+    ArticleRpcProperties props = new ArticleRpcProperties();
+    props.getArticleSyncOutbox().setPollIntervalMs(0);   // ← 只改了 **bean**
+    return props;
+}
+```
+
+容器正常起来，测试全绿。
+**但把修复改回去（`@Scheduled` 退回裸占位符）—— 测试仍然全绿。**
+⇒ 变异验证判成「**假绿**」。
+
+**根因**
+`@Scheduled(fixedRateString = "${article-rpc.article-sync-outbox.poll-interval-ms:1000}")`
+里的 `${…}` 走的是 **`Environment`（PropertySource）**，
+与 `ArticleRpcProperties` 这个 **bean 的字段**是**两条不同的数据通路**：
+
+| 通路 | 谁读 | 本轮误改的地方 |
+|---|---|---|
+| `Environment` | `@Scheduled` 的占位符、`@Value`、`@ConfigurationProperties` 绑定 | ❌ 没改到 |
+| `ArticleRpcProperties` bean | 业务代码 `properties.getArticleSyncOutbox().getPollIntervalMs()` | ✅ 改了（但没人读它） |
+
+⇒ 「配置写 0」这个场景**根本没进到**被测的那条通路上
+⇒ Environment 里没有这个键 ⇒ 占位符走默认值 `:1000` ⇒ 一切正常。
+
+**为什么测试抓不到**
+断言写成「`normalizeIntervalMs(0) == 1000`」—— 那是**纯函数断言**，
+它只证明**兜底函数本身**是对的，与「`@Scheduled` 真的会用到它」**无关**。
+⇒ 真正的行为断言是「**容器在配置为 0 时能不能起来**」，而它被绕过了。
+
+**元教训**
+> **「改了配置对象」≠「配置被读到」。**
+> 配置有**至少两条**通路（Environment / 绑定后的 bean），
+> 而**框架注解（`@Scheduled` / `@Value` / SpEL）几乎总是读 Environment**。
+> ⇒ 写「某个配置值生效」的测试时，必须先确认**被测代码到底从哪条通路取值**，
+> 再决定改哪里。
+> ⇒ 判据：**把被测的读取路径断掉，看测试会不会红** —— 不会红就说明没测到它。
+
+**下次怎么防**
+1. 「配置写 0 / 写错」这类场景，一律用
+   `@TestPropertySource(properties = "…")` / `properties = {"…"}` 落在 **Environment** 上，
+   **不要**只 `new` 一个配置对象改字段。
+2. 断言要覆盖**装配期行为**（容器起不起来 / 调度是否解析成功），
+   而不是只断一个纯函数的返回值。
+3. ⚠️ **变异验证必须包含「把框架注解改回原样」这一档** ——
+   只变异业务代码会漏掉「注解根本没读到你改的那个值」这类假绿。

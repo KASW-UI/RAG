@@ -698,3 +698,164 @@ MP `updateById` 默认 `updateStrategy = NOT_NULL`，<b>只写非 null 字段</b
 ⇒ 与 AGENTS.md §3.1「不要拿未验证的结论当基准」同源：
 **推断级证据的条目必须在标题里标注**，否则下一个 agent 会照着它去「修」，
 而照着错误结论修比不修更糟。
+
+---
+
+<!-- @fix 2026-10-24 · 由 align/article 工作树产出 · 基线 commit 8422116 -->
+
+## 2026-10-24 修复轮：`DRIFT-ARTICLE-RPC-003` 已修（公开读 DB 失败 ⇒ INTERNAL）
+
+> **本节是增量追加**，上文 §0~§10 与「修复轮 / 第二轮」各节**一字未删**。
+> **核对日期 = 2026-10-24。** 基线 commit `8422116`（`align/article` 工作树）。
+> **证据强度：真 PG（Testcontainers postgres:16-alpine + 真实 Spring 上下文 + 真实 MyBatis）**
+> + **变异验证**（2/2 转红）—— 与 2026-10-23 那轮「仅 S-1 做过变异验证」相比，本条**证据更硬**。
+
+### ✅ FIX-04 —— `DRIFT-ARTICLE-RPC-003` 已修
+
+**Go 出处（三段，逐行读到消费点）**
+
+```
+① model/article_public.go:34-57   FindPublicOne —— 三处 DB 失败返回**同一种** error
+     if err := publicArticleQuery(...).First(&article).Error; err != nil { return PublicArticle{}, err }  // 文章行
+     pointer, err := m.Publication(ctx, id); if err != nil { return PublicArticle{}, err }                 // 指针行
+     revision, err := m.RevisionByID(ctx, id, pointer.CurrentRevision); if err != nil { return …, err }    // revision
+
+② internal/logic/get_article_logic.go:129-135
+     if err == gorm.ErrRecordNotFound { return nil, status.Error(codes.NotFound, "article not published") }
+     if err != nil { …; return nil, status.Error(codes.Internal, "read publication failed") }    // ← **INTERNAL**
+
+③ internal/logic/get_article_logic.go:157-163
+     increased, err := l.svcCtx.ArticleRepo.IncrPublicViewCount(l.ctx, in.ArticleId)
+     if err != nil { …; return nil, status.Error(codes.Internal, "increment public view failed") }  // ← **INTERNAL**
+     if !increased { return nil, status.Error(codes.NotFound, "article no longer published") }      // ← **NOT_FOUND**（不是 INTERNAL）
+```
+
+⚠️ **③ 的两个分支码不同**：**失败**⇒ INTERNAL（5001）；**影响 0 行**⇒ NOT_FOUND（1002，撤回赢了竞态）⇒ **不可合并**。
+
+**修法**
+
+RAG 侧把 Go 的**一次** `FindPublicOne` 拆成了**三次** mapper 调用
+（`selectPublicById` / `selectPublication` / `selectByRevisionId`），
+所以必须**逐个**把 DB 失败翻译成 `INTERNAL`：
+
+- 新增私有方法 `readPublication(Supplier<T>)` —— 任一 DB 失败 ⇒ `ArticleExceptions.readPublicationFailed()`（INTERNAL）；
+- 新增私有方法 `incrementPublicView(String)` —— 失败 ⇒ `ArticleExceptions.incrementPublicViewFailed()`（INTERNAL）。
+
+> ⭐ **强证据（额外）**：`ArticleExceptions.incrementPublicViewFailed()` 在本轮之前
+> **全仓零调用点** —— 这个工厂方法**本来就是为此准备的**，它的存在本身就是
+> 「这条 INTERNAL 曾被设计出来、但接线漏了」的证据（与上一轮对 `readPublicationFailed()` 的判断同型）。
+
+> ⚠️ **异常类型的选择**：`readPublication` 捕获 `RuntimeException`（不是只捕 `DataAccessException`），
+> 因为 Go 侧 `FindPublicOne` 是**仓储层调用**，任何失败都是「读失败」；
+> 但**显式放行 `ArticleExceptions.Rpc`**（领域异常不该被吞成 INTERNAL）。
+> `incrementPublicView` 同理（它内部只可能是 DB 失败）。
+
+**证据：真 PG（不是 Mockito）**
+
+| 用例 | 手法 | 断言 |
+|---|---|---|
+| `publicReadDbFailureIsInternalNotUnknown` | `ALTER TABLE article_publication RENAME TO …` ⇒ **真 SQL 错误 42P01** ⇒ 真 `DataAccessException` | `Rpc` 的 code = `INTERNAL`、message = `"read publication failed"`（逐字） |
+| `publicViewIncrementDbFailureIsInternalNotUnknown` | `ALTER TABLE article ADD CONSTRAINT chk_force_view_fail CHECK (view_count < 0) NOT VALID` ⇒ **只有 UPDATE 失败、SELECT 仍成功** ⇒ 精确命中计数那条路径 | code = `INTERNAL`、message = `"increment public view failed"`（逐字） |
+
+> ⚠️ **为什么不用 Mockito 把 mapper 打桩**：那样测不到「**真 SQL 失败**会不会被翻译成 INTERNAL」。
+> 本组用例让**真 PG 真的报错**，走真 MyBatis + 真异常翻译链
+> （`MyBatisExceptionTranslator` ⇒ `DataAccessException` ⇒ 本层 catch ⇒ `ArticleExceptions.Rpc`）。
+> ⚠️ CHECK 约束必须带 `NOT VALID`：既有行 `view_count=0` 不满足 `view_count<0`，
+> 不加的话 **ALTER 自己就会失败**（这是个很容易踩的 PG 细节）。
+> ⚠️ 两个用例都用 `try/finally` 恢复 schema（共享容器 ⇒ 不恢复会污染后续用例）。
+
+**变异验证**
+
+| # | 变异内容 | 结果 |
+|---|---|---|
+| 1 | 去掉 `readPublication` 包装（直接调 `selectPublicById`） | ✅ **转红**（抛的不是 `ArticleExceptions.Rpc`，而是裸 `DataAccessException` ⇒ 会落 `UNKNOWN` ⇒ 1015） |
+| 2 | 去掉 `incrementPublicView` 包装 | ✅ **转红**（同上） |
+
+⇒ **2/2 转红** ⇒ 守门网**非假绿**。
+
+**测试计数**：`ArticleTransactionWiringTest` **17 条全绿**（原 15），真 PG 容器 `skipped=0`。
+⇒ article-rpc 全模块 **107 tests / 0 failures / 0 errors / 0 skipped**。
+
+### 判定变化
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `DRIFT-ARTICLE-RPC-003` 公开读 5001→1015 | ❌ SEMANTIC MISMATCH | ✅ 已修 + 真 PG + 变异验证 |
+| `DRIFT-005` / `006` / `007` / `008` | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
+| 全部 `U-*`（U-2 / U-3 / U-4 / U-5 / U-6 / U-7 / U-8 / U-9 / U-4' / U-5'） | 🔴 OPEN | 🔴 **OPEN** |
+| S-5（security 域） | ⛔ 阻塞 | ⛔ **仍阻塞**（security 域不在本项目范围内） |
+| **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
+
+⚠️ **判定不变的理由**：只关掉 1 条；`005~008` 与 10 条 `U-*` 仍在，
+且**无双侧活体对拍**（Go 侧仍需 `etcd:2379`）⇒ 本条的 ✅ 读作「**在真 PG 证据下一致**」，不是「已闭环」。
+
+### ✅ FIX-05 —— `DRIFT-ARTICLE-RPC-006` + `DRIFT-ARTICLE-RPC-008` 已修（outbox 中继的调度语义）
+
+两条**同源**（都在 `@Scheduled` 的属性上），一起修。
+
+**Go 出处（两段，缺一不可）**
+
+```
+// ① 间隔兜底 —— service/article/rpc/article.go:62-65
+relayInterval := time.Duration(c.ArticleSyncOutbox.PollIntervalMs) * time.Millisecond
+if relayInterval <= 0 { relayInterval = time.Second }
+
+// ② 首次触发时机 —— article.go:94,101
+ticker := time.NewTicker(s.interval)     // ← 首次 tick 在 interval **之后**
+for { select { case <-ticker.C: …SendPending(…) } }
+```
+
+**修法**
+
+| 漂移 | 修前 | 修后 |
+|---|---|---|
+| **006** 兜底没接上 | `@Scheduled(fixedRateString = "${…:1000}")` **直接读原值**；`effectiveIntervalMs()` 兜底方法**零调用点** | 改为 **SpEL**：`#{T(…ArticleSyncOutboxRelay).normalizeIntervalMs(${…:1000})}` |
+| **008** 首次时机 | 无 `initialDelay` ⇒ Spring 默认**立即**执行首次 | 显式给 `initialDelayString` **同一个**归一化后的间隔 |
+
+⚠️ **为什么 006 不能直接用占位符兜底**：`@Scheduled` 的 fixedRate **不接受非正数**
+⇒ 配置写 0 会让 Spring 在**装配期**就抛异常（容器起不来），
+而 Go 侧是「配 0 仍每秒」。
+⇒ 只能用 **SpEL**（Spring 先解析 `${…}`，再求值 `#{…}` —— `EmbeddedValueResolver` 的顺序）
+才能让兜底真正生效。
+⚠️ `normalizeIntervalMs` 必须是 **`static`**：调度属性在**容器装配期**求值，那时拿不到实例注入，
+只能用 SpEL 的 `T(...)` 类型引用。
+
+**证据：真容器（`@SpringJUnitConfig` + `@EnableScheduling`）+ 真实时钟**
+
+| 用例 | 手法 | 断言 |
+|---|---|---|
+| `zeroIntervalStillBootsAndFallsBackToOneSecond` | `@TestPropertySource(properties="…poll-interval-ms=0")` ⇒ **配置真的写 0** | ① 容器**起得来**（修之前是装配期报错）；② `normalizeIntervalMs(0/-1)=1000`、`(500)=500`（正数不得被改写） |
+| `firstExecutionHappensAfterTheIntervalNotImmediately` | mock 掉 `fetchPending` 并**记录首次调用的时刻** | 首次进入中继循环的时刻 **≥ 900ms**（兜底间隔 1000ms，留 10% 抖动余量）⇒ 证明 `initialDelay` 生效 |
+
+⚠️ **为什么不需要真 PG / 真 Kafka**：被测的是**调度器**，不是数据面 ——
+`outboxMapper.fetchPending` 与 `kafkaTemplate.send` 都 mock，中继在「捞不到事件」处即返回，
+**不碰数据库、不发消息**。
+
+**变异验证**
+
+| # | 变异内容 | 结果 |
+|---|---|---|
+| 3 | `@Scheduled` 改回裸占位符（去掉 SpEL 兜底） | ✅ **转红**（容器装配期报错 ⇒ 用例 ERROR） |
+| 4 | 去掉 `initialDelayString` | ✅ **转红**（实测首次触发在 **84ms**，即启动即执行） |
+
+⇒ **2/2 转红** ⇒ 守门网**非假绿**。
+
+> 🔴 **本轮的一条真实假绿（值得单独记）**：
+> 第一版测试**只把 `ArticleRpcProperties` 这个 bean 的 `pollIntervalMs` 设成 0**，
+> 而 `@Scheduled` 的占位符读的是 **Environment** —— Environment 里**根本没有这个键**
+> ⇒ 占位符走默认值 `:1000` ⇒ 把实现改回裸占位符也**不会**报错
+> ⇒ **变异验证直接判成「假绿」**。
+> ⇒ 教训：**「配置写 0」这个场景必须落在 Environment 上**；
+> 「改的是 bean、读的是 Environment」是最隐蔽的一种假绿。
+> ⇒ 详见 [`docs/Pitfalls/article/rpc.md`](../../Pitfalls/article/rpc.md) 的新增条目。
+
+### 判定变化（FIX-05）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `DRIFT-ARTICLE-RPC-006` 间隔兜底没接上 | ❌ OBSERVABLE DIFFERENCE（LOW） | ✅ 已修 + 真容器 + 变异验证 |
+| `DRIFT-ARTICLE-RPC-008` 首次触发时机 | ❌ OBSERVABLE DIFFERENCE（LOW） | ✅ 已修 + 真容器 + 变异验证 |
+| `DRIFT-ARTICLE-RPC-005` schema 门禁时机 | ❌ OBSERVABLE DIFFERENCE（MEDIUM） | 🔴 **OPEN**（需把门禁挪到 gRPC server 监听**之前**，非本轮范围） |
+| `DRIFT-ARTICLE-RPC-007` 每通道独立 Kafka brokers | ❌ OBSERVABLE DIFFERENCE（LOW） | 🔴 **OPEN**（配置面误导，今天无行为差异） |
+| 全部 `U-*` | 🔴 OPEN | 🔴 **OPEN** |
+| **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
