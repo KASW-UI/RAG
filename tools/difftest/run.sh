@@ -54,7 +54,21 @@ done
 
 PG_PORT=55432
 REDIS_PORT=56379
-export POSTGRES_ADDR=127.0.0.1 POSTGRES_PORT=$PG_PORT \
+# ⚠️ **POSTGRES_ADDR 与 POSTGRES_HOST 都要导出**（2026-10-24 实测修）
+#
+#   全仓的 DSN 写法有**两套约定**，本脚本原先只导出了 `POSTGRES_ADDR`：
+#     · POSTGRES_ADDR ：admin-rpc、comment-rpc
+#     · POSTGRES_HOST ：message-rpc / article-rpc / like-rpc / task-rpc /
+#                       follow-rpc / favorite-rpc
+#   ⇒ 缺 `POSTGRES_HOST` 的模块会**回落到 yml 里的默认值 `postgres`**
+#     （那是 docker-compose 里的服务名，宿主机上解析不了）
+#     ⇒ 表现为：`UnknownHostException: postgres` → Flyway 连不上库 →
+#       `flywayInitializer` 失败 → 整个上下文起不来。
+#   实测（2026-10-24）：message-rpc 就是这样起不来的，
+#   且 `run.sh` 的 `assert_started` 会因此**提前退出**，把整个对拍编排打断。
+#   ⇒ 两个都导出，值相同 ⇒ 对两套约定都成立。
+export POSTGRES_ADDR=127.0.0.1 POSTGRES_HOST=127.0.0.1 \
+       POSTGRES_PORT=$PG_PORT \
        POSTGRES_USER=admin POSTGRES_PASSWORD=difftest \
        REDIS_ADDR=127.0.0.1 REDIS_PORT=$REDIS_PORT \
        NACOS_ADDR=127.0.0.1 NACOS_PORT=1

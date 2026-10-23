@@ -419,3 +419,37 @@
   3. 提交前若要确保「装到 `~/.m2` 的就是本分支的」，先 `mvn -o -DskipTests install`
      —— 但**注意**：这会**污染其它并发 worktree 的 `~/.m2`** ⇒ 优先用 `-am`，
      `install` 只在确有必要时做，且做完提醒他人。
+
+---
+
+## P-ADMINAPI-015 · `baseline-on-migrate: true` + 默认 `baseline-version=1` ⇒ **V1 迁移被静默吞掉**
+
+- **现象**：`difftest` 栈起来后，`assert_tables` 报 `rag_db.message_notification 不存在`
+  ⇒ 但 message-rpc 的迁移文件 `V1__create_message_notification.sql` **明明在**，
+  且内容是 `CREATE TABLE IF NOT EXISTS`（幂等）。
+
+- **根因**：查 Flyway 账本一眼就看出来：
+  ```
+  flyway_schema_history_message:
+    1 | << Flyway Baseline >>        | success=true   ← V1 从没执行
+    2 | create message conversation  | success=true
+    3 | create message conversation message | success=true
+  ```
+  `message-rpc/application.yml` 设了 `baseline-on-migrate: true`，
+  而 **Flyway 的 `baseline-version` 默认是 1** ⇒
+  当它启动时 schema **已经非空**（`user-rpc` / `admin-rpc` 的 `SchemaInitializer`
+  先建了 `users_user` / `admin_admin`）⇒
+  Flyway 判定「非空 schema + 无账本」⇒ **把版本 1 当作 baseline 记进账本**
+  ⇒ **`V1` 永远不执行**，而 `V2`/`V3` 照跑 ⇒ **看起来「迁移跑了」，其实少跑了一个**。
+
+- **为什么难发现**：
+  - 账本里有 3 行、`success=true` ⇒ **没有任何报错**；
+  - 失败的表是**业务表**，不是启动依赖 ⇒ 进程**照样起来**、端口**照样监听**；
+  - 只在「别的模块先建过表」的多模块同库场景下才出现 ⇒ 单模块跑永远看不到。
+
+- **下次怎么防**：
+  1. 多模块共库时，`baseline-version` 要设 **0**（让 baseline 落在 0 ⇒ V1 照跑），
+     或改用「幂等重放」而不是版本化迁移（本仓 users 域就是这么做的：`SchemaInitializer` 无账本重放）。
+  2. **断言要打在「表真的在」上**（`assert_tables`），不能只看「迁移跑成功」——
+     账本里的 `success=true` 证明不了该跑的都跑了。
+  3. 看到「某个表不存在，但迁移文件在、账本也说成功」⇒ **先查账本里有没有 `<< Flyway Baseline >>`**。

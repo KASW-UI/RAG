@@ -1475,6 +1475,8 @@ RAG 的 admin-api 现在**必须在 admin-rpc ready 之后起**（fail-fast ⇒ 
 | 4 | `check-plaintext400-headers.sh` 的 `scope=user` 仍红（见 §2）⇒ 与第 2 条同源 | **users/user 域** |
 | 5 | 🔴 **`AGENTS.md §0` 的 users 行有三处出入**（**共享文件，合并时统一改，本域无权改**）：<br>① `update_time ×5` 应为 **×6**（实际改了 6 处 `update_time`）；<br>② `admin-rpc 同款 status=0L 未修` **应撤销**（该条已修）；<br>③ `extra_info` 一栏需标注 **users/user 域已改 TEXT** | **共享文件 `AGENTS.md`** |
 | 6 | ⚠️ **本域的 `Intentional_Deviations/users/admin/*.md` 三个文件在主仓仍是 0 字节** —— 本分支已补齐，但**未合并** ⇒ 合并前主仓看不到签字档 | 合并时 |
+| 7 | 🔴 **`tools/difftest/run.sh` 只导出 `POSTGRES_ADDR`，而全仓有两种 DSN 约定** —— `POSTGRES_HOST`（message/article/like/task/follow/favorite-rpc）拿不到值 ⇒ 回落 yml 默认值 `postgres`（docker 服务名，宿主机解析不了）⇒ `UnknownHostException: postgres` → Flyway 连不上库 → **整个上下文起不来**，且 `run.sh` 的 `assert_started` 会**提前退出**、把对拍编排打断。**本轮已修**（两个都导出，值相同）⇒ 见 `tools/difftest/run.sh` 的 `POSTGRES_HOST` 注释 | **`tools/` 共享资产 · 本轮已修** |
+| 8 | 🔴 **`message-rpc` 的 Flyway 把 `V1` 当 baseline 跳过了** ⇒ `rag_db.message_notification` **永远不建**。实测账本：<br>`flyway_schema_history_message` = `1 \| << Flyway Baseline >> \| success=true` / `2 \| create message conversation` / `3 \| create message conversation message`<br>⇒ **V1 没跑**。<br>**根因**：`message-rpc/application.yml` 设了 `baseline-on-migrate: true`，而 **Flyway 的 `baseline-version` 默认是 1** ⇒ 当 schema **已非空**（`user-rpc`/`admin-rpc` 的 `SchemaInitializer` 先建了 `users_user`/`admin_admin`）时，Flyway 判定「非空 schema 且无账本」⇒ **baseline 掉 V1** ⇒ `V1__create_message_notification.sql` 从不执行。<br>⇒ **修法（属 message 域，本 worker 无权改其 yml）**：加 `spring.flyway.baseline-version: 0` ⇒ baseline 标记落在 0 ⇒ **V1 照常执行**（V1 本身已是 `CREATE TABLE IF NOT EXISTS`，幂等）。 | **message 域**（`service/message/message-rpc/src/main/resources/application.yml`） |
 
 ## 9. 本轮测试数字（2026-10-24）
 
