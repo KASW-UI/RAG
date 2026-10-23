@@ -235,6 +235,78 @@ class ArticleSemanticsRegressionTest {
     }
 
     // ==================================================================
+    // U-7：直方图的**分桶边界**必须与 Go 逐条一致（此前只对了指标名）
+    // ==================================================================
+
+    /**
+     * 🔴 U-7 —— MinIO 耗时的直方图<b>分桶边界</b>必须与 Go 的 8 个桶逐条一致。
+     *
+     * <h2>Go 出处（消费点）</h2>
+     * <pre>
+     * service/article/rpc/metrics/metrics.go:41-47
+     *   MinioRequestDuration = prometheus.NewHistogramVec(
+     *     prometheus.HistogramOpts{
+     *       Namespace: Namespace, Name: "minio_request_duration_seconds",
+     *       Buckets:   []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
+     *     }, []string{"operation"})
+     * </pre>
+     * ⇒ Go 的分桶边界**就是这 8 个**（外加 Prometheus 经典直方图固有的 {@code +Inf}）。
+     *
+     * <h2>⚠️ 此前为什么"看起来是对的"</h2>
+     * {@code ArticleRpcMetrics} 同时写了
+     * {@code .publishPercentileHistogram()} 与 {@code .serviceLevelObjectives(...)}，
+     * 注释还断言"换算后数值一致，因此两侧的分桶边界相同"。
+     * <br>🔴 <b>这个断言是错的</b>：Micrometer 的
+     * {@code DistributionStatisticConfig.getHistogramBuckets(supportsAggregablePercentiles)}
+     * （micrometer-core 1.16.7）取的是<b>并集</b>：
+     * <pre>
+     * if (percentileHistogram != null &amp;&amp; percentileHistogram &amp;&amp; supportsAggregablePercentiles) {
+     *     buckets.addAll(PercentileHistogramBuckets.buckets(this));   // 默认百分位桶
+     *     buckets.add(minimumExpectedValue);
+     *     buckets.add(maximumExpectedValue);
+     * }
+     * if (serviceLevelObjectives != null) { for (...) buckets.add(sloBoundary); }  // ← 只是**再加**
+     * </pre>
+     * ⇒ {@code publishPercentileHistogram()} <b>不是</b>"用 SLO 桶"，
+     * 而是"<b>额外</b>塞进一整套默认百分位桶" ⇒ 实际桶数远多于 Go 的 8 个。
+     *
+     * <h2>为什么这条必须用<b>真抓取</b>断言</h2>
+     * 桶集是 Micrometer 内部算出来的（{@code DistributionStatisticConfig} ⇒
+     * {@code PercentileHistogramBuckets} ⇒ 注册表的 exposition），
+     * <b>源码层面推不出最终结果</b> ⇒ 必须抓一次真实的 Prometheus 文本。
+     */
+    @Test
+    @DisplayName("🔴 U-7: MinIO 耗时的直方图分桶边界必须与 Go 的 8 个桶逐条一致")
+    void minioHistogramBucketsMatchGoExactly() {
+        PrometheusMeterRegistry registry = prometheusRegistry();
+        ArticleRpcMetrics metrics = new ArticleRpcMetrics(registry);
+
+        metrics.observeMinio("put", 12_000_000L);   // 12ms ⇒ 落在 0.01 与 0.025 之间
+
+        List<String> bucketLines = registry.scrape().lines()
+                .filter(l -> l.startsWith("article_service_minio_request_duration_seconds_bucket"))
+                .toList();
+
+        List<Double> actual = new ArrayList<>();
+        for (String line : bucketLines) {
+            int at = line.indexOf("le=\"");
+            String le = line.substring(at + 4, line.indexOf('"', at + 4));
+            // ⚠️ Prometheus 的 +Inf 桶标签是 "+Inf"，Double.parseDouble 不认
+            actual.add("+Inf".equals(le) ? Double.POSITIVE_INFINITY : Double.parseDouble(le));
+        }
+        java.util.Collections.sort(actual);
+
+        // Go 侧 8 个桶 + Prometheus 经典直方图固有的 +Inf
+        List<Double> expected = new ArrayList<>(List.of(
+                0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, Double.POSITIVE_INFINITY));
+
+        assertEquals(expected, actual,
+                "分桶边界必须与 Go metrics.go:46 逐条一致（8 个桶 + 固有的 +Inf）。"
+                        + "多出来的桶会让 histogram_quantile 的结果与迁移前不同，"
+                        + "也会让这条指标的 series 基数翻几倍");
+    }
+
+    // ==================================================================
     // S-5：content security 端口必须能表达 Go 的 !success 分支
     // ==================================================================
 

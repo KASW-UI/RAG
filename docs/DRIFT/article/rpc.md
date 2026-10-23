@@ -215,7 +215,7 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 | outbox 中继 | **`pollIntervalMs<=0` 兜底** | `article.go:62-65` ⇒ 1s | **未接上**（DRIFT-ARTICLE-RPC-006） | **OBSERVABLE DIFFERENCE** | 静态 |
 | outbox 中继 | `@Scheduled` 是否真的跑 | goroutine + ticker | `@EnableScheduling` 已声明（`ArticleRpcApplication:65`） | EQUIVALENT | 真上下文 |
 | 指标 | 6 个 Prometheus 全名 | `metrics.go:5-69` | 逐条一致（O-2 已改） | EQUIVALENT | SimpleMeterRegistry scrape |
-| 指标 | 直方图桶边界 | `metrics.go:46` 显式 8 桶 | `serviceLevelObjectives` 同 8 值 | UNKNOWN | 未做容器级 scrape 对拍 |
+| 指标 | 直方图桶边界 | `metrics.go:46` 显式 8 桶 | ~~`serviceLevelObjectives` + `publishPercentileHistogram` ⇒ **实际 77 桶**~~ ⇒ **已改为只用 SLO 桶（8 个）** | ✅ EQUIVALENT | **真 scrape 实测**（2026-10-24，`DRIFT-ARTICLE-RPC-010`） |
 | 错误边界 | `Rpc` / `Raw` / `StatusRuntimeException` / 其它 | grpc-go `status.FromError` 四档 | `ArticleServiceGrpcImpl:119-152` 四档齐 | EQUIVALENT | 纯 Mockito |
 | 错误边界 | **普通 `DataAccessException`** | 该路径 Go 本来就返 `INTERNAL` | 落 `UNKNOWN`（DRIFT-ARTICLE-RPC-003） | **SEMANTIC MISMATCH** | 静态 |
 | 配置 | server 超时 70000ms | `article.go:36` + `observability/rpc.go:19-23,30-38` | `observability.rpc-timeout: 70s` + 显式挂载（`ArticleRpcApplication:108-111`） | EQUIVALENT | 真上下文 |
@@ -270,7 +270,7 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 | **S-6** | `DEADLINE_EXCEEDED` 被降级为 `UNKNOWN`；已改 | 静态复核成立：`ArticleServiceGrpcImpl:127-141` 单列 `StatusRuntimeException` 透传，且**排在** `catch (RuntimeException)` **之前**。⚠️ 但该修复**只覆盖已带 status 的异常**；普通 `DataAccessException` 仍落 `UNKNOWN` ⇒ 本轮新发现 DRIFT-003 | ✅ 维持，⚠️ 覆盖不完整 |
 | **S-7** | `secondaryTag` 参数名不一致 ⇒ `BindingException`；已改 | 静态复核成立：`ArticleMapper.java:130-140` 的 `<if>` 现用 `secondaryTagJson`，与 `@Param` 一致。⚠️ **该方法的 jsonb 映射仍未修**（DRIFT-001） | ✅ 维持，⚠️ 同方法另有缺陷 |
 | **O-1** | not-found 文案 `"record not found"`；已改 | 静态复核成立：`ArticleExceptions.articleNotFoundRaw()` 产出该字面量，`invoke` 的 `catch (Raw)` 映射成 `UNKNOWN` | ✅ 维持 |
-| **O-2** | 6 个指标全名；已改 | 静态复核 + `SimpleMeterRegistry` scrape 一致。⚠️ 只对了**名字**（`# TYPE` 行），**未对桶边界** ⇒ U-7 | ✅ 维持（⚠️ 范围不全） |
+| **O-2** | 6 个指标全名；已改 | 静态复核 + `SimpleMeterRegistry` scrape 一致。⚠️ 只对了**名字**（`# TYPE` 行），**未对桶边界** ⇒ U-7 | ✅ 维持；🔴 **桶边界部分已于 2026-10-24 补完**（U-7 关闭，并因此发现 `DRIFT-ARTICLE-RPC-010`：实际 77 桶 vs Go 8 桶 ⇒ 已修） |
 | **O-3** | DB 计数失败不记 MinIO 指标；已改 | 静态复核成立：`ArticleDomainService:213-225` 的 catch 内**只有** `LOG.warn` | ✅ 维持 |
 | **O-4** | `extra.author_id` 传原串 vs 解析后数字串 | 复核：`MessageRpcClient:90-91` 传 `authorId` 原串 ✅ 与 Go `article_sync_result_consumer.go:207` 一致。🔴 **原记录的等价性论证已被证伪并推翻**：曾写「通知标题取 `approved.title`（冻结 payload）而 Go 取 `article.Title`（当前行）；在 `last_sync_event_id`/`version_ms` 双重判据约束下两者必相等」—— **双重判据约束的是 event_id 与 version，与标题无关**；作者在 REVIEWING 期间改标题时两者**确实不等** ⇒ 已立 `DRIFT-ARTICLE-RPC-009` 并**修复**（2026-10-24） | ❌ 原结论作废 ⇒ ✅ **已修**（`DRIFT-ARTICLE-RPC-009`） |
 | **O-5** | ~~Flyway 账本~~ | 复核：`article-rpc` 仍用默认 `flyway_schema_history`，按 AGENTS.md §6.3 问题 4 的既定分配归它独占 | ❌ 维持"证伪" |
@@ -494,6 +494,58 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 ⇒ 修复时**只**改通知那一处；revision 那一处**本来就该**取冻结值。
 ⇒ 回归网同时断言这两个源（任一取错都红），见 `docs/Pitfalls/article/rpc.md` `PF-ARTICLE-RPC-009`。
 
+### DRIFT-ARTICLE-RPC-010 —— MinIO 耗时的直方图**实际有 77 个桶**，Go 只有 8 个
+
+- **Component**: 指标 · MinIO 耗时直方图
+- **Operation**: `ArticleRpcMetrics.observeMinio`
+- **Category**: Observability（§21）
+- **Go Behavior**: `metrics/metrics.go:41-47`
+  ```go
+  MinioRequestDuration = prometheus.NewHistogramVec(
+    prometheus.HistogramOpts{
+      Namespace: Namespace, Name: "minio_request_duration_seconds",
+      Buckets:   []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
+    }, []string{"operation"})
+  ```
+  ⇒ 分桶边界就是这 **8** 个（外加 Prometheus 经典直方图固有的 `+Inf`）⇒ **共 9 个**。
+- **Java Behavior**（修复前）: `ArticleRpcMetrics.observeMinio` 同时写了
+  `.publishPercentileHistogram()` **和** `.serviceLevelObjectives(MINIO_BUCKET_DURATIONS)`。
+- **Difference**: 实际抓取到的桶边界是 **77** 个（0.001 / 0.001048576 / 0.001398101 / … / 30.0 / `+Inf`），
+  包含 Go 完全没有的整套默认百分位桶。
+- **Observable Impact**: ① `histogram_quantile(0.95, …)` 的结果与迁移前**不同** ⇒
+  基于分位数的告警阈值失效；② 该指标的 series 基数从 9 涨到 77 ⇒ 存储与查询成本上升。
+- **Likely Cause**: 对 Micrometer 的 API 语义误解 ——
+  `publishPercentileHistogram()` 被当成了「用我给的 SLO 桶」，
+  实际是「**额外**塞进一整套默认百分位桶」。
+- **Must Preserve**: 桶边界与 Go **逐条**一致（迁移前后告警阈值不变）。
+- **Recommended Verification**: 真 `PrometheusMeterRegistry` 抓一次 exposition，逐行比对 `le=` 标签。
+- **Classification**: **OBSERVABLE DIFFERENCE**
+- **Risk**: MEDIUM（告警阈值静默失效，不报错）
+- **Evidence**: **真 scrape 实测**（2026-10-24，`ArticleSemanticsRegressionTest#minioHistogramBucketsMatchGoExactly`）：
+  修复前实际 **77** 个边界、期望 **9** 个 ⇒ 用例转红；修复后 9/9 一致。
+
+#### 🔴 根因（Micrometer 消费点，micrometer-core **1.16.7**）
+
+```
+DistributionStatisticConfig.getHistogramBuckets(boolean supportsAggregablePercentiles)   // :101-117
+  if (percentileHistogram != null && percentileHistogram && supportsAggregablePercentiles) {
+      buckets.addAll(PercentileHistogramBuckets.buckets(this));   // ← 默认百分位桶（额外的一整套）
+      buckets.add(minimumExpectedValue);                          // → 0.001
+      buckets.add(maximumExpectedValue);                          // → 30.0
+  }
+  if (serviceLevelObjectives != null) {
+      for (double sloBoundary : serviceLevelObjectives) buckets.add(sloBoundary);   // ← 只是"再加"
+  }
+```
+
+⇒ **是并集，不是"SLO 优先"** ⇒ `publishPercentileHistogram()` 一旦出现，SLO 桶就被"淹没"在
+77 个桶里。**Go 的 8 个桶一个都没少，但多了 68 个**。
+
+⚠️ 原实现的 javadoc 写着"换算后数值一致，因此两侧的直方图分桶边界相同"——
+**这句话本身是错的**（它只对了 SLO 那一半，漏了 `publishPercentileHistogram` 那一半）。
+⇒ 这也是台账 O-2「只对了名字，没对桶边界 ⇒ U-7」当时没被追下去的原因：
+**错的那句注释正好在解释"为什么看起来等价"。**
+
 ## 8. Test Cases（§29 + §30，本轮**提出**而非**执行**的用例）
 
 | CASE | 输入 | 环境 | 期望语义 | 现状 |
@@ -519,8 +571,8 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 | **U-4**（新） | S-3 的**依据**已被证伪，那"已改"还成立吗？ | 同上 | RAG 的 javadoc（`ArticleRpcApplication.java:143-154`）引用的是 `commit(consumer, container, offset+1)`，**该分支只在 `commitRecovered=true` 时执行**（`SeekUtils.java:229`），而 `FailedRecordProcessor.java:57` `commitRecovered` 默认 **false**，本模块**从未** `setCommitRecovered(true)` ⇒ 引用的那段代码**不在本模块的执行路径上** | 结论方向（对齐丢弃）大概率仍成立，但**现有论证是错的**；锁测试 `kafkaContainersCarryTheForceCommitErrorHandler` 只断言 `isSeekAfterError()==true`，**分不清"因为这个理由对"与"碰巧对"** | 同 U-3；并把锁测试改成断言**行为**（失败一次后该 offset 已提交且不再投递），不是断言属性值 |
 | **U-5**（新） | `acceptSyncResult` 的**成功**路径在真 PG 上从未被验证 | `article_sync_result_consumer.go:74-153` | ~~现有真 PG 只测了 `domainOutboxFailureRollsBackEverything`（失败回滚）与两个 `getPublicArticle`~~ | ✅ **已关闭**（2026-10-24）：补 CASE-R11 的 **3 条**真 PG 用例，覆盖四步联动（revision/指针/域事件/status）、通知条件（首次发布 vs 已发布过）、标题双来源；**并因此发现 `DRIFT-ARTICLE-RPC-009`**（详见本轮修复节） |
 | **U-6**（新） | `updated_at` 该用哪种方式补（`@TableField(fill)` + `MetaObjectHandler` / mapper 里显式 SQL / DB 触发器）？ | GORM `autoUpdateTime` 由 ORM 承担 | RAG 侧三选一 | 这是**实现选择**，不是判定阻塞项；但选 `DB 触发器` 会让"已存在的 46 处批量改"之类的口径需要重新评估 | 由修复方决定；选定后必须配一条真 PG 用例（CASE-R04） |
-| **U-7**（新） | Micrometer 直方图的实际输出（`_seconds` 后缀 + 8 个桶边界 + `_count/_sum`）与 Go `HistogramVec` 是否逐桶一致？ | `metrics.go:41-49`（显式 8 桶） | `ArticleRpcMetrics:131-139`（`serviceLevelObjectives` + `publishPercentileHistogram`） | 现有断言只比对 `# TYPE` 里的**名字**（`ArticleSemanticsRegressionTest:177-220`），**没比对 bucket 边界**；且 `publishPercentileHistogram` 可能追加额外桶 | 容器级 `/actuator/prometheus` scrape 后逐行 diff `..._bucket` |
-| **U-8**（新） | `@Scheduled` 首次执行的 `initialDelay` 默认值 | `article.go:94` ticker ⇒ 首次在 1s 后 | 未读 `ScheduledAnnotationBeanPostProcessor` 源码 | DRIFT-ARTICLE-RPC-008 的 Java 侧一半 | 读 Spring 源码或起真容器看首两次触发时间戳 |
+| **U-7**（新） | Micrometer 直方图的实际输出（`_seconds` 后缀 + 8 个桶边界 + `_count/_sum`）与 Go `HistogramVec` 是否逐桶一致？ | `metrics.go:41-49`（显式 8 桶） | ~~`ArticleRpcMetrics:131-139`（`serviceLevelObjectives` + `publishPercentileHistogram`）~~ | ✅ **已关闭**（2026-10-24）：真 `PrometheusMeterRegistry` scrape 实测 ⇒ 发现 `publishPercentileHistogram` 与 SLO 桶取**并集** ⇒ 实际 **77** 个边界（Go 只有 **9**：8 + 固有的 `+Inf`）⇒ 已立 `DRIFT-ARTICLE-RPC-010` 并**修复**（去掉 `publishPercentileHistogram`） |
+| **U-8**（新） | `@Scheduled` 首次执行的 `initialDelay` 默认值 | `article.go:94` ticker ⇒ 首次在 1s 后 | ~~未读 `ScheduledAnnotationBeanPostProcessor` 源码~~ | ✅ **已关闭**（2026-10-24，**零新代码**，用 FIX-05 已有的实测证据）：① FIX-05 的变异 #4「去掉 `initialDelayString`」实测首触发在 **84ms** ⇒ **Spring 的默认值就是"立即执行"**；② 修复后由 `ArticleOutboxRelayScheduleTest#firstExecutionHappensAfterTheIntervalNotImmediately` 断言首次 ≥ 900ms（兜底间隔 1000ms）⇒ 与 Go ticker 同款 |
 | **U-9**（新） | 并发（8 handler）下的 offset 提交/跳过语义两侧是否一致 | `kq/queue.go:219-246`（8 个 processor 各自 `CommitMessages`，**不保证连续**） | RECORD + 上面那套 handler | 两边都**没有**活体对拍；顺序错乱窗口未量化 | 真 Kafka 压测 + 逐条比对 |
 | **U-2**（沿用） | 锁顺序反转 | Go 侧两条路径都由 `RetractPublicationTx` 的 `FOR UPDATE` 串行化 | Java 已统一成 article → publication，但 `retractAndUpdate` 多了一次 `selectByIdForUpdate` 提前 return | 真并发用例未写（CASE-R12） | 同左 |
 | **U-4'**（沿用） | 双侧活体对拍 | Go 依赖 `etcd:2379`，本机拉不起 | — | 本轮仍 **0** 条 | 起 etcd |
@@ -1111,3 +1163,84 @@ public class ArticleSchemaGate implements SmartInitializingSingleton {
 ⇒ 同样在"server 已起来之后"才校验。
 ⇒ 是否构成同等级缺陷，取决于各自门禁的 fail-fast 程度与所保护的不变量。
 ⇒ ⚠️ **本工作树不碰其它域**（§5.3：只写自己域的台账文件）。
+
+---
+
+<!-- @fix 2026-10-24 第五轮 · 由 align/article 工作树产出 · 基线 commit 50cab9c -->
+
+## 2026-10-24 第五轮：U-7 关闭 ⇒ **顺带发现并修掉 `DRIFT-ARTICLE-RPC-010`（直方图 77 桶 vs Go 8 桶）**
+
+> 起因是台账里的 `U-7`：「直方图的实际输出与 Go 是否逐桶一致？」
+> ⇒ 补上真 scrape 用例后，**答案不是"一致"，而是"差 8 倍"**。
+
+### ✅ FIX-08 —— `U-7` 关闭（真 scrape 实测）+ `DRIFT-ARTICLE-RPC-010` 已修（桶边界对齐 Go）
+
+#### 实测结果（修复前）
+
+真 `PrometheusMeterRegistry`（`PrometheusConfig.DEFAULT`）抓 `article_service_minio_request_duration_seconds_bucket`：
+
+| | 桶边界数 | 内容 |
+|---|---|---|
+| Go `metrics.go:46` | **9** | `0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1` + 固有的 `+Inf` |
+| RAG（修复前） | **77** | `0.001, 0.001048576, 0.001398101, …, 30.0, +Inf` |
+
+⇒ Go 的 8 个桶**一个都没少**，但**多了 68 个** ⇒ `histogram_quantile` 的结果与迁移前不同。
+
+#### 根因（Micrometer 消费点，micrometer-core **1.16.7**）
+
+`DistributionStatisticConfig.getHistogramBuckets(...)`（`:101-117`）取的是**并集**：
+
+```
+percentileHistogram 分支  →  PercentileHistogramBuckets.buckets(this)  // 默认百分位桶（额外）
+                            + minimumExpectedValue (0.001) + maximumExpectedValue (30.0)
+serviceLevelObjectives   →  8 个 SLO 桶（只是"再加"）
+```
+
+⇒ `publishPercentileHistogram()` **不是**"用我给的 SLO 桶"，而是"**额外**塞进一整套默认百分位桶"。
+
+#### 修复（去掉一行）
+
+```java
+Timer.builder("article_service_minio_request_duration")
+        .description("Latency of MinIO requests.")
+        .tag("operation", operation)
+-       .publishPercentileHistogram()          // ← 这一行让桶从 9 涨到 77
+        .serviceLevelObjectives(MINIO_BUCKET_DURATIONS)
+        .register(registry)
+        .record(durationNanos, TimeUnit.NANOSECONDS);
+```
+
+⚠️ 只去掉这一行，**不新增任何桶常量** ⇒ 桶集直接由 `MINIO_BUCKETS`（= Go 的 `metrics.go:46` 同一组数值）决定。
+
+#### 证据
+
+- **真 scrape 实测**：修复前 **77** 个边界 ⇒ 用例转红（`expected: <[0.005, …, Infinity]> but was: <[0.001, 0.001048576, …]>`）；
+  修复后 **9** 个，与 Go 逐条一致。
+- **变异验证（三态判定）**：`MUT-RED`
+  —— 把 `.publishPercentileHistogram()` 加回去 ⇒ 用例转红 ⇒ **回归网非假绿**。
+- **模块级**：`ArticleSemanticsRegressionTest` **11 条全绿**（原 10 ⇒ +1）；
+  `article-rpc` **115 tests / 0 failures / 0 errors / 0 skipped**（原 114 ⇒ +1）；
+  连同 `article-api` 67 + `article-common` 15 ⇒ **article 域合计 197 / 0 / 0 / 0**（`BUILD SUCCESS`）。
+
+#### 判定变化（FIX-08）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `U-7` 直方图桶边界真 scrape | 🔴 OPEN（未做 scrape 对拍） | ✅ **已关闭**（实测 + 变异验证） |
+| `DRIFT-ARTICLE-RPC-010` 桶边界 77 vs 9 | 🔴 **未被登记**（被当成"应该一致"） | ✅ **已修** + 真 scrape + 变异验证 |
+| `O-2` 的范围 | ⚠️ 只对了名字 | ✅ **范围补完**（名字 + 桶边界） |
+| `DRIFT-007` / `U-2` / `U-3` / `U-4` / `U-6` / `U-8` / `U-9` / `U-4'` / `U-5'` | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
+| S-5（security 域） | ⛔ 阻塞 | ⛔ **仍阻塞**（security 域不在本项目范围内） |
+| **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
+
+⚠️ **判定不变的理由**：只关掉 1 条 `U-*`、修掉 1 条新漂移；
+其余 `DRIFT` / `U-*` 仍在，且**无双侧活体对拍**（Go 侧仍需 `etcd:2379`）
+⇒ 本条的 ✅ 读作「**在真 scrape 证据下一致**」，不是「已闭环」。
+
+#### 📌 一条可复用的元教训
+
+**注释里那句"因此两侧等价"最危险** —— 它既像结论又是**不查证就下结论的理由**。
+本轮正是这句注释（"换算后数值一致，因此两侧的分桶边界相同"）让一条 8 倍的差异
+在台账里以 `EQUIVALENT` 的面目待了很久。
+⇒ 对照 AGENTS.md §3.3.2（以「Go: …」措辞出现的断言属于高危项）：
+**任何"因此两侧一致"的注释，都必须配一条能把它证伪的用例**，否则它只是在**阻止**别人去查。

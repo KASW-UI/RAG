@@ -494,3 +494,68 @@ assertEquals("作者改过的标题", outcome.title());      // Go :147
    | `ApplicationRunner` | `refresh()` 之后、ready 之前 | ⚠️ 仍晚于 lifecycle 启动 |
 2. 断言"没启动过"要用**组件自己发的启动事件**，不要用"事后端口/连接/进程状态"。
 3. 每条负向用例配一条**正例**，证明观测手段有效。
+
+---
+
+## PF-ARTICLE-RPC-011 —— `publishPercentileHistogram()` **不是**"用我给的桶"，而是"**额外**塞一整套默认桶"
+
+**现象**
+给 MinIO 耗时的直方图对齐 Go 的分桶时，代码里同时写了：
+
+```java
+Timer.builder("article_service_minio_request_duration")
+        .publishPercentileHistogram()
+        .serviceLevelObjectives(MINIO_BUCKET_DURATIONS)   // ← Go 的 8 个桶
+```
+
+注释还写着「换算后数值一致，因此两侧的分桶边界相同」。
+⇒ **实测：RAG 77 个桶，Go 9 个**（8 + 固有的 `+Inf`）。
+
+**根因（框架机制，读到消费点）**
+micrometer-core **1.16.7**，`DistributionStatisticConfig.getHistogramBuckets(...)`（`:101-117`）：
+
+```java
+if (percentileHistogram != null && percentileHistogram && supportsAggregablePercentiles) {
+    buckets.addAll(PercentileHistogramBuckets.buckets(this));   // ← 默认百分位桶（额外的一整套）
+    buckets.add(minimumExpectedValue);                           // → 0.001
+    buckets.add(maximumExpectedValue);                           // → 30.0
+}
+if (serviceLevelObjectives != null) {
+    for (double sloBoundary : serviceLevelObjectives) buckets.add(sloBoundary);   // ← 只是"再加"
+}
+```
+
+⇒ **是并集，不是"SLO 优先"**。
+`publishPercentileHistogram()` 的语义是"我要 Prometheus 原生的百分位直方图"，
+而 Prometheus 的原生桶表是**固定的一整套**（Micrometer 用 4 的幂 + 1/3 步长生成，共 77 个含 `+Inf`），
+**与你给的 SLO 桶无关** —— 它只会**叠加**上去。
+
+**为什么测试抓不到**
+原来的断言只比对 `# TYPE` 行里的**指标名**（`# TYPE xxx histogram`），
+**桶在 `_bucket` 系列的 `le=` 标签里**，压根不在被断言的那几行里。
+⇒ 名对了、桶错了，测试照样绿。
+
+**元教训**
+> **Micrometer 的 `serviceLevelObjectives` 与 `publishPercentileHistogram` 不是二选一，是叠加。**
+> ⇒ 只要目标是"桶边界与 Go 逐条一致"，就**只**写 `serviceLevelObjectives`。
+> ⇒ 凡是要与 Go 的 `HistogramOpts.Buckets` 对齐，**不要**加 `publishPercentileHistogram()`。
+>
+> **更通用的一条**：
+> **注释里那句"因此两侧等价"最危险** —— 它既像结论，又是**不查证就下结论的理由**。
+> 本轮正是这句注释让一条 8 倍的差异在台账里以 `EQUIVALENT` 的面目待着。
+> ⇒ 对照 AGENTS.md §3.3.2：**任何"因此一致"的断言，都必须配一条能把它证伪的用例**，
+> 否则它只是在**阻止**别人去查。
+
+**为什么这条必须用<b>真抓取</b>断言**
+桶集是 Micrometer 内部一层层算出来的（`DistributionStatisticConfig` ⇒
+`PercentileHistogramBuckets` ⇒ 注册表的 exposition），
+**源码层面推不出最终结果**（还要过 `includeInfinityBucket`、Prometheus 客户端自己补 `+Inf` 等几道）。
+⇒ 必须抓一次真实的 Prometheus 文本，逐行读 `le=` 标签。
+
+**下次怎么防**
+1. 对齐 Go 的 `HistogramOpts.Buckets` ⇒ **只用 `serviceLevelObjectives`**，且**不**加 `publishPercentileHistogram()`。
+2. 断言要**抓 exposition**，逐行读 `le=`，而不是只对 `# TYPE` 的名字。
+3. 断言时把 `+Inf` 单独处理（`Double.parseDouble("+Inf")` 会抛 `NumberFormatException`，
+   Prometheus 的标签字面量是 `"+Inf"` 而不是 `"Infinity"`）。
+4. 凡是"框架 A 的这个开关 + 框架 B 的那个配置"组合使用，
+   **先查清楚两者的合并语义**（并集？覆盖？优先级？）—— Micrometer 这里就是**并集**。
