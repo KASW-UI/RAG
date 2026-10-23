@@ -95,3 +95,39 @@ done 标记的段序点赞路 uid 在前、文章路 taskId 在前。
 | 本域 DRIFT | [`../../DRIFT/task/rpc.md`](../../../../DRIFT/task/rpc.md) · [`api.md`](../../../../DRIFT/task/api.md) · [`proto.md`](../../../../DRIFT/task/proto.md) |
 | 本域踩坑 | [`../../Pitfalls/task/rpc.md`](../../../../Pitfalls/task/rpc.md) |
 | 全仓决策档 | [`_INDEX.md`](./_INDEX.md) · [`_cross/decisions.md`](./_cross/decisions.md) |
+---
+
+## SD-2026-10-24-TASK-01 · topic 缺失时：Go **进程退出** vs RAG **服务存活**
+
+**签字状态**：✅ 已签字（2026-10-24 登记）。**性质**：RAG 做了**更可用**的那一侧。
+
+### 两侧取值
+
+| | 值 | 出处 |
+|---|---|---|
+| Go | 🔴 **进程直接退出** | `initGoKa.go:138-145`：`goka.NewProcessor` 返回错误 ⇒ `log.Fatal(err)`。<br>而该错误的**根因**是 topic 不存在：`goka@v1.1.16 processor.go:1012` → `ensureCopartitioned` → `tm.Partitions(topic)` 失败 ⇒ `return 0, fmt.Errorf("Error fetching partitions for topic %s: %v", ...)`（`processor.go:1035-1040`）⇒ **`EnsureStreamExists` 根本没被调用** ⇒ goka 的「建 topic」路径是死的 |
+| RAG | ✅ **服务存活**，listener 持续重试 | Spring Kafka 的 listener 容器在 topic 缺失时只记 WARN 并重试；<br>已有运行证据：`TaskProgressUpsertParityTest` 用 `spring.kafka.bootstrap-servers=127.0.0.1:1`（**完全不可达**）仍能起完整 Spring 上下文并跑绿 15 条 |
+
+**实测**（2026-10-24，真 Kafka，干净 broker，不预建 topic）：
+
+```
+2026/10/24 04:58:59 Error fetching partitions for topic task.logs.raw: requested topic was not found
+⇒ go-task-rpc 进程退出
+```
+
+### 为什么 RAG 不照抄
+
+1. **照抄在容器化部署里是错的**：K8s 里「topic 缺失」通常是**部署顺序/配置漂移**的**短暂**状态
+   （运维还没建 topic、或 broker 还没就绪）⇒ Go 的行为是 **CrashLoopBackOff**，
+   而 **Spring 的重试恰好能自愈**（topic 一建好，listener 立刻开始消费）。
+2. **Go 的 `log.Fatal` 发生在 goka 的 `prepareTopics`**，那是 goka 库的设计取舍（它假设 topic 由外部管）；
+   RAG 不引入「组件负责 topic 生命周期」这个契约 ⇒ 也就没有在 topic 缺失时自杀的理由。
+3. **本条不是「RAG 更安全」而是「RAG 更可用」**：它让 RAG 在部署顺序异常时**自愈**而非**崩溃重启**。
+
+### 复核要点
+
+- ⚠️ **不要**把本条推广到别的域：那是「goka 的 `prepareTopics` 要求输入 topic 已存在」这个**具体前提**的结论。
+- ⚠️ 本条**不涉及** topic 的 config（`cleanup.policy` / `retention.ms`）——
+  那一侧两侧**都不管**（Go 侧 `handleConfigMismatch` 是 `Ignore` 分支、**连日志都不打**，
+  `goka topic_manager.go:158-167`）⇒ RAG 侧同样不建、不改 topic ⇒ **一致，无差异**。
+  详见 [`../../DRIFT/task/rpc.md`](../../../../DRIFT/task/rpc.md) §四·七·一。

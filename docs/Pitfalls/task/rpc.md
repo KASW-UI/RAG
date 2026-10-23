@@ -725,3 +725,245 @@ Nacos **2.x 的客户端用 gRPC 注册**（nacos-client 3.x 的 `NamingGrpcClie
    的变量定义处写死注释（NACOS_GRPC=NACOS_HTTP+1000，不能乱填）。
 3. ⚠️ 附带一条：**Nacos 的 readiness 端点返回 `OK`，不是 `UP`** ——
    探针写 `grep -q UP` 会永远等不到（实测空转 120 秒才失败）。
+
+
+---
+
+## 🔴 PITFALL-TASK-RPC-18 · `@KafkaListener(properties=…)` **不走 Boot 松散绑定** ⇒ 连字符写法被 Kafka 静默忽略 ⇒ 「earliest 从未生效」而 326 条测试全绿
+
+> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-006`](../../../../DRIFT/task/rpc.md#-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)
+
+### 现象
+
+台账上一版写的是「goka 三处 `OffsetOldest` 与 kq 三处 `"latest"` 方向相反，
+**RAG 逐 listener 用 `properties` 覆盖，与 Go 一致**」—— 而且**旁边就挂着一条待办**：
+「goka 的 `OffsetOldest` 只作用于首次消费无位点的 group；本条结论限于**配置意图一致**，
+**未做活体验证**」。
+
+⇒ 2026-10-24 真去验了，发现**「配置意图一致」本身就是错的**：
+
+```
+# RAG 侧 consumer 的 config dump（真 Kafka）：
+auto.offset.reset = latest
+AbstractConfig : These configurations '[auto-offset-reset]' were supplied but are not used yet.
+```
+
+### 根因（两层）
+
+1. **Kafka 的合法配置名是点分的 `auto.offset.reset`**
+   （`org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET_CONFIG`）。
+2. ⚠️ **`@KafkaListener(properties = "auto-offset-reset=earliest")` 不走 Spring Boot 的松散绑定**
+   ⇒ 这个字符串**原样**塞进 consumer 的 props ⇒ Kafka 走
+   `ConfigDef.parse` 的 **unused** 分支 ⇒ **只打一条 info 日志，然后彻底忽略**。
+
+⇒ 同一个语义、**两条完全不同的生效路径**：
+
+| 写法 | 是否生效 | 原因 |
+|---|---|---|
+| `spring.kafka.consumer.auto-offset-reset: latest`（yaml） | ✅ **生效** | Boot 松散绑定会转成 `auto.offset.reset` |
+| `@KafkaListener(properties = "auto-offset-reset=earliest")` | ❌ **被忽略** | 原样传递，Kafka 不认连字符 |
+
+⇒ **两个 listener 写的值一个生效一个不生效，肉眼看不出来** ——
+`latest` 那三处「碰巧对」（全局默认恰好也是 latest），`earliest` 那三处**从未生效**。
+
+### 为什么 326 条测试全绿也抓不到
+
+⚠️ **所有既有对拍都是「先起消费者、后灌消息」** ⇒
+那种顺序下 `latest` 与 `earliest` **没有任何可观察差别**（消息都产生在消费者 join 之后）
+⇒ 绿测试是**假绿**。
+⇒ 只有「**先灌消息、再起消费者**」（全新 group、无已提交位点）才暴露它。
+
+### 修法与守门
+
+1. 六个 listener 全部改成**点分**的 `auto.offset.reset`。
+2. 新增 `TaskKafkaOffsetResetContractTest`（5 条）：
+   - **阳性对照**：用 Kafka 自己的 `ConsumerConfig` 证明「连字符形式确实不被采纳」
+     （加了连字符键 vs 完全不给这个键，生效值**完全一样**）；
+   - 六个 listener 的精确断言；
+   - ⭐ **通用断言**：所有 per-listener property 的键名**都必须是 `ConsumerConfig.configNames()` 认识的合法名**
+     ⇒ 以后写错任何键名都会被立刻抓住。
+   - ✅ **变异测试已做**（改回连字符 ⇒ 2 条变红）⇒ 非假绿。
+3. ⭐ **抓它的方法（可复用）**：**把「先灌消息、再起消费者」做成一条对拍**。
+   凡是要验「初始位点 / 首次消费 / 无位点回落」这类语义，
+   **必须让消息早于消费者存在**，否则测的是「消费新消息」而已。
+
+### 元教训
+
+> **「配置意图」与「配置生效」是两件事**，而 Java 生态里这条缝特别大：
+> yaml 那条走 Boot 松散绑定（**认连字符**），
+> `@KafkaListener(properties=…)` 那条不走（**只认点分**）。
+> ⇒ 同一个键名，**两种写法，一个生效一个静默失效**。
+> ⇒ 写「与 Go 一致」之前，先问一句：**这个值到 Kafka 手里的时候还是不是它？**
+> ⇒ 而且**静默失效不报错**（Kafka 只打一条 info）⇒ 绿测试天然测不出来。
+
+---
+
+## 🔴 PITFALL-TASK-RPC-19 · 探针自己会撒谎：**同一个实验连翻三次车**，前两次的「结论」全是假的
+
+### 现象
+
+要回答「Kafka 的 `cleanup.policy=compact` 会不会按 `retention.ms` 删消息」，
+写了个探针，**第一次跑出来的结论是「会删」** ⇒ 于是差点据此给 `task:goka:count:*` 加 TTL。
+
+### 三次翻车
+
+| 版本 | 观测 | 我以为的结论 | 真相 |
+|---|---|---|---|
+| v1 | `compact`=0 条、`delete`=0 条、`plain`=1 条 | 「compact 也按时间删」 | ⭐ **producer 写失败被 `>/dev/null 2>&1` 吞了**。compact/delete/plain 是**按顺序**写的 ⇒ broker 刚重建还没 ready ⇒ **先写的两个失败、最后那个成功** ⇒ 「0 条」是「没写进去」，不是「被删了」 |
+| v2 | 全部 0 条 | 「全被删了」 | 五个 topic **全是 compact** ⇒ 全部写失败 ⇒ 全 0 |
+| v3 | 全部 0 条 + 报错 | 「探针坏了」 | ⭐ **Kafka 拒绝 compacted topic 上没有 key 的消息**：`InvalidRecordException: Compacted topic cannot accept message without key` ⇒ 我用 `echo` 写的消息**没有 key** ⇒ broker 直接拒收 |
+
+### 真正的原因（v4 才跑对）
+
+| topic | `cleanup.policy` | `retention.ms` | `segment.ms` | 读回 | 含义 |
+|---|---|---|---|---|---|
+| `y_short` | **compact** | 1000 | 1000 | **1 条（存活）** | ⭐ compact 单独使用**不按时间删** |
+| `z_delete` | delete | 1000 | 1000 | **0 条（被删）** | ✅ **阳性对照**：同参数下 delete 确实被删 ⇒ 机制有效、探针有区分力 |
+| `w_default` | delete | 默认 | 默认 | 1 条 | ✅ 阳性对照 |
+| `x_infinite` | compact | -1 | 1000 | 1 条 | ✅ |
+| `v_noseg` | compact | 1000 | **默认（不滚动）** | 1 条 | ✅ **segment 粒度对照**：证明 `y_short` 存活不是因为 segment 没滚动 |
+
+⇒ **结论：compact 单独使用时 Kafka 不启用按时间删除** ⇒ Go 的 compacted table 的 key 不按时间过期。
+
+### 教训（这才是可复用的部分）
+
+1. ⭐ **每一步的产出都要验**：写完消息立刻 `kafka-get-offsets.sh` 确认 `offset > 0`，
+   **写不进去就重试，重试还不行就直接判「本次实验作废」并退出** ——
+   **绝不能把「没写进去」当成「被删了」**。
+2. ⭐ **不要吞 producer 的输出**。`>/dev/null 2>&1` 会把「写失败」伪装成「数据消失」。
+3. ⭐ **阳性对照是硬要求**：必须有「同参数、不同 `cleanup.policy`」的那一条，
+   才能证明「探针分得出被删与没被删」。
+4. ⭐ **Kafka 的 compacted topic 强制要求消息带 key** —— 这条解释了
+   **为什么 Go 的 goka 一直带 `ctx.Key()` emit**（`initGoKa.go:81`/`:106`）。
+5. ⚠️ **Kafka 的按时间删除是按 segment 粒度的** ⇒ 测它必须让 segment 先滚动
+   （`segment.ms` 调小），否则单条消息在活跃 segment 里永远不会被删。
+
+> 📌 **这条与本仓已有的 PITFALL-04（Python urllib 自动补 Content-Type）是同一类**：
+> **探针的观测值不等于被观测对象的状态** —— 中间隔着探针自己的行为。
+
+---
+
+## 🔴 PITFALL-TASK-RPC-20 · compose 的**项目名从目录名推导** ⇒ 同目录的两个 compose 文件撞成同一个 project ⇒ `up -d` 会**删掉别的域的容器**
+
+### 现象
+
+在 `tools/difftest/` 下执行
+`docker compose -f docker-compose.task-kafka.yml up -d`，
+输出里出现了：
+
+```
+Container difftest-postgres Recreate
+Container difftest-redis Recreate
+```
+
+⇒ 而 `difftest-postgres` / `difftest-redis` **不是我的** —— 它们是
+**user 域**的基建（同目录的 `tools/difftest/docker-compose.yml`）。
+⇒ 执行完后那两个容器**消失了**。
+
+### 根因
+
+**docker compose 的项目名默认从 compose 文件所在目录名推导**。
+本仓 `tools/difftest/` 下有**两个** compose 文件：
+
+| 文件 | 用途 | 目录 ⇒ 项目名 | 容器名 |
+|---|---|---|---|
+| `docker-compose.yml` | **user 域**基建 | `difftest` | `difftest-postgres` / `difftest-redis` |
+| `docker-compose.task-kafka.yml` | **task 域**基建 | `difftest` | `taskprobe-postgres` / `taskprobe-redis` |
+
+⇒ **两个文件的 project 名都是 `difftest`** ⇒ compose 把对方的服务当成
+「同 project 的同名服务」⇒ **`up -d` = Recreate = 删掉重建**；
+`down -v` 更狠 ⇒ **还会把对方的数据卷一起删掉**。
+
+⇒ 而且是**双向**的：user 域的 `run.sh` 跑 `down -v` 同样会把 task 域的容器与卷删掉。
+
+### 修法
+
+在 task 域的 compose 文件里**显式声明项目名**：
+
+```yaml
+name: taskprobe          # ← 不是装饰，是「项目名」
+```
+
+⇒ 两个 project 彻底分开，两个方向的 `up` / `down -v` / `rm` 都只影响自己的。
+
+### 教训
+
+1. ⭐ **同一个目录里不要放第二个 compose 文件而不改项目名**。
+2. ⭐ 判据：**`docker compose ls` 看 project 名** ——
+   两个文件同名目录 ⇒ 同 project ⇒ 会互相 Recreate。
+3. ⚠️ 脚本里**显式带 `-p <project>`** 是第二道保险
+   （本仓 task 域的脚本已统一带 `-p taskprobe`）。
+4. ⚠️ **误删后能不能恢复**：user 域的 compose **只有 bind mount、没有命名卷**
+   ⇒ 重建容器即重跑 `initdb.sql` ⇒ **可完全恢复**（本次已恢复并验证 healthy）。
+   ⚠️ 但**如果对方用了命名卷，`down -v` 就不可逆了** ⇒ 所以要**先查 volume 再动手**。
+
+---
+
+## ⚠️ PITFALL-TASK-RPC-21 · bash 里 `$var` 紧跟**全角标点** ⇒ 标点被算进变量名 ⇒ `set -u` 下直接报错
+
+### 现象
+
+自己写的探针脚本报：
+
+```
+retention-probe.sh: line 71: off?: unbound variable
+```
+
+⇒ 那一行是 `echo "  ✓ $t 写入成功（offset=$off，第 $attempt 次）"` ——
+**`$off` 后面紧跟一个全角逗号**。
+
+### 根因
+
+bash 的变量名解析会把**非 ASCII 字节**也算进名字 ⇒ `$off，` 被当成一个叫 `off，` 的变量。
+⇒ 在 `set -u`（`set -euo pipefail` 的一部分）下 ⇒ **unbound variable 硬失败**。
+
+### 修法
+
+**一律写 `${var}`**：`offset=${off}`。
+
+### 教训
+
+1. ⭐ 这是**本仓已踩过两次的同一个坑**：`tools/difftest/run.sh` 里就有同款
+   （上一轮修过 2 处），本轮在一次性探针脚本里**又踩了一次**。
+2. ⭐ **中文注释/文案多的脚本里特别容易犯** —— 因为中文标点满天飞。
+3. ⭐ 机械检查（本次用的）：
+
+   ```bash
+   python3 - <<'PY'
+   import re, io, sys
+   pat = re.compile(r'\$([A-Za-z_][A-Za-z0-9_]*)(?=[^\x00-\x7f])')
+   for p in sys.argv[1:]:
+       hits = pat.findall(io.open(p, encoding="utf-8").read())
+       print(p, hits or "OK")
+   PY
+   ```
+
+   ⇒ 本轮把 task 域**全部 7 个脚本**扫了一遍：只有一处命中，且**在注释里**（无害）。
+4. ⚠️ `bash -n` **查不出这个错**（语法合法，是运行期语义错）⇒ 只能靠上面那把尺子。
+
+---
+
+## 🔴 PITFALL-TASK-RPC-22 · 「先起消费者、后灌消息」的对拍**测不出** `earliest` / `latest` 的差别 ⇒ 全绿是假绿
+
+### 现象
+
+2026-10-24 之前，本域所有 Kafka 对拍（E2E、畸形消息、HTTP 双侧）**都是**：
+**先起两侧栈 → 等消费者认领分区 → 再灌消息**。
+
+⇒ 在这种顺序下，`auto.offset.reset=earliest` 与 `=latest`
+**没有任何可观察差别**：消息都产生在消费者 join **之后**，两种起点都能消费到。
+
+⇒ 于是「goka 三处 earliest / kq 三处 latest 与 Go 一致」这个结论，
+**在所有既有对拍里都是恒真的** ⇒ **它不是被验证过的，它是被这个顺序掩盖的**。
+
+### 教训
+
+1. ⭐ **要验「初始位点」语义，对拍的顺序必须反过来**：
+   **先灌消息 → 再起消费者**（且 consumer group 必须是全新的 ⇒ 无已提交位点）。
+2. ⭐ 这类语义（`auto.offset.reset` / `Offsets.Initial` / sarama 的 `OffsetOldest`）
+   **只在「无位点」这一条分支上生效** ⇒ 对拍必须精确命中那条分支。
+3. ⭐ **「测试全绿」与「这条语义被验证过」是两回事** ——
+   顺序不对时，绿测试**测不到**它（AGENTS.md §3.3「跑绿 ≠ 对」的又一实例）。
+4. ⇒ 落地：`tools/difftest/run-task-offset-oldest.sh`
+   —— 阶段 B「先灌消息」→ 阶段 C「再起消费者」，并配**阴性对照**（kq 必须跳过预灌消息）
+   与**阳性对照**（启动后投递的消息必须被消费）⇒ 探针**有区分力**。

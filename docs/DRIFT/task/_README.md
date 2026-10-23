@@ -8,14 +8,14 @@
 
 | 组件 | 台账 | 最新结论 | 证据强度 |
 |---|---|---|---|
-| `task-rpc` | [`rpc.md`](./rpc.md) | ✅ **首轮为 🔴 NOT EQUIVALENT（5 条漂移），现已全部修复** · 已修 **5** 条 | ✅✅✅ Kafka 端到端活体对拍 · ✅✅✅ Kafka 畸形消息活体对拍（五个用例）· ✅✅ gRPC 双向跨语言对拍 · ✅ 真启动 + 真 PG 16 + 真 Redis |
+| `task-rpc` | [`rpc.md`](./rpc.md) | ✅ **首轮为 🔴 NOT EQUIVALENT（5 条漂移），现已全部修复；本轮又查出并修掉第 6 条** · 已修 **6** 条 | ✅✅✅ Kafka 端到端活体对拍 · ✅✅✅ Kafka 畸形消息活体对拍 · ✅✅ gRPC 双向跨语言对拍 · ✅✅✅ **「首次消费无位点」活体对拍（8 条断言全过，查出 DRIFT-TASK-RPC-006）** · ✅ 真启动 + 真 PG 16 + 真 Redis |
 | `task-api` | [`api.md`](./api.md) | ✅ **EQUIVALENT** · 已修 **3** 条 | ✅✅ 双侧活体对拍（44 条，MATCH 44/DIFF 0）· ✅✅ 真 Tomcat 守门（12 条 + 变异测试）· ✅✅ Nacos 真注册中心（注册/注销实测）· ✅ 真实 MVC 管线（MockMvc，20 条）· ⚠️ gRPC 边界在单测里是 mock |
 | `task-proto` | [`proto.md`](./proto.md) | ✅ 一致（消费方式本轮首次核对） | ✅ 双侧静态 diff（`check-proto-static.sh` EXIT=0）+ 真构建 |
 
 **task 域没有 `-common`** —— Go 侧 `service/task` 下只有 `api` 与 `rpc`，**不是遗漏**。
 ⇒ 错误全部是标准 gRPC code（`INVALID_ARGUMENT` / `UNKNOWN`），不需要 like/message 那种业务码 ↔ gRPC code 转换类。
 
-## 本轮改了什么（首轮 7 个 + 第二轮 5 个 commit）
+## 本轮改了什么（首轮 + 第二轮 + 盘点收口 + 第三轮，共 **24 个 commit**）
 
 ### 首轮（2026-10-23）
 
@@ -49,7 +49,7 @@
 | `546457b` | **Nacos 真注册中心对拍**（注册 → 注销，EXIT=0）+ 修既有 `run.sh` 里 2 处同款潜伏 bug（`$var` 紧跟多字节字符） |
 | `（本次）` | 台账：api.md 加 §四·六（Nacos 证据）+ Pitfalls 15·补 / 17 + 本 README |
 
-### 第三轮（2026-10-24 · 台账盘点收口）
+### 第二轮之二（2026-10-24 · 台账盘点收口）
 
 | commit | 内容 |
 |---|---|
@@ -70,8 +70,8 @@
 
 ⇒ 修这 8 处的原因是**防下一个 agent 照着过期待办重做已完成的事**（`proto.md` 那两条当时是会真去重做的）。
 
-**最终测试**：`task-api` **90**（含新增 12 条真 Tomcat）/ `task-rpc` **90**（含 15 条真 PG + **9 条真 Redis**）/ `common` **146**
-⇒ **326 条全部 0 failures / 0 errors / 0 skipped**。
+**最终测试**：`task-api` **90**（含新增 12 条真 Tomcat）/ `task-rpc` **99**（含 15 条真 PG + **13 条真 Redis** + **5 条 offset-reset 契约**）/ `common` **146**
+⇒ **335 条全部 0 failures / 0 errors / 0 skipped**。
 
 **静态守门**：`check-proto-static.sh` EXIT=0 · `check-ddl-static.py --domain task` EXIT=0（11 列 0 差异）· `check-plaintext400-headers.sh` EXIT=0。
 
@@ -93,14 +93,25 @@
 | 8 | 「Kafka 写入 → task-api 读到」闭环 | ⚠️ **不做** —— 两侧读写 Redis key **本来就不一致**（Go 侧也读不到自己写的缓存）⇒ 不是 RAG 的缺陷 |
 | 9 | `parity-task-kafka.py` 纳入 CI | ⚠️ **未做** —— 要用 Testcontainers 改造**共享**构建基建，范围超出 task 域，需与其它域协调 |
 | 10 | `task:goka:count:*` 保留策略 | ⚠️ **未做** —— 要给 Redis key 加 TTL/清理策略是**新增行为**，按 AGENTS.md 需单独拍板 |
+### 第三轮（2026-10-24 · 验「goka OffsetOldest」+ 定案「保留策略」）
+
+| commit | 内容 |
+|---|---|
+| `（本轮）` | 🔴 **修 DRIFT-TASK-RPC-006**：六个 listener 的 `properties` 写成了**连字符** `auto-offset-reset` ⇒ **Kafka 直接忽略** ⇒ goka 三处的 `earliest` **从未生效**（kq 三处的 `latest` 属「碰巧对」）。改成**点分**的 `auto.offset.reset` + 新增 5 条契约守门测试（含阳性对照 + ✅ 变异测试） |
+| `（本轮）` | **「首次消费无位点」活体对拍**：新脚本 `tools/difftest/run-task-offset-oldest.sh`（**先灌消息、再起消费者**）⇒ **8 条断言全过、失败项 0**；修复前 A2/A4 是 `<absent>` FAIL |
+| `（本轮）` | **定案「goka 表的保留策略」**：`cleanup.policy=compact` 单独使用时 **Kafka 不按时间删**（带阳性对照的对照实验）⇒ **Go 的计数表永不过期** ⇒ **RAG 的 `task:goka:count:*` 不设 TTL 才是对齐**（加了会造成业务错误）⇒ 新增 4 条真 Redis 契约守门测试（含 ✅ 变异测试） |
+| `（本轮）` | 🔴 **修跨域隐患**：`tools/difftest/` 下两个 compose 文件**项目名撞车**（都叫 `difftest`）⇒ `up -d` 会**删掉 user 域的容器**、`down -v` 还会删卷 ⇒ 给 task 域的 compose 加 `name: taskprobe` |
+| `（本轮）` | 台账：rpc.md 加 §四·七（保留策略）+ §四·八（OffsetOldest 对拍）+ DRIFT-TASK-RPC-006；Intentional_Deviations 加 `SD-2026-10-24-TASK-01`；Pitfalls 加 **5 条**（18~22） |
+
 
 ## 🔓 本域**当前仍开放**的项（2026-10-24 盘点结论）
 
-> **一句话**：**语义漂移 0 条**。剩下的全是「证据缺口 / 待办 / 跨域」，**没有一条是已知的 RAG 行为缺陷**。
+> **一句话**：**语义漂移 0 条**（⚠️ 注意：盘点之后**又验出并修掉了第 6 条** —— `auto-offset-reset` 连字符被 Kafka 忽略，
+> ⇒ 「goka 的 earliest 从未生效」；详见 §三·第三轮）。剩下的全是「证据缺口 / 待办 / 跨域」，**没有一条是已知的 RAG 行为缺陷**。
 
 | # | 项 | 性质 | 本域能独立做掉？ |
 |---|---|---|---|
-| 1 | goka `OffsetOldest` 的「**首次消费无位点**」分支**未做活体验证**（`rpc.md` §三 末条）—— 本轮只核到「配置意图一致」 | **唯一剩余的技术未知** | ✅ **能**（纯取证，零代码改动） |
+| 1 | ~~goka `OffsetOldest` 的「**首次消费无位点**」分支未做活体验证~~ ⇒ **2026-10-24 已做**（`run-task-offset-oldest.sh`，8 条断言全过）⇒ **并查出第 6 条漂移（`auto-offset-reset` 连字符 ⇒ Kafka 忽略）已修** | ✅ **已关闭** | — |
 | 2 | `task:goka:count:*` **无 TTL、只增不删**（`rpc.md` §六 / §七 第 3 条） | **新增行为**，不是漂移 | ❌ 需**单独拍板**（AGENTS.md §5） |
 | 3 | `parity-task-kafka.py` **纳入 CI**（`rpc.md` §七 第 6 条） | 要用 Testcontainers 改**共享**构建基建 | ❌ 范围**超出 task 域**，须与其它域协调 |
 | 4 | DRIFT-TASK-API-004（`Content-Type` 的 charset/空白格式） | **五域共性** | ❌ 不在本域单独修（改了会造成本域与其它域不一致） |
@@ -120,7 +131,13 @@
    2026-10-23 又添了 **5 条**（PITFALL-06 ~ 10），其中 06/07 记的是
    **「整条消息链路是死的，而 81 条测试全绿」**这件事是怎么发生的；
    2026-10-24 再添 **5 条**（PITFALL-11 ~ 15），记的是
-   **「上一版台账的根因结论是误判」**这件事是怎么发生的
+   **「上一版台账的根因结论是误判」**这件事是怎么发生的；
+   同日第三轮再添 **5 条**（PITFALL-18 ~ 22），记的是
+   **「配置意图一致」其实是假的**（`auto-offset-reset` 连字符 ⇒ Kafka 静默忽略）、
+   **「探针自己会撒谎」连翻三次车**、
+   **「compose 项目名撞车会删掉别的域的容器」**、
+   **「`$var` 紧跟全角标点」**、
+   **「先起消费者的对拍测不出 earliest/latest」**这五件事
 
 ## 共享索引未更新（按 `docs/Worktree.md` §3 留给合并后统一处理）
 
@@ -140,5 +157,7 @@
 | `check-plaintext400-headers.sh` | 加 task 域 + 端口不可达判 SKIP | user 域的判定与默认值**不变** |
 | `run.sh` | **修 2 处既有潜伏 bug**（`$var` 紧跟多字节字符 ⇒ `set -u` 下硬失败） | 只改了 2 个错误分支的 echo 文案，判定逻辑不变 |
 | `parity-task.py` | task 域私有脚本 | 无 |
+| `docker-compose.task-kafka.yml` | **加 `name: taskprobe`**（修跨域误删：同目录的两个 compose 文件项目名原本都叫 `difftest`） | ⚠️ **合并时若与其它域同时改这个文件，注意别把 `name:` 行删掉** |
+| `run-task-offset-oldest.sh` | **新建**（task 域私有） | 无 |
 
 ⇒ 合并时若其它域也在改这三个文件，需要人工合。

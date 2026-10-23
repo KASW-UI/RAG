@@ -16,8 +16,8 @@
 | 项 | 结论 |
 |---|---|
 | 语义等价性 | ✅ **首轮为 🔴 NOT EQUIVALENT（5 条漂移），现已全部修复并复核**（2026-10-24：Kafka 端到端 + HTTP 双侧对拍均 0 DIFF）⚠️ 效力边界见 §五 |
-| 已修 | **5 条**（DRIFT-TASK-RPC-001 / 002 / 003 / **004** / 005），每条配守门测试 |
-| 未修 | **0 条语义漂移**；另有 1 条**已签字偏离**（`SD-2026-10-23-TASK-01`，见 §二） |
+| 已修 | **6 条**（DRIFT-TASK-RPC-001 / 002 / 003 / 004 / 005 / **006**），每条配守门测试 |
+| 未修 | **0 条语义漂移**；另有 2 条**已签字偏离**（`SD-2026-10-23-TASK-01` 与 `SD-2026-10-24-TASK-01`，见 §二） |
 | 证据强度 | ✅✅✅ **Kafka 端到端活体对拍**（2026-10-23 23:4x，真 Kafka + 真 Redis + 真 PG，两侧同批消息比最终态，见 §四·三）· ✅✅✅ **Kafka 畸形消息活体对拍**（2026-10-24，五个用例，见 §四·五·二）· ✅✅ **gRPC 双向跨语言对拍**（2026-10-24，Java 客户端 + **Go 客户端**各打两端，见 §四·五·一）· ✅ 真启动 + 真 PG 16 容器 |
 | DDL 对拍 | ✅ **GORM AutoMigrate 产物 vs Flyway 产物逐列一致**（本轮实测，见 §四·二） |
 | ⚠️ 仍未覆盖 | ⓿ **「Kafka 写入 → task-api 读到」这条跨域闭环**未做活体对拍 —— 但两侧的读写 Redis key **本来就不一致**（Go 侧也读不到自己写的缓存），⇒ **不是 RAG 的缺陷**，见 §五 第 7 条；① ⚠️ **goka `OffsetOldest` 的「首次消费无位点」分支未做活体验证**（§三 末条）—— 本轮只核到「配置意图一致」 |
@@ -260,6 +260,60 @@ Go 侧同一批消息能正常落库，RAG 侧一条不落。
 
 ⚠️ 这条**不是**「统一风格」：用错吞/抛就会分叉，所以两个 helper 的契约写进了 javadoc。
 
+### 🔴 DRIFT-TASK-RPC-006 · per-listener 的 offset-reset 写成了**连字符** ⇒ Kafka 直接忽略 ⇒ **earliest 从未生效**
+
+**性质**：SEMANTIC MISMATCH（行为层，且**上一版台账记的是「配置意图一致」** ⇒ 结论本身就是错的）
+
+**这是 2026-10-24 活体验证「goka 的 OffsetOldest」时查出来的**（§四·八）。
+
+| 路径 | Go（真源） | RAG（修复前） |
+|---|---|---|
+| goka 路由组 | `cfg.Consumer.Offsets.Initial = sarama.OffsetOldest`（`initGoKa.go:131`）**真实生效** | `@KafkaListener(properties = "auto-offset-reset=earliest")` ⇒ **Kafka 认不出这个键 ⇒ 忽略** ⇒ 实际是全局的 `latest` |
+| goka 用户计数 | `sarama.OffsetOldest`（`initGoKa.go:173`） | 同上 |
+| goka 文章计数 | `sarama.OffsetOldest`（`initGoKa.go:207`） | 同上 |
+| kq 诊断消费者 | 硬编码 `Offset: "latest"`（`initKafkaRaw.go:32`） | `properties = "auto-offset-reset=latest"` ⇒ **同样被忽略** ⇒ 但**碰巧对**（全局默认恰好也是 latest） |
+| kq 用户 sink | 硬编码 `Offset: "latest"`（`initUserFilter.go:47`） | 同上（碰巧对） |
+| kq 文章 sink | 硬编码 `Offset: "latest"`（`initArticleFilter.go:40`） | 同上（碰巧对） |
+
+**根因（实测证据）**：
+
+```
+# RAG 侧 consumer 的 config dump（真 Kafka）：
+auto.offset.reset = latest
+AbstractConfig : These configurations '[auto-offset-reset]' were supplied but are not used yet.
+```
+
+- ⚠️ **Kafka 的合法配置名是点分的 `auto.offset.reset`**（`ConsumerConfig.AUTO_OFFSET_RESET_CONFIG`）。
+- ⚠️ **`@KafkaListener(properties = ...)` 不走 Spring Boot 的松散绑定** ⇒ 字符串**原样**传给 Kafka
+  ⇒ 连字符形式 `auto-offset-reset` 落进 `ConfigDef.parse` 的 **unused** 分支
+  ⇒ **只打一条 info 日志，然后被彻底忽略**。
+- ⇒ **同一个语义、两条完全不同的生效路径**：
+  - 全局的 `spring.kafka.consumer.auto-offset-reset: latest` **生效**（Boot 松散绑定会转成点分形式）；
+  - per-listener 的 `properties = "auto-offset-reset=earliest"` **不生效**。
+
+**后果**：**「consumer group 首次消费、尚无已提交位点」**这一场景下
+—— 也就是「服务重启后 group 位点被清空」「新环境首次接入」「运维重置位点」——
+**RAG 从队尾开始（历史消息永远不参与计数），Go 从队头开始** ⇒ 行为分叉。
+
+**为什么此前 326 条测试全绿也抓不到**：
+⚠️ **所有既有对拍都是「先起消费者、后灌消息」** ⇒ 那时 `latest` 与 `earliest`
+**没有可观察差别** ⇒ 绿测试是**假绿**。
+⇒ 只有「**先灌消息、再起消费者**」才暴露它 —— 那正是
+[`tools/difftest/run-task-offset-oldest.sh`](../../../tools/difftest/run-task-offset-oldest.sh) 做的事。
+
+**修法**：六个 listener 的 `properties` 全部改成**点分**的 `auto.offset.reset`：
+goka 三处 `=earliest`、kq 三处 `=latest`。
+⚠️ kq 三处虽「碰巧对」，也必须改：否则将来把全局默认改成 earliest，这三处会**静默**变成 earliest。
+
+**守门**：
+1. [`TaskKafkaOffsetResetContractTest`](../../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mq/TaskKafkaOffsetResetContractTest.java)
+   （5 条）：**阳性对照**用 Kafka 自己的 `ConsumerConfig` 证明「连字符形式确实不被采纳」
+   （加了连字符键 vs 完全不给这个键，效果**完全一样**）
+   + 六个 listener 的精确断言 + **通用断言**：所有 per-listener property 的键名
+   **都必须是 `ConsumerConfig.configNames()` 里认识的合法名** ⇒ 以后写错任何键名都会被立刻抓住。
+   ✅ **变异测试已做**：把任一 listener 改回连字符 ⇒ **2 条变红**（报的正是「不是 Kafka 的合法配置名」）⇒ 非假绿。
+2. **运行证据**：`run-task-offset-oldest.sh` 的 A2/A4 —— 修复前 FAIL（`<absent>`），修复后 PASS（`5`）⇒ 见 §四·八。
+
 ---
 
 ## 二、签字偏离与有意偏离
@@ -348,7 +402,9 @@ Go 侧同一批消息能正常落库，RAG 侧一条不落。
   RAG 刻意不映射，并在注释里写明「映射了会让人误以为并发度是 8」。
 - ✅ goka 三个 processor 用 `codec.Int64` 编**十进制 ASCII**（`goka/codec/codec.go:56`）⇒ value 用 `StringDeserializer` 而非 ByteArray，有注释佐证。
 - ✅ `kq` 无重试循环 ⇒ RAG 的 `DefaultErrorHandler` 显式 `FixedBackOff(1000, 1)`（maxAttempts=1）+ `ackAfterHandle(false)` + `seekAfterError(false)`。
-- ⚠️ `goka` 的 `OffsetOldest` 只作用于**首次**消费无位点的 group；本条结论限于「配置意图一致」，**未做活体验证**。
+- 🔴 **`goka` 的 `OffsetOldest` 只作用于「首次消费无位点」的 group** —— 本条**已做活体验证**（2026-10-24，见 §四·八），
+  并且**验证过程中查出 RAG 侧一条真漂移**（`auto-offset-reset` 写成了连字符 ⇒ Kafka 直接忽略 ⇒ 实际是 `latest`），
+  ⇒ 已修（[DRIFT-TASK-RPC-006](#🔴-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)）。
 
 ### DDL（`AutoMigrate` ↔ Flyway）
 
@@ -413,6 +469,15 @@ Go 侧同一批消息能正常落库，RAG 侧一条不落。
 7. ⚠️ **Go 侧未跑 `task-api`**：Kafka 对拍只到 `task-rpc`。`task-api` 侧的
    `GetTask` 读路径已由 HTTP 对拍覆盖，但**「Kafka 写入 → task-api 读到」这条闭环未做活体对拍**
    （两侧的 key 形状不一致这件事见 `TaskRedisKeys` 类注释，是 Go 侧既有的读写 key 不一致，**不改**）。
+8. ✅ **「首次消费无位点」这一分支已单独活体验证**（2026-10-24，见 §四·八）：
+   全新 group + **预灌消息在消费者启动前** ⇒ 两侧的 goka 路都读到队头（计数 = 5、group 位点 = 7），
+   两侧的 kq 路都跳过预灌消息（阴性对照）⇒ 且**验证过程中查出并修掉了一条真漂移**
+   （[DRIFT-TASK-RPC-006](#🔴-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)）。
+   ⚠️ **这条证据只覆盖「无位点」这一条分支**；「有位点」时两侧都是「从已提交位点继续」（Spring 的
+   `AckMode.RECORD` ↔ Go 的 `CommitMessages`），已由 Kafka 端到端对拍（§四·三）与畸形消息对拍（§四·五·二）覆盖。
+9. ✅ **goka 表的「保留策略」已用实测定案**（2026-10-24，见 §四·七）：
+   `cleanup.policy=compact` 单独使用时 **Kafka 不按时间删**（带阳性对照的对照实验）
+   ⇒ Go 的计数**永不丢失** ⇒ RAG 的 `task:goka:count:*` **不设 TTL 就是等价实现**。
 
 ---
 
@@ -421,7 +486,7 @@ Go 侧同一批消息能正常落库，RAG 侧一条不落。
 | 风险 | 说明 | 处置建议 |
 |---|---|---|
 | Redis 变成计数的硬依赖 | 此前计数是纯内存，Redis 挂了只影响进度缓存（会降级回源）；**现在 Redis 挂了会阻塞 goka 计数组**（位点不提交、消息堆积） | 已在类注释写明取舍。若运维不接受，把 `TaskCountStore` 换成本地文件 store（更贴 goka 的 LevelDB）即可，其余代码不用动 |
-| Redis key 无 TTL、无上限 | goka 的表会随 Kafka retention 滚动，RAG 的 `task:goka:count:*` **只增不删** | 长期需加保留策略（如按 `like:total` 的 90 天口径定期清理）。本轮**未实现**，登记为待办 |
+| Redis key 无 TTL、无上限 | 🔴 **原表述的前提是错的**（2026-10-24 实测推翻，见 §四·七·二）：<br>Go 侧的计数表**不随 Kafka retention 滚动** —— goka 的表 topic 只设了 `cleanup.policy=compact`、**没有 `retention.ms`**，且 `compact` 单独使用时 Kafka **不按时间删**（实测）。<br>⇒ **这不是与 Go 的漂移，而是与 Go 一致**：Go 的权威存储是本地 LevelDB（无 TTL、task 域从不调 `Delete`）⇒ **计数永不丢失**。<br>⚠️ 但「Redis 内存无上限」本身仍是真的运维事实（RAG 侧是内存，Go 侧是磁盘） | **不加 TTL** —— 加了会造成**业务错误**（计数到期归零 ⇒ `like:total` 是普通 SET 不是 GREATEST ⇒ 被更小的值覆盖），并制造一条与 Go 的新漂移（§四·七·二）。<br>⇒ 改为「**用真 Redis 守门测试把「不设 TTL」锁成契约**」<br>（`TaskCountStoreRetentionContractTest`，4 条，含阳性对照）。<br>⚠️ 若将来确实要内存有界，**必须先改 Go 侧**或同时改 `like:total` 的写法 ⇒ 那已是行为变更，不在本域单方面做 |
 | 新增了一条 gRPC→Redis 的同步依赖 | 每条 raw 日志一次 `INCR` RTT | 与 Go 的「每条消息一次本地 DB 写 + 定期 Kafka 表 emit」量级相当，判断为可接受 |
 
 ---
@@ -437,7 +502,15 @@ Go 侧同一批消息能正常落库，RAG 侧一条不落。
 2. **「Kafka 写入 → task-api 读到」的闭环对拍**：本轮 Kafka 对拍只到 `task-rpc`；
    `task-api` 的读路径（`task:progress:<uid>`，与 sink 写的 `task:progress:<uid>:<taskId>` **不是同一个 key**）
    只由 HTTP 对拍间接覆盖。这是 Go 侧既有的读写 key 不一致，**不要「顺手统一」**。
-3. `task:goka:count:*` 的保留策略（见 §六）—— **无 TTL、只增不删**。
+3. ~~`task:goka:count:*` 的保留策略（见 §六）—— **无 TTL、只增不删**~~
+   ⇒ **2026-10-24 关闭**（见 §四·七）：**结论是「不加 TTL」**。
+   ⚠️ 原待办的**前提是错的**（「goka 的表会随 Kafka retention 滚动」）：
+   goka 的表 topic 只设 `cleanup.policy=compact`、**没有 `retention.ms`**，
+   而 compact 单独使用时 **Kafka 不按时间删**（带阳性对照的对照实验，§四·七·二）⇒
+   **Go 的计数表 key 永不按时间过期**（权威存储是本地 LevelDB，默认无 TTL 且从不调 `Delete`）
+   ⇒ **RAG 不设 TTL 就是等价实现**，加了反而会造成业务错误（计数归零 ⇒ `like:total` 被更小的值覆盖）。
+   ⇒ 改为「**用真 Redis 守门测试把「不设 TTL」锁成契约**」
+   （`TaskCountStoreRetentionContractTest`，4 条，含阳性对照 + ✅ 变异测试已做）。
 4. ~~`tools/difftest/check-ddl-static.py` 扩到 task 域~~ ⇒ **2026-10-24 已做**：
    脚本改成 `--domain users|task` 参数化；task 域实测
    **11 列逐字一致、类型/长度 0 差异、NOT NULL/DEFAULT 0 差异**，`EXIT=0`。
@@ -455,6 +528,17 @@ Go 侧同一批消息能正常落库，RAG 侧一条不落。
    [`tools/difftest/run-task-http-parity.sh`](../../../tools/difftest/run-task-http-parity.sh)
    （原先 HTTP 侧只有手工步骤，Kafka 侧才有一键脚本）⇒ 两边的「一条命令复跑」齐了，
    但**都还依赖手工起的基建**，进 CI 仍需 Testcontainers。
+7. ⚠️ **`run-task-offset-oldest.sh` 与 `run-task-kafka-e2e.sh` 的关系**：
+   前者是**专门为「无位点分支」设计**的（顺序与 E2E **相反**：先灌消息、再起消费者），
+   后者验的是「正常消费路径」（先起消费者、再灌消息）。
+   ⇒ **两者都要保留**，不要用前者替代后者
+   （前者**不**验畸形消息、**不**验 DDL、**不**验 PG 表）。
+   ⇒ ⚠️ 前者还会**重建 `taskprobe-*` 容器** ⇒ 会丢弃该容器上的既有数据。
+8. ⚠️ **本分支改了 4 个多域共享工具**（合并时留意）：
+   `check-proto-static.sh`（退出码语义）、`check-ddl-static.py`（参数化）、
+   `check-plaintext400-headers.sh`（加 task 段）、`run.sh`（2 处 bug 修复），
+   外加**新增** `docker-compose.task-kafka.yml` 的 `name: taskprobe`（修跨域误删）。
+   ⇒ 清单见 [`./_README.md`](./_README.md) 的「共享工具改动清单」。
 
 ---
 
@@ -740,3 +824,182 @@ go-zero 的 zrpc 客户端能不能把 RAG 端的错误码与描述**原样**带
 ⇒ 新进程 `BindException: Address already in use` ⇒ 整轮对拍白跑，
 而症状是「api 一直 503」，很容易误判成应用问题。
 ⇒ 已改成**轮询等端口释放 + 等端口开始监听**，且进程起不来时**立刻失败并打日志尾部**。
+
+---
+
+## 四·七、goka 表的「保留策略」到底怎么算（2026-10-24 实测）
+
+> **这一节推翻本台账上一版的一条结论**（§六 曾写「goka 的表会随 Kafka retention 滚动」）。
+> 结论变了，但**不是**「RAG 有缺陷要修」——恰恰相反：**RAG 现在的做法就是对齐的**。
+> ⇒ 这也是本仓 §3.1「不要拿现有 RAG 代码或注释当对照基准」的另一个样本：
+> **两边的台账都可能写错，只能靠实测定案。**
+
+### 四·七·一、Go 侧 goka **不创建** topic —— 缺 topic 直接 `log.Fatal`
+
+**这是本轮第一个实测结论**，它决定了「RAG 侧要不要也去管 topic 生命周期」这个问题。
+
+| 步骤 | 出处 | 事实 |
+|---|---|---|
+| goka 准备 topic 的**第一步** | `goka@v1.1.16 processor.go:1012` → `ensureCopartitioned(tm, gg.copartitioned().Topics())` | 先检查**输入 topic 是否存在** |
+| topic 不存在时 | `goka@v1.1.16 processor.go:1035-1040` `ensureCopartitioned` → `tm.Partitions(topic)` 失败即 `return 0, fmt.Errorf("Error fetching partitions for topic %s: %v", ...)` | **直接返回错误** |
+| `prepareTopics` 因此中断 | `processor.go:1012-1014` | **`EnsureStreamExists` 根本没被调用** |
+| `NewProcessor` 失败 | `initGoKa.go:138-145` | **`log.Fatal(err)` ⇒ 进程退出** |
+
+**实测**（2026-10-24，真 Kafka 容器，干净 broker，**不预先建 topic**）：
+
+```
+2026/10/24 04:58:59 start task kafka filter
+2026/10/24 04:58:59 Error fetching partitions for topic task.logs.raw: requested topic was not found
+⇒ 进程退出（pgrep 查不到 go-task-rpc）
+```
+
+⇒ **Go 侧 goka 的「建 topic」代码路径是死的**：它要求**所有输入 topic 已被外部预先创建**，
+自己只做「**校验**」（`EnsureStreamExists` 的 config 比对），且 config 不匹配时
+**`handleConfigMismatch` 的 default 分支直接 `return nil`、连日志都不打**
+（`topic_manager.go:158-167` ⇒ `MismatchBehavior=Ignore`）。
+
+⇒ **两侧的 topic 生命周期都由部署侧（运维 / 脚本）负责，组件本身不管。**
+⇒ ⇒ **RAG 侧「不建、不改 topic」是与 Go 一致的做法**；
+本轮一度准备新增的「RAG 侧用 `KafkaAdmin` 建/校准 topic」**因此取消** ——
+那会制造一条与 Go 的**结构性**不一致（Go 不建，RAG 建）。
+
+> ⚠️ **附带发现的一条真实差异**（已登记为有意偏离）：
+> Go 侧 **topic 缺失 ⇒ 进程 `log.Fatal` 退出**；RAG 侧 **topic 缺失 ⇒ listener 持续重试、
+> 服务照常起**。见 [`../../Intentional_Deviations/task/rpc.md`](../../Intentional_Deviations/task/rpc.md)。
+
+### 四·七·二、`cleanup.policy=compact` **不按时间删** —— 决定性对照实验
+
+**要回答的问题**：Go 的计数表有一份 Kafka compacted topic 副本
+（`<group>-table`），它的 config 只设了 `cleanup.policy=compact`、**没有 `retention.ms`**
+（`goka@v1.1.16 topic_manager.go:317-326`）。
+那么 **compact 策略下 `retention.ms` 会不会把 key 删掉**？
+（Kafka 的按时间删除是**按 segment 粒度**的 ⇒ 实验必须让 segment 先滚动。）
+
+**实验**（真 Kafka KRaft，5 个 topic，每个写入都**先验证 `offset > 0`**）：
+
+| topic | `cleanup.policy` | `retention.ms` | `segment.ms` | 45 秒后读回 | 说明 |
+|---|---|---|---|---|---|
+| `probe.y_short` | **compact** | **1000** | 1000 | **1 条（存活）** | ⭐ **核心**：compact 单独使用**不按时间删** |
+| `probe.z_delete` | delete | 1000 | 1000 | **0 条（被删）** | ✅ **阳性对照**：同参数下 delete **确实**被删 ⇒ 机制有效、探针有区分力 |
+| `probe.w_default` | delete | 默认 604800000 | 默认 | 1 条（存活） | ✅ 阳性对照 |
+| `probe.x_infinite` | compact | -1（无限） | 1000 | 1 条（存活） | ✅ |
+| `probe.v_noseg` | compact | 1000 | **默认（不滚动）** | 1 条（存活） | ✅ **segment 粒度对照**：证明 `y_short` 的存活不是因为 segment 没滚动 |
+
+⇒ **`cleanup.policy=compact` 单独使用时，Kafka 不启用按时间删除** ⇒
+Go 的 compacted table topic 的 key **不按时间过期**。
+
+### 四·七·三、结论：RAG 的 `task:goka:count:*` **不设 TTL 才是对齐**
+
+把两侧的**权威存储**摆在一起看：
+
+| | Go | RAG |
+|---|---|---|
+| 权威的计数存储 | **本地 LevelDB**（`goka storage/builders.go:18-26` `leveldb.OpenFile(fp, nil)` ⇒ 默认**无 TTL**） | **Redis**（`TaskCountStore` 的 `INCR`） |
+| 何时删 key | `PartitionTable.Delete`（`partition_table.go:622`）**在 task 域从未被调用**（两个 processor 只有 `ctx.Value()`/`ctx.SetValue()`，`initGoKa.go:75-81` / `:92-97`）⇒ **永不删** | **永不删**（无 TTL） |
+| Kafka 副本 | compacted topic `<group>-table`，`cleanup.policy=compact`、无 `retention.ms` ⇒ **不按时间过期** | **不存在**（计数直接落 Redis） |
+| 副本有人消费吗 | ❌ **全仓无任何读取点**（唯一写它的是 goka 自己） | — |
+
+⇒ **Go 的计数永不丢失；RAG 的计数也永不丢失 ⇒ 等价。**
+⇒ ⇒ **给 `task:goka:count:*` 加 TTL 会制造一条与 Go 的新漂移**，而且**造成业务错误**：
+计数到期归零 ⇒ `like:total:<uid>` 是**普通 SET**（不是 GREATEST，
+`UserLikeProgressSink.pipelineSetLikeTotal`）⇒ 被**更小的值覆盖**；
+达标判定 `total >= target` 读的是计数器 ⇒ 用户得重新攒够次数。
+
+⇒ **本轮的交付不是「加 TTL」，而是「把『不设 TTL』锁成契约」**：
+新增真 Redis 守门测试
+[`TaskCountStoreRetentionContractTest`](../../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mq/TaskCountStoreRetentionContractTest.java)
+（4 条，含阳性对照：先证明「读 TTL」这个探针能区分「有 TTL / 无 TTL」，
+再断言计数 key 的 `TTL == -1`）⇒ **后人若好心加 TTL，测试立刻变红。**
+
+#### ⚠️ 附带查明的一个 Kafka 事实（顺带解释了 Go 侧一个细节）
+
+Kafka 的 **compacted topic 强制要求消息带 key**：
+
+```
+org.apache.kafka.common.InvalidRecordException:
+  Compacted topic cannot accept message without key in topic partition probe.x_infinite-0
+```
+
+⇒ Go 侧 goka 一直带 `ctx.Key()` emit（`initGoKa.go:81` / `:106`）才写得进去；
+⇒ 也从侧面印证 compacted topic 存的是「**key → 最新值**」，与 RAG「一个 key 一个值」同构。
+
+
+---
+
+## 四·八、goka `OffsetOldest` 活体验证：**查出并修掉一条真漂移**（2026-10-24 实测）
+
+> 这一节关闭了本台账 §三 末条那条「只核到配置意图一致，**未做活体验证**」的缺口。
+> ⚠️ **而且验证本身查出了一条真漂移** —— 台账上一版写的「与 Go 一致」**是错的**。
+> 脚本：[`tools/difftest/run-task-offset-oldest.sh`](../../../tools/difftest/run-task-offset-oldest.sh)。
+
+### 四·八·一、为什么必须换一种对拍顺序
+
+⚠️ **本域此前所有 Kafka 对拍都是「先起消费者、后灌消息」**
+（E2E、畸形消息、HTTP 双侧全是这个顺序）⇒
+那种顺序下 `auto.offset.reset=earliest` 与 `=latest`
+**没有任何可观察差别**（消息都产生在消费者 join **之后**）
+⇒ **「earliest 与 Go 一致」这个结论在所有既有对拍里都是恒真的** —— 它**没被验证过**，只是**被顺序掩盖了**。
+
+⇒ 本次改成的顺序：
+
+```
+阶段 B：① 建 topic → ② **预灌消息** → ③ 起消费者（全新 group ⇒ 无已提交位点）
+阶段 C：④ 断言（earliest 正向 + latest 阴性对照 + 阳性对照）
+阶段 D：⑤ **消费者就位之后**再投递 ⇒ 端到端断言（无竞态）
+```
+
+### 四·八·二、结果：**8 条断言全过，失败项 0**
+
+| # | 观测点 | 期望 | 实测 | 判定 |
+|---|---|---|---|---|
+| A1 | Go `task.rpc.consumer61-table`（compacted table topic）key=`5001` 的最后值 | `5` | `5` | ✅ Go goka 用户路 **earliest 生效** |
+| **A2** | **RAG Redis db1 `task:goka:count:rag.rpc.consumer61:5001`** | `5` | **`5`** | ✅ **RAG goka 用户路 earliest 生效**（修复前是 `<absent>`） |
+| A3 | Go `task.rpc.consumer71-table` key=`9001` | `5` | `5` | ✅ Go 文章路 earliest 生效 |
+| **A4** | **RAG Redis db1 `task:goka:count:rag.rpc.consumer71:9001`** | `5` | **`5`** | ✅ **RAG 文章路 earliest 生效**（修复前是 `<absent>`） |
+| A5 | 两侧 `like:total:7777`（**预灌**在 filtered.User 的 kq 输入上） | **两侧都不存在** | Go `<absent>` / RAG `<absent>` | ✅ **阴性对照**：kq 的 `latest` 确实跳过了预灌消息 ⇒ 探针**有区分力** |
+| A6 | 两侧 `like:total:5001`（端到端） | `10` | Go `10` / RAG `10` | ✅ **预灌 5 + 后灌 5 = 10** ⇒ **预灌那批确实被计入了** |
+| A7 | 两侧 `like:total:5002` | `4` | Go `4` / RAG `4` | ✅ 同上（预灌 2 + 后灌 2） |
+| A8 | 两侧 `like:total:8888`（**启动后**投递到 filtered.User） | `42` | Go `42` / RAG `42` | ✅ **阳性对照**：kq 路本身正常 ⇒ A5 的「不存在」不是因为 kq 坏了 |
+
+⇒ **A6 的 `10` 是最有说服力的一条**：它是「**预灌的 5 条也被计入了**」的端到端铁证
+—— 若 earliest 没生效，计数只会是 5。
+
+⇒ **consumer group 位点**（阴性对照的直接证据）：
+
+| group | CURRENT-OFFSET | LOG-END-OFFSET | 说明 |
+|---|---|---|---|
+| `task.rpc.consumer61`（Go） | **7** | 7 | ✅ 读了全部 7 条预灌消息 |
+| `rag.rpc.consumer61`（RAG） | **7** | 7 | ✅ 同上（**修复前是 0**） |
+
+### 四·八·三、🔴 查出的真漂移：per-listener 的 `auto-offset-reset` **从未生效**
+
+**在「修复前」跑同一套脚本**，结果是 **A1/A3 PASS、A2/A4 FAIL**（`<absent>`）：
+
+```
+✓ PASS  [A1] Go goka 用户路 … 实测=5
+✗ FAIL  [A2] RAG goka 用户路 … 实测=<absent>
+✓ PASS  [A3] Go goka 文章路 … 实测=5
+✗ FAIL  [A4] RAG goka 文章路 … 实测=<absent>
+```
+
+⇒ **Go 从队头读、RAG 从队尾读** ⇒ 行为分叉。
+⇒ 根因与修法见 [DRIFT-TASK-RPC-006](#🔴-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)。
+
+### 四·八·四、⚠️ 本脚本固化了两个「环境级」坑
+
+1. **端口不能写死**：2026-10-24 实测，**user 域的并发会话**的 `go-user-rpc` 正占着 **19005**
+   ⇒ 本脚本的 Go 侧直接 `bind: address already in use` 退出。
+   ⇒ 脚本改为**自动挑空闲端口**（从 19005 / 59005 往后找），并生成一份改过 `ListenOn` 的 Go 配置副本。
+   ⇒ ⚠️ **绝不 kill 别人的进程** —— 那是别的域的基建。
+2. **compose 必须带 `-p taskprobe`**：见 §四·七·一 与
+   [`docs/Pitfalls/task/rpc.md`](../../Pitfalls/task/rpc.md) 的 `PITFALL-TASK-RPC-20`。
+
+### 四·八·五、复现
+
+```bash
+./tools/difftest/run-task-offset-oldest.sh          # 完整跑一遍
+KEEP_UP=1 ./tools/difftest/run-task-offset-oldest.sh # 跑完保留服务与容器
+```
+
+⚠️ 脚本会**重建 `taskprobe-*` 三个容器**（⇒ 该容器上的既有数据会被丢弃），
+并**只**停自己起的两个进程（按 `$WORK` 目录路径匹配 ⇒ 不会误杀别的域的同名进程）。
