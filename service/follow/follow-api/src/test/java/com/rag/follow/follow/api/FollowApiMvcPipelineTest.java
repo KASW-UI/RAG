@@ -596,7 +596,7 @@ class FollowApiMvcPipelineTest {
     // ==================================================================
 
     @Test
-    @DisplayName("⚠️ user_ids 出参是 JSON 数字（Go tag 无 ,string），空结果输出 [] 而不是 null")
+    @DisplayName("⚠️ user_ids 出参是 JSON 数字（Go tag 无 ,string），空结果输出 null 而不是 []")
     void userIdsAreSerializedAsNumbers() throws Exception {
         when(stub.getFollowList(any())).thenReturn(okUserList(11L, 22L));
 
@@ -609,7 +609,12 @@ class FollowApiMvcPipelineTest {
 
         assertTrue(body.contains("\"user_ids\":[11,22]"),
                 "user_ids 必须是 JSON 数字数组，实际 body = " + body);
-        // ⚠️ 空列表不能是 null
+        // ⚠️ 空列表必须是 null（不是 []）。
+        //   Go 侧的 rpcResp.UserIds 是 protobuf 反序列化后的切片：proto3 的 repeated
+        //   为空时字段不上 wire ⇒ 反序列化得 nil ⇒ encoding/json 输出 "user_ids":null。
+        //   2026-10-24 的 Go↔RAG 双侧活体对拍实测：Go 输出 "user_ids":null。
+        //   ⚠️ 本断言原先写的是 [] —— 那是一条**锁死错误答案**的断言（AGENTS.md §3.3）：
+        //   它只看 rpc 进程内的非 nil 空切片，漏了中间那次 protobuf 编解码。
         when(stub.getFollowList(any())).thenReturn(okUserList());
         String emptyBody = mockMvc.perform(post("/follow/v1/follow/list")
                         .header("Authorization", bearer(userToken()))
@@ -617,8 +622,8 @@ class FollowApiMvcPipelineTest {
                         .content("{}"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
-        assertTrue(emptyBody.contains("\"user_ids\":[]"),
-                "空 user_ids 必须是 []，实际 body = " + emptyBody);
+        assertTrue(emptyBody.contains("\"user_ids\":null"),
+                "空 user_ids 必须是 null（与 Go 的 nil 切片一致），实际 body = " + emptyBody);
     }
 
     @Test
