@@ -83,7 +83,7 @@ public final class GoStyleRecoverInterceptor implements ServerInterceptor {
         // listener 的多个回调（onMessage / onHalfClose / onReady）可能先后抛出，
         // 重复 close 会抛 IllegalStateException（grpc-java 的 ServerCallImpl.close 是 checkState(!closeCalled)）。
         // ⚠️ 早期版本用「静态 WeakHashMap<ServerCall, AtomicBoolean>」做这件事 ——
-        // 那会在本模块（被 16 个 rpc 组件依赖的共享模块）里留下一份**静态可变状态**，
+        // 那会在本模块（被 10 个 rpc + 10 个 api = 20 个组件依赖的共享模块）里留下一份**静态可变状态**，
         // 且 Collections.synchronizedMap 的 computeIfAbsent **并不原子**（WeakHashMap 未覆写它）
         // ⇒ 并发下可能两个线程各拿到一个 guard、双双放行 ⇒ 重复 close。
         // ⇒ 改为**每次 interceptCall 一个局部 AtomicBoolean**，由匿名类捕获 ⇒ 无共享状态、无泄漏、无竞态。

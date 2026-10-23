@@ -12,6 +12,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
 /**
@@ -81,8 +82,15 @@ class MessageGrpcInterceptorWiringTest {
         //    而 SimpleForwardingServerCallListener 的构造器 checkNotNull(delegate) ⇒ 不打桩会 NPE。
         doReturn(listener).when(interceptor).interceptCall(any(), any(), any());
 
+        // ⚠️ 关掉 CPU 降载：本用例要验的是「链里能调到业务 interceptor」，
+        //    而降载一旦命中就会短路（handler 不执行）⇒ 断言会变得不确定。
+        //    降载本身由 GoStyleRpcSheddingInterceptorTest 单独覆盖。
+        com.rag.common.protection.GoStyleProtectionProperties props =
+                new com.rag.common.protection.GoStyleProtectionProperties();
+        props.getCpuShedding().setEnabled(false);
+
         GrpcServerConfigurer configurer =
-                new MessageRpcApplication().rpcInterceptorConfigurer(interceptor);
+                new MessageRpcApplication().rpcInterceptorConfigurer(interceptor, props);
 
         ServerBuilder<?> builder = mock(ServerBuilder.class);
         ArgumentCaptor<io.grpc.ServerInterceptor> captor =
@@ -99,9 +107,52 @@ class MessageGrpcInterceptorWiringTest {
         io.grpc.ServerCallHandler<Object, Object> next = mock(io.grpc.ServerCallHandler.class);
         doReturn(listener).when(next).startCall(any(), any());
 
+        // ⚠️⚠️ **必须打桩 getMethodDescriptor()**：链上的 breaker 用它取隔离 key
+        //    （Go: breakerName := info.FullMethod）⇒ Mockito 默认返回 null ⇒ 链里抛 NPE。
+        // ⇒ 而那个 NPE 会被**最外层的 recover 静默兜住**（关掉调用、返回 INTERNAL），
+        //    现象是「业务 interceptor 零交互」—— 看起来像"链没生效"，真因却在链里面。
+        //    （这本身是个值得记的坑：被 recover 兜住的异常会让链路看起来"没被调用"。）
+        when(call.getMethodDescriptor()).thenReturn(io.grpc.MethodDescriptor.<Object, Object>newBuilder()
+                .setType(io.grpc.MethodDescriptor.MethodType.UNARY)
+                .setFullMethodName("/message.MessageService/MarkNotificationRead")
+                .setRequestMarshaller(new NoopMarshaller())
+                .setResponseMarshaller(new NoopMarshaller())
+                .build());
+
         chained.interceptCall(call, new io.grpc.Metadata(), next);
 
-        verify(interceptor).interceptCall(same(call), any(), same(next));
+        // ⚠️⚠️ 2026-10-24（DRIFT-MSG-V-016）：断言**从「同一个对象」改成「业务被调到 + call 被包装了」**。
+        //
+        // 老断言是 verify(interceptor).interceptCall(same(call), any(), same(next))，
+        // 它成立的前提是「链上没有任何包装层」—— 那时 recoverThen 直接把原始 call 透传下去。
+        // 现在链里有 breaker / shedding，它们各自 **ForwardingServerCall 包了一层**
+        // ⇒ 业务 interceptor 拿到的是**包装后的 call** ⇒ same(call) 必然不成立。
+        //
+        // ⇒ 换成两条**更强**的断言：
+        //  ① 业务 interceptor 确实被调到了（语义没放松）；
+        //  ② 业务 interceptor 拿到的 call **不是**原始 call ⇒ **证明链上真的有包装层**
+        //     （即 breaker/shedding 确实挂在链上，而不是"配置了但没生效"）。
+        ArgumentCaptor<io.grpc.ServerCall<Object, Object>> callCaptor =
+                ArgumentCaptor.forClass(io.grpc.ServerCall.class);
+        verify(interceptor).interceptCall(callCaptor.capture(), any(), any());
+
+        assertThat(callCaptor.getValue())
+                .as("链上有 breaker/shedding ⇒ 业务 interceptor 拿到的必须是包装过的 call。"
+                        + "若拿到的是原始 call，说明包装层没挂上 —— 即 breaker/shedding 形同虚设。")
+                .isNotSameAs(call);
+    }
+
+    /** 最小可用的 marshaller（测试不真的序列化）。 */
+    private static final class NoopMarshaller implements io.grpc.MethodDescriptor.Marshaller<Object> {
+        @Override
+        public java.io.InputStream stream(Object value) {
+            return new java.io.ByteArrayInputStream(new byte[0]);
+        }
+
+        @Override
+        public Object parse(java.io.InputStream stream) {
+            return new Object();
+        }
     }
 
     @Test

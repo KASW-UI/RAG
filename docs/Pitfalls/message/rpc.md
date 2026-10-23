@@ -3,7 +3,7 @@
 > 配套台账：[`docs/DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md)（差异本体） +
 > [`docs/DRIFT/_cross/message-domain-wide.md`](../_cross/message-domain-wide.md)（§6.7 第二轮）。
 > **本文件只写教训**，不重复差异清单。
-> 编号命名空间 `PITFALL-MSG-R-*`；核对日期 **2026-10-23**。
+> 编号命名空间 `PITFALL-MSG-R-*`；最近一次核对日期 **2026-10-24**（`PITFALL-MSG-R-014/015/016` 为本轮新增）。
 
 ---
 
@@ -461,5 +461,99 @@ forcePassDuration=1s`）与 `accept()` 的同构运算顺序，还专门标出�
 
 **⇒ 顺带产出**：`DRIFT/message/rpc.md` 的「状态更正 #7」已把那条错误判断连同证据一起更正，
 并在 `SD-2026-10-23-07` 里写明「补这两条**不得**引入 resilience4j」。
+
+---
+
+---
+
+<!-- @new 2026-10-24 00:0x 第七轮（V-016 breaker/shedding）新增 3 条 -->
+
+## PITFALL-MSG-R-014 串拦截器链时**不能把 `next` 直接透传** —— 那样内层 interceptor 永远不被调用
+
+**现象**：给 message-rpc 补服务端熔断/降载时，把链的定义点做进共享模块
+（`GoStyleRpcProtectionChain`），第一版把 `breakerThen` / `sheddingThen` 写成：
+
+```java
+public <ReqT,RespT> ServerCall.Listener<ReqT> interceptCall(call, headers, next) {
+    return breaker.interceptCall(call, headers, next);   // ❌ next 直接透传
+}
+```
+
+⇒ **业务 interceptor（超时/trace）永远不会被调用**，而：
+- 编译通过、启动通过、上下文正常；
+- 熔断/降载**看起来**在工作（它们在链上）；
+- **不报任何错**。
+
+**根因**：grpc 的 interceptor 链是**嵌套**关系：
+外层拦截器拿到 `ServerCallHandler next`，**必须自己决定**要不要调 `next.startCall(...)`。
+把 `next` 透传给内层拦截器，等于**跳过**了中间那一层的 `interceptCall`。
+⇒ 正确写法是**手写一层 delegate**（本仓 `recoverThen` 早就是这么写的）：
+
+```java
+ServerCallHandler<ReqT,RespT> delegateToInner = new ServerCallHandler<ReqT,RespT>() {
+    @Override public ServerCall.Listener<ReqT> startCall(ServerCall<ReqT,RespT> c, Metadata h) {
+        return inner.interceptCall(c, h, next);      // ✅ 调 inner，不是透传 next
+    }
+};
+return breaker.interceptCall(call, headers, delegateToInner);
+```
+
+**⇒ 元规则**：**每加一层拦截器，都要问「内层那个 interceptor 的 `interceptCall` 被调到了吗」。**
+链序的正确性**不能靠读代码确认** —— 本轮就是靠
+`GoStyleRpcProtectionChainTest#buildChainReachesBusinessInterceptor` 当场抓到的。
+
+**⇒ 下次怎么防**：写完链就用**一个计数型的假业务 interceptor**跑一遍，
+断言它的 `interceptCall` **确实被调到**（本轮那条用例第一版就是红的）。
+
+---
+
+## PITFALL-MSG-R-015 拒绝必须关「**本层包装过的** call」—— 关原始 call ⇒ 外层看不到
+
+**现象**：降载拦截器拒绝请求时，第一版写 `call.close(...)`（原始 call）。
+结果：**外层的熔断器永远开不了路**。
+
+**根因**：熔断器的判据观察点是 `ServerCall#close(status, trailers)`，
+它**只在自己包过的那一层**才被触发。外层拦截器包的是 `watched`，
+内层拦截器若直接关**原始** call，就**跳过了**外层的 `watched` ⇒
+外层熔断器**看不到**这次降载 ⇒ 记不到失败 ⇒ 熔断永远开不了。
+
+**而 Go 侧是能看到的**：Go 的链是**返回值冒泡**，
+`UnarySheddingInterceptor` 返回的 `RESOURCE_EXHAUSTED` 会**穿过**外层 `UnaryBreakerInterceptor`
+的 `handler(ctx, req)` 调用 ⇒ breaker 的 `doReq` 拿到它 ⇒ 记成失败
+（`RESOURCE_EXHAUSTED` 在 Go 的 6 码失败名单里）⇒ **持续降载最终把熔断器打开**。
+
+⇒ 这是 Go 与 grpc-java 的**执行模型差异**，必须显式补上：
+**拒绝要关「自己包过的那一层」，让错误自然穿过外层的包装。**
+
+**⚠️ 顺带一条容易漏的**：拒绝路径**不结算 promise** ——
+Go 的 `defer` 是在 `Allow()` 成功**之后**才注册的（`sheddinginterceptor.go:24-31` 先 Allow，`:36` 才 defer）
+⇒ 拒绝时既不 `Pass()` 也不 `Fail()`。本仓第一版会在拒绝时也走 `close` 的结算分支，
+靠一个 `rejected` 标志位纠正。
+
+**⇒ 下次怎么防**：链里每有一个「拒绝型」拦截器，就要有一条用例证明
+**外层能观察到它的拒绝**（本轮：`GoStyleRpcProtectionChainTest#sheddingRejectionIsVisibleToTheOuterBreaker`）。
+
+---
+
+## PITFALL-MSG-R-016 被 recover 兜住的异常，会让链路看起来「没被调用」
+
+**现象**：装配层用例报 `Wanted but not invoked ... there were zero interactions with this mock`
+—— 业务 interceptor **一次都没被调到**。
+
+**真因不在业务侧，在链里面**：Mockito 的 `ServerCall` mock 对 `getMethodDescriptor()`
+默认返回 **null** ⇒ 链上的熔断器取隔离 key 时 `call.getMethodDescriptor().getFullMethodName()`
+抛 **NPE** ⇒ 而这个 NPE 被**最外层的 recover 静默兜住**（关掉调用、返回 `INTERNAL`）
+⇒ 现象是「业务 interceptor 零交互」。
+
+**⇒ 元规则**：
+1. **「零交互」有两种成因**：① 链没接上；② 链里抛了异常被 recover 吞了。
+   **区分办法：看 recover 的 ERROR 日志**（`gRPC handler panic: …` + 栈）——
+   有日志 ⇒ 是 ②。
+2. ⇒ **测「链路是否接通」时，mock 必须补齐被链上代码用到的 getter**
+   （本轮是 `getMethodDescriptor()`）；否则你在测 mock 的默认值，不是测链路。
+
+**⇒ 附带的通用提醒**：**recover 的兜底会把链内异常变成「静默的 INTERNAL」**。
+生产上排查「某个 interceptor 好像没生效」时，第一件事是去翻 recover 的 ERROR 日志，
+而不是盯着业务日志 —— 业务侧只会看到一个普通的 `INTERNAL`。
 
 ---

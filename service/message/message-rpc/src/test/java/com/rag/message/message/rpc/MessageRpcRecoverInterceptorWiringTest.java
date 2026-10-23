@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <h3>🔴 本类刻意放在 message-rpc 而不是 service/common</h3>
  * <p>① 它需要 {@code message-proto} 的类型（common 不依赖它）；
- * ② 更重要的是：它验的是 <b>生产装配</b> {@link MessageRpcApplication#recoverThen}，
+ * ② 更重要的是：它验的是 <b>生产装配</b> {@link com.rag.common.protection.GoStyleRpcProtectionChain#recoverThen}，
  * 而不是测试自己拼的链 —— 后者会出现「测试全绿、生产漏挂」的假闭环（§3.3）。
  *
  * <h3>为什么必须真触发，而不是断言 Bean 存在</h3>
@@ -78,7 +78,7 @@ class MessageRpcRecoverInterceptorWiringTest {
         server = InProcessServerBuilder.forName(SERVER_NAME)
                 .directExecutor()
                 // ⚠️ 用**生产的** recoverThen，不是测试自己拼的链
-                .intercept(MessageRpcApplication.recoverThen(inner))
+                .intercept(com.rag.common.protection.GoStyleRpcProtectionChain.recoverThen(inner))
                 .addService(new MessageServiceGrpc.MessageServiceImplBase() {
                     @Override
                     public void markNotificationRead(MarkNotificationReq request,
@@ -190,7 +190,7 @@ class MessageRpcRecoverInterceptorWiringTest {
     void nonRuntimeExceptionErrorIsAlsoRecovered() throws Exception {
         server = InProcessServerBuilder.forName(SERVER_NAME)
                 .directExecutor()
-                .intercept(MessageRpcApplication.recoverThen(noopInner()))
+                .intercept(com.rag.common.protection.GoStyleRpcProtectionChain.recoverThen(noopInner()))
                 .addService(new MessageServiceGrpc.MessageServiceImplBase() {
                     @Override
                     public void markNotificationRead(MarkNotificationReq request,
@@ -236,7 +236,7 @@ class MessageRpcRecoverInterceptorWiringTest {
 
         server = InProcessServerBuilder.forName(SERVER_NAME)
                 .directExecutor()
-                .intercept(MessageRpcApplication.recoverThen(explodingInner))
+                .intercept(com.rag.common.protection.GoStyleRpcProtectionChain.recoverThen(explodingInner))
                 .addService(new MessageServiceGrpc.MessageServiceImplBase() {
                     @Override
                     public void markNotificationRead(MarkNotificationReq request,

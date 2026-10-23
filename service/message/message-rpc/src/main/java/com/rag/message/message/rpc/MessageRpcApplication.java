@@ -83,7 +83,17 @@ import org.springframework.context.annotation.Import;
         // 两者都是 org.apache.ibatis.plugin.Interceptor Bean，MyBatis-Plus 自动配置会
         //   收集容器内全部 Interceptor 并 setPlugins，因此这里只需保证它们成为 Bean。
         DeadlineQueryTimeoutInjector.class,
-        SqlTimeoutStatusTranslator.class
+        SqlTimeoutStatusTranslator.class,
+
+        // ===== DRIFT-MSG-V-016：服务端熔断 / CPU 降载的配置载体（2026-10-24）=====
+        // GoStyleProtectionConfiguration 携带 @EnableConfigurationProperties(GoStyleProtectionProperties)，
+        //   两者必须一起 @Import —— 只 Import properties 类不会触发绑定。
+        // ⚠️ 为什么 rpc 模块要显式 @Import：本模块**刻意不扫** com.rag.common
+        //   （扫了会把 jakarta.servlet.Filter 那一族拖进纯 gRPC 进程），
+        //   所以 protection 包里的 @Configuration 不会被扫到 ⇒ properties Bean 不会自动注册。
+        //   GoStyleProtectionConfiguration 本身无 @ConditionalOnWebApplication（它只带一个纯 POJO），
+        //   非 web 进程里 Import 它是安全的。
+        com.rag.common.protection.GoStyleProtectionConfiguration.class
 })
 public class MessageRpcApplication {
 
@@ -103,7 +113,8 @@ public class MessageRpcApplication {
      */
     @org.springframework.context.annotation.Bean
     public net.devh.boot.grpc.server.serverfactory.GrpcServerConfigurer rpcInterceptorConfigurer(
-            io.grpc.ServerInterceptor rpcUnaryServerInterceptor) {
+            io.grpc.ServerInterceptor rpcUnaryServerInterceptor,
+            com.rag.common.protection.GoStyleProtectionProperties protectionProps) {
         // ⚠️ **顺序在这里被显式钉死，不用 server.intercept(a, b) 的多次调用**。
         //
         // Go 侧的注册序（zrpc/server.go:144-163 + zrpc/internal/server.go:58「append 到尾部」
@@ -114,44 +125,14 @@ public class MessageRpcApplication {
         // 为什么手工串链而不直接 server.intercept(recover, observability)：
         // io.grpc.ServerBuilder#intercept 每次只收一个，且多次调用的执行顺序是
         // 「added in reverse order」—— 依赖它等于把嵌套关系交给一个容易记错的细节。
-        // 顺序由 recoverThen(...) 的代码结构写死（见其 javadoc）。
-        return server -> server.intercept(recoverThen(rpcUnaryServerInterceptor));
-    }
-
-    /**
-     * 把 {@code recover} 显式串在 {@code inner} 的<b>外层</b>，返回单一拦截器。
-     *
-     * <p><b>为什么写成一个显式匿名类，而不是两次 server.intercept(...)</b>：
-     * {@code io.grpc.ServerBuilder#intercept} 每次只收一个拦截器，
-     * 而多次调用的执行顺序是「<b>added in reverse order</b>」——
-     * 把嵌套关系交给一个容易记错的 API 细节，等于把 recover 的正确性押在记忆上。
-     * 这里用代码结构把顺序写死：<b>recover 在外，业务观测拦截器在内</b>。
-     *
-     * <p>⚠️ 用匿名类而不是 lambda：{@code ServerInterceptor#interceptCall} 与
-     * {@code ServerCallHandler#startCall} <b>各自是泛型方法</b>，
-     * 三层 lambda 嵌套时 javac 推断不出函数描述符（实测报「函数描述符无效」）。
-     */
-    public static io.grpc.ServerInterceptor recoverThen(io.grpc.ServerInterceptor inner) {
-        final io.grpc.ServerInterceptor outer = new com.rag.common.observability.GoStyleRecoverInterceptor();
-        return new io.grpc.ServerInterceptor() {
-            @Override
-            public <ReqT, RespT> io.grpc.ServerCall.Listener<ReqT> interceptCall(
-                    io.grpc.ServerCall<ReqT, RespT> call,
-                    io.grpc.Metadata headers,
-                    io.grpc.ServerCallHandler<ReqT, RespT> next) {
-                // ⚠️ ServerCallHandler 的类型参数在**接口声明处**（ServerCallHandler<ReqT, RespT>），
-                //    不是方法级泛型 —— 这里若再写一次 <Q, S> 会与父类型「同名但互不覆盖」而编译失败。
-                io.grpc.ServerCallHandler<ReqT, RespT> delegateToInner =
-                        new io.grpc.ServerCallHandler<ReqT, RespT>() {
-                            @Override
-                            public io.grpc.ServerCall.Listener<ReqT> startCall(
-                                    io.grpc.ServerCall<ReqT, RespT> c, io.grpc.Metadata h) {
-                                return inner.interceptCall(c, h, next);
-                            }
-                        };
-                return outer.interceptCall(call, headers, delegateToInner);
-            }
-        };
+        //
+        // ⚠️ 2026-10-24（DRIFT-MSG-V-016）：链的定义点已**上提到共享模块**
+        //   com.rag.common.protection.GoStyleRpcProtectionChain —— 因为 breaker / shedding
+        //   是**框架级**能力（Go 侧在 zrpc 库里），10 个 rpc 组件都要挂同一套链，
+        //   顺序若分散在 10 个组件里各写一遍，就是 10 个可能写错的地方。
+        //   本仓的链：recover → breaker → shedding → 业务观测拦截器。
+        return server -> server.intercept(com.rag.common.protection.GoStyleRpcProtectionChain
+                .build(rpcUnaryServerInterceptor, protectionProps));
     }
 
     public static void main(String[] args) {
