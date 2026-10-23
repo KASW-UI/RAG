@@ -316,21 +316,21 @@ def layer3_numbers(root, texts):
         #    ⇒ 写死「必须全部登记」会让脚本在**每次提交后**都报一次 ⇒ 变成噪声 ⇒ 没人看
         #    ⇒ 真正要抓的是「**漏登记了历史 commit**」（≥2 个才是问题）
         head = git(root, 'rev-parse', '--short=7', 'HEAD')
-        if len(missing) > 1:
+        # ⚠️ **只允许 HEAD 那一个未登记**（本轮「（本轮）」占位，提交那一刻才有哈希）
+        #    ⇒ 其余任何未登记的都是**漏登记的历史 commit**，必须报出来。
+        #    ⚠️ 「允许 ≤1 个未登记」是错的：连续快速提交时会漏过真正的漏登记
+        #    （本轮实测：一次补登只解决一个 ⇒ 前一个还没登记就又提交了新的 ⇒ 漏过）。
+        non_head = [h for h in missing if h[:7] != head]
+        if non_head:
             bad += 1
-            print(f'  ❌ 有 {len(missing)} 个 commit **未在台账里登记**（分支 {branch}，共 {len(hashes)} 个）')
-            for h in missing:
+            print(f'  ❌ 有 {len(non_head)} 个 commit **未在台账里登记**，且**不是** HEAD'
+                  f'（分支 {branch}，共 {len(hashes)} 个）')
+            for h in non_head:
                 subj = git(root, 'log', '-1', '--format=%s', h)
                 print(f'      {h}  {subj}')
         elif len(missing) == 1:
-            head_missing = missing[0][:7] == head
-            if head_missing:
-                print(f'  ✅ 分支上 {len(hashes)} 个 commit 已登记'
-                      f'（1 个待登记 = 本次「（本轮）」占位 {head}，允许）')
-            else:
-                bad += 1
-                print(f'  ❌ 有 1 个 commit 未登记，且**不是** HEAD（{missing[0][:7]} ≠ {head}）'
-                      f' ⇒ 那是**漏登记的历史 commit**，不是本轮占位')
+            print(f'  ✅ 分支上 {len(hashes)} 个 commit 已登记'
+                  f'（1 个待登记 = 本次「（本轮）」占位 {head}，允许）')
         else:
             print(f'  ✅ 分支上 {len(hashes)} 个 commit **全部**在台账里有登记（分支 {branch}）')
     else:
