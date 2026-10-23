@@ -92,7 +92,7 @@
 | 7 | NacosDiscovery 真注册中心行为 | ✅ 完成（Nacos 注册 → 注销） |
 | 8 | 「Kafka 写入 → task-api 读到」闭环 | ⚠️ **不做** —— 两侧读写 Redis key **本来就不一致**（Go 侧也读不到自己写的缓存）⇒ 不是 RAG 的缺陷 |
 | 9 | `parity-task-kafka.py` 纳入 CI | ⚠️ **未做** —— 要用 Testcontainers 改造**共享**构建基建，范围超出 task 域，需与其它域协调 |
-| 10 | `task:goka:count:*` 保留策略 | ⚠️ **未做** —— 要给 Redis key 加 TTL/清理策略是**新增行为**，按 AGENTS.md 需单独拍板 |
+| 10 | `task:goka:count:*` 保留策略 | ✅ **已定案**（2026-10-24）—— 实测证明 Go 的 compacted table **不按时间过期** ⇒ **不设 TTL 才是对齐**（加了会造成业务错误）⇒ 改为「用真 Redis 守门测试把「不设 TTL」锁成契约」 |
 ### 第三轮（2026-10-24 · 验「goka OffsetOldest」+ 定案「保留策略」）
 
 | commit | 内容 |
@@ -112,11 +112,12 @@
 | # | 项 | 性质 | 本域能独立做掉？ |
 |---|---|---|---|
 | 1 | ~~goka `OffsetOldest` 的「**首次消费无位点**」分支未做活体验证~~ ⇒ **2026-10-24 已做**（`run-task-offset-oldest.sh`，8 条断言全过）⇒ **并查出第 6 条漂移（`auto-offset-reset` 连字符 ⇒ Kafka 忽略）已修** | ✅ **已关闭** | — |
-| 2 | `task:goka:count:*` **无 TTL、只增不删**（`rpc.md` §六 / §七 第 3 条） | **新增行为**，不是漂移 | ❌ 需**单独拍板**（AGENTS.md §5） |
-| 3 | `parity-task-kafka.py` **纳入 CI**（`rpc.md` §七 第 6 条） | 要用 Testcontainers 改**共享**构建基建 | ❌ 范围**超出 task 域**，须与其它域协调 |
+| 2 | ~~`task:goka:count:*` **无 TTL、只增不删**~~ ⇒ **2026-10-24 已定案**：实测证明 Go 的 compacted table **不按时间过期** ⇒ **不设 TTL 才是对齐**（加了会造成业务错误）⇒ 改为「真 Redis 契约守门测试」 | ✅ **已关闭** | — |
+| 3 | **`parity-task-kafka.py` / `run-task-offset-oldest.sh` 纳入 CI**（`rpc.md` §七 第 6、7 条） | 要用 Testcontainers 改**共享**构建基建 | ❌ 范围**超出 task 域**，须与其它域协调 |
 | 4 | DRIFT-TASK-API-004（`Content-Type` 的 charset/空白格式） | **五域共性** | ❌ 不在本域单独修（改了会造成本域与其它域不一致） |
 | 5 | 「Kafka 写入 → task-api 读到」跨域闭环 | **非缺陷**：两侧读写 Redis key 本来就不一致（Go 侧也读不到自己写的缓存） | ❌ **明确不做** |
 | 6 | `service/common` 未重审 | 属 **common 域**，不在本域台账范围 | ❌ 属其它域 |
+| 7 | 🆕 **「配置键名对不上 ⇒ 静默失效」的全域扫描还没固化**：本轮查出 `auto-offset-reset` 连字符被 Kafka 忽略（DRIFT-TASK-RPC-006）⇒ 同类扫描已跑过一遍（`@Value` 5/5 可解析、`@ConfigurationProperties` 孤儿键 **0**）⇒ **但那是临时脚本，没进 CI** | **预防性**，不是已知缺陷 | ✅ **能**（把扫描写成守门测试，纯本域） |
 
 ⚠️ 另有**两条不是本域的活**：`AGENTS.md` §0 / §3.5 与 `docs/DRIFT/_INDEX.md` 的 task 域行
 —— 按 `docs/Worktree.md` §3 留给**合并后统一更新**，本工作树不碰。
