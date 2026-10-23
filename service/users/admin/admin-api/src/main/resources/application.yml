@@ -28,7 +28,17 @@ spring:
       host: ${REDIS_ADDR:redis}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
+      # ⚠️ 取值出处（2026-10-23 补记，此前只有数值没有出处）：
+      #   Go 的 admin.yaml 完全没配 BizRedis 超时
+      #     → go-zero v1.10.2 redisclientmanager.go:32-39 建 red.Options 时不传任何 timeout
+      #     → go-redis/v9 options.go init() 默认：ReadTimeout = 3s
+      #   ⇒ 读命令超时 3s，与 go-redis 默认逐字相同（完整出处链见 admin-rpc 侧同段注释）。
+      #   🔴 go-zero redis.go:27 的 `readWriteTimeout = 2s` 是**死常量**，别被它误导。
       timeout: 3s
+      # 连接超时：Go 的 go-redis DialTimeout 默认 **5s**。
+      # Lettuce 在 connect-timeout 未设时回落到 timeout ⇒ 不配这行会跟着变成 3s。
+      # Boot 4 里这是独立属性（DataRedisProperties.connectTimeout，模块 spring-boot-data-redis）。
+      connect-timeout: 5s
 
   # ===== 2. Nacos 服务发现客户端 =====
   # 配 Nacos server 地址 + namespace + group。

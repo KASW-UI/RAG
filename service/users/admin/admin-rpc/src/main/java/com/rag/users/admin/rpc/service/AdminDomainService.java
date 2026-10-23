@@ -157,6 +157,14 @@ public class AdminDomainService {
      * </ol>
      */
     public Long login(String username, String password) {
+        // 🔴 DRIFT-ARPC-006：Go loginlogic.go 在方法开头 otel.Tracer("admin-rpc").Start(ctx,"Action-Admin-Login")
+        //    并打 audit.admin_username = in.Username（**原始入参，未 trim**）
+        return AdminSpans.traced(AdminSpans.LOGIN,
+                span -> span.setAttribute(AdminSpans.ATTR_ADMIN_USERNAME, username),
+                () -> doLogin(username, password));
+    }
+
+    private Long doLogin(String username, String password) {
         checkDeadline();
         AdminEntity admin;
         try {
@@ -400,6 +408,19 @@ public class AdminDomainService {
      */
     public long createAdmin(String username, String password, String email,
                             Map<String, String> extraInfo, String inviteCode) {
+        // 🔴 DRIFT-ARPC-006：Go createadminlogic.go 的顺序是
+        //     tracer.Start(ctx, "Action-Admin-CreateAdmin")
+        //     username := strings.TrimSpace(in.Username)      ← 先 trim
+        //     span.SetAttributes(attribute.String("audit.admin_username", username))  ← 再打属性
+        // ⇒ 属性必须取**trim 之后**的值，与 Go 逐字一致（不是原始入参）。
+        return AdminSpans.traced(AdminSpans.CREATE_ADMIN,
+                span -> span.setAttribute(AdminSpans.ATTR_ADMIN_USERNAME,
+                        username == null ? "" : username.trim()),
+                () -> doCreateAdmin(username, password, email, extraInfo, inviteCode));
+    }
+
+    private long doCreateAdmin(String username, String password, String email,
+                               Map<String, String> extraInfo, String inviteCode) {
         checkDeadline();
         // inviteCode 非空
         String trimmedInvite = inviteCode == null ? "" : inviteCode.trim();
@@ -499,6 +520,14 @@ public class AdminDomainService {
      * </ol>
      */
     public InviteCodeResult createInviteCode(long operatorId) {
+        // 🔴 DRIFT-ARPC-006：Go createinvitecodelogic.go span="Action-Admin-CreateInviteCode"，
+        //    属性只有 audit.operator_id
+        return AdminSpans.traced(AdminSpans.CREATE_INVITE_CODE,
+                span -> span.setAttribute(AdminSpans.ATTR_OPERATOR_ID, operatorId),
+                () -> doCreateInviteCode(operatorId));
+    }
+
+    private InviteCodeResult doCreateInviteCode(long operatorId) {
         checkDeadline();
         // 校验 operator 是有效 admin
         try {
@@ -588,6 +617,14 @@ public class AdminDomainService {
      * <p>L2 业务语义：把 user.status 改成 1（封禁）。
      */
     public boolean banUser(long uid, long operatorId) {
+        // 🔴 DRIFT-ARPC-006：Go Action-Admin-BanUser，属性 audit.operator_id + audit.target_uid
+        return AdminSpans.traced(AdminSpans.BAN_USER, span -> {
+            span.setAttribute(AdminSpans.ATTR_OPERATOR_ID, operatorId);
+            span.setAttribute(AdminSpans.ATTR_TARGET_UID, uid);
+        }, () -> doBanUser(uid, operatorId));
+    }
+
+    private boolean doBanUser(long uid, long operatorId) {
         checkDeadline();
         int rows;
         try {
@@ -621,6 +658,14 @@ public class AdminDomainService {
      * <p>L2 业务语义：把 user.status 改回 0（解封）。
      */
     public boolean unBanUser(long uid, long operatorId) {
+        // 🔴 DRIFT-ARPC-006：Go Action-Admin-UnBanUser，属性 audit.operator_id + audit.target_uid
+        return AdminSpans.traced(AdminSpans.UNBAN_USER, span -> {
+            span.setAttribute(AdminSpans.ATTR_OPERATOR_ID, operatorId);
+            span.setAttribute(AdminSpans.ATTR_TARGET_UID, uid);
+        }, () -> doUnBanUser(uid, operatorId));
+    }
+
+    private boolean doUnBanUser(long uid, long operatorId) {
         checkDeadline();
         int rows;
         try {
@@ -835,8 +880,19 @@ public class AdminDomainService {
      * </ol>
      */
     public UserEntity updateUser(long uid, long operatorId,
-                                 String username, String password, String email,
-                                 Map<String, String> extraInfo) {
+                              String username, String password, String email,
+                              Map<String, String> extraInfo) {
+        // 🔴 DRIFT-ARPC-006：Go updateuserlogic.go span="Action-Admin-UpdateUser"，
+        //    属性 audit.operator_id + audit.target_uid
+        return AdminSpans.traced(AdminSpans.UPDATE_USER, span -> {
+            span.setAttribute(AdminSpans.ATTR_OPERATOR_ID, operatorId);
+            span.setAttribute(AdminSpans.ATTR_TARGET_UID, uid);
+        }, () -> doUpdateUser(uid, operatorId, username, password, email, extraInfo));
+    }
+
+    private UserEntity doUpdateUser(long uid, long operatorId,
+                                    String username, String password, String email,
+                                    Map<String, String> extraInfo) {
         checkDeadline();
         // W2 查 user
         UserEntity target;
@@ -945,6 +1001,14 @@ public class AdminDomainService {
      * <p>L2 业务语义：deleteUserByUid → RowsAffected=0 抛 NotFound / 其它 DB 错抛 Internal / 成功 → resp{Success=true}。
      */
     public boolean deleteUser(long uid, long operatorId) {
+        // 🔴 DRIFT-ARPC-006：Go Action-Admin-DeleteUser，属性 audit.operator_id + audit.target_uid
+        return AdminSpans.traced(AdminSpans.DELETE_USER, span -> {
+            span.setAttribute(AdminSpans.ATTR_OPERATOR_ID, operatorId);
+            span.setAttribute(AdminSpans.ATTR_TARGET_UID, uid);
+        }, () -> doDeleteUser(uid, operatorId));
+    }
+
+    private boolean doDeleteUser(long uid, long operatorId) {
         checkDeadline();
         int rows;
         try {
@@ -983,6 +1047,14 @@ public class AdminDomainService {
      * 所以 ResetUserPassword 即使 user 在 W2 和 W4 之间被并发删了，仍会返 success。这是 Go 端的语义，1:1 保留。
      */
     public boolean resetUserPassword(long uid, long operatorId) {
+        // 🔴 DRIFT-ARPC-006：Go Action-Admin-ResetUserPassword，属性 audit.operator_id + audit.target_uid
+        return AdminSpans.traced(AdminSpans.RESET_USER_PASSWORD, span -> {
+            span.setAttribute(AdminSpans.ATTR_OPERATOR_ID, operatorId);
+            span.setAttribute(AdminSpans.ATTR_TARGET_UID, uid);
+        }, () -> doResetUserPassword(uid, operatorId));
+    }
+
+    private boolean doResetUserPassword(long uid, long operatorId) {
         checkDeadline();
         // W2 查 user
         try {

@@ -1878,3 +1878,131 @@ username / email 任一侧不同就会报 `payload_diff`，
 2. **`success=false` 这个期望值的正确性来自 Go 源码**（`updateuserlogic.go:105-113` 不 set Success
    ⇒ proto3 默认 false），**不是**来自本次对拍 —— 对拍只能证明「两侧一致」，
    证不了「两侧都对」。这与 AGENTS.md §3.3 的告诫同型：变异测试与期望值来源两者缺一不可。
+
+---
+
+# 2026-10-23 实施轮（② Redis 超时 + ① ARPC-006 手写 span）
+
+> **核对日期**：2026-10-23 23:4x–23:5x　**分支**：`align/users-admin`
+> 起因：复核轮把 admin 域「还能改的漂移」列成 4 条，用户选定 **② → ①**。
+> ⚠️ **本轮推翻了复核轮对 ① 的一处判断**（见 §2.1）。
+
+## 1. ✅ ② UNRESOLVED-ARPC-003 的连接超时 —— 已实施
+
+### 1.1 改了什么
+
+| 文件 | 改动 |
+|---|---|
+| `admin-rpc/src/main/resources/application.yml` | 新增 `spring.data.redis.connect-timeout: 5s`；并给 `timeout: 3s` 补上**完整出处链注释**（此前只有裸数值） |
+| `admin-api/src/main/resources/application.yml` | 同上（admin-api 也用 Redis 存黑名单） |
+
+### 1.2 出处（写入 yml 注释，避免下一次又变成「裸数值」）
+
+- Go `admin.yaml` **无** BizRedis 超时 → go-zero v1.10.2 `redisclientmanager.go:32-39` 建 `red.Options`
+  时**三个 timeout 一个都没传** → go-redis/v9 `options.go init()` 填默认：
+  **`DialTimeout = 5s`**（`:329-330`）、**`ReadTimeout = 3s`**（`switch opt.ReadTimeout { case 0: … }`）
+- Boot 4 里 `connect-timeout` 是**独立字段**：`DataRedisProperties.connectTimeout`
+  （模块 `spring-boot-data-redis` —— `RedisProperties` 已从 `spring-boot-autoconfigure` 拆出，
+  这正是 §3.3「Boot 4 拆模块」那条纪律的现场）
+- 不配它，Lettuce 会**回落到 `timeout`** ⇒ 连接超时跟着变成 3s，与 Go 的 5s 不一致
+
+### 1.3 🔴 红鲱鱼（已写进注释）
+
+go-zero `core/stores/redis/redis.go:27` 的 `readWriteTimeout = 2 * time.Second`
+**全文件只有这一处 —— 死常量，从未被使用**。只看它会错判成「Go 是 2s」。
+
+### 1.4 守门 + 变异实证
+
+`AdminRedisTimeoutConfigTest`（**静态配置断言**，用 SnakeYAML 直接读 classpath 里的 yml）：
+
+```
+变异：删掉 connect-timeout: 5s
+  → AssertionFailedError: 连接超时应为 5s… ==> expected: <5s> but was: <null>
+✅ 文件已还原
+```
+
+⚠️ **效力边界（不夸大）**：这是**静态**断言 —— 证明「yml 里写了这两个值」，
+**不证明**「Boot 4 真的把它们绑定到 Lettuce 客户端」。
+后者需要运行期证据（例如把连接指向黑洞 IP、实测失败耗时落在 5s 而非 3s），**本轮未做**
+⇒ 仍记 UNRESOLVED，见定性轮 §2.4。
+
+## 2. ✅ ① DRIFT-ARPC-006 —— 已实施（本轮最大的改动）
+
+### 2.1 🔴 先推翻一处旧判断
+
+审计轮把本条写成「<b>需要动 `service/common` 的 OTel 装配（不在本组件）</b>」——
+**过度保守，判断错误**。实测：
+
+- `admin-rpc/pom.xml` **已**引 `opentelemetry-bom` + `opentelemetry-exporter-otlp`（API + SDK 都在编译期）
+- `service/common` 自己的 `MqConsumer.java:81` 用的就是
+  `GlobalOpenTelemetry.getTracer(tracerName)` —— **与 Go 的 `otel.Tracer(...)` 是同一个 API**
+
+⇒ **完全可以在 admin-rpc 模块内完成**，一行共享代码都不用改。
+
+### 2.2 🔴 更重要的纠正：是 **8 个 logic**，不是 13 个
+
+本条台账原文写「Go 逐 Logic 打 `audit.*` 属性」，容易让人以为是 13 个 logic 全都有。
+逐文件核（`grep -l "go.opentelemetry.io/otel"`）：
+
+| 有 span（**8 个**） | span 名 | 属性 |
+|---|---|---|
+| `loginlogic.go` | `Action-Admin-Login` | `audit.admin_username = in.Username`（**原始入参**） |
+| `createadminlogic.go` | `Action-Admin-CreateAdmin` | `audit.admin_username = username`（**trim 之后**） |
+| `createinvitecodelogic.go` | `Action-Admin-CreateInviteCode` | `audit.operator_id` |
+| `updateuserlogic.go` | `Action-Admin-UpdateUser` | `audit.operator_id` + `audit.target_uid` |
+| `banuserlogic.go` | `Action-Admin-BanUser` | 同上 |
+| `unbanuserlogic.go` | `Action-Admin-UnBanUser` | 同上 |
+| `deleteuserlogic.go` | `Action-Admin-DeleteUser` | 同上 |
+| `resetuserpasswordlogic.go` | `Action-Admin-ResetUserPassword` | 同上 |
+
+**没有 span（5 个）**：`getselflogic.go`、`getuserlogic.go`、`getuserlistlogic.go`、
+`logoutlogic.go`、`updateselflogic.go` —— 这 5 个文件**连 otel import 都没有**。
+
+> **「13」是 attribute 条数，不是 logic 数**（1+1+1+2×5 = 13）。
+> ⇒ 本轮**刻意不给那 5 个加 span** —— Go 没有的，RAG 也不凭空加，
+> 否则 trace 里的 admin span 数会从 8 变 13，与真源不符。
+
+### 2.3 改法
+
+新增 `service/AdminSpans.java`：`GlobalOpenTelemetry.getTracer("admin-rpc")` + `Scope` + `finally span.end()`。
+`AdminDomainService` 的 **8 个** public 方法改成「薄壳 + 原体改名 `doXxx`」——
+**原方法体一行未动**，只改签名处，diff 可读。
+
+### 2.4 ⚠️ 与签字偏离 N-4 的关系（必须知情）
+
+Go 的 `audit.operator_id` **恒为 0**（读 `ctx["uid"]`，而 claim 名是 `userId`），
+RAG 传**真实 uid** —— 这是已签字的 **N-4**。
+⇒ **补了 span 之后，这个差异第一次真正落到 trace 数据里**：
+排障/对拍时两侧 `audit.operator_id` 会不同，**属预期差异，不是回归**。
+`AdminSpanWiringTest` 直接断言 RAG 侧该属性 == 真实 operatorId，把这个决策钉死。
+
+### 2.5 L4 差异（§3.2 留痕）
+
+Go 的 `span.RecordError(err)` 分布在**具体错误分支**上（全 8 个 logic 共 16 处）；
+本类在**异常逃出时统一** `recordException` + 置 ERROR 状态。
+⇒ **IMPLEMENTATION DIFFERENCE**，不影响 span 名与属性。
+（逐点复刻 16 处不在本轮范围；如需严格对齐应另立条目。）
+
+### 2.6 守门：**装配层**证据 + 变异实证
+
+`AdminSpanWiringTest`（3 条，真 PG）。它**不**断言「代码调用了 `AdminSpans.traced`」——
+那只能证明代码写成了这样（§3.3）。它**自己装一个 SDK + 收集型 `SpanExporter`**
+（不引 `opentelemetry-sdk-testing`，避免为测试扩大依赖面），
+把 `GlobalOpenTelemetry` 指过去，然后断言**导出的 span**：
+
+| 用例 | 断言 |
+|---|---|
+| `resetUserPasswordProducesGoSpanWithAttributes` | 导出名为 `Action-Admin-ResetUserPassword` 的 span；scope 名 == `admin-rpc`；`audit.operator_id`/`audit.target_uid` 都带上；`span.hasEnded()` |
+| `methodsWithoutGoSpanMustNotProduceOne` | **负向**：Go 没打 span 的读路径**不许凭空产生** `Action-Admin-*` span |
+| `spanNameConstantsMatchGoInventory` | 8 个 span 名常量与 Go 清单逐条相等 |
+
+**变异实证**（证明不是假绿）：
+
+```
+变异：删掉 resetUserPassword 的 span.setAttribute(ATTR_TARGET_UID, uid)
+  → AssertionFailedError: audit.target_uid 必须带上 ==> expected: <7701> but was: <null>
+✅ 文件已还原
+```
+
+⇒ 「span 真的被导出」与「属性真的被带上」**双���都有运行期证据**，
+不是「代码里写了」的推测。
