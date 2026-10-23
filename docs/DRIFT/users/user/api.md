@@ -1596,7 +1596,10 @@ Neo4j 399 MiB、Grafana 362 MiB …… 已吃掉大半 ⇒ 小容器也分不到
 
 ## 2026-10-23 第四轮（补）：`DRIFT-007` 定性 · `DRIFT-009` 执行链核实
 
-### 1. `DRIFT-USERAPI-007` —— **定性为「有意偏离（待签字）」，本轮不改行为，但加了护网钉住**
+### 1. `DRIFT-USERAPI-007` —— ✅ **已签字保留（`SD-USERAPI-001`，2026-10-23）**，行为不改，护网已钉住
+
+> **本条已收编进 [`../../Intentional_Deviations/users/user/api.md`](../../Intentional_Deviations/users/user/api.md)
+> （`SD-USERAPI-001`）** —— 那里是「决策」，本节是「取证与论证」。审查时**先看签字档**。
 
 **Go 出处（本轮回原文复核，全文 23 行）**：
 `go-zero@v1.10.2/rest/handler/recoverhandler.go:12-23`
@@ -1643,8 +1646,8 @@ RAG 侧 `GlobalExceptionHandler#handleAny:262-272` ⇒ **HTTP 500 + 完整 envel
 
 零容器依赖（`standaloneSetup` + 真 advice），**0.6 秒**。
 
-**⇒ 待你拍板**：`DRIFT-007` 是「签字保留 envelope」还是「对齐 Go 的空 body」。
-若选前者，应收编进 `docs/Intentional_Deviations/users/`（当前该文件为空）。
+**⇒ 用户已于 2026-10-23 拍板：签字保留 envelope**，收编为 `SD-USERAPI-001`。
+（对齐 Go 的空 body 这一选项被否 —— 理由见签字档。）
 
 ### 2. `DRIFT-USERAPI-009` —— 执行链已**逐行追完**（原台账为「静态断言」，本轮升级为「完整链路 + 行号」）
 
