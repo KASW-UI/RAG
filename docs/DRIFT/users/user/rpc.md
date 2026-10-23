@@ -650,7 +650,12 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 - **归属**：`service/common` 组件，不属 user-rpc 自身。**判定权在 common 组件的台账**，
   此处只登记 user-rpc 作为消费方的事实，避免同一问题被两个组件各判一次。
 
-### DRIFT-USERRPC-V-008 死代码 + **伪出处**（无行为影响，但会误导下一个 agent）
+### DRIFT-USERRPC-V-008 死代码 + **伪出处** —— ✅ **已修（2026-10-23 第四轮，commit `fa2de52`）**
+
+> **本节是首轮原文，保留供追溯。** 修复经过见本文件第四轮 §2「`DRIFT-USERRPC-V-008` ✅ 已修」——
+> 三个异常类与两个 mapper 方法**已删除**（2026-10-23 复核确认：仓内只剩注释残留，无任何类声明/方法定义）。
+> ⚠️ 复核时**差点漏掉**：本节标题与 §5 汇总表两处都还写着「仍成立 / 建议下轮删掉」，
+> 是与 §9 `UNRESOLVED` 表同型的**台账脱节**，已一并更正。
 
 - **Category**: 文档 / 死代码
 - **发现**：
@@ -1110,7 +1115,7 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | **DRIFT-USERRPC-V-011（新）** | 时间列 **DEFAULT `CURRENT_TIMESTAMP`**（Go 无 DEFAULT） | 🔴 新发现 | 两侧写入路径都**显式**写这两个列（Go 靠 GORM autoCreateTime；RAG 本轮起靠应用侧时钟）⇒ DEFAULT 只在「有人不写该列」时生效 ⇒ **当前不可观察**。⚠️ 改它要先确认 admin 域与 `users_user` 的写入路径 |
 | **DRIFT-USERRPC-V-006** | `id` 的取值来源（Go `bigserial` 序列 vs RAG `IdType.ASSIGN_ID` 雪花） | 仍成立，wire 零影响 | ⛔ 本轮**未**实测 `users_user_avatar_history.id` 到底谁胜出（`@Options(useGeneratedKeys=true)` vs `ASSIGN_ID`）。**真 PG 直查即可关闭**，本轮时间预算用完，见 §6 |
 | **DRIFT-USERRPC-V-007** | 超时的 gRPC `description` 不同（`service/common` 组件） | 仍成立 | 归属 `service/common`，不在本组件判定权内 |
-| **DRIFT-USERRPC-V-008** | 死代码 + **伪出处**（3 个异常类 + 2 个 mapper 方法） | 仍成立 | 低危；但**建议**下轮删掉 `TokenBlacklistedException` 的**假 Go 出处**（它会让下一个 agent「恢复」一个 Go 从未有过的行为） |
+| **DRIFT-USERRPC-V-008** | 死代码 + **伪出处**（3 个异常类 + 2 个 mapper 方法） | ✅ **已修**（`fa2de52`） | 第四轮 §2 已删；且**伪出处是两个不是���个**（`PasswordMismatchException` 声称的 `ALREADY_EXISTS` 在 Go 恰好相反）。⚠️ 本行此前仍写「仍成立」，属台账脱节，本轮复核更正 |
 | **UNRESOLVED-USERRPC-004 ②** | 启动期 Redis 不可用：Go `MustNewRedis` fail-fast vs RAG 懒连接 | 仍 unresolved | 本轮未做「停掉 Redis 再起进程」的注入实验 |
 | **UNRESOLVED-USERRPC-005** | `users_user` 建表责任交叉（user-rpc ↔ admin-rpc） | 仍 unresolved | 跨组件不变量；本轮的隔离 harness 是**单 rpc** 的，**证明不了**两 rpc 同库共存。⇒ 属 admin 会话范围 |
 
