@@ -336,3 +336,128 @@ red = "Failures: 0" not in summary          # ← summary 是所有测试类的�
 「下游总调用次数=41」这类**与本次变异无关**的数字 ⇒ 才察觉报告是空的。
 ⇒ **脚本的标签是二手证据，断言原文才是一手证据。**
 （与 §3.3「绿测试可能是错误答案的守卫」同族：**自动判定也会给错答案**。）
+
+---
+
+## PIT-USERS-SHARED-007 🔴 对拍脚本**不清状态** ⇒ 第二次跑出来的「漂移」是假的
+
+**症状**：给 `user-rpc` 补 9 个 RPC 的双侧活体对拍（`tools/difftest/exp-difftest-grpc-user9.sh`）。
+第一轮跑出 43 场景 / **6 处**差异，其中 2 处看起来是**货真价实的新产品漂移**：
+
+| 场景 | Go | RAG | 看着像 |
+|---|---|---|---|
+| `Register` 空用户名 | `OK` | `ALREADY_EXISTS`「用户名已存在」 | RAG 误判重名 |
+| `Register` 空邮箱 | `OK` | `INTERNAL`「DB更新失败」 | RAG 写库失败 |
+
+⇒ 差点就按「RAG 错」去改产品代码了。
+
+**真相：两侧状态不对称。**
+- Go 侧表名 `users`、RAG 侧表名 `users_user`，两边都有 `UNIQUE(username)` / `UNIQUE(email)`；
+- 本对拍里**「空用户名」「空邮箱」两个场景的输入不是按 run 唯一的**（每次都是 `''`）；
+- ⇒ 上一轮跑完留下的 `username=''` / `email=''` 行，会让下一轮在**留着残留的那一侧**撞 UNIQUE，
+  而**没有残留的那一侧照常成功** ⇒ 凭空多出一处「RAG 错」。
+
+**决定性的一步**：**两侧同时清空后复跑** ⇒ 那 2 处变成 ✓，
+43 场景 / 4 处差异（只剩 Go 侧乱码文案，见 `docs/DRIFT/users/user/rpc.md` §9.1.4）。
+
+⚠️ **更一般的教训**：
+1. **「两侧跑同一套输入」不蕴含「两侧初始状态相同」。** 状态是**第三个变量**。
+   对拍脚本必须**显式**把两侧状态对齐（清库 / 同一份种子数据），
+   否则你比较的是「初始状态 + 代码」的综合差异，而不是代码差异。
+2. **假漂移比漏漂移更危险**：漏漂移只留下空白，假漂移会**留下一个看起来很扎实的结论**
+   （「RAG 在空用户名上误判重名」，还带着完整的场景名和 hex）——
+   照着它去改产品，就是**把正确的代码改错**。
+3. **清状态的责任要放在「执行体自己」身上，不能只放在编排脚本里。**
+   编排脚本的 `DROP DATABASE` 只保护「按脚本跑」这一条路径；
+   而实际调试最常见的用法是「**复用已起好的栈，只重跑执行体**」——
+   那条路径下状态一路累积 ⇒ 第二次跑出来的差异是假的。
+   ⇒ 本轮把清理移进了 runner 自己的 `resetState()`（跑前清空两侧业务表）。
+
+**判定口诀**：
+> **看到「某一侧在某个边界输入上失败、另一侧成功」时，先问一句：两侧的库现在是不是同一个初始状态？**
+> 尤其当那个边界输入**恰好是 UNIQUE 列的极值**（空串、空 map、0）时。
+
+**处置**：
+- `tools/difftest/grpc-user9-dual-port-runner.java` 增加 `resetState()`：
+  跑前用 JDBC 清空**两侧自己的**业务表（`users` / `user_avatar_history` / `users_user` / `users_user_avatar_history`），
+  并在输出里打印清掉多少行（**「清掉 0 行」本身就是一条信息**）；
+- 编排脚本把库名 / 端口透传给 runner（`-Dgo.db.url` / `-Drag.db.url`），
+  否则 runner 会去清**别的库**（或根本清不到）⇒ 又变成假漂移；
+- 提供 `-Dcleanup=false` 逃生门，但**在输出里明确警告「会生假漂移」**。
+
+---
+
+## PIT-USERS-SHARED-008 🔴 bash + UTF-8 locale ⇒ **全角括号会被算进变量名**
+
+**症状**：`exp-difftest-grpc-user9.sh` 跑到第 4 步直接挂：
+
+```
+==> [4/5] 起两套 user-rpc（Go :$GO_PORT / RAG :$RAG_PORT）
+exp-difftest-grpc-user9.sh: line 127: RAG_PORT）: unbound variable
+```
+
+**根因**：在 `C.UTF-8` locale 下，bash 把**全角右括号 `）`（U+FF09）算作标识符字符**，
+于是 `"$RAG_PORT）"` 里的变量名被解析成 **`RAG_PORT）`**（带全角括号）⇒ 找不到 ⇒ `unbound variable`。
+
+**为什么危险**：这不是「脚本跑不起来」这种一眼可见的错。
+本轮它第一次出现时，报错信息里的全角字符在终端里几乎看不出来（`RAG_PORT）: unbound variable`），
+很容易被误读成「脚本里少定义了个变量」或「环境变量没传进去」⇒ **往错的方向查**。
+
+**扫描办法**（本轮用的）：找出「`$变量` 后面紧跟非 ASCII 字节」的位置。
+```bash
+python3 - <<'PY'
+import re
+b = open("exp-difftest-grpc-user9.sh","rb").read().decode("utf-8")
+for i, line in enumerate(b.split("\n"), 1):
+    for m in re.finditer(r"\$[A-Za-z_][A-Za-z0-9_]*", line):
+        j = m.end()
+        if j < len(line) and ord(line[j]) > 127:
+            print(i, m.group(0), repr(line[j]), line.strip()[:80])
+PY
+PY
+```
+⇒ 本轮在本脚本里查出 **3 处**（`$a（`、`$RAG_PORT）`、`$RC）`），全部改成 `${VAR}` 形式。
+
+⚠️ **同款隐患在共享脚本 `tools/difftest/run.sh` 里也有 3 处**（L51 / L162 / L212）——
+本轮**故意没改**：那个脚本**正被 admin 域会话使用中**，而 bash 是**增量读脚本**的，
+改一个正在跑的脚本会把对方的执行流搞坏 ⇒ 留到合并时统一处理。
+
+**处置**：
+- **所有变量引用一律写 `${VAR}`**（哪怕后面跟的是 ASCII 标点）——
+  这条规矩零成本，且彻底绕开「什么算标识符字符」的实现差异；
+- 中文注释里**紧贴变量**是触发条件 ⇒ 若必须紧贴，把全角标点改成半角或加空格。
+
+---
+
+## PIT-USERS-SHARED-009 🔴 共享的 difftest 容器会被**别的会话回收** ⇒ 对拍脚本要自带容器
+
+**症状**：`exp-difftest-grpc-user9.sh` 第一次跑成功，几分钟后重跑就挂：
+
+```
+Error response from daemon: No such container: difftest-postgres
+```
+
+查 `docker ps` 发现：`difftest-postgres` / `difftest-redis` **已经不在 `docker ps -a` 里**（不是停止，是**被删除**），
+而本会话自建的 `uu_go_db` / `uu_rag_db` **两个库一起消失**（容器重建 ⇒ 卷没了），
+**正在跑的两套栈也一起没了**（Go 进程被收走，RAG 进程因连接池失效而失联）。
+
+**根因**：`difftest-postgres` / `difftest-redis` 是**共享资源**，由 `tools/difftest/run.sh` 管理，
+本机同时有多个会话在跑（用户域 / admin 域 / message 域 / task 域……）。
+在 Docker 内存只有 **7.65 GiB** 的机器上，**任何一个会话都可能为了腾资源把它们删掉**。
+
+⚠️ **更要命的是「删容器」与「重启容器」的观感完全不同**：
+- **重启**：容器还在，数据卷还在 ⇒ 库还在，但**进程全没了**（本轮实测：容器 `Up 14 seconds`，
+  我的 Go 进程被收走、admin 会话的栈也被收走）；
+- **删除 + 重建**：**库也没了**（本轮实测：`uu_go_db` / `uu_rag_db` 直接 `database does not exist`）。
+⇒ **两种情况都会让「跑到一半的对拍」消失**，而且没有任何本地报错指向真正的原因。
+
+**处置**：
+- 对拍脚本**自带容器**（`uudifftest-postgres` :55434 / `uudifftest-redis` :56382），
+  脚本自己 `ensure_container`（不存在就建、存在但停了就启）+ `wait_pg`（真正能连上再继续，
+  **容器 healthy ≠ psql 可用**）；
+- 端口**逐个避开**共享栈：`19005 / 59211 / 19195 / 55434 / 56382`。
+  ⚠️ **DevServer 端口会撞**：本轮实测 `19095` 被共享栈里的 Go user-api 占了 ⇒ 本脚本改用 `19195`；
+- **成本可忽略**：PG 约 40 MiB、Redis 约 9 MiB（`docker stats` 实测），
+  对比「跑到一半环境被别人收走」的代价，**完全值得**；
+- **仍然不碰共享的 `go_db` / `rag_db`** —— 那是别的会话正在用的库，
+  **自己建库**比「清理共享库」安全得多。

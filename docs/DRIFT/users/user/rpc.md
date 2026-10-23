@@ -301,7 +301,7 @@ Result 只用 5 个枚举值。证据列的记号：
 | **OBSERVABLE DIFFERENCE** | **7** | V-002 ~ V-008 |
 | IMPLEMENTATION DIFFERENCE | 4 | 表名 / 指标注册 / 建表机制 / 服务发现 |
 | 已签字偏离（引用不重开） | 2 | N-1、N-2（见 `./api.md`） |
-| **UNKNOWN / unresolved** | **7** | §9 |
+| **UNKNOWN / unresolved** | **6** | §9（**U-007 已于 2026-10-24 闭环** ⇒ §9.1） |
 
 ### 4.5 复核历史导航页 L34–41 的三条「缺口」
 
@@ -732,11 +732,120 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 | **UNRESOLVED-USERRPC-004** | **① `IdType.ASSIGN_ID` 与 `useGeneratedKeys=true` 谁决定 `users_user_avatar_history.id`（V-006）；② 启动期 Redis 不可用时两侧的失败时机（CASE-35）** | `servicecontext.go:29` `redis.MustNewRedis` 在 `MustNewServer` **之前** ⇒ 启动即失败 | Redis 为懒连接；`insertHistory` 的两种 id 来源并存 | 两条都需要真容器 / 真 jar 才能判 | LOW | ① 真 PG 下插入一条后 `SELECT id FROM users_user_avatar_history` 看量级；② 停掉 Redis 起进程看是否 fail-fast |
 | **UNRESOLVED-USERRPC-005** | **建表责任交叉**：`users_user` 由 **user-rpc 与 admin-rpc 都建**（幂等重放 + 同一个 advisory lock 键 `8_675_309`） | Go 两个服务**各有各的表名**（`users` vs `users_user` 不冲突；admin-rpc 也建 `users`）⇒ 靠 `HasTable` 的**时序侥幸**（`_shared.md` §6.2.5 第 ②③ 段已实测 5 轮） | 两侧**表名相同** ⇒ 真正共享同一张表；靠 `SchemaInitializer` 的 advisory lock 串行化 | **本组件单侧验不完**：必须与 `admin-rpc` 的结论合并判读。RAG 的锁比 Go 的「时序侥幸」强，但那是**机制更强**，不是「与 Go 等价」 | HIGH（跨组件不变量） | 与 admin-rpc 组件的台账合并判读；跑 `tools/difftest` 双栈并发启动（`_shared.md` 已有实测记录，但那是 2026-10-21 的，需在当前代码上复跑） |
 | **UNRESOLVED-USERRPC-006** | **索引 / 唯一约束 / NOT NULL / DEFAULT 四项仍未逐列核对** | 需查 `information_schema` 的 `indexes` / `constraints` | 同 | `tools/difftest/check-ddl-static.py` 的文件头**自陈只查 `data_type` 与 `character_maximum_length`**，其余标 `NOT CHECKED` | MEDIUM | 起两侧容器后跑一条 psql 查询逐列比对。⚠️ **不要把该脚本「全绿」读成「DDL 已一致」**（该脚本当前在有差异时是 EXIT=1） |
-| **UNRESOLVED-USERRPC-007** | **双侧活体对拍从未在本组件上跑过** | — | — | `tools/difftest/grpc-dual-port-runner.java` 只覆盖 4 档 status code（E-2），**9 个 RPC 的字段级响应、error message、边界输入全部未对拍**；本轮 91 条测试**全是 RAG 单侧** | HIGH（这是本轮最大的证据缺口） | `./tools/difftest/run.sh --keep --serve-only` 起两套栈后跑 grpc dual-port runner。⚠️ Go 侧 yaml 的 `${POSTGRES_PASSWORD}` 占位符**不会展开**（`_shared.md` 已记录），须用 `tools/difftest/conf/go/*.yaml` 的副本 |
+| ~~**UNRESOLVED-USERRPC-007**~~ | ✅ **已闭环（2026-10-24）** | — | — | 双侧活体对拍已跑（真进程 + 真 PG + 真 Redis，**自带容器 / 自带库 / 自带端口**）：**43 场景 / 39 等价 / 4 处差异**，4 处**全部**是 N-2 已签字的 Go 源码乱码文案 ⇒ **无新漂移** | ~~HIGH（本轮最大的证据缺口）~~ → 已闭环 | ⇒ **§9.1**（含首轮 2 处**假漂移**的辨伪记录 + 守网清单） |
 
 ---
 
-## 10. 最终判定（spec §39 · 18 项 checklist）
+## 9.1 UNRESOLVED-USERRPC-007 闭环记录（2026-10-24 · 双侧活体对拍）
+
+> 本节是 §9 那条 UNRESOLVED 的**闭环记录**，**不是**新的漂移条目。
+> 证据强度：**双侧活体对拍（真进程 + 真 PG + 真 Redis）** ——
+> 这是 AGENTS.md §0 证据分层里**最高的一档**（此前本组件的 91 条测试**全是 RAG 单侧**）。
+
+### 9.1.1 怎么跑的
+
+| 项 | 内容 |
+|---|---|
+| 编排脚本 | `tools/difftest/exp-difftest-grpc-user9.sh`（**自带容器 + 自带库 + 自带端口**，不碰共享的 `go_db` / `rag_db`） |
+| 执行主体 | `tools/difftest/grpc-user9-dual-port-runner.java`（43 场景） |
+| Go 侧 | 真源二进制 `go-user-rpc`（`go build` 自冻结仓库，**不复制源码**），监听 `:19005`，连 `uu_go_db` |
+| RAG 侧 | `user-rpc-0.0.1-SNAPSHOT.jar`，监听 `:59211`，连 `uu_rag_db` |
+| 基础设施 | 自建 `uudifftest-postgres`（:55434）/ `uudifftest-redis`（:56382） |
+| 覆盖 | 9 个 RPC × ① 字段级响应 ② `grpc-message` 逐字 ③ 边界输入 |
+
+**逐字约定**：普通字段两侧必须逐字相同；带 `~` 前缀的字段（uid / token / history.id / create_time）为每侧自有，只断言存在性；
+`user.has_status` 专测 proto3 `optional` 字段的**存在性**（Go 的 `GetUser` 会填 `Status`、`UpdateUser` 不填 ⇒ 「有没有这个字段」本身就是 wire 级差异）。
+
+### 9.1.2 结论：43 场景 / 39 等价 / 4 处差异 —— **4 处全是 N-2，无新漂移**
+
+| # | 场景 | Go（原始字节） | RAG | 判定 |
+|---|---|---|---|---|
+| 1 | `UploadAvatar` 查无此人 | `鐢ㄦ埛涓嶅瓨鍦?` | `用户不存在` | N-2 已签字 |
+| 2 | `GetAvatarHistory` 查无此人 | `鐢ㄦ埛涓嶅瓨鍦?` | `用户不存在` | N-2 已签字 |
+| 3 | `SelectAvatar` 不存在的 history_id | `澶村儚鍘嗗彶涓嶅瓨鍦?` | `头像历史不存在` | N-2 已签字 |
+| 4 | `SelectAvatar` 查无此人 | `鐢ㄦ埛涓嶅瓨鍦?` | `用户不存在` | N-2 已签字 |
+
+⇒ **4/4 的 gRPC 状态码两侧完全相同**；差异只在 `grpc-message` 头的字节。
+
+### 9.1.3 「Go 源码乱码」为什么判定为**编辑事故**而不是语义（2026-10-24 逐文件 hex 实测）
+
+**同一个 Go 仓库里，同一个语义同时存在正常写法与损坏写法**：
+
+| 语义 | 正常写法（Go） | 损坏写法（Go） |
+|---|---|---|
+| 用户不存在 | `getuserlogic.go:39` / `deleteuserlogic.go:46` / `updateuserlogic.go:74` | `uploadavatarlogic.go:57` / `getavatarhistorylogic.go:35` / `selectavatarlogic.go:43` |
+| DB查询失败 | `getuserlogic.go:44` / `registerlogic.go:54` / `loginlogic.go:56` / `updateuserlogic.go:43`·`:77` / `deleteuserlogic.go:52` | `getavatarhistorylogic.go:38` / `:44` |
+| DB更新失败 | `registerlogic.go:86` / `updateuserlogic.go:66` / `deleteuserlogic.go:60` | `selectavatarlogic.go:49` |
+
+⇒ 损坏的那几处是 **UTF-8 → GBK 误解码 → UTF-8** 的转码往返：
+「用户不存在」的 UTF-8 字节 `e794a8 e688b7 e4b88d e5ad98 e59ca8` 按 GBK 解码正好得到「鐢ㄦ埛涓嶅瓨鍦」+ 末字节落成 `?`。
+⇒ **Go 自己对同一语义会吐两种字节** ⇒ 损坏的那份在定义上就不是语义。
+
+**处置**：N-2（**用户 2026-10-21 已拍板**：RAG 保留正常中文，不复刻乱码）。
+⚠️ 兄弟域 `users/admin` 侧同样有 **17 处**（`updateselflogic.go` 7 / `createinvitecodelogic.go` 5 / `createadminlogic.go` 3 / `getselflogic.go` 2），
+已由 admin 域台账 `DRIFT-ARPC-007` 处置 —— **本轮不重开**。
+
+### 9.1.4 🔴 辨伪记录：首轮跑出的 2 处差异**不是漂移**（脚本状态残留）
+
+**首轮结果**：43 场景 / **6 处**差异，其中 2 处看起来像**新的产品漂移**：
+
+| 场景 | 首轮 Go | 首轮 RAG | 看着像 |
+|---|---|---|---|
+| `Register` 空用户名 | `OK` | `ALREADY_EXISTS`「用户名已存在」 | RAG 误判重名 |
+| `Register` 空邮箱 | `OK` | `INTERNAL`「DB更新失败」 | RAG 写库失败 |
+
+**真相：两侧状态不对称。**
+- Go 侧表名 `users`、RAG 侧表名 `users_user`，两边都有 `UNIQUE(username)` / `UNIQUE(email)`；
+- 本对拍里**「空用户名」「空邮箱」两个场景的输入不是按 run 唯一的**（每次都是 `''`）；
+- ⇒ 上一轮跑完留下的 `username=''` / `email=''` 行，会让下一轮在**留着残留的那一侧**撞 UNIQUE。
+
+**实测证据**：
+```
+首轮（uu_rag_db 里有上一轮遗留的 username='' 与 email=''）：
+    Register: 空用户名   go=OK  rag=ALREADY_EXISTS   ← 假漂移
+    Register: 空邮箱     go=OK  rag=INTERNAL          ← 假漂移
+两侧同时清空后复跑：
+    Register: 空用户名   go=OK  rag=OK                ✓
+    Register: 空邮箱     go=OK  rag=OK                ✓
+    ⇒ 43 场景 / 4 处差异（只剩 N-2 的乱码文案）
+```
+
+⇒ **这 2 处是假阳性**，而且**反向证明了两侧的 UNIQUE 约束行为是一致的**（干净库上两侧都成功插入）。
+⇒ **处置**：清状态的责任落到 **runner 自己**身上（`resetState()`：跑前清空两侧业务表），
+而不是只靠脚本的 `DROP DATABASE` —— 因为「复用已起好的栈只重跑 runner」这条**最常见的用法**不受脚本保护。
+⇒ 教训见 `docs/Pitfalls/users/_shared.md` 的 **PIT-USERS-SHARED-007**。
+
+### 9.1.5 守网
+
+| 护网 | 覆盖 |
+|---|---|
+| `UserRpcGoErrorMessageParityTest`（本轮新建） | 9 条 gRPC description **逐字**断言（正常中文）+ **决策 tripwire**（断言 RAG ≠ Go 的损坏字节）；DB 三条失败路径用**真故障注入**（改表名 / 加 CHECK 约束）制造，不是 mock |
+| `exp-difftest-grpc-user9.sh` + `grpc-user9-dual-port-runner.java` | 43 场景双侧活体对拍，可一键复跑 |
+
+**变异验证（2026-10-24，4/4 取得有效证据）** —— §3.3 的纪律：**必须能编译 + 断言红**（构建红 / 上下文加载错都不算）：
+
+| 变异 | 改法 | 结果 | 断言原文 |
+|---|---|---|---|
+| M-A | `"用户不存在"` → `"用户不存在X"`（7 处） | ✅ 断言红 | `expected: <用户不存在> but was: <用户不存在X>` |
+| M-B | `"用户不存在"` → Go 的**损坏字面量**（7 处） | ✅ 断言红 | `expected: <用户不存在> but was: <鐢ㄦ埛涓嶅瓨鍦?>` |
+| M-C | `"头像历史不存在"` → Go 的损坏字面量（2 处） | ✅ 断言红 | `expected: <头像历史不存在> but was: <澶村儚鍘嗗彶涓嶅瓨鍦?>` |
+| M-D | `"用户名已存在"` → `"用户名已存在X"`（2 处，未损坏那组） | ✅ 断言红 | `expected: <用户名已存在> but was: <用户名已存在X>` |
+
+⇒ 复原后回归**绿**，且 `UserDomainService.java` 与备份**逐字节一致**。
+
+⚠️ **第一版变异脚本把「上下文加载失败」当成了「红」** —— M-A 首次跑出的是
+`Failed to load ApplicationContext`（`Errors: 3`）而不是断言失败。
+**基线复跑 3 次全绿**证明那是**环境抖动**（本机 38 个容器、7.65 GiB 内存下的 testcontainers 启动竞争），
+**不是**变异造成的 ⇒ 按 §3.3 **该次 M-A 不算证据**，已重做。
+⇒ 第二版判定逻辑**显式区分**「编译失败 / 上下文加载失败 / 断言红」三类，并保留**断言消息原文**作为一手证据
+（同 `PIT-USERS-SHARED-006` 的纪律）。
+
+⚠️ **已知覆盖缺口（1/9，如实记录）**：`history_id生成失败`（Go 对应 `uploadavatarlogic.go:42` 的 `history_id鐢熸垚澶辫触`）
+**进不了运行时护网** —— 它要求 `Snowflake.nextId()` 抛错，而 `Snowflake` 是**进程级静态单例**
+（`setWorkerId(null)` 是 no-op、`workerId` first-wins、无 reset 钩子）⇒ 在不动共享模块 `service/common` 的前提下无法诱发。
+⇒ **别让下一个人以为 9/9 都守住了。**
+
+---
 
 | # | 检查项 | 结论 | 依据 |
 |---|---|---|---|
@@ -744,7 +853,7 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 | 2 | 正常路径是否一致？ | ✅ **一致** | 9 个 OP 的 happy path 逐条对照一致（§4.2） |
 | 3 | 边界输入是否一致？ | ⚠️ **不完全一致** | trim / clamp / 空串全部一致；**显式空 map 分支不一致**（V-005） |
 | 4 | NotFound / Empty / Null 是否一致？ | ⚠️ **不完全一致** | NotFound 一致（响应被丢弃）；Empty 一致；**NULL status 不一致**（V-001）；NULL extra_info 一致 |
-| 5 | Error meaning 是否一致？ | ⚠️ **code 一致 / message 部分不一致** | 全部 gRPC code 逐条一致；3 处 message 因 Go 源码乱码不同（**N-2 已签字**）+ 1 处超时 description（V-007） |
+| 5 | Error meaning 是否一致？ | ⚠️ **code 一致 / message 部分不一致** | 全部 gRPC code 逐条一致；**4 处** message 因 Go 源码乱码不同（**N-2 已签字**，2026-10-24 双侧活体对拍实测）+ 1 处超时 description（V-007）。⚠️ 那 4 处的**状态码两侧完全相同**，差异只在 `grpc-message` 头的字节 |
 | 6 | Error propagation 是否一致？ | ✅ **一致** | Go 的「resp+err 双返」在 gRPC 层被丢弃 ⇒ 两侧客户端只见 status code |
 | 7 | External dependency failure 是否一致？ | ✅ **一致**（超时路径除外） | PG/Redis/bcrypt/snowflake 四类失败两侧同 code 同 message；57014 取消的内层差异被外层 interceptor 掩盖（E-4 已实测闭环） |
 | 8 | Cache hit / miss 是否一致？ | **N/A** | 本组件无缓存 |
