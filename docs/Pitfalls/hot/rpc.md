@@ -3,7 +3,7 @@
 > **范围**：`service/hot/hot-rpc`。**核对日期**：2026-10-24（第五轮 UNR-1 闭合）。
 > 差异本体在 [`../../DRIFT/hot/rpc.md`](../../DRIFT/hot/rpc.md)（`DRIFT-HOTRPC-001..010` + `G-HOT-001/002/003`）。
 > 本文件只回答四件事：**症状像什么 · 真实原因（框架/语言机制）· 为什么测试抓不到 · 下次怎么防**。
-> 累计 **11 条坑**（P-HOTRPC-01..11）。
+> 累计 **12 条坑**（P-HOTRPC-01..12）。
 
 ---
 
@@ -358,3 +358,45 @@ awaitCondition(() -> counterCount("like") == likeBefore + 1, "正常消息没进
 ① Go 的 pipeline 重试是**整组重发**（`redis.go:1204-1227` 每次 `writeCmds` 全量）⇒ `DEL`+`ZADD` 幂等重放；
 ② ⚠️ 反向查出 **Go 会重发非幂等的 rename 脚本** ⇒ 可能「实际 RENAME 成功却记 fail」。
 ⇒ 详见 [`../../DRIFT/hot/rpc.md`](../../DRIFT/hot/rpc.md) 第五轮章节。
+
+## P-HOTRPC-12 🟠 返回 `Set` 的 API —— **mock 测不出「保序」**，而框架可能给你 `HashSet`
+
+**现象**
+`HotRankingQueryService` 的查询面此前只有 Mockito 单测，全部绿。
+补上真 Redis IT 后**一条都没红** —— 但这不是「本来就对」的证据，
+而是「**mock 根本没测到点上**」的证据。
+
+**真实原因**
+生产代码的读法是：
+
+```java
+Set<ZSetOperations.TypedTuple<String>> results =
+        redis.opsForZSet().reverseRangeWithScores(HOT_ARTICLES_KEY, 0, k - 1);
+```
+
+⚠️ 这个 API 返回的是 **`Set`**，而**顺序是它的全部语义**：
+热榜靠 `Set` 的迭代序决定顺序，**并列项的先后也在这个序里**。
+Mockito 给什么就是什么 ⇒ **「顺序对不对」这件事，mock 一个字都测不出来**。
+
+而真 Redis 上这一层有三个**框架行为**在中间：
+1. **Redis 服务端**：`ZREVRANGE` 按 score 降序、同分按 member 字典序；
+2. **Lettuce**：`ZREVRANGE key start stop WITHSCORES`（**消费点**在 `RedisCommandBuilder`）；
+3. **Spring Data Redis**：`deserializeTupleValues` 把 RESP2 数组转成 Java `Set`
+   ⇒ **它给的是哪种 `Set`？** 若是 `HashSet`，**顺序当场就丢了**，而且**不报任何错**。
+
+**为什么危险**
+「mock 全绿」在这里长得和「行为正确」**一模一样**。
+而且这个坑有**两个变体**，都能悄悄错：
+- **顺序丢失**：框架给 `HashSet` ⇒ 热榜顺序与 Go 不同 ⇒ **纯 bug，无症状**；
+- **区间/取整搞错**：`0, k-1` 写成 `0, k` ⇒ 多取一条；`uint32(score)` 写成 `Math.round` ⇒ 分数变
+  ⇒ 这两条 mock **也**测不出（mock 不经服务端排序、不经 float64 存储）。
+
+**怎么防**
+1. **凡 API 返回 `Set` / `Map` 而顺序有语义 ⇒ 必须上真中间件**，
+   并**显式断言顺序**（`containsExactly`，不是 `containsExactlyInAnyOrder`）。
+2. 断言要覆盖**并列项**（同分）—— 那才是顺序最容易丢的地方。
+3. 真中间件 IT 配**定向变异**：`0,k-1 ⇒ 0,k`、`scoreToCount ⇒ Math.round`
+   ⇒ 变红才证明断言真的在测那个语义（本轮实测：M-R1 变红 2 条、M-R2 变红 1 条）。
+4. ⚠️ **不是所有语义位都能上真 Redis 验**：ZSET member **恒是字符串字节**
+   ⇒ 「member 非字符串」分支**在真 Redis 上不可达**（不是没验，是不可达）
+   ⇒ 只能靠源码取证，并登记为「真 Redis 无法覆盖」。

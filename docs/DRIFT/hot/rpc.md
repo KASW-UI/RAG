@@ -976,7 +976,7 @@ SEMANTICALLY NOT EQUIVALENT
 |---|---|---|
 | **真 Redis / 真 Kafka 集成测试** | ✅ **第四轮已闭合** | 真 `redis:7-alpine`（12 例）+ 真 `apache/kafka:3.7.2`（4 例），全部默认跑、不 skip，均配变异验证。✅ **残留已清**：Go 侧 `MaxRetries=3` 的实际重试面（UNR-1）**第五轮已闭合** |
 | **UNR-1（Go 侧重试面 / shadow 半成品）** | ✅ **第五轮已闭合** | Go 重试面已逐条钉到 go-redis v9.20.0 源码；**「shadow 半成品」不可达**（两侧 DEL 先于 ZADD + 幂等整组重发）；反向查出「Go 重发**非幂等** rename 脚本 ⇒ 实际成功却记 fail」⇒ **DRIFT-HOTRPC-004 降级 LOW**。⚠️ 台账原定的 `CLIENT PAUSE` 验证手段**被证伪**（只延迟、不能失败） |
-| **Go 侧 `?page` 之外的入口面** | — | 本轮只对照了消费面与查询面；`HotRankingQueryService` 的 Redis 分支仍只有 Mockito 单测 |
+| **`HotRankingQueryService` 的 Redis 读取分支仍只有 Mockito 单测** | ✅ **第六轮已闭合** | ⚠️ **2026-10-24 订正**：本行原文写的是「Go 侧 `?page` 之外的入口面」⇒ 那是 **api 域**的 query 解析面（已由 D11/D13 等覆盖并修完），**串台到本台账**，故删除；保留的**唯一属 rpc 域**的未知项（查询面从 Redis 读 `hot:articles`）**第六轮已用真 Redis 闭合** ⇒ 新增 `HotRankingQueryServiceRedisGateTest`（7 例，真 `redis:7-alpine`）+ 2 条变异全红 |
 | **proto 回归网** | 🚫 **用户决定不做**（2026-10-24） | 「proto 是复制粘贴过来的，不用测」⇒ 关闭。⚠️ 附带发现：现有 `check-proto-static.sh` **只覆盖 users 域**且**恒退出 0**，不能直接当 CI 门禁 |
 | **DRIFT-HOTRPC-009（容器并发度）** | 📝 已签字 | 用户 2026-10-24 拍板保持现状 ⇒ `SD-HOT-RPC-003`；实际「×3 副本」部署下等价。⚠️ **单实例部署下不等价** ⇒ 残留风险 |
 | **DRIFT-HOTRPC-010（注册失败存活语义）** | 📝 已签字 **+ 已补健康检查** | 用户 2026-10-24 拍板「保持 + 签字 + 补 NOT_READY」⇒ `SD-HOT-RPC-004`；配套实现与守门测试已落地 |
@@ -1290,3 +1290,83 @@ Client.Pipeline()                      redis.go:1508-1514   exec = c.processPipe
 
 ⚠️ **复现提示**：探针复刻真源 pipeline 序列时用 **sha256 绑定真源原文**，
 避免「复刻本身漂移」—— 这是本轮唯一能防「拿自己的复刻当真源」的手段。
+
+---
+
+<!-- ====================================================================================
+     ↓↓↓ 第六轮：2026-10-24「查询面真 Redis 轮」（hot 域第六轮，align/hot 分支）
+     ↑ 上方第五轮及更早的历史条目与编号一条未删
+     ==================================================================================== -->
+
+# 第六轮：查询面真 Redis 轮（2026-10-24）
+
+> **范围**：`service/hot/hot-rpc`（**只加测试**，生产代码**零改动**）。
+> **分支**：`align/hot`（worktree `../RAG.worktrees/hot`）。
+> **本轮性质**：把未闭合表里**最后一条 rpc 域未知项**做掉 ——
+> 「`HotRankingQueryService` 的 Redis 读取分支仍只有 Mockito 单测」。
+> **只读边界**：**Go 真源仓库零改动**。
+
+## 本轮一句话
+
+**查询面已上真 Redis：7 例全绿 ⇒ 闭区间 / 降序 / 同分 tie-break / float64 截断 四条语义位全部实测确认；
+2 条变异全红 ⇒ 守门非假绿。本轮生产代码零改动 —— 查出来的不是漂移，是「本来就对，现在有证据了」。**
+
+## 产出
+
+| 文件 | 性质 | 规模 |
+|---|---|---|
+| `HotRankingQueryServiceRedisGateTest.java` | **新增** 真 Redis 守门测试 | 7 例 |
+
+## 一、为什么这条必须上真 Redis（mock 测不了什么）
+
+| 语义位 | mock 为什么测不出 |
+|---|---|
+| **rank 闭区间**（Go `:43` 的 `0, k-1` ⇒ 取 **k** 条不是 k+1） | mock 返回什么就是什么，区间语义不在 mock 里 |
+| **降序** | mock 不经服务端排序 |
+| **同分 tie-break** | ZSET 同分按 member **字典序升序**排 rank ⇒ `ZREVRANGE` 取**降序**；且这同时验「Spring 返回的 `Set` **是否保序**」⇒ 若 `deserializeTupleValues` 给的是 `HashSet`，顺序会丢 ⇒ **热榜顺序与 Go 不同** |
+| **float64 → uint32 向零截断**（Go `:62` 的 `uint32(z.Score)`） | mock 直接给 `Double`，不经 float64 存储 |
+
+## 二、命令层取证：两侧发的是**同一个** Redis 命令
+
+| 侧 | 出处 | 命令 |
+|---|---|---|
+| Go | go-redis v9.20.0 `ZRevRangeWithScores` | `ZREVRANGE key start stop WITHSCORES` |
+| RAG | Lettuce 6.8.2 `RedisCommandBuilder.zrevrangeWithScores`（**消费点**）| `createCommand(ZREVRANGE, …, args.add(start).add(stop).add(WITHSCORES))` |
+| RAG | Spring Data Redis 4.0.7 `DefaultZSetOperations.reverseRangeWithScores` | `connection.zRevRangeWithScores(rawKey, start, end)` |
+
+⇒ 服务端返回的字节应当相同；本轮验的是**框架层有没有在中间动手脚**。
+
+## 三、实测结果（真 `redis:7-alpine`，7 例全绿）
+
+| 用例 | 验的语义位 | 结果 |
+|---|---|---|
+| `rankRangeIsClosedInterval` | k=3 ⇒ **恰好 3** 条（不是 4） | ✅ |
+| `resultsAreSortedByScoreDescending` | 按 score 降序（不是插入序） | ✅ |
+| `tieBreakIsLexicographicDescending` | 同分 ⇒ member 字典序**降序**（`c, b, a`）⇒ **同时证明 Spring 的 `Set` 保序** | ✅ |
+| `floatScoreIsTruncatedTowardZero` | `3.7 ⇒ 3`（round 会给 4）、`2.2 ⇒ 2` | ✅ |
+| `negativeScoreIsUndefinedOnGoSide` | 负 score ⇒ RAG 取确定值（-1）；**Go 侧 `uint32(负数)` 是未定义行为 ⇒ 不做等价判定** | ✅（记录） |
+| `missingKeyReturnsEmptyListWithoutError` | key 不存在 ⇒ 空列表、不抛 | ✅ |
+| `topKIsNormalized` | k≤0 ⇒ 20；k>100 ⇒ 100；k=100 ⇒ 100 | ✅ |
+
+## 四、变异验证（2 条，全部按预期变红）
+
+| # | 变异 | 预期红 | 实测 |
+|---|---|---|---|
+| **M-R1** | `reverseRangeWithScores(key, 0, k - 1)` ⇒ `0, k`（区间上界写错） | 闭区间 + TopK 归一 | ✅ 2 条红：`Expected size: 3 but was: 4`、`Expected size: 20 but was: 21` |
+| **M-R2** | `HeavyKeeper.scoreToCount(score)` ⇒ `(int) Math.round(score)` | 截断用例 | ✅ 1 条红：`expected: 3 but was: 4` |
+
+⇒ 两条分别锁住「取几条」与「怎么取整」⇒ **守门非假绿**。
+
+## 五、⚠️ 顺带查出三条 Go 侧**不可达分支**（不是 RAG 缺陷，但值得留档）
+
+1. **Go 的 `err == redis.Nil` 分支（`get_hot_articles_logic.go:45-48`）在 `ZRevRangeWithScores` 上不可达** ——
+   `redis.Nil` 是 **bulk string** 命令（`GET` 之类）在 key 不存在时的哨兵；
+   而 **zset range 命令**对不存在的 key 返回**空数组 + nil error** ⇒ 走不到 `:45-48`，
+   实际是走 `:53` 的循环（results 为空）⇒ 返回 `Items: []`。
+   ⇒ **RAG 侧不需要、也不应该有**对应的 nil 哨兵分支 ⇒ 现状**正确**。
+2. **member 非字符串分支（`:55-59`）在真 Redis 上不可达** ——
+   Redis 协议里 ZSET member 就是**字符串字节** ⇒ 与已签字的 `SD-2` 同构 ⇒ **真 Redis IT 无法验这条**（不是没验，是不可达）。
+3. **负 score 时 Go 的 `uint32(z.Score)` 是未定义行为** ——
+   Go spec：float64 → uint32 超出范围时结果 **implementation-specific** ⇒
+   **无法用「以 Go 为准」判定 RAG 取什么值才算对** ⇒ 本轮只钉住「RAG 取了一个确定值」，
+   等价性记 **UNKNOWN**（不擅自签「等价」，也不擅自签「不等价」）。

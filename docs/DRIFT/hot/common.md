@@ -1,6 +1,11 @@
 <!-- @move AGENTS.md L1343-L1391 · §0 hot-common 双侧对拍 -->
 ### ✅ `service/hot/hot-common`：已落地，Go ↔ Java 双侧对拍 **sha256 逐字节一致**（2026-10-22）
 
+> **⚠️ 复核批注（2026-10-24，第四轮）**：本文件的三处边界里，**边界 #2 与边界 #3 的原结论都已被推翻** ——
+> #2 原写「仅日志少段前缀，属表达层，非 L1」⇒ 实测是**日志面整体不等**（级别 + 字段集 + 字段值），**已修**；
+> #3 原写「消费侧尚未接线、advice 仍是空骨架」⇒ 实测**早已接线**，是台账没回填，**已更正**。
+> ⇒ 本文件**没有**「未闭合的差异」，只有「已修的差异」与「库层差异（待签字）」。
+
 > **hot 域唯一的非 api/rpc 组件**，也是 §0「从未验证」清单里 `hot` 一项本次**部分收口**的部分。
 > Go 真源只有 1 个文件（`errmsg.go`，121 行），是纯值定义 + 纯函数库：
 > **无 DB / 无 RPC / 无 MQ / 无鉴权 / 无事务 / 无缓存** ⇒ L3 技术语义在本组件上**全部为空**，风险集中在 L1。
@@ -41,10 +46,36 @@
 #### ⚠️ 三处边界（不得越读成「hot 域已完成」）
 
 1. **有意不迁的 4 个符号不是遗漏** —— grep 验证它们在 `service/hot` 全域**零调用点**、hot-rpc 对本文件**零引用** ⇒ **它们在 Go 侧本身就是死代码**，迁过来只会制造无调用方的结构。`BizCodeFromError` 的**判定顺序**已完整留档在 `FileTree/hot/common.md §12.3`；日后 hot 若接上 gRPC 消费方，**照该顺序**补 `HotGrpcError`（照 `MessageGrpcError` 的形状），不要临时另写一套。
-2. **`CodeError.Error()` 的 `"ErrCode:%d, Errmsg:%s"` 未复刻** —— 已查实两侧可观察面：HTTP envelope **完全一致**（Go 是**逐字段复制** `codeErr.Code`/`codeErr.Msg`，不是 `Error()` 整串）；**仅**日志 `error_reason` 自由文本少一段冗余前缀，而码值在两侧都另有结构化 `error_code` 字段承载（Go `logger.go:152` / Java `Logger.java:277`）⇒ 语义信息不丢，属表达层，非 L1。
-3. **消费侧尚未接线** —— 全仓目前**无任何代码**引用这两个类；hot-api 的 `GlobalExceptionHandler` / `GlobalResponseAdvice` 仍是空骨架（属 `service/hot/api` 另一个 Component）。接线等价式：`new BusinessException(HotErrorCode.X.getCode(), HotErrorMessages.getMsg(code))` ≡ Go 的 `hotcommon.NewErrCode(...)`。
+2. ~~**`CodeError.Error()` 的 `"ErrCode:%d, Errmsg:%s"` 未复刻**~~ —— ✅ **2026-10-24 第四轮：已修**，
+   且**原定性被推翻**（原文写「仅日志少段冗余前缀，属表达层，非 L1」——**不准确**）。
+   - **复核结论**：Go 侧「hot-rpc 返回空响应」那条日志（`getHotArticlesLogic.go:72-73`）记的是
+     **`*CodeError`** ⇒ `error_reason` = `"ErrCode:5001, Errmsg:internal server error"`（`errmsg.go:15-17`）；
+     而 RAG 侧当时记的是 **`logInfo`** ⇒ **级别（ERROR vs INFO）、字段集（9 个 vs 0 个）、字段值**三处都不一样。
+     ⇒ 这**不是**「少段前缀」，是**日志面整体不等**。
+   - **修法**：新增 `HotCodeError`（`getMessage()` 覆写为 Go 的 `Error()` 整串，另开 `getBizMsg()` 给信封）
+     + `GlobalExceptionHandler.bizMsgOf` 拆两个面 + nil 响应分支改 `logBusinessErr`。
+   - **守门 + 变异**：`HotCodeErrorLogParityTest`（3 例，**真触发**日志链路）+ 3 条变异全红。
+   - ⇒ 详见 [`../../DRIFT/hot/api.md`](api.md) 的 **DRIFT-HOTAPI-016**。
+   - ⚠️ **同族但未修**的一条：下游 gRPC 调用失败时的 `error_reason` 形态是**各自 gRPC 库**决定的
+     （grpc-go `"rpc error: code = Unavailable desc = …"` vs grpc-java `"UNAVAILABLE: …"`）
+     ⇒ **库层**差异，hot 域不该手拼 ⇒ 登记为 [`../../DRIFT/hot/api.md`](api.md) 的 **DRIFT-HOTAPI-017**（待签字）。
+   - ⚠️ **HTTP envelope 仍完全一致**（Go 是**逐字段复制** `codeErr.Code`/`codeErr.Msg`，不是 `Error()` 整串）
+     ⇒ 修日志**不得**动信封，这条已由 `HotCodeErrorLogParityTest#envelopeKeepsPlainBusinessMessage` 钉死。
+3. ~~**消费侧尚未接线**~~ —— ✅ **2026-10-24 复核：这条已过时，事实相反**。
+   实测（`grep -rn "HotErrorCode\|HotErrorMessages" service/hot/`）：**hot-api 已经全面接线**——
+   `advice/GlobalExceptionHandler.java`（`serverCommon()` / `envelope()` 两处取码表）、
+   `advice/GlobalResponseAdvice.java`（成功信封取 `SUCCESS` 码 + 文案）、
+   `form/GoFormValues.java`（query 解析失败构造 `BusinessException`）。
+   ⚠️ **本条原记「hot-api 的 advice 仍是空骨架」「全仓无任何代码引用这两个类」是错的**，
+   与 `DRIFT-HOTAPI-012`（2048 上限早已实现）是**同一类错**（台账没回填），已就地更正。
+   - **接线等价式（已落地）**：`new BusinessException(HotErrorCode.X.getCode(), HotErrorMessages.getMsg(code))`
+     ≡ Go 的 `hotcommon.NewErrCode(...)`（`errmsg.go:19-24`：`Code=code`、`Msg=GetErrMsg(code)`）。
+   - **MVC 管线层已钉住 envelope 的 code/msg**（原「下一步①」的要求已满足）：
+     `HotApiMvcPipelineTest` 的 `successEnvelopeIsGoShaped` / `errorEnvelopeIsNotDoubleWrapped` /
+     `queryParseFailureMapsToTwoHundredWithFiveThousandAndOne` 三条**走真实 MVC 管线**断言信封；
+     `HotArticleQueryServiceTest` 另断言异常侧的 `code` / `message` 取自本码表。
 
 ⚠️ **`hot-common` 没有 `HUMAN_ONLY.MD`，且不应补** —— 全仓仅 4 份、全在 `service/users/` 下；`-common` 模块族（users-common / message-common / article-common / like-common）**从来没有过**这份文档。
 
-**下一步（hot 域）**：① hot-api 的 advice 与 service 层落地时会首次真正调用本码表，届时**必须补一条 MVC 管线测试断言 envelope 的 code/msg**，否则「库侧对拍通过」仍不能证明 HTTP 边界等价；② hot-rpc 零引用本模块，**刻意不依赖**，改判时需同步其 pom。
+**下一步（hot 域）**：① ~~hot-api 的 advice 与 service 层落地时会首次真正调用本码表，届时**必须补一条 MVC 管线测试断言 envelope 的 code/msg**~~ → ✅ **2026-10-24 已完成**（接线 + MVC 管线断言都已落地，见上方边界 #3）；② hot-rpc 零引用本模块，**刻意不依赖**，改判时需同步其 pom（**状态不变，仍成立**）。
 

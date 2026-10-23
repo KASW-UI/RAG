@@ -128,6 +128,8 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | **D13** | **畸形 JSON body** → Go 拒绝 5001，RAG 完全忽略 body | OBSERVABLE DIFFERENCE | 🟡 需拍板 |
 | **D14** | 超时 / 499 响应缺 `X-Content-Type-Options: nosniff` | OBSERVABLE DIFFERENCE | 🟡 静态可确证，待真 Tomcat 取证 |
 | **D15** | 运行时 JSON **字段顺序**与 Go 声明序不同（裸 mapper 测不出来） | OBSERVABLE DIFFERENCE | 🟡 已知取舍，需登记 |
+| **D16** | **业务错误日志的级别 / 字段集 / `error_reason` 形态**与 Go 不同（nil 响应分支最严重：Go 是 **error 级 + 9 字段**，RAG 是 **info 级 + 0 字段**） | OBSERVABLE DIFFERENCE | ✅ **已修**（2026-10-24 第四轮 ⇒ `DRIFT-HOTAPI-016`；3 条变异全红） |
+| **D17** | 下游 gRPC 调用失败时，日志 `error_reason` 是**各自 gRPC 库**的形态（grpc-go `"rpc error: code = Unavailable desc = …"` vs grpc-java `"UNAVAILABLE: …"`，**code 名大小写都不同**） | OBSERVABLE DIFFERENCE | 🆕 **待签字**（**库层**差异 ⇒ 建议「不复刻」） |
 
 ---
 
@@ -901,6 +903,117 @@ SEMANTICALLY NOT EQUIVALENT
 
 ---
 
+<!-- ====================================================================================
+     ↓↓↓ 第四轮：2026-10-24「日志面 / CodeError 对齐轮」（align/hot 分支）
+     ↑ 上方首轮 + 第二轮 + 第三轮的历史记录一条未删
+     ==================================================================================== -->
+
+# 第四轮：日志面 / `CodeError` 对齐轮（hot 域第六轮，2026-10-24）
+
+> **范围**：`service/hot/hot-api`（+ `docs/DRIFT/hot/common.md` 的边界回填）。
+> **分支**：`align/hot`（worktree `../RAG.worktrees/hot`），**只改 hot 域文件**。
+> **本轮性质**：把 `docs/DRIFT/hot/common.md` 边界 #2（`CodeError.Error()` 未复刻）从「定性为非漂移」
+> **推翻并修掉** —— 复核时发现它**不是**「少段前缀」那么简单，而是**两处叠加**的漂移。
+> **只读边界**：**Go 真源仓库零改动**（探针在 `/tmp`，复用真源的 `go.mod`/`go.sum` 离线构建）。
+
+## 本轮一句话
+
+**边界 #2 的原定性（「仅日志少段冗余前缀，属表达层，非 L1」）是错的**：
+实测发现「hot-rpc 返回空响应」这条日志在 Go 侧是 **error 级 + 9 个字段**（含 `error_code` / `error_reason`），
+RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段值三处都不一样**。
+⇒ 已修（`DRIFT-HOTAPI-016`）；同时**新查出**一条**库层**差异（`DRIFT-HOTAPI-017`），**不在 hot 域可复刻范围**。
+
+---
+
+## DRIFT-HOTAPI-016 ✅ 已修 · OBSERVABLE DIFFERENCE · MEDIUM（日志面）
+
+- **Component**：hot-api 的**业务错误日志**（`error_reason` / 日志级别 / 字段集）
+- **Go 行为**（`service/hot/api/internal/logic/hot/getHotArticlesLogic.go:65-74`）：
+  ```go
+  if rpcErr != nil {
+      metrics.ObserveRPCError(hotRPCCallee)
+      logger.LogBusinessErr(l.ctx, hotcommon.ErrorServerCommon, rpcErr)   // :67
+      return nil, hotcommon.NewErrCode(hotcommon.ErrorServerCommon)        // :68
+  }
+  if hotResp == nil {
+      metrics.ObserveArticleSkip(skipReasonNilHotPayload)
+      nilRespErr := hotcommon.NewErrCode(hotcommon.ErrorServerCommon)       // :72
+      logger.LogBusinessErr(l.ctx, hotcommon.ErrorServerCommon, nilRespErr) // :73
+      return nil, nilRespErr                                                // :74
+  }
+  ```
+  ⇒ **两条 fatal 分支都记 `LogBusinessErr`（error 级 + 9 字段）**；
+  其中 `:73` 记的是 **`*CodeError`** ⇒ 其 `error_reason` = `(*CodeError).Error()` 的整串
+  （`service/hot/common/errmsg.go:15-17` ⇒ `"ErrCode:5001, Errmsg:internal server error"`）。
+- **RAG 原行为**（修前）：`HotArticleQueryService.fatal(...)`
+  - `cause != null` ⇒ `logger.logBusinessErr(ctx, code, cause)` ✅（对齐 `:67`）；
+  - `cause == null` ⇒ **`logger.logInfo(ctx, "hot rpc returned a nil response for route ...")`**
+    ⇒ ❌ **info 级、无 `error_code` / `error_reason` / `file_line` / `call_path` / `call_chain` 字段**。
+  ⇒ 三处不一致：**① 级别**（ERROR vs INFO）、**② 字段集**（9 个 vs 0 个）、**③ 字段值**（`error_reason` 缺 `ErrCode:5001, Errmsg:` 前缀）。
+- **修法**（三处，缺一不可）：
+  1. **新增 `HotCodeError extends BusinessException`**（`com.rag.hot.hot.api.exception`）：
+     `getMessage()` **覆写**为 Go 的 `(*CodeError).Error()` 整串；另开 `getBizMsg()` 暴露**纯文案**。
+     ⚠️ **为什么放在 hot-api 而不是 hot-common**：`hot-common` 的 pom **不依赖** `service/common`
+     （Go 侧 `errmsg.go` 也是零依赖的纯值库）⇒ 在那里 `extends BusinessException` 会引入一条 Go 侧没有的依赖；
+     且 Go 侧 hot-**rpc** 全域不用 `CodeError`（只有 api 侧用）⇒ 不需要跨组件共享，落在用它的组件里不制造新耦合。
+  2. **`GlobalExceptionHandler.bizMsgOf(e)`**：信封取 `HotCodeError.getBizMsg()`（**纯文案**），
+     其余 `BusinessException` 仍取 `getMessage()`。
+     ⚠️ **必须这样分**：Go 的信封是**逐字段复制**（`hotcenter.go:53-66` 取 `codeErr.Code` / `codeErr.Msg`），
+     **不是** `Error()` 整串 ⇒ 若信封也用 `getMessage()`，响应体会多出 `ErrCode:5001, Errmsg:` 前缀 ⇒ **制造新漂移**。
+  3. **`HotArticleQueryService.fatal(null)` 分支**：`logInfo` → `logBusinessErr(ctx, code, err)`
+     （`err` 就是 `HotCodeError`）⇒ 对齐 Go `:72-73`。
+- **守门测试**：`HotCodeErrorLogParityTest`（3 例）
+  ① `getMessage()` 逐字节 = `"ErrCode:5001, Errmsg:internal server error"`；
+  ② **真触发日志链路**（logback `ListAppender` 挂在真实 logger 上，走完整
+     `HotArticleQueryService → LoggerFactoryBean.logBusinessErr → Logger.doLogBusinessErr → slf4j`）
+     ⇒ 断言**级别 = ERROR**、**`error_reason` 逐字节对齐**、**`error_code` = 5001**；
+  ③ 信封的 `msg` 仍是**纯文案**且**不含** `ErrCode:` 前缀。
+  ⚠️ ② 是「真触发」而不是读内部字段 —— 只断言 `getMessage()` 的返回值**证明不了**日志链路真的用了它。
+- **变异验证（3 条，全部按预期变红）**：
+
+  | # | 变异 | 预期红 | 实测 |
+  |---|---|---|---|
+  | **M-A** | `HotCodeError.getMessage()` 改回返回 `bizMsg` | ① + ② | ✅ 2 条红：`expected: <ErrCode:5001, Errmsg:internal server error> but was: <internal server error>` |
+  | **M-B** | `bizMsgOf` 改回 `e.getMessage()` | ③ | ✅ 1 条红：`expected: <internal server error> but was: <ErrCode:5001, Errmsg:internal server error>` |
+  | **M-C** | nil 响应分支改回 `logInfo` | ② | ✅ 1 条红：`expected: <ERROR> but was: <INFO>` |
+
+  ⇒ 三条分别锁住「日志值」「信封值」「日志级别」三个面 ⇒ **守门非假绿**。
+- **顺带订正**：`HotArticleQueryServiceTest#hotRpcFailureIsFatal` 原断言
+  `assertEquals("internal server error", e.getMessage())` —— 锁的正是**旧的不一致行为**
+  （RAG 侧 `getMessage()` 是纯文案，Go 侧是 `Error()` 整串）⇒ 按 §3.3「先改错误断言」改为断言对齐后的形态。
+- **Evidence**：【Go 活体源码逐行 + RAG 运行证据（日志事件实际字段）】
+- ⚠️ **同族但**未**修的**部分见下一条 `DRIFT-HOTAPI-017` ⇒ **本条修完不等于「日志面全等」**。
+
+---
+
+## DRIFT-HOTAPI-017 🆕 待签字（不复刻）· OBSERVABLE DIFFERENCE · LOW（**库层**）
+
+- **Component**：hot-api 日志的 `error_reason`，在**下游 gRPC 调用失败**时的形态
+- **Go 行为**：Go 侧 `:67` 记的是 `rpcErr`（**gRPC 库产生的 error 对象**）⇒
+  `error_reason` = `err.Error()` ⇒ **grpc-go 的形态**。
+- **RAG 行为**：RAG 侧记的是 grpc-java 的 `StatusRuntimeException` ⇒ `error_reason` = `err.getMessage()`
+  ⇒ **grpc-java 的形态**。
+- **两侧实测（真源 go.mod/go.sum 离线构建 + grpc-java 直跑）**：
+
+  | | `error_reason` 的实际值 | gRPC code 名 |
+  |---|---|---|
+  | **Go（grpc-go）** | `"rpc error: code = Unavailable desc = boom"` | `Unavailable`（**CamelCase**） |
+  | **RAG（grpc-java）** | `"UNAVAILABLE: boom"` | `UNAVAILABLE`（**全大写**） |
+
+  ⇒ **连 code 名的大小写都不同** ⇒ 逐字节对齐需要一张 **code 名映射表**。
+- **为什么不修**（建议按有意偏离签字）：
+  1. 形态由**两个 gRPC 库各自决定**，不是 hot 域的代码 ⇒ 要复刻就得在 hot-api **手拼** `"rpc error: code = "` 前缀
+     并维护一张 code 名大小写映射表 ⇒ **在错误的层**（hot 域凭什么知道 gRPC 错误串的格式？）；
+  2. 与 `DRIFT-HOTRPC-004`（Redis 重试）**同一个判断**：把库行为搬进业务层，比差异本身更坏；
+  3. **可观察影响极小**：`error_reason` 是**日志自由文本**，码值在两侧都另有结构化 `error_code` 字段承载
+     （Go `logger.go:152` / RAG `Logger.java:277`）⇒ 语义信息不丢。
+- **⚠️ 与 `DRIFT-HOTAPI-016` 的分界**：`016` 修的是**hot 域自己写的**格式（`errmsg.go:15-17`）⇒ 该修；
+  `017` 是**库写的**格式 ⇒ 不该由 hot 域修。
+- **Evidence**：【双侧实测：Go 探针 `/tmp/grpc-err-probe/` + grpc-java 直跑】
+- **状态**：🆕 **待用户拍板**（建议签字为「不复刻」⇒ 登记 `SD-HOT-API-005`）。
+
+---
+
 ## ⚠️ 本轮**未**闭合的项（不得读成「hot-api 已完成」）
 
 | 项 | 状态 | 说明 |
@@ -908,5 +1021,7 @@ SEMANTICALLY NOT EQUIVALENT
 | **端到端双侧活体对拍**（D1/U1） | ❌ 仍缺 | 本轮做的是**分层对拍**（Go 真库 `httpx.Parse` ↔ RAG 真实 MVC 管线），**两套服务同时跑**的端到端对拍仍未做 |
 | **真 Tomcat 下的响应头取证**（D14） | ❌ 仍缺 | MockMvc 测不到真实 Tomcat 的响应头（D14 本身已移交 common 域） |
 | **超时 / 保护层四闸的活体观测**（D9/U2） | ❌ 仍缺 | 仍是静态确认 |
-| **变异验证**（D2/U9） | 🟡 部分 | 本轮对**新增的 3 条修复**做了定向变异（hash 5/5、字段序 1/1）；**全组件系统变异仍未做** |
+| **变异验证**（D2/U9） | 🟡 部分 | 本轮对**新增的 3 条修复**做了定向变异（hash 5/5、字段序 1/1、日志面 3/3）；**全组件系统变异仍未做** |
 | **端口归属**（D6） | ⏳ 待拍板 | Go `hotcenter.yaml` = 8893；`Infrastructure.md §3` 给 hot 预占 18897。当前按 18897 落 |
+| **下游 gRPC 错误串形态**（DRIFT-HOTAPI-017） | 🆕 **待签字** | 库层差异（grpc-go `"rpc error: code = Unavailable desc = …"` vs grpc-java `"UNAVAILABLE: …"`）⇒ 建议签字「不复刻」 |
+| **日志面已对齐的部分** | ✅ **本轮闭合** | `DRIFT-HOTAPI-016` 已修（`CodeError.Error()` 整串 + 日志级别 + 字段集），3 条变异全红 |
