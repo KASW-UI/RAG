@@ -456,7 +456,7 @@ RAG 多一层 properties。**该条不重开。**
 
 > 编号 `DRIFT-USERRPC-V-0xx`。**每条都写明「证据强度」，未取得双侧活体对拍的一律不写成已闭环。**
 
-### DRIFT-USERRPC-V-001 🔴 `Login` 对 `status == NULL` 的分支与 Go **相反**（fail-open）
+### DRIFT-USERRPC-V-001 🔴 `Login` 对 `status == NULL` 的分支与 Go **相反**（fail-open） —— ✅ **已修（第二轮）**
 
 - **Component**: user-rpc / **Operation**: `Login`
 - **Category**: State Semantics / 分支可达性
@@ -486,7 +486,7 @@ RAG 多一层 properties。**该条不重开。**
   插一条 `status IS NULL` 的行，两侧各打一次 `Login`，比对 `Status.getCode()`。
   在改 DDL 前，**不要**把这条按「不可达」销掉。
 
-### DRIFT-USERRPC-V-002 DDL：`users_user.status` 的 **NOT NULL** 两侧不同
+### DRIFT-USERRPC-V-002 DDL：`users_user.status` 的 **NOT NULL** 两侧不同 —— 🔴 **仍成立，但被卡**（改动必须与 admin 域同改）
 
 - **Category**: Schema
 - **Go**：`gorm:"column:status;default:0"` ⇒ GORM 建出 **`status bigint DEFAULT 0`（可空）**。
@@ -565,7 +565,7 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 **跨域**：`admin_admin.extra_info` 已由 admin 域改为 `text`（`DRIFT-ARPC-004①`，`c10f639`/`d7b2b45`）。
 本条修复后**两张表列类型一致，且都与 Go 一致** ⇒ §5b 记的那个不对称状态已消除。
 
-### DRIFT-USERRPC-V-004 DDL：4 个时间列 **timestamptz ↔ timestamp**，连带 `create_time` 的时区标签
+### DRIFT-USERRPC-V-004 DDL：4 个时间列 **timestamptz ↔ timestamp**，连带 `create_time` 的时区标签 —— ✅ **已修（列类型与可观察半边）**
 
 - **Category**: Schema / Serialization
 - **Go**：`schema.Time` ⇒ `postgres.go:252-255` 返回 **`timestamptz`**；DSN 钉 `TimeZone=Asia/Shanghai`（`db.go:21`）。
@@ -602,7 +602,7 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 ⇒ **`users_user` 的时间值不进任何 wire 字段**，本轮改动**无可观察差异**，
 是纯 schema / 类型层对齐。**别把「已修」读成「wire 已对齐」。**
 
-### DRIFT-USERRPC-V-005 `UpdateUser` 对**显式空 map** 的分支不同
+### DRIFT-USERRPC-V-005 `UpdateUser` 对**显式空 map** 的分支不同 —— ✅ **判为「不成立」予以关闭**（protobuf3 的空 map 在 wire 上不可表达）
 
 - **Category**: Input Interpretation
 - **Go**：`updateuserlogic.go:58-60` `if in.ExtraInfo != nil { toUpdate.ExtraInfo = in.ExtraInfo }`；
@@ -619,7 +619,7 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
   两侧生成代码行为可能不同。本轮**未构造 wire 级输入**验证。
 - **Risk**: LOW
 
-### DRIFT-USERRPC-V-006 `users_user.id` / `users_user_avatar_history.id` 的取值来源不同
+### DRIFT-USERRPC-V-006 `users_user.id` / `users_user_avatar_history.id` 的取值来源不同 —— ✅ **已关闭（第四轮，真 PG 实证；永不进 wire）**
 
 - **Category**: State / Schema
 - **Go**：`Id uint64 gorm:"primaryKey"` ⇒ GORM 视为主键自增，`Create` 时省略该列，
@@ -635,7 +635,7 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
   （`UserAvatarHistoryMapper.java:88-93`）时，`IdType.ASSIGN_ID` 与 `Jdbc3KeyGenerator` **谁最终胜出**
   本轮未验证 ⇒ `UNRESOLVED-USERRPC-004`。
 
-### DRIFT-USERRPC-V-007（跨组件 `service/common`）超时路径的 gRPC **status description** 不同
+### DRIFT-USERRPC-V-007（跨组件 `service/common`）超时路径的 gRPC **status description** 不同 —— 🔴 **仍成立，但不在本组件判定权内**
 
 - **Category**: Error Identity
 - **Go**：`service/common/observability/rpc.go:69`

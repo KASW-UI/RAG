@@ -546,7 +546,7 @@ RAG：Spring 容器装配（`UserRpcClient` 的 `@GrpcClient` + `JwtAuthIntercep
 
 ## 7. Semantic Drifts（§27 + §36）
 
-### DRIFT-USERAPI-001 —— `userId` claim 缺失/非数字：Go 走业务层（200+1006），RAG 在鉴权层直接 401
+### DRIFT-USERAPI-001 —— `userId` claim 缺失/非数字：Go 走业务层（200+1006），RAG 在鉴权层直接 401 —— ✅ **已修（第三轮）**
 
 ```text
 Component:    JwtAuthInterceptor + 9 个 Logic 的 uid 提取
@@ -585,7 +585,7 @@ Recommended Verification: 用 JwtUtil.getToken 造一个**不含 userId** / `use
                双侧各打一次请求，断言 HTTP 状态码与 body 全文。
 ```
 
-### DRIFT-USERAPI-002 —— delete / update 的 `uid` 合法域被收窄（Go 不拒绝 `uid <= 0`）
+### DRIFT-USERAPI-002 —— delete / update 的 `uid` 合法域被收窄（Go 不拒绝 `uid <= 0`） —— ✅ **已修（第三轮）**
 
 ```text
 Component:    UserDeleteService / UserUpdateService
@@ -626,7 +626,7 @@ Recommended Verification: 双侧各起真进程，用 userId=0 的 token 打 del
                比对 HTTP 状态码 + body + **rpc 调用次数**（Go 侧看 rpc 日志 / RAG 侧看 stub 计数）。
 ```
 
-### DRIFT-USERAPI-003 —— gRPC 错误码通用映射比 Go 的 per-Logic switch 宽
+### DRIFT-USERAPI-003 —— gRPC 错误码通用映射比 Go 的 per-Logic switch 宽 —— ✅ **已修（第四轮；由「条件性」升级为「已确认可达」）**
 
 ```text
 Component:    GlobalExceptionHandler.mapRPCStatusToCode + 6 个 Service 的 catch-rethrow
@@ -788,9 +788,7 @@ Recommended Verification: 真进程各打一次 `?Username=a&Password=b`（空 b
 
 </details>
 
-### DRIFT-USERAPI-004（原编号保留占位）—— 见上方「已证伪关闭」小节
-
-### DRIFT-USERAPI-005 —— `/user/avatar/history` 在 Go 侧根本不读 body，RAG 侧会解析
+### DRIFT-USERAPI-005 —— `/user/avatar/history` 在 Go 侧根本不读 body，RAG 侧会解析 —— ✅ **已修（第四轮，整个去掉 `@RequestBody`）**
 
 ```text
 Component:    getavatarhistoryhandler.go / UserController.getAvatarHistory
@@ -822,7 +820,7 @@ Must Preserve: 该端点忽略 body 的事实。
 Recommended Verification: 双侧对该端点发畸形 JSON，断言状态码差异是否真实存在。
 ```
 
-### DRIFT-USERAPI-006 —— 400 响应的 `Content-Type` 少 `charset` 参数，且 body 用 ISO-8859-1 编码
+### DRIFT-USERAPI-006 —— 400 响应的 `Content-Type` 少 `charset` 参数，且 body 用 ISO-8859-1 编码 —— ✅ **已修（第六轮，真 Tomcat 双侧实证）**
 
 ```text
 Component:    GlobalExceptionHandler.goStylePlainTextBadRequest
@@ -879,7 +877,7 @@ Recommended Verification: (a) 真 Tomcat 起 user-api，curl -i 打一个必填�
                抓原始响应头；(b) 发一个含中文的畸形 JSON，比对 body 字节。
 ```
 
-### DRIFT-USERAPI-007 —— panic / 兜底异常的响应形状
+### DRIFT-USERAPI-007 —— panic / 兜底异常的响应形状 —— ✅ **已签字保留（`SD-USERAPI-001`，2026-10-23）**
 
 ```text
 Component:    GlobalExceptionHandler.handleAny / go-zero RecoverHandler
@@ -905,7 +903,7 @@ Must Preserve: 至少要明确 500 的 body 形状是「有意统一」还是「
 Recommended Verification: 双侧各制造一次 panic（临时端点或测试钩子），比对原始响应。
 ```
 
-### DRIFT-USERAPI-008 —— go-zero 的 Breaker / Shedding / MaxConns 在 RAG 侧没有任何对应物
+### DRIFT-USERAPI-008 —— go-zero 的 Breaker / Shedding / MaxConns 在 RAG 侧没有任何对应物 —— 🔴 **仍成立，尚未拍板**
 
 ```text
 Component:    user-api 的过载保护层
@@ -979,7 +977,7 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
                             而非运行时指标比对。
 ```
 
-### DRIFT-USERAPI-010 —— 黑名单 401 的 `Content-Type` 拼写错误，RAG 有意不复刻
+### DRIFT-USERAPI-010 —— 黑名单 401 的 `Content-Type` 拼写错误，RAG 有意不复刻 —— ✅ **已签字（`SD-2026-10-23-01/02/03` 的 N-1）**
 
 ```text
 Component:    CheckBlacklistMiddleware
@@ -1046,7 +1044,18 @@ Recommended Verification: 无需验证（属已决策项），但建议在 N-1 �
 
 ## 9. Unresolved（§37）—— 此节不为空，故最终判定不给 `SEMANTICALLY EQUIVALENT`
 
-### UNRESOLVED-001 —— 真 Tomcat 下 400 响应的精确 `Content-Type` 与 body 字节
+### UNRESOLVED-001 —— 真 Tomcat 下 400 响应的精确 `Content-Type` 与 body 字节 —— ✅ **第六轮已关（2026-10-24）**
+
+> **答案（真 Tomcat 活体）**：真 Tomcat 11.0.24 下实测
+> `Content-Type: text/plain;charset=UTF-8` + `X-Content-Type-Options: nosniff` + 400，
+> body 与 Go 逐字相同。
+> ⇒ 走查门脚本 `tools/difftest/check-plaintext400-headers.sh` ⇒ **EXIT=0**；
+> Go 侧另用 stdlib `http.Error` 探针补齐双侧证据。
+> ⇒ **残余差异只有 Content-Type 的字面形态**（分号后空格 + charset 大小写），
+> 按 RFC 9110 两者都不显著 ⇒ 属「表述差异」，登记不修。
+> 详细证据 ⇒ 本文件第六轮 §「DRIFT-USERAPI-006」小节。
+
+<details><summary>原始提问（保留供追溯）</summary>
 
 ```text
 Question:    真实容器返回的 400 响应，Content-Type 到底是 "text/plain" 还是
@@ -1060,6 +1069,13 @@ Why Unknown: 本轮只能证明「传给 setContentType 的字面量没有 chars
              但**真 Tomcat** 的 Response.setContentType 与 StringHttpMessageConverter 的
              交互未做活体验证。
 Impact:      响应头可比对性；含非 ASCII 的错误文案的正确性（见 DRIFT-USERAPI-006 的 ②）。
+```
+
+> ⚠️ 第 ② 项（body 含非 ASCII 时会不会乱码）**实测不成立**：
+> Jackson 2.21 的 `StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` 默认关闭，
+> 异常文案里原始输入是 `Source: REDACTED` ⇒ 非 ASCII 进不了 body。
+> 该前提已被 `UserApiGoStyleBodyContentTypeTest#unreadableBodyMessageDoesNotLeakRawSource` 钉住。
+</details>
 Required Confirmation: 真 Tomcat 起 user-api，curl -i 打 /user/v1/login（空 body）
              与一个含中文的畸形 JSON，抓原始响应头与 body 字节。
 ```
@@ -1164,6 +1180,7 @@ SEMANTICALLY NOT EQUIVALENT
 - **OBSERVABLE DIFFERENCE：7 条** —— DRIFT-USERAPI-003 ~ 010
   （其中 #003 条件性成立与否取决于 UNRESOLVED-003；#001/#002 所在族的 #010 已并入 §0 的 N-1 范围说明）
 - **UNRESOLVED：5 条** —— UNRESOLVED-001 ~ 005
+  ⇒ **第六轮更新**：001 已关（真 Tomcat 活体）⇒ **现剩 1 条 open（004）**
 - **双侧活体对拍证据：0 条**（本轮全部为 `静态源码` + 1 条 `字节码核实`）
 
 > ⚠️ **结论的适用边界**：这是一份**源码级**对照台账，不是「已闭环」。
@@ -1672,8 +1689,9 @@ Neo4j 399 MiB、Grafana 362 MiB …… 已吃掉大半 ⇒ 小容器也分不到
 只 mock Service），但**零容器、零 Spring 上下文、4.7 秒**。
 
 ⚠️ **本类不覆盖真 Tomcat 下 `Content-Type` 的 charset 行为** —— 那是 `UNRESOLVED-001`，
-需要 `tools/difftest/check-plaintext400-headers.sh` 那个真容器脚本。
+**第六轮已用 `tools/difftest/check-plaintext400-headers.sh` 在真 Tomcat 下关闭**。
 **两件事不要混**：本条讲「绑不绑 body」，`UNRESOLVED-001` 讲「绑了之后响应头长什么样」。
+⇒ 本类（零容器）守「绑不绑」，真容器脚本守「响应头长什么样」，**两层并存、互补**。
 
 端到端层的那条（真 Redis + 真 MVC 全上下文）保留，两层并存：
 **绑定层稳定、端到端层完整**。
@@ -1825,13 +1843,14 @@ RAG 侧 `GlobalExceptionHandler#handleAny:262-272` ⇒ **HTTP 500 + 完整 envel
 
 | # | 状态 | 依据 |
 |---|---|---|
-| `UNRESOLVED-001`（真 Tomcat 400 的 `Content-Type` 与 body 字节） | 🔴 **仍 open** | 需真容器脚本 `tools/difftest/check-plaintext400-headers.sh`；MockMvc 结构上测不到 |
+| `UNRESOLVED-001`（真 Tomcat 400 的 `Content-Type` 与 body 字节） | ✅ **第六轮已关** | 真 Tomcat 11.0.24 起 user-api（端口 59900），跑 `tools/difftest/check-plaintext400-headers.sh` ⇒ **EXIT=0**；Go 侧用 stdlib `http.Error` 探针补齐双侧证据。实测 `Content-Type=text/plain;charset=UTF-8` + `nosniff` + 400，body 逐字相同 ⇒ 残余只有 Content-Type 的**字面形态**（表述差异）。⚠️ 本行此前一直写「仍 open」，属台账脱节，第六轮复核更正 |
 | `UNRESOLVED-002`（jjwt 选算法） | ✅ **本轮已关** | 见本文件第四轮 §1–§3（含对原断言的证伪） |
 | `UNRESOLVED-003`（需与 user-rpc 合并判读的 code 集合） | ✅ **本轮已关** | 见本文件第四轮 §1–§2：枚举两侧 code 全量交叉，21 格中 20 格已一致，唯一漂移格已修 |
 | `UNRESOLVED-004`（Redis 慢/断连） | 🔴 **仍 open** | 需真 Redis 故障注入。⚠️ 本轮**收窄了假设面**：实测确认黑名单那次 Redis 调用**两侧都在 3s 预算之内**（Go 在 `route.Handler` 内、RAG 在 `JwtAuthInterceptor` 内）⇒ 不会因「位置差」分叉；但「谁先触发」仍需那个实验 |
 | `UNRESOLVED-005`（rpc 事务/并发语义） | ✅ **本轮已关** | 见上 |
 
-⇒ **api 侧：5 条中 3 条已关、2 条仍 open。**
+⇒ **api 侧：5 条中 4 条已关、1 条仍 open**（`UNRESOLVED-004`，需真 Redis 故障注入）。
+⇒ ⚠️ 上表「`UNRESOLVED-001` 仍 open」是**第五轮时点的状态**，第六轮已关（本表已更正）。
 
 ### 3. ⚠️ 复核中再次确认的文档病灶
 

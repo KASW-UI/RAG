@@ -69,7 +69,10 @@
 
 ## 3. 差异明细
 
-### DRIFT-USERSCOMMON-001 🔴 `ErrorCode.getMsg(1017/1018)` 有文案，Go 的 `codeMsg` 里**没有这两条**
+### DRIFT-USERSCOMMON-001 🔴 `ErrorCode.getMsg(1017/1018)` 有文案，Go 的 `codeMsg` 里**没有这两条** —— ⏸️ **潜伏，跨域待裁决**
+
+> **本域（users/user）内结论**：三个调用点**全是日志码、wire 观察不到** ⇒ 在本组件范围内**不构成可观察漂移**。
+> 真正会进 wire 的是 `admin-api` 的两处 ⇒ **需 admin 域签字**，属跨域项。详见本节末尾「处置」。
 
 **性质：OBSERVABLE DIFFERENCE（潜伏 · 在 `users/user` 内不进 wire）**
 
@@ -117,7 +120,9 @@
 
 ---
 
-### DRIFT-USERSCOMMON-002 🔴 JWT header 缺 `"typ":"JWT"`
+### DRIFT-USERSCOMMON-002 🔴 JWT header 缺 `"typ":"JWT"` —— ✅ **已修（首轮，`JwtUtil.java:24` `.header().add("typ", "JWT")`）**
+
+> 守门网：`JwtUtilParityTest`（**22 条**，含 11 档密钥长度 × alg 必为 HS256 + 5 档签名长度 + 6 条其余断言）。
 
 **性质：OBSERVABLE DIFFERENCE（wire 可见 · 字节级）**
 
@@ -142,7 +147,9 @@
 
 ---
 
-### DRIFT-USERSCOMMON-003 ⚠️ JWT payload 的 claim **顺序**不同（语义等价，字节不同）
+### DRIFT-USERSCOMMON-003 ⚠️ JWT payload 的 claim **顺序**不同（语义等价，字节不同） —— ✅ **判为不修（字节级语义等价）**
+
+> **性质修正**：它不是「漂移」，而是**表述差异**（JSON 对象键序无语义，claim 集合与取值两侧完全一致）。
 
 **性质：OBSERVABLE DIFFERENCE（字节级 · 语义等价）**
 
@@ -160,7 +167,12 @@
 
 ---
 
-### DRIFT-USERSCOMMON-004 🔴 JWT `alg` 在密钥 ≥48 字节时**静默分叉**（证伪了既有台账的说法）
+### DRIFT-USERSCOMMON-004 🔴 JWT `alg` 在密钥 ≥48 字节时**静默分叉**（证伪了既有台账的说法） —— ✅ **已修（首轮）**
+
+> 修法**必须连 key 一起钉**：显式 `new SecretKeySpec(padToHmacKeySize(secretKey), "HmacSHA256")`
+> + `signWith(key, SignatureAlgorithm.HS256)` —— 只加后者不够，
+> `Keys.hmacShaKeyFor` 返回的 `SecretKeySpec` 的 JCA 算法名才是 jjwt 真正采信的来源。
+> 守门网：同上 `JwtUtilParityTest`（22 条，含 11 档密钥长度）。
 
 **性质：SEMANTIC MISMATCH（条件性 · 触发条件已量化）**
 
