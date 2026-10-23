@@ -1172,3 +1172,54 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 处置：新测试用 `properties = "grpc.server.port=0"`（内核分配临时端口）。
 ⚠️ 本测试只关心 DDL 与主键来源，**不需要真的监听端口**。
 ⇒ 详见 [`../../../Pitfalls/users/_shared.md`](../../../Pitfalls/users/_shared.md)。
+
+---
+
+<!-- @fix 2026-10-23 第五轮：§9 UNRESOLVED 状态复核（台账 vs 实际） -->
+
+## 2026-10-23 第五轮：§9 `Unresolved` 表**状态复核**（台账 vs 实际）
+
+> **背景**：§9 那张表是**首轮**（2026-10-23 02:00）写的，
+> 而第二轮 / 第三轮**已经关掉其中 4 条却没回填** ⇒ 表与实际脱节。
+> 本节是**权威的状态更正**，§9 原表保留作审计轨迹。
+
+### 复核方法
+
+不看 §9 写了什么，**只看证据是否真实存在**：
+① 台账后文是否已声明关闭；② 对应的测试类/实验是否**真的在仓里**；
+③ 引用的库源码行号是否支持该结论。
+
+### 复核结果：**4 条已关但表里仍写 open**
+
+| # | §9 写的 | **实际** | 证据（为什么判定为已关） |
+|---|---|---|---|
+| **UNRESOLVED-USERRPC-001**<br>V-001 端到端可达性 | open | ✅ **已关** | §9 要求「在 RAG 库 `DROP NOT NULL` + 插 NULL 行」。<br>**该实验已真做**：`UserRpcLoginNullStatusReadsAsZeroTest.java:116` `void dropNotNullAndSeed()`、`:122` `ALTER TABLE users_user ALTER COLUMN status DROP NOT NULL`、`:125` `INSERT … status`(NULL)，真 PG Testcontainers；`:154` `loginWithNullStatusSucceedsLikeGo`、`:171` 反向对照组 |
+| **UNRESOLVED-USERRPC-002**<br>V-004 时区偏移量 | open | ✅ **已关** | 第三轮 §2 用**两组实测**推翻旧说法并给出机制：偏移量由**进程本地时区**（Go `time.Local`）决定，**PG 会话时区不参与**（pgx 走二进制解码）。附 `pgtype/timestamptz.go:133-137` `ScanLocation` 默认 nil、`:270-276` 回落到 `time.Local` 的源码依据 |
+| **UNRESOLVED-USERRPC-003**<br>V-005 wire 可达性 | open | ✅ **已关** | 第三轮 §3 已明写「就此关闭」，答案是「**protobuf3 的空 map 在 wire 上不可表达**（零条目 ⇒ 字段缺席 ⇒ 解出来是 nil）」。§9 表未同步 |
+| **UNRESOLVED-USERRPC-006**<br>索引/唯一约束/NOT NULL/DEFAULT | open | ✅ **已关** | 第三轮 §4 用**真库逐列对照**（`information_schema`）完成，给出确认差异表 + 索引/约束等价表。<br>⚠️ 本轮**重新审了这条的证据强度**：它是 2026-10-23 当天的真实执行、有具体输出，**符合 §6.2 状态表纪律** ⇒ 维持「已关」，**我先前的怀疑不成立，特此更正** |
+
+### 复核结果：**确实仍 open 的 3 条**
+
+| # | 为什么仍 open |
+|---|---|
+| `UNRESOLVED-USERRPC-004` ② | 启动期 Redis 不可用时两侧的失败时机（Go `MustNewRedis` fail-fast vs RAG 懒连接）。<br>**①（id 谁胜出）已由本轮 V-006 关闭**（真 PG：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出）。② 需「停掉 Redis 再起进程」的注入实验，未做 |
+| `UNRESOLVED-USERRPC-005` | `users_user` 建表责任交叉（user-rpc ↔ admin-rpc）。**跨组件**：必须两个 rpc **同库并发启动**才能验，单侧 harness 证明不了 |
+| `UNRESOLVED-USERRPC-007` | 9 个 RPC 的 **gRPC 层错误 message 逐字对拍**。第三轮 §6.1 明写「`grpc-message-dual-port-runner.java` 本轮**未**跑」；已覆盖的只是 HTTP wire 层 |
+
+### ⚠️ 顺带查出的一处**台账事实错误**（与 AGENTS.md 已记的 `FlywayLedgerIsolationTest` 同型）
+
+§7 守门测试清单与第三轮 §7 都写着 **`UserRpcLoginNullStatusFailClosedTest`（5 条）**。
+
+**该测试类在仓内不存在。** 实际类名是：
+
+| 台账写的 | 实际 |
+|---|---|
+| `UserRpcLoginNullStatusFailClosedTest`（5 条） | **`UserRpcLoginNullStatusReadsAsZeroTest`**（**8** 条） |
+
+⇒ 同一条结论（V-001 已修）在文档里被写成了一个**不存在的类名 + 错误的条数**。
+这与 AGENTS.md §6.3 警告的「多处声称由 `FlywayLedgerIsolationTest` 负责，**该测试类全仓不存在**」是**同一类病灶**。
+⇒ 已在 `UNRESOLVED-001` 的证据栏写明正确类名；**后续引用一律以本节为准**。
+
+### 本节不改变任何代码
+
+纯台账状态更正，**未改动任何实现**。

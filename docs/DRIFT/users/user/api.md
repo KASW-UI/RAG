@@ -1702,3 +1702,45 @@ RAG 侧 `GlobalExceptionHandler#handleAny:262-272` ⇒ **HTTP 500 + 完整 envel
 | 模块 | 结果 |
 |---|---|
 | `user-api` | 新增 `PanicFallbackResponseShapeTest` 2 条全绿（0.6s，零容器） |
+
+---
+
+<!-- @fix 2026-10-23 第五轮：§9 UNRESOLVED-005 关闭（引用 rpc.md）+ 全量状态复核 -->
+
+## 2026-10-23 第五轮：§9 `Unresolved` 表状态复核
+
+### 1. `UNRESOLVED-005` ✅ **关闭** —— 它要的「合并判读」对象已经答完了
+
+原文写的是：
+
+> 「超出本组件边界（§2 strict scope）。**Required Confirmation：引用 `docs/DRIFT/users/user/rpc.md`（另一会话产出）后回填本节。**」
+
+⇒ 这条从写下那天起就**只等一次引用**。而 `user-rpc` 台账的 §39 checklist 已经答完：
+
+| 本组件问的 | rpc 侧的答案 | 出处 |
+|---|---|---|
+| delete/update/select 的事务边界 | ✅ **一致** —— 4/5 步原子性两侧相同，`[PG]` **真回滚实证**，**无 self-invocation** | `rpc.md` §39 第 9 项 |
+| `extra_info` jsonb 写入 | ⚠️ 不一致（V-003，跨域待裁决） | `rpc.md` V-003 |
+| `is_current` 派生字段是否实时 | ✅ 头像 current 状态机一致 | `rpc.md` §39 第 10 项 |
+| `FOR UPDATE` 行锁 | ✅ **两侧都无悲观锁** ⇒ TOCTOU 窗口集合**相同**（含共有缺陷） | `rpc.md` §39 第 15 项 |
+
+⇒ **本条关闭。** 唯一遗留的 `extra_info` 那半，已由 `V-003` 独立承载，不因本条关闭而消失。
+
+### 2. 复核汇总（§9 五条的当前状态）
+
+| # | 状态 | 依据 |
+|---|---|---|
+| `UNRESOLVED-001`（真 Tomcat 400 的 `Content-Type` 与 body 字节） | 🔴 **仍 open** | 需真容器脚本 `tools/difftest/check-plaintext400-headers.sh`；MockMvc 结构上测不到 |
+| `UNRESOLVED-002`（jjwt 选算法） | ✅ **本轮已关** | 见本文件第四轮 §1–§3（含对原断言的证伪） |
+| `UNRESOLVED-003`（需与 user-rpc 合并判读的 code 集合） | ✅ **本轮已关** | 见本文件第四轮 §1–§2：枚举两侧 code 全量交叉，21 格中 20 格已一致，唯一漂移格已修 |
+| `UNRESOLVED-004`（Redis 慢/断连） | 🔴 **仍 open** | 需真 Redis 故障注入。⚠️ 本轮**收窄了假设面**：实测确认黑名单那次 Redis 调用**两侧都在 3s 预算之内**（Go 在 `route.Handler` 内、RAG 在 `JwtAuthInterceptor` 内）⇒ 不会因「位置差」分叉；但「谁先触发」仍需那个实验 |
+| `UNRESOLVED-005`（rpc 事务/并发语义） | ✅ **本轮已关** | 见上 |
+
+⇒ **api 侧：5 条中 3 条已关、2 条仍 open。**
+
+### 3. ⚠️ 复核中再次确认的文档病灶
+
+`rpc.md` 台账里 **`UserRpcLoginNullStatusFailClosedTest` 这个类名在仓内不存在**
+（实际是 `UserRpcLoginNullStatusReadsAsZeroTest`，8 条不是 5 条）。
+`api.md` 的 §9 `UNRESOLVED-001` 曾以它作为「关闭条件」的指引 ⇒ **该指引当前指向一个不存在的类**，
+按它去复核的人会直接扑空。已在 `rpc.md` 第五轮更正。

@@ -464,3 +464,55 @@ python3 diff.py go_out.jsonl rag_out.jsonl
 ```
 
 > 探针目录在 `/tmp`，**不入仓**。若需长期回归，守门测试已在仓内落地（见 §5）。
+---
+
+<!-- @fix 2026-10-23 第五轮：UNRESOLVED-USERSCOMMON-005 关闭（双侧真实路径实测） -->
+
+## 2026-10-23 第五轮：`UNRESOLVED-USERSCOMMON-005` 关闭（`userId` 超 2^53 的精度）
+
+### 结论：**两侧都无精度损失，本条不是漂移**
+
+**Go 侧的真实路径（三段，缺一不可）**：
+
+1. `go-zero@v1.10.2/rest/handler/authhandler.go:51` `parser := token.NewTokenParser()`（无 opts）
+2. `go-zero@v1.10.2/rest/token/tokenparser.go:81-86` `doParseToken` → `request.WithParser(newParser())`
+3. 🔴 **`go-zero@v1.10.2/rest/token/tokenparser.go:122-123`**：
+   ```go
+   func newParser() *jwt.Parser {
+       return jwt.NewParser(jwt.WithJSONNumber())     // ← 关键：开了 UseJSONNumber
+   }
+   ```
+
+⇒ `claims["userId"]` 的动态类型是 **`json.Number`**（**不是** `float64`）
+⇒ `service/user/user/identity/resolve.go:70` 的 `claim, ok := ctx.Value("userId").(json.Number)` 断言成立
+⇒ `:73` `claim.Int64()` **精确**，无 float64 舍入。
+
+⚠️ **本条差点被写成假发现，过程记录在案**：
+第一版探针用**裸 `json.Unmarshal`** 解析 payload，得到 `float64`，
+实测 `9007199254740993` 变成 `9007199254740992`（**差 1**），
+若采信就会写出一条「Go 在 2^53 以上丢精度」的**假漂移**。
+⇒ 是 `tokenparser.go:123` 那行 `jwt.WithJSONNumber()` 推翻了它。
+**教训：探针必须复现真实调用路径，不能用「看起来等价」的库调用替代。**
+
+**RAG 侧的真实路径**：`JwtAuthInterceptor` `claim instanceof Number → ((Number) claim).longValue()`
+⇒ 实测 jjwt 给出的动态类型：
+
+| 签名时 `userId` | jjwt 给出的类型 | `longValue()` 结果 | 精确 |
+|---|---|---|---|
+| `1234567890` | `Integer` | 1234567890 | ✅ |
+| `9007199254740993`（2^53+1） | **`Long`** | 9007199254740993 | ✅ |
+| `-9007199254740993` | `Long` | -9007199254740993 | ✅ |
+| `Long.MAX_VALUE` / `MIN_VALUE`（±2^63） | `Long` | 原值 | ✅ |
+
+⇒ **jjwt 对 int64 全域精确**，`longValue()` 无截断。
+
+### 唯一的理论分歧点：**超出 int64 的值**
+
+| 输入 | Go | RAG |
+|---|---|---|
+| `2^64 + 100`（18446744073709551716） | `claim.Int64()` **报错** ⇒ `ErrInvalidClaim`（1006） | Jackson 给 `BigInteger`，`.longValue()` **静默回绕** ⇒ 可能得到一个正数小值 |
+
+⚠️ **但不可达**：`uid` 来自 Snowflake（量级 ~1e18 < 2^63），
+**任何一侧都不可能签出 ≥2^64 的 userId** ⇒ 该分歧点**当前不可观察**，不构成漂移。
+
+⇒ **本条关闭。** 若将来引入新的 uid 生成器（超过 2^63），**必须重开本条**。
