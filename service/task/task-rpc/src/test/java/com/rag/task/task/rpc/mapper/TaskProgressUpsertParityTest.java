@@ -66,7 +66,18 @@ import static org.junit.jupiter.api.Assertions.assertNull;
                 "management.otlp.tracing.export.enabled=false"
         })
 @Testcontainers
-@org.testcontainers.junit.jupiter.EnabledIfDockerAvailable
+// ⚠️ 刻意**不加** @EnabledIfDockerAvailable（2026-10-23 移除）
+// 该注解在类级求值时要去拿 Docker client，而 Testcontainers 2.x 的 client() 会顺带
+// 确保 Ryuk 资源回收容器可用；本机拉不到 ryuk 镜像时它抛的 ContainerFetchException
+// 会被 DockerAvailableDetector 的 `catch (Throwable) -> false` 压成
+// 「Docker is not available」，于是**整类 15 条用例静默 skip 而 reactor 报 BUILD SUCCESS** ——
+// 而这 15 条恰恰是本模块唯一直接验证「Flyway 真跑 + MyBatis-Plus 真产出 SqlSessionFactory +
+// ON CONFLICT/GREATEST/COALESCE 真按 PG 语义执行」的用例。
+// Ryuk 已在 task-rpc/pom.xml 的 surefire environmentVariables 里禁用
+// （TESTCONTAINERS_RYUK_DISABLED=true，全仓其它容器模块同款），
+// 此时该注解已无作用，留着只会继续掩盖失败。
+// ⚠️ 反过来说：真到了「本机确实没有 Docker」的环境，正确表现是**报错**（起不了容器），
+// 而不是安静地跳掉 15 条 —— 那才是绿灯底下的空洞。
 class TaskProgressUpsertParityTest {
 
     @Container
