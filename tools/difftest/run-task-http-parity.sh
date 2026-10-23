@@ -65,6 +65,47 @@ GOKA_CACHE_DIR=${GOKA_CACHE_DIR:-/private/tmp/goka/processor}
 kafka() { docker exec taskprobe-kafka /opt/kafka/bin/"$@"; }
 say() { printf '\n\033[1m==== %s ====\033[0m\n' "$*"; }
 
+# 端口是否被占（有人 LISTEN）
+port_busy() {
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+}
+
+# 等端口**释放**（最多 $2 秒）。
+# ⚠️ 为什么不能只 sleep 2s：JVM 收到 SIGTERM 后要走 Spring 上下文 close
+#    （Hikari 关池、Kafka 消费者下线……），实测**超过 2 秒**仍在监听
+#    ⇒ 新进程 BindException: Address already in use ⇒ 整轮对拍白跑。
+#    （2026-10-24 实测：旧 rpc 03:56:47 才关完，新 rpc 03:56:46 就去 bind 了。）
+wait_port_free() {
+    local port=$1 timeout=${2:-60}
+    for i in $(seq 1 $timeout); do
+        port_busy "$port" || { echo "  ✓ :$port 已释放（${i}s）"; return 0; }
+        sleep 1
+    done
+    echo "  ✗ :$port 等了 ${timeout}s 还没释放"
+    return 1
+}
+
+# 等端口**开始监听**（最多 $2 秒）；同时盯进程是否还活着
+wait_port_listen() {
+    local port=$1 timeout=${2:-90} log=${3:-}
+    for i in $(seq 1 $timeout); do
+        if port_busy "$port"; then
+            echo "  ✓ :$port 已监听（${i}s）"
+            return 0
+        fi
+        if [ -n "$log" ] && [ -s "$log" ] && grep -q "Application run failed\|BindException" "$log" 2>/dev/null; then
+            echo "  ✗ 进程启动失败（日志尾部）："
+            tail -25 "$log" | sed 's/^/     /'
+            return 1
+        fi
+        sleep 1
+    done
+    echo "  ✗ :$port 等了 ${timeout}s 还没监听"
+    [ -n "$log" ] && tail -25 "$log" | sed 's/^/     /'
+    return 1
+}
+
+
 # ═════════════════════════════════════════════════════════════════════════
 say "0. 前置检查"
 for c in docker go mvn java curl; do
@@ -136,15 +177,20 @@ pkill -f 'go-task-rpc -f .*task-rpc.yaml' 2>/dev/null
 pkill -f 'go-task-api -f .*task-api.yaml' 2>/dev/null
 pkill -f 'com.rag.task.task.rpc.TaskRpcApplication' 2>/dev/null
 pkill -f 'com.rag.task.task.api.TaskApiApplication' 2>/dev/null
-sleep 2
-echo "  剩余：$(pgrep -f 'go-task-rpc|go-task-api|TaskRpcApplication|TaskApiApplication' | wc -l | tr -d ' ')"
+# ⚠️ 不能只 sleep 2s：JVM 的优雅关闭（Spring close + Hikari 关池 + Kafka 消费者下线）
+#    实测要 3~4 秒 ⇒ 新进程会 BindException: Address already in use。
+for p in "$GO_RPC_PORT" "$RAG_RPC_PORT" "$GO_API_PORT" "$RAG_API_PORT"; do
+  wait_port_free "$p" 60 || { echo "  ✗ 端口没释放，放弃（避免新一轮抢端口）"; exit 1; }
+done
+echo "  剩余进程：$(pgrep -f 'go-task-rpc|go-task-api|TaskRpcApplication|TaskApiApplication' | wc -l | tr -d ' ')"
 
 say "6. 起 Go 真源 task-rpc (:$GO_RPC_PORT) + task-api (:$GO_API_PORT)"
 ( cd "$WORK" && nohup "$WORK/bin/go-task-rpc" \
       -f "$HERE/conf/go/task-rpc.yaml" > "$WORK/logs/go-task-rpc.log" 2>&1 & )
-sleep 3
+wait_port_listen "$GO_RPC_PORT" 90 "$WORK/logs/go-task-rpc.log" || exit 1
 ( cd "$WORK" && nohup "$WORK/bin/go-task-api" \
       -f "$HERE/conf/go/task-api.yaml" > "$WORK/logs/go-task-api.log" 2>&1 & )
+wait_port_listen "$GO_API_PORT" 90 "$WORK/logs/go-task-api.log" || exit 1
 echo "  ✓ 已起"
 
 say "7. 起 RAG task-rpc (:$RAG_RPC_PORT) + task-api (:$RAG_API_PORT)"
@@ -177,7 +223,8 @@ nohup java -cp "$RPC_CP" com.rag.task.task.rpc.TaskRpcApplication \
     --task.kafka.group-filter-user=rag.rpc.consumer81 \
     --task.kafka.group-kafka-filter=rag.rpc.consumer101 \
     > "$WORK/logs/rag-task-rpc.log" 2>&1 &
-sleep 5
+echo "  ✓ 已起"
+wait_port_listen "$RAG_RPC_PORT" 90 "$WORK/logs/rag-task-rpc.log" || exit 1
 NACOS_ADDR=127.0.0.1:1 OTEL_EXPORTER_OTLP_ENDPOINT=127.0.0.1:1 \
 TASK_RPC_ADDRESS="static://127.0.0.1:$RAG_RPC_PORT" \
 nohup java -cp "$API_CP" com.rag.task.task.api.TaskApiApplication \
@@ -187,6 +234,7 @@ nohup java -cp "$API_CP" com.rag.task.task.api.TaskApiApplication \
     --management.otlp.tracing.export.enabled=false \
     > "$WORK/logs/rag-task-api.log" 2>&1 &
 echo "  ✓ 已起"
+wait_port_listen "$RAG_API_PORT" 90 "$WORK/logs/rag-task-api.log" || exit 1
 
 say "8. 等两侧 api 就绪（④ 必须拒绝 000 / 404）"
 # ⚠️ 判据是「**真实业务请求**返回 200」，不是「端口能连上」——
