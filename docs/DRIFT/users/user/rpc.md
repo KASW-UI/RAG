@@ -419,7 +419,7 @@ RAG 侧无对应物。记为 V-008 的姊妹项，见 §9 UNRESOLVED-USERRPC-004
 | 维度 | Go | Spring Boot | 结果 |
 |---|---|---|---|
 | wire 契约 | proto3 | 同（逐字节核对） | **EQUIVALENT** |
-| jsonb 参数绑定 | 驱动按 `text` 列写 | `ps.setObject(..., Types.OTHER)` | 目标列类型不同（V-003），但**两边各自都能写成功**（`[PG]` 实测） |
+| extra_info 参数绑定 | 驱动按 `text` 列写 | `ps.setString`（原 `ps.setObject(..., Types.OTHER)`） | ✅ **列类型已一致（V-003 已修，`ec33159`）**，两侧都按 text 写 |
 | json 序列化 key 序 | `encoding/json` 对 `map[string]string` **按键排序** | Jackson `LinkedHashMap` **保持插入序**，再被 jsonb 按 (长度,字节) 重排 | **两端都不透传 key 序**（proto 是 map）⇒ wire 不可见 |
 | `create_time` 格式 | RFC3339 秒精度 | 同（`[T]` 3 条用例锁死） | **EQUIVALENT** |
 | `create_time` 时区标签 | 带偏移 | 恒 `Z` | **OBSERVABLE DIFFERENCE**（V-004） |
@@ -499,7 +499,7 @@ RAG 多一层 properties。**该条不重开。**
 - **Must Preserve**：这是**决策问题**，不是 bug —— 若保留 NOT NULL，V-001 需按「不可达」降级；
   若要与 Go 一致放开可空，V-001 就变成实打实的安全缺陷。**两者必须一起判。**
 
-### DRIFT-USERRPC-V-003 DDL：`extra_info` 列类型 **text ↔ jsonb**
+### DRIFT-USERRPC-V-003 DDL：`extra_info` 列类型 **text ↔ jsonb** —— ✅ **已修（2026-10-23 23:4x，commit `ec33159`）**
 
 - **Category**: Schema / Serialization
 - **Go 侧成因（本轮独立复核，不是猜的）**：
@@ -507,18 +507,63 @@ RAG 多一层 properties。**该条不重开。**
   → `gorm@v1.31.2/schema/field.go:195-199`：`serializer` 命中时 **强制 `field.DataType = String`**
   → `gorm.io/driver/postgres@v1.6.0/postgres.go:245-250`：`schema.String` 且 `Size == 0` ⇒ 返回 **`text`**。
   **⇒ Go 侧 `users.extra_info` 就是 `text`，不是 jsonb。**
-- **RAG**：`01_create_user.sql:41` `extra_info JSONB`。
+  ⚠️ 上面这条推导链**每一环都对，但已不再是唯一依据**：本轮另取**建表语句级实证**
+  （`go run -overlay` 虚拟注入探针 → 调真源 `model.InitDB` → PG `log_statement=all` 抓原文），
+  见本文件 §4 的补记。**「推导对」与「有实证」是两回事，后者才关得住争议。**
+- **RAG（修复前）**：`01_create_user.sql:41` `extra_info JSONB`。
 - **Difference**：jsonb 会归一化（key 按「长度 + 字节序」重排、重复 key 丢弃、空白删除），
   text 原样保留。
+  **实测（本轮 PG 上直接跑，2026-10-23 23:46）**：
+  ```
+  输入  {"b":"2","a":"1","bb":"3"}
+  text  ⇒ {"b":"2","a":"1","bb":"3"}            原样
+  jsonb ⇒ {"a": "1", "b": "2", "bb": "3"}      键重排 + 冒号后补空格
+  ```
 - **Observable Impact**：**wire 层无影响**（两侧都解析成 `map<string,string>` 再发 proto map）。
   DB 层可见：任何直接对 `extra_info` 做文本匹配的跨组件查询会因 key 序不同而失效。
 - **Classification**: **OBSERVABLE DIFFERENCE**（仅 DB 层）
-- **Evidence**: `[GO]` 上述三处**消费点**行号；`[RAG]` `01_create_user.sql:41`；`[PG]`
-  `UserRpcContainerWiringTest#schemaInitCreatedJsonbColumns` 断言 RAG 侧确实是 `jsonb`。
-  `_shared.md` §6.2.5 已把它记为「剩余 12 处 DDL 差异」中的 2 处 `text→jsonb` 之一。
+- **Evidence**: `[GO]` 上述三处**消费点**行号 **+ 建表语句级实证**；`[RAG]` `01_create_user.sql:41`；
+  `[PG]` 见下方「修复与守门」。
 - **Why It Matters**：`AGENTS.md` §0 第 2 条说「10 处列类型差异从未评估」并特别点名
   「⚠️ `users_user.extra_info` 的 `text→jsonb` **必须单独取证** —— 不能照『RAG 用了 jsonb 所以 Go 也该用』来猜」。
   **本条就是那份取证**，结论是：**Go 侧确实是 `text`。**
+
+#### 修复（`ec33159`）
+
+| 层 | 改法 |
+|---|---|
+| DDL | `extra_info JSONB` ⇒ `TEXT` + 幂等自愈 `ALTER … TYPE text USING extra_info::text` |
+| handler | `JsonbTypeHandler` ⇒ **`JsonTextTypeHandler`**，`setObject(…,Types.OTHER)` ⇒ `setString` |
+| CAST ×2 | `UserMapper#updateUserById` 与 `UserAvatarHistoryMapper#updateUserExtraInfo` 去掉 `CAST(… AS jsonb)` |
+
+**为什么连类名一起改**：该 handler 存在的**全部理由**就是「jsonb 拒收 varchar 绑参」，
+理由消失后类名若仍叫 `Jsonb…`，就是在给下一个人讲一个已经不成立的故事
+（与 `TokenBlacklistedException` 声称 Go 有 `PERMISSION_DENIED` 同型病灶，见 §3.4.1 D-2 先例）。
+
+**⚠️ 两处 CAST 是本次最容易漏的**：它们在 text 列上**能跑通**
+（`jsonb→text` 是 assignment cast），语句不报错、端到端用例**照样全绿**，
+但 PG 会顺手规范化一次 ⇒ **「能跑但语义错」，比编译不过更难发现**。
+
+#### 守门网（3 条，全部经变异验证）
+
+| # | 守门 | 层 | 变异 → 结果 |
+|---|---|---|---|
+| 1 | `extraInfoBytesAreStoredVerbatim`：断言落库字节**逐字节**等于 Jackson 输出 | 真 PG | DDL 回退 jsonb ⇒ 红 |
+| 2 | `updateUserById_extraInfoHasNoJsonbCast`：SQL 片段不得含 CAST/jsonb | mock | CAST 加回 ⇒ 红 |
+| 3 | `updateUserExtraInfoSqlHasNoJsonbCast`：`@Update` 注解反射 | 零容器 | CAST 加回 ⇒ 红 |
+
+**第 1 条的判别键组**：`LinkedHashMap` 插入序 `c, a, bb`；
+PG jsonb 会重排成 `a, c, bb`（键长 → 字节序）⇒ 两列类型可分辨，已实测确认。
+⚠️ **第 3 条是补自查缺口**：头像双写那条 `@Update` 路径原本**无任何断言**，
+CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
+
+**反转 1 条**：`schemaInitCreatedTextExtraInfoColumn`（原名 `schemaInitCreatedJsonbColumns`，
+断言「必须是 jsonb」）。⚠️ 原断言的**目的没变、服务对象变了**：它原本是防「退化成 text 导致 jsonb 用例假绿」，
+现在列就是 text ⇒ 新的风险是**反方向**的（改回 jsonb 时下面用例照样全绿），
+拦住它的是第 1 条而非类型断言。**两条缺一不可。**
+
+**跨域**：`admin_admin.extra_info` 已由 admin 域改为 `text`（`DRIFT-ARPC-004①`，`c10f639`/`d7b2b45`）。
+本条修复后**两张表列类型一致，且都与 Go 一致** ⇒ §5b 记的那个不对称状态已消除。
 
 ### DRIFT-USERRPC-V-004 DDL：4 个时间列 **timestamptz ↔ timestamp**，连带 `create_time` 的时区标签
 
@@ -1020,7 +1065,7 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | 列 | Go | RAG | 判定 |
 |---|---|---|---|
 | `users.status` | `bigint` / **is_nullable=YES** / default `0` | `bigint` / **is_nullable=NO** / default `0` | 🔴 **DRIFT-USERRPC-V-002 升级为「真库实证」**（此前只有静态源码） |
-| `users.extra_info` | **`text`** | **`jsonb`** | 🔴 **DRIFT-USERRPC-V-003 升级为「真库实证」**（与 `postgres.go:245-250` 的推导一致） |
+| `users.extra_info` | **`text`** | ~~`jsonb`~~ → **`text`** | ✅ **DRIFT-USERRPC-V-003 已修**（`ec33159`；修复前为 🔴「真库实证」） |
 | `users.create_time` / `update_time` | `timestamptz` / is_nullable=YES / **default `<none>`** | `timestamptz` / is_nullable=YES / **default `CURRENT_TIMESTAMP`** | 🔴 **新发现（V-011）**：Go 的 AutoMigrate **不给**时间列 DEFAULT；RAG 给了 |
 | `users_user_avatar_history.create_time` / `update_time` | `timestamptz` / default `<none>` | `timestamptz` / default `CURRENT_TIMESTAMP` | 同上（本轮已修列类型；DEFAULT 差异仍在） |
 
@@ -1061,7 +1106,7 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | ID | 内容 | 本轮结论 | 为什么不动 |
 |---|---|---|---|
 | **DRIFT-USERRPC-V-002** | `users_user.status` **NOT NULL**（Go 可空） | 🔴 **真库实证确认**（§4） | ⚠️ **动它会立刻激活 admin-rpc 的同款缺陷**：admin-rpc 的 `UserEntity.status` 是 `private Long status = 0L;`（MyBatis `callSettersOnNulls=false` ⇒ NULL 读成 0）⇒ 放开 NOT NULL 会让 admin 侧把 NULL 当成「活跃」。⇒ **必须与 admin 侧一起改**（见 `_shared.md` 的 admin 待裁决节） |
-| **DRIFT-USERRPC-V-003** | `extra_info` `text` ↔ `jsonb` | 🔴 **真库实证确认** | wire 层无影响（两侧都解析成 `map<string,string>`）；改 `jsonb→text` 会**破坏**已修的 `JsonbTypeHandler` / `CAST(... AS jsonb)` 一整套（§0 第 2 条已登记为跨域项）。⚠️ 需与 admin 域的 `admin_admin.extra_info` 一起判 |
+| **DRIFT-USERRPC-V-003** | `extra_info` `text` ↔ `jsonb` | ✅ **已修**（`ec33159`） | 你随后拍板「一起改成 text」。连带改 `JsonTextTypeHandler` + 去掉 2 处 CAST + 3 条守门（详见 §502）。跨域不对称随之消除 |
 | **DRIFT-USERRPC-V-011（新）** | 时间列 **DEFAULT `CURRENT_TIMESTAMP`**（Go 无 DEFAULT） | 🔴 新发现 | 两侧写入路径都**显式**写这两个列（Go 靠 GORM autoCreateTime；RAG 本轮起靠应用侧时钟）⇒ DEFAULT 只在「有人不写该列」时生效 ⇒ **当前不可观察**。⚠️ 改它要先确认 admin 域与 `users_user` 的写入路径 |
 | **DRIFT-USERRPC-V-006** | `id` 的取值来源（Go `bigserial` 序列 vs RAG `IdType.ASSIGN_ID` 雪花） | 仍成立，wire 零影响 | ⛔ 本轮**未**实测 `users_user_avatar_history.id` 到底谁胜出（`@Options(useGeneratedKeys=true)` vs `ASSIGN_ID`）。**真 PG 直查即可关闭**，本轮时间预算用完，见 §6 |
 | **DRIFT-USERRPC-V-007** | 超时的 gRPC `description` 不同（`service/common` 组件） | 仍成立 | 归属 `service/common`，不在本组件判定权内 |
@@ -1069,7 +1114,11 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | **UNRESOLVED-USERRPC-004 ②** | 启动期 Redis 不可用：Go `MustNewRedis` fail-fast vs RAG 懒连接 | 仍 unresolved | 本轮未做「停掉 Redis 再起进程」的注入实验 |
 | **UNRESOLVED-USERRPC-005** | `users_user` 建表责任交叉（user-rpc ↔ admin-rpc） | 仍 unresolved | 跨组件不变量；本轮的隔离 harness 是**单 rpc** 的，**证明不了**两 rpc 同库共存。⇒ 属 admin 会话范围 |
 
-### 5b. 跨域状态更新（2026-10-23 晚）：V-003 的「需与 admin 域一起判」已**部分落地**
+### 5b. 跨域状态更新（2026-10-23 晚）：V-003 的跨域不对称**已消除** ✅
+
+> **本节已被 §502「修复」小节取代结论**，保留全过程供追溯：
+> 下面是「admin 先改、user 未改」那个中间态的记录；最终你拍板「一起改成 text」，
+> 已由本组件在 `ec33159` 落地 ⇒ **两张表现在都是 `text`，且都与 Go 一致。**
 
 §5 写「⚠️ 需与 admin 域的 `admin_admin.extra_info` 一起判」时，两边都还是 `jsonb`。
 **此后 admin 会话单方面判了并已提交**（分支 `align/users-admin`，`c10f639` / `d7b2b45`，
@@ -1083,8 +1132,12 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | `admin_admin.extra_info` | admin | **`text`**（已改已提交） | ✅ 一致 |
 | `users_user.extra_info` | user（本组件） | **`jsonb`**（未改） | 🔴 **V-003 仍在** |
 
-⇒ 两侧列类型**现已不一致**（这正是本组件上轮向你提的那个问题）。
-本轮**未改** —— 依据是你已拍板的口径：**V-002 / V-003 / V-011 三条 DDL 一条不动，只取证写台账**。
+⇒ 两侧列类型**一度不一致**（这正是本组件上轮向你提的那个问题）。
+当时的处置依据是你已拍板的口径：**V-002 / V-003 / V-011 三条 DDL 一条不动，只取证写台账**。
+
+➡️ **后续**：取证摆上桌后（建表语句级实证 + jsonb 改写字节的 PG 实测），
+你改判为「**一起改成 text**」⇒ 本组件已在 `ec33159` 修复，见 §502。
+**⇒ 本节记录的「不对称」状态已不存在。**
 
 ⚠️ **因此这不是「本组件单方面能定」的项**：把 `users_user` 也改成 `text` 会连带
 `JsonbTypeHandler` / `CAST({0} AS jsonb)` / `UserAvatarHistoryMapper:127` /
@@ -1096,7 +1149,7 @@ admin 域拥有 `03_create_admin.sql` / `04_create_admin_invite.sql`，**四个�
 测试断言也是各域各断言自己那张表（admin 断 `admin_admin` 是 text，本域断 `users_user` 是 jsonb）。
 ⇒ **改 `users_user` 是文件级可分离的，不存在 §5.3 的共享文件冲突。**
 （本条更正由 2026-10-23 晚的跨域状态复核发现；原措辞把「同目录」误当成「同文件」。）
-⇒ **需你在三个选项里裁定**（见本轮回复正文）。
+~~⇒ 需你在三个选项里裁定。~~ **已裁定：改成 text（`ec33159`）。**
 
 ### 6. 本轮没做成 / 没验的事（诚实边界）
 
