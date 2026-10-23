@@ -67,3 +67,17 @@
    ③ RAG 代码里 `pb.` 硬编码**零命中**（唯二命中是描述 Go 侧命名的 javadoc）。
    ⇒ 改包名后实测 **108 例测试全绿**（`like-api` 62 + `like-rpc` 46，含**真实 in-process gRPC 往返** 3 例）。
    ⚠️ **唯一失效面**：跨栈 gRPC 互调（Go like-rpc ⇄ RAG like-rpc）—— 当前不存在这种调用。
+
+---
+
+## SD-2026-10-23-04 / -05（proto `package` 归一）
+
+> 从 AGENTS.md §〇 搬出。
+
+⚠️ **2026-10-23 12:25 新增第 4 条**（`SD-2026-10-23-04`）—— `comment` 域 proto `package` 归一为 `comment`
+   （Go 为遗留名 `pb`）⇒ **gRPC 方法路径前缀不同**（wire 层可见），当前该域 api/rpc 皆空壳故**无实际影响**，
+   **实现该域时必须显式处理** ⇒ [`docs/Intentional_Deviations/comment/proto.md`](../../docs/Intentional_Deviations/comment/proto.md)。
+   ⚠️ **同日追加第 5 条**（`SD-2026-10-23-05`）—— `like` 域 proto `package` 同样归一为 `like`；
+   该域**已实现**但实测**影响面为零**（仓内自产自销 + 对拍探针不走 gRPC 服务名 + `pb.` 硬编码零命中），
+   改包名后 **108 例测试全绿** ⇒ [`docs/Intentional_Deviations/like/proto.md`](../../docs/Intentional_Deviations/like/proto.md)。
+   ⇒ 两条合起来的效果：**RAG 侧 10 个 proto 的 `package` 全部与域名一致，仓内不再有 `pb` 遗留名**。

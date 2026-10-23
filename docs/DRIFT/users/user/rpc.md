@@ -552,7 +552,7 @@ RAG 多一层 properties。**该条不重开。**
 **指向同一张表 `users_user`**，不是 4 张表 4 列。
 
 ⚠️ **原台账「改动三部分」的第 3 部分（3 处格式化）经复核归因错误**，详见
-[`_shared.md` 的同名小节](_shared.md)：`AvatarDomainService` 格式化的是**头像历史表**的实体，
+[`_shared.md` 的同名小节](../_shared.md)：`AvatarDomainService` 格式化的是**头像历史表**的实体，
 `UserApiSupport:69` 只是 proto 字符串透传、根本不是格式化点。
 ⇒ **`users_user` 的时间值不进任何 wire 字段**，本轮改动**无可观察差异**，
 是纯 schema / 类型层对齐。**别把「已修」读成「wire 已对齐」。**

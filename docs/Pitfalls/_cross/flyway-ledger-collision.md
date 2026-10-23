@@ -1,7 +1,7 @@
 # 🔴 Pitfall：多个服务共用同一个 PG schema 时，Flyway 账本必然撞号
 
 > **归档时间**：2026-10-23 · **性质**：跨模块基础设施坑（影响 `message-rpc` / `like-rpc` / `article-rpc`）
-> **决策记录**：AGENTS.md §6.3 问题 4 · **状态**：**配置层已修**（2026-10-23 实测 `EXIT=0`），**运行时验证仍缺 ⇒ 记 `UNKNOWN`**
+> **决策记录**：AGENTS.md §6.3 问题 4 · **状态**：**配置层 + 运行时均已闭环**（2026-10-23 实测）；⚠️ **「三模块同库共存」仍记 `unresolved`**
 > **守门**：`tools/difftest/check-flyway-ledger.py`（由 `EXIT=1` 转 `EXIT=0`）
 
 ## 一句话
@@ -103,9 +103,10 @@ spring:
   message/like 已各自让开 ⇒ 三本账互不共享。
   代价是 article 的表名仍是默认值，**将来新增第 4 个模块若忘加 `table` 就会直接撞上 article**。
 - **守门脚本转绿**：`check-flyway-ledger.py` 由 `EXIT=1` → **`EXIT=0`**（同组三本账表名两两不同）。
-- ❌ **运行时验证仍未做 ⇒ 按 AGENTS.md §3.3 记 `UNKNOWN`，不得写成「已修复」**：
-  静态脚本只证明**声明层**不撞，不证明 Flyway 运行时真的按 `spring.flyway.table` 建账本。
-  真正的证明需要**真 PG 上 message-rpc 与 like-rpc 对启动**。
+- ✅ **运行时已确证（2026-10-23 实测，`UNKNOWN` 可关闭）**：`message-rpc` 启动日志出现
+  `Creating Schema History table "public"."flyway_schema_history_message"`；`like-rpc` 真 PG 启动
+  **已建出** `flyway_schema_history_like` + 5 张表 ⇒ 静态脚本 + 启动日志 + 真 PG 三重证据。
+- ⚠️ **仍未闭环的是「三模块同库共存」**：单模块各自确证 **≠** 三本账能同时跑，该项记 `unresolved`。
 - ⚠️ **文档缺陷**：多处文档声称运行时那一条「由各模块的 `FlywayLedgerIsolationTest` 负责」，
   **该测试类全仓不存在**（`grep -r FlywayLedgerIsolationTest` 只命中文档自身）
   —— 又一条「文件已写」型未核实断言。真要闭环：要么真写这个测试，要么改掉这句声明。
