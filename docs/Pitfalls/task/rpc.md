@@ -646,3 +646,82 @@ Caused by: java.net.BindException: Address already in use
 3. ⇒ 本条已固化进
    [`tools/difftest/run-task-http-parity.sh`](../../../tools/difftest/run-task-http-parity.sh)
    的注释与函数里（`wait_port_free` / `wait_port_listen`）。
+
+---
+
+## ⚠️ PITFALL-TASK-RPC-15·补 · bash 的 `$var` 紧跟多字节字符：**实测规则**（本轮又踩了一次）
+
+> 补充 2026-10-24：这条写完的**当天**又踩了一次（写 Nacos 对拍脚本时），
+> 而且踩的还是同一种 ⇒ 值得把规则说准。
+
+### 实测规则（macOS 自带 bash 3.2.57）
+
+| 场景 | 行为 |
+|---|---|
+| `set -u` **开** | 🔴 **硬失败**：`xxx?: unbound variable`（变量名被并上了多字节字符的首字节） |
+| `set -u` **关** | ⚠️ **静默展开成空串**（该多字节字符的首字节被吞掉，后面几个字节照原样输出 ⇒ 屏幕上是乱码） |
+
+实测：
+```bash
+a=1; echo "$a（后面"      # ⇒ "??后面"（`（` 的首字节被吞，后两个字节成了乱码）
+NACOS_NAME=xyz; echo "$NACOS_NAME，"   # ⇒ "??"
+```
+⇒ **不是「显示损坏」那么轻**：`set -u` 下是硬失败，没有 `set -u` 时**变量直接变成空串**。
+
+### 为什么会漏掉
+
+**同样的写法在同一个文件里可能一处没事、一处有事** ——
+取决于紧跟的是哪个多字节字符、以及**前面有没有别的 `$var`**：
+本轮既有脚本 `run.sh` 里就有两处同款潜伏 bug（`$a（…`、`$j，…`），
+都在**错误分支**上（平时走不到）⇒ 一直没暴露。
+
+### 教训
+
+1. **凡是多字节字符（中文/全角标点）紧跟 `$var`，一律写 `${var}`。**
+2. ⇒ 扫描用正则（**排除注释行**）：
+   ```bash
+   grep -nP '\$[A-Za-z_][A-Za-z0-9_]*(?=[^\x00-\x7f])' tools/difftest/*.sh
+   ```
+   本轮用它扫出 4 处（自己新写的）+ 2 处（既有 `run.sh`）⇒ **既有那两处也一并修了**
+   （`run.sh` 有 `set -euo pipefail` ⇒ 那两条错误分支是**硬失败**）。
+
+---
+
+## 🔴 PITFALL-TASK-RPC-17 · Nacos 2.x 客户端按「HTTP 端口 + 1000」推算 gRPC 端口 ⇒ 映射错了会让**整个应用起不来**
+
+### 现象
+
+把 `task-api` 注册到真 Nacos 时，**应用启动失败**：
+
+```
+ERROR c.a.c.n.registry.NacosServiceRegistry : nacos registry, task-api register failed...
+ErrCode:-401, ErrMsg:Client not connected, current status:STARTING
+...
+Caused by: java.lang.IllegalStateException: Application run failed
+```
+
+### 根因
+
+Nacos **2.x 的客户端用 gRPC 注册**（nacos-client 3.x 的 `NamingGrpcClientProxy`），
+而它**按「HTTP 端口 + 1000」推算 gRPC 端口** ⇒ 宿主机必须把
+`HTTP端口+1000` 映射到容器的 `9848`。
+
+本轮把 HTTP 映射到 `49849`、gRPC 映射到 `50949`（随手写的）⇒
+客户端去找 `49849+1000 = 50849` ⇒ 连不上 ⇒ 注册失败；
+又因为 `failFast=true` ⇒ **整个 ApplicationContext 启动失败**。
+
+### 为什么这个坑贵
+
+**症状是「app 起不来」，病根是「端口映射少算了一个 1000」** ——
+中间还隔着「注册失败」这层 ⇒ 极易误判成
+「Nacos 版本不对」「客户端与服务端 gRPC 版本不兼容」「网络不通」。
+
+### 教训
+
+1. **Nacos 2.x 的宿主机端口映射必须是 `HTTP` 与 `HTTP+1000` 两条**，
+   且 gRPC 那条**不能随手填**。
+2. ⇒ 已在
+   [`tools/difftest/run-task-nacos-discovery.sh`](../../../tools/difftest/run-task-nacos-discovery.sh)
+   的变量定义处写死注释（NACOS_GRPC=NACOS_HTTP+1000，不能乱填）。
+3. ⚠️ 附带一条：**Nacos 的 readiness 端点返回 `OK`，不是 `UP`** ——
+   探针写 `grep -q UP` 会永远等不到（实测空转 120 秒才失败）。

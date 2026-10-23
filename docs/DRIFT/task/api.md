@@ -25,7 +25,7 @@
 | 已修 | **3 条**（DRIFT-TASK-API-001 端口 / -002 `Go:` 行号引用失准 / **-003 Content-Type 无关性**） |
 | 对拍新发现 | **1 条 OBSERVABLE DIFFERENCE**（DRIFT-TASK-API-003）⇒ **2026-10-24 已修**，见 §六 |
 | 未修 | 0 条语义漂移（余 1 条**全域共性** DRIFT-TASK-API-004，按 §三·三 不在本域单独修） |
-| 证据强度 | ✅✅ **双侧活体对拍**（2026-10-24 重跑，44 条）· ✅✅ **真 Tomcat 守门**（`TaskApiContentTypeTest` 12 条 + 变异测试）· ✅ 真实 MVC 管线（MockMvc，20 条）· ⚠️ gRPC 边界在单测里是 mock |
+| 证据强度 | ✅✅ **双侧活体对拍**（2026-10-24 重跑，44 条 MATCH 44/DIFF 0）· ✅✅ **真 Tomcat 守门**（`TaskApiContentTypeTest` 12 条 + 变异测试）· ✅✅ **Nacos 真注册中心**（2026-10-24，注册/注销实测，见 §四·六）· ✅ 真实 MVC 管线（MockMvc，20 条）· ⚠️ gRPC 边界在单测里是 mock |
 | 对拍结果 | **44 用例：MATCH 44 / DIFF 0**（判定口径：状态码 + **归一后**的 Content-Type 媒体类型 + nosniff + 响应体逐字节） |
 | 测试 | **90 tests / 0 failures / 0 errors / 0 skipped**（task-api；原 78 + 新增 12） |
 
@@ -240,7 +240,7 @@ RAG 侧 Spring 会对 `form-urlencoded` 的 POST body **参数化重建**，对 
 ## 四、待办
 
 1. ~~跑 `tools/difftest/check-plaintext400-headers.sh` 覆盖 task-api~~ ⇒ **2026-10-24 已做**（见 §三·3）。
-2. `task-api` 的 `NacosDiscovery` 在真注册中心下的注册/注销行为未验（当前测试指向不可达地址绕过）。
+2. ~~`task-api` 的 `NacosDiscovery` 在真注册中心下的注册/注销行为未验~~ ⇒ **2026-10-24 已验**（见 §四·六）。
 3. ~~**DRIFT-TASK-API-003 的彻底修法**~~ ⇒ **2026-10-24 已修**（见 §六）。
 4. **跨域闭环对拍**：「Kafka 写入 → `task-api` 读到」——
    注意两侧的读写 Redis key **本来就不一致**（见 `TaskRedisKeys` 类注释），
@@ -249,6 +249,49 @@ RAG 侧 Spring 会对 `form-urlencoded` 的 POST body **参数化重建**，对 
    **全域共性**（article/hot/like/message/task 五域同样记着），
    **不在本域单独修**（单独改会造成「本域与其它域不一致」）。
    本轮已把对拍脚本的判定口径改成「归一后比媒体类型」，让这条共性**不再淹没真差异**。
+
+---
+
+## 四·六、NacosDiscovery 真注册中心行为（2026-10-24 实测）
+
+**性质**：AGENTS.md §3.3「框架机制要运行证据」——
+此前 `task-api` 的注册/注销路径**从没跑过**：所有测试都是
+`spring.cloud.nacos.discovery.register-enabled=false` 或指向不可达地址
+⇒ **装配层被整体关掉**。
+
+**做法**：起一个**独立**的 Nacos 容器（`taskprobe-nacos`，HTTP `:49849` / gRPC `:50849`），
+把 `task-api` 真注册上去，再用 Nacos open API 查注册表。
+
+⚠️ **为什么自己起一个**：本机已有 `Sea-nacos`（Sea 栈的，**不许动**）
+与 `nacos-standalone`（用户自己的开发实例）⇒ 往用户的实例里注册测试实例是**对用户环境的副作用**。
+
+**结果（`EXIT=0`）**：
+
+| 步骤 | 期望 | 实测 |
+|---|---|---|
+| 起 `task-api`（`register-enabled=true`） | 注册表出现自己的实例 | ✅ **第 3s** 查到：`ip=192.168.43.239 port=58887 healthy=true enabled=true ephemeral=true clusterName=DEFAULT`，`metadata` 里带 `preserved.register.source=SPRING_CLOUD` |
+| 停进程 | 实例从注册表**消失**（不留幽灵） | ✅ **第 1s** 就消失了（`hosts: []`） |
+
+⇒ **注册与注销都符合预期**，且注销是**即时的**（不靠心跳超时）。
+
+**复现**：
+```bash
+./tools/difftest/run-task-nacos-discovery.sh
+```
+
+#### 🔴 本轮实测踩到的两个「症状离病根很远」的坑
+
+1. **Nacos 2.x 的客户端按「HTTP 端口 + 1000」推算 gRPC 端口**
+   （nacos-client 3.x 的 `NamingGrpcClientProxy` 连的就是这个端口）。
+   ⇒ 宿主机映射必须用 `49849+1000 = 50849`；我第一次映射成 `50949` ⇒
+   客户端连不上 ⇒ 注册报 **`ErrCode:-401 Client not connected, current status:STARTING`**
+   ⇒ 而且 `failFast=true` ⇒ **整个应用启动失败**。
+   ⇒ 症状是「app 起不来」，病根却在**端口映射**上。
+2. **Nacos 的 readiness 端点返回的是 `OK`，不是 `UP`**
+   ⇒ 探针里写 `grep -q UP` 会永远等不到（本轮实测空转 120 秒）。
+
+⇒ 这两条已写进
+[`tools/difftest/run-task-nacos-discovery.sh`](../../../tools/difftest/run-task-nacos-discovery.sh) 的注释里。
 
 ---
 

@@ -8,8 +8,8 @@
 
 | 组件 | 台账 | 最新结论 | 证据强度 |
 |---|---|---|---|
-| `task-rpc` | [`rpc.md`](./rpc.md) | 🔴 NOT EQUIVALENT · 已修 **5** 条 | ✅✅✅ Kafka 端到端活体对拍 · ✅✅ gRPC 单组件对拍 · ✅ 真启动 + 真 PG 16 + 真 Redis |
-| `task-api` | [`api.md`](./api.md) | ✅ **EQUIVALENT** · 已修 **3** 条 | ✅✅ 双侧活体对拍（44 条，MATCH 44/DIFF 0）· ✅✅ 真 Tomcat 守门（12 条 + 变异测试）· ✅ 真实 MVC 管线（MockMvc，20 条）· ⚠️ gRPC 边界在单测里是 mock |
+| `task-rpc` | [`rpc.md`](./rpc.md) | 🔴 NOT EQUIVALENT · 已修 **5** 条 | ✅✅✅ Kafka 端到端活体对拍 · ✅✅✅ Kafka 畸形消息活体对拍（五个用例）· ✅✅ gRPC 双向跨语言对拍 · ✅ 真启动 + 真 PG 16 + 真 Redis |
+| `task-api` | [`api.md`](./api.md) | ✅ **EQUIVALENT** · 已修 **3** 条 | ✅✅ 双侧活体对拍（44 条，MATCH 44/DIFF 0）· ✅✅ 真 Tomcat 守门（12 条 + 变异测试）· ✅✅ Nacos 真注册中心（注册/注销实测）· ✅ 真实 MVC 管线（MockMvc，20 条）· ⚠️ gRPC 边界在单测里是 mock |
 | `task-proto` | [`proto.md`](./proto.md) | ✅ 一致（消费方式本轮首次核对） | ✅ 双侧静态 diff（`check-proto-static.sh` EXIT=0）+ 真构建 |
 
 **task 域没有 `-common`** —— Go 侧 `service/task` 下只有 `api` 与 `rpc`，**不是遗漏**。
@@ -42,13 +42,36 @@
 | `e378114` | **HTTP 侧双侧活体对拍一键编排入仓**（`run-task-http-parity.sh`）+ `parity-task.py` 三处改造（补上一直没实现的「不带 Content-Type」用例 / 有 DIFF 返回非零 / 按媒体类型归一后判定）⇒ **44 条 MATCH 44 / DIFF 0** |
 | `37486c0` | 三个静态守门脚本扩到 task 域：`check-proto-static.sh`（EXIT=0）、`check-ddl-static.py`（11 列逐字一致）、`check-plaintext400-headers.sh`（task 段三条断言全过） |
 | `a4d772c` | 台账：API-003 收口 + **推翻上一版的根因误判** + 5 条新踩坑（11~15） |
+| `243b5e5` | **gRPC 跨语言互调** —— Go 客户端 → 两端服务端（补齐第二个跨语言方向；用真源**自己生成**的桩，真源零写入）⇒ 7/7 一致 |
+| `ca37b4e` | **Kafka 畸形消息活体对拍**（五个用例，两侧完全一致）⇒ 并**推翻本仓 javadoc 里一条错误断言**（「Go 会被 kafka-go 的自动提交抵消」—— kafka-go 用 `FetchMessage` 时自动提交不生效） |
+| `8d89170` | **编排脚本**：pkill 后只 sleep 2 ⇒ 新进程抢不到端口，症状却是「api 503」⇒ 改成轮询等端口释放 / 等端口监听 |
+| `a50b6cb` | 台账：rpc.md 加 §四·五（跨语言 gRPC + 畸形消息活体对拍）+ 证据边界与待办更新 |
+| `546457b` | **Nacos 真注册中心对拍**（注册 → 注销，EXIT=0）+ 修既有 `run.sh` 里 2 处同款潜伏 bug（`$var` 紧跟多字节字符） |
+| `（本次）` | 台账：api.md 加 §四·六（Nacos 证据）+ Pitfalls 15·补 / 17 + 本 README |
 
 **最终测试**：`task-api` **90**（含新增 12 条真 Tomcat）/ `task-rpc` **90**（含 15 条真 PG + **9 条真 Redis**）/ `common` **146**
 ⇒ **326 条全部 0 failures / 0 errors / 0 skipped**。
 
 **静态守门**：`check-proto-static.sh` EXIT=0 · `check-ddl-static.py --domain task` EXIT=0（11 列 0 差异）· `check-plaintext400-headers.sh` EXIT=0。
 
-**活体对拍**：`parity-task.py` 44 条 **MATCH 44 / DIFF 0**（`EXIT=0`）· `parity-task-kafka.py` 最终态完全一致（`EXIT=0`）。
+**活体对拍**：`parity-task.py` 44 条 **MATCH 44 / DIFF 0**（`EXIT=0`）· `parity-task-kafka.py` 最终态完全一致（`EXIT=0`）·
+`run-task-kafka-malformed.sh` 五个畸形消息用例两侧一致（`EXIT=0`）·
+`run-task-grpc-xlang.sh` 跨语言 7/7 一致（`EXIT=0`）· `run-task-nacos-discovery.sh` 注册/注销符合预期（`EXIT=0`）。
+
+### 「验证未知」10 条的完成情况
+
+| # | 项 | 状态 |
+|---|---|---|
+| 1 | `check-proto-static.sh` 扩 task | ✅ 完成（EXIT=0） |
+| 2 | `check-ddl-static.py` 扩 task | ✅ 完成（11 列 0 差异，EXIT=0）；顺带补上 NOT NULL/DEFAULT 对照 |
+| 3 | `check-plaintext400-headers.sh` 覆盖 task-api | ✅ 完成（EXIT=0） |
+| 4 | API-003 彻底修法 | ✅ 完成（`364d8c3`） |
+| 5 | Go↔RAG 跨语言 gRPC 互调 | ✅ 完成（`243b5e5`，Go 客户端 → 两端服务端） |
+| 6 | Kafka 畸形消息活体对拍 | ✅ 完成（`ca37b4e`，五个用例） |
+| 7 | NacosDiscovery 真注册中心行为 | ✅ 完成（Nacos 注册 → 注销） |
+| 8 | 「Kafka 写入 → task-api 读到」闭环 | ⚠️ **不做** —— 两侧读写 Redis key **本来就不一致**（Go 侧也读不到自己写的缓存）⇒ 不是 RAG 的缺陷 |
+| 9 | `parity-task-kafka.py` 纳入 CI | ⚠️ **未做** —— 要用 Testcontainers 改造**共享**构建基建，范围超出 task 域，需与其它域协调 |
+| 10 | `task:goka:count:*` 保留策略 | ⚠️ **未做** —— 要给 Redis key 加 TTL/清理策略是**新增行为**，按 AGENTS.md 需单独拍板 |
 
 ## 读本域台账前必读
 
@@ -78,6 +101,7 @@
 | `check-proto-static.sh` | 加 task 域 + 退出码改成有差异返回 1 | users/admin 的判定内容不变；**退出码语义变了**（原先恒 0） |
 | `check-ddl-static.py` | 改 `--domain` 参数化 + 加 NOT NULL/DEFAULT 对照 + 排除 Flyway 账本表 | users 域默认参数与原有输出**不变**（多一节补充对照） |
 | `check-plaintext400-headers.sh` | 加 task 域 + 端口不可达判 SKIP | user 域的判定与默认值**不变** |
+| `run.sh` | **修 2 处既有潜伏 bug**（`$var` 紧跟多字节字符 ⇒ `set -u` 下硬失败） | 只改了 2 个错误分支的 echo 文案，判定逻辑不变 |
 | `parity-task.py` | task 域私有脚本 | 无 |
 
 ⇒ 合并时若其它域也在改这三个文件，需要人工合。
