@@ -19,6 +19,25 @@
 #    —— 那是**宿主机**的端口，在容器自己的 netns 里没人监听 ⇒ 永远连不上。
 #    ⇒ 容器内一律用 `--bootstrap-server localhost:19092`。
 #    （宿主机上的 Go / RAG 客户端不受影响：宿主机视角 59992 → 容器 9092 是通的。）
+# ⚠️⚠️ `name:` 不是装饰 —— 它是**项目名**，缺了会误删别的域的容器（2026-10-24 实测踩到）
+#
+# docker compose 的**项目名默认从 compose 文件所在目录名推导**。
+# 本文件在 `tools/difftest/` ⇒ 目录名 `difftest` ⇒ 项目名就是 `difftest`
+# ⇒ 与**同目录**的 user 域基建 `tools/difftest/docker-compose.yml`
+#    （容器 `difftest-postgres` / `difftest-redis`）**撞成同一个 project**。
+#
+# 实测后果（2026-10-24 本轮踩到）：
+#   `docker compose -f tools/difftest/docker-compose.task-kafka.yml up -d`
+#   ⇒ compose 把 user 域那两个容器判成「同 project 的同名服务」⇒ **Recreate**
+#      （= 删掉重建）⇒ user 域的基建容器当场消失。
+#   `down -v` 更狠 ⇒ 还会连带删掉 user 域的**数据卷**。
+#   （两个方向的脚本都会中招：user 域的 `run.sh` 也会把 taskprobe 的容器/卷删掉。）
+#
+# ⇒ 这里显式声明 `name: taskprobe` ⇒ 项目名与 user 域彻底分开，
+#    两个方向的 `up` / `down -v` / `rm` 都只影响自己的 project。
+# ⇒ **改动本文件时不要删掉这一行**；新增 task 域的 compose 文件也必须带独立 `name:`。
+name: taskprobe
+
 services:
   postgres:
     image: postgres:16-alpine
