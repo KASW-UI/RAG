@@ -130,6 +130,9 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | **D15** | 运行时 JSON **字段顺序**与 Go 声明序不同（裸 mapper 测不出来） | OBSERVABLE DIFFERENCE | 🟡 已知取舍，需登记 |
 | **D16** | **业务错误日志的级别 / 字段集 / `error_reason` 形态**与 Go 不同（nil 响应分支最严重：Go 是 **error 级 + 9 字段**，RAG 是 **info 级 + 0 字段**） | OBSERVABLE DIFFERENCE | ✅ **已修**（2026-10-24 第四轮 ⇒ `DRIFT-HOTAPI-016`；3 条变异全红） |
 | **D17** | 下游 gRPC 调用失败时，日志 `error_reason` 是**各自 gRPC 库**的形态（grpc-go `"rpc error: code = Unavailable desc = …"` vs grpc-java `"UNAVAILABLE: …"`，**code 名大小写都不同**） | OBSERVABLE DIFFERENCE | 🆕 **待签字**（**库层**差异 ⇒ 建议「不复刻」） |
+| **D18** | Prometheus `_bucket{le=}` 边界序列：Go **12 个**（`DefBuckets` 11 + `+Inf`）vs RAG **80 个**（`publishPercentileHistogram()` 塞进了 69 个 exponential 边界） | OBSERVABLE DIFFERENCE | ✅ **已修**（2026-10-24 第四轮 ⇒ `DRIFT-HOTAPI-018`；去掉 `publishPercentileHistogram()`；3 条变异全红） |
+| **D19** | Prometheus 全局标签 `application="hot-api"`（Go 的默认 registry **无**此标签） | OBSERVABLE DIFFERENCE | 🆕 **待决策**（**全仓约定**，跨域 ⇒ hot 域无权单改 ⇒ `DRIFT-HOTAPI-019`） |
+| **D20** | hot-api **注册到 Nacos**（Go 侧 hot-api **完全不注册**）⇒ 且实测「Nacos 不可达 ⇒ 整个进程起不来」 | OBSERVABLE DIFFERENCE | 🆕 **待决策**（**部署面** ⇒ `DRIFT-HOTAPI-020`） |
 
 ---
 
@@ -687,12 +690,12 @@ Recommended Verification:
 | **U3** | 客户端断连是否真产出 499，且 gRPC 真的被取消？ | `http.go:84-86` `errors.Is(Canceled)`→499 | `HttpMiddleware:332` IOException→499 | 静态两侧一致，但 Servlet 断连**不会**自动取消在飞的阻塞 gRPC（D3 已留痕） | curl `--max-time 0.5` 撞慢下游，抓 499 + PG/服务端观察 gRPC 是否被取消 |
 | **U4** | client breaker 是否真在链上并会因超时打开？ | `zrpc/internal/client.go:112-113` + `breakerinterceptor.go:16-18` | 依赖「扫到 `com.rag.common`」+ `@GrpcGlobalClientInterceptor` | §3.3：**注解存在 ≠ 生效**（D8） | 装配层断言拦截器真进了 channel 的 interceptor 列表 + 连续 N 次失败后观察 breaker 打开 |
 | **U5** | 保护层四闸（MaxConns/MaxBytes/CpuShedding/Breaker）真触发？ | `rest/config.go:12-22,52-56` tag 默认 | `rag.protection.*`（静态同值） | 未构造超限请求（D9） | 并发 10001 连接 / 发送 >1 MiB body / CPU 打满，各观察裸状态码 |
-| **U6** | 404 / 405 在**真 Tomcat** 下的响应头与 body 是否逐字节同？ | `http.Error` 四行（server.go:2337-2356） | MockMvc 实测：`404 page not found\n` + text/plain + nosniff；405 无 body | **MockMvc 不走真容器**；`HttpMiddleware:664-678` 的注释自己就记着一次「MockMvc 全绿、真 Tomcat 丢 Content-Type」的教训 | 真起 Tomcat，`curl -sv` 抓完整响应头（含 `Content-Length` / `Transfer-Encoding` / `Connection`） |
+| **U6** | 404 / 405 在**真 Tomcat** 下的响应头与 body 是否逐字节同？ | `http.Error` 四行（server.go:2337-2356） | MockMvc 实测：`404 page not found\n` + text/plain + nosniff；405 无 body | ✅ **已闭合（第四轮）**：**真 Tomcat**（`RANDOM_PORT` + JDK `HttpClient`）⇒ 404 = `404 page not found\n` + `text/plain` + **`nosniff`**；405 = 裸状态码 + `Allow`、**无 body** | ✅ 已完成（`HotApiRealTomcatGateTest` 的 `#notFoundIsBareGoStyleResponse` / `#methodNotAllowedIsBareStatusCode`） |
 | **U7** | `TopK=100` 被 hot-rpc 如何解释？items 是否按热度降序？ | `logic:62-64` 硬编码 100；`hot.proto:10` 注释「默认 20，最大 100」 | `HotRpcClient:63` 硬编码 100 | **本轮按简报要求未假设对端 rpc 正确**；这属 hot-rpc 组件 | **必须与 [`hot/rpc.md`](rpc.md) 合并判读**：确认 hot-rpc 是否 clamp 到 100、是否排序、是否分页 |
-| **U8** | percent-encoding 在真 Tomcat 下的绑定值 | `url.ParseQuery` 解 `%2B`→`+` ⇒ 5 | MockMvc **不解码**（`%2B5` 原样传入）；但 `.param("page","+5")` ⇒ 5 | 两个原因叠加：① 测试夹具不解码；② `Integer.parseInt("+5")` 与 `strconv.ParseInt("+5")` **都接受前导 +** ⇒ 真 Tomcat 下**预期等价** | 真 Tomcat 下 `curl '/hot/v1/articles?page=%2B5'` 与 `?page=%20 5` 各一条；**不要**据 MockMvc 结果去「修」`GoFormValues`（见 Pitfall P4） |
+| **U8** | percent-encoding 在真 Tomcat 下的绑定值 | `url.ParseQuery` 解 `%2B`→`+` ⇒ 5 | MockMvc **不解码**（`%2B5` 原样传入）；但 `.param("page","+5")` ⇒ 5 | ✅ **已闭合（第四轮）**：**真 Tomcat** 下 `%2B5` ⇒ 解码成 `+5` ⇒ `Integer.parseInt("+5")` 接受前导 `+` ⇒ **`page=5`**，与 Go 的 `strconv.ParseInt("+5")` **等价**（两侧都接受前导 `+`）⇒ **不需要改 `GoFormValues`**（见 Pitfall P4） | ✅ 已完成（`HotApiRealTomcatGateTest#percentEncodedPlusIsDecodedAndAccepted`） |
 | **U9** | 59 条测试是否假绿？ | — | 本轮**间接证实过一处**：DRIFT-HOTAPI-015-B 的裸 mapper 让字段序测试永久无效 | 未做系统变异（D2） | 对 `HotRankPaginator` / `GlobalResponseAdvice` / `GoFormValues` 做定向变异；并把 `HotApiWireContractTest` 换成运行时 mapper 后重跑 |
 | **U10** | 极端并发下补全的延迟分布是否可比？ | Go：100 goroutine + 每请求新建 chan(8)，无池上限 | Java：每请求 Semaphore(8) + **32 共享池** + 64 队列 + `CallerRunsPolicy` | 常态窗口都是 8；**池满时 Java 会在请求线程上串行跑补全**，Go 是纯排队 | 8 并发请求 × 100 items 的压测，比 p99 而非成功率；确认没有请求被 `CallerRunsPolicy` 拖成串行 |
-| **U11** | Prometheus 实际导出形态是否同 Go | Go：`HistogramVec` 带 `_bucket{le=}` | Micrometer `publishPercentileHistogram` + `serviceLevelObjectives(GO_DEF_BUCKETS)` | 只断言了 meter 定义，未抓过 `/actuator/prometheus` | curl `/actuator/prometheus`，比 `_bucket{le}` 边界序列与 `_total_total` 命名 |
+| **U11** | Prometheus 实际导出形态是否同 Go | Go：`HistogramVec` 带 `_bucket{le=}`，边界 = `prometheus.DefBuckets`（**11 个** + `+Inf`） | Micrometer `publishPercentileHistogram` + `serviceLevelObjectives(GO_DEF_BUCKETS)` | ✅ **已闭合（第四轮）**：真 Tomcat + 真 `/actuator/prometheus` ⇒ 查出 **DRIFT-HOTAPI-018**（RAG 实测 **80** 个 `le` 边界 vs Go 的 **12**）⇒ **已修**（去掉 `publishPercentileHistogram()` ⇒ 实测回到 **12** 个、数值逐条一致）；同时**推翻**原注释「Counter 是 `hot_api_request_total_total`」⇒ 实测**两侧都是** `hot_api_request_total`（**单** `_total`），注释已订正 | ✅ 已完成（`HotApiRealTomcatGateTest` 的 3 条 U11 用例） |
 
 ## 10. 最终判定（§39 的 18 项 checklist）
 
@@ -1014,14 +1017,106 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 
 ---
 
+## DRIFT-HOTAPI-018 ✅ 已修 · OBSERVABLE DIFFERENCE · MEDIUM（指标分桶边界）
+
+- **Component**：`hot_api_request_duration_seconds` 的 Prometheus `_bucket{le=}` 边界序列
+- **Go 行为**：`metrics.go:24-29` —— `prometheus.HistogramVec{Buckets: prometheus.DefBuckets}`
+  ⇒ 导出**恰好 11 个** `le` 边界 + `+Inf` = **12 个**。
+  ⚠️ `DefBuckets` 取自**源码**：`client_golang@v1.21.1/prometheus/histogram.go:271`
+  = `{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}`。
+- **RAG 原行为**：`HotApiMetrics.observeRequest` 同时开了
+  `.publishPercentileHistogram()` + `.serviceLevelObjectives(GO_DEF_BUCKETS)`
+  ⇒ **真 Actuator 实测导出 80 个 `le` 边界**：
+  Micrometer 的 `publishPercentileHistogram()` **强制**改用它自己的 exponential percentile 桶
+  （69 个：`0.001, 0.001048576, 0.001398101, …`），把 SLO 边界只是**合并**进去。
+- **影响**：**两侧的 `histogram_quantile` 不可比** ——
+  Go 侧按 `DefBuckets` 插值、RAG 侧按另一套边界插值 ⇒ 同一个 p95 在两侧不是一个数。
+  ⚠️ 原注释声称「开了 SLO 就能可比」⇒ **实现与意图不符**（这是该修的缺陷，不是取舍）。
+- **修法**：**去掉** `.publishPercentileHistogram()`，**只留** `.serviceLevelObjectives(GO_DEF_BUCKETS)`。
+- **实测（探针逐变体对比，Micrometer 1.16.7 + `io.micrometer.prometheusmetrics`）**：
+
+  | 变体 | `le` 边界数 | 与 Go 一致？ |
+  |---|---|---|
+  | `publishPercentileHistogram()` + SLO（**修前**） | **80** | ❌ |
+  | **只 SLO（修后）** | **12**（11 + `+Inf`） | ✅ **数值逐条一致** |
+  | 只 `publishPercentileHistogram()` | 69 | ❌ |
+  | 裸 Timer | 0（只有 `_count/_sum/_max`） | ❌ |
+
+  ⇒ 「只 SLO」是**唯一**能给出 Go 那 11 个边界的配置。
+- **守门测试**：`HotApiRealTomcatGateTest#prometheusBucketBoundariesMatchGoDefBuckets`
+  （**真 Tomcat + 真 `/actuator/prometheus`**）⇒ 断言边界**数量 = 12**、**逐条数值相等**、
+  末位 = `+Inf`，并**反向断言** Micrometer 的 exponential 边界（`0.001048576` 等）**一个都不许出现**。
+- **变异验证（3 条，全部按预期变红）**：
+
+  | # | 变异 | 实测 |
+  |---|---|---|
+  | **M-P1** | 加回 `.publishPercentileHistogram()` | ✅ `Expected size: 12 but was: 80` |
+  | **M-P2** | 把一个 SLO 边界改错（10s → 20s） | ✅ `expected: 10.0 but was: 20.0` |
+  | **M-P3** | 去掉 `.serviceLevelObjectives(...)` | ✅ `Expected size: 12 but was: 0` |
+
+- ⚠️ **残留的库层差异（不修，见 DRIFT-HOTAPI-017 同族）**：
+  **文本**形态不同 —— Micrometer 写 `1.0 / 5.0 / 10.0`，client_golang 写 `1 / 5 / 10`
+  ⇒ **数值相同、文本不同** ⇒ Prometheus 的 `le` 是字符串标签，标准解析按数值处理 ⇒ 语义等价。
+
+---
+
+## DRIFT-HOTAPI-019 🆕 待决策（全仓级）· OBSERVABLE DIFFERENCE · LOW
+
+- **Component**：Prometheus 全局标签 `application="hot-api"`
+- **Go 行为**：`prometheus.MustRegister(...)` 注册到**默认 registry** ⇒ **无任何全局标签**。
+- **RAG 行为**：`application.yml` 的 `management.metrics.tags.application: hot-api`
+  ⇒ 每个指标都多一个 `application` 标签。
+- **⚠️ 这不是 hot 域单点问题**：全仓 **article-api / article-rpc / comment-api / favorite-api /
+  favorite-rpc / task-rpc …** 都配了同一项 ⇒ 是**跨域约定** ⇒ 按 §5.3 hot 域**无权单独改**。
+- **影响**：低 —— 不改任何业务判定；但按「Go 无此标签」的字面口径，两侧的指标**标签集不同**
+  ⇒ 跨实现直接写 PromQL 会对不上（需要先 `sum by(...)` 去掉 `application`）。
+- **处置**：🆕 **待用户拍板**。两个选项：
+  1. **保持**（全仓一致）⇒ 登记为有意偏离（与 `SD-HOT-API-004` 的「暴露面单向增强」同族）；
+  2. **全仓去掉**（跨域动作，需另开一轮）⇒ 与 Go 逐字一致。
+
+---
+
+## DRIFT-HOTAPI-020 🆕 待决策 · OBSERVABLE DIFFERENCE · MEDIUM（**部署面**）
+
+- **Component**：hot-api 的**服务注册**（Nacos）
+- **Go 行为**：**完全不注册** —— `service/hot/api/` 全目录 `grep -rn "nacos\|Nacos"` **零命中**；
+  `internal/svc/serviceContext.go` 只有两个 `zrpc.MustNewClient`（hot-rpc / article-rpc），**没有任何注册中心**。
+- **RAG 行为**：pom 引了 `spring-cloud-starter-alibaba-nacos-discovery`
+  ⇒ Spring Cloud Alibaba **自动注册**到 Nacos。
+- **⚠️ 实测到的后果（可用性级别）**：`@SpringBootTest(webEnvironment = RANDOM_PORT)` 下
+  **Nacos 不可达 ⇒ 整个上下文起不来**：
+  ```
+  Caused by: ErrCode:-401, ErrMsg:Client not connected, current status:STARTING
+      at com.alibaba.nacos.client.naming.remote.gprc.NamingGrpcClientProxy.requestToServer
+  Caused by: org.springframework.context.ApplicationContextException: Failed to start bean 'webServerStartStop'
+      at com.alibaba.cloud.nacos.registry.NacosServiceRegistry.register
+  ```
+  ⇒ **注册失败 ⇒ web server 起不来 ⇒ 进程退出**。
+  ⚠️ 这与 hot-rpc 的 **DRIFT-HOTRPC-010**（注册失败 ⇒ 存活 + 健康检查 NOT_SERVING）
+  **方向相反**：hot-rpc 侧已按「保持存活」签字，hot-api 侧却是「注册失败 ⇒ 启动失败」。
+- **影响**：中等 —— 服务发现形态不同（Go 侧 hot-api 不在注册中心里），
+  且 **Nacos 抖动 ⇒ hot-api 直接起不来**（Go 侧不受影响）。
+- **处置**：🆕 **待用户拍板**。两个选项：
+  1. **对齐 Go**：`spring.cloud.nacos.discovery.enabled=false`（或去掉 starter）
+     ⇒ 不注册、注册失败也不影响启动 ⇒ 与 Go 逐字一致；
+  2. **保持 + 签字**：与 hot-rpc 同口径「注册失败 ⇒ 存活 + 健康检查 NOT_SERVING」
+     ⇒ 需**同样补**健康检查（hot-api 侧目前**没有**）。
+- ⚠️ 本轮**只登记、不擅改** —— 改 pom / 改部署形态都超出「域内漂移对齐」的范围。
+
+---
+
 ## ⚠️ 本轮**未**闭合的项（不得读成「hot-api 已完成」）
 
 | 项 | 状态 | 说明 |
 |---|---|---|
 | **端到端双侧活体对拍**（D1/U1） | ❌ 仍缺 | 本轮做的是**分层对拍**（Go 真库 `httpx.Parse` ↔ RAG 真实 MVC 管线），**两套服务同时跑**的端到端对拍仍未做 |
-| **真 Tomcat 下的响应头取证**（D14） | ❌ 仍缺 | MockMvc 测不到真实 Tomcat 的响应头（D14 本身已移交 common 域） |
 | **超时 / 保护层四闸的活体观测**（D9/U2） | ❌ 仍缺 | 仍是静态确认 |
-| **变异验证**（D2/U9） | 🟡 部分 | 本轮对**新增的 3 条修复**做了定向变异（hash 5/5、字段序 1/1、日志面 3/3）；**全组件系统变异仍未做** |
+| **变异验证**（D2/U9） | 🟡 部分 | 已对**新增的 6 条修复**做了定向变异（hash 5/5、字段序 1/1、日志面 3/3、bucket 边界 3/3）；**全组件系统变异仍未做** |
 | **端口归属**（D6） | ⏳ 待拍板 | Go `hotcenter.yaml` = 8893；`Infrastructure.md §3` 给 hot 预占 18897。当前按 18897 落 |
 | **下游 gRPC 错误串形态**（DRIFT-HOTAPI-017） | 🆕 **待签字** | 库层差异（grpc-go `"rpc error: code = Unavailable desc = …"` vs grpc-java `"UNAVAILABLE: …"`）⇒ 建议签字「不复刻」 |
+| **Prometheus 分桶边界**（DRIFT-HOTAPI-018） | ✅ **本轮已闭合** | 真 Actuator 实测：`publishPercentileHistogram()` 会塞进 69 个 exponential 边界 ⇒ 实测 80 个 vs Go 的 12 个 ⇒ **已修**，3 条变异全红 |
+| **真 Tomcat 响应头 / percent-encoding**（U6/U8/D14） | ✅ **本轮已闭合** | 真 Tomcat（RANDOM_PORT）下：404 = `404 page not found\n` + `text/plain` + `nosniff`；405 = 裸状态码 + `Allow`、无 body；`%2B5` ⇒ 解码成 `+5` ⇒ `page=5`（两侧等价）。⚠️ D14 本身仍**跨域移交** common 域（那是超时/499 路径，不是 404/405） |
+| **Prometheus 导出形态**（U11） | ✅ **本轮已闭合** | 真 `/actuator/prometheus`：Counter 名 `hot_api_request_total`（**两侧都是单 `_total`**，原注释的「双 `_total`」说法已被实测推翻并订正） |
+| **全局 `application` 标签**（DRIFT-HOTAPI-019） | 🆕 **待决策** | Go 的默认 registry 无此标签；RAG 有 ⇒ **全仓约定**（跨域）⇒ hot 域无权单改 |
+| **Nacos 服务注册**（DRIFT-HOTAPI-020） | 🆕 **待决策** | Go 侧 hot-api **完全不注册**；RAG 注册 ⇒ 且实测「Nacos 不可达 ⇒ 启动失败」 |
 | **日志面已对齐的部分** | ✅ **本轮闭合** | `DRIFT-HOTAPI-016` 已修（`CodeError.Error()` 整串 + 日志级别 + 字段集），3 条变异全红 |

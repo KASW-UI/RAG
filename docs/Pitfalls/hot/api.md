@@ -2,7 +2,7 @@
 
 > 领域：`docs/Pitfalls/hot/api.md`（教训本体）
 > 差异本体在 [`docs/DRIFT/hot/api.md`](../../DRIFT/hot/api.md)。
-> **核对日期：2026-10-23**（组件级验证第二轮）。
+> **核对日期：2026-10-24**（第四轮：日志面 / `CodeError` 对齐 + 真 Tomcat / Prometheus 导出取证）。
 > 本文件只写「为什么会踩 / 框架怎么静默失效 / 下次怎么防」，不重复记差异本身。
 
 ---
@@ -451,3 +451,52 @@ JSON 解析成树之后，**字段顺序信息被丢掉了**；
    （本仓已有先例：`like-rpc` 的 `LikeEventContracts`、`comment-rpc` 的 `CommentCacheService`）。
 3. 加一条**变异**：把 `@JsonPropertyOrder` 去掉，顺序断言**必须变红** ——
    否则你只是把「当前的字母序」固化了下来，等于把漂移锁进了测试。
+
+## P14 — 「配了 SLO 边界」不等于「导出就是那些边界」：Micrometer 的 `publishPercentileHistogram()` 会**换掉**它们
+
+**现象**
+`HotApiMetrics` 里明明写着
+
+```java
+.publishPercentileHistogram()
+.serviceLevelObjectives(GO_DEF_BUCKETS)   // GO_DEF_BUCKETS = Go 的 prometheus.DefBuckets 逐条转写
+```
+
+注释还言之凿凿：「不显式开这两个，dashboard 上的 `histogram_quantile` 在两侧不可比」。
+**结果真抓 `/actuator/prometheus` 一看，导出的是 80 个 `le` 边界**，Go 侧只有 12 个
+⇒ 两侧的 p95 **根本不是一个数**，而所有绿测试都看不出来（断言只到「meter 定义」层）。
+
+**真实原因**
+`publishPercentileHistogram()` 在 Micrometer 里不是「额外开一个直方图」，
+而是**强制把直方图换成 Micrometer 自己的 exponential percentile 桶**
+（69 个：`0.001, 0.001048576, 0.001398101, …`）。
+你给的 `serviceLevelObjectives(...)` 只是被**合并**进这套桶里，**并没有替代它**。
+
+实测四个变体（Micrometer 1.16.7 + `io.micrometer.prometheusmetrics`）：
+
+| 变体 | `le` 边界数 |
+|---|---|
+| `publishPercentileHistogram()` + SLO | **80** |
+| **只 SLO** | **12**（Go 的 11 + `+Inf`）✅ |
+| 只 `publishPercentileHistogram()` | 69 |
+| 裸 Timer | 0（只有 `_count/_sum/_max`） |
+
+⇒ **「只 SLO」才是唯一能给出 Go 那 11 个边界的配置**；
+「SLO + percentile」是**最糟**的组合（80 个）。
+
+**为什么危险**
+1. **注释与实现相反**：注释说「开了就能可比」，实现恰好开了那个让它不可比的开关
+   ⇒ **注释是「意图」，不是「事实」**，读者会照着注释相信已经对齐了。
+2. **症状只在导出层可见**：`meter` 定义、注册、记录全都正常，**零告警**。
+3. `histogram_quantile` 是**慢查询**才用到的指标 ⇒ 出问题时往往已上线很久。
+
+**怎么防**
+1. **凡是「把 A 的分桶对齐到 B」的断言，必须验**导出文本**里的边界序列**，
+   不是验「配置项写对了」。⇒ 真 `/actuator/prometheus`（或至少真 `registry.scrape()`）。
+2. 断言**数量 + 逐条数值 + 反向断言**（Micrometer 独有的 exponential 边界一个都不许出现）。
+3. 配置项之间会**互相覆盖**（本例是「开 percentile ⇒ 覆盖 SLO」）⇒
+   **组合**要逐个实测，不能各自单测都过就以为组合也对。
+4. ⚠️ **探针自己也会写错**：我第一版探针 grep 的是 `<meter>_bucket`，
+   而 Micrometer 会给 Timer 名字**自动加单位后缀**（`xxx_seconds_bucket`）
+   ⇒ 探针报「0 个 bucket」，看起来像「没生效」，实际是**探针的前缀写错了**。
+   ⇒ **探针的阴性结果也要自证**：先用「已知会有的东西」校准探针，再拿它去测未知。
