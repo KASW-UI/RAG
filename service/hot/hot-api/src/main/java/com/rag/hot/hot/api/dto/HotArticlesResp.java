@@ -1,6 +1,7 @@
 package com.rag.hot.hot.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 
 import java.util.List;
 
@@ -16,6 +17,14 @@ import java.util.List;
  *       Scope    string           `json:"scope"`
  *   }
  * </pre>
+ *
+ * <h2>⚠️ 字段顺序必须显式钉住（字节级 L1）</h2>
+ * Go 的 {@code encoding/json} 按结构体声明序输出（{@code types.go:27-33}）：
+ * {@code items, total, page, page_size, scope}。
+ * ⇒ {@link JsonPropertyOrder} 显式钉死：注解优先于
+ * {@code MapperFeature.SORT_PROPERTIES_ALPHABETICALLY} 这类全局特性，
+ * 无论运行时 mapper 怎么配，输出都等于 Go 的声明序。依据见
+ * {@link HotArticleCard} 的同名小节。
  *
  * <h2>⚠️ {@code items} 必须是空列表而不是 null（L1 字节级）</h2>
  * Go 侧 {@code getHotArticlesLogic.go:80} 是 {@code pagedItems := items[start:end]}，
@@ -36,6 +45,7 @@ import java.util.List;
  * 常量定义在同文件 {@code :30}。即 hot-rpc 当前<b>不返回</b>窗口类型，本字段恒为
  * {@code "rolling"}。将来若下游区分「滚动 / 日榜」，改动点在这里。
  */
+@JsonPropertyOrder({"items", "total", "page", "page_size", "scope"})
 public class HotArticlesResp {
 
     @JsonProperty("items")

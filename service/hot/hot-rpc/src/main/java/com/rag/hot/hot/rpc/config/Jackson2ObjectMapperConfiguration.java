@@ -71,7 +71,7 @@ public class Jackson2ObjectMapperConfiguration {
      * <pre>
      * json: cannot unmarshal number into Go struct field ArticleHotEvent.article_id of type string
      * </pre>
-     * ⇒ 两侧对<b>同一��消息</b>的判定相反：Go 侧解析失败 ⇒ 该消息被 drop；
+     * ⇒ 两侧对<b>同一条消息</b>的判定相反：Go 侧解析失败 ⇒ 该消息被 drop；
      * Java 侧解析成功 ⇒ 该消息被当成正常事件处理 ⇒ <b>方向相反的漂移</b>
      * （热榜权重会被一条本该丢弃的消息污染）。
      *

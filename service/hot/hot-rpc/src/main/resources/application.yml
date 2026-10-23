@@ -60,6 +60,22 @@ spring:
         namespace: ${NACOS_NAMESPACE:public}
         group: ${NACOS_GROUP:DEFAULT_GROUP}
 
+  # ============== 定时任务调度器（对齐 Go 的两条独立 goroutine）==============
+  # ⚠️ Boot 4 的调度器默认是**单线程**：TaskSchedulingProperties$Pool 的默认值是 1
+  #    （Boot 4.0.8 字节码：TaskSchedulingProperties$Pool.<init> → iconst_1; putfield size）。
+  #    消费点已核对：TaskSchedulingConfigurations$ThreadPoolTaskSchedulerBuilderConfiguration
+  #    → TaskSchedulingProperties.getPool().getSize() → ThreadPoolTaskSchedulerBuilder.poolSize(int)。
+  #    ⇒ 不配这一项，hot 的两条 @Scheduled 会**共用一个线程、互相排队**：
+  #      30s 快照（HotRedisSnapshotStore.periodicSync）与 10s 合并（HotMergeScheduler.periodicMerge），
+  #      合并一次要 pipeline 读 N 个分片 + 写 shadow + 跑 Lua，Redis 命令超时 3s
+  #      ⇒ 最坏情况合并会占住调度线程数秒，把 30s 快照推迟。
+  # Go 侧是两条**独立 goroutine**（hot_handler.go:76-77 `go h.periodicSync(...)` + `go h.periodicMerge(...)`），
+  # 各自的 ticker 互不影响 ⇒ 这里给 2 个线程，把「两条周期任务互不阻塞」这个语义位钉住。
+  task:
+    scheduling:
+      pool:
+        size: 2
+
 # ============== gRPC server（devh）（对应 Go ListenOn: 0.0.0.0:8083）==============
 grpc:
   server:

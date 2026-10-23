@@ -721,3 +721,159 @@ SEMANTICALLY NOT EQUIVALENT
 3. **RAG 侧证据的 mapper 依赖已暴露一次假绿（DRIFT-HOTAPI-012）。**
    凡本文件标 ✅ 的 RAG 行，均注明了**用的是哪个 mapper / 哪套上下文**；
    未注明的仍按 AGENTS.md §3.3 记 `UNKNOWN`。
+---
+
+<!-- ====================================================================================
+     ↓↓↓ 第三轮：2026-10-23 23:0x「对齐修复轮」（align/hot 分支）
+     ↑ 上方是 2026-10-23 首轮实现 + 第二轮组件级验证的历史记录，一条未删
+     ==================================================================================== -->
+
+# 第三轮：修复轮（2026-10-23）
+
+> **范围**：`service/hot/hot-api`（Go `service/hot/api/`）。
+> **分支**：`align/hot`（worktree `../RAG.worktrees/hot`），**只改 hot 域文件**。
+> **本轮性质**：把第二轮台账里 **1 条 SEMANTIC MISMATCH + 4 条 OBSERVABLE DIFFERENCE** 逐条处置。
+> **只读边界**：**Go 真源仓库零改动**；探针在 `/tmp`，直接调用 **go-zero v1.10.2 的
+> `rest/httpx.Parse`** + **逐字复制**的 `types.HotArticlesReq`。
+
+## 本轮一句话
+
+**第二轮的 `SEMANTICALLY NOT EQUIVALENT` 判定里，唯一那条 SEMANTIC MISMATCH（D11 重复 query 参数）
+已修；4 条 OBSERVABLE DIFFERENCE 里 3 条已修（D12 / D13 / D15），1 条（D14 缺 nosniff）
+归 **common 域**、本域无权改，已登记移交。**
+
+## 逐条处置
+
+| ID | 上一轮判定 | 本轮处置 | 证据 |
+|---|---|---|---|
+| **DRIFT-HOTAPI-011** | 🔴 SEMANTIC MISMATCH | ✅ **已修** | Go 活体探针 + 真实 MVC 管线 4 例 |
+| **DRIFT-HOTAPI-012** | ⚠️ 证据缺口（测试永久无效） | ✅ **已补** | 新增 `HotApiGoWireOrderTest`（真实上下文 + 原始字节） |
+| **DRIFT-HOTAPI-013** | 🟠 OBSERVABLE DIFFERENCE | ✅ **已修** | Go 活体探针 + 真实 MVC 管线 2 例 |
+| **DRIFT-HOTAPI-014** | 🟡 OBSERVABLE DIFFERENCE | 🔁 **跨域移交 common 域** | 本域无权改（代码在 `service/common`） |
+| **DRIFT-HOTAPI-015** | 🟡 OBSERVABLE DIFFERENCE | ✅ **已修** | `@JsonPropertyOrder` + 真实运行时断言 + 变异变红 |
+
+---
+
+## DRIFT-HOTAPI-011 ✅ 已修 · SEMANTIC MISMATCH · MEDIUM
+
+- **Go 行为（权威取证，非推测）**：go-zero v1.10.2
+  - `rest/httpx/util.go:60` — 同名多值收进一个 `[]string`；
+  - `rest/httpx/requests.go:27-31` — `formUnmarshaler` 带 `mapping.WithFromArray()`；
+  - `core/mapping/unmarshaler.go:835-846` — 非 slice 字段且值是数组 ⇒ **`val.Index(0)`**（取首值）。
+- **Go 活体探针实测**（`httpx.Parse` + 逐字复制的 `types.HotArticlesReq`）：
+
+  | 输入 | Go | RAG 修前 | RAG 修后 |
+  |---|---|---|---|
+  | `?page=5&page=3` | **page=5** | 🔴 5001（`"5,3"` 拼串后 parseInt 失败） | ✅ page=5 |
+  | `?page[]=5&page[]=9` | **page=5** | 🔴 5001 | ✅ page=5 |
+  | `?page=5&page=` | **page=5** | ✅ page=5 | ✅ page=5 |
+  | `?page=1,2` | **5001**（`strconv.ParseInt("1,2")` 失败，不做逗号拆分） | ✅ 5001 | ✅ 5001 |
+
+- **RAG 修法**：`HotArticleController` **不再用 `@RequestParam`**，改为
+  `GoFormValues.firstFormValue(request, name)` → `request.getParameterValues(name)` 取**第 0 个**非空值，
+  并额外支持 Go 的 **`[]` 数组记法后缀**（`httpx/util.go:59-61` 剥掉后缀后归到同名 key）。
+- **守门测试**：`HotApiGoParseParityTest` 4 例（真实 Boot 上下文 + MockMvc）。
+
+### ⚠️ 本轮发现的一条 **Go 侧非确定性**（新增观察，非 RAG 缺陷）
+
+`?page=1&page[]=2` 这种**同名 + 带后缀混用**时，Go 的 `GetFormValues` 会把两个 key
+都写进同一个 `params["page"]`（后者**覆盖**前者），而 `r.Form` 是 map ⇒ **遍历序随机**
+⇒ Go 的结果在 `page=1` / `page=2` 之间**随机**（实测 8 次：6 次 2、2 次 1）。
+⇒ RAG 取**确定性**的「精确名优先」⇒ 落在 Go 的行为包络内，但**比 Go 更确定**。
+⇒ 登记为 [`docs/Intentional_Deviations/hot/api.md`](../../Intentional_Deviations/hot/api.md) `SD-HOT-API-001`。
+
+---
+
+## DRIFT-HOTAPI-012 ✅ 已补 · 证据缺口（测试永久无效）
+
+- **原问题**：`HotApiWireContractTest` 用**裸 `ObjectMapper`** 断言字段序，
+  而运行时用的是 Spring Boot 装配的 mapper ⇒ 该测试**永远绿**，运行时是字母序它也测不出来。
+- **本轮处置（两件事，缺一不可）**：
+  1. **保留** `HotApiWireContractTest`，但把它的**职责边界写清楚**：
+     它只验「Jackson 按注解怎么写」（字段名 / `null` vs `[]` / uint32 无符号），
+     **不**声称能证明运行时的字节形状；
+  2. **新增** `HotApiGoWireOrderTest`：**真实 Boot 上下文** + **原始响应体字节**，
+     逐个断言 13 个 item 字段与 5 个 resp 字段的**相对顺序**等于 Go 的声明序。
+- **⚠️ 这是本轮最值得记住的一条方法论**：
+  **「断言用了哪个 mapper」≠「断言了运行时」**。
+  裸 mapper 与运行时 mapper 是**两个对象**，前者绿不代表后者对。
+  ⇒ 凡涉及「序列化后的字节形状」，必须走**真实上下文 + 原始字节**。
+
+---
+
+## DRIFT-HOTAPI-013 ✅ 已修 · OBSERVABLE DIFFERENCE · LOW-MEDIUM
+
+- **Go 行为**：`httpx/requests.go:66-68` 的 `ParseJsonBody` 在 `Parse` 里**无条件**执行；
+  `httpx/requests.go:153-155` 的 `withJsonBody(r)` = `r.ContentLength > 0 && strings.Contains(Content-Type, "application/json")`；
+  `core/mapping/jsonunmarshaler.go:45-53` 先 `jsonx.UnmarshalFromReader`（**JSON 语法校验**）再按 json tag 填字段。
+- **Go 活体探针实测**（Content-Type: application/json）：
+
+  | body | Go | RAG 修前 | RAG 修后 |
+  |---|---|---|---|
+  | `{`（畸形） | 🔴 5001（unexpected EOF） | 🟢 200 | ✅ 5001 |
+  | `[1,2]` | 🔴 5001（type mismatch） | 🟢 200 | ✅ 5001 |
+  | `null` / `123` / `"x"` | 🔴 5001（unsupported type） | 🟢 200 | ✅ 5001 |
+  | `{"page":9,"page_size":3}` | 🟢 200，**page 仍取 query 的 5** | 🟢 同 | ✅ 同 |
+  | 空 body / `text/plain` / 无 Content-Type | 🟢 200（Go 根本不读 body） | 🟢 同 | ✅ 同 |
+
+- **RAG 修法**：`GoFormValues.requireParsableJsonBody(request)`
+  —— 只在 `contentLength > 0` 且 Content-Type 含 `application/json` 时读 body；
+  语法错误 / 顶层非对象 ⇒ `BusinessException(5001)`（⇒ **200 + `{code:5001}`**，与 Go 的 `SetErrorHandler` 同形）。
+- **⚠️ 一条刻意<b>不</b>做的**：**不开** `FAIL_ON_TRAILING_TOKENS`。
+  Go 用的是 `json.Decoder.Decode`（`core/jsonx/json.go:74-77`），它**只读一个值**、**不**拒绝尾随内容
+  ⇒ `{"a":1} garbage` 在 Go 是**通过**的；开了那个特性反而会造出一条 Go 没有的拒绝路径。
+
+---
+
+## DRIFT-HOTAPI-014 🔁 跨域移交（common 域）· OBSERVABLE DIFFERENCE · LOW
+
+- **Go**：`observability/http.go:88` 的 `http.Error(w, httpTimeoutBody, statusCode)`
+  ⇒ `net/http` 的 `http.Error` 会设 `Content-Type: text/plain; charset=utf-8` **和**
+  `X-Content-Type-Options: nosniff` ⇒ **503（超时）与 499（断连）两条路径都带 nosniff**。
+- **RAG**：`com.rag.common` 的 `HttpMiddleware.writeTimeoutResponse` **没有** nosniff。
+- **⚠️ 归属**：该代码在 **`service/common`**（`com.rag.common.observability.HttpMiddleware`），
+  **不属于 hot 域** ⇒ 按 AGENTS.md §5.3「只写自己域」，本轮**不改**，
+  已在本文件登记并移交 ⇒ 需由 **common 域**在其 worktree 里处置。
+- **对照事实（说明这不是 hot-api 单点的选择）**：同一个组件里 **404 路径**
+  （`com.rag.common.http.GoStyleRouterErrorResponses`）**是**设了 nosniff 的
+  ⇒ 「同一组件内两条路径形状不一致」这件事**发生在 common 域内部**，hot 域只是消费者。
+- **影响面**：客户端拿到的超时/断连响应少一个硬化头；**业务判定（code/msg/status）不受影响**。
+- **状态**：⏳ **待 common 域处理**。本域无后续动作。
+
+---
+
+## DRIFT-HOTAPI-015 ✅ 已修 · OBSERVABLE DIFFERENCE · MEDIUM
+
+- **Go 行为**：`encoding/json` 按**结构体声明序**输出
+  （`service/common/response/response.go` = `code, msg, data`；
+  `api/internal/types/types.go:27-33` = `items, total, page, page_size, scope`；
+  `api/internal/types/types.go:6-20` = 13 个 item 字段的声明序）。
+- **RAG 原行为**：运行时 mapper 输出**字母序**
+  （实测 body：`article_id, author_id, brief, comment_count, cover_image_url, create_time,
+  hot_score, like_count, manual_type_tag, rank, secondary_tags, title, view_count`）⇒ **与 Go 字节不同**。
+- **⚠️ 根因（第三轮补齐，比上一轮的说法更准确）**：
+  **不是** Boot 显式开启了 `SORT_PROPERTIES_ALPHABETICALLY`（全 jar 扫描该字符串**零命中**），
+  而是 **Jackson 3 把这个特性的默认值翻成了 true**：
+  - Jackson 3 `tools.jackson.databind.MapperFeature`：`SORT_PROPERTIES_ALPHABETICALLY` 构造实参 = `iconst_1` ⇒ **默认 true**；
+  - Jackson 2 `com.fasterxml.jackson.databind.MapperFeature`：同名字段构造实参 = `iconst_0` ⇒ **默认 false**。
+  ⇒ Boot 4 的 web 栈用 **Jackson 3**（`tools.jackson.core:jackson-databind:3.1.5`）
+  ⇒ 运行时字母序；**裸 `new ObjectMapper()` 与 `Jackson2ObjectMapperBuilder.json().build()` 都是 Jackson 2**
+  ⇒ 声明序 ⇒ **这才是「为什么裸 mapper 测不出来」的真正原因**（上一轮归因到 Boot 装配层，不准确）。
+- **RAG 修法**：`HotArticleCard` / `HotArticlesResp` 加 `@JsonPropertyOrder({...})`
+  ⇒ 注解**优先于** `MapperFeature.SORT_PROPERTIES_ALPHABETICALLY` 这类全局特性
+  ⇒ 无论 mapper 怎么配，输出都等于 Go 的声明序。
+  （全仓同一手法已在用：`like-rpc` 的 `LikeEventContracts`、`comment-rpc` 的 `CommentCacheService`。）
+- **守门测试 + 变异验证**：`HotApiGoWireOrderTest`（真实上下文 + 原始字节）；
+  **去掉 `@JsonPropertyOrder` ⇒ 该测试变红**（实测失败信息里直接打印出字母序 body）⇒ **守门有效**。
+
+---
+
+## ⚠️ 本轮**未**闭合的项（不得读成「hot-api 已完成」）
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| **端到端双侧活体对拍**（D1/U1） | ❌ 仍缺 | 本轮做的是**分层对拍**（Go 真库 `httpx.Parse` ↔ RAG 真实 MVC 管线），**两套服务同时跑**的端到端对拍仍未做 |
+| **真 Tomcat 下的响应头取证**（D14） | ❌ 仍缺 | MockMvc 测不到真实 Tomcat 的响应头（D14 本身已移交 common 域） |
+| **超时 / 保护层四闸的活体观测**（D9/U2） | ❌ 仍缺 | 仍是静态确认 |
+| **变异验证**（D2/U9） | 🟡 部分 | 本轮对**新增的 3 条修复**做了定向变异（hash 5/5、字段序 1/1）；**全组件系统变异仍未做** |
+| **端口归属**（D6） | ⏳ 待拍板 | Go `hotcenter.yaml` = 8893；`Infrastructure.md §3` 给 hot 预占 18897。当前按 18897 落 |

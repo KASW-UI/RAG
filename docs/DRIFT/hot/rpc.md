@@ -821,3 +821,129 @@ SEMANTICALLY NOT EQUIVALENT
 4. 决定 `DRIFT-HOTRPC-004` 的口径（建议显式化现状）、`DRIFT-HOTRPC-006` 要不要签字；
 5. 起真 Redis + 真 Kafka 做 IT，消掉 UNR-1 / 2 / 4 / 5。
 
+
+---
+
+<!-- ====================================================================================
+     ↓↓↓ 第三轮：2026-10-23 23:0x「对齐修复轮」（align/hot 分支）
+     ↑ 上方 L1~L750 是 2026-10-22 首次实现 + 2026-10-23 第二轮组件级验证的历史记录，
+       历史条目与编号一条未删（仅就地加了复核批注）
+     ==================================================================================== -->
+
+# 第三轮：修复轮（2026-10-23）
+
+> **范围**：`service/hot/hot-rpc`（+ 强依赖 `service/hot/heavykeeper/`）。
+> **分支**：`align/hot`（worktree `../RAG.worktrees/hot`），**只改 hot 域文件**。
+> **本轮性质**：对第二轮台账里**已取证但未修**的条目动手；修法一律「先复现 → 再改 → 再验」。
+> **只读边界**：**Go 真源仓库零改动**（探针在 `/tmp`，`go.mod` 用 `replace` 指向真源的**逐字节副本**）。
+
+## 本轮一句话
+
+**第二轮的 `SEMANTICALLY NOT EQUIVALENT` 判定里，最重的一条（DRIFT-HOTRPC-001）已修并双侧活体对拍通过；
+另修一条并发语义漂移（-003）；两条需要「决策」的（-004 / -006）已签字。**
+⇒ 本组件**核心算法层**已对齐真源；**剩余未闭合项集中在「真 Redis / 真 Kafka 集成测试」**。
+
+## 逐条处置
+
+| ID | 上一轮判定 | 本轮处置 | 证据 |
+|---|---|---|---|
+| **DRIFT-HOTRPC-001** | 🔴 SEMANTIC MISMATCH | ✅ **已修** | 【双侧活体对拍】2025/2025 列号一致 + Top-100 集合与分数逐条一致；变异 **5/5 全红** |
+| **DRIFT-HOTRPC-002** | 🔴 BLOCKING（起不来） | ✅ 上一轮修复轮已清（Jackson 2 Bean） | 本轮 `HotRpcSpringContextWiringTest` 6/6 仍绿 |
+| **DRIFT-HOTRPC-003** | 🟠 OBSERVABLE DIFFERENCE | ✅ **已修** | `spring.task.scheduling.pool.size: 2` + 装配层断言真实线程池 ≥ 2 |
+| **DRIFT-HOTRPC-004** | 🟠 OBSERVABLE DIFFERENCE | 📝 **已签字**（不复刻） | 新证据：**Lettuce 6.8.2 连 `io/lettuce/core/retry` 包都没有** ⇒ Spring 侧**无配置入口** |
+| **DRIFT-HOTRPC-005** | 🟡 OBSERVABLE DIFFERENCE | ⏸ **保持不修**（方向明确、幅度有界） | 上一轮结论不变 |
+| **DRIFT-HOTRPC-006** | 🟠 OBSERVABLE DIFFERENCE | 📝 **已签字**（RAG 更稳的一侧） | 见 `docs/Intentional_Deviations/hot/rpc.md` |
+| **DRIFT-HOTRPC-007** | ⚪ 证据缺口 | ✅ 上一轮修复轮已补装配层测试 | 本轮复跑仍绿 |
+
+---
+
+## DRIFT-HOTRPC-001 ✅ 已修 · SEMANTIC MISMATCH · HIGH
+
+- **Component**：`HeavyKeeper`（`service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/domain/HeavyKeeper.java`）
+- **Operation**：`hash(key, seed)` → `Add` 的桶定位
+- **根因（不变）**：Go 的 `uint64 % width`（`heavykeeper.go:189`）被写成 Java 的**有符号**取模 + 补正。
+- **修法（一行）**：
+  ```java
+  // 旧（错）：算的是 Euclidean(-a, width)，与 Go 的 Euclidean(2^64 - a, width) 恒差 2^64 mod width
+  int remainder = (int) (h % width);
+  return remainder < 0 ? remainder + width : remainder;
+  // 新（对）：正除数下的无符号余数
+  return (int) Long.remainderUnsigned(h, (long) width);
+  ```
+  ⚠️ `Math.floorMod` **同样错**（实测与旧写法输出完全一致），已在类注释里把这两条错路钉死。
+
+### 本轮证据（比上一轮更强：换了 fixture 与口径）
+
+| 手段 | 结果 |
+|---|---|
+| **双侧活体对拍（修正前）** | Go 侧用真源 `heavykeeper.go` 的**逐字节副本**（sha256 `2fef39e7a8e35a19e6774fbfb1ed360e138dd73b5baef3090e58a2bbebd4309e`）+ 最小导出探针；Java 侧直接调用**生产类**。生产口径 `width=1000/depth=5/topK=100`、405 个 key（含空串、中文、emoji、300 字符长串）⇒ **173/405 个 key 的列号与 Go 不同**，Top-100 榜单**集合不一致**（`article-58/59` 仅 Go 有，`article-112/113` 仅 RAG 有） |
+| **双侧活体对拍（修正后）** | 同输入 ⇒ **0/405 列号不一致**；Top-100 **集合一致、分数逐条一致** |
+| **对拍 fixture 守门测试** | 新增 `HeavyKeeperGoParityTest`（5 例）：3 组列号表（width=1000/7/100000 × 17 个 key × 每 seed 一列）+ 2 组榜单（重碰撞 width=7；生产口径变权 400 key） |
+| **变异验证** | 把实现改回旧写法 ⇒ **5/5 全部变红**（列号表 3 条 + 榜单 2 条）⇒ **守门有效，非假绿** |
+| **既有 46 条测试** | 全绿未受影响（`HeavyKeeperTest` 只断言相对次序，本就不覆盖桶位） |
+
+### 变更文件
+
+- `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/domain/HeavyKeeper.java`（`hash()` + 类注释补 Go 出处与两条错路）
+- `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/domain/HeavyKeeperGoParityTest.java`（新增，5 例）
+
+---
+
+## DRIFT-HOTRPC-003 ✅ 已修 · OBSERVABLE DIFFERENCE · MEDIUM
+
+- **Go 形态**：`hot_handler.go:76-77` 两条**独立 goroutine**（`go h.periodicSync(...)` + `go h.periodicMerge(...)`），各自的 ticker 互不影响。
+- **RAG 原形态**：两条 `@Scheduled` 共用 Boot 的 `taskScheduler`，而 Boot 4.0.8 的
+  `TaskSchedulingProperties$Pool` 默认 **size = 1**。
+- **本轮取证（消费点，不只是声明点）**：
+  - 默认值：`TaskSchedulingProperties$Pool.<init>` 字节码 = `iconst_1; putfield size`；
+  - 属性前缀：`spring.task.scheduling`（常量池字符串）；
+  - **消费点**：`TaskSchedulingConfigurations$ThreadPoolTaskSchedulerBuilderConfiguration.threadPoolTaskSchedulerBuilder`
+    → `getPool().getSize()` → `ThreadPoolTaskSchedulerBuilder.poolSize(int)`。
+- **修法**：`application.yml` 加 `spring.task.scheduling.pool.size: 2`。
+- **守门测试**：`HotRpcSpringContextWiringTest` 新增 `taskSchedulerHasAtLeastTwoThreads`
+  ⇒ 断言的是**调度器真实的线程池大小**（消费点生效），**不是**「yaml 里写了 2」。
+
+---
+
+## DRIFT-HOTRPC-004 📝 已签字（不复刻）· OBSERVABLE DIFFERENCE · MEDIUM
+
+- **Go**：`svc/service_context.go:17-20` 只给 `Addr`+`Password` ⇒ `MaxRetries` 走 go-redis v9.20.0
+  `Options.init()` 的默认 **3**（`if opt.MaxRetries == 0 { opt.MaxRetries = 3 }`）⇒ 网络错误/超时会**自动重试最多 3 次**。
+- **RAG**：Lettuce **0 次**重试。
+- **⚠️ 本轮新增的关键取证（决定为什么「不复刻」而不是「没空复刻」）**：
+  - Spring Data Redis **4.0.7** 的 `connection/lettuce` 包内 **`RetryPolicy` 引用数 = 0**
+    ⇒ **Spring 侧没有暴露 Lettuce 命令级重试策略的配置入口**；
+  - Lettuce **6.8.2** 的 jar 内**根本没有 `io/lettuce/core/retry` 包**
+    （顶层包清单：`annotations/api/cluster/codec/.../protocol/resource/search/sentinel/support`），
+    只有 `protocol/DefaultEndpoint$RetryListener` ⇒ 命令级重试策略**不是 Lettuce 6.8 的 API 面**。
+  ⇒ ⇒ **「配成 3 次」在当前依赖栈下不可达**；要在应用层自己写重试，就等于把重试放到
+  **错误的层**（会改变 drop 语义、指标口径与失败时机）⇒ 那比现状更坏。
+- **签字结论**：**不复刻 Go 的 Redis 命令重试**，登记为有意偏离
+  ⇒ [`docs/Intentional_Deviations/hot/rpc.md`](../../Intentional_Deviations/hot/rpc.md) `SD-HOT-RPC-002`。
+- **遗留口径提醒**：`article_hot_redis_sync_total{status}` 的值**不可跨实现直接比较**；
+  弱网下 RAG 的热榜刷新率**低于** Go。
+
+---
+
+## DRIFT-HOTRPC-006 📝 已签字（RAG 更稳的一侧）· OBSERVABLE DIFFERENCE · MEDIUM
+
+- **Go**：`observability/mq.go:30` 的 `TraceConsumer` 是裸 `err := fn(...)`（**无 recover**），
+  且 sarama 的 claim goroutine **也没有 recover** ⇒ 消费路径 panic ⇒ **崩进程**。
+- **RAG**：`HotEventConsumer.java:116-124` 把 `RuntimeException` 降级成返回值 ⇒ span 标 error、
+  位点推进、事件丢弃、**分区继续消费**。
+- **签字结论**：**保留 RAG 的降级行为**（崩进程不是想要的语义），但**必须留痕**
+  ⇒ `HotEventConsumer` 的类注释已补「Go 侧此处无 recover、会崩进程，本条为有意偏离」
+  ⇒ [`docs/Intentional_Deviations/hot/rpc.md`](../../Intentional_Deviations/hot/rpc.md) `SD-HOT-RPC-001`。
+- ⚠️ **与 001 的耦合**：正因为这里吞异常，001 那种「静默算错」才完全没有症状 ——
+  ⇒ 两条必须**一起**看，不能只修算法不修降级。
+
+---
+
+## ⚠️ 本轮**未**闭合的项（不得读成「hot-rpc 已完成」）
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| **真 Redis / 真 Kafka 集成测试** | ❌ 仍缺 | 4 段 Lua、两个 TTL、`EXISTS` 守卫、`RENAME` 原子性、RoundRobin 实际分配、零重试 handler 的**实际效果**，全部仍只有静态源码证据。本机 Docker 可用，但本轮未拉起中间件 ⇒ 证据强度未提升 |
+| **Go 侧 `?page` 之外的入口面** | — | 本轮只对照了消费面与查询面；`HotRankingQueryService` 的 Redis 分支仍只有 Mockito 单测 |
+| **proto 回归网** | ❌ 仍缺 | `hot.proto` 无自动对照测试（UNR-8）；本轮未补 |
+| **DRIFT-HOTRPC-005（Kafka 位点节奏）** | ⏸ 保持不修 | Go 每 1s 批量提交、RAG 逐条提交 ⇒ 崩溃恢复时 Go 会重复计入。方向明确、幅度有界，**登记不修** |

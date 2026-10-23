@@ -78,9 +78,26 @@ yaml 里**一个字都没有**，照 yaml 对永远看不见。
 **字段顺序是字母序**，Go 是**声明序**。两者字段值、类型、null 语义**逐字节等价**，
 **只有顺序不同** —— 所以 `jsonPath` 类断言也照样全绿。
 
-**根因**
-Spring Boot 的 `JacksonAutoConfiguration` 会开启
-`MapperFeature.SORT_PROPERTIES_ALPHABETICALLY`。
+**根因（2026-10-23 第三轮修正：不是 Boot 开的，是 Jackson 3 把默认值翻了）**
+Boot 4 的 web 栈用的是 **Jackson 3**（`tools.jackson.core:jackson-databind:3.1.5`，
+经 `spring-boot-starter-jackson` 进来），
+而 **Jackson 3 把 `MapperFeature.SORT_PROPERTIES_ALPHABETICALLY` 的默认值从 false 翻成了 true**。
+
+字节码取证（两侧同一行代码、不同结果）：
+
+| 库 | `MapperFeature.SORT_PROPERTIES_ALPHABETICALLY` 的构造实参 | 默认 |
+|---|---|---|
+| Jackson 2 `com.fasterxml.jackson.databind.MapperFeature` | `iconst_0` | **false**（声明序） |
+| **Jackson 3 `tools.jackson.databind.MapperFeature`** | **`iconst_1`** | **true（字母序）** |
+
+⇒ **不是** `spring-boot-jackson` 里「显式开启」了它 ——
+全 jar 扫描 `SORT_PROPERTIES_ALPHABETICALLY` 字符串**零命中**；
+是 **Jackson 3 自己的默认**。
+⇒ 也**不是** `Jackson2ObjectMapperBuilder.json().build()` 开的 ——
+那个 builder 造的是 **Jackson 2** 的 mapper，默认仍是 false。
+⇒ ⚠️ **这解释了本条里最反直觉的那格**：
+「裸 mapper 与 builder 都是 false、唯独运行时是 true」的真正原因是
+**它们根本不是同一个 Jackson**（2 vs 3），而不是「Boot 的装配层做了什么」。
 
 ⚠️ **反直觉的实测结果**（别记反）：
 
@@ -101,6 +118,9 @@ standalone 与真 Boot 实测**都是字母序**。
 
 **怎么防**
 1. 写 wire 契约测试时**注入运行时那个 `ObjectMapper` bean**，不要 `new ObjectMapper()`。
+   ⚠️ 注意 Boot 4 的运行时 bean 是 **Jackson 3**（`tools.jackson.databind.json.JsonMapper`），
+   **Jackson 2 的 `ObjectMapper` 在 classpath 上但没有 Bean**（`common` 传递来的只有 jar）——
+   这正是 `hot-rpc` 当年起不来的那个缺口的同一个根因。
 2. 本项目的 `difftest` 若按字节比对，就必须显式决定：
    关掉 Boot 的字母序（`Jackson2ObjectMapperBuilderCustomizer`），
    或把比对改成「JSON 语义比对」。**不能含糊** ——
@@ -359,3 +379,75 @@ GZ=~/go/pkg/mod/github.com/zeromicro/go-zero@<那个版本>
 ⚠️ **本表里没有任何一条是靠「读一遍代码觉得没问题」得出的。**
 P3 / P4 / P6 / P7 / P9 都是**先有分歧或先有疑点，再用探针分清「真漂移」与「夹具失真」** ——
 这个动作本身就是本项目 §3.1「不要一次读就下结论」的可操作版本。
+---
+
+## P11 — `@RequestParam String` 在**同名多值**时被 Spring 拼成逗号串（不是取首值）
+
+**现象**
+`?page=5&page=3` 在 Go 侧是 **200 + page=5**，在 RAG 侧是 **200 + `{code:5001}`**（整包失败）。
+方向是「**Go 成功 / Java 失败**」—— 最难被发现的一类漂移，因为**两边都返回 200**。
+
+**根因**
+Spring 的 `RequestParamMethodArgumentResolver` 拿到的是 `String[]`，
+转换到 `String` 时走 `ArrayToStringConverter` ⇒ **用 `,` 拼接** ⇒ `"5,3"`
+⇒ 后续 `Integer.parseInt("5,3")` 失败 ⇒ 整包 5001。
+Go 侧则是 `core/mapping/unmarshaler.go:835-846` 的 `fromArray` 分支 ⇒ **`val.Index(0)`**（取首值）。
+
+**为什么测试抓不到**
+凡是**只测「单值」**的用例（`?page=5`、`?page_size=7`）两侧都过；
+**重复参数是一种「参数个数」的维度**，不在任何单值用例的覆盖里。
+⇒ 59 条用例全绿，而这条 MISMATCH 就在门外。
+
+**怎么防**
+1. 凡是自己解析 query 的地方，**不要用 `@RequestParam String`** ——
+   直接 `request.getParameterValues(name)` 取第 0 个（还要记得 Go 的**空值丢弃**与 **`[]` 后缀**两条规则）。
+2. **把「同名多值」写进用例矩阵**：每个 form 字段至少一条「重复键」用例。
+3. go-zero 的 `GetFormValues` 里还有两条同源的规则值得整体搬：
+   `httpx/util.go:44-45`（**空值丢弃**）、`httpx/util.go:59-61`（**`[]` 后缀剥离**）、
+   `httpx/util.go:15,48-53`（**2048 个 form 值上限**）。
+
+---
+
+## P12 — Go 的 **map 遍历序** ⇒ 同一个 URL，**Go 自己会给出不同结果**
+
+**现象**
+`?page=1&page[]=2` 这类「同名 + `[]` 后缀混用」的输入，
+Go 侧连跑 8 次得到 `page=2` 6 次、`page=1` 2 次 —— **真源自己是非确定性的**。
+
+**根因**
+`rest/httpx/util.go:36` 的 `for name, values := range r.Form` 遍历的是 **map**（顺序随机），
+而 `:59-61` 又把 `page[]` 的后缀剥掉写进**同一个** `params["page"]` ⇒ **谁覆盖谁随机**。
+
+**为什么这件事值得单独记**
+如果不去跑真源、只照源码推，会得出「Go 取 `page=1`」的**错误确定性结论**，
+然后把 RAG 写成「取 `page[]` 的值」或「取后出现的值」——
+**两条都与 Go 不一致**（Go 6/8 次是 2）。
+
+**怎么防**
+1. **对拍前先确认真源这一格是确定的**：同一个输入跑 8 次，结果不一致 ⇒ 那是**真源的非确定性**，
+   要么登记为签字偏离，要么在 fixture 里明确「这是 Go 的行为包络」。
+2. **不要把「真源非确定」当成「RAG 的 bug」去修**，也不要为了「像 Go」而引入随机性 ——
+   RAG 取**包络内**的一个确定值即可，并在台账里写明。
+3. 推论：**Go 侧凡是 `map` 参与决策的地方，都可能有非确定性**，
+   对拍脚本要能区分「RAG 错」与「Go 自己会变」。
+
+---
+
+## P13 — 顺序类断言必须用**原始字节**；`jsonPath` 天然看不见顺序
+
+**现象**
+`jsonPath("$.data.items[0].article_id").value("a1")` 这类断言，
+在「声明序」与「字母序」两种输出下**都绿** ⇒ 字段顺序漂移对它**完全隐形**。
+
+**根因**
+JSON 解析成树之后，**字段顺序信息被丢掉了**；
+`jsonPath` 只按 key 取值，不看 key 的先后。
+
+**怎么防**
+1. 顺序类断言只能断言**原始响应体字符串**（`getContentAsString()`）里
+   各字段名的**下标先后**；`jsonPath` 一律无效。
+2. 想让顺序**不再依赖 mapper 配置**，用 `@JsonPropertyOrder` **显式钉死** ——
+   注解优先于 `SORT_PROPERTIES_ALPHABETICALLY` 这类全局特性
+   （本仓已有先例：`like-rpc` 的 `LikeEventContracts`、`comment-rpc` 的 `CommentCacheService`）。
+3. 加一条**变异**：把 `@JsonPropertyOrder` 去掉，顺序断言**必须变红** ——
+   否则你只是把「当前的字母序」固化了下来，等于把漂移锁进了测试。
