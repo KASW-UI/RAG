@@ -17,4 +17,201 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <!--
+            task-proto：TaskServiceGrpc（server ImplBase）。
+            proto 源文件逐字复制自 Go 端 proto/task.proto，只多了 java_package / java_multiple_files
+            两行（L1 契约：message 名 / 字段号 / 类型一律未改，见 AGENTS.md §3.4）。
+
+            ⚠️ Go 侧 task 域**没有 common 模块**（service/task 下只有 api 与 rpc），
+               所以本模块没有 task-common：错误全部是**标准 gRPC code**
+               （INVALID_ARGUMENT / UNKNOWN），不需要 like/message 那种业务码 ↔ gRPC code 转换类。
+               判定依据：Go get_task_logic.go 只用了 codes.InvalidArgument 与裸 error。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>task-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            common（artifactId=common）：observability（MqConsumer.traceConsumer / RpcInterceptor）
+            + LoggerFactoryBean + RpcServerInterceptorFactory + Deadline/SQL 超时翻译。
+            Go 侧对应 service/common/observability：sinks 的每次 Consume / flush 都被
+            observability.TraceConsumer 包了一层，Java 侧必须同样包，否则 span 全丢。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot 基础（gRPC server 无 web） ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <!--
+            spring-boot-web-server：spring-cloud-starter-alibaba-nacos-discovery 通过反射引用
+            org.springframework.boot.web.server.context.WebServerInitializedEvent。
+            本模块不引 spring-boot-starter-web，但需要 spring-boot-web-server 里的那个类 + 抽象接口，
+            与 message-rpc / like-rpc 同款。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-web-server</artifactId>
+        </dependency>
+
+        <!-- ============== 3. gRPC server ============== -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+        <!-- @GrpcService 自动起 gRPC server（替代 zrpc.MustNewServer） -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-server-spring-boot-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!--
+            ⚠️ 刻意不引 grpc-client-spring-boot-starter：
+               Go 侧 task/rpc 的 ServiceContext 里 PointsClient / UserClient **整段被注释掉**了
+               （service_context.go:18-19, 31-32, 55-56），reward Worker 也因此没被启动
+               （initReward.go 整个文件是注释、task.go:35 的 StartInitReward 调用被注释）。
+               ⇒ 本模块**零下游 gRPC 调用**，引 client starter 只会多一条永远不用的通道。
+        -->
+
+        <!-- ============== 4. Kafka（Go go-queue/kq + lovoo/goka） ============== -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <!--
+            ⚠️ spring-boot-kafka **不可省**：Spring Boot 4 把 Kafka 自动配置整体搬出了
+            spring-boot-autoconfigure，改由独立模块提供（KafkaAutoConfiguration /
+            ConcurrentKafkaListenerContainerFactoryConfigurer 都在这里）。
+            只引 spring-kafka ⇒ 没有 ConsumerFactory Bean、没有 KafkaTemplate、
+            @KafkaListener 后置处理器也不装配 ⇒ 表现为
+            「NoSuchBeanDefinitionException: KafkaTemplate」，**组件直接起不来**。
+            like-rpc 与 hot-rpc 都实测踩过（AGENTS.md §3.3），本模块照单继承。
+            版本由 spring-boot-dependencies BOM 管理，不写 version。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-kafka</artifactId>
+        </dependency>
+
+        <!-- ============== 5. Redis（Go github.com/redis/go-redis/v9） ============== -->
+        <!--
+            Go task/rpc 用 Redis 做四件事，Spring Data Redis 全部覆盖：
+              1. HGETALL/HSET/HDEL 任务进度缓存（GetTask 读 + 两个 sink 失效）
+              2. SETNX 幂等标记（task:init:* / task:done:*）
+              3. XADD 奖励事件流（stream:task:reward）
+              4. 多 key pipeline 批量写（SET / HSET）
+            ⇒ 用 StringRedisTemplate（Go 侧同样是裸字符串协议，key/value 都是 string）。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- ============== 6. 数据访问：Postgres + MyBatis-Plus + Flyway ============== -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <!--
+            ⚠️ spring-boot-flyway 必需（Boot 4 拆模块，同 message-rpc DRIFT-MSG-006）。
+            缺它时**启动日志里连一行 Flyway 都没有**（不是报错，是根本没加载），
+            task_progress / user_like_count 永不创建，第一次真正查库才炸
+            `relation "task_progress" does not exist`。TaskSchemaGate 是它的第二道防线。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+        </dependency>
+
+        <!-- ============== 7. Metrics ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 8. OpenTelemetry OTLP exporter（Go Telemetry.*） ============== -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 9. Nacos 服务发现（替代 Go etcd 注册） ============== -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- ============== 10. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-inprocess</artifactId>
+            <version>${grpc.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            Testcontainers：装配层测试必须接**真 PostgreSQL**，不能用 H2。
+            原因与 message-rpc / like-rpc 同款：
+              - 本模块的 ON CONFLICT (user_id, task_id) / GREATEST / COALESCE 语义
+                （两个 sink 的幂等核心）在 H2 上与 PG 不同，替换等于把要验证的东西换没了；
+              - Flyway 的两份迁移脚本面向 PG 写的；
+              - 有 @MapperScan 的模块没有 DataSource 就产不出 SqlSessionFactory
+                ⇒ 「不接库」会让本测试要验证的东西根本没法验证。
+        -->
+        <!--
+            ⚠️ artifactId 用的是 **Testcontainers 2.x** 的写法（testcontainers-postgresql /
+               testcontainers-junit-jupiter），与 like-rpc / message-rpc 一致。
+               此前这里写的是 1.x 的 `postgresql` / `junit-jupiter` —— 那两个 artifactId
+               不在 spring-boot-dependencies 的 testcontainers-bom 里 ⇒ 版本无人管理 ⇒
+               **Maven 连 pom 都读不进去**，报错
+               "'dependencies.dependency.version' for org.testcontainers:postgresql:jar is missing"，
+               于是整个 service/task 聚合模块（**含 task-api**）都无法构建。
+               改名的另一个理由：1.x 的 `org.testcontainers:junit-jupiter` 早已被
+               `testcontainers-junit-jupiter` 取代，前者是 testcontainers-shaded 的遗留坐标。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>

@@ -17,4 +17,68 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
+    <dependencies>
+        <!--
+            FollowGrpcError 构造 io.grpc.StatusException / 解析 StatusRuntimeException /
+            读 Status.Code，这些类全在 grpc-api；grpc-stub 会传递依赖 grpc-api。
+            引 grpc-stub 而不是直接引 grpc-api，是为了与 message-common / like-common /
+            favorite-common 保持同源，并让版本由根 pom 的 dependencyManagement 统一管理
+            （本模块不写死版本号）。
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+        </dependency>
+
+        <!--
+            FollowCodeError 需要 @JsonAutoDetect / @JsonProperty 钉住 JSON key，
+            让 follow-api 层序列化时输出与 Go 端 `json:"code"` / `json:"msg"` 标签完全一致、
+            且不多出 Throwable 继承来的 message / cause / stackTrace 字段
+            （Go 的 Error() 是方法不是字段，不会进 JSON）。
+            单独引 jackson-annotations（仅注解模块，无 databind/core）保持 follow-common 是
+            "纯工具库"——Jackson 反射实现由 API 层引入，common 只声明契约。
+            版本由 spring-boot-dependencies BOM 管理。
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+        </dependency>
+
+        <!--
+            focused test：错误码表 / 文案表 / 未知码回落 / bizCode 跨真 gRPC 传输往返。
+            版本由 spring-boot-dependencies BOM 管理（spring-boot-starter-parent 提供）。
+        -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            JSON 序列化测试需要 ObjectMapper（jackson-databind），验证 @JsonAutoDetect /
+            @JsonProperty 实际生效；只放 test scope，不让 follow-common 把 databind 拉进生产 classpath。
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            真 in-process gRPC server + client：FollowGrpcErrorRoundTripTest 需要证明
+            「业务码藏在 description 文案里」这个本域唯一契约真的能跨传输往返，
+            而不只是「同一个 Status 对象在内存里过一遍」——在内存里过一遍永远为真，
+            证明不了 grpc-java 对 description 是否逐字节保真（这正是 like 域踩过的坑所在）。
+            ⚠️ 必须显式写 ${grpc.version}：根 pom 的 dependencyManagement 没有收录 grpc-inprocess。
+            且不能升版本——根 pom 已注明 grpc-inprocess 1.63.0 与更高版本内部类不兼容，全栈锁 1.63.0。
+            follow-common 本身不依赖传输层，故放 test scope。
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-inprocess</artifactId>
+            <version>${grpc.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
 </project>

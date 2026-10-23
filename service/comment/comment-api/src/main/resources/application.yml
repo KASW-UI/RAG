@@ -1,0 +1,140 @@
+# =============================================================================
+# comment-api application.yml —— 对应 Go 端 service/comment/api/etc/commentservice.yaml
+# =============================================================================
+# 1:1 迁移原则：Go yaml 的每个字段在这里都有对应；Spring / devh starter 用自己的
+# 字段名表达同一语义。不新增 Go 侧不存在的开关。
+# =============================================================================
+
+spring:
+  application:
+    name: comment-api
+
+  # ============== Nacos 服务发现（用于解析 discovery:///comment-rpc）==============
+  # Go 端是 **直连** zrpc（CommentRpc.Target: 127.0.0.1:9001），无注册中心。
+  # Java 端用 Nacos，与 RAG 其余 api 域一致；namespace / group 与 comment-rpc 自身保持一致。
+  # ⚠️ 若要退回 Go 的直连形态，把下面 grpc.client.comment-rpc.address 覆盖成
+  #   ${COMMENT_RPC_TARGET} 即可，无需改代码（表达层差异，非行为差异）。
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+
+# =============================================================================
+# HTTP server
+# =============================================================================
+# Go: etc/commentservice.yaml 的 Host=0.0.0.0 / Port=8888。
+server:
+  port: ${COMMENT_API_PORT:8888}
+  address: 0.0.0.0
+  servlet:
+    context-path: /
+
+# =============================================================================
+# gRPC client（连 comment-rpc）
+# =============================================================================
+# Go: CommentRpc{ Target: 127.0.0.1:9001, NonBlock: true } —— 直连。
+# Java: devh grpc-client-spring-boot-starter + Nacos name resolver。
+# ⚠️ negotiation-type 不能省：devh 的默认值是 TLS，不写会静默发 TLS ClientHello，
+#   而 comment-rpc 是明文 gRPC（Go zrpc.MustNewServer 全仓无 TLS 配置）。
+grpc:
+  client:
+    comment-rpc:
+      address: ${COMMENT_RPC_ADDRESS:discovery:///comment-rpc}
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      permit-keep-alive-without-calls: true
+
+# =============================================================================
+# 业务配置（对齐 Go 端 UserAuth.*）
+# =============================================================================
+# Go: etc/commentservice.yaml:5-7
+#   UserAuth.AccessSecret = ae0536f9-6450-4606-8e13-5a19ed505da0
+#   UserAuth.AccessExpire = 31536000（365 天）
+#
+# ⚠️ 密钥必须与**签发方** user-api 一致，否则验签必失败，
+#   失败表现为 HTTP 401 + **空 body**（不是业务码信封），排查时先看这里。
+# ⚠️ comment-api 只验签、不签发：Go 侧本服务没有 login / register 端点。
+comment-api:
+  user-auth:
+    access-secret: ${USER_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}
+    access-expire: ${USER_JWT_EXPIRE:31536000}
+  comment-rpc:
+    target: ${COMMENT_RPC_TARGET:127.0.0.1:9001}
+
+# =============================================================================
+# rag.protection —— Go「请求保护层」四道中间件
+# =============================================================================
+# ⚠️ 下面四项在 Go 的 etc/commentservice.yaml 里**一个字都没写**，
+#    但在 Go 侧**是开启的**（go-zero v1.10.2 rest/config.go 的 tag 默认值）：
+#   MaxConns `json:",default=10000"` / MaxBytes `json:",default=1048576"` /
+#   CpuThreshold `json:",default=900,range=[0:1000)"` /
+#   MiddlewaresConf 九个开关**全部** `json:",default=true"`（含 Breaker / Shedding）
+# ⇒ 「Go yaml 里没写」≠「Go 没开」。这是 AGENTS.md §3.1 的一条延伸：
+#   对照基准不能只看数据文件，**框架 tag 里的默认值同样是行为定义**。
+# ⚠️ 四层的拒绝响应是裸状态码 + 空 body + 无 Content-Type，不走 envelope。
+rag:
+  protection:
+    max-conns: 10000
+    max-bytes: 1048576
+    cpu-shedding:
+      enabled: true
+      cpu-threshold: 900
+      cpu-source: SYSTEM
+    breaker:
+      enabled: true
+
+# =============================================================================
+# Metrics
+# =============================================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+      enabled-by-default: false
+  endpoint:
+    health:
+      enabled: true
+    info:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    enable:
+      prometheus: true
+    tags:
+      application: comment-api
+
+# =============================================================================
+# OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）
+# =============================================================================
+# Go: Telemetry.Name=comment-api / Endpoint=jaeger:4317 / Sampler=1.0 / Batcher=otlpgrpc
+otel:
+  exporter:
+    otlp:
+      endpoint: http://${OTEL_ADDR:jaeger}:${OTLP_PORT:4317}
+      protocol: grpc
+  resource:
+    attributes:
+      service.name: comment-api
+  traces:
+    sampler: always_on
+
+logging:
+  level:
+    root: INFO
+    com.rag.comment.comment.api: INFO
+    com.rag.common: INFO
+
+# =============================================================================
+# observability
+# =============================================================================
+# 取值依据：Go 侧 etc/commentservice.yaml **未配置** Timeout，
+# 实际生效值来自 go-zero v1.10.2 rest/config.go 的 `Timeout int64 json:",default=3000"`。
+observability:
+  http-timeout: 3s

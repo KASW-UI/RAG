@@ -32,7 +32,7 @@ Go 微服务：
 
 Java 项目：
 
-‘/Users/pr/Documents/GitHub/Sea-RideTheWind_java’
+‘/Users/pr/Documents/java&golang/RAG’
 
 Java 对应微服务：
 

@@ -17,4 +17,108 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
+    <!--
+        本文件此前没有 <dependencies> 段（19 行），即「空壳 pom」——
+        §12.5 的文件树一行都编译不过。补的依赖逐条对应 Go 侧 servicecontext.go 的依赖：
+
+          TaskCli  (zrpc.MustNewClient + NewTaskServiceClient)  → task-proto + grpc-client starter
+          observability.NewHTTPMiddleware                        → common (HttpMiddlewareFilter)
+          rest.MustNewServer 的内建保护层                        → common (com.rag.common.protection)
+
+        刻意**不**引入的（Go 侧零消费点，加了就是新增能力）：
+          - spring-boot-starter-security —— Go 的 routes.go 没有 rest.WithJwt
+          - spring-boot-starter-data-redis —— task-api 的 svc 没有任何 Redis client
+          - mybatis-plus / flyway —— task-api 不碰 DB（纯 HTTP → gRPC 网关）
+    -->
+    <dependencies>
+        <!--
+            task-proto：Go 端 pb/*.pb.go 的 Java 等价物（task.proto 逐字段复制）。
+            生成物落在 com.rag.task.task.proto（java_multiple_files=true）：
+              Task / GetTaskReq / GetTaskResp / TaskServiceGrpc。
+            ⚠️ 注意与本模块 dto 包下的 GetTaskReq / GetTaskResp **同名不同义**：
+               proto 侧是 wire 契约（task_id 等字段），dto 侧是 HTTP 契约（camelCase JSON）。
+               TaskGetService 里两者都要用，故用全限定名区分，不要 import 其中之一。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>task-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!--
+            common（artifactId=common）：service/common，对应 Go 端 service/common/*：
+              - spring.HttpMiddlewareFilter    ← Go observability.NewHTTPMiddleware（HTTP 3s 超时 + span）
+              - protection.GoStyleMaxBytesFilter / GoStyleBreakerFilter
+                                              ← Go rest/config.go:12-23 默认开启的保护层
+              - http.GoStyleRouterErrorResponses ← 404 / 405 的字节形状
+              - protection.GoStyleCircuitOpenException ← gRPC client 熔断打开
+            ⚠️ 依赖本模块不等于自动生效：TaskApiApplication 必须显式
+               scanBasePackages 含 "com.rag.common"，否则这些 @Component 全部静默不注册
+               （AGENTS.md §3.3 的典型形态）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot Web（HTTP server） ==============
+             对应 Go 端 rest.MustNewServer(c.RestConf) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- ============== 3. gRPC client（连 task-rpc） ==============
+             与 hot-api / message-api 同款：devh + Nacos discovery。
+             ⚠️ 必须 exclude io.grpc:grpc-core（devh 默认拖 1.63.0），版本统一由根 pom
+                的 <grpc.version> 管理。
+             ⚠️ 必须显式写 negotiation-type: plaintext（hot-api 的 DRIFT-NEW-014）：
+                devh 的 GrpcChannelProperties 默认值是 TLS，不写会静默发 TLS ClientHello，
+                而 Go 侧 zrpc.MustNewClient 是明文 gRPC。 -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot-starter.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+
+        <!-- ============== 4. Nacos 服务发现 ============== -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- ============== 5. OpenTelemetry OTLP exporter（Go Telemetry.*） ============== -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 6. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            Boot 4 把测试切片拆成独立 artifact：@AutoConfigureMockMvc 在
+            org.springframework.boot.webmvc.test.autoconfigure，不再在
+            spring-boot-test-autoconfigure 里。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>

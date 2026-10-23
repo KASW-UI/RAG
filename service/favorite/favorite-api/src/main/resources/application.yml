@@ -1,0 +1,129 @@
+# =============================================================================
+# favorite-api application.yml —— 对齐 Go 端 service/favorite/api/etc/favorite.yaml
+#
+# 独立 HTTP gateway 进程；下游通过 gRPC 调 favorite-rpc，调 Redis 查 JWT 黑名单。
+#
+# 字段重映射：
+#   Go etc/favorite.yaml            →         application.yml
+#   ============================================================
+#   Name=favorite-api               →   spring.application.name=favorite-api
+#   Host=0.0.0.0                     →   server.address=0.0.0.0
+#   Port=8890                        →   server.port=18893
+#                                     （18893 = Infrastructure.md §3 给 favorite 域预占的号段）
+#   Log.ServiceName/Mode/Path        →   （交由 service/common Logger.java + logging 节）
+#   UserAuth.AccessSecret           →   favorite-api.user-auth.access-secret
+#   UserAuth.AccessExpire           →   favorite-api.user-auth.access-expire
+#   FavoriteRpc.Etcd.Hosts/Key       →   grpc.client.favorite-rpc.address（discovery:///favorite-rpc）
+#   BizRedis.Host/Type/Pass          →   spring.data.redis.*
+#   Telemetry.Endpoint/Sampler       →   otel.exporter.otlp.* + otel.traces.sampler
+#   DevServer.Enabled/Port/Paths     →   management.endpoints + management.server.port
+# =============================================================================
+
+spring:
+  application:
+    name: favorite-api
+
+  # ===== 1. Redis（对齐 Go 端 BizRedis）=====
+  # Go: BizRedis.Host=redis:6379 / Type=node / Pass=""
+  # Java 侧用 Spring Data Redis（Lettuce）。
+  # REDIS_ADDR/REDIS_PORT 来自 docker-compose.yaml（容器内 DNS 名 + 容器内端口 6379）。
+  data:
+    redis:
+      host: ${REDIS_ADDR:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3s
+
+  # ===== 2. Nacos 服务发现客户端 =====
+  # ⚠️ namespace / group 的默认值必须与 favorite-rpc 的 application.yml 一致，
+  #    否则 api 侧【找不到】自己的下游 —— 两边都走同一组 env 覆盖。
+  #    favorite-rpc 侧当前默认：namespace=public / group=DEFAULT_GROUP。
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+
+# ===== 3. HTTP server 监听端口 =====
+# Infrastructure.md §3：favorite 域预占 18893。
+server:
+  port: ${FAVORITE_API_PORT:18893}
+  address: 0.0.0.0
+  servlet:
+    context-path: /
+
+# ===== 3.5. gRPC client（端到端验证期：走 Nacos discovery 找到 favorite-rpc）=====
+# devh grpc-client-spring-boot-starter 3.1.0.RELEASE 的 discovery scheme：
+#   address: discovery:///favorite-rpc   ← 三斜杠（discovery://[authority]/<service-name>）
+# 对应 Go 端 FavoriteRpc.Etcd.Key: favorite.rpc（favorite.yaml:34-37）。
+#
+# ⚠️ negotiation-type 必须显式写 plaintext：
+#    devh 的 GrpcChannelProperties 默认值是 TLS，不写会【静默】变 TLS，
+#    而 Go zrpc.MustNewServer 是明文 gRPC ⇒ 写错时表现为连接握手失败，不是配置报错。
+grpc:
+  client:
+    favorite-rpc:
+      address: discovery:///favorite-rpc
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      permit-keep-alive-without-calls: true
+
+# ===== 4. 业务配置（对齐 Go 端 UserAuth.*）=====
+# 对应 Go: UserAuth.AccessSecret / UserAuth.AccessExpire（favorite.yaml:10-12）
+#
+# ⚠️ access-secret 必须与 user-rpc 的签发密钥一致：
+#    Go 侧 favorite/api 只验签、不签发（没有 login 端点），签发方是 user-api。
+#    两边密钥不一致 ⇒ 验签必失败，表现为 HTTP 401。
+favorite-api:
+  user-auth:
+    access-secret: ${FAVORITE_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}
+    access-expire: ${FAVORITE_JWT_EXPIRE:2592000}   # 30 天，与 Go 端 favorite.yaml:12 一致
+
+# ===== 5. Metrics：暴露 /actuator/prometheus =====
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+    enabled-by-default: false      # 只显式开启下面三个
+  endpoint:
+    health:
+      enabled: true
+    info:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    enable:
+      prometheus: true
+    tags:
+      application: ${spring.application.name}
+
+# ===== 6. OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）=====
+# Go: Endpoint=jaeger:4317, Batcher=otlpgrpc, Sampler=1.0, Name=favorite-api
+otel:
+  service:
+    name: favorite-api
+  exporter:
+    otlp:
+      endpoint: http://${OTEL_ADDR:jaeger}:${OTLP_PORT:4317}
+      protocol: grpc
+  traces:
+    sampler: parentbased_always_on     # 对齐 Go Sampler: 1.0
+
+# ===== 7. 日志（Spring Boot 默认走 logback-classic，SLF4J）=====
+# Logger.java 已显式调 Logger.init("favorite-api")，MDC trace_id 会被自动填入
+logging:
+  level:
+    root: INFO
+    com.rag.favorite.favorite.api: INFO
+    com.rag.common: INFO
+
+# ===== observability（对齐 Go service/favorite/api/favorite.go:28-30）=====
+# Go: observability.DisableNativeRestTimeout(&c.RestConf) + observability.NewHTTPMiddleware(...)
+# 取值依据：Go 侧 service/favorite/api/etc/favorite.yaml 【未配置】Timeout，
+# 实际生效值为 go-zero v1.10.2 `rest/config.go:55` 的 `json:",default=3000"` → 3000ms。
+observability:
+  http-timeout: 3s

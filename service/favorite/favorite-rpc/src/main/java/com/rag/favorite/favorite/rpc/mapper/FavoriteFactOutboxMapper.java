@@ -1,0 +1,340 @@
+package com.rag.favorite.favorite.rpc.mapper;
+
+import com.rag.favorite.favorite.rpc.domain.FavoriteFactOutboxEntity;
+import org.apache.ibatis.annotations.Insert;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
+
+import java.util.List;
+
+/**
+ * 事实发件箱数据访问 —— 对应 Go
+ * {@code service/favorite/rpc/internal/model/favorite_delivery.go:131-202}
+ * （{@code DispatchFavoriteFactOnce}）与 {@code favorite_fact.go:270-332}
+ * （两个事务里的 {@code tx.Create(&fact)}）。
+ *
+ * <p><b>本 Mapper 是并发正确性的核心</b>：取件查询里的
+ * {@code FOR UPDATE SKIP LOCKED} + 前驱屏障子句决定「多副本下事件按版本序、
+ * 互不阻塞、且 retract 绝不越过 assert」。
+ */
+@Mapper
+public interface FavoriteFactOutboxMapper {
+
+    /**
+     * 对应 Go {@code favoriteOutbox} / {@code favoriteOutboxV2} 返回后的事务写入
+     * （favorite_fact.go:160-161 / 196-197 的 {@code tx.Create(&fact)}）。
+     *
+     * <p>⚠️ {@code status} 显式写 0（pending）：Go 的 struct 字面量带了
+     * {@code Status: FavoriteFactPending}，而 DDL 的 {@code DEFAULT 0} 只是兜底。
+     * <p>⚠️ {@code payload} 显式 {@code ::jsonb}：与 DDL 列类型对齐，
+     * 也保证写入的是<b>与 Go 完全相同的字节序列</b>（见
+     * {@code FavoriteFactOutboxEntity} 的类注释）。
+     */
+    @Insert("""
+            INSERT INTO favorite_fact_outbox
+                (event_id, favorite_id, aggregate_version, payload, status, retry_count)
+            VALUES (#{eventId}, #{favoriteId}, #{aggregateVersion}, #{payload}::jsonb, 0, 0)
+            """)
+    int insertFact(@Param("eventId") String eventId,
+                   @Param("favoriteId") long favoriteId,
+                   @Param("aggregateVersion") long aggregateVersion,
+                   @Param("payload") String payload);
+
+    /**
+     * 🔴🔴 取件查询 —— 对应 Go {@code favorite_delivery.go:141-147}：
+     * <pre>
+     * tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+     *    Where("status IN ?", []int32{FavoriteFactPending, FavoriteFactFailed}).
+     *    Where(`aggregate_version=1 OR EXISTS (
+     *        SELECT 1 FROM favorite_fact_outbox predecessor
+     *        WHERE predecessor.favorite_id=favorite_fact_outbox.favorite_id
+     *            AND predecessor.aggregate_version=1 AND predecessor.status=1)`).
+     *    Order("created_at,event_id").Take(&amp;row)
+     * </pre>
+     *
+     * <p><b>四个要素一个都不能丢</b>：
+     * <ol>
+     *   <li>{@code status IN (0, 2)} —— 只取待投递与可重试；已接受(1)与已阻塞(3)
+     *       永远不再取出。🔴 若漏掉 status=2，一条投递失败的事件就<b>永久卡住</b>。</li>
+     *   <li><b>前驱屏障</b> {@code aggregate_version=1 OR EXISTS(…status=1)} ——
+     *       保证 v2 retract <b>绝不</b>在 v1 assert 之前投给 DC。
+     *       丢掉它，下游会先收到「不再收藏」再收到「曾经收藏」，状态机倒流。</li>
+     *   <li>{@code FOR UPDATE SKIP LOCKED} —— 多 dispatcher 各取各的，互不阻塞；
+     *       Go 侧注释明写「Multiple dispatchers skip the locked row」。</li>
+     *   <li>{@code ORDER BY created_at, event_id} —— 与 Go 完全相同的排序，
+     *       保证可复现。{@code event_id} 是 tie-breaker（{@code created_at} 可同值）。</li>
+     * </ol>
+     *
+     * <p>⚠️ 返回 {@code null} ⇒ Go 的 {@code gorm.ErrRecordNotFound} ⇒
+     * {@code return false, nil}（队列空，<b>不是错误</b>，favorite_delivery.go:148-150）。
+     */
+    @Select("""
+            SELECT event_id, favorite_id, aggregate_version, payload, status, retry_count,
+                   technical_receipt_id, technical_input_hash, technical_offset,
+                   technical_received_at, delivered_at, created_at, updated_at
+            FROM favorite_fact_outbox
+            WHERE status IN (0, 2)
+              AND (aggregate_version = 1 OR EXISTS (
+                    SELECT 1 FROM favorite_fact_outbox predecessor
+                    WHERE predecessor.favorite_id = favorite_fact_outbox.favorite_id
+                      AND predecessor.aggregate_version = 1
+                      AND predecessor.status = 1))
+            ORDER BY created_at, event_id
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+            """)
+    FavoriteFactOutboxEntity claimNextDeliverable();
+
+    /**
+     * 对应 Go 冻结信封校验失败时的处理（favorite_delivery.go:156-159）：
+     * {@code Update("status", FavoriteFactBlocked)} 后<b>提交事务</b>并返回错误。
+     *
+     * <p>状态 3 = blocked：<b>既不重试也不丢弃</b>，等待人工迁移
+     * （Go 的 {@code ErrFavoriteFactBlocked} → {@code INVALID_FROZEN_ENVELOPE}）。
+     *
+     * <p>⚠️ 本方法<b>不在</b>触发器的不可变清单内（event_id / favorite_id /
+     * aggregate_version / payload），所以不会被 {@code favorite_fact_identity_immutable}
+     * 误伤 —— 这一点是 V5 触发器的安全性前提。
+     */
+    @Update("UPDATE favorite_fact_outbox SET status = 3 WHERE event_id = #{eventId}")
+    int markBlocked(@Param("eventId") String eventId);
+
+    /** 对应 Go 投递失败（favorite_delivery.go:176-177）：{@code status=2, retry_count = retry_count + 1}。 */
+    @Update("""
+            UPDATE favorite_fact_outbox
+            SET status = 2, retry_count = retry_count + 1
+            WHERE event_id = #{eventId}
+            """)
+    int markFailed(@Param("eventId") String eventId);
+
+    /**
+     * 对应 Go 投递成功（favorite_delivery.go:189-192）：
+     * {@code status=1, technical_receipt_id, technical_input_hash, technical_offset,
+     * technical_received_at, delivered_at}。
+     *
+     * <p>⚠️ 这 6 列<b>全部</b>是投递元数据列，都不在不可变触发器的清单里。
+     *
+     * <p>⚠️ {@code updated_at} 由本方法显式推进；Go 侧靠 GORM 的 {@code autoUpdateTime}
+     * 在每次 UPDATE 时刷新（favorite_delivery.go:191 用的是 {@code Updates(map)}）。
+     */
+    @Update("""
+            UPDATE favorite_fact_outbox
+            SET status = 1,
+                technical_receipt_id = #{receiptId},
+                technical_input_hash = #{inputHash},
+                technical_offset = #{offset},
+                technical_received_at = #{receivedAt},
+                delivered_at = #{deliveredAt},
+                updated_at = now()
+            WHERE event_id = #{eventId}
+            """)
+    int markAccepted(@Param("eventId") String eventId,
+                     @Param("receiptId") String receiptId,
+                     @Param("inputHash") String inputHash,
+                     @Param("offset") long offset,
+                     @Param("receivedAt") java.time.OffsetDateTime receivedAt,
+                     @Param("deliveredAt") java.time.OffsetDateTime deliveredAt);
+
+    /**
+     * 对应 Go {@code AuthoritativeFavoriteFact} 的按 event_id 取单行
+     * （favorite_authority.go:213）：
+     * <pre>m.conn.WithContext(ctx).Where("event_id = ?", eventID).Limit(1).Find(&amp;row)</pre>
+     *
+     * <p>🔴 <b>刻意不过滤 status</b>：是否可读由后续 17 道校验判定
+     * （{@code authoritativeFavoriteRow} 首先就要求 {@code status == 1}）。
+     * 在 SQL 里过滤会把「未投递」伪装成「查不到」，两者的 HTTP 语义不同
+     * （前者走 404，后者同样走 404，但日志与告警口径不同）⇒ Go 选了在应用层判。
+     *
+     * <p>⚠️ <b>无 {@code FOR UPDATE}</b>：权威读是纯读路径。
+     */
+    @Select("""
+            SELECT event_id, favorite_id, aggregate_version, payload, status, retry_count,
+                   technical_receipt_id, technical_input_hash, technical_offset,
+                   technical_received_at, delivered_at, created_at, updated_at
+            FROM favorite_fact_outbox
+            WHERE event_id = #{eventId}
+            LIMIT 1
+            """)
+    FavoriteFactOutboxEntity selectByEventId(@Param("eventId") String eventId);
+
+    /**
+     * 对应 Go {@code favoriteAssertionSchema} 找 v1 断言
+     * （favorite_fact.go:214-215）：
+     * <pre>tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+     *    Where("favorite_id = ? AND aggregate_version = 1", item.FavoriteId).Take(&amp;row)</pre>
+     *
+     * <p><b>必须带 {@code FOR UPDATE}</b>：它是「同一收藏的 assert 与 retract
+     * 不得并发」的锁点。🔴 漏掉它 ⇒ 两个并发事务可能同时判定「有 v1 断言」
+     * 并各自写出一条 v2，而 {@code UNIQUE(favorite_id, aggregate_version)}
+     * 只能让其中一个失败（23505）——那时错误码会变成 {@code Internal/5008}
+     * 而不是设计的成功路径。
+     */
+    @Select("""
+            SELECT event_id, favorite_id, aggregate_version, payload, status, retry_count,
+                   technical_receipt_id, technical_input_hash, technical_offset,
+                   technical_received_at, delivered_at, created_at, updated_at
+            FROM favorite_fact_outbox
+            WHERE favorite_id = #{favoriteId} AND aggregate_version = 1
+            LIMIT 1
+            FOR UPDATE
+            """)
+    FavoriteFactOutboxEntity lockAssertByFavoriteId(@Param("favoriteId") long favoriteId);
+
+    /**
+     * 对应 Go {@code favoriteAssertionSchema} 的孤儿检查（favorite_fact.go:236-239）：
+     * <pre>tx.Model(&FavoriteFactOutbox{}).
+     *    Where("favorite_id = ? AND aggregate_version = 2", item.FavoriteId).Count(&amp;orphanCount)</pre>
+     *
+     * <p>语义：走 legacy 分支时若已存在一条 v2 retract，说明这条收藏已经撤过一次
+     * ⇒ {@code orphanCount != 0 ⇒ ErrFavoriteFactMigrationBlocked}。
+     * 即「<b>没有前驱的撤回</b>」必须阻断，不能让标记把它放过去。
+     */
+    @Select("""
+            SELECT count(*) FROM favorite_fact_outbox
+            WHERE favorite_id = #{favoriteId} AND aggregate_version = 2
+            """)
+    long countRetractsByFavoriteId(@Param("favoriteId") long favoriteId);
+
+    /**
+     * 对应 Go {@code authoritativeFavoriteFact} 的两条独立核对：
+     * <pre>
+     * // favorite_authority.go:229  「断言还活着时，独立核对业务行」
+     * query := m.conn.Where("favorite_id = ?", row.FavoriteID).Limit(1).Find(&item)
+     * // favorite_authority.go:243  「断言 v1 没了时，必须恰好有一条 v2 墓碑」
+     * m.conn.Model(&FavoriteFactOutbox{}).
+     *     Where("favorite_id = ? AND aggregate_version = 2", row.FavoriteID).Count(&count)
+     * </pre>
+     *
+     * <p>两条查询<b>共用</b>一个方法：都是 {@code aggregate_version = 2} 的计数，
+     * 但调用点要求的语义不同（"恰好 1 条" vs "没有孤儿"）⇒ 由调用方判返回值。
+     */
+    @Select("""
+            SELECT count(*) FROM favorite_fact_outbox
+            WHERE favorite_id = #{favoriteId} AND aggregate_version = 2
+            """)
+    long countRetractsForAuthority(@Param("favoriteId") long favoriteId);
+
+    /**
+     * 对应 Go {@code authoritativeFavoriteFact} 的 v1 前驱查找（favorite_authority.go:262-263）：
+     * <pre>
+     * query = m.conn.Where("event_id = ? AND favorite_id = ? AND aggregate_version = 1",
+     *     fact.PredecessorEventID, row.FavoriteID).Limit(1).Find(&predecessor)
+     * </pre>
+     *
+     * <p>🔴 <b>三个条件都要带</b>：只按 event_id 查的话，一个 event_id 恰好等于
+     * 另一个收藏的 {@code favorite.<id>.v1} 就能冒充前驱。
+     * {@code PredecessorEventID} 是本服务生成的（favorite_fact.go:141），可预测，
+     * 所以 {@code favorite_id} 的交叉校验是必需的。
+     */
+    @Select("""
+            SELECT event_id, favorite_id, aggregate_version, payload, status, retry_count,
+                   technical_receipt_id, technical_input_hash, technical_offset,
+                   technical_received_at, delivered_at, created_at, updated_at
+            FROM favorite_fact_outbox
+            WHERE event_id = #{eventId} AND favorite_id = #{favoriteId} AND aggregate_version = 1
+            LIMIT 1
+            """)
+    FavoriteFactOutboxEntity selectAssertPredecessor(@Param("eventId") String eventId,
+                                                     @Param("favoriteId") long favoriteId);
+
+    /**
+     * 对应 Go {@code authoritativeFavoriteFact} 的「活业务行必须已消失」检查
+     * （favorite_authority.go:253-258）：
+     * <pre>
+     * var liveCount int64
+     * m.conn.Model(&FavoriteItem{}).Where("favorite_id = ?", row.FavoriteID).Count(&liveCount)
+     * if liveCount != 0 { return ..., ErrFavoriteFactUnavailable }
+     * </pre>
+     *
+     * <p>语义：一条 retract 权威事实只有在<b>业务行确实没了</b>时才成立。
+     */
+    @Select("SELECT count(*) FROM favorite_item WHERE favorite_id = #{favoriteId}")
+    long countLiveItemsByFavoriteId(@Param("favoriteId") long favoriteId);
+
+    /**
+     * 对应 Go {@code FavoriteLegacyPreflight} 的孤儿撤回统计
+     * （favorite_legacy_preflight.go:86-91）：
+     * <pre>
+     * SELECT count(*) FROM favorite_fact_outbox retract
+     *  WHERE retract.aggregate_version=2 AND NOT EXISTS (
+     *    SELECT 1 FROM favorite_fact_outbox assertion
+     *    WHERE assertion.favorite_id=retract.favorite_id AND assertion.aggregate_version=1)
+     * </pre>
+     *
+     * <p>语义：「有撤回但没有建立」的孤儿数，必须为 0 才算 clear。
+     */
+    @Select("""
+            SELECT count(*) FROM favorite_fact_outbox retract
+            WHERE retract.aggregate_version = 2
+              AND NOT EXISTS (
+                  SELECT 1 FROM favorite_fact_outbox assertion
+                  WHERE assertion.favorite_id = retract.favorite_id
+                    AND assertion.aggregate_version = 1)
+            """)
+    long countOrphanRetracts();
+
+    /**
+     * 对应 Go {@code FavoriteLegacyPreflight} 的主查询（favorite_legacy_preflight.go:40-47）。
+     *
+     * <p>🔴 这是一条 <b>只读</b> LEFT JOIN：拉出「有业务行但没有 v1 断言」的所有行，
+     * 连同它们的 marker（可能为 NULL）。marker 的逐字段比对在
+     * {@code FavoriteLegacyPreflightRunner} 里做（Go 是 :56-78 的 rows.Scan 循环）。
+     *
+     * <p>⚠️ {@code ORDER BY i.favorite_id} 逐字照抄 Go（:47）—— 报表要可复现。
+     *
+     * <p>⚠️ 全部 nullable 列用 {@code java.lang.Long} / {@code String} 承载 null；
+     * marker 不存在时那 8 列全是 null，而「null」与「值不匹配」在 Go 里是<b>同一个</b>处置
+     * （{@code report.Blocked++}，:74）⇒ Java 侧必须保留「哪些列是 null」的信息。
+     */
+    @Select("""
+            SELECT i.favorite_id, i.user_id, i.folder_id, i.target_type, i.target_id, i.target_revision,
+                   m.favorite_id AS marker_favorite_id, m.user_id AS marker_user_id,
+                   m.folder_id AS marker_folder_id, m.target_type AS marker_target_type,
+                   m.target_id AS marker_target_id, m.target_revision AS marker_target_revision,
+                   m.source_snapshot_sha256 AS marker_source_snapshot_sha256,
+                   m.approval_ref AS marker_approval_ref
+            FROM favorite_item i
+            LEFT JOIN favorite_fact_outbox assertion
+              ON assertion.favorite_id = i.favorite_id AND assertion.aggregate_version = 1
+            LEFT JOIN favorite_legacy_fact_marker m ON m.favorite_id = i.favorite_id
+            WHERE assertion.event_id IS NULL
+            ORDER BY i.favorite_id
+            """)
+    List<FavoriteLegacyPreflightRow> selectRowsWithoutAssertion();
+
+    /** 只读预检的一行结果 —— 对应 Go {@code FavoriteLegacyPreflight} 的 rows.Scan 目标（:42-47）。 */
+    class FavoriteLegacyPreflightRow {
+
+        /** {@code i.favorite_id}。 */
+        public Long favoriteId;
+        /** {@code i.user_id}。 */
+        public Long userId;
+        /** {@code i.folder_id}。 */
+        public Long folderId;
+        /** {@code i.target_type}。 */
+        public String targetType;
+        /** {@code i.target_id}。 */
+        public String targetId;
+        /** {@code i.target_revision}（可空）。 */
+        public String targetRevision;
+
+        /** {@code m.favorite_id}（LEFT JOIN 未命中时为 null）。 */
+        public Long markerFavoriteId;
+        /** {@code m.user_id}。 */
+        public Long markerUserId;
+        /** {@code m.folder_id}。 */
+        public Long markerFolderId;
+        /** {@code m.target_type}。 */
+        public String markerTargetType;
+        /** {@code m.target_id}。 */
+        public String markerTargetId;
+        /** {@code m.target_revision}（可空）。 */
+        public String markerTargetRevision;
+        /** {@code m.source_snapshot_sha256}。 */
+        public String markerSourceSnapshotSha256;
+        /** {@code m.approval_ref}。 */
+        public String markerApprovalRef;
+    }
+}

@@ -1,0 +1,194 @@
+# =============================================================================
+# follow-api application.yml —— 对应 Go 端 service/follow/api/etc/followcenter.yaml
+# =============================================================================
+# 1:1 迁移原则：Go yaml 的每个字段都在这里有对应；Spring / devh starter 用自己的
+# 字段名表达同一语义。不新增 Go 侧不存在的开关。
+# =============================================================================
+
+spring:
+  application:
+    # 对应 Go Name: followcenter。⚠️ 与 message-api 不同，Go 侧这里的 Name 是
+    # "followcenter"（不是 "follow-api"）；但 Telemetry.Name 是 "follow-api"。
+    # 本文件取 Telemetry 的名字作 application.name，与同域其它 api 保持一致。
+    name: follow-api
+
+  # ============== 1. Redis（JWT 黑名单）==============
+  # Go: BizRedis { Host: redis:6379, Type: node, Pass: "" }
+  # ⚠️ 这是 follow-api **唯一**的 Redis 用途（Go 侧 api 层没有缓存，
+  #    svc/servicecontext.go:23 建连接只是为了 middleware/checkblacklistmiddleware.go:40 的 ExistsCtx）。
+  #    所以这里只配连接串，不配任何 RedisTemplate 定制 —— StringRedisTemplate 默认行为
+  #    就是「按 key 查存在性」，与 go-zero 的 ExistsCtx 语义一致。
+  # ⚠️ Redis 不可用时**必须 fail-open**（放行），见 FollowBlacklistInterceptor。
+  #    Spring Data Redis 默认是懒连接，构造期不会因为 Redis 不在就启动失败 ——
+  #    这与 Go 的 redis.MustNewRedis（构造期就 ping）在行为上不同，
+  #    但差异只在「Redis 启动即不可达」这一形态下可见（Go 起不来，RAG 起得来但每次查询放行）。
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+
+  # ============== 2. Nacos 服务发现（用于解析 discovery:///follow-rpc）==============
+  # Go 端是 etcd flat key "follow.rpc"（无 namespace / group 分层）。
+  # Java 端用 Nacos，namespace / group 必须与 follow-rpc 自身一致
+  # （follow-rpc/src/main/resources/application.yml:66-67：public / DEFAULT_GROUP），
+  # 两端不一致 ⇒ 解析不到 follow-rpc ⇒ 所有业务码塌成 1015（service busy）。
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+
+# =============================================================================
+# HTTP server
+# =============================================================================
+# Go: etc/followcenter.yaml 的 Host=0.0.0.0 / Port=8891。
+# 这里保持 Go 的 8891（与 message-api 保留 Go 的 8892 是同一条策略）。
+server:
+  port: ${FOLLOW_API_PORT:8891}
+  address: 0.0.0.0
+  servlet:
+    context-path: /
+
+# =============================================================================
+# gRPC client（连 follow-rpc）
+# =============================================================================
+# Go: FollowRpc.Etcd{ Hosts: [etcd:2379], Key: "follow.rpc" }。
+# Java: devh grpc-client-spring-boot-starter + Nacos name resolver。
+# ⚠️ negotiation-type 不能省（DRIFT-NEW-014）：devh 的默认值是 TLS，
+#   不写会静默发 TLS ClientHello，而 follow-rpc 是明文 gRPC
+#   （Go service/follow/rpc/follow.go zrpc.MustNewServer 全仓无 TLS 配置）。
+grpc:
+  client:
+    follow-rpc:
+      address: discovery:///follow-rpc
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      permit-keep-alive-without-calls: true
+
+# =============================================================================
+# 业务配置（对齐 Go 端 UserAuth.*）
+# =============================================================================
+# Go: etc/followcenter.yaml
+#   UserAuth.AccessSecret / AccessExpire = ae0536f9-… / 31536000（365 天）
+#
+# ⚠️ 密钥必须与<b>签发方</b>一致：followcenter.yaml 与 user-api 的 user 段用的是
+#   **同一个** secret（ae0536f9-6450-4606-8e13-5a19ed505da0），
+#   所以用户拿 user-api 签发的 token 直接能访问 follow 域。
+# ⚠️ follow-api 只验签、不签发：Go 侧本服务没有 login / register 端点。
+#   AccessExpire 在本模块不被读取（Go 侧同样没有 logic 读它，签发在别的服务），
+#   保留字段是为了让 yaml 与 Go 端 1:1 可对照。
+follow-api:
+  user-auth:
+    access-secret: ${USER_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}
+    access-expire: ${USER_JWT_EXPIRE:31536000}
+
+# =============================================================================
+# rag.protection —— Go「请求保护层」四道中间件
+# =============================================================================
+# ⚠️ 下面四项在 Go 的 etc/followcenter.yaml 里 **一个字都没写**，
+#    但在 Go 侧 **是开启的**。照 yaml 逐字段对，永远看不见这四层。
+#
+# 证据（go-zero v1.10.2）：
+#   rest/config.go:52      MaxConns     int   `json:",default=10000"`
+#   rest/config.go:53      MaxBytes     int64 `json:",default=1048576"`
+#   rest/config.go:56      CpuThreshold int64 `json:",default=900,range=[0:1000)"`
+#   rest/config.go:12-22   MiddlewaresConf 九个开关 **全部** `json:",default=true"`
+#                          （含 MaxConns / Breaker / Shedding / MaxBytes）
+#
+# ⇒ 「Go yaml 里没写」≠「Go 没开」。这是 AGENTS.md §3.1 的一条延伸：
+#   对照基准不能只看数据文件，**框架 tag 里的默认值同样是行为定义**。
+#
+# ⚠️ 四层的拒绝响应都是 **裸状态码 + 空 body + 无 Content-Type**，不走 envelope
+#    （Go 侧是裸 w.WriteHeader，没有 httpx.Error）。这与本模块
+#    「所有业务错误恒 200 + envelope」的约定刻意不同：保护层在到达
+#    业务逻辑之前就拒绝了，没有 envelope 可包。
+#
+# ⚠️ 与 Go 的一处表达层差异（已在 GoStyleMaxConnsFilter javadoc 留痕）：
+#    Go 的 MaxConns 闸门是 **每路由一个**（engine.go:146 对每条路由各建一次），
+#    共享实现取 **全局一个**。
+rag:
+  protection:
+    # Go rest/config.go:52
+    max-conns: 10000
+    # Go rest/config.go:53（1 MiB）。注意 Go 只看 Content-Length 头，
+    # chunked 请求（无 Content-Length）会绕过这层 —— 刻意保留该行为。
+    max-bytes: 1048576
+    cpu-shedding:
+      # Go rest/config.go:22 Middlewares.Shedding
+      enabled: true
+      # Go rest/config.go:56（千分比，900 = 90% CPU）
+      cpu-threshold: 900
+      # Go 读整机 CPU（Linux /proc/stat）⇒ SYSTEM 对齐；
+      # PROCESS 只看本 JVM，偏离 Go，仅在多副本各自限流时才用。
+      cpu-source: SYSTEM
+    breaker:
+      # Go rest/config.go:15 Middlewares.Breaker
+      # ⚠️ 这条同时管住 **HTTP 层**熔断与 **gRPC client** 熔断：
+      #    后者由 com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor
+      #    承担，它带 @GrpcGlobalClientInterceptor，被扫到即自动注册
+      #    （对应 Go zrpc/internal/config.go:14 的 `Breaker bool json:",default=true"`）。
+      enabled: true
+
+# =============================================================================
+# Metrics
+# =============================================================================
+# Go 端 internal/metrics/metrics.go 的三个 metric，prometheus 子系统名 = follow_api：
+#   follow_api_request_total{route,result}          success / fail
+#   follow_api_reject_total{route,reason}           user_id_missing / forbidden_scope
+#   follow_api_request_duration_seconds{route}      Histogram(DefBuckets)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+    enabled-by-default: false
+  endpoint:
+    health:
+      enabled: true
+    info:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    enable:
+      prometheus: true
+    tags:
+      # Go 侧是 prometheus.NewCounterVec(CounterOpts{Subsystem: "follow_api"})，
+      # Prometheus 导出时子系统会变成 name 前缀 —— 在 Micrometer 侧对应这个 tag。
+      application: follow-api
+
+# =============================================================================
+# OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）
+# =============================================================================
+# Go: Telemetry.Name=follow-api / Endpoint=jaeger:4317 / Batcher=otlpgrpc / Sampler=1.0
+otel:
+  exporter:
+    otlp:
+      endpoint: http://${OTEL_ADDR:jaeger}:${OTLP_PORT:4317}
+      protocol: grpc
+  resource:
+    attributes:
+      service.name: follow-api
+  traces:
+    sampler: always_on
+
+logging:
+  level:
+    root: INFO
+    com.rag.follow.follow.api: INFO
+    com.rag.common: INFO
+
+# =============================================================================
+# observability
+# =============================================================================
+# 取值依据：Go 侧 etc/followcenter.yaml <b>未配置</b> Timeout，
+# 实际生效值来自 go-zero v1.10.2 rest/config.go:55 的 `Timeout int64 json:",default=3000"`。
+# DisableNativeRestTimeout 已把 go-zero 原生超时中间件关掉，超时只有 observability 一个执行者。
+observability:
+  http-timeout: 3s

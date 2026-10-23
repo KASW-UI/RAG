@@ -17,4 +17,284 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
+    <!--
+        ⚠️ 迁移前本文件只有 <artifactId> 与 <properties>：**零 <dependencies>、零 build 插件**。
+        那不是「精简」，是「从来没有编译过一行 Java」—— 没有 protoc 消费、没有 gRPC、没有
+        数据访问、没有 Flyway。与 like-rpc 的空壳是同一种状态。
+        本段依赖清单逐条对应 Go 侧 service/favorite/rpc 的真实依赖面
+        （推导依据：docs/FileTree/favorite/rpc.md §12.4 末行）。
+    -->
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <!--
+            favorite-proto：FavoriteServiceGrpc（server ImplBase）+ 7 组 Req/Resp + FavoriteFolder/FavoriteItem。
+            proto 已与 Go 端 proto/favorite.proto 对齐（只差 option 块：go_package → java_package），
+            ⇒ 生成的 *Grpc 方法路径 /favorite.FavoriteService/* 与 Go 相同，零 wire 偏离。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>favorite-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            favorite-common：FavoriteErrorCode / FavoriteErrorMessages / FavoriteGrpcError。
+            🔴 本域与 like 域的关键差异：FavoriteGrpcError.grpcError(Status.Code, int bizCode)
+            收的是「**标准** gRPC 码 + 业务码」，业务码靠 description 文案反查还原
+            （见 FavoriteGrpcError 的类注释与 docs/FileTree/favorite/common.md）。
+            纯 gRPC 进程不需要 GlobalExceptionHandler（那是 api 侧的事）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>favorite-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            user-proto：UserServiceGrpc + GetUserReq{uid} / GetUserResp{user, found} / UserInfo。
+            Go 出处：internal/svc/service_context.go:37
+              UserRpc: userservice.NewUserService(zrpc.MustNewClient(c.UserRpc))
+            🔴 UserInfo.status 是 **optional int64**（users.proto:12）——
+            Go 的 `resp.User.Status == nil` 是 presence 检查，Java 侧必须 hasStatus()。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>user-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            article-proto：ArticleServiceGrpc + GetArticleRequest{article_id, incr_view, public_only, requester_id}
+            / GetArticleResponse{article} / Article{... ext_info=16} / ArticleStatus.PUBLISHED=2。
+            Go 出处：internal/svc/service_context.go:38
+              ArticleRpc: articleservice.NewArticleService(zrpc.MustNewClient(c.ArticleRpc))
+            🔴 IncrView=false 与 PublicOnly=true 都是 L1（helper.go:133-137）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>article-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            common（artifactId=common）：服务级共享能力，对应 Go 端 service/common/*：
+              - LoggerFactoryBean / SnowflakeBean / Logger / FatalError
+                                                  ← Go common/logger + common/snowflake
+              - RpcServerInterceptorFactory / Observability* / DeadlineQueryTimeoutInjector
+                                                  ← Go common/observability（超时/deadline/OTEL）
+              - communityfact.{Wire,Dispatcher,AuthorityHandler,ProcessLogger}
+                                                  ← Go common/communityfact（事实流公共契约）
+            favorite 域对 Wire 的复用度最高：FavoriteWireEvent / FavoriteTechnicalReceipt /
+            DCEventSender / canonicalHash(JCS) / strictDecode / validateReceipt 全部直接取用。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot 基础（纯 gRPC，不带 web） ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <!--
+            spring-boot-web-server：**只为满足 nacos-discovery 的反射引用**
+            （org.springframework.boot.web.server.context.WebServerInitializedEvent）。
+            不引它启动不了 Nacos 自动配置，但**不会**因此起 web 容器 —— 本服务无 WebApplicationType。
+            与 like-rpc / message-rpc 完全同款。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-web-server</artifactId>
+        </dependency>
+        <!--
+            ⚠️ servlet-api 在 common 里是 `provided`，**不传递给消费者**
+            （Maven 的 provided 既不传递也不打包）。而 favorite 侧要编译
+            fact/FavoriteAuthorityEndpointConfig（Go internal/authority/http.go 的 Servlet 等价物）
+            就必须能编译期引用 jakarta.servlet.http.HttpServlet/Request/Response。
+
+            ⚠️ 这里刻意**不用** provided（与 common 相反）：
+            provided 意味着运行期也不在 classpath ⇒ Spring 组件扫描加载
+            FavoriteAuthorityEndpointConfig 时会抛 NoClassDefFoundError，
+            而它是带 @Configuration 的类，扫描阶段就会触发 ⇒ **整个容器起不来**。
+            （这正是 AGENTS.md §3.3「不能凭声明推断能力存在」的同型问题：
+            本模块的 like/message 域都没写过 authority 端点，所以从未踩到。）
+
+            jakarta.servlet-api 是**纯 API jar**（不含任何实现），加进运行时 classpath
+            不会启动任何容器；favorite-rpc 仍然是 WebApplicationType.NONE 的纯 gRPC 进程，
+            不监听任何 HTTP 端口 —— 与 Go etc/favorite.yaml 只有 ListenOn: 8082 一致。
+            ⚠️ 真要<b>开启</b>权威读端点（favorite.fact.authority.enabled=true），
+            还需运维另加一个 servlet 容器（tomcat / jetty），那是部署形态变更，
+            见剩余问题。
+        -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+        </dependency>
+        <!--
+            ServletRegistrationBean 所在的 spring-boot-web-server 已在上方声明；
+            @ConditionalOnProperty 来自 spring-boot-autoconfigure（starter 已传递）。
+        -->
+
+        <!-- ============== 3. gRPC server + client ============== -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+        <!-- @GrpcService 自动起 gRPC server（替代 zrpc.MustNewServer） -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-server-spring-boot-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- @GrpcClient("user-rpc") / @GrpcClient("article-rpc")：替代 zrpc.MustNewClient -->
+        <!--
+            ⚠️ 这个 <version> 是必需的，**不是**冗余：
+            根 pom 的 <dependencyManagement> 只管理了 grpc-**server**-spring-boot-starter
+            （pom.xml:178-182），没有管理 grpc-**client**-spring-boot-starter。
+            message-rpc / like-rpc / article-rpc 三个模块各自显式写了
+            `<version>3.1.0.RELEASE</version>`，本模块漏写 ⇒
+            `'dependencies.dependency.version' for net.devh:grpc-client-spring-boot-starter:jar is missing`
+            ⇒ **整个 reactor 的 POM 解析失败**，任何模块都构建不了
+            （连 `-pl service/task/task-rpc -am` 也会在读 POM 阶段就挂掉）。
+            取值与根 pom 的 ${grpc-spring-boot-starter.version} 一致。
+        -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot-starter.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ============== 4. 数据访问：Postgres + MyBatis-Plus + Flyway ============== -->
+        <!--
+            对应 Go 端 gorm.Open(postgres.Open(...)) + db.AutoMigrate(3 实体) + 4 个手写 SQL。
+            ⚠️ Go 的 DDL 事实源有**两处**（AutoMigrate 只覆盖 FavoriteFolder/FavoriteItem/
+            FavoriteFactOutbox 三个；CHECK / 部分索引 / 两个不可变触发器 / legacy 标记表
+            全部只能靠手写 SQL）⇒ Java 侧 V1..V6 必须**一次性建全**，不能只搬 struct tag。
+            详见 docs/FileTree/favorite/rpc.md §12.3 的「三条硬结论」。
+        -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+        </dependency>
+        <dependency>
+            <!--
+                ⚠️ 刻意不加 <scope>runtime</scope>：JsonbTypeHandler 在**编译期**就引用
+                org.postgresql.util.PGobject 把参数显式声明成 jsonb 类型。
+                改成 runtime 会编译失败（与 like-rpc 同款）。
+            -->
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <!--
+            ⚠️ spring-boot-flyway **不可省**（与 message-rpc / like-rpc 同款）。
+            Boot 4 把自动配置拆成按技术分模块：flyway-core 只是引擎本身，
+            真正让 spring.flyway.* 生效并在启动期跑 classpath:db/migration 的是本模块。
+            缺它时**启动日志里连一行 Flyway 都没有**（不是报错，是根本没加载），
+            4 张表永不创建 ⇒ FavoriteSchemaGate 会报 ERROR，首次真正执行 SQL 才炸。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+        </dependency>
+
+        <!-- ============== 5. Metrics ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 6. Nacos 服务发现 ============== -->
+        <!--
+            对应 Go zrpc.MustNewServer 的 Etcd 注册（etc/favorite.yaml Etcd.Key: favorite.rpc）。
+            ⚠️ 与 like-rpc 同款：不引 spring-boot-starter-web，否则纯 gRPC 进程会被拉起 web 容器；
+            FavoriteNacosRegistration 用显式 Bean 名避开 NacosServiceRegistryAutoConfiguration 的同名 Bean。
+        -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- ============== 7. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            ⚠️ 必须显式写版本：根 pom 的 dependencyManagement 只管 grpc-stub / -core /
+            -netty-shaded / -protobuf / -protobuf-lite，**没有**管 grpc-inprocess，
+            漏写版本会让整个 reactor 在读 POM 阶段就失败。
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-inprocess</artifactId>
+            <version>${grpc.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            真 PostgreSQL（不是 H2）：favorite_fact_outbox 上有 UNIQUE(favorite_id,aggregate_version)
+            + CHECK(aggregate_version IN (1,2)) + 两个 BEFORE UPDATE 不可变触发器，
+            而「唯一冲突必须整事务回滚」「FOR UPDATE SKIP LOCKED 多 dispatcher 并发」
+            正是本域要验证的不变量。H2 既没有 plpgsql 触发器也不认 SKIP LOCKED ⇒ 替换等于换没了。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
+                集成测试必须关掉 Ryuk，否则在本机/CI 上起不了任何容器。
+                原因与恢复方式见 message-rpc/pom.xml 与 like-rpc/pom.xml 的同款注释
+                （Testcontainers 2.x 的 ResourceReaper 只读环境变量 TESTCONTAINERS_RYUK_DISABLED）。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

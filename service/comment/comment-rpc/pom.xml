@@ -17,4 +17,301 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <!--
+            comment-proto：CommentServiceGrpc.CommentServiceImplBase + 各 message 类。
+            comment.proto 已与 Go 端 proto/comment.proto 逐字段对齐（字段号 / message 名 / enum 值全同），
+            生成物直接可用。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>comment-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            comment-common：CommentErrorCode / CommentErrorMessages / CommentCodeError / CommentGrpcError。
+            comment-rpc 是**纯 gRPC 进程**，不引 web ⇒ 不需要 GlobalExceptionHandler，
+            业务错误一律经 CommentGrpcError.grpcError(bizCode, msg) 变成 StatusException 上 wire。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>comment-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            message-proto：MessageServiceBlockingStub。
+            Go 侧 svc.ServiceContext.MessageRpc，唯一调用点 audit_consumer.go:101 notifyComment → SendNotification。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>message-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            article-proto：ArticleServiceBlockingStub。
+            Go 侧 svc.ServiceContext.ArticleRpc，唯一调用点 subject_fallback.go:17 → GetArticle(incrView=false)。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>article-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            service/common（artifactId=common）：服务级共享
+              - SnowflakeBean            ← Go common/snowflake（create_comment_logic.go:93 生成评论 ID）
+              - RpcServerInterceptorFactory / Observability*  ← Go common/observability（超时 / deadline / OTEL）
+              - communityfact.{Wire,Dispatcher,AuthorityHandler,ProcessLogger}
+                                        ← Go common/communityfact（事实流公共契约，本域直接复用，不重写）
+              - MqConsumer                ← Go observability.TraceConsumer（audit_consumer.go:34）
+              - persistence.DeadlineQueryTimeoutInjector / SqlTimeoutStatusTranslator
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot 基础（纯 gRPC，不带 web） ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <!--
+            spring-boot-web-server：只为满足 nacos-discovery 的反射引用
+            （org.springframework.boot.web.server.context.WebServerInitializedEvent）。
+            不引它启动不了 Nacos 自动配置，但**不会**因此起 web 容器 —— 本服务无 WebApplicationType。
+            与 message-rpc / like-rpc 完全同款。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-web-server</artifactId>
+        </dependency>
+
+        <!-- ============== 3. gRPC server + client ============== -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+        <!-- @GrpcService 自动起 gRPC server（替代 zrpc.MustNewServer，comment.go:47-53） -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-server-spring-boot-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!--
+            @GrpcClient("message-rpc") / @GrpcClient("article-rpc")：
+            自动发现 + channel pool，替代 Go 的 zrpc.MustNewClient（service_context.go:36-37）。
+        -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>3.1.0.RELEASE</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ============== 4. 数据访问：Postgres + MyBatis-Plus + Flyway ============== -->
+        <!--
+            对应 Go 端 model.InitDB + GORM（db.go:10-19）：
+              - @TableName + @TableId 取代 GORM 的 TableName() + gorm tag
+              - Mapper extends BaseMapper<Entity> 取代 *gorm.DB
+              - Flyway V*__create_*.sql 取代 db.AutoMigrate(&Subject{}, …)
+        -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+        </dependency>
+        <!--
+            ⚠️ 这里刻意**不是** runtime scope：JsonbTypeHandler 直接 import 了
+            org.postgresql.util.PGobject（jsonb 列要显式声明 PG 类型名，否则按 VARCHAR 绑定会报错）。
+            runtime scope 下编译期看不到 PGobject ⇒ 编译失败。
+        -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <!--
+            ⚠️ spring-boot-flyway 不可省（AGENTS.md §3.3 / DRIFT-MSG-006）。
+            Boot 4 把自动配置拆成「按技术分模块」：flyway-core 只是引擎，**不提供任何 Spring 自动配置**；
+            真正让 spring.flyway.* 生效并在启动期执行 classpath:db/migration 的是本模块。
+            缺它时启动日志里**连一行 Flyway 都没有**（不是报错，是根本没加载）⇒ 7 张表永不创建 ⇒
+            第一次真正执行 SQL 才炸 `relation "subject" does not exist`。
+            CommentSchemaGate 是它的第二道防线。版本由 spring-boot-starter-parent 管理，不写 version。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+        </dependency>
+
+        <!-- ============== 5. Redis（对应 Go BizRedis → cache.InitRedis） ============== -->
+        <!--
+            Go comment-rpc 用的是 Redis **String + MGET + Pipeline + SCAN + DEL**：
+              - SubjectKey / ReplyContentKey / CommentIndexKey 三种 String key
+              - ReplyIndexPageKey 分页 id 列表（JSON 数组）
+              - GetCommentIndexCache / BatchGetContentCache 走 MGET + Pipeline 回填
+              - InvalidateTargetCaches 走 SCAN + DEL
+            Spring Data Redis 的 opsForValue().multiGet / execute(PipelineCallback) / scan 正好 1:1 覆盖。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <!--
+            ⚠️ commons-pool2 不可省：application.yml 配了 spring.data.redis.lettuce.pool.enabled: true
+            ⇒ Boot 4 的 LettuceConnectionConfiguration 会构造 GenericObjectPoolConfig，
+            而 Boot 4 的 starter 不再传递 commons-pool2 ⇒ 缺它时启动报
+            NoClassDefFoundError: org/apache/commons/pool2/impl/GenericObjectPoolConfig。
+            实测先例：like-rpc（docs/DRIFT/like/rpc.md）。版本由 BOM 管理，不写 <version>。
+        -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-pool2</artifactId>
+        </dependency>
+
+        <!-- ============== 6. Kafka（对应 Go kq.Pusher / kq.Queue） ============== -->
+        <!--
+            ★ Go 侧一个 producer + 一个 consumer：
+              - kq.NewPusher(brokers, "comment-audit-topic") → create_comment_logic.go:126 推 CommentKafkaMsg
+              - kq.MustNewQueue(KqConsumerConf{Group:"comment-audit-group", Topic:"comment-audit-topic",
+                Offset:"last", Consumers:8}, AuditConsumer) → comment.go:43-45
+            Spring 侧对应：KafkaTemplate（producer）+ @KafkaListener（consumer）。
+        -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <!--
+            ⚠️ spring-boot-kafka 不可省：Boot 4 把 Kafka 自动配置拆成独立模块，
+            只有 spring-kafka（底层库）时 KafkaTemplate / ConsumerFactory /
+            ConcurrentKafkaListenerContainerFactory 全都没有 ⇒ 启动报
+            NoSuchBeanDefinitionException: KafkaTemplate，**组件起不来**。
+            实测先例：like-rpc（DRIFT-LIKE-013）、article-rpc、hot-rpc。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-kafka</artifactId>
+        </dependency>
+
+        <!-- ============== 7. Metrics：Micrometer + Prometheus ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 8. OpenTelemetry OTLP exporter ============== -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 9. Nacos service discovery（替代 Go 的 Etcd） ============== -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- ============== 9b. Servlet API（仅编译期） ============== -->
+        <!--
+            comment-rpc 是**纯 gRPC 进程**，刻意不引 spring-boot-starter-web。
+            但 bootstrap.CommentAuthorityEndpointConfig 要在「显式打开权威读端点」时
+            调 AuthorityHandlerFactory.register(...)，其返回类型是
+            ServletRegistrationBean<HttpServlet> ⇒ 编译期需要 jakarta.servlet 类型。
+
+            ⚠️ 用 provided scope：**不引入任何运行时容器**。
+               端点本身由 comment.authority.enabled 默认 false 关着（见该类注释），
+               要真正暴露它仍必须人工加 spring-boot-starter-web 并显式确定端口 ——
+               本依赖只是让「那行代码能编译」，不是让它生效。
+        -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- ============== 10. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            Testcontainers（版本由 spring-boot-starter-parent 的 testcontainers.version 管理）。
+            为什么本模块的守护测试必须是真 PostgreSQL、不能用 H2：
+              - subject/comment_index/comment_content/comment_like/report_record 五张表共 4 个复合唯一约束
+                （idx_target / idx_user_comment_like / idx_user_comment_report）与 1 个复合索引，
+                H2 与 PG 的 ON CONFLICT / 唯一约束行为不同，而「冲突必须整事务回滚」正是要验的不变量；
+              - comment_content.meta 与 outbox 的 payload / delivery_envelope 是 **jsonb**，
+                走 JsonbTypeHandler ⇒ ps.setObject(..., PGobject jsonb)；
+              - migrations V6..V8 的 CHECK 约束、触发器与 COMMENT ON 全部面向 PG 写的；
+              - appendCommentFact 的 INSERT … ON CONFLICT … RETURNING 原子取号只有 PG 语义下成立。
+            Go 侧对应的 3 个 _test.go 都在**无 DSN 时 t.Skip**（默认不跑）——
+            RAG 侧必须默认跑，否则就重蹈「测试全绿但从没验证过」的覆辙。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
+                集成测试必须关掉 Ryuk，否则在本机/CI 上起不了任何容器。
+
+                原因（实测，与 admin-rpc / user-rpc / message-rpc 同款）：
+                  Testcontainers 2.x 的 ResourceReaper.instance() 读的是**环境变量**
+                  System.getenv("TESTCONTAINERS_RYUK_DISABLED")，testcontainers.properties 与 -D 都无效，
+                  只有 surefire 注入 env 才有效；而 ryuk 镜像需要从 Docker Hub 拉，
+                  本机走镜像加速器拉 Docker Hub 会 EOF 失败，且发生在 @Container 之前 ⇒ 整个类失败。
+
+                代价 = 容器不再自动回收，CI 跑完可能残留；测试用的 postgres:16-alpine 镜像需本地已有。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

@@ -28,7 +28,8 @@
 | **`common`** | [`common/protection.md`](./common/protection.md) · [`common/http.md`](./common/http.md)<br>[`common/deadline.md`](./common/deadline.md) · [`common/audit.md`](./common/audit.md)<br>⚠️ 签字偏离已迁出 ⇒ [`../Intentional_Deviations/`](../Intentional_Deviations/_INDEX.md) | 请求保护层四层的最终落点 |
 | **`hot`** | [`hot/rpc.md`](./hot/rpc.md) · [`hot/common.md`](./hot/common.md)<br>[`hot/api.md`](./hot/api.md) | 前两者双侧对拍逐字节一致；**api 已实现 + 源码级对照完成，但无双侧活体对拍** |
 | **`article`** | [`article/common.md`](./article/common.md)<br>[`article/api.md`](./article/api.md) · [`article/rpc.md`](./article/rpc.md) | common 已对拍；**rpc 已完成首轮组件级对照（2026-10-23，见下方「状态更正」）**，api 未对照 |
-| 🆕 **`comment` / `favorite` / `follow` / `task`** | [`_cross/new-domains-2026-10-23.md`](./_cross/new-domains-2026-10-23.md) | **2026-10-23 12:25 纳入范围**：仅 **proto 层**已搬齐并实测（4 个 `*.proto` 逐行 diff，1 处签字差异）；**api / rpc / common 共 11 个组件仍是空壳** ⇒ 语义对照**尚未开始** |
+| **`favorite`** | [`favorite/rpc.md`](./favorite/rpc.md) | **rpc 已落地 + 首轮源码级对照（2026-10-23）**：36 文件 / 7,057 行 / **56 例绿**（真 PG）；本轮**修掉 6 处 L2 语义偏差**（含 3 处「写路径误用读路径 5007」）。⚠️ 证据强度上限 = **真 PG + 真启动**，**无双侧活体对拍**；**api 不在本表范围** |
+| 🆕 **`comment` / `follow` / `task`** | [`_cross/new-domains-2026-10-23.md`](./_cross/new-domains-2026-10-23.md) | **2026-10-23 12:25 纳入范围**：仅 **proto 层**已搬齐并实测（4 个 `*.proto` 逐行 diff，1 处签字差异）；**api / rpc / common 共 11 个组件仍是空壳** ⇒ 语义对照**尚未开始**（⚠️ `favorite-rpc` 已于当日单独落地 ⇒ 见上一行） |
 | **`_cross`** | [`_cross/open-items.md`](./_cross/open-items.md)<br>[`_cross/decisions.md`](./_cross/decisions.md) | 已知未修表 + 决策详述（**签字偏离已迁出** ⇒ 见 `docs/Intentional_Deviations/`） |
 
 ## 🔴 状态更正（2026-10-23 实测，与 AGENTS.md §0 冲突）

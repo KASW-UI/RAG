@@ -10,6 +10,7 @@
 ## 〇、当前状态（2026-10-23）
 
 **权威索引：[`docs/DRIFT/_INDEX.md`](docs/DRIFT/_INDEX.md)** —— 按域列出全部台账、搬移账目、证据边界。本节只给结论。
+
 > **📌 往哪写（2026-10-23 定）** —— 本文件只放**政策与索引**，且必须**全文可进上下文**（预算 32 KB）：
 > 逐条漂移与修复记录 ⇒ `docs/DRIFT/<域>/<模块>.md`，跨域 ⇒ `docs/DRIFT/_cross/fix-round-<日期>.md`；
 > 踩坑与元教训 ⇒ `docs/Pitfalls/`；签字偏离 ⇒ `docs/Intentional_Deviations/`。
@@ -18,7 +19,7 @@
 > 🔴 **2026-10-23 02:00**：§3.5 当时的 **23 个组件里，12 个 api/rpc 已完成首轮组件级对照**
 > （12 个并发会话，台账 +11,697 行）。**12 个结论全部 `SEMANTICALLY NOT EQUIVALENT`**
 > —— 合计 **34 条 `SEMANTIC MISMATCH` + 52 条 `OBSERVABLE DIFFERENCE`**。
-> ⚠️ **当日 12:25 范围扩到 38 个组件**（新增 4 域）⇒ 上述结论**只覆盖原有 6 域**，新增 4 域**尚未开始对照**。
+> ⚠️ **当日 12:25 范围扩到 38 个组件**（新增 4 域）⇒ 上述结论**只覆盖原有 6 域**。
 
 | 域 | 语义对照（Go ↔ RAG）| 台账（**逐条证据在此**） |
 |---|---|---|
@@ -28,7 +29,7 @@
 | `common` | ✅ 审计完成 | [`common/`](docs/DRIFT/common/audit.md) |
 | `hot` | 🔴 rpc ✅ 4 条启动阻塞已修（此前**根本起不来**）；🔴 重桶 `hash()` 仿错仍影响 **49.5% 的 key（未修）**；api 1 MISMATCH | [`hot/`](docs/DRIFT/hot/rpc.md) |
 | `article` | 🔴 rpc 4 MISMATCH + 4 OBS；api 2 MISMATCH（**首次对照即 NOT EQUIVALENT**）。⚠️ `DRIFT-ARTICLE-RPC-004` 复核后**撤销** —— 两边都是静默覆盖，照台账修反会造成新漂移 | [`article/`](docs/DRIFT/article/rpc.md) |
-| `comment`/`favorite`/`follow`/`task` | 🆕 **仅 proto 层已搬齐**（88 java / 4 Grpc）；🔴 **11 个组件仍是空壳**（0 行 Java）⇒ **语义对照尚未开始** | [`_cross/`](docs/DRIFT/_cross/new-domains-2026-10-23.md) |
+| `comment`/`favorite`/`follow`/`task` | **10-23 19:13 核对**：`comment-api` 22 绿 · `comment-common` 27 绿 · `task` 已落地；✅ **`follow-rpc` 已迁移**（65 绿，含真 PG 守门）；🔴 `follow-api` 与 `favorite` api/rpc **仍 0 行** ⇒ 3 个组件无对照对象、4 域无台账 | [`_cross/`](docs/DRIFT/_cross/new-domains-2026-10-23.md) |
 | 其余 | ⚠️ 10 个 `*-proto` 语义层一致（复制非翻译，**8 个无回归网** ⇒ §3.4）；5 个 `*-common` 本轮未单独审查 | 见 DRIFT 索引 |
 
 > ⚠️ **表内计数是「首轮组件级对照」的审计结论，不是当前状态**；判断某一条的现状**一律回台账**。
@@ -73,9 +74,8 @@ RAG 仓库路径：`/Users/pr/Documents/java&golang/RAG`。
 
 **微服务范围（2026-10-23 用户定，12:25 扩到 10 个）** —— 共 **38 个组件**（10 api + 10 rpc + 8 common + 10 proto，权威清单见 §3.5）：
 `article` / `hot` / `like` / `users-user` / `users-admin` / `message` / `comment` / `favorite` / `follow` / `task`。
-⚠️ **12:25 新纳入的 4 域本轮只搬了 proto 层**（10 个 `*.proto` 已齐全，见 §3.4）；
-**其余 11 个组件（4 api + 4 rpc + 3 common）仍是只有 `pom.xml` 的空壳** ⇒ 无可对照对象。
-`task` 域无 `-common`（Go 侧同样没有，不是遗漏）。Go 侧 `knowledge`/`points`/`security` **仍在范围外 ⇒ 不是待办**。
+⚠️ **12:25 新纳入的 4 域**：10 个 `*.proto` 已齐全（§3.4）；api/rpc/common 落地进度**见 §0 表格**（19:20 核对）。
+`task` 域无 `-common`（Go 侧同样没有，不是遗漏）。Go 侧 `knowledge`/`points`/`security` **范围外 ⇒ 不是待办**。
 
 ⚠️ **「未翻译」≠「该做」**：范围是**决策**，不是进度。
 
@@ -241,9 +241,9 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧 `proto/*.proto` 复制而来**，
 `article` 4 · `hot` 4 · `like` 4 · `message` 4 · `users` 7（含 `user`+`admin` 两套 api/rpc/proto）·
 `comment` 4 · `favorite` 4 · `follow` 4 · `task` 3（**无 `-common`**，Go 侧同样没有，不是遗漏）。
 
-⚠️ **新纳入 4 域的完成度极不均衡**：**只有 proto 层是真货**；其 **4 api + 4 rpc + 3 common 共 11 个组件
-全是只有 `pom.xml` 的空壳**（0 行 Java）⇒ **无可对照对象**，审查前得先有人把它们实现出来。
-⇒ 逐组件台账入口见 [`docs/DRIFT/_INDEX.md`](docs/DRIFT/_INDEX.md)。
+⚠️ **新纳入 4 域完成度不均**：`comment-api`/`comment-common`/`task` api+rpc 已落地；
+`favorite`/`follow` 的 api+rpc **仍 0 行** ⇒ 那 6 个组件审查前须先实现。⚠️ **落地 ≠ 已对照**：尚无组件级台账，
+证据强度上限是「真实 MVC 管线 + mock gRPC 边界」。
 
 **为什么不能退到微服务粒度**：域粒度下 `hot`（rpc 逐字节一致 + api 仅源码级对照）与
 `article`（rpc 首轮完成 + api 从未对照）都会被打成 ✅ —— **那是假绿灯**。
