@@ -694,3 +694,96 @@ SEMANTICALLY NOT EQUIVALENT
 2. **DRIFT-LIKEAPI-018/019/020 是文档缺陷，不是运行时缺陷**。它们不影响当前行为，
    但**每一条都会在下一次改动时变成运行时缺陷** —— 这正是 §3.3.2 立该硬要求的原因。
 3. **绿测试 62 条全绿不构成本判定的反证**。本轮 6 条 MISMATCH 无一被现有测试覆盖。
+---
+---
+
+# like-api 修复轮 · 部分完成（2026-10-23）
+
+> **分支**：`align/like` · **基线**：改前 `like-api` 62 tests 全绿。
+> ⚠️ 本轮**只修完 2 条**，其余留档 —— 见 §4。**判定不变**：`SEMANTICALLY NOT EQUIVALENT`。
+
+## 0. 本轮摘要
+
+| | 内容 |
+|---|---|
+| **已修** | **DRIFT-LIKEAPI-013**（null 元素崩在 protobuf）、**DRIFT-LIKEAPI-014**（尾随 token） |
+| **新增守门测试** | `LikeApiGoAlignmentTest` **5 条**（基线 62 → **67**） |
+| **证据强度** | 4 条走**真实 MVC 管线** + `ArgumentCaptor` 捕获真实下游 proto；1 条纯函数 |
+| **⚠️ 零覆盖已证伪两次** | 这 2 条修复改回原状时，既有 62 条<b>依然全绿</b> |
+
+## 1. DRIFT-LIKEAPI-013 ✅ 已修
+
+**问题**：`{"target_ids":[null]}` / `["x",null,"y"]` 时，null 元素原样透传到 protobuf 的
+`addAllTargetIds(...)` ⇒ `NullPointerException: Element at index 0 is null.`
+⇒ 被 `GlobalExceptionHandler#handleAny` 兜成 `200 + 5001`，**下游 RPC 根本没发出**；
+Go 侧则**正常发出**。
+
+**Go 真实语义**（`core/mapping/unmarshaler.go:156-183`）：
+
+| 输入 | Go 结果 | 后果 |
+|---|---|---|
+| 缺席 / `[]` | nil / 空 slice | 空 target_ids |
+| `[null]` | **slice 保持 nil**（`valid` 标志从未置位 ⇒ `value.Set` 不执行） | 空 target_ids ⇒ like-rpc 回 2001 |
+| `["x",null,"y"]` | **`["x","","y"]`** —— `conv` 长度仍是 3，null 位留成零值空串（`:158-160` 的 `continue`） | ⚠️ **不是过滤** |
+
+**修法**：新增 `com.rag.like.like.api.service.GoStyleTargetIds`（两个读服务共用，避免各写一份），
+`LikeCountService` / `LikeStateService` 的 `addAllTargetIds(...)` 均改走 `normalize(...)`。
+
+⚠️ **最容易做错的是「长度不变」**：把 null 过滤掉会把长度 3 缩成 2，
+会让**下一页的 limit 边界与 offset 全部错位** —— 这是分页语义问题，不是长度洁癖。
+
+⚠️ **刻意不在此处实现 012**：012 是「`target_ids` 里放 **JSON 数字**时 Go 接受、RAG 拒」，
+属**解析层**（DTO setter）的责任；数字若已被解析层拒掉，`normalize` 根本看不到。
+
+## 2. DRIFT-LIKEAPI-014 ✅ 已修（**主动放宽解析器**）
+
+**Go 语义**：`core/jsonx/json.go:74-77` 只解**第一个** JSON 值，其后内容既不报错也不检查。
+`{…} xx` ⇒ **解析成功**（用第一个对象，**会真的发出 RPC**）；`{…}{…}` ⇒ 同理。
+
+**RAG 原状**：Jackson 3（`tools.jackson` 3.1.5）把 `FAIL_ON_TRAILING_TOKENS` 的**默认值翻转成 `true`**
+（Jackson 2 是 `false`）⇒ 两者都解析失败 ⇒ `200 + 5001`。含 `likeaction` 这个**写路径**在内，6 个端点全受影响。
+
+**修法**：`LikeGoStyleCoercion.applyTo` 里显式
+`builder.disable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)`。
+⚠️ 只改 **like 域自有**的 `LikeGoStyleCoercion`，**不动 `service/common` 的 `GoStyleCoercion`**（见 §4 015）。
+
+⚠️ **这是有代价的放宽**：接受「一个 JSON 值后跟任意垃圾」是攻击面。
+之所以仍按此修，是 AGENTS.md §5「出现行为差异时默认判 RAG 错」——
+真源就是这个行为，不对齐则灰度期两侧对畸形请求的分叉无法解释。
+⚠️ **若将来决定改严，必须先在 `Intentional_Deviations` 签字，不能单方面「顺手收紧」。**
+
+## 3. 本轮新增守门测试
+
+`service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiGoAlignmentTest.java` —— **5 条**：
+
+`trailingContentAfterFirstJsonValueIsAccepted` · `secondJsonObjectIsIgnored` ·
+`allNullTargetIdsBecomeEmptyList` · `partialNullTargetIdsKeepLengthAndFillEmptyString` ·
+`normalizeCoversAllFourShapes`
+
+⚠️ **前 4 条必须走真实 MVC 管线**（`@SpringBootTest` + `@AutoConfigureMockMvc`）并用
+`ArgumentCaptor` 捕获**真实发给 like-rpc 的 proto** ——
+尾随 token 与 coercion 都取决于 Spring MVC **实际使用的那个** Jackson 3 mapper，
+自己 `new` 一个 mapper 造断言是**假绿**（本轮在 LikeApiGoAlignmentTest 的类 javadoc 里显式写明了这点）。
+
+## 4. ⚠️ 本轮**未做**的（留档，含原因）
+
+| ID | 内容 | 为什么没做 |
+|---|---|---|
+| **DRIFT-LIKEAPI-015** | `Content-Type` 大小写：Go 用**原始头**（`strings.Contains` 大小写敏感），RAG 用**已解析的 MediaType**（媒体类型已小写化） | ⚠️ **修法落在 `service/common` 的 `GoStyleJsonBodyConverter`**，该类被 **6 个域**共用（like / follow / message / users×2 / task / article），各域都有 `*GoStyleBodyContentTypeTest`。在**多域并发 worktree**（§5.3）下改共享组件会产生跨域冲突 ⇒ **须单域串行处理**，不在本 worktree 内做 |
+| **DRIFT-LIKEAPI-012** | `target_ids` 里放 JSON 数字：Go **接受**（`fillSliceValue` 的 `case fmt.Stringer` 命中 `json.Number`），RAG **拒**（`LogicalType.Textual ← Integer = Fail`） | 修法需**元素级解析器**（setter 改 `Object` 入参）。⚠️ 台账已实测记录「Jackson 3 的 coercion **只有 LogicalType 级生效、类级无效**」，所以 `withCoercionConfig(SomeListClass, …)` 这条路走不通 —— 需新增一个显式的元素级解析组件，范围大于本轮 |
+| **DRIFT-LIKEAPI-016** | `weight: 1e400` ⇒ Go **拒**（`strconv.ParseFloat` 检查 `ErrRange`），RAG 收成 `Double.POSITIVE_INFINITY` ⇒ **真的发出一次 `weight=+Inf` 的写调用** | 修法明确（`setWeight` 改 `Object` 入参 + `isFinite()` 校验），但需与 012 共用同一套「元素级/字段级解析器」组件 ⇒ **与 012 合并做**，避免两次改动同一批 DTO |
+| **DRIFT-LIKEAPI-017** | 单次 RPC 超时：Go **固定 2000ms**（`zrpc/config.go:31` 的 struct tag 默认），RAG 取 **HTTP 剩余预算**（≤3000） | 需新增独立配置项 + 改 `GoStyleRequestDeadline` 的「无预算就原样返回」分支（单测里没有 HTTP 超时上下文时两侧语义会再次分叉）⇒ 需要连带审 `common` 的 deadline 组件，同样受 §4 的并发约束 |
+| **DRIFT-LIKEAPI-018/019/020** | 3 条**文档层**高危断言 | ⚠️ **纯注释修正**，无需运行期测试。本轮**未做**，留待下一轮（改动零风险，但需要逐条核对 Go 出处，不能凭印象改） |
+| **DRIFT-LIKEAPI-021/022** | 响应 `Content-Type` 无 `charset`（判语义等价）/ 裸 503（RAG 独有） | 台账建议登记为签字偏离 ⇒ 属 `Intentional_Deviations` 档的写入，本轮未做 |
+
+## 5. ⚠️ 关于「018 不加测试」的一条自我约束
+
+`DRIFT-LIKEAPI-018` 是纯文档缺陷（类 javadoc 曾宣称「刻意不配 `http-timeout`」，
+而 `application.yml:27-29` 早就配了 3s）⇒ 修复方式是改注释，**不需要**新测试。
+
+⚠️ 本轮写测试时**差点**顺手加一条 `assertEquals("3s", …)` 之类的恒真断言 ——
+那等于**主动制造一条假绿测试**，给未来的人「已经验过了」的错觉，
+而台账 §9 **U-03 明确记着「3s 的 503 出口未在运行期复现」**。
+⇒ 该条**刻意不加测试**，并把理由写进 `LikeApiGoAlignmentTest` 的注释里
+（这本身是 §3.3.3「绿测试可能是错误答案的守卫」的一个**更隐蔽的变种**：
+不是绿测试锁死了错答案，而是**用一条无意义的断言伪装成"验过了"**）。

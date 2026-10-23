@@ -71,6 +71,19 @@ public final class LikeGoStyleCoercion {
         // 共享的两条：float 不进整数字段（ACCEPT_FLOAT_AS_INT）、number/bool 不进 String 字段
         GoStyleCoercion.applyTo(builder);
 
+        // ⚠️ 2026-10-23 修正（DRIFT-LIKEAPI-014）：Jackson 3 把 FAIL_ON_TRAILING_TOKENS 的
+        //    **默认值翻转成了 true**（Jackson 2 是 false），于是「一个 JSON 值后面跟任意内容」
+        //    会直接解析失败。而 Go 侧 core/jsonx/json.go:74-77 只解**第一个**值，
+        //    其后的内容既不报错也不检查：
+        //        {…} xx   ⇒ 解析成功，用第一个对象（**会真的发出 RPC**）
+        //        {…}{…}   ⇒ 解析成功，用第一个对象
+        //    ⇒ 含 likeaction 这个**写路径**在内，6 个端点全部受影响。
+        //    ⇒ 按 AGENTS.md §5「行为差异默认判 RAG 错」显式关掉，对齐 Go 的宽松。
+        //    ⚠️ 这是**主动放宽解析器**：接受带尾随垃圾的请求体是攻击面，
+        //       但真源就是这个行为，不对齐则灰度期两侧对畸形请求的分叉无法解释。
+        //       若将来决定改严，必须先在 Intentional_Deviations 签字，不能单方面「顺手收紧」。
+        builder.disable(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+
         // 补强 1：JSON 字符串不进整数字段（只影响无 ,string 的字段）
         builder.withCoercionConfig(LogicalType.Integer, cfg -> cfg
                 .setCoercion(CoercionInputShape.String, CoercionAction.Fail));
