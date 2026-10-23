@@ -48,7 +48,7 @@ for a in "$@"; do
     # 专供 exp-*.sh 这类需要「栈已经在跑」的取证脚本复用编排逻辑
     # ——它们自己造输入、自己观测，不该各自复制一遍起栈代码。
     --serve-only) SERVE_ONLY=1 ;;
-    *) echo "未知参数：$a（可选：--no-build / --keep / --serve-only）" >&2; exit 2 ;;
+    *) echo "未知参数：${a}（可选：--no-build / --keep / --serve-only）" >&2; exit 2 ;;
   esac
 done
 
@@ -159,7 +159,7 @@ fi
 for j in go-user-rpc go-user-api go-admin-rpc go-admin-api go-message-rpc \
          user-rpc user-api admin-rpc admin-api message-rpc; do
   [[ -x "$RUN_DIR/bin/$j" || -f "$RUN_DIR/bin/$j" ]] \
-    || { echo "缺少产物 $j，请去掉 --no-build"; exit 1; }
+    || { echo "缺少产物 ${j}，请去掉 --no-build"; exit 1; }
 done
 
 echo "==> [3/5] 启动 Go 栈（配置来自 conf/go/*.yaml 副本，Etcd 已移除、Endpoints 直连）"
