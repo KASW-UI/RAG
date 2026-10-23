@@ -1,6 +1,5 @@
 package com.rag.comment.comment.rpc.service;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
@@ -209,6 +208,17 @@ public class CommentDomainFactService {
      * 这组差异不是洁癖：{@code validCommentDelivery}（fact_delivery.go:36）要断言
      * {@code payload.AggregateVersion == null}（信封才有版本号，载荷里必须没有），
      * 而 strictDecode 遇到「字段缺失」与「字段为 null」是两种输入。
+     *
+     * <p>🔴 <b>2026-10-24 移除 {@code @JsonIgnoreProperties(ignoreUnknown = true)}</b>：
+     * Go 的 {@code communityfact.StrictDecode} 用的是
+     * {@code decoder.DisallowUnknownFields()}（{@code wire.go:121-131}）
+     * ⇒ <b>载荷里多一个字段 ⇒ 解码失败 ⇒ 该行 BLOCKED</b>。
+     * <br>而本类上的类级 {@code @JsonIgnoreProperties} 会<b>覆盖</b> mapper 级的
+     * {@code FAIL_ON_UNKNOWN_PROPERTIES=true} ⇒ 严格性被静默取消
+     * ⇒ 被篡改 / 来自更高 schema 版本的载荷在 RAG 侧<b>照发</b>，
+     * 而 Go 源站会判定为非法。
+     * <br>⚠️ 序列化方向不受影响（{@code ignoreUnknown} 只作用于反序列化），
+     * ⇒ 线上字节不变。
      */
     @JsonPropertyOrder({
             "schema_version", "event_id", "event_type", "producer", "aggregate_id", "aggregate_version",
@@ -217,7 +227,6 @@ public class CommentDomainFactService {
             "old_state", "new_state", "visibility_state", "search_evidence",
             "event_time", "occurred_at", "available_at"
     })
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class CommentFact {
 
         @JsonProperty("schema_version")

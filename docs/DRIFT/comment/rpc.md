@@ -11,10 +11,17 @@
 > - ✅ **真 PG**：`CommentSchemaPgGateTest`（18 例，真起 Testcontainers PG）
 > - ✅ **真构建**：`mvn -o -pl service/comment/comment-rpc -am install` ⇒ `EXIT=0`（本轮实测）
 > - ✅ **源码逐行对照**：Go 侧 33 个 `.go`（3,620 行）逐文件读过，非抽样
+> - ✅ **真 PG + 真 MyBatis + 真事务**：`CommentRpcGoSemanticsGateTest`（11 例，**2026-10-24 修复轮新增**）
+>   —— 手工搭 `SqlSessionTemplate`（`SpringManagedTransactionFactory`）⇒ mapper 的 SQL 与
+>   `CommentFactDeliveryService` 的事务跑在**同一条连接**上，与生产同构
+> - ✅ **变异测试**（**2026-10-24 修复轮**：10 条变异**全部**让对应守门网变红 ⇒「测试不是假绿」已验）
 > - 🔴 **无双侧活体对拍** —— Go 侧依赖 `etcd` + Kafka + 真 PG，起不来；RAG 侧依赖 Nacos + Kafka + Redis
-> - 🔴 **未做变异测试** —— 「测试不是假绿」这一半没验
 >
 > ⇒ 本台账里的 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环。
+>
+> 🟢 **2026-10-24 修复轮**：§2 的 **7 条 MISMATCH 全部已修**，每条都配了**真 PG 守门网**并做了**变异验证**。
+> 本轮同时修掉**一条本轮自己引入的偏差**（MISMATCH-02 的原始 `sendErr` 丢失）与**一条假守卫**
+> （MISMATCH-06 的守门网曾「因错误原因而绿」，见该条下的「⚠️ 假守卫教训」）。
 
 ---
 
@@ -29,6 +36,7 @@
 | 组件规模 | Go 3,620 行 / 33 文件 ⇒ RAG 7,455 行 / 40 类（**RAG 是 Go 的 2.06 倍**） |
 | 构建 | `mvn -o -q -pl service/comment/comment-rpc -am -DskipTests install` ⇒ **`EXIT=0`**（本轮实测） |
 | 本台账范围 | **仅 `comment-rpc`**。`comment-api` / `comment-common` 各自独立台账 |
+| **修复轮** | **2026-10-24**：§2 的 **7 条 MISMATCH 全部已修**。守门网 = `CommentRpcGoSemanticsGateTest`（**11 例，真 PG**）；本域测试 46 ⇒ **57 例 / 0 failures / 0 skipped**；**10 条变异全部变红** |
 
 > 🟥 **最严重的 3 条（MISMATCH-01/02/03）都在「事实投递链路」上**，
 > 且**都是 Go 侧的显式 `tx.Commit()` 在 Java 侧被 Spring 的回滚规则吃掉**。
@@ -60,6 +68,9 @@
 | **机理** | Spring 默认规则：`RuntimeException` ⇒ **回滚**。`Wire.ERR_FROZEN_ENVELOPE_BLOCKED` 继承 `RuntimeException` ⇒ **刚执行的 UPDATE 被回滚** |
 | **可观察后果** | 该行永远停在 `delivery_status=0` ⇒ 调度器每秒重新领到它 ⇒ **BLOCKED 永不落盘**，Go 的「等人工迁移」语义完全丢失，且形成**无限重领活锁** |
 | **修法** | `markBlocked` 拆到独立 `REQUIRES_NEW` 事务；或 `@Transactional(noRollbackFor = ...)` + 显式提交 |
+| **✅ 已修** | **2026-10-24**。`@Transactional` ⇒ **`TransactionTemplate`（编程式事务）**，与 Go 的 `Begin / defer Rollback / 三处 Commit` **逐条同构**；三个写状态分支**刻意不调** `setRollbackOnly()`；错误在**事务提交之后**才抛。范式照抄同仓既有的正确实现 `favorite-rpc/FavoriteFactDispatchService`（不发明第三种写法） |
+| **🧪 守门网** | `CommentRpcGoSemanticsGateTest#blockedFrozenEnvelopeIsPersistedEvenThoughTheCallThrows`（**真 PG + 真 MyBatis + 真 `DataSourceTransactionManager`**）：断言抛 `Wire.FrozenEnvelopeBlockedException` **且** `delivery_status=3` **落盘** |
+| **🧬 变异实测** | 把 blocked 分支改回 `status.setRollbackOnly()`（= 修复前的 `@Transactional` 语义）⇒ 该测试**变红**（`Failures: 1`）⇒ 守门网不是假绿 |
 
 ### MISMATCH-02 · 投递失败 ⇒ `DeliveryFailed` + `retry_count + 1` **永不落盘**
 
@@ -70,6 +81,9 @@
 | **机理** | 同 MISMATCH-01。且**更糟**：失败路径的异常类型不统一 —— `Wire.DataCenterAcceptanceRejectedException`（`Wire.java:415-427`）是 `RuntimeException` ⇒ 回滚 ⇒ `retry_count` **恒 0**；若是受检异常（`IOException`）⇒ Spring **不回滚** ⇒ 反而落盘 |
 | **可观察后果** | 同一失败路径**因异常类型不同而 DB 状态不同**；Go 侧则是无条件 Commit。无限重试且重试计数不增长 ⇒ 排障时看不出「已经重试了多少次」 |
 | **修法** | 同 MISMATCH-01 |
+| **✅ 已修** | **2026-10-24**。同 MISMATCH-01（同一个 `TransactionTemplate` 改动）。🔴 **另修一处本轮自己引入的偏差**：失败路径原本把原始 `sendErr` 换成了通用文案 ⇒ 改回 Go 的 `fact_delivery.go:110` `return false, sendErr`（**原始错误挂 `DeliveryDeferredException` 的 `cause`**，排障时能分清超时 / 拒连 / 回执不匹配） |
+| **🧪 守门网** | `CommentRpcGoSemanticsGateTest#failedDeliveryIsPersistedWithRetryCountEvenThoughTheCallThrows`：断言抛错 **且** `delivery_status=2`、`retry_count=1` **落盘**，**且** `hasCause(原始 sendErr)` |
+| **🧬 变异实测** | 把 failed 分支改回 `status.setRollbackOnly()` ⇒ 该测试**变红** ⇒ 守门网有效 |
 
 ### MISMATCH-03 · `technical_received_at` 写成了**本地投递时间**，不是 DC 回执里的接收时刻
 
@@ -79,6 +93,9 @@
 | **RAG 现状** | `CommentFactDeliveryService.java:112-114` 拿到了含 `Instant received` 的 `validated` 但**丢弃未用**；`:130-132` `markAccepted(..., now, now)` ⇒ `technical_received_at == delivered_at == 本地投递时间` |
 | **可观察后果** | DC 的接收时刻被本地时刻顶替。`CommentAuthorityLookupService.java:351-353` 的权威读响应 `technical_receipt.received_at` 取自该列 ⇒ **wire 上可观察的值不同** |
 | **修法** | `markAccepted(...)` 的两个时间参数分别传 `validated.get().atOffset(UTC)` 与 `now`（mapper 签名本就区分了两个参数，是**调用方传错**） |
+| **✅ 已修** | **2026-10-24**。`markAccepted(..., receivedAt, now)`：`receivedAt` = `validated.get().atOffset(UTC)`（**DC 回执的 `received_at`**），`now` = 本地投递时刻（`delivered_at`） |
+| **🧪 守门网** | `CommentRpcGoSemanticsGateTest#technicalReceivedAtComesFromTheDataCenterReceipt`：回执 `received_at` 固定为 `2020-01-02T03:04:05Z` ⇒ 断言 `technical_received_at` **等于**该值、**且不等于** `delivered_at` |
+| **🧬 变异实测** | 改回 `markAccepted(..., now, now)` ⇒ 该测试**变红** ⇒ 守门网有效 |
 
 ### MISMATCH-04 · 事实载荷的**未知字段严格性**被类级注解取消
 
@@ -88,6 +105,9 @@
 | **RAG 现状** | `CommentDomainFactService.java:220` `@JsonIgnoreProperties(ignoreUnknown = true)` 挂在 `CommentFact` 上 ⇒ **类级注解覆盖** `Wire.MAPPER` 的 `FAIL_ON_UNKNOWN_PROPERTIES=true`（`Wire.java:115-116`）；`CommentDeliveryValidator.java:173-180` 静默忽略未知字段 |
 | **可观察后果** | 载荷被篡改 / 来自更高 schema 版本时，Go **拒发并 BLOCKED**，RAG **照发** ⇒ DC 收到一个 Go 源站会判定为非法的事实 |
 | **讽刺点** | `CommentDeliveryValidator.java:30-36` 的 javadoc 恰好写着「用错 mapper 会让『载荷里多一个字段』这种篡改悄悄通过校验」，而 `:38-42` 注入的其实是**共享的宽松 mapper**（不是 javadoc 说的「专用 mapper」）—— 严格性恰恰被这个注解取消 |
+| **✅ 已修** | **2026-10-24**。① **移除** `CommentFact` 上的 `@JsonIgnoreProperties(ignoreUnknown = true)`（类级注解会**覆盖** mapper 级严格性）；② `CommentDeliveryValidator` 改用**本域私有**的 `STRICT_MAPPER`（`FAIL_ON_UNKNOWN_PROPERTIES=true`）。⚠️ **刻意不动 `service/common` 的 `Wire.MAPPER`** —— 它被 like / message / article / favorite / follow / task **六域共用**，且 `align/common` 是**另一条并发分支（不同基线）** ⇒ 改它会波及多域并引入合并冲突 |
+| **🧪 守门网** | `CommentRpcGoSemanticsGateTest#payloadWithUnknownFieldIsBlocked`：载荷多一个 `tampered_extra_field` ⇒ 断言 **BLOCKED**（`delivery_status=3`）**且 sender 从未被调用** |
+| **🧬 变异实测** | 恢复 `@JsonIgnoreProperties(ignoreUnknown = true)` ⇒ 该测试**变红** ⇒ 守门网有效 |
 
 ### MISMATCH-05 · 载荷里三个时间字段**无格式校验**
 
@@ -96,6 +116,9 @@
 | **Go 事实** | `domain_fact.go:77-79` `EventTime/OccurredAt/AvailableAt time.Time` ⇒ `encoding/json` 解码必须是 RFC3339，否则 `StrictDecode` 报错 ⇒ BLOCKED |
 | **RAG 现状** | `CommentDomainFactService.java:299-306` 用 `String` 承载 ⇒ 任意字符串都能通过；`CommentDeliveryValidator.java:151-160` **只对 `occurred_at` 做 `Instant.parse`**，`event_time` / `available_at` 完全无校验 |
 | **可观察后果** | Go 会 BLOCKED 的畸形载荷（如 `"event_time":"not-a-time"`）在 RAG 侧通过校验并被投递；`CommentAuthorityLookupService.java:326-327/396-398` 的零值判定只看 `0001-01-01` 前缀，也拦不住 |
+| **✅ 已修** | **2026-10-24**。`CommentDeliveryValidator` 新增 `parseGoRfc3339()`（`OffsetDateTime.parse(..., ISO_OFFSET_DATE_TIME)`，对齐 Go `time.Time.UnmarshalJSON` —— **要求偏移必须存在**，与 Go 的 RFC3339 接受集合一致），对 `event_time` / `occurred_at` / `available_at` 三字段补校验。⚠️ **刻意保持 `CommentFact` 的三个时间字段为 `String`** —— 改成 `Instant` 会因 mapper 未注册 `JavaTimeModule` 而反序列化失败，且会改线上字节 |
+| **🧪 守门网** | `CommentRpcGoSemanticsGateTest#payloadWithMalformedEventTimeIsBlocked` + `#payloadWithMalformedAvailableAtIsBlocked` |
+| **🧬 变异实测** | 摘掉那两行 RFC3339 校验 ⇒ **两个测试同时变红** ⇒ 守门网有效 |
 
 ### MISMATCH-06 · 信封数值字段**未禁 String→int 强转**
 
@@ -105,6 +128,10 @@
 | **RAG 现状** | `Wire.java:115-116` 的 `Wire.MAPPER` 只配了 `FAIL_ON_UNKNOWN_PROPERTIES`，**未禁 String→int 强转** ⇒ `"schema_version":"1"` 被读成 `1`，通过 `CommentDeliveryValidator.java:108` 的 `event.schemaVersion != 1` 检查 |
 | **可观察后果** | 被篡改的信封（数值字符串化）在 Go 侧 BLOCKED、在 RAG 侧通过 |
 | **备注** | `Jackson2ObjectMapperConfiguration.java:82-90` 配的 Textual 强转禁令是给 **Kafka 审计消息**用的共享 mapper；`Wire.MAPPER` 是**另一个独立 mapper**，没吃到这条禁令 |
+| **✅ 已修** | **2026-10-24**。`CommentDeliveryValidator` 新增**本域私有** `STRICT_MAPPER`，把 Go `encoding/json` 的类型严格性**整套**搬过来：`Integer←String/Float` Fail、`Float←String` Fail、`Textual←Integer/Float/Boolean` Fail、`Boolean←String/Integer` Fail（Go 对这六种类型不匹配**一律报错**，Jackson 2 默认**静默强转**）。⚠️ **未改 `service/common` 的 `Wire.MAPPER`**（六域共用 + `align/common` 不同基线） |
+| **🧪 守门网** | `CommentRpcGoSemanticsGateTest#envelopeWithStringifiedSchemaVersionIsBlocked`（信封 `schema_version:"1"`）+ `#payloadWithNumericStringFieldIsBlocked`（载荷 `target_type:5`） |
+| **🧬 变异实测** | 把 `STRICT_MAPPER` 的强转配置**整段删掉**（= 修复前只禁未知字段的 `Wire.MAPPER`）⇒ **两个测试同时变红** ⇒ 守门网有效 |
+| **⚠️ 假守卫教训** | 第一版守门网用的是「载荷 `schema_version` 数字化」。它**恒绿** —— 宽松解码把 `1` 读成 `"1"`，而 `"1" ≠ "rtw.community-fact.v1"` ⇒ **照样 BLOCKED，但原因是「版本号不匹配」而不是「类型不合法」**。⇒ **绿测试可能是「因错误原因而绿」的守卫**（§3.3）。换成 `target_type`（数字化后读成 `"5"`，非空 ⇒ 整条事实会被**照常投递**）才真正区分 |
 
 ### MISMATCH-07 · `comment_index` / `comment_content` INSERT 时 `updated_at` 取值不同
 
@@ -114,6 +141,9 @@
 | **RAG 现状** | `CommentTransactionalService.java:179` `index.setUpdatedAt(createdAt)` ⇒ **评论创建时刻**（Kafka 消息里的 `create_time`） |
 | **可观察后果** | INSERT 瞬间两值不同。该列不进 wire（`get_comment_logic.go:139` 只取 `created_at`），此后每次 UPDATE 两侧都写 `CURRENT_TIMESTAMP` ⇒ **不可观察窗口极窄**，但值确实不同 |
 | **严重度** | 列在 wire 上 ⇒ 按 `comment_content`/`comment_index` 的 `updated_at` 是否被任何读取路径使用，本次**未找到读取方** ⇒ 记为 MISMATCH 但影响面窄 |
+| **✅ 已修** | **2026-10-24**。两个 mapper 的 INSERT 改 `updated_at = CURRENT_TIMESTAMP`（**入库时刻**），`created_at` 仍是 Kafka 的 `create_time`（**评论创建时刻**）。⚠️ **GORM 侧依据（实测源码）**：`gorm@v1.31.2/callbacks/create.go:340-351` —— 字段值为**零** ⇒ 填 `curTime`；**非零** ⇒ 原样保留。Go 侧 `CommentIndex`/`CommentContent`（`data_model.go:22-49`）只赋 `CreatedAt` ⇒ `UpdatedAt` 留零 ⇒ 被填 `curTime`（入库时刻） |
+| **🧪 守门网** | `CommentRpcGoSemanticsGateTest#commentIndexInsertUsesInsertTimeForUpdatedAt` + `#commentContentInsertUsesInsertTimeForUpdatedAt`：把 `created_at` 设成 1 小时前 ⇒ 断言 `updated_at` 比它晚 10 分钟以上、且 ≈ now |
+| **🧬 变异实测** | 两处 `CURRENT_TIMESTAMP` 改回 `#{createdAt}` ⇒ **两个测试同时变红** ⇒ 守门网有效 |
 
 ---
 
@@ -224,13 +254,13 @@
 
 | # | 事项 | 类型 |
 |---|---|---|
-| **U1** | MISMATCH-01/02 需**真 PG + 真 Spring 上下文**的守门测试：断言「冻结信封非法 ⇒ `delivery_status=3` 落盘」「投递失败 ⇒ `delivery_status=2` 且 `retry_count=1` 落盘」 | 🔴 修漂移 + 配回归网 |
-| **U2** | MISMATCH-03/04/05/06 同属 `CommentFactDeliveryService` / `CommentDomainFactService` / `Wire` 三处，一次改动可解 4 条 | 🔴 修漂移 |
-| **U3** | 本组件**无任何投递路径测试**（现有 5 个测试类全不覆盖 `dispatchOnce`）⇒ 上述结论的证据强度上限是「Spring 默认回滚规则推导」，**未实测** | ⚠️ 证据缺口 |
+| **U1** | ~~MISMATCH-01/02 需真 PG 守门测试~~ ⇒ ✅ **2026-10-24 已完成**：`CommentRpcGoSemanticsGateTest`（11 例，真 PG + 真 MyBatis + 真事务），**并做了 10 条变异验证** | ✅ 已闭环 |
+| **U2** | ~~MISMATCH-03/04/05/06 一次改动可解 4 条~~ ⇒ ✅ **2026-10-24 已完成**（改动落在 `CommentFactDeliveryService` / `CommentDomainFactService` / `CommentDeliveryValidator` 三处 + 两个 mapper） | ✅ 已闭环 |
+| **U3** | ~~本组件无任何投递路径测试~~ ⇒ ✅ **2026-10-24 已补**：`dispatchOnce` 的三条出口（blocked / failed / accepted）均有真 PG 守门网 | ✅ 已闭环 |
 | **U4** | Go 侧三个 `_test.go`（`domain_fact_test.go` / `fact_process_fixture_test.go` / `fact_delivery_logging_test.go`）**默认 `t.Skip`** ⇒ Go 侧投递链路的**期望行为在 Go 仓里本身也没有活体证据** | ⚠️ 真源侧缺口 |
 | **U5** | `comment_fact_stream` 的 CHECK 在 Go 侧**是否常态存在取决于迁移执行顺序**（生产顺序有 / 测试顺序无） | ⚠️ 待核 |
 | **U6** | `comment_like` 的 Go 侧有**两份互相冲突的 DDL 产物**（AutoMigrate vs 手写 `001`），在 `id`（`bigserial` vs IDENTITY）与唯一约束形态上不同 ⇒ 不存在单一「Go 侧 DDL」基线 | ⚠️ 真源侧歧义 |
-| **U7** | MISMATCH-07（`updated_at` INSERT 取值）—— 未找到任何读取方 ⇒ 影响面待确认 | ⚠️ 待核 |
+| **U7** | ~~MISMATCH-07（`updated_at` INSERT 取值）—— 未找到任何读取方~~ ⇒ ✅ **2026-10-24 已修**：按 GORM `create.go:340-351` 的实测语义改成入库时刻；**仍无读取方** ⇒ 影响面窄但值已对齐 | ✅ 已修（影响面窄） |
 
 ---
 

@@ -32,15 +32,22 @@ public interface CommentIndexMapper {
      * <p>⚠️ {@code state} 取自敏感词判定（0 正常 / 1 审核中），由调用方传入；
      * {@code attribute} 取自消息（Go 侧建消息时恒为 0）。
      *
-     * <p>⚠️ {@code created_at} / {@code updated_at} 来自 Kafka 消息里的 {@code create_time}
-     * （{@code time.Unix(msg.CreateTime, 0)}），<b>不是</b>入库时刻。
+     * <p>⚠️ <b>{@code created_at} 来自 Kafka 消息里的 {@code create_time}</b>
+     * （{@code time.Unix(msg.CreateTime, 0)}）—— <b>评论创建时刻</b>，不是入库时刻。
+     *
+     * <p>🔴 <b>{@code updated_at} 用 {@code CURRENT_TIMESTAMP}（入库时刻），不是 created_at</b>：
+     * Go 侧构造 {@code CommentIndex} 时<b>只赋 {@code CreatedAt}</b>，
+     * {@code UpdatedAt} 留零 ⇒ GORM 的 {@code autoUpdateTime} 在 INSERT 时用
+     * {@code curTime}（入库时刻）填（{@code gorm.io/gorm/callbacks/create.go:344-347}）。
+     * <br>⇒ 两侧「created_at = 评论创建时刻、updated_at = 入库时刻」才一致。
+     * 修复前 RAG 侧两列都写 created_at ⇒ INSERT 瞬间两值不同。
      */
     @Insert("""
             INSERT INTO comment_index (id, target_type, target_id, user_id, root_id, parent_id,
                                         like_count, dislike_count, reply_count, state, attribute,
                                         created_at, updated_at)
             VALUES (#{id}, #{targetType}, #{targetId}, #{userId}, #{rootId}, #{parentId},
-                    0, 0, 0, #{state}, #{attribute}, #{createdAt}, #{updatedAt})
+                    0, 0, 0, #{state}, #{attribute}, #{createdAt}, CURRENT_TIMESTAMP)
             """)
     int insert(CommentIndexEntity index);
 

@@ -189,6 +189,107 @@ RAG 侧有**两个** ObjectMapper：
 
 ---
 
+## PIT-COMMENT-RPC-05 🔴 · 「因错误原因而绿」的假守卫 —— 断言对了，路径错了
+
+### 一句话
+
+**一条守门网可以断言出正确的结果，却是因为一条与被守行为无关的路径 ⇒ 变异测试一做就露馅。
+只看「测试是不是绿的」永远发现不了。**
+
+### 本轮实证（MISMATCH-06 的守门网第一版）
+
+要守的是「Go 的 `encoding/json` 对类型不匹配报错 ⇒ 载荷被数字化 ⇒ 必须 BLOCKED」。
+
+第一版守门网挑的字段是**载荷的 `schema_version`**（Go 侧是 `string`）：
+
+```java
+String payload = payloadJson(...).replace("\"schema_version\":\"rtw.community-fact.v1\"",
+                                          "\"schema_version\":1");
+assertThatThrownBy(...).isInstanceOf(Wire.FrozenEnvelopeBlockedException.class);
+```
+
+🔴 **这条断言恒绿 —— 但不是因为强转禁令生效**：
+
+| 步骤 | 删掉强转禁令后（= 修复前的状态） | 结果 |
+|---|---|---|
+| 宽松解码 `1` → `String` | 得 `"1"` | 解码**成功** |
+| `payload.schemaVersion != "rtw.community-fact.v1"` | `"1" != "rtw.community-fact.v1"` | ⇒ **判非法** |
+| 最终 | **BLOCKED** | **断言照样通过** |
+
+⇒ 它守的是「**版本号不匹配**」，不是「**类型不合法**」。把强转禁令整段删掉，测试**照样绿**。
+
+### 怎么改才守得住
+
+换成一个「数字化之后仍然合法」的字段：**载荷的 `target_type`**（Go 侧是 `string`）。
+
+| 步骤 | 删掉强转禁令后 | 结果 |
+|---|---|---|
+| 宽松解码 `5` → `String` | 得 `"5"` | 解码**成功** |
+| `isBlank(payload.targetType)` | `"5"` 非空 | **通过** |
+| 全部交叉校验 | 通过 | ⇒ **这条事实会被照常投递** |
+
+⇒ 有强转禁令：解码失败 ⇒ BLOCKED ⇒ 断言通过；
+无强转禁令：事实被**投递** ⇒ `mustNotBeCalled()` 的 sender 抛 `AssertionError` ⇒ **测试变红**。
+
+### 可复用的判据
+
+> **一条守门网要能区分「被守的行为」与「别的行为」，必须先问：
+> 把被守行为拿掉之后，它**是不是仍然会绿**？**
+> 如果仍然绿 ⇒ 它守的不是那件事。
+>
+> **判据的落地方式就是变异测试**（AGENTS.md §3.3：「绿测试可能是错误答案的守卫」）——
+> **变异测试不是「额外加一道保险」，它是「守门网本身是否守得住」的唯一检验手段。**
+
+⚠️ 附带一条元教训：**变异脚本自己也会造假绿**。
+本轮第一版脚本把 `restore` 写在了「跑测试」的函数里 ⇒ 同组第二条测试实际跑在**未变异的基线**上
+⇒ 两条「守门网失效」是**脚本的 bug**，不是代码的问题。
+⇒ **变异脚本必须保证「每条变异只影响它自己那一条断言」**（跑完立刻还原，且还原动作不能和跑测试耦合在一起）。
+
+### 对应本轮的漂移
+
+[`../../DRIFT/comment/rpc.md`](../../DRIFT/comment/rpc.md) 的 **MISMATCH-06**。
+
+---
+
+## PIT-COMMENT-RPC-06 🔴 · 「编程式事务」的守门网必须让 mapper **真的**参与那个事务
+
+### 一句话
+
+**用 `TransactionTemplate` 换掉 `@Transactional` 之后，测试里如果 mapper 走的是**另一条连接**，
+那么「事务提交了没有」这件事在测试里根本不成立 —— 守门网会恒绿。**
+
+### 形态
+
+生产（Spring Boot + MyBatis-Plus）里 mapper 与服务共享**同一条连接**，靠的是
+`DataSourceTransactionManager` 绑连接 + `SqlSessionTemplate` 取会话。
+
+测试里手搭夹具时，**两条路都长得像，但只有一条是对的**：
+
+| 写法 | 结果 |
+|---|---|
+| `sqlSessionFactory.openSession()` | 每次 mapper 调用**自己开一条连接**、自己提交 ⇒ **不在 Spring 事务里** ⇒ 断言「回滚后状态没落盘」**恒不成立** |
+| `new SqlSessionTemplate(factory)` + `template.getMapper(X.class)` | 会话被 `SqlSessionUtils` 绑到当前事务 ⇒ **与生产同构** ✅ |
+
+⇒ 关键三件套：`SpringManagedTransactionFactory`（`Environment` 里）+ `SqlSessionTemplate` + 同一个 `DataSource` 实例。
+
+### 可复用的判据
+
+> **断言「事务语义」的测试，必须能证明「被断言的那条 SQL 与被断言的那个事务在同一条连接上」。
+> 最好的证明是：让测试真的回滚一次，看状态有没有变。**
+
+### 附带：本域的两处版本陷阱
+
+| 陷阱 | 真相 |
+|---|---|
+| `mybatis-spring` 4.x 把 `SqlSessionTemplate` 从 `org.springframework.mybatis.spring` 挪到了 **`org.mybatis.spring`**；`SpringManagedTransactionFactory` 从 `org.apache.ibatis.transaction.managed` 挪到了 **`org.mybatis.spring.transaction`** | mybatis-spring **4.0.0**（由 `mybatis-plus-spring-boot3-starter:3.5.17` 引入） |
+| Jackson 2 的 `LogicalType` 常量是 **`Textual`**，**没有 `Text`** | 抄 `Jackson2ObjectMapperConfiguration` 时极易写成 `LogicalType.Text` ⇒ 编译不过（这类错误是**好的**错误） |
+
+### 对应本轮的漂移
+
+[`../../DRIFT/comment/rpc.md`](../../DRIFT/comment/rpc.md) 的 **MISMATCH-01 / MISMATCH-02**。
+
+---
+
 ## 与既有台账的关系
 
 | 文件 | 关系 |
