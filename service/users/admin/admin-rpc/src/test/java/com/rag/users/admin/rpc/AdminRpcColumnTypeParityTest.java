@@ -102,6 +102,7 @@ class AdminRpcColumnTypeParityTest {
     @Autowired private AdminDomainService domain;
     @Autowired private AdminInviteMapper adminInviteMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private javax.sql.DataSource dataSource;
 
     private static final long ADMIN_UID = 8801L;
 
@@ -125,6 +126,77 @@ class AdminRpcColumnTypeParityTest {
         for (String col : new String[]{"expires_at", "used_at", "create_time", "update_time"}) {
             assertEquals("timestamp with time zone", columnType("admin_invite", col),
                     "Go 的 data_model.go:24,26,27,28 是 time.Time 无 type tag ⇒ GORM 生成 timestamptz");
+        }
+    }
+
+    // ==================================================================
+    // 1b. 脚本重放的幂等性（**本轮自己引入的隐患，必须自证**）
+    // ==================================================================
+
+    /**
+     * 非 UTC 会话时区下重放 users 域 DDL，{@code timestamptz} 时刻**不得漂移**。
+     *
+     * <p><b>为什么这条必须存在</b>：{@code SchemaInitializer.applyAll}
+     * <b>每次启动都原样重放</b>这四份脚本（无版本账本，靠重放做升级）。
+     * 而 {@code 03} / {@code 04} 里的 ALTER 用了
+     * {@code USING create_time AT TIME ZONE 'UTC'} ——
+     * 该表达式对<b>已经是 timestamptz</b> 的列**并不恒等</b>：
+     * <pre>
+     *   timestamptz --AT TIME ZONE 'UTC'--> timestamp(UTC 墙钟)
+     *                --按会话 TimeZone 铸回--> timestamptz(可能被平移)
+     * </pre>
+     * 会话时区非 UTC 时，<b>每启动一次整列时刻就偏移一次，且永不收敛</b>。
+     * 两份脚本里写的 {@code SET TIME ZONE 'UTC'} … {@code RESET TIME ZONE}
+     * 就是为了让两条路径都恒等 —— <b>而这个前提此前没有任何测试守着</b>
+     * （台账本轮 §5 第 6 项自认「未验证」）。
+     *
+     * <p><b>本用例的可证伪性</b>：把 {@code 03/04} 里的
+     * {@code SET TIME ZONE 'UTC'} 那一行删掉 ⇒ 本条立刻红（时刻偏移一个时区差）。
+     * 用例自带「会话时区已被钉成 Asia/Shanghai」的前提断言，不依赖跑测试的机器时区。
+     *
+     * <p><b>为什么不能只查 DDL 脚本文本</b>：脚本文本里有那行 SET 不代表它被执行 ——
+     * 语句切分、事务、连接池都可能改变实际效果，必须让脚本<b>真跑一遍</b>。
+     */
+    @Test
+    @DisplayName("✅ 非 UTC 会话时区下重放 DDL，时刻不漂移（SET TIME ZONE 范式的守门）")
+    void ddlReplayDoesNotShiftInstantsUnderNonUtcSession() throws Exception {
+        seedAdmin(ADMIN_UID, "replay-admin");
+        // 用带偏移量的字面量写入，避免 Timestamp.from() 自己就掺进 JVM 默认时区
+        jdbcTemplate.update(
+                "update admin_admin set create_time = '2026-01-02T03:04:05+00:00'::timestamptz where uid = ?",
+                ADMIN_UID);
+        long before = epochSecondOfAdminCreateTime(ADMIN_UID);
+
+        // 会话时区钉成非 UTC —— 这正是会让 `AT TIME ZONE 'UTC'` 平移的条件
+        try (java.sql.Connection conn = dataSource.getConnection();
+             java.sql.Statement st = conn.createStatement()) {
+            st.execute("SET TIME ZONE 'Asia/Shanghai'");
+            assertEquals("Asia/Shanghai", currentSessionTimeZone(conn),
+                    "前提断言：会话时区必须真的是 Asia/Shanghai，否则本用例测不到任何东西");
+            com.rag.users.common.ddl.SchemaInitializer.applyAll(conn, "replay-probe");
+        }
+
+        long after = epochSecondOfAdminCreateTime(ADMIN_UID);
+        assertEquals(before, after,
+                "SchemaInitializer 每次启动都重放脚本。若 03/04 的 ALTER 少了 `SET TIME ZONE 'UTC'`，"
+                        + "`timestamptz AT TIME ZONE 'UTC'` 会在非 UTC 会话下把整列平移一个时区差，"
+                        + "且每次启动累积一次、永不收敛。before=" + before + " after=" + after);
+    }
+
+    /** {@code extract(epoch from timestamptz)} 给的是真实 epoch 秒，与会话时区无关。 */
+    private long epochSecondOfAdminCreateTime(long uid) {
+        Long v = jdbcTemplate.queryForObject(
+                "select extract(epoch from create_time)::bigint from admin_admin where uid = ?",
+                Long.class, uid);
+        assertNotNull(v, "行必须还在（重放不应删数据）");
+        return v;
+    }
+
+    private static String currentSessionTimeZone(java.sql.Connection conn) throws Exception {
+        try (java.sql.Statement st = conn.createStatement();
+             java.sql.ResultSet rs = st.executeQuery("show timezone")) {
+            rs.next();
+            return rs.getString(1);
         }
     }
 

@@ -1508,3 +1508,67 @@ users 域 DDL，多建 `users_user_avatar_history`。
 > 同理，`admin.updateuser` 在 **HTTP 层**虽被 `diff.py` 覆盖，
 > 但两侧 api 层都硬编码 `success=true` ⇒ **它对 rpc 层的 `success` 字段零覆盖**。
 > 「39 步全绿」推不出本条已闭环。
+
+## 8. ✅ 本轮自引入的隐患已闭环 —— DDL 重放的时区幂等性（**含变异测试实证**）
+
+> 上一节 §5 第 6 项自认「本轮新增的 `SET/RESET TIME ZONE` 未做运行时验证」⇒ 本节关闭它。
+
+### 8.1 问题
+
+`SchemaInitializer.applyAll` **每次启动都原样重放**这四份脚本（无版本账本，靠重放做升级），
+而 `03` / `04` 的 ALTER 用了 `USING <col> AT TIME ZONE 'UTC'`：
+
+```
+timestamptz --AT TIME ZONE 'UTC'--> timestamp(UTC 墙钟)
+             --按会话 TimeZone 铸回--> timestamptz(可能被平移)
+```
+
+会话时区非 UTC 时，**每启动一次整列时刻偏移一次，且永不收敛**。
+`01_create_user.sql:80-94` 已把这条坑记得很清楚，但**没有任何测试守着那个前提**。
+
+### 8.2 守门
+
+`AdminRpcColumnTypeParityTest#ddlReplayDoesNotShiftInstantsUnderNonUtcSession`（真 PG）：
+1. 写入 `create_time = '2026-01-02T03:04:05+00:00'::timestamptz`（**用带偏移量的字面量**，
+   避免 `Timestamp.from()` 自己就掺进 JVM 默认时区）；
+2. **把会话时区钉成 `Asia/Shanghai`**（含前提断言 `show timezone`），让危害条件成立；
+3. 真实调用 `SchemaInitializer.applyAll(conn, "replay-probe")` —— **让脚本真跑一遍**，
+   而不是查脚本文本里有几行 `SET`；
+4. 用 `extract(epoch from create_time)` 比对前后（该表达式与会话时区无关，给的是真实 epoch 秒）。
+
+### 8.3 🔴 变异测试实证（证明这条测试**不是假绿**）
+
+按 §3.3「变异测试能证明测试不是假绿，但**不能**证明期望值是对的 —— 两者缺一不可」：
+
+**变异**：把 `03_create_admin.sql` 的 `SET TIME ZONE 'UTC';` 那一行删掉（只改这一行，其余不动）。
+
+```
+Tests run: 1, Failures: 1
+AssertionFailedError: … before=1767323045 after=1767294245
+  ==> expected: <1767323045> but was: <1767294245>
+```
+
+**1767323045 − 1767294245 = 28800 秒 = 整 8 小时 = `Asia/Shanghai` 的 UTC 偏移。**
+
+⇒ 两个结论同时拿到：
+1. ✅ **守门是真的**：删掉那行 ⇒ 立刻红 ⇒ 有人误删 `SET TIME ZONE 'UTC'` 会被挡下；
+2. ✅ **危害是真的**：无 `SET` 时**一次重放就平移 8 小时**，
+   按 `SchemaInitializer` 的重放语义（每次启动一次）⇒ **每启动一次漂一次、永不收敛**。
+   这不是理论推演，是本轮跑出来的数。
+
+⇒ 文件已还原（`git diff service/users/users-common/` 为空），变异只存在于验证过程。
+
+### 8.4 本轮收尾数字（补跑，含新增用例）
+
+| 模块 | 测试类 | tests | failures | errors | **skipped** |
+|---|---|---|---|---|---|
+| `admin-rpc` | 14 | **92**（91 + 本节新增 1） | **0** | **0** | **0** |
+
+`AdminRpcColumnTypeParityTest` 逐条（真 PG，7.98s）：
+
+```
+✓ adminColumnsMatchGoDdlTypes                    库里的真实 schema：extra_info=text、6 个时间列=timestamptz
+✓ extraInfoAcceptsPayloadJsonbWouldReject        \u0000 payload 落库 + 往返一致 + 整列覆盖语义
+✓ inviteExpiryJudgedOnAbsoluteInstantNotWallClock 跨时区未过期邀请码被接受 / 已过期被拒（PERMISSION_DENIED）
+✓ ddlReplayDoesNotShiftInstantsUnderNonUtcSession 非 UTC 会话下重放 DDL，时刻不漂移（变异实测会红）
+```
