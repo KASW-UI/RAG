@@ -843,7 +843,7 @@ RAG `3047ms/4455ms`，量级一致、可复现，**但以复测值为准**：
 | 项 | Go | RAG | 判定 |
 |---|---|---|---|
 | `users.status` | `is_nullable = YES` | `NO` | 🔴 **V-002 仍在**（真库确证） |
-| `users.extra_info` | `text` | `jsonb` | 🔴 **V-003 仍在**（真库确证） |
+| `users.extra_info` | `text` | ✅ `text` | ✅ **V-003 已修**（2026-10-23，`ec33159`）；`admin_admin.extra_info` 同轮前后一致 |
 | `users.create_time` / `update_time` 的 **DEFAULT** | **无** | **有 `CURRENT_TIMESTAMP`** | 🔴 **新登记 V-011** |
 | 索引 / 唯一约束 / NOT NULL | 见下 | 见下 | ✅ **功能等价** |
 
