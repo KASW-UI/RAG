@@ -18,8 +18,10 @@ import org.springframework.stereotype.Service;
  *
  * <p>L1 外部契约 + L2 业务语义（4 状态机，1:1 复刻）：
  * <pre>
- *   1. IdentityResolver.claimedUID(request) → uid
+ *   1. IdentityResolver.claimedUIDAllowNonPositive(request) → uid
  *      → 失败 → ErrorTokenRuntime (1006)
+ *      ⚠️ 这里**不**做 uid&lt;=0 判定：Go 的 deleteuserlogic.go:37-47 没有这个判定
+ *         （2026-10-23 修 DRIFT-USERAPI-002）
  *
  *   2. 调 userRpc.deleteUser(DeleteUserReq{Uid})
  *      → 失败 或 rpcResp.Success == false：
@@ -47,7 +49,13 @@ public class UserDeleteService {
     public DeleteUserResp deleteUser(DeleteUserReq req, HttpServletRequest httpRequest) {
         long uid;
         try {
-            uid = IdentityResolver.claimedUID(httpRequest);
+            // 🔴 2026-10-23（DRIFT-USERAPI-002 已修）：用 claimedUIDAllowNonPositive，
+            //   **不**做 uid<=0 判定 —— Go 的 deleteuserlogic.go:37-47 没有这个判定，
+            //   uid=0 / 负数照常进 rpc（最终由 rpc 的 NOT_FOUND 收敛成 1003）。
+            //   实测（双侧活体对拍，2026-10-23 21:12）：
+            //       Go  : 200 {"code":1003,"msg":"用户不存在","data":null}
+            //       RAG : 200 {"code":1006,…}            ← 修复前
+            uid = IdentityResolver.claimedUIDAllowNonPositive(httpRequest);
         } catch (IdentityResolver.ErrInvalidClaimException e) {
             log.error("deleteUser ErrInvalidClaim", e);
             throw new BusinessException(ErrorCode.ERROR_TOKEN_RUNTIME.getCode(), ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());

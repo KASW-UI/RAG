@@ -26,6 +26,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -253,23 +254,56 @@ class UserRpcContainerWiringTest {
     }
 
     /**
-     * 防回退：{@code updateUserById} 的 {@code any == false → return 0} 语义。
-     * Go 侧 GORM 对全零值 struct 不发 UPDATE，RAG 必须同样"什么都不改就返回 0"。
+     * 🔴 2026-10-23（DRIFT-USERRPC-V-010 修复）：<b>旧断言是错的，本用例被反转</b>。
+     *
+     * <p>旧用例名 {@code zeroValuePatchDoesNotUpdate} / 旧 DisplayName「全零值 patch 不发 UPDATE
+     * （对齐 GORM 的 no-op 语义）」断言「无字段变更 ⇒ 返回 0、不发 UPDATE、update_time 不推进」。
+     * <p>⚠️ 那条「GORM 的 no-op 语义」<b>没有 Go 出处</b>，且被 2026-10-23 的
+     * <b>双侧活体对拍</b>证伪（真进程 + 真 PG，2026-10-23 21:25）：
+     * <pre>
+     *   请求体 {}                 Go: update_time 推进   RAG(修复前): 不推进   ← 漂移
+     *   请求体 {"extra_info":{}} Go: update_time 推进   RAG(修复前): 不推进   ← 漂移
+     * </pre>
+     * <p><b>Go 出处（消费点）</b>：{@code gorm.io/gorm@v1.31.1/callbacks/update.go:235-252}
+     * <pre>
+     * if field.AutoUpdateTime &gt; 0 &amp;&amp; value[field.Name] == nil &amp;&amp; value[field.DBName] == nil {
+     *     now := stmt.DB.NowFunc()
+     *     assignValue(field, now)
+     *     set = append(set, clause.Assignment{Column: …, Value: now})   // ← 无条件进 SET
+     * }
+     * </pre>
+     * ⇒ {@code autoUpdateTime} <b>无条件</b>进 SET ⇒ {@code ConvertToAssignments} 的 set 非空
+     * ⇒ {@code callbacks/update.go:74-79} 的 {@code else { return }}（"空 set 就不发 UPDATE"）<b>不触发</b>
+     * ⇒ <b>Go 总会发出一条只推进 update_time 的 UPDATE</b>。
+     * <p>⇒ 本用例现在锁住的是「<b>必须</b>发 UPDATE、<b>必须</b>推进 update_time、
+     * 但<b>不得</b>改任何业务列」这三条。
      */
     @Test
-    @DisplayName("DRIFT-001：全零值 patch 不发 UPDATE（对齐 GORM 的 no-op 语义）")
-    void zeroValuePatchDoesNotUpdate() {
+    @DisplayName("DRIFT-USERRPC-V-010：全零值 patch 仍发 UPDATE（只推进 update_time，不碰业务列）")
+    void zeroValuePatchStillAdvancesUpdateTimeOnly() throws Exception {
         long uid = 700004L;
         seedUser(uid, "jsonb-nopatch", "jsonb-nopatch@example.com");
         Object before = jdbcTemplate.queryForObject(
                 "SELECT update_time FROM users_user WHERE uid = ?", Object.class, uid);
+        String emailBefore = jdbcTemplate.queryForObject(
+                "SELECT email FROM users_user WHERE uid = ?", String.class, uid);
+
+        // PG 的 CURRENT_TIMESTAMP 是**事务**时间戳；两次读之间必须跨事务才能看出推进。
+        Thread.sleep(30L);
 
         int affected = userMapper.updateUserById(uid, new UserEntity());
-        assertEquals(0, affected, "无字段变更时应返回 0 且不发 UPDATE");
+        assertEquals(1, affected,
+                "全零值 patch 仍必须发出 UPDATE —— Go 的 autoUpdateTime 无条件进 SET"
+                        + "（gorm callbacks/update.go:238-252）");
 
         Object after = jdbcTemplate.queryForObject(
                 "SELECT update_time FROM users_user WHERE uid = ?", Object.class, uid);
-        assertEquals(before, after, "不发 UPDATE ⇒ update_time 不应推进");
+        assertNotEquals(before, after,
+                "update_time 必须推进 —— 这是 Go 侧 autoUpdateTime 的无条件行为");
+
+        String emailAfter = jdbcTemplate.queryForObject(
+                "SELECT email FROM users_user WHERE uid = ?", String.class, uid);
+        assertEquals(emailBefore, emailAfter, "业务列不得被这次 UPDATE 改动");
     }
 
     // ==================================================================

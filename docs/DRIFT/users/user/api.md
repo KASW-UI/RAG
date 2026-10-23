@@ -1164,3 +1164,164 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 | **N-1 鉴权失败 body 形状** | ✅ 是 | **仍然成立（未变）**，但本轮**扩大了它的覆盖范围** | 事实复核通过：`service/user` 全树 `grep WithUnauthorizedCallback` **零命中** ⇒ `engine.unauthorizedCallback` 为 nil ⇒ `authhandler.go:116-121` 只写 401、**不写 body** ⇒ Go 的 JWT 401 确为空 body。新增：**DRIFT-USERAPI-010** 把 N-1 的范围从 body 扩到 Content-Type 头 |
 | **N-2 Go 中文乱码** | ❌ **不属本组件** | 不改判 | 9 处乱码全在 `user/rpc/internal/logic/`，**没有一处在 user-api**。user-api 只按 `status.Code` 分支、不透传 `status.Message` ⇒ 本轮 6 条 rethrow 端点也只取 `getStatus().getCode()` |
 | **§6.1 的 2 / 3 / 4 / 6（admin-rpc 事务 / 邀请码 FOR UPDATE / extra_info jsonb / UpdateSelf 空 email）** | ❌ **不属本组件** | 不改判 | 全部发生在 admin-rpc 的 SQL 层，user-api 零 DB 访问 |
+---
+
+## 2026-10-23 第三轮：双侧活体对拍 + 守门测试（claim 语义两条已修）
+
+> 本节把本组件的证据强度从 **「静态源码」** 抬到 **「Go 进程 ↔ RAG 进程 双侧活体对拍」**
+> —— 上一节 §「证据强度声明」里写着「**本轮没有任何一条结论来自双侧活体对拍**」，
+> 本节**推翻该声明**（只推翻这一点，同节其余 UNRESOLVED 仍然有效，见 §6）。
+> 本节同时**修掉了 §7 的两条 SEMANTIC MISMATCH（DRIFT-USERAPI-001 / -002）**。
+
+### 0. 元信息与证据强度（对照上一节的声明）
+
+| 项 | 值 |
+|---|---|
+| 核对日期 | **2026-10-23**（21:10–21:15 实跑对拍；21:31 重建 jar 后复跑） |
+| 组件 | `service/users/user/user-api`（本节）· 对端 `user-rpc` 见 [`rpc.md`](./rpc.md) 同名节 |
+| **证据强度（本节新增部分）** | ✅ **双侧活体对拍**（Go api 进程 :19188 ↔ RAG api 进程 :60900，各自接真 PG/真 Redis，逐字比对 body + 状态码） |
+| 对拍 harness | 与 `rpc.md` 同一套隔离环境（`userprobe-postgres`:56432 / `userprobe-redis`:57379），理由见 `rpc.md` §0（**并行 admin 会话占用共享端口/容器，不碰**） |
+| 探针 | `/tmp/userprobe/probe_auth.py`（claim 语义，5 个 case 逐字比对两侧 status + body）· `/tmp/userprobe/diff.py --scenario user`（17 步全场景） |
+| 基线（修复前） | user-api **69**/0/0/0 |
+| 终态（修复后） | user-api **76**/0/0/0（新增守门 7 条，**skipped = 0**） |
+| 冻结仓库 | Go 二进制从冻结仓 `go build`，配置用 `tools/difftest/conf/go/*.yaml` 的**副本** ⇒ 冻结仓一个字节未动 |
+
+> 🔴 **§「证据强度声明」的三处更正**（上一节写于本轮之前）：
+> 1. 「`双侧活体对拍` **0 条**」→ 本节起 **5 条 claim 语义结论**来自双侧活体对拍（`probe_auth.py` 实跑）。
+> 2. 「`真 PG` **本组件无 DB 访问 → 0 条**」→ **该判断本身仍然成立**（user-api 确实零 DB 访问），
+>    但它**不等于**本组件无法做活体对拍 —— 对拍时 RAG api 连的是**真 user-rpc 进程**，
+>    后端落的是**真 PG**。见 §6 的诚实边界。
+> 3. 「纯 Mockito **0 条**」→ 本轮新增的守门类替换了 gRPC 边界（`@MockitoBean UserRpcClient`），
+>    故**新类的证据强度是「真 MVC + 真 Redis + mock gRPC 边界」**，不是「纯 Mockito」
+>    （纯 Mockito 单测 = 数据层与框架层全 mock，本类两者都不是）。**这条是措辞更正，不是结论反转。**
+
+### 1. DRIFT-USERAPI-001 ✅ 已修 —— 畸形 claim 必须是 **200 + 1006**，不是 401
+
+**双侧活体对拍实测（修复前，2026-10-23 21:12）**：
+
+| case | Go | RAG（修复前） | RAG（修复后） |
+|---|---|---|---|
+| claim 缺失（无 `userId`） | `200 {"code":1006,…}` | ❌ `401 {"code":1006,…}` | ✅ `200 {"code":1006,…}` |
+| claim 是字符串 | `200 {"code":1006,…}` | ❌ `401 {"code":1006,…}` | ✅ `200 {"code":1006,…}` |
+
+**Go 出处（消费点，非声明点）**：
+- `github.com/zeromicro/go-zero/rest/handler/authhandler.go:54-81` ——
+  只有 `ParseToken` 失败（`:56-62`）与 `!tok.Valid`（含 `exp` 过期，`:64`）两条会走 401 分支；
+  `:65-79` 把**所有非标准 claim**（含 `userId`）塞进 `ctx.Values`，`:81` 直接 `next.ServeHTTP`
+  ⇒ **claim 的存在性与类型在鉴权层从不校验**。
+- `service/user/user/identity/resolve.go:70-73` ——
+  `claim, ok := ctx.Value("userId").(json.Number)`；`!ok` ⇒ `ErrInvalidClaim`。
+- `service/user/user/api/internal/logic/user/deleteuserlogic.go:37-41` ——
+  同样的 type assertion，失败即 `return nil, errmsg.ErrorTokenRuntime`。
+- `service/user/user/api/internal/handler/user/deleteuserhandler.go:27` ——
+  `httpx.OkJson(w, &response.Response{...})` ⇒ **HTTP 200**（不是 401）。
+
+**RAG 修法**（`interceptor/JwtAuthInterceptor.java:153-195`）：
+claim 不是 `Number` 时**只 `log.warn`（`:194`）、不写 `userId` attribute、不抛异常**，
+继续走黑名单检查（`:220`），把判定交给业务层。
+⚠️ 注意：**黑名单检查没有因此被跳过** —— 这与 Go 一致（Go 的黑名单中间件在 JWT 之后独立跑，
+拿不到 `userId` 时用别的键；本实现的 `:220` 用 `claimUsable ? uid : "n/a"` 表达同一件事）。
+
+**可证伪性**：把 `:154` 的分支改回抛 `AuthenticationException` ⇒ 守门用例 1 / 2 立刻红。
+
+### 2. DRIFT-USERAPI-002 ✅ 已修 —— delete / update 的 `uid<=0` 必须**透传**
+
+**双侧活体对拍实测（修复前，2026-10-23 21:12）**：
+
+| case | Go | RAG（修复前） | RAG（修复后） |
+|---|---|---|---|
+| `userId=0` → `delete` | `200 {"code":1003,"msg":"用户不存在"}` | ❌ `200 {"code":1006,…}` | ✅ `200 {"code":1003,…}` |
+| `userId=0` → `update` | `200 {"code":1003,"msg":"用户不存在"}` | ❌ `200 {"code":1006,…}` | ✅ `200 {"code":1003,…}` |
+| `userId=0` → `get` | `200 {"code":1006,…}` | ✅ `200 {"code":1006,…}`（本就一致） | ✅ 不变 |
+| `userId=0` → `avatar/history` | `200 {"code":1006,…}` | ✅ `200 {"code":1006,…}`（本就一致） | ✅ 不变 |
+
+**Go 出处（消费点）**：
+- `service/user/user/api/internal/logic/user/deleteuserlogic.go:37-47` ——
+  `type assertion 失败 ⇒ 1006`；`userId.Int64()` 之后**直接 `rpcReq := &pb.DeleteUserReq{Uid: uid}`**，
+  **全函数无 `uid <= 0` 判定**。
+- `service/user/user/api/internal/logic/user/updateuserlogic.go:36-46` —— 同构，无 `uid<=0` 判定。
+- **对照组**：`service/user/user/identity/resolve.go:66-79` 的 `ClaimedUID` ——
+  `:75` 是 `if err != nil || uid <= 0 { return 0, ErrInvalidClaim }`，**有** `uid<=0` 判定。
+  ⇒ Go 侧 `get` / `avatar*` 走 `ClaimedUID`（拒），`delete` / `update` **不走**（放行）。
+  **两套语义并存是 Go 的事实，不是笔误。**
+
+**RAG 修法**：新增 `IdentityResolver.claimedUIDAllowNonPositive`（`service/IdentityResolver.java:160-172`，
+只在 `:169` 去掉 `uid<=0` 判定，type assertion 失败仍抛）；
+`UserDeleteService.java:58` 与 `UserUpdateService.java:59` 改用它；
+**其余端点继续用 `claimedUID`（`:110` 保留 `uid<=0` 判定）** —— 即**不**统一抹平 Go 的两套语义。
+
+**可证伪性**：把 delete / update 改回 `claimedUID` ⇒ 用例 3 / 4 立刻红（rpc 不再被调用，1003 变 1006）；
+把 `get` 改用 `claimedUIDAllowNonPositive` ⇒ 用例 5 立刻红。
+
+### 3. 🔴 对拍暴露的**第三层差异**：差异不止于返回值，还包括**是否触达下游**
+
+本轮特意核对了 **rpc 调用次数**（Go 侧看 rpc 进程日志，RAG 侧看 client 调用计数）：
+修复前 `userId=0` 打 delete / update 时，**RAG 一次 rpc 都没发**（在 api 层就被拒了），
+Go 则**照发**（`deleteuserlogic.go:47` 构造 `pb.DeleteUserReq{Uid: 0}`）。
+⇒ 一个只对比 HTTP 响应的探针**会漏掉这一层**。守门测试因此对 mock stub 做了
+`ArgumentCaptor` 断言（`UserApiClaimSemanticsParityTest.java:172`、`:192`），
+**锁住的是「rpc 被调了一次且入参 uid=0」，不是「返回了 1003」**。
+
+### 4. 全场景对拍（`diff.py --scenario user`，17 步）
+
+修复后复跑（2026-10-23 21:32，V-010 修复后的新 jar）：
+
+```text
+steps=17  asserted=5  byte_equal=12  unexpected=0
+```
+
+- 5 条 `asserted` = 已签字偏离，**逐条断言两侧 body**（断言不通过照样算 DIFF）：
+  N-1 三条（无 token / 坏 token / 注销后再访问）+ DRIFT-006 两条（畸形 JSON 的 400）。
+- 12 条 `byte_equal` = 归一化后**逐字节相等**（uid / history id / 时间戳按 §`diff.py` 的占位规则归一）。
+- ⚠️ **首跑出现 3 条 unexpected（`uid` / `history[].id` 未归一）**，根因是**两侧库里都残留了上一轮的
+  `dt_user1`** ⇒ `user.register` 直接返 1001 ⇒ `capture` 没抓到 uid ⇒ 归一化器拿不到别名。
+  清库后归零。**这不是 RAG 的缺陷，但它是「探针自身的可证伪性」的一个实例：探针也会假红。**
+- ⚠️ **该工具测不到本轮修的两条**：`diff.py` 的 case 集里没有畸形 claim / `uid=0` 的 token
+  ⇒ 必须用 `probe_auth.py`。同 `rpc.md` §0 对 `create_time` 的说明（`TS_KEYS` 无条件抹平）。
+
+### 5. 守门测试清单（`UserApiClaimSemanticsParityTest`，7 条，**skipped = 0**）
+
+| # | 用例 | 锁住什么 | 变异后 |
+|---|---|---|---|
+| 1 | claim 缺失 → 200 + 1006 | DRIFT-USERAPI-001 | 变 401 |
+| 2 | claim 是字符串 → 200 + 1006 | DRIFT-USERAPI-001 | 变 401 |
+| 3 | `userId=0` → delete **透传 rpc**（`ArgumentCaptor` 验 uid=0） | DRIFT-USERAPI-002 | 1006 / 不调 rpc |
+| 4 | `userId=0` → update **透传 rpc**（同上） | DRIFT-USERAPI-002 | 1006 / 不调 rpc |
+| 5 | `userId=0` → get → 1006 且 **rpc 零调用**（对照组） | Go 的两套语义 | get 放行 uid=0 |
+| 6 | `userId=0` → avatar/history → 1006 且 rpc 零调用（对照组） | Go 的两套语义 | 同上 |
+| 7 | 签名无效 → 仍然 401 | N-1 未被误伤 | 401 变 200 |
+
+> 用例 5 / 6 是**对照组**，作用是防止「为了让 -002 通过，把 `claimedUID` 的判定也删掉」
+> —— 那是修 A 顺手弄坏 B 的最自然路径。**没有对照组的定向修复等于没修。**
+
+**证据强度（诚实标注）**：`@SpringBootTest` + `@AutoConfigureMockMvc`（**真 MVC 管线**：
+真 `HttpMiddleware` filter + 真 `JwtAuthInterceptor` + 真 advice，**不是** `standaloneSetup`）
++ **真 Redis**（Testcontainers，黑名单路径必须真连）。
+**唯一被替换的是 gRPC 边界**（`@MockitoBean UserRpcClient`，`:123-124`）。
+⚠️ **user-api 自身零 DB 访问 ⇒「真 PG 守门」对本组件不适用**（不是漏做，是不适用）。
+⇒ **本类是回归守门，不是一致性证据**；一致性证据是 §1/§2 的双侧活体对拍。
+
+### 6. 本轮的诚实边界（什么仍然没验）
+
+1. **§9 的 UNRESOLVED-002（jjwt `signWith` 按 key 长度选算法）仍 unresolved** ——
+   本轮造 token 时用的是与 `application.yml` 相同的 36 字节 UUID 密钥（≥32 ⇒ HS256），
+   **没有覆盖短密钥分支**，不能据此宣布已对齐。
+2. **§9 的 UNRESOLVED-004（Redis 慢 / 断连）仍未验** ——
+   `UNRESOLVED-USERRPC-004②`（Redis 启动 fail-fast）与本条是同一件事的两端，本轮都没做。
+3. **DRIFT-USERAPI-003 ~ 010 一条都没动** —— 本轮范围只锁 claim 语义两条。
+   其中 003（gRPC 错误码通用映射）与 `user-rpc` 的行为强耦合，
+   **若 `user-rpc` 后续改了错误码集合，本条必须重判**（§9 UNRESOLVED-003 仍是合并判读项）。
+4. **`HttpMiddleware` / 401 的 body 形状（N-1）本轮未重新取证** ——
+   `diff.py` 的 5 条 assert 已覆盖「两侧 body 不同但都在预期集合内」，**不等于**逐字节确认过。
+5. **DRIFT-USERAPI-005（`avatar/history` 读不读 body）本轮未验** ——
+   `diff.py` 只打了 `{}` 空 body，**没打带 body 的请求** ⇒ 该条仍静态源码级。
+
+### 7. 复核后**不改判**的既有结论
+
+| 条目 | 本轮复核 | 依据 |
+|---|---|---|
+| 附录 B 第 1 条（`@ResponseBodyAdvice` 二次包裹） | ✅ 仍成立 | 21:12 起的 7 条守门用例全部经**真 MVC 管线**跑通，`body == null \|\| body instanceof Response` 的放行分支在位（否则 200 + 1006 会被二次包裹） |
+| 附录 B 第 10' 条（`DRIFT-FRAMEWORK-001` transport status propagate） | ✅ 仍成立 | 用例 7 实测签名无效 → **HTTP 401**（不是 200）⇒ `setStatus` 的 propagate 链路在位 |
+| 附录 B 第 7 条（`JwtUtil` zero-pad） | ✅ 仍成立 | 7 条用例的 token 用**同一份** `JwtUtil` 签 + `JwtAuthInterceptor` 验，36 字节密钥下 `padToHmacKeySize` 是 no-op |
+| 附录 B 第 8 条（登录 `UNAUTHENTICATED` 映射） | ✅ 仍成立 | `diff.py` 的 `user.login.wrongpw` 步实测两侧均 1002 |
+| §9 UNRESOLVED-003（需与 user-rpc 合并判读） | ⏳ **仍 unresolved** | 本轮 `user-rpc` 侧未改错误码集合，故本条**不能**因本轮而关闭 |

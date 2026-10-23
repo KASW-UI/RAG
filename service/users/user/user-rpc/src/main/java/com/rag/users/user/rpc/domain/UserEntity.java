@@ -49,40 +49,63 @@ public class UserEntity {
      * 对应 Go {@code Status int64 `gorm:"column:status;default:0"`}
      * （声明点 {@code service/user/user/rpc/internal/model/data_model.go:11}，<b>无 not null</b>）。
      *
-     * <p>🔴 <b>此处曾写 {@code = 0L}，已删除（2026-10-23，DRIFT-USERRPC-V-001）。</b>
+     * <p>🔴 <b>{@code = 0L} 曾于 2026-10-23 被删掉，2026-10-23 当天又原样恢复。</b>
+     * 下面是那次误删与恢复的完整依据，**保留是因为它正是等价性的实现载体，不是历史包袱**。
      *
-     * <p><b>为什么那个默认值会造成 fail-open</b>（§3.3.1 的典型形态）：
-     * 字段初始化值只在「setter 从未被调用」时才可见，而
+     * <h3>Go 的语义：{@code status IS NULL} 读出来是 {@code 0}，<b>不报错</b></h3>
+     * <p>声明点：{@code service/user/user/rpc/internal/model/data_model.go:11}
+     * {@code Status int64 `gorm:"column:status;default:0"`}（<b>无 not null</b>，值类型非指针）。
+     * <p><b>消费点</b>（三段，逐段都要看，缺一段就会得出相反结论）：
+     * <ol>
+     *   <li>{@code gorm.io/gorm@v1.31.2/schema/field.go:616-622} 给 int64 字段装的 setter：
+     *       {@code case **int64: if data != nil && *data != nil { …SetInt(**data) }}
+     *       —— <b>{@code *data == nil} 时什么都不做</b>，字段保持<b>零值 0</b>；</li>
+     *   <li>{@code gorm@v1.31.2/scan.go:21} {@code prepareValues} 与
+     *       {@code schema/field.go:1009} {@code NewValuePool} 都是
+     *       {@code poolInitializer(reflect.PointerTo(field.IndirectFieldType))}
+     *       ⇒ 传给 {@code rows.Scan} 的 dest 是 <b>{@code **int64}</b>，不是 {@code int64}；</li>
+     *   <li>因此 {@code database/sql/convert.go:431-435} 走的是
+     *       {@code case reflect.Pointer: if src == nil { dv.SetZero(); return nil }}
+     *       ⇒ <b>不报错</b>。
+     *       （{@code convert.go:438-440} 那条
+     *       {@code case reflect.Int64: if src == nil { return "converting NULL to int64 is unsupported" }}
+     *       <b>永远走不到</b>，因为 dest 的 kind 是 Pointer 而不是 Int64。）</li>
+     * </ol>
+     *
+     * <h3>本类的机制与之<b>逐条同形</b></h3>
      * MyBatis 的 {@code DefaultResultSetHandler} 在
      * {@code value == null && !callSettersOnNulls} 时<b>跳过 setter</b>
      * （{@code callSettersOnNulls} 默认 {@code false}）
-     * ⇒ {@code status IS NULL} 的行读出来是 <b>{@code 0L}</b>，<b>不是 null</b>。
+     * ⇒ 字段初始化值 {@code 0L} 留了下来 ⇒ {@code status IS NULL} 同样读成 <b>{@code 0L}</b>。
      *
-     * <p>于是 Login 里的 {@code if (user.getStatus() != null && user.getStatus() == 1L)}
-     * 判成「未封禁」⇒ <b>被封禁用户可以登录</b>。
-     * 而同一份代码的 {@code getUser} 处写着
-     * 「status=0 意为活跃，把 NULL 默认成活跃是朝错误方向的 fail-open」
-     * —— <b>同一个字段，两条路径两个方向</b>。
+     * <h3>⇒ 曾经那版「fail-closed」是<b>真的偏离</b></h3>
+     * 2026-10-23 上午，本类被删掉 {@code = 0L}，并在
+     * {@code UserDomainService#login} / {@code #getUser} 加了
+     * 「status 为 null ⇒ 抛 INTERNAL」的守卫，理由写的是
+     * 「{@code gorm@v1.31.2/scan.go:153 rows.Scan} 对 NULL → int64 直接返回错误」。
+     * <b>该理由已被上面第 2/3 段与双侧活体对拍同时证伪</b>：
+     * <pre>
+     *   status IS NULL 打 Login ：Go 200 + token   RAG（误修后）5001「系统内部错误」
+     *   status IS NULL 打 GetUser：Go 200（status 字段被 omitempty 省掉 ⇒ 即 0）
+     *                            RAG（误修后）5001「系统内部错误」
+     * </pre>
+     * ⇒ <b>删掉 {@code = 0L} 才是不等价的那一侧</b>。现已恢复。
      *
-     * <p><b>Go 的语义不是「NULL 当 0」而是「NULL 读不出来」</b>：
-     * {@code gorm@v1.31.2/scan.go:153} {@code rows.Scan(values...)} 对
-     * 「NULL → int64」直接返回错误 ⇒ 整条 Login 走 db_error 支（INTERNAL）。
-     * ⇒ Java 侧必须让 {@code null} <b>真的传上来</b>，由调用点显式判。
+     * <p>⚠️ <b>admin-rpc 的同名实体一直保留 {@code = 0L}</b>（与本类同形）——
+     * 是<b>当时正确</b>的一侧，2026-10-23 上午被本组件的误修文档反向指为「同款缺陷」，
+     * 该指认已撤销，见 {@code docs/DRIFT/users/user/rpc.md} 第三轮 §8。
      *
-     * <p>⚠️ <b>删除初始化值不会改变写入语义</b>，两条路径都不依赖它：
+     * <p>⚠️ <b>删除/恢复初始化值都不改变写入语义</b>，两条写入路径都不依赖它：
      * <ul>
      *   <li><b>INSERT</b>：{@code UserDomainService.register} 显式
-     *       {@code u.setStatus(0L)}（:321），与 Go 的 {@code default:0} 语义一致；</li>
+     *       {@code u.setStatus(0L)}，与 Go 的 {@code default:0} 语义一致；</li>
      *   <li><b>UPDATE</b>：{@code UserMapper#updateUserById} 用
      *       {@code LambdaUpdateWrapper.set(...)} <b>逐字段显式 set</b>，
-     *       不走 {@code updateById(entity)} ⇒ 本来就与字段默认值无关。</li>
+     *       不走 {@code updateById(entity)}。</li>
      * </ul>
-     *
-     * <p>⚠️ <b>admin-rpc 的同名实体仍有 {@code = 0L}</b>（同款缺陷类，属另一个组件），
-     * 未在本轮一并改 —— 见台账的跨组件待办。
      */
     @TableField("status")
-    private Long status;
+    private Long status = 0L;
 
     @TableField("score")
     private Integer score;

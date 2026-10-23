@@ -14,6 +14,7 @@ import com.rag.users.user.proto.LogoutReq;
 import com.rag.users.user.proto.SelectAvatarReq;
 import com.rag.users.user.proto.UpdateUserReq;
 import com.rag.users.user.proto.UploadAvatarReq;
+import com.rag.users.user.proto.UserInfo;
 import com.rag.users.user.rpc.config.UserRpcProperties;
 import com.rag.users.user.rpc.domain.UserAvatarHistoryEntity;
 import com.rag.users.user.rpc.domain.UserEntity;
@@ -335,7 +336,7 @@ class UserDomainServiceTest {
         history.setContentType("image/png");
         history.setSizeBytes(1024L);
         history.setIsCurrent(true);
-        history.setCreateTime(LocalDateTime.now());
+        history.setCreateTime(java.time.OffsetDateTime.now());
         when(avatarHistoryMapper.createAvatarHistory(any(), anyLong(), anyString(), anyString(), anyString(), anyLong()))
                 .thenReturn(history);
 
@@ -358,7 +359,7 @@ class UserDomainServiceTest {
         h1.setHistoryId("h-1");
         h1.setUid(1L);
         h1.setAvatarUrl("http://a/1.png");
-        h1.setCreateTime(LocalDateTime.now());
+        h1.setCreateTime(java.time.OffsetDateTime.now());
         // req.getLimit() == 10 直接传入 mapper；mapper 内部 default 方法再做 clamp，
         // 但这里测的是 UserDomainService → mapper 的调用，所以按 (uid=1, limit=10) mock
         when(avatarHistoryMapper.listAvatarHistory(1L, 10))
@@ -651,42 +652,68 @@ class UserDomainServiceTest {
     // ==================================================================
 
     /**
-     * DRIFT-011 回归：{@code status} 为 NULL 时必须走 Go 的
-     * {@code codes.Internal "DB查询失败"}，而不是在 {@code setStatus(Long)} 上自动拆箱炸 NPE。
+     * 🔴 DRIFT-USERRPC-V-012 回归：{@code getUser} <b>不</b>再对 NULL status 抛 INTERNAL ——
+     * 那道守卫的依据（"GORM 把 NULL 扫进 int64 会直接报错"）<b>已被证伪</b>。
      *
-     * <p>Go 出处 model/data_model.go:11 {@code Status int64}（值类型，非指针）+
-     * model/user.go:22-29：GORM 把 NULL 扫进 int64 会直接返回错误 ⇒
-     * {@code FindOneByUid} 返回非 sentinel 错误 ⇒ {@code LogBusinessErr(ErrorDbSelect)}
-     * + {@code codes.Internal "DB查询失败"}。
+     * <p><b>Go 的真实语义</b>：{@code status IS NULL} 被<b>读成 0</b>、<b>不报错</b>。
+     * 消费点三段（缺一段就会得出相反结论）：
+     * <ol>
+     *   <li>{@code gorm@v1.31.2/schema/field.go:616-622} 给 int64 装的 setter 是
+     *       {@code case **int64: if data != nil && *data != nil { …SetInt(**data) }}
+     *       ⇒ {@code *data == nil} 时<b>不动作</b>，字段留零值 0；</li>
+     *   <li>{@code gorm@v1.31.2/scan.go:21} 与 {@code schema/field.go:1009} 传给
+     *       {@code rows.Scan} 的 dest 是 <b>{@code **int64}</b>；</li>
+     *   <li>{@code database/sql/convert.go:431-435}
+     *       {@code case reflect.Pointer: if src == nil { dv.SetZero(); return nil }}
+     *       ⇒ <b>不报错</b>（{@code convert.go:438} 那条 "unsupported" 因 kind 不符<b>永远走不到</b>）。</li>
+     * </ol>
+     * 双侧活体对拍（2026-10-23 21:41）：status IS NULL 打 GetUser，
+     * Go 返回 200 且 {@code user} 里 <b>status 字段整个不出现</b>（JSON 的 omitempty，读到的值就是 0）。
      *
-     * <p>而 RAG 侧 {@code UserInfo.Builder} 对 {@code optional int64 status = 6}
-     * <b>只生成 {@code setStatus(long)}</b>（已核对生成代码 UserInfo.java:1166），
-     * 传 {@code Long} 会自动拆箱 → NPE → 被 UserServiceGrpcImpl 兜底成
-     * {@code INTERNAL + "NullPointerException: ..."}，既丢了 ErrorDbSelect 日志，description 也与 Go 不同。
+     * <p><b>为什么本用例改的是 mock 而不是真库</b>：本类是 Mockito 单测，
+     * 构造不出 MyBatis 跳过 setter 的那条路径 ⇒ 真库版本见
+     * {@code UserRpcLoginNullStatusReadsAsZeroTest#mapperMapsNullStatusToZeroLikeGo}。
+     * 本用例负责另一件事：<b>锁住 {@code = 0L} 初始化值这个等价性载体本身</b>。
      *
-     * <p>⚠️ 刻意<b>不</b> fallback 成 0：{@code status=0} 在 identity 解析里意为「活跃」，
-     * 把 NULL 默认成活跃是朝错误方向的 fail-open。
+     * <p>⚠️ 上一版本用例用 {@code user.setStatus(null)} 人为造出一个
+     * <b>MyBatis 根本产生不了的状态</b>（跳过 setter ⇒ 字段留初始化值），
+     * 再断言它抛 INTERNAL —— 那是在给一个不可达状态写期望值，
+     * 并且把守卫的<b>假依据</b>固化成了回归网。已一并撤销。
      */
     @Test
-    void getUser_nullStatus_throwsInternalNotNPE() {
+    void getUser_nullStatusColumn_readsAsZeroLikeGo() {
         UserEntity user = new UserEntity();
         user.setUid(456L);
         user.setUsername("bob");
-        user.setStatus(null);   // DB 里 status 列为 NULL
+        // 不调 setStatus：DB 里 status 列为 NULL 时，MyBatis 的 callSettersOnNulls=false
+        // 会**跳过 setter**，字段保留 UserEntity 的 `= 0L` 初始化值 —— 与 Go 同形。
+        assertThat(user.getStatus())
+                .as("UserEntity 的 `= 0L` 初始化值是 status-NULL 语义的载体，删掉它本用例立刻红")
+                .isEqualTo(0L);
         when(userMapper.findOneByUid(456L)).thenReturn(user);
 
-        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () ->
-                service.getUser(GetUserReq.newBuilder().setUid(456L).build()));
+        UserInfo got = service.getUser(GetUserReq.newBuilder().setUid(456L).build()).getUser();
 
-        assertThat(e.getStatus().getCode())
-                .as("NULL status 必须与 Go 同码 INTERNAL").isEqualTo(Status.Code.INTERNAL);
-        assertThat(e.getStatus().getDescription())
-                .as("description 必须与 Go 一致").isEqualTo("DB查询失败");
-        assertThat(e.getStatus().getDescription())
-                .as("绝不能是 NullPointerException —— 那说明又退回自动拆箱了")
-                .doesNotContain("NullPointerException");
-        // Go 在这条路径上打的是 ErrorDbSelect（5003）
-        verify(logger).logBusinessErr(any(), eq(com.rag.users.common.errmsg.ErrorCode.ERROR_DB_SELECT.getCode()), any());
+        assertThat(got.getStatus())
+                .as("status IS NULL 必须像 Go 一样读成 0，而不是抛 INTERNAL「DB查询失败」")
+                .isEqualTo(0L);
+        assertThat(got.getUid()).isEqualTo(456L);
+    }
+
+    /**
+     * 🔴 对照组：{@code status} 为 <b>非</b> NULL 时，值必须<b>原样</b>透传
+     * （证明上一条不是把「恒返回 0」写成了断言）。
+     */
+    @Test
+    void getUser_nonNullStatus_passesThroughUnchanged() {
+        UserEntity user = new UserEntity();
+        user.setUid(457L);
+        user.setStatus(1L);
+        when(userMapper.findOneByUid(457L)).thenReturn(user);
+
+        assertThat(service.getUser(GetUserReq.newBuilder().setUid(457L).build()).getUser().getStatus())
+                .as("status=1 必须原样返回，不能被 NULL→0 的语义吞掉")
+                .isEqualTo(1L);
     }
 
     /**
@@ -756,29 +783,83 @@ class UserDomainServiceTest {
      */
     @Test
     void avatarHistory_createTime_hasNoFractionalSeconds() {
-        UserAvatarHistoryEntity h = new UserAvatarHistoryEntity();
-        h.setHistoryId("H-1");
-        h.setAvatarUrl("https://cdn/x.png");
-        // 2026-09-23T10:15:30.123456 —— 正是 CURRENT_TIMESTAMP 在 PG 里的典型形态
-        h.setCreateTime(java.time.LocalDateTime.of(2026, 9, 23, 10, 15, 30, 123456000));
+        // 机器无关：强制进程时区，而不是依赖跑测机器的 TZ。
+        // （渲染落在**进程本地时区** —— Go 的 time.Local 语义；实测：Go 进程 TZ=UTC → '…Z'）
+        java.util.TimeZone original = java.util.TimeZone.getDefault();
+        try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Asia/Shanghai"));
+            UserAvatarHistoryEntity h = new UserAvatarHistoryEntity();
+            h.setHistoryId("H-1");
+            h.setAvatarUrl("https://cdn/x.png");
+            // 2026-09-23T10:15:30.123456+08:00 —— 正是 timestamptz 在 PG 里的典型形态
+            // （Go 侧 GORM autoCreateTime 用应用侧时钟写入，pgx 二进制编码到 UTC 微秒）
+            h.setCreateTime(java.time.OffsetDateTime.of(
+                    2026, 9, 23, 10, 15, 30, 123456000, java.time.ZoneOffset.ofHours(8)));
 
-        String createTime = avatarDomainService.fromModel(h).getCreateTime();
+            String createTime = avatarDomainService.fromModel(h).getCreateTime();
 
-        assertThat(createTime)
-                .as("必须与 Go 的 time.RFC3339 逐字符一致：秒精度、零偏移标 Z")
-                .isEqualTo("2026-09-23T10:15:30Z");
-        assertThat(createTime).doesNotContain(".");
+            // 🔴 2026-10-23（DRIFT-USERRPC-V-004 可观察半边）：期望值已从 "…Z" 改为 "…+08:00"。
+            //
+            // ⚠️ **旧断言是错的**（它把"渲染恒为 Z"当成规格）：
+            //   Go 出处 service/user/user/rpc/internal/logic/avatarhelpers.go:16-19
+            //       `item.CreateTime.Format(time.RFC3339)` —— Go 的 time.Time **自带 location**，
+            //       Format 打印的是该 location 的偏移量，非 UTC 时就是 "+08:00"。
+            //   双侧活体对拍实测（2026-10-23 21:01，真进程 + 真 PG）：
+            //       Go  : "2026-10-23T21:01:48+08:00"
+            //       RAG : "2026-10-23T21:01:48Z"      ← 修复前
+            //   ⇒ 旧实现 `ct.atOffset(ZoneOffset.UTC)` 把读到的时刻强行标成 UTC，
+            //     在 JVM 默认时区非 UTC 时渲染出的是**另一个时刻的墙钟**（实测差 8 小时）。
+            assertThat(createTime)
+                    .as("必须与 Go 的 time.RFC3339 逐字符一致：秒精度 + **进程本地时区的偏移量**")
+                    .isEqualTo("2026-09-23T10:15:30+08:00");
+            assertThat(createTime).doesNotContain(".");
+        } finally {
+            java.util.TimeZone.setDefault(original);
+        }
     }
 
-    /** 对照组：纳秒本来就为 0 时输出不变（证明上条不是靠"总是截断"蒙对的）。 */
+    /**
+     * 对照组 1：偏移量为 0 时输出 "Z"（Go 的 "Z07:00" 布局在零偏移时就是 Z）。
+     * <p>证明上一条不是靠"总是带 +08:00"蒙对的。
+     */
     @Test
     void avatarHistory_createTime_secondPrecision_whenNoNanos() {
-        UserAvatarHistoryEntity h = new UserAvatarHistoryEntity();
-        h.setHistoryId("H-2");
-        h.setCreateTime(java.time.LocalDateTime.of(2026, 9, 23, 10, 15, 30));
+        java.util.TimeZone original = java.util.TimeZone.getDefault();
+        try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"));
+            UserAvatarHistoryEntity h = new UserAvatarHistoryEntity();
+            h.setHistoryId("H-2");
+            h.setCreateTime(java.time.OffsetDateTime.of(
+                    2026, 9, 23, 10, 15, 30, 0, java.time.ZoneOffset.UTC));
 
-        assertThat(avatarDomainService.fromModel(h).getCreateTime())
-                .isEqualTo("2026-09-23T10:15:30Z");
+            assertThat(avatarDomainService.fromModel(h).getCreateTime())
+                    .isEqualTo("2026-09-23T10:15:30Z");
+        } finally {
+            java.util.TimeZone.setDefault(original);
+        }
+    }
+
+    /**
+     * 对照组 3：实体的偏移量是「非整小时」时，渲染必须落在**进程本地时区**、且保持同一绝对时刻。
+     * <p>渲染的落点由进程时区决定（Go 的 time.Local），所以实体的偏移量<b>不参与</b>输出标签 ——
+     * 这正是 Go 的行为：{@code time.Time} 被 pgx 解到 {@code time.Local} 后才 Format。
+     */
+    @Test
+    void avatarHistory_createTime_keepsTheSameInstantInProcessZone() {
+        java.util.TimeZone original = java.util.TimeZone.getDefault();
+        try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Asia/Shanghai"));
+            UserAvatarHistoryEntity h = new UserAvatarHistoryEntity();
+            h.setHistoryId("H-2b");
+            h.setCreateTime(java.time.OffsetDateTime.of(
+                    2026, 9, 23, 10, 15, 30, 0, java.time.ZoneOffset.ofHoursMinutes(8, 30)));
+
+            // 10:15:30+08:30 == 01:45:30Z == 09:45:30+08:00（本地时区）
+            assertThat(avatarDomainService.fromModel(h).getCreateTime())
+                    .isEqualTo("2026-09-23T09:45:30+08:00");
+        } finally {
+            java.util.TimeZone.setDefault(original);
+        }
     }
 
     /** Go 出处 avatarhelpers.go:16-18：CreateTime 为零值时不设置该字段 ⇒ wire 上是空串。 */

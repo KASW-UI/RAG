@@ -66,15 +66,50 @@ class UserRpcJsonbAndAvatarProjectionTest {
     }
 
     @Test
-    @DisplayName("extra_info 为空时不做任何写入（保持 D-017 部分更新语义）")
+    @DisplayName("没有业务字段变更时仍必须发出 UPDATE —— Go 的 autoUpdateTime 无条件进 SET")
     @SuppressWarnings({"unchecked", "unused"})
-    void updateUserById_noFields_isNoOp() {
+    void updateUserById_noBusinessFields_stillAdvancesUpdateTime() {
+        // 🔴 2026-10-23（DRIFT-USERRPC-V-010）：**旧断言是错的**。
+        //
+        // 旧用例名 `updateUserById_noFields_isNoOp` 断言「没有任何字段变更时应直接返回 0，不发 UPDATE」，
+        // 依据是旧注释里那句「GORM 对全零值 struct 同样不发 UPDATE」。
+        // ⚠️ 那句注释**没有 Go 出处**，而且被 2026-10-23 的**双侧活体对拍**证伪：
+        //
+        //   Go 出处（消费点）gorm.io/gorm@v1.31.1/callbacks/update.go:235-252
+        //       if field.AutoUpdateTime > 0 && value[field.Name] == nil && value[field.DBName] == nil {
+        //           now := stmt.DB.NowFunc()
+        //           assignValue(field, now)
+        //           set = append(set, clause.Assignment{Column: …, Value: now})   // ← 无条件进 SET
+        //       }
+        //   ⇒ 即便所有业务字段都是零值，autoUpdateTime 字段**仍会被加进 SET**
+        //   ⇒ ConvertToAssignments 返回的 set 非空
+        //   ⇒ callbacks/update.go:74-79 的 `else { return }`（"空 set 就不发 UPDATE"）**不触发**
+        //   ⇒ **Go 总会发出一条只推进 update_time 的 UPDATE**。
+        //
+        //   双侧活体对拍实测（2026-10-23 21:25，真进程 + 真 PG）：
+        //       请求体 {}                  Go: update_time 推进   RAG(修复前): 不推进
+        //       请求体 {"extra_info":{}}  Go: update_time 推进   RAG(修复前): 不推进
+        //
+        // ⇒ 旧断言「never().update(...)」是一条**把错误答案锁死**的守卫（§3.3.3「绿测试可能是错误答案的守卫」）。
         UserMapper mapper = Mockito.mock(UserMapper.class, Mockito.CALLS_REAL_METHODS);
 
-        int affected = mapper.updateUserById(1001L, new UserEntity());
+        mapper.updateUserById(1001L, new UserEntity());
 
-        assertEquals(0, affected, "没有任何字段变更时应直接返回 0，不发 UPDATE");
-        Mockito.verify(mapper, Mockito.never()).update(Mockito.any(), Mockito.any());
+        ArgumentCaptor<LambdaUpdateWrapper<UserEntity>> captor =
+                ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        Mockito.verify(mapper).update(Mockito.isNull(), captor.capture());
+
+        String sqlSet = captor.getValue().getSqlSet();
+        assertTrue(sqlSet.contains("update_time"),
+                "即使没有业务字段变更，也必须发出只推进 update_time 的 UPDATE"
+                        + "（对齐 GORM autoUpdateTime 的无条件 SET）。实际 SET = " + sqlSet);
+        assertTrue(sqlSet.contains("CURRENT_TIMESTAMP"),
+                "update_time 应由 CURRENT_TIMESTAMP 推进，实际 SET = " + sqlSet);
+        // 反向断言：确实**没有**任何业务列被写
+        assertFalse(sqlSet.contains("username"), "不该写 username，实际 SET = " + sqlSet);
+        assertFalse(sqlSet.contains("password"), "不该写 password，实际 SET = " + sqlSet);
+        assertFalse(sqlSet.contains("email"), "不该写 email，实际 SET = " + sqlSet);
+        assertFalse(sqlSet.contains("extra_info"), "不该写 extra_info，实际 SET = " + sqlSet);
     }
 
     // ================== 缺陷 2：SelectAvatar 响应 is_current 投影 ==================

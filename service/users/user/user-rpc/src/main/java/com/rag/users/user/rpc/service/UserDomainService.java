@@ -150,35 +150,25 @@ public class UserDomainService {
             try {
                 checkDeadline();
                 user = userMapper.findOneByUserName(req.getUsername());
-                // 🔴 DRIFT-USERRPC-V-001：status 为 NULL 视同 Go 的**扫描失败**，不是「未封禁」。
+                // 🔴 DRIFT-USERRPC-V-012（2026-10-23 当天修正上一轮的误判）：
+                // 本处曾有一道「status 为 null ⇒ 抛 INTERNAL」的 fail-closed 守卫，
+                // 理由写的是「Go 的 rows.Scan 对 NULL → int64 直接报错」。**该理由已被证伪并撤销。**
                 //
-                // Go 出处（声明点 + 消费点）：
-                //   声明点  internal/model/data_model.go:11
-                //           `Status int64 gorm:"column:status;default:0"` —— **无 not null**
-                //   消费点  gorm@v1.31.2/scan.go:153  `db.AddError(rows.Scan(values...))`
-                //           → database/sql 对「NULL → int64」返回 unsupported 错误
-                //           → internal/model/user.go:28 `return nil, err`（非 ErrRecordNotFound）
-                //           → loginlogic.go:53-57 db_error 支 ⇒ codes.Internal "DB查询失败"
+                // Go 出处（消费点，三段缺一不可）：
+                //   gorm@v1.31.2/schema/field.go:616-622   `case **int64: if data != nil && *data != nil`
+                //                                            ⇒ *data == nil 时不 SetInt，字段保持零值 0
+                //   gorm@v1.31.2/scan.go:21 + schema/field.go:1009
+                //                                            ⇒ 传给 rows.Scan 的 dest 是 **int64
+                //   database/sql/convert.go:431-435        ⇒ `case reflect.Pointer: src == nil → SetZero()`
+                //                                            ⇒ **不报错**（convert.go:438 的 "unsupported" 走不到）
+                // ⇒ **Go 把 status IS NULL 读成 0，然后 status==1 判false ⇒ 放行登录。**
                 //
-                // ⚠️ **抛在 try 内部是有意的**：这样它会落进下面的 catch(Exception)，
-                // 从而**同时**拿到 metrics.getLoginDbError() + span.recordException
-                // + ErrorDbSelect 业务日志 + INTERNAL "DB查询失败" —— 与 Go 的四条副作用逐条对齐。
-                // 若抛 StatusRuntimeException，会先被 catch(StatusRuntimeException) 接走原样重抛，
-                // 四条副作用全部丢掉，且 status=1/2 那两个分支也会被污染。
+                // 双侧活体对拍（2026-10-23 21:40，真进程 + 真 PG）：
+                //   status IS NULL 打 login → Go 200 + token；RAG（带这道守卫时）5001「系统内部错误」
                 //
-                // ⚠️ **绝不能 fallback 成「当作没封禁」** —— 修复前的
-                // `if (user.getStatus() != null && user.getStatus() == 1L)` 正是这么写的：
-                // status=NULL ⇒ 跳过封禁检查 ⇒ 直接走 W4 返回登录成功 ⇒ **被封禁用户可登录**，
-                // 方向是 **fail-open**。而本文件 getUser 处就写着：
-                // 「绝不 fallback 成 0 —— status=0 意为活跃，把 NULL 默认成活跃是朝错误方向的 fail-open」
-                // ⇒ 修复前**同一个字段在两条路径上朝两个方向**，自相矛盾。
-                //
-                // ⚠️ 放在 W2 密码比对**之前**：Go 的失败发生在 mapper 层，根本走不到密码校验，
-                // 所以 metric、错误文案、是否泄漏「用户名是否存在」都必须与 Go 一致。
-                if (user.getStatus() == null) {
-                    throw new IllegalStateException(
-                            "users_user.status is NULL for username=" + req.getUsername());
-                }
+                // ⇒ 守卫已删除。status 为 NULL 时 UserEntity 的 0L 初始化值生效（MyBatis
+                // callSettersOnNulls=false 跳过 setter），与 Go 的 field.Set 留零值同形。
+                // 下面的 `!= null && == 1L` 判定因此对 NULL 行与 Go 一样得到「未封禁」。
             } catch (NotFoundException e) {
                 // 用户不存在 → Status=1（D-002：和密码错共用同一个状态码）
                 metrics.getLoginUserNotFound().increment();
@@ -216,10 +206,15 @@ public class UserDomainService {
             }
 
             // W3 封禁检查
-            // ⚠️ 这里的 `!= null` 在此**已恒为真**（上面 try 内已把 NULL 当作扫描失败抛出）。
-            // 保留它只是因为删除属无行为变更的清理、徒增 review 负担；
-            // 但**不要**再把它读成「status 为 NULL 就当没封禁」——
-            // 那正是 DRIFT-USERRPC-V-001 修复前的 fail-open 写法。
+            // ⚠️ `!= null` 这一半在本实现里**恒为真**（UserEntity 的 `= 0L` 初始化值
+            // + MyBatis callSettersOnNulls=false ⇒ NULL 行读出 0L 而非 null）。
+            // 保留它是为了与 Go 的类型形态对齐，且删它是无行为变更的清理。
+            //
+            // 🔴 不要再把这行读成「status 为 NULL 就当没封禁」的 fail-open 缺陷：
+            // Go 走的**正是**「NULL ⇒ 0 ⇒ status==1 判 false ⇒ 放行」这条路径
+            // （gorm@v1.31.2/schema/field.go:616-622 + database/sql/convert.go:431-435），
+            // 双侧活体对拍实测 Go 对 status IS NULL 的行返回 200 + token。
+            // ⇒ 这里的 `== 1L` 判定与 Go 逐字一致，**NULL 行在两侧都放行**。
             if (user.getStatus() != null && user.getStatus() == 1L) {
                 // 用户被封禁 → Status=2（无 metrics，与 Go 端一致）
                 // 注：Go 字符串 username 前有空格、username 后有两个空格（typo），保持原样
@@ -380,20 +375,21 @@ public class UserDomainService {
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
         }
 
-        // DRIFT-011：Go 侧 Status 是值类型 int64（GORM 把 NULL 扫进 int64 会直接报错 →
-        // FindOneByUid 返回非 sentinel 错误 → ErrorDbSelect + codes.Internal "DB查询失败"），
-        // 且 protoc 对 `optional int64 status = 6` **只生成 setStatus(long)**（无 Long 重载），
-        // 这里直接 setStatus(user.getStatus()) 会在 status 为 null 时自动拆箱抛 NPE，
-        // 被 UserServiceGrpcImpl 兜底成 INTERNAL + "NullPointerException: ..."，
-        // 既丢了 ErrorDbSelect 日志，description 也与 Go 不同。
-        // 对齐做法：null 视同 Go 的扫描失败，走与 Go 同一条错误路径。
-        // 绝不 fallback 成 0 —— status=0 在 identity 解析里意为「活跃」，
-        // 把 NULL 默认成活跃是朝错误方向的 fail-open。
-        if (user.getStatus() == null) {
-            logger.logBusinessErr(otelCtx, ErrorCode.ERROR_DB_SELECT.getCode(),
-                    new IllegalStateException("users_user.status is NULL for uid=" + req.getUid()));
-            throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
-        }
+        // 🔴 DRIFT-USERRPC-V-012（2026-10-23 当天修正上一轮的误判）：本处曾有一道
+        // 「status 为 null ⇒ ErrorDbSelect + INTERNAL」的守卫，理由同为
+        // 「GORM 把 NULL 扫进 int64 会直接报错」。该理由**已被证伪并撤销**：
+        //   gorm@v1.31.2/schema/field.go:616-622 + scan.go:21 + schema/field.go:1009
+        //       ⇒ dest 是 **int64，*data == nil 时 setter 不动作，字段留零值 0
+        //   database/sql/convert.go:431-435 ⇒ Pointer + src==nil 走 SetZero()，**不报错**
+        // 双侧活体对拍（2026-10-23 21:41）：status IS NULL 打 GetUser，
+        //   Go 200，`user` 对象里 **status 字段整个不出现**（Go 侧 omitempty，读到的值就是 0）；
+        //   RAG（带这道守卫时）5001「系统内部错误」。
+        //
+        // ⚠️ 下面 `setStatus(user.getStatus())` 的**拆箱 NPE 风险是真的**，但它已由
+        // UserEntity 的 `= 0L` 初始化值 + MyBatis callSettersOnNulls=false 消除：
+        // status IS NULL 时 setter 被跳过，getStatus() 返回 0L，不为 null。
+        // ⇒ 守卫已删除，行为与 Go 逐字一致（Go 侧同样把 0 交给 protobuf，
+        //   再由 JSON 的 omitempty 省掉该字段）。
 
         UserInfo.Builder b = UserInfo.newBuilder()
                 .setUid(user.getUid())

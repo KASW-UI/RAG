@@ -30,20 +30,34 @@ import java.util.Set;
  * <ol>
  *   <li>public 路径（{@code /user/v1/login}、{@code /user/v1/register}）→ <b>直接放行</b>，不校验 token</li>
  *   <li>protected 路径（其余 7 个）—— 本层只承担 Go {@code rest.WithJwt} 的职责
- *     （验签名 + exp + claim 存在且为数字），失败一律 <b>HTTP 401</b>：
+ *     （验签名 + exp），失败一律 <b>HTTP 401</b>：
  *     <ul>
  *       <li>Authorization 缺失 / 不以 "Bearer " 开头 → {@code AuthenticationException} → 401</li>
  *       <li>"Bearer " 后 token 为空 → {@code AuthenticationException} → 401</li>
  *       <li>JWT 签名错 / 过期 → {@code AuthenticationException} → 401</li>
- *       <li>claim.userId 缺失或类型不对 → {@code AuthenticationException} → 401</li>
  *       <li>Redis blacklist（{@code user:jwt_blacklist:<token>}）存在 → {@code AuthenticationException} → 401</li>
  *       <li>Redis 故障 → 不阻塞业务（与 Go 端 {@code err == nil && exists} 行为一致）</li>
  *     </ul>
  *     以上任一失败都<b>不</b>写 userId / jwt_token attribute。
  *   </li>
- *   <li><b>uid 取值（{@code uid <= 0}）不在本层拒绝</b>：Go 的 {@code rest.WithJwt} 同样不校验 claim 取值，
+ *   <li><b>🔴 claim 的「存在性」与「取值」都不在本层拒绝</b>（2026-10-23 修 DRIFT-USERAPI-001）：
+ *       Go 出处 {@code go-zero@v1.10.2 rest/handler/authhandler.go:54-81} ——
+ *       只有 {@code ParseToken} 失败与 {@code !tok.Valid} 两条会 401；
+ *       之后 {@code authhandler.go:72-79} 把**非标准 claim 逐个塞进 ctx**，
+ *       {@code authhandler.go:81} 直接 {@code next.ServeHTTP} ⇒ 请求**到达 handler**。
+ *       ⇒ 「签名合法但 userId claim 缺失 / 是字符串」在 Go 侧<b>不是 401</b>，
+ *       而是由业务层 {@code identity/resolve.go:70-73} 的 type assertion 失败
+ *       ⇒ {@code ErrInvalidClaim} ⇒ handler {@code httpx.OkJson} ⇒
+ *       <b>HTTP 200 + 业务码 1006</b>。
+ *       本类现在<b>只记 warn、不写 userId attribute、不抛异常</b>，把判定交给业务层。
+ *       ⚠️ 黑名单检查仍在 claim 判定<b>之前/之后都照常执行</b>（Go 的链序是
+ *       JWT → 黑名单 → handler），所以「畸形 claim + 已拉黑」两侧都是 401。
+ *   </li>
+ *   <li><b>uid 取值（{@code uid <= 0}）也不在本层拒绝</b>：Go 的 {@code rest.WithJwt} 同样不校验 claim 取值，
  *       该规则属于 identity 层（{@code identity/resolve.go} {@code ClaimedUID}），
  *       由 {@code IdentityResolver.claimedUID} 承担，失败表现为 <b>HTTP 200 + 业务码 1006</b>。
+ *       ⚠️ 但 Go 侧的 {@code uid <= 0} 规则<b>分端点</b>：{@code get} / {@code avatar/*} 拒绝，
+ *       {@code delete} / {@code update} <b>不</b>拒绝（见 {@code IdentityResolver.claimedUIDAllowNonPositive}）。
  *   </li>
  * </ol>
  *
@@ -129,7 +143,8 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             );
         }
 
-        long uid;
+        long uid = -1L;
+        boolean claimUsable = false;
         try {
             Jws<Claims> jws = Jwts.parser()
                     .verifyWith(key)
@@ -138,23 +153,51 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             Object claim = jws.getPayload().get("userId");
             if (claim instanceof Number) {
                 uid = ((Number) claim).longValue();
+                claimUsable = true;
                 // ⚠️ 这里<b>不</b>做 uid <= 0 的拒绝判断。
                 // Go 出处：go-zero 的 rest.WithJwt 只验签名与 exp，不校验 claim 取值；
                 // `uid > 0` 是业务规则，落在 identity 层
                 // （identity/resolve.go:75-77 `if err != nil || uid <= 0 { return 0, ErrInvalidClaim }`）。
-                // 放在本层会导致 Go 返回 200 + 1006 的场景在 RAG 上变成 401。
                 request.setAttribute("userId", Long.valueOf(uid));
             } else {
-                log.warn("JWT claim userId missing or wrong type : {}", claim == null ? "null" : claim.getClass());
-                throw new AuthenticationException(
-                        ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
-                        ErrorCode.ERROR_TOKEN_RUNTIME.getMsg()
-                );
+                // 🔴 2026-10-23（DRIFT-USERAPI-001 已修）：**不在鉴权层拒绝畸形 claim**。
+                //
+                // Go 出处（消费点，不是声明点）：
+                //   go-zero@v1.10.2 rest/handler/authhandler.go:54-81
+                //       tok, err := parser.ParseToken(r, secret, …)   // 只管签名 + exp
+                //       if err != nil { unauthorized(…); return }      // ← 只有这里 401
+                //       if !tok.Valid { unauthorized(…); return }      // ← 只有这里 401
+                //       claims, ok := tok.Claims.(jwt.MapClaims)
+                //       for k, v := range claims {                    // ← **逐个 claim 塞进 ctx**
+                //           switch k { case aud,exp,jti,iat,iss,nbf,sub: /* ignore */ default: ctx = WithValue(ctx,k,v) }
+                //       }
+                //       next.ServeHTTP(w, r.WithContext(ctx))          // ← 请求**到达 handler**
+                //   ⇒ Go 对 claim 的「存在性」与「取值」**都不校验**，
+                //     畸形 claim 的后果发生在业务层：
+                //       identity/resolve.go:70-73  ClaimedUID: ctx.Value("userId").(json.Number) 失败 ⇒ ErrInvalidClaim
+                //       api 层 handler → httpx.OkJson ⇒ **HTTP 200** + {"code":1006,…}
+                //
+                // ⚠️ 修复前本类在这里抛 AuthenticationException ⇒ HTTP 401。
+                //   实测（双侧活体对拍，2026-10-23 21:12，真进程 + 真 PG + 真 Redis）：
+                //       Go  : 200 {"code":1006,"msg":"TOKEN已过期","data":null}
+                //       RAG : 401 {"code":1006,"msg":"TOKEN已过期","data":null}   ← 修复前
+                //   ⇒ 业务码两侧相同（1006），**HTTP 状态码不同** ⇒ 语义漂移。
+                //
+                // ⚠️ **注意别与 N-1 混淆**：N-1 签字的是「401 的 body 形状统一成完整 envelope」，
+                //   覆盖的是**真正的鉴权失败**（缺 Bearer / 签名错 / 过期 / 黑名单命中）。
+                //   本条说的是「签名合法但 claim 畸形」——Go 侧**根本不 401**，所以不涉及 N-1。
+                //
+                // ⇒ 现在的行为：**不写 userId attribute、不抛异常**，继续走黑名单检查，
+                //   让业务层（IdentityResolver.claimedUID）拒掉它 ⇒ 200 + 1006。
+                //   黑名单检查仍会执行 —— Go 的链序是 JWT → 黑名单 → handler（authhandler.go:81 之后才到 handler），
+                //   所以「畸形 claim + 已拉黑」在 Go 侧也是 401，本类同样先查黑名单 ⇒ 一致。
+                log.warn("JWT claim userId missing or wrong type : {}",
+                        claim == null ? "null" : claim.getClass());
             }
         } catch (BusinessException e) {
             throw e;
         } catch (Throwable t) {
-            // 签名错 / 过期 —— 与 Go 端 silent 行为一致
+            // 签名错 / 过期 —— 与 Go 端 silent 行为一致（authhandler.go:56 → unauthorized → 401）
             log.warn("JWT verify failed : {}", t.getMessage());
             throw new AuthenticationException(
                     ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
@@ -174,7 +217,7 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         // ⇒ 验签失败时黑名单**从不被查**，Go 也不为畸形 token 产生任何 Redis 读。
         String jwtToken = BearerTokenExtractor.trimBearerPrefix(authHeader);
         if (!jwtToken.isEmpty() && isBlacklisted(jwtToken)) {
-            log.warn("token in blacklist, uid={}", uid);
+            log.warn("token in blacklist, uid={}", claimUsable ? uid : "n/a");
             throw new AuthenticationException(
                     ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
                     ErrorCode.ERROR_TOKEN_RUNTIME.getMsg()

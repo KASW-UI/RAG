@@ -93,6 +93,10 @@ public class IdentityResolver {
     /**
      * 从 request attribute "userId" 取正整数 UID。
      * JwtAuthInterceptor 在 JWT 验签通过后把 Long 类型的 userId 写进 attribute。
+     *
+     * <p>⚠️ <b>本方法只适用于 Go 侧「拒绝 uid&lt;=0」的端点</b>：{@code get} / {@code avatar/*}。
+     * {@code delete} / {@code update} 在 Go 侧<b>不</b>拒绝，必须改用
+     * {@link #claimedUIDAllowNonPositive(HttpServletRequest)}。
      */
     public static long claimedUID(HttpServletRequest request) {
         if (request == null) {
@@ -107,6 +111,63 @@ public class IdentityResolver {
             throw new ErrInvalidClaimException(MSG_INVALID_CLAIM);
         }
         return uid;
+    }
+
+    /**
+     * 🔴 2026-10-23（DRIFT-USERAPI-002 已修）：<b>不</b>做 {@code uid <= 0} 判定的取值。
+     *
+     * <p><b>Go 出处（消费点）</b>：Go 侧<b>并存两套 uid 语义</b>，而且 delete/update 与
+     * get/avatar <b>不一样</b>：
+     * <ul>
+     *   <li>{@code get} / {@code avatar/history} / {@code avatar} / {@code avatar/select}
+     *       → 走 {@code identity.ClaimedUID}
+     *       （{@code service/user/user/identity/resolve.go:66-79}）：
+     *       <pre>
+     *       claim, ok := ctx.Value("userId").(json.Number)
+     *       if !ok { return 0, ErrInvalidClaim }
+     *       uid, err := claim.Int64()
+     *       if err != nil || uid &lt;= 0 { return 0, ErrInvalidClaim }   // ← :75 有 uid&lt;=0 判定
+     *       </pre></li>
+     *   <li>{@code delete} / {@code update}
+     *       → <b>Logic 内联</b>，<b>没有</b> uid&lt;=0 判定：
+     *       <pre>
+     *       // service/user/user/api/internal/logic/user/deleteuserlogic.go:37-47
+     *       userId, ok := l.ctx.Value("userId").(json.Number)
+     *       if !ok { … 1006 }
+     *       uid, err := userId.Int64()
+     *       if err != nil { … 1006 }
+     *       // ← 此处**没有** uid &lt;= 0 的分支 ⇒ uid=0 / 负数照常进 rpc
+     *       // service/user/user/api/internal/logic/user/updateuserlogic.go:36-46 同款
+     *       </pre></li>
+     * </ul>
+     *
+     * <p><b>可观察差异</b>（双侧活体对拍实测，2026-10-23 21:12，真进程 + 真 PG + 真 Redis）：
+     * <pre>
+     *   token 签名合法、userId = 0，打 /user/delete 与 /user/update
+     *   Go  : 200 {"code":1003,"msg":"用户不存在","data":null}   ← uid=0 透传到 rpc，rpc 查无此人 ⇒ NOT_FOUND
+     *   RAG : 200 {"code":1006,"msg":"TOKEN已过期","data":null}   ← 修复前：在 api 层就拒了，**0 次** rpc 调用
+     * </pre>
+     * ⇒ 差异不止于返回值，还包括<b>是否触达下游</b>（可观测的下游调用次数）。
+     *
+     * <p>⚠️ <b>为什么这仍然是安全的</b>：uid&lt;=0 进 rpc 后，user-rpc 的
+     * {@code FindOneByUid(uid)} 必然查无此人 ⇒ {@code NOT_FOUND} ⇒ 1003，
+     * <b>不会</b>删掉/改掉任何真实用户的数据（uid 是主键，&lt;=0 的行不存在）。
+     *
+     * <p>⚠️ <b>不要把它合并回 {@link #claimedUID}</b>：那正是 §3.4.4 记的
+     * 「安全规则的第二份实现本身就是缺陷来源」的同款形态 —— Go 自己就是两套，
+     * 合并成一套等于擅自"修好"Go 的不对称，制造一处新的语义漂移。
+     */
+    public static long claimedUIDAllowNonPositive(HttpServletRequest request) {
+        if (request == null) {
+            throw new ErrInvalidClaimException(MSG_INVALID_CLAIM);
+        }
+        Object v = request.getAttribute("userId");
+        if (!(v instanceof Long)) {
+            // claim 缺失 / 类型不对 → 与 Go 的 type assertion 失败同款 ⇒ 1006
+            throw new ErrInvalidClaimException(MSG_INVALID_CLAIM);
+        }
+        // 不做 uid <= 0 判定：Go 的 delete / update 不做。
+        return (Long) v;
     }
 
     /**

@@ -81,33 +81,65 @@ public interface UserMapper extends BaseMapper<UserEntity> {
      * <p><b>update_time 必须在 SET 子句里显式带上</b>（DRIFT-001 修复）：
      * <ul>
      *   <li>Go 出处：{@code service/user/user/rpc/internal/model/data_model.go:15}
-     *       {@code UpdateTime time.Time `gorm:"column:update_time;autoUpdateTime"`}。
-     *       GORM 的 autoUpdateTime 会在每次 {@code Updates()} 时把该列写进 SET 子句。</li>
+     *       {@code UpdateTime time.Time `gorm:"column:update_time;autoUpdateTime"`}。</li>
      *   <li>原 RAG 实现的注释写的是「依赖 Postgres CURRENT_TIMESTAMP 在 row-level 触发」——
      *       这句话在事实层面不成立：普通 UPDATE 不含该列时，Postgres 不会触碰它；
      *       本仓既无 MetaObjectHandler（本模块零命中，message-rpc 才有），
-     *       Flyway DDL 也只有 {@code DEFAULT CURRENT_TIMESTAMP}（仅 INSERT 时生效）、无 trigger。
+     *       DDL 也只有 {@code DEFAULT CURRENT_TIMESTAMP}（仅 INSERT 时生效）、无 trigger。
      *       结果：RAG 的 update_time 自注册起永不推进，而 Go 会。</li>
-     *   <li>修法：与 extra_info 的 {@code setSql(CAST(...))} 同款，在 wrapper 上显式 setSql。
-     *       放在 {@code any} 判定<b>之后</b>，保证「无字段变更则不发 UPDATE」这一 Go 语义不变
-     *       （GORM 对全零值 struct 同样不发 UPDATE）。</li>
      * </ul>
+     *
+     * <p>🔴 <b>2026-10-23（DRIFT-USERRPC-V-010 修复）：{@code update_time} 必须<b>无条件</b>进 SET</b>，
+     * 哪怕一个业务字段都没改。
+     * <p>Go 出处（<b>消费点</b>，不是声明点）：
+     * {@code gorm.io/gorm@v1.31.1/callbacks/update.go:235-252}
+     * <pre>
+     * if !stmt.SkipHooks &amp;&amp; stmt.Schema != nil {
+     *     for _, dbName := range stmt.Schema.DBNames {
+     *         field := stmt.Schema.LookUpField(dbName)
+     *         if field.AutoUpdateTime &gt; 0 &amp;&amp; value[field.Name] == nil &amp;&amp; value[field.DBName] == nil {
+     *             if v, ok := selectColumns[field.DBName]; (ok &amp;&amp; v) || !ok {
+     *                 now := stmt.DB.NowFunc()
+     *                 assignValue(field, now)
+     *                 set = append(set, clause.Assignment{Column: …, Value: now})   // ← 无条件进 SET
+     * }}}}}}}
+     * </pre>
+     * ⇒ 即便所有业务字段都是零值，{@code autoUpdateTime} 字段<b>仍会被加进 SET</b>
+     * ⇒ {@code ConvertToAssignments} 返回的 set 非空
+     * ⇒ {@code callbacks/update.go:74-79} 的 {@code else { return }}（"空 set 就不发 UPDATE"）<b>不触发</b>
+     * ⇒ <b>Go 总会发出一条只推进 update_time 的 UPDATE</b>。
+     * <p>⚠️ <b>原实现（及其守门测试）把这条当成了「GORM 对全零值 struct 不发 UPDATE」—— 那是错的</b>：
+     * 旧注释与旧用例 {@code updateUserById_noFields_isNoOp} 都写着「无字段变更 ⇒ 返回 0、不发 UPDATE」，
+     * 而它的证据只有 <b>RAG 单侧</b> 的 mock 断言（{@code never()).update(...)}），
+     * <b>没有任何一侧的真进程/真 PG 证据</b>。
+     * <p>双侧活体对拍实测（2026-10-23 21:25，真进程 + 真 PG，UPDATE 请求体分别为
+     * {@code {}} / {@code {"extra_info":{}}} / {@code {"email":…}}）：
+     * <pre>
+     *   请求体 {}                 Go: update_time 推进   RAG: 不推进   ← 漂移
+     *   请求体 {"extra_info":{}} Go: update_time 推进   RAG: 不推进   ← 漂移
+     *   请求体 {"email":…}       Go: update_time 推进   RAG: 推进     ✅
+     * </pre>
+     * ⇒ 修法：<b>删掉 {@code if (!any) return 0;} 的早退</b>，
+     * 让 {@code update_time} 永远进 SET —— 于是发出的 SQL 与 Go 的
+     * {@code UPDATE users SET update_time = ? WHERE uid = ?} 逐条同构
+     * （Go 侧 {@code model/user.go:44-47} 的 {@code Updates(newUser)} 也是同一个动作）。
+     * <p>⚠️ <b>为什么这条不是「无中生有」</b>：Go 的 {@code UpdateUserById} 无条件被调用
+     * （{@code updateuserlogic.go:62}），它不判断「有没有要改的字段」。
+     * RAG 侧早退属于<b>凭空加出来的优化</b>（无出处 idiomatization，§3.2）。
      */
     default int updateUserById(Long uid, UserEntity newUser) {
         LambdaUpdateWrapper<UserEntity> wrapper = new LambdaUpdateWrapper<>();
         wrapper.eq(UserEntity::getUid, uid);
-        boolean any = false;
+        // ⚠️ 只写「非空」的业务字段 —— 对齐 GORM Updates(struct) 跳过零值的语义。
+        //    （注意：**update_time 不受这条约束**，见本方法末尾的 DRIFT-USERRPC-V-010 说明。）
         if (newUser.getUsername() != null && !newUser.getUsername().isEmpty()) {
             wrapper.set(UserEntity::getUsername, newUser.getUsername());
-            any = true;
         }
         if (newUser.getPassword() != null && !newUser.getPassword().isEmpty()) {
             wrapper.set(UserEntity::getPassword, newUser.getPassword());
-            any = true;
         }
         if (newUser.getEmail() != null && !newUser.getEmail().isEmpty()) {
             wrapper.set(UserEntity::getEmail, newUser.getEmail());
-            any = true;
         }
         if (newUser.getExtraInfo() != null) {
             // ⚠️ 不能用 wrapper.set(UserEntity::getExtraInfo, map)：
@@ -120,10 +152,11 @@ public interface UserMapper extends BaseMapper<UserEntity> {
             //    直接写 SQL 片段 + 显式 CAST，参数按 String 绑定再转 jsonb。
             //    （实体上的 typeHandler 只对 MP 自己生成的 insert/updateById 生效。）
             wrapper.setSql("extra_info = CAST({0} AS jsonb)", toJson(newUser.getExtraInfo()));
-            any = true;
         }
-        if (!any) return 0;
-        // DRIFT-001：对齐 GORM autoUpdateTime —— 只有真的发出 UPDATE 时才推进 update_time
+        // 🔴 DRIFT-USERRPC-V-010：update_time **无条件**进 SET（对齐 GORM autoUpdateTime 的
+        //   callbacks/update.go:238-252）。**不要**在这里写 `if (!any) return 0;` ——
+        //   Go 对全零值 struct 同样会发一条只推进 update_time 的 UPDATE。
+        //   （旧注释写「GORM 对全零值 struct 同样不发 UPDATE」，经 2026-10-23 双侧活体对拍证伪。）
         wrapper.setSql("update_time = CURRENT_TIMESTAMP");
         return update(null, wrapper);
     }

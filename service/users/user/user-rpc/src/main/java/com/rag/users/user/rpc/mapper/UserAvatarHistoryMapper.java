@@ -84,11 +84,34 @@ public interface UserAvatarHistoryMapper extends BaseMapper<UserAvatarHistoryEnt
     /**
      * INSERT 新 history（is_current=true）。
      * 对应 createAvatarHistory W3。
+     *
+     * <p>🔴 <b>2026-10-23（DRIFT-USERRPC-V-009）：create_time / update_time 必须由应用侧绑定，不能用 {@code CURRENT_TIMESTAMP}</b>。
+     * <p>Go 出处：{@code service/user/user/rpc/internal/model/user.go:86-95}
+     * <pre>
+     *   history = UserAvatarHistory{ …, IsCurrent: true }
+     *   if err := tx.Create(&history).Error; err != nil { return err }
+     * </pre>
+     * GORM 的 {@code autoCreateTime / autoUpdateTime} 会在 <b>Create 之前</b>把这两个字段
+     * 写成应用侧时钟（{@code gorm.io/gorm/callbacks/create.go} 的 {@code ConvertToCreateValues}
+     * 用 {@code stmt.DB.NowFunc()}），并把它们<b>随 INSERT 一起写进库里</b>；
+     * 由于传进去的是 {@code &history}（指针），<b>同一个结构体被回填</b> ⇒
+     * {@code avatarHistoryItemFromModel(&history)} 拿到的是<b>真实时刻</b>，
+     * 于是 {@code UploadAvatarResp.history.create_time} 是一个非空 RFC3339 字符串。
+     * <p>修复前 RAG 用 {@code CURRENT_TIMESTAMP}（PG 时钟）写库，但<b>实体对象没被回填</b>
+     * ⇒ 返回的实体 {@code createTime == null} ⇒ {@code fromModel} 不 set ⇒
+     * <b>wire 上 create_time 是空串</b>。
+     * <p>实测（双侧活体对拍，2026-10-23 21:01）：
+     * <pre>
+     *   Go  : "2026-10-23T21:01:48+08:00"
+     *   RAG : ""                              ← 修复前
+     * </pre>
+     * <p>⇒ 修法与 Go 同构：<b>应用侧时钟写库 + 同一个实体回填</b>，
+     * 保证「库里的值」与「响应里的值」是同一时刻（Go 也是如此）。
      */
     @Insert("INSERT INTO users_user_avatar_history " +
             "(history_id, uid, avatar_url, content_type, size_bytes, is_current, create_time, update_time) " +
             "VALUES (#{historyId}, #{uid}, #{avatarUrl}, #{contentType}, #{sizeBytes}, #{isCurrent}, " +
-            "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+            "#{createTime}, #{updateTime})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insertHistory(UserAvatarHistoryEntity history);
 
@@ -136,6 +159,15 @@ public interface UserAvatarHistoryMapper extends BaseMapper<UserAvatarHistoryEnt
         history.setContentType(contentType);
         history.setSizeBytes(sizeBytes);
         history.setIsCurrent(true);
+        // 🔴 DRIFT-USERRPC-V-009：应用侧时钟写库 + 同一实体回填（Go 的 GORM autoCreateTime/autoUpdateTime 同构）。
+        //   create_time 是**唯一 wire 可见**的时间字段（proto AvatarHistoryItem.create_time），
+        //   修复前实体不回填 ⇒ 响应里 create_time 是空串。
+        //   Go 侧 GORM 在 Create 之前把两个字段都设成 stmt.DB.NowFunc()（应用侧时钟），
+        //   这里同样用**同一个** now 赋给 create/update_time —— Go 的 autoCreateTime 与
+        //   autoUpdateTime 在 Create 路径上取的是同一个 curTime。
+        java.time.OffsetDateTime now = java.time.OffsetDateTime.now();
+        history.setCreateTime(now);
+        history.setUpdateTime(now);
         insertHistory(history);
 
         // W4 UPDATE user.extra_info["avatar"] = avatarURL（D-014：双写）
