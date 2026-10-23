@@ -229,3 +229,60 @@ mvn -o -pl service/users/user/user-rpc test
 
 **判定口诀**：报错的列/表/配置**刚改过**，而 `target/classes` 看着是新的 ⇒
 **先怀疑 classpath 用的是 `~/.m2` 的旧 jar**，别先去读业务代码。
+
+---
+
+## PIT-USERS-SHARED-005 🔴 二阶后果会**掩盖真凶** —— 看到 503 别急着找「谁短路了」，要找「谁把它喂成 500 的」
+
+**症状**：给 user-api 补 `GoStyleGrpcClientBreakerE2ETest`（客户端熔断的端到端守网），
+**首跑就红**：
+
+```
+AssertionFailedError: 熔断打开时 Go 走的是**业务码**路径… 实际 body =  ==> expected: <200> but was: <503>
+```
+
+⚠️ **503 + 空 body**。第一反应是「入口侧的 `GoStyleBreakerFilter` 提前短路了请求」——
+因为 503 空 body 正是 Go `breakerhandler.go:27` / `maxconnshandler.go:34` /
+`sheddinghandler.go:40` 三处的**共同形状**，看起来就是「某个闸门开了」。
+
+**真凶完全不在那里**。完整链条是：
+
+| 步 | 发生什么 | 位置 |
+|---|---|---|
+| ① | 客户端熔断打开 ⇒ 抛 `GoStyleCircuitOpenException`（**刻意不是** `StatusRuntimeException`） | `GoStyleGrpcClientBreakerInterceptor.java:200-206` |
+| ② | user-api 的 `GlobalExceptionHandler` **没有**这一支 ⇒ 落进兜底 `handleAny` ⇒ **HTTP 500 + 业务码 5001** | 修前的 `GlobalExceptionHandler` |
+| ③ | 入口侧 breaker 的成败判据是 `capturedStatus < 500`（对齐 Go `breakerhandler.go:33`）⇒ **500 被记成失败** | `GoStyleBreakerFilter.java:124-128` |
+| ④ | 入口 breaker 累积失败后打开 ⇒ `setStatus(503)` + **空 body** | `GoStyleBreakerFilter.java:110-115` |
+
+⇒ **我们看到的 503 是第 ④ 步的产物，真凶在第 ② 步。**
+
+⚠️ **如果不追这条链，就会去「修入口熔断」**（调阈值、改判据、放宽 500）——
+那**既治不了病**，还会**偏离 Go**（Go 的业务错误恒为 HTTP 200，入口 breaker 本就不该因它打开）。
+
+**判定口诀**：**观测到的响应码 ≠ 真凶**。
+遇到「某个闸门/阈值被打开」的现象，先问「**它是被什么喂开的**」，
+再问「**谁在喂它**」——按 **① 真凶 → ② 传播路径** 的顺序追，
+**不要从观测到的那个码倒推**。
+
+**为什么这类漂移能活这么久**：
+出问题的机制**本身是好的**（客户端熔断装配正确、拒绝行为正确），
+坏的是**它下游的异常映射**——而那部分**从来没有测试**。
+⇒ 印证 §3.3.1：**读到「注解在、配置对」不能推出「行为对」**；
+必须有一条**从机制入口一直观察到对外响应形状**的端到端网。
+
+**可复用的排查手法**：把 surefire XML 里的**应用日志**按时间顺序读一遍，
+用「谁先打印」确定因果顺序。
+本轮的关键是这两行**相邻**出现：
+
+```
+[grpc-breaker] dropped, circuit open, method=user.UserService/Login
+GlobalExceptionHandler : unhandled exception
+```
+
+—— 这两行的相邻性就是「熔断异常被兜底吃掉了」的现场证据。
+⚠️ **只看断言消息（「expected 200 but was 503」）是追不出这条链的**：
+503 只告诉你「最后长这样」，不告诉你「第一件出错的事是什么」。
+
+**处置**：把兜底分支**显式拆细**，让每一类失败都有**专属的映射点**；
+再给每一类补一条**断言到对外响应形状**（状态码 + 业务码 + 指标）的网。
+⇒ 本轮落地：`@ExceptionHandler(GoStyleCircuitOpenException.class)` 单独一支（与另外 4 个域同款）。

@@ -1,6 +1,7 @@
 package com.rag.users.user.api.service;
 
 import com.rag.common.exception.BusinessException;
+import com.rag.common.protection.GoStyleCircuitOpenException;
 import com.rag.users.common.errmsg.ErrorCode;
 import com.rag.users.common.jwt.JwtUtil;
 import com.rag.users.user.api.client.UserRpcClient;
@@ -80,6 +81,15 @@ public class UserLoginService {
         com.rag.users.user.proto.LoginResp rpcResp;
         try {
             rpcResp = userRpcClient.userRpc().login(rpcReq);
+        } catch (GoStyleCircuitOpenException e) {
+            // Go 出处：loginlogic.go:46-48 的 err != nil 分支 —— 它的 err != nil
+            // **捕获一切**，所以熔断抛出的 breaker.ErrServiceUnavailable（普通 error，
+            // 不是 gRPC status）也会命中 ⇒ Go 侧的 rpc_error 计数**会**递增。
+            // 本 catch 只为对齐这个计数；业务码映射交给 advice 的 handleCircuitOpen
+            // （Go 侧 status.FromError ⇒ codes.Unknown ⇒ default ⇒ 1015）。
+            metrics.getLoginRpcError().increment();
+            log.error("login RPC error (circuit breaker open), username={}", req.getUsername(), e);
+            throw e;
         } catch (StatusRuntimeException e) {
             metrics.getLoginRpcError().increment();
             log.error("login RPC error, username={}", req.getUsername(), e);

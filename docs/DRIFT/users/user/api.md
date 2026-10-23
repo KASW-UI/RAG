@@ -359,7 +359,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标记见文件头。
 | 41 | 鉴权 | Bearer 前缀两套取法（验签大小写不敏感 / 黑名单敏感） | `golang-jwt/request/oauth2.go` vs `strings.TrimPrefix` | `BearerTokenExtractor:74-81` vs `:95-99` | **EQUIVALENT** | 静态源码 + 2 条 `UserApiMvcPipelineTest` |
 | 42 | 鉴权 | 黑名单 401 的 `Content-Type` | `appliaction/json;charset=utf-8`（**Go 侧拼写错误**） | `application/json` | OBSERVABLE DIFFERENCE（有意不复刻） | **DRIFT-USERAPI-010** · 静态源码 |
 | 43 | 异常 | panic / 兜底异常的响应形状 | `recoverhandler.go:17` → **500 空 body** | `handleAny:262-272` → **500 + envelope(5001)** | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-007** · 静态源码 |
-| 44 | 过载 | Breaker / Shedding / MaxConns | `rest/config.go:12-23` 全 `default=true`；`sheddinghandler.go:40` 过载 → 503 空 body | **无任何对应物** | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-008** · 静态源码 |
+| 44 | 过载 | Breaker / Shedding / MaxConns | `rest/config.go:12-23` 全 `default=true`；`sheddinghandler.go:40` 过载 → 503 空 body | `service/common/protection/` 四个 Go 风格 Filter（MaxConns `+1` / Breaker `+2` / CpuShedding `+3` / MaxBytes `+6`） | **机制齐备**（原记「无任何对应物」**已证伪**）；⚠️ MaxConns 闸门粒度不同（Go per-route vs RAG 全局） | **DRIFT-USERAPI-008** · 静态源码 |
 | 45 | 请求体上限 | MaxBytes 1 MiB，**413 压过 401** | `rest/config.go:53` `default=1048576`；`engine.go:164` 在 JWT 之外 | `GoStyleMaxBytesFilter:84-117` `@Component @Order(+6)` | **EQUIVALENT** | 静态源码（层次等价：Filter ⊃ Interceptor） |
 | 46 | 超时 | 3s 预算的**作用域** | **不覆盖** JWT 验签 | **覆盖** 验签 + 黑名单 + handler | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-009** · 静态源码 |
 | 47 | 可观测性 | 401 是否计入 `markHTTPResult` | **否**（Authorize 在 obs 外层） | **是**（Filter 在 DispatcherServlet 外） | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-009** · 静态源码 |
@@ -371,6 +371,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标记见文件头。
 | 53 | 错误码表 | code→msg 全表 | `errmsg.go:38-68` | `ErrorCode` 枚举（users-common） | **EQUIVALENT**（以 users-common 为公理，不在本组件复验） | 逐条比对 30 项常量一致 · 静态源码 |
 | 54 | 错误码表 | 未知码 → "FAIL" | `errmsg.go:70-76` `codeMsg[Error]` | `ErrorCode.of` → `ERROR`（`getMsg` 500→"FAIL"） | **EQUIVALENT** | 静态源码 |
 | 55 | 并发 | 本组件的并发语义 | 无状态、无写、无幂等键 | 同 | **EQUIVALENT** | 静态源码 |
+| 56 | 过载 | **客户端熔断打开**时的对外形状 | `zrpc/internal/clientinterceptors/breakerinterceptor.go:13-19` → `core/breaker/breaker.go:18-19` `ErrServiceUnavailable`（**普通 error**）→ `loginlogic.go:46-56` `status.FromError`⇒`Unknown`⇒`default`⇒**1015**；`loginhandler.go` 用 `httpx.OkJson` ⇒ **HTTP 200** | 修前：`GlobalExceptionHandler` **无**该分支 ⇒ 落兜底 ⇒ **HTTP 500 + 5001**，并把**入口**熔断喂开 ⇒ 对外变成 **503 空 body** | ❌ → ✅ **已修**（2026-10-24 第七轮） | **DRIFT-USERAPI-011** · 双侧活体（真 in-process gRPC server + 真 channel） |
 | 56 | 生命周期 | 启动顺序 / 关闭 | `usercenter.go:24-45` | `UserApiApplication.main` + `ObservabilityLifecycle:47` | **EQUIVALENT**（表达层） | 静态源码 |
 | 57 | 并发/事务 | user-rpc 的事务边界、`FOR UPDATE`、`extra_info` jsonb、`is_current` 陈旧 | — | — | **UNKNOWN**（不在本组件职责） | U-005 |
 
@@ -944,6 +945,10 @@ RAG 的 `@Order` 是 MaxConns(+1) → Breaker(+2) → CpuShedding(+3) → HttpMi
    `GoStyleGrpcClientBreakerInterceptor` 的 javadoc **自己就写着**
    「这正是 AGENTS.md §3.3『不能仅凭存在 {@code @Component} 就推断责任已被承担』的形态」，
    而 follow-api / message-api **有** `GoStyleGrpcClientBreakerWiringTest`，**user-api 没有**。
+   ✅ **2026-10-24 第七轮已闭环** ⇒ 补齐 `GoStyleGrpcClientBreakerWiringTest` +
+   `GoStyleGrpcClientBreakerE2ETest`，并**由此抓出一条真漂移**
+   （`DRIFT-USERAPI-011`：user-api 缺熔断异常的 handler ⇒ 500+5001，Go 应为 200+1015）⇒
+   **详见 §「2026-10-24 第七轮」**。
 3. **逐机制行为等价性从未逐条对照** —— 四个机制各自的触发阈值、拒绝时的响应形状
    （Go 是 **503 + 空 body + 无 Content-Type**，已实测）、指标口径，都还没逐条比过。
 
@@ -1952,3 +1957,175 @@ M5b 把注入点前移后，`queryParamsAreNotBound` 立刻变红 ⇒ 该护网*
 
 users-common · user-rpc · user-api **96**（+6：5 条绑定面 + 1 条 UTF-8 前提守门），
 全部 **0 failures / 0 errors**。
+
+## 2026-10-24 第七轮：客户端熔断接线测试落地 ⇒ **抓出一条真漂移**（`DRIFT-USERAPI-011`）
+
+| 项 | 结果 |
+|---|---|
+| **DRIFT-USERAPI-011** | ✅ **已修** —— user-api **缺** `@ExceptionHandler(GoStyleCircuitOpenException.class)`：客户端熔断打开时 RAG 返回 **HTTP 500 + 业务码 5001**，Go 应为 **HTTP 200 + 业务码 1015** |
+| **DRIFT-USERAPI-008 ②** | ✅ **已闭环** —— user-api 补齐 `GoStyleGrpcClientBreakerWiringTest`（接线层）+ `GoStyleGrpcClientBreakerE2ETest`（端到端层） |
+| **DRIFT-USERAPI-008 ③** | 🔶 **部分推进** —— 「客户端熔断」「入口 Breaker」两条已逐条对照（见 §5）；MaxConns / MaxBytes / CpuShedding 三条**仍待办** |
+
+### 1. 起因：一条**从未被测过**的机制，藏着一个**二阶**漂移
+
+`DRIFT-USERAPI-008` 的第 2 个真问题记的是「user-api 的 gRPC client breaker 是否真的被装配，未验证」。
+本轮补测试 ⇒ **首跑就红** —— 但红的**不是「装配」**（装配本来就是好的），
+而是**装配之后的错误映射**：熔断异常被兜底分支吃成了 **HTTP 500 + 业务码 5001**，
+再被**入口**侧熔断放大成 **HTTP 503 + 空 body**。
+
+⇒ **这正是 §3.3 要防的形态**：一条「配了、注解在、类注释写得很全」的机制，
+**没有任何一行代码断言它的错误语义** ⇒ 它可以错得悄无声息。
+⇒ 也再次印证 **§3.3.1**：读到「拦截器 @GrpcGlobalClientInterceptor + @Component」
+**不能推出**「它的异常会被正确映射」—— 那是**另一段代码**的事。
+
+### 2. Go 侧事实（三段装配 + 错误码路径，全部 `文件:行号`）
+
+**① 这层在 Go 侧是开着的**（三段缺一不可）：
+
+| 段 | 出处 | 内容 |
+|---|---|---|
+| 默认开启 | `zrpc/internal/config.go:14` | `Breaker bool \`json:",default=true"\`` |
+| 装配 | `zrpc/internal/client.go:112-113` | `if c.middlewares.Breaker { interceptors = append(interceptors, clientinterceptors.BreakerInterceptor) }` |
+| 实现 | `zrpc/internal/clientinterceptors/breakerinterceptor.go:13-19` | `breaker.DoWithAcceptableCtx(ctx, breakerName, fn, codes.Acceptable)` |
+
+**② 熔断打开时返回的是「普通 error」，不是 gRPC status**：
+
+| 出处 | 内容 |
+|---|---|
+| `core/breaker/breaker.go:18-19` | `var ErrServiceUnavailable = errors.New("circuit breaker is open")` |
+| `core/breaker/googlebreaker.go:73-75` | `if b.proba.TrueOnProba(dropRatio) { return ErrServiceUnavailable }` |
+| `core/breaker/breaker.go:155-163` | `DoWithAcceptableCtx` → `DoWithAcceptable` → `throttle.doReq(req, nil, acceptable)`（**fallback = nil ⇒ 原样返回该 error**） |
+
+**③ 业务码落点 = `default` ⇒ 1015**（本域 **9 个 logic 全部如此**）：
+
+| 出处 | 内容 |
+|---|---|
+| `service/user/user/api/internal/logic/user/loginlogic.go:46-56` | `st, _ := status.FromError(err)` → `case codes.Internal: 5001` / `default: errmsg.CodeServerBusy` |
+| 同上（其余 8 个 logic） | `selectavatar / getuser / logout / uploadavatar / deleteuser / updateuser / getavatarhistory / register` —— **逐个核对，无一个显式列 `codes.Unknown`** ⇒ 一律落 `default` |
+| `service/user/common/errmsg/errmsg.go:6` | `CodeServerBusy = 1015` |
+| `service/user/common/errmsg/errmsg.go:41` | `CodeServerBusy: "服务繁忙"` |
+
+⚠️ `status.FromError` 对**非 status 错误**返回 `codes.Unknown` ⇒ `Unknown` 不在任何 `case` 里
+⇒ **落 `default` ⇒ 1015**。
+
+**④ HTTP 状态码恒 200**：
+
+| 出处 | 内容 |
+|---|---|
+| `service/user/user/api/internal/handler/user/loginhandler.go` | `httpx.OkJson(w, &response.Response{Code: code, Msg: errmsg.GetErrMsg(code), Data: resp})` —— **`OkJson`** ⇒ 业务码多少都是 **HTTP 200 + envelope** |
+
+⇒ **Go 的完整对外形状：HTTP 200 + `{"code":1015,"msg":"服务繁忙","data":null}`**。
+
+### 3. RAG 侧事实：它为什么掉进了兜底分支
+
+| 位置 | 内容 |
+|---|---|
+| `service/common/.../protection/GoStyleGrpcClientBreakerInterceptor.java:200-206` | 拒绝时 `throw new GoStyleCircuitOpenException("circuit breaker is open")` —— **刻意不是 `StatusRuntimeException`**（否则 msg 会变成 `"circuit breaker is open"`，与 Go 的 `"服务繁忙"` 不同） |
+| `service/users/user/user-api/.../service/UserLoginService.java`（修前） | `catch (StatusRuntimeException e)` —— **只捕 gRPC status** ⇒ 熔断异常**穿透** |
+| `service/users/user/user-api/.../advice/GlobalExceptionHandler.java`（修前） | **没有** `@ExceptionHandler(GoStyleCircuitOpenException.class)` ⇒ 落 `handleAny` ⇒ **HTTP 500 + 业务码 5001** |
+
+⇒ **与 Go 的差**：业务码 **5001 vs 1015**、HTTP **500 vs 200**。
+
+> 📌 同仓另外 4 个域**早就有**这一支：`comment-api` / `follow-api` / `message-api` / `task-api`
+> 全部有 `@ExceptionHandler(GoStyleCircuitOpenException.class)`。
+> ⇒ **user-api 是唯一的漏网** ⇒ 这条漂移是**漏抄**出来的，不是设计分歧。
+
+### 4. 二阶后果：HTTP 500 把**入口**熔断也喂开了
+
+`GoStyleBreakerFilter` 的成败判据是 `capturedStatus < 500`（对齐 Go `breakerhandler.go:33`）：
+
+| 步骤 | 发生什么 |
+|---|---|
+| ① 客户端熔断打开 | 抛 `GoStyleCircuitOpenException` → `handleAny` → **HTTP 500** |
+| ② 入口 breaker 记失败 | `capturedStatus = 500` ⇒ `>= 500` ⇒ `markFailure()`（Go 侧**不会**：Go 的业务错误是 HTTP 200） |
+| ③ 入口 breaker 打开 | ⇒ `response.setStatus(503)` + **空 body** |
+
+⇒ 对外最终形态变成 **HTTP 503 + 空 body**（连 envelope 都没有），
+与 Go 的 **200 + 1015** 在 wire 上**完全不同**。
+
+🔴 **这是本条漂移在首跑 E2E 里的现场证据**：首跑的实际响应就是
+`expected: <200> but was: <503>`、`实际 body = `（空）。
+⚠️ 若只读代码、只查「熔断异常映射」，**会误判成「入口熔断提前短路了」**——
+真相是「入口熔断是被 500 喂开的」。**顺序不同 ⇒ 修法不同。**
+
+### 5. 修法（三处，缺一不可）
+
+| # | 文件 | 改动 | 依据 |
+|---|---|---|---|
+| **1** | `user-api/advice/GlobalExceptionHandler.java` | 新增 `@ExceptionHandler(GoStyleCircuitOpenException.class)` ⇒ **HTTP 200 + envelope(1015, "服务繁忙")** | Go `loginlogic.go:53-54` 的 `default` 分支 + `loginhandler.go` 的 `OkJson` |
+| **2** | `user-api/service/UserLoginService.java` | 新增 `catch (GoStyleCircuitOpenException e)` ⇒ **计数 `loginRpcError` + rethrow** | Go `loginlogic.go:46-48` 的 `err != nil` **捕获一切** ⇒ 熔断错误也算 `rpc_error` |
+| **3** | `user-api/service/UserRegisterService.java` | 同上（`registerRpcError`） | Go `registerlogic.go:45-47` |
+
+⚠️ **为什么 1 和 2/3 都要做**：
+- 只做 1 ⇒ 业务码对了，但 **Go 会递增的 `rpc_error` 计数器在 RAG 静默不增** ⇒ 监控看板失真；
+- 只做 2/3 ⇒ 指标对了，但**业务码仍是 5001**（异常仍落兜底分支）。
+⇒ 2/3 只负责**计数**，业务码映射统一由 1 负责（与 `UserRegisterService` 既有写法
+「catch → 计数 → rethrow → advice 映射」完全同款）。
+
+### 6. 守网（两条测试，**新建**）
+
+| 测试 | 条数 | 断言什么 |
+|---|---|---|
+| `GoStyleGrpcClientBreakerWiringTest` | **2** | ① 拦截器出现在 starter 的 `GlobalClientInterceptorRegistry` 里（**不是**「Bean 存在」）② 默认配置下熔断是**开启**的 |
+| `GoStyleGrpcClientBreakerE2ETest` | **1**（含 4 段断言） | 真 in-process gRPC server + 真 channel + 真拦截器：① 首次调用落到下游 ⇒ **5001 + HTTP 200** ② 熔断打开后**下游不再被触达**（计数增长 40 → ≤2）③ 熔断打开时**业务码 1015 + HTTP 200** ④ 熔断打开时 **`rpc_error` 计数递增** |
+
+> 📌 **② 用「下游触达次数」而不是「业务码」当判据**，是为了与「错误码怎么映射」**正交** ——
+> 即使有人改了错误码映射，②仍然有效；③才负责盯错误码。
+> 📌 **③ 为什么不能「随手发一个请求断言 1015」**：Go 的 googlebreaker 有 **force-pass** 保底，
+> 熔断打开期间**每约 1s 会放一个请求真的打到下游**，那个请求拿到的是 5001 ⇒ 那样写是 flaky。
+> 详见 §8。
+
+### 7. 变异验证（能编译 + 测试变红，非构建红）
+
+| # | 变异 | 结果 |
+|---|---|---|
+| **M6** | 删掉 `handleCircuitOpen` 整个方法（退回修法之前） | 🔴 **RED** —— `Tests run: 1, Failures: 1`：`熔断打开后每个请求都必须是 Go 的 1015…`，`下游总调用次数=41`（说明熔断确实打开了，只是**没有 1015**） |
+| **M7** | `handleCircuitOpen` 的业务码 1015 → 5001（**只**错码值，状态码仍 200） | 🔴 **RED** —— 同上断言变红 ⇒ **码值这一半有独立护网**（不是靠「整体挂掉」才红） |
+| **M8** | `handleCircuitOpen` 的 HTTP 状态 200 → 500（**只**错状态码，业务码仍 1015） | 🔴 **RED** —— 挂在**状态码**那条断言上：`实际 body = {"code":1015…}` ⇒ **状态码这一半也有独立护网** |
+| **M9** | 删掉 `UserLoginService` 的 `catch (GoStyleCircuitOpenException)`（指标不再递增） | 🔴 **RED** —— 挂在**指标**那条断言上：`实际增量=0.0` ⇒ **指标这一半有独立护网** |
+
+⚠️ **M7 / M8 的意义**：它们分别只错**一半**，却各自被**不同的断言**抓住
+⇒ 证明这条护网**不是「要么全对要么全挂」的粗网**，而是**三条独立语义各有一道网**：
+业务码 / HTTP 状态码 / 指标计数。
+⚠️ **M6 的 `下游总调用次数=41`** 是一条**反向证据**：
+熔断**确实打开**了（41 次里只触达了 41 次=全部失败后被短路），
+红的原因**只**是错误映射 —— 这把「装配没生效」与「映射错了」两种可能**区分开**了。
+（§3.3.1：读源码得出的「机制会怎样」可能是错的；这次是**运行数据**把它劈开的。）
+
+### 8. 附带结论：Go 的 `googlebreaker` 与 RAG 的 `GoStyleBreaker` **逐行一致**
+
+这是核对 force-pass 时的**意外收获**，写下来是因为它**极易被「顺手改好」**。
+
+`core/breaker/googlebreaker.go:53-80` 与 RAG `GoStyleBreaker.accept()` 的判定顺序**逐条一致**：
+
+```go
+dropRatio := (float64(history.total-protection) - weightedAccepts) / float64(history.total+1)
+if dropRatio <= 0 { return nil }          // ← 早退，**不更新 lastPass**
+lastPass := b.lastPass.Load()
+if lastPass > 0 && timex.Since(lastPass) > forcePassDuration { b.lastPass.Set(now); return nil }
+dropRatio *= float64(buckets-history.workingBuckets) / buckets
+if b.proba.TrueOnProba(dropRatio) { return ErrServiceUnavailable }
+b.lastPass.Set(timex.Now())
+```
+
+⇒ **force-pass 分支要求 `lastPass > 0`，而 `lastPass` 只在「概率<i>没</i>命中」那条路上被更新**
+⇒ 在**随机源被钉死**（本测试钉成 `0.0`，以保证拒绝是确定性的）的场景下，
+**force-pass 永不触发** ⇒ 熔断打开的形态是「下游一次都不被触达」，
+**不是**「每秒一个探测请求」。
+
+⚠️ **为什么必须记下来**：
+1. 我这次测试的**首版判据就是按「每秒一个探测请求」写的** ⇒ 拿到一个**假红**
+   （「未能观测到 force-pass」）⇒ 若不是回 Go 源码逐行核对，
+   极可能把「测试写错」误判成「实现有 bug」，或者反过来去「修」一个 Go 根本没这么做的行为。
+2. 这条一旦被「顺手改好」（例如把早退也更新 `lastPass`），熔断的**恢复行为**就变了
+   （从「10s 窗口老化」变成「1s force-pass 恢复」）—— 那是**新增行为**，不是对齐。
+
+### 9. 回归
+
+users-common **33** · user-rpc **122** · user-api **99**（+3：2 条接线 + 1 条端到端），
+全部 **0 failures / 0 errors**，`BUILD SUCCESS`。
+
+⚠️ **本轮新增的 3 条测试里有 2 条是「接线层」** ——
+它们证明的是「拦截器进了 starter 的 registry」与「默认开关是开的」，
+**不证明**任何行为；行为由那条端到端测试负责。
+⇒ 分层写清楚，避免「有测试」被读成「测过了」。

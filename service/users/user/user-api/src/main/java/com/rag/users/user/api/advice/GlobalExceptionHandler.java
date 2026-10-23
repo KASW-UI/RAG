@@ -3,6 +3,7 @@ package com.rag.users.user.api.advice;
 import com.rag.common.exception.AuthenticationException;
 import com.rag.common.exception.BusinessException;
 import com.rag.common.logger.FatalError;
+import com.rag.common.protection.GoStyleCircuitOpenException;
 import com.rag.common.response.Response;
 import com.rag.users.common.errmsg.ErrorCode;
 import com.rag.users.common.http.GoRequiredFieldException;
@@ -92,6 +93,56 @@ public class GlobalExceptionHandler {
                 e.getStatus().getDescription(),
                 e);
         return ResponseEntity.status(HttpStatus.OK).body(new Response(businessCode, msg, null));
+    }
+
+    /**
+     * <b>gRPC client 熔断打开 → 1015 + HTTP 200</b>。
+     *
+     * <p><b>为什么必须单列，不能落进 {@link #handleAny} 的兜底分支</b>：
+     * Go 侧每个 logic 的错误出口都是「捕获一切」的 {@code err != nil}，例如
+     * {@code loginlogic.go:46-56}：
+     * <pre>
+     *   rpcResp, err := l.svcCtx.UserRpc.Login(l.ctx, rpcReq)
+     *   if err != nil {
+     *       st, _ := status.FromError(err)
+     *       switch st.Code() {
+     *       case codes.Internal: return nil, errmsg.ErrorServerCommon   // 5001
+     *       default:             return nil, errmsg.CodeServerBusy      // 1015
+     *       }
+     *   }
+     * </pre>
+     * 而 Go 的客户端熔断（{@code zrpc/internal/clientinterceptors/breakerinterceptor.go}）
+     * 在熔断打开时返回的是 {@code breaker.ErrServiceUnavailable} ——
+     * <b>一个普通 Go error，不是 gRPC status</b>。
+     * {@code status.FromError} 对非 status 错误返回 {@code codes.Unknown}
+     * ⇒ 落 {@code default} ⇒ <b>1015</b>，
+     * 再经 handler 的 {@code httpx.OkJson} 输出 ⇒ <b>HTTP 恒 200 + envelope</b>。
+     *
+     * <p>⚠️ <b>本域 9 个 logic 全部如此</b>：逐个核对
+     * {@code selectavatar / getuser / logout / uploadavatar / deleteuser / updateuser /
+     * getavatarhistory / register / login} 的 switch，<b>没有一个显式列 {@code codes.Unknown}</b>
+     * ⇒ 熔断错误在 Go 侧<b>一律</b>落 default ⇒ 一律 1015。
+     *
+     * <p>RAG 侧的对应写法是 {@code catch (StatusRuntimeException e)} ——
+     * <b>只捕 gRPC status</b>。而 {@link GoStyleCircuitOpenException} 刻意不是 status
+     * （否则 msg 会变成 {@code "circuit breaker is open"} 而非 Go 的 {@code "服务繁忙"}），
+     * 于是它<b>绕过</b> service 的 catch、也绕过 {@link #handleRPC}，
+     * 最终落到 {@link #handleAny} ⇒ <b>HTTP 500 + 业务码 5001</b>。
+     *
+     * <p>⚠️ <b>这条漂移还有二阶后果</b>：HTTP 500 会被<b>入口</b>侧的
+     * {@code GoStyleBreakerFilter} 判为失败（{@code cw.Code < 500} 才算成功），
+     * 于是「客户端熔断打开」会反过来把<b>入口</b>熔断也打开，
+     * 对外表现为 <b>503 空 body</b> —— 与 Go 的「200 + 1015」在 wire 上<b>完全不同</b>。
+     * ⇒ 修好本条，两层熔断的联动也随之消失。
+     *
+     * <p>锁定用例：{@code GoStyleGrpcClientBreakerE2ETest}（断言 HTTP 200 + 业务码 1015）。
+     */
+    @ExceptionHandler(GoStyleCircuitOpenException.class)
+    public ResponseEntity<Response> handleCircuitOpen(GoStyleCircuitOpenException e) {
+        log.error("gRPC client circuit breaker is open", e);
+        return ResponseEntity.status(HttpStatus.OK)
+                .body(new Response(ErrorCode.CODE_SERVER_BUSY.getCode(),
+                        ErrorCode.CODE_SERVER_BUSY.getMsg(), null));
     }
 
     /**
