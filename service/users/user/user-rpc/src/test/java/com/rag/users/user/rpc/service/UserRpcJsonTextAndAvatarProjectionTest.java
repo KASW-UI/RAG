@@ -6,6 +6,7 @@ import com.rag.users.user.rpc.domain.UserAvatarHistoryEntity;
 import com.rag.users.user.rpc.domain.UserEntity;
 import com.rag.users.user.rpc.mapper.UserAvatarHistoryMapper;
 import com.rag.users.user.rpc.mapper.UserMapper;
+import org.apache.ibatis.annotations.Update;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,14 +22,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * user-rpc 两个已确认缺陷的回归测试：
  * <ol>
- *   <li>{@code updateUserById} 写 jsonb 曾用 {@code wrapper.set(Entity::getExtraInfo, map)}，
+ *   <li>{@code updateUserById} 写 extra_info 曾用 {@code wrapper.set(Entity::getExtraInfo, map)}，
  *       该参数以 Object 形式进 {@code ew.paramNameValuePairs}，<b>不走</b>实体上的
- *       {@code @TableField(typeHandler = JsonbTypeHandler.class)}，Postgres 对 jsonb 列直接拒收</li>
+ *       {@code @TableField(typeHandler = JsonTextTypeHandler.class)}，序列化结果不受控。
+ *       <br>⚠️ <b>2026-10-23（DRIFT-USERRPC-V-003）本条的判据已整体反转</b>：
+ *       原来要求 SQL 里<b>必须</b>出现 {@code CAST(... AS jsonb)}（那是为 jsonb 列被迫加的）；
+ *       列改回 text 后 CAST 必须在<b>任何路径上都不出现</b> —— 它不会报错，
+ *       只是悄悄把落库字节规范化一遍，与 Go 存的不一致。</li>
  *   <li>{@code selectAvatarHistory} 返回的是 UPDATE 之前读到的实体，
  *       响应里的 {@code is_current} 会是旧值，与刚落库的 true 自相矛盾</li>
  * </ol>
  */
-class UserRpcJsonbAndAvatarProjectionTest {
+class UserRpcJsonTextAndAvatarProjectionTest {
 
     @BeforeAll
     static void initMyBatisPlusTableInfo() throws Exception {
@@ -41,12 +46,23 @@ class UserRpcJsonbAndAvatarProjectionTest {
                 UserAvatarHistoryEntity.class);
     }
 
-    // ================== 缺陷 1：extra_info jsonb 写入 ==================
+    // ================== 缺陷 1：extra_info 写入路径不得残留 CAST(... AS jsonb) ==================
 
+    /**
+     * 🔴 <b>DRIFT-USERRPC-V-003 修复后判据反转</b>：extra_info 是 text 列，
+     * {@code updateUserById} 必须以 {@code setSql("extra_info = {0}", json)} 写入，
+     * <b>SQL 片段里不得再出现 CAST 或 jsonb</b>。
+     *
+     * <p>为什么这条要在<b>mock 层</b>断言 CAST 的缺席，而把「字节是否被改写」
+     * 交给真 PG 的 {@code UserRpcContainerWiringTest#extraInfoBytesAreStoredVerbatim}：
+     * 两层各管一半。mock 层能精确定位「SQL 文本里有没有 CAST」，
+     * 真 PG 层才能证伪「CAST 缺席 ⇒ 字节没被动过」这条推理本身没断。
+     * 只有 mock 层 ⇒ 一段无害的 CAST 能过；只有 PG 层 ⇒ 失败信息看不出是哪条路径带进来的。
+     */
     @Test
-    @DisplayName("updateUserById 写 extra_info 必须走 CAST(... AS jsonb)，不能是普通 set 占位符")
+    @DisplayName("updateUserById 写 extra_info 不得残留 CAST(... AS jsonb)（text 列）")
     @SuppressWarnings({"unchecked", "unused"})
-    void updateUserById_extraInfoUsesJsonbCast() {
+    void updateUserById_extraInfoHasNoJsonbCast() {
         // CALLS_REAL_METHODS：让 interface 的 default 方法（updateUserById）真跑，
         // 只有 BaseMapper.update 这类抽象方法被替换掉。
         UserMapper mapper = Mockito.mock(UserMapper.class, Mockito.CALLS_REAL_METHODS);
@@ -61,8 +77,45 @@ class UserRpcJsonbAndAvatarProjectionTest {
         Mockito.verify(mapper).update(Mockito.isNull(), captor.capture());
 
         String sqlSet = captor.getValue().getSqlSet();
-        assertTrue(sqlSet.contains("CAST(") && sqlSet.toUpperCase().contains("JSONB"),
-                "extra_info 必须以 setSql(CAST(... AS jsonb)) 写入。实际 SET = " + sqlSet);
+        String upper = sqlSet.toUpperCase();
+        assertFalse(upper.contains("CAST("),
+                "extra_info 是 text 列，CAST 不该再出现（它不报错但会规范化落库字节）。实际 SET = " + sqlSet);
+        assertFalse(upper.contains("JSONB"),
+                "extra_info 是 text 列，SQL 片段里不该再出现 jsonb。实际 SET = " + sqlSet);
+        assertTrue(sqlSet.contains("extra_info = "),
+                "extra_info 仍应被显式 set（不能退回 wrapper.set 的占位符路径）。实际 SET = " + sqlSet);
+    }
+
+    /**
+     * 🔴 <b>补上面那条留下的缺口（2026-10-23 自查）</b>：
+     * {@code UserAvatarHistoryMapper.updateUserExtraInfo} 是**另一条**写 extra_info 的路径
+     * （头像双写 D-014），原先带着 {@code CAST(#{extraInfoJson} AS jsonb)}。
+     *
+     * <p><b>为什么上面那条 {@code extraInfoBytesAreStoredVerbatim} 抓不到它</b>：
+     * 那条走的是 {@code BaseMapper.insert}；而这条走的是 {@code @Update} 注解里的
+     * 固定 SQL。把 CAST 加回这条路径 ⇒ 语句<b>照样执行成功</b>（text 列接受 assignment cast）、
+     * 端到端用例<b>照样全绿</b>，只有落库字节被悄悄改写。
+     * ⇒ 这是一条<b>独立的、现有护网覆盖不到的</b>残留路径，必须单独钉。
+     *
+     * <p>本条是<b>纯注解反射断言</b>：{@code @Update} 的 SQL 是编译期常量字符串，
+     * 直接读出来比对，**零容器、零数据库**，比端到端探针快一个数量级。
+     */
+    @Test
+    @DisplayName("updateUserExtraInfo（头像双写）的 SQL 不得残留 CAST(... AS jsonb)")
+    void updateUserExtraInfoSqlHasNoJsonbCast() throws NoSuchMethodException {
+        Update ann = UserAvatarHistoryMapper.class
+                .getMethod("updateUserExtraInfo", Long.class, String.class)
+                .getAnnotation(Update.class);
+        assertTrue(ann != null, "该方法应当还挂着 @Update 注解");
+        String[] values = ann.value();
+        String sql = String.join(" ", values);
+        String upper = sql.toUpperCase();
+        assertFalse(upper.contains("CAST("),
+                "extra_info 是 text 列，头像双写这条路径不得再 CAST。实际 SQL = " + sql);
+        assertFalse(upper.contains("JSONB"),
+                "extra_info 是 text 列，头像双写这条 SQL 里不该再出现 jsonb。实际 SQL = " + sql);
+        assertTrue(sql.contains("extra_info = "),
+                "extra_info 仍应被显式赋值。实际 SQL = " + sql);
     }
 
     @Test

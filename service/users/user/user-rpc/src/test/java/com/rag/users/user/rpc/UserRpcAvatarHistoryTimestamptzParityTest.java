@@ -166,7 +166,7 @@ class UserRpcAvatarHistoryTimestamptzParityTest {
         jdbcTemplate.execute("TRUNCATE users_user RESTART IDENTITY CASCADE");
         jdbcTemplate.update("""
                 INSERT INTO users_user (uid, username, password, email, status, score, extra_info)
-                VALUES (?, 'avatar-tstz-user', 'h', 'avatar-tstz@mail.test', 0, 0, '{}'::jsonb)
+                VALUES (?, 'avatar-tstz-user', 'h', 'avatar-tstz@mail.test', 0, 0, '{}')
                 """, SEED_UID);
     }
 
