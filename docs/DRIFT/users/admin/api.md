@@ -50,8 +50,8 @@ Controller 侧 `if (req == null) req = new XxxReq()`（对齐 Go 的零值 struc
 
 | | |
 |---|---|
-| **Go 侧** | `Sea-RideTheWind_golang/service/user/admin/api`（36 个文件：1 main + 1 config + 13 handler + 13 logic + 1 middleware + 1 metrics + 1 svc + 1 types + 1 yaml） |
-| **RAG 侧** | `RAG/service/users/admin/admin-api`（43 个 main + 10 个 test 文件） |
+| **Go 侧** | `Sea-RideTheWind_golang/service/user/admin/api`（**34 个文件** = 33 个 `.go` + 1 个 yaml：1 main + 1 config + **14 handler**（13 个 `handler/admin/*.go` + **1 个 `handler/routes.go`**）+ 13 logic + 1 middleware + 1 metrics + 1 svc + 1 types + 1 yaml）<br>〔**2026-10-24 复核订正**：原写「36 个文件 / 13 handler」——36 是错的（分解相加只有 34），且 `routes.go` 不是 handler 却被漏计〕 |
+| **RAG 侧** | `RAG/service/users/admin/admin-api`（**52 个 main + 13 个 test** 文件）<br>〔**2026-10-24 复核订正**：原写「43 main + 10 test」〕 |
 | **外部依赖（不在本组件范围）** | Go `service/user/common/{cryptx,errmsg,jwt}`、`service/common/{logger,observability,response}`；RAG `service/common`（`HttpMiddleware` / `Response` / `BusinessException`）、`service/users/users-common`（`ErrorCode` / `GoStyle*` / `JwtUtil`） |
 | **⚠️ 明确排除** | Go `service/user/rpc/internal/logic/` 的 **7 个孤儿 `_test.go`**（全仓零引用）；Go `service/user/admin/rpc`（属 `admin/rpc.md`，由另一会话审查） |
 
@@ -150,7 +150,7 @@ Admin Center 的 **HTTP 网关**。它自身**不持有任何业务状态、不�
 |---|---|
 | `Authorize` 在 `ng.middlewares` **之前** append ⇒ JWT 比 observability **更外层** | go-zero `rest/engine.go:108-112`：`chn = ng.appendAuthHandler(...)` 后才 `for _, middleware := range ng.middlewares { chn = chn.Append(...) }` |
 | chain 索引 0 最外层、先执行 | `rest/chain/chain.go` 的 `Then` = `m0(m1(...(mN(h))))` |
-| **黑名单不在 chain 里**，它是 `ThenFunc` 的**参数** ⇒ 比 chain 任何元素都内层 | go-zero `rest/server.go:222-233` `WithMiddleware`：`Handler: middleware(route.Handler)` —— 在 `routes.go` 构造期就完成，早于 `bindRoute` |
+| **黑名单不在 chain 里**，它是 `ThenFunc` 的**参数** ⇒ 比 chain 任何元素都内层 | go-zero `rest/server.go:222-235` `WithMiddleware`：`Handler: middleware(route.Handler)` —— 在 `routes.go` 构造期就完成，早于 `bindRoute` |
 | ⇒ **真实顺序 = Authorize(JWT) → observability → CheckBlacklist → handler** | 三段合成 |
 
 ### 2.2 鉴权两层
@@ -344,13 +344,13 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | M-34 | ALL | 序列化：显式 `null` vs 缺席（map 字段） | `null⇒400 mustn't be nil` / 缺席⇒通过 | 同（`extraInfoPresent` 标志） | EQUIVALENT | R2 已修；`GoStyleRequired.explicitNull:67-71` |
 | M-35 | ALL | 标量强转 / 浮点截断 | number/bool→String **拒**；float→int **拒**（含 `1.0`） | 同（`GoStyleCoercion` 全局生效） | EQUIVALENT | R1 已修；⚠️ Jackson 3 类级 coercion 实测无效 ⇒ 只能全局（`GoStyleCoercion` 类注释「第三个坑」） |
 | M-36 | ALL | 超时时长 | **3000ms**（yaml 未写，来自 `rest/config.go:55` 的 `json:",default=3000"`） | `observability.http-timeout: 3s` | EQUIVALENT | **消费点**：`TimeoutFromMillis(conf.Timeout)`；`application.yml:131-132` |
-| M-37 | ALL | 超时的**包含范围** | 计时器在 Authorize **之后**起算 | 计时器在 **最外层 Filter**，含验签与 Redis | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-006 |
+| M-37 | ALL | 超时的**包含范围** | 计时器在 Authorize **之后**起算 ⇒ **JWT 验签不计入** | 计时器在 `HttpMiddlewareFilter`(+5) 起算，位于 JWT 拦截器**外层** ⇒ **验签计入** | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-006（**2026-10-24 复核：差异成立**；差异**仅**在 JWT 验签这一段 —— 黑名单 Redis 两侧都计入） |
 | M-38 | ALL | 超时响应 | `503` + `text/plain; charset=utf-8` + `nosniff` + 尾换行 | `503` + `text/plain; charset=utf-8` + 尾换行，**无 nosniff** | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-007（**代码在 `service/common`，非本组件文件**） |
-| M-39 | ALL | 中间件外层顺序 / 遥测面 | 签名无效的请求**不产生** observability span | 会产生 | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-006 |
+| M-39 | ALL | 中间件外层顺序 / 遥测面 | 签名无效的请求：**Sea 侧 `markHTTPResult` 观测数据不产生**（`Authorize` 短路 ⇒ 内层中间件不执行）；但 go-zero native `TraceHandler` 在**链首**，**仍产生 OTel server span** | 会产生（401 的观测数据与 span 都产生） | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-006（**2026-10-24 复核：原写「完全不产生 observability span」口径过宽**） |
 | M-40 | 全部外部调用 | Retry | **无** | **无** | EQUIVALENT | 两侧 `application.yml` / `admincenter.yaml` 均无重试配置 |
 | M-41 | 启动 | 下游依赖不可达 | `zrpc.MustNewClient` **启动即失败**（进程不启动） | Nacos + devh 懒连接，**进程能起**、每请求失败 | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-009 |
 | M-42 | 全部 | 并发语义 | 无状态，goroutine-per-request | 无状态，**但**多一个 worker-pool 饱和 → `setStatus(503)` 无 body 分支 | UNKNOWN | Go 侧无对应分支；见 UNRESOLVED-004 |
-| M-43 | 全部 | Prometheus 指标 | `admin_api_intercept_total{path,result}`，17 个具名 label | Micrometer 同名 Counter + 同 2 个 tag | IMPLEMENTATION DIFFERENCE | Micrometer 的 `_total` 命名归一化未实测 → UNRESOLVED-005 |
+| M-43 | 全部 | Prometheus 指标 | `admin_api_intercept_total{path,result}`：**2 个 label 名**（`path` / `result`）、**16 个组合**（login 3 + banuser 2 + unbanuser 2 + delete 2 + resetuserpassword 2 + updateuser 2 + invite/create 3） | Micrometer 同名 Counter + 同 2 个 tag，**16 个组合逐条一致**；但 exposition 上**多一个 `application` label** | IMPLEMENTATION DIFFERENCE | 〔**2026-10-24 复核订正**：原写「17 个具名 label」——**label 名是 2 个、组合数是 16**；且原注「`_total` 命名归一化未实测」已被 UNRESOLVED-005 ② 关掉（实测同名）。**剩下的真实差异是 RAG 多一个 `application` tag**（`application.yml` 的 `management.metrics.tags`）〕 |
 | M-44 | ALL | 事务边界 | api 层无事务 | api 层无事务 | EQUIVALENT | 13 个 logic / 13 个 Service 均无事务注解 |
 
 ---
@@ -594,18 +594,50 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **Component**：admin-api / 全部端点
 - **Category**：Lifecycle / Timeout Scope / Observability
 - **Classification**：OBSERVABLE DIFFERENCE　**Risk**：LOW-MEDIUM
-- **Go Behavior**：`admincenter.go:36` `server.Use(observability.NewHTTPMiddleware(...))`
-  ⇒ 进入 `ng.middlewares`，在 `engine.go:108-112` 里**排在 `appendAuthHandler` 之后** append
+- **Go Behavior**：`admincenter.go:34` `httpTimeout := observability.DisableNativeRestTimeout(&c.RestConf)`
+  → `admincenter.go:36` `server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, ...))`
+  ⇒ 进入 `ng.middlewares`，在 `engine.go:110-112` 里**排在 `appendAuthHandler` 之后** append
   ⇒ 位置在 **JWT 内层**、黑名单外层。
 - **RAG Behavior**：`HttpMiddlewareFilter:37` `@Order(Ordered.HIGHEST_PRECEDENCE + 5)` 是 **servlet Filter**，
   包住整个 `DispatcherServlet` ⇒ 在 `AdminJwtAuthInterceptor`（`WebMvcConfig:60-63`）**外层**。
 - **Difference**：
-  1. **遥测面**：一个签名无效的请求，Go 在 `Authorize` 就短路 ⇒ **完全不产生 observability span**；
-     RAG 会先跑完 Filter（建 span、记 401）才被拦截器拒。
+  1. **遥测面**：一个签名无效的请求，Go 在 `Authorize` 就短路 ⇒ **Sea 侧 `markHTTPResult` 的观测数据不产生**
+     （`observability/http.go:48`/`:78` 都不执行）；但 go-zero native `TraceHandler`（`rest/handler/tracehandler.go:26-60`）
+     在**链首**、用 `tracer.Start` 真实创建 **OTel server span** ⇒ **401 也会产生 span**。
+     RAG 侧 `HttpMiddlewareFilter` 在**所有 JWT 相关组件外层** ⇒ 401 的观测数据与 span **都产生**。
   2. **超时范围**：Go 的 3s 计时器在 Authorize **之后**起算（JWT 验签耗时**不计入**）；
-     RAG 的 3s 在最外层起算 ⇒ **验签 + Redis EXISTS 都计入**预算。
-- **Evidence strength**：`静态源码·双侧`（`engine.go:108-112` 与 `@Order` 行号均已核对）
+     RAG 的 3s 在 JWT 拦截器**外层**起算 ⇒ **验签计入**预算。
+     ⚠️ **黑名单 Redis EXISTS 两侧都计入**（Go 侧黑名单被 `WithMiddleware` 直接包在 `route.Handler` 上、
+     在计时器**内层**；RAG 侧在拦截器阶段 2、也在计时器内层）⇒ **差异仅在 JWT 验签这一段**。
+- **Evidence strength**：`静态源码·双侧`（`engine.go:110-112` 与 `@Order` 行号均已核对）
 - **Note**：不影响任何业务判定，只影响遥测与极端超时边界。**不列为待办**，仅留档。
+
+> #### ⚠️ 2026-10-24 复核补记：**「Go 的 3s 从哪起算」有个必须绕开的陷阱**
+>
+> 上文 Go Behavior 只写了 `server.Use(...)` 的位置，**没写 native Timeout 已被关掉** ——
+> 补上这一环，结论才站得住（否则会读成「计时器在 Authorize 外层 ⇒ 差异不成立」）：
+>
+> | 环节 | 出处 | 作用 |
+> |---|---|---|
+> | ① 关掉 native Timeout | `admincenter.go:34` → `observability/http.go:30-34`：`conf.Middlewares.Timeout = false` | 必须在 `admincenter.go:35` `rest.MustNewServer(c.RestConf)` **之前**调用（值拷贝 ⇒ 先改后传才生效） |
+> | ② native Timeout 不进链 | `rest/engine.go:154-155`：`if ng.conf.Middlewares.Timeout { chn = chn.Append(handler.TimeoutHandler(...)) }` | 条件为 false ⇒ **`TimeoutHandler` 不在链上** ⇒ native 那条链（Trace→…→Shedding→**Timeout**→Recover）**不参与**计时 |
+> | ③ 真正的计时器 | `observability/http.go:36-92` `NewHTTPMiddleware`（`context.WithTimeout`） | 经 `server.Use` 进 `ng.middlewares` |
+> | ④ 挂载点 | `rest/engine.go:110-112`：`for _, middleware := range ng.middlewares { chn = chn.Append(...) }` | `chain.Append` **接在末尾**（`rest/chain/chain.go:43-45`：请求流 m1→m2→m3→m4，**列表首 = 最外层**）⇒ `ng.middlewares` 比 `Authorize`（`engine.go:70-84` append）**更内层** |
+> | ⑤ 黑名单在哪 | `rest/server.go:222-235` `WithMiddleware`：`Handler: middleware(route.Handler)` | 直接包在 **route.Handler** 上 ⇒ **最内层**，在计时器内 |
+>
+> ⇒ **最终 Go 链（外→内）**：Trace → Log → Prometheus → MaxConns → Breaker → Shedding → Recover → Metrics →
+> **Authorize(JWT)** → **observability(3s 计时)** → **黑名单** → handler
+> ⇒ **RAG 链（外→内）**：MaxConns(+1) → Breaker(+2) → CpuShedding(+3) → **observability/3s(+5)** → MaxBytes(+6) →
+> DispatcherServlet → **Authorize(JWT)** → 黑名单 → controller
+>
+> ⚠️ RAG 侧的 `HttpMiddlewareFilter` **不是**最外层（+1/+2/+3 在它外面），但那三个**不计时** ⇒ 预算范围结论不变。
+> **结论：差异成立，且只在 JWT 验签这一段。**
+>
+> **方法论**：`*WithNative*` / `Disable*` 这类**关掉框架自带机制**的调用，
+> 是「读框架源码推中间件顺序」时最容易漏掉的一环 ——
+> 漏了它，就会把「框架原生 Timeout 在 Authorize 外层」误当成生效，
+> 从而把一个**真实存在的差异**误判成「不成立」。
+> ⇒ 判定某条框架机制是否生效，必须读到**消费该开关的那段控制流**（AGENTS.md §3.3.1 第 1 条）。
 
 ---
 
@@ -615,11 +647,23 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **Category**：Serialization / Response Headers
 - **Classification**：OBSERVABLE DIFFERENCE　**Risk**：LOW
 - **Go Behavior**：`observability/http.go:88` `http.Error(w, httpTimeoutBody, statusCode)`
-  ⇒ Go 的 `net/http.Error` 做**三件事**：写状态码、设 `Content-Type: text/plain; charset=utf-8`、
-  设 `X-Content-Type-Options: nosniff`，再写 `body + "\n"`。
-- **RAG Behavior**：`HttpMiddleware.writeTimeoutResponse:419-425` 只做**两件**：
-  `setStatus` + `setContentType` + 写 `body + "\n"`，**没有 nosniff**。
+  ⇒ Go 标准库 `net/http.Error`（**本机 Go 1.25.11 `src/net/http/server.go:2337-2355`**）实际做 **5 件事**：
+  ① `h.Del("Content-Length")` ② `h.Set("Content-Type", "text/plain; charset=utf-8")`
+  ③ `h.Set("X-Content-Type-Options", "nosniff")` ④ `w.WriteHeader(code)` ⑤ `fmt.Fprintln(w, error)`（补尾部 `\n`）。
+- **RAG Behavior**：`HttpMiddleware.writeTimeoutResponse:419-425` 做 **4 件事**：
+  `setStatus` + `setContentType("text/plain; charset=utf-8")` + 写 `body` + 写 `'\n'`（+ `flush`），
+  **没有 nosniff**。
 - **Difference**：503/499 响应少一个 `X-Content-Type-Options` 头。
+  ⚠️ 另两处**不可观察**：Go 的 ① `Del("Content-Length")` 在 servlet 下由容器自行计算（无对应可观察差异）；
+  ⑤ 的「尾部 `\n`」两侧**都产出**（RAG 分两次 `write`，字节序列相同）。
+- **🔴 2026-10-24 复核订正 —— 根因不是「实现忘了加 header」，而是「注释把 Go 行为数错了」**：
+  本条原注释写的是 Go 做「**三件事**」、RAG 做「**两件**」，**两个计数都不对**
+  （Go 实为 5 件、RAG 实为 4 件；原文列举的 4 项里把 `WriteHeader` 与「写 body」合并计数了）。
+  ⇒ **错误的不是代码，是那句描述 Go 行为的注释** ——
+  它少算了 `Del("Content-Length")` 与 `WriteHeader`，让人以为「三件事」已经覆盖了 nosniff 之外的语义，
+  从而把「缺 nosniff」读成「RAG 少做了一件」，而实际是**两侧动作数不同、且 RAG 恰好少了 ③ nosniff**。
+  ⇒ 教训：**「N 件事」这种计数必须对着源码逐行数一遍**，注释里的数字一旦错了，
+  根因判断会整体偏一格（AGENTS.md §3.3.2 同源风险）。
 - **⚠️ 归属**：`service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`
   **不在本组件的修改范围内**（本会话只允许改两个台账文件）⇒ **只留档，不实施**。
   影响面是**所有 api 组件**，不是 admin-api 独有。
@@ -846,7 +890,7 @@ SEMANTICALLY NOT EQUIVALENT
 1. 本轮**没有**产出任何「已闭环」结论；最强者是 `静态源码·双侧`。
 2. 引用到的 difftest / matrix / `AdminApiMvcPipelineTest` 成果均为 **2026-10-21/22 他人已跑**，本轮**未复跑**。
 3. `admin/_shared.md` 的 **DRIFT-009 行**（「黑名单先执行」）与当前源码**冲突**：
-   本轮已复核 go-zero `rest/engine.go:108-112` + `rest/server.go:222-233`，**真实顺序是验签先、黑名单后**，
+   本轮已复核 go-zero `rest/engine.go:108-112` + `rest/server.go:222-235`，**真实顺序是验签先、黑名单后**，
    与 `AdminJwtAuthInterceptor` 的现状一致。⇒ 该行已过期，**但该文件不属本会话修改范围**，故在此标注。
 4. `AGENTS.md` §4.2 的「13 Service + 2 client」需上游修正（DRIFT-ADMINAPI-010）。
 
@@ -1494,3 +1538,98 @@ RAG 的 admin-api 现在**必须在 admin-rpc ready 之后起**（fail-fast ⇒ 
 > （jar 里 `03_create_admin.sql` 还是 `extra_info JSONB` 的旧版）
 > ⇒ 带 `-am` 重跑即 99/0/0/0 + 129/0/0/0 全绿。
 > ⇒ 完整教训见 [`docs/Pitfalls/users/admin/api.md` P-ADMINAPI-014](../../../Pitfalls/users/admin/api.md)。
+
+---
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- 2026-10-24 复核轮：「台账 vs 实际」逐条复核（6 处陈旧 + 1 处新根因 + 1 处自我纠正） -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+# 2026-10-24 复核轮（admin-api 侧 · 「台账 vs 实际」逐条复核）
+
+> **核对日期**：2026-10-24　**分支**：`align/users-admin`
+> **目标**：把本文件（+ `rpc.md`）里的**可证伪断言**逐条回到源码/实测重核一遍，
+> 找出「台账写的」与「代码实际做的」之间的偏差 —— **不是为了重写台账，是为了找出假绿灯**。
+
+## 0. 本轮结论摘要
+
+| # | 位置 | 性质 | 原断言 | 实际 | 处置 |
+|---|---|---|---|---|---|
+| 1 | 本文 `:53` | **计数错** | Go 侧「36 个文件」 | **34**（33 `.go` + 1 yaml） | 已订正 |
+| 2 | 本文 `:53` | **漏项** | Go 侧「13 handler」 | **14**（13 个 `handler/admin/*.go` + **1 个 `handler/routes.go`**） | 已订正 |
+| 3 | 本文 `:54` | **计数错** | RAG 侧「43 main + 10 test」 | **52 main + 13 test** | 已订正 |
+| 4 | 本文 M-43 | **计数错** | Prometheus「17 个具名 label」 | **2 个 label 名**（path/result）、**16 个组合**；另发现 RAG exposition **多一个 `application` label** | 已订正 |
+| 5 | 本文 ADMINAPI-006 ① | **口径过宽** | 「401 **完全不产生** observability span」 | Sea 侧 `markHTTPResult` 观测数据不产生；**但 go-zero native `TraceHandler` 在链首，仍产生 OTel server span** | 已订正 |
+| 6 | 本文 ADMINAPI-007 | **新根因** | Go `http.Error`「三件事」/ RAG「两件」 | Go **5 件事**、RAG **4 件事** ⇒ 根因是**注释数错了 Go 行为**，不是「忘了加 header」 | 已订正 |
+| 7 | `rpc.md` §6 | **计数陈旧** | U+FFFD「15 文件 / 42 字符」 | **13 文件 / 36 字符**（本域已清零）；§6.2 的 13 行表**仍逐条正确** | 已订正 |
+| — | 本文 ADMINAPI-006 ② | 🔴 **差点误判** | （台账原文）Go 计时器在 Authorize **之后**起算 | **台账原文是对的** —— 本轮复核初稿曾一度想把它改成「差异不成立」，**核到 `DisableNativeRestTimeout` 后撤回** | **原文保留 + 补证据链** |
+
+## 1. 复核方法
+
+- **只抽可证伪断言**：把三份台账（`DRIFT/users/admin/{api,rpc}.md` + `Intentional_Deviations/users/admin/*.md`）
+  里的每条断言按「能否被一次 grep / 一次 `go run` / 一次编译证伪」分类，
+  **共 81 条**可证伪 ⇒ 逐条回真源与 RAG 源码重核。
+- **每个计数都用命令重数**，不采信台账里的数字，也不采信上一轮的结论。
+- **对「框架机制」类断言，额外读一遍消费点**（AGENTS.md §3.3.1）——
+  本轮最重要的一次返工就出在这里（见 §3）。
+
+## 2. ⚠️ 本轮最有价值的一条：**复核差点自己造出一条新漂移**
+
+**经过**：初稿认为 ADMINAPI-006 ② 说反了 ——
+理由是 go-zero `rest/engine.go` 的 native `TimeoutHandler` 在 `buildChainWithNativeMiddlewares` 里
+**排在 `Authorize` 之前**（更外层）⇒ 「JWT 验签计入预算」⇒ 两侧一致 ⇒ 差异不成立。
+
+**核到第 4 环才发现：native Timeout 根本没进链。**
+
+`admincenter.go:34` 调了 `observability.DisableNativeRestTimeout(&c.RestConf)`，
+它把 `conf.Middlewares.Timeout` 置 **false**（`observability/http.go:32`），
+而 `rest/engine.go:154-155` 的条件 `if ng.conf.Middlewares.Timeout` 因此为假 ⇒ **`TimeoutHandler` 不在链上**。
+真正计时的 3s 是 `NewHTTPMiddleware`（经 `server.Use` ⇒ `ng.middlewares` ⇒ 在 `engine.go:110-112`
+**最后** append ⇒ 比 `Authorize` **更内层**）。
+
+⇒ **台账原文「Go 的 3s 计时器在 Authorize 之后起算（JWT 验签不计入）」是正确的**，
+差异**真实存在**（只在 JWT 验签这一段）。**初稿的「差异不成立」已撤回。**
+
+> 🔴 **教训（已记入 Pitfalls：P-ADMINAPI-016）**：
+> 「关掉框架自带机制」的调用（`Disable*` / `With*` 开关）是**读框架源码推中间件顺序时最容易漏掉的一环**。
+> 漏了它 ⇒ 把「框架原生 Timeout 在 Authorize 外层」误当成生效 ⇒ 把**真实存在的差异**误判成「不成立」。
+> ⇒ **上一条错误结论如果写进台账，就是台账自己造出了一条新漂移** —— 台账的错误比代码的错误更难发现，
+> 因为它是「看起来有证据的错」。
+> ⇒ 判据：**读消费开关的那段控制流，不是读声明**（AGENTS.md §3.3.1 第 1 条）。
+> 完整证据链（5 环）见上文 ADMINAPI-006 的「2026-10-24 复核补记」。
+
+## 3. 复核通过、**未动**的断言（避免下轮重复核）
+
+| 组 | 条目 | 结论 |
+|---|---|---|
+| ARPC-001~008 | 8 条 | 全部与代码一致（含 `update_time` **6** 处、Go `updateuserlogic.go:105-113` 不 set Success ⇒ RAG 已去掉 `setSuccess(true)`、空 `default-password` 守卫 `:1075-1076`、DDL `extra_info` TEXT + 6 个 `timestamptz`、SchemaInitializer 重放 4 脚本、**RAG 8 处 `AdminSpans.traced(` ↔ Go 8 处 `tracer.Start`**、Go `errmsg.go` 字面量确为乱码、`= 0L` 与 Go 一致） |
+| H-1~H-3 | 3 条 | 独立 Bean + `@Transactional`；`.last("FOR UPDATE")` 实际在 `AdminCreateAtomicService.java:120-123`（台账写 116-120，**行号微偏**，不影响结论）；pom 里 flyway 只剩注释 |
+| 签字偏离 | 7 条 | 全部一致（SD-01 `claim instanceof Number`、SD-06、SD-07、SD-08 `ERROR_TOKEN_RUNTIME(1006)`、N-1 401 envelope、N-4 `IdentityResolver.claimedUID`、N-5 `padToHmacKeySize`） |
+| 前提不可达 | 3 条 | ADMINAPI-002 / 005 / 008（`getSelf`/`getUser` 找不到抛 `Status.NOT_FOUND`） |
+| 契约 | 2 条 | 黑名单 key 两侧逐字节一致（`admin:jwt_blacklist:<token>`）；proto 13 RPC 逐字节一致（`check-proto-static.sh` EXIT=0） |
+
+## 4. 本轮顺带改的代码（**1 处，纯注释**）
+
+- `service/users/admin/admin-api/.../metrics/AdminApiMetrics.java`
+  - javadoc「**17 个**具名 Counter」→「**16 个**」（并在注释里写明「2 个 label 名 / 16 个组合」的区别）。
+  - 补一段：RAG exposition **多一个 `application` label**（`management.metrics.tags`），Go 侧没有。
+
+> ⚠️ **只改注释，零行为改动** ⇒ 不需要重跑测试门禁（见 §6）。
+
+## 5. 跨域待办（**数字更新**，仍开放）
+
+| 项 | 归属 | 本轮复核后的状态 |
+|---|---|---|
+| `users_user.extra_info` 的 `CAST(... AS jsonb)` 仍在 `AdminDomainService.java:962` | users 域 | 仍开放 |
+| user-api 的 400 仍用 `headers.setContentType(MediaType.TEXT_PLAIN)`（缺 charset） | users/user 域 | 仍开放 |
+| message-rpc 的 Flyway `baseline-on-migrate: true` 且无 `baseline-version` ⇒ V1 被 baseline 吞掉 | message 域 | 仍开放（修法：加 `baseline-version: 0`） |
+| `AGENTS.md §0` users 行三处出入（`update_time ×5`→**×6**、撤销「`status=0L` 未修」、`extra_info` 标注 users/user 域已改） | **共享文件** | 仍开放，合并时统一改 |
+
+## 6. 本轮是否需要重跑测试
+
+**不需要。** 本轮改动 = 2 个台账文件 + 1 个 javadoc（零行为改动）
+⇒ 无编译期/运行期影响 ⇒ **不构成 §3.3.3 的「改了实现要配守门」情形**。
+
+⚠️ 但**上一轮的实现改动**（ADMINAPI-009 v2 等）已有守门网：
+`mvn -o -pl service/users/admin/admin-api,service/users/admin/admin-rpc -am test`
+⇒ **admin-api 129/0/0/0、admin-rpc 99/0/0/0，skipped=0**（2026-10-24 实测，见上文 §9）。

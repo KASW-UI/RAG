@@ -453,3 +453,49 @@
   2. **断言要打在「表真的在」上**（`assert_tables`），不能只看「迁移跑成功」——
      账本里的 `success=true` 证明不了该跑的都跑了。
   3. 看到「某个表不存在，但迁移文件在、账本也说成功」⇒ **先查账本里有没有 `<< Flyway Baseline >>`**。
+
+---
+
+## P-ADMINAPI-016 · 🔴 读框架源码推中间件顺序时，**漏掉 `Disable*` 开关** ⇒ 把「真实存在的差异」误判成「不成立」
+
+- **场景**：2026-10-24「台账 vs 实际」复核轮，要核实台账里
+  `DRIFT-ADMINAPI-006 ②`（Go 的 3s 超时计时器从哪起算）。
+
+- **初稿的推理**（**错**）：
+  读 go-zero `rest/engine.go` 的 `buildChainWithNativeMiddlewares`，
+  看到 native 中间件顺序是
+  `Trace → Log → Prometheus → MaxConns → Breaker → Shedding → **Timeout** → Recover → Metrics`，
+  而 `Authorize` 是在 `appendAuthHandler`（`engine.go:70-84`）里**之后** append 的
+  ⇒ **`Timeout` 比 `Authorize` 更外层** ⇒ JWT 验签计入 3s 预算
+  ⇒ 与 RAG 的最外层 Filter「一致」⇒ **这条漂移不成立**。
+
+- **真相**：`TimeoutHandler` **根本不在链上**。
+  `admincenter.go:34` 在建 server **之前**调了
+  `observability.DisableNativeRestTimeout(&c.RestConf)`，
+  它把 `conf.Middlewares.Timeout` 置 `false`（`observability/http.go:32`），
+  而 `rest/engine.go:154-155` 的条件 `if ng.conf.Middlewares.Timeout` 因此为假 ⇒ native Timeout 被跳过。
+  真正计时的是 `NewHTTPMiddleware`（`server.Use` ⇒ `ng.middlewares` ⇒ `engine.go:110-112` **最后** append
+  ⇒ 比 `Authorize` **更内层**）⇒ **台账原文是对的，差异真实存在**。
+
+- **为什么难发现**：
+  - `DisableNativeRestTimeout` 是个**看起来像工具函数**的调用，返回一个 `time.Duration`，
+    **读签名完全看不出它改了配置**；
+  - 它改的是**结构体字段**（`conf.Middlewares.Timeout`），而 `rest.MustNewServer(c.RestConf)` 传的是**值拷贝**
+    ⇒ 只有「先改后传」的顺序才生效 ⇒ 顺序错了也**不报错**，只是语义悄悄变了；
+  - go-zero 源码里 native Timeout 的位置**客观上**就在 `Authorize` 外层 ——
+    **不看那段关闭代码，推理过程「无懈可击」**。
+
+- **最坏的后果不是这一条错，而是它会被写进台账**：
+  台账的错误比代码的错误更难发现 —— 它**看起来有证据**（行号、函数名、顺序图都对），
+  而且**会把一条真实存在的漂移注销掉**，让后续所有轮次都不再查它。
+  ⇒ **复核轮最大的风险不是漏看，而是「复核出一个假的结论」**。
+
+- **下次怎么防**：
+  1. 推中间件顺序时，**先 grep 一遍 `Disable` / `With` / `Enable` 这类开关调用**，
+     确认「框架自带的那条链」**有没有被摘掉**；
+  2. 判「某框架机制是否生效」，**读消费该开关的那段控制流**，不是读声明
+     （AGENTS.md §3.3.1 第 1 条）；
+  3. 复核台账时，**先把「原文可能是对的」当成默认假设** ——
+     复核的目的是找**陈旧**与**错误**，不是把所有结论翻新一遍。
+     ⚠️ 本轮 81 条可证伪断言里，只有 **6 条**真的有问题（7.4%）；
+     若复核结论是「大部分都反了」，那更可能是**复核方法本身有偏差**。
