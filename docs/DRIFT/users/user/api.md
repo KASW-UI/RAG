@@ -346,7 +346,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标记见文件头。
 | 28 | Avatar/* | 空列表 → `[]`（非 null） | `getavatarhistorylogic.go:55` `make(…,0,n)` | `AvatarHistoryService.java:80` `new ArrayList<>(0)` | **EQUIVALENT** | 静态源码 |
 | 29 | Avatar/* | `history` 字段不会是 null | `avatarhelpers.go:15-27`（nil→零值 struct） | `UserApiSupport.java:62`（proto3 `getHistory()` 返默认实例，永不为 null） | **EQUIVALENT** | 静态源码（proto `users.proto:105-108`） |
 | 30 | **ALL 6 个 rethrow 端点** | **gRPC code → 业务码** | 每个 Logic 自己的 switch（`default` 收窄） | `mapRPCStatusToCode:100-110` **通用**映射 | **OBSERVABLE DIFFERENCE**（条件性） | **DRIFT-USERAPI-003** · 静态源码 + 依赖 U-003 |
-| 31 | **ALL** | **请求绑定面（path/query/header/body）** | `Parse` = Path + **Form** + **Headers** + Body | 仅 JSON body | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-004** · 静态源码 |
+| 31 | **ALL** | **请求绑定面（path/query/header/body）** | `Parse` = Path + **Form** + **Headers** + Body，**但没有对应 tag 的字段被整个跳过**（`usingDifferentKeys`）⇒ 只有 json tag 的 Req **只吃 JSON body** | 仅 JSON body | ✅ **一致**（原记 OBSERVABLE DIFFERENCE，**已证伪**） | **DRIFT-USERAPI-004** 已关闭（双侧活体，`330bafb`） |
 | 32 | Avatar/history | **body 是否被解析** | handler **不调** `httpx.Parse` | `@RequestBody` 会解析 | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-005** · 静态源码 |
 | 33 | 必填缺失 | HTTP 400 + text/plain + nosniff + 尾换行 | `http.Error` 形状 | `goStylePlainTextBadRequest:214-220` | **EQUIVALENT** | 静态源码 |
 | 34 | 必填缺失 | **`Content-Type` 字面量** | `text/plain; **charset=utf-8**` | `text/plain`（**无 charset**） | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-006** · 字节码核实 |
@@ -670,7 +670,89 @@ Recommended Verification: 从 user-rpc 台账取每个 RPC 实际发出的 code 
                与上表逐格比对；发得出的格子全部补 per-Service 分支。
 ```
 
-### DRIFT-USERAPI-004 —— 请求绑定面：Go 接受 path/query/form/HTTP header，RAG 只接受 JSON body
+### DRIFT-USERAPI-004 —— 请求绑定面 —— ❌ **已证伪关闭（2026-10-24 00:0x，commit `330bafb`）**
+
+> **本节的原始断言是错的**，它出自纯静态源码阅读、**从未跑过活体**。
+> 下面是证伪过程，保留供追溯（⚠️ 别再照着原始结论去「修」）。
+
+#### 原断言（错的）
+
+> Go 接受 path/query/form/HTTP header，RAG 只接受 JSON body ⇒ 客户端契约面被收窄。
+> `Must Preserve: Go 的完整绑定面`。
+
+#### 错在哪：漏掉了紧挨着的那道门
+
+原结论读了 go-zero `core/mapping/utils.go` 的 `parseKeyAndOptions` ——
+它确实在「没有对应 tag」时**回落到 Go 字段名**，据此推断 form/header 通道会按字段名绑定。
+**漏掉了紧挨着的 `core/mapping/unmarshaler.go:570-573`**：
+
+```go
+func usingDifferentKeys(key string, field reflect.StructField) bool {
+	if len(field.Tag) > 0 {
+		if _, ok := field.Tag.Lookup(key); !ok {
+			return true        // ← 该字段没有 <key> tag ⇒ **整个字段被跳过**
+		}
+	}
+	return false
+}
+```
+
+⇒ **不是「按字段名回落」，而是「完全不看」**。
+`processField` 首行就 `return nil`（`unmarshaler.go:569-573`）。
+
+而 `service/user/user/api/internal/types.go` 的 Req **只有 json tag**
+（`json:"username"` / `json:"password,optional"` …）⇒
+**path / form / header 三个通道对它们全部惰性**；
+随后的 json 通道又按 json tag 强制必填
+⇒ **Go 的 user-api 只认「Content-Type 含 `application/json` + JSON body」这一种输入。**
+
+#### Go 侧活体实证（`go run -overlay` 虚拟注入探针 + 真源 `types.LoginReq` + go-zero `httpx.Parse`）
+
+| # | 输入 | Go 结果 |
+|---|---|---|
+| 1 | JSON body（CT=`application/json`） | `Username="j" Password="p"` ✅ |
+| 2 | 空 body + `?username=q&password=p` | **ERR** `field "username" is not set` |
+| 3 | 空 body + urlencoded form body | **ERR** `field "username" is not set` |
+| 4 | header `Username`/`Password` | **ERR** `field "username" is not set` |
+| 5 | query + JSON body（username 冲突） | `Username="fromJson"` ⇒ **JSON 赢** |
+| 6 | JSON body 缺 password | **ERR** `field "password" is not set` |
+| 7 | JSON body 但 CT 缺失 | **ERR** `field "username" is not set` |
+| 8 | JSON body 但 CT=`text/plain` | **ERR** `field "username" is not set` |
+
+**机制侧对照**：第 3/4 条用**带 `form:`/`header:` tag** 的结构体复测，
+只有 json tag 写成 `,optional` **且同时**带 form/header tag 时该通道才生效
+⇒ **证明机制本身可用**，是 **user-api 的结构体没带那些 tag**，不是 go-zero 的通道坏了。
+
+#### RAG 侧真 Tomcat 实测（Tomcat 11.0.24，端口 59900）
+
+| 输入 | RAG | 与 Go |
+|---|---|---|
+| query `?username=q&password=p` | 400 `field "username" is not set` | ✅ 逐字一致 |
+| header `username`/`password` | 400 同上 | ✅ |
+| urlencoded form body | 400 同上 | ✅ |
+| CT=`text/plain` + JSON body | 400 同上（**不是 415**） | ✅ |
+| CT 缺失 + JSON body | 400 同上 | ✅ |
+| CT=`application/json` + 合法 body | 200 并进入下游 | ✅ |
+
+#### 结论
+
+**RAG 的 `@RequestBody`-only 绑定面与 Go 已经等价 ⇒ 本条不构成漂移，不修。**
+
+**守网**：`UserApiBindingSurfaceParityTest`（5 条，`330bafb`）——
+它的作用是**反向护网**：防止下一个 agent 照着本节的原始结论去「补齐 query/form/header
+绑定面」，**那才是真的引入漂移**（Go 不绑、RAG 绑 ⇒ 同一请求两侧行为分叉）。
+
+#### 遗留（本轮顺带澄清，不单独编号）
+
+**CT≠`application/json` 时 Go 返回 400 而非 415** 这条差异，
+原台账归在 `DRIFT-USERAPI-005` 第四轮（`api.md` §1540-1552），
+实测 **RAG 的 login/register 也是 400**（不是 415）⇒ 该差异**只存在于当时的 avatar/history**，
+且已由 DRIFT-005 的修法（整个去掉 `@RequestBody`）消掉。
+**⇒ 当前 user-api 全端点在 CT 维度上与 Go 一致。**
+
+<details><summary>原始断言全文（保留供追溯）</summary>
+
+
 
 ```text
 Component:    httpx.Parse（Go） / @RequestBody（RAG）
@@ -703,6 +785,10 @@ Must Preserve: Go 的完整绑定面，或逐条签字放弃。
 Recommended Verification: 真进程各打一次 `?Username=a&Password=b`（空 body），
                断言两侧的 HTTP 状态码与 body。
 ```
+
+</details>
+
+### DRIFT-USERAPI-004（原编号保留占位）—— 见上方「已证伪关闭」小节
 
 ### DRIFT-USERAPI-005 —— `/user/avatar/history` 在 Go 侧根本不读 body，RAG 侧会解析
 
@@ -847,7 +933,12 @@ Must Preserve: 或明确签字放弃（并写清「过载行为由上游网关/�
 Recommended Verification: CPU 打满 / 连接数打满条件下双侧压测，比对 503 比例与响应体。
 ```
 
-### DRIFT-USERAPI-009 —— observability 的位置：Go 在鉴权之内，RAG 在鉴权之外
+### DRIFT-USERAPI-009 —— observability 的位置：Go 在鉴权之内，RAG 在鉴权之外 —— ✅ **① 已签字（2026-10-24）⇒ `SD-USERAPI-002`**
+
+> **本条签字只覆盖 ①（可观测性）。** ②（3s 超时作用域）**不在签字范围内** ——
+> 那是行为差异且条件性（只在 Redis 也慢时可观察）⇒ 仍挂 `UNRESOLVED-004`。
+> 签字档 ⇒ [`docs/Intentional_Deviations/users/user/api.md`](../../../Intentional_Deviations/users/user/api.md) 的 `SD-USERAPI-002`。
+> ⚠️ 审查时看到「401 进了 access log」变红，**先确认是不是这一条**，不要当新回归去「修」。
 
 ```text
 Component:    HttpMiddleware(Filter) vs go-zero server.Use 中间件
@@ -881,7 +972,11 @@ Risk:         MEDIUM。① 是永远可见的差异；② 是「只有在 Redis 
 Evidence:     静态源码（Go: engine.go:101-113 + chain.go 的 Then 语义；
               RAG: HttpMiddlewareFilter.java:36-37 + WebMvcConfig.java:56-59）。
 Must Preserve: 或明确签字接受「RAG 的观测面更大」（这通常是好事，但要写下来）。
+                  ⇒ ✅ 2026-10-24 已签字接受（SD-USERAPI-002）
 Recommended Verification: 真进程各打一次无 token 请求，比对 access log / /actuator 指标里是否出现。
+                          ⇒ ⚠️ 本轮**未做**（无 metrics 后端）⇒ 签字依据是**中间件顺序的结构性证据**
+                            （HttpMiddlewareFilter.java:36-37 的 @Order vs WebMvcConfig.java:56-59 的 addInterceptor），
+                            而非运行时指标比对。
 ```
 
 ### DRIFT-USERAPI-010 —— 黑名单 401 的 `Content-Type` 拼写错误，RAG 有意不复刻
@@ -944,7 +1039,7 @@ Recommended Verification: 无需验证（属已决策项），但建议在 N-1 �
 | CASE-15 序列化边界（`uid` 字符串） | 注册成功 | `"uid":"123…"`（字符串） | `"uid":"123…"`（字符串） | ✅ | `,string` 已对齐 |
 | CASE-15b 序列化边界（`score`） | `/get` 成功 | `"score":0` 恒存在 | `"score":0` 恒存在 | ✅ | |
 | CASE-15c **序列化边界（400 header）** | 必填缺失 | `Content-Type: text/plain; charset=utf-8` | `Content-Type: text/plain` | ❌ | **DRIFT-USERAPI-006** |
-| CASE-15d **序列化边界（绑定面）** | `?Username=a&Password=b` 空 body | 登录成功 | 400 | ❌ | **DRIFT-USERAPI-004** |
+| CASE-15d **序列化边界（绑定面）** | `?Username=a&Password=b` 空 body | **400 `field "username" is not set`** | 400 `field "username" is not set` | **YES** | 原判 ❌，**已证伪更正**（`330bafb`） |
 | CASE-15e **序列化边界（history 的 body）** | `/avatar/history` 发畸形 JSON | 200 | 400 | ❌ | **DRIFT-USERAPI-005** |
 
 ---
@@ -1040,7 +1135,7 @@ Required Confirmation: 引用 `docs/DRIFT/users/user/rpc.md`（另一会话产�
 |---|---|---|---|
 | 1 | 两边的 public behavior 是否一致 | ❌ | DRIFT-USERAPI-001 / 002 / 004 |
 | 2 | 正常路径是否一致 | ✅ | §4 #5,6,7,8,9,12,16,21,22,24 |
-| 3 | 边界输入是否一致 | ❌ | DRIFT-USERAPI-004（query/header 绑定面）、005（history 的 body） |
+| 3 | 边界输入是否一致 | ❌ | ~~DRIFT-USERAPI-004~~（**已证伪关闭**）· DRIFT-USERAPI-005（history 的 body，已修） |
 | 4 | NotFound / Empty / Null 是否一致 | ✅ | §4 #28,29；`list`→`[]`、`history` 不会 null、`data`→null 一致 |
 | 5 | Error meaning 是否一致 | ⚠️ | 主干一致（§4 #7,8,13,14,15,25）；条件性不一致见 DRIFT-USERAPI-003 |
 | 6 | Error propagation 是否一致 | ❌ | DRIFT-USERAPI-001（业务层 200+1006 → 鉴权层 401） |
@@ -1054,7 +1149,7 @@ Required Confirmation: 引用 `docs/DRIFT/users/user/rpc.md`（另一会话产�
 | 14 | Timeout scope 是否一致 | ❌ | DRIFT-USERAPI-009（Go 不含验签、RAG 含） |
 | 15 | Concurrency semantics 是否一致 | ✅ | 本组件无状态无写（N/A 性质的等价）；见 U-005 |
 | 16 | Authentication / Authorization 是否一致 | ❌ | DRIFT-USERAPI-001（claim presence）、002（uid 合法域）；✅ 集合/前缀/fail-open/顺序一致 |
-| 17 | Serialization semantics 是否一致 | ❌ | DRIFT-USERAPI-004 / 005 / 006；✅ `uid,string` / `score` / `data:null` 一致 |
+| 17 | Serialization semantics 是否一致 | ❌ | ~~004~~（已证伪）/ 005（已修）/ 006（本轮已修）；✅ `uid,string` / `score` / `data:null` 一致 |
 | 18 | Lifecycle 是否一致 | ⚠️ | 启动顺序等价（§6.12）；❌ 过载能力 DRIFT-USERAPI-008 |
 
 **统计**：✅ 8 项 / ❌ 7 项 / ⚠️ 3 项 / — 2 项（N/A）

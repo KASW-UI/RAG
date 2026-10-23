@@ -215,7 +215,12 @@ Go 验 RAG 签的： 同上                                     → 全部 VERIF
 
 ---
 
-### DRIFT-USERSCOMMON-005 ⚠️ bcrypt 接受 `$1$` / `$2x$` 前缀，RAG 拒收
+### DRIFT-USERSCOMMON-005 ⚠️ bcrypt 接受 `$1$` / `$2x$` 前缀，RAG 拒收 —— ✅ **已签字（2026-10-24）⇒ `SD-USERSCOMMON-001`**
+
+> 决定：**保留 RAG 的 fail-closed**（拒收 `$1$` / `$2x$`），**不对齐 Go 的 fail-open**。
+> 签字档 ⇒ [`docs/Intentional_Deviations/users/common.md`](../../../Intentional_Deviations/users/common.md) 的 `SD-USERSCOMMON-001`。
+> ⚠️ **签字的是「保留严格校验」这个决定，不是「登不进去这件事没问题」** ——
+> 真出现这类账号，正确处置是**重置密码 / 数据迁移**，不是回头放宽正则。
 
 **性质：OBSERVABLE DIFFERENCE（数据依赖 · fail-closed 方向）**
 
