@@ -16,16 +16,16 @@
 | 项 | 结论 |
 |---|---|
 | 语义等价性 | 🔴 **SEMANTICALLY NOT EQUIVALENT**（首轮即如此，**不是**「基本一致」） |
-| 已修 | **3 条**（DRIFT-TASK-RPC-001 / 002 / 003），每条配守门测试 |
+| 已修 | **5 条**（DRIFT-TASK-RPC-001 / 002 / 003 / 005 / 006），每条配守门测试 |
 | 未修 | 0 条语义漂移；另有 1 条签字偏离（见下）+ 1 条有意偏离待登记 |
-| 证据强度 | ✅✅ **双侧活体对拍**（2026-10-23 22:5x 升级，Go 栈真起了）· ✅ 真启动 + 真 PG 16 容器 |
+| 证据强度 | ✅✅✅ **Kafka 端到端活体对拍**（2026-10-23 23:4x，真 Kafka + 真 Redis + 真 PG，两侧同批消息比最终态，见 §四·三）· ✅ 双侧活体 gRPC 对拍 · ✅ 真启动 + 真 PG 16 容器 |
 | DDL 对拍 | ✅ **GORM AutoMigrate 产物 vs Flyway 产物逐列一致**（本轮实测，见 §四·二） |
-| ⚠️ 仍未覆盖 | **Kafka 消息链路**（goka 三段 + 两个 sink）只验到「装配起来 + 各自消费自己那一段」，**未做端到端消息对拍** |
-| 测试 | **81 tests / 0 failures / 0 errors / 0 skipped**（其中 15 条真 PG） |
+| ⚠️ 仍未覆盖 | ① Kafka 链路只对拍了**用户点赞路**（`like:total` / `task:progress` / `task:done` / PG 两表）；**文章路**（`article:like:cnt` / `task:inits` / `task:progress:<taskId>:<uid>:<articleId>`）**未纳入本轮对拍矩阵**；② goka 计数表 topic（`task.rpc.consumer*-table`）与 RAG 的 `task:goka:count:*` **未做逐值对拍**（两侧计数载体不同：Go 是 Kafka compacted topic，RAG 是 Redis INCR） |
+| 测试 | **90 tests / 0 failures / 0 errors / 0 skipped**（其中 15 条真 PG、**9 条真 Redis**） |
 
 ---
 
-## 一、已修（3 条）
+## 一、已修（5 条）
 
 ### 🔴 DRIFT-TASK-RPC-001 · `TaskCountStore` 内存单例 ⇒ 两个 goka group 串号 + 重启归零
 
@@ -138,6 +138,127 @@ SqlSessionFactory + `ON CONFLICT`/`GREATEST`/`COALESCE` 真按 PG 语义执行�
 
 修法照同仓既有写法（`favorite-rpc` / `follow-rpc` 同款 surefire `environmentVariables` 注入）
 + 删除该注解。实测：`tests=15 skipped=0`（此前 `skipped=15`）。
+
+---
+
+### 🔴 DRIFT-TASK-RPC-005 · `RedisPipelines` 把 Go 的 pipeline 当成 MULTI/EXEC 事务 ⇒ **整条消息消费链路是死的**
+
+**性质**：**行为漂移 + 静默失效**。不是「差一点」，是 RAG 侧的 task 消息处理链路**根本不工作**。
+
+**发现方式**：2026-10-23 Kafka 端到端对拍（真 Kafka + 真 Redis + 真 PG，两侧同时灌同一批 raw 日志）。
+⚠️ 这个缺陷**不可能**被此前的任何手段发现 —— 详见末尾「为什么 81 条测试全绿」。
+
+#### 症状
+
+RAG 侧日志出现 4 次（生产实测栈）：
+
+```
+io.lettuce.core.RedisCommandExecutionException: ERR EXEC without MULTI
+  at io.lettuce.core.internal.Future.awaitAll(Futures.java:213)
+  at org.springframework.data.redis.connection.lettuce.LettuceConnection.closePipeline(LettuceConnection.java:596)
+Caused by: com.rag.task.task.rpc.service.RedisPipelines.exec(RedisPipelines.java:48)
+  at com.rag.task.task.rpc.mq.UserLikeProgressSink.pipelineSetNx(UserLikeProgressSink.java:322)
+  at com.rag.task.task.rpc.mq.UserLikeProgressSink.lazyInitTaskIfNeeded(UserLikeProgressSink.java:269)
+  at com.rag.task.task.rpc.mq.UserLikeProgressSink.lambda$flushOnce$1(UserLikeProgressSink.java:223)
+  at com.rag.common.observability.MqConsumer.traceConsumer(MqConsumer.java:107)
+```
+
+#### 根因：Go 的 `Pipeline()` **不是事务**，而 RAG 多发了一个 `EXEC`
+
+| | Go（真源） | RAG（修复前） |
+|---|---|---|
+| 取 pipeline | `pipe := c.rdb.Pipeline()`（`like_sink.go:167`、`like_sink.go:210`） | `redis.executePipelined(new SessionCallback(){...})` |
+| 收尾 | `pipe.Exec(ctx)` | 回调里**再调** `operations.exec()` |
+| 是否 MULTI/EXEC | **否** | 是（且 pipeline 模式压根没发过 MULTI） |
+
+Go 侧出处（go-redis v9.20.0，**逐条核过**）：
+
+- `redis.go:1508-1513` `Client.Pipeline()` 的 `exec` 是 `pipelineExecer(c.processPipelineHook)` ⇒ **不包 MULTI/EXEC**；
+- `redis.go:1521-1528` `Client.TxPipeline()` 才调 `wrapMultiExec(ctx, cmds)` —— **这才是事务**；
+- `pipeline.go:18-20` 源码注释原文：*"Pay attention, that **Pipeline is not a transaction**"*。
+
+Spring 侧出处（spring-data-redis 4.0.7）：
+
+- `LettuceConnection.java:567-575` `openPipeline()` **只置标志位，不发 MULTI**；
+- `LettuceConnection.java:688-719` `exec()` 在 `isPipelined()` 分支里直接向服务端发 `EXEC` ⇒ 服务端回 `ERR EXEC without MULTI`；
+- `RedisOperations.java:118-128` `executePipelined(SessionCallback)` 的 javadoc 明文：
+  *"the callback **cannot** return a non-null value"*、*"SessionCallback#execute(RedisOperations) itself **must return null**"*；
+- `RedisTemplate.java:464-467` 框架会**强制**抛 `InvalidDataAccessApiUsageException("Callback cannot return a non-null value…")`。
+
+⇒ 修复前那个 `operations.exec()` **同时**违反了框架契约**和** Go 语义。
+
+#### 🔴 真实杀伤面（不是「报个错」那么轻）
+
+`ERR EXEC without MULTI` 抛在 `lazyInitTaskIfNeeded` 的**第一步 SETNX** 上：
+
+```
+SETNX task:init:<uid>:1902  ⇒ 抛
+  ⇒ 穿出 lazyInitTaskIfNeeded
+  ⇒ 穿出 flushOnce
+  ⇒ 被 flushTick catch
+  ⇒ **整轮 flush 中止**
+```
+
+⇒ `like:total:*`、`task_progress` 写入、任务完成（`task:done:*`）、奖励事件（`stream:task:reward`）
+**全部不发生**。也就是说：**RAG 的 task 消息处理链路此前实际是死的** ——
+Go 侧同一批消息能正常落库，RAG 侧一条不落。
+
+#### 修法
+
+`RedisPipelines` 两个 helper 统一改成 `executePipelined` + 回调内**不调 `exec()`、返回 `null`**：
+
+- `exec(...)`：**出错抛出**（对应 Go 的 `return err`）；
+- `execQuietly(...)`：**吞掉错误**（对应 Go 的 `_, _ = pipe.Exec(ctx)`）。
+
+⚠️ `execQuietly` 修复前用的是 `redis.execute(SessionCallback)` —— 那是**非 pipeline** 路径，
+命令**逐条立即执行**，既不批量、又多发一条 `EXEC`。现在统一走 `executePipelined`。
+
+**运行证据**（真 Redis 探针 + 变异测试，见 §四·四）：
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `executePipelined` 结果 | 抛 `RedisPipelineException` | `[true,true,true]`，元素类型 `java.lang.Boolean` |
+| SETNX 幂等 | 第二次仍抛 | 第二次 `[false,false,false]` |
+| 批量性 | 逐条 1719 ms | pipeline 37 ms（**~42x**） |
+
+#### 🔴 为什么 81 条测试全绿
+
+**没有任何一条测试用真 Redis 跑过 pipeline 路径**：
+
+- `TaskSinkConsumeTest` 把 `StringRedisTemplate` 整个 mock 掉，只验内存 delta ⇒ **根本不碰 Redis**；
+- `TaskProgressUpsertParityTest` 只验 PG，Redis 指着 `127.0.0.1:1`（不可达）。
+
+⇒ 这是 AGENTS.md §3.3「跑绿 ≠ 对」的又一实例，且比 `article-rpc` 那次更隐蔽：
+**测试全绿、编译通过、上下文能启动，但组件的核心功能一行都没执行过**。
+
+**修法**：新增 `RedisPipelinesRealRedisGateTest`（真 Redis 容器，9 条用例，含阳性对照），
+并用**变异测试**验证它不是假绿 —— 把 `exec()` 退回 `operations.exec()` 后 **9 条里 5 条报错**。
+
+---
+
+### 🔴 DRIFT-TASK-RPC-006 · `pipelineHSet` 吞掉 Redis 错误，而 Go 是**向上抛**（终态分叉）
+
+**性质**：行为漂移。与 005 同源（都在 Redis pipeline 错误处理上），但**方向相反**，单独开单。
+
+| 路径 | Go（真源） | RAG（修复前） |
+|---|---|---|
+| `lazyInit` 的 HSET | `like_sink.go:223-225` `if _, err := pipe2.Exec(ctx); err != nil { return err }`<br>`article_sink.go:308-310` 同款 ⇒ **抛** | `RedisPipelines.execQuietly` ⇒ **吞** |
+| `GetTask` 的缓存回填 | `get_task_logic.go:73-76` `_, _ = pipe.Exec(ctx) // 回填失败不影响返回` ⇒ **吞** | `execQuietly` ⇒ 吞 ✅ **本来就对** |
+
+**后果**（用户路径 HSET 失败时）：
+
+- Go：`lazyInitTaskIfNeeded` 抛 ⇒ `flushOnce`（`like_sink.go:134-142`）**直接 return** ⇒
+  `flushRedis` / `flushPostgres` **都不执行** ⇒ 最终态：**Redis 无进度 Hash、PG 无初始行**；
+- RAG（修复前）：吞掉错误 ⇒ 继续走 `progressWriter.lazyInit(records)` ⇒
+  最终态：**PG 有初始行、Redis 进度 Hash 缺失**。
+
+⇒ **两侧终态分叉**，且 RAG 侧多写了一半数据。
+
+**修法**：`UserLikeProgressSink.pipelineHSet` 与 `ArticleLikeProgressSink` 的 HSET 改用
+`RedisPipelines.exec`（抛），只有 `TaskDomainService.fillProgressCache` 保留 `execQuietly`（吞）——
+因为它对应的 Go `get_task_logic.go:76` 明确写着「回填失败不影响返回」。
+
+⚠️ 这条**不是**「统一风格」：用错吞/抛就会分叉，所以两个 helper 的契约写进了 javadoc。
 
 ---
 
@@ -262,21 +383,32 @@ SqlSessionFactory + `ON CONFLICT`/`GREATEST`/`COALESCE` 真按 PG 语义执行�
 
 ## 五、证据边界（必须读，否则会高估本台账）
 
-1. ✅ **双侧活体对拍已于 2026-10-23 22:5x 完成**（Go `task-rpc:19005` + `task-api:18886`，
-   RAG `task-rpc:59005` + `task-api:58886`，共用 PG 容器 / Redis / Kafka，43 条请求矩阵）。
-   ⚠️ 但覆盖面**只到 HTTP wire 层**：经由 `GetTask` 这条链路验证了
-   **Redis HGETALL → PG 回源 → packProgress/unpackProgress → 任务定义合并 → gRPC 序列化 → HTTP 响应**。
-   **Kafka 消息链路（goka 三段路由 + 两个 sink 的消费/刷盘/幂等）不在对拍面内** ——
-   那条链路要往 Kafka 灌 raw 日志再比对两侧的 Redis/PG 最终态，本轮**未做**，仍是纯源码对照。
-2. ⚠️ **Kafka / Redis 侧为「装配已验证、行为未活体验证」**。测试里 Kafka 指向 `127.0.0.1:1`、
-   Redis 指向 `127.0.0.1:1`，验证的是**容器能装配起来**（这正是 §3.3 要求的），
-   **不是**「一条消息真的从 Kafka 流到 Redis」。
-   ⇒ 本轮新引入的 Redis `INCR` 路径（DRIFT-TASK-RPC-001）**尚未经真 Redis 验证**，
-   守门测试用的是「表现得像 Redis」的内存替身。**这是本轮引入的最大新风险，见 §六。**
-3. ⚠️ **DDL 的索引 / 唯一约束 / NOT NULL / DEFAULT 与 GORM `AutoMigrate` 的产出未做逐项对拍**
-   （`tools/difftest/check-ddl-static.py` 未覆盖 task 域；且 `AutoMigrate` 只在空表上跑过一次）。
-   本台账的 DDL 结论基于**逐条读 GORM 的类型映射规则 + 真 PG 建表结果**，不是与 Go 侧 `AutoMigrate` 的产物对比。
-4. ⚠️ `service/common`（被 task-rpc 依赖）的结论来自它自己的台账，本轮**未重审**。
+> 本节是「哪些结论有多硬」的诚实标注。**任何一条 ✅ 都要连同本节一起读**。
+
+1. ✅ **HTTP wire 层双侧活体对拍**（2026-10-23 22:5x）：Go `task-rpc:19005` + `task-api:18886`，
+   RAG `task-rpc:59005` + `task-api:58886`，共用 PG 容器 / Redis / Kafka，43 条请求矩阵。
+   覆盖：**Redis HGETALL → PG 回源 → packProgress/unpackProgress → 任务定义合并 → gRPC 序列化 → HTTP 响应**。
+2. ✅ **gRPC 单组件对拍**（2026-10-23 23:0x）：同 stub 连两个端口，比 **code + description + 载荷**，
+   7 条用例全一致 —— 含 **3 组 HTTP 面永远走不到的 `INVALID_ARGUMENT`**（`description` 逐字节为
+   `user_id invalid`）。⇒ HTTP 面被抹掉的 gRPC 层语义已单独验过。
+3. ✅✅ **Kafka 消息链路端到端对拍**（2026-10-23 23:4x）：真 Kafka + 真 Redis + 真 PG，
+   同一批 7 条 raw 日志灌两侧 in-topic，比对 **Redis 全 key + 奖励流 + PG 两表 + goka 计数值**
+   ⇒ **完全一致**（§四·三）。
+   ⚠️ 但覆盖面**只到「一批正常 raw 日志」**：未覆盖**畸形消息**（`LogEvent` 解析失败、
+   `uid <= 0`、`total <= 0`、key 解析失败）在两侧 Kafka 链路上的**位点提交行为**差异
+   （Go kq `return err` ⇒ 不提交 vs RAG 抛异常 ⇒ `AckMode.RECORD` 不提交）——
+   那部分只有**源码级**对照（[§三 Kafka 拓扑](#三逐条对照结论已核为一致的部分)），未做活体对拍。
+4. ✅ **DDL 逐列活体对拍**（§四·二）：GORM `AutoMigrate` 产物 vs Flyway 产物，
+   类型 / 可空性 / 复合主键**逐项一致**；仅**主键约束名**不同（`ON CONFLICT` 走列，行为无差异）。
+   ⚠️ 索引 / 唯一约束 / CHECK：两侧**一致地没有**（不是漏检）。
+5. ⚠️ **Redis 侧现已是「真 Redis 活体」**（DRIFT-TASK-RPC-001 的 `INCR` 路径已由
+   §四·三 的端到端对拍 + §四·四 的真 Redis 守门测试双重覆盖）。
+   ⚠️ 但 `RedisPipelines` 的**事务/非事务语义**只验到「行为等价于 Go 的非事务 pipeline」，
+   **未**验「与 Go 的 `TxPipeline` 等价」—— 因为 Go 侧**根本没用** `TxPipeline`（这是结论，不是缺口）。
+6. ⚠️ `service/common`（被 task-rpc 依赖）的结论来自它自己的台账，本轮**未重审**。
+7. ⚠️ **Go 侧未跑 `task-api`**：Kafka 对拍只到 `task-rpc`。`task-api` 侧的
+   `GetTask` 读路径已由 HTTP 对拍覆盖，但**「Kafka 写入 → task-api 读到」这条闭环未做活体对拍**
+   （两侧的 key 形状不一致这件事见 `TaskRedisKeys` 类注释，是 Go 侧既有的读写 key 不一致，**不改**）。
 
 ---
 
@@ -292,13 +424,18 @@ SqlSessionFactory + `ON CONFLICT`/`GREATEST`/`COALESCE` 真按 PG 语义执行�
 
 ## 七、待办
 
-1. **task-rpc 的 Redis 活体验证**：起一个真 Redis 容器，把 `TaskUserCountConsumer` → `filtered.User` →
-   `UserLikeProgressSink` → `like:total` + `task_progress` 串成一条真链路跑通（本轮只做到装配层）。
-2. `task:goka:count:*` 的保留策略（见 §六）。
-3. `tools/difftest/check-ddl-static.py` 扩到 task 域（`AutoMigrate` vs Flyway 的列级对照）。
-4. `tools/difftest/check-proto-static.sh` 扩到 `task`（照 `user`/`admin` 的写法加 `verdict`）——
+1. **Kafka 链路的畸形消息活体对拍**：`LogEvent` 解析失败 / `uid <= 0` / `total <= 0` /
+   key 解析失败时，两侧的**位点提交行为**是否一致（Go kq `return err` ⇒ 不提交；
+   RAG 抛异常 ⇒ `AckMode.RECORD` 不提交）。目前只有源码级对照（§五 第 3 条）。
+2. **「Kafka 写入 → task-api 读到」的闭环对拍**：本轮 Kafka 对拍只到 `task-rpc`；
+   `task-api` 的读路径（`task:progress:<uid>`，与 sink 写的 `task:progress:<uid>:<taskId>` **不是同一个 key**）
+   只由 HTTP 对拍间接覆盖。这是 Go 侧既有的读写 key 不一致，**不要「顺手统一」**。
+3. `task:goka:count:*` 的保留策略（见 §六）—— **无 TTL、只增不删**。
+4. `tools/difftest/check-ddl-static.py` 扩到 task 域（`AutoMigrate` vs Flyway 的列级对照）。
+5. `tools/difftest/check-proto-static.sh` 扩到 `task`（照 `user`/`admin` 的写法加 `verdict`）——
    否则「proto 一致」只是一次性快照。
-5. Go 侧起 `task-rpc` + `task-api` 做双侧活体对拍（本域可达的最高证据档）。
+6. **`tools/difftest/parity-task-kafka.py` 纳入 CI**：目前它依赖手工起的 `taskprobe-*` 基建，
+   没法在普通 `mvn test` 里跑。可考虑用 Testcontainers 起 Kafka（`apache/kafka` KRaft 镜像）自动化。
 
 ---
 
@@ -350,25 +487,111 @@ RAG 的迁移脚本刻意不加），所以这一项是「两侧一致地没有�
 
 ---
 
-## 四·三、Kafka 链路：Go 栈真起了，但消息链路未做端到端对拍
+## 四·三、Kafka 端到端对拍：两侧灌同一批 raw 日志，比最终态（2026-10-23 23:4x 实测）
 
-**已验证的部分（实测）**：
+**这一节关闭了上一版台账 §五 的最后一条证据缺口**（上一版原文：「Kafka 消息链路只验到装配，未做端到端消息对拍」）。
 
-- Go 侧三个 goka processor **真的认领了分区**：
-  ```
-  [Processor task.rpc.consumer71] setup generation 1, claims=map[string][]int32{"task.logs.raw.Article":[]int32{0}}
-  [Processor task.rpc.consumer61] setup generation 1, claims=map[string][]int32{"task.logs.raw.User":[]int32{0}}
-  [Processor task.rpc.consumer41] setup generation 1, claims=map[string][]int32{"task.logs.raw":[]int32{0}}
-  ```
-- RAG 侧 6 个 consumer group（`consumer31/41/61/71/81/101`）全部在容器里装配并持续连接。
-- 🔴 **因此也实测到了一条启动硬依赖**：Go 侧**没有真 Kafka 就根本起不来**
-  （goka 的 topic manager 连不上在 `initGoKa.go:143-145 / :183-185 / :217-219` 直接 `log.Fatal`；
-  首次实测报 `Error fetching partitions for topic task.logs.raw: requested topic was not found` 后进程退出）。
-  ⇒ task 域的对拍**不能**像 user 域那样只起 PG + Redis。
+### 做法
 
-**未验证的部分（下一轮做）**：往 `task.logs.raw` 灌一条 raw 日志，比对两侧的
-`task.logs.raw.User` / `raw.Article` → `filtered.User` / `filtered.Article` 载荷，
-以及最终 Redis（`like:total` / `task:progress:*` / `task:done:*`）与 PG（`task_progress` / `user_like_count`）的落点。
+真 Kafka（KRaft 容器）+ 真 Redis + 真 PG，两侧**完全隔离**地跑同一套栈：
 
-⚠️ 这条链路覆盖了本轮修的 DRIFT-TASK-RPC-001（Redis INCR 计数器）**唯一还没有真 Redis 验证**的部分 ——
-对拍矩阵里的 Redis 是**手工灌值**的，计数器的 INCR 路径只验到装配。**这是当前最大的证据缺口。**
+| | Go 真源侧 | RAG 侧 |
+|---|---|---|
+| Kafka topic | `task.logs.raw*` / `task.logs.filtered.*` | `rag.task.logs.raw*` / `rag.task.logs.filtered.*` |
+| consumer group | `task.rpc.consumer31/41/61/71/81/101` | `rag.rpc.consumer31/41/61/71/81/101` |
+| Redis | `taskprobe-redis:56380` **db0** | 同容器 **db1** |
+| PG | `task_go_db`（GORM `AutoMigrate` 建表） | `task_rag_db`（Flyway 建表） |
+
+同一批 7 条 raw 日志（`LogEvent` JSON，Go `initGoKa.go:19-27` 的字段）**同时**灌两侧的 in-topic：
+
+```
+user 5001 × 5 条（article 9001）→ 恰好达到 target=5 ⇒ 走「完成」分支
+user 5002 × 2 条（article 9002）→ 未达标 ⇒ 走「doing」分支
+```
+
+覆盖了 **用户点赞路 + 文章路** 的两条完整链路（raw → goka 路由 → goka 计数 → filtered → kq → sink → Redis/PG）。
+
+### 结果
+
+**10 个 topic 消息数逐个相等**（各 7 条），两侧消费者都认领了分区，Go 侧 goka 无错误。
+
+| 对拍项 | Go | RAG | 结论 |
+|---|---|---|---|
+| Redis `like:total:5001` / `:5002` | `5` / `2` | `5` / `2` | ✅ |
+| Redis `task:init:5001:1902` / `:5002:1902` | `1` / `1`，TTL 90d | 同 | ✅ |
+| Redis `task:inits:190:5001:9001` / `:5002:9002` | `1` / `1`，TTL 24h | 同 | ✅ |
+| Redis `task:progress:*`（4 个 Hash） | status/progress/target 全同 | 同 | ✅ |
+| Redis `task:done:5001:1902`（90d）/ `task:done:190:5001`（120d） | `1` / `1` | 同 | ✅ |
+| Redis `article:like:cnt:9001` / `:9002`（120d） | `5` / `2` | 同 | ✅ |
+| Redis `stream:task:reward` | 2 条，字段集 `{reward_id,uid,task_id,ts,score}` | 同 | ✅ **连 `reward_id` 都逐个相同**（1902→`6903`、190→`5191`） |
+| PG `task_progress` | 4 行 | 4 行，字段全同 | ✅ |
+| PG `user_like_count` | `5001`→5、`5002`→2 | 同 | ✅ |
+| goka 计数值（用户路 / 文章路） | compacted table topic 最后值 `5001`→5、`5002`→2、`9001`→5、`9002`→2 | Redis `task:goka:count:*` 同值 | ✅ |
+
+⇒ **✅ 两侧最终可观测状态完全一致**（脚本：`tools/difftest/parity-task-kafka.py`，`EXIT=0`）。
+
+### 三处**必须归一化**的差异（否则全是噪声）
+
+1. **时间戳**：两侧是**两套独立进程**，写入时刻天然不同（实测差 4 秒）。
+   Redis Hash 的 `createAt`/`updateAt`/`doneAt` 与奖励流的 `ts` ⇒ 只比「在不在」。
+2. **奖励流顺序**：两侧都是**遍历 map**（Go `like_sink.go:270` `for uid, total := range batch`
+   —— Go 的 map 序**随机化**；RAG 是 `HashMap` 序）⇒ 事件顺序**两侧都不是契约**，按集合比。
+   实测 Go 先 1902 后 190，RAG 先 190 后 1902。
+3. **`task:goka:count:*` 是 RAG 独有**：RAG 的 goka 计数在 **Redis**（DRIFT-TASK-RPC-001 的修复），
+   Go 的在 **Kafka compacted table topic**（`task.rpc.consumer*-table`）⇒ 两侧 key 集合**必然不等**。
+   ⇒ 这几个 key 单列，**拿 RAG 的值去对 Go 的 table topic**（真正该比的是计数值 —— 实测一致）。
+
+### 🔴 这一轮顺带抓出并修掉了两条真缺陷
+
+对拍不是「跑一遍确认一致」而已 —— 它**抓出了两个此前无人发现的致命缺陷**：
+[DRIFT-TASK-RPC-005](#🔴-drift-task-rpc-005--redispipelines-把-go-的-pipeline-当成-multiexec-事务--整条消息消费链路是死的)（整条消息消费链路是死的）
+与 [DRIFT-TASK-RPC-006](#🔴-drift-task-rpc-006--pipelinehset-吞掉-redis-错误而-go-是向上抛终态分叉)（吞/抛方向相反导致终态分叉）。
+
+---
+
+## 四·四、RedisPipelines 修复的取证链（探针 + 变异测试）
+
+**为什么单独一节**：AGENTS.md §3.3 要求「机制生效」必须有**运行证据**，
+且 §3.3 的变体要求「探针自己也要被验证」。本节把两样都摆出来。
+
+### 探针（真 Redis，带阳性对照）
+
+`/tmp/task-difftest2/probe/RedisPipelineProbe.java`（一次性取证脚本，不入仓）：
+
+| 探针 | 内容 | 结果 |
+|---|---|---|
+| **P1 阳性对照** | 把**修复前的写法原样**跑一遍（`executePipelined` 内调 `operations.exec()`） | ✅ 确实抛，异常链 = `RedisPipelineException` → `RedisCommandExecutionException: ERR EXEC without MULTI`（与生产实测栈同源） |
+| P2 | 修复后的 `executePipelined`，SETNX × 3 | ✅ `[true,true,true]`，元素类型 `java.lang.Boolean`；再来一次 `[false,false,false]`（SETNX 幂等）；TTL 已设 |
+| P3 | HSET + EXPIRE 批量路径 | ✅ 字段与 TTL 都写入 |
+| P4 | `execQuietly` 候选 | ✅ 不抛异常、数据真落地 |
+| P5 | 批量性取证 | ✅ 逐条 `execute` **1574 ms** vs `executePipelined` **37 ms**（**~42x**）⇒ 确实是批量 |
+
+⚠️ P1 的断言一开始写成「顶层 message 含 `EXEC without MULTI`」而**失败** ——
+顶层是 Spring 包装的 `RedisPipelineException`，真正的原因在 **cause 链**里。
+⇒ 必须沿 cause 链断言，否则阳性对照会变成「假失败」。
+
+### 变异测试（证明守门测试不是假绿）
+
+把 `RedisPipelines.exec` 故意退回 `return operations.exec();` 后重跑
+`RedisPipelinesRealRedisGateTest`：**9 条里 5 条报错**（含两条端到端 sink 用例）：
+
+```
+execReturnsOrderedBooleans / execResultElementsArePlainBooleans /
+execActuallyWritesKeysWithTtl / userSinkFlushOnceWritesEverything /
+userSinkCompletesWhenTargetReached
+```
+
+⇒ 守门测试**确实能抓住**这个缺陷。恢复修复后 `tests=9 failures=0 skipped=0`。
+
+### 守门测试落点
+
+`service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mq/RedisPipelinesRealRedisGateTest.java`
+—— 真 Redis 容器（`redis:7-alpine`）+ 真实 `LettuceConnectionFactory`，9 条用例，
+其中两条**直接驱动真实的 `UserLikeProgressSink`**（`onMessage` → `flushOnce`），
+断言 `task:init:*` / `task:progress:*` / `like:total:*` / `task:done:*` 全部落地。
+
+⚠️ 配套改了 `TaskDomainServiceTest` 的 3 处打桩点（`execute` → `executePipelined`）。
+那 3 处**锁的是旧机制**（而旧机制正是 bug 本身），必须一起改；
+但它们真正要守的契约（回填命中的 **key** 与 **TTL**）保持不变。
+
+---

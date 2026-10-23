@@ -222,3 +222,202 @@ req = urllib.request.Request(url, data=b'{"id":1001}', method="POST")
    **先把 header 归一，再看还剩什么**。没有这一步，42 条噪声会把 2 条真差异埋掉。
 3. ⚠️ 反过来也成立：**不要因为「大部分红的是格式」就草率收工** ——
    本轮那 2 条状态码差异恰恰就是从这堆噪声里筛出来的。
+
+---
+
+## 🔴 PITFALL-TASK-RPC-06 · Go 的 `Pipeline()` 不是事务，Spring 的 `executePipelined` 也不开 MULTI —— **两边都理解错了，于是整条链路静默死掉**
+
+> 场景：2026-10-23 Kafka 端到端对拍首跑。**整个 task 消息处理链路此前是死的**，而 81 条测试全绿。
+
+### 现象
+
+RAG 侧日志（4 次）：
+
+```
+io.lettuce.core.RedisCommandExecutionException: ERR EXEC without MULTI
+  at io.lettuce.core.internal.Future.awaitAll(Futures.java:213)
+  at org.springframework.data.redis.connection.lettuce.LettuceConnection.closePipeline(LettuceConnection.java:596)
+Caused by: com.rag.task.task.rpc.service.RedisPipelines.exec(RedisPipelines.java:48)
+  at UserLikeProgressSink.pipelineSetNx(UserLikeProgressSink.java:322)
+```
+
+### 根因（三方语义对不上）
+
+| | 事实 | 出处 |
+|---|---|---|
+| Go 的 `Pipeline()` | **不是事务**，只是批量 flush | go-redis v9.20.0 `redis.go:1508-1513`（`exec: pipelineExecer(processPipelineHook)`）；`redis.go:1521-1528` 的 `TxPipeline()` 才 `wrapMultiExec`；`pipeline.go:18-20` 注释原文 *"Pipeline is not a transaction"* |
+| Go 的 sink | 用的是 `c.rdb.Pipeline()` | `like_sink.go:167`、`like_sink.go:210` |
+| Spring 的 `executePipelined` | **不开 MULTI**（只置标志位） | `LettuceConnection.java:567-575` `openPipeline()` |
+| Spring 的 `exec()` | pipeline 模式下**直接发 EXEC** | `LettuceConnection.java:688-719` ⇒ 服务端回 `ERR EXEC without MULTI` |
+| Spring 的框架契约 | 回调**必须返回 null** | `RedisOperations.java:118-128` javadoc；`RedisTemplate.java:464-467` 强制抛异常 |
+
+⇒ RAG 在 `executePipelined` 的回调里**多调了一次 `operations.exec()``，
+把「Go 的批量 flush」误当成「MULTI/EXEC 事务」⇒ 服务端直接拒绝。
+
+### 为什么杀伤面这么大
+
+`ERR EXEC without MULTI` 抛在 `lazyInitTaskIfNeeded` 的**第一步 SETNX** 上：
+
+```
+SETNX 抛 ⇒ 穿出 lazyInit ⇒ 穿出 flushOnce ⇒ 被 flushTick catch ⇒ **整轮 flush 中止**
+```
+
+⇒ `like:total:*`、`task_progress`、任务完成、奖励事件**全部不发生**。
+**组件「跑着」「健康」「测试全绿」，但核心功能一行都没执行过。**
+
+### 教训
+
+1. **「两边的同名概念」不保证语义相同**：`Pipeline()` 在 Go 与 Spring 里都叫 pipeline，
+   但 Go 的**不是**事务、Spring 的**也不开** MULTI —— 真正的对应物是
+   Spring 的 `executePipelined`（且**回调必须返回 null**）。
+2. **框架的 javadoc 契约要当约束读**，不是当建议读。
+   `RedisOperations.java:118-128` 已经把「must return null」写在脸上。
+3. **「出错 ⇒ 抛」与「出错 ⇒ 吞」在 Go 里逐点不同**，不能统一处理：
+   `like_sink.go:223-225` 抛，`get_task_logic.go:73-76` 吞（注释写着「回填失败不影响返回」）。
+   统一成一种 ⇒ 终态分叉（见 DRIFT-TASK-RPC-006）。
+
+---
+
+## 🔴 PITFALL-TASK-RPC-07 · 81 条测试**零真 Redis 覆盖** ⇒「跑绿」证明不了 Redis 路径
+
+### 现象
+
+`RedisPipelines.exec` 里那个让整条链路死掉的 `operations.exec()`，
+在 81 条测试全绿的情况下长期存在。拆开看这 81 条覆盖了什么：
+
+| 测试类 | 条数 | 碰 Redis 了吗 |
+|---|---|---|
+| `TaskSinkConsumeTest` | 19 | ❌ 把 `StringRedisTemplate` **整个 mock 掉**，只验内存 delta |
+| `TaskProgressUpsertParityTest` | 15 | ❌ 只验 PG，Redis 指着 `127.0.0.1:1`（不可达） |
+| `TaskEventParsingTest` | 21 | ❌ 纯解析 |
+| `TaskDomainServiceTest` | 19 | ❌ mock `StringRedisTemplate`，且**连方法名都断言了** |
+| 其余 | 7 | ❌ |
+
+⇒ **没有任何一条测试让 Redis pipeline 真的跑过一条命令。**
+
+### 教训
+
+1. **「有 Redis 依赖」≠「有 Redis 覆盖」**：要数的是
+   **有几条用例让真 Redis 收到过命令**，不是 pom 里有没有 `spring-boot-starter-data-redis`。
+2. **mock 掉的东西不会告诉你它坏没坏**。本例中 mock 反而**固化**了错误的机制
+   （`verify(redis).execute(cap.capture())` 断言的正是那个 bug 机制）。
+3. ⇒ 修的时候要**同时**改实现和那 3 处锁错机制的断言，并说清为什么改。
+4. **变异测试是验「守门测试不是假绿」的唯一硬手段**：
+   本轮把 `exec()` 退回 `operations.exec()` 后，9 条里 **5 条报错**（含两条端到端 sink 用例），
+   证明守门测试真的能抓住它。
+
+---
+
+## ⚠️ PITFALL-TASK-RPC-08 · Redis 的 `SET` 是**类型无关**的 ⇒ 断言会「因为错误的原因而通过」
+
+> 场景：2026-10-23 写真 Redis 守门测试时踩到。
+
+### 现象
+
+想造一个「命令级错误」，用「对 hash 类型的 key 做 `SET`」当错误源。
+结果**不抛异常** —— 而且**非 pipeline 的对照组也不抛**。
+
+### 根因
+
+Redis 的 `SET` **会覆盖任何类型的 key**（它是类型无关的写入）。
+WRONGTYPE 只发生在「用某类型的读/改命令去动另一种类型的 key」上
+（对 string key 做 `HGET` 才是 WRONGTYPE）。
+
+### 为什么危险
+
+这条断言当时**通过了** —— 但它通过的原因是「错误源根本没触发错误」，
+**不是**因为「实现正确」。⇒ 这是 AGENTS.md §3.3 说的
+「绿测试可能是错误答案的守卫」的又一个变体。
+
+### 教训
+
+1. **阳性对照的对照组也要有**：本例是「非 pipeline 同样操作也不抛」暴露了前提错误。
+   ⇒ 写错误路径的断言时，**必须先确认这个错误在直连模式下也会发生**。
+2. 正确做法：对 **string** 类型的 key 做 `HGET`（已写进
+   `RedisPipelinesRealRedisGateTest.execPropagatesCommandError` 的注释里）。
+
+---
+
+## 🔴 PITFALL-TASK-RPC-09 · 删 Kafka topic **不会**删 `__consumer_offsets` 里的已提交位点
+
+### 现象
+
+为了重置对拍状态，删掉全部 topic 再重建、再灌同样的 7 条消息：
+
+```
+task.logs.raw          task.logs.raw:0:7   ← 消息在
+task.logs.raw.User     task.logs.raw.User:0:0   ← 路由处理器一条都没发出
+```
+
+RAG 侧却完全正常（`rag.task.logs.raw.User:0:7`）。
+
+### 根因
+
+- 已提交位点存在 `__consumer_offsets`，键是 **group + topic + partition**。
+  **topic 同名 ⇒ 位点还在**（哪怕 topic 已删重建）。
+- Go 的 goka 用 `cfg.Consumer.Offsets.Initial = sarama.OffsetOldest`
+  （`initGoKa.go:134-135` 等三处），但 `OffsetOldest` **只在没有已提交位点时生效**。
+  有旧位点（比如 9）就从 9 开始 ⇒ 新 topic 只有 7 条（offset 0-6）⇒ **整段被跳过**。
+- RAG 侧侥幸没事：`@KafkaListener` 用 `auto-offset-reset=latest`，
+  而消息是**启动之后**才灌的 ⇒ 起点就是队尾 ⇒ 全部收到。
+
+⇒ 一侧全收、一侧全不收 —— **典型的「假差异」**，会让人误判成 RAG 的 bug。
+
+### 附带坑：goka 的本地 LevelDB 缓存
+
+goka 自己会报：
+
+```
+kafka tells us there's no message in the topic, but our cache has one.
+The table might be gone. Try to delete your local cache!
+Topic task.rpc.consumer71-table, partition 0, hwm 0, local offset 23
+```
+
+缓存路径 = `/private/tmp/goka/processor/<group>/<topic>.<partition>`（goka `storage/builders.go:18-21`）。
+⇒ **删 topic 必须连本地缓存一起清**（用 `mv` 挪走，不要动整个 `/private/tmp/goka`——
+别的会话可能也在用）。
+
+### 教训
+
+1. **Kafka 的「重置」= topic + consumer group 位点 + 客户端本地缓存，三样都要清**。
+   最省事、最不会漏的做法：**重建整个 Kafka 容器**（本轮就这么干的）。
+2. **不对称的重置会造出假差异** ⇒ 两侧的重置必须**同样彻底**。
+
+---
+
+## ⚠️ PITFALL-TASK-RPC-10 · 容器内 Kafka CLI 必须用 **INTERNAL** 监听器
+
+### 现象
+
+`kafka-topics.sh --bootstrap-server localhost:9092` 在容器内**一直重连**：
+
+```
+WARN [AdminClient clientId=adminclient-1] Connection to node 1 (/127.0.0.1:59992) could not be established.
+```
+
+`kafka-get-offsets.sh` 则直接 `ClassNotFoundException: kafka.tools.GetOffsetShell`（包名已变）。
+
+### 根因
+
+容器 env：
+
+```
+KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://127.0.0.1:59992,INTERNAL://localhost:19092
+```
+
+`127.0.0.1:59992` 是**宿主机**的端口映射。容器内的客户端 bootstrap 到 `localhost:9092` 后，
+broker 回头告知 `127.0.0.1:59992` ⇒ 在容器自己的 netns 里这个端口**没人监听** ⇒ 永远连不上。
+
+⇒ 容器内要用 `--bootstrap-server localhost:19092`（INTERNAL 监听器，advertised 为 `localhost:19092`）。
+**宿主机上的客户端不受影响**（宿主机视角 `59992 → 容器 9092` 是通的）——
+所以「服务能连上、CLI 连不上」是**预期**的，不是环境坏了。
+
+### 教训
+
+1. **`advertised.listeners` 决定的是「客户端拿到什么地址」**，不是「broker 监听什么」。
+   同理适用于数据库、gRPC 等任何有 advertised 地址的中间件。
+2. 新版 `apache/kafka` 镜像里 `kafka.tools.GetOffsetShell` 已改名 ⇒ 用
+   **`kafka-get-offsets.sh`**；`--property` 也已 deprecated ⇒ 用 `--formatter-property`。
+3. ⚠️ **「offset 查询失败」不等于「offset 是 0」**。本轮最初就是
+   `GetOffsetShell` 报错 ⇒ 输出为空 ⇒ 被误读成「消息没灌进去」，
+   实际 offset 是 16。**测量手段失败时，先怀疑测量手段。**
