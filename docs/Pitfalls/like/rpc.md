@@ -234,3 +234,49 @@ SeekUtils.java:63                public static final FixedBackOff DEFAULT_BACK_O
 ⚠️ 另一面：**没有测试的错误不是「错误答案」，而是「根本不存在的断言」** ——
 这是 §3.3.3「绿测试可能是错误答案的守卫」的**反向**版本。
 本例若没有那条测试，这段代码会以「兼容层」的姿态长期留存，且**永远不会被发现**。
+
+---
+
+# 2026-10-24 第五轮新增踩坑（L-U11 补 `@EnableScheduling` 守门网）
+
+## PIT-LIKE-RPC-012 —— 🔴 **「Bean 存在」在 `@EnableScheduling` 这类机制上，是最像真的假绿**
+
+### 现象
+
+`DRIFT-LIKE-006` 把 like-rpc 的真实装配缺口缩到 2 处，其中一处是：
+「缺 `@EnableScheduling` ⇒ outbox relay 静默不跑，事件永远积压」。
+
+### 为什么它比别的坑更隐蔽
+
+`LikeHotEventOutboxRelay` 是 `@Component` ⇒ **摘掉 `@EnableScheduling` 之后它照样被创建、照样能注入**。
+所以任何形如
+
+```java
+assertNotNull(context.getBean(LikeHotEventOutboxRelay.class));   // ❌ 恒绿
+```
+
+的断言，**在缺陷存在时也是绿的**。
+
+而缺 `@EnableScheduling` 的真实后果是：**ticker 不再触发 ⇒ 热点事件永远积压**，
+启动日志**零告警、零报错** —— 这是 §3.3.3「静默失效」里最安静的一种形态。
+
+### 本轮锁的是两件更强的事
+
+1. **装配层**：`ScheduledTaskHolder` **真的持有**那个 `@Scheduled` 任务
+   （识别用 `ScheduledMethodRunnable.toString()` = `"<声明类全名>.<方法名>"`）。
+2. **行为层**：`Task.getLastExecutionOutcome().status()` 从 `NONE`（从没跑过）变成 `SUCCESS`
+   —— 即**它真的被执行了**。
+
+⚠️ 断言用的是 `SUCCESS` 而不只是「≠ `NONE`」：
+**「ticker 在跑但每轮都抛异常」是另一个缺陷，不能算通过**
+（relay 的循环体自己 `catch` 住异常只记 `WARN`，不抛出 ⇒ 那种失败在日志里很轻）。
+
+### 元教训
+
+⚠️ **「装配缺口」类缺陷要按「摘掉它之后会怎样」来设计断言**：
+- 摘掉之后**上下文起不来** ⇒ 任何 `@SpringBootTest` 都会红（容易发现）
+- 摘掉之后**Bean 还在、只是不工作** ⇒ 只有「机制生效」级别的断言能抓（难）
+
+⇒ 后者才是 §3.3.3 说的「**注解存在 ≠ 机制生效**」。
+本条与错误断言 F（`LikeRpcApplication` 里那句「每一条都有对应的 wiring 测试锁死」）
+是**同一个洞的两面**：断言 F 是对**覆盖范围**的错报，本条是那个洞本身。
