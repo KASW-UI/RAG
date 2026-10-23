@@ -1090,7 +1090,12 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 `JsonbTypeHandler` / `CAST({0} AS jsonb)` / `UserAvatarHistoryMapper:127` /
 `UserEntity:113` 共 4 处生产代码 + 5 个测试类一起动（其中
 `UserRpcContainerWiringTest:141` 断言的正是「`extra_info` 必须是 jsonb」），
-会与 admin 会话**产生同一张 `users-common/db/*.sql` 的双写冲突**（§5.3 共享文件纪律）。
+⚠️ **更正本文件早先「会产生同一张 `users-common/db/*.sql` 的双写冲突」的措辞** ——
+**不准确**：本组件拥有 `01_create_user.sql` / `02_create_user_avatar_history.sql`，
+admin 域拥有 `03_create_admin.sql` / `04_create_admin_invite.sql`，**四个文件两两不重叠**。
+测试断言也是各域各断言自己那张表（admin 断 `admin_admin` 是 text，本域断 `users_user` 是 jsonb）。
+⇒ **改 `users_user` 是文件级可分离的，不存在 §5.3 的共享文件冲突。**
+（本条更正由 2026-10-23 晚的跨域状态复核发现；原措辞把「同目录」误当成「同文件」。）
 ⇒ **需你在三个选项里裁定**（见本轮回复正文）。
 
 ### 6. 本轮没做成 / 没验的事（诚实边界）
