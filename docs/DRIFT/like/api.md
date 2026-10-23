@@ -706,8 +706,9 @@ SEMANTICALLY NOT EQUIVALENT
 
 | | 内容 |
 |---|---|
-| **已修** | **DRIFT-LIKEAPI-013**（null 元素崩在 protobuf）、**DRIFT-LIKEAPI-014**（尾随 token） |
-| **新增守门测试** | `LikeApiGoAlignmentTest` **5 条**（基线 62 → **67**） |
+| **已修** | **DRIFT-LIKEAPI-013**（null 元素崩在 protobuf）、**DRIFT-LIKEAPI-014**（尾随 token）
+| **已修（第四轮，见下）** | **012**（target_ids 数字）/ **016**（weight 溢出）/ **018 / 019 / 020**（三条文档高危断言）
+| **新增守门测试** | `LikeApiGoAlignmentTest` **5 条**（基线 62 → 67）；第四轮再加 **7 条**（→ **75**）并做了**变异验证** |
 | **证据强度** | 4 条走**真实 MVC 管线** + `ArgumentCaptor` 捕获真实下游 proto；1 条纯函数 |
 | **⚠️ 零覆盖已证伪两次** | 这 2 条修复改回原状时，既有 62 条<b>依然全绿</b> |
 
@@ -787,3 +788,139 @@ Go 侧则**正常发出**。
 ⇒ 该条**刻意不加测试**，并把理由写进 `LikeApiGoAlignmentTest` 的注释里
 （这本身是 §3.3.3「绿测试可能是错误答案的守卫」的一个**更隐蔽的变种**：
 不是绿测试锁死了错答案，而是**用一条无意义的断言伪装成"验过了"**）。
+
+---
+---
+
+# like-api 第四轮 · 012 / 016 / 018~020 修复（2026-10-23）
+
+> **分支** `align/like` · **基线**：改前 67 tests 全绿；改后 **75 tests 全绿**（新增 8 条）。
+> ⚠️ 与上一轮同款：这些修复**没有一条**被既有 67 条覆盖 —— 已用**变异测试**实证（见 §5）。
+
+## 0. 本轮摘要
+
+| 条目 | 分类 | 风险 | 状态 |
+|---|---|---|---|
+| **DRIFT-LIKEAPI-012** `target_ids` 里的 JSON 数字 | SEMANTIC MISMATCH | 🔴 HIGH | ✅ 已修 |
+| **DRIFT-LIKEAPI-016** `weight` 越出 f64 值域 | SEMANTIC MISMATCH（**写路径**） | 🟠 MEDIUM | ✅ 已修 |
+| **DRIFT-LIKEAPI-018** 应用入口类 javadoc 传播已推翻结论 | 文档层 | 🔴 HIGH | ✅ 已修（纯注释） |
+| **DRIFT-LIKEAPI-019** 测试类注释「Slice 永不计必填」 | 文档层 | 🔴 HIGH | ✅ 已修（纯注释） |
+| **DRIFT-LIKEAPI-020** `application/*+json` 的 Go 结论过宽 | 文档精度 | 🟡 LOW-MED | ✅ 已修 + 补边界用例 |
+
+⚠️ **判定不变**：仍有未修项（015 / 017 / 003），见 §4。
+
+## 1. 012：为什么「全局 coercion 一刀切」必然漏掉 Slice 这一半
+
+**Go 侧完整因果链（三段均读到消费点）**
+
+| # | 位置 | 事实 |
+|---|---|---|
+| 1 | `go-zero@v1.10.2/core/jsonx/json.go:74-77` | `unmarshalUseNumber` 对**三个** Unmarshal 入口统一 `decoder.UseNumber()` ⇒ 一切 JSON 数字是 `json.Number`（`type Number string`），**不是** float64 |
+| 2 | `core/mapping/unmarshaler.go:228-229` | `fillSliceValue` 的 type switch **第一条**就是 `case fmt.Stringer: setValueFromString(baseKind, ithVal, v.String())`；`json.Number` 实现了 `Stringer` ⇒ 数组里的数字被字符串化**接受** |
+| 3 | `core/mapping/utils.go` `convertTypeFromString` | `case reflect.String: return str, nil` —— **原样返回，不解析不校验** ⇒ `99999999999999999999` 连溢出都不管 |
+
+⚠️ **这是 go-zero 自身的��对称**：同一个 JSON 数字，进**标量** String 字段被拒（`processFieldPrimitive`），
+进 **Slice 元素**却被收。只学「String 字段拒数字」必然漏掉这一半 —— 台账原判 HIGH 成立。
+
+**修法**：新增 `GoStyleRawStringListDeserializer`（域内，不动 `users-common`），挂到
+`GetLikeCountReq` / `GetLikeStateReq` 的 `target_ids`。
+
+### 🔴 为什么必须用「原始 token 文本」—— 三方案实测对照
+
+| 字面量 | 默认（`Object`） | +`USE_BIG_DECIMAL_FOR_FLOATS` | **`getText()`（本实现）** | Go `json.Number` |
+|---|---|---|---|---|
+| `1` | `Integer 1` | `Integer 1` | **`"1"`** | `"1"` ✅ |
+| `1.5` | `Double 1.5` | `BigDecimal 1.5` | **`"1.5"`** | `"1.5"` ✅ |
+| `1.0` | `Double 1.0` | `BigDecimal 1.0` | **`"1.0"`** | `"1.0"` ✅ |
+| `1.50` | ⚠️ `Double 1.5`（**尾零丢失**） | `BigDecimal 1.50` | **`"1.50"`** | `"1.50"` ✅ |
+| `1e3` | ⚠️ `Double 1000.0` | ⚠️ `BigDecimal 1E+3` | **`"1e3"`** | `"1e3"` ✅ |
+| `-2.5e-7` | ⚠️ `Double -2.5E-7` | ⚠️ `BigDecimal -2.5E-7` | **`"-2.5e-7"`** | `"-2.5e-7"` ✅ |
+
+⚠️ **`BigDecimal` 方案也不成立**：`new BigDecimal("1e3").toString()` 是 `"1E+3"`（**大写 E、正指数带 `+`**）。
+⚠️ 且 `USE_BIG_DECIMAL_FOR_FLOATS` 是**全局**开关，会连带改变 `weight` 等**有明确目标类型**的 Double 字段 ⇒ 副作用外溢，故不采用。
+
+**⚠️ 本类同时承担 013 的 null 语义（实测踩到）**：`p.getText()` 对 `VALUE_NULL` 返回
+**字符串 `"null"`** 而非 Java `null` ⇒ 照抄会把 `[null]` 变成 `["null"]`，**直接破坏 013**。
+⇒ 类中显式对 `VALUE_NULL` 返回 Java `null`，交给 `GoStyleTargetIds#normalize`。
+
+**其它 token 的处置（逐条对应 Go 分支）**
+
+| token | Go | 本类 |
+|---|---|---|
+| 数值 | `case fmt.Stringer` | `getText()` 原字面量 |
+| 字符串 | `case string` | `getText()`（无引号） |
+| null | `fillSlice` 的 `continue`，**不进** `fillSliceValue` | Java `null` → `normalize` |
+| **bool** | `default` → `errTypeMismatch`（`unmarshaler.go:255-261`：`reflect.TypeOf(bool).AssignableTo(string)` 为假） | **抛错** |
+| object / array | `case map[string]any` → String 元素 ⇒ `errTypeMismatch` | **抛错** |
+
+## 2. 016：`1e400` 为什么会变成一次 `+Inf` 的写调用
+
+**Go 判据**（`core/mapping/unmarshaler.go:684-687`）：
+```go
+case reflect.Float32:
+    fValue, err := v.Float64()      // v 是 json.Number
+    if err != nil { return err }    // ← 1e400 在这里被拒
+```
+`json.Number("1e400").Float64()` ⇒ `(+Inf, ErrRange)` ⇒ **解析失败** ⇒ 整个请求 5001，**不发任何 RPC**。
+
+⚠️ 而 Jackson 3 对溢出字面量**不报错** ⇒ `weight` 得 `Double.POSITIVE_INFINITY`
+⇒ 随即被 `(float)` 窄化到 f32，`+Inf` 原样进 proto ⇒ **下游任何按权重加权的计算被污染**。
+
+**修法**：新增 `GoStyleFloat64Deserializer`，显式查 `Double.isFinite()`。
+
+⚠️ **两条容易做错的边界**
+
+| 输入 | Go | 为什么容易做错 |
+|---|---|---|
+| `1e39` | ✅ **接受**（f64 合法） | ⚠️ `weight` 是 `float64`，**不**触发 `unmarshaler.go:694` 的 f32 `OverflowFloat`；若把 f32 的溢出规则也搬过来会**误拒** |
+| `"1.5"`（字符串） | ❌ type mismatch | ⚠️ 字段一改成自定义 deserializer，原先那条 `LogicalType.Float ← String = Fail` **就不再生效**（目标类型已不是 Float）⇒ 必须由本类自己拒绝 |
+
+**已补用例**：这条修法同时要防「修过头」——`largeButValidWeightIsAccepted` 专门钉住 `1e39` 必须仍被接受。
+
+## 3. 018 / 019 / 020：三条文档层高危断言（**先改断言，未动一行实现**）
+
+| 条目 | 原断言 | 实测判据 | 结论 |
+|---|---|---|---|
+| **018** | 「Go 侧 yaml **没有** `Timeout` 字段 ⇒ `TimeoutFromMillis(0)==0` ⇒ 不设超时；Java 侧**刻意不配**」 | `go-zero@v1.10.2/rest/config.go:55` `Timeout int64 \`json:",default=3000"\`` ⇒ **yaml 写不写都是 3000ms**；且 `application.yml:27-29` **早已配了 3s** | 整条推理**不成立**。⚠️ 这正是 §3.3.1「配置里没写 ≠ 没开」的原型案例，且落在**应用入口类**上 ⇒ 任何人清理配置时第一眼就会读到 |
+| **019** | 「Slice 永不计必填」+ 给 Go 代码标 `← 不报错` | `unmarshaler.go:944-950` 的 Slice 分支**不是** `return nil`，而是把 `emptyMap` 交给 `processFieldNotFromString` → `default:` → `processFieldPrimitive` → `typeKind≠valueKind` ⇒ **`newTypeMismatchError`** | 两处都错，且**与同文件 59-73 行自相矛盾**（那里已写对）。⚠️ 这是 **DRIFT-LIKEAPI-002 的案发现场** |
+| **020** | 「`application/*+json` 在 Go 侧同样不算 JSON」 | `rest/httpx/requests.go:153-155` 判据是 `strings.Contains(ct, "application/json")`（**子串包含**）⇒ `application/vnd.api+json` 不含 ⇒ 不读；⚠️ **`application/json-patch+json` 含 ⇒ Go 会读** | 措辞**过宽**（把两条混成一条）。⚠️ 已补 `jsonPatchContentTypeIsReadBecauseItContainsTheSubstring` 钉住反向那一半，防止有人照旧措辞给它加 Go 没有的拒绝逻辑 |
+
+## 4. 仍未修（与上一轮 §4 相同，无新增）
+
+| ID | 原因 |
+|---|---|
+| **015** | 修法落在 `service/common` 的 `GoStyleJsonBodyConverter`，**6 个域共用**，多域并发 worktree 下会跨域冲突 ⇒ 须单域串行 |
+| **017** | 主要落点在 like 域（`LikeRpcClient` 加 2000ms 配置 + `min(…, 剩余预算)`），但需连带审 `common` 的 `GoStyleRequestDeadline` 分支 |
+| **003**（rpc 侧） | 事实投递链路，需新建**独立进程**；真 DC 接收服务不在任何仓 |
+| **021/022** | 已建档为 ⏳ 待签字候选 |
+
+## 5. 守门测试与**变异验证**
+
+`LikeApiGoAlignmentTest` 由 **5 条 → 12 条**：
+
+012 三条（`jsonNumbersInTargetIdsAreAcceptedAsTheirLiteralText` /
+`scientificNotationKeepsLiteralForm` / `booleanElementIsRejected`）·
+016 四条（`weightOutOfF64RangeIsRejectedAndNoRpcIsSent` /
+`negativeWeightOutOfRangeIsRejected` / `largeButValidWeightIsAccepted` / `weightAsStringIsRejected`）
+
+🔴 **变异验证（不是"跑绿"就算数）**
+
+| 变异 | 结果 |
+|---|---|
+| 摘掉 `weight` 的 `@JsonDeserialize` | **2 条转红**（`1e400`、`-1e400`）✅ |
+| 摘掉 `target_ids` 的 `@JsonDeserialize` | **2 条转红**（数字字面量、科学计数法）✅ |
+
+⚠️ 变异同时暴露一处**有用的事实**：`weightAsStringIsRejected` 在去掉注解后**仍绿** ——
+因为字段仍是 `Double` 类型，全局 `LogicalType.Float ← String = Fail` 仍在生效；
+它变红的前提是「字段类型也一起改」。⇒ 那条断言守着的是**另一层**，不是无用断言（已在其 `@DisplayName` 里说明依赖）。
+
+## 6. ⚠️ 本轮的两次自我纠错（都发生在动手之前）
+
+1. **先测错了对象**：最初 4 个探测类用的是 `com.fasterxml.jackson.databind.ObjectMapper`（**Jackson 2**），
+   而 like-api 的 MVC 实际用 **Jackson 3**（`tools.jackson.*`；注解保留 `com.fasterxml.jackson.annotation` 包名）。
+   ⚠️ 若不纠正，012 的方案会基于错误数据定型。
+2. **凭记忆写错异常类**：写了 `DeserializationException`，Jackson 3 **没有这个类**，
+   编译失败后才查 jar 找到正确类型是 `tools.jackson.databind.exc.MismatchedInputException`
+   （构造器 `protected`，必须用静态工厂 `from(...)`）—— 语义上正好对应 Go 的 `errTypeMismatch`。
+
+⇒ 两条都属于「**API 存在性**」类误判，与 PIT-LIKEAPI-009「不存在某机制与两侧都实现了它在台账上长得一样」同族。

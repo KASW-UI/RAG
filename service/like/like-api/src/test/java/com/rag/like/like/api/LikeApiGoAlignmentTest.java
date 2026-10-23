@@ -180,6 +180,129 @@ class LikeApiGoAlignmentTest {
                 "单元素 null ⇒ 等价于空列表（Go slice 保持 nil）");
     }
 
+    // ==================== DRIFT-LIKEAPI-012：target_ids 里的 JSON 数字 ====================
+
+    /**
+     * Go 侧的完整因果链（均已读到消费点，见 {@code GoStyleRawStringListDeserializer} 的类注释）：
+     * {@code jsonx/json.go:74-77 UseNumber()} ⇒ 数字是 {@code json.Number}（实现 {@code fmt.Stringer}）
+     * ⇒ {@code unmarshaler.go:228 case fmt.Stringer} ⇒ {@code utils.go case reflect.String: return str, nil}（原样）。
+     */
+    @Test
+    @DisplayName("🔴 target_ids 里放 JSON 数字必须被接受并原样字符串化（Go B05/B06/B28）")
+    void jsonNumbersInTargetIdsAreAcceptedAsTheirLiteralText() throws Exception {
+        // 三个用例与 Go 活体探针逐条对应
+        assertIdsForLiteral(1, "1");
+        assertIdsForLiteral(2, "2");
+        assertIdsForLiteral(5, "1.5");
+        assertIdsForLiteral(28, "99999999999999999999");
+    }
+
+    private void assertIdsForLiteral(int seq, String literal) throws Exception {
+        stubGetLikeCount();
+        org.mockito.Mockito.clearInvocations(stub);
+
+        mockMvc.perform(post("/like/v1/getlikecount")
+                        .header("Authorization", bearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"target_type\":\"article\",\"target_ids\":[" + literal + "]}"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<GetLikeCountReq> captor = ArgumentCaptor.forClass(GetLikeCountReq.class);
+        verify(stub).getLikeCount(captor.capture());
+        assertEquals(List.of(literal), captor.getValue().getTargetIdsList(),
+                "JSON 字面量 " + literal + " 必须按**原字面量**字符串化 —— "
+                        + "走数值再拼回字符串会把 1e3 变成 1000.0、1.50 变成 1.5，与 Go 的 json.Number 不同");
+        // 序号仅用于让失败用例可定位
+        assertTrue(seq > 0);
+    }
+
+    @Test
+    @DisplayName("🔴 科学计数法也必须保真（Go json.Number 原样，Jackson 默认会变成 1000.0）")
+    void scientificNotationKeepsLiteralForm() throws Exception {
+        stubGetLikeCount();
+        mockMvc.perform(post("/like/v1/getlikecount")
+                        .header("Authorization", bearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"target_type\":\"article\",\"target_ids\":[1e3]}"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<GetLikeCountReq> captor = ArgumentCaptor.forClass(GetLikeCountReq.class);
+        verify(stub).getLikeCount(captor.capture());
+        assertEquals(List.of("1e3"), captor.getValue().getTargetIdsList(),
+                "Go 侧是 json.Number(\"1e3\").String() = \"1e3\"；"
+                        + "⚠️ BigDecimal 也不行 —— new BigDecimal(\"1e3\").toString() 是 \"1E+3\"");
+    }
+
+    @Test
+    @DisplayName("🔴 target_ids 里放 bool 必须被拒（Go unmarshaler.go:255-261 ⇒ errTypeMismatch）")
+    void booleanElementIsRejected() throws Exception {
+        mockMvc.perform(post("/like/v1/getlikecount")
+                        .header("Authorization", bearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"target_type\":\"article\",\"target_ids\":[true]}"))
+                .andExpect(status().isOk());
+
+        // 关键：下游 RPC **没有被调用**（Go 侧同样在解析阶段就失败）
+        verify(stub, org.mockito.Mockito.never()).getLikeCount(any());
+    }
+
+    // ==================== DRIFT-LIKEAPI-016：weight 越出 f64 值域 ====================
+
+    @Test
+    @DisplayName("🔴 weight:1e400 必须解析失败且**不发 RPC**（Go json.Number.Float64() ⇒ ErrRange）")
+    void weightOutOfF64RangeIsRejectedAndNoRpcIsSent() throws Exception {
+        mockMvc.perform(post("/like/v1/likeaction")
+                        .header("Authorization", bearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"target_type\":\"article\",\"target_id\":\"1\","
+                                + "\"action_type\":1,\"author_id\":1,\"weight\":1e400}"))
+                .andExpect(status().isOk());
+
+        // Go: unmarshaler.go:684-687 → v.Float64() 返回 (+Inf, ErrRange) ⇒ return err ⇒ 解析失败
+        verify(stub, org.mockito.Mockito.never()).likeAction(any());
+    }
+
+    @Test
+    @DisplayName("🔴 weight:-1e400 同样被拒（负向溢出同路径）")
+    void negativeWeightOutOfRangeIsRejected() throws Exception {
+        mockMvc.perform(post("/like/v1/likeaction")
+                        .header("Authorization", bearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"target_type\":\"article\",\"target_id\":\"1\","
+                                + "\"action_type\":1,\"author_id\":1,\"weight\":-1e400}"))
+                .andExpect(status().isOk());
+        verify(stub, org.mockito.Mockito.never()).likeAction(any());
+    }
+
+    @Test
+    @DisplayName("⚠️ weight:1e39 必须被**接受**（f64 合法；weight 是 float64，不触发 f32 的 OverflowFloat）")
+    void largeButValidWeightIsAccepted() throws Exception {
+        when(stub.likeAction(any())).thenReturn(
+                com.rag.like.like.proto.LikeActionResp.newBuilder().setSuccess(true).build());
+
+        mockMvc.perform(post("/like/v1/likeaction")
+                        .header("Authorization", bearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"target_type\":\"article\",\"target_id\":\"1\","
+                                + "\"action_type\":1,\"author_id\":1,\"weight\":1e39}"))
+                .andExpect(status().isOk());
+
+        // 这条是**防过度收紧**：若把 f32 的溢出规则也搬过来，1e39 会被误拒
+        verify(stub).likeAction(any());
+    }
+
+    @Test
+    @DisplayName("🔴 weight 传字符串必须被拒（String → 浮点字段 type mismatch）")
+    void weightAsStringIsRejected() throws Exception {
+        mockMvc.perform(post("/like/v1/likeaction")
+                        .header("Authorization", bearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"target_type\":\"article\",\"target_id\":\"1\","
+                                + "\"action_type\":1,\"author_id\":1,\"weight\":\"1.5\"}"))
+                .andExpect(status().isOk());
+        verify(stub, org.mockito.Mockito.never()).likeAction(any());
+    }
+
     // ==================== 018：只改注释，不加断言 ====================
 
     /*

@@ -368,6 +368,57 @@ Arrays.asList(null)          // ❌ NullPointerException
 ⚠️ 而本轮修的 `DRIFT-LIKEAPI-013` 恰恰是「数组里允许 null」这件事 ——
 **测试数据构造方式与被测语义在同一处打架时，先确认构造 API 的契约**。
 
+## PIT-LIKEAPI-013 — 「测错对象」比「测不出来」更贵：先确认 classpath 上到底是哪一代
+
+**现象（修复轮 2026-10-23，修 012 时）**
+我写了 4 个探测类，用 `com.fasterxml.jackson.databind.ObjectMapper` 测「JSON 数字反序列化成
+`Object` 会得到什么类型」，拿到的结论一路推到底。
+
+**根因：like-api 的 MVC 用的是 Jackson 3，不是 Jackson 2**
+| 证据 | 说明 |
+|---|---|
+| `WebMvcConfig` 用 `JsonMapperBuilderCustomizer` + `tools.jackson.databind.JsonMapper.Builder` | 核心是 `tools.jackson.*` |
+| DTO 用 `com.fasterxml.jackson.annotation.JsonProperty` | ⚠️ **注解包名仍是 Jackson 2 的** —— 这正是最容易看走眼的地方 |
+| `Jackson2ObjectMapperConfiguration`（在 like-**rpc**） | 另一个组件显式造 Jackson 2 `ObjectMapper`，进一步混淆 |
+
+⇒ 同一仓里 **Jackson 2 与 Jackson 3 同时存在**，而注解包名**不区分版本**
+（Jackson 3 刻意保留 `com.fasterxml.jackson.annotation` 以便迁移）。
+
+⚠️ 若是只测 Jackson 2，012 的方案（尤其是「要不要开 `USE_BIG_DECIMAL_FOR_FLOATS`」）
+就会基于错误数据定型 —— 而 Jackson 3 的 `ObjectMapper` 是**不可变**的，
+`new ObjectMapper().enable(...)` 直接编译失败，这个差异本来会暴露，但我差点靠旧数据先下了结论。
+
+**下次怎么防**
+1. **探测必须用「生产路径上的那个对象」**，而不是「同名的那个类」。
+   MVC 场景就用 `@SpringBootTest` + `@AutoConfigureMockMvc` 走真实管线（这也是 PIT-LIKEAPI-010 的结论）。
+2. 看到 `com.fasterxml.jackson.annotation.*` **不要**据此断定是 Jackson 2。
+3. 探测类写完先看**它是否真能编译**——`enable()` 在 Jackson 2 上有、在 Jackson 3 上没有；
+   如果探测代码顺利编译通过，反而要警惕「测的根本不是生产用的那个」。
+
+---
+
+## PIT-LIKEAPI-014 — 「API 存在性」要查 jar，不要凭记忆
+
+**现象（同一个修复轮里连续发生两次）**
+① 写了 `tools.jackson.databind.DeserializationException` —— **Jackson 3 里没有这个类**；
+② 修好后又按记忆写了 `p.currentToken() == JsonParser.Token.START_ARRAY` —— Jackson 2 的
+`Token` 是顶层类 `JsonToken`，Jackson 3 迁到 `tools.jackson.core.JsonToken`。
+
+**为什么容易错**
+Jackson 2 → 3 的迁移里，**包名、注解包名、异常体系都变了**，而网上的绝大多数示例仍是 2.x。
+记忆里的「Jackson 写法」几乎全部指向 2.x。
+
+**正确做法（两次都是靠它救回来的）**
+```bash
+unzip -l <jackson-databind-3.1.5.jar> | grep -E "exc/"   # 先看有哪些类
+javap -cp <jar> <类名>                                        # 再看构造器是否 private / protected
+```
+⚠️ 第二个尤其重要：`MismatchedInputException` 的构造器是 **`protected`**，
+必须用静态工厂 `from(JsonParser, Class, String)` —— 编译期报错比运行期踩坑便宜得多。
+
+⇒ 这与 PIT-LIKEAPI-009（「不存在某机制」与「两侧都实现了它」在台账上长得一样）同族：
+**否定式断言必须用检索证明，不能用记忆证明。**
+
 ---
 
 ## 附：本轮两条最贵的教训（给下一个接手的人）
