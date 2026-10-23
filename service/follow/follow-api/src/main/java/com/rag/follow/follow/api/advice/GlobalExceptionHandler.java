@@ -189,19 +189,37 @@ public class GlobalExceptionHandler {
     /**
      * Content-Type 不支持 → 415。
      *
-     * <p><b>已知偏离（OBSERVABLE DIFFERENCE）</b>：Go 侧的 go-zero 没有「媒体类型协商」这回事，
-     * {@code withJsonBody} 只判 Content-Type 是否<b>包含</b> {@code application/json}；
-     * 不含时它<b>不报错</b>，而是走 {@code UnmarshalJsonMap(nil, v)}（对有必填字段的 DTO
-     * 仍然会报必填错 ⇒ 200 + 5001；对无必填字段的 DTO 则按零值继续）。
-     * Java 侧由 Spring 的消息转换器选择直接判 415。
+     * <p><b>⚠️ 本分支在本模块<b>不可达</b>（2026-10-24 双侧活体对拍实测修正）</b>。
      *
-     * <p>取舍与 message-api 一致：保留 Spring 默认，不为了「更接近 Go」去放宽媒体类型协商。
-     * 差异只出现在<b>客户端 Content-Type 写错</b>时，两侧都是拒绝、都不产生业务副作用。
-     * ⚠️ 但 {@code com.rag.common.http.GoStyleJsonBodyConverter}（扫到即生效）已把
-     * 「Go 是否读这个 body」的判据收进本模块的 MVC 管线，
-     * 所以 {@code text/plain} + 合法 JSON 在本服务<b>不会</b>被 415 挡掉，
-     * 而是按 Go 的规则<b>丢弃 body</b> ⇒ 4 个动作端点因此得到 200 + 5001（target_id 缺失），
-     * 4 个 list 端点则按零值继续。这正是 Go 的行为。
+     * <p><b>Go 侧的判据</b>（{@code rest/httpx/requests.go} 的 {@code withJsonBody}）：
+     * {@code r.ContentLength > 0 && strings.Contains(r.Header.Get("Content-Type"), "application/json")}
+     * —— 只判 Content-Type 是否<b>包含</b> {@code application/json}，
+     * <b>不含时不报错</b>，而是走 {@code UnmarshalJsonMap(nil, v)}（<b>完全不看 body</b>）：
+     * 对有必填字段的 DTO 仍会报必填错 ⇒ 200 + 5001；对无必填字段的 DTO 则按零值继续。
+     *
+     * <p><b>RAG 侧为什么也走不到 415</b>：{@code com.rag.common.http.GoStyleJsonBodyConverter}
+     * （扫到即生效）把上面那条判据<b>整体接管</b>进了本模块的 MVC 管线 ——
+     * Spring 的消息转换器根本轮不到它 ⇒ {@code HttpMediaTypeNotSupportedException} 不会被抛出。
+     * ⇒ {@code text/plain} / 无 Content-Type + 合法 JSON：
+     * <b>4 个动作端点</b>得到 200 + 5001（target_id 缺失），
+     * <b>4 个 list 端点</b>按零值继续 —— <b>与 Go 逐字节一致</b>。
+     *
+     * <p><b>为什么这个 handler 还要留着</b>：它是<b>兜底</b>，不是主路径。
+     * 一旦 {@code GoStyleJsonBodyConverter} 哪天没进本模块的管线（本域<b>没有</b>回归网守着
+     * 它是否还在 —— 守着的是 {@code FollowApiMvcPipelineTest} 的
+     * {@code nonJsonContentTypeDiscardsBodyOnActionEndpoint} 与
+     * {@code nonJsonContentTypeGivesZeroValuesOnListEndpoint}：
+     * 若转换器失效，Spring 要么 415、要么照常解析出 target_id 而成功 —— 两者都会让那两条断言红），
+     * 这个分支就会重新变成「与 Go 不同」的行为。
+     * ⇒ <b>保留分支 + 保留注释 = 留下「一旦变成主路径就会不一致」的提示</b>，
+     * 而不是把它当成当前已知的、已签字的行为差异。
+     *
+     * <p>⚠️ <b>2026-10-24 之前这段写的是「已知偏离（OBSERVABLE DIFFERENCE）」</b>，
+     * 声称「Java 侧由 Spring 的消息转换器选择直接判 415」——
+     * <b>那是错的</b>：转换器已被共享组件覆盖，415 分支不可达。
+     * 旧注释把「一条不可达的兜底分支」写成了「一条已存在的观测差异」，
+     * 会让后续审查者<b>重复质疑或误修</b>（AGENTS.md §3.3.2：
+     * 以断言口吻写下的错误结论比没有结论更危险）。
      */
     @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
     public ResponseEntity<Void> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException e) {
