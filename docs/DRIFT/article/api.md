@@ -328,7 +328,7 @@ Result 仅取 `EQUIVALENT / IMPLEMENTATION DIFFERENCE / OBSERVABLE DIFFERENCE / 
 | 入参解释 | **重复 query key** | 取**第一个**（`unmarshaler.go:841-843`） | Spring 逗号拼接 → 400 | **SEMANTIC MISMATCH** | **DRIFT-003** |
 | 入参解释 | query 参数总数上限 2048 | `httpx/util.go:15,48-53` | 无上限 | **OBSERVABLE DIFFERENCE** | **DRIFT-005** |
 | 序列化 | `ext_info` 空 map ⇒ null | `cloneStringMap:106-108` | `:223-226` | EQUIVALENT | 静态源码 |
-| 序列化 | `ext_info` key 排序 | UTF-8 字节序（`encode.go:805` `slices.SortFunc`） | `TreeMap`（UTF-16 码元序） | OBSERVABLE DIFFERENCE | DRIFT-007 |
+| 序列化 | `ext_info` key 排序 | UTF-8 字节序（`encoding/json/encode.go:805-807` `strings.Compare`） | ~~`TreeMap`（UTF-16 码元序）~~ ⇒ **已改为按码点比较** | ✅ EQUIVALENT | **双侧探针实测**（2026-10-24，`DRIFT-ARTICLE-API-007`） |
 | 序列化 | `secondary_tags` 空 ⇒ null | nil slice | `cloneStringList` | EQUIVALENT | 静态源码 |
 | 序列化 | `author_name` 空 ⇒ **key 消失** | `json:",omitempty"` | `@JsonInclude(NON_EMPTY)` | EQUIVALENT | 静态源码 |
 | 序列化 | `status` 输出数值非枚举名 | `int32(res.Article.Status)` | `getStatusValue()` | EQUIVALENT | 静态源码 |
@@ -1234,8 +1234,99 @@ chn = chn.Append(GunzipHandler)          // ⑪
 |---|---|---|
 | `DRIFT-005` query 参数总数上限 2048 | 🔴 OPEN（LOW） | Go `httpx/util.go:15,48-53` 累计超 2048 个非空值即 400；RAG 无上限。**本域只有 8 个 query 字段，但「客户端发 2049 个未知参数」是可达的** ⇒ 修法：新 filter 统计参数个数，超限按 Go 的 `too many form values` 走 400 |
 | `DRIFT-006` 8–10 MiB body 文案 | 🔴 OPEN（LOW） | 可观察契约相同（400 + text/plain + nosniff），差异仅在 body 文案（Go 是截断后解析失败 ⇒ `unexpected EOF`） |
-| `DRIFT-007` `ext_info` key 排序（非 BMP） | 🔴 OPEN（极低） | 修法方向已明确：Go 的 `strings.Compare` = **UTF-8 字节序** = **码点序**；Java 的 `TreeMap` 用 UTF-16 码元序 ⇒ 改成按**码点**比较的 Comparator 即可（ASCII/BMP 完全不变） |
+| `DRIFT-007` `ext_info` key 排序（非 BMP） | ✅ **已修**（2026-10-24） | 已按**码点序**比较（= Go 的 UTF-8 字节序），见本文件末尾「第三轮」节；`DRIFT-005` / `DRIFT-006` 仍 🔴 OPEN |
 | `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | rpc 侧已核过 `public_only` / `status` 的消费方式（见 [`proto.md`](./proto.md)）；仍缺**跨栈活体对拍** |
 | `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` | 🔴 OPEN（当前影响为零） | 结论依赖 go-zero 的 tag 默认值，不是设计对齐 |
 | `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | `docs/DRIFT/` 全树仍查无此编号 ⇒ 存在一份未入库的历史漂移清单 |
 | 🔴 **新增确认**：`Content-Type` 少一个空格 | 🟡 **已确认为 LOW OBSERVABLE DIFFERENCE** | 本轮首次由真 Tomcat 确认；**决定不修**（理由见上节），已用 characterization test 锁住实测现状 |
+
+---
+
+<!-- @fix 2026-10-24 第三轮 · 由 align/article 工作树产出 · 基线 commit e440d37 -->
+
+## 2026-10-24 第三轮：`DRIFT-ARTICLE-API-007` 已修（`ext_info` key 按**码点序**输出）
+
+### ✅ FIX-09 —— `DRIFT-ARTICLE-API-007` 已修（排序的**非 BMP 边界**）
+
+#### Go 出处（消费点，Go 1.25 **标准库**，不是 go-zero）
+
+```
+$GOROOT/src/encoding/json/encode.go:805-807
+  slices.SortFunc(sv, func(i, j reflectWithString) int {
+      return strings.Compare(i.ks, j.ks)      // ← 逐字节比 UTF-8
+  })
+```
+
+⚠️ **台账原引的 `encode.go:805` 是 Go 标准库 `encoding/json`**，不是 go-zero
+（go-zero v1.10.2 的 `core/mapping/` 下**没有** `encode.go`；只有 `marshaler.go` / `unmarshaler.go`）。
+⇒ 本条已把出处更正到标准库的具体文件与行号。
+
+⇒ `strings.Compare` 是**逐字节**比较 UTF-8 ⇒ 等价于**码点序**。
+
+#### Java 侧（修复前）
+
+`ArticleApiSupport.cloneStringMap` 用 `new TreeMap<>(source)` ⇒ 自然序 = `String.compareTo`
+= **UTF-16 码元序**。
+
+#### 🔴 差异只在**非 BMP** 字符上出现
+
+- 对 **BMP 内**字符：UTF-16 码元序 == 码点序 == UTF-8 字节序 ⇒ 两侧**一致** ⇒ ASCII 用例测不出来。
+- 对**非 BMP**（增补平面，如 U+1F600 😀）：UTF-16 把它拆成代理对 `D83D DE00`（落在 U+D800–U+DFFF），
+  **排在 U+E000–U+FFFF 之前**；码点序里它排在它们**之后** ⇒ 两侧**顺序不同**。
+
+#### 双侧探针实测（2026-10-24，Go 1.25.11 + JDK 21）
+
+同一组 key：`a` / `中`(U+4E2D) / U+E000 / U+FFFD / `😀`(U+1F600)
+
+| 实现 | 顺序 |
+|---|---|
+| Go `encoding/json` | `a, 中, U+E000, U+FFFD, 😀` ← **期望** |
+| Java `TreeMap` 自然序（修复前） | `a, 中, 😀, U+E000, U+FFFD` ← ❌ |
+| Java `TreeMap` + 码点比较器（修复后） | `a, 中, U+E000, U+FFFD, 😀` ← ✅ 与 Go 一致 |
+
+#### 修复
+
+`ArticleApiSupport` 新增 `CODE_POINT_ORDER` 比较器（逐码点比较，短者为前缀时短者在前），
+`cloneStringMap` 改为 `new TreeMap<>(CODE_POINT_ORDER)` + `putAll`。
+
+⚠️ 比较器与 `equals` **自洽**（两个不同的字符串码点序列必不同）⇒ TreeMap 不会出现"键冲突丢数据"。
+
+#### 证据
+
+- **双侧探针**：Go 侧 `encoding/json.Marshal` 与 Java 侧两种比较器同跑（上面的表）⇒ 差异是**实测**的，不是推理的。
+- **回归网**：`ArticleApiMvcPipelineTest#extInfoKeysWithNonBmpCharactersUseCodePointOrder`
+  （真 MockMvc 管线 + 真 Jackson 序列化 + 真 proto map ⇒ 非 BMP key 走完整条路）。
+  ⚠️ 读 body 必须用 `getContentAsByteArray()` + **UTF-8** 解码：
+  `MockHttpServletResponse.getContentAsString()` 用的是 response 的 character encoding
+  （没带 charset 时是 ISO-8859-1）⇒ 非 ASCII 会乱码。
+- **变异验证（三态判定）**：`MUT-RED`
+  —— 把 `cloneStringMap` 改回 `new TreeMap<>(source)`（自然序）⇒ 用例转红。
+- **模块级**：`ArticleApiMvcPipelineTest` **39 条全绿**（原 38 ⇒ +1）；
+  `article-api` **68 tests / 0 failures / 0 errors / 0 skipped**（原 67 ⇒ +1）；
+  连同 `article-rpc` 115 + `article-common` 15 ⇒ **article 域合计 198 / 0 / 0 / 0**（`BUILD SUCCESS`）。
+
+#### 判定变化（FIX-09）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `DRIFT-ARTICLE-API-007` `ext_info` key 排序（非 BMP） | ❌ OBSERVABLE DIFFERENCE（极低） | ✅ **已修** + 双侧探针 + 变异验证 |
+| `DRIFT-005` query 参数总数上限 2048 | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
+| `DRIFT-006` 8–10 MiB body 文案 | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
+| `UNRESOLVED-002` / `007` / `008` | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
+| `Content-Type` 空格（已确认不修） | 🟡 LOW OBSERVABLE DIFFERENCE | 🟡 **不变**（已用 characterization test 锁住） |
+| **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
+
+⚠️ **判定不变的理由**：本轮只修掉 1 条**极低**风险漂移；
+`DRIFT-005` / `DRIFT-006` 与 3 条 `UNRESOLVED` 仍在，
+且**无双侧活体对拍**（Go 侧仍需 `etcd:2379`）⇒ 本条的 ✅ 读作「**在双侧探针证据下一致**」。
+
+#### 📌 一条可复用的元教训
+
+**"ASCII 用例全绿"不等于"排序语义一致"。**
+⇒ 对"排序/比较"类契约，测试**必须**挑一个**两侧会分歧的输入**。
+本例的分歧点是**代理对**（非 BMP），需要刻意构造 —— 随手写的用例几乎必然落在 BMP 内，
+于是"两侧一致"被**假绿**地确认了。
+⇒ 对照本轮 `DRIFT-010`（直方图桶）：**同一类错误的两面** ——
+一个测了名字没测桶，一个测了 BMP 没测非 BMP。
+⇒ **通用判据**：写"两侧应当一致"的用例前，先问一句
+**「什么样的输入会让两侧不一致？」**，并把它写进用例。

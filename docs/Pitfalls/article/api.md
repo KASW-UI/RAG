@@ -587,3 +587,57 @@ MockMvc **不经过 Tomcat 的 header 规范化** ⇒ 50 条 MockMvc 测试全�
 3. ⚠️ **characterization test 的写法**：当实测与 Go 不一致又决定不修时，
    断言**实测值**，但 `@DisplayName` 必须写明「与 Go 差在哪」——
    否则就变成 AGENTS.md §3.3 说的「把 RAG 的行为写成 Go 的事实」。
+
+---
+
+## P-17 「两侧排序一致」的用例若只用 ASCII ⇒ 它**测不出**任何排序差异
+
+**现象**
+`ext_info` 的 key 要按 Go 的顺序输出。RAG 侧本来就用 `TreeMap`（会排序），
+台账把它判成 OBSERVABLE DIFFERENCE（"UTF-8 字节序 vs UTF-16 码元序"），
+但**两侧其实在绝大多数输入上是一致的** —— 只在一个很窄的边界上分叉。
+
+**根因（不是框架机制，是**比较语义**）**
+
+| | 排序依据 |
+|---|---|
+| Go `encoding/json`（`encode.go:805-807`） | `strings.Compare` ⇒ **UTF-8 字节序** = **码点序** |
+| Java `String.compareTo` | **UTF-16 码元序** |
+
+- BMP 内字符：UTF-16 码元序 == 码点序 == UTF-8 字节序 ⇒ **完全一致**。
+- **非 BMP**（增补平面，U+10000+）：UTF-16 用代理对表示（U+D800–U+DFFF），
+  **排在 U+E000–U+FFFF 之前**；码点序里排在**之后** ⇒ **分叉**。
+
+实测（Go 1.25.11 + JDK 21，同一组 key `a` / `中` / U+E000 / U+FFFD / `😀`）：
+
+```
+Go encoding/json       : a, 中, U+E000, U+FFFD, 😀      ← 码点序
+Java TreeMap 自然序     : a, 中, 😀, U+E000, U+FFFD      ← ❌ 分叉
+Java TreeMap 码点比较器 : a, 中, U+E000, U+FFFD, 😀      ← ✅ 与 Go 一致
+```
+
+**为什么测试抓不到**
+原来的用例只用 ASCII key（`Mid` / `alpha` / `zeta`）⇒ **恰好落在两侧一致的那一侧** ⇒ 永远绿。
+⚠️ 而且它还"证明"了"Java 的自然序恰好同构"—— **只对 BMP 成立**，却把结论写成了普遍成立。
+
+**元教训**
+> **写"两侧应当一致"的用例之前，先问一句：「什么样的输入会让两侧不一致？」并把它写进用例。**
+>
+> ⇒ 对**排序 / 比较 / 编码 / 精度 / 边界值**这类契约，
+> 随手写的用例几乎必然落在"两侧碰巧一致"的区域 ⇒ 用例**假绿**，
+> 而且还会反过来给出一个**过强的结论**（"自然序恰好同构"）。
+>
+> ⇒ 判据：**用例里必须出现一个"专门挑出来的分歧点"**，
+> 并在注释里写清「两侧为什么会在这个输入上分叉」。
+
+**与本轮另一条同源**
+`DRIFT-ARTICLE-RPC-010`（直方图桶）是同一类错误的另一面：
+一个**测了名字没测桶**，一个**测了 BMP 没测非 BMP**。
+⇒ 通用处方：**对每个"已对齐"的断言，问一句"它到底测的是哪一面"**。
+
+**顺带两条实操细节**
+1. `MockHttpServletResponse.getContentAsString()` 用的是 response 的 character encoding
+   （没带 charset 时是 **ISO-8859-1**）⇒ 断言非 ASCII 内容必须用
+   `getContentAsByteArray()` + **UTF-8** 解码。
+2. Java 里要按**码点**排序，不能用 `String.compareTo`；
+   实现时逐码点比较，并注意**一方是另一方前缀**时短者在前（与 `strings.Compare` 一致）。

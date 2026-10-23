@@ -1088,6 +1088,69 @@ class ArticleApiMvcPipelineTest {
                 "ext_info 必须按字节序（Mid < alpha < zeta）输出，实际=" + body);
     }
 
+    /**
+     * 🔴 DRIFT-007 的<b>边界</b>：key 含<b>非 BMP</b>字符（增补平面）时的排序。
+     *
+     * <h2>Go 出处（消费点）</h2>
+     * <pre>
+     * Go 1.25 标准库 encoding/json/encode.go:805-807
+     *   slices.SortFunc(sv, func(i, j reflectWithString) int {
+     *       return strings.Compare(i.ks, j.ks)      // ← 逐字节比 UTF-8
+     *   })
+     * </pre>
+     * ⇒ Go 按 <b>UTF-8 字节序</b> = <b>码点序</b>。
+     *
+     * <h2>为什么 ASCII 用例测不出来</h2>
+     * 上一条用例只用了 ASCII key。对 BMP 内的字符，
+     * <b>UTF-16 码元序 == 码点序 == UTF-8 字节序</b> ⇒ 两侧一致 ⇒ 测不出差别。
+     * <br>差别只在<b>非 BMP</b>字符上出现：UTF-16 把它拆成代理对（U+D800–U+DFFF），
+     * <b>排在 U+E000–U+FFFF 之前</b>；码点序里它排在它们<b>之后</b>。
+     *
+     * <h2>双侧探针实测（2026-10-24）</h2>
+     * <pre>
+     * 同一组 key：a / 中(U+4E2D) / U+E000 / U+FFFD / 😀(U+1F600)
+     * Go encoding/json      : a, 中, U+E000, U+FFFD, 😀     ← 期望
+     * Java TreeMap 自然序    : a, 中, 😀, U+E000, U+FFFD     ← ❌ 修复前的行为
+     * </pre>
+     */
+    @Test
+    @DisplayName("🔴 DRIFT-007：ext_info 的 key 含**非 BMP**字符时仍按码点序（Go 字节序）输出")
+    void extInfoKeysWithNonBmpCharactersUseCodePointOrder() throws Exception {
+        Mockito.when(userStub.getUser(Mockito.any())).thenReturn(
+                com.rag.users.user.proto.GetUserResp.newBuilder().setFound(false).build());
+        Mockito.when(stub.getArticle(Mockito.any())).thenReturn(
+                GetArticleResponse.newBuilder()
+                        .setArticle(Article.newBuilder()
+                                .setId("x").setAuthorId("1001")
+                                .setStatus(ArticleStatus.PUBLISHED)
+                                .putExtInfo("a", "1")            // U+0061
+                                .putExtInfo("中", "2")            // U+4E2D
+                                .putExtInfo("", "3")            // U+E000（私用区）
+                                .putExtInfo("�", "4")            // U+FFFD
+                                .putExtInfo("😀", "5")            // U+1F600（非 BMP，代理对 D83D DE00）
+                                .build())
+                        .build());
+
+        var response = mockMvc.perform(get("/v1/article/x"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse();
+        // ⚠️ 必须按 UTF-8 解码：MockHttpServletResponse.getContentAsString() 用的是
+        //    response 的 character encoding（没带 charset 时是 ISO-8859-1）⇒ 非 ASCII 会乱码。
+        String body = new String(response.getContentAsByteArray(),
+                java.nio.charset.StandardCharsets.UTF_8);
+
+        int a = body.indexOf("\"a\"");
+        int zhong = body.indexOf("\"中\"");
+        int e000 = body.indexOf("\"\"");
+        int fffd = body.indexOf("\"�\"");
+        int emoji = body.indexOf("\"😀\"");
+        assertTrue(a >= 0 && zhong > a && e000 > zhong && fffd > e000 && emoji > fffd,
+                "ext_info 的 key 必须按**码点序**（= Go 的 UTF-8 字节序）输出，"
+                        + "即 a < 中 < U+E000 < U+FFFD < 😀（U+1F600）；"
+                        + "非 BMP 字符在 UTF-16 自然序里会跑到 U+E000/U+FFFD **之前**，那是错的。"
+                        + "实际=" + body);
+    }
+
     // =====================================================================
     // helpers
     // =====================================================================
