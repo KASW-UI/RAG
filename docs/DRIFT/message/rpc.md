@@ -1121,9 +1121,13 @@ RAG 按索引名的字面意图（"recipient + read"）建了两列。
 
 ⚠️ **这一条要当心**：RAG 的版本其实**更贴合** `ListNotifications` 的
 `WHERE recipient_id=? AND is_read=false` 过滤；但按 §3.1 真源是唯一基准，这仍是漂移。
-**本轮只登记，未改** —— 改回单列会让该查询退化成「扫索引再回表过滤」，
-属于「忠实复刻会引入性能回退」的典型，**留给用户拍板**，不自行决定。
 （同域的 `idx_message_recipient_read` 两侧都是 3 列，**一致**。）
+
+✅ **2026-10-23 用户已拍板：保留 RAG 现状，不回改。**
+⇒ 本条**已从 DRIFT 转入签字档**：
+[`SD-2026-10-23-06`](../../Intentional_Deviations/message/rpc.md)。
+**本文档保留原始差异记录，不因签字而删除**（与 `_cross/signed-deviations.md` 的处置方式一致）。
+⚠️ 读法变更：**看到这条 DDL 对拍为红时，先确认是不是 SD-06，再下结论。**
 
 ### ✅ FIX-MSG-V-023 —— `uk_conversation_pair`：约束 ⇒ 索引，并顺带关掉 `UNRESOLVED-MSG-005`
 
