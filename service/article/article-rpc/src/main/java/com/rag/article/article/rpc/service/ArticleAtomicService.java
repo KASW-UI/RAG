@@ -395,8 +395,26 @@ public class ArticleAtomicService {
 
         publishApprovedRevision(article, approved);
 
+        // 🔴 通知标题取**当前行**（article.getTitle()），不是冻结 payload 的 approved.title。
+        //
+        // Go 出处：article_sync_result_consumer.go:147
+        //   notifyAuthor, notifyTitle = article.AuthorID, article.Title
+        //   —— article 是本次事务里 FOR UPDATE 锁住的那一行；
+        //   而 revision 的标题取的是另一个源：:115  Title: approved.Title（冻结输入）。
+        //   ⇒ Go 侧这两个标题**本就来自不同的地方**，不可互相代替。
+        //
+        // 可达性（不是理论上的可能）：作者在 REVIEWING 期间改标题时，
+        //   update_article_logic.go:142-144 立即把新标题写进行；
+        //   而 enqueueReview（:232-245）只推 Kafka，**不推进** last_sync_event_id
+        //   —— 新 event_id 要等审核回调（article_consumer.go:107）才写。
+        //   ⇒ 在「标题已改」到「新 event_id 写入」的窗口里，旧同步结果到达时
+        //     双重判据（last_sync_event_id + last_sync_version_ms）依然成立
+        //     ⇒ 发布照常发生，但 Go 通知里用的是**新标题**。
+        //
+        // ⚠️ 曾经误取 approved.title，台账当时以「双重判据 ⇒ 两者必相等」结案 —— 该论证不成立
+        //    （双重判据约束的是 event_id/version，与标题无关）。
         return shouldNotify
-                ? new PublishOutcome(article.getAuthorId(), approved.title, true)
+                ? new PublishOutcome(article.getAuthorId(), article.getTitle(), true)
                 : null;
     }
 
@@ -408,6 +426,13 @@ public class ArticleAtomicService {
      *
      * <p>⚠️ 字段名用 {@code notifyRequired} 而非 {@code notify}：
      * 后者与 {@code Object.notify()} 冲突，记录组件会拒绝该名称（编译期硬错误）。
+     *
+     * <h2>{@code title} 的来源：<b>当前行</b>，不是冻结 payload</h2>
+     * Go 出处：{@code article_sync_result_consumer.go:147}
+     * {@code notifyAuthor, notifyTitle = article.AuthorID, article.Title}。
+     * <br>⚠️ <b>不要</b>把它换成冻结输入的 {@code approved.title} ——
+     * revision 的标题确实取那个源（{@code :115}），但通知取的是行。
+     * 两者在「作者审核期间改了标题」时不同 ⇒ 详见 {@link #acceptSyncResult} 里的可达性论证。
      */
     public record PublishOutcome(String authorId, String title, boolean notifyRequired) {
     }

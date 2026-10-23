@@ -207,10 +207,10 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 | 审核消费者 | handler 并发度 | `Processors default=8`（`kq/config.go:19` → `queue.go:220`） | `factory.setConcurrency(8)` | EQUIVALENT | 真上下文 |
 | 审核消费者 | 文本/图片审核 `success=false` | 两条都 `return error`（重投） | 两条都抛（重投） | EQUIVALENT | 纯 Mockito |
 | 审核消费者 | **审核链路可用性** | 两个真 client | `UnavailableContentSecurityClient` 恒抛 | **SEMANTIC MISMATCH**（= S-5，仍阻塞） | 真上下文 |
-| 同步结果消费者 | 判定链顺序 ①~⑤ | `article_sync_result_consumer.go:75-107` | `ArticleAtomicService:339-396` | EQUIVALENT | 真 PG（失败回滚路径） |
+| 同步结果消费者 | 判定链顺序 ①~⑤ | `article_sync_result_consumer.go:75-107` | `ArticleAtomicService:339-396` | EQUIVALENT | 真 PG（失败回滚 + **成功路径**，2026-10-24 补） |
 | 同步结果消费者 | 六项冻结输入比对 | `:103-107` | `ArticleAtomicService:384-390` | EQUIVALENT | 静态 |
 | 同步结果消费者 | 通知在事务提交后 / 失败只记日志 | `:160-163` | `ArticleSyncResultConsumer:146` | EQUIVALENT | 静态 |
-| 同步结果消费者 | 通知标题来源 | `article.Title`（**当前行**） | `approved.title`（**冻结 payload**） | IMPLEMENTATION DIFFERENCE | 静态（在 `last_sync_event_id`+`last_sync_version_ms` 双重判据约束下两者必相等，论证见 §6-b 的 O-4 行） |
+| 同步结果消费者 | **通知标题来源** | `article.Title`（**当前行**） | ~~`approved.title`（**冻结 payload**）~~ ⇒ **已改为当前行** | ❌ SEMANTIC MISMATCH ⇒ ✅ **已修**（`DRIFT-ARTICLE-RPC-009`） | 真 PG（行标题 ≠ 冻结标题时也能复现，2026-10-24） |
 | outbox 中继 | 捞取条件 / 逐条独立 / key=AggregateID / 推 payload 原文 | `article_sync_outbox_sender.go:21-45` | `ArticleSyncOutboxRelay:89-121` | EQUIVALENT | 静态 |
 | outbox 中继 | **`pollIntervalMs<=0` 兜底** | `article.go:62-65` ⇒ 1s | **未接上**（DRIFT-ARTICLE-RPC-006） | **OBSERVABLE DIFFERENCE** | 静态 |
 | outbox 中继 | `@Scheduled` 是否真的跑 | goroutine + ticker | `@EnableScheduling` 已声明（`ArticleRpcApplication:65`） | EQUIVALENT | 真上下文 |
@@ -272,7 +272,7 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 | **O-1** | not-found 文案 `"record not found"`；已改 | 静态复核成立：`ArticleExceptions.articleNotFoundRaw()` 产出该字面量，`invoke` 的 `catch (Raw)` 映射成 `UNKNOWN` | ✅ 维持 |
 | **O-2** | 6 个指标全名；已改 | 静态复核 + `SimpleMeterRegistry` scrape 一致。⚠️ 只对了**名字**（`# TYPE` 行），**未对桶边界** ⇒ U-7 | ✅ 维持（⚠️ 范围不全） |
 | **O-3** | DB 计数失败不记 MinIO 指标；已改 | 静态复核成立：`ArticleDomainService:213-225` 的 catch 内**只有** `LOG.warn` | ✅ 维持 |
-| **O-4** | `extra.author_id` 传原串 vs 解析后数字串 | 复核：`MessageRpcClient:90-91` 传 `authorId` 原串 ✅ 与 Go `article_sync_result_consumer.go:207` 一致。⚠️ 但**通知标题**取 `approved.title`（冻结 payload）而 Go 取 `article.Title`（当前行）；在 `last_sync_event_id`/`version_ms` 双重判据约束下两者必相等，故记为 **IMPLEMENTATION DIFFERENCE** | ✅ 维持（补充一处等价性论证） |
+| **O-4** | `extra.author_id` 传原串 vs 解析后数字串 | 复核：`MessageRpcClient:90-91` 传 `authorId` 原串 ✅ 与 Go `article_sync_result_consumer.go:207` 一致。🔴 **原记录的等价性论证已被证伪并推翻**：曾写「通知标题取 `approved.title`（冻结 payload）而 Go 取 `article.Title`（当前行）；在 `last_sync_event_id`/`version_ms` 双重判据约束下两者必相等」—— **双重判据约束的是 event_id 与 version，与标题无关**；作者在 REVIEWING 期间改标题时两者**确实不等** ⇒ 已立 `DRIFT-ARTICLE-RPC-009` 并**修复**（2026-10-24） | ❌ 原结论作废 ⇒ ✅ **已修**（`DRIFT-ARTICLE-RPC-009`） |
 | **O-5** | ~~Flyway 账本~~ | 复核：`article-rpc` 仍用默认 `flyway_schema_history`，按 AGENTS.md §6.3 问题 4 的既定分配归它独占 | ❌ 维持"证伪" |
 | **O-6** | message-rpc `deadline: 3s` → `2s`；已改 | 静态复核成立：`go-zero@v1.10.2/zrpc/config.go:31` `Timeout int64 \`json:",default=2000"\``（声明点）+ **消费点** `zrpc/client.go:70-71` `if c.Timeout > 0 { WithTimeout(...) }`；article/rpc 的 `go.mod:17` 锁 `go-zero v1.10.2` | ✅ 维持 |
 
@@ -428,6 +428,62 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 - **Risk**: LOW
 - **Evidence**: 静态（Go 侧确证）；**Spring 侧默认值未读源码** ⇒ 该项的 Java 侧行为同时登记为 **U-4**。
 
+### DRIFT-ARTICLE-RPC-009 —— 通知标题取冻结 payload，Go 取当前行（**原台账判成"两者必相等"，该论证已证伪**）
+
+- **Component**: MQ · 同步结果消费者
+- **Operation**: `acceptSyncResult` 的一次性通知
+- **Category**: External Interaction / State（§8 + §12）
+- **Go Behavior**: `article_sync_result_consumer.go:147`
+  `notifyAuthor, notifyTitle = article.AuthorID, article.Title`
+  —— `article` 是**本次事务里 `FOR UPDATE` 锁住的那一行**；标题取**当前行**。
+- **Java Behavior**（修复前）: `ArticleAtomicService.acceptSyncResult` 返回
+  `new PublishOutcome(article.getAuthorId(), approved.title, true)`
+  —— 标题取**冻结 payload**（outbox 里反序列化出来的 `approved`）。
+- **Difference**: 两者在「作者在 REVIEWING 期间改过标题」时**不相等** ⇒ 通知正文不同：
+  Go 发 `《新标题》已经完成审核并成功入库。`，RAG 发 `《旧标题》已经完成审核并成功入库。`
+  （`MessageRpcClient:68-71` 的文案拼装逻辑两侧一致，**差别只在喂进去的标题**。）
+- **Observable Impact**: 用户可见（站内通知正文）。
+- **Classification**: **SEMANTIC MISMATCH**
+- **Risk**: LOW（触发窗口窄，但**可达**，见下）
+- **Evidence**: **真 PG**（`ArticleTransactionWiringTest.acceptSyncResultUsesFrozenTitleForRevisionButCurrentRowTitleForNotification`，
+  2026-10-24）—— 行标题与冻结标题**故意设成不同值**，修复前该用例转红。
+
+#### 🔴 可达性论证（这是本条与"理论差异"的分别）
+
+**Go 侧三个事实（均已验到消费点）**：
+
+1. **改标题立即写进行**：`update_article_logic.go:142-144`
+   ```go
+   if in.Title != nil { article.Title = *in.Title; sourceChanged = true }
+   ```
+   ⇒ `ArticleRepo.Update`（`:112`）把**新标题**落库；已冻结的 outbox payload **不跟着变**。
+2. **改标题不会立刻推进 `last_sync_event_id`**：`enqueueReview`（`:232-245`）**只推 Kafka**；
+   新 event_id 要等审核回调（`article_consumer.go:107` `SetSyncState(current, "reco_queued", "pending", syncReason, eventID, versionMs, "")`）才写。
+3. **发布回调的双重判据只看 event_id 与 version**：`:81-82`
+   ```go
+   if article.ExtInfo[ExtLastSyncEventID] != result.EventID ||
+      article.ExtInfo[ExtLastSyncVersion] != strconv.FormatInt(result.VersionMs, 10) || ...
+   ```
+   ⇒ **判据里没有标题**。
+
+⇒ 在「标题已改」到「新 event_id 写入」这个窗口里，旧同步结果到达时**双重判据依然成立**
+⇒ 发布照常发生（revision / 指针 / 域事件全部照 Go 落库），
+**但 Go 的通知用新标题、RAG 用旧标题**。
+
+⚠️ **原台账把这条判成 IMPLEMENTATION DIFFERENCE，理由是「双重判据 ⇒ 两者必相等」——
+该论证把判据约束的字段（event_id/version）当成了它约束不到的字段（标题）。**
+⇒ 教训见 [`docs/Pitfalls/article/rpc.md`](../../Pitfalls/article/rpc.md) 的 `PF-ARTICLE-RPC-009`。
+
+#### ⚠️ Go 侧本来就存在**两个不同的标题源**，不可互相代替
+
+| 用途 | Go 的源 | 位置 |
+|---|---|---|
+| **revision 的标题** | `approved.Title`（**冻结 payload**） | `:115` `Title: approved.Title` |
+| **通知的标题** | `article.Title`（**当前行**） | `:147` |
+
+⇒ 修复时**只**改通知那一处；revision 那一处**本来就该**取冻结值。
+⇒ 回归网同时断言这两个源（任一取错都红），见 `docs/Pitfalls/article/rpc.md` `PF-ARTICLE-RPC-009`。
+
 ## 8. Test Cases（§29 + §30，本轮**提出**而非**执行**的用例）
 
 | CASE | 输入 | 环境 | 期望语义 | 现状 |
@@ -442,7 +498,7 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 | CASE-R08 | 一条必然失败的审核消息（MinIO 不可达） | 真 Kafka（需 docker-compose） | 消息被**丢弃**，位点推进，无热循环 | ⏳ **未写**（= U-3） |
 | CASE-R09 | `poll-interval-ms: 0` | 真上下文 | 实际调度间隔 1000ms | ❌ **未写** |
 | CASE-R10 | 缺 `article_revision_immutable` 触发器的 schema | 真上下文 | 端口**从未**建立监听 | ❌ **未写** |
-| CASE-R11 | `acceptSyncResult` **成功**路径（发布落库） | 真 PG | revision/指针/域事件/status 四者同时落库 | ❌ **未写**（现有真 PG 只覆盖**失败回滚**路径） |
+| CASE-R11 | `acceptSyncResult` **成功**路径（发布落库） | 真 PG | revision/指针/域事件/status 四者同时落库 | ✅ **已写并通过**（2026-10-24，3 条：四步联动 / 通知条件 / 标题双来源） |
 | CASE-R12 | 并发：同一文章同时「降级」与「删除」 | 真 PG + 多线程 | 无死锁；指针版本单调 | ⏳ 沿用 U-2 |
 
 ## 9. Unresolved（§37，必填）
@@ -451,7 +507,7 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 |---|---|---|---|---|---|
 | **U-3**（新） | `seekAfterError=true` + `FixedBackOff(0,0)` 在**真 Kafka** 上到底是"丢弃"还是"进程内无限重投"？ | `kq/config.go:24` `ForceCommit default=true`；消费点 `kq/queue.go:230-242` ⇒ 失败**也**走到 `:240` `CommitMessages` ⇒ **丢弃** | spring-kafka 4.0.7 源码：`SeekUtils.java:107-135` `doSeeks` 对**首条**（失败记录）先问 `recovery.recovered(...)`，返回 true ⇒ **不 seek** ⇒ 实际跳过；`FailedRecordProcessor.java:150-156` 的 javadoc 明确写 "records will be **redelivered on the next poll**" | 只有**源码**级证据；无真 Kafka 对拍，且 `remaining` 列表在 RECORD 模式下是否只含失败记录未实测 | 起一套真 Kafka，让 `ArticleReviewConsumer` 撞一次必然失败的消息，观察该 offset 是否前进、是否重复投递 |
 | **U-4**（新） | S-3 的**依据**已被证伪，那"已改"还成立吗？ | 同上 | RAG 的 javadoc（`ArticleRpcApplication.java:143-154`）引用的是 `commit(consumer, container, offset+1)`，**该分支只在 `commitRecovered=true` 时执行**（`SeekUtils.java:229`），而 `FailedRecordProcessor.java:57` `commitRecovered` 默认 **false**，本模块**从未** `setCommitRecovered(true)` ⇒ 引用的那段代码**不在本模块的执行路径上** | 结论方向（对齐丢弃）大概率仍成立，但**现有论证是错的**；锁测试 `kafkaContainersCarryTheForceCommitErrorHandler` 只断言 `isSeekAfterError()==true`，**分不清"因为这个理由对"与"碰巧对"** | 同 U-3；并把锁测试改成断言**行为**（失败一次后该 offset 已提交且不再投递），不是断言属性值 |
-| **U-5**（新） | `acceptSyncResult` 的**成功**路径在真 PG 上从未被验证 | `article_sync_result_consumer.go:74-153` | 现有真 PG 只测了 `domainOutboxFailureRollsBackEverything`（失败回滚）与两个 `getPublicArticle` | 成功路径涉及 revision 插入 + 指针 upsert + 域事件 + 通知判定四步联动，无一条真 PG 用例 | 补 CASE-R11 |
+| **U-5**（新） | `acceptSyncResult` 的**成功**路径在真 PG 上从未被验证 | `article_sync_result_consumer.go:74-153` | ~~现有真 PG 只测了 `domainOutboxFailureRollsBackEverything`（失败回滚）与两个 `getPublicArticle`~~ | ✅ **已关闭**（2026-10-24）：补 CASE-R11 的 **3 条**真 PG 用例，覆盖四步联动（revision/指针/域事件/status）、通知条件（首次发布 vs 已发布过）、标题双来源；**并因此发现 `DRIFT-ARTICLE-RPC-009`**（详见本轮修复节） |
 | **U-6**（新） | `updated_at` 该用哪种方式补（`@TableField(fill)` + `MetaObjectHandler` / mapper 里显式 SQL / DB 触发器）？ | GORM `autoUpdateTime` 由 ORM 承担 | RAG 侧三选一 | 这是**实现选择**，不是判定阻塞项；但选 `DB 触发器` 会让"已存在的 46 处批量改"之类的口径需要重新评估 | 由修复方决定；选定后必须配一条真 PG 用例（CASE-R04） |
 | **U-7**（新） | Micrometer 直方图的实际输出（`_seconds` 后缀 + 8 个桶边界 + `_count/_sum`）与 Go `HistogramVec` 是否逐桶一致？ | `metrics.go:41-49`（显式 8 桶） | `ArticleRpcMetrics:131-139`（`serviceLevelObjectives` + `publishPercentileHistogram`） | 现有断言只比对 `# TYPE` 里的**名字**（`ArticleSemanticsRegressionTest:177-220`），**没比对 bucket 边界**；且 `publishPercentileHistogram` 可能追加额外桶 | 容器级 `/actuator/prometheus` scrape 后逐行 diff `..._bucket` |
 | **U-8**（新） | `@Scheduled` 首次执行的 `initialDelay` 默认值 | `article.go:94` ticker ⇒ 首次在 1s 后 | 未读 `ScheduledAnnotationBeanPostProcessor` 源码 | DRIFT-ARTICLE-RPC-008 的 Java 侧一半 | 读 Spring 源码或起真容器看首两次触发时间戳 |
@@ -859,3 +915,86 @@ for { select { case <-ticker.C: …SendPending(…) } }
 | `DRIFT-ARTICLE-RPC-007` 每通道独立 Kafka brokers | ❌ OBSERVABLE DIFFERENCE（LOW） | 🔴 **OPEN**（配置面误导，今天无行为差异） |
 | 全部 `U-*` | 🔴 OPEN | 🔴 **OPEN** |
 | **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
+
+---
+
+<!-- @fix 2026-10-24 第三轮 · 由 align/article 工作树产出 · 基线 commit 91da528 -->
+
+## 2026-10-24 第三轮：U-5 关闭 ⇒ **顺带发现并修掉 `DRIFT-ARTICLE-RPC-009`**
+
+> 本轮的起因是台账里的一条 **UNRESOLVED**：`U-5` —— `acceptSyncResult` 的**成功路径**
+> 在真 PG 上从未被验证过（此前只测了失败回滚）。
+> ⇒ **补上这条网，第一件事就是它转红** —— 而且红的不是"缺一条用例"，
+> 而是**一个此前被台账判成"两者必相等"的真实漂移**。
+
+### ✅ FIX-06 —— `U-5` 关闭（成功路径真 PG）+ `DRIFT-ARTICLE-RPC-009` 已修（通知标题取当前行）
+
+#### 本轮补的 3 条真 PG 用例（`ArticleTransactionWiringTest`，真 PostgreSQL 容器）
+
+| 用例 | 钉住什么 | Go 出处 |
+|---|---|---|
+| `acceptSyncResultSuccessPathPublishesEverything` | **四步联动**：revision / 指针 / 域事件 / 文章状态**同时**落库；正文与标题取**冻结 payload**；`pointer_version` 从 0+1=1 起；`state=published`；`aggregate_version = pointerVersion` | `:109-152` |
+| `acceptSyncResultNotifiesOnlyOnFirstPublish` | 通知**条件**：`reason=create` 且 `published_once` 为空 ⇒ 返回 `PublishOutcome`；`published_once` 已非空 ⇒ **不再通知**，但**发布照样发生** | `:146-148` |
+| `acceptSyncResultUsesFrozenTitleForRevisionButCurrentRowTitleForNotification` | **标题的两个源**：revision 取冻结 payload，通知取**当前行** | `:115` vs `:147` |
+
+⚠️ 补网过程中**先撞上一个自己的错**：
+`acceptSyncResultSuccessPathPublishesEverything` 里我把域事件的 `event_type` 写成了裸 `"published"`，
+真跑才发现 Go 侧是 `"community.article." + operation`（`community_article_event.go:91`）
+⇒ 裸 `"published"` 只是它的**入参**（`:131`）。
+⇒ 已改断言为 `community.article.published` + 补一条 `event_id` 断言（`:65`）。
+⚠️ **如果当初没写这条真 PG 用例，这个错误会一直留在台账的"等价"结论里。**
+
+#### 修复本身（1 行 + 注释）
+
+```java
+// 修复前
+new PublishOutcome(article.getAuthorId(), approved.title, true)     // ← 冻结 payload
+// 修复后
+new PublishOutcome(article.getAuthorId(), article.getTitle(), true)   // ← 当前行
+```
+
+**Go 出处**：`article_sync_result_consumer.go:147`
+`notifyAuthor, notifyTitle = article.AuthorID, article.Title`
+（`article` = 本次事务里 `FOR UPDATE` 锁住的那一行）。
+
+⚠️ **只改通知这一处**：revision 的标题**本来就该**取冻结值（`:115` `Title: approved.Title`）
+⇒ Go 侧这两个标题**本就来自不同的源**，混用即错。
+
+#### 证据
+
+- **真 PG**：`ArticleTransactionWiringTest` **20 tests / 0 failures / 0 errors / 0 skipped**
+  （原 17 ⇒ 新增 3；`skipped=0` ⇒ 没有一条被 Docker 条件跳过）。
+- **模块级**：`article-rpc` **112 tests / 0 failures / 0 errors / 0 skipped**（原 109 ⇒ +3）；
+  连同 `article-api` 67 + `article-common` 15 ⇒ **article 域合计 194 / 0 / 0 / 0**（`BUILD SUCCESS`）。
+- **变异验证（三态判定）**：`MUT-RED`
+  —— 把 `article.getTitle()` 改回 `approved.title` ⇒ 用例转红，
+  报错为 `expected: <作者改过的标题> but was: <冻结时的标题>`
+  ⇒ **回归网非假绿**，且它**恰好**能抓住这条漂移。
+- ⚠️ **修复前**的那次红（`expected: <作者改过的标题> but was: <冻结时的标题>`）
+  与变异红是**同一个断言、同一条消息** ⇒ 测试确实在测这件事，而不是碰巧红。
+
+#### 判定变化（FIX-06）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `U-5` 成功路径真 PG 验证 | 🔴 OPEN（无一条真 PG 用例） | ✅ **已关闭**（3 条用例 + `skipped=0` + 变异验证） |
+| `DRIFT-ARTICLE-RPC-009` 通知标题来源 | 🔴 **未被登记**（判成 IMPLEMENTATION DIFFERENCE，论证已证伪） | ✅ **已修** + 真 PG + 变异验证 |
+| `O-4` 的等价性论证 | ⚠️ 论证不成立（把判据约束不到的字段当成了约束得到的） | ✅ 已撤销并更正 |
+| `DRIFT-005` / `007` | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
+| `U-2` / `U-3` / `U-4` / `U-6` / `U-7` / `U-8` / `U-9` / `U-4'` / `U-5'` | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
+| S-5（security 域） | ⛔ 阻塞 | ⛔ **仍阻塞**（security 域不在本项目范围内） |
+| **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
+
+⚠️ **判定不变的理由**：只关掉 1 条 `U-*`、修掉 1 条新漂移；
+`DRIFT-005`/`007` 与 9 条 `U-*` 仍在，且**无双侧活体对拍**（Go 侧仍需 `etcd:2379`）
+⇒ 本条的 ✅ 读作「**在真 PG 证据下一致**」，不是「已闭环」。
+
+#### 📌 本轮的一条**台账维护教训**（已记入 Pitfalls）
+
+台账原来给这条写的是「IMPLEMENTATION DIFFERENCE：在双重判据约束下两者必相等」。
+**这个论证是错的**：双重判据（`last_sync_event_id` + `last_sync_version_ms`）约束的是
+**event_id 与 version**，**与标题无关**；而改标题**不立刻**推进 `last_sync_event_id`
+（`enqueueReview` 只推 Kafka）。
+⇒ **「某个判据 ⇒ 两者必相等」这种句式，在写进台账前必须问：这个判据到底约束了那个字段吗？**
+⇒ 与 AGENTS.md §3.1「不要拿未验证的结论当基准」同源，且更隐蔽：
+**它长得像一条严谨的论证，且写进了台账，会让下一个 agent 以为"已经证明等价，不用管"。**
