@@ -23,19 +23,20 @@ Kafka 端到端对拍 —— 比对 Go 真源侧与 RAG 侧的**最终可观测�
   - Postgres：`task_progress` / `user_like_count`
   - Kafka ：Go 的 goka 计数表 vs RAG 的 Redis 计数
 """
+import os
 import re
 import subprocess
 import sys
 
-REDIS_PORT = "56380"
-PG_CONTAINER = "taskprobe-postgres"
-KAFKA_CONTAINER = "taskprobe-kafka"
-KAFKA_BOOT = "localhost:19092"
+REDIS_PORT = os.environ.get("DIFFTEST_REDIS_PORT", "56380")
+PG_CONTAINER = os.environ.get("DIFFTEST_PG_CONTAINER", "taskprobe-postgres")
+KAFKA_CONTAINER = os.environ.get("DIFFTEST_KAFKA_CONTAINER", "taskprobe-kafka")
+KAFKA_BOOT = os.environ.get("DIFFTEST_KAFKA_BOOT", "localhost:19092")
 
-GO_REDIS_DB = "0"
-RAG_REDIS_DB = "1"
-GO_DB = "task_go_db"
-RAG_DB = "task_rag_db"
+GO_REDIS_DB = os.environ.get("DIFFTEST_GO_REDIS_DB", "0")
+RAG_REDIS_DB = os.environ.get("DIFFTEST_RAG_REDIS_DB", "1")
+GO_DB = os.environ.get("DIFFTEST_GO_DB", "task_go_db")
+RAG_DB = os.environ.get("DIFFTEST_RAG_DB", "task_rag_db")
 
 TS_TOLERANCE = 120  # 秒
 
@@ -242,6 +243,27 @@ def main():
     rag_p = pg_state(RAG_DB)
     go_stream = redis_stream(GO_REDIS_DB, "stream:task:reward")
     rag_stream = redis_stream(RAG_REDIS_DB, "stream:task:reward")
+
+    # ── 前置健全性检查：先确认**两侧都真的消费到了**，否则下面全是噪声 ──
+    # ⚠️ 踩过的坑：Go 侧的 kq 消费者 Offset 是**硬编码 "latest"**
+    #    （initUserFilter.go:47），它在 join group 时把起点定在**当时**的队尾。
+    #    若灌消息灌得太早（kq 还没完成 offset 解析），它会从队尾之后开始
+    #    ⇒ **一条都收不到** ⇒ 表现是「goka 三段全通、RAG 全通，只有 Go 的 like:total 为 0」。
+    #    若不做这一步，下面的 diff 会输出成一大坨「只有 RAG 侧有 …」，
+    #    看不出「有一侧根本没消费」这个根因。
+    go_like = sum(1 for k in go_r if k.startswith("like:total:"))
+    rag_like = sum(1 for k in rag_r if k.startswith("like:total:"))
+    if go_like == 0 or rag_like == 0:
+        print("=" * 74)
+        print("❌ 前置检查失败：有一侧**根本没消费到消息**，下面的 diff 没有意义")
+        print(f"   Go  侧 like:total 数量 = {go_like}")
+        print(f"   RAG 侧 like:total 数量 = {rag_like}")
+        print("   ⇒ 两侧都应为 2（user 5001 / 5002 各一个）")
+        print("   ⇒ 最可能原因：**灌消息太早**。Go 的 kq 消费者 Offset 硬编码 latest，")
+        print("      它在 join group 时把起点定在当时的队尾 ⇒ 必须等 12 个 consumer group")
+        print("      全部注册（且留 grace period）之后再灌。")
+        print("=" * 74)
+        return 2
 
     print("=" * 74)
     print("Redis（Go db0 / RAG db1）")
