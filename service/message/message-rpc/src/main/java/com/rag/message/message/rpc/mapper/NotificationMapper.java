@@ -45,7 +45,12 @@ public interface NotificationMapper extends BaseMapper<NotificationEntity> {
             w.eq(NotificationEntity::isRead, false);
         }
         w.orderByDesc(NotificationEntity::getCreatedAt);
-        w.last("LIMIT " + limit + " OFFSET " + offset);
+        // DRIFT-MSG-V-014：Go（internal/model/message.go:59-64）对 limit/offset 各自判 > 0，
+        // 负值是**跳过该子句**而不是拼进 SQL（否则 PG 报 OFFSET must not be negative）。
+        String tail = GoStylePagination.limitOffset(limit, offset);
+        if (!tail.isEmpty()) {
+            w.last(tail);
+        }
         return selectList(w);
     }
 

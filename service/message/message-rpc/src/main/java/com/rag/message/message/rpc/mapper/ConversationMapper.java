@@ -78,7 +78,11 @@ public interface ConversationMapper extends BaseMapper<ConversationEntity> {
                                  .eq(ConversationEntity::getParticipant2Id, id)));
         w.orderByDesc(ConversationEntity::getLastMessageAt);
         w.orderByDesc(ConversationEntity::getUpdatedAt);
-        w.last("LIMIT " + limit + " OFFSET " + offset);
+        // DRIFT-MSG-V-014：Go 出处 internal/model/message.go:127-131（同 NotificationMapper）。
+        String tail = GoStylePagination.limitOffset(limit, offset);
+        if (!tail.isEmpty()) {
+            w.last(tail);
+        }
         return selectList(w);
     }
 

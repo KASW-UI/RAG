@@ -28,6 +28,7 @@
 | **`common`** | [`common/protection.md`](./common/protection.md) · [`common/http.md`](./common/http.md)<br>[`common/deadline.md`](./common/deadline.md) · [`common/audit.md`](./common/audit.md)<br>⚠️ 签字偏离已迁出 ⇒ [`../Intentional_Deviations/`](../Intentional_Deviations/_INDEX.md) | 请求保护层四层的最终落点 |
 | **`hot`** | [`hot/rpc.md`](./hot/rpc.md) · [`hot/common.md`](./hot/common.md)<br>[`hot/api.md`](./hot/api.md) | 前两者双侧对拍逐字节一致；**api 已实现 + 源码级对照完成，但无双侧活体对拍** |
 | **`article`** | [`article/common.md`](./article/common.md)<br>[`article/api.md`](./article/api.md) · [`article/rpc.md`](./article/rpc.md) | common 已对拍；**rpc 已完成首轮组件级对照（2026-10-23，见下方「状态更正」）**，api 未对照 |
+| 🆕 **`comment` / `favorite` / `follow` / `task`** | [`_cross/new-domains-2026-10-23.md`](./_cross/new-domains-2026-10-23.md) | **2026-10-23 12:25 纳入范围**：仅 **proto 层**已搬齐并实测（4 个 `*.proto` 逐行 diff，1 处签字差异）；**api / rpc / common 共 11 个组件仍是空壳** ⇒ 语义对照**尚未开始** |
 | **`_cross`** | [`_cross/open-items.md`](./_cross/open-items.md)<br>[`_cross/decisions.md`](./_cross/decisions.md) | 已知未修表 + 决策详述（**签字偏离已迁出** ⇒ 见 `docs/Intentional_Deviations/`） |
 
 ## 🔴 状态更正（2026-10-23 实测，与 AGENTS.md §0 冲突）
@@ -80,7 +81,7 @@
 
 | 缺口 | 明细 | 证据 |
 |---|---|---|
-| **分母缺口（最大）** | Go 有 14 个服务，RAG 只译了 6 个域。**7 个 Go 微服务在 RAG 里没有任何对应模块**：`comment` / `favorite` / `follow` / `knowledge` / `points` / `security` / `task` ⇒ 本目录对它们只能停在「未翻译」这一句 | Go `service/*` 目录实测；RAG `service/pom.xml` 只列 6 个 `<module>` |
+| **分母缺口（最大）** | ⚠️ **2026-10-23 12:25 已缩小**：Go 有 14 个服务，RAG 现覆盖 **10 个域**（`comment` / `favorite` / `follow` / `task` 已升为范围内，但**仅 proto 层**）。仍**完全未译**的只剩 **3 个**：`knowledge` / `points` / `security` ⇒ 本目录对它们只能停在「未翻译」这一句 | Go `service/*` 目录实测；RAG `service/pom.xml` 现列 10 个 `<module>` |
 | **组件缺口** | 8 个组件**无专属台账文件**：6 个 `*-proto`（`article` / `hot` / `like` / `message` / `user` / `admin`）+ `like-common` + `message-common`。其中 **`article-proto` / `like-proto` / `user-proto` 在两个目录里零提及** | `grep -rl` 全目录扫描 |
 | **Pitfalls 是骨架** | 27 个文件里 **21 个是 0 字节占位**（索引已声明「空文件即待填坑位」），**只有 6 份有内容** | `find docs/Pitfalls -name '*.md' -size 0c` |
 | **口径陷阱** | 「有台账」≠「已对照」。见 AGENTS.md §0 各域**证据强度列**——`hot/api` 仅源码级、`article/api` 从未对照 | 本目录各 `<域>/<模块>.md` |

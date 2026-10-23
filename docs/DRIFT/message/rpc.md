@@ -897,3 +897,99 @@ RAG application.yml:16
 | `@Import` 归一化 | ✅ **已完成**（与 `AGENTS.md §6.3 问题 3` 的记载相反，该条需由持有者修正） | 静态源码 |
 | Flyway 账本**单模块运行时** | ✅ **已确证生效**（关闭该项 UNKNOWN） | 真 PG 启动日志 |
 | Flyway 账本**三模块同库** | ⚠️ 未验证 ⇒ `UNRESOLVED-MSG-008` | — |
+
+---
+
+<!-- @fix 2026-10-23 第二轮：DRIFT-MSG-V-014 + DRIFT-MSG-V-017 已修 -->
+
+## 2026-10-23 第二轮：DRIFT-MSG-V-014 / -017 已修
+
+> message-rpc 当前：**49 tests / 0 failures / 0 errors**，BUILD SUCCESS（原 39 + 分页 7 + isRead 3）。
+
+### ✅ FIX-MSG-014 —— 负 `offset` 不再变成 `OFFSET must not be negative`
+
+**Go 出处（消费点，三处逐字同构）**：
+
+```go
+// internal/model/message.go:59-64 / :127-131 / :164-168
+if offset > 0 { db = db.Offset(int(offset)) }   ← offset = -1 ⇒ 整段被跳过
+if limit  > 0 { db = db.Limit(int(limit))   }   ← limit  =  0 ⇒ 整段被跳过
+```
+
+修复前三个 Mapper 都是 `w.last("LIMIT " + limit + " OFFSET " + offset)` **无条件拼接**
+⇒ `OFFSET -1` ⇒ PG 报 `OFFSET must not be negative`
+⇒ 被 `MessageRpcServiceImpl` 兜底成 `INTERNAL` + "internal server error" ⇒ 客户端拿 **5001**。
+
+**危害不在返回值错，而在分类错了**：参数非法被降级成基础设施故障，监控会记成 DB 故障。
+
+**修法**：新增 `mapper/GoStylePagination.limitOffset(limit, offset)` 统一生成尾子句，
+三个 Mapper 改为 `if (!tail.isEmpty()) w.last(tail)`。
+
+⚠️ **`limit <= 0` 时 Go 是「不加 LIMIT」⇒ 不限行数，不是「LIMIT 0 返回空页」**。
+这看着像缺陷，但它是 Go 的实际行为，照原样复刻（§3.2 不「顺手改好」）。
+
+**安全边界**：`limit`/`offset` 都是原始 `int`，字符串拼接**类型安全**，**不构成 SQL 注入面**。
+已在 helper 的 javadoc 里写明：若将来把签名改成 `String`，这一行就从「类型安全」变成「注入面」。
+
+**未改的一处（刻意）**：`ConversationMessageMapper#listByConversation`（带 `beforeMessageId` cursor）
+在 Go 侧**无对应函数**，且**当前零调用方**（死代码）⇒ 不改（改了就是「顺手改好」）。
+
+**证据**：`MessagePaginationNegativeOffsetWiringTest`（7/7 绿，真 PG）：
+
+- 3 条路径各一条负 offset 用例（Notification / Conversation / …）
+- `limit=0`、`limit=-1` 两条：**不加 LIMIT ⇒ 返回全部 5 行**，而不是「LIMIT 0 返回空页」
+- `normalPaginationUnchanged` 对照组：`limit=2 offset=1` ⇒ 顺序逐条一致
+- **`allNegativeCombinationsAcrossAllThreePaths`**：**守恒断言**，7 组负值/正常值组合
+  逐组断言「行数 == Go 语义的可执行表述」（§3.3.3「凡是脚本批量改 N 处，
+  必须配一条覆盖全部 N 处的守恒断言」）
+- `negativeOffsetIsNotRejectedAsInvalidArgument` —— **显式钉住「不改成 INVALID_ARGUMENT」**：
+  本模块**没有**参数校验出口，加一个就是新增 Go 不存在的拒绝路径（§3.2）
+
+### ✅ FIX-MSG-017 —— `isRead` 字段名（潜伏缺陷，今天无可观察差异）
+
+**⚠️ 先说清楚性质**：`markAllReadByRecipient` **无调用方**，生产路径走的是手写
+`@Update` 的 `markReadByConversationAndRecipient` ⇒ 本条修复**不改变今天任何可观察行为**，
+只是拆掉「一旦有人接线就抛 `can not find lambda cache for this property [read]`」那颗雷。
+
+**修法照抄同模块 `NotificationEntity`（2026-10-21 已付过运行期代价）**：
+字段 `isRead` → `read` + `@TableField("is_read")`，**getter/setter 签名保持
+`isRead()` / `setRead(boolean)` 不变**（改签名会波及 `MessageRpcSupport:130/149`，
+与本缺陷无关）。
+
+#### 🔴 连带修复：手写 `@Insert` 里的 `#{isRead}` **必须一起改**（本轮实测踩到）
+
+改完字段名后，**5 条既有测试立刻红**：
+```
+ReflectionException: There is no getter for property named 'isRead'
+  in ConversationMessageMapper.insertMsg-Inline
+```
+
+根因：**手写 `@Insert` 的 `#{…}` 走 OGNL，按 JavaBeans 规则解析属性名** ——
+`isRead()` 这个 getter 对应的属性是 `read`，属性 `isRead` 并不存在。
+`callbacks/create.go` 那套 `TableInfo.propertyMap` 完全不参与。
+
+⇒ 同一个字段名，**两套解析规则**：
+
+| 写法 | 解析依据 | 本例取值 |
+|---|---|---|
+| `ConversationMessageEntity::isRead`（MP lambda） | `TableInfo.propertyMap`，key = **字段名** | 字段必须是 `read` |
+| `#{isRead}`（手写 `@Insert` OGNL） | JavaBeans **属性名**（由 getter 定） | 必须写 `#{read}` |
+
+⇒ **改字段名必须分别验证这两条路**，改一处不保证另一处还对。
+`insertMsg` 的占位符已改为 `#{read}`（`ConversationMessageMapper:152`）。
+
+**证据**：`MessageIsReadLambdaWiringTest`（3/3 绿，真 PG）——
+**主动调用那个死方法**，让 lambda 在真 PG 上真跑一遍（不执行就永远不会暴露这类纯静态缺陷）：
+
+- `markAllReadByRecipientLambdaResolves` —— 不抛异常 + 恰好命中 3 行
+- `lambdaResolvesToSnakeCaseColumn` —— 断言解析出的**列名**是 `is_read`；
+  顺带显式钉住「属性名 `read` / getter 名 `isRead`」这对不一致正是缺陷成因本身
+- `readPathMapsIsRead` —— 对照：读路径 `getIsRead()` 能正确还原（不是恒 false）
+
+### 元教训（值得单列）
+
+1. **同一个字段名，MP lambda 与手写 OGNL 是两套解析规则。** 改字段名时，
+   「跑一下全量测试」是唯一能同时覆盖两者的办法——
+   本轮若只跑那个新写的守门测试，5 条既有测试的红色就看不见了。
+2. **「潜伏缺陷」不等于「不用修」，但也不等于「修了有收益」。**
+   本条的收益是拆雷，**必须如实写明今天无可观察差异**，否则会被当成行为修复来汇报。

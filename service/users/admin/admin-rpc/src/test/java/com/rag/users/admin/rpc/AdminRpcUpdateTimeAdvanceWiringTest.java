@@ -13,7 +13,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -104,7 +104,7 @@ class AdminRpcUpdateTimeAdvanceWiringTest {
     @DisplayName("🔴 Go: banUser 推进 update_time")
     void banUserAdvancesUpdateTime() {
         seedUser();
-        LocalDateTime before = updateTimeOf();
+        OffsetDateTime before = updateTimeOf();
 
         assertTrue(adminService.banUser(UID, 1L));
 
@@ -121,7 +121,7 @@ class AdminRpcUpdateTimeAdvanceWiringTest {
     void unBanUserAdvancesUpdateTime() {
         seedUser();
         jdbcTemplate.update("UPDATE users_user SET status = 1 WHERE uid = ?", UID);
-        LocalDateTime before = updateTimeOf();
+        OffsetDateTime before = updateTimeOf();
 
         assertTrue(adminService.unBanUser(UID, 1L));
 
@@ -137,7 +137,7 @@ class AdminRpcUpdateTimeAdvanceWiringTest {
     @DisplayName("🔴 Go: updateUser 推进 update_time")
     void updateUserAdvancesUpdateTime() {
         seedUser();
-        LocalDateTime before = updateTimeOf();
+        OffsetDateTime before = updateTimeOf();
 
         Map<String, String> extra = new HashMap<>();
         extra.put("nickname", "new-nick");
@@ -157,7 +157,7 @@ class AdminRpcUpdateTimeAdvanceWiringTest {
     @DisplayName("🔴 Go: resetUserPassword 推进 update_time")
     void resetUserPasswordAdvancesUpdateTime() {
         seedUser();
-        LocalDateTime before = updateTimeOf();
+        OffsetDateTime before = updateTimeOf();
         String oldHash = jdbcTemplate.queryForObject(
                 "SELECT password FROM users_user WHERE uid = ?", String.class, UID);
 
@@ -179,7 +179,7 @@ class AdminRpcUpdateTimeAdvanceWiringTest {
     @DisplayName("🔴 Go: 用户不存在时 banUser 抛 NOT_FOUND，且不动任何行")
     void missingUserDoesNotAdvanceUpdateTime() {
         seedUser();
-        LocalDateTime before = updateTimeOf();
+        OffsetDateTime before = updateTimeOf();
 
         try {
             adminService.banUser(999_999L, 1L);
@@ -198,23 +198,35 @@ class AdminRpcUpdateTimeAdvanceWiringTest {
     /**
      * 把 update_time 推到 2020，让「有没有前进」无歧义。
      *
-     * <p>⚠️ 列类型是 {@code TIMESTAMP}（<b>不带时区</b>，见
-     * {@code users-common/src/main/resources/db/01_create_user.sql:43}），
-     * 而 setSql 写的是 {@code CURRENT_TIMESTAMP}（PG 侧带时区）。
-     * 二者在<b>同一个会话</b>内比较不会跨时区偏移，因为断言读回的是同一列的同一类型。
+     * <p>⚠️ 字面量用 {@code TIMESTAMPTZ '…+00'} 而不是原来的 {@code TIMESTAMP '…'}：
+     * {@code users_user.update_time} 现在是 {@code timestamptz}
+     * （见 {@code users-common/src/main/resources/db/01_create_user.sql:82-83}），
+     * 无时区字面量塞进去会被 PG 按<b>会话 TimeZone</b> 隐式换算
+     * ⇒ 时区不是 UTC 时种子数据的绝对时刻会漂，而这个测试只关心「有没有前进」。
      */
     private void seedUser() {
         jdbcTemplate.update("""
                 INSERT INTO users_user (uid, username, password, email, status, score,
                                        extra_info, create_time, update_time)
                 VALUES (?, 'ts-user', 'old-hash', 'ts@mail.test', 0, 0, '{}'::jsonb,
-                        TIMESTAMP '2020-01-01 00:00:00', TIMESTAMP '2020-01-01 00:00:00')
+                        TIMESTAMPTZ '2020-01-01 00:00:00+00', TIMESTAMPTZ '2020-01-01 00:00:00+00')
                 """, UID);
     }
 
-    private LocalDateTime updateTimeOf() {
+    /**
+     * 🔴 读列类型随 DDL 一起从 {@code LocalDateTime} 改成 {@link OffsetDateTime}
+     * （DRIFT-USERRPC-V-004，2026-10-23）。
+     *
+     * <p>不是顺手改：{@code users_user.update_time} 现在是 {@code timestamptz}
+     * （见 {@code users-common/.../01_create_user.sql:82-83}），
+     * 用 {@code LocalDateTime.class} 去 {@code getObject} 一个 timestamptz，
+     * pgjdbc 会拿 JVM 默认时区把它压成无偏移的本地时间 ——
+     * <b>时区不是 UTC 时，这个读法会静默差一个偏移量</b>。
+     * 断言的是「时间是否前进」，读法本身不能引入时区噪声。
+     */
+    private OffsetDateTime updateTimeOf() {
         return jdbcTemplate.queryForObject(
-                "SELECT update_time FROM users_user WHERE uid = ?", LocalDateTime.class, UID);
+                "SELECT update_time FROM users_user WHERE uid = ?", OffsetDateTime.class, UID);
     }
 
     private long statusOf() {
@@ -223,8 +235,8 @@ class AdminRpcUpdateTimeAdvanceWiringTest {
         return s == null ? -1L : s;
     }
 
-    private void assertAdvances(LocalDateTime before, String op) {
-        LocalDateTime after = updateTimeOf();
+    private void assertAdvances(OffsetDateTime before, String op) {
+        OffsetDateTime after = updateTimeOf();
         assertTrue(after.isAfter(before),
                 op + " 之后 update_time 必须前进（GORM autoUpdateTime 的语义）；"
                         + "仍等于 " + before + " 说明该入口漏了 "

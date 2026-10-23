@@ -13,10 +13,12 @@
 
 **权威索引：[`docs/DRIFT/_INDEX.md`](../../../docs/DRIFT/_INDEX.md)** —— 按域列出全部台账、搬移账目、证据边界。本节只给结论。
 
-> 🔴 **2026-10-23 02:00 重大更新**：§3.5 的 **23 个组件里，12 个 api/rpc 已全部完成首轮组件级对照**
+> 🔴 **2026-10-23 02:00 重大更新**：§3.5 当时的 **23 个组件里，12 个 api/rpc 已全部完成首轮组件级对照**
 > （12 个并发会话，台账 +11,697 行）。**12 个组件结论全部是 `SEMANTICALLY NOT EQUIVALENT`**
 > —— 合计 **34 条 `SEMANTIC MISMATCH` + 52 条 `OBSERVABLE DIFFERENCE`**。
 > 下表已按台账重写，**旧表述全部作废**；逐条证据以各组件台账为准。
+> ⚠️ **当日 12:25 范围扩到 38 个组件**（新增 4 个域）⇒ 这 12 个 api/rpc 的对照结论**只覆盖原有 6 域**，
+> 新增 4 域**尚未开始任何对照**（见 [`new-domains-2026-10-23.md`](./new-domains-2026-10-23.md)）。
 
 | 域 | 语义对照（Go ↔ RAG） | 台账 |
 |---|---|---|
@@ -71,13 +73,16 @@ RAG 仓库路径：`/Users/pr/Documents/java&golang/RAG`。
 
 **RAG 的存在范围**：用 Spring 生态表达 Go 的行为。**不**对任何"非 Spring Boot 的 Java 实现"做对照——那些是另一种工作，不属于本项目的范围；也不接收 RAG 反向同步。
 
-**微服务范围（2026-10-23 用户定）**：本项目**只搬这 6 个微服务** ——
-`article` / `hot` / `like` / `users-user` / `users-admin` / `message`，
-共 **23 个组件**（6 api + 6 rpc + 5 common + 6 proto，权威清单见 **§3.5**）。
-Go 侧另外 **7 个微服务**（`comment` / `favorite` / `follow` / `knowledge` / `points` / `security` / `task`）
-**不在本项目范围内** ⇒ **不是待办**。
+**微服务范围（2026-10-23 用户定 · 当日 12:25 扩到 10 个）**：本项目搬 **10 个微服务** ——
+`article` / `hot` / `like` / `users-user` / `users-admin` / `message` / `comment` / `favorite` / `follow` / `task`，
+共 **38 个组件**（10 api + 10 rpc + 8 common + 10 proto，权威清单见 **§3.5**）。
+
+⚠️ **2026-10-23 12:25 范围变更（用户指令，推翻本日早些时候的决策）**：
+`comment` / `favorite` / `follow` / `task` 四域由「范围外」升为「范围内」，**本轮只搬了 proto 层** ——
+10 个 `*.proto` 现已齐全（见 §3.4）；**其余 11 个组件（4 api + 4 rpc + 3 common）仍是只有 `pom.xml` 的空壳**，
+`task` 域没有 `-common`（Go 侧同样没有，不是遗漏）。
+Go 侧剩余 `knowledge` / `points` / `security` **仍在范围外** ⇒ **不是待办**。
 ⚠️ **「未翻译」≠「该做」**：范围是**决策**，不是进度。
-任何「proto 还差 6 个没复制」「还有 N 个微服务没搬」的说法一律作废。
 
 ### 1.1 三次真理之源切换的结论
 
@@ -123,14 +128,18 @@ Go 侧另外 **7 个微服务**（`comment` / `favorite` / `follow` / `knowledge
 ⇒ **「文件已写」同样是需要证据的断言**（§3.3 同款形态）：改这些清单前先跑一次 glob，别照抄上一版。
 
 未覆盖的子模块：**users-common / message-rpc / message-api**（虽已实现并做过 Go ↔ RAG 对照，但**文档缺失**）
-+ **Go 有、RAG 尚未翻译的 7 个微服务**：`comment` / `favorite` / `follow` / `knowledge` / `points` / `security` / `task`
++ **Go 有、RAG 尚未翻译的 3 个微服务**：`knowledge` / `points` / `security`
 （🚫 **不在本项目范围内，不是待办** ⇒ §1「微服务范围」）
++ **2026-10-23 12:25 新纳入范围但只有 proto 层的 4 个域**：`comment` / `favorite` / `follow` / `task`
+—— 它们的 **4 api + 4 rpc + 3 common 共 11 个组件仍是空壳**（只有 `pom.xml`、0 行 Java）⇒ 无可对照对象
 + **已翻译但对照未闭环的组件**：`article-api`（从未对照）、`article-rpc`（首轮组件级完成）、
 `hot-api`（仅源码级对照）、以及 `like-common` / `message-common`
 （**连 Go ↔ RAG 对照都还没做过**，见 §0）。前者建议按 phase 补文档，后者暂按 Go 行为对齐、进入对应 phase 再补。
   - ⚠️ **2026-10-23 校正**：此处原把「6 个 `*-proto`」也列进"从未做过"，**该条已过期**——
-    6 个 proto 实为**从 Go 侧复制**（非翻译），2026-10-23 实测**语义层 6/6 逐条一致**，
-    详见 **§3.4**；其中 `user` / `admin` 有守门脚本，另 4 个**只有一次性实测、无回归网**。
+    10 个 proto 实为**从 Go 侧复制**（非翻译），2026-10-23 实测**语义层 10 个中 9 个逐条一致**，
+    `comment` 有 **1 处已签字偏离**（proto `package` 归一，`SD-2026-10-23-04`），
+    详见 **§3.4** 与 [`../../Intentional_Deviations/comment/proto.md`](../../Intentional_Deviations/comment/proto.md)；
+    其中 `user` / `admin` 有守门脚本，另 8 个**只有一次性实测、无回归网**。
 ⚠️ **2026-10-23 实测校正**：原枚举写作「article / comment / favorite / follow / hot / like / points / security / task / common」——
 ① **漏了 `knowledge`**：Go 侧是**独立微服务**（含 api 组件，依赖 Neo4j + Milvus），RAG 侧**完全未翻译**，
 仅 [`Infrastructure.md`](../../../Infrastructure.md) 标「❌ 未实装」；② **`hot` / `like` / `common` 三项已过期**——

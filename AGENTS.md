@@ -10,20 +10,23 @@
 
 **权威索引：[`docs/DRIFT/_INDEX.md`](docs/DRIFT/_INDEX.md)** —— 按域列出全部台账、搬移账目、证据边界。本节只给结论。
 
-> 🔴 **2026-10-23 02:00 重大更新**：§3.5 的 **23 个组件里，12 个 api/rpc 已全部完成首轮组件级对照**
+> 🔴 **2026-10-23 02:00 重大更新**：§3.5 当时的 **23 个组件里，12 个 api/rpc 已全部完成首轮组件级对照**
 > （12 个并发会话，台账 +11,697 行）。**12 个组件结论全部是 `SEMANTICALLY NOT EQUIVALENT`**
 > —— 合计 **34 条 `SEMANTIC MISMATCH` + 52 条 `OBSERVABLE DIFFERENCE`**。
 > 下表已按台账重写，**旧表述全部作废**；逐条证据以各组件台账为准。
+> ⚠️ **当日 12:25 范围扩到 38 个组件**（新增 4 个域）⇒ 这 12 个 api/rpc 的对照结论**只覆盖原有 6 域**，
+> 新增 4 域**尚未开始任何对照**（见 §0 `comment`/`favorite`/`follow`/`task` 行）。
 
 | 域 | 语义对照（Go ↔ RAG） | 台账 |
 |---|---|---|
-| `users` | 🔴 **首轮对照**：4 个组件全部 `NOT EQUIVALENT`（user-api 2 MISMATCH、user-rpc 1、admin-api 3、admin-rpc 0 MISMATCH 但 6 OBSERVABLE）。✅ 已修：`extra_info` / `is_current`（真 PG 实证）、**admin-rpc `update_time` 5 处推进**（2026-10-23；守门 `AdminRpcUpdateTimeAdvanceWiringTest`，**81 tests / 0 failures**）。⚠️ **admin-api 的 `OperatorId`（1 条）与 user-api 的 `uid`（1 条）已签字不修**（`SD-2026-10-23-01` / `-02`）——对拍看到它们变红是**预期**。**`UpdateSelf` 与 uid 两条历史回归经复核不属该域** | [`docs/DRIFT/users/`](docs/DRIFT/users/_shared.md) |
-| `message` | 🔴 **首轮对照**：api 5 MISMATCH + 1 OBSERVABLE；rpc 1 MISMATCH（负 `offset` ⇒ 500）+ 5 OBSERVABLE。✅ **`broadcast:1` 误发全量已修**（2026-10-23，`Boolean←Integer`=Fail；守门 `MessageApiMvcPipelineTest` 42/42）。`affected` 的 `,string` 漂移**已签字**（`SD-2026-10-23-03`，不修） | [`docs/DRIFT/message/`](docs/DRIFT/message/api.md) |
-| `like` | 🔴 **首轮对照**：api **9 MISMATCH**（本轮最高，**62 条绿测试零覆盖**）；rpc 4 MISMATCH。✅ **rpc 6 条启动阻塞已修**（2026-10-23，缺 `spring-boot-kafka` 等 ⇒ 此前**根本起不来**；守门 `LikeRpcSpringContextWiringTest` 7/7）。事实投递链路**跨三个仓库且末端不在任何仓** ⇒ 链路无法闭环 | [`docs/DRIFT/like/`](docs/DRIFT/like/rpc.md) |
+| `users` | 🔴 **首轮对照**：4 个组件全部 `NOT EQUIVALENT`（user-api 2 MISMATCH、user-rpc 1、admin-api 3、admin-rpc 0 MISMATCH 但 6 OBSERVABLE）。✅ 已修：`extra_info` / `is_current`、**admin-rpc `update_time` 5 处**、**user-rpc `Login` 的 `status IS NULL` fail-open**（2026-10-23；**根因比台账更深**：字段初始化值 `= 0L` + `callSettersOnNulls` 默认 false ⇒ NULL 被读成 `0`，不是 `null`）。✅ **`users_user` 时间列 `TIMESTAMP⇒TIMESTAMPTZ` 已修**（2026-10-23，DDL + 两个实体 4 字段改 `OffsetDateTime`；**踩到并修掉两个坑**：无账本重放下裸 `ALTER` 会累积平移整列、`ScriptUtils` 无美元引号支持导致 `DO` 块炸启动 ⇒ 守门 `UserRpcUsersUserTimestamptzParityTest` 6/6 + **变异测试已证伪**）。user-rpc **102/0**、admin-rpc **84/0**。⚠️ **admin-rpc 有同款缺陷未修**（`status = 0L`，跨组件）。🔴 **V-004 的可观察半边在 `users_user_avatar_history`，仍未修**（台账「3 处格式化」归因错误：`AvatarDomainService` 格式化的是**另一张表**，`UserApiSupport:69` 只是透传 ⇒ 本次改动**无 wire 差异**）。⚠️ **admin-api 的 `OperatorId`、user-api 的 `uid` 已签字不修**（`SD-2026-10-23-01/02`）——对拍变红是**预期** | [`docs/DRIFT/users/`](docs/DRIFT/users/_shared.md) |
+| `message` | 🔴 **首轮对照**：api 5 MISMATCH + 1 OBSERVABLE；rpc 1 MISMATCH + 5 OBSERVABLE。✅ **`broadcast:1` 误发全量已修**（2026-10-23，`Boolean←Integer`=Fail；守门 `MessageApiMvcPipelineTest` 42/42）。✅ **rpc 负 `offset` 已修**（2026-10-23，3 个 Mapper 补 Go 的 `>0` 守卫 ⇒ 不再 `OFFSET must not be negative` ⇒ 不再降级成 500；含**守恒断言**）；✅ **rpc `isRead` 字段名已修**（潜伏缺陷，**今天无可观察差异**；连带修好手写 `@Insert` 的 `#{isRead}`）。**49 tests / 0 failures**。`affected` 的 `,string` **已签字**（`SD-2026-10-23-03`） | [`docs/DRIFT/message/`](docs/DRIFT/message/rpc.md) |
+| `like` | 🔴 **首轮对照**：api **9 MISMATCH**（本轮最高，**62 条绿测试零覆盖**）；rpc 4 MISMATCH + 2 OBSERVABLE。✅ **rpc 6 条启动阻塞已修**（2026-10-23；守门 `LikeRpcSpringContextWiringTest` 7/7）。✅ **rpc `like_domain_fact_outbox` DDL 已对齐**（新增 V6，**64 tests / 0 failures**）：列类型 `BIGINT⇒integer`（Go int32 经 `field.Size=32` → `size<=32⇒integer`）+ **补回 CHECK/部分索引/复合索引/不可变触发器/`version` 范围 CHECK 共 5 项**（台账原记 4 项，**低估**）。事实投递链路**跨三个仓库且末端不在任何仓** ⇒ 链路无法闭环 | [`docs/DRIFT/like/`](docs/DRIFT/like/rpc.md) |
 | `common` | ✅ 审计完成 | [`docs/DRIFT/common/`](docs/DRIFT/common/audit.md) |
 | `hot` | 🔴 **首轮对照**：rpc ✅ **4 条启动阻塞已修**（2026-10-23，Jackson 3 装配缺失等 ⇒ 此前**根本起不来**；守门 `HotRpcSpringContextWiringTest` 6/6）；🔴 **重桶 `hash()` 仿错仍影响 49.5% 的 key（未修）**；api 1 MISMATCH（重复 query 参数）。⚠️ 旧结论「双侧对拍逐字节一致」**仅在 `width=100000` 无碰撞区间成立，不可外推** | [`docs/DRIFT/hot/`](docs/DRIFT/hot/api.md) |
-| `article` | 🔴 **首轮对照**：rpc 4 MISMATCH + 4 OBSERVABLE。✅ **jsonb `@ResultMap`（实为 4 处，非台账原记 3 处）+ `updated_at` 推进已修**；🔴 **并新发现公开列表双重损坏**（`<if>` 参数名 typo 挡住解析期，后面还藏着 `<where>` 生成双 `WHERE` ⇒ **公开列表 100% 报错**）—— 一并修（2026-10-23；守门 `ArticleJsonbResultMapWiringTest` + `ArticleTransactionWiringTest`，**105 tests / 0 failures**）。**S-3 的论证依据仍被推翻**。api 2 MISMATCH（gRPC 码映射丢失、超时作用域差 35×）—— **api 首次对照即 NOT EQUIVALENT** | [`docs/DRIFT/article/`](docs/DRIFT/article/rpc.md) |
-| 其余子模块 | ⚠️ **6 个 `*-proto` 语义层一致**（复制非翻译，4 个无回归网 ⇒ §3.4）；5 个 `*-common` 本轮**未单独审查**（作为同域公理被引用） | 见 DRIFT 索引 |
+| `article` | 🔴 **首轮对照**：rpc 4 MISMATCH + 4 OBSERVABLE。✅ **jsonb `@ResultMap`（实为 4 处）+ `updated_at` 推进已修**；🔴 **新发现公开列表双重损坏**（`<if>` 参数名 typo 挡住解析期，后面还藏着 `<where>` 生成双 `WHERE` ⇒ **公开列表 100% 报错**）—— 一并修（**105 tests / 0 failures**）。⚠️ **`DRIFT-ARTICLE-RPC-004` 复核后撤销**：台账称「Go 报错 / RAG 静默改」**不成立**，Go 实为 `ON CONFLICT DO UPDATE` 回落（`finisher_api.go:117-121` + `callbacks/create.go:366-402`），**两边都是静默覆盖** ⇒ **照台账修反而会制造新漂移**。api 2 MISMATCH —— **api 首次对照即 NOT EQUIVALENT** | [`docs/DRIFT/article/`](docs/DRIFT/article/rpc.md) |
+| `comment`/`favorite`/`follow`/`task` | 🆕 **2026-10-23 12:25 纳入范围**：✅ **仅 proto 层已搬齐**（4 个 `*.proto` 从 Go 侧复制 + 接上 protoc 插件，实测各产出 7~37 个 java + 1 个 `*Grpc`，合计 **88 java / 4 Grpc**）；⚠️ `comment` 的 proto `package` 有 **1 处已签字偏离**（`SD-2026-10-23-04`，见 §0 第 1 条）；🔴 **api / rpc / common 共 11 个组件仍是空壳**（只有 `pom.xml`、0 行 Java）⇒ **语义对照尚未开始**，这些域**不在** §0 前 5 行的任何结论覆盖范围内 | [`docs/DRIFT/_cross/new-domains-2026-10-23.md`](docs/DRIFT/_cross/new-domains-2026-10-23.md) |
+| 其余子模块 | ⚠️ **10 个 `*-proto` 语义层一致**（复制非翻译，**8 个无回归网** ⇒ §3.4）；5 个 `*-common` 本轮**未单独审查**（作为同域公理被引用），另 3 个新域 common **尚为空壳** | 见 DRIFT 索引 |
 
 > ⚠️ **表内的 MISMATCH / OBSERVABLE 计数是「首轮组件级对照」的审计结论，不是当前状态**。
 > 已修项一律在上表用 ✅ 单独标出（带核对日期 + 守门测试名）；判断某一条的现状**一律回台账**，勿凭本表下结论。
@@ -35,9 +38,19 @@
 1. **已签字的有意偏离** 9+ 条 —— 是决策不是缺陷，但两侧确实不一致 ⇒ [`docs/Intentional_Deviations/`](docs/Intentional_Deviations/_INDEX.md)
    ⚠️ **2026-10-23 修复轮新增 3 条签字偏离**（`SD-2026-10-23-01/02/03`）—— 共性：**RAG 做了更严/更安全的那一侧**。
    ⇒ 对拍看到它们变红，先确认是不是这三条，**不要当新回归去「修」**。
-2. **DDL 12 处列类型差异** 未处理；**索引 / 唯一约束 / NOT NULL / DEFAULT 完全 NOT CHECKED**。
-   仅 message 域时间列已评估过影响（DRIFT-MSG-V-007：JVM 非 UTC 时时间戳偏移一个时区差），**其余 10 处从未评估**。
-   ⚠️ **实际差异数远超 12 处**（admin-rpc 7 处、user-rpc 4 个时间列、like-rpc 丢失 CHECK/触发器/部分索引、message-rpc `V2` 迁移无 `IF NOT EXISTS`）⇒ 明细见 DRIFT 台账。
+   ⚠️ **2026-10-23 12:25 新增第 4 条**（`SD-2026-10-23-04`）—— `comment` 域 proto `package` 归一为 `comment`
+   （Go 为遗留名 `pb`）⇒ **gRPC 方法路径前缀不同**（wire 层可见），当前该域 api/rpc 皆空壳故**无实际影响**，
+   **实现该域时必须显式处理** ⇒ [`docs/Intentional_Deviations/comment/proto.md`](docs/Intentional_Deviations/comment/proto.md)。
+   ⚠️ **同日追加第 5 条**（`SD-2026-10-23-05`）—— `like` 域 proto `package` 同样归一为 `like`；
+   该域**已实现**但实测**影响面为零**（仓内自产自销 + 对拍探针不走 gRPC 服务名 + `pb.` 硬编码零命中），
+   改包名后 **108 例测试全绿** ⇒ [`docs/Intentional_Deviations/like/proto.md`](docs/Intentional_Deviations/like/proto.md)。
+   ⇒ 两条合起来的效果：**RAG 侧 10 个 proto 的 `package` 全部与域名一致，仓内不再有 `pb` 遗留名**。
+2. **DDL 列类型差异**：原记 12 处，**实际更多**；**索引 / 唯一约束 / NOT NULL / DEFAULT 完全 NOT CHECKED**。
+   - ✅ 已修：message 域 `article-rpc`（2026-10-23）、users 域 `users_user` 两列 `TIMESTAMP⇒TIMESTAMPTZ`（2026-10-23）。
+   - 🔴 **仍未修**：message 域时间列（DRIFT-MSG-V-007：JVM 非 UTC 时偏移一个时区差）、
+     **users 域其余 3 张表**（`users_user_avatar_history` ← **唯一 wire 可见的一张**、`admin_admin`、`admin_invite` 共 4 列）、
+     admin-rpc 7 处、like-rpc 丢失的 CHECK/触发器/部分索引、message-rpc `V2` 迁移无 `IF NOT EXISTS`。
+   ⚠️ **不要把本轮的改法批量套到那 3 张表**：每张表的 wire 可见性与时区敏感点都不同 ⇒ 明细见 DRIFT 台账。
 3. **跨组件不变量仍无法单侧闭环**（§3.5 表）：
    `users_user` 建表交叉（user-rpc ↔ admin-rpc）、**事实投递链路末端不在任何仓**（like 三仓库）、
    三模块 Flyway 账本共存（message ↔ like ↔ article）、client 契约。
@@ -64,13 +77,16 @@ RAG 仓库路径：`/Users/pr/Documents/java&golang/RAG`。
 
 **RAG 的存在范围**：用 Spring 生态表达 Go 的行为。**不**对任何"非 Spring Boot 的 Java 实现"做对照——那些是另一种工作，不属于本项目的范围；也不接收 RAG 反向同步。
 
-**微服务范围（2026-10-23 用户定）**：本项目**只搬这 6 个微服务** ——
-`article` / `hot` / `like` / `users-user` / `users-admin` / `message`，
-共 **23 个组件**（6 api + 6 rpc + 5 common + 6 proto，权威清单见 **§3.5**）。
-Go 侧另外 **7 个微服务**（`comment` / `favorite` / `follow` / `knowledge` / `points` / `security` / `task`）
-**不在本项目范围内** ⇒ **不是待办**。
+**微服务范围（2026-10-23 用户定 · 当日 12:25 扩到 10 个）**：本项目搬 **10 个微服务** ——
+`article` / `hot` / `like` / `users-user` / `users-admin` / `message` / `comment` / `favorite` / `follow` / `task`，
+共 **38 个组件**（10 api + 10 rpc + 8 common + 10 proto，权威清单见 **§3.5**）。
+
+⚠️ **2026-10-23 12:25 范围变更（用户指令，推翻本日早些时候的决策）**：
+`comment` / `favorite` / `follow` / `task` 四域由「范围外」升为「范围内」，**本轮只搬了 proto 层** ——
+10 个 `*.proto` 现已齐全（见 §3.4）；**其余 11 个组件（4 api + 4 rpc + 3 common）仍是只有 `pom.xml` 的空壳**，
+`task` 域没有 `-common`（Go 侧同样没有，不是遗漏）。
+Go 侧剩余 `knowledge` / `points` / `security` **仍在范围外** ⇒ **不是待办**。
 ⚠️ **「未翻译」≠「该做」**：范围是**决策**，不是进度。
-任何「proto 还差 6 个没复制」「还有 N 个微服务没搬」的说法一律作废。
 
 ### 1.1 三次真理之源切换的结论
 
@@ -215,16 +231,21 @@ Go 侧大量行为的默认值**藏在 struct tag 里**而不是 yaml 里；反�
 
 ### 3.4 proto 是**复制粘贴**，不是翻译（2026-10-23 实测）
 
-RAG 侧 6 个 `*.proto` **全部从 Go 侧 `proto/*.proto` 复制而来**，
+RAG 侧 10 个 `*.proto` **全部从 Go 侧 `proto/*.proto` 复制而来**，
 既不是重写也不是翻译。改动**严格限定在 option 块与空白层面**：
 
 | 改动项 | 覆盖 | 性质 |
 |---|---|---|
-| 删 `option go_package` | ✅ 6/6 | 表达层（Go 专用，Java 不消费） |
-| 加 `option java_package` + `java_multiple_files = true` | ✅ 6/6 | 表达层（生成代码落包必需） |
-| 缩进风格统一（`admin` / `like` 由 4 空格改 2 空格）、末尾空行 | ✅ 6/6 | 表达层 |
+| 删 `option go_package` | ✅ 10/10 | 表达层（Go 专用，Java 不消费） |
+| 加 `option java_package` + `java_multiple_files = true` | ✅ 10/10 | 表达层（生成代码落包必需） |
+| 缩进风格统一（`admin` / `like` / `comment` 由 4 空格改 2 空格）、首尾空行 | ✅ 10/10 | 表达层 |
 | `user.proto` → RAG 侧改名 `users.proto`，并加一段解释性注释 | 仅 user | 表达层 |
-| **message 名 / 字段名 / 字段号 / 类型 / 枚举值** | **✅ 6/6 逐条一致** | **行为层（wire contract）** |
+| **message 名 / 字段名 / 字段号 / 类型 / 枚举值** | **✅ 10/10 逐条一致** | **行为层（wire contract）** |
+
+⚠️ **`comment` / `favorite` / `follow` / `task` 四项于 2026-10-23 12:25 补齐**：
+这 4 个 `*-proto` 模块此前**只有 `pom.xml`**（`<dependencies>` 与 `<build>` 全空 ⇒ 从未生成过任何代码，产出空 jar）。
+本次除拷入 `.proto` 外，还接上了与 `article-proto` / `message-proto` **逐行同构**的 protoc 插件段 ——
+否则放进 `.proto` 也没有插件消费，等于没放（§3.3）。实测产出 **88 个 java + 4 个 `*Grpc`**，落包 `com/rag/<域>/<域>/proto`。
 
 ⇒ **实测数据、回归网状态与待办** ⇒ [`docs/DRIFT/_cross/proto-verification.md`](docs/DRIFT/_cross/proto-verification.md)
 
@@ -234,16 +255,22 @@ RAG 侧 6 个 `*.proto` **全部从 Go 侧 `proto/*.proto` 复制而来**，
    字段号是否被某处硬编码覆盖、Jackson/protobuf 配置差异）。
 2. **不外推到 api / rpc 组件**。proto 一致 **推不出** wire 层行为一致；
    §0 的组件状态一律以各域台账为准。
-3. **不覆盖范围外的 6 个 proto**（见上表第三档）——它们**不是待办**。
+3. **不覆盖范围外的 3 个 proto**（`knowledge` / `points` / `security`）——它们**不是待办**。
 
-### 3.5 组件级审查范围（2026-10-23 用户定 · 23 个组件）
+### 3.5 组件级审查范围（2026-10-23 用户定 · 12:25 扩到 38 个组件）
 
 **审查粒度 = 组件级**，不是微服务级、也不是 api/rpc 二分。**common / proto 不是「可选项」**（同域对照的默认公理：
 共享 DTO、错误码契约、wire 契约）—— 少审它们 = **拿一面没人校过的镜子照自己**，与 §3.1 禁止的
 「拿现有 RAG 代码当对照基准」同源。
 
-**范围内组件清单（权威，审查任务按此拆分）** —— 6 微服务 / **23 个组件** = 6 api + 6 rpc + 5 common + 6 proto：
-`article` 4 · `hot` 4 · `like` 4 · `message` 4 · `users` 7（含 `user`+`admin` 两套 api/rpc/proto）。
+**范围内组件清单（权威，审查任务按此拆分）** —— 10 微服务 / **38 个组件** = 10 api + 10 rpc + 8 common + 10 proto：
+`article` 4 · `hot` 4 · `like` 4 · `message` 4 · `users` 7（含 `user`+`admin` 两套 api/rpc/proto）·
+`comment` 4 · `favorite` 4 · `follow` 4 · `task` 3（**无 `-common`**，Go 侧同样没有，不是遗漏）。
+
+⚠️ **新纳入 4 域的完成度极不均衡**（2026-10-23 12:25 实测）：
+**只有 proto 层是真货**（10 个 `*.proto` 已复制并验证产出代码）；
+`comment`/`favorite`/`follow`/`task` 的 **4 api + 4 rpc + 3 common 共 11 个组件全是只有 `pom.xml` 的空壳**，
+0 行 Java ⇒ 这 11 个组件**无可对照对象**，审查它们之前得先有人把它们实现出来。
 ⇒ 逐组件台账入口见 [`docs/DRIFT/_INDEX.md`](docs/DRIFT/_INDEX.md)。
 
 **为什么不能退到微服务粒度**：域粒度下 `hot`（rpc 逐字节一致 + api 仅源码级对照）与

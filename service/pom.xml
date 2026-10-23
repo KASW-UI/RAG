@@ -34,5 +34,9 @@
         <module>hot</module>
         <module>message</module>
         <module>like</module>
+        <module>task</module>
+        <module>follow</module>
+        <module>favorite</module>
+        <module>comment</module>
     </modules>
 </project>

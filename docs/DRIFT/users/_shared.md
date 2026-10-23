@@ -704,3 +704,78 @@ RAG `3047ms/4455ms`，量级一致、可复现，**但以复测值为准**：
 > ⚠️ E-4 的经历给 E-2 留了一条现成的做法：**不要只做 HTTP 层**，本轮的 B-1 正是
 > 「HTTP 全绿 + gRPC 链路从未执行」才暴露出来的。
 
+
+---
+
+<!-- @verify 2026-10-23 第三轮：DRIFT-USERRPC-V-004 时间列类型 —— 已修 users_user 半边；users_user_avatar_history 半边仍 OPEN -->
+
+## `users_user` 时间列 `TIMESTAMP` ⇄ `timestamptz`：`users_user` 半边**已修**（2026-10-23）
+
+> **用户已拍板**：照改（存量数据无所谓 —— 只有测试种子），且 DDL + 两个实体 + 格式化点**同一提交**做完。
+> 下文「改动三部分」里**第 3 部分经复核是错的**，已更正；实际只落地了第 1、2 部分。
+
+### 落地内容（已验证）
+
+| # | 改了什么 | 文件 | 守门 |
+|---|---|---|---|
+| 1 | `CREATE TABLE` 里两列改 `TIMESTAMPTZ` + 幂等 `SET TIME ZONE 'UTC'` 包裹的 `ALTER … USING … AT TIME ZONE 'UTC'` + `RESET TIME ZONE` | `users-common/src/main/resources/db/01_create_user.sql:42-43` / `:101-106` | `UserRpcUsersUserTimestamptzParityTest` |
+| 2 | 两个实体 4 个字段 `LocalDateTime` ⇒ `OffsetDateTime` | `user-rpc/.../domain/UserEntity.java`、`admin-rpc/.../domain/UserEntity.java` | 同上（反射断言声明类型） |
+
+**测试**：admin-rpc **84/0**、user-rpc **102/0**（新增 6 条真 PG 用例）。
+**变异测试已做**：删掉 DDL 里的 `SET TIME ZONE 'UTC'` ⇒
+`replayUnderNonUtcSessionTimeZone_doesNotShiftStoredInstants` 立刻红，
+`2020-01-01T08:00:00Z` 实际变成 `2020-01-01T00:00:00Z`（差 8 小时 = Asia/Shanghai 偏移）⇒ **守门非假绿**。
+
+### ⚠️ 两个「本以为显然、实际踩到」的坑（详见 [`docs/Pitfalls/_cross/fix-round-lessons.md`](../../Pitfalls/_cross/fix-round-lessons.md)）
+
+1. **裸 `ALTER` 在无账本重放模型下会累积损坏数据。**
+   `SchemaInitializer` 每次启动原样重放 DDL，而 `timestamptz AT TIME ZONE 'UTC'`
+   对**已是 timestamptz** 的列**不恒等**（先压成 UTC 墙钟，再按会话 TZ 铸回）
+   ⇒ 会话时区非 UTC 时每启动一次偏移一次，永不收敛。
+   **「照抄同文件 R3 三条的写法」在此不成立** —— `varchar→text` 是超集、不重新解释取值，
+   `timestamp→timestamptz` 会重新解释。**外形像 ≠ 语义像。**
+   修法是把会话时区钉成 UTC 再转，转完 `RESET`，让首迁与重放两条路径都恒等。
+2. **条件守卫不能用 `DO $$ … $$`。**
+   `SchemaInitializer` 用 Spring `ScriptUtils` 切分语句（分隔符 `;`），
+   而 spring-jdbc 7.0.9 的 `ScriptUtils` **没有 PostgreSQL 美元引号支持**
+   （反编译 `ScriptUtils.class` 常量池中不存在 `$$`）⇒ 块内分号照样被切断，
+   DDL 语法错、`applyAll` 抛异常 ⇒ **user-rpc 与 admin-rpc 双双起不来**（实测 34 个测试红在启动阶段）。
+
+### 🔴 台账原文第 3 部分「格式化点」是错的，已更正
+
+原记录（`_shared.md` 旧版第 3 行）写：
+
+> 3 | 格式化点改发带偏移的 RFC3339 | 主代码实测只有 3 处：`AvatarDomainService`(2)、`user-api/UserApiSupport`(1)
+
+**复核结论：两处都归错了。**
+
+| 原记的「格式化点」 | 实际 | 证据 |
+|---|---|---|
+| `AvatarDomainService.fromModel:71-74` | 格式化的是 **`UserAvatarHistoryEntity.createTime`**，数据来自 **`users_user_avatar_history`**（`02_create_user_avatar_history.sql:30-31`，**仍是 `TIMESTAMP`**），**不是 `users_user`** | `AvatarDomainService.java:63` 形参类型即 `UserAvatarHistoryEntity` |
+| `user-api/UserApiSupport:69` | **不是格式化点**，是 proto string → DTO string 的原样透传 | `dto.setCreateTime(proto.getCreateTime() == null ? "" : proto.getCreateTime())` |
+
+⇒ **`users_user` 的时间值在 RAG 侧根本没有任何格式化点**，不进入任何 proto/DTO ⇒
+本轮改动对 wire **无可观察差异**，是**纯 schema / 类型层对齐**。
+⇒ 「3 处格式化」实际属于 **`users_user_avatar_history` 那条线**，属另一份 DDL 文件、另一个实体。
+
+### 🔴 仍然 OPEN：V-004 的**可观察半边**在 `users_user_avatar_history`
+
+`docs/DRIFT/users/user/rpc.md` 的 `CASE-27` / `OBSERVABLE DIFFERENCE`（客户端可见字段
+`AvatarHistoryItem.create_time`）指向的是**头像历史表**，本次**未修**：
+
+- `users-common/.../02_create_user_avatar_history.sql:30-31` 仍是 `TIMESTAMP`；
+- `UserAvatarHistoryEntity.java:47,50` 仍是 `LocalDateTime`；
+- `AvatarDomainService.java:74` 仍 `atOffset(ZoneOffset.UTC)` ⇒ wire 上恒 `Z`，Go 侧带偏移；
+- 叠加 `user-rpc/application.yaml:13` 的 JDBC URL **未钉** `TimeZone`（Go 侧 `db.go:21` 钉 `Asia/Shanghai`）。
+
+⇒ **同根因（Go `time.Time` 无 type tag ⇒ `timestamptz`）还剩 3 张表**：
+`users_user_avatar_history`、`admin_admin`（`03_create_admin.sql:55-56`）、
+`admin_invite`（`04_create_admin_invite.sql:37-41`，4 个时间列含 `expires_at`/`used_at`）。
+⚠️ **未单独评估过**，不要照本轮的改法批量套用 —— 每张表的 wire 可见性与时区敏感点都不同。
+
+### 跨组件影响面提醒
+
+`users_user` 由 `user-rpc` 与 `admin-rpc` **共同建表**（AGENTS.md §6.3 问题 1），
+且共用 `users-common` 的同一份 DDL ⇒ 改这份 DDL **同时影响两个组件的启动**。
+两边的 `AdminSchemaBootstrap` / `UserSchemaBootstrap` 都会幂等重放它 ——
+本轮实测两个组件的真 PG 用例均已跑通（含上述重放守门）。

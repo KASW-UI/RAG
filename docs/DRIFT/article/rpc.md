@@ -626,3 +626,75 @@ Java 侧对应两处是**原生 `@Update` 注解**（`ArticleMapper#incrViewCoun
 
 article-rpc 当前：`mvn -o -pl service/article/article-rpc -am test` ⇒
 **105 tests / 0 failures / 0 errors**，BUILD SUCCESS。
+
+---
+
+<!-- @fix 2026-10-23 第二轮：DRIFT-ARTICLE-RPC-004 复核结论 = 撤销，改为「台账描述有误」 -->
+
+## 2026-10-23 第二轮：DRIFT-ARTICLE-RPC-004 **不修** —— 复核发现台账的 Go 侧描述有误
+
+> 上一轮列出的 4 条 HIGH 里，本条是唯一<b>没有照台账修</b>的。
+> 原因：复核 Go 侧时发现台账写的「Go 会报错、RAG 静默修改」**不成立**，
+> **照台账修反而会制造一条新漂移**。此处保留完整复核证据，供下个 agent 不必重走一遍。
+
+### 台账原文的断言（❌ 经复核不成立）
+
+> 「GORM `Save` 在 0 行时会退化成 `Create` ⇒ **撞主键 ⇒ 整个事务失败并报错**」
+
+### 复核结果（已验到消费点）
+
+**① 软删过滤确实加在 UPDATE 上**（这部分台账是对的）：
+`gorm@v1.31.2/soft_delete.go:76-96` `SoftDeleteQueryClause.ModifyStatement`
+在 `!stmt.Unscoped` 时追加 `WHERE deleted_at = <ZeroValue>`，
+经 `:98-100 UpdateClauses` 挂到 UPDATE。
+
+**② 0 行之后的回落是 `ON CONFLICT DO UPDATE`，不是报错**：
+`finisher_api.go:117-121`
+```go
+updateTx := tx.callbacks.Update().Execute(...)
+if updateTx.Error == nil && updateTx.RowsAffected == 0 && !updateTx.DryRun && !selectedUpdate {
+    return tx.Session(&Session{SkipHooks: true}).Clauses(clause.OnConflict{UpdateAll: true}).Create(value)
+}
+```
+⇒ 行**物理存在**（软删只是加了列）⇒ 冲突 ⇒ `DO UPDATE` ⇒ **不报错**。
+
+**③ `deleted_at` 会被写回，且写回的是同一个非零值**：
+`callbacks/create.go:366-402` 逐列判定跳过的条件是
+`PrimaryKey` 或（`HasDefaultValue && DefaultValueInterface==nil && DefaultValue != "NULL"`）或 `AutoCreateTime > 0`。
+`DeletedAt` 在 `internal/model/article.go:32` 只标了 `gorm:"index"`，**无 default** ⇒ `HasDefaultValue=false`
+⇒ <b>不被跳过</b>；且它不是 AutoCreateTime/AutoUpdateTime 字段 ⇒ 进入 `DO UPDATE SET deleted_at = excluded.deleted_at`。
+而 `excluded.deleted_at` 来自 `model/article.go:92` 的 `FindOneUnscoped`（**Unscoped 读，能读到 deleted_at**）⇒ 同一个非零值。
+
+### 两边净行为的对照（修正后）
+
+| | Go `Save` | RAG `updateById` |
+|---|---|---|
+| UPDATE 带 `deleted_at IS NULL` | ✅ | ❌ |
+| 软删行影响行数 | 0（走回落） | 1 |
+| 其他列是否被覆盖 | **是**（`DO UPDATE SET`） | **是** |
+| `deleted_at` 最终值 | 原非零值（不变） | 不触碰（不变） |
+| **是否报错** | **否** | **否** |
+
+⇒ **两侧在可观察层面基本一致**：都静默覆盖软删行的其他列、都不复活、都不报错。
+
+### 为什么不修
+
+若按台账给 `updateById` 加 `deleted_at IS NULL`：
+MP 会返回「影响 0 行」，而调用方<b>不检查 RowsAffected</b>（8 处调用点均未检查）
+⇒ 变成<b>完全不写</b>，而 Go 是<b>写了</b> ⇒ **这会把一个不存在的缺陷修成一个真实的新漂移**。
+
+### ⚠️ 真正存在的相邻差异（另立条目，未修）
+
+Go 的 `Save` 走 `finisher_api.go:113-114` 的 `Selects = append(Selects, "*")`
+——「update 时使用<b>全部</b>字段，含零值字段」；
+MP `updateById` 默认 `updateStrategy = NOT_NULL`，<b>只写非 null 字段</b>。
+⇒ 一个「把某列显式置为零值」的更新，两侧结果不同。
+**这才是真实差异**，但它与 004 描述的不是同一件事，且需逐调用点核对 Go 是否真的用 `Save`（部分路径用 `Updates(map)`）⇒ 未展开。
+
+### 台账维护教训
+
+本条台账写作时，Go 侧标注的是「**未实跑**（归入 U-4）」——
+即**结论本身是推断**，却被写成了 `SEMANTIC MISMATCH` 并进入 §0 计数。
+⇒ 与 AGENTS.md §3.1「不要拿未验证的结论当基准」同源：
+**推断级证据的条目必须在标题里标注**，否则下一个 agent 会照着它去「修」，
+而照着错误结论修比不修更糟。

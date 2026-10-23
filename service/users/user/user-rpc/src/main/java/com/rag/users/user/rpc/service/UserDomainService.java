@@ -150,6 +150,35 @@ public class UserDomainService {
             try {
                 checkDeadline();
                 user = userMapper.findOneByUserName(req.getUsername());
+                // 🔴 DRIFT-USERRPC-V-001：status 为 NULL 视同 Go 的**扫描失败**，不是「未封禁」。
+                //
+                // Go 出处（声明点 + 消费点）：
+                //   声明点  internal/model/data_model.go:11
+                //           `Status int64 gorm:"column:status;default:0"` —— **无 not null**
+                //   消费点  gorm@v1.31.2/scan.go:153  `db.AddError(rows.Scan(values...))`
+                //           → database/sql 对「NULL → int64」返回 unsupported 错误
+                //           → internal/model/user.go:28 `return nil, err`（非 ErrRecordNotFound）
+                //           → loginlogic.go:53-57 db_error 支 ⇒ codes.Internal "DB查询失败"
+                //
+                // ⚠️ **抛在 try 内部是有意的**：这样它会落进下面的 catch(Exception)，
+                // 从而**同时**拿到 metrics.getLoginDbError() + span.recordException
+                // + ErrorDbSelect 业务日志 + INTERNAL "DB查询失败" —— 与 Go 的四条副作用逐条对齐。
+                // 若抛 StatusRuntimeException，会先被 catch(StatusRuntimeException) 接走原样重抛，
+                // 四条副作用全部丢掉，且 status=1/2 那两个分支也会被污染。
+                //
+                // ⚠️ **绝不能 fallback 成「当作没封禁」** —— 修复前的
+                // `if (user.getStatus() != null && user.getStatus() == 1L)` 正是这么写的：
+                // status=NULL ⇒ 跳过封禁检查 ⇒ 直接走 W4 返回登录成功 ⇒ **被封禁用户可登录**，
+                // 方向是 **fail-open**。而本文件 getUser 处就写着：
+                // 「绝不 fallback 成 0 —— status=0 意为活跃，把 NULL 默认成活跃是朝错误方向的 fail-open」
+                // ⇒ 修复前**同一个字段在两条路径上朝两个方向**，自相矛盾。
+                //
+                // ⚠️ 放在 W2 密码比对**之前**：Go 的失败发生在 mapper 层，根本走不到密码校验，
+                // 所以 metric、错误文案、是否泄漏「用户名是否存在」都必须与 Go 一致。
+                if (user.getStatus() == null) {
+                    throw new IllegalStateException(
+                            "users_user.status is NULL for username=" + req.getUsername());
+                }
             } catch (NotFoundException e) {
                 // 用户不存在 → Status=1（D-002：和密码错共用同一个状态码）
                 metrics.getLoginUserNotFound().increment();
@@ -187,6 +216,10 @@ public class UserDomainService {
             }
 
             // W3 封禁检查
+            // ⚠️ 这里的 `!= null` 在此**已恒为真**（上面 try 内已把 NULL 当作扫描失败抛出）。
+            // 保留它只是因为删除属无行为变更的清理、徒增 review 负担；
+            // 但**不要**再把它读成「status 为 NULL 就当没封禁」——
+            // 那正是 DRIFT-USERRPC-V-001 修复前的 fail-open 写法。
             if (user.getStatus() != null && user.getStatus() == 1L) {
                 // 用户被封禁 → Status=2（无 metrics，与 Go 端一致）
                 // 注：Go 字符串 username 前有空格、username 后有两个空格（typo），保持原样

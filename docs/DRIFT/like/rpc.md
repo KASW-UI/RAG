@@ -854,3 +854,82 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 - ⚠️ **本组件的验证无法闭环整条事实链路**（§1.1）：Java 侧投递侧 + 权威读侧仍是骨架，
   且真 DC 接收服务不在任何仓内 ⇒ U9 / U10 必须带着「链路末端未覆盖」这一前提被下游引用。
 
+
+---
+
+<!-- @fix 2026-10-23 第三轮：DRIFT-LIKE-017 已修（6 项，不止台账列的 4 项） -->
+
+## 2026-10-23 第三轮：DRIFT-LIKE-017 已修
+
+> like-rpc 当前：**64 tests / 0 failures / 0 errors**（含新类 8 条），BUILD SUCCESS。
+> 全部在**真 PG** 上验证（Testcontainers `postgres:16-alpine`）。
+
+### 修复方式：新增 V6，**不改 V4**
+
+like-rpc **仍用 Flyway**（独立账本 `flyway_schema_history_like`，AGENTS.md §6.3 问题 4）。
+改已发布的 V4 会导致 **checksum mismatch ⇒ 启动失败**。
+users 域虽已废弃 Flyway 改幂等重放，但 **like-rpc 没有** —— 两条机制不能混用，只能追加版本。
+⇒ `V6__align_like_domain_fact_outbox_with_go.sql`，全部语句幂等（`IF NOT EXISTS` / 存在性判定）。
+
+### ① 列类型 `BIGINT` ⇒ `integer`（核心，且台账自身的纠错是对的）
+
+Go 的 `DeliveryStatus int32` / `RetryCount int32`（`internal/model/domain_fact.go:21-22`）
+**无 `type` tag**，要验到<b>两个消费点串起来</b>才算结论：
+
+| 消费点 | 内容 |
+|---|---|
+| `gorm@v1.31.2/schema/field.go:330-341` | `if field.Size == 0 { … case reflect.Int32: field.Size = 32 }` |
+| `gorm.io/driver/postgres@v1.6.0/postgres.go:231-234` | `case size <= 32: return "integer"` |
+
+⇒ AutoMigrate 建出 **`integer`**。
+
+> ⚠️ **V4 原注释「GORM 对『无 size 的整数』统一取 bigint」确实是错的**（错因：只看了
+> `field.Size` 默认分支的 `Int64/Int` 那一行，漏了 `Int32` 的独立分支）。
+>
+> ⚠️ **另一处易误判**：Go 的 `003_like_fact_delivery.sql` 里写的是
+> `ADD COLUMN IF NOT EXISTS delivery_status smallint / retry_count integer`，
+> 但 **AutoMigrate 已建好列 ⇒ 整条 ALTER 是空操作**，Go 的实际类型始终是 `integer`。
+
+**连带收益**：RAG 的 `LikeDomainFactOutboxEntity` 本来就用 `int`（对应 Go 的 int32），
+改完后**实体类型与 DDL 也对齐了**（此前是 DDL=BIGINT / 实体=int 的错配）。
+
+### ②③④⑤⑥ 台账<b>没列全</b>的 5 项
+
+| # | 对象 | Go 出处 | 说明 |
+|---|---|---|---|
+| ② | `like_new_fact_has_dc_wire` CHECK | `002_like_dc_wire.sql` | `NOT VALID` **逐字照抄** —— 它放行存量行但照常拦新 INSERT；改成 `VALID` 会在存量行不满足时迁移失败，那是 Go 没有的行为 |
+| ③ | `idx_like_legacy_fact_subject_target` | `002` | 部分索引 `WHERE delivery_envelope IS NULL`，RAG 侧**此前完全没有** |
+| ④ | `idx_like_fact_delivery` | `003` | 复合 `(delivery_status, created_at, event_id)`，是 `FOR UPDATE SKIP LOCKED` + `ORDER BY created_at` 所需；**单列那条（对应 Go 的 `index` tag）保留不删** |
+| ⑤ | `like_domain_fact_identity_immutable` 触发器 | `003` | `BEFORE UPDATE`（**非** constraint trigger）+ 函数体逐字照抄 |
+| ⑥ | `like_fact_stream_version_range` CHECK | `002` | `version BETWEEN 1 AND 2^53-1` —— version 要进 JSON 信封，超界即静默丢精度 |
+
+### 加约束前的两项安全性核对（不做就是在赌）
+
+1. **⑤ 触发器会不会打死生产写路径**：`LikeDomainFactOutboxMapper` 三处 UPDATE 只写
+   `delivery_status` / `retry_count` / `technical_*` / `delivered_at`，
+   **没有一列**落在不可变清单（`event_id`/`event_type`/`payload`/`aggregate_id`/`fact_version`/`delivery_envelope`）里
+   ⇒ 不会被误伤。
+2. **② CHECK 会不会拒绝合法写入**：`LikeDomainFactService:157-158` 调 `insertFact` 时
+   `streamId` / `factVersion` / `envelopeJson` **三者都非 null** ⇒ 不会打脸。
+
+### 证据：`LikeDomainFactSchemaParityTest`（8/8，真 PG）
+
+**查 pg_catalog 而非读 DDL 文件** —— schema 类断言只有查真库才算数
+（读脚本只能证明「写了什么」，读实体只能证明「声明了什么」）。
+
+- `deliveryColumnsAreIntegerNotBigint` —— `information_schema.columns` 断言 2 列是 `integer`
+- `otherColumnTypesUnchanged` —— **反向对照**：`technical_offset`/`fact_version` 必须仍是 `bigint`
+  （`int64 ⇒ Size=64`），防止把「改类型」做成无差别降级
+- `newFactMustCarryDcWire` —— CHECK **真的触发**：三件套齐全通过，缺 `delivery_envelope` / 缺 `fact_version` 各自被拒
+- `legacyPartialIndexExists` / `deliveryCompositeIndexExists` / `singleColumnDeliveryIndexStillPresent`
+- `envelopeIsImmutableButDeliveryMetadataIsNot` —— 触发器**双向**验证：
+  改 `payload` / `fact_version` 被拒，**改投递元数据必须放行**
+  （只测「被拒」会漏掉「误伤生产写路径」这个更危险的方向）
+- `factStreamVersionRangeEnforced` —— `version=0` 与 `2^53` 各自被拒
+
+### 过程中踩到并已记录的坑
+
+- ⚠️ **jsonb 列必须显式 `CAST(? AS jsonb)`**：pgjdbc 把 Java `String` 默认绑成
+  `character varying`，jsonb 列直接拒收。
+  这与 admin-rpc 的 `extra_info` 是**同一个坑**（那边已有注释记录）——
+  说明「jsonb + JdbcTemplate 参数」这个组合在本项目已踩过两次，值得进 §3.3 的清单。

@@ -80,6 +80,10 @@ public interface ConversationMessageMapper extends BaseMapper<ConversationMessag
         w.eq(ConversationMessageEntity::getRecipientId, recipientId)
                 .eq(ConversationMessageEntity::getRecipientRole, recipientRole)
                 .eq(ConversationMessageEntity::isRead, false)
+                // ⚠️ 形如 `E::isRead` 的方法引用保持原样 —— DRIFT-MSG-V-017 的修法在**实体侧**
+                // （字段 isRead → read + @TableField("is_read")），不在这里改名。
+                // 改名的诱惑很大，但那样就偏离了 NotificationEntity 的既有形态，
+                // 而两份实体同款才是可读性来源。
                 .set(ConversationMessageEntity::isRead, true)
                 .set(ConversationMessageEntity::getReadAt, readAt);
         return update(null, w);
@@ -128,12 +132,28 @@ public interface ConversationMessageMapper extends BaseMapper<ConversationMessag
         LambdaQueryWrapper<ConversationMessageEntity> w = new LambdaQueryWrapper<>();
         w.eq(ConversationMessageEntity::getConversationId, conversationId);
         w.orderByAsc(ConversationMessageEntity::getCreatedAt);
-        w.last("LIMIT " + limit + " OFFSET " + offset);
+        // DRIFT-MSG-V-014：Go 出处 internal/model/message.go:164-168（同上两处）。
+        String tail = GoStylePagination.limitOffset(limit, offset);
+        if (!tail.isEmpty()) {
+            w.last(tail);
+        }
         return selectList(w);
     }
 
     /**
      * 对应 Go 端 createConversationWithMessageTx / createOrSendMessageTx 的 message INSERT。
+     *
+     * <p>🔴 {@code #{read}} 不是笔误（2026-10-23，DRIFT-MSG-V-017 的连带修复）：
+     * 实体字段已从 {@code isRead} 改名为 {@code read}，而<b>手写 {@code @Insert} 的
+     * {@code #{…}} 走 OGNL，按 JavaBeans 规则解析属性名</b>
+     * —— {@code isRead()} 这个 getter 对应的是属性 {@code read}，属性 {@code isRead} 并不存在。
+     * 保留 {@code #{isRead}} 的后果是运行期抛
+     * {@code ReflectionException: There is no getter for property named 'isRead'}，
+     * 且<b>编译与启动都发现不了</b>。
+     *
+     * <p>⇒ 与 {@link #markAllReadByRecipient} 对照：那条走 MyBatis-Plus 的 lambda，
+     * 由 {@code TableInfo.propertyMap} 反查属性名；这条走手写 OGNL，
+     * <b>两套解析规则，必须分别验证</b> —— 改一处不保证另一处还对。
      */
     @Insert("""
             INSERT INTO message_conversation_message (
@@ -141,7 +161,7 @@ public interface ConversationMessageMapper extends BaseMapper<ConversationMessag
               content, is_read, read_at, created_at
             ) VALUES (
               #{id}, #{conversationId}, #{senderId}, #{senderRole}, #{recipientId}, #{recipientRole},
-              #{content}, #{isRead}, #{readAt}, #{createdAt}
+              #{content}, #{read}, #{readAt}, #{createdAt}
             )
             """)
     int insertMsg(com.rag.message.message.rpc.domain.ConversationMessageEntity msg);

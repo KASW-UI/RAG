@@ -18,6 +18,8 @@
 |---|---|
 | [`_cross/signed-deviations.md`](_cross/signed-deviations.md) | 签字偏离主表：HTTP path / HTTP method / 表名（Go `users`·`admins`·`admin_invites`·`user_avatar_history` ↔ RAG `users_user`·`admin_admin`·`admin_invite`·`users_user_avatar_history`），含「造阻塞的脚本必须先证明锁真的加上了」教训 |
 | [`common/_signed-deviations.md`](common/_signed-deviations.md) | `service/common` 逐行审计产出的 20 项偏差中**修复后仍存在、无法靠改代码消除**的 5 条（含 A-1 等价域收窄等） |
+| 🆕 [`comment/proto.md`](comment/proto.md) | `comment` 域 proto `package` 由 Go 的遗留名 `pb` 归一为 `comment`（**SD-2026-10-23-04**）—— gRPC 方法路径 `/comment.CommentService/*` vs Go 的 `/pb.CommentService/*`；当前无跨栈调用故无实际影响，实现该域时须显式处理 |
+| 🆕 [`like/proto.md`](like/proto.md) | `like` 域 proto `package` 由 `pb` 归一为 `like`（**SD-2026-10-23-05**）—— 同类归一，但**该域已实现**：仓内 api↔rpc 自洽（108 例测试全绿，含真实 gRPC 往返）；仅跨栈互调会失效 |
 
 ## 待填（空文件即坑位）
 
@@ -43,3 +45,25 @@
    `message-api` 的 `affected`（Go `int64` 无 `,string` vs RAG 输出字符串）。
    **三条共性：RAG 做了更严/更安全的那一侧，不是忘了做。**
    ⇒ 对拍看到这三条变红，先确认是不是这三条，**不要当新回归去「修」**。
+
+## SD-2026-10-23-04（2026-10-23 12:25 范围扩展时新增）
+
+> 详见 [`comment/proto.md`](comment/proto.md)。
+
+⚠️ **`comment` 域 proto `package` 归一为 `comment`**（Go 侧为遗留名 `pb`）——
+   **本条共性与 01/02/03 不同：不是「RAG 更严/更安全」，而是表达层归一（proto package / java_package / 模块名 / 域名 四者一致）**。
+   代价是 **gRPC 方法路径前缀不同**（`/comment.CommentService/*` vs `/pb.CommentService/*`）——
+   **wire 层可见**，但当前 `comment` 域 api / rpc 均为空壳、无跨栈调用 ⇒ **现在无实际影响**。
+   ⚠️ **实现该域时必须显式处理**（改回 `pb`，或加服务名前缀映射），否则双侧活体对拍会 `UNIMPLEMENTED`。
+
+## SD-2026-10-23-05（2026-10-23 用户指令追加：proto package 全域归一）
+
+> 详见 [`like/proto.md`](like/proto.md)。
+
+⚠️ **`like` 域 proto `package` 由 `pb` 归一为 `like`**（同 SD-04 的理由）。
+   **该域已实现且做过双侧活体对拍**，但实测**影响面为零**：
+   ① 仓内 `like-api` ⇄ `like-rpc` 是同源再生成 ⇒ 自洽；
+   ② 56 条双侧活体对拍走的是 **HTTP 输入解释/响应字节**（Go 侧探针明确「不含业务逻辑（无 like-rpc）」）⇒ **不经过 gRPC 服务名**；
+   ③ RAG 代码里 `pb.` 硬编码**零命中**（唯二命中是描述 Go 侧命名的 javadoc）。
+   ⇒ 改包名后实测 **108 例测试全绿**（`like-api` 62 + `like-rpc` 46，含**真实 in-process gRPC 往返** 3 例）。
+   ⚠️ **唯一失效面**：跨栈 gRPC 互调（Go like-rpc ⇄ RAG like-rpc）—— 当前不存在这种调用。

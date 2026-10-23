@@ -540,6 +540,23 @@ RAG 多一层 properties。**该条不重开。**
 - **同构先例**：`DRIFT-MSG-010` 是完全同一条（message 域），可接受性同样 `UNKNOWN`。
 - **可接受性**: **UNKNOWN** —— 见 `UNRESOLVED-USERRPC-002`（JVM / PG 会话时区未实测）。
 
+#### FIX（2026-10-23，部分）——`users_user` 半边已修，**`users_user_avatar_history` 半边仍 OPEN**
+
+| 半边 | 状态 | 说明 |
+|---|---|---|
+| `users_user.create_time/update_time`（`01_create_user.sql:42-43`） | ✅ **已修** | 列改 `TIMESTAMPTZ`；两个实体 4 字段改 `OffsetDateTime`。守门 `UserRpcUsersUserTimestamptzParityTest`（6 条，真 PG），变异测试已证伪。admin-rpc **84/0**、user-rpc **102/0** |
+| `users_user_avatar_history.create_time/update_time`（`02_create_user_avatar_history.sql:30-31`） | 🔴 **未修** | 这才是本条 **OBSERVABLE** 的那一半（`CASE-27`）。`UserAvatarHistoryEntity:47,50` 仍 `LocalDateTime`，`AvatarDomainService:74` 仍 `atOffset(UTC)` ⇒ wire 恒 `Z`；叠加 JDBC URL 未钉 `TimeZone`（Go `db.go:21` 钉 `Asia/Shanghai`） |
+
+⚠️ **本条原标题「4 个时间列」口径已更正**：那 4 处是 **两份 Go model 各 2 个字段**
+（`user/rpc/.../data_model.go:14-15` 与 `admin/rpc/.../data_model.go:12-13`），
+**指向同一张表 `users_user`**，不是 4 张表 4 列。
+
+⚠️ **原台账「改动三部分」的第 3 部分（3 处格式化）经复核归因错误**，详见
+[`_shared.md` 的同名小节](_shared.md)：`AvatarDomainService` 格式化的是**头像历史表**的实体，
+`UserApiSupport:69` 只是 proto 字符串透传、根本不是格式化点。
+⇒ **`users_user` 的时间值不进任何 wire 字段**，本轮改动**无可观察差异**，
+是纯 schema / 类型层对齐。**别把「已修」读成「wire 已对齐」。**
+
 ### DRIFT-USERRPC-V-005 `UpdateUser` 对**显式空 map** 的分支不同
 
 - **Category**: Input Interpretation
@@ -718,3 +735,76 @@ SEMANTICALLY EQUIVALENT（全部可达路径） + 7 项 OBSERVABLE DIFFERENCE
 ❌ **双侧活体对拍 = 缺**。⇒ 本文件里任何 `EQUIVALENT` 结论的强度都是
 「**逐行读 Go 消费点得出**，RAG 单侧真 PG 测试只作旁证」，
 **不构成 spec §1 意义上的「双侧同时跑的探针」**。这一点不得在下游被读成「已闭环」。
+
+---
+
+<!-- @fix 2026-10-23 第二轮：DRIFT-USERRPC-V-001 已修（根因比台账更深） -->
+
+## 2026-10-23 第二轮：DRIFT-USERRPC-V-001 已修
+
+> user-rpc 当前：**96 tests / 0 failures / 0 errors**，BUILD SUCCESS（原 91 + 新 5）。
+
+### 🔴 根因比台账记的更深一层（台账只写到分支，没写到根因）
+
+台账记的是「`UserDomainService:190` 的 `!= null && == 1L` 让 NULL 跳过封禁检查」。
+实测发现：**即使删掉那个 `!= null`，判据仍然不会触发**。
+
+| 层 | 事实 |
+|---|---|
+| 台账记录的表层缺陷 | `if (user.getStatus() != null && user.getStatus() == 1L)` ⇒ NULL 时跳过封禁检查 |
+| **实际根因** | `UserEntity.status` 声明为 `private Long status = 0L;` |
+| 机制 | MyBatis `DefaultResultSetHandler` 在 `value == null && !callSettersOnNulls` 时**跳过 setter**（`callSettersOnNulls` 默认 `false`）⇒ 字段保持初始化值 |
+| 结果 | `status IS NULL` 读出来是 **`0L`**，不是 `null` ⇒ `0 != 1` ⇒ 判定「未封禁」⇒ **放行** |
+
+⇒ 台账里 `getUser` 处那段「status=0 意为活跃，把 NULL 默认成活跃是朝错误方向的 fail-open」
+的注释，**当时是死代码**：那一段的 `if (user.getStatus() == null)` 同样永远不会触发。
+**同一个字段、两条路径、朝两个方向** —— 这条自相矛盾此前无人发现。
+
+### Go 侧依据（声明点 + 消费点）
+
+- 声明点：`service/user/user/rpc/internal/model/data_model.go:11`
+  `Status int64 `gorm:"column:status;default:0"`` —— <b>值类型 + 无 not null</b>
+- 消费点：`gorm@v1.31.2/scan.go:153` `db.AddError(rows.Scan(values...))`
+  → `database/sql` 对「NULL → int64」返回 unsupported 错误
+  → `internal/model/user.go:28` `return nil, err`（<b>非</b> `ErrRecordNotFound`）
+  → `internal/logic/loginlogic.go:53-57` db_error 支 ⇒ `codes.Internal "DB查询失败"`
+
+⇒ Go 的语义不是「NULL 当 0」，而是「**NULL 读不出来**」。Java 侧必须让 `null` 真传上来。
+
+### 修法（两处，缺一不可）
+
+1. `UserEntity.status` 删除字段初始化值 `= 0L`，改为 `@TableField("status") private Long status;`
+2. `UserDomainService#login` 在 mapper 调用<b>之后、密码校验<b>之前</b>显式判 NULL 并抛
+
+**第 2 步刻意抛在 try 内部**：这样它会落进既有的 `catch (Exception e)`，
+从而**同时**拿到 `metrics.getLoginDbError()` + `span.recordException`
++ `ErrorDbSelect` 业务日志 + `INTERNAL "DB查询失败"` —— 与 Go 的四条副作用逐条对齐。
+若抛 `StatusRuntimeException` 会被 `catch (StatusRuntimeException)` 接走原样重抛，四条副作用全丢。
+
+**删除初始化值不改变写入语义**（两条路径都不依赖它）：
+
+| 路径 | 机制 | 是否依赖 `= 0L` |
+|---|---|---|
+| INSERT | `UserDomainService.register` 显式 `u.setStatus(0L)`（`:321`） | ❌ 不依赖 |
+| UPDATE | `UserMapper#updateUserById` 用 `LambdaUpdateWrapper.set(...)` 逐字段显式 set，<b>不走</b> `updateById(entity)` | ❌ 不依赖 |
+
+### 证据
+
+`UserRpcLoginNullStatusFailClosedTest`（新建，真 PG + Testcontainers，5/5 绿）：
+
+- `loginWithNullStatusFailsClosed` —— NULL ⇒ `INTERNAL` + description 逐字等于 `"DB查询失败"`
+- `nullStatusIsDetectedBeforePasswordCheck` —— 用**错误密码** + NULL 组合区分两支
+  （Go 的 NULL 扫描失败<b>先于</b>密码错误发生 ⇒ 必须是 INTERNAL 而非 `LoginResp{status=1}`）
+- `nonNullStatusBehaviourUnchanged` —— 对照：status=0 成功 / status=1 封禁
+- `missingUserStillReturnsStatusOne` —— 对照：用户不存在仍是 `status=1`，未被 db_error 判据吞掉
+- `mapperMapsNullStatusToNull` —— **前提断言**：mapper 必须把 NULL 映射成 `null`
+  （这条正是本轮第一次跑时红的，它直接证伪了「`!= null` 判据不够」这个假设）
+
+> ⚠️ 本类需要 `ALTER TABLE users_user ALTER COLUMN status DROP NOT NULL` 才能复现 Go 的可达性
+> —— 因为 RAG 的 DDL 声明 `NOT NULL` 而 Go 没有，这本身就是 `DRIFT-USERRPC-V-002` 记的那条差异。
+
+### ⚠️ admin-rpc 有<b>同款缺陷</b>（跨组件，本轮未改）
+
+`service/users/admin/admin-rpc/.../domain/UserEntity.java:60` 同样是 `private Long status = 0L;`。
+属**另一个组件**，本轮未动；admin 侧不跑 `Login`，暴露面不同（`GetUser` 响应会带 `status=0`）。
+⇒ 登记为跨组件待办，**不要**当成「已随 user-rpc 修好」。
