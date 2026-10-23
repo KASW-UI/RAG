@@ -1,9 +1,9 @@
 package com.rag.task.task.rpc.mq;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
-
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * goka {@code Persist} 的等价物 —— 对应 Go 端两个 processor 里的
@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <h2>Go 侧的三行就是全部语义</h2>
  * <pre>
- * // initGoKa.go:75-81（用户计数）
+ * // initGoKa.go:75-81（用户计数；文章计数 :92-97 同型）
  * var cur int64
  * if v := ctx.Value(); v != nil { cur = v.(int64) }
  * cur++
@@ -19,55 +19,115 @@ import java.util.concurrent.ConcurrentHashMap;
  * ctx.Emit(goka.Stream(outTopicTaskUser), ctx.Key(), cur)
  * </pre>
  *
- * <p>⇒ 它是一个<b>按 Kafka key 累加的本地计数器</b>：
- * <ul>
- *   <li>key 首次出现 ⇒ 存量为 nil ⇒ 从 0 起算，{@code cur++} 后为 <b>1</b>；</li>
- *   <li>key 已存在 ⇒ 从上次 emit 出去的<b>那个值</b>继续 +1；</li>
- *   <li>值不是全局共享的 —— 它是<b>本进程本地</b>状态，不在 Redis 里、也不在 PG 里。</li>
- * </ul>
+ * <p>⇒ 它是一个<b>按 Kafka key 累加的计数器</b>：key 首次出现 ⇒ 存量为 nil ⇒ 从 0 起算，
+ * {@code cur++} 后为 <b>1</b>；key 已存在 ⇒ 从上次 emit 出去的那个值继续 +1。
  *
- * <h2>⚠️ 为什么用内存 Map 而不是 Redis（这是 L4，实现机制）</h2>
- * <p>goka 的默认 store 会把 KV 表<b>持久化到本地文件</b>，目的是进程重启后不重复累加。
- * Java 侧改用进程内 {@link ConcurrentHashMap}，理由：
- * <ul>
- *   <li>goka 的落盘是<b>单机恢复优化</b>，不影响消息本身的处理语义；</li>
- *   <li>放进 Redis 会让「每条消息一次网络往返」，而这条链路的 QPS 是点赞量级 —— 成本不对等；</li>
- *   <li>更重要的是：<b>重启后从 0 重新累加，与 goka 从文件恢复相比只是重复计数</b>，
- *       而下游（两个 sink）用的是 {@code max(旧值, 新值)} 与 SETNX 完成幂等，
- *       重复计数<b>不会</b>造成业务错误。</li>
- * </ul>
- * ⇒ 这是可接受的行为差异，但它<b>不是</b>严格等价：重启后 emit 出去的计数会从 1 重新开始。
- * 若将来要求"跨重启精确计数"，需要改成本地文件 store（RocksDB / MapDB）而非 Redis。
+ * <h2>🔴🔴 2026-10-23 修正：本类此前是「内存单例」，有两处与 Go 不等价</h2>
  *
- * <h2>⚠️ 线程安全：为什么用 compute 而非 get/put</h2>
- * <p>Go 侧 goka 保证<b>同一个 group 内同一 key 的处理是串行的</b>（单分区单消费者）。
- * Spring Kafka 默认 {@code concurrency=1}，同样是单线程消费 ⇒ 语义一致。
- * 但 {@link #increment} 仍用 {@code compute}，因为
- * {@code @Scheduled} 之外将来可能引入并发路径，且「读-改-写」非原子是典型的竞态写法。
+ * <h3>① 每个 group 必须各持一份存储（此前两个 group 共用了一张表）</h3>
+ * <p>Go 侧 <b>两个 goka processor 是两次独立的 {@code goka.NewProcessor}</b>
+ * （{@code initGoKa.go:178-181} 用户路、{@code :212-215} 文章路），
+ * 各自拥有独立的 store。goka 的 store 路径就<b>按 group 名分目录</b>：
+ * <pre>
+ * // goka@v1.1.16 processor.go:82
+ * WithStorageBuilder(storage.DefaultBuilder(DefaultProcessorStoragePath(gg.Group())))
+ * // goka@v1.1.16 storage/builders.go:8-17 ⇒ LevelDB，文件名 = &lt;path&gt;/&lt;topic&gt;.&lt;partition&gt;
+ * </pre>
+ * <p>此前本类是<b>单个 {@code @Component} + 单张 {@code ConcurrentHashMap}</b>，
+ * 被 {@link TaskUserCountConsumer} 与 {@link TaskArticleCountConsumer} 共用。
+ * ⇒ <b>用户路的 key 是 {@code user_id}、文章路的 key 是 {@code article_id}，
+ * 两条链路的 id 空间会相交</b>：一旦出现 {@code user_id == "190"} 且
+ * {@code article_id == "190"} 的两条消息，两路的计数就<b>互相污染</b>，
+ * 后续 emit 出去的 {@code cur} 全错。
+ * <p>现在按 <b>group id</b> 命名空间隔离（{@link #increment(String, String)} 的第一个参数），
+ * 与 goka 的「按 group 分目录」一一对应。
+ *
+ * <h3>② 存储必须跨重启存活（此前是纯进程内存）</h3>
+ * <p>Go 用的是 <b>LevelDB 落盘</b>，且该 table 本身还是一个 Kafka compacted topic
+ * （{@code <group>-table}），新实例可以从表里重建状态。
+ * ⇒ <b>进程重启后计数从上次 emit 的值继续</b>，不会归零。
+ * <p>纯内存 Map 归零 ⇒ 可观察后果<b>不是</b>「重复计数无害」，而是：
+ * <ul>
+ *   <li>点赞路的 {@code like:total:<uid>} 是<b>普通 SET</b>
+ *       （{@code UserLikeProgressSink} 的 {@code pipelineSetLikeTotal}），
+ *       不是 GREATEST ⇒ 重启后被<b>更小的值覆盖</b>；</li>
+ *   <li>达标判定 {@code total >= target(5)} 读的是<b>计数器</b>而不是 DB
+ *       ⇒ 重启后用户必须重新攒够 5 次，任务才会完成；</li>
+ *   <li>好消息是 {@code task:done:<uid>:<taskId>} 的 SETNX（90 天 TTL）不受影响，
+ *       已完成的任务不会被重复发奖。</li>
+ * </ul>
+ * ⇒ 改用 Redis {@code INCR}：原子、跨重启、跨实例共享，语义比「进程内 + 落盘缓存」更贴近
+ * goka 的 <b>Kafka 表</b>（那才是权威副本，本地 LevelDB 只是缓存）。
+ *
+ * <h2>⚠️ Redis 失败时的行为：抛异常，让位点不提交</h2>
+ * <p>Go 侧 store 写失败时 goka 会退避并<b>重投该条消息</b>（计数不会前进）。
+ * 这里让异常直接冒出 listener：{@code AckMode.RECORD} 下未提交位点 ⇒ 该条会被重投。
+ * <b>不要</b>吞掉异常返回 1 —— 那等于把「计数没加上」伪装成「加了一次」，
+ * 比丢数据更难排查。
+ *
+ * <h2>⚠️ key 命名空间是 RAG 侧的实现产物</h2>
+ * <p>{@code task:goka:count:<groupId>:<messageKey>}。
+ * Go 侧不存在这个 Redis key（它用 {@code <group>-table} compacted topic + 本地 LevelDB），
+ * 本类与 {@link TaskRedisKeys} 里的业务 key（{@code task:progress:*} / {@code task:done:*} …）
+ * <b>刻意不共用前缀</b>，避免被误读成 Go 也有的业务键。
+ *
+ * <h2>⚠️ 为什么用 {@code compute} 语义已经不重要，但 INCR 仍是必需的</h2>
+ * <p>Go 靠「同一 group 内同一 key 串行处理」保证无并发写；Redis {@code INCR} 本身原子，
+ * 即使将来给 listener 调了 {@code concurrency > 1} 也不会丢计数。
  */
 @Component
 public class TaskCountStore {
 
-    /** 每个消费组各持有一份：Go 侧三个 group 是三个独立的 goka processor，存储互不共享。 */
-    private final Map<String, Long> counters = new ConcurrentHashMap<>();
+    private static final Logger LOG = LoggerFactory.getLogger(TaskCountStore.class);
+
+    /**
+     * 计数器 key 前缀 —— 见类注释「key 命名空间是 RAG 侧的实现产物」。
+     * 刻意区别于 {@link TaskRedisKeys} 的 {@code task:progress / task:init / task:done / task:inits}。
+     */
+    static final String COUNTER_KEY_PREFIX = "task:goka:count:";
+
+    private final StringRedisTemplate redis;
+
+    public TaskCountStore(StringRedisTemplate redis) {
+        this.redis = redis;
+    }
 
     /**
      * 对应 Go {@code ctx.Value()} + {@code cur++} + {@code ctx.SetValue(cur)}。
      *
-     * @param key Kafka 消息的 key（Go 的 {@code ctx.Key()}）
-     * @return 累加后的值；key 首次出现时返回 1
+     * @param group goka group id（{@code task.rpc.consumer61} / {@code task.rpc.consumer71}）——
+     *               <b>命名空间</b>，Go 侧靠「按 group 分目录」达到同一效果
+     * @param key   Kafka 消息的 key（Go 的 {@code ctx.Key()}）
+     * @return 累加后的值；该 (group,key) 首次出现时返回 1
+     * @throws org.springframework.data.redis.RedisConnectionFailureException
+     *         Redis 不可用时<b>直接抛出</b> ⇒ 位点不提交 ⇒ 该条被重投（见类注释）
      */
-    public long increment(String key) {
-        return counters.compute(key, (k, current) -> current == null ? 1L : current + 1L);
+    public long increment(String group, String key) {
+        Long incremented = redis.opsForValue().increment(keyOf(group, key));
+        if (incremented == null) {
+            // 只有在 pipeline / 事务里没有立即返回值时才会是 null；
+            // 正常路径不会走到。真走到就明确报错，而不是假装加了 1。
+            throw new IllegalStateException(
+                    "INCR returned null for group=" + group + " key=" + key);
+        }
+        return incremented;
     }
 
     /** 当前存量，仅用于诊断与测试。 */
-    public long current(String key) {
-        return counters.getOrDefault(key, 0L);
+    public long current(String group, String key) {
+        String raw = redis.opsForValue().get(keyOf(group, key));
+        if (raw == null) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(raw);
+        } catch (NumberFormatException e) {
+            LOG.warn("counter value is not a number, treat as 0: group={} key={} raw={}", group, key, raw);
+            return 0L;
+        }
     }
 
-    /** 条目数，仅用于诊断与测试。 */
-    public int size() {
-        return counters.size();
+    static String keyOf(String group, String key) {
+        return COUNTER_KEY_PREFIX + group + ":" + key;
     }
 }

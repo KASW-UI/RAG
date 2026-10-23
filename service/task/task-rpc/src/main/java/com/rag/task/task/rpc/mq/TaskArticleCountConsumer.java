@@ -81,7 +81,9 @@ public class TaskArticleCountConsumer {
         TaskLogEvent event = TaskLogEvent.parseLenient(objectMapper, value);
 
         // Go: cur++ 后 SetValue
-        long cur = countStore.increment(key);
+        // ⚠️ group 作为命名空间传入：Go 侧两个 goka processor 各有独立 store
+        //    （goka processor.go:82 按 group 名分 LevelDB 目录），见 TaskCountStore 类注释。
+        long cur = countStore.increment(topics.getGroupGokaArticle(), key);
 
         // Go: _val := TaskArticleEvent{UserID: logEvent.UserID, Cur: cur}; ctx.Emit(out, ctx.Key(), val)
         TaskArticleProgressEvent out = new TaskArticleProgressEvent(event.userId(), cur);

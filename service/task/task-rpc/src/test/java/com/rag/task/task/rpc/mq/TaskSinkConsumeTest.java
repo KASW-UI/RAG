@@ -8,12 +8,14 @@ import org.mockito.ArgumentCaptor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * 两个 sink 的<b>消费侧与聚合侧</b>行为测试（不落库）。
@@ -248,7 +250,7 @@ class TaskSinkConsumeTest {
     void userCounterEmitsDecimalString() {
         KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
         TaskUserCountConsumer consumer = new TaskUserCountConsumer(
-                kafka, new com.rag.task.task.rpc.config.TaskKafkaTopics(), new TaskCountStore());
+                kafka, new com.rag.task.task.rpc.config.TaskKafkaTopics(), newCountingStore());
 
         consumer.onMessage(record("42", "raw"));
         consumer.onMessage(record("42", "raw"));
@@ -269,7 +271,7 @@ class TaskSinkConsumeTest {
         KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
         TaskArticleCountConsumer consumer = new TaskArticleCountConsumer(
                 kafka, new com.rag.task.task.rpc.config.TaskKafkaTopics(),
-                new TaskCountStore(), mapper());
+                newCountingStore(), mapper());
 
         // key 是文章 ID，但 user_id 来自 raw 载荷
         consumer.onMessage(record("9001", "{\"user_id\":\"42\",\"article_id\":\"9001\"}"));
@@ -285,12 +287,32 @@ class TaskSinkConsumeTest {
     @Test
     @DisplayName("TaskCountStore：首次 key 从 1 起（Go: nil ⇒ cur=0 ⇒ cur++ ⇒ 1）")
     void countStoreStartsAtOne() {
-        TaskCountStore store = new TaskCountStore();
+        TaskCountStore store = newCountingStore();
 
-        assertEquals(1L, store.increment("k"));
-        assertEquals(2L, store.increment("k"));
-        assertEquals(1L, store.increment("other"), "不同 key 各自计数");
-        assertEquals(2L, store.current("k"));
+        assertEquals(1L, store.increment("g", "k"));
+        assertEquals(2L, store.increment("g", "k"));
+        assertEquals(1L, store.increment("g", "other"), "不同 key 各自计数");
+        assertEquals(2L, store.current("g", "k"));
+    }
+
+    @Test
+    @DisplayName("🔴🔴 TaskCountStore：两个 goka group 的计数必须互相隔离（2026-10-23 修正）")
+    void countStoreIsolatesGroups() {
+        TaskCountStore store = newCountingStore();
+        final String userGroup = "task.rpc.consumer61";    // initGoKa.go:115
+        final String articleGroup = "task.rpc.consumer71"; // initGoKa.go:116
+
+        // 用户路先记 3 次
+        store.increment(userGroup, "190");
+        store.increment(userGroup, "190");
+        store.increment(userGroup, "190");
+        // 文章路用**同一个 id 字符串**记 1 次
+        assertEquals(1L, store.increment(articleGroup, "190"),
+                "★ user_id 与 article_id 的 id 空间会相交；共用一张表会让两条链路的计数互相污染。"
+                        + " Go 侧两个 processor 各有独立 store（goka processor.go:82 按 group 名分目录）");
+
+        assertEquals(3L, store.current(userGroup, "190"), "用户路的计数不能被文章路影响");
+        assertEquals(1L, store.current(articleGroup, "190"));
     }
 
     @Test
@@ -307,5 +329,35 @@ class TaskSinkConsumeTest {
         return com.fasterxml.jackson.databind.json.JsonMapper.builder()
                 .disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .build();
+    }
+
+    /**
+     * 一个「表现得像 Redis」 的 {@link TaskCountStore}：用内存 Map 实现 INCR/GET 语义。
+     *
+     * <p>为什么不用 mock 逐条 stub：那样测的就不是「同一个 key 会累加」这件事本身了。
+     * 本类只要求 <b>计数语义</b>正确（per-key 累加、per-group 隔离），不要求 Redis 本身可用 ——
+     * Redis 客户端的连通性属于装配层，由 {@code TaskProgressUpsertParityTest} 那条真 PG 路线覆盖。
+     */
+    @SuppressWarnings("unchecked")
+    private static TaskCountStore newCountingStore() {
+        java.util.Map<String, java.util.concurrent.atomic.AtomicLong> backing =
+                new java.util.concurrent.ConcurrentHashMap<>();
+        org.springframework.data.redis.core.StringRedisTemplate redis =
+                mock(org.springframework.data.redis.core.StringRedisTemplate.class);
+        org.springframework.data.redis.core.ValueOperations<String, String> ops =
+                mock(org.springframework.data.redis.core.ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(ops);
+        when(ops.increment(anyString()))
+                .thenAnswer(inv -> {
+                    String k = inv.getArgument(0);
+                    return backing.computeIfAbsent(k, x -> new java.util.concurrent.atomic.AtomicLong())
+                            .incrementAndGet();
+                });
+        when(ops.get(anyString()))
+                .thenAnswer(inv -> {
+                    java.util.concurrent.atomic.AtomicLong v = backing.get(inv.getArgument(0));
+                    return v == null ? null : String.valueOf(v.get());
+                });
+        return new TaskCountStore(redis);
     }
 }
