@@ -1716,3 +1716,165 @@ Required Confirm 是「跑 `exp-difftest-grpc-errors.sh`」。
 | 模块 | 测试类 | tests | failures | errors | **skipped** |
 |---|---|---|---|---|---|
 | `admin-rpc` | 14 | **93**（92 + 本轮 W4 守门 1） | **0** | **0** | **0** |
+
+---
+
+# 2026-10-23 定性轮（C 类：把「还没定性」的项判掉）
+
+> **核对日期**：2026-10-23 23:2x–23:5x　**分支**：`align/users-admin`
+> 起因：上一轮把它们归为「**连是不是漂移都还没判**」，用户要求做掉。
+> 方法：**逐层读依赖库源码到消费点**（§3.3.1），不靠配置名、不靠默认值记忆。
+
+## 1. ✅ UNRESOLVED-ARPC-002 定性 —— **CONFIRMED SEMANTIC MISMATCH**（不再是「未知」）
+
+### 1.1 结论一句话
+
+> **两侧的有效 deadline 不同：Go = min(客户端, 服务端配置)；RAG = 只有服务端配置。**
+> ⇒ 客户端给一个比服务端更短的 deadline 时，**Go 会在客户端那一刻中止服务端的工作，
+> RAG 不会** —— 它会一直干到自己的 2000ms。
+
+### 1.2 逐层证据链
+
+| # | 层 | 事实 |
+|---|---|---|
+| 1 | Go `service/common/observability/rpc.go:38` | `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` —— **`ctx` 是 handler ctx**，gRPC 会把客户端的 `grpc-timeout` 传播进来 |
+| 2 | Go 语言语义 | `context.WithTimeout(parent, d)` 在 parent deadline 已更早时**等价于 parent** ⇒ 有效 deadline = **min(parent, now+d)** = **min(客户端, 服务端)** |
+| 3 | RAG `service/common/observability/RpcInterceptor.java:170-172` | `deadlineEpochMs = System.currentTimeMillis() + timeout.toMillis()` —— **从不读入站 `Context` 上的 deadline** ⇒ 有效 deadline = **只有服务端配置** |
+| 4 | RAG `RpcInterceptor.java:184-198` | `TIMEOUT_SCHEDULER.schedule(…, timeoutMs, …)` —— 到点才 `close(DEADLINE_EXCEEDED)`，同样**不受客户端 deadline 影响** |
+| 5 | 配置值 | 两侧**配置相同**：Go 未配 `Timeout` ⇒ go-zero v1.10.2 `zrpc/config.go` 的 `Timeout int64 json:",default=2000"` = **2000ms**；RAG `application.yml:129` `rpc-timeout: 2s` = **2000ms** |
+
+⇒ **差异不在配置值，在「是否继承」。** 这是本条最容易被误判成「两边都是 2s 所以一样」的地方。
+
+### 1.3 可观察后果
+
+客户端发 `grpc-timeout: 100ms`、服务端配 2000ms，handler 需要 500ms：
+
+| | Go | RAG |
+|---|---|---|
+| **客户端看到** | `DEADLINE_EXCEEDED` @~100ms | `DEADLINE_EXCEEDED` @~100ms（**gRPC 库替客户端兜的，与本条无关**） |
+| **服务端 handler** | ctx 在 100ms 即 Done ⇒ **任何 ctx-aware 操作（SQL / 下游 RPC）中止**，在途查询被取消 | **继续跑到 2000ms** |
+| **副作用** | 100ms 之后的写**不发生** | 100ms 之后的写**照样落库** —— 客户端看到失败，数据却变了 |
+
+⇒ **分类：`SEMANTIC MISMATCH`，Risk MEDIUM**（属于「客户端已放弃但服务端仍提交副作用」，
+与本仓 B-1 那轮超时取消工作是同族问题）。
+本条与 `admin-rpc` 的业务代码无关，**修法在 `service/common`** ⇒ 跨域，只报告不实施。
+
+### 1.4 🔴 效力边界：**现有对拍工具在结构上抓不到这条**
+
+- 客户端在两侧都是 @~100ms 拿到 `DEADLINE_EXCEEDED` ⇒ **任何客户端侧对拍都看不出差别**；
+- `GrpcAdminDualPortRunner` / `diff.py` 都是客户端侧 ⇒ **加多少用例都测不出来**；
+- 差别只在**服务端**：Go 取消了在途 SQL，RAG 没有。
+
+⇒ **关闭本条需要的是 PG 侧探针，不是 gRPC 用例。** 最小做法复用现成范式：
+照 `tools/difftest/exp-b1-timeout-cancel.sh` 的手法 —— 用另一个 psql 会话锁住一行
+（`SELECT … FOR UPDATE`），让 handler 的 UPDATE 阻塞，然后发一个**短 deadline** 的请求，
+最后**查 PG 侧那次查询是否被取消**（Go 应出现 cancel/短滞留；RAG 应跑满）。
+⚠️ 造阻塞的脚本必须先证明「锁真的加上了」（`to_regclass()` 校验）——
+`tools/difftest/README.md` 与 `Intentional_Deviations/_cross/signed-deviations.md` 都记了这个坑。
+
+> ⚠️ 本条的 Required Confirm 原文写的是「用 100ms / 2000ms / 5000ms 三档 deadline 对拍」。
+> **那条 recipe 本身是无效的** —— 三档都只在客户端可见差异，测不出服务端行为。
+> ⇒ 该 recipe 已订正，不要再照它跑。
+
+## 2. ✅ UNRESOLVED-ARPC-003 定性 —— 读超时 **EQUIVALENT**（但一致是**巧合**）；连接超时**未验**
+
+### 2.1 逐层证据链
+
+| # | 层 | 事实 |
+|---|---|---|
+| 1 | Go `service/user/admin/rpc/etc/admin.yaml` | `BizRedis` 段**没有**任何 timeout 字段 |
+| 2 | go-zero v1.10.2 `core/stores/redis/redisclientmanager.go:32-39` | 建 `red.Options` 时**只传** Addr/Username/Password/DB/MaxRetries/MinIdleConns/TLSConfig —— **三个 timeout 一个都没传** |
+| 3 | go-redis v9 `options.go` `init()` | `DialTimeout = 5s`（`:329-330`）；`ReadTimeout` 的 `case 0: = 3 * time.Second` |
+| 4 | RAG `admin-rpc/application.yml:48` | `spring.data.redis.timeout: 3s` |
+
+⇒ **读命令超时：两侧都是 3s，一致。**
+
+### 2.2 ⚠️ 一个会骗人的红鲱鱼：go-zero 里的 `readWriteTimeout`
+
+`core/stores/redis/redis.go:27` 写着：
+
+```go
+readWriteTimeout     = 2 * time.Second
+```
+
+**全文件只有这一处 —— 声明了、从未被使用（死常量）。**
+只看这一行会得出「Go 的 Redis 超时是 2s」的错误结论。
+⇒ 真正的生效值在 go-redis 的 `init()` 里（**Read 3s / Dial 5s**）。
+**这正是 §3.3.1「必须读到消费点，只贴声明行不算证据」的原型案例。**
+
+### 2.3 一致性是**巧合**，没有出处也没有回归网
+
+`spring.data.redis.timeout: 3s` 与 go-redis 的默认 `ReadTimeout=3s` **数值相同**，
+但 RAG 侧这个值：
+- **没有任何注释写明它来自 go-redis 的默认值**；
+- go-zero 若升级 go-redis、默认值一变，RAG 会**静默分叉**；
+- 仓内**没有一条测试**断言这个值。
+
+⇒ **分类：读超时 EQUIVALENT（证据强度＝静态源码·双侧 + 依赖库源码），
+但「一致」没有回归网。** 建议在配置里补一行注释写明出处（比补测试更便宜）。
+
+### 2.4 仍存疑的一处：**连接超时**
+
+| | Go | RAG |
+|---|---|---|
+| 连接（dial）超时 | **5s**（go-redis `DialTimeout` 默认） | **3s**（同一个 `spring.data.redis.timeout` 属性） |
+
+Spring Data Redis 的 `timeout` 属性同时作用于 command 与 connect，
+若成立 ⇒ **连接路径两侧不同（5s vs 3s）**。
+⚠️ **未做运行时验证**（需要「连一个黑洞 IP 测拨号耗时」或直接查 Lettuce 的绑定点），
+⇒ 记 **半定性**，不写成断言。
+
+另：go-zero 显式 `maxRetries = 3`（`redisclientmanager.go:14`），
+Lettuce/Spring 的重试语义与之**不一定等价**，本轮未查。
+
+## 3. ✅ ARPC-002 的验证缺口已关闭 —— 补 `updateuser.ok` 对拍用例
+
+**问题**：`GrpcAdminDualPortRunner` 的 18 个用例里 `updateUser` **只有 `notfound` 错误路径**，
+而 DRIFT-ARPC-002（`UpdateUserResp.success`：Go=false / RAG=true）
+**恰好只在成功响应里可见** ⇒ 那条漂移改了对拍也发现不了。
+
+**改法**（`tools/difftest/` 共享资产，经用户指示后实施）：
+
+| 文件 | 改动 |
+|---|---|
+| `exp-difftest-grpc-admin-errors.sh` | 新增 `[3/4]` 步骤：用 `psql` 在 `go_db.users` 与 `rag_db.users_user` 各造一行 probe user（**两侧 username / email / status / score 完全一致**，只有 uid 不同；`ON CONFLICT DO NOTHING` 幂等）；把两个 uid 以 `-Dgo.probe.uid` / `-Drag.probe.uid` 传给 runner |
+| `GrpcAdminDualPortRunner.java` | 新增 `updateuser.ok` 用例；新增 `UpdateUserResp` 的归一化分支，**`success` 必须进归一化**（只比 `hasUser` 会漏掉它），uid 不比 |
+
+⚠️ **为什么种数据那步的字段必须两侧一致**：
+username / email 任一侧不同就会报 `payload_diff`，
+把「种子数据没对齐」误报成**语义差异** —— 这是对拍工具最常见的自伤。
+
+### 3.1 本轮实跑结果
+
+| 命令 | 结果 |
+|---|---|
+| `run.sh --keep --serve-only` | 两套 admin/user 栈就绪（message-rpc 启动失败，**不在本域**） |
+| `exp-difftest-grpc-admin-errors.sh --stacks-up` | **`cases=19 / code_mismatch=0 / payload_diff=0 / description_diff=5`**，`exit 0` |
+| ↳ 新增 `updateuser.ok` | **`[MATCH]`** —— `success` 字段两侧同为 `false`，`hasUser`/username/email/status/score/extraKeys 全同 |
+| `diff.py --scenario all`（种数据**之后**跑） | **`steps=39 / asserted=10 / byte_equal=29 / unexpected=0`**，`EXIT=0` |
+
+**用例数 18 → 19**，其余数字与审计轮基线**逐项相同**（`description_diff=5` 仍是已签字的 DRIFT-ARPC-007）。
+
+> ⚠️ **专门验了一次「种 probe user 会不会污染 HTTP 对拍基线」**：答案是不会。
+> 两侧各加 1 行、`username`/`email`/`status`/`score` 完全对称 ⇒
+> `admin.getuserlist` 的 `total` 两侧同时 +1，仍相等。
+> ⚠️ 但这是**巧合性安全**，不是设计保证：若将来有人把两侧种子的字段改成不对称，
+> 就会报出**假** `payload_diff`。种数据那步的注释里已写明这个要求。
+
+### 3.2 🔴 效力边界（必须说清，别把这条当「ARPC-002 已完全闭环」）
+
+`updateuser.ok` 这一条**证明的是**：`UpdateUserResp.success` 在**双侧活体**上同为 `false`。
+⇒ **DRIFT-ARPC-002 的证据强度已从「Go 侧源码逐字 + RAG 侧真 PG 运行」
+升到「双侧活体」，该条的验证缺口关闭。**
+
+**但仍有两点要说清**：
+
+1. **本轮没有为这条新用例跑变异测试。**（对比：DDL 时区守门那条**跑过**，
+   删 `SET TIME ZONE 'UTC'` → 偏移 28800 秒 → 红。）
+   本条的「可证伪」目前是**构造性推理**：`normalize()` 的返回值里**字面包含 `success=`**
+   且本次为 `[MATCH]`，⇒ 把 `AdminServiceGrpcImpl` 的 `setSuccess(true)` 加回去
+   必然让 RAG 侧归一化串变成 `success=true;…` 而 Go 侧仍是 `success=false;…`
+   ⇒ `payload_diff=1`。**推理很直接，但没有实跑证据。**
+2. **`success=false` 这个期望值的正确性来自 Go 源码**（`updateuserlogic.go:105-113` 不 set Success
+   ⇒ proto3 默认 false），**不是**来自本次对拍 —— 对拍只能证明「两侧一致」，
+   证不了「两侧都对」。这与 AGENTS.md §3.3 的告诫同型：变异测试与期望值来源两者缺一不可。

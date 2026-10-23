@@ -152,9 +152,18 @@ public final class GrpcAdminDualPortRunner {
             // 「自己的 uid」的用例都必须**分侧传各自的 uid**，不能共用一个常量。
             long goUid = loginUid(go);
             long ragUid = loginUid(rag);
+
+            // 2026-10-23：成功路径的 updateUser 需要一个**存在的 users_user 行**。
+            // 由编排脚本 exp-difftest-grpc-admin-errors.sh 用 psql 在两侧各造一行，
+            // uid 刻意取不同值（两侧是独立库，但归一化时 uid 一律不比）。
+            long goProbeUid = Long.parseLong(prop("go.probe.uid", "7700000000000000001"));
+            long ragProbeUid = Long.parseLong(prop("rag.probe.uid", "7700000000000000002"));
+
             System.out.println("== 两侧 admin uid ==");
             System.out.println("   go  admin-rpc(" + goHost + ":" + goPort + ")  uid=" + goUid);
             System.out.println("   rag admin-rpc(" + ragHost + ":" + ragPort + ")  uid=" + ragUid);
+            System.out.println("== 两侧 probe user uid（updateUser 成功路径用）==");
+            System.out.println("   go  probe uid=" + goProbeUid + "   rag probe uid=" + ragProbeUid);
             System.out.println();
 
             // ── 1. Login ───────────────────────────────────────────
@@ -239,6 +248,16 @@ public final class GrpcAdminDualPortRunner {
                             .setUid(NO_SUCH_UID).setUsername("zzz_probe").build())),
                     call(() -> rag.updateUser(UpdateUserReq.newBuilder()
                             .setUid(NO_SUCH_UID).setUsername("zzz_probe").build()))));
+
+            // 2026-10-23 新增（关闭 DRIFT-ARPC-002 的验证缺口）：
+            // 此前 updateUser **只有 notfound 错误路径**，成功路径从未被双侧活体对拍，
+            // 而 DRIFT-ARPC-002（UpdateUserResp.success：Go=false / RAG=true）恰好
+            // 只在**成功响应**里可见 ⇒ 缺这一条，那条漂移改了也没人能发现。
+            rows.add(new Row("updateuser.ok", "存在的用户 → OK（**success 字段两侧必须相同**，DRIFT-ARPC-002）",
+                    call(() -> go.updateUser(UpdateUserReq.newBuilder()
+                            .setUid(goProbeUid).setUsername("probe_renamed").build())),
+                    call(() -> rag.updateUser(UpdateUserReq.newBuilder()
+                            .setUid(ragProbeUid).setUsername("probe_renamed").build()))));
 
             // ── 10. UpdateSelf ─────────────────────────────────────
             rows.add(new Row("updateself.notfound", "uid 不存在 → NOT_FOUND（**Go desc 乱码**，DRIFT-ARPC-007）",
@@ -352,6 +371,23 @@ public final class GrpcAdminDualPortRunner {
         }
         if (o instanceof com.rag.users.admin.proto.BanUserResp) {
             return "success=" + ((com.rag.users.admin.proto.BanUserResp) o).getSuccess();
+        }
+        if (o instanceof com.rag.users.admin.proto.UpdateUserResp) {
+            // 2026-10-23 新增（DRIFT-ARPC-002）。**success 必须进归一化** ——
+            // 它就是那条漂移的载体；只比 hasUser 会漏掉它。
+            // uid 一律不比（两侧各自 snowflake，必然不同）。
+            com.rag.users.admin.proto.UpdateUserResp r = (com.rag.users.admin.proto.UpdateUserResp) o;
+            StringBuilder sb = new StringBuilder();
+            sb.append("success=").append(r.getSuccess()).append(";hasUser=").append(r.hasUser());
+            if (r.hasUser()) {
+                com.rag.users.admin.proto.UserInfo u = r.getUser();
+                sb.append(";username=").append(u.getUsername())
+                  .append(";email='").append(u.getEmail()).append("'")
+                  .append(";status=").append(u.getStatus())
+                  .append(";score=").append(u.getScore())
+                  .append(";extraKeys=").append(u.getExtraInfoMap().keySet());
+            }
+            return sb.toString();
         }
         if (o instanceof com.rag.users.admin.proto.UnBanUserResp) {
             return "success=" + ((com.rag.users.admin.proto.UnBanUserResp) o).getSuccess();
