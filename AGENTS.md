@@ -33,9 +33,9 @@
 | 其余 | ⚠️ 10 个 `*-proto` 语义层一致（复制非翻译，**8 个无回归网** ⇒ §3.4）；5 个 `*-common` 本轮未单独审查 | 见 DRIFT 索引 |
 
 > ⚠️ **表内计数是「首轮组件级对照」的审计结论，不是当前状态**；判断某一条的现状**一律回台账**。
-> ⚠️ **「已改」≠「已验证」；「源码级对照」≠「双侧活体对拍」**（前者只证明读 Go 读得对）。
+> ⚠️ **「已改」≠「已验证」；「源码级对照」≠「双侧活体对拍」**。
 > ⚠️ **证据强度分层（2026-10-23 实测）**：`like-api`/`hot-api` 拿到**双侧活体对拍**；其余多为
-> **真 PG 或真启动**；`article-api`/`admin-api`/`message-api`/`user-api` 的上限是**静态源码**。
+> **真 PG 或真启动**；`article-api`/`admin-api`/`message-api`/`user-api` 的上限是**静态源码**
 > ⇒ 台账里的 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环。
 
 1. **已签字的有意偏离** 9+ 条 —— 是决策不是缺陷，但两侧确实不一致 ⇒ [`docs/Intentional_Deviations/`](docs/Intentional_Deviations/_INDEX.md)
@@ -72,9 +72,7 @@ RAG 仓库路径：`/Users/pr/Documents/java&golang/RAG`。
 
 **RAG 的存在范围**：用 Spring 生态表达 Go 的行为。**不**对任何「非 Spring Boot 的 Java 实现」做对照 —— 那是另一种工作，不在本项目范围内；也不接收 RAG 反向同步。
 
-**微服务范围（2026-10-23 用户定，12:25 扩到 10 个）** —— 共 **38 个组件**（10 api + 10 rpc + 8 common + 10 proto，权威清单见 §3.5）：
-`article` / `hot` / `like` / `users-user` / `users-admin` / `message` / `comment` / `favorite` / `follow` / `task`。
-⚠️ **12:25 新纳入的 4 域**：10 个 `*.proto` 已齐全（§3.4）；api/rpc/common 落地进度**见 §0 表格**（19:20 核对）。
+**微服务范围（2026-10-23 用户定，12:25 扩到 10 个 / 38 个组件）** —— 10 api + 10 rpc + 8 common + 10 proto，清单与覆盖见 §3.5。
 `task` 域无 `-common`（Go 侧同样没有，不是遗漏）。Go 侧 `knowledge`/`points`/`security` **范围外 ⇒ 不是待办**。
 
 ⚠️ **「未翻译」≠「该做」**：范围是**决策**，不是进度。
@@ -143,11 +141,10 @@ Go 侧大量行为的默认值**藏在 struct tag 里**而不是 yaml 里；反�
 1. 判断某个 Go 默认行为是否生效，**必须读到消费该 tag 的那段控制流**，
    只贴 struct 定义行不算证据；
 2. 判断某个 Java 框架能力是否生效，**必须有运行证据**（真实管线 / 真容器），
-   「pom 里有依赖」「类上有注解」都不算（AGENTS.md §3.3 原有纪律）；
+   「pom 里有依赖」「类上有注解」都不算（§3.3 原有纪律）；
 3. 写 `文件:行号` 证据时，行号要指向**消费点**而不是**声明点**。
 
 **3.3.2（2026-10-22 新增）以「Go: …」形式写在 `@DisplayName` / javadoc 里的断言，本身是高危项**
-（案例 ⇒ 同上文件）
 
 ⇒ **硬要求**：任何以「Go: …」措辞出现的断言，必须满足 §3.3.1 的三条，
 否则**不得**用该措辞，改成中性描述（写「本模块要求的语义：…」）或直接删掉该断言。
@@ -209,19 +206,13 @@ Go 侧大量行为的默认值**藏在 struct tag 里**而不是 yaml 里；反�
 
 ### 3.4 proto 是**复制粘贴**，不是翻译（2026-10-23 实测）
 
-RAG 侧 10 个 `*.proto` **全部从 Go 侧 `proto/*.proto` 复制而来**，
-既不是重写也不是翻译。改动**严格限定在 option 块与空白层面**：
-
-| 改动项 | 覆盖 | 性质 |
-|---|---|---|
-| 删 `option go_package` / 加 `option java_package` + `java_multiple_files=true` / 缩进与首尾空行统一 | ✅ 10/10 | **表达层**（Go 专用项 Java 不消费；生成代码落包必需） |
-| `user.proto` → RAG 侧改名 `users.proto` + 加解释性注释 | 仅 user | 表达层 |
-| **message 名 / 字段名 / 字段号 / 类型 / 枚举值** | **✅ 10/10 逐条一致** | **行为层（wire contract）** |
+RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格限定在 option 块与空白层面**：删 `option go_package` /
+加 `java_package` + `java_multiple_files=true` / 缩进与首尾空行统一（10/10 表达层，Go 专用项 Java 不消费）；
+`user.proto` 改名 `users.proto` + 加注释（仅 user）。**message 名 / 字段名 / 字段号 / 类型 / 枚举值 10/10 逐条一致 = 行为层**。
 
 ⚠️ **12:25 补齐的 4 个 `*-proto` 此前只有 `pom.xml`**（依赖与 build 全空 ⇒ 从未生成代码，产出空 jar）；
-本次除拷入 `.proto` 外还接上了 protoc 插件段，否则没有插件消费、等于没放（§3.3）。实测产出 **88 java + 4 `*Grpc`**。
-
-⇒ **实测数据、回归网状态与待办** ⇒ [`docs/DRIFT/_cross/proto-verification.md`](docs/DRIFT/_cross/proto-verification.md)
+本次除拷入 `.proto` 外还接上 protoc 插件段，否则没有插件消费、等于没放（§3.3）。实测产出 **88 java + 4 `*Grpc`**。
+⇒ 实测数据与待办 ⇒ [`docs/DRIFT/_cross/proto-verification.md`](docs/DRIFT/_cross/proto-verification.md)
 
 ⚠️ **本条的效力边界（三条，越界即失效）**：
 1. **复制忠实 ≠ 消费方式已验**。本条只证明 `.proto` **文件本身**两侧一致，
@@ -293,8 +284,11 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧 `proto/*.proto` 复制而来**，
 
 1. **每个 phase 一个 PR**；PR 自带 spec（`RAG/.agents/specs/<slug>.md`），提交前 spec 已落仓。
 2. **issue 在 PR 之前**；PR body 引用 issue。
-3. **分支策略：所有动作直接在 `do-my-own-gh` 上做**（2026-10-21 用户明确要求）。不开 `row/*` 分支、不建独立 worktree；
-   需要隔离时用 `git stash`。历史上的 `row/*` 分支均为该规则生效前的产物，现已全部合并回 `do-my-own-gh`。
+3. **分支策略（2026-10-23 改写，取代「不开 worktree + git stash」）**：串行仍在 `do-my-own-gh`；**多域并发对齐时一域一 worktree** ——
+   `align/<域>` + `../RAG.worktrees/<域>`，均从 `do-my-own-gh` 切，主干只在最后接合并。**工作树内只写 `docs/DRIFT/<域>/<组件>.md`；
+   共享索引（`_INDEX.md`/`AGENTS.md`/`_MANIFEST.json`）合并后统一更新** ⇒ 多路并发必撞，且事后无法区分台账归属。
+   ⚠️ `git stash` 是工作区级状态，会被并发 agent 互偷 ⇒ 不再作隔离手段。⚠️ **共享文件的改动要尽早提交** ——
+   实测已被并发会话 `git checkout` 整体回滚过一次。操作手册 ⇒ [`docs/Worktree.md`](docs/Worktree.md)。历史 `row/*` 已合并（实测）。
 4. **作用范围**：仅限 RAG 仓库。`Sea-RideTheWind_golang` 已冻结只读；其他非 Spring Boot 的 Java 实现不在范围内。
 5. **Go 是真理之源**（2026-10-20 第三次切换，全子模块适用）。proto 字段号、错误码、JWT claims、表结构、HTTP path、
    Kafka topic 等语义细节一律以 Go 对应子模块为准；差异**只允许出现在表达层**，出现行为差异时默认判 **RAG 错**。
@@ -335,10 +329,8 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧 `proto/*.proto` 复制而来**，
 > 完整经过与证据 ⇒ `docs/Pitfalls/_cross/flyway-ledger-collision.md`
 ### 6.4 其他子模块
 
-| 阶段（module） | 状态 |
-|---|---|
-| `service/message` | `message-rpc` / `message-api` 均已完成审计 + 修复（2026-10-22）⇒ 台账 [`docs/DRIFT/message/`](docs/DRIFT/message/rpc.md) |
-| Phase 5（全量 + 端到端） | 未启动；需真实 PG + Redis 集成测试补上（当前测试大量 mock 数据层） |
+`service/message` 台账见 [`docs/DRIFT/message/`](docs/DRIFT/message/rpc.md)（与 §0 域表同源，不重复）。
+**Phase 5（全量 + 端到端）**：未启动；需真实 PG + Redis 集成测试补上（当前测试大量 mock 数据层）。
 
 ## 七、引用清单
 
@@ -365,7 +357,7 @@ RAG 不是从 Go「推测」行为，而是**逐字对照 Go 源码**（§3.1）
 | [`docs/Intentional_Deviations/`](docs/Intentional_Deviations/_INDEX.md) | **有意偏离档** —— 「明知与 Go 不同、**经签字批准**」的偏离。
   ⚠️ **是决策不是缺陷：审查时不重复质疑，但也不得「顺手修正回旧行为」。**
   三类性质不同的差异不可混谈：有意偏离 / 框架限制 / 表述差异 | 判断某条差异「要不要修」时 |
-| [`docs/FileTree/`](docs/FileTree/README.MD) · [`docs/HUMAN_ONLY/`](docs/HUMAN_ONLY/simple.md) · [`docs/MappingTable/`](docs/MappingTable/README.MD) | 理论文件树（15 份，⚠️ **迁移期脚手架，不是长期规范**）· 包级阅读指南（api/rpc 两份）· 表名字段名映射 | 规划模块结构 / 第一次进包 / 跨服务对表 |
+| [`docs/FileTree/`](docs/FileTree/README.MD) · [`docs/HUMAN_ONLY/`](docs/HUMAN_ONLY/simple.md) · [`docs/MappingTable/`](docs/MappingTable/README.MD) · [`docs/Worktree.md`](docs/Worktree.md) | 理论文件树（15 份，⚠️ **迁移期脚手架，不是长期规范**）· 包级阅读指南（api/rpc 两份）· 表名字段名映射 · **worktree 并发工作流**（§5.3 操作手册） | 规划模块结构 / 第一次进包 / 跨服务对表 / 开并发对齐前 |
 
 - ⚠️ **`docs/` 下两个 `common` 不是同一个组件**：`FileTree/common.md` = Go `service/common`（跨服务共享）；
   `FileTree/hot/common.md` = Go `service/hot/common`（**hot 专属，仅 1 个 `errmsg.go`**）。
