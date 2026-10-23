@@ -779,3 +779,164 @@ RAG `3047ms/4455ms`，量级一致、可复现，**但以复测值为准**：
 且共用 `users-common` 的同一份 DDL ⇒ 改这份 DDL **同时影响两个组件的启动**。
 两边的 `AdminSchemaBootstrap` / `UserSchemaBootstrap` 都会幂等重放它 ——
 本轮实测两个组件的真 PG 用例均已跑通（含上述重放守门）。
+
+---
+
+## 2026-10-23 第三轮：`users/user` 半边双侧活体对拍收口（+ **admin 侧待裁决问题**）
+
+> 本节只覆盖 `users/user` 半边（`user-rpc` / `user-api` / `user-proto` / `users-common`）。
+> 逐组件明细 ⇒ [`user/rpc.md`](./user/rpc.md) 与 [`user/api.md`](./user/api.md) 的同名章节。
+> **本节的所有权只有 user 半边**；`admin_admin` / `admin_invite` 只**报告**，不修改。
+
+### 0. 元信息
+
+| 项 | 值 |
+|---|---|
+| 核对日期 | **2026-10-23**（21:00–21:35，全部实跑） |
+| **证据强度** | ✅ **双侧活体对拍**（Go 进程 ↔ RAG 进程，各自真 PG + 各自真 Redis，逐字比对）+ ✅ **真 PG 守门测试**（Testcontainers） |
+| 隔离 harness | 容器 `userprobe-postgres`(127.0.0.1:56432) / `userprobe-redis`(127.0.0.1:57379)；Go rpc **19104** / api **19188**，RAG rpc **61210** / api **60900** |
+| ⚠️ 为什么另起 harness | 并行的 **users/admin 会话正在跑 `tools/difftest/run.sh`**，占共享端口与 `difftest-postgres:55432` ⇒ 本轮**不碰**共享资源，避免两边取证互相污染 |
+| 冻结仓库 | Go 二进制从冻结仓 `go build`；配置用 `tools/difftest/conf/go/*.yaml` 的**副本** ⇒ 冻结仓一个字节未动 |
+| 基线（修复前） | users-common **11**/0/0/0 · user-rpc **102**/0/0/0 · user-api **69**/0/0/0 |
+| 终态（修复后，21:35 复跑） | users-common **11**/0/0/0 · user-rpc **112**/0/0/0 · user-api **76**/0/0/0（**skipped 全 0**） |
+| user-proto | 本轮**未单独跑测试** —— §3.4 的「`.proto` 与 Go 逐字节一致（10/10）」是**上一轮的既有结论**，本轮既未推翻也未复核 |
+| 全场景对拍 | `diff.py --scenario user`：**17 步 / 12 byte_equal / 5 asserted（已签字）/ 0 unexpected** |
+
+> ⚠️ **skipped 纪律（本轮新立，已逐模块核对）**：真 PG 用例带 `@EnabledIfDockerAvailable`，
+> **无 Docker 时整类被跳过而 reactor 仍报 `BUILD SUCCESS`**。
+> ⇒ 本轮逐模块读了 surefire XML 的 `skipped` 属性，三者**全为 0**。
+> 复现：`grep -ho 'skipped="[0-9]*"' service/users/user/*/target/surefire-reports/*.xml`
+
+### 1. `users_user` 时间列：本节上半部分的结论**已被推翻一半**
+
+上一节（"2026-10-23" `users_user` 时间列节）写：
+
+> 「🔴 **仍然 OPEN**：V-004 的**可观察半边**在 `users_user_avatar_history`」
+> 「`AvatarDomainService.java:74` 仍 `atOffset(ZoneOffset.UTC)` ⇒ wire 上恒 `Z`，Go 侧带偏移」
+
+⇒ **这两句现在都不成立**：
+
+| 上一节的断言 | 本轮实测（21:01 前后，双侧活体） | 现状 |
+|---|---|---|
+| `AvatarDomainService:74` 恒渲染成 `Z` | Go `2026-10-23T21:01:48+08:00` vs RAG `2026-10-23T21:01:48Z`（**时刻差 8h**） | ✅ 已修 → 两侧**逐字相同** |
+| V-004 的可观察半边 OPEN | 同上 | ✅ 已修 → V-004 整条关闭 |
+
+**🔴 但归因是错的，上一节必须连同归因一起更正**：上一节把差异归给
+「JDBC URL 未钉 `TimeZone`（Go 侧 `db.go:21` 钉 `Asia/Shanghai`）」。
+本轮实测**否掉了这个归因**：
+
+- 把 RAG 的 JDBC URL 加上 `TimeZone=Asia/Shanghai`，Go 与 RAG 的渲染**都不变**；
+- 把 **Go 进程的 `TZ` 设成 UTC**，Go 的渲染立刻变成 `…Z`（与 RAG 修复前同形）；
+- pgjdbc `getObject(OffsetDateTime.class)` **恒返回 UTC**，与 session TZ / JVM TZ 都无关
+  （实测 pgjdbc **42.7.13**）。
+
+⇒ **偏移量由进程 `time.Local` 决定（Go 侧）/ 由渲染点显式换算决定（RAG 侧），与 PG 会话时区无关。**
+⇒ RAG 的修法是在 `AvatarDomainService.fromModel` 用
+`ct.atZoneSameInstant(ZoneId.systemDefault()).toOffsetDateTime()` 渲染，
+并把列类型改 `TIMESTAMPTZ` + 绑定应用侧时钟。
+⚠️ **两侧同形的条件是「两侧进程时区相同」** —— 这与 Go 自身的前提完全一致，不是新引入的限制。
+
+### 2. `users_user` 建表：真库对照的结论（`UNRESOLVED-USERRPC-006` 关闭）
+
+对**两个真库**跑 `ddl_compare.py`（不是读脚本，是连上去查 `information_schema`）：
+
+| 项 | Go | RAG | 判定 |
+|---|---|---|---|
+| `users.status` | `is_nullable = YES` | `NO` | 🔴 **V-002 仍在**（真库确证） |
+| `users.extra_info` | `text` | `jsonb` | 🔴 **V-003 仍在**（真库确证） |
+| `users.create_time` / `update_time` 的 **DEFAULT** | **无** | **有 `CURRENT_TIMESTAMP`** | 🔴 **新登记 V-011** |
+| 索引 / 唯一约束 / NOT NULL | 见下 | 见下 | ✅ **功能等价** |
+
+- 唯一约束：Go `uni_users_email` / `uni_users_username` ↔ RAG `users_user_email_key` / `users_user_username_key`
+  ⇒ **名字不同、语义相同**（RAG 另有 `users_user_uid_key`，Go 侧靠 `tag:uniqueIndex` 生成，同语义）。
+- RAG 多一个 `idx_users_user_avatar_history_uid_is_current (uid, is_current)` 复合索引
+  ⇒ **RAG 略强**（Go 只有单列 `uid`），属表达层增强，**不算漂移**。
+- `users_user_avatar_history`：Go `PRIMARY KEY (id)` ↔ RAG 同；RAG 另有 `history_id` 唯一索引，
+  Go 侧同样是 tag 生成 ⇒ 等价。
+- **V-011 的可观察性**：两侧写入路径都**显式写该列** ⇒ 当前**不可观察**，
+  故本轮**不修**（改了也没有守门能证明，且可能干扰 admin 侧的写入路径）。
+
+### 3. 🔴 关闭 `DRIFT-USERRPC-V-005`（上一轮结论**被证伪**）
+
+上一轮记的是「`UpdateUser` 对**显式空 map** 的分支不同」。本轮双侧实测：
+
+- Go 侧**根本不写** `extra_info`：wire 传来的空 map 经 go-zero `core/mapping` 解出**非 nil 的空 map**，
+  GORM 的 `Updates(struct)` 对空字段**全部跳过** ⇒ SQL 里根本没有 `extra_info`；
+- 实测两侧 DB 里 `extra_info` **都是 NULL** ⇒ **RAG 也没写**。
+
+⇒ **原结论错误，予以关闭。**
+⚠️ 这是本轮**第二次**推翻自己（第一次是 V-004 的归因）⇒ 与 `docs/Pitfalls/_cross/testing-pitfalls.md`
+的「绿测试可能是错误答案的守卫」同源：**结论错，比没结论更贵。**
+真正残留的差异是 **`V-010`（`update_time` 推进）**，已修：GORM 的
+`gorm@v1.31.1/callbacks/update.go:235-252` 会**无条件**把 `UpdateTime`（autoUpdateTime）放进 SET，
+RAG 曾用 `if (!any) return 0;` 把它挡掉了。修复后双侧实测：空 body / `extra_info={}` / 改 email
+**三种情况两侧 `update_time` 都推进**。
+
+### 4. `users/user` 半边本轮修掉的全部漂移
+
+| 编号 | 一句话 | 归属 |
+|---|---|---|
+| `DRIFT-USERRPC-V-004`（可观察半边） | `users_user_avatar_history` 时间列 `TIMESTAMP⇒TIMESTAMPTZ` + 渲染换算到进程本地时区 | user 半边 ✅ |
+| `DRIFT-USERRPC-V-009`（新） | `insertHistory` 由 DB 的 `CURRENT_TIMESTAMP` 改绑**应用侧时钟**（对齐 GORM autoCreateTime/autoUpdateTime 同源） | user 半边 ✅ |
+| `DRIFT-USERRPC-V-010`（新） | `update_time` 无条件进 SET（Go 依据 `gorm@v1.31.1/callbacks/update.go:235-252`） | user 半边 ✅ |
+| `DRIFT-USERAPI-001` | 畸形 claim 走业务层 200+1006，**不是**鉴权层 401 | user 半边 ✅ |
+| `DRIFT-USERAPI-002` | delete / update 的 `uid<=0` 透传（Go 的两套 uid 语义不抹平） | user 半边 ✅ |
+| `DRIFT-USERRPC-V-005` | **关闭**（结论被证伪，非修复） | user 半边 ✅ |
+| `UNRESOLVED-USERRPC-006` | **关闭**（真库对照完成） | user 半边 ✅ |
+
+**同时反转了 5 条错误断言**（AGENTS.md §3.3.3「先改/删错误断言，再改实现」）：
+`UserDomainServiceTest` 3 条（改期望值 + `TimeZone.setDefault` 强制时区，机器无关）、
+`UserRpcJsonbAndAvatarProjectionTest` 1 条、`UserRpcContainerWiringTest` 1 条。
+
+### 5. 🔴 admin 侧待裁决问题（本轮**只报告，不修改**）
+
+> ⚠️ **所有权边界**：admin 域由**另一个并行会话**审查。本轮**一个字都没改** `service/users/admin/**`
+> 与 `docs/DRIFT/users/admin/**`。以下 4 条需要**联合裁决**，单方面改会引入新漂移。
+
+#### ADJ-01 🔴 `users_user.status` 的 NOT NULL 与 admin-rpc 的 `status = 0L` **必须同时改**
+
+- 真库实证：Go `users.status` **`is_nullable = YES`**，RAG 是 `NO`（`DRIFT-USERRPC-V-002`）。
+- 但**单独放开 NOT NULL 会立刻激活一个已存在的缺陷**：`admin-rpc` 的 `UserEntity.status = 0L`
+  是与 `DRIFT-USERRPC-V-001`（`Login` fail-open）**同款**的缺陷 ——
+  若 `status` 变可空，RAG 的 `WHERE status = 0L` 就会**匹配到 NULL 行**（SQL 三值逻辑下 `NULL = 0` 为 NULL，
+  但 MyBatis 若生成 `status = 0` 且列可空，行为与 Go 的 `status <> 0` 判据不同），
+  **暴露面是 `GetUser` 响应**（未注册用户被当成已封禁/已删除）。
+- ⇒ **裁决点**：`users_user.status` 是否放开 NOT NULL；放开则必须同步修 admin-rpc 的判据。
+  **本轮不单方面改。**
+
+#### ADJ-02 ⚠️ `admin_admin` / `admin_invite` 时间列仍是 `TIMESTAMP`
+
+- 同根因（Go `time.Time` 无 type tag ⇒ `timestamptz`）：`03_create_admin.sql:55-56`（`admin_admin`）
+  与 `04_create_admin_invite.sql:37-41`（`admin_invite`，**4 个**时间列含 `expires_at` / `used_at`）。
+- ⚠️ **不要照 user 半边的改法批量套用**：本轮实测证明
+  「偏移量由**渲染点**决定，不是由列类型决定」⇒ **列类型改不改，取决于该表的字段是否进 wire**。
+  `admin_invite.expires_at` / `used_at` 是**比较型**字段（`<` / `>`），时区错会直接改变过期判定；
+  这与 `users_user_avatar_history.create_time`（纯展示型）**风险等级不同**。
+- ⇒ **裁决点**：admin 侧需单独评估这两张表，本轮只登记。
+
+#### ADJ-03 ⚠️ `users_user` 建表责任交叉（`user-rpc` ↔ `admin-rpc`）仍未在当前代码上复跑
+
+- `users_user` 由**两个组件共同建表**，共用 `users-common` 的同一份 DDL
+  （两边各有 `UserSchemaBootstrap` / `AdminSchemaBootstrap` 幂等重放）。
+- 本轮验证的是「**各自单跑**能重放成功」；
+  **「两套栈并发跑同一张表」在本轮代码上没有复跑过** ⇒
+  AGENTS.md §6.3 问题 1 记录的「建表责任交叉」**仍 unresolved**。
+- ⇒ **裁决点**：需要一轮双栈并发验证，**归属跨界**，本轮不做。
+
+#### ADJ-04 ⚠️ `users_user.status` 的 **V-011（DEFAULT `CURRENT_TIMESTAMP`）** 对 admin 写入路径的影响未评估
+
+- RAG 的 `users_user` 时间列有 `DEFAULT CURRENT_TIMESTAMP`，Go 无。
+- user 半边两侧都显式写该列 ⇒ **不可观察**；
+  但 **admin 侧的写入路径若依赖 DEFAULT**（例如只写部分列的 INSERT），差异就会显现。
+- ⇒ **裁决点**：需 admin 侧确认其 INSERT 是否总是显式带时间列；本轮只登记。
+
+### 6. 本轮**没有**做的事（诚实边界）
+
+1. **`user-proto` 未单独跑测试** —— 「`.proto` 与 Go 逐字节一致」是上一轮既有结论，本轮未复核。
+2. **`user-api` 无真 PG 守门** —— 该组件**零 DB 访问**，「真 PG」对它**不适用**（不是漏做）。
+   替代方案：真 MVC 管线 + 真 Redis + mock gRPC 边界（见 [`user/api.md`](./user/api.md) §5）。
+3. **`UNRESOLVED-USERRPC-004②`（Redis 启动 fail-open/fail-fast）未验** —— 时间预算内没做。
+4. **`DRIFT-USERRPC-V-006`（`users_user.id` / `avatar_history.id` 谁胜出）未验** ——
+   本轮只验了「两侧 id 不同但同形」，没验「同一 id 是否会撞」。
+5. **`api.md` 的 DRIFT-USERAPI-003 ~ 010 一条没动** —— 本轮只锁 claim 语义两条。
+6. **未复跑 `users/admin` 的任何测试** —— 那是并行会话的范围。
