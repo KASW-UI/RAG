@@ -11,10 +11,12 @@ task 域 Go ↔ RAG 双侧活体对拍（HTTP wire 层）。
 所以两侧可以交错执行，不存在「后一侧捡到前一侧的残局」。
 """
 import json
+import http.client
 import subprocess
 import sys
 import urllib.request
 import urllib.error
+from urllib.parse import urlparse
 
 GO_API = "http://127.0.0.1:18886"
 RAG_API = "http://127.0.0.1:58886"
@@ -23,6 +25,8 @@ RAG_DB = "task_rag_db"
 REDIS = "taskprobe-redis"
 
 results = []
+# 已知全域共性差异（不计入 DIFF，但必须单独列出来 —— 不藏）
+known_shared = []
 
 
 def psql(db, sql):
@@ -61,20 +65,75 @@ def post(base, body, path="/taskcenter/v1/task/get", method="POST",
         return (0, None, None, f"TRANSPORT_ERROR: {e}")
 
 
+def post_bare(base, body, path="/taskcenter/v1/task/get", method="POST"):
+    """**真的**不带 Content-Type 发一个 POST。
+
+    ⚠️ 为什么不能用 urllib：它在没有显式 Content-Type 时会**自动补**
+       application/x-www-form-urlencoded ⇒ 那样测到的其实是「带 form-urlencoded」，
+       不是「不带 Content-Type」⇒ **探针自欺**（README §4.1 同款）。
+       http.client 只自动补 Host / Content-Length，**不会**补 Content-Type ✔。
+    """
+    u = urlparse(base)
+    conn = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=15)
+    try:
+        conn.request(method, path, body=body.encode())
+        resp = conn.getresponse()
+        data = resp.read().decode("utf-8", "replace")
+        return (resp.status, resp.getheader("Content-Type"),
+                resp.getheader("X-Content-Type-Options"), data)
+    except Exception as e:  # noqa: BLE001
+        return (0, None, None, f"TRANSPORT_ERROR: {e}")
+    finally:
+        conn.close()
+
+
+def norm_ct(ct):
+    """把 Content-Type 归一到「媒体类型」形态：小写、去空白、去掉 charset 参数。
+
+    ⚠️ **为什么必须归一**：DRIFT-TASK-API-004 记的是**全域共性**差异 ——
+    Go 的 `httpx.WriteJsonCtx` 写 `application/json; charset=utf-8`，
+    RAG 写 `application/json`（少了 charset，且 `;` 后无空格）。
+    按 RFC 9110，`;` 后的 OWS 本就允许省略 ⇒ 这不是语义差异。
+    ⇒ 归一后判定，**但原值差异要单独列出来**（不藏）。
+    ⚠️ 反过来：归一只吃 charset 与空白，**媒体类型本身不同**（如 application/json vs text/plain）
+       一律仍算差异。
+    """
+    if not ct:
+        return ""
+    parts = [p.strip() for p in ct.split(";")]
+    media = parts[0].strip().lower()
+    params = set()
+    for p in parts[1:]:
+        if "=" in p:
+            k, v = p.split("=", 1)
+            params.add(k.strip().lower())
+        else:
+            params.add(p.strip().lower())
+    params.discard("charset")
+    return media + (";" + ";".join(sorted(params)) if params else "")
+
+
 def record(case, desc, go, rag, *, expect_body_equal=True):
     gs, gct, gns, gb = go
     rs, rct, rns, rb = rag
     diffs = []
+    known = []
     if gs != rs:
         diffs.append(f"status Go={gs} RAG={rs}")
-    if (gct or "").lower() != (rct or "").lower():
+    if norm_ct(gct) != norm_ct(rct):
+        # 媒体类型本身不同 ⇒ 语义差异
         diffs.append(f"content-type Go={gct!r} RAG={rct!r}")
+    elif (gct or "").lower() != (rct or "").lower():
+        # 归一后一致、原值不同 ⇒ **已知的全域共性**（DRIFT-TASK-API-004）
+        known.append(f"content-type 格式 Go={gct!r} RAG={rct!r}（DRIFT-TASK-API-004 全域共性，不在本域修）")
     if (gns or "") != (rns or ""):
         diffs.append(f"nosniff Go={gns!r} RAG={rns!r}")
     if expect_body_equal and gb != rb:
         diffs.append(f"body Go={gb!r} RAG={rb!r}")
     verdict = "MATCH" if not diffs else "DIFF"
     results.append((verdict, case, desc, diffs, go, rag))
+    if known:
+        known_shared.append((case, known))
     print(f"[{verdict:4}] {case:<34} {desc}")
     for d in diffs:
         print(f"        ↳ {d}")
@@ -194,13 +253,27 @@ record("body-empty", "空 body",
 
 # ---- 2.7 无 Content-Type（Go 的 handler 不校验 Content-Type）----
 # ⚠️ 不能用 urllib：它会在没有显式 Content-Type 时**自动补** application/x-www-form-urlencoded，
-#    那样测的就不是「不带 Content-Type」了（探针自欺，README §4.1 同款）。这里用 curl 的 -H 'Content-Type:'。
+#    那样测的就不是「不带 Content-Type」了（探针自欺，README §4.1 同款）。
+#    这里用 http.client：它只自动补 Host / Content-Length，**不会**补 Content-Type。
+record("ctype-none", "POST 完全不带 Content-Type",
+       post_bare(GO_API, json.dumps({"id": 1001})),
+       post_bare(RAG_API, json.dumps({"id": 1001})))
 
 # ---------------------------------------------------------------- 汇总
 print("\n" + "=" * 78)
 match = [r for r in results if r[0] == "MATCH"]
 diff = [r for r in results if r[0] == "DIFF"]
 print(f"总计 {len(results)} 条：MATCH {len(match)} / DIFF {len(diff)}")
+print(f"（判定口径：状态码 + **归一后**的 Content-Type 媒体类型 + nosniff + 响应体）")
+if known_shared:
+    print(f"\n已知全域共性差异 {len(known_shared)} 条（**不计入 DIFF**，但列出，不藏）：")
+    for case, ks in known_shared:
+        for k in ks:
+            print(f"  · [{case}] {k}")
+    print("  ⇒ 归 DRIFT-TASK-API-004：Go `httpx.WriteJsonCtx` 写 `application/json; charset=utf-8`，")
+    print("    RAG 写 `application/json`（少 charset、且 `;` 后无空格）。")
+    print("    按 RFC 9110，`;` 后的 OWS 本就允许省略 ⇒ 非语义差异。")
+    print("    ⇒ 归**全域共性**，不在 task 域单独修（单独改会让本域与其它域不一致）。")
 if diff:
     print("\n--- DIFF 明细 ---")
     for verdict, case, desc, diffs, go, rag in diff:
@@ -209,4 +282,10 @@ if diff:
             print(f"  · {d}")
         print(f"  Go  = {go}")
         print(f"  RAG = {rag}")
+    # ⚠️ 有差异必须返回非零 —— 否则这个脚本没法当门禁用
+    #    （对齐 tools/difftest/parity-task-kafka.py 的 return 1 约定）。
+    print("=" * 78)
+    sys.exit(1)
+print("=" * 78)
+print("✅ HTTP wire 层：Go 与 RAG 全部用例一致")
 sys.exit(0)
