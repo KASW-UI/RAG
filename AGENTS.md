@@ -29,7 +29,7 @@
 | `common` | ✅ 审计完成 | [`common/`](docs/DRIFT/common/audit.md) |
 | `hot` | 🔴 rpc ✅ 4 条启动阻塞已修（此前**根本起不来**）；🔴 重桶 `hash()` 仿错仍影响 **49.5% 的 key（未修）**；api 1 MISMATCH | [`hot/`](docs/DRIFT/hot/rpc.md) |
 | `article` | 🔴 rpc 4 MISMATCH + 4 OBS；api 2 MISMATCH（**首次对照即 NOT EQUIVALENT**）。⚠️ `DRIFT-ARTICLE-RPC-004` 复核后**撤销** —— 两边都是静默覆盖，照台账修反会造成新漂移 | [`article/`](docs/DRIFT/article/rpc.md) |
-| `comment`/`favorite`/`follow`/`task` | **10-23 19:13 核对**：`comment-api` 22 绿 · `comment-common` 27 绿 · `task` 已落地；✅ **`follow-rpc` 已迁移**（65 绿，含真 PG 守门）；🔴 `follow-api` 与 `favorite` api/rpc **仍 0 行** ⇒ 3 个组件无对照对象、4 域无台账 | [`_cross/`](docs/DRIFT/_cross/new-domains-2026-10-23.md) |
+| `comment`/`favorite`/`follow`/`task` | 🔴 **14 个组件全部零台账**（20:2x 实测）。代码已全部落地（原「`favorite`/`follow` 仍 0 行」结论**作废**），全量编译 `EXIT=0` ⇒ **下一批主攻** | [`_cross/`](docs/DRIFT/_cross/new-domains-2026-10-23.md) |
 | 其余 | ⚠️ 10 个 `*-proto` 语义层一致（复制非翻译，**8 个无回归网** ⇒ §3.4）；5 个 `*-common` 本轮未单独审查 | 见 DRIFT 索引 |
 
 > ⚠️ **表内计数是「首轮组件级对照」的审计结论，不是当前状态**；判断某一条的现状**一律回台账**。
@@ -42,7 +42,7 @@
    ⚠️ **2026-10-23 修复轮新增 3 条签字偏离**（`SD-2026-10-23-01/02/03`）—— 共性：**RAG 做了更严/更安全的那一侧**。
    ⇒ 对拍看到它们变红，先确认是不是这三条，**不要当新回归去「修」**。
    ⚠️ **12:25 后同日追加 2 条**（`SD-2026-10-23-04` comment 域 / `-05` like 域）—— 都是 proto `package` 归一，
-   当前无实际影响（两域 api/rpc 为空壳 / 仓内自产自销）⇒ 明细见 `docs/Intentional_Deviations/`。
+   当前无实际影响（仓内自产自销）⇒ 明细见 `docs/Intentional_Deviations/`。
 2. **DDL 列类型差异**：原记 12 处，**实际更多**；**索引 / 唯一约束 / NOT NULL / DEFAULT 完全 NOT CHECKED**。
    - ✅ 已修：message 域 `article-rpc`（2026-10-23）、users 域 `users_user` 两列 `TIMESTAMP⇒TIMESTAMPTZ`（2026-10-23）。
    - 🔴 **仍未修**：message 域时间列、users 域其余 3 张表（`users_user_avatar_history` 是**唯一 wire 可见的一张**）、
@@ -241,9 +241,9 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧 `proto/*.proto` 复制而来**，
 `article` 4 · `hot` 4 · `like` 4 · `message` 4 · `users` 7（含 `user`+`admin` 两套 api/rpc/proto）·
 `comment` 4 · `favorite` 4 · `follow` 4 · `task` 3（**无 `-common`**，Go 侧同样没有，不是遗漏）。
 
-⚠️ **新纳入 4 域完成度不均**：`comment-api`/`comment-common`/`task` api+rpc 已落地；
-`favorite`/`follow` 的 api+rpc **仍 0 行** ⇒ 那 6 个组件审查前须先实现。⚠️ **落地 ≠ 已对照**：尚无组件级台账，
-证据强度上限是「真实 MVC 管线 + mock gRPC 边界」。
+⚠️ **新纳入 4 域（2026-10-23 20:2x 实测）**：**14 个组件代码已全部落地**（原「`favorite`/`follow` 仍 0 行」结论**作废**），
+全量 `mvn -DskipTests install` **`EXIT=0`**。⚠️ **落地 ≠ 已对照**：这 14 个组件**零台账、对照尚未开始** ⇒
+逐组件状态见 [`docs/DRIFT/_INDEX.md` 覆盖矩阵](docs/DRIFT/_INDEX.md)。
 
 **为什么不能退到微服务粒度**：域粒度下 `hot`（rpc 逐字节一致 + api 仅源码级对照）与
 `article`（rpc 首轮完成 + api 从未对照）都会被打成 ✅ —— **那是假绿灯**。

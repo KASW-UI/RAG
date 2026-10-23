@@ -33,8 +33,14 @@ proto `package` 决定 **gRPC 方法全名**：
 
 ### 为什么当前无实际影响
 
-`comment` 域的 RAG 侧 **api / rpc / common 三个组件仍是空壳**（只有 `pom.xml`、0 行 Java），
-没有任何 RAG 侧 client / server 会去连这个服务 ⇒ **当前不存在跨栈调用，不产生可观察差异**。
+🔴 **2026-10-23 20:2x 更正 —— 本节前提已过期**：原文写「`comment` 域的 api / rpc / common 三个组件仍是空壳」，
+实测**三个组件均已落地**（`comment-api` 33 类 / 2,838 行 / 22 tests、`comment-common` 4 / 537 / 27、
+`comment-rpc` 40 / 7,455 / 46；全量编译 `EXIT=0`）⇒ **「没有任何 RAG 侧 client / server 会去连这个服务」不再成立**。
+
+⇒ **本签字偏离必须从「无实际影响」升级为待处理**：一旦 `comment-api` ↔ `comment-rpc` 走真实 gRPC，
+方法路径前缀不一致（`/pb.` vs `/comment.`）会**直接导致调用失败**，不是「对拍时才会发现」。
+⚠️ 但这 14 个组件**零台账、尚未做过 Go ↔ RAG 对照** ⇒ 该偏离**到底何时变真，取决于对照结论**，不要在无对照的前提下擅自「修」。
+详见 [`../DRIFT/_cross/component-coverage-matrix.md`](../DRIFT/_cross/component-coverage-matrix.md)。
 
 ### 什么时候会变成真差异
 

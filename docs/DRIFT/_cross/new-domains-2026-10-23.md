@@ -6,21 +6,30 @@
 > 本文件是这 4 个域**首个台账**，首版覆盖范围仅 **proto 层**。
 > **2026-10-23 19:20 更新**：api / rpc / common 开始落地（并发会话 + `comment-api` 迁移），
 > 结论速览表已按实测刷新；proto 层结论不变。
+>
+> 🔴 **2026-10-23 20:2x 更新 —— 下表「api / rpc / common」三列已整体作废。**
+> 一次真实执行（全量 `mvn -o -T1C install` `EXIT=0` + `mvn -o -T1C test` `BUILD SUCCESS`）实测：
+> **四域的 api / rpc / common 代码已全部落地，38 个组件零空骨架** ——
+> 「`favorite` / `follow` 的 api+rpc 仍 0 行」「`comment-rpc` 40 类里 17 个仍空」「11 个组件是空壳」
+> **全部是 19:20 的过期快照**。组件级状态以
+> [`component-coverage-matrix.md`](./component-coverage-matrix.md) 为准。
 
 ## 结论速览
 
 **核对时间：2026-10-23 19:20**（行数/测试数为实测；⚠️ **仅 `comment-api` 由本仓跑过 `verify`**，
 `task` / `favorite` / `follow` 是并发会话在写，本文件只登记其**存在性**，不背书其行为等价性）
 
-| 域 | proto 层 | api / rpc / common（19:20 实测） | 结论 |
+| 域 | proto 层 | api / rpc / common（**20:2x 实测，原 19:20 列作废**） | 结论 |
 |---|---|---|---|
-| `comment` | ✅ 已搬齐，行为层逐行一致（**1 处已签字差异**） | 🔴 `comment-api` **33 类 / 2838 行 / 22 tests 绿**；`comment-common` ✅ 537 行 / 27 tests 绿；🔴 `comment-rpc` **40 类里 17 个仍空 / 0 test** | proto 层通过；差异已签字 ⇒ [`../../Intentional_Deviations/comment/proto.md`](../../Intentional_Deviations/comment/proto.md) |
-| `favorite` | ✅ 已搬齐，**逐行零差异** | ⚠️ `-common` ✅ 453 行 / 3 tests；🔴 `api` 23/30 类空、`rpc` 12/35 类空，**均 0 test** | proto 层通过 |
-| `follow` | ✅ 已搬齐，**逐行零差异** | ⚠️ `-common` ✅ 558 行 / 3 tests；🔴 `api`/`rpc` **全空（0 行）** | proto 层通过 |
-| `task` | ✅ 已搬齐，**逐行零差异** | ✅ `api` 1233 行 / 5 tests、`rpc` 4010 行 / 3 tests（**未由本仓验证**） | proto 层通过 |
+| `comment` | ✅ 已搬齐，行为层逐行一致（**1 处已签字差异**） | ✅ **全部落地**：`api` 33 类 / 2,838 行 / 22 tests、`common` 4 / 537 / 27、`rpc` 40 / 7,455 / 46（原「17 类仍空 / 0 test」作废） | proto 层通过；差异已签字 ⇒ [`../../Intentional_Deviations/comment/proto.md`](../../Intentional_Deviations/comment/proto.md) |
+| `favorite` | ✅ 已搬齐，**逐行零差异** | ✅ **全部落地**：`common` 3 / 453 / 25、`api` 31 / 2,920 / 69、`rpc` 36 / 7,057 / 56（原「api/rpc 多数类空、均 0 test」作废；`rpc` 另有专属台账） | proto 层通过 |
+| `follow` | ✅ 已搬齐，**逐行零差异** | ✅ **全部落地**：`common` 4 / 558 / 37、`api` 27 / 2,850 / 49、`rpc` 17 / 2,655 / 65（原「api/rpc 全空 0 行」作废） | proto 层通过 |
+| `task` | ✅ 已搬齐，**逐行零差异** | ✅ **全部落地**：`api` 9 / 1,233 / 78、`rpc` 29 / 4,015 / 77 ⚠️ **其中 15 条静默 skip**（`@EnabledIfDockerAvailable`，见矩阵「绿灯底下的空洞」） | proto 层通过 |
 
 ⚠️ **「有代码」≠「已做语义对照」**：上表的 api/rpc 列记录的是**实现存在性**，
-**不是** §3.5 意义上的组件级对照结论。这 4 域**至今没有任何组件进入首轮对照台账**。
+**不是** §3.5 意义上的组件级对照结论。
+🔴 **20:2x 更正**：这 4 域**只有 `favorite-rpc` 有台账**（190 行，见 [`../favorite/rpc.md`](../favorite/rpc.md)）；
+**其余 13 个组件零台账**，对照尚未开始 ⇒ 逐组件状态见 [`component-coverage-matrix.md`](./component-coverage-matrix.md)。
 `task` 域**没有 `-common`**（Go 侧同样没有，**不是遗漏**）。
 
 ### `comment-api` 的证据边界（2026-10-23 19:20）
@@ -100,9 +109,15 @@
 
 ## 待办
 
-1. ~~**实现四域的 api / rpc / common**~~ —— **部分完成（19:20）**：`comment-api`/`comment-common` 已落地，
-   `task` api+rpc 已落地；**仍待实现**：`comment-rpc`（17 类空）、`favorite` api/rpc、`follow` api/rpc（全空）。
-   实现完成后才谈得上语义对照。
+1. ~~**实现四域的 api / rpc / common**~~ —— ✅ **已全部完成（20:2x 实测）**：38 组件零空骨架、
+   全量编译 `EXIT=0`、全量测试 `BUILD SUCCESS`。🔴 **下一步改为「做语义对照」**，排序见
+   [`component-coverage-matrix.md`](./component-coverage-matrix.md)（硬约束：**rpc 先于 api**）。
+1b. 🔴 **救活 `task-rpc` 的 15 条静默 skip**（`TaskProgressUpsertParityTest`）——
+   ✅ **根因已定性**：`task-rpc` 是**全仓唯一漏配 `RYUK_DISABLED` surefire 注入的容器模块**，
+   而 `@EnabledIfDockerAvailable` 在类级求值时要去拿 Docker client ⇒ 触发拉 Ryuk 镜像 ⇒
+   `ContainerFetchException` 被 `DockerAvailableDetector` 的 `catch (Throwable)→false` 压成
+   「Docker is not available」⇒ 整类静默 disable。⚠️ **本条只诊断未实施** ⇒
+   详见 [`component-coverage-matrix.md`](./component-coverage-matrix.md)。
 2. **`comment-rpc` 落地后**：`comment-api` 才具备双侧活体对拍条件（当前只有 mock gRPC 边界）。
 3. **gRPC client 熔断**（`comment-api` 已登记未修，见上「证据边界」一节）。
 4. **`comment` 域实现时**，按 [`../../Intentional_Deviations/comment/proto.md`](../../Intentional_Deviations/comment/proto.md)

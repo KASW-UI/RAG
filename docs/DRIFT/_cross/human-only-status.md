@@ -21,8 +21,11 @@
 未覆盖的子模块：**users-common / message-rpc / message-api**（虽已实现并做过 Go ↔ RAG 对照，但**文档缺失**）
 + **Go 有、RAG 尚未翻译的 3 个微服务**：`knowledge` / `points` / `security`
 （🚫 **不在本项目范围内，不是待办** ⇒ §1「微服务范围」）
-+ **2026-10-23 12:25 新纳入范围但只有 proto 层的 4 个域**：`comment` / `favorite` / `follow` / `task`
-—— 它们的 **4 api + 4 rpc + 3 common 共 11 个组件仍是空壳**（只有 `pom.xml`、0 行 Java）⇒ 无可对照对象
++ **2026-10-23 12:25 新纳入范围的 4 个域**：`comment` / `favorite` / `follow` / `task`
+—— 🔴 **2026-10-23 20:2x 更正**：原文写「4 api + 4 rpc + 3 common 共 11 个组件仍是空壳」，
+实测**全部已落地**（38 组件零空骨架、全量编译 `EXIT=0`）⇒ 该条**作废**。
+它们现在缺的不是代码而是 **HUMAN_ONLY.MD 文档 + Go ↔ RAG 对照**（**14 个组件零台账**），
+逐组件状态见 [`component-coverage-matrix.md`](./component-coverage-matrix.md)
 + **已翻译但对照未闭环的组件**：`article-api`（从未对照）、`article-rpc`（首轮组件级完成）、
 `hot-api`（仅源码级对照）、以及 `like-common` / `message-common`
 （**连 Go ↔ RAG 对照都还没做过**，见 §0）。前者建议按 phase 补文档，后者暂按 Go 行为对齐、进入对应 phase 再补。
