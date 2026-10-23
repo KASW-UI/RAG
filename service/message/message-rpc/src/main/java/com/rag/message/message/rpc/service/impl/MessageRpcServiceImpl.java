@@ -1,6 +1,5 @@
 package com.rag.message.message.rpc.service.impl;
 
-import com.rag.message.message.common.errmsg.MessageErrorMessages;
 import com.rag.message.message.proto.BaseResp;
 import com.rag.message.message.proto.ConversationListReq;
 import com.rag.message.message.proto.ConversationListResp;
@@ -120,7 +119,7 @@ public class MessageRpcServiceImpl extends MessageServiceGrpc.MessageServiceImpl
      *
      * <p>关键：DomainService 已经把业务异常用 {@link com.rag.message.message.rpc.service.MessageRpcSupport#grpcRuntimeError}
      * 包成 {@link StatusRuntimeException}，这里直接 catch 并 {@code responseObserver.onError(...)}；
-     * 其它 RuntimeException 兜底为 INTERNAL + ErrorServerCommon，避免泄漏 stack trace 给客户端。
+     * 其它 RuntimeException 兜底为 <b>UNKNOWN</b>（2026-10-24 由 INTERNAL 改来，见下方长注释）。
      */
     private static <Resp> void invoke(Supplier<Resp> handler, StreamObserver<Resp> observer) {
         try {
@@ -132,11 +131,39 @@ public class MessageRpcServiceImpl extends MessageServiceGrpc.MessageServiceImpl
             observer.onError(sre);
         } catch (RuntimeException e) {
             log.error("message-rpc handler failed", e);
-            observer.onError(new StatusRuntimeException(
-                    Status.INTERNAL
-                            .withDescription(MessageErrorMessages.getMsg(
-                                    com.rag.message.message.common.errmsg.MessageErrorCode.ERROR_SERVER_COMMON.getCode()))
-                            .withCause(e)));
+            // ⚠️⚠️ **兜底码必须是 UNKNOWN，不是 INTERNAL**（DRIFT-MSG-V-024，2026-10-24 修）
+            //
+            // 【Go 行为（消费点，不是声明点）】
+            //   ① message-rpc 的业务代码在 DB / 未知异常路径上**原样返回普通 error**
+            //      （service/message/rpc/internal/logic/**：**共 19 处** ObserveDBError 之后
+            //       `return nil, err`，不包 status）⇒ grpc-go v1.81.1 的
+            //       `processUnaryRPC` 走 `status.FromContextError(appErr)` ⇒
+            //       **codes.Unknown + 原始错误文本**。
+            //   ② go-zero 的熔断判据 `codes.Acceptable(err)` 只对
+            //      {DEADLINE_EXCEEDED, INTERNAL, UNAVAILABLE, DATA_LOSS, UNIMPLEMENTED,
+            //       RESOURCE_EXHAUSTED} 这 6 个码判「失败」
+            //      （zrpc/internal/codes/accept.go:9-17）
+            //      ⇒ **UNKNOWN 不在名单里 ⇒ Go 的 DB 故障不触发熔断**。
+            //
+            // 【改之前的 RAG 行为】本方法把 RuntimeException 统一转成
+            //   `Status.INTERNAL + "internal server error"` ⇒
+            //   ① 客户端看到的 status 码与 Go 不同（INTERNAL vs UNKNOWN）；
+            //   ② **INTERNAL 在那 6 码名单里 ⇒ RAG 的熔断器会把 DB 故障记成失败**
+            //      ⇒ 同一个 DB 故障，两侧的开路决策分岔（RAG 灵敏得多）。
+            //
+            // 【为什么 description 留空（null），而不是抄 Go 的原始错误文本】
+            //   Go 的 description 是**原始错误文本**（如 `pq: relation "x" does not exist`），
+            //   而 api 侧的 `shared.RPCError` 会把 description **原文**塞进 HTTP envelope 的 msg
+            //   ⇒ Go 侧客户端能直接看到 SQL 错误文本（**信息泄露**）。
+            //   本仓 `DRIFT-MSG-V-003` 已就这一点**签字保留 RAG 侧**：
+            //   envelope 只回码表文案，不回显原始错误文本。
+            //   ⇒ 这里若把原始文本抄过来，等于在**签字之外**又引入一次泄露。
+            //   ⇒ description 留空 ⇒ api 侧 `bizCodeFromError` 走
+            //      「反查未命中 ⇒ 按 status code class 兜底」这一支
+            //      （Go 侧对非 status 错误走的是**同一支**：`status.FromError` 返回 ok=false
+            //        ⇒ 直接 `CodeServerBusy`）⇒ **业务码 1015 与 Go 一致**，
+            //      且 envelope 的 msg 由码表给出（"service busy"），**不泄露原始文本**。
+            observer.onError(new StatusRuntimeException(Status.UNKNOWN.withCause(e)));
         }
     }
 }

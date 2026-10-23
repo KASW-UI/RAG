@@ -64,6 +64,42 @@ spring:
   flyway:
     enabled: true
     baseline-on-migrate: true
+    # ⚠️⚠️ **baseline-version 必须显式钉 0**（2026-10-24 实测修掉的真缺陷）
+    #
+    # 【现象】message-rpc 与 user-rpc / admin-rpc **连同一个库**（rag_db / first_db），
+    #         而 user-rpc / admin-rpc 用的是 SchemaInitializer 幂等重放（无账本），
+    #         它们先启动 ⇒ **public schema 已经非空**（users_user / admin_admin …）。
+    #         ⇒ message-rpc 启动时 Flyway 看到「非空 schema + 没有自己的账本」
+    #         ⇒ 因 baseline-on-migrate=true ⇒ **在 V1 处打 baseline 标记**
+    #         ⇒ **V1 的 SQL 从未执行** ⇒ `message_notification` 表永远建不出来
+    #         ⇒ V5（ALTER 那 8 个时间列）报 `relation "message_notification" does not exist`
+    #         ⇒ **服务起不来**。
+    #
+    # 【为什么 Testcontainers 永远测不出来】
+    #         `MessageTransactionWiringTest` 每个用例都是**全新空库** + 只有 message-rpc 一个进程
+    #         ⇒ schema 是空的 ⇒ baseline 根本不触发 ⇒ V1 正常执行。
+    #         ⇒ 「测试全绿」与「生产拓扑下根本起不来」同时成立（§3.3 的经典形态）。
+    #
+    # 【证据】真 PG 16 + 真 jar 实测（2026-10-24，difftest 并行实例）：
+    #         非空 schema + baseline-on-migrate=true（默认 baseline-version=1）
+    #           ⇒ 账本首行 = `<< Flyway Baseline >>`（version 1）
+    #           ⇒ message_notification **不存在** ⇒ V5 失败 ⇒ 启动失败
+    #         非空 schema + **baseline-version=0**
+    #           ⇒ 账本 = V1..V5 **五条全部真实执行**
+    #           ⇒ message_notification 建出 ⇒ `Started MessageRpcApplication in 4.09 seconds`
+    #
+    # 【为什么 0 而不是关掉 baseline-on-migrate】
+    #         baseline-on-migrate=false 时，非空 schema 且无账本 ⇒ Flyway **直接抛异常退出**
+    #         （"Found non-empty schema(s) … but no schema history table"）⇒ 更糟（起不来且无修复路径）。
+    #         baseline-version=0 ⇒ baseline 标记打在 version 0 ⇒ **V1 之后全部迁移照常执行**
+    #         ⇒ 既能在共享库里安全启动，又不丢任何迁移。
+    #
+    # 【影响面】同一套写法（独立账本 + baseline-on-migrate=true + 共享 schema）
+    #         在 **like-rpc** 上**同样成立**（它的迁移从 V1 起步 ⇒ V1 会被顶掉
+    #         ⇒ like_record 表建不出来）⇒ 见 DRIFT 台的 `DRIFT-MSG-V-029`。
+    #         ⚠️ **article-rpc 不受影响**：它的迁移从 V8 起步，没有 V1 可跳
+    #         ⇒ baseline 落在 version 1 ⇒ V8..V10 照常执行（2026-10-24 实测更正）。
+    baseline-version: 0
     locations: classpath:db/migration
     schemas: public
     table: flyway_schema_history_message

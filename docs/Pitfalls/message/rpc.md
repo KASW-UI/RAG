@@ -557,3 +557,152 @@ Go 的 `defer` 是在 `Allow()` 成功**之后**才注册的（`sheddingintercep
 而不是盯着业务日志 —— 业务侧只会看到一个普通的 `INTERNAL`。
 
 ---
+
+
+---
+
+## PITFALL-MSG-R-017 `set -euo pipefail` + 命令替换里的 `lsof` ⇒ **脚本静默消失**
+
+**现象**：`tools/difftest/run.sh` 跑着跑着就没了，日志停在某一行，**一个字都不报错**，
+进程也没留下，日志文件是空的。
+
+**根因**：`lsof` 在「**没有匹配**」时退出码是 **1**；脚本开头是 `set -euo pipefail`
+⇒ 命令替换 `who="$(lsof … | tail | head | awk)"` 的**退出码非零**
+⇒ `set -e` 立刻终止整个脚本。
+⚠️ 而且它**不报错** —— 赋值失败不是「命令失败」，`set -e` 不打任何东西。
+
+**为什么难查**：① 症状是「没输出」，不像错误；② `head -1` 还会提前关管道
+⇒ `lsof` 收到 SIGPIPE（141）⇒ **同源**；③ 退出码非零，但脚本被 harness 记成「正常结束」。
+
+**修法**：`who="$( { lsof … ; } || true )"` —— 把整条管道的退出码兜成 0。
+
+**通用教训**：**`set -e` 下的命令替换会把「探测型命令的非零退出码」升级成「脚本猝死」**。
+⇒ 任何 `$( … )` 里放 `grep` / `lsof` / `diff` 这类**「没找到就返回 1」**的命令，
+   都必须显式 `|| true`。
+
+---
+
+## PITFALL-MSG-R-018 占位符名字**跨模块不统一** ⇒ 一整类模块在测试环境里**根本起不来**
+
+**现象**：`message-rpc` 在 difftest 环境里报
+`java.net.UnknownHostException: postgres` ⇒ Spring 连的是容器里的 `postgres` 主机名，
+而对拍环境的 PG 跑在 `127.0.0.1:<端口>`。
+
+**根因**：全仓的 jdbc url 占位符**名字不统一**：
+
+| 占位符 | 用它的模块 |
+|---|---|
+| `${POSTGRES_ADDR:postgres}` | `user-rpc` / `admin-rpc` |
+| `${POSTGRES_HOST:postgres}` | `message-rpc` / `article-rpc` / `comment-rpc` / `favorite-rpc` / `follow-rpc` / `like-rpc` / `task-rpc` |
+
+而 harness 只导出 `POSTGRES_ADDR` ⇒ **7 个 rpc 模块在对拍环境里全部起不来**。
+
+⚠️ **这条的真正意义**：它说明 **「message 域从没被 difftest 覆盖过」不是因为没人写脚本，
+而是因为脚本起不来** —— 而「脚本就位」在台账里被当成了「只差跑一次」。
+
+**通用教训**：**「脚本就位」与「脚本跑得起来」是两件事**。
+⇒ 共享 harness 里凡是**依赖应用侧环境变量名**的地方，
+   必须**按应用侧的写法导出全部别名**，而不是按「我印象里的那个名字」。
+
+---
+
+## PITFALL-MSG-R-019 `baseline-on-migrate: true` 会**顶掉 V1** ⇒ 核心表永远建不出来
+
+**现象**：`message-rpc` 在共享库（非空 schema）里启动失败：
+`Migration of schema "public" to version "5 …" failed` ⇒ `relation "message_notification" does not exist`。
+
+**根因**：`baseline-on-migrate: true` + **非空 schema** + **没有自己的账本**
+⇒ Flyway 在 **V1** 处打 baseline 标记 ⇒ **V1 的 SQL 从未执行** ⇒ V1 建的那张表不存在
+⇒ 后面任何碰它的迁移都失败。
+
+⚠️ **Testcontainers 永远测不出来**：每个用例都是**全新空库** + 只有本模块一个进程
+⇒ schema 是空的 ⇒ baseline 根本不触发。
+
+**修法**：`spring.flyway.baseline-version: 0` ⇒ 基线打在 V1 **之下** ⇒ V1..Vn 全部照常执行。
+⚠️ **不要**改成 `baseline-on-migrate: false` —— 那会让「非空 schema 且无账本」**直接抛异常退出**，更糟。
+
+**守门手法（在 `@DynamicPropertySource` 里，不是 `@BeforeEach`）**：
+先建一张无关表把 schema 弄成非空，再让 Spring 上下文启动（Flyway 才跑）。
+⚠️ 放 `@BeforeEach` 无效 —— 那跑在上下文**之后**，Flyway 早就迁移完了。
+
+**通用教训**：**「共享同一个 schema 的多个迁移方」+「各自独立账本」+「baseline-on-migrate」**
+= **后启动者那些版本号 ≤ baseline 版本的迁移会被静默顶掉**。
+⇒ 独立账本只解决了「账本互相污染」，**没解决「baseline 顶掉迁移」**。
+
+⚠️ **准确表述（2026-10-24 实测更正）**：不是「第一个迁移被顶掉」，而是
+「**版本号 ≤ baseline 版本**的迁移被顶掉」——
+因为 baseline 默认打在 **version 1** ⇒ 只有 **V1** 会被跳过。
+⇒ **是否受害取决于该模块最小的迁移版本号**：
+  · `message-rpc` 迁移从 **V1** 起步 ⇒ V1 被顶掉 ⇒ **V5 引用它 ⇒ 启动失败**；
+  · `like-rpc` 迁移从 **V1** 起步 ⇒ V1 被顶掉 ⇒ 但 V2..V6 不引用它 ⇒ **能起，运行期缺表**；
+  · `article-rpc` 迁移从 **V8** 起步 ⇒ 没有 V1 可顶 ⇒ **完全不受影响**（实测 `ls` 确认只有 V8/V9/V10）。
+⇒ **判定方法**：先 `ls` 该模块 `db/migration/` 看**最小版本号**，再比 baseline 版本。
+
+---
+
+## PITFALL-MSG-R-020 `mvn package` 成功 ≠ **产物可运行**
+
+**现象**：`message-api` 的 jar 只有 **76 KB**（而 `message-rpc` 的可执行 jar 是 **69 MB**）
+⇒ `java -jar message-api-*.jar` 报「**中没有主清单属性**」。
+
+**根因**：`service/message/message-api/pom.xml` **完全没有 `<build>` 段**
+⇒ 没有 `spring-boot-maven-plugin` 的 repackage ⇒ 打出来的是**普通 library jar**。
+
+⚠️ **为什么测试全绿**：`@SpringBootTest` 从 `target/classes` 起上下文，**根本不碰 jar**
+⇒ 「测试全绿 + mvn package 成功」与「产物根本起不来」可以同时成立。
+
+**修法**：补 `<build>` 段（`spring-boot-maven-plugin`）⇒ 产物 71 MB，
+`Main-Class: JarLauncher` / `Start-Class: MessageApiApplication`。
+
+**通用教训**：**模块的「可部署性」要单独验一次** —— 至少跑一次 `java -jar <产物>`。
+⚠️ 只跑 `mvn package` 只证明了「编译过了」。
+
+---
+
+## PITFALL-MSG-R-021 多工作树**共用同一个 `~/.m2`** ⇒ 共享模块的 SNAPSHOT 会被**别人**覆盖 ⇒ 单模块测试随机报 `NoClassDefFoundError`
+
+**现象**：`mvn -o -B -pl service/message/message-rpc test`（**故意不带 `-am`**）
+⇒ 几乎所有 `@SpringBootTest` 用例报 `Failed to load ApplicationContext` ⇒ 最内层 cause：
+
+```
+Caused by: java.lang.NoClassDefFoundError: com/rag/common/protection/GoStyleRpcProtectionChain
+	at com.rag.message.message.rpc.MessageRpcApplication.lambda$rpcInterceptorConfigurer$0(MessageRpcApplication.java:135)
+```
+
+⚠️ **迷惑性极强**：那个类**明明就在本工作树的源码里**
+（`service/common/src/main/java/com/rag/common/protection/GoStyleRpcProtectionChain.java`），
+且同一批用例在 20 分钟前还是**全绿** ⇒ 第一反应必然是「我刚才改坏了」。
+
+**根因**：`~/.m2/repository/com/rag/common/0.0.1-SNAPSHOT/` 是**主仓与所有工作树共用**的。
+本项目的并发工作流（`docs/Worktree.md`）里，主仓 `do-my-own-gh` 与各域工作树**同时**跑 `mvn install`
+⇒ **谁最后 install，谁的版本就占住那个 SNAPSHOT 路径**。
+
+实测样本（2026-10-24 现场）：
+
+| 位置 | `service/common/protection/` 下的类数 | 含 `GoStyleRpcProtectionChain`？ |
+|---|---|---|
+| 工作树 `align/message` | **12** | ✅ 有（`4aff796` 加的） |
+| 主仓 `do-my-own-gh` | **11** | ❌ **没有** |
+| `~/.m2` 里的 SNAPSHOT jar（mtime 05:47） | — | ❌ `unzip -l` 计数 = **0** ⇒ 来自主仓那次 install |
+
+⇒ 不带 `-am` 的单模块构建，解析到的 `service/common` 是**主仓那一版** ⇒ 缺类。
+
+**规避**：
+1. **单模块测试一律带 `-am`**：`mvn -o -B -pl <module> -am test`
+   ⇒ 共享模块从**本工作树源码**重新构建，压根不看 `~/.m2`。
+2. ⚠️ **不要**用 `mvn install` 把本工作树的版本装回去当修复 —— **会被别人再次覆盖**，
+   只是把「必现」变成「看谁最后 install」。
+3. ⚠️ **不要**看到 `NoClassDefFoundError` 就判「代码坏了」⇒ 先查两件事：
+   - 该类在**本工作树源码**里在不在？（`ls`）
+   - `~/.m2` 那个 SNAPSHOT jar 是**哪一版**？（看 mtime + `unzip -l | grep`）
+
+**判别式（一条命令定性）**：
+```bash
+unzip -l ~/.m2/repository/com/rag/common/0.0.1-SNAPSHOT/common-0.0.1-SNAPSHOT.jar \
+  | grep -c GoStyleRpcProtectionChain
+```
+⇒ 计数 **0** 而源码里有 ⇒ 就是这条坑，**不是代码问题** ⇒ 加 `-am` 重跑即可。
+
+**通用教训**：**多工作树并发下，`~/.m2` 里的 SNAPSHOT 是「最后写入者赢」的共享可变状态** ——
+它和 `git stash` 一样，是**工作区级状态**，会被并发 agent 互踩（与 `docs/Worktree.md` 禁用 `git stash` 同源）。
+⇒ 凡是要验证的行为，**都必须从本工作树源码构建**，不能依赖本地仓库里的 SNAPSHOT。

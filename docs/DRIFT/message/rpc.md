@@ -774,7 +774,14 @@ Go 侧同一命令连不上。**同时**：注释给了错误的安全感（§3.
 
 ---
 
-### DRIFT-MSG-V-024 🆕 DB / 未知异常：Go 保留 `UNKNOWN`，RAG 转成 `INTERNAL` ⇒ **熔断器会把它放大**
+### ✅ DRIFT-MSG-V-024 ✅ **已修（2026-10-24 第八轮）** DB / 未知异常：Go 保留 `UNKNOWN`，RAG 转成 `INTERNAL` ⇒ **熔断器会把它放大**
+
+> **⚠️ 2026-10-24 处置**：本条的**结论是对的**（Go 的 DB 故障确实不触发熔断），
+> 且**已实施修复**：rpc 侧兜底 `Status.INTERNAL` ⇒ **`Status.UNKNOWN`**、description 留空
+> ⇒ 熔断判定与 Go 一致；api 侧业务码从 5001 变 **1015**（与 Go 的 `CodeServerBusy` 一致），
+> 同时**不**回显原始错误文本（`DRIFT-MSG-V-003` 的签字保留）。
+> 守门 `MessageRpcUnknownStatusWiringTest`（4 例，真 gRPC）+ 变异验证 3/4 转红。
+> 详见下方「第八轮」第 3 节。
 
 **Component**: message-rpc　**Operation**: 全部（任何非业务异常的失败路径）
 **Category**: Error Identity　**Classification**: **`OBSERVABLE DIFFERENCE`**
@@ -838,6 +845,70 @@ RAG 侧**看不到** ⇒ 熔断/降载**上线后无法确认它在工作**（�
 `[CODE]` Go `zrpc/internal/serverinterceptors/sheddinginterceptor.go:24/28/29/41`（四处调用）；
 `[CODE]` RAG `GoStyleAdaptiveShedder.java` 无任何计数字段（实测 grep）。
 **Counterfactual = NO**（不影响任何请求的行为）—— 但**影响可运维性**。
+
+---
+
+### DRIFT-MSG-V-029 🆕 **跨组件待办**：`like-rpc` 有与 V-027 同款的 Flyway baseline 缺陷（`article-rpc` 经核实**不受影响**，已从本条剔除）
+
+**Component**: `like-rpc`（**别的域，本轮不改**）
+**Category**: DDL / Lifecycle　**Classification**: **`SEMANTIC MISMATCH`（运行期缺表）**
+**Risk**: **HIGH**
+
+> ⚠️ **2026-10-24 实测更正**：本条最初写的是「`like-rpc` / `article-rpc` **都**有同款缺陷，
+> 且分类为「服务起不来」⇒ **两处都错**，已按实测改写。详见下方「更正记录」。
+
+#### 现状（实测）
+
+**`like-rpc` —— 确有缺陷**：`application.yml` 与 message-rpc 同款写法
+（`baseline-on-migrate: true` + 独立账本 `flyway_schema_history_like` + 连同一个 `first_db` / `public` schema）
+⇒ 在共享库里，**先启动者留下的非空 schema** 会让 Flyway 在 **version 1** 处打 baseline
+⇒ **`V1__create_like_record.sql` 被整条跳过** ⇒ `like_record` 表永远建不出来。
+
+⚠️ **但严重度不是「起不来」**：实测 `V2`~`V6` **没有任何一处引用 `like_record`**
+（`grep -nE "REFERENCES|like_record"` 全部为空，V2 里那处只是注释）
+⇒ V2..V6 全部执行成功 ⇒ **`like-rpc` 能正常启动**
+⇒ 缺陷在**运行期**才暴露：第一次 like 写入 / 查询时找不到 `like_record` 表。
+（与 message-rpc 的区别：message-rpc 的 **V5** ALTER 那 8 个时间列引用 `message_notification`
+⇒ V5 失败 ⇒ **启动直接失败**。）
+
+**`article-rpc` —— 不受影响**（原判断有误，已剔除）：它的迁移**从 V8 起步**，没有 V1 可跳：
+```
+V8__create_article.sql
+V9__create_article_sync_outbox.sql
+V10__create_article_community_revision.sql
+```
+⇒ baseline 落在 version 1 ⇒ **V8..V10 全部照常执行** ⇒ 无缺陷。
+
+#### 为什么「非空 schema」这个前提对 like-rpc 也成立
+
+实测全仓**只有 users 域**有 `SchemaInitializer`（`service/users/users-common/.../ddl/SchemaInitializer.java`）
+⇒ 由 user-rpc / admin-rpc 先启动时建表 ⇒ `first_db` 的 `public` schema 非空。
+（各 api 模块 `Application` 类里出现的 `SchemaInitializer` 字样**只是排除扫描的注释**，不是它们自己在建表。）
+
+#### 修法
+
+与 message-rpc **完全相同**：加 `spring.flyway.baseline-version: 0`
+⇒ baseline 标记打在 version 0 ⇒ V1..V6 全部执行 ⇒ `like_record` 建得出来。
+⚠️ 属**别的域**，按域间纪律**本工作树不得改** ⇒ 交给 like 域自己的 session。
+
+⚠️ **连带提醒**：V-027 的守门手法（`@DynamicPropertySource` 里先建一张无关表把 schema 弄成非空）
+可以直接照抄给 like 域 —— 否则它会像 message-rpc 一样「测试全绿但运行期缺表」。
+
+#### 更正记录（2026-10-24，提交 `b43c4a1` 之前自查发现）
+
+| 项 | 原写 | 实测后 | 依据 |
+|---|---|---|---|
+| 受影响组件 | `like-rpc` + `article-rpc` | **只有 `like-rpc`** | `ls service/article/article-rpc/src/main/resources/db/migration/` ⇒ 只有 V8/V9/V10 |
+| 严重度 | 「服务起不来」 | **运行期缺表**（服务能起） | like-rpc V2..V6 不引用 `like_record`（grep 实测） |
+
+**Evidence**: `[CODE]` `like-rpc/application.yml`：`baseline-on-migrate: true` + `table: flyway_schema_history_like`
++ URL `.../${POSTGRES_DB:first_db}`；`ls` 实测迁移为 V1..V6；`grep` 实测 V2..V6 不引用 `like_record`；
+`ls` 实测 article-rpc 迁移为 V8..V10；`grep -rln SchemaInitializer` 实测**只有 users 域**有。
+`[RUNTIME-PG]` message-rpc 侧的实测样本见 `DRIFT-MSG-V-027`。
+**Counterfactual = YES**：把 `baseline-on-migrate` 去掉的人不会想到它会**顶掉 V1**。
+⚠️ **本条的严重度未经 like 域真 PG 复现**（本工作树不碰别域代码）⇒
+⇒ like 域接手时应先跑一次真 PG 复现再照抄修法。
+
 
 ---
 
@@ -1028,7 +1099,7 @@ RAG application.yml:16
 
 | 编号 | 问题 | 为何无法判定 | 需要什么 |
 |---|---|---|---|
-| **UNRESOLVED-MSG-003**（沿用，**复核仍成立**） | `tools/difftest` 的 message 域 12 档对拍是否真的一致 | 脚本与 runner 都在，但**没有任何结果产物**；且两侧栈要同时起 | 起双栈跑 `./tools/difftest/exp-difftest-grpc-errors-message.sh`，留结果产物 |
+| **UNRESOLVED-MSG-003** ✅ **已关闭（2026-10-24 第八轮）** | ~~`tools/difftest` 的 message 域 12 档对拍是否真的一致~~ | —— | ✅ **已关闭**：真起 Go + RAG 两套栈（2026-10-24，端口段 20082 / 60210），跑 `exp-difftest-grpc-errors-message.sh` ⇒ **11 条 status 码 + happy path 全部逐条一致，EXIT=0**；结果产物 `tools/difftest/message-grpc-results.txt`。<br>⚠️ **关闭它的前提是先修掉 3 个「起不来」的东西**：V-027（Flyway baseline 跳过 V1）、V-028（message-api jar 不可执行）、H5（`POSTGRES_HOST` 占位符不一致）⇒ **「脚本就位」≠「跑得起来」** |
 | **UNRESOLVED-MSG-004**（沿用，**复核仍成立**） | 三项「起不来」缺陷是否有**点名式**防回退 | 现存用例只间接锁住「上下文能起」 | 拆一条 `MessageContextWiringTest`，分别断言 `@MapperScan` 值、`NacosRegistration` 的 Bean 名、`spring-boot-flyway` 在 classpath |
 | **UNRESOLVED-MSG-005** ✅ **已关闭（2026-10-23 第四轮，FIX-MSG-V-023）** | ~~已存在的非 Flyway 建表的库上能否启动~~ | —— | ✅ 已关闭：**原问题的前提不成立** —— GORM `AutoMigrate` 建的是**索引**，V2 的 `ADD CONSTRAINT` 在 GORM 建过的库上**本来就能跑**；且 V4 已把约束降回索引（`DROP CONSTRAINT IF EXISTS` + `CREATE UNIQUE INDEX IF NOT EXISTS`），幂等实测 8 次执行全 `exit=0`。⚠️ **残留角落**：仅当外部工具恰好用了同名**约束**时才成立 |
 | **UNRESOLVED-MSG-V-001**（沿用，跨轮次） | Nacos namespace/group 不一致 | 需 user/admin 侧同轮次结论 | 两侧 namespace/group 对齐后再判 |
@@ -1392,20 +1463,23 @@ Flyway 本身每个迁移只跑一次，生产上不会重放。
 > **引用时必须带核对日期 + 当场实测**，不能沿用上一轮的数。
 
 ```
-message-rpc：54 tests（V-020 轮后的真实基线，2026-10-23 23:5x 实测）
-              → +5（recover 守门）= 59 → +2（breaker 真 gRPC 端到端）= 61 tests
-              → 61 tests / 0 failures / 0 errors / 0 skipped   BUILD SUCCESS
+message-rpc：54（V-020 轮后基线）→ 59（recover）→ 61（breaker）→ 68（本轮 +3 Flyway 守门 +4 V-024 守门）
+              → 68 tests / 0 failures / 0 errors / 0 skipped   BUILD SUCCESS
               ← skipped=0 是硬要求：§状态更正#5 规定「绿灯必须额外断言 skipped 数 = 0」
-message-api：84 tests / 0 failures / 0 errors / 0 skipped
-message-common：21 tests（本轮从 0 建起）/ 0 failures / 0 errors / 0 skipped
-service/common：146 → +16（判据 4 + breaker 5 + shedding 4 + 链序 3）= 162 tests
-              → 162 tests / 0 failures / 0 errors / 0 skipped
-              ← 本轮新增 GoStyleRecoverInterceptor / 4 个 protection 薄壳所在模块
+message-api：84 → 86（本轮 +2 503 超时取证）/ 0 failures / 0 errors / 0 skipped
+message-common：21 tests / 0 failures / 0 errors / 0 skipped
+service/common：162 tests / 0 failures / 0 errors / 0 skipped
+              ← GoStyleRecoverInterceptor / 4 个 protection 薄壳所在模块（本轮改了 HttpMiddleware 的 nosniff）
 semantic-probe：56 例 → 一致 54，不一致 0，已签字偏离 2                      EXIT=0
 breaker-probe（**新增**）：A 组 17 条判据**逐条一致** / B 组冷启动前缀**逐字一致**（prefix=AAAAA）
                         / C 组拒绝率统计比对（go=0.2500 / rag=0.2000，差 0.05 ≤ 容差 0.15）  EXIT=0
                         ⇒ C 组是**健全性检查**（Go 随机源不可播种 + 按墙钟分桶），
                           **真正的逐条对拍是 A 组与 B 组**
+**双端口活体对拍（2026-10-24 新增，本仓 message 域首次）**：
+  difftest 12 档 gRPC 对拍 ⇒ 11 条 status 码 + happy path **全部一致**      EXIT=0
+  真容器响应头 dump ⇒ 6 条路径 × 两侧全量头（产物 /tmp/difftest-msg-headers/）
+  3s 超时 503 ⇒ 503 + text/plain;charset=utf-8 + nosniff + "Request Timeout\n"
+  ⇒ **UNRESOLVED-MSG-003（rpc）/ -003、-004（api）已关闭**
 DDL 对拍：Go AutoMigrate 55 行 vs RAG **V1~V5**，**归一化后剩余 19 行差异**
           = 6 列 DEFAULT（RAG 有 / Go 无，各占 6 行）12
           + V-021 索引名 2 处（Go 带 message_ 前缀）4
@@ -1815,3 +1889,217 @@ message-api    ： 84 tests / 0 failures / 0 errors / 0 skipped
 semantic-probe ：56 例 → 一致 54，不一致 0，已签字偏离 2         EXIT=0
 breaker-probe  ：A 组 17 条逐条一致 / B 组 prefix=AAAAA / C 组 go=0.25 rag=0.20   EXIT=0
 ```
+
+---
+
+<!-- @fix 2026-10-24 第八轮 · 真双栈对拍首次跑通 · 连带修掉 2 个「根本起不来」级缺陷 -->
+
+## 2026-10-24 第八轮：**真双栈对拍首次跑通** + 连带挖出 2 个「根本起不来」级缺陷
+
+> **用户指示**：「起真双栈对拍，一次关 4 项未知（difftest 12 档 + 响应头 dump + 503 超时取证 + MSGAPI-010）」
+> ⇒ 本轮**第一次**真的把 Go ↔ RAG 两套栈同时起起来并对拍。
+
+### 0. 一句话结论
+
+| 交付项 | 结果 |
+|---|---|
+| **12 档 gRPC 双端口对拍** | ✅ **11 条 status 码 + happy path 全部逐条一致**（EXIT=0）⇒ **关闭 `UNRESOLVED-MSG-003`** |
+| **真容器响应头 dump** | ✅ 4 条路径 × 两侧全量响应头取证 ⇒ **关闭 api `UNRESOLVED-003`**；**`DRIFT-MSGAPI-010` 在真容器级确认** |
+| **3s 超时 503 取证** | ✅ 真 Tomcat + 慢 stub ⇒ **关闭 api `UNRESOLVED-004`**；顺带**修掉**一条真实差异（缺 `nosniff`） |
+| **附带挖出** | 🔴 **2 个「根本起不来」级缺陷**（Flyway baseline 跳过 V1 / message-api jar 不可执行） |
+
+---
+
+### 1. 🔴 `DRIFT-MSG-V-027`（新挖出 · 已修）：**Flyway 的 baseline 把 V1 整条跳过 ⇒ `message_notification` 永远建不出来**
+
+**Component**: `message-rpc`　**Operation**: 启动（全部 RPC）
+**Category**: DDL / Lifecycle　**Classification**: **`SEMANTIC MISMATCH`（服务起不来）**
+**Risk**: **HIGH（生产阻断）**　**发现时间**: 2026-10-24（起真栈时暴露）
+
+```
+现象（真 PG 16 + 真 jar 实测）：
+  message-rpc 与 user-rpc / admin-rpc 连**同一个库**（生产 first_db / 对拍 rag_db）
+  ⇒ user-rpc / admin-rpc 用 SchemaInitializer 幂等重放（无账本），**它们先启动**
+  ⇒ public schema 已经**非空**（users_user / admin_admin …）
+  ⇒ message-rpc 启动时 Flyway 看到「非空 schema + 没有自己的账本」
+  ⇒ 因 baseline-on-migrate=true ⇒ **在 V1 处打 baseline 标记**
+  ⇒ **V1 的 SQL 从未执行** ⇒ message_notification 表建不出来
+  ⇒ V5（ALTER 那 8 个时间列）报 `relation "message_notification" does not exist"
+  ⇒ **服务起不来**
+
+账本实况（修复前）：
+  installed_rank | version |             description             | type
+  ----------------+---------+------------------------------------+-------
+                1 | 1       | << Flyway Baseline >>               | BASELINE
+                2 | 2       | create message conversation         | SQL
+                3 | 3       | create message conversation message | SQL
+                4 | 4       | conversation pair unique index      | SQL
+```
+
+**为什么 Testcontainers 永远测不出来**：`MessageTransactionWiringTest` 每个用例都是**全新空库** + 只有 message-rpc 一个进程
+⇒ schema 是空的 ⇒ baseline 根本不触发 ⇒ V1 正常执行
+⇒ **「测试全绿」与「生产拓扑下根本起不来」同时成立**（§3.3 的经典形态）。
+
+**修法**：`spring.flyway.baseline-version: 0` ⇒ baseline 标记打在 **version 0**（V1 之下）
+⇒ **V1..V5 五条全部真实执行** ⇒ `message_notification` 建出 ⇒ `Started MessageRpcApplication in 4.09 seconds`。
+
+**为什么不是关掉 `baseline-on-migrate`**：`baseline-on-migrate=false` 时，非空 schema 且无账本
+⇒ Flyway **直接抛异常退出**（"Found non-empty schema(s) … but no schema history table"）⇒ 更糟（起不来且无修复路径）。
+
+**守门**：`MessageFlywaySharedSchemaWiringTest`（3 例，真 PG）
+- 关键手法：在 `@DynamicPropertySource` 里**先建一张无关表** ⇒ 把 schema 弄成非空
+  （放 `@BeforeEach` 无效 —— 那跑在上下文之后，Flyway 早就迁移完了）
+- 断言：`message_notification` 存在 / 账本的 BASELINE 行版本必须是 **0** / V1..V5 全是 SQL 行
+- **变异验证**：去掉 `baseline-version: 0` ⇒ **3/3 转红**（Context 起不来）⇒ 不是假绿
+
+⚠️ **口径纠正（实测）**：`baseline-on-migrate=true` 时 Flyway **一定会**写一行 BASELINE
+⇒ 断言口径不是「不允许有 BASELINE 行」，而是「**BASELINE 行的版本必须是 0**」。
+（第一版把断言写成「不允许出现 BASELINE 行」⇒ 连修好后的状态也判红 ⇒ 被本测试当场抓出来。）
+
+> ⚠️ **跨域影响（不在本轮范围）**：同一套写法（独立账本 + `baseline-on-migrate=true` + 共享 schema）
+> 在 **`like-rpc`** 上**同样成立** ⇒ 它的迁移从 V1 起步 ⇒ V1 会被顶掉 ⇒ `like_record` 建不出来。
+> ⚠️ **`article-rpc` 经实测不受影响**（迁移从 V8 起步，没有 V1 可跳）⇒ 已从本条剔除。
+> ⇒ 登记为跨组件待办，见 [`DRIFT-MSG-V-029`](#drift-msg-v-029-跨组件待办)。
+
+---
+
+### 2. 🔴 `DRIFT-MSG-V-028`（新挖出 · 已修）：**`message-api` 的 jar 根本不可执行**
+
+**Component**: `message-api`　**Operation**: 打包 / 部署
+**Category**: Build / Delivery　**Classification**: **`SEMANTIC MISMATCH`（产物不可运行）**
+**Risk**: **HIGH（部署阻断）**
+
+```
+service/message/message-api/pom.xml **完全没有 <build> 段**
+⇒ 没有 spring-boot-maven-plugin 的 repackage
+⇒ 打出来的是**普通 library jar**：实测 76 KB（而 message-rpc 的可执行 jar 是 69 MB）
+⇒ `java -jar message-api-*.jar` 直接报：「中没有主清单属性」（no main manifest attribute）
+⇒ **message-api 从来没被打成过可部署产物**
+   （此前所有验证都跑在容器里 @SpringBootTest，从没跑过真 jar）
+```
+
+**修法**：补 `<build>` 段（`spring-boot-maven-plugin` + 与 user-api 同款 surefire Ryuk 关闭段）。
+⇒ 实测产物 **71 MB**，`Main-Class: org.springframework.boot.loader.launch.JarLauncher`、
+`Start-Class: com.rag.message.message.api.MessageApiApplication` ⇒ **真 jar 起得来**。
+
+⚠️ **这正是 §3.3「编译通过 ≠ 产物可运行」的形态**：`mvn package` 成功、测试全绿，但产物根本起不来。
+⚠️ **只有 message-api 漏了**：`message-rpc` 的 pom 早就有这一段（`:230-234`）⇒ rpc 侧不受影响。
+
+---
+
+### 3. ✅ `DRIFT-MSG-V-024`（已修）：DB / 未知异常走 `UNKNOWN`（与 Go 的熔断判据对齐）
+
+**改动**：`MessageRpcServiceImpl#invoke` 的兜底 `Status.INTERNAL` ⇒ **`Status.UNKNOWN`**，
+且 **description 留空**。
+
+**为什么 description 留空、而不是抄 Go 的原始错误文本**：
+Go 的 api `shared.RPCError` 会把 gRPC description **原文**塞进 HTTP envelope 的 msg
+⇒ Go 客户端能直接看到 SQL 错误文本（**信息泄露**）。
+本仓 `DRIFT-MSG-V-003` 已就这一点**签字保留 RAG 侧**（envelope 只回码表文案）
+⇒ 若把原始文本抄过来，等于在**签字之外**又引入一次泄露。
+⇒ description 留空 ⇒ api 侧走「反查未命中 ⇒ 按 status code class 兜底」那一支
+⇒ **业务码 1015 与 Go 一致**，且 envelope 的 msg 由码表给出（不泄露）。
+
+**守门**：`MessageRpcUnknownStatusWiringTest`（4 例，真 gRPC）
+- DB 异常 ⇒ 客户端看到 **UNKNOWN**（不是 INTERNAL）
+- description 必须为 **null**（原始文本不得进 wire）
+- api 侧业务码必须 **1015**（Go 的 `CodeServerBusy`）
+- 业务错误（`StatusRuntimeException`）仍然原样转发
+**变异验证**：改回 `INTERNAL + "internal server error"` ⇒ **3/4 转红**（UNKNOWN→INTERNAL、1015→5001、description null→非 null）
+
+---
+
+### 4. ✅ `UNRESOLVED-MSG-003`（已关闭）：12 档 gRPC 双端口对拍
+
+```
+== message 域 Go ↔ RAG 双端口对拍 ==
+  go  message-rpc = 127.0.0.1:20082
+  rag message-rpc = 127.0.0.1:60210
+
+  ✓ INVALID_ARGUMENT: listNotifications(userId=0)
+  ✓ INVALID_ARGUMENT: getUnreadSummary(userId=0)
+  ✓ INVALID_ARGUMENT: markNotificationRead(uid=1, nid=0)
+  ✓ INVALID_ARGUMENT: markAllNotificationsRead(userId=0)
+  ✓ NOT_FOUND: markNotificationRead(ghost notificationId)
+  ✓ INVALID_ARGUMENT: getConversationMessages(conversationId=0)
+  ✓ NOT_FOUND: getConversationMessages(ghost conversationId)
+  ✓ INVALID_ARGUMENT: sendChatMessage(content="")
+  ✓ INVALID_ARGUMENT: sendChatMessage(self-chat USER 1 → USER 1)
+  ✓ PERMISSION_DENIED: sendChatMessage(USER 1 → ADMIN 2, no conversation)
+  ✓ INVALID_ARGUMENT: sendChatMessage(first message 51 runes > 50)
+  ✓   └─ conversation_id 非 0 / message.conversation_id == conversation_id / status == PENDING / can_send == false
+
+exit code: 0 (0 = message 域双端口等价 / 1 = 至少一档不符)
+```
+
+⇒ **证据强度**：这是本仓 message 域**第一次**真正的**双侧活体对拍**
+（此前只有「源码级对照」与「单侧真 PG」两档）⇒ §0 的「证据强度分层」可把 message 域上调一档。
+
+---
+
+### 5. 本轮为了让对拍能跑起来，**顺带修掉的 harness 缺陷**（`tools/difftest/`）
+
+| # | 缺陷 | 影响 | 修法 |
+|---|---|---|---|
+| H1 | **Go 侧 message-api 从没被起过** | message-api 的 HTTP 面**从来没有**双侧对拍过 | 新增 `conf/go/message-api.yaml`（Etcd → Endpoints 直连、端口独占 18892）+ run.sh 里构建/启动/就绪校验 |
+| H2 | **容器名与端口全写死** | 多域并发对齐时，第二份实例会 `docker compose down -v` **删掉别人正在用的 PG 数据卷** | 全部参数化：`DIFTEST_PORT_OFFSET` / `DIFTEST_CONTAINER_PREFIX` / `DIFTEST_PG_PORT` / `DIFTEST_REDIS_PORT`；默认值保持不变 ⇒ **老调用方零改动** |
+| H3 | **端口无预检** | 端口被别的容器占着时，症状出现在 docker compose 里（`port is already allocated`），看着像自己配置写错 | 起栈前逐端口预检，被占就报出**是谁**占的（容器名 / 进程名）并退出 |
+| H4 | **端口越界无校验** | Redis 56379+10000=66379 > 65535 ⇒ compose 报 `invalid hostPort`；RAG 59210+10000=69210 ⇒ Java 栈深处的 `port out of range`（**看半天才看得出是端口算错**） | 全部端口统一校验，越界就带着可操作的提示立刻退出 |
+| H5 | **`POSTGRES_ADDR` 与 `POSTGRES_HOST` 占位符不一致** | 全仓 jdbc url 里 **7 个 rpc 模块用 `POSTGRES_HOST`**（message/article/comment/favorite/follow/like/task），admin-rpc 用 `POSTGRES_ADDR`；而 harness 只导出 `POSTGRES_ADDR` ⇒ **这 7 个模块在对拍环境里都起不来**（`UnknownHostException: postgres`） | 两个名字**都导出**（同值）⇒ **这 7 个模块现在都能被对拍了** |
+| H6 | `set -euo pipefail` + 命令替换里的 `lsof` | `lsof` 无匹配时退出码 **1** ⇒ `pipefail` 让命令替换返回非零 ⇒ `set -e` **静默杀掉整个脚本**（一个字都不报错） | 用 `{ …; } \|\| true` 兜住整条管道 |
+
+⚠️ **H5 的意义远超本轮**：它意味着 **「message 域从没被 difftest 覆盖过」这件事的根因就在这里** ——
+不是没人写脚本，是**脚本起不来**。
+
+---
+
+### 6. 本轮实测数据（2026-10-24 当场实测）
+
+```
+【双侧活体对拍（本仓 message 域首次）】
+  12 档 gRPC 对拍：11 条 status 码 + happy path ⇒ 全部一致            EXIT=0
+  真容器响应头 dump：4 条路径 × 两侧全量响应头 ⇒ 逐条比对（见 api 台账）
+  3s 超时 503：真 Tomcat + 慢 stub ⇒ 503 + text/plain;charset=utf-8
+                                    + nosniff + "Request Timeout\n"
+
+【测试】2026-10-24 当场实测
+  service/common ：162 tests / 0 failures / 0 errors / 0 skipped
+  message-common ： 21 tests / 0 failures / 0 errors / 0 skipped
+  message-rpc    ： 68 tests（61 + 3 Flyway 守门 + 4 V-024 守门）/ 0 failures / 0 errors / 0 skipped
+  message-api    ： 86 tests（84 + 2 503 超时取证）/ 0 failures / 0 errors / 0 skipped
+  ⇒ 合计 **337 例**，0 failures / 0 errors / 0 skipped，BUILD SUCCESS
+
+【变异验证（本轮新增）】
+  Flyway：去掉 baseline-version: 0            ⇒ 3/3 转红
+  V-024：改回 INTERNAL + "internal server error" ⇒ 3/4 转红
+  nosniff：删掉 setHeader("X-Content-Type-Options","nosniff")
+                                          ⇒ 1/2 转红
+            （AssertionFailedError: expected: <nosniff> but was: <null>）
+            ⇒ 证明这条守门**不是假绿**
+
+【全仓校验】2026-10-24 当场实测
+  mvn -o -B -DskipTests package ⇒ 38 个模块全部 SUCCESS（42.9s，BUILD SUCCESS）
+  ⇒ 本轮对**共享面** `service/common` 的改动（nosniff）**未破坏其余 9 个域的编译**
+```
+
+> ⚠️ **2026-10-24 补记（本条在提交前自查时又挖出一条坑）**
+>
+> 复核「注释改动有没有改坏 YAML」时，跑 `mvn -pl service/message/message-rpc test`（**没带 `-am`**）
+> ⇒ 几乎所有 `@SpringBootTest` 用例报 `NoClassDefFoundError: GoStyleRpcProtectionChain`
+> ⇒ **看着像「我刚改坏了」，其实不是**：那个类在本工作树源码里**确实存在**，
+> 但 `~/.m2` 里的 `common-0.0.1-SNAPSHOT.jar` 被**主仓**（`do-my-own-gh`）那次 `mvn install` **覆盖**了
+> ⇒ 主仓那版 `service/common` **没有**这个类（主仓 11 个 protection 类 vs 工作树 12 个）。
+> ⇒ 带 `-am` 重跑 ⇒ 全绿。
+> ⇒ **教训**：多工作树共用一个 `~/.m2` ⇒ SNAPSHOT 是「最后写入者赢」的共享可变状态
+> ⇒ **凡验证行为，必须从本工作树源码构建** ⇒ 单模块测试一律带 `-am`。
+> ⇒ 完整经过 ⇒ [`PITFALL-MSG-R-021`](../../Pitfalls/message/rpc.md)。
+
+
+---
+
+### 7. ⚠️ 本轮改动落在**共享面**（`service/common`）
+
+- `HttpMiddleware#writeTimeoutResponse` **补 `X-Content-Type-Options: nosniff`**（Go 的 `http.Error` 会写）
+  ⇒ 影响**全部 10 个 api**（共享模块）⇒ 合并时需人工确认。
+- ⚠️ 另：Go 侧 `net/http` 的 `http.Error` 还会 `h.Del("Content-Length")` ⇒ chunked；
+  RAG 侧同样是 chunked ⇒ **这一项一致**。

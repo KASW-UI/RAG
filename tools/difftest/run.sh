@@ -48,13 +48,125 @@ for a in "$@"; do
     # 专供 exp-*.sh 这类需要「栈已经在跑」的取证脚本复用编排逻辑
     # ——它们自己造输入、自己观测，不该各自复制一遍起栈代码。
     --serve-only) SERVE_ONLY=1 ;;
-    *) echo "未知参数：$a（可选：--no-build / --keep / --serve-only）" >&2; exit 2 ;;
+    *) echo "未知参数：${a}（可选：--no-build / --keep / --serve-only）" >&2; exit 2 ;;
   esac
 done
 
-PG_PORT=55432
-REDIS_PORT=56379
-export POSTGRES_ADDR=127.0.0.1 POSTGRES_PORT=$PG_PORT \
+# ═══════════════════════════════════════════════════════════════════════════
+# 【并行实例（2026-10-24 新增）】多域并发对齐时，两个域的 session 可能同时跑本 harness。
+#
+# 实测踩到的坑：另一个域的 session（users-admin 工作树）正在跑同一套 harness，
+# 而本脚本的容器名（difftest-postgres）、端口段（55432/56379、18xxx/19xxx、58xxx/59xxx）
+# **全是写死的** ⇒ 直接跑第二份会：
+#   ① `docker compose down -v` 把**别人正在用的** PG 数据卷删掉（静默、且毁掉别人的中间态）
+#   ② 服务端口直接撞（Address already in use）
+#   ③ 双方抢同一个 /tmp/difftest 目录里的二进制与日志
+#
+# ⇒ 现在全套资源都支持偏移：
+#   DIFTEST_PORT_OFFSET=10000      整套端口段 +10000（PG/Redis/Go/RAG/DevServer 全跟着走）
+#   DIFTEST_CONTAINER_PREFIX=msgd   容器名前缀（⇒ 容器名与 compose project 都隔离）
+#   默认值全是 0 / difftest ⇒ **老调用方零改动**。
+# ═══════════════════════════════════════════════════════════════════════════
+PORT_OFFSET="${DIFTEST_PORT_OFFSET:-0}"
+CONTAINER_PREFIX="${DIFTEST_CONTAINER_PREFIX:-difftest}"
+COMPOSE_PROJECT="${DIFTEST_COMPOSE_PROJECT:-$CONTAINER_PREFIX}"
+PG_CONTAINER="$CONTAINER_PREFIX-postgres"
+REDIS_CONTAINER="$CONTAINER_PREFIX-redis"
+
+PG_PORT="${DIFTEST_PG_PORT:-$((55432 + PORT_OFFSET))}"
+REDIS_PORT="${DIFTEST_REDIS_PORT:-$((56379 + PORT_OFFSET))}"
+
+# ⚠️ 必须把算出来的端口/容器名前缀**导出**给 docker compose：
+#   compose 文件里写的是 ${DIFTEST_PG_PORT:-55432} / ${DIFTEST_CONTAINER_PREFIX:-difftest}，
+#   它只认环境变量 ⇒ 这里算完要 export，否则 compose 仍会用默认端口 ⇒
+#   第二份实例会去连第一份实例的 PG（表现为「A 的数据出现在 B 的库里」）。
+export DIFTEST_PG_PORT="$PG_PORT"
+export DIFTEST_REDIS_PORT="$REDIS_PORT"
+export DIFTEST_CONTAINER_PREFIX="$CONTAINER_PREFIX"
+
+
+# Go 侧服务端口（与 conf/go/*.yaml 副本里的字面量一一对应，渲染时同步偏移）
+GO_USER_RPC_PORT=$((19004 + PORT_OFFSET))
+GO_ADMIN_RPC_PORT=$((18081 + PORT_OFFSET))
+GO_MESSAGE_RPC_PORT=$((18082 + PORT_OFFSET))
+GO_USER_API_PORT=$((18888 + PORT_OFFSET))
+GO_ADMIN_API_PORT=$((18889 + PORT_OFFSET))
+GO_MESSAGE_API_PORT=$((18892 + PORT_OFFSET))
+
+# RAG 侧服务端口（Spring relaxed binding：GRPC_SERVER_PORT / SERVER_PORT）
+RAG_USER_RPC_PORT=$((59210 + PORT_OFFSET))
+RAG_ADMIN_RPC_PORT=$((58081 + PORT_OFFSET))
+RAG_MESSAGE_RPC_PORT=$((58210 + PORT_OFFSET))
+RAG_USER_API_PORT=$((59900 + PORT_OFFSET))
+RAG_ADMIN_API_PORT=$((58889 + PORT_OFFSET))
+RAG_MESSAGE_API_PORT=$((58992 + PORT_OFFSET))
+
+# ⚠️ **端口越界校验（实测踩中两次）**：统一 +10000 时
+#   Redis 端口变成 66379、RAG 的 59210 变成 69210 ⇒ **都超过 65535**。
+#   症状不同但同源：Redis 报 docker compose 的 "invalid hostPort"，
+#   RAG 侧报 Java 栈深处的 "port out of range: 69210"（**看半天才看得出是端口算错**）。
+#   ⇒ 所有端口统一在这里校验，越界就**立刻**带着可操作的提示退出。
+#   ⇒ PG / Redis 另可用独立环境变量指定（并行实例常用：65432 / 56381）。
+for _p in "$PG_PORT" "$REDIS_PORT" \
+          "$GO_USER_RPC_PORT" "$GO_ADMIN_RPC_PORT" "$GO_MESSAGE_RPC_PORT" \
+          "$GO_USER_API_PORT" "$GO_ADMIN_API_PORT" "$GO_MESSAGE_API_PORT" \
+          "$RAG_USER_RPC_PORT" "$RAG_ADMIN_RPC_PORT" "$RAG_MESSAGE_RPC_PORT" \
+          "$RAG_USER_API_PORT" "$RAG_ADMIN_API_PORT" "$RAG_MESSAGE_API_PORT"; do
+  if (( _p < 1024 || _p > 65535 )); then
+    echo "端口越界：$_p 不在 [1024,65535]。" >&2
+    echo "  ⇒ DIFTEST_PORT_OFFSET=$PORT_OFFSET 太大；换小一点的偏移，" >&2
+    echo "    或用 DIFTEST_PG_PORT / DIFTEST_REDIS_PORT 单独指定 PG 与 Redis 的端口。" >&2
+    exit 2
+  fi
+done
+
+
+# ── 端口预检：起栈之前先确认「我要用的端口都空着」────────────────────
+# ⚠️ 为什么必须预检（实测踩中）：
+#   端口被**别的 docker 容器的端口映射**占着时，症状出现在 docker compose 里
+#   （"Bind for 0.0.0.0:56381 failed: port is already allocated"），
+#   看起来像「我这套配置写错了」，实际是**别人先占了**。
+#   ⇒ 起栈前逐个探；被占就报出**是谁**占的（容器名 / 进程名）。
+preflight_ports() {
+  local p who busy=0
+  for p in "$PG_PORT" "$REDIS_PORT" \
+           "$GO_USER_RPC_PORT" "$GO_ADMIN_RPC_PORT" "$GO_MESSAGE_RPC_PORT" \
+           "$GO_USER_API_PORT" "$GO_ADMIN_API_PORT" "$GO_MESSAGE_API_PORT" \
+           "$RAG_USER_RPC_PORT" "$RAG_ADMIN_RPC_PORT" "$RAG_MESSAGE_RPC_PORT" \
+           "$RAG_USER_API_PORT" "$RAG_ADMIN_API_PORT" "$RAG_MESSAGE_API_PORT"; do
+    # ⚠️⚠️ **这里必须吞掉非零退出码**，否则脚本会**静默死掉**：
+    #   lsof 在「没有匹配」时退出码是 **1**；而本脚本开头是 `set -euo pipefail`
+    #   ⇒ 命令替换 `who="$(lsof ... | tail | head | awk)"` 的退出码非零
+    #   ⇒ `set -e` 立刻终止整个脚本。
+    #   ⚠️ 而且它**一个字都不报错**（赋值失败不是命令失败）⇒ 症状是
+    #   「脚本跑着跑着就没了、日志停在某一行、没有任何 error」。
+    #   ⚠️ 另外 `head -1` 会提前关管道 ⇒ lsof 收到 SIGPIPE（141）⇒ 同源。
+    # ⇒ 这里用 `{ ...; } || true` 把整条管道的退出码兜成 0。
+    who="$( { lsof -nP -iTCP:"$p" -sTCP:LISTEN 2>/dev/null | tail -n +2 | head -1 | awk '{print $1}'; } || true )"
+    if [[ -n "$who" ]]; then
+      busy=1
+      echo "  端口 $p 已被占用（$who）" >&2
+      { docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -E "[:.]${p}->" || true; } | sed 's/^/      容器：/' >&2
+      echo "      ⇒ 换端口：DIFTEST_PORT_OFFSET / DIFTEST_PG_PORT / DIFTEST_REDIS_PORT" >&2
+    fi
+  done
+  [[ $busy -eq 0 ]] || { echo "端口预检失败 ⇒ 换端口段后重试（不要硬顶）。" >&2; exit 2; }
+  echo "  ✓ 端口预检通过（全部空闲）"
+}
+preflight_ports
+
+# ⚠️⚠️ **POSTGRES_ADDR 与 POSTGRES_HOST 必须同时导出**（2026-10-24 实测踩中）：
+#   全仓的 jdbc url 占位符**名字不统一**：
+#     ${POSTGRES_ADDR:postgres} —— user-rpc（application.yaml）/ admin-rpc
+#     ${POSTGRES_HOST:postgres} —— message-rpc / article-rpc / comment-rpc /
+#                                  favorite-rpc / follow-rpc / like-rpc / task-rpc
+#   而 harness 早先只导出 POSTGRES_ADDR ⇒ **message-rpc 起不来**，
+#   症状是 `java.net.UnknownHostException: postgres`（Spring 连的是容器里的
+#   `postgres` 主机名，而对拍环境里 PG 跑在 127.0.0.1:<端口>）。
+#   ⚠️ 这不是 message 域独有：**其余 6 个 rpc 模块同样会起不来** ——
+#   也就是说「message 域从没被 difftest 覆盖过」这件事的根因就在这里。
+#   ⇒ 两个名字都导，且值相同。
+export POSTGRES_ADDR=127.0.0.1 POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=$PG_PORT \
        POSTGRES_USER=admin POSTGRES_PASSWORD=difftest \
        REDIS_ADDR=127.0.0.1 REDIS_PORT=$REDIS_PORT \
        NACOS_ADDR=127.0.0.1 NACOS_PORT=1
@@ -86,7 +198,7 @@ cleanup() {
   fi
   echo "[run.sh] 收摊…"
   for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done
-  docker compose -f "$HERE/docker-compose.yml" down -v >/dev/null 2>&1 || true
+  docker compose -p "$COMPOSE_PROJECT" -f "$HERE/docker-compose.yml" down -v >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -118,15 +230,47 @@ assert_started() {  # logfile, name
 
 mkdir -p "$RUN_DIR" "$LOGS"
 
+# ── 渲染 Go 配置副本：把字面量端口整体偏移 ──────────────────────────────
+# 为什么必须渲染而不是直接用 conf/go/*.yaml：
+#   那些副本里的端口是**字面量**（18082 / 19004 / 55432 …），
+#   并行实例若共用它们 ⇒ 第二份实例的 Go 进程会去连第一份实例的端口 ⇒
+#   对拍结果静默地变成「打到自己」。
+#   渲染到 $RUN_DIR/conf/go/ 之后，**每个实例的 Go 侧只认自己的端口**。
+#
+# 渲染方式用「整串数字替换」而不是正则词边界：
+#   ⚠️ macOS 的 sed 是 BSD 版，**不支持 \b**（那是 GNU 扩展）。
+#   这里所有端口都是 5 位、互不为子串 ⇒ 整串替换是安全的。
+render_go_conf() {
+  local dst="$RUN_DIR/conf/go" f base
+  mkdir -p "$dst"
+  # 顺序无关（各端口互不为子串），但固定写下来便于逐条核对。
+  local pairs="55432:$PG_PORT 56379:$REDIS_PORT \
+19004:$GO_USER_RPC_PORT 18081:$GO_ADMIN_RPC_PORT 18082:$GO_MESSAGE_RPC_PORT \
+18888:$GO_USER_API_PORT 18889:$GO_ADMIN_API_PORT 18892:$GO_MESSAGE_API_PORT \
+19094:$((19094 + PORT_OFFSET)) 19095:$((19095 + PORT_OFFSET)) \
+19096:$((19096 + PORT_OFFSET)) 19097:$((19097 + PORT_OFFSET)) \
+19098:$((19098 + PORT_OFFSET)) 19099:$((19099 + PORT_OFFSET))"
+  for f in "$HERE"/conf/go/*.yaml; do
+    base="$(basename "$f")"
+    cp "$f" "$dst/$base"
+    for pair in $pairs; do
+      sed -i '' "s/${pair%%:*}/${pair##*:}/g" "$dst/$base"
+    done
+  done
+  echo "  ✓ Go 配置副本已渲染到 ${dst}（端口偏移 ${PORT_OFFSET}）"
+}
+render_go_conf
+GO_CONF="$RUN_DIR/conf/go"
+
 echo "==> [1/5] 基建（postgres + redis；刻意不起 etcd / Nacos / jaeger）"
-docker compose -f "$HERE/docker-compose.yml" down -v >/dev/null 2>&1 || true
-docker compose -f "$HERE/docker-compose.yml" up -d
-until docker exec difftest-postgres pg_isready -U admin -d go_db >/dev/null 2>&1; do sleep 1; done
-until docker exec difftest-redis redis-cli ping >/dev/null 2>&1; do sleep 1; done
+docker compose -p "$COMPOSE_PROJECT" -f "$HERE/docker-compose.yml" down -v >/dev/null 2>&1 || true
+docker compose -p "$COMPOSE_PROJECT" -f "$HERE/docker-compose.yml" up -d
+until docker exec "$PG_CONTAINER" pg_isready -U admin -d go_db >/dev/null 2>&1; do sleep 1; done
+until docker exec "$REDIS_CONTAINER" redis-cli ping >/dev/null 2>&1; do sleep 1; done
 # initdb.sql 只在数据目录为空时执行；如果上一轮残留了旧卷，这三个库必须都在，
 # 否则 RAG 会连到一个不存在/表结构不对的库上，报错还长得像业务 bug。
 for db in go_db rag_db; do
-  until docker exec difftest-postgres psql -U admin -lqt 2>/dev/null | cut -d'|' -f1 | grep -qw "$db"; do sleep 1; done
+  until docker exec "$PG_CONTAINER" psql -U admin -lqt 2>/dev/null | cut -d'|' -f1 | grep -qw "$db"; do sleep 1; done
 done
 echo "  ✓ postgres(go_db,rag_db) + redis"
 
@@ -138,7 +282,8 @@ if [[ $BUILD -eq 1 ]]; then
     && CGO_ENABLED=0 go build -o "$RUN_DIR/bin/go-user-api"  ./service/user/user/api \
     && CGO_ENABLED=0 go build -o "$RUN_DIR/bin/go-admin-rpc" ./service/user/admin/rpc \
     && CGO_ENABLED=0 go build -o "$RUN_DIR/bin/go-admin-api" ./service/user/admin/api \
-    && CGO_ENABLED=0 go build -o "$RUN_DIR/bin/go-message-rpc" ./service/message/rpc )
+    && CGO_ENABLED=0 go build -o "$RUN_DIR/bin/go-message-rpc" ./service/message/rpc \
+    && CGO_ENABLED=0 go build -o "$RUN_DIR/bin/go-message-api" ./service/message/api )
 fi
 
 if [[ $BUILD -eq 1 ]]; then
@@ -147,7 +292,7 @@ if [[ $BUILD -eq 1 ]]; then
   # jar 统一收进 $RUN_DIR/bin，让下面的存在性检查和启动逻辑与 Go 二进制同构
   for m in user/user-rpc:user-rpc user/user-api:user-api \
            admin/admin-rpc:admin-rpc admin/admin-api:admin-api \
-           message/message-rpc:message-rpc; do
+           message/message-rpc:message-rpc message/message-api:message-api; do
     src="$ROOT/service/users/${m%%:*}/target/${m##*:}-0.0.1-SNAPSHOT.jar"
     # message 域在 service/ 下面而不是 service/users/ 下面，单独算一次路径
     [[ "$m" == message/* ]] && src="$ROOT/service/${m%%:*}/target/${m##*:}-0.0.1-SNAPSHOT.jar"
@@ -156,29 +301,35 @@ if [[ $BUILD -eq 1 ]]; then
   done
 fi
 
-for j in go-user-rpc go-user-api go-admin-rpc go-admin-api go-message-rpc \
-         user-rpc user-api admin-rpc admin-api message-rpc; do
+for j in go-user-rpc go-user-api go-admin-rpc go-admin-api go-message-rpc go-message-api \
+         user-rpc user-api admin-rpc admin-api message-rpc message-api; do
   [[ -x "$RUN_DIR/bin/$j" || -f "$RUN_DIR/bin/$j" ]] \
-    || { echo "缺少产物 $j，请去掉 --no-build"; exit 1; }
+    || { echo "缺少产物 ${j}，请去掉 --no-build"; exit 1; }
 done
 
 echo "==> [3/5] 启动 Go 栈（配置来自 conf/go/*.yaml 副本，Etcd 已移除、Endpoints 直连）"
-POSTGRES_DB=go_db "$RUN_DIR/bin/go-user-rpc"  -f "$HERE/conf/go/user-rpc.yaml"  >"$LOGS/go-user-rpc.log" 2>&1 & PIDS+=($!)
-POSTGRES_DB=go_db "$RUN_DIR/bin/go-admin-rpc" -f "$HERE/conf/go/admin-rpc.yaml" >"$LOGS/go-admin-rpc.log" 2>&1 & PIDS+=($!)
+POSTGRES_DB=go_db "$RUN_DIR/bin/go-user-rpc"  -f "$GO_CONF/user-rpc.yaml"  >"$LOGS/go-user-rpc.log" 2>&1 & PIDS+=($!)
+POSTGRES_DB=go_db "$RUN_DIR/bin/go-admin-rpc" -f "$GO_CONF/admin-rpc.yaml" >"$LOGS/go-admin-rpc.log" 2>&1 & PIDS+=($!)
 sleep 3
 # message-rpc 必须等 user-rpc / admin-rpc 起来之后再起：
 # Go 侧 NewServiceContext 里 `zrpc.MustNewClient(c.UserRpc)` 默认 NonBlock=false
 # ⇒ 走 grpc.WithBlock()，下游没监听时会一直阻塞拨号。副本已把 Etcd 换成
 # Endpoints 直连（conf/go/message-rpc.yaml），但直连同样要等对端在听。
-POSTGRES_DB=go_db "$RUN_DIR/bin/go-message-rpc" -f "$HERE/conf/go/message-rpc.yaml" >"$LOGS/go-message-rpc.log" 2>&1 & PIDS+=($!)
+POSTGRES_DB=go_db "$RUN_DIR/bin/go-message-rpc" -f "$GO_CONF/message-rpc.yaml" >"$LOGS/go-message-rpc.log" 2>&1 & PIDS+=($!)
 sleep 2
 assert_started "$LOGS/go-message-rpc.log" "go message-rpc" || true
-POSTGRES_DB=go_db "$RUN_DIR/bin/go-user-api"  -f "$HERE/conf/go/user-api.yaml"  >"$LOGS/go-user-api.log" 2>&1 & PIDS+=($!)
-POSTGRES_DB=go_db "$RUN_DIR/bin/go-admin-api" -f "$HERE/conf/go/admin-api.yaml" >"$LOGS/go-admin-api.log" 2>&1 & PIDS+=($!)
+POSTGRES_DB=go_db "$RUN_DIR/bin/go-user-api"  -f "$GO_CONF/user-api.yaml"  >"$LOGS/go-user-api.log" 2>&1 & PIDS+=($!)
+POSTGRES_DB=go_db "$RUN_DIR/bin/go-admin-api" -f "$GO_CONF/admin-api.yaml" >"$LOGS/go-admin-api.log" 2>&1 & PIDS+=($!)
 assert_started "$LOGS/go-user-api.log"  "go user-api"  || true
 assert_started "$LOGS/go-admin-api.log" "go admin-api" || true
-wait_http "http://127.0.0.1:18888/usercenter/v1/user/login" "go user-api" 60
-wait_http "http://127.0.0.1:18889/admincenter/v1/admin/login" "go admin-api" 60
+wait_http "http://127.0.0.1:$GO_USER_API_PORT/usercenter/v1/user/login" "go user-api" 60
+wait_http "http://127.0.0.1:$GO_ADMIN_API_PORT/admincenter/v1/admin/login" "go admin-api" 60
+# go-message-api 必须在 go-message-rpc 之后起：它要连 message-rpc（zrpc client），
+# 与 message-rpc → user-rpc 的阻塞拨号同理，下游没监听时会一直卡住。
+POSTGRES_DB=go_db "$RUN_DIR/bin/go-message-api" -f "$GO_CONF/message-api.yaml" >"$LOGS/go-message-api.log" 2>&1 & PIDS+=($!)
+sleep 3
+assert_started "$LOGS/go-message-api.log" "go message-api" || true
+wait_http "http://127.0.0.1:$GO_MESSAGE_API_PORT/message/v1/unread" "go message-api" 60
 
 echo "==> [4/5] 启动 RAG 栈（独占端口 59210/58081/59900/58889；gRPC 走 static:// 绕开 Nacos）"
 # GRPC_SERVER_PORT / SERVER_PORT 用 Spring relaxed binding 覆盖 yml 里的默认值，
@@ -209,7 +360,7 @@ echo "==> [4/5] 启动 RAG 栈（独占端口 59210/58081/59900/58889；gRPC 走
 # ⚠️ 前缀必须是 mybatis-plus，不能写 mybatis（§3.3「不报错的隐式失效」）：
 #   MyBatis-Plus 的 @ConfigurationProperties 前缀是 "mybatis-plus"
 #   （javap: MybatisPlusProperties，字段 configuration 的类型是
-#     MybatisPlusProperties$CoreConfiguration，继承 MyBatis Configuration，
+#     MybatisPlusProperties${CoreConfiguration}，继承 MyBatis Configuration，
 #     其上有 defaultStatementTimeout: Integer 的 getter+setter，绑定链路通）。
 #   而**没有任何** @ConfigurationProperties(prefix="mybatis")。
 #   Spring Boot 对未知的命令行属性是【静默接受】的 —— 不打 warn、不报错、
@@ -224,9 +375,9 @@ if [[ -n "${EXP_RAG_QUERY_TIMEOUT:-}" ]]; then
   echo "    （生产方案是代码内拦截器逐请求注入，本开关只作兜底/对照）"
 fi
 
-POSTGRES_DB=rag_db GRPC_SERVER_PORT=59210 \
+POSTGRES_DB=rag_db GRPC_SERVER_PORT=$RAG_USER_RPC_PORT \
   java -jar "$RUN_DIR/bin/user-rpc"  ${QTO_ARG[@]+"${QTO_ARG[@]}"} >"$LOGS/rag-user-rpc.log" 2>&1 & PIDS+=($!)
-POSTGRES_DB=rag_db GRPC_SERVER_PORT=58081 \
+POSTGRES_DB=rag_db GRPC_SERVER_PORT=$RAG_ADMIN_RPC_PORT \
   java -jar "$RUN_DIR/bin/admin-rpc" ${QTO_ARG[@]+"${QTO_ARG[@]}"} >"$LOGS/rag-admin-rpc.log" 2>&1 & PIDS+=($!)
 sleep 20
 #
@@ -257,18 +408,18 @@ sleep 20
 #   这是**对拍抓出来的真实配置缺陷**，不是对拍环境特有的问题（默认值在哪儿都一样）。
 #   修法是给 user-api/application.yml 补 negotiation-type: plaintext；
 #   在那之前 harness 显式钉住，否则整个 user 域没法对拍。
-POSTGRES_DB=rag_db SERVER_PORT=59900 \
+POSTGRES_DB=rag_db SERVER_PORT=$RAG_USER_API_PORT \
   env SPRING_CLOUD_NACOS_DISCOVERY_REGISTER_ENABLED=false \
   java -jar "$RUN_DIR/bin/user-api" \
-  --grpc.client.user-rpc.address=static://127.0.0.1:59210 \
+  --grpc.client.user-rpc.address=static://127.0.0.1:$RAG_USER_RPC_PORT \
   --grpc.client.user-rpc.negotiation-type=plaintext \
   >"$LOGS/rag-user-api.log" 2>&1 & PIDS+=($!)
-POSTGRES_DB=rag_db SERVER_PORT=58889 \
+POSTGRES_DB=rag_db SERVER_PORT=$RAG_ADMIN_API_PORT \
   env SPRING_CLOUD_NACOS_DISCOVERY_REGISTER_ENABLED=false \
   java -jar "$RUN_DIR/bin/admin-api" \
-  --grpc.client.admin-rpc.address=static://127.0.0.1:58081 \
+  --grpc.client.admin-rpc.address=static://127.0.0.1:$RAG_ADMIN_RPC_PORT \
   --grpc.client.admin-rpc.negotiation-type=plaintext \
-  --grpc.client.user-rpc.address=static://127.0.0.1:59210 \
+  --grpc.client.user-rpc.address=static://127.0.0.1:$RAG_USER_RPC_PORT \
   --grpc.client.user-rpc.negotiation-type=plaintext \
   >"$LOGS/rag-admin-api.log" 2>&1 & PIDS+=($!)
 sleep 5
@@ -276,8 +427,8 @@ assert_started "$LOGS/rag-user-rpc.log"  "rag user-rpc"
 assert_started "$LOGS/rag-admin-rpc.log" "rag admin-rpc"
 assert_started "$LOGS/rag-user-api.log"  "rag user-api"
 assert_started "$LOGS/rag-admin-api.log" "rag admin-api"
-wait_http "http://127.0.0.1:59900/user/v1/login"  "rag user-api" 120
-wait_http "http://127.0.0.1:58889/admin/v1/login"  "rag admin-api" 120
+wait_http "http://127.0.0.1:$RAG_USER_API_PORT/user/v1/login"  "rag user-api" 120
+wait_http "http://127.0.0.1:$RAG_ADMIN_API_PORT/admin/v1/login"  "rag admin-api" 120
 
 # ── message 域（2026-10-22 纳入，AGENTS.md §6.6）────────────────────────
 # gRPC 下游同样用 -- 命令行参数（理由见上：map key 含连字符，env 形态的
@@ -289,15 +440,36 @@ wait_http "http://127.0.0.1:58889/admin/v1/login"  "rag admin-api" 120
 #    关掉 starter 会让它装配失败、上下文直接起不来。沿用 register-enabled=false
 #    即可：只关自动注册，starter 的 bean 还在。NACOS_PORT=1 让注册立刻失败并被
 #    register() 的 try/catch 吞掉，进程照常服务。
-POSTGRES_DB=rag_db GRPC_SERVER_PORT=58210 \
+POSTGRES_DB=rag_db GRPC_SERVER_PORT=$RAG_MESSAGE_RPC_PORT \
   java -jar "$RUN_DIR/bin/message-rpc" \
-  --grpc.client.user-rpc.address=static://127.0.0.1:59210 \
+  --grpc.client.user-rpc.address=static://127.0.0.1:$RAG_USER_RPC_PORT \
   --grpc.client.user-rpc.negotiation-type=plaintext \
-  --grpc.client.admin-rpc.address=static://127.0.0.1:58081 \
+  --grpc.client.admin-rpc.address=static://127.0.0.1:$RAG_ADMIN_RPC_PORT \
   --grpc.client.admin-rpc.negotiation-type=plaintext \
   >"$LOGS/rag-message-rpc.log" 2>&1 & PIDS+=($!)
 sleep 15
 assert_started "$LOGS/rag-message-rpc.log" "rag message-rpc"
+
+# ── RAG message-api（2026-10-24 纳入）────────────────────────────────────
+# 端口用 --server.port 而不是 MESSAGE_API_PORT 环境变量：
+#   application.yml 里写的是 `server.port: ${MESSAGE_API_PORT:8892}`，
+#   但 relaxed binding 下 `MESSAGE_API_PORT` → `message.api.port` 与
+#   `server.port` 的归属容易歧义 ⇒ 命令行参数按属性名直接绑定，没有歧义。
+# 独占段 58xxx：58xxx 已占 58081(admin-rpc) / 58210(message-rpc) ⇒ 取 58992。
+#
+# 与 message-rpc 同样：register-enabled=false（只关自动注册，starter 的 bean 还在），
+# NACOS_PORT=1 让注册立刻失败并被吞掉。
+# negotiation-type=plaintext：devh client 默认 TLS，而两端 message-rpc 都是 plain gRPC。
+POSTGRES_DB=rag_db \
+  env SPRING_CLOUD_NACOS_DISCOVERY_REGISTER_ENABLED=false \
+  java -jar "$RUN_DIR/bin/message-api" \
+  --server.port=$RAG_MESSAGE_API_PORT \
+  --grpc.client.message-rpc.address=static://127.0.0.1:$RAG_MESSAGE_RPC_PORT \
+  --grpc.client.message-rpc.negotiation-type=plaintext \
+  >"$LOGS/rag-message-api.log" 2>&1 & PIDS+=($!)
+sleep 12
+assert_started "$LOGS/rag-message-api.log" "rag message-api"
+wait_http "http://127.0.0.1:$RAG_MESSAGE_API_PORT/message/v1/unread" "rag message-api" 120
 
 # 「进程起来了但 schema 是空的」是一类静默失败：RPC 服务照常监听，
 # 只有真正打 SQL 时才炸，而那时候报错长得像业务 bug。
@@ -305,15 +477,15 @@ assert_started "$LOGS/rag-message-rpc.log" "rag message-rpc"
 # users_user 根本不存在，却照样打出 "Started UserRpcApplication"。
 assert_tables() {  # db, table, label
   local n
-  n=$(docker exec difftest-postgres psql -U admin -d "$1" -tAc \
+  n=$(docker exec "$PG_CONTAINER" psql -U admin -d "$1" -tAc \
       "select count(*) from information_schema.tables where table_schema='public' and table_name='$2';" 2>/dev/null | tr -d '[:space:]')
   if [[ "$n" != "1" ]]; then
     echo "  FAIL ${3}：表 ${1}.${2} 不存在"
     echo "        RAG 侧查 Flyway 账本（看迁移是不是被跳过了）："
-    docker exec difftest-postgres psql -U admin -d "$1" -tAc \
+    docker exec "$PG_CONTAINER" psql -U admin -d "$1" -tAc \
       "select version||' | '||description||' | success='||success from flyway_schema_history order by installed_rank;" 2>/dev/null | sed 's/^/        /' || true
     echo "        实际建出来的表："
-    docker exec difftest-postgres psql -U admin -d "$1" -tAc \
+    docker exec "$PG_CONTAINER" psql -U admin -d "$1" -tAc \
       "select tablename from pg_tables where schemaname='public' order by 1;" 2>/dev/null | sed 's/^/        /' || true
     echo "        Go 侧查自己的启动日志（AutoMigrate 失败会直接 log.Fatalln 退出）："
     echo "          $LOGS/go-${3#rag-}-rpc.log"

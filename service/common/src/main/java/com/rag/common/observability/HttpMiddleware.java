@@ -419,6 +419,16 @@ public final class HttpMiddleware {
     private static void writeTimeoutResponse(HttpServletResponse resp, int statusCode) throws IOException {
         resp.setStatus(statusCode);
         resp.setContentType("text/plain; charset=utf-8");
+        // ⚠️ 2026-10-24 补：Go 的 net/http `http.Error` 还会写
+        //   `h.Set("X-Content-Type-Options", "nosniff")`（Go 1.11 起）
+        //   ⇒ 少这一个头就是**字节级不一致**（真 Tomcat 实测：RAG 侧原本没有）。
+        //   ⇒ 补上，与 Go 对齐。
+        //   ⚠️ 已知**不可修**的残差：上面那个 Content-Type 里分号后的**空格** ——
+        //   Tomcat 的 setContentType 会把 Content-Type 解析成 MediaType 再序列化，
+        //   序列化时吃掉空格 ⇒ 发出 "text/plain;charset=utf-8"；
+        //   实测 `setHeader("Content-Type", ...)` 也一样（Tomcat 内部转手调 setContentType）
+        //   ⇒ 该空格在 Tomcat 上无任何写法能产出 ⇒ 归「框架限制」，不改。
+        resp.setHeader("X-Content-Type-Options", "nosniff");
         resp.getWriter().write(HTTP_TIMEOUT_BODY);
         resp.getWriter().write('\n');
         resp.getWriter().flush();

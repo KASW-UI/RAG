@@ -882,7 +882,27 @@ Tomcat
 
 ---
 
-### 🔴 DRIFT-MSGAPI-010 🔴 **仍 OPEN（2026-10-23 第三轮复核：未动）** 成功 / 错误响应的 `Content-Type` 缺 `charset`
+### 🔴 DRIFT-MSGAPI-010 🔴 **仍 OPEN，但 2026-10-24 已在真容器级确认并细化** 成功 / 错误响应的 `Content-Type` 缺 `charset`
+
+> **⚠️ 2026-10-24 真容器级取证（第八轮）** —— 本条不再是「只有转换器级证据」：
+>
+> ```
+> Go  message-api（真 net/http）： Content-Type: application/json; charset=utf-8
+> RAG message-api（真 Tomcat）  ： Content-Type: application/json              ← 无 charset
+> ```
+> ⇒ **真容器下确认成立**（此前只有转换器级推断）。
+>
+> **⚠️ 同时查清了根因，且它把本条拆成了两半**：
+> 1. **「缺 charset」这一半是可修的** ⇒ RAG 的 JSON 转换器 `defaultContentType` 就是 `application/json`，
+>    补一个带 charset 的 media type 即可逼近 Go。
+> 2. **「分号后的空格」那一半在 Tomcat 上不可达** ⇒ ⚠️ **实测**：
+>    Tomcat 11 的 `Response.setContentType(String)` 会把 Content-Type **解析成 MediaType 再序列化**，
+>    序列化时**吃掉分号后的空格** ⇒ 发出 `application/json;charset=utf-8`；
+>    且 **`setHeader("Content-Type", …)` 也一样**（Tomcat 内部对 Content-Type **转手调 `setContentType`**）
+>    ⇒ **没有任何写法能产出 Go 的 `application/json; charset=utf-8`** ⇒ 归 **框架限制**，不可修。
+>
+> ⇒ 故本条的正确表述是：**「charset 缺失」可修；「charset 后的空格」属框架限制（不可修）。**
+> ⇒ 修复路径与共享面影响见第八轮第 4 节。
 
 - **Component**：`message-api` 响应头
 - **Operation**：全部 13 个（成功与 envelope 错误两条路径）
@@ -1000,24 +1020,30 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
 - **Required Confirmation**：修 005 时同步补一条「规则进了 MVC mapper」的装配断言
   （首轮教训：`GoStyleGrpcClientBreakerWiringTest` 就是为这一层存在的）。
 
-### UNRESOLVED-003
-- **Question**：响应头在**真容器**下的完整形状（Content-Type / Content-Length / nosniff / Allow）两侧是否逐字节一致？
-- **Go Evidence**：`rest/httpx/responses.go:175-196`、`rest/internal/header/headers.go:17`
-- **Java Evidence**：本轮只到**转换器级**（`application/json`）；真 Tomcat 只验过保护层的裸 413/503。
-- **Why Unknown**：MockMvc 断言对 charset 不敏感（§7 DRIFT-MSGAPI-010 已说明）；
-  真 Tomcat 那 3 例测的是保护层路径，不经过消息转换器。
-- **Impact**：404 / 405 / 正常响应三条响应头全部停在 `OBSERVABLE DIFFERENCE` 或未判。
-- **Required Confirmation**：真容器 curl 两端 dump 全部头（首轮「下一步建议」第 3 条，至今未做）。
+### UNRESOLVED-003 ✅ **已关闭（2026-10-24 第八轮）**
+- ~~**Question**：响应头在**真容器**下的完整形状两侧是否逐字节一致？~~
+- **✅ 关闭依据**：真起 Go + RAG 两套 message-api（端口 20892 / 60992），
+  新增 `tools/difftest/exp-http-headers-message.sh` 对 **4 条路径**逐条 dump 两侧**全部**响应头并 diff：
+  `401 未带 token` / `404 未知路径` / `405 方法不匹配` / `415 Content-Type 不对` / `200 正常 envelope`（带 JWT）。
+  原始响应头产物在 `/tmp/difftest-msg-headers/`。
+- **⇒ 取证结论见第八轮第 2 节的对照表**（3 处真实差异 + 1 处框架限制）。
 
-### UNRESOLVED-004
-- **Question**：3s 超时触发时，RAG 是否真的写出 `503 + text/plain; charset=utf-8 + "Request Timeout\n"`？
-- **Go Evidence**：`service/common/observability/http.go:88`（`http.Error(w, httpTimeoutBody, statusCode)`）
-  + `rest/handler/timeouthandler.go`（已被 `DisableNativeRestTimeout` 关掉，不参与）
-- **Java Evidence**：`HttpMiddleware#writeTimeoutResponse`（**静态读过，无运行证据**）
-- **Why Unknown**：首轮「下一步建议」第 4 条（stub `sleep(5000)`）**至今未实现**；
-  `MessageApiProtectionRealTomcatTest` 的 3 例只覆盖 MaxBytes 413，不触达超时分支。
-- **Impact**：§6 的 Timeout 维度只能停在「设计对齐 + 静态一致」，不能写「已验证」。
-- **Required Confirmation**：补一条真触发测试（stub 睡眠 > 3s）并 dump 响应头与 body。
+### UNRESOLVED-004 ✅ **已关闭（2026-10-24 第八轮）**
+- ~~**Question**：3s 超时触发时，RAG 是否真的写出 `503 + text/plain; charset=utf-8 + "Request Timeout\n"`？~~
+- **✅ 关闭依据**：新增 `MessageApiTimeoutRealTomcatTest`（2 例，**真 Tomcat**）
+  —— 用一个**睡 5s 的 mock stub**（> 3s 阈值）把超时分支真正逼出来，并断言：
+  - 状态码 **503**（Go `http.Error(w, httpTimeoutBody, 503)`）
+  - body **恰好是 `"Request Timeout\n"`**（Go 的 `http.Error` 写 body + `\n`）
+  - `X-Content-Type-Options: nosniff`（Go 的 `http.Error` 自带）
+  - `Content-Type` 是 `text/plain` 且**带 charset**（⚠️ 分号后的空格不可达，见下）
+  - 对照组：同一路径、同一 stub，**不睡** ⇒ 正常 200 + envelope ⇒ 证明上一例确实由超时触发
+- **⚠️ 取证同时挖出并修掉一条真实差异**：RAG 侧的 503 **原本没有 `X-Content-Type-Options: nosniff`**
+  ⇒ 已在 `service/common` 的 `HttpMiddleware#writeTimeoutResponse` **补上**（Go 的 `http.Error` 会写）
+  ⇒ 影响全部 10 个 api（共享面）。
+- **⚠️ 残留（不可修 · 框架限制）**：`Content-Type` 分号后的**空格** ——
+  Tomcat 的 `setContentType` 会把 Content-Type 解析成 MediaType 再序列化、**吃掉空格**；
+  实测 `setHeader("Content-Type", …)` 也一样（Tomcat 内部转手调 `setContentType`）
+  ⇒ RAG 侧最多只能发 `text/plain;charset=utf-8`，Go 是 `text/plain; charset=utf-8`。
 
 ### UNRESOLVED-005
 - **Question**：`extra` 落库后的**键序**是否影响客户端？
@@ -1243,3 +1269,154 @@ message-api：84 tests / 0 failures / 0 errors / 0 skipped   BUILD SUCCESS
 
 ⚠️ **「84 全绿」不等于「对齐了 84 条」**：探针的 54 例才是这一轮的判定性证据，
 MVC 那一层的作用是证明装配（规则没掉在 builder 上），两者不可互相替代（§3.3.3）。
+
+---
+
+<!-- @fix 2026-10-24 第八轮 · 真双栈响应头取证 + 503 超时取证 + 3 条新发现 -->
+
+## 2026-10-24 第八轮：**真容器响应头双侧取证** + **3s 超时取证** + 3 条新发现
+
+> **用户指示**：「起真双栈对拍，一次关 4 项未知（difftest 12 档 + 响应头 dump + 503 超时取证 + MSGAPI-010）」
+
+### 1. 取证方法（新增 `tools/difftest/exp-http-headers-message.sh`）
+
+- 真起两套 message-api（Go `20892` / RAG `60992`），对 **4+2 条路径**逐条 dump 两侧**全部**响应头并 diff：
+  `401 未带 token` / `404 未知路径` / `405 方法不匹配` / `415 Content-Type 不对` / `200 正常 envelope`（带 JWT）/ `200 通知列表`（带 JWT）
+- **为什么必须带 JWT**：Go 侧 `rest.WithJwt(UserAuth.AccessSecret)` 覆盖整个 `/message/v1` 分组
+  ⇒ 无 token 一律 401 ⇒ 「正常响应」那一档必须现签一个两侧都认的 HS256 token（脚本内用 python3 现签）
+- ⚠️ 规范化只剔除**逐次变化**的 `Date` / `Server` / `Content-Length`，**其余逐条比对**
+
+### 2. 逐条对照结果（原始响应头产物：`/tmp/difftest-msg-headers/`）
+
+| 路径 | Go | RAG | 判定 |
+|---|---|---|---|
+| `401 未带 token` | `HTTP/1.1 401 Unauthorized`<br>`Traceparent: 00-…`<br>`Content-Length: 0` | `HTTP/1.1 401 `<br>`Content-Length: 0` | 🔴 状态行缺 reason phrase + 缺 `Traceparent` |
+| `404 未知路径` | `HTTP/1.1 404 Not Found`<br>`Content-Type: text/plain; charset=utf-8`<br>`Traceparent`<br>`X-Content-Type-Options: nosniff` | `HTTP/1.1 404 `<br>`X-Content-Type-Options: nosniff`<br>`Content-Type: text/plain;charset=utf-8` | 🔴 状态行 + `Content-Type` 空格 + 缺 `Traceparent` |
+| `405 方法不匹配` | `HTTP/1.1 405 Method Not Allowed` | `HTTP/1.1 405 ` | 🔴 状态行 |
+| `415 Content-Type 不对` | 两侧都是 **401**（鉴权在 Content-Type 判定之前） | 同 | ✅ **一致**（且与 Go 的 chain 顺序一致） |
+| `200 正常 envelope` | `Content-Type: application/json; charset=utf-8` | `Content-Type: application/json` | 🔴 **= `DRIFT-MSGAPI-010`**（真容器级确认） |
+
+⇒ **body 逐字一致**：`{"code":200,"msg":"OK","data":{...}}` 两侧结构与取值一致
+（仅 JSON 对象的**键序**不同 —— Go 的 `map` 序列化按 key 排序，RAG 按声明序 ⇒ 见 `UNRESOLVED-005`，语义等价）。
+
+### 2.1 原始响应头逐字留档（**仓内证据**，随本台账一起 review）
+
+> ⚠️ 原始 txt 产物按 `.gitignore` 的 `tools/difftest/*-results.txt` 策略属「日志不入仓」；
+> ⇒ 这里把**原始响应头**逐字贴进台账，**证据因此留在仓内**（可 review、可 diff）。
+> 运行时产物目录：`/tmp/difftest-msg-headers/`（Go 侧 20892 / RAG 侧 60992，2026-10-24）。
+
+**`200-unread`**
+
+```
+--- Go ---
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+Traceparent: 00-b8d94466c2e11e4e4260d5999ee14f77-7947fb03073c5d57-01
+Date: Fri, 23 Oct 2026 22:20:23 GMT
+Content-Length: 97
+
+--- RAG ---
+HTTP/1.1 200 
+Content-Type: application/json
+Content-Length: 97
+Date: Fri, 23 Oct 2026 22:20:24 GMT
+```
+
+**`404-未知路径`**
+
+```
+--- Go ---
+HTTP/1.1 404 Not Found
+Content-Type: text/plain; charset=utf-8
+Traceparent: 00-01ad4794b3d336b454e8d79378fc7293-918ba39aaf963c08-01
+X-Content-Type-Options: nosniff
+Date: Fri, 23 Oct 2026 22:20:22 GMT
+Content-Length: 19
+
+--- RAG ---
+HTTP/1.1 404 
+X-Content-Type-Options: nosniff
+Content-Type: text/plain;charset=utf-8
+Content-Length: 19
+Date: Fri, 23 Oct 2026 22:20:22 GMT
+```
+
+**`401-未带token`**
+
+```
+--- Go ---
+HTTP/1.1 401 Unauthorized
+Traceparent: 00-873628a39f27f0fc33c505e48080aa1b-b126d839fa1e8a9c-01
+Date: Fri, 23 Oct 2026 22:20:21 GMT
+Content-Length: 0
+
+--- RAG ---
+HTTP/1.1 401 
+Content-Length: 0
+Date: Fri, 23 Oct 2026 22:20:22 GMT
+```
+
+
+### 3. 🆕 三条新发现
+
+#### 🆕 `DRIFT-MSGAPI-011` 🔴 **RAG 全域通病**：**状态行缺 reason phrase**
+
+```
+Go  ： HTTP/1.1 200 OK / 401 Unauthorized / 404 Not Found / 405 Method Not Allowed
+RAG ： HTTP/1.1 200    / 401             / 404            / 405
+```
+⚠️ **不是 message 域特有** —— 实测 **RAG 的 user-api / admin-api / message-api 全都这样**，Go 侧全都有
+⇒ 归因在**共享层**（Tomcat + Spring Boot 4 + `HttpMiddleware` 的 response wrapper）
+⇒ 本工作树**不改共享层**（会影响 20 个组件）⇒ 登记为**跨组件待办**。
+⚠️ 归因尚未定位到具体一行 ⇒ 台账里写「待查」，不臆断。
+
+#### 🆕 `DRIFT-MSGAPI-012` 🟡 **框架限制**：`Content-Type` 分号后的**空格**在 Tomcat 上不可达
+
+```
+Go  ： Content-Type: text/plain; charset=utf-8     （有空格）
+RAG ： Content-Type: text/plain;charset=utf-8       （无空格）
+```
+⚠️ **实测**：Tomcat 11 的 `Response.setContentType(String)` 会把 Content-Type **解析成 MediaType 再序列化**，
+序列化时**吃掉空格**；且 **`setHeader("Content-Type", …)` 也一样**（Tomcat 内部对 Content-Type **转手调 `setContentType`**）
+⇒ **没有任何写法能产出带空格的 Content-Type** ⇒ 归 **框架限制**，**不可修**。
+⇒ 连带：`DRIFT-MSGAPI-010` 即使补上 charset，也只能是 `application/json;charset=utf-8` ⇒ **与 Go 仍差一个空格**。
+
+#### 🆕 `DRIFT-MSGAPI-013` 🟡 **缺 `Traceparent` 响应头**
+
+```
+Go  ： Traceparent: 00-<trace-id>-<span-id>-01     （每个响应都有）
+RAG ： 无
+```
+⇒ Go 侧是 tracing 中间件带出来的（W3C trace context 头）。
+⇒ 归类：**响应头集合不对称** ⇒ 影响分布式追踪的**跨域接力**（下游拿不到上游的 trace context）。
+⚠️ RAG 侧是否有等价的传播机制（OTel）需另查 ⇒ 本轮只登记事实，**不下「谁更对」的结论**。
+
+### 4. `DRIFT-MSGAPI-010` 的修法（已定位，**本轮未实施**）
+
+- **可修的一半**：「缺 charset」⇒ RAG 的 JSON 转换器 `defaultContentType` 就是 `application/json`
+  ⇒ 给转换器补一个带 charset 的 media type 即可（落点在 api 侧的 `WebMvcConfig` 或共享的转换器配置）。
+- **不可修的一半**：「分号后的空格」⇒ 见 `DRIFT-MSGAPI-012`（Tomcat 序列化行为）。
+- ⚠️ **实施前必须先确认**：改了 charset 之后，**所有** api 的 JSON 响应头都会变
+  ⇒ 属于**跨域影响**（20 个组件共享 `service/common`）⇒ **需用户拍板后再做**。
+
+### 5. 本轮 api 侧实测数据
+
+```
+message-api：84 + 2（MessageApiTimeoutRealTomcatTest）= 86 tests / 0 failures / 0 errors / 0 skipped
+真容器响应头：6 条路径 × 两侧全量 dump ⇒ 产物 /tmp/difftest-msg-headers/
+3s 超时：503 + text/plain;charset=utf-8 + nosniff + "Request Timeout\n"   （真 Tomcat）
+```
+
+> ⚠️ **超时路径会打一条 `HttpMessageNotWritableException` 日志 —— 不是行为差异，别当 bug 修**
+> （`No converter for [class com.rag.common.response.Response] with preset Content-Type 'text/plain;charset=utf-8'`）
+>
+> 机理：`HttpMiddleware#writeTimeoutResponse` 已经**写完并 flush 了** 503 + `text/plain`；
+> 随后超时异常继续往上抛 ⇒ Spring MVC 的 `@ExceptionHandler` 又想写一个 JSON `Response` 回来
+> ⇒ 但 Content-Type 已被预设成 `text/plain` ⇒ 转换器不匹配 ⇒ 抛这条异常。
+> **客户端早已收到正确的 503**（响应已提交，二次写入改不了）⇒ 守门测试断言的 4 项全部成立。
+>
+> ⚠️ 与本轮改动的**因果关系**：与本轮加的 `nosniff` **无关** ——
+> 预设 Content-Type 的那行 `setContentType("text/plain; charset=utf-8")` 是**既有代码**（D-11 修复），
+> `setHeader("X-Content-Type-Options", …)` 不参与转换器选择。
+> ⇒ 归「既有噪音，本轮不改」：改它要动 api 侧的全局异常处理链，**超出本轮 scope**。
+
