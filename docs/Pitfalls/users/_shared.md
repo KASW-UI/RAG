@@ -123,3 +123,63 @@ Neo4j 399 MiB、Grafana 362 MiB …… 已吃掉大半。
 > 这条与 [`PIT-USERS-SHARED-001`](./_shared.md)（固定 gRPC 端口被并行会话占）
 > 是同一类问题：**§5.3 的并行 worktree 工作流在「文档里写共享索引」那部分是完备的，
 > 但「共享机器资源」这一层没有任何约定** —— 端口、内存、镜像拉取都会互撞。
+
+---
+
+## PIT-USERS-SHARED-003 🔴 探真源 `internal` 包会撞 Go 的 internal 规则 ⇒ 用 `go run -overlay` 虚拟注入，别复制源码
+
+**症状**：想在 `/tmp` 建探针模块、`replace sea-try-go => <真源路径>`，
+直接 import 真源的 model 包：
+
+```go
+import "sea-try-go/service/user/user/rpc/internal/model"
+```
+```
+main.go:7:2: use of internal package sea-try-go/service/user/user/rpc/internal/model not allowed
+```
+
+**为什么会这样**：Go 的 `internal` 规则看的是**导入路径前缀**，不是文件系统的真实位置。
+`.../rpc/internal/model` 只能被 `.../rpc/` 下的包导入；
+探针模块的包在 `/tmp`，前缀对不上 ⇒ 无论怎么 `replace` 都不通。
+
+**三条路的取舍**：
+
+| 方案 | 结论 |
+|---|---|
+| 把真源 model 包复制到 `/tmp` 再跑 | ❌ **违反 §3.3 的「不得复制源码重跑」** —— 复制的那份可能已经被人改过，证的是复制品不是真源 |
+| 把探针写进真源目录 | ❌ 真源**冻结只读**（§7.1）；且会污染真源工作区 |
+| **`go run -overlay`** | ✅ **正解** |
+
+**做法**：用 overlay 把一个**只存在于 `/tmp`** 的探针文件，**虚拟挂载**到真源模块树里：
+
+```json
+// /tmp/eiprobe/overlay.json
+{"Replace": {
+  "<真源>/service/user/user/rpc/internal/zzprobe/main.go":
+  "/tmp/eiprobe/zzprobe/main.go"
+}}
+```
+```bash
+cd <真源> && CGO_ENABLED=0 \
+  go run -overlay /tmp/eiprobe/overlay.json sea-try-go/service/user/user/rpc/internal/zzprobe
+```
+
+探针包路径落在 `.../rpc/internal/zzprobe` ⇒ 前缀合法 ⇒ **能 import 真源的 `model` 包**；
+而真源目录**磁盘零写入**（overlay 是编译期虚拟映射，`git status` 干净）。
+
+**配套两条**：
+1. `CGO_ENABLED=0` —— 走真源测试时必加，否则 `runtime/cgo` 会因缺 `stdlib.h` 报
+   `fatal error`，看起来像代码问题其实是工具链问题；
+2. 真源自带测试也会被这个手段救活。例如
+   `service/user/user/rpc/internal/logic/getuser_status_test.go` 内部
+   `db.AutoMigrate(&model.User{})` —— 用 `KNOWLEDGE_TEST_DSN` 指到隔离库即可
+   跑通**真源自己的建表路径**，连探针都不用写。
+
+**本轮用它取到的硬证据**（`users` + `user_avatar_history` 全列活体类型）见
+[`docs/DRIFT/users/user/rpc.md`](../../DRIFT/users/user/rpc.md) §4 —— 
+其中 `extra_info` 为 **`text`** 这一条，此前只是从 `postgres.go` 的 `DataTypeOf`
+推导，本轮升级为**建表语句级实证**。
+
+> 这条的通用价值：凡「真源在 `internal/` 下、而探针必须不复制源码」的组合，
+> 以前只能放弃取证或退回复制。overlay 把这条路补上了 ——
+> **「拿不到证据」从此不再是「判定为等价」的正当理由。**
