@@ -431,11 +431,23 @@ Go 侧同一批消息能正常落库，RAG 侧一条不落。
    `task-api` 的读路径（`task:progress:<uid>`，与 sink 写的 `task:progress:<uid>:<taskId>` **不是同一个 key**）
    只由 HTTP 对拍间接覆盖。这是 Go 侧既有的读写 key 不一致，**不要「顺手统一」**。
 3. `task:goka:count:*` 的保留策略（见 §六）—— **无 TTL、只增不删**。
-4. `tools/difftest/check-ddl-static.py` 扩到 task 域（`AutoMigrate` vs Flyway 的列级对照）。
-5. `tools/difftest/check-proto-static.sh` 扩到 `task`（照 `user`/`admin` 的写法加 `verdict`）——
-   否则「proto 一致」只是一次性快照。
+4. ~~`tools/difftest/check-ddl-static.py` 扩到 task 域~~ ⇒ **2026-10-24 已做**：
+   脚本改成 `--domain users|task` 参数化；task 域实测
+   **11 列逐字一致、类型/长度 0 差异、NOT NULL/DEFAULT 0 差异**，`EXIT=0`。
+   ⚠️ 顺带**补上了此前标为 NOT CHECKED 的 NOT NULL / DEFAULT 对照**
+   （users 域的台账数字未受影响，那一节是新增的）。
+   ⚠️ 另需排除 **Flyway 迁移账本表**（`flyway_schema_history_task`）——
+   它是 RAG 侧独有的工具产物，不是业务表，不排除会被判成「列集合不一致」。
+5. ~~`tools/difftest/check-proto-static.sh` 扩到 `task`~~ ⇒ **2026-10-24 已做**：
+   task 域实测 `EXIT=0`（`task.proto ↔ task.proto` 逐字节一致）。
+   ⚠️ task 两侧的 `package task;` **逐字相同** ⇒ **不需要**像 `like` 域那样额外排除 package 行。
+   ⚠️ 顺带把该脚本的**退出码**从「恒 0」改成「有差异返回 1」⇒ 现在能当门禁用。
 6. **`tools/difftest/parity-task-kafka.py` 纳入 CI**：目前它依赖手工起的 `taskprobe-*` 基建，
    没法在普通 `mvn test` 里跑。可考虑用 Testcontainers 起 Kafka（`apache/kafka` KRaft 镜像）自动化。
+   ⚠️ **2026-10-24 已补上另一半**：HTTP 侧现在有一键编排
+   [`tools/difftest/run-task-http-parity.sh`](../../../tools/difftest/run-task-http-parity.sh)
+   （原先 HTTP 侧只有手工步骤，Kafka 侧才有一键脚本）⇒ 两边的「一条命令复跑」齐了，
+   但**都还依赖手工起的基建**，进 CI 仍需 Testcontainers。
 
 ---
 

@@ -421,3 +421,187 @@ broker 回头告知 `127.0.0.1:59992` ⇒ 在容器自己的 netns 里这个端�
 3. ⚠️ **「offset 查询失败」不等于「offset 是 0」**。本轮最初就是
    `GetOffsetShell` 报错 ⇒ 输出为空 ⇒ 被误读成「消息没灌进去」，
    实际 offset 是 16。**测量手段失败时，先怀疑测量手段。**
+
+---
+
+## 🔴 PITFALL-TASK-RPC-11 · 方法签名对了 ≠ 方法会被调到；而且**调用时机**比签名更致命
+
+### 现象
+
+修 DRIFT-TASK-API-003（form-urlencoded 的 POST 被 RAG 拒、Go 收）时，
+第一版修法选在**转换器层**：在 `ContentTypeAgnosticJsonBodyConverter` 里覆盖
+`read(ResolvableType, HttpInputMessage, Map)`，form POST 时改传一个直读
+`HttpServletRequest.getInputStream()` 的 `HttpInputMessage`。
+
+装上后**一点效果都没有**：form-urlencoded 仍然 400。
+
+### 根因（两层）
+
+**第一层：拿不到原始 request。** 转换器拿到的 `HttpInputMessage` 是
+`EmptyBodyCheckingHttpInputMessage`（spring-webmvc 7.0.9
+`AbstractMessageConverterMethodArgumentResolver.java:355-380`），
+**不是** `ServletServerHttpRequest` ⇒ `inputMessage instanceof ServletServerHttpRequest`
+**永远 false** ⇒ 绕开分支从不执行。
+
+**第二层（更要命）：body 在转换器被调用之前就已经被换掉了。**
+`EmptyBodyCheckingHttpInputMessage` 的**构造器**就调了一次 `inputMessage.getBody()`
+⇒ 那一次调用走的是 `ServletServerHttpRequest.getBody()`（spring-web 7.0.9 `:227-234`）的
+「form POST ⇒ 从表单参数重建 body」分支 ⇒ **原始 body 此刻已经没了**。
+⇒ 转换器层是**事后诸葛**，再怎么改也拿不回原始字节。
+
+⚠️ 而 `read(ResolvableType, HttpInputMessage, Map)` 这个签名**本身是对的** ——
+Boot 4 / Jackson 3 的 `AbstractJacksonHttpMessageConverter extends AbstractSmartHttpMessageConverter`
+（`:88`），所以 MVC 走 **SMART 分支**，确实调它（`:313`）。
+⇒ **签名没错、时机错了** —— 只看「方法会不会被调」这一层，根本看不出问题在哪。
+
+### 教训
+
+1. **要判「某一层能不能修这个 bug」，先问「这个 bug 的消费点在不在这一层之后」。**
+   消费点在**更早**的环节 ⇒ 这一层再怎么改都是徒劳。
+2. **修不动的时候，先去读那一层的源码**（本轮读的是 spring-web / spring-webmvc 的
+   `-sources.jar`，不是猜）。本轮一开始就在猜「是 Tomcat 连接器层还是 Spring 层」，
+   读源码后 20 分钟就定位到了「`EmptyBodyCheckingHttpInputMessage` 构造期就消费」。
+3. ⚠️ **`instanceof` 判不出来的东西，多半是「拿错了对象」而不是「类型不对」** ——
+   判 false 时别急着改判据，先问「我以为传进来的是什么」。
+
+---
+
+## 🔴 PITFALL-TASK-RPC-12 · 配置项**名字写错 = 静默失效**，而且用它「排除 Spring 侧」会得出**假阴性**
+
+### 现象
+
+DRIFT-TASK-API-003 上一版台账写着：
+
+> 已实测**排除** Spring 侧：加 `--spring.mvc.formcontent.filter.enabled=false` 与
+> `--spring.mvc.servlet.multipart.enabled=false` 后行为**完全不变**。
+
+本轮实测：**`spring.mvc.servlet.multipart.enabled` 这个属性名是错的**。
+Boot 4 的 `MultipartAutoConfiguration` 上是
+`@ConditionalOnBooleanProperty(name = "spring.servlet.multipart.enabled", matchIfMissing = true)`
+（在 `spring-boot-servlet-4.0.8.jar` 里）⇒ **没有 `mvc.`**。
+
+⇒ 写错名字 ⇒ **没人读那个属性** ⇒ 开关根本没关上 ⇒ 「行为完全不变」是必然的。
+
+### 为什么这条特别危险
+
+它不是「改错没生效」这么简单 —— 它被用来**排除一个方向**：
+「实测排除 Spring 侧 ⇒ 剩余消费者在 Tomcat 连接器层」
+⇒ **一个写错的属性名，制造了一条错误的根因结论**，并据此否掉了真正可修的方案。
+
+### 教训
+
+1. **「加了开关行为没变」要区分两种情况**：
+   (a) 开关生效了、确实不是它 ⇒ 结论成立；
+   (b) **开关压根没生效**（名字写错 / 拼错 / 放错层级）⇒ **结论无效**。
+   ⇒ 用它做排除法之前，**必须先单独证明开关生效**：
+   读 `Environment` 断言属性真的被解析成目标值，或看启动日志里的条件装配结果。
+2. ⚠️ **Spring Boot 的属性名不能靠直觉拼**：`spring.mvc.*` 是 Spring Boot 2/3 的形状，
+   Boot 4 拆模块后不少 `mvc.*` 已经挪走（`spring.servlet.multipart.*` 就是一例）。
+   ⇒ 拿不准就**去 jar 里看那个 `@ConditionalOn*Property` 的 name**。
+3. ⇒ 本轮据此加了一条守门断言：直接读 `Environment` 断言
+   `spring.servlet.multipart.enabled == "false"`，并断言
+   `spring.mvc.servlet.multipart.enabled` **不存在**（防止有人改回错名字）。
+
+---
+
+## ⚠️ PITFALL-TASK-RPC-13 · 探针里的一句 `getInputStream().available()`，**自己触发了**它要测的那个行为
+
+### 现象
+
+同一个 form-urlencoded 请求，两次观测到的**错误文案不一样**：
+
+| 观测方式 | 错误文案 |
+|---|---|
+| 探针里挂了「读 `available()`」的 filter | `Required request body is missing` |
+| 不挂任何 filter | `JSON parse error: Unexpected character ('%' (code 37))` |
+
+⇒ 看起来像「行为不稳定」，实际是**探针自己改变了被测行为**。
+
+### 根因
+
+Tomcat 对 `application/x-www-form-urlencoded` 的 POST **惰性解析表单**：
+只有当代码调用 `request.getParameter*()` 时才去读 body。
+而**探针 filter 里那句 `req.getInputStream().available()`** ——
+在 Tomcat 上，它会触发输入流的准备 ⇒ 表单参数被解析 ⇒ **body 提前被消费**。
+⇒ 之后 Spring 再去 `getParameterMap()` 时，参数表已经是空的 ⇒
+重建出来的 body 也是空的 ⇒ 报「Required request body is missing」。
+
+⚠️ 而 `available()` 在 Tomcat 上**只报缓冲区字节数**，不等于剩余量 ——
+拿它当「body 还在不在」的信号，结论本身就是错的。
+
+### 教训
+
+1. **探针本身是观测的一部分** —— 它的每一次调用都可能改变被测系统。
+   ⇒ 「加个 filter 看看 body 还在不在」这类做法要先问：
+   **我这个调用会不会触发解析/消费？**
+2. ⚠️ **`available()` 不是「剩余可读字节数」**（Tomcat 上尤其如此）。
+   要判断 body 有没有被消费，看 `getContentLength()` + 实际读到的字节数，
+   或者**别读，只看下游有没有拿到完整内容**。
+3. ⇒ 本轮把这条探针**整个删掉**，换成「真 Tomcat + 真实业务请求 + 断言状态码与响应体」的守门测试。
+
+---
+
+## ⚠️ PITFALL-TASK-RPC-14 · 对拍两侧的 Redis **db 编号**要按「这一轮在测什么」来定，不是照抄别的脚本
+
+### 现象
+
+HTTP 对拍矩阵里，**Redis 缓存命中路径**的 3 条用例两侧不一致：
+Go 读出 `completionProgress` = 2 / -7 / 99，RAG **一律 0**。
+⇒ 第一反应是「RAG 的缓存解析有漂移」。
+
+### 根因
+
+**是编排脚本配错了，不是 RAG 的漂移。**
+
+- 矩阵脚本用 `redis-cli`（**默认 db0**）手工 `HSET task:progress:<uid>`；
+- Go 的 `task-rpc.yaml` 里 `LikeRedis.DB: 0` ⇒ Go 读 db0 ✔；
+- 而本轮新写的编排脚本照抄了 **Kafka E2E 脚本**的 `--spring.data.redis.database=1`
+  ⇒ RAG 读 db1 ⇒ **读了个空库** ⇒ 回落 0。
+
+⇒ **两个脚本的 Redis 隔离需求正好相反**：
+
+| 脚本 | 场景 | 两侧 Redis | 为什么 |
+|---|---|---|---|
+| `run-task-kafka-e2e.sh` | Kafka 消息链路 | **隔离**（Go db0 / RAG db1） | 两侧 rpc **同时往 Redis 写**，必须隔离，否则互相污染 |
+| `run-task-http-parity.sh` | HTTP 读路径 | **共用**（都 db0） | 要测的正是「**同一段 Redis 值**两侧解析结果是否一致」，必须读同一份 |
+
+### 教训
+
+1. **照抄配置前先问「这一轮在测什么」** —— 同样的参数在不同场景下要求**相反**。
+2. **「矩阵里某条用例两侧不一致」的第一嫌疑是探针配置**，不是被测代码。
+   ⇒ 先确认两侧读的是**同一份状态**，再谈漂移。
+3. ⇒ 本轮在编排脚本里把这条写成了**带理由的注释**（不是只写「改成 0」），
+   免得下一个人再照抄 Kafka 脚本。
+
+---
+
+## ⚠️ PITFALL-TASK-RPC-15 · bash 里 `$var` 紧跟**多字节字符**，变量名会被吃掉首字节
+
+### 现象
+
+编排脚本跑到一半炸了：
+
+```
+line 128: g?: unbound variable
+```
+
+源码是：
+
+```bash
+echo "  ✓ 移走 goka 本地缓存 $g（⑤）"
+```
+
+### 根因
+
+bash 的变量名只认 `[A-Za-z_][A-Za-z0-9_]*`，但 **`$g` 后面紧跟的 `（`（U+FF08，
+UTF-8 首字节 `0xEF`）会被算进变量名** ⇒ 变量名变成 `g\xef` ⇒ 未绑定变量。
+
+⚠️ **同样的写法在既有的 Kafka 脚本里没事**，因为那里是 `"... $g"` —— `$g` 后面是**引号**，
+不是多字节字符 ⇒ 一眼看不出差别。
+
+### 教训
+
+1. **凡是多字节字符（中文/全角标点）紧跟 `$var`，一律写 `${var}`。**
+   ⇒ 已用一条正则把仓内脚本扫了一遍（`\$[A-Za-z_][A-Za-z0-9_]*(?=[^\x00-\x7f])`），
+   本轮只命中 1 处。
+2. ⇒ **脚本里凡是会打印中文的变量，一律用 `${}` 显式界定边界** —— 别赌 bash 的解析。

@@ -21,13 +21,13 @@
 
 | 项 | 结论 |
 |---|---|
-| 语义等价性 | 🔴 **SEMANTICALLY NOT EQUIVALENT**（1 条端口漂移，已修） |
-| 已修 | **2 条**（DRIFT-TASK-API-001 端口 / DRIFT-TASK-API-002 `Go:` 行号引用失准） |
-| 对拍新发现 | **1 条 OBSERVABLE DIFFERENCE**（DRIFT-TASK-API-003，**未修**，见 §六） |
-| 未修 | 0 条语义漂移 |
-| 证据强度 | ✅✅ **双侧活体对拍**（2026-10-23 升级）· ✅ 真实 MVC 管线（MockMvc，20 条）· ⚠️ gRPC 边界在单测里是 mock |
-| 对拍结果 | **43 用例：body 43/43 逐字节一致**；状态码 41/43 一致；Content-Type header 格式 40 条不同 |
-| 测试 | **78 tests / 0 failures / 0 errors / 0 skipped** |
+| 语义等价性 | ✅ **EQUIVALENT**（1 条端口漂移已修；1 条 Content-Type 无关性漂移已修） |
+| 已修 | **3 条**（DRIFT-TASK-API-001 端口 / -002 `Go:` 行号引用失准 / **-003 Content-Type 无关性**） |
+| 对拍新发现 | **1 条 OBSERVABLE DIFFERENCE**（DRIFT-TASK-API-003）⇒ **2026-10-24 已修**，见 §六 |
+| 未修 | 0 条语义漂移（余 1 条**全域共性** DRIFT-TASK-API-004，按 §三·三 不在本域单独修） |
+| 证据强度 | ✅✅ **双侧活体对拍**（2026-10-24 重跑，44 条）· ✅✅ **真 Tomcat 守门**（`TaskApiContentTypeTest` 12 条 + 变异测试）· ✅ 真实 MVC 管线（MockMvc，20 条）· ⚠️ gRPC 边界在单测里是 mock |
+| 对拍结果 | **44 用例：MATCH 44 / DIFF 0**（判定口径：状态码 + **归一后**的 Content-Type 媒体类型 + nosniff + 响应体逐字节） |
+| 测试 | **90 tests / 0 failures / 0 errors / 0 skipped**（task-api；原 78 + 新增 12） |
 
 ---
 
@@ -165,25 +165,43 @@ AGENTS.md §3.3.2 硬要求：**任何以「Go: …」措辞出现的断言，�
 ⚠️ Go 配置是**副本**（[`tools/difftest/conf/go/task-api.yaml`](../../../tools/difftest/conf/go/task-api.yaml)），
 **冻结真源仓库零写入**；`Log.Mode: console` 是必需的（真源默认落文件）。
 
-### 结果：43 条用例
+### 结果：**44 条用例**（2026-10-24 重跑，含本轮新增的「不带 Content-Type」用例）
 
 | 维度 | 结果 |
 |---|---|
-| **响应体逐字节一致** | ✅ **43 / 43** |
-| 状态码一致 | ✅ 41 / 43（差的 2 条见 DRIFT-TASK-API-003） |
-| `X-Content-Type-Options: nosniff` | ✅ 43 / 43 一致 |
-| `Content-Type` header | ⚠️ **40 条不同**（格式差异，见 DRIFT-TASK-API-004） |
+| **判定口径** | 状态码 + **归一后**的 Content-Type 媒体类型 + `X-Content-Type-Options` + **响应体逐字节** |
+| **MATCH / DIFF** | ✅ **44 / 0**（脚本 `EXIT=0`，可直接当门禁） |
+| **响应体逐字节一致** | ✅ **44 / 44** |
+| 状态码一致 | ✅ **44 / 44**（DRIFT-TASK-API-003 修掉后，那 2 条不再红） |
+| `X-Content-Type-Options: nosniff` | ✅ 44 / 44 一致 |
+| `Content-Type` header **原值** | ⚠️ **43 条不同**（**格式**差异，见 DRIFT-TASK-API-004）⇒ 归一后一致，**单列不藏** |
 
 覆盖：`id` 参数解析 18 类（null/缺失/字符串/数字/布尔/数组/对象/浮点/超长/带符号…）、
 DB 回源 5 组（含无行、status/progress 为 NULL）、**Redis 缓存命中 10 组手工 crafted 值**
-（2 段 / 4 段 / 空串 / 非数字 / **负数** / 超 target / status 含 `|`）、路由层 3 组、畸形 JSON、空 body。
+（2 段 / 4 段 / 空串 / 非数字 / **负数** / 超 target / status 含 `|`）、路由层 3 组、
+**Content-Type 矩阵 5 组**、畸形 JSON、空 body、**完全不带 Content-Type 1 组**。
 
-### 🔴 静态审查完全看不到、只有对拍才抓到的一条
+### ⚠️ 本轮把对拍脚本从「只能人读」改成「能当门禁」（三处改造）
+
+1. **补上 §2.7 那个一直没实现的用例**。原脚本 §2.7 只有一段注释：
+   「⚠️ 不能用 urllib：它会在没有显式 Content-Type 时**自动补** `application/x-www-form-urlencoded`…」
+   ⇒ **用例本身根本没写**，但上一版台账的 API-003 表里却有一行「不带 Content-Type | 200 | 200 ✅」
+   ⇒ **那一行当时没有脚本证据**。本轮用 `http.client` 实现（它只自动补 `Host`/`Content-Length`，
+   **不补** `Content-Type`），用例数 43 → **44**。
+2. **有 DIFF 必须返回非零**。原脚本结尾恒 `sys.exit(0)` ⇒ **43 条全红也返回 0**，不能当门禁。
+   现在对齐 `parity-task-kafka.py` 的 `return 1` 约定。
+3. **按媒体类型归一后再判定**。原先 Content-Type 的**格式**差异（`application/json; charset=utf-8`
+   vs `application/json`）直接把 43/44 条染红 ⇒ 真差异会被淹没。
+   现在：媒体类型本身不同 ⇒ 仍算 DIFF；只是 charset/空白不同 ⇒ 归入
+   **「已知全域共性」单列**（DRIFT-TASK-API-004），不计入 DIFF、但**必须打印出来**。
+
+### 🔴 静态审查完全看不到、只有对拍才抓到的一条（**已修**）
 
 **DRIFT-TASK-API-003**：Go 的 handler（`gettaskhandler.go:19` 的 `json.NewDecoder(r.Body)`，
 **没有** `httpx.Parse`）对 `Content-Type` **完全无感**；
-RAG 侧 Tomcat 会对 `form-urlencoded` / `multipart` 的 POST body 抢先解析并消费掉输入流 ⇒ 返回 400。
-详见 §六。
+RAG 侧 Spring 会对 `form-urlencoded` 的 POST body **参数化重建**，对 `multipart` 的 POST body
+**被 resolver 抢先消费** ⇒ 两条都返回 400。
+⇒ **2026-10-24 已修**，根因（含上一版台账的**误判**）与修法见 §六。
 
 ### ⚠️ 对拍方法论上的一条教训（已写进 `../../Pitfalls/task/rpc.md`）
 
@@ -193,34 +211,44 @@ RAG 侧 Tomcat 会对 `form-urlencoded` / `multipart` 的 POST body 抢先解析
 
 ## 三、证据边界
 
-1. ✅ **双侧活体对拍已做**（2026-10-23 22:5x，见 §二·五）：Go `task-api:18886` + `task-rpc:19005`
-   与 RAG `task-api:58886` + `task-rpc:59005` 同时起，43 条请求矩阵，
-   **body 43/43 逐字节一致**，状态码 41/43。
+1. ✅ **双侧活体对拍已做**（2026-10-23 首做 43 条，**2026-10-24 重跑 44 条**，见 §二·五）：
+   Go `task-api:18886` + `task-rpc:19005`
+   与 RAG `task-api:58886` + `task-rpc:59005` 同时起，请求矩阵 **MATCH 44 / DIFF 0**。
    ⚠️ 但覆盖面**只到 HTTP wire 层**：经由 `GetTask` 这条链路验证了
    **Redis HGETALL → PG 回源 → packProgress/unpackProgress → 任务定义合并 → gRPC 序列化 → HTTP 响应**。
    **Kafka 消息链路不在 HTTP 对拍面内**（那条链路由
    [`rpc.md` §四·三](./rpc.md#四三kafka-端到端对拍两侧灌同一批-raw-日志比最终态2026-10-23-234x-实测) 单独对拍）。
+   ⚠️ **本轮新增了一键编排** [`tools/difftest/run-task-http-parity.sh`](../../../tools/difftest/run-task-http-parity.sh)
+   （原先只有手工步骤，Kafka 侧有一键脚本而 HTTP 侧没有）。
 2. ⚠️ **gRPC 边界在单测里是 mock**：`TaskGetServiceTest` / `GrpcStatusHttpMappingTest` 用 stub，
    验证的是「拿到某个 gRPC code 后映射成什么 HTTP 响应」，**不是**「对着真的 task-rpc 调」。
    ⚠️ 但 **gRPC 单组件对拍已单独做**（`rpc.md` §四·三 之前的 gRPC runner，7/7 一致，
    含 3 组 HTTP 面永远走不到的 `INVALID_ARGUMENT`）。
-3. ⚠️ **MockMvc 不是真 Tomcat**。400 响应的 `Content-Type`/`nosniff` 在 MockMvc 下可验，
-   但**真实 Tomcat 下 400 的 header 行为**属另一域已登记的坑（`tools/difftest/check-plaintext400-headers.sh`），
-   本域**未跑该脚本** ⇒ 登记为待办。
-4. ⚠️ 本轮**未重审** `service/common`（`HttpMiddlewareFilter` / breaker / maxConns 等），
+3. ✅ **真 Tomcat 的 400 响应头已守**（2026-10-24）：`tools/difftest/check-plaintext400-headers.sh`
+   已扩到 **task-api**（畸形 JSON / 空 body 两条）⇒ 状态码 400、`Content-Type: text/plain;charset=utf-8`、
+   `X-Content-Type-Options: nosniff` **三条断言全过**，并与 Go 真源同请求的响应头做了对照打印。
+   ⚠️ 该脚本里 task 段与 user 段**互不影响**：某域栈没起时判 **SKIP** 而不是 FAIL。
+4. ✅ **Content-Type 无关性有真 Tomcat 守门测试**（2026-10-24 新增
+   [`TaskApiContentTypeTest`](../../../../service/task/task-api/src/test/java/com/rag/task/task/api/TaskApiContentTypeTest.java)）：
+   6 种 Content-Type + 不带 Content-Type 全要 200；**带阳性对照**（畸形 JSON / 空 body 仍须 400）。
+   ⚠️ **变异测试已做**：撤掉处理器替换 ⇒ 1 条红；把 multipart 开关改回 `true` ⇒ 2 条红 ⇒ **不是假绿**。
+5. ⚠️ 本轮**未重审** `service/common`（`HttpMiddlewareFilter` / breaker / maxConns 等），
    其结论沿用 `docs/DRIFT/common/audit.md`。
 
 ---
 
 ## 四、待办
 
-1. 跑 `tools/difftest/check-plaintext400-headers.sh` 覆盖 task-api（真 Tomcat 下的 400 header）。
+1. ~~跑 `tools/difftest/check-plaintext400-headers.sh` 覆盖 task-api~~ ⇒ **2026-10-24 已做**（见 §三·3）。
 2. `task-api` 的 `NacosDiscovery` 在真注册中心下的注册/注销行为未验（当前测试指向不可达地址绕过）。
-3. **DRIFT-TASK-API-003 的彻底修法**（Servlet 容器层拦截 form/multipart 的参数化）——
-   见 §六 的「要彻底修，需要」两条候选方案，**均未评估**。
+3. ~~**DRIFT-TASK-API-003 的彻底修法**~~ ⇒ **2026-10-24 已修**（见 §六）。
 4. **跨域闭环对拍**：「Kafka 写入 → `task-api` 读到」——
    注意两侧的读写 Redis key **本来就不一致**（见 `TaskRedisKeys` 类注释），
    所以这条闭环在 Go 侧也是「读不到自己写的缓存」的，**不要当成 RAG 的 bug 修**。
+5. ⚠️ **DRIFT-TASK-API-004（`Content-Type` header 的 charset/空白格式）**——
+   **全域共性**（article/hot/like/message/task 五域同样记着），
+   **不在本域单独修**（单独改会造成「本域与其它域不一致」）。
+   本轮已把对拍脚本的判定口径改成「归一后比媒体类型」，让这条共性**不再淹没真差异**。
 
 ---
 
@@ -235,53 +263,155 @@ RAG 侧 Tomcat 会对 `form-urlencoded` / `multipart` 的 POST body 抢先解析
 
 ---
 
-## 六、对拍新发现（未修）
+## 六、对拍新发现（**已修**）
 
-### 🔴 DRIFT-TASK-API-003 · JSON body 配 `form-urlencoded` / `multipart` 时 Go 收、RAG 拒
+### ✅ DRIFT-TASK-API-003 · JSON body 配 `form-urlencoded` / `multipart` 时 Go 收、RAG 拒
 
 **性质**：SEMANTIC MISMATCH（状态码层）。**对拍抓出，静态审查不可见。**
+**状态**：🔴 → ✅ **2026-10-24 已修**（双侧活体对拍 **MATCH 44 / DIFF 0** 复验）。
 
-| Content-Type（body 均为 `{"id":1001}`） | Go | RAG |
-|---|---|---|
-| `application/json` | 200 | 200 ✅ |
-| 不带 Content-Type | 200 | 200 ✅ |
-| `text/plain` | 200 | 200 ✅ |
-| `application/xml` | 200 | 200 ✅ |
-| **`application/x-www-form-urlencoded`** | **200** | 🔴 **400** `JSON parse error: Unexpected character ('%' (code 37))` |
-| **`multipart/form-data`** | **200** | 🔴 **400** `Failed to parse multipart servlet request` |
+| Content-Type（body 均为 `{"id":1001}`） | Go | RAG（修前） | RAG（**修后**） |
+|---|---|---|---|
+| `application/json` | 200 | 200 ✅ | 200 ✅ |
+| **不带 Content-Type** | 200 | 200 ✅ | 200 ✅（本轮补上了**真实**的这条用例） |
+| `text/plain` | 200 | 200 ✅ | 200 ✅ |
+| `application/xml` | 200 | 200 ✅ | 200 ✅ |
+| **`application/x-www-form-urlencoded`** | **200** | 🔴 **400** `JSON parse error: Unexpected character ('%' (code 37))` | ✅ **200**，body 与 Go **逐字节一致** |
+| **`multipart/form-data`** | **200** | 🔴 **400** `Failed to parse multipart servlet request` | ✅ **200**，body 与 Go **逐字节一致** |
 
 **Go 为什么收**：`gettaskhandler.go:18-24` 直接 `json.NewDecoder(r.Body).Decode(&req)`，
 **不调 `httpx.Parse`**（那才是 go-zero 做 Content-Type 校验的入口），handler 对 Content-Type 零判断。
 
-**RAG 为什么拒（根因已定位到消费点，未完全收口）**：
+---
 
-1. 已实测**排除** Spring 侧：加 `--spring.mvc.formcontent.filter.enabled=false` 与
-   `--spring.mvc.servlet.multipart.enabled=false` 后行为**完全不变**；
-2. 实测**排除** Tomcat 的 body 参数解析：`Connector#setParseBodyMethods(null)`（字节码确认
-   `isParseBodyMethod` 就是一次 `Set.contains`，空集 ⇒ 完全不解析）之后，
-   form-urlencoded 的报错从「URL 解码损坏」变成 **「Required request body is missing」**
-   ⇒ 输入流仍被消费掉，但已不是 Tomcat 参数解析干的；
-3. ⇒ **剩余消费者在 Tomcat 11 连接器层，Spring 的配置开关够不着**（filter 在解析之后才跑）。
+#### 🔴🔴 本轮推翻上一版台账的根因结论（**上一版是误判**）
 
-**为什么没有修**（两条缓解路径都实测过，都**没有达成 parity**）：
+上一版写的是：
 
-| 尝试 | 结果 |
+> 3. ⇒ **剩余消费者在 Tomcat 11 连接器层，Spring 的配置开关够不着**（filter 在解析之后才跑）。
+
+**这是错的。** 真源在 **Spring 的 `HttpInputMessage` 制造环节**，不在 Tomcat 连接器层。逐条证据：
+
+**（1）消费点是 Spring 的 `ServletServerHttpRequest.getBody()`**，spring-web **7.0.9**
+`org/springframework/http/server/ServletServerHttpRequest.java:227-234`：
+```java
+public InputStream getBody() throws IOException {
+    if (isFormPost(this.servletRequest) && this.servletRequest.getQueryString() == null) {
+        return getBodyFromServletRequestParameters(this.servletRequest);  // ← 不读原始 body
+    }
+    else {
+        return this.servletRequest.getInputStream();
+    }
+}
+```
+`isFormPost`（同文件 `:249-253`）判的是
+`contentType.contains("application/x-www-form-urlencoded") && POST`；
+`getBodyFromServletRequestParameters`（同文件 `:261` 起）做的是
+`request.getParameterMap()`（触发 Tomcat 表单解析，body 被消费）→ 再把参数
+`URLEncoder.encode` 后拼成 `key=value` ⇒ **`%` 的来源**。
+
+**（2）上一版的「已实测排除 Spring 侧」是**假阴性**。**
+上一版加的开关是 `--spring.mvc.formcontent.filter.enabled=false` 与
+**`--spring.mvc.servlet.multipart.enabled=false`** ——
+⚠️ **后者的属性名错了**（多了 `mvc.`）。Boot 4 的
+`MultipartAutoConfiguration` 上是
+`@ConditionalOnBooleanProperty(name = "spring.servlet.multipart.enabled", matchIfMissing = true)`
+（在 `spring-boot-servlet-4.0.8.jar` 里）⇒ 写 `spring.mvc.servlet.multipart.enabled`
+**静默失效**（没人读那个属性）⇒ 当时「行为完全不变」是必然的，
+**不能作为「已排除 Spring 侧」的证据**。
+
+**（3）更关键：body 在转换器被调用**之前**就已经被换掉了** ⇒ 转换器层来不及。**
+spring-webmvc 7.0.9
+`org/springframework/web/servlet/mvc/method/annotation/AbstractMessageConverterMethodArgumentResolver.java:355-380`：
+```java
+private static class EmptyBodyCheckingHttpInputMessage implements HttpInputMessage {
+    public EmptyBodyCheckingHttpInputMessage(HttpInputMessage inputMessage) throws IOException {
+        this.headers = inputMessage.getHeaders();
+        InputStream inputStream = inputMessage.getBody();   // ← 构造期就消费一次
+        ...
+    }
+}
+```
+⇒ 转换器拿到的 `HttpInputMessage` 是 `EmptyBodyCheckingHttpInputMessage`，
+**不是** `ServletServerHttpRequest` ⇒ **转换器层根本拿不到原始 request，更拿不到原始 body**。
+
+⚠️ **本轮第一版修法就栽在这里**：先按「转换器层修」写了
+`ContentTypeAgnosticJsonBodyConverter.read(ResolvableType, HttpInputMessage, Map)` 的绕开逻辑，
+靠 `inputMessage instanceof ServletServerHttpRequest` 拿原始 request ——
+**永远为 false** ⇒ 修法一装上就没效果（实测 form-urlencoded 仍 400）。
+⇒ 这正是 AGENTS.md §3.3 说的「**注解存在 ≠ 机制生效**」的另一种形态：
+**方法签名对了 ≠ 方法会被调到**。
+
+---
+
+#### ✅ 修法（两处，分工不同）
+
+**（A）multipart ⇒ 配置层「本服务不支持 multipart」**
+
+`service/task/task-api/src/main/resources/application.yml`：
+```yaml
+spring:
+  servlet:
+    multipart:
+      enabled: false
+```
+**为什么**：Go 侧 task-api **没有 multipart 概念** ——
+`routes.go:15-25` 只有一条路由，`gettaskhandler.go:19-21` 是裸 decoder，**不读任何 form part**。
+⇒ Spring 侧也不该让 multipart resolver 先把 body 吃掉
+（`DispatcherServlet` 的 multipart resolver 调 `getParts()` 消费 body），
+否则 body 到 handler 时已被消费 ⇒ 报「Required request body is missing」。
+关掉之后 multipart body 原样流给 Jackson ⇒ 与 Go 侧同样按 JSON 解析 ⇒ **同样的 200**。
+
+**（B）form-urlencoded ⇒ 消息输入层「body 一律按 JSON 读原始字节」**
+
+新增两个类：
+- [`GoStyleRawBodyArgumentProcessor`](../../../../service/task/task-api/src/main/java/com/rag/task/task/api/config/GoStyleRawBodyArgumentProcessor.java)
+  —— 继承 `RequestResponseBodyMethodProcessor`，**只覆盖 `createInputMessage(NativeWebRequest)`**
+  （父类 `AbstractMessageConverterMethodArgumentResolver:269-273`，protected），
+  返回一个 `getBody()` 直读 `HttpServletRequest.getInputStream()` 的 `ServletServerHttpRequest` 子类。
+- [`TaskApiRawBodyConfig`](../../../../service/task/task-api/src/main/java/com/rag/task/task/api/config/TaskApiRawBodyConfig.java)
+  —— 用 `BeanPostProcessor` 把 `RequestMappingHandlerAdapter` 里的默认
+  `RequestResponseBodyMethodProcessor` **就地替换**成本类。
+
+**为什么不能改转换器**（这正是上一版台账「要彻底修」的第二个候选，**方向对、位置错**）：
+body 在转换器被调用前就被换掉了（见上面 (3)）⇒ 转换器层是**事后诸葛**。
+
+**为什么用 `BeanPostProcessor` 替换处理器、而不是自建 `HandlerMethodArgumentResolver`**：
+`RequestMappingHandlerAdapter#getDefaultArgumentResolvers()`（spring-webmvc 7.0.9）
+把**自定义** resolver 放在**所有**内置 resolver **之后**，
+而 `RequestResponseBodyMethodProcessor.supportsParameter()` 对任何带 `@RequestBody` 的参数都返回 `true`
+⇒ 自定义 resolver **永远轮不到**。⇒ 只能**就地替换**默认实例。
+
+**⚠️ 副作用面（必须知道再改）**：替换实例会丢掉 Spring 内部持有的 `RequestBodyAdvice` 链
+（`RequestMappingHandlerAdapter#requestResponseBodyAdvice` 是 private 且**没有 getter**）。
+本仓全量 `service/` 主代码里**没有任何** `RequestBodyAdvice` 实现 ⇒ 传 `null` 与 Spring 自己的装配**完全等价**。
+⇒ 装配处加了**启动即失败**的断言：一旦将来有人加了 `RequestBodyAdvice`，直接抛异常，
+**不静默丢掉**。
+
+**不用「filter 改写 Content-Type」那种「在容器层撒谎」的方案** ——
+那会让服务端看到与客户端不同的 Content-Type，排查时更迷惑。
+
+---
+
+#### ✅ 证据
+
+| 证据 | 结果 |
 |---|---|
-| `setParseBodyMethods(null)`（新增 `TomcatConnectorCustomizer`） | 错误**文案**变了（`%` 解码损坏 → body 缺失），**状态码仍是 400**。且全局关掉 body 解析会让 `getParameter*()` / `getParts()` 静默失效 —— 对「下一个端点要读表单参数」是雷 |
-| 再叠加关掉 formcontent filter + multipart | 无变化 |
+| **双侧活体对拍**（`tools/difftest/parity-task.py`，44 条矩阵） | ✅ **MATCH 44 / DIFF 0**，脚本 `EXIT=0` |
+| **真 Tomcat 守门测试**（`TaskApiContentTypeTest`，12 条） | ✅ 6 种 Content-Type + 不带 Content-Type 全 200；**阳性对照**（畸形 JSON / 空 body）仍 400 |
+| **变异测试 ①**：撤掉处理器替换 | 🔴 1 条红，报错正是 `Unexpected character ('%' (code 37))`（与修前历史错误形态一致） |
+| **变异测试 ②**：multipart 开关改回 `true` | 🔴 2 条红（行为 + 配置项断言各 1） |
+| **全量回归** | ✅ task-api **90** + task-rpc **90** + common **146** = **326 条全绿 0 skipped** |
 
-⇒ **该改动已回滚**（不进仓）。理由：它没有改变对外可观察的**状态码**，
-却引入了「容器级关掉 body 解析」这个副作用面宽的改动；
-半吊子修复比不修更危险 —— 它会让人以为问题已解决。
+⇒ 守门测试**不是假绿**：两个变异都能把它打红。
 
-**影响面判断**：只影响「用非 JSON 的 Content-Type 头发送 JSON body」的客户端。
-这类客户端本身用法有问题（Go 能收是因为它根本不校验），真实网关/前端 SDK 基本不会这么发。
-⇒ 归 **OBSERVABLE DIFFERENCE 而非阻塞缺陷**，但**按 AGENTS.md §5 仍默认判 RAG 错**，未签字。
-
-**要彻底修，需要**（均未做，需先评估）：
-- 在 Servlet 容器之前拦住 form/multipart 的请求参数化（例如自定义 `HttpServletRequest` 包装 +
-  强制 `setContentType("application/json")`），或
-- 让本域不接受任何 `consumes` 判定并自建 `HandlerMethodArgumentResolver` 直接读 raw stream。
+**修法来源**（本轮唯一一次「先读源码再动手」）：
+- Go：`service/task/api/internal/handler/task/gettaskhandler.go:18-24`
+- Spring：spring-web 7.0.9 `ServletServerHttpRequest.java:227-234` / `:249-253` / `:261`
+- Spring：spring-webmvc 7.0.9 `AbstractMessageConverterMethodArgumentResolver.java:269-273` / `:355-380`
+- Spring：`AbstractJacksonHttpMessageConverter.java:313`（`read(ResolvableType, HttpInputMessage, Map)`，
+  **Smart 分支**，是本仓转换器 `read` 覆盖的真实入口）、
+  `AbstractJacksonHttpMessageConverter.java:88`（`extends AbstractSmartHttpMessageConverter`）
 
 ---
 
@@ -304,19 +434,37 @@ RAG 侧由 Spring 的转换器与本域的 `plainText()` 产生。
 改它需要覆盖 Spring 的消息转换器输出，代价大于收益。
 ⇒ 归入**全域共性差异**（其它 api 域同样如此），**不在本域单独修**。
 
-⚠️ 但它让本域对拍的 43 条里有 40 条「红了」。读对拍报告时必须先按 header 归一再看，
-否则会淹没真正的语义差异 —— 这正是 `tools/difftest/diff.py` 里 `Normalizer` 的职责。
+⚠️ **它曾让本域对拍的 43 条里有 40 条「红了」** —— 真差异会被淹没。
+⇒ **2026-10-24 已处理**：对拍脚本改成「**按媒体类型归一后判定**，
+原值差异归入『已知全域共性』单列（打印但不计 DIFF）」，
+现在 44 条里 43 条的这个共性差异**单列可见**，且**不再掩盖任何真差异**。
+（⚠️ `tools/difftest/diff.py` 里的 `Normalizer` 管的是 **JSON 值**的归一，
+**不是** HTTP 头 —— 别指望它兜这件事。）
 
 ---
 
 ## 七、对拍产物与复现
 
+### 一条命令复跑（2026-10-24 新增）
+
+```bash
+./tools/difftest/run-task-http-parity.sh          # 完整跑一遍
+KEEP_UP=1 ./tools/difftest/run-task-http-parity.sh # 跑完不拆服务与容器
+```
+
+⚠️ 它会**重建** `taskprobe-postgres` / `taskprobe-redis` / `taskprobe-kafka`
+（`docker compose down -v` + 删同名遗留容器）⇒ **会破坏该容器上的既有数据**，
+且与其它并发会话可能抢容器名/端口（已用 `taskprobe-*` 前缀 + 独立端口避开）。
+
+### 产物
+
 | 文件 | 作用 |
 |---|---|
+| [`tools/difftest/run-task-http-parity.sh`](../../../tools/difftest/run-task-http-parity.sh) | **一键编排**（编 Go/RAG、起基建、起两侧四进程、等就绪、跑矩阵、收摊） |
+| [`tools/difftest/parity-task.py`](../../../tools/difftest/parity-task.py) | **44 条请求矩阵**（已进仓）；`EXIT=0/1` 可当门禁 |
+| [`tools/difftest/docker-compose.task-kafka.yml`](../../../tools/difftest/docker-compose.task-kafka.yml) | 基建（pg/redis/kafka，容器名 `taskprobe-*`） |
 | [`tools/difftest/conf/go/task-rpc.yaml`](../../../tools/difftest/conf/go/task-rpc.yaml) | Go rpc 配置副本（冻结真源零写入） |
 | [`tools/difftest/conf/go/task-api.yaml`](../../../tools/difftest/conf/go/task-api.yaml) | Go api 配置副本 |
-| [`tools/difftest/parity-task.py`](../../../tools/difftest/parity-task.py) | 43 条请求矩阵（已进仓） |
-| `/tmp/task-difftest/parity-result.txt` | 本轮结果原始输出 |
+| `$TMPDIR/task-http-parity/logs/parity-task-http.txt` | 对拍报告落盘（编排脚本第 9 步 tee 出来） |
 
-⚠️ **`parity.py` 尚未进仓**。它本该落在 `tools/difftest/` 下（像 `diff.py` / `run.sh` 那样可复现），
-本轮已补进仓（`tools/difftest/parity-task.py`）。⚠️ 它目前**硬编码了本轮的端口**（Go 18886 / RAG 58886）与库名，与 `run.sh` 一样属对拍专用配置。
+⚠️ `parity-task.py` **硬编码了本轮的端口**（Go 18886 / RAG 58886）与库名，与 `run.sh` 一样属对拍专用配置。
