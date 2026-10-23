@@ -993,3 +993,197 @@ ReflectionException: There is no getter for property named 'isRead'
    本轮若只跑那个新写的守门测试，5 条既有测试的红色就看不见了。
 2. **「潜伏缺陷」不等于「不用修」，但也不等于「修了有收益」。**
    本条的收益是拆雷，**必须如实写明今天无可观察差异**，否则会被当成行为修复来汇报。
+
+---
+
+<!-- @fix 2026-10-23 22:5x–23:0x 第四轮 · V-015 / V-019 已修 · 新增 V-020~V-023（双侧活体 DDL 对拍） · 基线 8422116 -->
+
+## 2026-10-23 第四轮：配置侧两条关闭 + **首次双侧活体 DDL 对拍**
+
+> **核对时间**：2026-10-23 22:45–23:00　**基线 commit**：`8422116`（`align/message` 工作树）
+> **本轮新增的证据形态**：**Go GORM AutoMigrate 真跑一次** vs **RAG 三个 Flyway 迁移真跑一次**，
+> 同一个 `postgres:16-alpine`，逐行 diff（列类型/可空/默认/索引/约束）。
+> ⚠️ 这是 message 域**第一次**拿到 DDL 的活体证据 ——
+> AGENTS.md §0 一直记着「索引 / 唯一约束 / NOT NULL / DEFAULT **完全 NOT CHECKED**」，
+> 而 message 域之前连 `tools/difftest/check-ddl-static.py` 都跑不了
+> （它要求一个已装好 Go 侧 schema 的 `difftest-postgres` 容器，而 Go 真源起不来，依赖 `etcd:2379`）。
+
+### 探针做法（可复现）
+
+不需要起整个 Go 服务 —— 真源的建表行为全部来自
+`service/message/rpc/internal/model/db.go:42` 的
+`db.AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})`。
+⇒ 用**真源同一个** `go.mod`（`gorm.io/driver/postgres v1.6.0` / `gorm.io/gorm v1.31.1`）写一个最小程序，
+struct 与 `data_model.go` 逐字段逐 tag 一致，对真 PG 跑一次 AutoMigrate，
+再用 `information_schema.columns` + `pg_indexes` + `pg_constraint` 三张系统表把 schema 打出。
+
+### ✅ FIX-MSG-V-015 —— reflection 暴露面（配置层已对齐 + 装配层已验）
+
+| | Go | RAG（修复前） |
+|---|---|---|
+| 判定点 | `message.go:40-42`：`if c.Mode == service.DevMode \|\| c.Mode == service.TestMode` | 无判定，直接用 starter 默认 |
+| 取值来源 | `zrpc.RpcServerConf.Mode` 的 tag `json:",default=pro,…"`（go-zero@v1.10.2 `core/service/serviceconf.go:35`） | `GrpcServerProperties.reflectionServiceEnabled` |
+| 实际值 | `etc/message.yaml` **未配 Mode** ⇒ `pro` ⇒ **不注册** | starter metadata `defaultValue=True` ⇒ **注册** |
+
+⇒ `application.yml` 显式加 `grpc.server.reflection-service-enabled: false`，
+并**删掉那句错误的注释**（「Java 端由 devh starter 默认注册 reflection」把 starter 默认值当成了与 Go 一致）。
+
+**证据**（新增 `MessageGrpcReflectionExposureWiringTest`，**真 Spring 上下文 + 真 PG 容器**）：
+
+1. `GrpcServerProperties#isReflectionServiceEnabled() == false` —— 证明 yml 那行**真的绑定到了配置对象**；
+2. `Environment#getProperty("grpc.server.reflection-service-enabled") == "false"` ——
+   证明这一行**确实被解析**，而不是「starter 恰好不是默认值」凑巧关掉的。
+
+⚠️ **证据边界（§6.2 约定 2）**：「reflection 服务真的没被注册进 ServerBuilder」属于 starter 内部行为，
+需起真端口 + `grpcurl list` 才能证 ⇒ **本轮未做端到端验证**。
+⇒ 本条结论读作「**配置层 + 绑定层已对齐，端到端未验**」。
+
+### ✅ FIX-MSG-V-019 —— PostgreSQL 连接参数（并**新挖出一条台账没记的**）
+
+Go DSN（`db.go:21-29`）实际是：
+
+```go
+"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=Asia/Shanghai"
+//                                  ↑ 来自 etc/message.yaml:34 的 Mode: "disable"
+//                                                        ↑ 来自 db.go:22 字面量
+```
+
+| 参数 | 修复前 RAG | 本轮修复后 |
+|---|---|---|
+| `sslmode` | URL 里没有 ⇒ pgjdbc 默认 `prefer`（先试 TLS 再回落明文） | `?sslmode=disable`（**永不尝试 TLS**，与 Go 同） |
+| `TimeZone` | 🔴 **完全没有** | `options=-c%20TimeZone%3DAsia%2FShanghai` |
+
+⚠️ **`TimeZone` 是本轮新发现的**，原 V-019 只写了 `sslmode`。
+落地方式不能写 `?TimeZone=Asia/Shanghai` —— **pgjdbc 没有这个连接属性**
+（实测 `PGProperty` 里只有 `OPTIONS`/`ASSUME_MIN_SERVER_VERSION` 等，无 TimeZone），
+必须走 `options=-c …` 透传。
+**为什么它要紧**：本域时间列当前是 `TIMESTAMP`（**无时区**，见 V-020），
+会话时区直接决定读出来的是哪一刻 ⇒ Go 把会话钉在 Asia/Shanghai，RAG 却吃 PG 服务器默认值。
+
+### 🔴 新增 V-020 —— **9 个时间列：`timestamptz` vs `timestamp`（外加 NOT NULL 与 DEFAULT 也不同）**
+
+**Go 侧证据（消费点）**：`gorm.io/driver/postgres@v1.6.0/postgres.go:251-255`
+
+```go
+case schema.Time:
+    if field.Precision > 0 { return fmt.Sprintf("timestamptz(%d)", field.Precision) }
+    return "timestamptz"          // ← 真源 go.mod:27 钉的就是 v1.6.0
+```
+
+⇒ Go 的 `time.Time` 字段**全部**建成 `timestamp with time zone`。
+
+**双侧活体 diff（`postgres:16-alpine`，同一镜像）**：
+
+| 列 | Go | RAG |
+|---|---|---|
+| `message_notification.read_at` | `with time zone` / 可空 | `without time zone` / 可空 |
+| `message_notification.created_at` | `with time zone` / **可空** / 无默认 | `without time zone` / **`NOT NULL`** / **`DEFAULT CURRENT_TIMESTAMP`** |
+| `message_notification.updated_at` | `with time zone` / **可空** / 无默认 | 同上 |
+| `message_conversation.last_message_at` | `with time zone` / NOT NULL / 无默认 | `without time zone` / NOT NULL / **`DEFAULT CURRENT_TIMESTAMP`** |
+| `message_conversation.created_at` / `updated_at` | `with time zone` / **可空** / 无默认 | `without time zone` / NOT NULL / DEFAULT |
+| `message_conversation_message.read_at` | `with time zone` / 可空 | `without time zone` / 可空 |
+| `message_conversation_message.created_at` | `with time zone` / **可空** / 无默认 | `without time zone` / NOT NULL / DEFAULT |
+
+⚠️ **三处不同，不止类型**：`类型`（timestamptz / timestamp）+ `可空性`（Go 的 created_at 可空！RAG 是 NOT NULL）
++ `默认值`（Go 没有，RAG 有 `CURRENT_TIMESTAMP`）。
+这三者**互相咬合**：改成 `timestamptz` 后，读路径的 epoch 换算必须同步，
+否则会**多修一次错**（§6.7.10 记的「读侧修法的前提是一个库只由同一时区 JVM 写」）。
+⇒ **本轮只登记，未改**：这属于「改一处必须同步三处 + 双侧对拍」的量级，
+且 users 域已有同类处置先例（`users_user` 两列 `⇒TIMESTAMPTZ`），应照该先例的规格做，不宜在本轮顺手改。
+
+### 🔴 新增 V-021 —— 两个索引的**名字**不同（列相同）
+
+```
+Go : idx_message_conversation_last_message_at ON (last_message_at)
+RAG: idx_conversation_last_message_at        ON (last_message_at)
+Go : idx_message_conversation_updated_at      ON (updated_at)
+RAG: idx_conversation_updated_at             ON (updated_at)
+```
+
+根因：Go 的 `LastMessageAt` / `UpdatedAt` 用的是**无名** `index` tag，GORM 按
+`idx_<表名>_<列名>` 生成 ⇒ 表名 `message_conversation` 被拼进去；
+RAG 手写迁移时按「读起来更短」命名。
+⇒ 行为等价（同一列的等价索引），但 `pg_indexes` / `\d` / 任何引用索引名的运维脚本都会看到差别。
+**本轮只登记，未改**（改名 = `DROP INDEX` + `CREATE INDEX`，需评估线上是否有对象依赖旧名）。
+
+### 🔴 新增 V-022 —— `idx_notification_recipient_read` 的**列不同**（Go 只有 1 列）
+
+```
+Go : idx_notification_recipient_read ON (is_read)                     ← 1 列
+RAG: idx_notification_recipient_read ON (recipient_id, is_read)        ← 2 列
+```
+
+根因：Go 的 tag 里 `recipient_id` 挂的是**另一个**索引
+（`index:idx_notification_recipient_time,priority:1`），
+而 `is_read` 用 `index:idx_notification_recipient_read,priority:2` ——
+该索引**没有 priority:1 的成员**，GORM 就只建一列。
+RAG 按索引名的字面意图（"recipient + read"）建了两列。
+
+⚠️ **这一条要当心**：RAG 的版本其实**更贴合** `ListNotifications` 的
+`WHERE recipient_id=? AND is_read=false` 过滤；但按 §3.1 真源是唯一基准，这仍是漂移。
+**本轮只登记，未改** —— 改回单列会让该查询退化成「扫索引再回表过滤」，
+属于「忠实复刻会引入性能回退」的典型，**留给用户拍板**，不自行决定。
+（同域的 `idx_message_recipient_read` 两侧都是 3 列，**一致**。）
+
+### ✅ FIX-MSG-V-023 —— `uk_conversation_pair`：约束 ⇒ 索引，并顺带关掉 `UNRESOLVED-MSG-005`
+
+**双侧活体证据**：
+
+```
+Go   pg_indexes  : CREATE UNIQUE INDEX uk_conversation_pair ON public.message_conversation
+                   USING btree (participant1_role, participant1_id, participant2_role, participant2_id)
+     pg_constraint: 无 uk_conversation_pair 行
+RAG  pg_indexes  : （无独立行，被约束背着的索引不单列）
+     pg_constraint: message_conversation|uk_conversation_pair|u|UNIQUE (…)      ← 唯一**约束**
+```
+
+⇒ Go 的 `uniqueIndex:` tag 建的是**唯一索引**，RAG 的 `ADD CONSTRAINT … UNIQUE` 建的是**唯一约束**。
+
+**顺带证伪了台账里的一条修法方向**：原 `UNRESOLVED-MSG-005` 建议「给 `V2` 的
+`ALTER TABLE … ADD CONSTRAINT` 加 `IF NOT EXISTS`」——
+🔴 **PostgreSQL 16 不支持这个语法**（真容器实测：`ERROR: syntax error at or near "NOT"`）。
+所以那条路是**死的**，只能改成 `CREATE UNIQUE INDEX IF NOT EXISTS`（PG 支持）。
+
+⇒ 新增 `V4__conversation_pair_unique_index.sql`：
+`ALTER TABLE … DROP CONSTRAINT IF EXISTS` + `CREATE UNIQUE INDEX IF NOT EXISTS`。
+**没有改 V2 的正文** —— 改已应用迁移会撞 Flyway 校验和（§6.3 决策 1 的推论）。
+
+**幂等性实测**：V1→V2→V3→V4 连跑两遍，**8 次执行全部 `exit=0`**，
+且第二遍跑完后 schema 与第一遍一致（V4 把 V2 重建的约束又降回索引）。
+
+⚠️ **诚实边界**：这**不能**说「V2 的非幂等被修好了」——
+Flyway 本身每个迁移只跑一次，生产上不会重放。
+本条真正修掉的是：(a) 对象类型与 Go 一致；(b) **人工重放 / 外部工具建过同名列时**不再炸。
+`UNRESOLVED-MSG-005` 的原始问题（「已被 GORM AutoMigrate 建过表的库上能否启动」）
+仍然只在「外部工具恰好用了同名**约束**」时才成立；GORM 建的是**索引**，
+所以 V2 的 `ADD CONSTRAINT` 在 GORM 建过的库上**本来就能跑**。
+
+### 仍然开放（本轮核实，未改）
+
+| 编号 | 状态 | 本轮核实结论 |
+|---|---|---|
+| `DRIFT-MSG-V-016`（go-zero 三个 unary 拦截器：recover / breaker / CPU shedding 全缺） | 🔴 **OPEN** | 确认仍缺。`MessageGrpcInterceptorWiringTest` 验的是 `DRIFT-MSG-003` 的**观测**拦截器（超时/trace），**不是**这三个。三者各自的 Go 出处与默认值已在台账 §7 列全（`zrpc/internal/config.go:21/25`、`zrpc/config.go:47`）。**属架构级新增（要给纯 gRPC 服务补三件套框架能力），不在本轮「对齐既有行为」的范围内**，留待下一轮单独决策 |
+| `DRIFT-MSG-V-017`（`isRead` 字段名） | ✅ 已修（上一轮），**本轮复核仍绿** | `MessageIsReadLambdaWiringTest` 3/3 绿、skipped=0 |
+| `DRIFT-MSG-V-018`（`ListConversations` 少一次 `count_unread` 埋点） | 🔴 **OPEN** | 确认仍缺。**副作用已加重**：本轮把时间列与会话时区都摊开（V-019/V-020）后可以确定，该路径当前**不可达**（列表已按参与者过滤，`peerOf` 不会失败），所以它今天只表现为「一条永远不会增长的指标」。修它的收益低于风险，**建议与 V-016 一起决策** |
+| `UNRESOLVED-MSG-004`（三项「起不来」缺陷无点名式防回退） | 🔴 仍成立 | 本轮新增的 `MessageGrpcReflectionExposureWiringTest` 是**配置绑定**层的点名式用例，可作为该条「点名式守门」的样板；`@MapperScan` / `NacosRegistration` Bean 名两项目前仍未点名 |
+
+### 🟡 附带观察（不改，只记）
+
+`MessageTransactionWiringTest` 带 `@EnabledIfDockerAvailable` ——
+即 `docs/DRIFT/_cross/component-coverage-matrix.md` 点名的那个反模式。
+**本模块不受其害**（`message-rpc` 是有 `RYUK_DISABLED` surefire 注入的模块之一，
+本轮实测 `skipped=0`），但该注解**理应删掉**：它唯一的作用是把两类失败压成同一个
+`Docker is not available`，而 message-rpc 并不需要它。
+**本轮未删**（它现在无害，删它属于清理而非对齐，且会让本轮的测试计数变化混在语义修复里）。
+
+### 本轮实测数据
+
+```
+message-rpc：51 tests（原 49 + 新增 2）/ 0 failures / 0 errors / 0 skipped   BUILD SUCCESS
+              ← skipped=0 是硬要求：§状态更正#5 规定「绿灯必须额外断言 skipped 数 = 0」
+message-api：84 tests / 0 failures / 0 errors / 0 skipped
+message-common：21 tests（本轮从 0 建起）/ 0 failures / 0 errors / 0 skipped
+semantic-probe：56 例 → 一致 54，不一致 0，已签字偏离 2                      EXIT=0
+DDL 对拍：Go AutoMigrate 55 行 vs RAG V1~V4，**归一化后剩余 23 行差异**
+          （= V-020 时间列 8 列 × 3 维 + V-021 索引名 2 + V-022 索引列 1 + 表头/格式噪声）
+```

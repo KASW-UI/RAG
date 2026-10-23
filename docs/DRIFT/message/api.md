@@ -1069,3 +1069,150 @@ RAG 真实 DTO + 真实 coercion，两侧同时跑），足以支撑判定。
 2. **每个 Go 事实带 `文件:行号`，且指向消费点** —— 本台账已逐条标注；修改时不得退回 struct tag 声明行。
 3. **改完必须两侧同时跑** —— `tools/semantic-probe` 需**扩到 51 例以上并新增出参用例面**，
    否则 `-009` 这类「出参漂移」没有任何守门。
+---
+
+<!-- @fix 2026-10-23 22:0x 第三轮 · 探针补到 56 例 · -005 已修 / -006 -007 -008 本轮修 / -009 已签字 -->
+
+## 2026-10-23 第三轮：探针落盘 + `-005/-006/-007/-008` 关闭
+
+> **核对时间**：2026-10-23 22:31–22:50
+> **基线 commit**：`8422116`（`align/message` 工作树）
+> **本轮证据强度**：**真源-双侧探针 56 例**（Go 侧真源 `core/mapping` + RAG 侧真实 DTO/真实 coercion，**值级比对**）
+
+### 🔴 本轮第一个发现：上一轮宣称的「51 例探针」**从未落盘**
+
+§8.1 写「本轮双侧探针（51 例，真源-双侧探针）」，但实测 `tools/semantic-probe/` 里：
+
+| 文件 | 上一轮宣称的 | 实测 |
+|---|---|---|
+| `go/main.go` | 51 例 | **102 行 / 23 例** |
+| `java/Probe.java` | 51 例 | **106 行 / 23 例** |
+| 最后一次改动 | — | commit `69e3262` / `e993ff0`（标题就是 `add shit`），**早于**本台账 02:14 的写入时间 |
+
+⇒ **五条 SEMANTIC MISMATCH（-005 ~ -009）的判定性证据不在仓内，不可复现、无人守门。**
+这正是 §3.3「凡写『与 Go 一致』，必须有两侧同时跑的探针」被绕过的一次 ——
+**结论写进了台账，探针却没进仓**。本轮第一件事就是把探针补齐并跑通。
+
+### 一、探针从 23 例扩到 56 例（新增两组机制 + 33 例）
+
+**机制①：值比对**（首轮探针自认「只比 ACCEPTED/REJECTED」）
+现在同一用例打印**解析出的值 / 序列化结果**，两侧逐字比对（Go 侧 `mapStr` ↔ Java 侧 `mapStr`，
+整数十进制无分隔、bool 用 `true/false`、map 按键排序拼 `k=v`）。
+判定新增一档 `XX(值不同)` —— 「两侧都收、但落的值不一样」从此可见。
+
+**机制②：签字偏离白名单**（`run-parity.sh` 内置 `known-dev` 清单）
+`docs/Intentional_Deviations/` 里已签字的差异**必然**为红。若让它们计入失败，
+守门人迟早会去「修绿」—— 那正是把已签字决策改回未受控漂移的最短路径（§3.2 / §5.3b）。
+⇒ 白名单用例标成 `SD-xx 预期差异`，**不计入失败，但始终打印出来**。
+⚠️ 加白名单是有后果的动作：每条都必须能在签字档里找到对应记录，否则就是拿白名单掩盖真漂移。
+
+**新增用例组**：`A`（布尔收数字 7 例）· `B`（`extra` 元素 10 例）· `C`（显式 null / int32 范围 8 例）
+· `D`（`,string` 值解析边界 6 例）· `X`（**出参**序列化 2 例，首轮完全没有这一面）。
+
+### 二、`-005`：**代码里早已修好，台账没更新**（本轮只做核实与补证）
+
+`MessageGoStyleCoercion` 里已有「补强 3（2026-10-23，DRIFT-MSGAPI-005）」：
+`LogicalType.Boolean + CoercionInputShape.Integer → Fail`。
+探针 A 组 7 例（`unread_only`/`broadcast` × `1`/`0`/`2`/`1.0`/`1.5`）**两侧全部 REJECTED**，
+`MessageApiMvcPipelineTest#adminBroadcastRejectsJsonNumber` 也已在锁。
+⇒ **`-005` 关闭（代码早于台账）**；台账的「未修」标记本轮更正。
+
+### 三、`-006` / `-007`：`map[string]string` 的**元素级**判据（本轮修）
+
+**Go 出处（消费点，已本轮重新逐行核对 `go-zero@v1.10.2/core/mapping/unmarshaler.go`）**：
+`generateMap` 赋值元素的 `default` 分支（`:385-417`）
+
+```go
+case json.Number:                       // ← 数字：收下并字符串化（v.String() 是**原始字面量**）
+    target := reflect.New(dereffedElemType)
+    if err := setValueFromString(dereffedElemKind, target.Elem(), v.String()); err != nil { … }
+case bool:                              // ← bool：要求 elem kind == Bool，对 string map ⇒ errTypeMismatch
+default:                                // ← nil/数组/对象：要求 elem kind == 值 kind ⇒ Invalid ≠ String ⇒ 报错
+```
+
+⚠️ **与顶层标量字段是两段代码、判据相反**（顶层走 `processFieldPrimitiveWithJSONNumber`，
+其 `switch typeKind` 无 `reflect.Bool` 分支 ⇒ 一律拒）。这正是 006/007 的全部根因。
+
+**为什么不能在 `MessageGoStyleCoercion` 里加一条规则解决**：
+共享规则靠 `LogicalType.Textual + Integer/Float → Fail` 对齐**顶层 String 字段**，
+而 map 的值同样声明为 `String` ⇒ 命中同一条规则。
+放行 map 元素上的数字，就必须把顶层 String 字段一起放行 ⇒ `{"content":123}` 会重新变成 ACCEPTED
+（`DRIFT-MSGAPI-002` 回退）。两个目标类型在 Jackson 的 **LogicalType 维度上无法区分**；
+`GoStyleCoercion` 类注释还记录了另一条路也不通 —— Jackson 3 的**类级** coercion 配置实测完全不生效。
+⇒ 唯一可靠挂点是字段上的 `contentUsing`，即新增的 `GoStyleMapStringValueDeserializer`。
+
+**🔴 修 `-007` 时踩到的 Jackson 细节（不写下来一定会再踩）**：
+`ValueDeserializer` 实现 `NullValueProvider`，map 元素为 `null` 时 Jackson **不走 `deserialize`**，
+而走 `getNullValue` —— 默认实现返回 `null` ⇒ 静默放行。
+**只覆写 `deserialize` 的话 `-007` 不会被修掉**，必须同时覆写 `getNullValue` 抛错。
+且 `getNullValue` 里**不能**调 `handleUnexpectedToken(…, p)`：该路径 Jackson 没给 parser，传 `null` 会 NPE。
+
+**证据（双侧，值级）**：`B1`(1) `B2`(1.5) `B9`(1.0) `B10`(1e2) 两侧一致；
+`B3`（元素 null）两侧均 REJECTED；`B4`/`B6`/`B8`（bool/数组/整体字符串）两侧均 REJECTED。
+`B9`/`B10` 专门钉住「**保留原始字面量**」：Go 用 `json.Number.String()` ⇒ `1.0` 落 `"1.0"`、`1e2` 落 `"1e2"`，
+不是 `"1"` ⇒ Java 侧必须用 `p.getText()`，不能用数值格式化。
+
+### 四、`-008`：`,optional` 标量字段的显式 null（本轮修）
+
+**Go 出处**：`unmarshaler.go:854-863 processNamedFieldWithValue`
+
+```go
+if mapValue == nil {
+    if opts.optional() { return nil }        // ← 接受，值保持零值
+    return fmt.Errorf("field %q mustn't be nil", key)
+}
+```
+
+Jackson 3 的 `FAIL_ON_NULL_FOR_PRIMITIVES` **默认 true** ⇒ `{"offset":null}` / `{"kind":null}` /
+`{"unread_only":null}` 三种形态全被拒。
+
+**为什么在本模块全局关掉是安全的**（逐字段核过 `types.go`，不是拍脑袋）：
+本模块**没有任何必填的原始类型字段**。`PageReq` 三字段全 `,optional`；
+`AdminSendNotificationReq` 的 `broadcast`/`kind` 全 `,optional`，`target_id` 是 `Long`；
+必填的 `title`/`content`/`conversation_id` **全是引用类型** ——
+它们收显式 null 的拒绝靠 `GoStyleRequired#field(...)`（Controller 层），
+**不靠这个 feature** ⇒ 关掉它动不到必填语义。
+探针 `required 显式 null(conversation_id)` + 新增 MVC 用例 `requiredFieldExplicitNullIsStillRejected` 双向钉死。
+
+**证据（双侧，值级）**：`C1` offset=0 · `C2` limit=0 · `C3` unread_only=false · `C4` kind=0，
+四例两侧一致。`C5`（`,string,optional` 的 `target_id:null`）两侧本就一致（早前已对）。
+
+### 五、`-009`：**已被签字，不再是待修项**（本轮更正台账）
+
+`DRIFT-MSGAPI-009` 仍写着「未修 · 必须改成 JSON 数字」，但
+[`SD-2026-10-23-03`](../../Intentional_Deviations/_cross/signed-deviations.md#L67-L78)
+已由用户逐条拍板「**保留 RAG 的字符串形态，不改 wire 契约**」。
+
+⇒ **本组件不再把它当漂移**。三条连带处置：
+
+1. 探针把 `X1`/`X2` 放进 `known-dev` 白名单 ⇒ 对拍时它**必然为红但不计失败**，
+   且每次都打印出来（不会「悄悄消失」）。
+2. 🔴 **`AdminSendNotificationResp` 的 javadoc 把 Go tag 抄错了** ——
+   它写 `Affected int64 \`json:"affected,string"\``，而真源 `types.go:21-23` 是
+   `Affected int64 \`json:"affected"\``（**没有** `,string`）。
+   注释里那句错误的「Go: …」正是当年加 `@JsonFormat(STRING)` 的理由（§3.3.2）。
+   ⇒ 已改正为中性描述 + 指向 SD-03；**行为按签字结论保持字符串不变**。
+3. 台账里「Must Preserve：affected 是 JSON 数字」一句**作废** —— 按 Go 改反而是制造未受控漂移。
+
+### 六、`-010`（Content-Type 缺 charset）—— **仍开放，本轮未动**
+
+`OBSERVABLE DIFFERENCE` / LOW。要在**真容器**下 dump 全部响应头才能与 Go 逐字节对齐；
+本轮未做（与 `UNRESOLVED-003` 同一件事）。**未修不等于已登记为待办以外的东西** ——
+它仍是 OPEN，且探针不覆盖 HTTP 响应头（那需要双侧起栈）。
+
+### 七、本轮关闭的 Unresolved
+
+| 编号 | 状态 | 依据 |
+|---|---|---|
+| `UNRESOLVED-002` | ✅ **关闭** | 新增 `MessageApiGoStyleCoercionWiringTest`（**6 例，全部走真实 MVC 管线**：2 例 `,optional` 显式 null 放行并落零值、1 例 admin `kind:null`、1 例 `extra` 元素收数字并断言下游 proto 里的**字面量**、1 例 `extra` 元素 null → 5001 **且零次下游调用**、1 例必填 `title:null` 仍 5001）。它证明的是「规则真挂在 Spring MVC 用的那个 mapper 上」——探针只证明「规则是什么」 |
+
+### 八、本轮实测数据
+
+```
+探针：56 例 → 一致 54，不一致 0，已签字偏离 2        EXIT=0
+message-api：84 tests / 0 failures / 0 errors / 0 skipped   BUILD SUCCESS
+             （原 78 + 新增 6；新增类的 surefire XML skipped=0，符合 §状态更正#5 的要求）
+```
+
+⚠️ **「84 全绿」不等于「对齐了 84 条」**：探针的 54 例才是这一轮的判定性证据，
+MVC 那一层的作用是证明装配（规则没掉在 builder 上），两者不可互相替代（§3.3.3）。

@@ -14,8 +14,6 @@ import com.rag.message.message.api.interceptor.AbstractMessageJwtAuthInterceptor
 import com.rag.message.message.common.errmsg.MessageErrorCode;
 import com.rag.message.message.common.errmsg.MessageErrorMessages;
 import com.rag.message.message.common.errmsg.MessageGrpcError;
-import io.grpc.StatusException;
-import io.grpc.StatusRuntimeException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Component;
 
@@ -123,7 +121,11 @@ public class MessageApiSupport {
      * <ul>
      *   <li><b>code</b> 由 {@link MessageGrpcError#bizCodeFromError} 决定 ——
      *       先按 gRPC status 的 description 反查业务码表，查不到再按 gRPC code class 兜底。
-     *       Go 与 RAG 共用同一张表与同一套规则（message-common 已有 focused tests）。</li>
+     *       <br>⚠️ <b>2026-10-23 更正</b>：原注释写「message-common 已有 focused tests」——
+     *       实测该模块当时<b>一条测试都没有</b>（{@code src/test} 目录不存在），
+     *       属 §3.3.2 点名的「以断言口气写的假事实」。现已补齐
+     *       （{@code MessageErrorMessagesTest} / {@code MessageGrpcErrorTest}），
+     *       但本行不再引用测试的存在与否当论据。</li>
      *   <li><b>msg</b> 优先用 gRPC 的 description <b>原文</b>；只有在拿不到非空 description 时
      *       才退回按 code 查表。Go 侧 message-rpc 把业务码藏在 description 里
      *       （{@code GRPCError(codes.X, bizCode)} → {@code status.Error(X, GetErrMsg(bizCode))}），
@@ -146,16 +148,19 @@ public class MessageApiSupport {
     /**
      * 取 gRPC status 的 description；不是 status 异常时返回 {@code null}。
      *
-     * <p>对应 Go {@code status.FromError(err)} 的 {@code ok} 判定。
+     * <p>对应 Go {@code status.FromError(err)} 的 {@code ok} 判定与 {@code st.Message()}。
+     *
+     * <p>🔴 <b>2026-10-23：这里原先是自己写的 {@code instanceof} 双分支，已删除。</b>
+     * 原因：Go 侧的 {@code status.FromError}（grpc-go v1.81.1）里有 {@code errors.As} ——
+     * <b>会沿 cause 链解包</b>；本方法只认「最外层那个异常本身是不是 status」，
+     * 于是 {@code CompletionException}/{@code @Async} 包一层的场景，
+     * {@link #rpcError} 拿到的是 {@code 1015} 而 Go 拿到的是按 code class 映射的码。
+     * ⇒ 现在统一委派给 {@link MessageGrpcError#statusMessage(Throwable)}，
+     * <b>全仓只保留一份实现</b>（两份实现迟早分叉，而分叉的症状是「码对、msg 错」，
+     * 端到端测试几乎看不出来）。
      */
     private static String statusDescription(Throwable err) {
-        if (err instanceof StatusRuntimeException sre) {
-            return sre.getStatus().getDescription();
-        }
-        if (err instanceof StatusException se) {
-            return se.getStatus().getDescription();
-        }
-        return null;
+        return MessageGrpcError.statusMessage(err);
     }
 
     /**

@@ -305,3 +305,66 @@ RAG 侧列是 `TIMESTAMP`（无时区），读侧改用 `atZone(ZoneId.systemDef
 **教训**：**「读侧修好」与「列类型修好」是两件事**，
 只有后者能让数据自带 epoch 信息、不再依赖「部署环境永远一致」这个隐含假设。
 台账里必须把这条写清楚，否则「已修」会被读成「彻底解决」。
+---
+
+<!-- @new 2026-10-23 23:0x · 由 `align/message` 工作树产出 · 基线 commit 8422116 -->
+
+## 2026-10-23 第四轮的 4 条元教训
+
+### 1. 🔴 **起不来整个 Go 服务，不代表拿不到 Go 的 schema**
+
+`tools/difftest/check-ddl-static.py` 需要一个装好 Go 侧 schema 的容器，
+而 Go 真源起不来（依赖 `etcd:2379`）⇒ message 域的 DDL 对照一直是 `NOT CHECKED`。
+
+⇒ 但**真源的建表行为全部来自一行**：
+`service/message/rpc/internal/model/db.go:42` 的 `db.AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})`。
+用**真源同一个 `go.mod`**（`gorm.io/driver/postgres v1.6.0`）写 80 行最小程序，
+struct 与 `data_model.go` 逐字段逐 tag 一致，对真 PG 跑一次即可。
+⇒ **产出 55 行 schema dump**，与 RAG 侧三个迁移的 dump 逐行 diff。
+
+⚠️ 纪律：**「拿不到活体证据」时，先问「那个活体到底由哪几行代码构成」**。
+本例中被误判为「不可测」的，其实是一行可以被单独调用的函数。
+（对照 §3.3「框架机制必须验证实际生效」的同一思路，只是这次的对象是 GORM。）
+
+### 2. 🔴 **列类型差一条，会带着「可空性」和「默认值」一起差**
+
+本轮首次把 NOT NULL / DEFAULT 从「NOT CHECKED」变成「已查」，结果是**三处一起不同**：
+
+```
+Go  message_notification.created_at | timestamptz | 可空  | 无默认
+RAG message_notification.created_at | timestamp   | NOT NULL | DEFAULT CURRENT_TIMESTAMP
+```
+
+⇒ 只改类型（`TIMESTAMP ⇒ TIMESTAMPTZ`）会**留下另两处的差异**，
+而另两处同样影响行为（谁写进去、能不能写 null）。
+⇒ **纪律**：DDL 对照的判定单位是「列 + 可空 + 默认」三元组，
+不是「列类型」。users 域 `users_user` 的同类处置已有先例可循。
+
+### 3. 🔴 **「给 `ADD CONSTRAINT` 加 `IF NOT EXISTS」这条修法是死的 —— 而且很容易被当成显然**
+
+`UNRESOLVED-MSG-005` 一直挂着「给 V2 的 `ALTER TABLE … ADD CONSTRAINT` 加 `IF NOT EXISTS`」。
+🔴 实测：**PostgreSQL 16 不支持这个语法**（`ERROR: syntax error at or near "NOT"`）。
+支持的是 `CREATE INDEX IF NOT EXISTS` / `CREATE TABLE IF NOT EXISTS` / `DROP … IF EXISTS`。
+
+⇒ 顺带发现**更根本的一点**：真源的 `uniqueIndex:` tag 建出来的是**唯一索引**
+（`pg_indexes` 有行、`pg_constraint` 无行），根本不是约束。
+所以正确的修法不是「让约束幂等」，而是**换成索引**（`CREATE UNIQUE INDEX IF NOT EXISTS`）
+—— 一次同时解决「对象类型与 Go 一致」和「可幂等重放」两个问题。
+⇒ **纪律**：提出修法前，先在**真容器**上验证那个语法/接口存在。
+
+### 4. 🔴 **改已应用的 Flyway 迁移 = 撞校验和**
+
+直觉修法是「直接改 V2 的那一行」。但 V2 已经在若干库上应用过，
+改正文会改变 Flyway 的 checksum ⇒ `validate-on-migrate` 直接失败。
+⇒ **纪律**：幂等性/对象类型这类修正，一律**新增 `V4`**（`DROP … IF EXISTS` + `CREATE … IF NOT EXISTS`），
+让「已跑过」与「没跑过」的库都能收敛到同一状态。
+⚠️ 并且要**实测连跑两遍**都 `exit=0` —— 本轮就是这么验的（8 次执行全 0）。
+
+### 5. 🟡 附带：`@EnabledIfDockerAvailable` 的正确处理方式
+
+`MessageTransactionWiringTest` 带着 `@org.testcontainers.junit.jupiter.EnabledIfDockerAvailable`
+—— 正是 `component-coverage-matrix.md` 点名的反模式。
+**本模块无实际危害**（`message-rpc` 是已配 `RYUK_DISABLED` surefire 注入的模块，本轮实测 `skipped=0`），
+但该注解理应删掉：它唯一的作用是把「Docker 不可用」与「Ryuk 镜像拉不下来」
+压成同一个 `false`。**本轮未删** —— 它现在无害，而删它会让本轮的测试计数变化混进语义修复里，
+不如单独一轮处理干净。

@@ -297,3 +297,68 @@ response 已 committed 后 `setHeader` 被静默忽略 ⇒ text/plain 400 丢 Co
 | 3s 超时 503 分支 | ❌ **零运行证据** | UNRESOLVED-004 |
 | 断连 / 超时 / 并发 / 过载 | ❌ **零运行证据** | DRIFT 台账 §8.3 #6~#9 |
 | 依赖 message-rpc 的响应语义 | ⚠️ **UNKNOWN**（属另一会话） | UNRESOLVED-001 |
+---
+
+<!-- @new 2026-10-23 22:5x · 由 `align/message` 工作树产出 · 基线 commit 8422116 -->
+
+## 2026-10-23 第三轮的 5 条元教训（比单个缺陷更重要）
+
+### 1. 🔴 **「结论写进台账，探针却没进仓」** —— 本轮第一个发现
+
+`DRIFT/message/api.md` §8.1 白纸黑字写着「本轮双侧探针（51 例，真源-双侧探针）」，
+实测 `tools/semantic-probe/go/main.go` 与 `java/Probe.java` **都还是 23 例**，
+且最后一次改动（commit `69e3262` / `e993ff0`，标题 `add shit`）**早于**台账的写入时间。
+
+⇒ 五条 `SEMANTIC MISMATCH` 的**判定性证据不在版本库里**：
+不可复现、无法守门、下一个人做同类改动时没有任何拦截。
+§3.3 要求「两侧同时跑的探针」——**跑过 ≠ 落仓**。
+⇒ **纪律**：任何以「探针第 N 例」为形式的结论，必须同时交出
+① 探针两侧代码的 diff；② 一次完整运行输出。缺任一项 ⇒ 结论按 `UNKNOWN` 处理。
+
+### 2. 🔴 **「只比 ACCEPTED/REJECTED」的探针，会系统性漏掉一整类漂移**
+
+首轮探针的 README 自认「只看 Go 是否 ACCEPTED 与 RAG 是否 ACCEPTED 是否相同」——
+于是「**两侧都接受、但落的值不同**」这一类完全不可见。
+`affected` 的出参类型漂移（`DRIFT-MSGAPI-009` / 现 `SD-2026-10-23-03`）**正是这么漏掉的**。
+
+⇒ 本轮把判定升级为「判定 + **值逐字比对**」，新增一档 `XX(值不同)`。
+⚠️ 代价是**格式必须两侧逐字对齐**（Go 的 `mapStr` ↔ Java 的 `mapStr`：
+整数无千分位、bool 用 `true/false`、map 按键排序）—— 格式不一致会制造假红。
+⇒ **纪律**：跨语言的值比对，先各写一个「格式化函数」并让两侧互为镜像，再写用例。
+
+### 3. 🔴 **顶层字段与 map 元素在 Go 侧是「两段代码、相反判据」**
+
+这是本轮 `-006` / `-007` 的根因，也是最容易「按常识推错」的一处：
+
+| 目标 | Go 的判据 | 位置 |
+|---|---|---|
+| 顶层标量字段收 JSON 数字 | **一律拒**（`switch typeKind` 无 `Bool` 分支 ⇒ `default` ⇒ type mismatch） | `core/mapping/unmarshaler.go:663-715` |
+| `map[string]string` 的**值**收 JSON 数字 | **收下并字符串化**（`case json.Number → setValueFromString`） | 同文件 `:385-417` |
+
+⇒ 在 Java 侧，这两个目标**都是 `String`**，共享同一条 `LogicalType.Textual` 规则，
+**无法在 LogicalType 维度区分**；而 Jackson 3 的类级 coercion 实测**完全不生效**
+（`GoStyleCoercion` 类注释里有最小复现实验）。
+⇒ **唯一可靠挂点是字段上的 `contentUsing`**。
+
+### 4. 🔴 **修 map 的 null 值，只覆写 `deserialize` 是不够的**
+
+`ValueDeserializer` 实现 `NullValueProvider`：map 元素为 `null` 时 Jackson
+**不走 `deserialize`**，而走 `getNullValue`，其默认实现返回 `null` ⇒ 静默放行。
+⇒ 必须**同时**覆写 `getNullValue` 抛错。
+⚠️ 且 `getNullValue` 里**不能**调 `handleUnexpectedToken(…, p)` ——
+该路径 Jackson **没有给 parser**，传 `null` 会 NPE（用 `reportInputMismatch`）。
+
+⇒ 推广：**修 Jackson 行为前先问「这条路径真的会调到这个方法吗」**，
+这与 §3.3.1「必须读到消费该 tag 的那段控制流」是同一条纪律的 Jackson 版本。
+
+### 5. 🔴 **两个方向相反的 null，别一起「顺手改」**
+
+| 形态 | Go 结论 | 出处 |
+|---|---|---|
+| **字段级** `extra: null` | **接受**（`,optional` ⇒ `if mapValue == nil { return nil }`） | `unmarshaler.go:854-863` |
+| **元素级** `extra: {"k": null}` | **拒绝**（elem kind `String` ≠ `nil` 的 `Invalid`） | `unmarshaler.go:385-417` |
+
+名字几乎一样，结论完全相反。
+本轮两条各留了一条用例（`fieldLevelExtraNullIsStillAccepted` /
+`mapValueExplicitNullIsRejectedWithoutCallingRpc`）——
+**反向守门必须在修之前就存在**，否则修完就没有基线可对照（§3.3.3）。
