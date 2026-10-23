@@ -12,12 +12,19 @@ import java.util.concurrent.TimeUnit;
  * hot-api 的 5 个指标 —— 对应 Go {@code api/internal/metrics/metrics.go:13-43} 的 5 个
  * Prometheus collector，逐个 1:1。
  *
- * <h3>指标名为什么会多一个 {@code _total} 后缀</h3>
- * Go 侧 {@code Subsystem="hot_api"} + {@code Name="request_total"} 在 Prometheus 里渲染为
- * {@code hot_api_request_total_total}（{@code CounterVec.Name} 本身已含 {@code _total}，
- * client_golang 不做去重）。Micrometer 的 {@code Counter.builder("hot_api_request_total")}
- * 在 Prometheus registry 上同样被规范化成 {@code hot_api_request_total_total}
- * ⇒ <b>两侧 key 一致</b>，看板不会因为换语言而断。
+ * <h3>指标名：<b>两侧逐字节一致</b>（⚠️ 2026-10-24 实测订正）</h3>
+ * ⚠️ 本节原写「Go 侧 {@code Subsystem="hot_api"} + {@code Name="request_total"} 在 Prometheus 里
+ * 渲染为 {@code hot_api_request_total_total}（{@code CounterVec.Name} 本身已含 {@code _total}，
+ * client_golang 不做去重）」—— <b>那是错的</b>，已由真 Actuator 导出实测推翻：
+ * <ul>
+ *   <li><b>client_golang</b>：{@code CounterOpts.Name} <b>原样</b>成为指标名，
+ *       它<b>不会</b>再加 {@code _total} 后缀 ⇒ Go 侧 = {@code hot_api_request_total}；</li>
+ *   <li><b>Micrometer</b>：{@code Counter.builder("hot_api_request_total")}
+ *       名字已以 {@code _total} 结尾 ⇒ 也<b>不会</b>重复加 ⇒ RAG 侧 = {@code hot_api_request_total}。</li>
+ * </ul>
+ * ⇒ <b>两侧都是 {@code hot_api_request_total}</b>（不是 {@code ..._total_total}）。
+ * ✅ 守门：{@code HotApiRealTomcatGateTest#counterNameKeepsGoSingleTotalSuffix}
+ * 断言导出里<b>有</b> {@code hot_api_request_total{…}} 且<b>没有</b> {@code hot_api_request_total_total{…}}。
  *
  * <h3>⚠️ 本模块的指标在 Go 侧<b>其实没有被暴露</b>（这是 Go 侧的事实，不是本类的缺陷）</h3>
  * {@code hotcenter.go:33} 确实调了 {@code metrics.InitMetrics()}，5 个 collector 注册进了
@@ -90,13 +97,25 @@ public class HotApiMetrics {
      * {@code prometheus.HistogramVec}，导出时带 {@code _bucket{le="0.005"}} 这类分桶；
      * 而 Micrometer 的 {@link io.micrometer.core.instrument.Timer} 在 Prometheus registry 上
      * <b>默认只导出 {@code _count/_sum/_max}</b>（没有 {@code le}）。
-     * ⇒ 不显式开 {@code publishPercentileHistogram} + SLO 边界，dashboard 上的
+     * ⇒ 不显式开 SLO 边界，dashboard 上的
      * {@code histogram_quantile} 在两侧不可比。
      * <p>⚠️ 刻意<b>不</b>走 {@code management.metrics.distribution.slo} 配置项：
      * Boot 的 {@code ServiceLevelObjectiveBoundary} 转换器解析不了小数秒
      * （{@code 2.5s} 抛 {@code NumberFormatException}，并让整个
      * {@code MetricsProperties} 绑定失败 ⇒ 上下文起不来）。写在代码里既绕开该转换器，
      * 也把「这组桶 = Go 的 DefBuckets」这条对应关系放在指标定义旁边。
+     *
+     * <p>⚠️ <b>只能开 SLO，绝不能再开 {@code publishPercentileHistogram()}</b>
+     * （2026-10-24 真 Actuator 实测）：Micrometer 的 {@code publishPercentileHistogram()}
+     * 会<b>强制</b>改用它自己的 exponential percentile 桶（69 个边界：
+     * {@code 0.001, 0.001048576, 0.001398101, …}），把 SLO 边界只是<b>合并</b>进去
+     * ⇒ 实测导出 <b>80 个</b> {@code le} 边界，而 Go 侧 {@code prometheus.DefBuckets}
+     * 只有 <b>11 个</b>（+ {@code +Inf} = 12）⇒ {@code histogram_quantile} 在两侧<b>不可比</b>。
+     * ⇒ <b>只</b>用 {@code serviceLevelObjectives(GO_DEF_BUCKETS)} ⇒ 实测恰好 <b>12 个</b>边界，
+     * 与 Go 的 11 个 {@code DefBuckets} + {@code +Inf} <b>数值逐条一致</b>。
+     * ⚠️ 唯一残留：<b>文本</b>形态不同（Micrometer 写 {@code 1.0 / 5.0 / 10.0}，
+     * client_golang 写 {@code 1 / 5 / 10}）—— 库层格式化差异，见
+     * {@code docs/DRIFT/hot/api.md} 的 DRIFT-HOTAPI-017 同族说明。
      */
     private static final Duration[] GO_DEF_BUCKETS = {
             Duration.ofMillis(5), Duration.ofMillis(10), Duration.ofMillis(25),
@@ -136,9 +155,11 @@ public class HotApiMetrics {
         Timer.builder("hot_api_request_duration_seconds")
                 .description("Hot api request duration in seconds")
                 .tag("route", route)
-                // ⚠️ 没有这两行，Prometheus 上只有 _count/_sum/_max，没有 _bucket{le=…}；
-                //    Go 侧是 HistogramVec ⇒ 带分桶，边界必须是 prometheus.DefBuckets。
-                .publishPercentileHistogram()
+                // ⚠️ **只**开 SLO 边界，**不要**再开 publishPercentileHistogram()：
+                //    Go 侧是 HistogramVec ⇒ 带分桶，边界必须是 prometheus.DefBuckets（11 个）。
+                //    ⚠️ publishPercentileHistogram() 会**强制**换成 Micrometer 自己的
+                //    exponential percentile 桶（69 个），把 SLO 只是合并进去 ⇒ 实测 80 个边界
+                //    ⇒ histogram_quantile 两侧不可比（详见 GO_DEF_BUCKETS 的 javadoc）。
                 .serviceLevelObjectives(GO_DEF_BUCKETS)
                 .register(registry)
                 .record(System.nanoTime() - startedNanos, TimeUnit.NANOSECONDS);
