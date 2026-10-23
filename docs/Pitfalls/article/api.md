@@ -510,3 +510,80 @@ grpc-java 把它编进 `Status.toString()`，`StatusRuntimeException.getMessage(
 2. 需要复刻 Go 文案时，**显式维护一张规范名映射表**，不要用 `name()` / `toString()` 顶替。
 3. 文案差异按 §3.1 归类：若只是**文案**不同而码与状态码一致，可记为
    `IMPLEMENTATION DIFFERENCE`；若文案被下游协议依赖（如抠 ID），按 `SEMANTIC MISMATCH` 记。
+
+---
+
+## P-15 变异验证：被变异的模块**没被重编** ⇒ 会产出**假的「仍全绿」**
+
+**现象**
+变异 `service/common` 里的 `GoStyleCpuSheddingFilter` 的 `@Order`（+3 → +9），
+想验证新写的 Filter 链序断言能不能抓住它。脚本判定：**仍全绿 ⇒ 假绿**。
+
+但断言**本身是对的** —— 加 `-am` 重编 `service/common` 之后，同一个变异**立刻转红**。
+
+**根因（构建机制）**
+```bash
+mvn -pl service/article/article-api test          # ❌ 不带 -am
+```
+⇒ `service/common` **不参与本次构建**，用的是**本地仓库里已 install 的旧 jar**
+⇒ **源码改了，运行的东西没变** ⇒ 变异**根本没生效** ⇒ 测试当然还绿。
+
+**元教训**
+> **变异验证的判据是「行为变了」，不是「源码变了」。**
+> 源码改了而产物没变 ⇒ 变异无效 ⇒ 「仍全绿」**不能**判成「回归网无效」，
+> 只能判成「**变异没生效**」。
+> ⇒ **三态判定是必须的**：`转红` / `仍全绿` / `变异无效`。
+> 本轮之前已因为 `sed` 多行替换失败踩过一次「假绿」，**同一个坑踩了两次**。
+
+**下次怎么防**
+1. 变异**非本模块**的源码时，命令必须带 `-am`（或先 `mvn -pl <被变异模块> install -DskipTests`）。
+2. 带 `-am` 时 `-Dtest=X` 会传播到所有模块 ⇒ 还要补
+   `-Dsurefire.failIfNoSpecifiedTests=false`，否则先在别的模块上失败。
+3. 每次变异后**先确认变异真的进了产物**（如 `javap` 看字节码 / 看编译时间戳变化），
+   再看测试红不红。
+
+---
+
+## P-16 「我写的那个字节」到不了客户端 —— 框架的**归一化**会覆盖它
+
+**现象**
+为了对齐 Go 的 `http.Error`，RAG 侧写的是**逐字相同**的
+`Content-Type: text/plain; charset=utf-8`（**分号后有空格**）。
+真 Tomcat 实测：客户端收到的是 **`text/plain;charset=utf-8`（无空格）**。
+
+⇒ 第一反应是「常量写错了」⇒ 把它改成无空格 ⇒ **输出字节没变**。
+⇒ 真相是：**写进去的那个原值根本没到达客户端**。
+
+**根因（框架机制）**
+Spring 的 `ServletServerHttpResponse.writeHeaders()`：
+
+```java
+getHeaders().forEach((name, values) -> values.forEach(v -> servletResponse.addHeader(name, v)));
+// ↓ 紧接着
+if (servletResponse.getContentType() == null) {
+    MediaType contentType = getHeaders().getContentType();   // ← parseMediaType 再 toString
+    if (contentType != null) servletResponse.setContentType(contentType.toString());
+}
+```
+⇒ **`MediaType.toString()` 不在 `;` 后加空格** ⇒ 刚 `addHeader` 进去的原始值被**覆盖**。
+
+⚠️ 同一个仓里已经有一处**绕过**了它（`GoStyleJsonBodyLimitFilter` 用 `setHeader` 裸写），
+所以「为什么那一处对、这一处不对」曾是个谜 —— 答案是**路径不同**（Filter vs ResponseEntity）。
+
+**为什么测试抓不到**
+MockMvc **不经过 Tomcat 的 header 规范化** ⇒ 50 条 MockMvc 测试全绿，
+而真客户端拿到的是另一个字节串。
+
+**元教训**
+> **断言要打在「客户端真正收到的」那一份上，而不是「我写出去的」那一份。**
+> 中间隔着：框架的消息转换器 → `MediaType` 的解析与再序列化 → 容器 header 规范化。
+> ⇒ 只要这条链上有一环会**再序列化**，你写的常量就只是**意图**，不是**结果**。
+
+**下次怎么防**
+1. 涉及**响应头字节**的契约，必须有**真容器**（`RANDOM_PORT`）用例 + **JDK `HttpClient`** 断言
+   —— MockMvc 只能证明「应用层设了这个 header」。
+2. 断言**客户端收到的那一份**（`response.headers().firstValue("Content-Type")`），
+   不要断言 `ResponseEntity` / `HttpServletResponse` 上设的值。
+3. ⚠️ **characterization test 的写法**：当实测与 Go 不一致又决定不修时，
+   断言**实测值**，但 `@DisplayName` 必须写明「与 Go 差在哪」——
+   否则就变成 AGENTS.md §3.3 说的「把 RAG 的行为写成 Go 的事实」。

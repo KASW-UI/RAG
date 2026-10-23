@@ -1037,3 +1037,205 @@ return userServiceBlockingStub.withDeadlineAfter(effective, TimeUnit.MILLISECOND
 `DRIFT-005~007` 与 8 条 `UNRESOLVED-*` 仍在，且**证据强度上限仍是 MockMvc/Mockito**
 （**无双侧活体对拍、无真实 Tomcat、无装配层测试**）⇒
 本轮全部 ✅ 一律读作「**在 MockMvc 级证据下一致**」，不是「已闭环」。
+
+---
+
+<!-- @fix 2026-10-24 · 第二轮 · 由 align/article 工作树产出 · 基线 commit 8422116 -->
+
+## 2026-10-24 第二轮：**装配层真容器测试** —— 关闭 5 条 `UNRESOLVED`，并首次确认 1 条真漂移
+
+> **核对日期 = 2026-10-24。** 基线 commit `8422116`（`align/article` 工作树）。
+> 新增测试类：`ArticleApiAssemblyWiringTest`（7 条）。
+> **证据强度：真容器（`webEnvironment = RANDOM_PORT` ⇒ 真 Tomcat）+ 真 Spring 上下文 + 真实时钟**
+> + **变异验证 4/4 转红**。
+
+### 0. 为什么这一轮必须做
+
+上一轮的 60 条测试**全部**是 `@SpringBootTest + @AutoConfigureMockMvc + @MockitoBean`，
+而 `@MockitoBean` **恰好把要验证的那一段替换掉了**：
+
+| 台账条目 | 为什么 MockMvc/Mockito 测不到 |
+|---|---|
+| `UNRESOLVED-004` `@GrpcClient` 是否真装配 | client 被 `@MockitoBean` 整个换掉 |
+| `UNRESOLVED-006` 共享层是否真被扫到 | 需要看**真实**上下文里的 Bean 集合 |
+| `UNRESOLVED-003` Filter 链实际 `@Order` 全序 | MockMvc 不走 Filter 链 |
+| `UNRESOLVED-001` / `-005` 400/401/404 响应头 | MockMvc **不经过 Tomcat 的 header 规范化** |
+
+⇒ 本轮新增的测试类**刻意不 mock 任何东西**，gRPC channel 指向必然连不上的
+`static://127.0.0.1:1`（只验证装配，不发调用），
+HTTP 侧用 **JDK 的 `HttpClient`**（绕开任何框架再加工，断言的就是客户端真正收到的字节）。
+
+### 1. ✅ `UNRESOLVED-004` 已关闭 —— `@GrpcClient` 真装配
+
+| 项 | 值 |
+|---|---|
+| 断言 | `articleRpcClient.articleRpc()` 与 `userRpcClient.userRpc()` **非 null** |
+| 变异 | 摘掉 `@GrpcClient("article-rpc")` 注解 ⇒ 字段不再被注入 ⇒ **转红** ✅ |
+
+⚠️ 附带确认：devh 的 `@GrpcClient` 在 **Bean 初始化期**就建 channel（不是懒建）
+⇒ 测试环境没有 Nacos 时 `discovery://` 解析失败 ⇒ **上下文起不来**
+⇒ 必须覆盖成 `static://`。
+⚠️ 另一条：**必须整个关掉服务发现**（`spring.cloud.discovery.enabled=false`）——
+否则 Nacos 客户端连不上会让 `webServerStartStop` 直接失败
+（`Client not connected, current status:STARTING`），**上下文根本起不来**。
+
+### 2. ✅ `UNRESOLVED-006` 已关闭 —— 共享层真被扫到
+
+断言 6 个共享件 Bean 存在 + **`GoStyleJsonBodyConverter` 真在 MVC 的 converter 链里**。
+
+⚠️ **`GoStyleJsonBodyConverter` 本身不是 Bean**（它在
+`GoStyleJsonBodyConverterConfig.extendMessageConverters` 里 new 出来）
+⇒ 断言「Bean 存在」测不到「它真被插进了转换器链」
+⇒ 必须查 `RequestMappingHandlerAdapter.getMessageConverters()`。
+（第一版写成了 `ctx.getBean(GoStyleJsonBodyConverter.class)` ⇒ 直接 `NoSuchBeanDefinition`。）
+
+| 变异 | 结果 |
+|---|---|
+| `scanBasePackages` 去掉 `"com.rag.common"` | ✅ **转红**（保护层整体消失） |
+
+### 3. ✅ `UNRESOLVED-003` 已关闭 —— Filter 链的**实际生效顺序**
+
+**Go 出处**（go-zero v1.10.2 · `rest/engine.go:130-166` `buildChainWithNativeMiddlewares`）：
+
+```go
+chn := chain.New()
+chn = chn.Append(TraceHandler)          // ①
+chn = chn.Append(logHandler)             // ②
+chn = chn.Append(PrometheusHandler)      // ③
+chn = chn.Append(MaxConnsHandler)        // ④
+chn = chn.Append(BreakerHandler)         // ⑤
+chn = chn.Append(SheddingHandler)        // ⑥
+chn = chn.Append(TimeoutHandler)         // ⑦
+chn = chn.Append(RecoverHandler)         // ⑧
+chn = chn.Append(MetricHandler)          // ⑨
+chn = chn.Append(MaxBytesHandler)        // ⑩
+chn = chn.Append(GunzipHandler)          // ⑪
+```
+
+⇒ 与本组件相关的子序列：**MaxConns → Breaker → Shedding → Timeout → MaxBytes**。
+
+**真容器实测链序（2026-10-24）**：
+
+```
+1. ArticleGoStyleCorsFilter           @Order(HIGHEST_PRECEDENCE)
+2. GoStylePathNormalizingFilter       @Order(HIGHEST_PRECEDENCE)
+3. GoStyleMaxConnsFilter              @Order(HIGHEST+1)
+4. GoStyleBreakerFilter               @Order(HIGHEST+2)
+5. GoStyleCpuSheddingFilter           @Order(HIGHEST+3)
+6. HttpMiddlewareFilter               @Order(HIGHEST+5)
+7. GoStyleMaxBytesFilter              @Order(HIGHEST+6)
+8. GoStyleJsonBodyLimitFilter         @Order(HIGHEST+7)
+```
+
+⇒ **3→8 与 Go 的链序逐条一致** ✅
+⇒ **1、2 两位与 Go 也一致**：Go 侧 `WithCors`（`server.go:148-153`）包装的是 **router**，
+而 `path.Clean`（`patrouter.go:48,60`）在 router **内部**
+⇒ Go = **CORS 在外、path.Clean 在内** ⇒ RAG 实测同构 ✅（**不是巧合**）。
+
+> ⚠️ **前两位同为 `@Order(HIGHEST_PRECEDENCE)`** ⇒ 它们的**相对**顺序由 **Bean 注册序**决定，
+> **不是 `@Order` 表达的** ⇒ 这一条只能靠**真容器**测出来。
+> ⇒ 测试里把**完整链序**钉死，既是回归网，也把「相对顺序是容器决定的」这件事留了痕。
+
+| 变异 | 结果 |
+|---|---|
+| 把 `GoStyleCpuSheddingFilter` 的 `@Order` 从 `+3` 改成 `+9` | ✅ **转红**（链序被打乱） |
+
+> 🔴 **本条变异第一次判成「假绿」—— 是我的变异工装有问题**：
+> 被变异的是 `service/common`，而命令是 `mvn -pl service/article/article-api test`
+> ⇒ **不重编 `service/common`**，跑的是本地仓库里的**旧 jar** ⇒ 变异根本没生效。
+> ⇒ 加 `-am`（并补 `-Dsurefire.failIfNoSpecifiedTests=false`）后才真正转红。
+> ⇒ **教训：变异一个非目标模块的源码时，必须确认它被重编了**，否则会产出一条**假的「仍全绿」**。
+> ⇒ 已记入 [`docs/Pitfalls/article/api.md`](../../Pitfalls/article/api.md)。
+
+### 4. 🔴 `UNRESOLVED-001` / `-005` 已关闭 —— **并首次确认一条真漂移**
+
+真 Tomcat 实测结果：
+
+| 场景 | Go | RAG 实测 | 判定 |
+|---|---|---|---|
+| 400 的 body | `http.Error` ⇒ 裸文案 + `\n` | ✅ 一致 | ✅ |
+| 400 的 `X-Content-Type-Options` | `nosniff` | ✅ 一致 | ✅ |
+| 400/404 的 **`Content-Type`** | `text/plain; charset=utf-8`（**分号后有空格**） | `text/plain;charset=utf-8`（**无空格**） | 🔴 **差一个空格** |
+| 401 的 body | 空 | ✅ 空 | ✅ |
+| 401 的 `Content-Type` | **无**（Go 只 `WriteHeader(401)`） | ✅ 无 | ✅ |
+| 404 的 body | `404 page not found\n` | ✅ 一致 | ✅ |
+| 方法不匹配 | **404 空 body**（不是 405） | ✅ 一致 | ✅ |
+
+⇒ **`UNRESOLVED-001` 从 `UNKNOWN` 升级为「已确认的 LOW OBSERVABLE DIFFERENCE」**：
+`Content-Type` 的参数分隔符后少一个空格。
+
+**根因（已定位到具体机制，不是推断）**
+
+1. Go 的 `net/http.Error`（`net/http/server.go`）写的是**字面量**
+   `h.Set("Content-Type", "text/plain; charset=utf-8")` ⇒ **带空格**。
+2. RAG 侧 `GoStylePlainTextErrors` 写的**也是**带空格的同一个字面量
+   （`ResponseEntity.header(CONTENT_TYPE, "text/plain; charset=utf-8")`）。
+3. ⚠️ **但这个原值根本没到达客户端** ——
+   Spring 的 `ServletServerHttpResponse.writeHeaders()` 在
+   `servletResponse.getContentType() == null` 时会调
+   `setContentType(mediaType.toString())`，
+   而 **Java 的 `MediaType.toString()` 不在分号后加空格**
+   ⇒ 原始 header 被**覆盖**成 `text/plain;charset=utf-8`。
+4. **实测证明（对照变异）**：把 RAG 的常量从带空格改成无空格 ⇒ **输出字节不变** ⇒
+   证明「原值不过那层归一化就出不来」。
+
+| 变异 | 结果 | 含义 |
+|---|---|---|
+| 把常量改成 `"text/plain"`（去掉 charset） | ✅ **转红** | 测试是**真网**（输出字节真的变了会被抓到） |
+| 把常量改成 `"text/plain;charset=utf-8"`（去掉空格） | ⚪ **仍全绿**（**预期**） | ⇒ **证明 RAG 写的原值到不了客户端** |
+
+> ⚠️ **上游只在一处绕过了这个归一化**：
+> `GoStyleJsonBodyLimitFilter`（Filter 里用 `setHeader` 裸写）能保住空格，
+> 而**异常处理这条路**（`ResponseEntity` ⇒ Spring 写响应）**没绕过** ⇒ 这就是差异的来源。
+
+**为什么不修（记录理由，供后续决策）**
+
+- 该差异**语义等价**：按 RFC 9110，`;` 后的可选空白（OWS）不是语法的一部分
+  ⇒ **任何** HTTP 客户端解析两者一致。
+- 要修必须**绕过 Spring/Tomcat 的 `setContentType` 路径**（例如在异常处理器里直接写
+  `HttpServletResponse`），那会动到**本组件风险最高的一条路径**（错误写出），
+  并连带影响 `GlobalResponseAdvice` 的「放行 4」分支与 401/404 空 body 路径。
+- ⇒ 判定：**已确认的 LOW OBSERVABLE DIFFERENCE，本轮不修**。
+  测试里用**characterization test** 锁住实测现状，且 `@DisplayName` 明说「与 Go 差一个空格」
+  —— **不是把 RAG 现状写成 Go 的事实**。
+
+### 5. 判定变化
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `UNRESOLVED-001` / `-005` 真 Tomcat 响应头 | 🔴 OPEN（UNKNOWN） | ✅ **已关闭**（并确认 1 条 LOW 漂移） |
+| `UNRESOLVED-003` Filter 链实际顺序 | 🔴 OPEN（UNKNOWN） | ✅ **已关闭**（实测链序已钉死） |
+| `UNRESOLVED-004` `@GrpcClient` 真装配 | 🔴 OPEN（UNKNOWN） | ✅ **已关闭** |
+| `UNRESOLVED-006` 共享层真被扫到 | 🔴 OPEN（UNKNOWN） | ✅ **已关闭** |
+| `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | 🟡 部分关闭（本轮在 rpc 侧核对了 `public_only`/`status` 的消费方式） |
+| `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` 差异 | 🔴 OPEN | 🔴 OPEN（当前 yaml 未配 ⇒ 影响为零） |
+| `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | 🔴 OPEN（仍查无对应台账） |
+| `UNRESOLVED-009` `UpdateArticleReq.java:8` 的 Go 行号引用有误 | 🔴 OPEN | 🔴 OPEN（本轮只读不写该文件） |
+| `DRIFT-005~007` | 🔴 OPEN | 🔴 OPEN |
+| **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
+
+⚠️ **判定不变的理由**：本轮关掉的是 **5 条「从未验证」的 UNRESOLVED**（证据强度提升），
+**没有关掉任何一条 DRIFT**；另**新增确认 1 条 LOW OBSERVABLE DIFFERENCE**（`Content-Type` 空格）。
+且**无双侧活体对拍**（Go 侧仍需 `etcd:2379`）。
+
+### 6. ✅ `UNRESOLVED-009` 已关闭 —— javadoc 的 Go 行号引用更正
+
+`dto/UpdateArticleReq.java:8` 原写「Go `types.go:61-71` 的 `UpdateArticleReq`」，
+但实测 **`types.go:61-71` 是 `ListArticlesReq` / `ListArticlesResp`**，
+`UpdateArticleReq` 的真实位置是 **`types.go:74-83`**（2026-10-24 实测确认）。
+
+⇒ 已改。⚠️ 这条本身**不是**行为差异，是**证据指针错误** ——
+但按 AGENTS.md §3.3「证据行号指向消费点」，一条指错的行号会让后来者
+按 §3.1 的纪律去核对时**读到另一个结构体** ⇒ 属于「必须顺手修掉」的那一类。
+
+### 7. 本轮**未**关掉的（保持 OPEN）
+
+| 条目 | 状态 | 说明 |
+|---|---|---|
+| `DRIFT-005` query 参数总数上限 2048 | 🔴 OPEN（LOW） | Go `httpx/util.go:15,48-53` 累计超 2048 个非空值即 400；RAG 无上限。**本域只有 8 个 query 字段，但「客户端发 2049 个未知参数」是可达的** ⇒ 修法：新 filter 统计参数个数，超限按 Go 的 `too many form values` 走 400 |
+| `DRIFT-006` 8–10 MiB body 文案 | 🔴 OPEN（LOW） | 可观察契约相同（400 + text/plain + nosniff），差异仅在 body 文案（Go 是截断后解析失败 ⇒ `unexpected EOF`） |
+| `DRIFT-007` `ext_info` key 排序（非 BMP） | 🔴 OPEN（极低） | 修法方向已明确：Go 的 `strings.Compare` = **UTF-8 字节序** = **码点序**；Java 的 `TreeMap` 用 UTF-16 码元序 ⇒ 改成按**码点**比较的 Comparator 即可（ASCII/BMP 完全不变） |
+| `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | rpc 侧已核过 `public_only` / `status` 的消费方式（见 [`proto.md`](./proto.md)）；仍缺**跨栈活体对拍** |
+| `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` | 🔴 OPEN（当前影响为零） | 结论依赖 go-zero 的 tag 默认值，不是设计对齐 |
+| `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | `docs/DRIFT/` 全树仍查无此编号 ⇒ 存在一份未入库的历史漂移清单 |
+| 🔴 **新增确认**：`Content-Type` 少一个空格 | 🟡 **已确认为 LOW OBSERVABLE DIFFERENCE** | 本轮首次由真 Tomcat 确认；**决定不修**（理由见上节），已用 characterization test 锁住实测现状 |
