@@ -1839,3 +1839,45 @@ RAG 侧 `GlobalExceptionHandler#handleAny:262-272` ⇒ **HTTP 500 + 完整 envel
 （实际是 `UserRpcLoginNullStatusReadsAsZeroTest`，8 条不是 5 条）。
 `api.md` 的 §9 `UNRESOLVED-001` 曾以它作为「关闭条件」的指引 ⇒ **该指引当前指向一个不存在的类**，
 按它去复核的人会直接扑空。已在 `rpc.md` 第五轮更正。
+
+---
+
+<!-- @fix 2026-10-24 第六轮：API-006 已修（真 Tomcat 双侧实证）· API-004 证伪关闭 · API-009 已签字 -->
+
+## 2026-10-24 第六轮：API-006 修复 · API-004 证伪 · API-009 签字
+
+| 项 | 结果 |
+|---|---|
+| **DRIFT-USERAPI-006** | ✅ **已修**（`c79d113`）—— 400 响应 Content-Type 补 charset + body 按 UTF-8 写出 |
+| **DRIFT-USERAPI-004** | ❌ **证伪关闭**（`330bafb`）—— Go 的 user-api 其实**只**吃 JSON body，RAG 已等价 |
+| **DRIFT-USERAPI-009** | ✅ **已签字**（`SD-USERAPI-002`）—— 接受「RAG 的观测面更大」 |
+| **DRIFT-USERSCOMMON-005** | ✅ **已签字**（`SD-USERSCOMMON-001`）—— 保留 bcrypt 的 fail-closed |
+
+### 变异验证（能编译 + 测试变红，非构建红）
+
+| # | 变异 | 结果 |
+|---|---|---|
+| **M4** | `GlobalExceptionHandler` 去掉 charset（退回修法之前） | 7 tests / **2 failures**：`expected: <UTF-8> but was: <null>` |
+| **M5** | 给 `login` 加 `@RequestParam` query 绑定（注入点在必填校验**之后**） | 5 tests / **1 failure**：`expected: <fromJson> but was: <fromQuery>` |
+| **M5b** | 同上，但注入点在必填校验**之前**（更贴近真实写法） | 5 tests / **3 failures**，含 `queryParamsAreNotBound` 的 `expected: <400> but was: <500>` |
+
+⚠️ **M5 与 M5b 的差别值得记一笔**：M5 只被「JSON 赢」那条抓住，
+`queryParamsAreNotBound` **没红** —— 因为 query 值在 `GoStyleRequest.normalize`
+（内含必填校验）**之后**注入，必填异常先抛 ⇒ 变异「看起来没生效」。
+⇒ **变异的位置必须贴近真实写法，否则会得出「这条护网没用」的错误结论。**
+M5b 把注入点前移后，`queryParamsAreNotBound` 立刻变红 ⇒ 该护网**确实覆盖**了这个场景。
+
+### 本轮的一条方法论教训
+
+**API-004 的原断言是纯静态源码阅读得出的，从未跑过活体**，
+而它读漏的是**紧挨着的那道门**（`usingDifferentKeys`）——
+一处「A 说的对、但 A 的前提被 B 否掉」的典型。
+⇒ 印证 AGENTS.md §3.3：**「配置/注解存在」与「机制生效」之间隔着一次运行**，
+**源码阅读得出的「机制会怎样」同样可能是错的**。
+本轮把它变成活体结论的路径是：`go run -overlay` 虚拟注入探针 +
+真源自己的 `types.LoginReq` + go-zero 自己的 `httpx.Parse`。
+
+### 回归
+
+users-common · user-rpc · user-api **96**（+6：5 条绑定面 + 1 条 UTF-8 前提守门），
+全部 **0 failures / 0 errors**。
