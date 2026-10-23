@@ -541,6 +541,29 @@ user 5002 × 2 条（article 9002）→ 未达标 ⇒ 走「doing」分支
    Go 的在 **Kafka compacted table topic**（`task.rpc.consumer*-table`）⇒ 两侧 key 集合**必然不等**。
    ⇒ 这几个 key 单列，**拿 RAG 的值去对 Go 的 table topic**（真正该比的是计数值 —— 实测一致）。
 
+### 怎么复现（全部已入仓，一条命令）
+
+```bash
+./tools/difftest/run-task-kafka-e2e.sh          # 全流程：编 Go + 编 RAG + 起基建 + 灌消息 + 比对 + 收摊
+KEEP_UP=1 ./tools/difftest/run-task-kafka-e2e.sh # 跑完保留服务与容器，便于手查
+```
+
+| 文件 | 作用 |
+|---|---|
+| [`tools/difftest/run-task-kafka-e2e.sh`](../../../tools/difftest/run-task-kafka-e2e.sh) | **编排入口**（把本轮踩过的 6 个坑全部固化在注释里） |
+| [`tools/difftest/docker-compose.task-kafka.yml`](../../../tools/difftest/docker-compose.task-kafka.yml) | task 域专用基建（postgres + redis + **kafka** KRaft） |
+| [`tools/difftest/initdb-task.sql`](../../../tools/difftest/initdb-task.sql) | 补建 `task_rag_db`（`task_go_db` 由容器 `POSTGRES_DB` 建） |
+| [`tools/difftest/parity-task-kafka.py`](../../../tools/difftest/parity-task-kafka.py) | 最终态比对（Redis 全 key + 奖励流 + PG 两表 + goka 计数值） |
+
+⚠️ 脚本里固化了本轮实测出来的**几个反直觉点**，改动前先读它的注释：
+① 容器内 Kafka CLI 必须用 **INTERNAL 监听器 `localhost:19092`**；
+② 重置 Kafka 必须**重建容器**（删 topic 不删 `__consumer_offsets` 里的已提交位点）；
+③ 还必须移走 goka 的**本地 LevelDB 缓存**；
+④ 灌消息前必须等**两侧 12 个 consumer group 全部注册** ——
+Go 的 kq 消费者 `Offset` 硬编码 `latest`（`initUserFilter.go:47`），
+灌早了它会从队尾之后开始 ⇒ **一条都收不到**，
+表现极具迷惑性（goka 三段全通、RAG 全通，只有 Go 的 `like:total` 为 0）。
+
 ### 🔴 这一轮顺带抓出并修掉了两条真缺陷
 
 对拍不是「跑一遍确认一致」而已 —— 它**抓出了两个此前无人发现的致命缺陷**：

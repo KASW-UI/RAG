@@ -193,9 +193,17 @@ RAG 侧 Tomcat 会对 `form-urlencoded` / `multipart` 的 POST body 抢先解析
 
 ## 三、证据边界
 
-1. 🔴 **无双侧活体对拍**：Go 侧 `task-api` 未起过（依赖 `task-rpc` + etcd）。
-2. ⚠️ **gRPC 边界是 mock**：`TaskGetServiceTest` / `GrpcStatusHttpMappingTest` 用 stub，
+1. ✅ **双侧活体对拍已做**（2026-10-23 22:5x，见 §二·五）：Go `task-api:18886` + `task-rpc:19005`
+   与 RAG `task-api:58886` + `task-rpc:59005` 同时起，43 条请求矩阵，
+   **body 43/43 逐字节一致**，状态码 41/43。
+   ⚠️ 但覆盖面**只到 HTTP wire 层**：经由 `GetTask` 这条链路验证了
+   **Redis HGETALL → PG 回源 → packProgress/unpackProgress → 任务定义合并 → gRPC 序列化 → HTTP 响应**。
+   **Kafka 消息链路不在 HTTP 对拍面内**（那条链路由
+   [`rpc.md` §四·三](./rpc.md#四三kafka-端到端对拍两侧灌同一批-raw-日志比最终态2026-10-23-234x-实测) 单独对拍）。
+2. ⚠️ **gRPC 边界在单测里是 mock**：`TaskGetServiceTest` / `GrpcStatusHttpMappingTest` 用 stub，
    验证的是「拿到某个 gRPC code 后映射成什么 HTTP 响应」，**不是**「对着真的 task-rpc 调」。
+   ⚠️ 但 **gRPC 单组件对拍已单独做**（`rpc.md` §四·三 之前的 gRPC runner，7/7 一致，
+   含 3 组 HTTP 面永远走不到的 `INVALID_ARGUMENT`）。
 3. ⚠️ **MockMvc 不是真 Tomcat**。400 响应的 `Content-Type`/`nosniff` 在 MockMvc 下可验，
    但**真实 Tomcat 下 400 的 header 行为**属另一域已登记的坑（`tools/difftest/check-plaintext400-headers.sh`），
    本域**未跑该脚本** ⇒ 登记为待办。
@@ -207,8 +215,12 @@ RAG 侧 Tomcat 会对 `form-urlencoded` / `multipart` 的 POST body 抢先解析
 ## 四、待办
 
 1. 跑 `tools/difftest/check-plaintext400-headers.sh` 覆盖 task-api（真 Tomcat 下的 400 header）。
-2. Go 侧起 `task-rpc` + `task-api`，对本域做双侧活体对拍（本域可达的最高证据档）。
-3. `task-api` 的 `NacosDiscovery` 在真注册中心下的注册/注销行为未验（当前测试指向不可达地址绕过）。
+2. `task-api` 的 `NacosDiscovery` 在真注册中心下的注册/注销行为未验（当前测试指向不可达地址绕过）。
+3. **DRIFT-TASK-API-003 的彻底修法**（Servlet 容器层拦截 form/multipart 的参数化）——
+   见 §六 的「要彻底修，需要」两条候选方案，**均未评估**。
+4. **跨域闭环对拍**：「Kafka 写入 → `task-api` 读到」——
+   注意两侧的读写 Redis key **本来就不一致**（见 `TaskRedisKeys` 类注释），
+   所以这条闭环在 Go 侧也是「读不到自己写的缓存」的，**不要当成 RAG 的 bug 修**。
 
 ---
 
