@@ -74,6 +74,50 @@ import org.springframework.stereotype.Component;
  * <h2>⚠️ 为什么用 {@code compute} 语义已经不重要，但 INCR 仍是必需的</h2>
  * <p>Go 靠「同一 group 内同一 key 串行处理」保证无并发写；Redis {@code INCR} 本身原子，
  * 即使将来给 listener 调了 {@code concurrency > 1} 也不会丢计数。
+ *
+ * <h2>🔴 2026-10-24：为什么这些 key <b>不设 TTL</b>（保留策略契约）</h2>
+ * <p>本类的 Redis key <b>刻意不设过期时间</b>。这不是「忘了设」，而是<b>对齐 Go 侧的语义</b>，
+ * 且已由真 Redis 守门测试锁住
+ * （{@code TaskCountStoreRetentionContractTest}）。三条依据：
+ *
+ * <h3>① Go 侧计数表的<b>权威存储</b>是本地 LevelDB，默认无 TTL</h3>
+ * <pre>
+ * // goka@v1.1.16 storage/builders.go:18-26
+ * func DefaultBuilder(path string) Builder {
+ *     return func(topic string, partition int32) (Storage, error) {
+ *         fp := filepath.Join(path, fmt.Sprintf("%s.%d", topic, partition))
+ *         db, err := leveldb.OpenFile(fp, nil)     // ← 默认选项，**无 TTL**
+ * </pre>
+ * <p>而 goka 唯一的删除入口 {@code PartitionTable.Delete}
+ * （{@code partition_table.go:622}）在 task 域<b>从未被调用</b> ——
+ * 两个计数 processor 只有 {@code ctx.Value()} / {@code ctx.SetValue()}
+ * （{@code initGoKa.go:75-81} 与 {@code :92-97}）⇒ <b>key 永不删除</b>。
+ *
+ * <h3>② Go 侧的 Kafka compacted topic 是<b>副本</b>，不是权威存储，且无人消费</h3>
+ * <pre>
+ * // goka@v1.1.16 topic_manager.go:317-326
+ * func (m *topicManager) EnsureTableExists(topic string, npar int) error {
+ *     return m.ensureExists(topic, npar, ..., map[string]string{
+ *         "cleanup.policy": m.topicManagerConfig.tableCleanupPolicy(),   // ⇒ "compact"
+ *     })                                          // ← **只有这一个键**，没有 retention.ms
+ * </pre>
+ * <p>⇒ 该副本的 config 里<b>没有 {@code retention.ms}</b>，落 broker 默认。
+ * ⚠️ 但**无论它怎么滚动都不影响计数正确性**：这个 {@code <group>-table} topic
+ * <b>全仓没有任何读取点</b>（唯一写它的是 goka 自己）⇒ 它只是表状态的一个备份，
+ * <b>权威副本是本地 LevelDB</b>。
+ * ⇒ <b>RAG 侧没有这个副本</b>（计数直接落 Redis），但这不构成可观察差异。
+ *
+ * <h3>③ 加 TTL 会<b>制造一条与 Go 的新漂移</b></h3>
+ * <p>Go 的计数<b>永不丢失</b>；若给这些 key 加 TTL，计数会在到期后归零，
+ * 而 {@code like:total:<uid>} 是<b>普通 SET</b>（不是 GREATEST）
+ * ⇒ 重启/过期后会被<b>更小的值覆盖</b>，达标判定（{@code total >= target}）随之出错 ——
+ * 与 {@code DRIFT-TASK-RPC-001} 同型的后果。
+ *
+ * <p>⚠️ <b>顺带一个实测事实</b>：Kafka 的 compacted topic <b>强制要求消息带 key</b>
+ * （无 key 直接被 broker 拒：{@code InvalidRecordException: Compacted topic cannot accept
+ * message without key}）⇒ Go 侧 goka 一直带 {@code ctx.Key()} emit 才写得进去
+ * （{@code initGoKa.go:81} / {@code :106}）。这也从侧面印证了「compacted topic 存的是
+ * <b>key → 最新值</b>」这一语义，与本类「一个 key 一个值」的模型同构。
  */
 @Component
 public class TaskCountStore {
