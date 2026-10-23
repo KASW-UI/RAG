@@ -39,15 +39,21 @@ import org.mybatis.spring.annotation.MapperScan;
  * <p>这些都是 message-rpc 在 AGENTS.md §6.6 里付出真实代价才补上的（DRIFT-MSG-003 ~ 006），
  * 本模块<b>照单继承</b>。
  * ⚠️ 2026-10-23 修正错误断言 F：原文写「<b>且每一条都有对应的 wiring 测试锁死</b>」——
- * 该说法<b>不成立</b>。真实的装配层回归网只有
- * {@code LikeRpcSpringContextWiringTest}（7 条，含真 PG Testcontainers），
+ * 该说法<b>不成立</b>。真实的装配层回归网是
+ * {@code LikeRpcSpringContextWiringTest}（<b>9 条</b>，含真 PG Testcontainers），
  * 它覆盖的是第 1 条（{@code @MapperScan} / {@code SqlSessionFactory} / 5 个 Mapper Bean）、
  * Jackson 2 Bean、KafkaTemplate、{@code @KafkaListener} 进 registry、
- * 以及序列化行为（未知字段忽略 / number→string 报错）。
- * <br>第 3 条（{@link #rpcInterceptorConfigurer}）与第 5 条（{@code @EnableScheduling}）
- * <b>没有对应测试</b> —— ⚠️ 尤其第 3 条：删掉它之后 {@code getBean(ServerInterceptor.class)}
- * 断言<b>照样是绿的</b>，因为 Bean 仍在，只是没被挂进 gRPC 调用链。
- * 补这两条属已知测试缺口（需真实 gRPC server / 调度器启动才能验）。
+ * 序列化行为（未知字段忽略 / number→string 报错），
+ * 以及第 5 条（{@code @EnableScheduling} —— 见该类里「outbox relay 的 ticker 真的执行过」两条）。
+ * <br>🔴 <b>2026-10-23 第五轮更正（原文写「第 3 条与第 5 条没有对应测试」）</b>：
+ * 第 5 条<b>已有</b>守门测试了（同一个 wiring 测试类，断言的是
+ * 「{@code ScheduledTaskHolder} 真的持有 relay 的任务」+「那个任务真的执行过」，
+ * <b>不是</b>「Bean 存在」）；
+ * <b>仍然没有</b>对应测试的是<b>第 3 条</b>（{@link #rpcInterceptorConfigurer}）：
+ * 删掉它之后 {@code getBean(ServerInterceptor.class)} 断言<b>照样是绿的</b>，
+ * 因为 Bean 仍在，只是没被挂进 gRPC 调用链。
+ * ⇒ 补第 3 条需验「真挂上调用链」（要能观测到拦截器的**行为**，
+ * 而不只是链里有它）—— 属已知测试缺口，见 DRIFT 台账 L-U11。
  * <ol>
  *   <li><b>{@code @MapperScan}</b> — 缺它 5 个 Mapper 全部注册不上，
  *       报 {@code No qualifying bean of type '…mapper.LikeRecordMapper'}，
@@ -57,13 +63,14 @@ import org.mybatis.spring.annotation.MapperScan;
  *       （servlet Filter），纯 gRPC 进程全包扫描会把 web 类拖进来。</li>
  *   <li><b>{@link #rpcInterceptorConfigurer}</b> — devh starter <b>不会</b>自动把用户提供的
  *       {@link ServerInterceptor} 挂到 server 上。没有它，超时 / deadline 传播 / gRPC span
- *       <b>全部静默消失</b>，而 Bean 断言照样是绿的。❌ <b>无守门测试</b>。</li>
+ *       <b>全部静默消失</b>，而 Bean 断言照样是绿的。❌ <b>仍无守门测试</b>。</li>
  *   <li><b>{@code spring-boot-flyway}</b>（在 pom 里）— Boot 4 拆模块后必需。
  *       缺它时<b>启动日志里连一行 Flyway 都没有</b>（不是报错，是根本没加载），
  *       5 张表永不创建 ⇒ 第一次真正执行 SQL 才炸。
  *       {@code LikeSchemaGate} 是它的第二道防线。</li>
  *   <li><b>{@code @EnableScheduling}</b> — outbox relay 的 1 秒 ticker 靠它。
- *       缺它 relay 静默不跑，事件永远积压。❌ <b>无守门测试</b>。</li>
+ *       缺它 relay 静默不跑，事件永远积压。✅ <b>2026-10-23 第五轮已补守门测试</b>
+ *       （断言「任务进了调度器」+「任务真的执行过」）。</li>
  * </ol>
  */
 @SpringBootApplication

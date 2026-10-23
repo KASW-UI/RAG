@@ -451,7 +451,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Classification** | **SEMANTIC MISMATCH**（§20：同一语义旋钮取值不同 ⇒ 语义错误，不是配置风格差异） |
 | **Risk** | **MEDIUM**（只在 2–3s 窗口可观测；但下游变慢时「RAG 会把本该超时的调用放过去」正是线上最难查的一类问题） |
 | **Must Preserve** | 单次 RPC 调用封顶 **2000ms**，与 HTTP 总预算 **3000ms** 是**两个独立旋钮** |
-| **Recommended Verification** | 给 `LikeRpcClient` 增加一个显式的 `like-rpc` 超时配置（默认 `2000ms`），在 `likeRpc()` 里取 `min(配置值, HTTP 剩余预算)`；⚠️ 改完后 `GoStyleRequestDeadline` 的「无预算就原样返回」分支也要重新审 —— 单测里没有 HTTP 超时上下文时，两侧语义会再次分叉 |
+| **Recommended Verification** | 给 `LikeRpcClient` 增加一个显式的 `like-rpc` 超时配置（默认 `2000ms`），在 `likeRpc()` 里取 `min(配置值, HTTP 剩余预算)`；⚠️ 改完后 `GoStyleRequestDeadline` 的「无预算就原样返回」分支也要重新审 —— 单测里没有 HTTP 超时上下文时，两侧语义会再次分叉<br>🔴 **2026-10-23 第五轮更正（本行后半句是错的）** —— 「需连带审 `common` 的 deadline 组件」**不成立**：<br>① `GoStyleRequestDeadline` 的**公开** API 已有 `isPresent()` / `remainingMillis()`，而 `applyTo(stub)` 的语义就是「把当前线程的剩余预算套到 stub 上」⇒ **只读**这两个方法就能拿到剩余预算，**不需要改 common**；<br>② 「无预算就原样返回」那条分支**根本不参与**：修法是**不再调用 `applyTo`**，改成 like-api 自己算 `min(2000, 剩余)` —— 无预算时 Go 的有效 deadline 是**纯 2s**（`context.WithTimeout(ctx, 2s)` 在无 deadline 的 ctx 上就是 2s），不是「没有 deadline」。<br>⇒ **本条是纯域内可修项，不受 §4 的跨域并发约束。** 详见第五轮章节。 |
 | **Evidence** | E-Go 源码链：`zrpc/config.go:31` → `zrpc/client.go:70-72` → `clientinterceptors/timeoutinterceptor.go:17-30`；E-Src：`GoStyleRequestDeadline.java:110-120` + `LikeRpcClient.java:78-80`。⚠️ 「3000 − 已耗时 > 2000 时 RAG 真的放行」这一条**未做双端活体对拍**（需要真的让 like-rpc 慢 2.5s），见 §9 U-04 |
 
 ---
@@ -773,7 +773,7 @@ Go 侧则**正常发出**。
 | **DRIFT-LIKEAPI-015** | `Content-Type` 大小写：Go 用**原始头**（`strings.Contains` 大小写敏感），RAG 用**已解析的 MediaType**（媒体类型已小写化） | ⚠️ **修法落在 `service/common` 的 `GoStyleJsonBodyConverter`**，该类被 **6 个域**共用（like / follow / message / users×2 / task / article），各域都有 `*GoStyleBodyContentTypeTest`。在**多域并发 worktree**（§5.3）下改共享组件会产生跨域冲突 ⇒ **须单域串行处理**，不在本 worktree 内做 |
 | **DRIFT-LIKEAPI-012** | `target_ids` 里放 JSON 数字：Go **接受**（`fillSliceValue` 的 `case fmt.Stringer` 命中 `json.Number`），RAG **拒**（`LogicalType.Textual ← Integer = Fail`） | 修法需**元素级解析器**（setter 改 `Object` 入参）。⚠️ 台账已实测记录「Jackson 3 的 coercion **只有 LogicalType 级生效、类级无效**」，所以 `withCoercionConfig(SomeListClass, …)` 这条路走不通 —— 需新增一个显式的元素级解析组件，范围大于本轮 |
 | **DRIFT-LIKEAPI-016** | `weight: 1e400` ⇒ Go **拒**（`strconv.ParseFloat` 检查 `ErrRange`），RAG 收成 `Double.POSITIVE_INFINITY` ⇒ **真的发出一次 `weight=+Inf` 的写调用** | 修法明确（`setWeight` 改 `Object` 入参 + `isFinite()` 校验），但需与 012 共用同一套「元素级/字段级解析器」组件 ⇒ **与 012 合并做**，避免两次改动同一批 DTO |
-| **DRIFT-LIKEAPI-017** | 单次 RPC 超时：Go **固定 2000ms**（`zrpc/config.go:31` 的 struct tag 默认），RAG 取 **HTTP 剩余预算**（≤3000） | 需新增独立配置项 + 改 `GoStyleRequestDeadline` 的「无预算就原样返回」分支（单测里没有 HTTP 超时上下文时两侧语义会再次分叉）⇒ 需要连带审 `common` 的 deadline 组件，同样受 §4 的并发约束 |
+| **DRIFT-LIKEAPI-017** | 单次 RPC 超时：Go **固定 2000ms**（`zrpc/config.go:31` 的 struct tag 默认），RAG 取 **HTTP 剩余预算**（≤3000） | 需新增独立配置项 + 改 `GoStyleRequestDeadline` 的「无预算就原样返回」分支（单测里没有 HTTP 超时上下文时两侧语义会再次分叉）⇒ 需要连带审 `common` 的 deadline 组件，同样受 §4 的并发约束<br>🔴 **2026-10-23 第五轮更正：后半句整段是错的** —— **不需要改 `common`，也不受 §4 并发约束**：只**读** `GoStyleRequestDeadline` 已有的公开 `isPresent()` / `remainingMillis()` 即可拿到剩余预算，并在 like-api 侧自己算 `min(2000, 剩余)`（**不再调用 `applyTo`**）。理由见 §7.2 该条的更正。 |
 | **DRIFT-LIKEAPI-018/019/020** | 3 条**文档层**高危断言 | ⚠️ **纯注释修正**，无需运行期测试。本轮**未做**，留待下一轮（改动零风险，但需要逐条核对 Go 出处，不能凭印象改） |
 | **DRIFT-LIKEAPI-021/022** | 响应 `Content-Type` 无 `charset`（判语义等价）/ 裸 503（RAG 独有） | ✅ **已建档**为待签字候选：`Intentional_Deviations/like/api.md` 的 SD-…-08 / -09。⚠️ 标注为**待签字**而非已签字 —— 保留在案是为了让下一轮复核**不会把它们当新发现重提**，不是代替用户拍板 |
 
@@ -890,7 +890,7 @@ case reflect.Float32:
 | ID | 原因 |
 |---|---|
 | **015** | 修法落在 `service/common` 的 `GoStyleJsonBodyConverter`，**6 个域共用**，多域并发 worktree 下会跨域冲突 ⇒ 须单域串行 |
-| **017** | 主要落点在 like 域（`LikeRpcClient` 加 2000ms 配置 + `min(…, 剩余预算)`），但需连带审 `common` 的 `GoStyleRequestDeadline` 分支 |
+| **017** | 主要落点在 like 域（`LikeRpcClient` 加 2000ms 配置 + `min(…, 剩余预算)`），但需连带审 `common` 的 `GoStyleRequestDeadline` 分支<br>🔴 **2026-10-23 第五轮更正：后半句是错的** —— 「连带审 common」**不成立**（只读它的公开 `isPresent()` / `remainingMillis()` 即可，**不改 common**）⇒ **本条是纯域内可修项**，已于第五轮修掉，见第五轮章节 |
 | **003**（rpc 侧） | 事实投递链路，需新建**独立进程**；真 DC 接收服务不在任何仓 |
 | **021/022** | 已建档为 ⏳ 待签字候选 |
 
@@ -924,3 +924,116 @@ case reflect.Float32:
    （构造器 `protected`，必须用静态工厂 `from(...)`）—— 语义上正好对应 Go 的 `errTypeMismatch`。
 
 ⇒ 两条都属于「**API 存在性**」类误判，与 PIT-LIKEAPI-009「不存在某机制与两侧都实现了它在台账上长得一样」同族。
+
+---
+
+# like-api 第五轮 · DRIFT-LIKEAPI-017 修复（2026-10-24）
+
+> **分支** `align/like` · **基线**：改前 75 tests 全绿；改后 **81 tests 全绿**（新增 6 条）。
+> ⚠️ 本轮是**纯域内**改动 —— **没有碰 `service/common` 一行**（这正是下面第 2 节更正掉的那条错误断言）。
+
+## 0. 本轮摘要
+
+| 项 | 内容 |
+|---|---|
+| **修掉的漂移** | **DRIFT-LIKEAPI-017**（单次 RPC 超时：Go **固定 2000ms**，RAG 只取 HTTP 剩余预算 ≤3000ms） |
+| **🔴 更正掉的错误断言** | 台账 3 处写「需连带审 `common` 的 deadline 组件」⇒ **不成立**，本条是**纯域内可修项** |
+| **改的实现** | `LikeRpcClient.likeRpc()`（deadline 计算）· `LikeApiProperties`（新增 `LikeRpc.timeout`） |
+| **新增守门测试** | `LikeRpcTimeoutCapTest` **6 条**（**真起 in-process gRPC server**） |
+| **变异验证** | 摘掉 2s 上界 ⇒ **3 条转红** ✅ |
+
+## 1. Go 侧的完整证据链（全部读到**消费点**，不是声明点）
+
+| 环节 | 出处 | 内容 |
+|---|---|---|
+| 旋钮①的默认值 | `go-zero@v1.10.2/rest/config.go:55` | `Timeout int64 \`json:",default=3000"\`` ⇒ **yaml 写不写都是 3000ms** |
+| 旋钮①怎么生效 | `Sea-RideTheWind_golang/service/common/observability/http.go:30-33,53` | `DisableNativeRestTimeout` 取 `TimeoutFromMillis(conf.Timeout)` 并**关掉** go-zero 原生 TimeoutHandler；`NewHTTPMiddleware` 里 `ctx, cancel := context.WithTimeout(r.Context(), timeout)` + `req := r.WithContext(ctx)` ⇒ ctx deadline **传进业务** |
+| 旋钮②的默认值 | `go-zero@v1.10.2/zrpc/config.go:31` | `Timeout int64 \`json:",default=2000"\`` ⇒ **yaml 写不写都是 2000ms** |
+| 旋钮②怎么生效 | `go-zero@v1.10.2/zrpc/client.go:70-71` | `if c.Timeout > 0 { opts = append(opts, WithTimeout(time.Duration(c.Timeout)*time.Millisecond)) }` |
+| ⚠️ **旋钮②的开关** | `go-zero@v1.10.2/zrpc/internal/config.go:15` | `ClientMiddlewaresConf.Timeout bool \`json:",default=true"\`` ⇒ **`etc/likecenter.yaml` 的 `LikeRpc:` 段没有 `Middlewares` 键** ⇒ 走 default ⇒ **拦截器确实挂上了**（这一条是 §3.3.1 的「配置里没写 ≠ 没开」的同型，**必须读到 `buildUnaryInterceptors` 才会挂**，不是看 yaml） |
+| 旋钮②的消费点 | `go-zero@v1.10.2/zrpc/internal/client.go:100-120` + `clientinterceptors/timeoutinterceptor.go:17-30` | `if c.middlewares.Timeout { interceptors = append(interceptors, clientinterceptors.TimeoutInterceptor(timeout)) }` ⇒ `context.WithTimeout(ctx, t)` |
+| ⚠️ **有没有被 per-call 覆盖** | `service/like/rpc/likeservice/likeservice.go:53-55` | 生成的代码是 `client.LikeAction(ctx, in, opts...)`，**没有** `zrpc.WithCallTimeout` ⇒ 拦截器的默认 2000ms 生效 |
+
+⇒ **Go 的有效 deadline = `min(2000ms, 3000ms − 已耗时)`**（Go 的 `context.WithTimeout(parent, 2s)` 在父 deadline 更早时**取更早者**）。
+⇒ **无 HTTP 预算时（`shouldSkipHTTPTimeout` 命中：websocket / SSE）Go 的有效值仍是纯 2s**，不是「没有 deadline」。
+
+## 2. 🔴 本轮对**台账自身**的更正（原文均保留，未删改）
+
+台账三处写「需连带审 `common` 的 `GoStyleRequestDeadline` 分支 ⇒ 受跨域并发约束」—— **这条是错的**：
+
+1. `GoStyleRequestDeadline` 的**公开** API 已有 `isPresent()` / `remainingMillis()` ⇒ **只读**就能拿到剩余预算；
+2. 「无预算就原样返回」那条分支**根本不参与** —— 修法是**不再调用 `applyTo`**，改由 like-api 自己算 `min(2000, 剩余)`；
+   Go 侧无 deadline 时有效值是**纯 2s**，所以「有预算才套 deadline」这个形态本身就是漂移的一半。
+3. ⇒ **本条不碰 `service/common`，不产生跨域冲突**，可在 like 域内单独闭环。
+
+**已在台账里就地更正的三处**（§7.2 的 `Recommended Verification` 行、第三轮的 §4「本轮未做的」表、第四轮的 §4「仍未修」表）。
+
+## 3. 实现
+
+### 3.1 `LikeRpcClient.likeRpc()`
+
+```java
+long capMillis      = properties.getLikeRpc().getTimeout().toMillis();   // 旋钮②：2000
+long remainingMillis = GoStyleRequestDeadline.remainingMillis();          // 旋钮①：-1 = 无
+long effectiveMillis = (remainingMillis < 0L) ? capMillis : Math.min(capMillis, remainingMillis);
+long effectiveNanos  = Math.max(1L, effectiveMillis * 1_000_000L);
+return likeServiceBlockingStub.withDeadlineAfter(effectiveNanos, TimeUnit.NANOSECONDS);
+```
+
+⚠️ **两处精度取舍（必须随结论一起读）**
+
+| 取舍 | 说明 | 可观察性 |
+|---|---|---|
+| **ms 粒度** | `remainingMillis()` 是毫秒精度（Go 的 ctx 是纳秒） | 有效值与 Go 最多差 **< 1ms** ⇒ 两侧在同一个毫秒窗口内都以 `DEADLINE_EXCEEDED` 收场 ⇒ **不可观察** |
+| **1ns 下限** | 预算耗尽时 `remainingMillis()` 返回 `0`，取 `max(1ns, …)` | 与 `GoStyleRequestDeadline.applyTo` 的「预算耗尽 ⇒ 给 1 纳秒而不是原样返回」**同款**：Go 侧 ctx 到期时下游调用立刻失败，若此刻退化成「没有 deadline」就会变成一次「没有 deadline 的慢调用」—— 那正是要修的漂移 |
+
+### 3.2 `LikeApiProperties` 新增 `LikeRpc` 段（**只含 `timeout`**）
+
+⚠️ **同时更正了本类 javadoc 里的一条已过时的断言**：原文写「为什么没有 LikeRpc 字段 …… 再放一份 yaml 字段就是**没有消费者的死配置**」。
+🔴 **该断言只对「寻址类字段」成立**（`Etcd.Hosts` / `Key` / `Endpoints` / `Target` —— 那些由 `@GrpcClient` + Nacos 接管），
+**对「语义旋钮类字段」不成立**（`Timeout` —— 它**必须**有 Java 等价物，否则就是 017 这个漂移本身）。
+⇒ 现改为「`LikeRpc` 段**只有** timeout、**没有**寻址字段」，并写明两类的区别。
+
+⚠️ **默认值 2000ms 来自 Go 的 struct tag，不是 yaml**：Go 的 `likecenter.yaml` 同样**没有** `LikeRpc.Timeout` 这一行
+⇒ Java 侧也**不写进 `application.yml`**，由字段默认值承担（与 Go 端 1:1）。
+
+## 4. 守门测试（`LikeRpcTimeoutCapTest`，6 条）
+
+⚠️ **为什么必须起一个真 gRPC server**：断言「stub 上挂了 deadline」只证明**配置**；
+本类证明**行为** —— 服务端被**真的**掐断在 2 秒，且**服务端自己观测到的 deadline** 也确实是 2 秒。
+
+**判据设计成「成功 / 失败」二分，不存在「两者都绿」的可能**：服务端睡 **2500ms**（正落在 Go 的 2s~3s 窗口内）⇒
+
+| 情形 | 结果 |
+|---|---|
+| 有 2s 上界 | 客户端 **DEADLINE_EXCEEDED** |
+| 只有 3s 的 HTTP 预算（= 修复前） | 客户端 **成功**拿到响应 |
+
+⇒ 这正是台账 §9 U-04 记的「下游耗时 2.5s 时 RAG 真的放行」，本轮**用真 server 复现了这条差异**。
+
+| 用例 | 断言 |
+|---|---|
+| `withoutHttpBudgetTheCallIsStillCappedAt2000ms` | 无 HTTP 预算时仍封顶 2000ms（**第二个面**：修前是「完全没有 deadline」） |
+| `httpBudgetOf3sDoesNotRaiseTheSingleCallCap` | HTTP 预算 3s **不能**把单次上界顶回去（**核心漂移**） |
+| `serverObservesThe2000msCapNotTheHttpBudget` | **服务端**观测到的剩余预算 ≤ 2000ms（且 > 1500ms）⇒ deadline 真的传到了服务端 |
+| `httpBudgetSmallerThanTheCapWins` | HTTP 预算 500ms 时取**更小者**（min 的另一半） |
+| `exhaustedHttpBudgetFailsImmediately` | 预算耗尽 ⇒ **立刻**失败（不是退化成「没有 deadline」） |
+| `capLargerThanServerSleepSucceeds` | **反向对照**：上界调到 5s ⇒ 调用**成功** ⇒ 证明这套判据能区分成功/失败，不是「一律抛异常」 |
+
+### 4.1 🔴 变异验证（不是「跑绿」就算数）
+
+| 变异 | 结果 |
+|---|---|
+| 摘掉 `min(cap, remaining)` 的 cap（= 修复前的行为） | **3 条转红**：`withoutHttpBudget…` / `httpBudgetOf3s…` / `serverObserves…` ✅<br>（转红原因正是「服务端 2.5s 后成功返回」⇒ 断言「应当抛 DEADLINE_EXCEEDED」失败） |
+
+⚠️ 另外 3 条**保持绿**是**预期的**：它们守的是另外两层（`min` 的另一半 / 预算耗尽 / 反向对照），
+不是被变异摘掉的那一层。
+
+## 5. ⚠️ 本轮的一次自我纠错（发生在写测试的过程中）
+
+**第一次写错了「观测 deadline」的方式**：把服务端拿到的 `Deadline` **对象**存起来，事后才读 `timeRemaining(...)` ⇒ 读到的是**已过期**的负数（`-1ms`），一度以为「deadline 没传到服务端」。
+⇒ 实测发现 **`Deadline` 是不可变对象，`timeRemaining(...)` 是「调用那一刻」才算出来的**。
+⇒ 修法：在 **handler 内部当场**把 `timeRemaining` 取成 `AtomicLong`。
+（中间用一个临时探针类量到了 `grpc-timeout: 1970387u` 与 handler 侧 `remaining ≈ 1961ms`，确认了传播链路本身没问题 —— **探针类已删除**，不进仓。）
+
+⇒ 这条属于「**测法**本身的误判」，与第四轮记的「凭记忆写错异常类」同族：**API 的语义细节不能靠印象**。

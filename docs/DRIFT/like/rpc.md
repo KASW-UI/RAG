@@ -168,7 +168,7 @@ Go 的 `DispatchFactOnce` 是**在事务里发 HTTP**：`Begin` → 行锁 → P
 | **DRIFT-LIKE-002** | 业务码对**未迁移的 Go like-api** 丢失：Go 直发 `grpc-status: 5003`；grpc-java `fromCodeValue(5003)` → `UNKNOWN(2)`（实测 `desc="Unknown code 5003"`，`Code.values().length == 17`），Java 改放自定义 trailer `rag-like-biz-code`，而 Go like-api 只读 `int(st.Code())` ⇒ 灰度期 envelope code 变 **2**、msg 因 `GetErrMsg(2)` 落表外而回落 `"FAIL"` | SEMANTIC MISMATCH | 🔴 |
 | DRIFT-LIKE-004 | Kafka 消费侧 Java 多 **9 次进程内重试**：`new DefaultErrorHandler(recoverer)` 内部即 `SeekUtils.DEFAULT_BACK_OFF = FixedBackOff(0,9)`；Go `kq` 的 `ForceCommit` 默认 true 且未注册 errorHandler ⇒ **0 次**，失败只不提交位点 | OBSERVABLE | 🟠 |
 | DRIFT-LIKE-005 | Kafka key/分区：Go `Push` 内部即 `PushWithKey(UnixNano)` 且用 `LeastBytes{}` 分区；Java `send(topic,null,payload)` 走默认分区器 | OBSERVABLE | 🟠 |
-| DRIFT-LIKE-006 | 模块**从未做过 Spring 上下文加载测试**（无 `@SpringBootTest` / `ApplicationContextRunner`），而 javadoc 点名的 4 个 wiring 测试**全部不存在** —— 与 §6.6.5 message-rpc 同型<br>🔴 **2026-10-23 修复轮更正：部分过期** —— 已新增 `LikeRpcSpringContextWiringTest`（7 条 / 真 PG）且实跑全绿；真实缺口缩到 2 处（`rpcInterceptorConfigurer` 未验证是否真挂上 gRPC 调用链、`@EnableScheduling` 无守门）。详见第三轮 §5 L-U11 | UNKNOWN | 🟠 |
+| DRIFT-LIKE-006 | 模块**从未做过 Spring 上下文加载测试**（无 `@SpringBootTest` / `ApplicationContextRunner`），而 javadoc 点名的 4 个 wiring 测试**全部不存在** —— 与 §6.6.5 message-rpc 同型<br>🔴 **2026-10-23 修复轮更正：部分过期** —— 已新增 `LikeRpcSpringContextWiringTest`（7 条 / 真 PG）且实跑全绿；真实缺口缩到 2 处（`rpcInterceptorConfigurer` 未验证是否真挂上 gRPC 调用链、`@EnableScheduling` 无守门）。详见第三轮 §5 L-U11<br>🔴 **2026-10-24 第五轮再更正：真实缺口缩到 1 处** —— `@EnableScheduling` 那半**已补守门测试**（同一个 wiring 测试类，**9 条**）：① `ScheduledTaskHolder` **真的持有** relay 的 `@Scheduled` 任务 ② 那个任务**真的执行过**（`Task.getLastExecutionOutcome().status() != NONE`）。⇒ 剩下的**只有** `rpcInterceptorConfigurer`（见 §5 L-U11） | UNKNOWN | 🟠 |
 | DRIFT-LIKE-007 | 未知字段从「忽略」变「丢弃」：`@JsonIgnoreProperties(ignoreUnknown=false)` 覆盖了 Jackson 3 的默认忽略 ⇒ 抛异常 ⇒ 记 `json_error` 并**提交位点**（永久丢失、不可恢复的消息黑洞） | SEMANTIC MISMATCH | 🟡 |
 | DRIFT-LIKE-008 | map 形式 `Updates` **会**刷新 `updated_at`（真 PG 实测：`2020-01-01 08:00` → `2026-10-22 19:48:54.598+08`）；Java `updateState` 不刷新 ⇒ `idx_user_list(user_id, updated_at)` 内容两侧不同 | OBSERVABLE | 🟡 |
 | DRIFT-LIKE-009 | 指标 label 漂移 4 处：`redis_read_error` 的 target_type 塞字面量且 action 恒 `"n/a"`；Go「字段不存在」也记指标而 Java 直接返回；Go `GetLikeState` 记 `redis_error` 而 Java 不记；Java 把序列化失败并入 `kafka_error` | OBSERVABLE | 🟡 |
@@ -751,7 +751,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | **DRIFT-LIKE-003**（事实投递链路缺失） | **仍然成立**：Java 侧 6 个骨架文件逐个复核，**仍是 4 行**；生产侧 `LikeDomainFactService` **完整**且已被 `LikeMessageIngestService` 调用 ⇒ 「只写不送」成立 |
 | **DRIFT-LIKE-004**（9 次进程内重试） | **仍然成立**：`LikeUpdateKafkaListener.java:170-175` 用的 `new DefaultErrorHandler(recoverer)` **内置 `FixedBackOff(0,9)`**；而同一文件 `:44-49` 的 javadoc 仍写着「不做进程内重试」⇒ **错误断言 E 仍在** |
 | **DRIFT-LIKE-005**（Kafka key/分区） | **仍然成立**，且本轮把消费点钉到 `go-queue@v1.2.2/kq/pusher.go:123-125`（`Push` → `PushWithKey(UnixNano)`）与 `:44-48`（`Balancer: &kafka.LeastBytes{}`） |
-| **DRIFT-LIKE-006**（模块从未做过 Spring 上下文加载测试） | **仍然成立，且后果已实测**：本轮首次真正启动该应用（E-Boot）⇒ **上下文起不来**（DRIFT-LIKE-013~016）。⇒ 首轮 U1「上下文能否启动」**结论：不能**<br>🔴 **2026-10-23 修复轮更正：本条现已「部分过期」** —— 修复轮新增了 `LikeRpcSpringContextWiringTest`（7 条，**真 PG Testcontainers**），第三轮实跑全绿 ⇒「**从未**做过 Spring 上下文加载测试」不再成立。<br>⚠️ **剩下的真实缺口只有 2 处**（见第三轮 §2 与 §5 的 L-U11）：`rpcInterceptorConfigurer`（Bean 存在但**没挂进 gRPC 调用链**）与 `@EnableScheduling`。<br>⇒ 本条**不能**简单标「已关」：断言「Bean 存在」抓不到「Bean 在但没接上」这一形态。 |
+| **DRIFT-LIKE-006**（模块从未做过 Spring 上下文加载测试） | **仍然成立，且后果已实测**：本轮首次真正启动该应用（E-Boot）⇒ **上下文起不来**（DRIFT-LIKE-013~016）。⇒ 首轮 U1「上下文能否启动」**结论：不能**<br>🔴 **2026-10-23 修复轮更正：本条现已「部分过期」** —— 修复轮新增了 `LikeRpcSpringContextWiringTest`（7 条，**真 PG Testcontainers**），第三轮实跑全绿 ⇒「**从未**做过 Spring 上下文加载测试」不再成立。<br>⚠️ **剩下的真实缺口只有 2 处**（见第三轮 §2 与 §5 的 L-U11）：`rpcInterceptorConfigurer`（Bean 存在但**没挂进 gRPC 调用链**）与 `@EnableScheduling`。<br>🔴 **2026-10-24 第五轮更正：这 2 处现在只剩 1 处** —— `@EnableScheduling` 那半**已补守门测试**（`LikeRpcSpringContextWiringTest` 增到 **9 条**：断言「任务进了调度器」+「任务真的执行过」，**不是**「Bean 存在」）；变异验证：摘掉 `@EnableScheduling` ⇒ **2 条转红** ✅。<br>⇒ **仍然没有**守门测试的是 **`rpcInterceptorConfigurer`**（要验「真挂进 gRPC 调用链」，得观测拦截器的**行为**而不是链里有它）。<br>⇒ 本条**不能**简单标「已关」：断言「Bean 存在」抓不到「Bean 在但没接上」这一形态。 |
 | **DRIFT-LIKE-007**（未知字段从忽略变丢弃） | **仍然成立**：`LikeEventContracts.java:40,94,134` 三处 `@JsonIgnoreProperties(ignoreUnknown = false)` |
 | **DRIFT-LIKE-008**（`updated_at` 刷新差异） | **仍然成立**，并把 Go 侧机制钉到消费点：`gorm.io/gorm@v1.31.1/callbacks/update.go:201`（`case map[string]interface{}`）→ `:238`（`field.AutoUpdateTime > 0` ⇒ 追加自动更新时间）⇒ **map 形式确实会刷新** ⇒ `LikeRecordMapper.java:196-199` 的注释（错误断言 B）仍错 |
 | **DRIFT-LIKE-009**（指标 label 漂移 4 处） | **仍然成立**：`LikeDomainService.java:881`（`redis_read_error` 的 target_type 是 key 反解出来的类型、action 恒 `"n/a"`）、`hgetCountLenient` 只在**异常**时打点而 Go 在**字段不存在**时也打点 |
@@ -1179,7 +1179,7 @@ Java 侧用默认（按 key 哈希）分区器、**未配 Snappy**。
 |---|---|---|---|
 | `§OP-07` 表格 Branch 3 / Branch 4 | 「outbox 构造失败 / DB 事务失败 ⇒ 返回 `err` ⇒ **不提交（重投）**」 | `kq/config.go:24` `ForceCommit` 默认 **true** 且 `mq.yaml` 未覆盖 ⇒ `queue.go:235` 的 `if !q.c.ForceCommit { continue }` **不成立** ⇒ 落到 `CommitMessages` ⇒ **提交位点** | ❌ **反了**。Go 侧这两个分支是**丢弃**，不是重投 |
 | `§7.6` 对 004 的复核 | 「Go 的 `ForceCommit` 默认 true 且未注册 errorHandler ⇒ **0 次**，失败**只不提交位点**」 | 同上 | ⚠️ **「0 次」对，「只不提交位点」错** —— 恰恰是 `ForceCommit=true` 导致**照样提交** |
-| `§7.6` 对 006 的复核 | 「模块从未做过 Spring 上下文加载测试 —— **仍然成立**」 | 修复轮已新增 `LikeRpcSpringContextWiringTest`（7 条 / 真 PG），第三轮实跑全绿 | ⚠️ **部分过期**，真实缺口缩到 2 处（见 §5 L-U11） |
+| `§7.6` 对 006 的复核 | 「模块从未做过 Spring 上下文加载测试 —— **仍然成立**」 | 修复轮已新增 `LikeRpcSpringContextWiringTest`（7 条 / 真 PG），第三轮实跑全绿 | ⚠️ **部分过期**，真实缺口缩到 2 处（见 §5 L-U11）<br>🔴 **第五轮再缩到 1 处**：`@EnableScheduling` 那半已补守门测试（9 条） |
 | `§1` 首轮摘要与错误断言 **A** | 「GORM 对 timestamptz 取 `data.Unix()` ⇒ 回源产出**秒**，与写路径毫秒不一致，**是真实可观察行为，原样保留**」 | `UserLikeListResult.CreateTime` 的 gorm DBName 是 `create_time`，`Select` 取的是 `created_at` ⇒ **不匹配 ⇒ 恒 0** ⇒ `getuserlikelistlogic.go:94-96` 每行 `continue` ⇒ **该分支从未执行过 ZADD** | ❌ **前提不成立**，描述的是一条**不可达路径**。详见 §2.10 |
 | 错误断言 **E**（源码注释侧） | 「不做进程内重试……若在 Java 侧加 `FixedBackOff` 做 N 次进程内重试，那是新增行为」 | `DefaultErrorHandler` 单参构造**内建** `FixedBackOff(0,9)` ⇒ 该行为**正在发生** | ❌ 半错，见 §2.1 |
 
@@ -1197,7 +1197,7 @@ Java 侧用默认（按 key 哈希）分区器、**未配 Snappy**。
 | **DRIFT-LIKE-003** | 事实投递链路 6 个骨架文件 | 本轮**有意不碰**（需新建独立进程，scope 过大）；链路末端真 DC 接收服务**不在任何仓**，投递环节只能对 stub 验证 |
 | **L-U9** | 「失败消息之后，后续消息是否真的被继续处理」**无活体证据** | 本轮**没有真 Kafka**。源码链已钉死（`recovered` 返回 `true` ⇒ `doSeeks` 不 seek），但那是**源码级**不是**活体级** |
 | **L-U10** | 分区器 `LeastBytes` + Snappy | OBSERVABLE，见 §2.11 |
-| **L-U11** | `rpcInterceptorConfigurer` / `@EnableScheduling` 无守门测试 | 错误断言 F 已标注为**已知测试缺口**（需真实 gRPC server / 调度器才能验） |
+| **L-U11** | `rpcInterceptorConfigurer` / `@EnableScheduling` 无守门测试 | 错误断言 F 已标注为**已知测试缺口**（需真实 gRPC server / 调度器才能验）<br>🔴 **2026-10-24 第五轮：`@EnableScheduling` 那半已修**（见 §6.5）⇒ **只剩 `rpcInterceptorConfigurer` 一处** |
 
 ## 6. 本轮新增守门测试
 
@@ -1212,3 +1212,63 @@ Java 侧用默认（按 key 哈希）分区器、**未配 Snappy**。
 
 ⚠️ **能力边界（必须随结论一起读）**：本类证明的是**配置形状与调用参数**，
 **不能**证明「真实 broker 上失败消息之后的消费行为」—— 那需要真 Kafka，属 §5 的 L-U9。
+
+---
+
+# like-rpc 第五轮 · L-U11 的 `@EnableScheduling` 半边补上（2026-10-24）
+
+> **分支** `align/like` · **基线**：改前 55 tests 全绿；改后 **57 tests 全绿**（`LikeRpcSpringContextWiringTest` 由 **7 条 → 9 条**）。
+> ⚠️ 本轮**没有改一行生产代码** —— 只补了**守门测试** + 更正了**已经过时的 javadoc 断言**。
+
+## 6.5.1 本轮补的是什么（以及为什么它不是「补一条 Bean 断言」）
+
+`DRIFT-LIKE-006` 的真实缺口在第三轮被缩到 **2 处**，本轮关掉其中 **1 处**：
+
+| 缺口 | 状态 |
+|---|---|
+| `@EnableScheduling` —— outbox relay 的 1 秒 ticker 靠它 | ✅ **本轮补上守门测试** |
+| `rpcInterceptorConfigurer` —— 删掉它之后 `getBean(ServerInterceptor.class)` **照样是绿的**，因为 Bean 仍在，只是**没挂进 gRPC 调用链** | ❌ **仍然缺**（要验「真挂上调用链」得观测拦截器的**行为**，不是链里有它） |
+
+### ⚠️ 为什么「断言 `LikeHotEventOutboxRelay` 这个 Bean 存在」**不算**守门测试
+
+那个 Bean 是 `@Component` ⇒ **摘掉 `@EnableScheduling` 之后它照样被创建**，
+只是 ticker 再也不会被触发 ⇒ **热点事件永远积压，且启动日志零告警、零报错**。
+这正是 AGENTS.md §3.3.3「断言『Bean 存在』不等于断言『机制生效』」的现场。
+
+⇒ 本轮锁的是**两件更强的事**：
+
+1. **装配层**：`ScheduledTaskHolder`（Spring 7 里在 `org.springframework.scheduling.config` 包，
+   由 `ScheduledAnnotationBeanPostProcessor` 实现）**真的持有**那个 `@Scheduled` 任务 ——
+   识别方式是 `ScheduledMethodRunnable.toString()` = `"<声明类全名>.<方法名>"`
+   ⇒ 命中 `com.rag.like.like.rpc.mq.LikeHotEventOutboxRelay.sendPending`。
+2. **行为层**：`Task.getLastExecutionOutcome().status()` 从 `NONE`（从没跑过）变成 `STARTED`/`SUCCESS`/`ERROR`
+   ⇒ 证明**调度器真的执行了它**。
+   ⚠️ `Task` 的 `OutcomeTrackingRunnable`（Spring 6.2+）在**每次执行**时更新 outcome，
+   `NONE → STARTED → SUCCESS/ERROR`；且断言用的是 `SUCCESS` 而不只是「≠ NONE」——
+   **「ticker 在跑但每轮都抛异常」是另一个缺陷，不能算通过**。
+
+## 6.5.2 🔴 变异验证（不是「跑绿」就算数）
+
+| 变异 | 结果 |
+|---|---|
+| 摘掉 `LikeRpcApplication` 上的 `@EnableScheduling` | **2 条转红** ✅<br>`relayScheduledTaskIsRegisteredWithTheScheduler` → 「ScheduledTaskHolder 缺失 ⇒ @EnableScheduling 没生效」<br>`relayTaskActuallyRuns` → 同上<br>⚠️ 其余 **7 条仍绿**（它们不依赖调度）—— 这正是期望的判别分布 |
+
+## 6.5.3 🔴 本轮同时更正的两条**已经过时**的 javadoc 断言
+
+§3.3.3 的强制顺序要求**先改错误断言**：本轮改了 **2 处**生产代码注释（**未动任何逻辑**）：
+
+| 位置 | 原文 | 更正为 |
+|---|---|---|
+| `LikeRpcApplication` 类 javadoc | 「第 3 条与第 5 条**没有对应测试**」 | 第 5 条（`@EnableScheduling`）**已有**守门测试（同一个 wiring 测试类，9 条）；**仍然没有**的是**第 3 条**（`rpcInterceptorConfigurer`） |
+| `LikeRpcApplication` 类 javadoc | 「真实的装配层回归网只有 `LikeRpcSpringContextWiringTest`（**7 条**）」 | 改为 **9 条**，并逐条列出覆盖范围（含新增的调度两条） |
+
+⚠️ 这两处若不改，下一个 agent 读到的就是**过期事实** ——
+而「注释说没有测试」会让下一个人**以为可以跳过**，
+「注释说 7 条」会让下一个人**以为新增的两条不在回归网里**。
+
+## 6.5.4 本轮**没有**做的事（留档，含原因）
+
+| 项 | 为什么没做 |
+|---|---|
+| `rpcInterceptorConfigurer` 的守门测试 | 要验「真挂进 gRPC 调用链」，得观测拦截器的**行为**（如它设置的 span / deadline 传播），而不是「链里有它」。本轮 gRPC server 确实在 `grpc.server.port=0` 起了，但**构造一条能观测到拦截器行为的请求**需要另立一轮；本轮先把**能干净闭环**的那半边关掉 |
+| 真 Kafka（`L-U9`） | `spring-kafka-test` / `testcontainers-kafka` **不在本地 m2** ⇒ 要联网拉依赖；Docker 可用但依赖待补 |
