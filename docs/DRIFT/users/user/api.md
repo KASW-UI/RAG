@@ -1497,3 +1497,95 @@ java.lang.AssertionError: JSON path "$.code" expected:<1015> but was:<500>
 |---|---|
 | `user-api` | **82** tests / 0 failures / 0 errors / **skipped = 0**（原 76 + 新 6） |
 | 对照：Service 层单独跑 | 4/4；MVC 层单独跑 9/9 |
+
+---
+
+<!-- @fix 2026-10-23 第四轮：DRIFT-USERAPI-005 已修（并实测出 Content-Type 415 这条新维度） -->
+
+## 2026-10-23 第四轮：`DRIFT-USERAPI-005` 已修（`avatar/history` 不读 body）
+
+### 1. Go 出处复核（全文 26 行，逐行）
+
+`service/user/user/api/internal/handler/user/getavatarhistoryhandler.go:16-25`：
+
+```go
+func GetavatarhistoryHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		l := user.NewGetavatarhistorylogic(r.Context(), svcCtx)
+		resp, code := l.Getavatarhistory()          // ← 无 var req、无 httpx.Parse
+		httpx.OkJson(w, &response.Response{Code: code, Msg: errmsg.GetErrMsg(code), Data: resp})
+	}
+}
+```
+
+⇒ 请求体**从头到尾没被读过**。参数另有出处
+（`getavatarhistorylogic.go:32` uid 取自 JWT、`:40` limit **硬编码 30**）
+⇒ **这个端点根本不需要任何入参 DTO**。
+
+### 2. 修法（三处，缺一不可）
+
+| # | 改动 | 为什么 |
+|---|---|---|
+| 1 | `UserController#getAvatarHistory` **去掉 `@RequestBody`**，签名只留 `HttpServletRequest` | Spring 不再有理由去反序列化 body ⇒ 畸形 JSON / 非法 Content-Type 一律不再影响该端点 |
+| 2 | `AvatarHistoryService#getAvatarHistory` 去掉 `GetAvatarHistoryReq req` 参数 | 该参数**在方法体里一次都没被用过**（uid 走 JWT、limit 走常量）—— 留着它就等于留着一次无意义的 body 绑定 |
+| 3 | **删除** `dto/GetAvatarHistoryReq.java`（空类，删除后已零消费者） | §3.4.1 D-2：零消费者的代码不能算已对齐 |
+
+### 3. 🆕 变异验证顺带实测出**一条原台账没记录的新维度**
+
+原台账只预测了「畸形 JSON → Go 200 / RAG 400」。变异实测（把 body 绑回去）：
+
+| 输入 | Go | 修前 RAG | **变异实测** |
+|---|---|---|---|
+| `Content-Type: application/json` + `{"a":}` | 200 | 400 | `Status expected:<200> but was:<400>` |
+| `Content-Type: text/plain` + 任意文本 | 200 | 400 | **`Status expected:<200> but was:<415>`** |
+
+⇒ **多出一条原台账没写到的差异：RAG 会返回 `415 Unsupported Media Type`**，
+而 Go 侧**连 Content-Type 都不看**（handler 根本不碰 request body）。
+这是「@RequestBody 绑定」比「畸形 JSON」更宽的伤害面 —— **Content-Type 也成了契约**。
+⇒ 修法 1（整个去掉 `@RequestBody`）把两个维度一起消掉；只加「容错解析」会漏掉 415。
+
+### 4. 守门网：`AvatarHistoryIgnoresBodyTest`（**新建 4 条 · 零容器依赖 · 4.7 秒**）
+
+| # | 用例 | 变异后 |
+|---|---|---|
+| 1 | 畸形 JSON → 200 + `$.code=200` | 🔴 变 400 |
+| 2 | `text/plain` + 非 JSON → 200 | 🔴 变 **415** |
+| 3 | 合法 JSON 带未知字段 → 200 且 Service 被调 | ⚪ 仍绿（**不具判别力**，见下） |
+| 4 | **对照组**：login 同样畸形 body 必须 400 | ⚪ 仍绿 |
+
+⚠️ **诚实标注**：4 条里**只有 1、2 两条对本条漂移有判别力**。
+第 3 条（合法 JSON 带未知字段）在绑定与否两种实现下都是 200，它防的是另一类回归
+（body 里塞 `uid`/`limit` 会不会被误采纳），**不能算作本条的变异证据**。
+
+**对照组 4 的作用**：防止「为了让 avatar/history 通过，把 body 解析整体关掉」
+—— 那会把一条漂移修成九条（其余 8 个端点在 Go 侧确实 Parse）。
+
+### 5. 为什么这层护网用 `standaloneSetup` 而不是 `@SpringBootTest`（**本轮的一个方法论收获**）
+
+这条漂移**只关乎「Spring 会不会去解析 body」**，与鉴权/黑名单无关。
+原本沿用 `UserApiClaimSemanticsParityTest` 的真 Redis 全上下文装配，
+结果**本轮连撞 3 次** `ContainerLaunch Container startup failed for image redis:7-alpine`。
+
+**真因**（`docker info` + `docker stats` 实测，非猜测）：
+本机 Docker Desktop 只分配 **7.653 GiB**，而当前跑着约 30 个容器，
+其中 Kafka ×3（943 + 802 + 770 MiB）、Nacos ×2（943 + 708 MiB）、
+Neo4j 399 MiB、Grafana 362 MiB …… 已吃掉大半 ⇒ 小容器也分不到。
+
+⇒ **让「绑定语义」的护网依赖一个 30 MB 容器，等于把基础设施抖动当成代码信号。**
+改用 `MockMvcBuilders.standaloneSetup(controller).setControllerAdvice(真 advice)`：
+仍走**真 DispatcherServlet 的参数解析 + 真 advice**（Controller 与 advice 都是真实实现，
+只 mock Service），但**零容器、零 Spring 上下文、4.7 秒**。
+
+⚠️ **本类不覆盖真 Tomcat 下 `Content-Type` 的 charset 行为** —— 那是 `UNRESOLVED-001`，
+需要 `tools/difftest/check-plaintext400-headers.sh` 那个真容器脚本。
+**两件事不要混**：本条讲「绑不绑 body」，`UNRESOLVED-001` 讲「绑了之后响应头长什么样」。
+
+端到端层的那条（真 Redis + 真 MVC 全上下文）保留，两层并存：
+**绑定层稳定、端到端层完整**。
+
+### 6. 本轮回归
+
+| 模块 | 结果 |
+|---|---|
+| `user-api` | **88** tests / 0 failures / 0 errors / **skipped = 0**（82 + 新 6） |
+| 切片层单独跑 | 4/4，**零容器**，4.7s |
