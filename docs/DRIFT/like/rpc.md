@@ -933,3 +933,261 @@ Go 的 `DeliveryStatus int32` / `RetryCount int32`（`internal/model/domain_fact
   `character varying`，jsonb 列直接拒收。
   这与 admin-rpc 的 `extra_info` 是**同一个坑**（那边已有注释记录）——
   说明「jsonb + JdbcTemplate 参数」这个组合在本项目已踩过两次，值得进 §3.3 的清单。
+
+---
+---
+
+# like-rpc 第三轮 · 修复轮（2026-10-23）
+
+> **本节是修复轮记录，前两节原文一字未改**。
+> 首轮 = 2026-10-22（12 条，文件首节）；第二轮 = 2026-10-23 组件级（013~018，见上节）。
+> **分支**：`align/like` · **范围**：DRIFT-LIKE-002 / 004 / 005 / 007~012 / 018 + 错误断言 A~I。
+> **基线**：改前 `like-rpc` 46 tests 全绿；改后 **55 tests 全绿**（新增 `LikeGoAlignmentTest` 9 条）。
+> ⚠️ 这 9 条修复**没有一条**被既有 46 条覆盖 —— 改回原状时它们依然全绿。
+
+## 0. 本轮结论摘要
+
+| | 内容 |
+|---|---|
+| **已修** | **9 条**：002（定性为框架限制，未改代码）/ 004 / 005 / 007（**证伪**）/ 008 / 009 / 010 / 011 / 012 / 018 |
+| **已修** | 错误断言 **A~I 共 9 条**全部清理，另**新发现并清理 4 处** |
+| **证伪** | **DRIFT-LIKE-007 不成立** —— `@JsonIgnoreProperties(ignoreUnknown=false)` 是 **no-op** |
+| **纠正台账** | **§OP-07「Branch 3/4 ⇒ 返回 err ⇒ 不提交（重投）」是错的**；Go 实为**提交位点 ⇒ 丢弃** |
+| **台账作废** | §7.6 对 004 的「失败只不提交位点」**反了**：`ForceCommit` 默认 true ⇒ 失败**也**提交 |
+| **新发现（Java 侧缺陷）** | `epochSeconds` ⇒ 同一条记录冷/热缓存下 timestamp **差 1000 倍** |
+| **保留未对齐** | 分区器 `LeastBytes` + `Compression: Snappy`（OBSERVABLE，见 §2.5） |
+
+## 1. 证据强度声明（本轮）
+
+| 编号 | 类型 | 说明 |
+|---|---|---|
+| **E-GoSrc** | Go 真源**消费点**源码 | go-zero / go-queue / gorm **依赖源码**读到行号，不只贴 `pom`/yaml |
+| **E-FwSrc** | 框架源码消费点 | spring-kafka **4.0.7 sources jar** 实读（`unzip` 后按行号引用） |
+| **E-Test** | 本仓真容器/真断言 | `mvn test` 实跑；含 **真 PG Testcontainers**（`LikeDomainFactSchemaParityTest` / `LikeRpcSpringContextWiringTest`） |
+| ⚠️ **缺口** | **无真 Kafka** | 本轮**没有**起真 broker ⇒ 「失败消息之后的后续消息是否被处理」**没有活体证据**，只有源码链 |
+
+## 2. 逐条修复记录
+
+### 2.1 DRIFT-LIKE-004 ✅ 已修（并**推翻台账原表述**）
+
+**台账原表述（错）**：§7.6 称「Go `kq` 的 `ForceCommit` 默认 true 且未注册 errorHandler ⇒ **0 次**，失败只不提交位点」。
+
+**实测真源（E-GoSrc）**：
+
+```go
+// go-queue@v1.2.2/kq/queue.go:230-243
+if err := q.consumeOne(ctx, string(msg.Key), string(msg.Value)); err != nil {
+    if q.errorHandler != nil { q.errorHandler(ctx, msg, err) }  // 默认实现：只 logc.Errorf
+    if !q.c.ForceCommit { continue }                            // ⚠️ ForceCommit=true ⇒ 不 continue
+}
+if err := q.consumer.CommitMessages(ctx, msg); err != nil { … } // ⚠️ 落到这里 ⇒ 提交位点
+```
+
+- `kq/config.go:24` `ForceCommit bool \`json:",default=true"\``
+- `service/like/rpc/internal/mq/etc/mq.yaml` —— **没有覆盖该字段** ⇒ 生效值 `true`
+- `kq/queue.go:362-366` 默认 errorHandler 只 `logc.Errorf`，**不改控制流**
+
+⇒ **确定结论：Go 侧消费失败 ⇒ 提交位点 ⇒ 该消息永久丢弃、不重投，且继续处理下一条。**
+
+⚠️ **连带纠正 §OP-07 的 Branch 3 / Branch 4**：表里写的「返回 err ⇒ **不提交（重投）**」是错的。
+⇒ 「Go 的 inbox `payload_hash` 不同 ⇒ **报错重投**」（`internal/model/like.go:164-179`）这条注释所述的机制，
+**在 Go 侧从未真正发生** —— 「重投」意图被 `ForceCommit=true` 架空。**这是真源自身的缺陷**，已留档，RAG 侧不「顺手修正」。
+
+**Java 侧原实现**：`new DefaultErrorHandler(recoverer)` —— 单参构造内部即 `SeekUtils.DEFAULT_BACK_OFF`
+（`DefaultErrorHandler.java:81-83`），而 `SeekUtils.java:57` `DEFAULT_MAX_FAILURES = 10`、`:63` `DEFAULT_BACK_OFF = FixedBackOff(0, 9)`
+⇒ **失败消息被真的重新 poll 并重跑 listener 共 9 次**（`FailedRecordTracker.recovered` 每次返回 false ⇒ `SeekUtils.doSeeks` seek ⇒ `seekOrRecover` 抛 `RecordInRetryException`）。
+
+**修法**：`new DefaultErrorHandler(recoverer, new FixedBackOff(0, 0))`
+⇒ 第一次失败即 `nextBackOff == STOP` ⇒ `FailedRecordTracker.java:185-195` 走 else 分支 ⇒ 调 recoverer 后**返回 `true`**
+⇒ `SeekUtils.doSeeks` **不 seek** ⇒ 容器继续处理后续消息、位点推进 ⇒ **丢弃 + 继续**，与 Go 逐条一致。
+
+⚠️ 顺带修掉 2 处**方向写反**的注释：`LikeRpcApplication` 原写「本处理器不 seek、不提交、失败消息在重启后重投」
+与「**默认** recoverer 会 seek ⇒ 丢消息」—— 两者都与 Spring Kafka 4.0.7 的实际控制流**相反**。
+
+### 2.2 DRIFT-LIKE-005 ✅ 已修（**范围比台账小**）
+
+台账说「Java `send(topic,null,payload)` 走默认分区器」——**对，但漏了另两路本来就带 key**。
+
+**真源逐条钉死（E-GoSrc）**：
+
+| 调用点 | API | key |
+|---|---|---|
+| `likeactionlogic.go:240` `KafkaPusher.Push` | `Push` | **UnixNano**（`pusher.go:123-125` 内部即 `PushWithKey(UnixNano)`） |
+| `likeactionlogic.go:317` `TaskUserPusher.PushWithKey` | `PushWithKey` | `strconv.FormatInt(in.UserId,10)` |
+| `likeactionlogic.go:340` `TaskArticlePusher.PushWithKey` | `PushWithKey` | `in.TargetId` |
+| `like_outbox_sender.go:28` `HotEventPusher.Push` | `Push` | **UnixNano** |
+
+⇒ Java 的两路 TaskProgress **key 本来就对**；真正要改的只有 **2 处 `null`**。
+
+**修法**：新增 `LikeKafkaPushKey.unixNano()`，改 `KafkaLikeMsgPublisher` / `LikeHotEventOutboxRelay`。
+⚠️ **不能用 `System.nanoTime()`** —— 它是任意单调计时器值，与 Unix epoch 无关；灰度期逐条 diff 消息元数据会全错。
+
+**顺带修掉台账 U6**：`kafkaTemplate.send(...)` 全模块**零** `whenComplete` ⇒ 异步失败连日志都没有
+（而 `application.yml` 原注释声称有「失败回调日志」，**是假的**）。已在 2 处补 `whenComplete` + `LOG.error`。
+
+### 2.3 DRIFT-LIKE-007 ❌ **证伪，漂移不成立**
+
+台账称「`@JsonIgnoreProperties(ignoreUnknown=false)` 覆盖了 Jackson 3 的默认忽略 ⇒ 抛异常 ⇒ 记 `json_error` 并提交位点」。
+
+**证伪依据（E-Test）**：
+1. `ignoreUnknown = false` 就是 Jackson 的**默认值** ⇒ 该注解**不含任何"开启严格"的信息**；
+2. 类级 `@JsonIgnoreProperties` **无法覆盖**全局的 `DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES`；
+   真正决定行为的是 `Jackson2ObjectMapperConfiguration.java:91` 的 `.disable(FAIL_ON_UNKNOWN_PROPERTIES)`；
+3. **绿测实证**：`LikeRpcSpringContextWiringTest#unknownFieldsAreIgnoredLikeGoEncodingJson`
+   断言「带 `extra_field` 的消息解析成功」，本轮实跑**通过** ⇒ 实际行为**本就是「忽略」＝与 Go 一致**。
+
+**处置**：删除 3 处误导性注解 + import，并在类 javadoc 写明「要改严格模式请改全局 ObjectMapper 那一处」。
+
+### 2.4 DRIFT-LIKE-008 ✅ 已修（错误断言 **B**）
+
+台账说 Go map 形式**会**刷新 `updated_at`（真 PG 实测）—— **本轮独立复核，成立**：
+
+1. `internal/model/data_model.go:19` `UpdatedAt time.Time \`gorm:"autoUpdateTime;not null;index:idx_user_list,priority:2"\`` ⇒ `AutoUpdateTime > 0`；
+2. `gorm.io/gorm@v1.31.1/callbacks/update.go:201` `case map[string]interface{}` → `:236-243`
+   `if field.AutoUpdateTime > 0 && value[...] == nil` ⇒ 往 SET **append `updated_at = NowFunc()`**。
+
+⚠️ 而且该列正是 `idx_user_list(user_id, updated_at)` 的 priority:2 ⇒ 原 Java 实现不刷新 ⇒ **索引内容两侧不同**。
+
+**修法**：`LikeRecordMapper#updateState` 的 SQL 加 `updated_at = now()`。
+
+### 2.5 DRIFT-LIKE-009 ✅ 已修（4 处 label 全改）
+
+| # | 原状 | 真源（E-GoSrc） | 处置 |
+|---|---|---|---|
+| 1 | `redis_read_error` 第 1 个 label 传**字面量** `"like_count"`/`"dislike_count"` | `likeactionlogic.go:265,280` 传 `in.TargetType` | 改传 `request.getTargetType()` |
+| 2 | 第 2 个 label 恒 `"n/a"` | 传 `actionStr` | 改传真实 `actionStr` |
+| 3 | **字段为空时完全不打点** | `if err == nil && str != ""` 的 **else** ⇒ 字段不存在**也**打点 | 补打点 |
+| 4 | `GetLikeState` **一次都不**打 `redis_error` | `getlikestatelogic.go:53-56` `if err != nil` ⇒ 打点 | 补打点（用可区分「读失败 / 字段不存在」的 `hgetLenientWithError`） |
+| 5（额外） | 序列化失败被并进 `kafka_error` | `likeactionlogic.go:236` **`json_error`** 是**独立** label | `publish` 改返回 `PublishOutcome` 三态 |
+
+⚠️ **注意 #3 与 #4 的形状相反**：`LikeAction` 用 else 分支（两种都打点），`GetLikeState` 用 `if err != nil`（只对错误打点）。
+⚠️ Go 侧 `LikeActionCount` 共 **7** 个 result label（`invalid_param` / `redis_error` / `idempotent` / `snowflake_error` / `json_error` / `kafka_error` / `success` / `redis_read_error`），Java 此前只有 **6** 个（缺 `json_error`）。
+
+### 2.6 DRIFT-LIKE-010 ✅ 已修（2 处，不止台账记的 1 处）
+
+Go `strconv.ParseInt` **不忽略任何空白**。除台账记的 `LikeDomainService#parseLongOrZero`（`:912` 的 `.trim()`），
+**`LikeUpdateKafkaListener#isValid` 的 `Long.parseLong(msg.msgId.trim())` 也是同类** ——
+Go `likemq.go:92` 是 `strconv.ParseInt(msg.MsgID, 10, 64)` ⇒ `" 123 "` 在 Go 侧 `parseErr != nil` ⇒ **整条丢弃**，
+而 Java 会**接受**。⇒ 两处都已去掉 `.trim()`。
+
+### 2.7 DRIFT-LIKE-011 ✅ 已修
+
+Go 是 `clause.OnConflict{DoNothing: true}`（**无仲裁目标**），Java 写的是 `ON CONFLICT (event_key) DO NOTHING`。
+
+⚠️ **该表有两个唯一约束**（`event_id` 主键 + `uk_event_key`，见 `V3__create_like_outbox_event.sql:16,28`）
+⇒ 带上仲裁目标后**撞 `event_id` 主键会抛唯一约束异常**，Go 则静默忽略。⇒ 已去掉目标列。
+（`like_consume_inbox` 只有一个唯一约束 ⇒ 两者等价；`like_record` 本来就是无目标写法。）
+
+### 2.8 DRIFT-LIKE-012 ✅ 已修
+
+Go `servicecontext.go:43-44` 是**两个独立** `newOptionalPusher`（各判 `len(Brokers)==0 || Topic==""`）
+⇒ 两路可分别启停；Java 合并成一个 `taskPushersEnabled`，**丢失粒度**（Go 侧不存在的能力）。
+
+**修法**：拆成 `task-user-pusher-enabled` / `task-article-pusher-enabled`。
+⚠️ **不做旧键回退**：两个字段默认都是 `true`，Spring 绑定**无法区分「未配置」与「显式配成 true」**
+⇒ 任何回退逻辑都会把「显式只开一路」误判成「都没配」。已把 yml 键直接换成两个，旧字段标 `@Deprecated` 且不参与判定。
+⚠️ **这条是被守门测试当场抓出来的实现 bug**（详见 §4）。
+
+### 2.9 DRIFT-LIKE-018 ✅ 已修
+
+Go `internal/mq/etc/mq.yaml` `Kafka.Consumers: 8`（`kq/config.go:18` 默认值也是 8），消费点 `kq/queue.go:249`
+`for i := 0; i < q.c.Consumers; i++` ⇒ **8 个消费协程**；Java 侧 factory 未设 ⇒ 并发度 **1**。
+
+**修法**：`LikeRpcApplication#kafkaListenerContainerFactory` 调 `factory.setConcurrency(likeKafkaTopics.getConsumers())`。
+
+⚠️ **关键坑**：`spring.kafka.listener.concurrency` 在本模块**是死配置** —— 因为该 Bean 自己 `new` 了 factory，
+Boot 的 `ConcurrentKafkaListenerContainerFactoryConfigurer` **不参与**。已在 yaml 与 javadoc 两处标注。
+
+### 2.10 🔴 **本轮新发现的 Java 侧缺陷**（不在原台账内）
+
+`epochSeconds`（Unix **秒**）用于 DB 回源写 ZSet 的 score，而写路径用 `UnixMilli`（毫秒）
+⇒ 同一条记录在 **cache-hit** 与 **cache-miss** 下返回**差 1000 倍**的 `LikeRecordItem.timestamp`。
+
+**根因正是错误断言 A**：那段注释的依据是「GORM 把 timestamptz 扫进 int64 时取 `data.Unix()` ⇒ 秒」，
+**但该前提不成立** ⇒ 描述的其实是一条**不可达路径**：
+
+1. `internal/model/like.go:114-119` `UserLikeListResult.CreateTime` 无 gorm tag
+   ⇒ gorm `toDBName("CreateTime")`（`schema/naming.go`）推出 DBName = **`create_time`**；
+2. 而 SQL 取的是 **`created_at`**（`like.go:130` `Select("id, target_type,target_id, created_at")`）；
+3. 两者不匹配 ⇒ `Scan` 后 **`CreateTime` 恒为 0**
+   ⇒ `getuserlikelistlogic.go:94-96` 的 `if timestamp == 0 { continue }` **每行命中**
+   ⇒ 该分支**从未**执行 ZADD、**从未**产出任何元素 ⇒ **回源路径整体是死代码**。
+
+⚠️ 这**同时证实了 DRIFT-LIKE-001 的签字依据**（Go 侧冷缓存下列表恒空）。
+⚠️ 可对齐的是 Go 的**命中分支**（`getuserlikelistlogic.go:70-77` `realTimestamp := score >> 22`，
+score 来自 `UnixMilli << 22`）⇒ **`timestamp` 单位是毫秒**。⇒ Java 两处回源分支（`GetUserLikeList` / `GetTargetLikerList`）已改为 `epochMillis`。
+
+⚠️ **与 DRIFT-LIKE-001 签字不冲突**：签字的是「Go 空列表是缺陷、Java 返回真实数据」，
+**没有**签字「Java 应当沿用 Go 那条死路径的秒刻度」。
+
+### 2.11 ⚠️ **保留未对齐**（有意，非遗漏）
+
+Go `kq/pusher.go:44-49` `NewPusher` 固定 `Balancer: &kafka.LeastBytes{}` + `Compression: kafka.Snappy`；
+Java 侧用默认（按 key 哈希）分区器、**未配 Snappy**。
+
+⇒ **不改的理由**：二者**不改变消息内容与业务结果**（消费端按 group 均衡），
+只影响「消息落在哪个分区 / 网络占用」；而自定义 `Partitioner` 会引入
+「broker 扩缩容 / rebalance 时与 kafka-go 行为分叉」的新风险，收益不抵风险。
+⇒ 记为 **OBSERVABLE DIFFERENCE**，在 `application.yml` 与 `LikeKafkaPushKey` javadoc 双处留档。
+
+## 3. 错误断言清理（A~I 全部 + 新增 4 处）
+
+| # | 断言 | 复核结论 | 处置 |
+|---|---|---|---|
+| **A** | 「回源写秒 / 写路径写毫秒，是真实可观察行为，原样保留」 | ❌ **前提不成立**，描述的是不可达路径（见 §2.10） | 重写 + 改为毫秒 |
+| **B** | 「map 形式不会带上 `updated_at`」 | ❌ 错，`update.go:236-243` 会追加 | 重写 + 补 `updated_at = now()` |
+| **C** | 「Go `Push` 不带 key」 | ❌ 错，`Push` 内部即 `PushWithKey(UnixNano)` | 重写 + 传 key |
+| **D** | 「Go `Push` 是**同步**阻塞写，所以选 acks=1 + 异步」 | ❌ 错，默认挂 `ChunkExecutor`（`pusher.go:66-89`）⇒ 只入队即返回 | 重写（保留 acks=1，与 kafka.Writer 默认一致） |
+| **E** | 「不做进程内重试……加 `FixedBackOff` 是新增行为」 | ❌ 半错：`DefaultErrorHandler` 单参构造**内建** `FixedBackOff(0,9)`，正在发生 | 重写 + 显式 0 次 |
+| **F** | 「这五个装配点**每一条都有对应的 wiring 测试锁死**」并点名 `LikeGrpcInterceptorWiringTest` | ❌ 该类**不存在**；第 3/5 条**无守门测试** | 重写 + 标注测试缺口 |
+| **G** | outbox relay「`Push` 不带 key」 | ❌ 同 C | 重写 + 传 key |
+| **H** | 「Go 侧 etcd 注册失败会让 `MustNewServer` **panic** ⇒ 进程退出」 | ⚠️ **结论对、机制错**：是 `logx.Must` ⇒ `os.Exit(1)`（`logs.go:241`，`ExitOnFatal` 默认 true），panic 是 `ExitOnFatal=false` 时的次生路径 | 重写 + 补齐调用链行号 |
+| **I** | `V4__…sql` 的「GORM 对无 size 的整数统一取 bigint」 | 首轮已由 DRIFT-LIKE-017 记录；修复轮已加 `V6__align_…sql` | 保留（已对齐） |
+
+**本轮新发现并清理的 4 处**（不在 A~I 内）：
+
+| # | 位置 | 原断言 | 实情 |
+|---|---|---|---|
+| **J** | `LikeRpcApplication#kafkaListenerContainerFactory` | 「本处理器**不 seek、不提交**，失败消息重启后重投」 | 两句都反了（§2.1） |
+| **K** | 同上 | 「**默认** recoverer 会 seek ⇒ 丢消息」 | 反了：默认 9 次重试才是 seek 的那条；本实现显式 0 次 ⇒ **不 seek** |
+| **L** | `application.yml` producer 段 | 「Go 的 `Push` 是同步阻塞写」「失败回调日志」 | 前半错（见 D）；后半**该回调根本不存在**（U6） |
+| **M** | `application.yml` kafka consumer 段 | 「持久层失败则**不提交**（retry）」 | 错：Go `ForceCommit=true` ⇒ **照样提交**（§2.1） |
+
+## 4. ⚠️ 元教训：守门测试当场抓出**我自己**的实现 bug
+
+给 `task-pushers-enabled` 写「旧键回退兼容」时，我先加了回退逻辑再写测试，
+测试立刻红了：`legacyTaskPushersSwitchStillWorks` 期望 `false` 实际 `true`。
+
+⇒ **根因不是笔误，是设计不可行**：两个细分开关默认值都是 `true`，
+而 Spring 的绑定**无法区分「未配置」与「显式配置成 true」** ⇒ 任何回退逻辑都会误判。
+
+⇒ 最终改为**不做回退** + yml 直接换键 + 旧字段 `@Deprecated` 不参与判定。
+⚠️ 若当时没有这条测试，这段代码会以「兼容层」的姿态留下，且**永远不会被发现** ——
+这正是 §3.3.3「绿测试可能是错误答案的守卫」的**反向**版本：
+**没有测试的错误，不是错误答案，而是不存在的断言。**
+
+⇒ 已把该用例改为 `legacyTaskPushersSwitchIsNoLongerConsulted`，把「不做回退」这个决定**钉进测试**，
+避免下一个人出于「善意」再把回退逻辑加回来。
+
+## 5. 本轮遗留（未修 / 无证据）
+
+| ID | 内容 | 为什么留着 |
+|---|---|---|
+| **DRIFT-LIKE-003** | 事实投递链路 6 个骨架文件 | 本轮**有意不碰**（需新建独立进程，scope 过大）；链路末端真 DC 接收服务**不在任何仓**，投递环节只能对 stub 验证 |
+| **L-U9** | 「失败消息之后，后续消息是否真的被继续处理」**无活体证据** | 本轮**没有真 Kafka**。源码链已钉死（`recovered` 返回 `true` ⇒ `doSeeks` 不 seek），但那是**源码级**不是**活体级** |
+| **L-U10** | 分区器 `LeastBytes` + Snappy | OBSERVABLE，见 §2.11 |
+| **L-U11** | `rpcInterceptorConfigurer` / `@EnableScheduling` 无守门测试 | 错误断言 F 已标注为**已知测试缺口**（需真实 gRPC server / 调度器才能验） |
+
+## 6. 本轮新增守门测试
+
+`service/like/like-rpc/src/test/java/com/rag/like/like/rpc/service/LikeGoAlignmentTest.java` —— **9 条**：
+
+`errorHandlerHasZeroInProcessRetries`（反射读**真实生效**的 backOff，锁 0 次）·
+`goSideSaysDropNotRetry`（真源语义文档化断言）· `listenerConcurrencyMatchesGoConsumers` ·
+`likeMsgPublishUsesNonNullUnixNanoKey`（mock `KafkaTemplate` 捕获 key + 量纲校验）·
+`hotEventRelayUsesNonNullKey` · `taskPushersAreIndependentlySwitchable` ·
+`legacyTaskPushersSwitchIsNoLongerConsulted` · `parseLongOrZeroRejectsWhitespace` ·
+`timestampUnitIsMillisecondsNotSeconds`
+
+⚠️ **能力边界（必须随结论一起读）**：本类证明的是**配置形状与调用参数**，
+**不能**证明「真实 broker 上失败消息之后的消费行为」—— 那需要真 Kafka，属 §5 的 L-U9。

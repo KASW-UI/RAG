@@ -102,11 +102,18 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
-      # Go kq.Pusher.Push 是**同步**阻塞写；Java KafkaTemplate.send 是异步。
-      # 阻塞等待 acks 会把 Kafka 延迟传导到 LikeAction 的响应时间里，
-      # 而 Go 侧失败也只打日志不返回错误 —— 因此这里选 acks=1 + 异步 + 失败回调日志，
-      # 对外可观察行为（响应不被 Kafka 拖慢/拖挂）与 Go 一致。详见 LikeKafkaTopics。
+      # ⚠️ 2026-10-23 修正：原注释写「Go 的 Push 是同步阻塞写」「选 acks=1 + 异步 + 失败回调日志」，
+      #    其中**两点都不成立**：
+      #    ① Go 的 kq.NewPusher 默认挂 ChunkExecutor（pusher.go:66-89）⇒ Push 只入队即返回，
+      #       写失败发生在 executor 里、走 logx.Error，**不是同步阻塞、也不会回传调用方**；
+      #    ② 「失败回调日志」此前在本模块**并不存在**（全模块零 whenComplete/exceptionally），
+      #       异步失败连日志都没有。已在 KafkaLikeMsgPublisher / LikeHotEventOutboxRelay 补上 whenComplete。
+      #    acks=1 本身保留：它与 Go kafka.Writer 的默认 RequiredAcks(1) 一致。
       acks: 1
+      # ⚠️ 未对齐项（有意留档）：Go writer 固定 Balancer=&kafka.LeastBytes{} + Compression=Snappy
+      #    （pusher.go:44-49）。Java 侧未配自定义 Partitioner（默认按 key 哈希），
+      #    也未配 Snappy 压缩。二者**不改变消息内容与业务结果**（消费端按 group 均衡），
+      #    仅影响「消息落在哪个分区 / 网络占用」⇒ 记为 OBSERVABLE，不在本轮对齐。
     listener:
       # RECORD = listener 正常返回后提交位点。这是 drop/retry 契约的实现载体。
       ack-mode: record
@@ -155,6 +162,12 @@ like:
 
   # ---------- Kafka 主题（对应 Go 各 PusherConf 的 Topic）----------
   kafka:
+    # ---------- 主题（对应 Go 各 PusherConf 的 Topic）----------
+    # ---------- 消费并发度：Go mq.yaml `Kafka.Consumers: 8` ----------
+    # ⚠️ 这条键在本模块**不会**被 `spring.kafka.listener.concurrency` 读取 ——
+    #    LikeRpcApplication 自己 new 了 factory 并显式 `setConcurrency(此值)`。
+    #    写成 `spring.kafka.listener.concurrency` 会成为无消费点的死配置（§3.3）。
+    consumers: 8
     # Go KafkaConf.Topic: like_promotion_topic
     # ★ 同时也是 Go mq.yaml 的消费 Topic（生产与消费同一个 topic）
     like-topic: like_promotion_topic
@@ -169,10 +182,12 @@ like:
     hot-event-topic: article-hot-events
 
     # ---------- 可选 producer 的启用开关 ----------
-    # Go newOptionalPusher(conf)：Brokers 为空或 Topic 为空 ⇒ 返回 nil ⇒
-    # 整段 syncTaskProgress / notifyArticleLiked 的推送逻辑被跳过。
-    # 这里用 enabled 把这条「运行期判空」显式化成配置，保持「不配置就完全不推」的语义。
-    task-pushers-enabled: true
+    # ⚠️ 2026-10-23 拆分：此前是**一个** task-pushers-enabled 管两路（DRIFT-LIKE-012）。
+    # Go 侧是两路**各自独立**判空：servicecontext.go:43-44 分别 newOptionalPusher(c.TaskUserPusherConf)
+    # / newOptionalPusher(c.TaskArticlePusherConf)，判空条件是 Brokers 或 Topic 任一为空。
+    # ⇒ 配置面随之拆成两个键，与两个 KqConf 一一对应。
+    task-user-pusher-enabled: true
+    task-article-pusher-enabled: true
 
   # ---------- 事实流派发（P3 fact-dispatch）----------
   # Go cmd/fact-dispatch/main.go 要求同时具备：

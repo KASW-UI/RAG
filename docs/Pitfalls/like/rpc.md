@@ -91,3 +91,146 @@ H2 至少还有「类存在但 Bean 不存在」这条线索；本条是**连类
 | **这次的处理** | 凡 Go 侧结论一律引用**消费点行号**（含 go-zero / go-queue / gorm **依赖源码**的消费点，例如 `kq/pusher.go:123-125`、`driver/postgres` 的 `DataTypeOf`、`gorm/callbacks/update.go:201,238`），并在 §9 逐条标注哪些结论**只到静态强度**（U4 / U5 / U11 / U12 / U15）。 |
 | **下次怎么防** | 跨语言组件的验证**必须排期成对**：Go 侧探针 + RAG 侧探针**同时**跑同一组输入，比对**输出字节**（不是「结构看起来一样」）。`payload_hash` / `occurred_at` 这类**字节级契约**尤其不能只靠读代码。 |
 
+---
+
+# 修复轮追加（2026-10-23 · 9 条漂移修复）
+
+> 原文保留；以下为 2026-10-23 修复轮新增的踩坑记录。
+
+---
+
+## P-08：`ForceCommit=true` 让「报错重投」变成「静默丢弃」
+
+### 现象
+
+对照 Go 侧 Kafka 消费循环时，直觉是「返回 error ⇒ 不确认位点 ⇒ 会重投」。
+源码注释（Go `internal/model/like.go:164-179` 的 inbox 幂等第 ② 层）也写着
+「`payload_hash` 不同 ⇒ **报错重投**（不跳过）」。
+**两边都指向"会重投"，于是没人去核对那个开关。**
+
+### 真源（消费点）
+
+```go
+// go-queue@v1.2.2/kq/queue.go:230-243
+if err := q.consumeOne(ctx, string(msg.Key), string(msg.Value)); err != nil {
+    if q.errorHandler != nil { q.errorHandler(ctx, msg, err) }  // 默认只 logc.Errorf（:362-366）
+    if !q.c.ForceCommit { continue }                            // ⚠️ default=true ⇒ 不 continue
+}
+if err := q.consumer.CommitMessages(ctx, msg); err != nil { … } // ⚠️ 照样提交
+```
+
+- `kq/config.go:24` → `ForceCommit bool \`json:",default=true"\``
+- like 侧 `internal/mq/etc/mq.yaml` **没有覆盖**它 ⇒ 生效值 `true`
+
+⇒ **失败消息被提交位点、永久丢弃**，且循环继续下一条。
+⇒ **注释所述的「重投」从未发生** —— 这是**真源自身的缺陷**（意图与实现不符）。
+
+### 为什么这么容易踩
+
+「返回 error ⇒ 不确认」是 **Kafka 客户端的常见心智模型**，但那个模型的前提是
+「消费循环不会继续 commit」。kq 用一个**默认开启**的 `ForceCommit` 把它翻转了，
+而这个默认值既不在 yaml 里、名字也不像「丢弃」——**藏得极深**。
+
+### 怎么不重犯
+
+1. **读到消费点，不读到声明点**：`ForceCommit` 的声明在 `config.go:24`，
+   真正决定控制流的是 `queue.go:235` 那句 `if !q.c.ForceCommit`（AGENTS.md §3.3.1）。
+2. **「重投 / 丢弃」这类结论，一律追问「位点最后有没有被推进」**，
+   而不是看函数返回了什么。返回值与位点是**两件事**。
+3. 怀疑某个默认值时，**先查消费它的 yaml 有没有覆盖**（Go 的默认值大量来自 struct tag，
+   yaml 常常一个字段都不写）。
+
+---
+
+## P-09：注解写得「像开关」，其实是个 no-op
+
+### 现象
+
+台账把 DRIFT-LIKE-007 判为「未知字段从『忽略』变『丢弃』」，依据是源码里的
+`@JsonIgnoreProperties(ignoreUnknown = false)`。
+**看起来就是"这里配了严格模式"，于是没人去问：这个值是不是默认值？**
+
+### 真源
+
+1. `ignoreUnknown = false` 就是 Jackson 的**默认值** —— 注解不含任何"开启严格"的信息；
+2. 类级 `@JsonIgnoreProperties` **无法覆盖**全局的
+   `DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES`；
+3. 真正决定行为的是 `Jackson2ObjectMapperConfiguration.java:91` 的 `.disable(FAIL_ON_UNKNOWN_PROPERTIES)`；
+4. **绿测早就写对了**：`LikeRpcSpringContextWiringTest#unknownFieldsAreIgnoredLikeGoEncodingJson`
+   断言「带 `extra_field` 的消息解析成功」且**一直是绿的**。
+
+⇒ 漂移**不成立**；那 3 处注解是**误导性残留**，比没有更坏（它让人以为这里配过严格模式）。
+
+### 怎么不重犯
+
+- **看到「配置型注解/配置项」先问一句「它的默认值是不是就是当前值」** ——
+  是 ⇒ 它是 no-op，删掉比留着好（留着会持续误导下一个读者）。
+- **台账与绿测冲突时，优先相信能跑出来的那条**。
+  本例中「测试是绿的」是唯一的事实，其余全是推理。
+
+---
+
+## P-10：框架的「默认构造」里藏着一个你没写的数字
+
+### 现象
+
+`new DefaultErrorHandler(recoverer)` 看起来就是「配个日志回调」。
+**没读构造链** ⇒ 一直以为"没有重试逻辑"，而 javadoc 里也这么写。
+
+### 真源（`spring-kafka` 4.0.7 sources jar）
+
+```
+DefaultErrorHandler.java:81-83   public DefaultErrorHandler(ConsumerRecordRecoverer r) { this(r, SeekUtils.DEFAULT_BACK_OFF); }
+SeekUtils.java:57                public static final int DEFAULT_MAX_FAILURES = 10;
+SeekUtils.java:63                public static final FixedBackOff DEFAULT_BACK_OFF = new FixedBackOff(0, DEFAULT_MAX_FAILURES - 1);
+```
+
+⇒ 单参构造**内建 9 次进程内重试**；失败消息会被 seek 回原位并**真的重跑 listener 9 次**。
+
+### 为什么这么容易踩
+
+重试次数不是写在业务代码里的，而是**藏在框架的默认构造链里**。
+从调用侧看，`new DefaultErrorHandler(lambda)` 只有一个参数，**没有任何数字可见**。
+
+### 怎么不重犯
+
+- **凡引入带「错误处理器 / 重试策略」的框架 API，必须读过它的默认构造**，
+  并**显式**把关键数字写出来（哪怕就是 `FixedBackOff(0, 0)`）。
+- 判定「它到底重试几次」不能看 javadoc，要看 `DEFAULT_*` 常量的**定义 + 消费点**（§3.3.1）。
+- ⚠️ 注意 `DefaultErrorHandler` 重试耗尽后 `FailedRecordTracker.recovered` **返回 `true`**
+  ⇒ `SeekUtils.doSeeks` **不 seek** ⇒ **并不会卡死分区**。
+  「重试 = 卡死」是合理直觉，但在这里**是错的** —— 结论必须顺着
+  `recovered → doSeeks → seekOrRecover` 三段读到底，中途停下就会得出相反结论。
+
+---
+
+## P-11：兼容层本身可能就是那个 bug（守门测试当场抓到）
+
+### 现象
+
+把一个开关拆成两个细分开关后，我顺手加了「旧键回退兼容」，
+让存量配置不至于静默失效。**看起来是好意。**
+
+守门测试立刻红了：`expected: <false> but was: <true>`。
+
+### 根因：不是笔误，是设计不可行
+
+两个细分开关的默认值**都是 `true`**，而 Spring 的绑定**无法区分**
+「用户没配」与「用户显式配成了 `true`」⇒
+任何回退逻辑都会把「显式只开一路」误判成「都没配过」⇒ 行为**恰好相反**。
+
+⇒ 最终**不做回退**：yml 键直接换成两个，旧字段标 `@Deprecated` 且**不参与判定**，
+并把「不做回退」这个决定**钉进测试**（`legacyTaskPushersSwitchIsNoLongerConsulted`），
+避免下一个人出于善意再把回退加回来。
+
+### 元教训（比这个 bug 本身重要）
+
+⚠️ **「兼容层」是高危区**：它看起来总是对的，却经常制造**静默**的行为翻转
+—— 本例中它会让「只开一路」变成「两路都开」，而**没有任何日志、没有任何报错**。
+
+⇒ 写兼容层前先问：**「未配置」与「配置成默认值」我能区分吗？**
+不能 ⇒ **不要写兼容层**，宁可改配置键并让失效可见。
+
+⚠️ 另一面：**没有测试的错误不是「错误答案」，而是「根本不存在的断言」** ——
+这是 §3.3.3「绿测试可能是错误答案的守卫」的**反向**版本。
+本例若没有那条测试，这段代码会以「兼容层」的姿态长期留存，且**永远不会被发现**。

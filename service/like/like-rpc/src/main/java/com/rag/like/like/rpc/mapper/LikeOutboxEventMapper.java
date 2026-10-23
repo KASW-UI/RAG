@@ -24,12 +24,19 @@ public interface LikeOutboxEventMapper {
      *
      * <p>只在「首次点赞」路径被调用（{@code oldState == 0 && newState == 1}），
      * 依赖 {@code uk_event_key} 保证同一 (user,type,id) 只产生一条事件。
+     *
+     * <p>⚠️ 2026-10-23 修正：原实现写的是 {@code ON CONFLICT (event_key) DO NOTHING}，
+     * <b>与 Go 不等价</b>。本表有<b>两个</b>唯一约束（{@code event_id} 主键 + {@code uk_event_key}），
+     * 带上仲裁目标后，撞 {@code event_id} 主键时 PG 会<b>抛唯一约束异常</b>；
+     * 而 Go 的 {@code clause.OnConflict{DoNothing:true}} <b>不带目标</b>，任意唯一约束冲突都静默忽略。
+     * ⇒ 去掉目标列，对齐 Go（DRIFT-LIKE-011）。
+     * 对照：{@code LikeRecordMapper#insertSeedIfAbsent} 本来就是无目标的写法。
      */
     @Insert("""
             INSERT INTO like_outbox_event
                 (event_id, event_key, event_type, aggregate_id, payload, status, retry_count, created_at, updated_at)
             VALUES (#{eventId}, #{eventKey}, #{eventType}, #{aggregateId}, #{payload}::json, 0, 0, now(), now())
-            ON CONFLICT (event_key) DO NOTHING
+            ON CONFLICT DO NOTHING
             """)
     int insertIfAbsent(@Param("eventId") String eventId,
                        @Param("eventKey") String eventKey,

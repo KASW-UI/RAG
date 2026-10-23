@@ -194,13 +194,29 @@ public interface LikeRecordMapper {
     /**
      * 对应 Go {@code tx.Model(&current).Updates(map[string]any{"state":…, "last_operation_id":…, "author_id":…})}。
      *
-     * <p>注意<b>不</b>更新 {@code updated_at}：Go 的 {@code Updates} 用 map 形式，
-     * GORM 的 {@code UpdatedAt} 自动更新时间只在 {@code Save}/{@code Updates(struct)} 路径触发，
-     * map 形式不会带上。保持一致。
+     * <p>⚠️ 2026-10-23 修正错误断言 B：原注释写「Go 的 {@code Updates} 用 map 形式不会带上
+     * {@code updated_at}」，<b>是错的</b>。真实链路（已读到消费点）：
+     * <ol>
+     *   <li>Go struct 显式声明自动更新时间 ——
+     *       {@code internal/model/data_model.go:19}
+     *       {@code UpdatedAt time.Time `gorm:"autoUpdateTime;not null;index:idx_user_list,priority:2;…"`}；</li>
+     *   <li>GORM 的 map 分支里<b>同样会追加</b>自动更新时间列 ——
+     *       {@code gorm.io/gorm@v1.31.1/callbacks/update.go:201} {@code case map[string]interface{} …}
+     *       到 {@code :236-243}：
+     *       {@code if field.AutoUpdateTime > 0 && value[field.Name] == nil && value[field.DBName] == nil}
+     *       ⇒ 往 SET 里 append {@code updated_at = NowFunc()}。</li>
+     * </ol>
+     * ⇒ Go 侧<b>每次状态变更都会推进 {@code updated_at}</b>；原 Java 实现不推进，
+     * 会让 {@code idx_user_list(user_id, updated_at)} 的<b>索引内容两侧不同</b>
+     * （该索引正是 {@code data_model.go:19} 里 priority:2 指定的那一列，DRIFT-LIKE-008）。
+     * ⇒ 本 SQL 已改为与 Go 一致地推进 {@code updated_at}。
      */
     @Update("""
             UPDATE like_record
-            SET state = #{state}, last_operation_id = #{lastOperationId}, author_id = #{authorId}
+            SET state = #{state},
+                last_operation_id = #{lastOperationId},
+                author_id = #{authorId},
+                updated_at = now()
             WHERE id = #{id}
             """)
     int updateState(@Param("id") long id,
