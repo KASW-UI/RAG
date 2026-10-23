@@ -98,7 +98,7 @@ public class UserLikeProgressSink {
         this.properties = properties;
         this.taskId = properties.getLike().getTaskId();
         this.target = properties.getLike().getTarget();
-        this.ttl = Duration.ofDays(properties.getLike().getInitTtlDays());
+        this.ttl = properties.getLike().getInitTtl();
     }
 
     // ==================== 消费 ====================

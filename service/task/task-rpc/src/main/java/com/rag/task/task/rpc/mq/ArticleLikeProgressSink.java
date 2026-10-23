@@ -105,8 +105,8 @@ public class ArticleLikeProgressSink {
         this.objectMapper = objectMapper;
         this.taskId = properties.getArticle().getTaskId();
         this.target = properties.getArticle().getTarget();
-        this.doneTtl = Duration.ofDays(properties.getArticle().getDoneTtlDays());
-        this.initTtl = Duration.ofDays(properties.getArticle().getInitTtlDays());
+        this.doneTtl = properties.getArticle().getDoneTtl();
+        this.initTtl = properties.getArticle().getInitTtl();
     }
 
     /** Go {@code articleAgg}：{@code UserID int64; total int64}。 */
