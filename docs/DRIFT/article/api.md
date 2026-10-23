@@ -326,7 +326,7 @@ Result 仅取 `EQUIVALENT / IMPLEMENTATION DIFFERENCE / OBSERVABLE DIFFERENCE / 
 | 入参解释 | int base-10、位宽 32 | `utils.go:120-121` | `GoFormValues.int32` | EQUIVALENT | 静态源码 |
 | 入参解释 | 非 JSON Content-Type ⇒ 丢 body | `withJsonBody` 字面 `Contains` | `GoStyleJsonBodyConverter.goReadsBody` | EQUIVALENT | `requests.go:153-155` |
 | 入参解释 | **重复 query key** | 取**第一个**（`unmarshaler.go:841-843`） | Spring 逗号拼接 → 400 | **SEMANTIC MISMATCH** | **DRIFT-003** |
-| 入参解释 | query 参数总数上限 2048 | `httpx/util.go:15,48-53` | 无上限 | **OBSERVABLE DIFFERENCE** | **DRIFT-005** |
+| 入参解释 | query 参数总数上限 2048 | `httpx/util.go:15,48-53` | 🔴 **原判「无上限」已被实测推翻**（Tomcat 的 8 KB 请求行上限**更早**触发 ⇒ 状态码两侧都是 400）⇒ **已补应用层 Go 语义闸门** | ✅ EQUIVALENT（判据）＋ 🟡 body 形状差异（不修） | **真 Tomcat 实测**（2026-10-24，`DRIFT-ARTICLE-API-005`） |
 | 序列化 | `ext_info` 空 map ⇒ null | `cloneStringMap:106-108` | `:223-226` | EQUIVALENT | 静态源码 |
 | 序列化 | `ext_info` key 排序 | UTF-8 字节序（`encoding/json/encode.go:805-807` `strings.Compare`） | ~~`TreeMap`（UTF-16 码元序）~~ ⇒ **已改为按码点比较** | ✅ EQUIVALENT | **双侧探针实测**（2026-10-24，`DRIFT-ARTICLE-API-007`） |
 | 序列化 | `secondary_tags` 空 ⇒ null | nil slice | `cloneStringList` | EQUIVALENT | 静态源码 |
@@ -739,6 +739,22 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 - **Why It Matters**：不是行为差异，是**证据指针错误**。AGENTS.md §3.3 要求证据行号指向消费点；
   一条指错的行号会让后来者按 §3.1 的纪律去核对时读到 `ListArticlesResp`。
 - **Required Confirmation**：修正 javadoc 行号（本轮**只读不写源码**，未改）。
+
+### UNRESOLVED-010 —— Go `net/url` 的三个 query 解析行为，RAG 未覆盖（2026-10-24 新增）
+- **Question**：`httpx.GetFormValues` 之前还有一层 Go **标准库** `net/url` 的解析，
+  它有三条行为会让请求**直接 400**；本轮补的 `GoStyleFormParamCountFilter`
+  **刻意只复刻了 go-zero 的 2048 判据**，这三条未覆盖：
+  | # | Go 行为 | 出处（Go 1.25 标准库） |
+  |---|---|---|
+  | ① | `defaultMaxParams = 10000` ⇒ 超限 400「number of URL query parameters exceeded limit」 | `net/url/url.go:1001,1019-1022` |
+  | ② | query 里出现 `;` ⇒ 记错并**返 400**「invalid semicolon separator in query」 | `net/url/url.go:1026-1029` |
+  | ③ | query 里出现非法 `%` 转义 ⇒ **返 400** | `net/url/url.go:1034-1045` |
+- **Why Unknown**：本 filter 按 Go 的**分段规则**处理这三种输入（②③ 跳过该段），
+  但**不**复刻 Go 的「返 400」这一层 ⇒ 两侧在②③ 上行为不同。
+- **Impact**: 低。②③ 需要客户端发畸形 query；① 需要 >10000 个分段
+  （默认配置下 Tomcat 的 8 KB 请求行上限会先拒 ⇒ 不可达）。
+- **Required Confirmation**：先量 Tomcat 对 `;` 与非法 `%` 的实际处理
+  （Tomcat 自己会 400 吗？还是当字面量放过？），再决定是补进 filter 还是记为签字偏离。
 
 ---
 
@@ -1232,7 +1248,7 @@ chn = chn.Append(GunzipHandler)          // ⑪
 
 | 条目 | 状态 | 说明 |
 |---|---|---|
-| `DRIFT-005` query 参数总数上限 2048 | 🔴 OPEN（LOW） | Go `httpx/util.go:15,48-53` 累计超 2048 个非空值即 400；RAG 无上限。**本域只有 8 个 query 字段，但「客户端发 2049 个未知参数」是可达的** ⇒ 修法：新 filter 统计参数个数，超限按 Go 的 `too many form values` 走 400 |
+| `DRIFT-005` query 参数总数上限 2048 | 🟡 **部分关闭**（2026-10-24） | 🔴 **原定性（「RAG 无上限」）已被真容器实测推翻**：Tomcat 的 `server.max-http-request-header-size`（默认 8 KB）**更早**触发 ⇒ **状态码两侧都是 400**，且 RAG 阈值**更严**（≈2040 < Go 的 2049）⇒ 不存在 DoS 暴露。已**补应用层 Go 语义闸门**（`GoStyleFormParamCountFilter`），真容器实测 body 与 Go **逐字节一致**（2/2 变异验证）。🟡 **残留**：默认部署下拒绝发生在连接器层 ⇒ body 是 Tomcat 的 HTML 页（Go 是 text/plain）⇒ **LOW，决定不修** |
 | `DRIFT-006` 8–10 MiB body 文案 | 🔴 OPEN（LOW） | 可观察契约相同（400 + text/plain + nosniff），差异仅在 body 文案（Go 是截断后解析失败 ⇒ `unexpected EOF`） |
 | `DRIFT-007` `ext_info` key 排序（非 BMP） | ✅ **已修**（2026-10-24） | 已按**码点序**比较（= Go 的 UTF-8 字节序），见本文件末尾「第三轮」节；`DRIFT-005` / `DRIFT-006` 仍 🔴 OPEN |
 | `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | rpc 侧已核过 `public_only` / `status` 的消费方式（见 [`proto.md`](./proto.md)）；仍缺**跨栈活体对拍** |
@@ -1330,3 +1346,152 @@ $GOROOT/src/encoding/json/encode.go:805-807
 一个测了名字没测桶，一个测了 BMP 没测非 BMP。
 ⇒ **通用判据**：写"两侧应当一致"的用例前，先问一句
 **「什么样的输入会让两侧不一致？」**，并把它写进用例。
+
+---
+
+<!-- @fix 2026-10-24 第四轮 · 由 align/article 工作树产出 · 基线 commit bedd9a5 -->
+
+## 2026-10-24 第四轮：`DRIFT-ARTICLE-API-005`（query 参数上限）—— 🔴 **台账原定性被实测推翻**
+
+### 🔴 先说结论：台账原写的「RAG **无上限**」是**错的**
+
+原台账（§4 对照表 + §7「本轮未关掉的」表）写：
+
+> `DRIFT-005` query 参数总数上限 2048 —— Go `httpx/util.go:15,48-53` 累计超 2048 个非空值即 400；**RAG 无上限**。
+
+**2026-10-24 真 Tomcat 实测推翻了后半句**：
+
+| 场景（真 Tomcat，默认配置） | 实测 |
+|---|---|
+| 2049 个非空 query 值（≈ 8196 字节） | **400**，body = **Tomcat 的 HTML 错误页** |
+| **2048** 个非空 query 值（≈ 8192 字节） | **400**（同样） |
+| 3000 个**空值** query 参数（≈ 6000 字节） | 请求**通过** ⇒ 走到 controller ⇒ 下游 gRPC 不可达 ⇒ 500 |
+
+⇒ **RAG 并非"无上限"**：Tomcat 自己在**连接器层**就拒了（Boot 4 的
+`server.max-http-request-header-size`，默认 **8 KB**）。
+⇒ 而且 **2048 个（Go 允许的上限）在 RAG 默认配置下就已经被拒** ⇒
+**RAG 的阈值比 Go 更严**（≈2040 个值 < Go 的 2049）⇒ **不存在"无上限解析"的 DoS 暴露**。
+
+⇒ 因此原来的定性「RAG 无上限 ⇒ OBSERVABLE DIFFERENCE」**站不住**，
+真实的差异只剩**响应体形状**（见下）。
+
+### ✅ FIX-10 —— 新增 `GoStyleFormParamCountFilter`（Go 的 2048 判据落到应用层）
+
+**Go 出处（逐行，消费点）**
+
+```
+go-zero@v1.10.2/rest/httpx/util.go:11-17
+  const (
+      // most servers and clients have a limit of 8192 bytes (8 KB)
+      // one parameter at least take 4 chars, for example `?a=b&c=d`
+      maxFormParamCount = 2048
+  )
+
+go-zero@v1.10.2/rest/httpx/util.go:44-56  GetFormValues
+  for name, values := range r.Form {
+      for _, v := range values {
+          if len(v) == 0 { continue }                             // ← 空值不计数
+          if n < maxFormParamCount { filtered = append(filtered, v); n++ }
+          else { return nil, fmt.Errorf("too many form values, error: %s", r.Form.Encode()) }
+      }
+  }
+```
+
+调用链：handler 的 `httpx.Parse`（`internal/handler/article/*.go:21`）→ `httpx.ParseForm`
+→ `httpx.GetFormValues` ⇒ 超限 ⇒ `httpx.ErrorCtx` → `httpx/responses.go:142-159`
+（未注册 error handler ⇒ `handler == nil`；该 error 非 gRPC error ⇒ 走 else 分支）
+→ `http.Error(w, err.Error(), 400)`
+⇒ **400** + text/plain + nosniff + body = `"too many form values, error: " + r.Form.Encode()` + `"\n"`。
+
+**实现**：`service/article/article-api/.../config/GoStyleFormParamCountFilter.java`
+（`@Order(HIGHEST_PRECEDENCE + 8)`，紧贴 controller —— Go 侧这个上限在**路由 handler 内**，
+即所有中间件之后 ⇒ Java 侧放在最后一个 filter 位最贴近）。
+
+⚠️ **刻意放在 api 自己的 config 包**，**不**动 `service/common`（被 16 个组件依赖，
+与 `align/common` 工作树并发修改会冲突，AGENTS.md §5.3）。
+
+**逐条复刻的 Go 语义**
+
+| 语义 | Go 出处 | 本实现 |
+|---|---|---|
+| 上限 2048（数**非空值**） | `util.go:15,48-53` | `MAX_FORM_PARAM_COUNT = 2048` + `countNonEmptyValues` |
+| 分段规则（`&` 切分、`;` 跳过、空 key 跳过、首个 `=` 切分、解码失败跳过） | `net/url/url.go:1019-1054` | `parseGoQuery` |
+| 错误 body 的 `r.Form.Encode()` | `net/url/url.go:1055-1073` | `encodeGoValues` |
+| `QueryEscape`（`A-Za-z0-9-_.~` 不转义、空格 ⇒ `+`、其余 ⇒ `%XX` 大写） | `url.go:108-161,282-284` | `queryEscape` |
+| key 排序 = **字节序**（= 码点序） | `url.go:1060` `slices.Sorted` | `compareByCodePoint`（与 `DRIFT-ARTICLE-API-007` 同一个坑） |
+| `http.Error` 的响应形状 | `net/http/server.go` | `writeGoStyleBadRequest`（与 `GoStyleJsonBodyLimitFilter` 同款） |
+
+#### 证据（真 Tomcat + 真 HTTP）
+
+| 用例 | 断言 |
+|---|---|
+| `tooManyFormValuesIsGoShapedBadRequest` | 2049 个非空值 ⇒ **400** + body **逐字节** = `"too many form values, error: " + r.Form.Encode() + "\n"`（`a=1` × 2049）✅ |
+| `encodedFormMatchesGoUrlValuesEncode` | body 里的 `r.Form.Encode()` = `a=%E4%B8%AD&a=~&a=%2A&b=a+b&z=1&…` —— **key 字节序** + Go 的转义 ✅ |
+| `exactlyMaxFormValuesIsAccepted` | 恰好 2048 ⇒ **不**触发（Go 的判据是 `n < 2048`）✅ |
+| `emptyValuesAreNotCounted` | 3000 个**空值** ⇒ **不**触发（Go 的 `len(v)==0 ⇒ continue`）✅ |
+
+⚠️ **Go 探针实测**（Go 1.25.11，`net/url`）用来钉死转义规则：
+`url.QueryEscape("*") == "%2A"`（`*` **不在** Go 的 unreserved 集合里 ⇒ 要转义）、
+`"~"` 不转义、`" "` ⇒ `"+"`、`"中"` ⇒ `"%E4%B8%AD"`；
+`url.Values{a:[中,~,*], b:[a b]}.Encode() == "a=%E4%B8%AD&a=~&a=%2A&b=a+b"`。
+⇒ **本实现与 Go 的 `Values.Encode()` 逐字节一致。**
+
+#### 变异验证（三态判定）
+
+| # | 变异内容 | 结果 |
+|---|---|---|
+| 1 | `MAX_FORM_PARAM_COUNT` 2048 ⇒ 2047 | ✅ **转红**（"2048 个值恰好在上限内"用例） |
+| 2 | 不再跳过空值（把 `if (!v.isEmpty())` 去掉） | ✅ **转红**（"3000 个空值不该被拒"用例） |
+
+⇒ **2/2 转红** ⇒ 守门网**非假绿**。
+
+**测试计数**：`ArticleApiFormParamLimitTest` **4 条全绿**（新建，真 Tomcat + 真 HTTP）；
+`ArticleApiAssemblyWiringTest` **10 条全绿**（原 7 ⇒ +3：链序新增一个 filter + 两条 DRIFT-005 事实）；
+`article-api` **75 tests / 0 failures / 0 errors / 0 skipped**（原 67 ⇒ +8）；
+连同 `article-rpc` 115 + `article-common` 15 ⇒ **article 域合计 205 / 0 / 0 / 0**（`BUILD SUCCESS`）。
+
+### 判定变化（FIX-10）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `DRIFT-ARTICLE-API-005` 的**定性** | 「RAG **无上限**」 ⇒ OBSERVABLE DIFFERENCE | 🔴 **原定性被推翻**：RAG 有上限（Tomcat 的 8 KB，更严）；真实差异只剩**响应体形状** |
+| 应用层的 Go 2048 判据 | 🔴 无 | ✅ **已实现**（`GoStyleFormParamCountFilter`，真容器实测 body 与 Go 逐字节一致） |
+| 默认部署下的 400 **body** | Tomcat 的 HTML 错误页 | Tomcat 的 HTML 错误页（**不变**）⇒ 🟡 **LOW OBSERVABLE DIFFERENCE，决定不修** |
+| `DRIFT-006` 8–10 MiB body 文案 | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
+| `UNRESOLVED-002` / `007` / `008` | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
+| **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
+
+#### ⚠️ 为什么默认部署下的 **body 差异不修**
+
+默认配置下，超长 query 在**连接器层**被拒 ⇒ 产出的是 Tomcat 的 HTML 错误页
+（`<!doctype html>…HTTP Status 400 – Bad Request`），而 Go 是 text/plain 的
+`too many form values, error: …`。
+⇒ 要改它就得替换 Tomcat 的错误页产出（`ErrorReportValve`）⇒
+**风险远大于收益**（且属于容器级改动，不是本组件该做的事）。
+⇒ 登记为 **LOW OBSERVABLE DIFFERENCE**，并用 characterization test 钉住实测现状。
+⚠️ **状态码本身两侧已一致（都 400）** ⇒ 这一条**不是**「无上限」问题。
+
+#### ⚠️ 本条**未**覆盖的相邻 Go 行为（另立，不在本条范围）
+
+| Go 行为 | 出处 | RAG 现状 |
+|---|---|---|
+| `net/url` 自己的 `defaultMaxParams = 10000` ⇒ 超限 400「number of URL query parameters exceeded limit」 | `url.go:1001,1020-1022` | Tomcat 的 `maxParameterCount` 默认也是 10000，但**判据不同**（数"参数"vs 数"`&` 分段"） |
+| query 里出现 `;` ⇒ Go 记错并**返 400**「invalid semicolon separator in query」 | `url.go:1026-1029` | 本 filter 按 Go 的分段规则**跳过**该段，**不返 400** |
+| query 里出现非法 `%` 转义 ⇒ Go **返 400** | `url.go:1034-1045` | 本 filter **跳过**该段，**不返 400** |
+
+⇒ 这三条都是**独立的**相邻差异，未修 ⇒ 已在 §9 的 UNRESOLVED 里登记方向。
+
+#### 📌 一条可复用的元教训
+
+> **台账写「RAG 无上限」之前，应该问一句：「RAG 所在的那一层，会不会已经有上限？」**
+>
+> 本轮的教训链：
+> ① 台账凭**源码**判定"RAG 无上限"（Spring 的 `@RequestParam` 确实不限制总数）；
+> ② 补真容器用例时才发现 —— **Tomcat 在连接器层就先拒了**，而且**比 Go 更严**；
+> ③ 于是这条漂移从「DoS 暴露」降级成「响应体形状差异」。
+>
+> ⇒ 对照 AGENTS.md §3.1「不要拿未验证的结论当基准」：
+> **"RAG 侧没有 X" 这类断言，必须在**运行时**验证，而不是只看 RAG 的源码** ——
+> 因为 RAG 跑在**容器**里，容器自带一堆上限。
+> ⇒ 同 AGENTS.md §3.3.1「配置里没写 ≠ 没开」的镜像版：
+> **「你的代码里没写 ≠ 运行时没有」**。
