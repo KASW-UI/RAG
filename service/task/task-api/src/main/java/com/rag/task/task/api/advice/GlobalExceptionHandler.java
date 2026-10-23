@@ -23,7 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * 本域<b>唯一</b>的错误响应出口 —— 对应 Go {@code rest/httpx/responses.go:143-160}
+ * 本域<b>唯一</b>的错误响应出口 —— 对应 go-zero v1.10.2 {@code rest/httpx/responses.go:142-173}（{@code doHandleError}）
  * 在 {@code errorHandler == nil} 时的分支。
  *
  * <h2>🔴 前提：task-api <b>没有注册 error handler</b>，本类的形状由此唯一确定</h2>
@@ -73,7 +73,7 @@ public class GlobalExceptionHandler {
     // ============== 1. gRPC 状态码 → HTTP 状态码 ==============
 
     /**
-     * Go {@code rest/httpx/responses.go:147-149} 的 gRPC 分支 ——
+     * go-zero v1.10.2 {@code rest/httpx/responses.go:150-153} 的 gRPC 分支 ——
      * {@code http.Error(w, err.Error(), errcode.CodeFromGrpcError(err))}。
      *
      * <p>⚠️ <b>不是</b> user-api 的 {@code mapRPCStatusToCode}（那是 5 分支的<b>业务码</b>映射，
@@ -276,7 +276,7 @@ public class GlobalExceptionHandler {
     // ============== 5. 兜底 ==============
 
     /**
-     * Go {@code responses.go:151-153}：<b>任何</b>非 gRPC 错误都是
+     * go-zero v1.10.2 {@code rest/httpx/responses.go:154-155}：<b>任何</b>非 gRPC 错误都是
      * {@code http.Error(w, err.Error(), http.StatusBadRequest)} ⇒ <b>400</b>。
      *
      * <p>⚠️ <b>这里是 400，不是 500</b>。这是本域最容易照抄错的一处：别的域的兜底写
@@ -289,7 +289,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<byte[]> handleAny(Exception e) {
-        LOG.warn("unhandled exception -> 400 (Go responses.go:152): {}", e.toString());
+        LOG.warn("unhandled exception -> 400 (go-zero v1.10.2 rest/httpx/responses.go:155): {}", e.toString());
         return plainText(HttpStatus.BAD_REQUEST, String.valueOf(e.getMessage()));
     }
 

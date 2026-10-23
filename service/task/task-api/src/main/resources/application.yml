@@ -34,7 +34,7 @@ spring:
 #   · Go service/task/api/etc/task.yaml:3   Port: 18886
 #   · Go manage.sh:842                      -p 18886:18886
 #
-# ⚠️ 本行 2026-10-23 从 18809 改为 18886（DRIFT-TASK-API-002）。原值 18809 来自
+# ⚠️ 本行 2026-10-23 从 18809 改为 18886（DRIFT-TASK-API-001）。原值 18809 来自
 #    Infrastructure.md:89 的「端口号段预占表」，那份表自己写明
 #    「Java 版只是先按这个号段预占，**等具体域实装时再校验**」（Infrastructure.md:91）
 #    —— task 域现已实装，就是那个校验点。
