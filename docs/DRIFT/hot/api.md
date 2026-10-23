@@ -4,7 +4,7 @@
 > 2026-10-23 该模块完成首次实现并做了首轮 Go ↔ RAG 对照，本文件已整体重写。
 > 2026-10-23 第二轮（组件级验证，见下文第 11~13 节）在此基础上**增量追加**，历史条目与编号一条未删。
 
-**核对日期**：2026-10-24（第五轮，U1/D1 端到端双侧活体对拍）
+**核对日期**：2026-10-24（第六轮，5 条签字落地：017 / 019 / 020 / 024 + D6）
 **真源**：`Sea-RideTheWind_golang/service/hot/api` @ go-zero **v1.10.2**（`go.mod:17`，已核对 module cache 里同时存在 v1.10.0/v1.10.3，**本文件所有行号一律以 v1.10.2 为准**）
 **本轮证据强度**（按 AGENTS.md §3.3 口径）：
 
@@ -114,7 +114,7 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | D3 | 客户端**断连**取消不再传播 | ⚠️ 已留痕（2026-10-23） | Go 把请求 ctx 传进 100 次补全，Servlet 断连不会自动取消在飞的 gRPC。已用「请求线程取一次预算 + 显式下传」保住**超时**语义，**断连**语义不等价 |
 | D4 | Go panic 时指标误记为 `success` | ⚠️ 有意差异（2026-10-23） | Go 的 `defer` 读命名返回值 `err`，panic 展开时仍为 nil；Java 按客户端实际看到的结果记 `fail`。该路径无代码可达 |
 | D5 | 指标**暴露**是单向增强 | ⚠️ 有意偏离（2026-10-23） | Go 的 5 个指标注册了但**无端点暴露**（yaml 的 Prometheus 块无 Host；`DevServer` 块在 go-zero v1.10.2 无对应字段）。分桶边界已对齐回 `prometheus.DefBuckets` |
-| D6 | **端口** | ⏳ 待拍板（2026-10-23） | Go `hotcenter.yaml` = 8893；`Infrastructure.md §3` 给 hot 预占 18897。当前按 18897 落，`HOT_API_PORT` 可覆盖 |
+| D6 | **端口** | ✅ **已签字**（2026-10-24 第六轮，用户拍板「保持」） | Go `hotcenter.yaml` = 8893；`Infrastructure.md §3` 给 hot 预占 18897 ⇒ **保持 18897**（`HOT_API_PORT` 可覆盖）⇒ `SD-HOT-API-009`。⚠️ HTTP 端口**不是 wire 契约**（各自独立）⇒ 无行为差异 |
 | D7 | GET + JSON body 覆盖 query | ✅ **2026-10-23 复核：原结论修正 —— 这不是漂移** | **原文保留**：「Go 的 `httpx.Parse` 还会跑 `ParseJsonBody`。极冷边界，未承诺一致」。<br>**修正依据**：`core/mapping/utils.go:589-597` `usingDifferentKeys(key, field)` —— 字段有 `form` tag 但**没有 `json` tag** ⇒ JSON unmarshaler（`jsonTagKey`）**整字段跳过**（`unmarshaler.go:571-573` 直接 `return nil`）。<br>**Go 侧活体探针实测**：`?page=5` + body `{"page":9,"page_size":3}` → **`page=5 pageSize=20`**；无 query + body → **`1/20`**；POST + body → **`1/20`**。JSON body **完全被忽略**。<br>⇒ RAG「不读 body」与 Go 行为**一致**，原记的「未实现」是**假阳性**。真漂移另有其人，见 **DRIFT-HOTAPI-013**（畸形 JSON body）。 |
 | D8 | client 熔断实际生效 | ⚠️ 静态确认（2026-10-23） | 依赖「扫到 `com.rag.common`」+ `@GrpcGlobalClientInterceptor`，按 §3.3 **不得**据注解存在即断言生效 |
 | D9 | 3s 超时 / 保护层四闸实际触发 | ⚠️ 静态确认（2026-10-23） | 同上，需活体观测（503 + `Request Timeout` / 超限裸状态码）。⚠️ 第二轮补了一条**静态可确证的反例**：超时/499 响应头少 `nosniff`（DRIFT-HOTAPI-014） |
@@ -130,10 +130,10 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | **D14** | 超时 / 499 响应缺 `X-Content-Type-Options: nosniff` | OBSERVABLE DIFFERENCE | ✅ **活体取证完成**（2026-10-24 第五轮）：真栈下 Go 的 503 带 `nosniff`、RAG **不带** ⇒ **确认是漂移**（不是静态推断）。代码在 `service/common` ⇒ **已移交 common 域** |
 | **D15** | 运行时 JSON **字段顺序**与 Go 声明序不同（裸 mapper 测不出来） | OBSERVABLE DIFFERENCE | 🟡 已知取舍，需登记 |
 | **D16** | **业务错误日志的级别 / 字段集 / `error_reason` 形态**与 Go 不同（nil 响应分支最严重：Go 是 **error 级 + 9 字段**，RAG 是 **info 级 + 0 字段**） | OBSERVABLE DIFFERENCE | ✅ **已修**（2026-10-24 第四轮 ⇒ `DRIFT-HOTAPI-016`；3 条变异全红） |
-| **D17** | 下游 gRPC 调用失败时，日志 `error_reason` 是**各自 gRPC 库**的形态（grpc-go `"rpc error: code = Unavailable desc = …"` vs grpc-java `"UNAVAILABLE: …"`，**code 名大小写都不同**） | OBSERVABLE DIFFERENCE | 🆕 **待签字**（**库层**差异 ⇒ 建议「不复刻」） |
+| **D17** | 下游 gRPC 调用失败时，日志 `error_reason` 是**各自 gRPC 库**的形态（grpc-go `"rpc error: code = Unavailable desc = …"` vs grpc-java `"UNAVAILABLE: …"`，**code 名大小写都不同**） | OBSERVABLE DIFFERENCE | ✅ **已签字**（2026-10-24 第六轮，用户拍板「不复刻」⇒ `SD-HOT-API-005`） |
 | **D18** | Prometheus `_bucket{le=}` 边界序列：Go **12 个**（`DefBuckets` 11 + `+Inf`）vs RAG **80 个**（`publishPercentileHistogram()` 塞进了 69 个 exponential 边界） | OBSERVABLE DIFFERENCE | ✅ **已修**（2026-10-24 第四轮 ⇒ `DRIFT-HOTAPI-018`；去掉 `publishPercentileHistogram()`；3 条变异全红） |
-| **D19** | Prometheus 全局标签 `application="hot-api"`（Go 的默认 registry **无**此标签） | OBSERVABLE DIFFERENCE | 🆕 **待决策**（**全仓约定**，跨域 ⇒ hot 域无权单改 ⇒ `DRIFT-HOTAPI-019`） |
-| **D20** | hot-api **注册到 Nacos**（Go 侧 hot-api **完全不注册**）⇒ 且实测「Nacos 不可达 ⇒ 整个进程起不来」 | OBSERVABLE DIFFERENCE | 🆕 **待决策**（**部署面** ⇒ `DRIFT-HOTAPI-020`） |
+| **D19** | Prometheus 全局标签 `application="hot-api"`（Go 的默认 registry **无**此标签） | OBSERVABLE DIFFERENCE | ✅ **已签字**（2026-10-24 第六轮，用户拍板「保持」⇒ `SD-HOT-API-007`） |
+| **D20** | hot-api **注册到 Nacos**（Go 侧 hot-api **完全不注册**）⇒ 且实测「Nacos 不可达 ⇒ 整个进程起不来」 | OBSERVABLE DIFFERENCE | ✅ **已签字**（2026-10-24 第六轮，用户拍板「保持」⇒ `SD-HOT-API-008`；⚠️ 残留风险「Nacos 抖动 ⇒ hot-api 起不来」签字即接受） |
 
 ### 🆕 第五轮新增（2026-10-24 U1/D1 端到端对拍，D21 起接续编号）
 
@@ -142,7 +142,7 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | **D21** | **Tomcat 请求目标字符校验**拒绝 query 里的 `[` `]` ⇒ `?page[]=5` **Go 200 / RAG 400 + Tomcat HTML 错误页** | **SEMANTIC MISMATCH** | 🔴 **需修（跨域）** ⇒ `DRIFT-HOTAPI-021`。⚠️ **第二轮 CASE-04b/04c 的 ✅ 结论被推翻**（MockMvc 绕过 Tomcat 的请求行校验） |
 | **D22** | **form 参数个数上限**：Go **2048**（应用层）vs RAG **1000**（Tomcat `maxParameterCount`）⇒ 1001~2048 区间 Go 成功 / RAG 5001 | OBSERVABLE DIFFERENCE | 🔴 **需修（跨域）** ⇒ `DRIFT-HOTAPI-022`。⇒ **RAG 侧自己实现的 2048 上限在 GET query 上不可达**（Tomcat 先拒） |
 | **D23** | **请求行长上限**：Go `net/http` **1 MiB** vs RAG Tomcat **8 KiB** ⇒ 8 KiB~1 MiB 的 query：Go 处理 / RAG **400 + Tomcat HTML 错误页**（不是业务信封） | OBSERVABLE DIFFERENCE | 🔴 **需修（跨域）** ⇒ `DRIFT-HOTAPI-023` |
-| **D24** | `Content-Type` 媒体类型**参数**：Go `application/json; charset=utf-8`（**分号后有空格**）vs RAG `application/json`（无 charset） | OBSERVABLE DIFFERENCE | 🆕 **待签字** ⇒ `DRIFT-HOTAPI-024`（⚠️ Spring 的 `MediaType.toString()` 产出 `;` 后**无空格** ⇒ 即使显式补 charset 也**不可逐字节复刻** ⇒ 建议「不复刻」） |
+| **D24** | `Content-Type` 媒体类型**参数**：Go `application/json; charset=utf-8`（**分号后有空格**）vs RAG `application/json`（无 charset） | OBSERVABLE DIFFERENCE | ✅ **已签字**（2026-10-24 第六轮，用户拍板「不复刻」⇒ `SD-HOT-API-006`；⚠️ Spring 的 `MediaType.toString()` 产出 `;` 后**无空格** ⇒ **不可逐字节复刻**） |
 
 ---
 
@@ -1023,7 +1023,7 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 
 ---
 
-## DRIFT-HOTAPI-017 🆕 待签字（不复刻）· OBSERVABLE DIFFERENCE · LOW（**库层**）
+## DRIFT-HOTAPI-017 ✅ 已签字（不复刻）· OBSERVABLE DIFFERENCE · LOW（**库层**）
 
 - **Component**：hot-api 日志的 `error_reason`，在**下游 gRPC 调用失败**时的形态
 - **Go 行为**：Go 侧 `:67` 记的是 `rpcErr`（**gRPC 库产生的 error 对象**）⇒
@@ -1038,7 +1038,7 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
   | **RAG（grpc-java）** | `"UNAVAILABLE: boom"` | `UNAVAILABLE`（**全大写**） |
 
   ⇒ **连 code 名的大小写都不同** ⇒ 逐字节对齐需要一张 **code 名映射表**。
-- **为什么不修**（建议按有意偏离签字）：
+- **为什么不修**（✅ 已按有意偏离签字，2026-10-24 第六轮）：
   1. 形态由**两个 gRPC 库各自决定**，不是 hot 域的代码 ⇒ 要复刻就得在 hot-api **手拼** `"rpc error: code = "` 前缀
      并维护一张 code 名大小写映射表 ⇒ **在错误的层**（hot 域凭什么知道 gRPC 错误串的格式？）；
   2. 与 `DRIFT-HOTRPC-004`（Redis 重试）**同一个判断**：把库行为搬进业务层，比差异本身更坏；
@@ -1047,7 +1047,7 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 - **⚠️ 与 `DRIFT-HOTAPI-016` 的分界**：`016` 修的是**hot 域自己写的**格式（`errmsg.go:15-17`）⇒ 该修；
   `017` 是**库写的**格式 ⇒ 不该由 hot 域修。
 - **Evidence**：【双侧实测：Go 探针 `/tmp/grpc-err-probe/` + grpc-java 直跑】
-- **状态**：🆕 **待用户拍板**（建议签字为「不复刻」⇒ 登记 `SD-HOT-API-005`）。
+- **状态**：✅ **已签字**（2026-10-24 第六轮，用户拍板「不复刻」）⇒ `SD-HOT-API-005`。
 
 ---
 
@@ -1094,7 +1094,7 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 
 ---
 
-## DRIFT-HOTAPI-019 🆕 待决策（全仓级）· OBSERVABLE DIFFERENCE · LOW
+## DRIFT-HOTAPI-019 ✅ 已签字（保持）· OBSERVABLE DIFFERENCE · LOW
 
 - **Component**：Prometheus 全局标签 `application="hot-api"`
 - **Go 行为**：`prometheus.MustRegister(...)` 注册到**默认 registry** ⇒ **无任何全局标签**。
@@ -1104,13 +1104,13 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
   favorite-rpc / task-rpc …** 都配了同一项 ⇒ 是**跨域约定** ⇒ 按 §5.3 hot 域**无权单独改**。
 - **影响**：低 —— 不改任何业务判定；但按「Go 无此标签」的字面口径，两侧的指标**标签集不同**
   ⇒ 跨实现直接写 PromQL 会对不上（需要先 `sum by(...)` 去掉 `application`）。
-- **处置**：🆕 **待用户拍板**。两个选项：
-  1. **保持**（全仓一致）⇒ 登记为有意偏离（与 `SD-HOT-API-004` 的「暴露面单向增强」同族）；
-  2. **全仓去掉**（跨域动作，需另开一轮）⇒ 与 Go 逐字一致。
+- **处置**：✅ **已签字（2026-10-24 第六轮，用户拍板「保持」）** ⇒ `SD-HOT-API-007`。
+  理由：全仓统一都配了这一项 ⇒ hot-api 单独去掉会成为**全仓唯一的例外**；
+  影响只到标签集，**不改任何指标数值与业务判定**；与 `SD-HOT-API-004` 同族。
 
 ---
 
-## DRIFT-HOTAPI-020 🆕 待决策 · OBSERVABLE DIFFERENCE · MEDIUM（**部署面**）
+## DRIFT-HOTAPI-020 ✅ 已签字（保持）· OBSERVABLE DIFFERENCE · MEDIUM（**部署面**）
 
 - **Component**：hot-api 的**服务注册**（Nacos）
 - **Go 行为**：**完全不注册** —— `service/hot/api/` 全目录 `grep -rn "nacos\|Nacos"` **零命中**；
@@ -1130,9 +1130,12 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
   **方向相反**：hot-rpc 侧已按「保持存活」签字，hot-api 侧却是「注册失败 ⇒ 启动失败」。
 - **影响**：中等 —— 服务发现形态不同（Go 侧 hot-api 不在注册中心里），
   且 **Nacos 抖动 ⇒ hot-api 直接起不来**（Go 侧不受影响）。
-- **处置**：🆕 **待用户拍板**。两个选项：
-  1. **对齐 Go**：`spring.cloud.nacos.discovery.enabled=false`（或去掉 starter）
-     ⇒ 不注册、注册失败也不影响启动 ⇒ 与 Go 逐字一致；
+- **处置**：✅ **已签字（2026-10-24 第六轮，用户拍板「保持」）** ⇒ `SD-HOT-API-008`。
+  理由：其余 9 个 api + 全部 rpc 模块都注册 ⇒ 对齐 Go 会让 hot-api 成为**唯一不入注册中心**的服务。
+  ⚠️ 签字即接受残留风险：「Nacos 不可达 ⇒ hot-api 起不来」；
+  ⚠️ 与 hot-rpc 侧 `DRIFT-HOTRPC-010`（「注册失败 ⇒ 存活 + NOT_SERVING」）**方向仍相反**，本轮不动
+  （改它要 `service/common` 的 `HealthIndicator` 能力 ⇒ 跨域），但**已留痕**。
+  原备选（未采纳）：`spring.cloud.nacos.discovery.enabled=false`（或去掉 starter）；
   2. **保持 + 签字**：与 hot-rpc 同口径「注册失败 ⇒ 存活 + 健康检查 NOT_SERVING」
      ⇒ 需**同样补**健康检查（hot-api 侧目前**没有**）。
 - ⚠️ 本轮**只登记、不擅改** —— 改 pom / 改部署形态都超出「域内漂移对齐」的范围。
@@ -1146,14 +1149,14 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 | **端到端双侧活体对拍**（D1/U1） | ✅ **本轮已闭合** | 两套栈**同时拉起**（Go hot-api + RAG hot-api + 下游同构双桩），29 条用例逐字节比**响应体 + 关键响应头** + 期望值 + **下游调用序列** ⇒ 默认配置 **24/29 通过**，并**新查出 4 条漂移**（D21~D24）；带修正配方时 **28/29**（剩下的 1 条 = D14，已移交 common 域） |
 | **超时 / 保护层四闸的活体观测**（D9/U2/U5） | 🟡 **部分闭合（第五轮）** | **超时分支已活体触发**：`CASE-21` 让请求真的拖过 3s ⇒ 两侧**都**产出 `503 + "Request Timeout\n"`（body 逐字节相同），**只差 `nosniff`**（= D14，跨域移交 common 域）。⚠️ **保护层四闸**（MaxConns / MaxBytes / CpuShedding / Breaker）**仍未构造超限请求** ⇒ 仍是静态确认 |
 | **变异验证**（D2/U9） | 🟡 部分 | 已对**新增的 6 条修复**做了定向变异（hash 5/5、字段序 1/1、日志面 3/3、bucket 边界 3/3）；**全组件系统变异仍未做** |
-| **端口归属**（D6） | ⏳ 待拍板 | Go `hotcenter.yaml` = 8893；`Infrastructure.md §3` 给 hot 预占 18897。当前按 18897 落 |
-| **下游 gRPC 错误串形态**（DRIFT-HOTAPI-017） | 🆕 **待签字** | 库层差异（grpc-go `"rpc error: code = Unavailable desc = …"` vs grpc-java `"UNAVAILABLE: …"`）⇒ 建议签字「不复刻」 |
+| **端口归属**（D6） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「保持」⇒ `SD-HOT-API-009`：保持 18897（`HOT_API_PORT` 可覆盖）。⚠️ HTTP 端口**不是 wire 契约** |
+| **下游 gRPC 错误串形态**（DRIFT-HOTAPI-017） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「不复刻」⇒ `SD-HOT-API-005`。库层差异（grpc-go `"rpc error: code = Unavailable desc = …"` vs grpc-java `"UNAVAILABLE: …"`）|
 | **Prometheus 分桶边界**（DRIFT-HOTAPI-018） | ✅ **本轮已闭合** | 真 Actuator 实测：`publishPercentileHistogram()` 会塞进 69 个 exponential 边界 ⇒ 实测 80 个 vs Go 的 12 个 ⇒ **已修**，3 条变异全红 |
 | **真 Tomcat 响应头 / percent-encoding**（U6/U8/D14） | ✅ **本轮已闭合** | 真 Tomcat（RANDOM_PORT）下：404 = `404 page not found\n` + `text/plain` + `nosniff`；405 = 裸状态码 + `Allow`、无 body；`%2B5` ⇒ 解码成 `+5` ⇒ `page=5`（两侧等价）。⚠️ D14 本身仍**跨域移交** common 域（那是超时/499 路径，不是 404/405） |
 | **Prometheus 导出形态**（U11） | ✅ **本轮已闭合** | 真 `/actuator/prometheus`：Counter 名 `hot_api_request_total`（**两侧都是单 `_total`**，原注释的「双 `_total`」说法已被实测推翻并订正） |
 | **client breaker 装配层**（U4/D8） | 🟡 **部分闭合** | hot-api 此前**没有** wiring 测试（而 `follow-api` / `message-api` 各有一份）⇒ 本轮新增 `GoStyleGrpcClientBreakerWiringTest`（3 例）+ 变异 M-W1 变红。⚠️ **「熔断真的打开」的行为级证据仍未做**（需内嵌恒返 INTERNAL 的 gRPC server，参照 message-api 的 E2E 范式） |
-| **全局 `application` 标签**（DRIFT-HOTAPI-019） | 🆕 **待决策** | Go 的默认 registry 无此标签；RAG 有 ⇒ **全仓约定**（跨域）⇒ hot 域无权单改 |
-| **Nacos 服务注册**（DRIFT-HOTAPI-020） | 🆕 **待决策** | Go 侧 hot-api **完全不注册**；RAG 注册 ⇒ 且实测「Nacos 不可达 ⇒ 启动失败」 |
+| **全局 `application` 标签**（DRIFT-HOTAPI-019） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「保持」⇒ `SD-HOT-API-007`：全仓统一配了同一项 ⇒ hot-api 单独去掉会成为**唯一例外** |
+| **Nacos 服务注册**（DRIFT-HOTAPI-020） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「保持」⇒ `SD-HOT-API-008`。⚠️ 签字即接受残留风险：「Nacos 不可达 ⇒ hot-api 起不来」（实测 `ErrCode:-401`）；缓解手段 = `register-enabled=false` |
 | **日志面已对齐的部分** | ✅ **本轮闭合** | `DRIFT-HOTAPI-016` 已修（`CodeError.Error()` 整串 + 日志级别 + 字段集），3 条变异全红 |
 
 ---
@@ -1286,7 +1289,7 @@ RAG 直接 **400 + HTML 错误页** ⇒ 响应**形状**都不同（不是业务
 **修法（已实测）**：`server.max-http-request-header-size=1MB`
 ⇒ 实测到 200000 字节都不翻转，与 Go 一致。
 
-### DRIFT-HOTAPI-024 —— `Content-Type` 的 charset 参数 🆕 待签字（不复刻）
+### DRIFT-HOTAPI-024 —— `Content-Type` 的 charset 参数 ✅ 已签字（不复刻）
 
 | | 响应头 |
 |---|---|
