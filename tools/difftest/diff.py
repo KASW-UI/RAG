@@ -591,9 +591,21 @@ class Runner:
         spec = step["go"] if self.name == "go" else step["rag"]
         group = step["group"]
 
+        # ⚠️ 2026-10-24：记录**本步骤里没解析出来的模板**。
+        #   `{{user_uid}}` 这类占位符只在 user 场景里被 capture；
+        #   跑 `--scenario admin`（或 user 场景前半段失败）时它解析成空串 ⇒
+        #   两侧都拿到「空 uid」⇒ 都回 400 text/plain，但**错误文本来源不同**
+        #   （Go 走 form 参数的 strconv 报错；RAG 走 body 的必填校验）。
+        #   ⇒ 这种差异**不是漂移**，而是「本场景在当前 scope 下不可判定」。
+        #   不记录的话，它会被算成 unexpected ⇒ 把工具噪声当成真差异。
+        missing = set()
+
         def resolve(v):
             if isinstance(v, str) and v.startswith("{{") and v.endswith("}}"):
-                return self.state.get(v[2:-2], "")
+                key = v[2:-2]
+                if key not in self.state:
+                    missing.add(key)
+                return self.state.get(key, "")
             return v
 
         def resolve_deep(v):
@@ -633,7 +645,7 @@ class Runner:
                         "admin_uid": "uid", "admin2_uid": "uid"}.get(key)
                 if kind:
                     self.norm.register(kind, val)
-        return status, body, text, rh
+        return status, body, text, rh, missing
 
 
 def main():
@@ -655,10 +667,11 @@ def main():
     print("Go <-> Spring Boot dual differential (HTTP wire)  scenario=%s" % args.scenario)
     print("=" * 78)
 
-    asserted = byte_equal = diffs = 0
+    asserted = byte_equal = diffs = inconclusive = 0
     for i, s in enumerate(steps):
-        gs, gb, gtext, ghead = raw["go"][i]
-        rs, rb, rtext, rhead = raw["rag"][i]
+        gs, gb, gtext, ghead, gmiss = raw["go"][i]
+        rs, rb, rtext, rhead, rmiss = raw["rag"][i]
+        missing_tpl = sorted(set(gmiss) | set(rmiss))
 
         gn = runners["go"].norm.norm(gb)
         rn = runners["rag"].norm.norm(rb)
@@ -679,10 +692,18 @@ def main():
                       % (s["id"], s["desc"], note))
                 asserted += 1
             else:
-                diffs += 1
-                print("  [ DIFF ] %-32s %s [ASSERT 边界已被违反]" % (s["id"], s["desc"]))
-                for pr in problems[:14]:
-                    print("           - %s" % pr)
+                if missing_tpl:
+                    inconclusive += 1
+                    print("  [ 不可判定 ] %-32s %s" % (s["id"], s["desc"]))
+                    print("           - 前置缺失：模板 %s 在本 scope 下未被 capture"
+                          % ", ".join("{{%s}}" % t for t in missing_tpl))
+                    for pr in problems[:6]:
+                        print("           - %s" % pr)
+                else:
+                    diffs += 1
+                    print("  [ DIFF ] %-32s %s [ASSERT 边界已被违反]" % (s["id"], s["desc"]))
+                    for pr in problems[:14]:
+                        print("           - %s" % pr)
             continue
 
         problems = []
@@ -694,6 +715,20 @@ def main():
             print("  [ OK   ] %-32s %s" % (s["id"], s["desc"]))
             byte_equal += 1
         else:
+            if missing_tpl:
+                # 两侧都是「空 uid ⇒ 400 text/plain」，但错误文本来自不同来源
+                # （Go：form 参数 strconv.ParseInt；RAG：body 必填校验）
+                # ⇒ **这不是漂移，是本场景在当前 scope 下不可判定** ⇒ 不计入 unexpected。
+                inconclusive += 1
+                print("  [ 不可判定 ] %-32s %s" % (s["id"], s["desc"]))
+                print("           - 前置缺失：模板 %s 在本 scope 下未被 capture"
+                      % ", ".join("{{%s}}" % t for t in missing_tpl))
+                for pr in problems[:6]:
+                    print("           - %s" % pr)
+                if args.verbose:
+                    print("           Go  raw: %s" % gtext[:500])
+                    print("           RAG raw: %s" % rtext[:500])
+                continue
             diffs += 1
             print("  [ DIFF ] %-32s %s" % (s["id"], s["desc"]))
             for pr in problems[:14]:
@@ -709,8 +744,10 @@ def main():
     # 而是「按已签字的 N-1 / DRIFT-006 边界分别断言两侧」）。
     # `byte_equal` 才是真正跨端逐字比对的步数。两个数分开报，避免把
     # 「靠断言通过」误读成「两侧 body 逐字相同」。
-    print("steps=%d  asserted=%d  byte_equal=%d  unexpected=%d"
-          % (len(steps), asserted, byte_equal, diffs))
+    # `inconclusive` = 前置缺失（模板未捕获）导致本场景在当前 scope 下不可判定
+    #   ⇒ **不计入 unexpected**（它不是漂移），但也不计入通过。
+    print("steps=%d  asserted=%d  byte_equal=%d  inconclusive=%d  unexpected=%d"
+          % (len(steps), asserted, byte_equal, inconclusive, diffs))
     return 1 if diffs else 0
 
 

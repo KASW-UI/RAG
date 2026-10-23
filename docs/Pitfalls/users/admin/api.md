@@ -215,3 +215,207 @@
      而不是「层清单」。
   3. 顺序差异优先问一句「**它影响业务判定吗**」：不影响（只影响遥测 / 超时边界）就降级为留档，
      不要伪装成待办 —— 否则台账会被「看起来像缺陷的等价差异」淹没。
+---
+
+## P-ADMINAPI-009 · 🔴 **最小上下文 ≠ 生产装配**：全局 client 拦截器会把 gRPC channel「包掉」
+
+> 本轮（2026-10-24）ADMINAPI-009 的 **v1 修法被真栈推翻**，代价是「admin-api 在任何环境下都起不来」。
+> 这是本仓至今最贵的一次假绿，**根因不是写错了，是「测的装配 ≠ 生产的装配」**。
+
+- **现象**：为对齐 Go 的 `zrpc.MustNewClient`（下游不可达 ⇒ panic ⇒ 进程起不来），
+  v1 在 `AdminRpcClient.afterPropertiesSet()` 里读 `stub.getChannel()`，
+  判 `instanceof ManagedChannel` 再 `getState(true)` 等 READY，3s 超时即抛。
+  **单测 2/0/0/0 全绿**；**真栈里 admin-api 100% 起不来**：
+  ```
+  BeanCreationException: admin-rpc 的 gRPC channel 不是 ManagedChannel
+    （实际类型 io.grpc.ClientInterceptors$InterceptorChannel）
+  ```
+
+- **根因（三层，逐层都得查到消费点）**：
+  1. devh 的 `AbstractChannelFactory.createChannel` 最后一行是
+     `ClientInterceptors.interceptForward(channel, interceptors)` ⇒ stub 拿到的是**包装后**的 channel；
+  2. 包出来的是 `io.grpc.ClientInterceptors$InterceptorChannel extends io.grpc.Channel`，
+     而 **grpc-api 1.63.0 的 `io.grpc.Channel` 只有 `newCall` 与 `authority` ——
+     根本没有 `getState`**（`getState` 只在 `io.grpc.ManagedChannel` 上）⇒ 包装后**拿不到**连通性状态；
+  3. 生产里**必然**有全局拦截器：`com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor`
+     是 `@Component + @GrpcGlobalClientInterceptor`，admin-api 依赖 `service/common`
+     ⇒ channel **一定**被包装 ⇒ `instanceof ManagedChannel` **永远为 false**。
+
+- **为什么测试抓不到（关键）**：v1 的守门用 `ApplicationContextRunner` +
+  **只引 `GrpcClientAutoConfiguration` 的最小上下文**，**没有装配那个全局拦截器**
+  ⇒ 测出来的 channel 是**裸** `ManagedChannel` ⇒ `instanceof` 成立 ⇒ **绿灯是假的**。
+  ⇒ **「最小上下文」验不了「依赖 channel 具体类型」的断言** —— 它验的是另一个装配。
+
+- **下次怎么防**：
+  1. 凡断言依赖**框架内部对象的具体类型**，先问一句：**生产上有没有全局拦截器/包装器？**
+     有 ⇒ **别摸那个对象**，去用**框架自己持有的原始对象**。
+     devh 的正解是 `grpc.client.<name>.immediate-connect-timeout`
+     （`AbstractChannelFactory.newManagedChannel → connectOnStartup`，
+     它作用在原始 `ManagedChannel` 上 ⇒ **天然免疫包装**）。
+  2. **守门测试必须复刻生产装配**：至少把**全局 client 拦截器**装上
+     （本轮 `AdminApiStartupFailFastTest` 加了 `WithGlobalInterceptorConfig`）。
+  3. **fail-fast 类检查必须配一条正向用例**（「可达 ⇒ 能启动」）。
+     v1 只有「不可达 ⇒ 失败」⇒ **一个「永远失败」的实现也能全绿**。
+     这条正向用例正是本轮能立刻发现 v1 是错的唯一原因。
+  4. **启动期语义一律用「真栈起一次」收口**，不要用「单测里上下文起得来」替代。
+
+---
+
+## P-ADMINAPI-010 · 「503 + 空 body」在 `service/common` 里有**三个来源** ⇒ 光看 503 归不了因
+
+- **现象**：300 并发压测 admin-api，观察到 **100 次「503 + 空 body」**
+  ⇒ 直觉结论：「worker-pool 饱和分支触发了」。
+  **实际不是**：关掉 CPU shedding 后，裸 503 变成 **0**。
+
+- **根因**：`service/common` 里有**三条**能产出「503 + 空 body」的路径：
+
+  | # | 路径 | 位置 | 默认生效条件 |
+  |---|---|---|---|
+  | ① | worker-pool 饱和（`RejectedExecutionException`） | `HttpMiddleware.java:296-315` | 池满（默认**不可达**，见下） |
+  | ② | **CPU shedding**（Go `sheddinghandler` 对应物） | `GoStyleCpuSheddingFilter.java:94` | **默认开启**，threshold 900‰ |
+  | ③ | max-conns（Go `maxconnshandler` 对应物） | `GoStyleMaxConnsFilter.java:114` | 默认 `maxConns=10000` |
+
+- **为什么难归因**：CPU shedding 是**自适应**的（读**整机** CPU）
+  ⇒ **裸 503 出不出、出多少，取决于压测当时机器有多忙**
+  ⇒ 实测同一份代码、同一个并发数，两次跑出来的裸 503 数是 **100** 和 **0**。
+  ⇒ **「裸 503 计数」不是稳定信号，不能用它判定池饱和。**
+
+- **下次怎么防**：
+  1. 判定「哪条分支」要**做对照实验**（关掉其中一个 → 差异即归因），
+     **不要**靠「响应长什么样」猜。
+  2. 判定「分支可达性」要量**机制本身的量**（池并发峰值 vs 上限），
+     而不是量「症状出现了几次」。
+  3. 顺带一条：**Tomcat 线程只增不复用** ⇒ 「exec 线程号上界」**不是**并发上限
+     （实测见过 390）；正确口径是**同一时刻不同 exec 线程的个数**。
+
+---
+
+## P-ADMINAPI-011 · bash：`$VAR` 后面紧跟**全角标点**，全角字符会被并进变量名
+
+- **现象**：脚本里 `echo "退出码 = $RC（期望 ...）"` 在 `set -u` 下直接
+  `RC（: unbound variable` ⇒ 脚本在**最该给出结论的那一行**崩掉。
+
+- **根因**：bash 的变量名只允许 `[A-Za-z_][A-Za-z0-9_]*`，
+  但在 **UTF-8 locale** 下，多字节字符的**首字节**有时会被当作变量名的合法延续
+  ⇒ `$RC（` 被解析成变量 `RC（`。
+  ⇒ 只有当多字节字符**紧贴** `$VAR` 时才发生 ⇒ **`"$VAR "`（后面有空格）没事**，
+  ⇒ 越是在中文注释/文案里随手写 `$VAR）`，越容易中招。
+
+- **为什么 `bash -n` 抓不到**：语法检查只查语法，**查不到「变量未定义」**
+  （`set -u` 是**运行期**才生效的）。
+
+- **下次怎么防**：
+  1. **凡 `$VAR` 后面紧跟中文/全角标点，一律写成 `${VAR}`**。
+  2. 自检一行（本次用过的）：
+     ```bash
+     python3 - << 'PY'
+     import pathlib, re
+     pat = re.compile(r'\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F]')
+     for p in pathlib.Path("tools/difftest").glob("*.sh"):
+         for i, line in enumerate(p.read_text().splitlines()):
+             if pat.search(line):
+                 print(f"{p}:{i+1}: {line}")
+     PY
+     ```
+  3. ⚠️ 已知**存量命中**：`tools/difftest/run.sh` 的 `未知参数：$a（` 与 `缺少产物 $j，`
+     —— **`align/task` 分支已修**（`${a}` / `${j}`）⇒ 合并时别重复改（会撞同一段）。
+
+---
+
+## P-ADMINAPI-012 · `docker exec` 不带 `-i` ⇒ **heredoc 里的 SQL 根本没进去**，而且**不报错**
+
+- **现象**：写了个「复位 admin 夹具」的脚本（`tools/difftest/reset-admin-fixtures.sh`），
+  跑完打印「✓ 密码已复位」，**数据库里的值却一个字没变**。
+
+- **根因**：`docker exec` **默认不接 stdin** ⇒ `psql <<SQL ... SQL` 的**输入根本没进容器**
+  ⇒ psql 读到 EOF 直接结束 ⇒ **exit 0** ⇒ `set -e` 也拦不住。
+
+- **为什么难发现**：脚本的**自述输出**（"✓ 已复位"）与**实际效果**脱钩 ——
+  这正是 AGENTS.md §3.3「『代码里写了』与『客户端收到』之间隔着一次 commit」的同款。
+
+- **下次怎么防**：
+  1. `docker exec` 要喂 stdin 就必须加 **`-i`**（`docker exec -i ... psql <<SQL`）。
+  2. **凡是「我改了外部状态」的脚本，必须回读一次**再打印「✓」。
+     本轮补的校验：
+     ```bash
+     docker exec difftest-postgres psql -U admin -d rag_db -tAc \
+       "select username||' => '||left(password,20) from admin_admin;"
+     ```
+  3. 自查：脚本里凡有 `<<` heredoc 给 `docker exec`，逐个确认 `-i` 在不在。
+
+---
+
+## P-ADMINAPI-013 · 差分脚本的**夹具不是幂等的** ⇒ 第二轮跑出来的全是假 DIFF
+
+- **现象**：`diff.py --scenario admin` 第一轮 22 步里 12 步逐字相同；
+  第二轮**几乎全红**（Go 侧 `admin.login` 直接 1002「用户名或密码错误」）。
+
+- **根因**：场景表里有两处**会改状态**的动作：
+  ① `admin.update` 把 admin 的**密码**改成 `newadmin123`
+  ⇒ 第二轮 `admin.login`（用 `admin/admin`）必然失败 ⇒ 后面 18 步被**连带**带成假 DIFF；
+  ② `admin.create` 每次都用**固定**用户名 `dt_admin2` ⇒ 第二轮撞「用户名已存在」。
+  ③ `admin.logout` 把 token 写进 **Redis 黑名单** ⇒ 只清数据库密码**不够**。
+
+- **为什么难发现**：脚本**退出码是 1**，看起来像「测出真问题」；
+  实际是**夹具没复位**。⇒ 「红」本身不携带信息量。
+
+- **下次怎么防**：
+  1. 差分脚本旁边**必须**配一个**夹具复位脚本**，且**复位完要回读校验**
+     （见 P-ADMINAPI-012）。
+  2. 本轮产出的 `tools/difftest/reset-admin-fixtures.sh` 复位三样：
+     `go_db.admins` 密码、`rag_db.admin_admin` 密码、Redis `admin:jwt_blacklist:*`。
+     （两侧都是 bcrypt：Go `service/user/common/cryptx/password.go:8`，
+     RAG `PasswordUtil.encrypt` ⇒ 一份 bcrypt("admin") 两边都验得过。）
+  3. **差分脚本要能区分「两侧不同」与「本场景在当前 scope 下不可判定」**：
+     `{{user_uid}}` 这类模板在 `--scenario admin` 下**没被 capture** ⇒ 解析成空串
+     ⇒ 两侧都 400 但错误文本来源不同（Go 走 form 参数的 `strconv.ParseInt`，
+     RAG 走 body 的必填校验）⇒ 那**不是漂移**，是**前置缺失**。
+     ⇒ 本轮给 `diff.py` 加了 `inconclusive` 分类：单列「不可判定」，**不计入 unexpected**
+     （但也不计入通过）。**断言本身没被放松**：模板有值时它们照样走逐字比对
+     （full scope 下这 5 步实测两侧逐字相同）。
+
+---
+
+## P-ADMINAPI-014 · 🔴 跑模块测试**不带 `-am`** ⇒ 依赖模块从**共享 `~/.m2`** 取 jar ⇒ 可能测的是**别的 worktree 的代码**
+
+- **现象**：本轮跑 admin-rpc 测试，得到 4 条**红**：
+  ```
+  AdminRpcColumnTypeParityTest.adminColumnsMatchGoDdlTypes
+    expected: <text> but was: <jsonb>
+  AdminRpcColumnTypeParityTest.extraInfoAcceptsPayloadJsonbWouldReject
+    INTERNAL: DB更新失败（22P02）
+  AdminRpcColumnTypeParityTest.inviteExpiryJudgedOnAbsoluteInstantNotWallClock
+    已过期的邀请码必须仍被拒绝 ⇒ nothing was thrown
+  AdminCreatePasswordOrderRegressionTest.oversizedPasswordWithExpiredInviteYieldsInviteUnavailable
+    IllegalArgumentException: password cannot be more than 72 bytes
+  ```
+  ⇒ 一看像「我上一轮的 DDL 改动把 admin-rpc 弄坏了」。
+  **全是假的。**
+
+- **根因（两层）**：
+  1. 命令写成 `mvn -pl <module1>,<module2> test` —— **没有 `-am`**
+     ⇒ Maven **不构建** 依赖模块 ⇒ `com.rag:users-common` 从 **`~/.m2` 的已安装 jar** 解析；
+  2. **本仓是并发多 worktree 的**（§5.3「一域一 worktree」）⇒ **`~/.m2` 是所有 worktree 共享的**
+     ⇒ 那个 jar 可能是**另一个分支的另一个 worker** 装进去的。
+     实测：jar（04:14 构建）里的 `db/03_create_admin.sql` 是 **`extra_info JSONB`** 的**旧版**，
+     而本工作树的源文件（00:12）早已改成 `TEXT`
+     ⇒ ⇒ 测的是「**旧 DDL + 新代码**」的组合 ⇒ 报出来的失败**在本分支上根本不存在**。
+
+- **为什么难发现**：
+  - 失败**看起来非常合理**（正好命中本轮改过的 DDL 主题）；
+  - `mvn test` **不会报错**，只是拿到一个「能跑但版本不对」的依赖；
+  - **共享 `~/.m2` + 并发 worktree** ⇒ 同一命令在不同时间跑出**不同结果**，
+    而且**与被测代码无关**。
+
+- **下次怎么防**：
+  1. **跑模块测试一律带 `-am`**（仓库自己的纪律，见 AGENTS.md §4.2：
+     `mvn -pl <module> -am package`）—— 这不是风格问题，是**正确性前提**。
+  2. 看到「与本轮改动主题高度相关的失败」时，**先怀疑依赖版本**，再怀疑实现：
+     ```bash
+     # 查依赖模块当前被解析到的是哪一份
+     unzip -p ~/.m2/repository/com/rag/users-common/0.0.1-SNAPSHOT/users-common-0.0.1-SNAPSHOT.jar \
+         db/03_create_admin.sql | head -60
+     ```
+  3. 提交前若要确保「装到 `~/.m2` 的就是本分支的」，先 `mvn -o -DskipTests install`
+     —— 但**注意**：这会**污染其它并发 worktree 的 `~/.m2`** ⇒ 优先用 `-am`，
+     `install` 只在确有必要时做，且做完提醒他人。

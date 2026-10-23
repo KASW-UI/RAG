@@ -268,7 +268,7 @@ RAG 的 Filter 在 **JWT 外层**。见 DRIFT-ADMINAPI-006。
 | 阶段 | 行为 | 与 Go |
 |---|---|---|
 | public 路径 | `PUBLIC_PATHS.contains(request.getRequestURI())` ⇒ 直接 return（`:98-100`） | ✅ 一致（集合逐条相同） |
-| 阶段 1 验签 | 缺 `Authorization` ⇒ 401；`tokenForSignatureVerification` 剥前缀（大小写不敏感）；jjwt 验签；`userId` claim **必须是 Number**，否则 401（`:133-183`） | ⚠️ 比 Go **多一道** claim 存在性/类型检查（DRIFT-ADMINAPI-003） |
+| 阶段 1 验签 | 缺 `Authorization` ⇒ 401；`tokenForSignatureVerification` 剥前缀（大小写不敏感）；jjwt 验签；`userId` claim **必须是 Number**，否则 401（`:133-183`） | ⚠️ 比 Go **多一道** claim 存在性/类型检查（DRIFT-ADMINAPI-003）⇒ **已签字偏离 SD-2026-10-23-01，属预期差异** |
 | 阶段 2 黑名单 | `trimBearerPrefix`（大小写敏感）；`hasKey(prefix+token)`；异常吞成 `null` ⇒ **fail-open**（`:196-231`） | ✅ 一致（含「两段取法不同」这个 Go 自身的不一致） |
 | attribute 写入 | 成功时写 `userId`（Long）与 `jwt_token`（String） | ✅ 一致 |
 
@@ -314,7 +314,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | M-04 | ALL | 401 状态码 | 401（两处短路） | 401 | EQUIVALENT | `authhandler.go:106-121` / `checkblacklistmiddleware.go:38` vs `handleAuthentication:66-68` |
 | M-05 | 鉴权 | 验签失败 / 缺头的 401 **body** | **空 body** | 完整 envelope `{code:1006}` | OBSERVABLE DIFFERENCE | 已在 `AuthenticationException:20-39` 与 `_shared.md` N-1 留档（**已签字**） |
 | M-06 | 鉴权 | 黑名单 401 的**业务码** | **`code:401`** + `msg:"登录已失效,请重新登陆"` + `Content-Type: appliaction/json`（Go 拼写错误） | **`code:1006`** + `msg:"TOKEN已过期"` + `application/json` | **OBSERVABLE DIFFERENCE** | → **DRIFT-ADMINAPI-004** |
-| M-07 | 鉴权 | 签名有效但 `userId` claim 缺失/非数字 | **200 + `{code:1006}`** | **401 + `{code:1006}`** | **OBSERVABLE DIFFERENCE** | → **DRIFT-ADMINAPI-003** |
+| M-07 | 鉴权 | 签名有效但 `userId` claim 缺失/非数字 | **200 + `{code:1006}`** | **401 + `{code:1006}`** | **OBSERVABLE DIFFERENCE（已签字 SD-01）** | → **DRIFT-ADMINAPI-003** ⇒ **预期差异，对拍必红，不是回归** |
 | M-08 | 鉴权 | public 路径集合 | `{create, login}` | `{create, login}` | EQUIVALENT | `routes.go:16-30` vs `AdminJwtAuthInterceptor:70-72` |
 | M-09 | 鉴权 | 中间件顺序（验签 → 黑名单） | Authorize → observability → CheckBlacklist | CheckBlacklist 在 JWT **之后** | EQUIVALENT | 三段取证见 §2.1；`AdminApiMvcPipelineTest` 有 4 条断言（非本轮） |
 | M-10 | 鉴权 | 黑名单 fail-open | `err != nil` ⇒ 放行 | catch ⇒ `exists=null` ⇒ 放行 | EQUIVALENT | `checkblacklistmiddleware.go:35-36` vs `isBlacklisted:221-231` |
@@ -486,6 +486,33 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 
 ### DRIFT-ADMINAPI-003 · 签名有效但 `userId` claim 缺失/非数字：Go 200+1006，RAG 401+1006
 
+> ✅ **2026-10-24 用户拍板：本条不是「待修漂移」，而是 SD-2026-10-23-01 的可观察后果。**
+> **零代码改动**，只订正归类。
+>
+> **为什么它已被签字覆盖（本条此前一直标「未经签字」，那个判定是错的）**：
+> `docs/Intentional_Deviations/users/admin/_shared.md` 的 **N-4 条目末尾**写得很明确：
+>
+> > 「Go『恒 0 + **不校验 claim**』的**校验缺失**那半边，
+> > 已由 **SD-2026-10-23-01** 单独签字（RAG 选择严格校验）。**N-4 只管取值，不覆盖校验。**」
+>
+> 而 SD-2026-10-23-01 原文（`_cross/signed-deviations.md`）写的是：
+>
+> | 项 | 内容 |
+> |---|---|
+> | **Go 行为** | 操作者 id 恒为 `0`，且**不校验** JWT 里有没有对应 claim |
+> | **RAG 行为** | 从 JWT claim 取操作者并**严格校验**，缺失即拒绝 |
+> | **签字结论** | **保留 RAG 的严格校验**。Go 的「恒 0 + 不校验」是安全缺口而不是业务语义 —— 复刻它等于把一个已知弱点也搬过来 |
+> | **⚠️ 代价** | 两侧**可观察行为确实不同**：Go 接受而 RAG 拒绝的请求存在。任何跨实现对拍在这条上都会红，**属预期差异，不是回归** |
+> | **⚠️ 不得做的事** | 不要为了让对拍变绿而给 RAG 放宽校验。若日后 Go 侧补上校验，则应反向收敛 RAG，而不是保持差异 |
+>
+> ⇒ **本条正是「Go 接受而 RAG 拒绝的请求」的一个具体实例** ⇒ 在签字范围内。
+> ⇒ 对拍看到这条红，**先确认是不是 SD-01**，不要当新回归去「修」。
+>
+> **2026-10-24 用户明确拍板**：不撤销 SD-01，不改代码，保留 RAG 的严格校验。
+>
+> ---
+>
+> **以下为原始审计记录（保留原文）**：
 - **Component**：admin-api / OP-05、OP-06、OP-12 的鉴权失败分支
 - **Category**：Error Identity / HTTP Status
 - **Classification**：OBSERVABLE DIFFERENCE　**Risk**：MEDIUM（业务码相同，状态码不同）
@@ -672,7 +699,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | CASE-07 | `{"username":123}` | `400 type mismatch` | `400` | ✅ | 已有（非本轮）：R1 锁死用例 |
 | CASE-08 | 缺 Authorization | `401` + 空 body | `401` + envelope | ⚠️ body 不同（M-05，已签字） | 已有（非本轮）：`AdminApiMvcPipelineTest` 3 条 |
 | CASE-09 | token 在黑名单 | `401` + `{code:401}` | `401` + `{code:1006}` | ❌ | **缺**（→ DRIFT-ADMINAPI-004 未被任何断言覆盖） |
-| CASE-10 | 签名有效但无 `userId` claim | `200 + 1006` | `401 + 1006` | ❌ | **缺**（→ DRIFT-ADMINAPI-003） |
+| CASE-10 | 签名有效但无 `userId` claim | `200 + 1006` | `401 + 1006` | ❌ | **缺**（→ DRIFT-ADMINAPI-003）⇒ **已签字 SD-01，此处必红是预期** |
 | CASE-11 | `userId = 0`，调 banuser | 发 RPC，`OperatorId=0` | `1006`，不发 RPC | ❌ | **缺**（→ DRIFT-ADMINAPI-001） |
 | CASE-12 | Redis 宕机 | 放行（fail-open） | 放行 | ✅ | 已有（非本轮）：`AdminSemanticDriftApiRegressionTest#redisFailureFailOpen` |
 | CASE-13 | `getself`，下游返回空 Admin | `200` + 零值 admin | `1003` | ❌ | **缺**（→ DRIFT-ADMINAPI-002，依赖 UNRESOLVED-001） |
@@ -711,6 +738,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 
 ### UNRESOLVED-002 · admin-api 的 text/plain 400 **没有真实 Tomcat 守门**
 
+> ✅ **已关闭（2026-10-24）** ⇒ 见本文件新增 **§2**（admin 入口真实 Tomcat 守门，`EXIT=0`）。
+
 - **已核实的事实**：
   1. admin-api 的 5 个 `@SpringBootTest`（`AdminApiMvcPipelineTest` / `AdminApiGoStyleBodyContentTypeTest` /
      `AdminApiPlainText400HeaderProbeTest` / `GoStyleParseSemanticsMvcTest` / 以及 admin 侧其余）
@@ -727,12 +756,18 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 
 ### UNRESOLVED-003 · Go 的 `omitempty` 对 struct 无效这一条，本轮只做了静态判定
 
+> ✅ **已关闭（2026-10-24）** ⇒ 见本文件新增 **§1**（逐字节副本 + `go run` 实测）。
+
 - `types.go:72` 的 `json:"user,omitempty"` 是 `UserInfo`（struct）⇒ Go 的 `encoding/json` 不会省略它。
 - 本轮**没有跑探针实证**（Go 侧需要起进程或写小程序）。这是 DRIFT-ADMINAPI-005 的判定支点之一。
 - **Required Confirmation**：一个 10 行的 Go 程序即可判定；或直接把 admin-rpc 的实际返回形态确认掉
   （那样 DRIFT-ADMINAPI-005 可能整条作废）。
 
 ### UNRESOLVED-004 · RAG 侧 worker-pool 饱和 → 无 body 的 503
+
+> ✅ **已关闭（2026-10-24）** ⇒ 见本文件新增 **§3**。
+> ⚠️ **本条上文的两处说法被推翻**：①「没有测试覆盖」是错的（`HttpMiddlewareWorkerPoolTest` 已有 3 条守门）；
+> ② 该分支在**默认配置下不可达**（Tomcat `max-threads` 实测 200 < 池 max 512），实测裸 503 全部来自 CPU shedding。
 
 - `HttpMiddleware` 把业务跑在独立 worker 池上；池满时走 `httpResp.setStatus(503)` 且**不写 body**
   （与 Go 侧任何分支都不同源 —— Go 用 goroutine，无池）。
@@ -741,12 +776,16 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 
 ### UNRESOLVED-005 · 两项启动期事实未实测
 
+> ✅ **已关闭（2026-10-24）** ⇒ 见本文件新增 **§4**（① Nacos 不可达 ⇒ 起不来，实测；② counter 名实测为 `admin_api_intercept_total`，与 Go 同名）。
+
 | 项 | 未知点 |
 |---|---|
 | DRIFT-ADMINAPI-009 | Nacos 不可达时 admin-api 的**真实**启动序列与就绪探针表现（静态只说明「不会像 Go 那样 panic」） |
 | M-43 | Micrometer Counter 名 `admin_api_intercept_total` 在 `/actuator/prometheus` 上**最终叫什么**（Micrometer 有 `_total` 归一化规则，未实测）⇒ 与 Go 的 `admin_api_intercept_total` 是否同名也未实测 |
 
 ### UNRESOLVED-006 · 本组件的绝大多数结论是 `静态源码·双侧`
+
+> ✅ **已关闭（2026-10-24）** ⇒ 见本文件新增 **§5**（admin 22 步 + 全量 39 步定向对拍，`unexpected=0`）。
 
 - 本轮**没有**跑双端活体对拍、**没有**跑真 Tomcat、**没有**跑真 PG（本组件无 SQL）。
 - 引用到的 2026-10-21/22 difftest（39 步）与 matrix（273 条）成果**本轮未复跑**，
@@ -797,7 +836,7 @@ SEMANTICALLY NOT EQUIVALENT
 
 | 历史回归 | 本轮结论 | 证据 |
 |---|---|---|
-| **HTTP 状态码语义变更** | ⚠️ **修正为：主体已修，但两处遗留未闭合** | 业务族恒 200 ✅（`GlobalExceptionHandler:231-233` `decideStatus` 无条件 `OK`，对应 Go 的 `httpx.OkJson`）；鉴权族 401 ✅（`handleAuthentication:66-68`，对应 Go `authhandler.go:121`）。**遗留**：黑名单 401 的业务码 401→1006（DRIFT-ADMINAPI-004）；claim 无效时 200→401（DRIFT-ADMINAPI-003） |
+| **HTTP 状态码语义变更** | ⚠️ **修正为：主体已修，但两处遗留未闭合** | 业务族恒 200 ✅（`GlobalExceptionHandler:231-233` `decideStatus` 无条件 `OK`，对应 Go 的 `httpx.OkJson`）；鉴权族 401 ✅（`handleAuthentication:66-68`，对应 Go `authhandler.go:121`）。**遗留**：黑名单 401 的业务码 401→1006（DRIFT-ADMINAPI-004）；claim 无效时 200→401（DRIFT-ADMINAPI-003）—— ⚠️ **2026-10-24 订正：这两处其实都已签字**（SD-2026-10-23-08 / SD-2026-10-23-01）⇒ **本行「遗留未闭合」的表述作废**，两者都是预期差异 |
 | **`@ResponseBodyAdvice` 二次包裹** | ✅ **已修，当前源码成立**（成功 + 异常 + 400 三类路径均覆盖） | 两道守卫：`GlobalResponseAdvice:39-41`（`body == null \|\| body instanceof Response`）与 `:52-55`（非 JSON 原样透传）。`handleBusiness` / `handleRPC` / `handleAuthentication` / 三个 IdentityResolver 分支全部返回 `ResponseEntity<Response>` ⇒ G1 短路；`goStylePlainTextBadRequest` 返回 `ResponseEntity<String>` + text/plain ⇒ G2 短路。⚠️ **残余缺口**：`body == null` 这一支（405/415/actuator）无任何断言；且 `AdminResponseEnvelopeAdviceTest` 用的是 `standaloneSetup`，**不加载 `HttpMiddlewareFilter`** ⇒ 与 DRIFT-FRAMEWORK-001 相关的容器时序不在其覆盖内。**按 AGENTS.md 硬约束 2，绿测试本身不作为「已闭环」证据** |
 | **`SelectAvatar` 响应 `is_current` 陈旧** | 🚫 **不适用**；但**同型的 `found` 已修且当前成立** | admin 域**无 avatar 端点**：`service/user/admin/api` 33 个源文件逐条核对，无任何 avatar 字样；`admin.proto` 的 `AdminInfo` 无头像字段。同型问题在 `getuser`：Go 的 `true` 写在 **api 层**（`getuserlogic.go:59`），RAG 显式 `setFound(true)`（`AdminGetUserService:67`），并有 `AdminApiMvcPipelineTest` + `AdminSemanticDriftApiRegressionTest` 两处断言（**非本轮**） |
 | **`JwtUtil` 密钥补齐被删** | ✅ **已修且当前成立**（但其后果 N-5 已签字） | `JwtUtil.padToHmacKeySize:44-53` 存在，且被**签发端与验签端共用**：签发 `JwtUtil.getToken:16`、验签 `AdminJwtAuthInterceptor:90` ⇒ 不存在「一处补一处没补」的撕裂。⚠️ 后果：Go 用 15 字节原串、RAG 用 32 字节 zero-pad ⇒ **两侧签发的 token 互不认**（N-5，已签字，`admin/_shared.md`） |
@@ -1143,3 +1182,313 @@ assertEquals("text/plain", asPlainText.getResponse().getContentType(),
 > `admin-api/pom.xml` 与 `admin-rpc/pom.xml` 都注入了 `TESTCONTAINERS_RYUK_DISABLED=true`，
 > 实测全 0 ⇒ 真容器**确实跑了**，不是 `@EnabledIfDockerAvailable` 静默全跳。
 > 复核：`grep -ho 'skipped="[0-9]*"' service/users/admin/*/target/surefire-reports/*.xml`
+
+---
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- 2026-10-24 增量：未知项全部关闭 + ADMINAPI-009 实修（v1 被真栈推翻 → v2） -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+## 0. 本轮（2026-10-24）增量摘要
+
+> **核对日期**：2026-10-24　**分支**：`align/users-admin`
+> ⚠️ **本节是增量追加**，上文各节**一字未删**（§3.4.3 的「先改/删错误断言，再改实现」纪律在下文 §2 有实例）。
+
+| # | 事项 | 结论 | 证据强度 |
+|---|---|---|---|
+| 1 | **ADMINAPI-003** | ✅ **已被 SD-2026-10-23-01 覆盖**（本轮订正了上一轮「未签字」的错误说法） | 静态 |
+| 2 | **ADMINAPI-009** | ✅ **已实修**（真栈双向验证：可达⇒能起 / 不可达⇒起不来 / Nacos 不可达⇒起不来） | **双侧活体对拍** |
+| 3 | **UNRESOLVED-002** | ✅ 关闭（admin 入口真实 Tomcat 守门 `EXIT=0`） | **双侧活体对拍** |
+| 4 | **UNRESOLVED-003** | ✅ 关闭（Go `omitempty` 对 struct 无效 ⇒ 逐字节副本 + `go run` 实测） | **真源程序实测** |
+| 5 | **UNRESOLVED-004** | ✅ 关闭（**推翻了上文两条说法**：不是「没有测试覆盖」，且该分支在默认配置下**不可达**） | **并发压测 + 结构论证** |
+| 6 | **UNRESOLVED-005 ①** | ✅ 关闭（Nacos 不可达 ⇒ 进程起不来，实测） | **双侧活体对拍** |
+| 7 | **UNRESOLVED-005 ②** | ✅ 关闭（counter 名恰好 `admin_api_intercept_total`，与 Go 同名） | **真容器 `/actuator/prometheus`** |
+| 8 | **UNRESOLVED-006** | ✅ 关闭（admin 22 步 + 全量 39 步，`unexpected=0`） | **双侧活体对拍** |
+
+## 1. ✅ UNRESOLVED-003 关闭：Go 的 `omitempty` 对 struct **无效**
+
+**判定物**：`tools/difftest/probe-go-omitempty.sh`（可复现）
+**方法**：**逐字节复制**真源 `service/user/admin/api/internal/types/types.go` 到临时模块再 `go run`
+（真源是 `internal` 包，外部不可 import；且真源仓库冻结只读 ⇒ 复制是唯一不污染真源的做法），
+脚本打印两侧 sha256 供核对（`1e8132b9…8c31`，一致）。
+
+```
+SCENARIO=zero_getUserResp  JSON={"user":{"uid":"0","username":"","status":0},"found":false}
+SCENARIO=found_only        JSON={"user":{"uid":"0","username":"","status":0},"found":true}
+SCENARIO=user_set          JSON={"user":{"uid":"7701","username":"x","status":1},"found":true}
+SCENARIO=map_empty         JSON={}          ← 对照：map 形态才会被省略
+```
+
+**结论**：
+
+1. `json:"user,omitempty"` 里的 `UserInfo` 是 **struct** ⇒ Go 的 `encoding/json` **不省略**它
+   ⇒ 零值 `user` **必输出**（含 `uid`/`username`/`status` 三个无 omitempty 的零值字段）；
+   只有 `email` / `extra_info` 因带 omitempty 且为空而省略。
+2. ⇒ **DRIFT-ADMINAPI-005 的判定支点坐实**：Go 恒输出零值 user 对象，RAG 的
+   `@JsonInclude(NON_NULL)` 会让整个 `user` 字段消失 ⇒ **该条是真实差异**（此前只是静态判定）。
+3. **但该路径前提不可达**（与 DRIFT-ADMINAPI-002 / 008 同源，见本文件 §2）
+   ⇒ 维持「实现差异（防御性加固）」的归类，不改实现。
+
+## 2. ✅ UNRESOLVED-002 关闭：真实 Tomcat 下的 400 响应头（admin 入口）
+
+**新增可重复执行的守门**：`tools/difftest/check-plaintext400-headers.sh` 补了 **admin 入口**
+并加了 **charset 断言**；脚本随后又加了**分域执行**（`[all|admin|user]`）。
+
+**实测（2026-10-24，真实 Tomcat，admin-api 58889 vs Go admin-api 18889）**：
+
+```
+[admin] create 缺 username（public 路径 ⇒ 400 text/plain）
+  [RAG] status=400  Content-Type='text/plain;charset=utf-8'  nosniff='nosniff'
+  [Go ] status=400  Content-Type='text/plain; charset=utf-8'  nosniff='nosniff'
+  ⇒ 两侧归一化后（去空格 + 小写）逐字相同 ✅
+```
+
+**脚本 `EXIT=0`（scope=admin）**。
+
+> ⚠️ **Go 与 RAG 的线上字节并不相同**：Go 是 `text/plain; charset=utf-8`（分号后**有**空格），
+> RAG 是 `text/plain;charset=utf-8`（**无**空格）⇒ 差异来自 **Tomcat 对 Content-Type 的重渲染**，
+> 不是 RAG 写错了（代码里写的是逐字相同的 `text/plain; charset=utf-8`）。
+> ⇒ 「归一化后一致」是本条的准确口径；**逐字节一致做不到**，除非绕开容器重渲染。
+
+**附带订正**：`GlobalExceptionHandler.goStylePlainTextBadRequest` 的注释停留在**修复前**的状态
+（原写「RAG : text/plain ← 少了 charset 参数」，并称「守门脚本抓不到 charset 差异 ⇒ 需要独立守门」）。
+两处都已按实测改正（**只改注释，零行为改动**）。
+
+**跨域提示**：`scope=user` 时脚本仍是红的 —— RAG 的 user-api **仍缺 `charset=utf-8`**
+（`Content-Type='text/plain'` vs Go 的 `text/plain; charset=utf-8`）
+⇒ 那是 **users/user 域**的账（对应本文件 §5 A-1），**不是 admin 域的**。
+
+## 3. ✅ UNRESOLVED-004 关闭：worker-pool 饱和分支在默认配置下**不可达**
+
+> ⚠️ **本条推翻了上文 §9 的两处说法**：
+> ① 「**没有测试覆盖**」——**错的**：`service/common/src/test/java/com/rag/common/observability/HttpMiddlewareWorkerPoolTest.java`
+>    **已有 3 条守门**，其中 `saturationShedsWithBare503` 直接断言「裸 503 + 空 body + 业务链不执行」。
+> ② 「没有并发压测数据说明该分支在真实负载下的可达性」——本节补上。
+
+### 3.1 先分清三个「503 空 body」来源（否则一定归错因）
+
+`service/common` 里有**三条**能产出「503 + 空 body」的路径：
+
+| # | 路径 | 位置 | 生效条件 |
+|---|---|---|---|
+| ① | worker-pool 饱和（`RejectedExecutionException`） | `HttpMiddleware.java:296-315` | 池满 ⇒ 默认**不可达**（见 3.2） |
+| ② | **CPU shedding**（Go `sheddinghandler` 对应物） | `GoStyleCpuSheddingFilter.java:94` | `rag.protection.cpu-shedding.enabled` **默认 true**，threshold **900‰** |
+| ③ | max-conns（Go `maxconnshandler` 对应物） | `GoStyleMaxConnsFilter.java:114` | 默认 `maxConns=10000` ⇒ 本场景不触发 |
+
+⇒ **只看「出现裸 503」无法判断是哪个** ⇒ 必须做**两轮对照**。
+
+### 3.2 结构论证 + 实测
+
+**结构论证**：Tomcat 的 `max-threads` 限制了**同时执行 filter 链**的请求数；
+`HttpMiddleware` 把业务丢进 worker 池后**容器线程用 `CountDownLatch.await` 阻塞等待**
+⇒ 池内并发任务数 **≤ Tomcat 线程数** ≤ 200；而池的 max = 512（`HttpMiddleware.MAX_HTTP_WORKERS`）
+⇒ **200 < 512 ⇒ AbortPolicy 那条分支在默认配置下不可达。**
+
+**决定性实测（与机器负载无关）**：负载期间采样 `obs-http-worker` 线程数
+（= worker 池的**实际并发**）⇒ **实测峰值 200** ⇒ 离 512 的饱和阈值差 **2.5 倍**
+⇒ **池饱和分支未被触发**。同轮采样到的 Tomcat **去重** exec 线程数峰值同为 **200**
+⇒ 与结构论证**完全吻合**（池并发 = Tomcat 并发 = 200）。
+
+> 可复现：`bash tools/difftest/exp-admin-worker-pool-load.sh 300` ⇒ `EXIT=0`。
+> 两轮实测均为：Tomcat 并发峰值 **200** / 池并发峰值 **200** / **裸 503 = 0**。
+
+> ⚠️ **别用「exec 线程号上界」当并发上限**：Tomcat 线程**只增不复用**，
+> 线程号会随累计请求数一直涨（实测见过 390），与并发无关。
+> 正确口径是**同一时刻不同 exec 线程的个数**。
+
+**两轮对照（归因用，但裸 503 的数不稳定）**：
+
+| 轮次 | 配置 | 一次实测的结果 | **裸 503（空 body）** |
+|---|---|---|---|
+| 第 1 轮 | CPU shedding **开**（默认） | 188×200(1015) + 12×200(1002) + **100×503 裸空 body** | **100** |
+| 第 2 轮 | CPU shedding **关** | 85×200(1002) + 52×200(1015) + 29×500(5001) + 125×503(body=`Request Timeout\n`) + 9×200(body=`Request Timeout\n`) | **0** |
+
+⇒ **归因**：第 1 轮那 100 个裸 503 **来自 CPU shedding**（Go 同款 `sheddinghandler`），**不是**池饱和。
+
+> ⚠️⚠️ **「裸 503 的个数」是负载相关的，不稳定**：CPU shedding 是**自适应**的
+> （`GoStyleAdaptiveShedder` 读**整机** CPU，threshold=900‰）⇒ 机器忙不忙直接决定它开不开。
+> 实测同一份代码、同一个并发数，两次跑出来的裸 503 数分别是 **100** 和 **0**。
+> ⇒ **判定池饱和分支可达性的可靠依据是「池并发峰值 vs 512」，不是「裸 503 数」。**
+> ⇒ 这也解释了为什么 `service/common` 里**三条**路径都能产出「503 + 空 body」
+> （见 3.1）时，**光看 503 是归不了因的**。
+
+**结论**：worker-pool 饱和分支在**默认配置下不可达**；
+它只在「运维把 Tomcat `max-threads` 调到 > 512」时才会被触发 ⇒ **不是当前部署的语义差异**。
+⚠️ 该分支**没有 Go 侧对应物**（Go 用 goroutine，无池）⇒ 一旦触发就是 RAG 独有行为，
+但默认配置下不发生 ⇒ **维持 M-42 的 `UNKNOWN` 归类，但补充可达性结论**。
+
+## 4. ✅ UNRESOLVED-005 关闭（①②）
+
+### 4.1 ① Nacos 不可达时的真实启动序列
+
+**可复现脚本**：`tools/difftest/exp-admin-startup-failfast.sh`（EXIT=0）
+
+| 用例 | 输入 | 实测结果 |
+|---|---|---|
+| A | `grpc.client.admin-rpc.address=static://127.0.0.1:<死端口>` | 退出码 **1**；`Caused by: java.lang.IllegalStateException: Can't connect to channel admin-rpc`；**拨号预算实测 3.5s**（3s 预算 + 启动开销） |
+| B | 默认 `discovery:///admin-rpc` + `NACOS_PORT=1`（Nacos 不可达） | 退出码 **1**；`Failed to resolve name. status=UNAVAILABLE ... Can not get hosts from nacos server. serviceId: admin-rpc` |
+
+⇒ **RAG 侧「下游不可达 ⇒ 进程起不来」已与 Go 同型**
+（Go 侧 etcd 不可达 ⇒ `zrpc.MustNewClient` ⇒ `logx.Must` ⇒ panic）。
+
+### 4.2 ② Micrometer counter 名
+
+**守门**：`AdminApiPrometheusMetricNameTest`（2 条，2/0/0/0）⇒ `/actuator/prometheus` 上
+counter 名**恰好** `admin_api_intercept_total`，与 Go
+（`internal/metrics/metrics.go:9-14`，`Namespace="" + Subsystem="admin_api" + Name="intercept_total"`）**同名**。
+⇒ M-43 的「`_total` 命名归一化未实测」这条**关闭**；M-43 维持 `IMPLEMENTATION DIFFERENCE`
+（实现不同、**可观测名相同**）。
+
+## 5. ✅ UNRESOLVED-006 关闭：api 域定向双侧活体对拍
+
+**工具**：`tools/difftest/diff.py`（补了「模板未解析 ⇒ 不可判定」的判定，见下）
+
+| scope | 步骤 | asserted | byte_equal | inconclusive | **unexpected** |
+|---|---|---|---|---|---|
+| `admin` | 22 | 5 | 12 | 5 | **0** |
+| `all`（user+admin） | 39 | 10 | 29 | 0 | **0** |
+
+⇒ **零个未签字漂移**。
+
+**工具侧的一处必要修改**（共享资产）：`diff.py` 原先把「`{{user_uid}}` 在 admin-only scope 下未捕获 ⇒
+解析成空串 ⇒ 两侧都 400、但错误文本来源不同」算成 **unexpected**。
+实测这 5 步（`banuser` / `unbanuser` / `resetuserpassword` / `updateuser` / `delete`）的差异是：
+
+```
+Go : 'strconv.ParseInt: parsing "": invalid syntax'   ← Go 这些端点的 uid 走 form 参数
+RAG: 'field "uid" is not set'                          ← RAG 走 body 的必填校验
+```
+
+⇒ 这是**参数通道差异（A-03，已签字）的可观察后果**，且在 **full scope 下两侧逐字相同**
+（full scope 里 `user_uid` 有值 ⇒ 两边都 200 ⇒ `admin.banuser` 等 5 步全 OK）
+⇒ **不是漂移，是「本 scope 下不可判定」**。
+⇒ `diff.py` 现在把这类步骤单列为 **`不可判定`（inconclusive）**，**不计入 unexpected**
+（但也不计入通过）。**断言本身没被放松**：有 uid 时它们照样走逐字比对。
+
+**顺带确认**：这 5 个端点的「uid 参数通道」差异（Go form ↔ RAG body）是 **A-03 已签字**的范围内，
+本轮**没有**新增未签字漂移。
+
+## 6. ✅ DRIFT-ADMINAPI-009 实修（**v1 被真栈推翻 ⇒ v2 用框架原生机制**）
+
+### 6.1 v1 为什么被推翻（**这一节是本轮最贵的教训**）
+
+v1 修法：`AdminRpcClient implements InitializingBean`，在 `afterPropertiesSet()` 里读
+`stub.getChannel()`，判 `instanceof ManagedChannel` 再 `getState(true)` 等 READY，3s 超时即抛。
+
+**单测全绿，真栈里 admin-api 任何环境下都起不来**：
+
+```
+BeanCreationException: Error creating bean with name 'adminRpcClient':
+  admin-rpc 的 gRPC channel 不是 ManagedChannel（实际类型 io.grpc.ClientInterceptors$InterceptorChannel）
+  ⇒ 无法执行启动期可达性检查（对齐 Go zrpc.MustNewClient）
+```
+
+**根因（§3.3「配置里没写≠没开」的同款陷阱，但方向相反 —— 这次是「**装配不同**」）**：
+
+| # | 事实 | 出处 |
+|---|---|---|
+| 1 | devh 用 `ClientInterceptors.interceptForward(channel, interceptors)` 把 channel **包一层** | `AbstractChannelFactory.java`（devh 3.1.0 源码） |
+| 2 | 包出来的是 `io.grpc.ClientInterceptors$InterceptorChannel extends io.grpc.Channel`，**不暴露 `getState`** | `javap`（grpc-api 1.63.0） |
+| 3 | `io.grpc.Channel`（grpc-api 1.63.0）**只有** `newCall` 与 `authority` —— **根本没有 `getState`** | `javap` / sources jar |
+| 4 | `getState` 只在 `io.grpc.ManagedChannel` 上 | `javap` |
+| 5 | 生产里**必然**有全局拦截器：`GoStyleGrpcClientBreakerInterceptor` 是 `@Component + @GrpcGlobalClientInterceptor`，admin-api 依赖 `service/common` | `service/common/.../GoStyleGrpcClientBreakerInterceptor.java:103-106` |
+
+⇒ ⇒ **`instanceof ManagedChannel` 在生产永远为 false** ⇒ admin-api 根本起不来。
+
+**为什么单测没抓到（关键）**：v1 的守门测试用 `ApplicationContextRunner` +
+**只引 `GrpcClientAutoConfiguration` 的最小上下文**，**没有装配那个全局拦截器**
+⇒ 测出来的 channel 是裸 `ManagedChannel` ⇒ **`instanceof` 成立**
+⇒ **测试验的装配 ≠ 生产的装配** ⇒ 绿灯是假的。
+
+⇒ 这条已记入 [`docs/Pitfalls/_cross/`](../../../Pitfalls/_cross/)：
+**「最小上下文 + 没有全局拦截器」的单测，不能用来验任何依赖 channel 具体类型的断言。**
+
+### 6.2 v2 修法：改用 **devh 原生机制**，不自己摸 channel
+
+**做法**：`application.yml` 里给 **admin-rpc 这一个 channel** 开
+`grpc.client.admin-rpc.immediate-connect-timeout: 3s`
+⇒ devh 的 `AbstractChannelFactory.newManagedChannel → connectOnStartup`：
+`channel.getState(true)` → 等 READY → 超时则
+`throw new IllegalStateException("Can't connect to channel admin-rpc")`
+⇒ stub 创建失败 ⇒ **上下文启动失败 ⇒ 进程退出**。
+
+**为什么这是正解**：它作用在 devh **自己持有的原始 `ManagedChannel`** 上
+⇒ **天然免疫拦截器包装**；且它的 javadoc 写得很直白：
+*"If the connection fails, the stub will fail to create with an exception which in turn causes the
+application context startup to fail."*
+
+**为什么只对 admin-rpc 开（不设全局）**：Go 侧 admin-api 的 `ServiceContext`
+（`service/user/admin/api/internal/svc/servicecontext.go:24-28`）里**只有 `AdminRpc` 一个下游依赖**；
+本模块 yml 里那条 `grpc.client.user-rpc` 是**没有对应 Go 依赖的遗留配置**
+（本模块**零个** `@GrpcClient("user-rpc")` 注入点）
+⇒ 设成全局会凭空多出一条 Go 侧不存在的启动期硬依赖。
+
+**再加一道运行时自检**（`AdminRpcClient.afterPropertiesSet()`）：
+devh 的 `immediate-connect-timeout` **默认值是 0（= 关闭）**
+⇒ 「yml 里没写」就等于「机制没武装」⇒ 有人删掉那行会让 fail-fast **静默消失**，
+现象退化成「Pod Ready 但 100% 请求失败」。⇒ 自检断言该属性**已武装**，否则直接让启动失败。
+
+### 6.3 守门（`AdminApiStartupFailFastTest`，6 条，**6/0/0/0**）
+
+| # | 用例 | 断言 |
+|---|---|---|
+| 1 | admin-rpc **不可达** ⇒ 上下文启动失败 | `hasFailed()` + 失败原因含 `Can't connect to channel` |
+| 2 | admin-rpc **可达** ⇒ 上下文**能启动** | `hasNotFailed()` + `hasSingleBean(AdminRpcClient)` |
+| 3 | **生产装配**（注册 `@GrpcGlobalClientInterceptor`）下不可达 ⇒ 仍失败 | 同 #1 |
+| 4 | **生产装配**下可达 ⇒ 仍能启动 | 同 #2 |
+| 5 | `application.yml` 真的写上了 `immediate-connect-timeout=3s` | 静态读 yml + `Binder` 绑定 ⇒ 有效值 == 3s |
+| 6 | `application.yml` **刻意没**给 user-rpc 开启动期硬依赖 | 该键必须不存在（Go 侧无 user-rpc 依赖） |
+
+> ⚠️ **用例 2/3/4 是 v1 缺的那一环**：v1 只有「不可达 ⇒ 失败」，
+> ⇒ 写成一个「永远失败」的检查也能全绿（**假绿**）。
+> **用例 2 是守住「别把 fail-fast 写成永远失败」的那条。**
+
+### 6.4 真栈双向验证（`tools/difftest/exp-admin-startup-failfast.sh`，EXIT=0）
+
+| 场景 | 期望 | 实测 |
+|---|---|---|
+| admin-rpc **可达** | 能启动 | `Successfully connected to channel admin-rpc` → `Tomcat started on port 58889` → `Started AdminApiApplication` ✅ |
+| admin-rpc **不可达**（static:// 死端口） | 起不来 | 退出码 1 + `Can't connect to channel admin-rpc`；**拨号预算 3.5s** ✅ |
+| **Nacos 不可达**（默认 `discovery:///`） | 起不来 | 退出码 1 + `Can not get hosts from nacos server. serviceId: admin-rpc` ✅ |
+
+### 6.5 对 `tools/difftest/run.sh` 的连带改动
+
+RAG 的 admin-api 现在**必须在 admin-rpc ready 之后起**（fail-fast ⇒ 启动顺序从「无所谓」变成**硬约束**）
+⇒ `run.sh` 里把 RAG admin-api 的启动挪到 `assert_started rag-admin-rpc` 之后。
+⚠️ Go 侧本来就有这个约束（`zrpc.MustNewClient`），它的顺序一直是对的。
+
+## 7. ✅ DRIFT-ADMINAPI-003 订正（零代码改动）
+
+用户 2026-10-24 拍板「选项 3」：**不动代码，只订正台账**。
+**事实纠正**：本条**已被 `SD-2026-10-23-01` 覆盖**（`admin/_shared.md:66` 原文），
+本轮上一版说它「未签字」是**错的**。已在 §7 的条目本身加「已签字覆盖」blockquote
+（保留原始审计记录）、更新 3 处表项、撤销「两处遗留未闭合」的表述（ADMINAPI-004 已签 SD-08）。
+⇒ **零代码改动**。
+
+## 8. 跨域观察（**本轮无权改，留给对应域 / 合并时处理**）
+
+| # | 观察 | 归属 |
+|---|---|---|
+| 1 | `tools/difftest/run.sh:51` 与 `:162` 有**活代码**里的 `$VAR` + 全角字符（`$a（`、`$j，`）⇒ 在 UTF-8 locale 下 bash 会把全角字符并进变量名 ⇒ 触发 `unbound variable`。**`align/task` 分支已修**（`${a}` / `${j}`）⇒ **本域不重复改**（避免同段合并冲突） | `tools/` 共享资产 |
+| 2 | RAG **user-api** 的 400 响应**仍缺 `charset=utf-8`**（Go 有）⇒ 与 DRIFT-ADMINAPI-011 同款，但发生在 user 域 | **users/user 域** |
+| 3 | 高压（300 并发）下 RAG admin-api 出现 **29 次 HTTP 500 + `code=5001`**；Go 侧**未做同量级压测** ⇒ **尚未定性**，本轮**不判为漂移**，留待后续 | 待观察 |
+| 4 | `check-plaintext400-headers.sh` 的 `scope=user` 仍红（见 §2）⇒ 与第 2 条同源 | **users/user 域** |
+| 5 | 🔴 **`AGENTS.md §0` 的 users 行有三处出入**（**共享文件，合并时统一改，本域无权改**）：<br>① `update_time ×5` 应为 **×6**（实际改了 6 处 `update_time`）；<br>② `admin-rpc 同款 status=0L 未修` **应撤销**（该条已修）；<br>③ `extra_info` 一栏需标注 **users/user 域已改 TEXT** | **共享文件 `AGENTS.md`** |
+| 6 | ⚠️ **本域的 `Intentional_Deviations/users/admin/*.md` 三个文件在主仓仍是 0 字节** —— 本分支已补齐，但**未合并** ⇒ 合并前主仓看不到签字档 | 合并时 |
+
+## 9. 本轮测试数字（2026-10-24）
+
+| 模块 | 测试类 | tests | failures | errors | **skipped** |
+|---|---|---|---|---|---|
+| `admin-api` | 13 | **129** | **0** | **0** | **0** |
+| `admin-rpc` | 14 | **99** | **0** | **0** | **0** |
+
+> `skipped=0` 是硬门槛（AGENTS.md §0 的 2026-10-23 新纪律）。
+> 复核：`grep -ho 'skipped="[0-9]*"' service/users/admin/*/target/surefire-reports/*.xml`
+>
+> ⚠️ **跑法必须是 `mvn -o -pl <模块> -am test`** —— **漏掉 `-am` 会拿到假的失败**：
+> 本轮第一次跑（`-pl` 不带 `-am`）报了 4 条红（`extra_info` 列类型等），
+> 根因是 `users-common` 从**共享 `~/.m2`** 取到了**别的 worktree 装进去的旧 jar**
+> （jar 里 `03_create_admin.sql` 还是 `extra_info JSONB` 的旧版）
+> ⇒ 带 `-am` 重跑即 99/0/0/0 + 129/0/0/0 全绿。
+> ⇒ 完整教训见 [`docs/Pitfalls/users/admin/api.md` P-ADMINAPI-014](../../../Pitfalls/users/admin/api.md)。

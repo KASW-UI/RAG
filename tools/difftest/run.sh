@@ -263,6 +263,22 @@ POSTGRES_DB=rag_db SERVER_PORT=59900 \
   --grpc.client.user-rpc.address=static://127.0.0.1:59210 \
   --grpc.client.user-rpc.negotiation-type=plaintext \
   >"$LOGS/rag-user-api.log" 2>&1 & PIDS+=($!)
+# ⚠️⚠️ **admin-api 必须在 admin-rpc 就绪之后才起**（2026-10-24，DRIFT-ADMINAPI-009 修复后）
+#
+#   RAG 侧 admin-api 启动时会做「3s 内连不上 admin-rpc ⇒ 启动失败」的检查
+#   （对齐 Go 的 zrpc.MustNewClient —— service/user/admin/api/internal/svc/servicecontext.go:27，
+#    go-zero zrpc/internal/client.go:18 dialTimeout=3s）。
+#   ⇒ **启动顺序从「无所谓」变成了硬约束**：
+#   修之前 admin-rpc 是懒连接，admin-api 先起后起都行；
+#   修之后 admin-rpc 必须先 ready，否则 admin-api 直接起不来 ⇒ 整个对拍编排崩。
+#
+#   Go 侧本来就有这个约束（admin-api 用 MustNewClient），
+#   它的顺序（line 167 起 admin-rpc → line 177 起 admin-api）一直是对的。
+sleep 5
+assert_started "$LOGS/rag-user-rpc.log"  "rag user-rpc"
+assert_started "$LOGS/rag-admin-rpc.log" "rag admin-rpc"
+assert_started "$LOGS/rag-user-api.log"  "rag user-api"
+
 POSTGRES_DB=rag_db SERVER_PORT=58889 \
   env SPRING_CLOUD_NACOS_DISCOVERY_REGISTER_ENABLED=false \
   java -jar "$RUN_DIR/bin/admin-api" \
@@ -272,9 +288,6 @@ POSTGRES_DB=rag_db SERVER_PORT=58889 \
   --grpc.client.user-rpc.negotiation-type=plaintext \
   >"$LOGS/rag-admin-api.log" 2>&1 & PIDS+=($!)
 sleep 5
-assert_started "$LOGS/rag-user-rpc.log"  "rag user-rpc"
-assert_started "$LOGS/rag-admin-rpc.log" "rag admin-rpc"
-assert_started "$LOGS/rag-user-api.log"  "rag user-api"
 assert_started "$LOGS/rag-admin-api.log" "rag admin-api"
 wait_http "http://127.0.0.1:59900/user/v1/login"  "rag user-api" 120
 wait_http "http://127.0.0.1:58889/admin/v1/login"  "rag admin-api" 120
