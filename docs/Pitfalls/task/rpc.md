@@ -274,7 +274,7 @@ SETNX 抛 ⇒ 穿出 lazyInit ⇒ 穿出 flushOnce ⇒ 被 flushTick catch ⇒ *
    `RedisOperations.java:118-128` 已经把「must return null」写在脸上。
 3. **「出错 ⇒ 抛」与「出错 ⇒ 吞」在 Go 里逐点不同**，不能统一处理：
    `like_sink.go:223-225` 抛，`get_task_logic.go:73-76` 吞（注释写着「回填失败不影响返回」）。
-   统一成一种 ⇒ 终态分叉（见 DRIFT-TASK-RPC-006）。
+   统一成一种 ⇒ 终态分叉（见 DRIFT-TASK-RPC-005）。
 
 ---
 

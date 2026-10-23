@@ -25,7 +25,7 @@
 | `2865ffe` | HTTP 层双侧活体对拍（43 用例）+ gRPC 单组件对拍 runner（7 用例） |
 | `25ca5f5` | 🔴 **`RedisPipelines` 把 Go 的 pipeline 当成 MULTI/EXEC 事务 ⇒ 整条消息消费链路是死的**（`ERR EXEC without MULTI`）+ 真 Redis 守门测试（9 条，含阳性对照 + 变异测试） |
 | `2900360` | Kafka 端到端对拍脚本（`tools/difftest/parity-task-kafka.py`）+ gRPC runner 入库 |
-| `a42f606` | 台账补 DRIFT-TASK-RPC-005/006 与 5 条踩坑（06~10）+ §四·三/四·四 端到端对拍证据 |
+| `a42f606` | 台账补 DRIFT-TASK-RPC-004/005 与 5 条踩坑（06~10）+ §四·三/四·四 端到端对拍证据 |
 
 **最终测试**：`task-rpc` **90**（含 15 条真 PG + **9 条真 Redis**）/ `task-api` 78，
 **全部 0 failures / 0 errors / 0 skipped**。

@@ -141,7 +141,7 @@ SqlSessionFactory + `ON CONFLICT`/`GREATEST`/`COALESCE` 真按 PG 语义执行�
 
 ---
 
-### 🔴 DRIFT-TASK-RPC-005 · `RedisPipelines` 把 Go 的 pipeline 当成 MULTI/EXEC 事务 ⇒ **整条消息消费链路是死的**
+### 🔴 DRIFT-TASK-RPC-004 · `RedisPipelines` 把 Go 的 pipeline 当成 MULTI/EXEC 事务 ⇒ **整条消息消费链路是死的**
 
 **性质**：**行为漂移 + 静默失效**。不是「差一点」，是 RAG 侧的 task 消息处理链路**根本不工作**。
 
@@ -236,7 +236,7 @@ Go 侧同一批消息能正常落库，RAG 侧一条不落。
 
 ---
 
-### 🔴 DRIFT-TASK-RPC-006 · `pipelineHSet` 吞掉 Redis 错误，而 Go 是**向上抛**（终态分叉）
+### 🔴 DRIFT-TASK-RPC-005 · `pipelineHSet` 吞掉 Redis 错误，而 Go 是**向上抛**（终态分叉）
 
 **性质**：行为漂移。与 005 同源（都在 Redis pipeline 错误处理上），但**方向相反**，单独开单。
 
@@ -567,8 +567,8 @@ Go 的 kq 消费者 `Offset` 硬编码 `latest`（`initUserFilter.go:47`），
 ### 🔴 这一轮顺带抓出并修掉了两条真缺陷
 
 对拍不是「跑一遍确认一致」而已 —— 它**抓出了两个此前无人发现的致命缺陷**：
-[DRIFT-TASK-RPC-005](#🔴-drift-task-rpc-005--redispipelines-把-go-的-pipeline-当成-multiexec-事务--整条消息消费链路是死的)（整条消息消费链路是死的）
-与 [DRIFT-TASK-RPC-006](#🔴-drift-task-rpc-006--pipelinehset-吞掉-redis-错误而-go-是向上抛终态分叉)（吞/抛方向相反导致终态分叉）。
+[DRIFT-TASK-RPC-004](#🔴-drift-task-rpc-004--redispipelines-把-go-的-pipeline-当成-multiexec-事务--整条消息消费链路是死的)（整条消息消费链路是死的）
+与 [DRIFT-TASK-RPC-005](#🔴-drift-task-rpc-005--pipelinehset-吞掉-redis-错误而-go-是向上抛终态分叉)（吞/抛方向相反导致终态分叉）。
 
 ---
 

@@ -42,7 +42,7 @@ import static org.mockito.Mockito.mock;
  * <b>{@code executePipelined} 内再调 {@code operations.exec()}}</b> 的写法
  * —— 违反 Spring 框架契约、且让整条消息消费链路静默死掉 —— 一路绿灯放行。
  *
- * <h2>🔴 被它掩盖的缺陷（DRIFT-TASK-RPC-005）</h2>
+ * <h2>🔴 被它掩盖的缺陷（DRIFT-TASK-RPC-004）</h2>
  * <p><b>Go 的 {@code Pipeline()} 不是事务</b>：
  * <ul>
  *   <li>go-redis v9.20.0 {@code redis.go:1508-1513} {@code Client.Pipeline()} 的

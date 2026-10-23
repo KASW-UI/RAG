@@ -253,7 +253,7 @@ class TaskDomainServiceTest {
         // ⚠️ 2026-10-23：捕获点从 `execute(SessionCallback)` 改成 `executePipelined(SessionCallback)`。
         //    原因：RedisPipelines.execQuietly 原先走 `execute`（**非 pipeline**）且在回调里
         //    多调了一次 `operations.exec()` ⇒ 服务端回 ERR EXEC without MULTI ⇒
-        //    整条回填链路是死的（详见 RedisPipelines 类注释 / DRIFT-TASK-RPC-005）。
+        //    整条回填链路是死的（详见 RedisPipelines 类注释 / DRIFT-TASK-RPC-004）。
         //    本用例真正要锁的契约是**回填命中的 key 与 TTL**（Go get_task_logic.go:73-76），
         //    批量机制本身由 RedisPipelinesRealRedisGateTest 用**真 Redis** 单独锁住 ——
         //    两边分工明确，不让 mock 用例去承担它证明不了的东西。
