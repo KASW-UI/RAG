@@ -73,7 +73,15 @@ public class TaskUserCountConsumer {
             topics = "${task.kafka.raw-user-topic}",
             groupId = "${task.kafka.group-goka-user}",
             // ⚠️ goka 硬编码 OffsetOldest（initGoKa.go:173），与 kq 那三处的 "latest" 相反
-            properties = "auto-offset-reset=earliest",
+            //
+            // 🔴 2026-10-24 修正：必须是**点分**的 `auto.offset.reset`。
+            //    `@KafkaListener(properties=...)` 不走 Boot 松散绑定，原样传给 Kafka；
+            //    连字符形式 `auto-offset-reset` **不是 Kafka 的合法配置名 ⇒ 被直接忽略**
+            //    （实测：consumer config dump 里 `auto.offset.reset = latest`，
+            //      且 Kafka 打出 "These configurations '[auto-offset-reset]' were supplied but are not used yet."）
+            //    ⇒ 此前这里写的 earliest **从未生效**，实际是全局的 latest。
+            //    详见 {@link TaskRawLogRouter} 同名注解处的完整说明。
+            properties = "auto.offset.reset=earliest",
             containerFactory = "kafkaListenerContainerFactory")
     public void onMessage(ConsumerRecord<String, String> record) {
         String key = record.key() == null ? "" : record.key();

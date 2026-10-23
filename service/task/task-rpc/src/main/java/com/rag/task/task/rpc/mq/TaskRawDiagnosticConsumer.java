@@ -45,7 +45,13 @@ public class TaskRawDiagnosticConsumer {
             topics = "${task.kafka.in-topic}",
             groupId = "${task.kafka.group-kafka-raw}",
             // ⚠️ kq 硬编码 Offset: "latest"（initKafkaRaw.go:32）
-            properties = "auto-offset-reset=latest",
+            //
+            // 🔴 2026-10-24 修正：必须是**点分**的 `auto.offset.reset`。
+            //    `@KafkaListener(properties=...)` 不走 Boot 松散绑定，原样传给 Kafka；
+            //    连字符形式 `auto-offset-reset` **不是 Kafka 的合法配置名 ⇒ 被直接忽略**
+            //    ⇒ 本处写的 latest 此前**从未生效**（「碰巧对」：全局默认恰好也是 latest）。
+            //    详见 {@link TaskRawLogRouter} 同名注解处的完整说明。
+            properties = "auto.offset.reset=latest",
             containerFactory = "kafkaListenerContainerFactory")
     public void onMessage(ConsumerRecord<String, String> record) {
         String value = record.value();

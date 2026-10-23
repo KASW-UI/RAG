@@ -68,7 +68,19 @@ public class TaskRawLogRouter {
             // ⚠️ Go 的 goka 三个 processor 全部硬编码 cfg.Consumer.Offsets.Initial = sarama.OffsetOldest
             //    （initGoKa.go:131, 173, 207），**与** kq 那三处的 "latest" 相反。
             //    这里是 goka 的第一个 group ⇒ 必须 earliest，否则历史消息永远不参与计数。
-            properties = "auto-offset-reset=earliest",
+            //
+            // 🔴 2026-10-24 修正：这里**原来写的是 `auto-offset-reset=earliest`（连字符）**，
+            //    而 **Kafka 的合法配置名是点分的 `auto.offset.reset`** ——
+            //    `@KafkaListener(properties=...)` **不走 Spring Boot 的松散绑定**，
+            //    原样传给 Kafka ⇒ Kafka 认不出连字符形式 ⇒ **直接忽略**！
+            //    实测证据（真 Kafka，RAG 侧 consumer 的 config dump）：
+            //      auto.offset.reset = latest
+            //      AbstractConfig : These configurations '[auto-offset-reset]' were supplied but are not used yet.
+            //    ⇒ 实际生效的是全局的 `spring.kafka.consumer.auto-offset-reset: latest`
+            //      （那个生效是因为它走 Boot 松散绑定，会被转成点分形式）
+            //    ⇒ 后果：**「group 首次消费无位点」时 RAG 从队尾开始、Go 从队头开始** ⇒ 行为分叉。
+            //    （此前的对拍全绿是因为它们都是「先起消费者、后灌消息」⇒ latest/earliest 无差别。）
+            properties = "auto.offset.reset=earliest",
             containerFactory = "kafkaListenerContainerFactory")
     public void route(ConsumerRecord<String, String> record) {
         // ⚠️ value 必须是 raw 原文（见类注释）

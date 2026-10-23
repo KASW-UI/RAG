@@ -117,7 +117,16 @@ public class UserLikeProgressSink {
             topics = "${task.kafka.out-user-topic}",
             groupId = "${task.kafka.group-filter-user}",
             // ⚠️ kq 硬编码 Offset: "latest"（initUserFilter.go:47）
-            properties = "auto-offset-reset=latest",
+            //
+            // 🔴 2026-10-24 修正：必须是**点分**的 `auto.offset.reset`。
+            //    `@KafkaListener(properties=...)` 不走 Boot 松散绑定，原样传给 Kafka；
+            //    连字符形式 `auto-offset-reset` **不是 Kafka 的合法配置名 ⇒ 被直接忽略**
+            //    （实测：consumer config dump 里 `auto.offset.reset = latest`，
+            //      且 Kafka 打出 "These configurations '[auto-offset-reset]' were supplied but are not used yet."）
+            //    ⇒ 本处写的 latest 此前**从未生效**；它「看起来对」只是因为
+            //      全局默认恰好也是 latest ⇒ **属于碰巧对，不是配置生效**。
+            //    ⇒ 显式写成点分形式后，即使全局默认将来改成 earliest，本处也仍是 latest。
+            properties = "auto.offset.reset=latest",
             containerFactory = "kafkaListenerContainerFactory")
     public void onMessage(ConsumerRecord<String, String> record) {
         String key = record.key() == null ? "" : record.key();
