@@ -659,6 +659,29 @@ Required Confirm: 用 exp-difftest-grpc-errors.sh 对同一用例分别用 100ms
                 三档客户端 deadline 打两侧 grpc 端点，比对响应时刻与 handler 副作用。
 ```
 
+> ✅ **2026-10-24 验证轮续 §1：本条从「静态推断」升级为「运行期实证」**（结论**未变**，证据强度**变了**）。
+>
+> **实测（2026-10-24 00:44~00:46，两套 admin-rpc 同时在跑，主仪器 = PG 服务端日志）**：
+>
+> | 档位 | 侧 | 查询存活 Δ_start | **客户端返回后仍占 PG Δ_end** |
+> |---|---|---|---|
+> | 客户端 1000ms | Go | +1005ms | **+0ms** |
+> | 客户端 1000ms | **RAG** | **+2117ms** | **+1111ms** |
+> | 客户端 5000ms（对照） | Go | +2113ms | −3ms |
+> | 客户端 5000ms（对照） | RAG | +2124ms | +3ms |
+>
+> ⇒ **Go 继承了客户端 deadline**（查询随客户端一起结束）；
+> **RAG 没有继承**（客户端 1006ms 就返回了，查询还在 PG 上占着 **1.1 秒**）。
+> ⇒ 对照组（客户端 5000ms）两侧 Δ_end 都 ≈0 ⇒ 差异**只**来自「是否继承客户端 deadline」。
+>
+> ⚠️ **本条最反直觉的一点（也是第一版实验做错的地方）**：
+> **客户端耗时两侧必然相同**（都是客户端自己的 deadline）⇒
+> 拿客户端耗时判这条会得出「两侧一致」的错误结论。
+> 真正的可观察差异是**服务端资源在客户端放弃后继续占用**。
+>
+> ⇒ 完整实验设计与效力边界 ⇒ **验证轮续 §1**；
+> 工具 ⇒ `tools/difftest/GrpcAdminDeadlineProbe.java` + `exp-grpc-admin-deadline-probe.sh`。
+
 ### UNRESOLVED-ARPC-003 —— Redis 客户端超时配置不对齐
 
 ```
@@ -673,6 +696,30 @@ Impact:         故障时的挂起时长与错误文本可能不同（错误码�
 Required Confirm: 起一个 Redis 容器并 iptables 掉网络，两侧各打一次 Logout，
                 比对「返回时刻」与「description 文本」。
 ```
+
+> ✅ **2026-10-24 验证轮续 §2：本条关闭**（配置侧全部对齐，socket 层已实证）。
+>
+> **关闭依据（逐层）**：
+> 1. **库默认值已读到底**（不是猜）：
+>    - Go `core/stores/redis/redisclientmanager.go:32-39` 建 `red.Options` 时
+>      **三个 timeout 一个都没传** ⇒ 走 go-redis/v9 `options.go` 的 `init()`：
+>      `DialTimeout = 5s`（`:329-330`）/ `ReadTimeout = 3s`；
+>    - 🔴 红鲱鱼：go-zero `core/stores/redis/redis.go:27` 的 `readWriteTimeout = 2 * time.Second`
+>      是**死常量**（全文件仅此一处、从未被使用）⇒ 只看它会错判成 2s。
+> 2. **RAG 侧已补齐并实施**（`connect-timeout: 5s`），理由见实施轮 §1。
+> 3. **socket 层已实证**（验证轮续 §2.3/§2.4）：连黑洞 IP 的失败耗时落在
+>    `[4000, 9500)` ms ⇒ **只有 5s 落得进去**（10s = Lettuce 默认 / 3s = 命令超时 / 75s = 系统默认）。
+>
+> **⚠️ 关闭时必须一起记的一条（本轮实测教会的）**：
+> **Lettuce 的连接是异步的** ⇒ Redis 不可达时，**先到期的往往是命令超时（3s）而不是连接超时（5s）**
+> ⇒ `connect-timeout: 5s` 在故障时**通常不决定用户可见的时长**。
+> ⇒ 「Go 连接超时 5s / RAG 连接超时 5s」这个描述是**配置层**的等价，
+> **不是**故障时的**可观察时延**的等价。
+> ⇒ 两侧「错误码都是 Internal、desc 也一致」这个原始判断**依然成立**
+> （本条 Impact 里那句话是对的：只影响时延不影响语义）。
+>
+> **守门网**：`AdminRedisTimeoutConfigTest`（yml 文本层 + Binder 绑定层）
+> + `AdminRedisConnectTimeoutSocketTest`（配置消费点 + socket 层黑洞实测）。
 
 ### UNRESOLVED-ARPC-004 —— `extra_info` jsonb 的边界写入行为
 
@@ -1455,8 +1502,8 @@ users 域 DDL，多建 `users_user_avatar_history`。
 |---|---|---|---|
 | 1 | 🔴 **`users_user.extra_info` 也是 jsonb，而 Go 是 text**（`serializer:json`） | **跨域 · 未修** | DDL 归 users/user 域（`01_create_user.sql:41`），本 worker 无权改。**与本轮 ① 完全同型**：Go 落库成功 / RAG 被 jsonb 以 22P02 拒收。⇒ 建议 users-user 域照本节 §1.1 的三处同提交改法处理。**注意 `admin-rpc` 的 `updateUser` 也要跟着去掉那处 CAST**，否则跨域合并时会产生行为分叉 |
 | 2 | 🟡 **DRIFT-ARPC-006**（RAG 侧零手写 span，Go 逐 Logic 打 `audit.*` 属性） | ~~未修~~ **✅ 实施轮 §2 已修（8 处 span）** | | ⚠️ **本条原先的判断「需动 `service/common`、不在本域」已被推翻** —— `admin-rpc` 自己的 `pom.xml` 已引 `opentelemetry-bom`，`GlobalOpenTelemetry.getTracer` 与 Go `otel.Tracer` 是同一套 API ⇒ 在 admin-rpc 内即可补齐，不动 `service/common`。另**订正计数**：Go 是 **8 个 logic** 有 span，不是 13（13 是 attribute 条数）⇒ 刻意不给 getself/getuser/getuserlist/logout/updateself 加 span，用负向断言钉死 |
-| 3 | 🟡 **UNRESOLVED-ARPC-002**（超时是否 min 客户端 deadline） | ~~仍未定~~ **✅ 定性轮 §1：CONFIRMED SEMANTIC MISMATCH** | | 修法落在 `service/common` 的 `RpcInterceptor`（不继承入站 deadline），**不在本域**，故本 worker 无权改。⚠️ 现有对拍工具在结构上抓不到这条（见定性轮 §1.4）⇒ 不得以「对拍全绿」当它已闭环 |
-| 4 | 🟡 **UNRESOLVED-ARPC-003**（Redis 客户端超时配置） | ~~仍未定~~ **✅ 定性轮 §2 定性 + 实施轮 §1 实施 + 验证轮 §2 补绑定证据** | | 读超时 3s 两侧一致（但**一致是巧合**，无出处无回归网）；连接超时已补 `connect-timeout: 5s`。⚠️ **Lettuce socket 层的实际超时行为仍未证**（需黑洞 IP 实测）⇒ 该尾巴仍挂 UNRESOLVED |
+| 3 | 🟡 **UNRESOLVED-ARPC-002**（超时是否 min 客户端 deadline） | ~~仍未定~~ **✅ 定性轮 §1 定性 → 验证轮续 §1 拿到运行期实证** | | **CONFIRMED SEMANTIC MISMATCH**（结论未变，证据强度变了：静态推断 → 实测）。实测：客户端 deadline 1000ms 时，Go 的查询随客户端一起死（Δ_end=0ms），**RAG 的查询在客户端返回后仍占着 PG 1111ms**。修法落在 `service/common` 的 `RpcInterceptor`（不继承入站 deadline），**不在本域**，故本 worker 无权改。⚠️ 现有 HTTP 对拍工具在结构上抓不到这条（见定性轮 §1.4）⇒ 不得以「对拍全绿」当它已闭环 |
+| 4 | 🟡 **UNRESOLVED-ARPC-003**（Redis 客户端超时配置） | ~~仍未定~~ **✅ 定性轮 §2 + 实施轮 §1 + 验证轮 §2 + 验证轮续 §2 ⇒ **已关闭**（含 socket 层实证）** | | 读超时 3s 两侧一致（但**一致是巧合**，无出处无回归网）；连接超时已补 `connect-timeout: 5s`，**socket 层已用黑洞 IP 实测**（失败耗时落在 [4000,9500)ms ⇒ 只有 5s 落得进去）。⚠️ 但要记住：**Lettuce 的连接是异步的** ⇒ 故障时**先到期的往往是 3s 的命令超时**，5s 的连接超时通常不决定用户可见时延 |
 | 5 | 🟡 **UNRESOLVED-ARPC-005**（`users_user` 建表责任交叉） | ~~跨组件~~ **✅ 验证轮 §1 已关闭（双侧并发实测）** | | RAG 侧 advisory lock **机制性**串行（同一把锁 8675309，两进程严格错开）；Go 侧 GORM AutoMigrate 是 check-then-act，**机制上仍有竞态窗口**，实测未撞≠机制保证 ⇒ 两侧性质不同，不可混谈 |
 | 6 | 🟡 **DDL 的 `SET TIME ZONE` 副作用** | ~~已记录未验证~~ **✅ 修复轮 §8 已闭环（变异实测偏移 28800 秒）** | | 本轮新增的 `SET/RESET TIME ZONE` 与 `01`/`02` 同款；`SchemaInitializer` 四份脚本共用**一条连接**依次执行 ⇒ `03`/`04` 的 `SET` 只影响其自身语句区间，随后 `RESET` 还原。**未做「多实例并发建表 + 非 UTC 会话时区」的运行时验证** |
 | 7 | ⚠️ **`users_user` 时间列的 3 张表** | 跨域 | `01`/`02` 已由 users/user 域于 2026-10-23 改为 TIMESTAMPTZ；本 worker **未复核**其正确性，只确认了 DDL 文本已是 `TIMESTAMPTZ` |
@@ -2168,43 +2215,48 @@ relaxed binding 规则（`connect-timeout` → `connectTimeout`）是 Spring 自
 **占位符形态**，不解析就没法把 `port` 绑成 `int` ⇒ 辅助方法 `resolvePlaceholder`
 按 Spring 的语义取默认值。
 
-### 2.3 ⚠️ 效力边界：**仍未证到 socket 层**
+### 2.3 ⚠️ 效力边界（本节写于本轮；**末层已于次日补上**）
 
 | 层 | 状态 |
 |---|---|
 | yml 里写了这两个值 | ✅ 已证（第 1 条断言） |
 | Spring `Binder` 真把它们绑进 `DataRedisProperties` | ✅ **已证（本轮第 2 条）** |
-| **Lettuce 客户端在 socket 层真按 5s 超时** | ❌ **仍未证** |
+| **Boot 把 `connectTimeout` 接到 Lettuce 的 `SocketOptions`** | ✅ **已证（2026-10-24 验证轮续 §2.2）** |
+| **Lettuce 客户端在 socket 层真按 5s 超时** | ✅ **已证（2026-10-24 验证轮续 §2.3，实测 5220ms）** |
 
-最后一层是 Lettuce 的内部行为，要拿运行期证据只能**把连接指向黑洞 IP**、
-实测失败耗时落在 5s 而不是 3s。**本轮未做** ⇒ 该尾巴仍挂 UNRESOLVED，
-见「定性轮 §2.4」。
+> ⚠️ **2026-10-24 更新**：本节原写「末层仍未证 ⇒ 不得写『Redis 超时已完全对齐』」。
+> **该限制已解除** —— 末层（socket 层）已用黑洞 IP 实测补上，
+> 且顺带发现了「**两个超时值互相遮蔽**」这条重要事实（验证轮续 §2.4）。
+> ⇒ 现在的准确表述是：
+> **「配置层（yml → Binder → Boot → Lettuce ClientOptions → socket 实测）已全链对齐，
+>   但故障时的用户可见时延由 3s 的命令超时主导，不是 5s 的连接超时。」**
 
-⇒ 🔴 **不得**因为本条绿了就写「Redis 超时已完全对齐」——
-现在只到「**配置值已正确进入 Boot 的配置 POJO**」。
+## 3. ✅ C 项（ARPC-002 的 PG 侧阻塞探针）：**已于 2026-10-24 做掉**
 
-## 3. ❌ C 项（ARPC-002 的 PG 侧阻塞探针）：本轮**未做**，recipe 在此
+> ⚠️ **本节原写「预算内跑不完，只留 recipe」** —— 那是 2026-10-23 验证轮当时的结论。
+> **2026-10-24 验证轮续 §1 已把它跑完**：recipe 可行，而且拿到了决定性数据。
+>
+> ⇒ **完整实验设计 / 实测数据 / 效力边界 ⇒ 验证轮续 §1**；
+> ⇒ 工具 ⇒ `tools/difftest/GrpcAdminDeadlineProbe.java` + `exp-grpc-admin-deadline-probe.sh`。
 
-**为什么做不了**：这个探针要求**同时起 Go + RAG 两套栈**、用**另一个 psql 会话**
-持 `SELECT … FOR UPDATE` 行锁、发一个短 deadline 请求、再查 PG 侧
-`pg_stat_activity` 看查询是否被取消。在本轮的预算与时长内**跑不完**。
-⇒ 按 §3.3「不许只跑 RAG 侧探针」的要求，**跑一半的探针没有证据价值**，
-所以选择**不做**，而不是做个残缺的。
+### 3.1 原 recipe（保留存档 —— 它是**可复现**的）
 
-**可复现 recipe**（留给下一轮/别的 worker）：
+**可复现 recipe**（现已跑通）：
 
-1. 起 RAG `admin-rpc` + Go `admin-rpc`（`tools/difftest/run.sh` 已能起两侧栈）；
-2. 用**第三个** psql 会话：`BEGIN; SELECT id FROM users_user WHERE id = <uid> FOR UPDATE;`（**不提交**）；
-3. 对两侧各发一个 **client deadline = 100ms** 的 `UpdateUser` 请求；
+1. 起 RAG `admin-rpc` + Go `admin-rpc`（`tools/difftest/run.sh --serve-only --keep`）；
+2. 用**第三个** psql 会话：`BEGIN; LOCK TABLE <admin 表> IN ACCESS EXCLUSIVE MODE;`（**不提交**）；
+3. 对两侧各发一个 **client deadline = 1000ms** 的 `Login` 请求（**直接打 gRPC 端口**，不经 HTTP 层）；
 4. 比对**两件事**：
-   a. 响应是否在 ~100ms 返回（Go 应返回 `DeadlineExceeded`；RAG 侧因 `RpcInterceptor`
-      **不继承入站 deadline**（`RpcInterceptor.java:170-172`），会等到自己那 2s）；
-   b. PG 侧 `pg_stat_activity` 里那条 `UPDATE` 是否被 `cancel`（Go 会，RAG 不会）。
-5. **期望差异**：Go 侧查询被取消、RAG 侧查询**跑满 2s** ⇒ 这就是
-   「CONFIRMED SEMANTIC MISMATCH」在 PG 侧的可观察形态。
+   a. 响应时刻（两侧**必然相同** ⇒ 这条量不出差异，**别拿它判**）；
+   b. **PG 侧那条阻塞查询的存活时长**（主仪器 = **PG 服务端日志**里的
+      `canceling statement due to user request` + `STATEMENT:` 行）。
+5. **期望差异**：Go 侧查询随客户端一起死（Δ_end ≈ 0）；
+   RAG 侧查询在客户端返回后**继续占着 PG ~1.1s**。
 
-⚠️ **不要**用 `exp-difftest-grpc-admin-errors.sh` 验这条 —— 它**结构上抓不到**
-（见「定性轮 §1.4」：现有对拍脚本不设置客户端 deadline）。
+⚠️ **两条踩过的坑（都写在验证轮续 §1.2 里）**：
+① **不能用 `SELECT … FOR UPDATE` 行锁**（普通 SELECT 走 MVCC，不会被行锁挡住）；
+② **不能用 `pg_stat_activity` 轮询采样**（每次轮询起一个 psql，~200ms 开销，采样窗口比事件还粗，会直接漏掉）——
+   **主仪器必须是 PG 的服务端日志**。
 
 ## 4. ✅ 顺手修掉的一类「事实错误注释」：GORM 的**默认表名**从来不是 `admin_admin`
 
@@ -2384,3 +2436,173 @@ javadoc 里记了改名理由与 Go 出处）。
 > ⚠️ **未改 `docs/DRIFT/users/_shared.md` 与 `docs/Pitfalls/users/_shared.md`** ——
 > 这两个是 users 域**共享**文件，`align/users-user` 分支**正在改它们**
 > ⇒ 本 worker 不写，避免并发互撞。
+
+---
+
+# 2026-10-24 验证轮续：ARPC-002 的**运行期**证据 + Lettuce socket 层
+
+> 本轮把上一轮列的两条「未证」做掉：
+> ① **C 项** —— ARPC-002 的 PG 侧阻塞探针（原写「预算内跑不完，只留 recipe」）；
+> ② **Lettuce socket 层** —— connect-timeout 是否真在 socket 层生效。
+>
+> ⚠️ 两项的结论**都改变了本台账此前的措辞**，逐条标了「原结论 → 新结论」。
+
+## 1. ✅ UNRESOLVED-ARPC-002 拿到**运行期**证据 —— CONFIRMED SEMANTIC MISMATCH 坐实
+
+### 1.1 为什么**客户端耗时**量不出差异（这是本实验的第一个坑）
+
+两侧的**客户端**都会在**自己的 deadline** 返回：
+
+| | 客户端返回时刻由谁决定 |
+|---|---|
+| Go | 客户端 deadline（1000ms） |
+| RAG | 客户端 deadline（1000ms）——**服务端那 2s 完全没参与** |
+
+⇒ **客户端耗时两侧必然相同**（实测都是 ~1000ms），
+拿它判这条会得出「两侧一致」的错误结论。
+**可观察的差异在服务端**（PG 上那条阻塞查询活了多久）。
+
+### 1.2 实验设计
+
+| 要素 | 取法 | 为什么 |
+|---|---|---|
+| 阻塞源 | 后台 psql 事务 `LOCK TABLE <admin 表> IN ACCESS EXCLUSIVE MODE` | ⚠️ **不能用 `SELECT … FOR UPDATE` 行锁** —— 普通 SELECT 走 MVCC 快照读，**不会被行锁挡住**（`exp-b1-timeout-cancel.sh` 的注释里记了这个坑：第一版用行锁，两侧 login 都在 150ms 内成功返回，实验毫无意义）。⚠️ 每个 (库,表) 必须**独立 psql 进程** —— 塞进同一个事务会让一张表的 LOCK 报错把整个事务 abort |
+| 表名 | Go `admins` / RAG `admin_admin` | Go 的 `TableName()` 返回 `admins`（`data_model.go:16-18`），RAG 是 users 域的加前缀约定 |
+| 客户端 | `GrpcAdminDeadlineProbe`（新工具），**直接打 gRPC 端口**（Go 18081 / RAG 58081），带可配 deadline | 走 HTTP 层会多一跳 admin-api，把 gRPC 的 deadline 语义抹掉 |
+| RPC | `Login` | 它先查库再验密码 ⇒ 查库这一步会被锁挡住 |
+| **主仪器** | **PG 服务端日志**里的 `canceling statement due to user request` + `STATEMENT:` 行 | ⚠️ 第一版用 `pg_stat_activity` 轮询采样 —— 每次轮询要起一个 psql 进程（~200ms 开销），**采样窗口比事件本身还粗**，直接漏掉了 RAG 侧那条查询（当时读成「实验没生效」，其实是采样太粗）。PG 的错误日志给出**取消的确切时刻 + 语句原文**，而且「**没有日志条目**」本身就是强证据（= 那条查询根本没到 PG） |
+| 指标 | `Δ_start` = 取消时刻 − RPC 发起时刻<br>`Δ_end` = 取消时刻 − **客户端返回**时刻 | `Δ_end` 是最锐利的那个：**客户端走了之后，查询还在 PG 上占着多久** |
+
+⚠️ 探针必须报 **RPC 的绝对墙钟起止**（`rpc_start_ms` / `rpc_end_ms`）——
+相对「进程启动时刻」的偏移里混着 JVM 启动时间（每次几百 ms 且每次都不同），直接比会得出错误的差值。
+
+### 1.3 实测数据（2026-10-24 00:44~00:46，两套 admin-rpc 同时在跑）
+
+| 档位 | 侧 | `Δ_start` 查询存活 | `Δ_end` 客户端返回后仍占 PG | 客户端看到的 desc |
+|---|---|---|---|---|
+| **A** 客户端 deadline **1000ms** | **Go** | **+1005ms** | **+0ms** | `CallOptions deadline exceeded`（客户端自己的） |
+| **A** 客户端 deadline **1000ms** | **RAG** | **+2117ms** | **+1111ms** | `CallOptions deadline exceeded`（客户端自己的） |
+| **B** 客户端 deadline **5000ms**（对照） | **Go** | +2113ms | −3ms | `context deadline exceeded` |
+| **B** 客户端 deadline **5000ms**（对照） | **RAG** | +2124ms | +3ms | `rpc timeout after 2000ms` |
+
+### 1.4 结论
+
+1. **档位 A（客户端 1000ms < 服务端 2s）**：
+   - **Go**：查询在 **1005ms** 被取消 ⇒ `context.WithTimeout(ctx, timeout)` **继承了客户端 deadline**（`rpc.go:38`），有效期限 = min(1000ms, 2s) = 1000ms。
+     `Δ_end = 0ms` ⇒ **客户端一走，查询同步被 CancelRequest 掐掉**。
+   - **RAG**：查询活到 **2117ms**（= 它自己的 2s），
+     而客户端在 1006ms 就返回了 ⇒ **`Δ_end = +1111ms`：客户端已经放弃，服务端的查询还在 PG 上占着 1.1 秒。**
+2. **档位 B（客户端 5000ms > 服务端 2s）**：两侧 `Δ_end` **都 ≈ 0**（−3ms / +3ms）
+   ⇒ **差异确实只来自「是否继承客户端 deadline」**，与两侧各自的 SQL 超时机制无关。
+   ⇒ 这就是**对照组**的作用：把「SQL 超时机制不同」这个替代解释排除掉。
+
+⇒ **UNRESOLVED-ARPC-002 从「静态推断」升级为「运行期实证」。**
+定性轮 §1 的结论（CONFIRMED SEMANTIC MISMATCH）**得到实证支持**，不再是推断。
+
+### 1.5 ⚠️ 效力边界（必须一起记，否则会被过度解读）
+
+| | 内容 |
+|---|---|
+| **差异的可观察形态** | 「**服务端资源在客户端放弃后继续占用**」（PG 上多占 1.1s），**不是**「客户端响应不同」。客户端响应**两侧相同**。 |
+| **HTTP 层更看不见** | admin-api 把 gRPC status 翻译成业务码，deadline 差异在 HTTP 响应体里**根本不存在** ⇒ `diff.py` 的 HTTP 对拍**永远抓不到这条**。 |
+| **修法归属** | 仍在 `service/common` 的 `RpcInterceptor`（`RpcInterceptor.java:170-172` 只算服务端自己的 2s）⇒ **不在本域**，本 worker 无权改。 |
+| **未覆盖** | 只测了 `Login` 一个 RPC。机制在 `RpcInterceptor` 里 ⇒ **对全部 13 个 RPC 生效**，但**逐个 RPC 的实测**未做。 |
+
+## 2. ✅ Lettuce socket 层 —— connect-timeout 5s 已证（第 3、4 层）
+
+### 2.1 四层证据，第 3、4 层是本轮新增
+
+| 层 | 内容 | 状态 |
+|---|---|---|
+| ① 文本层 | yml 里写了 `timeout: 3s` / `connect-timeout: 5s` | ✅ 已有（`AdminRedisTimeoutConfigTest` 第 1 条） |
+| ② 绑定层 | Spring `Binder` 真把它们绑进 `DataRedisProperties` | ✅ 已有（`AdminRedisTimeoutConfigTest` 第 2 条） |
+| ③ **消费点** | Boot 把 `connectTimeout` 接到 Lettuce 的 `SocketOptions` | ✅ **本轮新增** |
+| ④ **socket 层** | 连黑洞 IP，实测失败耗时 | ✅ **本轮新增** |
+
+### 2.2 第 ③ 层：Boot 4.0.8 的接线（**消费点**，符合 §3.3.1）
+
+`spring-boot-data-redis-4.0.8` 的
+`org/springframework/boot/data/redis/autoconfigure/LettuceConnectionConfiguration.java:212-215`：
+
+```java
+Duration connectTimeout = getProperties().getConnectTimeout();
+if (connectTimeout != null) {
+    builder.socketOptions(SocketOptions.builder().connectTimeout(connectTimeout).build());
+}
+```
+
+⇒ `DataRedisProperties.connectTimeout` → `ClientOptions.socketOptions.connectTimeout`。
+实测（`AdminRedisConnectTimeoutSocketTest` ①）：
+
+```java
+cf.getClientConfiguration()      // ⚠️ LettuceConnectionFactory 没有 getClientOptions()，只有这个
+ .getClientOptions()             // → Optional<ClientOptions>
+ .map(ClientOptions::getSocketOptions)
+ .map(SocketOptions::getConnectTimeout)   // → Duration.ofSeconds(5)  ✅
+```
+
+⚠️ **API 细节**：`spring-data-redis 4.0.7` 的 `LettuceConnectionFactory`
+**没有** `getClientOptions()` 方法（javap 实测），只有 `getClientConfiguration()` ⇒
+照抄别处的写法会编译不过。
+
+### 2.3 第 ④ 层：socket 层实测（连黑洞）
+
+黑洞 IP = `192.0.2.1`（RFC 5737 的 TEST-NET-1，TCP SYN 发出去**永不回包**；
+本机实测 4 个保留段地址全部是黑洞）。
+
+| 可能的失败耗时 | 来源 | 是否可能 |
+|---|---|---|
+| **≈5s** | 本配置的 `connect-timeout: 5s` | ✅ **期望值** |
+| ≈10s | Lettuce 自己的默认（`SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION = 10s`） | ⇒ 说明属性**没生效** |
+| ≈3s | 回落到 `timeout: 3s` | ⇒ 说明 connect 超时没单独配 |
+| ≈75s | macOS 的 TCP connect 系统默认（SYN 重传耗尽） | ⇒ 说明本配置完全没生效 |
+
+⇒ 断言区间取 `[4000ms, 9500ms)` —— **只** 5s 落得进去。
+
+### 2.4 🔴 一个必须记的发现：**两个超时值会互相遮蔽**（第一版实测 3266ms 教会的）
+
+第一版测试**没有**覆盖 `spring.data.redis.timeout`，结果实测 **3266ms** —— 那是 `timeout: 3s`，
+**不是** `connect-timeout: 5s`。
+
+**根因**：**Lettuce 的连接是异步的** ——
+`getConnection()` 立刻返回（真正握手在后台），
+命令是**排在还没连上的通道**上的 ⇒ **先到期的往往是命令超时，不是连接超时**。
+
+⇒ **只测「连不上要多久」很可能测的是另一个超时值。**
+⇒ 修法：测试里把 `spring.data.redis.timeout` 覆盖成 `30s`（远大于 connect 超时），
+**唯一**可能先到的就是 connect 超时 ⇒ 测出来的时长才有判别力。
+
+⚠️ **这条同样适用于生产**：`connect-timeout: 5s` 与 `timeout: 3s` 并存时，
+Redis 不可达的实际表现由 **3s 的命令超时**主导，5s 的连接超时**根本没机会生效**
+⇒ 写「Redis 连接超时 5s」这个描述时，得知道它在故障时**通常不决定用户可见的时长**。
+
+### 2.5 守门网
+
+`AdminRedisConnectTimeoutSocketTest`（1 条，真连黑洞）：
+- ① 配置消费点断言（`connectTimeout == 5s`）—— **永远生效**；
+- ② socket 层时长断言 —— 区间 `[4000, 9500)`，
+  且用 `Assumptions.assumeTrue` 判掉「本环境 192.0.2.1 不是黑洞」的情况
+  （某些网络直接 `no route to host`，那样测到的是路由错误、不是超时）。
+
+## 3. 本轮新增的文件
+
+| 文件 | 性质 |
+|---|---|
+| `tools/difftest/GrpcAdminDeadlineProbe.java` | **新增**：带 **deadline 档位**的 gRPC 双端口客户端（报 RPC 绝对墙钟起止） |
+| `tools/difftest/exp-grpc-admin-deadline-probe.sh` | **新增**：C 项实验编排（持表锁 → 打 deadline → 读 PG 服务端日志） |
+| `service/users/admin/admin-rpc/src/test/.../AdminRedisConnectTimeoutSocketTest.java` | **新增**：Lettuce socket 层守门（配置消费点 + 黑洞实测） |
+
+## 4. 本轮实测数字
+
+| 项 | 数字 |
+|---|---|
+| **ARPC-002 客户端 deadline 1000ms 档** | Go 查询存活 **1005ms** / 客户端返回后仍占 PG **0ms**<br>RAG 查询存活 **2117ms** / 客户端返回后仍占 PG **1111ms** |
+| **ARPC-002 客户端 deadline 5000ms 档（对照）** | Go **2113ms / −3ms**　RAG **2124ms / +3ms** |
+| **Lettuce socket 实测** | 配置的 `connectTimeout=PT5S`　**实测失败耗时 = 5220ms**（其中 `getConnection` **0ms**） |
+| **admin-rpc 全量** | **99 / 0 failures / 0 errors / 0 skipped**（16 个测试类；上一轮 98 ⇒ 本轮 +1） |
+| **admin-api 全量** | **121 / 0 failures / 0 errors / 0 skipped**（11 个测试类；未变） |
+| `mvn -pl admin-rpc,admin-api -am test` | **EXIT=0** |
+
+> ⚠️ `getConnection` 耗时 **0ms** 这一个数字，就证实了「**Lettuce 的连接是异步的**」
+> （`getConnection()` 立刻返回，真正握手在后台）⇒ 命令超时会先于连接超时到期。
+> ⇒ 这也是第一版测试实测出 3266ms（= `timeout: 3s`）的原因。
