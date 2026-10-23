@@ -1060,7 +1060,7 @@ Go DSN（`db.go:21-29`）实际是：
 **为什么它要紧**：本域时间列当前是 `TIMESTAMP`（**无时区**，见 V-020），
 会话时区直接决定读出来的是哪一刻 ⇒ Go 把会话钉在 Asia/Shanghai，RAG 却吃 PG 服务器默认值。
 
-### 🔴 新增 V-020 —— **8 个时间列：`timestamptz` vs `timestamp`（外加 NOT NULL 与 DEFAULT 也不同）**
+### ✅ V-020 —— **8 个时间列：`timestamptz` vs `timestamp`（外加 NOT NULL 与 DEFAULT 也不同）** · **2026-10-23 已修**，详见下方「第五轮」；残留：6 列 `DEFAULT CURRENT_TIMESTAMP`（刻意保留）
 
 **Go 侧证据（消费点）**：`gorm.io/driver/postgres@v1.6.0/postgres.go:251-255`
 
@@ -1095,7 +1095,7 @@ case schema.Time:
 （`message_notification` 3 + `message_conversation` 3 + `message_conversation_message` 2）。
 同口径更正：`DROP NOT NULL` 的是 **5** 列，不是 6；`DEFAULT` 残差是 **6** 列，不是 7。
 
-### 🔴 新增 V-021 —— 两个索引的**名字**不同（列相同）
+### 🔴 V-021 —— 两个索引的**名字**不同（列相同）· **仍 OPEN**，本轮未改
 
 ```
 Go : idx_message_conversation_last_message_at ON (last_message_at)
@@ -1110,7 +1110,7 @@ RAG 手写迁移时按「读起来更短」命名。
 ⇒ 行为等价（同一列的等价索引），但 `pg_indexes` / `\d` / 任何引用索引名的运维脚本都会看到差别。
 **本轮只登记，未改**（改名 = `DROP INDEX` + `CREATE INDEX`，需评估线上是否有对象依赖旧名）。
 
-### 🔴 新增 V-022 —— `idx_notification_recipient_read` 的**列不同**（Go 只有 1 列）
+### ✅ V-022 —— `idx_notification_recipient_read` 的**列不同**（Go 只有 1 列）· **已签字**，见 `SD-2026-10-23-06`
 
 ```
 Go : idx_notification_recipient_read ON (is_read)                     ← 1 列
