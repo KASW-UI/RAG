@@ -960,7 +960,18 @@ Tomcat 的头写出？）—— 留作 UNRESOLVED。
 | **DRIFT-ADMINAPI-002**（getself 多两道校验） | SEMANTIC MISMATCH | 🔴 **前提不可达** ⇒ 实际**无可观察差异** | 降级为「**实现差异（防御性加固）**」，补一条「rpc 总是 set admin ⇒ 那两道校验永不触发」的说明即可；**不需要改实现** |
 | **DRIFT-ADMINAPI-005**（user 字段缺失时字段整个消失） | OBSERVABLE DIFFERENCE | 🔴 **前提不可达** ⇒ 实际**无可观察差异** | 同上降级。⚠️ 但**不要删** `if (rpcResp.hasUser())` 那个守卫 —— 它是防御性的；只是它的「前提」已被证伪 |
 | **DRIFT-ADMINAPI-008**（getself 的 gRPC 兜底映射） | OBSERVABLE DIFFERENCE | 🔴 **那 4 个 code 不可达** ⇒ 实际**无可观察差异** | 同上降级。⚠️ 通用表本身**不要动**（它被 12 个已对齐的端点共用） |
-| **DRIFT-ADMINAPI-001**（5 个端点的身份解析层） | SEMANTIC MISMATCH | 🟡 **仍成立，但严重度下调**：下游不读 `operator_id` ⇒ 真正的差异只剩「**claim 无效时 Go 照常发 RPC、RAG 不发**」这一条 | **仍需用户裁决**（不是「已签字」）。⚠️ 「Go 恒 0」那一半是 N-4（已签字）；「RAG 会拒绝」那一半**未签字** |
+| **DRIFT-ADMINAPI-001**（5 个端点的身份解析层） | SEMANTIC MISMATCH | 🟡 **仍成立，但严重度下调**：下游不读 `operator_id` ⇒ 真正的差异只剩「**claim 无效时 Go 照常发 RPC、RAG 不发**」这一条 | ✅ **已签字**（2026-10-23 复核订正，见下） |
+
+> 🔴 **2026-10-23 22:0x 订正：上一行原文写「仍需用户裁决 /『RAG 会拒绝』那一半未签字」，该判定是错的。**
+> `docs/Intentional_Deviations/_cross/signed-deviations.md` 的 **SD-2026-10-23-01**
+> 标题就是「admin-api `OperatorId`：Go 恒 0 且**不校验 claim**，RAG **严格校验**」——
+> **「不校验」与「严格校验」两半都在签字范围内**，签字人＝用户，签字时间＝2026-10-23。
+> ⇒ 误判的根因：当时 `docs/Intentional_Deviations/users/**` 下 6 个文件**全是 0 字节空占位**，
+> 按签字档逐层检索时在 `users/` 这一层就断了，只看到 `_cross` 的一份转述。
+> **已修**：本轮补齐 `docs/Intentional_Deviations/users/admin/{_shared,api,rpc}.md`，
+> 并在其中把「取值」（N-4）与「校验」（SD-2026-10-23-01）明确拆成两条。
+> ⚠️ 另注：N-4 与 SD-01 **不是同一条**，N-4 只管 `operator_id` 取不取真实 uid，
+> 不覆盖「claim 无效时要不要拒绝」。
 
 > ⚠️ **这三条「前提不可达」的判定依赖 admin-rpc 侧「总是 set」这个事实**，
 > 而该事实本轮**有双侧活体对拍背书**（gRPC 18 用例的 payload 归一化里含 `hasUser` / `hasAdmin`）。
@@ -991,6 +1002,20 @@ RAG 是 `{"code":1006,"msg":"TOKEN已过期","data":null}`。
 
 ⇒ **本条仍属未签字的语义改变**，只是现在有了活体证据。
 （`docs/Intentional_Deviations/**` 不在本 worker 的所有权内 ⇒ 只报告，见 §5。）
+
+> ✅ **2026-10-23 22:0x 补签：本条已正式签字 ⇒ SD-2026-10-23-08**
+> （[`Intentional_Deviations/users/admin/api.md`](../../../Intentional_Deviations/users/admin/api.md)）。
+> **用户拍板：保留 RAG 的 `1006`**，不为了对拍变绿而改回 Go 的 `401`。
+>
+> ⚠️ 同时订正本节的两处**错误判定**：
+> 1. 「N-1 从未声明『业务码 401 → 1006`』」⇒ **错**。N-1 原文就写着
+>    「业务码仍是 `ERROR_TOKEN_RUNTIME(1006)`」⇒ 本条**早就在 N-1 的签字范围内**。
+> 2. 「`docs/Intentional_Deviations/users/**` 6 个文件全 0 字节 ⇒ 无签字文件覆盖」⇒
+>    **当时属实，已修**。本轮补齐三个文件，并把本条单列为 SD-2026-10-23-08
+>    （N-1 只管 body 形状；本条管业务码，范围更大）。
+>
+> ⇒ **本条的真正教训不是「差异没签字」，而是「签字档有洞 ⇒ 检索不到 ⇒ 被误判成没签字」**。
+> 洞已补；同型风险（`users/user` 域的 3 个文件仍是空占位）已在 §5 继续跟踪。
 
 ## 4. 本轮 admin-api 侧的实测数字
 
@@ -1034,3 +1059,85 @@ assertEquals("text/plain", asPlainText.getResponse().getContentType(),
 > 改实现后它立刻变红，正好证明了「跑绿不是对」。
 > ⇒ 本条的元教训：**当一条绿测试的断言值与它自己的失败消息矛盾时，
 > 先怀疑断言，而不是先怀疑实现。**
+
+---
+
+# 2026-10-23 修复轮（admin-api 侧 · 签字补录 + 一处出处订正）
+
+> **核对日期**：2026-10-23（22:0x–22:3x）　**分支**：`align/users-admin`
+> ⚠️ **本节是增量追加**，上文两节**一字未删**。
+> 🔴 **本轮 `admin-api` 的行为代码零改动** —— 上文所有结论（HTTP 层 EQUIVALENT、
+> DRIFT-ADMINAPI-011 已修等）**不受本轮影响**。本轮做了三件事，都不是行为修复。
+
+## 0. 本轮实际改动一览（先说清「没改什么」，避免误读）
+
+| 类别 | 内容 |
+|---|---|
+| **行为代码** | **零改动**。唯一触及实现的是一条注释（Go 出处订正，见 §2） |
+| **签字档** | 补齐 `Intentional_Deviations/users/admin/{_shared,api,rpc}.md`（此前 0 字节），新增 SD-2026-10-23-08，并订正上文两处**错误的「未签字」判定** |
+| **上游影响** | admin-rpc 本轮修了 `UpdateUserResp.success`（DRIFT-ARPC-002），但**本组件不感知**：两侧 API 层都硬编码 `true` ⇒ HTTP 输出不变 |
+
+## 1. ✅ DRIFT-ADMINAPI-004 已正式签字 ⇒ SD-2026-10-23-08
+
+用户 2026-10-23 22:0x 拍板：**保留 RAG 的 `1006`**，不为对拍变绿而改回 Go 的 `401`。
+完整表 ⇒ [`Intentional_Deviations/users/admin/api.md`](../../../Intentional_Deviations/users/admin/api.md)。
+
+**⚠️ 读这条前必须知道**：`401` 在这里指的是**响应体 JSON 的 `code` 字段**，
+两侧的 **HTTP 状态码都是 401**。只看状态码的对拍**永远发现不了本条**。
+
+## 2. ✅ 订正一条错误的 Go 出处（§3.3.2 形态）
+
+`AdminUpdateUserService.java` 的注释原写：
+
+> 「与参考侧 `UpdateUserLogic.java:129` 1:1：显式 true。」
+
+**引错了。** 正确出处：
+
+| | 位置 | 事实 |
+|---|---|---|
+| Go **api** 层 | `service/user/admin/api/internal/logic/admin/updateuserlogic.go:68` | `Success: true` —— **api 层确实硬编码 true** |
+| Go **rpc** 层 | `service/user/admin/rpc/internal/logic/updateuserlogic.go:105-113` | **只 set 了 `User`，没 set `Success`** ⇒ proto3 默认值 `false` |
+
+⇒ 结论（「api 层两侧都硬编码 true，HTTP 一致」）**不变**，变的只是引文。
+但把 rpc 层的行号安到 api 层头上，会让下一个 agent 以为
+「rpc 层也返回 true」⇒ **正是这个错引文让 DRIFT-ARPC-002 在 rpc 层被漏掉**。已改。
+
+## 3. ✅ DRIFT-ADMINAPI-001 的「未签字」判定作废
+
+上文 §2 末尾写「仍需用户裁决（不是『已签字』）」——**错**。
+`SD-2026-10-23-01` 标题即「Go 恒 0 且**不校验 claim**，RAG **严格校验**」，两半都签。
+误判根因（签字档 `users/` 层 0 字节 ⇒ 检索在这一层断掉）见
+[`Pitfalls P-9`](../../../Pitfalls/users/admin/rpc.md)。
+
+**并明确区分两条签字**（此前被混为一谈）：
+
+| 签字 | 管什么 | 不管什么 |
+|---|---|---|
+| **N-4** | `operator_id` **取值** —— Go 恒 0，RAG 传真实 uid | 不管 claim 校验 |
+| **SD-2026-10-23-01** | claim **校验** —— Go 不校验，RAG 严格校验 | 不管取值 |
+
+## 4. 上文 §3~§5 各条的现状（2026-10-23 核对）
+
+| 条目 | 状态 |
+|---|---|
+| DRIFT-ADMINAPI-002（getself 多两道校验） | 前提不可达 ⇒ **仍维持**「实现差异（防御性加固）」，本轮未动 |
+| DRIFT-ADMINAPI-005（user 字段缺失时消失） | 前提不可达 ⇒ 同上 |
+| DRIFT-ADMINAPI-008（getself 的 4 个 code 不可达） | 同上；通用映射表未动（被 12 个端点共用） |
+| UNRESOLVED-002（text/plain 400 无真实 Tomcat 守门） | **部分关闭**：`AdminApiPlainText400ContentTypeTest` 已在，但可重复执行的脚本仍缺（`tools/` 共享资产，不在本域） |
+| UNRESOLVED-003 / 004 / 005 / 006 | 未变 |
+| §5 A-1（user-api 同款 charset 缺失） | 仍有效，归 users/user 域 |
+| §5 A-2（`Intentional_Deviations/users/**` 6 个 0 字节） | ✅ **本域 3 个已补**；`users/user` 的 3 个**仍空**，归 users/user 域 |
+| §5 A-3（`diff.py` 把 ADMINAPI-004 标成「N-1 已签字」） | 措辞指向不精确属实；已由 SD-2026-10-23-08 给出准确引用。⚠️ **`tools/difftest/diff.py` 属共享资产，本轮未改** |
+| §5 A-4（补 admin 入口到 `check-plaintext400-headers.sh`） | 未做，归 `tools/` owner |
+
+## 5. 本轮测试数字
+
+| 模块 | 测试类 | tests | failures | errors | **skipped** |
+|---|---|---|---|---|---|
+| `admin-api` | 11 | **121** | **0** | **0** | **0** |
+| `admin-rpc`（上游，本轮有行为改动） | 14 | **91** | **0** | **0** | **0** |
+
+> `skipped=0` 是硬门槛（AGENTS.md §0 的 2026-10-23 新纪律）：
+> `admin-api/pom.xml` 与 `admin-rpc/pom.xml` 都注入了 `TESTCONTAINERS_RYUK_DISABLED=true`，
+> 实测全 0 ⇒ 真容器**确实跑了**，不是 `@EnabledIfDockerAvailable` 静默全跳。
+> 复核：`grep -ho 'skipped="[0-9]*"' service/users/admin/*/target/surefire-reports/*.xml`

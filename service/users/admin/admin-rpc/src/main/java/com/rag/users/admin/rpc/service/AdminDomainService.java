@@ -26,8 +26,7 @@ import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
 import java.time.Duration;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -337,9 +336,17 @@ public class AdminDomainService {
             // 不能用 wrapper.set(AdminEntity::getExtraInfo, copy)：
             //   LambdaUpdateWrapper 的参数以 Object 形式塞进 ew.paramNameValuePairs，
             //   不走字段上的 @TableField(typeHandler=...)，MyBatis 只能按 javaType=Object
-            //   猜 handler → 猜成 PG 的 hstore → "hstore 扩展尚未安装"。
-            // 改为直接写 SQL 片段 + 显式 CAST，参数按 String 绑定再转 jsonb。
-            wrapper.setSql("extra_info = CAST({0} AS jsonb)", toJson(extraInfo));
+            //   猜 handler ⇒ 结果不可控。
+            // 改为直接写 SQL 片段 + 参数按 String 绑定。
+            //
+            // 🔴 2026-10-23：**去掉了 CAST(... AS jsonb)**（DRIFT-ARPC-004①）。
+            //   admin_admin.extra_info 已由 jsonb 改为 **text**（对齐 Go 的 serializer:json），
+            //   显式 CAST 成 jsonb 会把 text 强制转回 jsonb、重新引入 jsonb 那套校验 ——
+            //   而 Go 侧根本没有这层校验（实测：含 U+0000 的 extra_info，
+            //   Go 落库成功 / RAG 被 jsonb 以 22P02 拒收）。
+            //   ⚠️ 同文件 updateUser 里的 CAST 必须保留：那列是 **users_user.extra_info**，
+            //   仍是 jsonb（DDL 归属 users/user 域，01_create_user.sql:41）。两张表不能一起改。
+            wrapper.setSql("extra_info = {0}", toJson(extraInfo));
         }
         // DRIFT-ADMIN-RPC-003：对齐 GORM autoUpdateTime（见本类末尾 updateTimeAdvance 注释块）
         wrapper.setSql("update_time = CURRENT_TIMESTAMP");
@@ -508,8 +515,14 @@ public class AdminDomainService {
             throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
         }
 
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime expiresAt = now.plus(INVITE_CODE_TTL);
+        // 🔴 OffsetDateTime，不是 LocalDateTime（2026-10-23，用户拍板修 DRIFT-ARPC-004②）
+        // Go 出处：createinvitecodelogic.go:63  expiresAt := time.Now().Add(inviteCodeTTL)
+        //          createinvitecodelogic.go:83  ExpiresAt: expiresAt.Unix()
+        // Go 的 time.Time 带 location，timestamptz 列存的是**绝对时刻**，Unix() 跨时区恒定。
+        // LocalDateTime 只剩墙钟：单实例同区恰好自洽，跨时区多实例会让 expires_at 偏移一个时区差
+        // ⇒ 消费方 AdminCreateAtomicService 按墙钟比较时，邀请码会刚生成就判为已过期。
+        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime expiresAt = now.plus(INVITE_CODE_TTL);
 
         for (int attempt = 0; attempt < INVITE_CODE_MAX_RETRY; attempt++) {
             String code;
@@ -545,7 +558,10 @@ public class AdminDomainService {
             }
 
             metrics.getCreateInviteSuccess().increment();
-            long expiresAtUnix = expiresAt.atZone(ZoneId.systemDefault()).toEpochSecond();
+            // Go 出处：createinvitecodelogic.go:83  ExpiresAt: expiresAt.Unix()
+            // ⚠️ 注意是**内存里算**、不是回读 DB 后再算 —— 所以 wire 值与列类型无关，
+            // 但**列类型决定下游能不能把它当成同一个绝对时刻**（见 createAdminAtomic 的比较）。
+            long expiresAtUnix = expiresAt.toEpochSecond();
             log.info("admin createInviteCode success, operator_id={}", operatorId);
             return new InviteCodeResult(code, expiresAtUnix);
         }
@@ -880,7 +896,13 @@ public class AdminDomainService {
             wrapper.set(UserEntity::getEmail, email);
         }
         if (extraInfo != null && !extraInfo.isEmpty()) {
-            // 同 updateSelf：wrapper.set() 走 Object → 被当成 hstore，必须用 setSql + CAST
+            // 同 updateSelf 的 setSql + 参数绑定（不能用 wrapper.set，走 Object 猜 handler 不可控）。
+            //
+            // ⚠️ **这里的 CAST 必须保留**（与上面 updateSelf 的一处不同）：
+            //   本方法写的是 **users_user.extra_info**，该列**仍是 jsonb**
+            //   （DDL 归属 users/user 域：users-common/.../01_create_user.sql:41）。
+            //   admin_admin.extra_info 已在 2026-10-23 改成 text（DRIFT-ARPC-004①），
+            //   但这一列没改、也不在本 worker 所有权内 ⇒ **两张表不可一并去 CAST**。
             wrapper.setSql("extra_info = CAST({0} AS jsonb)", toJson(extraInfo));
         }
         // DRIFT-ADMIN-RPC-003：对齐 GORM autoUpdateTime
@@ -980,6 +1002,24 @@ public class AdminDomainService {
         // W3 bcrypt DefaultPassword
         String defaultPassword = properties.getSystem().getDefaultPassword();
         if (defaultPassword == null || defaultPassword.isEmpty()) {
+            // 🔴 **有意偏离，不是待修漂移**（DRIFT-ARPC-003，用户 2026-10-23 22:0x 拍板签字）。
+            //
+            // Go 出处：resetuserpasswordlogic.go:55-62
+            //     var password string
+            //     password, err = cryptx.PasswordEncrypt(l.svcCtx.Config.System.DefaultPassword)
+            //   Go **没有空值守卫**：空串照样进 bcrypt。
+            //   而 x/crypto/bcrypt 的 GenerateFromPassword 只在 len > 72 时报错
+            //   ⇒ 配置为空时 Go **成功**，并把该用户的密码重置成「空串的哈希」
+            //     —— 之后可用**空密码登录**。
+            //
+            // 签字结论：**保留 RAG 的严格拒绝**，不引入空密码可登录这一路径。
+            //   与 SD-2026-10-23-01/02/03 同型：「RAG 做了更严/更安全的那一侧」。
+            // ⚠️ 代价（必须知情）：显式把 system.default-password 配成空串时，
+            //   Go 返回成功、RAG 返回 INTERNAL「密码加密失败」→ admin-api 报 5001。
+            //   对拍在这一条上**必然为红，属预期差异，不是回归**。
+            // ⚠️ 不得做的事：不要为了「让对拍变绿」而删掉这道守卫。
+            //   若日后 Go 侧也补上空值校验，应反向收敛 RAG，而不是保持差异。
+            // 守门：AdminSemanticDriftRegressionTest 里的空 default-password 用例。
             metrics.getResetPasswordInternalError().increment();
             throw Status.INTERNAL.withDescription("密码加密失败").asRuntimeException();
         }
@@ -1073,8 +1113,13 @@ public class AdminDomainService {
     }
 
     /**
-     * Map → JSON 文本，供 {@code wrapper.setSql("extra_info = CAST({0} AS jsonb)", ...)} 使用。
-     * 序列化失败按内部错误处理——extraInfo 是 Map<String,String>，正常不会失败。
+     * Map → JSON 文本，供两处 {@code wrapper.setSql("extra_info = …", …)} 使用。
+     * <p><b>两处调用点的列类型不同，2026-10-23 起不再一致</b>：
+     * <ul>
+     *   <li>{@code updateSelf} → {@code admin_admin.extra_info}（<b>text</b>，不再 CAST）</li>
+     *   <li>{@code updateUser}  → {@code users_user.extra_info}（<b>jsonb</b>，仍 CAST）</li>
+     * </ul>
+     * 序列化失败按内部错误处理——extraInfo 是 Map&lt;String,String&gt;，正常不会失败。
      */
     private static String toJson(Map<String, String> map) {
         try {

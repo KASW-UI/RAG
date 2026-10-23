@@ -253,3 +253,103 @@ AGENTS.md §6.3 问题 3 记的是「显式 `@Import`，不拆包」，那解决
 ⚠️ 同款缺件是否还在别处：**未审**。`AGENTS.md` §3.3.3 已记
 `service/like/like-rpc/pom.xml:120` 只引 `spring-kafka` 的同款问题，尚未修。
 本组件不属于该清单。
+---
+
+## P-8 · 同一个模块里**两张表的同名列类型不同** —— 改 DDL 时按方法名批量替换会改错表
+
+> 2026-10-23 修复 DRIFT-ARPC-004① 时踩到（本轮**没有**踩进去，是靠逐处核对 Go 出处躲过的）。
+
+### 现象
+
+`admin-rpc` 的 `AdminDomainService` 里有**两处形状完全一样**的代码：
+
+```java
+wrapper.setSql("extra_info = CAST({0} AS jsonb)", toJson(extraInfo));
+```
+
+- `:342` 在 `updateSelf` 里，wrapper 是 `LambdaUpdateWrapper<**AdminEntity**>` → 写 **`admin_admin.extra_info`**
+- `:884` 在 `updateUser` 里，wrapper 是 `LambdaUpdateWrapper<**UserEntity**>` → 写 **`users_user.extra_info`**
+
+这一轮把 `admin_admin.extra_info` 从 `jsonb` 改成 `text` ⇒ **`:342` 必须去掉 CAST，`:884` 必须保留**。
+两行文本逐字相同，只有实体泛型不同。
+
+### 为什么会踩
+
+「`extra_info` 是 jsonb，改成 text」这句话在整个模块里是**半真**的：
+`AdminEntity.extraInfo` 变 text，`UserEntity.extraInfo`（映射 `users_user`，**另一个域的表**）**仍是 jsonb**。
+于是：
+
+- `grep -rn "CAST({0} AS jsonb)"` → 2 处，**任何「全部替换」都会改错其中一处**；
+- 改错 `:884` ⇒ `users_user` 那个 jsonb 列收到未 CAST 的字符串 ⇒
+  `ERROR: column "extra_info" is of type jsonb but expression is of type character varying`
+  ⇒ **user 域的 `updateUser` 100% 失败**，而 admin 域自己的测试**照样全绿**
+  （admin 的测试不经过 `users_user` 的写路径）。
+
+### 下次怎么防
+
+1. **按「列的全名」而不是按「文本」定位**。判断依据是实体的 `@TableName` + wrapper 的泛型参数，
+   不是方法名、不是 grep 到的字符串。
+2. **凡是要改某一列的类型，先问「这个模块里还有哪些实体映射了同名列」**。
+   本组件 3 个实体（`AdminEntity` / `AdminInviteEntity` / `UserEntity`）里
+   `extra_info` 出现了**两次**，时间列出现了 **6 次**，分属两张表。
+3. **跨域的表不要在本域顺手改**。`users_user` 的 DDL 归 users/user 域，
+   即使 admin-rpc 也在读写它 —— 这一轮只报告、不改（见 `DRIFT/users/admin/rpc.md` 本轮 §6）。
+
+### 同源的更大一类
+
+`user-rpc` 侧 `users_user.extra_info` **也是 jsonb，而 Go 侧同样是 `serializer:json`（text）**
+⇒ 同一个漂移在 users/user 域也存在，且**尚未修**。
+本轮已作为跨域问题上报 —— 这条坑对整个 users 域都成立。
+
+---
+
+## P-9 · **签字档里的空占位文件**会让人把「已签字」误判成「未签字」
+
+> 2026-10-23 实测，本轮的真实成本来源。
+
+### 现象
+
+2026-10-23 21:3x 的 admin-api 审计轮，在台账里写下：
+
+> 「⚠️ `docs/Intentional_Deviations/users/**` 下 **6 个文件全是 0 字节**（空占位）
+> ⇒ **没有任何一份正式的签字文件覆盖它**」
+
+并据此判定 DRIFT-ADMINAPI-001 / -004「**仍需用户裁决**」。
+
+**这个判定是错的。**
+`docs/Intentional_Deviations/_cross/signed-deviations.md` 里的 **SD-2026-10-23-01**
+标题明写「Go 恒 0 且**不校验 claim**，RAG **严格校验**」—— 两半都在签字范围内。
+
+### 根因
+
+签字信息**分散在三处**，而检索是**逐层下行**的：
+
+```
+docs/Intentional_Deviations/_INDEX.md      ← 索引
+  └─ users/                                 ← 🔴 6 个 0 字节文件，断在这里
+      ├─ admin/_shared.md   （原 0 字节）
+      └─ _cross/signed-deviations.md        ← 真正的签字在 _cross 这一层，绕过了 users/
+```
+
+本域的签字（N-1 / N-4 / N-5）当时**只存在于 `docs/DRIFT/users/admin/_shared.md`** ——
+那是**漂移台账**，按 §7.2 的读法不该当签字档用。
+于是两个 agent 查同一个问题，一个查到「没签字」、一个查到「签了」。
+
+### 为什么这条特别危险
+
+它不是「漏查」这种可恢复的错误，而是**让审计结论反向**：
+一个 agent 会把一条**用户已经拍板过的决策**当成新发现，
+提出「要不要对齐 Go」的疑问 —— 而按 §5.3b 的纪律，
+另一个 agent 可能就**「顺手修回旧行为」**，把用户的决策推翻。
+
+### 下次怎么防
+
+1. **签字档必须逐域落地**，不能只在 `_cross` 留一份转述。
+   本轮已补齐 `docs/Intentional_Deviations/users/admin/{_shared,api,rpc}.md`。
+2. **发现「某档下有 0 字节文件」时，先把它当成事故处理**，而不是当成「该域没有签字偏离」。
+   两者在文件内容上完全一样，只能靠**别的域也有签字**来推断出「这是洞不是空」。
+3. **写「未签字」三个字之前，必须真的走完 `_INDEX.md → 域 → 组件` 三层**，
+   并且**再全文 grep 一次 `signed-deviations.md`**。本轮两次误判都栽在这一步。
+
+> ⚠️ 同型洞仍在：`docs/Intentional_Deviations/users/user/{api,rpc}.md`
+> 与 `users/_shared.md` **仍是 0 字节** ⇒ 归 users/user 域，未处理。

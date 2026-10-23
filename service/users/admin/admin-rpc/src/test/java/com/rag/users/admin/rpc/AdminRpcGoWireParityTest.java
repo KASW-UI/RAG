@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -330,36 +331,52 @@ class AdminRpcGoWireParityTest {
     }
 
     // ==================================================================
-    // 4. UpdateUserResp.success —— wire 上两侧相反（DRIFT-ARPC-002），决策 tripwire
+    // 4. UpdateUserResp.success —— 已对齐 Go（DRIFT-ARPC-002，2026-10-23 修复）
     // ==================================================================
 
     /**
-     * 🔴 <b>Go 与 RAG 的 {@code UpdateUserResp.success} 在 wire 上相反</b>：
-     * Go 的 {@code updateuserlogic.go:105-113} 构造响应时<b>没有</b>给 {@code Success} 赋值
-     * ⇒ proto3 默认值 {@code false}；RAG 的 {@code AdminServiceGrpcImpl:219} 显式
-     * {@code setSuccess(true)} ⇒ {@code true}。
+     * <b>两侧已一致：{@code UpdateUserResp.success} 都是 {@code false}</b>。
      *
-     * <p><b>本条不判「谁对」，只钉住「差异还在」</b> —— 它是 tripwire：
-     * 若有人把 RAG 改成 {@code false}（对齐 Go）却没更新台账与本断言，本条立刻红。
+     * <p><b>Go 出处</b>：{@code service/user/admin/rpc/internal/logic/updateuserlogic.go:105-113}
+     * <pre>
+     *   return &amp;pb.UpdateUserResp{
+     *       User: &amp;pb.UserInfo{ Uid: …, Username: …, Email: …, Status: …, ExtraInfo: … },
+     *   }, nil
+     * </pre>
+     * 只 set 了 {@code User}，<b>没有 set Success</b> ⇒ proto3 bool 默认值 {@code false}，
+     * 线上序列化时该字段<b>缺席</b>，客户端读到 {@code false}。
      *
-     * <p><b>为什么 admin-api 的 HTTP 面看不到它</b>：{@code AdminUpdateUserService:93}
-     * 硬编码 {@code success=true}（Go 侧 admin/api 的 updateuserlogic.go 同样硬编码 true）
-     * ⇒ 端到端 HTTP 两侧都是 {@code {"success":true}}，差异只在<b>直连 gRPC</b> 的调用方可见。
+     * <p><b>2026-10-23 变更经过（§3.3.3 的原型案例：绿测试锁死了错误答案）</b>：
+     * 本断言<b>原先要求 {@code assertTrue(resp.getSuccess())}</b>，
+     * 并在失败消息里写「若本断言失败，说明有人改了实现」——
+     * 也就是说，它<b>把「与 Go 相反」这个漂移固化成了绿测试</b>。
+     * 修复实现后它立刻变红，<b>这条红正是「跑绿不是对」的直接证据</b>。
+     * 现改为断言<b>与 Go 一致的 {@code false}</b>，并保留 Go 出处作为反向守卫。
+     *
+     * <p><b>⚠️ 顺序说明</b>：本轮实际是<b>先改实现、后改断言</b>，
+     * 严格说与 §3.3.3「先改/删错误断言，再改实现」的顺序相反。<b>结论一致</b>：
+     * 那条绿测试锁的是错误答案，改实现后它变红，正好证明了问题所在。
+     *
+     * <p><b>为什么 admin-api 的 HTTP 面看不到这个字段</b>：
+     * {@code AdminUpdateUserService} 硬编码 {@code success=true}
+     * （Go 侧 {@code service/user/admin/api/internal/logic/admin/updateuserlogic.go:68} 同样硬编码）
+     * ⇒ 端到端 HTTP 两侧都是 {@code {"success":true}}，<b>本条只对直连 gRPC 的调用方可见</b>。
+     * ⇒ 也正因如此，HTTP 对拍全绿 <b>不能</b> 证明 rpc 层已对齐。
      */
     @Test
-    @DisplayName("🔴 UpdateUserResp.success：wire 上 Go=false / RAG=true（DRIFT-ARPC-002，tripwire）")
-    void updateUserRespSuccessFieldIsStillOppositeToGo() {
+    @DisplayName("✅ UpdateUserResp.success：与 Go 一致为 false（Go 不 set Success，proto3 默认值）")
+    void updateUserRespSuccessMatchesGoWire() {
         Outcome o = capture((Consumer<StreamObserver>) obs -> grpc.updateUser(UpdateUserReq.newBuilder()
                 .setUid(USER_UID).setUsername("renamed-by-probe").build(), obs));
 
         assertNull(o.error, "更新一个存在的用户不应失败: " + o.error);
         com.rag.users.admin.proto.UpdateUserResp resp =
                 (com.rag.users.admin.proto.UpdateUserResp) o.response;
-        assertTrue(resp.getSuccess(),
-                "RAG 侧当前显式 setSuccess(true)（AdminServiceGrpcImpl:219），"
-                        + "而 Go 侧 updateuserlogic.go:105-113 漏赋值 ⇒ wire 上 Go=false。"
-                        + "若本断言失败，说明有人改了实现 —— 请同步更新 "
-                        + "docs/DRIFT/users/admin/rpc.md §7 DRIFT-ARPC-002 与本断言");
+        assertFalse(resp.getSuccess(),
+                "Go 的 updateuserlogic.go:105-113 只 set 了 User、没 set Success"
+                        + " ⇒ wire 上必须是 false。RAG 侧 AdminServiceGrpcImpl 的 updateUser"
+                        + " 若重新 setSuccess(true)，就又与真源分叉了 —— 请同步更新 "
+                        + "docs/DRIFT/users/admin/rpc.md 的 DRIFT-ARPC-002 与本断言。");
         assertTrue(resp.hasUser(), "Go 侧同样构造了 user（updateuserlogic.go:106-113 带 user）");
     }
 

@@ -7,7 +7,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.Map;
 
 /**
@@ -29,20 +29,32 @@ import java.util.Map;
  *   username    TEXT UNIQUE                    -- nullable（admin 可没 username）
  *   password    TEXT                           -- bcrypt 哈希（PasswordUtil.encrypt）
  *   email       TEXT UNIQUE                    -- nullable（1:1 保留 Go 端 *string 语义）
- *   extra_info  JSONB                          -- JsonbTypeHandler
- *   create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
- *   update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ *   extra_info  TEXT                              -- JsonTextTypeHandler（2026-10-23 由 JSONB 改来）
+ *   create_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+ *   update_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
  * </pre>
  *
- * <p><b>⚠️ 两个时间列是 {@code timestamp}（无时区），Go 侧是 {@code timestamptz}</b>
- * —— 属 DRIFT-ARPC-004 ②③，**修法归属 {@code users-common} 的 DDL**（本组件无 DDL 所有权）。
- * Go 出处：{@code data_model.go:12-13} 的 {@code time.Time} 无 type tag
- * ⇒ GORM 的 postgres driver（{@code postgres.go:251-256}）生成 {@code timestamptz}。
+ * <p><b>⚠️ 2026-10-23：{@code extra_info} 由 {@code JSONB} 改为 {@code TEXT}</b>
+ * —— 对齐 Go 的 {@code serializer:json}（{@code data_model.go:11}），修 DRIFT-ARPC-004①。
+ * 双侧活体对拍实测：含 U+0000 的 extra_info，Go 落库成功、RAG 被 jsonb 以 22P02 拒收
+ * （{@code unsupported Unicode escape sequence}）⇒ 真实可观察差异。
+ * 配套改用 {@link com.rag.users.admin.rpc.mapper.JsonTextTypeHandler}；
+ * <b>同模块的 {@code UserEntity.extra_info} 仍走 {@code JsonbTypeHandler}</b> ——
+ * 那列是 {@code users_user.extra_info}，仍是 jsonb，DDL 归属 users/user 域，勿一并改。
+ *
+ * <p><b>⚠️ 2026-10-23：两个时间列已由 {@code timestamp} 改为 {@code timestamptz}，
+ * 实体同步 {@code LocalDateTime ⇒ OffsetDateTime}</b> —— 对齐 Go 的
+ * {@code data_model.go:12-13}（{@code time.Time} 无 type tag
+ * ⇒ {@code gorm.io/driver/postgres/postgres.go:251-256} 生成 {@code timestamptz}）。
+ * <b>两处必须同一提交</b>：列改 timestamptz 而实体仍是 LocalDateTime，
+ * 等于把「列类型不一致」换成「值算错」，那比现状更糟。
+ * 本表两列<b>不可观察</b>（admin.proto 无对应字段）；同族里唯一可观察的那一列
+ * 是 {@code admin_invite.expires_at}，见 {@link AdminInviteEntity}。
  *
  * <p>L4 实现机制差异：
  * <ul>
- *   <li>Hibernate {@code @JdbcTypeCode(SqlTypes.JSON)} → MyBatis-Plus {@code JsonbTypeHandler}
- *       （Go 侧是 {@code serializer:json} 写进 <b>text</b> 列 ⇒ 边界行为不同，见 DRIFT-ARPC-004 ①）</li>
+ *   <li>Hibernate {@code @JdbcTypeCode(SqlTypes.JSON)} → MyBatis-Plus {@code JsonTextTypeHandler}
+ *       （Go 侧是 {@code serializer:json} 写进 <b>text</b> 列 ⇒ 现在两侧同构）</li>
  *   <li>JPA {@code @Entity} → MyBatis-Plus {@code @TableName}（无状态 entity，纯 POJO + Lombok @Data）</li>
  * </ul>
  *
@@ -69,12 +81,12 @@ public class AdminEntity {
     @TableField("email")
     private String email;
 
-    @TableField(value = "extra_info", typeHandler = com.rag.users.admin.rpc.mapper.JsonbTypeHandler.class)
+    @TableField(value = "extra_info", typeHandler = com.rag.users.admin.rpc.mapper.JsonTextTypeHandler.class)
     private Map<String, String> extraInfo;
 
     @TableField(value = "create_time", insertStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.NEVER, updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.NEVER)
-    private LocalDateTime createTime;
+    private OffsetDateTime createTime;
 
     @TableField(value = "update_time", insertStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.NEVER, updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.NEVER)
-    private LocalDateTime updateTime;
+    private OffsetDateTime updateTime;
 }

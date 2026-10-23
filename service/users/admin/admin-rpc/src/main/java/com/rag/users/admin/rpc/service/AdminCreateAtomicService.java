@@ -13,7 +13,7 @@ import io.grpc.StatusRuntimeException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -121,7 +121,15 @@ public class AdminCreateAtomicService {
         if (invite == null) {
             throw new InviteUnavailableException("invite code not found: " + inviteCode);
         }
-        LocalDateTime now = LocalDateTime.now();
+        // 🔴 OffsetDateTime，不是 LocalDateTime（2026-10-23，用户拍板修 DRIFT-ARPC-004②）。
+        // Go 出处：createadminlogic.go:64-65
+        //     now := time.Now()
+        //     if invite.UsedAt != nil || !invite.ExpiresAt.After(now) {
+        // Go 的 invite.ExpiresAt 来自 **timestamptz** 列 ⇒ 带 location 的绝对时刻，
+        // `.After(now)` 比的是绝对时刻。
+        // 原 RAG 的 LocalDateTime 版本比的是**墙钟**：单实例同区恰好自洽，
+        // 跨时区多实例部署时（A 区建码、B 区消费）邀请码会刚生成就判为已过期 ⇒ 与 Go 行为分叉。
+        OffsetDateTime now = OffsetDateTime.now();
         if (invite.getUsedAt() != null || !invite.getExpiresAt().isAfter(now)) {
             throw new InviteUnavailableException("invite code expired or used: " + inviteCode);
         }

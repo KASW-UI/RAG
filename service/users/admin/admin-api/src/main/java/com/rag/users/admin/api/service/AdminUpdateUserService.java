@@ -87,9 +87,15 @@ public class AdminUpdateUserService {
         log.info("updateUser success, operator_id={} target_uid={}", operatorId, req.getUid());
 
         UpdateUserResp resp = new UpdateUserResp();
-        // 与参考侧 UpdateUserLogic.java:129 1:1：显式 true。
-        // 不能透传 rpcResp.getSuccess()——admin.proto 的 UpdateSelfResp/UpdateUserResp
-        // 在 admin-rpc 未显式 set 时 proto3 默认值是 false，透传会把"成功"报成失败。
+        // 🔴 2026-10-23：订正本注释的 Go 出处（原写「UpdateUserLogic.java:129」，**引错了**）。
+        // 正确出处：service/user/admin/api/internal/logic/admin/updateuserlogic.go:68
+        //     return &types.UpdateUserResp{ Success: true, User: … }
+        // ⇒ **api 层**两侧都硬编码 true，HTTP 面本就一致，本条与 admin-rpc 的
+        //   DRIFT-ARPC-002（rpc 层 Go 不 set ⇒ false）互不影响。
+        //
+        // 不能透传 rpcResp.getSuccess()：proto3 bool 未 set 时默认值是 false，
+        // 而 admin-rpc 侧已于 2026-10-23 对齐 Go **不再显式 set**（AdminServiceGrpcImpl:219）
+        // ⇒ 透传会把「成功」报成失败。
         resp.setSuccess(true);
         if (rpcResp.hasUser()) {
             UserInfo ui = support.fromProto(rpcResp.getUser());
