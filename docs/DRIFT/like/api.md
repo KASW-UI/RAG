@@ -774,7 +774,7 @@ Go 侧则**正常发出**。
 | **DRIFT-LIKEAPI-016** | `weight: 1e400` ⇒ Go **拒**（`strconv.ParseFloat` 检查 `ErrRange`），RAG 收成 `Double.POSITIVE_INFINITY` ⇒ **真的发出一次 `weight=+Inf` 的写调用** | 修法明确（`setWeight` 改 `Object` 入参 + `isFinite()` 校验），但需与 012 共用同一套「元素级/字段级解析器」组件 ⇒ **与 012 合并做**，避免两次改动同一批 DTO |
 | **DRIFT-LIKEAPI-017** | 单次 RPC 超时：Go **固定 2000ms**（`zrpc/config.go:31` 的 struct tag 默认），RAG 取 **HTTP 剩余预算**（≤3000） | 需新增独立配置项 + 改 `GoStyleRequestDeadline` 的「无预算就原样返回」分支（单测里没有 HTTP 超时上下文时两侧语义会再次分叉）⇒ 需要连带审 `common` 的 deadline 组件，同样受 §4 的并发约束 |
 | **DRIFT-LIKEAPI-018/019/020** | 3 条**文档层**高危断言 | ⚠️ **纯注释修正**，无需运行期测试。本轮**未做**，留待下一轮（改动零风险，但需要逐条核对 Go 出处，不能凭印象改） |
-| **DRIFT-LIKEAPI-021/022** | 响应 `Content-Type` 无 `charset`（判语义等价）/ 裸 503（RAG 独有） | 台账建议登记为签字偏离 ⇒ 属 `Intentional_Deviations` 档的写入，本轮未做 |
+| **DRIFT-LIKEAPI-021/022** | 响应 `Content-Type` 无 `charset`（判语义等价）/ 裸 503（RAG 独有） | ✅ **已建档**为待签字候选：`Intentional_Deviations/like/api.md` 的 SD-…-08 / -09。⚠️ 标注为**待签字**而非已签字 —— 保留在案是为了让下一轮复核**不会把它们当新发现重提**，不是代替用户拍板 |
 
 ## 5. ⚠️ 关于「018 不加测试」的一条自我约束
 

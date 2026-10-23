@@ -168,7 +168,7 @@ Go 的 `DispatchFactOnce` 是**在事务里发 HTTP**：`Begin` → 行锁 → P
 | **DRIFT-LIKE-002** | 业务码对**未迁移的 Go like-api** 丢失：Go 直发 `grpc-status: 5003`；grpc-java `fromCodeValue(5003)` → `UNKNOWN(2)`（实测 `desc="Unknown code 5003"`，`Code.values().length == 17`），Java 改放自定义 trailer `rag-like-biz-code`，而 Go like-api 只读 `int(st.Code())` ⇒ 灰度期 envelope code 变 **2**、msg 因 `GetErrMsg(2)` 落表外而回落 `"FAIL"` | SEMANTIC MISMATCH | 🔴 |
 | DRIFT-LIKE-004 | Kafka 消费侧 Java 多 **9 次进程内重试**：`new DefaultErrorHandler(recoverer)` 内部即 `SeekUtils.DEFAULT_BACK_OFF = FixedBackOff(0,9)`；Go `kq` 的 `ForceCommit` 默认 true 且未注册 errorHandler ⇒ **0 次**，失败只不提交位点 | OBSERVABLE | 🟠 |
 | DRIFT-LIKE-005 | Kafka key/分区：Go `Push` 内部即 `PushWithKey(UnixNano)` 且用 `LeastBytes{}` 分区；Java `send(topic,null,payload)` 走默认分区器 | OBSERVABLE | 🟠 |
-| DRIFT-LIKE-006 | 模块**从未做过 Spring 上下文加载测试**（无 `@SpringBootTest` / `ApplicationContextRunner`），而 javadoc 点名的 4 个 wiring 测试**全部不存在** —— 与 §6.6.5 message-rpc 同型 | UNKNOWN | 🟠 |
+| DRIFT-LIKE-006 | 模块**从未做过 Spring 上下文加载测试**（无 `@SpringBootTest` / `ApplicationContextRunner`），而 javadoc 点名的 4 个 wiring 测试**全部不存在** —— 与 §6.6.5 message-rpc 同型<br>🔴 **2026-10-23 修复轮更正：部分过期** —— 已新增 `LikeRpcSpringContextWiringTest`（7 条 / 真 PG）且实跑全绿；真实缺口缩到 2 处（`rpcInterceptorConfigurer` 未验证是否真挂上 gRPC 调用链、`@EnableScheduling` 无守门）。详见第三轮 §5 L-U11 | UNKNOWN | 🟠 |
 | DRIFT-LIKE-007 | 未知字段从「忽略」变「丢弃」：`@JsonIgnoreProperties(ignoreUnknown=false)` 覆盖了 Jackson 3 的默认忽略 ⇒ 抛异常 ⇒ 记 `json_error` 并**提交位点**（永久丢失、不可恢复的消息黑洞） | SEMANTIC MISMATCH | 🟡 |
 | DRIFT-LIKE-008 | map 形式 `Updates` **会**刷新 `updated_at`（真 PG 实测：`2020-01-01 08:00` → `2026-10-22 19:48:54.598+08`）；Java `updateState` 不刷新 ⇒ `idx_user_list(user_id, updated_at)` 内容两侧不同 | OBSERVABLE | 🟡 |
 | DRIFT-LIKE-009 | 指标 label 漂移 4 处：`redis_read_error` 的 target_type 塞字面量且 action 恒 `"n/a"`；Go「字段不存在」也记指标而 Java 直接返回；Go `GetLikeState` 记 `redis_error` 而 Java 不记；Java 把序列化失败并入 `kafka_error` | OBSERVABLE | 🟡 |
@@ -751,7 +751,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | **DRIFT-LIKE-003**（事实投递链路缺失） | **仍然成立**：Java 侧 6 个骨架文件逐个复核，**仍是 4 行**；生产侧 `LikeDomainFactService` **完整**且已被 `LikeMessageIngestService` 调用 ⇒ 「只写不送」成立 |
 | **DRIFT-LIKE-004**（9 次进程内重试） | **仍然成立**：`LikeUpdateKafkaListener.java:170-175` 用的 `new DefaultErrorHandler(recoverer)` **内置 `FixedBackOff(0,9)`**；而同一文件 `:44-49` 的 javadoc 仍写着「不做进程内重试」⇒ **错误断言 E 仍在** |
 | **DRIFT-LIKE-005**（Kafka key/分区） | **仍然成立**，且本轮把消费点钉到 `go-queue@v1.2.2/kq/pusher.go:123-125`（`Push` → `PushWithKey(UnixNano)`）与 `:44-48`（`Balancer: &kafka.LeastBytes{}`） |
-| **DRIFT-LIKE-006**（模块从未做过 Spring 上下文加载测试） | **仍然成立，且后果已实测**：本轮首次真正启动该应用（E-Boot）⇒ **上下文起不来**（DRIFT-LIKE-013~016）。⇒ 首轮 U1「上下文能否启动」**结论：不能** |
+| **DRIFT-LIKE-006**（模块从未做过 Spring 上下文加载测试） | **仍然成立，且后果已实测**：本轮首次真正启动该应用（E-Boot）⇒ **上下文起不来**（DRIFT-LIKE-013~016）。⇒ 首轮 U1「上下文能否启动」**结论：不能**<br>🔴 **2026-10-23 修复轮更正：本条现已「部分过期」** —— 修复轮新增了 `LikeRpcSpringContextWiringTest`（7 条，**真 PG Testcontainers**），第三轮实跑全绿 ⇒「**从未**做过 Spring 上下文加载测试」不再成立。<br>⚠️ **剩下的真实缺口只有 2 处**（见第三轮 §2 与 §5 的 L-U11）：`rpcInterceptorConfigurer`（Bean 存在但**没挂进 gRPC 调用链**）与 `@EnableScheduling`。<br>⇒ 本条**不能**简单标「已关」：断言「Bean 存在」抓不到「Bean 在但没接上」这一形态。 |
 | **DRIFT-LIKE-007**（未知字段从忽略变丢弃） | **仍然成立**：`LikeEventContracts.java:40,94,134` 三处 `@JsonIgnoreProperties(ignoreUnknown = false)` |
 | **DRIFT-LIKE-008**（`updated_at` 刷新差异） | **仍然成立**，并把 Go 侧机制钉到消费点：`gorm.io/gorm@v1.31.1/callbacks/update.go:201`（`case map[string]interface{}`）→ `:238`（`field.AutoUpdateTime > 0` ⇒ 追加自动更新时间）⇒ **map 形式确实会刷新** ⇒ `LikeRecordMapper.java:196-199` 的注释（错误断言 B）仍错 |
 | **DRIFT-LIKE-009**（指标 label 漂移 4 处） | **仍然成立**：`LikeDomainService.java:881`（`redis_read_error` 的 target_type 是 key 反解出来的类型、action 恒 `"n/a"`）、`hgetCountLenient` 只在**异常**时打点而 Go 在**字段不存在**时也打点 |
@@ -952,10 +952,10 @@ Go 的 `DeliveryStatus int32` / `RetryCount int32`（`internal/model/domain_fact
 | **已修** | **9 条**：002（定性为框架限制，未改代码）/ 004 / 005 / 007（**证伪**）/ 008 / 009 / 010 / 011 / 012 / 018 |
 | **已修** | 错误断言 **A~I 共 9 条**全部清理，另**新发现并清理 4 处** |
 | **证伪** | **DRIFT-LIKE-007 不成立** —— `@JsonIgnoreProperties(ignoreUnknown=false)` 是 **no-op** |
-| **纠正台账** | **§OP-07「Branch 3/4 ⇒ 返回 err ⇒ 不提交（重投）」是错的**；Go 实为**提交位点 ⇒ 丢弃** |
-| **台账作废** | §7.6 对 004 的「失败只不提交位点」**反了**：`ForceCommit` 默认 true ⇒ 失败**也**提交 |
-| **新发现（Java 侧缺陷）** | `epochSeconds` ⇒ 同一条记录冷/热缓存下 timestamp **差 1000 倍** |
-| **保留未对齐** | 分区器 `LeastBytes` + `Compression: Snappy`（OBSERVABLE，见 §2.5） |
+| **🔴 纠正台账自身** | **5 处**（原文全部保留，就地加更正）—— 详见 **§4.5**。最重的两处：<br>① `§OP-07` 的「Branch 3/4 ⇒ 返回 err ⇒ **不提交（重投）**」**反了** —— Go 实为**提交位点 ⇒ 丢弃**；<br>② 错误断言 **A** 的前提不成立 —— 它描述的是 Go 侧一条**不可达路径** |
+| **台账部分过期** | `§7.6` 对 **006** 的「从未做过 Spring 上下文测试 —— 仍然成立」**已过期**（修复轮新增了真 PG 的 wiring 测试），真实缺口缩到 2 处 |
+| **新发现（Java 侧缺陷）** | `epochSeconds` ⇒ 同一条记录冷/热缓存下 timestamp **差 1000 倍**（见 §2.10） |
+| **保留未对齐** | 分区器 `LeastBytes` + `Compression: Snappy`（OBSERVABLE，见 **§2.11**） |
 
 ## 1. 证据强度声明（本轮）
 
@@ -1168,6 +1168,27 @@ Java 侧用默认（按 key 哈希）分区器、**未配 Snappy**。
 
 ⇒ 已把该用例改为 `legacyTaskPushersSwitchIsNoLongerConsulted`，把「不做回退」这个决定**钉进测试**，
 避免下一个人出于「善意」再把回退逻辑加回来。
+
+## 4.5 🔴 本轮对**台账自身**的更正（原文均保留，未删改）
+
+> 这一节记的是「台账自己写错了什么」。
+> ⚠️ 保留原文是因为它们当时**基于当时能拿到的证据**，错在**推理链的一环**，
+> 而不是抄写错误 —— 这类更正比「抄错了」更值得留档。
+
+| 台账位置 | 原文结论 | 本轮实测 | 更正 |
+|---|---|---|---|
+| `§OP-07` 表格 Branch 3 / Branch 4 | 「outbox 构造失败 / DB 事务失败 ⇒ 返回 `err` ⇒ **不提交（重投）**」 | `kq/config.go:24` `ForceCommit` 默认 **true** 且 `mq.yaml` 未覆盖 ⇒ `queue.go:235` 的 `if !q.c.ForceCommit { continue }` **不成立** ⇒ 落到 `CommitMessages` ⇒ **提交位点** | ❌ **反了**。Go 侧这两个分支是**丢弃**，不是重投 |
+| `§7.6` 对 004 的复核 | 「Go 的 `ForceCommit` 默认 true 且未注册 errorHandler ⇒ **0 次**，失败**只不提交位点**」 | 同上 | ⚠️ **「0 次」对，「只不提交位点」错** —— 恰恰是 `ForceCommit=true` 导致**照样提交** |
+| `§7.6` 对 006 的复核 | 「模块从未做过 Spring 上下文加载测试 —— **仍然成立**」 | 修复轮已新增 `LikeRpcSpringContextWiringTest`（7 条 / 真 PG），第三轮实跑全绿 | ⚠️ **部分过期**，真实缺口缩到 2 处（见 §5 L-U11） |
+| `§1` 首轮摘要与错误断言 **A** | 「GORM 对 timestamptz 取 `data.Unix()` ⇒ 回源产出**秒**，与写路径毫秒不一致，**是真实可观察行为，原样保留**」 | `UserLikeListResult.CreateTime` 的 gorm DBName 是 `create_time`，`Select` 取的是 `created_at` ⇒ **不匹配 ⇒ 恒 0** ⇒ `getuserlikelistlogic.go:94-96` 每行 `continue` ⇒ **该分支从未执行过 ZADD** | ❌ **前提不成立**，描述的是一条**不可达路径**。详见 §2.10 |
+| 错误断言 **E**（源码注释侧） | 「不做进程内重试……若在 Java 侧加 `FixedBackOff` 做 N 次进程内重试，那是新增行为」 | `DefaultErrorHandler` 单参构造**内建** `FixedBackOff(0,9)` ⇒ 该行为**正在发生** | ❌ 半错，见 §2.1 |
+
+⚠️ **这五条的共同形状**（值得记住）：
+**每一条都是「读到了声明，但没读到消费点」** ——
+`ForceCommit` 读的是 `config.go` 的 tag 而不是 `queue.go` 的 `if`；
+`CreateTime` 读的是 struct 字段而不是 `Scan` 的列名匹配；
+`FixedBackOff` 读的是调用侧的一行 `new DefaultErrorHandler(x)` 而不是它的构造链。
+⇒ 这正是 AGENTS.md §3.3.1 反复强调的那件事，本轮又实证了一次。
 
 ## 5. 本轮遗留（未修 / 无证据）
 

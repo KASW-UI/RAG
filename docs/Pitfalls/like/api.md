@@ -302,6 +302,72 @@ Jackson 对溢出字面量**不报错**，直接按 IEEE 754 给无穷。
    它的措辞精度就是风险 —— 本轮的 `application/*+json 在 Go 侧同样不算 JSON`
    就属于**过宽**（`application/json-patch+json` 在 Go 侧**是**算的）。
 
+## PIT-LIKEAPI-011 — 恒真断言：不是「写错了」，是**主动制造一条假绿**
+
+**现象（修复轮 2026-10-23）**
+给 `DRIFT-LIKEAPI-018` 补守门测试时，我顺手写了这么一条：
+
+```java
+@Test
+void httpTimeoutIsActuallyConfigured() {
+    assertEquals("3s", ...isEmpty() ? "3s" : "3s", "占位：真实断言在别的类里");
+}
+```
+
+**它绿了。永远会绿。** —— 三元表达式的两个分支是同一个字面量。
+
+**为什么这条特别危险**
+它比「没写测试」更糟。PIT-LIKEAPI-010 讲的是「测试守错了东西」，
+而这条是**测试什么都没守，却占着一个 `@Test` 的位置**，
+读代码的人会看到「🔴 已有守门测试」⇒ **跳过这件事**。
+
+⇒ 这是 AGENTS.md §3.3.3「绿测试可能是错误答案的守卫」的**更隐蔽的变种**：
+不是绿测试锁死了错答案，而是**用一条无意义的断言伪装成"已经验过了"**。
+
+**本域的具体背景**
+`DRIFT-LIKEAPI-018` 是**纯文档缺陷**（`LikeApiApplication` 的类 javadoc 曾宣称
+「刻意不配 `observability.http-timeout`」，而 `application.yml:27-29` 早就配了 3s）。
+台账 §9 **U-03 明确记着「3s 的 503 出口未在运行期复现」**（需真 Tomcat + 慢下游）。
+⇒ 在这个状态下写任何"配置已生效"的断言都是自欺。
+
+**下次怎么防**
+1. **纯文档/注释类修复不需要新测试** —— 加测试才是异常信号。
+2. 写完断言先问一句：**「把这个断言改成恒真，它还会绿吗？」** 会 ⇒ 别提交。
+3. 真要钉配置，至少要能从**运行期**读到（如注入 `@ConfigurationProperties` 后的实际值），
+   而不是在测试里复述一个字面量。
+4. 拿不准就**不写**，并在测试类的注释里**写明为什么这条没有测试**
+   （本轮 `LikeApiGoAlignmentTest` 末尾就是这么做的，把「不写」的理由显式化，
+   避免下一个人以为「已经有人验过了」）。
+
+---
+
+## PIT-LIKEAPI-012 — `Arrays.asList(null)`：单参数时那个 `null` 是**数组本身**
+
+**现象（修复轮 2026-10-23）**
+测「target_ids 全为 null」时写：
+
+```java
+Arrays.asList(null)          // ❌ NullPointerException
+```
+
+**根因**
+`Arrays.asList(T... a)` 是 **varargs**。传**一个** `null` 时，编译器无法区分
+「一个 null 元素」与「整个数组是 null」⇒ 直接把 `null` 当成 `T[]` 传入
+⇒ `Arrays$ArrayList.<init>` 里 `requireNonNull` 抛 NPE。
+
+⚠️ **传两个以上参数不会踩**：`Arrays.asList(null, null)` 会正常展开成 `[null, null]`。
+⇒ 这个坑只在**恰好一个 null 元素**时出现，而那恰好是最容易构造的测试输入。
+
+**下次怎么防**
+需要「允许 null 元素的单元素列表」时：
+- `Collections.singletonList(null)` ✅（本轮改用这个）
+- 或 `Arrays.asList(new String[]{null})` ✅（显式数组）
+
+⚠️ 顺带：`List.of(null)` / `List.of(...)` 任何含 null 的写法**都会**抛 NPE ——
+`List.of` 是**不允许 null 元素**的，而 `Arrays.asList` / `Collections.singletonList` 允许。
+⚠️ 而本轮修的 `DRIFT-LIKEAPI-013` 恰恰是「数组里允许 null」这件事 ——
+**测试数据构造方式与被测语义在同一处打架时，先确认构造 API 的契约**。
+
 ---
 
 ## 附：本轮两条最贵的教训（给下一个接手的人）
