@@ -17,6 +17,28 @@ spring:
   application:
     name: task-api
 
+  # ============== multipart 关掉（本服务不支持 multipart）==============
+  # ⚠️⚠️ 属性名是 `spring.servlet.multipart.enabled`，**没有 `mvc.`**。
+  #    Boot 4 的 MultipartAutoConfiguration 上是
+  #      @ConditionalOnBooleanProperty(name = "spring.servlet.multipart.enabled", matchIfMissing = true)
+  #    （在 spring-boot-servlet-4.0.8.jar 里）⇒ 写成 `spring.mvc.servlet.multipart.enabled`
+  #    是**静默失效**的：属性没人读，开关根本没关上。
+  #    ⚠️ 上一轮台账（DRIFT-TASK-API-003）记的就是那个错名字 ⇒ 当时那句
+  #    「已实测排除 Spring 侧」是**假阴性**（探针用的就是错名字，一直是通的）。
+  #
+  # 为什么关：Go 侧 task-api **没有 multipart 概念**——
+  #   · service/task/api/internal/handler/routes.go:15-25 只有一条路由；
+  #   · gettaskhandler.go:19-21 是裸 `json.NewDecoder(r.Body)`，
+  #     **不读任何 form part**，multipart body 到它那儿就是一段 JSON 文本，
+  #     解析失败 ⇒ 400。
+  # ⇒ Spring 侧也不该让 multipart resolver 先把 body 吃掉
+  #   （DispatcherServlet 的 multipart resolver 调 getParts() 消费 body），
+  #   否则 body 到 handler 时已被消费 ⇒ 报「Required request body is missing」。
+  # 关掉之后 multipart body 原样流给 Jackson ⇒ 与 Go 侧同样按 JSON 解析 ⇒ 同样的 400。
+  servlet:
+    multipart:
+      enabled: false
+
   # ============== Nacos 服务发现 ==============
   # Go 侧 task-api **不走服务发现**（etc/task.yaml 用 Target 直连，见下方 grpc 段）。
   # 这里保留 Nacos 配置是为了「切到 discovery:///task-rpc 时不必改代码/依赖」。
