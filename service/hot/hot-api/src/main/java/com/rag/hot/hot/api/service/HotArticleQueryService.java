@@ -7,6 +7,7 @@ import com.rag.hot.hot.api.client.HotRpcClient;
 import com.rag.hot.hot.api.dto.HotArticleCard;
 import com.rag.hot.hot.api.dto.HotArticlesReq;
 import com.rag.hot.hot.api.dto.HotArticlesResp;
+import com.rag.hot.hot.api.exception.HotCodeError;
 import com.rag.hot.hot.api.metrics.HotApiMetrics;
 import com.rag.hot.hot.common.errmsg.HotErrorCode;
 import com.rag.hot.hot.common.errmsg.HotErrorMessages;
@@ -134,22 +135,53 @@ public class HotArticleQueryService {
      *
      * <p>Go 的 {@code SetErrorHandler}（{@code hotcenter.go:53-66}）对 {@code *hotcommon.CodeError}
      * 取出 {@code Code=5001 / Msg=GetErrMsg(5001)="internal server error"}，返回 <b>HTTP 200</b>。
-     * 两条 fatal 分支都走这一个出口 ⇒ 用 {@link BusinessException}
+     * 两条 fatal 分支都走这一个出口 ⇒ 用 {@link HotCodeError}
      * 携带 code/msg，由 {@code GlobalExceptionHandler} 产出同样的信封。
+     *
+     * <h3>⚠️ 为什么返回的是 {@link HotCodeError} 而不是普通 {@code BusinessException}</h3>
+     * <p>Go 侧的两条 fatal 分支<b>记的日志对象不同</b>（{@code getHotArticlesLogic.go:65-74}）：
+     * <pre>
+     *   if rpcErr != nil {
+     *       logger.LogBusinessErr(l.ctx, 5001, rpcErr)          // :67 —— 记**下游 gRPC error 本身**
+     *       return nil, hotcommon.NewErrCode(5001)              // :68
+     *   }
+     *   if hotResp == nil {
+     *       nilRespErr := hotcommon.NewErrCode(5001)            // :72
+     *       logger.LogBusinessErr(l.ctx, 5001, nilRespErr)      // :73 —— 记 **CodeError**
+     *       return nil, nilRespErr                              // :74
+     *   }
+     * </pre>
+     * ⇒ <b>只有「hot-rpc 返回空响应」这一条</b>的日志 {@code error_reason} 是
+     * {@code (*CodeError).Error()} 的整串：
+     * <pre>
+     *   ErrCode:5001, Errmsg:internal server error
+     * </pre>
+     * （Go 的日志取 {@code err.Error()}，见 {@code service/common/logger/logger.go:120}。）
+     * ⇒ 该分支必须用 {@link HotCodeError}（它的 {@code getMessage()} 就是这串）。
+     *
+     * <p>⚠️ <b>HTTP 信封不受影响</b>：信封走 {@code GlobalExceptionHandler.bizMsgOf}
+     * ⇒ 取 {@link HotCodeError#getBizMsg()} 的<b>纯文案</b>，与 Go 的逐字段复制一致。
      */
     private com.rag.common.exception.BusinessException fatal(Throwable cause) {
         int code = HotErrorCode.ERROR_SERVER_COMMON.getCode();
-        // Go :67/:73 都会记一条业务错误日志；日志失败不得改变响应（见 HotArticleHydrator 同款取舍）。
+        HotCodeError err = new HotCodeError(code, HotErrorMessages.getMsg(code));
+        // Go :67/:73 都会记一条**业务错误日志**；日志失败不得改变响应（见 HotArticleHydrator 同款取舍）。
         try {
             if (cause != null) {
+                // Go :67 —— 记的是**下游 gRPC error 本身**（不是 CodeError）。
                 logger.logBusinessErr(Context.current(), code, cause);
             } else {
-                logger.logInfo(Context.current(),
-                        "hot rpc returned a nil response for route " + HotApiMetrics.ROUTE);
+                // Go :72-73 —— nilRespErr := hotcommon.NewErrCode(5001)
+                //              logger.LogBusinessErr(l.ctx, 5001, nilRespErr)
+                // ⇒ error_reason 必须逐字节等于 (*CodeError).Error()
+                // ⚠️ 此前这里记的是 logInfo ⇒ Go 侧是 **error 级 + 9 个字段**
+                //   （error_code / error_reason / file_line / call_path / call_chain …），
+                //   RAG 侧却是 **info 级 + 无这些字段** ⇒ 那是比「少段前缀」更大的漂移。
+                logger.logBusinessErr(Context.current(), code, err);
             }
         } catch (RuntimeException loggingFailure) {
             // 刻意吞掉
         }
-        return new BusinessException(code, HotErrorMessages.getMsg(code));
+        return err;
     }
 }

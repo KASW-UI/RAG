@@ -93,7 +93,15 @@ class HotArticleQueryServiceTest {
                 () -> service.getHotArticles(new HotArticlesReq(1, 20)));
 
         assertEquals(HotErrorCode.ERROR_SERVER_COMMON.getCode(), e.getCode());
-        assertEquals("internal server error", e.getMessage());
+        // ⚠️ 2026-10-24 订正：本行原断言 "internal server error" == e.getMessage()，
+        //   锁的是**旧的不一致行为**（RAG 侧 getMessage() 是纯文案，而 Go 侧是 Error() 整串）。
+        //   Go 的 NewErrCode 返回 *CodeError，其 Error() 逐字节是
+        //   "ErrCode:5001, Errmsg:internal server error"（errmsg.go:15-17）⇒ 断言改成对齐后的形态。
+        //   ⚠️ 注意：**信封**的 msg 仍是纯文案（走 HotCodeError.getBizMsg()），
+        //   见 HotCodeErrorLogParityTest#envelopeKeepsPlainBusinessMessage。
+        assertEquals("ErrCode:5001, Errmsg:internal server error", e.getMessage(),
+                "异常对象的 getMessage() 必须与 Go 的 (*CodeError).Error() 逐字节一致"
+                        + "（Go errmsg.go:15-17）");
         assertEquals(1.0, registry.counter("hot_api_rpc_error_total",
                 "callee", HotApiMetrics.CALLEE_HOT_RPC).count());
         assertEquals(1.0, registry.counter("hot_api_request_total",
