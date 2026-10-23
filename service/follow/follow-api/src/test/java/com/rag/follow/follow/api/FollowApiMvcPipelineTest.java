@@ -649,6 +649,32 @@ class FollowApiMvcPipelineTest {
     }
 
     @Test
+    @DisplayName("⚠️ recommend 出参的**字段顺序**要与 Go 一致（target_id 在前，mutual_score 在后）")
+    void recommendFieldOrderMatchesGo() throws Exception {
+        // Go 的 encoding/json 按 struct 字段声明序输出 ⇒ {"target_id":"4","mutual_score":20}
+        // ⚠️ Jackson 在「属性全部 @JsonProperty 显式命名」时按**字母序**排 ⇒ 会输出
+        //    {"mutual_score":20,"target_id":"4"} —— JSON 语义等价，但**字节顺序不同**。
+        //    做 body 快照比对 / 签名校验的客户端会失配。
+        // ⇒ DTO 用 @JsonPropertyOrder({"target_id","mutual_score"}) 钉死。
+        // 证据：2026-10-24 Go↔RAG 双侧活体对拍（本条为当时抓到的那条漂移）。
+        when(stub.getRecommendations(any())).thenReturn(RecommendResp.newBuilder()
+                .setCode(200).setMsg("OK")
+                .addUsers(RecommendResp.RecommendUser.newBuilder()
+                        .setTargetId(4L).setMutualScore(20))
+                .build());
+
+        String body = mockMvc.perform(post("/follow/v1/recommendations")
+                        .header("Authorization", bearer(userToken()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertTrue(body.contains("\"target_id\":\"4\",\"mutual_score\":20"),
+                "recommend 出参的字段顺序必须与 Go 一致（target_id 在前），实际 body = " + body);
+    }
+
+    @Test
     @DisplayName("recommend 空结果 → \"users\":[]（Go 的 make(...,0,n) 保证非 nil）")
     void emptyRecommendationsIsEmptyArray() throws Exception {
         when(stub.getRecommendations(any())).thenReturn(

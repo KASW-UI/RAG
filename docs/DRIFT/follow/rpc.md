@@ -5,7 +5,7 @@
 > **核对日期：2026-10-24** · 基线 commit：`8422116`（`align/follow` 切出点）
 > **真源**：`Sea-RideTheWind_golang/service/follow/rpc/`（冻结，只读）
 > **被审**：`service/follow/follow-rpc/`
-> **对照方式**：Go 侧 19 个源文件逐行读 + **双侧活体对拍**（Go follow-rpc 与 RAG follow-rpc 同跑，共用同一 PG）
+> **对照方式**：Go 侧 19 个源文件逐行读 + **双侧活体对拍**（Go follow-rpc 与 RAG follow-rpc 同跑，共用同一 PG；api 层 52/52 见 api.md）
 
 ## 结论
 

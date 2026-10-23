@@ -83,6 +83,50 @@ assertTrue(emptyBody.contains("\"user_ids\":[]"), "空 user_ids 必须是 []，�
 
 ---
 
+## PITFALL-FOLLOW-009 🔴 `@JsonProperty` 显式命名的属性之间，Jackson 按**字母序**排
+
+**症状（双侧活体对拍抓到）**
+
+```
+Go  : {"users":[{"target_id":"4","mutual_score":20}]}
+RAG : {"users":[{"mutual_score":20,"target_id":"4"}]}      ← 字段顺序反了
+```
+
+**根因**
+
+- Go 的 `encoding/json` 按 **struct 字段声明序**输出。
+- Jackson 默认也按「字段声明序」—— **但当所有属性都带 `@JsonProperty` 显式命名时，
+  落入按名字排序的分支** ⇒ `mutual_score` < `target_id`（字母序）⇒ 顺序反过来。
+- 本仓 Boot 4 / Jackson 3 **没有全局 snake_case 策略** ⇒ 每个字段都必须写 `@JsonProperty`
+  ⇒ **凡是有 ≥2 个字段的出参 DTO，都会命中这条**。
+
+**后果等级**：⚠️ **不是语义差异**（JSON 对象无序，解析器都认），
+但它是 **wire 级字节差异** —— 做 body 快照比对 / 签名校验 / 严格字符串匹配的客户端会失配。
+
+**修法**：DTO 上加 `@JsonPropertyOrder({"target_id", "mutual_score"})`（显式钉死）。
+
+**本仓现状**
+
+| DTO | 字段数 | 是否命中 | 处理 |
+|---|---|---|---|
+| `follow-api` 的 `RecommendUser` | 2 | 🔴 **命中** | ✅ 已加 `@JsonPropertyOrder`（DRIFT-FOLLOW-005） |
+| `follow-api` 的 `FollowUserListResp` / `RecommendListResp` / `RelationActionResp` | 1 | — | 单字段无序问题 |
+| `service/common` 的 `Response`（envelope） | 3 | ❌ **不命中**（无 `@JsonProperty` ⇒ 走声明序）⇒ `code, msg, data` 与 Go 一致 | 不动 |
+
+**教训**
+
+1. ⚠️ **「加了 `@JsonProperty`」不只影响 key 名，还影响 key 的顺序** —— 这一条在
+   「只关心能不能解析」的测试里**永远测不出来**。
+2. ⇒ **凡是要与 Go 逐字节对齐的出参 DTO**：
+   - ≥2 个字段 ⇒ 必须显式 `@JsonPropertyOrder`；
+   - 断言要断**整个片段的字节序列**（本轮加的 `recommendFieldOrderMatchesGo` 就是断
+     `"target_id":"4","mutual_score":20` 这个**连续子串**，而不是分别断两个 key 存在）。
+3. ⚠️ 本仓**已有同款先例**（`like-rpc` 的 `LikeEventContracts`、`comment-rpc` 的
+   `CommentCacheService` 早已用 `@JsonPropertyOrder`）⇒ **follow 域是漏网的一个**，
+   说明这个模式**不是新问题，是覆盖率问题** ⇒ 其它域值得同样查一遍。
+
+---
+
 ## PITFALL-FOLLOW-008 ⚠️ `follow-api` 没有可执行 fat jar
 
 **现象**：`mvn install` 产出的 `follow-api-0.0.1-SNAPSHOT.jar` 只有 **53 KB**（普通 jar），

@@ -9,13 +9,14 @@
 
 ## 结论
 
-**首轮组件级对照：发现 1 条 wire 级可观察漂移（已修）**，其余语义层 `SEMANTICALLY EQUIVALENT`。
-**双侧活体对拍：协议层 20 条 + 数据路径 16 条 = 36/36 逐字节一致。**
+**首轮组件级对照：发现 2 条 wire 级可观察漂移（均已修）**，其余语义层 `SEMANTICALLY EQUIVALENT`。
+**双侧活体对拍：协议层 20 条 + 数据路径 16 条 + 边界/鉴权 16 条 = 52/52 逐字节一致。**
 
 | # | 漂移 | 级别 | 状态 |
 |---|---|---|---|
 | DRIFT-FOLLOW-001 | 空列表出参 Go=`"user_ids":null` / RAG=`"user_ids":[]` | **可观察（L1 wire）** | ✅ 已修 |
-| OPEN-001 | Content-Type 不支持 ⇒ RAG 415 / Go 不报错（按零值继续） | 可观察 | 🔴 **待签字**（见下） |
+| DRIFT-FOLLOW-005 | recommend 出参**字段顺序** Go=`target_id` 在前 / RAG=`mutual_score` 在前 | **可观察（L1 wire 字节序）** | ✅ 已修 |
+| ~~OPEN-001~~ | ~~Content-Type 不支持 ⇒ RAG 415 / Go 不报错~~ | 可观察 | ✅ **已关闭（415 分支实测不可达）**，见下 |
 
 ## DRIFT-FOLLOW-001 🔴 空列表出参：Go 是 `null`，RAG 是 `[]`（已修）
 
@@ -112,10 +113,70 @@ RAG 侧实现：`service/users/users-common/.../GoStyleStringInt64.java`（与 m
 |---|---|---|
 | 协议层 | 20 | 鉴权(401 空 body) / 解析失败 / 类型不匹配 / 必填缺失 / 自关系(5201) / 越权(5005) / 404 body / 405 body / 幂等 / 分页 / limit=0 |
 | 数据路径 | 16 | 关注 / 关注列表 / 重复关注 / 拉黑 / **已拉黑再关注(5202)** / 黑名单 / 取消关注 / 空列表(null) / 推荐 / 解除拉黑 / 解除不存在的拉黑 / 粉丝列表 |
+| **边界 + 鉴权** | **16** | JWT claim 五种类型（number/string/bool/1.5/数组/超 int64）· `bearer` 小写前缀 · `Bearer` 无空格 · 空 Authorization · offset 越界 · limit 超上限(1000) · limit 负数 · offset 负数 · **Content-Type: text/plain** · 无 Content-Type · **多层推荐（2→3→4，score=20）** · 推荐带 limit |
 
 两侧**共用同一个 PG**、**调用同一个下游 user-rpc**、**同一批探针脚本** ⇒ body 逐字节可比。
 
-## OPEN-001 🔴 Content-Type 不支持：RAG 415 / Go 不报错（待签字）
+## DRIFT-FOLLOW-005 🔴 recommend 出参**字段顺序**与 Go 相反（已修）
+
+**现象（双侧活体对拍抓到）**
+
+```
+Go  : {"users":[{"target_id":"4","mutual_score":20}]}
+RAG : {"users":[{"mutual_score":20,"target_id":"4"}]}      ← 修复前，字段顺序反了
+```
+
+**根因：Jackson 在「属性全部显式命名」时按字母序排**
+
+- Go 的 `encoding/json` 按 **struct 字段声明序**输出
+  （`types.go:20-23`：`TargetId` 在前、`MutualScore` 在后）⇒ `target_id` 在前。
+- Jackson 默认走「字段声明序」分支 —— **但当所有属性都带 `@JsonProperty` 显式命名时，
+  落入按名字排序的分支** ⇒ `mutual_score` < `target_id`（字母序）⇒ 顺序反过来。
+- 本类两个字段都带 `@JsonProperty`（为了 snake_case，Boot 4/Jackson 3 无全局 snake_case 策略）
+  ⇒ 正好命中这条分支。
+
+⚠️ **这不是语义差异**（JSON 对象无序），但它是 **wire 级字节差异** ——
+做 body 快照比对 / 签名校验 / 严格字符串匹配的客户端会失配。
+
+**修法**：`dto/RecommendUser.java` 加
+`@JsonPropertyOrder({"target_id", "mutual_score"})`。
+
+**受影响面核查**：follow 域其余出参 DTO 的字段数 ——
+`FollowUserListResp`（1 个）、`RecommendListResp`（1 个）、`RelationActionResp`（1 个）
+⇒ **单字段，无序问题**；envelope `Response`（`service/common`）**没有** `@JsonProperty`
+⇒ 走声明序 ⇒ `code, msg, data` 与 Go 一致 ⇒ **不受影响**（对拍已逐字节确认）。
+
+**本仓同款先例**：`like-rpc` 的 `LikeEventContracts`、`comment-rpc` 的 `CommentCacheService`
+早已用 `@JsonPropertyOrder` 固定顺序 ⇒ **follow 域是漏网的一个**。
+
+**防回归**：新增 `FollowApiMvcPipelineTest#recommendFieldOrderMatchesGo`（断言字节序列）。
+
+---
+
+## ~~OPEN-001~~ ✅ 已关闭：Content-Type 不支持 ⇒ 415 分支**实测不可达**
+
+**原记录**：`GlobalExceptionHandler.java:189-210` 的注释把「Content-Type 不支持 ⇒ Spring 415」
+写成「已知偏离（OBSERVABLE DIFFERENCE）」，并说「取舍与 message-api 一致：保留 Spring 默认」。
+
+**本轮实测（2026-10-24 双侧活体对拍）结论：两侧一致，415 分支走不到。**
+
+| 探针 | Go | RAG | 一致？ |
+|---|---|---|---|
+| 动作端点 + `Content-Type: text/plain` | 200 + `{code:5001}` | 200 + `{code:5001}` | ✅ |
+| 动作端点 + **无** Content-Type | 200 + `{code:5001}` | 200 + `{code:5001}` | ✅ |
+| list 端点 + `Content-Type: text/plain` | 200 + 正常流 | 200 + 正常流 | ✅ |
+
+**原因**：共享的 `com.rag.common.http.GoStyleJsonBodyConverter`（扫到即生效）
+已把「Go 是否读这个 body」的判据收进本模块的 MVC 管线 ⇒
+非 `application/json` 时**按 Go 的规则丢弃 body**（而非让 Spring 判 415）
+⇒ 4 个动作端点得到 200 + 5001（`target_id` 缺失）、4 个 list 端点按零值继续
+—— **这正是 Go 的行为**。
+
+⇒ 该 handler 是**防御性分支**（不可达），**不是**行为漂移 ⇒ 从 DRIFT 撤下，
+不需签字。⚠️ 但 `GlobalExceptionHandler` 里那段「已知偏离」的注释仍写着 415 与 Go 不同
+⇒ **该注释已过期**，应改为「本分支在 `GoStyleJsonBodyConverter` 生效时不可达」。
+（注释修订属本域文件，**未改动** ⇒ 列入下方待办。）
+
 
 **现象**：请求带 `Content-Type: text/plain`（但 body 是合法 JSON）⇒
 RAG 走 Spring 消息转换器 ⇒ **HTTP 415**；Go 侧 `withJsonBody` 只判 Content-Type **是否包含**
@@ -138,12 +199,14 @@ RAG 走 Spring 消息转换器 ⇒ **HTTP 415**；Go 侧 `withJsonBody` 只判 C
 |---|---|
 | 源码逐条对照（24 个 Go 文件 ↔ 23 个 Java 文件） | ✅ 双向静态 |
 | 真启动（真 Tomcat + 真 Redis + 真 Nacos） | ✅ **真启动**（`Started FollowApiApplication`） |
-| HTTP 行为 | ✅ **双侧活体对拍** 36/36 逐字节一致 |
+| HTTP 行为 | ✅ **双侧活体对拍** **52/52** 逐字节一致（协议层 20 + 数据路径 16 + 边界/鉴权 16） |
 | 指标数值 | ⚠️ 未对拍 |
 
 ## 待办
 
-1. **OPEN-001 待签字**（415）。
+1. **修订 `GlobalExceptionHandler` 里那段过期的「已知偏离（415）」注释** ——
+   实测该分支不可达（见上），注释应改为「本分支在 `GoStyleJsonBodyConverter` 生效时不可达」。
+   ⚠️ 属**注释订正**，不改行为 ⇒ 可直接改，等主会话或本域下一轮处理。
 2. `follow-api` **没有 `spring-boot-maven-plugin`** ⇒ 打不出可执行 fat jar，
    只能用 `java -cp <runtime classpath> <MainClass>` 启动。
    与 `article-api` / `comment-api` / `hot-api` / `like-api` / `message-api` / `task-api` 同款
