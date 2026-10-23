@@ -65,3 +65,39 @@
 - **⚠️ 与 `DRIFT-HOTAPI-016` 的分界**：`016` 是**hot 域自己写的**格式（`errmsg.go:15-17`）⇒ 该修、已修；
   本条是**库写的**格式 ⇒ 不该由 hot 域修。
 - **留痕位置**：`docs/DRIFT/hot/api.md` 的 DRIFT-HOTAPI-017 + `HotArticleQueryService.fatal` 的 javadoc。
+
+---
+
+## SD-HOT-API-006 · `Content-Type` 不带 `charset=utf-8` 参数（待签字）
+
+- **Component**：hot-api 成功路径响应头 `Content-Type`
+- **Go 出处**：
+  - `service/hot/api/hotcenter.go:45-51` → `httpx.SetOkHandler`；
+  - `go-zero v1.10.2 rest/httpx/responses.go:doWriteJson` ——
+    `w.Header().Set(ContentType, header.ContentTypeJson)`；
+  - `go-zero v1.10.2 rest/internal/header/headers.go:17` ——
+    `ContentTypeJson = "application/json; charset=utf-8"`（**分号后有空格**）。
+- **RAG 形态**：Spring 的 `MappingJackson2HttpMessageConverter` 写
+  `Content-Type: application/json`（**无 charset**）。
+- **两侧实测**（2026-10-24 第五轮端到端对拍，逐字节比响应头）：
+
+  | | 实际响应头 |
+  |---|---|
+  | Go | `Content-Type: application/json; charset=utf-8` |
+  | RAG | `Content-Type: application/json` |
+
+  ⇒ **媒体类型相同**（`application/json`），差的是**参数**。
+
+- **签字理由（建议）**：
+  1. **不可逐字节复刻**：即使 RAG 侧显式补 charset，Spring 的 `MediaType.toString()`
+     产出的是 `application/json;charset=utf-8`（**分号后无空格**）⇒ 与 Go 仍差一个空格
+     ⇒ 要逐字节相同只能靠 filter 在响应写出后改写 header；
+  2. **规范方向相反**：RFC 8259 规定 JSON 的字符集恒为 UTF-8，**不应**在 `application/json`
+     上声明 charset ⇒ Go 的写法是历史包袱，不是应当追随的标准；
+  3. **可观察影响极小**：客户端按 `Content-Type` 选解析器 ⇒ 两侧选的都是 JSON 解析器；
+     按 charset 解码的客户端在 JSON 上恒用 UTF-8（RFC 8259）⇒ 不受影响。
+- **⚠️ 与 `DRIFT-HOTAPI-021/022/023` 的分界**：那三条是**容器默认值比 Go 严**导致
+  **请求被拒**（Go 成功 / RAG 400）⇒ **该修**（已有实测配方）；
+  本条是**响应头多一个参数** ⇒ **不影响任何请求的处理结果** ⇒ 建议不复刻。
+- **留痕位置**：`docs/DRIFT/hot/api.md` 的 DRIFT-HOTAPI-024 + `tools/difftest/diff-hot.py`
+  的 `split_media()`（媒体类型硬比、参数差异归入「已记录差异」）。

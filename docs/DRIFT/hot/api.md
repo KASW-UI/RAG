@@ -4,18 +4,19 @@
 > 2026-10-23 该模块完成首次实现并做了首轮 Go ↔ RAG 对照，本文件已整体重写。
 > 2026-10-23 第二轮（组件级验证，见下文第 11~13 节）在此基础上**增量追加**，历史条目与编号一条未删。
 
-**核对日期**：2026-10-23（第二轮，组件级验证）
+**核对日期**：2026-10-24（第五轮，U1/D1 端到端双侧活体对拍）
 **真源**：`Sea-RideTheWind_golang/service/hot/api` @ go-zero **v1.10.2**（`go.mod:17`，已核对 module cache 里同时存在 v1.10.0/v1.10.3，**本文件所有行号一律以 v1.10.2 为准**）
 **本轮证据强度**（按 AGENTS.md §3.3 口径）：
 
 | 档 | 本轮用到的 | 说明 |
 |---|---|---|
-| ✅ **Go 侧活体探针** | 15 条 form 解析用例 + 25 条分页/归一化用例 + 3 组 wire 字节 | 直接调用真源 `httpx`/`jsonx` 与逐字复制的真实 struct，**跑起来了** |
-| ✅ **RAG 侧真实上下文探针** | 同矩阵 MockMvc + `@SpringBootTest` 真 Boot 上下文 | 复用**项目真实的** mapper / advice / controller，非自建 |
-| ✅ **双侧差分** | 分页/归一化 25 行 `diff` 输出为空 | 两侧同输入同函数，逐行相同 |
-| ⚠️ **静态源码** | 超时/499 响应头、保护层四闸、breaker | 两侧都读了消费点，但**无活体观测** |
-| ❌ **真 PG / 真 Redis / 真 Kafka** | 不适用 | 本组件无 DB、无 Redis、无 MQ、无事务、无缓存 |
-| ❌ **变异验证** | 仍未做 | 见 D2 |
+| ✅ **双侧活体对拍** | **29 条端到端用例 + 输入上限探针** | 两套 HTTP 栈**同时拉起**，逐字节比**响应体 + 关键响应头**；另有**下游调用序列**比对。详见「第五轮」一节 |
+| ✅ **Go 侧活体探针** | 15 条 form 解析用例 + 25 条分页/归一化用例 + 3 组 wire 字节 | 直接调用真源 `httpx`/`jsonx` 与逐字复制的真实 struct，**跑起来了**（第二轮） |
+| ✅ **RAG 侧真实上下文探针** | 同矩阵 MockMvc + `@SpringBootTest` 真 Boot 上下文 | 复用**项目真实的** mapper / advice / controller，非自建（第二轮） |
+| ✅ **双侧差分** | 分页/归一化 25 行 `diff` 输出为空 | 两侧同输入同函数，逐行相同（第二轮） |
+| ⚠️ **静态源码** | 保护层四闸、breaker | 两侧都读了消费点，但**无活体观测**（D9/U5 仍未做） |
+| ❌ **真 PG / 真 Redis / 真 Kafka** | 不适用 | 本组件无 DB、无 Redis、无 MQ、无事务、无缓存。⚠️ 本轮下游是**桩** ⇒ **hot-rpc 自身**的行为不在覆盖范围 |
+| ❌ **变异验证** | 仍未做（系统级） | 已对**新增的修复**做定向变异；见 D2 |
 
 ---
 
@@ -35,7 +36,7 @@
 | 代码是否落地 | ✅ 是 |
 | Go ↔ RAG **源码级**对照是否做过 | ✅ 是（逐行读 Go 到控制流级，非只贴声明行） |
 | Java 侧行为是否有断言钉住 | ✅ 是（59 例，含真实 MVC 管线 + 真实 stub 捕获） |
-| **双侧活体对拍**（Go 栈真跑起来逐项比对） | ❌ **未做** —— Go 侧依赖 `etcd:2379` + 本机 Nacos，本轮未拉起 |
+| **双侧活体对拍**（Go 栈真跑起来逐项比对） | ✅ **已做**（2026-10-24 第五轮，29 条端到端用例）—— **但查出 4 条新漂移**（D21~D24），且**推翻了第二轮 4 条 ✅ 结论** |
 | **变异验证**（证明测试不是假绿） | ❌ **未做** |
 | **真 PG / 真 Redis / 真 Kafka** | ➖ 本模块**不涉及**（无 DB、无 Redis、无 MQ、无事务、无缓存） |
 
@@ -108,7 +109,7 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 
 | # | 项 | 状态 | 备注 |
 |---|---|---|---|
-| D1 | **双侧活体对拍** | ❌ 未做（2026-10-23） | Go 侧依赖 `etcd:2379` + Nacos；**优先级高于再加单测**。⚠️ 第二轮已把**解析层/分页层/wire 层**用双侧探针对拍掉（见第 11 节），但**端到端 HTTP 栈**仍未对拍 |
+| D1 | **双侧活体对拍** | ✅ **已做（2026-10-24 第五轮）** | 端到端 HTTP 栈两侧**同时拉起**（Go hot-api + RAG hot-api + 下游桩），29 条用例逐字节比响应体 + 关键响应头 ⇒ **24/29 通过**，并**新查出 4 条漂移**（D21~D24）。详见「第五轮」一节。⚠️ 第二轮的**解析层/分页层/wire 层**双侧探针对拍仍然有效，但**第二轮的 CASE 表有 4 行结论被本轮推翻**（MockMvc 测不到真 Tomcat 的请求行校验） |
 | D2 | **变异验证** | ❌ 未做（2026-10-23） | 测试是否假绿未证实。⚠️ 第二轮已**间接证实一处假绿**（DRIFT-HOTAPI-015-B 的裸 mapper），但**系统变异仍未做** |
 | D3 | 客户端**断连**取消不再传播 | ⚠️ 已留痕（2026-10-23） | Go 把请求 ctx 传进 100 次补全，Servlet 断连不会自动取消在飞的 gRPC。已用「请求线程取一次预算 + 显式下传」保住**超时**语义，**断连**语义不等价 |
 | D4 | Go panic 时指标误记为 `success` | ⚠️ 有意差异（2026-10-23） | Go 的 `defer` 读命名返回值 `err`，panic 展开时仍为 nil；Java 按客户端实际看到的结果记 `fail`。该路径无代码可达 |
@@ -126,13 +127,22 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | **D11** | **重复 query 参数 → Go 取首值，RAG 拼成 `"首,次"` 后整包 5001** | **SEMANTIC MISMATCH** | 🔴 需修（真 Boot 上下文已复现） |
 | **D12** | form 参数总数上限 **2048** | OBSERVABLE DIFFERENCE | ✅ **已实现**（2026-10-24 复核：`GoFormValues.requireFormValueCountWithinLimit` + `HotApiGoParseParityTest` 的 2048/2049 边界用例；⚠️ 本行原记「RAG 侧不存在 / 需拍板」**是错的** —— 实现与测试都在，只是台账没回填） |
 | **D13** | **畸形 JSON body** → Go 拒绝 5001，RAG 完全忽略 body | OBSERVABLE DIFFERENCE | 🟡 需拍板 |
-| **D14** | 超时 / 499 响应缺 `X-Content-Type-Options: nosniff` | OBSERVABLE DIFFERENCE | 🟡 静态可确证，待真 Tomcat 取证 |
+| **D14** | 超时 / 499 响应缺 `X-Content-Type-Options: nosniff` | OBSERVABLE DIFFERENCE | ✅ **活体取证完成**（2026-10-24 第五轮）：真栈下 Go 的 503 带 `nosniff`、RAG **不带** ⇒ **确认是漂移**（不是静态推断）。代码在 `service/common` ⇒ **已移交 common 域** |
 | **D15** | 运行时 JSON **字段顺序**与 Go 声明序不同（裸 mapper 测不出来） | OBSERVABLE DIFFERENCE | 🟡 已知取舍，需登记 |
 | **D16** | **业务错误日志的级别 / 字段集 / `error_reason` 形态**与 Go 不同（nil 响应分支最严重：Go 是 **error 级 + 9 字段**，RAG 是 **info 级 + 0 字段**） | OBSERVABLE DIFFERENCE | ✅ **已修**（2026-10-24 第四轮 ⇒ `DRIFT-HOTAPI-016`；3 条变异全红） |
 | **D17** | 下游 gRPC 调用失败时，日志 `error_reason` 是**各自 gRPC 库**的形态（grpc-go `"rpc error: code = Unavailable desc = …"` vs grpc-java `"UNAVAILABLE: …"`，**code 名大小写都不同**） | OBSERVABLE DIFFERENCE | 🆕 **待签字**（**库层**差异 ⇒ 建议「不复刻」） |
 | **D18** | Prometheus `_bucket{le=}` 边界序列：Go **12 个**（`DefBuckets` 11 + `+Inf`）vs RAG **80 个**（`publishPercentileHistogram()` 塞进了 69 个 exponential 边界） | OBSERVABLE DIFFERENCE | ✅ **已修**（2026-10-24 第四轮 ⇒ `DRIFT-HOTAPI-018`；去掉 `publishPercentileHistogram()`；3 条变异全红） |
 | **D19** | Prometheus 全局标签 `application="hot-api"`（Go 的默认 registry **无**此标签） | OBSERVABLE DIFFERENCE | 🆕 **待决策**（**全仓约定**，跨域 ⇒ hot 域无权单改 ⇒ `DRIFT-HOTAPI-019`） |
 | **D20** | hot-api **注册到 Nacos**（Go 侧 hot-api **完全不注册**）⇒ 且实测「Nacos 不可达 ⇒ 整个进程起不来」 | OBSERVABLE DIFFERENCE | 🆕 **待决策**（**部署面** ⇒ `DRIFT-HOTAPI-020`） |
+
+### 🆕 第五轮新增（2026-10-24 U1/D1 端到端对拍，D21 起接续编号）
+
+| # | 项 | 类别 | 状态 |
+|---|---|---|---|
+| **D21** | **Tomcat 请求目标字符校验**拒绝 query 里的 `[` `]` ⇒ `?page[]=5` **Go 200 / RAG 400 + Tomcat HTML 错误页** | **SEMANTIC MISMATCH** | 🔴 **需修（跨域）** ⇒ `DRIFT-HOTAPI-021`。⚠️ **第二轮 CASE-04b/04c 的 ✅ 结论被推翻**（MockMvc 绕过 Tomcat 的请求行校验） |
+| **D22** | **form 参数个数上限**：Go **2048**（应用层）vs RAG **1000**（Tomcat `maxParameterCount`）⇒ 1001~2048 区间 Go 成功 / RAG 5001 | OBSERVABLE DIFFERENCE | 🔴 **需修（跨域）** ⇒ `DRIFT-HOTAPI-022`。⇒ **RAG 侧自己实现的 2048 上限在 GET query 上不可达**（Tomcat 先拒） |
+| **D23** | **请求行长上限**：Go `net/http` **1 MiB** vs RAG Tomcat **8 KiB** ⇒ 8 KiB~1 MiB 的 query：Go 处理 / RAG **400 + Tomcat HTML 错误页**（不是业务信封） | OBSERVABLE DIFFERENCE | 🔴 **需修（跨域）** ⇒ `DRIFT-HOTAPI-023` |
+| **D24** | `Content-Type` 媒体类型**参数**：Go `application/json; charset=utf-8`（**分号后有空格**）vs RAG `application/json`（无 charset） | OBSERVABLE DIFFERENCE | 🆕 **待签字** ⇒ `DRIFT-HOTAPI-024`（⚠️ Spring 的 `MediaType.toString()` 产出 `;` 后**无空格** ⇒ 即使显式补 charset 也**不可逐字节复刻** ⇒ 建议「不复刻」） |
 
 ---
 
@@ -650,34 +660,43 @@ Recommended Verification:
 | CASE-01 正常成功 | 无 query，hot-rpc/article-rpc 正常 | 200 `{code:200,page:1,page_size:20}` | 同 | ✅ |
 | CASE-02 空输入 | `?page=` / `?page` / `?page_size=` | 1 / 20（**取默认，不报错**） | 1 / 20 | ✅ |
 | CASE-03 不存在 | 空 items | `"items":[]`, total=0 | 同 | ✅ |
-| CASE-04 重复 | `?page=5&page=3` | 5 / 20 | **5001** | ❌ **D11** |
-| CASE-04b 重复（数组记法） | `?page[]=5&page[]=9` | 5 / 20 | **5001** | ❌ **D11** |
-| CASE-04c 单值数组记法 | `?page[]=5` | 5 / 20 | 5 / 20 | ✅ |
-| CASE-05 外部依赖失败（fatal） | hot-rpc 报错 | 200 `{code:5001}` | 200 `{code:5001}` | ✅ |
-| CASE-05b 外部依赖失败（best-effort） | 单条 article-rpc 报错 | 跳过该条，总数减 1 | 同 | ✅ 静态 |
-| CASE-06 超时 | 令下游 >3s | 503 + `Request Timeout\n` + nosniff | 503 + 同体，**缺 nosniff** | ❌ **D14**（静态） |
+| CASE-04 重复 | `?page=5&page=3` | 5 / 20 | 5 / 20 | ✅ **活体实测**（第五轮） |
+| CASE-04b 重复（数组记法） | `?page[]=5&page[]=9` | 5 / 20 | 5 / 20 | 🔴 **被第五轮推翻** ⇒ 真栈下 RAG 是 **400 + Tomcat HTML 错误页**（`DRIFT-HOTAPI-021`）。⚠️ 原 ✅ 是 **MockMvc 测的** |
+| CASE-04c 单值数组记法 | `?page[]=5` | 5 / 20 | 5 / 20 | 🔴 **被第五轮推翻** ⇒ 同上 |
+| CASE-05 外部依赖失败（fatal） | hot-rpc 报错 | 200 `{code:5001}` | 200 `{code:5001}` | ✅ **活体实测**（第五轮，逐字节相同） |
+| CASE-05b 外部依赖失败（best-effort） | 单条 article-rpc 报错 | 跳过该条，总数减 1 | 同 | ✅ **活体实测**（第五轮：`normal` 模式 total=3 vs `all-ok` 模式 total=4） |
+| CASE-06 超时 | 令下游 >3s | 503 + `Request Timeout\n` + nosniff | 503 + 同体，**缺 nosniff** | 🟡 **第五轮已活体触发**：两侧**状态码与 body 逐字节相同**，差的是 `X-Content-Type-Options`（**D14**，跨域移交 common 域） |
 | CASE-07 Retry | — | 无 | 无 | ✅ |
 | CASE-08/09 Cache Hit/Miss | — | 无缓存 | 无缓存 | — |
 | CASE-10 权限失败 | — | 零鉴权，无此路径 | 零鉴权 | ✅ |
 | CASE-11 并发调用 | 多请求 × 100 items | 每请求窗口 8 | 每请求 Semaphore(8) | ✅ 静态 + RAG 断言 |
 | CASE-12 重复调用（幂等） | 同参多次 | 无副作用（incr_view=false） | 同 | ✅ |
-| CASE-13 部分操作成功 | 4 条 skip 各一 | 逐条 metric + 少 N 条 | 同 | ✅ 静态 |
+| CASE-13 部分操作成功 | 4 条 skip 各一 | 逐条 metric + 少 N 条 | 同 | ✅ **活体实测**（第五轮：4 条 skip 分支全部由桩触发，**下游调用序列两侧一致** ⇒ 两侧跳过的条数相同） |
 | CASE-14 Transaction Rollback | — | 无事务 | 无事务 | — |
-| CASE-15 序列化边界 | `hot_score=0xFFFFFFFF` | `4294967295` | `4294967295` | ✅ |
-| CASE-15b 序列化边界 | 空 `secondary_tags` | `null` | `null` | ✅ |
-| CASE-15c 序列化边界 | 标题含 `<b>` `&` | 不转义 | 不转义 | ✅ |
-| CASE-15d 序列化边界 | 字段顺序 | 声明序 | **字母序** | ❌ **D15** |
-| CASE-16 int32 溢出分页 | `page=42949674&page_size=50` | 空页 | 空页 | ✅ 双侧 diff |
-| CASE-17 参数上限 | 2048 / 2049 个 form 值 | OK / **5001** | OK / OK | ❌ **D12** |
-| CASE-18 body | 合法 JSON | **忽略** | **忽略** | ✅（修正 D7） |
-| CASE-19 body | 畸形 JSON | **5001** | 成功 | ❌ **D13** |
-| CASE-20 路由层 | 404 / 405 | 裸响应 | 裸响应（真实 Boot 实测同） | ✅（⚠️ 待真 Tomcat） |
+| CASE-15 序列化边界 | `hot_score=0xFFFFFFFF` | `4294967295` | `4294967295` | ✅ **活体实测**（第五轮，逐字节相同） |
+| CASE-15b 序列化边界 | 空 `secondary_tags` | `null` | `null` | ✅ **活体实测**（第五轮） |
+| CASE-15c 序列化边界 | 标题含 `<b>` `&` | 不转义 | 不转义 | ✅ **活体实测**（第五轮；含双引号 / 反斜杠 / 换行，逐字节相同） |
+| CASE-15d 序列化边界 | 字段顺序 | 声明序 | 声明序 | ✅ **活体实测**（第五轮，逐字节相同 ⇒ D15 的修正在真栈里站得住） |
+| CASE-16 int32 溢出分页 | `page=42949674&page_size=50` | 空页 | 空页 | ✅ **活体实测**（第五轮，逐字节相同） |
+| CASE-17 参数上限 | 2048 / 2049 个 form 值 | OK / **5001** | OK / **5001**（阈值 1000 ⇒ 1001 起就 5001） | 🔴 **阈值不同**（`DRIFT-HOTAPI-022`）。⚠️ 第二轮原写「RAG: OK / OK」**是错的** |
+| CASE-18 body | 合法 JSON | **忽略** | **忽略** | ✅ **活体实测**（第五轮） |
+| CASE-19 body | 畸形 JSON | **5001** | **5001** | ✅ **活体实测**（第五轮） |
+| CASE-20 路由层 | 404 / 405 | 裸响应 | 裸响应（真栈实测同） | ✅ **活体实测**（第五轮：404 = `404 page not found\n` + `text/plain` + `nosniff`；405 = 裸状态码 + `Allow`、无 body） |
 
 > 🟥 **2026-10-24 复核：本表是「第二轮」的快照，CASE-15d / CASE-17 / CASE-19 三行的 ❌ 已被第三轮推翻。**
 > 现状态：D15 字段序 ✅ 已修（`@JsonPropertyOrder` + `HotApiGoWireOrderTest`）、
 > D12 参数上限 ✅ **早已实现**（`GoFormValues.requireFormValueCountWithinLimit` + `HotApiGoParseParityTest`
 > 的 2048/2049 边界用例 —— 本表原写「Java: OK / OK」**是错的**）、D13 畸形 body ✅ 已修。
 > ⇒ 三行现均为 ✅；未闭合的只有 **D14 缺 nosniff**（已移交 common 域）与 **真 Tomcat 取证**。
+>
+> 🟥 **2026-10-24 第五轮再订正（本表已被端到端对拍实测覆盖，4 行结论被推翻）**：
+> 1. **CASE-04b / CASE-04c 被推翻** ⇒ 真栈下 RAG 对 `?page[]=5` 是 **400 + Tomcat HTML 错误页**
+>    （`DRIFT-HOTAPI-021`）⇒ 原 ✅ 是 **MockMvc 测的**（MockMvc 不走 Tomcat 的请求行校验）。
+> 2. **CASE-17 被推翻** ⇒ 真栈下 RAG 的**值个数阈值是 1000**（Tomcat `maxParameterCount`），
+>    不是 2048 ⇒ 1001~2048 区间 Go 成功 / RAG 5001（`DRIFT-HOTAPI-022`）。
+>    ⇒ **D12「✅ 已实现」在实现层成立、但运行时不可达** ⇒ 须与 D22 合并看。
+> 3. **CASE-15d / CASE-19 / CASE-20 升级为「活体实测同」** ⇒ 第五轮真栈逐字节确认。
+> 4. **CASE-06 的超时分支已活体触发** ⇒ 两侧状态码与 body 逐字节相同，**只差 `nosniff`**（D14）。
 
 ## 9. Unresolved（§37）
 
@@ -685,8 +704,8 @@ Recommended Verification:
 
 | # | Question | Go Evidence | Java Evidence | Why Unknown | 需要什么活体证据 |
 |---|---|---|---|---|---|
-| **U1** | 端到端 HTTP 栈两侧是否逐字节一致？ | `hotcenter.go` 全链路已读 | 真 Boot 上下文已跑 | 两侧**服务都没同时拉起**：Go 需 `etcd:2379` + Nacos | 起两套栈 + 同请求同响应体/响应头逐字节 diff（`tools/difftest/run.sh`）。**这是 D1，本组件最后一块实质工作** |
-| **U2** | 3s 超时真的产出 `503 + Request Timeout`？ | `http.go:88` + `rest/config.go:55` | `HttpMiddleware:419-425` | 两侧都只有静态；本轮**未构造过 >3s 的请求** | 令 article-rpc sleep 5s，curl 观察状态码/响应体/`X-Content-Type-Options`/span 的 `sea.error.kind=timeout`（D9） |
+| **U1** | 端到端 HTTP 栈两侧是否逐字节一致？ | `hotcenter.go` 全链路已读 | 真 Boot 上下文已跑 | ⚠️ **已闭合（第五轮）**：两套栈**同时拉起**（Go hot-api + RAG hot-api + 下游同构双桩），29 条用例逐字节比**响应体 + 关键响应头** + 期望值 + **下游调用序列** ⇒ 默认 **24/29**，带修正配方 **28/29**。⇒ **查出 4 条新漂移**（D21~D24），并**推翻第二轮 4 条 ✅ 结论** | ✅ **已完成**（`tools/difftest/run-hot.sh` + `diff-hot.py`；详见「第五轮」一节） |
+| **U2** | 3s 超时真的产出 `503 + Request Timeout`？ | `http.go:88` + `rest/config.go:55` | `HttpMiddleware:419-425` | ⚠️ **已闭合（第五轮）**：`CASE-21` 用「20 条热榜 + article-rpc 睡 30s」把请求**真的拖过 3s** ⇒ 两侧**都**产出 `HTTP 503 + "Request Timeout\n"`（**body 逐字节相同**）。⚠️ 唯一差异 = **缺 `X-Content-Type-Options: nosniff`** ⇒ 即 **D14**（代码在 `service/common` ⇒ **已移交 common 域**） | ✅ **已完成**（第五轮 `CASE-21`） |
 | **U3** | 客户端断连是否真产出 499，且 gRPC 真的被取消？ | `http.go:84-86` `errors.Is(Canceled)`→499 | `HttpMiddleware:332` IOException→499 | 静态两侧一致，但 Servlet 断连**不会**自动取消在飞的阻塞 gRPC（D3 已留痕） | curl `--max-time 0.5` 撞慢下游，抓 499 + PG/服务端观察 gRPC 是否被取消 |
 | **U4** | client breaker 是否真在链上并会因超时打开？ | `zrpc/internal/client.go:112-113` + `breakerinterceptor.go:16-18` | 依赖「扫到 `com.rag.common`」+ `@GrpcGlobalClientInterceptor` | ⚠️ **部分闭合（第四轮）**：**装配层已补**（hot-api 此前**没有** wiring 测试 —— 而 `follow-api` / `message-api` 各有一份 ⇒ 正是本域缺口）⇒ 新增 `GoStyleGrpcClientBreakerWiringTest`（3 例：拦截器在 starter 的 `GlobalClientInterceptorRegistry` 里 + factory 认识本域两个 `@GrpcClient` 锚点 + 熔断默认开启）。⚠️ **「熔断真的打开」的行为级证据仍未做** | 决定 DRIFT-HOTRPC-004 的严重度；也可能暴露 Go 侧独有的 shadow 残留 | **仍需**：内嵌一个恒返 INTERNAL 的 gRPC server，连续调用直到 breaker 打开 ⇒ 观察 `interceptor.trackedMethods()`（参照 `message-api` 的 `GoStyleGrpcClientBreakerE2ETest` 范式）。⚠️ hot-api 侧响应体**看不出**熔断（前后都是 5001）⇒ 只能看拦截器/指标 |
 | **U5** | 保护层四闸（MaxConns/MaxBytes/CpuShedding/Breaker）真触发？ | `rest/config.go:12-22,52-56` tag 默认 | `rag.protection.*`（静态同值） | 未构造超限请求（D9） | 并发 10001 连接 / 发送 >1 MiB body / CPU 打满，各观察裸状态码 |
@@ -714,10 +733,10 @@ Recommended Verification:
 | 11 | Side effects 是否一致？ | ⚠️ 部分 | 5 个指标名/标签一致；**暴露面**有意单向增强（D5）；`incr_view=false` 均不写库 |
 | 12 | Ordering 是否一致？ | ✅ 一致 | 按下标保序；rank 跨页连续 |
 | 13 | Retry 是否一致？ | ✅ 一致 | 两侧均无 |
-| 14 | Timeout scope 是否一致？ | ✅ 一致（时长与作用域）／⚠️ 未活体验证 | 3s 整操作 + 2s 嵌套；实际触发未观测（U2） |
+| 14 | Timeout scope 是否一致？ | ✅ 一致（时长与作用域）／🟡 **响应头差 1 项** | 3s 整操作 + 2s 嵌套；**第五轮已活体触发**（U2）⇒ 两侧状态码与 body 逐字节相同，**只差 `nosniff`**（D14） |
 | 15 | Concurrency semantics 是否一致？ | ⚠️ 部分 | 常态窗口 8 一致；**池背压下延迟分布不同**（U10） |
 | 16 | Authentication / Authorization 是否一致？ | ✅ 一致 | 两侧零鉴权；本组件无 JWT / 黑名单中间件，该维度**不适用** |
-| 17 | Serialization semantics 是否一致？ | ⚠️ **部分** | 值/类型/null/uint32/HTML 转义全一致；**字段顺序不同**（D15）+ 超时头缺 nosniff（D14） |
+| 17 | Serialization semantics 是否一致？ | ✅ **一致（body 层）**／🟡 **头差 1 项** | 第五轮真栈逐字节确认：**值/类型/null/uint32/HTML 转义/字段顺序**全一致；**响应头**差 `Content-Type` 的 charset 参数（D24）+ 超时头缺 `nosniff`（D14） |
 | 18 | Lifecycle 是否一致？ | ✅ 一致 | 连接与线程池的边界相同（实现不同） |
 
 ### 最终结论
@@ -742,6 +761,21 @@ SEMANTICALLY NOT EQUIVALENT
 > - **D14 缺 nosniff**：🔁 **跨域移交 common 域**（代码在 `service/common` 的 `HttpMiddleware.writeTimeoutResponse`）
 >   ⇒ **hot 域内不可修**，需 common 域接手。
 > ⇒ 本组件**域内**已无可修的语义漂移；未闭合项全部是「证据缺口」或「跨域移交」。
+>
+> 🟥 **2026-10-24 第五轮再订正（端到端对拍实测后）**：
+> 上段「域内已无可修的语义漂移」**只对「域内代码」成立**，**对「域内配置」不成立** ——
+> 第五轮查出 **4 条新的可观察差异**，其中 3 条的根因在 **Tomcat 容器默认值**（属域内 `application.yml`
+> 可配，但**影响全部 10 个 api 模块** ⇒ 按 §5.3 跨域移交）：
+>
+> | 新增 | 差异 | 修法（**已实测**） | 归属 |
+> |---|---|---|---|
+> | `DRIFT-HOTAPI-021` | `?page[]=5` → Go 200 / RAG **400 + Tomcat HTML 错误页** | `server.tomcat.relaxed-query-chars: "[,]"` | 跨域 |
+> | `DRIFT-HOTAPI-022` | 值个数上限 Go **2048** / RAG **1000** | `server.tomcat.max-parameter-count: 2048` | 跨域 |
+> | `DRIFT-HOTAPI-023` | 请求行长 Go **1 MiB** / RAG **8 KiB** | `server.max-http-request-header-size: 1MB` | 跨域 |
+> | `DRIFT-HOTAPI-024` | `Content-Type` 的 charset 参数 | **建议不复刻**（Spring 侧不可逐字节复刻） | 待签字 |
+>
+> ⇒ 三条容器类差异**同时打开后**：对拍矩阵 **24/29 → 28/29**，输入上限阈值与 Go **完全一致**
+> （实测首个翻转 n 两侧都是 **2049**）⇒ **配方已被证实**，只剩 D14（`nosniff`，common 域）。
 
 ### ⚠️ 本结论的效力边界（三条，越界即失效）
 
@@ -1109,7 +1143,7 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| **端到端双侧活体对拍**（D1/U1） | ❌ 仍缺 | 本轮做的是**分层对拍**（Go 真库 `httpx.Parse` ↔ RAG 真实 MVC 管线），**两套服务同时跑**的端到端对拍仍未做 |
+| **端到端双侧活体对拍**（D1/U1） | ✅ **本轮已闭合** | 两套栈**同时拉起**（Go hot-api + RAG hot-api + 下游同构双桩），29 条用例逐字节比**响应体 + 关键响应头** + 期望值 + **下游调用序列** ⇒ 默认配置 **24/29 通过**，并**新查出 4 条漂移**（D21~D24）；带修正配方时 **28/29**（剩下的 1 条 = D14，已移交 common 域） |
 | **超时 / 保护层四闸的活体观测**（D9/U2） | ❌ 仍缺 | 仍是静态确认 |
 | **变异验证**（D2/U9） | 🟡 部分 | 已对**新增的 6 条修复**做了定向变异（hash 5/5、字段序 1/1、日志面 3/3、bucket 边界 3/3）；**全组件系统变异仍未做** |
 | **端口归属**（D6） | ⏳ 待拍板 | Go `hotcenter.yaml` = 8893；`Infrastructure.md §3` 给 hot 预占 18897。当前按 18897 落 |
@@ -1121,3 +1155,209 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 | **全局 `application` 标签**（DRIFT-HOTAPI-019） | 🆕 **待决策** | Go 的默认 registry 无此标签；RAG 有 ⇒ **全仓约定**（跨域）⇒ hot 域无权单改 |
 | **Nacos 服务注册**（DRIFT-HOTAPI-020） | 🆕 **待决策** | Go 侧 hot-api **完全不注册**；RAG 注册 ⇒ 且实测「Nacos 不可达 ⇒ 启动失败」 |
 | **日志面已对齐的部分** | ✅ **本轮闭合** | `DRIFT-HOTAPI-016` 已修（`CodeError.Error()` 整串 + 日志级别 + 字段集），3 条变异全红 |
+
+---
+
+# 🆕 第五轮（2026-10-24）· U1 / D1 端到端双侧活体对拍
+
+> **本节是 hot-api 组件的收口工作**。前面四轮都是**分层**对拍（Go 真库函数 ↔ RAG 真实 MVC 管线），
+> 两侧**从未同时跑起来**。本轮第一次把两套 HTTP 栈同时拉起，做**逐字节**差分。
+>
+> **本轮推翻了自己前一轮的 4 条结论** —— 全部是「MockMvc 测不到真 Tomcat」的形态（§3.3 的老坑）。
+
+## 1. 工具与编排
+
+| 文件 | 作用 |
+|---|---|
+| `tools/difftest/run-hot.sh` | 编排：构建 Go hot-api + RAG hot-api + 编译桩 → 起 4 个进程 → 跑对拍 → 收摊。`--no-build` / `--keep` / `--serve-only` |
+| `tools/difftest/conf/go/hot-api.yaml` | Go 真源 `service/hot/api/etc/hotcenter.yaml` 的**副本**（真源零改动）：`Etcd` 整块移除改 `Endpoints` 直连、`Log.Mode: console`、独占端口 18903 / DevServer 19069 |
+| `tools/difftest/hot-stub-server.java` | **同构双桩**：一个进程同时提供 `hot.HotService` + `article.ArticleService`，数据固定、可按「模式文件」切行为 |
+| `tools/difftest/diff-hot.py` | 29 条用例的逐字节对拍矩阵 |
+| `tools/difftest/probe-hot-limits.py` | 输入上限探针（二分出两侧的**值个数阈值**与**请求行长阈值**） |
+
+**端口分配**（全部独占，**没有碰**本机的 `Sea-*` 容器与 `Sea-RideTheWind_java` 进程）：
+Go hot-api `18903` · RAG hot-api `58903` · Go 侧桩 `19903` · RAG 侧桩 `19904`。
+
+**为什么下游用桩、而不是真 hot-rpc / 真 article-rpc**：
+hot-api 的链路是 `HTTP → hot-rpc.GetHotArticles(100) → article-rpc.GetArticle(每条)`。
+若用真下游，两侧会引入两个**与 hot-api 无关**的不确定源：① 两侧 Kafka 消费进度不同；
+② 两侧 Redis 快照写入时机不同 ⇒ 那是「对拍环境」的漂移，不是 hot-api 的漂移，判别力归零。
+⇒ 下游钉死，任何字节差异都 **100% 归因于 hot-api**。
+（代价：**hot-rpc 自身的行为不在本轮覆盖范围** —— 那属 `hot/rpc.md` 的 D1。）
+
+**为什么用「同构双桩」而不是「一个共用桩」**：
+共用桩分不清「谁发起的调用」。同构双桩各写各的调用日志 ⇒ 除比 HTTP 响应，还能比
+**下游调用序列**（比了就知道两侧调的方法、参数、条数是否一致 —— 例如两侧都跳过空 `article_id` 的那条）。
+
+## 2. 结果
+
+| 配置 | 通过 | 失败用例 |
+|---|---|---|
+| **默认**（RAG 侧不配任何 Tomcat 旋钮） | **24 / 29** | `CASE-04b`、`CASE-04c`、`CASE-15`、`CASE-16`、`CASE-21` |
+| **带修正配方**（见 §4） | **28 / 29** | `CASE-21`（= D14，已移交 common 域） |
+
+**24 条通过意味着**：信封形状、字段顺序、`items:[]` vs `null`、`secondary_tags:null`、
+`hot_score` 无符号（4294967295）、HTML 不转义、`scope` 常量、分页两层归一化、
+int32 溢出空页、rank 跨页连续、fatal vs best-effort 的不对称、404/405 裸响应、
+畸形 JSON body 拒绝 —— 这些**全部逐字节相同**。
+
+**每条用例都做 5 层断言**：
+① 跨侧状态码相同 ② 跨侧**响应体逐字节**相同（**不是** JSON 语义比对 ——
+JSON 比对会放过字段顺序、`null` vs `[]`、uint32 溢出这类差异，而那正是本域最常踩的坑）
+③ 跨侧**关键响应头**相同（`content-type` 媒体类型 / `x-content-type-options` / `allow`）
+④ 每条用例的**期望值**（来自 Go 真源语义）必须在**两侧**都成立
+⑤ 两侧桩的**下游调用序列**（多重集）相同
+
+## 3. 🆕 本轮新查出的 4 条漂移
+
+### DRIFT-HOTAPI-021 —— Tomcat 请求目标字符校验拒绝 `?page[]=5` 🔴 SEMANTIC MISMATCH（跨域）
+
+| | Go 真源 | RAG |
+|---|---|---|
+| 请求 | `GET /hot/v1/articles?page[]=5&page[]=9` | 同 |
+| 响应 | **HTTP 200** + `{"code":200,...,"page":5,...}` | **HTTP 400** + **Tomcat 的 HTML 错误页**（435 B，`text/html`） |
+
+**根因**（RAG 侧实测栈）：
+```
+java.lang.IllegalArgumentException: Invalid character found in the request target
+  [/hot/v1/articles?page[]=5&page[]=9 ]. The valid characters are defined in RFC 7230 and RFC 3986
+  at org.apache.coyote.http11.Http11InputBuffer.parseRequestLine(Http11InputBuffer.java:473)
+  [tomcat-embed-core-11.0.24.jar]
+```
+⇒ Tomcat 11.0.24 在 **HTTP 解析层**就拒了（请求**根本没进 Servlet**），
+⇒ 响应**不是**业务信封，而是 Tomcat 的 HTML 错误页 ⇒ **形状与状态码双双不同**。
+
+⚠️ **这条直接推翻了第二轮 CASE-04b / CASE-04c 的 ✅ 结论**：
+那两行是**MockMvc** 测的，MockMvc **不走 Tomcat 的请求行校验** ⇒ 假绿。
+（同一形态还有第四轮的 U6/U8「真 Tomcat 补测」—— 那些是真 Tomcat，所以结论有效。）
+
+⚠️ **更刺眼的一点**：RAG 侧 `GoFormValues.firstFormValue` **专门实现了** `name + "[]"`
+的回退（注释里写着「Go `?page[]=5` 剥掉 `[]` 后缀后归到 key `page`」），
+但在真栈里**这段代码是死的** —— 请求到不了控制器。
+⇒ 「代码写了」≠「客户端收到」的老坑又一次。
+
+**修法（已实测）**：`server.tomcat.relaxed-query-chars='[,]'`
+（Boot 4 的该属性是 `List<Character>` ⇒ **必须按逗号分隔传**，传 `'[]'` 会报
+`String [[]] with length 2 cannot be converted to char type`）。
+该属性的描述限定「只有 `< > [ \ ] ^ ` { | }` 可加」⇒ `[` `]` 在允许集内。
+
+### DRIFT-HOTAPI-022 —— form 参数个数上限：Go 2048 vs RAG 1000 🔴 OBSERVABLE DIFFERENCE（跨域）
+
+**实测**（`probe-hot-limits.py` 二分，「第一个不再是 200/{code:200} 的 n」）：
+
+| | 首个翻转 n | 翻转时的响应 |
+|---|---|---|
+| Go | **2049** | HTTP 200 + `{"code":5001,...}`（**应用层**拒绝） |
+| RAG（默认） | **1001** | HTTP 200 + `{"code":5001,...}`（**Tomcat 层**拒绝） |
+
+⇒ 形态**恰好相同**（都是 200 + 5001），但**阈值差一半** ⇒
+**1001 ~ 2048 这段区间：Go 成功、RAG 5001** ⇒ 可观察差异。
+
+**根因**：Boot 4 的 `server.tomcat.max-parameter-count` 默认 **1000**
+⇒ Tomcat 抛 `InvalidParameterException` ⇒ 被 RAG 的 catch-all
+（`GlobalExceptionHandler.onAnyException`）吞成 `{code:5001}`。
+```
+org.apache.tomcat.util.http.InvalidParameterException: More than the maximum number of
+request parameters (GET plus POST) for a single request ([1,000]) were detected.
+```
+
+⚠️ **副作用**：RAG 侧**自己实现的** 2048 上限（`GoFormValues.requireFormValueCountWithinLimit`）
+在 **GET query 上不可达** —— Tomcat 总是在 1000 就先拒了。
+⇒ 台账 D12「✅ 已实现」在**实现层面**成立，但在**运行时不可达** ⇒ 须与 D22 合并看。
+
+**修法（已实测）**：`server.tomcat.max-parameter-count=2048`
+⇒ 实测阈值变成 **2049**，与 Go **完全一致**。
+
+### DRIFT-HOTAPI-023 —— 请求行长上限：Go 1 MiB vs RAG 8 KiB 🔴 OBSERVABLE DIFFERENCE（跨域）
+
+**实测**（单值 query，隔离长度变量）：
+
+| | 首个翻转长度 | 翻转时的响应 |
+|---|---|---|
+| Go | **> 200000 字节**（`net/http` `MaxHeaderBytes` 默认 **1 MiB**） | — |
+| RAG（默认） | **8056 字节** | **HTTP 400** + **Tomcat HTML 错误页**（435 B） |
+
+⇒ 8 KiB ~ 1 MiB 的 query：Go 正常处理（并可能因值个数超限而回 5001），
+RAG 直接 **400 + HTML 错误页** ⇒ 响应**形状**都不同（不是业务信封）。
+
+**根因**：Boot 4 的 `server.max-http-request-header-size` 默认 **8KB**
+⇒ Tomcat 的 `maxHttpHeaderSize`（请求行 + 全部请求头一起算）。
+
+**修法（已实测）**：`server.max-http-request-header-size=1MB`
+⇒ 实测到 200000 字节都不翻转，与 Go 一致。
+
+### DRIFT-HOTAPI-024 —— `Content-Type` 的 charset 参数 🆕 待签字（不复刻）
+
+| | 响应头 |
+|---|---|
+| Go | `Content-Type: application/json; charset=utf-8`（**分号后有空格**） |
+| RAG | `Content-Type: application/json`（**无 charset**） |
+
+**根因**：Go 侧 httpx 写死 `header.ContentTypeJson = "application/json; charset=utf-8"`
+（go-zero v1.10.2 `rest/internal/header/headers.go:17`）；
+Spring 的 `MappingJackson2HttpMessageConverter` 写 `application/json`。
+
+**为什么建议「不复刻」**：即使 RAG 侧显式补 charset，Spring 的 `MediaType.toString()`
+产出的是 `application/json;charset=utf-8`（**分号后无空格**）⇒ 与 Go **仍不逐字节相同**。
+⇒ 要逐字节相同只能靠 filter 在响应写出后改写 header ⇒ 代价与收益不成比例。
+⇒ 建议登记为**有意偏离**（`SD-HOT-API-006`），媒体类型本身（`application/json`）**相同**。
+
+## 4. ✅ 修正配方（**已实测**：三旋钮同时打开 ⇒ 28/29 + 阈值完全对齐）
+
+```yaml
+server:
+  # 对齐 Go net/http 的 MaxHeaderBytes 默认 1 MiB（Boot 4 默认 8KB）
+  max-http-request-header-size: 1MB
+  tomcat:
+    # 对齐 go-zero httpx/util.go:15 的 maxFormParamCount = 2048（Boot 4 默认 1000）
+    max-parameter-count: 2048
+    # 允许 query 里的 [ ]（Go 的 net/http 允许；Boot 4 默认拒绝 ⇒ 400）
+    # ⚠️ 该属性是 List<Character> ⇒ YAML 里要写成列表，不能写字符串
+    relaxed-query-chars: "[,]"
+```
+
+**实测效果**：
+- 对拍矩阵 **24/29 → 28/29**（`CASE-04b` / `CASE-04c` / `CASE-15` / `CASE-16` 四条全绿）
+- 边界探针：Go 首个翻转 n = **2049**，RAG 首个翻转 n = **2049** ⇒ **完全一致**
+- 请求行长阈值：两侧到 200000 字节都**不翻转** ⇒ **完全一致**
+- 剩下的唯一失败是 `CASE-21` = **D14**（503 缺 `nosniff`）⇒ 代码在 `service/common`，**已移交 common 域**
+
+⚠️ **本轮只登记、不擅改**：这三个旋钮是 **Tomcat 容器级**的，影响**全部 10 个 api 模块**
+（article-api / comment-api / favorite-api / follow-api / hot-api / like-api / message-api /
+task-api / user-api / admin-api 同款默认值）⇒ 属**全仓约定**，按 §5.3「只写自己域」
+⇒ **跨域移交**，由 common 域 / 用户拍板后统一落地。
+（Go 侧 `net/http` 的 1 MiB 与 go-zero 的 2048 都是**库级默认**，RAG 侧要对齐就得**逐个显式配** ——
+这就是「默认值藏在库里、照 yaml 对永远看不见」的又一例，§3.3.1。）
+
+## 5. 本轮的方法论教训
+
+### 5.1 MockMvc 不是「真 Tomcat」（第 N 次，但这次代价最大）
+
+第二轮 4 条 ✅ 结论（CASE-04b / 04c / 15 / 16）**全部**建立在一个**不经过 Tomcat 请求行校验**
+的测试载体上。⇒ **「MockMvc 实测同」不能写进「等价」那一栏**。
+（第四轮的 U6/U8 用了 `RANDOM_PORT` 真 Tomcat，所以那些结论不受影响 —— 本轮实测 404/405 与
+percent-encoding 两侧**确实**逐字节一致。）
+
+### 5.2 探针自己也会被环境污染（第二次踩同一类坑）
+
+`probe-hot-limits.py` 第一版量出「Go 首个翻转 n = 1125，HTTP 503」—— **假数**。
+根因：`diff-hot.py` 的最后一条用例是 `CASE-21`（下游睡 30s），把桩的**模式文件**留在了 slow 上
+⇒ 探针的每个请求都被拖过 3s HTTP 超时 ⇒ 量到的是**超时点**，不是**限制点**。
+⇒ 修法：探针启动时先把模式切回 `hot-rpc-empty`（不发任何 article-rpc 调用 ⇒ 响应时间与被测变量无关）。
+⇒ **教训**：探针必须**显式设定**它依赖的环境，不能假设「上一个动作留下的环境是对的」。
+
+### 5.3 「同一套代码，配置不同 ⇒ 结论可能完全相反」
+
+同一个 RAG 二进制，只改 3 个启动参数，结果从 **24/29** 变成 **28/29**。
+⇒ **结论必须绑定配置**。台账里任何「已对齐 / 不对齐」都必须写清**在什么配置下**测的。
+
+## 6. 本轮**未**覆盖（不得读成「hot-api 全部闭合」）
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| **hot-rpc 自身的端到端对拍** | ❌ 未做 | 本轮下游是桩 ⇒ hot-rpc 的行为（Kafka 消费、Redis 快照、TopK 语义）**不在覆盖范围** ⇒ 属 `hot/rpc.md` 的 D1 |
+| **超时 / 保护层四闸的活体观测**（D9/U2/U5） | 🟡 部分 | `CASE-21` 已让 3s 超时**真的触发**（两侧都产出 `503 + Request Timeout\n`）⇒ **D9 的「超时分支」有活体证据了**；但「超时响应头缺 nosniff」= D14，**跨域移交 common 域**；保护层四闸仍未构造超限请求 |
+| **客户端断连 499**（D3/U3） | ❌ 未做 | 需要 `curl --max-time` 撞慢下游；本轮未构造 |
+| **变异验证**（D2/U9） | 🟡 部分 | 已对**新增的修复**做过定向变异；**全组件系统变异仍未做** |
+| **Go 侧 `hot.api` 的 `Log.Mode` 等配置项** | ✅ 已对齐副本 | 真源 yaml 零改动（纪律 1 自检通过：跑完 `git status --porcelain -uno` 为空） |
+

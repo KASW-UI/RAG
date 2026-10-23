@@ -547,3 +547,75 @@ p.write_text(s.replace(old, new, 1))   # ← 替换**第一个**出现
    是**镜像**：那次是「先怀疑断言」，这次是「**先怀疑工具**」——
    ⇒ 两者合起来是：**先怀疑你的工具，再怀疑世界，最后才怀疑被测代码**。
 4. ⚠️ 改生产源码做变异时，**注释里的同名文本是最大的坑** ⇒ 优先改**有独特上下文**的位置。
+
+---
+
+## P16 · MockMvc 不是「真 Tomcat」：它跳过请求行校验、header 长度上限、参数个数上限
+
+> **触发**：2026-10-24 第五轮（U1/D1 端到端对拍）
+> **代价**：第二轮台账里 **4 条 ✅ 结论** 被真栈推翻（D21 / D22 / D23 + D12 的运行时阈值）
+
+### 现象
+
+第二轮用 MockMvc 测出来的结论：
+
+| 用例 | 第二轮结论（MockMvc） | 第五轮真栈实测 |
+|---|---|---|
+| `?page[]=5` | ✅ 5 / 20 | 🔴 **HTTP 400 + Tomcat HTML 错误页** |
+| `?page=5&page=3` | ✅ 5 / 20 | ✅ 5 / 20 |
+| 2048 个 form 值 | ✅ OK | ✅ OK |
+| 2049 个 form 值 | ✅ 5001 | 🟡 **1001 个就 5001** |
+
+⇒ 前两行 MockMvc 全绿，真栈全红。
+
+### 根因
+
+MockMvc 直接调 `DispatcherServlet`，**不经过 Tomcat 的 HTTP 解析层** ⇒ 下面三道闸它一道都碰不到：
+
+| 闸 | Tomcat 11 的位置 | Boot 4 属性（默认） | Go 的对应（库级默认） |
+|---|---|---|---|
+| 请求目标字符校验 | `Http11InputBuffer.parseRequestLine` → `HttpParser.isQueryRelaxed` | `server.tomcat.relaxed-query-chars`（无） | `net/http` **允许** `[` `]` |
+| 请求行 + 头总长 | `maxHttpHeaderSize` | `server.max-http-request-header-size`（**8KB**） | `net/http` `MaxHeaderBytes`（**1 MiB**） |
+| 参数个数 | `Parameters` / Connector | `server.tomcat.max-parameter-count`（**1000**） | go-zero `maxFormParamCount`（**2048**） |
+
+### 怎么防
+
+1. **凡是要断言「HTTP 入口长什么样」的用例，一律用 `RANDOM_PORT` + 真实 `HttpClient`**
+   （本仓第四轮已用它做过一次 —— `HotApiRealTomcatGateTest`），
+   **不要**用 MockMvc 断言「状态码 + 响应头 + 原始 body」。
+   ⚠️ 判据：**断言里出现 `Content-Type` / `X-Content-Type-Options` / `Allow` / 原始 body 字节**
+   ⇒ MockMvc 不合格。
+2. **端到端对拍要覆盖「query 的形状」**，不只覆盖「query 的值」。
+   本轮 4 条漂移里有 3 条是**形状**问题（`[]` 后缀、值的个数、query 的长度），
+   而第二轮的 25 条分页/归一化用例全是**值**问题 ⇒ 覆盖面上就漏了。
+3. ⚠️ **Tomcat 的默认值比 Go 的库默认值更严**，这是**全仓**问题（10 个 api 模块同款）
+   ⇒ 修法是**显式配**，不是「RAG 照 yaml 对」—— 因为 Go 那边这些值**根本不在 yaml 里**
+   （§3.3.1：藏在 struct tag / 库默认值里）。
+
+---
+
+## P17 · 探针自己也会被环境污染：上一个动作留下的环境会量出假数
+
+> **触发**：2026-10-24 第五轮（`probe-hot-limits.py` 第一版）
+
+### 现象
+
+边界探针第一版量出「Go 侧首个翻转 n = 1125，HTTP 503」—— **假数**。
+Go 的真实限制是 **2049**（值个数）。
+
+### 根因
+
+`diff-hot.py` 的**最后一条**用例是 `CASE-21`（下游睡 30s，触发 3s 超时），
+它把桩的**模式文件**留在了 `article-slow` 上 ⇒ 探针的每个请求都被拖过 3s 超时
+⇒ 量到的不是「限制点」，是「超时点」。
+
+### 怎么防
+
+1. **探针启动时必须显式设定它依赖的环境**，不能假设「上一个动作留下的环境是对的」。
+   本轮修法：探针先把模式切回 `hot-rpc-empty`（hot-rpc 返 0 条 ⇒ **不发任何 article-rpc 调用**
+   ⇒ 响应时间与被测变量无关）。
+2. **用「无副作用」模式做测量**：测上限时不要让下游参与。
+3. ⚠️ 判据：**探针量出来的数字必须能被另一个独立观测解释**
+   （本轮：修正配方下重测 ⇒ 两侧都是 2049，且与 go-zero 源码常量 `maxFormParamCount = 2048` 吻合
+   ⇒ 才认这个数）。**孤证不算数**。
+4. 与 **P15** 同源：**先怀疑工具，再怀疑世界**。
