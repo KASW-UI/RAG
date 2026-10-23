@@ -81,3 +81,45 @@ IllegalState: ApplicationContext failure threshold (1) exceeded:
 > 同类的还有 §3.5 里那句「共享索引文件合并后统一更新」：
 > 凡是**多个会话会同时用同一份固定值**的资源（端口、库名、Redis db 号），
 > 都要按「会被别人占/被改」来设计，而不是按「只有我在用」。
+
+---
+
+## PIT-USERS-SHARED-002 🔴 Docker 内存配额只有 7.65 GiB ⇒ 小容器也起不来，**别把它当成代码信号**
+
+**症状**：`mvn test` 偶发
+```
+ContainerLaunch Container startup failed for image redis:7-alpine
+```
+或 `postgres:16-alpine`。同一份代码、同一个测试，**上一轮绿、这一轮红**，
+重试几次又能过 ⇒ 极易误判成「我刚改的东西有问题」。
+
+**真实原因**（实测，不是猜测）：
+```bash
+docker info   | grep -i "Total Memory"     # → Total Memory: 7.653GiB
+docker stats --no-stream --format '{{.Name}}\t{{.MemUsage}}'
+```
+本机 Docker Desktop 只分到 **7.653 GiB**；当前跑着约 **30 个容器**，
+Kafka ×3（943 + 802 + 770 MiB）、Nacos ×2（943 + 708 MiB）、
+Neo4j 399 MiB、Grafana 362 MiB …… 已吃掉大半。
+⇒ **连 `redis:7-alpine`（几十 MB）都分不到**。
+
+本轮为这件事连撞 **3 次**，且**不能**去 kill 别人的容器（§5.3：并行 worktree
+之间不互相动状态；那些 Kafka/Nacos 属于 Go 侧栈和其他会话）。
+
+**怎么区分「基础设施抖动」与「真回归」**：
+
+| 现象 | 判定 |
+|---|---|
+| `ContainerLaunch … failed for image <很小的镜像>` | 🔴 基础设施。**先查 docker stats，别碰代码** |
+| 用例 `assertion failed` 且断言内容具体 | ✅ 真回归 |
+| 同一用例**反复时绿时红**、且红的是启动阶段 | 🔴 基础设施 |
+
+**处置原则：让护网不要依赖容器，除非它真的在测容器**。
+本轮据此把 `AvatarHistoryIgnoresBodyTest`（测「Spring 会不会解析 body」）
+从真 Redis 全上下文改成 `standaloneSetup` + 真 advice ——
+**零容器、4.7 秒**，且判别力不变（变异验证照样红）。
+端到端那条仍保留真 Redis，两层并存。
+
+> 这条与 [`PIT-USERS-SHARED-001`](./_shared.md)（固定 gRPC 端口被并行会话占）
+> 是同一类问题：**§5.3 的并行 worktree 工作流在「文档里写共享索引」那部分是完备的，
+> 但「共享机器资源」这一层没有任何约定** —— 端口、内存、镜像拉取都会互撞。
