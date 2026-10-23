@@ -224,7 +224,7 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 | 配置 | **每通道独立 brokers** | `KqConf.Brokers` 逐通道 | 声明但从不消费（DRIFT-ARTICLE-RPC-007） | **OBSERVABLE DIFFERENCE** | 静态 |
 | DDL | 5 张表列型 / 约束 / 索引 | `article.sql` + `002_community_revision.sql` + AutoMigrate | `V8`/`V9`/`V10`（**仅大小写 + 多 3 条 COMMENT**，逐列 diff 已跑） | EQUIVALENT | 静态（逐行 diff） |
 | DDL | 时间列 | `timestamptz` | `timestamptz` ⇒ **DRIFT-MSG-V-007 类偏移在本域不成立** | EQUIVALENT | 静态 |
-| 启动 | **schema 门禁时机** | 建 server / 起 MQ **之前** panic | `ApplicationReadyEvent`（DRIFT-ARTICLE-RPC-008） | **OBSERVABLE DIFFERENCE** | 静态 |
+| 启动 | **schema 门禁时机** | 建 server / 起 MQ **之前** panic | ~~`ApplicationReadyEvent`~~ ⇒ **`SmartInitializingSingleton`**（已修，见 `DRIFT-ARTICLE-RPC-005`） | ✅ EQUIVALENT | **真进程实测**（2026-10-24） |
 
 ## 5. External Interaction & Error Flow（§8 + §10）
 
@@ -369,13 +369,13 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 - **Risk**: MEDIUM
 - **Evidence**: **真 PG 探针** PROBE6（Java 侧）+ 静态（GORM 软删除插件行为，**Go 侧未实跑** ⇒ 归入 U-4 的一部分）。
 
-### DRIFT-ARTICLE-RPC-005 —— schema 门禁发生在开始收流量之后
+### DRIFT-ARTICLE-RPC-005 —— schema 门禁发生在开始收流量之后 ✅ **已修（2026-10-24）**
 
 - **Component**: 启动 / 生命周期
 - **Operation**: 进程启动
 - **Category**: Lifecycle（§21）
 - **Go Behavior**: `article.go:41` `model.NewArticleRepo` → `InitDB`（`db.go:62-71`）校验触发器，失败 ⇒ `panic`；该调用**在** `article.go:44` `zrpc.MustNewServer` 与 `:57-60` 两个 `kq.MustNewQueue` **之前** ⇒ 缺 `article_revision_immutable` 时进程**从不收流量**。
-- **Java Behavior**: `ArticleSchemaGate.verifySchema()` 监听 `ApplicationReadyEvent`（`ArticleSchemaGate.java:73`）⇒ 此时 gRPC server 已监听、Kafka listener 已启动。
+- **Java Behavior**（修复前）: `ArticleSchemaGate.verifySchema()` 监听 `ApplicationReadyEvent`（`ArticleSchemaGate.java:73`）⇒ 此时 gRPC server 已监听、Kafka listener 已启动。
 - **Difference**: 存在一个「已在收流量、但不可变保证缺失」的窗口；窗口内任意一次误 UPDATE 都能改写已发布正文且**不报错**。
 - **Observable Impact**: 短暂窗口内接受写流量；随后 Spring 因异常关闭上下文。
 - **Likely Cause**: Spring 的"启动后钩子"比"刷新前钩子"容易写，于是选了一个语义上更晚的时机。
@@ -383,7 +383,17 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 - **Recommended Verification**: 启动期注入"缺触发器"的 schema，断言**从未**建立过监听（对比现有 `ArticleSpringContextWiringTest#flywayActuallyCreatedArticleTables` 只断言表存在）。
 - **Classification**: **OBSERVABLE DIFFERENCE**
 - **Risk**: MEDIUM
-- **Evidence**: 静态（两侧启动序列逐行读过）。
+- **Evidence**: ~~静态（两侧启动序列逐行读过）~~ ⇒ ✅ **真进程实测**（2026-10-24，见本文件末尾「第四轮」节）：
+  缺触发器时 gRPC server **确实绑定过端口**（devh 的 `GrpcServerStartedEvent` 实测触发），
+  修复后**不再触发**。
+
+> ⚠️ **同构问题，跨域（2026-10-24 实测，本工作树未修）**：
+> `like-rpc` / `comment-rpc` / `favorite-rpc` / `task-rpc` 的 `*SchemaGate`
+> **用的是同一套 `@EventListener(ApplicationReadyEvent.class)` 写法**
+> ⇒ 它们也都在"server 已起来之后"才校验。
+> 是否构成同等级缺陷取决于各自门禁的 fail-fast 程度与所保护的不变量
+> （article 域这条守的是「已发布正文不可变」，丢了会**静默**改写已发布内容）。
+> ⇒ **不属于 article 域 scope**，登记在此供主会话跨域处理。
 
 ### DRIFT-ARTICLE-RPC-006 —— outbox 中继的 `pollIntervalMs<=0` 兜底根本没接上
 
@@ -998,3 +1008,106 @@ new PublishOutcome(article.getAuthorId(), article.getTitle(), true)   // ← 当
 ⇒ **「某个判据 ⇒ 两者必相等」这种句式，在写进台账前必须问：这个判据到底约束了那个字段吗？**
 ⇒ 与 AGENTS.md §3.1「不要拿未验证的结论当基准」同源，且更隐蔽：
 **它长得像一条严谨的论证，且写进了台账，会让下一个 agent 以为"已经证明等价，不用管"。**
+
+---
+
+<!-- @fix 2026-10-24 第四轮 · 由 align/article 工作树产出 · 基线 commit 59ee046 -->
+
+## 2026-10-24 第四轮：`DRIFT-ARTICLE-RPC-005` 已修（schema 门禁移到 server 启动**之前**）
+
+### ✅ FIX-07 —— `DRIFT-ARTICLE-RPC-005` 已修（启动期门禁的时机）
+
+#### Go 出处（逐行，消费点）
+
+```
+article.go:41   u := model.NewArticleRepo(c)          ← InitDB 里校验 article_revision_immutable
+                                                     ← 失败 ⇒ panic（db.go:61-71）
+article.go:44   s := zrpc.MustNewServer(...)           ← gRPC server 在这之后才被创建
+article.go:57   serviceGroup.Add(kq.MustNewQueue(...))  ← Kafka consumer 同理
+article.go:78   serviceGroup.Start()                  ← 真正开始收流量
+```
+
+⇒ Go：**门禁在 server 被创建之前** ⇒ 缺触发器时进程**从不收流量**。
+
+#### Spring 侧的等价位置（spring-framework **7.0.9**，逐行读到消费点）
+
+```
+AbstractApplicationContext.refresh()
+  :621  finishBeanFactoryInitialization(beanFactory)
+         └─ DefaultListableBeanFactory.preInstantiateSingletons()
+              ├─ 实例化全部单例（Flyway 的 FlywayMigrationInitializer 在此执行 afterPropertiesSet）
+              └─ :1144-1147  SmartInitializingSingleton.afterSingletonsInstantiated()   ← 门禁放这里
+  :624  finishRefresh()
+         └─ :1013  getLifecycleProcessor().onRefresh()   ← 启动全部 SmartLifecycle
+                   ├─ devh  GrpcServerLifecycle    → localServer.start() ⇒ **端口绑定**
+                   └─ Kafka KafkaListenerEndpointRegistry → 消费者开始拉消息
+```
+
+⇒ `SmartInitializingSingleton` 正好落在「单例已就绪（含 Flyway）」与「任何 `SmartLifecycle` 被启动」**之间**。
+
+#### 修复
+
+```java
+// 修复前
+@EventListener(ApplicationReadyEvent.class)   // ← refresh() 之后才发布 ⇒ 端口已绑
+public void verifySchema() { ... }
+
+// 修复后
+public class ArticleSchemaGate implements SmartInitializingSingleton {
+    @Override
+    public void afterSingletonsInstantiated() { verifySchema(); }
+}
+```
+
+⚠️ **为什么不能更早**：`BeanFactoryPostProcessor` 阶段连 DataSource 都还没建好、Flyway 更没跑
+⇒ 那时校验必然误报"缺表"。
+⚠️ **为什么 Flyway 已经跑完了**：`FlywayMigrationInitializer` 是普通单例，
+它的 `afterPropertiesSet()` 在实例化阶段就执行完，
+而 `afterSingletonsInstantiated()` 是在**实例化循环结束之后**的另一个循环里调用的。
+
+#### 🔴 怎么"看见"服务器有没有启动过（这是本条的关键）
+
+⚠️ **失败启动后端口最终也会关闭 ⇒ 事后查端口分不出「从没启动」与「启动过又关了」。**
+⇒ 改用 devh 的一手信号：`GrpcServerLifecycle.createAndStartGrpcServer()`
+在 `localServer.start()`（**端口已绑定**）**之后**才
+`publishEvent(new GrpcServerStartedEvent(...))`
+⇒ **收到该事件 == 确实对外服务过**。
+
+#### 证据
+
+- **真进程实测**（`ArticleSchemaGateStartupOrderTest`，真 PG 容器 + 真 Spring 上下文 + 真 gRPC server）：
+  | 用例 | 结果 |
+  |---|---|
+  | `missingImmutabilityTriggerFailsBeforeGrpcServerEverStarts` | 启动失败 **且** 未收到 `GrpcServerStartedEvent` ✅ |
+  | `healthySchemaStartsTheGrpcServer`（**对照**） | 启动成功 **且** 收到了 `GrpcServerStartedEvent` ✅ |
+- ⚠️ **对照用例是必需的**：负向用例断言的是「事件**没**发生」，
+  监听器本身坏了就会**假绿** ⇒ 必须有一条正例证明监听器是活的。
+- **变异验证（三态判定）**：`MUT-RED`
+  —— 把门禁改回 `@EventListener(ApplicationReadyEvent.class)`（= 修复前实现）⇒ 用例转红，
+  报错为 `expected: <false> but was: <true>`（"gRPC server 已经启动过"）
+  ⇒ **回归网非假绿**，且它**恰好**抓住这条漂移。
+- **修复前**的那次红（同一句话、同一断言）与变异红**完全一致** ⇒ 测试确实在测这件事。
+- **模块级**：`article-rpc` **114 tests / 0 failures / 0 errors / 0 skipped**（原 112 ⇒ +2）；
+  连同 `article-api` 67 + `article-common` 15 ⇒ **article 域合计 196 / 0 / 0 / 0**（`BUILD SUCCESS`）。
+
+#### 判定变化（FIX-07）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `DRIFT-ARTICLE-RPC-005` schema 门禁时机 | ❌ OBSERVABLE DIFFERENCE（MEDIUM，静态证据） | ✅ **已修** + 真进程实测 + 变异验证 |
+| `DRIFT-ARTICLE-RPC-007` 每通道独立 Kafka brokers | ❌ OBSERVABLE DIFFERENCE（LOW） | 🔴 **OPEN**（本轮未动） |
+| `U-2` / `U-3` / `U-4` / `U-6` / `U-7` / `U-8` / `U-9` / `U-4'` / `U-5'` | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
+| S-5（security 域） | ⛔ 阻塞 | ⛔ **仍阻塞**（security 域不在本项目范围内） |
+| **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
+
+⚠️ **判定不变的理由**：本轮只修掉 1 条；
+`DRIFT-007` 与 9 条 `U-*` 仍在，且**无双侧活体对拍**（Go 侧仍需 `etcd:2379`）
+⇒ 本条的 ✅ 读作「**在真进程证据下一致**」，不是「已闭环」。
+
+#### 📌 跨域待办（不属于 article 域 scope，登记供主会话处理）
+
+`like-rpc` / `comment-rpc` / `favorite-rpc` / `task-rpc` 的 `*SchemaGate`
+**用的是同一套 `@EventListener(ApplicationReadyEvent.class)` 写法**
+⇒ 同样在"server 已起来之后"才校验。
+⇒ 是否构成同等级缺陷，取决于各自门禁的 fail-fast 程度与所保护的不变量。
+⇒ ⚠️ **本工作树不碰其它域**（§5.3：只写自己域的台账文件）。

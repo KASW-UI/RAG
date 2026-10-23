@@ -428,3 +428,69 @@ assertEquals("作者改过的标题", outcome.title());      // Go :147
 4. 补一条缺失的测试时，**先假设它会转红** ——
    转红的位置往往不是你想补的那条缺口，而是**另一条被论证掉的漂移**
    （本轮就是这样：`U-5` 补网 ⇒ 撞出 `DRIFT-ARTICLE-RPC-009`）。
+
+---
+
+## PF-ARTICLE-RPC-010 —— 启动期校验挂在哪个钩子上：Spring 的「启动后钩子」比「刷新前钩子」**晚了一个生命周期阶段**
+
+**现象**
+`ArticleSchemaGate` 原本用 `@EventListener(ApplicationReadyEvent.class)` 做启动期校验。
+它确实**会**在 schema 缺失时让进程启动失败（fail-fast 语义没问题），
+但**失败之前，gRPC server 已经绑定端口、已经对外服务过**了。
+
+**根因（框架机制 —— Spring 的生命周期阶段顺序）**
+
+`AbstractApplicationContext.refresh()`（spring-framework 7.0.9）：
+
+```
+:621  finishBeanFactoryInitialization(beanFactory)
+        └─ DefaultListableBeanFactory.preInstantiateSingletons()
+             ├─ 实例化全部单例（Flyway 的 FlywayMigrationInitializer 在此 afterPropertiesSet）
+             └─ :1144-1147  SmartInitializingSingleton.afterSingletonsInstantiated()  ← 可用
+:624  finishRefresh()
+        └─ :1013  getLifecycleProcessor().onRefresh()
+              └─ 启动全部 SmartLifecycle ⇒ devh GrpcServerLifecycle.start()
+                                              ⇒ localServer.start() ⇒ **端口绑定**
+```
+
+而 `ApplicationReadyEvent` 由 `SpringApplication.run()` 在 **`refresh()` 返回之后**才发布
+⇒ 它落在 `finishRefresh()` **之后** ⇒ 端口早绑了。
+
+⇒ **一句话**：`ApplicationReadyEvent` 的语义是「应用已经就绪，可以接流量了」，
+**恰恰是 fail-fast 校验最不该用的那个时机**。
+
+**为什么测试抓不到（第一层）**
+原来的测试只断言"schema 缺失时启动失败" ⇒ **绿**。
+它完全没问"失败之前有没有对外服务过"。
+⇒ **"启动失败"与"从未对外服务"是两件事**，前者不蕴含后者。
+
+**为什么测试抓不到（第二层，更隐蔽）**
+想补一条"断言端口没被绑过"的用例时，**事后查端口是查不出来的**：
+失败启动后 Spring 会 `cancelRefresh` → 停掉已启动的 lifecycle → 端口**最终也是关着的**。
+⇒ "从没启动过"与"启动过又关了"在事后观察上**完全同形** ⇒ 这类断言天生**假绿**。
+
+**元教训**
+> **验证"某个组件有没有启动过"，必须用一手信号，不能用事后状态。**
+> ⇒ 一手信号 = 组件**自己**在启动那一刻发出的东西（事件 / 日志 / 计数器）。
+> ⇒ 本例用的是 devh 的 `GrpcServerStartedEvent`：它在 `localServer.start()`（端口已绑）**之后**发布
+> ⇒ **收到它 == 确实对外服务过**。
+> ⇒ 对照：**关掉端口、查连接、查进程** 都是事后状态，都会假绿。
+
+**顺带一条：负向断言必须配一条正例（对照）**
+"断言事件**没**发生"这种用例，如果**监听器本身坏了**，会永远绿。
+⇒ 必须有一条正例："schema 完好 ⇒ 该事件**确实**发生了" ⇒ 证明监听器是活的。
+⇒ 这与本项目已记的「对照变异」是同一个思路：**证明你的观测手段本身是有效的**。
+
+**下次怎么防**
+1. 写"启动期 X 必须在 Y 之前"这类约束时，
+   先查**框架的阶段顺序**（读 `refresh()` 源码，不要凭直觉），
+   再选钩子。常见可选点（由早到晚）：
+   | 钩子 | 时机 | 适合 |
+   |---|---|---|
+   | `BeanFactoryPostProcessor` | 单例都还没建 | ❌ DataSource/Flyway 都没好，不能查库 |
+   | `SmartInitializingSingleton.afterSingletonsInstantiated()` | 单例已就绪、`SmartLifecycle` **未**启动 | ✅ **要"先校验再对外服务"就用这个** |
+   | `ContextRefreshedEvent` | `onRefresh()` **之后** | ❌ 太晚 |
+   | `ApplicationReadyEvent` | `refresh()` 返回之后 | ❌ **更晚**（"已就绪"语义） |
+   | `ApplicationRunner` | `refresh()` 之后、ready 之前 | ⚠️ 仍晚于 lifecycle 启动 |
+2. 断言"没启动过"要用**组件自己发的启动事件**，不要用"事后端口/连接/进程状态"。
+3. 每条负向用例配一条**正例**，证明观测手段有效。
