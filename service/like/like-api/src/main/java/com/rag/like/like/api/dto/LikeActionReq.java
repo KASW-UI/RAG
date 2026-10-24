@@ -1,6 +1,7 @@
 package com.rag.like.like.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 import com.rag.users.common.http.GoStyleRequired;
 import com.rag.users.common.http.GoStyleRequiredFields;
@@ -84,6 +85,7 @@ public class LikeActionReq implements GoStyleRequiredFields {
     private Long actionType;
     @JsonProperty("author_id")
     private Long authorId;
+    @JsonDeserialize(using = GoStyleFloat64Deserializer.class)
     @JsonProperty("weight")
     private Double weight;
     @JsonProperty("client_ip")

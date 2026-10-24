@@ -302,6 +302,123 @@ Jackson 对溢出字面量**不报错**，直接按 IEEE 754 给无穷。
    它的措辞精度就是风险 —— 本轮的 `application/*+json 在 Go 侧同样不算 JSON`
    就属于**过宽**（`application/json-patch+json` 在 Go 侧**是**算的）。
 
+## PIT-LIKEAPI-011 — 恒真断言：不是「写错了」，是**主动制造一条假绿**
+
+**现象（修复轮 2026-10-23）**
+给 `DRIFT-LIKEAPI-018` 补守门测试时，我顺手写了这么一条：
+
+```java
+@Test
+void httpTimeoutIsActuallyConfigured() {
+    assertEquals("3s", ...isEmpty() ? "3s" : "3s", "占位：真实断言在别的类里");
+}
+```
+
+**它绿了。永远会绿。** —— 三元表达式的两个分支是同一个字面量。
+
+**为什么这条特别危险**
+它比「没写测试」更糟。PIT-LIKEAPI-010 讲的是「测试守错了东西」，
+而这条是**测试什么都没守，却占着一个 `@Test` 的位置**，
+读代码的人会看到「🔴 已有守门测试」⇒ **跳过这件事**。
+
+⇒ 这是 AGENTS.md §3.3.3「绿测试可能是错误答案的守卫」的**更隐蔽的变种**：
+不是绿测试锁死了错答案，而是**用一条无意义的断言伪装成"已经验过了"**。
+
+**本域的具体背景**
+`DRIFT-LIKEAPI-018` 是**纯文档缺陷**（`LikeApiApplication` 的类 javadoc 曾宣称
+「刻意不配 `observability.http-timeout`」，而 `application.yml:27-29` 早就配了 3s）。
+台账 §9 **U-03 明确记着「3s 的 503 出口未在运行期复现」**（需真 Tomcat + 慢下游）。
+⇒ 在这个状态下写任何"配置已生效"的断言都是自欺。
+
+**下次怎么防**
+1. **纯文档/注释类修复不需要新测试** —— 加测试才是异常信号。
+2. 写完断言先问一句：**「把这个断言改成恒真，它还会绿吗？」** 会 ⇒ 别提交。
+3. 真要钉配置，至少要能从**运行期**读到（如注入 `@ConfigurationProperties` 后的实际值），
+   而不是在测试里复述一个字面量。
+4. 拿不准就**不写**，并在测试类的注释里**写明为什么这条没有测试**
+   （本轮 `LikeApiGoAlignmentTest` 末尾就是这么做的，把「不写」的理由显式化，
+   避免下一个人以为「已经有人验过了」）。
+
+---
+
+## PIT-LIKEAPI-012 — `Arrays.asList(null)`：单参数时那个 `null` 是**数组本身**
+
+**现象（修复轮 2026-10-23）**
+测「target_ids 全为 null」时写：
+
+```java
+Arrays.asList(null)          // ❌ NullPointerException
+```
+
+**根因**
+`Arrays.asList(T... a)` 是 **varargs**。传**一个** `null` 时，编译器无法区分
+「一个 null 元素」与「整个数组是 null」⇒ 直接把 `null` 当成 `T[]` 传入
+⇒ `Arrays$ArrayList.<init>` 里 `requireNonNull` 抛 NPE。
+
+⚠️ **传两个以上参数不会踩**：`Arrays.asList(null, null)` 会正常展开成 `[null, null]`。
+⇒ 这个坑只在**恰好一个 null 元素**时出现，而那恰好是最容易构造的测试输入。
+
+**下次怎么防**
+需要「允许 null 元素的单元素列表」时：
+- `Collections.singletonList(null)` ✅（本轮改用这个）
+- 或 `Arrays.asList(new String[]{null})` ✅（显式数组）
+
+⚠️ 顺带：`List.of(null)` / `List.of(...)` 任何含 null 的写法**都会**抛 NPE ——
+`List.of` 是**不允许 null 元素**的，而 `Arrays.asList` / `Collections.singletonList` 允许。
+⚠️ 而本轮修的 `DRIFT-LIKEAPI-013` 恰恰是「数组里允许 null」这件事 ——
+**测试数据构造方式与被测语义在同一处打架时，先确认构造 API 的契约**。
+
+## PIT-LIKEAPI-013 — 「测错对象」比「测不出来」更贵：先确认 classpath 上到底是哪一代
+
+**现象（修复轮 2026-10-23，修 012 时）**
+我写了 4 个探测类，用 `com.fasterxml.jackson.databind.ObjectMapper` 测「JSON 数字反序列化成
+`Object` 会得到什么类型」，拿到的结论一路推到底。
+
+**根因：like-api 的 MVC 用的是 Jackson 3，不是 Jackson 2**
+| 证据 | 说明 |
+|---|---|
+| `WebMvcConfig` 用 `JsonMapperBuilderCustomizer` + `tools.jackson.databind.JsonMapper.Builder` | 核心是 `tools.jackson.*` |
+| DTO 用 `com.fasterxml.jackson.annotation.JsonProperty` | ⚠️ **注解包名仍是 Jackson 2 的** —— 这正是最容易看走眼的地方 |
+| `Jackson2ObjectMapperConfiguration`（在 like-**rpc**） | 另一个组件显式造 Jackson 2 `ObjectMapper`，进一步混淆 |
+
+⇒ 同一仓里 **Jackson 2 与 Jackson 3 同时存在**，而注解包名**不区分版本**
+（Jackson 3 刻意保留 `com.fasterxml.jackson.annotation` 以便迁移）。
+
+⚠️ 若是只测 Jackson 2，012 的方案（尤其是「要不要开 `USE_BIG_DECIMAL_FOR_FLOATS`」）
+就会基于错误数据定型 —— 而 Jackson 3 的 `ObjectMapper` 是**不可变**的，
+`new ObjectMapper().enable(...)` 直接编译失败，这个差异本来会暴露，但我差点靠旧数据先下了结论。
+
+**下次怎么防**
+1. **探测必须用「生产路径上的那个对象」**，而不是「同名的那个类」。
+   MVC 场景就用 `@SpringBootTest` + `@AutoConfigureMockMvc` 走真实管线（这也是 PIT-LIKEAPI-010 的结论）。
+2. 看到 `com.fasterxml.jackson.annotation.*` **不要**据此断定是 Jackson 2。
+3. 探测类写完先看**它是否真能编译**——`enable()` 在 Jackson 2 上有、在 Jackson 3 上没有；
+   如果探测代码顺利编译通过，反而要警惕「测的根本不是生产用的那个」。
+
+---
+
+## PIT-LIKEAPI-014 — 「API 存在性」要查 jar，不要凭记忆
+
+**现象（同一个修复轮里连续发生两次）**
+① 写了 `tools.jackson.databind.DeserializationException` —— **Jackson 3 里没有这个类**；
+② 修好后又按记忆写了 `p.currentToken() == JsonParser.Token.START_ARRAY` —— Jackson 2 的
+`Token` 是顶层类 `JsonToken`，Jackson 3 迁到 `tools.jackson.core.JsonToken`。
+
+**为什么容易错**
+Jackson 2 → 3 的迁移里，**包名、注解包名、异常体系都变了**，而网上的绝大多数示例仍是 2.x。
+记忆里的「Jackson 写法」几乎全部指向 2.x。
+
+**正确做法（两次都是靠它救回来的）**
+```bash
+unzip -l <jackson-databind-3.1.5.jar> | grep -E "exc/"   # 先看有哪些类
+javap -cp <jar> <类名>                                        # 再看构造器是否 private / protected
+```
+⚠️ 第二个尤其重要：`MismatchedInputException` 的构造器是 **`protected`**，
+必须用静态工厂 `from(JsonParser, Class, String)` —— 编译期报错比运行期踩坑便宜得多。
+
+⇒ 这与 PIT-LIKEAPI-009（「不存在某机制」与「两侧都实现了它」在台账上长得一样）同族：
+**否定式断言必须用检索证明，不能用记忆证明。**
+
 ---
 
 ## 附：本轮两条最贵的教训（给下一个接手的人）
@@ -321,3 +438,81 @@ Jackson 对溢出字面量**不报错**，直接按 IEEE 754 给无穷。
    我第一版 RAG 探针漏了 `GoStyleJsonBodyConverter`，
    于是得出「RAG 返回 415」的错误结论 —— 而真实装配下 RAG 返回 `200 + 5001`。
    **探针漏一个生产 Bean，结论就整个反过来。**
+---
+
+# 2026-10-24 第五轮新增踩坑（DRIFT-LIKEAPI-017 修复过程）
+
+## PIT-LIKEAPI-015 —— 🔴 **`Deadline` 是不可变对象：`timeRemaining(...)` 是「调用那一刻」才算的**
+
+### 现象
+
+守门测试里断言「服务端观测到的 deadline 是 2000ms」，实际读到 **-1ms** ——
+一度以为「deadline 根本没传到服务端」，差点把结论写成「grpc 不传播 deadline」。
+
+### 根因
+
+`io.grpc.Deadline` 是**不可变**的：它只存一个**绝对到期时刻**，
+`timeRemaining(unit)` 是**调用那一刻**拿当前时刻去减 ⇒ **读得越晚，值越小**。
+
+我犯的错是：**把 `Deadline` 对象存进 `AtomicReference`，事后才读 `timeRemaining`** ——
+等到断言时，2 秒早已过去 ⇒ 读到一个已过期的负数。
+
+### 修法
+
+```java
+// ❌ 错：存对象，事后读
+serverObservedDeadline.set(Context.current().getDeadline());
+// …过一会儿…
+observed.timeRemaining(TimeUnit.MILLISECONDS);   // ← 此时早已过期
+
+// ✅ 对：在**观测点当场**把值取出来
+long remaining = observed == null ? -1L : observed.timeRemaining(TimeUnit.MILLISECONDS);
+serverObservedRemainingMillis.set(remaining);
+```
+
+### 元教训
+
+⚠️ **「观测到的值」和「观测到的对象」不是一回事** ——
+前者是**某一刻的快照**，后者要**在读的时候**才求值。
+凡是「先采集、后断言」的写法，采集的就必须是**值**，不是**活对象**。
+
+⇒ 与 PIT-LIKEAPI-009 / PIT-LIKEAPI-014（「API 的存在性/语义细节不能靠印象」）同族：
+**测法本身的误判，会伪装成「实现有 bug」的结论。**
+⚠️ 中间我还用了一个临时探针类量到 `grpc-timeout: 1970387u` 与 handler 侧 `remaining ≈ 1961ms`，
+确认传播链路本身没问题 ⇒ **探针类已删除，不进仓**（它只回答了一个一次性问题）。
+
+---
+
+## PIT-LIKEAPI-016 —— 🔴 **台账里一句「错误的范围判断」，会让本来能修的项被无限期搁置**
+
+### 现象
+
+`DRIFT-LIKEAPI-017`（单次 RPC 超时）在台账里被写成：
+
+> 「需新增独立配置项 + 改 `GoStyleRequestDeadline` 的「无预算就原样返回」分支 ⇒
+> **需要连带审 `common` 的 deadline 组件，同样受 §4 的并发约束**」
+
+⇒ 读起来像「这条要动共享模块 ⇒ 多域并发下会冲突 ⇒ 得排期等某个域先动」。
+
+### 根因
+
+那句话**是错的**，而且错在**根上**：修法其实**只读** `GoStyleRequestDeadline` 已有的**公开** API
+（`isPresent()` / `remainingMillis()`）就能拿到剩余预算，**根本不需要改 common**；
+而「无预算就原样返回」那条分支**根本不参与**（修法是不再调用 `applyTo`）。
+
+### 危害（这才是重点）
+
+一个**纯域内**、**零跨域冲突**的漂移，因为一句错误的范围判断，
+在台账里躺了好几轮，被当成「要排队等资源」而不是「现在就能修」。
+
+### 元教训
+
+⚠️ **「这条要动共享模块」这句话本身就是一个需要被证伪的断言** ——
+它和「这条有 bug」一样，都是**待验证的结论**，不是前提。
+
+⇒ 遇到「要动共享模块 ⇒ 有并发约束」的说法，先问一句：
+**「共享模块的哪一部分真的必须改？能不能只读它的公开 API？」**
+很多「必须改共享组件」的结论，实际只是**没想到有只读这条路**。
+
+⇒ 这也是 §3.3.3「先改/删错误断言，再改实现」在**台账层面**的同一条纪律：
+台账里的错误断言，同样会让下一轮**重复已修项**或**跳过可修项**。

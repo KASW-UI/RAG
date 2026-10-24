@@ -88,10 +88,21 @@ public class NacosRegistration {
             LOG.info("NacosRegistration registered: service={} group={} ip={} port={}",
                     SERVICE_NAME, DEFAULT_GROUP, localIp, grpcServerProperties.getPort());
         } catch (NacosException e) {
-            // Go 侧 etcd 注册失败会让 MustNewServer panic ⇒ 进程退出；
-            // 这里选择记日志继续启动（Nacos 可能只是暂时不可用）。
-            // ⚠️ 这是刻意的偏离：单 JVM 里 gRPC 已经起来了，为注册失败把整个服务杀掉
-            //    会让「Nacos 抖动 = 全站点赞不可用」，比 Go 更糟。
+            // ⚠️ 2026-10-23 修正错误断言 H：**结论对、机制说错了**。
+            //  Go 侧服务注册确实会让**进程退出**，但走的不是 panic：
+            //    like.go:34                      s := zrpc.MustNewServer(c.RpcServerConf, …)
+            //    zrpc/server.go:23-27             server, err := NewServer(...); logx.Must(err); return server
+            //    zrpc/server.go:41-46             HasEtcd ⇒ internal.NewRpcPubServer(…)；err ⇒ return nil, err
+            //    core/logx/logs.go:232-242        Must(err) ⇒ 打印堆栈 ⇒ if ExitOnFatal.True() { os.Exit(1) }
+            //    core/logx/vars.go:72             ExitOnFatal = syncx.ForAtomicBool(true)  ← 默认 true
+            //  原文写的「panic」不准确（那是 ExitOnFatal 被设为 false 时的次生路径：
+            //  此时 MustNewServer 会返回 nil server，调用方后续解引用才 panic）。
+            //
+            //  这里**有意偏离**：单 JVM 里 gRPC server 已经起来了，为一次注册失败杀掉整个进程
+            //  会让「Nacos 抖动 = 全站点赞不可用」，比 Go 更糟。
+            //  ⚠️ 代价（必须随本偏离一起读）：注册失败时本进程**不会**出现在服务发现里 ⇒
+            //  调用方拿不到本节点，流量不会被打进来；只有已建立的连接与 in-flight 请求继续。
+            //  ⇒ 这是「可用性优先于一致性」的取舍，不是「无差异」。
             LOG.error("NacosRegistration.register failed for {}: {}", SERVICE_NAME, e.getErrMsg(), e);
         }
     }

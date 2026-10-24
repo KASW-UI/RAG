@@ -6,6 +6,7 @@ import com.rag.like.like.api.dto.GetLikeCountResp;
 import com.rag.like.like.api.dto.LikeCountItem;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,7 +53,7 @@ public class LikeCountService {
     public GetLikeCountResp getLikeCount(GetLikeCountReq req) {
         var rpcReq = com.rag.like.like.proto.GetLikeCountReq.newBuilder()
                 .setTargetType(req.getTargetType())
-                .addAllTargetIds(idList(req.getTargetIds()))
+                .addAllTargetIds(GoStyleTargetIds.normalize(req.getTargetIds()))
                 .build();
 
         com.rag.like.like.proto.GetLikeCountResp rpcResp;
@@ -70,10 +71,5 @@ public class LikeCountService {
                     entry.getValue().getDislikeCount()));
         }
         return new GetLikeCountResp(counts);
-    }
-
-    /** 缺席的 {@code target_ids} 在 Go 上是<b>空 slice</b>（不是 null），见 {@link GetLikeCountReq}。 */
-    private static List<String> idList(List<String> ids) {
-        return ids == null ? List.of() : ids;
     }
 }

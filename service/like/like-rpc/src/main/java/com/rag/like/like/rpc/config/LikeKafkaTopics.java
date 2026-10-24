@@ -45,20 +45,80 @@ public class LikeKafkaTopics {
     private String hotEventTopic = "article-hot-events";
 
     /**
-     * 两个 Task*Pusher 是否启用 —— 对应 Go {@code newOptionalPusher}：
+     * 消费并发度 —— 对应 Go {@code service/like/rpc/internal/mq/etc/mq.yaml} 的
+     * {@code Kafka.Consumers: 8}。
      *
-     * <pre>
-     * func newOptionalPusher(conf kq.KqConf) *kq.Pusher {
-     *     if len(conf.Brokers) == 0 || conf.Topic == "" { return nil }
-     *     return kq.NewPusher(conf.Brokers, conf.Topic)
-     * }
-     * </pre>
+     * <p>Go 侧消费点（{@code go-queue@v1.2.2/kq/queue.go:249}）：
+     * {@code for i := 0; i < q.c.Consumers; i++ { … }} ⇒ <b>8 个消费协程</b>；
+     * {@code kq/config.go:18} 的默认值同样是 8。
      *
-     * <p>Go 是<b>运行期判空</b>（指针为 nil 则整段逻辑跳过），
-     * 所以这里<b>不能</b>用 {@code @ConditionalOnProperty} 把 Bean 做成「不存在」——
-     * 那会让 {@code LikeTaskProgressPublisher} 拿不到可选依赖而启动失败。
-     * 正确做法是保留 Bean、把开关透传下去，让业务代码走 Go 相同的 nil 分支。
+     * <p>⚠️ <b>本属性必须在 {@code kafkaListenerContainerFactory} 上调
+     * {@code setConcurrency(...)} 才生效</b>；写成 {@code spring.kafka.listener.concurrency}
+     * 是<b>无效</b>的 —— 因为 {@code LikeRpcApplication} 自己 {@code new} 了这个 factory，
+     * Boot 的 {@code ConcurrentKafkaListenerContainerFactoryConfigurer} <b>不会</b>参与，
+     * 那条 yaml 键没有任何消费点（AGENTS.md §3.3 同型：配置里没写 ≠ 没开，写了也可能没接）。
      */
+    private int consumers = 8;
+
+    /**
+     * <b>用户路</b> TaskPusher 是否启用 —— 对应 Go {@code newOptionalPusher(c.TaskUserPusherConf)}。
+     *
+     * <p>Go 判空条件（{@code internal/svc/servicecontext.go:50-54}）：
+     * {@code if len(conf.Brokers) == 0 || conf.Topic == "" { return nil }}，
+     * 即 <b>Brokers 与 Topic 两者任一为空即禁用</b>。
+     */
+    private boolean taskUserPusherEnabled = true;
+
+    /**
+     * <b>文章路</b> TaskPusher 是否启用 —— 对应 Go {@code newOptionalPusher(c.TaskArticlePusherConf)}。
+     *
+     * <p>Go 侧这是<b>另一个独立判空</b>（{@code servicecontext.go:43-44} 两个字段各判一次），
+     * 因此两路可以<b>分别</b>启用/禁用。
+     * ⚠️ 此前本模块把两路合并成一个 {@code taskPushersEnabled}，导致「只开一路」无法表达 ——
+     * 那是 Go 侧<b>不存在</b>的能力，属实现侧多做了限制（DRIFT-LIKE-012）。
+     */
+    private boolean taskArticlePusherEnabled = true;
+
+    public int getConsumers() {
+        return consumers;
+    }
+
+    public void setConsumers(int consumers) {
+        this.consumers = consumers;
+    }
+
+    public boolean isTaskUserPusherEnabled() {
+        return taskUserPusherEnabled;
+    }
+
+    public void setTaskUserPusherEnabled(boolean taskUserPusherEnabled) {
+        this.taskUserPusherEnabled = taskUserPusherEnabled;
+    }
+
+    public boolean isTaskArticlePusherEnabled() {
+        return taskArticlePusherEnabled;
+    }
+
+    public void setTaskArticlePusherEnabled(boolean taskArticlePusherEnabled) {
+        this.taskArticlePusherEnabled = taskArticlePusherEnabled;
+    }
+
+    /**
+     * ⚠️ <b>已废弃（2026-10-23）</b> —— 改用 {@link #taskUserPusherEnabled} 与
+     * {@link #taskArticlePusherEnabled} 两个独立开关。
+     *
+     * <p>原实现把 Go 侧两个独立判空合并成这一个开关，丢掉了「只启用一路」的能力
+     * （Go 出处：{@code internal/svc/servicecontext.go:43-44} 两个字段各判一次）。
+     *
+     * <p>⚠️ <b>这里不做「旧键回退」兼容</b>：两个细分开关的默认值都是 {@code true}，
+     * 而 Spring 的绑定<b>无法区分「未配置」与「显式配置成 true」</b> ——
+     * 任何回退逻辑都会把「显式只开一路」误判成「都没配」而退回旧开关。
+     * ⇒ 已把 {@code application.yml} 里的键直接换成两个新键，
+     * 让配置面与 Go 的两个 {@code KqConf} 一一对应，不留静默失效的中间态。
+     *
+     * <p>本字段与其访问器仅保留，避免旧调用点编译失败；<b>不再参与任何判定</b>。
+     */
+    @Deprecated
     private boolean taskPushersEnabled = true;
 
     public String getLikeTopic() {
@@ -93,10 +153,18 @@ public class LikeKafkaTopics {
         this.hotEventTopic = hotEventTopic;
     }
 
+    /**
+     * @deprecated 已废弃，见字段注释。<b>不参与判定</b>，改用两个细分开关。
+     */
+    @Deprecated
     public boolean isTaskPushersEnabled() {
         return taskPushersEnabled;
     }
 
+    /**
+     * @deprecated 已废弃，见字段注释。<b>不参与判定</b>，改用两个细分开关。
+     */
+    @Deprecated
     public void setTaskPushersEnabled(boolean taskPushersEnabled) {
         this.taskPushersEnabled = taskPushersEnabled;
     }

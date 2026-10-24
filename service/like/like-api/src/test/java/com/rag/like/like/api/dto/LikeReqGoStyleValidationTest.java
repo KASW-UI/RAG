@@ -28,19 +28,38 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>本类把规则钉在<b>它真正生效的那一层</b>（DTO 自身），从而：
  * <ul>
- *   <li>保住 Go 的语义（<b>标量必填 / Slice 永不计必填 / options 取值域</b>）；</li>
+ *   <li>保住 Go 的语义（<b>标量与 Slice 都必填、options 取值域</b>，
+ *       两者共用同一判据，只有错误文案不同）；</li>
  *   <li>让「去掉校验」这件事在测试里<b>必然变红</b>，而不是靠 NPE 巧合顶住；</li>
  *   <li>同时让实现不必依赖 NPE 这种「恰好同输出」的副作用。</li>
  * </ul>
  *
- * <p><b>Go 出处</b>（{@code core/mapping/unmarshaler.go} 的
- * {@code processNamedFieldWithoutValue}）：
+ * <p><b>Go 出处</b>（{@code go-zero@v1.10.2/core/mapping/unmarshaler.go:944-950}）：
  * <pre>
+ *   switch typeKind {
  *   case reflect.Array, reflect.Map, reflect.Slice:
- *       if !opts.optional() { return u.processFieldNotFromString(... emptyMap ...) }  ← 不报错
+ *       if !opts.optional() { return u.processFieldNotFromString(... emptyMap ...) }
  *   default:                                 ← String / Int / Bool 等标量
- *       if !opts.optional() { return newInitError(fullName) }                          ← field "x" is not set
+ *       if !opts.optional() { return newInitError(fullName) }   ← field "x" is not set
+ *   }
  * </pre>
+ *
+ * <p>🔴 <b>2026-10-23 修正错误断言（DRIFT-LIKEAPI-019）</b>：本段原先写的是
+ * 「标量必填 / <b>Slice 永不计必填</b>」，且给上面那段 Go 代码标了 {@code ← 不报错}。
+ * <b>两处都错</b>，且错得自相矛盾 —— 同一个文件的 59-73 行早已写对
+ * （「{@code target_ids} 也是必填 —— Slice 不豁免」）：
+ * <ol>
+ *   <li>Slice 分支<b>不是</b> {@code return nil}，而是把 {@code emptyMap} 交给
+ *       {@code processFieldNotFromString} → {@code default:} → {@code processFieldPrimitive}
+ *       → {@code typeKind(Slice) ≠ valueKind(Map)} → {@code newTypeMismatchError}；</li>
+ *   <li>⇒ 无 tag 的 Slice 与标量<b>同样必填</b>，只是<b>错误文案不同</b>
+ *       （Slice 报 {@code type mismatch for field "target_ids"}，
+ *       标量报 {@code field "target_ids" is not set}）。</li>
+ * </ol>
+ * ⚠️ 活体证据：Go 探针 B02（{@code {"target_type":"a"}}，缺 target_ids）
+ * ⇒ {@code ERR type mismatch for field "target_ids"}；B04（{@code target_ids:[]}）⇒ {@code OK}。
+ * ⇒ 这正是 <b>DRIFT-LIKEAPI-002</b> 的案发现场：照着上面那句错误注释「简化」Slice 校验，
+ * 会把已修好的漂移原样改回来。
  */
 class LikeReqGoStyleValidationTest {
 

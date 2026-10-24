@@ -145,7 +145,7 @@ class LikeApiGoStyleBodyContentTypeTest {
     }
 
     @Test
-    @DisplayName("application/*+json 在 Go 侧**同样不算** JSON（字面子串匹配，不是媒体类型兼容判定）")
+    @DisplayName("application/vnd.api+json **不含** `application/json` 子串 ⇒ Go 不读 body；⚠️ 但 `application/json-patch+json` **含**该子串 ⇒ Go **会读**（2026-10-23 收窄，见 DRIFT-LIKEAPI-020）")
     void vendorJsonSuffixIsNotApplicationJson() throws Exception {
         // Go 用 strings.Contains(ct, "application/json")；
         // "application/vnd.api+json" **不包含**该子串 ⇒ body 被丢弃 ⇒ 5001。
@@ -203,5 +203,33 @@ class LikeApiGoStyleBodyContentTypeTest {
         assertEquals(true,
                 com.rag.common.http.GoStyleJsonBodyConverter.goReadsBody("application/json; charset=utf-8", 10L),
                 "带 charset 参数时依然命中子串 ⇒ 读（Go 也是 contains，不是精确相等）");
+    }
+
+    /**
+     * DRIFT-LIKEAPI-020 的另一半（2026-10-23 补）。
+     *
+     * <p>Go 判据是 {@code strings.Contains(ct, "application/json")}（<b>子串包含</b>，
+     * {@code go-zero@v1.10.2/rest/httpx/requests.go:153-155}），
+     * 所以 <b>{@code application/json-patch+json} 是含该子串的</b> ⇒ Go <b>会读 body</b>。
+     * ⚠️ 这与同文件里 {@code application/vnd.api+json} 的结论<b>正好相反</b> ——
+     * 原 DisplayName 用 {@code application/*+json} 一概而论，才会把两条混成一条。
+     *
+     * <p>⇒ 本例与 Go <b>一致</b>（都读、都调下游），记为 EQUIVALENT；
+     * 它存在的意义是<b>防止有人照着收窄前的措辞，给 json-patch+json 加上 Go 没有的拒绝逻辑</b>。
+     */
+    @Test
+    @DisplayName("application/json-patch+json **含** `application/json` 子串 ⇒ Go 会读 body，RAG 也读（两侧一致）")
+    void jsonPatchContentTypeIsReadBecauseItContainsTheSubstring() throws Exception {
+        LikeServiceBlockingStub stub = mock(LikeServiceBlockingStub.class);
+        when(likeRpcClient.likeRpc()).thenReturn(stub);
+
+        mockMvc.perform(post(COUNT_PATH)
+                        .header("Authorization", "Bearer " + token())
+                        .contentType(MediaType.parseMediaType("application/json-patch+json"))
+                        .content(VALID_JSON))
+                .andExpect(status().isOk());
+
+        // 关键：body 真的被解析了 ⇒ 调到了下游（若被误加拒绝逻辑，这里会红）
+        verify(stub).getLikeCount(any());
     }
 }

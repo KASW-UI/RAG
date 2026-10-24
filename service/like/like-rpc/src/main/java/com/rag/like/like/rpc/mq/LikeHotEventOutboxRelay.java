@@ -2,6 +2,7 @@ package com.rag.like.like.rpc.mq;
 
 import com.rag.like.like.rpc.domain.LikeOutboxEventEntity;
 import com.rag.like.like.rpc.mapper.LikeOutboxEventMapper;
+import com.rag.like.like.rpc.service.LikeKafkaPushKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -77,8 +78,17 @@ public class LikeHotEventOutboxRelay {
 
         for (LikeOutboxEventEntity event : events) {
             try {
-                // Go: HotEventPusher.Push(ctx, string(event.Payload)) —— **不带 key**，且用 payload 原文
-                kafkaTemplate.send(topics.getHotEventTopic(), null, event.getPayload());
+                // Go: HotEventPusher.Push(ctx, string(event.Payload))
+                //   —— 「用 payload 原文」这半句是对的；
+                //   —— 「不带 key」这半句**是错的**（Go 的 Push 内部即 PushWithKey(UnixNano)，pusher.go:123-125）。
+                final String pushKey = LikeKafkaPushKey.unixNano();
+                kafkaTemplate.send(topics.getHotEventTopic(), pushKey, event.getPayload())
+                        .whenComplete((result, error) -> {
+                            if (error != null) {
+                                LOG.error("push hot event failed (async): eventId={} err={}",
+                                        event.getEventId(), error.getMessage());
+                            }
+                        });
                 outboxMapper.markSent(event.getEventId());
             } catch (Exception e) {
                 // Go: 记日志 → MarkFailed → continue（不影响同批其它事件）

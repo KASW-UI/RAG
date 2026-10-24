@@ -260,13 +260,21 @@ public class LikeDomainService {
 
         for (String id : ids) {
             String stateKey = LikeRedisKeys.likeStateHash(request.getTargetType(), id);
-            // Go: stateStr, err := HgetCtx(...); if err != nil { log }; if stateStr == "" { missing }
-            String stateStr = hgetLenient(stateKey, field);
-            if (stateStr.isEmpty()) {
+            // Go（getlikestatelogic.go:51-59）:
+            //   stateStr, err := HgetCtx(...);
+            //   if err != nil { span.RecordError(err); LikeQueryCacheCount{…, "redis_error"}.Add(1); log }
+            //   if stateStr == "" { missingIds = append(…); continue }   ← 这一段**不打点**
+            // ⚠️ 2026-10-23 修正 DRIFT-LIKE-009：此前直接用 hgetLenient（异常被吞成 ""），
+            //    导致 redis_error 一次都不打 —— Go 侧每次读失败都会 +1。
+            HgetResult state = hgetLenientWithError(stateKey, field);
+            if (state.error()) {
+                metrics.cache(request.getTargetType(), "redis_error", 1);
+            }
+            if (state.value().isEmpty()) {
                 missingIds.add(id);
                 continue;
             }
-            resp.putStates(id, (int) parseLongOrZero(stateStr));
+            resp.putStates(id, (int) parseLongOrZero(state.value()));
         }
 
         int hits = ids.size() - missingIds.size();
@@ -364,25 +372,30 @@ public class LikeDomainService {
     /**
      * 某用户给出的点赞列表（游标分页）。
      *
-     * <h3>⚠️ 两处 Go 的「不一致刻度」，必须原样复刻</h3>
-     *
-     * <p><b>(1) cursor 同时当两种刻度用</b>：Go 把同一个 cursor 既当作 ZSet 的 {@code maxScore}
-     * （{@code maxScore = cursor - 1}），又当作 DB 的 {@code id < cursor} 上界。
+     * <p><b>⚠️ (1) cursor 同时当两种刻度用（真实存在，保留）</b>：Go 把同一个 cursor 既当作 ZSet 的
+     * {@code maxScore}（{@code maxScore = cursor - 1}，{@code getuserlikelistlogic.go:48-52}），
+     * 又当作 DB 的 {@code id < cursor} 上界（{@code internal/model/like.go:126}）。
      * 而 cursor 是 {@code score} 本身（{@code timestamp << 22}），不是 {@code like_record.id}。
      * 两套刻度不一致 ⇒ 翻页在某些数据分布下会跳/重。<b>这是 Go 的现状，不修</b>。
      *
-     * <p><b>(2) DB 回源写进 ZSet 的 score 用「秒」，而 Redis 写入路径用「毫秒」</b>：
-     * <ul>
-     *   <li>写路径（Lua 的 {@code score}）来自 {@link LikeCursorIdGenerator} = {@code UnixMilli << 22}；</li>
-     *   <li>回源路径 {@code score = timestamp << 22}，而 {@code timestamp} 来自
-     *       {@code UserLikeListResult.CreateTime int64} —— GORM v1.31.1
-     *       {@code schema/field.go:671-678} 对「int64 目标 + time.Time 源」取的是
-     *       {@code data.Unix()}，即<b>秒</b>。</li>
-     * </ul>
-     * 后果：某条目一旦被 DB 回源「扶正」进 ZSet，之后走 Redis 命中分支时
-     * {@code score >> 22} 反解出来的 {@code timestamp} 会比写路径写入的小 1000 倍。
-     * 这是<b>真实存在的可观察行为</b>（响应里的 {@code LikeRecordItem.timestamp}），
-     * 按 AGENTS.md §15「不擅自修复 Go 的行为」原样保留，并在此显式留痕。
+     * <p><b>⚠️ (2) 关于「回源写秒 / 写路径写毫秒」——2026-10-23 撤销，这是错误断言 A</b>
+     * <br>原文论证「GORM 取 {@code data.Unix()} ⇒ 回源产出秒」<b>前提不成立</b>，该路径在 Go 侧<b>从未被执行</b>：
+     * <ol>
+     *   <li>{@code UserLikeListResult.CreateTime}（{@code internal/model/like.go:114-119}）无 gorm tag，
+     *       gorm 的 {@code toDBName("CreateTime")} 推出 DBName = {@code create_time}；</li>
+     *   <li>而 SQL 取的是 {@code created_at}（{@code like.go:130} {@code Select("id, target_type,target_id, created_at")}）;</li>
+     *   <li>两者不匹配 ⇒ {@code Scan} 后 {@code CreateTime} <b>恒为 0</b>
+     *       ⇒ {@code getuserlikelistlogic.go:94-96} 的 {@code if timestamp == 0 { continue }} <b>每行命中</b>
+     *       ⇒ 该分支<b>从未</b>执行 ZADD、<b>从未</b>向 list 追加任何元素 ⇒ <b>回源路径整体是死代码</b>
+     *       （这正是 DRIFT-LIKE-001 的真实成因：Go 侧该功能冷缓存下恒返回空列表）。</li>
+     * </ol>
+     * ⇒ 「秒 vs 毫秒不一致」这段行为<b>不存在</b>，无从对齐，也就谈不上「原样保留」。
+     * <br>可对齐的是 Go 的<b>命中分支</b>（{@code :70-77} {@code realTimestamp := score >> 22}，
+     * score 来自 {@code UnixMilli << 22}）⇒ {@code pb.LikeRecordItem.timestamp} 单位是<b>毫秒</b>。
+     * <br>⇒ Java 的回源分支已改为产出<b>毫秒</b>（见 {@code epochMillis}），
+     * 与命中分支、写路径三者<b>共用同一刻度</b>；否则同一条记录冷/热缓存下 timestamp 会差 1000 倍。
+     * ⚠️ 这条与 DRIFT-LIKE-001 的签字不冲突：签字的是「Go 空列表是缺陷、Java 返回真实数据」，
+     * <b>没有</b>签字「Java 应当沿用 Go 那条死路径的秒刻度」。
      */
     public GetUserLikeListResp getUserLikeList(GetUserLikeListReq request) {
         int limit = normalizePageSize(request.getPageSize());
@@ -438,8 +451,15 @@ public class LikeDomainService {
 
             for (int i = 0; i < dbResults.size(); i++) {
                 LikeRecordMapper.UserLikeRow row = dbResults.get(i);
-                // ⚠️ Go: var timestamp int64 = r.CreateTime —— GORM 给的是 **Unix 秒**，见方法注释
-                long timestamp = epochSeconds(row.getCreatedAt());
+                // ⚠️ 2026-10-23 修正（原注释「Go 给的是 Unix 秒」是错的，且由此引入了一个自洽性缺陷）。
+                //   真源 getuserlikelistlogic.go:70-77 的**命中分支**是：
+                //       realTimestamp := score >> 22   where score = UnixMilli << 22
+                //   ⇒ pb.LikeRecordItem.timestamp 的单位是**毫秒**，不是秒。
+                //   另一侧 getuserlikelistlogic.go:93-96 的回源分支写 score = timestamp << 22，
+                //   与命中分支共用同一个刻度 ⇒ 回源产出的 timestamp 也必须毫秒。
+                //   此前这里用 epochSeconds(秒) ⇒ 写进 ZSet 的 score 比写路径小 1000 倍，
+                //   同一条记录在 cache-hit 下与 cache-miss 下会返回**差 1000 倍**的 timestamp。
+                long timestamp = epochMillis(row.getCreatedAt());
                 if (timestamp == 0L) {
                     // Go: 脏数据（缺时间戳）→ 记日志并跳过，**且不计入返回的 limit 条数**
                     LOG.warn("like list dirty data without timestamp: id={} type={} target={}",
@@ -538,8 +558,10 @@ public class LikeDomainService {
 
             for (int i = 0; i < dbResults.size(); i++) {
                 LikeRecordMapper.TargetLikerRow row = dbResults.get(i);
-                // ⚠️ 同样是 Unix **秒**，见 getUserLikeList 的方法注释
-                long timestamp = epochSeconds(row.getCreatedAt());
+                // ⚠️ 同 getUserLikeList：Go 的 TargetLikerListResult.CreateTime 同样因 gorm
+                // DBName(create_time) 与 Select 的 created_at 不匹配而恒 0 ⇒ 回源分支是死代码；
+                // 可对齐的是命中分支 gettargetlikerlistlogic.go 的 score >> 22（毫秒）。
+                long timestamp = epochMillis(row.getCreatedAt());
                 if (timestamp == 0L) {
                     LOG.warn("target liker list dirty data without timestamp: id={} userId={}",
                             row.getId(), row.getUserId());
@@ -649,16 +671,19 @@ public class LikeDomainService {
                     java.time.Instant.now().getEpochSecond());
 
             // ⚠️ Kafka 推送失败**不影响** RPC 返回值（Go 只打日志）
-            if (likeMsgPublisher.publish(msg)) {
-                metrics.action(request.getTargetType(), actionStr, "success");
-            } else {
-                metrics.action(request.getTargetType(), actionStr, "kafka_error");
+            // Go likeactionlogic.go:234-250 是三条**独立**指标分支：
+            //   :236 json_error（Marshal 失败） / :245 kafka_error（Push 失败） / :248 success
+            // 此前 Java 只有一个 boolean，把 json_error 并进了 kafka_error（DRIFT-LIKE-009 第 4 项）。
+            switch (likeMsgPublisher.publish(msg)) {
+                case SUCCESS -> metrics.action(request.getTargetType(), actionStr, "success");
+                case JSON_ERROR -> metrics.action(request.getTargetType(), actionStr, "json_error");
+                case KAFKA_ERROR -> metrics.action(request.getTargetType(), actionStr, "kafka_error");
             }
         }
 
         // ---- 以下无条件执行（Go 在 resInt==0 时也不短路）----
-        long finalLikeCount = hgetCountLenient(countKey, request.getTargetId(), "like_count");
-        long finalDislikeCount = hgetCountLenient(dislikeCountKey, request.getTargetId(), "dislike_count");
+        long finalLikeCount = hgetCountLenient(countKey, request.getTargetId(), request.getTargetType(), actionStr);
+        long finalDislikeCount = hgetCountLenient(dislikeCountKey, request.getTargetId(), request.getTargetType(), actionStr);
 
         boolean likeOnArticle = resultCode != 0
                 && request.getActionType() == ActionType.ACTION_LIKE
@@ -791,6 +816,32 @@ public class LikeDomainService {
         }
     }
 
+    /**
+     * 能区分「读失败」与「字段不存在」的 HGET —— 仅供 {@code GetLikeState} 使用。
+     *
+     * <p>之所以需要它：Go 侧 {@code getlikestatelogic.go:53-56} <b>只</b>在
+     * {@code err != nil} 时打 {@code redis_error}，而紧邻的 {@code if stateStr == ""}
+     * 分支（字段不存在）<b>不打点</b>。这与 {@code LikeAction} 的形状<b>不同</b> ——
+     * 后者（{@code likeactionlogic.go:254-266}）是 {@code err == nil && str != ""} 的 else，
+     * 两种情况都打点。
+     *
+     * <p>{@link #hgetLenient(String, String)} 把异常吞成 {@code ""}，
+     * 会让这两条路径糊在一起，因而多打一批 Go 侧不存在的点。
+     */
+    private HgetResult hgetLenientWithError(String key, String field) {
+        try {
+            Object v = redis.opsForHash().get(key, field);
+            return new HgetResult(v == null ? "" : String.valueOf(v), false);
+        } catch (Exception e) {
+            LOG.warn("redis hget failed, degrade to miss: key={} field={} err={}", key, field, e.getMessage());
+            return new HgetResult("", true);
+        }
+    }
+
+    /** {@link #hgetLenientWithError} 的返回体。 */
+    private record HgetResult(String value, boolean error) {
+    }
+
     /** {@code HSET} 的容错封装：出错只记日志（回填失败不影响本次响应）。 */
     private void hsetLenient(String key, String field, String value) {
         try {
@@ -865,30 +916,46 @@ public class LikeDomainService {
     /**
      * 读取点赞数 / 点踩数并解析。
      *
-     * <p>Go 的两处细节：
+     * <p>Go 的两处细节（{@code internal/logic/likeactionlogic.go:254-266} 与 {@code :268-282}）：
      * <ul>
-     *   <li>读失败 ⇒ 计数保持 0，并记 {@code redis_read_error} 指标 + 日志；</li>
-     *   <li>解析失败 ⇒ 同样保持 0，记 {@code ErrorTypeTransfer} 日志。</li>
+     *   <li>命中条件是 {@code err == nil && str != ""}，<b>else 分支</b>（即
+     *       <b>读出错 <i>或</i> 字段不存在</b>）会：{@code span.RecordError(err)} +
+     *       {@code LikeActionCount.WithLabelValues(in.TargetType, actionStr, "redis_read_error").Inc()}
+     *       + 记一条 {@code ErrorRedisSelect} 日志；</li>
+     *   <li>解析失败 ⇒ 同样保持 0，记 {@code ErrorTypeTransfer} 日志（<b>不打点</b>）。</li>
      * </ul>
      * <b>两种情况都不影响响应</b>：返回 0，而不是报错。
+     *
+     * <p>⚠️ 2026-10-23 修正 DRIFT-LIKE-009 的两处 label 漂移：
+     * <ol>
+     *   <li>第 1 个 label 此前传的是<b>字面量</b> {@code "like_count"} / {@code "dislike_count"}，
+     *       Go 侧传的是<b>真实</b> {@code in.TargetType} ⇒ 同一指标被拆成两条时间序列；</li>
+     *   <li>第 2 个 label 此前恒为 {@code "n/a"}，Go 侧传的是真实 {@code actionStr}。</li>
+     * </ol>
+     * ⇒ 现在三个 label 与 Go 逐条一致：{@code (targetType, actionStr, "redis_read_error")}。
+     * ⚠️ Go 的两次 Hget（like / dislike）<b>用同一组 label</b>，字段缺失时各 {@code +1}；
+     * 改动后 Java 也是这个形状。
      */
-    private long hgetCountLenient(String hashKey, String field, String metricTargetType) {
+    private long hgetCountLenient(String hashKey, String field, String metricTargetType, String actionStr) {
         String raw;
         try {
             Object v = redis.opsForHash().get(hashKey, field);
             raw = v == null ? "" : String.valueOf(v);
         } catch (Exception e) {
-            metrics.action(metricTargetType, "n/a", "redis_read_error");
+            metrics.action(metricTargetType, actionStr, "redis_read_error");
             LOG.warn("redis read count failed: key={} field={} err={}", hashKey, field, e.getMessage());
             return 0L;
         }
         if (raw.isEmpty()) {
+            // Go: err == nil && str == "" 也落 else 分支 ⇒ 同样打点 + 记日志
+            metrics.action(metricTargetType, actionStr, "redis_read_error");
+            LOG.warn("redis count field missing: key={} field={}", hashKey, field);
             return 0L;
         }
         try {
             return Long.parseLong(raw);
         } catch (NumberFormatException e) {
-            // Go: strconv.ParseInt 出错被忽略，计数保持 0
+            // Go: strconv.ParseInt 出错被忽略，计数保持 0（该分支不打点）
             LOG.warn("redis count value is not a number: key={} field={} raw={}", hashKey, field, raw);
             return 0L;
         }
@@ -903,13 +970,18 @@ public class LikeDomainService {
      *
      * <p>Go 侧所有解析都是 {@code x, _ := strconv.ParseInt(...)}，出错即取 0。
      * 这里显式返回 0 而不是抛异常，避免把「脏数据」升级成「请求失败」。
+     *
+     * <p>⚠️ 2026-10-23 修正（DRIFT-LIKE-010）：原实现写 {@code Long.parseLong(raw.trim())}，
+     * 即<b>容忍首尾空白</b>；Go 的 {@code strconv.ParseInt} <b>不忽略任何空白</b>
+     * （{@code ParseInt(" 12 ", 10, 64)} 返回 {@code ErrSyntax} ⇒ 取 0）。
+     * ⇒ 已去掉 {@code .trim()}，让「带空白的 id」在两侧都退化成 0。
      */
     private static long parseLongOrZero(String raw) {
         if (raw == null || raw.isEmpty()) {
             return 0L;
         }
         try {
-            return Long.parseLong(raw.trim());
+            return Long.parseLong(raw);
         } catch (NumberFormatException e) {
             return 0L;
         }
@@ -942,15 +1014,27 @@ public class LikeDomainService {
     }
 
     /**
-     * {@code OffsetDateTime} → Unix <b>秒</b>。
+     * {@code OffsetDateTime} → Unix <b>毫秒</b>。
      *
-     * <p>⚠️ 这个「秒」是刻意的：Go 侧 GORM 把 {@code timestamptz} 扫进 {@code int64} 字段时
-     * 取的是 {@code data.Unix()}（gorm v1.31.1 {@code schema/field.go:671-678}）。
-     * 若这里改成毫秒，DB 回源写进 ZSet 的 score 会与写路径差 1000 倍，
-     * 从而改变 {@code LikeRecordItem.timestamp} 的取值 —— 属行为变更。
+     * <p>⚠️ 2026-10-23 修正：原方法叫 {@code epochSeconds}、返回<b>秒</b>，注释称
+     * 「GORM 取的是 {@code data.Unix()} ⇒ 秒」。<b>该推理链的前提不成立</b>：
+     * {@code UserLikeListResult.CreateTime}（{@code internal/model/like.go:114-119}）
+     * 的 gorm DBName 是 {@code create_time}（{@code toDBName("CreateTime")}），
+     * 而 SQL 取的是 {@code created_at}（{@code like.go:130}）⇒ <b>字段根本匹配不上</b>，
+     * {@code CreateTime} 恒为 0 ⇒ {@code getuserlikelistlogic.go:94-96} 的
+     * {@code if timestamp == 0 { continue }} <b>每行都命中</b>
+     * ⇒ Go 侧这条回源分支<b>从未执行过 ZADD、从未产出过任何元素</b>（DRIFT-LIKE-001 的真实成因）。
+     *
+     * <p>⇒ 「Go 回源产出秒」这段行为<b>不存在</b>，无从对齐；可对齐的是
+     * Go 的<b>命中分支</b>（{@code getuserlikelistlogic.go:70-77}）：
+     * {@code realTimestamp := score >> 22}，而 score 来自 {@code UnixMilli << 22}
+     * ⇒ {@code pb.LikeRecordItem.timestamp} 的单位是<b>毫秒</b>。
+     *
+     * <p>⇒ 本方法改为毫秒，使 Java 的回源分支与命中分支（以及 Redis ZSet 里写路径写入的
+     * score）<b>共用同一刻度</b>；否则同一条记录在冷缓存/热缓存下会返回差 1000 倍的 timestamp。
      */
-    private static long epochSeconds(java.time.OffsetDateTime value) {
-        return value == null ? 0L : value.toEpochSecond();
+    private static long epochMillis(java.time.OffsetDateTime value) {
+        return value == null ? 0L : value.toInstant().toEpochMilli();
     }
 
     /**
@@ -1000,24 +1084,52 @@ public class LikeDomainService {
         }
 
         /**
-         * @return true 表示消息已成功交给 Kafka 客户端；false 表示序列化或发送失败
+         * 推送结果 —— 对应 Go {@code likeactionlogic.go:234-250} 的<b>三条独立</b>指标分支。
+         *
+         * <p>⚠️ 此前 {@code publish} 只返回 {@code boolean}，把「序列化失败」与「发送失败」
+         * 合并成一个 {@code kafka_error}，而 Go 是分开的（DRIFT-LIKE-009 第 4 项）。
          */
-        public boolean publish(LikeEventContracts.KafkaLikeMsg msg) {
+        public enum PublishOutcome {
+            /** Go {@code :248} {@code success}。 */
+            SUCCESS,
+            /** Go {@code :236} {@code json_error} —— {@code json.Marshal} 失败，消息<b>根本没进 Kafka</b>。 */
+            JSON_ERROR,
+            /** Go {@code :245} {@code kafka_error} —— 序列化成功但交给 Kafka 客户端失败。 */
+            KAFKA_ERROR
+        }
+
+        /**
+         * @return 与 Go 三条指标分支一一对应的结果
+         */
+        public PublishOutcome publish(LikeEventContracts.KafkaLikeMsg msg) {
             final String payload;
             try {
                 payload = objectMapper.writeValueAsString(msg);
             } catch (Exception e) {
                 LOG.warn("marshal like msg failed: {}", e.getMessage());
-                return false;
+                return PublishOutcome.JSON_ERROR;
             }
             try {
-                // Go: KafkaPusher.Push(ctx, string(msgBytes)) —— **不带 key**
-                kafkaTemplate.send(topics.getLikeTopic(), null, payload);
-                return true;
+                // Go: KafkaPusher.Push(ctx, string(msgBytes))
+                // ⚠️ 2026-10-23 修正错误断言：原文写「**不带 key**」是错的 ——
+                //    Go 的 Push 内部即 PushWithKey(ctx, strconv.FormatInt(time.Now().UnixNano(), 10), v)
+                //    （go-queue@v1.2.2/kq/pusher.go:123-125）⇒ **带 key**。
+                //    另：Go 的 Push 默认挂 ChunkExecutor ⇒ 只入队即返回，写失败在 executor 里 logx.Error。
+                //    Java 侧同样是异步入队，但**必须**自己挂回调，否则异步失败连日志都没有
+                //    （application.yml 里"失败回调日志"的旧注释此前是假的）。
+                final String pushKey = LikeKafkaPushKey.unixNano();
+                kafkaTemplate.send(topics.getLikeTopic(), pushKey, payload)
+                        .whenComplete((result, error) -> {
+                            if (error != null) {
+                                LOG.error("push like kafka msg failed (async): topic={} key={} err={}",
+                                        topics.getLikeTopic(), pushKey, error.getMessage());
+                            }
+                        });
+                return PublishOutcome.SUCCESS;
             } catch (Exception e) {
                 // Go: LogBusinessErr(..., ErrorKafkaPush, "Kafka消息发送失败, 丢失消息: %s")
                 LOG.warn("push like kafka msg failed, message dropped: {} err={}", payload, e.getMessage());
-                return false;
+                return PublishOutcome.KAFKA_ERROR;
             }
         }
     }

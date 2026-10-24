@@ -1,6 +1,7 @@
 package com.rag.like.like.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 import com.rag.users.common.http.GoStyleRequired;
 import com.rag.users.common.http.GoStyleRequiredFields;
@@ -35,6 +36,7 @@ public class GetLikeStateReq implements GoStyleRequiredFields {
 
     @JsonProperty("target_type")
     private String targetType;
+    @JsonDeserialize(using = GoStyleRawStringListDeserializer.class)
     @JsonProperty("target_ids")
     private List<String> targetIds;
 

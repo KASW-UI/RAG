@@ -70,8 +70,11 @@ public class LikeTaskProgressPublisher {
                         long userLikesGiven, long articleLikes) {
 
         // ---------- 路 1：用户进度 ----------
-        // Go: if l.svcCtx.TaskUserPusher != nil { ... } else 整段跳过
-        if (topics.isTaskPushersEnabled()) {
+        // Go: if l.svcCtx.TaskUserPusher != nil { … } else 整段跳过
+        // ⚠️ 2026-10-23 修正：Go 的两路是**各自独立判空**
+        // （servicecontext.go:43-44 分别 newOptionalPusher(TaskUserPusherConf / TaskArticlePusherConf)），
+        // 此前这里两路共用一个 isTaskPushersEnabled()，丢失了粒度（DRIFT-LIKE-012）。
+        if (topics.isTaskUserPusherEnabled()) {
             // Go: totalLikesGiven > 0 才推（0 不推，避免给下游发无意义的零进度）
             if (userLikesGiven > 0) {
                 try {
@@ -87,7 +90,7 @@ public class LikeTaskProgressPublisher {
 
         // ---------- 路 2：文章进度 ----------
         // Go: if l.svcCtx.TaskArticlePusher == nil || in.AuthorId <= 0 || articleLikes <= 0 { return }
-        if (!topics.isTaskPushersEnabled() || authorId <= 0 || articleLikes <= 0) {
+        if (!topics.isTaskArticlePusherEnabled() || authorId <= 0 || articleLikes <= 0) {
             return;
         }
 

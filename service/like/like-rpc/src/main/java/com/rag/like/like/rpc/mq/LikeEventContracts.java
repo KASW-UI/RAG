@@ -1,6 +1,5 @@
 package com.rag.like.like.rpc.mq;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 
@@ -25,6 +24,24 @@ import com.fasterxml.jackson.annotation.JsonPropertyOrder;
  *
  * <p>{@code @JsonPropertyOrder} 显式固定字段顺序：Go 的 {@code encoding/json} 按 struct 字段声明序输出，
  * 这里保持一致，便于灰度期逐行 diff payload。
+ *
+ * <h2>⚠️ 这里<b>没有</b> {@code @JsonIgnoreProperties}，是刻意的（2026-10-23 修正）</h2>
+ *
+ * <p>本文件原先三个契约类上都挂着 {@code @JsonIgnoreProperties(ignoreUnknown = false)}，
+ * 并被台账记为「Java 把未知字段从『忽略』改成『丢弃』」的漂移（DRIFT-LIKE-007）。
+ * <b>该结论已实测证伪</b>，原因是它把一个 <b>no-op 注解</b>当成了开关：
+ * <ol>
+ *   <li>{@code ignoreUnknown = false} 就是 Jackson 的<b>默认值</b>，该注解不含任何"开启严格"的信息；</li>
+ *   <li>更关键：类级 {@code @JsonIgnoreProperties} <b>无法覆盖</b>全局的
+ *       {@code DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES}；真正决定行为的是
+ *       {@link com.rag.like.like.rpc.config.Jackson2ObjectMapperConfiguration}
+ *       里的 {@code .disable(FAIL_ON_UNKNOWN_PROPERTIES)}（第 91 行），
+ *       它才是对齐 Go {@code encoding/json} 默认忽略未知字段的那一处。</li>
+ * </ol>
+ * ⇒ 实际行为<b>本就是「忽略未知字段」＝与 Go 一致</b>（守门测试：
+ * {@code LikeRpcSpringContextWiringTest#unknownFieldsAreIgnoredLikeGoEncodingJson}）。
+ * ⇒ 删除这三处注解是为了消除「这里配过严格模式」的错觉；
+ * ⚠️ <b>要改严格模式请改全局 ObjectMapper 那一处</b>，加回这里的注解不会有任何效果。
  */
 public final class LikeEventContracts {
 
@@ -37,7 +54,6 @@ public final class LikeEventContracts {
      *
      * <p>由 {@code LikeAction} 在 Lua 返回非 0 时推入 {@code like_promotion_topic}。
      */
-    @JsonIgnoreProperties(ignoreUnknown = false)
     @JsonPropertyOrder({"msg_id", "user_id", "target_type", "target_id", "author_id", "state", "is_first", "created_at"})
     public static class KafkaLikeMsg {
 
@@ -91,7 +107,6 @@ public final class LikeEventContracts {
      * <p>由 {@code LikeHotEventOutboxRelay} 从 {@code like_outbox_event} 捞出后推入
      * {@code article-hot-events}。
      */
-    @JsonIgnoreProperties(ignoreUnknown = false)
     @JsonPropertyOrder({"article_id", "type", "user_id", "timestamp", "is_first"})
     public static class ArticleHotEvent {
 
@@ -131,7 +146,6 @@ public final class LikeEventContracts {
      *
      * <p>推给推广结算系统 {@code task.logs.filtered.Article}。
      */
-    @JsonIgnoreProperties(ignoreUnknown = false)
     @JsonPropertyOrder({"user_id", "cur"})
     public static class TaskArticleProgressMsg {
 

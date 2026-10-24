@@ -15,6 +15,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.scheduling.config.ScheduledTask;
+import org.springframework.scheduling.config.ScheduledTaskHolder;
+import org.springframework.scheduling.config.TaskExecutionOutcome;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -43,6 +46,14 @@ import static org.junit.jupiter.api.Assertions.*;
  * 所以「组件起不来」这件事<b>没有任何测试能发现</b>，测试全绿。
  * 这正是 AGENTS.md §3.3 纪律的教科书案例：
  * <b>纯 Mockito mock 数据层的单测天然测不到装配层问题</b>。
+ *
+ * <h2>🔴 2026-10-23 第五轮：补上 {@code @EnableScheduling} 的守门网（L-U11）</h2>
+ * <p>新增两条：①「{@code ScheduledTaskHolder} <b>真的持有</b> relay 的任务」
+ * ②「那个任务<b>真的执行过</b>」（{@code Task.getLastExecutionOutcome().status() != NONE}）。
+ * <p>⚠️ 为什么不能只断言「{@code LikeHotEventOutboxRelay} 这个 Bean 存在」：
+ * 那个 Bean 在 {@code @EnableScheduling} 被摘掉之后<b>照样存在</b>（它只是 {@code @Component}），
+ * 只是 ticker 再也不会被触发 ⇒ 事件永远积压、且**没有任何报错**。
+ * ⇒ 这正是 AGENTS.md §3.3.3「断言『Bean 存在』不等于断言『机制生效』」的现场。
  *
  * <h2>为什么必须接真 PG</h2>
  * <p>like-rpc 有 {@code @MapperScan}，MapperFactoryBean <b>要求</b> {@code sqlSessionFactory}，
@@ -182,5 +193,72 @@ class LikeRpcSpringContextWiringTest {
         assertNotNull(context.getBean(LikeDomainFactOutboxMapper.class));
         assertNotNull(context.getBean(LikeFactStreamMapper.class));
         assertNotNull(context.getBean(LikeOutboxEventMapper.class));
+    }
+
+    // ==================================================================
+    // 4. @EnableScheduling（DRIFT 台账 L-U11）
+    // ==================================================================
+
+    /**
+     * 找出调度器里那个「目标是 outbox relay 的 {@code sendPending}」的任务。
+     *
+     * <p>⚠️ <b>为什么不能只断言「{@code LikeHotEventOutboxRelay} 这个 Bean 存在」</b>：
+     * 那个 Bean 在 {@code @EnableScheduling} 被摘掉之后<b>照样存在</b>
+     * （它只是 {@code @Component}），只是那个 ticker 再也不会被触发 ⇒
+     * 事件永远积压、且**没有任何报错**。
+     * ⇒ 必须断言「任务<b>进了调度器</b>」+「任务<b>真的执行过</b>」这两件事。
+     */
+    private ScheduledTask findRelayScheduledTask() {
+        ScheduledTaskHolder holder = context.getBeanProvider(ScheduledTaskHolder.class).getIfAvailable();
+        assertNotNull(holder,
+                "ScheduledTaskHolder 缺失 ⇒ @EnableScheduling 没生效 ⇒ "
+                        + "所有 @Scheduled 方法都不会被调度（Boot 4 下这是**静默**失效，不报错）");
+        for (ScheduledTask task : holder.getScheduledTasks()) {
+            // ScheduledMethodRunnable.toString() = "<声明类全名>.<方法名>"
+            if (task.getTask().getRunnable().toString().contains("sendPending")) {
+                return task;
+            }
+        }
+        return null;
+    }
+
+    @Test
+    @DisplayName("🔴 @EnableScheduling 生效：outbox relay 的 @Scheduled 任务**真的进了调度器**")
+    void relayScheduledTaskIsRegisteredWithTheScheduler() {
+        ScheduledTaskHolder holder = context.getBeanProvider(ScheduledTaskHolder.class).getIfAvailable();
+        assertNotNull(holder, "ScheduledTaskHolder 缺失 ⇒ @EnableScheduling 没生效");
+        assertFalse(holder.getScheduledTasks().isEmpty(),
+                "调度器里一个任务都没有 ⇒ @Scheduled 一个都没注册 ⇒ outbox relay 不会被调度");
+
+        ScheduledTask relayTask = findRelayScheduledTask();
+        assertNotNull(relayTask,
+                "调度器里的任务 = " + holder.getScheduledTasks().stream()
+                        .map(t -> t.getTask().getRunnable().toString()).toList()
+                        + "，不含 LikeHotEventOutboxRelay.sendPending ⇒ "
+                        + "outbox relay 永远不会被调度，热点事件永远积压（Go 侧是 1 秒一次的 ticker）");
+    }
+
+    @Test
+    @DisplayName("🔴 outbox relay 的 ticker **真的执行过**（不是「只注册在册」）")
+    void relayTaskActuallyRuns() throws Exception {
+        ScheduledTask relayTask = findRelayScheduledTask();
+        assertNotNull(relayTask, "调度器里没有 relay 的任务 ⇒ @EnableScheduling 没生效");
+
+        // Task.getLastExecutionOutcome() 的 status：NONE（从没跑过）→ STARTED → SUCCESS/ERROR
+        long deadline = System.currentTimeMillis() + 20_000L;
+        TaskExecutionOutcome.Status status = TaskExecutionOutcome.Status.NONE;
+        while (System.currentTimeMillis() < deadline && status == TaskExecutionOutcome.Status.NONE) {
+            status = relayTask.getTask().getLastExecutionOutcome().status();
+            if (status == TaskExecutionOutcome.Status.NONE) {
+                Thread.sleep(200L);
+            }
+        }
+
+        assertNotEquals(TaskExecutionOutcome.Status.NONE, status,
+                "20 秒内这个任务一次都没被执行 ⇒ @EnableScheduling 没生效 ⇒ "
+                        + "outbox relay 永远不跑（而「Bean 存在」「方法上有 @Scheduled 注解」的断言全是绿的）");
+        assertEquals(TaskExecutionOutcome.Status.SUCCESS, status,
+                "任务跑过了但状态是 " + status + " ⇒ relay 的循环体抛了异常（它自己 catch 住并只记 WARN）"
+                        + "⇒ ticker 在跑，但每轮都在失败 —— 这是**另一个**缺陷，不能算通过");
     }
 }

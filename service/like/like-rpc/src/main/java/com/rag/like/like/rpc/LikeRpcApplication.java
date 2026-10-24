@@ -9,6 +9,7 @@ import com.rag.common.spring.RpcServerInterceptorFactory;
 import com.rag.common.spring.SnowflakeBean;
 import com.rag.common.spring.SnowflakeProperties;
 import com.rag.like.like.rpc.config.Jackson2ObjectMapperConfiguration;
+import com.rag.like.like.rpc.config.LikeKafkaTopics;
 import com.rag.like.like.rpc.mq.LikeUpdateKafkaListener;
 import io.grpc.ServerInterceptor;
 import net.devh.boot.grpc.server.serverfactory.GrpcServerConfigurer;
@@ -39,23 +40,40 @@ import com.rag.common.protection.GoStyleProtectionConfiguration;
  * <h2>⚠️ 五个「不写就静默失效 / 直接起不来」的装配点</h2>
  *
  * <p>这些都是 message-rpc 在 AGENTS.md §6.6 里付出真实代价才补上的（DRIFT-MSG-003 ~ 006），
- * 本模块<b>照单继承</b>，且每一条都有对应的 wiring 测试锁死：
+ * 本模块<b>照单继承</b>。
+ * ⚠️ 2026-10-23 修正错误断言 F：原文写「<b>且每一条都有对应的 wiring 测试锁死</b>」——
+ * 该说法<b>不成立</b>。真实的装配层回归网是
+ * {@code LikeRpcSpringContextWiringTest}（<b>9 条</b>，含真 PG Testcontainers），
+ * 它覆盖的是第 1 条（{@code @MapperScan} / {@code SqlSessionFactory} / 5 个 Mapper Bean）、
+ * Jackson 2 Bean、KafkaTemplate、{@code @KafkaListener} 进 registry、
+ * 序列化行为（未知字段忽略 / number→string 报错），
+ * 以及第 5 条（{@code @EnableScheduling} —— 见该类里「outbox relay 的 ticker 真的执行过」两条）。
+ * <br>🔴 <b>2026-10-23 第五轮更正（原文写「第 3 条与第 5 条没有对应测试」）</b>：
+ * 第 5 条<b>已有</b>守门测试了（同一个 wiring 测试类，断言的是
+ * 「{@code ScheduledTaskHolder} 真的持有 relay 的任务」+「那个任务真的执行过」，
+ * <b>不是</b>「Bean 存在」）；
+ * <b>仍然没有</b>对应测试的是<b>第 3 条</b>（{@link #rpcInterceptorConfigurer}）：
+ * 删掉它之后 {@code getBean(ServerInterceptor.class)} 断言<b>照样是绿的</b>，
+ * 因为 Bean 仍在，只是没被挂进 gRPC 调用链。
+ * ⇒ 补第 3 条需验「真挂上调用链」（要能观测到拦截器的**行为**，
+ * 而不只是链里有它）—— 属已知测试缺口，见 DRIFT 台账 L-U11。
  * <ol>
  *   <li><b>{@code @MapperScan}</b> — 缺它 5 个 Mapper 全部注册不上，
  *       报 {@code No qualifying bean of type '…mapper.LikeRecordMapper'}，
- *       上下文直接起不来。</li>
+ *       上下文直接起不来。✅ {@code LikeRpcSpringContextWiringTest} 已覆盖。</li>
  *   <li><b>{@code @Import} 精确引入 common Bean</b> — 不能用
  *       {@code scanBasePackages={"com.rag.common"}}: 那里有 {@code HttpMiddlewareFilter}
  *       （servlet Filter），纯 gRPC 进程全包扫描会把 web 类拖进来。</li>
  *   <li><b>{@link #rpcInterceptorConfigurer}</b> — devh starter <b>不会</b>自动把用户提供的
  *       {@link ServerInterceptor} 挂到 server 上。没有它，超时 / deadline 传播 / gRPC span
- *       <b>全部静默消失</b>，而 Bean 断言照样是绿的。</li>
+ *       <b>全部静默消失</b>，而 Bean 断言照样是绿的。❌ <b>仍无守门测试</b>。</li>
  *   <li><b>{@code spring-boot-flyway}</b>（在 pom 里）— Boot 4 拆模块后必需。
  *       缺它时<b>启动日志里连一行 Flyway 都没有</b>（不是报错，是根本没加载），
  *       5 张表永不创建 ⇒ 第一次真正执行 SQL 才炸。
  *       {@code LikeSchemaGate} 是它的第二道防线。</li>
  *   <li><b>{@code @EnableScheduling}</b> — outbox relay 的 1 秒 ticker 靠它。
- *       缺它 relay 静默不跑，事件永远积压。</li>
+ *       缺它 relay 静默不跑，事件永远积压。✅ <b>2026-10-23 第五轮已补守门测试</b>
+ *       （断言「任务进了调度器」+「任务真的执行过」）。</li>
  * </ol>
  */
 @SpringBootApplication
@@ -96,7 +114,9 @@ public class LikeRpcApplication {
      * <p><b>删掉这行后 {@code ctx.getBean(ServerInterceptor.class)} 断言照样是绿的</b>，
      * 但 {@code interceptCall} / {@code onHalfClose} 一次都不执行 ⇒
      * 超时、deadline 传播、gRPC span 全部静默消失。
-     * 锁死用例：{@code LikeGrpcInterceptorWiringTest}。
+     * 锁死用例：⚠️ <b>目前没有</b>（错误断言 F：原文此处写
+     * {@code LikeGrpcInterceptorWiringTest}，该测试类<b>全仓不存在</b>）。
+     * {@code LikeRpcSpringContextWiringTest} 只断言 Bean 存在，抓不到「Bean 在但没挂进调用链」。
      */
     @Bean
     public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryServerInterceptor,
@@ -117,22 +137,39 @@ public class LikeRpcApplication {
      *
      * <p>两处关键设置：
      * <ol>
-     *   <li>{@code AckMode.RECORD} — listener 正常返回后才提交位点。
-     *       这是 drop/retry 契约的载体（Go：{@code Consume} 返回 error ⇒ 不确认）。</li>
-     *   <li>{@link LikeUpdateKafkaListener#noCommitErrorHandler()} — 只记日志、
-     *       <b>不 seek、不提交</b>，让失败消息在重启后重投，与 Go kq 无进程内重试的行为一致。</li>
+     *   <li>{@code AckMode.RECORD} — listener 正常返回后才提交位点。</li>
+     *   <li>{@link LikeUpdateKafkaListener#goAlignedErrorHandler()} — <b>0 次进程内重试</b>，
+     *       失败即丢弃并继续处理后续消息，与 Go 逐条一致（见该方法的完整真源论证）。</li>
      * </ol>
      *
-     * <p>⚠️ 不用默认 recoverer：默认会 seek 到当前位点，等于把失败消息标记为已处理 ⇒ 丢消息。
-     * 那是<b>新增的丢消息路径</b>，与 Go 不符。
+     * <p>⚠️ 2026-10-23 修正两处此前写反的注释：原文说本处理器「不 seek、不提交、失败消息
+     * 在重启后重投」，又说<b>默认</b> recoverer「会 seek ⇒ 丢消息」。
+     * 两者都与 Spring Kafka 4.0.7 的实际控制流相反：
+     * <ul>
+     *   <li>显式给 {@code FixedBackOff(0, 0)} 后，失败<b>不会</b>被 seek（{@code FailedRecordTracker.recovered}
+     *       在 {@code nextBackOff == STOP} 时返回 {@code true} ⇒ {@code SeekUtils.doSeeks} 跳过该 offset），
+     *       位点<b>照常推进</b> ⇒ 是<b>丢弃</b>，不是重投；</li>
+     *   <li>而单参 {@code new DefaultErrorHandler(recoverer)} 默认 {@code FixedBackOff(0, 9)}
+     *       才是真正会 seek 并把 listener <b>重跑 9 次</b>的那条路。</li>
+     * </ul>
      */
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory(
-            ConsumerFactory<String, String> consumerFactory) {
+            ConsumerFactory<String, String> consumerFactory,
+            LikeKafkaTopics likeKafkaTopics) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
-        factory.setCommonErrorHandler(LikeUpdateKafkaListener.noCommitErrorHandler());
+        factory.setCommonErrorHandler(LikeUpdateKafkaListener.goAlignedErrorHandler());
+
+        // 对齐 Go mq.yaml 的 `Kafka.Consumers: 8`
+        // （消费点：go-queue@v1.2.2/kq/queue.go:249 `for i := 0; i < q.c.Consumers; i++` ⇒ 8 个消费协程；
+        //  默认值同 8：kq/config.go:18）。
+        // ⚠️ 必须在这里 setConcurrency —— 因为本方法自己 new 了 factory，
+        //    Boot 的 ConcurrentKafkaListenerContainerFactoryConfigurer 不参与，
+        //    写 `spring.kafka.listener.concurrency` 在本模块**没有任何消费点**（DRIFT-LIKE-018）。
+        //    默认值不设时 ConcurrentKafkaListenerContainerFactory 是 1，即单协程消费 ⇒ ÷8 的积压消化速度。
+        factory.setConcurrency(likeKafkaTopics.getConsumers());
         return factory;
     }
 
