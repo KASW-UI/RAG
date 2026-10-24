@@ -656,3 +656,68 @@ RAG 侧**一次都没产出过**（日志里连 499 字样都没有）。
    本仓 §3.3 的老坑（注解存在 ≠ 机制生效）在这里是**分支存在 ≠ 分支可达**。
 3. 判别一个分支是否可达，最省事的办法是**造出让它失效的输入再跑一遍**：
    本轮用「客户端断连」这个 Go 有、RAG 没有的信号，一测就分开了。
+
+---
+
+## P19 · 「变异编译进去了」≠「测试用到了它」—— 单模块跑会用 **~/.m2 里已安装的 jar**
+
+> **触发**：2026-10-24 第七轮（U4 熔断 E2E 的变异验证）
+> **代价**：第一版变异验证**假绿**（改了源码、也编进了工作树的 `target/classes`，测试却依然通过）
+
+### 现象
+
+变异目标在**跨模块**的 `service/common`：
+
+```java
+// service/common/.../GoStyleGrpcClientBreakerInterceptor.java
+- if (!breaker.accept()) {
++ if (!breaker.accept() && Boolean.FALSE) {   // MUTATION-M-U4
+```
+
+变异后跑测试：
+
+```bash
+mvn -o -pl service/hot/hot-api test -Dtest=GoStyleGrpcClientBreakerE2ETest ...
+```
+
+⇒ **测试通过**（绿）⇒ 第一反应是「这条断言不敏感」。
+
+### 真因（比 P15 又深一层）
+
+1. `mvn -pl service/hot/hot-api compile` 编出的是 **`service/common/target/classes`**（带变异）——
+   `javap` 一看，变异**确实在字节码里**；
+2. 但 `mvn -pl service/hot/hot-api test`（**不带 `-am`**）解析 `com.rag:common` 依赖时，
+   走的是 **本地仓库 `~/.m2/repository/com/rag/common/0.0.1-SNAPSHOT/common-...jar`**
+   ⇒ 那是**上一次 `install` 时的旧 jar**（未变异）；
+3. ⇒ 测试的**运行时**用的是未变异的字节码 ⇒ 熔断照样打开 ⇒ 断言照样通过。
+
+⇒ **P15 只查了「变异编进去了吗」；这次要查的是「测试的运行时用的是哪一份字节码」。**
+
+### 怎么防
+
+1. **变异验证一律用 `-am`**：`mvn -o -pl <被测模块> -am test -Dtest=...`
+   ⇒ 同一 reactor 内解析依赖到 `target/classes`，**不碰 ~/.m2**；
+   ⚠️ 配套参数是 `-Dsurefire.failIfNoSpecifiedTests=false`
+   （`-DfailIfNoSpecifiedTests=false` **不生效**，上游模块会因「没有匹配的测试」直接 BUILD FAILURE
+   ⇒ 失败在**上游模块**，看起来像「测试没跑」）；
+2. **别用 `mvn install` 装变异版到 ~/.m2** —— 那是**共享状态**，
+   并发会话会直接吃到你的变异（AGENTS.md 已警告并发会话干扰）；
+3. **判别依据要看「运行时用的哪一份」**，不是「源码改没改」：
+   ```bash
+   javap -c -p -cp ~/.m2/repository/com/rag/common/0.0.1-SNAPSHOT/common-0.0.1-SNAPSHOT.jar \
+          com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor | grep -c Boolean
+   ```
+   ⇒ 安装 jar 里 **0** 次、工作树 classes 里 **1** 次 ⇒ 差的那份就是真相；
+4. **「变异没红」的排查顺序要再往前插一步**：
+   ① 变异编进**哪一份**字节码了？→ ② 测试运行时用的是**哪一份**？→ ③ 脚本改对地方了吗？
+   → ④ 断言敏感吗。
+   （P15 的顺序是 ①②③，P19 在最前面插了「运行时用的是哪一份」。）
+
+### 附带一条：Go 熔断统计的「只认已完成桶」
+
+第一版测试还犯了个**语义**错误：断言「熔断未开时前 40 次都打到下游」。
+实测只有 16 次 ⇒ 因为 go-zero `googlebreaker.go:52-79` 的 `total` 来自
+`collection/rollingwindow.go:65-80` 的 `Reduce`，它 **`ignoreCurrent`**
+（注释：<i>ignore the current bucket, because of partial data</i>）
+⇒ **只有已完成的 250ms 桶**计入统计 ⇒ 统计窗口实际是 39 个完整桶 ≈ 9.75s。
+⇒ 写断言前必须先问「这个计数器统计的是**哪个窗口**的什么」。
