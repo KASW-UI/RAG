@@ -45,6 +45,18 @@ bash run_diff.sh
 
 ⚠️ `run_diff.sh` **会先检查前置产物**，缺哪个直接退出并告诉你缺哪个。
 
+### 附：proto 复制忠实度守门（**不需要起任何容器**）
+
+```bash
+python3 tools/difftest/comment/check-proto-parity.py   # EXIT=0 = 一致
+```
+
+> 判据：剥掉 `option` / `package` + **归一化空白**（§3.4 允许缩进与空行统一）后逐行比对，
+> 外加断言 `package` 仍归一（已签字偏离 `SD-2026-10-23-04`）+ RAG 侧无残留 `go_package`。
+> ⇒ 把「proto 是复制粘贴」从**一次性快照**变成**可持续结论**。
+> ⚠️ **只校验文件本身**，不校验消费方式（§3.4 效力边界第 1 条）—— 那部分由
+> `PbCommentServiceAliasGateTest` 与 `docs/DRIFT/comment/proto.md` 的台账守。
+
 ## 隔离矩阵（隔离不对 ⇒ 差异全是串味）
 
 | 要素 | Go 侧 | RAG 侧 |
