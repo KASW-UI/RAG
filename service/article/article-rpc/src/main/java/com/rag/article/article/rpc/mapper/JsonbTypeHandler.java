@@ -140,6 +140,25 @@ public final class JsonbTypeHandler {
      * 解析 JSON 文本为 {@code List<String>}；{@code null} / 空白 / JSON {@code null} → {@code null}。
      *
      * <p>对应 Go {@code StringArray.Scan}：{@code value == nil ⇒ *a = nil}。
+     *
+     * <h3>⚠️ 三个分支各自为什么必需（2026-10-24 逐条实测）</h3>
+     * <table border="1">
+     *   <caption>删掉任一分支的后果</caption>
+     *   <tr><th>分支</th><th>删掉的后果</th><th>实测</th></tr>
+     *   <tr><td>{@code json == null}</td>
+     *       <td>SQL NULL 会被 Jackson 判成「无内容」而抛异常</td><td>必需</td></tr>
+     *   <tr><td>{@code json.isBlank()}</td>
+     *       <td>空白串会让 Jackson 抛 {@code MismatchedInputException}</td>
+     *       <td>必需（实测：{@code readValue("  ", List) ⇒ MismatchedInputException}）</td></tr>
+     *   <tr><td>{@code "null".equals(json)}</td>
+     *       <td>⚠️ <b>行为不变</b> —— Jackson 自己就把 JSON 字面量 {@code null} 读成 {@code null}</td>
+     *       <td><b>与 Jackson 重复（冗余）</b>；实测：{@code readValue("null", List) ⇒ null}</td></tr>
+     * </table>
+     *
+     * <p>⇒ 最后那一条**保留**：它让「JSON {@code null} ⇒ null」这个契约<b>显式可见</b>，
+     * 而不是隐含在 Jackson 的行为里（万一哪天 Jackson 的行为变了，这里是保险）。
+     * ⚠️ 但要知道它<b>不是</b>承重的 —— 变异验证时删掉它，测试<b>照样全绿</b>
+     * ⇒ 这条「仍全绿」判为「**变异无效**」，不是「测不到」。
      */
     public static List<String> readList(String json) throws SQLException {
         if (json == null || json.isBlank() || "null".equals(json)) {

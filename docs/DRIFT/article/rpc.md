@@ -1684,6 +1684,7 @@ Caused by: java.lang.IllegalStateException: article-rpc 的 Kafka 通道「kq-pu
 | 9 | **jsonb 列的读回值** | `nil` | `null` | ✅ **一致**（`readList`/`readMap` 把 SQL NULL、空白、JSON `'null'` 一律读成 null；Go 的 `Scan` 同理） |
 | 10 | **过滤面**（`@>` 算子） | SQL NULL ⇒ NULL、jsonb `'null'` ⇒ false ⇒ **都排除该行** | 同 | ✅ **一致**（用例 5） |
 | 11 | **创建路径**（`secondary_tags`） | `model.StringArray(in.SecondaryTags)` ⇒ 空 ⇒ jsonb `'null'` | `new ArrayList<>(...)` ⇒ 空 ⇒ jsonb `'[]'` | ⚠️ **存储不同**，但 proto3 `repeated` 字段**两侧都是空**、按具体标签的过滤**两侧都排除** ⇒ ✅ **不可观察** |
+| 12 | **wire 层**（proto3 `repeated`/`map` **无 presence**） | nil / 空 ⇒ **字段不存在** | null 守卫 ⇒ **字段不存在** | ✅ **一致**（**wire 字节逐字节相同**，见第十一轮 + [`proto.md`](./proto.md) 的 `P-U-2`） |
 
 ⇒ 唯一剩下的存储层差异（#8 / #11）在**读回**（#9）与**过滤**（#10）上都不可见
 ⇒ **API 层面不可观察 ⇒ 不修。**
@@ -1740,3 +1741,117 @@ Caused by: java.lang.IllegalStateException: article-rpc 的 Kafka 通道「kq-pu
 >
 > ⇒ 附带一条：**「差异不可观察」也是一个结论**，而且需要**正面证明**
 > （读回一致 + 过滤一致），不能只说「应该没影响」。
+
+---
+
+<!-- @fix 2026-10-24 第十一轮 · 由 align/article 工作树产出 · 基线 commit a82950d -->
+
+## 2026-10-24 第十一轮：`P-U-2` 关闭 —— 「Go 创建的行」被 RAG 读的 **wire 字节级**判读
+
+### ✅ FIX-17 —— `P-U-2` 关闭（`article-proto`）+ 第十轮那条「不可观察」结论的**第三条独立论据**
+
+#### 起因
+
+第十轮关掉的那条差异（`secondary_tags` 存 **SQL NULL** vs **jsonb `'null'`**）给了两条论据：
+**读回**一致 + **过滤**一致。
+⇒ 还能不能从**别的层**再证明一次？⇒ **wire 层**。
+
+#### 🔴 证据①：Go 创建的行，落库形态就是 jsonb `'null'`
+
+```go
+// service/article/rpc/internal/logic/create_article_logic.go:94
+SecondaryTags: model.StringArray(in.SecondaryTags),
+```
+
+⚠️ 注意这里是**直接类型转换**，**不是** `append(nil, ...)`（更新路径 `update_article_logic.go:185` 才是 `append`）
+⇒ 请求不带二级标签时 ⇒ **nil slice**
+⇒ `StringArray.Value()` = `json.Marshal(nil)` = **`"null"`**
+⇒ **落库就是 jsonb `'null'`**。
+
+⇒ **灰度期两侧写同一张表时**，Go 建的行在 RAG 侧读到的就是 `'null'::jsonb`
+⇒ RAG 的 `JsonbTypeHandler.readList` 把它读成 **null**
+⇒ 而 RAG 自己建的行是 `'[]'` ⇒ **两侧同一张表里可能并存两种存储形态**。
+
+#### 🔴 证据②：两侧的「null / 空 ⇒ 不写入」处置 ⇒ wire 一致
+
+| 侧 | 出处 | 处置 |
+|---|---|---|
+| Go | `internal/logic/get_article_logic.go:112` `SecondaryTags: article.SecondaryTags` | nil slice ⇒ proto3 `repeated`（**无 presence**）⇒ **字段不存在** |
+| Go | `internal/logic/get_article_logic.go:191-201` `cloneStringMap`（`len(source)==0 ⇒ return nil`） | nil map ⇒ proto3 `map`（**无 presence**）⇒ **字段不存在** |
+| RAG | `ArticleDomainService:261-263` `if (a.getSecondaryTags() != null) { addAllSecondaryTags(...) }` | null ⇒ 不写 ⇒ **字段不存在** |
+| RAG | `ArticleDomainService:265-267` `if (a.getExtInfo() != null && !isEmpty()) { putAllExtInfo(...) }` | null / 空 ⇒ 不写 ⇒ **字段不存在** |
+| RAG | `ArticlePublicDomainService:394-399`（公开路径） | 同（**同样有守卫**） |
+
+⇒ **wire 字节完全一致** ⇒ **不是漂移**。
+
+⚠️ **顺带排除一个「以为有 bug」的怀疑**：
+protobuf 的 `addAll(null)` / `putAll(null)` 会 **NPE**
+⇒ 若 RAG 侧漏了 null 守卫，读 Go 建的行就会崩。
+⇒ 实测：**两侧的守卫都在** ⇒ 不崩。
+
+#### 🔴 证据③：新回归网（`ArticleNullJsonbToProtoMappingTest`，真 PG，3 条）
+
+| # | 用例 | 钉住什么 |
+|---|---|---|
+| 1 | `goCreatedRowWithJsonNullTagsReadsBackAsNull` | jsonb `'null'` 的行在 RAG 侧**读回 null** |
+| 2 | `nullEntityFieldsMapToEmptyProtoFieldsWithoutThrowing` | 实体的 jsonb 字段为 null ⇒ 映射**不抛 NPE**，两字段为空 |
+| 3 | `wireBytesAreIdenticalToProtoWithoutThoseFields` | ⭐ **wire 字节**与「proto3 里没有这两个字段」**逐字节相同** |
+
+⚠️ 第 3 条用**字节**而不是「集合相等」：proto3 的 `repeated` / `map` **没有 presence**
+⇒ 「空集合」与「null」在 wire 上**本来就无法区分**
+⇒ 要证明「与 Go 一样」，必须比**字节**。
+
+#### 变异验证（3/3 有效变异 MUT-RED + 1 个**变异无效**对照组）
+
+| # | 变异 | 结果 |
+|---|---|---|
+| 1 | 删掉 `toAuthorProtoArticle` 里 `secondaryTags` 的 null 守卫 | ✅ **转红**（NPE） |
+| 2 | 删掉 `extInfo` 的 null 守卫（只剩 `isEmpty`） | ✅ **转红**（NPE） |
+| 3 | `readList` 对 JSON `'null'` 返回**空 list**而不是 null | ✅ **转红** |
+| 3x | 【**对照组**】只删掉 `"null".equals(json)` 分支 | ⚠️ **仍全绿** ⇒ 判为「**变异无效**」 |
+
+⚠️ **3x 是一条有价值的负结果**：
+删掉 `"null".equals(json)` 后**行为不变** ⇒ 说明 **Jackson 自己就把 JSON 字面量 `null` 读成 null**
+⇒ 独立实测（Jackson 2.22.3）：
+```
+readValue("null", List) => null (null? true)
+readValue("null", Map)  => null (null? true)
+readValue("  ", List)   => 抛异常: MismatchedInputException
+```
+⇒ 那条分支**与 Jackson 的行为重复**（冗余但无害，保留是为了让契约显式可见）；
+⇒ 而 `json.isBlank()` 那条是**必需**的（空白串会让 Jackson 抛异常），
+⇒ `json == null`（SQL NULL）那条也**必需**。
+⇒ 已把这个「三个分支各自为什么必需」的实测结论写进 `JsonbTypeHandler.readList` 的 javadoc。
+
+### 判定变化（FIX-17）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `P-U-2`（`article-proto`）`Article` message 的 jsonb 两列 | 🔴 OPEN（未逐字段核对） | ✅ **已关闭**（逐字段 + wire 字节级判读）⇒ 落 [`proto.md`](./proto.md) |
+| `P-U-1`（跨栈活体对拍） | 🔴 OPEN | 🔴 **OPEN（不变）**（需 etcd） |
+| 第十轮那条「存储层差异不可观察」 | 两条论据（读回 / 过滤） | ✅ **三条**（读回 / 过滤 / **wire 字节**）⇒ 结论加强 |
+| **组件判定**（`article-rpc`） | `SEMANTICALLY NOT EQUIVALENT` | **`SEMANTICALLY NOT EQUIVALENT`（不变）** |
+
+⚠️ **判定不变的理由**：本轮**没有改变任何运行时行为**；
+且 `U-3` / `U-4` / `U-9` / `U-4'` / `S-5` 仍在，也**无双侧活体对拍**（Go 侧仍需 `etcd:2379`）。
+
+#### 测试计数
+
+- **新增** `ArticleNullJsonbToProtoMappingTest` **3 条全绿**（真 PG + 真 Mapper + **wire 字节级**比对）；
+- `article-rpc` **136 tests / 0 failures / 0 errors / 0 skipped**（原 133 ⇒ **+3**）；
+  连同 `article-api` 80 + `article-common` 15 ⇒ **article 域合计 231 / 0 / 0 / 0**（`BUILD SUCCESS`）。
+
+#### 📌 一条可复用的元教训
+
+> **「跨栈写同一张表」时，两侧的「同一列」可能存着不同的物理形态** ——
+> 而这种差异**往往在 wire 层被自动抹平**。
+>
+> 本轮的实测：Go 创建的行里 `secondary_tags` 是 **jsonb `'null'`**，RAG 创建的是 **`'[]'`**
+> ⇒ 同一张表里两种形态并存；
+> ⇒ 但 proto3 的 `repeated` **没有 presence** ⇒ 两侧映射过去**都是「字段不存在」**
+> ⇒ **wire 字节逐字节相同**。
+>
+> ⇒ 通用判据：评估「存储层差异」能不能被用户看到时，**要一路追到最外面那一层**（这里是 wire 字节），
+> 中间任何一层的「无 presence」语义都可能把它**自动抹平**。
+> ⇒ 反过来：**没有 presence 的字段（proto3 的 `repeated`/`map`、可空标量）会把空与缺混为一谈** ——
+> 想区分它们，就必须在**更靠近存储的那一层**去判。

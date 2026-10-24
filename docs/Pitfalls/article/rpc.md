@@ -806,3 +806,66 @@ MP 的 `@ResultMap` 缺失时**静默跳过该属性**。
 
 5. ⇒ 落成一句可复用的判据：
    **「读文档」得到的是策略名，「真 PG 写一行」得到的才是这次 UPDATE 实际写了什么。**
+
+---
+
+## PF-ARTICLE-RPC-015 —— 「同一列」在两侧可能存着**不同的物理形态**，而 wire 层会**自动抹平**它
+
+### 现象（本轮实际发生的一件事）
+
+Go 与 RAG 写**同一张** `article` 表，但**同一列**的落库形态不同：
+
+| 侧 | `secondary_tags` 的落库形态 | 原因 |
+|---|---|---|
+| Go | **jsonb `'null'`** | `create_article_logic.go:94` `SecondaryTags: model.StringArray(in.SecondaryTags)` —— **直接类型转换**（不是 `append(nil, ...)`）⇒ 空请求 ⇒ **nil slice** ⇒ `json.Marshal(nil)` = `"null"` |
+| RAG | **jsonb `'[]'`** | `ArticleDomainService:144` `new ArrayList<>(in.getSecondaryTagsList())` ⇒ 空 list ⇒ **非 null** ⇒ MP 的 `NOT_NULL` 照样写 ⇒ `'[]'` |
+
+⇒ **灰度期两侧写同一张表 ⇒ 同一列里两种形态并存。**
+
+⚠️ 而 RAG 读 Go 建的行时：`readList("null")` ⇒ **null** ⇒ 映射到 proto 时
+（`repeated string`）⇒ **字段不存在**；Go 读自己建的行时：`SecondaryTags` 是 nil
+⇒ proto3 `repeated`（**无 presence**）⇒ **字段不存在**。
+
+⇒ **wire 字节逐字节相同。**
+
+### 根因（不是 bug，是**三个独立事实叠在一起**）
+
+1. **两侧的「空」表示不同**：Go 的空 = **nil**、RAG 的空 = **空集合** ⇒ 落库形态不同；
+2. **proto3 的 `repeated` / `map` 没有 presence** ⇒ 「空集合」与「不存在」在 wire 上**不可区分**；
+3. **两侧的映射都把 null/空处理成「不写入」** ⇒ 于是两侧在 wire 上又**对齐了**。
+
+⇒ 三者叠加 ⇒ **存储层有差异、wire 层没差异。**
+
+### 为什么这在本项目特别危险
+
+这类差异**极难被测出来**，因为：
+
+- **行为测试测不到**：两条路径（读 Go 建 / 读 RAG 建的行）产出的 wire **完全相同** ⇒ 断言相等永远是绿的；
+- **DDL 对照测不到**：DDL 两侧一致（列都是 `jsonb`）⇒ DDL diff 不会报；
+- **存储层对拍测不到**：只有直接查 `secondary_tags::text` 才能看到 `'null'` vs `'[]'`。
+
+⇒ 而本仓的审计流程里，**恰最容易跑的就是前两种**。
+
+### 下次怎么防
+
+1. **跨栈写同一张表时，先把「两侧的空怎么表示」列出来。**
+   本例的清单：nil slice / 空 slice / 空字符串 / 空 map / SQL NULL / jsonb `'null'` / jsonb `'[]'`。
+   ⇒ 两侧的表示**只要有一处不同**，落库形态就可能不同。
+
+2. **评估「存储层差异能不能被看到」时，要一路追到最外面那一层。**
+   中间任何一层的「无 presence」语义都可能把它**自动抹平**（本例是 proto3）。
+   ⇒ 追到**用户真正拿到的东西**（本例是 wire 字节）才算判完。
+
+3. **反过来也要记住**：**没有 presence 的字段会把「空」与「缺」混为一谈**
+   （proto3 的 `repeated`/`map`、可空标量）。
+   ⇒ 想区分它们，只能在**更靠近存储的那一层**去判。
+
+4. **要留证据时，用「字节级」而不是「集合相等」。**
+   本轮的新网 `ArticleNullJsonbToProtoMappingTest` 就是比
+   `expected.toByteArray()` vs `mapped.toByteArray()` ——
+   ⇒ 「空集合相等」只能证明 Java 层一样，**证不了 wire 一样**。
+
+5. ⇒ 落到一条可复用的判据：
+   **「存储形态不同」≠「用户能看到不同」。**
+   两者之间隔着**若干层可能自动抹平的语义**（proto3 无 presence、
+   JSON 空值、空集合归一……）⇒ 判「是否可观察」必须**逐层过**。

@@ -22,6 +22,12 @@
 | ② 字段号是否被硬编码覆盖 | ✅ 无任何硬编码 | 全仓 grep |
 | ③ Jackson / protobuf 配置差异 | ✅ 不适用（proto 只走 binary，不进 Jackson） | 全仓 grep |
 
+**2026-10-24 第十一轮补充**：`P-U-2` 关闭 ——
+`Article` message 的两个 jsonb 列在 proto 层是 **`repeated string secondary_tags = 7`**
+与 **`map<string, string> ext_info = 16`**（**两侧逐字节一致**）；
+两侧的实体→proto 映射都是「**null / 空 ⇒ 不写入**」⇒ **wire 字节一致** ⇒ 非漂移。
+⇒ 详见 §6 的 `P-U-2` 条目。
+
 ---
 
 ## 1. 组件事实
@@ -163,7 +169,55 @@ Go（`update_article_logic.go:140-190`）与 RAG（`ArticleDomainService.applySo
 | ID | Question | Why Unknown | Required Confirmation |
 |---|---|---|---|
 | **P-U-1** | 跨栈 gRPC 互调（Go article-rpc ⇄ RAG article-rpc）未实测 | 本机拉不起 `etcd:2379`；且本组件**只有客户端/服务端两侧各自跑**，没有真实跨栈调用 | 起 etcd + 双栈，实测 `/article.ArticleService/GetArticle` 的 wire 互通 |
-| **P-U-2** | `Article` message 的 **jsonb 两列**（`secondary_tags` / `ext_info`）在 proto 层是 `repeated string` / `string`？ | 本轮只核对了**请求/响应消息**的 presence，**未逐字段核对 `Article` message 本身**（那是 rpc 层的结果映射问题，见 [`rpc.md`](./rpc.md) 的 `DRIFT-ARTICLE-RPC-001`） | 在 rpc 台账里合并判读 |
+| **P-U-2** | `Article` message 的 **jsonb 两列**（`secondary_tags` / `ext_info`）在 proto 层是 `repeated string` / `string`？ | ~~本轮只核对了**请求/响应消息**的 presence，**未逐字段核对 `Article` message 本身**~~ | ✅ **已关闭**（2026-10-24 第十一轮，见下）—— 逐字段核对完成：`repeated string secondary_tags = 7` / `map<string, string> ext_info = 16`（**两侧逐字节一致**）；两侧的实体→proto 映射都是「null / 空 ⇒ 不写入」⇒ **wire 上完全一致** |
+
+### ✅ `P-U-2` 关闭 —— `Article` message 的 jsonb 两列：逐字段核对 + wire 层判读（2026-10-24）
+
+#### ① proto 层：`Article` message 两侧**逐字节一致**
+
+```
+Go:    Sea-RideTheWind_golang/proto/article.proto
+RAG:   service/article/article-proto/src/main/proto/article.proto
+```
+
+| 字段 | Go | RAG | 一致 |
+|---|---|---|---|
+| `secondary_tags` | `repeated string secondary_tags = 7;` | 同 | ✅ |
+| `ext_info` | `map<string, string> ext_info = 16;` | 同 | ✅ |
+
+⇒ 整个 `Article` message（16 个字段，字段号 / 类型 / 名字）**两侧逐字节一致**
+（去掉 `option` 与注释后 `diff` 为空）⇒ **P-U-2 的问句有明确答案**：
+`secondary_tags` 是 **`repeated string`**、不是 `string`；`ext_info` 是 **`map<string, string>`**。
+
+#### ② 消费侧：两侧的「null / 空 ⇒ 不写入」处置**等价** ⇒ wire 一致
+
+| 侧 | 出处 | 处置 |
+|---|---|---|
+| Go | `internal/logic/get_article_logic.go:112` `SecondaryTags: article.SecondaryTags` | nil slice ⇒ proto3 `repeated` **无 presence** ⇒ **字段不存在** |
+| Go | `internal/logic/get_article_logic.go:191-201` `cloneStringMap` | `len(source)==0 ⇒ return nil` ⇒ proto3 `map` **无 presence** ⇒ **字段不存在** |
+| RAG | `ArticleDomainService:261-263` `if (a.getSecondaryTags() != null) { addAllSecondaryTags(...) }` | null ⇒ 不写 ⇒ **字段不存在** |
+| RAG | `ArticleDomainService:265-267` `if (a.getExtInfo() != null && !isEmpty()) { putAllExtInfo(...) }` | null / 空 ⇒ 不写 ⇒ **字段不存在** |
+| RAG | `ArticlePublicDomainService:394-399` | 同（公开路径同样有守卫） |
+
+⇒ **wire 字节完全一致** ⇒ 这条**不是**漂移。
+
+#### ③ 顺带把 rpc 台账第十轮那条「不可观察」结论**加了第三条独立论据**
+
+rpc 台账第十轮关掉的那条差异（`secondary_tags` 存 **SQL NULL** vs **jsonb `'null'`**），
+当时给的是「**读回**一致 + **过滤**一致」两条论据。
+⇒ 本轮从 **proto / wire** 层给出**第三条**：
+
+- Go 创建文章时（`create_article_logic.go:94`）请求不带标签 ⇒ `model.StringArray(nil)`
+  ⇒ `json.Marshal(nil)` ⇒ 落库就是 **jsonb `'null'`**；
+- RAG 读到 `'null'` ⇒ `readList` ⇒ **null** ⇒ 映射时 **null 守卫**跳过 ⇒ **字段不存在**；
+- Go 侧同一行 ⇒ `SecondaryTags` 是 nil ⇒ proto3 `repeated` **字段不存在**；
+- ⇒ **两侧 wire 字节逐字节相同** ⇒ 存储层那点差异**在 wire 上也不可观察**。
+
+⇒ 新增守门网 `ArticleNullJsonbToProtoMappingTest`（真 PG，3 条，含 **wire 字节级**比对）。
+
+⚠️ **本条关闭的边界**：`P-U-1`（跨栈活体对拍）**仍 OPEN** ——
+上面全部是**源码级 + 单侧真 PG**证据，**不是**「Go 栈与 RAG 栈真的互调过」。
+⇒ 本文件所有 ✅ 仍一律读作「**在源码级对照 + 单侧真 PG 证据下一致**」。
 
 > ⚠️ **本台账的结论只覆盖「proto 文件 + 其消费方式」**，
 > **不覆盖** wire 层的端到端行为 —— 后者归 [`article/rpc.md`](./rpc.md) 与 [`article/api.md`](./api.md)。
@@ -173,7 +227,8 @@ Go（`update_article_logic.go:140-190`）与 RAG（`ArticleDomainService.applySo
 ## 7. 结论
 
 - `article-proto`：**无漂移**，且**不需要**签字偏离（proto `package` 两侧一致 ⇒ wire 路径相同）。
-- 本轮补齐的是 §3.4 **明写不覆盖**的三项（presence / 字段号硬编码 / Jackson 配置）。
-- ⚠️ **本组件的证据强度上限 = 源码逐行对照 + 生成产物实测**；
+- 本轮补齐的是 §3.4 **明写不覆盖**的三项（presence / 字段号硬编码 / Jackson 配置），
+  **2026-10-24 第十一轮**又补了 `P-U-2`（`Article` message 逐字段 + wire 字节级判读）。
+- ⚠️ **本组件的证据强度上限 = 源码逐行对照 + 生成产物实测 + 单侧真 PG**；
   **没有**跨栈活体对拍（`P-U-1`）⇒ 按 §6 状态表纪律，
-  本文件所有 ✅ 一律读作「**在源码级对照下一致**」，不是「已闭环」。
+  本文件所有 ✅ 一律读作「**在源码级对照 + 单侧真 PG 证据下一致**」，不是「已闭环」。
