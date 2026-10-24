@@ -960,7 +960,8 @@ class ArticleApiMvcPipelineTest {
      * 压根没走到 8 MiB 截断那条路径 —— 一个「因为错误的原因而绿」的用例。
      */
     @Test
-    @DisplayName("DRIFT-002：9 MiB **合法** JSON body ⇒ 400（Go 的 maxBodyLen=8MiB 静默截断）")
+    @DisplayName("DRIFT-002：9 MiB **合法** JSON body ⇒ 400（Go 的 maxBodyLen=8MiB 静默截断）"
+            + "；⚠️ body 文案与 Go 不同（Go 是 \"unexpected EOF\"）—— 已确认 LOW 漂移")
     void oversizedJsonBodyIsRejectedAtEightMiB() throws Exception {
         // 构造一个**合法**的 JSON 文档：padding 塞进 brief，content 短
         String padding = "x".repeat(9 * 1024 * 1024);
@@ -977,6 +978,19 @@ class ArticleApiMvcPipelineTest {
 
         assertEqualsTextPlainUtf8(response.getContentType());
         Mockito.verify(stub, Mockito.never()).createArticle(Mockito.any());
+
+        // ⚠️ characterization（DRIFT-006）：**可观察契约相同，body 文案不同**。
+        //    Go 侧（Go 1.25 探针实测）：httpx.ParseJsonBody 用
+        //    json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode(v)
+        //    ⇒ 解析器拿到半个文档 ⇒ err.Error() == "unexpected EOF"
+        //    ⇒ http.Error(…, 400) 的 body 就是 "unexpected EOF\n"。
+        //    RAG 侧：显式拒绝 ⇒ body 是 "request entity too large\n"。
+        //    ⇒ 状态码 / Content-Type / nosniff 三项**一致**，只差文案 ⇒ LOW，**不修**
+        //       （要"对齐"就得改成先读 8 MiB 再解析失败 —— 纯浪费，且文案更费解）。
+        assertEquals("request entity too large\n", response.getContentAsString(),
+                "⚠️ 这是**实测现状**（与 Go 的 \"unexpected EOF\" 不同）—— DRIFT-006，"
+                        + "已确认 LOW OBSERVABLE DIFFERENCE，决定不修；断言它是为了锁住现状，"
+                        + "不是把 RAG 的文案当成 Go 的事实");
     }
 
     @Test

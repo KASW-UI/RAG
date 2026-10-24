@@ -3,7 +3,12 @@
 > 本文件**两代内容并存**：§0 是 2026-10-23 早先那次「文件计数实测」，原文逐字保留不删改；
 > §1 起是 2026-10-23 本轮 **Go ↔ RAG 语义对照**（首次）的完整台账（spec §31-b 结构）。
 > 编号空间统一为 `DRIFT-ARTICLE-API-0xx`；RAG 源码注释里遗留的 `DRIFT-001…007` 是上游实现期的
-> 内部编号，**未被本轮验证**，逐条对应关系见 §7.5。
+> 内部编号，**未被本轮验证**，逐条对应关系见 §7.6。
+>
+> ⚠️ **两套编号会撞号**（2026-10-24 实测确认，本文件内已发生两次误读）：
+> `DRIFT-ARTICLE-API-0xx`（本台账的**权威编号**）与上游源码注释里的 `DRIFT-001…007`（**另一套**）
+> **同形不同义** —— 例如 `DRIFT-006` 在前者是「8–10 MiB body 文案」，在后者是「type mismatch 三段式文案」。
+> ⇒ 引用**必须带全前缀**（`DRIFT-ARTICLE-API-006`）；见 §7.6 的对照表。
 
 ---
 
@@ -282,7 +287,7 @@ Result 仅取 `EQUIVALENT / IMPLEMENTATION DIFFERENCE / OBSERVABLE DIFFERENCE / 
 | 全局 | 方法不匹配 | **404 空 body**（`WithCors` 接管） | `handleMethodNotSupported` | EQUIVALENT | `patrouter.go:77-78`+`server.go:150`+`cors/handlers.go:44-48` |
 | 全局 | panic / 未转换 | 裸 500 空 body | `handleAny`/`handleUnconvertedRpcStatus` | EQUIVALENT | `recoverhandler.go:14-19` |
 | 全局 | MaxBytes | 10485760，裸 413 | `rag.protection.max-bytes` | EQUIVALENT | `maxbyteshandler.go:19-22` |
-| 全局 | JSON body 8 MiB 上限 | `LimitReader` 静默截断 ⇒ 400 | 显式拒绝 400 | **OBSERVABLE DIFFERENCE** | DRIFT-006 |
+| 全局 | JSON body 8 MiB 上限 | `LimitReader` 静默截断 ⇒ 400，body = `"unexpected EOF"` | 显式拒绝 400，body = `"request entity too large"` | 🟡 **已确认 LOW，不修**（状态码/Content-Type/nosniff 三项一致） | DRIFT-006 |
 | 全局 | CORS（5 头 / OPTIONS 204 / 不写 Allow-Credentials） | `cors/handlers.go:105-123` | `ArticleGoStyleCorsFilter` | EQUIVALENT | 静态源码 |
 | 全局 | 路径归一 | `path.Clean` 注册+匹配两侧 | `GoStylePathNormalizingFilter` | EQUIVALENT | `patrouter.go:48,60` |
 | 全局 | 超时执行者 | `DisableNativeRestTimeout` → 只有 observability 一个 | `observability.http-timeout: 70s` | EQUIVALENT | `observability/http.go:30-34,88` |
@@ -544,21 +549,38 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 
 #### DRIFT-ARTICLE-API-005 —— query 参数总数上限（OBSERVABLE DIFFERENCE，LOW）
 - **Go**：`httpx/util.go:15` `maxFormParamCount = 2048`；消费点 `util.go:48-53` —— 累计超过 2048 个非空值即 `return nil, fmt.Errorf("too many form values, …")` ⇒ **400**。
-- **RAG**：`ArticleController` 的 8 个 `@RequestParam` 无总数上限，Tomcat 只在 `maxHttpHeaderSize` 等处限流。
+- **RAG（首轮静态判定，已被实测推翻）**：`ArticleController` 的 8 个 `@RequestParam` 无总数上限，Tomcat 只在 `maxHttpHeaderSize` 等处限流。
 - **影响**：需要 >2048 个 query 值的请求 Go 拒、RAG 收。本组件的 query 字段只有 8 个，**实际不可达** ⇒ LOW。
 - **证据**：静态源码。
+- **🔴 当前状态（2026-10-24）**：本条**原定性被真容器实测推翻** —— 「RAG 无上限」**不成立**：
+  Tomcat 的 `server.max-http-request-header-size`（Boot 4 默认 8 KB）**更早**触发 ⇒ 状态码两侧都是 400，
+  且 RAG 阈值**更严**（≈2040 个值 < Go 的 2049）⇒ **不存在 DoS 暴露**。
+  已**补应用层 Go 语义闸门**（`GoStyleFormParamCountFilter`），真容器实测 body 与 Go **逐字节一致**（2/2 变异验证）。
+  🟡 **残留**：默认部署下拒绝发生在连接器层 ⇒ body 是 Tomcat 的 HTML 页（Go 是 text/plain）⇒ **LOW，决定不修**。
+  详见本文件「第四轮」节。
 
 #### DRIFT-ARTICLE-API-006 —— 8–10 MiB JSON body 的错误文案（OBSERVABLE DIFFERENCE，LOW）
 - **Go**：`requests.go:21` `maxBodyLen = 8 << 20`（**框架常量，不在任何 tag/yaml 里**）→ `io.LimitReader` **静默截断** → 解析器报 `unexpected EOF` → 400。
 - **RAG**：`GoStyleJsonBodyLimitFilter.java:93-97` 显式拒绝，body 为 `request entity too large\n`。
 - **可观察契约相同**（400 + text/plain + nosniff + 业务不执行），差异仅在 body 文案。
 - **证据**：静态源码。上游已在该 Filter 的 javadoc 自登记（标 DRIFT-002）。
+- **✅ 当前状态（2026-10-24）**：**已确认 LOW OBSERVABLE DIFFERENCE，决定不修**。
+  Go 侧文案由 Go 1.25.11 探针**实测**得到（`json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode`
+  解析半个文档 ⇒ `err.Error() == "unexpected EOF"` ⇒ `http.Error` 的 body = `"unexpected EOF\n"`），
+  RAG 侧 = `"request entity too large\n"`。
+  ⇒ 状态码 / Content-Type / nosniff **三项一致** ⇒ 仅文案不同。
+  ⇒ 已用 **characterization test**（`ArticleApiMvcPipelineTest#oversizedJsonBodyIsRejectedAtEightMiB`）
+  锁住实测现状（含文案断言 + 变异验证 MUT-RED）⇒ 将来谁改动这条路径，测试会立刻变红。
+  详见本文件「第六轮」节。
 
-#### DRIFT-ARTICLE-API-007 —— `ext_info` key 排序在非 BMP 字符上不同（OBSERVABLE DIFFERENCE，极低）
+#### DRIFT-ARTICLE-API-007 —— `ext_info` key 排序在非 BMP 字符上不同（OBSERVABLE DIFFERENCE，极低）✅ **已修**
 - **Go**：`encoding/json/encode.go:793-807`，`slices.SortFunc` 按 `ks`（Go string `<` = **UTF-8 字节序**）。
-- **RAG**：`ArticleApiSupport.java:226` `new java.util.TreeMap<>(source)` ⇒ `String.compareTo` = **UTF-16 码元序**。
+- **RAG（修复前）**：`ArticleApiSupport.java:226` `new java.util.TreeMap<>(source)` ⇒ `String.compareTo` = **UTF-16 码元序**。
 - **影响**：仅当 `ext_info` 的 key 含增补平面字符（代理对）时两者序不同；ASCII / BMP 范围内逐字节一致。
 - **证据**：`go1.25.11 src/encoding/json/encode.go:805`。静态源码。
+- **✅ 当前状态（2026-10-24）**：**已修**。改用**码点序**比较器（`CODE_POINT_ORDER`），
+  码点序 = Go 的 UTF-8 字节序 ⇒ 双侧探针实测一致（Go 1.25.11 + JDK 21 同跑），
+  并配回归网 + 变异验证 MUT-RED。详见本文件「第三轮」节。
 
 #### DRIFT-ARTICLE-API-008 —— 本仓台账的文件计数结论已被再次推翻（台账卫生）
 见 **§0.1**。`src/main/java` 实测 **38**（原文 36），主源码 **4,666** 行（原文 4,275），
@@ -573,18 +595,33 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 
 RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记其存在与本轮的间接观察：
 
+> 🔴 **本表是第二套编号空间，与 §7 的 `DRIFT-ARTICLE-API-0xx` 同形不同义**（2026-10-24 实测确认）：
+>
+> | 编号 | 本表（上游源码注释内部编号） | §7 的权威编号（`DRIFT-ARTICLE-API-0xx`） |
+> |---|---|---|
+> | `DRIFT-005` | `setHeader` vs `setContentType` 的 `charset=utf-8` 空格 | **005** = query 参数总数上限 2048 |
+> | `DRIFT-006` | type mismatch 三段式文案 | **006** = 8–10 MiB JSON body 错误文案 |
+> | `DRIFT-007` | `ext_info` 用 TreeMap 而非 LinkedHashMap | **007** = `ext_info` key 排序在非 BMP 字符上不同 |
+>
+> ⇒ 本表内的交叉引用（如「见 DRIFT-006」）指向的是 **§7 的权威编号**，**不是**本表同名的条目。
+> ⇒ 引用本表条目时**必须写全前缀** `DRIFT-ARTICLE-API-0xx` 或注明「上游内部编号」。
+
 | 上游编号 | 主题 | 落点 | 本轮观察 |
 |---|---|---|---|
 | `DRIFT-001` | 方法不匹配 ⇒ 404 而非 405 | `GlobalExceptionHandler.java:262-318` | ✅ 本轮静态核对**成立**（`patrouter.go:77-78` + `server.go:150` + `cors/handlers.go:44-48`） |
-| `DRIFT-002` | JSON body > 8 MiB ⇒ 400 | `GoStyleJsonBodyLimitFilter.java` | ✅ 成立（见 DRIFT-006；文案差异保留） |
+| `DRIFT-002` | JSON body > 8 MiB ⇒ 400 | `GoStyleJsonBodyLimitFilter.java` | ✅ 成立（见 `DRIFT-ARTICLE-API-006`；文案差异保留） |
 | `DRIFT-003` | 父类 `MultipartException` 未列 ⇒ 裸 500 | `GlobalExceptionHandler.java:219-225` | 未做活体验证 |
 | `DRIFT-004` | `path.Clean` 归一 | `GoStylePathNormalizingFilter.java` | ✅ 静态成立（`patrouter.go:48,60`） |
 | `DRIFT-005` | `setHeader` vs `setContentType` 的 `charset=utf-8` 空格 | `GoStyleJsonBodyLimitFilter.java:104-108` | **无真实 Tomcat 对拍 ⇒ UNKNOWN**（§9 UNRESOLVED-001） |
 | `DRIFT-006` | type mismatch 三段式文案 | `GoStyleStringFields.java:69-77` | ✅ 静态成立（`unmarshaler.go:1202-1204` 的 `%q` 格式） |
-| `DRIFT-007` | `ext_info` 用 TreeMap 而非 LinkedHashMap | `ArticleApiSupport.java:211-227` | ✅ 静态成立（`encode.go:805`），但见 DRIFT-007 的排序边界 |
+| `DRIFT-007` | `ext_info` 用 TreeMap 而非 LinkedHashMap | `ArticleApiSupport.java:211-227` | ✅ 静态成立（`encode.go:805`），但见 `DRIFT-ARTICLE-API-007` 的排序边界 |
 
-⚠️ 上游注释里 `GlobalExceptionHandler.java:118` 引用的 **`DRIFT-024`** 在本仓 `docs/DRIFT/` 下
-**查无对应台账条目** ⇒ 该编号来自另一份未入库的历史清单。已记入 §9 UNRESOLVED-008。
+🔴 **已更正（2026-10-24，第五轮 FIX-12）** —— 上游注释里 `GlobalExceptionHandler.java:118` 引用的
+**`DRIFT-024`** 原文写的是「在本仓 `docs/DRIFT/` 下**查无对应台账条目** ⇒ 该编号来自另一份未入库的历史清单」
+⇒ **该结论是错的**：`DRIFT-024` 在 **users 域** `docs/DRIFT/users/_shared.md:103`
+（主题 =「text/plain 400 的响应头丢失」）⇒ **域内编号跨域撞号**，不是"未入库"。
+本域**不受影响**（共享层 `HttpMiddleware` 已修为实时 propagate + 本域真 Tomcat 用例已断言 400 响应头）。
+⚠️ 跨域引用**必须带域前缀**才查得到 —— 详见本文件末尾「第五轮」节。
 
 ---
 
@@ -628,7 +665,7 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 | CASE-17 **上传时 rpc `Unavailable`** | 下游不可用 | **503 + `rpc error: code = Unavailable…`** | **400** | ⛔ **DRIFT-001** |
 | CASE-18 **上传时 rpc `Internal`** | 下游 500 | **500** | **400** | ⛔ **DRIFT-001 + DRIFT-004（绿测锁死）** |
 | CASE-19 **user-rpc 慢 3s** | 昵称补全 | **~2s 返回 200**（回落昵称） | **~3s 才返回 200**；>70s 则 **503** | ⛔ **DRIFT-002** |
-| CASE-20 8 MiB ~ 10 MiB JSON | 合法 JSON | 400（截断后解析失败） | 400（显式拒绝），文案不同 | △ DRIFT-006 |
+| CASE-20 8 MiB ~ 10 MiB JSON | 合法 JSON | 400（截断后解析失败） | 400（显式拒绝），文案不同 | 🟡 **LOW，已确认不修**（`DRIFT-ARTICLE-API-006`） |
 | CASE-21 路径未注册 | `/v1/nope` | 404 `404 page not found\n` | 同 | EQUIVALENT |
 | CASE-22 方法不匹配 | `POST /v1/article/1` | **404 空 body** | 同 | EQUIVALENT |
 | CASE-23 OPTIONS 预检 | `OPTIONS /v1/任意` | 204 空 + CORS 头 | 同 | EQUIVALENT |
@@ -653,7 +690,7 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 
 ## 9. Unresolved（§37 · 证据不足，不得猜）
 
-### UNRESOLVED-001 —— 400/401/404 响应头在**真实 Tomcat** 下的形状
+### UNRESOLVED-001 —— 400/401/404 响应头在**真实 Tomcat** 下的形状 ✅ **已关闭（2026-10-24，第二轮）**
 - **Question**：RAG 侧 400 text/plain 的 `Content-Type` 是否逐字节等于 Go 的 `text/plain; charset=utf-8`（**分号后有空格**）？`nosniff` 是否真的到客户端？
 - **Go Evidence**：`net/http.Error` 设 `Content-Type: text/plain; charset=utf-8` + `X-Content-Type-Options: nosniff`。
 - **Java Evidence**：`GoStylePlainTextErrors.java:69-75` 用 `ResponseEntity.header(...)` 设同值；`GoStyleJsonBodyLimitFilter.java:110-115` 刻意用 `setHeader` 而非 `setContentType`（注释称 `setContentType` 会被 Tomcat 改写成无空格形式）。
@@ -662,6 +699,9 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
   说明**静态正确 ≠ 客户端收到**。上游 `DRIFT-005` 正是这条。
 - **Impact**：低（仅文案字节），但它曾是 E-1 事故的形态。
 - **Required Confirmation**：起真实 Tomcat 容器打一次 400 请求，抓原始响应头。
+- **✅ 关闭依据（2026-10-24，真 Tomcat）**：见本文件「第二轮」节第 4 条（`UNRESOLVED-001` / `-005`）。
+  ⇒ 真容器实测：`Content-Type` / `nosniff` **都到位**（响应头没丢）；
+  ⇒ 同时**首次确认一条 LOW 漂移**：Go 写 `text/plain; charset=utf-8`（**带空格**），实测 `text/plain;charset=utf-8`（**无空格**，Tomcat 规范化）⇒ **决定不修**。
 
 ### UNRESOLVED-002 —— **依赖 `article-rpc` 的响应语义（跨组件，需与 `docs/DRIFT/article/rpc.md` 合并判读）**
 - **Question**：article-api 的三处安全闸门是否真的有效？
@@ -679,7 +719,7 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 - **Required Confirmation**：与 `docs/DRIFT/article/rpc.md` 合并判读；建议提升为**跨组件条目**
   （`public_only` 契约由两个组件共同承担，见 §7 各条）。
 
-### UNRESOLVED-003 —— Filter 链的实际 `@Order` 全序
+### UNRESOLVED-003 —— Filter 链的实际 `@Order` 全序 ✅ **已关闭（2026-10-24，第二轮）**
 - **Question**：`GoStylePathNormalizingFilter`(HIGHEST) / `ArticleGoStyleCorsFilter`(HIGHEST) /
   `GoStyleMaxConnsFilter`(+1) / `GoStyleCpuSheddingFilter`(+3) / `HttpMiddlewareFilter`(+5) /
   `GoStyleMaxBytesFilter`(+6) / `GoStyleJsonBodyLimitFilter`(+7) 的**实际生效顺序**是否与 Go 链序同构？
@@ -688,8 +728,10 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
   **只有容器起来才知道**。§3.3 同款：「注解存在」≠「生效」。
 - **Impact**：顺序错 ⇒ 413/503 是否带 CORS 头、`path.Clean` 是否在鉴权前生效。
 - **Required Confirmation**：启动容器打印 `FilterRegistrationBean` 顺序，或补一条装配层断言。
+- **✅ 关闭依据（2026-10-24）**：见本文件「第二轮」节第 3 条 —— 已用**装配层测试**钉死实际生效序
+  （并把该结论固化成 `ArticleApiAssemblyWiringTest` 的链序断言 ⇒ 后来者改 `@Order` 会立刻变红）。
 
-### UNRESOLVED-004 —— `@GrpcClient` 是否真在容器装配 + Nacos 寻址
+### UNRESOLVED-004 —— `@GrpcClient` 是否真在容器装配 + Nacos 寻址 ✅ **已关闭（2026-10-24，第二轮）**
 - **Question**：`ArticleRpcClient` / `UserRpcClient` 的 `@GrpcClient("article-rpc")` 阻塞 stub
   是否真被注入？`discovery:///article-rpc` 在本部署能否解析到实例？
 - **Java Evidence**：`ArticleRpcClient.java:52-53`、`application.yml:56-69`
@@ -699,15 +741,19 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
   **恰好把要验证的那一段替换掉了**。
 - **Impact**：若装配失败，所有端点在首次调用时报 NPE/IllegalStateException ⇒ 被 `handleAny` 兜成裸 500。
 - **Required Confirmation**：起真实 Spring 上下文（不 mock client）断言两个 stub 非 null。
+- **✅ 关闭依据（2026-10-24）**：见本文件「第二轮」节第 1 条 —— 已起**真实 Spring 上下文**（不 mock client）
+  断言两个 stub 非 null ⇒ **真在容器装配**。（Nacos 寻址属于**部署期**依赖，仍随部署验证。）
 
-### UNRESOLVED-005 —— 真实 Tomcat 下 405→404 空 body 是否仍无 `Content-Type`
+### UNRESOLVED-005 —— 真实 Tomcat 下 405→404 空 body 是否仍无 `Content-Type` ✅ **已关闭（2026-10-24，第二轮）**
 - **Question**：`ResponseEntity.status(404).build()`（`GlobalExceptionHandler.java:314-318`）
   在真实容器里会不会被 Tomcat 补上 `Content-Type`？
 - **Why Unknown**：同 UNRESOLVED-001；MockMvc 测不到。
 - **Impact**：低（客户端可据此区分两种 404，Go 侧同样区分）。
 - **Required Confirmation**：同 UNRESOLVED-001 的真实 Tomcat 探针。
+- **✅ 关闭依据（2026-10-24，真 Tomcat）**：同 `UNRESOLVED-001` —— 见本文件「第二轮」节第 4 条。
+  ⇒ 真容器实测 405→404 仍是**空 body**且**无 `Content-Type`**，与 Go 一致。
 
-### UNRESOLVED-006 —— 共享层（`com.rag.common`）在 article-api 上的真实生效
+### UNRESOLVED-006 —— 共享层（`com.rag.common`）在 article-api 上的真实生效 ✅ **已关闭（2026-10-24，第二轮）**
 - **Question**：`GoStyleGrpcClientBreakerInterceptor` / `GoStyleCpuSheddingFilter` / `GoStyleMaxConnsFilter` /
   `HttpMiddlewareFilter` / `GoStyleJsonBodyConverterConfig` 这 5 个共享件是否**真**被 `scanBasePackages={"…","com.rag.common"}` 扫到？
 - **Java Evidence**：`ArticleApiApplication.java:81-84`。
@@ -716,6 +762,8 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
   该分支的 HTTP 输出本轮未验证。
 - **Impact**：漏扫 ⇒ 保护层**静默消失**且不报错（AGENTS.md §3.3）。
 - **Required Confirmation**：补一条「上下文里这些 Bean 都存在」的装配层测试。
+- **✅ 关闭依据（2026-10-24）**：见本文件「第二轮」节第 2 条 —— 已补**装配层测试**，断言这 5 个共享件
+  **真的被扫到**（而不是「Bean 存在」这种弱断言）。
 
 ### UNRESOLVED-007 —— `SecurityRpc` 的启动期行为在 `NonBlock:false` 下的差异 ✅ **已关闭（2026-10-24，零新代码）**
 - **Question**：若 Go 侧日后给 `SecurityRpcConf` 显式写 `NonBlock: false`，`zrpc.MustNewClient`
@@ -749,7 +797,7 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 - 🔴 **原结论「查无此编号」是错的** —— 2026-10-24 全仓 + 全部工作树搜索后找到：
   | 位置 | 内容 |
   |---|---|
-  | **`docs/DRIFT/users/_shared.md:103`** | **DRIFT-024 =「text/plain 400 的响应头丢失」**（2026-10-22 E-1 收口时发现，*DRIFT-006 的另一半从未真正对齐*）<br>症状：`Content-Type` 与 `nosniff` **全部缺失**，状态行连 reason phrase 都没有，传输退化为 `Transfer-Encoding: chunked` + `Connection: close`<br>根因：`HttpMiddleware$ObservabilityResponseWriter.setHeader` 只收进 `capturedHeaders`、等 `flushTo` 才写回 underlying，而那时底层已 committed ⇒ Tomcat **静默忽略**<br>已改为三个覆写点（`setHeader`/`addHeader`/`setContentType`）实时 propagate<br>守门：`tools/difftest/check-plaintext400-headers.sh`（**必须真实 Tomcat**） |
+  | **`docs/DRIFT/users/_shared.md:103`** | **DRIFT-024 =「text/plain 400 的响应头丢失」**（2026-10-22 E-1 收口时发现，*article-api 的 `DRIFT-ARTICLE-API-006` 的另一半从未真正对齐*）<br>症状：`Content-Type` 与 `nosniff` **全部缺失**，状态行连 reason phrase 都没有，传输退化为 `Transfer-Encoding: chunked` + `Connection: close`<br>根因：`HttpMiddleware$ObservabilityResponseWriter.setHeader` 只收进 `capturedHeaders`、等 `flushTo` 才写回 underlying，而那时底层已 committed ⇒ Tomcat **静默忽略**<br>已改为三个覆写点（`setHeader`/`addHeader`/`setContentType`）实时 propagate<br>守门：`tools/difftest/check-plaintext400-headers.sh`（**必须真实 Tomcat**） |
   | `docs/DRIFT/common/http.md:117` | 引用它当**类比**（「响应对了不代表 body 对」） |
   | `docs/DRIFT/_cross/status-snapshot-2026-10-22.md:29,46` | 跨域快照里登记了它的修复结论 |
   | `docs/DRIFT/users/admin/api.md:60,723` | 指出 **admin-api 上没有任何守门** |
@@ -765,12 +813,16 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
     实测是 `text/plain;charset=utf-8`（**无空格**）⇒ Tomcat 规范化 ⇒ **决定不修**。
 - **判定**：引用有效、缺陷已修、本域不受影响 ⇒ 本条关闭。
 
-### UNRESOLVED-009 —— RAG 侧 `dto/UpdateArticleReq.java` 的 Go 行号引用有误
+### UNRESOLVED-009 —— RAG 侧 `dto/UpdateArticleReq.java` 的 Go 行号引用有误 ✅ **已关闭（2026-10-24，第二轮）**
 - **Question**：`UpdateArticleReq.java:8` 的 javadoc 写「Go `types.go:61-71`」，
   实际 Go 的 `UpdateArticleReq` 在 `service/article/api/internal/types/types.go:74-83`。
 - **Why It Matters**：不是行为差异，是**证据指针错误**。AGENTS.md §3.3 要求证据行号指向消费点；
   一条指错的行号会让后来者按 §3.1 的纪律去核对时读到 `ListArticlesResp`。
 - **Required Confirmation**：修正 javadoc 行号（本轮**只读不写源码**，未改）。
+- **✅ 关闭依据（2026-10-24）**：见本文件「第二轮」节第 6 条 —— javadoc 的 Go 行号引用已更正为
+  `types.go:74-83`（原文 `types.go:61-71` 实为 `ListArticlesReq` / `ListArticlesResp`）。
+  ⚠️ 这条**不是行为差异**，是**证据指针错误** —— 但同样必须修：错行号会让后来者按 §3.1 的纪律
+  去核对时读到**另一个结构体**。
 
 ### UNRESOLVED-010 —— Go `net/url` 的三个 query 解析行为，RAG 未覆盖（2026-10-24 新增）
 - **Question**：`httpx.GetFormValues` 之前还有一层 Go **标准库** `net/url` 的解析，
@@ -810,7 +862,7 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 | 14 | Timeout scope 是否一致 | ❌ **否** | **DRIFT-002**（`user-rpc` 2s vs 70s） |
 | 15 | Concurrency semantics 是否一致 | ✅ | 无共享写状态（§6.5） |
 | 16 | Authentication / Authorization 是否一致 | ✅ | 7 端点鉴权边界、401 空 body、1005/1006 语义全一致（§6.3） |
-| 17 | Serialization semantics 是否一致 | ⚠️ **基本一致** | 5/6 项一致；`ext_info` 排序在非 BMP key 上有边界差（DRIFT-007）；query 上限缺失（DRIFT-005） |
+| 17 | Serialization semantics 是否一致 | ⚠️ **基本一致** | §4「序列化」矩阵各行现均为 EQUIVALENT（其中 `ext_info` key 排序 **已修**：码点序 = Go 字节序，双侧探针实测，2026-10-24）；先前点名的两项 —— 非 BMP 排序边界差（DRIFT-007，**已修**）、query 上限（DRIFT-005，**已补 Go 语义闸门**）—— 均已关闭/部分关闭。⚠️ 仍判「基本一致」而非「一致」：残留的 `DRIFT-005` body 形状（Tomcat HTML 页 vs Go text/plain）与 `DRIFT-006` body 文案属**响应体形状**类差异，虽不涉序列化语义本身，仍是可观察差异 |
 | 18 | Lifecycle 是否一致 | ⚠️ UNKNOWN | 静态顺序一致；Filter 链与装配未验（UNRESOLVED-003/004/006） |
 
 ### 三值结论
@@ -1054,7 +1106,12 @@ return userServiceBlockingStub.withDeadlineAfter(effective, TimeUnit.MILLISECOND
 
 ---
 
-### 本轮**未**关掉的（保持 OPEN，不得当已修）
+### 本轮**未**关掉的（保持 OPEN，不得当已修）—— **历史快照（第一轮）**
+
+> ⚠️ **本表是第一轮的快照，条目状态已过时** ⇒ **当前状态不看这里**：
+> - `DRIFT-*` 的现状 ⇒ **§7 的「当前状态表 —— 活状态」**
+> - `UNRESOLVED-*` 的现状 ⇒ **§9 Unresolved**（那里逐条标了 ✅ 已关闭 与关闭依据）
+> ⇒ 保留本表是为了记录**第一轮当时的判断**（那是一次真实执行的产出，不抹除）。
 
 | 条目 | 状态 | 说明 |
 |---|---|---|
@@ -1066,7 +1123,7 @@ return userServiceBlockingStub.withDeadlineAfter(effective, TimeUnit.MILLISECOND
 | `UNRESOLVED-004` `@GrpcClient` 真装配 + Nacos 寻址 | 🔴 OPEN | 本轮 60 条测试仍**全部**用 `@MockitoBean` 把 client 换掉了 —— **恰好把要验证的那一段替换掉了** |
 | `UNRESOLVED-006` 共享层 `com.rag.common` 真被扫到 | 🔴 OPEN | 同上 |
 | `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | 本轮**已在 rpc 侧**核对 `public_only` / `status` 的消费方式（见 [`rpc.md`](./rpc.md) 与 [`proto.md`](./proto.md)） |
-| `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | ✅ **已关闭**（2026-10-24）：`DRIFT-024` = **users 域** `docs/DRIFT/users/_shared.md:103`「text/plain 400 响应头丢失」⇒ 域内编号跨域引用必须带域前缀才查得到；原「查无此编号 ⇒ 存在未入库清单」的推断作废 |
+| `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | 仍查无对应台账 |
 | `UNRESOLVED-009` `UpdateArticleReq.java:8` 的 Go 行号引用有误 | 🔴 OPEN | 本轮**只读不写**该文件；建议下一轮顺手改 |
 
 ### 判定变化
@@ -1276,13 +1333,17 @@ chn = chn.Append(GunzipHandler)          // ⑪
 但按 AGENTS.md §3.3「证据行号指向消费点」，一条指错的行号会让后来者
 按 §3.1 的纪律去核对时**读到另一个结构体** ⇒ 属于「必须顺手修掉」的那一类。
 
-### 7. 本轮**未**关掉的（保持 OPEN）
+### 7. 当前状态表 —— **活状态**（2026-10-24 更新，跨轮次累积）
+
+> ⚠️ **读法**：本表是 `article-api` 的**当前状态权威面**；本文件后面各轮的「判定变化」表是**历史记录**，
+> 只说明"那一轮改了什么" ⇒ **判断某一条的现状，一律回本表**，不要读历史轮次的表。
+> ⚠️ 本表**只登记仍有讨论价值 / 本轮有变动的条目**；更早已关闭的条目见各轮「判定变化」表与 §7.5。
 
 | 条目 | 状态 | 说明 |
 |---|---|---|
 | `DRIFT-005` query 参数总数上限 2048 | 🟡 **部分关闭**（2026-10-24） | 🔴 **原定性（「RAG 无上限」）已被真容器实测推翻**：Tomcat 的 `server.max-http-request-header-size`（默认 8 KB）**更早**触发 ⇒ **状态码两侧都是 400**，且 RAG 阈值**更严**（≈2040 < Go 的 2049）⇒ 不存在 DoS 暴露。已**补应用层 Go 语义闸门**（`GoStyleFormParamCountFilter`），真容器实测 body 与 Go **逐字节一致**（2/2 变异验证）。🟡 **残留**：默认部署下拒绝发生在连接器层 ⇒ body 是 Tomcat 的 HTML 页（Go 是 text/plain）⇒ **LOW，决定不修** |
-| `DRIFT-006` 8–10 MiB body 文案 | 🔴 OPEN（LOW） | 可观察契约相同（400 + text/plain + nosniff），差异仅在 body 文案（Go 是截断后解析失败 ⇒ `unexpected EOF`） |
-| `DRIFT-007` `ext_info` key 排序（非 BMP） | ✅ **已修**（2026-10-24） | 已按**码点序**比较（= Go 的 UTF-8 字节序），见本文件末尾「第三轮」节；`DRIFT-005` / `DRIFT-006` 仍 🔴 OPEN |
+| `DRIFT-006` 8–10 MiB body 文案 | ✅ **已确认 LOW，不修**（2026-10-24） | 可观察契约相同（400 + text/plain + nosniff），差异仅在 body 文案：Go 侧 Go 1.25 探针实测 = `"unexpected EOF"`（`json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode` 解析半个文档）；RAG 侧 = `"request entity too large"` ⇒ 已用 characterization test 锁住实测现状 |
+| `DRIFT-007` `ext_info` key 排序（非 BMP） | ✅ **已修**（2026-10-24） | 已按**码点序**比较（= Go 的 UTF-8 字节序），见本文件末尾「第三轮」节 |
 | `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | rpc 侧已核过 `public_only` / `status` 的消费方式（见 [`proto.md`](./proto.md)）；仍缺**跨栈活体对拍** |
 | `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` | ✅ **已关闭**（2026-10-24） | 结论依赖 go-zero 的 tag 默认值，不是设计对齐 ⇒ 已读到消费点确认为**条件性差异、当前不可达**（详见 §9） |
 | `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | ✅ **已关闭**（2026-10-24） | 🔴 **原结论作废**：`DRIFT-024` 在 **users 域** `docs/DRIFT/users/_shared.md:103`，common 域与 `_cross` 快照都在引用它；本域**不受影响**（共享层已修 + 真 Tomcat 已断言） |
@@ -1572,3 +1633,133 @@ article-api 的真 Tomcat 用例已断言 400 带 `Content-Type` + `nosniff`）�
 > 而那份清单根本不存在 —— 那条线索在 users 域的台账里）。
 > ⇒ 反过来：**凡是在注释里引用别的域的编号**，要么写全 `docs/DRIFT/<域>/…` 的路径，
 > 要么别引（否则下一个 agent 会和你一样查不到）。
+
+---
+
+<!-- @fix 2026-10-24 第六轮 · 由 align/article 工作树产出 · 基线 commit f44d168 -->
+
+## 2026-10-24 第六轮：`DRIFT-ARTICLE-API-006` 确认 **LOW，不修**（characterization + 变异验证）
+
+### ✅ FIX-13 —— `DRIFT-006` 8–10 MiB body 文案：**确认 LOW，不修**
+
+#### Go 侧文案来源（探针实测，不是推理）
+
+Go 侧超长 body 的路径（`requests.go:21` `maxBodyLen = 8 << 20`）是**静默截断**：
+
+```
+go-zero@v1.10.2/rest/httpx/requests.go
+  r.Body = io.LimitReader(r.Body, maxBodyLen)     // ← 静默截断，不报错
+  ...
+  json.NewDecoder(r.Body).Decode(v)               // ← 解析器只拿到半个文档
+```
+
+⇒ 解析器返回的 err 是 **`unexpected EOF`** ⇒ `http.Error(w, err.Error(), 400)`
+⇒ body = `"unexpected EOF\n"`。
+
+⚠️ **本轮实测确认（Go 1.25.11 探针 `/tmp/probe-sort/go/body.go`）**：
+不是读源码猜的 —— 探针直接复刻上面三行，拿一个 9 MiB 的合法 JSON 文档喂进去，
+打印出的错误字符串就是 `unexpected EOF`。
+
+#### RAG 侧实测现状
+
+`GoStyleJsonBodyLimitFilter` **显式**拒绝 ⇒ body = `"request entity too large\n"`。
+
+#### 可观察契约对照
+
+| 维度 | Go | RAG | 一致？ |
+|---|---|---|---|
+| 状态码 | 400 | 400 | ✅ |
+| `Content-Type` | `text/plain; charset=utf-8` | `text/plain; charset=utf-8` | ✅ |
+| `X-Content-Type-Options: nosniff` | 有 | 有 | ✅ |
+| 业务是否执行 | 不执行 | 不执行 | ✅ |
+| **body 文案** | `"unexpected EOF\n"` | `"request entity too large\n"` | ❌ **仅此一项** |
+
+⇒ **可观察契约相同，差异仅在文案** ⇒ 判定 **LOW OBSERVABLE DIFFERENCE**。
+
+#### 为什么不修（决策，不是逃避）
+
+要对齐文案，就得改成「先读 8 MiB → 解析失败 → 报 `unexpected EOF`」，
+即**故意让请求走到解析器报错**来复刻一条**更费解**的错误信息。
+⇒ 收益：客户端多认得一个字符串；代价：放弃**显式、清晰**的拒绝原因。
+⇒ 决定**不修**，改用 **characterization test** 锁住现状。
+
+#### 守门网（characterization test）
+
+`ArticleApiMvcPipelineTest#oversizedJsonBodyIsRejectedAtEightMiB` 增加**文案断言**：
+
+```java
+assertEquals("request entity too large\n", response.getContentAsString(), …);
+```
+
+⚠️ **这条断言的语义要说清楚**（避免下一个人把它当成「Go 的事实」）：
+它锁的是 **RAG 的实测现状**，**不是** Go 的期望值。
+⇒ 断言消息里直接写明了「这是实测现状，与 Go 的 `unexpected EOF` 不同 ⇒ DRIFT-006 已确认 LOW，决定不修」。
+
+#### 变异验证（三态判定）
+
+| # | 变异内容 | 结果 |
+|---|---|---|
+| 1 | 把期望值改成 Go 的 `"unexpected EOF\n"` | ✅ **转红**（`expected: <unexpected EOF\n> but was: <request entity too large\n>`） |
+
+⇒ **1/1 转红** ⇒ 该断言**确实在评估 body 内容**，不是空过
+（⚠️ 变异测试只能证明「测试不是假绿」，**不能**证明期望值对不对 ——
+期望值对不对，靠的是上面那张**双侧**对照表）。
+
+#### 测试计数
+
+`article-api` **75 tests / 0 failures / 0 errors / 0 skipped**（断言加在既有用例上 ⇒ 条数不变）。
+
+### 判定变化（FIX-13）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `DRIFT-006` 8–10 MiB body 文案 | 🔴 OPEN（LOW，待定性） | ✅ **已确认 LOW，不修**（双侧文案实测 + characterization test + 变异验证） |
+| `DRIFT-005` query 参数总数上限 2048 | 🟡 部分关闭 | 🟡 **部分关闭（不变）** |
+| `DRIFT-007` `ext_info` key 排序 | ✅ 已修 | ✅ **已修（不变）** |
+| `UNRESOLVED-002` 跨栈活体对拍 | 🟡 部分关闭 | 🟡 **部分关闭（不变）** |
+| `UNRESOLVED-010` Go `net/url` 三条相邻行为 | 🔴 OPEN | 🔴 **OPEN（不变）** |
+| **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
+
+⚠️ **判定不变的理由**：本轮**没有改变任何运行时行为**（只把一条待定性的漂移定性为 LOW 并锁住），
+且**无双侧活体对拍**（Go 侧仍需 `etcd:2379`）。
+
+### 🧹 本轮顺带修掉的**台账卫生**问题（不改行为，只改记录）
+
+本轮在整理台账时发现并修正了**四类**「记录本身会误导下一个读者」的问题 ——
+它们**不影响运行时**，但会让后来者按错的结论去改代码：
+
+| # | 问题 | 修法 |
+|---|---|---|
+| 1 | **两套编号空间同形不同义**：`DRIFT-ARTICLE-API-0xx`（本台账权威）vs 上游源码注释里的 `DRIFT-001…007` —— 二者的 `005/006/007` **语义完全不同**（例如 `DRIFT-006`：前者 = body 文案，后者 = type mismatch 文案） | 文件头 + §7.6 各加**撞号警告 + 对照表**；§7.6 内的交叉引用改写全前缀（`DRIFT-ARTICLE-API-006` / `-007`） |
+| 2 | §7 的表头写「本轮**未**关掉的（保持 OPEN）」，但表里已混入**已关闭**条目 ⇒ 表名与内容自相矛盾 | 改标题为「**当前状态表 —— 活状态**」，并写明「判断现状一律回本表，各轮『判定变化』表是历史记录」 |
+| 3 | §7 表里 `DRIFT-007` 行尾仍写「`DRIFT-005` / `DRIFT-006` 仍 🔴 OPEN」 ⇒ **已被本域后续两轮推翻** | 删掉陈旧尾巴（两条的真实状态见同表其它行） |
+| 4 | §7.5 的三条目正文用**现在时**描述 RAG 的旧实现（`new TreeMap<>(source)`、「无总数上限」）⇒ 描述的是**已经不存在的代码** | 每条补「**当前状态（2026-10-24）**」行；把旧描述标注为「修复前 / 首轮静态判定，已被实测推翻」 |
+| 5 | 🔴 **§9 是 UNRESOLVED 的权威清单，但 6 条已被第二轮真容器实测关闭的条目，正文仍写着「Why Unknown / Required Confirmation」** ⇒ 与第二轮的关闭结论**直接矛盾**，读者会以为它们还开着 | `UNRESOLVED-001` / `-003` / `-004` / `-005` / `-006` / `-009` 逐条加 ✅ **已关闭（2026-10-24，第二轮）** + 关闭依据指针（指到第二轮对应小节）⇒ §9 现在只剩 `-002`（部分关闭）与 `-010`（仍开） |
+| 6 | **第一轮的「本轮未关掉的」表与 §7 的同名表状态冲突**（前者说 005/006/007 全 OPEN，后者说已修） | 第一轮那张**降级为「历史快照（第一轮）」**并加指针（`DRIFT-*` 看 §7 / `UNRESOLVED-*` 看 §9）⇒ 全文件只剩**一个** DRIFT 现状面和**一个** UNRESOLVED 现状面 |
+| 7 | 第五轮曾**就地改写**第一轮表里 `UNRESOLVED-008` 那一行 ⇒ 等于用第五轮的结论去改第一轮的历史 | **回退为第一轮原值**（「仍查无对应台账」）；关闭结论留在 §9 条目 + 第五轮小节 + §7 当前状态表 |
+| 8 | §7.6 里仍写「`DRIFT-024` 在本仓查无台账 ⇒ 存在另一份未入库的历史清单」⇒ **与第五轮的结论矛盾**（它在 users 域） | 就地**更正**为 users 域条目 + 跨域撞号说明 |
+| 9 | §10 第 17 项写「5/6 项一致；… query 上限缺失（DRIFT-005）」⇒ 描述的是**修之前**的状态 | 按现状重写（点名的两项已修 / 已补闸门），并说明为何仍判「基本一致」而非「一致」（残留的是响应体形状类差异） |
+| 10 | §8 的 `CASE-20` Result 列写「△ DRIFT-006」⇒ 定性还是待定 | 更新为「🟡 **LOW，已确认不修**（`DRIFT-ARTICLE-API-006`）」 |
+
+⚠️ **为什么这也算「必须顺手修掉」**（对照 AGENTS.md §3.1）：
+台账是**下一个 agent 的对照基准**。基准本身写错时，
+§3.1 禁的那件事（「拿现有 RAG 代码当对照基准」）就会**通过台账复活** ——
+后来者读到「RAG 无上限」，很可能照着去"修"一个已经不存在的缺陷，
+或者读到「`new TreeMap<>(source)`」，以为代码还这样写。
+
+#### 📌 一条可复用的元教训
+
+> **台账的「现在时」是最危险的一种错。**
+>
+> 描述某个代码点的行为时，至少要标明**时间坐标**：
+> 「**修复前**的 RAG 是 `new TreeMap<>(source)`」是事实；
+> 「**RAG 是** `new TreeMap<>(source)`」在修复之后就成了**假事实** ——
+> 而假事实比"没有记录"更危险，因为读的人**不会怀疑它**。
+>
+> ⇒ **判据**：台账里每一条描述「RAG 侧是什么样」的句子，
+> 都必须能回答「**这是哪一天的 RAG 侧？**」
+> —— 回答不了 ⇒ 它就是个随时会骗人的陈述。
+>
+> ⇒ 同理，**「本轮未动」的历史表不要当成现状表** ——
+> 本轮就有一次误读：差点把第三轮的「DRIFT-006 OPEN」当成现状写进当前状态表
+> （已回退，历史记录保持原样，现状另起第六轮记录）。
