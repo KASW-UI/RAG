@@ -87,6 +87,29 @@ public final class HttpMiddleware {
     private static final int HTTP_CLIENT_CLOSED_REQUEST = 499;
 
     /**
+     * 该状态码是否允许带 {@code Content-Length}。
+     *
+     * <p>1xx / 204 / 304 按 HTTP 语义不带 body ⇒ 也不带 {@code Content-Length}
+     * （Go 的 {@code net/http} 同样不发；Tomcat 在未提交时收尾也不会发）。
+     *
+     * <p>⚠️ 这条是「<b>保形</b>」的一部分：{@link #flushCaptured} 提前提交响应，
+     * 若不把 {@code Content-Length} 定下来，Tomcat 就会退化成 {@code Transfer-Encoding: chunked}
+     * ⇒ 与 Go 的 {@code Content-Length} 不一致（真 Tomcat 实测：2026-10-25）。
+     */
+    private static boolean statusAllowsContentLength(int status) {
+        return status >= 200 && status != 204 && status != 304;
+    }
+
+    /**
+     * Tomcat 的响应输出缓冲默认大小（{@code org.apache.coyote.ExpandBuffer} 的 {@code defaultBufferSize}）。
+     *
+     * <p>用途：判断「响应体能不能整块装进缓冲」⇒ 决定要不要由我们先设 {@code Content-Length}
+     * （详见 {@link #flushCaptured}）。<b>刻意是常量而非配置项</b>：本类在 Spring 装配前就初始化，
+     * 挂配置只会得到一个「看起来能配、实际改了没反应」的面板（§3.3 同款形态）。
+     */
+    private static final int TOMCAT_RESPONSE_BUFFER_SIZE = 8192;
+
+    /**
      * 对应 Go 版 {@code httpTimeoutBody = "Request Timeout"}：HTTP 超时时 body 内容。
      */
     private static final String HTTP_TIMEOUT_BODY = "Request Timeout";
@@ -223,7 +246,7 @@ public final class HttpMiddleware {
                     chain.doFilter(httpReq, rec);
                     Duration duration = Duration.between(start, Instant.now());
                     markHttpResult(currentOtelContext(), serviceName, httpReq, rec.statusCode(), rec.bodyBytes(), duration, finalSlow);
-                    rec.flushTo(httpResp);
+                    flushCaptured(httpResp, rec, serviceName, httpReq, duration, currentOtelContext());
                     return;
                 }
 
@@ -329,7 +352,7 @@ public final class HttpMiddleware {
                     rec.markClientCancelled();
                     markTimeout(currentOtelContext(), new java.util.concurrent.TimeoutException("client cancelled: " + ie.getMessage()),
                             Duration.between(start, Instant.now()), httpAttrs(serviceName, httpReq, HTTP_CLIENT_CLOSED_REQUEST));
-                    writeTimeoutResponse(httpResp, HTTP_CLIENT_CLOSED_REQUEST);
+                    writeTimeoutResponseQuietly(httpResp, HTTP_CLIENT_CLOSED_REQUEST, httpReq);
                     return;
                 }
 
@@ -357,7 +380,7 @@ public final class HttpMiddleware {
                         // Go observability/http.go:84-88 的 499 分支是 `http.Error(w, body, 499)`，
                         // 客户端真的收到 499；旧 Java 版打完 span 属性就抛异常，
                         // 499 只活在遥测里、永远到不了客户端（分支实际不可达）。
-                        writeTimeoutResponse(httpResp, statusCode);
+                        writeTimeoutResponseQuietly(httpResp, statusCode, httpReq);
                         return;
                     }
                     markSystemError(pCtx, new RuntimeException(panic.getMessage(), panic), duration, httpAttrs(serviceName, httpReq, statusCode));
@@ -383,10 +406,10 @@ public final class HttpMiddleware {
                     markTimeout(tCtx, new java.util.concurrent.TimeoutException("http timeout"), duration, httpAttrs(serviceName, httpReq, statusCode));
                     // D-11 修复：Go 的 http.Error 会写 text/plain + 尾部换行，
                     // 裸 getWriter().write() 两样都没有，客户端看到的是无 Content-Type 的裸串
-                    writeTimeoutResponse(httpResp, statusCode);
+                    writeTimeoutResponseQuietly(httpResp, statusCode, httpReq);
                 } else {
                     markHttpResult(currentOtelContext(), serviceName, httpReq, rec.statusCode(), rec.bodyBytes(), duration, finalSlow);
-                    rec.flushTo(httpResp);
+                    flushCaptured(httpResp, rec, serviceName, httpReq, duration, currentOtelContext());
                 }
             }
         };
@@ -407,6 +430,108 @@ public final class HttpMiddleware {
         if (t instanceof RuntimeException re) throw re;
         if (t instanceof Error err) throw err;
         throw new ServletException(t);
+    }
+
+    /**
+     * 把捕获的响应写给客户端；<b>写失败且判定为「客户端已断连」⇒ 记 499</b>（不再向上抛）。
+     *
+     * <p><b>为什么 499 的判据必须落在这里（DRIFT-HOTAPI-025 / global T-4）</b>：
+     * <ul>
+     *   <li><b>Go</b>（{@code service/common/observability/http.go:80-88}）：
+     *       <pre>
+     *       case &lt;-ctx.Done():
+     *           statusCode := http.StatusServiceUnavailable
+     *           if errors.Is(ctx.Err(), context.Canceled) { statusCode = httpClientClosedRequest }
+     *           MarkTimeout(ctx, ctx.Err(), duration, httpAttrs(serviceName, req, statusCode)...)
+     *           http.Error(w, httpTimeoutBody, statusCode)
+     *       </pre>
+     *       ⇒ Go 的 499 由 <b>ctx 被取消</b>驱动；而 Go 的 {@code net/http} 在<b>客户端断开</b>时
+     *       会取消 {@code r.Context()} ⇒ 断连 ⇒ 必定 499，且 <b>在断连后 1~3ms 内</b>就定型。</li>
+     *   <li><b>RAG</b>：Servlet 容器<b>不向应用暴露「客户端已断连」信号</b>
+     *       （真 Tomcat 11.0.24 实测：async + {@code AsyncListener.onError} <b>不触发</b>；
+     *       Tomcat 自己的 {@code AbstractProcessorLight} 对 {@code SocketEvent.DISCONNECT}
+     *       明写 "Do nothing here, just wait for it to get recycled"
+     *       ⇒ 详见台账 T-4「框架限制」一节）。
+     *       ⇒ 唯一能观察到断连的时刻，就是 <b>往 socket 写响应的那一刻</b>。</li>
+     * </ul>
+     *
+     * <p>⇒ RAG 的 499 判据 =「<b>filter 线程写 socket 失败</b>」。
+     * <b>旧实现在写失败时让 IOException 直接逃出 doFilter</b> ⇒ ① 异常栈噪音直冲容器日志
+     * ② 记录里留下的是 <b>200</b>（{@code markHttpResult} 已在写之前跑完）⇒ 断连事件<b>完全不可见</b>。
+     *
+     * <p><b>与 Go 的两处已知差异（台账留痕，不掩盖）</b>：
+     * <ol>
+     *   <li><b>定型时点</b>：Go 在断连瞬间定 499；RAG 要等业务跑完、写到 socket 才知道
+     *       ⇒ RAG 的 499 必然<b>晚于</b> Go 的。</li>
+     *   <li><b>在飞 gRPC</b>：Go 的 ctx 取消立刻中止下游调用；RAG 没有断连信号
+     *       ⇒ 在飞调用仍要等到自己的 deadline 才结束（<b>框架限制</b>，非本类可修）。</li>
+     * </ol>
+     */
+    private static void flushCaptured(HttpServletResponse httpResp,
+                                      ObservabilityResponseWriter rec,
+                                      String serviceName,
+                                      HttpServletRequest httpReq,
+                                      Duration duration,
+                                      Context ctx) throws IOException {
+        try {
+            // ⚠️⚠️ **保形**：必须先把 Content-Length 定下来，否则下面那次 flush 会让响应
+            //   退化成 `Transfer-Encoding: chunked`（真 Tomcat 实测：2026-10-25）。
+            //   原因：flush ⇒ 响应**提前提交** ⇒ Tomcat 再也没机会在收尾时按缓冲内容算长度
+            //   ⇒ 而 Go 的 net/http 对「装得下」的响应体是**算 Content-Length** 的
+            //   ⇒ 不设它就是**新增的 wire 差异**（Go: Content-Length / RAG: chunked）。
+            //   阈值取 Tomcat 自己的响应缓冲大小（{@code ExpandBuffer} 的 defaultBufferSize = 8192）：
+            //   装得下 ⇒ 与 Tomcat 收尾时的算法一致（Content-Length）；
+            //   装不下 ⇒ 本来就是 chunked（缓冲区溢出时 Tomcat 已提交），保持不变。
+            byte[] captured = rec.bodyBytes();
+            if (captured.length <= TOMCAT_RESPONSE_BUFFER_SIZE
+                    && httpResp.getHeader("Content-Length") == null
+                    && statusAllowsContentLength(httpResp.getStatus())) {
+                httpResp.setContentLength(captured.length);
+            }
+            rec.flushTo(httpResp);
+            // ⚠️⚠️ **必须显式 flush**，否则断连根本观测不到（2026-10-25 真 Tomcat 实测）：
+            //   Tomcat 的 OutputBuffer 默认缓冲 8192 字节 ⇒ 小 body 写进去只进了缓冲区，
+            //   **socket 一个字节都没发** ⇒ 客户端已 RST 也照样「写成功」⇒ 不抛异常
+            //   ⇒ 499 分支永远进不去。
+            //   `flush()` ⇒ `OutputBuffer.doFlush(true)` ⇒ 真网络 flush ⇒
+            //   写失败被 Tomcat 包成 `ClientAbortException`（IOException 子类）抛出来。
+            //   ⚠️ 语义中性：本次 flush 之后 filter 立即返回，Tomcat 本来也要在收尾时提交响应
+            //   ⇒ 只是把提交提前了「几行代码」的距离，客户端可见行为不变。
+            httpResp.getOutputStream().flush();
+        } catch (IOException io) {
+            if (!isClientCancelledException(io)) {
+                // 非「客户端断连」的 IO 失败（例如后端存储坏了）⇒ 原样上抛，保持原有行为。
+                throw io;
+            }
+            // ===== 客户端已断连 ⇒ 记 499（对齐 Go 的 ctx.Canceled 分支）=====
+            rec.markClientCancelled();
+            markTimeout(ctx,
+                    new java.util.concurrent.TimeoutException("context canceled"),
+                    duration,
+                    httpAttrs(serviceName, httpReq, HTTP_CLIENT_CLOSED_REQUEST));
+            // ⚠️ 为什么还要打一条日志：Go 侧 499 之所以「可见」是因为 go-zero 的 access log
+            //   会打 `[HTTP] 499 - GET /x - ip - duration`；RAG **没有 access log**
+            //   ⇒ 若只写 span，没接 trace 后端时这条事件依然不可见（实测：本仓库的 OTEL
+            //   exporter 默认关闭）⇒ 必须留一条日志，否则「断连不可见」的老问题只修了一半。
+            log.warn("[HTTP] {} - {} {} - {} - duration {}ms",
+                    HTTP_CLIENT_CLOSED_REQUEST,
+                    httpReq.getMethod(),
+                    httpReq.getRequestURI(),
+                    remoteAddrOf(httpReq),
+                    duration.toMillis());
+        }
+    }
+
+    /**
+     * 客户端 IP（不含端口 —— Servlet API 只暴露 IP，Go 的 {@code r.RemoteAddr} 带端口）。
+     * <p>属<b>表述差异</b>，不影响判定。
+     */
+    private static String remoteAddrOf(HttpServletRequest req) {
+        if (req == null) {
+            return "-";
+        }
+        String addr = req.getRemoteAddr();
+        return addr == null || addr.isEmpty() ? "-" : addr;
     }
 
     /**
@@ -432,6 +557,34 @@ public final class HttpMiddleware {
         resp.getWriter().write(HTTP_TIMEOUT_BODY);
         resp.getWriter().write('\n');
         resp.getWriter().flush();
+    }
+
+    /**
+     * 写超时 / 断连响应；<b>写失败（客户端已走）不向上抛</b>。
+     *
+     * <p><b>为什么</b>：Go 的 {@code http.Error} 内部是 {@code fmt.Fprintln(w, error)}，
+     * 而 {@code Fprintln} <b>忽略写错误</b> ⇒ Go 在「客户端已断连」时只是「写不进去」，
+     * <b>不会</b>把异常抛给框架。RAG 旧实现让 IOException 直接逃出 {@code doFilter}
+     * ⇒ 每次断连都在容器日志里留一坨异常栈。
+     *
+     * <p>⇒ 这里吞掉写异常（记一条日志），状态码与记录<b>不受影响</b>：
+     * 503 / 499 的判定早已在写之前完成。
+     */
+    private static void writeTimeoutResponseQuietly(HttpServletResponse resp, int statusCode,
+                                                     HttpServletRequest req) {
+        try {
+            writeTimeoutResponse(resp, statusCode);
+        } catch (IOException io) {
+            if (isClientCancelledException(io)) {
+                log.warn("[HTTP] {} - {} {} - {} - client closed before response was written",
+                        statusCode,
+                        req == null ? "-" : req.getMethod(),
+                        req == null ? "-" : req.getRequestURI(),
+                        remoteAddrOf(req));
+            } else {
+                log.warn("[HTTP] {} - failed to write response: {}", statusCode, io.toString());
+            }
+        }
     }
 
     /**

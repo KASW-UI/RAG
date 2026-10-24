@@ -217,6 +217,41 @@
             H1/H2 恰恰就是这两类。
             @SpringBootTest + @EnableConfigurationProperties 才能真正走一遍 binder + Bean 生命周期。
         -->
+        <!--
+            tomcat-embed-core：**仅测试**（2026-10-25，T-4 / DRIFT-HOTAPI-025 的守门）。
+
+            为什么必须是**真 Tomcat**：本模块要守的机制是「**往 socket 写响应失败**」
+            （客户端断连 ⇒ Tomcat 抛 ClientAbortException）。
+            MockHttpServletResponse / MockMvc 的 write() **永远不失败**
+            ⇒ 断连分支**根本触发不了** ⇒ 那种测试是「错误答案的守卫」（§3.3）。
+
+            ⚠️ **刻意不写 version**：交给 spring-boot-dependencies 管 ⇒ 与各 api 模块运行时
+            用的 Tomcat 是**同一个版本**（写死版本号 = 在同一条 classpath 上塞第二个 Tomcat）。
+            ⚠️ 排除 tomcat-annotations-api：与 spring-boot-starter-tomcat-runtime 的做法一致
+            （Boot 用 jakarta.annotation:jakarta.annotation-api 顶替它）⇒ 离线仓库里
+            没有 tomcat-annotations-api，不排除会直接解析失败。
+            ⚠️ tomcat-embed-core **自带 jakarta.servlet API**（与本模块 provided 的
+            jakarta.servlet-api 同为 Servlet 6.1 规格）⇒ 测试期两份共存，
+            取 classpath 上先命中的那份即可，不影响判定（真 Tomcat 用的就是它自己那份）。
+        -->
+        <dependency>
+            <groupId>org.apache.tomcat.embed</groupId>
+            <artifactId>tomcat-embed-core</artifactId>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.tomcat</groupId>
+                    <artifactId>tomcat-annotations-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!--
+            ⚠️ jakarta.annotation-api **不在这里声明**：它已经由 spring-boot-starter（compile 作用域）
+            传递进来（ObservabilityLifecycle 的 @PreDestroy 就用它）。
+            ⚠️ 本轮曾把它显式声明成 test 作用域 ⇒ Maven「最近者优先」把它顶掉了
+            ⇒ **compile classpath 上 jakarta.annotation 消失** ⇒ ObservabilityLifecycle 编译失败
+            （教训：加 test 作用域依赖前先确认它没有以更近的路径提供同名 artifact）。
+        -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

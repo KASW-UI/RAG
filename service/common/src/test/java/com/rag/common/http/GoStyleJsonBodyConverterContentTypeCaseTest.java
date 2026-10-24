@@ -14,6 +14,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
@@ -97,12 +98,43 @@ class GoStyleJsonBodyConverterContentTypeCaseTest {
         assertNotNull(parsed, "Go 侧字面 Contains 命中 ⇒ 读 body；RAG 不该抛异常");
     }
 
-    // ⚠️ 逗号多值（application/json, application/xml）**故意不在本类断言**：
-    //    实测它仍抛 InvalidMediaTypeException（抛点在 super.read() 内部的 MediaType 解析），
-    //    而 Go 只做字面 Contains、不会抛 ⇒ **这仍是未修的漂移**。
-    //    ⇒ 断言它「会抛」等于把一个已知与 Go 不一致的行为**锁成标准**
-    //      （§3.3.3 说的「绿测试可能是错误答案的守卫」）⇒ 不住这里断言。
-    //    ⇒ 该残余已登记 ⇒ docs/DRIFT/global/common-tails.md「T-1 残余 ①」。
+    @Test
+    @DisplayName("② 逗号多值头（Go 只做字面 Contains，不会抛）⇒ **不抛异常**")
+    void commaJoinedContentTypeDoesNotThrow() throws java.io.IOException {
+        // Go: strings.Contains("application/json, application/xml", "application/json") == true
+        //   ⇒ 命中 ⇒ Go 照常读 body（Go 从不解析 MIME ⇒ 不会抛）
+        // ⚠️ 修 A1 之前：抛点在 super.read() 内部的 MediaType 解析
+        //   （InvalidMediaTypeException: Invalid token character ','）⇒ 请求 500 ⇒ 与 Go 相反
+        Object parsed = readWithContentType("application/json, application/xml");
+        assertNotNull(parsed, "Go 是字面 Contains ⇒ 命中即读 body；RAG 不该抛异常");
+    }
+
+    @Test
+    @DisplayName("② charset=gbk ⇒ Go 的 encoding/json 只认 UTF-8 ⇒ **解析失败**（RAG 同形）")
+    void nonUtf8CharsetFailsLikeGo() {
+        // Go: encoding/json 只认 UTF-8 ⇒ GBK 字节是非法 UTF-8 ⇒ 解码失败
+        // ⚠️ 若把 charset 透传给 Jackson ⇒ 会按 GBK 解码 ⇒ 变成「成功」⇒ 与 Go 相反
+        //   ⇒ A1 的净化层刻意**去掉 charset** ⇒ 回归成 UTF-8 ⇒ 与 Go 同形
+        byte[] gbk = new byte[]{(byte) 0xD6, (byte) 0xD0, (byte) 0xCE, (byte) 0xC4};
+        byte[] body = concat("{\"a\":\"".getBytes(StandardCharsets.UTF_8), gbk,
+                "\"}".getBytes(StandardCharsets.UTF_8));
+        assertThrows(Exception.class, () -> readWithBytes("application/json; charset=gbk", body),
+                "Go 的 encoding/json 只认 UTF-8 ⇒ 非 UTF-8 字节必须解析失败（RAG 同形）");
+    }
+
+    private static byte[] concat(byte[]... parts) {
+        int len = 0;
+        for (byte[] p : parts) {
+            len += p.length;
+        }
+        byte[] out = new byte[len];
+        int off = 0;
+        for (byte[] p : parts) {
+            System.arraycopy(p, 0, out, off, p.length);
+            off += p.length;
+        }
+        return out;
+    }
 
     // ==================== ③ 唯一真源与复制品的一致性 ====================
 
@@ -136,9 +168,13 @@ class GoStyleJsonBodyConverterContentTypeCaseTest {
      * @return 解析结果；判据不满足时为 {@code null}（= Go 的 {@code UnmarshalJsonMap(nil, v)}）
      */
     private static Object readWithContentType(String rawContentType) throws java.io.IOException {
+        return readWithBytes(rawContentType, BODY.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static Object readWithBytes(String rawContentType, byte[] body) throws java.io.IOException {
         GoStyleJsonBodyConverter converter =
                 new GoStyleJsonBodyConverter(JsonMapper.builder().build());
-        return converter.read(DTO_TYPE, new SimpleJsonInputMessage(rawContentType, BODY), Map.of());
+        return converter.read(DTO_TYPE, new SimpleJsonInputMessage(rawContentType, body), Map.of());
     }
 
     /**
@@ -149,12 +185,12 @@ class GoStyleJsonBodyConverterContentTypeCaseTest {
         private final HttpHeaders headers = new HttpHeaders();
         private final byte[] body;
 
-        SimpleJsonInputMessage(String rawContentType, String body) {
+        SimpleJsonInputMessage(String rawContentType, byte[] body) {
             // ⚠️ 用 add 而非 setContentType —— setContentType 会走 MediaType 解析并**归一化**，
             //    那就等于把被测的「原始头值」提前改掉了。
             this.headers.add(HttpHeaders.CONTENT_TYPE, rawContentType);
-            this.headers.setContentLength(body.getBytes(StandardCharsets.UTF_8).length);
-            this.body = body.getBytes(StandardCharsets.UTF_8);
+            this.headers.setContentLength(body.length);
+            this.body = body;
         }
 
         @Override

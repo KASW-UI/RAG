@@ -8,6 +8,7 @@ import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
 
 /**
@@ -138,12 +139,11 @@ public class GoStyleJsonBodyConverter extends JacksonJsonHttpMessageConverter {
         //
         //   ⇒ 改用 `getFirst(CONTENT_TYPE)` 取原始值 ⇒ 判定回到与 Go 同形。
         //
-        //   ⚠️ **但这只修好了「判定」这一层**：真正解析时 {@code super.read(...)} 内部
-        //   仍会调 {@code getHeaders().getContentType()} 做 MediaType 解析 ⇒
-        //   **畸形头（如 {@code application/json, application/xml}）仍会抛
+        //   ⚠️ **「判定」这一层修好之后，「解析」那一层还差一步**：
+        //   {@code super.read(...)} 内部仍会调 {@code getHeaders().getContentType()}
+        //   做 MediaType 解析 ⇒ **畸形头（如 {@code application/json, application/xml}）会抛
         //   {@code InvalidMediaTypeException}**，而 Go 只做字面 Contains、不会抛。
-        //   ⇒ 该残余已登记 ⇒ {@code docs/DRIFT/global/common-tails.md}「T-1 残余 ①」。
-        //   ⇒ ⚠️ 本条**不要**再写成「已彻底修好」——那是另一条未修的漂移。
+        //   ⇒ 下方的 {@link SanitizedJsonContentTypeInputMessage} 就是补这一步的。
         String contentType = inputMessage.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE);
         long contentLength = inputMessage.getHeaders().getContentLength();
 
@@ -153,7 +153,77 @@ public class GoStyleJsonBodyConverter extends JacksonJsonHttpMessageConverter {
             //    这里读了反而会让下游（如 MaxBytes 之后的日志/审计）看到空 body。
             return null;
         }
-        return super.read(type, inputMessage, hints);
+        // ⚠️ 2026-10-25（T-1 残余 ① 修复）：Go 的 ParseJsonBody 一旦判定命中，就
+        //   **只做字面 Contains，然后照常读 body** —— 它**从不解析 MIME**：
+        //
+        //     if withJsonBody(r) {
+        //         reader := io.LimitReader(r.Body, maxBodyLen)
+        //         return mapping.UnmarshalJsonReader(reader, v)   // ← 不看 Content-Type
+        //     }
+        //
+        //   而 Spring 的解析路径**一定会**把 Content-Type 解析成 MediaType
+        //   （getJavaType / charset）⇒ 畸形头会抛 InvalidMediaTypeException（unchecked）
+        //   ⇒ 请求 500 ⇒ 与 Go 相反。
+        //
+        //   ⇒ 办法：把 message **包一层**，让 Spring 看到一个**已净化的** Content-Type，
+        //     而**判定**仍然用原始值（上面那行）⇒ 两层各归各：
+        //       判定层 = Go 的字面 Contains（原始值）
+        //       解析层 = 一个一定能被 Spring 解析的 application/json
+        //
+        //   ⚠️ 顺带把 charset 也去掉：Go 的 encoding/json **只认 UTF-8**（无 charset 概念）
+        //   ⇒ 客户端写 `charset=gbk` 时 Go 解析失败（非法 UTF-8）⇒ 去掉 charset 后
+        //   Jackson 按 UTF-8 读 ⇒ 与 Go 同形。
+        return super.read(type, new SanitizedJsonContentTypeInputMessage(inputMessage), hints);
+    }
+
+    /**
+     * 把 {@link HttpInputMessage} 的 {@code Content-Type} 换成<b>已净化的</b> {@code application/json}
+     * （<b>不带 charset</b>），其余头与 body 原样透传。
+     *
+     * <p>⚠️ <b>为什么不能让 Spring 看见客户端的原始 Content-Type</b>：Spring 的解析路径一定会
+     * 把它当 MIME 解析 ⇒ 畸形头抛 {@code InvalidMediaTypeException} ⇒ 请求 500；
+     * 而 Go 只做字面 {@code Contains}、**从不解析 MIME** ⇒ 不会抛。
+     *
+     * <p>⚠️ <b>为什么去掉 charset</b>：Go 的 {@code encoding/json} 只认 UTF-8
+     * ⇒ 客户端声明 {@code charset=gbk} 时 Go 因非法 UTF-8 而**解析失败**；
+     * 若把 charset 透传给 Spring，Jackson 会按 GBK 解码 ⇒ 变成「成功」⇒ 与 Go 相反。
+     * ⇒ 去掉 charset ⇒ Jackson 按 UTF-8 读 ⇒ 与 Go 同形。
+     *
+     * <p>⚠️ <b>残余</b>：Jackson 3 会按 BOM/内容**自动探测** UTF-8/16/32 ⇒ 带 BOM 的 UTF-16
+     * 仍能被 RAG 解析，而 Go 会拒绝 ⇒ 一条极窄的残余，已登记在
+     * {@code docs/DRIFT/global/common-tails.md}「T-1 残余 ②」。
+     */
+    private static final class SanitizedJsonContentTypeInputMessage implements HttpInputMessage {
+        private final HttpInputMessage delegate;
+        private final HttpHeaders headers;
+
+        SanitizedJsonContentTypeInputMessage(HttpInputMessage delegate) {
+            this.delegate = delegate;
+            HttpHeaders original = delegate.getHeaders();
+            HttpHeaders copy = new HttpHeaders();
+            original.forEach((name, values) -> {
+                if (!HttpHeaders.CONTENT_TYPE.equalsIgnoreCase(name)) {
+                    copy.put(name, values);
+                }
+            });
+            // ⚠️ 刻意**不带 charset**（理由见类注释）
+            copy.set(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE);
+            long len = original.getContentLength();
+            if (len >= 0L) {
+                copy.setContentLength(len);
+            }
+            this.headers = copy;
+        }
+
+        @Override
+        public HttpHeaders getHeaders() {
+            return headers;
+        }
+
+        @Override
+        public InputStream getBody() throws IOException {
+            return delegate.getBody();
+        }
     }
 
     /**

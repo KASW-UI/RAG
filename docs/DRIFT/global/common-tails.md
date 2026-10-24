@@ -70,25 +70,35 @@
 **🧪 变异测试**：把修复改回 `MediaType.toString()` ⇒ **转红**
 （`expected: <null> but was: <{target_type=article, target_ids=[1]}>`）⇒ 守门网非空转。
 
-#### 🔴 T-1 残余 ①（**本轮未修，已登记**）
+#### ✅ T-1 残余 ① —— **2026-10-25 已修**（本轮第三轮 A1）
 
 **只修好了「判定」这一层；解析那一层仍会碰 MediaType 解析。**
 
 | | 事实 |
 |---|---|
 | **Go** | `strings.Contains(raw, "application/json")` ⇒ **纯字面**，**不做 MIME 解析** ⇒ 畸形头**不会抛**，命中就照常读 body |
-| **RAG（修后）** | 判定用原始值 ✔；但命中后 `super.read(...)` 内部仍会调 `getHeaders().getContentType()` 做 MediaType 解析 ⇒ **`application/json, application/xml` 仍抛 `InvalidMediaTypeException`**（实测，`Invalid token character ','`）⇒ 请求 500 |
-| **状态** | 🔴 **未修** |
+| **RAG（第二轮修后）** | 判定用原始值 ✔；但命中后 `super.read(...)` 内部仍会调 `getHeaders().getContentType()` 做 MediaType 解析 ⇒ **`application/json, application/xml` 仍抛 `InvalidMediaTypeException`**（实测，`Invalid token character ','`）⇒ 请求 500 |
+| **状态** | ✅ **已修**（2026-10-25 第三轮） |
 
-⇒ **建议修法**（下一轮）：命中后把传给 `super.read(...)` 的 `HttpInputMessage` **包一层**，
-让 Spring 看到一个**已净化的** `Content-Type`（如 `application/json`）
-⇒ 顺带修掉「`charset=gbk` 时 RAG 按 GBK 解码、Go 恒按 UTF-8」的另一条偏差
+**本轮修法（`GoStyleJsonBodyConverter#read`）**：命中判据后，把传给 `super.read(...)` 的
+`HttpInputMessage` **包一层**（新增私有静态类 `SanitizedJsonContentTypeInputMessage`），
+让 Spring 看到一个**已净化的** `Content-Type: application/json`（**不带 charset**）：
+
+| 场景 | 改前 | 改后 | Go |
+|---|---|---|---|
+| `application/json, application/xml` | 🔴 抛 `InvalidMediaTypeException` | ✅ 正常读 body | ✅ 不抛 |
+| `application/json; charset=gbk` | 🔴 按 GBK 解码 | ✅ **回归 UTF-8** | ✅ `encoding/json` 只认 UTF-8 |
+| `Application/JSON` | ✅ 不读 body（大小写敏感） | ✅ 同左 | ✅ 同左 |
+
+⇒ **顺带修掉了「charset=gbk 时 RAG 按 GBK 解码、Go 恒按 UTF-8」这条偏差**
 （Go 的 `encoding/json` 只认 UTF-8）。
 
-⚠️ **本轮刻意没做**：那会**扩大改动面**（要包 `HttpInputMessage`），
-且本轮授权范围是「修 T-1 的大小写判定」⇒ 按 §5.3「不擅自扩大 scope」登记待办。
-⚠️ **守门测试也刻意不断言该行为** —— 断言它「会抛」等于把一个**已知与 Go 不一致**的行为
-**锁成标准**（§3.3.3：绿测试可能是「错误答案的守卫」）。
+**守门**：`GoStyleJsonBodyConverterContentTypeCaseTest`（**8 条**，真 `HttpHeaders` + 真 converter，
+**刻意不用 Mockito**）⇒ 变异双向证明：去掉净化层 ⇒ **逗号头抛异常** + **GBK 被成功解码** ⇒ 均转红。
+
+⚠️ **残余（不可修，已登记）**：Jackson 仍会**自动探测 UTF-16 BOM** ⇒ 带 BOM 的请求体可能被按 UTF-16 解码，
+而 Go 的 `encoding/json` 只接受 UTF-8（且会因 BOM 直接报错）。
+⇒ 归「框架限制」，**不修**（改动面落在 Jackson 内部 ⇒ 无法在 common 层精准关掉而不伤其它路径）。
 
 ⚠️ **修法的连带面**：`goReadsBody` 是 **public**（`:94` 的 javadoc 明写：它是「Go 何时读 body」这条规则的**唯一真源**，
 且业务模块的测试直接断言它 ⇒ 复制品必然与实现漂移）⇒ 修它必须**同时**修所有调用方的测试期望值。
@@ -142,11 +152,122 @@
 
 ---
 
-### T-4 🔴 499 / 2s deadline —— **仍开放，本轮未展开**
+### T-4 🟡 **观测面已修**（499 可见）· **资源面残留为框架限制** —— 2026-10-25
 
-落点 `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:332`
-⇒ 实测该行是 `writeTimeoutResponse(httpResp, HTTP_CLIENT_CLOSED_REQUEST)`，位于 `InterruptedException` 分支
-（客户端断连 ⇒ 499）。**本轮未展开逐条对照**，状态维持 🔴 仍开放。
+> **对应**：`hot` 域 `D25` / `DRIFT-HOTAPI-025`（**代码在 `service/common` ⇒ 跨域 ⇒ global 修**）。
+> **原结论**：「客户端断连后 RAG **等 2s deadline**、**断连后继续发下游调用**、**无 499 记录**」
+> ⇒ 三条里**两条已修、一条不可修**。
+
+#### ① 根因（Go 与 RAG 的 499 判据不同源）
+
+| | Go（真源） | RAG（改前） |
+|---|---|---|
+| 499 的判据 | **`ctx` 被取消** —— `errors.Is(ctx.Err(), context.Canceled)`<br>（`service/common/observability/http.go:84-86`） | **worker 线程里抛了 IOException**（写响应失败）<br>（`HttpMiddleware.java` 的 `panicHolder` 分支） |
+| 断连 ⇒ ctx 取消？ | ✅ **`net/http` 在客户端断开时取消 `r.Context()`** ⇒ 断连后 **1~3ms** 内定型 | ❌ **Servlet 容器不向应用暴露「客户端已断连」信号**（见下） |
+| worker 会写 socket 吗？ | —— | ❌ **不会**：`ObservabilityResponseWriter` 把 body 写进**内存缓冲**，真正写 socket 的是 filter 线程的 `rec.flushTo(httpResp)`<br>⇒ **写失败抛在 filter 上，不在 worker 的 panic 通道里** ⇒ `panicHolder[0]` 永远 null ⇒ **永远进不了 499 分支** |
+| 记录里留的态码 | **499** | **200**（`markHttpResult` 已在写之前跑完） |
+
+⇒ 这不是配置问题，是**结构性差异**：Go 的 499 由 **ctx** 驱动（与写在哪一层无关），
+RAG 的 499 由 **worker 内的写失败** 驱动（而本组件的写发生在 worker 之外）。
+
+#### ② 本轮修法：499 判据改成「**filter 写 socket 失败**」
+
+> 这正是 `DRIFT-HOTAPI-025` 处置一节给出的两条建议之一（「把 499 的判定从『worker 内的写失败』改成
+> **『filter 写 socket 失败（`flushTo` 抛 `IOException`）』**」）。
+
+`service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`
+⇒ 新增 `flushCaptured(...)`（替换两处 `rec.flushTo(httpResp)` 的裸调用）：
+
+1. **先定 `Content-Length`**（保形，见 §④）⇒ 再 `rec.flushTo(httpResp)` ⇒ **再显式 `flush()`**；
+2. 写失败若是「客户端断连」（`EOFException` / `ClientAbortException`，判定沿用既有 `isClientCancelledException`）
+   ⇒ **记 499**：`markTimeout(ctx, …, httpAttrs(serviceName, httpReq, 499))`
+   （对齐 Go 的 `MarkTimeout(ctx, ctx.Err(), duration, httpAttrs(serviceName, req, 499)...)`）
+   ⇒ 覆盖掉先前的 200（`markTimeout` 的 `setAllAttributes` 覆盖同名键）；
+3. 并打一条 **`[HTTP] 499 - <method> <uri> - <ip> - duration <n>ms`** 日志
+   —— Go 侧 499 之所以「可见」是因为 **go-zero 的 access log** 会打 `[HTTP] 499 - …`；
+   RAG **没有 access log** ⇒ 只写 span 的话，**没接 trace 后端时事件依然不可见**（实测：本仓库 OTEL exporter 默认关闭）
+   ⇒ 必须补一条日志，否则「断连不可见」只修了一半；
+4. **非断连类 IOException 照旧上抛**（保持原有行为，不吞真实故障）。
+
+另：`writeTimeoutResponse(...)` 的三处调用改走 `writeTimeoutResponseQuietly(...)`
+⇒ 客户端已走时写 503/499 失败**不再把异常栈抛给容器**
+（对齐 Go：`http.Error` 内部的 `fmt.Fprintln` **忽略写错误**）。
+
+#### ③ 🔴 残留（**框架限制，不可修**）—— 在飞 gRPC 不会被提前取消
+
+| | Go 真源 | RAG（修后） |
+|---|---|---|
+| 断连后在飞 gRPC | **断连后 1~3ms 内全部取消**（ctx 传播） | ❌ **不取消** ⇒ 仍要等到自己的 deadline 才结束 |
+| 断连后是否继续发下游调用 | **否** | **是**（同改前） |
+
+**为什么不可修（真 Tomcat 11.0.24 实测 + Tomcat 源码取证）**：
+
+1. **Servlet 容器不向应用暴露「客户端已断连」信号**
+   ⇒ 实测：Servlet 里 `request.startAsync()` + 注册 `AsyncListener`，
+   客户端裸 socket `SO_LINGER{1,0}` 强制 **RST** ⇒ **`onError` / `onTimeout` / `onComplete` 一个都不触发**；
+2. ⇒ Tomcat 源码同证：`org/apache/coyote/AbstractProcessorLight.java:62`
+   对 `SocketEvent.DISCONNECT` 明写 **"Do nothing here, just wait for it to get recycled"**；
+   `org/apache/catalina/connector/CoyoteAdapter.java:140-160` 的 `setErrorState(..., true)`
+   只在**「非容器线程上的 I/O 错误」**时触发（即写失败，不是对端消失）；
+3. ⇒ Servlet 层也**拿不到 socket**：`org.apache.catalina.connector.Request` 里**没有任何 socket 访问器**
+   ⇒ 无法自己轮询「对端还在不在」。
+
+⇒ **本条 ⇒ 已归位为「框架限制」待签字候选 `SD-2026-10-25-CAND-12`**
+⇒ [`docs/Intentional_Deviations/global/common-tails.md`](../../../Intentional_Deviations/global/common-tails.md)。
+⚠️ **签字权在用户**：本轮**未**自行批准。
+
+> ⚠️ **口径提醒**：本条**不是**「RAG 少写了 499」—— 499 **已经产出**了；
+> 残留的是「**取消的传播**」这一层（Go 有 ctx 传播，RAG 没有等价物）。
+
+#### ④ 保形：提前 flush 会把 `Content-Length` 退化成 `chunked`（**已处理**）
+
+⚠️ 这是本轮**实测踩到并修掉**的一个坑（否则会引入**新的 wire 差异**）：
+
+- 499 的观测依赖「**真的写到 socket**」⇒ 必须显式 `flush()`；
+- 但 Tomcat 的 `OutputBuffer` 默认缓冲 **8192 字节** ⇒ 小 body 写进去**只进了缓冲区**，socket 一个字节都没发
+  ⇒ **不 flush 就观测不到断连**（实测：去掉 flush ⇒ 记录仍是 200）；
+- 而 **flush ⇒ 响应提前提交** ⇒ Tomcat 再也没机会在收尾时按缓冲内容算 `Content-Length`
+  ⇒ 响应退化成 **`Transfer-Encoding: chunked`**（真 Tomcat 实测），而 **Go 的 `net/http` 是 `Content-Length`**
+  ⇒ ⇒ **必须自己先把 `Content-Length` 定下来**（`statusAllowsContentLength` 排除 1xx/204/304，
+  阈值取 Tomcat 自己的响应缓冲 8192）。
+
+⇒ **逐字对比（真 Tomcat，改前 vs 改后）**：
+
+| 响应 | 改前（基线） | 改后 |
+|---|---|---|
+| 有 body（23 字节） | `Content-Length: 23` | ✅ `Content-Length: 23` |
+| 空 body | `Content-Length: 0` | ✅ `Content-Length: 0` |
+| 204 | 无 `Content-Length`、无 `Transfer-Encoding` | ✅ 同左 |
+| 大 body（20000 字节 > 8192） | `Transfer-Encoding: chunked` | ✅ `Transfer-Encoding: chunked`（**溢出直写 socket ⇒ 基线本来就是 chunked**） |
+
+⇒ ⚠️ **大 body 这一格是「阈值 8192」的唯一理由**：
+Tomcat 的 `OutputBuffer.appendByteArray`（`org/apache/catalina/connector/OutputBuffer.java:807-822`）
+在 body **超过缓冲容量**时会把溢出部分**直写 socket** ⇒ 响应**在写完前就被提交**
+⇒ 基线本来就是 chunked ⇒ 我们也**不能**给大 body 设 `Content-Length`（否则反而与基线不一致）。
+
+#### ⑤ 守门
+
+`service/common/src/test/java/com/rag/common/observability/HttpClientDisconnectRealTomcatTest.java`
+（**真 Tomcat**（`tomcat-embed-core`，test 作用域）+ **真 `HttpMiddleware`** + 真 OTel SDK + 真裸 socket RST）：
+
+| # | 断言 | 变异 | 结果 |
+|---|---|---|---|
+| 1 | 断连 ⇒ span 的 `http.status_code == 499` | **M1**：去掉 499 判定（一律上抛） | 🔴 转红（`expected: <499> but was: <200>`） |
+| 2 | 断连 ⇒ 日志有 `[HTTP] 499` | 同 M1 | 🔴 转红 |
+| 3 | 不断连 ⇒ 200 且**无** 499 日志（证明 1/2 确实是断连触发的） | —— | —— |
+| 4 | framing：`Content-Length`（非 chunked）/ 空 body `Content-Length: 0` / 204 无 `Content-Length` / **大 body 仍是 chunked** | **M2**：去掉显式 flush ⇒ 499 观测不到<br>**M3**：去掉 `setContentLength` ⇒ 退化成 chunked | 🔴 均转红 |
+
+⇒ **基线 3/3 绿；M1 / M2 / M3 三组变异全部转红**（变异体均已还原）。
+
+⚠️ **为什么必须真 Tomcat**：`MockHttpServletResponse` / MockMvc 的 `write()` **永远不失败**
+⇒ 断连分支**根本触发不了** ⇒ 那种测试是「错误答案的守卫」，比没有测试更危险（§3.3）。
+
+#### ⑥ 与 Go 的两处已知差异（不掩盖）
+
+| # | 差异 | 说明 |
+|---|---|---|
+| ① | **定型时点** | Go 在断连**瞬间**定 499；RAG 要等业务跑完、写到 socket 才知道 ⇒ RAG 的 499 **必然晚于** Go |
+| ② | **窄竞态窗口** | 若客户端在**业务跑完之后、flush 之前**才断：Go 的 `select` 可能已选中 `done` 分支 ⇒ 记 **200**；RAG 会记 **499**（RAG 更贴近真相，但与 Go 在这一窗口内不一致） |
 
 ---
 
@@ -166,12 +287,34 @@
 | **Go 语义** | 熔断器名 = **`target` + 方法名** ⇒ **每个下游 target 一份独立计数** |
 | **RAG 出处** | `service/common/src/main/java/com/rag/common/protection/GoStyleGrpcClientBreakerInterceptor.java:193`<br>`String fullMethodName = method.getFullMethodName();` ⇒ **无 target 前缀**<br>闸门在 `:161-165` `breakerOf(fullMethodName)`（实例级 `ConcurrentHashMap`） |
 | **可观察差异** | 两个**不同下游服务**调用**同名方法** ⇒<br>**Go：两份独立熔断器，互不影响**<br>**RAG：共用一份 ⇒ A 服务的失败把 B 服务的熔断器也拖开** |
-| **状态** | 🔴 未修 |
+| **状态** | ✅ **已修**（2026-10-25 第三轮 A2） |
 
 🔴 **附带发现（§3.2 缺陷）**：RAG 该类的 javadoc **原文照抄了 Go 那一行**
 `breakerName := path.Join(cc.Target(), method)`，却**只字未提自己没实现 target 前缀**。
 ⇒ 按 §3.2（「这段比 Go 多做了什么？语义还一样吗？」），此处是一处**无出处的 idiomatization** ——
 **注释写着 Go 的语义，代码是另一套语义**，属于 AGENTS.md §3.2 明令「不可 review，不得合入」的那一类。
+✅ **本轮已随修复一并订正**（javadoc 改成「本模块要求的语义：…」+ 指向签字/台账的指针）。
+
+**本轮修法**（`GoStyleGrpcClientBreakerInterceptor`）：
+熔断键由 `method.getFullMethodName()` 改为 `goBreakerName(targetOf(next), fullMethodName)`
+⇒ 折叠连续斜杠（对齐 Go 的 `path.Join`）。
+
+**身份从哪来（实测，非推测）**：
+
+| 问 | 答 | 依据 |
+|---|---|---|
+| `ManagedChannel` 有 `getTarget()` 吗？ | ❌ **没有** | grpc-java **1.63**，`javap` 实测（**不是** 1.10.2 那种老 API） |
+| 那用什么？ | `Channel.authority()` | devh `DiscoveryClientNameResolver.getServiceAuthority()` 返回 `uri.getPath().substring(1)` ⇒ `discovery:///message-rpc` 下 = **`message-rpc`**（≡ Go 的 `key=message.rpc`）；直连 = `host:port` |
+| ⚠️ 坑 | **in-process channel 的 authority 恒为 `"localhost"`** ⇒ 会塌缩成同一个 key | ⇒ 守门断言改用**直连地址**的真 channel |
+
+⇒ **表达式层差异（不掩盖）**：Go 的 target 形如 `etcd:///127.0.0.1:2379` 且 breaker key 里带 `key=message.rpc`；
+RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面不相同**，但**隔离语义相同**。
+
+**守门**：`GoStyleGrpcClientBreakerTargetKeyTest`（**6 条**）。
+⚠️ **守门网曾有洞并已修正**：第一版自己算 key 再查 breaker ⇒ **变异不转红**（等于自证）
+⇒ 改为**只调 `interceptCall` 再看 `trackedMethods()`**；现变异转红
+（`expected: <2> but was: <1>` + **跨服务污染复现**）。
+⇒ 同批更新测试接缝语义：`trackedMethods()` 变为「(服务,方法) 对数」；新增 `breakerForName(String)`。
 
 ---
 
@@ -187,19 +330,24 @@
 
 | # | 条目 | 复核前 | 复核后 | 本轮动了？ |
 |---|---|---|---|---|
-| T-1 | Content-Type 大小写 | ⬜ 待复核 | ✅ **已修**（残余 ① 已登记） | ✅ |
+| T-1 | Content-Type 大小写 | ⬜ 待复核 | ✅ **已修**（残余 ① **本轮第三轮亦已修**） | ✅ |
 | T-2 | MaxConns 作用域 | 🔴 仍未修 | ✅ **已签字**（`SD-2026-10-25-01`）⇒ 移出本档 | ✅ 指针 |
 | T-3 | 503/499 缺 nosniff | ✅ 已修 · 待确认 | ✅ **实测确认已修** | ❌ |
-| T-4 | 499 / 2s deadline | 🔴 仍开放 | 🔴 仍开放（落点已定位到 `:332`） | ❌ |
+| T-4 | 499 / 2s deadline | 🔴 仍开放 | 🟡 **观测面已修**（499 可见）· **资源面残留为框架限制**（⇒ `SD-2026-10-25-CAND-12` 待签字） | ✅ |
 | T-5 | MaxConns 作用域 | 🔴 仍开放 | ✅ **已签字**（同 T-2）⇒ 移出本档 | ✅ 指针 |
 | T-6 | 成功/失败 Content-Type | 🟡 仍 OPEN | 🟡 仍 OPEN | ❌ |
 | T-7 | 状态行 reason phrase | 🟡 仍 OPEN | 🟡 仍 OPEN | ❌ |
 | T-8 | 缺 Traceparent | 🟡 仍 OPEN | 🟡 仍 OPEN | ❌ |
-| T-9 | 熔断计数键 | ⬜ 待复核 | 🔴 **确认为真漂移 + 发现 §3.2 缺陷** | ❌ |
+| T-9 | 熔断计数键 | ⬜ 待复核 | ✅ **已修**（键补 target 前缀）+ §3.2 缺陷一并订正 | ✅ |
 | T-10 | UserDomainService 假断言 | ❌ 未销账 | ✅ **已闭环** | ✅ |
 
-⇒ **本轮净效果**：10 条里 **1 条闭环**（T-10）· **3 条从「待复核」升级为「已确认的真漂移」并补齐 Go 出处**
+⇒ **首轮净效果**：10 条里 **1 条闭环**（T-10）· **3 条从「待复核」升级为「已确认的真漂移」并补齐 Go 出处**
 （T-1 / T-2+T-5 / T-9）· **6 条维持原状**（未展开）。
+
+⇒ **第三轮净效果（2026-10-25）**：**T-1 残余 ① / T-9 / T-4 全部落地**
+⇒ 10 条里 **6 条已闭环或已签字**（T-1 + 残余① / T-2 / T-3 / T-4观测面 / T-5 / T-9 / T-10）·
+**T-4 资源面残留转「框架限制」待签字**（`SD-2026-10-25-CAND-12`）·
+**T-6 / T-7 / T-8 维持 🟡 仍 OPEN**（同落点，待用户拍板）。
 
 ---
 
@@ -207,11 +355,12 @@
 
 | 序 | 条目 | 落点 | 是否需要别的域配合 |
 |---|---|---|---|
-| ~~1~~ | ~~**T-1**~~ | `service/common/http/GoStyleJsonBodyConverter.java` | ✅ **已完成**（2026-10-25）；残余 ① 待下一轮 |
-| **1′** | **T-1 残余 ①** | 同上（包一层 `HttpInputMessage`） | ⚠️ 需先决定是否顺带修 charset 偏差 |
-| **2** | **T-9** | `service/common/protection/GoStyleGrpcClientBreakerInterceptor.java` | ⚠️ 需引入「target」概念 ⇒ 取决于 devh starter 能否拿到 channel target ⇒ **先做可行性探针** |
+| ~~1~~ | ~~**T-1**~~ | `service/common/http/GoStyleJsonBodyConverter.java` | ✅ **已完成**（2026-10-25 第二轮） |
+| ~~1′~~ | ~~**T-1 残余 ①**~~ | 同上（包一层 `HttpInputMessage`） | ✅ **已完成**（2026-10-25 第三轮）⇒ 顺带修掉 `charset=gbk` 偏差 |
+| ~~2~~ | ~~**T-9**~~ | `service/common/protection/GoStyleGrpcClientBreakerInterceptor.java` | ✅ **已完成**（2026-10-25 第三轮）⇒ 身份源 = `Channel.authority()` |
 | ~~3~~ | ~~**T-2 / T-5**~~ | —— | ✅ **已签字**（`SD-2026-10-25-01`）⇒ 移出本档 |
-| 4 | **T-4 / T-6 / T-7 / T-8** | `service/common/observability/HttpMiddleware.java` + `service/common/http/GoStyleRouterErrorResponses.java` | 🟡 **同落点，一次拍板一次改**（T-6/7/8 同文件） |
+| ~~4a~~ | ~~**T-4**~~ | `service/common/observability/HttpMiddleware.java` | 🟡 **观测面已修**（第三轮）；资源面 ⇒ `SD-2026-10-25-CAND-12` 待签字 |
+| 4b | **T-6 / T-7 / T-8** | `service/common/http/GoStyleRouterErrorResponses.java` | 🟡 **仍 OPEN**，同落点 ⇒ **一次拍板一次改** |
 
 ⚠️ **排序提醒**：T-1 与 T-9 都改 `service/common` ⇒ **本域独占写点**，别的域此刻在改 common 会撞
 （§5.3b 规则 1）⇒ 这几条**必须串行**。
@@ -222,5 +371,6 @@
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | **第三轮（A1 / A2 / A3 / A4 四项落地）**。① **T-1 残余 ① 已修** —— 包一层 `SanitizedJsonContentTypeInputMessage` ⇒ 畸形头不再抛 + `charset=gbk` 回归 UTF-8；守门扩到 8 条 + 变异双向转红 ② **T-9 已修** —— 熔断键补 target 前缀（身份源 = `Channel.authority()`，因 grpc-java 1.63 的 `ManagedChannel` 无 `getTarget()`）；守门 6 条 + 变异转红（第一版守门有洞 ⇒ 已改为只调 `interceptCall` 再看 `trackedMethods()`）③ **T-4 观测面已修** —— 499 判据从「worker 内写失败」改成「**filter 写 socket 失败**」；配真 Tomcat 守门 3 条 + M1/M2/M3 三组变异全转红；⚠️ 顺带修掉「提前 flush 把 `Content-Length` 退化成 chunked」这个**新引入的 wire 差异**；🔴 残留「在飞 gRPC 不被提前取消」⇒ **框架限制** ⇒ `SD-2026-10-25-CAND-12`（待签字）④ **CYCLE-002 普查** —— `service/common` 的 `@Deprecated` 归零、无反向 import 业务域、无跨域 `{@link}` ⇒ **0 命中** ⇒ 落成可重跑守门 `tools/difftest/check-cross-domain-holds.py` |
 | 2026-10-25 | **第二轮（T-1 修复）**。T-1 改为**取原始头值**（`getFirst(CONTENT_TYPE)`）⇒ 大小写敏感判定与 Go 对齐；配真 `HttpHeaders` 守门测试 6 条 + 变异测试（转红）。⚠️ 登记 **T-1 残余 ①**（解析层仍走 MediaType ⇒ 畸形头仍抛，Go 不会）。🔴 新增 **X-9**（3 份生产复制品）⇒ [`cross-domain.md`](cross-domain.md)。T-2 / T-5 **用户签字** ⇒ 转 `SD-2026-10-25-01` 并移出本档 |
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 T-1~T-10 逐条复核结论；纠正「Go 出处在项目树里」的方法论错误（真源分 L1 项目层 / L2 go-zero 框架层）；确认 T-1 / T-2 / T-5 / T-9 为真漂移；发现 T-2/T-5 档位错置、T-9 的 §3.2 缺陷；T-10 转 [`cycle-deps.md`](cycle-deps.md) |

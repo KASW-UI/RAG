@@ -93,12 +93,28 @@ case <-ctx.Done(): err := ctx.Err(); ...   // DeadlineExceeded
 
 ---
 
-## 二、CYCLE-002 ⏸ **未展开**（登记备查）
+## 二、CYCLE-002 ✅ **已查实：0 命中**（2026-10-25 第三轮 A4）
 
-`service/common` 与别的域之间**可能**还有同型循环（本轮**只**发现并闭环了 CYCLE-001）。
-⇒ **本轮未做系统性排查**（那需要跨全部域扫 javadoc 的 `{@link}` 悬空与跨文件方法引用）。
-⇒ 建议下一轮：全仓扫「`service/common` 里被 `@Deprecated` 保留、且 javadoc 里点名了别的域」的方法
-⇒ 每一处都是 CYCLE 同型。
+**问**：`service/common` 与别的域之间**还有没有** CYCLE-001 同型循环
+（① 共享层里被 `@Deprecated` 保留、且 javadoc 点名了别的域的方法）？
+
+**答**：**没有。** 三条规则逐条实测均为 **0 命中**：
+
+| # | 规则 | 实测 |
+|---|---|---|
+| ① | **依赖不倒置** —— `service/common` 的**主源码**里不得 `import` 任何业务域的类（共享层不得依赖使用方） | ✅ **0 命中**（`com.rag.users` / `com.rag.message` / `com.rag.hot` / … 全部 0） |
+| ② | **无跨域 javadoc 链接** —— `service/common` 的 javadoc 里不得出现指向**别的域**类的 `{@link}` | ✅ **0 命中** |
+| ③ | **`@Deprecated` + 外部引用提示** —— `service/common` 里的 `@Deprecated` 元素被**别处**引用时给出提示 | ✅ `service/common` 的 `@Deprecated` **归零** ⇒ 本规则**无对象**（只提示、不判失败） |
+
+⇒ **落成可重跑的守门**（不是一次性结论）：
+**`tools/difftest/check-cross-domain-holds.py`** ⇒ `EXIT=0` 过 / `EXIT=1` 命中硬规则。
+⇒ 复现：`python3 tools/difftest/check-cross-domain-holds.py`。
+
+**变异验证**（证明守门网不是空转）：注入 `import com.rag.users...UserDomainService` + `{@link UserDomainService}`
+⇒ `EXIT=1` **精准命中两条规则**；还原后 `EXIT=0` ✅。
+
+⚠️ **曾踩到的一个假阳性**（已修）：`{@link System}` 会命中 users 域的**同名类** ⇒ 加了 `JDK_TYPE_NAMES` 白名单修正。
+⇒ 教训见 [`docs/Pitfalls/global/cycle-deps.md`](../../Pitfalls/global/cycle-deps.md)。
 
 ---
 
@@ -106,4 +122,5 @@ case <-ctx.Done(): err := ctx.Err(); ...   // DeadlineExceeded
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | **第三轮：CYCLE-002 查实 = 0 命中**（A4）。三条规则逐条实测：`service/common` 的 `@Deprecated` 归零、无反向 import 业务域、无跨域 `{@link}` ⇒ **无 CYCLE-001 同型隐患**。落成可重跑守门 `tools/difftest/check-cross-domain-holds.py` + 变异验证（注入违规 import 与 `{@link}` ⇒ `EXIT=1` 精准命中）。⚠️ 曾踩到「`{@link System}` 命中 users 域同名类」的假阳性 ⇒ 加 `JDK_TYPE_NAMES` 白名单修正 |
 | 2026-10-25 | **首版 + CYCLE-001 闭环**。`align/global` @ `58e8314` 产出。两步走完（users 侧订正 javadoc → common 侧删方法），配真 in-process gRPC 守门测试 4 条 + 变异测试 2 组（均转红）。登记 CYCLE-002 待查 |

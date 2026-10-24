@@ -96,3 +96,148 @@ grep -rn "path.Join" "$GZ/zrpc/internal/clientinterceptors/"
 
 - 踩坑位置：`docs/DRIFT/global/common-tails.md` T-2 / T-5「附带发现：档位错置」
 - 2026-10-25，`align/global` @ `58e8314`
+
+---
+
+## PIT-GLOBAL-007 🔴 **Servlet 容器不向应用暴露「客户端已断连」信号**
+
+### 现象
+
+想复刻 Go 的「客户端断开 ⇒ 立刻取消在飞工作 ⇒ 记 499」，
+第一反应是走 Servlet 的 **async + `AsyncListener`**（Servlet 规范里唯一像样的事件源）。
+
+### 实测（真 Tomcat 11.0.24，嵌入式）
+
+Servlet 里 `request.startAsync()` + 注册 `AsyncListener`，
+客户端用裸 socket + `SO_LINGER{1,0}` 强制 **RST**：
+
+| 回调 | 触发？ |
+|---|---|
+| `onError` | ❌ **不触发** |
+| `onTimeout` | ❌ 不触发 |
+| `onComplete` | ❌ 不触发 |
+
+### Tomcat 源码同证
+
+- `org/apache/coyote/AbstractProcessorLight.java:62`
+  ⇒ 收到 `SocketEvent.DISCONNECT` 时明写 **"Do nothing here, just wait for it to get recycled"**；
+- `org/apache/catalina/connector/CoyoteAdapter.java:140-160`
+  ⇒ `asyncConImpl.setErrorState(t, true)`（唯一会 fire `onError` 的地方）
+  **只在「非容器线程上的 I/O 错误」时触发** —— 即「**写失败**」，**不是「对端消失」**；
+- `org/apache/catalina/connector/Request.java`
+  ⇒ **没有任何 socket 访问器** ⇒ 应用层也**无法自己轮询**「对端还在不在」。
+
+### 正确处置
+
+⇒ 断连的**唯一可观测时刻** = 「**往 socket 写响应失败**」。
+⇒ 499 的判据因此必须落在 **filter 线程的写**上，而不是 worker 里的写
+（worker 写的是内存缓冲，socket 是 filter 写的 ⇒ 见 `docs/DRIFT/global/common-tails.md` T-4）。
+
+### 教训
+
+「Servlet 规范里有 `AsyncListener`」**不等于**「它会告诉你对端断了」——
+`AsyncListener` 报的是**服务端这一侧**的错误（写超时、写失败、异步派发出错），
+**不是**「客户端消失了」这件事。
+⇒ 断言任何「容器会通知你客户端断连」的设计前，**先做一次真容器探针**（§3.3）。
+
+### 出处
+
+- 踩坑位置：`service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`（T-4 的修法选型）
+- 一次性探针：`/tmp/probe-async/AsyncDisconnectProbe.java`（不进仓）
+- 关联：`docs/DRIFT/global/common-tails.md` T-4 ③；`docs/Intentional_Deviations/global/common-tails.md` `SD-2026-10-25-CAND-12`
+- 2026-10-25，`align/global`
+
+---
+
+## PIT-GLOBAL-008 🔴 **「写失败」观测不到 ⇒ 必须显式 flush；flush 又会把 `Content-Length` 退化成 chunked**
+
+### 现象
+
+「客户端断连 ⇒ 写 socket 失败 ⇒ 记 499」这条链，第一版**跑不出 499**：
+客户端明明 RST 了，记录里还是 **200**。
+
+### 根因（真 Tomcat 11.0.24 实测）
+
+Tomcat 的 `OutputBuffer` 默认缓冲 **8192 字节** ⇒ 小 body 写进去**只进了缓冲区**，
+**socket 一个字节都没发** ⇒ 「写」根本没发生 ⇒ **不抛异常** ⇒ 499 分支永远进不去。
+
+⇒ 必须**显式 `flush()`**（⇒ `OutputBuffer.doFlush(true)` ⇒ 真网络 flush ⇒
+写失败被 Tomcat 包成 `ClientAbortException` 抛出来）。
+
+### ⚠️ 但 flush 会引入**新的 wire 差异**
+
+`flush()` ⇒ 响应**提前提交** ⇒ Tomcat 再也没机会在收尾时按缓冲内容算 `Content-Length`
+⇒ 响应退化成 **`Transfer-Encoding: chunked`**；
+而 **Go 的 `net/http` 对「装得下」的响应体是算 `Content-Length` 的**
+⇒ ⇒ **这就是一条新增的 wire 差异**（比原问题更难查）。
+
+### 正确处置（两步，缺一不可）
+
+1. **先自己定 `Content-Length`**（`setContentLength(body.length)`），
+   阈值取 Tomcat 自己的响应缓冲 8192；且 **1xx / 204 / 304 不设**（按 HTTP 语义不带 body）；
+2. **再 `flush()`**。
+
+⇒ **改前 vs 改后逐字对比（真 Tomcat）**：
+
+| 响应 | 改前 | 改后 |
+|---|---|---|
+| 有 body（23 字节） | `Content-Length: 23` | `Content-Length: 23` ✅ |
+| 空 body | `Content-Length: 0` | `Content-Length: 0` ✅ |
+| 204 | 无 `Content-Length`、无 `Transfer-Encoding` | 同左 ✅ |
+
+### 教训
+
+「把响应提前 flush 出去」不是一个中性的动作 —— 它会**提前提交响应**，
+从而**改掉 framing**（`Content-Length` vs `chunked`）。
+⇒ 任何「为了观测而提前提交」的改动，都必须**同时把 framing 显式钉死**，
+并配一条**逐字对比 framing 的守门**（否则回归会以「客户端仍能正常解析」的形式**静默通过**）。
+
+### 出处
+
+- 踩坑位置：`service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`（`flushCaptured`）
+- 守门：`service/common/src/test/java/com/rag/common/observability/HttpClientDisconnectRealTomcatTest.java`
+  ⇒ `responseFramingStaysContentLength`（变异 **M3** 去掉 `setContentLength` ⇒ 转红）
+- 关联：`docs/DRIFT/global/common-tails.md` T-4 ④
+- 2026-10-25，`align/global`
+
+---
+
+## PIT-GLOBAL-009 ⚠️ **显式声明一个 test 作用域依赖，会把 compile classpath 上的同名 artifact 顶掉**
+
+### 现象
+
+给 `service/common` 加一个 test 作用域的 `jakarta.annotation:jakarta.annotation-api`
+（为了真 Tomcat 启动），结果 **主源码编译失败**：
+
+```
+ObservabilityLifecycle.java:[5,26] 程序包jakarta.annotation不存在
+ObservabilityLifecycle.java:[52,6] 找不到符号: 类 PreDestroy
+```
+
+### 根因
+
+`jakarta.annotation-api` 本来就**由 `spring-boot-starter`（compile 作用域）传递进来**，
+而 `ObservabilityLifecycle` 的 `@PreDestroy` 用的正是它。
+⇒ 一旦把它**显式**声明成 `test` 作用域，Maven 的「**最近者优先**」规则
+⇒ **本模块的直接声明**（test）**压过**传递依赖（compile）
+⇒ **compile classpath 上这个 artifact 消失了** ⇒ 主源码编译失败。
+
+### 正确处置
+
+- 要么**根本不声明**（让 `spring-boot-starter` 的传递依赖顶着）；
+- 要么声明成 **compile**（与既有解析结果一致）。
+
+⇒ 本轮选了「**不声明**」：真 Tomcat 需要的 `jakarta.annotation.Resource`
+由 `spring-boot-starter` 的传递依赖提供（compile 作用域 ⇒ 测试期也在 classpath 上）。
+
+### 教训
+
+加 test 作用域依赖前，先确认**它没有以更近的路径提供同名 artifact**。
+⇒ 一旦 artifact 坐标相同，**作用域就变成了「谁更近谁说了算」**，
+⇒ 「我只是想加一个测试期依赖」可能**悄悄改掉主源码的编译类路径**。
+
+### 出处
+
+- 踩坑位置：`service/common/pom.xml`
+- 关联：`docs/DRIFT/global/common-tails.md` T-4 ⑤（守门落在 `service/common` ⇒ 需要真 Tomcat）
+- 2026-10-25，`align/global`

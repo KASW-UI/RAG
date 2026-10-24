@@ -112,9 +112,85 @@ func MaxConnsHandler(n int) func(http.Handler) http.Handler {
 
 ---
 
+## SD-2026-10-25-CAND-12 🟡 **待签字候选（未签字）** —— 客户端断连后**在飞的 gRPC 不会被提前取消**
+
+| 项 | 值 |
+|---|---|
+| 状态 | 🟡 **待签字候选（未签字）** —— 属**框架限制**，不是「RAG 偷懒」<br>⚠️ **签字权在用户** ⇒ agent **未**自行批准 |
+| 类别 | **框架限制**（想对齐但**语言/框架做不到** ⇒ 无法靠改 `service/common` 消除） |
+| 组件 | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`（**共享层** ⇒ 10 个 api 模块全部适用） |
+| 对应的 DRIFT 条目 | **T-4**（`hot` 域 `DRIFT-HOTAPI-025`）的**资源面**残留<br>⇒ ⚠️ T-4 的**观测面**（499 可见）**已修**，**不在本档** |
+| 行为层 | **资源占用 / 下游压力**（**无 wire 差异** —— 客户端已走，收不到任何东西） |
+| 证据强度 | ✅ **真 Tomcat 11.0.24 实测**（嵌入式，裸 socket RST）+ ✅ **Tomcat 源码逐行取证** |
+
+### 差异的实际面
+
+| 侧 | 客户端断连后，在飞的下游 gRPC 调用 |
+|---|---|
+| **Go 真源** | **断连后 1~3ms 内全部取消**（`net/http` 取消 `r.Context()` ⇒ ctx 传播到下游）<br>⇒ 且**断连后不再发新的下游调用** |
+| **RAG** | ❌ **不取消** ⇒ 仍要等到**自己的 deadline** 才结束；断连后**仍会继续发新的下游调用** |
+
+⇒ 可观察面：**下游被无谓地压**（资源浪费）；**客户端侧无差异**（客户端已断连，收不到任何东西）。
+
+### Go 出处（L1 项目层）
+
+```go
+// Sea-RideTheWind_golang/service/common/observability/http.go:53-56
+ctx, cancel := context.WithTimeout(r.Context(), timeout)   // ← 挂在 r.Context() 上
+req := r.WithContext(ctx)
+```
+⇒ `r.Context()` 由 **`net/http` 在客户端断开时取消** ⇒ `ctx` 随之取消
+⇒ 所有 **ctx-aware** 的下游调用（gRPC）**立即中止**。
+
+### RAG 出处
+
+`service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`
+⇒ 容器线程 `doneLatch.await(timeout)` ⇒ 期间**没有任何机制**能感知「客户端已走」
+⇒ worker 里的 gRPC 调用只能等到**自己的 deadline**（`GoStyleRequestDeadline`）。
+
+### 为什么不能对齐（框架限制的证据）
+
+1. **Servlet 容器不向应用暴露「客户端已断连」信号** ——
+   真 Tomcat 11.0.24 实测：Servlet 里 `startAsync()` + `AsyncListener`，
+   客户端裸 socket `SO_LINGER{1,0}` 强制 **RST** ⇒
+   **`onError` / `onTimeout` / `onComplete` 一个都不触发**；
+2. **Tomcat 源码同证** ——
+   `org/apache/coyote/AbstractProcessorLight.java:62` 对 `SocketEvent.DISCONNECT`
+   明写 **"Do nothing here, just wait for it to get recycled"**；
+   `org/apache/catalina/connector/CoyoteAdapter.java:140-160` 的
+   `setErrorState(t, true)`（唯一会 fire `onError` 的地方）**只在「非容器线程上的 I/O 错误」时触发**；
+3. **应用层也拿不到 socket** —— `org/apache/catalina.connector.Request` 里
+   **没有任何 socket 访问器** ⇒ 无法自己轮询「对端还在不在」。
+
+⇒ ⇒ **不是实现缺陷，是容器能力边界。**
+⇒ 踩坑留痕 ⇒ [`docs/Pitfalls/global/common-tails.md`](../../../Pitfalls/global/common-tails.md) PIT-GLOBAL-007。
+
+### 触发面与残留风险
+
+- 触发条件 = **客户端在请求在途期间断连**（浏览器刷新 / 弱网 / 客户端崩溃 / 爬虫超时）；
+- 影响 = **下游被无谓地压**（直到请求自己的 deadline）；
+- ⚠️ 影响量级取决于**业务自身的 deadline**：RAG 的 HTTP 超时上限（`observability.http-timeout`）
+  决定了「断连后最多再浪费多久」⇒ **把该值调小 ⇒ 浪费窗口同步变小**（这是**运维旋钮**，不是语义修复）。
+
+### 守门
+
+`service/common/src/test/java/com/rag/common/observability/HttpClientDisconnectRealTomcatTest.java`
+⇒ 守的是**已修的那一面**（499 可见 + framing 不退化）。
+⇒ ⚠️ **本条（提前取消）没有守门，也不可能有** —— 容器不给信号 ⇒ 无从断言。
+
+### 留痕位置
+
+- `docs/DRIFT/global/common-tails.md` T-4 ③（**只留指针 + 差异面**，不搬内容）；
+- `docs/Pitfalls/global/common-tails.md` PIT-GLOBAL-007（为什么不能对齐）；
+- ⚠️ **签字前它仍不是「已批准」** ⇒ 若用户**不**签字，本条应退回 `docs/DRIFT/global/common-tails.md`
+  继续作为 🔴 开放项。
+
+---
+
 ## 变更记录
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | **新增候选 `SD-2026-10-25-CAND-12`**（T-4 资源面残留）。T-4 的**观测面**已修（499 可见）⇒ 不在本档；本档只收**资源面**（断连后在飞 gRPC 不被提前取消）—— 经真 Tomcat 11.0.24 实测 + Tomcat 源码取证确认为**框架限制** ⇒ 落为**待签字候选**（**未签字**） |
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 `SD-2026-10-25-CAND-11`（T-2 / T-5 同一条），把「代码自称有意、但无签字」的第三态**归位到待签字候选** ⇒ 等用户拍板 |
 | 2026-10-25 | **用户签字** ⇒ 候选号 `CAND-11` 转正为 **`SD-2026-10-25-01`**，状态由「待签字」改为「已签字」。签字决定 = **保留 RAG 的全局闸门，不改成 per-route**。并完成两处落地：代码 javadoc 改为指向本档的指针 + 从 DRIFT 侧移除该条 |

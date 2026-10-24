@@ -71,3 +71,35 @@ AGENTS.md §3.3.3：**「绿测试可能是『错误答案的守卫』，比没�
 - 踩坑位置：`service/common/src/test/java/com/rag/common/observability/RpcInterceptorDeadlineBindingTest.java`
 - 关联：`docs/DRIFT/global/cycle-deps.md` §1.4 / §1.5
 - 2026-10-25，`align/global` @ `58e8314`
+
+---
+
+## PIT-GLOBAL-010 ⚠️ **跨域引用扫描会命中「JDK 同名类」** ⇒ 必须有白名单
+
+### 现象
+
+写「`service/common` 的 javadoc 不得出现指向**别的域**类的 `{@link}`」这条扫描规则时，
+第一版把 **`{@link System}`** 判成了违规。
+
+### 根因
+
+判定口径是「`{@link X}` 里的 `X` 是不是某个业务域的类」。
+⇒ `System` 在 **users 域**恰好也有同名类（`com.rag.users.…System` 之类）
+⇒ **JDK 类型名**被误判成「跨域引用」⇒ **假红**。
+
+### 正确处置
+
+⇒ 扫描器维护一份 **`JDK_TYPE_NAMES` 白名单**（`System` / `Object` / `String` / `List` / `Map` …）
+⇒ 命中白名单 ⇒ **不算违规**。
+
+### 教训
+
+「按类名判归属」这类规则，**必须**先处理**同名**这一类歧义：
+JDK 类型、业务域类型、第三方类型会互相撞名。
+⇒ 规则宁可**漏报**也不要**假红** —— 一个会误报的守门，久了就没人信它。
+
+### 出处
+
+- 踩坑位置：`tools/difftest/check-cross-domain-holds.py`
+- 关联：`docs/DRIFT/global/cycle-deps.md` §二（CYCLE-002 = 0 命中）
+- 2026-10-25，`align/global`
