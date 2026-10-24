@@ -1,0 +1,79 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  difftest 专用副本 —— Go 真源 service/hot/api/etc/hotcenter.yaml 的复制品
+#
+#  【铁律】绝不修改冻结的 Go 仓库。Go 的运行时配置全部来自本目录的副本，
+#         启动时用 `-f` 指过来，真源一个字节都不动。
+#  【铁律】Go 不写任何文件进仓库。真源 yaml 的 `Log.Mode: file` + `Path: ../../../../log/hot-api`
+#         是相对 etc/ 的，会直接落到冻结仓库里，所以副本改成 `Mode: console`。
+#
+#  与真源的四处差异（其余逐字一致）：
+#    1. Port 8893 → 18903    （独占端口段 18xxx，避开本机其它服务）
+#    2. DevServer.Port 16067 → 19069
+#    3. Log.Mode: file → console（difftest: 绝不写进冻结仓库）
+#    4. 两个 zrpc 客户端的 Etcd 整块移除，改用 Endpoints 直连对拍桩
+#       —— 与 run.sh 里 user-api 的处理同款（go-zero zrpc/config.go:91-95
+#          RpcClientConf.BuildTarget()：len(Endpoints)>0 ⇒ 直接目标，**优先于 Etcd 分支**）
+#
+#  【为什么第 4 项是必要的，而不是"省事"】
+#    真源的 HotRpcConf / ArticleRpcConf 都指向 etcd key `hot.rpc` / `article.rpc`。
+#    对拍环境**刻意不起 etcd**（tools/difftest/docker-compose.yml 只起 postgres + redis），
+#    因为 etcd 是服务发现层，不是业务语义层 —— 两边摘掉它才是对称的
+#    （与 RAG 侧 `register-enabled=false` 是同一个思路的两面）。
+#    补充事实：go-zero zrpc 的 `RpcClientConf.NonBlock` 默认 true
+#    （zrpc/config.go:30 `json:",default=true"`）⇒ `MustNewClient` 走
+#    `internal.NewClient(..., WithNonBlock())` ⇒ 不加 `grpc.WithBlock()`
+#    ⇒ 目标没起也不阻塞、也不 panic（真源里 panic 的来源是 etcd 解析失败，
+#    不是目标不可达）。这正是 Endpoints 直连能工作的原因。
+# ═══════════════════════════════════════════════════════════════════════════
+
+Name: hotcenter
+Host: 0.0.0.0
+Port: 18903              # 真源 8893；独占端口段 18xxx
+
+Log:
+  ServiceName: hotcenter
+  Mode: console          # difftest: 绝不写进冻结仓库
+
+Telemetry:
+  Name: hot-api
+  Endpoint: jaeger:4317
+  Sampler: 1.0
+  Batcher: otlpgrpc
+
+DevServer:
+  Enabled: true
+  Host: 0.0.0.0
+  Port: 19069             # 真源 16067
+  MetricsPath: /metrics
+  HealthPath: /healthz
+  EnableMetrics: true
+  EnablePprof: true
+
+# difftest: Etcd 整块移除 —— 改用 Endpoints 直连对拍桩（见文件头第 4 项说明）
+HotRpcConf:
+  Endpoints:
+    - 127.0.0.1:19903     # Go 侧对拍桩
+
+ArticleRpcConf:
+  Endpoints:
+    - 127.0.0.1:19903     # Go 侧对拍桩（同一个桩也提供 ArticleService）
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  U5 专用副本 —— MaxConns 阈值降到 8
+# ═══════════════════════════════════════════════════════════════════════════
+#  【为什么需要单独一份副本，而不是改主副本】
+#    主副本 hot-api.yaml **刻意不写** MaxConns ⇒ 走 go-zero 的 tag 默认 10000
+#    （rest/config.go:52）⇒ 那才是「生产形态」。
+#    本副本只用于 **U5 的闸门机制验证**：默认 10000 需要 10001 个同时在途的请求，
+#    在 RAG 侧**根本达不到**（Tomcat 默认 max-threads=200 ⇒ 同时在途最多 200），
+#    ⇒ 想验证「闸门机制两侧等价」，只能两侧**同值**降低阈值。
+#    ⚠️ 本副本**不代表**生产配置，也不用于其它对拍（diff-hot.py 用主副本）。
+#
+#  ⚠️⚠️ 下面这行**必须是真的 YAML 键**（不能写成注释）——
+#     写 yaml 副本时最容易踩的坑：一不留神把要生效的键写进了注释块里，
+#     yaml 解析出来是 None；而 go-zero 的 conf.MustLoad **不报错**
+#     （缺失字段走 tag 默认 10000）⇒ 表现为「闸门怎么配都不生效」，
+#     极易误判成「RAG 侧实现有 bug」。
+#     ⇒ 配完**必须**先验一遍解析结果：
+#     python3 -c "import yaml;print(yaml.safe_load(open('本文件'))['MaxConns'])"
+MaxConns: 8

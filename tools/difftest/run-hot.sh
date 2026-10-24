@@ -33,6 +33,14 @@
 #   ./run-hot.sh              # 完整跑（含构建）
 #   ./run-hot.sh --no-build   # 复用已有 jar / Go 二进制 / 桩 class
 #   ./run-hot.sh --keep       # 跑完不收摊，便于手工 curl
+#
+# 【U5 保护层实验用的两个环境变量口】
+#   GO_CONF=<yaml>          换 Go 侧配置副本（默认 conf/go/hot-api.yaml）。
+#                           U5 用 conf/go/hot-api-lowmaxconns.yaml（MaxConns: 8）。
+#   RAG_EXTRA_ARGS="..."    给 RAG 侧追加 Spring 参数（空格分隔）。
+#                           U5 用 "--rag.protection.max-conns=8"（**必须与 Go 侧同值**）。
+#   ⚠️ 这两个口**必须成对使用** —— 只改一侧就不是「同一个阈值」，
+#      测出来的差异分不清是「闸门行为不同」还是「阈值不同」。
 # ═══════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -185,7 +193,9 @@ grep -q READY "$LOGS/stub-rag.log" || { echo "  FAIL RAG 侧桩没起来"; cat "
 echo "  ✓ 两个桩就绪（$GO_STUB_PORT / ${RAG_STUB_PORT}）"
 
 # Go hot-api：配置指向 conf/go/hot-api.yaml 副本（Endpoints 直连 Go 侧桩）
-"$RUN_DIR/bin/go-hot-api" -f "$HERE/conf/go/hot-api.yaml" >"$LOGS/go-hot-api.log" 2>&1 & PIDS+=($!)
+# ⚠️ GO_CONF 可换副本（U5 用 lowmaxconns 版本）；默认仍是生产形态副本。
+GO_CONF="${GO_CONF:-$HERE/conf/go/hot-api.yaml}"
+"$RUN_DIR/bin/go-hot-api" -f "$GO_CONF" >"$LOGS/go-hot-api.log" 2>&1 & PIDS+=($!)
 
 # RAG hot-api：
 #   · HOT_API_PORT —— application.yml 的 server.port 用的就是 ${HOT_API_PORT:18897}
@@ -203,6 +213,7 @@ SPRING_CLOUD_NACOS_DISCOVERY_REGISTER_ENABLED=false \
   java -cp "$APP_CP" com.rag.hot.hot.api.HotApiApplication \
   --grpc.client.hot-rpc.address="static://127.0.0.1:$RAG_STUB_PORT" \
   --grpc.client.article-rpc.address="static://127.0.0.1:$RAG_STUB_PORT" \
+  ${RAG_EXTRA_ARGS:-} \
   >"$LOGS/rag-hot-api.log" 2>&1 & PIDS+=($!)
 
 sleep 5

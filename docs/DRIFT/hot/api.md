@@ -117,7 +117,7 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | D6 | **端口** | ✅ **已签字**（2026-10-24 第六轮，用户拍板「保持」） | Go `hotcenter.yaml` = 8893；`Infrastructure.md §3` 给 hot 预占 18897 ⇒ **保持 18897**（`HOT_API_PORT` 可覆盖）⇒ `SD-HOT-API-009`。⚠️ HTTP 端口**不是 wire 契约**（各自独立）⇒ 无行为差异 |
 | D7 | GET + JSON body 覆盖 query | ✅ **2026-10-23 复核：原结论修正 —— 这不是漂移** | **原文保留**：「Go 的 `httpx.Parse` 还会跑 `ParseJsonBody`。极冷边界，未承诺一致」。<br>**修正依据**：`core/mapping/utils.go:589-597` `usingDifferentKeys(key, field)` —— 字段有 `form` tag 但**没有 `json` tag** ⇒ JSON unmarshaler（`jsonTagKey`）**整字段跳过**（`unmarshaler.go:571-573` 直接 `return nil`）。<br>**Go 侧活体探针实测**：`?page=5` + body `{"page":9,"page_size":3}` → **`page=5 pageSize=20`**；无 query + body → **`1/20`**；POST + body → **`1/20`**。JSON body **完全被忽略**。<br>⇒ RAG「不读 body」与 Go 行为**一致**，原记的「未实现」是**假阳性**。真漂移另有其人，见 **DRIFT-HOTAPI-013**（畸形 JSON body）。 |
 | D8 | client 熔断实际生效 | ⚠️ 静态确认（2026-10-23） | 依赖「扫到 `com.rag.common`」+ `@GrpcGlobalClientInterceptor`，按 §3.3 **不得**据注解存在即断言生效 |
-| D9 | 3s 超时 / 保护层四闸实际触发 | ⚠️ 静态确认（2026-10-23） | 同上，需活体观测（503 + `Request Timeout` / 超限裸状态码）。⚠️ 第二轮补了一条**静态可确证的反例**：超时/499 响应头少 `nosniff`（DRIFT-HOTAPI-014） |
+| D9 | 3s 超时 / 保护层四闸实际触发 | ⚠️ 静态确认（2026-10-23） | ✅ **活体（2026-10-24 第八轮）**：**三闸双侧活体坐实** —— MaxBytes（默认阈值，超限 → 两侧 **413 + 空 body + 无 Content-Type**，边界「恰好等于」也一致）；MaxConns（同阈值 8 + 16 并发 → 两侧**各 8 个裸 503**）；Breaker（两侧都**真的打开** → 裸 503 + 空 body）。⚠️ **CpuShedding 在 darwin 上 Go 侧结构性不可达**（`core/stat/internal/cpu_other.go` 带 `//go:build !linux` ⇒ `CpuUsage()` 恒 0 ⇒ 永不降载）⇒ 只能静态 + 上游测试取证。产出 **DRIFT-HOTAPI-026**（413 后 Go RST）/ **DRIFT-HOTAPI-027**（MaxConns 默认阈值下 RAG 不可达）/ **U5-OPEN-1**（熔断打开时机不稳定，未定性） |
 | D10 | `management.metrics.distribution.slo` 不可用 | ⚠️ 已实测（2026-10-23） | Boot 的 `ServiceLevelObjectiveBoundary` 转换器解析不了小数秒（`2.5s` → `NumberFormatException`），且会让整个 `MetricsProperties` 绑定失败 ⇒ **上下文起不来**。SLO 边界改在 `HotApiMetrics` 代码侧声明 |
 
 ### 🆕 第二轮新增（D11 起接续编号，无冲突）
@@ -708,7 +708,7 @@ Recommended Verification:
 | **U2** | 3s 超时真的产出 `503 + Request Timeout`？ | `http.go:88` + `rest/config.go:55` | `HttpMiddleware:419-425` | ⚠️ **已闭合（第五轮）**：`CASE-21` 用「20 条热榜 + article-rpc 睡 30s」把请求**真的拖过 3s** ⇒ 两侧**都**产出 `HTTP 503 + "Request Timeout\n"`（**body 逐字节相同**）。⚠️ 唯一差异 = **缺 `X-Content-Type-Options: nosniff`** ⇒ 即 **D14**（代码在 `service/common` ⇒ **已移交 common 域**） | ✅ **已完成**（第五轮 `CASE-21`） |
 | **U3** | 客户端断连是否真产出 499，且 gRPC 真的被取消？ | `http.go:84-86` `errors.Is(Canceled)`→499 | `HttpMiddleware:332` IOException→499 | ✅ **已闭合（第七轮，2026-10-24）**：**裸 socket + SO_LINGER=0 强制 RST**（urllib/httpclient 都做不到「发到一半就消失」）⇒ 两侧都**实测**了：Go 侧 8 个在飞 gRPC 在**断连后 1~3ms** 全部被取消、且**日志里有** `[HTTP] 499 ... duration 503.3ms`；RAG 侧则**要等到 2s 调用 deadline** 才结束、**并在断连后继续发第二批**下游调用、且**没有任何 499 记录** ⇒ **D3 坐实**，并连带查出 **DRIFT-HOTAPI-025** | ✅ **已完成**（`tools/difftest/probe-hot-disconnect.py`） |
 | **U4** | client breaker 是否真在链上并会因超时打开？ | `zrpc/internal/client.go:112-113` + `breakerinterceptor.go:16-18` | 依赖「扫到 `com.rag.common`」+ `@GrpcGlobalClientInterceptor` | ⚠️ **部分闭合（第四轮）**：**装配层已补**（hot-api 此前**没有** wiring 测试 —— 而 `follow-api` / `message-api` 各有一份 ⇒ 正是本域缺口）⇒ 新增 `GoStyleGrpcClientBreakerWiringTest`（3 例：拦截器在 starter 的 `GlobalClientInterceptorRegistry` 里 + factory 认识本域两个 `@GrpcClient` 锚点 + 熔断默认开启）。⚠️ **「熔断真的打开」的行为级证据仍未做** | 决定 DRIFT-HOTRPC-004 的严重度；也可能暴露 Go 侧独有的 shadow 残留 | **仍需**：内嵌一个恒返 INTERNAL 的 gRPC server，连续调用直到 breaker 打开 ⇒ 观察 `interceptor.trackedMethods()`（参照 `message-api` 的 `GoStyleGrpcClientBreakerE2ETest` 范式）。⚠️ hot-api 侧响应体**看不出**熔断（前后都是 5001）⇒ 只能看拦截器/指标 |
-| **U5** | 保护层四闸（MaxConns/MaxBytes/CpuShedding/Breaker）真触发？ | `rest/config.go:12-22,52-56` tag 默认 | `rag.protection.*`（静态同值） | 未构造超限请求（D9） | 并发 10001 连接 / 发送 >1 MiB body / CPU 打满，各观察裸状态码 |
+| **U5** | 保护层四闸（MaxConns/MaxBytes/CpuShedding/Breaker）真触发？ | `rest/config.go:12-22,52-56` tag 默认 | `rag.protection.*`（静态同值） | ✅ **已闭合（第八轮，2026-10-24）· 三闸双侧活体 + 一闸平台不可达**：**MaxBytes** 两侧默认阈值下**逐字节一致**（超限 → 413 + 空 body + 无 Content-Type；「恰好等于阈值」也一致放行）；**MaxConns** 两侧同阈值 8 + 16 并发 → **各 8 个裸 503**（拒绝数恰等于阈值）；**Breaker** 两侧都**真的打开** → 裸 503 + 空 body（与超时的「503 + `Request Timeout\n`」可区分）。🔴 **CpuShedding 在 darwin 上 Go 侧结构性不可达**（`core/stat/internal/cpu_other.go` 的 `//go:build !linux` ⇒ `RefreshCpu()` 恒 0 ⇒ `stat.CpuUsage()` 恒 0 ⇒ `systemOverloaded()` 恒 false ⇒ `shouldDrop()` 永假；**活体佐证 = Go 自己的 stat 行 `CPU: 0m`**）⇒ 该闸只能「源码逐条对照 + go-zero 上游自带测试（`core/load`/`core/breaker` 全绿）+ RAG 侧 10 例同场景单测」取证。产出 **DRIFT-HOTAPI-026** / **DRIFT-HOTAPI-027** / **U5-OPEN-1** | ✅ **已完成**（`tools/difftest/probe-hot-protection.py`） |
 | **U6** | 404 / 405 在**真 Tomcat** 下的响应头与 body 是否逐字节同？ | `http.Error` 四行（server.go:2337-2356） | MockMvc 实测：`404 page not found\n` + text/plain + nosniff；405 无 body | ✅ **已闭合（第四轮）**：**真 Tomcat**（`RANDOM_PORT` + JDK `HttpClient`）⇒ 404 = `404 page not found\n` + `text/plain` + **`nosniff`**；405 = 裸状态码 + `Allow`、**无 body** | ✅ 已完成（`HotApiRealTomcatGateTest` 的 `#notFoundIsBareGoStyleResponse` / `#methodNotAllowedIsBareStatusCode`） |
 | **U7** | `TopK=100` 被 hot-rpc 如何解释？items 是否按热度降序？ | `logic:62-64` 硬编码 100；`hot.proto:10` 注释「默认 20，最大 100」 | `HotRpcClient:63` 硬编码 100 | **本轮按简报要求未假设对端 rpc 正确**；这属 hot-rpc 组件 | **必须与 [`hot/rpc.md`](rpc.md) 合并判读**：确认 hot-rpc 是否 clamp 到 100、是否排序、是否分页 |
 | **U8** | percent-encoding 在真 Tomcat 下的绑定值 | `url.ParseQuery` 解 `%2B`→`+` ⇒ 5 | MockMvc **不解码**（`%2B5` 原样传入）；但 `.param("page","+5")` ⇒ 5 | ✅ **已闭合（第四轮）**：**真 Tomcat** 下 `%2B5` ⇒ 解码成 `+5` ⇒ `Integer.parseInt("+5")` 接受前导 `+` ⇒ **`page=5`**，与 Go 的 `strconv.ParseInt("+5")` **等价**（两侧都接受前导 `+`）⇒ **不需要改 `GoFormValues`**（见 Pitfall P4） | ✅ 已完成（`HotApiRealTomcatGateTest#percentEncodedPlusIsDecodedAndAccepted`） |
@@ -1147,7 +1147,7 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 | 项 | 状态 | 说明 |
 |---|---|---|
 | **端到端双侧活体对拍**（D1/U1） | ✅ **本轮已闭合** | 两套栈**同时拉起**（Go hot-api + RAG hot-api + 下游同构双桩），29 条用例逐字节比**响应体 + 关键响应头** + 期望值 + **下游调用序列** ⇒ 默认配置 **24/29 通过**，并**新查出 4 条漂移**（D21~D24）；带修正配方时 **28/29**（剩下的 1 条 = D14，已移交 common 域） |
-| **超时 / 保护层四闸的活体观测**（D9/U2/U5） | 🟡 **部分闭合（第五轮）** | **超时分支已活体触发**：`CASE-21` 让请求真的拖过 3s ⇒ 两侧**都**产出 `503 + "Request Timeout\n"`（body 逐字节相同），**只差 `nosniff`**（= D14，跨域移交 common 域）。⚠️ **保护层四闸**（MaxConns / MaxBytes / CpuShedding / Breaker）**仍未构造超限请求** ⇒ 仍是静态确认 |
+| **超时 / 保护层四闸的活体观测**（D9/U2/U5） | ✅ **第八轮已闭合** | **超时**：CASE-21 让请求真的拖过 3s ⇒ 两侧都产出 `503 + "Request Timeout\n"`（body 逐字节相同），只差 `nosniff`（= D14，跨域移交 common 域）。**保护层四闸（第八轮）**：**MaxBytes** 两侧默认阈值下逐字节一致（超限 → 413 + 空 body + 无 Content-Type；边界也一致）；**MaxConns** 同阈值 8 + 16 并发 → 两侧**各 8 个裸 503**（机制等价）；**Breaker** 两侧都真的打开 → 裸 503 + 空 body。🔴 **CpuShedding 在 darwin 上 Go 侧结构性不可达**（`//go:build !linux` ⇒ `CpuUsage()` 恒 0 ⇒ 永不降载；活体佐证 = Go stat 行 `CPU: 0m`）⇒ 只能静态 + go-zero 上游测试取证 ⇒ **这是「本机不可能更强」的证据，不是「两边一致」** |
 | **客户端断连**（D3/U3） | ✅ **第七轮已闭合** | 裸 socket + SO_LINGER=0 强制 RST ⇒ Go 侧 8 个在飞 gRPC 在**断连后 1~3ms** 全部取消、**日志有 `[HTTP] 499`**；RAG 侧**等 2s deadline**、**断连后继续发下游调用**、**无任何 499 记录** ⇒ **D3 坐实** + 新产出 **DRIFT-HOTAPI-025** |
 | **变异验证**（D2/U9） | 🟡 部分 | 已对**新增的 6 条修复**做了定向变异（hash 5/5、字段序 1/1、日志面 3/3、bucket 边界 3/3）；**全组件系统变异仍未做** |
 | **端口归属**（D6） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「保持」⇒ `SD-HOT-API-009`：保持 18897（`HOT_API_PORT` 可覆盖）。⚠️ HTTP 端口**不是 wire 契约** |
@@ -1437,3 +1437,166 @@ RAG 的 499 由 **worker 内的写失败**驱动（而本组件的写发生在 w
 「**filter 写 socket 失败**（`flushTo` 抛 `IOException`）」或
 「**容器侧的客户端断连信号**」—— ⚠️ 具体方案由 common 域定，
 hot 域只提供**活体复现脚本**（`tools/difftest/probe-hot-disconnect.py`）。
+
+---
+
+## DRIFT-HOTAPI-026 —— MaxBytes 拒绝后 Go **重置连接（RST）**，RAG 干净关闭
+
+> **发现轮次**：2026-10-24 第八轮（U5 保护层四闸活体取证）
+> **类别**：OBSERVABLE DIFFERENCE（**连接层**；响应体/状态码/响应头**逐字节相同**）
+> **严重度**：LOW
+> **归属**：容器/传输层行为（Go `net/http` vs Tomcat），**非 hot 域代码** ⇒ 跨域登记
+
+### 活体实测（第八轮，`tools/difftest/probe-hot-protection.py --probe maxbytes`）
+
+两侧都跑**默认阈值** 1048576（Go `rest/config.go:53` 的 tag 默认；RAG `application.yml` 的 `rag.protection.max-bytes`）。
+
+| | **Go 真源** | **RAG** |
+|---|---|---|
+| `Content-Length: 1048577`（超限） | **413**，body **0B**，**无** `Content-Type` | **413**，body **0B**，**无** `Content-Type` |
+| 超限后连接状态 | 🔴 **RST（ConnectionResetError）** | ✅ 干净关闭（`closed`） |
+| `Content-Length: 1048576`（**恰好等于**阈值） | **200** + 业务信封（1112B） | **200** + 业务信封（1112B，**逐字节相同**） |
+
+⇒ **闸门行为本身两侧等价**：严格大于才拒（Go `maxbyteshandler.go:19` 的 `r.ContentLength > n`），
+拒绝时都是**裸 413 + 空 body + 无 Content-Type**（Go 是裸 `w.WriteHeader(413)`，RAG 是 `setStatus(413)` 且**刻意不** `sendError`）。
+
+### 唯一差异：Go 在 413 之后重置连接
+
+Go 的 `http.Server` 在 handler 返回后要处理「请求体没被读完」：
+`reqBody.Close()` 最多吞 256KB，剩下未读 ⇒ **带未读数据关连接 ⇒ 内核发 RST**。
+⇒ 客户端（哪怕已经收到 413）通常会看到 `ConnectionResetError`。
+
+RAG 侧 Tomcat 的 `maxSwallowSize`（默认 2MB）足够吞掉这 1MB ⇒ 不重置。
+
+⚠️ **实测踩到的坑**：探针第一版把「连接重置」当成了「整个请求失败」⇒ **误判成「Go 侧没实现 MaxBytes」**。
+修正后（**先看有没有拿到完整响应，再看连接状态**）才是上表的结论。
+⇒ 这条本身也是 Pitfall **P20** 的同源教训：**别把传输层的收尾差异当成业务层的失败**。
+
+### 处置
+
+🆕 **登记为已记录差异，不修**。理由：
+1. 响应（状态码 / body / 关键响应头）**逐字节相同** ⇒ wire 层无差异；
+2. 差异只在「服务端是否复用这条连接」——Go 侧因为**拒绝了一个未读完的大 body**而必须断，
+   RAG 侧 Tomcat 愿意吞掉；**这是容器策略差异，不是业务语义差异**；
+3. 真要「修」，得让 RAG 也对未读完的大 body 主动断连接 ⇒ 那是**新增行为**（Go 侧也只在
+   「body 超限」这一条路径上断，其它路径不复刻）⇒ 反而制造新的不一致。
+
+---
+
+## DRIFT-HOTAPI-027 —— MaxConns 在 RAG 侧**默认阈值下结构性不可达**（且 Go 是 per-route、RAG 是 global）
+
+> **发现轮次**：2026-10-24 第八轮（U5 保护层四闸活体取证）
+> **类别**：SEMANTIC MISMATCH（**闸门可达性** + **隔离单位**）
+> **严重度**：MEDIUM
+> **归属**：RAG 侧实现（`service/common/protection/GoStyleMaxConnsFilter`）+ 容器默认参数 ⇒ **跨域**
+
+### 活体实测（第八轮）
+
+**① 闸门机制本身：两侧等价 ✅**
+
+把两侧阈值**降到同一个值 8**（Go：`tools/difftest/conf/go/hot-api-lowmaxconns.yaml` 的 `MaxConns: 8`；
+RAG：`--rag.protection.max-conns=8`），16 个请求**完全重叠**（两侧日志都显示同一时刻起跑）：
+
+| | **Go 真源** | **RAG** |
+|---|---|---|
+| 裸 503（空 body）个数 | **8** | **8** |
+| 放行 | 5 个 200 + 3 个超时 503（合计 8 在途） | 8 个（全部超时 503） |
+| 耗时 | 3.0s | 3.0s |
+
+⇒ 拒绝数**恰好等于阈值**，形态**裸 503 + 空 body**（Go `maxconnshandler.go:34` 裸 `w.WriteHeader(503)`）
+⇒ **闸门机制两侧等价**。
+
+**② 但在默认阈值（10000）下，RAG 侧永远撞不到**
+
+| | **Go 真源** | **RAG** |
+|---|---|---|
+| 阈值 | 10000（`rest/config.go:52` tag 默认） | 10000（`rag.protection.max-conns`） |
+| 真正卡住并发的东西 | 无（`http.Server` 不限并发） | 🔴 **Tomcat `max-threads` 默认 200** ⇒ 同时在途**最多 200** |
+| 次一道坎 | — | 🔴 **Tomcat `max-connections` 默认 8192** ⇒ 第 8193 条连接在 **TCP 层**被拒（**连 HTTP 状态码都没有**） |
+| 阈值 10000 可达？ | ✅ 需 10001 个同时在途 | ❌ **不可达** |
+
+⇒ **RAG 侧这层闸门在默认部署下是死代码**：它永远等不到 10000 个在途请求。
+（Tomcat 的排队行为是「变慢」，Go 的拒绝行为是「立刻 503」——
+**这是两个不同的可观察行为**：客户端的退避/重试策略完全不同。）
+
+**③ 隔离单位也不一样**
+
+- Go：`engine.go:145-147` 在**每条路由的 chain** 里各建一个 `MaxConnsHandler`
+  ⇒ **每路由一个 10000 的信号量**，不同路由互不影响；
+- RAG：`GoStyleMaxConnsFilter` 是**全局 Filter**，只有**一个**信号量 ⇒ 所有路由共用。
+
+⇒ hot-api 只有 1 条路由 ⇒ 本组件**不可观察**；但**多路由组件**（article / message / like …）上可观察。
+
+### 处置
+
+🆕 **跨域登记，hot 域不可修**（代码在 `service/common`）。
+- `GoStyleMaxConnsFilter` 的 javadoc §2 **已经写明** Tomcat 三参数与 Go 的差异
+  ⇒ 本条是把那段**已知的静态结论升级成活体证据**（阈值 8 时两侧拒绝数完全一致 ⇒ 机制没问题）。
+- 建议 common 域与**运维**一起决定：是否把 `server.tomcat.max-threads` 调到万级，
+  以便 MaxConns 真正成为一道**可触发的**闸门；否则应把这层的默认阈值调到**可达区间**
+  （否则它只是「口径对齐」的摆设）。
+- ⚠️ **本轮未改任何一侧的默认值**：改阈值 = 改部署形态，属于用户拍板范围。
+
+---
+
+## U5-OPEN-1（开放项，未定性）—— 熔断实验中两侧 **5xx 累积速率**不同
+
+> **发现轮次**：2026-10-24 第八轮
+> **状态**：🔴 **未定性**（既不记为漂移，也不记为等价）—— 需要一次**隔离实验**才能定性
+
+### 现象
+
+在「桩切 `article-slow-short` ⇒ 补全拖过 3s HTTP 超时」的场景下打 HTTP 级熔断
+（`breakerhandler.go:19-44`，判别器 = **503 且 body 为空** vs **503 且 body = `Request Timeout\n`**）：
+
+| 轮次 | Go 真源 | RAG |
+|---|---|---|
+| 第 1 轮（12 并发 × 3 波） | 第 1 波：**9** 个超时 503；第 2 波：**2** 个熔断裸 503；第 3 波：0 | 第 1 波：9 个超时 503；第 2 波：**2** 个熔断裸 503；第 3 波：0 |
+| 第 2 轮（12 并发 × 3 波，**同一天隔几分钟重跑**） | 第 1 波：**4** 个超时 503 + **8** 个 200；第 2/3 波：**0** 个熔断裸 503 | 第 1 波：**12** 个超时 503；第 3 波：**3** 个熔断裸 503 |
+
+⇒ **两侧的 HTTP 熔断都能打开、都产出「裸 503 + 空 body」**（闸门机制 ✅ 等价）。
+⇒ 但**打开的时机**不稳定：Go 侧第 2 轮几乎没打开（0 个），RAG 侧第 1 轮 12 个请求**全部**超时。
+
+### 候选原因（两条，都还没排除）
+
+1. **客户端熔断（U4 那条）的开启时机不同** ⇒ 一旦打开，补全就变成「快速失败 + best-effort skip」
+   ⇒ 请求以 **200** 结束 ⇒ **5xx 不再累积** ⇒ HTTP 熔断就永远打不开。
+   ⇒ Go 侧第 2 轮第 1 波出现 **8 个 200**，正是这个形态。
+2. **两侧补全的「失败快慢」不同**：Go 的 `buildHotArticleItem`（`getHotArticlesLogic.go:132`）
+   用 `l.ctx`（**不传显式 deadline**）⇒ deadline = min(zrpc 的 2s, ctx 剩余)；
+   RAG 的 `HotArticleHydrator` 显式传 `remainingBudgetMs` ⇒ min(2s, 剩余)。
+   ⇒ **表达式等价**，但「剩余」的**取样时刻**可能不同（Go 在 ctx 上、RAG 在调用点各取一次）。
+
+⚠️ **已排除的一个候选**（记录下来，免得后人重查）：
+「两侧单次 gRPC deadline 不同（Go 987ms vs RAG 2s）」——**不成立**。
+987ms 那些是**第二批**（8 并发窗口用满后，第 9、10 条的 ctx 剩余只剩 ~1s）；
+Go 侧 zrpc 的超时是 `zrpc/client.go:70-71` + `TimeoutInterceptor` ⇒ **min(2s, ctx 剩余)**，与 RAG 一致。
+
+### 为什么不定性
+
+两个原因的**可观察后果相同**（都是「5xx 累积速率不同 ⇒ HTTP 熔断打开的时机不同」），
+但**修法完全不同**：① 要对齐客户端熔断的开启时机；② 要对齐「剩余预算」的取样时刻。
+⇒ **不隔离就动手 = 盲修**（这正是本仓 §3.3「先改/删错误断言，再改实现」的同类陷阱）。
+
+### 隔离实验（下一步要做的事）
+
+把**客户端熔断**从场景里摘掉：让补全的失败**不计入客户端熔断**即可
+（Go 侧 `codes.Acceptable` 把 `DeadlineExceeded` 判为**不可接受**⇒ 计入；
+可改用桩「**慢但成功**」或「**立即返回非 DeadlineExceeded 的错误**」来避开）。
+⇒ 届时两侧的 5xx 累积速率若一致 ⇒ 原因 ①；若仍不一致 ⇒ 原因 ②。
+
+⇒ **本条不阻塞 U5 的结论**：四闸里三闸已活体坐实，CpuShedding 是平台不可达。
+
+---
+
+## U5 结论（第八轮，四闸逐条）
+
+| 闸 | Go 出处 | 活体结果 | 结论 |
+|---|---|---|---|
+| **MaxBytes** | `rest/handler/maxbyteshandler.go:10-25` | 两侧**默认阈值**下：超限 → **413 + 空 body + 无 Content-Type**（逐字节相同）；**恰好等于阈值** → 两侧都放行（200 + 同一份 1112B 信封） | ✅ **EQUIVALENT**（连接层有一处已记录差异 ⇒ **DRIFT-HOTAPI-026**） |
+| **MaxConns** | `rest/handler/maxconnshandler.go:12-36` | 两侧**同阈值 8** + 16 并发 → **各 8 个裸 503（空 body）**，拒绝数恰等于阈值 | ✅ 机制 **EQUIVALENT**；⚠️ **默认阈值 10000 下 RAG 侧结构性不可达**（Tomcat 200 线程 / 8192 连接）⇒ **DRIFT-HOTAPI-027** |
+| **CpuShedding** | `rest/handler/sheddinghandler.go:20-52` + `core/load/adaptiveshedder.go` | 🔴 **darwin 上 Go 侧结构性不可达**：`core/stat/internal/cpu_other.go` 带 `//go:build !linux` ⇒ `RefreshCpu()` 恒 0 ⇒ `stat.CpuUsage()` 恒 0 ⇒ `systemOverloaded()` 恒 false ⇒ `shouldDrop()` 永假。**活体佐证**：Go 自己的 stat 行打 `CPU: 0m` | 🟡 **无法双侧活体对拍**（平台事实，非实现缺陷）⇒ 证据降级为：① 源码逐条对照；② **go-zero 上游自带测试**（`core/load` / `core/breaker`，从 module cache 复制到 /tmp 跑，**真源仓库零改动**）全绿；③ RAG 侧 `GoStyleAdaptiveShedderTest` 10 例覆盖**同一组场景**（含 `overloadedAndHighInFlightSheds`） |
+| **Breaker** | `rest/handler/breakerhandler.go:19-44` | 两侧都能**真的打开**，拒绝形态 = **裸 503 + 空 body**（与超时的「503 + `Request Timeout\n`」可区分） | ✅ 机制 **EQUIVALENT**；⚠️ **打开时机不稳定** ⇒ **U5-OPEN-1**（未定性） |
+
+> **证据强度**：MaxBytes / MaxConns / Breaker 三闸 = **双侧活体**（最强档）；
+> CpuShedding = **静态 + 上游参考测试**（本机不可能更强）。

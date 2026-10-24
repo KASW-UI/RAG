@@ -97,12 +97,30 @@ final class HotStubServer {
     public static final String MODE_ARTICLE_DRAFT = "article-draft";
     /** 20 条热榜 + article-rpc 睡 30s ⇒ 把请求拖过 HTTP 3s 超时 ⇒ 触发 503 分支。 */
     public static final String MODE_ARTICLE_SLOW = "article-slow";
+    /**
+     * **短慢**模式：10 条热榜 + article-rpc 睡 5s ⇒ 同样把请求拖过 3s HTTP 超时。
+     *
+     * <p><b>为什么需要它（U5 熔断实验的线程账）</b>：
+     * {@code article-slow} 每个请求会在 3s 内发起约 24 次 article-rpc 调用
+     * （20 条 × 8 并发窗口），而桩里每次调用都 {@code Thread.sleep(30s)} ——
+     * <b>客户端取消不会中断桩的 sleep</b> ⇒ 线程会滞留 30s。
+     * U5 的熔断实验需要几十个并发请求 ⇒ 滞留线程数 = 请求数 × 24 ⇒ 轻易上千。
+     * <p>本模式把条数压到 10（8 并发窗口 ⇒ 仍是 2 批 × 2s gRPC deadline &gt; 3s HTTP 超时，
+     * <b>超时语义不变</b>）、睡眠压到 5s ⇒ 滞留线程数降一个量级。
+     */
+    public static final String MODE_ARTICLE_SLOW_SHORT = "article-slow-short";
 
     /** 慢模式下返回的热榜条数 —— 8 并发 × 2s gRPC deadline ⇒ 需 > 8 条才能撑过 3s HTTP 超时。 */
     private static final int SLOW_ITEM_COUNT = 20;
 
+    /** {@link #MODE_ARTICLE_SLOW_SHORT} 的条数：10 条 = 8 并发窗口 + 2 条 ⇒ 仍是 2 批。 */
+    private static final int SLOW_ITEM_COUNT_SHORT = 10;
+
     /** 慢模式下 article-rpc 的睡眠时长（远大于 3s HTTP 超时与 2s gRPC deadline）。 */
     private static final long SLOW_SLEEP_MS = 30_000L;
+
+    /** 短慢模式下的睡眠时长（仍 &gt; 3s HTTP 超时与 2s gRPC deadline，但线程滞留时间短）。 */
+    private static final long SLOW_SLEEP_SHORT_MS = 5_000L;
 
     private static final Path MODE_FILE;
     private static final Path CALL_LOG;
@@ -212,9 +230,10 @@ final class HotStubServer {
             }
 
             List<HotArticleItem> items = new ArrayList<>();
-            if (MODE_ARTICLE_SLOW.equals(m)) {
+            if (MODE_ARTICLE_SLOW.equals(m) || MODE_ARTICLE_SLOW_SHORT.equals(m)) {
                 // 慢模式：条数刻意 > 并发窗口 8 ⇒ 3 批 × 2s gRPC deadline > 3s HTTP 超时
-                for (int i = 1; i <= SLOW_ITEM_COUNT; i++) {
+                int count = MODE_ARTICLE_SLOW_SHORT.equals(m) ? SLOW_ITEM_COUNT_SHORT : SLOW_ITEM_COUNT;
+                for (int i = 1; i <= count; i++) {
                     items.add(HotArticleItem.newBuilder()
                             .setArticleId(String.format("slow-%02d", i))
                             .setHotScore(1000 + i)
@@ -275,7 +294,7 @@ final class HotStubServer {
             boolean publicOnly = request.getPublicOnly();
             boolean incrView = request.getIncrView();
 
-            if (MODE_ARTICLE_SLOW.equals(m)) {
+            if (MODE_ARTICLE_SLOW.equals(m) || MODE_ARTICLE_SLOW_SHORT.equals(m)) {
                 record("GetArticle article_id=" + id + " public_only=" + publicOnly
                         + " incr_view=" + incrView + " -> SLOW");
                 // ── 计时取证：这次调用**何时**被取消？────────────────────────────────
@@ -298,7 +317,7 @@ final class HotStubServer {
                 }, Runnable::run);
                 event("ARTICLE_CALL_ENTER id=" + id);
                 try {
-                    Thread.sleep(SLOW_SLEEP_MS);
+                    Thread.sleep(MODE_ARTICLE_SLOW_SHORT.equals(m) ? SLOW_SLEEP_SHORT_MS : SLOW_SLEEP_MS);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }

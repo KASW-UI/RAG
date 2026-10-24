@@ -721,3 +721,98 @@ mvn -o -pl service/hot/hot-api test -Dtest=GoStyleGrpcClientBreakerE2ETest ...
 （注释：<i>ignore the current bucket, because of partial data</i>）
 ⇒ **只有已完成的 250ms 桶**计入统计 ⇒ 统计窗口实际是 39 个完整桶 ≈ 9.75s。
 ⇒ 写断言前必须先问「这个计数器统计的是**哪个窗口**的什么」。
+
+---
+
+## P20 · 配置副本里**把要生效的键写进注释块** ⇒ 配置「怎么配都不生效」，而**没有任何报错**
+
+> **触发**：2026-10-24 第八轮（U5 保护层四闸活体取证）
+> **代价**：**误判成「RAG 侧实现有 bug」**——差一步就把一条不存在的漂移写进台账
+
+### 现象
+
+要给 Go 侧降低 `MaxConns` 阈值做双侧对拍，于是写了一份 yaml 副本：
+
+```yaml
+#  U5 专用副本 —— MaxConns 阈值降到 8
+#  ...
+#  ⚠️ 本副本**不代表**生产配置 …
+#
+#  MaxConns: 8          # ← ⚠️ 这一行前面有个 '#' ⇒ 它是**注释**
+```
+
+启动后：Go 侧 16 个完全重叠的并发请求**一个都没被拒**（16 个全放行）⇒
+「`MaxConns` 闸在 Go 侧没生效？」⇒ 第一反应是「**RAG 侧实现有 bug**」。
+
+### 真因（三层，每层都「不报错」）
+
+1. `#  MaxConns: 8` 整行是**注释** ⇒ YAML 里**根本没有这个键**；
+2. go-zero 的 `conf.MustLoad` 对**缺失字段**套用 struct tag 的默认值
+   （`rest/config.go:52` `MaxConns int json:",default=10000"`）⇒ **静默回落 10000，不报错**；
+3. ⇒ 于是「把阈值改成 8」这件事**从未发生**，而 10000 在本机（Tomcat 200 线程）**本来就撞不到**
+   ⇒ 表现 = 「闸门像是坏的」。
+
+### 怎么防（配置类改动的通用自检）
+
+1. **配完先验解析结果**，别直接起进程：
+   ```bash
+   python3 -c "import yaml;print(yaml.safe_load(open('tools/difftest/conf/go/hot-api-lowmaxconns.yaml'))['MaxConns'])"
+   # ⇒ 必须打印 8；打印 None 就说明它还在注释里
+   ```
+   ⇒ **凡是「靠默认值也能跑」的参数，配置副本必须先验解析结果**。
+2. **阈值类实验必须先证明「阈值真的生效」**，再谈行为对拍：
+   本轮就是先看到「16 个并发全放行」才发现配置没生效的。
+3. ⚠️ **对称性提醒**：Go 侧配置错了 ⇒ Go 侧回到默认；RAG 侧参数写错 ⇒ Spring 也会回落默认
+   ⇒ **两侧都可能悄悄回到同一个默认**，于是「阈值不同」这个变量被消掉了，
+   测出来「看起来一致」其实什么都没测。⇒ **两侧都要验**。
+
+### 同源的一条：别把**传输层的收尾差异**当成**业务层的失败**
+
+同一轮里，Go 侧在 413 之后**重置连接（RST）**，探针第一版把它判成「整个请求失败」
+⇒ 差点报成「Go 侧没实现 MaxBytes」。
+
+⇒ **判定顺序必须是：① 有没有拿到完整响应（状态行 + 头 + 体）→ ② 响应内容对不对 → ③ 连接怎么收的**。
+连接状态（RST / 干净关闭 / 超时）是**独立于响应内容**的第三类观测，
+要**单独记**（本轮记成了 DRIFT-HOTAPI-026），不能混进「请求成功/失败」的二值判断。
+
+---
+
+## P21 · go-zero 的 `CpuUsage()` 在 **darwin 上恒为 0** ⇒ CPU 降载闸在 Mac 上**永不触发**
+
+> **触发**：2026-10-24 第八轮（U5 四闸的第四闸）
+> **代价**：差点把「Go 侧降载闸没实现 / 两侧行为不一致」写进台账
+
+### 事实链（go-zero v1.10.2，逐行）
+
+| 位置 | 内容 |
+|---|---|
+| `core/stat/internal/cpu_other.go:1-8` | `//go:build !linux` ⇒ `RefreshCpu()` **恒返回 0** |
+| `core/stat/usage.go:32-39` | `usage = prev*0.95 + cur*0.05`，`cur` 恒 0 ⇒ `usage` **恒 0** |
+| `core/stat/usage.go:51-53` | `CpuUsage()` 返回 `atomic.LoadInt64(&cpuUsage)` ⇒ **恒 0** |
+| `core/load/adaptiveshedder.go:245-256` | `systemOverloaded()` = `CpuUsage() >= cpuThreshold` ⇒ `0 >= 900` **恒 false** |
+| `core/load/adaptiveshedder.go:227-243` | `stillHot()` 依赖 `droppedRecently`，而它**只能由一次成功的 drop 置位** |
+| `core/load/adaptiveshedder.go:208-225` | `shouldDrop()` = (`systemOverloaded() \|\| stillHot()`) **且** `highThru()` |
+
+⇒ **第一次 drop 永远不可能发生** ⇒ `droppedRecently` 永远是 false ⇒ `stillHot()` 也永远 false
+⇒ **Go 侧的 CPU 降载闸在 macOS 上是死代码**。
+
+### 活体佐证（不用读源码也能看到）
+
+Go 自己的 stat 行（`core/stat/usage.go:82`）每分钟打一次：
+```
+"content":"CPU: 0m, MEMORY: Alloc=3.5Mi, ..."
+```
+⇒ **`0m` 就是「本平台的 CPU 采样恒 0」的实锤** ⇒ 不必去猜。
+
+### 怎么防
+
+1. **看到「平台相关的能力没生效」时，先查 `//go:build` 标签**——
+   go-zero 有多处 `!linux` 的降级实现（`cpu_other.go` 就是其中之一），
+   **在 Mac 上开发 = 在「Linux 降级版」上开发**。
+2. **这类闸不能做双侧活体对拍时，证据要换成三件套**：
+   ① 源码逐条对照；② **跑上游自带测试**（本轮：从 module cache 复制到 `/tmp` 跑
+   `core/load` / `core/breaker`，**真源仓库零改动**）；
+   ③ RAG 侧有**同场景**的单测（本轮：`GoStyleAdaptiveShedderTest` 10 例，
+   含 `overloadedAndHighInFlightSheds`，正对上游 `TestAdaptiveShedderShouldDrop`）。
+3. ⚠️ **别把「本机测不出来」写成「两侧一致」** ——
+   台账里必须写成「**无法双侧活体对拍（平台事实）**」，并把依据（`//go:build` 行号）写进去。
