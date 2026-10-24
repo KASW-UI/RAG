@@ -199,3 +199,125 @@ RAG 侧是**手写的 `HttpServlet`**（`FavoriteAuthorityEndpointConfig.Favorit
 ⚠️ **三条「照抄 Go 而不是照抄正确」的**（都是 Go 的既有行为，偏离会造成客户端行为分叉）：
 ① `Location` **二次转义**（`%` → `%25`）；② 301 的 body 末尾**两个** `\n`；
 ③ 404/401 的 body 末尾**一个** `\n`。
+
+---
+
+## PIT-FAV-RPC-006 · 🕳️ **静态调用点数不等 ≠ 行为差 —— 判据是「同一次失败，两侧各记几个」**
+
+### 现象
+
+2026-10-25 第五轮做指标 label 对照时，把两侧 `ObserveDBError` / `observeDbError` 的
+`(module, action, type)` 三元组当**多重集**一比：
+
+| | Go | RAG |
+|---|---|---|
+| `FOLDER/delete/db` | 1 | **3** |
+| `FOLDER/select/db` | 7 | **5** |
+| `ITEM/delete/db` | 1 | **3** |
+| `ITEM/insert/db` | 1 | **3** |
+
+⇒ 「4 组不等 ⇒ 有 4 处指标漂移」—— **这个结论是错的**。
+
+### 为什么会踩
+
+1. **Go 侧是「一条错误分支记一次」，Java 侧是「一个异常类型记一次」** ——
+   Go 的 `if dbErr != nil { … ObserveDBError(…) … }` 是**一段**；
+   Java 的 `try/catch` 拆成 `OwnerMismatchException` / `NotFoundException` / `DataAccessException`
+   **三个 catch 块**，每块各写一遍 `observeDbError`。
+2. ⚠️ **那三个 catch 是【互斥】的**（不同的异常类型）⇒ **一次失败只会命中其中一个**
+   ⇒ 运行时**至多记 1 次** ⇒ 与 Go 的「记 1 次」**完全一致**。
+3. 反方向也成立：Go 的两处独立 select 分支，RAG 可能**合并进同一个 catch**
+   ⇒ 一次失败仍只记 1 次 ⇒ 静态点数 7↔5，运行时仍是 1↔1。
+
+⇒ **静态调用点数根本不是行为等价性的判据。**
+
+### 怎么不再踩
+
+⇒ **判据换成「同一次失败，两侧各记几个、记成什么」**，逐个失败分支对着看。
+
+⚠️ 差点把它记成一条新漂移 —— 记下来当反面教材。
+⇒ 台账落点：[`../../DRIFT/favorite/rpc.md`](../../DRIFT/favorite/rpc.md) §11.5（口径说明，**不记入漂移条目**）。
+
+⚠️ 顺带更正 `tools/metrics-probe/favorite/README.md` 的「已知边界」：
+「不覆盖 `ObserveDBError` 的标签取值」这半句**对**（两侧都显式传参，没有 Go 的 defer/命名返回值那类语言层陷阱），
+但它**没有回答**「标签取值本身两侧是否一致」⇒ §11.5 把这一问补上了（结论：一致）。
+
+---
+
+## PIT-FAV-RPC-007 · 🕳️ **登记 ≠ 签字；签字前必须复核「两侧确实不同」这个前提**
+
+### 现象
+
+用户 2026-10-25 拍板「全部登记为签字」，本域当时有 **7 条**待签字。
+本轮在落实签字（改状态行）时**逐条复核前提** ⇒ **查出 1 条前提根本不成立**：
+
+`DEV-FAV-RPC-002` 登记的是「Go 侧 `create_favorite_logic.go:89` 与
+`get_favorites_by_folder_logic.go:68` 都在 **item** 流程里用了 `folderModule` ⇒ Go 侧写错了」。
+
+⇒ 逐行核对 Go 真源才发现：**那两行不是 item 流程，是【收藏夹查询】的失败分支**
+（`create_favorite_logic.go:79` 是 `FindFolderByFolderId`、
+`get_favorites_by_folder_logic.go:58` 是 `FindFolderByFolderId`）
+⇒ `folderModule` **本来就是对的** ⇒ **两侧一直一致，从未偏离** ⇒ **该条撤销，不该被签**。
+
+### 为什么会踩
+
+1. **「两侧不同」是登记的前提，而登记时只看了「label 看着像不对」** ——
+   没去看**那行代码处在哪个分支**。
+2. ⚠️ **同一个坑在本域犯了两次**：
+   本台账 §2 的 D5/D6 早已写明「Go 侧全部自洽，错的是 RAG 侧的映射」——
+   **同一个「看错分支」的错**，在 metrics 域重犯了一遍。
+3. ⚠️ **签名会让错误结论「转正」**：一旦签了字，后来人就有了「这已经审过了」的印象
+   ⇒ 再也没人会去核前提。
+
+### 怎么不再踩
+
+⇒ **签字 = 复核，不是盖章**：每条签字前，把「两侧确实不同」这个前提**重新验一遍**（带行号）。
+⇒ 前提不成立的 ⇒ **撤销**，并把**证伪过程**写进撤销记录（保留原结论原文，便于追溯）。
+
+⚠️ **别把「撤销」当成「没做过」** —— 撤销记录本身就是产出：
+它证明这条**被查过、且被证伪**，比「压根没注意到」强。
+⇒ 落点：[`../../Intentional_Deviations/favorite/rpc.md`](../../Intentional_Deviations/favorite/rpc.md)
+「撤销记录 · DEV-FAV-RPC-002」+ [`../../DRIFT/favorite/rpc.md`](../../DRIFT/favorite/rpc.md) §11.4。
+
+---
+
+## PIT-FAV-RPC-008 · 🕳️ **wire 形状漂移：状态码与业务码都测不出来 ⇒ 必须逐字段断言响应体**
+
+### 现象
+
+v2 权威读端点返回的 `subject_ref` 是 **v1 的三字段**（`authority_id` / `tenant_id` / `subject_id`），
+而 Go 的 v2 是 **两字段**（`issuer` / `subject_id`）。
+
+⚠️ **这个 bug 在此前的全部测试下都是绿的** —— 因为：
+· 状态码 **200** ✅ 一致；· 业务码 ✅ 一致；· v1 端点的形状 ✅ 本来就对；
+· 「v2 端点多了一个字段」这件事，**任何不逐字段断言响应体的测试都发现不了**。
+
+⇒ 下游 binder（BTW）**按字段名解析** ⇒ `issuer` 取不到、`tenant_id` 多出来 ⇒ **解析失败**。
+
+### 为什么会踩
+
+1. 🔴 **Go 的 v2 入口不是「另一个读法」，而是「读完之后多一步【压扁】」**：
+   `AuthoritativeFavoriteFactV2`（favorite_authority.go:195-204）在 resolve 之后
+   把 v1 的三字段 `subject_ref` **压成**两字段（`authority_id` → `issuer`，**丢掉** `tenant_id`）。
+   ⇒ **漏掉这一步 ⇒ 形状就错**，而**读的部分完全正确** ⇒ 完美躲过所有功能断言。
+2. ⚠️ **RAG 侧的两条 javadoc 把这件事写对了**（`FavoriteAuthorityLookupService` 的类注释
+   明写「v2 的 `subject_ref` 是两字段，可直接用 `Wire.AuthorityFact`」）
+   ⇒ **注释对、实现漏** ⇒ 光读注释更会以为已经做了。
+3. ⚠️ **「形状对不对」与「值对不对」是两种断言** —— 前者要看**字段集合**，
+   后者只看值 ⇒ 只断言值的话，`{issuer, subject_id, tenant_id}` 里的 `issuer` 值是对的 ⇒ 照样绿。
+
+### 怎么不再踩
+
+⇒ **形状类契约必须断言「字段集合」，不是断言「值」**：
+`assertEquals(Set.of("issuer","subject_id"), fieldNames(subjectRef))` ——
+**多一个字段少一个字段都要红**。
+
+⇒ **再用类型系统把这件事钉死**：`authoritativeFactV2` 的**返回类型**从 `FactV1` 改成
+`Wire.AuthorityFact` ⇒ 「返回三字段形态」**编译不过** ⇒ 不靠注释提醒。
+
+⇒ **变异验证**（本轮两条，都转红）：
+· M1 `issuer` 误取 `tenantId` ⇒ `expected: <rtw.identity> but was: <platform>`；
+· M2 **完整回退修复** ⇒ 精确报出**修复前的真实形状** `实际=[authority_id, subject_id, tenant_id]`。
+
+⇒ 落点：[`../../DRIFT/favorite/rpc.md`](../../DRIFT/favorite/rpc.md) §11.2 + 回归网
+`FavoriteAuthorityV2ResponseShapeTest`（3 例，真 PG 端到端）。

@@ -57,10 +57,17 @@ import java.time.Instant;
  * ⇒ <b>新增失败分支时漏设 RESULT_FAIL，指标就会把失败记成 success</b>。
  * ⇒ 由 {@code FavoriteRpcMetricsResultTagTest} 逐条守住。
  *
- * <p><b>③ 两处 {@code module} label 写错</b>：{@code create_favorite_logic.go:89} 与
- * {@code get_favorites_by_folder_logic.go:68} 都在 <b>item</b> 流程里用了
- * {@code folderModule}。本实现<b>按 Go 原样保留</b>（改 label 代价低但属于契约变更，
- * 需另行拍板），并在调用点用注释标出。
+ * <p><b>③ 两处 {@code module} label：Go 侧是对的，本实现与 Go 一致</b>：
+ * {@code create_favorite_logic.go:89} 与 {@code get_favorites_by_folder_logic.go:68}
+ * 这两处都紧跟在 <b>{@code FindFolderByFolderId}（收藏夹查询）</b>的失败分支之后
+ * ⇒ 记 {@code folderModule} <b>正确</b>；
+ * 而<b>收藏条目</b>的读失败分支（{@code get_favorites_by_folder_logic.go:84}、
+ * {@code create_favorite_logic.go:130}）记 {@code itemModule}。
+ * <p>⚠️ <b>2026-10-25 更正</b>：此前本注释写的是「Go 侧这两处 label 写错、本实现按 Go 原样保留」——
+ * 那是<b>看错了分支</b>（把「收藏夹查询失败」误认成「item 流程」）。
+ * ⇒ 逐行核对 Go 真源后确认：<b>Go 侧自洽、RAG 侧也自洽 ⇒ 两侧一致</b>，
+ * ⇒ 原登记的 {@code DEV-FAV-RPC-002}「Go 侧 label 写错」<b>前提不成立，已撤销</b>
+ * （见 {@code docs/Intentional_Deviations/favorite/rpc.md} 的撤销记录）。
  */
 @Component
 public class FavoriteRpcMetrics {

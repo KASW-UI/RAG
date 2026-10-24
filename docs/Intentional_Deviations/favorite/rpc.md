@@ -3,9 +3,15 @@
 # 有意偏离档 · `service/favorite/favorite-rpc`
 
 > **核对时间：2026-10-25**
+> ✅ **2026-10-25 用户已签字**：**3 条**（DEV-FAV-RPC-001 / -003 / -004）——
+> 「**保留现状，登记为签字偏离**」⇒ 审查时**不必重复质疑**，但**也不得「顺手修回 Go 行为」**。
+> ⚠️ **本档有 2 条已撤销**：
+> · **DEV-FAV-RPC-002**（2026-10-25 第五轮）—— **前提被逐行核对证伪** ⇒ 它**不是**偏离 ⇒ 撤销；
+> · **DEV-FAV-RPC-005**（2026-10-25 第四轮）—— U4 已修 ⇒ 不再是偏离 ⇒ 撤销。
+> ⇒ **现存 3 条已签字 + 2 条已撤销**。
 > ⚠️ 本档的条目分两类：
-> · **DEV-FAV-RPC-xxx** —— 已确认「两侧确实不同」且判定「不修回去」的偏离（**待签字**）；
-> · **U5 撤销** —— 原 U5 条目**前提被实测证伪** ⇒ 它**不是**偏离，见下方「撤销记录」。
+> · **DEV-FAV-RPC-xxx** —— 已确认「两侧确实不同」且判定「不修回去」的偏离（**已于 2026-10-25 全部签字**）；
+> · **撤销记录** —— 原条目**前提被实测证伪** ⇒ 它**不是**偏离，见下方「撤销记录」。
 
 ---
 
@@ -33,7 +39,20 @@
 
 ---
 
-## DEV-FAV-RPC-001 · 🟡 **待签字** · `favorite_request_seconds_counter` 的 Prometheus 渲染名
+## 撤销记录 · DEV-FAV-RPC-002（Go 侧两处 `module` label 写错，RAG 原样保留）· ❌ **撤销**
+
+| | 内容 |
+|---|---|
+| **原结论（2026-10-25 第三轮）** | 「Go 侧 `create_favorite_logic.go:89` 与 `get_favorites_by_folder_logic.go:68` 都在 **item** 流程里用了 `folderModule` ⇒ **Go 侧 label 写错**；RAG 侧**按 Go 原样保留** ⇒ 属有意偏离。」 |
+| **实测证伪（2026-10-25 第五轮）** | ① **那两行不是 item 流程**，而是<b>收藏夹（folder）查询</b>的失败分支：<br>· `create_favorite_logic.go:79` 是 `FindFolderByFolderId` ⇒ 其失败分支的 `:89` 记 `folderModule` —— <b>正确</b>；<br>· `get_favorites_by_folder_logic.go:58` 是 `FindFolderByFolderId` ⇒ 其失败分支的 `:68` 记 `folderModule` —— <b>正确</b>。<br>② 真正的 <b>item</b> 读失败分支在别处：`get_favorites_by_folder_logic.go:81`（`FindFavoritesByFolderId`）⇒ `:84` 记 `itemModule`；`create_favorite_logic.go:122`（`FindFavoriteByFolderTarget`）⇒ `:130` 记 `itemModule` —— <b>也都正确</b>。<br>③ ⇒ **Go 侧 18 处 `ObserveDBError` 的 label 全部自洽**（label 恒等于被操作对象的模块）。 |
+| **RAG 侧核实** | `FavoriteDomainService` 的两处调用点注释与实现**同样自洽**：<br>· `:657-659`「Go: get_favorites_by_folder_logic.go:84 ⇒ `ObserveDBError(**itemModule**…)`，<b>上一行的收藏夹读失败才是 folderModule（Go: :68）—— 两者不可混</b>」—— <b>逐字正确</b>；<br>· `:376-377`「Go: delete_favorite_folder_logic.go:88 ⇒ `ObserveDBError(**folderModule**, "delete", "db")`」—— <b>逐字正确</b>。 |
+| **结论** | 🔴 **两侧本来就一致 ⇒ 不存在偏离，无需签字** ⇒ **本条撤销**。<br>⇒ 原登记之所以出错，是把「收藏夹查询失败分支」误读成了「item 流程」—— 即<b>看错了分支</b>，不是 Go 的缺陷。<br>⇒ 同源提醒：本台账 §2 的 D5/D6 早已写明「Go 侧全部自洽，错的是 RAG 侧的映射，已修」—— **本条与 D5/D6 是同一个坑的两次重犯**。 |
+| **连带修正** | `FavoriteRpcMetrics` 的 javadoc ③ 原写「两处 `module` label 写错…本实现按 Go 原样保留」⇒ 这是 AGENTS.md §3.3.2 点名的<b>错误「Go: …」断言</b>，已改正为「Go 侧是对的，本实现与 Go 一致」。 |
+| **守门** | `FavoriteRpcMetricsResultTagTest`（4 例，运行时断言）+ 本条撤销记录里的行号证据（逐行可复核）。 |
+
+---
+
+## DEV-FAV-RPC-001 · ✅ **已签字** · `favorite_request_seconds_counter` 的 Prometheus 渲染名
 
 | | 内容 |
 |---|---|
@@ -43,24 +62,22 @@
 | **为什么接受** | 改名的代价是**观测断档**（Prometheus 侧 `rate(favorite_request_seconds_counter[5m])` 立刻失效）；而 Go 的这个指标本身是**「累计秒数的计数器」**（`CounterVec.Add(time.Since(started).Seconds())`，不是 Histogram）⇒ 把它换成 Timer 会把语义从「累计」变成「分布」，那是**另一个指标**而不是同一个指标的修正。 |
 | **什么时候会变成真差异** | 若看板/告警按 Go 的旧名写 ⇒ 迁到 RAG 后该查询**静默返回空**（不是报错）⇒ 需要同步改看板。 |
 | **守门** | `FavoriteRpcMetricsResultTagTest#metricNamesMatchGo` 钉住 Micrometer 侧的 counter 名。 |
-| **状态** | 🟡 **待签字** |
+| **状态** | ✅ **已签字**（2026-10-25，用户 Jason：**保留现状，登记为签字偏离**）—— **不是缺陷**；改动需**重新征签**<br>⚠️ **签字附带的前置动作**：迁移看板 / 告警时**同步**改用 `favorite_request_seconds_counter_total` ⇒ ⚠️ Prometheus 里改名后是**静默返回空**（不是报错）⇒ 不改就会得到「看起来没数据」的假象。 |
 
 ---
 
-## DEV-FAV-RPC-002 · 🟡 **待签字** · Go 侧两处 `module` label 写错，RAG 原样保留
+## ~~DEV-FAV-RPC-002~~ · ❌ **已撤销**（2026-10-25 第五轮）
 
-| | 内容 |
-|---|---|
-| **Go 行为** | `rpc/internal/logic/create_favorite_logic.go:89` 与 `rpc/internal/logic/get_favorites_by_folder_logic.go:68` 都在 **item** 流程里用了 `folderModule`（⇒ 这两条 item 相关的指标被打上 `favorite_folder` 标签）。 |
-| **RAG 行为** | **按 Go 原样保留**（同一处 label 错配）。 |
-| **为什么接受** | label 是**指标契约的一部分**：改了它，两侧的看板/告警就不可比 ⇒ 属「要改必须两侧同时改 + 迁移看板」的决策，不属「顺手修」。 |
-| **什么时候会变成真差异** | 若按 Go 的意图修正（改成 `itemModule`），则**与 Go 不一致** ⇒ 那时本条从「保留」变成「有意偏离」，需反向登记。 |
-| **守门** | RAG 侧调用点有注释标出（`FavoriteRpcMetrics` 的 javadoc ③）。 |
-| **状态** | 🟡 **待签字** |
+> **Go 侧两处 `module` label 写错，RAG 原样保留** ⇒ **前提被证伪，撤销**。
+> ⇒ 完整记录见本档上方的「撤销记录 · DEV-FAV-RPC-002」，
+> 逐条行号证据见 [`../../DRIFT/favorite/rpc.md`](../../DRIFT/favorite/rpc.md) §10.8。
+>
+> ⚠️ **别把这条当新回归去「修」**：它**从来不是偏离** ——
+> 那两行是**收藏夹查询**的失败分支，`folderModule` 本来就是对的 ⇒ **Go 与 RAG 一直一致**。
 
 ---
 
-## DEV-FAV-RPC-003 · 🟡 **待签字** · preflight 的退出码 → 结构化日志（U2）
+## DEV-FAV-RPC-003 · ✅ **已签字** · preflight 的退出码 → 结构化日志（U2）
 
 | | 内容 |
 |---|---|
@@ -70,11 +87,11 @@
 | **为什么接受** | `System.exit` 会杀掉同 JVM 的 gRPC 服务 ⇒ 不可接受；日志形态是 Spring 侧唯一安全的替代。 |
 | **什么时候会变成真差异** | CI 门禁若按 Go 的退出码写 ⇒ 在 RAG 上**永远拿不到退出码** ⇒ 必须改成解析日志（`outcome=not_reconciled`）⇒ 门禁脚本需要同步改造。 |
 | **其它已知差异** | Go 的 `context.WithTimeout(ctx, 2*time.Minute)`（单次预检最多 2 分钟）在 RAG 侧**未设**（Spring 进程内无法安全中断长事务）⇒ 已在 `FavoriteLegacyPreflightRunner` 的 javadoc 注明。 |
-| **状态** | 🟡 **待签字** |
+| **状态** | ✅ **已签字**（2026-10-25，用户 Jason：**保留现状，登记为签字偏离**）—— **不是缺陷**；改动需**重新征签**<br>⚠️ **强制来源**：`System.exit` 会**杀掉同 JVM 里的 gRPC 服务** ⇒ 物理上不可能照抄 Go 的退出码。<br>⇒ **签字附带的前置动作**：CI 门禁**必须**改为解析日志（`outcome=not_reconciled`）⇒ 按 Go 的退出码写的门禁在 RAG 上**永远拿不到退出码**。 |
 
 ---
 
-## DEV-FAV-RPC-004 · 🟡 **待签字** · 权威读端点的部署形态（U1）
+## DEV-FAV-RPC-004 · ✅ **已签字** · 权威读端点的部署形态（U1）
 
 | | 内容 |
 |---|---|
@@ -83,7 +100,7 @@
 | **为什么接受** | Go 的形态是「4 个进程合并成 1 个 JVM」的必然结果（`cmd/fact-dispatch` / `cmd/fact-authority` / `cmd/fact-legacy-preflight` 在 Go 侧都不注册任何 gRPC method）⇒ RAG 侧把「进程边界」降级为「配置项」。**默认关闭 ⇒ 默认零副作用**。 |
 | **⚠️ 剩余可观察差异（Go 侧原台账未列全）** | ① **配置不完整时 Go 进程起不来、RAG 照常跑** ⇒ 监控探针看到的是「服务活着但端点不存在」。<br>② **无启动前 DB 探活**（RAG 的 DB 探活时机不同）。<br>③ **HTTP server 的超时值不同**（Go 3s/5s vs Spring Boot 默认）。<br>④ **优雅关闭超时不同**（Go 5s）。 |
 | **什么时候会变成真差异** | 开启该开关时（部署形态变更）⇒ ① 最需要留意：下游（BTW）会拿到连接被拒，而不是像 Go 那样整个进程不存在。 |
-| **状态** | 🟡 **待签字** |
+| **状态** | ✅ **已签字**（2026-10-25，用户 Jason：**保留现状，登记为签字偏离**）—— **不是缺陷**；改动需**重新征签**<br>⚠️ **强制来源**：「Go 的 4 个进程合并成 1 个 JVM」是**已拍板**的架构决策 ⇒ 进程边界降级为配置项是必然结果；且**默认关闭 ⇒ 默认零副作用**。<br>⇒ **签字附带的前置动作**：**开启该开关之前**必须补「就绪探针」⇒ 否则监控只会看到「进程活着但端点不存在」，下游（BTW）拿到的是**连接被拒**。 |
 
 ---
 

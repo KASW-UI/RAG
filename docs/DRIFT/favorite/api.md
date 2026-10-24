@@ -16,8 +16,8 @@
 |---|---|
 | 落地形态 | 31 个 main 文件 / 2,920 行 / 13 个 DTO / 7 个 Service / 1 个 Controller |
 | 测试 | **5 个测试类 / 84 例全绿**（33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + **8 真 Tomcat 门禁**）→ 第三轮 **+1 个测试类 / +8 例** |
-| 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条待签字偏离** |
-| 未决 | **1 条待签字**（401 body 形态）+ **1 条 OBS**（500 兜底 body）+ **1 条跨域待拍板**（容器层参数上限口径） |
+| 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条已签字偏离** |
+| 未决 | **1 条已签字**（401 body 形态，✅ 2026-10-25 用户签字）+ **1 条 OBS**（500 兜底 body）+ **1 条跨域待拍板**（容器层参数上限口径 ⇒ 收口在 `global`） |
 | 本台账范围 | **仅 `favorite-api`**。`favorite-common` / `favorite-rpc` / `favorite-proto` 见同目录另三份台账 |
 
 ---
@@ -189,9 +189,9 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 
 ---
 
-## 3. ⚠️ 未决 / 待签字
+## 3. ⚠️ 未决 / 已签字偏离
 
-### DEV-FAV-API-001（**待签字**）· 401 响应的 body 形态
+### DEV-FAV-API-001（✅ **已于 2026-10-25 签字**）· 401 响应的 body 形态
 
 | | Go | RAG |
 |---|---|---|
@@ -199,7 +199,10 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 | 黑名单命中 | `checkblacklist_middleware.go:39-45` ⇒ 401 + **两字段**（无 `data`） | 同上（三字段） |
 
 ⇒ **HTTP 状态码 401 与 code 5004 都对齐**，差的是 body 的字段集合 ⇒ 表达层差异。
-⇒ 登记在 [`../../Intentional_Deviations/favorite/api.md`](../../Intentional_Deviations/favorite/api.md)，**待签字**。
+⇒ 登记在 [`../../Intentional_Deviations/favorite/api.md`](../../Intentional_Deviations/favorite/api.md)，
+✅ **2026-10-25 用户签字**（「保留现状，登记为签字偏离」）。
+⇒ ⚠️ 签字时一并明确：**follow 域选「Go 逐字」、本域选「三字段 envelope」**，两域做法不一致，
+但**状态码与业务码完全一致** ⇒ **按现状签，不改任何一方**；若将来要统一口径，**需同时动两个域并重新征签**。
 
 > ⚠️ 此前两个类（`GlobalExceptionHandler` / `FavoriteJwtAuthInterceptor`）都把这称为
 > 「属 AGENTS.md **§3.4** 已登记的表达层差异」—— **§3.4 是 proto 复制那一节**，与本条无关 ⇒ 已改正。
@@ -234,7 +237,7 @@ Go 的 `RecoverHandler` 写 **500 + text/plain**（`http.Error`）；RAG 的 `ha
 | **servlet filter 链真生效** | ✅ **已验**（2026-10-25 第三轮） | `FavoriteApiRealTomcatGateTest`（**8 例**，`webEnvironment = RANDOM_PORT` ⇒ **真 Tomcat**）：MaxBytes → **413 + 空 body + 无 Content-Type**、413 **压过** 401、未超限仍 401、三旋钮各自生效 ⇒ **真容器的 chain 里真的跑了它**（不再只是「Bean 存在 + `@Order` 一致」） |
 | **容器层参数上限的精确口径** | ✅ **已验** | 4 组判别用例（真 Tomcat）⇒ Tomcat 数**总「值」数（含空值）**、Go 数**非空值数** ⇒ 残余窗口见 §3 |
 | **Go 侧「非空值 >2048」时的逐字节响应** | 🟡 **源码级** | Go 侧 handler 的 `httpx.OkJsonCtx` 形状已逐字核对（`get_favorites_by_folder_handler.go:18-26`）+ 码值/文案已核（`errmsg.go:16,51`）⇒ 期望值 **HTTP 200 + `{code:5003, msg:"参数错误", data:null}`**；但**未跑起 Go 侧 favorite-api** ⇒ 无双侧活体对拍 |
-| 真实 gRPC 链路上的 description 保真 | 🔴 **未验** | common 侧探针验的是「构造出的 Status 对象」，不是「真 channel 传输后的字节」 |
+| 真实 gRPC 链路上的 description 保真 | ✅ **已验**（2026-10-25 第四轮） | `FavoriteGrpcErrorWireFidelityTest`（**4 例**，`favorite-common`，**真 in-process gRPC**）⇒ description 与 `FavoriteErrorMessages.getMsg(码)` **逐字节相同**、经 `bizCodeFromError` **能还原回原业务码**（含唯一只能靠文案反查的 **5304**）、标准 gRPC 码在链路上保真 ⇒ **变异**（去掉 `withDescription`）⇒ **3 例转红** ⇒ 不是假绿 |
 | Go 侧 `httpx.Parse` 的入参解析矩阵 | ✅ **已验** | RAG 侧的 DTO 注释记录了 go-zero v1.10.2 真源探针的实测矩阵（缺席/null/类型不符/空串/重复参数/key 大小写），并由 `FavoriteApiInputContractTest`（33 例）守住 |
 | `goFormFirstValue` 的两段语义 | ✅ **已验** | 「先滤空值、再取首值」逐条复刻（`FavoriteApiSupport:327-350`），重复参数 `?folderId=123&folderId=456` ⇒ Go 123 / Spring 逗号拼接会失败 —— 两者已刻意分开 |
 | `GET /folder/list` 的空 struct body 校验 | ✅ **已验** | Go `httpx.Parse` 无条件跑 `ParseJsonBody` ⇒ 非法 body ⇒ 5003；RAG 用 `assertGoEmptyStructBody` 复刻（`FavoriteController:234-263`） |

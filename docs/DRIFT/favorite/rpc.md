@@ -21,7 +21,7 @@
 | 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射） |
 | 构建 | `mvn -o -pl service/favorite/favorite-rpc -am install` ⇒ **BUILD SUCCESS** |
 | 本轮发现并修复 | **6 处 L2 语义偏差**（§2）+ **2 处实现期真 bug**（§3） |
-| 未决 | **7 条**（§5），其中 3 条是**待签字的有意偏离** |
+| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / 1 条待外部输入 / 1 条环境受限）⇒ **最新状态见 §10.10** |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -119,6 +119,10 @@ RAG 侧 `ArticleRpcClient.getPublicArticle` **固化了同样两个参数**。
 
 ## 5. ⚠️ 仍未决（7 条）
 
+> ⚠️ **本表的状态已被 §10.10 取代**（2026-10-25 第五轮）：
+> U1 / U2 / U6 → **已签字**；U4 → **已修**；U5 → **已撤销**；U3 → **待外部输入**；U7 → **环境受限**。
+> ⇒ 读本表请以 §10.10 为准，下表保留 2026-10-23 的原始登记以便追溯。
+
 > **纪律**：本表任一条**都没有**「已修」的断言。核对日期一律 2026-10-23。
 
 | # | 项 | 现状 | 待谁拍板 |
@@ -127,11 +131,13 @@ RAG 侧 `ArticleRpcClient.getPublicArticle` **固化了同样两个参数**。
 | **U2** | **preflight 的退出码语义** | Go 是独立进程 ⇒ 退出码即门禁。Java 进程内**刻意不调 `System.exit`**，改结构化日志（`outcome=succeeded` / `not_reconciled` / `failed` + `error_code`） | CI 需改为**解析日志**判门禁 |
 | **U3** | `zrpc.RpcServerConf.Mode` 的取值域 | **不在本仓库**（Go 侧 `etc/favorite.yaml` 只有 `Mode: dev`）⇒ 用 Spring profile `dev` / `test` 映射 | 需 Go 侧取值域清单 |
 | **U4** | **authority lookup 的 3s 超时** | Go 用 `context.WithTimeout(3s)` 约束 DB 查询；Java 侧走 Hikari `connection-timeout` ⇒ **未对齐** | ✅ **2026-10-25 第四轮已修**（见 §10）⇒ 本行保留作历史 |
-| **U5** | **`ObserveRPC` 的 `result` 标签** | Go 侧 **21 处**错误返回因未赋值命名返回值 `err`，被记成 **`success`**。Java 侧**按真实结果计数**（成功 `success`、异常 `fail`） | **有意的指标行为变更，未签字** ⇒ 需走 `docs/Intentional_Deviations/` |
+| **U5** | **`ObserveRPC` 的 `result` 标签** | Go 侧 **21 处**错误返回因未赋值命名返回值 `err`，被记成 **`success`**。Java 侧**按真实结果计数**（成功 `success`、异常 `fail`） | ❌ **已撤销**（2026-10-25 第二轮实测证伪）⇒ 见 §9.3 |
 | **U6** | `favorite_request_seconds_counter` 指标名 | Micrometer Counter 会追加 `_total`（Go `client_golang` 不会）⇒ 保留不改 | 与 U5 一并拍板 |
 | **U7** | **双侧活体对拍 + 变异验证** | 未做。Go 侧 `etcd` / Kafka 依赖不可拉起 | 需要一套能同时拉起两侧的环境 |
 
-> ⚠️ **U5 / U6 是「已实现但未签字」** —— 按 AGENTS.md §0 的约定，**看到它们变红不要当新回归去「修」**。
+> ⚠️ **本表状态已被 §10.10 取代**（2026-10-25 第五轮）：**U5 已撤销**（前提被实测证伪）、
+> **U6 已签字**（= DEV-FAV-RPC-001）⇒ **不要再把 U5 当成「待签字的指标行为变更」**，
+> 也**不要**因为 U6 的指标名与 Go 不同就去「修」——它是**已签字的有意偏离**。
 
 ---
 
@@ -371,3 +377,93 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 | `tools/authority-path-probe/favorite/run.sh` | **EXIT=0**（Go 侧 15 行矩阵 == `expected.txt`；Java 侧断言全绿） |
 | `tools/errmsg-probe/favorite/run-parity.sh` | **EXIT=0**（108 行 sha256 一致） |
 | `tools/metrics-probe/favorite/run.sh` | **EXIT=0** |
+
+---
+
+## 11. 2026-10-25 第五轮（`align/favorite` 工作树 · 基线 commit 58e8314 · 承 `8cfced5`）
+
+> ⚠️ **本节同样只追加，不修改 §0–§10。**
+> 本轮目标：① 落实用户 2026-10-25 的签字决定（7 条全登记）；
+> ② 在落实过程中**逐条复核签字前提** ⇒ **查出 1 条前提不成立的偏离（已撤销）**；
+> ③ 查出并修复 **1 条新的 L1 wire 漂移**（v2 响应体形状）。
+
+### 11.1 ✅ 签字批次（用户 2026-10-25 拍板）
+
+| 文件 | 条目 | 结论 |
+|---|---|---|
+| `docs/Intentional_Deviations/favorite/api.md` | DEV-FAV-API-001（401 body 形态） | ✅ **已签字** —— 「保留现状，登记为签字偏离」；⚠️ 签字时一并明确：**follow 域选「Go 逐字」、本域选「三字段 envelope」**，两域做法不一致，但**状态码（401）与业务码（5004）完全一致** ⇒ 按现状签，**不改任何一方** |
+| `docs/Intentional_Deviations/favorite/common.md` | DEV-FAV-COMMON-001 / -002 | ✅ **已签字** —— 两条的**豁免依据都是「不可达」**（favorite 域 56 个 `GRPCError` 调用点**没有一个**传 `codes.OK`；实际 error **全部**来自 gRPC stub）⇒ 各自附了「若将来出现该形态，必须先回来重评」的前置动作 |
+| `docs/Intentional_Deviations/favorite/rpc.md` | DEV-FAV-RPC-001 / -003 / -004 | ✅ **已签字** —— 各自附了前置动作（迁看板时改指标名 / CI 门禁改解析日志 / 开启开关前补就绪探针） |
+| `docs/Intentional_Deviations/favorite/rpc.md` | **DEV-FAV-RPC-002** | ❌ **本轮撤销**（见 §11.4）⇒ **不在签字范围内** |
+
+> ⚠️ **共享索引未动**：`docs/Intentional_Deviations/_INDEX.md` 属共享面（AGENTS.md §5.3）⇒ 本轮**不碰**。
+> ⇒ **合并后需主会话统一更新**：已签字条数 49 → **51**（新增 API-001 / COMMON-001 / COMMON-002 / RPC-001 / RPC-003 / RPC-004 共 6 条；若主会话按「撤销也算登记过」计，则为 52）。
+
+### 11.2 🔴 D3 · v2 权威读端点的响应体形状错误（**新发现并已修**）
+
+> 🔴 **这是本轮挖出的 L1 wire 漂移**，此前**没有任何测试覆盖**。
+
+| | 内容 |
+|---|---|
+| **Go 行为** | `internal/model/favorite_authority.go:195-204` 的 `AuthoritativeFavoriteFactV2` 把 resolve 的结果**压扁**成 v2 形状：`SubjectRef: FavoriteSubjectRefV2{Issuer: fact.SubjectRef.AuthorityID, SubjectID: fact.SubjectRef.SubjectID}`。<br>⇒ `FavoriteSubjectRefV2`（`favorite_fact.go:86-89`）**只有 2 个字段**（`issuer` / `subject_id`）⇒ **v2 的 `subject_ref` 里没有 `tenant_id`**（Go 注释：*"The legacy fixed platform slot is deliberately absent from the v2 EventSpec"*）。 |
+| **RAG 修复前** | `FavoriteAuthorityLookupService#authoritativeFactV2` **直接返回 `FactV1`**（三字段：`authority_id` / `tenant_id` / `subject_id`）⇒ **v2 端点把 v1 的形状发给了下游**。 |
+| **后果** | 下游 binder（BTW）**按字段名解析** ⇒ 取不到 `issuer`、多出 `tenant_id` ⇒ **解析失败**。<br>⚠️ **为什么此前测不出来**：v1 端点的形状本来就对，v2 端点只是「多了字段」⇒ 断言状态码 / 断言业务码**都区分不出来** ⇒ 必须**逐字段断言响应体**。 |
+| **修法** | ① `FavoriteAuthorityFact.toV2(FactV1)` —— 新增纯函数做那一步压扁（`tenant_id` **丢弃**、`authority_id` **改名** `issuer`）；<br>② 🔴 `authoritativeFactV2` 的**返回类型**从 `FactV1` 改成 `Wire.AuthorityFact` ⇒ **编译器级约束**：Go 的 v2 入口返回的**就是**两字段形状，若还返回 `FactV1` 则**编译不过** ⇒ 不靠注释提醒；<br>③ 端点的响应体变量改成 `Object`（v1/v2 是两种不同的 wire 形状，Jackson 按运行时类型序列化）。 |
+| **为什么复用 `Wire.AuthorityFact`** | 它与 Go 的 `FavoriteAuthorityFactV2` **逐字段逐 tag 一致**（event / subject_ref / predecessor_event_id(omitempty) / technical_receipt / source_event_hash）⇒ 不另立类型 —— 与本类已复用 `Wire.Event` / `Wire.TechnicalReceipt` 同一理由（`FavoriteAuthorityFact` 的类注释本就写着「只有 `/internal/v2/...` 才可以（用 `Wire.AuthorityFact`）」）。<br>⚠️ `service/common/**` **只读不写**（AGENTS.md §5.3）—— 本轮**只接线，未改 `service/common` 一行**。 |
+| **回归网** | `FavoriteAuthorityV2ResponseShapeTest`（**3 例**，**真 PG Testcontainers + 真 MyBatis + 真 servlet**）：<br>① v2 端点：`subject_ref` **恰好** `{issuer, subject_id}`，**无** `tenant_id`，顶层**恰好** 4 个字段；<br>② v1 端点：`subject_ref` **恰好** `{authority_id, tenant_id, subject_id}`；<br>③ 两个端点按**信封 schema** 分域（v1 读 schema=2 ⇒ 404，反之亦然）。 |
+| **fixture 的合法性** | 用的是「**信封 schema=2、聚合版本=1**」的 assert 行 ⇒ 这是 Go 的 `favoriteOutboxV2` 真实产出的形态（schema 由 `FavoriteAssertionSchemaResolver` 决定），**不是造出来的怪东西**；且在这条行上 Go 走 `row.AggregateVersion != 2` 分支（favorite_authority.go:225）⇒ **一行即可覆盖 v2 形状**。 |
+| **变异证据** | ① **M1**：`toV2` 里 `issuer` 误取 `tenantId` ⇒ **转红**，精确报错 `expected: <rtw.identity> but was: <platform>`；<br>② **M2**：**完整回退修复**（service 返回 `FactV1` + 端点序列化 `FactV1`）⇒ **转红**，精确报出**修复前的真实 wire 形状**：`实际=[authority_id, subject_id, tenant_id]`。⇒ **不是假绿**。 |
+
+### 11.3 🔴 连带修正：`FavoriteRpcMetrics` 的错误「Go: …」断言
+
+`FavoriteRpcMetrics` 的 javadoc ③ 原写：
+
+> 「**两处 `module` label 写错**：`create_favorite_logic.go:89` 与 `get_favorites_by_folder_logic.go:68` 都在 **item** 流程里用了 `folderModule`。本实现**按 Go 原样保留**…」
+
+⇒ 这是 AGENTS.md §3.3.2 点名的**高危形态**（「Go: …」断言本身可能是错的）⇒ **已改正**为「Go 侧是对的，本实现与 Go 一致」，并附行号依据。逐条证据见 §11.4。
+
+### 11.4 🔴 D4 · `DEV-FAV-RPC-002` 的**前提被逐行核对证伪** ⇒ 撤销
+
+| | 内容 |
+|---|---|
+| **原结论** | 「Go 侧 `create_favorite_logic.go:89` 与 `get_favorites_by_folder_logic.go:68` 都在 **item** 流程里用了 `folderModule` ⇒ **Go 侧 label 写错**，RAG 按 Go 原样保留 ⇒ 属有意偏离。 |
+| **证伪** | ① 那两行**不是 item 流程**，而是**收藏夹查询**的失败分支：`create_favorite_logic.go:79` 是 `FindFolderByFolderId` ⇒ 其失败分支 `:89` 记 `folderModule` —— **正确**；`get_favorites_by_folder_logic.go:58` 是 `FindFolderByFolderId` ⇒ 其失败分支 `:68` 记 `folderModule` —— **正确**。<br>② 真正的 item 读失败分支：`get_favorites_by_folder_logic.go:81`（`FindFavoritesByFolderId`）⇒ `:84` 记 `itemModule`；`create_favorite_logic.go:122`（`FindFavoriteByFolderTarget`）⇒ `:130` 记 `itemModule` —— **也都正确**。<br>③ ⇒ **Go 侧 18 处 `ObserveDBError` 的 label 全部自洽**（label 恒等于被操作对象的模块）。 |
+| **RAG 侧** | `FavoriteDomainService:657-659` 与 `:376-377` 的注释与实现**同样自洽**（前者明写「上一行的收藏夹读失败才是 folderModule（Go: :68）—— 两者不可混」）⇒ **两侧一致**。 |
+| **结论** | 🔴 **从来不是偏离 ⇒ 撤销**，且**不在本轮签字范围内**（签字的是「确认不同」的那几条）。<br>⇒ 原登记出错的原因是**看错了分支**（把「收藏夹查询失败」误读成「item 流程」）⇒ 与本台账 §2 的 D5/D6 是**同一个坑的两次重犯**。 |
+| **落点** | [`../../Intentional_Deviations/favorite/rpc.md`](../../Intentional_Deviations/favorite/rpc.md) 的「撤销记录 · DEV-FAV-RPC-002」。 |
+
+### 11.5 📌 口径说明：`ObserveDBError` 的**静态调用点数不等 ≠ 行为差**
+
+> ⚠️ **这一条是「别把静态差异当行为差异」的守门记录** —— 它差点被记成一条新漂移。
+
+| | 内容 |
+|---|---|
+| **观察到的现象** | Go 侧 `ObserveDBError` 共 **18** 处；RAG 侧 `metrics.observeDbError` 共 **22** 处。按 `(module, action, type)` 三元组做**多重集**比对，4 组不等：`FOLDER/delete/db` 1↔3 · `FOLDER/select/db` 7↔5 · `ITEM/delete/db` 1↔3 · `ITEM/insert/db` 1↔3。 |
+| **复现** | `grep -rn "ObserveDBError" <go>/service/favorite/rpc/internal/logic/`（Go 18 处）<br>`grep -rn "observeDbError" service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/service/FavoriteDomainService.java`（RAG 22 处） |
+| **⚠️ 为什么【不是】漂移** | **Go 的 1 处调用，对应的是 RAG 的 N 个【互斥】catch 块**：<br>· `ITEM/insert/db`：Go 1 处（`create_favorite_logic.go:162`）↔ RAG 3 处（`:297` `OwnerMismatchException` / `:305` `NotFoundException` / `:319` `DataAccessException`）—— 三者是**不同的异常类型** ⇒ **一次失败只会命中其中一个** ⇒ 运行时**至多记 1 次**；<br>· `ITEM/delete/db`：Go 1 处（`delete_favorite_logic.go:88`）↔ RAG 3 处（`:456`/`:463`/`:468`）—— 同上，**互斥**；<br>· `FOLDER/delete/db`：Go 1 处（`delete_favorite_folder_logic.go:88`）↔ RAG 3 处（`:379`/`:386`/`:391`）—— 同上，**互斥**；<br>· `FOLDER/select/db`：Go 7 处 ↔ RAG 5 处 —— RAG 把 Go 的两个独立 select 分支**合并进同一个 catch** ⇒ 运行时仍是**一次失败记一次**。 |
+| **结论** | ⇒ **静态调用点数不是行为等价性的判据**；判据是「**同一次失败，两侧各记几个、记成什么**」⇒ 本轮逐组核对后 **4 组全部运行时等价** ⇒ **不记入漂移条目**。 |
+| **⚠️ 同源提醒** | `tools/metrics-probe/favorite/README.md` 的「已知边界」写的是「**不覆盖** `ObserveOp` / `ObserveDBError` 的标签取值（那两条两侧都是显式传参，无语言语义差异）」—— **「无语言语义差异」这半句是对的**（两侧都显式传参，不存在 Go 的 defer/命名返回值那类语言层陷阱）；但**它没有回答「标签取值本身两侧是否一致」** ⇒ 本节把这一问补上了（结论：一致）。 |
+
+### 11.6 📌 §5「未决 7 条」的**最新状态**（2026-10-25 第五轮后）
+
+| # | 项 | 2026-10-23 的登记 | **最新状态** | 落点 |
+|---|---|---|---|---|
+| **U1** | 权威端点的 wire 形态 | path 参数 servlet，默认关 | ✅ **已签字**（部署形态差异 = 进程边界降级为配置项）；✅ 路径形态本身经 §10.2 逐条对拍通过 | **DEV-FAV-RPC-004** |
+| **U2** | preflight 的退出码语义 | 改结构化日志 | ✅ **已签字** | **DEV-FAV-RPC-003** |
+| **U3** | `zrpc.RpcServerConf.Mode` 取值域 | 不在本仓库 | ⬜ **仍未决** —— 需 Go 侧提供取值域清单（**外部输入**） | 留在 §5 |
+| **U4** | authority lookup 的 3s 超时 | 走 Hikari 连接超时 | ✅ **已修**（第四轮，§10.1）⇒ **DEV-FAV-RPC-005 撤销** | §10.1 |
+| **U5** | `ObserveRPC` 的 `result` 标签 | Go 21 处被记成 success | ❌ **已撤销**（第二轮实测证伪，§9.3） | 撤销记录 + `tools/metrics-probe/favorite/` |
+| **U6** | `favorite_request_seconds_counter` 指标名 | Micrometer 追加 `_total` | ✅ **已签字**（其余 3 个指标名两侧完全一致） | **DEV-FAV-RPC-001** |
+| **U7** | 双侧活体对拍 + 变异验证 | 未做 | 🔴 **仍未闭** —— Go 侧 `etcd` / Kafka 不可拉起（**环境受限**）⇒ 但**已有 4 项局部双侧对拍**：错误码契约（`tools/errmsg-probe/favorite/`）、path 形态（`tools/authority-path-probe/favorite/`）、指标 result 语义（`tools/metrics-probe/favorite/`）、v2 响应体形状（本轮，真 PG 端到端 + 变异） | §11.2 / 各探针 |
+
+### 11.7 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| `FavoriteAuthorityV2ResponseShapeTest`（**真 PG**，3 例） | **全绿**；变异 M1 ⇒ 转红（`expected: <rtw.identity> but was: <platform>`）；变异 M2（完整回退）⇒ 转红（`实际=[authority_id, subject_id, tenant_id]`） |
+| 本域全量测试 | **183 例全绿**（api 84 · rpc **70** · common 29 · proto 0），真 PG 19 例真跑未 skip |
+| `tools/authority-path-probe/favorite/run.sh` | **EXIT=0** |
+| `tools/errmsg-probe/favorite/run-parity.sh` | **EXIT=0** |
+| `tools/metrics-probe/favorite/run.sh` | **EXIT=0** |
+| `check-tomcat-limits.py` / `check-flyway-ledger.py` / `check-proto-static.sh` | 全 **EXIT=0** |
+| 共享面（`docs/DRIFT/_INDEX.md` / `_MANIFEST.json` / `docs/Intentional_Deviations/_INDEX.md` / `AGENTS.md` / `docs/DRIFT/_cross/`） | **零改动** |

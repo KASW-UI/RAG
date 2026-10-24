@@ -1,8 +1,8 @@
 package com.rag.favorite.favorite.rpc.fact;
 
+import com.rag.common.communityfact.Wire;
 import com.rag.common.observability.RpcInterceptor.DeadlineState;
 import com.rag.favorite.favorite.rpc.config.FavoriteRpcProperties;
-import com.rag.favorite.favorite.rpc.domain.FavoriteAuthorityFact;
 import com.rag.favorite.favorite.rpc.exception.FavoriteExceptions;
 import com.rag.favorite.favorite.rpc.service.FavoriteAuthorityLookupService;
 import com.rag.favorite.favorite.rpc.service.FavoriteRpcSupport;
@@ -255,7 +255,13 @@ public class FavoriteAuthorityEndpointConfig {
             String producer = pathParams[0];
             String eventId = pathParams[1];
 
-            FavoriteAuthorityFact.FactV1 fact;
+            // ⚠️ 类型是 Object：v1 返回 FavoriteAuthorityFact.FactV1（三字段 subject_ref），
+            //    v2 返回 Wire.AuthorityFact（两字段 subject_ref）—— 两者是【不同的 wire 形状】。
+            //    Jackson 按运行时类型序列化 ⇒ 声明成父类不会丢字段。
+            // ⚠️ 类型是 Object：v1 返回 FavoriteAuthorityFact.FactV1（三字段 subject_ref），
+            //    v2 返回 Wire.AuthorityFact（两字段 subject_ref）—— 两者是【不同的 wire 形状】。
+            //    Jackson 按运行时类型序列化 ⇒ 声明成父类不会丢字段。
+            Object fact;
             try {
                 // ═══ Go: http.go:44 / :80 ═══
                 // ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -309,7 +315,7 @@ public class FavoriteAuthorityEndpointConfig {
             }
         }
 
-        private FavoriteAuthorityFact.FactV1 lookupV2(String producer, String eventId) {
+        private Wire.AuthorityFact lookupV2(String producer, String eventId) {
             return lookupService.authoritativeFactV2(producer, eventId);
         }
 

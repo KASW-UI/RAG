@@ -160,4 +160,54 @@ public final class FavoriteAuthorityFact {
             this.sourceEventHash = sourceEventHash;
         }
     }
+
+    /**
+     * 🔴 对应 Go {@code AuthoritativeFavoriteFactV2}（favorite_authority.go:195-204）——
+     * 把 v1 的权威事实<b>压扁</b>成 v2 形状。
+     *
+     * <pre>
+     * return FavoriteAuthorityFactV2{Event: fact.Event,
+     *     SubjectRef:         FavoriteSubjectRefV2{Issuer: fact.SubjectRef.AuthorityID, SubjectID: fact.SubjectRef.SubjectID},
+     *     PredecessorEventID: fact.PredecessorEventID,
+     *     TechnicalReceipt:   fact.TechnicalReceipt,
+     *     SourceEventHash:    fact.SourceEventHash}, nil
+     * </pre>
+     *
+     * <p>⇒ <b>只有 {@code subject_ref} 变形状</b>：三字段 → 两字段
+     * （{@code authority_id} <b>改名</b>成 {@code issuer}，<b>{@code tenant_id} 被丢弃</b>），
+     * 其余 4 个字段原样带过。
+     *
+     * <h2>为什么可以复用 {@code Wire.AuthorityFact}</h2>
+     * <p>它与 Go 的 {@code FavoriteAuthorityFactV2} <b>逐字段逐 tag 一致</b>
+     * （event / subject_ref / predecessor_event_id(omitempty) / technical_receipt / source_event_hash）
+     * ⇒ <b>不另立类型</b> —— 与本类复用 {@code Wire.Event} / {@code Wire.TechnicalReceipt} 同一理由。
+     *
+     * <h2>⚠️ {@code tenant_id} 为什么被丢弃</h2>
+     * <p>Go 的 {@code FavoriteSubjectRefV2} 注释明写：
+     * <pre>
+     * // FavoriteSubjectRefV2 contains only the RTW-owned identity pair. The legacy
+     * // fixed platform slot is deliberately absent from the v2 EventSpec.
+     * </pre>
+     * ⇒ v2 的 {@code subject_ref} <b>本就没有</b> {@code tenant_id}。
+     * ⇒ <b>保留它就是 wire 破坏</b>：下游 binder（BTW）按字段名解析，多一个字段就失配。
+     */
+    public static Wire.AuthorityFact toV2(FactV1 v1) {
+        if (v1 == null) {
+            throw new IllegalArgumentException("null favorite authority fact");
+        }
+        Wire.AuthorityFact v2 = new Wire.AuthorityFact();
+        v2.event = v1.event;
+        Wire.SubjectRef subjectRef = new Wire.SubjectRef();
+        if (v1.subjectRef != null) {
+            // Go: :201 —— Issuer 来自 v1 的 AuthorityID，SubjectID 来自 v1 的 SubjectID。
+            // ⚠️ v1 的 TenantID 在 Go 侧【没有被带过来】—— 不要"顺手"补上。
+            subjectRef.issuer = v1.subjectRef.authorityId;
+            subjectRef.subjectId = v1.subjectRef.subjectId;
+        }
+        v2.subjectRef = subjectRef;
+        v2.predecessorEventId = v1.predecessorEventId;
+        v2.technicalReceipt = v1.technicalReceipt;
+        v2.sourceEventHash = v1.sourceEventHash;
+        return v2;
+    }
 }

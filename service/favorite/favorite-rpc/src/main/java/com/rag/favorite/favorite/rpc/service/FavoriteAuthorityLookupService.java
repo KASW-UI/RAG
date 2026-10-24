@@ -91,11 +91,19 @@ public class FavoriteAuthorityLookupService {
      *
      * <p>Go 的实现（:200-203）把 v1 的结果<b>压扁</b>成 v2 形状：
      * {@code SubjectRefV2{Issuer: fact.SubjectRef.AuthorityID, SubjectID: fact.SubjectRef.SubjectID}}。
+     *
+     * <p>🔴 <b>返回类型是 {@code Wire.AuthorityFact} 而不是 {@code FactV1}</b> ——
+     * 这是<b>编译器级的约束</b>：Go 的 v2 入口返回的<b>就是</b>两字段形状，
+     * 若这里还返回 {@code FactV1}（三字段），v2 端点就会把 v1 的形状发给下游 ⇒ wire 破坏。
+     * ⇒ 类型本身把「必须压扁」这件事钉死，不需要靠注释提醒。
      */
-    public FavoriteAuthorityFact.FactV1 authoritativeFactV2(String producer, String eventId) {
+    public Wire.AuthorityFact authoritativeFactV2(String producer, String eventId) {
         // Go 侧两个入口共用 authoritativeFavoriteFact(ctx, producer, eventID, expectedSchema)
         // ⇒ 这里同样复用同一个 resolve，只把 schema 期望值改成 2。
-        return resolve(producer, eventId, 2).fact;
+        //
+        // ⚠️ resolve 之后还有 Go 的那一步【压扁】—— 以前漏了这一步，
+        //    v2 端点因此把 v1 的三字段 subject_ref 发给了下游 binder。
+        return FavoriteAuthorityFact.toV2(resolve(producer, eventId, 2).fact);
     }
 
     /**

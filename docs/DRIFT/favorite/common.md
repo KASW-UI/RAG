@@ -49,7 +49,7 @@
 
 ---
 
-## 2. 🔴 2 条 OBS（不可达的实现层差异，已登记待签字）
+## 2. 🔴 2 条 OBS（不可达的实现层差异，已登记并签字）
 
 | # | 项 | Go | RAG | 为何不可达 |
 |---|---|---|---|---|
@@ -57,7 +57,7 @@
 | **OBS-2** | 「实现了 `GRPCStatus()` 的自定义 error」 | `status.FromError` 认「**顶层**实现 `GRPCStatus()`」⇒ 文案反查命中 = **5007** | `extractStatus` 只认 `StatusException` / `StatusRuntimeException` **两个具体类** ⇒ 认不出 = **1015** | favorite 域实际 error **全部**来自 gRPC stub ⇒ 永远是这两个类 |
 
 > ⚠️ 这两条**不是「Go 与 RAG 一致」也不是「不一致」**，而是**实现层的必然差异**。
-> ⇒ 已登记在 [`../../Intentional_Deviations/favorite/common.md`](../../Intentional_Deviations/favorite/common.md)（待签字）。
+> ⇒ 已登记在 [`../../Intentional_Deviations/favorite/common.md`](../../Intentional_Deviations/favorite/common.md)，✅ **2026-10-25 用户签字**（「保留现状，登记为签字偏离」）。
 > ⇒ 探针把它们放在 **OBS 段**：不参与逐字节对拍，但**断言差异仍然存在** ——
 > 若哪天 Java 侧改成与 Go 一致，探针 **exit 2** 提示更新台账，而不是让它静默漂移。
 
