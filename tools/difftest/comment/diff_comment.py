@@ -26,22 +26,43 @@ def b64u(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
 
-def make_token(user_id: int, exp_delta: int = 3600) -> str:
-    """HS256 JWT —— claim 名必须是 userId（Go 的 ctx.Value("userId") / RAG 的 CLAIM_ATTRIBUTE）。"""
+def make_token(user_id: int, exp_delta: int = 3600, iat_delta: int = 0):
+    """HS256 JWT —— claim 名必须是 userId（Go 的 ctx.Value("userId") / RAG 的 CLAIM_ATTRIBUTE）。
+
+    ⚠️ iat_delta 可为正 ⇒ 造「iat 在未来」的 token：Go 的 MapClaims.Valid() 会拒，
+       而 jjwt **不校验 iat** ⇒ 这一条专门验 RAG 侧补上的 iat 校验。
+    """
     header = {"alg": "HS256", "typ": "JWT"}
-    payload = {"userId": user_id, "exp": int(time.time()) + exp_delta}
+    now = int(time.time())
+    payload = {"userId": user_id, "exp": now + exp_delta, "iat": now + iat_delta}
     signing_input = (b64u(json.dumps(header, separators=(",", ":")).encode()) + "."
                      + b64u(json.dumps(payload, separators=(",", ":")).encode()))
     sig = hmac.new(SECRET, signing_input.encode(), hashlib.sha256).digest()
     return signing_input + "." + b64u(sig)
 
 
-def post(base: str, path: str, body, token: str = None, raw_body: str = None):
+def post(base: str, path: str, body, token: str = None, raw_body: str = None,
+         content_type: str = "application/json", method: str = "POST",
+         raw_auth: str = None, body_bytes: int = None):
+    """发一次请求并返回 (http_status, body_text)。
+
+    ⚠️ 额外参数是为本轮新增的四个维度服务的：
+       content_type（非 JSON ⇒ 验 415 vs 200+5001）
+       method（GET ⇒ 验 405）
+       raw_auth（原样传 Authorization 头 ⇒ 验 Bearer 长度边界）
+       body_bytes（指定 body 字节数 ⇒ 验未注册路径上的 MaxBytes 保护层覆盖）
+    """
     url = base + path
-    data = raw_body.encode() if raw_body is not None else json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
-    if token:
+    if body_bytes is not None:
+        data = b"x" * body_bytes
+    else:
+        data = raw_body.encode() if raw_body is not None else json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data, method=method)
+    if content_type is not None:
+        req.add_header("Content-Type", content_type)
+    if raw_auth is not None:
+        req.add_header("Authorization", raw_auth)
+    elif token:
         req.add_header("Authorization", "Bearer " + token)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
@@ -179,7 +200,63 @@ def run_side(base: str, label: str, user_id: int):
         except Exception:  # noqa: BLE001
             pr = None
         results.append((label, st, tx, pr))
+
+    results.extend(run_extra_cases(base, label, token))
     return results
+
+
+# ====================================================================================
+# 2026-10-24 新增的四个维度（把此前的「未知项」变成活体证据）
+# ====================================================================================
+#
+# ① 未注册路径 / 错误方法上的**保护层覆盖范围**
+#    Go：rest/engine.go:103-118 bindRoute 把 chain（含 MaxBytes/MaxConns/Breaker/Shedding）
+#         只挂在**匹配上的路由**上 ⇒ 未注册路径走 router 自己的 404/405 分支 ⇒ 不经保护层。
+#    RAG：4 个保护是**全局 servlet Filter**（@Component + @Order）⇒ **所有路径**都经过。
+#    ⇒ 预期差异：未注册路径 + 超大 body ⇒ Go 404 / RAG 413（MaxBytes 闸门）。
+# ② 非 application/json 的 Content-Type ⇒ Go 200+{code:5001} / RAG 415（CAND-04）
+# ③ Bearer 前缀剥离的长度边界（"Bearer " 恰好 7 字符）⇒ 两侧结局应相同（都是 401）
+# ④ iat 在未来的 token ⇒ Go 拒（MapClaims.Valid）⇒ RAG 本轮补了 iat 校验后也应拒
+def run_extra_cases(base: str, label: str, token: str):
+    out = []
+
+    def record(name, status, text):
+        try:
+            parsed = json.loads(text)
+        except Exception:  # noqa: BLE001
+            parsed = None
+        out.append((name, status, text, parsed))
+
+    list_body = {"target_type": "article", "target_id": "a-diff",
+                 "sort_type": 0, "root_id": 0, "page": 1, "page_size": 20}
+
+    # ①-a 未注册路径 + 正常 body（对照组：两侧都该是 404）
+    st, tx = post(base, "/comment/v1/nope", list_body, token=token)
+    record("T18-404-unregistered", st, tx)
+
+    # ①-b 错误方法（GET 打在本端点）⇒ 两侧都该 405
+    st, tx = post(base, "/comment/v1/comment/list", None, token=token, method="GET")
+    record("T19-405-wrong-method", st, tx)
+
+    # ①-c 未注册路径 + 超大 body（> Go/RAG 的 MaxBytes 1 MiB）⇒ 保护层覆盖范围的差异
+    st, tx = post(base, "/comment/v1/nope", None, token=token, body_bytes=1500000)
+    record("T20-404-oversized-body", st, tx)
+
+    # ② 非 JSON 的 Content-Type
+    st, tx = post(base, "/comment/v1/comment/list", list_body, token=token,
+                  content_type="text/plain", raw_body="{}")
+    record("T21-415-content-type", st, tx)
+
+    # ③ Bearer 前缀恰好 7 字符（"Bearer " + 空 token）⇒ 两侧结局应相同（都是 401）
+    st, tx = post(base, "/comment/v1/comment/list", list_body, raw_auth="Bearer ")
+    record("T22-bearer-length-7", st, tx)
+
+    # ④ iat 在未来的 token ⇒ Go 拒（MapClaims.Valid）⇒ RAG 本轮补了 iat 校验后也应拒
+    future_token = make_token(1001, exp_delta=3600, iat_delta=3600)
+    st, tx = post(base, "/comment/v1/comment/list", list_body, token=future_token)
+    record("T23-iat-in-future", st, tx)
+
+    return out
 
 
 def diff_value(path, a, b, out):

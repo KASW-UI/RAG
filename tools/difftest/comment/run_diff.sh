@@ -63,7 +63,27 @@ for g in comment-audit-group-go comment-audit-group-rag; do
       --delete --group "$g" >/dev/null 2>&1
 done
 sleep 2
-echo "  topics: $(docker exec cdifftest-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list 2>/dev/null | grep comment-audit | tr '\n' ' ')"
+
+# ⚠️⚠️ **前置健康检查**：基础设施挂掉时**必须立刻失败**，不能跑出一堆假差异。
+#   实测踩过：Kafka 容器被 OOM kill（exit 137）⇒ 两侧审计管道全断 ⇒
+#   「create 返回 200 但库里没有」+「RAG 侧 2s deadline exceeded」⇒ **全是基础设施故障的假象**，
+#   而 diff 报告会把它们当成语义差异列出来 ⇒ 必须先验基础设施。
+echo "  —— 前置健康检查 ——"
+infra_ok=1
+for c in cdifftest-postgres cdifftest-redis cdifftest-kafka; do
+  st=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo "missing")
+  if [ "$st" != "running" ]; then
+    echo "  ❌ 容器 $c 状态 = $st（不是 running）"; infra_ok=0
+  fi
+done
+$PG psql -t -A -U admin -d go_comment -c "select 1" >/dev/null 2>&1 || { echo "  ❌ PG 不可达"; infra_ok=0; }
+$REDIS -n 0 PING 2>/dev/null | grep -q PONG || { echo "  ❌ Redis 不可达"; infra_ok=0; }
+TOPICS=$(docker exec cdifftest-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list 2>/dev/null | grep -c "comment-audit-topic")
+[ "$TOPICS" -ge 2 ] || { echo "  ❌ Kafka 里 comment-audit-topic* 只有 $TOPICS 个（应为 2）"; infra_ok=0; }
+if [ "$infra_ok" -ne 1 ]; then
+  echo "❌ 基础设施不健康 ⇒ **中止**，不跑矩阵（否则产出的全是假差异）"; exit 4
+fi
+echo "  ✅ PG / Redis / Kafka 均可用，comment-audit-topic* 已就位"
 
 echo "== [1/5] 重置两侧数据库 =="
 $PG psql -q -U admin -d go_comment -c "TRUNCATE comment_content, comment_index, comment_like, comment_domain_fact_outbox, comment_fact_stream, subject RESTART IDENTITY CASCADE;" >/dev/null 2>&1
