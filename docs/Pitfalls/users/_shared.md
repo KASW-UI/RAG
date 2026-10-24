@@ -567,3 +567,126 @@ Go 的 `conf` 包会按 struct tag 施加默认值（`default=` / `options=`）�
 💡 **本轮真正的救命动作**：不是去读 go-zero 的源码，而是**先把进程起起来看它到底起没起来** ——
 静态读出来的「Must ⇒ 必失败」和活体结果冲突时，**先信活体**，再去查「我漏读了哪个默认值」。
 ⇒ **一条「看起来很确定」的结论，越顺手越要拿实验去撞它。**
+
+---
+
+## PIT-USERS-SHARED-012 🔴 故障注入的「**断连形态**」决定测不测得到目标分支 —— `container.stop()` 发 RST ⇒ **假守卫**
+
+> 2026-10-24 第九轮（user-api 的 `DRIFT-USERAPI-014` 守门网）实测。
+
+### 现象
+
+要守的是一条**只在「断连」态才发生**的差异：
+Lettuce 的 `DisconnectedBehavior` 决定「断连期间的命令」是**排队**还是**立即拒**。
+
+第一版守门网用 `container.stop()` 注入故障 ⇒ **变异验证时测试照样绿**
+（把 `REJECT_COMMANDS` 改回 `DEFAULT` 也测不出来）⇒ 守卫是**假的**。
+
+### 根因（用时间曲线探针打到 Lettuce 层的异常原文）
+
+| 配置 | Lettuce 层异常 |
+|---|---|
+| `REJECT_COMMANDS` | `RedisException: Currently not connected. Commands are rejected.` |
+| `DEFAULT` | `RedisException: java.net.SocketException: Connection reset` |
+
+⇒ `container.stop()` 让容器被**强杀** ⇒ 连接收到的是 **RST**
+⇒ Lettuce 往 socket 写命令时**立刻失败** ⇒ **根本走不到** `disconnectedBehavior` 那个分支
+⇒ 两种配置的耗时都是 **1~13ms** ⇒ **分不出**。
+
+而线上真实场景是 `docker stop` ⇒ Redis **优雅退出** ⇒ 连接收到的是 **FIN**
+⇒ Lettuce 进入 **DISCONNECTED（正在重连）** 状态 ⇒ 命令被**排队**
+⇒ 这才是 `DEFAULT` 会挂满 `commandTimeout(3s)` 的那条路径。
+
+### 处置
+
+守门网改用**可控 TCP 透传代理**（`UserApiRedisDisconnectedFastFailTest.GracefulDisconnectProxy`）：
+故障时**先关监听口**（⇒ 重连被 connection refused 挡掉）
+⇒ **再对已建立的连接半关闭 `shutdownOutput()`**（⇒ 客户端收到 FIN，而不是 RST）。
+⇒ 变异后耗时实测 **3017ms**，与 live 实测的 3020ms 吻合 ⇒ 守卫成立。
+
+⚠️ **顺序不能反**：先关监听口才能保证「断连期间重连一定失败」，
+否则 Lettuce 会在 FIN 到达前就重连成功 ⇒ 又测不到排队分支。
+⚠️ **只能用 `shutdownOutput()`，不能用 `close()`**：socket 上若还有未读数据，
+`close()` 会发 **RST** ⇒ 又退回成「Connection reset」那条不经过该配置的路径。
+
+### 教训
+
+> **「把服务弄挂」不是故障注入的全部 —— 挂的方式决定客户端走哪条分支。**
+> ⇒ 断言「客户端在 X 状态下的行为」时，**先确认故障注入真的把客户端推进了 X 状态**
+> （办法：把**客户端库层的异常原文**打出来，别只看 HTTP 状态码）。
+
+---
+
+## PIT-USERS-SHARED-013 🔴 只测「有效 token」的 200 是**假绿** —— 必须有「**被拉黑 token**」对照组
+
+> 2026-10-24 第九轮实测。
+
+要证明的是「Redis 故障 ⇒ **fail-open 放行**」。
+但只用**有效 token**探测时，「两侧都返回 200」有**两种**可能：
+
+- (a) 真的 fail-open（要证明的）；
+- (b) **两侧根本没在查黑名单**（查了但功能是坏的 / 没挂上）—— **假绿**。
+
+⇒ 必须加对照组：**先 `logout` 把 token 拉黑**（两侧的 rpc logout 都写
+`user:jwt_blacklist:<token>`），再拿**同一个 token** 探测：
+
+| Redis 状态 | 期望 | 证明什么 |
+|---|---|---|
+| 正常 | **401** | 黑名单机制**真在跑**（对照组成立） |
+| 断连 | **200** | 故障时被 **fail-open 放行**（不是 401 误拦） |
+
+⚠️ 单看 200 **无意义**；**401/200 这一对组合**才是完整证据。
+
+---
+
+## PIT-USERS-SHARED-014 🔴 「暖机」探针不能用「**返回 200**」判 —— 断连秒拒也是 200
+
+> 2026-10-24 第九轮实测。
+
+Redis 停过之后要让两侧客户端**重新连上**，否则下一轮测的是「**两侧连接状态不同**」而不是「Redis 慢」。
+
+但**用有效 token 当暖机探针是无效的**：
+Lettuce 断连时会**秒拒**命令（fail-open ⇒ **200**），
+与「连着且正常」在**状态码上完全一样** ⇒ **区分不了**。
+
+⇒ **必须用「被拉黑 token」当暖机探针**：拿到 **401** 才说明
+「客户端真的连上了 Redis **且查到了黑名单**」。
+
+---
+
+## PIT-USERS-SHARED-015 🔴 串行探测会把**故障窗口**吃光 ⇒ 第二侧测到的是「正常」
+
+> 2026-10-24 第九轮实测（首轮与第二轮都踩到）。
+
+`CLIENT PAUSE 4000` 的窗口是**全局**的。脚本里若两侧**串行**探测：
+
+```
+Go  探测：t=2 起 → 阻塞 2.19s → t=4.19 返回（PAUSE 窗口被它耗尽）
+RAG 探测：t=4.19 起 → PAUSE 早已结束 → 0.042s 返回「正常」
+```
+
+⇒ 第二侧拿到的是**假数据**（看起来「完全不受故障影响」）。
+⚠️ 迷惑性极强：RAG 侧日志里**没有任何** Redis 失败告警 —— 那正是「没踩到故障」的证据。
+
+⇒ **两侧探测必须并行**（两个 curl 放后台同时发起，再 `wait` 各自的 PID），
+且 PAUSE 窗口要足够长（两侧同时落在窗口里）。
+⚠️ **只能 `wait "$具体PID"`**：裸 `wait` 会把 Go/RAG 服务进程也一起等 ⇒ 脚本永远卡死。
+
+---
+
+## PIT-USERS-SHARED-016 🔴 `surefire-reports/*.xml` 里有**陈旧报告** ⇒ 求和会**多算**测试数
+
+> 2026-10-24 第九轮实测。
+
+统计回归测试数时直接对 `target/surefire-reports/*.xml` 求和，得到 **102 / 129**，
+而 mvn 自己的输出是 **101 / 125** ⇒ 差 1 和 4。
+
+差异来源是**目录里的陈旧 XML**：
+本轮删掉的临时探针（`TmpRedisTimingProbe.xml`，1 条）
+与**上一轮遗留**的旧报告（`UserRpcJsonbAndAvatarProjectionTest.xml`，Oct 23，4 条）。
+
+⇒ **以 mvn 输出的 `Tests run:` 为准**；
+确需按 XML 统计时，先按**修改时间**过滤出本轮的那一批，别把历史残留算进来。
+
+⚠️ 这条与 `PIT-USERS-SHARED-006` 同源：**自动化统计给出的数字，必须能对上一个独立来源**
+（这里就是 mvn 的汇总行），否则「多算」会一路传到台账里变成假数据。
