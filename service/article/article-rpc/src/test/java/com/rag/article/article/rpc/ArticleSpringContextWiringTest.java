@@ -2,6 +2,7 @@ package com.rag.article.article.rpc;
 
 import com.rag.article.article.rpc.client.ContentSecurityPort;
 import com.rag.article.article.rpc.client.UnavailableContentSecurityClient;
+import com.rag.article.article.rpc.config.ArticleRpcProperties;
 import com.rag.article.article.rpc.domain.ArticleEntity;
 import com.rag.article.article.rpc.mapper.ArticleDomainOutboxMapper;
 import com.rag.article.article.rpc.mapper.ArticleMapper;
@@ -19,6 +20,7 @@ import net.devh.boot.grpc.server.serverfactory.GrpcServerConfigurer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -33,6 +35,8 @@ import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.listener.FailedRecordProcessor;
 
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -65,7 +69,15 @@ import static org.junit.jupiter.api.Assertions.*;
                 "logging.level.com.alibaba.nacos=WARN",
                 "grpc.client.security-rpc.address=static://127.0.0.1:1",
                 "grpc.client.message-rpc.address=static://127.0.0.1:1",
-                "spring.kafka.bootstrap-servers=127.0.0.1:1"
+                "spring.kafka.bootstrap-servers=127.0.0.1:1",
+                // ⚠️ 四个 Kafka 通道的 brokers 必须与全局 bootstrap-servers **同值**。
+                //    通道的 brokers 键在 Spring Kafka 下**没有消费点**（客户端是全局单例），
+                //    ArticleKafkaChannelValidator 在启动时发现分叉会**让启动失败**（防「静默忽略」）。
+                //    ⇒ 覆盖全局的同时必须把四个通道一起覆盖，否则配置自相矛盾（本次就是这么暴露的）。
+                "article-rpc.kq-pusher-conf.brokers=127.0.0.1:1",
+                "article-rpc.kq-consumer-conf.brokers=127.0.0.1:1",
+                "article-rpc.article-sync-pusher-conf.brokers=127.0.0.1:1",
+                "article-rpc.article-sync-result-consumer-conf.brokers=127.0.0.1:1"
         })
 @Testcontainers
 @org.testcontainers.junit.jupiter.EnabledIfDockerAvailable
@@ -368,5 +380,95 @@ class ArticleSpringContextWiringTest {
         assertTrue(handler.get() instanceof
                         com.rag.article.article.rpc.config.ArticleMetaObjectHandler,
                 "接住的必须是本模块的 Handler，而不是别的实现");
+    }
+
+    // ==================================================================
+    // 8. Kafka 通道 brokers 与全局 bootstrap-servers 的「同源」不变量（DRIFT-007）
+    // ==================================================================
+
+    /**
+     * 🔴 <b>默认配置不得误报</b>：真上下文里，四个通道的 {@code brokers}
+     * 必须与全局 {@code spring.kafka.bootstrap-servers} <b>逐项相同</b>。
+     *
+     * <p>⚠️ 这条断言还兼带证明「{@link ArticleKafkaChannelValidator} <b>真的跑了</b>」——
+     * 它挂在 {@code @PostConstruct} 上，<b>分叉即启动失败</b>；
+     * 本类能起得来 ⇒ 前提成立 ⇒ 校验通过 ⇒ <b>不是「没跑所以没报错」</b>。
+     *
+     * <p>Go 出处：Go 侧四个通道<b>各自</b>用自己的 Brokers
+     * （{@code go-queue@v1.2.2/kq/config.go:12} 声明，
+     * {@code kq/pusher.go:44-47} / {@code kq/queue.go:121} 消费），
+     * 而 Spring Kafka 的客户端是<b>全局单例</b> ⇒ 通道的 brokers 键<b>没有消费点</b>。
+     */
+    @Test
+    @DisplayName("🔴 真上下文里四个 Kafka 通道的 brokers 与全局 bootstrap-servers 逐项相同（默认配置不误报）")
+    void kafkaChannelBrokersMatchGlobalBootstrapServers() {
+        ArticleRpcProperties props = context.getBean(ArticleRpcProperties.class);
+        KafkaProperties kafka = context.getBean(KafkaProperties.class);
+
+        List<String> global = kafka.getBootstrapServers();
+        assertNotNull(global, "spring.kafka.bootstrap-servers 未绑定 ⇒ KafkaProperties 拿不到值");
+        assertFalse(global.isEmpty(), "全局 bootstrap-servers 为空 ⇒ 无从与通道比较");
+
+        record Pair(String label, ArticleRpcProperties.KafkaConf conf) { }
+        List<Pair> channels = List.of(
+                new Pair("kq-pusher-conf", props.getKqPusherConf()),
+                new Pair("kq-consumer-conf", props.getKqConsumerConf()),
+                new Pair("article-sync-pusher-conf", props.getArticleSyncPusherConf()),
+                new Pair("article-sync-result-consumer-conf", props.getArticleSyncResultConsumerConf()));
+
+        for (Pair c : channels) {
+            assertEquals(global, List.of(c.conf().getBrokers()),
+                    "通道「" + c.label() + "」的 brokers 与全局不一致 ⇒ "
+                            + "ArticleKafkaChannelValidator 会在启动时失败。"
+                            + "（本类能起得来就说明一致 —— 断言写在这里是为了把「一致」变成可观测事实。）");
+        }
+    }
+
+    @Test
+    @DisplayName("🔴 ArticleKafkaChannelValidator 已注册（它是「静默忽略」的哨兵）")
+    void kafkaChannelValidatorIsRegistered() {
+        assertTrue(context.containsBean("articleKafkaChannelValidator"),
+                "校验器 Bean 缺失 ⇒ 通道 brokers 与全局分叉时会被静默忽略"
+                        + "（运维以为已切走 broker，实际还连在老 broker 上）");
+    }
+
+    /**
+     * 🔴 <b>锁死「同源」这个前提</b>：shipped yml 里四个通道的 {@code brokers}
+     * 必须都写成 {@code ${KAFKA_BROKERS:...}} 这<b>同一个</b>环境变量。
+     *
+     * <p>⚠️ 这是 {@code ArticleKafkaChannelValidator} 语义等价性论证的<b>地基</b>：
+     * 四个通道同源 ⇒ 四个值<b>必然</b>相同 ⇒ 与全局同源
+     * ⇒ 实际生效的 broker 列表与 Go（{@code rpc/etc/article.yaml} 四个通道都写死
+     * {@code kafka:9092}）<b>逐项相同</b> ⇒ 默认配置下无可观察差异。
+     *
+     * <p>一旦有人把某个通道的 {@code brokers} 改成<b>字面量</b>，
+     * 「默认配置下与 Go 等价」这句话就不再成立 ⇒ 必须在这里被抓住。
+     */
+    @Test
+    @DisplayName("🔴 shipped yml 里四个通道的 brokers 必须都引用同一个 ${KAFKA_BROKERS} 占位符（同源前提）")
+    void shippedYamlKeepsAllFourChannelsOnTheSameBrokerPlaceholder() throws Exception {
+        String yaml;
+        try (InputStream in = ArticleSpringContextWiringTest.class.getResourceAsStream("/application.yml")) {
+            assertNotNull(in, "classpath 上找不到 application.yml");
+            yaml = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+
+        List<String> brokerValues = new java.util.ArrayList<>();
+        for (String line : yaml.split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("brokers:")) {
+                brokerValues.add(trimmed.substring("brokers:".length()).trim());
+            }
+        }
+
+        assertEquals(4, brokerValues.size(),
+                "shipped yml 里应当恰好有 4 个 brokers 键（四个 Kafka 通道），实际 " + brokerValues.size()
+                        + " ⇒ " + brokerValues);
+        for (String v : brokerValues) {
+            assertTrue(v.contains("${KAFKA_BROKERS:"),
+                    "通道的 brokers 必须写成 \"${KAFKA_BROKERS:kafka:9092}\" 这个占位符，"
+                            + "这样四个通道才<b>同源</b>、必然相同；写成字面量就会与全局可能分叉，"
+                            + "「默认配置下与 Go 等价」的论证随之失效。实际值：" + v);
+        }
     }
 }

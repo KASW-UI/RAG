@@ -157,7 +157,14 @@ class ArticleSchemaGateStartupOrderTest {
                     "--logging.level.com.alibaba.nacos=WARN",
                     "--grpc.client.security-rpc.address=static://127.0.0.1:1",
                     "--grpc.client.message-rpc.address=static://127.0.0.1:1",
-                    "--spring.kafka.bootstrap-servers=127.0.0.1:1");
+                    "--spring.kafka.bootstrap-servers=127.0.0.1:1",
+                    // ⚠️ 四个通道的 brokers 键没有消费点（客户端是全局单例）⇒ 必须与全局同值，
+                    //    否则 ArticleKafkaChannelValidator 会**先于** schema 门禁失败，
+                    //    负向用例将拿不到「article_revision_immutable」这个真正的失败原因。
+                    "--article-rpc.kq-pusher-conf.brokers=127.0.0.1:1",
+                    "--article-rpc.kq-consumer-conf.brokers=127.0.0.1:1",
+                    "--article-rpc.article-sync-pusher-conf.brokers=127.0.0.1:1",
+                    "--article-rpc.article-sync-result-consumer-conf.brokers=127.0.0.1:1");
             return null;
         } catch (Throwable t) {
             return t;

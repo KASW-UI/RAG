@@ -1,6 +1,6 @@
-<!-- @new 2026-10-24 · article 域 rpc 层签字偏离（SD-2026-10-24-01） -->
+<!-- @new 2026-10-24 · article 域 rpc 层签字偏离（SD-2026-10-24-01 / SD-2026-10-24-02） -->
 
-# `article` 域 rpc 层签字偏离（SD-2026-10-24-01）
+# `article` 域 rpc 层签字偏离（SD-2026-10-24-01 / SD-2026-10-24-02）
 
 > 归类：**「决定不对齐的差异」**（见 [`../_INDEX.md`](../_INDEX.md)）。
 > 与 [`../../DRIFT/`](../../DRIFT/_INDEX.md) 的分工：
@@ -136,3 +136,92 @@ RAG 侧四条路径**统一**（`service/article/article-rpc/.../service/Article
 - 结论的取证过程与逐条对照 ⇒ [`../../DRIFT/article/rpc.md`](../../DRIFT/article/rpc.md) 的
   「2026-10-24 第七轮」节（U-2 关闭记录）。
 - 台账里的 `U-2`（锁顺序反转）**已关闭** ⇒ 它的结论落在这里，**不在 DRIFT 里重复记**。
+
+---
+
+## SD-2026-10-24-02：Kafka 四个通道**不能逐通道切 broker**（RAG 侧是全局单例）
+
+| 项 | 值 |
+|---|---|
+| 状态 | 🟡 **待签字**（2026-10-24 由 `align/article` 工作树产出；证据已闭环，**等用户签字**） |
+| 组件 | `service/article/article-rpc` |
+| 行为层 | **Kafka 客户端的粒度** —— 每个通道能否连各自的 broker |
+| Go 侧 | 四个通道**各自**一个客户端（`kq.KqConf.Brokers` 逐通道）⇒ **可以逐通道切 broker** |
+| RAG 侧 | `KafkaTemplate` / `ProducerFactory` / `ConsumerFactory` 是**全局单例** ⇒ 四通道**共用** `spring.kafka.bootstrap-servers` ⇒ **不能逐通道切 broker** |
+| 性质 | **框架表达能力所限**（Spring Kafka 的客户端是全局装配的），不是实现疏忽 |
+| 处置 | 差异**不消除**，但**不允许静默** ⇒ `ArticleKafkaChannelValidator` 在启动时发现分叉即**启动失败** |
+
+### 差异的实际面
+
+| 通道 | Go 侧客户端 | Go 出处（声明点 → 消费点） | RAG 侧 |
+|---|---|---|---|
+| 审核事件生产（`KqPusherConf`） | `kq.Pusher` | `go-queue@v1.2.2/kq/config.go:12` → `kq/pusher.go:44-47`（`kafka.TCP(addrs...)`）；调用点 `internal/svc/service_context.go:65` | 全局 `KafkaTemplate` |
+| 审核事件消费（`KqConsumerConf`） | `kq.MessageQueue` | `kq/config.go:12` → `kq/queue.go:121`（`kafka.ReaderConfig{Brokers: c.Brokers}`）；调用点 `internal/article.go:58` | 全局 `ConsumerFactory` |
+| 同步事件生产（`ArticleSyncPusherConf`） | `kq.Pusher` | 同上；调用点 `internal/svc/service_context.go:66` | 全局 `KafkaTemplate` |
+| 同步结果消费（`ArticleSyncResultConsumerConf`） | `kq.MessageQueue` | 同上；调用点 `internal/article.go:60` | 全局 `ConsumerFactory` |
+
+⚠️ **别引错行号**：Go 仓内 `internal/config/config.go:41` 也有一行 `Brokers []string`，
+但它属于 **`HotEventPusherConf`**（第 40 行那个匿名 struct）——
+那是 Go 侧的**死配置**（`service_context.go:68-70` 建了 Pusher，但全模块**零调用点**），
+**不是**四个通道的字段。四个通道的字段声明点在 `go-queue@v1.2.2/kq/config.go:12`。
+
+### 今天为什么**没有行为差异**
+
+| 侧 | 取值 | 出处 |
+|---|---|---|
+| Go | 四个通道全部 `kafka:9092` | `rpc/etc/article.yaml:29-30, 46-47, 56-57, 62-63` |
+| RAG | 四个通道全部 `"${KAFKA_BROKERS:kafka:9092}"`，全局 `spring.kafka.bootstrap-servers` 也是同一个占位符 | `service/article/article-rpc/src/main/resources/application.yml` |
+
+⇒ 四个通道**同源**（同一个环境变量）⇒ 四个值**必然相同** ⇒ 与全局**同源**
+⇒ **实际连接到的 broker 列表与 Go 逐项相同** ⇒ 无可观察差异。
+
+### 为什么**不修回去**（这条是决策，不是遗漏）
+
+「修回去」意味着给四个通道**各建一套** `ProducerFactory` / `ConsumerFactory` / `KafkaTemplate`。
+代价（已逐条评估）：
+
+1. Boot 4 的 `KafkaAutoConfiguration` 对这些类型都是 `@ConditionalOnMissingBean`
+   ⇒ **新增任何一个都会顶掉 Boot 自动装配的那个**；
+2. `ArticleOutboxRelayScheduleTest` 还自带一个 mock 的 `KafkaTemplate` Bean
+   ⇒ 「哪个模板被注入」变成**装配顺序问题**（AGENTS.md §3.3 的老坑）；
+3. 而这一切是为了一个**当前取值全相同**、**今天没有任何行为差异**的能力。
+
+⇒ 结论：**能力差异保留，但「静默」不保留。**
+
+### 为什么一定要「启动即失败」而不是「记个警告」
+
+**静默忽略是最坏的一种**：运维改了某个通道的 broker，看到「服务正常起来了」，
+于是以为流量已经切走 —— **实际上所有通道还连在老 broker 上**。
+
+⇒ `ArticleKafkaChannelValidator`（`@PostConstruct`，早于对外收流量）在启动时逐通道比较
+四个通道的 `brokers` 与全局 `spring.kafka.bootstrap-servers`，
+**不一致就抛 `IllegalStateException` ⇒ 启动失败**，并说清：哪个通道、实际值、全局值、
+「这个值不会生效」、Go 出处、以及两条出路。
+
+### 边界（本条**不覆盖**什么）
+
+| # | 边界 | 说明 |
+|---|---|---|
+| 1 | 通道 `brokers` **为空**（没配） | Go 侧空列表会让客户端**起不来**；RAG 侧回落到全局 ⇒ **RAG 更宽松**。校验器对空值**跳过**（= 没配，不是分叉点） |
+| 2 | 全局 `bootstrap-servers` 为空 | 无从比较 ⇒ 跳过 |
+| 3 | **地址逐字比较，不 trim** | Go 的 `kafka.TCP(addr)` 对地址逐字使用 ⇒ 带空格的地址在 Go 侧是「连不上」；RAG 侧校验也逐字比较，**不引入 Go 没有的宽容度** |
+| 4 | **第五个通道** `HotEventPusherConf` | Go 侧死配置（零调用点），Java 侧**不迁移** ⇒ 不在校验范围 |
+
+### 证据（真上下文实测 + 变异验证，2026-10-24）
+
+- **真上下文**（真 PG + 真 `@SpringBootTest`）：
+  `ArticleSpringContextWiringTest#kafkaChannelBrokersMatchGlobalBootstrapServers`
+  ⇒ 四个通道**绑定后**的 `brokers` 与全局**逐项相同**；
+  `#shippedYamlKeepsAllFourChannelsOnTheSameBrokerPlaceholder`
+  ⇒ shipped yml 里四个 `brokers` **全部**引用同一个 `${KAFKA_BROKERS:...}`（守住「同源」这个地基）。
+- **变异验证**：`ArticleKafkaChannelValidatorTest` **6/6 有效变异全部转红**
+  （含两条负结果：一次「变异无效」、一次「测不到 ⇒ 补用例」）。
+- ⚠️ **校验器装上后当场抓到 4 处真实的不自洽**：4 个 `@SpringBootTest` 把全局改成
+  `127.0.0.1:1` 而通道仍是 `kafka:9092` ⇒ **长期存在却从未被任何行为测试发现**
+  ⇒ 这正是「配置类差异只能靠守卫守、不能靠行为测试守」的实证。
+
+### 关联
+
+- 完整取证过程 ⇒ [`../../DRIFT/article/rpc.md`](../../DRIFT/article/rpc.md) 的
+  「2026-10-24 第九轮」节（FIX-14）。
+- 元教训 ⇒ [`../../Pitfalls/article/rpc.md`](../../Pitfalls/article/rpc.md) 的 **PF-ARTICLE-RPC-013**。

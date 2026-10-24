@@ -212,6 +212,37 @@ public class ArticleRpcProperties {
         private String group;
         private String topic;
         private String offset;
+
+        /**
+         * 🔴 <b>本字段在 Java 侧<b>没有消费点</b> —— 保留它只是为了让配置面与 Go 一一对应</b>。
+         *
+         * <h3>Go 出处（声明点 + 消费点，AGENTS.md §3.3.1）</h3>
+         * <pre>
+         * 字段声明点  go-queue@v1.2.2/kq/config.go:12      Brokers []string
+         * 消费点(生产) go-queue@v1.2.2/kq/pusher.go:44-47   kafka.Writer{Addr: kafka.TCP(addrs...)}
+         * 消费点(消费) go-queue@v1.2.2/kq/queue.go:121       kafka.ReaderConfig{Brokers: c.Brokers}
+         * 仓内调用点   rpc/internal/svc/service_context.go:65,66 （生产）
+         *              rpc/article.go:58,60                      （消费）
+         * </pre>
+         * ⇒ Go 侧<b>每个通道一个独立客户端</b>：改某个通道的 {@code brokers} 会切 broker。
+         *
+         * <h3>Java 侧为什么没有消费点</h3>
+         * Spring Kafka 的 {@code KafkaTemplate} / {@code ProducerFactory} /
+         * {@code ConsumerFactory} 是<b>全局单例</b>，统一吃 {@code spring.kafka.bootstrap-servers}。
+         * ⇒ 四个通道在本模块里<b>共用同一个 broker 列表</b>，本字段改了对实际连接<b>没有任何影响</b>。
+         *
+         * <h3>⚠️ 为什么不直接删掉这个字段</h3>
+         * 删掉会让配置面与 Go 失配（Go 有、Java 没有 ⇒ 迁过去的运维脚本会「配了但报未知键」），
+         * 且丢掉了「Go 在这里有独立能力」这条信息。
+         * ⇒ 保留字段 + 由 {@link ArticleKafkaChannelValidator} 在启动时校验
+         * <b>它与全局是否一致</b>：分叉就<b>启动失败</b>，
+         * 而不是让运维以为流量已切走、实际还连在老 broker 上。
+         *
+         * <h3>当前取值为何一致</h3>
+         * {@code application.yml} 里四个通道都写成 {@code "${KAFKA_BROKERS:kafka:9092}"}，
+         * 全局 {@code spring.kafka.bootstrap-servers} 也是同一个占位符
+         * ⇒ <b>同源 ⇒ 必然相同</b> ⇒ 与 Go（yaml 四个通道都写死 {@code kafka:9092}）默认连同一个 broker。
+         */
         private String[] brokers = new String[0];
 
         public String getName() {

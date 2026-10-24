@@ -72,7 +72,13 @@ import static org.junit.jupiter.api.Assertions.*;
                 "grpc.client.message-rpc.address=static://127.0.0.1:1",
                 // Kafka：listener 容器会在上下文启动时尝试连接 broker。
                 // 本类不验证消费路径，用一个不可达地址让 listener 惰性重试即可（不阻塞上下文启动）。
-                "spring.kafka.bootstrap-servers=127.0.0.1:1"
+                "spring.kafka.bootstrap-servers=127.0.0.1:1",
+                // ⚠️ 四个通道的 brokers 键没有消费点（客户端是全局单例）⇒ 必须与全局同值，
+                //    否则 ArticleKafkaChannelValidator 会在启动时因分叉而让上下文起不来。
+                "article-rpc.kq-pusher-conf.brokers=127.0.0.1:1",
+                "article-rpc.kq-consumer-conf.brokers=127.0.0.1:1",
+                "article-rpc.article-sync-pusher-conf.brokers=127.0.0.1:1",
+                "article-rpc.article-sync-result-consumer-conf.brokers=127.0.0.1:1"
         })
 @Testcontainers
 @org.testcontainers.junit.jupiter.EnabledIfDockerAvailable
