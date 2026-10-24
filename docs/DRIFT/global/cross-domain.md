@@ -13,7 +13,7 @@
 
 | # | 不变量 | 涉及组件 | 状态（2026-10-25） | 本轮 |
 |---|---|---|---|---|
-| X-1 | 共享 Flyway 账本 | `message-rpc`↔`like-rpc`↔`article-rpc` | 🟡 配置层 + 运行时已闭环；**三模块同库共存**仍 `unresolved` | 未展开 |
+| X-1 | 共享 Flyway 账本 | `message-rpc`↔`like-rpc`↔`article-rpc` | ✅ **第十五轮**：🔴 **7 个 Flyway rpc 模块全连同一个库 ⇒ 同库共存是常态** ⇒ 查出 **comment/follow/like 三个域缺 `spring.flyway.baseline-version: 0`** ⇒ 非空 schema 下 **V1 被整条跳过 ⇒ 首张表永远建不出来 ⇒ 服务起不来**（同款缺陷 `message-rpc` 2026-10-24 已修并留了守门，**没被推广**）⇒ ✅ **三域已修 + 各配真 PG 守门**；⛔ **`favorite-rpc` 同款缺陷零触碰 ⇒ 记账 + 告知该域 owner**；🟡 **「三进程并发」那个形态仍未验证** | ✅ **部分闭环**（见 §二·十二） |
 | X-2 | 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | ✅ **已审完（第九轮）** —— 交叉但无冲突；client 契约 10 域零漂移；🟡 **产出 1 条新真漂移**（`users_user.extra_info` jsonb→text 漏改）⇒ 见 §二·九 | ✅ **已审完** |
 | X-3 | 事实投递链路 | `like`/`comment`/`favorite` 的 rpc ↔ **仓外 DC 平台** | ✅ **已闭合**（2026-10-25 B2）—— 末端不是「第三个仓库」，是仓外 `POST /v1/events`；仓内两侧 4↔4 对齐 | ✅ **已闭合** |
 | X-4 | 社区消费者差异 | Go 用 `like`，RAG 不用 | ✅ **已确证（第九轮实测）** —— like 侧 RAG **另起炉灶**（0 引用共享组件）· favorite/article **RAG 多出** ⇒ 一半可修、一半被 favorite 阻塞 ⇒ 见 §二·十 | ✅ **已确证** |
@@ -515,6 +515,92 @@ Go 的 `httpx.Parse` 失败后经 `httpx.ErrorCtx` → `httpx.SetErrorHandler` �
 
 ---
 
+## 二·十二、X-1 ✅ **共享 Flyway 账本：配置层 + 运行时闭环 ⇒ 修掉 3 个域的真缺陷**（2026-10-25 第十五轮）
+
+> **本条的原状态**：「配置层 + 运行时已闭环；**三模块同库共存**仍 `unresolved`」（需真 PG + 三进程并发）。
+> ⇒ 本轮把它**拆成两半**：**配置层有一个此前没人登记的真缺陷**（本轮修掉），**运行时并发**留下一轮。
+
+### ① 🔴 取证：7 个 Flyway rpc 模块**全部连同一个库** ⇒ 同库共存是**常态**，不是边缘场景
+
+| rpc 模块 | DSN（默认） | 账本表 |
+|---|---|---|
+| `message-rpc` | `first_db` | `flyway_schema_history_message` |
+| `like-rpc` | `first_db` | `flyway_schema_history_like` |
+| `comment-rpc` | `first_db` | `flyway_schema_history_comment` |
+| `follow-rpc` | `first_db` | `flyway_schema_history_follow` |
+| `task-rpc` | `first_db` | `flyway_schema_history_task` |
+| `favorite-rpc` | `first_db` | `flyway_schema_history_favorite` |
+| `article-rpc` | `first_db` | **默认表名** `flyway_schema_history`（由它独占，见 AGENTS.md §6.3 问题 4） |
+
+⇒ ⇒ **「先启动的模块已经把 public schema 弄非空」是必然**，不是「万一」⇒ ⇒ **每个 V1 起始的模块都必须能扛住非空 schema**。
+
+### ② 🔴 缺陷形态（Flyway 的 baseline 语义）
+
+```
+spring.flyway.baseline-on-migrate: true      ← 7/7 都配了
+spring.flyway.baseline-version                ← 🔴 部分模块【没配】⇒ 取默认值 1
+```
+
+⇒ **非空 schema + 没有自己的账本** ⇒ Flyway 在 **version 1** 处打一条 BASELINE 记录
+⇒ ⇒ **只执行版本 > 1 的迁移** ⇒ **V1 的 SQL 从未执行** ⇒ 首张表永远建不出来
+⇒ ⇒ 后续依赖它的迁移报 `relation "…" does not exist` ⇒ **服务起不来**。
+
+⚠️ **同一缺陷在 `message-rpc` 上已于 2026-10-24 被抓到并修掉**（`MessageFlywaySharedSchemaWiringTest`）
+⇒ ⇒ **同一个坑，在另外 3 个域上原封不动地留着** ⇒ 这正是「已知模式没被推广」的典型。
+
+### ③ 逐模块判定（**不是所有模块都需要改**）
+
+| rpc 模块 | 最低迁移版本 | 是否受 baseline 默认值影响 | 处置 |
+|---|---|---|---|
+| `comment-rpc` | **V1**（`subject`） | 🔴 **受影响** | ✅ **本轮修** |
+| `follow-rpc` | **V1**（`follow_relation`） | 🔴 **受影响** | ✅ **本轮修** |
+| `like-rpc` | **V1**（`like_record`） | 🔴 **受影响** | ✅ **本轮修** |
+| `favorite-rpc` | **V1**（`favorite_folder`） | 🔴 **受影响** | ⛔ **零触碰** ⇒ 见 ⑤ |
+| `message-rpc` | V1 | ✅ 已配 `baseline-version: 0` | 不动 |
+| `task-rpc` | V1 | ✅ 已配 `baseline-version: 0` | 不动 |
+| `article-rpc` | **V8**（`article`） | 🟢 **不受影响** —— 最低版本 8 > baseline 默认值 1 ⇒ V8/V9/V10 照常执行 | **不动**（差点误修 ⇒ 逐模块判定后才排除） |
+
+### ④ 修法 + 守门（真 PG 16 + 真 Flyway 引擎）
+
+- **修法**：3 个模块的 `application.yml` 补 `spring.flyway.baseline-version: 0`（**一行**）
+  ⇒ baseline 标记打在 version 0 ⇒ **V1 之后全部迁移照常执行** ⇒ 既能在共享库里安全启动，又不丢任何迁移。
+  ⇒ ⚠️ **不能改成 `baseline-on-migrate: false`** —— 那会让 Flyway 在非空 schema 上**直接抛异常退出**
+  （"Found non-empty schema(s) … but no schema history table"）⇒ 更糟（起不来且无修复路径）。
+- **守门**：每个域一个 `*FlywaySharedSchemaGateTest`（`comment` / `follow` / like）⇒
+  - **真 PG 16**（Testcontainers）+ **与生产同版本的 Flyway 引擎** + 裸 JDBC
+    ⇒ ⚠️ 沿用本仓既有先例（`CommentSchemaPgGateTest` 明确写过「不起 Spring 上下文，避免把 DDL 守门变成全栈启动测试」）；
+  - 🔴 **配置取自本模块自己的 `application.yml`**（不是硬编码）⇒ 测的就是生产真正用的那几个值；
+  - 🔴 **先把 public schema 弄成非空**（预建一张无关表）⇒ 让 baseline 路径**真的被走到**
+    ⇒ 这是「空库测试永远测不出来」的那一层（§3.3 的经典形态）；
+  - 断言：① 首张表**真的存在** ② 账本的 BASELINE 行**版本必须是 0** ③ V1..VN **一条不缺**。
+- **变异测试（证明守门非空转）**：把 3 个模块 yaml 里的 `baseline-version: 0` **全部删掉**重跑
+  ⇒ **6 条守门全部转红**（3 域 × 2 条：首表存在 + BASELINE 行版本）
+  ⇒ ⇒ **每个域的守门都对该配置有判别力** ✓
+  ⇒ ⚠️ 第一次跑时 Maven 的 **fail-fast** 让 reactor 在第一个失败模块就停了
+  ⇒ ⇒ 必须加 `-fae` 才能看到三个域的全貌（**这是本轮踩到的一个小坑**：`-fae` 之前会漏看后两个域）。
+
+### ⑤ 🔴 `favorite-rpc` 同款缺陷：**global 不能改** ⇒ 记账 + 告知该域 owner
+
+| 项 | 内容 |
+|---|---|
+| 缺陷 | `service/favorite/favorite-rpc/src/main/resources/application.yml` 的 `spring.flyway` 块**缺 `baseline-version`** ⇒ 与 comment/follow/like **完全同款**（V1 = `favorite_folder`） |
+| 为什么 global 不能改 | favorite 域**零写权**（AGENTS.md §5.3c，用户重申「你没有 favorite 的所有权限」）⇒ **代码 / 配置 / 测试 / 台账一律不碰** |
+| 为什么共享层也代劳不了 | 这次**不是共享层的问题** —— 缺的是**该域自己 yaml 里的一行** ⇒ 共享层无法代劳（与第十四轮 X-6 不同：那条可以靠「共享层 + 缺省 off」规避） |
+| 后果（若不修） | favorite-rpc 在**非首个启动者**时，V1 被 baseline 跳过 ⇒ `favorite_folder` 表建不出来 ⇒ 后续迁移失败 ⇒ **服务起不来** ⇒ 属**生产可用性**问题（不是形状漂移） |
+| **交给 favorite 域 owner 的修法** | 在 `spring.flyway:` 块下加 `baseline-version: 0`（与 comment/follow/like 完全同款）⇒ 建议照抄 `CommentFlywaySharedSchemaGateTest` 的守门思路 |
+| 记账位置 | 本档（global 台账）+ 本轮 spec §七「不做」⇒ **不静默** |
+
+### ⑥ 残留（本条**未**闭环的部分）
+
+1. **三进程并发的运行时验证**仍未做（需真 PG + 同时起 `message-rpc` / `like-rpc` / `article-rpc`
+   ⇒ 观察账本互不干扰 + 全部表建成）⇒ 本轮做的是**逐模块的非空 schema 验证**（等价且更聚焦），
+   但**不是「三进程同时跑」那个形态** ⇒ 留一轮。
+2. ⚠️ `article-rpc` 用**默认账本表名** ⇒ 任何**新增**的 Flyway 模块若忘了配 `table` ⇒ 直接撞上它
+   （AGENTS.md §6.3 问题 4 已记为残留风险）⇒ 本轮**未动**（动它需要改 `article-rpc` 的表名
+   ⇒ 属跨域迁移，代价大于收益）。
+
+---
+
 ## 三、其余 7 条的状态说明（2026-10-25）
 
 本轮**未展开**这 7 条的逐条对照（它们的落点分散在多个域的代码里，
@@ -522,7 +608,7 @@ Go 的 `httpx.Parse` 失败后经 `httpx.ErrorCtx` → `httpx.SetErrorHandler` �
 
 | # | 为什么本轮没动 |
 |---|---|
-| X-1 | 需要**三个 rpc 模块同库共存**的运行时验证 ⇒ 需真 PG + 三进程并发 ⇒ 独立一轮 |
+| X-1 | 🔴 **第十五轮已部分消解** —— 取证发现 **7 个 Flyway rpc 模块全部连同一个库** ⇒ 同库共存是**常态** ⇒ 查出 **comment/follow/like 三域缺 `spring.flyway.baseline-version: 0`** ⇒ 非空 schema 下 **V1 被整条跳过 ⇒ 首张表建不出来 ⇒ 服务起不来** ⇒ ✅ **三域已修 + 各配真 PG 守门**（变异 6 条全红）；⛔ **`favorite-rpc` 同款缺陷零触碰 ⇒ 记账 + 告知 owner**；🟡 **「三进程并发」那个形态仍未验证** ⇒ 见 §二·十二 |
 | ~~X-2~~ | ✅ **已审完**（第九轮）⇒ 见 §二·九 |
 | ~~X-3~~ | ✅ **已闭合**（2026-10-25 B2）⇒ 见 §二·七（末端 = 仓外 DC 平台；仓内两侧 4↔4 对齐） |
 | ~~X-4~~ | ✅ **已确证**（第九轮）⇒ 见 §二·十（**可修的一半** = like 侧接线；**阻塞的一半** = favorite） |
@@ -548,6 +634,7 @@ Go 的 `httpx.Parse` 失败后经 `httpx.ErrorCtx` → `httpx.SetErrorHandler` �
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | ✅ **第十五轮（X-1 取证与修复）** —— ① 🔴 **取证推翻「同库共存是边缘场景」** —— **7 个 Flyway rpc 模块的 DSN 默认值全部是同一个 `first_db`** ⇒ 「先启动者把 public schema 弄非空」是**必然** ⇒ 每个 V1 起始的模块都必须扛得住 ② 🔴 **查出 3 个域缺 `spring.flyway.baseline-version: 0`** —— `baseline-on-migrate=true` + 非空 schema + 无账本 ⇒ Flyway 在 **version 1** 处打 BASELINE ⇒ **V1 的 SQL 从未执行** ⇒ 首张表永远建不出来 ⇒ **服务起不来** ⇒ 同款缺陷 `message-rpc` **2026-10-24 已修并留了守门** ⇒ **同一个坑在另外 3 个域原封不动地留着** ③ ✅ **三域已修**（各一行 yaml）+ **各配一个真 PG 守门**（真 PG 16 + 真 Flyway 引擎 + **配置取自模块自己的 yaml** + **先把 schema 弄成非空**）⇒ **变异（删掉那行）⇒ 6 条全红** ④ ⚠️ **`article-rpc` 逐模块判定后排除**（最低迁移版本 **V8** > baseline 默认值 1 ⇒ 不受影响 ⇒ **差点误修一个不存在的缺陷**）⑤ ⛔ **`favorite-rpc` 同款缺陷零触碰** ⇒ 记账 + **明确告知该域 owner**（含修法与守门思路）⇒ **不静默** ⑥ 🟡 **「三进程并发」的运行时形态仍未验证** ⇒ 留一轮 |
 | 2026-10-25 | ✅ **第十四轮（X-6 落地）** —— ① 🔴 **推翻第十三轮修法草案的一个隐含前提**：草案假设「共享 Filter 统一写 Go 的 400 原文」⇒ **错** —— **Go 的拒绝形状按域而异**（5 域注册 `httpx.SetErrorHandler` ⇒ **200 + 业务信封**；article/user/task/favorite 未注册 ⇒ **400 + Go 原文**）⇒ 且各域 5001 **文案不同**（like/comment =「系统内部错误」，hot/follow/message = `"internal server error"`）⇒ ⇒ **共享层写不出信封** ⇒ 拒绝形状必须**由域自己渲染** ② 落地结构 = `service/common` **6 个类**（`GoStyleFormValues` 判据 / `GoStyleFormLimitMode` 模式 / `GoStyleFormLimitExceededException` / `GoStyleFormValueLimitInterceptor` / `GoStyleFormLimitWebMvcConfig` / `GoStyleTomcatParameterLimitCustomizer`）+ **9 个域各一行 yaml**（`rag.http.go-form-limit.mode: raw\|envelope`）⇒ **favorite 缺省 = off ⇒ 容器上限与闸门都不生效 ⇒ 零触碰、行为逐字节不变** ③ 🔴 **闸门是 `HandlerInterceptor` 不是 servlet `Filter`** —— Filter 在 DispatcherServlet **之外** ⇒ 抛的异常到不了 `@RestControllerAdvice` ⇒ envelope 模式无法渲染 ④ 顺带订正 `service/common/pom.xml` 的 **spring-web / spring-test 硬编码 7.0.0**（与 starter-web 的 7.0.9 错配 ⇒ `NoClassDefFoundError: ApiVersionHolder`）⇒ 改为跟随 BOM ⑤ 🟢 证据强度首次达 **真容器 + 真 Spring MVC + 真 advice + 变异测试**（raw 5/5 · envelope 4/4 · 模式 8/8 · 变异 M1/M2 均转红）· `check-tomcat-limits.py` 新增第四旋钮 + **favorite 零触碰守卫** ⇒ EXIT=0 ⑥ 残留（有界，修前已存在）：**鉴权与闸门的先后**（Go 先鉴权后解析 / RAG 先解析后鉴权）⇒ 记录不改 |
 | 2026-10-25 | ✅ **第十一轮（favorite 零权限重申 ⇒ 推翻第九轮的「永久阻塞」结论）** —— 用户重申：「**你没有 favorite 的所有权限**」⇒ ① 🔴 **推翻自己第九轮的结论** —— 那个结论只覆盖「逐模块改 `application.yml`」这一条修法；本轮实测**共享层修法存在**：① `service/common` 里一个 `WebServerFactoryCustomizer`（`@Order` > Boot 的 `TomcatWebServerFactoryCustomizer.getOrder()==0`）⇒ `connector.setMaxParameterCount(-1)`（`Connector.java:538`；`-1` = 不限 ⇒ `Parameters.java:79/247`）② 一个共享 Filter 复刻 go-zero `GetFormValues`（`net/url` 解析层 + **2048 个非空值**计数，可从 `article-api` 的 `GoStyleGetFormValuesFilter` 移植）⇒ **10 个 api 模块零代码改动 ⇒ favorite 零触碰**（前提已逐条实测：10/10 依赖 `service/common` + 10/10 扫 `com.rag.common`）⇒ ⇒ **X-6 不是永久阻塞，也不需签字认账** ⇒ 落 **出路 D** ② ✅ **连带影响面复核**（§二·十一 ④ 之二）—— X-4（favorite 半边）**仍阻塞**（必须删 favorite 自己的 10 处调用）· X-9（hot/article 两份可收敛、**favorite 那份永久留作复制品**）· X-7（**只读库不改代码 ⇒ 不受影响，仍可推进**）③ 本表**已无「等用户拍板」的技术项**；唯一真决策项 = T-6（需先撕 hot 域 `SD-HOT-API-006`） |
 | 2026-10-25 | ✅ **第九轮补（X-6 global 侧展开）** —— 两层限制语义精确化：Go **数非空值**（`httpx/util.go:15` `maxFormParamCount=2048` + `:44-45` 跳过空值 + `:48` `n < 2048` ⇒ 最多 2048 个非空值）vs Tomcat **数参数总数** ⇒ **残余窗口 = 总数 ≥ 2048 且 非空值 ≤ 2048**。🔴 **修法必然要动 `favorite-api`**（`max-parameter-count` 是 **per-app** 连接器设置，**无法在 `service/common` 统一改**；实测 **10 个 api 模块全部已配 2048、零遗漏**）⇒ ⇒ **X-6 不是「待拍板的技术项」，而是「favorite 写权边界」问题** ⇒ 登记等用户定（出路 A 放开 favorite / B 制造分叉 / C 签字认账）<br>⚠️ **2026-10-25 第十一轮已改判** —— 出路 A 撤下、出路 B 放弃、**出路 C（签字认账）也放弃** ⇒ 改判为「**存在共享层修法 ⇒ 可修，favorite 零触碰**」（见上一行）⇒ ⇒ **第九轮那句「修法必然要动 `favorite-api` ⇒ 永久阻塞」作废**
