@@ -1677,7 +1677,17 @@ message-rpc：54 tests（原 52 + 新增 2 条真 PG 列级守门）/ 0 failures
 
 ## `DRIFT-MSG-V-016` 处置方案（三条拆开决，因为成本与风险差一个数量级）
 
+> ⚠️ **2026-10-24 第十一轮前向指针 —— 本节是 2026-10-23 的「方案稿」，下面那句「待决策 / 一行代码都还没改」已经过期**：
+> **V-016 现已全部落地** ——
+> · **recover 半边**（2026-10-23）：`GoStyleRecoverInterceptor` + `recoverThen` 显式串链，5 例真 in-process gRPC + 3 轮变异验证
+> · **breaker / shedding 半边**（2026-10-24 第九轮）：**8 个 rpc 组件全部接入** `GoStyleRpcProtectionChain`（9 个 rpc 组件，含 message-rpc 自身；`hot-rpc` 是 Kafka 架构不适用），
+>   守门 16 例（7 个 `*ProtectionChainWiringTest` 各 2 例 + `user-rpc` 的 `GrpcInterceptorWiringTest` 2 例）
+> · 连带：`SD-2026-10-23-07`（breaker/shedding 的「挂起式签字」）已于同日**撤销**；`SD-2026-10-23-08`（CPU fail-open）成为生效中的签字
+>
+> ⇒ **本节读作「当初的方案与决策过程」**，当前状态看上面 V-016 主节与 `docs/Intentional_Deviations/message/rpc.md`。
+
 > **状态：待决策。本节只是方案，一行代码都还没改。**
+> ⚠️（↑ 这句话是 2026-10-23 的原文，**现已过期** —— 上面那段指针为准。）
 > 与上一节的 `DRIFT-MSG-V-015/019/020/023` 不同 —— 那几条是「对齐既有行为」，
 > 这条是「**新增框架能力**」，两者的决策性质不一样。
 
