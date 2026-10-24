@@ -7,7 +7,7 @@
 
 ## PITFALL-FOLLOW-001 🔴🔴 测试把生产地址覆盖成 `static://` ⇒ 生产配置从未被跑过
 
-**症状**：63 条测试全绿、`mvn package` 通过、Spring 上下文在测试里能起来，
+**症状**：修复前 63 条测试全绿（现为 68 条）、`mvn package` 通过、Spring 上下文在测试里能起来，
 但 `java -jar` **起不来**（连续两条启动阻塞）。
 
 **根因**：`service/follow/follow-rpc/src/test/java/.../FollowRpcWiringTest.java:69`

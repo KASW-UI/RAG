@@ -99,7 +99,7 @@ HTTP body：         {"user_ids":null}
 | `,string` int64 入参**同时接受字符串与数字** | go-zero `mapping` 的 `json.Number` Kind==String | `users-common` 的 `GoStyleStringInt64` | ✅ 一致（见下） |
 | gRPC client 无 retry | `zrpc.RpcClientConf` 无 `Retries` 字段 | `client/FollowRpcClient.java` | ✅ 一致 |
 | gRPC client 熔断默认开 | `zrpc/internal/config.go:14` `Breaker default=true` | `GoStyleGrpcClientBreakerInterceptor` | ✅ 一致 |
-| 指标口径（3 个 counter + 1 个 histogram，label 名一致） | `api/internal/metrics/metrics.go` | `metrics/FollowApiMetrics.java` | ✅ 一致（数值未对拍） |
+| 指标口径（3 个 counter + 1 个 histogram，label 名一致） | `api/internal/metrics/metrics.go` | `metrics/FollowApiMetrics.java` | ✅ 一致（**U1 已双侧抓取比对**；文本层残留见 DRIFT-FOLLOW-007） |
 
 ### `,string` 入参语义的实测核对（go-zero v1.10.2 真源）
 
@@ -119,7 +119,7 @@ Go 的 `httpx.Parse` → `ParseJsonBody` → `mapping.UnmarshalJsonReader`（**�
 + `unmarshaler.go:1115-1122`（`case string` / `case json.Number` 都走 `ParseInt`）。
 RAG 侧实现：`service/users/users-common/.../GoStyleStringInt64.java`（与 message-api 的同名类逐行一致）。
 
-## 双侧活体对拍（36/36 逐字节一致）
+## 双侧活体对拍（52/52 逐字节一致）
 
 | 组 | 条数 | 覆盖 |
 |---|---|---|
@@ -425,11 +425,17 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 且 `le` 渲染问题**依然存在**（收益只有「桶数对齐 + 去掉 `_max`」）。
 ⇒ **本轮未改**（用户 2026-10-24 未拍板）。
 
+> **🧾 台账 ↔ 代码复核（2026-10-24）**：本文件的每条状态断言已逐条回代码/真源核对 ——
+> 「✅ 已修」5 条（001 / 005 / 007 / 009 + OPEN-001）**逐条在代码里坐实**；
+> 「🔴 未修」2 条（006/008）**仍然成立**；
+> 约 25 条 `file:line` 引用（Go 侧 / go-zero 侧 / RAG 侧）**逐条命中**；
+> 复核中发现 5 处表述偏差已当场订正（对拍条数、文件计数、指标数值对拍状态等）。
+
 ## 证据强度
 
 | 项 | 强度 |
 |---|---|
-| 源码逐条对照（24 个 Go 文件 ↔ 23 个 Java 文件） | ✅ 双向静态 |
+| 源码逐条对照（24 个 Go 文件 ↔ 27 个 Java 文件） | ✅ 双向静态 |
 | 真启动（真 Tomcat + 真 Redis + 真 Nacos） | ✅ **真启动**（`Started FollowApiApplication`） |
 | HTTP 行为 | ✅ **双侧活体对拍** **52/52** 逐字节一致（协议层 20 + 数据路径 16 + 边界/鉴权 16） |
 | 指标数值 | ✅ **双侧抓取比对**（归零重测；计数器同名同标签同值；直方图 Go 的 12 个 le 边界全在 ⇒ 残留见 DRIFT-FOLLOW-007） |

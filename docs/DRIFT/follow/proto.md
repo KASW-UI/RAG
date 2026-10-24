@@ -3,8 +3,10 @@
 # follow-proto 组件级契约对照（Go ↔ RAG）
 
 > **核对日期：2026-10-24** · 基线 commit：`8422116`
-> **真源**：`Sea-RideTheWind_golang/proto/follow.proto`（53 行）
-> **被审**：`service/follow/follow-proto/src/main/proto/follow.proto`（53 行）
+> **真源**：`Sea-RideTheWind_golang/proto/follow.proto`（**52** 行）
+> **被审**：`service/follow/follow-proto/src/main/proto/follow.proto`（**53** 行）
+> ⚠️ 差的那 1 行来自 **option 块**：`option go_package = "./pb";`（1 行）
+> ⇒ RAG 侧换成 `option java_package` + `option java_multiple_files`（2 行）⇒ **表达层，非行为层**。
 
 ## 结论
 
@@ -22,7 +24,7 @@
 | **message 声明** | 6 个（`RelationReq`/`BaseResp`/`ListReq`/`UserListResp`/`RecommendResp`+嵌套 `RecommendUser`） | 6 个 | ✅ 逐条一致 |
 | **字段号** | 15 条 | 15 条 | ✅ 逐条一致 |
 | **service `FollowService` + 8 个 rpc** | 8 个 | 8 个 | ✅ 逐条一致（签名与返回类型全同） |
-| **行为层 diff**（剥 `option` 行 + 去首尾空白 + 丢空行） | — | — | ✅ **0 行差异** |
+| **行为层 diff**（剥 `option` 行 + **去掉全部首尾空白** + 丢空行） | — | — | ✅ **0 行差异** |
 
 **service 全名**（wire 路径，决定客户端能不能连上）：
 
@@ -41,8 +43,24 @@ diff <(norm Go/follow.proto) <(norm RAG/follow.proto)
 → 0 行差异
 ```
 
+⚠️ **「归一空白」必须是「去掉全部前导空白」**（`sed 's/^[[:space:]]*//'`），
+不能只去一个空格 ——
+两侧**嵌套 message 内的字段缩进不同**（Go 4 空格 / RAG 2 空格，见 `RecommendResp.RecommendUser`）：
+
+```
+Go  :     int64 target_id = 1;      ← 4 空格
+RAG :   int64 target_id = 1;        ← 2 空格
+```
+
+⇒ 只去一个前导空格会残留 **2 行差异**，让人误判「proto 不一致」
+⇒ **这是纯空白差异，行为层仍是 0 行差异**（本轮复核实测确认）。
+
 > ⚠️ 与 [`_cross/new-domains-2026-10-23.md`](../../_cross/new-domains-2026-10-23.md)
 > 的「follow proto 逐行零差异」结论**一致**，本轮复核通过。
+
+> **🧾 台账 ↔ 文件复核（2026-10-24）**：`.proto` 两侧行数、message/字段号/rpc 计数、
+> 行为层 diff、生成代码数量**逐条实测复现**；复核中发现 2 处偏差已当场订正
+> （Go 侧行数 52 非 53；**证据段的空白归一规则写错**，按原表述复现会残留 2 行差异）。
 
 ## 证据强度与效力边界
 

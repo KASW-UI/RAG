@@ -5,11 +5,11 @@
 > **核对日期：2026-10-24** · 基线 commit：`8422116`（`align/follow` 切出点）
 > **真源**：`Sea-RideTheWind_golang/service/follow/rpc/`（冻结，只读）
 > **被审**：`service/follow/follow-rpc/`
-> **对照方式**：Go 侧 19 个源文件逐行读 + **双侧活体对拍**（Go follow-rpc 与 RAG follow-rpc 同跑，共用同一 PG；api 层 52/52 见 api.md）
+> **对照方式**：Go 侧 21 个源文件逐行读 + **双侧活体对拍**（Go follow-rpc 与 RAG follow-rpc 同跑，共用同一 PG；api 层 52/52 见 api.md）
 
 ## 结论
 
-**首轮组件级对照：业务语义层 `SEMANTICALLY EQUIVALENT`（双侧活体对拍 36/36 逐字节一致）**，
+**首轮组件级对照：业务语义层 `SEMANTICALLY EQUIVALENT`（双侧活体对拍 36/36 逐字节一致；第二轮补边界/鉴权 16 条后共 **52/52**）**，
 但**发现 3 条硬启动阻塞**（服务在修复前**根本起不来**，而测试全绿）。
 
 | # | 漂移 | 级别 | 状态 |
@@ -19,7 +19,7 @@
 | DRIFT-FOLLOW-004 | `server-addr` 硬编码 `:8848`、忽略 `NACOS_PORT`，与 follow-api 语义冲突 ⇒ api/rpc 连到两台 Nacos | 运行时故障（业务码塌成 1015） | ✅ 已修 |
 | DRIFT-FOLLOW-006 | 5 个 `follow_rpc_*` 指标**无任何抓取出口**（Go 有 DevServer `/metrics`，RAG 的 follow-rpc 是纯 gRPC 进程） | **可观察（抓取侧）** | 🔴 **未修**（用户 2026-10-24 定：**本轮不落地**，转「全仓 rpc 层统一方案」交主会话拍板） |
 
-> ⚠️ **三条都发生在「测试全绿」的状态下** —— 63 条测试 0 失败，
+> ⚠️ **三条都发生在「测试全绿」的状态下** —— 修复前 63 条测试 0 失败（现为 68 条），
 > 而 `java -jar` 起不来。根因见 [`docs/Pitfalls/follow/rpc.md`](../../Pitfalls/follow/rpc.md)。
 
 ## DRIFT-FOLLOW-002 🔴 运行时 classpath 缺 `grpc-inprocess`（启动阻塞）
@@ -298,14 +298,21 @@ threading.GoSafe(func() {
 ⇒ 已改成 `publishPercentileHistogram()`，**这样等出口补上时格式就已经是对的**
 （详见 `docs/DRIFT/follow/api.md` 的 DRIFT-FOLLOW-007）。
 
+> **🧾 台账 ↔ 代码复核（2026-10-24）**：本文件的每条状态断言已逐条回代码/真源核对 ——
+> 「✅ 已修」3 条（002/003/004）**逐条在代码里坐实**；
+> 「🔴 未修」1 条（006，follow-rpc 指标无出口）**仍然成立**；
+> 另：api.md 的 DRIFT-FOLLOW-008（MaxConns 仍是 `service/common` 里的全局 Semaphore）经复核**仍成立**；
+> 全部 `file:line` 引用**逐条命中**；
+> 复核中发现 4 处表述偏差已当场订正（对拍条数、Go 源文件数、测试条数、探针清单）。
+
 ## 证据强度
 
 | 项 | 强度 |
 |---|---|
-| 源码逐条对照（19 个 Go 文件 ↔ 16 个 Java 文件） | ✅ 双向静态 |
+| 源码逐条对照（21 个 Go 文件 ↔ 17 个 Java 文件） | ✅ 双向静态 |
 | 真启动（`java -jar` 真 PG + 真 Nacos） | ✅ **真启动**，非 test classpath |
 | DDL vs GORM 产物 | ✅ **双侧真产物逐行对比** |
-| gRPC 行为 | ✅ **双侧活体对拍**（Go follow-rpc 与 RAG follow-rpc 同跑，36/36 逐字节一致） |
+| gRPC 行为 | ✅ **双侧活体对拍**（Go follow-rpc 与 RAG follow-rpc 同跑，52/52 逐字节一致） |
 | 指标口径 | ⚠️ **未对拍**（Prometheus 指标名/label 已逐条对照，数值未双侧比） |
 
 ## 对拍环境（可复现）
@@ -318,7 +325,8 @@ threading.GoSafe(func() {
 | 下游 user-rpc | 隔离 stub（`/tmp/userstub`，实现 Go 真源 `user.UserService/GetUser`，恒 `found=true`） | 同左（同一进程，两边都调它） |
 | 服务发现 | etcd `127.0.0.1:49319` | Nacos `127.0.0.1:8848` |
 
-探针脚本：`/tmp/probe.sh`（协议层 20 条）+ `/tmp/probe_data.sh`（数据路径 16 条）。
+探针脚本：`/tmp/probe.sh`（协议层 20 条）+ `/tmp/probe_data.sh`（数据路径 16 条）
++ `/tmp/probe_ext.sh`（边界/鉴权 16 条）⇒ **合计 52/52**。
 
 > ⚠️ Go 侧二进制用 `CGO_ENABLED=0 go build -o /tmp/...` 构建（**不写入冻结仓库**），
 > 配置用 `/tmp/gofollow/*.yaml` 覆盖（Go 的 `-f` 参数支持自定义配置文件路径）。

@@ -42,7 +42,7 @@
 |---|---|
 | 源码逐条对照（1 个 Go 文件 ↔ 4 个 Java 文件） | ✅ 双向静态 |
 | 契约测试 | ✅ 37 条 / 0 失败（`FollowErrorCodeContractTest` 钉常量表与顺序、<br>`FollowErrorMessagesContractTest` 钉文案表与顺序、<br>`FollowGrpcErrorContractTest` 钉三段转换） |
-| 活体对拍 | ✅ **通过** —— follow-api 收到的业务码与 Go 侧逐字节相同（36/36 对拍矩阵里的 5004/5005/5201/5202/5101/5001 全部一致） |
+| 活体对拍 | ✅ **通过** —— follow-api 收到的业务码与 Go 侧逐字节相同（首轮 36 条对拍矩阵里的 5004/5005/5201/5202/5101/5001 全部一致；<br>第二轮补边界/鉴权 16 条后 api 层共 52/52） |
 
 ## 备注
 
