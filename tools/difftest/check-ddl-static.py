@@ -88,9 +88,13 @@ import sys
 # 每个域一套：容器名 / 两个库名 / 表名映射 / 排除表 / 差异说明
 DOMAINS = {
     "users": {
-        "container": "difftest-postgres",
-        "go_db": "go_db",
-        "rag_db": "rag_db",
+        # ⚠️ 2026-10-25（B3/X-7）订正：原写 `difftest-postgres` / `go_db` / `rag_db`
+        #   ⇒ **实测该容器已不存在**（`docker ps` 里是 `uudifftest-postgres`），
+        #   库名也带 `uu_` 前缀 ⇒ **原预设直接 FATAL，跑都跑不起来**。
+        #   ⇒ 订正为实测存在的容器 + 库名。
+        "container": "uudifftest-postgres",
+        "go_db": "uu_go_db",
+        "rag_db": "uu_rag_db",
         # ⚠️ 2026-10-25 订正：原写「users 域没有 Flyway 账本 ⇒ 不排除任何表」——
         #    那是 10-25「按模块独立账本表名」**之前**的假设。10-25 之后
         #    `spring.flyway.table: flyway_schema_history_<模块>` 落地，而**所有 rpc 模块
@@ -131,9 +135,14 @@ DOMAINS = {
                          "并建好 task_go_db / task_rag_db）"),
     },
     "message": {
-        "container": "msgddl-pg",
-        "go_db": "go_msg_db",
-        "rag_db": "rag_msg_db",
+        # ⚠️ 2026-10-25（B3/X-7）订正：原写 `msgddl-pg` / `go_msg_db` / `rag_msg_db`
+        #   ⇒ **实测容器名带下划线（`msg_ddl_pg`）、库名是 `go_db` / `rag_db`**，
+        #   且该容器的 PG 超级用户是 `postgres`（**没有 admin 角色**）
+        #   ⇒ 原预设三重失效（容器 / 库 / 用户）⇒ 全部按实测订正。
+        "container": "msg_ddl_pg",
+        "go_db": "go_db",
+        "rag_db": "rag_db",
+        "pg_user": "postgres",
         # ⚠️ message 域两侧表名相同（Go AutoMigrate 与 RAG Flyway 同名）⇒ 不需要映射
         "table_map": {},
         # ⚠️ RAG 侧有 Flyway 独立账本表 `flyway_schema_history_message`
@@ -145,7 +154,23 @@ DOMAINS = {
                  "  RAG 的 V1~V5 迁移脚本就是照这条规则写的。\n"
                  "⇒ 本域出现任何差异都应视为**新漂移**，而不是「已知的历史包袱」。"),
         "prepare_hint": ("先起 tools/difftest/run-message-ddl-parity.sh"
-                         "（会拉起 msgddl-pg 并建好 go_msg_db / rag_msg_db）"),
+                         "（会拉起 msg_ddl_pg 并建好 go_db / rag_db）"),
+    },
+    "comment": {
+        # ✅ 2026-10-25（B3/X-7 扩域）：本域**已有现成的双侧库**（comment 域对拍环境）
+        "container": "cdifftest-postgres",
+        "go_db": "go_comment",
+        "rag_db": "rag_comment",
+        "table_map": {},
+        # ⚠️ RAG 侧有 Flyway 独立账本表 `flyway_schema_history_comment`（AGENTS.md §6.3 问题 4）
+        #    Go 侧用 AutoMigrate 没有账本表 ⇒ 必须排除，否则「仅 RAG 有」会把列集合判成不一致。
+        "exclude_tables": ("flyway_schema_history",),
+        "note": ("comment 域两侧表名相同（Go 的 TableName() 与 RAG 迁移脚本同名）⇒ 不需要映射。\n"
+                 "  ⚠️ **已知的环境缺口（不是漂移）**：Go 侧的 `report_record` 表\n"
+                 "  （`service/comment/rpc/internal/model/data_model.go:66` 的 `ReportRecord.TableName()`）\n"
+                 "  **没有出现在 `go_comment` 库里** ⇒ 该表是**只被 RAG 侧 migrate 过**，\n"
+                 "  两侧对照因此在 report_record 上缺 Go 侧样本 ⇒ 结论只覆盖其余 6 张表。"),
+        "prepare_hint": "先起 tools/difftest/run.sh --no-build --keep --serve-only（会拉起 cdifftest-postgres）",
     },
 }
 
@@ -180,9 +205,9 @@ _INDEXDEF_RE = re.compile(
     r"^CREATE\s+(UNIQUE\s+)?INDEX\s+(\S+)\s+ON\s+\S+\s+USING\s+\w+\s+\((.*)\)\s*$")
 
 
-def load(container, db, table_map, query, exclude_tables=()):
+def load(container, db, table_map, query, exclude_tables=(), user="admin"):
     out = subprocess.run(
-        ["docker", "exec", "-i", container, "psql", "-U", "admin", "-d", db,
+        ["docker", "exec", "-i", container, "psql", "-U", user, "-d", db,
          "-t", "-A", "-c", query],
         capture_output=True, text=True, check=True).stdout
     cols = {}
@@ -199,10 +224,10 @@ def load(container, db, table_map, query, exclude_tables=()):
     return cols
 
 
-def load_indexes(container, db, table_map, exclude_tables=()):
+def load_indexes(container, db, table_map, exclude_tables=(), user="admin"):
     """⇒ {索引名: (表名, 是否唯一, 列元组)}"""
     out = subprocess.run(
-        ["docker", "exec", "-i", container, "psql", "-U", "admin", "-d", db,
+        ["docker", "exec", "-i", container, "psql", "-U", user, "-d", db,
          "-t", "-A", "-c", QUERY_INDEX],
         capture_output=True, text=True, check=True).stdout
     idx = {}
@@ -222,10 +247,10 @@ def load_indexes(container, db, table_map, exclude_tables=()):
     return idx
 
 
-def load_constraints(container, db, table_map, exclude_tables=()):
+def load_constraints(container, db, table_map, exclude_tables=(), user="admin"):
     """⇒ {(表名, 约束名): (contype, 定义)}"""
     out = subprocess.run(
-        ["docker", "exec", "-i", container, "psql", "-U", "admin", "-d", db,
+        ["docker", "exec", "-i", container, "psql", "-U", user, "-d", db,
          "-t", "-A", "-c", QUERY_CON],
         capture_output=True, text=True, check=True).stdout
     cons = {}
@@ -297,18 +322,21 @@ def main():
     rag_db = args.rag_db or cfg["rag_db"]
     table_map = cfg["table_map"]
     exclude_tables = cfg.get("exclude_tables", ())
+    # ⚠️ 不同容器的 PG 超级用户不一样（有的只有 postgres、有的有 admin）
+    #   ⇒ 用户名必须**按域预设**走，不能写死。
+    pg_user = cfg.get("pg_user", "admin")
     allow = {x.strip() for x in args.allow_idx.split(",") if x.strip()}
     allow_default = {x.strip() for x in args.allow_default.split(",") if x.strip()}
 
     try:
-        go = load(container, go_db, table_map, QUERY, exclude_tables)
-        rag = load(container, rag_db, table_map, QUERY, exclude_tables)
-        go_c = load(container, go_db, table_map, QUERY_CONSTRAINT, exclude_tables)
-        rag_c = load(container, rag_db, table_map, QUERY_CONSTRAINT, exclude_tables)
-        go_i = load_indexes(container, go_db, table_map, exclude_tables) if args.indexes else {}
-        rag_i = load_indexes(container, rag_db, table_map, exclude_tables) if args.indexes else {}
-        go_k = load_constraints(container, go_db, table_map, exclude_tables) if args.indexes else {}
-        rag_k = load_constraints(container, rag_db, table_map, exclude_tables) if args.indexes else {}
+        go = load(container, go_db, table_map, QUERY, exclude_tables, pg_user)
+        rag = load(container, rag_db, table_map, QUERY, exclude_tables, pg_user)
+        go_c = load(container, go_db, table_map, QUERY_CONSTRAINT, exclude_tables, pg_user)
+        rag_c = load(container, rag_db, table_map, QUERY_CONSTRAINT, exclude_tables, pg_user)
+        go_i = load_indexes(container, go_db, table_map, exclude_tables, pg_user) if args.indexes else {}
+        rag_i = load_indexes(container, rag_db, table_map, exclude_tables, pg_user) if args.indexes else {}
+        go_k = load_constraints(container, go_db, table_map, exclude_tables, pg_user) if args.indexes else {}
+        rag_k = load_constraints(container, rag_db, table_map, exclude_tables, pg_user) if args.indexes else {}
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         print(f"FATAL: 读不到 {container} 里的库 —— {e}\n{cfg['prepare_hint']}")
         return 2
