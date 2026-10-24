@@ -150,88 +150,18 @@ Content-Type: Application/JSON
 
 ---
 
-## 二·六、X-10 🔴 **新发现** —— `message` 域索引 `idx_notification_recipient_read` **两侧列不同**
+## 二·六、X-10 ✅ **已签字认账** —— `message` 域索引 `idx_notification_recipient_read` 两侧列不同
 
-| | 定义 |
+⚠️ **本条已按 §5.3b 硬边界 2 移出 DRIFT 档**（决定不对齐的差异只在签字档落笔）。
+
+| 项 | 值 |
 |---|---|
-| **Go** | `CREATE INDEX idx_notification_recipient_read ON public.message_notification USING btree (is_read)`<br>（真 PG 活体实测，`msg_ddl_pg/go_db`） |
-| **RAG** | `CREATE INDEX idx_notification_recipient_read ON public.message_notification USING btree (recipient_id, is_read)`<br>（真 PG 活体实测，`msg_ddl_pg/rag_db`；脚本见 `service/message/message-rpc/src/main/resources/db/migration/V1__create_message_notification.sql:29`） |
-| **差异** | **同名索引，列不同** ⇒ RAG 的索引覆盖更宽（多了 `recipient_id`）⇒ 属**索引定义**差异（§3.1 明确把「索引」列入必须逐条对照的面） |
+| 签字决定 | **保留 RAG 的 `(recipient_id, is_read)` 复合索引**，**不改回** Go 的单列 `(is_read)` |
+| 根因 | **Go 侧 gorm tag 的 `priority:1` 写到了另一个索引名**上 ⇒ GORM 只建出单列索引 ⇒ 是**声明笔误的产物** |
+| 决策记录 | [`docs/Intentional_Deviations/global/cross-domain.md` §SD-2026-10-25-03](../../../Intentional_Deviations/global/cross-domain.md) |
+| 代码侧指针 | `service/message/message-rpc/src/main/resources/db/migration/V1__create_message_notification.sql:27-36` |
 
-### 根因（Go 侧的一处声明笔误）
-
-```go
-// Sea-RideTheWind_golang/service/message/rpc/internal/model/data_model.go:32,38,41
-RecipientID int64  `gorm:"column:recipient_id;not null;index:idx_notification_recipient_time,priority:1"`
-IsRead      bool   `gorm:"column:is_read;not null;default:false;index:idx_notification_recipient_read,priority:2"`
-CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime;index:idx_notification_recipient_time,priority:2"`
-```
-
-⇒ `is_read` 声明的复合索引 `idx_notification_recipient_read` **只有 `priority:2`、没有 `priority:1`**
-⇒ 而 `recipient_id` 的 `priority:1` 被写到了**另一个索引名**（`idx_notification_recipient_time`）上
-⇒ GORM 于是只建出**单列索引** `(is_read)`
-⇒ **RAG 建的是「本意」的那个复合索引 `(recipient_id, is_read)`**
-⇒ ⇒ **两侧 DDL 不一致**，且**不一致的根因在 Go 侧的声明**。
-
-### 处置：**不在 global 落笔**（写权不在本域）
-
-⇒ 修法落在 `service/message/message-rpc` 的**迁移脚本** ⇒ **属 `message` 域的代码**
-⇒ `global` **不写别域业务代码**（§5.3b）⇒ **只记账 + 交接**。
-⇒ 且「是改成 Go 的单列 `(is_read)`（= 把 RAG 改**差**）还是保留 RAG 的复合索引并签字」
-⇒ 属**拍板题** ⇒ 等用户定。
-⚠️ **若签字保留 RAG 的复合索引** ⇒ 落 `docs/Intentional_Deviations/`（本档只留指针）。
-
----
-
-## 二·七、X-3 ✅ **已定位并闭合** —— 「第三个仓库」= **仓外的 DC 平台**（2026-10-25 B2）
-
-### ① 链路末端**不是仓库**，是一个**仓外 HTTP 服务**
-
-```go
-// Sea-RideTheWind_golang/service/like/rpc/cmd/fact-dispatch/main.go:54-56
-dsn      := os.Getenv("LIKE_DATABASE_URL")
-endpoint := os.Getenv("DC_PLATFORM_EVENT_URL")
-token    := os.Getenv("DC_PLATFORM_SERVICE_TOKEN")
-```
-
-⇒ 末端 = **DC 平台的 `POST /v1/events`**（**在本仓库之外**）
-⇒ 契约**不在仓内代码里**，而是由 **env + 构造期参数校验**钉死：
-
-```go
-// service/common/communityfact/wire.go:83-91
-if parsed.Path != "/v1/events" || len(token) < 32 || ... {
-    return nil, errors.New("community DataCenter event sender is not configured")
-}
-```
-⇒ 请求头：`Content-Type: application/json` + **`Idempotency-Key: <event.EventID>`**
-+ **`Authorization: Bearer <token>`** + OTel trace 注入（`wire.go:97-104`）。
-
-### ② 仓内两侧**都有**，且**逐条对齐**
-
-| 环节 | Go | RAG |
-|---|---|---|
-| 共享包 | `service/common/communityfact/`（`authority_http.go` / `process.go` / `logging.go` / `wire.go`） | `service/common/src/main/java/com/rag/common/communityfact/`（`AuthorityHandler` / `Dispatcher` / `ProcessLogger` / `Wire`）✅ **4 ↔ 4** |
-| `/v1/events` 路径校验 | `wire.go:87` | `Wire.java:201` ✅ |
-| authority 端点路径 | `mux.HandleFunc("GET /internal/v1/community/facts", …)` | `AuthorityHandlerFactory.AUTHORITY_PATH = "/internal/v1/community/facts"` ✅ |
-| 调度形状 4 项 | `1s` ticker / 每轮 `16` 条 / 单次 `10s` 超时 / 单条失败即 `break` | `Dispatcher.java:122,178` + 各域 `@Scheduled` ⇒ **四个形状逐条对齐**（javadoc 已写明 Go 行号） |
-| 接入的域 | `like` / `comment` / `favorite`（各有 `cmd/fact-authority` + `cmd/fact-dispatch`） | `like-rpc` / `comment-rpc` / `favorite-rpc` 三域**都接了线**（`DC_PLATFORM_EVENT_URL` / `DC_PLATFORM_SERVICE_TOKEN` → `application.yml`）✅ |
-
-### ③ 唯一差异 = **部署形态**（表达层）
-
-| | Go | RAG |
-|---|---|---|
-| dispatch | **独立进程** `cmd/fact-dispatch`（`RunDispatcher` 循环） | **进程内 `@Scheduled`**（`LikeFactDispatchScheduler` / `CommentFactDispatchScheduler` / `FavoriteFactDispatchScheduler`） |
-| authority | **独立进程** `cmd/fact-authority` | **rpc 进程内的一个 HTTP 端点**（`AuthorityHandlerFactory`） |
-
-⇒ 已在 javadoc 留痕：「只是**吞吐上限**从『1 进程』变成『每 JVM 16 × N 副本』」
-⇒ 属**部署形态差异**，不是语义差异 ⇒ **不修**（Spring Boot 单 jar 无法再起第二个 main 而不改产物形态）。
-
-### ④ 结论
-
-⇒ **X-3 从「未定位的第三个仓库」变成「已定位：仓外的 DC 平台 HTTP 端点；仓内两侧 4↔4 对齐、调度形状逐条对齐」**
-⇒ **不是漂移**，是**架构事实** ⇒ 本条**关闭**（✅ 已闭合）。
-⚠️ **唯一仍需外部知识补齐的一点**：DC 平台**自己**的行为（它怎么存、怎么回执）不在本仓库内
-⇒ 两侧对它**只能对齐到 env + 端点契约这一层** ⇒ 这是**边界**，不是缺口。
+⚠️ **别把它悄悄改回单列** ⇒ 那里已留指针 + 签字档是唯一记录处。
 
 ---
 

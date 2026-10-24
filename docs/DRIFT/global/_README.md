@@ -132,7 +132,7 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 | 社区消费者差异 | Go 用 `like`，RAG 不用 | ⏸ **仍未决**（交接 #9，与 `DRIFT-LIKE-003` 同一条） |
 | 裸 `ServerCallHandler` 不被 dispatch | task 域 | ⏸ **仍未决**（交接 #10） |
 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🔴 **未修 · 跨域 · 待拍板**（2049~10000 段且非空值 ≤2048 ⇒ Go 200 / RAG 5001） |
-| DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🟡 **部分闭合（2026-10-25 B3）** —— 查出**已有预设本身已失效**（users/message）⇒ 修好 + 扩到 `comment` ⇒ **可跑的域 1 → 4**；🔴 产出新差异 **X-10**（`message` 域索引列两侧不同）；⚠️ 仍缺 article/like/hot/follow/favorite 的**双侧库环境** |
+| DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🟡 **部分闭合（2026-10-25 B3）** —— 查出**已有预设本身已失效**（users/message）⇒ 修好 + 扩到 `comment` ⇒ **可跑的域 1 → 4**；🔴 产出新差异 **X-10**（`message` 域索引列两侧不同）⇒ ✅ **已签字认账**（`SD-2026-10-25-03`：保留 RAG 的复合索引）；⚠️ 仍缺 article/like/hot/follow/favorite 的**双侧库环境** |
 
 ---
 
@@ -146,17 +146,17 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 | 2 | `UserDomainService` javadoc 假断言 | `UserDomainService.java:113` **原样还在** | ✅ **已销账**（2026-10-25，两步走完 ⇒ 见 [`cycle-deps.md`](cycle-deps.md)） |
 | 3 | `DRIFT-COMMON-005` 定案（`bindToCurrent` 签名是否允许破坏性变更） | 跨域（common + admin-rpc + user-rpc）的破坏性变更 | ⏸ **仍未决**（唯一被反复确认的未决项） |
 | 4 | `like` 的 `SD-2026-10-23-09` 描述订正 | like 域本轮未动 | ⏸ **仍未决** |
-| 8 | `docs/Pitfalls/common/_signed-deviations.md` 疑似错放 | 该文件**仍是 0 字节**，原地未动 | ❌ **未销账**（真名在 `docs/Intentional_Deviations/common/`） |
+| 8 | `docs/Pitfalls/common/_signed-deviations.md` 疑似错放 | ✅ **2026-10-25 已销账**：确认是 **0 字节空文件**（真名在 `docs/Intentional_Deviations/common/_signed-deviations.md`）⇒ **直接删除**（0 字节 ⇒ 删掉不可能丢内容） | ✅ **已销账** |
 | 9 | 社区消费者：Go 用 `like`，RAG 不用 | 与 `DRIFT-LIKE-003` 同一条，favorite 域本轮未做 | ⏸ **仍未决** |
 | 10 | 裸 `ServerCallHandler` 不被 dispatch（task 域） | task 域本轮未动 | ⏸ **仍未决** |
 
-⇒ **真实分布（2026-10-25 更新）**：已销账 **6 条**（#1/#5/#6/#7/#11/**#2**）· **未销账 1 条**（#8）· **仍未决 4 条**（#3/#4/#9/#10）。
+⇒ **真实分布（2026-10-25 更新）**：已销账 **7 条**（#1/#5/#6/#7/#11/#2/**#8**）· **未销账 0 条**· **仍未决 4 条**（#3/#4/#9/#10）。
 
 ⇒ **第三轮（2026-10-25）新增归位**：**T-4 的资源面残留**（「断连后在飞 gRPC 不被提前取消」）
 经真 Tomcat 11.0.24 实测 + Tomcat 源码取证 ⇒ **Servlet 容器不向应用暴露客户端断连信号**
-⇒ **框架限制、不可修** ⇒ 归位为待签字候选 **`SD-2026-10-25-CAND-12`**
+⇒ **框架限制、不可修** ⇒ 归位为 **`SD-2026-10-25-02`**（**2026-10-25 已签字**）
 ⇒ [`docs/Intentional_Deviations/global/common-tails.md`](../../../Intentional_Deviations/global/common-tails.md)。
-⚠️ **签字权在用户** ⇒ 本轮**未**自行批准。
+⇒ 它是**框架限制** ⇒ **不存在决策空间**（不是「待拍板项」）⇒ 签字只认账事实、**不改任何代码**。
 ⚠️ 其中 **#3（`DRIFT-COMMON-005`：`bindToCurrent` 签名是否允许破坏性变更）** 仍是**唯一被反复确认的未决项**
 ⇒ 本域连续两轮**均未动** `bindToCurrent` 的签名 ⇒ 不与之冲突。
 
@@ -165,6 +165,11 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 ## 七、开工前的纪律
 
 1. **本域是 `service/common/**` 的唯一合法写点** —— 别的域只读（§二 边界表）。
+1b. ⚠️ **写权扩展（2026-10-25 用户授权）** —— 用户明确：「**你有对除了 favorite 外其他所有代码的权限**」
+   ⇒ ⇒ `global` **可以**改**除 `favorite` 外**任何域的代码与文档
+   ⇒ ⚠️ **但 `favorite` 一律不碰**（用户原话：「global 里的微服务只有 favorite 不是」）
+   ⇒ ⚠️ **单写权仍然成立且方向相反**：`service/common/**` **只有 `align/global` 能写**，别的域只读
+   ⇒ ⇒ 因此**跨域改动**（同时动 common + 别的域）**必须同一次提交**（§五 规则 2）。
 2. **凡要改 `service/common` + 别的域的代码 ⇒ 同一次提交**（§四 那个循环依赖的教训）。
 3. **每条收口都必须配真 PG / 真启动的守门测试**（§3.3）—— 纯 mock 单测不算。
 4. **台账写入边界**（§5.3 3b）：本域只写 `docs/DRIFT/global/` + `docs/Pitfalls/global/` +
@@ -178,6 +183,7 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | **第六轮（签字 + 授权范围）**：① **`SD-2026-10-25-CAND-12` → `SD-2026-10-25-02`（已签字）** —— T-4 资源面残留是**框架限制** ⇒ 不存在决策空间 ⇒ 签字只认账事实、**不改任何代码** ② 🔴 **X-10 用户签字** ⇒ **`SD-2026-10-25-03`**：保留 RAG 的 `(recipient_id, is_read)` 复合索引，**不改回** Go 的单列（根因 = Go 侧 gorm tag 的 `priority:1` 写到了另一个索引名）；配套：迁移脚本注释订正（留指针）+ DRIFT 侧移除该条只留指针（§5.3b）③ **#8 销账** —— `docs/Pitfalls/common/_signed-deviations.md` 确认是 0 字节错放文件 ⇒ 删除 ④ **记录写权扩展**：用户授权 global 改**除 favorite 外**所有域的代码（§七 纪律 1b） |
 | 2026-10-25 | **第五轮（B2 / X-3 闭合）**：**「第三个仓库」已定位** —— 链路末端**不是仓库**，是**仓外 DC 平台**的 `POST /v1/events`（契约由 `DC_PLATFORM_EVENT_URL` + `DC_PLATFORM_SERVICE_TOKEN` 钉死，路径必须以 `/v1/events` 结尾、token ≥ 32，见 Go `service/common/communityfact/wire.go:83-91`）。仓内两侧**都有**：`service/common/communityfact` **4 文件 ↔ 4 类**、authority 端点路径 1:1、调度形状 **1s/16/10s/单条失败即 break** 四项逐条对齐、三域都接了线 ⇒ **不是漂移，是架构事实 + 仓外边界** ⇒ **X-3 关闭** |
 | 2026-10-25 | **第四轮（B3 / X-7 部分闭合）**：① 查出 **`check-ddl-static.py` 已有的域预设本身已失效**（`users` 容器改名、`message` 容器+库名+psql 用户三重失效）⇒ 修好 + 给脚本加按域的 `pg_user` ② **扩域** ⇒ 新增 `comment` ⇒ **可跑的域 1 → 4** ③ 跑出**真结论**：task ✅ 11 列逐字相同、message ✅ 37 列逐字相同（DEFAULT 6 处 = 已知刻意保留）、users/comment 各有**环境缺口**（Go 侧对应表未被 AutoMigrate）④ 🔴 **新增 X-10** —— `message` 域索引 `idx_notification_recipient_read` **两侧列不同**（Go 单列 `is_read` / RAG 复合 `recipient_id,is_read`），根因是 Go 侧 `priority:1` 写到了另一个索引名 ⇒ 修法落在 message 域的迁移脚本 ⇒ **global 只记账，等用户拍板** ⇒ [`cross-domain.md`](cross-domain.md) |
 | 2026-10-25 | **第三轮收口（A1 / A2 / A3 / A4）**：① **T-1 残余 ① 已修**（包一层 `HttpInputMessage` ⇒ 畸形头不再抛 + `charset=gbk` 回归 UTF-8；守门 8 条 + 变异双向转红）② **T-9 已修**（熔断键补 target 前缀，身份源 = `Channel.authority()`；守门 6 条 + 变异转红）③ **T-4 观测面已修**（499 判据改成「**filter 写 socket 失败**」；真 Tomcat 守门 3 条 + M1/M2/M3 三组变异全转红；⚠️ 顺带修掉「提前 flush 把 `Content-Length` 退化成 chunked」这个**新引入的 wire 差异**）⇒ 🔴 资源面残留转**框架限制** ⇒ `SD-2026-10-25-CAND-12`（待签字）④ **CYCLE-002 普查 = 0 命中** ⇒ 落成可重跑守门 `tools/difftest/check-cross-domain-holds.py` ⇒ [`cycle-deps.md`](cycle-deps.md) |
