@@ -158,10 +158,11 @@ Content-Type: Application/JSON
 |---|---|
 | 签字决定 | **保留 RAG 的 `(recipient_id, is_read)` 复合索引**，**不改回** Go 的单列 `(is_read)` |
 | 根因 | **Go 侧 gorm tag 的 `priority:1` 写到了另一个索引名**上 ⇒ GORM 只建出单列索引 ⇒ 是**声明笔误的产物** |
-| 决策记录 | [`docs/Intentional_Deviations/global/cross-domain.md` §SD-2026-10-25-03](../../../Intentional_Deviations/global/cross-domain.md) |
-| 代码侧指针 | `service/message/message-rpc/src/main/resources/db/migration/V1__create_message_notification.sql:27-36` |
+| 决策记录 | [`docs/Intentional_Deviations/message/rpc.md` §`SD-2026-10-23-06`](../../../Intentional_Deviations/message/rpc.md)（**message 域那一条** —— 该编号在 3 个域各有含义，引用必须带域限定）<br>⚠️ **global 侧的 `SD-2026-10-25-03` 已撤销（重复登记）** ⇒ 见 [`docs/Intentional_Deviations/global/cross-domain.md`](../../../Intentional_Deviations/global/cross-domain.md) |
+| 代码侧指针 | `service/message/message-rpc/src/main/resources/db/migration/V1__create_message_notification.sql:27-38` |
 
 ⚠️ **别把它悄悄改回单列** ⇒ 那里已留指针 + 签字档是唯一记录处。
+⚠️ **本条的 DRIFT 侧销账日期是 2026-10-23**（`docs/DRIFT/message/rpc.md` §7 `DRIFT-MSG-V-022`），**不是** 2026-10-25 —— 2026-10-25 只是 global 侧重新发现并把指针指对。
 
 ---
 
