@@ -116,7 +116,7 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | D5 | 指标**暴露**是单向增强 | ⚠️ 有意偏离（2026-10-23） | Go 的 5 个指标注册了但**无端点暴露**（yaml 的 Prometheus 块无 Host；`DevServer` 块在 go-zero v1.10.2 无对应字段）。分桶边界已对齐回 `prometheus.DefBuckets` |
 | D6 | **端口** | ✅ **已签字**（2026-10-24 第六轮，用户拍板「保持」） | Go `hotcenter.yaml` = 8893；`Infrastructure.md §3` 给 hot 预占 18897 ⇒ **保持 18897**（`HOT_API_PORT` 可覆盖）⇒ `SD-HOT-API-009`。⚠️ HTTP 端口**不是 wire 契约**（各自独立）⇒ 无行为差异 |
 | D7 | GET + JSON body 覆盖 query | ✅ **2026-10-23 复核：原结论修正 —— 这不是漂移** | **原文保留**：「Go 的 `httpx.Parse` 还会跑 `ParseJsonBody`。极冷边界，未承诺一致」。<br>**修正依据**：`core/mapping/utils.go:589-597` `usingDifferentKeys(key, field)` —— 字段有 `form` tag 但**没有 `json` tag** ⇒ JSON unmarshaler（`jsonTagKey`）**整字段跳过**（`unmarshaler.go:571-573` 直接 `return nil`）。<br>**Go 侧活体探针实测**：`?page=5` + body `{"page":9,"page_size":3}` → **`page=5 pageSize=20`**；无 query + body → **`1/20`**；POST + body → **`1/20`**。JSON body **完全被忽略**。<br>⇒ RAG「不读 body」与 Go 行为**一致**，原记的「未实现」是**假阳性**。真漂移另有其人，见 **DRIFT-HOTAPI-013**（畸形 JSON body）。 |
-| D8 | client 熔断实际生效 | ⚠️ 静态确认（2026-10-23） | 依赖「扫到 `com.rag.common`」+ `@GrpcGlobalClientInterceptor`，按 §3.3 **不得**据注解存在即断言生效 |
+| D8 | client 熔断实际生效 | ✅ **已闭合（第十轮，2026-10-24）** | **装配层**（第四轮 `GoStyleGrpcClientBreakerWiringTest` 3 例）+ **行为层**（第十轮 `GoStyleGrpcClientBreakerE2ETest`：内嵌恒返 INTERNAL 的 gRPC server ⇒ 判据是「**下游调用次数停止增长**」）⇒ 熔断**真的打开**已被行为级证据坐实；**变异验证**（`service/common` 的 `if (!breaker.accept())` → `&& Boolean.FALSE` ⇒ 变红 ✅） |
 | D9 | 3s 超时 / 保护层四闸实际触发 | ⚠️ 静态确认（2026-10-23） | ✅ **活体（2026-10-24 第八轮）**：**三闸双侧活体坐实** —— MaxBytes（默认阈值，超限 → 两侧 **413 + 空 body + 无 Content-Type**，边界「恰好等于」也一致）；MaxConns（同阈值 8 + 16 并发 → 两侧**各 8 个裸 503**）；Breaker（两侧都**真的打开** → 裸 503 + 空 body）。⚠️ **CpuShedding 在 darwin 上 Go 侧结构性不可达**（`core/stat/internal/cpu_other.go` 带 `//go:build !linux` ⇒ `CpuUsage()` 恒 0 ⇒ 永不降载）⇒ 只能静态 + 上游测试取证。产出 **DRIFT-HOTAPI-026**（413 后 Go RST）/ **DRIFT-HOTAPI-027**（MaxConns 默认阈值下 RAG 不可达）/ **U5-OPEN-1**（熔断打开时机不稳定，未定性） |
 | D10 | `management.metrics.distribution.slo` 不可用 | ⚠️ 已实测（2026-10-23） | Boot 的 `ServiceLevelObjectiveBoundary` 转换器解析不了小数秒（`2.5s` → `NumberFormatException`），且会让整个 `MetricsProperties` 绑定失败 ⇒ **上下文起不来**。SLO 边界改在 `HotApiMetrics` 代码侧声明 |
 
@@ -124,9 +124,9 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 
 | # | 项 | 类别 | 状态 |
 |---|---|---|---|
-| **D11** | **重复 query 参数 → Go 取首值，RAG 拼成 `"首,次"` 后整包 5001** | **SEMANTIC MISMATCH** | 🔴 需修（真 Boot 上下文已复现） |
+| **D11** | **重复 query 参数 → Go 取首值，RAG 拼成 `"首,次"` 后整包 5001** | **SEMANTIC MISMATCH** | ✅ **已修**（`DRIFT-HOTAPI-011`：`GoFormValues.firstFormValue` 取首值） |
 | **D12** | form 参数总数上限 **2048** | OBSERVABLE DIFFERENCE | ✅ **已实现**（2026-10-24 复核：`GoFormValues.requireFormValueCountWithinLimit` + `HotApiGoParseParityTest` 的 2048/2049 边界用例；⚠️ 本行原记「RAG 侧不存在 / 需拍板」**是错的** —— 实现与测试都在，只是台账没回填） |
-| **D13** | **畸形 JSON body** → Go 拒绝 5001，RAG 完全忽略 body | OBSERVABLE DIFFERENCE | 🟡 需拍板 |
+| **D13** | **畸形 JSON body** → Go 拒绝 5001，RAG 完全忽略 body | OBSERVABLE DIFFERENCE | ✅ **已修**（`DRIFT-HOTAPI-015`） |
 | **D14** | 超时 / 499 响应缺 `X-Content-Type-Options: nosniff` | OBSERVABLE DIFFERENCE | ✅ **活体取证完成**（2026-10-24 第五轮）：真栈下 Go 的 503 带 `nosniff`、RAG **不带** ⇒ **确认是漂移**（不是静态推断）。代码在 `service/common` ⇒ **已移交 common 域** |
 | **D15** | 运行时 JSON **字段顺序**与 Go 声明序不同（裸 mapper 测不出来） | OBSERVABLE DIFFERENCE | 🟡 已知取舍，需登记 |
 | **D16** | **业务错误日志的级别 / 字段集 / `error_reason` 形态**与 Go 不同（nil 响应分支最严重：Go 是 **error 级 + 9 字段**，RAG 是 **info 级 + 0 字段**） | OBSERVABLE DIFFERENCE | ✅ **已修**（2026-10-24 第四轮 ⇒ `DRIFT-HOTAPI-016`；3 条变异全红） |
