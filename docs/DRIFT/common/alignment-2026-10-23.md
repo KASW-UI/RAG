@@ -34,6 +34,7 @@
 | 已修 | **3 条 SEMANTIC MISMATCH**（均配回归测试，147 tests / 0 failures）<br>+ DRIFT-COMMON-006 的**本域侧**（死代码标废弃） |
 | 已记录未修 | **28 条编号条目**（`DRIFT-COMMON` 3 + communityfact 15 + logger 7 + snowflake 3）<br>另补录 **5 项未编号的观察**（见 §六·六），含 1 条 `UNRESOLVED`、1 条 API 缺陷、2 条跨域归属 |
 | 2026-10-24 复验 | 🔴 **推翻了首版 1 条假结论**（「H2 已闭环」实为 9/10）；✅ 其余承重断言均仍成立（见 §六·五）<br>🔴 **新增 2 条**（DRIFT-COMMON-005 / -006），其中 -005 此前被**别的域签了字**却在本域无记录 |
+| 📌 决策与交接 | **2 条用户拍板**已记入 §八（守门脚本保留 / COMMON-005 先记账不改）<br>**9 项交接事项**列在 §九（本域一律不越界） |
 
 ---
 
@@ -527,7 +528,49 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 
 ---
 
-## 八、效力边界
+## 八、📌 决策记录（2026-10-24 用户拍板）
+
+> 本节记**用户明确拍过板的事**。目的是：**下一轮复验不要把它当新议题重新提一遍**。
+
+### 决策 1：`tools/difftest/check-grpc-interceptor-wiring.py` **保留**
+
+| 项 | 值 |
+|---|---|
+| 拍板 | ✅ **保留**（2026-10-24，用户） |
+| 产物 | `tools/difftest/check-grpc-interceptor-wiring.py`（可执行，`EXIT=1` 精确指向 `hot-rpc`） |
+| ⚠️ 归属说明 | 它**落在 `service/common` 之外**（在 `tools/`）。<br>⇒ 依据：**它不改任何别的域的代码**，只**报告**哪个消费方没接上 —— 是**检测器**，不是**越界修复**。<br>⇒ 预置在 `tools/difftest/` 也与既有惯例一致（`check-flyway-ledger.py` 同样是跨模块静态检查）。 |
+| 生效条件 | 待 `hot-rpc` 修好后应转 `EXIT=0` ⇒ **该脚本同时是「修好了」的验收信号** |
+| 📌 **交接给主会话** | ⚠️ 该脚本**尚未进入 AGENTS.md §7.2 的工具表** ⇒ 主会话合并时需补一行，否则它**不可被发现**（§7.2 表格是工具的唯一索引） |
+
+### 决策 2：DRIFT-COMMON-005 **先记入台账，本轮不改**
+
+| 项 | 值 |
+|---|---|
+| 拍板 | 📌 **先记入台账，不改**（2026-10-24，用户） |
+| 归档位置 | ✅ 留在 `docs/DRIFT/common/`（**不**进 `docs/Intentional_Deviations/common/`）<br>判据（§5.3b 硬边界 2）：**这条差异要不要「修回去」？** —— 要（技术上可修），只是**改动是跨域破坏性的** ⇒ 属 DRIFT，不属「决定不对齐」 |
+| 改动为什么必须跨域 | `bindToCurrent(long epochMillis)` 是 `service/common` 的**公共 API**，而 `admin-rpc` / `user-rpc` 的**测试**直接调它（`AdminDeadlinePassthroughTest.java:150`、`DeadlinePassthroughTest.java:144`）⇒ 改签名会打断别域 |
+| 关闭条件 | 需要一个**同时动 `service/common` + `admin-rpc` + `user-rpc`** 的决策（谁主导？API 兼容还是允许破坏？）⇒ **不属于单域可决** |
+| ⚠️ 遗留 | `align/like` 的 `SD-2026-10-23-09` 已就**同一现象**签字，但**描述只对了一半**（见 §六·五·6）⇒ 合并时两侧描述需对齐 |
+
+---
+
+## 九、📮 交接给主会话（合并时处理，本域不越界）
+
+| # | 事项 | 归属 | 说明 |
+|---|---|---|---|
+| 1 | **`hot-rpc` 缺 `GrpcServerConfigurer`** | `align/hot` | DRIFT-COMMON-004。`align/hot` 当前 3 个 commit 都在 `hot-api` 侧，**未触及 hot-rpc 的 Application**。修法 + 必备测试见 §一·五 |
+| 2 | **`UserDomainService.java:115` 的 javadoc 假断言** | `align/users-user` | DRIFT-COMMON-006 连带项：声称 deadline 由「`markExpired`（RpcInterceptor 调度）」设置，实际是 `onHalfClose` 的 `bindToCurrent` |
+| 3 | **DRIFT-COMMON-005 的定案** | 跨域（common + users） | 决策 2 关闭条件：`bindToCurrent` 签名是否允许破坏性变更 |
+| 4 | **`align/like` 的 `SD-2026-10-23-09` 描述订正** | `align/like` | 签字理由说 `GoStyleRequestDeadline` 只暴露毫秒，实际它内部是**纳秒**；真正只有毫秒的是 `DeadlineState` |
+| 5 | **守门脚本进 AGENTS.md §7.2 工具表** | 主会话 | 决策 1 的配套；不进表 = 不可被发现 |
+| 6 | **`align/message` ↔ `align/users-user` 合并冲突** | 主会话 | 两者都改了 `service/common/protection/GoStyleAdaptiveShedder.java` / `GoStyleCpuSheddingFilter.java` / `GoStyleRpcSheddingInterceptor.java` |
+| 7 | **共享面索引更新** | 主会话 | `_INDEX.md` / `AGENTS.md` / `_MANIFEST.json`（§5.3：本域一律不碰） |
+| 8 | **`docs/Pitfalls/common/_signed-deviations.md` 疑似错放** | 主会话 | 0 字节占位，却顶着 Intentional_Deviations 的名字（同名文件在 `docs/Intentional_Deviations/common/`）。本域未动 |
+| 9 | **社区消费者：Go 用 `like`，RAG 不用** | `align/like` / `align/favorite` | §四。`like` 域在 Go 侧有整套事实链路装配，RAG 侧零引用；`favorite` 反之。**别的域在往这条链上加消费者，却没人补 `like` 那一半** |
+
+---
+
+## 十、效力边界
 
 - 本文件所有断言的**基线是 commit `8422116`**。若 `do-my-own-gh` 已前进，须 `git merge do-my-own-gh` 后重新核对（§5.3.4）。
 - 「已修」= **有回归测试且测试红→绿可复现**；**不等于**已在真实部署环境验证。
