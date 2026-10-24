@@ -1171,8 +1171,10 @@ RAG application.yml:16
 | **UNRESOLVED-MSG-V-001**（沿用，跨轮次） | Nacos namespace/group 不一致 | 需 user/admin 侧同轮次结论 | 两侧 namespace/group 对齐后再判 |
 | **UNRESOLVED-MSG-006** ✅ **已关闭（2026-10-23 第六轮）** | ~~RAG 侧 handler 抛 `Error`/panic 时客户端到底看到什么~~ | —— | ✅ 已关闭：`GoStyleRecoverInterceptor` 落地后，抛 `Error`（非 `RuntimeException`）也被兜住 ⇒ 客户端见 `INTERNAL` + description 以 `"panic: "` 开头，与 Go 的 `recoverinterceptor.go:39-42` 一致（`MessageRpcRecoverInterceptorWiringTest` 5 例，真 in-process gRPC） |
 | **UNRESOLVED-MSG-007** ✅ **前提消失（2026-10-23 第四轮，FIX-MSG-V-019）** | ~~pgjdbc `sslmode` 默认值对**行为**的实际影响~~ | —— | ✅ **不再是未知项**：JDBC URL 现在**显式**钉 `?sslmode=disable`（对齐 Go `etc/message.yaml` 的 `Mode: "disable"`）⇒ **不再依赖 pgjdbc 的文档化默认值 `prefer`** ⇒ 两侧都是「永不尝试 TLS」。⚠️ 口径：原问法是「默认 `prefer` 在开了 TLS 的 PG 上会怎样」，那已不是当前配置 |
-| **UNRESOLVED-MSG-008** 🆕 | `Flyway` 独立账本在**三个模块同库**下真的不撞 | 本轮只证了 **message-rpc 单模块**建出 `flyway_schema_history_message`；`like-rpc` / `article-rpc` 未同时启动 | 三模块同时连同一个 `first_db`，`\dt` 确认三本账 + 各自 3 条 `success` |
-| **UNRESOLVED-MSG-009** 🆕 | 时间列 `TIMESTAMP`（非 `TIMESTAMPTZ`）在**多实例/多时区**下是否仍自洽 | 读侧修法的前提是「一个库只由同一时区 JVM 写」（§6.7.10 已留档） | 补一条 `V4` 迁移 + 双实例时区对拍 |
+| **UNRESOLVED-MSG-001** ✅ **已关闭（2026-10-24 第十轮补记）** | ~~JVM 运行时区未知 ⇒ `DRIFT-MSG-010` 时间戳 epoch 是否整体偏移仍未定级~~ | —— | ✅ **已关闭**（三条各自独立成立）：<br>① **2026-10-22 用户确认部署时区 = Asia/Shanghai** ⇒ `DRIFT-MSG-V-007` 的条件化结论确定（实测方向是「RAG 比 Go **晚** 8 小时」，不是「早」—— 方向不能靠推理）；<br>② **V-019** 把 JDBC URL 显式钉上 `options=-c TimeZone=Asia/Shanghai` ⇒ 不再依赖宿主机时区；<br>③ **V-020** 把 8 个时间列改成 `TIMESTAMPTZ` ⇒ **第十轮活体对拍实测两侧列类型逐字一致**（`data_type` 0 差异）⇒ 数据**自描述瞬时**，不再依赖「一个库只由同一时区 JVM 写」 |
+| **UNRESOLVED-MSG-002** ✅ **已关闭（2026-10-24 第十轮补记）** | ~~`ServerInterceptor` 挂载只有 `verify(builder).intercept(...)` 这层证据~~ | —— | ✅ **已关闭**：<br>① **第八轮真双栈 12 档对拍**（EXIT=0）提供**端到端**证据 —— 拦截器链上的行为（熔断码 / shedding 码 / recover 的 `INTERNAL` + `"panic: "` 前缀）在**真实 gRPC 往返**上逐条一致；<br>② **第九轮 V-026** 给 8 个 rpc 组件各补了 `*ProtectionChainWiringTest`（装配层断言「业务 interceptor 真被调到」+「拿到的是**包装过的** call」）⇒ 装配层证据也齐了 |
+| **UNRESOLVED-MSG-008** 🆕 | `Flyway` 独立账本在**三个模块同库**下真的不撞 | 本轮只证了 **message-rpc 单模块**建出 `flyway_schema_history_message`；`like-rpc` / `article-rpc` 未同时启动 | 三模块同时连同一个 `first_db`，`\dt` 确认三本账 + 各自 3 条 `success`<br>⚠️ **本工作树不能做**（需 `like-rpc` / `article-rpc` 同启 ⇒ **跨域**） |
+| **UNRESOLVED-MSG-009** 🆕 ⚠️ **前提已过期（第十轮更正）** | ~~时间列 `TIMESTAMP`（非 `TIMESTAMPTZ`）在**多实例/多时区**下是否仍自洽~~ | 读侧修法的前提是「一个库只由同一时区 JVM 写」（§6.7.10 已留档） | ⚠️ **它建议的「补一条 `V4` 迁移」已经做完**（`V5__message_time_columns_timestamptz.sql`，8 列改 `TIMESTAMPTZ`，第十轮活体对拍实测两侧类型一致）⇒ **不要再去补 V4**。<br>⇒ 剩下的只是**部署口径**问题（「同一个库被不同时区的 JVM 写」），**不是代码能修的** ⇒ 要么写进部署约束文档，要么改成一条运维约束登记<br>⚠️ **本轮不改它的状态**（用户只点了 A5）⇒ 保持 OPEN，但读法已更新 |
 
 ---
 
@@ -1513,6 +1515,15 @@ Flyway 本身每个迁移只跑一次，生产上不会重放。
 所以 V2 的 `ADD CONSTRAINT` 在 GORM 建过的库上**本来就能跑**。
 
 ### 仍然开放（本轮核实，未改）
+
+> ⚠️ **2026-10-24 第十轮加的前向指针 —— 本表是 2026-10-23 第四轮的快照，下表三行的状态此后又变了**：
+> | 行 | 表里写的 | **现在的实际状态** |
+> |---|---|---|
+> | `DRIFT-MSG-V-018` | 🔴 OPEN | ✅ **已修（第九轮）** —— `MessageListConversationsParityTest` 4 例 + 变异 1/4 红 |
+> | `UNRESOLVED-MSG-004` | 🔴 仍成立 | ✅ **已关闭（第九轮）** —— `MessageContextWiringTest` 4 例逐条点名 |
+> | `DRIFT-MSG-V-016` | 🟡 部分已处置 | ✅ **已全处置（第九轮）** —— breaker + shedding 已落地（`SD-07` 同时撤销） |
+>
+> ⇒ **下面这张表的「状态」列读作「2026-10-23 第四轮当时的判断」，不是当前状态。**
 
 | 编号 | 状态 | 本轮核实结论 |
 |---|---|---|
@@ -1933,6 +1944,13 @@ minK    = 1.1
 > ⇒ **真正的逐条对拍是 A 组与 B 组**；C 组只用来证明「两侧都会拒流、且量级相近」。
 
 ### 5. 🔴 本轮**新挖出**的三条漂移（不是实现错，是 Go 与 RAG 的真实分岔）
+
+> ⚠️ **2026-10-24 第十轮加的前向指针 —— 本表是 2026-10-23 第五轮的快照**：
+> `DRIFT-MSG-V-024` / `V-025` / `V-026` **三条现已全部处理完毕** ——
+> `V-024` ✅ 已修（第八轮，rpc 兜底码 `INTERNAL`→`UNKNOWN`）、
+> `V-025` ✅ 已修（第九轮，`GoStyleSheddingStat` 三计数 + 每分钟统计日志）、
+> `V-026` ✅ 已修（第九轮，**8 个 rpc 组件全部接入**熔断/降载链）。
+> ⇒ **下面「🔴 OPEN」读作「2026-10-23 第五轮当时的判断」，不是当前状态。**
 
 | 条目 | 内容 | 状态 |
 |---|---|---|

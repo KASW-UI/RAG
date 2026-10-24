@@ -1114,7 +1114,7 @@ RAG 真实 DTO + 真实 coercion，两侧同时跑），足以支撑判定。
 | `-010` Content-Type charset | **转换器级运行**（非真容器 HTTP 往返） |
 | 13 条路由 / 方法 / 鉴权边界 | 静态源码 + 41 条既有 MVC 用例（RAG 单侧） |
 | 保护层 413 / 503 裸响应 | **真容器-RAG单侧**（Go 侧期望值取自源码） |
-| 一切依赖 message-rpc 响应语义的结论 | **UNKNOWN**（UNRESOLVED-001） |
+| 一切依赖 message-rpc 响应语义的结论 | ✅ **已定级（第十轮）** —— 静态逐条对照 + 双侧活体 12 档对拍（EXIT=0）+ 兜底码专项，**`UNRESOLVED-001` 已关闭**（原为 **UNKNOWN**） |
 | 超时 / 断连 / 并发 / 过载 | **无运行证据**（§8.3 #6~#8） |
 
 ### 与 AGENTS.md §0 状态表的同步建议（本轮不改 AGENTS.md，登记在此）
@@ -1262,6 +1262,12 @@ Jackson 3 的 `FAIL_ON_NULL_FOR_PRIMITIVES` **默认 true** ⇒ `{"offset":null}
 `OBSERVABLE DIFFERENCE` / LOW。要在**真容器**下 dump 全部响应头才能与 Go 逐字节对齐；
 本轮未做（与 `UNRESOLVED-003` 同一件事）。**未修不等于已登记为待办以外的东西** ——
 它仍是 OPEN，且探针不覆盖 HTTP 响应头（那需要双侧起栈）。
+
+> ⚠️ **2026-10-24 第八轮更新**：**真容器 dump 那一半已经做了** ——
+> `UNRESOLVED-003` 已关闭，`exp-http-headers-message.sh` 对 5 条路径逐条 dump 两侧全部响应头
+> ⇒ **`-010` 本身已在真容器级确认**（Go `application/json; charset=utf-8` vs RAG `application/json`）。
+> ⇒ **仍然开放的只剩「要不要改」**（不是「不知道是什么」）。
+> ⚠️ **2026-10-24 用户拍板：保持登记，本轮不做**（改 charset 会动全部 10 个 api 的响应头）⇒ **不是签字**，仍是登记在册的待办。
 
 ### 七、本轮关闭的 Unresolved
 
