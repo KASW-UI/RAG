@@ -87,12 +87,13 @@ public class HotArticleHydrator {
      * 对 hot-rpc 返回的 TopK 做并发补全 —— 对应 Go {@code hydrateArticles}（{@code :91-124}）。
      *
      * @param hotItems         Go {@code hotResp.GetItems()}；元素可为 null（对应 Go 的 nil item）
-     * @param remainingBudgetMs 请求剩余预算，显式传给每个补全任务
-     *                         （Go 侧由 ctx 隐式携带，见 {@code getHotArticlesLogic.go:128}）
+     * @param deadlineNanos    请求的<b>绝对</b> deadline（{@link System#nanoTime()} 时基）；
+     *                         {@code -1} 表示本次请求<b>没有</b> HTTP 超时预算
+     *                         （对应 Go「没装 TimeoutHandler ⇒ ctx 上没有 deadline」）
      * @return 与输入<b>等长</b>的列表，元素为 {@code null} 表示该条被 skip；
      *         rank <b>尚未</b>计算（由 {@link HotRankPaginator#assignRanks} 统一做）
      */
-    public List<HotArticleCard> hydrate(List<HotArticleItem> hotItems, long remainingBudgetMs) {
+    public List<HotArticleCard> hydrate(List<HotArticleItem> hotItems, long deadlineNanos) {
         if (hotItems == null || hotItems.isEmpty()) {
             return new ArrayList<>();
         }
@@ -116,7 +117,7 @@ public class HotArticleHydrator {
             }
             futures[i] = CompletableFuture.runAsync(() -> {
                 try {
-                    hydrated[idx] = buildHotArticleItem(hotItem, remainingBudgetMs);
+                    hydrated[idx] = buildHotArticleItem(hotItem, deadlineNanos);
                 } finally {
                     gate.release();
                 }
@@ -142,9 +143,10 @@ public class HotArticleHydrator {
     /**
      * 单条补全 —— 对应 Go {@code buildHotArticleItem}（{@code getHotArticlesLogic.go:126-170}）。
      *
+     * @param deadlineNanos 请求的<b>绝对</b> deadline（nanoTime 时基）；{@code -1} = 无预算
      * @return 成功时的卡片；<b>任何</b> skip 分支都返回 {@code null}
      */
-    HotArticleCard buildHotArticleItem(HotArticleItem hotItem, long remainingBudgetMs) {
+    HotArticleCard buildHotArticleItem(HotArticleItem hotItem, long deadlineNanos) {
         // 分支 ①：Go :127-130 —— nil item 或空 article_id
         if (hotItem == null || hotItem.getArticleId().isEmpty()) {
             metrics.observeArticleSkip(HotApiMetrics.SKIP_EMPTY_ARTICLE_ID);
@@ -153,7 +155,8 @@ public class HotArticleHydrator {
 
         GetArticleResponse articleResp;
         try {
-            articleResp = articleRpcClient.getPublicArticle(hotItem.getArticleId(), remainingBudgetMs);
+            articleResp = articleRpcClient.getPublicArticle(
+                    hotItem.getArticleId(), remainingBudgetMs(deadlineNanos));
         } catch (RuntimeException e) {
             // 分支 ②：Go :137-142 —— RPC 报错。skip 该条 + 两条 metric + 业务错误日志。
             // ⚠️ 捕获 **RuntimeException** 而不是只捕 StatusRuntimeException：
@@ -212,6 +215,60 @@ public class HotArticleHydrator {
                 ? null
                 : new ArrayList<>(article.getSecondaryTagsList()));
         return card;
+    }
+
+    /**
+     * L4 idiomatization：把请求的<b>绝对</b> deadline 折算成「这一次调用还剩多少毫秒」。
+     *
+     * <p><b>Go 出处（三段，缺一不可）</b>：
+     * <pre>
+     * // ① service/common/observability/http.go:56-57 —— 请求级**绝对** deadline
+     * ctx, cancel := context.WithTimeout(r.Context(), timeout)
+     * req := r.WithContext(ctx)
+     *
+     * // ② service/hot/api/internal/logic/hot/getHotArticlesLogic.go:132 —— 每次调用都带 ctx
+     * articleResp, rpcErr := l.svcCtx.ArticleRpc.GetArticle(l.ctx, &amp;articleservice.GetArticleRequest{...})
+     *
+     * // ③ go-zero zrpc/client.go:70-71 + zrpc/internal/client.go —— 每次调用的实际 deadline
+     * //    = min(ctx 的绝对 deadline, 发起时刻 + 2s)
+     * </pre>
+     *
+     * <p><b>语义等价论证</b>：
+     * <ol>
+     *   <li>Go 的 ctx 上挂的是<b>绝对</b> deadline，被 100 个 goroutine <b>共享</b> ⇒
+     *       <b>每一次</b>调用都在<b>自己的发起时刻</b>重新算「还能活多久」：
+     *       {@code min(ctx.deadline, now+2s)}。</li>
+     *   <li>本实现把<b>绝对</b> deadline 传进每个补全任务，并在<b>调用点</b>折算剩余毫秒 ⇒
+     *       交给 {@code GoStyleGrpcCallDeadline} 的预算 = {@code min(2s, deadline-now)}
+     *       ⇒ 实际 deadline = {@code now + min(2s, deadline-now)} = {@code min(now+2s, deadline)}
+     *       ⇒ <b>与 Go 的公式逐字相同</b>。</li>
+     *   <li>⚠️ <b>本轮之前这里是错的</b>：曾把「请求开始时取一次的剩余毫秒<b>快照</b>」传给所有补全 ⇒
+     *       后发的补全拿到的是<b>全新的 2s</b>，<b>不被请求的绝对 deadline 卡住</b>。
+     *       ⇒ 活体实测（U5-OPEN-1 隔离实验 E1）：Go 侧第 3 批补全死于 t≈2.98s（被请求 deadline 卡住），
+     *       RAG 侧死于 t≈4.00s（自己的 2s）⇒ <b>差 1.03s</b>。
+     *       ⇒ 连带后果：这两条补全的失败（DEADLINE_EXCEEDED）落进 client breaker 的
+     *       <b>不同时间桶</b> ⇒ 熔断打开时机与 Go 不同 ⇒ 5xx 累积速率不同。</li>
+     * </ol>
+     *
+     * <p>⚠️ <b>为什么参数是「绝对 deadline」而不是「剩余毫秒」</b>：
+     * 剩余毫秒是<b>某一时刻</b>的量，传递它必然要「在某处取一次」⇒ 取一次就等于<b>冻结</b>。
+     * Go 侧之所以没有这个问题，是因为 ctx 上挂的是<b>绝对</b> deadline。
+     *
+     * <p>⚠️ <b>精度</b>：本仓能拿到的只是 {@code GoStyleRequestDeadline#remainingMillis()}
+     * （毫秒级、向下取整）⇒ 由它重建的绝对 deadline 比真实值<b>最多早 1ms</b>
+     * ⇒ 即 RAG 这一侧<b>更保守</b>（不会比 Go 多活）。
+     */
+    static long remainingBudgetMs(long deadlineNanos) {
+        if (deadlineNanos < 0L) {
+            // 无 HTTP 超时预算 ⇒ 对应 Go「ctx 上没有 deadline」⇒ 只剩 zrpc 的 2s
+            return -1L;
+        }
+        long remainNanos = deadlineNanos - System.nanoTime();
+        if (remainNanos <= 0L) {
+            // 预算已耗尽 ⇒ Go 侧 ctx 已到期，下游调用**立即失败**
+            return 0L;
+        }
+        return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(remainNanos);
     }
 
     /**

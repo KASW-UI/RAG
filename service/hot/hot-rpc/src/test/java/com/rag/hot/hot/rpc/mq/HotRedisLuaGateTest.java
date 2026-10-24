@@ -403,4 +403,59 @@ class HotRedisLuaGateTest {
         assertThat(redis.hasKey(HotRedisSnapshotStore.MERGE_SHADOW_KEY)).isFalse();
         assertThat(redis.hasKey(HotRedisSnapshotStore.HOT_ARTICLES_KEY)).isFalse();
     }
+
+    /**
+     * 🔴 <b>截断层守门</b>：合并结果 &gt;100 条时，<b>只留分数最高的 100 条</b>。
+     *
+     * <h2>为什么必须有这条（U9 系统变异查出来的真实守门缺口）</h2>
+     * <p>此前 {@code MERGED_LIMIT = 100} 与「按分数降序排序」这两处<b>都没有任何测试覆盖</b>：
+     * 既有用例的分片条目最多 4 条 ⇒ <b>永远走不到截断分支</b> ⇒
+     * 变异验证时这两处<b>改错了也没人叫</b>（U9 第十一轮的 R08 / R09 两个「没变红」）。
+     * <p>⚠️ 这两处<b>必须一起测</b>：它们在 &gt;100 条时<b>耦合</b> ——
+     * 排序方向若被改反（升序），截断会留下<b>分数最低</b>的 100 条，
+     * 而「条数」断言（100 vs 101）<b>抓不到</b>这种错误 ⇒ 必须断言<b>留存集合的边界</b>。
+     *
+     * <h2>Go 出处</h2>
+     * <p>{@code service/hot/rpc/internal/mqs/hot_handler.go:383-385}：
+     * <pre>
+     * sort.Slice(merged, func(i, j int) bool { return merged[i].Score &gt; merged[j].Score })
+     * if len(merged) &gt; 100 { merged = merged[:100] }
+     * </pre>
+     */
+    @Test
+    @DisplayName("🔴 合并：>100 条 ⇒ **只留分数最高的 100 条**（Go merged[:100] + 降序）")
+    void mergeTruncatesToThe100HighestScores() {
+        redis.delete(List.of(HotRedisSnapshotStore.HOT_ARTICLES_KEY,
+                HotRedisSnapshotStore.MERGE_SHADOW_KEY, HotMergeScheduler.MERGE_LOCK_KEY));
+        // 150 条，分数 1..150，全放 p0（避免跨分片求和干扰边界断言）
+        for (int i = 1; i <= 150; i++) {
+            redis.opsForZSet().add(HotRedisSnapshotStore.partitionKey(0),
+                    String.format("a%03d", i), (double) i);
+        }
+        holdMergeLock();
+
+        merge.mergePartitions();
+
+        Set<ZSetOperations.TypedTuple<String>> merged =
+                redis.opsForZSet().reverseRangeWithScores(HotRedisSnapshotStore.HOT_ARTICLES_KEY, 0, -1);
+        assertThat(merged).isNotNull();
+
+        assertThat(merged)
+                .as("合并结果必须截断到 100（Go hot_handler.go:383-385 merged[:100]）")
+                .hasSize(100);
+
+        // ★ 关键判定：留存的必须是**分数最高**的那批（150 条里取 51..150）。
+        //   只断言「条数 = 100」是不够的 —— 排序方向被改反时条数仍是 100，
+        //   但留下的是**分数最低**的 1..100 ⇒ 必须断言边界分数。
+        assertThat(merged.stream().mapToDouble(ZSetOperations.TypedTuple::getScore).min().orElseThrow())
+                .as("留存的最低分必须是 51（= 150-100+1）⇒ 留的是最高的一批")
+                .isEqualTo(51d);
+        assertThat(merged.stream().mapToDouble(ZSetOperations.TypedTuple::getScore).max().orElseThrow())
+                .as("留存的最高分必须是 150").isEqualTo(150d);
+
+        // 且「a001」这种低分条目必须**已被丢掉**
+        assertThat(merged.stream().map(ZSetOperations.TypedTuple::getValue).toList())
+                .doesNotContain("a001", "a050")
+                .contains("a051", "a150");
+    }
 }

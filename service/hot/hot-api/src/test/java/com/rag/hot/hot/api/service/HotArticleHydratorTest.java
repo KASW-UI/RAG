@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -319,15 +320,63 @@ class HotArticleHydratorTest {
                 "Go 的 proto3 repeated 字段在 wire 上无元素时是 nil ⇒ JSON 输出 null");
     }
 
+    /**
+     * 🔴 <b>本条断言在 2026-10-24 第十一轮被推翻过一次</b> —— 它当时编码的是<b>漂移后的</b>语义。
+     *
+     * <p><b>原断言</b>：「剩余预算被<b>原样</b>传到底层」（{@code verify(...eq(1500L))} × 3）。
+     * <p><b>为什么它是错的</b>：Go 侧共享的是 ctx 上的<b>绝对</b> deadline
+     * （{@code service/common/observability/http.go:56-57}），
+     * 每个补全在<b>自己的发起时刻</b>重新算 {@code min(ctx.deadline, now+2s)}；
+     * 而「把剩余毫秒原样传给所有补全」= <b>冻结快照</b> ⇒
+     * 后发的补全拿到<b>全新的 2s</b>、<b>不被请求 deadline 卡住</b>。
+     * <p><b>活体实测</b>（U5-OPEN-1 隔离实验 E1，真栈双侧对拍）：
+     * Go 侧第 3 批补全死于 t≈2.98s（被请求 deadline 卡住），RAG 侧死于 t≈4.00s ⇒ <b>差 1.03s</b>。
+     *
+     * <p>⇒ 现在的断言是「<b>在调用点重算</b>」，而不是「原样透传」。
+     */
     @Test
-    @DisplayName("剩余预算被原样传到底层（Go 侧 ctx 被所有补全 goroutine 共享）")
-    void forwardsRequestBudgetToEveryHydration() {
-        when(articleRpcClient.getPublicArticle(any(), anyLong())).thenReturn(published("x"));
+    @DisplayName("🔴 补全的剩余预算在**调用点重算**：后发的补全拿到更小的预算（Go 共享 ctx 的绝对 deadline）")
+    void remainingBudgetIsRecomputedAtEachCallSite() {
+        List<Long> budgets = Collections.synchronizedList(new ArrayList<>());
+        when(articleRpcClient.getPublicArticle(any(), anyLong())).thenAnswer(inv -> {
+            budgets.add(inv.getArgument(1));
+            // 让后面的补全晚一点发出（窗口 8 ⇒ 第 9、10 条要等槽位）
+            Thread.sleep(80L);
+            return published("x");
+        });
 
-        hydrator.hydrate(java.util.Arrays.asList(hotItem("a"), hotItem("b"), hotItem("c")), 1500L);
+        // 10 条 > 并发窗口 8 ⇒ 后 2 条必然是「后发」的
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            ids.add("a" + i);
+        }
+        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(1500L);
+        hydrator.hydrate(items(ids), deadlineNanos);
+
+        assertEquals(10, budgets.size());
+        long max = budgets.stream().mapToLong(Long::longValue).max().orElseThrow();
+        long min = budgets.stream().mapToLong(Long::longValue).min().orElseThrow();
+        assertTrue(max - min >= 40L,
+                "后发的补全必须拿到**更小**的剩余预算（差额应 ≥ 40ms）；"
+                        + "实测 max=" + max + " min=" + min
+                        + " ⇒ 若两者相等，说明退回了「一次性快照」语义（即本条修复前的漂移）");
+        assertTrue(max <= 1500L,
+                "预算不得超过请求的绝对 deadline 对应的剩余量（1500ms），实测 max=" + max);
+    }
+
+    @Test
+    @DisplayName("无 HTTP 超时预算 ⇒ 每次补全都拿默认的 2s（对应 Go「ctx 上没有 deadline」）")
+    void withoutRequestDeadlineEachCallGetsDefaultBudget() {
+        List<Long> budgets = Collections.synchronizedList(new ArrayList<>());
+        when(articleRpcClient.getPublicArticle(any(), anyLong())).thenAnswer(inv -> {
+            budgets.add(inv.getArgument(1));
+            return published("x");
+        });
+
+        hydrator.hydrate(java.util.Arrays.asList(hotItem("a"), hotItem("b"), hotItem("c")), -1L);
 
         org.mockito.Mockito.verify(articleRpcClient, org.mockito.Mockito.times(3))
-                .getPublicArticle(any(), eq(1500L));
+                .getPublicArticle(any(), eq(-1L));
     }
 
     @Test

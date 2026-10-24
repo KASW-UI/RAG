@@ -400,3 +400,111 @@ Mockito 给什么就是什么 ⇒ **「顺序对不对」这件事，mock 一个
 4. ⚠️ **不是所有语义位都能上真 Redis 验**：ZSET member **恒是字符串字节**
    ⇒ 「member 非字符串」分支**在真 Redis 上不可达**（不是没验，是不可达）
    ⇒ 只能靠源码取证，并登记为「真 Redis 无法覆盖」。
+
+---
+
+## P-HOTRPC-13 🔴「清 Redis」必须在旧进程**真死之后**——否则旧进程会把旧 sketch 写回来，热度**恰好翻倍**
+
+> **发现轮次**：2026-10-24 第十一轮（hot-rpc D1 活体对拍）
+> **症状**：对拍时两侧**条目集合、顺序、条数全部一致**，唯独**每个文章的热度恰好是 Go 的 2 倍**
+> （60 vs 120、59 vs 118、57 vs 114……），逐条整齐地 ×2。
+
+**根因链**
+
+1. `HeavyKeeper` 的 sketch 是**进程内内存态**；对外可见的是**周期性写进 Redis 的分片快照**
+   （Go/RAG 都是 30s ticker）。
+2. 编排里「杀旧进程 → 清 Redis」时，若**没等旧进程真的退出**就清空，
+   旧进程的 ticker 会在**清空之后**再写一轮，把它的内存 sketch 原样写回 Redis。
+3. 新进程启动 ⇒ `OnPartitionsAssigned` ⇒ `loadInto` 把**上一轮的分数**当权重灌进新 sketch
+   ⇒ 新 sketch 的计数 = 旧分数 + 本轮事件权重 ⇒ **恰好 ×2**。
+4. Go 侧如果启动得比旧 RAG 进程的下一轮 ticker 更早，它的 Redis 是空的 ⇒ Go 得到纯事件权重 ⇒ **Go 是基准**。
+
+**为什么这个坑特别贵**
+
+- 条目**集合**对、**顺序**对、**条数**对 ⇒ 任何「只比集合/顺序」的断言**全绿**。
+- 只有**逐字节比分数**才看得见 ⇒ 而「分数等比放大」很容易被误读成「权重表配置错了」或「事件被消费了两遍」。
+- 两侧都实现了**同一套**回灌逻辑（Go `hot_handler.go:123` / RAG `HotEventConsumer.java:206`），
+  ⇒ **代码是对的**，错的是编排 ⇒ 不该去改业务代码。
+
+**怎么防**
+
+1. **杀进程后必须等端口真正释放**（`lsof -iTCP:<port> -sTCP:LISTEN` 轮询到空），再清 Redis。
+2. **清完必须断言空**：`redis-cli DBSIZE` 必须为 0；不为 0 就**停下**，不要继续。
+3. **启动后必须断言回灌是 0**：日志里应出现 `loaded 0 articles for partition 0/1/2`；
+   若出现 `loaded 8 articles` 之类 ⇒ Redis 当时**不是空的** ⇒ 编排有残留。
+4. ⚠️ 通用形态：**任何「内存态 + 周期性落盘」的组件，跨进程重启做对拍时，
+   「清外部存储」与「停旧进程」是有先后依赖的**，不是两个独立动作。
+
+---
+
+## P-HOTRPC-14 🔴 用**残缺的编译产物**启动 ⇒ 类根本没被加载 ⇒ 组件功能缺失且**零日志**
+
+> **发现轮次**：2026-10-24 第十一轮
+> **症状**：RAG hot-rpc 进程起来了、gRPC 端口在听、消费者在消费、
+> 分片快照每 30s 正常写进 Redis —— 但**合并后的大 key `hot:articles` 永远不出现**，
+> 且**一条日志都没有**（连 `[Merge] lock lost` 都没有）。
+> 一度被误判成「RAG 侧合并逻辑有漂移」。
+
+**根因**
+
+- 那次是用一份**编译期缺文件**的 `target/classes` 启动的（源码树当时不完整）。
+- 缺失的恰好是 `HotMergeScheduler`（合并器）与 `HotServiceGrpcImpl`（gRPC 服务实现）
+  ⇒ 这两个 `@Component` **从未被实例化** ⇒ `@Scheduled` 的合并任务**根本没被注册**。
+- 因为**没有任何异常、没有任何日志**，只看日志永远查不出来。
+
+**判据（可复用）**
+
+```bash
+jcmd <pid> GC.class_histogram | grep 'com.rag.hot.hot.rpc'
+```
+⇒ **类不在列表里 ⇒ 这个 Bean 不会被装配**。
+本例中 `HotRedisSnapshotStore` 在、`HotMergeScheduler` 不在 ⇒ 缺口一目了然。
+
+**怎么防**
+
+1. 对拍脚本**启动前强制重编**（不要复用来源不明的 `target/classes`）。
+2. 启动后**断言关键类已加载**（脚本里已有这一步，见 `run-hot-rpc-difftest.sh` 第 5 步）。
+3. ⚠️ **「进程起来了」「端口在听」「有日志」都不等于「功能装配了」** ——
+   这是 §3.3「注解存在 ≠ 机制生效」的又一种形态：**类都没被加载**，
+   比「Bean 存在但没装配」更靠前一层。
+4. 同款形态提醒：**「某个 Redis key 一直不出现」这种零日志症状，
+   要先怀疑「那条链路上的组件压根没装上」，而不是先怀疑它的逻辑写错了。**
+
+---
+
+## P-HOTRPC-15 🟠 Kafka `console-producer` 的 `parse.key` 是 **reader 属性**——投错格式 ⇒ 消费者全丢 ⇒ 症状像「业务没跑」
+
+> **发现轮次**：2026-10-24 第十一轮（D1 编排）
+
+**症状**：事件确实进了 topic（`GetOffsetShell` 显示 600 条），但**两侧消费者**
+（RAG 报 `unmarshal event failed: Unrecognized token 'art'`）**一条都解析不出来** ⇒ 热榜恒空。
+
+**根因**：`kafka-console-producer.sh` 的 `parse.key` / `key.separator` 属于
+**message reader** 的属性，必须用 **`--property`** 传：
+
+```bash
+--property parse.key=true --property key.separator='|'
+```
+
+**连踩两次**（都不是「正确写法被拒」，而是**错误写法被静默接受**）：
+
+| 写法 | 实际效果 |
+|---|---|
+| `--producer-property parse.key=true` | 只是「未知 producer 配置」告警 ⇒ **parse.key 没生效** |
+| `KAFKA_OPTS="-Dparse.key=true -Dkey.separator=\|"`（JVM 系统属性） | 同样**没生效** |
+| `--property parse.key=true --property key.separator='|'` | ✅ 生效 |
+
+⇒ 三种写法的共同症状都一样：**整行（含分隔符）进了 value、key=null**
+⇒ 消费者拿到 `"art-021|{...}"` 这种非 JSON ⇒ 全丢。
+⇒ 而且 **key=null ⇒ 全部消息落进同一个分区**（murmur2(null) 恒定）
+⇒ 「3 个分区」的对拍前提直接失效。
+
+**怎么防**
+
+1. 投递后**必须抽样回读**：`kafka-console-consumer.sh --property print.key=true --property print.partition=true`
+   ⇒ 确认 key 与 value 分离、且分区**确实铺开**。
+2. ⚠️ **容器内连 Kafka 要用 INTERNAL 监听器**：
+   compose 里 PLAINTEXT 的 advertised 地址是宿主映射端口（如 `127.0.0.1:23902`），
+   容器内连它连不上 ⇒ 用 `localhost:19092`。
+3. 通用形态：**「CLI 静默接受了未知配置」比「CLI 报错」更危险** ——
+   报错会停下，静默接受会一路错到底。投递类脚本必须**回读校验**。

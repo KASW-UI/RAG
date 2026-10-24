@@ -91,11 +91,22 @@ public class HotArticleQueryService {
 
             // 剩余预算在**请求线程**上取一次，显式传给下游 ——
             // Go 侧是 ctx 被 100 个 goroutine 隐式共享（getHotArticlesLogic.go:128）。
+            //
+            // ⚠️ **取的是「绝对 deadline」而不是「剩余毫秒快照」**（U5-OPEN-1 E1 实测修正）：
+            //   Go 的 ctx 上挂的是**绝对** deadline（service/common/observability/http.go:56-57），
+            //   每个补全在**自己的发起时刻**重新算 min(ctx.deadline, now+2s)；
+            //   若这里只传「剩余毫秒的快照」，后发的补全会拿到**全新的 2s**、
+            //   **不被请求 deadline 卡住** ⇒ 实测两侧最后一批补全的死亡时刻差 1.03s
+            //   ⇒ 连带 client breaker 的失败落进不同时间桶 ⇒ 熔断打开时机不同。
+            //   详见 HotArticleHydrator#remainingBudgetMs 的三段式论证。
             long remainingBudgetMs = GoStyleRequestDeadline.remainingMillis();
+            long deadlineNanos = remainingBudgetMs < 0L
+                    ? -1L
+                    : System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(remainingBudgetMs);
 
             GetHotArticlesResponse hotResp = fetchTopK(remainingBudgetMs);
 
-            List<HotArticleCard> hydrated = hydrator.hydrate(hotResp.getItemsList(), remainingBudgetMs);
+            List<HotArticleCard> hydrated = hydrator.hydrate(hotResp.getItemsList(), deadlineNanos);
             List<HotArticleCard> ranked = HotRankPaginator.assignRanks(hydrated);
 
             HotArticlesResp resp = HotRankPaginator.slice(ranked, page, pageSize);

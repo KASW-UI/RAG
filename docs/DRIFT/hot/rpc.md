@@ -836,6 +836,26 @@ SEMANTICALLY NOT EQUIVALENT
    **「shadow 半成品」不可达**；⚠️ 台账原定的 `CLIENT PAUSE` 手段**被证伪** ⇒ 该子问以**源码级结论**结案，
    **明确不越读为「已实测」**）⇒ **本条的剩余动作已清零**。
 
+### ⚠️ §10 复核批注（2026-10-24 第十一轮 · D1 活体对拍后）
+
+> ⚠️ **本表写于第一轮**。下列条目的**依据已被后续轮次推翻或升级**，
+> **不得继续按第一轮的状态引用**。逐条订正：
+
+| # | 原结论 | 订正后 | 依据 |
+|---|---|---|---|
+| 1 | ❌ 否（001：Top-100 有 16/100 不同） | ✅ **一致**（限本轮覆盖面） | **DRIFT-HOTRPC-001 已修**（`Long.remainderUnsigned`）+ **本轮双侧活体对拍**：10 组 top_k **逐字节一致**（sha256 相同）、分数与「事件权重和」的独立预测逐条吻合 |
+| 2 | ⚠️ 无法确认（002：进程从未跑起来过） | ✅ **已确认** | **DRIFT-HOTRPC-002 已修**；**本轮 RAG hot-rpc 真进程**（真 Kafka + 真 Redis）完整跑通「消费 → sketch → 快照 → 合并 → 大 key → gRPC」全链路 |
+| 3 | ⚠️ 部分（sketch 桶位不一致） | ✅ **桶位已一致** | 001 修复后 `HeavyKeeperGoParityTest` 0/405 桶位不一致；本轮活体对拍再次印证（两侧 TopK 集合与分数逐条相同） |
+| 17 | ❌ 否（001 在哈希/桶位层） | ✅ **一致**（proto 仍无回归网） | 001 已修；⚠️ **UNR-8 仍然成立**（proto 无回归网，**用户已决定不做**）⇒ 本项的「proto 无回归网」部分**不变** |
+| 18 | ❌ 否（002：RAG 进程启动失败） | ✅ **能启动** | 002 已修；本轮真进程启动并完成全链路（并由 `run-hot-rpc-difftest.sh` 第 5 步**断言关键类已加载**） |
+
+⇒ **总判定维持 `SEMANTICALLY NOT EQUIVALENT`**，但**理由已经换过**：
+原先倚重的 001 / 002 两条**已不成立**，现在倚重的是
+**003（调度并发度）/ 004（Redis 重试）/ 005（位点提交节奏）/ 006（panic 语义）/ 007（listener 装配）**
+以及 **UNR-5 已回答的「非等价」结论**（DRIFT-HOTRPC-009）。
+⚠️ **不可读成「hot-rpc 已等价」**：本轮只把**正常路径**与**TopK 语义**做成了活体级证据，
+**失败路径 / 并发路径 / 重试面**仍无活体证据。
+
 
 ---
 
@@ -1370,3 +1390,127 @@ Client.Pipeline()                      redis.go:1508-1514   exec = c.processPipe
    Go spec：float64 → uint32 超出范围时结果 **implementation-specific** ⇒
    **无法用「以 Go 为准」判定 RAG 取什么值才算对** ⇒ 本轮只钉住「RAG 取了一个确定值」，
    等价性记 **UNKNOWN**（不擅自签「等价」，也不擅自签「不等价」）。
+
+---
+
+# 第十一轮：D1 活体对拍闭合 + U7 闭合 + U9 系统变异（2026-10-24）
+
+## 本轮一句话
+
+hot-rpc 的**双侧活体对拍**首次真正跑通：**真 Kafka + 2×真 Redis + 真 gRPC**，
+两侧对**同一批 300 条事件**产出的 `GetHotArticles` 响应 **10 组 top_k 全部逐字节一致**
+（sha256 相同）⇒ **DRIFT-HOTRPC-001 / 002 / 003 从「源码级已修」升级为「活体级已证」**；
+**U7 闭合**（TopK 的解释 + 降序）；**U9 系统变异**在 hot-rpc(84 条) + hot-common(14 条) 上
+查出 **3 处真实守门缺口**并补上 2 条守门测试。
+
+## 一、D1：双侧活体对拍（本轮主产出）
+
+### 1.1 编排
+
+| 环节 | 做法 | 出处 |
+|---|---|---|
+| Kafka | **1 个** `apache/kafka:3.7.2`，topic `article-hot-events` **3 分区** | 两侧用**不同 group-id** 消费**同一批消息**（Go `article-hot-group` / RAG `rag-hot-group`）—— 这正是要验的东西 |
+| Redis | **2 个** `redis:7-alpine`（Go:23979 / RAG:23980） | Redis key 两侧**都硬编码**（`hot:articles` / `hot:articles:p{i}` / `hot:articles:shadow` / `hot:merge:lock`）⇒ 共用一个必然互相覆盖 |
+| 事件 | 固定内容、固定顺序、**无桶冲突**的 300 条（24 篇文章 × 4 种 type） | 无冲突 ⇒ HeavyKeeper 的**概率衰减分支不可达** ⇒ 两侧随机数序列不同也**不影响**可比性（`tools/difftest/hot_rpc_events.py`） |
+| 栅栏 | 轮询**两侧** Redis 的 `hot:articles`，直到**两侧都含全部 24 条**且**连续两轮内容稳定** | 消费进度天然不对称 ⇒ 不设栅栏比的是「合并时刻」而不是「合并结果」 |
+| 比对 | **自定义 Marshaller** 直接取两侧的**原始 wire 字节** | 不经 JSON / 结构化中间层 ⇒ 字段序、null vs []、uint32 截断都逃不掉 |
+
+### 1.2 结果：10 组 top_k **全部逐字节一致**
+
+| top_k | 取回条数 | wire 字节（go / rag） | sha256[0:16] | 结论 |
+|---|---|---|---|---|
+| 0 | 20 | 260 / 260 | `e967fbe5ee97c000` | ✅ 一致 |
+| 1 | 1 | 13 / 13 | `206925817bfc0212` | ✅ 一致 |
+| 5 | 5 | 65 / 65 | `3a5c52da7637937f` | ✅ 一致 |
+| 20 | 20 | 260 / 260 | `e967fbe5ee97c000` | ✅ 一致 |
+| 100 | 24 | 312 / 312 | `caef16291a43e12e` | ✅ 一致 |
+| 101 | 24 | 312 / 312 | `caef16291a43e12e` | ✅ 一致 |
+| 200 | 24 | 312 / 312 | `caef16291a43e12e` | ✅ 一致 |
+| 1000 | 24 | 312 / 312 | `caef16291a43e12e` | ✅ 一致 |
+| -1 | 20 | 260 / 260 | `e967fbe5ee97c000` | ✅ 一致 |
+| -100 | 20 | 260 / 260 | `e967fbe5ee97c000` | ✅ 一致 |
+
+⇒ **`RESULT: ALL top_k BYTE-IDENTICAL between Go and RAG`**；两侧 `descending=true`。
+⇒ 栅栏 `rc=0`；冻结的 Go 仓库 tracked diff 为空（对拍纪律 1 守住）。
+
+### 1.3 分数与「独立预测」吻合
+
+事件生成器在**不跑任何 Java/Go 代码**的前提下，按 `yaml Interaction.Weights`
+（like=1 / comment=2 / coin=3 / share=4）算出每篇文章的**期望权重和**与**期望排序**，
+写进 `manifest.json`。实测两侧的分数**逐条等于**该预测：
+
+```
+art-000=60  art-001=59  art-002=57  art-003=54  art-004=50 ...
+```
+
+⇒ 这是一条**不依赖被测实现**的第三方断言：既证明两侧一致，也证明两侧都等于「事件权重和」。
+
+### 1.4 证据强度
+
+| 手段 | 覆盖到 | 覆盖不到 |
+|---|---|---|
+| **本轮双侧活体对拍** | 消费 → sketch → 快照 → 合并 → 大 key → gRPC 读 → wire 字节 | ① **只有 24 篇文章**（未触到 100 条截断）；② 无桶冲突 ⇒ **概率衰减分支未跑到**；③ 单实例（未触到多副本分片） |
+
+## 二、U7 闭合：TopK=100 被 hot-rpc 如何解释？items 是否按热度降序？
+
+| 问题 | 答案 | 证据 |
+|---|---|---|
+| `top_k` 被 clamp 到多少？ | **上限 100 / 下限回落 20** | `top_k=100/101/200/1000` 两侧都返回**全部 24 条**（本轮只有 24 篇，够不到 100）；`top_k=0/-1/-100` 两侧都返回 **20 条** ⇒ k≤0 ⇒ 回落默认 20 ✓（`get_hot_articles_logic.go:35-40`） |
+| items 是否按热度降序？ | **是** | 两侧 `descending=true`（10 组 top_k 全部）；`hot:articles` 是 Redis **ZSET** ⇒ 按 score 降序天然成立 |
+| `k` 到底怎么解释？ | 是「取前 k 条」的**上界**，`k≤0` 回落 **20** | 与 `hot.proto` 注释「默认 20，最大 100」一致 |
+
+⇒ **U7 闭合**（本轮由 `docs/DRIFT/hot/api.md` 的 U7 行同步）。
+
+## 三、U9 系统变异（hot-rpc 10 点 + hot-common 4 点）
+
+| 模块 | 变异点 | 结果 |
+|---|---|---|
+| **hot-rpc**（基线 **84** 条） | R01 Top-K 排序的 uint32 比较 / R02 零计数准入 / **R03 衰减概率的 uint32 取指数** / R04 TopK 上限 / R05 TopK 下界 / R06 零权重事件 / R07 分片 TTL / **R08 合并截断长度** / **R09 合并排序方向** / R10 gRPC 错误映射 | **7/10 被抓到；3 处「没变红」（R03/R08/R09）** |
+| **hot-common**（基线 **14** 条） | HC01 成功文案 / HC02 未知码回落 / HC03 码值 5001 / HC04 码值 1015 | **4/4 全部被抓到** |
+
+⇒ 合计 **11/14 被守门抓到**。三处「没变红」**不是假绿**，而是**真实守门缺口**（下节）。
+
+## 四、三处「没变红」的定性（按 P22 先证伪 no-op）
+
+P22 要求：判「守门缺口」之前必须先证伪「变异本身是 no-op」。三条的结论：
+
+| 变异 | no-op 证伪 | 定性 |
+|---|---|---|
+| **R03** `Math.pow(decay, unsignedToDouble(counts[row][col]))` → `Math.pow(decay, counts[row][col])` | `unsignedToDouble(x) = (double) Integer.toUnsignedLong(x)` ⇒ 对 **x ∈ [0, 2^31)** 与 `(double) x` **完全相等** ⇒ 变异只在 **count ≥ 2^31** 时才分岔。而 count 可达 2^31（`count += weight` 回绕 ⇒ 位模式为负） | 🔴 **真实缺口**：不是 no-op，但**现有用例的 count 永远达不到 2^31** ⇒ 需专门构造 |
+| **R08** `MERGED_LIMIT = 100` → `101` | 截断分支**可达**，但**既有用例的分片条目最多 4 条** ⇒ **永远走不到截断** | 🔴 **真实缺口**：截断层**完全没有测试** |
+| **R09** `merged.sort(降序)` → `升序` | 单独看：`writeShadow` 写的是 Redis **ZSET** ⇒ **内容与插入顺序无关** ⇒ 对最终产物**无影响**。**但**与 R08 耦合时：升序 + 截断 100 ⇒ 留下的是**分数最低**的 100 条 ⇒ **可观察** | 🔴 **真实缺口**：与 R08 **同一个未测路径** ⇒ 一条测试可同时抓住两者 |
+
+⇒ **结论：3 处缺口同源于「>100 条的合并截断层从未被测过」+「uint32 溢出的衰减分支从未被测过」。**
+
+## 五、补上的 2 条守门测试（并做变异验证）
+
+| 测试 | 位置 | 锁住 | 构造要点 |
+|---|---|---|---|
+| `mergeTruncatesToThe100HighestScores` | `HotRedisLuaGateTest`（**真 Redis**） | **R08 + R09** | 分片放 **150 条**（分数 1..150）⇒ 断言结果**恰好 100 条** **且最低分 = 51**（⇒ 留的是**最高**的一批）。⚠️ 只断言「条数 = 100」**抓不到** R09（排序反了条数仍对）⇒ 必须断言**边界分数** |
+| `decayProbabilityUsesUnsignedCount` | `HeavyKeeperUint32OverflowTest` | **R03** | `width=1` ⇒ 所有 key 落同一桶 ⇒ 必然冲突；`add("a", 2e9)` ×2 ⇒ count 位模式为负；`add("b",5)` 走冲突分支；再 `add("a",1)` 把桶里的计数**回写进 TopK**（`updateTopK` 只在同一 key 再次加入时更新已存在条目 ⇒ 否则衰减效果在 `topK()` 上看不见）。<br>**确定性来自**：无符号 `decay^4e9 = 0` ⇒ `nextDouble() < 0` **恒假** ⇒ 不衰减；有符号 `decay^(-2.9e8) = +Inf` ⇒ `nextDouble() < +Inf` **恒真** ⇒ 必然衰减 ⇒ 两条路径**完全相反且都不依赖随机数** |
+
+### 变异验证（三条，**全部按预期变红** ⇒ 守门非假绿）
+
+| 变异 | 预期红 | 实测 |
+|---|---|---|
+| **R03** `Math.pow(decay, unsignedToDouble(counts[row][col]))` ⇒ `Math.pow(decay, counts[row][col])` | `decayProbabilityUsesUnsignedCount` | ✅ **1 条红**（102s）：`HeavyKeeperUint32OverflowTest#decayProbabilityUsesUnsignedCount` |
+| **R08** `MERGED_LIMIT = 100` ⇒ `101` | `mergeTruncatesToThe100HighestScores` | ✅ **1 条红**（134s）：`HotRedisLuaGateTest#mergeTruncatesToThe100HighestScores` |
+| **R09** `merged.sort(降序)` ⇒ `升序` | `mergeTruncatesToThe100HighestScores` | ✅ **1 条红**（90s）：`HotRedisLuaGateTest#mergeTruncatesToThe100HighestScores` |
+
+⇒ 补测后 hot-rpc 基线 **86 条**（84 + 新增 2），**三个原本「没变红」的变异点现已 10/10 全被抓住**；
+连同 hot-common 的 4/4 ⇒ **hot 域三个模块合计 24/24 变异点全部有守门**。
+
+## 六、连带查出的 3 条**编排级**踩坑（不是产品缺陷，但会伪装成产品缺陷）
+
+⇒ 详见 [`docs/Pitfalls/hot/rpc.md`](../../Pitfalls/hot/rpc.md) 的 **P-HOTRPC-13 / 14 / 15**：
+
+1. **P-HOTRPC-13**：清 Redis 必须在旧进程**真死之后** ⇒ 否则旧进程把旧 sketch 写回来 ⇒ 新进程回灌 ⇒ **每个文章热度恰好 ×2**（实测 60 vs 120），而**条目集合 / 顺序 / 条数全对** ⇒ 极易误读成「权重配置错」。
+2. **P-HOTRPC-14**：用**残缺的编译产物**启动 ⇒ `HotMergeScheduler` / `HotServiceGrpcImpl` **根本没被加载**（`jcmd <pid> GC.class_histogram` 可查）⇒ 合并器未装配、热榜恒空、**零日志** ⇒ 一度被误判成「合并逻辑有漂移」。
+3. **P-HOTRPC-15**：Kafka `console-producer` 的 `parse.key` 是 **reader 属性**（`--property`），用 `--producer-property` 或 JVM 系统属性都**静默无效** ⇒ 整行进 value、key=null ⇒ 消费者全丢，且**全部消息落进同一分区**。
+
+## 七、对「最终判定」表的影响（⚠️ 该表是第一轮的旧状态）
+
+`docs/DRIFT/hot/rpc.md` §10 的 18 项 checklist 与其下的「判定依据」**写于第一轮**，
+其中 item 1 / 2 / 18 的依据已被后续轮次**推翻**（001/002/003 均已修），
+而本轮 D1 又把「进程能否跑起来」「正常路径」从**静态推断**升级为**活体实测**。
+⇒ **§10 逐条订正见本轮末尾的「§10 复核批注」。**
