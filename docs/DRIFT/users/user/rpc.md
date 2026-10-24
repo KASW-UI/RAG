@@ -57,7 +57,7 @@
 | 编号命名空间 | 本轮新增 **`DRIFT-USERRPC-V-001` 起** / **`UNRESOLVED-USERRPC-001` 起**。users 域已占用的 `DRIFT-001..011/016/018/024`、`DRIFT-NEW-001/005/007/008/011/012/013/014/015/016/018`、`DRIFT-FRAMEWORK-001` **一条都不复用** |
 | 本轮自跑证据 | ✅ **真 PG**：`mvn -o -pl service/users/user/user-rpc -am test`，**2026-10-24 实测 `Tests run: 125, Failures: 0, Errors: 0`**（其中含本轮新建的 `UserRpcGoErrorMessageParityTest` 3 条）。`UserRpcContainerWiringTest` **12 条**跑在 Testcontainers `postgres:16-alpine` 上（日志实证 `DockerClientFactory` + `Found Docker environment`），`AvatarTransactionWiringTest` 5 条跑在真实 Spring 容器装配上 |
 | ✅ **已**取得（2026-10-24 更新） | ✅ **双侧活体对拍** —— `tools/difftest/exp-difftest-grpc-user9.sh`：**43 场景**（9 个 RPC × 字段级响应 / `grpc-message` 逐字 / 边界输入），**真进程 + 真 PG + 真 Redis**，自带容器/库/端口 ⇒ **39 等价 / 4 处差异，4 处全是 N-2 已签字的 Go 源码乱码** ⇒ **无新漂移**。⇒ **§9.1**。<br>⚠️ 此前那句「`grpc-dual-port-runner.java` 只覆盖 4 档 status code」的**缺口描述已过期**（那是 2026-10-23 的状态） |
-| 最终判定 | **`SEMANTICALLY NOT EQUIVALENT`** —— 1 项 SEMANTIC MISMATCH + 7 项 OBSERVABLE DIFFERENCE + 1 项死代码/伪出处（§7），**5 项 unresolved**（§9；**U-005 / U-007 已于 2026-10-24 闭环**）。**其中 SEMANTIC MISMATCH 的端到端可达性未证**（§9 UNRESOLVED-USERRPC-001），若用户裁定其为「永不可达」，判定会降为「可达路径全等价 + 7 项可观察差异」 |
+| 最终判定 | **`SEMANTICALLY NOT EQUIVALENT`** —— **2 项 OBSERVABLE DIFFERENCE**（V-002 / V-007，§7）+ 4 项 IMPLEMENTATION DIFFERENCE，**0 项 SEMANTIC MISMATCH**、**0 项 unresolved**（§9 的 7 条已于 2026-10-24 全部闭环）。⚠️ **此前写「1 项 SEMANTIC MISMATCH + 7 项 OBSERVABLE DIFFERENCE + 5 项 unresolved」是过期状态** —— V-001 已证伪并闭环（Go 的 GORM 把 `status IS NULL` 读成 0 ⇒ **两侧行为一致**） |
 
 > ⚠️ **按 AGENTS.md §3.3 与本 spec 硬约束：91 条全绿不构成 `EQUIVALENT` 的证据。**
 > 本文件里每条 `EQUIVALENT` 的真实支撑是**逐行读 Go 消费点**，测试只是「RAG 侧写法确实如此」的旁证。
@@ -288,7 +288,7 @@ Result 只用 5 个枚举值。证据列的记号：
 | 建表失败 | `log.Fatalln` → 进程退出 | 抛 `IllegalStateException` → 启动失败 | **EQUIVALENT** | `[GO] db.go:33-36` `[RAG] UserSchemaBootstrap.java:52-56` |
 | **建表责任交叉** | `AutoMigrate(&User{}, &UserAvatarHistory{})`，`users` 排第 1 | 4 份 DDL **全部**重放，含 `admin_admin` / `admin_invite` | **OBSERVABLE EQUIVALENT**（两侧在「两个 rpc 并发对同一个空库启动」下都能起来、表都建齐、0 致命错误） | **§9.2**（双侧对称并发启动实测，共 9 轮；Go 侧靠 `HasTable` 的**时序侥幸**，RAG 侧靠 advisory lock ⇒ **机制不同但可观察结果一致**） |
 | Flyway 是否残留 | N/A | `mvn -o -pl … dependency:list \| grep -i flyway` ⇒ **零命中** | **EQUIVALENT**（已按 §6.3 问题 1 移除干净） | 本轮实测；`pom.xml:136-154` 的注释完整记录了「只删 flyway-core 不够」 |
-| DB 连接串时区 | `db.go:21` 钉 `TimeZone=Asia/Shanghai` | `application.yaml:13` **未指定** | **OBSERVABLE DIFFERENCE** | **V-004** |
+| DB 连接串时区 | `db.go:21` 钉 `TimeZone=Asia/Shanghai` | `application.yaml:13` **未指定** | **IMPLEMENTATION DIFFERENCE**（⚠️ 原记 OBSERVABLE DIFFERENCE 属**过度归因**） | **U-002 已闭环**：偏移量由**进程本地时区**（Go 的 `time.Local`）决定，**PG 会话时区不参与**（pgx 走二进制解码；`pgtype/timestamptz.go:133-137` `ScanLocation` 默认 nil → `:270-276` 回落到 `time.Local`）⇒ **DSN 的差异不是观测差异的成因**。⚠️ 残留：PG 会话时区会影响 `NOW()` / `CURRENT_TIMESTAMP` 这类**会话时区相关表达式** ⇒ 见 **V-011**（当前不可观察）。列类型本身已改 `timestamptz`（V-004 已修） |
 | Snowflake workerId 解析 | `env → hash`（`snowflake.go:52-85`） | `env → properties → hash` | **OBSERVABLE DIFFERENCE**（配置超集） | DRIFT-005 已留档，本轮只确认 Go 侧优先级 |
 | Snowflake 启动期 fail-fast | **无**（懒初始化，首个 `GetID()` 才 init） | `ApplicationReadyEvent` 校验 workerId 越界则启动失败 | **OBSERVABLE DIFFERENCE** | `[GO] snowflake.go:41-50` `[RAG] SnowflakeBootstrap.java:37-47` |
 | 服务发现 | etcd 静态 `Key: user.rpc` | Nacos `discovery://user-rpc` | **IMPLEMENTATION DIFFERENCE**（AGENTS §3.4 已签字：部署面偏离） | — |
@@ -297,11 +297,12 @@ Result 只用 5 个枚举值。证据列的记号：
 
 | 类别 | 数量 | 编号 |
 |---|---|---|
-| **SEMANTIC MISMATCH** | **1** | V-001 |
-| **OBSERVABLE DIFFERENCE** | **7** | V-002 ~ V-008 |
+| **SEMANTIC MISMATCH** | **0** | ~~V-001~~（**2026-10-24 已闭环**：Go 的 GORM 把 `status IS NULL` 读成 **0** 且不报错 ⇒ **两侧都是 `status=0` 登录成功** ⇒ 行为一致 ⇒ 该条已修） |
+| **OBSERVABLE DIFFERENCE** | **2** | **V-002**（`users_user.status` NOT NULL 差异，🔴 真库实证确认，**未修** · 需与 admin 域同改）· **V-007**（超时的 gRPC `description` 不同，归属 `service/common`）<br>⚠️ 已闭合的：**V-003**（jsonb⇒text，已修）· **V-004**（timestamptz，已修）· **V-005**（**判为不成立** —— protobuf3 空 map 在 wire 上不可表达）· **V-006**（雪花 id，永不进 wire）· **V-008**（死代码 + 伪出处，已修） |
 | IMPLEMENTATION DIFFERENCE | 4 | 表名 / 指标注册 / 建表机制 / 服务发现 |
 | 已签字偏离（引用不重开） | 2 | N-1、N-2（见 `./api.md`） |
-| **UNKNOWN / unresolved** | **5** | §9（**U-005 / U-007 已于 2026-10-24 闭环** ⇒ §9.1 / §9.2） |
+| **UNKNOWN / unresolved** | **0** | §9 的 **7 条（U-001 ~ U-007）已于 2026-10-24 全部闭环** ⇒ §9.1 / §9.2 / §9.3 |
+| ⚠️ **新发现但当前不可观察** | 1 | **V-011**（时间列 DEFAULT `CURRENT_TIMESTAMP`，Go 无 DEFAULT）⇒ 两侧写入路径都显式写该列 ⇒ **当前不可观察** |
 
 ### 4.5 复核历史导航页 L34–41 的三条「缺口」
 
@@ -350,6 +351,9 @@ Result 只用 5 个枚举值。证据列的记号：
 > 目的是把 grpc-java 默认的 `UNKNOWN` 收敛成 `INTERNAL`。Go 侧真出现 panic 时 grpc-go 会返回 `UNKNOWN`
 > （`status.FromError` 拿不到 code 时 `markRPCResult` 走 `codes.Unknown`，`rpc.go:80-83`）。
 > ⇒ **真触发 panic 时两侧 code 会不同**。本轮**未实测**（无 panic 注入路径），记为 UNRESOLVED-USERRPC-007 的一部分。
+> ⚠️ **2026-10-24 更新**：`UNRESOLVED-USERRPC-007` 已闭环（43 场景双侧活体对拍，§9.1），
+> **但 panic 路径不在那 43 个场景里** ⇒ 本条**仍未实测** ⇒ 保留为 §7 的**未量化残留差异**，
+> 不再挂在已关闭的 UNRESOLVED 名下。
 
 ---
 
@@ -492,6 +496,11 @@ RAG 多一层 properties。**该条不重开。**
 - **Evidence**: `[GO]` `service/user/user/rpc/internal/model/data_model.go:11`（`Status int64 gorm:"column:status;default:0"`，**无 NOT NULL**）
   + `internal/logic/loginlogic.go:45-57`；`[RAG]` `UserDomainService.java:190` vs `:359-363`。
   证据强度：**静态源码**。**未取得端到端证据**（`UNRESOLVED-USERRPC-001`）。
+  ⚠️ **2026-10-24 更正（端到端证据已取得，且推翻了本条的判定）**：
+  真 PG 实测（`UserRpcLoginNullStatusReadsAsZeroTest`，`DROP NOT NULL` + 插 NULL 行 + 反向对照组）
+  ⇒ **Go 的 GORM 把 NULL 读成 0 且不报错** ⇒ **两侧都是 `status=0` 登录成功**
+  ⇒ ⇒ 本条**不是** SEMANTIC MISMATCH，而是「写法不同、行为相同」⇒ **已修（两侧一致）**。
+  ⚠️ 本行「未取得端到端证据」是**过期状态**。
 - **Classification**: **SEMANTIC MISMATCH**（可达性未证）
 - **Risk**: HIGH（若可达）
 - **Recommended Verification**：在 RAG 库里 `ALTER TABLE users_user ALTER COLUMN status DROP NOT NULL`，
@@ -596,6 +605,10 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
   ⇒ **本条是把它从代码注释提升为台账条目**，不是新发现。
 - **同构先例**：`DRIFT-MSG-010` 是完全同一条（message 域），可接受性同样 `UNKNOWN`。
 - **可接受性**: **UNKNOWN** —— 见 `UNRESOLVED-USERRPC-002`（JVM / PG 会话时区未实测）。
+  ⚠️ **2026-10-24 更新**：`UNRESOLVED-USERRPC-002` 已闭环 ⇒ **机制已定**：
+  偏移量由**进程本地时区**（Go 的 `time.Local`）决定，**PG 会话时区不参与**（pgx 走二进制解码）；
+  源码依据 `pgtype/timestamptz.go:133-137`（`ScanLocation` 默认 nil）→ `:270-276` 回落到 `time.Local`。
+  ⇒ 「UNKNOWN」是**过期状态**；列类型本身也已改 `timestamptz`（V-004 已修）。
 
 #### FIX（2026-10-23，部分）——`users_user` 半边已修，**`users_user_avatar_history` 半边仍 OPEN**
 
@@ -629,6 +642,9 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
   `[RAG]` `UserDomainService.java:451` + `UserMapper.java:112,125`。证据强度：**静态源码**。
 - **⚠️ 可达性未证**（`UNRESOLVED-USERRPC-003`）：protobuf 编码器是否为「显式空 map」产出字段 tag，
   两侧生成代码行为可能不同。本轮**未构造 wire 级输入**验证。
+  ⚠️ **2026-10-24 更新**：`UNRESOLVED-USERRPC-003` 已闭环 ⇒ 答案是
+  「**protobuf3 的空 map 在 wire 上不可表达**」（零条目 ⇒ 字段缺席 ⇒ 解出来是 nil）
+  ⇒ ⇒ **V-005 判为「不成立」予以关闭**。本行「可达性未证」是**过期状态**。
 - **Risk**: LOW
 
 ### DRIFT-USERRPC-V-006 `users_user.id` / `users_user_avatar_history.id` 的取值来源不同 —— ✅ **已关闭（第四轮，真 PG 实证；永不进 wire）**
@@ -711,7 +727,7 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 | CASE-13 | `UpdateUser` 把 username 改成自己的现值 | `AlreadyExists`（不排除自己，`updateuserlogic.go:36-39`） | 同 | 同 | YES | `[T]` `updateUser_selfUsernameChange_throwsAlreadyExists` |
 | CASE-14 | `UpdateUser` 目标 uid 不存在 | update 影响 0 行 → 重读 `NOT_FOUND` | 同 | 同 code | YES | `[T]` `updateUser_userDeletedConcurrently_throwsNotFound` |
 | CASE-15 | `UpdateUser` 全字段为空 | 不发 UPDATE，`update_time` 不动 | 同（`any==false→return 0`） | 同 | YES | `[PG]` `zeroValuePatchDoesNotUpdate` |
-| CASE-16 | **`UpdateUser` 显式空 map + 其余空** | 发 UPDATE（写 `{}` + 推进 `update_time`） | **不发任何 UPDATE** | **应当等价** | **NO** | **V-005**，`UNRESOLVED-USERRPC-003` |
+| CASE-16 | **`UpdateUser` 显式空 map + 其余空** | 发 UPDATE（写 `{}` + 推进 `update_time`） | **不发任何 UPDATE** | **应当等价** | **YES**（**已判等价**） | **V-005 判为「不成立」** —— protobuf3 的**空 map 在 wire 上不可表达**（零条目 ⇒ 字段缺席 ⇒ 解出来是 nil）⇒ `UNRESOLVED-USERRPC-003` 已闭环 |
 | CASE-17 | `DeleteUser` 不存在的 uid | `NOT_FOUND` | `NOT_FOUND` | 同 code；响应 `success` 不可见 | YES | `[T]` |
 | CASE-18 | `DeleteUser` 存在的 uid（带头像历史） | 只删 users 行，**孤儿 history 保留** | 同 | 两侧都留孤儿 | YES | `[GO][RAG]` 静态（无 FK） |
 | CASE-19 | `UploadAvatar` 空 `avatar_url`（全空格） | `INVALID_ARGUMENT "avatar_url is required"`（`uploadavatarlogic.go:34-37`） | 同 | 同 code 同 description | YES | `[T]` |
@@ -722,7 +738,7 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 | CASE-24 | `SelectAvatar` 成功后响应 `is_current` | **恒 `true`**（`model/user.go:174`） | 恒 `true` | 同 | YES | `[PG]` + `[T]` |
 | CASE-25 | `GetAvatarHistory` `limit=0` / `31` / `-1` | 静默 clamp 到 30 | 同 | 同 | YES | `[GO][RAG]` 静态 |
 | CASE-26 | `GetAvatarHistory` 不存在的 uid | `NOT_FOUND` | `NOT_FOUND` | 同 | YES | `[T]` |
-| CASE-27 | **`GetAvatarHistory` 的 `create_time` 渲染** | 带时区偏移（如 `+08:00`） | 恒 `Z` | **应当等价** | **NO** | **V-004**，`UNRESOLVED-USERRPC-002` |
+| CASE-27 | **`GetAvatarHistory` 的 `create_time` 渲染** | 带时区偏移（如 `+08:00`） | 恒 `Z` | **应当等价** | **YES**（**已修**） | **V-004 已修**（列类型改 `timestamptz`）· 偏移量机制已定（`UNRESOLVED-USERRPC-002` 闭环）⇒ 见 `UserRpcUsersUserTimestamptzParityTest` / `UserRpcAvatarHistoryTimestamptzParityTest` |
 | CASE-28 | `Logout` 空 token | `INVALID_ARGUMENT "Token不能为空"` | 同 | 同 | YES | `[T]` |
 | CASE-29 | `Logout` 正常 token | `SETEX user:jwt_blacklist:<tok> 2592000 "banned"`；**`success=false`** | 同 | **两侧 success 都是 false** | YES | `[T]` `logout_writesRedisWithCorrectKeyAndTtl` |
 | CASE-30 | `Logout` token 含前后空格 | **不 trim**，整串作 key | 不 trim，整串作 key | 同 | YES | `[GO][RAG]` 静态 |

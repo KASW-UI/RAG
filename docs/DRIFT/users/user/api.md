@@ -998,7 +998,9 @@ Recommended Verification: CPU 打满 / 连接数打满条件下双侧压测，�
 ### DRIFT-USERAPI-009 —— observability 的位置：Go 在鉴权之内，RAG 在鉴权之外 —— ✅ **① 已签字（2026-10-24）⇒ `SD-USERAPI-002`**
 
 > **本条签字只覆盖 ①（可观测性）。** ②（3s 超时作用域）**不在签字范围内** ——
-> 那是行为差异且条件性（只在 Redis 也慢时可观察）⇒ 仍挂 `UNRESOLVED-004`。
+> 那是行为差异且条件性（只在 Redis 也慢时可观察）⇒ 仍挂 `UNRESOLVED-004`
+> （⚠️ **2026-10-24：该条已于第九轮闭环** ⇒ 实测「Redis 慢」时**两侧都是 503**，
+> 即 ② 的**实际后果与原推断不同**；但 ② 本身作为「超时作用域」差异**依然成立**）。
 > 签字档 ⇒ [`docs/Intentional_Deviations/users/user/api.md`](../../../Intentional_Deviations/users/user/api.md) 的 `SD-USERAPI-002`。
 > ⚠️ 审查时看到「401 进了 access log」变红，**先确认是不是这一条**，不要当新回归去「修」。
 
@@ -1029,6 +1031,8 @@ Difference:
   ① 可观测性：Go 的「JWT 验签失败」请求不出现在 access log / span / HTTP 指标里；RAG 会出现。
      ⇒ 鉴权失败率的看板两边口径不同。
   ② 超时作用域：见 §6.7 表。潜在后果见 UNRESOLVED-004（Redis 慢时 Go fail-open，RAG 可能 503）。
+     ⚠️ **2026-10-24 更新**：第九轮实测「Redis 慢」时**两侧都是 503 "Request Timeout"**（Go 3.003s / RAG 3.018s）
+     ⇒ 这条**具体后果**已被证伪；但「超时作用域」这个**差异本身**依然成立（属本条的 ②，未被签字覆盖）。
 Semantic Impact: OBSERVABLE DIFFERENCE（观测面）+ Timeout scope 差异（行为面，条件性）。
 Risk:         MEDIUM。① 是永远可见的差异；② 是「只有在 Redis 也慢时才可见」的差异。
 Evidence:     静态源码（Go: engine.go:101-113 + chain.go 的 Then 语义；
@@ -1160,7 +1164,12 @@ Recommended Verification: `UserApiRedisDisconnectedFastFailTest`（2 条 · 真�
 
 ---
 
-## 9. Unresolved（§37）—— 此节不为空，故最终判定不给 `SEMANTICALLY EQUIVALENT`
+## 9. Unresolved（§37）—— **本节已于 2026-10-24 第九轮清空**（001~005 全部闭环）
+
+> ⚠️ **「§9 清空」≠「组件已闭环」** ——
+> §9 记的是「**还不知道的事**」，清空只说明「没有未知的了」。
+> 组件仍因 **2 条未签字的 OBSERVABLE DIFFERENCE**（`DRIFT-USERAPI-009②` / `DRIFT-USERAPI-013`）
+> 而**不能**判 `SEMANTICALLY EQUIVALENT` ⇒ 见 §10。
 
 ### UNRESOLVED-001 —— 真 Tomcat 下 400 响应的精确 `Content-Type` 与 body 字节 —— ✅ **第六轮已关（2026-10-24）**
 
@@ -1198,7 +1207,10 @@ Required Confirmation: 真 Tomcat 起 user-api，curl -i 打 /user/v1/login（�
              与一个含中文的畸形 JSON，抓原始响应头与 body 字节。
 ```
 
-### UNRESOLVED-002 —— jjwt `signWith` 按 key 长度选算法，可能与 Go 的 HS256 分叉
+### UNRESOLVED-002 —— jjwt `signWith` 按 key 长度选算法，可能与 Go 的 HS256 分叉 —— ✅ **第四轮已关（2026-10-23）**
+
+> ✅ **关闭记录**：见本文件「2026-10-23 第四轮：§9 `UNRESOLVED-002` **已关闭**（并**部分证伪**其原文断言）」一节
+> —— 答案不是「两侧会不会分叉」，而是「**RAG 已显式钉住 HS256** ⇒ 永不跨阈值分叉」。
 
 ```text
 Question:    若 user-api 的 JWT secret 换成 ≥64 字节，RAG 签出的 token 还会是 HS256 吗？
@@ -1212,7 +1224,10 @@ Impact:      一旦触发 ⇒ user-api 签的 token 在 Go 侧（及任何按 HS
 Required Confirmation: 确认 secret 是否有变更计划；若有，则必须显式传 alg 并加跨侧验签用例。
 ```
 
-### UNRESOLVED-003 —— user-rpc 实际发出的 gRPC code 集合（**需与 user-rpc 审计合并判读**）
+### UNRESOLVED-003 —— user-rpc 实际发出的 gRPC code 集合（**需与 user-rpc 审计合并判读**） —— ✅ **第四轮已关（2026-10-23）**
+
+> ✅ **关闭记录**：见本文件「2026-10-23 第四轮：`DRIFT-USERAPI-003` 定性完成并已修」一节
+> —— 枚举两侧 code 全量交叉，**21 格中 20 格已一致**，唯一漂移格已修（`DRIFT-USERAPI-003`）。
 
 ```text
 Question:    user-rpc 对 login / register / delete / update / logout / avatar-history
@@ -1257,7 +1272,12 @@ Required Confirmation: 双侧真 Redis 故障注入（iptables DROP 或 redis-cl
 现已通过 Lettuce `DisconnectedBehavior.REJECT_COMMANDS` 修复，且**「连着但不回包」那一类未被改动**
 （仍是两侧一致的 503）。
 
-### UNRESOLVED-005 —— user-rpc 的事务/并发语义不在本组件职责内
+### UNRESOLVED-005 —— user-rpc 的事务/并发语义不在本组件职责内 —— ✅ **已关（2026-10-24）**
+
+> ✅ **关闭记录**：本条**从来就不是「待验」，而是「不在本组件判定权内」**
+> ⇒ 处置方式是**引另一组件的台账**：`docs/DRIFT/users/user/rpc.md`
+> （该组件 2026-10-24 已完成事务/并发/DDL 的逐项核对，结论见其 §7 / §8 / §9）。
+> ⇒ 本组件**不因「引了台账」而变成已对齐**，只因「这条不再是未知」而关闭。
 
 ```text
 Question:    delete / update / select 的事务边界、`extra_info` jsonb 写入、
@@ -1552,6 +1572,8 @@ steps=17  asserted=5  byte_equal=12  unexpected=0
 1. **§9 的 UNRESOLVED-002（jjwt `signWith` 按 key 长度选算法）仍 unresolved** ——
    本轮造 token 时用的是与 `application.yml` 相同的 36 字节 UUID 密钥（≥32 ⇒ HS256），
    **没有覆盖短密钥分支**，不能据此宣布已对齐。
+   ⚠️ **2026-10-24 更正（下方原句是第三轮时点的状态）**：该条**第四轮已关闭** ——
+   答案不是「两侧会不会分叉」，而是「**RAG 已显式钉住 HS256** ⇒ 永不跨阈值分叉」。
 2. **§9 的 UNRESOLVED-004（Redis 慢 / 断连）仍未验** ——
    `UNRESOLVED-USERRPC-004②`（Redis 启动 fail-fast）与本条是同一件事的两端，本轮都没做。
    ⚠️ **2026-10-24 更正（下方原句是第三轮时点的状态）**：
@@ -1573,8 +1595,7 @@ steps=17  asserted=5  byte_equal=12  unexpected=0
 | 附录 B 第 10' 条（`DRIFT-FRAMEWORK-001` transport status propagate） | ✅ 仍成立 | 用例 7 实测签名无效 → **HTTP 401**（不是 200）⇒ `setStatus` 的 propagate 链路在位 |
 | 附录 B 第 7 条（`JwtUtil` zero-pad） | ✅ 仍成立 | 7 条用例的 token 用**同一份** `JwtUtil` 签 + `JwtAuthInterceptor` 验，36 字节密钥下 `padToHmacKeySize` 是 no-op |
 | 附录 B 第 8 条（登录 `UNAUTHENTICATED` 映射） | ✅ 仍成立 | `diff.py` 的 `user.login.wrongpw` 步实测两侧均 1002 |
-| §9 UNRESOLVED-003（需与 user-rpc 合并判读） | ⏳ **仍 unresolved** | 本轮 `user-rpc` 侧未改错误码集合，故本条**不能**因本轮而关闭 |
-
+| §9 UNRESOLVED-003（需与 user-rpc 合并判读） | ⏳ **仍 unresolved** | 本轮 `user-rpc` 侧未改错误码集合，故本条**不能**因本轮而关闭<br>⚠️ **2026-10-24 更正**：本行是**第五轮时点**的状态；该条**第四轮就已关闭**（枚举两侧 code 全量交叉 ⇒ 21 格中 20 格一致，唯一漂移格已修 ⇒ `DRIFT-USERAPI-003` 已修），见本文件「第四轮」一节 |
 ---
 
 <!-- @fix 2026-10-23 第四轮：UNRESOLVED-002 已由 users-common 组件级对照实测关闭 -->
