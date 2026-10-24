@@ -574,7 +574,7 @@ DistributionStatisticConfig.getHistogramBuckets(boolean supportsAggregablePercen
 | **U-7**（新） | Micrometer 直方图的实际输出（`_seconds` 后缀 + 8 个桶边界 + `_count/_sum`）与 Go `HistogramVec` 是否逐桶一致？ | `metrics.go:41-49`（显式 8 桶） | ~~`ArticleRpcMetrics:131-139`（`serviceLevelObjectives` + `publishPercentileHistogram`）~~ | ✅ **已关闭**（2026-10-24） | 真 `PrometheusMeterRegistry` scrape 实测 ⇒ 发现 `publishPercentileHistogram` 与 SLO 桶取**并集** ⇒ 实际 **77** 个边界（Go 只有 **9**：8 + 固有的 `+Inf`）⇒ 已立 `DRIFT-ARTICLE-RPC-010` 并**修复**（去掉 `publishPercentileHistogram`） |
 | **U-8**（新） | `@Scheduled` 首次执行的 `initialDelay` 默认值 | `article.go:94` ticker ⇒ 首次在 1s 后 | ~~未读 `ScheduledAnnotationBeanPostProcessor` 源码~~ | ✅ **已关闭**（2026-10-24，**零新代码**，用 FIX-05 已有的实测证据） | ① FIX-05 的变异 #4「去掉 `initialDelayString`」实测首触发在 **84ms** ⇒ **Spring 的默认值就是"立即执行"**；② 修复后由 `ArticleOutboxRelayScheduleTest#firstExecutionHappensAfterTheIntervalNotImmediately` 断言首次 ≥ 900ms（兜底间隔 1000ms）⇒ 与 Go ticker 同款 |
 | **U-9**（新） | 并发（8 handler）下的 offset 提交/跳过语义两侧是否一致 | `kq/queue.go:219-246`（8 个 processor 各自 `CommitMessages`，**不保证连续**） | RECORD + 上面那套 handler | 两边都**没有**活体对拍；顺序错乱窗口未量化 | 真 Kafka 压测 + 逐条比对 |
-| **U-2**（沿用） | 锁顺序反转 | Go 侧两条路径都由 `RetractPublicationTx` 的 `FOR UPDATE` 串行化 | Java 已统一成 article → publication，但 `retractAndUpdate` 多了一次 `selectByIdForUpdate` 提前 return | 真并发用例未写（CASE-R12） | 同左 |
+| **U-2**（沿用） | 锁顺序反转 | Go 侧两条路径都由 `RetractPublicationTx` 的 `FOR UPDATE` 串行化 | Java 已统一成 article → publication，但 `retractAndUpdate` 多了一次 `selectByIdForUpdate` 提前 return | ✅ **已关闭**（2026-10-24） | 补 **CASE-R12 并发真 PG 用例** + **锁序探针**（真 PG 上同时扣住两把锁，观测被阻塞的 SQL）+ **Go 侧探针**（pgx + 真 PG，两种锁序各跑一次）⇒ 结论已定：**Go 自身**存在锁序反转（探针实测 `40P01 deadlock detected`），RAG 统一为 `article → publication` ⇒ **无反转**。⇒ 差异落档到 [`docs/Intentional_Deviations/article/rpc.md`](../../../Intentional_Deviations/article/rpc.md)（**SD-2026-10-24-01，待签字**），**不在本文重复记** |
 | **U-4'**（沿用） | 双侧活体对拍 | Go 依赖 `etcd:2379`，本机拉不起 | — | 本轮仍 **0** 条 | 起 etcd |
 | **U-5'**（沿用） | S-2 / S-3 / S-4 / S-7 新回归网**非假绿**未证 | — | 只有 S-1 做过变异验证 | AGENTS.md §3.3 | 逐条把修复改回去看用例是否转红 |
 
@@ -596,7 +596,7 @@ DistributionStatisticConfig.getHistogramBuckets(boolean supportsAggregablePercen
 | 12 | Ordering 是否一致 | ✅ | 作者/公开两条排序规则各自对齐（S-2 已改 + 真 PG） |
 | 13 | Retry 是否一致 | ✅ | 两侧均**零**进程内重试（`FixedBackOff(0,0)` ↔ kq 无重试循环） |
 | 14 | Timeout scope 是否一致 | ✅ | 70s / 10s / 2s 三处均为 **operation 级**；SQL 超时可取消已接线 |
-| 15 | Concurrency semantics 是否一致 | ⚠️ | 行锁集合一致；软删行可写（004）+ 锁顺序（U-2）+ offset 语义（U-9） |
+| 15 | Concurrency semantics 是否一致 | ⚠️ | 行锁集合一致；软删行可写（004）+ **锁顺序：U-2 已关闭（结论落 `Intentional_Deviations/article/rpc.md` 的 SD-2026-10-24-01，RAG 更安全 ⇒ 决定不对齐）** + offset 语义（U-9，仍 OPEN） |
 | 16 | Authentication / Authorization 是否一致 | ✅ | 两侧 rpc 层都不做认证；操作人/作者校验三处逐条一致 |
 | 17 | Serialization semantics 是否一致 | ❌ | 001（结果映射）；HTML 转义差异仅影响不经 PG 的四个字段（低） |
 | 18 | Lifecycle 是否一致 | ⚠️ | 四部件同启同停 ✅；门禁时机不同（005）；首次 tick 时刻不同（008/U-8） |
@@ -1244,3 +1244,128 @@ Timer.builder("article_service_minio_request_duration")
 在台账里以 `EQUIVALENT` 的面目待了很久。
 ⇒ 对照 AGENTS.md §3.3.2（以「Go: …」措辞出现的断言属于高危项）：
 **任何"因此两侧一致"的注释，都必须配一条能把它证伪的用例**，否则它只是在**阻止**别人去查。
+
+---
+
+<!-- @fix 2026-10-24 第七轮 · 由 align/article 工作树产出 · 基线 commit 990f5ca -->
+
+## 2026-10-24 第七轮：`U-2` 关闭 —— 锁序**实测**（RAG 侧探针 + Go 侧探针）
+
+### ✅ FIX-13 —— `U-2`（锁顺序反转）关闭，结论落 `Intentional_Deviations`
+
+#### 先说结论
+
+- **Go 侧**：四条写路径分成**两种**锁序 ⇒ **Go 自身**存在锁序反转
+  ⇒ 并发「发布回调」×「撤回/删除」时，PG 实测 **`40P01 deadlock detected`**。
+- **RAG 侧**：四条路径**统一**为 `article → publication` ⇒ **无反转**
+  ⇒ 同样并发下**只是串行化，不会失败**。
+- ⇒ 这是一条**真实、可观察**的差异，方向是「**RAG 更安全**」
+  ⇒ 按 `docs/Worktree.md` 的判据「**这条差异要不要修回去？**」（不要 —— 修回去 = 重新引入死锁）
+  ⇒ **落档到 [`docs/Intentional_Deviations/article/rpc.md`](../../../Intentional_Deviations/article/rpc.md)**
+  （**SD-2026-10-24-01，待签字**），**本文不重复记**（一条问题只落一档）。
+
+#### 两侧锁序逐条对照（行号指向**消费点**）
+
+| 路径 | Go 出处 | Go 锁序 | RAG 出处（`ArticleAtomicService.java`） | RAG 锁序 |
+|---|---|---|---|---|
+| 发布回调 `acceptSyncResult` | `article_sync_result_consumer.go:74` → `WithArticleTx`（`community_revision.go:81-89` 先 `FOR UPDATE` article）→ `:140` `tx.Save(&pointer)` | **article → publication** | `:339` `selectByIdForUpdate` → `publicationMapper.upsert`（隐式行锁） | article → publication |
+| 审核消费者 `article_consumer` | `article_consumer.go:104` → `WithArticleTx`；**只写 article + outbox，不碰 publication 行** | article（单锁） | `:268` `selectByIdForUpdate` | article（单锁） |
+| 降级 `updatePublishedToSourceOnly` | `update_article_logic.go:217` `RetractPublicationTx`（`community_article_event.go:112-114` 先 `FOR UPDATE` publication）→ `:220` `UpdateTx(article)` | **publication → article** | `:127` `selectByIdForUpdate` → `:208` `selectForUpdate` | article → publication |
+| 删除 `DeleteArticle` | `delete_article_logic.go:85` `RetractPublicationTx` → `:91` `DeleteTx(article)` | **publication → article** | `:162` `selectByIdForUpdate` → `:208` `selectForUpdate` | article → publication |
+
+#### 🔴 证据①：RAG 侧**锁序探针**（真 PG，观测「第一把锁」）
+
+`ArticleTransactionWiringTest#lockOrderIsArticleThenPublication`（**新建**）：
+
+1. 用**另一条连接**开事务，**同时**扣住 `article` 行与 `article_publication` 行两把行锁；
+2. 让被测代码在**另一线程**里跑 `retractAndUpdate` ⇒ 它必然卡在**它最先要的那把锁**上；
+3. 用 `pg_stat_activity`（`wait_event_type='Lock'` + `application_name` 过滤）
+   读出被阻塞后端正在执行的 SQL ⇒ **那条 SQL 唯一确定第一把锁**。
+
+**实测**：被阻塞的语句 = `SELECT * FROM article WHERE id = $1 FOR UPDATE`
+⇒ 第一把锁是 **article** ⇒ 锁序 = **article → publication** ✅
+
+⚠️ 判别子串必须是 `"FROM article WHERE"`（**带 WHERE**）：
+`article_publication` 是下划线连接，**不含**该子串 ⇒ 否则两条 SQL 会互相误判。
+
+#### 🔴 证据②：Go 侧探针（pgx v5 + 真 PG，两种锁序各跑一次）
+
+探针 `/tmp/probe-lock/go/main.go`（模块 `probe/lock`，驱动 `github.com/jackc/pgx/v5 v5.10.0`
+—— 与真源仓库 `go.mod` 同版本；容器 `postgres:16-alpine`）。
+两个事务用**会合点**（拿到第一把锁后与对端会合）制造**确定性交错**，**不靠 sleep 碰运气**。
+
+```
+=== Go 实际锁序：撤回路径 publication→article  ×  发布路径 article→publication ===
+  T1（SELECT * FROM article_publication WHERE article_id = $1 FOR UPDATE）: 失败: ERROR: deadlock detected (SQLSTATE 40P01)
+  T2（SELECT * FROM article WHERE id = $1 FOR UPDATE）: 成功
+  ⇒ 结论：**发生死锁**（40P01 deadlock detected）
+
+=== RAG 统一锁序：两条路径都是 article→publication ===
+  T1（SELECT * FROM article WHERE id = $1 FOR UPDATE）: 成功
+  T2（SELECT * FROM article WHERE id = $1 FOR UPDATE）: 成功
+  ⇒ 结论：**无死锁**（两次事务被串行化）
+```
+
+⇒ **同样的表、同样的锁语句，只因顺序不同，一个死锁一个不死锁**
+⇒ 差异出在**锁序**上，不是别的。
+
+#### 🔴 证据③：并发**结果**用例（CASE-R12）
+
+`ArticleTransactionWiringTest#concurrentRetractAndDeleteOnSameArticleSerializesWithoutDeadlock`（**新建**）：
+同一篇文章并发「降级」与「删除」⇒ 断言
+**①** 两个事务都在 60s 内完成（超时即死锁哨兵）、失败方**不是** PG 死锁（SQLSTATE 40P01）；
+**②** **恰好一个成功**（后到者撞 Go 的 `community publication pointer conflicts with published article`，
+`community_article_event.go:123-125`）；**③** 指针版本**单调到 2**（不是 3）、`state='retracted'`；
+**④** 域事件**只有 1 条**、`aggregate_version=2`、`event_type=community.article.retracted`。
+
+#### 变异验证（三态判定）—— 一条**转红** + 一条**仍全绿**
+
+| # | 变异 | 受影响的用例 | 结果 |
+|---|---|---|---|
+| 1 | `retractAndUpdate` 拿掉 article 行锁（`selectByIdForUpdate` → `selectById`）⇒ 锁序变 `publication → article` | `lockOrderIsArticleThenPublication` | ✅ **转红**（实测被阻塞语句变成 `SELECT * FROM article_publication WHERE article_id = $1 FOR UPDATE`） |
+| 1' | **同一个**变异 | `concurrentRetractAndDeleteOnSameArticleSerializesWithoutDeadlock` | ⚠️ **仍全绿** |
+
+⚠️ **1' 是本轮最重要的一条负结果**：
+
+**并发用例测的是「两个事务的最终结果」，而只要两条路径的锁序彼此一致，结果就一样**
+⇒ 它**证伪不了锁序**。
+⇒ 这正是 AGENTS.md 反复强调的「**跑绿 ≠ 对**」：绿测试可能只覆盖了它碰巧覆盖的那部分
+（同一个坑在本仓已出现过两次：`article-rpc` 的 101 条全绿而 jsonb 恒 `null`；
+`admin-rpc` 的绿测试把 `update_time` 不推进**锁死**了）。
+⇒ **必须另配一条「能唯一判定」的探针**（证据①）——
+好在它**不需要**造交错：只要同时扣住两把锁，看它卡在哪一把上就行。
+
+#### 测试计数
+
+`ArticleTransactionWiringTest` **22 条全绿**（原 20 ⇒ +2）；
+`article-rpc` **117 tests / 0 failures / 0 errors / 0 skipped**（原 115 ⇒ +2）。
+
+### 判定变化（FIX-13）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `U-2` 锁顺序反转 | 🔴 OPEN（真并发用例未写） | ✅ **已关闭**（RAG 侧锁序探针 + Go 侧探针，双侧实测）；**差异落 `Intentional_Deviations/article/rpc.md`（SD-2026-10-24-01，待签字）** |
+| `U-3` / `U-4` / `U-9`（Kafka 位点 / seek / 并发 offset） | 🔴 OPEN | 🔴 **OPEN（不变）**（需真 Kafka） |
+| `U-4'` / `U-5'`（双侧活体对拍 / 回归网非假绿） | 🔴 OPEN | 🔴 **OPEN（不变）** |
+| `S-5`（content security） | 🔴 OPEN | 🔴 **OPEN（不变）**（阻塞于 security 域，不在本项目范围） |
+| §10 第 15 项 Concurrency semantics | ⚠️（含「锁顺序（U-2）」待查） | ⚠️ **不变**（锁顺序已定性并落档；offset 语义 U-9 仍 OPEN） |
+| **组件判定** | `SEMANTICALLY NOT EQUIVALENT` | **`SEMANTICALLY NOT EQUIVALENT`（不变）** |
+
+⚠️ **判定不变的理由**：本轮**没有改变任何运行时行为**（只把一条「未验证」定性与关掉），
+且其余 `DRIFT` / `UNRESOLVED` 仍在，也**无双侧活体对拍**（Go 侧仍需 `etcd:2379`）。
+
+#### 📌 一条可复用的元教训
+
+> **「并发用例」不等于「并发语义已被验证」—— 它只覆盖它碰巧交错到的那一段。**
+>
+> 本轮的实测：把锁序从 `article → publication` 改成 `publication → article`（**一个真实的、
+> 已实测会死锁的锁序**），并发用例**依然全绿**；只有那条「同时扣住两把锁、观测它卡在哪把上」
+> 的探针转了红。
+>
+> ⇒ 通用判据：并发用例断言的若是**结果**，它就只对**结果**敏感；
+> 要断言**机制**（锁序、隔离级别、可见性），必须有一条**能唯一判定该机制**的探针。
+>
+> ⇒ 造交错最省事的办法往往不是「编排线程时序」，而是
+> **「把要区分的那两把锁都扣住，看它卡在哪一把」**——
+> 这条探针**确定性**、不依赖运气，且失败信息直接告诉你「它先要的是哪把」。
+
