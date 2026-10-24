@@ -303,6 +303,13 @@ public class FavoriteAuthorityEndpointConfig {
             resp.setStatus(HttpServletResponse.SC_OK);
             try {
                 resp.getOutputStream().write(body);
+                // 🔴🔴 Go 的 `json.NewEncoder(w).Encode(fact)` **必定追加一个 "\n"**
+                //    （encoding/json 的 Encoder.Encode 契约：写完 JSON 后跟一个换行符）
+                //    ⇒ 不补这一字节 ⇒ 响应体与 Go **逐字节不一致**（Content-Length 也差 1）。
+                //    ⚠️ 本类的错误路径（writeGoError / writeMovedPermanently）**刻意**补了
+                //    尾部 "\n" 以对齐 Go ⇒ 这里不补就是**同一件事上的缺口**，不是有意偏离。
+                //    ⇒ 证据：tools/authority-live-probe/favorite/（双侧活体对拍，v1_ok / v2_ok 两例）
+                resp.getOutputStream().write('\n');
             } catch (IOException e) {
                 // Go: service/favorite/rpc/internal/authority/http.go:58-60 —— Encode 失败只记日志，不改状态码
                 LOG.atWarn()

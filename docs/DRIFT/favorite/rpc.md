@@ -31,7 +31,7 @@
 | 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选已签字**（2026-10-25）：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK）⇒ **本域已无 🏷 候选**，见 §13.2 |
 | 第九轮 | 🆕 **注释可核验性审计**（§15）—— 抓出 **3 条「断言对、锚点指错行」的真缺陷**，门禁级发现 **67 → 0**；**零行为改动** |
 | 第十轮 | 🆕 **补完 §15.8 记下的 I1 欠账**（§16）—— **153 条**内联断言补上锚点，再抓 **5 条**（4 条行号指错 + 1 条把 Java 事实误记成 Go）；**台账体检**：2 条死指针 + 3 处过期数字 + 4 处裸行号 + **6 处 RAG 侧锚点位移**已修，**6 个 Go 源文件未落点**已补记 ⇒ 新工具 `tools/ledger-lint/favorite/check-ledger-selfcheck.py`（EXIT=0） |
-| 第十一轮 | 🆕 **三条候选签字**（§17）—— DEV-FAV-API-002 / RPC-006 / RPC-007 ⇒ **本域已无 🏷 候选**；顺带改正 §0 头部一处**过期断言**（「未做变异验证」只适用 §0–§8）<br>📌 **域内「可动项」清单**（§18）—— 🔴 **权威读 HTTP 面的双侧活体对拍其实做得了**（不需要 etcd/Kafka/Redis/user-rpc/article-rpc）· 🟡 域外写入方盘点（V7 前置）· ⬜ 跨域项收口在 `global` |
+| 第十二轮 | 🆕 **可动项 A + B 落地**（§19）—— 🔴 **权威读 HTTP 面的双侧活体对拍做成了**（新工具 `tools/authority-live-probe/favorite/`，**21 个 case：20 个逐字节一致 + 1 个 SKIP**）⇒ **U7 的局部活体对拍 6 项 → 7 项**；并抓出并**已修 1 条真缺陷**（200 路径少一个尾部换行字节）<br>🆕 **域外写入方盘点机检**（新工具 `tools/outbox-writer-audit/favorite/`）⇒ 本仓 **0 个域外写入方**（EXIT=0）<br>| 第十一轮 | 🆕 **三条候选签字**（§17）—— DEV-FAV-API-002 / RPC-006 / RPC-007 ⇒ **本域已无 🏷 候选**；顺带改正 §0 头部一处**过期断言**（「未做变异验证」只适用 §0–§8）<br>📌 **域内「可动项」清单**（§18）—— 🔴 **权威读 HTTP 面的双侧活体对拍其实做得了**（不需要 etcd/Kafka/Redis/user-rpc/article-rpc）· 🟡 域外写入方盘点（V7 前置）· ⬜ 跨域项收口在 `global` |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -1126,7 +1126,7 @@ breakerName := path.Join(cc.Target(), method)
 > 用户问「现在域内可修漂移、未知项有哪些」⇒ 本节给出**带证据的清单**，
 > 并把「可动」与「不可动（跨域 / 环境 / 已决策）」分开。
 
-### 18.1 🔴 可动项 A：**权威读 HTTP 面的双侧活体对拍 —— 其实做得了**
+### 18.1 ✅ 可动项 A：**权威读 HTTP 面的双侧活体对拍 —— 其实做得了**（**第十二轮已落地** ⇒ §19.1）
 
 ⚠️ **本节修正一处过宽的判定**：此前「U7 环境受限」的理由是
 「Go 侧 favorite-rpc 依赖 `etcd` + Kafka + Redis + article-rpc / user-rpc ⇒ 本机拉不起」。
@@ -1150,7 +1150,7 @@ breakerName := path.Join(cc.Target(), method)
 
 ⚠️ **本节只是「判定可做」，尚未实施** ⇒ 实现归下一轮。
 
-### 18.2 🟡 可动项 B：**域外直接写入方盘点**（V7 上线前置）
+### 18.2 ✅ 可动项 B：**域外直接写入方盘点**（V7 上线前置）—— **第十二轮已落地为机检工具** ⇒ §19.2
 
 | 项 | 状态 |
 |---|---|
@@ -1181,3 +1181,98 @@ breakerName := path.Join(cc.Target(), method)
 | **Go 侧源文件覆盖** | **50/50** 有台账落点 | §16.7 |
 
 ⇒ **favorite 域本轮无「未决的已识别漂移」** —— 剩下的全是**证据强度问题**（§18.1 / §18.2）与**跨域项**（§18.3）。
+
+---
+
+## 19. 2026-10-25 第十二轮（`align/favorite` 工作树 · 承 `0fa76f2`）—— **可动项 A + B 落地**
+
+> 本轮把第十一轮 §18.1 / §18.2 的两个「可动项」真正做掉了。
+> ⚠️ **有 1 处可执行逻辑改动**（不是纯注释）—— 见 §19.3。
+
+### 19.1 ✅ 可动项 A：**权威读 HTTP 面的双侧活体对拍**
+
+**新工具**：[`tools/authority-live-probe/favorite/`](../../../../tools/authority-live-probe/favorite/README.md)
+（`run.sh` + `expected.txt` + `seed.sql` + 13 个真源逐字节复制件 + Go 侧探针）
+**Java 侧**：`FavoriteAuthorityLiveParityTest`（真 PG Testcontainers + 真 Flyway + 真 MyBatis + 真 servlet）
+
+| 项 | 结果 |
+|---|---|
+| **对拍结果** | **21 个 case：20 个逐字节完全一致 + 1 个 SKIP** ⇒ **EXIT=0** |
+| 覆盖 | 200 正常（v1 三字段 / v2 两字段 `subject_ref`）· 鉴权 7 条（含**重复 Authorization 头**）· mux 5 条（path 清理 301 / 404 / 405）· query 2 条（带 query ⇒ 404）· 数据面 6 条（不存在 / producer 不匹配 / v1↔v2 schema 交叉 / event_id 超长 / `%2F`） |
+| 两侧怎么做到同一份数据 | **共用同一份 `seed.sql`** ⇒ 种子由 **真源自己的写入路径**生成：`model.InsertFavorite` + `model.DispatchFavoriteFactOnce`（+ 一个 `FavoriteFactSender` stub 用**同一个** `jsoncanonicalizer` 算 DC 端的 JCS hash）⇒ **真源随后自己用 `favoriteJCSHash(row.Payload)` 复核** ⇒ hash 算错真源自己就会拒 ⇒ **探针自证** |
+| 真源漂移哨兵 | `expected.txt` = **冻结的 Go 侧实测值**；`run.sh` 把 Go 输出与它逐行比对 ⇒ **Go 真源变了探针立刻响**；Java 侧断言的**也是这份** ⇒ 两侧共用一份真源 |
+| **🔴 抓出并已修的 1 条真缺陷** | 见 §19.3 |
+| **唯一的 SKIP** | `mux_method_not_allowed` ⇒ Go 的 405 来自 **`http.ServeMux` 层**（`Allow: GET, HEAD` + text/plain + nosniff + body）；RAG 侧是 **Servlet 层**（只有 `doGet`）⇒ Mock 下空 body，**真 Tomcat 下是容器的 HTML 错误页** ⇒ 形态取决于**部署形态** ⇒ 归 **DEV-FAV-RPC-004**（默认无 web 容器 ⇒ 端点默认关闭）⇒ **SKIP 理由已写进 `expected.txt` 注释**，不许默默忽略 |
+| 变异验证 | 去掉 RAG 侧 200 路径的尾部 `"\n"` ⇒ **`v1_ok` 转红**；复原 ⇒ 绿 ⇒ **不是假绿** |
+
+### 19.2 ✅ 可动项 B：**域外写入方盘点机检**
+
+**新工具**：[`tools/outbox-writer-audit/favorite/check-outbox-writers.py`](../../../../tools/outbox-writer-audit/favorite/README.md)
+
+| 项 | 结果 |
+|---|---|
+| **本仓结论** | **7 个 INSERT 站点、0 个域外写入方**、**8 个 UPDATE 站点**（只登记）⇒ **EXIT=0** |
+| 判定 | ① 站点必须在 `favorite-rpc` 模块内（域外 ⇒ 🔴 exit 1）；② INSERT 必须显式绑 `created_at` + `updated_at`（V7 去 DEFAULT 后不绑 ⇒ 立刻 NOT NULL 违例） |
+| 变异验证 | 去掉任一 INSERT 的两列绑定 ⇒ **EXIT=1 且点名文件行号**；复原 ⇒ EXIT=0 ⇒ **不是假绿** |
+| ⚠️ **边界（必须一并读）** | 工具只看得见**本仓库的代码** ⇒ 看不见**人工 psql、报表工具、数据修复脚本、另一个仓库、部署期一次性命令** ⇒ **EXIT=0 ≠ 可以放心上 V7** ⇒ 上线前**仍需人工确认一次** |
+
+### 19.3 🔴 本轮修的 1 条**可执行逻辑**差异（不是注释）
+
+| 项 | 内容 |
+|---|---|
+| **位置** | `FavoriteAuthorityEndpointConfig`（200 响应路径） |
+| **Go 行为** | `json.NewEncoder(w).Encode(fact)` ⇒ **必定追加一个 `"\n"`**（encoding/json 的 `Encoder.Encode` 契约：写完 JSON 后跟一个换行符） |
+| **RAG 原行为** | `STRICT_JSON.writeValueAsBytes(fact)` ⇒ **少了那一个字节** ⇒ 响应体逐字节不一致（`Content-Length` 也差 1） |
+| **为什么判它是「缺口」而不是「有意偏离」** | 同一类的**错误路径**（`writeGoError` / `writeMovedPermanently`）**刻意**补了尾部 `"\n"` 以对齐 Go ⇒ **同一件事上的不一致** ⇒ 不是设计选择 |
+| **修法** | `resp.getOutputStream().write('\n')`（紧跟 body 之后） |
+| **守门** | `tools/authority-live-probe/favorite/`（`v1_ok` / `v2_ok` 两例逐字节对拍）+ 变异验证 |
+
+### 19.4 🔴 顺带修掉的一类**探针假红**（`-pl` 不带 `-am` ⇒ 用过期上游产物）
+
+**现象**：`tools/api-envelope-probe/favorite/run.sh` 稳定失败
+（`Too many interim responses received: 9 > 8`）⇒ 看着像「Go ↔ RAG 响应字节对不上」。
+
+**根因（已定位，非猜测）**：`-pl <module>` **不带 `-am`** ⇒ 不重建上游模块 ⇒
+直接用**过期的** `service/common/target/classes`。
+⚠️ 在 worktree 场景里这是**常态**：`service/common` 是跨域共享模块，源码可能已被
+**别的会话**改过，而本 worktree 的 `target/` 还是上一轮的 ⇒ api 模块链接旧 class ⇒ 行为不一致。
+
+**决定性对照**（同一份源码、同一台机器）：
+
+| 环境 | 命令 | 结果 |
+|---|---|---|
+| **基线 worktree**（`0fa76f2`，零 target） | `mvn -o -pl … -am test` | ✅ 绿 |
+| 本 worktree，**不带** `-am` | `mvn -o -pl … test` | ❌ 红（3/3 次） |
+| 本 worktree，**带** `-am` | `mvn -o -pl … -am test` | ✅ 绿 |
+
+⇒ 变量只有「上游产物是否新鲜」⇒ 根因坐实 ⇒ **不是产品缺陷**。
+
+**修法**：**所有 favorite 域探针的 mvn 调用一律加 `-am`** +
+`-Dsurefire.failIfNoSpecifiedTests=false`（`-am` 会把 `-Dtest=X` 带到上游模块，
+上游没这个测试 ⇒ surefire 直接失败）。
+已改：`api-envelope-probe` / `proto-wire-probe` / `authority-path-probe` /
+`authority-live-probe` / `errmsg-probe`（`ddl-parity-probe` 无 mvn 调用 ⇒ 不受影响）。
+⇒ 元教训登记为 **PIT-FAV-RPC-013**。
+
+### 19.5 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| `tools/authority-live-probe/favorite/run.sh` | ✅ **EXIT=0**（SAME 20 / OBS 0 / SKIP 1） |
+| `tools/outbox-writer-audit/favorite/check-outbox-writers.py` | ✅ **EXIT=0**（0 个域外写入方） |
+| `check-assertion-sources.py` | ✅ **EXIT=0** |
+| `check-ledger-selfcheck.py` | ✅ **EXIT=0** |
+| 全量测试 | 见 §19.5 |
+| 六个既有探针 + 三个守门 | 见 §19.5 |
+| 共享面 | **零改动** |
+
+### 19.6 ⚠️ U7 的状态更新（**环境受限的判定被切掉一块**）
+
+> 🔴 **本轮推翻了「U7 环境受限」的一部分判定** ——
+> 此前说「拿不到整域活体对拍」的理由是「Go 侧 favorite-rpc 依赖 etcd + Kafka + Redis +
+> article-rpc / user-rpc」⇒ **那个理由只对 gRPC 整域成立**：
+> **权威读 HTTP 面两边都只要 PG + HTTP** ⇒ 真双侧活体对拍**做得了**，本轮做掉了。
+
+⇒ U7 的**局部**双侧活体对拍由 **6 项 → 7 项**（新增「**权威读 HTTP 面**」，21 个 case 逐字节）。
+⇒ **U7 仍未闭** —— 剩下的「整域」= **gRPC 整域**（Go gRPC server 注册走 etcd ⇒ 真受阻）
++ **api 整域**（Go favorite-api 依赖 etcd + favorite-rpc + Redis）。

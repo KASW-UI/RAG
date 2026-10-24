@@ -129,7 +129,7 @@ say "== 2/6 跑 Go 侧（真源 errmsg.go 同包编译 + 真 grpc 库）=="
   || die "Go 侧执行失败（exit $?）—— 见上方输出"
 
 say "== 3/6 编译 favorite-common =="
-mvn -o -q -f "${RAG_ROOT}/pom.xml" -pl "${MODULE}" compile
+mvn -o -q -f "${RAG_ROOT}/pom.xml" -pl "${MODULE}" -am compile
 CLASSES="${RAG_ROOT}/${MODULE}/target/classes"
 [ -d "${CLASSES}" ] || die "${CLASSES} 不存在"
 
@@ -137,7 +137,7 @@ CLASSES="${RAG_ROOT}/${MODULE}/target/classes"
 #    favorite-common 自己只引 grpc-stub（传递依赖 grpc-api），target/classes 里**没有** grpc 的 jar
 #    ⇒ 这里用 dependency:build-classpath 取该模块的**真实**依赖集，
 #    而不是手工 find ~/.m2 里的某个版本（那会让探针跑到与生产不同的 grpc 版本上）。
-mvn -o -q -f "${RAG_ROOT}/pom.xml" -pl "${MODULE}" \
+mvn -o -q -f "${RAG_ROOT}/pom.xml" -pl "${MODULE}" -am \
   dependency:build-classpath -Dmdep.outputFile="${TMP}/cp.txt" -Dmdep.includeScope=test \
   || die "dependency:build-classpath 失败"
 [ -s "${TMP}/cp.txt" ] || die "dependency:build-classpath 没产出 classpath"

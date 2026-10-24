@@ -49,8 +49,9 @@ if ! command -v mvn >/dev/null 2>&1; then
     echo "❌ 找不到 mvn" >&2
     exit 2
 fi
-( cd "$ROOT" && mvn -o -q -pl service/favorite/favorite-rpc test \
-    -Dtest='FavoriteAuthorityPathParityTest' -DfailIfNoTests=false ) || {
+( cd "$ROOT" && mvn -o -q -pl service/favorite/favorite-rpc -am test \
+    -Dtest='FavoriteAuthorityPathParityTest' -DfailIfNoTests=false \
+    -Dsurefire.failIfNoSpecifiedTests=false ) || {
     echo "❌ Java 侧断言不通过 ⇒ RAG 与 Go 的矩阵不一致" >&2
     exit 1
 }

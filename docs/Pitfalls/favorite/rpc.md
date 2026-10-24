@@ -472,3 +472,105 @@ favorite 的 `checkblacklist_middleware.go`（下划线）与 follow / user 域�
    并把它列入「改完注释后必查」清单。
 4. **锚点抽查是可机检的半自动动作**：把台账里的 `<类名>:<n>` 全部解析出来、
    打印该行的实际内容 ⇒ 人眼扫一遍即可（本轮 50 个锚点，6 处漂移）。
+
+---
+
+## PIT-FAV-RPC-012 · 🔴 **GORM 默认把日志写到 stdout** ⇒ 会污染探针的输出文件
+
+> **发现轮次**：第十二轮（2026-10-25，写 `tools/authority-live-probe/favorite/` 时）
+> **形态**：**探针自伤** —— 不是产品代码的 bug，但会让探针产出**看似正常、实则被污染**的结果。
+
+### 现象
+
+Go 侧探针把矩阵结果 `fmt.Println` 到 stdout ⇒ 结果是对的。
+但**真源 model 的 GORM 会把 "record not found" 这类日志打到 stdout**（**不是 stderr**）：
+
+```
+2026/10/25 07:03:56 .../internal/model/favorite_delivery.go:147 record not found
+[1.508ms] [rows:0] SELECT * FROM "favorite_fact_outbox" WHERE status IN (0,2) AND ...
+```
+
+⇒ 这些行**混进了 stdout** ⇒ 落盘后：
+· Java 侧 `applySeed` 逐行执行时，第一行就是那坨日志 ⇒ `syntax error at or near "2026"`；
+· 或者「看起来跑通了」，实际冻结的期望文件里混着日志。
+
+### 为什么难发现
+
+① 日志行**不像错误**（没有 ERROR 前缀，只是时间戳 + 路径 + message）；
+② `2>/dev/null` **挡不住**（它写的是 stdout，不是 stderr）；
+③ Go 侧自己觉得「我只是 Println 结果」⇒ 不会想到 GORM 也在抢 stdout。
+
+### 怎么不再踩
+
+⇒ **探针的结果一律写文件，stdout 只留诊断**：
+```go
+out := env("PROBE_OUT", "")
+if out == "" { return errors.New("缺少 PROBE_OUT") }
+os.WriteFile(out, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+```
+· 探针自己的日志 ⇒ `fmt.Fprintf(os.Stderr, ...)`；
+· GORM 的日志 ⇒ 在探针里 `gorm.Open(..., &gorm.Config{Logger: logger.Discard})` 或干脆不管
+  （反正它写 stdout，而 stdout 不再承载结果）。
+
+⇒ **通用判据**：**只要「结果」与「日志」共用一个输出通道，就一定会出事** ⇒ 结果走文件、日志走 stderr。
+
+⚠️ 同源提醒：`tools/ddl-parity-probe/favorite/` 的 Go 侧也是 `say()` 写 stderr + 结果写 stdout ——
+它之所以没踩到，是因为它**没有**触发 GORM 的 "record not found" 分支（它的 SELECT 都命中了）。
+⇒ **「这次没踩到」不等于「不会踩到」**。
+
+---
+
+## PIT-FAV-RPC-013 · 🔴 **`mvn -pl` 不带 `-am` ⇒ 用过期上游产物 ⇒ 假红**
+
+> **发现轮次**：第十二轮（2026-10-25）
+> **形态**：**探针脚本自伤** —— 不是产品代码的 bug，但会让探针**报出与代码无关的失败**。
+
+### 现象
+
+`tools/api-envelope-probe/favorite/run.sh` 用
+`mvn -o -q -pl service/favorite/favorite-api test -Dtest=FavoriteApiEnvelopeParityTest`
+跑 Java 侧 ⇒ **稳定失败**：
+
+```
+FavoriteApiEnvelopeParityTest.tooManyFormParamsMatchGoByteForByte:341->getWithToken:425
+  » Protocol Too many interim responses received: 9 > 8
+```
+
+⇒ 看起来像「Go ↔ RAG 的响应字节对不上了」⇒ **极易误判成真回归**。
+
+### 根因（**已定位到，不是猜测**）
+
+`-pl <module>` **不带 `-am`** ⇒ Maven **不会**重建上游模块 ⇒ 直接用
+`service/common/target/classes` 等**已存在的产物**。
+
+⚠️ 在 worktree 场景里这会**必然踩到**：
+本 worktree 的 `service/common/target/classes` 是**上一轮编译的**，
+而 `service/common` 的**源码**可能已被**别的会话**改过（该模块是跨域共享的）
+⇒ api 模块编译时链接的是**旧 class** ⇒ 运行时行为与源码不一致 ⇒ 协议层出怪状况。
+
+⇒ **决定性对照**（第十二轮实际做的）：
+| 环境 | 命令 | 结果 |
+|---|---|---|
+| **基线 worktree**（`0fa76f2`，零改动、零 target） | `mvn -o -pl … -am test` | ✅ **绿** |
+| 本 worktree，**不带** `-am` | `mvn -o -pl … test` | ❌ 红（3/3 次） |
+| 本 worktree，**带** `-am` | `mvn -o -pl … -am test` | ✅ **绿** |
+
+⇒ **同一份源码、同一台机器** ⇒ 变量只有「上游产物是否新鲜」⇒ 根因坐实。
+
+### 怎么不再踩
+
+⇒ **所有 favorite 域探针的 mvn 调用一律加 `-am`**（已全部改完）：
+`tools/{api-envelope,proto-wire,authority-path,authority-live}-probe/favorite/run.sh`
++ `tools/errmsg-probe/favorite/run-parity.sh`。
+
+⚠️ **加 `-am` 必须同时加 `-Dsurefire.failIfNoSpecifiedTests=false`** ——
+`-am` 会把 `-Dtest=X` 带到上游模块，而上游**没有**这个测试 ⇒ surefire 会**直接失败**
+（不是「跳过」）⇒ 实测 `users-common` 报 `No tests matching pattern … were executed!`。
+
+⚠️ `tools/ddl-parity-probe/favorite/run.sh` **没有** mvn 调用（纯 Go + Python）⇒ 不受此坑影响。
+
+### 通用判据
+
+> **「模块级 mvn 命令」要么带 `-am`，要么显式确认过上游产物是新鲜的。**
+> ⚠️ 在**多会话并发 + worktree** 的仓库里（AGENTS.md §5.3），「上游源码变了但我的 target 没变」
+> 是**常态**，不是意外 ⇒ 不加 `-am` 的探针**必然**在某个时刻开始假红。

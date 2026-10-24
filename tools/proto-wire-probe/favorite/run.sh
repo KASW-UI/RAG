@@ -96,8 +96,9 @@ fi
 
 say ""
 say "== 4/4 跑 Java 侧（favorite-proto 的真实生成码）=="
-mvn -o -q -f "${RAG_ROOT}/pom.xml" -pl "${MODULE}" test \
+mvn -o -q -f "${RAG_ROOT}/pom.xml" -pl "${MODULE}" -am test \
   -Dtest=FavoriteProtoWireParityTest -DfailIfNoTests=false \
+  -Dsurefire.failIfNoSpecifiedTests=false \
   || die "Java 侧 FavoriteProtoWireParityTest 失败（exit $?）—— 见上方输出"
 
 say ""

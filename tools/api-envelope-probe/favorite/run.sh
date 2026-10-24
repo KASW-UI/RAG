@@ -128,8 +128,9 @@ say ""
 say "== 4/4 跑 Java 侧（真实 advice / Response / DTO / 容器 mapper + 真 HTTP）=="
 # ⚠️ Java 侧断言的是**同一个** expected.txt ⇒ 两侧共用一份真源 ⇒ 不会各说一半。
 #    其中 OBS 段（500 兜底）断言的是「两侧**仍然不同**」⇒ 哪天差异消失 ⇒ 测试失败 ⇒ 逼人重评台账。
-mvn -o -q -f "${RAG_ROOT}/pom.xml" -pl "${MODULE}" test \
+mvn -o -q -f "${RAG_ROOT}/pom.xml" -pl "${MODULE}" -am test \
   -Dtest=FavoriteApiEnvelopeParityTest -DfailIfNoTests=false \
+  -Dsurefire.failIfNoSpecifiedTests=false \
   || die "Java 侧 FavoriteApiEnvelopeParityTest 失败（exit $?）—— 见上方输出"
 
 say ""
