@@ -5,7 +5,13 @@
 > **正本在本文件**；总索引见 [`../_INDEX.md`](../_INDEX.md)（⚠️ 该文件是**共享面**，
 > 按 `docs/Worktree.md` §三，所有工作树都不许碰 ⇒ 合并后由主会话统一登记本条的编号）。
 
-## 本域签字偏离：3 条（其中 `SD-07` 已于 2026-10-24 **撤销**）
+## 本域签字偏离：6 条（其中 `SD-07` 已于 2026-10-24 **撤销**）
+
+> 🆕 **2026-10-24 第十轮新增 3 条**（`SD-2026-10-24-01/02/03`）——
+> 分别是 `DRIFT-MSG-V-021`（索引名）/ `DRIFT-MSG-V-009`（直方图桶）/ `DRIFT-MSG-V-010`（错误解包深度）。
+> 三条都是用户 **2026-10-24 问卷拍板**：**签字保留 RAG 现状，不改代码**。
+> ⚠️ 三条都在本轮**拿到了活体证据**（不再是静态推断）：
+> V-021 靠双侧活体 DDL 对拍，V-009 靠双侧直方图桶实测，V-010 靠两侧消费点逐行核对。
 
 > ⚠️ **2026-10-24 第八轮：`DRIFT-MSG-V-003` 的签字范围已收窄**（不是撤销）——
 > 原签字：「DB/内部故障业务码 Go `1015` → RAG `5001`/`5008`，保留 RAG 侧」。
@@ -14,6 +20,56 @@
 > **保留的只有「不回显原始错误文本」这一半** ⇒ 即 Go 的 envelope 会把 gRPC description 原文
 > （SQL 错误文本）塞进 `msg`，RAG 只回码表文案（`service busy`）⇒ **信息泄露防护**。
 > ⇒ 详见本文件 §V-003 收窄说明。
+
+---
+
+### SD-2026-10-24-01 🆕 · `message_conversation` 两个索引的**名字**与 Go 不同（列完全相同）
+
+| 项 | 内容 |
+|---|---|
+| **组件** | `message-rpc`（DDL 台账：[`DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) 的 `DRIFT-MSG-V-021`） |
+| **Go 行为** | `service/message/rpc/internal/model/data_model.go:60`（`LastMessageAt … ;not null;index`）与 `:61`（`UpdatedAt … ;index`）用的是**无名** `index` tag ⇒ GORM 按 `idx_<表名>_<列名>` 命名 ⇒ 建出 `idx_message_conversation_last_message_at` / `idx_message_conversation_updated_at` |
+| **RAG 行为** | `service/message/message-rpc/src/main/resources/db/migration/V2__create_message_conversation.sql:43,48` 手写为 `idx_conversation_last_message_at` / `idx_conversation_updated_at` |
+| **类别** | `DDL / STRUCTURE`（**索引名**不同，**列完全相同** ⇒ 查询能力、唯一性保证、性能特征**完全等价**） |
+| **签字结论** | **2026-10-24 用户拍板：签字保留 RAG 短名，不改名** |
+| **⚠️ 活体证据（2026-10-24 第十轮，双侧真 PG）** | 两侧各建一个真库（Go 侧跑**真源自己的** `AutoMigrate`，RAG 侧按序执行 V1~V5），逐条 dump `pg_indexes`：<br>Go `idx_message_conversation_last_message_at` ⇔ RAG `idx_conversation_last_message_at`，两边 `cols=['last_message_at']`、`unique=False` **完全一致**<br>Go `idx_message_conversation_updated_at` ⇔ RAG `idx_conversation_updated_at`，两边 `cols=['updated_at']`、`unique=False` **完全一致**<br>⇒ 全域 12 个索引里**只有这 2 个名字不同**，其余 10 个（含 `uk_conversation_pair`）**逐条一致** |
+| **⚠️ 为什么保留是对的（不是「将就」）** | Go 的名字是 GORM 的**命名算法副产品**，不是设计意图 —— 业务代码里没有任何地方引用索引名（两侧的 mapper 都是纯列名 SQL）。RAG 的短名**更短更可读**，且 `V2` 的注释已把「为什么这么建」写清楚了。<br>⇒ 改名的收益 = 让 `\d` 输出好看；改名的代价 = 一次 `DROP INDEX` + `CREATE INDEX` 的迁移窗口 + 线上若有运维脚本按索引名操作就得同步改 |
+| **⚠️ 代价（必须知情）** | ① 两侧 `pg_indexes` / `\d` 的**索引名**不同；② 任何**按索引名做逐字节比对**的 DDL 对拍工具在**这一条上必然为红**（`tools/difftest/check-ddl-static.py --domain message --indexes` 会把它判成「名字不同但列等价」）⇒ 属**预期差异，不是回归**<br>⇒ 已把这两个名字加进门禁的豁免名单（`DDL_ALLOW_IDX`），使门禁对**新**的索引漂移仍然为红 |
+| **⚠️ 不得做的事** | 不要为了让 DDL 对拍变绿而改名 —— 除非**同时**确认线上没有任何对象（运维脚本 / 监控 / 报表）引用旧名。若将来确需改名，**必须走一条新的 Flyway 迁移**（`DROP INDEX IF EXISTS` + `CREATE INDEX`），**不得**改 `V2`（已部署过的库不会重跑 `V2`） |
+
+---
+
+### SD-2026-10-24-02 🆕 · `message_rpc_request_duration_seconds` 的直方图**桶边界零交集**
+
+| 项 | 内容 |
+|---|---|
+| **组件** | `message-rpc`（DRIFT 台账：[`DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) 的 `DRIFT-MSG-V-009`） |
+| **Go 行为** | `service/message/rpc/internal/metrics/metrics.go:23` `Buckets: prometheus.DefBuckets` ⇒ **11 个桶 + `+Inf`**：`0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10`（秒）<br>（常量来源：`github.com/prometheus/client_golang@v1.23.2/prometheus/histogram.go:271` —— go.mod 钉的就是 v1.23.2） |
+| **RAG 行为** | `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/metrics/MessageMetrics.java:86-92` `Timer.builder(…).publishPercentileHistogram()` ⇒ Micrometer 1.16.7 的**指数默认桶**：**69 个桶 + `+Inf`**，从 `0.001` 起、步长 `1.048576`（≈2^(1/20)）、到 `30.0` 为止 |
+| **类别** | `可观测指标 / 运维口径`（**不影响 wire 契约、不影响业务行为**） |
+| **签字结论** | **2026-10-24 用户拍板：签字留档，不改代码**（两个方向都不做 —— 不改 RAG 去迁就 Go，也不改 Prometheus 抓取端） |
+| **⚠️ 活体证据（2026-10-24 第十轮，双侧实测）** | Go 侧：跑一个复刻 `metrics.go:18-24` 的 `HistogramOpts` 的探针，打印桶边界；<br>Java 侧：跑一个复刻 `MessageMetrics.java:86-92` 的 `Timer`（`PrometheusMeterRegistry` + `publishPercentileHistogram()`），`registry.scrape()` 后解析 `le="…"`；<br>⇒ **两侧桶边界精确交集 = 0 个**。Go 的 11 个桶**全部**不在 Java 的 69 个桶里 |
+| **⚠️ 实际影响（必须知情）** | ① `histogram_quantile(0.95, rate(..._bucket[5m]))` **两边都能算**，但因为桶边不同，**同一份流量在两侧会算出不同的 p95 数字**（不是「谁错了」，是分桶不同）；<br>② **低于 5ms 的请求**：Go 落在第一个桶（`0.005`）之前 ⇒ 计入 `+Inf` 之前的隐含桶；RAG 落在 `0.001` 桶 ⇒ 可区分；<br>③ **超过 10s 的请求**：Go 全部落进 `10 → +Inf`（**分辨率丢失**）；RAG 仍能分到 `10 / 12.58 / 15.78 / 19.8 / 24.8 / 30` 等桶 ⇒ **RAG 在长尾上分辨率更高** |
+| **⚠️ 为什么保留是对的** | ① **两侧的桶都不是「对的那个」** —— Go 的 11 个是 Prometheus 客户端的历史默认档（为「秒级 Web 服务」设计，对 gRPC 毫秒级服务偏粗）；Micrometer 的 69 个指数桶是为「自适应分辨率」设计的通用档；<br>② **真正对齐的做法不是抄桶，而是对齐口径** —— 两侧的**指标名 / label 集 / 观测点**（`method` 标签、`success`/`fail` 计数）本就一致，桶只是分箱方式；<br>③ 改 RAG 的桶 = 要么手写 11 个桶（放弃长尾分辨率），要么改抓取端（运维侧动作，超出本域）⇒ **两边都不值得** |
+| **⚠️ 不得做的事** | 不要把「桶不同」当成**回归**反复「修」—— 它已被签字。⚠️ 也不要**只改一边**：只改 RAG 不改抓取端，会让运维侧已有的 `histogram_quantile` 告警阈值失去意义（分母的桶集合变了） |
+
+---
+
+### SD-2026-10-24-03 🆕 · 嵌在 cause 链里的 `CodeError`：Go `errors.As` **穿透** / RAG `instanceof` **不穿透**
+
+| 项 | 内容 |
+|---|---|
+| **组件** | `message-api` + `message-common`（DRIFT 台账：[`DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) 的 `DRIFT-MSG-V-010`） |
+| **Go 行为** | api 的**全局错误处理器**：`service/message/api/messagecenter.go:57` `if errors.As(err, &codeErr)` ⇒ `errors.As` **沿 `Unwrap()` 链逐层找** ⇒ **穿透** |
+| **RAG 行为** | `service/message/message-common/src/main/java/com/rag/message/message/common/errmsg/MessageGrpcError.java:230` `if (err instanceof CodeError)` ⇒ **只看最外层那一个对象**，**不穿透** |
+| **类别** | `错误传播`（**latent**：当前没有会发作的调用路径） |
+| **签字结论** | **2026-10-24 用户拍板：签字留档，不改代码** |
+| **⚠️ 活体证据（2026-10-24 第十轮，逐行核对两侧消费点）** | 两侧**不是**「一个穿透一个不穿透」，而是**分两支**（台账原文「Go 穿透 / Java 不穿透」**过宽**，本条已订正）：<br>① **`CodeError` 支** —— Go `service/message/common/errmsg.go:104` `err.(*CodeError)`（**不穿透**）↔ RAG `MessageGrpcError.java:230` `instanceof CodeError`（**不穿透**）⇒ **两侧一致 ✓**<br>② **`status` 支** —— Go `service/message/common/errmsg.go:108` `status.FromError(err)`（grpc-go 内部走 `errors.As` ⇒ **穿透**）↔ RAG `MessageGrpcError.java:300` `extractStatus(Throwable)`（**显式走 cause 链** ⇒ **穿透**）⇒ **两侧一致 ✓**（这条是 `DRIFT-MSG-COMMON-001` 修好的）<br>⇒ **真正不一致的只剩一处**：Go **api 的全局错误处理器**（`messagecenter.go:57`）用 `errors.As` 取 `*CodeError` ⇒ 它**能**认嵌套；RAG 的 api 侧 envelope（`MessageApiSupport.java:140`）走 `bizCodeFromError` ⇒ 它**只认最外层** |
+| **⚠️ 实际影响（为什么是 latent）** | RAG 侧 `CodeError` 由 api 自己的 logic **直接抛出** ⇒ 异常处理器拿到的就是它本身 ⇒ `instanceof` 命中。<br>⇒ **只有当 `CodeError` 被包进别的异常再抛**（Spring AOP / `@Async` / 异步 stub 的 `CompletionException` 包装）时，两侧才会给出不同的码。<br>⚠️ **Go 侧同样会被 `CompletionException` 之类的包装影响吗？** 不会 —— `errors.As` 会穿透。⇒ **这正是差异所在**，只是当前 Go 的 api 路径上没有这种包装 |
+| **⚠️ 为什么保留是对的** | ① **改 RAG 去穿透 = 会引入新的分歧点**：`bizCodeFromError` 的 `CodeError` 分支**刻意**不穿透（`MessageGrpcError.java:227-229` 的注释写明：「照 Go 排，别再对调」）—— 它对齐的是 Go `errmsg.go:104` 那条**不穿透**的实现；改成穿透反而**不再对齐** Go 的 `BizCodeFromError`；<br>② 真正的差异只在 **api 全局错误处理器**那一层，而 RAG 侧那层是 `service/common` 的**共享异常处理** ⇒ 改它**会影响 20 个组件**；<br>③ 当前**没有发作路径** ⇒ 属于「为不可观测的隐患付出跨域改动代价」 |
+| **⚠️ 不得做的事** | 不要**笼统**地「把 RAG 改成穿透」—— `bizCodeFromError` 里那两支**各自都已经和 Go 对齐**，动它们会**制造新漂移**。<br>⚠️ 若将来 api 侧真的引入了会包装 `CodeError` 的异步路径，**本条必须重新评估**（且要评估的是「api 全局错误处理器要不要像 Go 那样用 `errors.As`」，**不是**改 `bizCodeFromError`） |
+
+---
 
 ### SD-2026-10-23-08 · CPU 采样读不到时 **fail-open**（不降载）
 
@@ -99,5 +155,6 @@
 |---|---|
 | **服务端 panic 恢复 / 熔断 / CPU 降载**（`DRIFT-MSG-V-016` 三个拦截器） | ❌ **不存在偏离 —— 已全部对齐**。<br>· recover（2026-10-23 23:5x）：`INTERNAL` + `"panic: "` 前缀 + 进程存活；5 例真 in-process gRPC + 3 轮变异验证<br>· breaker（2026-10-24）：`UNAVAILABLE` + `"circuit breaker is open"`，隔离 key = gRPC 全方法名，失败判据 = Go 的 6 码白名单；含 message-rpc **真 gRPC 端到端** 2 例（连续失败真的跳闸）<br>· CPU 降载（2026-10-24）：`RESOURCE_EXHAUSTED` + `"service overloaded"`，全局 shedder，阈值沿用 Go 默认 900<br>⚠️ **不要**把任何一条当偏离放行；⚠️ 也**不要**以为「已经对齐了」就顺手把**其余 9 个 rpc 组件**也改了 —— 那是别的域的文件，见 `DRIFT-MSG-V-026` |
 | proto `package` 归一（`comment` / `like` 的 `SD-04` / `-05` 同款） | ❌ **不存在**。两侧 proto package 都是 `message`；Go 生成物的语言包名 `pb` 来自 `option go_package`，不是 proto package。见 [`DRIFT/message/proto.md`](../../DRIFT/message/proto.md) §2 |
-| `Content-Type` 缺 `charset`（`DRIFT-MSGAPI-010`） | ❌ 未签字 —— 属 **DRIFT**（要修），且是 `OBSERVABLE DIFFERENCE` / LOW。见 `DRIFT/message/api.md` |
-| 时间列 `timestamptz` → `timestamp`（`DRIFT-MSG-V-020`） | ❌ 未签字 —— 属 **DRIFT**，且**后果是双向的**（见 `DRIFT/message/rpc.md` 该节 ⚠️ 段：Go 的 AutoMigrate 会反向 `ALTER` 回来）。不要当偏离放行 |
+| `Content-Type` 缺 `charset`（`DRIFT-MSGAPI-010`） | ❌ 未签字 —— 属 **DRIFT**，且是 `OBSERVABLE DIFFERENCE` / LOW。见 `DRIFT/message/api.md`<br>⚠️ **2026-10-24 用户拍板「保持登记，本轮不做」**（**不是**签字）—— 理由：改 charset 会让**全部 10 个 api** 的 JSON 响应头都变 ⇒ 属跨域共享面改动。<br>⇒ 读法：它**仍是登记在册的待办**，只是**这一轮不动**；⚠️ **不要**在别的域的会话里「顺手把它修了」 |
+| 状态行缺 reason phrase（`DRIFT-MSGAPI-011`） | ❌ 未签字 —— 同上，**2026-10-24 用户拍板「保持登记，本轮不做」**；且归因尚未定位到共享层的具体一行（台账里写「待查」，不臆断） |
+| `message_conversation` 的时间列 `TIMESTAMP`（`DRIFT-MSG-V-020`） | ❌ 未签字 —— 属 **DRIFT**，且**后果是双向的**（见 `DRIFT/message/rpc.md` 该节 ⚠️ 段：Go 的 AutoMigrate 会反向 `ALTER` 回来）。不要当偏离放行 |

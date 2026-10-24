@@ -845,3 +845,88 @@ private static String stripXmlComments(String xml) {
 **必须显式确认编译产物是最新的**，否则后面所有的绿灯都不可信。
 ⇒ 与 §3.3「编译通过 ≠ 机制生效」同源：**编译这一步本身就有静默失效的路径**
 （这次是「时间戳判定 ⇒ 不重编」）。
+
+---
+
+## PITFALL-MSG-R-026 `pg_isready` **不是**「Postgres 可以用了」的判据 —— 它会在 initdb 的临时服务上**返回 0**
+
+**场景**：本轮写「双侧活体 DDL 对拍」脚本，第一版用
+`docker exec <容器> pg_isready -U admin` 当就绪判据。
+
+**实测翻车**：
+```
+=== 1. 起 PG（msgddl-pg，端口 55450）===
+  PG ready (2s)                      ← pg_isready 返回 0
+psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed:
+       No such file or directory
+```
+
+**根因**：
+`postgres` 官方镜像的 entrypoint 在 **initdb 阶段**会**临时起一个只监听 unix socket 的服务**
+（`listen_addresses=''`）来跑初始化脚本 ⇒ **`pg_isready` 对它返回 0**
+⇒ 脚本以为「PG 已就绪」就去 `CREATE DATABASE`
+⇒ 而此时那个临时服务**已经被停掉、真服务还没起** ⇒ socket 消失。
+
+⚠️ **危险等级**：
+- 往小处：脚本**首跑必挂**，报错信息（`No such file or directory`）指向 socket，
+  **完全不像「就绪判据用错了」** ⇒ 容易去查 socket 路径、查挂载、查权限 ⇒ 白查半天；
+- 往大处：如果判据写成「重试几次就放弃并继续」，就会在**没有库**的状态下继续跑对拍
+  ⇒ 而 `check-ddl-static.py` 的 `docker exec` 失败会抛 `CalledProcessError`
+  ⇒ 被 catch 成 `FATAL` + `EXIT=2` ⇒ **这一条还算是安全的**；
+  但凡下游有「读不到就当空」的分支，就会变成**假绿**。
+
+**修法（判据必须是「真能做那件事」）**：
+```bash
+# ❌ 错：pg_isready 只证明「有个 postgres 在接受连接」
+docker exec "$CONTAINER" pg_isready -U admin >/dev/null 2>&1
+
+# ✅ 对：判据 = 「我接下来要做的那条命令真的能跑通」
+docker exec "$CONTAINER" psql -U admin -d postgres -tAc 'select 1' >/dev/null 2>&1
+```
+⇒ 且**超时后要显式失败**（不能只是循环结束就往下走）：
+```bash
+docker exec "$CONTAINER" psql -U admin -d postgres -tAc 'select 1' >/dev/null 2>&1 \
+  || { echo "FATAL: PG 60s 内没就绪" >&2; exit 2; }
+```
+
+**通用教训**：
+**「依赖已就绪」不能用一个与「依赖可用」不同义的探针来判。**
+`pg_isready` 判的是「有进程在监听」，而我们真正要的是「**能建库、能建表、能查**」。
+⇒ 判据要**直接用**你接下来要执行的那条命令去试。
+（与 §3.3「注解存在 ≠ 机制生效」同源：**存在 ≠ 可用**。）
+
+---
+
+## PITFALL-MSG-R-027 bash 里 `$VAR` 后面紧跟**中文标点** ⇒ 变量名被吞进去 ⇒ `unbound variable`
+
+**实测翻车**：
+```bash
+echo "=== 1. 起 PG（$CONTAINER，端口 $PG_PORT）==="
+# tools/difftest/run-message-ddl-parity.sh: line 75: CONTAINER�: unbound variable
+```
+
+**根因**：
+bash 判定变量名边界用的是 `legal_variable_char()`，
+它在**当前 locale 下**对字符调 `isalnum()`（**按字节**）⇒ UTF-8 多字节字符的**首字节**
+（`0xE4`–`0xEF` 等）在某些 locale 里被 `isalnum()` 判成**字母数字**
+⇒ `$CONTAINER，` 被解析成变量名 `CONTAINER` + 首字节 ⇒ 该变量**从未定义** ⇒ `unbound variable`。
+
+⚠️ **为什么危险（不只是「脚本挂掉」）**：
+- 报错信息里那个变量名显示成一个**乱码替换符**（`CONTAINER�`）⇒ **看不出是哪个标点吞的**；
+- 若脚本开了 `set -u`（本仓的脚本惯例）⇒ 直接退出；**没开**的话，
+  `$CONTAINER` 会变成**空串** ⇒ 后续 `docker rm -f ""` 之类的命令会**静默做错事**
+  （本例就会去删一个**名字为空**的容器 ⇒ docker 报错但被 `2>&1` 吞掉）。
+
+**修法**：**中文文案里引用变量一律用 `${VAR}`**：
+```bash
+# ❌ 错
+echo "=== 1. 起 PG（$CONTAINER，端口 $PG_PORT）==="
+# ✅ 对
+echo "=== 1. 起 PG（${CONTAINER}，端口 ${PG_PORT}）==="
+```
+⇒ 判据很简单：**变量后面紧跟的不是 ASCII 字符，就加花括号**。
+
+**通用教训**：
+**带中文文案的 shell 脚本里，`$` 后面的一切都必须显式闭合。**
+这不是「bash 的中文 bug」，而是「**变量名边界依赖 locale**」这一条 Unix 传统的必然结果。
+⇒ 同一类问题还有：`$PATH` 后面直接跟 `/` 是安全的，但 `$CMD参数` 会被当成变量 `CMD参数`。

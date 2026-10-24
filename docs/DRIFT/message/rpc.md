@@ -1203,11 +1203,14 @@ RAG application.yml:16
 
 **理由（三条各自独立成立）**
 
-1. **存在会改变行为的差异**：`DRIFT-MSG-V-021`（两个索引的**名字**不同，列相同 ⇒ Go `idx_message_conversation_last_message_at`
-   vs RAG `idx_conversation_last_message_at`）与 `DRIFT-MSG-V-024`（DB 异常的 status 分岔，见理由 2）。
+1. **存在会改变行为的差异**：`DRIFT-MSG-V-024`（DB 异常的 status 分岔，见理由 2）。
    按 §39 的判定规则，只要存在一条会改变行为的差异即判 `NOT EQUIVALENT`。
    ⚠️ **2026-10-24 更正**：上一版此条写的是 `DRIFT-MSG-V-014`（负 offset）——
    该条已由 **2026-10-23 第二轮**修好（真 PG 守门 7 例）⇒ 不能再当差异用。
+   ⚠️ **2026-10-24 第十轮再更正**：本条原本还并列了 `DRIFT-MSG-V-021`（两个索引的**名字**不同、列相同），
+   但**索引名不同根本不改变任何行为**（同一列的等价索引 ⇒ 查询能力 / 唯一性 / 性能完全相同），
+   且该条已于第十轮**签字**（`SD-2026-10-24-01`）⇒ **从「会改变行为」的证据里撤掉**。
+   ⇒ 现在这一条**只剩 `V-024` 一个支撑**。
 2. **存在会改变系统应如何行为的差异**：`DRIFT-MSG-V-024`（2026-10-24 新挖出）——
    Go 侧 DB / 未知异常**原样返回** ⇒ 客户端见 `UNKNOWN`、**不计熔断失败**；
    RAG 侧 `MessageRpcServiceImpl.invoke:133-140` 把 `RuntimeException` 转 `INTERNAL` ⇒ **计熔断失败**
@@ -1429,7 +1432,7 @@ case schema.Time:
 （`message_notification` 3 + `message_conversation` 3 + `message_conversation_message` 2）。
 同口径更正：`DROP NOT NULL` 的是 **5** 列，不是 6；`DEFAULT` 残差是 **6** 列，不是 7。
 
-### 🔴 V-021 —— 两个索引的**名字**不同（列相同）· **仍 OPEN**，本轮未改
+### ✅ V-021 —— 两个索引的**名字**不同（列相同）· **已签字**（2026-10-24 第十轮），见 `SD-2026-10-24-01`
 
 ```
 Go : idx_message_conversation_last_message_at ON (last_message_at)
@@ -1442,7 +1445,16 @@ RAG: idx_conversation_updated_at             ON (updated_at)
 `idx_<表名>_<列名>` 生成 ⇒ 表名 `message_conversation` 被拼进去；
 RAG 手写迁移时按「读起来更短」命名。
 ⇒ 行为等价（同一列的等价索引），但 `pg_indexes` / `\d` / 任何引用索引名的运维脚本都会看到差别。
-**本轮只登记，未改**（改名 = `DROP INDEX` + `CREATE INDEX`，需评估线上是否有对象依赖旧名）。
+
+> ✅ **2026-10-24 第十轮：用户拍板「签字保留 RAG 短名，不改名」**
+> ⇒ 本条已从 **DRIFT** 转入签字档：[`SD-2026-10-24-01`](../../Intentional_Deviations/message/rpc.md)。
+> ⚠️ **读法变更**：看到这条 DDL 对拍为红时，先确认是不是 `SD-2026-10-24-01`，**不要**当新回归去「修」。
+>
+> ⚠️ **本轮同时拿到了活体证据**（首次，不再是静态推断）：
+> 两侧各建一个真库（Go 跑**真源自己的** `AutoMigrate`，RAG 按序执行 V1~V5），逐条 dump `pg_indexes` ⇒
+> 这两个索引的 **`cols` 与 `unique` 两侧完全一致**，且**全域 12 个索引里只有这 2 个名字不同**。
+> 复现：`bash tools/difftest/run-message-ddl-parity.sh`
+> （详见本文件末尾「第十轮」小节）。
 
 ### ✅ V-022 —— `idx_notification_recipient_read` 的**列不同**（Go 只有 1 列）· **已签字**，见 `SD-2026-10-23-06`
 
@@ -2446,3 +2458,149 @@ breaker 的「失败判据」是 **status code**（Go `zrpc/internal/codes/accep
   ⇒ **不引入任何新依赖**（未加 micrometer）⇒ 对 20 个组件的依赖树**零影响**。
 - **别的域的代码**（V-026）：8 个 rpc 组件的 `Application.java` + `user-rpc` 的一个既有测试。
   ⇒ 合并时需人工确认。
+
+---
+
+## 2026-10-24 第十轮：**双侧活体 DDL 对拍**（关掉 `UNRESOLVED-MSG-V-003`）+ 三条签字偏离
+
+> **用户指示**：「A5：起真 PG 跑 `check-ddl-static.py`，核对 DDL 索引/唯一约束/NOT NULL/DEFAULT」
+> ⇒ 本轮**没改任何业务代码**，产出是 **1 个新守门脚本 + 1 条活体证据链 + 3 条签字偏离 + 1 条新登记的漂移**。
+
+### 1. 🔴 为什么这道题**必须**起真库（不能读 DDL 文件判）
+
+`UNRESOLVED-MSG-V-003`（`docs/DRIFT/_cross/message-domain-wide.md` §6.7.4）原问法是
+「DDL 的索引 / 唯一约束 / NOT NULL / DEFAULT 完全 NOT CHECKED」。
+⚠️ **它当初之所以「没法查」，不是工具缺失，而是两侧 schema 都不是静态 SQL**：
+
+| 侧 | schema 怎么来的 | 为什么读文件判不出来 |
+|---|---|---|
+| **Go** | `service/message/rpc/internal/model/db.go:44` `AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})` | 索引名（`idx_<表名>_<列名>`）、可空性、DEFAULT 全由 **gorm.io/driver/postgres@v1.6.0** 的行为决定 ⇒ **读 struct tag 推不出来**（§3.3.1：tag 是**声明点**，迁移器才是**消费点**） |
+| **RAG** | Flyway `V1`~`V5` **叠加后的净效果** | 单看 `V1`（建表时是 `TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP`）与 `V5`（`ALTER TYPE` + `DROP NOT NULL`）都推不出最终态 |
+
+⇒ 必须两侧各建一个**真库**、真 dump、真比对。
+
+### 2. ✅ 新守门：`tools/difftest/run-message-ddl-parity.sh`（一条命令复现全部）
+
+```bash
+bash tools/difftest/run-message-ddl-parity.sh     # 建库 + 对拍
+```
+
+> ⚠️ **门禁的红/绿口径（两条命令，两种退出码）**：
+> ```bash
+> # 🔴 默认：EXIT=1 —— 9 处差异全算失败（3 处索引 + 6 处 DEFAULT）
+> bash tools/difftest/run-message-ddl-parity.sh
+>
+> # 🟡 只豁免**已签字**的 3 处索引（V-021 ×2 + V-022 ×1）⇒ 仍 EXIT=1
+> #    （因为 6 处 DEFAULT 残差 `DRIFT-MSG-V-031` **还没签字** ⇒ 故意不放行）
+> DDL_ALLOW_IDX="idx_message_conversation_last_message_at,idx_conversation_last_message_at,\
+> idx_message_conversation_updated_at,idx_conversation_updated_at,idx_notification_recipient_read" \
+>   bash tools/difftest/run-message-ddl-parity.sh
+>
+> # 🟢 若 `DRIFT-MSG-V-031` 也被签字保留 ⇒ 再加 DDL_ALLOW_DEFAULT ⇒ EXIT=0
+> ```
+> ⇒ **「默认红」是刻意的**：它保证「任何**新的** DDL 漂移都会立刻把门禁打红」，
+> 而**已签字的偏离靠豁免名单显式放行**（放行清单就是签字清单 ⇒ 两者不会漂移）。
+
+它做四件事（**全程不写被冻结的真源仓库**，只复制副本）：
+
+1. 起 `msgddl-pg`（`postgres:16-alpine`，端口 55450），建 `go_msg_db` / `rag_msg_db`；
+2. **Go 侧**：把真源仓库**复制**到临时目录 → 加一个 `cmd/ddlprobe` 探针 →
+   调**真源自己的** `model.InitDB(...)`（内部就是上面那个 `AutoMigrate`）
+   ⇒ 跑的是**同一份 struct tag + 同一个 gorm 版本**；
+3. **RAG 侧**：按序执行 `V1`~`V5`；
+4. 跑对拍（`tools/difftest/check-ddl-static.py --domain message --indexes`）。
+
+> ⚠️ **踩到并修掉的两个坑（都是「环境看起来正常、实际会假绿/假红」）**：
+> ① **`pg_isready` 不能当就绪判据** —— postgres 镜像 entrypoint 在 initdb 阶段会**临时起一个只监听 socket 的服务**，
+>    `pg_isready` 对它返回 0 ⇒ 脚本会在真服务还没起时就去建库 ⇒ 实测报
+>    `connection to server on socket ... No such file or directory`。
+>    ⇒ 判据改成「`psql -tAc 'select 1'` 真的能连上并执行」。
+> ② **`$VAR` 后面紧跟中文标点会被 bash 吞进变量名** —— `$CONTAINER，` 被解析成变量 `CONTAINER<0xEF>`
+>    ⇒ `unbound variable`。⇒ 全脚本改用 `${VAR}`。
+
+### 3. ✅ `check-ddl-static.py` 扩到 message 域 + 补上最后两项 `NOT CHECKED`
+
+| 改动 | 说明 |
+|---|---|
+| **新增 `--domain message`** | 表名映射**为空**（Go `AutoMigrate` 与 RAG Flyway 两侧表名完全相同）⇒ **写一个「看起来更规范」的映射进去 = 凭空制造列集合不一致** |
+| **新增 `--indexes`** | 补上 §3.1 对照清单里**最后两项从未被机器核过**的东西：`pg_indexes`（索引）与 `pg_constraint`（约束）<br>⚠️ **默认不开** —— 开了会让 users/task 域因**已知**历史差异直接红，破坏别人已在用的门禁语义 |
+| **新增 `--allow-idx` / `--allow-default`** | 豁免名单：让**已签字**的有意偏离（V-021 / V-022 / DEFAULT 残差）不把门禁拖红，而**新**的漂移仍然为红 |
+| **DEFAULT 与 NOT NULL 拆成两节报** | 两者的**可接受性完全不同**：可空性差异 = 能不能存 NULL ⇒ 直接影响写入行为，**零容忍**；DEFAULT 差异 = 「省略该列时填什么」⇒ 只在有 INSERT 省略该列时才发作 |
+| **索引差异分三类** | ① 同名但定义不同 ② **名字不同但「表+唯一性+列」完全等价**（⇒ 行为等价，**不是缺失**）③ 真的单边缺失 |
+
+### 4. ✅ 活体对拍结果（`go_msg_db` vs `rag_msg_db`，各 37 列 / 12 索引 / 3 约束）
+
+| 维度 | 结果 |
+|---|---|
+| **列类型 / 长度** | ✅ **0 差异**（37 列逐字相同：bigint / integer / text / varchar(255) / boolean / jsonb / **timestamptz**） |
+| **NOT NULL（可空性）** | ✅ **0 差异**（V-020 的 `DROP NOT NULL` 精确命中：Go 侧 `created_at`/`updated_at`/`read_at`/`extra` 可空、`last_message_at` NOT NULL，两侧一致） |
+| **DEFAULT** | 🔴 **6 处差异**（见下方第 5 节 ⇒ 新登记 `DRIFT-MSG-V-031`） |
+| **索引** | 🔴 **3 处差异**：`idx_notification_recipient_read`（Go 1 列 / RAG 2 列 ⇒ **V-022，已签字 SD-06**）＋ `idx_conversation_*` ×2 名字不同（⇒ **V-021，本轮签字 SD-2026-10-24-01**）<br>⇒ 其余 **9 个索引逐条一致**（含 `uk_conversation_pair` 的 4 列与 `unique=True`） |
+| **约束（`pg_constraint`）** | ✅ **两侧完全一致**（各 3 行，都是主键）<br>⇒ **V-023 的修复双向确认**：两侧的 `uk_conversation_pair` 都是**唯一索引**而非表约束（`pg_constraint` 里都没有 `contype='u'` 那一行） |
+
+### 5. 🔴 新登记：`DRIFT-MSG-V-031` —— 6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧**多出来的**
+
+```
+Go : message_notification.created_at | timestamptz | 可空 | 无默认
+RAG: message_notification.created_at | timestamptz | 可空 | DEFAULT CURRENT_TIMESTAMP
+（其余 5 列同款：message_conversation.{created_at,last_message_at,updated_at}
+               / message_conversation_message.created_at）
+```
+
+- **根因**：Go 侧这些列**根本没有 DEFAULT**（GORM 只在 tag 里写了 `autoCreateTime`/`autoUpdateTime`，**不生成 DEFAULT**）；
+  RAG 的 `V1`/`V2`/`V3` 建表时写了 `DEFAULT CURRENT_TIMESTAMP`，`V5` 只改了类型与可空性、**没删默认**。
+- **⚠️ 这是 `V-020` 当时就登记在案的残差**（`V5` 迁移文件里明写「本文件不删 `DEFAULT CURRENT_TIMESTAMP`（Go 侧无默认，属已知未对齐项）」），
+  **但当时没有任何活体证据** ⇒ 本轮首次**实测确认**：残差**恰好 6 列**（与台账里「DEFAULT 残差是 6 列」的数字**完全对上**）。
+- **可观测性（已实测排除）**：RAG 的 3 条 INSERT **全部显式绑定**这些列
+  （`ConversationMapper.java:143-155` / `NotificationMapper.java:205-219` / `ConversationMessageMapper.java:159-166`）
+  ⇒ 默认**永远不触发** ⇒ 两侧行为等价。
+  ⚠️ **但这是「当前无路径」而非「结构性无路径」**：将来若有人写一条省略该列的 INSERT，
+  Go 会写 **NULL**（可空列）而 RAG 会写 **now()** ⇒ 那时两侧就分岔了。
+- **处置**：⏸ **本轮只登记，未签字、未改代码** —— 两条路都留给用户拍板：
+  ① **签字保留**（与 `V-021` 同类：真实存在、当前不可观测）；
+  ② **加一条 `V6` 迁移 `ALTER TABLE … ALTER COLUMN … DROP DEFAULT`**（彻底对齐 Go；代价是若线上真有裸 SQL 依赖该默认会破）。
+- **⚠️ 不得做的事**：不要**默默**把它改掉或默默签字 —— 它是**唯一一条本轮新引入的漂移**，
+  需要一次显式决定。⇒ 已加进门禁豁免名单的**候选**（但**默认不放行**），
+  这样门禁对它是红的、直到有人拍板。
+
+### 6. ✅ 关闭：`UNRESOLVED-MSG-V-003`
+
+| 项 | 内容 |
+|---|---|
+| **原问法** | DDL 的索引 / 唯一约束 / NOT NULL / DEFAULT —— **完全 NOT CHECKED** |
+| **关闭依据** | 本轮**双侧活体**建库 + 逐维度比对（见第 4 节）：**索引 12 个、约束 3 个、37 列的可空性与 DEFAULT 全部核过**，逐条证据在上面的对照表与 `tools/difftest/run-message-ddl-parity.sh` 的输出里 |
+| **关闭口径** | 关闭的是「**未核过**」这个状态，**不是**「DDL 完全一致」—— 差异见第 4 节的 3 处索引 + 6 处 DEFAULT |
+| **⚠️ 残留** | ① 索引/约束对照**只覆盖本域这 3 张表**（Go `AutoMigrate` 的全部产物）；② **不覆盖触发器 / CHECK 约束 / 外键 / 分区**（两侧都没有）；③ `idx_notification_recipient_read` 与 `V-021` 两条索引差异**是已签字的有意偏离**，对拍为红属预期 |
+
+### 7. ⚠️ 顺带更正：`UNRESOLVED-MSG-009` 的**前提已过期**
+
+原问法：「时间列 `TIMESTAMP`（非 `TIMESTAMPTZ`）在多实例/多时区下是否仍自洽」，
+并建议「补一条 `V4` 迁移」⇒ **该迁移已由 `V5__message_time_columns_timestamptz.sql` 做完**
+（8 列全部 `TIMESTAMPTZ`，本轮对拍**实测确认**两侧类型一致）。
+
+⇒ **原问法里「列类型导致不自洽」那一半已经不存在**；剩下的只是
+「同一个库被不同时区的 JVM 写」这种**部署口径**问题 —— 它不是代码能修的，
+要么当部署约束写进文档，要么改成一条**运维约束**登记。
+⚠️ **本轮不改它的状态**（用户本轮只点了 A5）⇒ 保持 OPEN，但**读法要更新**：
+不要再去「补 V4 迁移」。
+
+### 8. ✅ 本轮的三条签字偏离（同时改了 `docs/Intentional_Deviations/message/rpc.md`）
+
+| 编号 | 原漂移 | 签字结论 |
+|---|---|---|
+| `SD-2026-10-24-01` | `V-021` 索引名不同 | 保留 RAG 短名，**不改名** |
+| `SD-2026-10-24-02` | `V-009` 直方图桶布局 | 签字留档，**不改代码**（双侧实测：两侧桶边界**零交集**，Go 11 桶 vs Micrometer 69 桶） |
+| `SD-2026-10-24-03` | `V-010` 错误解包深度 | 签字留档，**不改代码**（并**订正**了原描述：真正不一致的只有 `CodeError` 那一支，`status` 那一支两侧都已穿透） |
+
+### 9. ⚠️ 留给主会话的两条**共享面**订正（本工作树**不许碰**，只登记）
+
+按 `docs/Worktree.md` §三，以下两个文件是**共享面**（多域并发必撞）
+⇒ **本工作树不写**，只把「哪句话过期了、该改成什么」登记在此，由主会话合并时统一更新：
+
+| 文件 | 现状（已过期） | 该改成 |
+|---|---|---|
+| `docs/DRIFT/_cross/ddl-type-divergences.md` 第 10 行 | 「message-rpc 的 `V2` 迁移 `ALTER TABLE ADD CONSTRAINT` **无 `IF NOT EXISTS`**（在 GORM 建过表的库上会失败）」 | ⚠️ **该问题已不存在** —— `V4__conversation_pair_unique_index.sql` 已用 `DROP CONSTRAINT IF EXISTS` + `CREATE UNIQUE INDEX IF NOT EXISTS` 把它换成了**唯一索引**（且第十轮活体对拍**双向确认**：两侧 `pg_constraint` 里都**没有** `uk_conversation_pair` 那一行）⇒ 这条该从「差异清单」里**删掉** |
+| 同上（**新增**） | —— | ⚠️ **要新增一条真实差异**：message 域 **6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧多出来的**（Go 侧无默认）⇒ 见本文件第十轮第 5 节的 `DRIFT-MSG-V-031`。⚠️ 注意这份清单的标题是「**DDL 实际差异清单**」，**DEFAULT 差异按定义属于它** ⇒ 不要漏 |
+
+> ⚠️ **为什么不在本工作树直接改**：该文件是 `_cross` 共享面，users / like / article 等域的会话可能同时在改它
+> ⇒ 事后无法区分台账归属（`docs/Worktree.md` §三.1 的原话）。

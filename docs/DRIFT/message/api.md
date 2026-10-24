@@ -217,9 +217,9 @@ RAG 取**全局一个**。区别只在「单端点打满 10000 且同时另一�
 | 项 | Go | RAG | 建议 |
 |---|---|---|---|
 | ~~请求保护层~~ | `MaxBytes` 1MB→413、`CpuThreshold` 900→503、`MaxConns` 10000、**`Breaker` 熔断** | ✅ **已全部补齐**（2026-10-22）⇒ 见下方「请求保护层」小节 | — |
-| 404 body | `"404 page not found\n"` + text/plain + nosniff | 空 body | 建议补 |
-| 405 头 | 带 `Allow` | 无 `Allow` | 建议补 |
-| 成功响应 Content-Type | `application/json; charset=utf-8` | 疑似无 charset | **未验证**，需真容器 curl |
+| ~~404 body~~ | `"404 page not found\n"` + text/plain + nosniff | 空 body | ✅ **2026-10-24 第八轮实测：两侧 body 一致**（`Content-Length` 都是 **19**）⇒ 首轮「空 body」结论**已被推翻**；剩余差异只有**状态行 reason phrase**（= MSGAPI-011）+ **Content-Type 空格**（= MSGAPI-012） |
+| 405 头 | 带 `Allow` | 无 `Allow` | ⚠️ **第八轮的真容器 dump 只把 405 的「状态行」列入对照表，没有把 `Allow` 头单列** ⇒ **这一子项至今无运行证据**（静态读源码也不足以判定）⇒ 若要收口需补一次带 `Allow` 的 dump |
+| 成功响应 Content-Type | `application/json; charset=utf-8` | `application/json` | ✅ **2026-10-24 第八轮真容器级已确认**（= `DRIFT-MSGAPI-010`）；⚠️ **用户 2026-10-24 拍板「保持登记，本轮不做」**（共享面影响全部 10 个 api）⇒ **不是签字**，仍是登记在册的待办 |
 | `extra` map 键序 | `encoding/json` 排序（确定性） | `LinkedHashMap` 保序 | 字节级差异，JSON 语义等价 |
 | 观测端点 | `:16066/metrics`+`/healthz`+pprof | `:8892/actuator/*` | 运维配置要改 |
 | ~~Content-Type 非 JSON~~ | ~~继续处理出 envelope~~ | ~~415 空 body~~ | ✅ **2026-10-22 已关闭**，与 like 域合并为一份共享实现。⚠️ 原签字理由「两侧都是拒绝」**已被推翻**：Go 的 `withJsonBody` 不满足时是**丢弃 body 后按空对象继续**，对零必填 DTO（`PageReq`/`EmptyReq`）Go 其实**成功**。详见「请求体 Content-Type 判据」章节（已搬至 `docs/DRIFT/common/http.md` §0 DRIFT-006） |
@@ -884,6 +884,10 @@ Tomcat
 
 ### 🔴 DRIFT-MSGAPI-010 🔴 **仍 OPEN，但 2026-10-24 已在真容器级确认并细化** 成功 / 错误响应的 `Content-Type` 缺 `charset`
 
+> ⚠️ **2026-10-24 用户拍板：「保持登记，本轮不做」** —— **不是签字**。
+> 理由：补 charset 会让**全部 10 个 api** 的 JSON 响应头都变 ⇒ 属跨域共享面改动。
+> ⇒ 读法：它**仍是登记在册的待办**，只是这一轮不动；⚠️ **不要**在别的域的会话里「顺手把它修了」。
+
 > **⚠️ 2026-10-24 真容器级取证（第八轮）** —— 本条不再是「只有转换器级证据」：
 >
 > ```
@@ -998,27 +1002,33 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
 
 ## 9. Unresolved（§37 · **不得为空才允许下结论**）
 
-### UNRESOLVED-001
-- **Question**：Go 真源 `message-rpc` 的**响应语义**（哪些 code / 哪些 description）是否与 RAG 侧 `message-common` 一致？
-- **Go Evidence**：`service/message/rpc/**`（本轮**未读**，属 `message-rpc` 组件的审查范围，由另一并行会话负责）
-- **Java Evidence**：`message-common` 的 `MessageGrpcError` / `MessageErrorMessages`（**未改、未验证**）
-- **Why Unknown**：`DRIFT-MSGAPI-004` 的一条核心论证依赖「message-rpc 的业务错误只用
-  `InvalidArgument / NotFound / PermissionDenied`」，而那条断言首轮是**逐个调用点核对**得出的，
-  本轮**没有重做**该核对。
-- **Impact**：`§4.4` 的「gRPC 错误 → 业务码」与「熔断 acceptable 判据」两行的最终结论。
-- **Required Confirmation**：与 `message-rpc` 会话的台账合并判读（两侧都写「business errors 用哪三个 code」）。
+### UNRESOLVED-001 ✅ **已关闭（2026-10-24 第十轮）**
+- ~~**Question**：Go 真源 `message-rpc` 的**响应语义**（哪些 code / 哪些 description）是否与 RAG 侧 `message-common` 一致？~~
+- **✅ 关闭依据（三条，缺一不可）**：
+  1. **静态逐条对照**：`message-common` 的 `MessageGrpcError#mapStatusCodeToBizCode` 的 switch 与
+     Go `service/message/common/errmsg.go:117-132` **逐条一致**
+     （`InvalidArgument` / `Unauthenticated` / `PermissionDenied` / `AlreadyExists` / `NotFound` / `Internal` + `default=1015`）
+     ⇒ 这一条**早已由 `message-rpc` 组件的审查答完**（见 [`common.md`](common.md) 的 `UNRESOLVED-MSGAPI-001` 行）
+  2. **双侧活体对拍**（2026-10-24 第八轮）：真起 Go + RAG 两套 message-rpc（端口 20082 / 60210），
+     跑 `tools/difftest/exp-difftest-grpc-errors-message.sh`
+     ⇒ **11 条 status 码 + happy path 全部逐条一致，EXIT=0**，产物 `tools/difftest/message-grpc-results.txt`
+  3. **兜底码专项**（2026-10-24 第九轮）：`MessageRpcUnknownStatusWiringTest`（4 例，**真 gRPC**）
+     ⇒ DB / 未知异常两侧都归 `UNKNOWN`（Go `Unknown` vs RAG `UNKNOWN`）⇒ 熔断判据不分岔
+- **⇒ 关闭口径**：原问法问的是「响应语义是否一致」，答案 = **在上述证据强度下一致**（含 `description` 走 code class 映射的那一支）。
+- ⚠️ **为什么这一条拖了这么久**：它当时的卡点是「Go 侧未读、归 message-rpc 组件的审查范围」——
+  **跨组件的同一个问题被拆成两个组件的待办，就等于永远没人答**（§3.5 的同源坑）。
+  ⇒ 教训：**问题归属要按「问题」分，不能按「组件」分**。
 
-### UNRESOLVED-002
-- **Question**：RAG 侧 `MessageGoStyleCoercion` 的规则**是否真的作用在 Spring MVC 实际使用的那个 mapper 上**？
-- **Go Evidence**：不适用。
-- **Java Evidence**：`WebMvcConfig#goStyleCoercionCustomizer` 注册 `JsonMapperBuilderCustomizer`
-  —— **本轮未跑任何装配层断言**（首轮的 41 条用例间接证明了它生效：它们断言了
-  `{"offset":"10"}` 被拒，这条只可能来自 builder 上的 coercion）。
-- **Why Unknown**：本轮的 51 例探针用的是 `JsonMapper.builder() + MessageGoStyleCoercion.applyTo`，
-  与 MVC 配置**同构但不同实例**。它证明「规则本身是什么」，不证明「MVC 用的是这条规则」。
-- **Impact**：`DRIFT-MSGAPI-005` ~ `-008` 的**修法方向**（改 builder 还是改 DTO）依赖这个前提。
-- **Required Confirmation**：修 005 时同步补一条「规则进了 MVC mapper」的装配断言
-  （首轮教训：`GoStyleGrpcClientBreakerWiringTest` 就是为这一层存在的）。
+### UNRESOLVED-002 ✅ **已关闭（2026-10-24 第九轮）**
+- ~~**Question**：RAG 侧 `MessageGoStyleCoercion` 的规则**是否真的作用在 Spring MVC 实际使用的那个 mapper 上**？~~
+- **✅ 关闭依据**：新增 `MessageApiGoStyleCoercionWiringTest`（**6 例，全部走真实 MVC 管线**，不是「同构但不同实例」的探针）：
+  - 2 例 `,optional` 字段显式 null **放行**并落零值
+  - 1 例 admin `kind:null`
+  - 1 例 `extra` 元素收 JSON 数字，并断言**下游 proto 里的字面量**（不只是 DTO）
+  - 1 例 `extra` 元素 null ⇒ 5001 **且零次下游调用**（证明拦截发生在调用前）
+  - 1 例必填 `title:null` ⇒ 仍 5001
+  ⇒ 它证明的是「**规则真挂在 Spring MVC 用的那个 mapper 上**」
+  —— 探针只证明「规则是什么」，**装配层断言才证明「MVC 用的是这条规则」**（§3.3.3）。
 
 ### UNRESOLVED-003 ✅ **已关闭（2026-10-24 第八轮）**
 - ~~**Question**：响应头在**真容器**下的完整形状两侧是否逐字节一致？~~
@@ -1360,6 +1370,10 @@ Date: Fri, 23 Oct 2026 22:20:22 GMT
 ### 3. 🆕 三条新发现
 
 #### 🆕 `DRIFT-MSGAPI-011` 🔴 **RAG 全域通病**：**状态行缺 reason phrase**
+
+> ⚠️ **2026-10-24 用户拍板：「保持登记，本轮不做」** —— **不是签字**。
+> 理由：归因在**共享层**（Tomcat + Spring Boot 4 + `HttpMiddleware` 的 response wrapper）⇒ 影响全部 10 个 api。
+> ⇒ ⚠️ 台账里「归因尚未定位到具体一行 ⇒ 待查」这句**仍然成立** —— 别把「归因没定位」写成「已定位」。
 
 ```
 Go  ： HTTP/1.1 200 OK / 401 Unauthorized / 404 Not Found / 405 Method Not Allowed

@@ -167,7 +167,7 @@ RAG（修复前）            先 extractStatus → 后 instanceof CodeError    
 
 | 编号 | 问题 | 归谁 |
 |---|---|---|
-| `UNRESOLVED-MSGAPI-001` | `message-api` 台账问「message-rpc 的业务错误只用哪三个 gRPC code」—— **本轮已答**：`MessageGrpcError#mapStatusCodeToBizCode` 的 switch 与 Go `errmsg.go:117-132` 逐条一致（`InvalidArgument`/`Unauthenticated`/`PermissionDenied`/`AlreadyExists`/`NotFound`/`Internal` + `default=1015`）。但「rpc 侧实际抛出哪几个 code」仍需 `message-rpc` 台账回答 | ↔ message-rpc |
+| `UNRESOLVED-MSGAPI-001` ✅ **已关闭（2026-10-24 第十轮）** | ~~`message-api` 台账问「message-rpc 的业务错误只用哪三个 gRPC code」~~ —— **已答且已闭环**：<br>① **静态**：`MessageGrpcError#mapStatusCodeToBizCode` 的 switch 与 Go `service/message/common/errmsg.go:117-132` 逐条一致（`InvalidArgument`/`Unauthenticated`/`PermissionDenied`/`AlreadyExists`/`NotFound`/`Internal` + `default=1015`）<br>② **双侧活体**（2026-10-24 第八轮）：真起两套 message-rpc（端口 20082 / 60210）跑 12 档对拍 ⇒ **11 条 status 码 + happy path 全部逐条一致，EXIT=0**（产物 `tools/difftest/message-grpc-results.txt`）<br>③ **兜底码专项**（第九轮）：`MessageRpcUnknownStatusWiringTest`（4 例，真 gRPC）⇒ DB/未知异常两侧都归 `UNKNOWN`<br>⇒ 对应的 api 侧 `UNRESOLVED-001` 同步关闭（见 [`api.md`](api.md) §9） | ↔ message-rpc |
 | `UNRESOLVED-MSG-006` | RAG handler 抛非 `RuntimeException` 的 `Error` 时客户端看到什么 —— 与本组件的 status 构造有关但**不属本组件** | ↔ message-rpc |
 | — | Go 的 `CodeError` 有 `json:"code"` / `json:"msg"` 标签，RAG 用 `@JsonProperty` 对齐了字段名，但**没有任何测试断言序列化结果**（`CodeError` 从未被 Jackson 序列化过） | 低优先，见 §6 |
 

@@ -107,15 +107,24 @@ grep -rn 'getDescriptor|FieldNumber|setField(|getNumber()' service/message/*/src
 | 3 | `optional` presence 风险面 | ✅ 本域为空（0 个 optional） | 静态 |
 | 4 | 字段号硬编码 | ✅ 无（4 处 `getNumber()` 均为枚举互转） | 静态 + 全域 grep |
 | 5 | protobuf / Jackson 配置互扰 | ✅ 不存在（两条路径物理分离） | 静态 |
-| 6 | 双侧活体 gRPC 往返 | ⚠️ **UNKNOWN** | 见下 |
+| 6 | 双侧活体 gRPC 往返 | ✅ **已验证（2026-10-24 第八轮）** | 见下 |
 
-**判定：`SEMANTICALLY EQUIVALENT`（在该证据强度下）** —— 且**证据强度低于** §3.4 的其它结论：
-第 6 项（双侧活体往返）在本轮**仍未验证**，与 `UNRESOLVED-MSG-003`
-（`tools/difftest` 的 12 档对拍**脚本就位但从未执行**）是同一件事。
+**判定：`SEMANTICALLY EQUIVALENT`** —— ⚠️ **2026-10-24 第十轮升档**：
+本组件原先的判定是「`SEMANTICALLY EQUIVALENT`（在该证据强度下）」，
+且**证据强度低于** §3.4 的其它结论 —— 因为第 6 项（双侧活体往返）当时**仍未验证**，
+它与 `UNRESOLVED-MSG-003`（12 档对拍**脚本就位但从未执行**）是同一件事。
 
-⚠️ 按 §6.2 约定 2，上表的 ✅ 一律读作「**在静态逐行 + 源码级证据下一致**」，
-不是「双侧活体已闭环」。要让本组件升到与 `hot-common` 同一档，
-必须跑通双端口对拍并留下结果产物。
+> ✅ **2026-10-24 第八轮：`UNRESOLVED-MSG-003` 已关闭** ⇒ 第 6 项不再是未知项：
+> 真起 Go + RAG 两套 message-rpc（端口 20082 / 60210），跑
+> `tools/difftest/exp-difftest-grpc-errors-message.sh`
+> ⇒ **11 条 status 码 + happy path 全部逐条一致，EXIT=0**，产物 `tools/difftest/message-grpc-results.txt`。
+> ⇒ **proto 组件的证据强度已从「静态逐行 + 源码级」升到「双侧活体往返」这一档**，
+> 不再低于 `hot-common`。
+>
+> ⚠️ **升档的边界**：活体往返覆盖的是**已列出的 9 个 RPC 的错误路径 + happy path**；
+> **字段级 presence 语义**（`optional` 字段在 wire 上的存在/缺失）本域为空
+> （proto.md §3 的第 3 项：0 个 `optional`）⇒ 无残留风险面。
+> ⚠️ 仍按 §6.2 约定 2 读作「**在该证据强度下一致**」，不是「任何维度都已证明」。
 
 ## 5. 本组件此前**没有**专属台账
 
