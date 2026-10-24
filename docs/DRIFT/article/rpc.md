@@ -47,6 +47,10 @@
 > ⚠️ 证据强度上限：**真 PG / 真上下文 / 真 Tomcat / 双侧探针**，
 > **无双侧活体对拍**（Go 侧仍需 `etcd:2379`）⇒ 所有 ✅ 一律读作
 > 「**在该证据强度下一致**」，不是「已闭环」。
+>
+> ✅ **本域签字偏离现状（2026-10-24）**：[`docs/Intentional_Deviations/article/rpc.md`](../../Intentional_Deviations/article/rpc.md)
+> 的 **两条 SD（`SD-2026-10-24-01` / `SD-2026-10-24-02`）均已由用户签字批准** ——
+> ⇒ 本域**没有「待签字」的悬空项**；审查时直接当既定决策，**不得「顺手修正回 Go 的旧行为」**。
 
 ## 2026-10-23 实测核对（真实执行产出，非推断）
 
@@ -471,12 +475,12 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 
 ### DRIFT-ARTICLE-RPC-007 —— 每通道独立的 Kafka brokers 是"声明但从不消费"的配置
 
-> **当前状态（2026-10-24 第九轮）**：🔴 **OPEN → 🟡 已处置（差异本身仍在，落签字偏离待签字）**。
+> **当前状态（2026-10-24 第九轮）**：🔴 **OPEN → 🟡 已处置**（差异本身仍在，落签字偏离，**已签字**）。
 > 「配置声明与实际生效不一致」这个**能力差异没有消除**（RAG 仍不能逐通道切 broker），
 > 但**静默忽略**已改成**启动即失败** ⇒ 差异从「无人察觉」变成「响亮报错」。
 > ⇒ 完整取证与判定变化 ⇒ 本文件「2026-10-24 第九轮」节；
 > ⇒ 能力差异落 [`docs/Intentional_Deviations/article/rpc.md`](../../Intentional_Deviations/article/rpc.md)
-> （**SD-2026-10-24-02，待签字**），**本文不重复记**（一条问题只落一档）。
+> （**SD-2026-10-24-02，已签字**），**本文不重复记**（一条问题只落一档）。
 
 - **Component**: 配置
 - **Operation**: 全部 Kafka 生产/消费
@@ -658,7 +662,7 @@ DistributionStatisticConfig.getHistogramBuckets(boolean supportsAggregablePercen
 | **U-7**（新） | Micrometer 直方图的实际输出（`_seconds` 后缀 + 8 个桶边界 + `_count/_sum`）与 Go `HistogramVec` 是否逐桶一致？ | `metrics.go:41-49`（显式 8 桶） | ~~`ArticleRpcMetrics:131-139`（`serviceLevelObjectives` + `publishPercentileHistogram`）~~ | ✅ **已关闭**（2026-10-24） | 真 `PrometheusMeterRegistry` scrape 实测 ⇒ 发现 `publishPercentileHistogram` 与 SLO 桶取**并集** ⇒ 实际 **77** 个边界（Go 只有 **9**：8 + 固有的 `+Inf`）⇒ 已立 `DRIFT-ARTICLE-RPC-010` 并**修复**（去掉 `publishPercentileHistogram`） |
 | **U-8**（新） | `@Scheduled` 首次执行的 `initialDelay` 默认值 | `article.go:94` ticker ⇒ 首次在 1s 后 | ~~未读 `ScheduledAnnotationBeanPostProcessor` 源码~~ | ✅ **已关闭**（2026-10-24，**零新代码**，用 FIX-05 已有的实测证据） | ① FIX-05 的变异 #4「去掉 `initialDelayString`」实测首触发在 **84ms** ⇒ **Spring 的默认值就是"立即执行"**；② 修复后由 `ArticleOutboxRelayScheduleTest#firstExecutionHappensAfterTheIntervalNotImmediately` 断言首次 ≥ 900ms（兜底间隔 1000ms）⇒ 与 Go ticker 同款 |
 | **U-9**（新） | 并发（8 handler）下的 offset 提交/跳过语义两侧是否一致 | `kq/queue.go:219-246`（8 个 processor 各自 `CommitMessages`，**不保证连续**） | RECORD + 上面那套 handler | 两边都**没有**活体对拍；顺序错乱窗口未量化 | 真 Kafka 压测 + 逐条比对 |
-| **U-2**（沿用） | 锁顺序反转 | Go 侧两条路径都由 `RetractPublicationTx` 的 `FOR UPDATE` 串行化 | Java 已统一成 article → publication，但 `retractAndUpdate` 多了一次 `selectByIdForUpdate` 提前 return | ✅ **已关闭**（2026-10-24） | 补 **CASE-R12 并发真 PG 用例** + **锁序探针**（真 PG 上同时扣住两把锁，观测被阻塞的 SQL）+ **Go 侧探针**（pgx + 真 PG，两种锁序各跑一次）⇒ 结论已定：**Go 自身**存在锁序反转（探针实测 `40P01 deadlock detected`），RAG 统一为 `article → publication` ⇒ **无反转**。⇒ 差异落档到 [`docs/Intentional_Deviations/article/rpc.md`](../../Intentional_Deviations/article/rpc.md)（**SD-2026-10-24-01，待签字**），**不在本文重复记** |
+| **U-2**（沿用） | 锁顺序反转 | Go 侧两条路径都由 `RetractPublicationTx` 的 `FOR UPDATE` 串行化 | Java 已统一成 article → publication，但 `retractAndUpdate` 多了一次 `selectByIdForUpdate` 提前 return | ✅ **已关闭**（2026-10-24） | 补 **CASE-R12 并发真 PG 用例** + **锁序探针**（真 PG 上同时扣住两把锁，观测被阻塞的 SQL）+ **Go 侧探针**（pgx + 真 PG，两种锁序各跑一次）⇒ 结论已定：**Go 自身**存在锁序反转（探针实测 `40P01 deadlock detected`），RAG 统一为 `article → publication` ⇒ **无反转**。⇒ 差异落档到 [`docs/Intentional_Deviations/article/rpc.md`](../../Intentional_Deviations/article/rpc.md)（**SD-2026-10-24-01，已签字**），**不在本文重复记** |
 | **U-4'**（沿用） | 双侧活体对拍 | Go 依赖 `etcd:2379`，本机拉不起 | — | 本轮仍 **0** 条 | 起 etcd |
 | **U-5'**（沿用） | S-2 / S-3 / S-4 / S-7 新回归网**非假绿**未证 | — | 只有 S-1 做过变异验证 | AGENTS.md §3.3 | ✅ **已关闭**（2026-10-24 第十轮）：S-2 / S-3 / S-4 / S-7 **4/4 全部 MUT-RED** —— 逐条把修复改回去，用例都转红（详见本文件「第十轮」节的变异表）⇒ 五条回归网（S-1~S-4、S-7）**全部**证实非假绿 |
 
@@ -1370,7 +1374,7 @@ Timer.builder("article_service_minio_request_duration")
 - ⇒ 这是一条**真实、可观察**的差异，方向是「**RAG 更安全**」
   ⇒ 按 `docs/Worktree.md` 的判据「**这条差异要不要修回去？**」（不要 —— 修回去 = 重新引入死锁）
   ⇒ **落档到 [`docs/Intentional_Deviations/article/rpc.md`](../../Intentional_Deviations/article/rpc.md)**
-  （**SD-2026-10-24-01，待签字**），**本文不重复记**（一条问题只落一档）。
+  （**SD-2026-10-24-01，已签字**），**本文不重复记**（一条问题只落一档）。
 
 #### 两侧锁序逐条对照（行号指向**消费点**）
 
@@ -1452,7 +1456,7 @@ Timer.builder("article_service_minio_request_duration")
 
 | 项 | 修复前 | 修复后 |
 |---|---|---|
-| `U-2` 锁顺序反转 | 🔴 OPEN（真并发用例未写） | ✅ **已关闭**（RAG 侧锁序探针 + Go 侧探针，双侧实测）；**差异落 `../../Intentional_Deviations/article/rpc.md`（SD-2026-10-24-01，待签字）** |
+| `U-2` 锁顺序反转 | 🔴 OPEN（真并发用例未写） | ✅ **已关闭**（RAG 侧锁序探针 + Go 侧探针，双侧实测）；**差异落 `../../Intentional_Deviations/article/rpc.md`（SD-2026-10-24-01，已签字）** |
 | `U-3` / `U-4` / `U-9`（Kafka 位点 / seek / 并发 offset） | 🔴 OPEN | 🔴 **OPEN（不变）**（需真 Kafka） |
 | `U-4'` / `U-5'`（双侧活体对拍 / 回归网非假绿） | 🔴 OPEN | 🔴 **OPEN（不变）** |
 | `S-5`（content security） | 🔴 OPEN | 🔴 **OPEN（不变）**（阻塞于 security 域，不在本项目范围） |
@@ -1494,7 +1498,7 @@ Timer.builder("article_service_minio_request_duration")
 - ⇒ 本轮的处置**不是**「消除差异」（那要新建四套 Kafka 客户端，代价见下），
   而是**把「静默忽略」变成「启动即失败」** ⇒ 差异从「无人察觉」变成「响亮报错」。
 - ⇒ 能力差异本身落 [`docs/Intentional_Deviations/article/rpc.md`](../../Intentional_Deviations/article/rpc.md)
-  （**SD-2026-10-24-02，待签字**），**本文不重复记**（一条问题只落一档）。
+  （**SD-2026-10-24-02，已签字**），**本文不重复记**（一条问题只落一档）。
 
 #### 🔴 证据①：Go 侧的完整证据链（声明点 → 消费点，AGENTS.md §3.3.1）
 
@@ -1615,7 +1619,7 @@ Caused by: java.lang.IllegalStateException: article-rpc 的 Kafka 通道「kq-pu
 
 | 项 | 修复前 | 修复后 |
 |---|---|---|
-| `DRIFT-ARTICLE-RPC-007` 每通道独立 Kafka brokers | 🔴 OPEN（**静默忽略**，配置面误导） | 🟡 **已处置**：能力差异仍在（落 SD-2026-10-24-02，待签字），但**静默 → 启动即失败** + 真上下文实测 |
+| `DRIFT-ARTICLE-RPC-007` 每通道独立 Kafka brokers | 🔴 OPEN（**静默忽略**，配置面误导） | 🟡 **已处置**：能力差异仍在（落 SD-2026-10-24-02，已签字），但**静默 → 启动即失败** + 真上下文实测 |
 | `U-3` / `U-4` / `U-9`（Kafka 位点 / seek / 并发 offset） | 🔴 OPEN | 🔴 **OPEN（不变）**（需真 Kafka） |
 | `U-4'` / `U-5'`（双侧活体对拍 / 回归网非假绿） | 🔴 OPEN | 🔴 **OPEN（不变）** |
 | `S-5`（content security） | 🔴 OPEN | 🔴 **OPEN（不变）**（阻塞于 security 域，不在本项目范围） |
