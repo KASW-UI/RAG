@@ -21,11 +21,33 @@
 | 🆕 [`comment/proto.md`](comment/proto.md) | `comment` 域 proto `package` 由 Go 的遗留名 `pb` 归一为 `comment`（**SD-2026-10-23-04**）—— gRPC 方法路径 `/comment.CommentService/*` vs Go 的 `/pb.CommentService/*`；当前无跨栈调用故无实际影响，实现该域时须显式处理 |
 | 🆕 [`like/proto.md`](like/proto.md) | `like` 域 proto `package` 由 `pb` 归一为 `like`（**SD-2026-10-23-05**）—— 同类归一，但**该域已实现**：仓内 api↔rpc 自洽（108 例测试全绿，含真实 gRPC 往返）；仅跨栈互调会失效 |
 
+## 📌 10 域并发对齐后的产出（2026-10-25 合并后）
+
+> 合并前本档填充率仅 11%（40 个空坑位）。10 个域并发对齐后，各域**把散落在 DRIFT 里的签字倾向条目收编至此**。
+> ⚠️ **判据**：这条差异**要不要「修回去」**？要 ⇒ `DRIFT`；不要（有意）⇒ 本档。
+
+| 域 | 已收编 | 说明 |
+|---|---|---|
+| `article` | `rpc.md` | — |
+| `comment` | `api.md` · `proto.md` · `rpc.md` | 3 份，是本轮收编最多的域 |
+| `hot` | `api.md` · `common.md` · `rpc.md` | 3 份 |
+| `like` | `api.md` · `proto.md` · `rpc.md` | 3 份 |
+| `message` | `api.md` · `rpc.md` | — |
+| `task` | `rpc.md` | — |
+| `users` | `_shared.md` · `admin/{_shared,api,rpc}.md` · `common.md` · `user/api.md` | 6 份 |
+| `common` | `_signed-deviations.md` | — |
+| `follow` | 0 份 | 本轮该域未产出签字偏离 |
+| `favorite` | 0 份 | 本轮该域**未做**（合并时按要求跳过） |
+
+⚠️ **本档定位已明确（2026-10-25）**：**集中收编** —— 域内发现的签字倾向也收编到本档的 `<域>/<组件>.md`，
+不再只放跨域的。原先「集中收编 vs 只放跨域」这个悬而未决的问题就此定案。
+
 ## 待填（空文件即坑位）
 
-其余 22 个文件与 `docs/DRIFT` 同构，**当前为空**。域内台账中已出现签字倾向的条目
-（如 `like/rpc.md` 的 DRIFT-LIKE-001、`article/rpc.md` 的 6 条 `OBSERVABLE DIFFERENCE`）
-尚未收编至此 —— 收编与否取决于本档案定位：**集中收编** vs **只放跨域的、域内仍留 DRIFT**。
+`article/{api,common}` · `comment/common` · `hot/…` 已全填 · `like/…` 已全填 ·
+`message/…` 已全填 · `task/{api,proto}` · `users/admin/…` 已全填 · `users/user/{rpc}` ·
+`follow/*` · `favorite/*`（本域本轮未做）·
+`_cross/{decisions,go-anchors,message-domain-wide,open-items,status-snapshot-2026-10-22,user-qa-verbatim}`
 
 ## 搬移来源
 
