@@ -213,10 +213,12 @@ class ArticleApiAssemblyWiringTest {
                         "HttpMiddlewareFilter",
                         "GoStyleMaxBytesFilter",
                         "GoStyleJsonBodyLimitFilter",
-                        // 🔴 2026-10-24 新增：Go 的 query 参数总数上限（httpx/util.go 的 2048）
+                        // 🔴 2026-10-24 新增：Go 的 query 解析与参数总数上限（httpx 的 GetFormValues）
                         //    在 Go 侧位于**路由 handler 内**（httpx.Parse）⇒ 即所有中间件之后
                         //    ⇒ Java 侧放在**最后一个** filter 位（紧贴 controller）最贴近 Go 的位置。
-                        "GoStyleFormParamCountFilter"),
+                        //    ⚠️ 2026-10-24 改名：GoStyleFormParamCountFilter → GoStyleGetFormValuesFilter
+                        //    （它现在同时复刻 net/url 的三条错误，不再只做「计数」）。
+                        "GoStyleGetFormValuesFilter"),
                 order,
                 "真容器实测的 Filter 链序；Go 对应链序见方法 javadoc");
     }

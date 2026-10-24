@@ -332,6 +332,10 @@ Result 仅取 `EQUIVALENT / IMPLEMENTATION DIFFERENCE / OBSERVABLE DIFFERENCE / 
 | 入参解释 | 非 JSON Content-Type ⇒ 丢 body | `withJsonBody` 字面 `Contains` | `GoStyleJsonBodyConverter.goReadsBody` | EQUIVALENT | `requests.go:153-155` |
 | 入参解释 | **重复 query key** | 取**第一个**（`unmarshaler.go:841-843`） | Spring 逗号拼接 → 400 | **SEMANTIC MISMATCH** | **DRIFT-003** |
 | 入参解释 | query 参数总数上限 2048 | `httpx/util.go:15,48-53` | 🔴 **原判「无上限」已被实测推翻**（Tomcat 的 8 KB 请求行上限**更早**触发 ⇒ 状态码两侧都是 400）⇒ **已补应用层 Go 语义闸门** | ✅ EQUIVALENT（判据）＋ 🟡 body 形状差异（不修） | **真 Tomcat 实测**（2026-10-24，`DRIFT-ARTICLE-API-005`） |
+| 入参解释 | query 段数上限 10000 | `net/url/url.go:1000-1002,1020-1022` | 🔴 **修前：2048 计数先触发 ⇒ body 文案不对** | ✅ **已对齐**（顺序也按 Go：段数上限**先**于 2048 计数） | **真 Tomcat 实测**（2026-10-24，`DRIFT-ARTICLE-API-009`） |
+| 入参解释 | query 里有 `;` | `net/url/url.go:1026-1029` | 🔴 **修前：静默放过 ⇒ 请求被接受（200）** | ✅ **已对齐**（400 + Go 逐字文案） | **真 Tomcat 实测**（2026-10-24，`DRIFT-ARTICLE-API-009`） |
+| 入参解释 | query 里有非法 `%` 转义 | `net/url/url.go:1034-1045` | 🔴 **修前：漏到 Spring ⇒ 500 空 body** | ✅ **已对齐**（400 + Go 逐字文案，含 `strconv.Quote` 的 `\xNN`） | **真 Tomcat 实测**（2026-10-24，`DRIFT-ARTICLE-API-009`） |
+| 入参解释 | 请求行含**原始非 ASCII** 字节 | Go **接受**（探针实测 `err=<nil>`） | 🔴 **Tomcat 连接器层就 400**（HTML 错误页） | 🟡 **LOW，不修**（应用层不可达；状态码与 Go 不同 ⇒ 仅畸形输入） | **真 Tomcat 实测**（2026-10-24） |
 | 序列化 | `ext_info` 空 map ⇒ null | `cloneStringMap:106-108` | `:223-226` | EQUIVALENT | 静态源码 |
 | 序列化 | `ext_info` key 排序 | UTF-8 字节序（`encoding/json/encode.go:805-807` `strings.Compare`） | ~~`TreeMap`（UTF-16 码元序）~~ ⇒ **已改为按码点比较** | ✅ EQUIVALENT | **双侧探针实测**（2026-10-24，`DRIFT-ARTICLE-API-007`） |
 | 序列化 | `secondary_tags` 空 ⇒ null | nil slice | `cloneStringList` | EQUIVALENT | 静态源码 |
@@ -555,7 +559,7 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 - **🔴 当前状态（2026-10-24）**：本条**原定性被真容器实测推翻** —— 「RAG 无上限」**不成立**：
   Tomcat 的 `server.max-http-request-header-size`（Boot 4 默认 8 KB）**更早**触发 ⇒ 状态码两侧都是 400，
   且 RAG 阈值**更严**（≈2040 个值 < Go 的 2049）⇒ **不存在 DoS 暴露**。
-  已**补应用层 Go 语义闸门**（`GoStyleFormParamCountFilter`），真容器实测 body 与 Go **逐字节一致**（2/2 变异验证）。
+  已**补应用层 Go 语义闸门**（`GoStyleFormParamCountFilter`，**2026-10-24 第八轮已改名** `GoStyleGetFormValuesFilter`），真容器实测 body 与 Go **逐字节一致**（2/2 变异验证）。
   🟡 **残留**：默认部署下拒绝发生在连接器层 ⇒ body 是 Tomcat 的 HTML 页（Go 是 text/plain）⇒ **LOW，决定不修**。
   详见本文件「第四轮」节。
 
@@ -588,6 +592,30 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 - **Risk**（作为台账风险）：MEDIUM —— 任何按「36 个文件 / 4,275 行」做的完备性推断都已失效。
 - **Classification**：台账卫生问题（非实现漂移）。
 - **证据**：本会话 `find`/`wc` 实跑。
+
+#### DRIFT-ARTICLE-API-009 —— Go `net/url` 的三条 query 解析行为，RAG 曾**静默放过** ✅ **已修（2026-10-24）**
+- **Go**（Go 1.25 **标准库** `net/url/url.go:1019-1054` `parseQuery`）：
+  | # | 行为 | 出处 | Go 侧的文案（**探针实测**） |
+  |---|---|---|---|
+  | ① | 段数（`&` 分隔）> 10000 ⇒ **400** | `url.go:1000-1002,1020-1022` | `number of URL query parameters exceeded limit` |
+  | ② | 段内含 `;` ⇒ **400** | `url.go:1026-1029` | `invalid semicolon separator in query` |
+  | ③ | key/value 的 `%` 转义非法 ⇒ **400** | `url.go:1034-1045` | `invalid URL escape "%zz"` |
+  ⇒ 这些 error 由 `net/http.Request.ParseForm` 返回，而 go-zero 的
+  `httpx.GetFormValues`（`rest/httpx/util.go:25-27`）**原样往上抛**
+  ⇒ `httpx.Parse` 失败 ⇒ `httpx.ErrorCtx` ⇒ `http.Error(w, err.Error(), 400)`。
+- **RAG（修复前）**：`GoStyleFormParamCountFilter`（现 `GoStyleGetFormValuesFilter`）
+  按 Go 的**分段规则**处理这三种输入，但**只跳过该段、不上报错误**
+  ⇒ ②**静默放过**（请求被接受）、③漏到 Spring 的参数解析 ⇒ **500 空 body**、
+  ①**顺序反了**（2048 计数先触发 ⇒ body 文案不对）。
+- **影响**：②③ 只需客户端发畸形 query（**不需要任何特殊权限**）⇒ ②尤其糟：
+  Go 拒的请求 RAG **照单全收**。
+- **证据**：Go 侧探针（真包 `httpx.Parse`）+ 真 Tomcat 实测（修前实测见「第八轮」节）。
+- **✅ 当前状态（2026-10-24）**：**已修**。filter 按 Go 的**顺序**复刻：
+  段数上限 → 分段解析（错误**要上报**）→ go-zero 的 2048 计数。
+  ⇒ 真容器实测 **body 与 Go 逐字一致**（含 `strconv.Quote` 的转义文案）。
+  ⚠️ **残留（LOW，不修）**：请求行含**原始非 ASCII 字节** ⇒ Tomcat 在**连接器层**就 400
+  ⇒ 应用层不可达 ⇒ 与 `DRIFT-005` 的残留同类。详见本文件末尾「第八轮」节。
+
 
 ---
 
@@ -824,7 +852,7 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
   ⚠️ 这条**不是行为差异**，是**证据指针错误** —— 但同样必须修：错行号会让后来者按 §3.1 的纪律
   去核对时读到**另一个结构体**。
 
-### UNRESOLVED-010 —— Go `net/url` 的三个 query 解析行为，RAG 未覆盖（2026-10-24 新增）
+### UNRESOLVED-010 —— Go `net/url` 的三个 query 解析行为，RAG 未覆盖 ✅ **已关闭（2026-10-24）**
 - **Question**：`httpx.GetFormValues` 之前还有一层 Go **标准库** `net/url` 的解析，
   它有三条行为会让请求**直接 400**；本轮补的 `GoStyleFormParamCountFilter`
   **刻意只复刻了 go-zero 的 2048 判据**，这三条未覆盖：
@@ -833,12 +861,25 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
   | ① | `defaultMaxParams = 10000` ⇒ 超限 400「number of URL query parameters exceeded limit」 | `net/url/url.go:1001,1019-1022` |
   | ② | query 里出现 `;` ⇒ 记错并**返 400**「invalid semicolon separator in query」 | `net/url/url.go:1026-1029` |
   | ③ | query 里出现非法 `%` 转义 ⇒ **返 400** | `net/url/url.go:1034-1045` |
-- **Why Unknown**：本 filter 按 Go 的**分段规则**处理这三种输入（②③ 跳过该段），
-  但**不**复刻 Go 的「返 400」这一层 ⇒ 两侧在②③ 上行为不同。
-- **Impact**: 低。②③ 需要客户端发畸形 query；① 需要 >10000 个分段
-  （默认配置下 Tomcat 的 8 KB 请求行上限会先拒 ⇒ 不可达）。
-- **Required Confirmation**：先量 Tomcat 对 `;` 与非法 `%` 的实际处理
-  （Tomcat 自己会 400 吗？还是当字面量放过？），再决定是补进 filter 还是记为签字偏离。
+- **✅ 关闭依据（2026-10-24，Go 侧探针 + 真 Tomcat 实测）**：
+  - **Go 侧**（Go 1.25.11 + go-zero v1.10.2 的**真包** `httpx.Parse`，探针
+    `/tmp/probe-url/go/main.go`）⇒ 三条**都返 400**，文案逐字实测：
+    `invalid semicolon separator in query` / `invalid URL escape "%zz"` /
+    `number of URL query parameters exceeded limit`。
+  - **RAG 侧（修前，真 Tomcat 实测）**：
+    | 场景 | Go | RAG（修前） |
+    |---|---|---|
+    | `?a=1;b=2` | 400 + 分号文案 | 🔴 **200**（请求被**接受**了！） |
+    | `?a=%zz` | 400 + 转义文案 | 🔴 **500 空 body** |
+    | 10001 段 | 400 + 段数文案 | 🟡 400，但 body 是 **2048** 那条（**顺序反了**） |
+  ⇒ **三条全是真差异** ⇒ 已**修**（filter 改名 `GoStyleGetFormValuesFilter`，
+  按 Go 的顺序复刻：段数上限 → 分段解析（错误要上报）→ 2048 计数）。
+  ⇒ 详见 `DRIFT-ARTICLE-API-009` 与本文件末尾「第八轮」节。
+- **残留（已在同轮定性为 LOW，不修）**：**请求行里有原始非 ASCII 字节**时
+  （`?a=%中`、`?a=中`）⇒ **Tomcat 在连接器层就 400**（HTML 错误页）⇒ 请求到不了应用层
+  ⇒ 应用层无从插手 ⇒ 与 `DRIFT-005` 的残留同类 ⇒ **LOW，决定不修**
+  （已用 characterization test 锁住现状）。
+
 
 ---
 
@@ -848,7 +889,7 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 |---|---|---|---|
 | 1 | 两边的 public behavior 是否一致 | ⚠️ **部分** | 路由/鉴权/信封一致；上传失败状态码不一致（DRIFT-001） |
 | 2 | 正常路径是否一致 | ✅ | §4 矩阵 60+ 行 EQUIVALENT；CASE-01 |
-| 3 | 边界输入是否一致 | ⚠️ **部分** | 空值/类型/默认值一致；重复 query key 不一致（DRIFT-003、CASE-16） |
+| 3 | 边界输入是否一致 | ⚠️ **部分** | 空值/类型/默认值一致；重复 query key 不一致（DRIFT-003、CASE-16）；**query 畸形输入（`;` / 非法 `%` / >10000 段）已对齐 Go**（DRIFT-009，2026-10-24 真 Tomcat 实测 body 逐字一致） |
 | 4 | NotFound / Empty / Null 是否一致 | ✅ | `articles:null`、`secondary_tags:null`、`ext_info:null`、`author_name` 缺席 —— 四处逐条对齐 |
 | 5 | Error meaning 是否一致 | ⚠️ **部分** | 业务码全一致；上传路径丢失 gRPC 码语义（DRIFT-001） |
 | 6 | Error propagation 是否一致 | ⚠️ **部分** | 业务异常一致；`extractCurrentUserID` 的「200+1005」一致；panic 兜底一致 |
@@ -1341,9 +1382,10 @@ chn = chn.Append(GunzipHandler)          // ⑪
 
 | 条目 | 状态 | 说明 |
 |---|---|---|
-| `DRIFT-005` query 参数总数上限 2048 | 🟡 **部分关闭**（2026-10-24） | 🔴 **原定性（「RAG 无上限」）已被真容器实测推翻**：Tomcat 的 `server.max-http-request-header-size`（默认 8 KB）**更早**触发 ⇒ **状态码两侧都是 400**，且 RAG 阈值**更严**（≈2040 < Go 的 2049）⇒ 不存在 DoS 暴露。已**补应用层 Go 语义闸门**（`GoStyleFormParamCountFilter`），真容器实测 body 与 Go **逐字节一致**（2/2 变异验证）。🟡 **残留**：默认部署下拒绝发生在连接器层 ⇒ body 是 Tomcat 的 HTML 页（Go 是 text/plain）⇒ **LOW，决定不修** |
+| `DRIFT-005` query 参数总数上限 2048 | 🟡 **部分关闭**（2026-10-24） | 🔴 **原定性（「RAG 无上限」）已被真容器实测推翻**：Tomcat 的 `server.max-http-request-header-size`（默认 8 KB）**更早**触发 ⇒ **状态码两侧都是 400**，且 RAG 阈值**更严**（≈2040 < Go 的 2049）⇒ 不存在 DoS 暴露。已**补应用层 Go 语义闸门**（`GoStyleFormParamCountFilter`，**2026-10-24 第八轮已改名** `GoStyleGetFormValuesFilter`），真容器实测 body 与 Go **逐字节一致**（2/2 变异验证）。🟡 **残留**：默认部署下拒绝发生在连接器层 ⇒ body 是 Tomcat 的 HTML 页（Go 是 text/plain）⇒ **LOW，决定不修** |
 | `DRIFT-006` 8–10 MiB body 文案 | ✅ **已确认 LOW，不修**（2026-10-24） | 可观察契约相同（400 + text/plain + nosniff），差异仅在 body 文案：Go 侧 Go 1.25 探针实测 = `"unexpected EOF"`（`json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode` 解析半个文档）；RAG 侧 = `"request entity too large"` ⇒ 已用 characterization test 锁住实测现状 |
 | `DRIFT-007` `ext_info` key 排序（非 BMP） | ✅ **已修**（2026-10-24） | 已按**码点序**比较（= Go 的 UTF-8 字节序），见本文件末尾「第三轮」节 |
+| `DRIFT-009` Go `net/url` 的三条 query 解析行为 | ✅ **已修**（2026-10-24） | 修前 ②**静默放过**（200）、③**500 空 body**、①**顺序反了** ⇒ 已按 Go 的顺序复刻（段数上限 → 分段解析（错误上报）→ 2048 计数），真容器实测 **body 逐字一致** ⇒ 见本文件末尾「第八轮」节 |
 | `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | rpc 侧已核过 `public_only` / `status` 的消费方式（见 [`proto.md`](./proto.md)）；仍缺**跨栈活体对拍** |
 | `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` | ✅ **已关闭**（2026-10-24） | 结论依赖 go-zero 的 tag 默认值，不是设计对齐 ⇒ 已读到消费点确认为**条件性差异、当前不可达**（详见 §9） |
 | `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | ✅ **已关闭**（2026-10-24） | 🔴 **原结论作废**：`DRIFT-024` 在 **users 域** `docs/DRIFT/users/_shared.md:103`，common 域与 `_cross` 快照都在引用它；本域**不受影响**（共享层已修 + 真 Tomcat 已断言） |
@@ -1763,3 +1805,170 @@ assertEquals("request entity too large\n", response.getContentAsString(), …);
 > ⇒ 同理，**「本轮未动」的历史表不要当成现状表** ——
 > 本轮就有一次误读：差点把第三轮的「DRIFT-006 OPEN」当成现状写进当前状态表
 > （已回退，历史记录保持原样，现状另起第六轮记录）。
+
+---
+
+<!-- @fix 2026-10-24 第八轮 · 由 align/article 工作树产出 · 基线 commit 0b5543d -->
+
+## 2026-10-24 第八轮：`UNRESOLVED-010` 关闭 —— Go `net/url` 的三条 query 解析行为**已对齐**
+
+### ✅ FIX-14 —— `DRIFT-ARTICLE-API-009` 已修（三条 query 解析行为）
+
+#### 🔴 先说结论：修前的 RAG 现状是**实测**出来的，不是推理的
+
+Go 侧（Go 1.25.11 + go-zero v1.10.2 的**真包** `httpx.Parse`，探针 `/tmp/probe-url/go/main.go`）
+与 RAG 侧（**真 Tomcat**，真容器实测）的对照：
+
+| 场景 | Go（真包实测） | RAG（修前，真容器实测） |
+|---|---|---|
+| `?a=1;b=2` | **400** + `invalid semicolon separator in query` | 🔴 **200**（请求被**接受**了！） |
+| `?a=%zz` | **400** + `invalid URL escape "%zz"` | 🔴 **500 空 body** |
+| 10001 段 | **400** + `number of URL query parameters exceeded limit` | 🟡 **400**，但 body 是 **2048** 那条 ⇒ **顺序反了** |
+| `?a=%中`（原始非 ASCII） | **400** + `invalid URL escape "%\xe4\xb8"` | 🔴 **400** + **Tomcat 的 HTML 错误页** |
+| `?a=中`（原始非 ASCII，无 `%`） | ✅ **接受**（`err=<nil>` ⇒ 200） | 🔴 **400** + Tomcat 的 HTML 错误页 |
+
+⚠️ **②（分号）最糟**：Go 拒的请求，RAG **照单全收**（200）。
+⇒ 这三条**都是要修的**（不是签字偏离）⇒ 判据「要不要修回去」= **要**。
+
+#### Go 出处（逐行，消费点）
+
+```
+Go 1.25 标准库 net/url/url.go:1019-1054  parseQuery
+  if !urlParamsWithinMax(strings.Count(query, "&") + 1) {
+      return errors.New("number of URL query parameters exceeded limit")
+  }                                        // ← ⚠️ 在解析**之前**就 return
+  for query != "" {
+      key, query, _ = strings.Cut(query, "&")
+      if strings.Contains(key, ";") {
+          err = fmt.Errorf("invalid semicolon separator in query")   // ← 无条件赋值
+          continue
+      }
+      if key == "" { continue }
+      key, value, _ = strings.Cut(key, "=")
+      key, err1 := QueryUnescape(key)
+      if err1 != nil { if err == nil { err = err1 }; continue }      // ← 第一个转义错误胜出
+      value, err1 = QueryUnescape(value)
+      …
+  }
+```
+⇒ 这些 error 由 `net/http.Request.ParseForm` 返回，而 go-zero 的
+`httpx.GetFormValues`（`rest/httpx/util.go:25-27`）**原样往上抛**：
+
+```
+go-zero@v1.10.2/rest/httpx/util.go:25-27
+  if err := r.ParseForm(); err != nil {
+      return nil, err
+  }
+```
+⇒ `httpx.Parse` 失败 ⇒ `httpx.ErrorCtx` ⇒ `httpx/responses.go:142-159`
+⇒ `http.Error(w, err.Error(), 400)` ⇒ **400** + body = 文案 + `"\n"`。
+
+⚠️ **两条顺序事实（都可观察）**：
+1. `r.ParseForm()`（内含 net/url 的三条）**先于** go-zero 的 2048 计数
+   ⇒ 10001 段时 Go 报的是**段数**那条，不是 `too many form values`。
+2. `parseQuery` 里**分号错误无条件覆盖**、**转义错误只在 `err == nil` 时设置**
+   ⇒ 多个错误并存时，分号错误优先（后出现的分号段会覆盖前面的）。
+
+#### 修复
+
+**filter 改名** `GoStyleFormParamCountFilter` → **`GoStyleGetFormValuesFilter`**：
+它现在复刻的是 Go 的 `httpx.GetFormValues`（**解析 + 计数两步**），旧名字只说了后半截 ⇒ 名字已不诚实。
+
+按 Go 的**顺序**复刻（`doFilter`）：
+
+| 步 | Go | 本实现 |
+|---|---|---|
+| ① | `parseQuery` 开头的段数上限（**解析之前**） | `countQuerySegments(query) > 10000` ⇒ 400 + Go 文案 |
+| ② | `parseQuery` 的分段解析（**错误要上报**） | `parseGoQuery` 返回 `GoQueryParse{form, error}` ⇒ 有错 ⇒ 400 + Go 文案 |
+| ③ | go-zero 的 2048 计数 | `countNonEmptyValues(form) > 2048` ⇒ 400 + `too many form values, error: …` |
+
+⚠️ **错误文案的字节级保真**：
+Go 的转义错误文案是 `"invalid URL escape " + strconv.Quote(那一小截)`，
+而那一小截是 Go **按字节**截的（`%` + 最多 2 字节）⇒ **可能截断一个多字节字符**
+⇒ 截出来的是**非法 UTF-8** ⇒ `strconv.Quote` 会输出 `\xNN`（**小写**）。
+⇒ 本实现按**字节**定位与截取，并复刻了 `strconv.Quote`
+（`\a \b \f \n \r \t \v`、`\xNN` 小写、`\uNNNN`、`\UNNNNNNNN`、非法 UTF-8 字节 ⇒ `\xNN`）。
+⇒ Go 探针实测 `?a=%中` ⇒ `invalid URL escape "%\xe4\xb8"`，
+本实现**逐字节相同**（已由真容器用例断言）。
+
+#### 回归网（真 Tomcat + 真 HTTP）
+
+`ArticleApiFormParamLimitTest`（**4 条 ⇒ 9 条**）：
+
+| 用例 | 断言 |
+|---|---|
+| `semicolonInQueryIsRejectedLikeGo` | 400 + body **逐字** = `invalid semicolon separator in query\n` |
+| `invalidPercentEscapeInQueryIsRejectedLikeGo` | 400 + body **逐字** = `invalid URL escape "%zz"\n` |
+| `tooManyQuerySegmentsIsRejectedLikeGo` | 400 + body **逐字** = `number of URL query parameters exceeded limit\n` |
+| `invalidEscapeFollowedByMultiByteCharIsRejectedAtConnectorLayer` | ⚠️ characterization：Tomcat **连接器层**就 400（HTML 页）⇒ 应用层不可达 ⇒ LOW 不修 |
+| `rawNonAsciiInQueryIsRejectedAtConnectorLayer` | ⚠️ characterization：同上 + 对照（`?a=%E4%B8%AD` 合规编码 ⇒ 200） |
+
+⚠️ **必须用裸 socket**：JDK 的 `URI` / `HttpClient` **自己就会拒绝**非法 `%`
+（`Malformed escape pair`）⇒ 根本发不出去 ⇒ 测不到那条路径。
+⚠️ **请求行必须按 UTF-8 编码**：按 ISO-8859-1 编码会把非 ASCII 换成 `?`
+（实测踩过：`?a=%中` 被发成 `?a=%?` ⇒ 服务端收到的是**另一个** query）。
+
+#### 变异验证（三态判定）—— **3 个有效变异全转红 + 2 次「变异无效」的教训**
+
+| # | 变异 | 结果 | 判定 |
+|---|---|---|---|
+| A | 分号分支改回「跳过该段」 | ✅ **转红** | 有效 |
+| B₁ | **只**删 key 分支的错误上报 | ⚠️ 仍全绿 | ⚠️ **变异无效** —— 用例测的是 **value** 分支（`?a=%zz` ⇒ 坏转义在 value 里）⇒ 变异没打在被测行为上 |
+| B₂ | key + value 两条错误分支都删 | ✅ **转红**（且复现**修复前的原始症状**：`expected: <400> but was: <500>`） | 有效 |
+| C | 去掉段数上限 | ✅ **转红** | 有效 |
+| D₁/D₂ | 把段数上限挪位置（但**相对顺序没变**） | ⚠️ 仍全绿 | ⚠️ **变异无效** —— 挪到 2048 计数**之前**仍是「10000 先」的同一顺序 |
+| D₃ | 把段数上限挪到 2048 计数**之后** | ✅ **转红**（body 变成 `too many form values…`） | 有效 |
+
+⇒ **3/3 有效变异全部转红** ⇒ 守门网**非假绿**。
+
+⚠️⚠️ **本轮最值钱的一条元教训**：
+**「仍全绿」必须先排除「变异无效」，否则会把"变异没打中"误报成"测试覆盖不到"。**
+本轮两次「仍全绿」都是**变异无效**（B₁ 打错分支、D₁ 相对顺序没变），
+**不是**测试不敏感 ⇒ 如果不查这一步，就会得出"这条用例测不到锁序/顺序"的**错误结论**，
+进而可能去写一条**其实不需要**的新用例（或是错怪测试）。
+⇒ 排查手法很简单：**把变异内容打印出来 + 确认它真的落到了被测行为上**
+（本轮用 `grep -c "MUT-…"` 确认标记在文件里；D₁ 的教训则是**看代码确认相对顺序**）。
+
+#### 残留（LOW，决定不修）
+
+**请求行里有原始非 ASCII 字节**（`?a=%中`、`?a=中`）⇒ **Tomcat 在连接器层就 400**
+（HTML 错误页）⇒ 请求**到不了应用层** ⇒ 应用层 filter **无从插手**。
+⇒ 与 `DRIFT-005` 的残留同类（Tomcat 的 HTML 错误页 vs Go 的 text/plain）⇒ **LOW，不修**。
+⚠️ 状态码：Go 是 400（`?a=%中`）/ 200（`?a=中`），RAG 都是 400 ⇒
+`?a=中` 这条**状态码也不同**，但同样只影响**不合规的客户端**（正常客户端会发 `%E4%B8%AD`）。
+
+#### 测试计数
+
+`ArticleApiFormParamLimitTest` **9 条全绿**（原 4 ⇒ +5）；
+`ArticleApiAssemblyWiringTest` **10 条全绿**（链序断言里的 filter 改名 ⇒ 同步更新）；
+`article-api` **80 tests / 0 failures / 0 errors / 0 skipped**（原 75 ⇒ +5）；
+连同 `article-rpc` 117 + `article-common` 15 ⇒ **article 域合计 212 / 0 / 0 / 0**（`BUILD SUCCESS`）。
+
+### 判定变化（FIX-14）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `UNRESOLVED-010` Go `net/url` 三条相邻行为 | 🔴 OPEN | ✅ **已关闭**（Go 侧真包探针 + 真 Tomcat 实测 + 3/3 有效变异转红） |
+| `DRIFT-ARTICLE-API-009`（新增条目） | 🔴 三条真差异（② 静默放过 200、③ 500 空 body、① 顺序反了） | ✅ **已修**（body 与 Go **逐字一致**） |
+| 请求行含原始非 ASCII | 未记录 | 🟡 **LOW，不修**（Tomcat 连接器层就拒 ⇒ 应用层不可达）⇒ characterization test 锁现状 |
+| `DRIFT-005` / `DRIFT-006` / `DRIFT-007` | 已关闭/部分关闭 | **不变** |
+| `UNRESOLVED-002` 跨栈活体对拍 | 🟡 部分关闭 | 🟡 **部分关闭（不变）** |
+| **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
+
+⚠️ **判定不变的理由**：本轮关掉了一条 UNRESOLVED、修掉一条 DRIFT（**行为层面确实变了**），
+但其余 `DRIFT` / `UNRESOLVED` 仍在，且**无双侧活体对拍**（Go 侧仍需 `etcd:2379`）。
+
+#### 📌 一条可复用的元教训
+
+> **「Go 的错误会一路冒泡」这件事，必须读到**消费点**才知道它会不会变成 400。**
+>
+> 本轮的链路是：`net/url.parseQuery` 记 error ⇒ `net/http.Request.ParseForm` **返回**它
+> ⇒ go-zero 的 `httpx.GetFormValues` **原样往上抛**（`util.go:25-27`，**不是吞掉**）
+> ⇒ `httpx.Parse` 失败 ⇒ `httpx.ErrorCtx` ⇒ `http.Error(w, err.Error(), 400)`。
+>
+> ⇒ **中间任何一层把它吞了，Go 就不会返 400** —— 而这一层恰好是 go-zero 的一行代码。
+> ⇒ 同 AGENTS.md §3.3.1 的镜像版：**「错误被记录了」≠「错误被上报了」**。
+>
+> ⇒ 也因此，RAG 侧复刻时**不能只复刻"分段规则"** ——
+> 「解析失败时怎么办」才是 Go 的**可观察行为**，
+> 漏掉它就不是"漏了个细节"，而是**把一个 400 变成了 200**。

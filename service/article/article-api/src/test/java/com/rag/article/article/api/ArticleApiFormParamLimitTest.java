@@ -196,8 +196,164 @@ class ArticleApiFormParamLimitTest {
     }
 
     // =====================================================================
+    // 5. Go 的 net/url 三条相邻行为（UNRESOLVED-010）
+    // =====================================================================
+
+    /**
+     * <h2>Go 出处（逐行，消费点）</h2>
+     * <pre>
+     * Go 标准库 net/url/url.go:1019-1045  parseQuery
+     *   if strings.Contains(key, ";") {
+     *       err = fmt.Errorf("invalid semicolon separator in query")
+     *       continue
+     *   }
+     *   …
+     *   key, err1 := QueryUnescape(key)          // 失败 ⇒ err = err1
+     *   value, err1 := QueryUnescape(value)      // ⇒ "invalid URL escape \"%zz\""
+     *   …
+     *   if len(vs) &gt; maxParams {              // maxParams = defaultMaxParams = 10000
+     *       err = errors.New("number of URL query parameters exceeded limit")
+     *       break
+     *   }
+     * </pre>
+     *
+     * <p>⇒ 这些 error 由 {@code net/http.Request.ParseForm} 返回，
+     * 而 go-zero 的 {@code httpx.GetFormValues}（{@code rest/httpx/util.go:25-27}）
+     * <b>把它原样往上抛</b>（不是吞掉）：
+     * <pre>
+     *   if err := r.ParseForm(); err != nil {
+     *       return nil, err
+     *   }
+     * </pre>
+     * ⇒ {@code httpx.Parse} 返回 error ⇒ handler 调 {@code httpx.ErrorCtx}
+     * ⇒ {@code httpx/responses.go:142-159}（未注册 error handler ⇒ 走 else 分支）
+     * ⇒ {@code http.Error(w, err.Error(), 400)}
+     * ⇒ <b>400</b> + text/plain + nosniff + body = {@code err.Error()} + {@code "\n"}。
+     *
+     * <p><b>Go 侧探针实测</b>（Go 1.25.11 + go-zero v1.10.2 的<b>真包</b> {@code httpx.Parse}）：
+     * <pre>
+     * ?a=1;b=2     ⇒ "invalid semicolon separator in query\n"
+     * ?a=%zz       ⇒ "invalid URL escape \"%zz\"\n"
+     * ?a=1& ×10001 ⇒ "number of URL query parameters exceeded limit\n"
+     * </pre>
+     */
+    @Test
+    @DisplayName("🔴 Go: query 里有 `;` ⇒ **400** + body 逐字 = \"invalid semicolon separator in query\\n\"")
+    void semicolonInQueryIsRejectedLikeGo() throws Exception {
+        RawResponse resp = rawGet("/v1/article/1?a=1;b=2");
+        assertEquals(400, resp.status, "Go 对 `;` 返 400（net/url parseQuery），实际响应：\n" + resp);
+        assertEquals("invalid semicolon separator in query\n", resp.body,
+                "body 必须与 Go 逐字一致（Go 的 http.Error(w, err.Error(), 400)）");
+    }
+
+    @Test
+    @DisplayName("🔴 Go: query 里有非法 `%` 转义 ⇒ **400** + body 逐字 = \"invalid URL escape \\\"%zz\\\"\\n\"")
+    void invalidPercentEscapeInQueryIsRejectedLikeGo() throws Exception {
+        RawResponse resp = rawGet("/v1/article/1?a=%zz");
+        assertEquals(400, resp.status, "Go 对非法 % 转义返 400，实际响应：\n" + resp);
+        assertEquals("invalid URL escape \"%zz\"\n", resp.body,
+                "body 必须与 Go 逐字一致（Go 的 http.Error(w, err.Error(), 400)）");
+    }
+
+    /**
+     * ⚠️ characterization（<b>不是</b> Go 对齐）：<b>请求行里有原始非 ASCII 字节</b> ⇒
+     * <b>Tomcat 在连接器层就拒了</b>，请求<b>根本到不了应用层</b>。
+     *
+     * <p>Go 侧（真包 {@code httpx.Parse}，探针实测 {@code ?a=%中}）：
+     * <pre>
+     * net/url.ParseQuery  err=invalid URL escape "%\xe4\xb8"   ← 按**字节**切片 ⇒ 截断了「中」
+     * ⇒ 客户端看到的 body = "invalid URL escape \"%\\xe4\\xb8\"\n"
+     * </pre>
+     * ⇒ <b>状态码两侧都是 400</b>（一致）⇒ 差异只剩 <b>body 形状</b>：
+     * Go 是 text/plain 的那句文案，RAG 是 Tomcat 的 HTML 错误页。
+     *
+     * <p>⚠️ <b>为什么这条不修</b>：拒它的是 <b>Tomcat 的 URI 校验</b>（连接器层），
+     * <b>应用层 filter 无从插手</b> ⇒ 与 {@code DRIFT-005} 的残留同一类
+     * （Tomcat 的 HTML 错误页 vs Go 的 text/plain）⇒ <b>LOW，决定不修</b>。
+     * 本用例锁住现状，将来有人调 Tomcat 的 URI 校验时能立刻看到差异。
+     */
+    @Test
+    @DisplayName("⚠️ characterization: `%` 后面接**多字节字符** ⇒ Tomcat 在**连接器层**就 400（HTML 错误页）—— 应用层不可达")
+    void invalidEscapeFollowedByMultiByteCharIsRejectedAtConnectorLayer() throws Exception {
+        RawResponse resp = rawGet("/v1/article/1?a=%中");
+        assertEquals(400, resp.status, "Tomcat 连接器层就拒了（与 Go 的 400 一致）");
+        assertTrue(resp.body.startsWith("<!doctype html>"),
+                "body 是 Tomcat 的 HTML 错误页（连接器层拒绝）⇒ 与 Go 的 text/plain 文案不同，"
+                        + "但**状态码一致** ⇒ LOW，不修；实际 body：" + resp.body);
+    }
+
+    /**
+     * ⚠️ characterization：<b>query 里有原始非 ASCII（合法 UTF-8、无 {@code %}）</b>。
+     *
+     * <p>Go 侧（真包 {@code httpx.Parse}，探针实测 {@code ?a=中}）：{@code err=<nil>}
+     * ⇒ <b>Go 接受</b>（200）。
+     * <br>RAG 侧：<b>Tomcat 在连接器层就 400</b>（HTML 错误页）⇒ <b>请求到不了应用层</b>。
+     *
+     * <p>⚠️ <b>为什么这条不修</b>：同上一条 —— 拒它的是 <b>Tomcat 的 URI 校验</b>，
+     * 应用层无从插手 ⇒ LOW。而且<b>正常客户端不会这样发</b>：
+     * 实测 {@code ?a=%E4%B8%AD}（合规的百分号编码）⇒ 两侧都 200。
+     */
+    @Test
+    @DisplayName("⚠️ characterization: query 里有原始非 ASCII ⇒ Tomcat 连接器层 400（Go 侧接受）—— 应用层不可达，不修")
+    void rawNonAsciiInQueryIsRejectedAtConnectorLayer() throws Exception {
+        RawResponse resp = rawGet("/v1/article/1?a=中");
+        assertEquals(400, resp.status, "Tomcat 连接器层就拒了（Go 侧是接受的 ⇒ 差异只在这条畸形输入上）");
+        assertTrue(resp.body.startsWith("<!doctype html>"),
+                "body 是 Tomcat 的 HTML 错误页 ⇒ LOW，不修；实际 body：" + resp.body);
+
+        // 对照：<b>合规</b>的百分号编码 ⇒ 两侧都 200（这条是「正常客户端不会那样发」的证据）
+        RawResponse ok = rawGet("/v1/article/1?a=%E4%B8%AD");
+        assertEquals(200, ok.status, "合规的百分号编码必须正常通过（Tomcat 与 Go 都接受）");
+    }
+
+    @Test
+    @DisplayName("🔴 Go: query 超过 10000 个参数 ⇒ **400** + body 逐字 = \"number of URL query parameters exceeded limit\\n\"")
+    void tooManyQuerySegmentsIsRejectedLikeGo() throws Exception {
+        RawResponse resp = rawGet("/v1/article/1?" + goQuery(10001));
+        assertEquals(400, resp.status, "Go 对 >10000 个 query 参数返 400，实际响应：\n" + resp);
+        assertEquals("number of URL query parameters exceeded limit\n", resp.body,
+                "body 必须与 Go 逐字一致（Go 的 http.Error(w, err.Error(), 400)）");
+    }
+
+    // =====================================================================
     // helpers
     // =====================================================================
+
+    /** 裸 socket 收到的那份响应（状态码 + body）。 */
+    private record RawResponse(int status, String body, String raw) {
+        @Override
+        public String toString() {
+            return "status=" + status + " body=" + body;
+        }
+    }
+
+    /**
+     * 用<b>裸 socket</b>发请求 —— JDK 的 {@code URI}/{@code HttpClient} <b>自己就会拒绝</b>
+     * 非法 {@code %} 转义（{@code Malformed escape pair}），根本发不出去 ⇒ 测不到那条路径。
+     *
+     * <p>⚠️ 请求行必须按 <b>UTF-8</b> 编码：query 里的非 ASCII 字符若按 ISO-8859-1 编码，
+     * Java 会把它替换成 {@code ?}（不可映射字符）⇒ 服务端收到的是**另一个** query，
+     * 测的就不是那条路径了（实测踩过：{@code ?a=%中} 被发成 {@code ?a=%?}）。
+     */
+    private RawResponse rawGet(String rawTarget) throws Exception {
+        try (java.net.Socket s = new java.net.Socket("localhost", port)) {
+            s.setSoTimeout(15_000);
+            String request = "GET " + rawTarget + " HTTP/1.1\r\n"
+                    + "Host: localhost:" + port + "\r\n"
+                    + "Connection: close\r\n\r\n";
+            s.getOutputStream().write(request.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            s.getOutputStream().flush();
+            byte[] buf = s.getInputStream().readAllBytes();
+            String raw = new String(buf, java.nio.charset.StandardCharsets.ISO_8859_1);
+            int sep = raw.indexOf("\r\n\r\n");
+            String head = sep < 0 ? raw : raw.substring(0, sep);
+            String body = sep < 0 ? "" : raw.substring(sep + 4);
+            int sp1 = head.indexOf(' ');
+            int sp2 = head.indexOf(' ', sp1 + 1);
+            int status = (sp1 < 0 || sp2 < 0) ? -1 : Integer.parseInt(head.substring(sp1 + 1, sp2).trim());
+            return new RawResponse(status, body, raw);
+        }
+    }
 
     /** 造 N 个非空 query 值（{@code a=1&a=1&…} ⇒ Go 的 r.Form = {"a": [N 个 "1"]}）。 */
     private static String goQuery(int n) {
