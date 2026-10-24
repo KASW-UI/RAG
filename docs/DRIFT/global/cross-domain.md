@@ -15,7 +15,7 @@
 |---|---|---|---|---|
 | X-1 | 共享 Flyway 账本 | `message-rpc`↔`like-rpc`↔`article-rpc` | 🟡 配置层 + 运行时已闭环；**三模块同库共存**仍 `unresolved` | 未展开 |
 | X-2 | 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | 🔴 均未审 | 未展开 |
-| X-3 | 事实投递链路 | `like` 的 api ↔ rpc ↔ 第三个仓库 | ⏸ 链路本身不是任何组件的属性 | 未展开 |
+| X-3 | 事实投递链路 | `like`/`comment`/`favorite` 的 rpc ↔ **仓外 DC 平台** | ✅ **已闭合**（2026-10-25 B2）—— 末端不是「第三个仓库」，是仓外 `POST /v1/events`；仓内两侧 4↔4 对齐 | ✅ **已闭合** |
 | X-4 | 社区消费者差异 | Go 用 `like`，RAG 不用 | ⏸ 仍未决（交接 #9，与 `DRIFT-LIKE-003` 同一条） | 未展开 |
 | X-5 | 裸 `ServerCallHandler` 不被 dispatch | task 域 | ⏸ 仍未决（交接 #10） | 未展开 |
 | X-6 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🔴 未修 · 跨域 · 待拍板 | 未展开 |
@@ -183,6 +183,58 @@ CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime;index:idx_notifica
 
 ---
 
+## 二·七、X-3 ✅ **已定位并闭合** —— 「第三个仓库」= **仓外的 DC 平台**（2026-10-25 B2）
+
+### ① 链路末端**不是仓库**，是一个**仓外 HTTP 服务**
+
+```go
+// Sea-RideTheWind_golang/service/like/rpc/cmd/fact-dispatch/main.go:54-56
+dsn      := os.Getenv("LIKE_DATABASE_URL")
+endpoint := os.Getenv("DC_PLATFORM_EVENT_URL")
+token    := os.Getenv("DC_PLATFORM_SERVICE_TOKEN")
+```
+
+⇒ 末端 = **DC 平台的 `POST /v1/events`**（**在本仓库之外**）
+⇒ 契约**不在仓内代码里**，而是由 **env + 构造期参数校验**钉死：
+
+```go
+// service/common/communityfact/wire.go:83-91
+if parsed.Path != "/v1/events" || len(token) < 32 || ... {
+    return nil, errors.New("community DataCenter event sender is not configured")
+}
+```
+⇒ 请求头：`Content-Type: application/json` + **`Idempotency-Key: <event.EventID>`**
++ **`Authorization: Bearer <token>`** + OTel trace 注入（`wire.go:97-104`）。
+
+### ② 仓内两侧**都有**，且**逐条对齐**
+
+| 环节 | Go | RAG |
+|---|---|---|
+| 共享包 | `service/common/communityfact/`（`authority_http.go` / `process.go` / `logging.go` / `wire.go`） | `service/common/src/main/java/com/rag/common/communityfact/`（`AuthorityHandler` / `Dispatcher` / `ProcessLogger` / `Wire`）✅ **4 ↔ 4** |
+| `/v1/events` 路径校验 | `wire.go:87` | `Wire.java:201` ✅ |
+| authority 端点路径 | `mux.HandleFunc("GET /internal/v1/community/facts", …)` | `AuthorityHandlerFactory.AUTHORITY_PATH = "/internal/v1/community/facts"` ✅ |
+| 调度形状 4 项 | `1s` ticker / 每轮 `16` 条 / 单次 `10s` 超时 / 单条失败即 `break` | `Dispatcher.java:122,178` + 各域 `@Scheduled` ⇒ **四个形状逐条对齐**（javadoc 已写明 Go 行号） |
+| 接入的域 | `like` / `comment` / `favorite`（各有 `cmd/fact-authority` + `cmd/fact-dispatch`） | `like-rpc` / `comment-rpc` / `favorite-rpc` 三域**都接了线**（`DC_PLATFORM_EVENT_URL` / `DC_PLATFORM_SERVICE_TOKEN` → `application.yml`）✅ |
+
+### ③ 唯一差异 = **部署形态**（表达层）
+
+| | Go | RAG |
+|---|---|---|
+| dispatch | **独立进程** `cmd/fact-dispatch`（`RunDispatcher` 循环） | **进程内 `@Scheduled`**（`LikeFactDispatchScheduler` / `CommentFactDispatchScheduler` / `FavoriteFactDispatchScheduler`） |
+| authority | **独立进程** `cmd/fact-authority` | **rpc 进程内的一个 HTTP 端点**（`AuthorityHandlerFactory`） |
+
+⇒ 已在 javadoc 留痕：「只是**吞吐上限**从『1 进程』变成『每 JVM 16 × N 副本』」
+⇒ 属**部署形态差异**，不是语义差异 ⇒ **不修**（Spring Boot 单 jar 无法再起第二个 main 而不改产物形态）。
+
+### ④ 结论
+
+⇒ **X-3 从「未定位的第三个仓库」变成「已定位：仓外的 DC 平台 HTTP 端点；仓内两侧 4↔4 对齐、调度形状逐条对齐」**
+⇒ **不是漂移**，是**架构事实** ⇒ 本条**关闭**（✅ 已闭合）。
+⚠️ **唯一仍需外部知识补齐的一点**：DC 平台**自己**的行为（它怎么存、怎么回执）不在本仓库内
+⇒ 两侧对它**只能对齐到 env + 端点契约这一层** ⇒ 这是**边界**，不是缺口。
+
+---
+
 ## 三、其余 7 条的状态说明（2026-10-25）
 
 本轮**未展开**这 7 条的逐条对照（它们的落点分散在多个域的代码里，
@@ -192,14 +244,14 @@ CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime;index:idx_notifica
 |---|---|
 | X-1 | 需要**三个 rpc 模块同库共存**的运行时验证 ⇒ 需真 PG + 三进程并发 ⇒ 独立一轮 |
 | X-2 | `user-rpc`↔`admin-rpc` 的建表责任与 client 契约 ⇒ 跨 users 域内部两个子域 ⇒ 需先读 users 域台账 |
-| X-3 | 链路末端在**第三个仓库** ⇒ 本轮未定位那个仓库 |
+| ~~X-3~~ | ✅ **已闭合**（2026-10-25 B2）⇒ 见 §二·七（末端 = 仓外 DC 平台；仓内两侧 4↔4 对齐） |
 | X-4 | 与 `DRIFT-LIKE-003` 同一条 ⇒ 归 like 域，但需 global 协调（涉及 common 侧的 communityfact） |
 | X-5 | task 域内部 ⇒ 但「裸 `ServerCallHandler` 不被 dispatch」会**反噬所有 rpc 域** ⇒ 需先在 task 域定论 |
 | X-6 | 待**用户拍板**（改 Tomcat 三旋钮 vs 改 10 个 api 的参数解析）⇒ 拍板前不动 |
 | ~~X-7~~ | ✅ **已做**（2026-10-25 B3）⇒ 见 §二·五（4 个域可跑 + 产出 X-10） |
 
 ⇒ **排期建议（2026-10-25 更新）**：~~X-7~~ **已做**（§二·五）→ **X-1**（真 PG 三进程）
-→ **X-2** → **X-3** → X-4/X-5；**X-6 等用户拍板**；
+→ **X-2** → ~~X-3~~（**已闭合**）→ X-4/X-5；**X-6 等用户拍板**；
 **X-10 等用户拍板**（索引定义：改回 Go 的单列，还是保留 RAG 的复合索引并签字）。
 
 ---
@@ -209,5 +261,6 @@ CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime;index:idx_notifica
 | 日期 | 动作 |
 |---|---|
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 7 条跨域不变量状态；新增 **X-8 真源分层（L1 项目层 / L2 go-zero 框架层）** —— 本轮实测发现，影响全部域的对照方法 |
+| 2026-10-25 | **第四轮（B2 / X-3 闭合）**：**「第三个仓库」已定位** —— 链路末端**不是仓库**，是**仓外 DC 平台**的 `POST /v1/events`（`DC_PLATFORM_EVENT_URL` + `DC_PLATFORM_SERVICE_TOKEN`，路径必须以 `/v1/events` 结尾、token ≥ 32，见 Go `service/common/communityfact/wire.go:83-91`）。仓内两侧**都有**：`service/common/communityfact` **4 文件 ↔ 4 类**；authority 端点路径 1:1；调度形状 **1s / 16 / 10s / 单条失败即 break** 四项逐条对齐；`like` / `comment` / `favorite` 三域**都接了线**。唯一差异 = **部署形态**（Go 独立 `cmd/fact-dispatch` vs RAG 进程内 `@Scheduled`）⇒ 表达层差异，不修。⇒ **X-3 关闭**（不是漂移，是架构事实 + 仓外边界） |
 | 2026-10-25 | **第三轮（B3 / X-7 部分闭合）**：① 查出**已有的域预设本身已失效**（users 容器改名、message 容器+库+用户三重失效）⇒ 修好并给脚本加按域的 `pg_user` ② **扩到 4 个域**（新增 `comment`）⇒ **可跑的域 1 → 4** ③ 跑出**真结论**：task ✅ 11 列逐字相同、message ✅ 37 列逐字相同（+ DEFAULT 6 处=已知刻意保留）、users/comment 各有**环境缺口**（Go 侧对应表未被 AutoMigrate）④ 🔴 **新增 X-10**：`message` 域索引 `idx_notification_recipient_read` **两侧列不同**（Go 单列 `is_read` / RAG 复合 `recipient_id,is_read`）⇒ 根因是 Go 侧 `priority:1` 写到了另一个索引名 ⇒ **落在 message 域的迁移脚本 ⇒ global 只记账不改别域代码，等用户拍板** ⑤ 仍缺 5 个域（article/like/hot/follow/favorite）的**双侧库环境** ⇒ 缺 runner ⇒ 登记为待办 |
 | 2026-10-25 | **第二轮**：新增 **X-9** —— 「Go 是否读 body」判据存在 **3 份生产复制品**（favorite / hot / article）。T-1 修复前 RAG **内部自相矛盾**（闸门说不读 / 解析器说要读）⇒ T-1 修复后已一致。⚠️ **根治需各域自己收敛**（调用唯一真源），global 只记账不改别域代码 |
