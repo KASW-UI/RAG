@@ -1045,6 +1045,76 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
                             而非运行时指标比对。
 ```
 
+### 9.x `DRIFT-USERAPI-009 ②` 的修法推导（2026-10-24 · 逐行核实 Go 链序）
+
+> ⚠️ **本节只做推导与取证，代码与签字均未动**（等用户拍板）。
+> 推导结论：**② 的修法可以只落在 user 域内，不必动 `service/common`。**
+
+#### 1. Go 的完整链序（逐行核实过 `go-zero@v1.10.2`）
+
+| 环节 | 出处 | 位置 |
+|---|---|---|
+| 原生中间件（Trace/Log/Prom/MaxConns/Breaker/Shedding/Timeout/Recover/Metrics/MaxBytes/Gunzip） | `rest/engine.go:130-171` `buildChainWithNativeMiddlewares` | **最外层** |
+| JWT 验签 | `rest/engine.go:74` `chn.Append(handler.Authorize(...))` | 原生**之内** |
+| observability(3s) | `rest/engine.go:110-111` `for ... ng.middlewares { chn = chn.Append(...) }` | JWT **之内** |
+| 黑名单 | `rest/server.go:222-234` `WithMiddleware` 把中间件**套在 `route.Handler` 外面** ⇒ route 级 | **最内层** |
+
+- `chain.go` 的 `Append` 文档明写「adding the specified middlewares as the **last** ones in the request flow」
+  ⇒ 越 `Append` 越靠内；
+- `rest/server.go:73-76` `AddRoutes`：`rest.WithMiddlewares([CheckBlacklistMiddleware], routes...)`
+  （`routes.go:33-34`）+ `rest.WithJwt(...)`（`routes.go:73`）；
+- ⚠️ `rest/engine.go:154-156` 的原生 `TimeoutHandler` 被 `observability.DisableNativeRestTimeout`
+  关掉了（`service/user/user/api/usercenter.go:35`）⇒ 3s **只**由 observability 提供。
+
+⇒ **Go 执行序：原生 → JWT 验签 → observability(3s) → 黑名单 → handler**
+⇒ **JWT 在 3s 预算之外；黑名单在 3s 预算之内。**
+
+⚠️ **注册点决定了一个重要事实**：`usercenter.go:37` 的
+`server.Use(observability.NewHTTPMiddleware(...))` 是**每个 api 服务各自注册**的
+（`admincenter.go:36` 同款）⇒ **Go 的链序是「逐服务」决定的，不是全局常量。**
+
+#### 2. RAG 现状（与 Go 的差别只在 JWT 那一段）
+
+| 环节 | 位置 | 在 3s 预算内？ |
+|---|---|---|
+| `HttpMiddlewareFilter`（3s） | `service/common/.../spring/HttpMiddlewareFilter.java:37` `@Order(Ordered.HIGHEST_PRECEDENCE + 5)`（Servlet Filter ⇒ DispatcherServlet **外**） | — |
+| `JwtAuthInterceptor`（验签 + 黑名单） | `service/users/user/user-api/.../config/WebMvcConfig.java:56-59` `registry.addInterceptor(jwtAuthInterceptor)`（HandlerInterceptor ⇒ DispatcherServlet **内**） | **验签被覆盖**（❌ 与 Go 相反）· 黑名单在内（✅ 与 Go 一致） |
+
+#### 3. 改法 A（**落在 user 域内**，不动 `service/common`）
+
+把 **JWT 验签**从 `JwtAuthInterceptor` 拆出来，做成一个
+**`@Order` 序号更小**（比 `HttpMiddlewareFilter` 更外层，如 `HIGHEST_PRECEDENCE + 4`）的 Filter；
+**黑名单检查仍留在 interceptor** 里：
+
+```
+[JWT filter] → [3s HttpMiddleware] → [blacklist interceptor] → handler
+```
+
+⇒ **与 Go 的 [JWT] → [3s] → [blacklist] → handler 逐项一致** ✓
+⇒ 改动文件全部落在 `service/users/user/user-api/...` ⇒ **是 user 域内的改动**。
+
+#### 4. ⚠️ 三个连带项（**每一个都需要用户拍板**）
+
+| # | 连带项 | 依据 | 后果 |
+|---|---|---|---|
+| ① | **①（可观测性）会自动对齐** | Go 的 JWT 401 在 observability **之外** ⇒ 不进 access log/span/指标；改法 A 后 RAG 的 JWT 401 同样在 `HttpMiddlewareFilter` **之外** ⇒ 不进 `markHTTPResult` | ⇒ **① 从「已签字偏离」变成「已对齐」** ⇒ `SD-USERAPI-002` 的签字内容**不再适用**，需复核销号。⚠️ 黑名单 401 两侧都在 observability **内** ⇒ **不受影响** |
+| ② | **会推翻 N-1 的一部分** | Go 的 JWT 失败是 `rest/handler/authhandler.go:121` `writer.WriteHeader(http.StatusUnauthorized)` ⇒ **401 + 空 body**；RAG 现在是 `GlobalExceptionHandler` 转的 **401 + envelope(1006)**，而 **N-1 签的正是「RAG 统一成完整 envelope」** | 改法 A 把验签挪到 filter 后，异常**不再被 `@ControllerAdvice` 捕获**（`@ExceptionHandler` 只在 DispatcherServlet 内生效）⇒ filter 必须自己写响应 ⇒ **二选一**：照 Go 写空 body（推翻 N-1 的一半）/ 在 filter 里手写 envelope（保留 N-1） |
+| ③ | **推广是跨域的** | Go 逐服务 `server.Use` ⇒ **改法 A 才是对 Go 更忠实的做法**（每个服务对齐自己的 Go 侧），而非共享层一刀切 | RAG 有 10 个 api 服务，只改 user-api ⇒ **中间态是服务间不一致**（user-api 的 JWT 不计入 3s 预算，其余 9 个仍计入）⇒ 需 like/follow/comment/favorite/article/hot/message/task/admin **各域各改各的** |
+
+#### 5. 为什么不推荐「改法 B（共享层一刀切）」
+
+改 `service/common` 的 `HttpMiddlewareFilter`（位置或语义）可一次性对齐 10 个服务，
+但 ⚠️ **与 Go 的「逐服务链序」模型不符** —— Go 每个服务自己 `server.Use`，
+共享层一刀切会让 RAG 的链序**不再对应任何一个 Go 服务的链序**。
+⇒ 若最终要统一，**应逐服务对齐各自的 Go 侧**，而不是在共享层定一个全局顺序。
+
+#### 6. 边界结论
+
+- ✅ **user 域内能独立完成**：改法 A 的代码全部落在 `service/users/user/user-api`；
+- ❌ **user 域内完成不了**：全仓一致（需另外 9 个域各自推广）+
+  `SD-USERAPI-002` 与 N-1 **两份签字档**要改；
+- ⚠️ **签字档的连带比代码改动更需要先拍板**。
+
 ### DRIFT-USERAPI-010 —— 黑名单 401 的 `Content-Type` 拼写错误，RAG 有意不复刻 —— ✅ **已签字（`SD-2026-10-23-01/02/03` 的 N-1）**
 
 ```text
@@ -2277,7 +2347,7 @@ users-common **33** · user-rpc **122** · user-api **99**（+3：2 条接线 + 
 | `<=0` 语义 | no-op | no-op | ✅ |
 | 拒绝形状 | `w.WriteHeader(413)` ⇒ **413 空 body** | `setStatus(413)` ⇒ 同 | ✅ |
 | 相对鉴权的次序 | native middleware ⇒ **在 JWT 之外**（413 压过 401） | Filter ⊃ Interceptor ⇒ 同 | ✅ |
-| 运行时证据 | ⚠️ 静态 | ⚠️ 静态（真容器由 `tools/difftest/check-protection-layer.sh` 守） | ⚠️ |
+| 运行时证据 | ⚠️ 静态 | ⚠️ 静态 —— ⚠️ **2026-10-24 复核更正**：本行原写「真容器由 `tools/difftest/check-protection-layer.sh` 守」，**该脚本在仓内不存在**（复核脚本实测）⇒ **MaxBytes 在 `service/common` 没有专用测试类**（`GoStyleMaxBytesFilterTest` 不存在）；仅被 5 个**别的域**的 MVC 测试间接断言 413（`MessageApiProtectionMvcTest` / `MessageApiProtectionRealTomcatTest` / `LikeApiProtectionMvcTest` / `ArticleApiRouteAuthBoundaryTest` / `TaskApiWiringTest`）。⚠️ **user-api 侧自身零守网** | ⚠️ |
 
 ### 4. 逐条对照 · Breaker（入口）
 
@@ -2396,6 +2466,64 @@ Go 侧 `breaker.NewBreaker` 在**路由注册时**调用 ⇒ **有界**。
 | **C. 两条都签成有意偏离** | 承认「RAG 的过载闸门比 Go 更严」并签字 | 需要用户签字；且**键空间无界**这一条**不宜签字**（它是健壮性问题，不是口径分歧） |
 
 ⇒ **建议：A（键空间有界化）+ MaxConns 改 per-route**，但这是**共享层（影响全部 10 个 api 服务）**的设计变更 ⇒ 交由用户拍板。
+
+#### 7.x 归属澄清与 4 处补充（2026-10-24 · 用户提问触发的复核）
+
+**① 本条属于 `service/common`（共享层），**不**属于 `users-common`。**
+
+| 模块 | 内容 | 含过载保护吗 |
+|---|---|---|
+| `service/common/src/main/java/com/rag/common/protection/` | 11 个类：`GoStyleMaxConnsFilter` / `GoStyleMaxBytesFilter` / `GoStyleBreakerFilter` / `GoStyleCpuSheddingFilter` / `GoStyleBreaker` / `GoStyleAdaptiveShedder` / `GoStyleGrpcClientBreakerInterceptor` / `GoStyleProtectionConfiguration` / `GoStyleProtectionProperties` / `GoStyleCircuitOpenException` / `GoStyleStatusCapturingResponse` | ✅ **全部在这** |
+| `service/users/users-common/` | `JwtUtil` / `SchemaInitializer` / `PasswordUtil` / `GoStyleRequired*` / `ErrorCode` 等 9 个文件 | ❌ **完全不含** |
+
+⇒ ① 要改 `GoStyleMaxConnsFilter`、② 要改 `GoStyleBreakerFilter`，**两处都在 `service/common`** ⇒ 一次改动影响全部 10 个 api 服务。
+⇒ **台账落点建议**：`docs/DRIFT/common/protection.md`（共享层自己的档）。
+⚠️ **该文件当前一条漂移条目都没有**（只有一行「保护层已下沉到 `service/common`」的迁移说明）
+⇒ **共享层的行为却只由某个业务域的单侧台账记着** ⇒ 这正是 AGENTS.md §3.5
+「少审共享件 = 拿一面没人校过的镜子照自己」的形态。
+⚠️ **本轮未写该文件** —— 它属 `common` 域会话的工作面（§5.3：只写自己域的文件）。
+
+**② ⚠️ 代码注释给了一个与实现矛盾的安全保证（本轮新发现）**
+
+`service/common/src/main/java/com/rag/common/protection/GoStyleBreakerFilter.java:69-71` 写着：
+
+> 「为什么 breaker 实例不做无界缓存：key 由 method+path 构成，基数等于路由数
+> （本模块 13 条，**含未匹配路径不会建 key**），无界增长的现实风险为零。」
+
+但同文件 `:86` `breakerFor()` 是 `breakers.computeIfAbsent(routeKey(request), GoStyleBreaker::new)`，
+而 `:109` `doFilter` 对**每一个到达 filter 的请求**都调它 ⇒ **未匹配路径照样建 key**。
+⇒ **注释与实现直接矛盾** ⇒ 而且注释给的是**错误的安全保证**
+（⇒ 审阅者读注释会以为「键空间天然有界」而漏掉本条）。
+⚠️ 上文第 ② 段的判断（未匹配路径也建 key）是**对的**；错的是**代码注释**。
+
+**③ ⚠️ 键基数比「路由数」大得多（本轮新发现）**
+
+- RAG 的键是 `routeKey()`（`:90-92`）= `method + "://" + request.getRequestURI()`
+  ⇒ **实际具体路径**；
+- Go 的键是 `breakerhandler.go:20` `breaker.WithName(strings.Join([]string{method, path}, "://"))`
+  ⇒ **注册路由模板**，且 breaker 在**路由注册时**一次性建好 ⇒ 键数 = 路由数。
+- ⇒ 同一批路由下，RAG 的键基数 = **实际出现过的不同具体路径数**，Go 的 = **注册路由数**。
+- ⚠️ **放大器**：`article-api` 有 `@GetMapping("/article/{id}")`（`ArticleController.java:166,179`）
+  这类**路径参数路由** ⇒ **一个 Go 路由对应 N 个 RAG 键**。
+
+**④ ⚠️ 没有回归网（本轮新发现）**
+
+`GoStyleBreakerFilter.trackedRoutes()`（`:95-97`，专为观测键基数而写的测试钩子）
+在**整个测试目录零引用** ⇒ 键空间无界**没有任何回归网**。
+
+**⑤ 本条在其它域的记录情况（本轮新发现 —— 这就是「单侧」的具体形态）**
+
+| 域 | MaxConns 粒度（①） | breaker 键空间（②） |
+|---|---|---|
+| `users/user` | ✅ 已记（本条） | ✅ 已记（本条） |
+| `message` | ✅ 已记（`docs/DRIFT/message/api.md:196`，定性为「刻意的表达层差异（已在 javadoc 留痕，非隐藏缺口）」） | ❌ **没记** |
+| `like` | ❌ **判 EQUIVALENT**（`docs/DRIFT/like/api.md:305` 只比了参数值 10000==10000） | ❌ **没记** |
+| `hot` | ❌ **判 EQUIVALENT（静态）**（`docs/DRIFT/hot/api.md:447`） | ❌ **没记** |
+| `article` | ⏳ 挂在 unresolved（`docs/DRIFT/article/api.md:711`，未结论） | ❌ **没记** |
+
+⇒ **① 其实已有共识口径**（message 域已定性 + `GoStyleMaxConnsFilter.java:58-66` 已留痕）
+⇒ **① 缺的只是「签字」**（进 `docs/Intentional_Deviations/`），
+**真正需要设计决策的是 ②**。
 
 ### 8. 本轮的一条方法论收获
 

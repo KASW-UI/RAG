@@ -1279,7 +1279,7 @@ SEMANTICALLY EQUIVALENT（全部可达路径） + 7 项 OBSERVABLE DIFFERENCE
 - **修法**：删掉早退，`update_time` **无条件**进 SET
   ⇒ 发出的 SQL 与 Go 的 `UPDATE users SET update_time = ? WHERE uid = ?` 逐条同构。
 - **守门**：`UserRpcContainerWiringTest#zeroValuePatchStillAdvancesUpdateTimeOnly`（**真 PG**，本轮**反转**了旧用例）
-  + `UserRpcJsonbAndAvatarProjectionTest#updateUserById_noBusinessFields_stillAdvancesUpdateTime`。
+  + `UserRpcJsonTextAndAvatarProjectionTest#updateUserById_noBusinessFields_stillAdvancesUpdateTime`。
 
 ### 2. 🔴 归因更正：偏移量由**进程本地时区**决定，**不是** PG 会话时区
 
@@ -1474,7 +1474,7 @@ admin 域拥有 `03_create_admin.sql` / `04_create_admin_invite.sql`，**四个�
 |---|---|---|---|
 | `UserRpcAvatarHistoryTimestamptzParityTest`（**新建**） | **9** | V-004 可观察半边 + V-009 | ✅ Testcontainers `postgres:16-alpine` |
 | `UserRpcContainerWiringTest`（**反转 1 条**） | 12 | V-010 | ✅ |
-| `UserRpcJsonbAndAvatarProjectionTest`（**反转 1 条**） | 4 | V-010 | ❌ mock 数据层（**但**断言的是 SQL 片段形态） |
+| `UserRpcJsonTextAndAvatarProjectionTest`（**反转 1 条**） | 4 | V-010 | ❌ mock 数据层（**但**断言的是 SQL 片段形态） |
 | `UserDomainServiceTest`（**反转 2 条 + 新增 1 条**） | 44 | V-004 渲染 | ❌ 纯内存 |
 | `UserRpcUsersUserTimestamptzParityTest`（既有） | 6 | `users_user` 时间列 | ✅ |
 | `UserRpcLoginNullStatusFailClosedTest`（既有） | 5 | V-001 | ✅ |

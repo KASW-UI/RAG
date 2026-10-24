@@ -886,7 +886,7 @@ RAG 曾用 `if (!any) return 0;` 把它挡掉了。修复后双侧实测：空 b
 
 **同时反转了 5 条错误断言**（AGENTS.md §3.3.3「先改/删错误断言，再改实现」）：
 `UserDomainServiceTest` 3 条（改期望值 + `TimeZone.setDefault` 强制时区，机器无关）、
-`UserRpcJsonbAndAvatarProjectionTest` 1 条、`UserRpcContainerWiringTest` 1 条。
+`UserRpcJsonTextAndAvatarProjectionTest` 1 条、`UserRpcContainerWiringTest` 1 条。
 
 ### 5. 🔴 admin 侧待裁决问题（本轮**只报告，不修改**）
 
@@ -940,3 +940,88 @@ RAG 曾用 `if (!any) return 0;` 把它挡掉了。修复后双侧实测：空 b
    本轮只验了「两侧 id 不同但同形」，没验「同一 id 是否会撞」。
 5. **`api.md` 的 DRIFT-USERAPI-003 ~ 010 一条没动** —— 本轮只锁 claim 语义两条。
 6. **未复跑 `users/admin` 的任何测试** —— 那是并行会话的范围。
+
+---
+
+## 2026-10-24：「台账 vs 实际」机器复核（users/user 域 · 首次）
+
+### 0. 为什么要做
+
+AGENTS.md §9 / §8 / §0 三处都写着「**过期状态必须随实测同步更正**」，
+而本域台账历史上反复出现三类**台账脱节**：
+① 台账指向的测试类 / 文件**根本不存在**；
+② 台账引用的 Go `文件:行号` 与真源**对不上**；
+③ 台账声明的**计数**与仓库实际对不上。
+
+⇒ 这三类**全部是机器可判的** ⇒ 本轮把复核写成脚本（`tools/check-ledger-selfcheck.py`），
+让「复核」从「靠人读」变成「一条命令」。
+
+### 1. 复核工具
+
+`tools/check-ledger-selfcheck.py`（本轮新建）：
+- **A 引用存在性**：台账提到的每个测试类 / 文件路径，在 **RAG 仓 + Go 真源仓 + Go 模块缓存**里是否真的存在；
+- **B 行号引用**：每个 `file.go:NN` 能否解析到真实文件、行号是否在范围内，并**打印该行附近的实际文本**供人工判读
+  （⚠️ **只验「那行存在且长这样」，不自动判语义** —— 语义判断必须由人/agent 读原文，见 §3.3.1）；
+- **C 计数一致性**：台账声明的 `Tests run: N` vs surefire 报告；
+- **D 已修事实**：台账写「✅ 已修」的条目，逐条挂一个**可机器验证的代码事实**
+  （文件 + 必须出现的字符串），当前 5 条（API-011 / API-012 / API-014 / V-003 / V-004）**全部命中**。
+
+⚠️ **去噪规则也是实测踩出来的**（写进脚本注释，别删）：
+框架注解名不是测试类 · Go 侧路径在真源仓不在 RAG 仓 · go-zero / pgx / gorm 的文件在**模块缓存**里 ·
+同名文件多份时**按行数消歧** · 「删除 / 已改名 / 不存在」是**历史记述**不是引用 ·
+`tmp/…` 临时探针本就不在仓内。
+
+### 2. 复核结果（6 份台账 · 467 条 OK / 87 条 WARN / 3 条 FAIL）
+
+| # | 发现 | 类型 | 处置 |
+|---|---|---|---|
+| **1** | `docs/DRIFT/users/user/api.md` 第八轮 MaxBytes 表写「真容器由 `tools/difftest/check-protection-layer.sh` 守」—— **该脚本在仓内不存在** | 🔴 **台账事实错误** | ✅ 已更正（见下） |
+| **2** | `rpc.md:1282` / `rpc.md:1477` / `_shared.md:889` 引用的守门类 **`UserRpcJsonbAndAvatarProjectionTest`** —— 该类**已改名为 `UserRpcJsonTextAndAvatarProjectionTest`**（真源：`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/service/UserRpcJsonTextAndAvatarProjectionTest.java`） | 🔴 **守门清单指向不存在的类** | ✅ 三处已改新名 |
+| **3** | 同上改名**未同步到 admin 域**：`docs/DRIFT/users/admin/rpc.md:372,382` 仍用旧名 | ⚠️ **跨域** | ⏳ **本轮未改**（§5.3：只写自己域的文件）⇒ **提醒 admin 会话** |
+
+**另新查出 1 个覆盖缺口**（复核的副产品）：
+
+> **user-api 侧的四个过载保护里，`MaxBytes` / `MaxConns` / `CpuShedding` 三层在 user-api 自身**零守网**
+> （`service/users/user/user-api/src/test/` 下只有熔断的两个测试）；
+> `service/common` 侧也只有 `GoStyleMaxConnsFilterTest` / `GoStyleCpuSheddingFilterTest` /
+> `GoStyleAdaptiveShedderTest` / `GoStyleBreakerTest` / `GoStyleGrpcClientBreakerInterceptorTest`
+> —— **不存在** `GoStyleMaxBytesFilterTest`（专用测试类）。
+> ⇒ MaxBytes（413 空 body + chunked 放行）目前只被**别的域**的 5 个 MVC 测试间接覆盖
+> ⇒ **users/user 域这一层是裸的**。
+
+**发现 1 的更正后表述**（`api.md` 第八轮 MaxBytes 表）：
+
+> | 运行时证据 | ⚠️ 静态 | ⚠️ 静态 —— ⚠️ **2026-10-24 复核更正**：本行原写「真容器由
+> `tools/difftest/check-protection-layer.sh` 守」，**该脚本在仓内不存在** ⇒ **MaxBytes 在
+> `service/common` 没有专用测试类**；仅被 5 个**别的域**的 MVC 测试间接断言 413
+> ⇒ **user-api 侧自身零守网** | ⚠️ |
+
+### 3. WARN 的 87 条：不处理，但**记下性质**
+
+| 类别 | 条数 | 性质 | 处置 |
+|---|---|---|---|
+| 路径写法与实际不符（`user-api/advice/GlobalExceptionHandler.java` 之类） | ~20 | **表述差异**，文件都在 | 不改（本仓允许省略路径前缀） |
+| 跨仓同名（`config.go:55` 在真源与模块缓存都有） | ~60 | **行号可能指错文件**的风险提示 | 不改，但**人读时必须确认是哪一份** |
+| 临时探针 `tmp/userprobe/*` | 2 | **不可复现** | 不改（本就不在仓内） |
+
+⚠️ 跨仓同名这条**值得单列**：本仓的 Go 引用大量形如 `rest/config.go:55`（go-zero 模块内）
+与 `db.go:21`（真源仓内）—— **同名不同仓** ⇒ 脚本能验「行号在范围内」，
+但**验不出「引的是哪一份」** ⇒ 这一类**仍需人工判读**，不能拿脚本的 OK 当结论。
+
+### 4. 复核脚本本身的边界（诚实声明）
+
+- ❌ **不判语义**：只保证「你引用的那行存在且长这样」；
+- ❌ **不覆盖非 users/user 域**（其它域台账要各会话自己跑）；
+- ❌ **不检查 Go 侧行为**（那是活体对拍的事，不是台账复核的事）；
+- ⚠️ **C 类（计数）只能用 surefire 报告目录** ⇒ 该目录**可能含陈旧 XML** ⇒
+  以 **mvn 输出的 `Tests run:`** 为准（见 `PIT-USERS-SHARED-016`）。
+
+### 5. 复跑方式
+
+```bash
+python3 tools/check-ledger-selfcheck.py            # 复核 users/user 域 6 份台账
+python3 tools/check-ledger-selfcheck.py --strict   # 有 FAIL 时退出码非 0（可进 CI）
+python3 tools/check-ledger-selfcheck.py --ledger <file> ...   # 指定台账
+```
+
+⚠️ 本轮复核后： **FAIL 3 → 0**（发现 1、2 已修；发现 3 属 admin 域，本轮不动 ⇒ 仍为 WARN 级）。
