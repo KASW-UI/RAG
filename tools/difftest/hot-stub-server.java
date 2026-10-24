@@ -109,6 +109,28 @@ final class HotStubServer {
      * <b>超时语义不变</b>）、睡眠压到 5s ⇒ 滞留线程数降一个量级。
      */
     public static final String MODE_ARTICLE_SLOW_SHORT = "article-slow-short";
+    /**
+     * **多条 + 固定延迟**模式（U10 延迟分布对拍用）：100 条热榜，article-rpc 每次睡
+     * {@link #ARTICLE_LATENCY_MS} ms 后**正常返回**。
+     *
+     * <p><b>为什么需要它</b>：U10 要测的是「8 并发 × 100 items 的 p99」。
+     * <ul>
+     *   <li>条数必须够 100：Go 侧 hot-api 硬编码 {@code TopK=100}
+     *       （{@code getHotArticlesLogic.go:63}）⇒ 桩要能给满 100 条，
+     *       否则两侧都只补全 5~20 条，**测不到并发窗口**。</li>
+     *   <li>必须有<b>固定延迟</b>：没有延迟时，补全是「瞬间完成」，
+     *       延迟分布只反映调度抖动，测不出「补全并发窗口被共享池腰斩」这件事。</li>
+     *   <li>必须<b>正常返回</b>（不是超时）：超时路径会触发 HTTP 3s 超时 / 熔断，
+     *       把「延迟分布」问题搅成「失败模式」问题。</li>
+     * </ul>
+     */
+    public static final String MODE_MANY_100 = "many-100";
+
+    /** {@link #MODE_MANY_100} 的热榜条数（= Go 侧硬编码的 TopK）。 */
+    private static final int MANY_ITEM_COUNT = 100;
+
+    /** {@link #MODE_MANY_100} 下 article-rpc 的固定处理时长（毫秒）。 */
+    private static final long ARTICLE_LATENCY_MS = 20L;
 
     /** 慢模式下返回的热榜条数 —— 8 并发 × 2s gRPC deadline ⇒ 需 > 8 条才能撑过 3s HTTP 超时。 */
     private static final int SLOW_ITEM_COUNT = 20;
@@ -230,7 +252,15 @@ final class HotStubServer {
             }
 
             List<HotArticleItem> items = new ArrayList<>();
-            if (MODE_ARTICLE_SLOW.equals(m) || MODE_ARTICLE_SLOW_SHORT.equals(m)) {
+            if (MODE_MANY_100.equals(m)) {
+                // U10：给满 100 条（= Go 的 TopK），article-rpc 带固定延迟 ⇒ 可测延迟分布
+                for (int i = 1; i <= MANY_ITEM_COUNT; i++) {
+                    items.add(HotArticleItem.newBuilder()
+                            .setArticleId(String.format("many-%03d", i))
+                            .setHotScore(1000 + i)
+                            .build());
+                }
+            } else if (MODE_ARTICLE_SLOW.equals(m) || MODE_ARTICLE_SLOW_SHORT.equals(m)) {
                 // 慢模式：条数刻意 > 并发窗口 8 ⇒ 3 批 × 2s gRPC deadline > 3s HTTP 超时
                 int count = MODE_ARTICLE_SLOW_SHORT.equals(m) ? SLOW_ITEM_COUNT_SHORT : SLOW_ITEM_COUNT;
                 for (int i = 1; i <= count; i++) {
@@ -345,6 +375,28 @@ final class HotStubServer {
                 record("GetArticle article_id=" + id + " public_only=" + publicOnly
                         + " incr_view=" + incrView + " -> MISSING");
                 observer.onNext(GetArticleResponse.getDefaultInstance());
+                observer.onCompleted();
+                return;
+            }
+
+            if (MODE_MANY_100.equals(m)) {
+                // U10：固定处理时长（**正常返回**，不触发超时/熔断）
+                record("GetArticle article_id=" + id + " public_only=" + publicOnly
+                        + " incr_view=" + incrView + " -> OK(latency=" + ARTICLE_LATENCY_MS + "ms)");
+                // ⚠️ **U10 的关键埋点**：ENTER/EXIT 带时间戳 ⇒ 事后能算出
+                //    「下游实际同时在途数」。这是判定「RAG 侧的共享补全池是否把
+                //    8 并发 × 每请求 8 窗口 = 64 的并发度腰斩」的**直接证据**，
+                //    也是判定 CallerRunsPolicy 有没有触发（>32 ⇒ 有）的依据。
+                //    （事件日志与主调用日志分开：主日志要跨侧逐行比对，不能带时间戳。）
+                event("ARTICLE_ENTER id=" + id);
+                try {
+                    Thread.sleep(ARTICLE_LATENCY_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                event("ARTICLE_EXIT id=" + id);
+                observer.onNext(GetArticleResponse.newBuilder()
+                        .setArticle(articleOf(id, ArticleStatus.PUBLISHED)).build());
                 observer.onCompleted();
                 return;
             }

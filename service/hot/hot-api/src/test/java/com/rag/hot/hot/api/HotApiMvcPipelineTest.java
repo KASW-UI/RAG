@@ -142,6 +142,40 @@ class HotApiMvcPipelineTest {
                 .andExpect(jsonPath("$.data.page_size").value(50));
     }
 
+    /**
+     * ⚠️ **U9/D2 系统变异补出来的边界用例**（2026-10-24 第九轮）。
+     *
+     * <p><b>为什么必须有这条</b>：上面的 {@code pageSizeCapIsApplied} 请求的是
+     * {@code page_size=999} —— <b>远超上限</b> ⇒ 把上限从「{@code > 50}」放宽到
+     * 「{@code > 51}」它**照样**会被截到 50 ⇒ <b>抓不到那个变异</b>。
+     * ⇒ 真正能区分「{@code > 50}」与「{@code > 51}」的输入是
+     * <b>恰好越过上限一格的 {@code 51}</b>，此前<b>没有任何测试</b>钉它。
+     *
+     * <p><b>Go 出处</b>：{@code getHotArticlesLogic.go:185-187}
+     * <pre>
+     * if pageSize > maxPageSize {      // maxPageSize = 50
+     *     pageSize = maxPageSize
+     * }
+     * </pre>
+     * ⇒ {@code 50} 不截断（还是 50）、{@code 51} 截断成 50、{@code 999} 截断成 50。
+     * 本测试把三个值都钉住，其中 {@code 51} 是**唯一**能发现「上限被放宽」的输入。
+     */
+    @Test
+    @DisplayName("⚠️ page_size 恰好越过上限一格（51）时也必须截到 50 —— 边界值")
+    void pageSizeCapBoundaryIsApplied() throws Exception {
+        stubHappyPath();
+
+        // 恰好等于上限：Go 不截断（pageSize > 50 才截）⇒ 仍是 50
+        mockMvc.perform(get("/hot/v1/articles").param("page_size", "50"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.page_size").value(50));
+
+        // 恰好越过上限一格：Go 截断成 50（**唯一**能发现「上限被放宽」的输入）
+        mockMvc.perform(get("/hot/v1/articles").param("page_size", "51"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.page_size").value(50));
+    }
+
     @Test
     @DisplayName("⚠️ 404 是 Go 的裸响应：text/plain + nosniff + 尾随换行，无信封")
     void notFoundIsBareGoStyleResponse() throws Exception {
