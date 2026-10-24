@@ -1100,13 +1100,17 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
 ⇒ **与 Go 的 [JWT] → [3s] → [blacklist] → handler 逐项一致** ✓
 ⇒ 改动文件全部落在 `service/users/user/user-api/...` ⇒ **是 user 域内的改动**。
 
-#### 4. ⚠️ 三个连带项（**每一个都需要用户拍板**）
+#### 4. ⚠️ 三个连带项（**每一个都需要用户拍板** —— ② 已于 2026-10-24 拍板）
 
 | # | 连带项 | 依据 | 后果 |
 |---|---|---|---|
 | ① | **①（可观测性）会自动对齐** | Go 的 JWT 401 在 observability **之外** ⇒ 不进 access log/span/指标；改法 A 后 RAG 的 JWT 401 同样在 `HttpMiddlewareFilter` **之外** ⇒ 不进 `markHTTPResult` | ⇒ **① 从「已签字偏离」变成「已对齐」** ⇒ `SD-USERAPI-002` 的签字内容**不再适用**，需复核销号。⚠️ 黑名单 401 两侧都在 observability **内** ⇒ **不受影响** |
-| ② | **会推翻 N-1 的一部分** | Go 的 JWT 失败是 `rest/handler/authhandler.go:121` `writer.WriteHeader(http.StatusUnauthorized)` ⇒ **401 + 空 body**；RAG 现在是 `GlobalExceptionHandler` 转的 **401 + envelope(1006)**，而 **N-1 签的正是「RAG 统一成完整 envelope」** | 改法 A 把验签挪到 filter 后，异常**不再被 `@ControllerAdvice` 捕获**（`@ExceptionHandler` 只在 DispatcherServlet 内生效）⇒ filter 必须自己写响应 ⇒ **二选一**：照 Go 写空 body（推翻 N-1 的一半）/ 在 filter 里手写 envelope（保留 N-1） |
+| ② | **会推翻 N-1 的一部分** | Go 的 JWT 失败是 `rest/handler/authhandler.go:121` `writer.WriteHeader(http.StatusUnauthorized)` ⇒ **401 + 空 body**；RAG 现在是 `GlobalExceptionHandler` 转的 **401 + envelope(1006)**，而 **N-1 签的正是「RAG 统一成完整 envelope」** | 改法 A 把验签挪到 filter 后，异常**不再被 `@ControllerAdvice` 捕获**（`@ExceptionHandler` 只在 DispatcherServlet 内生效）⇒ filter 必须自己写响应 ⇒ **二选一**：照 Go 写空 body（推翻 N-1 的一半）/ 在 filter 里手写 envelope（保留 N-1）<br>✅ **已拍板（2026-10-24 用户）：选 envelope** ⇒ **N-1 / `SD-USERAPI-003` 保持不变**；改法 A 若实施，JWT 401 **仍写完整 envelope** ⇒ 改法 A **不会**让 RAG 的两处 401 形态分裂 |
 | ③ | **推广是跨域的** | Go 逐服务 `server.Use` ⇒ **改法 A 才是对 Go 更忠实的做法**（每个服务对齐自己的 Go 侧），而非共享层一刀切 | RAG 有 10 个 api 服务，只改 user-api ⇒ **中间态是服务间不一致**（user-api 的 JWT 不计入 3s 预算，其余 9 个仍计入）⇒ 需 like/follow/comment/favorite/article/hot/message/task/admin **各域各改各的** |
+
+> ✅ **连带项② 已关闭**（2026-10-24 用户拍板：接受 envelope）⇒
+> **改法 A 现在只剩 ①（自动对齐 ⇒ `SD-USERAPI-002` 需复核销号）与 ③（跨域推广）**。
+> ⇒ 换句话说：**改法 A 的「签名档阻力」已清零**，剩下的是「销号流程」与「推广节奏」。
 
 #### 5. 为什么不推荐「改法 B（共享层一刀切）」
 
@@ -1543,6 +1547,36 @@ SEMANTICALLY NOT EQUIVALENT
 > 仍有 **3 条未签字的 OBSERVABLE DIFFERENCE**（009② / 013 / **015**）挂着，
 > 且 `DRIFT-USERAPI-014` 的**跨域推广**（其余 api 服务有同款漂移）尚未做。
 > ⇒ 组件**不能**判 `SEMANTICALLY EQUIVALENT`。
+
+### 🆕 跨域归属清单（2026-10-24 第十轮 · 「剩下的漂移是不是都在别的域」）
+
+> 用户提问：「现在是否都是跨域的漂移？」
+> ⇒ **不是。** 3 条里 **2 条落在 user 域内可独立闭环**，只有 1 条属共享层。
+> ⚠️ 判据（§5.3）：**能不能只改本域文件就闭环**，而不是「像不像大问题」。
+
+| 条目 | 形态 | 归属 | 只改本域文件能否闭环 |
+|---|---|---|---|
+| `DRIFT-USERAPI-009②` | 3s 预算的作用域（Go 不含验签、RAG 含） | **改法 A 落在 `service/users/user/user-api`**（`service/common` 不动） | ✅ **能**（域内）<br>⚠️ 但「全仓一致」要 9 个域各改各的（Go 是逐服务 `server.Use`）⇒ **推广跨域，落地不跨域** |
+| `DRIFT-USERAPI-015` | Redis 主机名解析失败 ⇒ 200/503 摇摆 | 主修法 = 改 **user-api 自己的** `application.yml` | ✅ **能**（域内）<br>⚠️ 同款配置另见 `admin-api`（跨子域）与 `favorite-api`（跨域）|
+| `DRIFT-USERAPI-013` | 过载保护（breaker 键空间 + 注释与实现矛盾） | **`service/common`**（11 个 protection 类） | ❌ **不能** ⇒ **这才是唯一真正跨域的一条** |
+
+**⇒ 结论**：users/user 域**不是**「只剩跨域的活」。
+**域内可独立闭环 2 条（009② / 015）**，其中 015 是本轮新发现、修法只有一行配置；
+⇒ 唯一必须等共享层的只有 013（且它当前**未签字**、属「待拍板」而非「已确认漂移」）。
+
+**⚠️ 015 的成立条件不是「用了 Redis 就有」，而是「Redis 命令超时 ≥ HTTP 预算」**（实测全量）：
+
+| api 服务 | Redis 命令超时 | HTTP 预算 | 015 是否命中 |
+|---|---|---|---|
+| **user-api**（本域） | 3s | 3s | ✅ **命中**（等值 ⇒ 竞速 ⇒ 200/503 摇摆）|
+| `admin-api`（users/admin 子域） | 3s | 3s | ✅ 命中（同款配置）|
+| `favorite-api`（favorite 域） | 3s | 3s | ✅ 命中（同款配置）|
+| `follow-api`（follow 域） | **2s** | 3s | ❌ 不命中（2s < 3s ⇒ 提前失败 ⇒ fail-open 200）|
+
+⇒ ⚠️ 推论：**修 015 之前先定「Redis 命令超时与 HTTP 预算的关系」**，
+否则每个域的修法会各不相同（follow-api 已经用 2s「意外躲开」了）。
+⚠️ 且 follow-api 的 2s 与 Go 的 go-redis 默认 `ReadTimeout=3s` **不同** ⇒
+**那本身可能是一条尚未审的差异**（本次未审，登记为待办）。
 
 ---
 

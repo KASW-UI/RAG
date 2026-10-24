@@ -197,6 +197,7 @@ public class HttpMiddlewareFilter implements Filter {
 |---|---|
 | 对应 DRIFT | `DRIFT-USERAPI-009` ② 的**连带项**（N-1 的延伸与明确化） |
 | 签字日期 | **2026-10-24** |
+| 适用范围 | **现状**（JWT 验签在 `@ControllerAdvice` 内）**＋ 改法 A 落地后**（JWT 验签移到 Filter）——<br>⚠️ 后者是 **2026-10-24 用户补充拍板**：「009 接受 envelope」⇒ 见下方「适用范围扩展」 |
 | 决定 | **保留 RAG 现状**：JWT 验签失败 ⇒ **HTTP 401 + 完整 envelope** `{code,msg,data}`（业务码 1006 `TOKEN已过期`），**不复刻 Go 的「401 + 空 body」** |
 | 性质 | 有意偏离 —— 方向是「**统一**」而非「**分裂**」（见「为什么签字」第 2 条） |
 | 影响面 | **仅响应体形状**；**HTTP 状态码（401）与 Content-Type 不变**；不涉及任何业务路径 |
@@ -238,6 +239,22 @@ writer.WriteHeader(http.StatusUnauthorized)
 4. ⚠️ **本条不覆盖 `DRIFT-USERAPI-009` ② 的「3s 超时作用域」差异** ——
    那是**行为差异**（超时预算覆盖范围），本条只签**响应体形状**。
    ⇒ ② 仍挂 `DRIFT-USERAPI-009`，**不因本条而关闭**。
+
+### 🆕 适用范围扩展（2026-10-24 用户补充拍板：「009 接受 envelope」）
+
+`docs/DRIFT/users/user/api.md` 的 `DRIFT-USERAPI-009 ②` 有一条**改法 A**
+（把 JWT 验签从 `JwtAuthInterceptor` 拆成更外层的 Filter，改动全落在 user 域内）。
+该改法落地后，JWT 401 会由 **Filter** 直接写出，**不再经过 `@ControllerAdvice`**
+⇒ 「body 写空（复刻 Go）还是写 envelope（保留 N-1）」就变成一个**必须先拍板**的问题。
+
+> ✅ **用户 2026-10-24 拍板：接受 envelope。**
+> ⇒ **本条的适用范围从「现状」扩展到「改法 A 落地后」**：
+> 无论 JWT 验签在 advice 内（现状）还是在 Filter 内（改法 A），
+> **401 一律写完整 envelope** ⇒ **N-1 与本条都不因改法 A 而动摇**。
+
+⇒ 连带效果：**`DRIFT-USERAPI-009 ②` 的三个连带项里，②（会推翻 N-1 的一半）已关闭**
+⇒ 剩下 ①（① 可观测性会自动对齐 ⇒ `SD-USERAPI-002` 需复核销号）与 ③（推广跨域）
+⇒ 即：**改法 A 的「签字档阻力」已清零**，剩下的是销号流程与推广节奏。
 
 ### 与 `SD-USERAPI-002` 的关系（两条各管一面，别混）
 
