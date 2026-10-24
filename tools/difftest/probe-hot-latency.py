@@ -190,6 +190,8 @@ def main():
     ap.add_argument("--concurrency", type=int, default=8)
     ap.add_argument("--iterations", type=int, default=20)
     ap.add_argument("--mode", default="many-100")
+    ap.add_argument("--rag-pool-size", type=int, default=64,
+                    help="RAG 侧共享补全池容量（须与 HotHydrationExecutorConfiguration.POOL_SIZE 一致）")
     args = ap.parse_args()
 
     results = []
@@ -216,10 +218,13 @@ def main():
     print(f"  下游并发峰值：Go {go['downstream_peak_concurrency']}  vs  "
           f"RAG {rag['downstream_peak_concurrency']}")
     need = args.concurrency * 8
-    # RAG 侧共享补全池的容量（HotHydrationExecutorConfiguration.POOL_SIZE = 32）。
+    # RAG 侧共享补全池的容量（`HotHydrationExecutorConfiguration.POOL_SIZE`）。
+    # ⚠️ **这个值必须与代码里的 POOL_SIZE 保持一致** —— 它 2026-10-24 从 32 改成了 64
+    #    （DRIFT-HOTAPI-028 修复）⇒ 池容量变了，**判据的阈值也必须跟着变**，
+    #    否则「峰值 > 32 ⇒ CallerRuns 触发」会误报。
     # ⚠️ **这个 32 只属于 RAG 侧** —— Go 侧是裸 goroutine，**没有池** ⇒
-    #    拿「峰值 > 32」去判 Go 侧「CallerRuns 触发」是**判据套错对象**（Go 压根没这个机制）。
-    RAG_POOL_SIZE = 32
+    #    拿「峰值 > 池容量」去判 Go 侧「CallerRuns 触发」是**判据套错对象**（Go 压根没这个机制）。
+    RAG_POOL_SIZE = args.rag_pool_size
     print(f"  期望并发度（{args.concurrency} 请求 × 每请求 8 窗口）= {need}"
           f"；RAG 侧共享池容量 = {RAG_POOL_SIZE}")
     for st in results:

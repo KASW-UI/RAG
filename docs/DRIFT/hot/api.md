@@ -110,7 +110,7 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | # | 项 | 状态 | 备注 |
 |---|---|---|---|
 | D1 | **双侧活体对拍** | ✅ **已做（2026-10-24 第五轮）** | 端到端 HTTP 栈两侧**同时拉起**（Go hot-api + RAG hot-api + 下游桩），29 条用例逐字节比响应体 + 关键响应头 ⇒ **24/29 通过**，并**新查出 4 条漂移**（D21~D24）。详见「第五轮」一节。⚠️ 第二轮的**解析层/分页层/wire 层**双侧探针对拍仍然有效，但**第二轮的 CASE 表有 4 行结论被本轮推翻**（MockMvc 测不到真 Tomcat 的请求行校验） |
-| D2 | **变异验证** | ❌ 未做（2026-10-23） | 测试是否假绿未证实。⚠️ 第二轮已**间接证实一处假绿**（DRIFT-HOTAPI-015-B 的裸 mapper），但**系统变异仍未做** |
+| D2 | **变异验证** | ✅ **已闭合（第十轮，2026-10-24）** | hot-api 主干 **10 个系统性语义变异 ⇒ 10/10 全部被守门抓到**（基线 85→**86** tests / 0 failures）；🔴 并**查出并修补 1 个真实守门缺口**（`page_size=51` 边界无测试 ⇒ 新增 `HotApiMvcPipelineTest#pageSizeCapBoundaryIsApplied`）。⚠️ 第一轮 3 个「没变红」复核后确认**全是「变异本身是 no-op」**（含 `Integer.parseInt(String)` 本就是十进制，已 jshell 实测）⇒ 不是守门缺口。⚠️ **边界**：hot-rpc（84 条）/ hot-common（14 条）的系统性变异**仍未做** |
 | D3 | 客户端**断连**取消不再传播 | ✅ **活体坐实**（2026-10-24 第七轮） | Go 把请求 ctx 传进 100 次补全，Servlet 断连不会自动取消在飞的 gRPC。已用「请求线程取一次预算 + 显式下传」保住**超时**语义，**断连**语义不等价 ⇒ **第七轮用裸 socket 强制 RST 实测**：Go 侧断连后 **1~3ms** 内 8 个在飞 gRPC 全部取消；RAG 侧**等到 2s deadline** 才结束，**且断连后继续发第二批** ⇒ 差异由「静态推断」升级为「活体证据」。连带产出 **DRIFT-HOTAPI-025** |
 | D4 | Go panic 时指标误记为 `success` | ⚠️ 有意差异（2026-10-23） | Go 的 `defer` 读命名返回值 `err`，panic 展开时仍为 nil；Java 按客户端实际看到的结果记 `fail`。该路径无代码可达 |
 | D5 | 指标**暴露**是单向增强 | ⚠️ 有意偏离（2026-10-23） | Go 的 5 个指标注册了但**无端点暴露**（yaml 的 Prometheus 块无 Host；`DevServer` 块在 go-zero v1.10.2 无对应字段）。分桶边界已对齐回 `prometheus.DefBuckets` |
@@ -414,22 +414,25 @@ Java:  HotApiApplication 刻意不注册任何 interceptor/SecurityFilter；HotA
 ```text
 Go:    每个 item 起一个 goroutine（logic:101-109），容量 8 的 channel 信号量**每次调用新建**
        ⇒ 并发请求之间互不占用；结果写 hydrated[idx]，与完成顺序无关；wg.Wait() 汇合
-Java:  每请求 new Semaphore(8)，**先 acquire 再 submit** 到 32 共享线程池（4 请求 × 8）
+Java:  每请求 new Semaphore(8)，**先 acquire 再 submit** 到 64 共享线程池（8 请求 × 8）
        ⇒ 每请求同样享有完整 8 在途；results 按下标落位
-差异:  Go 的 goroutine 廉价、可无限等待；Java 的 32 池 + 64 队列 + CallerRunsPolicy
-       ⇒ **跨请求的合计在途数**被池卡在 32（Go 无上限）
-       ⇒ 极端并发下 Java 的**单请求延迟分布**与 Go 不同（结果相同）
+差异:  Go 的 goroutine 廉价、可无限等待；Java 的 64 池 + 64 队列 + CallerRunsPolicy
+       ⇒ **跨请求的合计在途**被池卡在 64（Go 无上限）⇒ 属**已签字偏离** SD-HOT-API-010
+       ⇒ 并发 ≤ 8 时完全等价；> 8 时 RAG 多一层排队（延迟分布不同，结果相同）
 ```
 ⇒ 常态 EQUIVALENT；**极端并发下 OBSERVABLE DIFFERENCE（延迟分布，非结果）**。
 
-> 🔴 **第十轮（U10）活体实测订正**（本节原结论有两处已被推翻/升级）：
+> 🔴 **第十轮（U10）活体实测订正 + 已修**（本节原结论有两处已被推翻/升级）：
 > ① ~~「池满时由请求线程自己跑」（Go 纯排队，Java 可能串行执行补全）~~ ——
->    **实测 `CallerRunsPolicy` 从未触发**（下游在途峰值 **32 = 池容量，未超过**）
+>    **实测 `CallerRunsPolicy` 从未触发**（下游在途峰值**未超过**池容量）
 >    ⇒ 两侧背压形态**同为纯排队**；
-> ② 「并发峰值 ==8 已由 RAG 侧断言（纯 Mockito + 真实 Semaphore，非双侧）」—— 现已升级为
+> ② 「并发峰值 ==8 已由 RAG 侧断言（纯 Mockito + 真实 Semaphore，非双侧）」—— 升级为
 >    **双侧活体 + 归因到具体参数**：下游在途峰值 **Go 64（= 8 请求 × 每请求 8，完整保留）
->    vs RAG 32（= 共享池容量，腰斩）** ⇒ p99 **1.76×** ⇒ **DRIFT-HOTAPI-028**。
+>    vs RAG 32（= 旧池容量，腰斩）** ⇒ p99 **1.76×** ⇒ **DRIFT-HOTAPI-028**
+>    ⇒ **已修**：池 32→64 ⇒ 复测**峰值 64 vs 64、p99 1.08×、p50 0.96×**
+>    ⇒ 残余差异转 **SD-HOT-API-010**。
 >    （脚本：`tools/difftest/probe-hot-latency.py`；判别器：桩的 ENTER/EXIT 事件日志算峰值）
+> ⚠️ **绝对延迟值不可跨轮比较**（机器负载在变）⇒ **只有同轮比值有意义**。
 
 ### §17 Timeout Semantic Equivalence
 ```text
@@ -715,13 +718,13 @@ Recommended Verification:
 | **U1** | 端到端 HTTP 栈两侧是否逐字节一致？ | `hotcenter.go` 全链路已读 | 真 Boot 上下文已跑 | ⚠️ **已闭合（第五轮）**：两套栈**同时拉起**（Go hot-api + RAG hot-api + 下游同构双桩），29 条用例逐字节比**响应体 + 关键响应头** + 期望值 + **下游调用序列** ⇒ 默认 **24/29**，带修正配方 **28/29**。⇒ **查出 4 条新漂移**（D21~D24），并**推翻第二轮 4 条 ✅ 结论** | ✅ **已完成**（`tools/difftest/run-hot.sh` + `diff-hot.py`；详见「第五轮」一节） |
 | **U2** | 3s 超时真的产出 `503 + Request Timeout`？ | `http.go:88` + `rest/config.go:55` | `HttpMiddleware:419-425` | ⚠️ **已闭合（第五轮）**：`CASE-21` 用「20 条热榜 + article-rpc 睡 30s」把请求**真的拖过 3s** ⇒ 两侧**都**产出 `HTTP 503 + "Request Timeout\n"`（**body 逐字节相同**）。⚠️ 唯一差异 = **缺 `X-Content-Type-Options: nosniff`** ⇒ 即 **D14**（代码在 `service/common` ⇒ **已移交 common 域**） | ✅ **已完成**（第五轮 `CASE-21`） |
 | **U3** | 客户端断连是否真产出 499，且 gRPC 真的被取消？ | `http.go:84-86` `errors.Is(Canceled)`→499 | `HttpMiddleware:332` IOException→499 | ✅ **已闭合（第七轮，2026-10-24）**：**裸 socket + SO_LINGER=0 强制 RST**（urllib/httpclient 都做不到「发到一半就消失」）⇒ 两侧都**实测**了：Go 侧 8 个在飞 gRPC 在**断连后 1~3ms** 全部被取消、且**日志里有** `[HTTP] 499 ... duration 503.3ms`；RAG 侧则**要等到 2s 调用 deadline** 才结束、**并在断连后继续发第二批**下游调用、且**没有任何 499 记录** ⇒ **D3 坐实**，并连带查出 **DRIFT-HOTAPI-025** | ✅ **已完成**（`tools/difftest/probe-hot-disconnect.py`） |
-| **U4** | client breaker 是否真在链上并会因超时打开？ | `zrpc/internal/client.go:112-113` + `breakerinterceptor.go:16-18` | 依赖「扫到 `com.rag.common`」+ `@GrpcGlobalClientInterceptor` | ⚠️ **部分闭合（第四轮）**：**装配层已补**（hot-api 此前**没有** wiring 测试 —— 而 `follow-api` / `message-api` 各有一份 ⇒ 正是本域缺口）⇒ 新增 `GoStyleGrpcClientBreakerWiringTest`（3 例：拦截器在 starter 的 `GlobalClientInterceptorRegistry` 里 + factory 认识本域两个 `@GrpcClient` 锚点 + 熔断默认开启）。⚠️ **「熔断真的打开」的行为级证据仍未做** | 决定 DRIFT-HOTRPC-004 的严重度；也可能暴露 Go 侧独有的 shadow 残留 | **仍需**：内嵌一个恒返 INTERNAL 的 gRPC server，连续调用直到 breaker 打开 ⇒ 观察 `interceptor.trackedMethods()`（参照 `message-api` 的 `GoStyleGrpcClientBreakerE2ETest` 范式）。⚠️ hot-api 侧响应体**看不出**熔断（前后都是 5001）⇒ 只能看拦截器/指标 |
+| **U4** | client breaker 是否真在链上并会因超时打开？ | `zrpc/internal/client.go:112-113` + `breakerinterceptor.go:13-18` | 依赖「扫到 `com.rag.common`」+ `@GrpcGlobalClientInterceptor` | ✅ **已闭合（第十轮，2026-10-24）**：**装配层**（第四轮补 `GoStyleGrpcClientBreakerWiringTest` 3 例）+ **行为层**（第十轮新增 `GoStyleGrpcClientBreakerE2ETest`：**内嵌恒返 INTERNAL 的 gRPC server**，连续调用直到 breaker 真打开）⇒ 判据是「**下游调用次数停止增长**」（hot-api 响应体前后都是 5001，**看不出**熔断）⇒ 断言「熔断必须短路下游」。⚠️ 第一版断言「前 40 次都打到下游」实测红（只有 16 次）⇒ 根因：go-zero `googlebreaker.go:52-79` 的 `total` 来自 `rollingwindow.go` 的 `Reduce(ignoreCurrent)` ⇒ **只认已完成的 250ms 桶**。**变异验证**：`service/common` 的 `if (!breaker.accept())` → `&& Boolean.FALSE` ⇒ 带 `-am` 重跑**变红** ✅ ⇒ 守门非假绿 | 决定 DRIFT-HOTRPC-004 的严重度；也可能暴露 Go 侧独有的 shadow 残留 | ✅ **已完成**（`GoStyleGrpcClientBreakerE2ETest` + `GoStyleGrpcClientBreakerWiringTest`） |
 | **U5** | 保护层四闸（MaxConns/MaxBytes/CpuShedding/Breaker）真触发？ | `rest/config.go:12-22,52-56` tag 默认 | `rag.protection.*`（静态同值） | ✅ **已闭合（第八轮，2026-10-24）· 三闸双侧活体 + 一闸平台不可达**：**MaxBytes** 两侧默认阈值下**逐字节一致**（超限 → 413 + 空 body + 无 Content-Type；「恰好等于阈值」也一致放行）；**MaxConns** 两侧同阈值 8 + 16 并发 → **各 8 个裸 503**（拒绝数恰等于阈值）；**Breaker** 两侧都**真的打开** → 裸 503 + 空 body（与超时的「503 + `Request Timeout\n`」可区分）。🔴 **CpuShedding 在 darwin 上 Go 侧结构性不可达**（`core/stat/internal/cpu_other.go` 的 `//go:build !linux` ⇒ `RefreshCpu()` 恒 0 ⇒ `stat.CpuUsage()` 恒 0 ⇒ `systemOverloaded()` 恒 false ⇒ `shouldDrop()` 永假；**活体佐证 = Go 自己的 stat 行 `CPU: 0m`**）⇒ 该闸只能「源码逐条对照 + go-zero 上游自带测试（`core/load`/`core/breaker` 全绿）+ RAG 侧 10 例同场景单测」取证。产出 **DRIFT-HOTAPI-026** / **DRIFT-HOTAPI-027** / **U5-OPEN-1** | ✅ **已完成**（`tools/difftest/probe-hot-protection.py`） |
 | **U6** | 404 / 405 在**真 Tomcat** 下的响应头与 body 是否逐字节同？ | `http.Error` 四行（server.go:2337-2356） | MockMvc 实测：`404 page not found\n` + text/plain + nosniff；405 无 body | ✅ **已闭合（第四轮）**：**真 Tomcat**（`RANDOM_PORT` + JDK `HttpClient`）⇒ 404 = `404 page not found\n` + `text/plain` + **`nosniff`**；405 = 裸状态码 + `Allow`、**无 body** | ✅ 已完成（`HotApiRealTomcatGateTest` 的 `#notFoundIsBareGoStyleResponse` / `#methodNotAllowedIsBareStatusCode`） |
 | **U7** | `TopK=100` 被 hot-rpc 如何解释？items 是否按热度降序？ | `logic:62-64` 硬编码 100；`hot.proto:10` 注释「默认 20，最大 100」 | `HotRpcClient:63` 硬编码 100 | **本轮按简报要求未假设对端 rpc 正确**；这属 hot-rpc 组件 | **必须与 [`hot/rpc.md`](rpc.md) 合并判读**：确认 hot-rpc 是否 clamp 到 100、是否排序、是否分页 |
 | **U8** | percent-encoding 在真 Tomcat 下的绑定值 | `url.ParseQuery` 解 `%2B`→`+` ⇒ 5 | MockMvc **不解码**（`%2B5` 原样传入）；但 `.param("page","+5")` ⇒ 5 | ✅ **已闭合（第四轮）**：**真 Tomcat** 下 `%2B5` ⇒ 解码成 `+5` ⇒ `Integer.parseInt("+5")` 接受前导 `+` ⇒ **`page=5`**，与 Go 的 `strconv.ParseInt("+5")` **等价**（两侧都接受前导 `+`）⇒ **不需要改 `GoFormValues`**（见 Pitfall P4） | ✅ 已完成（`HotApiRealTomcatGateTest#percentEncodedPlusIsDecodedAndAccepted`） |
 | **U9** | 59 条测试是否假绿？ | — | 本轮**间接证实过一处**：DRIFT-HOTAPI-015-B 的裸 mapper 让字段序测试永久无效 | ✅ **已闭合（第十轮，2026-10-24）**：对 hot-api 主干实现做 **10 个系统性语义变异**（分页上限/总数/起点/rank 稠密/跳过 nil/空页/十进制解析/gRPC deadline/信封包装/补全预算）⇒ **10/10 全部被守门抓到**，基线 **85 tests / 0 failures**。🔴 **过程中查出并修补了 1 个真实守门缺口**：`page_size=51`（恰好越过上限一格）此前**无任何测试钉住** ⇒ 新增 `HotApiMvcPipelineTest#pageSizeCapBoundaryIsApplied`，变异验证「恰好这一条变红」。⚠️ 第一轮 3 个「没变红」复核后确认**全是「变异本身是 no-op」**（含 `Integer.parseInt(String)` 本就是十进制）⇒ 不是守门缺口 | ✅ **已完成**（`tools/difftest/mutate-hot.py`） |
-| **U10** | 极端并发下补全的延迟分布是否可比？ | Go：100 goroutine + 每请求新建 chan(8)，**无池上限** | Java：每请求 Semaphore(8) + **32 共享池** + 64 队列 + `CallerRunsPolicy` | ⚠️ **旧结论被实测推翻**：「池满时 Java 会在请求线程上串行跑补全」—— 实测下游在途峰值 **32 = 池容量，未超过 ⇒ `CallerRunsPolicy` 从未触发** ⇒ 背压形态是**纯排队**（与 Go 同类） | ✅ **已闭合（第十轮，2026-10-24）**：桩切 `many-100`（100 条 = Go 的 `TopK`；article-rpc 固定睡 20ms 后**正常返回**），**8 并发 × 20 轮 = 160 请求/侧**，用桩的 **ENTER/EXIT 事件日志**算下游在途峰值。**结果**：成功率两侧 **160/160 全 200**（结果完全一致）；**p99 1.76×**（405.9ms vs 715.3ms）、**p50 1.95×**；**下游在途峰值 Go=64（= 8×8，完整保留）vs RAG=32（= 共享池容量，腰斩）** ⇒ 根因归因到 `HotHydrationExecutorConfiguration.POOL_SIZE=32` ⇒ 产出 **DRIFT-HOTAPI-028**（池容量是**容量决策** ⇒ 已登记**待用户拍板**，本轮未擅改） | ✅ **已完成**（`tools/difftest/probe-hot-latency.py`） |
+| **U10** | 极端并发下补全的延迟分布是否可比？ | Go：100 goroutine + 每请求新建 chan(8)，**无池上限** | Java：每请求 Semaphore(8) + **64 共享池** + 64 队列 + `CallerRunsPolicy` | ⚠️ **旧结论被实测推翻**：「池满时 Java 会在请求线程上串行跑补全」—— 实测下游在途峰值 **= 池容量，未超过 ⇒ `CallerRunsPolicy` 从未触发** ⇒ 背压形态是**纯排队**（与 Go 同类） | ✅ **已闭合（第十轮，2026-10-24）**：桩切 `many-100`（100 条 = Go 的 `TopK`；article-rpc 固定睡 20ms 后**正常返回**），**8 并发 × 20 轮 = 160 请求/侧**，用桩的 **ENTER/EXIT 事件日志**算下游在途峰值。**初测**：成功率两侧 **160/160 全 200**（结果完全一致）；**p99 1.76×**、p50 1.95×；**下游在途峰值 Go=64 vs RAG=32** ⇒ 根因 = `HotHydrationExecutorConfiguration.POOL_SIZE=32` ⇒ 产出 **DRIFT-HOTAPI-028**。**同日已修**（用户拍板方案 A：池 32→64 + 签字）：复测 **峰值 32→64（与 Go 一致）**、**p99 比值 1.76×→1.08×**、p50 **0.96×** ⇒ 残余差异（「RAG 有跨请求上限、Go 没有」）转 **SD-HOT-API-010**；新增守门用例 `HotArticleHydratorTest#concurrentRequestsEachKeepTheirOwnWindow`（变异回 32 ⇒ 变红 ✅） | ✅ **已完成**（`tools/difftest/probe-hot-latency.py`） |
 | **U11** | Prometheus 实际导出形态是否同 Go | Go：`HistogramVec` 带 `_bucket{le=}`，边界 = `prometheus.DefBuckets`（**11 个** + `+Inf`） | Micrometer `publishPercentileHistogram` + `serviceLevelObjectives(GO_DEF_BUCKETS)` | ✅ **已闭合（第四轮）**：真 Tomcat + 真 `/actuator/prometheus` ⇒ 查出 **DRIFT-HOTAPI-018**（RAG 实测 **80** 个 `le` 边界 vs Go 的 **12**）⇒ **已修**（去掉 `publishPercentileHistogram()` ⇒ 实测回到 **12** 个、数值逐条一致）；同时**推翻**原注释「Counter 是 `hot_api_request_total_total`」⇒ 实测**两侧都是** `hot_api_request_total`（**单** `_total`），注释已订正 | ✅ 已完成（`HotApiRealTomcatGateTest` 的 3 条 U11 用例） |
 
 ## 10. 最终判定（§39 的 18 项 checklist）
@@ -742,7 +745,7 @@ Recommended Verification:
 | 12 | Ordering 是否一致？ | ✅ 一致 | 按下标保序；rank 跨页连续 |
 | 13 | Retry 是否一致？ | ✅ 一致 | 两侧均无 |
 | 14 | Timeout scope 是否一致？ | ✅ 一致（时长与作用域）／🟡 **响应头差 1 项** | 3s 整操作 + 2s 嵌套；**第五轮已活体触发**（U2）⇒ 两侧状态码与 body 逐字节相同，**只差 `nosniff`**（D14） |
-| 15 | Concurrency semantics 是否一致？ | 🔴 **不等价** | **每请求窗口 8 一致** ✅；但**跨请求的合计在途数** Go 无上限、RAG 被共享池压到 32 ⇒ 8 并发时 p99 **1.76×**（**DRIFT-HOTAPI-028**）。⚠️ **旧结论已推翻**：`CallerRunsPolicy` 实测**从未触发**（峰值 32 = 池容量）⇒ 背压形态是**纯排队**，与 Go 同类 |
+| 15 | Concurrency semantics 是否一致？ | 🟡 **并发 ≤ 8 时等价** | **每请求窗口 8 一致** ✅；**跨请求合计在途** Go 无上限、RAG 被池压到 64 ⇒ 并发 ≤ 8 时**完全等价**（实测峰值 64 vs 64、p99 1.08×）；并发 > 8 时 RAG 多一层排队 ⇒ 延迟分布不同（结果仍同）⇒ 属**已签字偏离 SD-HOT-API-010**。⚠️ **旧结论已推翻**：`CallerRunsPolicy` 实测**从未触发** ⇒ 背压形态是**纯排队**，与 Go 同类 |
 | 16 | Authentication / Authorization 是否一致？ | ✅ 一致 | 两侧零鉴权；本组件无 JWT / 黑名单中间件，该维度**不适用** |
 | 17 | Serialization semantics 是否一致？ | ✅ **一致（body 层）**／🟡 **头差 1 项** | 第五轮真栈逐字节确认：**值/类型/null/uint32/HTML 转义/字段顺序**全一致；**响应头**差 `Content-Type` 的 charset 参数（D24）+ 超时头缺 `nosniff`（D14） |
 | 18 | Lifecycle 是否一致？ | ✅ 一致 | 连接与线程池的边界相同（实现不同） |
@@ -1158,7 +1161,7 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 | **超时 / 保护层四闸的活体观测**（D9/U2/U5） | ✅ **第八轮已闭合** | **超时**：CASE-21 让请求真的拖过 3s ⇒ 两侧都产出 `503 + "Request Timeout\n"`（body 逐字节相同），只差 `nosniff`（= D14，跨域移交 common 域）。**保护层四闸（第八轮）**：**MaxBytes** 两侧默认阈值下逐字节一致（超限 → 413 + 空 body + 无 Content-Type；边界也一致）；**MaxConns** 同阈值 8 + 16 并发 → 两侧**各 8 个裸 503**（机制等价）；**Breaker** 两侧都真的打开 → 裸 503 + 空 body。🔴 **CpuShedding 在 darwin 上 Go 侧结构性不可达**（`//go:build !linux` ⇒ `CpuUsage()` 恒 0 ⇒ 永不降载；活体佐证 = Go stat 行 `CPU: 0m`）⇒ 只能静态 + go-zero 上游测试取证 ⇒ **这是「本机不可能更强」的证据，不是「两边一致」** |
 | **客户端断连**（D3/U3） | ✅ **第七轮已闭合** | 裸 socket + SO_LINGER=0 强制 RST ⇒ Go 侧 8 个在飞 gRPC 在**断连后 1~3ms** 全部取消、**日志有 `[HTTP] 499`**；RAG 侧**等 2s deadline**、**断连后继续发下游调用**、**无任何 499 记录** ⇒ **D3 坐实** + 新产出 **DRIFT-HOTAPI-025** |
 | **变异验证**（D2/U9） | ✅ **第十轮已闭合（组件级）** | **hot-api 主干 10 个系统性语义变异 ⇒ 10/10 全部被守门抓到**（基线 85/0）；🔴 并**查出并修补 1 个真实缺口**（`page_size=51` 边界无测试）；⚠️ 第一轮 3 个「没变红」**全是变异本身 no-op**（P15 教训：「变异没红」先证伪变异有效性）。⚠️ **边界**：hot-rpc（84 条）与 hot-common（14 条）的系统性变异**仍未做** |
-| **延迟分布 / 背压形态**（U10） | 🔴 **已闭合，但检出差异** | 8 并发 × 100 items × 20 轮（160 请求/侧）：**成功率两侧 160/160 全 200**（结果一致）；**p99 1.76×**（405.9ms vs 715.3ms）、**p50 1.95×**；**下游在途峰值 Go=64（= 8×8，完整保留）vs RAG=32（= 共享池容量，腰斩）** ⇒ **DRIFT-HOTAPI-028**（池容量是**容量决策** ⇒ **待用户拍板**，本轮未擅改）。⚠️ **旧结论被推翻**：`CallerRunsPolicy` 实测**从未触发**（峰值 32 未超池容量）⇒ 背压形态是**纯排队**，与 Go 同类 |
+| **延迟分布 / 背压形态**（U10） | ✅ **已闭合并已修** | 8 并发 × 100 items × 20 轮（160 请求/侧）：**成功率两侧 160/160 全 200**（结果一致）；初测 **p99 1.76×**、下游在途峰值 **Go 64 vs RAG 32** ⇒ **DRIFT-HOTAPI-028**。✅ **同日已修**（池 32→64）：复测 **峰值 64 vs 64**、**p99 1.08×**、p50 **0.96×** ⇒ 残余差异转 **SD-HOT-API-010**（RAG 保留跨请求总上限 = 比 Go 更保守的一侧，已签字）。⚠️ **旧结论被推翻**：`CallerRunsPolicy` 实测**从未触发**（峰值未超池容量）⇒ 背压形态是**纯排队**，与 Go 同类 |
 | **端口归属**（D6） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「保持」⇒ `SD-HOT-API-009`：保持 18897（`HOT_API_PORT` 可覆盖）。⚠️ HTTP 端口**不是 wire 契约** |
 | **下游 gRPC 错误串形态**（DRIFT-HOTAPI-017） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「不复刻」⇒ `SD-HOT-API-005`。库层差异（grpc-go `"rpc error: code = Unavailable desc = …"` vs grpc-java `"UNAVAILABLE: …"`）|
 | **Prometheus 分桶边界**（DRIFT-HOTAPI-018） | ✅ **本轮已闭合** | 真 Actuator 实测：`publishPercentileHistogram()` 会塞进 69 个 exponential 边界 ⇒ 实测 80 个 vs Go 的 12 个 ⇒ **已修**，3 条变异全红 |
@@ -1366,12 +1369,14 @@ percent-encoding 两侧**确实**逐字节一致。）
 
 ## 6. 本轮**未**覆盖（不得读成「hot-api 全部闭合」）
 
+> ⚠️ **本节已于 2026-10-24 第十轮刷新**（原表里三行写着「未做」但其实已闭合 ⇒ 陈旧状态订正）。
+
 | 项 | 状态 | 说明 |
 |---|---|---|
-| **hot-rpc 自身的端到端对拍** | ❌ 未做 | 本轮下游是桩 ⇒ hot-rpc 的行为（Kafka 消费、Redis 快照、TopK 语义）**不在覆盖范围** ⇒ 属 `hot/rpc.md` 的 D1 |
-| **超时 / 保护层四闸的活体观测**（D9/U2/U5） | 🟡 部分 | `CASE-21` 已让 3s 超时**真的触发**（两侧都产出 `503 + Request Timeout\n`）⇒ **D9 的「超时分支」有活体证据了**；但「超时响应头缺 nosniff」= D14，**跨域移交 common 域**；保护层四闸仍未构造超限请求 |
-| **客户端断连 499**（D3/U3） | ❌ 未做 | 需要 `curl --max-time` 撞慢下游；本轮未构造 |
-| **变异验证**（D2/U9） | 🟡 部分 | 已对**新增的修复**做过定向变异；**全组件系统变异仍未做** |
+| **hot-rpc 自身的端到端对拍** | ❌ **仍未做** | 下游是桩 ⇒ hot-rpc 的行为（Kafka 消费、Redis 快照、TopK 语义）**不在覆盖范围** ⇒ 属 `hot/rpc.md` 的 D1。⚠️ **可行性已查清并写成可接手清单**（见文末「hot-rpc D1」节：两侧 Redis key 硬编码 ⇒ 必须 2 个 Redis；Kafka 消费进度不对称 ⇒ 需自造栅栏） |
+| **超时 / 保护层四闸的活体观测**（D9/U2/U5） | ✅ **已闭合（第八轮）** | 超时：`CASE-21` ⇒ 两侧 `503 + Request Timeout\n`（body 逐字节同），只差 `nosniff`（= D14，**跨域**）。保护层四闸：**MaxBytes / MaxConns / Breaker 三闸双侧活体坐实**；🔴 **CpuShedding 在 darwin 上 Go 侧结构性不可达**（`//go:build !linux` ⇒ `CpuUsage()` 恒 0）⇒ 只能静态 + go-zero 上游测试取证 |
+| **客户端断连 499**（D3/U3） | ✅ **已闭合（第七轮）** | 裸 socket + `SO_LINGER=0` 强制 RST ⇒ Go 侧 8 个在飞 gRPC 在**断连后 1~3ms** 全部取消、**日志有 `[HTTP] 499`**；RAG 侧**等 2s deadline**、**断连后继续发下游调用**、**无任何 499 记录** ⇒ **D3 坐实** + 产出 **DRIFT-HOTAPI-025**（代码在 `service/common` ⇒ 跨域） |
+| **变异验证**（D2/U9） | ✅ **已闭合（第十轮，组件级）** | hot-api 主干 **10 个系统变异 ⇒ 10/10 全部被守门抓到**（基线 86/0）；并**查出并修补 1 个真实缺口**。⚠️ hot-rpc / hot-common 的系统变异**仍未做** |
 | **Go 侧 `hot.api` 的 `Log.Mode` 等配置项** | ✅ 已对齐副本 | 真源 yaml 零改动（纪律 1 自检通过：跑完 `git status --porcelain -uno` 为空） |
 
 
@@ -1678,12 +1683,14 @@ Go 侧 zrpc 的超时是 `zrpc/client.go:70-71` + `TimeoutInterceptor` ⇒ **min
 
 ---
 
-## DRIFT-HOTAPI-028 —— RAG 侧补全的**跨请求并发窗口被共享池腰斩成一半**（Go 是 64，RAG 只有 32）
+## DRIFT-HOTAPI-028 ✅ **已修**（阈值 32→64）· 残余差异转 **SD-HOT-API-010** —— RAG 侧补全的**跨请求并发窗口被共享池腰斩成一半**（Go 是 64，RAG 只有 32）
 
 > **发现轮次**：2026-10-24 第十轮（U10 延迟分布对拍）
 > **类别**：OBSERVABLE DIFFERENCE（**延迟分布**；**结果完全一致** —— 两侧成功率 100%，响应体逐字节同）
 > **严重度**：MEDIUM
-> **归属**：RAG 侧 `service/hot/hot-api/.../config/HotHydrationExecutorConfiguration.java` ⇒ **本域可修**，但**属容量决策** ⇒ 待拍板
+> **归属**：RAG 侧 `service/hot/hot-api/.../config/HotHydrationExecutorConfiguration.java` ⇒ **本域可修**
+> **处置**：✅ **已修**（用户 2026-10-24 拍板「方案 A：池 64 + 登记为签字偏离」）⇒
+> 阈值 `POOL_SIZE` **32 → 64**；残余差异（「RAG 有跨请求总上限、Go 没有」）转 **SD-HOT-API-010** 签字留痕。
 
 ### 活体实测（第十轮，`tools/difftest/probe-hot-latency.py`）
 
@@ -1727,19 +1734,37 @@ Go 侧 zrpc 的超时是 `zrpc/client.go:70-71` + `TimeoutInterceptor` ⇒ **min
 ⇒ RAG 侧的背压形态是「**纯排队**」，**与 Go 同类**（只是排的队不同：Go 排 goroutine，RAG 排 `ThreadPoolTaskExecutor` 的 64 容量队列）。
 ⇒ **两侧的背压语义一致**；剩下的只有**排队深度**（并发窗口）这一处差异。
 
-### 处置（**待用户拍板**，本轮不擅改）
+### 处置（**已修** —— 2026-10-24 用户拍板「方案 A：池 64 + 登记为签字偏离」）
 
-两个方向，**取舍不同**：
+用户 2026-10-24 明确选择**保守路线**：**保留**这层跨请求保护（它是「RAG 比 Go 更稳」的一侧），
+把阈值提到能覆盖已验证的并发档位，并把「RAG 有上限、Go 没有」**签字登记**。
 
-| 方案 | 做法 | 代价 |
+| 方案 | 内容 | 结论 |
 |---|---|---|
-| **A. 调池容量** | `POOL_SIZE` 32 → **64**（= 8 并发 × 8 窗口） | 每 JVM 多 32 个平台线程；**并发更高时仍会再腰斩**（Go 不会）⇒ 只是把拐点推后 |
-| **B. 按 Go 语义做成「每请求窗口」** | 池**不设全局上限**（或按最大并发预估），保证「N 请求 × 8」恒成立 | 线程数无界 ⇒ 需要一个**有界的、但按并发度自适应的**策略（Java 没有 goroutine 那种廉价并发） |
+| **A（已采用）** | `POOL_SIZE` **32 → 64**（= 8 并发 × 每请求 8 窗口）+ 登记 **SD-HOT-API-010** | ✅ **已实施** |
+| B（未采用，留档） | 换成「每任务一虚拟线程」（Java 21 JEP 444）⇒ 彻底取消全局上限、逐条等价于 goroutine | ⚠️ **未采用**：会把下游并发**完全放开**，与「保护下游」的初衷相反（且 grpc-java blocking stub 在虚拟线程里的 **pinning** 需另行实测） |
+| — | 平台线程无界池 | 🚫 **不可行**：会 OOM / 上下文切换风暴 |
 
-⚠️ **本轮未改任何参数**：池容量是**部署形态**（线程数 / 内存 / 下游压力），
-且 Go 侧是「无上限」而 Java 侧**不可能**真的无上限 ⇒ **没有唯一正确答案** ⇒ 交用户拍板。
-⇒ 本条**只登记**，并附上**可复现的实测脚本**（`probe-hot-latency.py`），
-改完池容量后**重跑即可验证**。
+**修复后的活体复测**（同一轮、同一环境，两侧对比才有意义）：
+
+| | **Go 真源** | **RAG（修后）** | **RAG（修前）** |
+|---|---|---|---|
+| 下游同时在途峰值 | **64** | **64** ✅（修前 **32**） | 32 |
+| p50 | 513.4 ms | **491.9 ms**（0.96×） | 667.0 ms（1.95×） |
+| p99 | 1038.1 ms | **1118.7 ms（1.08×）** | 715.3 ms（1.76×，但那是**另一轮**的绝对值） |
+| 成功率 | 160/160 全 200 | 160/160 全 200 ✅ | 160/160 全 200 |
+
+⇒ **峰值 32 → 64 = 与 Go 一致**；**p99 比值 1.76× → 1.08×**（p50 0.96×）⇒ 延迟分布基本追平。
+⚠️ **绝对值不可跨轮比较**（机器负载在变：这一轮 Go 侧的 p50 也从 342ms 涨到 513ms）⇒ **只有同轮比值有意义**。
+
+**守门测试**：`HotArticleHydratorTest#concurrentRequestsEachKeepTheirOwnWindow`
+—— 断言「**8 个并发请求**的合计在途 = 8×8 = **64**」。
+⚠️ **为什么单请求的旧测试抓不到**：旧用例 `neverExceedsEightConcurrentHydrations` 只跑**一个**请求
+⇒ 单请求窗口是 8 ⇒ **池是 32 还是 64 都通过** ⇒ 必须**多请求同时跑**，池才会成为瓶颈。
+**变异验证**：把 `POOL_SIZE` 改回 32 ⇒ 该用例**恰好以 32 变红** ✅ ⇒ 守门非假绿。
+
+**残余差异（已签字）**：并发 **> 8** 时 RAG 仍会跨请求排队、并发 **> 16** 时会触发 `CallerRunsPolicy`
+⇒ 详见 **SD-HOT-API-010**（含残留风险清单）。
 
 ---
 

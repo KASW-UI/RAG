@@ -180,3 +180,41 @@
 - **⚠️ 残留风险**：若某个部署脚本按「两侧同端口」写死 ⇒ 会撞车
   ⇒ 记为**部署注意项**，不靠代码兜底。
 - **留痕位置**：`docs/DRIFT/hot/api.md` 的 D6 行 + `application.yml` 的 `server.port` 段注释。
+
+---
+
+## SD-HOT-API-010 ✅ 已签字 · 补全的**跨请求**并发总上限（RAG 有，Go 没有）—— RAG 更保守的一侧
+
+- **Component**：hot-api 的补全执行器（`service/hot/hot-api/.../config/HotHydrationExecutorConfiguration.java`）
+- **Go 出处**：
+  - `getHotArticlesLogic.go:93`：`sem := make(chan struct{}, hydrationConcurrency)`
+    —— **每个请求各建一个**容量 8 的信号量；
+  - `getHotArticlesLogic.go:101-109`：每个 item 一个 goroutine，**阻塞在 `sem <-` 上排队**
+    （阻塞的 goroutine **不占 OS 线程**）；
+  - ⇒ **N 个并发请求 ⇒ N×8 个同时在途的下游调用，跨请求合计在途【无全局封顶】**。
+- **RAG 行为**：
+  - 每请求窗口 = `Semaphore(8)`（`HotArticleHydrator`）✅ **与 Go 一一对应**；
+  - **但**所有请求的补全任务都投到**同一个全局池** ⇒ 跨请求合计在途被
+    `POOL_SIZE`（**64**）+ 队列（64）封顶 ⇒ **并发 > 8 时 RAG 排队，Go 不排**。
+- **签字理由（已批准，2026-10-24，用户拍板「方案 A：池 64 + 登记为签字偏离」）**：
+  1. **保留这层保护是有意的**：它给下游 article-rpc 兜了一层并发上限，
+     而 Go 侧**没有** ⇒ 这是「**RAG 比 Go 更稳 / 更保护下游**」的一侧；
+  2. **与 Go 等价的改法存在但更激进**：把池换成「每任务一虚拟线程」（Java 21 JEP 444）
+     ⇒ 彻底取消全局上限、逐条等价于 goroutine；
+     ⚠️ 但那会把下游并发**完全放开**（无上限），与「保护下游」的初衷相反 ⇒ **不采用**；
+  3. **阈值取 64 的依据是实测**：8 并发 × 每请求 8 窗口 = 64
+     ⇒ 在**本组件已验证的并发档位（≤ 8）下与 Go 完全等价**
+     （活体实测：下游在途峰值两侧**都是 64**，p99 比值 **1.08×**）；
+  4. **附带效果**：`POOL_SIZE + QUEUE = 64 + 64 = 128` 个任务位 = **16 个并发请求**
+     ⇒ **并发 ≤ 16 时 `CallerRunsPolicy` 不会触发** ⇒ 背压形态是**纯排队**（与 Go 同类）。
+- **⚠️ 残留风险（签字即接受）**：
+  - **并发 > 8 时**，RAG 侧会出现 Go 侧没有的**跨请求排队** ⇒ 延迟分布不同
+    （不是结果不同 —— 两侧的响应体与成功率仍逐条一致）；
+  - **并发 > 16 时**，`CallerRunsPolicy` 会触发 ⇒ **任务跑在请求线程上**
+    ⇒ Go 侧**永远不会有**这种形态（goroutine 独立）⇒ 这是**第二层**残余差异，
+    需在压测档位上留意；
+  - 阈值是**部署决策** ⇒ 改动会影响下游压力 ⇒ 改前应重跑
+    `tools/difftest/probe-hot-latency.py` 复测。
+- **守门**：`HotArticleHydratorTest#concurrentRequestsEachKeepTheirOwnWindow`
+  断言「8 个并发请求的合计在途 = 64」⇒ **池被改小 ⇒ 立刻变红**（变异验证：32 ⇒ 变红，实测）。
+- **留痕位置**：`docs/DRIFT/hot/api.md` 的 DRIFT-HOTAPI-028。

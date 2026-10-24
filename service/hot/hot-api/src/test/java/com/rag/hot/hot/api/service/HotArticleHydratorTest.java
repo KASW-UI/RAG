@@ -21,6 +21,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -185,6 +190,78 @@ class HotArticleHydratorTest {
         assertEquals(40, out.size());
         assertEquals(HotArticleHydrator.HYDRATION_CONCURRENCY, peak.get(),
                 "并发峰值必须等于窗口 8：更小=退化成串行（延迟与下游负载都变），更大=突破了 Go 的信号量");
+    }
+
+    /**
+     * ⚠️ **DRIFT-HOTAPI-028 的守门用例**（2026-10-24 第十轮 U10 活体对拍后新增）。
+     *
+     * <p><b>它守的是什么</b>：<b>跨请求</b>的合计在途数<b>不能被全局池压到单请求窗口以下</b>。
+     *
+     * <p><b>Go 侧语义</b>（{@code getHotArticlesLogic.go:93}）：
+     * {@code sem := make(chan struct{}, hydrationConcurrency)} 是<b>每个请求各建一个</b>
+     * ⇒ N 个并发请求 ⇒ <b>N × 8</b> 个同时在途的下游调用，<b>无全局封顶</b>。
+     *
+     * <p><b>为什么「每请求窗口 8」的旧测试抓不到这个</b>：
+     * {@link #neverExceedsEightConcurrentHydrations()} 只跑<b>一个</b>请求
+     * ⇒ 单请求的窗口是 8 ⇒ <b>无论池是 32 还是 64 都通过</b>
+     * ⇒ 必须<b>多个请求同时跑</b>，池才会成为瓶颈。
+     *
+     * <p><b>旧值 32 时会怎样</b>：8 个请求 × 8 = 64 个任务 ⇒ 池只有 32 个线程
+     * ⇒ 同时执行的最多 32 ⇒ 峰值 = 32 ⇒ <b>本断言变红</b>。
+     * <b>新值 64 时</b>：64 个任务全部并行 ⇒ 峰值 = 64 ✅。
+     *
+     * <p>⚠️ 阈值本身是<b>部署决策</b>（已按 {@code SD-HOT-API-010} 签字：
+     * RAG 保留跨请求总上限，比 Go 更保守）⇒ 本测试钉的是
+     * 「<b>并发 ≤ 8 时必须与 Go 等价</b>」这条**已签字的等价区间**，
+     * <b>不是</b>「池必须等于 64」这个具体数字
+     * ⇒ 将来若为别的并发档位调池，本测试需同步调整期望值。
+     */
+    @Test
+    @DisplayName("⚠️ 跨请求的合计在途不被全局池压扁：8 个并发请求 ⇒ 峰值 = 8×8 = 64")
+    void concurrentRequestsEachKeepTheirOwnWindow() throws Exception {
+        AtomicInteger inFlight = new AtomicInteger();
+        AtomicInteger peak = new AtomicInteger();
+        when(articleRpcClient.getPublicArticle(any(), anyLong())).thenAnswer(inv -> {
+            int now = inFlight.incrementAndGet();
+            peak.accumulateAndGet(now, Math::max);
+            try {
+                // ⚠️ 必须让任务**真的重叠**：sleep 期间才计入在途
+                Thread.sleep(30);
+                return published(inv.getArgument(0));
+            } finally {
+                inFlight.decrementAndGet();
+            }
+        });
+
+        final int requests = 8;
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < HotArticleHydrator.HYDRATION_CONCURRENCY; i++) {
+            ids.add("a" + i);
+        }
+
+        ExecutorService callers = Executors.newFixedThreadPool(requests);
+        try {
+            // ⚠️ **起跑门**：8 个请求必须**同时**开始提交，否则各请求的 8 个窗口
+            //    不会完全重叠 ⇒ 峰值会随机落在 56 之类的值上（实测过）⇒ 断言不稳。
+            CountDownLatch startGate = new CountDownLatch(1);
+            List<Future<List<HotArticleCard>>> futures = new ArrayList<>();
+            for (int r = 0; r < requests; r++) {
+                futures.add(callers.submit(() -> {
+                    startGate.await();
+                    return hydrator.hydrate(items(ids), -1L);
+                }));
+            }
+            startGate.countDown();
+            for (Future<List<HotArticleCard>> f : futures) {
+                assertNotNull(f.get(60, TimeUnit.SECONDS));
+            }
+        } finally {
+            callers.shutdownNow();
+        }
+
+        assertEquals(requests * HotArticleHydrator.HYDRATION_CONCURRENCY, peak.get(),
+                "8 个并发请求的合计在途必须是 8×8=64：更小说明全局池把**每个请求自己的**窗口"
+                        + "压小了（那不是限流，是偷偷改了单请求语义 —— DRIFT-HOTAPI-028）");
     }
 
     @Test
