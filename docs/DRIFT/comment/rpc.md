@@ -32,16 +32,16 @@
 
 | 项 | 值 |
 |---|---|
-| **总体判定** | 🔴 **`SEMANTICALLY NOT EQUIVALENT`** |
-| SEMANTIC MISMATCH | **7 条**（§2） |
-| OBSERVABLE DIFFERENCE | **6 条**（§3） |
+| **总体判定** | 🔴 **`SEMANTICALLY NOT EQUIVALENT`** —— ⚠️ **但这是首轮对照时的判定；7 条 MISMATCH 已全部修复**（见「修复轮」）⇒ **当前不再有「必须对齐」的分歧项** |
+| SEMANTIC MISMATCH | **7 条**（§2）—— ✅ **全部已修**（各配真 PG 守门网 + 变异验证） |
+| OBSERVABLE DIFFERENCE | **7 条**（§3）—— **D1 撤销** / **D3 已修** / **D6 已修** / **D7 已修** / D2（时间精度）· D4（authority 部署形态）· D5（dispatch 部署形态）⇒ 后三条已归入签字候选 CAND-03 / CAND-09 |
 | 等价确认 | **约 70 个判定点**（§4） |
 | 组件规模 | Go 3,620 行 / 33 文件 ⇒ RAG 7,455 行 / 40 类（**RAG 是 Go 的 2.06 倍**） |
 | 构建 | `mvn -o -q -pl service/comment/comment-rpc -am -DskipTests install` ⇒ **`EXIT=0`**（本轮实测） |
-| 测试 | `mvn -o -pl service/comment/comment-rpc,service/comment/comment-api -am test` ⇒ **BUILD SUCCESS**；**rpc 85 / api 45，合计 130 / 0 failures / 0 errors / 0 skipped**（2026-10-24 实测；本轮新增守门网 31 例） |
+| 测试 | `mvn -o -pl service/comment/comment-rpc,service/comment/comment-api,service/comment/comment-common -am test` ⇒ **BUILD SUCCESS**；**rpc 85 / api 45 / common 27，合计 157 / 0 failures / 0 errors / 0 skipped**（2026-10-24 实测；本轮新增守门网 31 例） |
 | 本台账范围 | **仅 `comment-rpc`**。`comment-api` / `comment-common` 各自独立台账 |
-| **修复轮** | **2026-10-24**：§2 的 **7 条 MISMATCH 全部已修**。守门网 = `CommentRpcGoSemanticsGateTest`（**11 例，真 PG**）；本域测试 46 ⇒ **57 例 / 0 failures / 0 skipped**；**10 条变异全部变红** |
-| **对拍轮** | **2026-10-24**：**双侧活体对拍**已跑通（Go 真源 + RAG 四进程同跑，**23 步**矩阵，**复跑两轮一致**）。结果 **20 一致 / 8 差异**，差异**落在 3 个步骤**上：T07 / T08 根因在 **Go 侧**（SQL 必报错 + 缺 `report_record` 表）⇒ **已签字偏离**；**T20 是新增的一条**（保护层覆盖范围：未注册路径上 Go 从不返回 413 / RAG 返回 413）⇒ 登记为 D6，**修法落在 `service/common` ⇒ 本域不可动 ⇒ 待决策**（[`api.md` §3.2](./api.md)）。对拍过程另发现并修掉 **4 个真实缺陷**（§4.6.2） |
+| **修复轮** | **2026-10-24**：§2 的 **7 条 MISMATCH 全部已修**。守门网 = `CommentRpcGoSemanticsGateTest`（**11 例，真 PG**）；**10 条变异全部变红**。⚠️ 计数以「测试」行的 **85 例**为准（后续又加了 EventTime 5 / RedisMetric 5 / Alias 6） |
+| **对拍轮** | **2026-10-24**：**双侧活体对拍**已跑通（Go 真源 + RAG 四进程同跑，**23 步**矩阵，**复跑两轮一致**）。结果 **20 一致 / 8 差异**，差异**落在 3 个步骤**上：T07 / T08 根因在 **Go 侧**（SQL 必报错 + 缺 `report_record` 表）⇒ **已签字偏离**；**T20 是新增的一条**（保护层覆盖范围：未注册路径上 Go 从不返回 413 / RAG 返回 413）⇒ 登记为 D6 ⇒ **用户已签字** `SD-2026-10-24-CAND-08`（**接受 RAG 更严/更安全的一侧** ⇒ **代码零改动**）（[`api.md` §3.2](./api.md)）。对拍过程另发现并修掉 **4 个真实缺陷**（§4.6.2） |
 
 > 🟥 **最严重的 3 条（MISMATCH-01/02/03）都在「事实投递链路」上**，
 > 且**都是 Go 侧的显式 `tx.Commit()` 在 Java 侧被 Spring 的回滚规则吃掉**。
