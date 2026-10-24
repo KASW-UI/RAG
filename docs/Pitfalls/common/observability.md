@@ -149,5 +149,37 @@ javap GrpcServerFactoryAutoConfiguration
 > **截断的输出不能支撑「不存在」这类否定断言。**
 > 需要下否定结论时，用专门的不利查询重新跑一次（`grep -c` / `grep -l` 全量），并明确写出计数。
 
-本条与 `docs/Pitfalls/_cross/fix-round-lessons.md` 里的「先证伪读数，再谈结论」同源：
-**读数有问题时，先怀疑读数。**
+### 🔴 2026-10-24 补：这条坑的**同类事故发生在本项目自己的台账里**
+
+**首版 `docs/DRIFT/common/alignment-2026-10-23.md` 写的是「H2 现状复核：✅ 已闭环，
+实测 10 个 rpc 模块**全部**有 `@Bean GrpcServerConfigurer`」——那句话是假的。**
+
+- 根因**一模一样**：当时的 `grep GrpcServerConfigurer` 输出**被桌面端截断**
+  （工具返回里明写了 `desktop grep output truncated`），我没察觉就据此外推「全部都有」。
+- 讽刺之处：**这条坑正是我自己在同一批产物里写下的**（本节），
+  而我在写台账时**没有回头核对**自己刚写下的纪律 ⇒ **坑档写下来了不等于不会犯**。
+- 代价：漏掉了 `hot-rpc` 缺 `GrpcServerConfigurer` 这个**真实缺陷**
+  （⇒ H2 形态在 `hot-rpc` 上复发：无 gRPC span、无 deadline 传播、
+  `checkDeadline()` 全是死代码、`DeadlineQueryTimeoutInjector` 不给 SQL 设 queryTimeout）。
+  详见 [`../../DRIFT/common/alignment-2026-10-23.md`](../../DRIFT/common/alignment-2026-10-23.md) 的 DRIFT-COMMON-004。
+
+### 是怎么发现的：**复验脚本的计数与预期不符**
+
+发现它不是靠重读台账，而是靠 2026-10-24 复验时的一个**「预期外」**：
+
+```
+复验脚本输出：命中 9 / 20
+而台账写的是「10 个 rpc 模块全部有」
+```
+
+⇒ **凡是台账里带具体数字的断言，都必须有一条能重跑的复验命令。**
+数字对不上时，**先怀疑台账**（本次就是台账错，代码是对的）。
+
+### 根治：把「数命中文件」换成「跑一条检查」
+
+同一个晚上新增的 [`tools/difftest/check-grpc-interceptor-wiring.py`](../../../../tools/difftest/check-grpc-interceptor-wiring.py)
+逐个 rpc 进程断言「① `@Import(RpcServerInterceptorFactory)` 与 ② `@Bean GrpcServerConfigurer` + `.intercept(` **同时具备**」，
+当前 **`EXIT=1`，精确指向 `hot-rpc`**。
+
+⇒ **凡是「每个消费方都要做 X」这类契约，都应该有一条可跑的检查**，
+而不是让人去数 grep 命中几个文件 —— **计数是人最容易出错、且错了不会报错的环节。**

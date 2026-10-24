@@ -4,7 +4,12 @@
 
 > **产出方**：`align/common` 工作树（`RAG.worktrees/common`），基线 commit **`8422116`**（与 `do-my-own-gh` 同点）。
 > **核对时间**：2026-10-23 22:49–23:10（真实执行：`mvn -o -pl service/common test` ×4 轮 + `javap` ×2 + `find`/`grep` 全仓扫描）。
+> **复验时间**：2026-10-24 19:26–19:50（真实执行：全分支 `git log`/`git diff` 对照 + 全量 `grep -rl`（不加截断）
+> + `mvn -o -pl service/common test` 重跑 + 新增守门脚本实跑）。**复验推翻了一条首版的假结论 —— 见 §二。**
 > **本文件回答**：`service/common` 台账标「✅ 审计完成」之后，还剩什么没对齐。
+>
+> ⚠️ **本文件所有行号引用均以基线 `8422116` 为准**。`service/common` 正在被别的域并发改动
+> （`align/message` 已加 7 个类、`align/users-user` 改了 shedder）⇒ 合并后行号会移位，见 §六·五。
 >
 > ⚠️ **本文件不改写既有 4 份台账**（`audit.md` / `protection.md` / `http.md` / `deadline.md`），
 > 只做**增量**：新发现 + 对既有结论的更正。真源为 Go：`/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/common/`。
@@ -23,10 +28,11 @@
 | 范围 | 结论 |
 |---|---|
 | 5 个可比包（`communityfact` / `logger` / `observability` / `response` / `snowflake`） | 🔴 **3 个 NOT EQUIVALENT**，1 个（`response`）**逐条等价** |
-| §3.3 机制接线（`spring/*`） | 🔴 1 条**可证伪的假框架断言**（已修）；2 条常见担忧**已证伪** |
+| §3.3 机制接线（`spring/*`） | 🔴 1 条**可证伪的假框架断言**（已修）；**1 条 H2 形态在 `hot-rpc` 上复发（DRIFT-COMMON-004，未修，归属 `align/hot`）**；2 条常见担忧**已证伪** |
 | 跨组件不变量 | 🔴 `communityfact` 消费者两侧不一致（见 §四） |
 | 已修 | **3 条 SEMANTIC MISMATCH**（均配回归测试，147 tests / 0 failures） |
-| 已记录未修 | **20 条**（含 1 条 `UNRESOLVED`） |
+| 已记录未修 | **26 条编号条目**（communityfact 15 + logger 7 + snowflake 3 + 跨域 1）<br>另补录 **5 项未编号的观察**（见 §六·六），含 1 条 `UNRESOLVED`、1 条 API 缺陷、1 条跨域归属 |
+| 2026-10-24 复验 | 🔴 **推翻了首版 1 条假结论**（「H2 已闭环」实为 9/10）；✅ 其余承重断言均仍成立（见 §六·五） |
 
 ---
 
@@ -93,6 +99,38 @@ Go 这样做是对的——它的 span 生命周期归 otel 插桩所有，拦�
 
 ---
 
+## 一·五、🔴 本轮新发现但**未修**（跨域归属）
+
+### DRIFT-COMMON-004 —— `hot-rpc` 未把 gRPC 拦截器挂到 server 上（H2 形态复发）
+
+| | |
+|---|---|
+| **归属** | 🔴 **`align/hot` 域**（`service/hot/hot-rpc` 的 Application 类不是 common 的文件）<br>本文件只登记证据，**未越界修改** |
+| **Go 出处** | `service/hot/rpc/hot.go:42` `s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, observability.SlowThreshold()))` —— Go 侧 **12 个** rpc 服务（含范围外的 `points` / `security`）**无一例外**全部显式注册 |
+| **RAG 落点** | `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/HotRpcApplication.java:44-45` —— `@Import({ RpcServerInterceptorFactory.class, … })` ✅ **有**，但**全文没有 `GrpcServerConfigurer`**，也**没有 `server.intercept(...)`** |
+| **机制** | ① 齐了（Bean 存在）② 缺（框架不用它）⇒ **正是 H2 的原始形态** |
+| **可观察面** | `interceptCall` / `onHalfClose` 从未执行 ⇒ ① gRPC 无 span；② **无 deadline 传播** ⇒ handler 线程上 `DeadlineState` 恒未设置 ⇒ 业务层 `checkDeadline()` 全是死代码；③ `DeadlineQueryTimeoutInjector` 因拿不到 `DeadlineState` 而**不给 SQL 设 `queryTimeout`**；④ gRPC 无超时（客户端只能等 api 层 `http-timeout`） |
+| **额外证据** | `hot-rpc` **无任何 interceptor 接线测试**（其余 9 个 rpc 模块都有 `*GrpcInterceptorWiringTest` 一类）⇒ 缺测试 + 缺接线，**绿灯不构成任何保证** |
+| **守门** | 本轮新增 `tools/difftest/check-grpc-interceptor-wiring.py`：**`EXIT=1`，精确指向 `hot-rpc`** |
+
+**修法（属 `align/hot`）**：
+1. `HotRpcApplication` 补 `@Bean GrpcServerConfigurer { server -> server.intercept(rpcUnaryServerInterceptor); }`；
+2. 补一条 `*GrpcInterceptorWiringTest`，断言 `verify(builder).intercept(...)` **真被调用**（不是断言 Bean 存在）；
+3. ⚠️ 第 2 步不可省 —— §3.3：断言「Bean 存在」≠ 断言「机制生效」，而这正是 H2 当年被误判为已修的原因。
+
+**⚠️ 与 `align/hot` 的现状对照**：`align/hot` 已有 3 个 commit（`8638055` / `81804b8` / `4f1b1c9`），
+但改的是 **`hot-api`** 侧（`GlobalExceptionHandler` / `HotArticleQueryService` / 新增 4 个 api 测试）
+与 `docs/DRIFT/hot/*.md` —— **尚未触及 `hot-rpc` 的 Application 类**。
+⇒ 该缺口**仍然开着**，需知会 `align/hot`。
+
+**§3.5 跨组件不变量提醒**：这是**「共享组件的消费方漏接」**这一类缺陷的首次实例。
+`service/common` 被 16 个组件依赖，其**接线义务随组件下沉**（见
+[`protection.md`](./protection.md)「私有组件变共享 ⇒ 装配义务必须一起搬」），
+但**没有任何机制强制消费方履行**。
+⇒ 本轮新增的静态守门脚本就是这个缺口的通用解：**把「每个消费方都要配两件」变成一条可跑的检查**。
+
+---
+
 ## 二、§3.3 机制接线复核（本轮独立自查）
 
 ### 🔴 已修：共享类 javadoc 里的**可证伪假框架断言**
@@ -130,9 +168,27 @@ javap GrpcServerConfigurer
 
 （另有范围外的 `service/security/rpc/security.go:43`。）
 
-**H2 现状复核：✅ 已闭环。** 实测 **10 个** rpc 模块**全部**有 `@Bean GrpcServerConfigurer`
-（`user-rpc` / `admin-rpc` + 8 个新建域）。⚠️ 早前一次 grep 用 `head -10` 截断，
-曾误判 `article` / `task` 未注册 —— **已复核为假**，两者都注册。
+**H2 现状复核（2026-10-24 复验后更正）：🔴 未完全闭环 —— 9/10，`hot-rpc` 漏 ②。**
+
+> ⚠️ **本行在 2026-10-23 首版写的是「10 个 rpc 模块全部有，已闭环」——那句话是错的。**
+> 错因与 [`docs/Pitfalls/common/observability.md`](../../Pitfalls/common/observability.md) 坑 4 完全同类：
+> 当初的 `grep GrpcServerConfigurer` 输出**被桌面端截断**（输出里明写了 `truncated`），
+> 我没察觉就据此外推「全部都有」——**正是我自己写进踩坑档的那条坑，我自己也犯了**。
+> 2026-10-24 复验（不加截断、全量 `grep -rl`）才发现 `hot-rpc` 不在其中。
+
+实测（`grep -rl GrpcServerConfigurer --include=*.java service/`，2026-10-24）：
+
+| rpc 进程 | ① `@Import(RpcServerInterceptorFactory)` | ② `@Bean GrpcServerConfigurer` + `.intercept(` |
+|---|---|---|
+| `user-rpc` / `admin-rpc` | ✅ | ✅ |
+| `article-rpc` / `comment-rpc` / `favorite-rpc` | ✅ | ✅ |
+| `follow-rpc` / `like-rpc` / `message-rpc` / `task-rpc` | ✅ | ✅ |
+| **`hot-rpc`** | ✅ | 🔴 **缺** ⇒ 见 DRIFT-COMMON-004 |
+
+**新增守门脚本**（本轮补）：[`tools/difftest/check-grpc-interceptor-wiring.py`](../../../../tools/difftest/check-grpc-interceptor-wiring.py)
+—— 逐个 rpc 进程断言「① 与 ② 同时具备」，当前 **`EXIT=1`，精确指向 `hot-rpc`**。
+⇒ 这类缺陷**不该再靠人眼数 grep 命中文件数**。
+
 
 ### ✅ 已证伪：台账担心的「`ObservabilityProperties` 双 Bean」不成立
 
@@ -212,6 +268,11 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 | `favorite` | 🔴 0 | 🔴 **10** |
 | `article` | 🔴 0 | 🔴 1 |
 
+**2026-10-24 复验（逐分支实测 `git grep -l "com.rag.common.communityfact"`）**：
+`like` **仍是 0**（`align/like` 分支上也没有）⇒ **核心结论未变，仍成立**。
+唯一变化：`comment` 从 4 个文件增至 **5**（`align/comment` 自己加了一处引用），且新增 `align/comment` 分支。
+⚠️ 换言之：**别的域在往这条链路上加消费者，却没人补 `like` 那一半。**
+
 ⇒ **`like-rpc` 缺了 Go 侧的整套事实链路装配**（authority 查询端 + dispatch 进程 + delivery model）；
 `favorite-rpc` / `article-rpc` 多出了 Go 侧没有的用法。
 **归属**：`align/like` 与 `align/favorite` 工作树。本文件只登记，不越界修。
@@ -221,7 +282,7 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 
 ---
 
-## 五、已记录未修（`communityfact` · 20 条中的其余）
+## 五、已记录未修（`communityfact` · 14 条）
 
 > 每条均为**读 Go 原文 line-by-line** 得出，Go 事实一律带 `文件:行号`。完整覆盖清单见本次三路子审计报告。
 
@@ -281,12 +342,92 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 **签字偏离现状复核**（台账要求）：
 
 - **A-1（`logFatal` 抛 `FatalError` 而非 `os.Exit(1)`）—— ✅ 仍成立**。关闭条件（全仓出现「catch 后继续运行」）**未触发**：
-  全仓 7 处 `catch (FatalError)` 全是 `@ExceptionHandler` 转发/rethrow，无一处吞掉后继续。
-  ⚠️ 但 `FatalErrorNotSwallowedTest` **在 worktree 里不存在**（只在 spec 被提及）⇒ **关闭条件目前靠 7 处人工 rethrow 维持，无守门测试**。
+  2026-10-24 复验：全仓 `catch (FatalError)` 已从 7 处增至 **15 处 / 8 个域**（article / comment / favorite / follow / like / message 各 1 + users 2），
+  **逐处看过，全部是 `throw fatal;` 或 `throw e;`**，无一处吞掉后继续。
+  ⚠️ 但 `FatalErrorNotSwallowedTest` **至今不存在**（只在 spec 被提及）⇒ **关闭条件目前靠 15 处人工 rethrow 维持，无守门测试**。
+  ⇒ 15 处分散在 8 个域，任何一处写错都不会被任何测试抓到 —— **建议补一个「全仓扫描 `catch (FatalError)` 必须 rethrow」的静态守门**（形态同本轮新增的 `check-grpc-interceptor-wiring.py`）。
 - **A-2（`call_chain` 过滤）—— ✅ 仍成立**，且可更精确：Go 的 `"github.com/zeromicro/go-zero/"` 前缀**本来就匹配不上**
   （`isFiltered` 消费的是 `getFuncName` 产出的**短名**；Go 自己的 `logger_test.go:189` 绕过 `getFuncName` 直接喂全路径，是同义反复）。
   ⚠️ **DRIFT-LOG-002 与 A-2 必须一起修**：RAG 多出的第 10 条 `com.rag.common.logger.` 会滤掉 logger 自身帧，
   而 Go 保留 `logger.LogXxx` 尾帧 —— 改一处不改另一处会产生新的不一致。
+
+---
+
+## 六·五、台账时效性（2026-10-24 复验）—— 这份台账现在还成立吗
+
+**结论：主结论仍成立，但本文件里有 1 处假结论已更正、若干计数已陈旧、且 `service/common` 正被别的域并发改动。**
+
+### 1. 基线
+
+| 项 | 值 |
+|---|---|
+| 本文件基线 | `8422116` |
+| `do-my-own-gh` 当前 HEAD | **仍是 `8422116`**（未前进）⇒ **基线无漂移**，本文件的证据链仍然对得上 |
+| `align/common` 当前 HEAD | `01db672`（本文件所在） |
+
+### 2. 承重断言逐条复验（2026-10-24 真实执行）
+
+| 断言 | 复验结果 |
+|---|---|
+| `service/common` 147 tests / 0 failures | ✅ **仍成立**（重跑实测） |
+| 3 处修复仍在（`wrappedCallRef` / `isAuthorityUnavailable(ex)` / `receivedAt == null`） | ✅ **仍成立**（grep 命中 3 / 1 / 1） |
+| A-1 关闭条件未触发 | ✅ **仍成立**（15 处逐个验过全是 rethrow；计数由 7 改为 15） |
+| Go 侧范围内 10 个 rpc 服务全部注册拦截器 | ✅ **仍成立**（全量 grep 得 12 个，其中 `points` / `security` 范围外） |
+| **「10 个 rpc 模块全部有 `GrpcServerConfigurer`」** | 🔴 **假结论，已更正为 9/10**（`hot-rpc` 缺） |
+| communityfact 消费者不一致 | ✅ **仍成立**（`like` 仍为 0；`comment` 由 4 增至 5） |
+
+### 3. `service/common` 正被别的域并发改动（合并前必须知道）
+
+| 分支 | `service/common` 规模 | 动了什么 |
+|---|---|---|
+| `8422116`（基线） | 44 文件 / 7,529 行 | — |
+| **`align/common`（本分支）** | 44 文件 / **7,587 行** | 本轮 3 处修复 + 注释 |
+| **`align/message`** | 🔴 **51 文件 / 8,602 行**（**+7 类**） | 新增 `GoStyleCpuReader` / `GoStyleSheddingStat` / `GoStyleRpcSheddingInterceptor` / `GoStyleRpcBreakerInterceptor` / `GoStyleRpcFailurePolicy` / `GoStyleRpcProtectionChain` / `FakeServerCall` / `GoStyleRecoverInterceptor`；改 `HttpMiddleware` / `GoStyleAdaptiveShedder` / `GoStyleBreaker` |
+| **`align/users-user`** | 44 文件 / 7,594 行 | 改 `GoStyleAdaptiveShedder` / `GoStyleCpuSheddingFilter`（+20 行） |
+
+⚠️ **两个直接后果**：
+
+1. **本文件引用的行号会失效** —— 例：本文件 §三引用的
+   `GoStyleCpuSheddingFilter.java:92-96`（`shedder.allow()` → 503）在 `align/users-user` 上已移位到 **112-116**。
+   ⇒ 本文件所有行号引用**均以基线 `8422116` 为准**，合并后需重新定位。
+2. **`protection/` 包的对照基准在移动** —— 详见 §七.1。
+
+### 4. 合并冲突评估（§5.3）
+
+| 冲突面 | 结论 |
+|---|---|
+| 本轮改的 5 个源文件 | ✅ **无冲突** —— 全分支扫描确认除 `01db672` 外无人改过 |
+| `docs/Pitfalls/common/protection.md` | ✅ **无冲突** —— 原为 0 字节占位，只有本分支填了内容 |
+| `docs/DRIFT/common/` 其余 4 份 | ✅ **无冲突** —— 只有本分支新增了 `alignment-2026-10-23.md` |
+| 三档台账跨域写串 | ✅ **未发生** —— `align/message` 只写 `docs/*/message/*`，`align/users-user` 只写 `docs/*/users/*`，均未越界写 `docs/*/common/*` |
+| 🔴 `align/message` ↔ `align/users-user` | ⚠️ **两者在 `service/common/protection/GoStyleAdaptiveShedder.java` / `GoStyleCpuSheddingFilter.java` / `GoStyleRpcSheddingInterceptor.java` 上都改了** ⇒ 这两支合并时大概率冲突。**不属本域，但需知会主会话。** |
+
+### 5. ⚠️ `docs/` 下「common」的**命名歧义**（导航陷阱）
+
+合并后 `docs/` 下会同时存在**三处**叫 common 的东西，**互不相干**：
+
+| 路径 | 是什么 | 归谁 |
+|---|---|---|
+| `docs/DRIFT/common/` | **`service/common`**（跨服务共享层，16 个组件依赖） | **本域** |
+| `docs/DRIFT/message/common.md` | `service/message/message-common`（该域的 errmsg 码表模块） | `align/message` |
+| `docs/DRIFT/users/common.md` | `service/users/users-common` | `align/users-user` |
+
+⇒ 看到 `common` 三个字**不能**推断是同一件事。§7.2 已就 `docs/FileTree/` 记过一次同类歧义，此处再记一次。
+
+---
+
+## 六·六、🔍 本轮查到但**首版台账漏记**的条目（2026-10-24 补录）
+
+首版台账只收了「MISMATCH / OBSERVABLE / UNRESOLVED」三类。逐行审计过程中还有几条**够不上那三类、但确实是问题**的项，漏了。补上：
+
+| # | 项 | 性质 | 出处 |
+|---|---|---|---|
+| DRIFT-CF-018 | `Dispatcher.run(once=false)` 创建了 `handle`（`Dispatcher.java:146`），但只在**循环退出后**才返回（`:211`），`once` 分支在 `:173` 直接 return ⇒ **`@PreDestroy` 拿不到 handle**，`Dispatcher.java:223-227` 的 javadoc 描述的用法**不可达** | **API 缺陷**（非 Go 语义差异） | `Dispatcher.java:146,173,211,223-227` |
+| — | Go 侧 `LogConf.MaxContentLength` 默认 **0** 且各服务 yaml 未设 ⇒ **64KB 截断在本项目配置下不生效**；在 `core/logx/fields.go` / `rotatelogger.go` 里都未找到 1<<16 缓冲或「多读一行」逻辑 | **不是漂移**（RAG 实现了但 Go 没启用 ⇒ 行为等价） | go-zero `core/logx/config.go` 的 `LogConf` |
+| — | `LoggerFactoryBean` 在各模块的注册方式**不一致**（有的显式列 `@Import(LoggerFactoryBean.class)`，有的只靠 `scanBasePackages` 含 `com.rag.common`）⇒ 是否有模块漏注册 ⇒ 该模块打日志路径整体不可用 | **跨模块，未验** | `LoggerFactoryBean.java:76` + 各 `*Application` |
+| — | `Logger` 静态入口的 `serviceName` 来自 `spring.application.name`，Go 来自 yaml 的 `Name`（如 `usercenter`）⇒ **`service` 字段值两侧必然不同** | 归入 DRIFT-LOG-003，但**逐模块取值对照表未拉**（20 个模块） | `logger.go:63` + 各服务 yaml `Name:` |
+| — | `Logger` 的三个 `doLogXxx` 是 `public`，Go 的 `logBusinessErr` 是**包私有** | 表述差异（暴露面变大，无行为差） | `Logger.java:221,297,374` vs `logger.go:98` |
+| — | Go 侧 `points` / `security` 也注册 `AddUnaryInterceptors`（`service/points/rpc/points.go`、`service/security/rpc/security.go:43`） | **范围外**，但影响「Go 侧注册点共 12 个」这个计数的口径 | 同左 |
 
 ---
 
@@ -296,18 +437,28 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
    这两个包在 Go 侧**没有对应文件**，它们是 go-zero `rest.Server` 内建中间件（breaker / shedder / maxConns / maxBytes）
    与 `httpx` 路由错误字节形状的 Spring 表达层。
    ⇒ 对齐基准应是 **go-zero v1.10.2 库源码**，不是本仓 `Sea-RideTheWind_golang`。属独立一轮工作。
+   ⚠️ **2026-10-24 追加的紧迫性**：这两个包正在被别的域大改 ——
+   `align/message` 往里加了 **7 个新类**（RPC 侧 breaker / shedding / failure policy / protection chain / recover），
+   `align/users-user` 改了 `GoStyleAdaptiveShedder` / `GoStyleCpuSheddingFilter`。
+   ⇒ **对照基准在移动**。真要做这一轮，**必须先钉死一个基准 commit**，否则结论会随别人的提交漂移。
+   ⇒ 更要紧的是：新加的 7 个类**从未被任何台账对照过**（它们是 2026-10-23 晚间之后新增的）。
 2. **`persistence/`（2 文件）未审** —— B-1 的缓解手段（`setQueryTimeout` 注入 + `57014` 翻译），已签字关闭，但未做变异验证。
 3. **`observability` 子审计的完整覆盖清单本轮未收齐** —— 本轮在该包上**独立发现并修掉**了 DRIFT-COMMON-001，
    其余条目（`HttpMiddleware` / `MqConsumer` / `GoStyleRequestDeadline` 的逐函数对照）待补。
+   ⚠️ **2026-10-24 追加**：`align/message` 已改 `HttpMiddleware.java`（+10 行）⇒ 该文件的对照基准同样在移动。
 4. **全程无 Go ↔ RAG 双侧活体对拍** —— 本轮最强证据是「真 OTel SDK + 真 span exporter 驱动真实拦截器」+
    `javap` 字节码 + 全仓配置扫描。**仍未达到 §3.3 理想态**（真 PG / 真 Redis / 双栈对拍）。
 5. **`service/common` 自身无启动入口** —— 它是库模块，20 个测试类中仅 `ObservabilityWiringTest` 装配 Spring 上下文，
    且那 4 条用例**全是断言 Bean 存在**。⚠️ 它自己宣称「验证 H1/H2 的机制确实生效」，
    而 `grpcInterceptorBeanExists` 恰恰是 H2（starter 不用该 Bean）**按定义抓不到**的形状 —— **为执行 §3.3 而写的测试本身违反了 §3.3**。
    ⇒ 本轮用 `RpcInterceptorTimeoutSpanTest` 补上了「断言运行时后果」这一半。
+   ⇒ **2026-10-24 新增反面证据**：DRIFT-COMMON-004 正是「H2 形态在 `hot-rpc` 上复发」——
+   而 `hot-rpc` 当时**没有**接线测试。⇒ 「有测试」也不等于「测了这一条」。
 6. **`DRIFT-LOG-003` 的 `serviceName` 取值对照表未逐模块拉**（Go `c.Name` ↔ RAG `spring.application.name`，20 个模块）。
 7. **Boot 4 是否改变了 `%kvp` 默认渲染** —— §三 已从 4.0.8 的 `defaults.xml` 直接取证为「不含」，
    但**未在真实启动的应用里抓一次 stdout** 闭环（§3.3 要求运行证据，本条只有配置层 + jar 内证据）。
+8. **本文件未复审 `align/message` 新增的 7 个 `service/common/protection/` 类** ——
+   它们从未被任何 Go 对照覆盖，属本次台账的**已知空白**，且不在本轮开工时的基线内。
 
 ---
 

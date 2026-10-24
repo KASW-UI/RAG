@@ -22,7 +22,7 @@ service/users/user/user-api
 
 ## 根因
 
-`GoStyleCpuSheddingFilter.java:92-96`：
+`GoStyleCpuSheddingFilter` 的 `doFilter` 里（**基线 `8422116` 的第 92-96 行**）：
 
 ```java
 if (!shedder.allow()) {
@@ -32,7 +32,10 @@ if (!shedder.allow()) {
 }
 ```
 
-这是**忠实复刻** go-zero `rest` 的 CPU shedding（`GoStyleCpuSheddingFilter.java:21-25` 的 javadoc
+> ⚠️ **行号会移位**：`align/users-user` 给这个文件加了 20 行 ⇒ 合并后同一段落在 **112-116 行**。
+> ⇒ 引用时**同时给出方法名**（`GoStyleCpuSheddingFilter#doFilter`）与基线行号，不要只给行号。
+
+这是**忠实复刻** go-zero `rest` 的 CPU shedding（`GoStyleCpuSheddingFilter` 类 javadoc
 直接引了 Go 侧 `promise, err := shedder.Allow()` → `w.WriteHeader(http.StatusServiceUnavailable)`）。
 **它按真实 CPU 占用决策** ⇒ 构建机越忙，越容易关门。
 
