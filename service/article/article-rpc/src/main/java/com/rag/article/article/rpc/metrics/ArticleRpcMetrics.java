@@ -122,17 +122,35 @@ public class ArticleRpcMetrics {
      * Go 的 Timer 语义是"从 NewTimer 到 ObserveDuration 的间隔"，
      * Java 侧由调用方测量区间后传入，两者是同一个量。
      *
-     * <p>⚠️ <b>buckets 由 {@link #MINIO_BUCKETS} 决定</b>：Go 侧是
-     * {@code Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1}}（秒）。
-     * Micrometer 的 {@code serviceLevelObjectives} 收 {@link Duration}（不是 double 秒），
-     * 换算后<b>数值一致</b>，因此两侧的直方图分桶边界相同 ——
+     * <h2>🔴 分桶边界由 {@link #MINIO_BUCKETS} 决定，且<b>绝不能</b>加 {@code publishPercentileHistogram()}</h2>
+     * Go 侧是 {@code Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1}}（秒）
+     * （{@code metrics.go:46}）；Micrometer 的 {@code serviceLevelObjectives} 收 {@link Duration}
+     * （不是 double 秒），换算后<b>数值一致</b> ⇒ 两侧的分桶边界相同，
      * 这让 {@code histogram_quantile} 的告警阈值在迁移前后不变。
+     *
+     * <h3>⚠️ 为什么不能同时写 {@code publishPercentileHistogram()}</h3>
+     * Micrometer 1.16.7 的 {@code DistributionStatisticConfig.getHistogramBuckets(supportsAggregablePercentiles)}
+     * 取的是<b>并集</b>，不是"SLO 优先"：
+     * <pre>
+     * if (percentileHistogram != null &amp;&amp; percentileHistogram &amp;&amp; supportsAggregablePercentiles) {
+     *     buckets.addAll(PercentileHistogramBuckets.buckets(this));   // ← 额外塞进一整套默认百分位桶
+     *     buckets.add(minimumExpectedValue);                          // → 0.001
+     *     buckets.add(maximumExpectedValue);                          // → 30.0
+     * }
+     * if (serviceLevelObjectives != null) { for (...) buckets.add(sloBoundary); }  // ← 只是"再加"
+     * </pre>
+     * ⇒ 实测（真 {@code PrometheusMeterRegistry} 抓取，2026-10-24）：
+     * 桶边界从 Go 的 <b>9</b> 个（8 个 + Prometheus 固有的 {@code +Inf}）
+     * 涨到 <b>77</b> 个 ⇒ {@code histogram_quantile} 的结果与迁移前不同，
+     * 且这条指标的 series 基数翻了几倍。
+     * ⇒ 锁死用例：{@code ArticleSemanticsRegressionTest#minioHistogramBucketsMatchGoExactly}。
      */
     public void observeMinio(String operation, long durationNanos) {
         Timer.builder("article_service_minio_request_duration")
                 .description("Latency of MinIO requests.")
                 .tag("operation", operation)
-                .publishPercentileHistogram()
+                // ⚠️ 不要加 .publishPercentileHistogram()：它与 serviceLevelObjectives 取**并集**
+                //    ⇒ 实际桶边界变成 77 个，与 Go 的 8 个不一致（见上方 javadoc）。
                 .serviceLevelObjectives(MINIO_BUCKET_DURATIONS)
                 .register(registry)
                 .record(durationNanos, TimeUnit.NANOSECONDS);

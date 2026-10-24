@@ -2,8 +2,7 @@ package com.rag.article.article.rpc.bootstrap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -39,12 +38,48 @@ import java.util.List;
  * message-rpc 就这么踩过（AGENTS.md DRIFT-MSG-006）。
  * 本类把「迁移到底跑没跑」变成<b>启动时的一条异常</b>。
  *
- * <h2>校验时机：{@link ApplicationReadyEvent}</h2>
- * 必须在上下文 refresh 之后（此时 Flyway 若生效已经跑完），
- * 又要早于任何业务流量。用 {@code ApplicationReadyEvent} 与 like-rpc 一致。
+ * <h2>🔴 校验时机：{@link SmartInitializingSingleton}（不是 {@code ApplicationReadyEvent}）</h2>
+ *
+ * <p><b>Go 出处（逐行，消费点）</b>：
+ * <pre>
+ * article.go:41   u := model.NewArticleRepo(c)         ← InitDB 里校验触发器，失败 ⇒ panic
+ * article.go:44   s := zrpc.MustNewServer(...)          ← gRPC server 在这之后才被创建
+ * article.go:57   serviceGroup.Add(kq.MustNewQueue(...))  ← Kafka consumer 同理
+ * article.go:78   serviceGroup.Start()                 ← 真正开始收流量
+ * </pre>
+ * ⇒ Go：**门禁在 server 被创建之前** ⇒ 缺触发器时进程<b>从不收流量</b>。
+ *
+ * <p><b>Spring 侧的等价位置</b>（spring-framework 7.0.9，消费点）：
+ * <pre>
+ * AbstractApplicationContext.refresh()
+ *   :621  finishBeanFactoryInitialization(beanFactory)
+ *          └─ DefaultListableBeanFactory.preInstantiateSingletons()
+ *               └─ :1144-1147  SmartInitializingSingleton.afterSingletonsInstantiated()  ← 本类在这
+ *   :624  finishRefresh()
+ *          └─ :1013  getLifecycleProcessor().onRefresh()   ← 启动全部 SmartLifecycle
+ *                    ├─ devh  GrpcServerLifecycle   (localServer.start() ⇒ 端口绑定)
+ *                    └─ Kafka KafkaListenerEndpointRegistry (消费者开始拉消息)
+ * </pre>
+ * ⇒ 本类选 {@link SmartInitializingSingleton}，因为它落在
+ * 「所有单例已实例化」与「任何 {@code SmartLifecycle} 被启动」<b>之间</b>。
+ *
+ * <p><b>为什么不能更早</b>：{@code BeanFactoryPostProcessor} 阶段连 DataSource 都还没建好，
+ * Flyway 更是没跑 ⇒ 那时校验必然误报"缺表"。
+ * <br><b>为什么 Flyway 已经跑完了</b>：{@code FlywayMigrationInitializer} 是普通单例，
+ * 它的 {@code afterPropertiesSet()} 在 {@code preInstantiateSingletons()} 的实例化阶段就执行完，
+ * 而 {@code afterSingletonsInstantiated()} 是在<b>实例化循环结束之后</b>的另一个循环里调用的。
+ *
+ * <p><b>为什么不能是 {@code ApplicationReadyEvent}</b>（🔴 这就是 {@code DRIFT-ARTICLE-RPC-005}）：
+ * 它由 {@code SpringApplication.run()} 在 {@code refresh()} <b>返回之后</b>才发布，
+ * 此时 gRPC server <b>早已绑定端口</b>、Kafka 消费者<b>早已开始拉消息</b>
+ * ⇒ 存在一个「已在收流量、但不可变保证缺失」的窗口。
+ * <br>⚠️ 失败启动后端口最终也会关闭 ⇒ <b>事后查端口分不出</b>「从没启动」与「启动过又关了」；
+ * ⇒ 回归网改用 devh 的 {@code GrpcServerStartedEvent}（在 {@code localServer.start()} 之后发布）
+ * 作为「确实对外服务过」的证据。
+ * ⇒ 锁死用例：{@code ArticleSchemaGateStartupOrderTest}。
  */
 @Component
-public class ArticleSchemaGate {
+public class ArticleSchemaGate implements SmartInitializingSingleton {
 
     private static final Logger LOG = LoggerFactory.getLogger(ArticleSchemaGate.class);
 
@@ -66,11 +101,24 @@ public class ArticleSchemaGate {
     }
 
     /**
+     * 校验表与触发器 —— <b>在 gRPC server / Kafka consumer 启动之前</b>。
+     *
+     * <p>⚠️ 这里<b>不能</b>再用 {@code ApplicationReadyEvent}：
+     * 那是 {@code refresh()} <b>之后</b>才发布的，那时端口已绑、消费者已拉消息。
+     * ⇒ 时机论证见类级 javadoc 的「校验时机」一节。
+     *
+     * @throws IllegalStateException 表缺失或触发器缺失 —— <b>阻止启动</b>，与 Go 的 panic 等价
+     */
+    @Override
+    public void afterSingletonsInstantiated() {
+        verifySchema();
+    }
+
+    /**
      * 校验表与触发器。
      *
      * @throws IllegalStateException 表缺失或触发器缺失 —— <b>阻止启动</b>，与 Go 的 panic 等价
      */
-    @EventListener(ApplicationReadyEvent.class)
     public void verifySchema() {
         List<String> present;
         try {

@@ -3,8 +3,12 @@ package com.rag.article.article.api.service;
 import com.rag.article.article.api.client.ArticleRpcClient;
 import com.rag.article.article.api.dto.UploadImageResp;
 import com.rag.article.article.api.http.GoStyleBadRequestException;
+import com.rag.article.article.api.http.GoStyleGrpcStatusMapper;
+import com.rag.article.article.api.http.GoStyleHttpErrorException;
 import com.rag.article.article.proto.UploadFileRequest;
 import com.rag.article.article.proto.UploadFileResponse;
+import com.rag.common.protection.GoStyleCircuitOpenException;
+import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -37,7 +41,7 @@ import java.io.IOException;
  * {@code httpx.SetOkHandler} / {@code httpx.SetErrorHandler}（{@code article.go} 全文 42 行）
  * 导致的结果：{@code OkJson} 不会自动包，成功路径就只能是裸结构体。
  *
- * <h2>⚠️ 为什么「上传时下游失败」也是 400 而不是 1015</h2>
+ * <h2>⚠️ 为什么「上传时下游失败」<b>不是</b> 1015 信封</h2>
  * <pre>
  *   Go: upload_image_logic.go:45-48
  *       rpcResp, err := l.svcCtx.ArticleRpc.UploadFile(...)
@@ -46,13 +50,37 @@ import java.io.IOException;
  *           return nil, err          // ← 返回**裸 err**，不是 (nil, errmsg.Code)
  *       }
  * </pre>
- * ⇒ 该 error 被 handler 交给 {@code httpx.ErrorCtx} ⇒ <b>400 text/plain</b>。
- * ⚠️ 这里的 {@code errmsg.ErrorMinioUpload}（5004）<b>只进日志，不进响应</b>。
+ * ⇒ 该 error 被 handler 交给 {@code httpx.ErrorCtx} ⇒ <b>裸 HTTP 状态码 + text/plain</b>，
+ * <b>不是</b> 200 + 信封。{@code errmsg.ErrorMinioUpload}（5004）<b>只进日志，不进响应</b>。
  * 照「其他 logic 的模式」给它套一个 1015/5004 信封就是<b>新增行为</b>。
  *
- * <h2>⚠️ {@code io.ReadAll} 失败也是同一条 400</h2>
- * {@code upload_image_logic.go:35-39} 读文件失败同样 {@code return nil, err}。
- * Java 侧对应 {@link IOException}。
+ * <h2>🔴 裸状态码<b>不是</b>恒 400（DRIFT-ARTICLE-API-001 已修）</h2>
+ * <pre>
+ *   // go-zero v1.10.2 · rest/httpx/responses.go:142-159
+ *   if handler == nil {                       // ← article-api **没有**注册 error handler
+ *       if len(fns) > 0 { … }
+ *       else if errcode.IsGrpcError(err) {    // ← ① 先问「是不是 gRPC 错误」
+ *           http.Error(w, err.Error(), errcode.CodeFromGrpcError(err))   // ← ② 按 gRPC 码映射
+ *       } else {
+ *           http.Error(w, err.Error(), http.StatusBadRequest)            // ← ③ 非 gRPC ⇒ 恒 400
+ *       }
+ *   }
+ * </pre>
+ * ⇒ <b>gRPC 状态错误</b>走 ② 分支，状态码由 gRPC 码决定：
+ * {@code Unavailable⇒503}、{@code Internal⇒500}、{@code DeadlineExceeded⇒504}、
+ * {@code ResourceExhausted⇒429}、{@code NotFound⇒404}、未知码⇒500。
+ * <b>非</b> gRPC 错误（典型：熔断打开时的 {@code breaker.ErrServiceUnavailable}）走 ③ 分支 ⇒ 恒 400。
+ *
+ * <h2>⚠️ body 文案也要逐字对齐</h2>
+ * Go 写的是 {@code err.Error()}，而 grpc-go 的 {@code *status.Error.Error()}
+ * 转发到 {@code Status.String()} = {@code fmt.Sprintf("rpc error: code = %s desc = %s", …)}
+ * ⇒ body 形如 {@code rpc error: code = Unavailable desc = minio down}。
+ * ⚠️ Java 的 {@code StatusRuntimeException.getMessage()} 是 {@code UNAVAILABLE: minio down}，
+ * <b>字面不同</b> ⇒ 必须走 {@link GoStyleGrpcStatusMapper#goErrorMessage} 复刻。
+ *
+ * <h2>⚠️ {@code io.ReadAll} 失败走的是<b>另一</b>分支</h2>
+ * {@code upload_image_logic.go:35-39} 读文件失败同样 {@code return nil, err}，
+ * 但那是<b>非</b> gRPC 错误 ⇒ 恒 400。Java 侧对应 {@link IOException}。
  */
 @Service
 public class ArticleUploadService {
@@ -91,10 +119,24 @@ public class ArticleUploadService {
                     .setFileName(filename == null ? "" : filename)
                     .build());
         } catch (StatusRuntimeException e) {
-            // Go: rpc call UploadFile failed: %w → 裸 err → 400 text/plain
+            // Go 分支 ②（responses.go:150-153）：err 是 gRPC 状态错误 ⇒ IsGrpcError 为真
+            //   ⇒ http.Error(w, err.Error(), errcode.CodeFromGrpcError(err))
+            // ⇒ 状态码按 gRPC 码映射（Unavailable⇒503 / Internal⇒500 / DeadlineExceeded⇒504 …），
+            //   body 复刻 grpc-go 的 "rpc error: code = X desc = Y"。
             // ⚠️ 业务码 errmsg.ErrorMinioUpload(5004) 在 Go 侧**只进日志**
-            throw new GoStyleBadRequestException(
-                    "rpc call UploadFile failed: " + e.getStatus(), e);
+            Status.Code code = e.getStatus().getCode();
+            throw new GoStyleHttpErrorException(
+                    GoStyleGrpcStatusMapper.httpStatusOf(code),
+                    GoStyleGrpcStatusMapper.goErrorMessage(code, e.getStatus().getDescription()));
+        } catch (GoStyleCircuitOpenException e) {
+            // Go 分支 ③（responses.go:156-157）：**非** gRPC 错误 ⇒ 恒 400。
+            // 典型来源：Go 侧 breaker 打开时返回的 breaker.ErrServiceUnavailable
+            // = errors.New("circuit breaker is open")（core/breaker/breaker.go:19）——
+            // 它是普通 error，不实现 GRPCStatus() ⇒ IsGrpcError 为假。
+            // ⚠️ RAG 侧的 GoStyleCircuitOpenException 同样是**普通** RuntimeException
+            //   （刻意不抛 StatusRuntimeException，理由见该类注释），
+            //   若不在这里接住，会一路落到 handleAny ⇒ 裸 500，与 Go 的 400 不一致。
+            throw new GoStyleBadRequestException(e.getMessage(), e);
         }
 
         return new UploadImageResp(rpcResp.getFileUrl());

@@ -418,3 +418,479 @@ Jackson 的 coercion 要作用在**声明的目标类型**上，形参是 `Objec
 1. 补强前先跑一次「真源逐字段扫描」，确认该域**确实没有**触发共享豁免的前提。
 2. 补强写成域内 `XxxGoStyleCoercion`，共享层**一行不动**。
 3. 每条 coercion 规则配一条「该形状必须被拒」的用例 —— 尤其检查**形参是 `Object` 的字段**。
+---
+
+## P-13 grpc-java 的 `withDeadline` 是**覆盖**，不是「取最小」
+
+> ⚠️ **本条对所有域适用**（凡同时用「请求级 deadline」+「per-client 超时上限」的地方）。
+> 合并时建议搬到 `docs/Pitfalls/_cross/`。
+
+**现象**
+给 `user-rpc` 的 stub 补 Go 侧的 per-client 上限（2s）时，最自然的写法是：
+
+```java
+GoStyleRequestDeadline.applyTo(stub).withDeadlineAfter(2, TimeUnit.SECONDS)
+```
+
+⇒ 看起来「HTTP 预算与 2s 上限都设上了」。但实测发现：**HTTP 剩余预算被顶掉了**。
+HTTP 只剩 0.5s 时，这个 stub 拿到的是 **2s** ⇒ 单次调用可能**超出 HTTP 总预算**。
+
+**根因（框架机制）**
+
+Go 侧（`zrpc/internal/clientinterceptors/timeoutinterceptor.go:25`）：
+
+```go
+ctx, cancel := context.WithTimeout(ctx, t)      // ← 取父子 deadline 中**较早**的
+```
+
+Java 侧（**grpc-api 1.66.0 字节码实测**，`io.grpc.CallOptions`）：
+
+```
+withDeadlineAfter(duration, unit) → Deadline.after(...) → withDeadline(deadline)
+withDeadline(deadline)            → builder.deadline = deadline;   // ← **直接覆盖**
+```
+
+⇒ Go 的 `context.WithTimeout` 是「**父子取小**」，
+grpc-java 的 `withDeadlineAfter` 是「**新的覆盖旧的**」。**语义不同，且没有任何告警。**
+
+**为什么测试抓不到**
+「不顶掉预算」是一个**否定式**断言：
+「deadline ≤ HTTP 剩余预算」。若测试只断言「deadline ≈ 2s」，
+覆盖行为与取小行为**都满足** ⇒ 假绿。
+⇒ 必须**显式构造「HTTP 预算 < client 上限」的场景**才能测出来。
+
+**元教训**
+> **「设置一个上限」在不同框架里可能是完全不同的两件事。**
+> Go 的 `context.WithTimeout` = 取小；grpc-java 的 `withDeadlineAfter` = 覆盖。
+> ⇒ 迁移时**不能假设语义等价**，必须回到两边各自的**消费点**确认。
+
+**下次怎么防**
+1. 凡是「请求级 deadline」与「per-client 上限」**并存**，一律**显式算 `min`**，不依赖框架合并。
+2. 回归网必须包含**「HTTP 预算更短」**与**「预算已耗尽」**两个场景 ——
+   只测「上限生效」测不出覆盖。
+3. 断言用**相对量**（`remaining ≤ min(预算, 上限)`），不要用绝对值。
+
+---
+
+## P-14 Go 的 `codes.Code.String()` 是 CamelCase，Java 的 `Status.Code.name()` 是 SCREAMING_SNAKE
+
+**现象**
+把 gRPC 错误映射成 HTTP 状态码后，还要复刻 Go 的**错误文案**。
+Go 的 `http.Error(w, err.Error(), …)` 写的是 `err.Error()`，
+而 grpc-go 的 `*status.Error.Error()` 转发到 `Status.String()`：
+
+```go
+fmt.Sprintf("rpc error: code = %s desc = %s", s.Code(), s.Message())
+```
+
+⇒ Go 的 body 形如 `rpc error: code = Unavailable desc = minio down`。
+
+Java 侧最自然的写法 `code.name()` 给的是 **`UNAVAILABLE`** ⇒ **wire 上字面不同**。
+再叠加 `StatusRuntimeException.getMessage()` 给的是 `UNAVAILABLE: minio down`（**另一种**形状），
+一共三种可能写法，**没有一种是 Go 的**。
+
+**根因（语言映射）**
+两边的**枚举命名约定**不同（Go 的 `codes` 用 CamelCase 的 `String()`，Java 用 SCREAMING_SNAKE 的 `name()`），
+且**异常类的 `getMessage()` 约定**也不同（grpc-go 把 code+desc 编进 `Error()`，
+grpc-java 把它编进 `Status.toString()`，`StatusRuntimeException.getMessage()` 又另走一路）。
+
+**为什么测试抓不到**
+状态码（400/503）对了就容易收工 —— 但 **body 是另一层**。
+若测试只断言状态码，body 的差异**完全不可见**。
+⇒ 而且 body 的差异**只有在客户端解析这段文案时**才显形（本域的
+`extractArticleIDFromStatusMessage` 就是从 status 文案里抠 article_id 的那类协议）。
+
+**元教训**
+> **「错误语义」至少有三层：状态码 · 错误码 · 文案。**
+> 只对齐第一层就收工，是这类漂移最常见的形态 ——
+> 状态码对了，客户端仍可能因为文案不同而解析失败。
+
+**下次怎么防**
+1. 断言错误响应时，**状态码与 body 逐字**都要断（body 断言用 `startsWith`，不要只断 `contains`）。
+2. 需要复刻 Go 文案时，**显式维护一张规范名映射表**，不要用 `name()` / `toString()` 顶替。
+3. 文案差异按 §3.1 归类：若只是**文案**不同而码与状态码一致，可记为
+   `IMPLEMENTATION DIFFERENCE`；若文案被下游协议依赖（如抠 ID），按 `SEMANTIC MISMATCH` 记。
+
+---
+
+## P-15 变异验证：被变异的模块**没被重编** ⇒ 会产出**假的「仍全绿」**
+
+**现象**
+变异 `service/common` 里的 `GoStyleCpuSheddingFilter` 的 `@Order`（+3 → +9），
+想验证新写的 Filter 链序断言能不能抓住它。脚本判定：**仍全绿 ⇒ 假绿**。
+
+但断言**本身是对的** —— 加 `-am` 重编 `service/common` 之后，同一个变异**立刻转红**。
+
+**根因（构建机制）**
+```bash
+mvn -pl service/article/article-api test          # ❌ 不带 -am
+```
+⇒ `service/common` **不参与本次构建**，用的是**本地仓库里已 install 的旧 jar**
+⇒ **源码改了，运行的东西没变** ⇒ 变异**根本没生效** ⇒ 测试当然还绿。
+
+**元教训**
+> **变异验证的判据是「行为变了」，不是「源码变了」。**
+> 源码改了而产物没变 ⇒ 变异无效 ⇒ 「仍全绿」**不能**判成「回归网无效」，
+> 只能判成「**变异没生效**」。
+> ⇒ **三态判定是必须的**：`转红` / `仍全绿` / `变异无效`。
+> 本轮之前已因为 `sed` 多行替换失败踩过一次「假绿」，**同一个坑踩了两次**。
+
+**下次怎么防**
+1. 变异**非本模块**的源码时，命令必须带 `-am`（或先 `mvn -pl <被变异模块> install -DskipTests`）。
+2. 带 `-am` 时 `-Dtest=X` 会传播到所有模块 ⇒ 还要补
+   `-Dsurefire.failIfNoSpecifiedTests=false`，否则先在别的模块上失败。
+3. 每次变异后**先确认变异真的进了产物**（如 `javap` 看字节码 / 看编译时间戳变化），
+   再看测试红不红。
+
+---
+
+## P-16 「我写的那个字节」到不了客户端 —— 框架的**归一化**会覆盖它
+
+**现象**
+为了对齐 Go 的 `http.Error`，RAG 侧写的是**逐字相同**的
+`Content-Type: text/plain; charset=utf-8`（**分号后有空格**）。
+真 Tomcat 实测：客户端收到的是 **`text/plain;charset=utf-8`（无空格）**。
+
+⇒ 第一反应是「常量写错了」⇒ 把它改成无空格 ⇒ **输出字节没变**。
+⇒ 真相是：**写进去的那个原值根本没到达客户端**。
+
+**根因（框架机制）**
+Spring 的 `ServletServerHttpResponse.writeHeaders()`：
+
+```java
+getHeaders().forEach((name, values) -> values.forEach(v -> servletResponse.addHeader(name, v)));
+// ↓ 紧接着
+if (servletResponse.getContentType() == null) {
+    MediaType contentType = getHeaders().getContentType();   // ← parseMediaType 再 toString
+    if (contentType != null) servletResponse.setContentType(contentType.toString());
+}
+```
+⇒ **`MediaType.toString()` 不在 `;` 后加空格** ⇒ 刚 `addHeader` 进去的原始值被**覆盖**。
+
+⚠️ 同一个仓里已经有一处**绕过**了它（`GoStyleJsonBodyLimitFilter` 用 `setHeader` 裸写），
+所以「为什么那一处对、这一处不对」曾是个谜 —— 答案是**路径不同**（Filter vs ResponseEntity）。
+
+**为什么测试抓不到**
+MockMvc **不经过 Tomcat 的 header 规范化** ⇒ 50 条 MockMvc 测试全绿，
+而真客户端拿到的是另一个字节串。
+
+**元教训**
+> **断言要打在「客户端真正收到的」那一份上，而不是「我写出去的」那一份。**
+> 中间隔着：框架的消息转换器 → `MediaType` 的解析与再序列化 → 容器 header 规范化。
+> ⇒ 只要这条链上有一环会**再序列化**，你写的常量就只是**意图**，不是**结果**。
+
+**下次怎么防**
+1. 涉及**响应头字节**的契约，必须有**真容器**（`RANDOM_PORT`）用例 + **JDK `HttpClient`** 断言
+   —— MockMvc 只能证明「应用层设了这个 header」。
+2. 断言**客户端收到的那一份**（`response.headers().firstValue("Content-Type")`），
+   不要断言 `ResponseEntity` / `HttpServletResponse` 上设的值。
+3. ⚠️ **characterization test 的写法**：当实测与 Go 不一致又决定不修时，
+   断言**实测值**，但 `@DisplayName` 必须写明「与 Go 差在哪」——
+   否则就变成 AGENTS.md §3.3 说的「把 RAG 的行为写成 Go 的事实」。
+
+---
+
+## P-17 「两侧排序一致」的用例若只用 ASCII ⇒ 它**测不出**任何排序差异
+
+**现象**
+`ext_info` 的 key 要按 Go 的顺序输出。RAG 侧本来就用 `TreeMap`（会排序），
+台账把它判成 OBSERVABLE DIFFERENCE（"UTF-8 字节序 vs UTF-16 码元序"），
+但**两侧其实在绝大多数输入上是一致的** —— 只在一个很窄的边界上分叉。
+
+**根因（不是框架机制，是**比较语义**）**
+
+| | 排序依据 |
+|---|---|
+| Go `encoding/json`（`encode.go:805-807`） | `strings.Compare` ⇒ **UTF-8 字节序** = **码点序** |
+| Java `String.compareTo` | **UTF-16 码元序** |
+
+- BMP 内字符：UTF-16 码元序 == 码点序 == UTF-8 字节序 ⇒ **完全一致**。
+- **非 BMP**（增补平面，U+10000+）：UTF-16 用代理对表示（U+D800–U+DFFF），
+  **排在 U+E000–U+FFFF 之前**；码点序里排在**之后** ⇒ **分叉**。
+
+实测（Go 1.25.11 + JDK 21，同一组 key `a` / `中` / U+E000 / U+FFFD / `😀`）：
+
+```
+Go encoding/json       : a, 中, U+E000, U+FFFD, 😀      ← 码点序
+Java TreeMap 自然序     : a, 中, 😀, U+E000, U+FFFD      ← ❌ 分叉
+Java TreeMap 码点比较器 : a, 中, U+E000, U+FFFD, 😀      ← ✅ 与 Go 一致
+```
+
+**为什么测试抓不到**
+原来的用例只用 ASCII key（`Mid` / `alpha` / `zeta`）⇒ **恰好落在两侧一致的那一侧** ⇒ 永远绿。
+⚠️ 而且它还"证明"了"Java 的自然序恰好同构"—— **只对 BMP 成立**，却把结论写成了普遍成立。
+
+**元教训**
+> **写"两侧应当一致"的用例之前，先问一句：「什么样的输入会让两侧不一致？」并把它写进用例。**
+>
+> ⇒ 对**排序 / 比较 / 编码 / 精度 / 边界值**这类契约，
+> 随手写的用例几乎必然落在"两侧碰巧一致"的区域 ⇒ 用例**假绿**，
+> 而且还会反过来给出一个**过强的结论**（"自然序恰好同构"）。
+>
+> ⇒ 判据：**用例里必须出现一个"专门挑出来的分歧点"**，
+> 并在注释里写清「两侧为什么会在这个输入上分叉」。
+
+**与本轮另一条同源**
+`DRIFT-ARTICLE-RPC-010`（直方图桶）是同一类错误的另一面：
+一个**测了名字没测桶**，一个**测了 BMP 没测非 BMP**。
+⇒ 通用处方：**对每个"已对齐"的断言，问一句"它到底测的是哪一面"**。
+
+**顺带两条实操细节**
+1. `MockHttpServletResponse.getContentAsString()` 用的是 response 的 character encoding
+   （没带 charset 时是 **ISO-8859-1**）⇒ 断言非 ASCII 内容必须用
+   `getContentAsByteArray()` + **UTF-8** 解码。
+2. Java 里要按**码点**排序，不能用 `String.compareTo`；
+   实现时逐码点比较，并注意**一方是另一方前缀**时短者在前（与 `strings.Compare` 一致）。
+
+---
+
+## P-18 「你的代码里没写」≠「运行时没有」：RAG 跑在**容器**里，容器自带一堆上限
+
+**现象**
+台账写「`DRIFT-005` query 参数总数上限 2048 ⇒ Go 有上限，**RAG 无上限**」。
+依据是源码：Spring 的 `@RequestParam` 确实不限制参数总数。
+⇒ 于是这条被当成「RAG 侧缺一道 DoS 闸门」记成了 OBSERVABLE DIFFERENCE。
+
+**2026-10-24 真 Tomcat 实测**
+
+| 场景（默认配置） | 实测 |
+|---|---|
+| 2049 个非空 query 值（≈8196 字节） | **400**，body = **Tomcat 的 HTML 错误页** |
+| **2048** 个非空 query 值（≈8192 字节） | **400**（Go 允许的上限在 RAG 上**就已经被拒**） |
+| 3000 个**空值** query 参数（≈6000 字节） | 请求**通过** ⇒ 走到 controller ⇒ 下游 gRPC 不可达 ⇒ 500 |
+
+⇒ **RAG 并不"无上限"**：Tomcat 在**连接器层**就拒了
+（Boot 4 的 `server.max-http-request-header-size`，默认 **8 KB**），
+而且**比 Go 更严**（≈2040 个值 < Go 的 2049）。
+⇒ 这条漂移从「DoS 暴露」降级成「**响应体形状**差异（Tomcat HTML vs Go text/plain）」。
+
+**元教训**
+> **「RAG 侧没有 X」这类断言，必须在运行时验证，不能只看 RAG 的源码。**
+> ⇒ 因为 RAG 跑在**容器**里，容器自带一堆上限（请求行长度、参数个数、参数大小、body 大小…），
+> 它们往往**比业务代码更早**触发。
+> ⇒ 这是 AGENTS.md §3.3.1「配置里没写 ≠ 没开」的**镜像版**：
+> **「你的代码里没写 ≠ 运行时没有」**。
+> ⇒ 推论：**台账里凡是"RAG 缺少某个上限/校验"的条目，都要先用真容器量一次**，
+> 否则很可能把一条**更严的**现实误判成"缺失"。
+
+**元教训 2：一条闸门在默认配置下不可达 ⇒ 它的回归网要单独开一个测试类**
+
+本例里，应用层的 2048 闸门在**默认配置下永远不触发**（Tomcat 先拒）⇒
+**用默认配置的测试类根本测不到它**（会一直绿，且是**假绿**：断言的是 Tomcat 的行为）。
+⇒ 做法：另开一个测试类，把 `server.max-http-request-header-size` 调大，
+**只为**让请求能进到应用层，然后在那里断言闸门本身的语义。
+⇒ 与 P-15（变异时模块没被重编）同族：**「测试跑过了」不等于「测到了你写的那段」**。
+
+**元教训 3：属性名写错 ⇒ 被静默忽略 ⇒ 看起来像"实现没生效"**
+
+第一版测试写的是 `server.max-http-header-size=65536` ⇒ Boot 4 里**这个属性已不存在**
+⇒ 未知的 Boot 属性**不报错**，被静默忽略 ⇒ 请求仍被 Tomcat 以 400 拒掉
+⇒ 现象是「**我的 filter 好像没执行**」。
+⇒ 真正的属性名是 `server.max-http-request-header-size`（Boot 4 的 `ServerProperties`：
+`maxHttpRequestHeaderSize`，默认 `DataSize.ofKilobytes(8)`）。
+⇒ 对照 AGENTS.md §3.3：**配置写错/写旧名 ⇒ 机制静默不生效，且没有任何告警**。
+
+---
+
+## P-19 域内编号跨域会撞号：「查无此编号」可能是**搜窄了**，不是"不存在"
+
+**现象**
+`UNRESOLVED-008` 记的是：`GlobalExceptionHandler.java:118` 的注释引用了「DRIFT-024」，
+而 **`docs/DRIFT/` 全树查无此编号** ⇒ 由此推断「存在一份**未入库**的历史漂移清单」。
+
+**真相**（2026-10-24 全仓 + 全部工作树搜索后）：
+`DRIFT-024` **存在** —— 在 **users 域**的 `docs/DRIFT/users/_shared.md:103`
+（「text/plain 400 的响应头丢失」），`docs/DRIFT/common/http.md` 与
+`docs/DRIFT/_cross/status-snapshot-2026-10-22.md` 都在引用它。
+
+⇒ **推断错了**：不是"有一份未入库的清单"，而是**我搜窄了**（只搜了本域/本仓的某些位置）。
+
+**根因**
+`DRIFT-0xx` / `UNRESOLVED-0xx` 是**域内编号**，**每个域各自从 001 开始**
+⇒ 同号在不同域指向**完全不同的条目**
+⇒ 跨域引用若不带域前缀，**在别的域的台账里根本查不到**。
+
+**元教训**
+> **「查无此编号」有两个可能：「它不存在」与「我搜窄了」—— 后者更常见。**
+> ⇒ 检索"查不到"时，必须：**全仓 + 全部工作树 + 别的域的台账**一起搜，
+> 而不是据此推出"存在未入库的清单"（那是一个**很重的结论**，需要更硬的证据）。
+> ⇒ 同理，**在注释里引用别的域的编号**时，要么写全路径
+> （`docs/DRIFT/users/_shared.md` 的 `DRIFT-024`），要么别引 ——
+> 否则下一个 agent 会和你一样查不到，然后重复掉进同一个坑。
+
+**顺带一条：跨域引用的条目，本身可能是"本域不受影响"的**
+⇒ 找到之后还要**确认它对本域的实际影响**（本例：共享层已修 + 本域真 Tomcat 用例已断言
+⇒ 不受影响），而不是"找到了 ⇒ 就算一条漂移"。
+
+---
+
+## P-20 「错误被记录了」≠「错误被上报了」：复刻 Go 的解析，**必须复刻它失败时怎么办**
+
+**现象（本轮实际发生的一件事）**
+本轮把 `GoStyleFormParamCountFilter` 改成复刻 Go 的 `net/url` 解析规则。
+自测时逐条对着 Go 的 `parseQuery` 源码核对，分段规则、`;` 跳过、`%` 解码失败跳过 —— **全对**。
+
+但真容器实测（2026-10-24）发现：
+
+| 场景 | Go | RAG（当时） |
+|---|---|---|
+| `?a=1;b=2` | 400 + `invalid semicolon separator in query` | 🔴 **200**（请求被接受） |
+| `?a=%zz` | 400 + `invalid URL escape "%zz"` | 🔴 **500 空 body** |
+
+⇒ 复刻了「**怎么解析**」，漏了「**解析失败时怎么办**」⇒ 一个 400 变成了 200。
+
+**根因（在 Go 侧，是「一行代码」的差别）**
+```
+Go 1.25 标准库 net/url/url.go:1019-1054  parseQuery
+  if strings.Contains(key, ";") {
+      err = fmt.Errorf("invalid semicolon separator in query")   // ← **记**错误
+      continue
+  }
+  …
+go-zero@v1.10.2/rest/httpx/util.go:23-25  GetFormValues（ParseForm 的 error 在这里上抛）
+  if err := r.ParseForm(); err != nil {
+      return nil, err          // ← **抛**错误（不是吞掉）
+  }
+```
+⇒ 链是：`parseQuery` 记 ⇒ `ParseForm` 返回 ⇒ `GetFormValues` 抛 ⇒ `httpx.Parse` 失败
+⇒ `httpx.ErrorCtx` ⇒ `http.Error(w, err.Error(), 400)`。
+⇒ **中间任何一层把它吞了，Go 就不会返 400** —— 而这一层恰好是 go-zero 的一行代码。
+
+**元教训**
+> **复刻一个「会失败」的函数时，「失败时怎么办」不是细节，是它的可观察行为。**
+>
+> 「分段规则」是**成功路径**的语义；「错误怎么冒泡」是**失败路径**的语义。
+> 只复刻前者 ⇒ 在畸形输入上两侧行为不同，而且**测试全绿**（因为测试用的是正常输入）。
+>
+> ⇒ 判据：**这个函数有可能失败吗？** 有 ⇒ 必须把「失败时的输出」也逐条对照，
+> 而且**必须挑一条会让它失败的输入**做用例。
+>
+> ⇒ 同 AGENTS.md §3.3.1 的镜像版：**「错误被记录了」≠「错误被上报了」**。
+
+**下次怎么防**
+1. 复刻 Go 的某个函数时，把它的**所有 return 路径**列出来（成功 / 各种失败），逐条对。
+2. 写用例时，**刻意挑一条会让 Go 失败的输入**，而不是挑一条「两边都成功」的。
+3. Go 侧用**真包**跑探针（`httpx.Parse`，不是自己 new 一个 `url.ParseQuery`）——
+   因为「谁把错误抛出去」这件事，**恰恰是在调用链的中间层决定的**。
+
+---
+
+## P-21 「仍全绿」的第一嫌疑是「**变异没打中**」，不是「测试测不到」
+
+**现象（本轮实际发生的一件事）**
+本轮给新写的三条 query 解析用例做变异验证，两次拿到「仍全绿」：
+
+| 变异 | 结果 | 真相 |
+|---|---|---|
+| B₁：**只**删掉 **key** 分支的错误上报 | 仍全绿 | ⚠️ **变异没打中** —— 用例测的是 **value** 分支（`?a=%zz` 的坏转义在 value 里） |
+| D₁：把段数上限挪到 2048 计数**之前** | 仍全绿 | ⚠️ **变异没打中** —— 挪了位置，但**相对顺序没变**（仍是「10000 先」） |
+
+⇒ 两次都不是「测试测不到」，而是**变异本身无效**。
+⇒ 若不查这一步，就会得出「这条用例测不出锁序/顺序」的**错误结论**，
+进而可能去写一条**其实不需要**的新用例，或错怪测试本身。
+
+**根因**
+三态判定里的「仍全绿」有**两种**含义，含义相反：
+- 「测试覆盖不到这个维度」⇒ 要**另写探针**（见 PF-ARTICLE-RPC-012）；
+- 「变异没生效」⇒ **测试是好的**，变异要重做。
+
+⇒ 而「变异没生效」有多种来源：
+① **打错分支**（B₁：改的是 key，用例测的是 value）；
+② **相对量没变**（D₁：挪了位置，但两个检查的**先后**没变）；
+③ **产物没重新编译**（P-15 已记：`-pl` 不带 `-am`）；
+④ **变异本身写错了**（本会话早前踩过：`sed` 多行替换失败 ⇒ 文件改坏 ⇒ 编译失败
+   ⇒ 脚本把「没跑到测试」误判成「仍全绿」）。
+
+**元教训**
+> **「仍全绿」不是一个结论，是一个待排查的状态。**
+> ⇒ 在写「这条用例测不到 X」之前，**先证明变异真的生效了**。
+>
+> ⇒ 对照 AGENTS.md §3.3「三态判定」：本轮把它从「三种结果」细化成
+> **「仍全绿」还要再分「测不到」与「变异无效」两支**。
+
+**下次怎么防**
+1. 变异后**先确认它进了产物 / 打在了被测行为上**：
+   - `grep -c "MUT-…"` 确认标记在文件里；
+   - 改的是**相对顺序**时，**看代码确认相对次序真的变了**（本轮 D₁ 就栽在这）。
+2. 变异**打偏**时的信号：失败信息与「被测行为」毫无关系
+   （例如改 key 分支却测 value）⇒ 那就是变异打偏了。
+3. 脚本判定「仍全绿」时，**必须同时打印变异内容**，让「没打中」当场可见。
+
+## P-22 「端到端测不到」是**两个问题**；「javadoc 写了 Go 出处」是**待核实的断言**，不是证据
+
+**现象（2026-10-24 台账审计时实际挖到的一件事）**
+
+审计 `article-api` 的 Go 行号引用时，发现 `GoStyleGetFormValuesFilter.isGoPrintable` 的 javadoc 写着：
+
+> Go 的 `strconv.IsPrint`（`strconv/quote.go:296-303`）
+
+两件事同时成立：
+
+1. **行号指错了函数** —— `quote.go:296-303` 落在 `UnquoteChar`（起于 `:259`）的转义解析里，
+   `IsPrint` 的真身在 **`:522`**；
+2. **代码也没实现 Go 的语义** —— RAG 写 `r >= 0x20 && r < 0x7F`，
+   而 Go 在 **`0xA1..0xFF` 判可打印**（唯一例外 `0xAD` 软连字符）
+   ⇒ `é` 在 Go 是原样输出（`c3 a9`），在 RAG 是 `\u00e9` ⇒ **wire 字节不同**。
+
+**坑在哪：三处**
+
+| # | 坑 | 本次的具体表现 |
+|---|---|---|
+| 1 | 「**端到端测不到**」被当成「**不用管**」 | 这段分支在 HTTP 路径上确实进不去 ⇒ 差点按「不可观察 ⇒ 不修」结案 |
+| 2 | 「**端到端测不到**」被当成「**不用写网**」 | 若真不写网 ⇒ 这段代码就**永远没人守**，下次有人「简化」它时**没有任何网会响** |
+| 3 | 「**javadoc 写了 Go 出处**」被当成「**已经对齐了**」 | 行号错 + 语义错 ⇒ **两层都是「看起来对齐」**；而 javadoc 恰恰是最容易骗过 review 的地方 |
+
+**根因：框架的「连接器级」校验先于应用层**
+
+`goQuote` 的唯一输入是 **query 串**里 `%` 开头的**原始字节**切片
+⇒ 要让非 ASCII 进去，请求行里就得有原始非 ASCII 字节
+⇒ **Tomcat 在连接器层就拒了**（Tomcat 11.0.24，逐行）：
+
+- **HTTP/1.1**：`Http11InputBuffer.java:468-473` ⇒ 逐字节查 `HttpParser.isQueryRelaxed`，
+  不过即抛 `IllegalArgumentException` ⇒ 400（**应用层 filter 根本没跑**）；
+- **HTTP/2**：`StreamProcessor.java:539-545` ⇒ 对 `:path` 的 query 段做**同一个**检查 ⇒ 400；
+- **判据本身**：`HttpParser.java:145-172` ⇒ `IS_QUERY_RELAXED` 只由
+  `IS_USERINFO` / `'%'` / `IS_SUBDELIM` / `':'` 组成（`:97-108`）⇒ **全是 ASCII**
+  ⇒ `0x80..0xFF` 恒为 false；
+- **放宽口子也堵死**：`HttpParser.java:1138-1148`（`relax`）只放宽
+  `isRelaxable` 字符集 `" < > [ \ ] ^ \` { | }`（`:114-117`）⇒ **同样全是 ASCII**
+  ⇒ **任何 `relaxedQueryChars` 配置都放宽不了非 ASCII**。
+
+⇒ **query 串恒为纯 ASCII** ⇒ 该分支是**结构性死代码**（不是「目前碰巧没碰到」）。
+
+**元教训**
+
+> **「端到端测不到」要拆成两问，缺一不可：**
+> ① 它**可观察**吗？（本条：**否** ⇒ 不立「需要对齐」的 `DRIFT` 条目）
+> ② 它**有网**吗？（本条：**没有** ⇒ 必须补一张**直接单元测试**）
+>
+> ⇒ 只答 ① 就放过 ⇒ 就会留下一段**没人守、还自称等价**的死代码。
+
+> **「以 Go 措辞写下的断言」是「待核实的断言」，不是证据。**
+>
+> ⇒ 本轮正是从一句 javadoc 的**行号写错**出发，顺藤摸到**代码也没实现 Go 的语义**。
+> ⇒ **行号错**与**语义错**往往是**同一个疏漏的两面**：抄的时候抄的是「看起来像」的那一段，
+> 而不是**真正在消费这个值**的那一段（AGENTS.md §3.3.1 的「声明点 ≠ 消费点」，
+> 同样适用于行号**范围**）。
+>
+> ⇒ 修的时候也要**两件事一起做**：改代码 + 改 javadoc；
+> 只改代码 ⇒ javadoc 继续说谎；只改 javadoc ⇒ 差异还在。
+
+**下次怎么防**
+
+1. **审计时把「源码里的 Go 行号引用」当独立待核验项抽样** ——
+   本轮抽样 34 条才抓到 4 条错 ⇒ 抽样比例要够，且**「看起来合理」的行号最容易蒙混过关**。
+2. **不可达分支也要写网，但要用「直接单元测试」** ——
+   端到端恒绿等于没网；用**反射**调私有静态方法即可（本轮 `ArticleGoStrconvQuoteParityTest`），
+   **不要**为了测试去改生产代码的可见性。
+3. **「不可达」要用框架源码的**消费点**证明，不是「实测恰好没碰到」** ——
+   「实测如此」只是**当前配置下**如此；**逐行读框架源码**才能证明「换配置也绕不过」。
+   ⇒ 本域第八轮记的是「实测如此」（LOW，不修），
+   第十二轮把它**升级**为「结构性必然」——**同一件事，两种证据强度**。
+4. **变异验证仍然要做** —— 直接单元测试也可能是假绿：
+   本轮 4 个变异（退整段 / 去掉软连字符例外 / 改下界 / 改上界）**全部转红** ⇒ 网是真的。
+
+**证据 / 指针**
+
+- 完整取证（含 Go 探针源码与逐字输出、Tomcat 逐行引用）：[`docs/DRIFT/article/api.md`](../../DRIFT/article/api.md) 第十二轮（FIX-18）。
+- 对应条目：`DRIFT-ARTICLE-API-010`。

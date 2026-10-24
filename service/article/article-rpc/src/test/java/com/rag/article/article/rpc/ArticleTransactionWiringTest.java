@@ -2,6 +2,7 @@ package com.rag.article.article.rpc;
 
 import com.rag.article.article.rpc.domain.ArticleEntity;
 import com.rag.article.article.rpc.domain.ArticleSyncOutboxEntity;
+import com.rag.article.article.rpc.exception.ArticleExceptions;
 import com.rag.article.article.rpc.mapper.ArticleMapper;
 import com.rag.article.article.rpc.mapper.ArticlePublicationMapper;
 import com.rag.article.article.rpc.mapper.ArticleSyncOutboxMapper;
@@ -20,10 +21,18 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -63,7 +72,13 @@ import static org.junit.jupiter.api.Assertions.*;
                 "grpc.client.message-rpc.address=static://127.0.0.1:1",
                 // Kafka：listener 容器会在上下文启动时尝试连接 broker。
                 // 本类不验证消费路径，用一个不可达地址让 listener 惰性重试即可（不阻塞上下文启动）。
-                "spring.kafka.bootstrap-servers=127.0.0.1:1"
+                "spring.kafka.bootstrap-servers=127.0.0.1:1",
+                // ⚠️ 四个通道的 brokers 键没有消费点（客户端是全局单例）⇒ 必须与全局同值，
+                //    否则 ArticleKafkaChannelValidator 会在启动时因分叉而让上下文起不来。
+                "article-rpc.kq-pusher-conf.brokers=127.0.0.1:1",
+                "article-rpc.kq-consumer-conf.brokers=127.0.0.1:1",
+                "article-rpc.article-sync-pusher-conf.brokers=127.0.0.1:1",
+                "article-rpc.article-sync-result-consumer-conf.brokers=127.0.0.1:1"
         })
 @Testcontainers
 @org.testcontainers.junit.jupiter.EnabledIfDockerAvailable
@@ -78,7 +93,13 @@ class ArticleTransactionWiringTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
-        r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+        // ⚠️ ApplicationName 是**锁序探针**（lockOrderIsArticleThenPublication）的抓手：
+        //    它要从 pg_stat_activity 里挑出「本测试卡住的后端」。
+        //    同容器实例上只有本测试会卡在 FOR UPDATE 上 ⇒ 加上标记就不会误抓别的会话。
+        r.add("spring.datasource.url", () -> {
+            String url = POSTGRES.getJdbcUrl();
+            return url + (url.contains("?") ? "&" : "?") + "ApplicationName=article-lockorder";
+        });
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);
     }
@@ -167,7 +188,255 @@ class ArticleTransactionWiringTest {
     }
 
     // ==================================================================
-    // 2. 事务回滚（Go: TestArticleDomainOutboxFailureRollsBackPublication）
+    // 3. 🔴 成功路径（U-5 / CASE-R11）：发布流水线的四步联动
+    // ==================================================================
+    //
+    // Go 出处：service/article/rpc/internal/mqs/article_sync_result_consumer.go:74-153
+    //   tx.Create(&revision)      → ① 冻结已批准正文为一条 revision
+    //   tx.Save(&pointer)          → ② 指针指向该 revision，state=published，pointerVersion+1
+    //   tx.Create(&domainEvent)    → ③ 域事件入 article_domain_outbox
+    //   article.Status = PUBLISHED; SetSyncState(...); ExtPublishedOnce = "true"  → ④
+    //
+    // ⚠️ 之前**只有失败回滚路径**有真 PG 用例（domainOutboxFailureRollsBackEverything）
+    //    ⇒ 「发布成功时四者是否真的同时落库」从未被验证过（U-5）。
+
+    @Test
+    @DisplayName("🔴 Go: acceptSyncResult **成功**路径 ⇒ revision + 指针 + 域事件 + 文章状态 四者同时落库")
+    void acceptSyncResultSuccessPathPublishesEverything() {
+        String articleId = "pub-ok-1";
+        seedReviewingArticle(articleId, "pub-ok.md", "sync-pub-ok", 2000L);
+        insertRevisionReadyOutbox(articleId, "sync-pub-ok", 2000L);
+
+        ArticleSyncEventTypes.ArticleSyncResult result = new ArticleSyncEventTypes.ArticleSyncResult();
+        result.articleId = articleId;
+        result.eventId = "sync-pub-ok";
+        result.op = ArticleSyncEventTypes.OP_UPSERT;
+        result.versionMs = 2000L;
+        result.success = true;
+
+        ArticleAtomicService.PublishOutcome outcome =
+                atomicService.acceptSyncResult(result, new ObjectMapperHolder().mapper());
+
+        // ⚠️ 种子里 last_sync_reason = 'update' ⇒ Go 的通知条件
+        //    （syncReason == create && ExtPublishedOnce == ""，:146-148）**不成立** ⇒ 不通知
+        assertNull(outcome, "reason=update ⇒ 不该要求发通知（Go :146-148）");
+
+        // ① revision：内容取自**冻结 payload**，不是当前 article 行
+        Integer revisions = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM article_revision WHERE article_id = ?", Integer.class, articleId);
+        assertEquals(1, revisions, "成功路径必须落一条 revision");
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT revision FROM article_revision WHERE article_id = ?", Integer.class, articleId),
+                "revision 号 = MAX(revision)+1（Go :109-111）");
+        assertEquals(articleId + ":r1", jdbcTemplate.queryForObject(
+                "SELECT revision_id FROM article_revision WHERE article_id = ?", String.class, articleId),
+                "revision_id 形如 \"<articleId>:r<n>\"（Go :112）");
+        assertEquals("# Approved", jdbcTemplate.queryForObject(
+                "SELECT markdown FROM article_revision WHERE article_id = ?", String.class, articleId),
+                "正文必须取**冻结 payload** 的 markdown（Go :118）");
+        assertEquals("approved title", jdbcTemplate.queryForObject(
+                "SELECT title FROM article_revision WHERE article_id = ?", String.class, articleId),
+                "标题必须取**冻结 payload** 的 title（Go :115）");
+        assertEquals("sync-pub-ok", jdbcTemplate.queryForObject(
+                "SELECT sync_event_id FROM article_revision WHERE article_id = ?", String.class, articleId),
+                "revision 记下这次同步的 event_id（Go :120）");
+        assertNotNull(jdbcTemplate.queryForObject(
+                "SELECT published_at FROM article_revision WHERE article_id = ?",
+                java.time.OffsetDateTime.class, articleId), "published_at 必须落库（Go :120）");
+
+        // ② 指针：current_revision 指向刚建的 revision，state=published，pointerVersion=1
+        assertEquals(articleId + ":r1", jdbcTemplate.queryForObject(
+                "SELECT current_revision FROM article_publication WHERE article_id = ?",
+                String.class, articleId), "指针必须指向刚冻结的 revision（Go :123）");
+        assertEquals(1L, jdbcTemplate.queryForObject(
+                "SELECT pointer_version FROM article_publication WHERE article_id = ?",
+                Long.class, articleId), "指针不存在时 pointerVersion 从 0+1=1 起（Go :121）");
+        assertEquals("published", jdbcTemplate.queryForObject(
+                "SELECT state FROM article_publication WHERE article_id = ?", String.class, articleId),
+                "state = published（Go :124）");
+
+        // ③ 域事件：aggregate_version 与指针版本一致，event_type = published
+        Integer domainEvents = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM article_domain_outbox WHERE aggregate_id = ?", Integer.class, articleId);
+        assertEquals(1, domainEvents, "成功路径必须落一条域事件（Go :127）");
+        assertEquals(1L, jdbcTemplate.queryForObject(
+                "SELECT aggregate_version FROM article_domain_outbox WHERE aggregate_id = ?",
+                Long.class, articleId), "域事件的 aggregate_version = pointerVersion（Go :125）");
+        // ⚠️ event_type **不是**裸的 "published"：Go 把 operation 拼进信封类型
+        //    （community_article_event.go:91 `EventType: "community.article." + operation`），
+        //    裸 "published" 只是它的一个入参（:131）。
+        assertEquals("community.article.published", jdbcTemplate.queryForObject(
+                "SELECT event_type FROM article_domain_outbox WHERE aggregate_id = ?",
+                String.class, articleId), "域事件的 event_type = community.article.published（Go :91）");
+        assertEquals("community.article.sync-pub-ok.published", jdbcTemplate.queryForObject(
+                "SELECT event_id FROM article_domain_outbox WHERE aggregate_id = ?",
+                String.class, articleId), "域事件 id = community.article.<eventId>.<operation>（Go :65）");
+        assertEquals(jdbcTemplate.queryForObject(
+                "SELECT last_event_id FROM article_publication WHERE article_id = ?",
+                String.class, articleId), jdbcTemplate.queryForObject(
+                "SELECT event_id FROM article_domain_outbox WHERE aggregate_id = ?",
+                String.class, articleId),
+                "指针的 last_event_id 必须指向这条域事件（Go :124）");
+
+        // ④ 文章本身：PUBLISHED + ext_info 状态机
+        ArticleEntity after = articleMapper.selectById(articleId);
+        assertNotNull(after, "文章行必须还在");
+        assertEquals(com.rag.article.article.proto.ArticleStatus.PUBLISHED_VALUE, after.getStatus(),
+                "状态必须变成 PUBLISHED（Go :150）");
+        assertNotNull(after.getExtInfo(), "ext_info 回读为 null ⇒ jsonb 映射没生效");
+        assertEquals("published", after.getExtInfo().get(ArticleSyncEventTypes.EXT_PUBLISH_STAGE),
+                "publish_stage = published（Go :151 的 SetSyncState 第 1 参）");
+        assertEquals("succeeded", after.getExtInfo().get(ArticleSyncEventTypes.EXT_RECO_SYNC_STATE),
+                "reco_sync_state = succeeded（Go :151 的 SetSyncState 第 2 参）");
+        assertEquals("true", after.getExtInfo().get(ArticleSyncEventTypes.EXT_PUBLISHED_ONCE),
+                "published_once = \"true\"（Go :152）");
+        assertEquals("sync-pub-ok", after.getExtInfo().get(ArticleSyncEventTypes.EXT_LAST_SYNC_EVENT_ID),
+                "last_sync_event_id 推进到本次事件（Go :151）");
+        assertEquals("2000", after.getExtInfo().get(ArticleSyncEventTypes.EXT_LAST_SYNC_VERSION),
+                "last_sync_version_ms 推进（Go :151）");
+    }
+
+    @Test
+    @DisplayName("Go: 首次发布（reason=create）⇒ 返回 PublishOutcome 要求发通知；**已发布过** ⇒ 不再通知")
+    void acceptSyncResultNotifiesOnlyOnFirstPublish() {
+        // ① 首次发布：last_sync_reason = create 且 published_once 为空 ⇒ 要通知
+        String firstId = "pub-notify-1";
+        seedReviewingArticleWithReason(firstId, "n1.md", "sync-n1", 3000L,
+                ArticleSyncEventTypes.REASON_CREATE);
+        insertRevisionReadyOutbox(firstId, "sync-n1", 3000L);
+
+        ArticleSyncEventTypes.ArticleSyncResult first = new ArticleSyncEventTypes.ArticleSyncResult();
+        first.articleId = firstId;
+        first.eventId = "sync-n1";
+        first.op = ArticleSyncEventTypes.OP_UPSERT;
+        first.versionMs = 3000L;
+        first.success = true;
+
+        ArticleAtomicService.PublishOutcome outcome =
+                atomicService.acceptSyncResult(first, new ObjectMapperHolder().mapper());
+
+        assertNotNull(outcome, "reason=create 且从未发布过 ⇒ 必须要求发通知（Go :146-148）");
+        assertTrue(outcome.notifyRequired(), "notifyRequired 必须为 true");
+        assertEquals("1001", outcome.authorId(), "通知对象是文章作者（Go :147 notifyAuthor = article.AuthorID）");
+
+        // ② 再次发布（同一篇文章换事件）：published_once 已是 "true" ⇒ **不再**通知
+        String secondId = "pub-notify-2";
+        seedReviewingArticleWithReason(secondId, "n2.md", "sync-n2", 4000L,
+                ArticleSyncEventTypes.REASON_CREATE);
+        // 预置 published_once = "true"（模拟「这篇已经发布过一次」）
+        jdbcTemplate.update("UPDATE article SET ext_info = jsonb_set(ext_info, '{published_once}', '\"true\"') "
+                + "WHERE id = ?", secondId);
+        insertRevisionReadyOutbox(secondId, "sync-n2", 4000L);
+
+        ArticleSyncEventTypes.ArticleSyncResult second = new ArticleSyncEventTypes.ArticleSyncResult();
+        second.articleId = secondId;
+        second.eventId = "sync-n2";
+        second.op = ArticleSyncEventTypes.OP_UPSERT;
+        second.versionMs = 4000L;
+        second.success = true;
+
+        ArticleAtomicService.PublishOutcome outcome2 =
+                atomicService.acceptSyncResult(second, new ObjectMapperHolder().mapper());
+
+        assertNull(outcome2, "published_once 已非空 ⇒ 不该再通知（Go :146 的第二个条件）");
+        // ⚠️ 但**发布本身**照样发生（published_once 只挡通知，不挡发布）
+        assertEquals(com.rag.article.article.proto.ArticleStatus.PUBLISHED_VALUE,
+                articleMapper.selectById(secondId).getStatus(),
+                "published_once 只挡通知，**不挡发布**（Go :147 只影响 notifyAuthor 的赋值）");
+    }
+
+    /**
+     * 🔴 Go 侧通知标题与 revision 标题<b>来自两个不同的源</b>，不可混用。
+     *
+     * <h2>Go 出处（两处，消费点）</h2>
+     * <ul>
+     *   <li><b>revision 的标题 = 冻结 payload</b>：
+     *       {@code article_sync_result_consumer.go:115} {@code Title: approved.Title}
+     *       —— {@code approved} 是从 outbox payload 反序列化出来的<b>冻结输入</b>。</li>
+     *   <li><b>通知的标题 = 当前行</b>：
+     *       {@code article_sync_result_consumer.go:147}
+     *       {@code notifyAuthor, notifyTitle = article.AuthorID, article.Title}
+     *       —— {@code article} 是<b>本次事务里锁住的那一行</b>，不是冻结输入。</li>
+     * </ul>
+     *
+     * <h2>为什么两者可以不同（可达性，不是理论）</h2>
+     * 作者在 REVIEWING 期间改标题：{@code update_article_logic.go:142-144} <b>立即把新标题写进行</b>，
+     * 而已冻结的 payload <b>不跟着变</b>。
+     * <br>⚠️ 关键：改标题<b>不会</b>立刻推进 {@code last_sync_event_id} ——
+     * {@code enqueueReview}（{@code update_article_logic.go:232-245}）只推 Kafka，
+     * 新 event_id 要等审核回调（{@code article_consumer.go:107}）才写。
+     * <br>⇒ 在「标题已改」到「新 event_id 写入」这个窗口里，旧同步结果到达：
+     * 双重判据（{@code last_sync_event_id} + {@code last_sync_version_ms}）<b>依然成立</b>
+     * ⇒ 发布照常发生，但 Go 通知里用的是<b>新标题</b>。
+     *
+     * <h2>为什么这条断言有分量</h2>
+     * 同时断言 revision 标题 = 冻结值、通知标题 = 当前行值 ⇒
+     * 两个源被<b>分别</b>钉死，任何一边取错源都会红。
+     */
+    @Test
+    @DisplayName("🔴 Go: revision 标题取**冻结 payload**，通知标题取**当前行**（两个源不可混用）")
+    void acceptSyncResultUsesFrozenTitleForRevisionButCurrentRowTitleForNotification() {
+        String articleId = "pub-title-1";
+        // 当前行标题 = 作者在审核期间改过的新标题
+        seedReviewingArticleWithReason(articleId, "t.md", "sync-title-1", 5000L,
+                ArticleSyncEventTypes.REASON_CREATE, "作者改过的标题");
+        // 冻结 payload 的标题 = 入队那一刻的旧标题
+        insertRevisionReadyOutbox(articleId, "sync-title-1", 5000L, "冻结时的标题");
+
+        ArticleSyncEventTypes.ArticleSyncResult result = new ArticleSyncEventTypes.ArticleSyncResult();
+        result.articleId = articleId;
+        result.eventId = "sync-title-1";
+        result.op = ArticleSyncEventTypes.OP_UPSERT;
+        result.versionMs = 5000L;
+        result.success = true;
+
+        ArticleAtomicService.PublishOutcome outcome =
+                atomicService.acceptSyncResult(result, new ObjectMapperHolder().mapper());
+
+        // ① revision：冻结 payload 的标题（Go :115）
+        assertEquals("冻结时的标题", jdbcTemplate.queryForObject(
+                "SELECT title FROM article_revision WHERE article_id = ?", String.class, articleId),
+                "revision 的标题必须取**冻结 payload**（Go :115 Title: approved.Title）");
+
+        // ② 通知：当前行的标题（Go :147）
+        assertNotNull(outcome, "reason=create 且从未发布过 ⇒ 必须返回 PublishOutcome（Go :146-148）");
+        assertEquals("作者改过的标题", outcome.title(),
+                "通知标题必须取**当前行**（Go :147 article.Title），不是冻结 payload 的标题");
+    }
+
+    /** 与 {@link #seedReviewingArticle} 同款，但可指定 {@code last_sync_reason}（通知条件的判据）。 */
+    private void seedReviewingArticleWithReason(String articleId, String contentPath,
+                                                String eventId, long versionMs, String reason) {
+        seedReviewingArticleWithReason(articleId, contentPath, eventId, versionMs, reason, "title");
+    }
+
+    /**
+     * 同上，并可指定<b>当前行的标题</b>。
+     *
+     * <p>Go 出处：{@code update_article_logic.go:142-144}（改标题只改行，不改已冻结的 payload）
+     * ⇒ 行标题与冻结标题可以不一致。
+     */
+    private void seedReviewingArticleWithReason(String articleId, String contentPath,
+                                                String eventId, long versionMs, String reason,
+                                                String rowTitle) {
+        jdbcTemplate.update("""
+                INSERT INTO article (id, title, brief, content, cover_image_url, manual_type_tag,
+                                     secondary_tags, author_id, status, view_count, like_count,
+                                     comment_count, share_count, ext_info, created_at, updated_at)
+                VALUES (?, ?, 'brief', ?, '', 'tag', '[]'::jsonb, '1001', 3, 0, 0, 0, 0,
+                        jsonb_build_object(
+                          'reco_sync_state', 'pending',
+                          'last_sync_event_id', ?,
+                          'last_sync_version_ms', ?::text,
+                          'last_sync_reason', ?,
+                          'pending_sync_reason', ?,
+                          'review_nonce', ?),
+                        now(), now())
+                """, articleId, rowTitle, contentPath, eventId, String.valueOf(versionMs), reason, reason, eventId);
+    }
+
+    // ==================================================================
+    // 4. 事务回滚（Go: TestArticleDomainOutboxFailureRollsBackPublication）
     // ==================================================================
 
     @Test
@@ -425,6 +694,85 @@ class ArticleTransactionWiringTest {
         assertEquals(0, viewCountOf(articleId), "不请求计数时不应写入");
     }
 
+    // =====================================================================
+    // 🔴 DRIFT-ARTICLE-RPC-003：公开读的 DB 失败 ⇒ 必须是 INTERNAL（5001），不是 UNKNOWN（1015）
+    // =====================================================================
+    //
+    // Go 出处（逐行读过消费点）：
+    //   model/article_public.go:34-57        FindPublicOne —— 三处 DB 失败返回**同一种** error
+    //   internal/logic/get_article_logic.go:129-135
+    //       if err == gorm.ErrRecordNotFound { return nil, status.Error(codes.NotFound, "article not published") }
+    //       if err != nil { …; return nil, status.Error(codes.Internal, "read publication failed") }
+    //   internal/logic/get_article_logic.go:157-163
+    //       increased, err := …IncrPublicViewCount(l.ctx, in.ArticleId)
+    //       if err != nil { …; return nil, status.Error(codes.Internal, "increment public view failed") }
+    //       if !increased { return nil, status.Error(codes.NotFound, "article no longer published") }
+    //
+    // ⚠️ 修之前的形状：DataAccessException 一路冒到 ArticleServiceGrpcImpl 的 catch(RuntimeException)
+    //    ⇒ 落 UNKNOWN ⇒ api 侧 default 分支 ⇒ 业务码 **1015**（Go 是 5001）。
+    //    ⇒ DB 抖动被计成「服务繁忙/限流」，两套告警口径混用。
+    //
+    // ⚠️ 为什么**不能用 Mockito 把 mapper 打桩**：那样测不到「真 SQL 失败会不会被翻译成 INTERNAL」。
+    //    本组用例让**真 PG 真的报错**（表改名 / CHECK 约束），走真 MyBatis + 真异常翻译。
+
+    @Test
+    @DisplayName("🔴 Go: 公开读的 DB 失败 ⇒ INTERNAL \"read publication failed\"（不是 UNKNOWN ⇒ 业务码 1015）")
+    void publicReadDbFailureIsInternalNotUnknown() {
+        String articleId = "pubfail-1";
+        insertArticle(articleId);
+        jdbcTemplate.update("UPDATE article SET status = 2 WHERE id = ?", articleId);
+        insertRevision(articleId, 1L, "pubfail-1:r1", "sync-pubfail-1", "# Approved", 1000L);
+        jdbcTemplate.update("""
+                INSERT INTO article_publication (article_id, current_revision, pointer_version, state, last_event_id)
+                VALUES (?, 'pubfail-1:r1', 1, 'published', 'evt-1')
+                """, articleId);
+
+        // 让公开读用到的表**真的不存在** ⇒ 真 SQL 错误（42P01）⇒ 真 DataAccessException
+        jdbcTemplate.execute("ALTER TABLE article_publication RENAME TO article_publication_hidden");
+        try {
+            ArticleExceptions.Rpc ex = assertThrows(ArticleExceptions.Rpc.class,
+                    () -> publicService.getPublicArticle(articleId, false),
+                    "公开读的 DB 失败必须被翻译成 gRPC INTERNAL，而不是裸 UNKNOWN");
+            assertEquals(io.grpc.Status.Code.INTERNAL, ex.getCode(),
+                    "Go: status.Error(codes.Internal, \"read publication failed\")");
+            assertEquals("read publication failed", ex.getMessage(),
+                    "Go 的文案逐字：get_article_logic.go:133");
+        } finally {
+            jdbcTemplate.execute("ALTER TABLE article_publication_hidden RENAME TO article_publication");
+        }
+    }
+
+    @Test
+    @DisplayName("🔴 Go: 公开读计阅读量的 DB 失败 ⇒ INTERNAL \"increment public view failed\"（不是 UNKNOWN）")
+    void publicViewIncrementDbFailureIsInternalNotUnknown() {
+        String articleId = "pubfail-2";
+        insertArticle(articleId);
+        jdbcTemplate.update("UPDATE article SET status = 2 WHERE id = ?", articleId);
+        insertRevision(articleId, 1L, "pubfail-2:r1", "sync-pubfail-2", "# Approved", 2000L);
+        jdbcTemplate.update("""
+                INSERT INTO article_publication (article_id, current_revision, pointer_version, state, last_event_id)
+                VALUES (?, 'pubfail-2:r1', 1, 'published', 'evt-2')
+                """, articleId);
+
+        // 只让 **UPDATE** 失败、SELECT 仍成功 ⇒ 精确命中 incrPublicViewCount 这一条路径
+        // （若改名 article 表，前面的 SELECT 会先失败 ⇒ 测不到计数那条路径）
+        // ⚠️ NOT VALID 是必需的：既有行的 view_count=0 不满足 view_count<0，
+        //    不加 NOT VALID 的话 ALTER 自己就会失败。
+        jdbcTemplate.execute(
+                "ALTER TABLE article ADD CONSTRAINT chk_force_view_fail CHECK (view_count < 0) NOT VALID");
+        try {
+            ArticleExceptions.Rpc ex = assertThrows(ArticleExceptions.Rpc.class,
+                    () -> publicService.getPublicArticle(articleId, true),
+                    "计阅读量的 DB 失败必须被翻译成 gRPC INTERNAL");
+            assertEquals(io.grpc.Status.Code.INTERNAL, ex.getCode(),
+                    "Go: status.Error(codes.Internal, \"increment public view failed\")");
+            assertEquals("increment public view failed", ex.getMessage(),
+                    "Go 的文案逐字：get_article_logic.go:160");
+        } finally {
+            jdbcTemplate.execute("ALTER TABLE article DROP CONSTRAINT IF EXISTS chk_force_view_fail");
+        }
+    }
+
     /**
      * 🔴 S-2：作者视角列表在 {@code sort_by} 为空时必须是 <b>DESC</b>。
      *
@@ -566,6 +914,292 @@ class ArticleTransactionWiringTest {
                         + "若这里也前进了，说明 handler 的作用面比 Go 更宽");
     }
 
+    // ==================================================================
+    // 11. CASE-R12 —— 并发：同一篇文章同时「降级」与「删除」
+    // ==================================================================
+
+    /**
+     * <h2>为什么这条必须是真 PG + 真并发</h2>
+     * <ul>
+     *   <li>要验证的是<b>行锁的串行化语义</b>（{@code SELECT ... FOR UPDATE} 在两个事务之间的行为）
+     *       —— H2 与 mock 数据层都测不到；</li>
+     *   <li>要验证的是<b>死锁是否发生</b> —— 单线程根本造不出来；</li>
+     *   <li>要验证的是<b>指针版本单调</b>（{@code article_publication.pointer_version}）
+     *       —— 它靠 {@code FOR UPDATE} + {@code UNIQUE(aggregate_id, aggregate_version)} 一起保证。</li>
+     * </ul>
+     *
+     * <h2>Go 出处（逐行对照）</h2>
+     * <pre>
+     * Go 降级：update_article_logic.go:216-221
+     *     RunInTx { RetractPublicationTx(…); ArticleRepo.UpdateTx(…) }
+     * Go 删除：delete_article_logic.go:84-96
+     *     RunInTx { RetractPublicationTx(…); ArticleSyncOutbox.CreateTx(…); ArticleRepo.DeleteTx(…) }
+     * Go RetractPublicationTx：community_article_event.go:112-114
+     *     tx.Clauses(clause.Locking{Strength:"UPDATE"}).Where("article_id=?").First(&amp;pointer)
+     * Go 冲突判据：community_article_event.go:123-125
+     *     if pointer.State != "published" || pointer.CurrentRevision == "" {
+     *         return errors.New("community publication pointer conflicts with published article")
+     *     }
+     * </pre>
+     *
+     * <h2>预期（两侧一致）</h2>
+     * 两个事务里<b>先拿到 publication 行锁的那个</b>完成撤回（{@code pointer_version} 1→2、
+     * {@code state='retracted'}、写一条 {@code aggregate_version=2} 的 {@code retracted} 域事件）；
+     * <b>后到的那个</b>在 READ COMMITTED 下重新读到已提交的 {@code state='retracted'}
+     * ⇒ 撞 Go 的 {@code community publication pointer conflicts with published article}。
+     * ⇒ <b>恰好一个成功</b>；指针版本<b>单调到 2</b>（不是 3）；域事件<b>只有 1 条</b>。
+     *
+     * <p>⚠️ 这是 <b>U-2</b> 要求的并发用例（此前只有静态代码对照，没有活体证据）。
+     */
+    @Test
+    @DisplayName("CASE-R12: 同一篇文章并发「降级」与「删除」⇒ 无死锁；指针版本单调到 2；先到者赢、后到者报 pointer conflicts（与 Go 同）")
+    void concurrentRetractAndDeleteOnSameArticleSerializesWithoutDeadlock() throws Exception {
+        String articleId = "conc-retract-1";
+        seedPublishedArticleWithPointer(articleId);
+
+        // ⚠️ 实体在**主线程**里读（与生产一致：调用点先读、后调 atomicService），
+        //    两个线程各拿一份实例 —— 不要在被测线程里用带 deleted_at IS NULL 过滤的读，
+        //    并发窗口里读到 null 那是测试代码的竞态，不是被测行为。
+        ArticleEntity forDowngrade = articleMapper.selectById(articleId);
+        forDowngrade.setStatus(com.rag.article.article.proto.ArticleStatus.DRAFT_VALUE);
+        Map<String, String> ext = ArticleSyncEventTypes.ensureExtInfo(forDowngrade.getExtInfo());
+        ArticleSyncEventTypes.setSyncState(ext, "source_only", "pending",
+                ArticleSyncEventTypes.REASON_STATUS_CHANGE, "evt-down", 2000L, "");
+        forDowngrade.setExtInfo(ext);
+
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<Throwable> down = pool.submit(() -> {
+                start.await();
+                try {
+                    atomicService.retractAndUpdate(forDowngrade, "evt-down", 2000L,
+                            ArticleSyncEventTypes.REASON_STATUS_CHANGE);
+                    return null;
+                } catch (Throwable t) {
+                    return t;
+                }
+            });
+            Future<Throwable> del = pool.submit(() -> {
+                start.await();
+                try {
+                    atomicService.retractAndDelete(articleId, "evt-del", 2000L);
+                    return null;
+                } catch (Throwable t) {
+                    return t;
+                }
+            });
+
+            start.countDown();
+            // ⚠️ 60s 超时是**死锁的哨兵**：真死锁时两个事务互相等待，future 永不完成
+            //    ⇒ get() 抛 TimeoutException ⇒ 用例失败（而不是永远挂着）。
+            Throwable tDown = down.get(60, TimeUnit.SECONDS);
+            Throwable tDel = del.get(60, TimeUnit.SECONDS);
+
+            // ① 无死锁：两个 future 都在超时内完成，且失败也不是 PG 的死锁（SQLSTATE 40P01）
+            assertFalse(isDeadlock(tDown), "降级路径出现死锁：" + rootMessage(tDown));
+            assertFalse(isDeadlock(tDel), "删除路径出现死锁：" + rootMessage(tDel));
+
+            // ② 恰好一个成功：后到者撞 Go 的「pointer conflicts」
+            boolean downOk = (tDown == null);
+            boolean delOk = (tDel == null);
+            assertTrue(downOk ^ delOk,
+                    "两个事务必须串行化 ⇒ 恰好一个成功（down=" + rootMessage(tDown)
+                            + " / del=" + rootMessage(tDel) + "）");
+            Throwable loser = downOk ? tDel : tDown;
+            assertTrue(rootMessage(loser).contains(
+                            "community publication pointer conflicts with published article"),
+                    "后到者必须撞 Go 的判据（community_article_event.go:123-125），实际："
+                            + rootMessage(loser));
+
+            // ③ 指针版本单调到 2（不是 3）—— 后到者不得再推一次
+            assertEquals(2L, jdbcTemplate.queryForObject(
+                    "SELECT pointer_version FROM article_publication WHERE article_id = ?",
+                    Long.class, articleId), "指针版本必须单调到 2（后到者不得再推一次）");
+            assertEquals("retracted", jdbcTemplate.queryForObject(
+                    "SELECT state FROM article_publication WHERE article_id = ?",
+                    String.class, articleId), "指针状态 = retracted（Go community_article_event.go:134）");
+
+            // ④ 域事件只有 1 条，aggregate_version = 指针版本（Go :125）
+            assertEquals(1, countDomainEvents(articleId),
+                    "只有成功的那次能写域事件（后到者在写之前就抛了）");
+            assertEquals(2L, jdbcTemplate.queryForObject(
+                    "SELECT aggregate_version FROM article_domain_outbox WHERE aggregate_id = ?",
+                    Long.class, articleId), "域事件的 aggregate_version = 指针版本（Go :125）");
+            assertEquals("community.article.retracted", jdbcTemplate.queryForObject(
+                    "SELECT event_type FROM article_domain_outbox WHERE aggregate_id = ?",
+                    String.class, articleId), "域事件的 event_type = community.article.retracted（Go :91）");
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    /**
+     * <h2>🔴 这条测的是<b>锁序</b>，不是结果</h2>
+     *
+     * <p>CASE-R12 测的是「两个事务的<b>最终结果</b>」，而<b>锁序</b>是另一维：
+     * 只要两条路径的锁序<b>彼此一致</b>，结果就一样 —— 所以 CASE-R12 <b>证伪不了锁序</b>
+     * （实测：把 {@code retractAndUpdate} 的 article 行锁拿掉，用例<b>仍全绿</b>）。
+     * ⇒ 换一条<b>能唯一判定</b>的探针。
+     *
+     * <h2>探针原理（确定性，不靠碰运气的交错）</h2>
+     * <ol>
+     *   <li>用<b>另一条连接</b>开一个事务，<b>同时</b>扣住两把行锁：
+     *       {@code article} 行 与 {@code article_publication} 行；</li>
+     *   <li>让被测代码在<b>另一个线程</b>里去跑 {@code retractAndUpdate} ⇒ 它必然卡在
+     *       <b>它最先要的那把锁</b>上；</li>
+     *   <li>用 {@code pg_stat_activity} 读出<b>被阻塞后端正在执行的 SQL</b>
+     *       （{@code wait_event_type = 'Lock'}）⇒ 那条 SQL 就是它的<b>第一把锁</b>。</li>
+     * </ol>
+     *
+     * <h2>为什么这样能唯一判定</h2>
+     * 两把锁都被扣着 ⇒ 无论它先要哪把，都会卡住 ⇒ <b>被阻塞的 SQL 唯一确定</b>它的第一把锁：
+     * <ul>
+     *   <li>卡在 {@code FROM article WHERE … FOR UPDATE} ⇒ 第一把锁是 <b>article</b>
+     *       ⇒ 锁序 = <b>article → publication</b>；</li>
+     *   <li>卡在 {@code FROM article_publication WHERE … FOR UPDATE} ⇒ 第一把锁是 publication
+     *       ⇒ 锁序 = <b>publication → article</b>。</li>
+     * </ul>
+     * ⚠️ 判别子串用 {@code "FROM article WHERE"}（<b>带 WHERE</b>）——
+     * {@code "FROM article_publication"} 里<b>不含</b>它（{@code article_publication} 是下划线连接），
+     * 否则两条 SQL 会互相误判。
+     *
+     * <h2>Go 侧的对应事实（逐行对照，见 docs/DRIFT/article/rpc.md 的 U-2）</h2>
+     * Go 的四条写路径分成<b>两种</b>锁序：
+     * <pre>
+     * article → publication ：WithArticleTx（article_sync_result_consumer.go:74 / article_consumer.go:104）
+     *                         community_revision.go:81-89 先 SELECT … FOR UPDATE article
+     * publication → article ：RetractPublicationTx 先 FOR UPDATE publication
+     *                         （community_article_event.go:112-114），随后才 UPDATE/DELETE article
+     * </pre>
+     * ⇒ <b>Go 自己</b>在「发布」与「撤回/删除」之间存在锁序反转；
+     * ⇒ 本实现把四条路径<b>统一</b>成 article → publication ⇒ <b>不存在反转</b>。
+     */
+    @Test
+    @DisplayName("U-2: 锁序实测 —— 同时扣住 article 与 publication 两把锁 ⇒ 被阻塞的必须是 article 那把（锁序 = article → publication）")
+    void lockOrderIsArticleThenPublication() throws Exception {
+        String articleId = "lock-order-1";
+        seedPublishedArticleWithPointer(articleId);
+
+        // ⚠️ 必须是**另一条连接**：同一个连接上的事务锁不住自己。
+        Connection holder = jdbcTemplate.getDataSource().getConnection();
+        holder.setAutoCommit(false);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            holdRowLock(holder, "SELECT * FROM article WHERE id = ? FOR UPDATE", articleId);
+            holdRowLock(holder, "SELECT * FROM article_publication WHERE article_id = ? FOR UPDATE", articleId);
+
+            ArticleEntity forDowngrade = articleMapper.selectById(articleId);
+            forDowngrade.setStatus(com.rag.article.article.proto.ArticleStatus.DRAFT_VALUE);
+            Map<String, String> ext = ArticleSyncEventTypes.ensureExtInfo(forDowngrade.getExtInfo());
+            ArticleSyncEventTypes.setSyncState(ext, "source_only", "pending",
+                    ArticleSyncEventTypes.REASON_STATUS_CHANGE, "evt-lo", 2000L, "");
+            forDowngrade.setExtInfo(ext);
+
+            Future<Throwable> f = pool.submit(() -> {
+                try {
+                    atomicService.retractAndUpdate(forDowngrade, "evt-lo", 2000L,
+                            ArticleSyncEventTypes.REASON_STATUS_CHANGE);
+                    return null;
+                } catch (Throwable t) {
+                    return t;
+                }
+            });
+
+            String blocked = awaitBlockedForUpdate(30_000L);
+            assertNotNull(blocked,
+                    "没观测到被阻塞的 FOR UPDATE ⇒ 探针本身失效（不是被测行为的问题）");
+            assertTrue(blocked.contains("FROM article WHERE"),
+                    "锁序必须是 article → publication ⇒ 它应该先卡在 **article** 的 FOR UPDATE 上；"
+                            + "实际被阻塞的语句：" + blocked);
+            assertFalse(blocked.contains("FROM article_publication"),
+                    "若卡在 publication 上 ⇒ 第一把锁是 publication ⇒ 与实现的锁序不符：" + blocked);
+
+            // 释放扣着的锁，让被测线程收尾（它会撞上 pointer conflicts，符合预期）
+            holder.rollback();
+            Throwable outcome = f.get(60, TimeUnit.SECONDS);
+            assertNull(outcome, "释放锁后它本该成功（此时两把锁都没被扣着了），实际：" + rootMessage(outcome));
+        } finally {
+            try {
+                holder.rollback();
+            } catch (Exception ignored) {
+                // holder 可能已被关闭
+            }
+            holder.close();
+            pool.shutdownNow();
+        }
+    }
+
+    /** 在给定连接上扣住一行（{@code FOR UPDATE}），事务保持打开。 */
+    private static void holdRowLock(Connection conn, String sql, String id) throws Exception {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                // 必须把结果读完，否则 PG 会等客户端消费 ⇒ 拿不到锁
+                while (rs.next()) {
+                    // no-op
+                }
+            }
+        }
+    }
+
+    /**
+     * 等到某个后端卡在 {@code FOR UPDATE} 上，返回它<b>正在执行的 SQL</b>。
+     *
+     * <p>用 {@code application_name} 过滤：本类所有连接都带同一个标记
+     * （{@code @DynamicPropertySource} 里加进 JDBC URL），
+     * 而本容器实例上只有本测试会卡住 ⇒ 不会误抓别的会话。
+     */
+    private String awaitBlockedForUpdate(long timeoutMs) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            List<String> blocked = jdbcTemplate.queryForList(
+                    "SELECT query FROM pg_stat_activity "
+                            + "WHERE wait_event_type = 'Lock' AND query ILIKE '%FOR UPDATE%' "
+                            + "AND application_name = 'article-lockorder' "
+                            + "AND pid <> pg_backend_pid()",
+                    String.class);
+            for (String q : blocked) {
+                if (q != null && !q.isBlank()) {
+                    return q;
+                }
+            }
+            Thread.sleep(100);
+        }
+        return null;
+    }
+
+    /** 取异常链里每一层的消息拼串（Spring 会把底层异常包成好几层）。 */
+    private static String rootMessage(Throwable t) {
+        StringBuilder sb = new StringBuilder();
+        for (Throwable cur = t; cur != null; cur = cur.getCause()) {
+            if (cur.getMessage() != null) {
+                sb.append(cur.getMessage()).append(" | ");
+            }
+            if (cur.getCause() == cur) {
+                break;
+            }
+        }
+        return sb.toString();
+    }
+
+    /** 是否是 PG 的死锁（{@code 40P01 deadlock detected}）。 */
+    private static boolean isDeadlock(Throwable t) {
+        for (Throwable cur = t; cur != null; cur = cur.getCause()) {
+            if (cur instanceof java.sql.SQLException sql && "40P01".equals(sql.getSQLState())) {
+                return true;
+            }
+            String m = cur.getMessage();
+            if (m != null && m.toLowerCase().contains("deadlock")) {
+                return true;
+            }
+            if (cur.getCause() == cur) {
+                break;
+            }
+        }
+        return false;
+    }
+
     private OffsetDateTime updatedAtOf(String articleId) {
         return jdbcTemplate.queryForObject(
                 "SELECT updated_at FROM article WHERE id = ?", OffsetDateTime.class, articleId);
@@ -649,8 +1283,52 @@ class ArticleTransactionWiringTest {
                 """, articleId, contentPath, eventId, String.valueOf(versionMs), eventId);
     }
 
+    /**
+     * 建一条<b>已发布</b>的文章 + 社区指针（{@code state='published'} / {@code pointer_version=1}）。
+     *
+     * <p>这是 retract 路径能真正推进指针的<b>前置条件</b>：
+     * Go 的 {@code RetractPublicationTx} 在指针<b>缺失</b>时走 legacy 缺口分支（标记后正常返回，
+     * {@code community_article_event.go:115-119}），只有在 {@code state != "published"}
+     * 时才抛冲突（{@code :123-125}）⇒ 不铺这条指针，测的就不是同一条路径。
+     *
+     * <p>⚠️ {@code status = 2} = {@code ArticleStatus.PUBLISHED_VALUE}
+     * （proto 枚举：UNSPECIFIED=0 / DRAFT=1 / PUBLISHED=2 / REVIEWING=3 / REJECTED=4 / DELETED=5）。
+     */
+    private void seedPublishedArticleWithPointer(String articleId) {
+        jdbcTemplate.update("""
+                INSERT INTO article (id, title, brief, content, cover_image_url, manual_type_tag,
+                                     secondary_tags, author_id, status, view_count, like_count,
+                                     comment_count, share_count, ext_info, created_at, updated_at)
+                VALUES (?, 'published title', 'brief', 'pub.md', '', 'tag', '[]'::jsonb, '1001', 2, 0, 0, 0, 0,
+                        jsonb_build_object(
+                          'publish_stage', 'published',
+                          'reco_sync_state', 'succeeded',
+                          'published_once', 'true',
+                          'last_sync_event_id', 'evt-seed',
+                          'last_sync_version_ms', '1000',
+                          'last_sync_reason', 'create'),
+                        now(), now())
+                """, articleId);
+        jdbcTemplate.update("""
+                INSERT INTO article_publication (article_id, current_revision, pointer_version, state, last_event_id)
+                VALUES (?, ?, 1, 'published', 'community.article.evt-seed.published')
+                """, articleId, articleId + ":r1");
+    }
+
     /** 建一条 pending 的同步 outbox 行（发布回调要读回它的冻结 payload）。 */
     private void insertRevisionReadyOutbox(String articleId, String eventId, long versionMs) {
+        insertRevisionReadyOutbox(articleId, eventId, versionMs, "approved title");
+    }
+
+    /**
+     * 同上，但可指定<b>冻结 payload 的标题</b>。
+     *
+     * <p>Go 出处：{@code article_sync_types.go:109}（{@code Title: article.Title}）——
+     * 冻结的是<b>入队那一刻</b>的行标题；发布回调通知时读的是<b>当前行</b>的标题
+     * （{@code article_sync_result_consumer.go:147}）。两者可以不同 ⇒ 需要分别可控。
+     */
+    private void insertRevisionReadyOutbox(String articleId, String eventId, long versionMs,
+                                           String frozenTitle) {
         ArticleSyncEventTypes.ArticleSyncEvent event = new ArticleSyncEventTypes.ArticleSyncEvent();
         event.eventScope = ArticleSyncEventTypes.ARTICLE_SYNC_SCOPE;
         event.eventId = eventId;
@@ -660,7 +1338,7 @@ class ArticleTransactionWiringTest {
         event.authorId = "1001";
         event.status = "PUBLISHED";
         event.versionMs = versionMs;
-        event.title = "approved title";
+        event.title = frozenTitle;
         event.markdown = "# Approved";
         String payload;
         try {

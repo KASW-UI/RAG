@@ -9,6 +9,7 @@ import com.rag.article.article.proto.GetArticleRequest;
 import com.rag.article.article.proto.GetArticleResponse;
 import com.rag.article.article.proto.ListArticlesRequest;
 import com.rag.article.article.proto.ListArticlesResponse;
+import com.rag.common.protection.GoStyleCircuitOpenException;
 import com.rag.users.common.jwt.JwtUtil;
 import com.rag.users.user.proto.UserServiceGrpc.UserServiceBlockingStub;
 import io.grpc.ManagedChannel;
@@ -350,10 +351,71 @@ class ArticleApiMvcPipelineTest {
                 .andExpect(jsonPath("$.data").doesNotExist());
     }
 
+    // =====================================================================
+    // 3b. upload 的 RPC 失败：状态码**按 gRPC 码映射**（不是恒 400）
+    // =====================================================================
+    //
+    // ⚠️ 本节取代了原先那条「upload 的 RPC 失败 ⇒ 恒 400 text/plain」的用例 ——
+    //   那条用例把 **RAG 的行为**写成了 **Go 的事实**（AGENTS.md §3.3.2 点名的形态）。
+    //
+    // Go 出处（go-zero v1.10.2）：
+    //   rest/httpx/responses.go:142-159  doHandleError
+    //       if handler == nil {                                   ← article-api 没有 error handler
+    //           if len(fns) > 0 { … }
+    //           else if errcode.IsGrpcError(err) {                // ① 先问是不是 gRPC 错误
+    //               http.Error(w, err.Error(), errcode.CodeFromGrpcError(err))   // ② 按码映射
+    //           } else {
+    //               http.Error(w, err.Error(), http.StatusBadRequest)            // ③ 非 gRPC ⇒ 恒 400
+    //           }
+    //   rest/internal/errcode/grpc.go:12-42  CodeFromGrpcError
+    //       Unavailable⇒503  Internal⇒500  DeadlineExceeded⇒504
+    //       ResourceExhausted⇒429  NotFound⇒404  未知码⇒500
+
     @Test
-    @DisplayName("upload 的 RPC 失败 ⇒ **400 text/plain + nosniff**，不是 1015 信封（Go 无 error handler）")
-    void uploadRpcFailureIsBareTextPlain400() throws Exception {
+    @DisplayName("upload 的 RPC 失败 ⇒ codes.Internal ⇒ **500**（Go errcode.CodeFromGrpcError），body 是 grpc-go 的 \"rpc error: code = Internal desc = …\"")
+    void uploadRpcInternalFailureIs500() throws Exception {
         Mockito.doThrow(Status.INTERNAL.withDescription("minio down").asRuntimeException())
+                .when(stub).uploadFile(Mockito.any());
+
+        var response = mockMvc.perform(multipart("/v1/upload")
+                        .file(new MockMultipartFile("image", "a.png", "image/png", new byte[]{1})))
+                .andExpect(status().isInternalServerError())
+                .andReturn().getResponse();
+
+        assertTrue(response.getContentType().startsWith("text/plain"),
+                "Go http.Error 的 Content-Type 必须是 text/plain; charset=utf-8，实际=" + response.getContentType());
+        assertEquals("nosniff", response.getHeader("X-Content-Type-Options"),
+                "Go http.Error 必须带 X-Content-Type-Options: nosniff");
+        assertFalse(response.getContentAsString().contains("\"code\""),
+                "解析/下游失败不是信封形状");
+        assertTrue(response.getContentAsString().endsWith("\n"),
+                "Go http.Error 用 Fprintln，body 以 \\n 结尾");
+        // grpc-go internal/status/status.go:201-203 —— Status.String() 的逐字形状
+        assertTrue(response.getContentAsString().startsWith("rpc error: code = Internal desc = minio down"),
+                "Go 写的是 err.Error() = \"rpc error: code = %s desc = %s\"，实际=" + response.getContentAsString());
+    }
+
+    @Test
+    @DisplayName("upload 的 RPC 失败 ⇒ codes.Unavailable ⇒ **503**（不是 400：下游不可用必须能被网关按 >=500 分流）")
+    void uploadRpcUnavailableFailureIs503() throws Exception {
+        Mockito.doThrow(Status.UNAVAILABLE.withDescription("article-rpc down").asRuntimeException())
+                .when(stub).uploadFile(Mockito.any());
+
+        var response = mockMvc.perform(multipart("/v1/upload")
+                        .file(new MockMultipartFile("image", "a.png", "image/png", new byte[]{1})))
+                .andExpect(status().isServiceUnavailable())
+                .andReturn().getResponse();
+
+        assertTrue(response.getContentAsString().startsWith("rpc error: code = Unavailable desc = article-rpc down"),
+                "Go 的 code 名是 CamelCase（Unavailable），不是 Java 的 UNAVAILABLE，实际=" + response.getContentAsString());
+    }
+
+    @Test
+    @DisplayName("upload 的**非** gRPC 失败（熔断打开）⇒ 恒 **400**（Go: IsGrpcError 为假 ⇒ 走 else 分支）")
+    void uploadNonGrpcFailureIs400() throws Exception {
+        // Go: breaker 打开时返回 breaker.ErrServiceUnavailable = errors.New("circuit breaker is open")
+        //    （core/breaker/breaker.go:19）—— 普通 error，不实现 GRPCStatus() ⇒ IsGrpcError 为假 ⇒ 400
+        Mockito.doThrow(new GoStyleCircuitOpenException("circuit breaker is open"))
                 .when(stub).uploadFile(Mockito.any());
 
         var response = mockMvc.perform(multipart("/v1/upload")
@@ -361,14 +423,8 @@ class ArticleApiMvcPipelineTest {
                 .andExpect(status().isBadRequest())
                 .andReturn().getResponse();
 
-        assertTrue(response.getContentType().startsWith("text/plain"),
-                "Go http.Error 的 Content-Type 必须是 text/plain；charset=utf-8，实际=" + response.getContentType());
-        assertEquals("nosniff", response.getHeader("X-Content-Type-Options"),
-                "Go http.Error 必须带 X-Content-Type-Options: nosniff");
-        assertFalse(response.getContentAsString().contains("\"code\""),
-                "解析/下游失败不是信封形状");
-        assertTrue(response.getContentAsString().endsWith("\n"),
-                "Go http.Error 用 Fprintln，body 以 \\n 结尾");
+        assertTrue(response.getContentAsString().startsWith("circuit breaker is open"),
+                "Go 的 body 就是 err.Error()，实际=" + response.getContentAsString());
     }
 
     @Test
@@ -708,6 +764,68 @@ class ArticleApiMvcPipelineTest {
                 "Go strconv.ParseInt(s,10,32) 是十进制；Integer.decode 会当成八进制 8");
     }
 
+    // ---------------------------------------------------------------------
+    // 6b. 重复 query key：Go 取**第一个**（DRIFT-ARTICLE-API-003 已修）
+    // ---------------------------------------------------------------------
+    //
+    // Go 出处（两段，顺序不能反）：
+    //   ① rest/httpx/util.go:44-45  —— 空值先被整个丢掉，map 里存的是 []string
+    //   ② core/mapping/unmarshaler.go:835-846 —— 目标不是 slice 时 mapValue = val.Index(0)
+    //
+    // ⚠️ 修之前的形状：controller 用 @RequestParam String，Spring 把多值**拼成一个字符串**
+    //    （"1,2"）⇒ GoFormValues.int32 解析失败 ⇒ 400。
+
+    @Test
+    @DisplayName("?page=1&page=2 ⇒ **200** 且取第一个（page=1）；Go unmarshaler.go:841-843 取 Index(0)")
+    void duplicateQueryKeyTakesTheFirstValue() throws Exception {
+        Mockito.when(userStub.getUser(Mockito.any())).thenReturn(
+                com.rag.users.user.proto.GetUserResp.newBuilder().setFound(false).build());
+        Mockito.when(stub.listArticles(Mockito.any())).thenReturn(ListArticlesResponse.newBuilder().build());
+
+        mockMvc.perform(get("/v1/articles").queryParam("page", "1").queryParam("page", "2"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<ListArticlesRequest> captor = ArgumentCaptor.forClass(ListArticlesRequest.class);
+        Mockito.verify(stub).listArticles(captor.capture());
+        assertEquals(1, captor.getValue().getPage(),
+                "Go 对非 slice 目标取 val.Index(0)，不是把多值拼接后报错");
+    }
+
+    @Test
+    @DisplayName("?incr_view=1&incr_view=0 ⇒ 取第一个 ⇒ **true**（Go 取 Index(0)，不是最后一个）")
+    void duplicateQueryKeyTakesFirstEvenForSideEffectFlag() throws Exception {
+        Mockito.when(userStub.getUser(Mockito.any())).thenReturn(
+                com.rag.users.user.proto.GetUserResp.newBuilder().setFound(false).build());
+        Mockito.when(stub.getArticle(Mockito.any())).thenReturn(
+                GetArticleResponse.newBuilder()
+                        .setArticle(pbArticle("x", "1001", ArticleStatus.PUBLISHED))
+                        .build());
+
+        mockMvc.perform(get("/v1/article/x").queryParam("incr_view", "1").queryParam("incr_view", "0"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<GetArticleRequest> captor = ArgumentCaptor.forClass(GetArticleRequest.class);
+        Mockito.verify(stub).getArticle(captor.capture());
+        assertTrue(captor.getValue().getIncrView(),
+                "Go 取的是第一个值（\"1\" ⇒ true），不是最后一个（\"0\" ⇒ false）");
+    }
+
+    @Test
+    @DisplayName("?page=&page=2 ⇒ 取 **2**（Go 先丢空值再取首：util.go:44-45 的 continue 在前）")
+    void duplicateQueryKeyDropsEmptyValueBeforeTakingFirst() throws Exception {
+        Mockito.when(userStub.getUser(Mockito.any())).thenReturn(
+                com.rag.users.user.proto.GetUserResp.newBuilder().setFound(false).build());
+        Mockito.when(stub.listArticles(Mockito.any())).thenReturn(ListArticlesResponse.newBuilder().build());
+
+        mockMvc.perform(get("/v1/articles").queryParam("page", "").queryParam("page", "2"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<ListArticlesRequest> captor = ArgumentCaptor.forClass(ListArticlesRequest.class);
+        Mockito.verify(stub).listArticles(captor.capture());
+        assertEquals(2, captor.getValue().getPage(),
+                "Go 的两步是「先过滤空值、再取首个」⇒ 落进 map 的是 [\"2\"] ⇒ 取到 2");
+    }
+
     @Test
     @DisplayName("列表空结果 ⇒ \"articles\":null（Go var articles []types.Article 是 nil slice）")
     void emptyListIsNullNotEmptyArray() throws Exception {
@@ -842,7 +960,8 @@ class ArticleApiMvcPipelineTest {
      * 压根没走到 8 MiB 截断那条路径 —— 一个「因为错误的原因而绿」的用例。
      */
     @Test
-    @DisplayName("DRIFT-002：9 MiB **合法** JSON body ⇒ 400（Go 的 maxBodyLen=8MiB 静默截断）")
+    @DisplayName("DRIFT-002：9 MiB **合法** JSON body ⇒ 400（Go 的 maxBodyLen=8MiB 静默截断）"
+            + "；⚠️ body 文案与 Go 不同（Go 是 \"unexpected EOF\"）—— 已确认 LOW 漂移")
     void oversizedJsonBodyIsRejectedAtEightMiB() throws Exception {
         // 构造一个**合法**的 JSON 文档：padding 塞进 brief，content 短
         String padding = "x".repeat(9 * 1024 * 1024);
@@ -859,6 +978,19 @@ class ArticleApiMvcPipelineTest {
 
         assertEqualsTextPlainUtf8(response.getContentType());
         Mockito.verify(stub, Mockito.never()).createArticle(Mockito.any());
+
+        // ⚠️ characterization（DRIFT-006）：**可观察契约相同，body 文案不同**。
+        //    Go 侧（Go 1.25 探针实测）：httpx.ParseJsonBody 用
+        //    json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode(v)
+        //    ⇒ 解析器拿到半个文档 ⇒ err.Error() == "unexpected EOF"
+        //    ⇒ http.Error(…, 400) 的 body 就是 "unexpected EOF\n"。
+        //    RAG 侧：显式拒绝 ⇒ body 是 "request entity too large\n"。
+        //    ⇒ 状态码 / Content-Type / nosniff 三项**一致**，只差文案 ⇒ LOW，**不修**
+        //       （要"对齐"就得改成先读 8 MiB 再解析失败 —— 纯浪费，且文案更费解）。
+        assertEquals("request entity too large\n", response.getContentAsString(),
+                "⚠️ 这是**实测现状**（与 Go 的 \"unexpected EOF\" 不同）—— DRIFT-006，"
+                        + "已确认 LOW OBSERVABLE DIFFERENCE，决定不修；断言它是为了锁住现状，"
+                        + "不是把 RAG 的文案当成 Go 的事实");
     }
 
     @Test
@@ -968,6 +1100,69 @@ class ArticleApiMvcPipelineTest {
         int zeta = body.indexOf("\"zeta\"");
         assertTrue(mid >= 0 && alpha > mid && zeta > alpha,
                 "ext_info 必须按字节序（Mid < alpha < zeta）输出，实际=" + body);
+    }
+
+    /**
+     * 🔴 DRIFT-007 的<b>边界</b>：key 含<b>非 BMP</b>字符（增补平面）时的排序。
+     *
+     * <h2>Go 出处（消费点）</h2>
+     * <pre>
+     * Go 1.25 标准库 encoding/json/encode.go:805-807
+     *   slices.SortFunc(sv, func(i, j reflectWithString) int {
+     *       return strings.Compare(i.ks, j.ks)      // ← 逐字节比 UTF-8
+     *   })
+     * </pre>
+     * ⇒ Go 按 <b>UTF-8 字节序</b> = <b>码点序</b>。
+     *
+     * <h2>为什么 ASCII 用例测不出来</h2>
+     * 上一条用例只用了 ASCII key。对 BMP 内的字符，
+     * <b>UTF-16 码元序 == 码点序 == UTF-8 字节序</b> ⇒ 两侧一致 ⇒ 测不出差别。
+     * <br>差别只在<b>非 BMP</b>字符上出现：UTF-16 把它拆成代理对（U+D800–U+DFFF），
+     * <b>排在 U+E000–U+FFFF 之前</b>；码点序里它排在它们<b>之后</b>。
+     *
+     * <h2>双侧探针实测（2026-10-24）</h2>
+     * <pre>
+     * 同一组 key：a / 中(U+4E2D) / U+E000 / U+FFFD / 😀(U+1F600)
+     * Go encoding/json      : a, 中, U+E000, U+FFFD, 😀     ← 期望
+     * Java TreeMap 自然序    : a, 中, 😀, U+E000, U+FFFD     ← ❌ 修复前的行为
+     * </pre>
+     */
+    @Test
+    @DisplayName("🔴 DRIFT-007：ext_info 的 key 含**非 BMP**字符时仍按码点序（Go 字节序）输出")
+    void extInfoKeysWithNonBmpCharactersUseCodePointOrder() throws Exception {
+        Mockito.when(userStub.getUser(Mockito.any())).thenReturn(
+                com.rag.users.user.proto.GetUserResp.newBuilder().setFound(false).build());
+        Mockito.when(stub.getArticle(Mockito.any())).thenReturn(
+                GetArticleResponse.newBuilder()
+                        .setArticle(Article.newBuilder()
+                                .setId("x").setAuthorId("1001")
+                                .setStatus(ArticleStatus.PUBLISHED)
+                                .putExtInfo("a", "1")            // U+0061
+                                .putExtInfo("中", "2")            // U+4E2D
+                                .putExtInfo("", "3")            // U+E000（私用区）
+                                .putExtInfo("�", "4")            // U+FFFD
+                                .putExtInfo("😀", "5")            // U+1F600（非 BMP，代理对 D83D DE00）
+                                .build())
+                        .build());
+
+        var response = mockMvc.perform(get("/v1/article/x"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse();
+        // ⚠️ 必须按 UTF-8 解码：MockHttpServletResponse.getContentAsString() 用的是
+        //    response 的 character encoding（没带 charset 时是 ISO-8859-1）⇒ 非 ASCII 会乱码。
+        String body = new String(response.getContentAsByteArray(),
+                java.nio.charset.StandardCharsets.UTF_8);
+
+        int a = body.indexOf("\"a\"");
+        int zhong = body.indexOf("\"中\"");
+        int e000 = body.indexOf("\"\"");
+        int fffd = body.indexOf("\"�\"");
+        int emoji = body.indexOf("\"😀\"");
+        assertTrue(a >= 0 && zhong > a && e000 > zhong && fffd > e000 && emoji > fffd,
+                "ext_info 的 key 必须按**码点序**（= Go 的 UTF-8 字节序）输出，"
+                        + "即 a < 中 < U+E000 < U+FFFD < 😀（U+1F600）；"
+                        + "非 BMP 字符在 UTF-16 自然序里会跑到 U+E000/U+FFFD **之前**，那是错的。"
+                        + "实际=" + body);
     }
 
     // =====================================================================

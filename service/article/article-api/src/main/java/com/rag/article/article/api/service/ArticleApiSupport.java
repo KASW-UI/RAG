@@ -210,7 +210,8 @@ public class ArticleApiSupport {
      * {@code "ext_info":null}（Go 的 {@code Article.ExtInfo} 无 {@code ,omitempty}）。
      * <p><b>⚠️ 这里必须是 {@link java.util.TreeMap}（排序），不能用 {@link LinkedHashMap}。</b>
      * Go 的 {@code encoding/json} 对 {@code map[string]string} 的 key <b>按字典序输出</b>
-     * （{@code encoding/json/encode.go} 的 mapEncoder 走 {@code sort.Slice}），
+     * （{@code encoding/json/encode.go:805-807} 的 mapEncoder 走
+     * {@code slices.SortFunc(sv, func(i, j) int { return strings.Compare(i.ks, j.ks) })}），
      * 同一份数据每次序列化字节一致。protobuf 的 {@code getExtInfoMap()} 是<b>无序</b> HashMap，
      * {@code LinkedHashMap} 只能保住<b>迭代顺序</b>（不等于字典序），透传会让 key 顺序漂移。
      *
@@ -223,8 +224,55 @@ public class ArticleApiSupport {
         if (source == null || source.isEmpty()) {
             return null;
         }
-        return new java.util.TreeMap<>(source);
+        // ⚠️ 必须用 {@link #CODE_POINT_ORDER}，不能用 TreeMap 的自然序（String.compareTo）。
+        java.util.TreeMap<String, String> sorted = new java.util.TreeMap<>(CODE_POINT_ORDER);
+        sorted.putAll(source);
+        return sorted;
     }
+
+    /**
+     * 🔴 key 的排序比较器：<b>按码点（= UTF-8 字节序）</b>，对齐 Go 的 {@code strings.Compare}。
+     *
+     * <h2>Go 出处（消费点）</h2>
+     * <pre>
+     * Go 1.25 标准库 encoding/json/encode.go:805-807
+     *   slices.SortFunc(sv, func(i, j reflectWithString) int {
+     *       return strings.Compare(i.ks, j.ks)      // ← 逐字节比 UTF-8
+     *   })
+     * </pre>
+     * ⇒ Go 输出 map key 时按 <b>UTF-8 字节序</b>，等价于 <b>码点序</b>。
+     *
+     * <h2>为什么不能直接用 {@link String#compareTo}</h2>
+     * {@code String.compareTo} 比的是 <b>UTF-16 码元</b>。
+     * ⇒ 对 <b>BMP 内</b>的字符，两者一致（UTF-16 码元序 = 码点序）。
+     * ⇒ 但遇到<b>非 BMP</b>字符（增补平面，如 U+1F600 😀）时两者<b>不一致</b>：
+     * UTF-16 里它被拆成代理对 {@code D83D DE00}（落在 U+D800–U+DFFF），
+     * <b>排在 U+E000–U+FFFF 之前</b>；而码点序里它排在它们<b>之后</b>。
+     *
+     * <h3>双侧探针实测（2026-10-24）</h3>
+     * <pre>
+     * 同一组 key：a / 中(U+4E2D) / U+E000 / U+FFFD / 😀(U+1F600)
+     * Go encoding/json     : a, 中, U+E000, U+FFFD, 😀      ← 码点序
+     * Java TreeMap(自然序)  : a, 中, 😀, U+E000, U+FFFD      ← ❌ 不一致
+     * Java TreeMap(本比较器): a, 中, U+E000, U+FFFD, 😀      ← ✅ 与 Go 一致
+     * </pre>
+     * ⇒ 这不是理论差异，是<b>响应 JSON 的 key 顺序</b>会变。
+     */
+    private static final java.util.Comparator<String> CODE_POINT_ORDER = (a, b) -> {
+        int i = 0;
+        int j = 0;
+        while (i < a.length() && j < b.length()) {
+            int ca = a.codePointAt(i);
+            int cb = b.codePointAt(j);
+            if (ca != cb) {
+                return Integer.compare(ca, cb);
+            }
+            i += Character.charCount(ca);
+            j += Character.charCount(cb);
+        }
+        // 一方是另一方的前缀 ⇒ 短者在前（与 strings.Compare 一致）
+        return Integer.compare(a.length() - i, b.length() - j);
+    };
 
     /**
      * proto {@code Article} → DTO {@code Article}。

@@ -1,4 +1,7 @@
 <!-- @move AGENTS.md L1444-L1534 · §0 article-common 双侧对拍 -->
+> 📌 **本文件是单轮快照**（从 AGENTS.md 搬移，**无历史轮次**）⇒ **全文即「现状权威面」**。
+> ⇒ 域内其它组件是**多轮**台账（各有「怎么读这份台账」的指针 + **跨文件轮次对照表**）：
+> [`api.md`](api.md) · [`rpc.md`](rpc.md) · [`proto.md`](proto.md)。
 ### ✅ `service/article/article-common`：Go ↔ Java 双侧对拍 **sha256 逐字节一致**（2026-10-22 晚）
 
 > **§0「从未验证」清单里 `article` 一项的第一块收口**（`hot-common` 之后的第 3 个 `-common` 模块族先例）。

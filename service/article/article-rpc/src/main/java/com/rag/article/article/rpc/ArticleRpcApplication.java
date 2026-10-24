@@ -35,7 +35,7 @@ import org.mybatis.spring.annotation.MapperScan;
  *       <td>{@code @Scheduled}</td><td>Spring 调度器</td></tr>
  * </table>
  *
- * <h2>⚠️ 六个「不写就静默失效 / 直接起不来」的装配点</h2>
+ * <h2>⚠️ 七个「不写就静默失效 / 直接起不来」的装配点</h2>
  * <p>这些是 message-rpc 在 AGENTS.md §6.6 付出真实代价才补上的
  * （DRIFT-MSG-003 ~ 006），本模块<b>照单继承</b>，每条都有 wiring 测试锁死：
  * <ol>
@@ -57,6 +57,17 @@ import org.mybatis.spring.annotation.MapperScan;
  *   <li><b>{@link #articleKafkaListenerContainerFactory}</b> —— 两个消费者共用一个
  *       {@link CommonErrorHandler}，<b>与 Go 的 {@code ForceCommit=true} 一致：失败即提交位点</b>；
  *       并发度对齐 Go 的 {@code Processors} 默认值 8。</li>
+ *   <li><b>{@link com.rag.article.article.rpc.config.ArticleKafkaChannelValidator}
+ *       （由 {@code @Component} 扫描自动装配）</b> —— Go 侧<b>每个 Kafka 通道各自</b>用自己的
+ *       {@code Brokers}（{@code go-queue@v1.2.2/kq/config.go:12} 声明，
+ *       {@code kq/pusher.go:44-47} / {@code kq/queue.go:121} 消费），
+ *       而 Spring Kafka 的客户端是<b>全局单例</b> ⇒ 本模块 yml 里四个通道的
+ *       {@code brokers} 键<b>声明了但没有消费点</b>。
+ *       缺这个校验器时，运维改了某个通道的 broker 会看到「服务正常起来了」，
+ *       <b>实际所有通道还连在老 broker 上</b> ⇒ <b>静默忽略</b>。
+ *       有了它，分叉就<b>启动失败</b>并说清原因与出路。
+ *       锁死用例：{@code ArticleKafkaChannelValidatorTest} +
+ *       {@code ArticleSpringContextWiringTest}（真上下文里「默认配置不误报」）。</li>
  * </ol>
  */
 @SpringBootApplication

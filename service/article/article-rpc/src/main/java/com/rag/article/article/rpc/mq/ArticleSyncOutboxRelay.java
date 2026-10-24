@@ -68,14 +68,34 @@ public class ArticleSyncOutboxRelay {
     /**
      * 每 {@code pollIntervalMs} 毫秒扫一次发件箱。
      *
-     * <p>⚠️ {@code fixedRateString} 读配置项，但<b>配置 ≤ 0 时 Go 有兜底</b>
-     * （{@code article.go:52-56}：{@code if interval <= 0 { interval = time.Second }}，
-     * batch 同理兜底为 100）。
-     * {@code @Scheduled} 不接受非正数，所以兜底放在
-     * {@link #effectiveIntervalMs()} / {@link #effectiveBatchSize()}，
-     * <b>而不是</b>给配置类塞默认值 —— 后者会让人以为"配置已生效"。
+     * <h2>🔴 两条 Go 语义必须由这一处同时兑现（DRIFT-006 / DRIFT-008）</h2>
+     * <pre>
+     * // Go article.go:62-65（间隔兜底）
+     * relayInterval := time.Duration(c.ArticleSyncOutbox.PollIntervalMs) * time.Millisecond
+     * if relayInterval &lt;= 0 { relayInterval = time.Second }
+     *
+     * // Go article.go:94,101（首次触发时机）
+     * ticker := time.NewTicker(s.interval)     // ← 首次 tick 在 interval **之后**
+     * for { select { case &lt;-ticker.C: … } }
+     * </pre>
+     * <ol>
+     *   <li><b>兜底（006）</b>：配置 ≤ 0 ⇒ <b>1s</b>。
+     *       ⚠️ {@code @Scheduled} 的 fixedRate <b>不接受非正数</b>
+     *       ⇒ 不能直接用 {@code ${...}} 占位符（配置写 0 会让 Spring 启动期报错）。
+     *       ⇒ 改用 <b>SpEL</b>：{@code #{T(...).normalizeIntervalMs(${...})}}
+     *       —— Spring 先解析 {@code ${...}}，再求值 {@code #{...}}
+     *       （{@code EmbeddedValueResolver} 的顺序），于是兜底能真正生效。</li>
+     *   <li><b>首次时机（008）</b>：Go 的 ticker <b>首次在 interval 之后</b>触发；
+     *       而 {@code @Scheduled(fixedRate)} 未设 {@code initialDelay} 时按 Spring 默认
+     *       <b>立即</b>执行首次 ⇒ RAG 会比 Go 早 ≤1s 推第一批 outbox。
+     *       ⇒ 显式给 {@code initialDelayString} <b>同一个</b>归一化后的间隔。</li>
+     * </ol>
      */
-    @Scheduled(fixedRateString = "${article-rpc.article-sync-outbox.poll-interval-ms:1000}")
+    @Scheduled(
+            fixedRateString = "#{T(com.rag.article.article.rpc.mq.ArticleSyncOutboxRelay)"
+                    + ".normalizeIntervalMs(${article-rpc.article-sync-outbox.poll-interval-ms:1000})}",
+            initialDelayString = "#{T(com.rag.article.article.rpc.mq.ArticleSyncOutboxRelay)"
+                    + ".normalizeIntervalMs(${article-rpc.article-sync-outbox.poll-interval-ms:1000})}")
     public void sendPending() {
         try {
             relayOnce();
@@ -83,6 +103,20 @@ public class ArticleSyncOutboxRelay {
             // Go: logx.Errorf("send article sync outbox failed: %v", err) —— 不让循环停掉
             LOG.warn("article sync outbox relay iteration failed: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Go {@code article.go:62-65} 的间隔兜底 —— <b>配置 ≤ 0 ⇒ 1000ms</b>。
+     *
+     * <p>⚠️ <b>必须是 {@code static}</b>：{@code @Scheduled} 的属性是在
+     * <b>容器装配期</b>求值的，那时还拿不到本类的实例注入，
+     * 所以只能用 SpEL 的 {@code T(...)} 类型引用调这个静态方法。
+     *
+     * @param configured 配置的间隔毫秒数
+     * @return 归一化后的间隔（≤0 ⇒ 1000）
+     */
+    public static long normalizeIntervalMs(long configured) {
+        return configured <= 0L ? 1000L : configured;
     }
 
     /** 单次中继；抽出来便于测试直接调用，不依赖调度器。 */
@@ -121,15 +155,18 @@ public class ArticleSyncOutboxRelay {
     }
 
     /**
-     * Go {@code article.go:52-56} 的间隔兜底：{@code if interval <= 0 { interval = time.Second }}。
+     * Go {@code article.go:62-65} 的间隔兜底：{@code if interval <= 0 { interval = time.Second }}。
      *
      * <p>⚠️ 之所以需要它：{@code @Scheduled} 的 fixedRate 不接受 ≤ 0，
      * 而 Go 侧允许配置为 0 并自行兜底。少了这个兜底，
      * "配置写 0"会从"每秒"变成"Spring 启动即报错"。
+     *
+     * <p>⚠️ <b>兜底逻辑只有一处</b>：本方法与
+     * {@code @Scheduled} 属性里的 SpEL <b>都</b>调 {@link #normalizeIntervalMs(long)}
+     * —— 两边若各写一份，改一处就会漂移。
      */
     long effectiveIntervalMs() {
-        int configured = properties.getArticleSyncOutbox().getPollIntervalMs();
-        return configured <= 0 ? 1000L : configured;
+        return normalizeIntervalMs(properties.getArticleSyncOutbox().getPollIntervalMs());
     }
 
     /** Go {@code article.go:57-60} 的批量兜底：{@code if batchSize <= 0 { batchSize = 100 }}。 */

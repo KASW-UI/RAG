@@ -53,6 +53,9 @@ import java.util.Map;
 @Service
 public class ArticlePublicDomainService {
 
+    private static final org.slf4j.Logger LOG =
+            org.slf4j.LoggerFactory.getLogger(ArticlePublicDomainService.class);
+
     private final ArticlePublicMapper publicMapper;
     private final ArticleRevisionMapper revisionMapper;
     private final ArticleObjectStorageClient storage;
@@ -93,7 +96,7 @@ public class ArticlePublicDomainService {
     // 对比：本类的 listPublicArticles（:144）**必须**保留 readOnly + REPEATABLE_READ，因为那里
     // count + 分页 + 取 revision 需要同一快照，且**不含任何写入**（Go article_public.go:65,128 同构）。
     public PublicArticleView getPublicArticle(String articleId, boolean incrView) {
-        ArticleEntity article = publicMapper.selectPublicById(articleId);
+        ArticleEntity article = readPublication(() -> publicMapper.selectPublicById(articleId));
         if (article == null) {
             // Go: err == gorm.ErrRecordNotFound ⇒ status.Error(codes.NotFound, "article not published")
             throw ArticleExceptions.articleNotPublished();
@@ -102,7 +105,8 @@ public class ArticlePublicDomainService {
         // Go: pointer, err := m.Publication(ctx, id)
         //     if err == ErrRecordNotFound && article.Status == 2 { return result, nil }   // legacy：Revision 保持 nil
         //     if pointer.State != "published" || pointer.CurrentRevision == "" { return NotFound }
-        ArticlePublicMapper.ArticlePublicationRow pointer = publicMapper.selectPublication(articleId);
+        ArticlePublicMapper.ArticlePublicationRow pointer =
+                readPublication(() -> publicMapper.selectPublication(articleId));
         ArticleRevisionEntity revision = null;
         if (pointer == null) {
             // 无指针行：仅当 legacy（status == PUBLISHED）才继续，且 Revision 保持 nil
@@ -113,7 +117,8 @@ public class ArticlePublicDomainService {
                 || pointer.getCurrentRevision() == null || pointer.getCurrentRevision().isEmpty()) {
             throw ArticleExceptions.articleNotPublished();
         } else {
-            revision = revisionMapper.selectByRevisionId(articleId, pointer.getCurrentRevision());
+            revision = readPublication(
+                    () -> revisionMapper.selectByRevisionId(articleId, pointer.getCurrentRevision()));
             if (revision == null) {
                 // Go: RevisionByID 出错 ⇒ return PublicArticle{}, err
                 //     （selectPublicById 的谓词已保证 EXISTS，这里是防御）
@@ -131,7 +136,7 @@ public class ArticlePublicDomainService {
         }
 
         if (incrView) {
-            int affected = publicMapper.incrPublicViewCount(articleId);
+            int affected = incrementPublicView(articleId);
             if (affected == 0) {
                 // Go: if !increased { return NotFound "article no longer published" }
                 // 撤回赢了竞态：不能返回陈旧结果，也不能给下架文章计阅读量
@@ -226,6 +231,83 @@ public class ArticlePublicDomainService {
      * <p><b>两条不同的失败</b>，Go 侧<b>文案相同</b>（都是 {@code "read legacy article failed"}）：
      * GetObject 失败与 ReadAll 失败。照搬 —— 区分它们会改变客户端可见的 description。
      */
+    /**
+     * Go {@code FindPublicOne} 的错误边界 —— <b>公开读的三处 DB 失败一律映射成 {@code INTERNAL}</b>。
+     *
+     * <p>Go 出处（{@code model/article_public.go:34-57}）：
+     * <pre>
+     * func (m *ArticleRepo) FindPublicOne(ctx context.Context, id string) (PublicArticle, error) {
+     *     var article Article
+     *     if err := publicArticleQuery(...).First(&amp;article).Error; err != nil {
+     *         return PublicArticle{}, err            // ① 文章行读失败
+     *     }
+     *     …
+     *     pointer, err := m.Publication(ctx, id)
+     *     if err == gorm.ErrRecordNotFound &amp;&amp; article.Status == 2 { return result, nil }
+     *     if err != nil { return PublicArticle{}, err }   // ② 指针行读失败
+     *     …
+     *     revision, err := m.RevisionByID(ctx, id, pointer.CurrentRevision)
+     *     if err != nil { return PublicArticle{}, err }   // ③ revision 读失败
+     *     …
+     * }
+     * </pre>
+     * ⇒ 三处失败<b>返回的是同一种 error</b>，api 层统一映射：
+     * <pre>
+     * // internal/logic/get_article_logic.go:129-135
+     * if err == gorm.ErrRecordNotFound { return nil, status.Error(codes.NotFound, "article not published") }
+     * if err != nil {
+     *     logger.LogBusinessErr(l.ctx, errmsg.ErrorDbSelect, err, logger.WithArticleID(in.ArticleId))
+     *     return nil, status.Error(codes.Internal, "read publication failed")   // ← **INTERNAL**
+     * }
+     * </pre>
+     *
+     * <p>🔴 <b>为什么这里必须显式包一层</b>：
+     * RAG 侧把 Go 的一次 {@code FindPublicOne} 拆成了<b>三次</b> mapper 调用，
+     * 若不包，{@code DataAccessException} 会一路冒到
+     * {@code ArticleServiceGrpcImpl} 的 {@code catch (RuntimeException)}
+     * ⇒ 落 {@code UNKNOWN} ⇒ <b>业务码 5001 被换成 1015</b>（DRIFT-ARTICLE-RPC-003）。
+     * <p>而 {@code ArticleExceptions.incrementPublicViewFailed()} 与
+     * {@code readPublicationFailed()} 这两个工厂方法<b>本来就是为此准备的</b>
+     * —— 其中前者在本轮之前<b>零调用点</b>，本身就是「这条 INTERNAL 曾被设计出来、但接线漏了」的证据。
+     */
+    private static <T> T readPublication(java.util.function.Supplier<T> read) {
+        try {
+            return read.get();
+        } catch (ArticleExceptions.Rpc e) {
+            // 领域异常（Rpc）不是 DB 失败，不该被吞成 INTERNAL
+            throw e;
+        } catch (RuntimeException e) {
+            // Go: status.Error(codes.Internal, "read publication failed")
+            LOG.warn("public read failed ⇒ INTERNAL \"read publication failed\": {}", e.toString());
+            throw ArticleExceptions.readPublicationFailed();
+        }
+    }
+
+    /**
+     * Go {@code IncrPublicViewCount} 的错误边界 —— 失败 ⇒ {@code INTERNAL "increment public view failed"}。
+     *
+     * <p>Go 出处（{@code internal/logic/get_article_logic.go:157-163}）：
+     * <pre>
+     * increased, err := l.svcCtx.ArticleRepo.IncrPublicViewCount(l.ctx, in.ArticleId)
+     * if err != nil {
+     *     logger.LogBusinessErr(l.ctx, errmsg.ErrorDbUpdate, err, logger.WithArticleID(in.ArticleId))
+     *     return nil, status.Error(codes.Internal, "increment public view failed")
+     * }
+     * if !increased { return nil, status.Error(codes.NotFound, "article no longer published") }
+     * </pre>
+     * ⚠️ <b>注意两个分支的码不同</b>：<b>失败</b>⇒ INTERNAL（5001），
+     * <b>影响 0 行</b>⇒ NOT_FOUND（1002，撤回赢了竞态）⇒ 两者<b>不可合并</b>。
+     */
+    private int incrementPublicView(String articleId) {
+        try {
+            return publicMapper.incrPublicViewCount(articleId);
+        } catch (RuntimeException e) {
+            LOG.warn("increment public view failed ⇒ INTERNAL \"increment public view failed\": {}",
+                    e.toString());
+            throw ArticleExceptions.incrementPublicViewFailed();
+        }
+    }
+
     private String readLegacyMarkdown(String articleId, String objectName) {
         try {
             return storage.readString(objectName);

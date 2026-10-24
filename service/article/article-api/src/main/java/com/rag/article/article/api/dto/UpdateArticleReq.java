@@ -5,7 +5,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
- * 更新文章请求 —— 对应 Go {@code types.go:61-71} 的 {@code UpdateArticleReq}。
+ * 更新文章请求 —— 对应 Go {@code types.go:74-83} 的 {@code UpdateArticleReq}。
+ *
+ * <p>⚠️ <b>行号更正（UNRESOLVED-009，2026-10-24 实测）</b>：
+ * 原注释写的是 {@code types.go:61-71}，那是 {@code ListArticlesReq} / {@code ListArticlesResp}
+ * 的区间 ⇒ 按 AGENTS.md §3.1 的纪律去核对时会读到**另一个结构体**。
+ * 真实位置：{@code service/article/api/internal/types/types.go:74-83}。
  *
  * <pre>
  * Go:
