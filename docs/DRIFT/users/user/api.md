@@ -232,9 +232,16 @@ com.rag.common.protection.GoStyleMaxBytesFilter:82-83  @Component @Order(+6)    
 ```
 
 ```text
-执行序：全部 Servlet Filter（MaxBytes → HttpMiddleware 3s）→ DispatcherServlet
+执行序：全部 Servlet Filter（MaxConns +1 → Breaker +2 → CpuShedding +3 → HttpMiddleware 3s +5 → MaxBytes +6）
+        → DispatcherServlet
         → JwtAuthInterceptor.preHandle（JWT → 黑名单）→ Controller → Service
 ```
+
+> ⚠️ **2026-10-24 勘误**：本段原写「全部 Servlet Filter（**MaxBytes → HttpMiddleware 3s**）」，
+> **顺序写反了** —— 按 `@Order` 数值，`HttpMiddlewareFilter` 是 **+5**、`GoStyleMaxBytesFilter` 是 **+6**
+> ⇒ 数值小的**先执行** ⇒ 实际是 **HttpMiddleware(3s) 在 MaxBytes 之外**。
+> ⇒ 由此**派生出一条新的观测面差异**（Go 侧 MaxBytes 在 observability 之外，RAG 侧在之内）
+> ⇒ 已记入 `DRIFT-USERAPI-009 ②` 的补充小节。
 
 ⚠️ **与 Go 的结构性差异**：RAG 的 Filter 一律在 `DispatcherServlet` **外**，
 Go 的 MaxBytes 原生中间件在 JWT **外**（同为 index 0 侧）⇒ MaxBytes↔401 关系一致 ✅；
@@ -1115,6 +1122,30 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
   `SD-USERAPI-002` 与 N-1 **两份签字档**要改；
 - ⚠️ **签字档的连带比代码改动更需要先拍板**。
 
+#### 7. 🆕 补充：另一条**独立**的观测面差异 —— MaxBytes 相对 observability 的位置（2026-10-24）
+
+> ⚠️ 本条**不是** ② 的一部分，而是**同一族（观测面）的另一条**，
+> 在做 009 复核时**顺带查出**，此前台账**没有记录**。
+
+| | Go | RAG |
+|---|---|---|
+| MaxBytes 相对 observability(3s) | **在之外**（`rest/engine.go:164` 是 native middleware，而 observability 是 `server.Use` 的 user middleware ⇒ 后者更靠内） | **在之内**（`GoStyleMaxBytesFilter` `@Order(+6)` 晚于 `HttpMiddlewareFilter` `@Order(+5)` ⇒ 数值小的先执行 ⇒ HttpMiddleware 在外） |
+| 可观察后果 | 超限 413 **不计入** access log / span / HTTP 指标 | 超限 413 **计入** |
+| 证据强度 | **静态源码**（`engine.go:130-171` + `chain.go` 的 Append 语义） | **静态源码**（两个 `@Order` 数值） |
+
+⚠️ **运行时不可观测**（如实声明）：3s 预算挂在 **worker 线程**的 ThreadLocal 上
+（`GoStyleRequestDeadline.begin(deadlineNanos)`，`HttpMiddleware.java:263`），
+**不是** request 属性 ⇒ 请求侧探不到；
+且观测面需要 metrics 后端才能看，**本仓无 metrics 后端**（同 `SD-USERAPI-002` 的同一限制）
+⇒ 本条**只能**是结构证据，**不冒充运行时结论**。
+
+⇒ **方向与 `SD-USERAPI-002` 一致**（RAG 多记）⇒ **若签字，建议并入 `SD-USERAPI-002` 的范围说明**
+（该条现只写了「401 计入」，应扩为「**鉴权失败与 413 拒绝都计入**」）。
+⚠️ **本条未签字**，等用户拍板。
+
+⇒ **守网锚点**：`UserApiProtectionMvcTest#maxBytesIsOrderedInsideHttpMiddleware`
+（断言两个 Filter 的 `@Order` 相对大小，并**在 javadoc 里自陈这是结构证据而非运行时观测**）。
+
 ### DRIFT-USERAPI-010 —— 黑名单 401 的 `Content-Type` 拼写错误，RAG 有意不复刻 —— ✅ **已签字（`SD-2026-10-23-01/02/03` 的 N-1）**
 
 ```text
@@ -1190,6 +1221,84 @@ Recommended Verification: `UserApiRedisDisconnectedFastFailTest`（2 条 · 真�
               + 变异验证（`REJECT_COMMANDS` ⇒ `DEFAULT`）⇒ 两条都红，耗时那条实测 **3017ms**。
 ```
 
+#### 🆕 本条的**修法覆盖边界**（2026-10-24 第十轮补）
+
+`REJECT_COMMANDS` 只在 endpoint **已经处于 disconnected 态**时生效 ⇒ 它覆盖的是
+「**连上之后断连**」。**「从头就没连上过」**是另一条路径（命令要等连接建立）⇒ 另行实测：
+
+| 形态 | Go | RAG | 等价 |
+|---|---|---|---|
+| 端口拒连（`127.0.0.1:<死端口>`） | 200 / 1.79s（稳态 1.79~1.80s） | 200 / 0.57s（稳态 0.06~0.07s） | ✅ 同形状 |
+| **主机名解析失败**（`redis`） | 200 / 1.81~1.92s（**稳定**） | **503/200 摇摆**（3.03s / 2.93s / 3.01s） | ❌ **⇒ `DRIFT-USERAPI-015`** |
+
+⇒ 即：**「端口拒连」形态已被本条的修法覆盖**（两侧同形状）；
+⇒ 但**「主机名解析失败」形态没被覆盖**，且它**正是生产默认值**（`${REDIS_ADDR:redis}`）。
+
+---
+
+### DRIFT-USERAPI-015 —— Redis **主机名解析不出来**（生产默认形态）：Go 恒 200 fail-open，RAG 在 **200/503 之间摇摆** —— 🔴 **本轮新发现 · 待拍板**
+
+```text
+Component:    JwtAuthInterceptor（黑名单 EXISTS）/ Lettuce 的连接建立与超时设置
+Operation:    全部 protected 端点在「Redis 地址**解析不出来**」时的响应
+Category:     State Semantics · Failure Semantics（可用性语义）+ **不确定性**
+
+⚠️ 本条的来源是**一次误诊**（2026-10-24 第十轮，写守网测试时撞出来的）：
+  测试环境**没有 Redis** ⇒ 首个受保护请求 3.31s ⇒ 撞 3s HTTP 预算 ⇒ 503
+  ⇒ 表面看与已修的 `DRIFT-USERAPI-014` 同型（「Redis 不可用 ⇒ RAG 503 / Go 200」）
+  ⇒ **但那次误诊把「原因」也搞错了**：3.31s 不是「Lettuce 排队等重连」造成的，
+  而是**测试机上 `redis` 这个主机名解析不出来**（= 生产默认值）。
+  ⇒ 本条是**顺着这次误诊**、用双侧活体对拍**重新测**出来的**真漂移**。
+
+Go Behavior（实测，2026-10-24 19:17，真进程 + 真 PG + 真 DNS 失败）：
+  go-zero@v1.10.2 core/stores/redis/redisclientmanager.go:32-40
+    red.NewClient(&red.Options{Addr: r.Addr, …, MaxRetries: 3, MinIdleConns: 8})
+    ⚠️ **不设** DialTimeout / ReadTimeout ⇒ 用 go-redis v9 默认值
+  实测日志：
+    redis: connection pool: failed to dial after 5 attempts:
+          dial tcp: lookup redis: no such host
+    [REDIS] slowcall on executing: exists user:jwt_blacklist:… duration: 1802.2ms
+  ⇒ **5 次拨号全部快速失败**（DNS NXDOMAIN 是同步返回的）⇒ 失败耗时 ≈ 1.8~1.9s
+  ⇒ < Go 的 HTTP 预算 3s（rest/config.go:55 Timeout int64 `json:",default=3000"`）
+  ⇒ 进业务层 ⇒ checkblacklistmiddleware.go:36 `if err == nil && exists` 判 false
+  ⇒ **fail-open 放行 ⇒ HTTP 200**（三轮**全部** 200，1.81/1.90/1.92s，**稳定**）
+
+Spring Boot Behavior（实测，同一轮）：
+  application.yml:15-18
+    host: ${REDIS_ADDR:redis}      ⇒ **默认就是主机名**（docker-compose 服务名）
+    timeout: 3s                    ⇒ **命令超时 = HTTP 预算**（observability.http-timeout: 3s）
+  ⇒ DNS 解析失败时 Lettuce 的命令要等连接建立 ⇒ 失败耗时**贴着 3s commandTimeout**
+  ⇒ **竞速**：commandTimeout 先到 ⇒ HttpMiddleware 的 3s 预算先耗尽 ⇒ **503 "Request Timeout"**；
+    预算先到之前失败 ⇒ fail-open ⇒ **200**
+  ⇒ 实测三轮：**503 / 200 / 503**（3.027s / 2.934s / 3.012s）——**同输入不同输出**
+  ⇒ 实测日志：`JwtAuthInterceptor : Redis blacklist check failed : Unable to connect to Redis` ×3
+
+Difference:  同一个「Redis 地址解析不出来」的故障：
+            Go = **稳定** 200 fail-open（1.8~1.9s）
+            RAG = **不稳定** 200/503 摇摆（2.93~3.03s，恰好卡在 3s 预算边缘）
+Semantic Impact: OBSERVABLE DIFFERENCE（可用性语义分叉 + **不确定性**）
+            ⚠️ 比 DRIFT-USERAPI-014 更严重：014 是「稳定地错」，这条是「**时对时错**」
+            ⇒ 客户端无法据响应判断 Redis 是否故障 ⇒ 监控上表现为「随机 5xx」
+Risk:         MEDIUM-HIGH（触发条件罕见但真实：compose 里 Redis 服务被移除 /
+            网络命名空间异常 / Redis 容器重建期间 DNS 短暂不可解析）
+Evidence:     **双侧活体对拍**（真进程 + 真 PG + 真 DNS 失败，2026-10-24 19:15 与 19:17 两轮，
+              `tools/difftest/exp-difftest-redis-neverup.sh`，每形态 3 轮 × 双侧）
+Must Preserve: 「Redis 不可用 ⇒ **fail-open 放行**」（Go 的 `err == nil && exists`），
+              且必须是**稳定**的 200，而不是「有时 200 有时 503」。
+              ⚠️ **不要**改成「Redis 不可用 ⇒ 稳定 503」——那是反向漂移。
+```
+
+#### 候选修法（**都需要用户拍板**，本轮只登记不实施）
+
+| # | 改法 | 效果 | 代价 / 风险 |
+|---|---|---|---|
+| ① | 把 `spring.data.redis.timeout`（**命令超时**）从 3s 压到 1s | DNS/连接失败最多 1s ⇒ 稳定 fail-open 200 ⇒ 与 Go 同形 | 🔴 **不可取**：Go 的 go-redis 默认 `ReadTimeout=3s`，与 HTTP 预算**同刻** ⇒ 已对齐的 CASE-05b（Redis 很慢 ⇒ 两侧都 503）正是靠这层「巧合」成立的；把 RAG 砍到 1s ⇒ 变成 RAG 200 / Go 503 ⇒ **把一条已对齐的 CASE 改成新的漂移** |
+| ② | 显式设 `spring.data.redis.connect-timeout`（如 1s） | 只砍**连接建立**这一段 | ⚠️ **可能管不住 DNS 解析耗时**（Lettuce 的 connectTimeout 约束的是 TCP connect，DNS 由 Netty resolver 单独计时）⇒ **必须实测验证**，不能凭形态推断 |
+| ③ | 给 Lettuce 换**带超时**的 DNS resolver | 精确掐住 DNS 这一段 ⇒ 不动命令超时 | 改动面最大，且与 Netty 版本耦合 |
+| ④ | 在 `JwtAuthInterceptor` 的黑名单查询上单独设更短超时 | 只影响黑名单这一处 | 需要在拦截器里显式控时；与 009 改法 A 的链序调整有耦合 |
+
+⇒ **建议先验 ②**（改动最小、且不碰 CASE-05b 的对齐面），**在修法落地前本条按「已知漂移」挂着**。
+
 ---
 
 ## 8. Test Cases（§29 + §30）
@@ -1213,6 +1322,8 @@ Recommended Verification: `UserApiRedisDisconnectedFastFailTest`（2 条 · 真�
 | CASE-05b 外部依赖失败（Redis **很慢**） | Redis 连着但不回包（`CLIENT PAUSE`） | **503** "Request Timeout"（3.003s） | **503** "Request Timeout"（3.018s） | ✅ **完全一致** | 两侧 HTTP 预算都是 3s ⇒ 同时到点 |
 | CASE-05c 黑名单命中（Redis 正常） | token 在黑名单 | **401** `{code:401,msg}` | **401** envelope(1006) | ⚠️ 已签字 N-1 | **对照组**：证明黑名单机制真在跑（否则 CASE-05 的 200 是假绿） |
 | CASE-05d 黑名单命中（Redis 断连） | token 在黑名单 + Redis 断 | **200**（fail-open，**不是** 401） | **200**（fail-open，**不是** 401） | ✅ **已对齐** | fail-open 的**语义**证据：故障时不得误拦 |
+| CASE-05e 外部依赖失败（Redis **从未连上**·端口拒连） | Redis 地址指向**没人监听**的端口 | **200**（fail-open，1.79s，**稳定**） | **200**（fail-open，首轮 0.57s / 稳态 0.06s） | ✅ **已对齐** | 第十轮双侧活体 ⇒ **DRIFT-USERAPI-014 的修法覆盖该形态** |
+| CASE-05f 外部依赖失败（Redis **主机名解析失败**） | `redis` 主机名解析不出来（**生产默认形态**） | **200**（fail-open，1.81~1.92s，**稳定**） | **503 / 200 / 503**（3.03 / 2.93 / 3.01s，**摇摆**） | ❌ | **DRIFT-USERAPI-015**（第十轮新发现） |
 | CASE-06 超时 | handler 睡 > 3s | 503 | 503 | ✅ 状态码；⚠️ 作用域 | DRIFT-USERAPI-009 |
 | CASE-07 Retry | rpc 失败 | 不重试 | 不重试 | ✅ | |
 | CASE-08/09 Cache | — | N/A | N/A | — | 本组件无缓存 |
@@ -1231,6 +1342,24 @@ Recommended Verification: `UserApiRedisDisconnectedFastFailTest`（2 条 · 真�
 | CASE-15c **序列化边界（400 header）** | 必填缺失 | `Content-Type: text/plain; charset=utf-8` | `Content-Type: text/plain` | ❌ | **DRIFT-USERAPI-006** |
 | CASE-15d **序列化边界（绑定面）** | `?Username=a&Password=b` 空 body | **400 `field "username" is not set`** | 400 `field "username" is not set` | **YES** | 原判 ❌，**已证伪更正**（`330bafb`） |
 | CASE-15e **序列化边界（history 的 body）** | `/avatar/history` 发畸形 JSON | 200 | 400 | ❌ | **DRIFT-USERAPI-005** |
+
+### 8.1 守门清单（第十轮新增 · 本组件的**服务接线层**回归网）
+
+| 守门 | 覆盖什么 | 为什么归 user 域（不是跨域） |
+|---|---|---|
+| `UserApiProtectionMvcTest`（**6 条**） | ① 四个保护 Filter **真的注册进本模块上下文**（`scanBasePackages` 含 `com.rag.common` ⇒ 零装配代码 ⇒ **没有任何编译期/启动期信号**告诉使用者它生效了）<br>② **结构证据**：MaxBytes 的 `@Order` 排在 HttpMiddleware(3s) 之后 ⇒ 413 落在 3s 预算**之内**（Go 侧在预算之外 ⇒ 观测面差异）<br>③ **行为**：超限 ⇒ **413 空 body 且压过 401**；未超限无 token ⇒ 仍 401；带合法 token ⇒ 走业务逻辑 200<br>④ MaxConns 闸门满 ⇒ 并发第 2 个请求 **503 空 body**（Go 是裸 503） | 共享层（`service/common`）负责实现，而「**本服务有没有把共享层扫进来**」取决于**各服务自己的** `scanBasePackages` ⇒ **天然是域级义务**。<br>先例：like-api / message-api / task-api / article-api **都写了** ⇒ **user-api 是当时唯一没写的那一个**（2026-10-24 台账复核查出） |
+
+**变异验证（4 个，全部按预期）** —— 判据按 AGENTS.md §3.3：**编译失败不算红 / 上下文加载失败不算红 / 断言红才算**。
+
+| 变异 | 期望 | 实测 |
+|---|---|---|
+| M1 摘掉 `GoStyleMaxBytesFilter` 的 `@Component` | 红 | ✅ 红 3 条：`oversizedBodyIsRejectedBeforeAuth` **413 → 401**；另 2 条 `NoSuchBeanDefinition` |
+| M2 摘掉 `GoStyleMaxConnsFilter` 的 `@Component` | 红 | ✅ 红 2 条：`maxConnsGateRejectsSecondConcurrentRequest` 裸 503 → **"Request Timeout"**；另 1 条 `NoSuchBeanDefinition` |
+| M3 `GoStyleMaxBytesFilter` 的 `@Order(+6)` → `LOWEST_PRECEDENCE` | **绿**（阴性对照） | ✅ 绿 6/6 —— ⚠️ **这次是我变异选错方向**：`LOWEST_PRECEDENCE` 把 MaxBytes 排得**更内层**，**仍在 3s 预算之内** ⇒ 语义未破 ⇒ 该绿 |
+| M4 `GoStyleMaxBytesFilter` 的 `@Order(+6)` → `HIGHEST_PRECEDENCE`（挪到预算**之外**） | 红 | ✅ 红 1 条：`maxBytesIsOrderedInsideHttpMiddleware`（`@Order(-2147483648) 应大于 @Order(-2147483643)`）<br>⚠️ **行为断言（413 压过 401）仍绿** ⇒ 正好印证 `GoStyleMaxBytesFilter` javadoc 的结论：「413 压过 401」靠的是**它是 Filter** 而不是 `@Order` ⇒ **只有结构断言能守住「在 3s 预算之内」这条** |
+
+⚠️ **本类第一次写成时是红的，且红得极具误导性**（"user RPC is nil"）⇒ 根因是**测试环境没有 Redis**，
+不是 mock 失效 ⇒ 详见 `docs/Pitfalls/users/_shared.md` 的 **PIT-USERS-SHARED-018**。
 
 ---
 
@@ -1370,13 +1499,13 @@ Required Confirmation: 引用 `docs/DRIFT/users/user/rpc.md`（另一会话产�
 
 | # | 检查项 | 结论 | 依据 / 缺口 |
 |---|---|---|---|
-| 1 | 两边的 public behavior 是否一致 | ❌ | **DRIFT-USERAPI-009②**（3s 超时作用域）+ **DRIFT-USERAPI-013**（过载保护，待拍板）。⚠️ 此前写的 001/002/004 **均已修/已证伪关闭** |
+| 1 | 两边的 public behavior 是否一致 | ❌ | **DRIFT-USERAPI-009②**（3s 超时作用域）+ **DRIFT-USERAPI-013**（过载保护，待拍板）+ **DRIFT-USERAPI-015**（Redis 主机名解析失败 ⇒ 200/503 摇摆 · 本轮新发现）。⚠️ 此前写的 001/002/004 **均已修/已证伪关闭** |
 | 2 | 正常路径是否一致 | ✅ | §4 #5,6,7,8,9,12,16,21,22,24 |
 | 3 | 边界输入是否一致 | ✅ | ~~DRIFT-USERAPI-004~~（**已证伪关闭**）· 005（已修）· 006（已修） |
 | 4 | NotFound / Empty / Null 是否一致 | ✅ | §4 #28,29；`list`→`[]`、`history` 不会 null、`data`→null 一致 |
 | 5 | Error meaning 是否一致 | ✅ | ~~DRIFT-USERAPI-003~~（**第四轮已修**）；§4 #7,8,13,14,15,25 |
 | 6 | Error propagation 是否一致 | ✅ | ~~DRIFT-USERAPI-001~~（**第三轮已修**：畸形 claim 走业务层 200+1006） |
-| 7 | External dependency failure 是否一致 | ✅ | **第九轮双侧活体实测**：Redis **断连** ⇒ 两侧都 200（fail-open 放行）；Redis **很慢** ⇒ 两侧都 503 "Request Timeout"。⇒ **DRIFT-USERAPI-014 已修** |
+| 7 | External dependency failure 是否一致 | ❌ | **第九轮双侧活体实测**：Redis **断连** ⇒ 两侧都 200（fail-open 放行）；Redis **很慢** ⇒ 两侧都 503 "Request Timeout"。⇒ **DRIFT-USERAPI-014 已修**。⚠️ **第十轮补测**：Redis **从未连上·端口拒连** ⇒ 两侧都 200（014 修法已覆盖）；但 Redis **主机名解析失败**（**生产默认形态**）⇒ Go **恒 200** / RAG **200·503 摇摆** ⇒ **DRIFT-USERAPI-015（本轮新发现）** |
 | 8 | Cache hit / miss 是否一致 | — | **N/A**：本组件无缓存 |
 | 9 | Transaction boundary 是否一致 | — | **N/A**：本组件无 DB；~~见 U-005~~（U-005 **已关**） |
 | 10 | State transition 是否一致 | ⚠️ | 本组件无状态（N/A 性质的等价）；user-rpc 侧 U-005 已关 |
@@ -1389,7 +1518,7 @@ Required Confirmation: 引用 `docs/DRIFT/users/user/rpc.md`（另一会话产�
 | 17 | Serialization semantics 是否一致 | ✅ | ~~004~~（已证伪）/ 005（已修）/ 006（已修）；✅ `uid,string` / `score` / `data:null` 一致 |
 | 18 | Lifecycle 是否一致 | ⚠️ | 启动顺序等价（§6.12）；❌ 过载能力 **DRIFT-USERAPI-013**（待拍板） |
 
-**统计**：✅ 12 项 / ❌ 2 项 / ⚠️ 2 项 / — 2 项（N/A）
+**统计**：✅ 11 项 / ❌ 3 项 / ⚠️ 2 项 / — 2 项（N/A）
 
 ### 结论
 
@@ -1398,18 +1527,20 @@ SEMANTICALLY NOT EQUIVALENT
 ```
 
 - **SEMANTIC MISMATCH：0 条** —— ⚠️ 此前记的 2 条（`DRIFT-USERAPI-001/002`）**第三轮均已修**
-- **OBSERVABLE DIFFERENCE：2 条** —— `DRIFT-USERAPI-009②`（3s 超时作用域 · 签字只覆盖 ①）
-  与 `DRIFT-USERAPI-013`（过载保护 · **待拍板**，属共享层）
+- **OBSERVABLE DIFFERENCE：3 条** —— `DRIFT-USERAPI-009②`（3s 超时作用域 · 签字只覆盖 ①）
+  · `DRIFT-USERAPI-013`（过载保护 · **待拍板**，属共享层）
+  · `DRIFT-USERAPI-015`（Redis **主机名解析失败** ⇒ Go 恒 200 / RAG **200·503 摇摆** · **第十轮新发现**）
 - **UNRESOLVED：0 条** ⇒ **§9 已清空**（001~005 全部闭环：001/005 真 Tomcat、002/003 第四轮、
   004 第九轮双侧活体、005 引 user-rpc 台账）
 - **双侧活体对拍证据：多条** —— ⚠️ 此前写「0 条（全部为静态源码）」是**过期状态**：
   第三轮（claim 语义 17 步）、第六轮（真 Tomcat 400 header）、第七轮（客户端熔断 E2E）、
-  第八轮（四个过载机制逐条对照）、第九轮（Redis 故障注入）**都已是双侧活体**
+  第八轮（四个过载机制逐条对照）、第九轮（Redis 故障注入）、
+  **第十轮（Redis「从未连上」两形态 × 3 轮 × 双侧）** **都已是双侧活体**
 - **已签字的有意偏离**：N-1（鉴权失败 body 形状）· `SD-USERAPI-001`（panic 兜底形状）·
   `SD-USERAPI-002`①（observability 位置）· `SD-2026-10-23-01/02/03`（proto package 归一 等）
 
 > ⚠️ **结论的适用边界**：**不是**「已闭环」——
-> 仍有 **2 条未签字的 OBSERVABLE DIFFERENCE**（009② / 013）挂着，
+> 仍有 **3 条未签字的 OBSERVABLE DIFFERENCE**（009② / 013 / **015**）挂着，
 > 且 `DRIFT-USERAPI-014` 的**跨域推广**（其余 api 服务有同款漂移）尚未做。
 > ⇒ 组件**不能**判 `SEMANTICALLY EQUIVALENT`。
 

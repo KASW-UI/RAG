@@ -131,7 +131,14 @@ public class HttpMiddlewareFilter implements Filter {
 
 `JwtAuthInterceptor` 是 `HandlerInterceptor`（`WebMvcConfig.java:56-59`），
 **在 DispatcherServlet 之内** ⇒ 执行序：
-**Filter(MaxBytes → HttpMiddleware 3s) → DispatcherServlet → JwtAuthInterceptor → Controller**
+
+**Filter(MaxConns +1 → Breaker +2 → CpuShedding +3 → HttpMiddleware 3s +5 → MaxBytes +6) → DispatcherServlet → JwtAuthInterceptor → Controller**
+
+> ⚠️ **2026-10-24 勘误**：本行原写「Filter(**MaxBytes → HttpMiddleware 3s**)」，
+> **顺序写反了** —— 按 `@Order` 数值，`HttpMiddlewareFilter` 是 `+5`、`GoStyleMaxBytesFilter` 是 `+6`
+> ⇒ 数值小的**先执行** ⇒ 实际是 **HttpMiddleware(3s) 在 MaxBytes 之外**。
+> ⇒ 本条 ① 的结论（401 计入观测面）**不受影响**（401 由 DispatcherServlet 内的拦截器产生，两种顺序下都在观测面之内）。
+> ⇒ 但「MaxBytes 相对观测面的位置」由此变成一条**独立的新差异** ⇒ 见 `SD-USERAPI-003` 与 `docs/DRIFT/users/user/api.md` 的 `DRIFT-USERAPI-009 ②` 补充。
 
 ⇒ ① **401 计入** `markHttpResult`（`HttpMiddleware.java:466`）
 ⇒ ② 3s 预算**覆盖**验签 + 黑名单 + handler。
@@ -181,3 +188,69 @@ public class HttpMiddlewareFilter implements Filter {
 1. 把 `JwtAuthInterceptor` 从 `HandlerInterceptor` 改为 `Filter` 并置于 `HttpMiddlewareFilter` **之外**
    （或反过来调整 order），**并确认响应字节与状态码不变**；
 2. 在本文件追加一条「撤销记录」，保留历史。
+
+---
+
+## SD-USERAPI-003（2026-10-24 用户签字）—— **JWT 验签失败的 401 保持完整 envelope**，不复刻 Go 的空 body
+
+| 项 | 值 |
+|---|---|
+| 对应 DRIFT | `DRIFT-USERAPI-009` ② 的**连带项**（N-1 的延伸与明确化） |
+| 签字日期 | **2026-10-24** |
+| 决定 | **保留 RAG 现状**：JWT 验签失败 ⇒ **HTTP 401 + 完整 envelope** `{code,msg,data}`（业务码 1006 `TOKEN已过期`），**不复刻 Go 的「401 + 空 body」** |
+| 性质 | 有意偏离 —— 方向是「**统一**」而非「**分裂**」（见「为什么签字」第 2 条） |
+| 影响面 | **仅响应体形状**；**HTTP 状态码（401）与 Content-Type 不变**；不涉及任何业务路径 |
+
+### Go 侧事实（消费点，非声明点）
+
+`go-zero@v1.10.2/rest/handler/authhandler.go:106-122` `unauthorized(...)`：
+
+```go
+// let callback go first, to make sure we respond with user-defined HTTP header
+if callback != nil { callback(writer, r, err) }
+// if user not setting HTTP header, we set header with 401
+writer.WriteHeader(http.StatusUnauthorized)
+```
+
+⇒ `service/user/user/api/usercenter.go` **没有**注册 `rest.WithUnauthorizedCallback`
+⇒ callback 为 nil ⇒ **只有一行 `WriteHeader(401)` ⇒ body 为空**。
+
+### RAG 侧事实
+
+`service/users/user/user-api/.../advice/GlobalExceptionHandler.java:73-78`
+⇒ `AuthenticationException` ⇒ **HTTP 401** + `{code:1006,msg:"TOKEN已过期",data:null}`。
+
+### 为什么签字接受（不复刻空 body）
+
+1. **与 N-1 同源**：N-1（用户 2026-10-21 已签字）已把「Go 侧两处 401 的 body **互不相同**」
+   （`WithJwt` → 空 body；`CheckBlacklistMiddleware` → `{"code":401,"msg":…}`）
+   收敛成 RAG 侧的**统一 envelope**。
+   ⇒ 本条把这条决策**在 JWT 路径上明确化**，避免将来实施 `DRIFT-USERAPI-009` 改法 A 时被当成「顺手改回」。
+2. **改法 A 一旦落地，写空 body 反而会让 RAG 自己分裂**：
+   改法 A 把 JWT 验签挪到 Servlet Filter ⇒ 异常**不再被 `@ControllerAdvice` 捕获**
+   （`@ExceptionHandler` 只在 `DispatcherServlet` 内生效）⇒ Filter 要自己写响应。
+   ⇒ 若此时写空 body ⇒ **RAG 的两处 401 会变成「JWT 空 body + 黑名单 envelope」**
+   ⇒ **比现在更不一致**，且要为此在 Filter 里另写一套响应拼装。
+   ⇒ 写 envelope ⇒ 与黑名单 401 **形态一致**，且 `GlobalExceptionHandler` 的 4 个 401 分支
+   （JWT 验签失败 / claim 畸形 / 黑名单命中 / uid 非法）**共用同一套形状**。
+3. **不影响任何「保护」语义**：401 之后请求**一律不放行**（拦截器直接终止链），
+   差别只在**响应体长什么样**，不涉及鉴权强度。
+4. ⚠️ **本条不覆盖 `DRIFT-USERAPI-009` ② 的「3s 超时作用域」差异** ——
+   那是**行为差异**（超时预算覆盖范围），本条只签**响应体形状**。
+   ⇒ ② 仍挂 `DRIFT-USERAPI-009`，**不因本条而关闭**。
+
+### 与 `SD-USERAPI-002` 的关系（两条各管一面，别混）
+
+| 签字 | 管的是 | 方向 |
+|---|---|---|
+| `SD-USERAPI-002` | **观测面**：401 是否进 access log / span / HTTP 指标 | RAG **多**记 |
+| **`SD-USERAPI-003`（本条）** | **响应体形状**：JWT 401 的 body | RAG **统一**成 envelope |
+
+### 关闭条件
+
+本条**不设自动关闭条件** —— 它是长期决策。
+若将来要撤销（即 JWT 401 改回空 body），必须同时：
+1. 在 JWT 路径上单独写响应（**不能**依赖 `@ControllerAdvice`），
+2. 改 `GlobalExceptionHandler` 里对应分支（否则 advice 仍会包 envelope），
+3. **改写**鉴权类守门测试的期望值（`AuthenticationHttpStatusTest` 等）—— 否则它们会红，
+4. 在本文件追加一条「撤销记录」，保留历史。

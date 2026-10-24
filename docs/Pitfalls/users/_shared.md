@@ -733,3 +733,82 @@ RAG 探测：t=4.19 起 → PAUSE 早已结束 → 0.042s 返回「正常」
 - 本轮**只记录，未改代码**（`service/common` 属共享层，改动影响 10 个 api 服务 ⇒ 交由用户拍板）。
 - 待办：① 修 `GoStyleBreakerFilter:69-71` 的错误注释；
   ② 给 `trackedRoutes()` 补一条**键基数断言**（目前该钩子在测试目录**零引用** ⇒ 键空间无界**无回归网**）。
+
+---
+
+## PIT-USERS-SHARED-018 🔴 「mock 没生效」在**有超时的链路**上是个不可靠的结论 —— 先看耗时与 Content-Type 两个指纹
+
+> 2026-10-24 写 `UserApiProtectionMvcTest`（user-api 保护层守网）时实测踩到。
+
+### 现象
+
+新写的守网测试第一条就红，症状**看起来**直指 mock：
+
+```text
+UserApiProtectionMvcTest.normalRequestReachesBusinessLogic
+  Status expected:<200> but was:<503>          （耗时 3.3s）
+日志：IdentityResolver$ErrIdentityMismatchException: user RPC is nil: authenticated user RPC identity mismatch
+```
+
+⇒ 第一反应必然是「`@MockitoBean` 注入的 `UserRpcClient` 与服务里持有的不是同一个实例」
+⇒ 于是去写诊断测试比对 `identityHashCode`（**结果三个全是同一个实例**，stub 也一致可见）
+⇒ 于是又怀疑「mock 被 reset 了」⇒ 于是去查 `MockReset` 的语义（**也是对的**）。
+
+⇒ **三次推理，三次都「有证据」，三次都不在真因上。**
+
+### 真因
+
+**测试类没有 Redis。** 鉴权链要查黑名单 ⇒ 首次连接失败被
+`spring.data.redis.timeout: 3s` 卡住 ⇒ **3.31s** ⇒ 撞上 3s HTTP 预算
+⇒ `HttpMiddleware` 的**超时分支**先返回 503 ⇒ 测试方法结束、mock 被 reset ⇒
+**还在 worker 线程上跑的请求**继续往下走，此时 `userRpc()` 已是 null
+⇒ 才出现那句「user RPC is nil」—— **它是第 1、2 步的次生症状，不是病因**。
+
+### 三个可复用的指纹（下次先看这三个，再怀疑 mock）
+
+| 指纹 | 读法 | 本次实测 |
+|---|---|---|
+| **请求耗时** | ≈3s ⇒ 撞了 HTTP 预算 ⇒ 与「mock / 装配」无关 | 3.3s |
+| **响应 `Content-Type`** | `text/plain;charset=utf-8` ⇒ **超时分支**写的（裸 503 的 MaxConns 分支**不带** Content-Type）⇒ 503 的**来源分支**可判 | `text/plain;charset=utf-8` |
+| **日志线程名** | `obs-http-worker` ⇒ 请求在 **worker 线程**上跑 ⇒ 可能**晚于**测试方法结束 ⇒ 才解释「stub 明明生效却拿到 null」 | `[obs-http-worker]` |
+
+⇒ 第 2 条尤其通用：**同是 503，来源分支不同则形状不同**
+（超时分支有 body 与 Content-Type，MaxConns 分支是裸 503 无 body）。
+⇒ 以前一直靠「body 是不是 Request Timeout」猜，现在有确定的指纹了。
+
+### 教训
+
+> **「mock 没生效」是一个需要**排除**的假设，不是第一个假设。**
+> ⇒ 判据：链路里**有没有超时预算**？
+> - **没有**超时 ⇒ 「mock 没生效」很可能是真的；
+> - **有**超时 ⇒ 先量耗时、看 Content-Type、确认线程名，**再**去怀疑 mock。
+>
+> ⚠️ 推论一：**测试必须自带它的真依赖**。
+> 基础设施缺失（这里是没有 Redis）不会让测试「失败得更有信息量」，
+> 而会把**被测变量整个换掉**——测的已经不是「保护层有没有生效」，而是「Redis 挂了会怎样」。
+> ⇒ 判据：写之前先问「**这条链路依赖什么外部设施？它到位了吗？**」
+> （本模块先例：`UserApiMvcPipelineTest` 用 Testcontainers 起真 Redis；本类现在也这么做。）
+>
+> ⚠️ 推论二：`@MockitoBean` 默认 `MockReset.AFTER` ⇒ **测试方法一结束，mock 就被 reset**
+> ⇒ 任何**跨方法残留的在途请求**（后台线程、异步任务）都会在「mock 已 reset」的时点继续执行。
+> ⇒ 判据：① stubbing 放 `@BeforeEach`（不放在方法体）；
+> ② 用到后台线程的用例，**必须在 `finally` 里等它真正结束**（本类用 `Future.get` 等）。
+
+### 处置
+
+- `UserApiProtectionMvcTest`：① 接 Testcontainers 真 Redis；② stubbing 移到 `@BeforeEach`；
+  ③ MaxConns 那条用 `Future.get` 等后台请求收尾。
+  ⇒ 6/6 全绿 + 4 个变异全部按预期变红（见 `docs/DRIFT/users/user/api.md` §8 守门清单）。
+- ⚠️ **这次误诊顺带撞出一条真发现**（经双侧活体实测后定型）：
+  「Redis **从未连上**」不是一个形态，是**两个**，行为完全不同：
+  - **端口拒连**（`127.0.0.1:<死端口>`）⇒ 两侧都 200 fail-open（Go 1.79s / RAG 0.57s）
+    ⇒ **无漂移**（`DRIFT-USERAPI-014` 的修法已覆盖该形态）；
+  - **主机名解析失败**（`redis` = **生产默认值** `${REDIS_ADDR:redis}`）⇒
+    Go **恒 200**（1.81~1.92s）／RAG **200·503 摇摆**（2.93~3.03s，恰好卡在 3s 预算边缘）
+    ⇒ **真漂移**（`DRIFT-USERAPI-015`）。
+
+  ⇒ 已立 `DRIFT-USERAPI-015`；复现脚本 `tools/difftest/exp-difftest-redis-neverup.sh`
+  （`REDIS_HOST=127.0.0.1` 与 `REDIS_HOST=redis` 各跑一轮）。
+  ⇒ ⚠️ **教训再加一条**：「Redis 挂了」不是一个形态 ——
+  **拒连 / 解析失败 / 很慢 / 连上后断连**是四个，各走不同的客户端状态机，
+  ⇒ **「外部依赖故障」类对照，必须按「故障形态」逐个测，不能测一个就宣布对齐。**
