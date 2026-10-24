@@ -258,9 +258,6 @@ public class FavoriteAuthorityEndpointConfig {
             // ⚠️ 类型是 Object：v1 返回 FavoriteAuthorityFact.FactV1（三字段 subject_ref），
             //    v2 返回 Wire.AuthorityFact（两字段 subject_ref）—— 两者是【不同的 wire 形状】。
             //    Jackson 按运行时类型序列化 ⇒ 声明成父类不会丢字段。
-            // ⚠️ 类型是 Object：v1 返回 FavoriteAuthorityFact.FactV1（三字段 subject_ref），
-            //    v2 返回 Wire.AuthorityFact（两字段 subject_ref）—— 两者是【不同的 wire 形状】。
-            //    Jackson 按运行时类型序列化 ⇒ 声明成父类不会丢字段。
             Object fact;
             try {
                 // ═══ Go: http.go:44 / :80 ═══
