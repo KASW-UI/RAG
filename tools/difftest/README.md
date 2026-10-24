@@ -173,5 +173,24 @@ ERROR: duplicate key value violates unique constraint "pg_type_typname_nsp_index
 | `initdb.sql` | 建 `go_db` 与 `rag_db` |
 | `conf/go/*.yaml` | **冻结 Go 仓库的副本**，运行时用 `-f` 指过去；真源一个字节都不动 |
 
+### `exp-*` 实验脚本（**各自带完整的设计说明在脚本头部**）
+
+> ⚠️ `exp-drift015-flyway-flags.sh` 是**被证伪方案**的实证记录，**不要当修复用**（脚本头部已写明）。
+> ⚠️ 这些脚本**自建容器/端口**，不依赖也不干扰别的会话的共享栈。
+
+| 脚本 | 回答什么问题 |
+|---|---|
+| `exp-b1-timeout-cancel.sh` | 超时与客户端取消：两侧是否都在各自的 `http-timeout` 附近返回 |
+| `exp-difftest-concurrent-schema.sh` | `UNRESOLVED-USERRPC-005`：`users_user` 建表责任交叉的**双侧对称**实验 |
+| `exp-difftest-grpc-admin-errors.sh` | admin-rpc 的 **gRPC 层**双侧活体对拍编排 |
+| `exp-difftest-grpc-errors-message.sh` | message 域 Go ↔ RAG **双端口**对拍编排 |
+| `exp-difftest-grpc-errors.sh` | §6.2.6 E-2 动态半的编排脚本 |
+| `exp-difftest-grpc-user9.sh` | `UNRESOLVED-USERRPC-007`：9 个 RPC 的 gRPC 层错误 message 逐字对拍 |
+| `exp-difftest-redis-blacklist.sh` | user-api 侧 `U-004` 的**真 Redis 故障注入**（正常 / 断连 / 很慢 三形态 × 双侧并行探测 + 「被拉黑 token」对照组）|
+| `exp-difftest-redis-failfast.sh` | `UNRESOLVED-USERRPC-004②` 的真故障注入实验（启动期 Redis 不可用）|
+| **`exp-difftest-redis-neverup.sh`** | **「Redis 从未连上过」的双侧对拍**：两种「连不上」的形态（`REDIS_HOST=127.0.0.1` 端口拒连 / `REDIS_HOST=redis` 主机名解析失败 = 生产默认值）× 3 轮（首个请求 ≠ 稳态）|
+| `exp-drift015-flyway-flags.sh` | 🔴 **被证伪方案**的实证记录，**不要当修复用** |
+| `exp-go-concurrent-automigrate.sh` | Go 侧并发 `AutoMigrate` 的行为 |
+
 > **纪律**：Go 侧绝不写任何文件进冻结仓库。真源 yaml 的 `Log.Path: ../../../../log/...`
 > 是相对 `etc/` 的，会直接落进仓库里，所以副本已改成 `Mode: console`。

@@ -9,7 +9,7 @@ import java.time.OffsetDateTime;
 import java.util.Map;
 
 /**
- * users_user 表实体 —— MyBatis-Plus @TableName + JsonbTypeHandler。
+ * users_user 表实体 —— MyBatis-Plus @TableName + JsonTextTypeHandler。
  *
  * 对应 Go: service/user/model/user.go 的 User struct（GORM 表 users → HUMAN_ONLY 后表名 users_user）。
  *
@@ -17,15 +17,16 @@ import java.util.Map;
  *   - @TableName("users_user") 取代 JPA 的 @Table(name="users")
  *   - @TableId(type = IdType.ASSIGN_ID) 主键策略（雪花 ID）取代 JPA 的 @Id + @GeneratedValue
  *   - @TableField("snake_case") 显式映射列名（与 Go 端 gorm tag byte-for-byte 一致）
- *   - extra_info JSONB 由 JsonbTypeHandler 序列化（取代 Hibernate @JdbcTypeCode(SqlTypes.JSON)）
+ *   - extra_info（**text** 列）由 JsonTextTypeHandler 序列化（取代 Hibernate @JdbcTypeCode(SqlTypes.JSON)）
  *
  * autoResultMap = true 不能去掉：没有它，MyBatis-Plus 自己生成的 ResultMap
- * 不会采用 extra_info 字段上声明的 TypeHandler，读回来的 jsonb 会是 null。
+ * 不会采用 extra_info 字段上声明的 TypeHandler，读回来的 JSON 文本会是 null。
  *
- * 用 JsonbTypeHandler 而不是 MP 自带的 JacksonTypeHandler：后者写参走 ps.setString，
- * JDBC 会绑成 varchar，Postgres 的 jsonb 列直接拒收
- * （"column extra_info is of type jsonb but expression is of type character varying"），
- * 导致 BaseMapper.insert / updateById 必现失败。
+ * ⚠️ 2026-10-23（DRIFT-USERRPC-V-003）：extra_info 列由 JSONB 改回 **TEXT**，与 Go 一致
+ *   （Go 的 `serializer:json` 让 GORM 把它当普通字符串列，建出来就是 text；已由真源
+ *   model.InitDB 的活体建表语句实证）。TypeHandler 随之改名 Jsonb→JsonText。
+ *   原注释里「MP 自带的 JacksonTypeHandler 会被 jsonb 列拒收」的理由**已随列类型一起失效**，
+ *   详见 {@link com.rag.users.user.rpc.mapper.JsonTextTypeHandler} 的类注释。
  */
 @TableName(value = "users_user", autoResultMap = true)
 public class UserEntity {
@@ -110,7 +111,7 @@ public class UserEntity {
     @TableField("score")
     private Integer score;
 
-    @TableField(value = "extra_info", typeHandler = com.rag.users.user.rpc.mapper.JsonbTypeHandler.class)
+    @TableField(value = "extra_info", typeHandler = com.rag.users.user.rpc.mapper.JsonTextTypeHandler.class)
     private Map<String, String> extraInfo;
 
     /**

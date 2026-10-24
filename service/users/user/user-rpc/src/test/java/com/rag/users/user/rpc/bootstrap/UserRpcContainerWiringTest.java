@@ -20,6 +20,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import java.util.Set;
@@ -36,31 +37,41 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * user-rpc 真实 Spring 容器 + 真实 PostgreSQL 集成测试。
  *
  * <p><b>关闭的缺口</b>：此前 {@code AvatarTransactionWiringTest} 与
- * {@code UserRpcJsonbAndAvatarProjectionTest} 都是<b>纯 mock 数据层</b>的单测，
+ * {@code UserRpcJsonTextAndAvatarProjectionTest} 都是<b>纯 mock 数据层</b>的单测，
  * 前者用"记录型事务管理器"只证明 {@code begin/rollback} 被调用过，
  * 后者只断言 MyBatis-Plus 生成的 SQL 片段文本。<b>两者都没有真实 PG</b>
- * （该类注释里自己写着"没有真实 PostgreSQL，所以不验证 jsonb 的 CAST"）。
+ * （该类注释里自己写着"没有真实 PostgreSQL，所以不验证 extra_info 的 CAST"）。
  *
  * <p>按 AGENTS.md §3.3，{@code @TableField(typeHandler=…)} 与 {@code @Transactional}
  * 都属于<b>运行期隐式装配</b>，出错时不报错。静态断言证明不了它们真的生效。
  *
  * <p><b>为什么不能用 H2</b>：本模块依赖三样 H2 不支持或语义不同的能力：
  * <ol>
- *   <li>{@code extra_info} 是 <b>jsonb</b> 列，{@code JsonbTypeHandler} 走
- *       {@code ps.setObject(..., Types.OTHER)} —— 换成 {@code setString} 会被 PG 直接拒收</li>
- *   <li>{@code updateUserById} 的 {@code setSql("extra_info = CAST({0} AS jsonb)")} 显式 CAST</li>
- *   <li>手写 {@code @Select} 上的 {@code @Results} 是否真把 jsonb 列映射成 {@code Map}</li>
+ *   <li>{@code extra_info} 的 {@link com.rag.users.user.rpc.mapper.JsonTextTypeHandler}
+ *       与真 PG 的绑定/反序列化行为（text ↔ {@code Map<String,String>}）</li>
+ *   <li>{@code updateUserById} 的 {@code setSql("extra_info = {0}")} 片段拼装与执行</li>
+ *   <li>手写 {@code @Select} 上的 {@code @Results} 是否真把该列映射成 {@code Map}</li>
  * </ol>
  * 换掉数据库等于把要验证的东西换没了。
  *
  * <p><b>本类证明什么</b>：
  * <ul>
- *   <li>{@code JsonbTypeHandler} 在 MP 生成的 insert 上真的能写入 jsonb 列（§3.3 缺口）</li>
+ *   <li>{@code JsonTextTypeHandler} 在 MP 生成的 insert 上真的能写入 extra_info 列（§3.3 缺口）</li>
  *   <li>{@code @Results} 让手写 {@code @Select} 真能读回 {@code Map} 而不是 null（§3.3 缺口）</li>
- *   <li>{@code CAST(... AS jsonb)} 的显式 CAST 在真 PG 上成立（§3.3 缺口）</li>
+ *   <li>extra_info 的<b>字节按原样落库</b>，没被 jsonb 规范化改写（§3.3 缺口，
+ *       DRIFT-USERRPC-V-003 修复后新增）</li>
  *   <li>4/5 步事务<b>真的回滚行</b>，而不只是"调用过 rollback"（§3.3 缺口）</li>
  *   <li>UNIQUE 约束在真 PG 上确实拦得住重复 username —— 这是 Go 侧 {@code AlreadyExists} 的地基</li>
  * </ul>
+ *
+ * ⚠️ <b>2026-10-23（DRIFT-USERRPC-V-003）本类整体换了一次前提</b>：
+ *   extra_info 列已由 jsonb 改回 <b>text</b>（与 Go 一致）。原注释里
+ *   「换成 setString 会被 PG 拒收」「显式 CAST 不能省」这些<b>随列类型一起失效</b>，
+ *   已全部重写而非保留 —— 留着就是在给下一个人讲一个已经不成立的故事。
+ *   换来的<b>新缺口</b>是反向的：text 列让
+ *   {@code CAST(x AS jsonb)} 这类残留<b>能跑通但不报错</b>，
+ *   只有断言「落库字节与 Go 序列化结果逐字节相同」才能抓住（见
+ *   {@code extraInfoBytesAreStoredVerbatim}）。
  *
  * <p><b>Ryuk 已在本模块 pom 的 surefire 配置里关掉</b>（理由与 admin-rpc 同名配置一致：
  * Ryuk 镜像需从 Docker Hub 拉，本机走加速器拉会 EOF 失败且发生在 {@code @Container} 之前）。
@@ -109,17 +120,22 @@ class UserRpcContainerWiringTest {
     // ==================================================================
 
     /**
-     * 本类其余用例的前提：users 域 DDL 真跑了，且 {@code extra_info} 真的是 jsonb。
+     * 本类其余用例的前提：users 域 DDL 真跑了，且 {@code extra_info} 真的是 {@code text}。
      *
-     * <p>Go 出处：{@code 01_create_user.sql} 的 {@code extra_info JSONB}，
-     * 对应 GORM {@code AutoMigrate} 从 struct tag 推出的 jsonb 列。
+     * <p>Go 出处：真源 {@code model.InitDB}（内含 {@code AutoMigrate}）在 PG 上实测建出的
+     * 建表语句原文是 {@code "extra_info" text}，已抓到日志留存（DRIFT-USERRPC-V-003）。
      *
-     * <p>顺带证明"类型不是 varchar" —— 若某次建表脚本被手改成 {@code text}/{@code varchar}，
-     * 下面所有 jsonb 用例都会变成假绿（TypeHandler 的 Types.OTHER 对 text 也能写成功）。
+     * <p>⚠️ <b>2026-10-23 本断言方向反转过</b>，原因是它<b>服务的目的没变，但服务的对象变了</b>：
+     * 原断言「必须是 jsonb」的理由是「若退化成 text，下面的 jsonb 用例会假绿」。
+     * 现在列就是 text，那套 jsonb 用例已被替换 ⇒ <b>新的风险是反方向的</b>：
+     * 若有人把脚本改回 jsonb，下面所有 {@code extra_info} 用例<b>照样全绿</b>
+     * （jsonb 能接受任何合法 JSON 文本，{@code @Results} 也照样解得出 Map）。
+     * ⇒ 拦住它的是 {@link #extraInfoBytesAreStoredVerbatim}，不是这条类型断言。
+     * <b>两条缺一不可：这条管「列类型与 Go 一致」，那条管「字节不被规范化」。</b>
      */
     @Test
-    @DisplayName("§3.3：建表真跑了，且 extra_info 的列类型确实是 jsonb")
-    void schemaInitCreatedJsonbColumns() {
+    @DisplayName("§3.3：建表真跑了，且 extra_info 的列类型确实是 text（与 Go 一致）")
+    void schemaInitCreatedTextExtraInfoColumn() {
         // 建表方式已在 2026-10-21 从 Flyway 换成幂等重放（DRIFT-NEW-015）：
         // flyway_schema_history 那张表已经不存在，所以这里只能验「表在不在」。
         // 顺带变成一个更强的断言：user-rpc **单独**对着空库启动，
@@ -138,35 +154,88 @@ class UserRpcContainerWiringTest {
                 "SELECT data_type FROM information_schema.columns "
                         + "WHERE table_name = 'users_user' AND column_name = 'extra_info'",
                 String.class);
-        assertEquals("jsonb", extraInfoType,
-                "extra_info 必须是 jsonb；若退化成 text/varchar，下面所有 jsonb 断言都会假绿");
+        assertEquals("text", extraInfoType,
+                "extra_info 必须是 text（Go 的 AutoMigrate 建出来就是 text）；"
+                        + "若退回 jsonb，PG 会重排/去重/删空格，落库字节将与 Go 不同");
+    }
+
+    /**
+     * 🔴 <b>DRIFT-USERRPC-V-003 修复后新增的守门</b>：extra_info 必须<b>逐字节</b>落库。
+     *
+     * <p><b>要证伪的是</b>：写入路径上是否还残留着 {@code CAST(... AS jsonb)}。
+     * 残留了<b>不会报错</b> —— text 列接受 assignment cast，测试照样全绿，
+     * 但 PG 会顺手把 JSON 规范化一遍（键按「长度→字节序」重排、去重键、删多余空格、
+     * 冒号后补空格），于是<b>库里存的字节不再是应用写进去的那个</b>。
+     *
+     * <p><b>为什么下面这组键能分辨两种列类型</b>：
+     * <ul>
+     *   <li>Jackson 按 <b>插入序</b> 输出：{@code {"c":"3","a":"1","bb":"2"}}</li>
+     *   <li>PG jsonb 按 <b>键长→字节序</b> 输出：{@code {"a": "1", "c": "3", "bb": "2"}}</li>
+     * </ul>
+     * 两者<b>键序不同</b> ⇒ 用 {@code assertEquals} 比对完整字符串即可分辨，
+     * 且失败信息会直接把两种序列化结果都打出来，一眼看出是哪边。
+     *
+     * <p>⚠️ 用 {@code SELECT extra_info::text} 取值时，text 列返回原样、jsonb 列返回规范化文本
+     * —— 这个差异正是本用例的判据，<b>不要</b>为了「两边都能跑」把它改写成不敏感的断言。
+     */
+    @Test
+    @DisplayName("§3.3：extra_info 逐字节落库，没被 jsonb 规范化重排（CAST 残留守门）")
+    void extraInfoBytesAreStoredVerbatim() {
+        // ⚠️ uid 必须与本类其他用例错开（共享同一个 Testcontainer 库，uid 上有 UNIQUE）
+        long uid = 700012L;
+        UserEntity user = new UserEntity();
+        user.setUid(uid);
+        user.setUsername("verbatim");
+        user.setPassword("x");
+        user.setEmail("verbatim@example.com");
+        user.setStatus(0L);
+        // LinkedHashMap ⇒ Jackson 按插入序输出：c, a, bb
+        // 而 jsonb 会重排成 a, c, bb ⇒ 两者可分辨
+        Map<String, String> extra = new LinkedHashMap<>();
+        extra.put("c", "3");
+        extra.put("a", "1");
+        extra.put("bb", "2");
+        user.setExtraInfo(extra);
+
+        userMapper.insert(user);
+
+        String raw = jdbcTemplate.queryForObject(
+                "SELECT extra_info::text FROM users_user WHERE uid = ?", String.class, uid);
+        assertEquals("{\"c\":\"3\",\"a\":\"1\",\"bb\":\"2\"}", raw,
+                "extra_info 必须原样落库。实际 = " + raw
+                        + "　若键被重排成 a,c,bb ⇒ 列又变回 jsonb 或写入路径残留了 CAST(... AS jsonb)");
     }
 
     // ==================================================================
-    // §3.3 缺口 2：JsonbTypeHandler 在 MP 生成的 insert 上真的生效
+    // §3.3 缺口 2：JsonTextTypeHandler 在 MP 生成的 insert 上真的生效
     // ==================================================================
 
     /**
      * <b>本类是 {@code AvatarTransactionWiringTest} 明确不覆盖的那一半。</b>
-     * 那个类写着"没有真实 PostgreSQL，所以不验证 jsonb 的 CAST"。
+     * 那个类写着"没有真实 PostgreSQL，所以不验证 extra_info 的实际写入"。
      *
-     * <p>要证伪的是：{@code @TableField(typeHandler = JsonbTypeHandler.class)}
-     * 真的被 MyBatis-Plus 的 insert SQL 采用。若失效（退回 {@code setString}），
-     * PostgreSQL 会直接报：
-     * {@code ERROR: column "extra_info" is of type jsonb but expression is of type character varying}
-     * —— <b>这个错误只在真 PG 上出现</b>，H2 和 mock 都测不到。
+     * <p><b>要证伪的是</b>：{@code @TableField(typeHandler = JsonTextTypeHandler.class)}
+     * 真的被 MyBatis-Plus 的 insert SQL 采用。若失效（字段级 TypeHandler 没被装配），
+     * MyBatis 会按 {@code javaType=Object} 猜 handler，序列化结果不受控 ——
+     * <b>这是运行期隐式装配，不报错、测试也可能照样绿</b>（§3.3）。
      *
-     * <p>Go 对应：{@code CreateUser} 走 GORM，jsonb 列由驱动按 jsonb 绑参写入。
+     * <p>⚠️ <b>2026-10-23 前提变了</b>：列已是 text，本条的判据从
+     * 「setString 会被 PG 拒收」改成「落库字节是否与 Jackson 序列化结果一致」
+     * —— 后者同样只在真 PG 上可验，且比「没报错」更严。
+     * 具体逐字节断言见 {@link #extraInfoBytesAreStoredVerbatim}；本条负责覆盖面
+     * （MP 生成的 insert 这一条路径）。
+     *
+     * <p>Go 对应：{@code CreateUser} 走 GORM，{@code serializer:json} 把 map 写成 JSON 文本入库。
      */
     @Test
-    @DisplayName("§3.3：JsonbTypeHandler 在 MP insert 上真能写入 jsonb 列（Types.OTHER 生效）")
-    void jsonbTypeHandlerWorksOnGeneratedInsert() {
+    @DisplayName("§3.3：JsonTextTypeHandler 在 MP insert 上真能写入 extra_info 列")
+    void jsonTextTypeHandlerWorksOnGeneratedInsert() {
         long uid = 700001L;
         UserEntity user = new UserEntity();
         user.setUid(uid);
-        user.setUsername("jsonb-insert");
+        user.setUsername("jsontext-insert");
         user.setPassword("x");
-        user.setEmail("jsonb-insert@example.com");
+        user.setEmail("jsontext-insert@example.com");
         user.setStatus(0L);
         Map<String, String> extra = new HashMap<>();
         extra.put("nickname", "阿伟");
@@ -185,23 +254,23 @@ class UserRpcContainerWiringTest {
     }
 
     // ==================================================================
-    // §3.3 缺口 3：手写 @Select 上的 @Results 真的把 jsonb 读成 Map
+    // §3.3 缺口 3：手写 @Select 上的 @Results 真的把 extra_info 读成 Map
     // ==================================================================
 
     /**
      * {@code UserMapper.selectByUidRaw / selectByUsernameRaw} 是手写 {@code @Select}，
-     * <b>不走</b> MP 生成的 ResultMap，因此必须靠注解上的 {@code @Results} 才拿得到 jsonb。
+     * <b>不走</b> MP 生成的 ResultMap，因此必须靠注解上的 {@code @Results} 才拿得到该列。
      * 少了它，字段静默变 null —— 又是一种"不报错"的失效。
      */
     @Test
-    @DisplayName("§3.3：手写 @Select 上的 @Results 真把 jsonb 读成 Map（不是 null）")
-    void resultsAnnotationMapsJsonbToMap() {
+    @DisplayName("§3.3：手写 @Select 上的 @Results 真把 extra_info 读成 Map（不是 null）")
+    void resultsAnnotationMapsExtraInfoToMap() {
         long uid = 700002L;
         UserEntity user = new UserEntity();
         user.setUid(uid);
-        user.setUsername("jsonb-select");
+        user.setUsername("jsontext-select");
         user.setPassword("x");
-        user.setEmail("jsonb-select@example.com");
+        user.setEmail("jsontext-select@example.com");
         user.setStatus(0L);
         Map<String, String> extra = new HashMap<>();
         extra.put("bio", "hello");
@@ -214,27 +283,34 @@ class UserRpcContainerWiringTest {
                 "@Results 缺失时 extraInfo 会静默变 null —— 这条断言就是防它");
         assertEquals("hello", byUid.getExtraInfo().get("bio"));
 
-        UserEntity byName = userMapper.findOneByUserName("jsonb-select");
+        UserEntity byName = userMapper.findOneByUserName("jsontext-select");
         assertNotNull(byName, "按 username 应能查到");
         assertEquals("hello", byName.getExtraInfo().get("bio"));
     }
 
     // ==================================================================
-    // §3.3 缺口 4：updateUserById 的显式 CAST 在真 PG 上成立
+    // §3.3 缺口 4：updateUserById 的 SQL 片段在真 PG 上成立且不残留 CAST
     // ==================================================================
 
     /**
-     * {@code updateUserById} 用的是 {@code wrapper.setSql("extra_info = CAST({0} AS jsonb)", json)}
+     * {@code updateUserById} 用的是 {@code wrapper.setSql("extra_info = {0}", json)}
      * 而不是 {@code wrapper.set(...)} —— 因为后者会把参数塞进
-     * {@code ew.paramNameValuePairs}、丢掉字段类型信息，PG 会拒收 varchar → jsonb。
+     * {@code ew.paramNameValuePairs}、丢掉字段类型信息，序列化结果不受控。
      *
-     * <p>这条断言同时覆盖了 {@code userMapper.java:110-130} 那段注释里描述的失败形态。
+     * <p>⚠️ <b>2026-10-23（DRIFT-USERRPC-V-003）本条的理由整个换掉了</b>：
+     * 原实现是 {@code setSql("extra_info = CAST({0} AS jsonb)", json)}，理由是
+     * 「PG 拒收 varchar → jsonb」。列改回 text 后那个理由消失，
+     * <b>但 CAST 不能留着</b> —— 它在 text 列上<b>能跑通</b>，只是会顺手规范化一次，
+     * 把刚落库的字节改写掉。⇒ 这类「能跑但语义错」的残留，靠「不报错」永远发现不了，
+     * 必须由 {@link #extraInfoBytesAreStoredVerbatim} 的逐字节断言来拦。
+     *
+     * <p>本条负责覆盖面（{@code setSql} 片段这条路），那条负责语义（字节没被动过）。
      */
     @Test
-    @DisplayName("§3.3：updateUserById 的 CAST({0} AS jsonb) 在真 PG 上成立")
-    void updateUserByIdCastsToJsonbOnRealPg() {
+    @DisplayName("§3.3：updateUserById 的 extra_info 片段在真 PG 上成立")
+    void updateUserByIdWritesExtraInfoOnRealPg() {
         long uid = 700003L;
-        seedUser(uid, "jsonb-update", "jsonb-update@example.com");
+        seedUser(uid, "jsontext-update", "jsontext-update@example.com");
 
         UserEntity patch = new UserEntity();
         Map<String, String> extra = new HashMap<>();
@@ -247,7 +323,7 @@ class UserRpcContainerWiringTest {
         String raw = jdbcTemplate.queryForObject(
                 "SELECT extra_info::text FROM users_user WHERE uid = ?", String.class, uid);
         assertTrue(raw != null && raw.contains("\"theme\""),
-                "CAST 后的 extra_info 应是 JSON 对象文本，实际 = " + raw);
+                "extra_info 应是 JSON 对象文本，实际 = " + raw);
 
         // @Results 读回路径也要跟着对
         assertEquals("dark", userMapper.findOneByUid(uid).getExtraInfo().get("theme"));
@@ -282,7 +358,7 @@ class UserRpcContainerWiringTest {
     @DisplayName("DRIFT-USERRPC-V-010：全零值 patch 仍发 UPDATE（只推进 update_time，不碰业务列）")
     void zeroValuePatchStillAdvancesUpdateTimeOnly() throws Exception {
         long uid = 700004L;
-        seedUser(uid, "jsonb-nopatch", "jsonb-nopatch@example.com");
+        seedUser(uid, "jsontext-nopatch", "jsontext-nopatch@example.com");
         Object before = jdbcTemplate.queryForObject(
                 "SELECT update_time FROM users_user WHERE uid = ?", Object.class, uid);
         String emailBefore = jdbcTemplate.queryForObject(

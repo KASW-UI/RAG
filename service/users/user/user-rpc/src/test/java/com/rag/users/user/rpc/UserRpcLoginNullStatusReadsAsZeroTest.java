@@ -124,7 +124,7 @@ class UserRpcLoginNullStatusReadsAsZeroTest {
         jdbcTemplate.update("""
                 INSERT INTO users_user (uid, username, password, email, status, score,
                                        extra_info, create_time, update_time)
-                VALUES (?, ?, ?, ?, NULL, 0, '{}'::jsonb,
+                VALUES (?, ?, ?, ?, NULL, 0, '{}',
                         TIMESTAMP '2020-01-01 00:00:00', TIMESTAMP '2020-01-01 00:00:00')
                 """, UID, USERNAME,
                 com.rag.users.common.cryptx.PasswordUtil.encrypt(RAW_PASSWORD),

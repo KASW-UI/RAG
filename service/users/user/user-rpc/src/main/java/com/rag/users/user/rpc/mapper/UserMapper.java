@@ -11,8 +11,6 @@ import org.apache.ibatis.annotations.Result;
 import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 
-import java.util.Optional;
-
 /**
  * users_user 表的 MyBatis-Plus Mapper。
  *
@@ -30,24 +28,29 @@ import java.util.Optional;
 public interface UserMapper extends BaseMapper<UserEntity> {
 
     /**
-     * 注意 extra_info（jsonb）的 TypeHandler：
-     * 手写 {@code @Select} 必须显式带 {@code @Results} 才能把 jsonb 列正确读成 Map：
+     * 注意 extra_info（text 列）的 TypeHandler：
+     * 手写 {@code @Select} 必须显式带 {@code @Results} 才能把该列正确读成 Map：
      * MyBatis 不认识 MyBatis-Plus 的 {@code @TableField}，实体字段上的 TypeHandler
      * 只对 MP 自己生成的 SQL 生效。不声明的话 extraInfo 会静默变成 null（不报错）。
      *
-     * <p>TypeHandler 用 JsonbTypeHandler 而非 MP 自带的 JacksonTypeHandler：
-     * 后者 setString 会把 jsonb 列绑成 varchar，Postgres 直接拒收。
+     * <p>TypeHandler 用 {@link JsonTextTypeHandler}（2026-10-23 由 JsonbTypeHandler 改名）。
+     * 改名原因：extra_info 列已由 jsonb 改回 text（DRIFT-USERRPC-V-003，对齐 Go），
+     * 原类名及其「MP 的 JacksonTypeHandler 会被 jsonb 拒收」的理由一并失效。
      */
     @Select("SELECT * FROM users_user WHERE username = #{username} LIMIT 1")
     @Results({
             @Result(property = "extraInfo", column = "extra_info",
-                    javaType = java.util.Map.class, typeHandler = JsonbTypeHandler.class)
+                    javaType = java.util.Map.class, typeHandler = JsonTextTypeHandler.class)
     })
     UserEntity selectByUsernameRaw(@Param("username") String username);
 
     /**
      * 对应 Go 端 UserModel.FindOneByUserName。
-     * 用 Optional 包装显式表达"找不到"语义；调用方应 .orElseThrow(() -> new NotFoundException(...))
+     *
+     * <p><b>2026-10-23 更正</b>：本方法原 javadoc 写「用 {@code Optional} 包装显式表达"找不到"
+     * 语义；调用方应 {@code .orElseThrow(...)}」—— <b>实现从来不是这样</b>：返回类型是
+     * {@code UserEntity}，找不到时在方法内直接抛 {@link NotFoundException}。
+     * 与 Go 的 {@code (user, err)} 返回二元组逐条同构：<b>「找不到」是 error，不是值</b>。
      */
     default UserEntity findOneByUserName(String username) {
         UserEntity u = selectByUsernameRaw(username);
@@ -58,7 +61,7 @@ public interface UserMapper extends BaseMapper<UserEntity> {
     @Select("SELECT * FROM users_user WHERE uid = #{uid} LIMIT 1")
     @Results({
             @Result(property = "extraInfo", column = "extra_info",
-                    javaType = java.util.Map.class, typeHandler = JsonbTypeHandler.class)
+                    javaType = java.util.Map.class, typeHandler = JsonTextTypeHandler.class)
     })
     UserEntity selectByUidRaw(@Param("uid") Long uid);
 
@@ -144,14 +147,18 @@ public interface UserMapper extends BaseMapper<UserEntity> {
         if (newUser.getExtraInfo() != null) {
             // ⚠️ 不能用 wrapper.set(UserEntity::getExtraInfo, map)：
             //    LambdaUpdateWrapper.set 把参数以 Object 形式塞进 ew.paramNameValuePairs，
-            //    不走实体字段上的 @TableField(typeHandler = JsonbTypeHandler.class)，
-            //    MyBatis 只能按 javaType=Object 猜 handler → 绑成 varchar / hstore，
-            //    Postgres 对 jsonb 列直接拒收（"column extra_info is of type jsonb but
-            //    expression is of type character varying"），UpdateUser 必现失败。
+            //    不走实体字段上的 @TableField(typeHandler = JsonTextTypeHandler.class)，
+            //    MyBatis 只能按 javaType=Object 猜 handler ⇒ 序列化成什么全不保证。
             //    正确做法与 admin-rpc 端 AdminDomainService 第 268/705 行同款：
-            //    直接写 SQL 片段 + 显式 CAST，参数按 String 绑定再转 jsonb。
+            //    直接写 SQL 片段，参数按 String 绑定。
             //    （实体上的 typeHandler 只对 MP 自己生成的 insert/updateById 生效。）
-            wrapper.setSql("extra_info = CAST({0} AS jsonb)", toJson(newUser.getExtraInfo()));
+            //
+            // ⚠️ 2026-10-23（DRIFT-USERRPC-V-003）：原来是
+            //    `extra_info = CAST({0} AS jsonb)`，CAST 是**为 jsonb 列被迫加的** ——
+            //    参数绑成 varchar 时 PG 拒收。列改回 text 后 CAST 不仅多余，
+            //    还会**重新引入 jsonb 的规范化**（把 Go 原样存的字节改写成 PG 的重排版），
+            //    等于把刚修掉的漂移又请回来 ⇒ 必须一起去掉。
+            wrapper.setSql("extra_info = {0}", toJson(newUser.getExtraInfo()));
         }
         // 🔴 DRIFT-USERRPC-V-010：update_time **无条件**进 SET（对齐 GORM autoUpdateTime 的
         //   callbacks/update.go:238-252）。**不要**在这里写 `if (!any) return 0;` ——
@@ -162,7 +169,7 @@ public interface UserMapper extends BaseMapper<UserEntity> {
     }
 
     /**
-     * Map → JSON 文本，供 {@code wrapper.setSql("extra_info = CAST({0} AS jsonb)", ...)} 使用。
+     * Map → JSON 文本，供 {@code wrapper.setSql("extra_info = {0}", ...)} 使用。
      *
      * <p>刻意不在这里吞异常：序列化失败属于编程/数据错误，向上抛由 domain 层映射成
      * {@code Status.INTERNAL "JSON序列化失败"}，与 admin-rpc 端 {@code toJson} 行为一致。
@@ -175,15 +182,11 @@ public interface UserMapper extends BaseMapper<UserEntity> {
         }
     }
 
-    /**
-     * 找出 user 的当前头像（is_current=true 且 uid 匹配）。
-     * 对应原 DataModel.createAvatarHistory W2 步骤（UPDATE 旧 current → false）。
-     */
-    @Select("SELECT * FROM users_user_avatar_history WHERE uid = #{uid} AND is_current = true LIMIT 1")
-    com.rag.users.user.rpc.domain.UserAvatarHistoryEntity selectCurrentByUid(
-            @Param("uid") Long uid);
-
-    default Optional<com.rag.users.user.rpc.domain.UserAvatarHistoryEntity> findCurrentAvatar(Long uid) {
-        return Optional.ofNullable(selectCurrentByUid(uid));
-    }
+    // ── 2026-10-23 删除（DRIFT-USERRPC-V-008）──
+    // 原 selectCurrentByUid(@Select) 与 findCurrentAvatar(default 包装) 全仓零调用点，
+    // 且 Go 侧无对应物：Go 的 W2 只是 UPDATE ... WHERE uid=? AND is_current=true 批量置 false，
+    // 见 service/user/user/rpc/internal/model/user.go:80-84，**不读回当前头像行**。
+    // ⇒ 留着的真实风险不是「多余」，而是它是一份**看起来该用**的查询：
+    // 下一个 agent 实现「查当前头像」时会直接调它，而那条路径 Go 根本没有。
+    // 删除遵循 §3.4.1 D-2 先例（零消费者的代码不能算已对齐）。
 }

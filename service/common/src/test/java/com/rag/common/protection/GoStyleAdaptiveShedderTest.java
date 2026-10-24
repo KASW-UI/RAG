@@ -172,4 +172,48 @@ class GoStyleAdaptiveShedderTest {
         assertEquals(1000.0D, s.minRt(), 1e-9,
                 "Fail 不得写入 RT 窗口 —— 否则降载期的 QPS 会被被丢的请求抬高，越降越不降");
     }
+
+    // ==================== RT 统计口径（Go adaptiveshedder.go:284-289）====================
+
+    @Test
+    @DisplayName("RT 必须是「浮点毫秒 + 向上取整」：1.2ms 记 2，不是整型截断的 1")
+    void rtIsRecordedWithCeilOfFloatMilliseconds() {
+        GoStyleAdaptiveShedder s = shedder(900);
+        s.setCpuPermilleReader(() -> 0);
+
+        s.pass(1.2D);
+
+        assertEquals(2L, s.recordedRtSum(),
+                "Go: rtCounter.Add(int64(math.Ceil(rt)))，rt 是 float64 毫秒 ⇒ ceil(1.2)=2。"
+                        + "若记成 1，说明这里用了整型毫秒（截断）⇒ 系统性少记约 1ms "
+                        + "⇒ minRt 偏小 ⇒ 在途上限偏低 ⇒ 比 Go 更早降载。");
+        assertEquals(1L, s.recordedRtCount(), "Go 的 Bucket.Add 无论 v 多大都 Count++");
+    }
+
+    @Test
+    @DisplayName("RT=0 时记 0（Go 的 Add(0)），不是「至少记 1」")
+    void zeroRtIsRecordedAsZeroNotOne() {
+        GoStyleAdaptiveShedder s = shedder(900);
+        s.setCpuPermilleReader(() -> 0);
+
+        s.pass(0.0D);
+
+        assertEquals(0L, s.recordedRtSum(),
+                "Go: math.Ceil(0.0)=0 ⇒ rtCounter 的 Sum 不加（Count 仍 +1）。"
+                        + "若记成 1，说明加了「至少记 1」的下限 ⇒ minRt 被抬高 ⇒ "
+                        + "在途上限被抬高 ⇒ 比 Go 更晚降载。");
+        assertEquals(1L, s.recordedRtCount(), "Count 照样 +1（Go: Bucket.Add 先 Sum+=v 再 Count++）");
+    }
+
+    @Test
+    @DisplayName("RT 恰为整毫秒时记原值（Go: ceil(2.0)=2）")
+    void exactIntegerRtIsRecordedVerbatim() {
+        GoStyleAdaptiveShedder s = shedder(900);
+        s.setCpuPermilleReader(() -> 0);
+
+        s.pass(2.0D);
+
+        assertEquals(2L, s.recordedRtSum(), "整毫秒不得被偏移（Go: ceil(2.0)=2）");
+        assertEquals(1L, s.recordedRtCount());
+    }
 }

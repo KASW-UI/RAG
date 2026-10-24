@@ -3,7 +3,6 @@ package com.rag.users.user.api.controller;
 import com.rag.users.common.http.GoStyleRequest;
 import com.rag.users.user.api.dto.DeleteUserReq;
 import com.rag.users.user.api.dto.DeleteUserResp;
-import com.rag.users.user.api.dto.GetAvatarHistoryReq;
 import com.rag.users.user.api.dto.GetAvatarHistoryResp;
 import com.rag.users.user.api.dto.GetUserReq;
 import com.rag.users.user.api.dto.GetUserResp;
@@ -197,9 +196,34 @@ public class UserController {
         return avatarUploadService.uploadAvatar(GoStyleRequest.normalize(req, UploadAvatarReq::new), httpRequest);
     }
 
+    /**
+     * <p><b>🔴 DRIFT-USERAPI-005 已修（2026-10-23）</b>：本端点<b>刻意不绑定 request body</b>。
+     *
+     * <p><b>Go 出处（全文 26 行，逐行核对）</b>：
+     * {@code user/api/internal/handler/user/getavatarhistoryhandler.go:16-25}
+     * <pre>
+     *   func GetavatarhistoryHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+     *       return func(w http.ResponseWriter, r *http.Request) {
+     *           l := user.NewGetavatarhistorylogic(r.Context(), svcCtx)
+     *           resp, code := l.Getavatarhistory()          ← 无 var req、无 httpx.Parse
+     *           httpx.OkJson(w, &amp;response.Response{...})
+     *       }
+     *   }
+     * </pre>
+     * ⇒ 请求体<b>从头到尾没被读过一次</b>：畸形 JSON、非 JSON Content-Type、超大 body
+     * 一律不影响该端点，Go 恒返 200。
+     *
+     * <p><b>为什么它不能靠「其余 8 个端点都对」推出来</b>：
+     * 9 个 handler 里<b>只有它不 Parse</b>，其余 8 个都 Parse。
+     * 写「9 个端点统一加 {@code @RequestBody}」是最自然的写法，
+     * 而它恰好把唯一的例外抹掉了。
+     *
+     * <p><b>参数从哪来</b>（与 Go 的 {@code getavatarhistorylogic.go:32,40} 逐条同构）：
+     * uid 取自 JWT claim（{@code currentUserID} / {@code IdentityResolver.claimedUID}），
+     * limit <b>硬编码 30</b>，两者都与 body 无关 ⇒ 不需要任何入参 DTO。
+     */
     @PostMapping("/avatar/history")
-    // L4 idiomatization：Go 端 GetAvatarHistoryReq{} 空 struct。
-    public GetAvatarHistoryResp getAvatarHistory(@RequestBody(required = false) GetAvatarHistoryReq req, HttpServletRequest httpRequest) {
-        return avatarHistoryService.getAvatarHistory(req, httpRequest);
+    public GetAvatarHistoryResp getAvatarHistory(HttpServletRequest httpRequest) {
+        return avatarHistoryService.getAvatarHistory(httpRequest);
     }
 }

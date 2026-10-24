@@ -278,7 +278,7 @@ class UserRpcUsersUserTimestamptzParityTest {
         jdbcTemplate.update("""
                 INSERT INTO users_user (uid, username, password, email, status, score,
                                        extra_info, create_time, update_time)
-                VALUES (?, 'tz-user', 'h', 'tz@mail.test', 0, 0, '{}'::jsonb,
+                VALUES (?, 'tz-user', 'h', 'tz@mail.test', 0, 0, '{}',
                         TIMESTAMP '2020-01-01 08:00:00', TIMESTAMP '2020-01-01 08:00:00')
                 """, SEED_UID);
     }

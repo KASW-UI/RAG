@@ -12,7 +12,7 @@
 --   email       TEXT UNIQUE
 --   status      BIGINT NOT NULL DEFAULT 0
 --   score       INTEGER
---   extra_info  JSONB                              -- PostgreSQL JSONB 列
+--   extra_info  TEXT                               -- ⚠️ Go 侧是 text，见下方 DRIFT-USERRPC-V-003
 --   create_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 --   update_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 --
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS users_user (
     email       TEXT UNIQUE,
     status      BIGINT NOT NULL DEFAULT 0,
     score       INTEGER,
-    extra_info  JSONB,
+    extra_info  TEXT,
     create_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -50,6 +50,57 @@ CREATE INDEX IF NOT EXISTS idx_users_user_uid ON users_user (uid);
 ALTER TABLE users_user ALTER COLUMN username TYPE text;
 ALTER TABLE users_user ALTER COLUMN password TYPE text;
 ALTER TABLE users_user ALTER COLUMN email   TYPE text;
+
+-- ---------------------------------------------------------------------------
+-- 2026-10-23（DRIFT-USERRPC-V-003）：extra_info 从 JSONB 改成 TEXT
+--
+-- Go 出处（**活体实证**，不是推导）：
+--   用 `go run -overlay` 把探针虚拟挂进真源模块树，直接调真源自己的
+--   `model.InitDB`（内含 `db.AutoMigrate(&User{}, &UserAvatarHistory{})`，
+--   见 service/user/user/rpc/internal/model/db.go:33），
+--   并开 PG `log_statement=all` 抓建表语句原文，得到：
+--     CREATE TABLE "users" (..., "extra_info" text, ...)
+--   探针方法与踩坑 ⇒ docs/Pitfalls/users/_shared.md 的 PIT-USERS-SHARED-003。
+--
+--   推导链（对，但已不再作为唯一依据）：
+--     声明点 data_model.go:13
+--       `ExtraInfo map[string]string `gorm:"column:extra_info;serializer:json"``
+--     消费点 ①gorm.io/gorm@v1.31.1/schema/field.go:195-200
+--       serializer:json ⇒ `field.DataType = String`（注释原文「Set default data type to
+--       string for serializer」）—— 注意它**不看 Go 的 map 类型**
+--     消费点 ② 同文件 :330-340，`field.Size == 0` 时的默认值分支 switch 在
+--       `reflect.Indirect(fieldValue).Kind()` 上；map 是 `reflect.Map`，
+--       **不在 Int/Float 任何分支里** ⇒ Size 保持 0
+--     消费点 ③gorm.io/driver/postgres@v1.6.0/postgres.go:245-250
+--       `case schema.String: if field.Size > 0 {…} return "text"` ⇒ Size=0 ⇒ **text**
+--   ⇒ Go 从来没有 jsonb，jsonb 是 RAG 自己引入的表达层选择。
+--
+-- 为什么必须改（不是「类型洁癖」）：
+--   **jsonb 会改写存进去的字节**，text 不会：
+--     存 {"b":"2","a":"1"}
+--       text  → 库里原样 `{"b":"2","a":"1"}`
+--       jsonb → 库里变成 `{"a": "1", "b": "2"}`（去重键 + 按「键长+字节序」重排
+--               + 删多余空格 + 冒号后补空格）
+--   两边**读出来都是同一个 map** ⇒ 当前 wire 上观察不到（已由双侧活体对拍确认），
+--   但「库里存的东西和 Go 存的不一样」本身就是漂移；一旦有人对 extra_info 做
+--   按文本查询、或下游服务直连这张库读原始字节，差异立刻暴露。
+--
+-- ✅ 本条与 03_create_admin.sql 的 `admin_admin.extra_info` 同步修改
+--    （admin 域编号 DRIFT-ARPC-004①，commit c10f639/d7b2b45），
+--    两张表现在**列类型一致**，且都与 Go 一致。
+--
+-- ⚠️ **USING 子句**：jsonb→text 在 PG 里是 **assignment cast**（非 implicit），
+--    `ALTER COLUMN … TYPE text` 不写 USING 会报错（admin 侧同样写了 USING，保持同款写法）。
+--
+-- ⚠️⚠️ **但这一条与上面的 timestamptz 改造不同，它是幂等的 —— 别照抄那个的担心**：
+--   SchemaInitializer 每次启动原样重放本文件（无版本账本），所以自愈语句必须恒等：
+--     首迁  jsonb `{"b":"2"}` --::text--> `{"a": "1", "b": "2"}`（jsonb 的规范化输出）
+--     重放  text  `{"a": "1", "b": "2"}` --::text--> 恒等（text→text 是恒等转换）
+--   ⇒ 第二次起不再有任何变化，**不会像 timestamptz 那样每次启动把整列时刻平移一次**。
+--   （判定口径：转换后的值是**文本本身**，重新解释文本不会改变文本。
+--     timestamptz 那条之所以危险，是因为 `timestamptz AT TIME ZONE 'UTC'` 会
+--     把「时刻」重新解释成「墙钟」，两次转换的复合结果不收敛。）
+ALTER TABLE users_user ALTER COLUMN extra_info TYPE text USING extra_info::text;
 
 -- ---------------------------------------------------------------------------
 -- 2026-10-23（DRIFT-USERRPC-V-004）：时间列从无时区的 TIMESTAMP 改成 TIMESTAMPTZ

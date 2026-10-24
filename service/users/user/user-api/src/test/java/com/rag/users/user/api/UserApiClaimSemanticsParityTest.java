@@ -134,6 +134,99 @@ class UserApiClaimSemanticsParityTest {
     }
 
     // ==================================================================
+    // DRIFT-USERAPI-003：logout 的 gRPC 错误码映射（端到端，走真 advice）
+    // ==================================================================
+
+    /**
+     * <p><b>为什么必须是 MVC 层而不是 Service 层</b>：修前 {@code UserLogoutService} 只是
+     * {@code throw e}，真正的码是 {@code GlobalExceptionHandler.mapRPCStatusToCode} 给的。
+     * 只在 Service 层断言，护网只能证明「Service 没自己映射」，
+     * <b>区分不出最终是 1015 还是 500</b> —— 而这正是本条漂移的全部内容。
+     * ⇒ 必须打到 HTTP body 的 {@code $.code}。
+     *
+     * <p>Go 出处 {@code user/api/internal/logic/user/logoutlogic.go:48-53}：
+     * logout 的 switch <b>只有两格</b> —— Internal→5001、default→1015；
+     * <b>不存在</b> INVALID_ARGUMENT→500 这一格。
+     *
+     * <p>Go 侧 user-rpc 对空 token 抛 INVALID_ARGUMENT
+     * （{@code user/rpc/internal/logic/logoutlogic.go:33}）⇒ 该分支<b>可达</b>。
+     */
+    @Test
+    @DisplayName("Go: logout RPC 抛 InvalidArgument → HTTP 200 + 1015 服务繁忙（修前是 500 系统内部错误）")
+    void logout_rpcInvalidArgument_isServerBusyNotInternalError() throws Exception {
+        Mockito.when(stub.logout(Mockito.any())).thenThrow(new StatusRuntimeException(
+                Status.fromCode(Status.Code.INVALID_ARGUMENT).withDescription("Token不能为空")));
+
+        mockMvc.perform(post("/user/v1/logout")
+                        .header("Authorization", "Bearer " + tokenWithUid(1234567890L))
+                        .contentType("application/json")
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1015));
+    }
+
+    /** 对照组：Internal 仍必须是 5001，防止「全映成 1015」的过度修复。 */
+    @Test
+    @DisplayName("对照组：logout RPC 抛 Internal → 5001 系统内部错误（不得被一起映成 1015）")
+    void logout_rpcInternal_staysInternalError() throws Exception {
+        Mockito.when(stub.logout(Mockito.any())).thenThrow(new StatusRuntimeException(
+                Status.fromCode(Status.Code.INTERNAL).withDescription("注销失败,Redis写入异常")));
+
+        mockMvc.perform(post("/user/v1/logout")
+                        .header("Authorization", "Bearer " + tokenWithUid(1234567890L))
+                        .contentType("application/json")
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(5001));
+    }
+
+    // ==================================================================
+    // DRIFT-USERAPI-005：avatar/history 在 Go 侧根本不读 body
+    // ==================================================================
+
+    /**
+     * <p><b>Go 出处</b>：{@code user/api/internal/handler/user/getavatarhistoryhandler.go:16-25}
+     * 全文 26 行，<b>没有 {@code var req}、没有 {@code httpx.Parse}</b>
+     * ⇒ 请求体从头到尾没被读过 ⇒ 畸形 JSON 不影响该端点，Go 恒返 200。
+     *
+     * <p><b>修前 RAG 行为</b>：Controller 上挂 {@code @RequestBody(required = false)}，
+     * Spring 仍会跑 Jackson 反序列化 ⇒ {@code HttpMessageNotReadableException} ⇒ <b>400 text/plain</b>。
+     *
+     * <p><b>为什么不能用「其余 8 个端点都对」推这一个</b>：9 个 handler 里<b>只有它不 Parse</b>，
+     * 写「9 个端点统一加 {@code @RequestBody}」是最自然的写法，而它恰好抹掉了唯一的例外。
+     *
+     * <p>本用例同时锁住「body 真的被忽略」：rpc 仍被调用一次且 uid 来自 JWT。
+     */
+    @Test
+    @DisplayName("Go: avatar/history 不 Parse body ⇒ 畸形 JSON 仍 200，不得变 400")
+    void avatarHistory_malformedJsonBody_isStill200() throws Exception {
+        Mockito.when(stub.getAvatarHistory(Mockito.any())).thenReturn(
+                com.rag.users.user.proto.GetAvatarHistoryResp.getDefaultInstance());
+
+        mockMvc.perform(post("/user/v1/avatar/history")
+                        .header("Authorization", "Bearer " + tokenWithUid(1234567890L))
+                        .contentType("application/json")
+                        .content("{\"a\":}"))          // 故意畸形
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        // body 被忽略 ⇒ rpc 照常被调用一次，且 uid 取自 JWT 而不是 body
+        Mockito.verify(stub, Mockito.times(1)).getAvatarHistory(
+                Mockito.argThat(r -> r.getUid() == 1234567890L));
+    }
+
+    /** 对照组：畸形 body **不得**影响其它端点（它们在 Go 侧确实 Parse）。 */
+    @Test
+    @DisplayName("对照组：login 同样畸形 body 必须是 400（Go 侧 login 确实 Parse）")
+    void login_malformedJsonBody_is400_provingTheGuardIsNotBlanket() throws Exception {
+        mockMvc.perform(post("/user/v1/login")
+                        .header("Authorization", "Bearer " + tokenWithUid(1234567890L))
+                        .contentType("application/json")
+                        .content("{\"a\":}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ==================================================================
     // DRIFT-USERAPI-001：畸形 claim 必须是 200 + 1006，不是 401
     // ==================================================================
 

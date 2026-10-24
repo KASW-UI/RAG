@@ -119,12 +119,16 @@ public interface UserAvatarHistoryMapper extends BaseMapper<UserAvatarHistoryEnt
      * UPDATE user.extra_info["avatar"] = avatarURL（D-014：双写 user 表的 JSON 字段）。
      * 对应 createAvatarHistory W4 / selectAvatarHistory W5。
      *
-     * <p>⚠️ {@code CAST(... AS jsonb)} 不能省：参数是 Java String（JDBC 绑成 varchar），
-     * 而列类型是 jsonb，Postgres 会直接拒绝：
-     * {@code ERROR: column "extra_info" is of type jsonb but expression is of type character varying}。
-     * 这个错误发生在 4/5 步原子事务的最后一步，会让 uploadAvatar / selectAvatar 直接返 INTERNAL。
+     * <p>⚠️ 2026-10-23（DRIFT-USERRPC-V-003）：原实现是
+     * {@code SET extra_info = CAST(#{extraInfoJson} AS jsonb)}，CAST 的理由是
+     * 「列是 jsonb，参数绑成 varchar 会被 PG 拒收」。
+     * <b>列改回 text 后，这条 CAST 不只是多余 —— 它是主动制造漂移</b>：
+     * {@code jsonb → text} 走的是 assignment cast，会先经一次 jsonb 规范化
+     * （键重排 / 去重 / 删空格 / 冒号后补空格）再落库。
+     * ⇒ 语法上不报错、测试也可能照样绿，但**库里存的字节已经不是 Go 存的那份了**。
+     * <b>这类「能跑但语义错」的改动比编译不过更难发现，故在此留痕。</b>
      */
-    @Update("UPDATE users_user SET extra_info = CAST(#{extraInfoJson} AS jsonb), " +
+    @Update("UPDATE users_user SET extra_info = #{extraInfoJson}, " +
             "update_time = CURRENT_TIMESTAMP WHERE uid = #{uid}")
     int updateUserExtraInfo(@Param("uid") Long uid, @Param("extraInfoJson") String extraInfoJson);
 

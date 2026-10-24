@@ -29,8 +29,6 @@ import com.rag.users.user.rpc.domain.UserAvatarHistoryEntity;
 import com.rag.users.user.rpc.domain.UserEntity;
 import com.rag.users.user.rpc.exception.UserExceptions.AvatarHistoryNotFoundException;
 import com.rag.users.user.rpc.exception.UserExceptions.NotFoundException;
-import com.rag.users.user.rpc.exception.UserExceptions.PasswordMismatchException;
-import com.rag.users.user.rpc.exception.UserExceptions.UsernameExistsException;
 import com.rag.users.user.rpc.mapper.UserAvatarHistoryMapper;
 import com.rag.users.user.rpc.mapper.UserMapper;
 import com.rag.users.user.rpc.metrics.UserRpcMetrics;

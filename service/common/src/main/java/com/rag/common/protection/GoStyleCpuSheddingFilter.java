@@ -79,6 +79,26 @@ public class GoStyleCpuSheddingFilter implements Filter {
         return shedder.flying();
     }
 
+    /**
+     * <b>RT 的计算口径</b> —— Go {@code adaptiveshedder.go:285}：
+     * <pre>
+     * rt := float64(timex.Since(p.start)) / float64(time.Millisecond)
+     * </pre>
+     * ⇒ <b>float64 毫秒</b>，之后由 {@code math.Ceil} 向上取整。
+     *
+     * <p><b>⚠️ 必须是浮点除法</b>：若写成整型（{@code / 1_000_000L}）就是<b>截断</b>，
+     * RT 会系统性少记最多 1ms ⇒ {@code minRt()} 偏小 ⇒
+     * {@code maxFlight = maxPass * minRt * 0.01} 偏小 ⇒
+     * <b>在途上限系统性偏低 ⇒ RAG 比 Go 更早降载</b>。
+     *
+     * <p><b>为什么提成静态方法</b>：RT 的<b>真实</b>耗时不可控，
+     * 直接断言「filter 记进去的 RT」只能是 flaky 的；
+     * 把口径本身提成纯函数后，<b>截断 vs 浮点</b>这一位差别就可以被<b>确定性</b>断言。
+     */
+    static double elapsedRtMs(long startNanos, long endNanos) {
+        return (endNanos - startNanos) / 1_000_000.0D;
+    }
+
     @Override
     public void doFilter(ServletRequest req, ServletResponse resp, FilterChain chain)
             throws IOException, ServletException {
@@ -103,7 +123,7 @@ public class GoStyleCpuSheddingFilter implements Filter {
             if (capturing.capturedStatus() == HttpServletResponse.SC_SERVICE_UNAVAILABLE) {
                 shedder.fail();
             } else {
-                long rtMs = (System.nanoTime() - startNanos) / 1_000_000L;
+                double rtMs = elapsedRtMs(startNanos, System.nanoTime());
                 shedder.pass(rtMs);
             }
         }

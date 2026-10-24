@@ -110,7 +110,7 @@ public final class GoStyleCoercion {
      * 把两条对齐规则施加到给定的 <b>Jackson 3</b> mapper builder 上。
      *
      * <p>调用方约定：只在 <b>api 层</b>（user-api / admin-api）的 MVC mapper 上调用。
-     * gRPC 用 protobuf marshaller、MyBatis 与 {@code JsonbTypeHandler} 各持自己的
+     * gRPC 用 protobuf marshaller、MyBatis 与 {@code JsonTextTypeHandler} 各持自己的
      * Jackson 2 mapper 实例，都与 go-zero 的 http 解析层无关，不该被这两条规则波及。
      *
      * @param builder Spring MVC 使用的 {@link JsonMapper.Builder}
