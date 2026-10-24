@@ -1372,6 +1372,27 @@ Content-Length: 0
 Date: Fri, 23 Oct 2026 22:20:22 GMT
 ```
 
+**`405-方法不匹配`**（**2026-10-24 第十一轮补贴** —— 这档的原始头是 `Allow` 结论的**唯一证据**，必须留在仓内）
+
+```
+--- Go ---
+HTTP/1.1 405 Method Not Allowed
+Allow: POST
+Date: Fri, 23 Oct 2026 22:20:22 GMT
+Content-Length: 0
+
+--- RAG ---
+HTTP/1.1 405 
+Allow: POST
+Content-Length: 0
+Date: Fri, 23 Oct 2026 22:20:22 GMT
+```
+
+> ✅ **逐字对照结论**：两侧**都有 `Allow: POST`**，body 都是**空**（`Content-Length: 0`）⇒
+> **该档唯一的差异是状态行缺 reason phrase**（= `DRIFT-MSGAPI-011`）。
+> ⇒ **首轮台账写的「RAG 无 `Allow` 头」是错的** ⇒ 该待办**不存在**。
+> ⇒ ⚠️ **不要**再去「补一个 `Allow` 头」—— 它本来就有。
+
 
 ### 2.2 ✅ 完整 6 档响应头对照表（**2026-10-24 第十轮复核**：把原始 dump 产物逐档读完）
 
