@@ -46,6 +46,41 @@
 ⚠️ **`TaskProgressUpsertParityTest` 的 15 条在无 Docker 环境下是 `skipped` 而非 `failed`**
 ⇒ 「全绿」可能意味着「一条没跑」⇒ 复核测试数字时**必须看 `skipped`**，不能只看 `failures=0`。
 
+### 〇·二、本组件的**生产类**清单（2026-10-24 复核补登）
+
+> ⚠️ 此前台账**只登记了测试类**，**生产类**一个都没点名 ⇒ 复核时判定为覆盖缺口。
+> 本节把 task-rpc 的**全部生产类**登记在此。
+> ⚠️ **登记它们的价值不在于「列全了」**，而在于：这些类里藏着**四个「缺了就起不来」**的
+> 启动阻塞项（见下），台账不点名 ⇒ 以后有人重构时**看不到这条风险**。
+
+| 生产类 | 作用 | ⚠️ 缺了会怎样 |
+|---|---|---|
+| `bootstrap/NacosRegistration` | 显式注册到 Nacos（对应 Go `task.go:37` 的隐式 etcd 注册） | ⚠️ Bean 名与 `NacosServiceRegistryAutoConfiguration` 撞名（`DRIFT-MSG-004`）⇒ `allow-bean-definition-overriding=false` ⇒ **上下文直接起不来** |
+| `config/Jackson2ObjectMapperConfiguration` | 提供 **Jackson 2** 的 `ObjectMapper` Bean | ⚠️ Boot 4 默认给的是 **Jackson 3**（`tools.jackson`），包名不同、API 不通用 ⇒ `NoSuchBeanDefinitionException: ObjectMapper` ⇒ **组件起不来**（纯 Mockito 单测照样全绿） |
+| `config/MybatisPlusOrderingBridgeAutoConfiguration` | MyBatis-Plus 自动配置**排序**桥接（Boot 4 专用 workaround） | ⚠️ MP 的 `@AutoConfigureAfter` 指向 **Boot 3 的包名** ⇒ Boot 4 下**静默悬空** ⇒ MP 先于 DataSource 求值 ⇒ `@ConditionalOnSingleCandidate(DataSource)` 找不到 bean ⇒ **整个自动配置不生效**（无 SqlSessionFactory） |
+| `config/TaskSinkProperties` | `@ConfigurationProperties("task.definitions")` 宿主 | ⚠️ 键名与属性名对不上 ⇒ **静默丢弃**（`DRIFT-TASK-RPC-002`） |
+| `config/TaskKafkaTopics` | `@ConfigurationProperties("task.kafka")` 宿主（12 个 topic / group 名） | ⚠️ 同上；且这些 topic 名是**跨域契约**（like-rpc 也在生产其中两个）⇒ 改一个字符就断链 |
+| `domain/TaskProgressEntity` | 任务进度实体（`task_progress`） | ⚠️ 只承载**读路径**（`GetTask` 回源）与 `TaskSchemaGate` 的存在性说明；写入一律走显式 SQL |
+| `domain/UserLikeCountEntity` | 点赞总数实体（`user_like_count`） | ⚠️ `userId` 在本表是 **String/TEXT**，在 `TaskProgressEntity` 是 **Long/BIGINT** ⇒ **不要「顺手统一」**（统一会让 Go 写的行 Java 查不出来） |
+| `mapper/UserLikeCountMapper` + 内部 `UserLikeCountRow` | `user_like_count` 的**唯一**写路径（`batchUpsertGreatest`） | ⚠️ 用**独立 POJO** 而非实体当参数容器（混用会造成「MyBatis-Plus 会接管这条 SQL」的错觉） |
+| `mapper/TaskProgressMapper` | `task_progress` 的三段 upsert（**全部写显式 SQL，不用 BaseMapper**） | ⚠️ 复合主键 + `ON CONFLICT` 的列集必须逐条对齐 Go 的 `clause.OnConflict` |
+| `mq/GoJson` | Go `encoding/json` 的**类型判定**还原 | ⚠️ Go 侧 `json.Unmarshal` 对类型不符是**报错并保持零值**（不是 Jackson 的宽松行为）⇒ 不用它 ⇒ 类型判定分叉 |
+| `mq/TaskTraceAttributes` | 两个 sink 的 OTEL span 属性 | ⚠️ attribute **名字与取值**属于可观察行为（Jaeger 里的 span 结构）；`messaging.destination` 传的是 Go 里写死的**逻辑名**（`user_like_sink` / `article_like_sink`），**不是 topic 名** |
+| `service/TaskProgressWriter` | 把 Go 两个 sink 里**逐字相同**的三段 upsert 收敛成唯一实现 | ⚠️ 合并的前提是「除 target 常量与结构体名外完全一致」（已逐条比对） |
+| `service/TaskRewardPublisher` | 任务完成奖励事件发布（`XADD` 到 `stream:task:reward`） | ⚠️ **只写不读**：Go 侧 `reward.Worker` 与 `StartInitReward` **整个文件都是注释**（`task.go:35` 的调用也被注释，因其依赖的 `PointsClient` 在 `service_context.go:18-19` 就被注释）⇒ 线上只有堆积的 XADD 记录、**无消费者** ⇒ Java 侧**刻意不补**（那是新增行为） |
+| `service/impl/TaskServiceGrpcImpl` | `TaskService` 的 gRPC 入口（对应 Go `internal/server/task_service_server.go`） | ⚠️ Go 的 server 层**没有任何逻辑**（薄转发）⇒ 本类同样保持薄转发 + **唯一的错误转换点**（两类异常两个去向） |
+
+**task-api 侧的两个**（在 `api.md` 覆盖，此处登记以便一屏看全）：
+
+| 生产类 | 作用 | ⚠️ 缺了会怎样 |
+|---|---|---|
+| `task-api/client/TaskRpcClient` | task-rpc 的 gRPC 客户端（对应 Go `api/internal/svc/servicecontext.go:22-32`） | ⚠️ Go 侧是**直连**（`Target: 127.0.0.1:9005`，无 Etcd 段）⇒ Java 侧默认也直连，切服务发现只改环境变量 |
+| `task-rpc/TaskRpcApplication` | rpc 进程的 `@SpringBootApplication`（含 `@ConfigurationPropertiesScan` 与 `@MapperScan`） | ⚠️ **扫描包写错 ⇒ 整个模块装配不起来**（且不报错） |
+
+⚠️ 另有两个**跨域共享**的类不在本模块：`TaskCountStore` / `TaskDomainService` 等已在
+§一 各条中点名；`TaskRawLogRouter` / `TaskUserCountConsumer` / `TaskArticleCountConsumer` /
+`TaskRawDiagnosticConsumer` / `UserLikeProgressSink` / `ArticleLikeProgressSink` 六个 listener 见 §四·八。
+
 ---
 
 ## 一、已修（6 条）
@@ -1204,6 +1239,26 @@ KEEP_UP=1 ./tools/difftest/run-task-offset-oldest.sh # 跑完保留服务与容�
    ⚠️ **本机 module cache 里当时只有 go-zero v1.10.3，而真源用的是 v1.10.2**
    ⇒ 用错版本核对会得出错误结论（本轮已按 `go.mod` 下载 v1.10.2 / kafka-go v0.4.47 / go-queue v1.2.2）。
 4. ⚠️ 第 5 层只覆盖 **task 域**；其它域要复核得各自扩展 `LEDGER_FILES` 与 `CLAIMS`。
+
+### 四·十·四·二、🆕 第二轮复核（2026-10-24 19:25）查出的**生产类覆盖缺口**
+
+> 第一轮复核只查了**测试类**（层 5）⇒ **生产类一个都没点名**。
+> 本轮补上第 6 层（生产类覆盖），查出 **12 个**从未被台账点名的生产类，
+> 已全部登记到 **§〇·二「本组件的生产类清单」**。
+
+⚠️ **登记它们的价值不在「列全了」**，而在于这些类里藏着 **4 个「缺了就起不来」**的启动阻塞项：
+
+| 启动阻塞项 | 缺了会怎样 |
+|---|---|
+| `NacosRegistration` | Bean 名与 `NacosServiceRegistryAutoConfiguration` 撞名 ⇒ `allow-bean-definition-overriding=false` ⇒ **上下文直接起不来** |
+| `Jackson2ObjectMapperConfiguration` | Boot 4 默认给的是 **Jackson 3**，与注入点的 Jackson 2 包名不同 ⇒ `NoSuchBeanDefinitionException: ObjectMapper` ⇒ **组件起不来**（纯 Mockito 单测照样全绿） |
+| `MybatisPlusOrderingBridgeAutoConfiguration` | MP 的 `@AutoConfigureAfter` 指向 **Boot 3 的包名** ⇒ Boot 4 下**静默悬空** ⇒ MP 先于 DataSource 求值 ⇒ `@ConditionalOnSingleCandidate(DataSource)` 找不到 bean ⇒ **整个自动配置不生效** |
+| `TaskKafkaTopics` | `@ConfigurationProperties("task.kafka")` 的宿主 ⇒ 键名对不上就**静默丢弃**；且其中两个 topic 名是**跨域契约**（like-rpc 也在生产）⇒ 改一个字符就断链 |
+
+⇒ **台账不点名 = 以后重构时看不到这条风险** ⇒ 这是「最全」的实质含义。
+
+⚠️ 第 6 层的判定要**认两种登记形态**：纯类名（`TaskKafkaTopics`）与带路径的形式
+（`config/TaskKafkaTopics`）⇒ 否则自己写的表会被判成「未点名」（本轮踩到）。
 
 ### 四·十·五、复核时踩到的 3 个坑（**都在脚本自己身上**）
 

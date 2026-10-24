@@ -483,6 +483,39 @@ def layer0_selfcheck(root):
     return bad
 
 
+def layer6_unmentioned_production(root, texts):
+    """台账是否点名了本域**生产类**（不只是测试类）。
+
+    ⚠️ 上一轮只查了测试类 ⇒ **生产类一个都没点名**（`TaskKafkaTopics` 这种
+    `@ConfigurationProperties` 的宿主都在其中）⇒ 而生产类里藏着四个
+    「缺了就起不来」的启动阻塞项 ⇒ 台账不点名 = 以后重构时看不到这条风险。
+    """
+    print('=' * 78)
+    print('第 6 层 · 台账从未点名的**生产类**（覆盖缺口）')
+    print('=' * 78)
+    mentioned = set()
+    for t in texts.values():
+        # ⚠️ 两种登记形态都要认：① 纯类名 `TaskKafkaTopics`
+        #    ② 带路径的形式 `bootstrap/NacosRegistration`（路径末段即类名）
+        for m in re.findall(r'`([A-Za-z0-9_./-]+)`', t):
+            mentioned.add(m.rsplit('/', 1)[-1].rsplit('.', 1)[-1])
+    files = [f for f in git(root, 'ls-files', 'service/task').splitlines()
+             if f.endswith('.java') and '/src/main/java/' in f]
+    unmentioned = []
+    for f in files:
+        src = read(os.path.join(root, f))
+        m = re.search(r'^\s*(?:public\s+)?(?:final\s+)?class\s+([A-Z][A-Za-z0-9]*)', src, re.M)
+        if m and m.group(1) not in mentioned:
+            unmentioned.append((m.group(1), f))
+    print(f'  仓库内 task 域生产类 {len(files)} 个 ⇒ 台账未点名 {len(unmentioned)} 个')
+    for c, f in unmentioned:
+        print(f'    ⚠️  {c}')
+        print(f'         {f}')
+    if not unmentioned:
+        print('    ✅ 全部已登记')
+    return len(unmentioned)
+
+
 # ====================================================================
 
 def main():
@@ -511,6 +544,7 @@ def main():
     bad += layer3_numbers(root, texts)
     bad += layer4_golines(root, texts, args.go_root)
     unmentioned = layer5_unmentioned(root, texts)
+    unmentioned_prod = layer6_unmentioned_production(root, texts)
 
     print()
     print('=' * 78)
@@ -518,8 +552,9 @@ def main():
         print(f'❌ 复核结果：{bad} 处不一致（层 0~4）')
     else:
         print('✅ 复核结果：层 0~4 全部通过')
-    if unmentioned:
-        print(f'⚠️  另有 {unmentioned} 个测试类台账未点名（层 5，不算失败）')
+    if unmentioned or unmentioned_prod:
+        print(f'⚠️  另有 {unmentioned} 个**测试类** + {unmentioned_prod} 个**生产类**'
+              f'台账未点名（层 5·6，不算失败）')
     print('=' * 78)
     return 1 if bad else 0
 

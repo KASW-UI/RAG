@@ -15,7 +15,7 @@
 **task 域没有 `-common`** —— Go 侧 `service/task` 下只有 `api` 与 `rpc`，**不是遗漏**。
 ⇒ 错误全部是标准 gRPC code（`INVALID_ARGUMENT` / `UNKNOWN`），不需要 like/message 那种业务码 ↔ gRPC code 转换类。
 
-## 本轮改了什么（首轮 + 第二轮 + 盘点收口 + 第三轮 + 第四轮 + 第五轮）
+## 本轮改了什么（首轮 + 第二轮 + 盘点收口 + 第三轮 + 第四轮 + 第五轮 + 第六轮）
 
 > **权威 commit 计数**：`git rev-list --count 8422116..HEAD`
 > ⚠️ **本标题刻意不写死数字** —— 改台账的**那次提交本身**也会让计数 +1 ⇒
@@ -122,6 +122,14 @@
 | `（本轮）` | 🔴 **新增复核器 `tools/check-ledger-selfcheck.py`**（六层：自检 / 路径存在性 / 「已修」断言→仓库证据 / 数字断言 + **commit 覆盖** / Go 侧 `file:line` / 未点名测试类）⇒ **解决「台账过期时没有任何东西会报警」**（AGENTS.md §6 的「核对日期」纪律的机械化）<br>✅ **三种变异测试全部精确命中**：① 修复被回退 ⇒ 第 2 层红；② 台账测试数造假 ⇒ 第 3 层红；③ Go 侧行号越界 ⇒ 第 4 层红<br>🔴 **复核查出 4 处台账缺陷并全部修掉**：① 章节标题「24 个 commit」**过期**（实际 31）② 第三/四轮清单的 commit 栏是**占位符**「（本轮）」（第二轮起就已改用哈希 ⇒ 本轮反而回退）；且第四轮**写成 4 行却只对应 1 个 commit** ⇒ 会误导读者 ③ 开放项表上方引用「§三·第四轮」**章节号失准**（该节在 rpc.md §四·九）④ **4 个测试类在册但从未被台账点名** ⇒ 两个台账各加一节「〇·一、**守门测试清单**」逐个登记（含条数 + 锁住哪条契约 + 关键前提） |
 | `c73d9cf` | 台账：rpc.md 加 §四·十（复核方法 + 查出的 4 处缺陷 + 变异测试 + **效力边界** + 脚本自身的坑）；_README 加第五轮清单 + 复核器登记；Pitfalls 加 **1 条**（26） |
 | `（本轮）` | 台账：把 `b0350ea` / `127e71c` / `c73d9cf` 三个**漏登记**的 commit 补进清单（由复核器第 3 层的「commit 覆盖」不变式抓出）<br>⚠️ 并把章节标题的**写死 commit 数**改成「指向 `git rev-list --count`」+ 加一句说明（写死的数字**必然滞后一拍**：改台账的那次提交本身就会 +1）⇒ 复核器第 3 层改查**更强的不变式**：**每个 commit 都必须在台账清单里出现过** |
+### 第六轮（2026-10-24 19:25 · 二次复核：查「最新 + 最全」）
+
+| commit | 内容 |
+|---|---|
+| `（本轮）` | 🔴 **第二轮复核**：距上轮 13 小时后重跑 ⇒ 复核器 `EXIT=0`、数字断言全对（104/90 与 surefire 实测一致）、**9 项开放项逐条实测确认仍成立**（无 CI 引用 / 读写 key 仍不一致 / 三类死配置仍在 yaml / 没别的域碰过 otel / common 未重审） |
+| `（本轮）` | 🔴 **查出「生产类覆盖缺口」**：第一轮只查了**测试类** ⇒ **12 个生产类从未被台账点名**，其中 **4 个是「缺了就起不来」的启动阻塞项**（`NacosRegistration` Bean 名撞名 / `Jackson2ObjectMapperConfiguration` Boot 4 给的是 Jackson 3 / `MybatisPlusOrderingBridgeAutoConfiguration` 的 `@AutoConfigureAfter` 指向 Boot 3 包名 ⇒ 静默悬空 / `TaskKafkaTopics` 是 `@ConfigurationProperties` 宿主且含**跨域契约** topic 名）⇒ 已全部登记到 **rpc.md §〇·二「本组件的生产类清单」**；复核器加**第 6 层**（生产类覆盖）并配 ✅ 变异测试 |
+| `（本轮）` | ⚠️ **合并冲突预警**：`tools/check-ledger-selfcheck.py` 与 **users-user 域同名文件**（两域互不包含 ⇒ 合并必撞）⇒ 两版**互补**（本域版有 7 层 + 自检 + 生产类层；users 版有「打印行号附近原文」+ 7 条去噪规则）⇒ 建议**取长补短**合成一版；另列本域与 `message` / `users-admin` / `users-user` 在 **4 个共享文件**上的重叠 |
+| `（本轮）` | 台账：rpc.md 加 §〇·二（生产类清单）+ §四·十·四·二；_README 加第六轮清单 + 合并冲突预警 + 开放项表第 10 项；Pitfalls 加 **1 条**（30：覆盖缺口只查测试类不够） |
 | `c52cbea` | 复核器第 3 层改查「**commit 覆盖**」不变式（不再比对写死计数 ⇒ 不自指）+ 补登 3 个漏登记 commit + 判定**只认表格行**（纯文本搜哈希会把**正文引用**当成登记）⇒ 新增第 0 层「自检」（阳性对照）<br>⚠️ Pitfalls 加 **2 条**（27·28） |
 | `5e9fb53` | 补登 `c52cbea`（复核器「commit 覆盖」不变式与自检层）<br>⚠️ **这一步本身就在验证不变式的闭合性**：提交后新 commit 自动被识别为「本轮占位」⇒ `EXIT=0` **恒定**，不再自指 |
 | `c3038ba` | 补登 `5e9fb53`（第二次验证闭合性：连续两次补登后 `EXIT=0` 仍恒定 ⇒ 不变式稳定） |
@@ -140,7 +148,7 @@
 ⇒ 这恰好印证了 AGENTS.md §6：**台账的「已修 / 未修」断言必须能被机械复核，否则它只是文字**。
 
 
-## 🔓 本域**当前仍开放**的项（2026-10-24 盘点结论）
+## 🔓 本域**当前仍开放**的项（2026-10-24 19:25 二次复核确认仍成立）
 
 > **一句话**：**语义漂移 0 条**（⚠️ 注意：盘点之后**又验出并修掉了第 6 条** —— `auto-offset-reset` 连字符被 Kafka 忽略，
 > ⇒ 「goka 的 earliest 从未生效」；详见 §三·第三轮）。
@@ -159,6 +167,12 @@
 | 7 | ~~「配置键名对不上 ⇒ 静默失效」的**全域扫描固化**~~ ⇒ **2026-10-24 已做**：新增 `TaskConfigKeyBindingContractTest`（**5 条全绿 + ✅ 三种变异测试**）⇒ **扫描已进 CI** | ✅ **已关闭** | — |
 | 8 | 🆕 **yaml 三类「死配置」跨域统一修**（`spring.mybatis-plus.*` / `otel.*` / `spring.jpa.*`，见 [rpc.md §四·九](rpc.md#四九-🔴-配置键名扫描yaml-里的死配置是怎么被查出来的2026-10-24-实测)） | **跨域共性**（8 / 20 / 6 个模块同款）· **零行为影响**（三处逐一核过）· ⚠️ 但 `otel.*` **与 Go 有观测差异**（Go 真导出 span，Java 侧 no-op） | ❌ 不在本域单独修（改了会造成本域与其它域不一致）；`otel.*` 还需**全仓统一接线** |
 | 9 | 🆕 **`otel.*` 的跨域接线**（补 Boot 4 的 OTel 自动配置 + 全仓 20 个 yaml） | 属**共享构建基建** + 观测面 | ❌ 须与其它域协调 |
+| 10 | 🆕 **`tools/check-ledger-selfcheck.py` 与 users-user 域的同名文件合并**（两版**互补**：本域版有 7 层 + 自检 + 生产类覆盖，users 版有「打印行号附近原文」+ 7 条去噪规则） | **跨域**（同一路径、互不包含） | ❌ 需读 users-user 实现并改写 ⇒ 属跨域动作，**待用户决策** |
+
+> **2026-10-24 19:25 复核**：上表 1~9 项**逐条实测确认仍成立**（无 CI 引用 / 读写 key 仍不一致 /
+> 三类死配置仍在 yaml 里 / 没有别的域碰过 otel / `service/common` 未重审）。
+> ⚠️ 另见本文件末尾的「**合并冲突预警**」—— 本域与 `message` / `users-admin` / `users-user`
+> 三个域在 **4 个共享文件**上有重叠。
 
 ⚠️ 另有**两条不是本域的活**：`AGENTS.md` §0 / §3.5 与 `docs/DRIFT/_INDEX.md` 的 task 域行
 —— 按 `docs/Worktree.md` §3 留给**合并后统一更新**，本工作树不碰。
@@ -217,3 +231,39 @@ python3 tools/check-ledger-selfcheck.py --domain task --go-root /path/to/Sea-Rid
 ⚠️ 第三方库必须按**真源 `go.mod` 的精确版本**核对（⚠️ 本机 cache 里当时只有 go-zero v1.10.3，真源用的是 **v1.10.2**）。
 ⚠️ **其它域要复核**：改脚本里的 `LEDGER_FILES` 与 `CLAIMS` 两张表即可（`--domain` 参数已预留）。
 ⇒ 详见 [rpc.md §四·十](rpc.md#四十台账-vs-实际的复核2026-10-24-实测)。
+
+---
+
+## ⚠️ 合并冲突预警：`tools/check-ledger-selfcheck.py` 与 **users-user 域同名文件**
+
+> **2026-10-24 19:25 实测**：本分支在 07:03 新建 `tools/check-ledger-selfcheck.py`；
+> **users-user 域在 18:38 独立实现了同名文件**（其 commit `47cbfbf`）⇒
+> **两域互不包含**（`git merge-base --is-ancestor` 验证为否）⇒ **合并时必然撞车**。
+
+| 维度 | 本域版（563 行） | users-user 版（391 行） |
+|---|---|---|
+| 结构 | **7 层分层** + 第 0 层「自检（阳性对照）」 | 单函数流（A/B/C 三类检查） |
+| **打印行号附近原文**供人工判读 | ❌ | ✅ **独有** |
+| **去噪规则**（历史记述≠引用 / 临时脚本记 WARN / 台账自陈不存在的类记 OK） | ❌ | ✅ **7 条独有**（N1~N7） |
+| 多域参数化 | `--domain` | `--ledger` |
+| 覆盖缺口检查 | 测试类（层 5）**+ 生产类（层 6）** | 无 |
+| 第三方库按真源 `go.mod` 精确版本核对 | ✅ | ✅ |
+
+⇒ **两版互补，不是重复** ⇒ 建议**取长补短**合成一版放 `tools/` 根，
+而不是二选一（谁先合谁覆盖 ⇒ 另一域的独有能力会丢）。
+
+⚠️ **本工作树不合并**（那需要读 users-user 的实现并改写本域文件 ⇒ 属跨域动作）。
+⇒ 决策留给用户，见本节末尾的选项。
+
+### 其它域也改了共享工具（合并时会撞车，**本域不碰**）
+
+| 域 | 改动的共享文件 |
+|---|---|
+| `message` | `tools/difftest/check-ddl-static.py`⚠️（**与本域同文件**）、`tools/difftest/run.sh`⚠️（**与本域同文件**）、`tools/semantic-probe/*`、`tools/breaker-probe/*` |
+| `users-admin` | `tools/difftest/check-plaintext400-headers.sh`⚠️（**与本域同文件**）、`tools/difftest/run.sh`⚠️、`tools/difftest/diff.py`⚠️ |
+| `users-user` | `tools/check-ledger-selfcheck.py`⚠️（**与本域同文件，本节主题**）、`tools/difftest/exp-difftest-*.sh` |
+| `follow` | `tools/difftest/` 下新增的 grpc runtime classpath 探查脚本（**名字待定，与本域不撞**） |
+| `comment` / `hot` | 各自 `tools/difftest/<域>/` 子目录（**与本域不撞**） |
+
+⚠️ **本域与 message / users-admin 域在 3 个共享文件上有重叠**
+（`check-ddl-static.py` / `run.sh` / `check-plaintext400-headers.sh`）⇒ 合并需人工合。
