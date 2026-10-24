@@ -298,3 +298,52 @@ func makeKeyPrefix(key string) string {
    ⇒ **对拍必须同时抓两侧日志里的 `error_reason`**，不能只看响应体。
 2. ⚠️ **go-zero 的 etcd 键语义是「前缀」**：键必须是 `prefix/<后缀>`，
    且**前缀下只应有一个有效地址**，否则寻址结果不确定。
+
+---
+
+## PITFALL-FOLLOW-015 🔴 Micrometer 的 `serviceLevelObjectives` 是「**追加**」，不是「限定」
+
+**症状**：为了把 Prometheus 直方图的桶对齐到 Go 的 `prometheus.DefBuckets`（12 个边界），
+写下 `.publishPercentileHistogram().serviceLevelObjectives(GO_DEF_BUCKETS)` ——
+**结果不是 12 个桶，而是 80 个**。
+
+```
+Go  : le 边界 12 个（0.005 0.01 0.025 0.05 0.1 0.25 0.5 1 2.5 5 10 +Inf）
+RAG : le 边界 80 个（上面 11 个全在 + Micrometer 默认桶 68 个 + Inf）
+```
+
+**根因（`micrometer-core 1.16.7` `DistributionStatisticConfig.getHistogramBuckets(boolean)`）**
+
+```java
+NavigableSet<Double> buckets = new TreeSet<>();
+if (percentileHistogram != null && percentileHistogram && supportsAggregablePercentiles) {
+    buckets.addAll(PercentileHistogramBuckets.buckets(this));   // ← 默认桶
+    buckets.add(minimumExpectedValue);
+    buckets.add(maximumExpectedValue);
+}
+if (serviceLevelObjectives != null) {
+    for (double sloBoundary : serviceLevelObjectives) buckets.add(sloBoundary);  // ← SLO 桶
+}
+return buckets;
+```
+
+⇒ 两个来源 **addAll 进同一个 `TreeSet`** ⇒ **强制并集**，
+⇒ **没有任何开关**能让 SLO 独占（`percentileHistogram` 只有 true/false 两态：
+true ⇒ 并集；false ⇒ **`_bucket` 根本不产生**）。
+
+**教训**
+
+1. ⚠️ **API 名字会骗人**：`serviceLevelObjectives` 读起来像「把桶限定成这些」，
+   实际是「**再加这些桶**」。
+   ⇒ **凡是「要精确控制某个第三方库产出什么」的场合，必须去读它的源码，
+   不能凭 API 名字或文档标题推断**（本仓 §3.3「不能仅凭注解名称断定机制已启用」的同源问题）。
+2. ⚠️ **这类问题只有实测能兜住**：改完不看 `_bucket` 的实际行数与 `le` 边界，
+   就只能靠「代码看起来对」自我安慰。
+   本轮的实测口径：`grep -c '_bucket'`（Go 96 / 修前 RAG 0 / 修后 RAG 640）
+   + 抽出两侧的 `le` 集合做**逐值比对**（不能只看数量）。
+3. ⚠️ **修之前先确认「修到什么程度算够」**：
+   本例里即使绕开 Micrometer，`le="1.0"` vs Go 的 `le="1"`（client_java 的 `Double.toString`）
+   **依然修不掉** ⇒ 若目标是「抓取文本逐字节一致」，那么**这条路根本走不通**，
+   应该早点把「做不到」这件事说清楚，而不是埋头改桶。
+   ⇒ **手段与目标要对齐**：目标若是「`histogram_quantile()` 两侧可比」，
+   那数值口径就够了，**不需要**为它付出脱离 Micrometer 抽象的代价。

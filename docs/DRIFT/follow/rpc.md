@@ -17,7 +17,7 @@
 | DRIFT-FOLLOW-002 | 运行时 classpath 缺 `grpc-inprocess` ⇒ `NoClassDefFoundError` ⇒ 启动失败 | **启动阻塞（硬失败）** | ✅ 已修 |
 | DRIFT-FOLLOW-003 | `discovery://user-rpc` 两斜杠被 devh 拒绝 ⇒ 启动失败 | **启动阻塞（硬失败）** | ✅ 已修 |
 | DRIFT-FOLLOW-004 | `server-addr` 硬编码 `:8848`、忽略 `NACOS_PORT`，与 follow-api 语义冲突 ⇒ api/rpc 连到两台 Nacos | 运行时故障（业务码塌成 1015） | ✅ 已修 |
-| DRIFT-FOLLOW-006 | 5 个 `follow_rpc_*` 指标**无任何抓取出口**（Go 有 DevServer `/metrics`，RAG 的 follow-rpc 是纯 gRPC 进程） | **可观察（抓取侧）** | 🔴 **未修**（修法需用户拍板部署形态） |
+| DRIFT-FOLLOW-006 | 5 个 `follow_rpc_*` 指标**无任何抓取出口**（Go 有 DevServer `/metrics`，RAG 的 follow-rpc 是纯 gRPC 进程） | **可观察（抓取侧）** | 🔴 **未修**（用户 2026-10-24 定：**本轮不落地**，转「全仓 rpc 层统一方案」交主会话拍板） |
 
 > ⚠️ **三条都发生在「测试全绿」的状态下** —— 63 条测试 0 失败，
 > 而 `java -jar` 起不来。根因见 [`docs/Pitfalls/follow/rpc.md`](../../Pitfalls/follow/rpc.md)。
@@ -204,7 +204,7 @@ curl: (1) Received HTTP/0.9 when not allowed                 ← 那不是 HTTP
 `FollowRecommendationServiceTest` 断言了 3 个上报点）——
 **缺的是「出口」，不是「数据」**。
 
-**修法选项（**需用户拍板**：都牵动部署形态）**
+**修法选项（**2026-10-24 用户定：本轮不落地，转全仓 rpc 层统一方案交主会话拍板**）**
 
 | 方案 | 做法 | 代价 |
 |---|---|---|
@@ -212,8 +212,86 @@ curl: (1) Received HTTP/0.9 when not allowed                 ← 那不是 HTTP
 | B. Spring Boot 管理端口 | 加 `spring-boot-starter-web`，`management.server.port=16065` | 进程变成 servlet web 应用 ⇒ **部署形态变化**（还要决定主应用监听哪个端口） |
 | C. Pushgateway | 改成主动推送 | **不是 scrape 语义** ⇒ 与 Go 不等价 ⇒ 不推荐 |
 
-⇒ 本轮**未改**：A 需要新增一个常驻 HTTP 端口（部署面变化），B 需要改进程形态。
-两者都应先由用户确认。
+### ⚠️ 全仓调查结论（2026-10-24，DRIFT-006 的判定依据）
+
+**「哪个服务用了 B / C」这个问题，答案不是「有」，而是「**只有 api 层用了 B，rpc 层一个都没有**」。**
+
+| | `spring-boot-starter-web` | 进程形态 | `/actuator/prometheus` 实际出口 |
+|---|---|---|---|
+| **8 个 api 模块** | **8/8 有** | servlet 应用 | ✅ **全部走 B**（actuator 挂主端口）—— B 是 api 层的**既定形态** |
+| **8 个 rpc 模块** | **0/8 有**（只有 `spring-boot-web-server` 抽象，供 nacos-discovery 反射引用） | 纯 gRPC 进程 | ❌ **零出口**（actuator 的 web endpoint 没有载体） |
+
+- ⚠️ **全仓无 Pushgateway** ⇒ **C 不是既有形态**，无需考虑。
+- `hot-rpc` 写得最直白：`management.server.port: -1` + `management.endpoints.prometheus.enabled: false`，
+  注释自述「纯 gRPC 进程没有 web 容器 ⇒ `/actuator/prometheus` 没有暴露路径，
+  **将来若要 scrape，需引入 spring-boot-starter-web 或独立 sidecar**」
+  ⇒ 仓库里**两个选项都已被承认**，但都还没做。
+- ⚠️ **「有 starter-web 就能起容器」是错的**：`comment/favorite/like/message/task-rpc` 的 pom 里
+  只有 `spring-boot-web-server`（抽象），`message-rpc` 的 pom 注释甚至明写
+  「**message-rpc 不引 spring-boot-starter-web**」⇒ 起步**没有 servlet 容器**。
+
+### ⚠️ Go 侧也不是所有 rpc 都有 DevServer（这一条决定了「谁才算漂移」）
+
+| Go 侧 rpc | DevServer | 端口 | RAG 侧现状 | 判定 |
+|---|---|---|---|---|
+| `follow/rpc` | ✅ | **16065** | ❌ 零出口 | 🔴 **漂移（本条）** |
+| `favorite/rpc` | ✅ | 16062 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
+| `message/rpc` | ✅ | 16067 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
+| `like/rpc` | ✅ | 9098 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
+| `user/user/rpc` | ✅ | 9094 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
+| `user/admin/rpc` | ✅ | 9097 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
+| `article/rpc`、`comment/rpc`、`hot/rpc`、`task/rpc` | ❌ **无 DevServer 段** | — | ❌ 零出口 | ⚠️ **不是漂移**（Go 侧同样抓不到） |
+
+⇒ **「Go 有、RAG 无」一共 6 处**，follow 是其中之一；
+⇒ **另外 4 个 rpc（article/comment/hot/task）在 Go 侧也没有指标出口** ⇒ RAG 侧同样没有 **不构成漂移**
+（⚠️ 但 RAG 侧仍在 Micrometer 里注册了 meter —— 那是「有数据无出口」，与 follow 一样，见下）。
+
+### ⚠️ 为什么「A 才是与 Go 形态等价的」
+
+Go 的 DevServer **本身就是方案 A**（`go-zero@v1.10.2/internal/devserver/server.go:67-76`）：
+
+```go
+threading.GoSafe(func() {
+    addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
+    logx.Infof("Starting dev http server at %s", addr)
+    if err := http.ListenAndServe(addr, s.server); err != nil { logx.Error(err) }
+})
+```
+
+⇒ 就是一个 **`http.ListenAndServe` + `http.ServeMux` 的独立小 HTTP server**，
+只挂 `/`（路由清单）、`HealthPath`、`MetricsPath`、`/debug/pprof/*`（`server.go:35-59`），
+**没有 servlet 容器、没有业务路由、不参与主进程的服务注册**。
+
+⇒ 所以：
+- **A** = 与 Go 形态**等价**（独立小 HTTP server、端口 16065 逐字对齐）；
+- **B** = 往纯 gRPC 进程里塞一个 **Go 侧不存在的 Tomcat** ⇒ 形态反而**不等价**；
+- B 的真正价值是「与 api 层的既定形态一致」—— 但 api 层是 servlet 应用，
+  **它与 rpc 层不可比**（api 的主端口本来就要监听，rpc 的主端口是 gRPC）。
+
+### 结论与派单
+
+⇒ **本轮不落地**（用户 2026-10-24 定）：DRIFT-006 留在台账，
+转为「**全仓 rpc 层指标出口的统一方案**」交主会话拍板 ——
+因为这已经是**跨 10 个 rpc 模块的部署形态决策**，不该由 follow 域单方面落地。
+
+⇒ **跨域待办（交主会话派单）**：下面 5 个 rpc 模块的「Go 有 DevServer、RAG 零出口」同款缺口，
+修法与 follow 域一致（先定 A/B，再统一铺开）：
+
+| # | 组件 | Go 的 DevServer 端口 | 归属域 |
+|---|---|---|---|
+| 1 | `favorite-rpc` | 16062 | favorite |
+| 2 | `message-rpc` | 16067 | message |
+| 3 | `like-rpc` | 9098 | like |
+| 4 | `user-user-rpc` | 9094 | users |
+| 5 | `user-admin-rpc` | 9097 | users |
+
+⚠️ **注意端口冲突**：`like-rpc` / `message-rpc` / `favorite-rpc` / `user-*-rpc` 目前的
+`grpc.server.port` 有**多个都写着 8082**（`favorite-rpc` / `like-rpc` / `message-rpc` / `follow-rpc`）
+⇒ 统一方案必须**一并把 DevServer 端口纳入端口规划**，否则会撞。
+
+⚠️ 另外：`article-rpc` / `comment-rpc` / `hot-rpc` / `task-rpc` 在 Go 侧**没有** DevServer
+⇒ 若统一方案选择「所有 rpc 都给出口」，这 4 个属于**新增可观测面**（Go 侧没有），
+应单独拍板，不要和「补齐 Go 已有出口」混为一谈。
 
 **顺带修掉的一处**：`FollowRpcMetrics` 的直方图原来用 `publishPercentiles()`
 （**分位数**开关，Prometheus 文本格式**不支持 quantile** ⇒ 对抓取端是无效配置）
@@ -254,9 +332,14 @@ curl: (1) Received HTTP/0.9 when not allowed                 ← 那不是 HTTP
    ⇒ 进程关闭时抛 `NoClassDefFoundError`（不影响启动，但会污染关闭日志）
    ⇒ 属 `service/common` 职责，**未在本工作树改动**。
 3. ~~**指标数值**未做双侧对拍~~ ⇒ ✅ **已做**（2026-10-24，U1）：
-   Go 侧抓到 127 行 `follow_rpc_*`；RAG 侧**零出口** ⇒ 登记为 **DRIFT-FOLLOW-006**，
-   修法（仿 Go 的 DevServer 起独立 metrics HTTP server）**需用户拍板部署形态**。
-4. **新增全仓门禁**（2026-10-24，commit `d50750e`）：
+   Go 侧抓到 127 行 `follow_rpc_*`；RAG 侧**零出口** ⇒ 登记为 **DRIFT-FOLLOW-006**。
+4. **DRIFT-FOLLOW-006 的修法已转为「全仓 rpc 层统一方案」交主会话拍板**（用户 2026-10-24 定）。
+   ⇒ 本工作树**不落地代码**；调查结论（rpc 层 0/8 有出口、B 只在 api 层是既定形态、C 无先例、
+   Go 侧只有 6 个 rpc 有 DevServer、Go 的 DevServer 本身即方案 A）见该条目。
+5. **跨域派单（5 处同款缺口）**：`favorite-rpc`(16062) / `message-rpc`(16067) / `like-rpc`(9098) /
+   `user-user-rpc`(9094) / `user-admin-rpc`(9097) —— Go 有 DevServer、RAG 零出口。
+   ⇒ 连同端口规划一起交主会话（本域不得改域外文件）。
+6. **新增全仓门禁**（2026-10-24，commit `d50750e`）：
    `tools/difftest/check-grpc-runtime-classpath.py` ——
    守住「`grpc-inprocess` 不得是 test scope」与「`discovery:` 必须三斜杠」两类
    **编译期看不出、测试期测不到、但能让服务起不来**的缺陷；

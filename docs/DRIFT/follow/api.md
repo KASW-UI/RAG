@@ -375,7 +375,7 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 - 计数器与 reject：**名字 + 标签集 + 值逐条一致**（60 条 series 中 46 条非直方图 series 全部相等）。
 - 直方图：Go 的 **12 个 `le` 边界全部存在**（数值化对齐后逐条命中）。
 
-**⚠️ 残留（**框架限制**，不是可修的语义漂移）**
+**⚠️ 残留（**框架限制**，不是可修的语义漂移）——2026-10-24 已查到源码级根因**
 
 | 残留 | Go | RAG | 性质 |
 |---|---|---|---|
@@ -387,17 +387,43 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 > ⚠️ **桶边界数是可复现的确定值**：Go 的 11 个数值边界
 > （0.005 / 0.01 / 0.025 / 0.05 / 0.1 / 0.25 / 0.5 / 1 / 2.5 / 5 / 10）
 > **逐个都在** RAG 侧（`le="1"` 例外，它是 `le="1.0"`），
-> RAG 侧多出的 **68** 个是 Micrometer 默认桶（0.001 … 30，1.5 倍比）。
+> RAG 侧多出的 **68** 个是 Micrometer 默认桶（0.001 … 30）。
 > ⇒ **Go 的 12 个 `le` 边界 100% 覆盖**（数值口径），
 > 差异只在「**多出来的桶**」与「**同值的写法**」两处。
 
-⇒ **Micrometer / Prometheus Java client 无法表达「恰好 12 个 DefBuckets」**：
-`getHistogramBuckets()` 把 `percentileHistogram` 的默认桶与 SLO **取并集**，
-没有「只要 SLO」的开关。
-⇒ **彻底修法**（**需用户拍板**，属架构取舍）：这 2 个指标**绕过 Micrometer**，
-直接用 Prometheus Java client 的原生 `Histogram`（`HistogramConfig.classicBounds(DefBuckets)`）
-注册进同一个 `PrometheusRegistry` ⇒ 代价是它们脱离 Micrometer 抽象
-（与 `jvm_*` / `http_server_*` 不在同一套 registry 管理），且 `le` 渲染仍是 `1.0` 形态。
+#### 三条限制的源码级边界（分属两个库 ⇒ 可修性不同）
+
+| # | 限制 | 根因（源码） | 绕过 Micrometer 能修吗 |
+|---|---|---|---|
+| **A** | 桶边界被**强制并集**（80 ≠ 12） | `micrometer-core 1.16.7` `DistributionStatisticConfig.getHistogramBuckets(boolean)`：<br>`buckets.addAll(PercentileHistogramBuckets.buckets(this))`（默认桶）**与** `buckets.addAll(serviceLevelObjectives)`（SLO 桶）**进同一个 `TreeSet`** ⇒ 取并集，**无任何开关**能让 SLO 独占 | ✅ **能** |
+| **B** | `le` 渲染成 `1.0`（Go 是 `1`） | `prometheus-metrics-exposition-textformats 1.4.3` `TextFormatUtil.writeDouble`：`writer.write(Double.toString(d))` ⇒ `1.0`→`"1.0"`；Go 的 `client_golang` 用 `strconv.FormatFloat(v,'g',-1,64)` ⇒ `"1"` | ❌ **不能**（client_java 的文本渲染，换谁都绕不开） |
+| **C** | 多一个 `_max` series | `PrometheusMeterRegistry` 自己加的 family：`new MicrometerCollector.Family<>(conventionName + "_max", ...)` ⇒ **不是** client_java 的原生产物 | ✅ **能** |
+
+⚠️ **A 的二选一**（实测：修复前 `_bucket` 行数 0，修复后 640）：
+`percentileHistogram=true` ⇒ 80 个桶（并集）；`false` ⇒ **`_bucket` 完全不产生**
+⇒ Micrometer 里**只有这两个状态**，不存在「只要 SLO 的 12 个」。
+
+⚠️ **B 只影响 1 / 5 / 10 三个值**：其余 8 个（0.005 / 0.01 / 0.025 / 0.05 / 0.1 / 0.25 / 0.5 / 2.5）
+的 `Double.toString` 与 Go 的 `%g` 同形 ⇒ 实测「Go 有而 RAG 没有的 le」**恰好就是这三个**。
+
+⇒ **「彻底修法」能做到什么、做不到什么**：
+用 client_java 原生 `Histogram`（`io.prometheus.metrics.core.metrics.Histogram$Builder`
+的 `classicOnly()` + `classicUpperBounds(double...)`，**API 已 javap 确认存在**）
+注册进**同一个** `PrometheusRegistry` ⇒
+✅ 桶边界**恰好 12 个**（classic 模式无并集）、
+✅ **不再有 `_max`**；
+❌ **`le="1.0"` 依旧** ⇒ **抓取文本做不到逐字节一致**。
+
+⇒ **对抓取侧的实际影响**（这决定了「残留值不值得修」）：
+- `histogram_quantile(0.95, sum by (le) (rate(..._bucket[5m])))` ⇒ **数值口径可用**，两侧可聚合；
+- 任何**按 `le` 字符串精确匹配**的查询（`le="1"`）⇒ 两侧不等价（RAG 侧匹配到 0 条）
+⇒ ⇒ **建议把这类查询统一改成数值口径**，而不是为了它去改客户端库。
+
+⇒ **待用户拍板的点已收窄**（原表述「要不要绕过 Micrometer」过宽）：
+真正的问题是「**愿不愿意让这 2 个指标脱离 Micrometer 抽象**」——
+代价：拿不到 Micrometer 的 tag 规范化 / `MeterFilter` 链 / `registry.getMeters()` 统一管理，
+且 `le` 渲染问题**依然存在**（收益只有「桶数对齐 + 去掉 `_max`」）。
+⇒ **本轮未改**（用户 2026-10-24 未拍板）。
 
 ## 证据强度
 
@@ -453,11 +479,19 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
    生效时不可达 + 何时会重新变成偏离 + 守住它的回归网是哪两条测试」。
 2. **DRIFT-FOLLOW-008（MaxConns 每路由 vs 全局）需派单到 `service/common`** ——
    实现位于共享模块，本域不得改（并发写会撞）。修法见该条目。
-3. **DRIFT-FOLLOW-007 的框架限制残留需用户拍板** ——
-   「彻底修法」= 这 2 个指标绕过 Micrometer 直接注册原生 Prometheus histogram，
-   代价是脱离 Micrometer 抽象 ⇒ 属架构取舍，不宜由本域单方面决定。
-4. **DRIFT-FOLLOW-006（follow-rpc 指标无出口）需用户拍板部署形态** ——
-   见 `docs/DRIFT/follow/rpc.md`。
+3. **DRIFT-FOLLOW-007 的框架限制残留：拍板点已收窄，待用户定** ——
+   残留分三条（详见该条目）：**A 桶数并集**（Micrometer 层，可修）、
+   **B `le="1.0"` 渲染**（client_java 层，**绕过 Micrometer 也修不掉**）、
+   **C 多一个 `_max`**（Micrometer 层，可修）。
+   ⇒ 「彻底修法」= 这 2 个指标改用 client_java 原生 `Histogram`
+   （`classicOnly()` + `classicUpperBounds(...)`）⇒ **收益只有「桶数对齐 12 + 去掉 `_max`」**，
+   `le` 写法问题依旧，且代价是脱离 Micrometer 抽象
+   （tag 规范化 / `MeterFilter` 链 / `registry.getMeters()` 统一管理都拿不到）。
+   ⇒ **本轮未改**（用户未拍板）。
+   ⚠️ **对抓取侧的影响**：数值口径的 `histogram_quantile()` 两侧可用；
+   **按 `le` 字符串精确匹配的查询两侧不等价** ⇒ 建议改数值口径，而不是为它改客户端库。
+4. **DRIFT-FOLLOW-006（follow-rpc 指标无出口）：用户 2026-10-24 定 ⇒ 本轮不落地**，
+   转「**全仓 rpc 层统一方案**」交主会话拍板（调查结论见 `docs/DRIFT/follow/rpc.md`）。
 5. `follow-api` **没有 `spring-boot-maven-plugin`** ⇒ 打不出可执行 fat jar，
    只能用 `java -cp <runtime classpath> <MainClass>` 启动。
    与 `article-api` / `comment-api` / `hot-api` / `like-api` / `message-api` / `task-api` 同款
