@@ -212,7 +212,7 @@ Spring 的 `@ExceptionHandler(IllegalArgumentException.class)` **只按类型匹
    `org.apache.tomcat.util.http`（非公开 API 面，Boot 换版本就可能挪位置）。
 2. **兜底 handler（`handleAny`）一旦真的被触发，就是信号** —— Go 侧的 **7 个 handler 全部
    `httpx.OkJsonCtx` ⇒ handler 自身永不产出 500** ⇒ RAG 侧出现 500 = 有东西没被接住。
-   ⚠️ **但要说清「不可达」的边界**（2026-10-25 第五轮更正）：Go 的 handler 逻辑虽不产出 500，
+   ⚠️ **但要说清「不可达」的边界**（2026-10-25 第六轮更正）：Go 的 handler 逻辑虽不产出 500，
    **panic 仍会走默认中间件 `RecoverHandler` ⇒ 500 + 空 body** ⇒ **那条路径是可达的**
    （见 [`DEV-FAV-API-002`](../../Intentional_Deviations/favorite/api.md)）⇒
    「不可达」只对「**handler 自己返回 5xx**」成立，对「**panic**」不成立。
@@ -224,11 +224,11 @@ Spring 的 `@ExceptionHandler(IllegalArgumentException.class)` **只按类型匹
 
 ---
 
-## PIT-FAV-API-007 · 🕳️ **「读源码判定」不是「已验」—— 本轮两条都判错了**
+## PIT-FAV-API-007 · 🕳️ **「读源码判定」不是「已验」—— 一条判错、另一条碰巧判对**
 
 ### 现象
 
-2026-10-25 第五轮做响应字节对拍时，本台账里两条标着「🟡 源码级」的结论被实测推翻：
+2026-10-25 第六轮做响应字节对拍时，本台账里两条标着「🟡 源码级」的结论被实测复核：
 
 | # | 原结论（读源码判的） | 实测（真库跑的） |
 |---|---|---|

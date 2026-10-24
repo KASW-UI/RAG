@@ -5,7 +5,7 @@
 > **核对时间：2026-10-25**
 > **本轮性质**：§3.4 **效力边界第 1 条**（「RAG 侧使用生成代码的方式与 Go 一致」）的首次核对。
 > **证据强度**：✅ **双侧静态全文 diff**（proto 文件本身）+ ✅ **消费点逐条清点**（源码级）
-> + ✅ **双侧活体对拍**（protobuf 消息体的 wire 字节，2026-10-25 第五轮 ⇒ §5）。
+> + ✅ **双侧活体对拍**（protobuf 消息体的 wire 字节，2026-10-25 第六轮 ⇒ §5）。
 > ⚠️ **仍未做**：**帧层**（HTTP2 / length-prefix / gRPC status 帧）的字节对拍 —— 需两侧同时起服务。
 
 ---
@@ -150,13 +150,13 @@ RAG 侧 7 处用 `nullToEmpty(...)` / `nullToZero(...)` 显式设零值
 | `optional` presence | ✅ **本域零 optional** ⇒ 不适用 |
 | 字段号硬编码 | ✅ 无命中 |
 | **「默认值不落 wire」的生成码级证据** | ✅ **已验**（2026-10-25 第四轮 ⇒ 见 §2 的 `writeTo` 条件表达式） |
-| **「默认值不落 wire」的【字节级】证据** | ✅ **已验**（2026-10-25 第五轮 ⇒ 探针 `tools/proto-wire-probe/favorite/`：**零值消息在 wire 上是空字节**）⇒ 见 §5 |
-| **protobuf 消息体的 wire 字节** | ✅ **已验**（2026-10-25 第五轮 ⇒ **双侧活体对拍**：Go 真源的 `favorite.pb.go`（protoc-gen-go 运行时）vs favorite-proto 的生成码（protobuf-java 运行时）⇒ **6 组消息逐字节一致** ⇒ 见 §5） |
+| **「默认值不落 wire」的【字节级】证据** | ✅ **已验**（2026-10-25 第六轮 ⇒ 探针 `tools/proto-wire-probe/favorite/`：**零值消息在 wire 上是空字节**）⇒ 见 §5 |
+| **protobuf 消息体的 wire 字节** | ✅ **已验**（2026-10-25 第六轮 ⇒ **双侧活体对拍**：Go 真源的 `favorite.pb.go`（protoc-gen-go 运行时）vs favorite-proto 的生成码（protobuf-java 运行时）⇒ **6 组消息逐字节一致** ⇒ 见 §5） |
 | **真 channel 上的 wire 字节**（gRPC 帧 / status 帧） | 🔴 **未验**（需要两侧同时起服务）⇒ ⚠️ **gRPC status 的 description** 那一环**已验**（在 [`common.md`](./common.md) §4，由 `FavoriteGrpcErrorWireFidelityTest` 守着）⇒ **剩下的是帧层（HTTP2 / length-prefix / status 帧）** |
 
 ---
 
-## 5. ✅ 第五轮新增：protobuf 消息体的 wire 字节**双侧活体对拍**
+## 5. ✅ 第六轮新增：protobuf 消息体的 wire 字节**双侧活体对拍**
 
 > 🔴 **这一节把 §4 的最后一条「🔴 未验」拆成了两半**：**消息体字节**这一半已闭合，
 > **帧层**那一半仍未闭（需要两侧同时起服务）。

@@ -18,10 +18,10 @@
 | 项 | 值 |
 |---|---|
 | 落地 | **36 个 Java 文件 / 7,057 行 / 6 个迁移脚本**（本轮前：34 个文件全 0 字节、`pom.xml` 零依赖零插件、6 个 `.sql` 全 0 字节） |
-| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射） |
+| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §12.4**（9 个测试类 / 76 例全绿） |
 | 构建 | `mvn -o -pl service/favorite/favorite-rpc -am install` ⇒ **BUILD SUCCESS** |
 | 本轮发现并修复 | **6 处 L2 语义偏差**（§2）+ **2 处实现期真 bug**（§3） |
-| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / 1 条待外部输入 / 1 条环境受限）⇒ **最新状态见 §10.10** |
+| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / 1 条待外部输入 / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）**<br>🏷 **第六轮新增 1 条候选**：DEV-FAV-RPC-006（GORM 唯一索引名，见 §12.2） |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -119,9 +119,9 @@ RAG 侧 `ArticleRpcClient.getPublicArticle` **固化了同样两个参数**。
 
 ## 5. ⚠️ 仍未决（7 条）
 
-> ⚠️ **本表的状态已被 §10.10 取代**（2026-10-25 第五轮）：
+> ⚠️ **本表的状态已被 §11.6 取代**（2026-10-25 第五轮）：
 > U1 / U2 / U6 → **已签字**；U4 → **已修**；U5 → **已撤销**；U3 → **待外部输入**；U7 → **环境受限**。
-> ⇒ 读本表请以 §10.10 为准，下表保留 2026-10-23 的原始登记以便追溯。
+> ⇒ 读本表请以 §11.6 为准，下表保留 2026-10-23 的原始登记以便追溯。
 
 > **纪律**：本表任一条**都没有**「已修」的断言。核对日期一律 2026-10-23。
 
@@ -135,7 +135,7 @@ RAG 侧 `ArticleRpcClient.getPublicArticle` **固化了同样两个参数**。
 | **U6** | `favorite_request_seconds_counter` 指标名 | Micrometer Counter 会追加 `_total`（Go `client_golang` 不会）⇒ 保留不改 | 与 U5 一并拍板 |
 | **U7** | **双侧活体对拍 + 变异验证** | 未做。Go 侧 `etcd` / Kafka 依赖不可拉起 | 需要一套能同时拉起两侧的环境 |
 
-> ⚠️ **本表状态已被 §10.10 取代**（2026-10-25 第五轮）：**U5 已撤销**（前提被实测证伪）、
+> ⚠️ **本表状态已被 §11.6 取代**（2026-10-25 第五轮）：**U5 已撤销**（前提被实测证伪）、
 > **U6 已签字**（= DEV-FAV-RPC-001）⇒ **不要再把 U5 当成「待签字的指标行为变更」**，
 > 也**不要**因为 U6 的指标名与 Go 不同就去「修」——它是**已签字的有意偏离**。
 
@@ -397,7 +397,12 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 | `docs/Intentional_Deviations/favorite/rpc.md` | **DEV-FAV-RPC-002** | ❌ **本轮撤销**（见 §11.4）⇒ **不在签字范围内** |
 
 > ⚠️ **共享索引未动**：`docs/Intentional_Deviations/_INDEX.md` 属共享面（AGENTS.md §5.3）⇒ 本轮**不碰**。
-> ⇒ **合并后需主会话统一更新**：已签字条数 49 → **51**（新增 API-001 / COMMON-001 / COMMON-002 / RPC-001 / RPC-003 / RPC-004 共 6 条；若主会话按「撤销也算登记过」计，则为 52）。
+> ⇒ **合并后需主会话统一更新**：已签字条数 **49 → 55**
+> （新增 **6** 条：API-001 / COMMON-001 / COMMON-002 / RPC-001 / RPC-003 / RPC-004）。
+> ⚠️ **口径待主会话定**：另有 **2 条已撤销**（DEV-FAV-RPC-002 / -005）—— 共享索引的口径
+> 是「一条 = 一个有**独立编号**的签字条目」，**没说撤销怎么算** ⇒ 若计入则 **57**。
+> ⚠️ **第六轮新增 1 条候选**（DEV-FAV-API-002，🏷 候选建议签）⇒ 若签字则 **56**（撤销不计）/ **58**（计入）。
+> 🔴 **订正**：本行原先写的是「49 → 51」—— **算术错了**（49 + 6 = 55，不是 51）⇒ 已改正。
 
 ### 11.2 🔴 D3 · v2 权威读端点的响应体形状错误（**新发现并已修**）
 
@@ -467,3 +472,94 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 | `tools/metrics-probe/favorite/run.sh` | **EXIT=0** |
 | `check-tomcat-limits.py` / `check-flyway-ledger.py` / `check-proto-static.sh` | 全 **EXIT=0** |
 | 共享面（`docs/DRIFT/_INDEX.md` / `_MANIFEST.json` / `docs/Intentional_Deviations/_INDEX.md` / `AGENTS.md` / `docs/DRIFT/_cross/`） | **零改动** |
+
+---
+
+## 12. 2026-10-25 第六轮（`align/favorite` 工作树 · 基线 commit 58e8314 · 承 `d660a04`）
+
+> ⚠️ **本节只追加，不修改 §0–§11。**
+> 本轮目标：**补 U7 的证据缺口** —— 把「protobuf 消息体的 wire 字节」从**未验**升级为**双侧活体对拍**。
+
+### 12.1 ✅ U7 的第 5 项局部双侧对拍：protobuf 消息体的 wire 字节
+
+| | 内容 |
+|---|---|
+| **工具** | `tools/proto-wire-probe/favorite/`（**EXIT=0**） |
+| **Go 侧** | 复制**真源真正在用的** `service/favorite/rpc/pb/favorite.pb.go`（**逐字节复制 + sha256 校验**）+ `google.golang.org/protobuf` 运行时 |
+| **RAG 侧** | `favorite-proto` 的生成码 + `protobuf-java` 运行时 |
+| ⚠️ **两侧运行时不同** | protoc-gen-go 的运行时 vs protoc 的 Java 运行时 ⇒ **不是「同一份实现自证」** |
+| **冻结期望** | `expected.txt`：**6 组 `WIRE|<name>|<hex>`** —— `folder_full` / `folder_zero` / `item_full` / `item_partial` / `folders_resp_two` / `create_req` |
+| **关键结论** | `folder_zero` 是**空字节** ⇒ proto3 标量零值**不落 wire** ⇒ 把 §10.4 的「生成码级证据」升级为**字节级**；<br>`item_partial` 证明**空字符串不落 wire**（那是 JSON 的行为，不是 proto3 的）；<br>`create_req` 证明 `int64` 在 wire 上是 **varint**，**不是**字符串（字符串是 api 层的 JSON 约定）。 |
+| **回归网** | `FavoriteProtoWireParityTest`（**6 例**，**住在 `favorite-rpc` 模块**）—— ⚠️ `favorite-proto` 的 pom 里**一行 junit 依赖都没有** ⇒ 放**消费方**（它本就依赖 proto）。⇒ 副作用：proto 组件从「0 例测试」变成「有 1 个字节级守门」。 |
+
+### 12.2 ✅ DDL 的**逐列对照**（本轮首次做，此前只有抽查）
+
+> 🔴 **为什么此前是个缺口**：`tools/difftest/check-ddl-static.py` 只有 **users / task / message**
+> 三个域预设 ⇒ **favorite 不在其中**；而本域的 `FavoriteSchemaParityTest`（13 例真 PG）只**抽查**了
+> 3 项（`target_id` 是 varchar / 时间列是 timestamptz / `favorite_item` 无 `update_time`）
+> ⇒ **其余列的类型 / 长度 / 可空性 / DEFAULT 从未被逐列比过**。
+
+**先确立「Go 侧的真源 schema 是什么」**（这一步本身就是结论）：
+
+| Go 侧 | 内容 |
+|---|---|
+| `internal/model/db.go:33` | `db.AutoMigrate(&FavoriteFolder{}, &FavoriteItem{}, &FavoriteFactOutbox{})` —— **只跑 GORM AutoMigrate** |
+| 🔴 **`.sql` 文件不由程序执行** | 全仓 grep：**没有任何 Go 代码执行这 4 个 `.sql`** ⇒ 它们是**运维手工执行**的（`DELIVERY_ACCEPTANCE.md:7`：「先在现有 Favorite PostgreSQL 库执行 `001_favorite_fact_outbox.sql`，再执行 `002_favorite_fact_delivery.sql`」）⇒ **目标 schema = AutoMigrate ∪ 4 个手写 SQL** |
+| ⇒ | RAG 的 `V1–V6` 正是这个**并集** ⇒ 结构上对齐 ✅ |
+
+**逐列比对结果（4 张表）⇒ 列级零差异**：
+
+| 表 | 比对依据 | 结果 |
+|---|---|---|
+| `favorite_folder` | Go `data_model.go:5-16` + GORM 类型推断链 | ✅ **6 列全一致**（`id bigserial` / `folder_id bigint NN` / `user_id bigint NN` / `name varchar(100) NN` / `create_time timestamptz` / `update_time timestamptz`） |
+| `favorite_item` | Go `data_model.go:18-35` + `003` | ✅ **10 列全一致**（含 `target_revision varchar(96)` 可空 / `title varchar(255)` **可空** / `cover varchar(500)` **可空** / **无 `update_time`**） |
+| `favorite_fact_outbox` | Go `001` + `002` + `favorite_fact.go:60-76` | ✅ **13 列全一致**（含 `payload jsonb NN` / `status smallint NN DEFAULT 0` / `retry_count integer NN DEFAULT 0` / `technical_input_hash char(64)` / `created_at timestamptz NN DEFAULT now()`） |
+| `favorite_legacy_fact_marker` | Go `004`（**AutoMigrate 不覆盖此表**） | ✅ **9 列全一致**（含 `target_type text` / `target_id text` / `source_snapshot_sha256 char(64)` + 正则 CHECK / `approved_at timestamptz NN DEFAULT now()`） |
+
+**类型推断链（不靠猜，逐条有出处）**：
+
+| Go 侧写法 | GORM 产出 | 出处 |
+|---|---|---|
+| `Id uint64` + `primaryKey` | **`bigserial`** | `gorm.io/gorm@v1.31.1/schema/schema.go:336-347`（`PrioritizedPrimaryField` 且 `GORMDataType == Uint` ⇒ 推断 `AutoIncrement = true`）→ `gorm.io/driver/postgres@v1.6.0/postgres.go:216-227`（`size++` ⇒ 65 > 32 ⇒ `bigserial`） |
+| `int64` / `int32` | `bigint` / `integer` | 同上 `:229-236` |
+| `type:varchar(N)` | `varchar(N)` | 同上 `:246-250` |
+| `time.Time` | `timestamptz` | 同上 `:251-255` |
+| `string` **无** `type:` | `text` | 同上 `:247-250`（`Size == 0` ⇒ 回落 `text`）⇒ **对 `favorite_legacy_fact_marker` 而言，实际来源是 `004` 里显式写的 `text`**（该表**不在** AutoMigrate 名单里 ⇒ GORM 推断对它**不生效**）⇒ 但两边**恰好一致**（若该表哪天进了 AutoMigrate，GORM 也会给 `text`）⇒ 记为一致，不是巧合需要解释。 |
+
+**唯一差异（表达层，行为等价）** —— **GORM 自动生成的唯一索引名**：
+
+| 索引 | Go / GORM | RAG |
+|---|---|---|
+| `favorite_folder.folder_id` 唯一索引 | **`idx_favorite_folder_folder_id`** | `uk_favorite_folder_folder_id` |
+| `favorite_item.favorite_id` 唯一索引 | **`idx_favorite_item_favorite_id`** | `uk_favorite_item_favorite_id` |
+
+⇒ 依据 `gorm.io/gorm@v1.31.1/schema/index.go:119-134`（未命名的 `uniqueIndex` 走
+`namer.IndexName(table, column)` ⇒ `idx_<table>_<column>`，**与是否 UNIQUE 无关**）
+⇒ **列集合相同、唯一性相同、约束语义相同 ⇒ 行为等价**，仅**标识符**不同。
+⇒ 已登记：`docs/Intentional_Deviations/favorite/rpc.md` 的 **DEV-FAV-RPC-006**（🏷 候选，建议签）。
+
+> ⚠️ **为什么这条必须登记、不能默默「统一」**：两边名字不同 ⇒ **统一到任何一边都是行为变化**
+> （PG 目录里索引名变了；23505 的错误信息里带的约束名也变了）⇒
+> 而 RAG 侧**按 SQLSTATE 23505** 翻译错误码（不看约束名）⇒ 错误码**不受影响** ⇒ 属纯命名层。
+
+> ⚠️ **本节的方法边界**：这是**源码 + 驱动源码级**的推导（把 GORM 的类型推断链逐条读出来），
+> **不是**「两侧同时跑真 PG 逐列对拍」⇒ **证据强度 = 源码级（但推导链有出处）**。
+> ⇒ **要升级为活体对拍**，需要「真 Go 进程 + 真 PG 拉起 AutoMigrate」⇒ 与 §12.3 的环境受限同源。
+
+### 12.3 U7 状态更新
+
+| | 2026-10-25 第五轮后 | **第六轮后** |
+|---|---|---|
+| **rpc 侧整域双侧活体对拍** | 🔴 未闭（Go 侧 `etcd` / Kafka 不可拉起） | 🔴 **仍未闭**（**环境受限**，非方法缺陷） |
+| **已做的局部双侧对拍** | **4 项**：错误码契约 / path 形态 / 指标 result 语义 / v2 响应体形状 | **5 项**：＋ **protobuf 消息体 wire 字节** |
+| **DDL 逐列对照** | 🔴 未做（`check-ddl-static.py` 无 favorite 预设） | 🟡 **源码级已完成**（§12.2）⇒ **活体对拍仍未做** |
+| **仍未闭的** | — | **帧层**（HTTP2 / length-prefix / gRPC status 帧）⇒ 需两侧同时起服务 |
+
+### 12.4 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| 本域全量测试 | **194 例全绿**（api **89** · rpc **76** · common 29 · proto 0），真 PG 19 例真跑未 skip |
+| 探针 | api-envelope / proto-wire / authority-path / errmsg / metrics ⇒ **5 个全 EXIT=0** |
+| 守门 | `check-tomcat-limits.py` / `check-flyway-ledger.py` / `check-proto-static.sh` ⇒ 全 **EXIT=0** |
+| 共享面 + `service/common/**` | **零改动** |
