@@ -98,6 +98,59 @@ grep -rn "WithJSONNumber\|jwt.NewParser" $D/rest/                     # 看解�
 
 ---
 
+## PIT-COMMENT-API-03 🔴 · **自己的 javadoc 会成为「证据」** ⇒ 一条被推翻的漂移，靠的是读异常处理类
+
+### 一句话
+
+**D1（非 JSON Content-Type ⇒ Go 200+5001 vs RAG 415）立项时，唯一的依据是
+RAG 自己异常处理类里的一句 javadoc；撤销时，活体实测证明那句 javadoc 本身是错的。**
+
+### 形态
+
+`CommentGlobalExceptionHandler.java` 里原本写着：
+
+> 「Go 侧 … 仍会报必填错 ⇒ 200 + 5001。**Java 侧由 Spring 的消息转换器选择直接判 415。**」
+
+⇒ 首轮对照（**纯静态**）据此把 D1 登记成 OBSERVABLE DIFFERENCE，并一路写进台账与 `§0 摘要`。
+
+**2026-10-24 双侧活体对拍（T21）实测**：两侧**都是 200 + `{code:5001}`** ⇒ **D1 撤销**。
+
+### 为什么静态推导会错
+
+「Java 侧 ⇒ 415」这个推断隐含了一个**没被验证的前提**：
+「非 JSON Content-Type ⇒ Spring 一定抛 `HttpMediaTypeNotSupportedException`」。
+实际发生的是另一条路径：
+
+| 判别实验（同一份 1 字节 body） | Spring 的反应 | 说明 |
+|---|---|---|
+| `Content-Type: application/json` | **`JSON parse error: Unrecognized token 'x'`** | body **被读了** |
+| `Content-Type: text/plain` | **`Required request body is missing`** | body **读不出字节** ⇒ 走的是「body 缺失」分支，**不是** 415 |
+
+⇒ 真实路径是 `HttpMessageNotReadableException` ⇒ `handleUnreadableBody` ⇒ 200 + 5001。
+
+### 可复用的判据
+
+> **判据 1：把「我方代码里的注释」当证据前，先问一句「这句话本身是谁写的、验过吗」。**
+> 本仓的 javadoc 里**有已登记的漂移、有已签字的偏离、有过时的论证** ——
+> 它们是**结论的载体**，不是**结论的依据**。
+>
+> **判据 2：断言「某框架会抛某异常」之前，先确认那个异常**真的是这条路径抛的** ——
+> Spring 的 `@ExceptionHandler` 分支很多，落到哪个分支是**运行期**决定的。
+>
+> **判据 3：一条差异从立项到撤销，如果**全程没有活体证据**，那么它的「证据强度」标签就应当一直是「静态」。**
+
+### 连带动作
+
+- ✅ **已订正** `CommentGlobalExceptionHandler.java` 的那段 javadoc（写明实测结论 + 机制未查实）。
+- 🟢 **已撤销** `docs/DRIFT/comment/api.md` 的 D1（并同步 §0 计数）。
+- ⚠️ **同类风险仍在**：`CommentGrpcError.java:97-103` / `:150-162` 的两段论证也带着「若未来 …」的措辞（见 `DRIFT/comment/api.md` 的 U5 / U6）⇒ **待订正**。
+
+### 对应本轮的漂移
+
+[`../../DRIFT/comment/api.md`](../../DRIFT/comment/api.md) §3.3（D1 撤销）。
+
+---
+
 ## 与既有台账的关系
 
 | 文件 | 关系 |

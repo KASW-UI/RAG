@@ -15,7 +15,7 @@
 >   —— 手工搭 `SqlSessionTemplate`（`SpringManagedTransactionFactory`）⇒ mapper 的 SQL 与
 >   `CommentFactDeliveryService` 的事务跑在**同一条连接**上，与生产同构
 > - ✅ **变异测试**（**2026-10-24 修复轮**：10 条变异**全部**让对应守门网变红 ⇒「测试不是假绿」已验）
-> - ✅ **双侧活体对拍**（**2026-10-24 对拍轮**：Go 真源 + RAG **四进程同时在跑**，17 步请求矩阵逐字段差分 ⇒ **§4.6**）
+> - ✅ **双侧活体对拍**（**2026-10-24 对拍轮**：Go 真源 + RAG **四进程同时在跑**，**23 步**请求矩阵逐字段差分，**复跑两轮一致** ⇒ **§4.6**）
 > - 🔴 ~~无双侧活体对拍~~ —— 已于 2026-10-24 补上（Go 侧 `etcd` 块删除 + 下游 RPC 指向死端点；RAG 侧 Nacos 注册关闭）
 >
 > ⇒ 本台账里的 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环。
@@ -38,9 +38,10 @@
 | 等价确认 | **约 70 个判定点**（§4） |
 | 组件规模 | Go 3,620 行 / 33 文件 ⇒ RAG 7,455 行 / 40 类（**RAG 是 Go 的 2.06 倍**） |
 | 构建 | `mvn -o -q -pl service/comment/comment-rpc -am -DskipTests install` ⇒ **`EXIT=0`**（本轮实测） |
+| 测试 | `mvn -o -pl service/comment/comment-rpc,service/comment/comment-api -am test` ⇒ **BUILD SUCCESS**；**rpc 85 / api 45，合计 130 / 0 failures / 0 errors / 0 skipped**（2026-10-24 实测；本轮新增守门网 31 例） |
 | 本台账范围 | **仅 `comment-rpc`**。`comment-api` / `comment-common` 各自独立台账 |
 | **修复轮** | **2026-10-24**：§2 的 **7 条 MISMATCH 全部已修**。守门网 = `CommentRpcGoSemanticsGateTest`（**11 例，真 PG**）；本域测试 46 ⇒ **57 例 / 0 failures / 0 skipped**；**10 条变异全部变红** |
-| **对拍轮** | **2026-10-24**：**双侧活体对拍**已跑通（Go 真源 + RAG 四进程同跑，17 步矩阵）。结果 **15 一致 / 6 差异**，6 条差异**全部落在 2 个步骤**上，且**两侧根因都在 Go 侧**（Go 的 SQL 必报错 + Go 缺 `report_record` 表）⇒ **不是 RAG 的漂移**，改为**待签字偏离候选**。对拍过程另发现并修掉 **4 个真实缺陷**（§4.6.2） |
+| **对拍轮** | **2026-10-24**：**双侧活体对拍**已跑通（Go 真源 + RAG 四进程同跑，**23 步**矩阵，**复跑两轮一致**）。结果 **20 一致 / 8 差异**，差异**落在 3 个步骤**上：T07 / T08 根因在 **Go 侧**（SQL 必报错 + 缺 `report_record` 表）⇒ **已签字偏离**；**T20 是新增的一条**（保护层覆盖范围：未注册路径上 Go 从不返回 413 / RAG 返回 413）⇒ 登记为 D6，**修法落在 `service/common` ⇒ 本域不可动 ⇒ 待决策**（[`api.md` §3.2](./api.md)）。对拍过程另发现并修掉 **4 个真实缺陷**（§4.6.2） |
 
 > 🟥 **最严重的 3 条（MISMATCH-01/02/03）都在「事实投递链路」上**，
 > 且**都是 Go 侧的显式 `tx.Commit()` 在 Java 侧被 Spring 的回滚规则吃掉**。
@@ -155,12 +156,86 @@
 
 | # | 判定点 | Go 侧事实 | RAG 侧现状 | 性质 |
 |---|---|---|---|---|
-| **D1** | `comment_domain_fact_outbox.created_at` 的取值来源 | `domain_fact.go:29` GORM `autoCreateTime` ⇒ INSERT 显式带 `created_at` = Go 进程当时 | `CommentDomainFactOutboxMapper.java:55-64` 的 INSERT **不带** `created_at` ⇒ 走 DDL 默认（`V6:24` `DEFAULT CURRENT_TIMESTAMP`）= **事务开始时刻** | 值不同（两者都是「now」，当前不改变投递顺序，但 `ORDER BY created_at` 的排序键口径不同） |
+| **D1** | ~~`comment_domain_fact_outbox.created_at` 的取值来源~~ ⇒ 🟢 **撤销（2026-10-24 复核：原结论是误判）** | **Go 侧同样走 DB 默认**（`not null;default:CURRENT_TIMESTAMP` ⇒ GORM **不**把该列放进 INSERT）⇒ 两侧都是「事务开始时刻」⇒ **无差异** | ✅ **无差异**（详见下方 §3.1） |
 | **D2** | 时间精度 | `domain_fact.go:94/98` `time.Now().UTC()` = **纳秒** | `CommentDomainFactService.java:120/124` `Instant.now()` = 微秒级 | `event_time`/`available_at` 小数位数不同 ⇒ 载荷字节不同（`validCommentDelivery` 比的是**瞬时**与 **JCS 哈希**，语义不受影响） |
-| **D3** | `EventTime` 的 UTC 归一化 | `domain_fact.go:96` `fact.EventTime = fact.EventTime.UTC()` → `:97` `OccurredAt = EventTime` | `CommentDomainFactService.java:119-124`：`eventTime` 非 null 时**原样使用** | 当前 3 个调用方都传 UTC-Z ⇒ **当前不可观察**；`append` 是 public API，第 4 个调用方若传 `+08:00`，envelope 字节会漂移 |
+| **D3** | `EventTime` 的 UTC 归一化 | `domain_fact.go:96` `fact.EventTime = fact.EventTime.UTC()` → `:97` `OccurredAt = EventTime` | `CommentDomainFactService.java:118-122`：**修复前** `eventTime` 非 null 时**原样使用** | ✅ **已修**（2026-10-24，详见下方 §3.2） |
 | **D4** | authority 端点的部署形态 | `cmd/fact-authority/main.go:52/75-80` = **独立进程 + 独立监听端口**，默认就在跑 | `CommentAuthorityEndpointConfig.java:42` `@ConditionalOnProperty(comment.authority.enabled=true)`；`application.yml:196` 默认 `false`；且 pom 无 `spring-boot-starter-web` ⇒ 即使打开也起不来 | ⚠️ **建议登记为签字偏离**（见 `docs/Intentional_Deviations/comment/rpc.md`） |
 | **D5** | fact-dispatch 的部署形态 | `cmd/fact-dispatch/main.go:52-77` = 独立进程，缺配置即退出；默认就在投递 | `CommentFactDispatchScheduler.java:58-63` + `application.yml:178` `dispatch-enabled: false` ⇒ 默认整条投递链路**不参与运行** | ⚠️ **建议登记为签字偏离** |
-| **D6** | 缓存读穿失败时的 **Redis 指标 label** | `comment_subject_cache.go:31-35`：`GetSubjectCache` 返回 err 时，`GetSubjectWithCache` 打 `action="GetSubjectWithCache"`；同时 `GetSubjectCache` 内部对 **Redis 真异常**再打一次 `action="GetSubjectCache"` ⇒ **Redis 真异常时打两个指标** | `CommentCacheService.java:182` 把**所有**异常（含 JSON 解析失败）都记成 `action="GetSubjectCache"`；`getSubjectWithCache` 在 `readSubjectCache` 返回 null 时**不再打点** ⇒ **只打一个，且 label 名不同** | 指标 label 集合不同 ⇒ Prometheus 曲线口径不同。**JSON 解析失败**这一项 Go 侧也不打 `GetSubjectCache`（`comment_subject_cache.go:96-98` 注释明说），RAG 却打了 ⇒ RAG 侧**多打**一个 |
+| **D6** | 缓存读穿失败时的 **Redis 指标 label** | `comment_subject_cache.go:31-35`：`GetSubjectWithCache` 返回 err 时打 `action="GetSubjectWithCache"`；同时 `GetSubjectCache` 内部对 **Redis 真异常**再打一次 `action="GetSubjectCache"` ⇒ **Redis 真异常时打两个指标** | `CommentCacheService.java:182` 把**所有**异常（含 JSON 解析失败）都记成 `action="GetSubjectCache"`；`getSubjectWithCache` 在 `readSubjectCache` 返回 null 时**不再打点** ⇒ **只打一个，且 label 名不同** | ✅ **已修**（2026-10-24，详见下方 §3.3） |
+| **D7** | **回填 Redis 失败**时的读路径 | `comment_subject_cache.go:59` `_ = c.SetSubjectCache(...)` ⇒ **显式忽略错误** ⇒ Redis 挂掉时读路径**照常返回 DB 回源的结果** | **修复前** `CommentCacheService` 的 `writeSubjectCache` 抛 `IllegalStateException` ⇒ 整个 `getSubjectWithCache` 失败 ⇒ **对外 500** | ✅ **已修**（2026-10-24，详见下方 §3.4） |
+
+### 3.1 🟢 D1 撤销：Go 的 `default:` 标签会**吃掉** GORM 的 `autoCreateTime`
+
+| 项 | 值 |
+|---|---|
+| 原结论 | 「Go 的 `CreatedAt` 是 GORM `autoCreateTime` ⇒ INSERT 显式带 `created_at` = Go 进程当时；RAG 走 DDL 默认 = 事务开始时刻 ⇒ 值不同」 |
+| 复核结论 | 🟢 **原结论不成立 —— 两侧都是「事务开始时刻」，无差异** |
+| 复核日期 | 2026-10-24 |
+
+**证据链（三重，全部可复现）**：
+
+1. **Go 的 tag**（`rpc/internal/model/domain_fact.go:29`）：
+   `CreatedAt time.Time \`gorm:"column:created_at;not null;default:CURRENT_TIMESTAMP"\``
+   ⚠️ **没有** `autoCreateTime` 标签，但**有** `default:` 标签。
+
+2. **GORM 的消费点**（`gorm.io/gorm@v1.31.2/callbacks/create.go:268-270`）：
+   ```go
+   if field := stmt.Schema.FieldsByDBName[db]; !field.HasDefaultValue || field.DefaultValueInterface != nil {
+       ... 把该列加进 INSERT ...
+   }
+   ```
+   ⇒ `HasDefaultValue = true`（`schema/field.go:210-213` 解析 `DEFAULT` tag 时置位）
+   且 `DefaultValueInterface == nil`（`schema/field.go:277-281` 试图 `now.Parse("CURRENT_TIMESTAMP")` **失败**
+   ⇒ 不赋值）⇒ **整个条件为 false** ⇒ **`created_at` 根本不进 INSERT 列清单** ⇒ **DB 默认生效**。
+
+3. **活体数据**（双侧对拍那轮的 `go_comment` 库）：
+   Go 的 `DeleteCommentTx` 里 `comment_index` 的 `state=2` UPDATE（`comment.go:288`，推进 `updated_at` = GORM 的 `curTime`）
+   **先于** `appendCommentFact` 的 outbox INSERT（`comment.go:338`），
+   而两者在**同一个事务**里 ⇒ 若 `created_at` 是 GORM 在 INSERT 时刻填的，它必须 **≥** `comment_index.updated_at`。
+   实测：`outbox.created_at = 10:39:06.06046` **<** `comment_index.updated_at = 10:39:06.089807`
+   ⇒ **`created_at` 来自 DB 默认（事务开始时刻）**，不是 GORM 填的。✅
+
+⇒ **RAG 侧的 mapper（INSERT 不带 `created_at`，交给 DDL 默认）本来就是对的 ⇒ 本轮不改代码。**
+
+> ⚠️ **为什么这个坑值得单独记**：`domain_fact.go:29` 的 `CreatedAt` 字段名会让 GORM 的
+> **命名约定**（`schema/field.go:294-295`：`field.Name == "CreatedAt"` ⇒ `AutoCreateTime`）生效，
+> 但 `default:` 标签又让 INSERT **跳过**它 ⇒ **看 struct 定义会得出相反的结论**。
+> ⇒ 这正是 AGENTS.md §3.3.1 说的「必须读到**消费该 tag 的那段控制流**，只贴 struct 定义行不算证据」。
+> ⇒ 已登记为 `docs/Pitfalls/comment/rpc.md` 的 PIT-COMMENT-RPC-10。
+
+### 3.2 ✅ D3 已修：`event_time` 归一化到 UTC
+
+| 项 | 值 |
+|---|---|
+| **Go 事实** | `domain_fact.go:95-97`：`if fact.EventTime.IsZero() { … = time.Now().UTC() }` → **`:96` `fact.EventTime = fact.EventTime.UTC()`（无条件）** → `:97` `OccurredAt = EventTime` |
+| **修复前 RAG** | `CommentDomainFactService.append()` 只做了第一步（`null ⇒ now`），**漏了第二步** ⇒ 调用方传 `+08:00` 时 payload/envelope 保留本地偏移 |
+| **可观察后果** | Go 的 `occurred_at` 是 UTC（`"…T10:00:00Z"`），RAG 是 `"…T18:00:00+08:00"` ⇒ **信封字节漂移**（`ORDER BY`/JCS 哈希口径不同） |
+| **当前是否可见** | ⚠️ 当前 3 个调用方（`CommentTransactionalService:234/389/542`）都传 UTC ⇒ **当前不可观察**；但 `append(CommentFact)` 是 **public API**，第 4 个调用方传本地偏移就会漂 ⇒ 属**预防性**对齐 |
+| **✅ 已修** | **2026-10-24**。新增 `CommentDomainFactService.normalizeEventTimeToUtc(String)`：`null`/空白 ⇒ now；Go 零值时刻（`0001-01-01T00:00:00Z`）⇒ now；**带偏移的 RFC3339 ⇒ 转成 UTC（`Z`）**；已是 UTC ⇒ 不动；**无法解析 ⇒ 原样保留**（Go 的 `time.Time` 不可能有非法值，抛异常等于新增 Go 没有的失败模式 ⇒ 交给投递侧 RFC3339 校验判 BLOCKED，MISMATCH-05 已覆盖该路径） |
+| **🧪 守门网** | **新增** `CommentFactEventTimeGateTest`（**5 例，真 PG + 真 MyBatis**）：断言落库的 **payload jsonb** 与 **delivery_envelope jsonb** 里的 `event_time`/`occurred_at` 都是 UTC 形态；另含「已是 UTC 不动」「纳秒精度 + 末尾 0 去掉（Go RFC3339Nano 语义）」「null ⇒ now」「无法解析 ⇒ 原样保留」 |
+| **🧬 变异实测** | 把 `append()` 改回「原样透传」⇒ **2/5 变红**，症状精确：`expected: <2026-10-24T10:00:00Z> but was: <2026-10-24T18:00:00+08:00>` ⇒ 守门网不是假绿 |
+
+### 3.3 ✅ D6 已修：Redis 错误的**指标 label 与打点次数**
+
+| 项 | 值 |
+|---|---|
+| **Go 事实** | `comment_subject_cache.go:16-73` 的 `GetSubjectWithCache` + `:75-101` 的 `GetSubjectCache`：**三种**结局、**两处**打点判定 |
+| **关键区分** | ① **Redis 真异常** ⇒ `GetSubjectCache` 自己打 `("comment_redis","GetSubjectCache","query")`（`:80-82`），**且**返回 err ⇒ 调用方再打 `("comment_redis","GetSubjectWithCache","query")`（`:26-29` / `:39-42`）⇒ **两个 label 各 2 次**（外层读 + singleflight 双检）<br>② **JSON 解析失败** ⇒ `GetSubjectCache` **不打点**（`:94-98` 注释明说「视作缓存未命中，不记 metric」），但**返回 err** ⇒ 调用方仍打 `GetSubjectWithCache` ⇒ **该 label 2 次、`GetSubjectCache` 0 次**<br>③ **未命中（`redis.Nil`）** ⇒ 两侧都不打点 |
+| **修复前 RAG** | 两个 catch **合并**成一个 ⇒ 两种异常都只打一个 `GetSubjectCache` ⇒ label 集合与 Go 不同（**多** `GetSubjectCache`、**少** `GetSubjectWithCache`） |
+| **✅ 已修** | **2026-10-24**。`CommentCacheService` 引入**三态** `SubjectCacheRead{value, error, redisFailure}`，把「Redis 真异常」与「JSON 解析失败」**分开**；打点位置照 Go：Redis 异常打 `GetSubjectCache`、两种异常都让调用方打 `GetSubjectWithCache`、JSON 解析失败**不**打 `GetSubjectCache` |
+| **🧪 守门网** | **新增** `CommentCacheRedisMetricGateTest`（**5 例：真 Redis 容器 + 真 PG + 真 MyBatis + 真 Micrometer registry**）：① 命中 ⇒ 0 个指标；② 未命中 ⇒ 0 个；③ JSON 解析失败 ⇒ **只**有 `GetSubjectWithCache`=2、`GetSubjectCache`=0；④ Redis 真异常（连**没人监听的端口**⇒ Lettuce 真被拒）⇒ 两个 label 各 2；⑤ 回填失败 ⇒ 读路径照常返回（见 §3.4） |
+| **🧬 变异实测** | 把两个 catch **合并**（= 修复前）⇒ **1/5 变红**，症状精确：`expected: <0.0> but was: <2.0>`（`GetSubjectCache` 多打了 2 次）⇒ 守门网不是假绿 |
+
+### 3.4 ✅ D7 已修：回填 Redis 失败 ⇒ 读路径**照常成功**
+
+| 项 | 值 |
+|---|---|
+| **Go 事实** | `comment_subject_cache.go:59` `_ = c.SetSubjectCache(ctx, subjectID, &subject, 5*time.Minute)` ⇒ **显式忽略错误**；`get_comment_logic.go:176` 同样 `_ =` |
+| **修复前 RAG** | `CommentCacheService.getSubjectWithCache` 直接调 `writeSubjectCache(...)`，后者在 Redis 失败时抛 `IllegalStateException` ⇒ 整个读路径失败 ⇒ **对外 500**（而 Go 侧**照常返回** DB 回源的结果） |
+| **可观察后果** | Redis 不可用时，Go 的评论查询**仍然可用**（降级回源 DB），RAG 的**整个接口 500** ⇒ 可用性面差异 |
+| **✅ 已修** | **2026-10-24**。`getSubjectWithCache` 的回填包 try/catch，异常**记日志后忽略**（照 Go 的 `_ =`）。⚠️ `CommentDomainService:404-409` 的另一处回填**本来就**是 catch 后忽略 ⇒ 与 Go 一致，无需改 |
+| **🧪 守门网** | `CommentCacheRedisMetricGateTest#writeBackFailureDoesNotFailTheRead`（Redis 指向死端口 ⇒ 读与写都失败）⇒ 断言**仍返回 DB 回源的结果**、且 `SetSubjectCache`(set) 打点存在 |
+| **🧬 变异实测** | 去掉那个 try/catch（= 修复前）⇒ **2/5 变红**（`IllegalStateException: redis set subject cache failed` 抛到测试）⇒ 守门网不是假绿 |
 
 ---
 
@@ -293,17 +368,24 @@
 > 只有**真 PG + 真 MyBatis** 才会撞上语法错。
 > ⇒ 与 AGENTS.md §3.3「纯 Mockito mock 数据层的单测不算数」完全对上。
 
-### 4.6.3 对拍结果：**17 步 / 15 一致 / 6 差异**
+### 4.6.3 对拍结果：**23 步 / 20 一致 / 8 差异**（**复跑两轮结果一致**）
 
-**6 条差异全部落在 2 个步骤上，且两侧根因都在 Go 侧** ⇒ **不是 RAG 的漂移**，转 §4.6.4。
+> ⚠️ **第一轮是 17 步 / 15 一致 / 6 差异**；第二轮把矩阵**扩到 23 步**（新增 6 步专打「此前未触发的判定点」）
+> ⇒ 差异从 6 条变成 8 条，但**归因集合没变**，只是**多暴露了一条此前从未被观察到的差异**（T20）。
+
+**8 条差异全部落在 3 个步骤上 ⇒ 3 个根因，其中 2 个在 Go 侧、1 个在保护层覆盖范围。**
 
 | 步骤 | Go 侧 | RAG 侧 | 归因 |
 |---|---|---|---|
 | **T07 `manage`（`action_type=2` = `MANAGE_UNPIN`）** | **5002**「DB更新失败」 | **200** `{success:true}` | ✅ **已签字偏离**（`SD-2026-10-24-CAND-06`，2026-10-24 用户 Jason）—— 🔴 **Go 侧的 SQL 必报错**：`comment.go:165` `gorm.Expr("attribute & ~?", val)` —— `val` 是 `uint` ⇒ PG 收到**未定型参数** ⇒ `operator is not unique: ~ unknown (SQLSTATE 42725)`。已在 PG 上直接复现（`PREPARE t(unknown) AS SELECT 4::bigint & ~$1` ⇒ 同一错误）。⇒ **RAG 侧实现的是 Go 的*意图***（`attribute & ~#{mask}`，mask 是 **有类型**的 `long` ⇒ PG 解析为 `~ bigint` ⇒ 成功） |
 | **T08 `report`** | **5004**「DB插入失败」 | **200** `{success:true}` | ✅ **已签字偏离**（`SD-2026-10-24-CAND-02`，2026-10-24 用户 Jason）—— 🔴 **Go 侧根本没有 `report_record` 表**：`db.go:15` 的 `AutoMigrate` 列表只有 6 个模型，**不含 `ReportRecord`**；3 个手写迁移脚本也不建它 ⇒ Go 侧**全新部署上 `ReportComment` 必然 5004** |
+| **T20 `404-oversized-body`（1.5 MB → 未注册路径）** | **transport error**（`Broken pipe` / `Connection reset by peer`，**服务端从不返回状态码**） | **HTTP 413**（空 body） | 🔴 **新登记的差异** —— **保护层的覆盖范围**：Go 的 MaxBytes 是 **per-route**（`rest/engine.go:105` 在 `bindRoute` 内拼 chain ⇒ 未注册路径不经它），RAG 的是**全局 servlet Filter** ⇒ 差异详情与处置见 [`api.md` §3.2](./api.md)（D6）⇒ **修法落在 `service/common`，本域不可动 ⇒ 待用户决策** |
 
-> ⚠️ **这两条现在都是「已签字偏离」，不是待办** ⇒ 后续对拍再看到它们变红，
+> ⚠️ **T07 / T08 现在都是「已签字偏离」，不是待办** ⇒ 后续对拍再看到它们变红，
 > **不得当成新回归去「修」回 Go 的旧行为**（AGENTS.md §0 第 1 条）。
+>
+> ⚠️ **T20 也不是本轮代码改动引入的**（RAG 的全局 Filter 是既有实现，Go 的 per-route 语义也是既有事实）
+> ⇒ **归因是「覆盖面被补上了」，不是「行为被改坏了」。**
 
 > ⚠️ **同款缺陷在 Go 的点赞路径上潜伏**：`comment.go:571` 是**同一个** `attribute & ~?` 写法
 > （仅当 `userId == ownerId` 且取消赞时触发）⇒ **Go 侧「作者取消自己的赞」也会 5002**。
@@ -314,13 +396,18 @@
 
 | 判定点 | 结果 |
 |---|---|
-| 7 个 HTTP 路由 + 7 个 RPC 的**响应体逐字段一致** | ✅ 15/17 步全字段一致（含 `subject.total_count` / `root_count` / `state` / `comment[]` 的每一项） |
+| 7 个 HTTP 路由 + 7 个 RPC 的**响应体逐字段一致** | ✅ **20/23 步全字段一致**（含 `subject.total_count` / `root_count` / `state` / `comment[]` 的每一项） |
 | **创建是异步链路**（请求返回 ≠ 已落库） | ✅ 两侧都是「推 Kafka → 消费端落库」：Go `mqs/audit_consumer.go` / RAG `CommentAuditListener` ⇒ **架构同构** |
 | 落库后的**事实投递条数** | ✅ `comment_domain_fact_outbox` 两侧**都是 3 条** |
 | `GetComment` **不按 `state` 过滤**（已删评论仍在列表里） | ✅ 两侧一致（Go `OnlyNormal:false`；RAG `<if test="onlyNormal">` 恒 false）⇒ 删除后**两侧的 list 都仍返回该评论**（对拍里 `等 delete 落库` 两侧**同时**超时，属**一致**而非差异） |
 | `CreateCommentResp.subject_count` **恒 0** | ✅ 两侧一致 |
 | 越权 / 空内容 / 缺字段的**业务码**（1008 / 2001 / 1006 / 1013） | ✅ 逐条一致 |
 | 缺失 Authorization / 坏 JWT ⇒ **401** | ✅ 两侧一致 |
+| **未注册路径 ⇒ 404**（不被鉴权遮蔽成 401） | ✅ **T18** 一致 |
+| **已注册路径 + 错方法 ⇒ 405** | ✅ **T19** 一致 |
+| **Bearer 前缀长度边界**（`"Bearer "` 恰好 7 字符 ⇒ 两侧都 401） | ✅ **T22** 一致 ⇒ 证实「D2 当前不可观察」 |
+| **`iat` 在未来 ⇒ 401** | ✅ **T23** 一致 ⇒ **D4 的修复被活体确认**（不只是单测绿） |
+| **非 JSON Content-Type ⇒ 两侧都 200 + `{code:5001}`** | ✅ **T21** 一致 ⇒ **D1 撤销**（详见 [`api.md` §3.3](./api.md)） |
 
 ### 4.6.5 ⚠️ 对拍 harness 的两个坑（**不是**产品缺陷，但会制造假差异）
 
@@ -328,6 +415,7 @@
 |---|---|---|
 | **不等异步落库就往下跑** | 第一轮跑出 **24 条差异**，其中 20 条是**同一根因**：RAG 侧 `create` 返回 200 但**库里当时还没有这一行** ⇒ 后续 `list`/`like`/`delete` 全部「评论不存在」 | ⚠️ **固定 `sleep(3)` 不可靠**（实测 RAG 侧迟 19s）⇒ harness 改成**轮询到「可见/已消失」为止**（上限 40s / 15s） |
 | **Kafka topic 不预建 ⇒ 消费者组 rebalance 退避** | RAG 消费者 **订阅于 18:23:00、19 秒后（18:23:34）才 join 成功拿到分区** ⇒ create→可见迟到 19s。根因：topic 在启动前被删掉 ⇒ 消费者订阅了一个**不存在的 topic** ⇒ Kafka 4.x 的 rebalance **指数退避**（`group.initial.rebalance.delay.ms=3000` 起，上限 `group.rebalance.backoff.max.ms=30000`） | harness 改成**「先删后建」**（`--create --partitions 1`）⇒ 消费者订阅时 topic 已存在 ⇒ 立刻 join。⚠️ **Go 侧不受影响**（kafka-go Reader 不走组协调 ⇒ 同样是毫秒级）⇒ 这是 **Kafka 客户端实现差异**，不是 comment 域语义差异，但**在产品上会表现为「RAG 的审计管道延迟远高于 Go」** |
+| **基础设施挂掉 ⇒ 报告里全是「差异」** | Kafka 容器被 **OOM kill（`Exited (137)`）** ⇒ 两侧审计管道全断 ⇒ 产出「create 返回 200 但库里没有」+「RAG 侧 2s deadline exceeded」——**两个都不是 comment 域的语义问题**，但会被当成差异列出来 | harness 加**前置健康检查**：容器状态 + PG/Redis 可达 + `comment-audit-topic*` 数量 ≥ 2 ⇒ 任一不过 ⇒ **`exit 4` 中止**，不跑矩阵（否则产出的全是假差异） |
 
 > ⚠️ **这两条都写进了 `docs/Pitfalls/comment/rpc.md`**（PIT-COMMENT-RPC-07 / -08）。
 
@@ -354,6 +442,9 @@
 | **U9** | ✅ **`SD-2026-10-24-CAND-02` 已签字**（2026-10-24，用户 Jason）：`report_record` 表 Go 侧**不存在** ⇒ Go 的 `ReportComment` **必然 5004**；RAG 侧建了表 ⇒ 可用。**由活体对拍实证**（Go=5004 / RAG=200） | ✅ 已闭环 |
 | **U10** | 🔴 **跨域**：`service/common` 的 RPC 超时文案两侧不同（`context deadline exceeded` vs `rpc timeout after 2000ms`），code 相同（4）。`service/common` 是六域共用 + `align/common` 并发分支 ⇒ **本轮不动**，上报主会话 | 🔴 跨域待办 |
 | **U11** | ⚠️ **Go 侧潜伏缺陷**：`comment.go:571`（点赞的 `attribute & ~?`）与 `comment.go:165` 同款 ⇒ **Go 侧「作者取消自己的赞」也会 5002**。本轮矩阵 `user 1001 ≠ owner 2002` ⇒ 未触发 ⇒ 两侧一致。⇒ **Go 侧缺陷**，RAG 侧已正确 | ⚠️ 真源侧缺陷（记录，不修 RAG） |
+| **U12** | ✅ **跨栈 gRPC 路径前缀**（未知项 #5）：Go `package pb;` ⇒ `/pb.CommentService/*`，RAG `package comment;` ⇒ `/comment.CommentService/*`。**新增 `PbCommentServiceAlias`**（`@GrpcService` + `BindableService`，用 `MethodDescriptor.toBuilder().setFullMethodName()` 改名 + 复用 `getServerCallHandler()`）⇒ **只增不改**（`comment.` 路径原样保留）⇒ **不推翻**已签字的 `SD-2026-10-23-04`。守门网 `PbCommentServiceAliasGateTest` 6 例（真 in-process server，两条路径都通、同一实现、方法集合对应、未注册方法仍 UNIMPLEMENTED） | ✅ 已闭环（**半修**，见 U13） |
+| **U13** | 🔴 **U12 的伴生阻塞（不可修）**：`io.grpc.Status` **只有 17 个常量** ⇒ grpc-java **发不出** `grpc-status: 1012` ⇒ RAG 的业务码在**自定义 trailer** 里 ⇒ **Go 侧读不到** ⇒ 跨栈错误码必然退化成 `UNKNOWN(2)`。⇒ **结论：混跑必须同栈配对，别名只是兜底** | 🔴 跨栈限制（**协议层**，非本域可修） |
+| **U14** | 🔴 **T20 保护层覆盖范围差异**（见 §4.6.3）：未注册路径 + 超大 body ⇒ Go **从不返回 413** / RAG 返回 **413** ⇒ 登记为 [`api.md` §3.2 D6](./api.md)。⚠️ 修法落在 `service/common/protection`（**六域共用 + `align/common` 并发分支**）⇒ **本域不可动** ⇒ **待用户决策**（改回 Go / 签字为有意偏离） | 🔴 跨域待决 |
 
 ---
 

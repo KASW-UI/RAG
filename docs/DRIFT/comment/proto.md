@@ -8,7 +8,7 @@
 > **本轮性质：** §3.4 已验过「**复制忠实**」（`docs/DRIFT/_cross/new-domains-2026-10-23.md`），
 > 本轮补验 §3.4 **效力边界第 1 条**：「**不证明 RAG 侧使用生成代码的方式**与 Go 一致」。
 >
-> ⚠️ **证据强度**：静态全文 diff + 源码 grep。**未做双侧活体对拍**（wire 层）。
+> ⚠️ **证据强度**：静态全文 diff + 源码 grep **＋ 双侧活体对拍**（wire 层，2026-10-24 补上 ⇒ 见 §3.1）。
 
 ---
 
@@ -16,7 +16,7 @@
 
 | 项 | 值 |
 |---|---|
-| **总体判定** | ✅ **`SEMANTICALLY EQUIVALENT`**（消费方式层） |
+| **总体判定** | ✅ **`SEMANTICALLY EQUIVALENT`**（消费方式层）—— ⚠️ **但跨栈路径前缀有差异**（见 §3.1 / §4） |
 | SEMANTIC MISMATCH | **0 条** |
 | OBSERVABLE DIFFERENCE | **0 条**（本轮新增） |
 | 已知签字偏离 | **1 条**：`SD-2026-10-23-04`（proto `package` 归一）—— **不是缺陷**，见 [`docs/Intentional_Deviations/comment/proto.md`](../../Intentional_Deviations/comment/proto.md) |
@@ -75,12 +75,31 @@
 
 ---
 
+## 3.1 🔴 跨栈 gRPC 路径前缀：`/pb.` vs `/comment.`（未知项 #5 的处置）
+
+| 项 | 值 |
+|---|---|
+| **Go 侧** | `proto/comment.proto:4` `package pb;` ⇒ 方法全名 **`/pb.CommentService/*`** |
+| **RAG 侧** | `proto/comment.proto:3` `package comment;` ⇒ 方法全名 **`/comment.CommentService/*`** |
+| **已签字偏离** | `SD-2026-10-23-04`（proto `package` 归一）⇒ **不得推翻**（Go 侧 `package pb;` 是仓内自产自销的命名，RAG 侧归一后**仓内自洽**） |
+| **问题** | 跨栈（Go 客户端 ↔ RAG 服务端）时，路径前缀不一致 ⇒ **直接 `UNIMPLEMENTED`** |
+| **✅ 处置（只增不改）** | **新增** `service/comment/comment-rpc/.../service/impl/PbCommentServiceAlias.java`：`@GrpcService` + 实现 `BindableService`，用 `MethodDescriptor.toBuilder().setFullMethodName()` 把方法名改写成 `/pb.CommentService/*`，并**复用 `getServerCallHandler()`**（⇒ **同一份实现**，不复制逻辑）⇒ **两条路径都通**。<br>⚠️ **`/comment.` 原样保留** ⇒ RAG↔RAG 不受影响 ⇒ **不推翻** `SD-2026-10-23-04` |
+| **🧪 守门网** | **新增** `PbCommentServiceAliasGateTest`（**6 例，真 in-process gRPC server**）：两条路径都通、指向**同一实现**、方法集合一一对应、**未注册方法仍 `UNIMPLEMENTED`** |
+| **🔴 伴生阻塞（不可修）** | `io.grpc.Status` **只有 17 个常量** ⇒ grpc-java **发不出** `grpc-status: 1012` ⇒ RAG 的业务码放在**自定义 trailer** 里 ⇒ **Go 侧读不到** ⇒ **跨栈错误码必然退化成 `UNKNOWN(2)`**。<br>⇒ **结论：混跑必须同栈配对**（Go↔Go、RAG↔RAG），`PbCommentServiceAlias` **只是兜底**（解决「方法找不到」，解决不了「错误码传不过去」） |
+
+> ⚠️ **这就是「半修」**：路径通了，**错误码仍然不通**。
+> ⇒ 任何「让 Go 侧调 RAG 的 comment-rpc」的方案都**不能**指望业务码能透传
+> ⇒ 跨栈场景必须**按 `UNKNOWN(2)` 处理**（⇒ 端到端业务语义会退化成「系统内部错误」）。
+
+---
+
 ## 4. 未决 / 待办
 
 | # | 事项 | 类型 |
 |---|---|---|
 | **U1** | §3.4 效力边界第 1 条的三个子项**本轮全部验完**（`optional` 不适用 / 无字段号硬编码 / 序列化器无交叉）⇒ **本组件的首轮对照收口** | ✅ 已完成 |
-| **U2** | **双侧活体对拍尚未做** —— 前提是 Go 侧 `comment-rpc` 起得来（依赖 `etcd` + Kafka + 真 PG）。做之前必须先解决 `SD-2026-10-23-04` 的路径前缀映射 | ⚠️ 证据缺口 |
+| **U2** | ~~双侧活体对拍尚未做~~ ⇒ ✅ **2026-10-24 已做**：Go 真源 + RAG 四进程同跑，**23 步**矩阵逐字段差分 ⇒ wire 层已验。**路径前缀**按 §3.1 处理 | ✅ 已闭环 |
+| **U4** | 🔴 **跨栈业务码不可传输**（协议层限制，不可修）：`io.grpc.Status` **只有 17 个常量** ⇒ grpc-java **发不出** `grpc-status: 1012` ⇒ RAG 的业务码在**自定义 trailer** 里 ⇒ **Go 侧读不到** ⇒ 跨栈错误码必然退化成 `UNKNOWN(2)` ⇒ **混跑必须同栈配对**，`PbCommentServiceAlias` 只是兜底 | 🔴 协议层限制（**非本域可修**） |
 | **U3** | `check-proto-static.sh` 尚未覆盖 `comment`（既有台账 `new-domains-2026-10-23.md:125-126` 已列待办）⇒ 本轮的「复制忠实」是一次性快照，**不是可持续结论** | ⚠️ 待办 |
 
 ---

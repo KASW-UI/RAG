@@ -69,6 +69,49 @@
 
 ---
 
+## SD-2026-10-24-CAND-07：**HS384 / HS512** 签名的 token ⇒ RAG **拒绝**，Go **接受**
+
+| 项 | 值 |
+|---|---|
+| 状态 | 🟡 **待签字**（候选，建议签） |
+| 组件 | `service/comment/comment-api` |
+| 行为层 | **鉴权入口**（HTTP 401 vs 通过） |
+| 证据强度 | ✅ **双侧活体探针对拍**（11 例 token，字节完全相同）—— 见下方「证据」 |
+
+### 差异的实际面
+
+| 侧 | 事实 | 出处 |
+|---|---|---|
+| **Go** | `golang-jwt/jwt/v4@v4.5.2/hmac.go:49-74` `SigningMethodHMAC.Verify` **不限制 alg**（只要是 `*SigningMethodHMAC` 就用同一套逻辑验签）；go-zero 的 `rest/token/tokenparser.go:127-129` `newParser()` 用 `jwt.NewParser(jwt.WithJSONNumber())`，**没有** `WithValidMethods` ⇒ **HS384 / HS512 一律接受** | |
+| **RAG** | jjwt 0.12.6 的 `impl/DefaultJwtParser.java:320-365` 把 **key 绑死在一个算法上**：`Keys.hmacShaKeyFor(key)` 对 32 字节密钥 ⇒ 产出 `HmacSHA256` ⇒ 请求头写 `HS384`/`HS512` 时抛 **`WeakKeyException`** ⇒ **拒绝** | |
+
+### 证据（双侧探针，**11 个字节完全相同的 token**）
+
+探针 Go 侧走 go-zero 的 `rest/token.TokenParser`、Java 侧走本仓 `CommentJwtAuthInterceptor` 的**真实代码路径**：
+
+| token 形态 | Go | RAG | 判定 |
+|---|---|---|---|
+| HS256 / 缺 `exp` / `iat` 在未来 / HS384 / HS512 / 字符串 userId / 小数 userId … | 见 `docs/DRIFT/comment/api.md` §3.1 的矩阵 | | **11 例逐条对拍** |
+
+⇒ **只有 HS384 / HS512 这一类不一致**，其余 9 例两侧一致。
+
+### 为什么倾向签字（而不是放宽 RAG）
+
+1. **放宽是降低安全性**：要接受 HS384/HS512，就得让 jjwt 接受任意 HMAC alg ⇒ 需要显式配置 `SignatureAlgorithm` 白名单或改用 `SecretKey` 的多算法派生 —— **扩大了攻击面**。
+2. **实际部署只用 HS256**：两侧的密钥（`etc/commentservice.yaml:6` 与 `application.yml:64`）与签发方都只用 HS256 ⇒ **正常客户端零影响**。
+3. **Go 侧接受是「没限制」的副产物**，不是刻意设计（`WithValidMethods` 是 jwt/v4 提供的、go-zero 没启用）。
+4. ⚠️ **本条是「RAG 更严一侧」** ⇒ 与 `SD-2026-10-23-01/02/03` 的共性一致（RAG 做了更严/更安全的那一侧）。
+
+### ⚠️ 需要一并决策的点
+
+- 若签字：**任何用 HS384/HS512 签 token 的上游都要改**（当前没有）。
+- 若不签：需要把 jjwt 的算法白名单放开到 HS256/384/512 ⇒ **必须配套一条测试**锁住「不再抛 `WeakKeyException`」。
+- ⚠️ **签字后 `CommentJwtTokenMatrixGateTest` 的两条断言要同步改**（当前断言的是「RAG 拒绝」）。
+
+**签字人：______　签字日期：______**
+
+---
+
 ## 与既有台账的关系
 
 | 文件 | 关系 |

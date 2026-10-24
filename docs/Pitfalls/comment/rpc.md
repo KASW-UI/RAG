@@ -405,6 +405,161 @@ Kafka 4.x 的组协调在 JoinGroup 阶段拿不到 topic 元数据 ⇒ **指数
 
 ---
 
+## PIT-COMMENT-RPC-10 🔴 · GORM 的 `default:` 标签会**吃掉** `autoCreateTime` ⇒ 看 struct 定义会得出**相反**的结论
+
+### 一句话
+
+**「字段名叫 `CreatedAt`」会让 GORM 的命名约定打开 `autoCreateTime`，
+但 `default:` 标签又让 INSERT **跳过**这一列 —— 两个规则互相覆盖，
+只贴 struct 定义行必然得出与活体相反的结论。**
+
+### 形态（本轮实测）
+
+```go
+// rpc/internal/model/domain_fact.go:29
+CreatedAt time.Time `gorm:"column:created_at;not null;default:CURRENT_TIMESTAMP"`
+```
+
+**看起来** ⇒ GORM 命名约定（`schema/field.go:294-295`：`field.Name == "CreatedAt"` ⇒ `AutoCreateTime`）
+⇒ INSERT 会**显式带上** `created_at` = Go 进程当时。
+
+**实际上** ⇒ `callbacks/create.go:268-270`：
+
+```go
+if field := stmt.Schema.FieldsByDBName[db]; !field.HasDefaultValue || field.DefaultValueInterface != nil {
+    ... 把该列加进 INSERT ...
+}
+```
+
+`HasDefaultValue = true`（`schema/field.go:210-213` 解析 `DEFAULT` tag 时置位）
+且 `DefaultValueInterface == nil`（`schema/field.go:277-281` 试图 `now.Parse("CURRENT_TIMESTAMP")` **失败** ⇒ 不赋值）
+⇒ **整个条件为 false** ⇒ **`created_at` 根本不进 INSERT 列清单** ⇒ **DB 默认生效**。
+
+### 活体证据（不靠推理）
+
+Go 的 `DeleteCommentTx` 里 `comment_index` 的 `state=2` UPDATE（`comment.go:288`，推进 `updated_at`）
+**先于** `appendCommentFact` 的 outbox INSERT（`comment.go:338`），两者在**同一个事务**里
+⇒ 若 `created_at` 是 GORM 在 INSERT 时刻填的，它必须 **≥** `comment_index.updated_at`。
+
+实测：`outbox.created_at = 10:39:06.06046` **<** `comment_index.updated_at = 10:39:06.089807`
+⇒ **`created_at` 来自 DB 默认（事务开始时刻）**，不是 GORM 填的。✅
+
+### 后果
+
+⇒ 原先登记的漂移 D1（「RAG 走 DDL 默认 = 事务开始时刻，Go 走进程当时 ⇒ 值不同」）是**误判** ⇒ **撤销**，RAG 代码不动。
+
+### 可复用的判据
+
+> **判据：看到 struct tag 里有 `default:`，就不要假设 GORM 会替你填值 —— 必须读到 `callbacks/create.go` 那个消费点。**
+> 这正是 AGENTS.md §3.3.1 的「必须读到**消费该 tag 的那段控制流**，只贴 struct 定义行不算证据」。
+
+### 对应本轮的漂移
+
+[`../../DRIFT/comment/rpc.md`](../../DRIFT/comment/rpc.md) §3.1（D1 撤销）。
+
+---
+
+## PIT-COMMENT-RPC-11 🔴 · **已应用的 Flyway 迁移文件连注释都不能改** —— 签字记录写进去 = 校验失败
+
+### 一句话
+
+**「给已应用的迁移文件加一行签字说明」看起来是无害的注释，
+但 Flyway 的 checksum 是对文件**全文**算的 ⇒ 改一个字符 ⇒ 已落库的账本立刻对不上 ⇒ **组件起不来。**
+
+### 本轮实测（本仓自己踩的）
+
+`433dbbd` 那次签字 commit 里，给 `V5__create_comment_report_record.sql` 追加了 5 行签字说明：
+
+```
+-- ✅ **2026-10-24 用户已签字（Jason）**：**接受本偏离，保留本脚本**。
+```
+
+⇒ checksum 从 **733247998** 变成 **1073033367** ⇒ 与 `flyway_schema_history_comment` 里已应用的 **733247998** 不符。
+
+### 🟢 活体双向实验（**正反两面都跑了**，2026-10-24）
+
+| 实验 | 操作 | 结果 |
+|---|---|---|
+| **正向** | 用**恢复原字节**的 V5（checksum **733247998**）启动 `comment-rpc`，连**已有账本**的 `rag_comment` 库 | ✅ `Successfully validated 8 migrations` → `Schema "public" is up to date. No migration necessary.` ⇒ **组件正常启动** |
+| **反向** | 把账本里 V5 的 checksum 改成 **1073033367**（= `433dbbd` 那版文件的值）再启动 | 🔴 **`Validate failed: Migrations have failed validation` / `Migration checksum mismatch for migration version 5`** ⇒ **组件起不来**（随后已把账本改回 733247998） |
+
+⇒ **结论**：`433dbbd` 那笔 commit **一旦合入，任何在它之前应用过 V5 的环境都会在启动时直接失败**。
+⇒ 修复动作 = **把 V5 恢复成原始字节并提交**（签字记录改放 Java javadoc + 台账）。
+
+### 校验 checksum 的正确姿势（Flyway 的算法不是「文件 CRC32」）
+
+Flyway 的 `ChecksumCalculator` 是**逐行**累加 CRC32，**不含行尾符** ⇒
+和「整个文件的 CRC32」**不是一回事**。本轮用下面这段脚本对 V1~V8 **8/8 全部与库中一致**（用它反证算法正确）：
+
+```python
+import zlib
+def flyway_crc(text: str) -> int:
+    crc = 0
+    for line in text.split('\n'):          # Java readLine() 的语义：不含行尾符
+        crc = zlib.crc32(line.encode('utf-8'), crc)
+    return zlib.crc32(b'', crc) & 0xffffffff
+def to_int(v):                            # PG 存的是有符号 int32
+    return v - 4294967296 if v > 2147483647 else v
+```
+
+> ⚠️ **判据**：校验 checksum 前，**先拿这个算法把「当前所有迁移文件」跑一遍，与库里的值对一遍** ——
+> 算法对了再谈哪条对不上，否则容易把「算法不对」误判成「文件被改过」。
+
+### 正确做法
+
+| 想记的东西 | ❌ 不能放哪 | ✅ 该放哪 |
+|---|---|---|
+| 签字偏离的结论 | ❌ **已应用的 `.sql` 迁移文件**（连注释都不行） | ✅ **Java javadoc**（如 `ReportRecordMapper.java`）+ **台账** |
+| 迁移脚本的语义说明 | ❌ 已应用文件 | ✅ **新写的迁移文件**（或台账） |
+
+⚠️ **Flyway 只增不改** ⇒ 想撤销一条已应用的迁移，正确做法是**新写 V9 DROP TABLE**，**不是**改 V5。
+
+### 对应本轮的漂移
+
+无（**不是**漂移，是**流程坑**）。已在 [`../../Intentional_Deviations/comment/rpc.md`](../../Intentional_Deviations/comment/rpc.md) 的
+`SD-2026-10-24-CAND-02` 记签字结论，签字说明落在 `ReportRecordMapper.java` 的 javadoc。
+
+---
+
+## PIT-COMMENT-RPC-12 🔴 · 基础设施挂掉时，**对拍报告会把故障当成语义差异**
+
+### 一句话
+
+**Kafka 容器被 OOM kill（exit 137）⇒ 两侧审计管道全断 ⇒ 报告里全是「差异」——
+而那些差异没有一个是 comment 域的语义问题。**
+
+### 本轮实测
+
+容器 `cdifftest-kafka` 被 OOM kill（`docker ps` 显示 `Exited (137)`）后那一轮对拍产出：
+
+| 现象 | 真实原因 |
+|---|---|
+| 「create 返回 200 但库里没有」 | 消费者没起来 ⇒ 审计消息无人消费 ⇒ 永不落库 |
+| 「RAG 侧 2s deadline exceeded」 | Kafka 客户端在重连 ⇒ 拖慢了整条链路 |
+
+⇒ **两个都不是 comment 域的漂移**，但报告会把它们**当成差异列出来**（还带着「RAG 比 Go 慢」的结论倾向）。
+
+### 修法：**前置健康检查，不健康就中止**
+
+`tools/difftest/comment/run_diff.sh` 现在在跑矩阵**之前**做三件事，任一不过 ⇒ **`exit 4` 中止**（而不是跑出一堆假差异）：
+
+1. 三个容器 `cdifftest-postgres` / `cdifftest-redis` / `cdifftest-kafka` 的状态必须是 `running`；
+2. PG 可达（`psql -c "select 1"`）、Redis 可达（`PING` ⇒ `PONG`）；
+3. Kafka 里 `comment-audit-topic*` **数量 ≥ 2**。
+
+### 可复用的判据
+
+> **判据：任何「双侧对拍 / 集成测试」在跑之前，先验基础设施；
+> 「跑出一堆差异」的第一反应应该是「我的环境是不是挂了」，而不是「对方写错了」。**
+>
+> **判据 2：docker 容器 `Exited (137)` = OOM kill**，不是「正常退出」⇒ `docker start` 恢复即可，但根因（内存上限）要单独处理。
+
+### 对应本轮的漂移
+
+无（**不是**漂移，是 harness 坑）。已在 [`../../DRIFT/comment/rpc.md`](../../DRIFT/comment/rpc.md) §4.6.5 记录。
+
+---
+
 ## 与既有台账的关系
 
 | 文件 | 关系 |
