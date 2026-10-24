@@ -1,9 +1,15 @@
 # like-api 语义对照台账
 
-> **核对日期**：2026-10-23（本轮复核 · 组件级 · Go → Spring Boot）
+> **核对日期**：2026-10-24（**第 5 轮** · 组件级 · Go → Spring Boot）
 > **Go 侧**：`/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/like/api`
 > **RAG 侧**：`/Users/pr/Documents/java&golang/RAG/service/like/like-api`
+> ⚠️ **第 3~5 轮的改动在工作树里**：`/Users/pr/Documents/java&golang/RAG.worktrees/like`（分支 `align/like`，**尚未合并**）
 > **方法**：`.agents/specs/semantic-verification-prompt.md`（Go 重建基准 → RAG 对照）
+>
+> ⚠️ **本文件按「轮次」追加，§1~§10 是首轮（2026-10-23）的原始记录、原文不改** ——
+> 首轮的判定**已被后续轮次推翻**，**不要**把 §10.2 的 `SEMANTICALLY NOT EQUIVALENT` 当作当前结论。
+> ⇒ **当前状态速览见下方「📌 当前状态（2026-10-24 · 第五轮后）」**；
+> 逐轮细节见文件末尾的「第三轮 / 第四轮 / 第五轮」章节。
 
 ## 证据强度声明（本轮）
 
@@ -11,12 +17,28 @@
 |---|---|---|---|
 | **E-Go** | **Go 活体探针** | `/tmp/likeprobe/main.go`，独立小程序，直接调 `go-zero v1.10.2` 的 `httpx.Parse` / `OkJsonCtx` / `SetErrorHandler`，struct 定义逐字复制自 `internal/types/types.go`。56 条输入矩阵 + 6 条 envelope 字节 + 3 条错误路径字节 | Go 的**输入解释与出参字节**。不含业务逻辑（无 like-rpc），不含 HTTP 层（路由/JWT/超时） |
 | **E-Rag** | **RAG 活体探针（真实 MVC 管线）** | `/tmp/likeprobe/RagProbe.java` + `NullElem.java`。用生产 `JsonMapper`（`LikeGoStyleCoercion.applyTo` 原样装配）、生产 DTO、`GoStyleRequest.normalize`、生产 `GoStyleJsonBodyConverter`、生产 `GlobalExceptionHandler` / `GlobalResponseAdvice`，以 `MockMvcBuilders.standaloneSetup` 驱动；proto 用生产 `com.rag.like.like.proto` 生成类 | RAG 的**输入解释 / 必填判定 / 响应形状**。⚠️ `MockMvc` 不等价于真 Tomcat（不参与 `Content-Length` 真实计算、不驱动 converter 排序以外的容器行为） |
-| **E-Tomcat** | RAG 真容器测试 | `LikeApiRouterErrorRealTomcatTest`（`RANDOM_PORT` + JDK HttpClient 读原始响应），本轮 `mvn -o -pl service/like/like-api test` 实跑 **62 tests / 0 failures / 0 errors** | 404/405 的字节级形状、鉴权遮蔽边界 |
+| **E-Tomcat** | RAG 真容器测试 | `LikeApiRouterErrorRealTomcatTest`（`RANDOM_PORT` + JDK HttpClient 读原始响应），首轮（2026-10-23）`mvn -o -pl service/like/like-api test` 实跑 **62 tests / 0 failures / 0 errors**；🔴 **2026-10-24 更新：like-api 现为 81 tests / 0 failures**（第三~五轮新增 19 条） | 404/405 的字节级形状、鉴权遮蔽边界 |
 | **E-Src** | 静态源码 | 两侧源码逐行对照，Go 侧引用到**消费点**行号 | 只证明「代码写成了这样」，**不证明运行期真的这样** |
 | **E-Cfg** | 配置 + 装配源码 | yaml ↔ struct tag ↔ 过滤器注册链 | 「配置与装配代码都在」，**不等于运行期生效**（AGENTS.md §3.3） |
 
-> ⚠️ **本组件绿测试 62 条全绿** —— 但绿测试**不是**「无漂移」的证据（AGENTS.md §0）。
+> ⚠️ **本组件绿测试 62 条全绿**（首轮 2026-10-23 实跑）—— 但绿测试**不是**「无漂移」的证据（AGENTS.md §0）。
 > 本轮 6 条 SEMANTIC MISMATCH **全部落在现有 62 条测试的覆盖之外**。
+> 🔴 **2026-10-24 更新（第五轮后）**：like-api 现有 **81 tests / 0 failures**；
+> 那 6 条里 **5 条已修**（012 / 013 / 014 / 016 / 017），**只剩 015**（落点在 6 域共用的 `service/common`）。
+> ⇒ **首轮的「SEMANTICALLY NOT EQUIVALENT」判定已过期** —— 当前判定见下方速览与末尾第五轮章节。
+
+---
+
+## 📌 当前状态（2026-10-24 · 第五轮后）
+
+| 项 | 值 |
+|---|---|
+| **当前三值判定** | 🔴 **仍 `SEMANTICALLY NOT EQUIVALENT`** —— 但**理由已变**：首轮的 6 条 SEMANTIC MISMATCH 里 **5 条已修**，**只剩 015** 一条真的还没修 |
+| **未修的语义漂移** | **DRIFT-LIKEAPI-015**（`Content-Type` 大小写）—— 落点在 `service/common` 的 `GoStyleJsonBodyConverter`，**6 个域共用** ⇒ **须单域串行处理** |
+| **待签字** | **4 条 ⏳ 待签字候选**：021 / 022 / SD-2026-10-24-10（017 的毫秒粒度取整）/ **SD-2026-10-24-11**（网关层拒绝计数 —— Java 比 Go 多暴露一个指标）⇒ 见 [`../../Intentional_Deviations/like/api.md`](../../Intentional_Deviations/like/api.md) |
+| **跨仓未解** | 事实投递链路（003，rpc 侧）需独立进程 + 真 DC 接收服务不在任何仓 ⇒ `UNRESOLVED` |
+| **测试** | like-api **81 / 0 failures**；like-rpc **57 / 0 failures**（真 PG Testcontainers） |
+| **本轮改动落点** | 工作树 `RAG.worktrees/like` 分支 `align/like`，**未 push、未建 issue、未开 PR** |
 
 ---
 
@@ -138,6 +160,10 @@
 
 ## 4. Equivalence Matrix
 
+> 🔴 **2026-10-24 审计更正 —— 本矩阵是**首轮（2026-10-23）**的快照**。
+> 其中 012 / 013 / 014 / 016 / 017 各行的「Spring Boot」列写的是**修复前**的行为。
+> ⇒ **当前状态以 §3.5「当前判定」与各条末尾的「状态」行为准**；本矩阵保留是因为它记录了「首轮看到了什么」。
+
 > Result 只用 5 个枚举值。Evidence 见本文件头部 E-Go / E-Rag / E-Src / E-Cfg。
 
 | # | Operation | Semantic Dimension | Go | Spring Boot | Result | Evidence |
@@ -208,6 +234,8 @@ Side Effect     : likeaction 会改 like-rpc 侧的数据（本组件无本地�
 | 超时被取消 | `DEADLINE_EXCEEDED` | `CANCELLED`（补 deadline 后为 `DEADLINE_EXCEEDED`） | 见矩阵 #32 |
 
 ### 5.2 ERROR FLOW 汇总
+
+> 🔴 **2026-10-24 审计更正 —— 本表是**首轮快照**，012 / 013 / 014 / 016 / 017 的错误流已变** ⇒ 现状见 §3.5 与各条「状态」行。
 
 | Failure | 触发条件 | Go 输出 | Spring Boot 输出 | Semantic Equivalent |
 |---|---|---|---|---|
@@ -280,6 +308,8 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 ⇒ **EQUIVALENT**（两侧都不重试）。
 
 ### 6.8 Serialization Semantics（§19）
+
+> 🔴 **2026-10-24 审计更正 —— 本节是**首轮快照**；012 / 013 / 014 / 016 的序列化结论已在第四轮改变 ⇒ 现状见 §3.5。
 | 维度 | Go | RAG | Result |
 |---|---|---|---|
 | JSON 库 | `core/jsonx`（`encoding/json` + `UseNumber` + `SetEscapeHTML(false)`） | Jackson 3（`tools.jackson` 3.1.5） | IMPLEMENTATION DIFFERENCE |
@@ -325,7 +355,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 
 | ID | 项 | 分类 | 状态 |
 |---|---|---|---|
-| **DRIFT-LIKEAPI-001** | HTTP 请求超时 | SEMANTIC MISMATCH | ✅ **2026-10-23 复核：已修**。`application.yml:27-29` 已配 `observability.http-timeout: 3s`；装配链完整：`HttpMiddlewareFilter`（`@Component` + `@Order(HIGHEST_PRECEDENCE+5)`）← `LikeApiApplication:63-66` 的 `scanBasePackages` 含 `com.rag.common` ⇒ 自动注册。⚠️ **按 §3.3 记「配置+装配已核对，运行期 503 出口未复现」**（本轮探针未起真 Tomcat 打超时路径） |
+| **DRIFT-LIKEAPI-001** | HTTP 请求超时 | SEMANTIC MISMATCH | ✅ **2026-10-23 复核：已修**。`application.yml:27-29` 已配 `observability.http-timeout: 3s`；装配链完整：`HttpMiddlewareFilter`（`@Component` + `@Order(HIGHEST_PRECEDENCE+5)`）← `LikeApiApplication:75-78` 的 `scanBasePackages` 含 `com.rag.common`（🔴 2026-10-24 更正：原写 63-66，行号已随第四轮的 javadoc 修改位移） ⇒ 自动注册。⚠️ **按 §3.3 记「配置+装配已核对，运行期 503 出口未复现」**（本轮探针未起真 Tomcat 打超时路径） |
 | **DRIFT-LIKEAPI-002** | `target_ids` 必填性 | SEMANTIC MISMATCH | ✅ **2026-10-23 复核：已修且结论成立**。Go 活体探针 B02 复现：`type mismatch for field "target_ids"`；B03 `mustn't be nil`。RAG 侧 `GetLikeCountReq#assertGoRequiredFields` 抛 `GoRequiredFieldException` ⇒ 200+5001。⚠️ **但遗留 3 处未清理的旧断言**：`-018`（本文件外）与 `LikeReqGoStyleValidationTest` 类注释 ⇒ 见 **DRIFT-LIKEAPI-019** |
 | ~~DRIFT-LIKEAPI-003~~ | 请求保护层四层全缺 | — | ✅ 已关（2026-10-22）。本轮未复审 |
 | ~~DRIFT-LIKEAPI-004~~ | 超限请求优先级（413 而非 401） | — | ✅ 已关（2026-10-22）。本轮未复审 |
@@ -338,6 +368,11 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | ~~DRIFT-LIKEAPI-009~~ | `author_id = -2^63` 被误拒 | — | ❌ 复核为误报，已撤销。⚠️ **本轮探针再次印证**：`GoStyleStringInt64` 的 `bitLength() >= 64` 判据正确（`Long.MIN_VALUE` 的 bitLength 是 63），见矩阵 #21（D 系列全绿） |
 
 ### 7.2 本轮新增
+
+> 🔴 **2026-10-24 审计更正 —— 本小节是**首轮（2026-10-23）**的快照**。
+> 各条的 `Java Behavior` / `Difference` / `Observable Impact` 三列写的是**修复前**的行为，
+> 字段名却是现在时 ⇒ 按它核对会误判「漂移还在」。
+> ⇒ **每条末尾的「状态」行是权威的当前状态**；修复细节见第三/四/五轮章节。
 
 ---
 
@@ -358,6 +393,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Must Preserve** | `target_ids` 的**元素**允许 JSON 数字，且按 `json.Number.String()` 原样字符串化 |
 | **Recommended Verification** | ① 在 `GetLikeCountReq` / `GetLikeStateReq` 的 `setTargetIds` 改用 `Object` 入参 + 一个仿 `GoStyleStringInt64` 的元素级解析器（只对 Slice 元素放开 Integer/Float，标量规则不动）；② 或给 DTO 加显式元素级 coercion 豁免。**⚠️ 注意 Jackson 3 的 coercion 配置只有 LogicalType 级生效，类级无效**（`GoStyleCoercion:74-83` 已实测记录此坑），所以**不要指望 `withCoercionConfig(SomeListClass, …)`** |
 | **Evidence** | **双侧活体对拍**：Go `/tmp/likeprobe` B05 `OK ids=[1 2]` / B06 `OK ids=[1.5]` / B28 `OK ids=[99999999999999999999]`；RAG 同输入 `InvalidFormatException: Cannot coerce Integer value (1) to java.lang.String`。消费点：`core/mapping/unmarshaler.go:227-231`（`fillSliceValue` 的 `case fmt.Stringer`） |
+| **状态** | ✅ **已修（第四轮）** —— 修复：`GoStyleRawStringListDeserializer`（数字取原始 token 文本）· 守门 `LikeApiGoAlignmentTest` 3 条 + 变异验证 2 条转红。**本表的 `Java Behavior` / `Difference` / `Observable Impact` 三列是修复前的快照** ⇒ 现状见第四轮章节。 |
 
 ---
 
@@ -377,6 +413,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Must Preserve** | Go 对 null 元素的实际语义：全 null ⇒ nil slice；部分 null ⇒ 该位变空串且**长度不变** |
 | **Recommended Verification** | 在 `LikeCountService` / `LikeStateService` 的 `idList` 里把 null 元素替换成 `""`；并单独钉死「全 null ⇒ 空列表」与「部分 null ⇒ 长度不变、null 位为空串」两条（后者**不是**过滤，Go 不会缩短数组） |
 | **Evidence** | **双侧活体对拍**：Go B08 `OK ids=[] nil=true` / B09 `OK ids=[]string{"x", "", "y"}`；RAG `ids=[null]` / `ids=[x, null, y]`，proto 侧 `/tmp/likeprobe/NullElem.java` 实测 `NullPointerException: Element at index 0 is null.`。消费点：`core/mapping/unmarshaler.go:156-160,181-183` |
+| **状态** | ✅ **已修（第三轮）** —— 修复：`GoStyleTargetIds`（全 null ⇒ 空列表 / 部分 null ⇒ 空串占位）· 守门测试 5 条。**本表三列是修复前的快照** ⇒ 现状见第三轮章节。 |
 
 ---
 
@@ -396,6 +433,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Must Preserve** | 二选一必须**显式决策**：要么在 RAG 侧关掉 `FAIL_ON_TRAILING_TOKENS` 以对齐 Go，要么把这条登记为**签字的有意偏离**。⚠️ **当前的沉默状态最坏**：既没关，也没有任何台账记录它 |
 | **Recommended Verification** | 在 `LikeGoStyleCoercion.applyTo` 里 `builder.disable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)`（或显式 `enable` 并签字），并加一条锁死该判定的测试 |
 | **Evidence** | **双侧活体对拍**：Go B21 `OK tt="a"` / B22 `OK tt="a"`（取第一个对象）；RAG B21 `StreamReadException: Unrecognized token 'xx'` / B22 `MismatchedInputException: Trailing token … not allowed as per DeserializationFeature.FAIL_ON_TRAILING_TOKENS`。消费点：`core/jsonx/json.go:74-77` |
+| **状态** | ✅ **已修（第三轮）** —— 修复：`LikeGoStyleCoercion` 关掉 `FAIL_ON_TRAILING_TOKENS`（对齐 Go 只解第一个值）· 守门测试 2 条。**本表三列是修复前的快照** ⇒ 现状见第三轮章节。 |
 
 ---
 
@@ -415,6 +453,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Must Preserve** | 判据必须作用在**未经解析的原始头**上（`request.getHeader("Content-Type")`），而不是 `getContentType().toString()` |
 | **Recommended Verification** | 改 `GoStyleJsonBodyConverter.read` 传入 `((HttpServletRequest) …).getHeader("Content-Type")`（或 `inputMessage.getHeaders().getFirst("Content-Type")`）；加一条**走完整管线**（不能只测 `goReadsBody`）的用例钉死 `Content-Type: APPLICATION/JSON` |
 | **Evidence** | **双侧活体对拍**：Go A04 `Content-Type: APPLICATION/JSON` ⇒ `ERR field "target_type" is not set`；RAG A04/A08b ⇒ `200 {"code":200,…,"echo_ids":"[1]"}`。消费点：`rest/httpx/requests.go:153-155`（`r.Header.Get` 原始头）vs `GoStyleJsonBodyConverter.java:115-118`（`getContentType().toString()`） |
+| **状态** | 🔴 **仍未修** —— 修法落在 `service/common` 的 `GoStyleJsonBodyConverter`（**6 个域共用**）⇒ **须单域串行**。⚠️ 2026-10-24 审计更正：本条「各域都有 `*GoStyleBodyContentTypeTest`」**不准确**（实测只有 like / message / users×2 **4 个模块**有）；且**域内绕过已实测排除**（`OrderComparator` 同 order 无 tiebreak ⇒ 排序不可控）。 |
 
 ---
 
@@ -434,6 +473,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Must Preserve** | `weight` 超出 float64 值域 ⇒ 解析失败，不得产生 `Infinity` |
 | **Recommended Verification** | 给 `LikeActionReq#setWeight` 改成 `Object` 入参 + 显式 `isFinite()` 校验；或在 DTO 层加一道 `Double.isFinite` 断言（抛 `IllegalArgumentException` ⇒ 已被 `handleIllegalArgument` 折叠成 5001） |
 | **Evidence** | **双侧活体对拍**：Go D07 `ERR strconv.ParseFloat: parsing "1e400": value out of range`；RAG D07 `OK w=Infinity`。消费点：`core/mapping/unmarshaler.go:686-693`（`v.Float64()` 后的 `target.SetFloat`，**未检查 ErrRange** 之外的上层 `setValueFromString` 路径）→ 实测报错来自 `setValueFromString` 的 `ParseFloat` 返回值检查 |
+| **状态** | ✅ **已修（第四轮）** —— 修复：`GoStyleFloat64Deserializer`（`isFinite` 校验）· 守门 4 条 + 变异验证 2 条转红。**本表三列是修复前的快照** ⇒ 现状见第四轮章节。 |
 
 ---
 
@@ -452,7 +492,8 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Risk** | **MEDIUM**（只在 2–3s 窗口可观测；但下游变慢时「RAG 会把本该超时的调用放过去」正是线上最难查的一类问题） |
 | **Must Preserve** | 单次 RPC 调用封顶 **2000ms**，与 HTTP 总预算 **3000ms** 是**两个独立旋钮** |
 | **Recommended Verification** | 给 `LikeRpcClient` 增加一个显式的 `like-rpc` 超时配置（默认 `2000ms`），在 `likeRpc()` 里取 `min(配置值, HTTP 剩余预算)`；⚠️ 改完后 `GoStyleRequestDeadline` 的「无预算就原样返回」分支也要重新审 —— 单测里没有 HTTP 超时上下文时，两侧语义会再次分叉<br>🔴 **2026-10-23 第五轮更正（本行后半句是错的）** —— 「需连带审 `common` 的 deadline 组件」**不成立**：<br>① `GoStyleRequestDeadline` 的**公开** API 已有 `isPresent()` / `remainingMillis()`，而 `applyTo(stub)` 的语义就是「把当前线程的剩余预算套到 stub 上」⇒ **只读**这两个方法就能拿到剩余预算，**不需要改 common**；<br>② 「无预算就原样返回」那条分支**根本不参与**：修法是**不再调用 `applyTo`**，改成 like-api 自己算 `min(2000, 剩余)` —— 无预算时 Go 的有效 deadline 是**纯 2s**（`context.WithTimeout(ctx, 2s)` 在无 deadline 的 ctx 上就是 2s），不是「没有 deadline」。<br>⇒ **本条是纯域内可修项，不受 §4 的跨域并发约束。** 详见第五轮章节。 |
-| **Evidence** | E-Go 源码链：`zrpc/config.go:31` → `zrpc/client.go:70-72` → `clientinterceptors/timeoutinterceptor.go:17-30`；E-Src：`GoStyleRequestDeadline.java:110-120` + `LikeRpcClient.java:78-80`。⚠️ 「3000 − 已耗时 > 2000 时 RAG 真的放行」这一条**未做双端活体对拍**（需要真的让 like-rpc 慢 2.5s），见 §9 U-04 |
+| **Evidence** | E-Go 源码链：`zrpc/config.go:31` → `zrpc/client.go:70-72` → `clientinterceptors/timeoutinterceptor.go:17-30`；E-Src：`GoStyleRequestDeadline.java:110-120` + `LikeRpcClient.java:133-147`（🔴 2026-10-24 更正：原写 78-80，是第五轮改实现前的行号）。⚠️ 「3000 − 已耗时 > 2000 时 RAG 真的放行」这一条**未做双端活体对拍**（需要真的让 like-rpc 慢 2.5s），见 §9 U-04 |
+| **状态** | ✅ **已修（第五轮）** —— 修复：`LikeRpcClient.likeRpc()` 改为 `min(2000ms, HTTP 剩余预算)`、**不再调用 `applyTo`**；`LikeApiProperties` 新增 `LikeRpc.timeout`（默认 2000ms）· 守门 `LikeRpcTimeoutCapTest` 6 条（真 in-process gRPC server）+ 变异验证 3 条转红。**本表三列是修复前的快照** ⇒ 现状见第五轮章节。 |
 
 ---
 
@@ -463,7 +504,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Component** | like-api（入口类文档） |
 | **Operation** | n/a（文档） |
 | **Category** | **文档致高危**（AGENTS.md §3.3.2 同款形态） |
-| **断言原文** | `LikeApiApplication.java:25-29`：<br>「⚠️ **本服务没有配置超时**：Go 侧 `etc/likecenter.yaml` 的 RestConf **没有 `Timeout` 字段** ⇒ `TimeoutFromMillis(0) == 0` ⇒ `observability.NewHTTPMiddleware` 走 `timeout <= 0` 的『不设超时』分支。Java 侧因此**刻意不配** `observability.http-timeout`，配了就等于凭空加了一条 Go 没有的 503 超时出口。」 |
+| **断言原文** | `LikeApiApplication.java:25-41`（🔴 2026-10-24 更正：原写 25-29）：<br>「⚠️ **本服务没有配置超时**：Go 侧 `etc/likecenter.yaml` 的 RestConf **没有 `Timeout` 字段** ⇒ `TimeoutFromMillis(0) == 0` ⇒ `observability.NewHTTPMiddleware` 走 `timeout <= 0` 的『不设超时』分支。Java 侧因此**刻意不配** `observability.http-timeout`，配了就等于凭空加了一条 Go 没有的 503 超时出口。」 |
 | **事实** | ① Go 的 `Timeout` 由 **struct tag** 提供：`rest/config.go:55` `Timeout int64 json:",default=3000"` ⇒ yaml 不写也等于 **3000ms**；② Java 侧**已经配了** —— `application.yml:27-29` `observability.http-timeout: 3s`；③ 因此这条注释描述的「刻意不配」**早已不存在**，且它描述的 Go 行为是 **DRIFT-LIKEAPI-001 的成因本身** |
 | **Why It Matters** | 这是 §3.3.2 点名的**最危险形态**：一段「引用真实文件、行文自信」的 Go 断言，指向已被证伪的推理，而它就在**应用入口类**上 —— 任何人排查超时或整理配置时**第一眼就会读到它**，并据此把 `http-timeout: 3s` 当成「凭空多出来的出口」删掉 ⇒ **DRIFT-LIKEAPI-001 原地复活** |
 | **Observable Impact** | 无运行时影响；影响的是下一次改动 |
@@ -472,6 +513,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Must Preserve** | — |
 | **Recommended Verification** | 改写为：「Go 的 3s 来自 `rest/config.go:55` 的 struct tag 默认值（yaml 未写），本模块在 `application.yml` **显式写出同值**」 |
 | **Evidence** | E-Go：`rest/config.go:55`（tag 声明）+ `observability/http.go:30-34,88`（消费点）；E-Src/E-Cfg：`application.yml:27-29` 已配 3s。**本条已由本轮实测交叉确认**：若 Go 真无超时，则 `A01`（无 Content-Type）那条路径不会有 3s 窗口 —— 无关；决定性证据是 tag 默认值本身 |
+| **状态** | ✅ **已修（第四轮，纯注释）** —— `LikeApiApplication` 的类 javadoc 已改成「整条推理不成立」。**刻意不加运行期断言**（U-03 记着「3s 的 503 出口未复现」）⇒ 加一条恒真断言等于制造假绿。 |
 
 ---
 
@@ -490,6 +532,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Must Preserve** | 类级注释里的 Go 结论必须与 §59-73 行一致：**无 tag 的 Slice 与标量同样必填**，只是错误文案不同 |
 | **Recommended Verification** | 删除 `-31` 的「Slice 永不计必填」字样与 `-40` 的 `← 不报错` 标注，改写为指向同文件 59-73 行的结论 + `unmarshaler.go:944-950 → processFieldNotFromString(emptyMap) → processFieldPrimitive → newTypeMismatchError` 的完整调用链 |
 | **Evidence** | E-Go 探针 **B02 = `ERR type mismatch for field "target_ids"`**（`{"target_type":"a"}`），**B04 = `OK ids=[]`**（`target_ids:[]` 合法）。消费点：`core/mapping/unmarshaler.go:944-950` |
+| **状态** | ✅ **已修（第四轮，纯注释）** —— `LikeReqGoStyleValidationTest` 类注释已改成「标量与 Slice 都必填」。 |
 
 ---
 
@@ -506,6 +549,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Risk** | **LOW-MEDIUM**（有人据此以为「Go 拒绝一切 `+json`」⇒ 可能给 `application/json-patch+json` 加上 Go 没有的拒绝逻辑） |
 | **Recommended Verification** | 把 DisplayName 收窄为「`application/vnd.api+json` 不含 `application/json` 子串 ⇒ Go 不读；⚠️ `application/json-patch+json` **含**该子串 ⇒ Go 会读，RAG 也读」；并在 `goReadsBody` 的边界测试里补一条 `application/json-patch+json → true`（本轮实测确为 `true`） |
 | **Evidence** | E-Go A05 `Content-Type: application/json-patch+json` ⇒ **`OK tt="a" ids=[1]`**（读）；A-E-Rag `goReadsBody("application/json-patch+json",10) = true`。消费点：`rest/httpx/requests.go:154` 的 `strings.Contains` |
+| **状态** | ✅ **已修（第四轮）** —— `LikeApiGoStyleBodyContentTypeTest` 的措辞已收窄，并补边界用例 `jsonPatchContentTypeIsReadBecauseItContainsTheSubstring`。 |
 
 ---
 
@@ -525,6 +569,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Must Preserve** | 不必强行对齐（会与容器对抗）；⚠️ 若将来有客户端按原始字符串比对，需登记为签字偏离 |
 | **Recommended Verification** | 保持现状；在 `docs/Intentional_Deviations/_cross/signed-deviations.md` 追加一行留档 |
 | **Evidence** | E-Go F01/F04 `ct="application/json; charset=utf-8"`；E-Rag A03 `ct=application/json`。消费点：`core/jsonx` + `rest/httpx/responses.go:182` `w.Header().Set(ContentType, header.ContentTypeJson)` |
+| **状态** | ⏳ **已建档为待签字候选**（**不是**已签字）—— `docs/Intentional_Deviations/like/api.md` 的 SD-2026-10-23-08 / -09。⚠️ 2026-10-24 更正：本节原写「在 `docs/Intentional_Deviations/_cross/signed-deviations.md` 追加一行留档」—— **该文件里没有任何 like 条目**，实际建档位置是 `docs/Intentional_Deviations/like/api.md`。 |
 
 ---
 
@@ -639,6 +684,8 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 
 ### 10.1 §39 的 18 项 checklist（逐条）
 
+> 🔴 **2026-10-24 审计更正 —— 本表是**首轮快照**；第 5 项（序列化）与第 8 项（超时）涉及 012~017 ⇒ 现状见 §3.5 与各条「状态」行。
+
 | # | 检查项 | 结论 | 依据 |
 |---|---|---|---|
 | 1 | 两边的 public behavior 是否一致？ | ❌ **否** | 6 条 SEMANTIC MISMATCH（012~017） |
@@ -666,6 +713,12 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 SEMANTICALLY NOT EQUIVALENT
 ```
 
+🔴 **2026-10-24 更新（第五轮后）—— 本判定已过期**：
+首轮的 6 条 SEMANTIC MISMATCH 中 **012 / 013 / 014 / 016 / 017 已修**（第四/五轮），
+**只剩 015**（落点在 6 域共用的 `service/common`）；
+文档层的 018/019/020 已修；021/022 已建档为 ⏳ 待签字候选。
+⇒ **三值结论仍是 `NOT EQUIVALENT`（因为 015 还在），但理由只剩一条** —— 当前判定见开头速览与末尾第五轮章节。
+
 **理由**：存在 **6 条会改变行为的 SEMANTIC MISMATCH** + **4 条 OBSERVABLE DIFFERENCE**，
 其中 3 条（012/013/015/016）**直接改变「是否向下游发出请求」或「发出什么内容」**，
 1 条（017）改变超时语义，1 条（014）改变解析成败。
@@ -680,7 +733,7 @@ SEMANTICALLY NOT EQUIVALENT
 | 结论类别 | 条数 | 证据强度 |
 |---|---|---|
 | SEMANTIC MISMATCH（012/013/014/015/016） | 5 | **双侧活体对拍**（同矩阵、同输入、两侧各跑一次真实解析路径） |
-| SEMANTIC MISMATCH（017） | 1 | Go 源码链到消费点 + RAG 源码链；**活体对拍未做** ⇒ §9 U-04 |
+| SEMANTIC MISMATCH（017） | 1 | Go 源码链到消费点 + RAG 源码链；**活体对拍未做** ⇒ §9 U-04<br>🔴 **2026-10-24：活体对拍已做**（第五轮：真 in-process gRPC server，服务端睡 2500ms ⇒ 客户端 `DEADLINE_EXCEEDED`；反向对照证明上界调到 5s 时**成功**）⇒ U-04 已闭环 |
 | SEMANTIC MISMATCH（文档层 018/019/020） | 3 | 源码直读 + Go 活体探针反证 |
 | OBSERVABLE DIFFERENCE（021/022/#32） | 3 | 源码 + 探针（#32 为源码级，已由 `GoStyleRequestDeadline` 自陈） |
 | EQUIVALENT（矩阵 40 项中 31 项） | 31 | 多数为**双侧活体对拍**；404/405/401 为**真 Tomcat 实跑** |
@@ -694,6 +747,9 @@ SEMANTICALLY NOT EQUIVALENT
 2. **DRIFT-LIKEAPI-018/019/020 是文档缺陷，不是运行时缺陷**。它们不影响当前行为，
    但**每一条都会在下一次改动时变成运行时缺陷** —— 这正是 §3.3.2 立该硬要求的原因。
 3. **绿测试 62 条全绿不构成本判定的反证**。本轮 6 条 MISMATCH 无一被现有测试覆盖。
+   🔴 **2026-10-24 更新**：第五轮新增的 6 条守门测试同样证明了这点 ——
+   变异验证显示摘掉修复后 **3 条转红**，而其余既有测试**全绿** ⇒
+   「既有测试全绿」与「守门网有效」是**两件独立的事**。
 ---
 ---
 
@@ -708,7 +764,7 @@ SEMANTICALLY NOT EQUIVALENT
 |---|---|
 | **已修** | **DRIFT-LIKEAPI-013**（null 元素崩在 protobuf）、**DRIFT-LIKEAPI-014**（尾随 token）
 | **已修（第四轮，见下）** | **012**（target_ids 数字）/ **016**（weight 溢出）/ **018 / 019 / 020**（三条文档高危断言）
-| **新增守门测试** | `LikeApiGoAlignmentTest` **5 条**（基线 62 → 67）；第四轮再加 **7 条**（→ **75**）并做了**变异验证** |
+| **新增守门测试** | `LikeApiGoAlignmentTest` **5 条**（基线 62 → 67）；第四轮再加 **8 条**（**7 条**在 `LikeApiGoAlignmentTest`（5→12）+ **1 条**在 `LikeApiGoStyleBodyContentTypeTest`（7→8））⇒ 67 + 8 = **75**并做了**变异验证** |
 | **证据强度** | 4 条走**真实 MVC 管线** + `ArgumentCaptor` 捕获真实下游 proto；1 条纯函数 |
 | **⚠️ 零覆盖已证伪两次** | 这 2 条修复改回原状时，既有 62 条<b>依然全绿</b> |
 
@@ -770,7 +826,7 @@ Go 侧则**正常发出**。
 
 | ID | 内容 | 为什么没做 |
 |---|---|---|
-| **DRIFT-LIKEAPI-015** | `Content-Type` 大小写：Go 用**原始头**（`strings.Contains` 大小写敏感），RAG 用**已解析的 MediaType**（媒体类型已小写化） | ⚠️ **修法落在 `service/common` 的 `GoStyleJsonBodyConverter`**，该类被 **6 个域**共用（like / follow / message / users×2 / task / article），各域都有 `*GoStyleBodyContentTypeTest`。在**多域并发 worktree**（§5.3）下改共享组件会产生跨域冲突 ⇒ **须单域串行处理**，不在本 worktree 内做 |
+| **DRIFT-LIKEAPI-015** | `Content-Type` 大小写：Go 用**原始头**（`strings.Contains` 大小写敏感），RAG 用**已解析的 MediaType**（媒体类型已小写化） | ⚠️ **修法落在 `service/common` 的 `GoStyleJsonBodyConverter`**，该类被 **6 个域**共用（like / follow / message / users×2 / task / article），各域都有 `*GoStyleBodyContentTypeTest`。在**多域并发 worktree**（§5.3）下改共享组件会产生跨域冲突 ⇒ **须单域串行处理**，不在本 worktree 内做<br>🔴 **2026-10-24 审计更正：「各域都有 `*GoStyleBodyContentTypeTest`」这句不准确** —— 实测（`find service -name "*GoStyleBodyContentTypeTest.java"`）该测试类**只有 4 个模块**有：like-api / message-api / user-api / admin-api；follow / task / article **没有**这个类（它们覆盖的是 `FollowApiMvcPipelineTest` / `TaskApiMvcPipelineTest` / `TaskApiWiringTest` / `GetTaskReqParsingTest` 与 article 的 `GoStyleJsonBodyLimitFilter`）。<br>⇒ 「6 个域共用」**属实**；「各域都有该测试类」**高估了改动面** —— 真正需要**复核断言**的只有 **4 个模块**。<br>⚠️ **另经实测排除「域内绕过」这条路**：`OrderComparator.doCompare`（spring-core 7.0.9）在两个 config **order 相同**时**返回 0、无类名 tiebreak** ⇒ 排序退化为稳定排序、取决于 bean 注册顺序 ⇒ 「子类化 + 替换 common 插入的转换器」**顺序不可控** ⇒ 域内绕过不可靠，**确认须单域串行**。 |
 | **DRIFT-LIKEAPI-012** | `target_ids` 里放 JSON 数字：Go **接受**（`fillSliceValue` 的 `case fmt.Stringer` 命中 `json.Number`），RAG **拒**（`LogicalType.Textual ← Integer = Fail`） | 修法需**元素级解析器**（setter 改 `Object` 入参）。⚠️ 台账已实测记录「Jackson 3 的 coercion **只有 LogicalType 级生效、类级无效**」，所以 `withCoercionConfig(SomeListClass, …)` 这条路走不通 —— 需新增一个显式的元素级解析组件，范围大于本轮 |
 | **DRIFT-LIKEAPI-016** | `weight: 1e400` ⇒ Go **拒**（`strconv.ParseFloat` 检查 `ErrRange`），RAG 收成 `Double.POSITIVE_INFINITY` ⇒ **真的发出一次 `weight=+Inf` 的写调用** | 修法明确（`setWeight` 改 `Object` 入参 + `isFinite()` 校验），但需与 012 共用同一套「元素级/字段级解析器」组件 ⇒ **与 012 合并做**，避免两次改动同一批 DTO |
 | **DRIFT-LIKEAPI-017** | 单次 RPC 超时：Go **固定 2000ms**（`zrpc/config.go:31` 的 struct tag 默认），RAG 取 **HTTP 剩余预算**（≤3000） | 需新增独立配置项 + 改 `GoStyleRequestDeadline` 的「无预算就原样返回」分支（单测里没有 HTTP 超时上下文时两侧语义会再次分叉）⇒ 需要连带审 `common` 的 deadline 组件，同样受 §4 的并发约束<br>🔴 **2026-10-23 第五轮更正：后半句整段是错的** —— **不需要改 `common`，也不受 §4 并发约束**：只**读** `GoStyleRequestDeadline` 已有的公开 `isPresent()` / `remainingMillis()` 即可拿到剩余预算，并在 like-api 侧自己算 `min(2000, 剩余)`（**不再调用 `applyTo`**）。理由见 §7.2 该条的更正。 |
@@ -997,6 +1053,19 @@ return likeServiceBlockingStub.withDeadlineAfter(effectiveNanos, TimeUnit.NANOSE
 ⚠️ **默认值 2000ms 来自 Go 的 struct tag，不是 yaml**：Go 的 `likecenter.yaml` 同样**没有** `LikeRpc.Timeout` 这一行
 ⇒ Java 侧也**不写进 `application.yml`**，由字段默认值承担（与 Go 端 1:1）。
 
+## 3.5 📌 当前判定（截至第五轮 · 2026-10-24）
+
+| 项 | 值 |
+|---|---|
+| **三值判定** | 🔴 **仍 `SEMANTICALLY NOT EQUIVALENT`**（首轮判定**未变**，但**理由只剩一条**） |
+| **理由** | 首轮的 6 条 SEMANTIC MISMATCH：**012 ✅ / 013 ✅ / 014 ✅ / 015 🔴 未修 / 016 ✅ / 017 ✅（本轮）** |
+| **文档层** | 018 ✅ / 019 ✅ / 020 ✅（第四轮，全部只改注释） |
+| **可观察差异** | 021 / 022 ⇒ ⏳ **待签字候选**（`Intentional_Deviations/like/api.md` SD-…-08 / -09）；另 + **SD-…-11**（拒绝计数暴露面，审计时补录） |
+| **本轮新增的待签字** | **SD-2026-10-24-10**（017 的毫秒粒度取整，<1ms，不可观察）· **SD-2026-10-24-11**（网关层拒绝计数 —— Java 比 Go 多暴露一个指标；**台账审计时补录**，此前完全没提） |
+| **测试** | like-api **81 / 0**；like-rpc **57 / 0**（真 PG Testcontainers） |
+
+⇒ **唯一还没修的语义漂移是 015**，且它**必须动 6 域共用的 `service/common`** ⇒ **须单域串行，等你指定由哪个域先动**。
+
 ## 4. 守门测试（`LikeRpcTimeoutCapTest`，6 条）
 
 ⚠️ **为什么必须起一个真 gRPC server**：断言「stub 上挂了 deadline」只证明**配置**；
@@ -1037,3 +1106,75 @@ return likeServiceBlockingStub.withDeadlineAfter(effectiveNanos, TimeUnit.NANOSE
 （中间用一个临时探针类量到了 `grpc-timeout: 1970387u` 与 handler 侧 `remaining ≈ 1961ms`，确认了传播链路本身没问题 —— **探针类已删除**，不进仓。）
 
 ⇒ 这条属于「**测法**本身的误判」，与第四轮记的「凭记忆写错异常类」同族：**API 的语义细节不能靠印象**。
+
+---
+
+# 2026-10-24 台账审计（like-api 侧）
+
+> **目的**：核对本台账的每一条「已修 / 未修 / 证伪」断言是否与**当前代码的真实状态**一致，并找出**过期或失真**的陈述。
+> **方法**：① 机器扫全部 `.java:行号` 引用（38 个文件 / 95 处）核对是否落在真实文件的有效行范围内；
+> ② 逐条比对 **22 个 `DRIFT-LIKEAPI-*` 编号**的状态断言与代码现状（**否定式断言必须找到证据，不默认成立**）；
+> ③ 核对台账内部的自洽性（测试条数算式、指针指向、快照标注）。
+> ⚠️ 本轮**未改一行生产代码**（除 `application.yml` 注释外，见 rpc 侧审计）—— 全部是台账与注释的准确性修复。
+
+## 1. 已就地更正的过期陈述（原文保留）
+
+| 位置 | 原文 | 现状 | 处置 |
+|---|---|---|---|
+| L3 核对日期 | `2026-10-23` | 第 5 轮 · 2026-10-24 | 改 |
+| L5 RAG 侧路径 | 只指主工作区 | 第 3~5 轮改动在 **worktree**，**尚未合并** | 加注 |
+| L14 E-Tomcat | `62 tests / 0 failures` | **81** | 加注（保留首轮数） |
+| L18-19 | 「绿测试 62 条全绿」 | **81**；且首轮 6 条 MISMATCH 里 **5 条已修** | 加注 + **新增「📌 当前状态」速览** |
+| §4 矩阵 / §5.2 / §6.8 / §10.1 | 用**现在时**写「Java Behavior / RAG 侧行为」 | 012/013/014/016/017 已修 | 4 处加**「首轮快照」声明** + 各条末尾加**「状态」行** |
+| §7.2 的 10 组条目 | 同上（通篇是漂移描述、无状态列） | 8 组已修、1 组未修（015）、1 组待签字 | **每条加「状态」行** |
+| §10.2 三值结论 | `SEMANTICALLY NOT EQUIVALENT`（首轮） | **仍是 NOT EQUIVALENT**（因为 015 还在），但**理由只剩一条** | 加更正指针 + 第五轮新增 §3.5「当前判定」 |
+| §10.3 证据强度表 017 行 | 「活体对拍未做 ⇒ U-04」 | **活体对拍已做**（真 in-process gRPC server） | 改 |
+| §10.4 第 3 条 | 「绿测试 62 条」 | 81；且变异验证证明「既有测试全绿」与「守门网有效」是**两件独立的事** | 加注 |
+| 第三轮章节条数 | 「第四轮再加 **7 条**（→ **75**）」 | 67 + 7 = 74 ≠ 75；实际是 **8 条**（7 在 `LikeApiGoAlignmentTest` + 1 在 `LikeApiGoStyleBodyContentTypeTest`） | 改 |
+| 021/022 的建档指针 | 「在 `docs/Intentional_Deviations/_cross/signed-deviations.md` 追加一行」 | 该文件**无任何 like 条目**；实际在 `docs/Intentional_Deviations/like/api.md` | 改 |
+| 过期行号 | `LikeApiApplication:63-66` / `LikeApiApplication.java:25-29` / `LikeRpcClient.java:78-80` | 75-78 / 25-41 / 133-147 | 改 |
+| 015 的影响面 | 「**各域都有** `*GoStyleBodyContentTypeTest`」 | 该测试类只有 **4 个模块**有（like / message / users×2）；follow / task / article 覆盖的是别的测试类 | 加更正 |
+
+⚠️ **「6 个域共用 `GoStyleJsonBodyConverter`」这句本身是准确的**（like / follow / message / users×2 / task / article）；
+失真的只是「各域都有那个测试类」⇒ **高估了改动面**（真正要复核断言的只有 4 个模块）。
+
+⚠️ **另经实测排除「015 域内绕过」这条路**：`OrderComparator.doCompare`（spring-core 7.0.9）在两个 config
+**order 相同**时**返回 0、无类名 tiebreak** ⇒ 排序退化为稳定排序、取决于 bean 注册顺序
+⇒ 「子类化 + 替换 common 插入的转换器」**顺序不可控** ⇒ 015 **确认须单域串行**。
+
+## 2. 补录：台账此前**零提及**、但代码里存在的东西
+
+| 东西 | 位置 | 为什么该进台账 |
+|---|---|---|
+| `LikeApiMetrics` | `service/like/like-api/.../metrics/LikeApiMetrics.java`（`@Component`） | ⚠️ **不是「漏记一个类名」，而是漏了一条可观察差异** —— 见下方 §2.1 |
+| `LikeApiProtectionMvcTest`（4 条） | `service/like/like-api/src/test/...` | 保护层四道 filter 的 MVC 级回归网 |
+| `LikeApiMvcPipelineTest`（30 条） | 同上 | like-api **最大的测试类**（全组件 81 条里占 30 条），台账此前只以数字出现、未点名 |
+
+### 2.1 🔴 补录的同时挖出的一条**真实可观察差异**：网关层拒绝计数的「是否真的被暴露」
+
+**台账此前完全没有提到** `LikeApiMetrics` —— 而它承载的是 Go 侧 `service/like/api/internal/metrics/metrics.go`
+的 `ApiRejectCount`。本轮逐条对照（**读到消费点**）：
+
+| 维度 | Go | RAG | 判定 |
+|---|---|---|---|
+| 指标定义 | `prometheus.NewCounterVec({Subsystem:"like_api", Name:"reject_total"}, ["route","reason"])` | Micrometer `Counter.builder("like_api_reject_total")` | ✅ key 一致（Prometheus 两侧都渲染成 `like_api_reject_total_total`） |
+| **计数点位** | `getlikestate` / `likeaction` / `getuserlikelist` / `getusertotallike` **4 个** logic 的 `:39`（`token_invalid`）与 `:46`（`token_parse_error`） | `LikeApiSupport.userId()` 的 2 处 `incApiReject`；且 `LikeCountService` / `TargetLikerListService` **刻意不读 uid**（Go 的 `getlikecountlogic.go` / `gettargetlikerlistlogic.go` 也不读） | ✅ **4/4 完全一致**（多的两个端点两侧都不埋） |
+| **route 标签** | 4 处**全部硬编码** `"/like/likeaction"`（**含 3 处与实际端点不符的错误值**） | `ROUTE_LABEL_GO_HARDCODED = "/like/likeaction"`（刻意保留 Go 的错误值） | ✅ 一致（**刻意不修 Go 的既有错误**） |
+| 🔴 **指标是否真被暴露** | `InitMetrics()` 里才有 `prometheus.Register(ApiRejectCount)`，而 **`service/like/api/likecenter.go` 的 `main()` 从未调用它** ⇒ 该 CounterVec **从未注册进 Prometheus 默认 registry** ⇒ Go 端 `:9099/metrics` **根本看不到**这个指标 | Micrometer `Counter.builder(...).register(registry)` ⇒ **声明即注册** ⇒ `/actuator/prometheus` **能看到** | 🔴 **可观察差异：Java 比 Go 多暴露一个指标**（单向增强，不改任何业务判定） |
+
+⚠️ **「Go 的 `InitMetrics()` 从未被调用」是本轮实测的**：`grep -rn "InitMetrics" --include="*.go"` 显示
+`follow/api` `message/api` `hot/api` `user/user/api` `user/admin/api` **都调了**，
+**唯独 `like/api/likecenter.go` 没调** ⇒ like 是唯一漏调的域。
+
+⇒ 已登记为 Intentional_Deviations 的 **SD-2026-10-24-11（⏳ 待签字候选）** ——
+性质是「**有意偏离（单向增强）**」：**Java 侧的指标可见面比 Go 侧大**，属框架迁移的附带结果，不是缺陷。
+
+⚠️ **这条如果漏掉，下一个做「可观测面对拍」的人会把它当成新漂移重新发现一遍** ——
+而它既不是 bug、也不该「修」（把 RAG 的指标藏起来反而是倒退）。
+
+## 3. 本轮**没有**做的（留档，含原因）
+
+| 项 | 原因 |
+|---|---|
+| 015 的修复 | 落点在 **6 域共用**的 `service/common` ⇒ **须单域串行**（§5.3），且已实测排除域内绕过 |
+| 逐条改写 §4 矩阵 / §5.2 / §6.8 / §10.1 的**每个格子** | 那 4 张表是**首轮对照产物**，它的价值就在于「首轮看到了什么」；逐格改会**抹掉历史**。⇒ 改为加「首轮快照」声明 + 各条加「状态」行（**原文一字未删**） |

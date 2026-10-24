@@ -8,20 +8,54 @@
 > （§3.3 纪律的又一次真实发作：否定式断言不可信，跨仓库尤其）。
 > 完整拓扑、冻结的权威端点契约、6 个骨架文件清单、12 条漂移、8 条错误断言、
 > 31 条测试的盲区分析 ⇒ 见 **`service/like/like-rpc` 小节**。
+> 🔴 **2026-10-24 更新（第五轮后）**：上句的「12 条漂移 / 8 条错误断言 / 31 条测试」是**首轮（2026-10-22）**的数字 ——
+> 漂移编号已排到 **018**，错误断言已清到 **13 条**，测试已 **57 条**；
+> 且**首轮「NOT EQUIVALENT」的 3 条 CRITICAL/HIGH 已修掉 2 条**（第 3 条 = 业务码载体迁移 ⇒ 签字偏离 SD-…-06）。
+> ⇒ **当前状态见文件末尾「第三轮 / 第五轮」章节与下方「📌 当前状态」速览。**
 >
 > **同时注意两个仍未解决的前置项**：
-> ① `like-rpc` **从未做过一次 Spring 上下文启动测试**（与 §6.6.5 message-rpc 同型）；
+> ① ~~`like-rpc` **从未做过一次 Spring 上下文启动测试**（与 §6.6.5 message-rpc 同型）~~
+>    🔴 **2026-10-23 第三轮起已不成立** —— 现已有 `LikeRpcSpringContextWiringTest`（**9 条**，**真 PG Testcontainers**），
+>    且它当场抓出了**4 条独立启动阻塞**（`spring-boot-kafka` 缺失 / Jackson 2 Bean 缺失 /
+>    MP 排序桥接缺失 / `TaskExecutor` 注入歧义）—— 即「从没起过」这件事**本身就是缺陷**，现已关闭；
 > ② dispatch / authority 两个 Go 入口**只经 DB 耦合**，与 like-rpc 的 gRPC 面无任何调用关系
 > ⇒ 它们**不必须**随 like-rpc 一起 Java 化，这是「要不要重实现」的前置判断点。
 
+---
+
+## 📌 当前状态（2026-10-24 · 第五轮后）
+
+| 项 | 值 |
+|---|---|
+| **当前三值判定** | 🔴 **仍 `SEMANTICALLY NOT EQUIVALENT`** —— 但**构成它的条目大部分已修**：首轮 12 条里 **13 条已修 / 1 条证伪**，**只剩事实投递链路（003）这条真的还开着** |
+| **仍未修的漂移** | **DRIFT-LIKE-003**（事实投递链路 6 个骨架）—— 需新建**独立进程** + 真 DC 接收服务**不在任何仓** ⇒ `UNRESOLVED` |
+| **仍未修的测试缺口** | **L-U9**（真 Kafka 活体证据，`spring-kafka-test` / `testcontainers-kafka` 不在本地 m2）· **L-U11 的 `rpcInterceptorConfigurer` 半边**（🔴 2026-10-24 审计：**留着的理由已过时** —— gRPC server 早就起了，**路径已钉死**：发慢请求看客户端是否 2s 后收到 `DEADLINE_EXCEEDED`；只差实现） |
+| **有意不修** | **L-U10**（`LeastBytes` 分区器 + Snappy）⇒ OBSERVABLE，已登记 |
+| **已签字偏离** | SD-2026-10-23-06（gRPC 业务码载体迁移＝**框架限制**）· SD-2026-10-23-07（Nacos 注册失败不退出）· SD-2026-10-23-05（proto `package` 归一） |
+| **测试** | like-rpc **57 / 0 failures**（含真 PG Testcontainers）；like-api **81 / 0** |
+| **本轮改动落点** | 工作树 `RAG.worktrees/like` 分支 `align/like`，**未 push、未建 issue、未开 PR** |
+
+⚠️ **本文件按「轮次」追加**：§0~§10 是**首/二轮**的原始记录、**原文不改**；
+第三轮与第五轮的结论在文件末尾对应章节。⇒ **不要**把 §10.2 的判定表当成当前构成。
+
+---
+
 <!-- @move AGENTS.md L1143-L1342 · §0 like-rpc 12 条漂移 -->
 ### 🔴 `service/like/like-rpc`：已落地，独立子会话验证判定 **NOT EQUIVALENT**，12 条漂移（2026-10-22）
+> 🔴 **2026-10-24 更新（第五轮后）**：标题里的「12 条漂移」是**首轮**数字 ——
+> 漂移编号现为 **001~018**（其中 **13 条已修**、**1 条证伪**、**3 条是启动阻塞已修**、**1 条待签字**），
+> 测试从 **31 条 → 57 条**。⇒ **首轮判定 `NOT EQUIVALENT` 仍成立**，但构成它的具体条目**大部分已被修掉**。
 
 > 本节是独立 verifier 子会话（Go → Spring Boot 基础组件语义一致性验证）的裁定。
 > 模块现状：Go `service/like/rpc` → Java `service/like/like-rpc`，主源 39 文件 / 5247 行
 > + 5 份 Flyway 迁移，**31 tests 全绿**（Redis 降级 8 / 幂等状态机 11 / 基础件 9 / gRPC wire 3）。
+> 🔴 **2026-10-24 更新（第五轮后）**：like-rpc 现有 **57 tests / 0 failures**（真 PG Testcontainers）——
+> 新增：`LikeDomainFactSchemaParityTest` 8 / `LikeRpcSpringContextWiringTest` 9（**7 → 9**）/ `LikeGoAlignmentTest` 9 / `LikeServiceGrpcImplWireTest` 3 等。
 > ⚠️ **31 条绿测试不能推翻此判定** —— 三条 CRITICAL/HIGH 漂移恰好全部落在
 > 「需要真 DB / 真 Redis / 真 Kafka / 跨语言对拍」的缺口里（见末尾盲区分析）。
+> 🔴 **2026-10-24 更新**：那三条 CRITICAL/HIGH 现已**修掉 2 条** ——
+> ①「组件起不来」已修（4 条启动阻塞）+ ②「业务码丢失」已定性为**框架限制**（签字偏离 SD-2026-10-23-06）；
+> **剩下 1 条**是事实投递链路（`DRIFT-LIKE-003`）—— 需新建独立进程 + 真 DC 接收服务不在任何仓 ⇒ `UNRESOLVED`。
 
 #### ✅ 已签字：DRIFT-LIKE-001 按「Java 现状即为已修正」处理（2026-10-22）
 
@@ -645,6 +679,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 > 历史条目 **DRIFT-LIKE-001 ~ 012** 全部保留在文件首节（原样未改）。本节只列 **2026-10-23 新增**。
 
 ### DRIFT-LIKE-013 — gRPC 客户端寻址 URI 格式错误 ⇒ 上下文启动失败
+> 🔴 **状态：仍未修**（第四轮只修了 014/015/016 三条启动阻塞，013 **是唯一剩余的启动阻塞**）—— ⚠️ 生产配置 `application.yml:139` 仍是 `discovery://message-rpc`（**两斜杠**）；而测试用 `static://` 绕过 ⇒ **这个后果没有任何测试覆盖**。
 
 | 项 | 内容 |
 |---|---|
@@ -661,6 +696,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | **Evidence** | E-Boot（`/tmp/like-boot-nokafka.log:59,67`）；同仓正确写法：`service/users/admin/admin-api/src/main/resources/application.yml:56,65,71`、`service/like/like-api/src/main/resources/application.yml:104`、`service/hot/hot-api/…:53,59`、`service/message/message-api/…:52`（均三斜杠）；`MessageRpcClient.java:52` 的 `@GrpcClient("message-rpc")` |
 
 ### DRIFT-LIKE-014 — MyBatis-Plus（Boot 3 starter）在 Boot 4 下自动配置被静默跳过 ⇒ 无 `SqlSessionFactory` ⇒ 启动失败
+> ✅ **状态：已修（2026-10-23 第三轮 / 2026-10-24 修复轮）** —— 修法：新增 `config/MybatisPlusOrderingBridgeAutoConfiguration.java`（排序桥接）+ `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 注册它 ⇒ 绕过 Boot 3/4 的 `@AutoConfigureAfter` 旧包名悬空。**下表是修复前的描述。**
 
 | 项 | 内容 |
 |---|---|
@@ -677,6 +713,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | **Evidence** | E-Boot：`--debug` 的 ConditionEvaluationReport 原文 `MybatisPlusAutoConfiguration: Did not match: - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) did not find any beans (OnBeanCondition)`；`mybatis-plus-spring-boot3-starter-3.5.17.jar` 的常量池含 `org/springframework/boot/autoconfigure/jdbc/DataSourceAutoConfiguration`；`spring-boot-autoconfigure-4.0.8.jar` 内该类**不存在**，`spring-boot-jdbc-4.0.8.jar` 内为 `org/springframework/boot/jdbc/autoconfigure/DataSourceAutoConfiguration` |
 
 ### DRIFT-LIKE-015 — `spring-boot-kafka` 缺失 ⇒ `KafkaTemplate` / `ConsumerFactory` 缺失 ⇒ 启动失败且 `@KafkaListener` 永不生效
+> ✅ **状态：已修（2026-10-23 第三轮 / 2026-10-24 修复轮）** —— 修法：`service/like/like-rpc/pom.xml:156-159` 显式引入 `org.springframework.boot:spring-boot-kafka`（Boot 4 把 Kafka 自动配置拆出 `spring-boot-autoconfigure`）。**下表是修复前的描述。**
 
 | 项 | 内容 |
 |---|---|
@@ -695,6 +732,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | **历史结论修正** | **2026-10-23 复核：AGENTS.md §3.3.3 与 `docs/Pitfalls/like/rpc.md` 记的「静默失效 —— 上下文照常启动、容器正常起来、一行消息都不消费」，对本组件**不成立**：本组件把 `KafkaTemplate` / `ConsumerFactory` 作为**必需**构造依赖注入 ⇒ 失效形态是**上下文启动失败（硬失败）**，不是静默。两条表述**都不准确**，正确表述见 §7 备注 |
 
 ### DRIFT-LIKE-016 — Boot 4 无 Jackson 2 自动配置 ⇒ `com.fasterxml.jackson.databind.ObjectMapper` Bean 缺失 ⇒ 启动失败
+> ✅ **状态：已修（2026-10-23 第三轮 / 2026-10-24 修复轮）** —— 修法：新增 `config/Jackson2ObjectMapperConfiguration.java`（自建 Jackson 2 `ObjectMapper` Bean）+ `LikeRpcApplication` 的 `@Import` 引入它。**下表是修复前的描述。**
 
 | 项 | 内容 |
 |---|---|
@@ -711,6 +749,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | **Evidence** | E-Boot（`/tmp/like-boot-6.log:20`、`/tmp/like-boot-7.log:20`，两次独立启动均命中）；`spring-boot-jackson-4.0.8-sources.jar` 的 `JacksonAutoConfiguration.java:35-44` import 的是 `tools.jackson.databind.ObjectMapper`；本地仓库 `spring-boot-starter-json` 仅到 3.5.11；根 pom 注释「Spring Boot 4 自动配置的 tools.jackson 只在 message-api 的 HTTP 边界用」——**like-rpc 用的 Jackson 2 并没有对应自动配置** |
 
 ### DRIFT-LIKE-017 — `like_domain_fact_outbox` DDL 漂移：列类型错 + 丢失 Go 侧的 CHECK / 触发器 / 部分索引 / 版本范围约束
+> ✅ **状态：已修（2026-10-23 第三轮）** —— 修法：新增 `V6__align_like_domain_fact_outbox_with_go.sql`（**不改 V4**），6 项对齐 + `LikeDomainFactSchemaParityTest` 8 条真 PG 守门。**下表是修复前的描述。**
 
 | 项 | 内容 |
 |---|---|
@@ -728,6 +767,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | **Evidence** | E-Src：Go `internal/model/domain_fact.go:14-29`、`internal/model/migrations/002_like_dc_wire.sql`、`003_like_fact_delivery.sql`；RAG `V4__create_like_domain_fact_outbox.sql`、`V5__create_like_fact_stream.sql`；gorm 消费点 `gorm.io/driver/postgres@v1.6.0/postgres.go` `DataTypeOf`、`gorm.io/gorm@v1.31.1/schema/field.go:338-339`；E-PG：Java 侧真 PG 建出的列类型（见 §8 CASE-13） |
 
 ### DRIFT-LIKE-018 — Kafka 消费并发度 8 → 1
+> ✅ **状态：已修（2026-10-23 第三轮）** —— 修法：`LikeRpcApplication` 的 `kafkaListenerContainerFactory` 里 `factory.setConcurrency(likeKafkaTopics.getConsumers())`（= 8，对齐 Go `mq.yaml` 的 `Consumers: 8`）· 配置键 `like.kafka.consumers`。**下表是修复前的描述。**
 
 | 项 | 内容 |
 |---|---|
@@ -755,7 +795,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | **DRIFT-LIKE-007**（未知字段从忽略变丢弃） | **仍然成立**：`LikeEventContracts.java:40,94,134` 三处 `@JsonIgnoreProperties(ignoreUnknown = false)` |
 | **DRIFT-LIKE-008**（`updated_at` 刷新差异） | **仍然成立**，并把 Go 侧机制钉到消费点：`gorm.io/gorm@v1.31.1/callbacks/update.go:201`（`case map[string]interface{}`）→ `:238`（`field.AutoUpdateTime > 0` ⇒ 追加自动更新时间）⇒ **map 形式确实会刷新** ⇒ `LikeRecordMapper.java:196-199` 的注释（错误断言 B）仍错 |
 | **DRIFT-LIKE-009**（指标 label 漂移 4 处） | **仍然成立**：`LikeDomainService.java:881`（`redis_read_error` 的 target_type 是 key 反解出来的类型、action 恒 `"n/a"`）、`hgetCountLenient` 只在**异常**时打点而 Go 在**字段不存在**时也打点 |
-| **DRIFT-LIKE-010 ~ 012**（trim / ON CONFLICT 目标 / pusher 粒度） | **仍然成立**：`:912` 的 `raw.trim()` vs Go `ParseInt` 不忽略空白；`LikeOutboxEventMapper.java:32` 的 `ON CONFLICT (event_key)` vs Go 无目标；`LikeKafkaTopics.taskPushersEnabled` 单开关 vs Go 两个独立 pusher |
+| **DRIFT-LIKE-010 ~ 012**（trim / ON CONFLICT 目标 / pusher 粒度） | ~~**仍然成立**：`:912` 的 `raw.trim()` vs Go `ParseInt` 不忽略空白；`LikeOutboxEventMapper.java:32` 的 `ON CONFLICT (event_key)` vs Go 无目标；`LikeKafkaTopics.taskPushersEnabled` 单开关 vs Go 两个独立 pusher~~<br>🔴 **2026-10-23 第三轮更正：本条已全部修掉** —— ① `raw.trim()` 已删（`LikeDomainService.java:979-988` + `LikeUpdateKafkaListener.java:201`，**2 处**）；② `ON CONFLICT` 已去掉仲裁目标（`LikeOutboxEventMapper.java:39` ⇒ `ON CONFLICT DO NOTHING`）；③ 单开关已拆成两个独立开关（`LikeKafkaTopics.java:70,80` + `application.yml:189-190` + `LikeTaskProgressPublisher.java:77,93`）。**本行原文保留（首轮快照）。** |
 | **首轮 U1**（上下文能否启动） | **已解决**：**不能**。4 个独立硬阻塞，见 §7 DRIFT-LIKE-013~016 |
 | **首轮 U3**（Flyway 是否真建表） | **已解决（like-rpc 单体侧）**：真 PG 16 上跑通，**建出了 `flyway_schema_history_like` 账本表 + 5 张 `like_*` 表**（E-PG）。⚠️ **跨组件那一半仍未解决**（三模块共 schema 共存），见 U13 |
 | **首轮 8 条错误断言** | **仍然全部在位**（A/B/C/D/E/F/G/H 的原文仍留在源码注释里）⇒ **本轮新增第 9 条错误断言 I**：`V4__create_like_domain_fact_outbox.sql` 的「GORM 对无 size 的整数统一取 bigint」（见 DRIFT-LIKE-017） |
@@ -830,7 +870,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | 15 | Concurrency semantics 是否一致？ | ⚠️ **否** —— 消费并发 8→1（DRIFT-LIKE-018）；游标生成与行锁互斥一致 |
 | 16 | Authentication / Authorization 是否一致？ | ✅ 一致（**两侧都没有鉴权层**，身份由调用方注入） |
 | 17 | Serialization semantics 是否一致？ | ⚠️ **部分** —— 字段名/顺序/HTML 转义/RFC3339Nano 逻辑对齐；**未知字段行为相反**（DRIFT-LIKE-007）；跨语言字节未对拍（U12） |
-| 18 | Lifecycle 是否一致？ | ❌ **否** —— Go 4 进程 / Java 1 JVM（事实投递进程未拆出，首轮已论证「不得内嵌」）；且 Java 侧当前**起不来** |
+| 18 | Lifecycle 是否一致？ | ❌ **否** —— Go 4 进程 / Java 1 JVM（事实投递进程未拆出，首轮已论证「不得内嵌」）；~~且 Java 侧当前**起不来**~~<br>🔴 **2026-10-24 更正**：4 条启动阻塞已修（第三/四轮）⇒ **现在起得来**（`LikeRpcSpringContextWiringTest` 真 PG 实跑全绿）；剩下的「起不来」只剩 **DRIFT-LIKE-013**（生产配置里 `discovery://message-rpc` 两斜杠，且**无测试覆盖**） |
 
 ### 10.2 判定
 
@@ -844,6 +884,13 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | **SEMANTIC MISMATCH** | **4** | DRIFT-LIKE-013 / 014 / 015 / 016（**全部是「组件起不来」**）+ 历史 DRIFT-LIKE-002 / 003 / 007（本轮复核仍成立） |
 | **OBSERVABLE DIFFERENCE** | **2** | DRIFT-LIKE-017 / 018 + 历史 DRIFT-LIKE-004 / 005 / 008 / 009 / 010~012 |
 | **已签字的有意偏离** | 1 | DRIFT-LIKE-001（Go 侧 `created_at` 列名错配导致列表恒空；Java 现状视为已修正的 bug） |
+
+🔴 **2026-10-24 更新（第五轮后）—— 这张表是**第二轮**的构成，已过期**：
+- **SEMANTIC MISMATCH 4 条**（013/014/015/016）—— **全部已修**（它们是「组件起不来」的 4 条硬启动阻塞）；
+- 历史 **002** ⇒ 已定性为**框架限制**（签字偏离 SD-2026-10-23-06）· **007** ⇒ **证伪**（`@JsonIgnoreProperties(ignoreUnknown=false)` 是 no-op）· **003** ⇒ **仍未修**（事实投递链路）；
+- **OBSERVABLE 2 条**（017/018）—— **017 已修**（DDL 对齐）· **018 已修**（消费并发 8）；
+- 历史 **004/005/008/009/010/011/012** —— **全部已修**（第三轮）。
+⇒ **当前仍构成 `NOT EQUIVALENT` 的只剩 003 一条**；当前速览见文件开头「📌 当前状态」。
 
 ### 10.3 与首轮判定的关系
 
@@ -861,7 +908,9 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 
 ## 2026-10-23 第三轮：DRIFT-LIKE-017 已修
 
-> like-rpc 当前：**64 tests / 0 failures / 0 errors**（含新类 8 条），BUILD SUCCESS。
+> like-rpc 当前：**54 tests / 0 failures / 0 errors**（含新类 `LikeDomainFactSchemaParityTest` 8 条），BUILD SUCCESS。
+> 🔴 **2026-10-24 审计更正：原文写「64 tests」—— 与任何时点都不自洽**（31 → 46 → 55 → 57 四个数各自可复算，只有 64 无对应状态）⇒ 按本章节时点应为 **54**（46 + 8）。
+> **本文件最终条数 = 57**（第三轮 55 + 第五轮 2）。
 > 全部在**真 PG** 上验证（Testcontainers `postgres:16-alpine`）。
 
 ### 修复方式：新增 V6，**不改 V4**
@@ -1197,7 +1246,7 @@ Java 侧用默认（按 key 哈希）分区器、**未配 Snappy**。
 | **DRIFT-LIKE-003** | 事实投递链路 6 个骨架文件 | 本轮**有意不碰**（需新建独立进程，scope 过大）；链路末端真 DC 接收服务**不在任何仓**，投递环节只能对 stub 验证 |
 | **L-U9** | 「失败消息之后，后续消息是否真的被继续处理」**无活体证据** | 本轮**没有真 Kafka**。源码链已钉死（`recovered` 返回 `true` ⇒ `doSeeks` 不 seek），但那是**源码级**不是**活体级** |
 | **L-U10** | 分区器 `LeastBytes` + Snappy | OBSERVABLE，见 §2.11 |
-| **L-U11** | `rpcInterceptorConfigurer` / `@EnableScheduling` 无守门测试 | 错误断言 F 已标注为**已知测试缺口**（需真实 gRPC server / 调度器才能验）<br>🔴 **2026-10-24 第五轮：`@EnableScheduling` 那半已修**（见 §6.5）⇒ **只剩 `rpcInterceptorConfigurer` 一处** |
+| **L-U11** | `rpcInterceptorConfigurer` / `@EnableScheduling` 无守门测试 | 错误断言 F 已标注为**已知测试缺口**（需真实 gRPC server / 调度器才能验）<br>🔴 **2026-10-24 第五轮：`@EnableScheduling` 那半已修**（见 §6.5）⇒ **只剩 `rpcInterceptorConfigurer` 一处**<br>🔴 **2026-10-24 审计更正：「需真实 gRPC server 才能验」这个理由已过时** —— like-rpc 的测试里 gRPC server **早就起了**（`grpc.server.port=0`）；真正的路径是「发一个慢请求，看客户端是否在 `observability.rpc-timeout: 2s` 后收到 `DEADLINE_EXCEEDED`」⇒ **它从「环境受阻」降级为「尚未实现」**（详见审计章节 §3.2） |
 
 ## 6. 本轮新增守门测试
 
@@ -1272,3 +1321,124 @@ Java 侧用默认（按 key 哈希）分区器、**未配 Snappy**。
 |---|---|
 | `rpcInterceptorConfigurer` 的守门测试 | 要验「真挂进 gRPC 调用链」，得观测拦截器的**行为**（如它设置的 span / deadline 传播），而不是「链里有它」。本轮 gRPC server 确实在 `grpc.server.port=0` 起了，但**构造一条能观测到拦截器行为的请求**需要另立一轮；本轮先把**能干净闭环**的那半边关掉 |
 | 真 Kafka（`L-U9`） | `spring-kafka-test` / `testcontainers-kafka` **不在本地 m2** ⇒ 要联网拉依赖；Docker 可用但依赖待补 |
+
+---
+
+# 2026-10-24 台账审计（like-rpc 侧）
+
+> **目的 / 方法**：同 api 侧审计章节（机器扫行号引用 + 逐条比对 **18 个 `DRIFT-LIKE-*` 编号** + 内部自洽性）。
+> ⚠️ 本轮**改了 1 处生产文件的注释**（`application.yml` 的错误断言 M —— 台账声称已清理、实际漏改），**未动任何逻辑**。
+
+## 1. 已就地更正的过期陈述（原文保留）
+
+| 位置 | 原文 | 现状 | 处置 |
+|---|---|---|---|
+| 开头「请先读这条」区块 | 「`like-rpc` **从未做过一次 Spring 上下文启动测试**」 | 第三轮起已有 `LikeRpcSpringContextWiringTest`（**9 条 / 真 PG**），且它当场抓出 4 条启动阻塞 | 划掉 + 加更正 |
+| 同区块标题 | 「**12 条漂移**」 | 编号已排到 **018**；13 条已修 / 1 条证伪 | 加更正 |
+| 同区块 | 「**31 tests 全绿**」 | **57** | 加更正 + 列出各测试类条数 |
+| 同区块 | 「三条 CRITICAL/HIGH …」 | 3 条里**已修 2 条**（起不来 / 业务码载体迁移＝框架限制），**剩 1 条**（事实投递链路） | 加更正 |
+| §7 的 013~018 | 通篇是**漂移描述、无状态列** ⇒ 读 §7 的人会以为全还开着 | 014/015/016/017/018 已修；**013 仍未修**且**无测试覆盖** | **每条标题下加「状态」标注** |
+| §7.6 的 010~012 | 「**仍然成立**」 | 第三轮**已全部修掉**（trim ×2 / ON CONFLICT / 拆两开关） | 加更正 |
+| §10.1 第 18 项 | 「且 Java 侧当前**起不来**」 | 4 条启动阻塞已修 ⇒ **现在起得来**；只剩 013 | 加更正 |
+| §10.2 判定表 | 002 列为 SEMANTIC MISMATCH | 偏离档已定性为**框架限制 SD-2026-10-23-06** | 加更正指针（定性不一致的坑） |
+| 第三轮 §017 章节 | 「**64 tests**」 | 与**任何时点都不自洽**（31 → 46 → 55 → 57 四个数各自可复算，只有 64 无对应状态）⇒ 该时点应为 **54** | 改 + 注明最终 57 |
+
+## 2. 🔴 本轮**发现并修掉**的一处代码级错误断言（台账声称已清理、实际漏改）
+
+**错误断言 M** —— 台账 §3「错误断言清理」表把它列为**已清理**，但代码里**三句还在**：
+
+| 位置 | 原文（错） | 事实 |
+|---|---|---|
+| `service/like/like-rpc/src/main/resources/application.yml:92-94` | 「与 Go kq 一样，位点**只在处理成功后提交**，解析/校验失败的坏消息会被**主动提交**（drop），持久层失败则**不提交**（retry）」 | **两句都反了** |
+| 同文件 `:97-98` | 「若保留 true，则『持久层失败 → 不提交位点 → retry』这条契约不成立（**kq 的语义是 Consume 返回 error ⇒ 不确认**）」 | **方向写反** |
+
+**真源（已读到消费点）**：
+
+```go
+// go-queue@v1.2.2/kq/config.go:24
+ForceCommit   bool   `json:",default=true"`
+
+// service/like/rpc/internal/mq/etc/mq.yaml —— 没有覆盖该字段 ⇒ 生效值 true
+
+// go-queue@v1.2.2/kq/queue.go:230-242
+if err := q.consumeOne(ctx, string(msg.Key), string(msg.Value)); err != nil {
+    if q.errorHandler != nil { q.errorHandler(ctx, msg, err) }   // 默认实现：只 logc.Errorf
+    if !q.c.ForceCommit { continue }                             // ⚠️ ForceCommit=true ⇒ 不 continue
+}
+if err := q.consumer.CommitMessages(ctx, msg); err != nil { … }  // ⚠️ 落到这里 ⇒ **提交位点**
+```
+
+⇒ **Go 侧消费失败 ⇒ 提交位点 ⇒ 该消息永久丢弃、不重投**（与 §2.1 的结论一致）。
+Java 侧 `DefaultErrorHandler(recoverer, new FixedBackOff(0, 0))` ⇒ 失败**不 seek**、跳过该条、位点在下一条成功时跨过它 ⇒ **同样丢弃**。
+⇒ **两侧语义一致：失败即丢弃，不重投** —— 而原注释写的「不提交（retry）」是**与 Go 相反**的方向。
+
+⇒ **本轮已改这三句注释**（零逻辑改动），并把 Go 出处写进 yaml。
+
+⚠️ **元教训**：这是 §3.3.3「**先改/删错误断言，再改实现**」在**同一轮里只做了一半**的现场 ——
+第三轮改了**实现**（`FixedBackOff(0,0)`）与**两处 javadoc**（J/K），却漏了 `application.yml` 里的**同款断言**（M），
+而台账还把它记成「已清理」。
+⇒ **错误断言的清单必须逐条对着文件核，不能凭「我记得改了」勾掉。**
+
+## 3. 🔴 两条**新发现**（此前台账完全没有）
+
+### 3.1 `service/common` 的 `RpcServerInterceptorFactory` javadoc 说错了 —— 且与 like-rpc 的 javadoc **直接冲突**
+
+| 侧 | 断言 |
+|---|---|
+| `service/common/.../RpcServerInterceptorFactory.java`（**共享模块**） | 「grpc-spring-boot-starter（`net.devh:grpc-server-spring-boot-starter`）**会自动把所有 `ServerInterceptor` 类型的 Bean 注册到 gRPC server**，业务模块无需手写 `grpcServer.use(...)`」 |
+| `service/like/like-rpc/.../LikeRpcApplication.java`（like 域） | 「devh starter **不会**自动把用户提供的 `ServerInterceptor` 挂到 server 上。没有它，超时 / deadline 传播 / gRPC span **全部静默消失**，而 Bean 断言照样是绿的」 |
+
+**实测 devh 3.1.0 的真实行为（读源码，不是看文档）**：
+
+| 机制 | 出处 | 收集什么 |
+|---|---|---|
+| `GlobalServerInterceptorRegistry.initServerInterceptors()` | `net/devh/boot/grpc/server/interceptor/GlobalServerInterceptorRegistry.java:79-87` | 只遍历 **`GlobalServerInterceptorConfigurer`** Bean |
+| `AnnotationGlobalServerInterceptorConfigurer.getServerInterceptorBeans()` | 同包 `:57-60` | `applicationContext.getBeansWithAnnotation(**GrpcGlobalServerInterceptor**.class)` ⇒ **只认带这个注解的 Bean** |
+| `@GrpcService(interceptors = …)` | `net/devh/boot/grpc/server/service/AnnotationGrpcServiceDiscoverer.java:91` | 另一条显式路径 |
+
+⇒ **普通的 `ServerInterceptor` Bean 不会被自动注册** ⇒ **like-rpc 的 javadoc 是对的，common 的是错的**
+（common 那句漏了 `@GrpcGlobalServerInterceptor` 这个前提）。
+⇒ 佐证：**全仓 `grep -rn "GrpcGlobalServerInterceptor" service/` 零命中** ⇒ 在本仓，common 那句话**从未成立过**。
+
+⚠️ **本轮没有改 common**（共享模块，§5.3 跨域并发约束）⇒ **留档待处理**。
+⚠️ **影响面 = 所有 rpc 域**（`like-rpc` / `comment-rpc` / `follow-rpc` / `message-rpc` / `favorite-rpc` /
+`user-rpc` / `admin-rpc` / `task-rpc` / `hot-rpc` / `article-rpc` 全部 `@Import(RpcServerInterceptorFactory.class)`）
+⇒ 这条 javadoc 若被下一个人当真，可能有人**删掉各域的 `rpcInterceptorConfigurer`** ⇒
+超时 / deadline 传播 / gRPC span **在所有 rpc 域静默消失**、且**没有任何报错**。
+⇒ **建议列入下一个「共享组件串行窗口」处理**（与 015 的 `GoStyleJsonBodyConverter` 同批）。
+
+### 3.2 L-U11 留着没做的**理由已经过时**
+
+台账 §5 的 L-U11 写「需真实 gRPC server / 调度器才能验」⇒ **但 like-rpc 的测试里 gRPC server 早就起了**
+（`LikeRpcSpringContextWiringTest` 用 `grpc.server.port=0`）⇒ **环境障碍不存在**。
+
+**剩下的问题不是「怎么起 server」，而是「怎么观测拦截器的行为」** —— 而答案已经有了：
+`RpcInterceptor` 在超时时会 `wrappedCall.close(DEADLINE_EXCEEDED)`
+（`service/common/.../observability/RpcInterceptor.java:55`、`:120`）
+而 like-rpc 的 `observability.rpc-timeout: 2s`（`application.yml:252-253`）
+⇒ **发一个会睡很久的真实 gRPC 请求 ⇒ 客户端应在 2 秒后收到 `DEADLINE_EXCEEDED`**；
+若拦截器没挂上，请求会一直挂着 ⇒ **这正是「行为级」的判据**（不是「链里有它」）。
+
+⇒ **L-U11 的 `rpcInterceptorConfigurer` 半边，从「环境受阻」降级为「尚未实现」** —— 台账已更正（见 §5 与开头速览）。
+
+## 4. 补录：台账此前**零提及**、但代码里存在的东西
+
+| 东西 | 位置 | 说明 |
+|---|---|---|
+| `spring-boot-kafka` 依赖 | `service/like/like-rpc/pom.xml:156-159` | **014 之后编号那条的修法**（DRIFT-LIKE-015 的修法） |
+| `spring-boot-flyway` 依赖 | 同上 `:224-227` | Boot 4 拆模块后必需 —— 缺它**启动日志里连一行 Flyway 都没有** |
+| `commons-pool2` 依赖 | 同上 `:124-127` | Lettuce 连接池 |
+| `grpc-inprocess` 显式版本 | 同上 `:265-270` | 测试用 |
+| `MybatisPlusOrderingBridgeAutoConfiguration` + `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | `config/` + `resources/META-INF/` | **DRIFT-LIKE-014 的修法**（台账原正文只写了「怎么坏」，没写「怎么修」） |
+| `Jackson2ObjectMapperConfiguration` | `config/Jackson2ObjectMapperConfiguration.java` | **DRIFT-LIKE-016 的修法**（含 number→string / number→boolean 一律 `Fail` 的强转策略） |
+| `LikeSchemaGate` | `bootstrap/LikeSchemaGate.java`（`@Component`） | Flyway 之后的第二道防线（启动自检）—— 台账此前只在说「测试类 `LikeSchemaGateTest` 不存在」时提过它 |
+| `like.redis.list-ttl`（7d） | `application.yml:166-170` + `config/LikeRpcProperties.java:80` | Go 出处已写在 yaml 注释里（`getuserlikelistlogic.go:120` / `gettargetlikerlistlogic.go:128`，两处都是 7 天） |
+| `like.kafka.consumers`（8） | `application.yml:189-190` + `config/LikeKafkaTopics.java:47-61` | 对齐 Go `mq.yaml` 的 `Consumers: 8`（DRIFT-LIKE-018 的配置载体） |
+
+## 5. 本轮**没有**做的（留档，含原因）
+
+| 项 | 原因 |
+|---|---|
+| 改 `service/common` 的 `RpcServerInterceptorFactory` javadoc | **共享模块** ⇒ §5.3 跨域并发约束 ⇒ 留档（见 §3.1），列入下一个共享组件串行窗口 |
+| 补 `rpcInterceptorConfigurer` 的守门测试 | §3.2 已把**路径**钉死（发慢请求看 `DEADLINE_EXCEEDED`）⇒ 但这是**新增一条行为级测试**，超出「核对台账」的范围 ⇒ **等你确认后再做** |
+| 事实投递链路（003）/ `L-U9`（真 Kafka）/ `L-U10`（有意不修） | 与前几轮结论一致，**状态未变** |

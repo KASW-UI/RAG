@@ -12,10 +12,10 @@
 
 ## ⏳ 待签字（2026-10-23 修复轮 + 2026-10-24 第五轮提出，**用户尚未确认**）
 
-> ⚠️ **本节三条尚未获得用户签字**，故**不计入**「已签字偏离」总数。
+> ⚠️ **本节四条尚未获得用户签字**，故**不计入**「已签字偏离」总数。
 > 保留在此是为了让下一轮复核**不会把它们当成新发现重新提一遍**。
-> 处置依据见 [`../../DRIFT/like/api.md`](../../DRIFT/like/api.md) 的 `DRIFT-LIKEAPI-021 / -022`
-> 与第五轮章节的「017 精度取舍」。
+> 处置依据见 [`../../DRIFT/like/api.md`](../../DRIFT/like/api.md) 的 `DRIFT-LIKEAPI-021 / -022`、
+> 第五轮章节的「017 精度取舍」，以及**台账审计**章节 §2.1（网关层拒绝计数的暴露面）。
 
 ### ⏳ SD-2026-10-23-08（候选）：响应 `Content-Type` 不带 `charset=utf-8`
 
@@ -111,6 +111,44 @@
 **若将来出现按纳秒比对的探针** ⇒ 需要重新评估（那时它就不再是「框架限制」了）。
 
 ---
+
+---
+
+
+### ⏳ SD-2026-10-24-11（候选）：网关层拒绝计数 —— **Java 侧比 Go 侧多暴露一个指标**
+
+| 项 | 值 |
+|---|---|
+| 状态 | ⏳ **待签字**（2026-10-24 台账审计时提出，尚未获批） |
+| 原台账编号 | **无**（此前台账**完全没有提到** `LikeApiMetrics`）—— 是审计补录时挖出来的 |
+| 组件 | `service/like/like-api`（`metrics/LikeApiMetrics`） |
+| 性质 | **有意偏离（单向增强）** —— Java 的**指标可见面比 Go 大**，不是缺陷 |
+
+**差异**
+
+| 侧 | `like_api_reject_total` 这个指标 |
+|---|---|
+| Go | `service/like/api/internal/metrics/metrics.go:20` 的 `prometheus.Register(ApiRejectCount)` **从未被执行** —— `service/like/api/likecenter.go` 的 `main()` **没有调用** `metrics.InitMetrics()` ⇒ 该 CounterVec **从未注册进 Prometheus 默认 registry** ⇒ Go 端 `:9099/metrics` **根本看不到**这个指标（`WithLabelValues(...).Inc()` 仍能自增，只是没被暴露） |
+| RAG | Micrometer `Counter.builder("like_api_reject_total").register(registry)` ⇒ **声明即注册** ⇒ `/actuator/prometheus` **能看到** |
+
+**为什么保留（不修）**
+
+① **不改任何业务判定** —— 只是可观测面变大；
+② **修回去 = 倒退** —— 把指标藏起来对运维没有任何好处；
+③ **Go 那一侧是漏调**（`follow/api` `message/api` `hot/api` `user/api` `admin/api` **都调了** `InitMetrics()`，**唯独 like 域没调**）⇒
+**是 Go 侧的缺陷，不是 RAG 侧的偏差**；按「不要擅自修正 Go 的行为」的纪律，RAG 侧**照 Go 的语义实现计数**，但**不照抄 Go 的漏调**。
+
+**⚠️ 边界：两侧其余部分是完全一致的（已逐条核对到消费点）**
+
+| 维度 | 结论 |
+|---|---|
+| 指标 key | ✅ 一致（Prometheus 两侧都渲染成 `like_api_reject_total_total`） |
+| 计数点位 | ✅ **4/4 一致** —— Go 的 `getlikestate` / `likeaction` / `getuserlikelist` / `getusertotallike`；`getlikecount` / `gettargetlikerlist` **两侧都不埋**（RAG 侧 `LikeCountService` / `TargetLikerListService` **刻意不读 uid**） |
+| `route` 标签 | ✅ 一致 —— Go 4 处**全部硬编码** `"/like/likeaction"`（含 3 处与实际端点不符的**错误值**），RAG 侧用 `ROUTE_LABEL_GO_HARDCODED` **刻意保留**这个错误 |
+| `reason` 标签 | ✅ 一致（`token_invalid` / `token_parse_error`） |
+
+**若将来 Go 侧补上 `InitMetrics()`** ⇒ 两侧暴露面自然一致，本条自动失效 ⇒ 应在 Go 侧修复后**重新评估并关闭本条**。
+
 
 ---
 

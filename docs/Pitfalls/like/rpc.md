@@ -280,3 +280,86 @@ assertNotNull(context.getBean(LikeHotEventOutboxRelay.class));   // ❌ 恒绿
 ⇒ 后者才是 §3.3.3 说的「**注解存在 ≠ 机制生效**」。
 本条与错误断言 F（`LikeRpcApplication` 里那句「每一条都有对应的 wiring 测试锁死」）
 是**同一个洞的两面**：断言 F 是对**覆盖范围**的错报，本条是那个洞本身。
+
+---
+
+# 2026-10-24 台账审计新增踩坑
+
+## PIT-LIKE-RPC-013 —— 🔴 **「错误断言已清理」这句话，本身也是一条需要被核的断言**
+
+### 现象
+
+台账 §3「错误断言清理（A~I 全部 + 新增 4 处）」把 **M** 列为**已清理**：
+> | **M** | `application.yml` kafka consumer 段 | 「持久层失败则**不提交**（retry）」 | 错：Go `ForceCommit=true` ⇒ **照样提交**（§2.1） |
+
+2026-10-24 的台账审计一查 —— **`application.yml` 里那三句原文还在**，
+且其中两句的方向与 Go **完全相反**。
+
+### 为什么会被漏掉
+
+第三轮修了 9 条漂移，其中 **004** 的修法是「显式 `FixedBackOff(0, 0)`」，
+配套改了**两处 javadoc**（`LikeRpcApplication` 的 J/K）——
+但 **`application.yml` 里还有第三处同款断言**（M），没人回头核。
+⇒ 台账勾「已清理」时，勾的是**记忆里的清单**，不是**文件里的事实**。
+
+### 代价（这条断言是**方向反的**）
+
+`application.yml` 写着「持久层失败则**不提交**（retry）」⇒
+读者会以为 RAG 侧失败会**重投** ⇒ 而 Go 的 `ForceCommit=true` 是**照样提交（丢弃）** ⇒
+**两侧语义相反的结论被写进了配置文件的注释里**，且被台账记成「已修」。
+
+### 元教训
+
+⚠️ **「错误断言清理」是一张需要逐条对着文件核的清单**，不是一次性的动作 ——
+**代码改了、清单勾了、文件没改**，是三者最容易脱节的一种。
+
+⇒ **判据**：勾「已清理」时，手要真的打开那个文件、看到那行字被改过。
+⚠️ 「我记得我改了三处」和「三处都被改了」之间，隔着一次 grep。
+
+⇒ 这也是本轮审计为什么把「机器扫行号引用 + 逐条比对编号」当成必做动作：
+**行号会位移、清单会凭印象勾、只有机器扫 + 逐条核能兜住。**
+
+---
+
+## PIT-LIKE-RPC-014 —— 🔴 **共享组件的 javadoc 与各域的 javadoc 可以「互相矛盾」，而且两边都言之凿凿**
+
+### 现象
+
+`service/common/.../RpcServerInterceptorFactory.java` 写：
+
+> 「grpc-spring-boot-starter **会自动把所有 `ServerInterceptor` 类型的 Bean 注册到 gRPC server**，
+> 业务模块无需手写 `grpcServer.use(...)`」
+
+而 `service/like/like-rpc/.../LikeRpcApplication.java` 写：
+
+> 「devh starter **不会**自动把用户提供的 `ServerInterceptor` 挂到 server 上。
+> 没有它，超时 / deadline 传播 / gRPC span **全部静默消失**，而 Bean 断言照样是绿的。」
+
+**两句直接矛盾**，而且都写得很笃定。
+
+### 实测谁对（读 devh 源码，不是看文档）
+
+| 机制 | 出处 | 收集什么 |
+|---|---|---|
+| `GlobalServerInterceptorRegistry.initServerInterceptors()` | `GlobalServerInterceptorRegistry.java:79-87` | 只遍历 `GlobalServerInterceptorConfigurer` Bean |
+| `AnnotationGlobalServerInterceptorConfigurer.getServerInterceptorBeans()` | 同包 `:57-60` | `getBeansWithAnnotation(GrpcGlobalServerInterceptor.class)` ⇒ **只认带注解的** |
+| `@GrpcService(interceptors=…)` | `AnnotationGrpcServiceDiscoverer.java:91` | 另一条显式路径 |
+
+⇒ **普通 `ServerInterceptor` Bean 不会被自动注册** ⇒ **like-rpc 那句对，common 那句错**
+（common 漏了 `@GrpcGlobalServerInterceptor` 这个前提）。
+⚠️ 佐证：全仓 `grep -rn "GrpcGlobalServerInterceptor" service/` **零命中** ⇒ common 那句话**在本仓从未成立过**。
+
+### 危害
+
+common 那句若被下一个人当真 ⇒ **各域的 `rpcInterceptorConfigurer` 会被当成冗余删掉** ⇒
+超时 / deadline 传播 / gRPC span 在**所有 10 个 rpc 域**静默消失、且**零报错**。
+
+### 元教训
+
+⚠️ **共享组件的 javadoc 是「所有域的公共知识」** ——
+它写错一次，影响面是**全部调用方**，而不是一个域。
+⇒ 共享组件里的每一句机制描述，都该被当作**跨域契约**来审。
+
+⚠️ **两处互相矛盾的注释，本身就是最强的告警信号** ——
+比任何一处单看像错的都更值得追。⇒ 看到矛盾时，**去读第三方源码**（这里是 devh 的
+`GlobalServerInterceptorRegistry`），而不是「挑一个更可信的」。

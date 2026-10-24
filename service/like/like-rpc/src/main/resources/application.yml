@@ -89,13 +89,25 @@ spring:
       # 对应 Go mq.yaml Kafka.Group: like-update-group
       group-id: like-update-group
       # 对应 Go Offset: first —— 从最早开始消费。
-      # ⚠️ 这是「至少一次」语义的起点：与 Go kq 一样，位点只在处理成功后提交，
-      #    解析/校验失败的坏消息会被**主动提交**（drop），持久层失败则**不提交**（retry）。
-      #    两者都靠 DefaultErrorHandler + RECORD ack mode 表达，见 LikeUpdateKafkaListener。
+      # ⚠️ 2026-10-24 修正错误断言（台账 DRIFT 表的「错误断言 M」，此前声称已清理但**实际漏改**）：
+      #    原文写「位点只在处理成功后提交，持久层失败则**不提交**（retry）」—— **与 Go 相反**。
+      #    Go 真源：go-queue@v1.2.2/kq/config.go:24 `ForceCommit bool `json:",default=true"``
+      #           + service/like/rpc/internal/mq/etc/mq.yaml **未覆盖该字段** ⇒ 生效值 true
+      #           ⇒ kq/queue.go:230-242：消费失败后 `if !q.c.ForceCommit { continue }` **不成立**
+      #           ⇒ 落到 `CommitMessages` ⇒ **失败也提交位点 ⇒ 该消息永久丢弃、不重投**。
+      #    Java 侧等价：`DefaultErrorHandler(recoverer, new FixedBackOff(0, 0))`
+      #           ⇒ 第一次失败即 STOP ⇒ `FailedRecordTracker.recovered` 返回 true
+      #           ⇒ `SeekUtils.doSeeks` **不 seek** ⇒ 跳过这条、继续处理后续消息 ⇒ 同样丢弃。
+      #    ⇒ 两侧语义一致：**失败即丢弃，不重投**（不是「不提交位点 → 重投」）。
+      #    ⚠️ 「enable-auto-commit: false」仍要保留：它关的是**容器自动提交**，
+      #    位点由 RECORD ack mode 在**成功处理后**提交 —— 失败那条被 ErrorHandler 跳过，
+      #    位点在**下一条成功时跨过它**提交 ⇒ 效果同样是「丢弃」，且**不重投**。
       auto-offset-reset: earliest
       # ⚠️ 关掉自动提交，改由容器在 listener 正常返回后提交。
-      #    若保留 true，则「持久层失败 → 不提交位点 → retry」这条契约不成立
-      #    （kq 的语义是 Consume 返回 error ⇒ 不确认）。
+      #    若保留 true，则「容器自动提交位点」这条路径会**绕过** RECORD ack mode 的
+      #    「成功后才提交」契约 —— 那才是真的会让「失败 → 重投」成立。
+      #    （原文写「kq 的语义是 Consume 返回 error ⇒ 不确认」，**方向写反**：
+      #      Go 的 ForceCommit=true 恰恰是「Consume 返回 error **也**确认」。）
       enable-auto-commit: false
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
