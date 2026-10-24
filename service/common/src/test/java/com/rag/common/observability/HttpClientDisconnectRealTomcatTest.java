@@ -253,7 +253,7 @@ class HttpClientDisconnectRealTomcatTest {
                         + "也不能退化成 chunked —— 那就是新增的 wire 差异。实际响应=" + slow);
         assertTrue(slow.contains("Content-Length:"), "必须带 Content-Length。实际响应=" + slow);
         int declared = Integer.parseInt(slow.replaceAll("(?s).*Content-Length:\\s*(\\d+).*", "$1").trim());
-        String body = slow.substring(slow.indexOf("\r\n\r\n") + 4);
+        String body = bodyAfterInformationalResponses(slow);
         assertEquals(body.getBytes(StandardCharsets.UTF_8).length, declared,
                 "Content-Length 必须等于实际 body 字节数。响应=" + slow);
 
@@ -284,6 +284,44 @@ class HttpClientDisconnectRealTomcatTest {
     }
 
     // ------------------------------------------------------------------ 工具
+
+    /**
+     * 取「最终响应」的 body —— <b>跳过前面的 1xx</b>（RFC 9110 允许任意多个 1xx 先行）。
+     *
+     * <p>⚠️ 2026-10-25：客户端断连的<b>主动探测</b>会往 socket 写
+     * {@code HTTP/1.1 103 Early Hints}（见 {@code GoStyleClientDisconnectProbe}）
+     * ⇒ 「<b>第一个空行</b>」不再等于「响应头结束」⇒ 老的 {@code indexOf("\r\n\r\n")} 解析法
+     * 会把 1xx 之后的内容当成 body。
+     * <p>⇒ 这里改成「按 HTTP 报文块逐块解析，1xx 整块跳过」。
+     * <b>断言强度不变</b>（仍然要求 Content-Length == 实际 body 字节数）。
+     */
+    private static String bodyAfterInformationalResponses(String raw) {
+        int pos = 0;
+        while (true) {
+            int eol = raw.indexOf("\r\n", pos);
+            if (eol < 0) {
+                return raw.substring(pos);
+            }
+            String statusLine = raw.substring(pos, eol);
+            pos = eol + 2;
+            while (true) {
+                eol = raw.indexOf("\r\n", pos);
+                if (eol < 0) {
+                    return raw.substring(pos);
+                }
+                String line = raw.substring(pos, eol);
+                pos = eol + 2;
+                if (line.isEmpty()) {
+                    break;
+                }
+            }
+            if (statusLine.startsWith("HTTP/1.1 1")) {
+                // 1xx ⇒ 跳过整块，继续找最终响应
+                continue;
+            }
+            return raw.substring(pos);
+        }
+    }
 
     private SpanData awaitSpan() throws InterruptedException {
         long deadline = System.currentTimeMillis() + 10_000L;

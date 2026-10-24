@@ -112,11 +112,12 @@ func MaxConnsHandler(n int) func(http.Handler) http.Handler {
 
 ---
 
-## SD-2026-10-25-02 ⏳ **待签字（2026-10-25 05:46 用户要求「先等下签字」）** —— 客户端断连后**在飞的 gRPC 不会被提前取消**
+## SD-2026-10-25-02 ❌ **已撤销（2026-10-25 第十轮）** —— 「框架限制」这个记录**不再成立**：T-4 资源面已被**方案⑤ 主动探测写**修掉 ⇒ **本条从未被签字，也不需再签**
 
 | 项 | 值 |
 |---|---|
-| 状态 | ⏳ **待签字** —— 原为待签字候选 `SD-2026-10-25-CAND-12`；2026-10-25 第四轮曾被**误转正为「已签字」**（用户当时只问了「它是什么」，**未点头**）⇒ ⚠️ **2026-10-25 05:46 用户明确「先等下签字」** ⇒ **已改回待签字** ⇒ 原候选号 `CAND-12` 保留 |
+| 状态 | ❌ **已撤销（2026-10-25 第十轮）** —— 本条**从未被签字**（第四轮曾被**误转正**，第八轮已撤销回待签字）；第十轮**问题本身被修掉** ⇒ 「框架限制」这个定性**不再成立** ⇒ **本条作废，不需签字** |
+| ⇒ **取代它的签字** | **`SD-2026-10-25-04`**（同档，见下）—— 方案⑤「主动探测写」带来的 **wire 偏离**（客户端先收到 N 行 `103 Early Hints`） |
 | 类别 | ⚠️ **待定（第八轮已查证 6 条路径）** —— 原判「**框架限制**」**已被证伪**（生态里确实有办法）⇒ 准确表述：**「在「Tomcat + HTTP/1.1 + 同步 Servlet + 保 `Content-Length`」这组约束下没有 Go 等价路径」** ⇒ 而**这组约束是项目自己选的** ⇒ ⇒ 本条实质是「**要不要为这一点动约束**」的**决策项**，不是事实登记 ⇒ 见 §①~④ |
 | 组件 | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`（**共享层** ⇒ 10 个 api 模块全部适用） |
 | 对应的 DRIFT 条目 | **T-4**（`hot` 域 `DRIFT-HOTAPI-025`）的**资源面**残留<br>⇒ ⚠️ T-4 的**观测面**（499 可见）**已修**，**不在本档** |
@@ -171,6 +172,85 @@ func MaxConnsHandler(n int) func(http.Handler) http.Handler {
 
 ⇒ **研究结论已回 ⇒ 本条要么被「方案 1+2/3/4 组合」修掉，要么在「明确保留现约束」的前提下签字认账。**
 ⚠️ 在此之前**不要**把它当成已定性事实对外引用，也**不要**引用旧版的「框架限制 ⇒ 无决策空间」。
+
+### ❌ 本条作废的最终处置（第十轮）
+
+⇒ **T-4 的资源面已被「方案⑤ 主动探测写」修掉** ⇒ 「在飞 gRPC 不会被提前取消」**不再是事实** ⇒
+⇒ **本条（记录「框架限制」的那个）作废**，**不需要签字**。
+⇒ **取代它的是 [`SD-2026-10-25-04`](#sd-2026-10-25-04)（方案⑤ 带来的 wire 偏离）** —— 那条**已由用户签字**。
+
+---
+
+## SD-2026-10-25-04 ✅ **已签字（2026-10-25，用户拍板）** —— 方案⑤「主动探测写」带来的 **wire 偏离**：客户端先收到 N 行 `103 Early Hints`
+
+| 项 | 值 |
+|---|---|
+| **状态** | ✅ **已签字（2026-10-25）** —— 用户原话：「**CAND-12：主动探测写（周期 flush()）（签字偏离）**」 |
+| **类别** | **有意偏离**（主动选择与 Go 不同 ⇒ 须签字） |
+| **组件** | `service/common/src/main/java/com/rag/common/observability/GoStyleClientDisconnectProbe.java`（**共享层** ⇒ 10 个 api 模块全部适用） |
+| **对应的 DRIFT 条目** | **T-4** 的**资源面**（`hot` 域 `DRIFT-HOTAPI-025`）⇒ ✅ **已修**（不再签字认账） |
+| **行为层** | **wire 层（响应流的最前面多了 1xx）** + **时序层（499 的定型时点晚于 Go）** |
+| **证据强度** | ✅ **真 Tomcat 11.0.24 实测**（`GoStyleClientDisconnectProbeGateTest`，3 条）+ ✅ **变异测试转红**（证明守门非空转） |
+
+### ① 偏离的实际面
+
+| | Go 真源 | RAG（方案⑤ 落地后） |
+|---|---|---|
+| **响应流最前面** | **没有 1xx** | 🔴 **多出 N 行 `HTTP/1.1 103 Early Hints\r\n\r\n`**（28 字节/行）<br>N = 探测轮数 ≈ 慢请求秒数 ÷ 0.5s<br>⇒ **快请求（< 500ms）零影响** |
+| **客户端断连 → 在飞 gRPC 取消** | **1~3ms**（`net/http` 取消 `r.Context()`） | 🟡 **≤ 1 个探测周期**（实测 **461ms**；探测间隔 500ms） |
+| **499 的定型时点** | **断连瞬间** | 🟡 **下一个探测周期**（实测 **~505ms**） |
+
+⇒ ⚠️ **字节层面确实多了 1xx**；但 RFC 9110 要求客户端**忽略 1xx** ⇒ **业务语义不变**（客户端解析出的最终响应与 Go 完全一致）。
+
+### ② 为什么必须选这个方案（其余 5 条的代价，见 `SD-2026-10-25-02` §①）
+
+| 方案 | 为何不选 |
+|---|---|
+| ⑥ 缩短在飞 deadline | 只是**止损**，不是 Go 等价（Go 是 0ms 取消）⇒ 先做，但**不解决本条** |
+| ⑤ **主动探测写** | ✅ **本条** —— 唯一能做到「真取消在飞 RPC」且**不动协议 / 不换容器 / 不换栈**的路 |
+| ④ HTTP/2 `RST_STREAM` | Go 侧实测是**明文 HTTP/1.1** ⇒ 换协议 = **偏离 Go**（且要 async 化 + 客户端支持 h2c） |
+| ③ 轮询 Tomcat 内部 `isClosed()` | ❌ **实测否决**：反射链通，但**滞后 5.6 秒**，比主动写还慢 |
+| ①② 换 Jetty / 换 Netty | 🔴 换运行时 / 换整个技术栈 ⇒ 成本远超收益 |
+
+### ③ 关键设计取舍：为什么探针写的是「**直接写 socket 的 1xx**」而不是 `response.flushBuffer()`
+
+- `flushBuffer()` 会**提前提交响应** ⇒ 之后 `setContentType` / `setHeader` 被 Tomcat **静默忽略**
+  ⇒ **会丢掉 `Content-Type`**（本仓 E-1 那个 bug 的同款）⇒ **比本条更严重的回归**。
+- 直接写 socket 的 `103 Early Hints` **不经过 Tomcat 的 `OutputBuffer`** ⇒ **不提交响应**
+  ⇒ **`Content-Type` 与 `Content-Length` 全部保住**（实测 `Content-Length: 23` 未退化成 chunked）。
+- ⚠️ 必须 `write` **且** `flush`：Tomcat 的 socket 写缓冲在未满时**不会真正 syscall** ⇒ 只写不 flush **探不出错误**（实测）。
+
+### ④ 已知风险（必须知情）
+
+| 风险 | 缓解 |
+|---|---|
+| **反射链依赖 Tomcat 内部 API**（`RequestFacade.request` → `getCoyoteRequest()` → `Request.hook` → `getSocketWrapper()`）⇒ Tomcat 升级可能静默失效 | ✅ **守卫测试会红**（`normalClientIsNotAffectedByProbeBytes` 断言「必须看到 1xx」⇒ 反射链一断就红，**不会静默降级**）；探针本身 fail-open（`UNAVAILABLE` ⇒ 不改变现有行为） |
+| 裸写绕过 Tomcat `OutputBuffer` ⇒ 理论上可能与业务裸写交错 | 本仓 `ObservabilityResponseWriter` 是**全缓冲式**、worker 不碰 socket ⇒ **当前不触发** |
+| 探测间隔是**运维旋钮**（默认 500ms，system property `rag.common.http.disconnect-probe-interval-ms` 可覆盖，下限 50ms） | ⇒ 调小 ⇒ 取消更快但 1xx 更多 |
+
+### ⑤ 守门
+
+`service/common/src/test/java/com/rag/common/observability/GoStyleClientDisconnectProbeGateTest.java` —— **3 条**（真 Tomcat + 真 `HttpMiddleware` + 真 in-process gRPC server）：
+
+1. 🔴 客户端 RST ⇒ **在飞的下游 gRPC 被取消**（实测 461ms，远早于 8s HTTP 超时）**且** HTTP 层很快定型 499
+   ⇒ ⚠️ 下游通过 `io.grpc.Context.current().addListener` 观察取消（**不是**靠线程中断）⇒ **断言有判别力**
+2. ✅ 客户端不断连 ⇒ body 逐字节相同、**`Content-Length` / `Content-Type` 全保住**
+   ⇒ 含**正向对照**（必须先看到 1xx，否则后面的断言全是空转）
+3. 🔒 探针字节**不破坏 HTTP 流**（1xx 可被客户端正确忽略）
+
+⇒ **变异测试**：把 `probe(...)` 换成 `State.UNAVAILABLE` ⇒ **3 条全红**（核心断言报「实测取消延迟=**-1ms**」= 从未被取消）⇒ **守门非空转**。
+
+⚠️ `HttpClientDisconnectRealTomcatTest`（既有 3 条）**必须同步改一处**：它的 body 提取用 `indexOf("\r\n\r\n")`（=「第一个空行」）⇒ 1xx 出现后该假设失效 ⇒ 改为「按报文块跳过 1xx」的解析器
+⇒ **断言强度不变**（仍要求 `Content-Length == body 字节数`），framing 结论不变。
+
+### ⑥ 留痕位置
+
+- `service/common/src/main/java/com/rag/common/observability/GoStyleClientDisconnectProbe.java`
+- `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`（切片等待 + 探测 + gRPC Context 取消）
+- `service/common/src/test/java/com/rag/common/observability/GoStyleClientDisconnectProbeGateTest.java`
+- `docs/DRIFT/global/common-tails.md` T-4 ③ · `docs/Pitfalls/global/common-tails.md` PIT-GLOBAL-007
+
+---
 
 ### 差异的实际面
 
@@ -246,6 +326,7 @@ req := r.WithContext(ctx)
 | 日期 | 动作 |
 |---|---|
 | 2026-10-25 | ✅ **第八轮：6 条路径全部查完（源码 + 2 个真 Tomcat 探针）** ⇒ **「生态做不到」被证伪**：① 换 Jetty（`HttpChannel.Listener#onAbort()`）🟡可行·换运行时 ② 换 WebFlux+Netty 🟡可行·换栈 ③ **轮询 Tomcat 内部 `isClosed()` ❌实测否决**（反射链通，但实测**滞后 5.6s**，比主动写还慢）④ HTTP/2 `RST_STREAM` ⇒ Tomcat **真触发 `AsyncListener.onError`** 🟡可行但**偏离 Go**（Go 侧实测明文 HTTP/1.1）⑤ **主动探测写 ✅实测有效**（断连后 ~500ms 抛 `ClientAbortException`）但**改 framing** ⑥ 缩短在飞 deadline ✅**零改动·零 wire·零签字** ⇒ ⇒ **修正定性**：不是「生态做不到」，而是「**在既定约束下**没有 Go 等价路径」，而约束是项目自己选的 ⇒ ⇒ **本条从「事实登记」改判为「决策项」**
+| 2026-10-25 | ✅ **第十轮（方案⑤ 落地 + 签字）** —— 用户 2026-10-25：「**CAND-12：主动探测写（周期 flush()）（签字偏离）**」⇒ ① 选定**方案⑤**并实现（`GoStyleClientDisconnectProbe` + `HttpMiddleware` 切片等待 + gRPC `Context` 取消）② 🔴 **撤销 `SD-2026-10-25-02`** —— 它记录的是「框架限制」，而**问题本身已被修掉** ⇒ **本条从未被签字也不需再签** ③ 🆕 **新增 `SD-2026-10-25-04`（已签字）** —— 方案⑤ 带来的 **wire 偏离**：客户端先收到 N 行 `103 Early Hints`（快请求零影响）+ **499 定型时点晚于 Go**（~505ms）
 | 2026-10-25 | ⚠️ **改回「待签字」+ 降级原分类（用户质询后）** —— 用户 2026-10-25 05:46：「**先等下签字，我想知道有没有其他办法，springboot 做分布式肯定有办法**」。⇒ ① 第四轮把它**误转正为「已签字」**（用户当时只问了「它是什么」，**未点头**）⇒ **改回待签字**，原候选号 `CAND-12` 保留。② 原分类「**框架限制**」**过宽** ⇒ 降级为「**Tomcat 的 Servlet 层不给断连信号**」⇒ 实测只覆盖「Tomcat + HTTP/1.1 + Spring MVC」一种组合 ⇒ **不等于「Java/Spring 生态做不到」**。③ 登记 **6 条待查技术路径**（换容器 Jetty/Undertow · 换栈 WebFlux+Netty · 反射取 Tomcat 内部 socket 状态 · HTTP/2 的 RST_STREAM 路径 · 主动探测写 · 缩短在飞 deadline）⇒ **研究结论回来前不签字** |
 | 2026-10-25 | **候选 `SD-2026-10-25-CAND-12` 转正为 `SD-2026-10-25-02`（已签字）**。它是**框架限制**（Servlet 容器不向应用暴露客户端断连信号）⇒ **不存在决策空间** ⇒ 按三分口径属「已定性的事实登记」而非「待拍板项」⇒ 签字只认账事实、**不改任何代码**。<br>⚠️ **该转正已于同日撤销**（用户当时只问了「它是什么」，未点头；且用户随后质询「有没有其他办法」）⇒ 见上一行 |
 | 2026-10-25 | **新增候选 `SD-2026-10-25-CAND-12`**（T-4 资源面残留）。T-4 的**观测面**已修（499 可见）⇒ 不在本档；本档只收**资源面**（断连后在飞 gRPC 不被提前取消）—— 经真 Tomcat 11.0.24 实测 + Tomcat 源码取证确认为**框架限制** ⇒ 落为**待签字候选**（**未签字**） |

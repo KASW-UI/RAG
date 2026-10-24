@@ -269,6 +269,24 @@ public final class HttpMiddleware {
                 final Context parentOtelCtx = Context.current();
                 final long startNanos = System.nanoTime();
 
+                // ===== 2026-10-25 新增：gRPC Context（客户端断连 ⇒ 在飞下游 RPC 立刻中止）=====
+                //
+                // Go 出处：Sea-RideTheWind_golang/service/common/observability/http.go:80-88
+                //     case <-ctx.Done():
+                //         if errors.Is(ctx.Err(), context.Canceled) { statusCode = httpClientClosedRequest }  // 499
+                //   ⇒ Go 的 ctx 一取消，所有 ctx-aware 的下游调用（grpc.Dial）**立刻**返回。
+                //   RAG 没有 ctx 传播 ⇒ 本 ref 让容器线程在「探针判定断连」时
+                //   cancel 这个 io.grpc.Context ⇒ 在飞的 ClientCallImpl 立刻中止。
+                //
+                // ⚠️ 反射/版本细节：grpc-api 1.63 的 io.grpc.Context **没有 makeCurrent()**，
+                //   只有 attach()/detach(Context) ⇒ 这里用官方推荐的 attach/detach 配对写法。
+                // ⚠️ Context.current() 永远不返回 CancellableContext（返回「不可取消的替身」）
+                //   ⇒ 但替身的 cancellableAncestor 指向我们的 CancellableContext
+                //   ⇒ ClientCallImpl 在**发起调用的线程**上抓到的 Context 仍能把取消传回来
+                //   （grpc-core 1.63 ClientCallImpl.java:119 抓 Context.current()，:363 挂 listener）。
+                final java.util.concurrent.atomic.AtomicReference<io.grpc.Context.CancellableContext>
+                        grpcContextRef = new java.util.concurrent.atomic.AtomicReference<>();
+
                 // ⚠️ 预算必须在 submit **之前**起算：Go 侧 timeouthandler.go:67 就是在
                 // 起 goroutine 之前 context.WithTimeout 的。若从 worker 真正开始才起算，
                 // 「等线程」这段时间就不算进预算，超时窗口会比 Go 长。
@@ -292,7 +310,19 @@ public final class HttpMiddleware {
                             MDC.setContextMap(mdcSnapshot);
                         }
                         try (io.opentelemetry.context.Scope ignoredScope = parentOtelCtx.makeCurrent()) {
-                            chain.doFilter(httpReq, rec);
+                            // ★ gRPC Context 必须在 worker 线程上 attach：
+                            //   下游 gRPC 调用是在 chain.doFilter 里发起的，
+                            //   ClientCallImpl 在**调用线程**上抓 Context.current()
+                            //   ⇒ 只有在 worker 上 current，才抓得到我们这个可取消的 Context。
+                            io.grpc.Context.CancellableContext grpcCtx =
+                                    io.grpc.Context.current().withCancellation();
+                            grpcContextRef.set(grpcCtx);
+                            io.grpc.Context previousGrpcCtx = grpcCtx.attach();
+                            try {
+                                chain.doFilter(httpReq, rec);
+                            } finally {
+                                grpcCtx.detach(previousGrpcCtx);
+                            }
                         }
                     } catch (Throwable t) {
                         // 标记 timedOutByScheduler 已经在主线程里写好了；这里只记异常
@@ -342,9 +372,45 @@ public final class HttpMiddleware {
                 long timeoutMs = timeout.toMillis();
                 // 容器线程等 latch 到点即返回：精度对齐 Go 的 select{<-ctx.Done()}
                 // （旧实现 Thread.sleep(10) 轮询最多晚 10ms 才判超时）
+                //
+                // ===== 2026-10-25：单次等待 ⇒ 「切片等待 + 周期主动探测」 =====
+                // 动机：Tomcat 在 HTTP/1.1 下**不向应用层发断连信号** ⇒ 容器线程只有
+                //   「往 socket 写」时才知道客户端已经走了 ⇒ 在飞的下游 gRPC 只能等自己的 deadline。
+                //   改成切片等待后，每片醒来探一次 ⇒ 断连能被**提前**发现并立刻取消下游 RPC。
+                //
+                // ⚠️ **总预算不变**：切片只是把「一次性等 timeout」拆成「若干次等 min(间隔, 剩余)」，
+                //   剩余量每轮按**真实经过时间**重算 ⇒ 总窗口既不延长也不缩短。
+                // ⚠️ 探测本身是 fail-open：探不到（UNAVAILABLE）就什么都不做，继续等。
                 boolean workerDone;
+                boolean clientDisconnected = false;
                 try {
-                    workerDone = doneLatch.await(timeoutMs, TimeUnit.MILLISECONDS);
+                    final long waitStartNanos = System.nanoTime();
+                    final long budgetNanos = TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+                    workerDone = false;
+                    while (true) {
+                        long remainingNanos = budgetNanos - (System.nanoTime() - waitStartNanos);
+                        if (remainingNanos <= 0L) {
+                            break;
+                        }
+                        long sliceMs = Math.max(1L, Math.min(
+                                GoStyleClientDisconnectProbe.probeIntervalMillis(),
+                                TimeUnit.NANOSECONDS.toMillis(remainingNanos)));
+                        workerDone = doneLatch.await(sliceMs, TimeUnit.MILLISECONDS);
+                        if (workerDone) {
+                            break;
+                        }
+                        // 预算用尽 ⇒ 落到下面的超时分支（**不缩短也不延长**总窗口）
+                        if (budgetNanos - (System.nanoTime() - waitStartNanos) <= 0L) {
+                            break;
+                        }
+                        GoStyleClientDisconnectProbe.State probeState =
+                                GoStyleClientDisconnectProbe.probe(httpReq, httpResp);
+                        if (probeState == GoStyleClientDisconnectProbe.State.DISCONNECTED) {
+                            clientDisconnected = true;
+                            break;
+                        }
+                        // ALIVE / UNAVAILABLE ⇒ 什么都不做，继续等（fail-open）
+                    }
                 } catch (InterruptedException ie) {
                     // 容器关闭 / 请求被容器取消：Go 侧对应 ctx.Err() == context.Canceled
                     Thread.currentThread().interrupt();
@@ -352,6 +418,26 @@ public final class HttpMiddleware {
                     rec.markClientCancelled();
                     markTimeout(currentOtelContext(), new java.util.concurrent.TimeoutException("client cancelled: " + ie.getMessage()),
                             Duration.between(start, Instant.now()), httpAttrs(serviceName, httpReq, HTTP_CLIENT_CLOSED_REQUEST));
+                    writeTimeoutResponseQuietly(httpResp, HTTP_CLIENT_CLOSED_REQUEST, httpReq);
+                    return;
+                }
+
+                if (clientDisconnected) {
+                    // ===== 探针判定「客户端已断连」⇒ 对齐 Go 的 ctx.Err()==context.Canceled 分支 =====
+                    //
+                    // ① 先取消 gRPC Context ⇒ **在飞的下游 RPC 立刻中止**（Go：ctx 取消同步传播）
+                    //    ⚠️ 必须排在 workerFuture.cancel(true) 之前：
+                    //    线程中断只能打断「阻塞在 interruptible 调用上」的代码，
+                    //    而**异步**下游调用（future / observer）不受线程中断影响 ⇒ 只有 Context 能取消它。
+                    io.grpc.Context.CancellableContext grpcCtx = grpcContextRef.get();
+                    if (grpcCtx != null) {
+                        grpcCtx.cancel(null);
+                    }
+                    // ② 中断 worker 线程（对齐 Go：ctx 取消后所有 ctx-aware 调用立即返回）
+                    workerFuture.cancel(true);
+                    // ③ 记录 499 + 写响应 —— **复用已有的 499 路径**（flushCaptured 里的那一套）
+                    recordClientDisconnected(rec, currentOtelContext(), serviceName, httpReq,
+                            Duration.between(start, Instant.now()));
                     writeTimeoutResponseQuietly(httpResp, HTTP_CLIENT_CLOSED_REQUEST, httpReq);
                     return;
                 }
@@ -504,22 +590,52 @@ public final class HttpMiddleware {
                 throw io;
             }
             // ===== 客户端已断连 ⇒ 记 499（对齐 Go 的 ctx.Canceled 分支）=====
-            rec.markClientCancelled();
-            markTimeout(ctx,
-                    new java.util.concurrent.TimeoutException("context canceled"),
-                    duration,
-                    httpAttrs(serviceName, httpReq, HTTP_CLIENT_CLOSED_REQUEST));
-            // ⚠️ 为什么还要打一条日志：Go 侧 499 之所以「可见」是因为 go-zero 的 access log
-            //   会打 `[HTTP] 499 - GET /x - ip - duration`；RAG **没有 access log**
-            //   ⇒ 若只写 span，没接 trace 后端时这条事件依然不可见（实测：本仓库的 OTEL
-            //   exporter 默认关闭）⇒ 必须留一条日志，否则「断连不可见」的老问题只修了一半。
-            log.warn("[HTTP] {} - {} {} - {} - duration {}ms",
-                    HTTP_CLIENT_CLOSED_REQUEST,
-                    httpReq.getMethod(),
-                    httpReq.getRequestURI(),
-                    remoteAddrOf(httpReq),
-                    duration.toMillis());
+            recordClientDisconnected(rec, ctx, serviceName, httpReq, duration);
         }
+    }
+
+    /**
+     * 记录「客户端已断连」（<b>499</b>）—— 对齐 Go 的 {@code ctx.Err() == context.Canceled} 分支。
+     *
+     * <p><b>唯一的 499 记录入口</b>：① {@link #flushCaptured} 写 socket 失败（老路径）；
+     * ② {@code doFilter} 里「主动探测」判定断连（2026-10-25 新增）⇒ 两处走同一套代码，
+     * 避免「同一个语义两套实现」在后续演进里漂移。
+     *
+     * <p>Go 出处：{@code Sea-RideTheWind_golang/service/common/observability/http.go:80-88}
+     * <pre>
+     *   case &lt;-ctx.Done():
+     *       statusCode := http.StatusServiceUnavailable
+     *       if errors.Is(ctx.Err(), context.Canceled) { statusCode = httpClientClosedRequest }  // 499
+     *       MarkTimeout(ctx, ctx.Err(), duration, httpAttrs(serviceName, req, statusCode)...)
+     *       http.Error(w, httpTimeoutBody, statusCode)
+     * </pre>
+     *
+     * @param rec       响应记录器（置 clientCancelled 标志 ⇒ 后续写变成 no-op）
+     * @param ctx       当前 OTel Context（打标用；**跑在容器线程**上）
+     * @param serviceName 服务名
+     * @param httpReq   当前请求
+     * @param duration  请求已耗时
+     */
+    private static void recordClientDisconnected(ObservabilityResponseWriter rec,
+                                                  Context ctx,
+                                                  String serviceName,
+                                                  HttpServletRequest httpReq,
+                                                  Duration duration) {
+        rec.markClientCancelled();
+        markTimeout(ctx,
+                new java.util.concurrent.TimeoutException("context canceled"),
+                duration,
+                httpAttrs(serviceName, httpReq, HTTP_CLIENT_CLOSED_REQUEST));
+        // ⚠️ 为什么还要打一条日志：Go 侧 499 之所以「可见」是因为 go-zero 的 access log
+        //   会打 `[HTTP] 499 - GET /x - ip - duration`；RAG **没有 access log**
+        //   ⇒ 若只写 span，没接 trace 后端时这条事件依然不可见（实测：本仓库的 OTEL
+        //   exporter 默认关闭）⇒ 必须留一条日志，否则「断连不可见」的老问题只修了一半。
+        log.warn("[HTTP] {} - {} {} - {} - duration {}ms",
+                HTTP_CLIENT_CLOSED_REQUEST,
+                httpReq.getMethod(),
+                httpReq.getRequestURI(),
+                remoteAddrOf(httpReq),
+                duration.toMillis());
     }
 
     /**

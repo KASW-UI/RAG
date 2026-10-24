@@ -193,12 +193,17 @@ RAG 的 499 由 **worker 内的写失败** 驱动（而本组件的写发生在 
 ⇒ 客户端已走时写 503/499 失败**不再把异常栈抛给容器**
 （对齐 Go：`http.Error` 内部的 `fmt.Fprintln` **忽略写错误**）。
 
-#### ③ 🔴 残留（**待签字 · 分类已在第八轮改判**）—— 在飞 gRPC 不会被提前取消
+#### ③ ✅ **资源面已修（2026-10-25 第十轮，方案⑤「主动探测写」）** —— 在飞 gRPC **会被提前取消**
 
-| | Go 真源 | RAG（修后） |
+| | Go 真源 | RAG（**第十轮修后**） |
 |---|---|---|
-| 断连后在飞 gRPC | **断连后 1~3ms 内全部取消**（ctx 传播） | ❌ **不取消** ⇒ 仍要等到自己的 deadline 才结束 |
-| 断连后是否继续发下游调用 | **否** | **是**（同改前） |
+| 断连后在飞 gRPC | **断连后 1~3ms 内全部取消**（ctx 传播） | 🟡 **会取消**，但**晚于 Go**（实测 **461ms** ≈ 1 个探测周期；探测间隔 500ms）<br>⇒ 🔴 残留的是**时序差**，不是「不取消」 |
+| 断连后是否继续发下游调用 | **否** | 🟡 探测判定断连后不再发新的下游调用 |
+
+⇒ ⚠️ **本条不再是「不修」项**：第九轮查明 6 条替代路径后，**第十轮落地方案⑤**（用户 2026-10-25 拍板）⇒
+⇒ 🆕 **新签字条目** [`docs/Intentional_Deviations/global/common-tails.md` §`SD-2026-10-25-04`](../Intentional_Deviations/global/common-tails.md)
+   —— 记的是**方案⑤ 带来的 wire 偏离**（客户端先收到 N 行 `103 Early Hints`）+ **499 定型时点晚于 Go**；
+⇒ ❌ 原「框架限制」记录 `SD-2026-10-25-02` **已撤销**（问题被修掉 ⇒ 不需签字）。
 
 **为什么在「Tomcat + HTTP/1.1 + 同步 Servlet + 保 `Content-Length`」下拿不到信号**
 （真 Tomcat 11.0.24 实测 + Tomcat 源码取证）：
@@ -424,6 +429,7 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | ✅ **第十轮（T-4 资源面已修 · 方案⑤）** —— 用户 2026-10-25 拍板「**CAND-12：主动探测写（周期 flush()）（签字偏离）**」⇒ 🔴 **「在飞 gRPC 不会被提前取消」不再是事实** —— 落地**方案⑤**：① `GoStyleClientDisconnectProbe`（反射取 Tomcat `SocketWrapper`，`write(true, "HTTP/1.1 103 Early Hints\r\n\r\n")` **+ `flush(true)`** ⇒ 断连时抛 `IOException`；两个前置守卫：非 HTTP/1.1 跳过、`isCommitted()` 跳过；探测间隔默认 500ms，system property 可覆盖，**未动任何 `application.yml`**）② `HttpMiddleware` 单次 `await` ⇒ **切片等待 + 周期探测**（总预算按真实经过时间重算 ⇒ **不延长不缩短**）③ worker 线程上 `io.grpc.Context.withCancellation()` + `attach/detach` ⇒ 探针判定断连即 `cancel(null)` ⇒ **在飞下游 RPC 立刻中止**（grpc-core 1.63 `ClientCallImpl:363` `context.addListener(this, …)`）④ 🟡 **残留时序差**：取消延迟 **461ms**（Go 1~3ms）⇒ 签字记入 `SD-2026-10-25-04`（含 wire 偏离：客户端先收到 N 行 `103 Early Hints`）
 | 2026-10-25 | ✅ **第九轮（T-6 / T-7 / T-8 归因定位）** —— 🔴 **原台账的「落点 `GoStyleRouterErrorResponses.java:83`」是错的**（该文件只管 404/405 且已逐字节对齐）⇒ 三条**分属三个层次**：**T-6** 落点 = Spring `MappingJackson2HttpMessageConverter`（Go = go-zero `rest/internal/header/headers.go:17` 的 `application/json; charset=utf-8`，**带空格**）⇒ **可 Go 等价修**（写原始字符串，绕开 `MediaType.toString()`）🟡 **但 hot 域 `SD-HOT-API-006` 的「不可逐字节复刻」前提已被本仓自己证伪**（`GoStyleRouterErrorResponses` 对 text/plain 就是这么干的）⇒ 需先撤销该签字；**T-7** 落点 = **Tomcat `Http11OutputBuffer`（容器层）** ⇒ 🔴 **真框架限制**，`service/common` 够不着 ⇒ 「归因尚未定位」这句话作废；**T-8** Go 出处 = go-zero `rest/handler/tracehandler.go` 的 `propagator.Inject(spanCtx, HeaderCarrier(w.Header()))` ⇒ RAG **完全没有** ⇒ 落点 = `service/common` HTTP 入口 ⇒ ✅ **可 Go 等价修且不需拍板** ⇒ ⇒ **「三条同落点一次改」的处置作废，必须拆开**
 | 2026-10-25 | **第三轮（A1 / A2 / A3 / A4 四项落地）**。① **T-1 残余 ① 已修** —— 包一层 `SanitizedJsonContentTypeInputMessage` ⇒ 畸形头不再抛 + `charset=gbk` 回归 UTF-8；守门扩到 8 条 + 变异双向转红 ② **T-9 已修** —— 熔断键补 target 前缀（身份源 = `Channel.authority()`，因 grpc-java 1.63 的 `ManagedChannel` 无 `getTarget()`）；守门 6 条 + 变异转红（第一版守门有洞 ⇒ 已改为只调 `interceptCall` 再看 `trackedMethods()`）③ **T-4 观测面已修** —— 499 判据从「worker 内写失败」改成「**filter 写 socket 失败**」；配真 Tomcat 守门 3 条 + M1/M2/M3 三组变异全转红；⚠️ 顺带修掉「提前 flush 把 `Content-Length` 退化成 chunked」这个**新引入的 wire 差异**；🔴 残留「在飞 gRPC 不被提前取消」⇒ **框架限制** ⇒ `SD-2026-10-25-CAND-12`（待签字）④ **CYCLE-002 普查** —— `service/common` 的 `@Deprecated` 归零、无反向 import 业务域、无跨域 `{@link}` ⇒ **0 命中** ⇒ 落成可重跑守门 `tools/difftest/check-cross-domain-holds.py` |
 | 2026-10-25 | **第二轮（T-1 修复）**。T-1 改为**取原始头值**（`getFirst(CONTENT_TYPE)`）⇒ 大小写敏感判定与 Go 对齐；配真 `HttpHeaders` 守门测试 6 条 + 变异测试（转红）。⚠️ 登记 **T-1 残余 ①**（解析层仍走 MediaType ⇒ 畸形头仍抛，Go 不会）。🔴 新增 **X-9**（3 份生产复制品）⇒ [`cross-domain.md`](cross-domain.md)。T-2 / T-5 **用户签字** ⇒ 转 `SD-2026-10-25-01` 并移出本档 |
