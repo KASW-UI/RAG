@@ -87,8 +87,81 @@ git worktree remove /tmp/rag-baseline-check          # 用完即撤
 
 ---
 
+## PIT-GLOBAL-011 🔴 **裸 `ServerCallHandler` 造的「慢服务」从不执行** ⇒ 测试绿但**空转**
+
+### 现象
+
+为验证「服务端超时能打断在飞处理」，测试里注册一个「处理函数睡 10 秒」的服务：
+
+```java
+ServerCallHandler<Req, Resp> slowHandler = new ServerCallHandler<Req, Resp>() {
+    public ServerCall.Listener<Req> startCall(ServerCall<Req, Resp> call, Metadata headers) {
+        return new ServerCall.Listener<Req>() {
+            @Override public void onHalfClose() {
+                Thread.sleep(10_000);          // ← 这行**从未执行过**
+                call.sendMessage(resp); call.close(Status.OK, new Metadata());
+            }
+        };
+    }
+};
+ServerServiceDefinition.builder(svc).addMethod(m, slowHandler).build();
+```
+
+⇒ 测试**绿**，断言 `DEADLINE_EXCEEDED` + `elapsed < 3000ms` 都过
+⇒ 但它验证的是「服务端能取消一个**从未开始执行**的调用」，
+**不是**「服务端超时打断一个**正在执行**的处理」。
+
+### 根因（探针实测，grpc-java 1.63）
+
+```
+client got status=DEADLINE_EXCEEDED
+RESULT startCall=true  onHalfClose=false  responded=false
+```
+
+⇒ grpc-java **会**调用裸 handler 的 `startCall()`
+⇒ 但**不会**把 `onHalfClose` 派发给它返回的 `ServerCall.Listener`
+⇒ ⇒ **注册进去的业务处理函数从未执行**。
+
+⚠️ **为什么「断言照样过」**：客户端还挂着 `withDeadlineAfter(5, SECONDS)`
+⇒ 服务端永不响应 ⇒ 客户端自己的 deadline 到点 ⇒ `DEADLINE_EXCEEDED` ⇒ `assertThrows` 通过
+⇒ `elapsed < 3000` 由**服务端超时拦截器**取消一个空调用而满足。
+
+### 正确处置
+
+⇒ 造慢服务必须走 grpc-java 的**标准派发入口**：
+`io.grpc.stub.ServerCalls.asyncUnaryCall(...)` ⇒ `onHalfClose` 才会被派发
+⇒ 并补一条断言「**handler 确实被调用过**」（计数器 / latch）
+⇒ 再做**变异测试**：去掉 `server.intercept(...)` ⇒ 客户端 deadline 生效 ⇒ `elapsed ≈ 5000ms` ⇒ 转红。
+
+### ⚠️ 区分「哪些裸 handler 是有意的」
+
+| 形态 | 判定 |
+|---|---|
+| 裸 handler **注册进 `ServerServiceDefinition` 挂真 server** | 🔴 **本形态** ⇒ 空转 |
+| 裸 handler 当**拦截器链的 `next`**（直接调 `startCall()`） | ✅ **不是本形态** —— 拦截器单测的标准写法，**别顺手改** |
+
+⇒ 全仓扫描时**必须按「是否注册进 server」分类**，不能只 grep `new ServerCallHandler`。
+
+### 教训
+
+**「测试绿」要问一句「它测的东西真的发生了吗」。**
+⇒ 一个**从不执行的分支**也能让断言全部通过 ——
+这与 AGENTS.md §3.3 的「绿测试可能是错误答案的守卫」同源，
+只是这次藏得更深：**错的是测试的构造方式，不是测试的期望值。**
+
+### 出处
+
+- 踩坑位置：`service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskGrpcInterceptorWiringTest.java:173`
+  + `service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/FollowGrpcInterceptorWiringTest.java:149`
+- 关联：`docs/DRIFT/global/cross-domain.md` §二·八（X-5）
+- 一次性探针：`/tmp/probe-handler/Probe.java`（不入仓）
+- 2026-10-25，`align/global`
+
+---
+
 ## 变更记录
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | **第七轮新增 PIT-GLOBAL-011** —— 裸 `ServerCallHandler` 造的「慢服务」**从不执行** ⇒ task + follow 两个域的同名测试**绿但空转**；含探针实测输出、两种裸 handler 的分类判据、修法与变异测试要求 |
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 PIT-GLOBAL-005（全量构建偶发红的判定三步 + 基线对照的 worktree 做法）· PIT-GLOBAL-006（真源分层的指针） |

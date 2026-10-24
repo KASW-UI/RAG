@@ -17,7 +17,7 @@
 | X-2 | 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | 🔴 均未审 | 未展开 |
 | X-3 | 事实投递链路 | `like`/`comment`/`favorite` 的 rpc ↔ **仓外 DC 平台** | ✅ **已闭合**（2026-10-25 B2）—— 末端不是「第三个仓库」，是仓外 `POST /v1/events`；仓内两侧 4↔4 对齐 | ✅ **已闭合** |
 | X-4 | 社区消费者差异 | Go 用 `like`，RAG 不用 | ⏸ 仍未决（交接 #9，与 `DRIFT-LIKE-003` 同一条） | 未展开 |
-| X-5 | 裸 `ServerCallHandler` 不被 dispatch | task 域 | ⏸ 仍未决（交接 #10） | 未展开 |
+| X-5 | 裸 `ServerCallHandler` 不被 dispatch | **task + follow**（2026-10-25 实测扩面） | 🔴 **已确证**（第七轮探针）—— grpc-java 不向裸 handler 派发 `onHalfClose` ⇒ 两个域的「造慢服务」测试**空转** ⇒ 见 §二·八 | ✅ **已确证**（机制 + 波及面） |
 | X-6 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🔴 未修 · 跨域 · 待拍板 | 未展开 |
 | X-7 | DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🟡 **部分闭合**（2026-10-25 B3）—— 4 个域已能活体逐列对照；其余 5 域**缺双侧库环境** | ✅ **已跑**（产出真结论 + 1 条新差异 X-10） |
 | **X-8** | 🆕 **真源分层（Go 出处一半在框架里）** | **全部域** | ✅ **本轮已查明并记账** | ✅ **本轮新增** |
@@ -166,6 +166,84 @@ Content-Type: Application/JSON
 
 ---
 
+## 二·八、X-5 🔴 **已确证（2026-10-25 第七轮实测）** —— 裸 `ServerCallHandler` 不被 dispatch ⇒「造慢服务」的测试**是空转的**
+
+> ⚠️ **本条由「仍未决 · 未展开」升级为「已确证」** —— 机制已用**一次性探针**实测清楚，
+> **波及面从「task 域 1 处」扩到「task + follow 两个 rpc 域各 1 处」**。
+> ⚠️ **本轮只取证、未改代码**（改法涉及 task / follow 两个域的测试 ⇒ 下一轮落地）。
+
+### ① 机制（探针实测，非推断）
+
+用 grpc-java 1.63 起一个**真 server**，把一个**裸** `ServerCallHandler` 注册成唯一方法：
+
+```java
+// /tmp/probe-handler/Probe.java（一次性探针，不入仓）
+ServerServiceDefinition.builder("probe.Service")
+    .addMethod(MD, new ServerCallHandler<String,String>() {
+        public ServerCall.Listener<String> startCall(ServerCall<String,String> call, Metadata h) {
+            START_CALL_FIRED.set(true);          // ← 确实被调用
+            return new ServerCall.Listener<String>() {
+                @Override public void onHalfClose() {   // ← 【从不触发】
+                    HALF_CLOSE_FIRED.set(true);
+                    Thread.sleep(2000);
+                    call.sendMessage("pong"); call.close(Status.OK, new Metadata());
+                }
+            };
+        }
+    }).build();
+```
+
+**实测输出**：
+
+```
+client got status=DEADLINE_EXCEEDED
+RESULT startCall=true  onHalfClose=false  responded=false
+```
+
+⇒ **grpc-java 会调用裸 handler 的 `startCall()`，但**不会**把 `onHalfClose` 派发给它返回的 `ServerCall.Listener`**
+⇒ ⇒ **注册进去的业务处理函数从未执行过**（`responded=false`）。
+
+### ② 为什么这会让测试**空转**（而不是「少测一点」）
+
+两个域的同名测试（`serverSideTimeoutIsActuallyEnforced` 形态）都是：
+「注册一个**处理函数睡 10 秒**的服务 ⇒ 断言服务端超时在 ~300ms 打断它」。
+
+| 事实 | 后果 |
+|---|---|
+| handler 的 `onHalfClose` **从不触发** | 「睡 10 秒」**从未发生** ⇒ 服务端**从一开始就不打算响应** |
+| 客户端还挂着 `withDeadlineAfter(5, SECONDS)` | 客户端最终拿到 `DEADLINE_EXCEEDED` ⇒ `assertThrows` **照样通过** |
+| `elapsedMillis < 3_000` 断言 | 由**服务端超时拦截器**取消一个**从未开始执行的调用**而满足 |
+
+⇒ ⚠️ **测试是绿的，但它验证的是「服务端能取消一个空调用」，
+而不是它 DisplayName 声称的「服务端超时打断一个正在执行的处理」。**
+⇒ 这正是 AGENTS.md §3.3 点名的形态：**「绿测试可能是错误答案的守卫」**。
+
+⚠️ **别把它读成「服务端超时机制没生效」** —— 那条断言（`elapsed < 3000`）
+**确实**抓得住「`server.intercept(...)` 没挂上」⇒ **该轴的守门力是真的**。
+缺的只是**「正在执行的处理被打断」这一语义从未被验证过**。
+
+### ③ 波及面（2026-10-25 全仓扫描）
+
+| 文件 | 形态 | 判定 |
+|---|---|---|
+| `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskGrpcInterceptorWiringTest.java:173` | 裸 handler → `ServerServiceDefinition.builder(...).addMethod(m, slowHandler)` → **挂真 server** | 🔴 **空转** |
+| `service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/FollowGrpcInterceptorWiringTest.java:149` | 同款（同文件、同注释、同结构） | 🔴 **空转** |
+| `service/common/src/test/java/com/rag/common/protection/{GoStyleRpcProtectionChainTest, GoStyleRpcSheddingInterceptorTest, GoStyleSheddingStatTest, GoStyleRpcBreakerInterceptorTest}.java` | 裸 handler 作**拦截器链的 `next`** ⇒ 直接调 `startCall()` | ✅ **不是本形态**（拦截器单测的标准写法，无需改） |
+| `service/common/src/main/java/com/rag/common/protection/GoStyleRpcProtectionChain.java:98,134,161` | **生产代码**里的 `next` 包装 | ✅ **不是本形态**（拦截器链包装，不注册进 server） |
+
+⇒ 🔴 **实际波及 = 2 个 rpc 域各 1 条测试**（task + follow），
+**不是**先前台账写的「task 域内部 ⇒ 会反噬所有 rpc 域」—— **反噬面比预估的窄，但确实是跨域的**。
+
+### ④ 修法（下一轮落地）
+
+| # | 动作 |
+|---|---|
+| ① | 把裸 `ServerCallHandler` 换成 grpc-java 的**标准派发入口** `io.grpc.stub.ServerCalls.asyncUnaryCall(...)` ⇒ `onHalfClose` 才会被派发 ⇒ 处理函数**真的执行** |
+| ② | 补一条断言：「**handler 确实被调用过**」（计数器 / latch）+「服务端在 handler **执行中途**取消它」⇒ 补上现在缺失的那一维语义 |
+| ③ | **变异测试**：去掉 `server.intercept(...)` ⇒ 客户端 5s deadline 生效 ⇒ `elapsed ≈ 5000ms` ⇒ **转红**（证明守门非空转） |
+
+---
+
 ## 三、其余 7 条的状态说明（2026-10-25）
 
 本轮**未展开**这 7 条的逐条对照（它们的落点分散在多个域的代码里，
@@ -177,13 +255,14 @@ Content-Type: Application/JSON
 | X-2 | `user-rpc`↔`admin-rpc` 的建表责任与 client 契约 ⇒ 跨 users 域内部两个子域 ⇒ 需先读 users 域台账 |
 | ~~X-3~~ | ✅ **已闭合**（2026-10-25 B2）⇒ 见 §二·七（末端 = 仓外 DC 平台；仓内两侧 4↔4 对齐） |
 | X-4 | 与 `DRIFT-LIKE-003` 同一条 ⇒ 归 like 域，但需 global 协调（涉及 common 侧的 communityfact） |
-| X-5 | task 域内部 ⇒ 但「裸 `ServerCallHandler` 不被 dispatch」会**反噬所有 rpc 域** ⇒ 需先在 task 域定论 |
+| ~~X-5~~ | ✅ **已确证**（2026-10-25 第七轮，探针实测）⇒ 见 §二·八。⚠️ 机制清楚了，但**修法要同时动 task + follow 两个域的测试** ⇒ 下一轮落地 |
 | X-6 | 待**用户拍板**（改 Tomcat 三旋钮 vs 改 10 个 api 的参数解析）⇒ 拍板前不动 |
 | ~~X-7~~ | ✅ **已做**（2026-10-25 B3）⇒ 见 §二·五（4 个域可跑 + 产出 X-10） |
 
 ⇒ **排期建议（2026-10-25 更新）**：~~X-7~~ **已做**（§二·五）→ **X-1**（真 PG 三进程）
-→ **X-2** → ~~X-3~~（**已闭合**）→ X-4/X-5；**X-6 等用户拍板**；
-**X-10 等用户拍板**（索引定义：改回 Go 的单列，还是保留 RAG 的复合索引并签字）。
+→ **X-2** → ~~X-3~~（**已闭合**）→ ~~X-5~~（**已确证**，§二·八）→ **X-5 修法落地**（task + follow）
+→ X-4；**X-6 等用户拍板**；
+~~X-10~~（**已签字认账**，真实记录 = message 域 `SD-2026-10-23-06`）。
 
 ---
 
@@ -191,6 +270,7 @@ Content-Type: Application/JSON
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | **第七轮（X-5 确证 + X-10 去重）**：① 🔴 **X-5 由「未展开」升级为「已确证」** —— 一次性探针实测：grpc-java 1.63 **会**调裸 handler 的 `startCall()`，但**不会**把 `onHalfClose` 派发给它返回的 `ServerCall.Listener` ⇒ 「处理函数睡 10 秒」**从未发生** ⇒ task + follow 两个域的同名测试**空转**（绿，但验证的是「取消一个空调用」而非「打断在飞处理」）⇒ 波及面由「task 域」扩到「task + follow 两个 rpc 域」⇒ 见 §二·八 ② ⚠️ **X-10 去重** —— 复查发现 X-10 早在 2026-10-23 已签为 message 域 `SD-2026-10-23-06` ⇒ **撤销本域重复登记的 `SD-2026-10-25-03`**（改为指针） |
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 7 条跨域不变量状态；新增 **X-8 真源分层（L1 项目层 / L2 go-zero 框架层）** —— 本轮实测发现，影响全部域的对照方法 |
 | 2026-10-25 | **第四轮（B2 / X-3 闭合）**：**「第三个仓库」已定位** —— 链路末端**不是仓库**，是**仓外 DC 平台**的 `POST /v1/events`（`DC_PLATFORM_EVENT_URL` + `DC_PLATFORM_SERVICE_TOKEN`，路径必须以 `/v1/events` 结尾、token ≥ 32，见 Go `service/common/communityfact/wire.go:83-91`）。仓内两侧**都有**：`service/common/communityfact` **4 文件 ↔ 4 类**；authority 端点路径 1:1；调度形状 **1s / 16 / 10s / 单条失败即 break** 四项逐条对齐；`like` / `comment` / `favorite` 三域**都接了线**。唯一差异 = **部署形态**（Go 独立 `cmd/fact-dispatch` vs RAG 进程内 `@Scheduled`）⇒ 表达层差异，不修。⇒ **X-3 关闭**（不是漂移，是架构事实 + 仓外边界） |
 | 2026-10-25 | **第三轮（B3 / X-7 部分闭合）**：① 查出**已有的域预设本身已失效**（users 容器改名、message 容器+库+用户三重失效）⇒ 修好并给脚本加按域的 `pg_user` ② **扩到 4 个域**（新增 `comment`）⇒ **可跑的域 1 → 4** ③ 跑出**真结论**：task ✅ 11 列逐字相同、message ✅ 37 列逐字相同（+ DEFAULT 6 处=已知刻意保留）、users/comment 各有**环境缺口**（Go 侧对应表未被 AutoMigrate）④ 🔴 **新增 X-10**：`message` 域索引 `idx_notification_recipient_read` **两侧列不同**（Go 单列 `is_read` / RAG 复合 `recipient_id,is_read`）⇒ 根因是 Go 侧 `priority:1` 写到了另一个索引名 ⇒ **落在 message 域的迁移脚本 ⇒ global 只记账不改别域代码，等用户拍板** ⑤ 仍缺 5 个域（article/like/hot/follow/favorite）的**双侧库环境** ⇒ 缺 runner ⇒ 登记为待办 |
