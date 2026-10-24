@@ -91,13 +91,13 @@ DOMAINS = {
         "container": "difftest-postgres",
         "go_db": "go_db",
         "rag_db": "rag_db",
-        # ⚠️ 2026-10-26 订正：原写「users 域没有 Flyway 账本 ⇒ 不排除任何表」——
+        # ⚠️ 2026-10-25 订正：原写「users 域没有 Flyway 账本 ⇒ 不排除任何表」——
         #    那是 10-25「按模块独立账本表名」**之前**的假设。10-25 之后
         #    `spring.flyway.table: flyway_schema_history_<模块>` 落地，而**所有 rpc 模块
         #    共用同一个 `rag_db`** ⇒ message-rpc 的账本表 `flyway_schema_history_message`
         #    就落在 users 域检查所读的库里。
         #    ⇒ users 域必须**同样排除** `flyway_schema_history*`，否则「仅 RAG 有」
-        #    会把列集合判成不一致（实测：2026-10-26 复现该假阳性）。
+        #    会把列集合判成不一致（实测：2026-10-25 复现该假阳性）。
         #    排除用前缀匹配（loader 里是 `tbl == x or tbl.startswith(x)`）⇒ 一条就够。
         "exclude_tables": ("flyway_schema_history",),
         "table_map": {

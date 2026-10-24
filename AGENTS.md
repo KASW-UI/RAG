@@ -24,7 +24,7 @@
 | `users` | 🔴 4 个组件全部 `NOT EQUIVALENT`（api 2+3、rpc 1+6 OBSERVABLE）。✅ 已修 `extra_info`/`is_current`、admin-rpc `update_time` ×5、user-rpc `Login` fail-open、**users 域 4 张表时间列 `⇒TIMESTAMPTZ`**；⚠️ admin-rpc 同款 `status=0L` 未修 | [`users/`](docs/DRIFT/users/_shared.md) |
 | `message` | 🔴 api 5 MISMATCH + 1 OBS；rpc 1 MISMATCH + 5 OBS。✅ `broadcast:1` 误发全量、rpc 负 `offset`、`isRead` 字段名 —— 回归全绿 | [`message/`](docs/DRIFT/message/rpc.md) |
 | `like` | 🔴 api **9 MISMATCH**（本轮最高，**62 条绿测试零覆盖**）；rpc 4+2。✅ rpc 6 条启动阻塞、`like_domain_fact_outbox` DDL 对齐 —— 回归全绿。事实链路**跨三仓库且末端不在任何仓** | [`like/`](docs/DRIFT/like/rpc.md) |
-| `common` | 🔴 **不是「已审计完成」** —— 重对齐实测 5 个可比包 **3 个 `NOT EQUIVALENT`**（communityfact/logger/observability/snowflake），仅 `response` 逐条等价。**28 条编号未修** + 5 项未编号 + **8 项未决交接**（#1 hot-rpc 接线已关闭）⇒ **共享层，其他域的尾巴挂在它身上** | [`common/`](docs/DRIFT/common/alignment-2026-10-23.md) |
+| `common` | 🔴 **不是「已审计完成」** —— 重对齐实测 5 个可比包 **3 个 `NOT EQUIVALENT`**（communityfact/logger/observability/snowflake），仅 `response` 逐条等价。**27 条编号未修** + 5 项未编号 + **交接 4 未决 / 2 未销账** ⇒ **共享层，其他域的尾巴挂在它身上** | [`common/`](docs/DRIFT/common/alignment-2026-10-23.md) |
 | `hot` | ✅ 三组件**全部拿到双侧活体对拍**、25/25 变异点被守门抓住；✅ **2026-10-25** 认领并修复 `DRIFT-COMMON-004`（rpc 拦截器从未挂上 server）+ 6 个 api 的 jar 可执行 + **Tomcat 三旋钮（D21/D22/D23）已修**（10 个 api 统一配 ⇒ 三个阈值与 Go **逐条一致**）。⚠️ 残余：`DRIFT-HOTAPI-030`（**跨域待拍板**）/ `-031`（框架限制）；D14/D25/D27 移交 `service/common` | [`hot/`](docs/DRIFT/hot/rpc.md) |
 | `article` | 🔴 rpc 4 MISMATCH + 4 OBS；api 2 MISMATCH（**首次对照即 NOT EQUIVALENT**）。⚠️ `DRIFT-ARTICLE-RPC-004` 复核后**撤销** —— 两边都是静默覆盖，照台账修反会造成新漂移 | [`article/`](docs/DRIFT/article/rpc.md) |
 | `comment`/`follow`/`task` | ✅ **2026-10-25 并发对齐后「零台账」已解除**，各域 4/4/3 组件全部完成首轮对照 | [`_cross/`](docs/DRIFT/_cross/component-coverage-matrix.md) |
@@ -36,7 +36,7 @@
 
 1. **已签字的有意偏离** **49 条**（另 **14 条未签字候选**）—— 是决策不是缺陷，但两侧确实不一致 ⇒ [`docs/Intentional_Deviations/`](docs/Intentional_Deviations/_INDEX.md)
    ⚠️ **共性**：多数是「**RAG 做了更严/更安全的那一侧**」或「proto `package` 归一（表达层）」⇒ 对拍看到它们变红，**先确认是不是签字项，不要当新回归去「修」**。
-2. **DDL 差异**（2026-10-26 **双侧活体对拍** · users/task/message 三域）：**类型/长度全部 0 差异**
+2. **DDL 差异**（2026-10-25 **双侧活体对拍** · users/task/message 三域）：**类型/长度全部 0 差异**
    （原记 12 处列类型差异**已被 10-23 修复轮清零**：message `V5`、users `01~04`、like `V6`）。
    **仍未修**：`users_user.status` 可空性（Go 可空 / RAG `NOT NULL`，须与 admin 域同改）、
    `DEFAULT CURRENT_TIMESTAMP` 残留 **14 处**（users 8 + message 6，**刻意保留**：两侧 INSERT 都显式绑定）、
@@ -349,7 +349,7 @@ RAG 不是从 Go「推测」行为，而是**逐字对照 Go 源码**（§3.1）
 | `tools/semantic-probe/` | **双侧语义探针**（§3.3「两侧同时跑的探针」首个落地实现） | `bash tools/semantic-probe/run-parity.sh` |
 | `tools/errmsg-probe/` | 错误码契约逐字节对拍（码值/文案/未知码回落） | `bash tools/errmsg-probe/run-parity.sh` |
 | `tools/difftest/` | 双端运行时对拍（起两套栈 + 请求矩阵） | `bash tools/difftest/run.sh` |
-| `tools/difftest/check-ddl-static.py` | **DDL 列级对照**（类型/长度 + 可空性 + DEFAULT + `--indexes` 索引/约束）。**3 域预设** `users`/`task`/`message`；`like` **无预设** ⇒ 只到源码级。2026-10-26：类型 **0 差异** | `python3 … [--domain users\|task\|message] [--indexes]` |
+| `tools/difftest/check-ddl-static.py` | **DDL 列级对照**（类型/长度 + 可空性 + DEFAULT + `--indexes` 索引/约束）。**3 域预设** `users`/`task`/`message`；`like` **无预设** ⇒ 只到源码级。2026-10-25：类型 **0 差异** | `python3 … [--domain users\|task\|message] [--indexes]` |
 | `tools/difftest/check-proto-static.sh` | proto 契约对照（字段号 / message 名 / RPC 签名） | `bash tools/difftest/check-proto-static.sh` |
 | `tools/difftest/check-plaintext400-headers.sh` | 真 Tomcat 下 400 的 `Content-Type`/`nosniff`（**MockMvc 测不到**） | `bash …` |
 | `tools/difftest/check-flyway-ledger.py` | Flyway 账本隔离（按库+schema 断言表名两两不同）。2026-10-23 `EXIT=1`→**`EXIT=0`**；运行时验证仍缺（§6.3 问题 4） | `python3 …` |

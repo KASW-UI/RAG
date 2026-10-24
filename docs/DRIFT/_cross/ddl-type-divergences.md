@@ -1,10 +1,10 @@
-<!-- @move AGENTS.md §〇 item 2 · DDL 列类型差异明细 · 2026-10-26 填实 -->
+<!-- @move AGENTS.md §〇 item 2 · DDL 列类型差异明细 · 2026-10-25 填实 -->
 
 # DDL 列类型 / 约束差异明细（运行时权威）
 
 > 从 AGENTS.md §〇 搬出。**AGENTS.md 只留结论 + 一行指针，逐条明细在本文件。**
 
-## 〇、核对口径（2026-10-26 实测）
+## 〇、核对口径（2026-10-25 实测）
 
 **证据强度 = 双侧活体 DDL 对拍**（不是读 DDL 文件推断）。工具：[`tools/difftest/check-ddl-static.py`](../../../tools/difftest/check-ddl-static.py)。
 
@@ -21,11 +21,11 @@
 
 1. **users 域检查会顺带读到 message 域的表** —— 2026-10-25「按模块独立 Flyway 账本表名」落地后，**所有 rpc 模块共用同一个 `rag_db`** ⇒ users 域的 72 列里含 message 的 13 列 ⇒ 表里已按表归属分开计。
 2. **Flyway 账本表必须排除** —— RAG 侧独有 `flyway_schema_history*`（Go 侧用 AutoMigrate，没有账本表）⇒ 不排除则「仅 RAG 有」会把列集合判成不一致。
-   ⚠️ **2026-10-26 实测复现了这个假阳性**：`users` 域 `exclude_tables` 原为空 ⇒ 脚本 `EXIT=2`（列集合不一致）。**已修**：改为 `("flyway_schema_history",)`（前缀匹配，一条覆盖 7 个模块的账本表）。
+   ⚠️ **2026-10-25 实测复现了这个假阳性**：`users` 域 `exclude_tables` 原为空 ⇒ 脚本 `EXIT=2`（列集合不一致）。**已修**：改为 `("flyway_schema_history",)`（前缀匹配，一条覆盖 7 个模块的账本表）。
 
 ---
 
-## 一、总表（2026-10-26 实测）
+## 一、总表（2026-10-25 实测）
 
 | 维度 | `users`（72 列） | `task`（11 列） | `message`（37 列） |
 |---|---|---|---|
@@ -51,7 +51,7 @@
 | **Go** | `is_nullable = YES`（可空） |
 | **RAG** | `is_nullable = NO`（`NOT NULL`） |
 | **台账** | `DRIFT-USERRPC-V-002` ⇒ [`docs/DRIFT/users/user/rpc.md`](../users/user/rpc.md) |
-| **状态** | 🔴 **2026-10-26 仍未修 · 被卡**：改动必须与 admin 域同改 |
+| **状态** | 🔴 **2026-10-25 仍未修 · 被卡**：改动必须与 admin 域同改 |
 
 **为什么被卡**（`users/user/rpc.md:1413`）：`admin-rpc` 的 `UserEntity.status` 是 `private Long status = 0L;`，MyBatis `callSettersOnNulls=false` ⇒ 读出 `NULL` 会被当成 `0`（「活跃」）⇒ 单独放开 `users_user.status` 的 `NOT NULL` 会**立刻激活** admin 侧把 `NULL` 当活跃的缺陷 ⇒ 必须两侧一起裁决。
 
@@ -135,7 +135,7 @@
 
 ⚠️ **AGENTS.md §〇 item 2 原列的「仍未修」清单里，5 条全部已不成立**：
 
-| 原清单项 | 实际状态（2026-10-26 实测） | 修法位置 |
+| 原清单项 | 实际状态（2026-10-25 实测） | 修法位置 |
 |---|---|---|
 | message 域时间列 `TIMESTAMP` | ✅ **已修** —— `V5__message_time_columns_timestamptz.sql`（8 列 `ALTER … TYPE TIMESTAMPTZ USING … AT TIME ZONE 'Asia/Shanghai'` + 5 列 `DROP NOT NULL`）⇒ **运行时实测类型 0 差、可空性 0 差** | `service/message/message-rpc/src/main/resources/db/migration/V5__message_time_columns_timestamptz.sql` |
 | users 域其余 3 张表时间列 | ✅ **已修** —— `02/03/04_*.sql` 均带 `ALTER COLUMN … TYPE TIMESTAMPTZ` ⇒ **运行时实测 users 域 72 列类型 0 差** | `service/users/users-common/src/main/resources/db/0{2,3,4}_*.sql` |

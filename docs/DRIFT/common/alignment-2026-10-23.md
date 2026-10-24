@@ -1,6 +1,6 @@
 <!-- @new 2026-10-23 22:5x–23:1x · align/common 工作树产出 · 基线 commit 8422116 -->
 
-> 🟥 **当前态指针（2026-10-26 台账校准轮回填）** —— 本文件按「轮次」追加，**历史各轮一条未删**（快照价值）。
+> 🟥 **当前态指针（2026-10-25 台账校准轮回填）** —— 本文件按「轮次」追加，**历史各轮一条未删**（快照价值）。
 > ⚠️ **头部一度严重过期**（文件名与首行仍停在 2026-10-23，而正文已有 §六·五 时效性复验、§八 决策记录、§十一 交接结案状态）⇒ **当前状态一律以文件末尾「§十一「交接事项的结案状态（2026-10-25 更新）」」一节为准**。
 > ⇒ 本文件里的 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环（AGENTS.md §0 证据强度分层）。
 > **本轮只回填头部口径；正文各轮的原始记录一条未删。**
@@ -40,6 +40,12 @@
 | 已记录未修 | **28 条编号条目**（`DRIFT-COMMON` 3 + communityfact 15 + logger 7 + snowflake 3）<br>另补录 **5 项未编号的观察**（见 §六·六），含 1 条 `UNRESOLVED`、1 条 API 缺陷、2 条跨域归属 |
 | 2026-10-24 复验 | 🔴 **推翻了首版 1 条假结论**（「H2 已闭环」实为 9/10）；✅ 其余承重断言均仍成立（见 §六·五）<br>🔴 **新增 2 条**（DRIFT-COMMON-005 / -006），其中 -005 此前被**别的域签了字**却在本域无记录 |
 | 📌 决策与交接 | **2 条用户拍板**已记入 §八（守门脚本保留 / COMMON-005 先记账不改）<br>**9 项交接事项**列在 §九（本域一律不越界） |
+
+> 🟥 **2026-10-25 校准轮订正（上表两处数字已过期，详见 §十二）**：
+> ① 「**28** 条编号条目」⇒ 实为 **27** 条 —— `DRIFT-COMMON-004` 已由 hot 域 2026-10-25 认领并关闭（§十一 #1）⇒ `DRIFT-COMMON` 未修数 3 → **2**。<br>
+> ② communityfact **15 条是对的** —— **§五 的「14 条」才是旧快照**（漏了 §六·六 补录的 `DRIFT-CF-018`）。<br>
+> ③ 「9 项交接」⇒ **其中 5 项（#2/#5/#6/#7/#8）的状态从未被记录** ⇒ 真实分布 = **已销账 5 / 未销账 2 / 仍未决 4**（§十二·三）⇒ AGENTS.md §0 的「8 项未决」把「没人看过」当成了「确认未决」。<br>
+> ⇒ 本表**其余各行（含第 36 行「3 个 NOT EQUIVALENT」）仍然成立**。
 
 ---
 
@@ -602,3 +608,125 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 |---|---|---|---|
 | **10** | **裸 `ServerCallHandler` 注册到 unary 方法上，grpc-java 根本不会 dispatch** ⇒ 「超时生效」类断言在这种写法下**依然是绿的** | **`align/task`** | `service/task/task-rpc/.../TaskGrpcInterceptorWiringTest.java` 的 `slowTaskService()` 用的正是裸 `ServerCallHandler` ⇒ 它的「睡 10 秒的服务」**实际从未睡过**。<br>⇒ 该用例的断言**依然有效地证明了「服务端超时生效」**，但**证明不了「handler 被调用过」/「deadline 传播到了 handler 线程」**。<br>⇒ 建议该域换成 `ServerCalls.asyncUnaryCall` 并补一条「handler 被调用过」的断言。<br>实测证据 ⇒ [`docs/DRIFT/hot/rpc.md`](../hot/rpc.md) 第十二轮 §五 |
 | **11** | **6 个 api 模块的 jar 不可执行** | **跨 6 域（已修）** | `DRIFT-MSG-V-030`，登记方在 message 域 ⇒ **2026-10-25 已统一修完**，守门脚本 `EXIT=0` |
+
+---
+
+## 十二、📌 2026-10-25 台账校准轮：common 作为「共享写点」的真实状态
+
+> 本节由 2026-10-25 的一次**全档机械扫描 + 定向实测**产出，**不改写上文任何历史记录**（§〇~§十一 原文保留）。
+> **本节的目的**：把「common 域是瓶颈、其他域的尾巴全挂在它身上」这个判断**落到可执行的粒度** —— 每条尾巴的**落点 `文件:行号`**、**当前真实状态**、**闭合需要几步**。
+> ⚠️ **本节不实施任何修复**（用户 2026-10-25 明确「我自己修」）⇒ 本节只提供**事实与顺序**。
+>
+> 🟥 **本节初稿的日期被守门脚本当场抓住并已订正** —— 初稿把本轮的核对日期写成了**次日**（一个**未来日期**；系统当日为 **2026-10-25**），
+> 共 10 处（本文件 9 处 + `docs/DRIFT/_INDEX.md` 1 处）⇒ `python3 tools/check-agents-budget.py` 的「未来日期检查」返回 **`EXIT=1`** 并逐行列出 ⇒
+> **已全部订正为 2026-10-25**。
+> ⇒ 这正是 §6.2「核对日期必须由一次真实执行产出」这条纪律**有机器检查**的样子 —— **写完台账必须重跑 `check-agents-budget.py`**，它同时守体量与日期。
+> ⚠️ **连带一条工具纪律**：连「复盘一个未来日期错误」这句话本身都不能写出那个未来日期的字面量（守门脚本是机械匹配）⇒ **反例要用「次日 / 未来日期」这类相对表述**。
+
+### 十二·一、层一：common 域自身的漂移真实条数 = **27 条编号 + 5 项未编号**
+
+**对 §〇 第 40 行的订正**：
+
+| §〇 原写 | 实测 | 依据 |
+|---|---|---|
+| **28** 条编号条目 | **27** 条 | `DRIFT-COMMON-004`（`hot-rpc` 缺 `GrpcServerConfigurer`）已由 **hot 域 2026-10-25 认领并关闭**（§十一 #1）⇒ `DRIFT-COMMON` 未修数 **3 → 2** |
+| communityfact **15** 条 | ✅ **15 是对的** | §五 的表格只列 **14** 条（5 MISMATCH + 8 OBS + 1 UNRESOLVED）⇒ **漏了 `DRIFT-CF-018`**（它在 §六·六「补录」里）⇒ **§五 的「14 条」是旧快照**，§〇 的 15 才是全量 |
+
+**逐族明细（2026-10-25 扫描）**：
+
+| 编号族 | 未修 | 编号清单 | 状态 |
+|---|---|---|---|
+| `DRIFT-COMMON` | **2** | `-005`（`DeadlineState` 墙钟 vs Go 单调钟）/ `-006`（`markExpired` 死代码 + 跨域 javadoc 假断言） | 🔴 **无任何域认领**（§八 决策 2 明确「先记账不改」） |
+| `DRIFT-CF`（communityfact） | **15** | `-001 -002 -003 -004 -005 -006 -008 -009 -011 -012 -013 -014 -015 -017 -018`（**无 -010 / -016**） | 🔴 **一条未动** |
+| `DRIFT-LOG`（logger） | **7** | `-001` ~ `-007` | 🔴 未修 |
+| `DRIFT-SF`（snowflake） | **3** | `-001` ~ `-003` | 🔴 未修 |
+| **合计** | **27** | | + **5 项未编号**（§六·六） |
+
+⚠️ **5 个可比包 3 个 `NOT EQUIVALENT`** 依然成立（`communityfact` / `logger` / `observability` / `snowflake` 中只有 `response` 逐条等价）⇒ **§〇 第 36 行未过期**。
+
+### 十二·二、层二：common 是**唯一的共享写点** —— 外部域的尾巴清单（10 条）
+
+> **这是比层一更硬的那层**：这些条目**不属于 common 域的漂移**，但**修法落在 `service/common` 的共享类里** ⇒ 改一处影响 6–10 个域 ⇒ 按 §5.3 必须**单域串行** ⇒ 并发对齐在这一点上**必然排队**。
+
+| # | 域 | 条目 | 落点（`文件:行`） | 差异 | 当前真实状态（2026-10-25 实测） |
+|---|---|---|---|---|---|
+| **T-1** | `like` | `DRIFT-LIKEAPI-015` | `common/http/GoStyleJsonBodyConverter.java:115-117`（`getContentType().toString()` ⇒ MediaType 已小写化）vs `goReadsBody` `:98-101`（`contains` 大小写敏感） | Go 用**原始头**（`strings.Contains` 敏感），RAG 用**已解析 MediaType** | 🔴 **仍未修**（`like/api.md:456`）。⚠️ **6 域共用**（like / follow / message / users×2 / task / article）⇒ **单点解多域** |
+| **T-2** | `follow` | `DRIFT-FOLLOW-008` | `common/protection/GoStyleMaxConnsFilter.java` | Go `MaxConnsHandler` **每路由一个** latch，RAG **全局一个** | 🔴 **仍未修**（`follow/api.md:20`「`service/common` 共享模块 ⇒ 派单」） |
+| **T-3** | `hot` | `D14` / `DRIFT-HOTAPI-014` | `common/observability/HttpMiddleware.java:431`（`writeTimeoutResponse`） | 503 / 499 响应缺 `X-Content-Type-Options: nosniff` | ✅ **已修，但 hot 域台账未销账** —— 代码 2026-10-24 commit `8d019e0` 已 `setHeader(..., "nosniff")`；真 Tomcat 守门 `MessageApiTimeoutRealTomcatTest:140` 断言 `x-content-type-options == "nosniff"` ⇒ **实际已闭合** |
+| **T-4** | `hot` | `D25` / `DRIFT-HOTAPI-025` | `common/observability/HttpMiddleware.java:332`（`writeTimeoutResponse(resp, 499)`） | 客户端断连后 RAG **等 2s deadline**、**断连后继续发下游调用**、**无 499 记录**；Go 侧 1–3ms 内取消 8 个在飞 gRPC 并打 `[HTTP] 499` | 🔴 **仍开放，且全仓无 499 守门测试**（`grep -rln "499" service/*/*/src/test/java/` ⇒ **0 命中**）⇒ 修了也**没有防回退网** |
+| **T-5** | `hot` | `D27` | `common/protection/GoStyleMaxConnsFilter.java` | 同 T-2（MaxConns 作用域） | 🔴 仍开放 |
+| **T-6** | `message` | `-010` | `common/observability/HttpMiddleware.java:421`（`setContentType("text/plain; charset=utf-8")`）+ `common/http/GoStyleRouterErrorResponses.java:83` | 成功 / 错误响应 `Content-Type` 缺 `charset` | 🟡 **仍 OPEN**（用户 2026-10-24 拍板「保持登记，本轮不做」）⇒ **不是签字**，是登记在册的待办 |
+| **T-7** | `message` | `-011` | 同上路径 | 状态行 reason phrase 差异 | 🟡 仍 OPEN（同上拍板） |
+| **T-8** | `message` | `-013` | 同上路径 | 缺 `Traceparent` | 🟡 仍 OPEN（同上拍板） |
+| **T-9** | `comment` | `D3` | `common/protection/GoStyleGrpcClientBreakerInterceptor.java:193`（`method.getFullMethodName()`，**无 target 前缀**） | Go `path.Join(cc.Target(), method)` ⇒ 单 channel 下不可观察，将来多 target 会把计数合并 | 🔴 仍开放（`comment/api.md:126`「改动影响多域 ⇒ 只登记不改」） |
+| **T-10** | `users` | 交接 **#2** | `service/users/user/user-rpc/.../UserDomainService.java:113`（javadoc 仍写「由 `RpcInterceptor` 调度」） | 声称 deadline 由 `DeadlineState#markExpired(long)` 设置，实际是 `onHalfClose` 的 `bindToCurrent` | 🔴 **仍未修**（见 十二·四 的**循环依赖**） |
+
+⚠️ **不是 common 尾巴的一条（订正）**：`comment/api.md` 的 **D2**（Bearer 前缀长度边界 `> 7` vs Go `> 6`）落点是 **`service/users/users-common/.../BearerTokenExtractor.java:74-81`** ⇒ **属 `users` 域，不属 `service/common`** ⇒ 把它算作 common 的尾巴是错的（**D3** 才是）。
+
+### 十二·三、9 项交接的真实状态（逐条实测，2026-10-25）
+
+> ⚠️ **§十一 只记了 #1 / #3 / #4 / #9 / #10 / #11 六条** ⇒ **#2 / #5 / #6 / #7 / #8 五条的状态从未被记录**。
+> ⇒ AGENTS.md §0 的「**8 项未决交接**」把「**没人看过**」当成了「**确认未决**」。
+
+| # | 事项 | §十一 记录 | **2026-10-25 实测** | 判定 |
+|---|---|---|---|---|
+| 1 | `hot-rpc` 缺 `GrpcServerConfigurer` | ✅ 已关闭 | —— | ✅ **已销账** |
+| 2 | `UserDomainService` javadoc 假断言 | **未记录** | `UserDomainService.java:113` **原样还在** | ❌ **未销账**（同时是 T-10） |
+| 3 | `DRIFT-COMMON-005` 定案 | ⏸ 仍未决 | 跨域（common + admin-rpc + user-rpc）的破坏性变更 | ⏸ **仍未决**（唯一被反复确认的未决项） |
+| 4 | `like` 的 `SD-2026-10-23-09` 描述订正 | ⏸ 仍未决 | like 域本轮未动 | ⏸ **仍未决** |
+| 5 | 守门脚本进 AGENTS.md §7.2 | **未记录** | `AGENTS.md` §7.2 工具表**已有** `check-grpc-interceptor-wiring.py` | ✅ **已销账** |
+| 6 | `align/message` ↔ `align/users-user` 合并冲突 | **未记录** | `service/common/.../protection/` 三个冲突文件**无冲突标记残留**，单副本存在 | ✅ **已销账** |
+| 7 | 共享面索引更新 | **未记录** | `docs/DRIFT/_INDEX.md` / `AGENTS.md` / `_MANIFEST.json` **已更新** | ✅ **已销账** |
+| 8 | `docs/Pitfalls/common/_signed-deviations.md` 疑似错放 | **未记录** | 该文件**仍是 0 字节**，原地未动 | ❌ **未销账**（真名在 `docs/Intentional_Deviations/common/`） |
+| 9 | 社区消费者：Go 用 `like`，RAG 不用 | ⏸ 仍未决 | 与 `DRIFT-LIKE-003` 同一条，favorite 域本轮未做 | ⏸ **仍未决** |
+| 10 | 裸 `ServerCallHandler` 不被 dispatch（task 域） | 已登记 | task 域本轮未动 | ⏸ **仍未决** |
+| 11 | 6 个 api 模块 jar 不可执行 | ✅ 已修 | —— | ✅ **已销账** |
+
+⇒ **真实分布**：**已销账 5 条**（#1/#5/#6/#7/#11）· **未销账 2 条**（#2/#8）· **仍未决 4 条**（#3/#4/#9/#10）。
+⇒ **「8 项未决」这个数**（9 − 1）把 4 条「已销账但没记」也算成了未决 ⇒ **应改为「4 条仍未决 + 2 条未销账」**。
+
+### 十二·四、🔴 一条可**两步闭环**的循环依赖（本次扫描的新发现）
+
+```
+service/common/.../RpcInterceptor.java:617   markExpired(long)  ← 标 @Deprecated，保留不删
+        │  保留的唯一理由（RpcInterceptor.java:603-611 的 javadoc 明写）：
+        │    「service/users/user/user-rpc 的 UserDomainService javadoc 仍以 markExpired(long)
+        │      描述 deadline 的来源（该描述本身也不准确……）…… 删除本方法会让那些域的 javadoc 链接悬空，
+        │      而跨域文件的改动不由本域决定」
+        ↓
+service/users/user/user-rpc/.../UserDomainService.java:113   ← 这行 javadoc 本身就是错的
+        （真相：deadline 由 onHalfClose 的 bindToCurrent 设置 ⇒ RpcInterceptor.java:281 / :372）
+```
+
+⇒ **实测确认**：`grep -rn "markExpired" service/ --include='*.java'` ⇒ **除定义处（`RpcInterceptor.java:617`）外，全仓 0 个生产调用方**；引用它的只有 `RpcInterceptor` 自己的 javadoc（`:132` / `:265` / `:607`）与 `UserDomainService.java:113` 的 javadoc。
+⇒ **闭合只需两步**：
+
+1. 改 `UserDomainService.java:113` **一行 javadoc** ⇒ 指向 `bindToCurrent` ⇒ **同时消掉 T-10 / 交接 #2**；
+2. 删 `RpcInterceptor.java:617` 的 `markExpired(long)`（连带 `:132` / `:265` / `:607` 三处 javadoc 引用）⇒ **消掉 `DRIFT-COMMON-006`**。
+
+⇒ **投入产出比最高的一处切口**：2 步 ⇒ 消 2 条编号未修 + 1 条未销账交接。
+
+⚠️ **本节只登记，不实施**（用户 2026-10-25 明确「我自己修」）。
+
+### 十二·五、两处**跨域台账**的自相矛盾（跨域登记，本域不改）
+
+| 位置 | 问题 | 实测 |
+|---|---|---|
+| `docs/DRIFT/hot/api.md:180` | 「尚未处理」节仍写「全仓约定待拍板 **D21 / D22 / D23**（Tomcat 三旋钮）」 | **这三条 2026-10-25 第十三轮已修**（`hot/api.md` 第 2063 行起；`D21`/`D22`/`D23` 三行状态列均为「✅ 已修」）⇒ 该节是第七轮时期的章节，**标题却读起来像现状** |
+| `docs/DRIFT/comment/api.md:125` | `D2` 被归入「剩余 D2 / D3 两条属 `service/common` 跨域」 | `D2` 的落点是 **`service/users/users-common/.../BearerTokenExtractor.java:74-81`** ⇒ 属 `users` 域；**只有 `D3` 才在 `service/common`** |
+
+### 十二·六、结论：**「common 是瓶颈」这个判断需要改写**
+
+**不准确的说法**：「common 域是瓶颈，其他域的尾巴全挂在 common 域身上」。
+
+**更准确的两层说法**（本节全部实测支撑）：
+
+1. **语义层**：common 域自身是**全仓最大的单域漂移堆**（**27 条**编号 + **5 项**未编号；5 个可比包 **3 个 `NOT EQUIVALENT`**）⇒ 这部分**没有收敛**，且 communityfact 的 **15 条一条未动**。
+2. **变更层（更硬）**：common 域是**唯一的共享写点** —— 别的域的未修项只要修法落在 `service/common`，就**自动从并发任务降级为串行任务**（§5.3 单域串行）⇒ **这才是 10 域并发对齐吞吐被卡住的那一层**，而不是「common 的漂移条目多」。
+
+⇒ **两条可选路径（供裁决，本轮未选）**：
+
+- **路径 A：立「共享写点」准入规则** —— 给 `service/common` 定专门归属、准入与串行手册（类似 `docs/Worktree.md`，但针对共享类），并要求**任何落进 `service/common` 的修复**先登记「影响哪些域」。
+- **路径 B：先摘「单点解多域」的尾巴** —— 按「改一次同时解掉几条」排序，优先 `GoStyleJsonBodyConverter`（T-1，**6 域共用**）与 `GoStyleMaxConnsFilter`（T-2 + T-5，**2 条**）；再摘 十二·四 的**两步闭环**（`markExpired` ⇒ 2 条 + 1 条交接）。
+
+⚠️ **本节给的是事实与顺序建议，不含任何实施**（用户 2026-10-25 明确「我自己修」）。

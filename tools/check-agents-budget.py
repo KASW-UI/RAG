@@ -65,5 +65,48 @@ def main():
     return 1
 
 
+def check_future_dates():
+    """§6.2「核对日期必须由一次真实执行产出」——**未来日期的核对是不可能的**。
+
+    2026-10-25 实测：另一个会话把 10-25 的实测全部标成了 **2026-10-26**，
+    35 处、跨 14 个文件与 4 个档案，无人发现 —— 因为这条纪律**从来没有机器检查**。
+    一个不存在的日期会让人把「未验证」的行读成「刚验证过」。
+    """
+    import datetime
+    import glob
+    import re
+
+    today = datetime.date.today()
+    hits = []
+    for f in ["AGENTS.md"] + glob.glob(os.path.join(ROOT, "docs/**/*.md"), recursive=True):
+        try:
+            txt = open(f, encoding="utf-8").read()
+        except OSError:
+            continue
+        for m in re.finditer(r"\b(20\d{2}-\d{2}-\d{2})\b", txt):
+            try:
+                d = datetime.date.fromisoformat(m.group(1))
+            except ValueError:
+                continue
+            if d > today:
+                ln = txt[:m.start()].count("\n") + 1
+                hits.append((os.path.relpath(f, ROOT), ln, m.group(1)))
+    if not hits:
+        return 0
+    print("=" * 70)
+    print("🔴 未来日期检查（§6.2：核对日期必须由一次真实执行产出）")
+    print("=" * 70)
+    print(f"\n  今天 {today}，下列 {len(hits)} 处日期在**未来** —— 不可能已核对：\n")
+    for f, ln, d in hits[:30]:
+        print(f"    {f}:{ln}  {d}")
+    if len(hits) > 30:
+        print(f"    …… 另有 {len(hits)-30} 处")
+    print("\n  ⇒ 这些条目的状态一律按 `UNKNOWN` 处理；先改日期，再谈结论。")
+    print("=" * 70)
+    return 1
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    rc = main()
+    rc |= check_future_dates()
+    sys.exit(rc)
