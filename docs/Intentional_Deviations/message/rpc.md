@@ -5,13 +5,17 @@
 > **正本在本文件**；总索引见 [`../_INDEX.md`](../_INDEX.md)（⚠️ 该文件是**共享面**，
 > 按 `docs/Worktree.md` §三，所有工作树都不许碰 ⇒ 合并后由主会话统一登记本条的编号）。
 
-## 本域签字偏离：6 条（其中 `SD-07` 已于 2026-10-24 **撤销**）
+## 本域签字偏离：7 条（其中 `SD-07` 已于 2026-10-24 **撤销**）
 
 > 🆕 **2026-10-24 第十轮新增 3 条**（`SD-2026-10-24-01/02/03`）——
 > 分别是 `DRIFT-MSG-V-021`（索引名）/ `DRIFT-MSG-V-009`（直方图桶）/ `DRIFT-MSG-V-010`（错误解包深度）。
 > 三条都是用户 **2026-10-24 问卷拍板**：**签字保留 RAG 现状，不改代码**。
 > ⚠️ 三条都在本轮**拿到了活体证据**（不再是静态推断）：
 > V-021 靠双侧活体 DDL 对拍，V-009 靠双侧直方图桶实测，V-010 靠两侧消费点逐行核对。
+>
+> 🆕 **2026-10-24 第十轮再新增 1 条**（`SD-2026-10-24-04`）——
+> `DRIFT-MSG-V-031`（6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧多出来的）
+> ⇒ **用户拍板：保留签字**（不加 `V6` 迁移去 `DROP DEFAULT`）。
 
 > ⚠️ **2026-10-24 第八轮：`DRIFT-MSG-V-003` 的签字范围已收窄**（不是撤销）——
 > 原签字：「DB/内部故障业务码 Go `1015` → RAG `5001`/`5008`，保留 RAG 侧」。
@@ -68,6 +72,26 @@
 | **⚠️ 实际影响（为什么是 latent）** | RAG 侧 `CodeError` 由 api 自己的 logic **直接抛出** ⇒ 异常处理器拿到的就是它本身 ⇒ `instanceof` 命中。<br>⇒ **只有当 `CodeError` 被包进别的异常再抛**（Spring AOP / `@Async` / 异步 stub 的 `CompletionException` 包装）时，两侧才会给出不同的码。<br>⚠️ **Go 侧同样会被 `CompletionException` 之类的包装影响吗？** 不会 —— `errors.As` 会穿透。⇒ **这正是差异所在**，只是当前 Go 的 api 路径上没有这种包装 |
 | **⚠️ 为什么保留是对的** | ① **改 RAG 去穿透 = 会引入新的分歧点**：`bizCodeFromError` 的 `CodeError` 分支**刻意**不穿透（`MessageGrpcError.java:227-229` 的注释写明：「照 Go 排，别再对调」）—— 它对齐的是 Go `errmsg.go:104` 那条**不穿透**的实现；改成穿透反而**不再对齐** Go 的 `BizCodeFromError`；<br>② 真正的差异只在 **api 全局错误处理器**那一层，而 RAG 侧那层是 `service/common` 的**共享异常处理** ⇒ 改它**会影响 20 个组件**；<br>③ 当前**没有发作路径** ⇒ 属于「为不可观测的隐患付出跨域改动代价」 |
 | **⚠️ 不得做的事** | 不要**笼统**地「把 RAG 改成穿透」—— `bizCodeFromError` 里那两支**各自都已经和 Go 对齐**，动它们会**制造新漂移**。<br>⚠️ 若将来 api 侧真的引入了会包装 `CodeError` 的异步路径，**本条必须重新评估**（且要评估的是「api 全局错误处理器要不要像 Go 那样用 `errors.As`」，**不是**改 `bizCodeFromError`） |
+
+---
+
+---
+
+### SD-2026-10-24-04 🆕 · 6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧**多出来的**（Go 侧无默认）
+
+| 项 | 内容 |
+|---|---|
+| **组件** | `message-rpc`（DDL 台账：[`DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) 的 `DRIFT-MSG-V-031`） |
+| **Go 行为** | **6 个时间列都没有 DEFAULT** —— GORM 只在 tag 里写 `autoCreateTime` / `autoUpdateTime`（`service/message/rpc/internal/model/data_model.go` 的 `Notification` / `Conversation` / `ConversationMessage`），**迁移器不生成 DEFAULT** |
+| **RAG 行为** | 同 6 列带 `DEFAULT CURRENT_TIMESTAMP`（`V1__create_message_notification.sql` / `V2__create_message_conversation.sql` / `V3__create_message_conversation_message.sql` 建表时写的；`V5` 只改了类型与可空性、**没删默认**） |
+| **具体 6 列** | `message_notification.{created_at, updated_at}` · `message_conversation.{created_at, updated_at, last_message_at}` · `message_conversation_message.created_at` |
+| **类别** | `DDL / STRUCTURE`（**当前不可观测** —— 见「为什么保留是对的」） |
+| **签字结论** | **2026-10-24 用户拍板：保留签字**（保留 RAG 侧的 DEFAULT，不加 `V6` 迁移去 `DROP DEFAULT`） |
+| **⚠️ 活体证据（2026-10-24 第十轮，双侧真 PG）** | Go 侧跑**真源自己的** `AutoMigrate`、RAG 侧按序执行 `V1`~`V5`，两侧各建一个真库后逐列 dump `information_schema.columns`：<br>**列类型 / 长度 0 差异 · 可空性 0 差异 · DEFAULT 恰好 6 处差异**（Go 一律 `<NULL>`，RAG 一律 `CURRENT_TIMESTAMP`）<br>⇒ 与 `V-020` 迁移文件里早就写下的「`DEFAULT` 残差是 **6** 列，不是 7」**数字完全对上** —— 这是该残差**首次拿到活体证据**。<br>⇒ 复现：`bash tools/difftest/run-message-ddl-parity.sh` |
+| **⚠️ 为什么保留是对的（不是「将就」）** | ① **当前不可观测**：RAG 的 3 条 INSERT **全部显式绑定**这些列（`ConversationMapper.java:143-155` / `NotificationMapper.java:205-219` / `ConversationMessageMapper.java:159-166`）⇒ 默认**永远不触发** ⇒ 两侧行为等价。<br>② **V-020 当时已论证过保留的理由**（`V5__message_time_columns_timestamptz.sql` 的 ⚠️ 段：「删除默认对『省略该列的 INSERT』才有意义……为一个不可观测的维度冒『有人在某条裸 SQL 路径上依赖了默认』的风险不划算」）—— 本轮只是把那个推理**用活体证据确认了一遍**。<br>③ **删它的代价不对称**：加一条 `V6` 迁移 `DROP DEFAULT`，会**静默改变**任何「省略该列的 INSERT」的行为（Go 写 NULL / RAG 写 now()），而这类路径**当前不存在** ⇒ 为不存在的场景引入一次迁移窗口 + 一次线上行为变更，不划算。 |
+| **⚠️ 代价（必须知情）** | **这不是「永远等价」，是「当前无路径」。** 将来若有人写一条**省略该列**的 INSERT：<br>· Go 侧：该列可空 ⇒ 写 **NULL**（`created_at`/`updated_at`/`read_at`/`extra`）或 **NOT NULL 违规**（`last_message_at`）<br>· RAG 侧：写 **now()**（`last_message_at` 则是 now()）<br>⇒ **两侧会分岔**，且**分岔方向是「RAG 悄悄填了个时间」** ⇒ 排查成本高。<br>⇒ **必须知情的是这条，不是「现在没事」** |
+| **⚠️ 不得做的事** | ① **不要**在别的域/别的会话里「顺手把默认删了」或「顺手加个 `V6`」—— 那是**另一条决策**，必须重新签字；<br>② **不要**因为「当前不可观测」就把它从台账上抹掉 —— 它是**已登记的偏离**，抹掉 = 下一个人会重新踩；<br>③ **不要**以为「Go 侧没有 DEFAULT ⇒ RAG 也不该有」就去对照 —— 本条**正是**有意保留 RAG 侧。 |
+| **关联** | `DRIFT-MSG-V-020`（时间列 `TIMESTAMP` ⇒ `TIMESTAMPTZ`，已修）· `V-023`（`uk_conversation_pair` 约束 ⇒ 索引，已修）· 本条的活体证据来自同一轮双侧 DDL 对拍（见 `DRIFT/message/rpc.md` 第十轮小节） |
 
 ---
 

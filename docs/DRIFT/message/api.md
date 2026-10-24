@@ -218,7 +218,7 @@ RAG 取**全局一个**。区别只在「单端点打满 10000 且同时另一�
 |---|---|---|---|
 | ~~请求保护层~~ | `MaxBytes` 1MB→413、`CpuThreshold` 900→503、`MaxConns` 10000、**`Breaker` 熔断** | ✅ **已全部补齐**（2026-10-22）⇒ 见下方「请求保护层」小节 | — |
 | ~~404 body~~ | `"404 page not found\n"` + text/plain + nosniff | 空 body | ✅ **2026-10-24 第八轮实测：两侧 body 一致**（`Content-Length` 都是 **19**）⇒ 首轮「空 body」结论**已被推翻**；剩余差异只有**状态行 reason phrase**（= MSGAPI-011）+ **Content-Type 空格**（= MSGAPI-012） |
-| 405 头 | 带 `Allow` | 无 `Allow` | ⚠️ **第八轮的真容器 dump 只把 405 的「状态行」列入对照表，没有把 `Allow` 头单列** ⇒ **这一子项至今无运行证据**（静态读源码也不足以判定）⇒ 若要收口需补一次带 `Allow` 的 dump |
+| ~~405 头~~ | 带 `Allow: POST` | 带 `Allow: POST` | ✅ **2026-10-24 第十轮复核原始 dump 产物：两侧 `Allow` 头完全一致** ⇒ **首轮「RAG 无 `Allow` 头」的结论是错的**（静态读源码判反了）⇒ **这一行不需要「建议补」，它从来就不缺**。详见下方 §2.2 的完整 6 档对照表 |
 | 成功响应 Content-Type | `application/json; charset=utf-8` | `application/json` | ✅ **2026-10-24 第八轮真容器级已确认**（= `DRIFT-MSGAPI-010`）；⚠️ **用户 2026-10-24 拍板「保持登记，本轮不做」**（共享面影响全部 10 个 api）⇒ **不是签字**，仍是登记在册的待办 |
 | `extra` map 键序 | `encoding/json` 排序（确定性） | `LinkedHashMap` 保序 | 字节级差异，JSON 语义等价 |
 | 观测端点 | `:16066/metrics`+`/healthz`+pprof | `:8892/actuator/*` | 运维配置要改 |
@@ -1373,6 +1373,38 @@ Date: Fri, 23 Oct 2026 22:20:22 GMT
 ```
 
 
+### 2.2 ✅ 完整 6 档响应头对照表（**2026-10-24 第十轮复核**：把原始 dump 产物逐档读完）
+
+> ⚠️ **第十轮做的事**：第八轮只把**状态行**贴进了对照表，**把每个头的逐条 diff 留在了产物里没读出来**
+> ⇒ 导致「`Allow` 头两侧到底一不一致」这个子项被挂成「无运行证据」。
+> ⇒ **本轮把 `/tmp/difftest-msg-headers/*.h.n`（归一化后的完整头集合）逐档读完**，
+> 结论如下（`normalize` 只剔除逐次变化的 `Date` / `Server` / `Content-Length`）：
+>
+> | 档位 | Go | RAG | 差异 |
+> |---|---|---|---|
+> | `401-未带token` | `401 unauthorized` + `traceparent` | `401 ` | 状态行 reason phrase ＋ **缺 `traceparent`** |
+> | `404-未知路径` | `404 not found` + `content-type: text/plain; charset=utf-8` + `traceparent` + `x-content-type-options: nosniff` | `404 ` + `content-type: text/plain;charset=utf-8` + `x-content-type-options: nosniff` | 状态行 ＋ Content-Type **空格** ＋ 缺 `traceparent` |
+> | **`405-方法不匹配`** | `405 method not allowed` + **`allow: post`** | `405 ` + **`allow: post`** | ✅ **只有状态行** ⇒ **`Allow` 头两侧一致** |
+> | `415-ContentType不对` | `401 unauthorized` + `traceparent` | `401 ` | 两侧**都是 401**（鉴权在 Content-Type 判定之前）⇒ 该档**结构一致**，差异同上 |
+> | `200-unread` | `200 ok` + `content-type: application/json; charset=utf-8` + `traceparent` | `200 ` + `content-type: application/json` | 状态行 ＋ **缺 charset** ＋ 缺 `traceparent` |
+> | `200-notiflist` | 同上 | 同上 | 同上 |
+>
+> ⇒ **差异面收敛为 4 条**（此前台账只记了 3 条）：
+> | # | 差异 | 归属 |
+> |---|---|---|
+> | 1 | **状态行缺 reason phrase** | `DRIFT-MSGAPI-011`（共享层） |
+> | 2 | **Content-Type 缺 charset**（200 档） | `DRIFT-MSGAPI-010`（共享层） |
+> | 3 | **Content-Type 分号后空格**（404 档） | `DRIFT-MSGAPI-012`（Tomcat 限制，**不可修**） |
+> | 4 | **缺 `Traceparent`** | `DRIFT-MSGAPI-013`（共享层） |
+>
+> ⇒ ✅ **首轮那张「待决策」表里判反的两行**（「404 body 空」「405 无 `Allow` 头」）**双双作废** ——
+> 两者在真容器下**两侧都一致**。⚠️ 这两条都是**静态读源码**得出的结论 ⇒ 见
+> [`PITFALL-MSG-R-028`](../../Pitfalls/message/rpc.md)。
+>
+> ⚠️ **产物的时效性**：dump 时刻 = **2026-10-23 22:20 GMT（= 2026-10-24 06:20 CST）**；
+> `message-api/src/main/` 的**最后一次**改动是 `52b327b`（**2026-10-23 23:02 +0800**）
+> ⇒ **改动在 dump 之前** ⇒ 产物忠实代表当前行为，**无需重起栈**。
+
 ### 3. 🆕 三条新发现
 
 #### 🆕 `DRIFT-MSGAPI-011` 🔴 **RAG 全域通病**：**状态行缺 reason phrase**
@@ -1427,6 +1459,23 @@ RAG ： 无
 > 与 `MSGAPI-010`（charset）/ `MSGAPI-011`（reason phrase）**同类** ⇒ **需用户拍板后再动**。
 > ⚠️ **不得做的事**：不要在 message 域单独加一个 filter 就完事 ——
 > 那样会变成「message-api 有、其它 9 个 api 没有」的**新的不对称**（比现状更难解释）。
+
+### 📌 `MSGAPI-013` 的**后续修**执行计划（2026-10-24 用户拍板「计入台账，后续修」）
+
+> **状态**：**已计入台账，本轮不做**（与 `MSGAPI-010` / `MSGAPI-011` 同批，但**这三件是一起的** —— 都在 `service/common` 的响应头上）。
+
+| 步骤 | 内容 | 落点 / 证据 |
+|---|---|---|
+| **1. 落点** | 改**共享层** `service/common` 的 `HttpMiddleware`（响应写出那一段），**或**新增一个所有 api 都装配的 filter ⇒ **10 个 api 一起生效** | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java` |
+| **2. 取值** | `Span.fromContext(ctx).getSpanContext()` ⇒ `getTraceId()`（32 位 hex）/ `getSpanId()`（16 位 hex）/ `getTraceFlags()` | ⚠️ **必须判 `isValid()`** —— 无效 span 写出来的 `traceparent` 是全 0，比不写更坏 |
+| **3. 拼格式** | `00-<traceId>-<spanId>-<flags>`：`flags` 用 `traceFlags.isSampled() ? "01" : "00"` | ⚠️ **Go 侧的格式**：`core/trace/propagation.go:9-11` 的 `TraceContext{}.Inject` 写出的就是 `version-traceid-spanid-flags`（`00` 开头，flags 位 `01`=sampled）⇒ **逐字节同构** |
+| **4. 写入** | `resp.setHeader("Traceparent", ...)` | ⚠️ **别用 `Content-Type` 那条路** —— Tomcat 对 `Content-Type` 有特殊处理（`setContentType` 会解析再序列化、吃掉空格 ⇒ `MSGAPI-012`）；`Traceparent` 是普通头，**不受影响** |
+| **5. 守门** | ① **单测**：`HttpMiddleware` 层断言 `Traceparent` 头的**正则形状** `^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$`（MockMvc **能**测，因为是我们自己写的头）；<br>② **真容器对拍**：`tools/difftest/exp-http-headers-message.sh` 的 6 档 dump —— 改完后两侧的 `traceparent` 应**逐条一致**（Go 侧的 trace-id 每次不同 ⇒ 归一化时要比**格式**不比**值**） | ⚠️ 「格式一致」这件事**单测能守**，「真的出现在真容器的响应里」**要真容器** ⇒ 两个都要 |
+| **6. 变异验证** | 摘掉那段写 header 的代码 ⇒ 守门必须转红 | ⚠️ 摘掉后若守门仍绿 ⇒ 说明断言写错了地方（§3.3.3） |
+| **7. 顺带** | 同一次改动**顺手把 `MSGAPI-010`（charset）与 `MSGAPI-011`（reason phrase）一起拍板** —— 它们与本条**落在同一处**，分三次改共享层是三次冲突 | ⇒ 三件**一起做**或**一起不做** |
+
+> ⚠️ **为什么本轮不做**：共享层改动 ⇒ 影响全部 10 个 api ⇒ 需与 `MSGAPI-010` / `MSGAPI-011` **合并成一次**共享面变更 ⇒ 需用户单独拍板。
+> ⚠️ **不得做的事**：不要只改 message 域（会造成新的不对称）；不要只写单测就宣布修好（真容器那一层必须也验）。
 
 ### 4. `DRIFT-MSGAPI-010` 的修法（已定位，**本轮未实施**）
 

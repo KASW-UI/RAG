@@ -1174,7 +1174,7 @@ RAG application.yml:16
 | **UNRESOLVED-MSG-001** ✅ **已关闭（2026-10-24 第十轮补记）** | ~~JVM 运行时区未知 ⇒ `DRIFT-MSG-010` 时间戳 epoch 是否整体偏移仍未定级~~ | —— | ✅ **已关闭**（三条各自独立成立）：<br>① **2026-10-22 用户确认部署时区 = Asia/Shanghai** ⇒ `DRIFT-MSG-V-007` 的条件化结论确定（实测方向是「RAG 比 Go **晚** 8 小时」，不是「早」—— 方向不能靠推理）；<br>② **V-019** 把 JDBC URL 显式钉上 `options=-c TimeZone=Asia/Shanghai` ⇒ 不再依赖宿主机时区；<br>③ **V-020** 把 8 个时间列改成 `TIMESTAMPTZ` ⇒ **第十轮活体对拍实测两侧列类型逐字一致**（`data_type` 0 差异）⇒ 数据**自描述瞬时**，不再依赖「一个库只由同一时区 JVM 写」 |
 | **UNRESOLVED-MSG-002** ✅ **已关闭（2026-10-24 第十轮补记）** | ~~`ServerInterceptor` 挂载只有 `verify(builder).intercept(...)` 这层证据~~ | —— | ✅ **已关闭**：<br>① **第八轮真双栈 12 档对拍**（EXIT=0）提供**端到端**证据 —— 拦截器链上的行为（熔断码 / shedding 码 / recover 的 `INTERNAL` + `"panic: "` 前缀）在**真实 gRPC 往返**上逐条一致；<br>② **第九轮 V-026** 给 8 个 rpc 组件各补了 `*ProtectionChainWiringTest`（装配层断言「业务 interceptor 真被调到」+「拿到的是**包装过的** call」）⇒ 装配层证据也齐了 |
 | **UNRESOLVED-MSG-008** 🆕 | `Flyway` 独立账本在**三个模块同库**下真的不撞 | 本轮只证了 **message-rpc 单模块**建出 `flyway_schema_history_message`；`like-rpc` / `article-rpc` 未同时启动 | 三模块同时连同一个 `first_db`，`\dt` 确认三本账 + 各自 3 条 `success`<br>⚠️ **本工作树不能做**（需 `like-rpc` / `article-rpc` 同启 ⇒ **跨域**） |
-| **UNRESOLVED-MSG-009** 🆕 ⚠️ **前提已过期（第十轮更正）** | ~~时间列 `TIMESTAMP`（非 `TIMESTAMPTZ`）在**多实例/多时区**下是否仍自洽~~ | 读侧修法的前提是「一个库只由同一时区 JVM 写」（§6.7.10 已留档） | ⚠️ **它建议的「补一条 `V4` 迁移」已经做完**（`V5__message_time_columns_timestamptz.sql`，8 列改 `TIMESTAMPTZ`，第十轮活体对拍实测两侧类型一致）⇒ **不要再去补 V4**。<br>⇒ 剩下的只是**部署口径**问题（「同一个库被不同时区的 JVM 写」），**不是代码能修的** ⇒ 要么写进部署约束文档，要么改成一条运维约束登记<br>⚠️ **本轮不改它的状态**（用户只点了 A5）⇒ 保持 OPEN，但读法已更新 |
+| **UNRESOLVED-MSG-009** ✅ **已关闭（2026-10-24 第十轮，用户拍板）** | ~~时间列 `TIMESTAMP`（非 `TIMESTAMPTZ`）在**多实例/多时区**下是否仍自洽~~ | —— | ✅ **关闭依据**：<br>① **原问法的前提已消失** —— 它建议的「补一条 `V4` 迁移」**已由 `V5__message_time_columns_timestamptz.sql` 做完**（8 列全部 `TIMESTAMPTZ`）；<br>② **第十轮双侧活体对拍实测**：两侧 `data_type` **0 差异**（全部 `timestamp with time zone`）⇒ 数据**自描述瞬时**，不再依赖「一个库只由同一时区 JVM 写」；<br>③ **剩下的不是代码问题** ——「同一个库被不同时区的 JVM 写」属**部署口径**，无代码可修 ⇒ 转为部署约束（见下）<br>⚠️ **关闭口径**：关闭的是「**代码侧**是否存在不自洽」这个未知项；**部署侧**的约束仍然成立，只是不再是一条待办 |
 
 ---
 
@@ -2508,16 +2508,18 @@ bash tools/difftest/run-message-ddl-parity.sh     # 建库 + 对拍
 > # 🔴 默认：EXIT=1 —— 9 处差异全算失败（3 处索引 + 6 处 DEFAULT）
 > bash tools/difftest/run-message-ddl-parity.sh
 >
-> # 🟡 只豁免**已签字**的 3 处索引（V-021 ×2 + V-022 ×1）⇒ 仍 EXIT=1
-> #    （因为 6 处 DEFAULT 残差 `DRIFT-MSG-V-031` **还没签字** ⇒ 故意不放行）
+> # 🟢 豁免名单 = **已签字清单**（V-021 ×2 + V-022 ×1 + V-031 ×6）⇒ EXIT=0
 > DDL_ALLOW_IDX="idx_message_conversation_last_message_at,idx_conversation_last_message_at,\
 > idx_message_conversation_updated_at,idx_conversation_updated_at,idx_notification_recipient_read" \
+> DDL_ALLOW_DEFAULT="message_notification.created_at,message_notification.updated_at,\
+> message_conversation.created_at,message_conversation.updated_at,message_conversation.last_message_at,\
+> message_conversation_message.created_at" \
 >   bash tools/difftest/run-message-ddl-parity.sh
->
-> # 🟢 若 `DRIFT-MSG-V-031` 也被签字保留 ⇒ 再加 DDL_ALLOW_DEFAULT ⇒ EXIT=0
 > ```
 > ⇒ **「默认红」是刻意的**：它保证「任何**新的** DDL 漂移都会立刻把门禁打红」，
-> 而**已签字的偏离靠豁免名单显式放行**（放行清单就是签字清单 ⇒ 两者不会漂移）。
+> 而**已签字的偏离靠豁免名单显式放行**（放行清单 = 签字清单 ⇒ 两者不会漂移）。
+> ⚠️ **豁免名单是「签字」的机器可读形式** —— 往里加一个名字 = 给那条差异补一次签字。
+> ⇒ **改名单必须同时改签字档**（`docs/Intentional_Deviations/message/rpc.md`），否则就是「悄悄放行」。
 
 它做四件事（**全程不写被冻结的真源仓库**，只复制副本）：
 
@@ -2556,7 +2558,7 @@ bash tools/difftest/run-message-ddl-parity.sh     # 建库 + 对拍
 | **索引** | 🔴 **3 处差异**：`idx_notification_recipient_read`（Go 1 列 / RAG 2 列 ⇒ **V-022，已签字 SD-06**）＋ `idx_conversation_*` ×2 名字不同（⇒ **V-021，本轮签字 SD-2026-10-24-01**）<br>⇒ 其余 **9 个索引逐条一致**（含 `uk_conversation_pair` 的 4 列与 `unique=True`） |
 | **约束（`pg_constraint`）** | ✅ **两侧完全一致**（各 3 行，都是主键）<br>⇒ **V-023 的修复双向确认**：两侧的 `uk_conversation_pair` 都是**唯一索引**而非表约束（`pg_constraint` 里都没有 `contype='u'` 那一行） |
 
-### 5. 🔴 新登记：`DRIFT-MSG-V-031` —— 6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧**多出来的**
+### 5. ✅ `DRIFT-MSG-V-031` —— 6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧**多出来的** · **已签字**（`SD-2026-10-24-04`）
 
 ```
 Go : message_notification.created_at | timestamptz | 可空 | 无默认
@@ -2574,12 +2576,13 @@ RAG: message_notification.created_at | timestamptz | 可空 | DEFAULT CURRENT_TI
   ⇒ 默认**永远不触发** ⇒ 两侧行为等价。
   ⚠️ **但这是「当前无路径」而非「结构性无路径」**：将来若有人写一条省略该列的 INSERT，
   Go 会写 **NULL**（可空列）而 RAG 会写 **now()** ⇒ 那时两侧就分岔了。
-- **处置**：⏸ **本轮只登记，未签字、未改代码** —— 两条路都留给用户拍板：
-  ① **签字保留**（与 `V-021` 同类：真实存在、当前不可观测）；
-  ② **加一条 `V6` 迁移 `ALTER TABLE … ALTER COLUMN … DROP DEFAULT`**（彻底对齐 Go；代价是若线上真有裸 SQL 依赖该默认会破）。
-- **⚠️ 不得做的事**：不要**默默**把它改掉或默默签字 —— 它是**唯一一条本轮新引入的漂移**，
-  需要一次显式决定。⇒ 已加进门禁豁免名单的**候选**（但**默认不放行**），
-  这样门禁对它是红的、直到有人拍板。
+- **处置**：✅ **2026-10-24 用户拍板：保留签字**（保留 RAG 侧的 DEFAULT，**不加** `V6` 迁移去 `DROP DEFAULT`）
+  ⇒ 本条已从 **DRIFT** 转入签字档：[`SD-2026-10-24-04`](../../Intentional_Deviations/message/rpc.md)。
+  ⚠️ **读法变更**：看到这条 DDL 对拍为红时，先确认是不是 `SD-2026-10-24-04`，**不要**当新回归去「修」。
+- **⚠️ 不得做的事**：不要**默默**把它改掉 —— 删默认是一次**线上行为变更**（任何「省略该列的 INSERT」会从 now() 变 NULL），
+  必须重新走一次签字；也不要因为「当前不可观测」就把它从台账上抹掉。
+- **门禁豁免名单已更新**：这 6 列已进 `DDL_ALLOW_DEFAULT` ⇒ 门禁**可以转绿**，但**默认仍是红**
+  （不传豁免名单时它照红 ⇒ 保证「新的 DDL 漂移」仍然会被抓到）。
 
 ### 6. ✅ 关闭：`UNRESOLVED-MSG-V-003`
 
@@ -2590,25 +2593,26 @@ RAG: message_notification.created_at | timestamptz | 可空 | DEFAULT CURRENT_TI
 | **关闭口径** | 关闭的是「**未核过**」这个状态，**不是**「DDL 完全一致」—— 差异见第 4 节的 3 处索引 + 6 处 DEFAULT |
 | **⚠️ 残留** | ① 索引/约束对照**只覆盖本域这 3 张表**（Go `AutoMigrate` 的全部产物）；② **不覆盖触发器 / CHECK 约束 / 外键 / 分区**（两侧都没有）；③ `idx_notification_recipient_read` 与 `V-021` 两条索引差异**是已签字的有意偏离**，对拍为红属预期 |
 
-### 7. ⚠️ 顺带更正：`UNRESOLVED-MSG-009` 的**前提已过期**
+### 7. ✅ `UNRESOLVED-MSG-009` 已关闭（用户 2026-10-24 拍板）
 
 原问法：「时间列 `TIMESTAMP`（非 `TIMESTAMPTZ`）在多实例/多时区下是否仍自洽」，
 并建议「补一条 `V4` 迁移」⇒ **该迁移已由 `V5__message_time_columns_timestamptz.sql` 做完**
 （8 列全部 `TIMESTAMPTZ`，本轮对拍**实测确认**两侧类型一致）。
 
 ⇒ **原问法里「列类型导致不自洽」那一半已经不存在**；剩下的只是
-「同一个库被不同时区的 JVM 写」这种**部署口径**问题 —— 它不是代码能修的，
-要么当部署约束写进文档，要么改成一条**运维约束**登记。
-⚠️ **本轮不改它的状态**（用户本轮只点了 A5）⇒ 保持 OPEN，但**读法要更新**：
-不要再去「补 V4 迁移」。
+「同一个库被不同时区的 JVM 写」这种**部署口径**问题 —— 它不是代码能修的。
+✅ **用户 2026-10-24 拍板：关掉**（不再作为待办）。
+⇒ **关闭口径**：关闭的是「**代码侧**是否存在不自洽」这个未知项。
+⚠️ **部署侧的约束仍然成立**（同一个库不要被不同时区的 JVM 写），但它已不是一条待办。
 
-### 8. ✅ 本轮的三条签字偏离（同时改了 `docs/Intentional_Deviations/message/rpc.md`）
+### 8. ✅ 本轮的四条签字偏离（同时改了 `docs/Intentional_Deviations/message/rpc.md`）
 
 | 编号 | 原漂移 | 签字结论 |
 |---|---|---|
 | `SD-2026-10-24-01` | `V-021` 索引名不同 | 保留 RAG 短名，**不改名** |
 | `SD-2026-10-24-02` | `V-009` 直方图桶布局 | 签字留档，**不改代码**（双侧实测：两侧桶边界**零交集**，Go 11 桶 vs Micrometer 69 桶） |
 | `SD-2026-10-24-03` | `V-010` 错误解包深度 | 签字留档，**不改代码**（并**订正**了原描述：真正不一致的只有 `CodeError` 那一支，`status` 那一支两侧都已穿透） |
+| `SD-2026-10-24-04` | `V-031` 6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` | **保留签字**（不加 `V6` 去 `DROP DEFAULT`）—— 用户 2026-10-24 拍板；⚠️ **必须知情**：这是「当前无路径」而非「结构性无路径」，将来若有省略该列的 INSERT，两侧会分岔 |
 
 ### 9. ⚠️ 留给主会话的两条**共享面**订正（本工作树**不许碰**，只登记）
 
