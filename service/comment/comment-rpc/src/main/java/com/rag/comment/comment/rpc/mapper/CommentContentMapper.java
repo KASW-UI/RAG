@@ -36,15 +36,20 @@ public interface CommentContentMapper {
      * 带上 {@code @TableField(typeHandler=…)}，靠默认路径会把 jsonb 当 VARCHAR 绑定而报错。
      * 这里手写 SQL 把这件事钉死（同 {@code CommentDomainFactOutboxMapper#appendFact}）。
      *
-     * <p>⚠️ 插入的 {@code created_at} / {@code updated_at} 由调用方显式给出
-     * （来自 Kafka 消息里的 {@code create_time}），<b>不是</b> {@code CURRENT_TIMESTAMP} ——
-     * Go 侧用的是 {@code time.Unix(msg.CreateTime, 0)}，即<b>评论创建时刻</b>而非入库时刻。
+     * <p>⚠️ 插入的 {@code created_at} 由调用方显式给出（来自 Kafka 消息里的 {@code create_time}）
+     * —— Go 侧用的是 {@code time.Unix(msg.CreateTime, 0)}，即<b>评论创建时刻</b>而非入库时刻。
+     *
+     * <p>🔴 <b>{@code updated_at} 用 {@code CURRENT_TIMESTAMP}（入库时刻），不是 created_at</b>：
+     * Go 侧构造 {@code CommentContent} 时<b>只赋 {@code CreatedAt}</b>，
+     * {@code UpdatedAt} 留零 ⇒ GORM 的 {@code autoUpdateTime} 在 INSERT 时用
+     * {@code curTime}（入库时刻）填（{@code gorm.io/gorm/callbacks/create.go:344-347}）。
+     * <br>⇒ 两侧「created_at = 评论创建时刻、updated_at = 入库时刻」才一致。
      */
     @Insert("""
             INSERT INTO comment_content (comment_id, content, meta, created_at, updated_at)
             VALUES (#{commentId}, #{content},
                     #{meta, typeHandler=com.rag.comment.comment.rpc.mapper.JsonbTypeHandler, jdbcType=OTHER},
-                    #{createdAt}, #{updatedAt})
+                    #{createdAt}, CURRENT_TIMESTAMP)
             """)
     int insert(CommentContentEntity content);
 

@@ -3,6 +3,7 @@ package com.rag.comment.comment.api.service;
 import com.rag.comment.comment.api.interceptor.CommentJwtAuthInterceptor;
 import com.rag.comment.comment.common.errmsg.CommentErrorCode;
 import com.rag.comment.comment.common.errmsg.CommentErrorMessages;
+import com.rag.comment.comment.common.errmsg.CommentGrpcError;
 import com.rag.common.exception.BusinessException;
 import io.grpc.Status;
 import io.grpc.StatusException;
@@ -10,6 +11,7 @@ import io.grpc.StatusRuntimeException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.math.BigInteger;
 
 /**
@@ -44,6 +46,35 @@ public class CommentApiSupport {
      * （Go 侧 6 个 logic 的第一个分支，字面量 {@code errmsg.ErrorTokenRuntime}），
      * 即 <b>HTTP 200 + {code:1006, msg:"TOKEN已过期"}</b>。
      *
+     * <h2>⚠️ Go 的 {@code json.Number} 分支是<b>真路径</b>，不是死代码</h2>
+     *
+     * <p><b>2026-10-24 更正</b>：本方法此前注释断言「golang-jwt 没有用 {@code UseNumber()}」，
+     * <b>与真源相反</b>。实测 go-zero v1.10.2：
+     * <pre>
+     * rest/token/tokenparser.go:123:	return jwt.NewParser(jwt.WithJSONNumber())
+     * </pre>
+     * ⇒ Go 侧数值 claim <b>就是</b> {@code json.Number}，{@code case float64} 才是死代码。
+     *
+     * <p>而 {@code json.Number.Int64()} 的实现是 {@code strconv.ParseInt(string(n), 10, 64)}
+     * —— 它解析的是 <b>JSON 字面量原文</b>，不是数值。⇒ 后果：
+     * <table border="1">
+     *   <caption>Go 的实际判定</caption>
+     *   <tr><th>claim 字面量</th><th>Go 的 {@code Int64()}</th><th>RAG 必须</th></tr>
+     *   <tr><td>{@code 31337}</td><td>31337 ✓</td><td>31337</td></tr>
+     *   <tr><td>{@code 1.5}</td><td>❌ 报错（"1.5" 不是合法 int 文本）⇒ 1006</td><td>❌ 1006</td></tr>
+     *   <tr><td>{@code 1.0}</td><td>❌ 报错（"1.0" 同理）⇒ 1006</td><td>❌ 1006</td></tr>
+     *   <tr><td>{@code 9223372036854775808}（越界）</td><td>❌ 溢出 ⇒ 1006</td><td>❌ 1006</td></tr>
+     * </table>
+     *
+     * <p>⚠️ <b>因此 {@code Double} / {@code Float} / {@code BigInteger} 三类必须一律 1006</b>：
+     * <ul>
+     *   <li>JSON <b>浮点</b>字面量（Double/Float）⇒ Go 侧原文必然带 {@code .} 或 {@code e}
+     *       ⇒ {@code ParseInt} 必然失败 ⇒ <b>没有例外</b>；</li>
+     *   <li>JSON <b>越界整数</b>（BigInteger）⇒ Go 侧 {@code ParseInt} 必然溢出 ⇒ <b>必然失败</b>。</li>
+     * </ul>
+     * ⇒ 之前把 {@code 1.5} 截断成 {@code 1}、把越界值<b>回绕</b>成负数，
+     * 是<b>静默产出错误身份</b>（拿它去调 rpc 就是越权面），**不是**对齐。
+     *
      * <p><b>三条必须保留的语义</b>：
      * <ol>
      *   <li><b>不拒绝 {@code uid <= 0}</b>：Go 侧同样不拒绝，{@code uid=0} 会原样透传给
@@ -52,21 +83,13 @@ public class CommentApiSupport {
      *       / {@code ""} 全部失败。<b>绝不能</b>用 {@code Long.parseLong} 之外更宽松的解析
      *       （如先 {@code parseDouble}）——那会让本该失败的 token 变成成功的身份，
      *       是实打实的越权风险。</li>
-     *   <li><b>数字走截断</b>：Go 的 {@code int64(float64)} 是<b>截断</b>（1.5 ⇒ 1，不报错），
-     *       {@code longValue()} 同为截断，一致。</li>
+     *   <li><b>msg 必须是 Go 的原文</b>：失败时统一走 {@code tokenRuntime()}（1006 + "TOKEN已过期"）。</li>
      * </ol>
-     *
-     * <p><b>为什么 Java 侧看不到 {@code json.Number} 分支</b>：
-     * golang-jwt/v4 用 {@code encoding/json} 把 claims 解进 {@code MapClaims}
-     * （{@code map[string]interface{}}），数字字面量默认解成 {@code float64} ——
-     * {@code json.Number} 只在调用方显式用了 {@code Decoder.UseNumber()} 时才出现，
-     * golang-jwt <b>没有</b>这么做。jjwt 同样不会产生 {@code json.Number}。
-     * ⇒ 该分支在本实现里不可达，用 {@code Double} 分支覆盖它等价。
      */
     public long userId(HttpServletRequest request) {
         Object claim = request.getAttribute(CommentJwtAuthInterceptor.CLAIM_ATTRIBUTE);
 
-        // Go: case int64 / case int —— jjwt 对整数字面量给 Integer / Long / BigInteger
+        // Go: case int64 / case int —— jjwt 对范围内的整数字面量给 Integer / Long
         if (claim instanceof Long l) {
             return l;
         }
@@ -79,17 +102,25 @@ public class CommentApiSupport {
         if (claim instanceof Byte b) {
             return b.longValue();
         }
-        if (claim instanceof BigInteger bi) {
-            // 溢出长整型时截断，与 Go 的 float64 → int64 同为「不报错、截断」
-            return bi.longValue();
-        }
 
-        // Go: case float64 —— int64(value) 是截断转换
+        // ⚠️ Go: case json.Number → value.Int64() → strconv.ParseInt(字面量原文, 10, 64)
+        //    JSON 浮点字面量与越界整数在 Go 侧**必然**解析失败 ⇒ 一律 1006。
+        //    禁止截断（1.5 ⇒ 1）或回绕（BigInteger ⇒ 负数）：那是静默的错误身份。
+        if (claim instanceof BigInteger bi) {
+            logTokenClaimRejected("integer claim out of int64 range: " + bi);
+            throw tokenRuntime();
+        }
         if (claim instanceof Double d) {
-            return d.longValue();
+            logTokenClaimRejected("float claim is not an int64 literal: " + d);
+            throw tokenRuntime();
         }
         if (claim instanceof Float f) {
-            return f.longValue();
+            logTokenClaimRejected("float claim is not an int64 literal: " + f);
+            throw tokenRuntime();
+        }
+        if (claim instanceof BigDecimal bd) {
+            logTokenClaimRejected("decimal claim is not an int64 literal: " + bd);
+            throw tokenRuntime();
         }
 
         // Go: case string —— strconv.ParseInt，失败即整体失败
@@ -117,35 +148,68 @@ public class CommentApiSupport {
      * return nil, errmsg.NewErrCode(errmsg.ErrorServerCommon)
      * </pre>
      *
-     * <p><b>⚠️⚠️ 本方法刻意<b>不</b>使用 {@code CommentGrpcError.bizCodeFromError}</b>。
-     * 这是本模块最容易写错、且错了立刻产生线上不一致的一点：
-     * <ul>
-     *   <li>Go 侧的 code 是 <b>{@code int(st.Code())}</b> —— gRPC <b>标准码的数值</b>
-     *       （InvalidArgument=3 / NotFound=5 / AlreadyExists=6 / PermissionDenied=7 /
-     *        ResourceExhausted=8 / FailedPrecondition=9 / Internal=13 / Unavailable=14 /
-     *        Unauthenticated=16），<b>不是</b> comment 域自己的业务码（1012 / 1013 …）。
-     *       换句话说，下游 comment-rpc 返回 {@code NotFound}，客户端在 HTTP 上看到的就是
-     *       {@code code:5}，而不是 {@code 1013}。</li>
-     *   <li>若改用 {@code bizCodeFromError}（按 description 反查业务码表），
-     *       会把 5 变成 1013 —— <b>这是新增行为，且与 Go 不一致</b>。
-     *       message-api 用它是<b>因为</b> Go message 侧确实有 {@code shared.RPCError}
-     *       → {@code BizCodeFromError} 那一层；comment 侧<b>没有</b>。</li>
-     * </ul>
+     * <h2>⚠️ 两条分支的差异是本方法最容易做错的地方</h2>
+     * <table border="1">
+     *   <caption>Go 的 ok 标志决定一切</caption>
+     *   <tr><th>错误形态</th><th>Go 侧结果</th></tr>
+     *   <tr>
+     *     <td>gRPC status 错误</td>
+     *     <td>{@code NewErrCodeMsg(int(st.Code()), st.Message())} —— <b>msg 用 status 原文，不查表</b></td>
+     *   </tr>
+     *   <tr>
+     *     <td>其它任何错误（如熔断）</td>
+     *     <td>{@code NewErrCode(ErrorServerCommon)} ⇒ <b>5001 + "系统内部错误"</b></td>
+     *   </tr>
+     * </table>
      *
-     * <p><b>非 status 错误（如熔断）⇒ 5001</b>：Go 的 {@code status.FromError} 对不实现
-     * {@code GRPCStatus()} 的 error 返回 {@code ok=false} ⇒ 落进兜底分支。
-     * Java 侧对应「不是 {@link StatusRuntimeException} / {@link StatusException}」。
+     * <p><b>不能直接用 {@code status.getCode().value()} 当业务码</b> —— 那是<b>本轮修掉的缺陷</b>：
+     * <ul>
+     *   <li><b>Go 侧</b>：comment-rpc 用 {@code errmsg.NewGrpcErr(code, msg)}
+     *       （{@code service/comment/common/errmsg/errmsg.go:33-35} {@code status.Error(codes.Code(code), msg)}）
+     *       ⇒ 业务码（1012 / 1013 / 1008 / 5003 / 2001…）<b>原样写进 grpc-status</b>
+     *       ⇒ api 侧 {@code int(st.Code())} <b>原样取回</b>业务码。</li>
+     *   <li><b>RAG 侧</b>：grpc-java 的 {@code Status} 只能承载 0..16 的标准码
+     *       （{@code Status.java:438} 只存 Code 枚举），业务码装不下
+     *       ⇒ {@code CommentGrpcError.grpcError} 把业务码放进<b>自定义 trailer</b>
+     *       {@code rag-comment-biz-code}，{@code grpc-status} 只剩 UNKNOWN(2) / INVALID_ARGUMENT(3)。</li>
+     * </ul>
+     * ⇒ <b>两边「字面搬运」搬的不是同一个东西</b>：Go 搬的是 grpc-status 里的业务码，
+     * RAG 必须搬 trailer 里的业务码。⇒ 只读 {@code status.getCode().value()} 会让
+     * 客户端拿到 {@code 2} / {@code 3} 而不是 1012 / 1013 / 1008 / 5003。
+     *
+     * <p>⇒ 本方法的 {@code bizCode} 取自 {@link CommentGrpcError#bizCodeFromError(Throwable)}，
+     * 它按三条线索依次判定，<b>三条在本域都成立</b>：
+     * <ol>
+     *   <li><b>降级 description 捞码</b>（{@code "Unknown code 5003"}）—— 对端是 <b>Go comment-rpc</b> 时
+     *       （grpc-go 把越界码发出去了，grpc-java 收成 UNKNOWN + 降级 description）
+     *       ⇒ 捞回 5003，与 Go 的 {@code int(st.Code())} <b>完全一致</b>；</li>
+     *   <li><b>trailer</b> —— 对端是 <b>RAG comment-rpc</b> 时 ⇒ 无损取回业务码；</li>
+     *   <li><b>标准码原值</b> —— 对端返回的是标准码（如 NOT_FOUND=5）时 ⇒ 原值，与 Go 一致。</li>
+     * </ol>
+     *
+     * <p><b>msg 取 {@code status.getDescription()}，绝不查表</b>：
+     * comment-rpc 发的是<b>自定义文案</b>（如 5003 的 "DB查询失败"），
+     * 而码表里 5003 的文案是 "查询数据库失败"，<b>两者不相等</b>。
+     * 查表会把客户端看到的错误信息换掉。
+     *
+     * <p><b>description 为 null 时按空串处理</b>：Go 的 {@code st.Message()} 在无 message 时
+     * 返回 {@code ""} ⇒ {@code NewErrCodeMsg(code, "")}，msg 是<b>空串</b>。
+     *
+     * <p>⚠️ <b>同仓正确范式</b>：{@code like-api} 的 {@code LikeApiSupport#rpcError} 用的是同一套
+     * （先判 status、再 {@code bizCodeFromError}、msg 取 description）。
+     * 本方法此前把这一步漏掉了 ⇒ 两个模块各自都对、拼起来就错。
      */
     public BusinessException rpcError(Throwable err) {
         Status status = statusOf(err);
-        if (status != null) {
+        if (status == null) {
+            // Go: status.FromError 的 ok == false 分支 —— 注意是 5001，不是 1015
             return new BusinessException(
-                    status.getCode().value(),
-                    status.getDescription() == null ? "" : status.getDescription());
+                    CommentErrorCode.ERROR_SERVER_COMMON.getCode(),
+                    CommentErrorMessages.getMsg(CommentErrorCode.ERROR_SERVER_COMMON.getCode()));
         }
-        return new BusinessException(
-                CommentErrorCode.ERROR_SERVER_COMMON.getCode(),
-                CommentErrorMessages.getMsg(CommentErrorCode.ERROR_SERVER_COMMON.getCode()));
+        int bizCode = CommentGrpcError.bizCodeFromError(err);
+        String description = status.getDescription();
+        return new BusinessException(bizCode, description == null ? "" : description);
     }
 
     /**

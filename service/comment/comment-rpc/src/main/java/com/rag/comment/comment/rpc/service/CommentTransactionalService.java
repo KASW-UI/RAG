@@ -152,12 +152,14 @@ public class CommentTransactionalService {
         String meta = normalizeCommentMeta(msg.getMeta());
 
         // --- ④ 插 comment_content（Go comment.go:66-77）
+        // ⚠️ created_at = Kafka 消息的 create_time（评论创建时刻）；
+        //    updated_at 由 SQL 写 CURRENT_TIMESTAMP（入库时刻）——
+        //    对齐 Go 的 GORM autoUpdateTime（curTime）。见 CommentContentMapper#insert。
         CommentContentEntity content = new CommentContentEntity();
         content.setCommentId(msg.getCommentId());
         content.setContent(msg.getContent());
         content.setMeta(meta);
         content.setCreatedAt(createdAt);
-        content.setUpdatedAt(createdAt);
         try {
             commentContentMapper.insert(content);
         } catch (RuntimeException e) {
@@ -166,6 +168,9 @@ public class CommentTransactionalService {
         }
 
         // --- ⑤ 插 comment_index（Go comment.go:80-96）
+        // ⚠️ created_at = Kafka 消息的 create_time（评论创建时刻）；
+        //    updated_at 由 SQL 写 CURRENT_TIMESTAMP（入库时刻）——
+        //    对齐 Go 的 GORM autoUpdateTime（curTime）。见 CommentIndexMapper#insert。
         CommentIndexEntity index = new CommentIndexEntity();
         index.setId(msg.getCommentId());
         index.setTargetType(msg.getTargetType());
@@ -176,7 +181,6 @@ public class CommentTransactionalService {
         index.setState(status);
         index.setAttribute(msg.getAttribute());
         index.setCreatedAt(createdAt);
-        index.setUpdatedAt(createdAt);
         try {
             commentIndexMapper.insert(index);
         } catch (RuntimeException e) {

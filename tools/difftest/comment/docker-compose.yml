@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cdifftest-postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: difftest
+      POSTGRES_DB: go_comment
+    ports:
+      - "127.0.0.1:55440:5432"
+    volumes:
+      - ./initdb.sql:/docker-entrypoint-initdb.d/10-initdb.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d go_comment"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    container_name: cdifftest-redis
+    ports:
+      - "127.0.0.1:56395:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

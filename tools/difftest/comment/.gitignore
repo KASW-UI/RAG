@@ -1,0 +1,5 @@
+# 对拍 harness 的运行时产物（不入仓）
+bin/
+logs/
+api-cp.txt
+__pycache__/

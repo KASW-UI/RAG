@@ -1,0 +1,43 @@
+Name: comment.rpc
+ListenOn: 0.0.0.0:19001
+DB:
+  DataSource: "host=127.0.0.1 user=admin password=difftest dbname=go_comment port=55440 sslmode=disable TimeZone=Asia/Shanghai"
+
+Log:
+  ServiceName: commentcenter
+  Mode: console
+  Path: console
+
+Telemetry:
+  Name: comment-rpc
+  Endpoint: 127.0.0.1:14317
+  Sampler: 1.0
+  Batcher: otlpgrpc
+
+
+KqPusherConf:
+  Brokers:
+    - 127.0.0.1:59993
+  Topic: comment-audit-topic-go
+
+KqConsumerConf:
+  Brokers:
+    - 127.0.0.1:59993
+  Group: comment-audit-group-go
+  Topic: comment-audit-topic-go
+  Offset: first
+  Consumers: 8
+  Name: ""
+
+BizRedis:
+  Host: 127.0.0.1:56395
+  Type: node
+  Pass: ""
+
+MessageRpc:
+  Endpoints:
+    - 127.0.0.1:19999
+
+ArticleRpc:
+  Endpoints:
+    - 127.0.0.1:19999

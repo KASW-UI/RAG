@@ -94,12 +94,23 @@ public final class CommentGrpcError {
      *       那是<b>新增行为</b>不是对齐。{@code UNKNOWN} 与 Go「码无法归类」的实情相符。</li>
      * </ul>
      *
-     * <p><b>⚠️ 交给 api 层的一条硬约束</b>：Go 的
-     * {@code service/comment/api/etc/commentservice.yaml} <b>没有</b>配置 {@code codes.Acceptable}
-     * （已核对全文，只有 {@code Target} 与 {@code NonBlock}），所以 comment-api 不存在
-     * 「业务错误被计成熔断失败」这一路径。若未来 comment-api 引入熔断器，
-     * <b>不得</b>只把上面这几个标准码当成功、而把 {@code UNKNOWN} 当失败 ——
-     * 那会让 Java 侧比 Go 侧<b>更容易</b>打开熔断。打铁要趁热：真要加熔断时回来看这一条。
+     * <p><b>⚠️ 交给 api 层的一条硬约束（2026-10-24 订正：原措辞「若未来引入熔断器」<b>已过时</b>）</b>：
+     * <b>comment-api 早已引入熔断器</b> ——
+     * {@code service/common/protection/GoStyleGrpcClientBreakerInterceptor}
+     * （{@code @Component} + {@code @GrpcGlobalClientInterceptor}），
+     * 开关 {@code rag.protection.breaker.enabled: true}（{@code application.yml:88-89}）。
+     * <p>Go 侧同样默认开：{@code zrpc/internal/config.go:14}
+     * {@code Breaker bool json:",default=true"} ⇒ {@code zrpc/internal/client.go:112-113}
+     * 装 {@code BreakerInterceptor}；{@code etc/commentservice.yaml} 未配 {@code Middlewares} ⇒ 生效。
+     * <p>⇒ <b>两侧的「失败名单」逐条一致</b>：Go {@code zrpc/internal/codes/accept.go} 只把
+     * {@code DeadlineExceeded / Internal / Unavailable / DataLoss / Unimplemented / ResourceExhausted}
+     * 算作失败；RAG {@code GoStyleGrpcClientBreakerInterceptor.java:242-251} 的
+     * {@code isAcceptable} 同样是这 6 个码 ⇒
+     * <b>业务错误（{@code UNKNOWN(2)} / {@code INVALID_ARGUMENT(3)}）不计入熔断失败</b>
+     * ⇒ <b>原文担心的「Java 侧比 Go 侧更容易打开熔断」不成立</b>。
+     * <p>⚠️ <b>该一致性是「当前成立」，不是「结构上保证」</b> ⇒
+     * 若将来调整 {@code isAcceptable} 的名单，<b>必须</b>同步核对 Go 的
+     * {@code codes/accept.go}，否则这条约束会真的被破坏。
      * 由 {@code CommentGrpcErrorTest#businessCodesNeverCollideWithRetryableCategories} 锁死选型。
      */
     private static Status.Code mapToGrpcCode(int bizCode) {
@@ -154,6 +165,21 @@ public final class CommentGrpcError {
      * 若 Java 在此处改判成 {@code 2001}（像 {@code LikeGrpcError} 那样），
      * 就是<b>凭空造出一个 Go 永远产生不到的码</b> —— 按 AGENTS.md「出现行为差异时默认判 RAG 错」
      * 与「不要擅自修复 Go 的行为」，此处以 Go 为准：<b>返回 {@link Status.Code#value()} 原值</b>。
+     *
+     * <p><b>⚠️ 2026-10-24 补充：这段「字面搬运」的论证<b>只对 Go-rpc 对端成立</b>。</b>
+     * 对 <b>RAG-rpc 对端</b>，Go 式的「字面搬运」对象其实是<b>业务码</b>
+     * —— 因为业务码在 RAG-rpc 侧放在<b>自定义 trailer</b> 里，<b>不在</b> grpc-status 里
+     * ⇒ 两边「搬」的<b>不是同一个东西</b>：
+     * <ul>
+     *   <li><b>Go-rpc 对端</b>：grpc-status 上就是业务码（Go 直接写 {@code grpc-status: 1012}），
+     *       grpc-java 降级成 {@code UNKNOWN + "Unknown code 1012"} ⇒ 码可从 description 文本捞回
+     *       ⇒ 本方法的<b>第①优先级</b>正是为它而设；</li>
+     *   <li><b>RAG-rpc 对端</b>：业务码在 trailer 里 ⇒ <b>必须先读 trailer（本方法第②优先级）</b>
+     *       ⇒ 若只按「标准码原值」处理，<b>会把业务码整个丢掉</b>，端到端退化成 {@code UNKNOWN(2)}。</li>
+     * </ul>
+     * ⇒ 结论：<b>api 层读 RAG-rpc 的错误时，业务码来自 trailer，不是 grpc-status</b>
+     * ⇒ 这一点与 [`docs/DRIFT/comment/proto.md`](../../../../../../docs/DRIFT/comment/proto.md) §3.1
+     * 记的「跨栈业务码方向不对称」是同一件事。
      *
      * <p><b>非 status 错误</b>（Go {@code ok == false}）→ {@link CommentErrorCode#CODE_SERVER_BUSY}。
      * 严格说 Go 侧此刻走的是 {@code NewErrCode(ErrorServerCommon)}(5001)，

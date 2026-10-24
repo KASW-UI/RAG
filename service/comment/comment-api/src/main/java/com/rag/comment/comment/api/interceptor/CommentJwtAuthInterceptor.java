@@ -10,6 +10,9 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jws;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import java.time.Instant;
+import java.util.Date;
+
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -110,6 +113,30 @@ public class CommentJwtAuthInterceptor implements HandlerInterceptor {
         } catch (Throwable t) {
             // 签名错 / 过期 / 格式错 —— Go 侧同样只走到 unauthorized()，不区分原因
             log.warn("JWT verify failed on {} : {}", request.getRequestURI(), t.getMessage());
+            throw unauthorized();
+        }
+
+        // ⚠️⚠️ **iat 校验**：jjwt **不校验** iat，Go 的 jwt 库**校验** ⇒ 这里必须自己补。
+        //
+        // 【Go 出处】golang-jwt/jwt/v4@v4.5.2：
+        //   map_claims.go:124-141  MapClaims.Valid() → VerifyIssuedAt(now, false)
+        //   map_claims.go:63-85    VerifyIssuedAt：iat 缺失 ⇒ !req ⇒ 有效；
+        //                            iat 是数字 ⇒ verifyIat(iat, now)；
+        //                            iat 是**其它类型** ⇒ 直接 return false（**拒绝**）
+        //   claims.go:250-255      verifyIat：now >= iat 才有效（**无时钟偏移容忍**）
+        //
+        // 【为什么这一条很要紧】jjwt 只校验 exp / nbf，**不校验 iat**
+        // ⇒ 修复前 RAG 会接受「iat 在未来」的 token，而 Go 侧会拒绝
+        // ⇒ **RAG 比 Go 松**（安全面更宽）⇒ 与 AGENTS.md §3 的「差异默认判 RAG 错」一致 ⇒ 必须修。
+        //
+        // 【精度对齐】Go 比较的是**秒**（time.Unix(cmp,0) vs newNumericDateFromSeconds(iat)）；
+        //   jjwt 的 getIssuedAt() 返回毫秒精度的 Date，但 token 里的 iat 是整秒
+        //   ⇒ issuedAt.toInstant() 的毫秒部分恒为 0 ⇒ 与 Go 的秒级比较**等价**
+        //   （iat == 当前秒 ⇒ 两侧都判有效；iat == 当前秒+1 ⇒ 两侧都判无效）。
+        Date issuedAt = claims.getIssuedAt();
+        if (issuedAt != null && issuedAt.toInstant().isAfter(Instant.now())) {
+            // Go: MapClaims.Valid() → "Token used before issued" ⇒ authhandler 走 unauthorized()
+            log.warn("JWT issued-at in the future on {}", request.getRequestURI());
             throw unauthorized();
         }
 
