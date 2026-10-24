@@ -1,0 +1,49 @@
+package com.rag.common.http;
+
+/**
+ * 🔴 「按 Go 的语义，这个 query 该被拒」 —— 由共享层的闸门抛出，
+ * <b>由各域自己的兜底 handler 渲染成该域的错误出口</b>。
+ *
+ * <h2>🔴 为什么它是「普通」RuntimeException，而不是 {@code BusinessException}</h2>
+ * <pre>
+ * go-zero@v1.10.2/rest/httpx/responses.go:141-172  doHandleError
+ *   code, body := handler(err)
+ *   // handler = SetErrorHandler 注册的那个：
+ *   //   code = ErrorServerCommon(5001)（因为 err 不是 *CodeError，取不到 code）
+ *   //   msg  = GetErrMsg(code)                       ← **从该域的错误码表查**
+ * </pre>
+ * <p>⇒ Go 的「解析失败」这条路径<b>不会</b>把错误原文放进信封 ⇒ 只带 code + 查表文案。
+ * <br>⇒ RAG 侧要对齐，就<b>不能</b>把 Go 原文塞进 {@code msg}。
+ *
+ * <p>⚠️ 若本类继承 {@code com.rag.common.exception.BusinessException}，各域的
+ * {@code @ExceptionHandler(BusinessException.class)} 会优先命中 ⇒ 信封的 msg 会变成
+ * {@code getMessage()}（= Go 原文）⇒ <b>like / comment 会变成「系统内部错误」之外的乱码</b>
+ * ⇒ ⇒ <b>刻意继承 {@link RuntimeException}</b> ⇒ 让它落到各域的
+ * {@code @ExceptionHandler(Exception.class)} 兜底 ⇒ 那里才是「查自己的表、渲染 200 + 5001」。
+ *
+ * <h2>⚠️ 哪些域会收到它</h2>
+ * <p>只有 {@link GoStyleFormLimitMode#ENVELOPE} 模式的域
+ * （hot / follow / like / message / comment —— 即 Go 侧<b>注册了</b> {@code SetErrorHandler} 的那些）。
+ * <br>其余域（article / user / task / favorite）走
+ * {@link GoStyleFormLimitMode#RAW} ⇒ 共享层<b>直接写</b> Go 的 {@code http.Error} 形状。
+ */
+public class GoStyleFormLimitExceededException extends RuntimeException {
+
+    /**
+     * Go 的原文（如 {@code "too many form values, error: a=1&a=1…"}）。
+     *
+     * <p>⚠️ 它<b>不会</b>出现在 wire 上（Go 侧同理：{@code SetErrorHandler} 只取 code/msg）⇒
+     * 它的用途是<b>日志与排障</b>，不是「把 Go 的原文发给客户端」。
+     */
+    private final String goMessage;
+
+    public GoStyleFormLimitExceededException(String goMessage) {
+        super(goMessage);
+        this.goMessage = goMessage;
+    }
+
+    /** Go 的原文（不进 wire）。 */
+    public String getGoMessage() {
+        return goMessage;
+    }
+}

@@ -1,6 +1,6 @@
 package com.rag.article.article.api;
 
-import com.rag.article.article.api.config.GoStyleGetFormValuesFilter;
+import com.rag.common.http.GoStyleFormValues;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -72,7 +72,7 @@ class ArticleGoStrconvQuoteParityTest {
 
     /** RAG 侧的 {@code goQuote}（private static）—— 用反射调用，不为测试改生产代码的可见性。 */
     private static String goQuote(byte[] s) throws Exception {
-        Method m = GoStyleGetFormValuesFilter.class.getDeclaredMethod("goQuote", byte[].class);
+        Method m = GoStyleFormValues.class.getDeclaredMethod("goQuote", byte[].class);
         m.setAccessible(true);
         return (String) m.invoke(null, (Object) s);
     }
@@ -172,12 +172,12 @@ class ArticleGoStrconvQuoteParityTest {
     // =====================================================================
 
     @Test
-    @DisplayName("结构守卫：反射必须真的命中 GoStyleGetFormValuesFilter.goQuote（否则上面全是假绿）")
+    @DisplayName("结构守卫：反射必须真的命中 GoStyleFormValues.goQuote（否则上面全是假绿）")
     void reflectionActuallyHitsGoQuote() throws Exception {
-        Method m = GoStyleGetFormValuesFilter.class.getDeclaredMethod("goQuote", byte[].class);
+        Method m = GoStyleFormValues.class.getDeclaredMethod("goQuote", byte[].class);
         assertNotNull(m, "goQuote 方法必须存在（重命名会让本类静默失效）");
         assertEquals("private static java.lang.String goQuote(byte[])",
-                m.toString().replace("com.rag.article.article.api.config.GoStyleGetFormValuesFilter.", ""),
+                m.toString().replace("com.rag.common.http.GoStyleFormValues.", ""),
                 "反射到的必须是 goQuote(byte[]) ⇒ 若签名变了，本类会假绿");
         // 冒烟：ASCII 输入的输出必须是 ASCII（Go 的 strconv.Quote 形状）
         assertEquals("\"%zz\"", goQuote(hex("257a7a")),

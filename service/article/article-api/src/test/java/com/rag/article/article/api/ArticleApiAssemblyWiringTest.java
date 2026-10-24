@@ -213,15 +213,39 @@ class ArticleApiAssemblyWiringTest {
                         "GoStyleCpuSheddingFilter",
                         "HttpMiddlewareFilter",
                         "GoStyleMaxBytesFilter",
-                        "GoStyleJsonBodyLimitFilter",
-                        // 🔴 2026-10-24 新增：Go 的 query 解析与参数总数上限（httpx 的 GetFormValues）
-                        //    在 Go 侧位于**路由 handler 内**（httpx.Parse）⇒ 即所有中间件之后
-                        //    ⇒ Java 侧放在**最后一个** filter 位（紧贴 controller）最贴近 Go 的位置。
-                        //    ⚠️ 2026-10-24 改名：GoStyleFormParamCountFilter → GoStyleGetFormValuesFilter
-                        //    （它现在同时复刻 net/url 的三条错误，不再只做「计数」）。
-                        "GoStyleGetFormValuesFilter"),
+                        "GoStyleJsonBodyLimitFilter"),
                 order,
                 "真容器实测的 Filter 链序；Go 对应链序见方法 javadoc");
+
+        // ④ 🔴 2026-10-25 第十四轮：Go 的 query 解析与 form 值上限闸门**不再是 Filter**，
+        //    而是 Spring MVC 的 **HandlerInterceptor**（共享层 `GoStyleFormValueLimitInterceptor`）。
+        //    ⇒ 原因（Go 出处）：Go 的这个闸门在 **handler 内**（`httpx.Parse`）⇒ 其拒绝形状
+        //    **按域而异**（注册了 `httpx.SetErrorHandler` 的域 ⇒ 200 + 业务信封；
+        //    没注册的域 ⇒ 400 + Go 原文）⇒ 信封的文案在**域自己的错误码表**里
+        //    ⇒ 共享层写不出来 ⇒ 必须把异常抛给域的 `@RestControllerAdvice`
+        //    ⇒ 而 servlet Filter 抛的异常**到不了** advice（Filter 在 DispatcherServlet 之外）。
+        //    ⇒ 故改用 Interceptor；它的顺序单独断言（见下）。
+        List<String> interceptors = effectiveInterceptorOrder();
+        assertTrue(interceptors.contains("GoStyleFormValueLimitInterceptor"),
+                "form 值上限闸门必须真的进了 MVC 拦截器链（§3.3：Bean 存在 ≠ 进了链）；实际="
+                        + interceptors);
+        assertEquals("GoStyleFormValueLimitInterceptor", interceptors.get(0),
+                "共享层闸门取 order=HIGHEST_PRECEDENCE ⇒ 必须排在各域自己的鉴权拦截器**之前**；实际="
+                        + interceptors);
+    }
+
+    /** MVC 拦截器链的实际顺序（取自容器真正用的那个 {@code RequestMappingHandlerMapping}）。 */
+    private List<String> effectiveInterceptorOrder() {
+        List<String> names = new ArrayList<>();
+        // ⚠️ Spring 7 里 `AbstractHandlerMapping.getInterceptors()` 已改名 `getAdaptedInterceptors()`
+        //    （返回 `HandlerInterceptor[]`）⇒ 用旧名会编译不过。
+        for (org.springframework.web.servlet.HandlerInterceptor i
+                : ctx.getBean("requestMappingHandlerMapping",
+                        org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping.class)
+                        .getAdaptedInterceptors()) {
+            names.add(i.getClass().getSimpleName());
+        }
+        return names;
     }
 
     /** 按 Spring Boot 自己用的排序规则排出 Filter 链的实际顺序。 */
@@ -335,7 +359,7 @@ class ArticleApiAssemblyWiringTest {
      * ⇒ 状态码 400（与 Go 一致）但 body 是 <b>Tomcat 的 HTML 错误页</b>。
      * <p>改后（{@code server.max-http-request-header-size: 1028KB} ＋
      * {@code server.tomcat.max-parameter-count: 2048}）：请求<b>能到达</b>
-     * {@code GoStyleGetFormValuesFilter} ⇒ 该 filter 按 Go 的语义
+     * {@code GoStyleFormValueLimitInterceptor} ⇒ 该 filter 按 Go 的语义
      * （{@code httpx/util.go:44-53}：数<b>非空值</b>，第 2049 个即报错）
      * 产出 <b>Go 逐字相同的 body</b>：{@code "too many form values, error: " + r.Form.Encode()}。
      * <br>⇒ <b>状态码与 body 都与 Go 一致</b> ⇒ 原先登记的 body 形状差异
@@ -355,7 +379,7 @@ class ArticleApiAssemblyWiringTest {
 
         assertEquals(400, resp.statusCode(),
                 "Go 侧 httpx/util.go:48-53 超限 ⇒ http.Error(400)");
-        // ✅ 2026-10-25 第十三轮：请求能到达 GoStyleGetFormValuesFilter ⇒ body 是 Go 的形态。
+        // ✅ 2026-10-25 第十三轮：请求能到达 GoStyleFormValueLimitInterceptor ⇒ body 是 Go 的形态。
         assertTrue(resp.body() != null && resp.body().startsWith("too many form values, error: a=1&a=1&"),
                 "body 必须是 Go 的 `too many form values, error: <r.Form.Encode()>` 形态；实际="
                         + (resp.body() == null ? "<null>" : resp.body().substring(0,
@@ -376,7 +400,7 @@ class ArticleApiAssemblyWiringTest {
      * ⇒ Tomcat 的连接器层上限<b>比 Go 的 2048 更早</b>触发 ⇒ 400
      * ⇒ 本用例当时的作用是「钉住『默认配置下应用层闸门不可达』这个事实」。
      * <p>改后：请求行上限 1028KB ⇒ 8204 字节<b>远在限内</b>
-     * ⇒ 请求到达 {@code GoStyleGetFormValuesFilter}，其判据是
+     * ⇒ 请求到达 {@code GoStyleFormValueLimitInterceptor}，其判据是
      * {@code nonEmpty > 2048} ⇒ <b>2048 不触发</b> ⇒ 放行 ⇒ <b>200</b>。
      * <br>⇒ 与 Go 的 {@code httpx.GetFormValues}（{@code if n < maxFormParamCount} ⇒
      * 第 2048 个仍被接受）<b>一致</b> ⇒ 应用层闸门<b>首次真正可达</b>，
@@ -393,7 +417,7 @@ class ArticleApiAssemblyWiringTest {
 
         assertEquals(200, resp.statusCode(),
                 "Go 的 GetFormValues：第 2048 个非空值仍被接受（`n < maxFormParamCount` 才计数）⇒ 200；"
-                        + "RAG 侧 GoStyleGetFormValuesFilter 的 `nonEmpty > 2048` 判据同样放行 ⇒ 两侧必须一致");
+                        + "RAG 侧 GoStyleFormValueLimitInterceptor 的 `nonEmpty > 2048` 判据同样放行 ⇒ 两侧必须一致");
     }
 
     /** 🔴 Go 只数<b>非空</b>值（{@code if len(v) == 0 { continue }}）⇒ 空值再多也不触发。 */

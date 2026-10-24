@@ -218,10 +218,129 @@ RESULT startCall=true  onHalfClose=false  responded=false
 
 ---
 
+## PIT-GLOBAL-013 🔴 **Go 的行为常常是「逐 api 注册」的 ⇒ 共享层复刻它时不能假设「Go 这一条是全局一致的」**
+
+### 现象（第十四轮实测）
+
+第十四轮落地 X-6（`DRIFT-HOTAPI-030`）时，第十三轮的修法草案写着「共享 Filter 统一写 Go 的 **400 原文**」。
+落地前的取证把这条前提**推翻**了：
+
+| Go 侧是否注册 `httpx.SetErrorHandler` | 域 | 解析失败时的 wire 形状 |
+|---|---|---|
+| ✅ 注册了 | `hot/api/hotcenter.go:53` · `follow/api/followcenter.go:53` · `like/api/likecenter.go:48` · `message/api/messagecenter.go:53` · `comment/api/commentservice.go:47` | **200** + `{"code":5001,"msg":"<该域文案>","data":null}` |
+| ❌ 没注册 | `article/api` · `user/api` · `task/api` · `favorite/api` | **400** + `text/plain` + `nosniff` + Go 原文 |
+
+⚠️ **而且各域 5001 的文案还不一样**：hot / follow / message = `"internal server error"`；like / comment = `"系统内部错误"`。
+
+### 根因
+
+Go 的 `httpx.SetErrorHandler`（go-zero `rest/httpx/responses.go:141-172` 的 `doHandleError`）是
+**每个 api 进程各自注册**的**可选钩子** ⇒
+「有没有这个钩子」决定了 `err` 走 `http.Error(400)` 还是走「业务信封」。
+⇒ ⇒ **同一个 Go 库里，同一类错误，在不同 api 进程里的 wire 形状是不同的。**
+
+### 🔴 教训一：**共享层复刻 Go 时，先问「这条行为在 Go 侧是全局的吗？」**
+
+- ❌ 直觉（本次差点踩）：「Go 的 `httpx.Parse` 失败 ⇒ 400 原文」⇒ 直接在共享层写死。
+- ✅ 正确：**先查 Go 侧这个行为是不是「逐进程注册的钩子」** ⇒ 是 ⇒ 共享层**不能有单一形状**
+  ⇒ 必须让**域自己**决定怎么渲染。
+
+⇒ **判据**：Go 侧的 `XxxHandler` / `SetXxxHandler` / `WithXxx` 这类**注册式 API**
+（`httpx.SetErrorHandler` / `httpx.SetOkHandler` / `rest.WithJwt` / `rest.WithCors` …）
+⇒ **逐进程注册 ⇒ 行为按进程而异** ⇒ 复刻它时**必须带一个 per-process 的开关**。
+
+### 🔴 教训二：**servlet `Filter` 抛出的异常到不了 `@RestControllerAdvice`**
+
+本次为了「让域用自己的错误出口渲染信封」，共享层改成**抛异常** ⇒
+**Filter 在 DispatcherServlet 之外** ⇒ 抛的异常**不会**被 `@RestControllerAdvice` 接住
+⇒ ⇒ 必须做成 Spring MVC 的 **`HandlerInterceptor`**（`preHandle` 位于 `doDispatch` 的 try 块内
+⇒ 异常会走 `processHandlerException` ⇒ `ExceptionHandlerExceptionResolver`）。
+
+⇒ **副作用（是修正，不是回归）**：Interceptor **只对匹配到的 handler 生效**
+⇒ 未匹配路由（404 / 405）不再触发闸门 ⇒ **与 Go 一致**（Go 的 404 分支不解析 form）。
+
+### 🔴 教训三：**「把本地的判据搬到共享层」会改变它的位置 ⇒ 连锁打穿域里钉住旧位置的测试**
+
+`article-api` 有一条**装配层**守门 `ArticleApiAssemblyWiringTest.effectiveFilterOrderMatchesGoChain`
+用 `assertEquals` 钉死了 **Filter 链的完整顺序**（末尾含那个 form 判据 filter）
+⇒ 判据从 Filter 变成 Interceptor 后 ⇒ 该断言**过期** ⇒ 变红。
+
+⇒ ⚠️ 这**不是回归**，是**断言过期** ⇒ 按 AGENTS.md §3.3「**先改/删错误断言，再改实现**」处置：
+把 Filter 链的期望改成**新结构**，并**另加一条**断言「新的那个 Interceptor **真的进了拦截器链**且排在最前」
+⇒ ⇒ 守门强度**不降反升**（从「Filter 链里有一个」升级为「拦截器链里有一个且在最前」）。
+
+### 教训四：**共享层改动若会改别的域的可观察行为 ⇒ 能用开关规避就规避**
+
+本次原方案会**连带改 favorite 的行为**（它本地的判据会先于共享层生效）⇒
+最终形态：把「**抬容器上限**」也挂在**同一个 per-process 开关**下 ⇒
+`favorite` 缺省 = `off` ⇒ **容器上限也不动、闸门也不装** ⇒ **favorite 行为逐字节不变**
+⇒ ⇒ **连「告知该域 owner」这一步都不需要了**。
+
+### 出处
+
+- 踩坑位置：`docs/DRIFT/global/cross-domain.md` §二·十一 ⑤（X-6 第十四轮落地）
+- 关联：`docs/DRIFT/global/cross-domain.md` §二·十一 ⑤ 之四（各域可观察行为对照表）
+- 2026-10-25，`align/global`
+
+---
+
+## PIT-GLOBAL-014 🔴 **变异测试报「没转红」时，先排除「测试压根没跑」** —— 否则会误删一个好守门
+
+### 现象（第十四轮实测）
+
+对共享层的「非空值计数」做变异（`countNonEmptyValues` 恒返回 0）⇒ 守门**一条都没红**
+⇒ 按「§3.3：守门必须做变异测试证明非空转」的纪律，结论应该是「**守门空转**」。
+
+⚠️ **但真因是变异脚本自己写错了**：
+
+```
+mvn -Dtest=GoStyleParamLimitGateTest+GoStyleFormLimitEnvelopeGateTest+GoStyleFormLimitModeTest
+```
+
+⇒ **surefire 的 `-Dtest` 用逗号分隔，**`+`** 会被当成「类名模式的一部分」
+⇒ ⇒ **一个测试类都没匹配上** ⇒ mvn 静默通过（`-DfailIfNoTests=false`）
+⇒ ⇒ **「零红」是假阴性**，不是「守门空转」。
+
+改成分隔符正确后重跑 ⇒ **4 条守门转红**（raw 模式的 2049 那条、envelope 模式的 2049 那条、模式分派的 2 条）
+⇒ ⇒ 守门**本来就有判别力**。
+
+### 根因
+
+「变异测试」这一步有**两个**独立的失败模式，而它们的现象**长得一模一样**（都是「红测数 = 0」）：
+
+| 失败模式 | 含义 | 处置 |
+|---|---|---|
+| **守门空转** | 守门**没在**守这条机制 | 补守门 / 改实现 |
+| **测试没跑** | 守门**在**守，但这次没被执行到 | 修变异脚本（**不是**改守门） |
+
+⇒ ⇒ 二者必须**先分开**，否则会把好守门当成没用的删掉（而它其实正是在防下一次回归）。
+
+### 判据（三条，缺一不可）
+
+1. **变异脚本必须先断言「变异确实写进去了」**（例如 `assert old in source` 后再写）⇒
+   否则「源文本没命中 ⇒ 什么都没改」也会表现为「零红」。
+2. **跑完必须看 `Tests run:` 行**，确认**跑了多少条** ⇒ `Tests run: 0` 或**没有该行** ⇒ 就是「没跑」。
+3. **`-Dtest` 的多类名分隔符是逗号**（`,`），**不是** `+`；且加 `-DfailIfNoTests=false` 时
+   「没匹配上」会**静默通过** ⇒ ⇒ 这条组合最容易制造假阴性 ⇒ **要么别加 `-DfailIfNoTests=false`，要么手动核对 `Tests run:` 的条数**。
+
+### 教训
+
+> **「没转红」是一个需要二次确认的信号，不是结论。**
+> 在把它写成「守门空转」之前，先问一句：**这次测试到底跑了没有？**
+
+### 出处
+
+- 踩坑位置：2026-10-25 第十四轮的变异测试 M2（`docs/DRIFT/global/cross-domain.md` §二·十一 ⑤ 之三）
+- 关联：`docs/Pitfalls/global/cross-domain.md` §PIT-GLOBAL-013
+
+---
+
 ## 变更记录
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | **第十四轮新增 PIT-GLOBAL-014** —— 变异测试报「没转红」时**先排除「测试压根没跑」**：surefire 的 `-Dtest` 多类名分隔符是**逗号**不是 `+`，配上 `-DfailIfNoTests=false` 会**静默通过** ⇒ 「零红」是假阴性 ⇒ 差点把好守门当成空转删掉；含三条判据（变异脚本先断言写进去了 / 跑完看 `Tests run:` 条数 / 别把「没匹配上」当通过） |
+| 2026-10-25 | **第十四轮新增 PIT-GLOBAL-013** —— Go 的 `httpx.SetErrorHandler` 是**逐 api 注册**的 ⇒ 解析失败的 wire 形状**按域而异**（200+信封 vs 400+原文）且信封文案**在域自己的错误码表**里 ⇒ 共享层**不能有单一形状**；含四条教训：① 复刻 Go 前先问「这条行为在 Go 侧是全局的吗」② servlet Filter 抛的异常到不了 advice ⇒ 必须 Interceptor ③ 搬运判据会改变它的位置 ⇒ 域里钉住旧位置的测试会红（是断言过期，不是回归）④ 共享层若会改别的域行为，能用开关规避就规避（favorite 缺省 off ⇒ 零变化） |
 | 2026-10-25 | **第十一轮新增 PIT-GLOBAL-012** —— 「per-app 配置」≠「只能逐模块改」⇒ 第九轮把 X-6 误判成 favorite 边界下的永久阻塞 ⇒ 第十一轮找到共享层修法（`Connector.setMaxParameterCount(-1)` + Boot customizer 顺序 + `com.rag.common` 组件扫描 10/10）⇒ **该漂移可修、favorite 零触碰**；含四问判据 + 「共享层会改别的域行为 ⇒ 不能静默」的教训 |
 | 2026-10-25 | **第七轮新增 PIT-GLOBAL-011** —— 裸 `ServerCallHandler` 造的「慢服务」**从不执行** ⇒ task + follow 两个域的同名测试**绿但空转**；含探针实测输出、两种裸 handler 的分类判据、修法与变异测试要求 |
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 PIT-GLOBAL-005（全量构建偶发红的判定三步 + 基线对照的 worktree 做法）· PIT-GLOBAL-006（真源分层的指针） |

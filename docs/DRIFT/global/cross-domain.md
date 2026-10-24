@@ -18,7 +18,7 @@
 | X-3 | 事实投递链路 | `like`/`comment`/`favorite` 的 rpc ↔ **仓外 DC 平台** | ✅ **已闭合**（2026-10-25 B2）—— 末端不是「第三个仓库」，是仓外 `POST /v1/events`；仓内两侧 4↔4 对齐 | ✅ **已闭合** |
 | X-4 | 社区消费者差异 | Go 用 `like`，RAG 不用 | ✅ **已确证（第九轮实测）** —— like 侧 RAG **另起炉灶**（0 引用共享组件）· favorite/article **RAG 多出** ⇒ 一半可修、一半被 favorite 阻塞 ⇒ 见 §二·十 | ✅ **已确证** |
 | X-5 | 裸 `ServerCallHandler` 不被 dispatch | **task + follow**（2026-10-25 实测扩面） | 🔴 **已确证**（第七轮探针）—— grpc-java 不向裸 handler 派发 `onHalfClose` ⇒ 两个域的「造慢服务」测试**空转** ⇒ 见 §二·八 | ✅ **已确证**（机制 + 波及面） |
-| X-6 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🟡 **第十一轮改判：可修（共享层）** —— `max-parameter-count` 虽是 per-app，但**上限可在运行期由 `service/common` 改掉** ⇒ 10 个 api 模块零改动 ⇒ **favorite 零触碰** ⇒ 非永久阻塞、非签字项 ⇒ 见 §二·十一 | ✅ **已展开 + 已改判**（修法待落地） |
+| X-6 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | ✅ **第十四轮已落地**（共享层 6 个类 + 9 个域一行 yaml）⇒ 🔴 **Go 的拒绝形状按域而异**（5 域注册 `SetErrorHandler` ⇒ 200+信封；4 域未注册 ⇒ 400+原文）⇒ 共享层按 `mode` 分派、**文案由各域自己的兜底 handler 渲染** ⇒ **favorite 缺省 = off ⇒ 零触碰** ⇒ 🟢 **真容器 + 真 MVC + 变异测试** | ✅ **已修**（见 §二·十一 ⑤） |
 | X-7 | DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🟡 **部分闭合**（2026-10-25 B3）—— 4 个域已能活体逐列对照；其余 5 域**缺双侧库环境** | ✅ **已跑**（产出真结论 + 1 条新差异 X-10） |
 | **X-8** | 🆕 **真源分层（Go 出处一半在框架里）** | **全部域** | ✅ **本轮已查明并记账** | ✅ **本轮新增** |
 | **X-9** | 🆕 **「Go 是否读 body」判据有 3 份生产复制品** | favorite / hot / article | 🟡 **当前行为正确，但是定时炸弹** | ✅ **本轮新增** |
@@ -432,6 +432,87 @@ RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFact
 | **X-9**（3 份「Go 是否读 body」复制品） | 🟡 **部分要** —— 3 份分别在 favorite / hot / article；**hot + article 两份可收敛到唯一真源**，favorite 那份不能 | ✅ **本轮不动**（现状三份都取原始头值 ⇒ 行为正确）⇒ 但「3 份复制品」的风险**在 favorite 那份上永久存在** ⇒ 已在本节 §2.3 补记该限制 |
 | **X-7**（DDL 双侧活体对照） | ❌ **不要** —— 只读库、不改 favorite 代码 | ✅ **不受影响** —— favorite 域缺的是**双侧库环境**（runner），不是写权 ⇒ **仍可推进**（见 §二·五 ③） |
 
+### ⑤ ✅ **第十四轮已落地**（2026-10-25）—— 🔴 且**推翻了第十一轮修法草案的一个前提**
+
+> 🔴 **第十四轮最重要的发现**：第十三轮的修法草案假设「共享 Filter 统一写 Go 的 **400 原文**」。
+> **那个假设是错的** —— **Go 的拒绝形状是「按域而异」的**。
+
+#### ⑤ 之一 🔴 **Go 的拒绝形状按域而异**（逐域读 Go 源码取证）
+
+Go 的 `httpx.Parse` 失败后经 `httpx.ErrorCtx` → `httpx.SetErrorHandler` 出口（go-zero `rest/httpx/responses.go:141-172`）：
+
+| Go 侧是否注册 `SetErrorHandler` | 域（Go 侧出处） | wire 形状 |
+|---|---|---|
+| ✅ **注册了** | `hot/api/hotcenter.go:53` · `follow/api/followcenter.go:53` · `like/api/likecenter.go:48` · `message/api/messagecenter.go:53` · `comment/api/commentservice.go:47` | **HTTP 200** + `{"code":5001,"msg":"<该域自己的文案>","data":null}` |
+| ❌ **没注册** | `article/api` · `user/api` · `task/api` · `favorite/api` | **HTTP 400** + `text/plain; charset=utf-8` + `nosniff` + Go 原文 |
+
+⚠️ **各域 5001 的文案还不一样**（Go 侧逐域取证）：
+
+| 域 | `GetErrMsg(5001)` |
+|---|---|
+| hot / follow / message | `"internal server error"` |
+| like / comment | `"系统内部错误"` |
+
+⇒ ⇒ **共享层写不出信封** ⇒ 拒绝形状**必须由域自己渲染** ⇒ ⇒ **共享层不能有单一形状**。
+
+#### ⑤ 之二 落地的结构（`service/common` 6 个类 + **9 个域各一行 yaml**）
+
+| 件 | 作用 |
+|---|---|
+| `GoStyleFormValues` | **Go 判据**：`net/url` 三条错误（段数上限 / 分号 / 转义）+ **2048 个非空值**计数 + Go 原文。**只出判据，不出响应** |
+| `GoStyleFormLimitMode` | 模式：`off` / `raw` / `envelope`；**非法值在构造期就炸**（不静默兜底） |
+| `GoStyleFormLimitExceededException` | envelope 模式下抛出；**刻意不继承 `BusinessException`**（否则各域的 `@ExceptionHandler(BusinessException.class)` 会拿 `getMessage()` 当信封 msg ⇒ 把 Go 原文塞进 wire） |
+| `GoStyleFormValueLimitInterceptor` | 闸门本体。**是 `HandlerInterceptor` 不是 servlet `Filter`** —— Filter 在 DispatcherServlet **之外** ⇒ 抛的异常到不了 `@RestControllerAdvice` |
+| `GoStyleFormLimitWebMvcConfig` | 注册拦截器（`order = HIGHEST_PRECEDENCE`） |
+| `GoStyleTomcatParameterLimitCustomizer` | 容器上限 → **10001**（= Go `net/url` 段数上限 + 1）；**仅非 `off` 模式生效** |
+
+⇒ **每个域只需一行 yaml**：`rag.http.go-form-limit.mode: raw | envelope`
+
+| 模式 | 域 | 形状 |
+|---|---|---|
+| `raw` | article / user-api / admin-api / task | 400 + Go 原文（`http.Error` 形状） |
+| `envelope` | hot / like / follow / message / comment | 200 + 该域自己的信封（**共享层只抛异常，由域的兜底 handler 查自己的表渲染**） |
+| **缺省（off）** | **favorite** | **零触碰** —— 容器上限也不动、闸门不装 ⇒ 行为逐字节不变 |
+
+⚠️ **为什么 favorite 连容器上限都不动**：第十三轮担心「抬高上限会改 favorite 的行为」⇒ ⇒ **把「抬上限」也挂在同一个模式开关下** ⇒ `off` ⇒ `GoStyleTomcatParameterLimitCustomizer` 直接 `return` ⇒ **favorite 的 Tomcat 上限仍是 yaml 里的 2048** ⇒ **favorite 零改动、零行为变化、无需通知其 owner**。
+
+#### ⑤ 之三 实测依据（§3.3 真容器 / 真 Spring MVC）
+
+| 守门 | 覆盖 | 结果 |
+|---|---|---|
+| `GoStyleParamLimitGateTest`（**真 Tomcat + 真 Spring MVC 拦截器链**，raw 模式） | 运行期容器上限 = 10001 · 2048 放行 · 2049 ⇒ 400 + Go 原文逐字 · **3000 个空值 ⇒ 200（X-6 的窗口）** · 10001 段 ⇒ 400 + 段数文案 | ✅ **5/5** |
+| `GoStyleFormLimitEnvelopeGateTest`（**真 Tomcat + 真 MVC + 真 advice**，envelope 模式） | 2049 ⇒ **200 + 业务信封**（`code=5001` / msg 由**测试替身的域**提供 / `data:null`）· 2048 放行 · 3000 空值放行 · 容器上限 10001 | ✅ **4/4** |
+| `GoStyleFormLimitModeTest`（模式分派单测） | `off` 放行且不写响应 · `raw` 写 400 + Go 原文 · `envelope` 抛异常且**不写**响应 · 非法值构造期炸 | ✅ **8/8** |
+| **变异测试** | M1 `MAX_PARAMETER_COUNT` 10001→2048 ⇒ **3000 空值那条转红**；M2 非空值计数恒 0 ⇒ **2049 那条转红** | ✅ **两条机制都有判别力** |
+| `tools/difftest/check-tomcat-limits.py` | 新增第四旋钮「form-gate 模式」+ **favorite 无 mode 的零触碰守卫** | ✅ **EXIT=0** |
+
+⇒ **证据强度**：🟢 **真容器 + 真 MVC + 真 advice + 变异测试**（本条首次达到该强度；此前 X-6 只有源码级/配置级取证）。
+
+#### ⑤ 之四 连带影响（各域可观察行为）
+
+| 域 | 2049 个非空值：修前 | 修后 | 性质 |
+|---|---|---|---|
+| article | 400 + Go 原文（本地 filter） | **400 + Go 原文**（共享层 raw） | ✅ **不变** |
+| hot | 200 + `{code:5001}`（本地判据） | **200 + `{code:5001}`**（共享层 envelope ⇒ hot 自己的兜底 handler 渲染 ⇒ 文案取 hot 的表） | ✅ **不变** |
+| like / follow / message / comment / task / user / admin | 400 + **HTML 错误页**（Tomcat 先拒） | **Go 的形状**（200+信封 或 400+原文） | ✅ **向 Go 靠拢**（修漂移） |
+| **favorite** | 400 + HTML（Tomcat 在 2048 先拒） | **400 + HTML（完全不变）** | ✅ **零变化**（`off` 模式） |
+
+#### ⑤ 之五 ⚠️ 残留（有界，本轮刻意不改）
+
+1. **鉴权与闸门的先后**：Go 是「**先鉴权**（`rest.WithJwt` 是中间件）**后解析**（`httpx.Parse` 在 handler 内）」；
+   RAG 的拦截器 `order = HIGHEST_PRECEDENCE` ⇒ 「**先解析后鉴权**」
+   ⇒ 「既无合法 token、又带 2049 个参数」的请求：**Go 401 / RAG 400 或 5001**。
+   ⚠️ 这是**修之前就存在**的差异（`article-api` 的同名 filter 一直跑在鉴权之前）⇒ 本轮**刻意不改**（避免扩大 scope）⇒ **记为有界残留**，不是新引入。
+2. **未匹配到路由的路径不触发闸门**（Interceptor 只对匹配到的 handler 生效）⇒ **与 Go 一致**（Go 的 404 分支在 `patrouter.go:73` 直接返回，**不解析 form**）⇒ 这条是**修正**，不是残留。
+
+#### ⑤ 之六 对第十三轮「落地前必须先答的 3 个问题」的最终回答
+
+| # | 第十三轮的预判 | 第十四轮实测结论 |
+|---|---|---|
+| 1 | yaml 声明值 ≠ 运行时值 ⇒ yaml 成「名义值」 | 🔴 **预判已过时**：最终形态是 **yaml 新增一行 `mode`**（10 份 yaml 里的 `max-parameter-count: 2048` **一个字没动**）⇒ **yaml 仍是名义值**（运行期 10001，由 `check-tomcat-limits.py` 断言「yaml 统一 2048 + mode 齐备」）；favorite 那份 yaml **完全没动** |
+| 2 | 共享 Filter 与 3 个模块的本地实现重复 | ✅ **已消解**（不是「重复」而是「**分工**」）：共享层出**判据**与**容器上限**，本地实现出**域特有的形状**。实测 article / hot 的可观察行为**逐字节不变** |
+| 3 | 共享 Filter 会改 favorite 的可观察行为 ⇒ 须记账并告知 owner | ✅ **已消解**：模式开关把 favorite 置于 `off` ⇒ **容器上限与闸门都不生效** ⇒ **favorite 零变化、无需通知** |
+
 ---
 
 ## 三、其余 7 条的状态说明（2026-10-25）
@@ -446,7 +527,7 @@ RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFact
 | ~~X-3~~ | ✅ **已闭合**（2026-10-25 B2）⇒ 见 §二·七（末端 = 仓外 DC 平台；仓内两侧 4↔4 对齐） |
 | ~~X-4~~ | ✅ **已确证**（第九轮）⇒ 见 §二·十（**可修的一半** = like 侧接线；**阻塞的一半** = favorite） |
 | ~~X-5~~ | ✅ **已确证**（2026-10-25 第七轮，探针实测）⇒ 见 §二·八。⚠️ 机制清楚了，但**修法要同时动 task + follow 两个域的测试** ⇒ 下一轮落地 |
-| ~~X-6~~ | ✅ **已展开 + 已改判**（第九轮展开 / 第十一轮改判）⇒ 见 §二·十一（**不是 favorite 边界下的永久阻塞** —— 共享层修法存在 ⇒ **可修**、**不需签字**） |
+| ~~X-6~~ | ✅ **已展开 + 已改判 + 已落地**（第九轮展开 / 第十一轮改判 / **第十四轮落地**）⇒ 见 §二·十一（**不是 favorite 边界下的永久阻塞** —— 共享层修法存在 ⇒ **可修**、**不需签字**；🔴 第十四轮补：**Go 的拒绝形状按域而异** ⇒ 共享层按 `mode` 分派 ⇒ **favorite 缺省 off ⇒ 零触碰**） |
 | ~~X-7~~ | ✅ **已做**（2026-10-25 B3）⇒ 见 §二·五（4 个域可跑 + 产出 X-10） |
 
 ⇒ **排期建议（2026-10-25 更新）**：~~X-7~~ **已做**（§二·五）→ **X-1**（真 PG 三进程）
@@ -467,6 +548,7 @@ RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFact
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | ✅ **第十四轮（X-6 落地）** —— ① 🔴 **推翻第十三轮修法草案的一个隐含前提**：草案假设「共享 Filter 统一写 Go 的 400 原文」⇒ **错** —— **Go 的拒绝形状按域而异**（5 域注册 `httpx.SetErrorHandler` ⇒ **200 + 业务信封**；article/user/task/favorite 未注册 ⇒ **400 + Go 原文**）⇒ 且各域 5001 **文案不同**（like/comment =「系统内部错误」，hot/follow/message = `"internal server error"`）⇒ ⇒ **共享层写不出信封** ⇒ 拒绝形状必须**由域自己渲染** ② 落地结构 = `service/common` **6 个类**（`GoStyleFormValues` 判据 / `GoStyleFormLimitMode` 模式 / `GoStyleFormLimitExceededException` / `GoStyleFormValueLimitInterceptor` / `GoStyleFormLimitWebMvcConfig` / `GoStyleTomcatParameterLimitCustomizer`）+ **9 个域各一行 yaml**（`rag.http.go-form-limit.mode: raw\|envelope`）⇒ **favorite 缺省 = off ⇒ 容器上限与闸门都不生效 ⇒ 零触碰、行为逐字节不变** ③ 🔴 **闸门是 `HandlerInterceptor` 不是 servlet `Filter`** —— Filter 在 DispatcherServlet **之外** ⇒ 抛的异常到不了 `@RestControllerAdvice` ⇒ envelope 模式无法渲染 ④ 顺带订正 `service/common/pom.xml` 的 **spring-web / spring-test 硬编码 7.0.0**（与 starter-web 的 7.0.9 错配 ⇒ `NoClassDefFoundError: ApiVersionHolder`）⇒ 改为跟随 BOM ⑤ 🟢 证据强度首次达 **真容器 + 真 Spring MVC + 真 advice + 变异测试**（raw 5/5 · envelope 4/4 · 模式 8/8 · 变异 M1/M2 均转红）· `check-tomcat-limits.py` 新增第四旋钮 + **favorite 零触碰守卫** ⇒ EXIT=0 ⑥ 残留（有界，修前已存在）：**鉴权与闸门的先后**（Go 先鉴权后解析 / RAG 先解析后鉴权）⇒ 记录不改 |
 | 2026-10-25 | ✅ **第十一轮（favorite 零权限重申 ⇒ 推翻第九轮的「永久阻塞」结论）** —— 用户重申：「**你没有 favorite 的所有权限**」⇒ ① 🔴 **推翻自己第九轮的结论** —— 那个结论只覆盖「逐模块改 `application.yml`」这一条修法；本轮实测**共享层修法存在**：① `service/common` 里一个 `WebServerFactoryCustomizer`（`@Order` > Boot 的 `TomcatWebServerFactoryCustomizer.getOrder()==0`）⇒ `connector.setMaxParameterCount(-1)`（`Connector.java:538`；`-1` = 不限 ⇒ `Parameters.java:79/247`）② 一个共享 Filter 复刻 go-zero `GetFormValues`（`net/url` 解析层 + **2048 个非空值**计数，可从 `article-api` 的 `GoStyleGetFormValuesFilter` 移植）⇒ **10 个 api 模块零代码改动 ⇒ favorite 零触碰**（前提已逐条实测：10/10 依赖 `service/common` + 10/10 扫 `com.rag.common`）⇒ ⇒ **X-6 不是永久阻塞，也不需签字认账** ⇒ 落 **出路 D** ② ✅ **连带影响面复核**（§二·十一 ④ 之二）—— X-4（favorite 半边）**仍阻塞**（必须删 favorite 自己的 10 处调用）· X-9（hot/article 两份可收敛、**favorite 那份永久留作复制品**）· X-7（**只读库不改代码 ⇒ 不受影响，仍可推进**）③ 本表**已无「等用户拍板」的技术项**；唯一真决策项 = T-6（需先撕 hot 域 `SD-HOT-API-006`） |
 | 2026-10-25 | ✅ **第九轮补（X-6 global 侧展开）** —— 两层限制语义精确化：Go **数非空值**（`httpx/util.go:15` `maxFormParamCount=2048` + `:44-45` 跳过空值 + `:48` `n < 2048` ⇒ 最多 2048 个非空值）vs Tomcat **数参数总数** ⇒ **残余窗口 = 总数 ≥ 2048 且 非空值 ≤ 2048**。🔴 **修法必然要动 `favorite-api`**（`max-parameter-count` 是 **per-app** 连接器设置，**无法在 `service/common` 统一改**；实测 **10 个 api 模块全部已配 2048、零遗漏**）⇒ ⇒ **X-6 不是「待拍板的技术项」，而是「favorite 写权边界」问题** ⇒ 登记等用户定（出路 A 放开 favorite / B 制造分叉 / C 签字认账）<br>⚠️ **2026-10-25 第十一轮已改判** —— 出路 A 撤下、出路 B 放弃、**出路 C（签字认账）也放弃** ⇒ 改判为「**存在共享层修法 ⇒ 可修，favorite 零触碰**」（见上一行）⇒ ⇒ **第九轮那句「修法必然要动 `favorite-api` ⇒ 永久阻塞」作废**
 | 2026-10-25 | ✅ **第九轮（X-2 审完 + X-4 确证）** —— ① **X-2**（建表责任交叉 + client 契约）**从「均未审」变成「已审完」**：A 组交叉但无冲突（Go 两侧 `User` struct 逐字段相同）；B 组 **10 域全覆盖零漂移**；🟡 **产出 1 条此前无人登记的真漂移** —— `users_user.extra_info` 写路径仍按 jsonb（`AdminDomainService.java:962` + `UserEntity.java:129`），但该列**早已是 TEXT**（`01_create_user.sql:41` + `:103`，且 admin-rpc 自己就在重放这份 DDL）⇒ **代码注释的前提已失效** ⇒ 含 `\u0000` 时 Go 成功 / RAG 5001 ② **X-4 实测确证**：`like` 域 Go 侧 6 个文件引用 `communityfact`、RAG 侧 **0**（**另起炉灶**）；`favorite` Go 0 / RAG 10（⛔ 不碰）③ ⚠️ **订正我自己第四轮 B2 的错误结论**（「like/comment/favorite 三域都接了线」**作废**）

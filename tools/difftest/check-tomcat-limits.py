@@ -69,14 +69,30 @@ Tomcat 的 `maxParameterCount` 数的是**总参数个数**（query + post），
 ════════════════════════════════════════════════════════════════════════
 【本脚本查什么 / 不查什么】
 ════════════════════════════════════════════════════════════════════════
-查：每个 `*-api` 模块的 `src/main/resources/application.yml` 是否配了三个旋钮，
-    且**值**正确（不是「配了就行」）。
+查：每个 `*-api` 模块的 `src/main/resources/application.yml` 是否配了三个容器旋钮，
+    且**值**正确（不是「配了就行」）；**外加第四个旋钮** —— form 值上限闸门的模式
+    （`rag.http.go-form-limit.mode`）。
+
+  ┌────────────────────────────────────┬───────────────────────────────────────┐
+  │ 第四旋钮                            │ 语义                                   │
+  ├────────────────────────────────────┼───────────────────────────────────────┤
+  │ rag.http.go-form-limit.mode         │ off（缺省）/ raw / envelope           │
+  │                                    │ = 「Go 侧该 api 有没有注册            │
+  │                                    │   httpx.SetErrorHandler」              │
+  │                                    │   raw      ⇒ 400 + text/plain + Go 原文│
+  │                                    │   envelope ⇒ 200 + 业务信封            │
+  │                                    │   off      ⇒ 不装闸门、也不改容器上限  │
+  └────────────────────────────────────┴───────────────────────────────────────┘
+
+  ⚠️ **favorite-api 必须没有这一项** ⇒ 它不在 global 的写权范围内（AGENTS.md §5.3c）
+     ⇒ 共享层对它必须零影响 ⇒ 本脚本对它做**反向断言**（存在即红）。
 
 不查：
   · **不启动任何服务** —— 纯静态。
   · **不验证这些配置真的生效** —— 那是运行时后果，由
-    `service/hot/hot-api` 的 `HotApiRealTomcatGateTest`（真 Tomcat）
-    与 `tools/difftest/probe-hot-limits.py`（双侧活体）负责（§3.3）。
+    `service/common` 的 `GoStyleParamLimitGateTest`（raw，真 Tomcat + 真 Spring MVC）、
+    `GoStyleFormLimitEnvelopeGateTest`（envelope，真 Tomcat + 真 MVC + 真 advice）
+    与 `service/hot/hot-api` 的 `HotApiRealTomcatGateTest`（双侧活体）负责（§3.3）。
   · **不检查 rpc 模块** —— rpc 是纯 gRPC 进程，不跑 Tomcat。
 
 ⚠️ 静态检查保证**配置写对了**，不等于**框架真的采用了它**。
@@ -114,6 +130,33 @@ EXPECTED_MAX_HEADER_SIZE = 1024 * 1024 + 4096  # 1 MiB + 4 KiB = 1028 KB
 # Boot 4.0.8 的默认值（用于报错时说明「不配会怎样」）
 BOOT_DEFAULT_MAX_PARAM_COUNT = 1000
 BOOT_DEFAULT_MAX_HEADER_SIZE = 8 * 1024  # 8KB
+
+# ============================================================================
+# 第四个旋钮：form 值上限闸门的**模式**（2026-10-25 第十四轮 · global X-6）
+# ============================================================================
+# 值的语义 = 「Go 侧该 api 有没有注册 httpx.SetErrorHandler」（逐域取证）：
+#   raw      ⇒ 没注册 ⇒ http.Error(w, err.Error(), 400) ⇒ 400 + text/plain + Go 原文
+#   envelope ⇒ 注册了 ⇒ 业务信封 ⇒ 200 + {code:5001, 该域自己的文案, data:null}
+#   缺省     ⇒ OFF（不装闸门、也不改容器上限）
+#
+# ⚠️ favorite-api **故意不在表里** ⇒ 它的 yaml 里不得出现这个属性
+#    （favorite 不在 global 的写权范围内 ⇒ 共享层对它必须零影响）。
+FORM_LIMIT_MODE_PROPERTY = "rag.http.go-form-limit.mode"
+EXPECTED_FORM_LIMIT_MODE = {
+    "service/article/article-api": "raw",
+    "service/users/user/user-api": "raw",
+    "service/users/admin/admin-api": "raw",
+    "service/task/task-api": "raw",
+    "service/hot/hot-api": "envelope",
+    "service/like/like-api": "envelope",
+    "service/follow/follow-api": "envelope",
+    "service/message/message-api": "envelope",
+    "service/comment/comment-api": "envelope",
+}
+# 🔴 favorite 域**必须**没有这一项（零触碰守卫）
+FORBIDDEN_FORM_LIMIT_MODE_MODULES = {
+    "service/favorite/favorite-api",
+}
 
 
 def find_api_modules():
@@ -193,7 +236,7 @@ def main():
 
     print(f"\n扫描到 {len(mods)} 个 api 进程：\n")
     hdr = (f"  {'模块':<26} {'① relaxed-chars':<20} {'② max-param':<14} "
-           f"{'③ header-size':<14} 结论")
+           f"{'③ header-size':<14} {'④ form-gate':<14} 结论")
     print(hdr)
     print("  " + "-" * (len(hdr) - 2))
 
@@ -214,6 +257,18 @@ def main():
         mpc = tomcat.get("max-parameter-count")
         hsz = normalize_size(server.get("max-http-request-header-size"))
 
+        # ④ form 值上限闸门模式：rag.http.go-form-limit.mode
+        rag = doc.get("rag") or {}
+        http = rag.get("http") or {}
+        gate = http.get("go-form-limit") or {}
+        mode = gate.get("mode")
+        expected_mode = EXPECTED_FORM_LIMIT_MODE.get(mod)
+        if mod in FORBIDDEN_FORM_LIMIT_MODE_MODULES:
+            # 🔴 favorite：这一项**必须不存在**（零触碰守卫）
+            gate_ok = mode is None
+        else:
+            gate_ok = (mode == expected_mode)
+
         problems = []
         if chars != EXPECTED_RELAXED_QUERY_CHARS:
             problems.append("①")
@@ -221,6 +276,8 @@ def main():
             problems.append("②")
         if hsz != EXPECTED_MAX_HEADER_SIZE:
             problems.append("③")
+        if not gate_ok:
+            problems.append("④")
 
         def mark(ok):
             return "✅" if ok else "❌ 缺/错"
@@ -228,6 +285,7 @@ def main():
         print(f"  {mod:<26} {mark(chars == EXPECTED_RELAXED_QUERY_CHARS):<20} "
               f"{mark(mpc == EXPECTED_MAX_PARAM_COUNT):<14} "
               f"{mark(hsz == EXPECTED_MAX_HEADER_SIZE):<14} "
+              f"{mark(gate_ok):<14} "
               f"{'✅' if not problems else '🔴'}")
 
         if problems:
@@ -235,6 +293,8 @@ def main():
                 "chars": tomcat.get("relaxed-query-chars"),
                 "mpc": mpc,
                 "hsz": server.get("max-http-request-header-size"),
+                "mode": mode,
+                "expected_mode": expected_mode,
             }))
 
     if not violations:
@@ -267,11 +327,25 @@ def main():
                   f"Go 处理 / RAG 400 + HTML 错误页")
             print("        ⇒ ⚠️ 写 1MB 也不对：Go 的真实上限是 1 MiB **+ 4096**"
                   "（net/http/server.go:941 'bufio slop'）")
-        print("     修法：在该模块 application.yml 的 server: 块下补 ——")
-        print("       tomcat:")
-        print('         relaxed-query-chars: ["[", "]"]')
-        print(f"         max-parameter-count: {EXPECTED_MAX_PARAM_COUNT}")
-        print("       max-http-request-header-size: 1028KB")
+        if "④" in problems:
+            if mod in FORBIDDEN_FORM_LIMIT_MODE_MODULES:
+                print(f"     🔴 ④ {FORM_LIMIT_MODE_PROPERTY}：**这一项必须不存在**"
+                      f"（实际 {actual.get('mode')!r}）")
+                print("        ⇒ favorite 域不在 global 的写权范围内（AGENTS.md §5.3c）")
+                print("        ⇒ 共享层对它必须**零影响**：既不改容器上限、也不装闸门")
+            else:
+                print(f"     缺 ④ {FORM_LIMIT_MODE_PROPERTY}：实际 {actual.get('mode')!r}，"
+                      f"应为 {actual.get('expected_mode')!r}")
+                print("        ⇒ raw      = Go 未注册 httpx.SetErrorHandler"
+                      " ⇒ 400 + text/plain + Go 原文")
+                print("        ⇒ envelope = Go 注册了 httpx.SetErrorHandler"
+                      " ⇒ 200 + {code:5001, 该域自己的文案, data:null}")
+                print("        ⇒ 缺它 ⇒ 容器上限不会被抬到 10001 ⇒ Tomcat 会先于应用层拒绝")
+                print("          （且拒绝形状是 400 + HTML 错误页 ⇒ 与 Go 不同）")
+        print("     修法：在该模块 application.yml 的 rag: 块下补 ——")
+        print("       http:")
+        print("         go-form-limit:")
+        print(f"           mode: {actual.get('expected_mode') or 'raw'}")
         print("     ⚠️ 光补配置不够：还要配一条断言「这些旋钮真的生效」的测试")
         print("        （§3.3：配置写对了 ≠ 框架采用了它）")
         print()
