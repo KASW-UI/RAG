@@ -321,7 +321,8 @@ public class FavoriteFactEnvelopeFactory {
     private static final DateTimeFormatter RFC3339_SECONDS =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss").withZone(ZoneOffset.UTC);
 
-    /** {@code json.Marshal} 的等价物；失败按 Go 侧的「构造失败 ⇒ 事务回滚」处理。 */
+    /** {@code json.Marshal} 的等价物；失败按 Go 侧的「构造失败 ⇒ 事务回滚」处理
+     *     （{@code service/favorite/rpc/internal/model/favorite_fact.go:156}）。 */
     private static String serialize(Map<String, Object> value) {
         try {
             return FavoriteRpcSupport.STRICT_JSON.writeValueAsString(value);

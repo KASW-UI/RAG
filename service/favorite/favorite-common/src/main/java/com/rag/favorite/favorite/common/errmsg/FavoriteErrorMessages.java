@@ -76,7 +76,8 @@ public final class FavoriteErrorMessages {
     }
 
     /**
-     * 对应 Go {@code func GetErrMsg(code int) string}：未知码回退到 {@code "FAIL"}。
+     * 对应 Go {@code func GetErrMsg(code int) string}
+     * （{@code service/favorite/common/errmsg.go:91}）：未知码回退到 {@code "FAIL"}。
      *
      * <p><b>不能用 {@code getOrDefault(code, null)}</b> —— 那会让上游 handler 把
      * {@code null} 写进 HTTP envelope 的 {@code msg}，客户端拿到 {@code {"code":…, "msg":null}}，

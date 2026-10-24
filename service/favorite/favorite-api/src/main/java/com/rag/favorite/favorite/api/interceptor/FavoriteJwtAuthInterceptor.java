@@ -72,7 +72,7 @@ import javax.crypto.SecretKey;
  *   token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
  * </pre>
  * 即「大小写<b>敏感</b>的精确前缀 TrimPrefix」<b>再</b> TrimSpace。
- * 而 users/admin 域（{@code user/{user,admin}/api/internal/middleware/checkblacklistmiddleware.go:28}）
+ * 而 users/admin 域（{@code service/user/user/api/internal/middleware/checkblacklistmiddleware.go:28}）
  * 是 {@code strings.TrimPrefix(authHeader, "Bearer ")}，<b>没有</b> TrimSpace。
  * <p>⇒ 本实现刻意<b>不</b>直接复用 {@link BearerTokenExtractor#trimBearerPrefix}，
  * 而是在其结果上再补一次 Go 语义的 TrimSpace。
@@ -213,7 +213,8 @@ public class FavoriteJwtAuthInterceptor implements HandlerInterceptor {
     /**
      * Redis 黑名单查询 —— fail-open 与 Go 逐条对齐。
      *
-     * <p>Go: {@code exists, err := m.Redis.ExistsCtx(...); if err == nil && exists { 401 }}。
+     * <p>Go: {@code exists, err := m.Redis.ExistsCtx(...); if err == nil && exists { 401 }}
+     * （{@code service/favorite/api/internal/middleware/checkblacklist_middleware.go:37}）。
      * Redis 故障时 {@code err != nil} ⇒ 条件为 false ⇒ <b>放行</b>，不阻塞业务。
      * 本实现把异常吞成 {@code null}，随后 {@code exists != null && exists} 同样为 false ⇒ 放行。
      */

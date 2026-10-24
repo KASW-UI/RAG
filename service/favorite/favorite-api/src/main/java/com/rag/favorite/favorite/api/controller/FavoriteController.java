@@ -181,7 +181,8 @@ public class FavoriteController {
     /**
      * 查询收藏夹下的收藏 —— <b>form 通道</b>（query string）。
      *
-     * <p>Go 出处：{@code types.GetFavoritesByFolderReq} 的 tag 是 {@code form:"folderId,string"}。
+     * <p>Go 出处：{@code types.GetFavoritesByFolderReq} 的 tag 是 {@code form:"folderId,string"}
+     * （{@code service/favorite/api/internal/types/types.go:67}）。
      * <p>⚠️ {@code required = false}：Go 侧「参数缺席」走的是
      * {@code field "folderId" is not set}（⇒ 5003），<b>不是</b> 400 ——
      * 缺席与「值非法」在本域落到<b>同一个出口</b>（200 + 5003），
@@ -201,7 +202,7 @@ public class FavoriteController {
     /**
      * 复刻 Go 对<b>空 struct 请求体</b>的解析 —— 见 {@link #getFavoriteFolders} 的调用点注释。
      *
-     * <p><b>Go 出处</b>：{@code rest/httpx/requests.go:129-137} 的 {@code ParseJsonBody}
+     * <p><b>Go 出处</b>：{@code go-zero@v1.10.2/rest/httpx/requests.go:117-124} 的 {@code ParseJsonBody}
      * <pre>
      *   func ParseJsonBody(r *http.Request, v any) error {
      *       if withJsonBody(r) {
@@ -211,7 +212,7 @@ public class FavoriteController {
      *       return mapping.UnmarshalJsonMap(nil, v)
      *   }
      * </pre>
-     * 配合 {@code requests.go:153-155} 的
+     * 配合 {@code go-zero@v1.10.2/rest/httpx/requests.go:153-155} 的
      * {@code withJsonBody = r.ContentLength &gt; 0 &amp;&amp; strings.Contains(CT, "application/json")}。
      *
      * <p><b>真源探针实测（go-zero v1.10.2 + 逐字空 struct）</b>：

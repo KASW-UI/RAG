@@ -8,7 +8,7 @@ import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 /**
  * favorite-api HTTP gateway 入口。
  *
- * <p>对应 Go: {@code service/favorite/api/favorite.go} 的 {@code func main()}。
+ * <p>对应 Go: {@code service/favorite/api/favorite.go:20} 的 {@code func main()}。
  *
  * <p><b>Spring 化拆分</b>：
  * <ul>

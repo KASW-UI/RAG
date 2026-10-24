@@ -36,7 +36,7 @@ import java.nio.charset.StandardCharsets;
  * <p>strict-decode 信封并逐条校验 11 项，任何不符 ⇒ {@code ErrFavoriteFactMigrationBlocked}。
  * 通过则返回<b>该事件自己的 schema</b>（1 或 2）——
  * 🔴 撤回<b>永远继承</b>建立时冻结的 schema，与当前进程的开关无关
- * （Go {@code favorite.go:16-18} 的注释明确说了这一点）。
+ * （Go {@code internal/model/favorite.go:16-18} 的注释明确说了这一点）。
  *
  * <h3>分支 B：没有 v1 断言 ⇒ legacy（{@code favorite_fact.go:216-243}）</h3>
  * <p>必须找到 marker 并逐条比对 7 个锚点 + hash 正则 + approval_ref 非空，

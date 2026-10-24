@@ -24,7 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * 🔴🔴 favorite proto 的 <b>protobuf 消息体 wire 字节</b>双侧对拍。
  *
  * <h2>它补的是哪个缺口</h2>
- * <p>AGENTS.md §3.4 只保证「{@code .proto} <b>文件本身</b>两侧一致」，
+ * <p>AGENTS.md §3.4 只保证「{@code .proto} <b>文件本身</b>两侧一致」
+ * （Go 侧生成码 {@code service/favorite/rpc/pb/favorite.pb.go:1}），
  * <b>推不出</b>「两侧<b>生成码</b>产出的 wire 字节一致」——
  * 字段号、零值落不落 wire、repeated 的编码方式，<b>只有序列化出来才看得见</b>。
  * <p>⇒ 本类用<b>同一组消息</b>在两侧各序列化一次，比对<b>十六进制字节</b>。

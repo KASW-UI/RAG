@@ -43,7 +43,7 @@ import java.util.List;
  *
  * <h2>⚠️ Go 的退出码语义在 Spring 进程内<b>没有对应物</b></h2>
  * <table border="1">
- *   <caption>Go 的退出码（main.go:24,30,38,50）</caption>
+ *   <caption>Go 的退出码（cmd/fact-legacy-preflight/main.go:24,30,38,50）</caption>
  *   <tr><th>码</th><th>含义</th><th>Java 侧</th></tr>
  *   <tr><td>0</td><td>clear</td><td>日志 {@code outcome=succeeded}</td></tr>
  *   <tr><td>1</td><td>读取失败</td><td>日志 {@code outcome=failed} + {@code error_code=PREFLIGHT_READ_FAILED}</td></tr>
@@ -98,7 +98,7 @@ public class FavoriteLegacyPreflightRunner {
     }
 
     /**
-     * Go {@code main()} 的执行入口（main.go:32-53）。
+     * Go {@code main()} 的执行入口（cmd/fact-legacy-preflight/main.go:32-53）。
      *
      * <p>对应 Go 的 {@code context.WithTimeout(ctx, 2min)}：单次预检最多 2 分钟。
      * ⚠️ 本实现**不设**该超时（Spring 进程内无法安全中断一个长事务）⇒ 已知差异。
@@ -209,7 +209,8 @@ public class FavoriteLegacyPreflightRunner {
         return row.markerSourceSnapshotSha256.equals(snapshotHash(row));
     }
 
-    /** 重算业务行的不可变快照哈希 —— 与 Go 的 {@code favoriteLegacySnapshotHash} 同一口径。 */
+    /** 重算业务行的不可变快照哈希 —— 与 Go 的 {@code favoriteLegacySnapshotHash}
+     *     （{@code service/favorite/rpc/internal/model/favorite_fact.go:44}）同一口径。 */
     private String snapshotHash(FavoriteLegacyPreflightRow row) {
         FavoriteItemEntity item = new FavoriteItemEntity();
         item.setFavoriteId(row.favoriteId);
@@ -221,7 +222,8 @@ public class FavoriteLegacyPreflightRunner {
         return new FavoriteFactEnvelopeFactory().legacySnapshotHash(item);
     }
 
-    /** 保留引用：预检的输出字段名必须与 Go 的 JSON tag 一致。 */
+    /** 保留引用：预检的输出字段名必须与 Go 的 JSON tag 一致
+     *     （{@code service/favorite/rpc/internal/model/favorite_legacy_preflight.go:15-19}）。 */
     @SuppressWarnings("unused")
     private static Class<?> mapper() {
         return FavoriteRpcSupport.class;

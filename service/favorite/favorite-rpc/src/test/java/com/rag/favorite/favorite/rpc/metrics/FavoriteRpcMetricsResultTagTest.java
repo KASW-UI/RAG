@@ -30,7 +30,8 @@ import static org.mockito.Mockito.when;
  *
  * <h2>为什么这条是 U5 撤销后的替代守门</h2>
  *
- * <p>2026-10-23 的台账把 Go 侧判成「21 处错误返回被记成 {@code success}」，
+ * <p>2026-10-23 的台账把 Go 侧判成「21 处错误返回被记成 {@code success}」
+ * （代表调用点 {@code service/favorite/rpc/internal/logic/create_favorite_folder_logic.go:52}），
  * 2026-10-25 用<b>实测</b>（{@code tools/metrics-probe/favorite/}）证伪：
  * Go 的 {@code return nil, favoritecommon.GRPCError(...)} <b>会</b>把值赋给命名返回值
  * {@code err} ⇒ defer 里的 {@code ObserveRPC} 记的是 {@code fail}。

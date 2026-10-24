@@ -21,13 +21,13 @@ import java.util.List;
  * （Go 侧是 {@code model.ErrorNotFound} 哨兵在各 logic 分派）。
  *
  * <p>⚠️ <b>全部无 LIMIT</b>（Go 侧 {@code FindFavoritesByFolderId} 也没有分页，
- * favorite.go:82-92）⇒ 这里不加 {@code LIMIT}。
+ * internal/model/favorite.go:82-92）⇒ 这里不加 {@code LIMIT}。
  */
 @Mapper
 public interface FavoriteItemMapper {
 
     /**
-     * 对应 Go {@code FindFavoritesByFolderId}（favorite.go:82-92）：
+     * 对应 Go {@code FindFavoritesByFolderId}（internal/model/favorite.go:82-92）：
      * <pre>Where("folder_id = ?", folderId).Order("create_time desc")</pre>
      *
      * <p>🔴 {@code ORDER BY create_time DESC} 是 L2 语义（条目列表展示顺序）。
@@ -41,7 +41,7 @@ public interface FavoriteItemMapper {
             """)
     List<FavoriteItemEntity> findByFolderId(@Param("folderId") long folderId);
 
-    /** 对应 Go {@code FindFavoriteByFavoriteId}（favorite.go:94-104）。 */
+    /** 对应 Go {@code FindFavoriteByFavoriteId}（internal/model/favorite.go:94-104）。 */
     @Select("""
             SELECT id, favorite_id, folder_id, user_id, target_id, target_type,
                    target_revision, title, cover, create_time
@@ -52,7 +52,7 @@ public interface FavoriteItemMapper {
     FavoriteItemEntity findByFavoriteId(@Param("favoriteId") long favoriteId);
 
     /**
-     * 对应 Go {@code FindFavoriteByFolderTarget}（favorite.go:106-118）：
+     * 对应 Go {@code FindFavoriteByFolderTarget}（internal/model/favorite.go:106-118）：
      * {@code Where("folder_id = ? AND target_id = ? AND target_type = ?")}。
      *
      * <p>🔴 三个条件缺一不可：{@code target_type} 参与 {@code uk_folder_target}

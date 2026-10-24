@@ -17,18 +17,18 @@ import java.util.List;
  * <p>⚠️ AGENTS.md §4.1 已锁定的决策：Go 的单个 {@code FavoriteModel} 按实体拆成多个 Mapper。
  *
  * <p><b>「查不到」的约定</b>：Go 侧所有 Find* 方法把 {@code gorm.ErrRecordNotFound}
- * 归一化成 {@code model.ErrorNotFound}（favorite.go:55,69,101,115），由 logic 决定
+ * 归一化成 {@code model.ErrorNotFound}（internal/model/favorite.go:55,69,101,115），由 logic 决定
  * 翻译成哪个业务码。⇒ 本 Mapper 的单条查询<b>返回 {@code null}</b>，
  * 由 {@code FavoriteDomainService} 统一翻译（避免每处各写一遍判空）。
  *
- * <p>⚠️ <b>全部无 LIMIT</b>（Go 侧 favorite.go:37-47 的 {@code FindFoldersByUserId}
+ * <p>⚠️ <b>全部无 LIMIT</b>（Go 侧 internal/model/favorite.go:37-47 的 {@code FindFoldersByUserId}
  * 也没有分页）⇒ 这里<b>不加</b> {@code LIMIT}。加了就改变了可观察行为。
  */
 @Mapper
 public interface FavoriteFolderMapper {
 
     /**
-     * 对应 Go {@code InsertFolder}（favorite.go:33-35）：
+     * 对应 Go {@code InsertFolder}（internal/model/favorite.go:33-35）：
      * {@code m.conn.WithContext(ctx).Create(folder).Error}。
      *
      * <p>{@code id} 是 bigserial 自增代理键，<b>不写入</b>（Go 的 struct 里
@@ -47,7 +47,7 @@ public interface FavoriteFolderMapper {
                      @Param("name") String name);
 
     /**
-     * 对应 Go {@code FindFoldersByUserId}（favorite.go:37-47）：
+     * 对应 Go {@code FindFoldersByUserId}（internal/model/favorite.go:37-47）：
      * <pre>Where("user_id = ?", userId).Order("create_time desc")</pre>
      *
      * <p>🔴 <b>{@code ORDER BY create_time DESC} 是 L2 语义</b>：收藏夹列表的展示顺序。
@@ -61,7 +61,7 @@ public interface FavoriteFolderMapper {
             """)
     List<FavoriteFolderEntity> findByUserId(@Param("userId") long userId);
 
-    /** 对应 Go {@code FindFolderByFolderId}（favorite.go:49-59）：{@code Where("folder_id = ?").First()}。 */
+    /** 对应 Go {@code FindFolderByFolderId}（internal/model/favorite.go:49-59）：{@code Where("folder_id = ?").First()}。 */
     @Select("""
             SELECT id, folder_id, user_id, name, create_time, update_time
             FROM favorite_folder
@@ -91,7 +91,7 @@ public interface FavoriteFolderMapper {
             """)
     FavoriteFolderEntity findByFolderIdForUpdate(@Param("folderId") long folderId);
 
-    /** 对应 Go {@code FindFolderByUserIdAndName}（favorite.go:61-73）。 */
+    /** 对应 Go {@code FindFolderByUserIdAndName}（internal/model/favorite.go:61-73）。 */
     @Select("""
             SELECT id, folder_id, user_id, name, create_time, update_time
             FROM favorite_folder
@@ -102,7 +102,7 @@ public interface FavoriteFolderMapper {
                                              @Param("name") String name);
 
     /**
-     * 🔴 对应 Go {@code UpdateFolderNameByFolderId}（favorite.go:75-80）。
+     * 🔴 对应 Go {@code UpdateFolderNameByFolderId}（internal/model/favorite.go:75-80）。
      *
      * <p><b>只更新 name 一列</b>，<b>刻意不碰 {@code update_time}</b>。
      *

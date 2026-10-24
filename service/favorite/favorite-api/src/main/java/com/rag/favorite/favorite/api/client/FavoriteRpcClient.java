@@ -140,7 +140,7 @@ public class FavoriteRpcClient {
      * 把 deadline 压到「ctx 预算」与「客户端超时」里的<b>较小者</b>。
      *
      * <p><b>语义</b>：Go 侧客户端拦截器
-     * {@code zrpc/internal/clientinterceptors/timeoutinterceptor.go} 做的是
+     * {@code go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:17-27} 做的是
      * {@code ctx, cancel := context.WithTimeout(ctx, c.Timeout)} ——
      * 即「在已有 ctx 预算之上再套一层 2s」，<b>取更小的生效</b>。
      *

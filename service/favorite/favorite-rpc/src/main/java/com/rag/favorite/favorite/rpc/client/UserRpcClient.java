@@ -33,7 +33,8 @@ public class UserRpcClient {
     /**
      * 返回<b>已套上请求级 deadline</b> 的 stub。
      *
-     * <p>Go 侧靠 {@code observability} 的 unary interceptor 给整条服务端链路加超时，
+     * <p>Go 侧靠 {@code observability} 的 unary interceptor 给整条服务端链路加超时
+     * （{@code service/common/observability/rpc.go:19}），
      * 并由 context 把 deadline 传进<b>全部</b>下游调用；
      * RAG 侧唯一能一处覆盖所有调用点的位置就是这个 getter
      * （先例：{@code article-api/client/UserRpcClient.java} 同款注释）。

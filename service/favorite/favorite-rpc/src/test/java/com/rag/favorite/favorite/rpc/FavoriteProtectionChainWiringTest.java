@@ -23,6 +23,8 @@ import static org.mockito.Mockito.when;
  * <b>DRIFT-MSG-V-026 的逐组件守门</b>：熔断 / 降载链必须<b>真的</b>挂到本组件的 gRPC server 上。
  *
  * <p><b>为什么必须是「组件级」而不是「一条共用测试」</b>（AGENTS.md §3.5）：
+ * Go 侧的熔断 / 降载拦截器挂在 zrpc 客户端拦截器链上
+ * （{@code go-zero@v1.10.2/zrpc/internal/client.go:112-117}），
  * 熔断 / 降载在 Go 侧是 <b>zrpc 框架级</b>能力，每个 rpc server 都自带；
  * 本仓把链的定义点放在共享模块 {@code GoStyleRpcProtectionChain}，
  * 但<b>每个组件仍然要自己把链交给 ServerBuilder</b> ——

@@ -149,7 +149,9 @@ public class FavoriteAuthorityEndpointConfig {
      * <p>⚠️ <b>整个类被 {@code @ConditionalOnProperty} 门禁</b>：
      * {@code favorite.fact.authority.enabled} 默认 false ⇒
      * <b>不注册任何 HTTP 端点</b>，favorite-rpc 保持「纯 gRPC、零 HTTP 端口」，
-     * 与 Go 的 {@code ListenOn: 0.0.0.0:8082} 一致。
+     * 与 Go 的 {@code ListenOn: 0.0.0.0:8082} 一致
+     * （{@code service/favorite/rpc/etc/favorite.yaml:2}，配置结构
+     * {@code service/favorite/rpc/internal/config/config.go:6}）。
      *
      * <p>⇒ 开启它需要给纯 gRPC 进程新增 web connector（Spring MVC），
      * 这是一处<b>部署形态变更</b>，见剩余问题。
@@ -320,7 +322,8 @@ public class FavoriteAuthorityEndpointConfig {
         /**
          * 从 {@code /internal/v{1,2}/favorite/facts/{producer}/{event_id}} 里取出两段路径值。
          *
-         * <p>⚠️ <b>逐段 URL-decode</b>：Go 的 {@code r.PathValue} 返回的是<b>已解码</b>的值，
+         * <p>⚠️ <b>逐段 URL-decode</b>：Go 的 {@code r.PathValue}（{@code net/http/request.go:1469}）
+         * 返回的是<b>已解码</b>的值，
          * 而 {@code getRequestURI} 是原始形态。
          * ⇒ 未经解码会让含 {@code %xx} 的 producer/event_id 与 Go 不一致。
          *
@@ -364,7 +367,8 @@ public class FavoriteAuthorityEndpointConfig {
         // ══════════════════ Go mux 层的 path 清理与重定向 ══════════════════
 
         /**
-         * Go 的 {@code net/http.cleanPath} —— 逐字复刻 Go 1.25 的实现。
+         * Go 的 {@code net/http.cleanPath}（{@code net/http/server.go:2629}）——
+         * <b>等价复刻</b>（<b>不是逐字</b>：Go 1.25 的原实现多一条 fast path，见下）。
          *
          * <pre>
          * func cleanPath(p string) string {
@@ -376,6 +380,12 @@ public class FavoriteAuthorityEndpointConfig {
          * }
          * </pre>
          *
+         * <p>⚠️ <b>Go 原实现里的 fast path 被本实现省略了，但语义相同</b>：
+         * Go 在 {@code net/http/server.go:2639-2646} 多一层
+         * {@code if len(p) == len(np)+1 &amp;&amp; strings.HasPrefix(p, np) { np = p } else { np += "/" }}。
+         * 由于 {@code np = path.Clean(p)} 会去掉结尾的 {@code "/"}，
+         * 该 fast path 的命中条件等价于「{@code p == np + "/"}」⇒ {@code np = p} 与
+         * {@code np += "/"} <b>结果完全相同</b> ⇒ 省略它不改变任何可观察行为。
          * <p>⚠️ <b>输入必须是「未解码」的 path</b>（Go 的 mux 用的是 {@code r.URL.EscapedPath()}）⇒
          * {@code %2E%2E} 不会被当成 {@code ..} ⇒ 实测 Go 对
          * {@code /…/%2E%2E} 返回 <b>200</b>（不重定向）—— 本实现同款。
@@ -397,7 +407,8 @@ public class FavoriteAuthorityEndpointConfig {
             return np;
         }
 
-        /** Go 的 {@code path.Clean}（纯词法：合并重复分隔符、消除 "."、回退 ".."）。 */
+        /** Go 的 {@code path.Clean}（纯词法：合并重复分隔符、消除 "."、回退 ".."）
+         *     （{@code path/path.go:72}）。 */
         private static String goPathClean(String p) {
             Deque<String> segments = new ArrayDeque<>();
             for (String segment : p.split("/", -1)) {
@@ -421,7 +432,8 @@ public class FavoriteAuthorityEndpointConfig {
         }
 
         /**
-         * Go 的 {@code mux} 重定向目标：{@code (&url.URL{Path: path, RawQuery: rawQuery}).String()}。
+         * Go 的 {@code mux} 重定向目标：{@code (&url.URL{Path: path, RawQuery: rawQuery}).String()}
+         * （{@code net/http/server.go:2403}）。
          *
          * <p>⚠️ <b>这里会二次转义</b>，而且是 Go 的<b>既有行为</b>（不是本实现引入的）：
          * Go 构造 {@code url.URL{Path: path}} 时<b>没有</b>设 {@code RawPath}
@@ -439,7 +451,7 @@ public class FavoriteAuthorityEndpointConfig {
         }
 
         /**
-         * Go 的 {@code escape(s, encodePath)}。
+         * Go 的 {@code escape(s, encodePath)}（{@code net/url/url.go:292}）。
          *
          * <p>Go 的 {@code shouldEscape(c, encodePath)}：{@code encodePath} 模式下
          * <b>只有 {@code ?} 需要转义</b>（§3.3：{@code $ &amp; + , / : ; = @} 都保留），
@@ -484,7 +496,8 @@ public class FavoriteAuthorityEndpointConfig {
             }
         }
 
-        /** Go 的 {@code hexEscapeNonASCII}：非 ASCII 字节转成 %XX（ASCII 原样）。 */
+        /** Go 的 {@code hexEscapeNonASCII}：非 ASCII 字节转成 %XX（ASCII 原样）。
+         *     （{@code net/http/http.go:143}） */
         private static String hexEscapeNonAscii(String s) {
             StringBuilder sb = new StringBuilder();
             for (byte b : s.getBytes(StandardCharsets.UTF_8)) {
@@ -500,7 +513,9 @@ public class FavoriteAuthorityEndpointConfig {
             return sb.toString();
         }
 
-        /** Go 的 {@code htmlEscape}（net/http/html.go 的 htmlReplacer）。 */
+        /** Go 的 {@code htmlEscape}（Go 1.25 的 htmlReplacer 在
+         *     {@code net/http/server.go:2458}，不在 net/http/html.go ——
+         *     该文件在 Go 1.25 已不存在）。 */
         private static String htmlEscape(String s) {
             return s.replace("&", "&amp;")
                     .replace("<", "&lt;")
@@ -512,7 +527,7 @@ public class FavoriteAuthorityEndpointConfig {
         // ══════════════════ Go 的三个错误响应形状 ══════════════════
 
         /**
-         * Go 的 {@code http.Error(w, msg, code)}：
+         * Go 的 {@code http.Error(w, msg, code)}（{@code net/http/server.go:2337}）：
          * <b>状态码 + {@code Content-Type: text/plain; charset=utf-8}
          * + {@code X-Content-Type-Options: nosniff} + body = {@code msg + "\n"}</b>。
          *
@@ -531,7 +546,8 @@ public class FavoriteAuthorityEndpointConfig {
         }
 
         /**
-         * Go 的 {@code http.NotFound(w, r)} ⇒ {@code http.Error(w, "404 page not found", 404)}。
+         * Go 的 {@code http.NotFound(w, r)}（{@code net/http/server.go:2358}）⇒
+         * {@code http.Error(w, "404 page not found", 404)}。
          *
          * <p>⚠️ Go 的 mux 层「模式不匹配」与 handler 层的
          * 「带 query」/「ErrFavoriteFactUnavailable」<b>用的是同一个 404 形状</b>
@@ -542,7 +558,8 @@ public class FavoriteAuthorityEndpointConfig {
         }
 
         /**
-         * Go 的 {@code http.Redirect(w, r, url, http.StatusMovedPermanently)}。
+         * Go 的 {@code http.Redirect(w, r, url, http.StatusMovedPermanently)}
+         * （{@code net/http/server.go:2403}）。
          *
          * <p>🔴 <b>body 末尾是<b>两个</b> {@code "\n"}</b>：Go 的实现是
          * {@code body := "<a href=\"…\">Moved Permanently</a>.\n"} 再交给

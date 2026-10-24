@@ -688,7 +688,7 @@ public class FavoriteDomainService {
     /**
      * 读收藏夹；DB 异常按 Go 的 5007 路径处理（记 db_error 后抛）。
      *
-     * <p>⚠️ <b>调用方拿不到异常</b> —— Go 侧三处（delete_favorite_folder:58-72、
+     * <p>⚠️ <b>调用方拿不到异常</b> —— Go 侧三处（delete_favorite_folder_logic.go:58-72、
      * update_favorite_folder_name:68-82、get_favorites_by_folder:58-72）形状一致：
      * {@code if dbErr != nil { NotFound ? 5201 : 5007 }}。
      */

@@ -19,6 +19,9 @@ import static org.mockito.Mockito.verifyNoInteractions;
  *
  * <h2>期望值的来源</h2>
  * <p>🔴 <b>全部期望值来自 Go 真源的实测</b>，不是推断：
+ * （Go 的 {@code http.Error} 见 {@code net/http/server.go:2337}，
+ * {@code http.NotFound} 见 {@code net/http/server.go:2358}，
+ * {@code http.Redirect} 见 {@code net/http/server.go:2403}），
  * {@code tools/authority-path-probe/favorite/} 用 Go 标准库复刻
  * {@code http.ServeMux} + {@code http.Error} / {@code http.NotFound} / {@code http.Redirect}
  * 的行为，把结果落在 {@code expected.txt}。

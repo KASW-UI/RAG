@@ -258,12 +258,14 @@ public class FavoriteArticleSnapshotResolver {
         return "";
     }
 
-    /** Go 的 map 取值语义：缺失键得到 {@code ""}（不是 null）。 */
+    /** Go 的 map 取值语义：缺失键得到 {@code ""}（不是 null）
+     *     （{@code service/favorite/rpc/internal/logic/helper.go:157-158}）。 */
     private static String trimToEmpty(String value) {
         return value == null ? "" : value.trim();
     }
 
-    /** Go 的 {@code metrics.ObserveOp("dependency", "article_get", resultFail)}（:140,149,154,164,172）。 */
+    /** Go 的 {@code metrics.ObserveOp("dependency", "article_get", resultFail)}
+     *     （{@code service/favorite/rpc/internal/logic/helper.go:140,149,154,164,168,172}）。 */
     private void fail() {
         metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
                 FavoriteRpcLabels.ACTION_ARTICLE_GET, FavoriteRpcLabels.RESULT_FAIL);

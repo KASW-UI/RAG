@@ -22,6 +22,7 @@
 | 构建 | `mvn -o -pl service/favorite/favorite-rpc -am install` ⇒ **BUILD SUCCESS** |
 | 本轮发现并修复 | **6 处 L2 语义偏差**（§2）+ **2 处实现期真 bug**（§3） |
 | 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选**：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK），见 §13.2 |
+| 第九轮 | 🆕 **注释可核验性审计**（§15）—— 抓出 **3 条「断言对、锚点指错行」的真缺陷**，门禁级发现 **67 → 0**；**零行为改动** |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -746,3 +747,138 @@ RAG 侧**也**拆成两个工厂 ⇒ 一致 ✅。
 | api 侧 7 条路由 + 前缀 | ✅ **逐条一致** |
 | 代码改动 | **零**（本轮是**只读复核**） |
 | 全量测试 | **200 例全绿**（未变） |
+
+---
+
+## 15. 2026-10-25 第九轮（`align/favorite` 工作树 · 基线 commit 58e8314 · 承 `9f52c8d`）
+
+### 15.1 本轮审计的是「注释的可核验性」，不是行为
+
+前八轮把**行为**对照到了「双侧活体对拍」的水位。本轮处理的是另一类风险：
+**注释里的 Go 断言本身是否可核验**（AGENTS.md §3.3.2 / §3.3.1）。
+
+> §3.3.2：「任何以「Go: …」措辞出现的断言，必须满足 §3.3.1 的三条，否则**不得**用该措辞，
+> 改成中性描述（写「本模块要求的语义：…」）或直接删掉该断言。」
+> §3.3.1 第 1 条：「论证里的每个 Go 事实都必须带 `文件:行号`，**不许只写结论**」。
+
+⚠️ 这一类风险**不会被任何行为测试抓到** —— 测试是绿的，行为也是对的，
+但注释把读者指向了错误的行（或根本没给行）。**只能靠机器核验**。
+
+### 15.2 新增工具
+
+| 项 | 值 |
+|---|---|
+| 位置 | `tools/assertion-audit/favorite/check-assertion-sources.py` + `README.md` |
+| 依据 | AGENTS.md §3.3.2（硬要求）+ §3.3.1（三条） |
+| 扫描范围 | favorite 域 **4 个组件 / 91 个 java 文件 / 1029 个注释块**，其中 **416 块含 Go 断言** |
+| 锚点解析 | **Go 真源** → **锁定版本的依赖**（真源 `go.mod` pin 住的版本，取本机 module cache）→ **Go 标准库**（`GOROOT/src`） |
+| 多候选消歧 | **同域 → 同模块 → basename**（favorite 的 api 侧与 rpc 侧**各有同名 logic 文件**，只按同域筛不够） |
+
+四类门禁级发现：
+
+| 类 | 含义 |
+|---|---|
+| **F1** | 断言块里一个 `*.go:NN` 都没有 |
+| **F2** | 锚点里的 .go 文件在真源 / 锁定依赖 / 标准库里都找不到 |
+| **F3** | 文件找到了，但锚点行号超出该文件行数（行号过期） |
+| **F4** | 块里 `<pre>` 引用的 Go 源码**落在锚点行段之外** ⇒ 锚点指到了别的函数 |
+
+### 15.3 🔴 抓到的真缺陷（3 条 · 断言对、锚点错）
+
+前八轮手工 review 没抓到，机器一次抓到 3 条 —— **都是「断言内容正确、锚点指错行」**：
+读者按锚点跳过去会看到不相干的代码。
+
+| # | 位置 | 缺陷 | 真值（2026-10-25 实测） |
+|---|---|---|---|
+| **D-a** | `favorite-api/…/FavoriteController.java` `assertGoEmptyStructBody` | 锚点 `rest/httpx/requests.go:129-137` 标为 `ParseJsonBody` ⇒ 实际 129-137 行是 **`ParsePath`**（另一个函数） | `ParseJsonBody` 在 **`rest/httpx/requests.go:117-124`** |
+| **D-b** | `favorite-api/…/FavoriteRpcClient.java` | 锚点 `zrpc/config.go:29` 标为 `RpcClientConf.Timeout` ⇒ 实际 29 行是 **`Token`** | `Timeout int64 \`json:",default=2000"\`` 在 **`zrpc/config.go:31`** |
+| **D-c** | `favorite-rpc/…/FavoriteAuthorityEndpointConfig.java` | 注释写「`net/http/html.go` 的 `htmlReplacer`」⇒ **该文件在 Go 1.25 已不存在** | `htmlReplacer` 在 **`net/http/server.go:2458`** |
+
+⇒ **D-a / D-b 已修**（锚点改正）；**D-c 已修**（改为 `net/http/server.go:2458` 并注明
+「Go 1.25 的 `net/http/html.go` 已不存在」）。
+
+另 2 条 F2 同批修掉：
+
+| 位置 | 缺陷 | 修法 |
+|---|---|---|
+| `FavoriteDeliveryValidator.java` | 锚点 `favoriteDelivery.go:155` ⇒ 真源里是 **`favorite_delivery.go`**（snake_case） | 改正命名 |
+| `FavoriteJwtAuthInterceptor.java` | 锚点 `/api/internal/middleware/checkblacklistmiddleware.go` 的**前导 `/`** 有误导性（它指的是 **users 域**那份同名文件） | 改为 `service/user/user/api/internal/middleware/…` |
+
+⚠️ **注意 `checkblacklist` 的两套命名**：favorite 用 `checkblacklist_middleware.go`（下划线），
+follow / user 域用 `checkblacklistmiddleware.go`（无下划线）⇒ **字面存在但指向别的域**，
+机器消歧时按「同域优先」才能发现。
+
+### 15.4 修掉的门禁级发现（67 条 → 0）
+
+| 类 | 条数 | 修法 |
+|---|---|---|
+| **F1**（缺锚点） | **61** | 逐条补 `文件:行号`；每条的行号都在 **Go 真源 / go-zero v1.10.2 / Go 1.25.11** 里**当场核对过** |
+| **F2**（悬空） | **1** | `favoriteDelivery.go` → `favorite_delivery.go` |
+| **F4**（引用不符） | **1** | `rest/httpx/requests.go:129-137` → `117-124` |
+| **F3**（行号越界） | **0**（修完 F1 后新增 1 条，已一并修） | `helper.go:69` → `service/favorite/rpc/internal/logic/helper.go:69`（api 侧那份只有 46 行 ⇒ 原锚点指的是 rpc 侧） |
+
+⇒ **本轮结束时门禁级发现 = 0**（`check-assertion-sources.py` EXIT=0）。
+
+⚠️ **修法是「补锚点」，不是「改措辞」** —— 因为这些断言的内容本身**经核对是对的**（本轮逐条在 Go 真源 / go-zero v1.10.2 / Go 1.25.11 里核对过行号所指的内容）。
+⇒ 换句话说：**补锚点 = 把「本来对但读者查不到」的断言变成可核验的**，**不是**把行为改回 Go。
+
+### 15.5 另修的 26 处「读者定位不到」的裸路径（I2 → 0）
+
+裸文件名在机器里能消歧，但**读者定位不到**。逐条人工核对上下文后补全：
+
+| 类 | 处数 | 例子 |
+|---|---|---|
+| api 侧 vs rpc 侧**同名 logic 文件** | 54 | `create_favorite_logic.go` → `api/internal/logic/favorite/…` 或 `rpc/internal/logic/…`（按 Java 文件所属模块定） |
+| `cmd/*/main.go` 三个进程同名 | 26 | `main.go` → `cmd/fact-dispatch/main.go`（调度器）/ `cmd/fact-legacy-preflight/main.go`（预检） |
+| rpc 的 `favorite.go` 有两份 | — | 进程入口 `service/favorite/rpc/favorite.go` vs 数据模型 `…/internal/model/favorite.go`（按被引用的内容定） |
+| go-zero 的 `httpx` vs `httpc` 同名 | 2 | `requests.go` / `responses.go` → `rest/httpx/…` |
+
+### 15.6 1 处表述改正（不是行为漂移）
+
+`FavoriteAuthorityEndpointConfig.goCleanPath` 的注释原写「**逐字复刻** Go 1.25 的实现」，
+但引用的 Go 源码是**删节版**（漏了 Go 1.25 的 fast path，`net/http/server.go:2639-2646`）。
+
+⇒ 已改为「**等价复刻**」，并补注证明：
+
+> fast path 的命中条件 `len(p) == len(np)+1 && strings.HasPrefix(p, np)`，
+> 由于 `np = path.Clean(p)` 会去掉结尾的 `"/"` ⇒ 等价于 `p == np + "/"`
+> ⇒ `np = p` 与 `np += "/"` **结果完全相同** ⇒ 省略它**不改变任何可观察行为**。
+
+⇒ **RAG 实现无需改动**（它本来就是 `np += "/"`），只改注释的表述精度。
+
+### 15.7 ⚠️ 工具自身的 3 个缺陷（避免把工具缺陷当成代码缺陷）
+
+审计器第一版把 4 条**假阳性**报成 F2。逐条查下来全是**工具**的问题，不是代码的问题 ——
+这本身就是一条教训：**审计工具的第一版输出不能直接当结论用**。
+
+| 工具缺陷 | 症状 | 修法 |
+|---|---|---|
+| 锚点正则的字符类漏了 `@` | `gorm.io/gorm@v1.31.1/callbacks/create.go:302` 被截成 `v1.31.1/…` ⇒ 报「悬空」 | 字符类补 `@` |
+| 标准库索引只按 `GOROOT/src` 相对路径登记 | `src/net/url/url.go:1001` 解析不到 | 同一棵树再以 `src/` 前缀登记一份 |
+| basename 回退对**带目录**的锚点也生效 | `zrpc/config.go` 被错映射成别的域的 `config.go` | basename 回退只在锚点**不含 `/`** 时才允许 |
+
+⇒ 修完工具后重跑，真实门禁级发现从 67 收敛到 **63**（少 4 条 = 上面 3 条 + `src/net/url` 那条）。
+
+### 15.8 剩余提示级（**已知 · 非门禁**）
+
+| 类 | 条数 | 含义 |
+|---|---|---|
+| **I1** | **153** | **内联注释**里的 Go 断言没有锚点（§3.3.2 字面只点名 `@DisplayName` / javadoc ⇒ 只提示不拦） |
+| **I3** | **10** | `<pre>` 引用的 Go 源码在锚点文件里**找不到逐字匹配**（多半是节选或重排成单行） |
+| **I4** | **0** | 锚点只写了文件名 —— §15.5 已把裸路径全部补全 ⇒ **该类归零** |
+
+⚠️ **I1 的 153 条是真实欠账**，不是噪音：它们多在 `// Go: …` 形态的行注释里。
+按 §3.3.2 的字面要求（「任何以「Go: …」措辞出现的断言」）它们也该带 `文件:行号`。
+本轮**未做**（量大且多为重复句式）⇒ **记为欠账，留给下一轮**。
+
+### 15.9 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| `check-assertion-sources.py` | ✅ **EXIT=0**（门禁级 0 / I2 0） |
+| 扫描规模 | 91 文件 / 1029 注释块 / 416 含 Go 断言的块 / **398 个锚点**（真源 313 / 依赖 69 / 标准库 16 / **悬空 0 / 越界 0 / 仅靠文件名定位 0**） |
+| `<pre>` 引用逐字核对 | 12 段 —— **不匹配 0**（另 10 段是节选/改写 ⇒ I3，不拦） |
+| **I2**（读者定位不到） | **0**（§15.5 补全 26 处裸路径后归零） |
+| **可执行逻辑改动** | **零** —— 43 个 java 文件的改动**全部落在注释里**；机器复核（`git diff -U0 -- '*.java'` 去掉注释行）只剩 **6 行**，全是**测试展示文本**（2 处断言失败消息 + 1 处 `@DisplayName`），不参与任何判定 |
+| 全量测试 | **200 例全绿**（未变） |
+| 六个探针 + 三个守门 | 全部 **EXIT=0**（未变） |

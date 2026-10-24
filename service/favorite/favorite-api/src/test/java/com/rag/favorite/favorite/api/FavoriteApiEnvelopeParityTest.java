@@ -167,7 +167,8 @@ class FavoriteApiEnvelopeParityTest {
     /**
      * 把一行里的 <b>Content-Type 字段</b>做 OWS 归一（其余字段原样）。
      *
-     * <p>⚠️ 冻结文件里存的是 Go 的<b>原样</b>（{@code application/json; charset=utf-8}），
+     * ⚠️ 冻结文件里存的是 Go 的<b>原样</b>（{@code application/json; charset=utf-8}，
+     * {@code go-zero@v1.10.2/rest/internal/header/headers.go:17}），
      * 而 Spring 渲染成 {@code application/json;charset=utf-8}
      * ⇒ 比较前把<b>两边</b>都归一到同一形式（去掉分号后的空格）。
      * <p>⚠️ 只动第 4 段（Content-Type），<b>body 一律逐字节比较</b>。
@@ -235,6 +236,7 @@ class FavoriteApiEnvelopeParityTest {
      * 归一化 Content-Type 里参数分隔符后的<b>可选空白</b>（RFC 9110 §5.6.2 的 OWS）。
      *
      * <p>⚠️ <b>为什么需要它</b>：Go 侧写的是 {@code application/json; charset=utf-8}
+     * （{@code go-zero@v1.10.2/rest/internal/header/headers.go:17}）
      * （<b>分号后有空格</b>），而 Spring 的 {@code MediaType#toString()} 渲染成
      * {@code application/json;charset=utf-8}（<b>没有空格</b>）⇒ 两者**字面不同**。
      * <p>⚠️ <b>这不是行为漂移</b>：HTTP 的媒体类型参数分隔符两侧的空白是<b>可选</b>（OWS），
@@ -426,7 +428,8 @@ class FavoriteApiEnvelopeParityTest {
     /**
      * 造 n 个**非空**的 query 参数，<b>第一个固定是 folderId</b>。
      *
-     * <p>⚠️ ① 必须非空：Go 的 {@code httpx.GetFormValues} 数的是**非空值个数**（空值不计数）。
+     * <p>⚠️ ① 必须非空：Go 的 {@code httpx.GetFormValues} 数的是**非空值个数**（空值不计数，
+     * {@code go-zero@v1.10.2/rest/httpx/util.go:22,48}）。
      * <p>⚠️ ② 必须带一个合法 {@code folderId}：{@code GetFavoritesByFolderReq} 的
      * {@code form:"folderId,string"} 是**必填** ⇒ 缺了它会先因「field "folderId" is not set」失败
      * ⇒ 那测的就不是「参数个数上限」而是「缺字段」了。

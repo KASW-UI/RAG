@@ -150,7 +150,8 @@ public class FavoriteApiSupport {
     }
 
     /**
-     * 业务日志 —— 对应 Go 的 {@code logger.LogInfo(ctx, msg, userLogOption(userID), ...)}。
+     * 业务日志 —— 对应 Go 的 {@code logger.LogInfo(ctx, msg, userLogOption(userID), ...)}
+     * （{@code service/common/logger/logger.go:85}）。
      *
      * <p>⚠️ <b>日志失败不得影响业务</b>：Go 侧的 logger 写不出去不会让请求失败，
      * 本实现用 try/catch 包住，保证语义一致（与 hot-api 的 {@code logQuietly} 同款处理）。
@@ -165,7 +166,8 @@ public class FavoriteApiSupport {
 
     /**
      * 业务错误日志 —— 对应 Go 的
-     * {@code logger.LogBusinessErr(ctx, code, err, userLogOption(userID), articleLogOption(...))}。
+     * {@code logger.LogBusinessErr(ctx, code, err, userLogOption(userID), articleLogOption(...))}
+     * （{@code service/common/logger/logger.go:77}）。
      */
     public void logBusinessErr(int code, Throwable err, Long userId, String articleId) {
         try {
@@ -177,8 +179,10 @@ public class FavoriteApiSupport {
 
     /**
      * 构造 Go 的两个 log option：
-     * {@code userLogOption} = {@code logger.WithUserID(strconv.FormatInt(userID, 10))}、
-     * {@code articleLogOption} = {@code logger.WithArticleID(strings.TrimSpace(articleID))}。
+     * {@code userLogOption} = {@code logger.WithUserID(strconv.FormatInt(userID, 10))}
+     * （{@code service/common/logger/logger.go:35}）、
+     * {@code articleLogOption} = {@code logger.WithArticleID(strings.TrimSpace(articleID))}
+     * （{@code service/common/logger/logger.go:42}）。
      */
     private static LogOption[] options(Long userId, String articleId) {
         LogOption[] opts = new LogOption[2];
@@ -448,7 +452,8 @@ public class FavoriteApiSupport {
     /**
      * 构造 Go 的 {@code favoritecommon.ErrorUnauthorized}（5004）业务异常。
      *
-     * <p>Go: {@code return nil, favoritecommon.ErrorUnauthorized} ⇒
+     * <p>Go: {@code return nil, favoritecommon.ErrorUnauthorized}
+     * （{@code service/favorite/common/errmsg.go:17}）⇒
      * handler 写 {@code {code:5004, msg:"未登录或登录已失效", data:null}}，<b>HTTP 200</b>。
      */
     private static BusinessException unauthorized() {

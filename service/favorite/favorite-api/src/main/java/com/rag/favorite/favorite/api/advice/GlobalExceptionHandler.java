@@ -65,7 +65,7 @@ public class GlobalExceptionHandler {
 
     /**
      * go-zero 解析失败在 favorite 域的<b>唯一</b>业务码。
-     * Go: {@code favoritecommon.ErrorInvalidParam = 5003}（{@code errmsg.go:16}）。
+     * Go: {@code favoritecommon.ErrorInvalidParam = 5003}（{@code service/favorite/common/errmsg.go:16}）。
      */
     private static final int ERROR_INVALID_PARAM = FavoriteErrorCode.ERROR_INVALID_PARAM.getCode();
 
@@ -73,7 +73,8 @@ public class GlobalExceptionHandler {
      * 业务异常 → HTTP 200 + envelope。
      *
      * <p>Go 出处：所有 logic 的 {@code return nil, code} 形态，handler 侧
-     * {@code httpx.OkJsonCtx(w, &response.Response{Code: code, Msg: GetErrMsg(code), Data: resp})}。
+     * {@code httpx.OkJsonCtx(w, &response.Response{Code: code, Msg: GetErrMsg(code), Data: resp})}
+     * （{@code service/favorite/api/internal/handler/favorite/create_favorite_folder_handler.go:29-33}）。
      * <b>HTTP 恒为 200</b>，业务成败由 body 的 {@code code} 表达。
      */
     @ExceptionHandler(BusinessException.class)
@@ -243,7 +244,8 @@ public class GlobalExceptionHandler {
     /**
      * 兜底：未预期的异常 → HTTP 500 + 5001。
      *
-     * <p>Go 侧的等价物是 go-zero 的 {@code RecoverHandler}（把 panic 转成 500），
+     * <p>Go 侧的等价物是 go-zero 的 {@code RecoverHandler}（把 panic 转成 500，
+     * {@code go-zero@v1.10.2/rest/handler/recoverhandler.go:12}），
      * 但 Go 的 logic 不会 panic —— 本分支对应的是「RAG 侧的实现缺陷」，
      * 不属于迁移需要保留的语义。
      */
@@ -262,7 +264,8 @@ public class GlobalExceptionHandler {
      * 解析失败的统一出口：<b>HTTP 200 + {@code {code:5003, msg:"参数错误", data:null}}</b>。
      *
      * <p>Go: {@code httpx.OkJsonCtx(w, &response.Response{Code: ErrorInvalidParam,
-     * Msg: GetErrMsg(ErrorInvalidParam), Data: nil})}。
+     * Msg: GetErrMsg(ErrorInvalidParam), Data: nil})}
+     * （{@code service/favorite/api/internal/handler/favorite/create_favorite_folder_handler.go:19-23}）。
      */
     private static ResponseEntity<Response> invalidParam() {
         return ResponseEntity.status(HttpStatus.OK)

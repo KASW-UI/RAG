@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 🔴 冻结信封链路的<b>确定性语义</b>回归网 —— 覆盖 Go
- * {@code service/favorite/rpc/internal/model/favorite_fact.go} +
+ * {@code service/favorite/rpc/internal/model/favorite_fact.go:45} +
  * {@code favorite_delivery.go} + {@code favorite_authority.go} 中
  * <b>不依赖数据库</b>的全部判定。
  *

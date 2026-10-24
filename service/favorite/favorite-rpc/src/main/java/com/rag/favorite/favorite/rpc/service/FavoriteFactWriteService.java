@@ -270,7 +270,8 @@ public class FavoriteFactWriteService {
     }
 
     /**
-     * 对应 Go 的 {@code tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("folder_id = ?").First()}。
+     * 对应 Go 的 {@code tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("folder_id = ?").First()}
+     * （{@code service/favorite/rpc/internal/model/favorite_fact.go:214}）。
      *
      * <p>⚠️ <b>必须带 FOR UPDATE</b>：这是「并发删除同一收藏夹」时保证
      * 「一方看到全部 items、另一方看到空集」的锁点。缺它会让两个事务

@@ -203,7 +203,8 @@ public class FavoriteFactDispatchService {
         }
     }
 
-    /** Go 的 {@code (bool, error)} 三种可能结果。 */
+    /** Go 的 {@code (bool, error)} 三种可能结果
+     *     （{@code service/favorite/rpc/internal/model/favorite_delivery.go:131}）。 */
     private enum DispatchOutcome {
         /** {@code (false, nil)} —— 队列空。 */
         EMPTY,
