@@ -129,7 +129,8 @@ public final class RpcInterceptor {
      * <p>Java grpc-java 的 {@link ServerCall#close} 只能从外部"关闭 call"让客户端看到超时，
      * <b>不会</b>主动中断业务 handler 线程。本拦截器采用 Java 化的两层补救：
      * <ol>
-     *   <li>到时调用 {@link DeadlineState#markExpired(long)} 把过期时刻挂到 ThreadLocal，任意业务线程可读</li>
+     *   <li>把 deadline 过期时刻<b>绑定到真正跑 handler 的线程</b>
+     *       （{@code DeadlineState.bindToCurrent}，作用域自动清理），业务线程可随时读</li>
      *   <li>{@link #handle} 静态方法配合 {@link java.util.concurrent.CompletableFuture}{@code .get(timeout)} +
      *       {@code future.cancel(true)}（→ worker.interrupt()）让调用方主动响应取消</li>
      * </ol>
@@ -588,35 +589,32 @@ public final class RpcInterceptor {
         /** 当前线程的 deadline 过期时刻（epoch 毫秒）；未设置时 {@link #isExpired()} 返回 false。 */
         private static final ThreadLocal<Long> DEADLINE = new ThreadLocal<>();
 
-        /**
-         * 把当前线程的 deadline 设为 epoch 毫秒时刻。
+        /*
+         * ⚠️ 2026-10-25（{@code align/global} 收口提交）：原 {@code markExpired(long)}
+         * 已<b>删除</b>，此处保留说明以留痕。
          *
-         * <p><b>⚠️ 本方法当前<b>没有任何生产调用方</b>（2026-10-24 全仓 grep 实证）。</b>
-         * 实际生效的路径是 {@link #bindToCurrent(long)} ——
-         * 由 {@link #newUnaryServerInterceptor} 的 {@code onHalfClose} 在
-         * <b>真正跑 handler 的线程</b>上绑定（M7 修复：早前版本把 deadline 设在
-         * 超时调度线程上，而 {@code ThreadLocal} 对 handler 线程不可见 ⇒ 恒不生效）。
+         * <p>删除理由（三条，均为实测）：
+         * <ol>
+         *   <li><b>无任何生产调用方</b> —— 全仓 grep 实证：仅 5 处 javadoc 引用，无一处真实调用；</li>
+         *   <li><b>永远不生效</b> —— 它只做 {@code DEADLINE.set(...)}，
+         *       而 {@code DEADLINE} 是 {@code ThreadLocal}；唯一 conceivable 的用法
+         *       （设在超时调度线程上）对 handler 线程<b>不可见</b>；</li>
+         *   <li><b>不做作用域清理</b> —— {@link #bindToCurrent(long)} 返回的 {@link Scope}
+         *       会在 try-with-resources 结束时 {@code remove()}，避免线程池复用串味。</li>
+         * </ol>
          *
-         * <p>⇒ <b>本方法是被 {@code bindToCurrent} 取代后残留的旧入口</b>。
-         * 与 {@link #bindToCurrent(long)} 的区别仅在于<b>不做作用域清理</b>
-         * （{@code bindToCurrent} 返回的 {@link Scope} 会在 try-with-resources 结束时
-         * {@code remove()}，避免线程池复用串味；本方法设置后<b>不会自动清</b>）。
+         * <p><b>为什么它一直留到今天</b>：{@code service/users/user/user-rpc} 的
+         * {@code UserDomainService} javadoc 误以它描述 deadline 的来源，
+         * 删除会让那个跨域文件的 javadoc 链接悬空，而<b>跨域文件的改动不由 common 域决定</b>
+         * ⇒ 这是跨域单点 ⇒ 归 {@code global} 收口域（明细见
+         * {@code docs/DRIFT/global/cycle-deps.md}）。
+         * ⇒ <b>两步走完（同一提交内）</b>：① 改正 users 侧假断言 → ② 删除本方法。
          *
-         * <p><b>为什么标记废弃而不删除</b>：
-         * {@code service/users/user/user-rpc} 的 {@code UserDomainService} javadoc
-         * 仍以 {@link #markExpired(long)} 描述 deadline 的来源（该描述本身也不准确 ——
-         * 实际来源是 {@code onHalfClose} 绑定的 {@code bindToCurrent}）。
-         * 删除本方法会让那些域的 javadoc 链接悬空，而<b>跨域文件的改动不由本域决定</b>。
-         * ⇒ 保留方法、改正说明，等各域自行清理引用后再删。
+         * <p>实际生效路径：{@link #newUnaryServerInterceptor} 的 {@code onHalfClose}
+         * 在<b>真正跑 handler 的线程</b>上 {@link #bindToCurrent(long)}（M7 修复）。
          *
          * <p>对应 Go 版 ctx 触发 cancel 后，handler ctx 立即 Done() 的语义。
-         *
-         * @deprecated 无生产调用方；请改用 {@link #bindToCurrent(long)}（自带作用域清理）。
          */
-        @Deprecated
-        public static void markExpired(long epochMillis) {
-            DEADLINE.set(epochMillis);
-        }
 
         /** 当前线程是否已过 deadline；false 包括"未设置"和"还有时间"。 */
         public static boolean isExpired() {
