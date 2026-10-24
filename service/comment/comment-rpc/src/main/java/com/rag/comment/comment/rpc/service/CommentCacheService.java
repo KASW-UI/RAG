@@ -140,17 +140,24 @@ public class CommentCacheService {
         }
 
         // --- 1. 尝试从缓存取（Redis 异常 ⇒ 打点后继续，不阻断）
-        SubjectEntity cached = readSubjectCache(subjectId);
-        if (cached != null) {
-            return cached;
+        //     Go :24-30：命中就返回；err != nil ⇒ 打 ("comment_redis","GetSubjectWithCache","query")
+        SubjectCacheRead first = readSubjectCacheDetailed(subjectId);
+        if (first.value() != null) {
+            return first.value();
+        }
+        if (first.error()) {
+            metrics.observeRedisError("GetSubjectWithCache", "query");
         }
 
         // --- 2. singleflight：同一 key 的并发 miss 只回源一次
         return singleflight("subject:" + subjectId, () -> {
-            // 双检 Redis
-            SubjectEntity again = readSubjectCache(subjectId);
-            if (again != null) {
-                return again;
+            // 双检 Redis（Go :37-43，判定与上面**逐条相同**）
+            SubjectCacheRead again = readSubjectCacheDetailed(subjectId);
+            if (again.value() != null) {
+                return again.value();
+            }
+            if (again.error()) {
+                metrics.observeRedisError("GetSubjectWithCache", "query");
             }
             // --- 3. 回源 DB
             SubjectEntity subject = subjectMapper.findOneByTarget(subjectType, subjectId);
@@ -159,28 +166,103 @@ public class CommentCacheService {
                 throw new CommentExceptions.SubjectNotFound();
             }
             // --- 4. 回填 Redis
-            writeSubjectCache(subjectId, subject, SUBJECT_TTL);
+            // ⚠️ Go :59 是 `_ = c.SetSubjectCache(...)` ⇒ **回填失败被显式忽略**。
+            // 若照搬成「抛异常」⇒ Redis 挂掉时整个读路径失败（500），
+            // 而 Go 侧**照常返回 DB 回源的结果** ⇒ 这是可观察差异。
+            // ⇒ 这里照搬 Go：打点（writeSubjectCache 内部已打）后忽略异常。
+            try {
+                writeSubjectCache(subjectId, subject, SUBJECT_TTL);
+            } catch (RuntimeException cacheErr) {
+                LOG.warn("set subject cache failed for target {}: {}", subjectId, cacheErr.getMessage());
+            }
             return subject;
         });
     }
 
+    /**
+     * 对应 Go {@code GetSubjectCache} 的<b>三态</b>返回：{@code (*Subject, error)}。
+     *
+     * <p>⚠️ <b>为什么必须是三态而不是「entity 或 null」</b>：
+     * Go 的 {@code GetSubjectCache} 有<b>三种</b>结局，而 {@code null} 会把其中两种合并掉 ——
+     * 而这两种结局的<b>打点不同</b>：
+     * <table border="1">
+     *   <caption>Go comment_subject_cache.go 的三种结局</caption>
+     *   <tr><th>结局</th><th>Go 出处</th><th>{@code GetSubjectCache} 打点</th>
+     *       <th>{@code GetSubjectWithCache} 打点</th></tr>
+     *   <tr><td>命中</td><td>:86-92</td><td>无</td><td>无</td></tr>
+     *   <tr><td>未命中（{@code redis.Nil}）</td><td>:83-85</td><td>无</td><td>无</td></tr>
+     *   <tr><td><b>Redis 真异常</b></td><td>:78-82</td>
+     *       <td><b>有</b>（{@code GetSubjectCache} / {@code query}）</td>
+     *       <td><b>有</b>（{@code GetSubjectWithCache} / {@code query}）</td></tr>
+     *   <tr><td><b>JSON 解析失败</b></td><td>:94-98</td>
+     *       <td><b>无</b>（Go 注释明说「视作缓存未命中，不记 metric」）</td>
+     *       <td><b>有</b>（{@code GetSubjectWithCache} / {@code query}）</td></tr>
+     * </table>
+     * ⚠️ <b>每个 label 各打 2 次</b>：Go 的读路径<b>读两次 Redis</b> ——
+     * 外层一次（{@code :24-30}）+ singleflight 里的<b>双检</b>一次（{@code :37-43}）——
+     * 两处的打点判定<b>逐条相同</b>。
+     * ⇒ 修复前 RAG 把「Redis 真异常」与「JSON 解析失败」<b>合并</b>成一个 catch
+     * ⇒ 两者都只打一个 {@code GetSubjectCache} ⇒ <b>label 集合与 Go 不同</b>
+     * （Go 的 JSON 解析失败打在 {@code GetSubjectWithCache} 上，RAG 打在 {@code GetSubjectCache} 上；
+     *  且 Redis 真异常时 Go 打两个 label，RAG 只打一个）。
+     * ⇒ 见 docs/DRIFT/comment/rpc.md 的 D6。
+     *
+     * @param value   命中的缓存值；未命中 / 出错时为 null
+     * @param error   是否「出错」（区别于「未命中」）—— Go 的 {@code err != nil}
+     * @param redisFailure 是否是 <b>Redis 传输层</b>异常（区别于 JSON 解析失败）
+     */
+    private record SubjectCacheRead(SubjectEntity value, boolean error, boolean redisFailure) {
+
+        static SubjectCacheRead hit(SubjectEntity value) {
+            return new SubjectCacheRead(value, false, false);
+        }
+
+        static SubjectCacheRead miss() {
+            return new SubjectCacheRead(null, false, false);
+        }
+
+        static SubjectCacheRead redisError() {
+            return new SubjectCacheRead(null, true, true);
+        }
+
+        static SubjectCacheRead parseError() {
+            return new SubjectCacheRead(null, true, false);
+        }
+    }
+
     /** 对应 Go {@code GetSubjectCache}：读缓存 + 反序列化。<b>null 返回 = 未命中</b>。 */
     public SubjectEntity readSubjectCache(String subjectId) {
+        return readSubjectCacheDetailed(subjectId).value();
+    }
+
+    /**
+     * 对应 Go {@code GetSubjectCache}（comment_subject_cache.go:75-101）——<b>含打点</b>。
+     *
+     * <p>⚠️ 打点必须发生在这里（而不是在调用方），因为 Go 的
+     * {@code GetSubjectCache} <b>自己</b>就打了 {@code GetSubjectCache} 那个 label。
+     */
+    private SubjectCacheRead readSubjectCacheDetailed(String subjectId) {
         if (subjectId == null || subjectId.isEmpty()) {
             throw new IllegalArgumentException("invalid subjectID: empty");
         }
+        String raw;
         try {
-            String raw = redis.opsForValue().get(CommentRedisKeys.subjectKey(subjectId));
-            if (raw == null) {
-                return null; // redis.Nil ⇒ 未命中，Go 侧不打点
-            }
-            return cacheMapper.readValue(raw, SubjectCacheDto.class).toEntity();
+            raw = redis.opsForValue().get(CommentRedisKeys.subjectKey(subjectId));
         } catch (Exception e) {
-            // JSON 解析失败在 Go 侧也不打点（comment_subject_cache.go:96-98 注释：
-            // 「JSON 解析失败可以视作缓存未命中，不记 metric」），但**返回错误**。
-            // 这里统一按「Redis 异常」处理：打点 + 当未命中（继续回源 DB）。
+            // Go :78-82：Redis **真异常** ⇒ 打 ("comment_redis","GetSubjectCache","query") 并返回 err
             metrics.observeRedisError("GetSubjectCache", "query");
-            return null;
+            return SubjectCacheRead.redisError();
+        }
+        if (raw == null) {
+            // Go :83-85：redis.Nil ⇒ 未命中，**不打点**
+            return SubjectCacheRead.miss();
+        }
+        try {
+            return SubjectCacheRead.hit(cacheMapper.readValue(raw, SubjectCacheDto.class).toEntity());
+        } catch (Exception e) {
+            // Go :94-98：JSON 解析失败视作缓存未命中，**不记 metric**（但返回 err
+            // ⇒ 调用方仍会打 "GetSubjectWithCache"）
+            return SubjectCacheRead.parseError();
         }
     }
 

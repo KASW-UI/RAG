@@ -11,6 +11,20 @@ import org.apache.ibatis.annotations.Param;
  *
  * <p>Go 侧这一条<b>没有事务</b>（是 {@code comment.go:157,184,242} 三个无事务方法之一），
  * 只是一次 {@code INSERT … ON CONFLICT DO NOTHING}。
+ *
+ * <h2>✅ 2026-10-24 用户已签字：「{@code report_record} 表在 RAG 侧存在」是<b>有意偏离</b></h2>
+ * <p><b>Go 侧根本没有这张表</b>：{@code rpc/internal/model/db.go:15} 的 {@code AutoMigrate} 列表
+ * （{@code Subject / CommentContent / CommentIndex / CommentLike / CommentDomainFactOutbox /
+ * CommentFactStream}）<b>不含 {@code ReportRecord}</b>，3 个手写迁移脚本也不建它
+ * ⇒ Go 侧全新部署上 {@code ReportComment} <b>必然 5004</b>
+ * （实测：{@code comment.go:243 ERROR: relation "report_record" does not exist}）。
+ * <p>⇒ RAG 侧用 {@code V5__create_comment_report_record.sql} 建表 ⇒ <b>举报功能可用</b>。
+ * <p>⇒ 签字记录：{@code docs/Intentional_Deviations/comment/rpc.md} 的
+ * {@code SD-2026-10-24-CAND-02}（签字人 Jason，2026-10-24）。
+ * <p>⚠️ <b>V5 迁移文件的字节不可再改</b>（连注释也不行）—— 改了会让
+ * <b>已应用过 V5 的环境</b>在启动时 Flyway checksum 校验失败而直接起不来。
+ * ⇒ 本类的说明写在这里（Java 文件不影响 checksum），
+ * <b>不要</b>为了更新签字状态去改 V5 的注释。
  */
 @Mapper
 public interface ReportRecordMapper {

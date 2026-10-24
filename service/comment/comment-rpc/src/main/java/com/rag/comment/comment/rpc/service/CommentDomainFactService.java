@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
 /**
@@ -115,11 +116,16 @@ public class CommentDomainFactService {
         }
         // --- ② 默认值（Go :93-102）
         // Go 用 time.Now().UTC()；Java 显式转 UTC，避免落到 JVM 默认时区上。
-        String eventTime = (fact.eventTime == null)
-                ? DateTimes.toRfc3339Nano(Instant.now())
-                : fact.eventTime;
-        fact.eventTime = eventTime;
-        fact.occurredAt = eventTime;
+        //
+        // ⚠️ Go 在 :95-96 是**两步**：
+        //     if fact.EventTime.IsZero() { fact.EventTime = time.Now().UTC() }
+        //     fact.EventTime = fact.EventTime.UTC()          ← ← ← **无条件归一化到 UTC**
+        // RAG 此前只做了第一步（null ⇒ now），**漏了第二步** ⇒ 调用方传 +08:00 的
+        // eventTime 时，Go 的 payload/envelope 是 UTC（"…T10:00:00Z"），RAG 是原样的
+        // "…T18:00:00+08:00" ⇒ **信封字节漂移**。
+        // ⇒ 见 docs/DRIFT/comment/rpc.md 的 D3。
+        fact.eventTime = normalizeEventTimeToUtc(fact.eventTime);
+        fact.occurredAt = fact.eventTime;
         fact.availableAt = DateTimes.toRfc3339Nano(Instant.now());
         fact.schemaVersion = SCHEMA_VERSION;
         fact.producer = PRODUCER;
@@ -161,6 +167,55 @@ public class CommentDomainFactService {
                 fact.eventId, fact.aggregateId, version);
         return version;
     }
+
+    /**
+     * 对应 Go {@code domain_fact.go:95-96} 的两步：
+     * <pre>
+     *   if fact.EventTime.IsZero() { fact.EventTime = time.Now().UTC() }
+     *   fact.EventTime = fact.EventTime.UTC()
+     * </pre>
+     *
+     * <p>⚠️ Go 的 {@code EventTime} 是 {@code time.Time}（结构体）⇒ <b>不可能非法</b>；
+     * RAG 侧用 {@code String} 承载 ⇒ 可能拿到各种形态。
+     *
+     * <p><b>本方法的映射规则</b>：
+     * <table border="1">
+     *   <caption>String ⇄ time.Time 的对应</caption>
+     *   <tr><th>入参</th><th>Go 的对应</th><th>本方法</th></tr>
+     *   <tr><td>{@code null} / 空白</td><td>{@code IsZero()} ⇒ now</td><td>now（UTC）</td></tr>
+     *   <tr><td>Go 的零值时刻（0001-01-01T00:00:00Z）</td><td>{@code IsZero()} ⇒ now</td><td>now（UTC）</td></tr>
+     *   <tr><td>带偏移的 RFC3339（{@code +08:00}）</td><td>{@code .UTC()} ⇒ 转成 UTC</td><td>转成 UTC（{@code Z}）</td></tr>
+     *   <tr><td>已是 UTC（{@code Z}）</td><td>{@code .UTC()} ⇒ 不变</td><td>不变</td></tr>
+     *   <tr><td><b>无法解析</b></td><td><b>不可能发生</b></td><td><b>原样保留</b>（见下）</td></tr>
+     * </table>
+     *
+     * <p>⚠️ <b>无法解析时为什么不抛异常</b>：Go 侧根本没有「非法时间」这种状态，
+     * 抛异常等于<b>新增一个 Go 没有的失败模式</b>（会回滚事务）。
+     * ⇒ 这里原样保留，让下游 {@code CommentDeliveryValidator} 的 RFC3339 校验
+     * 把它判成 <b>BLOCKED</b>（MISMATCH-05 已覆盖那条路径）⇒ 与 Go 的「拒发」语义一致，
+     * 且<b>不改变事务边界</b>。
+     */
+    static String normalizeEventTimeToUtc(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return DateTimes.toRfc3339Nano(Instant.now());
+        }
+        OffsetDateTime parsed;
+        try {
+            parsed = OffsetDateTime.parse(raw, DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        } catch (RuntimeException e) {
+            // 非法形态：Go 不可能出现 ⇒ 原样保留，交给投递侧校验 BLOCKED
+            return raw;
+        }
+        Instant instant = parsed.toInstant();
+        // Go 的 time.Time.IsZero()：零值时刻（0001-01-01T00:00:00Z）
+        if (instant.equals(GO_ZERO_TIME)) {
+            return DateTimes.toRfc3339Nano(Instant.now());
+        }
+        return DateTimes.toRfc3339Nano(instant);
+    }
+
+    /** Go {@code time.Time} 的零值时刻（{@code IsZero()} 为 true 的那一个）。 */
+    private static final Instant GO_ZERO_TIME = Instant.parse("0001-01-01T00:00:00Z");
 
     /**
      * 对应 Go {@code commentDeliveryEnvelope}（domain_fact.go:43-53）九字段信封。
