@@ -1,5 +1,6 @@
 package com.rag.common.http;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpInputMessage;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -87,13 +88,26 @@ public class GoStyleJsonBodyConverter extends JacksonJsonHttpMessageConverter {
     /**
      * Go 是否会读这个请求体 —— 逐条对齐 {@code withJsonBody}。
      *
-     * @param contentType 原始 Content-Type 头（可为 null / 空）
+     * @param contentType <b>原始</b> Content-Type 头值（可为 null / 空）。
+     *                   ⚠️ <b>必须传客户端发来的原始字符串</b>，<b>不要</b>传
+     *                   {@code MediaType.toString()} —— 那会把 type/subtype <b>小写化</b>
+     *                   ⇒ 判定从 Go 的大小写<b>敏感</b>变成<b>不敏感</b>（2026-10-25 T-1 修复）。
+     *                   正确取法：{@code HttpHeaders#getFirst(HttpHeaders#CONTENT_TYPE)}
+     *                   或 Servlet 的 {@code request.getHeader("Content-Type")} /
+     *                   {@code request.getContentType()}。
      * @param contentLength {@code HttpInputMessage} 报告的 Content-Length；
      *                      chunked 时 Spring 给 -1，与 Go 的语义一致
      *
      * <p><b>为什么是 public</b>：它是「Go 何时读 body」这条规则的<b>唯一真源</b>，
      * 且 {@code goReadsBody} 与 {@link #read} 必须永远一致 ⇒ 让业务模块的测试能直接断言
      * 它的边界，而不是复制一份判据到测试里（复制品必然与实现漂移）。
+     *
+     * <p>⚠️ <b>2026-10-25 补记：仓库里存在 3 份「复制品」</b>（favorite / hot / article 各自抄了一份
+     * {@code contentType.contains("application/json")}）—— 它们当时取的是<b>原始头值</b>
+     * ⇒ 判定与 Go 一致，但**没有调用本方法** ⇒ 是一枚定时炸弹：
+     * 哪天有人把其中一份改成「用 MediaType 解析」，RAG 就会**内部自相矛盾**
+     * （闸门说不读、解析器说要读）。⇒ 详见
+     * {@code docs/DRIFT/global/cross-domain.md} X-9。
      */
     public static boolean goReadsBody(String contentType, long contentLength) {
         return contentLength > 0L
@@ -112,9 +126,25 @@ public class GoStyleJsonBodyConverter extends JacksonJsonHttpMessageConverter {
                        java.util.Map<String, Object> hints)
             throws IOException, HttpMessageNotReadableException {
 
-        String contentType = inputMessage.getHeaders().getContentType() == null
-                ? null
-                : inputMessage.getHeaders().getContentType().toString();
+        // ⚠️ 2026-10-25（T-1 修复）：这里必须取**原始头值**，不能取 `getContentType().toString()`。
+        //
+        //   Go: `strings.Contains(r.Header.Get("Content-Type"), "application/json")`
+        //       `r.Header.Get` 返回的是**客户端发来的原始字符串** ⇒ `strings.Contains`
+        //       **大小写敏感** ⇒ `Content-Type: Application/JSON` ⇒ Go **不读 body**。
+        //
+        //   而 `HttpHeaders.getContentType()` 会把头**解析成 MediaType**，
+        //   其 `toString()` 已把 type/subtype **小写化** ⇒ `contains` 变成大小写**不**敏感
+        //   ⇒ `Application/JSON` 在 RAG 侧会被**当成 JSON 读进去** ⇒ 与 Go 相反。
+        //
+        //   ⇒ 改用 `getFirst(CONTENT_TYPE)` 取原始值 ⇒ 判定回到与 Go 同形。
+        //
+        //   ⚠️ **但这只修好了「判定」这一层**：真正解析时 {@code super.read(...)} 内部
+        //   仍会调 {@code getHeaders().getContentType()} 做 MediaType 解析 ⇒
+        //   **畸形头（如 {@code application/json, application/xml}）仍会抛
+        //   {@code InvalidMediaTypeException}**，而 Go 只做字面 Contains、不会抛。
+        //   ⇒ 该残余已登记 ⇒ {@code docs/DRIFT/global/common-tails.md}「T-1 残余 ①」。
+        //   ⇒ ⚠️ 本条**不要**再写成「已彻底修好」——那是另一条未修的漂移。
+        String contentType = inputMessage.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE);
         long contentLength = inputMessage.getHeaders().getContentLength();
 
         if (!goReadsBody(contentType, contentLength)) {

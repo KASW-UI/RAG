@@ -21,6 +21,7 @@
 | X-6 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🔴 未修 · 跨域 · 待拍板 | 未展开 |
 | X-7 | DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🔴 未修 · 跨域 | 未展开 |
 | **X-8** | 🆕 **真源分层（Go 出处一半在框架里）** | **全部域** | ✅ **本轮已查明并记账** | ✅ **本轮新增** |
+| **X-9** | 🆕 **「Go 是否读 body」判据有 3 份生产复制品** | favorite / hot / article | 🟡 **当前行为正确，但是定时炸弹** | ✅ **本轮新增** |
 
 ---
 
@@ -59,7 +60,51 @@ AGENTS.md §3.1 规定「任何行为一致性审查必须**以 Go 为唯一基�
 
 ---
 
-## 二、其余 7 条的状态说明（2026-10-25）
+## 二、X-9 🆕 **「Go 是否读 body」判据有 3 份生产复制品**（2026-10-25 新发现）
+
+### 2.1 事实
+
+`service/common/http/GoStyleJsonBodyConverter#goReadsBody` 的 javadoc 自称是
+「Go 何时读 body」这条规则的**唯一真源**，并明确警告「复制品必然与实现漂移」。
+⇒ **但仓库里有 3 份生产代码各自抄了一份判据**：
+
+| # | 位置 | 抄法 | 取的头值 |
+|---|---|---|---|
+| 1 | `service/favorite/favorite-api/.../controller/FavoriteController.java:242` | `contentType.contains("application/json")` | `httpRequest.getHeader("Content-Type")` ⇒ **原始** ✔ |
+| 2 | `service/hot/hot-api/.../form/GoFormValues.java:272` | `contentType.contains("application/json")` | `request.getContentType()` ⇒ **原始** ✔ |
+| 3 | `service/article/article-api/.../config/GoStyleJsonBodyLimitFilter.java:123` | `contentType.contains("application/json")` | `request.getContentType()` ⇒ **原始** ✔ |
+
+⇒ **三份当前都取原始头值 ⇒ 判定与 Go 一致 ⇒ 当前行为是「对的」**。
+（`FavoriteController.java:241` 的注释甚至已经写明「Go 用 strings.Contains（大小写敏感），不是 MIME 解析 —— 别用 MediaType.parseMediaType」）
+
+### 2.2 为什么它仍是**跨域**问题（而不是三个域各自的小事）
+
+T-1 修复**前**，RAG 内部是**自相矛盾**的：
+
+```
+Content-Type: Application/JSON
+  ├─ favorite / hot / article 的三份复制品 ⇒ 「不是 JSON body」⇒ 不读   ← 与 Go 一致
+  └─ GoStyleJsonBodyConverter（唯一真源）   ⇒ 「是 JSON body」⇒ 读     ← 与 Go 相反 ❌
+```
+
+⇒ 同一个请求，**闸门说不读、解析器说要读** ⇒ 这不是「某域的 bug」，是**共享判据被复制**造成的一致性风险。
+⇒ **T-1 已于 2026-10-25 修复**（唯一真源改取原始头值）⇒ 现在两侧一致。
+
+### 2.3 残留风险（**本轮未修，已登记**）
+
+| 风险 | 说明 |
+|---|---|
+| 🔴 **复制品可能漂移** | 哪天有人把其中一份改成「用 `MediaType` 解析」（看起来更「地道」）⇒ RAG 立刻**内部自相矛盾**（闸门 vs 解析器），且**没有任何测试会红** |
+| 🔴 **修法在别的域** | 要根治 ⇒ 三份复制品都应改为**调用** `GoStyleJsonBodyConverter.goReadsBody(...)`（唯一真源）⇒ **但那三个文件分别在 favorite / hot / article 域** ⇒ **不是 global 的写权范围**（§5.3b 规则 1：`service/common/**` 只有 `align/global` 能写；**反向不成立** —— global 也不该去改别的域的业务代码） |
+| ✅ **已做的缓解** | 已在唯一真源的 javadoc 里**显式列出这 3 份复制品的位置**，并写明「哪天有人改成 MediaType 解析 ⇒ RAG 会内部自相矛盾」⇒ 下一个改它的人会看到 |
+
+⇒ **归属**：这 3 份文件的修改**属于 favorite / hot / article 三域** ⇒ 应由各域自行收敛
+（各域台账可链到本条）⇒ **global 只做记账与协调**。
+⚠️ **本轮不去改它们**（§5.3b：别的域的代码，别的域自己改；global 只写自己的台账）。
+
+---
+
+## 三、其余 7 条的状态说明（2026-10-25）
 
 本轮**未展开**这 7 条的逐条对照（它们的落点分散在多个域的代码里，
 且多数需要**真 PG / 真启动**才能判定 ⇒ 不适合与 T-10 同批做）。
@@ -79,8 +124,9 @@ X-6 **等用户拍板**。
 
 ---
 
-## 三、变更记录
+## 四、变更记录
 
 | 日期 | 动作 |
 |---|---|
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 7 条跨域不变量状态；新增 **X-8 真源分层（L1 项目层 / L2 go-zero 框架层）** —— 本轮实测发现，影响全部域的对照方法 |
+| 2026-10-25 | **第二轮**：新增 **X-9** —— 「Go 是否读 body」判据存在 **3 份生产复制品**（favorite / hot / article）。T-1 修复前 RAG **内部自相矛盾**（闸门说不读 / 解析器说要读）⇒ T-1 修复后已一致。⚠️ **根治需各域自己收敛**（调用唯一真源），global 只记账不改别域代码 |

@@ -41,24 +41,71 @@
 
 ## 一、逐条复核结论
 
-### T-1 🔴 `Content-Type` 大小写敏感判定 —— **确认为真漂移**（未修）
+### T-1 ✅ `Content-Type` 大小写敏感判定 —— **已修**（残余 ① 见下）
 
 | | 事实 |
 |---|---|
 | **Go 出处** | `go-zero@v1.10.2/rest/httpx/requests.go:153-155`<br>`func withJsonBody(r *http.Request) bool { return r.ContentLength > 0 && strings.Contains(r.Header.Get(header.ContentType), header.ApplicationJson) }`<br>常量：`rest/internal/header/headers.go:5` ⇒ `ApplicationJson = "application/json"` |
 | **RAG 出处** | `service/common/src/main/java/com/rag/common/http/GoStyleJsonBodyConverter.java:115-117`（`read()` 取 Content-Type）<br>判定在 `:98-101`（`goReadsBody`）⇒ `contentType.contains(GO_JSON_CONTENT_TYPE_MARK)`，`GO_JSON_CONTENT_TYPE_MARK = "application/json"`（`:77`） |
 | **差异根因** | Go 读的是**原始头值**（`r.Header.Get` **不做大小写归一**）⇒ `strings.Contains` **大小写敏感**；<br>RAG 读的是 `getContentType().toString()` ⇒ **Spring 的 `MediaType.toString()` 已把 type/subtype 小写化** ⇒ `contains` **大小写不敏感** |
-| **可观察差异** | 请求头 `Content-Type: Application/JSON`（大写 A/J）⇒<br>**Go：不读 body**（走 `mapping.UnmarshalJsonMap(nil, v)`，body 被忽略）<br>**RAG：读 body**（进 Jackson 反序列化） |
-| **状态** | 🔴 未修 |
+| **可观察差异** | 请求头 `Content-Type: Application/JSON`（大写 A/J）⇒<br>**Go：不读 body**（走 `mapping.UnmarshalJsonMap(nil, v)`，body 被忽略）<br>**RAG（修前）：读 body**（进 Jackson 反序列化） |
+| **状态** | ✅ **2026-10-25 已修**（`align/global` 收口提交） |
 
 ⚠️ **不是「RAG 更严」**：两侧行为**方向相反**（Go 忽略 body / RAG 解析 body）⇒ 不是签字偏离能覆盖的类型，是**行为漂移**。
 
+#### ✅ 修法与守门（2026-10-25）
+
+**改一行**：`GoStyleJsonBodyConverter#read` 里把
+`inputMessage.getHeaders().getContentType().toString()`
+换成 `inputMessage.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE)`（**原始头值**）。
+
+⇒ **落点全在 `service/common`**（`align/global` 的单写权范围）⇒ **不需要改别的域的代码**。
+⚠️ 已核对 `like-api` 的 `LikeApiGoStyleBodyContentTypeTest#goReadsBodyBoundaries` 的 7 个断言
+**全是已小写值** ⇒ 修复**不改变任何现有期望值**（实测：该模块测试全绿）。
+
+**守门**：`service/common/src/test/java/com/rag/common/http/GoStyleJsonBodyConverterContentTypeCaseTest.java`（6 条）
+⇒ 用**真 `HttpHeaders` + 真 converter**（刻意不用 Mockito —— 被测的正是「`HttpHeaders` 到底返回什么」）
+⇒ 覆盖：`Application/JSON` / `APPLICATION/JSON` / `application/JSON` ⇒ **不读 body**；
+`application/json` / 带 charset ⇒ **读 body**；Spring 能容忍的头内畸形 ⇒ **不抛**。
+**🧪 变异测试**：把修复改回 `MediaType.toString()` ⇒ **转红**
+（`expected: <null> but was: <{target_type=article, target_ids=[1]}>`）⇒ 守门网非空转。
+
+#### 🔴 T-1 残余 ①（**本轮未修，已登记**）
+
+**只修好了「判定」这一层；解析那一层仍会碰 MediaType 解析。**
+
+| | 事实 |
+|---|---|
+| **Go** | `strings.Contains(raw, "application/json")` ⇒ **纯字面**，**不做 MIME 解析** ⇒ 畸形头**不会抛**，命中就照常读 body |
+| **RAG（修后）** | 判定用原始值 ✔；但命中后 `super.read(...)` 内部仍会调 `getHeaders().getContentType()` 做 MediaType 解析 ⇒ **`application/json, application/xml` 仍抛 `InvalidMediaTypeException`**（实测，`Invalid token character ','`）⇒ 请求 500 |
+| **状态** | 🔴 **未修** |
+
+⇒ **建议修法**（下一轮）：命中后把传给 `super.read(...)` 的 `HttpInputMessage` **包一层**，
+让 Spring 看到一个**已净化的** `Content-Type`（如 `application/json`）
+⇒ 顺带修掉「`charset=gbk` 时 RAG 按 GBK 解码、Go 恒按 UTF-8」的另一条偏差
+（Go 的 `encoding/json` 只认 UTF-8）。
+
+⚠️ **本轮刻意没做**：那会**扩大改动面**（要包 `HttpInputMessage`），
+且本轮授权范围是「修 T-1 的大小写判定」⇒ 按 §5.3「不擅自扩大 scope」登记待办。
+⚠️ **守门测试也刻意不断言该行为** —— 断言它「会抛」等于把一个**已知与 Go 不一致**的行为
+**锁成标准**（§3.3.3：绿测试可能是「错误答案的守卫」）。
+
 ⚠️ **修法的连带面**：`goReadsBody` 是 **public**（`:94` 的 javadoc 明写：它是「Go 何时读 body」这条规则的**唯一真源**，
 且业务模块的测试直接断言它 ⇒ 复制品必然与实现漂移）⇒ 修它必须**同时**修所有调用方的测试期望值。
+✅ **实测**：唯一跨域调用方是 `like-api` 的 `LikeApiGoStyleBodyContentTypeTest`（7 条断言，**全为已小写值**）
+⇒ **不需改任何别的域的代码**。
+
+🔴 **但发现 3 份「生产复制品」** ⇒ 见 [`cross-domain.md` X-9](cross-domain.md)。
 
 ---
 
-### T-2 / T-5 🔴 `MaxConns` 闸门作用域 —— **确认为真漂移**，且🔴 **发现档位错置**
+### T-2 / T-5 ✅ `MaxConns` 闸门作用域 —— **已签字为有意偏离**（移出本档）
+
+> ⚠️ **本两条已不在 DRIFT 档**（§5.3b 硬边界 2：「不要在 DRIFT 里记『决定不对齐』的偏离」）
+> ⇒ 决策记录在 [`docs/Intentional_Deviations/global/common-tails.md` §SD-2026-10-25-01`](../../../Intentional_Deviations/global/common-tails.md)
+> ⇒ 下面是**历史记录**，保留以便追溯「它曾是第三态、怎么归位的」。
+
+**（以下为签字前的历史）**
 
 | | 事实 |
 |---|---|
@@ -78,9 +125,12 @@
 
 ⇒ 按 §5.3b 判据（「这条差异**要不要**『修回去』？要 ⇒ DRIFT；不要（有意）⇒ Intentional_Deviations」），
 **它目前既不是 DRIFT 也不是签字偏离 —— 是个无归属的第三态。**
-⇒ **已归位**到待签字候选 ⇒ [`docs/Intentional_Deviations/global/common-tails.md` §SD-2026-10-25-CAND-11`](../../../Intentional_Deviations/global/common-tails.md)
-⇒ **需拍板**：① 签字为有意偏离，或 ② 按 Go 口径改成 per-route（落 `service/common`，是 `global` 的单写权范围）。
-⇒ **本轮不自行决定**（签字权在用户，见 §5.3b）。
+⇒ **已归位**到待签字候选 `SD-2026-10-25-CAND-11` ⇒ **2026-10-25 用户已签字**
+⇒ 候选号转正为 **`SD-2026-10-25-01`**（状态：已签字）⇒ 详见
+[`docs/Intentional_Deviations/global/common-tails.md`](../../../Intentional_Deviations/global/common-tails.md)。
+⇒ **签字决定 = 保留 RAG 的全局闸门，不改成 per-route**。
+⇒ 配套落地：`GoStyleMaxConnsFilter` 的 javadoc 已从「有意的表达层收敛」自述
+**改成指向该签字档的指针**（并加一句「不要因为 Go 是 per-route 就顺手改回」）。
 
 ---
 
@@ -137,11 +187,11 @@
 
 | # | 条目 | 复核前 | 复核后 | 本轮动了？ |
 |---|---|---|---|---|
-| T-1 | Content-Type 大小写 | ⬜ 待复核 | 🔴 **确认为真漂移** | ❌ |
-| T-2 | MaxConns 作用域 | 🔴 仍未修 | 🔴 **确认 + 发现档位错置** | ❌（等拍板） |
+| T-1 | Content-Type 大小写 | ⬜ 待复核 | ✅ **已修**（残余 ① 已登记） | ✅ |
+| T-2 | MaxConns 作用域 | 🔴 仍未修 | ✅ **已签字**（`SD-2026-10-25-01`）⇒ 移出本档 | ✅ 指针 |
 | T-3 | 503/499 缺 nosniff | ✅ 已修 · 待确认 | ✅ **实测确认已修** | ❌ |
 | T-4 | 499 / 2s deadline | 🔴 仍开放 | 🔴 仍开放（落点已定位到 `:332`） | ❌ |
-| T-5 | MaxConns 作用域 | 🔴 仍开放 | 🔴 **确认 + 发现档位错置** | ❌（等拍板） |
+| T-5 | MaxConns 作用域 | 🔴 仍开放 | ✅ **已签字**（同 T-2）⇒ 移出本档 | ✅ 指针 |
 | T-6 | 成功/失败 Content-Type | 🟡 仍 OPEN | 🟡 仍 OPEN | ❌ |
 | T-7 | 状态行 reason phrase | 🟡 仍 OPEN | 🟡 仍 OPEN | ❌ |
 | T-8 | 缺 Traceparent | 🟡 仍 OPEN | 🟡 仍 OPEN | ❌ |
@@ -157,9 +207,10 @@
 
 | 序 | 条目 | 落点 | 是否需要别的域配合 |
 |---|---|---|---|
-| 1 | **T-1** | `service/common/http/GoStyleJsonBodyConverter.java` | ⚠️ 需连带改**各域业务模块**里断言 `goReadsBody` 边界的测试 ⇒ **跨域**，但**只读**业务代码不改 ⇒ 可与别域并行 |
-| 2 | **T-9** | `service/common/protection/GoStyleGrpcClientBreakerInterceptor.java` | ⚠️ 需引入「target」概念 ⇒ 取决于 devh starter 能否拿到 channel target ⇒ **先做可行性探针** |
-| 3 | **T-2 / T-5** | `service/common/protection/GoStyleMaxConnsFilter.java` | ⏸ **等用户拍板**（签字 or 改成 per-route） |
+| ~~1~~ | ~~**T-1**~~ | `service/common/http/GoStyleJsonBodyConverter.java` | ✅ **已完成**（2026-10-25）；残余 ① 待下一轮 |
+| **1′** | **T-1 残余 ①** | 同上（包一层 `HttpInputMessage`） | ⚠️ 需先决定是否顺带修 charset 偏差 |
+| **2** | **T-9** | `service/common/protection/GoStyleGrpcClientBreakerInterceptor.java` | ⚠️ 需引入「target」概念 ⇒ 取决于 devh starter 能否拿到 channel target ⇒ **先做可行性探针** |
+| ~~3~~ | ~~**T-2 / T-5**~~ | —— | ✅ **已签字**（`SD-2026-10-25-01`）⇒ 移出本档 |
 | 4 | **T-4 / T-6 / T-7 / T-8** | `service/common/observability/HttpMiddleware.java` + `service/common/http/GoStyleRouterErrorResponses.java` | 🟡 **同落点，一次拍板一次改**（T-6/7/8 同文件） |
 
 ⚠️ **排序提醒**：T-1 与 T-9 都改 `service/common` ⇒ **本域独占写点**，别的域此刻在改 common 会撞
@@ -171,4 +222,5 @@
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | **第二轮（T-1 修复）**。T-1 改为**取原始头值**（`getFirst(CONTENT_TYPE)`）⇒ 大小写敏感判定与 Go 对齐；配真 `HttpHeaders` 守门测试 6 条 + 变异测试（转红）。⚠️ 登记 **T-1 残余 ①**（解析层仍走 MediaType ⇒ 畸形头仍抛，Go 不会）。🔴 新增 **X-9**（3 份生产复制品）⇒ [`cross-domain.md`](cross-domain.md)。T-2 / T-5 **用户签字** ⇒ 转 `SD-2026-10-25-01` 并移出本档 |
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 T-1~T-10 逐条复核结论；纠正「Go 出处在项目树里」的方法论错误（真源分 L1 项目层 / L2 go-zero 框架层）；确认 T-1 / T-2 / T-5 / T-9 为真漂移；发现 T-2/T-5 档位错置、T-9 的 §3.2 缺陷；T-10 转 [`cycle-deps.md`](cycle-deps.md) |

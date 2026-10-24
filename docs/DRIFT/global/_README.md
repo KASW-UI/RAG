@@ -69,7 +69,7 @@
 | | `common` 域台账 | `global` 域台账 |
 |---|---|---|
 | **对象** | `service/common` **自身**的语义漂移 | **别的域**的漂移，但**修法落在** `service/common` |
-| **例子** | `DRIFT-CF-001`（communityfact）、`DRIFT-LOG-001`（logger）、`DRIFT-SF-001`（snowflake） | `T-2` / `T-5`（`GoStyleMaxConnsFilter` 的 MaxConns 作用域）——**`follow` / `hot` 域的条目，但落点在 common** |
+| **例子** | `DRIFT-CF-001`（communityfact）、`DRIFT-LOG-001`（logger）、`DRIFT-SF-001`（snowflake） | `T-1`（`GoStyleJsonBodyConverter` 的 Content-Type 大小写判定）——**`like` 域的条目，但落点在 common**；<br>⚠️ `T-2` / `T-5`（`GoStyleMaxConnsFilter` 的 MaxConns 作用域）**已于 2026-10-25 签字** ⇒ 归 `docs/Intentional_Deviations/global/` ⇒ 不再是本档的例子 |
 | **判据** | 差异在 common 的**行为**本身 | 差异在**别的域的行为**，common 只是**载体** |
 
 ⇒ **一句话**：common 域问「common 自己对不对」，global 域问「**别人**因为 common 而对不对」。
@@ -84,15 +84,16 @@
 
 | # | 域 | 条目 | 落点（`文件:行`） | 差异 | 状态（2026-10-25 实测） |
 |---|---|---|---|---|---|
-| **T-1** | `like` | `DRIFT-LIKEAPI-015` | `common/http/GoStyleJsonBodyConverter.java:115-117`（`getContentType().toString()` ⇒ MediaType 已小写化）vs `goReadsBody` `:98-101`（`contains` 大小写敏感） | Content-Type 大小写敏感判定不同 | 🔴 **已复核：确认为真漂移**（2026-10-25） |
-| **T-2** | `follow` | `DRIFT-FOLLOW-008` | `common/protection/GoStyleMaxConnsFilter.java` | Go `MaxConnsHandler` **每路由一个** latch，RAG **全局一个** | 🔴 **仍未修** + 🔴 **发现档位错置**（代码自称「有意」但**无签字** ⇒ 待拍板） |
+| **T-1** | `like` | `DRIFT-LIKEAPI-015` | `common/http/GoStyleJsonBodyConverter.java`（原 `:115-117` 用 `getContentType().toString()` ⇒ MediaType 已小写化）vs `goReadsBody` `:98-101`（`contains` 大小写敏感） | Content-Type 大小写敏感判定不同 | ✅ **2026-10-25 已修**（改取原始头值 `getFirst(CONTENT_TYPE)`）⇒ 残余 ① 已登记 |
+| **T-2** | `follow` | `DRIFT-FOLLOW-008` | `common/protection/GoStyleMaxConnsFilter.java` | Go `MaxConnsHandler` **每路由一个** latch，RAG **全局一个** | ✅ **已签字**（2026-10-25）⇒ `SD-2026-10-25-01` ⇒ **已移出本档** |
 | **T-3** | `hot` | `D14` / `DRIFT-HOTAPI-014` | `common/observability/HttpMiddleware.java:431`（`writeTimeoutResponse`） | 503 / 499 响应缺 `X-Content-Type-Options: nosniff` | ✅ 已修 —— **2026-10-25 实测确认在位**，common 侧无需再动 |
 | **T-4** | `hot` | `D25` / `DRIFT-HOTAPI-025` | `common/observability/HttpMiddleware.java:332`（`writeTimeoutResponse(resp, 499)`） | 客户端断连后 RAG 等 2s deadline、断连后继续发下游调用、无 499 语义 | 🔴 **仍开放**（落点已定位） |
-| **T-5** | `hot` | `D27` | `common/protection/GoStyleMaxConnsFilter.java` | 同 T-2（MaxConns 作用域） | 🔴 **仍开放** + 🔴 **发现档位错置**（同 T-2） |
+| **T-5** | `hot` | `D27` | `common/protection/GoStyleMaxConnsFilter.java` | 同 T-2（MaxConns 作用域） | ✅ **已签字**（同 T-2）⇒ **已移出本档** |
 | **T-6** | `message` | `-010` | `common/observability/HttpMiddleware.java:421` + `common/http/GoStyleRouterErrorResponses.java:83` | 成功 / 失败响应的 `Content-Type` 差异 | 🟡 **仍 OPEN**（待拍板） |
 | **T-7** | `message` | `-011` | 同上路径 | 状态行 reason phrase 差异 | 🟡 **仍 OPEN**（同上拍板） |
 | **T-8** | `message` | `-013` | 同上路径 | 缺 `Traceparent` | 🟡 **仍 OPEN**（同上拍板） |
 | **T-9** | `comment` | `D3` | `common/protection/GoStyleGrpcClientBreakerInterceptor.java:193`（`method.getFullMethodName()`，**无 target 前缀**） | Go `path.Join(cc.Target(), method)` ⇒ 单 client 的熔断计数**串了** | 🔴 **已复核：确认为真漂移** + 🔴 **发现 §3.2 缺陷**（javadoc 照抄 Go 那行却未说自己没实现） |
+| **T-1 残余 ①** | — | — | 同 T-1 落点 | 判定已修，但**解析层**仍走 MediaType 解析 ⇒ 畸形头仍抛（Go 不抛） | 🔴 **未修**（已登记） |
 | **T-10** | `users` | 交接 **#2** | `service/users/user/user-rpc/.../UserDomainService.java:113`（javadoc 仍写「由 `RpcInterceptor` 调度」） | 声称 deadline 由 `DeadlineState#markExpired(long)` 设置，实际由 `bindToCurrent` 设置 ⇒ **javadoc 假断言** | ✅ **2026-10-25 已闭环**（两步走完 + 真管线守门 + 变异验证）⇒ 详见 [`cycle-deps.md`](cycle-deps.md) |
 
 ---
@@ -150,6 +151,8 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 | 10 | 裸 `ServerCallHandler` 不被 dispatch（task 域） | task 域本轮未动 | ⏸ **仍未决** |
 
 ⇒ **真实分布（2026-10-25 更新）**：已销账 **6 条**（#1/#5/#6/#7/#11/**#2**）· **未销账 1 条**（#8）· **仍未决 4 条**（#3/#4/#9/#10）。
+⚠️ 其中 **#3（`DRIFT-COMMON-005`：`bindToCurrent` 签名是否允许破坏性变更）** 仍是**唯一被反复确认的未决项**
+⇒ 本域连续两轮**均未动** `bindToCurrent` 的签名 ⇒ 不与之冲突。
 
 ---
 
@@ -170,4 +173,5 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 | 日期 | 动作 |
 |---|---|
 | 2026-10-25 | **域创建**。用户定义：`global` = 跨微服务 + `service/common` 影响的漂移收口域。首版收录：T-1~T-10（common 尾巴 10 条）· 4 条仍未决 + 2 条未销账 · 7 条跨域不变量 · 1 条两步闭环循环依赖 |
+| 2026-10-25 | **第二轮收口**：① **T-1 已修** —— 唯一真源改取**原始头值**（`getFirst(CONTENT_TYPE)`）⇒ 大小写敏感判定与 Go 对齐；配真 `HttpHeaders` 守门 6 条 + 变异转红；⚠️ 登记 **T-1 残余 ①**（解析层仍走 MediaType ⇒ 畸形头仍抛）② **T-2 / T-5 用户签字** ⇒ `SD-2026-10-25-01` ⇒ **移出本档**，代码 javadoc 改为指向签字档的指针 ③ 新增 **X-9**（3 份生产复制品；T-1 修前 RAG 内部自相矛盾）⇒ [`cross-domain.md`](cross-domain.md) |
 | 2026-10-25 | **第一轮收口（`align/global` @ `58e8314`）**：<br>① **T-10 / CYCLE-001 闭环** —— 两步同一次提交（users 侧订正 javadoc 假断言 → common 侧删 `markExpired`）+ 真 in-process gRPC 守门测试 4 条 + 变异测试 2 组（均转红）⇒ [`cycle-deps.md`](cycle-deps.md)<br>② **T-1 / T-2 / T-5 / T-9 复核确认**为真漂移，补齐逐行 Go 出处 ⇒ [`common-tails.md`](common-tails.md)<br>③ 🔴 **发现「Go 出处在框架层」** —— 真源分 L1 项目层 / L2 go-zero v1.10.2 框架层 ⇒ [`cross-domain.md`](cross-domain.md) X-8 + [`Pitfalls/global/common-tails.md`](../../Pitfalls/global/common-tails.md) PIT-GLOBAL-001<br>④ 🔴 **发现 T-2/T-5 档位错置**（代码自称「有意」但无签字）⇒ 待用户拍板<br>⑤ 🔴 **发现 T-9 的 §3.2 缺陷**（javadoc 照抄 Go 那行却未说明自己没实现 target 前缀）<br>⑥ 踩坑留痕 4 条 ⇒ [`Pitfalls/global/`](../../Pitfalls/global/) |

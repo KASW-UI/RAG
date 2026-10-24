@@ -63,7 +63,13 @@ import java.util.concurrent.Semaphore;
  *       对 13 个端点的并发度来说，两种口径的差别只在「单个端点打满 10000 且
  *       同时另一端点也有接近 10000」时才显现，而那时 Tomcat 的
  *       {@code max-threads=200} 早已先成为瓶颈（见 §2）。
- *       <b>此处为有意的表达层收敛，已在此显式留痕</b>，不是等价性的隐藏缺口。</li>
+ *       <br>
+ *       <b>⚠️ 本条是经签字批准的「有意偏离」</b> ⇒ 落点：
+ *       {@code docs/Intentional_Deviations/global/common-tails.md}
+ *       的 {@code SD-2026-10-25-01}（原候选号 {@code CAND-11}，2026-10-25 用户签字）。
+ *       ⚠️ 那个档才是<b>决策记录</b>；本段只是代码侧的指针。
+ *       ⇒ <b>不要</b>因为「Go 是 per-route」就把它当缺陷顺手改回
+ *       （§5.3b：签字偏离不重复质疑，也不得「顺手修正回旧行为」）。</li>
  *   <li><b>{@code n <= 0} ⇒ no-op</b>：照搬 Go 的短路，配 0 = 不限流。</li>
  *   <li>拒绝时<b>裸 503 空 body</b>，理由同 {@link GoStyleMaxBytesFilter}（不用 {@code sendError}）。</li>
  * </ol>
