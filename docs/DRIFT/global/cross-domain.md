@@ -18,7 +18,7 @@
 | X-3 | 事实投递链路 | `like`/`comment`/`favorite` 的 rpc ↔ **仓外 DC 平台** | ✅ **已闭合**（2026-10-25 B2）—— 末端不是「第三个仓库」，是仓外 `POST /v1/events`；仓内两侧 4↔4 对齐 | ✅ **已闭合** |
 | X-4 | 社区消费者差异 | Go 用 `like`，RAG 不用 | ✅ **已确证（第九轮实测）** —— like 侧 RAG **另起炉灶**（0 引用共享组件）· favorite/article **RAG 多出** ⇒ 一半可修、一半被 favorite 阻塞 ⇒ 见 §二·十 | ✅ **已确证** |
 | X-5 | 裸 `ServerCallHandler` 不被 dispatch | **task + follow**（2026-10-25 实测扩面） | 🔴 **已确证**（第七轮探针）—— grpc-java 不向裸 handler 派发 `onHalfClose` ⇒ 两个域的「造慢服务」测试**空转** ⇒ 见 §二·八 | ✅ **已确证**（机制 + 波及面） |
-| X-6 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🔴 **已展开（第九轮）** ⇒ **被 favorite 永久阻塞**（修法必须逐模块改 `max-parameter-count` ⇒ 必动 `favorite-api`）⇒ 见 §二·十一 | ✅ **已展开** |
+| X-6 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🟡 **第十一轮改判：可修（共享层）** —— `max-parameter-count` 虽是 per-app，但**上限可在运行期由 `service/common` 改掉** ⇒ 10 个 api 模块零改动 ⇒ **favorite 零触碰** ⇒ 非永久阻塞、非签字项 ⇒ 见 §二·十一 | ✅ **已展开 + 已改判**（修法待落地） |
 | X-7 | DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🟡 **部分闭合**（2026-10-25 B3）—— 4 个域已能活体逐列对照；其余 5 域**缺双侧库环境** | ✅ **已跑**（产出真结论 + 1 条新差异 X-10） |
 | **X-8** | 🆕 **真源分层（Go 出处一半在框架里）** | **全部域** | ✅ **本轮已查明并记账** | ✅ **本轮新增** |
 | **X-9** | 🆕 **「Go 是否读 body」判据有 3 份生产复制品** | favorite / hot / article | 🟡 **当前行为正确，但是定时炸弹** | ✅ **本轮新增** |
@@ -96,6 +96,7 @@ Content-Type: Application/JSON
 |---|---|
 | 🔴 **复制品可能漂移** | 哪天有人把其中一份改成「用 `MediaType` 解析」（看起来更「地道」）⇒ RAG 立刻**内部自相矛盾**（闸门 vs 解析器），且**没有任何测试会红** |
 | 🔴 **修法在别的域** | 要根治 ⇒ 三份复制品都应改为**调用** `GoStyleJsonBodyConverter.goReadsBody(...)`（唯一真源）⇒ **但那三个文件分别在 favorite / hot / article 域** ⇒ **不是 global 的写权范围**（§5.3b 规则 1：`service/common/**` 只有 `align/global` 能写；**反向不成立** —— global 也不该去改别的域的业务代码） |
+| 🔴 **favorite 那份永久无法收敛** | 2026-10-25 用户重申 favorite 零权限 ⇒ **hot + article 两份**可改为调用唯一真源，**favorite 那份不能** ⇒ 收敛后仍是「共享真源 + favorite 一份复制品」⇒ **「3 份复制品」的风险在 favorite 上永久存在** ⇒ 缓解手段只剩唯一真源 javadoc 的显式点名 |
 | ✅ **已做的缓解** | 已在唯一真源的 javadoc 里**显式列出这 3 份复制品的位置**，并写明「哪天有人改成 MediaType 解析 ⇒ RAG 会内部自相矛盾」⇒ 下一个改它的人会看到 |
 
 ⇒ **归属**：这 3 份文件的修改**属于 favorite / hot / article 三域** ⇒ 应由各域自行收敛
@@ -331,7 +332,12 @@ RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFact
 
 ---
 
-## 二·十一、X-6 🔴 **global 侧已展开 ⇒ 结论：被 favorite 永久阻塞**（`DRIFT-HOTAPI-030`）
+## 二·十一、X-6 🔴 **第十一轮已改判 ⇒ 不是 favorite 边界下的永久阻塞**（`DRIFT-HOTAPI-030`）
+
+> ⚠️ **第九轮结论已被本轮推翻**：第九轮写「修法必然要动 `favorite-api` ⇒ 永久阻塞」——
+> **那个结论只覆盖了「逐模块改 `application.yml`」这一条修法**，而**不是全部修法**。
+> 本轮实测发现**共享层修法**（落在 `service/common`）⇒ **10 个 api 模块零改动 ⇒ favorite 零触碰**。
+> ⇒ **教训已登记** ⇒ [`docs/Pitfalls/global/cross-domain.md`](../../../Pitfalls/global/cross-domain.md)。
 
 ### ① 两层限制的**精确语义**（第九轮实测取证）
 
@@ -346,30 +352,85 @@ RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFact
 > **总数 ≥ 2048 且 非空值 ≤ 2048** ⇒ **Go 200 / RAG 5001**
 > （需要至少「总数 − 2048」个空值才能落进窗口；例：2048 个参数全空 ⇒ Go 放行、RAG 5001）
 
-### ③ 🔴 修法**必然**要动 `favorite-api` ⇒ 永久阻塞
+### ③ 🔴 **「逐模块改 yaml」这条修法必然要动 `favorite-api`** —— 但**它不是唯一修法**
 
 彻底修 = ① `max-parameter-count: -1`（关掉 Tomcat 上限）＋ ② **每个** api 模块补 Go 的应用层判据（数**非空值**、上限 2048、以及 `net/url` 的段数上限）。
 
-⚠️ **实测确认「每个 api 模块都有自己的 Tomcat 连接器」** ⇒ 该配置是 **per-app** 的 ⇒ **无法在 `service/common` 统一改**：
+⚠️ **实测确认「每个 api 模块都有自己的 Tomcat 连接器」** ⇒ 该配置是 **per-app** 的 ⇒ **无法在 `service/common` 用 yaml 统一改**：
 
 | 域 | api 模块 | 现有配置 |
 |---|---|---|
 | article / comment / **favorite** / follow / hot / like / message / task | 8 个 | `max-parameter-count: 2048` |
 | users（user-api + admin-api） | 2 个 | `max-parameter-count: 2048` |
 
-⇒ **10 个 api 模块全部已配 2048，零遗漏** ⇒ 修法**必须逐模块改** ⇒ **必然动 `favorite-api`** ⇒ ⛔ **与「favorite 一律不碰」直接冲突**。
+⇒ **10 个 api 模块全部已配 2048，零遗漏** ⇒ **「逐模块改 yaml」这条修法必然动 `favorite-api`** ⇒ ⛔ **与「favorite 一律不碰」直接冲突**。
 
 ⚠️ **只改 9 个、留着 favorite-api 不改** ⇒ **等于把差异留在 favorite 域** ⇒ 9 个模块与 Go 一致、favorite 域不一致 ⇒ **制造新的分叉**（与 T-1「3 份生产复制品」同类问题）。
 
-### ④ ⇒ 结论：**这不是「待拍板的技术项」，是「favorite 写权边界」问题**
+#### ③ 之二 🟢 **但存在共享层修法 ⇒ favorite 零触碰**（第十一轮新发现，本轮唯一的技术结论）
 
-| 出路 | 内容 | 性质 |
+🔴 **关键前提（本轮实测，10/10 成立）**：
+
+| 前提 | 实测证据 | 结论 |
 |---|---|---|
-| **A** | 放开 `favorite-api` 的写权 ⇒ 按 hot 域给的方案 10 个模块一起改 | 🔴 **需要用户改「favorite 不碰」这条边界** |
-| B | 9 个模块改、favorite 不改 | 🔴 **制造分叉**（且 favorite 域行为仍与 Go 不一致） |
-| C | 保持现状 + 签字认账 | 需把 `DRIFT-HOTAPI-030` 归入签字档（**目前无签字条目**） |
+| **10 个 api 模块都依赖 `service/common`** | 逐模块查 `pom.xml` ⇒ **10/10 ✅** | 共享层的类**在每个 api 模块的 classpath 上** |
+| **10 个 api 模块都扫 `com.rag.common`** | 逐模块查 `@SpringBootApplication(scanBasePackages = …)`：9 个 = `{<域包>, "com.rag.common"}`；`task-api` = `@ComponentScan(basePackages = {"com.rag.task.task.api", "com.rag.common"})` ⇒ **10/10 ✅** | ⇒ **`service/common` 里加的 Bean / Filter 会进所有 10 个 api 上下文**（本仓**不用** `AutoConfiguration.imports`，靠**组件扫描** ⇒ 见 `GoStyleProtectionConfiguration.java:45-49`） |
+| **Tomcat 允许在运行期改上限** | `Connector.setMaxParameterCount(int)`（`catalina/connector/Connector.java:538`，默认 `1000` 在 `:251`）⇒ `Request.java:148/480` 每请求从 connector 取值 | ⇒ **连接器上限可在容器启动期改掉** |
+| **`-1` = 不限** | `org/apache/tomcat/util/http/Parameters.java:79` javadoc「**or -1 for no limit**」+ `:247` `if (limit > -1 && parameterCount >= limit)` | ⇒ `setMaxParameterCount(-1)` ⇒ **Tomcat 完全不限制参数个数** ⇒ 与 Go 的 `net/http`（不限制）+ go-zero 应用层 2048 判据**同构** |
+| **Boot 的接线顺序可被超越** | Boot 4.0.8 `org.springframework.boot.tomcat.autoconfigure.TomcatWebServerFactoryCustomizer.getOrder()` **返回 0**（javap 实测）⇒ 它用 `ConnectorCustomizer` lambda 设 `maxParameterCount` | ⇒ 共享层用 **`WebServerFactoryCustomizer<ConfigurableTomcatWebServerFactory>` + `@Order > 0`** ⇒ **在 Boot 之后执行 ⇒ 覆盖生效** |
 
-⇒ **本轮不自行拍板**（用户 memory：登记类不升级为拍板；但**改「favorite 不碰」这条边界**属真正的决策）⇒ **登记等用户定**。
+⇒ **共享层修法（两处，全在 `service/common`）**：
+
+1. **一个 `WebServerFactoryCustomizer`**（`@Order` > 0）⇒ `factory.addConnectorCustomizers(c -> c.setMaxParameterCount(-1))`
+   ⇒ **10 个 api 模块的 Tomcat 上限统一解除**，**不动任何 `application.yml`**（含 `favorite-api`）。
+2. **一个共享 Filter** 复刻 go-zero `GetFormValues` 的两层（`net/url` 解析错误 + **2048 个非空值**计数）
+   ⇒ **可从 `article-api` 的 `GoStyleGetFormValuesFilter` 移植**（它已把 `net/url` 段数上限 10000 / URL escape 校验 / 2048 非空值计数三件事做全了）
+   ⇒ 放在 `service/common` ⇒ **10 个 api 模块自动生效**。
+
+⚠️ **已有实现分布（实测，影响工作量估算）**：
+
+| api 模块 | 是否已有 Go 等价的应用层判据 | 位置 |
+|---|---|---|
+| `article-api` | ✅ 有（**含 `net/url` 解析层**） | `article-api/.../config/GoStyleGetFormValuesFilter.java` |
+| `hot-api` | ✅ 有 | `hot-api/.../form/GoFormValues.java` |
+| `favorite-api` | ✅ 有（**只含 2048 计数**，不含 `net/url` 解析层） | `favorite-api/.../service/FavoriteApiSupport.java:327-358` |
+| 其余 7 个 | ❌ **没有** | like / message / comment / follow / task / user-api / admin-api |
+
+⇒ ⇒ **X-6 的修法 = 共享层 2 处 ⇒ 10 个 api 模块零代码改动 ⇒ favorite 零触碰 ⇒ 不制造分叉**
+⇒ **证据强度**：🟡 **源码级 + 配置级已逐条取证**（Tomcat 源码 / Boot 字节码 / 10 个模块的 pom 与扫描配置 / 3 个已有实现的分布）
+⇒ ⚠️ **尚未做真容器实测**（§3.3：「配置/源码说得通」≠「框架真的采用了它」）⇒ **落地时必须配真 Tomcat 守门 + 变异测试**。
+
+### ④ ⇒ 结论：**可修（共享层）⇒ 不必动 favorite ⇒ 也不是「待拍板的技术项」**
+
+> 🔴 **2026-10-25 用户重申写权边界**：「**你没有 favorite 的所有权限**」⇒ global 对 `favorite` 域**零改动**（代码 / 配置 / 台账一律不碰）。
+> ⇒ **出路 A 随之撤下** —— 它不再是「等你点头」的选项，而是**边界之外**。
+> ⇒ **但边界本身不构成阻塞** —— 因为存在**共享层修法**（③ 之二）⇒ **不需要用户拍板**。
+
+| 出路 | 内容 | 状态 |
+|---|---|---|
+| ~~A~~ | 放开 `favorite-api` 的写权 ⇒ 10 个模块一起改 yaml | ❌ **已撤下**（用户重申 favorite 零权限 ⇒ 边界之外，不作为选项） |
+| ~~B~~ | 9 个模块改、favorite 不改 | ❌ **已放弃** —— 等于把差异永久留在 favorite 域 ⇒ **制造新的分叉**（与 T-1「3 份生产复制品」同类问题） |
+| ~~C~~ | 保持现状 + 登记待签字候选 | ❌ **已放弃** —— **本轮找到共享层修法 ⇒ 问题可修 ⇒ 不该「认账不改」** ⇒ 候选 `SD-2026-10-25-CAND-13` **未登记**（编号已回收，勿引用） |
+| **D** | ✅ **共享层修法**：`service/common` 里 2 处（① Tomcat 上限解除 ② 共享 Filter 复刻 Go 判据）⇒ **10 个 api 模块零代码改动 ⇒ favorite 零触碰** | ✅ **本轮定案** |
+
+⇒ ⇒ **`DRIFT-HOTAPI-030` 不是 favorite 边界下的永久阻塞**，**也不需要签字认账** ⇒ 它是一条**待修的真实漂移**，修法落在 `service/common`（global 单写权范围内）⇒ **下一轮落地**。
+
+⚠️ **落地前必须先答的 3 个问题**（本轮已能预判，但留给落地轮实测）：
+
+| # | 问题 | 预判 | 落地时的验收门槛（§3.3） |
+|---|---|---|---|
+| 1 | **yaml 声明值 ≠ 运行时值**：10 个 api 模块的 `application.yml` 里仍是 `max-parameter-count: 2048`（**favorite-api 不能碰 ⇒ 改不了**），而共享层在运行期把连接器上限设成 `-1` | 🟡 **这是边界内唯一可行的形态**（另一条路 = 改 10 份 yaml ⇒ 必动 favorite ⇒ 被边界排除）<br>⇒ 代价：**yaml 变成「名义值」** ⇒ 必须在共享层 javadoc + `check-tomcat-limits.py` 里写清楚 | ⚠️ **`tools/difftest/check-tomcat-limits.py` 的期望要跟着改**（它现在断言 yaml == 2048 ⇒ 共享层接管后这条断言的**语义**变了）⇒ **该脚本属 global 可写**（`tools/`）⇒ **同一次提交** |
+| 2 | **共享 Filter 与 3 个模块已有的本地实现重复**：article / hot / favorite 本地已有 Go 等价判据 | 🟡 共享 Filter **先执行** ⇒ 「>2048 非空值」这条路径上**本地实现变不可达** ⇒ 响应须**逐字节一致**（都是 Go 的 `too many form values, error: <encoded>` + 400） | 真容器对照：**共享 Filter 的 400 body 与 article-api 现有实现的 400 body 逐字节相同** |
+| 3 | **共享 Filter 会改变 favorite 的可观察行为**：favorite 本地实现抛 `IllegalArgumentException` ⇒ 落 **5003**；共享层会把它变成 Go 的 **400** | 🟡 **这是向 Go 靠拢的修正**（Go = 400）⇒ **不是回归** | ⚠️ **必须记进台账并告知 favorite 域 owner**（global 不碰它的代码，但共享层会改它的行为 ⇒ 不能静默） |
+
+### ④ 之二 🔴 **favorite 边界的连带影响面**（本轮一并复核，避免留下「半修」）
+
+| 条目 | 修法是否要动 favorite | 处置 |
+|---|---|---|
+| **X-4**（社区消费者差异） | 🔴 **要** —— favorite 侧 RAG 多出 10 处 Go 没有的 `communityfact` 用法，删掉它们 = 改 favorite | ✅ 已在 §二·十 记为「**可修的一半（like）+ 永久阻塞的一半（favorite）**」⇒ 边界确认后**维持原判** |
+| **X-6**（本条 HOTAPI-030） | 🟢 **不用** —— `max-parameter-count` 虽是 per-app，但**上限可在运行期由共享层改**（`Connector.setMaxParameterCount`，`Connector.java:538`）⇒ 共享层 2 处 ⇒ **favorite 零触碰** | ✅ 本轮已改判为「**可修（共享层）**」⇒ 落 D 出路 ⇒ 下一轮落地（**非永久阻塞、非签字项**） |
+| **X-9**（3 份「Go 是否读 body」复制品） | 🟡 **部分要** —— 3 份分别在 favorite / hot / article；**hot + article 两份可收敛到唯一真源**，favorite 那份不能 | ✅ **本轮不动**（现状三份都取原始头值 ⇒ 行为正确）⇒ 但「3 份复制品」的风险**在 favorite 那份上永久存在** ⇒ 已在本节 §2.3 补记该限制 |
+| **X-7**（DDL 双侧活体对照） | ❌ **不要** —— 只读库、不改 favorite 代码 | ✅ **不受影响** —— favorite 域缺的是**双侧库环境**（runner），不是写权 ⇒ **仍可推进**（见 §二·五 ③） |
 
 ---
 
@@ -385,13 +446,20 @@ RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFact
 | ~~X-3~~ | ✅ **已闭合**（2026-10-25 B2）⇒ 见 §二·七（末端 = 仓外 DC 平台；仓内两侧 4↔4 对齐） |
 | ~~X-4~~ | ✅ **已确证**（第九轮）⇒ 见 §二·十（**可修的一半** = like 侧接线；**阻塞的一半** = favorite） |
 | ~~X-5~~ | ✅ **已确证**（2026-10-25 第七轮，探针实测）⇒ 见 §二·八。⚠️ 机制清楚了，但**修法要同时动 task + follow 两个域的测试** ⇒ 下一轮落地 |
-| ~~X-6~~ | ✅ **已展开**（第九轮）⇒ 见 §二·十一（**不是技术待拍板，是 favorite 写权边界问题**） |
+| ~~X-6~~ | ✅ **已展开 + 已改判**（第九轮展开 / 第十一轮改判）⇒ 见 §二·十一（**不是 favorite 边界下的永久阻塞** —— 共享层修法存在 ⇒ **可修**、**不需签字**） |
 | ~~X-7~~ | ✅ **已做**（2026-10-25 B3）⇒ 见 §二·五（4 个域可跑 + 产出 X-10） |
 
 ⇒ **排期建议（2026-10-25 更新）**：~~X-7~~ **已做**（§二·五）→ **X-1**（真 PG 三进程）
 → **X-2** → ~~X-3~~（**已闭合**）→ ~~X-5~~（**已确证**，§二·八）→ **X-5 修法落地**（task + follow）
-→ X-4；**X-6 等用户拍板**；
+→ **X-4**（like 半边可修 / favorite 半边**仍阻塞** —— 必须删 favorite 自己的 10 处调用）；
+→ **X-6 修法落地**（**共享层 2 处**：`service/common` 的 Tomcat 上限解除 + 共享 Filter 复刻 Go 判据 ⇒ **favorite 零触碰**）；
 ~~X-10~~（**已签字认账**，真实记录 = message 域 `SD-2026-10-23-06`）。
+
+⚠️ **本表已无「等用户拍板」的技术项**（2026-10-25 第十一轮复核）——
+剩余待决项全部是**登记类**（候选签字等签），按用户既定偏好**不升级为拍板**：
+`SD-2026-10-25-CAND-10`（HOTAPI-031）· users 域 8 处 DEFAULT 补签字 ·
+`DRIFT-COMMON-005`（可拆到只拍「毫秒 vs 纳秒」差异②）
+⇒ 唯一真决策项 = **T-6**（**需先撕 hot 域 `SD-HOT-API-006`**）。
 
 ---
 
@@ -399,7 +467,8 @@ RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFact
 
 | 日期 | 动作 |
 |---|---|
-| 2026-10-25 | ✅ **第九轮补（X-6 global 侧展开）** —— 两层限制语义精确化：Go **数非空值**（`httpx/util.go:15` `maxFormParamCount=2048` + `:44-45` 跳过空值 + `:48` `n < 2048` ⇒ 最多 2048 个非空值）vs Tomcat **数参数总数** ⇒ **残余窗口 = 总数 ≥ 2048 且 非空值 ≤ 2048**。🔴 **修法必然要动 `favorite-api`**（`max-parameter-count` 是 **per-app** 连接器设置，**无法在 `service/common` 统一改**；实测 **10 个 api 模块全部已配 2048、零遗漏**）⇒ ⇒ **X-6 不是「待拍板的技术项」，而是「favorite 写权边界」问题** ⇒ 登记等用户定（出路 A 放开 favorite / B 制造分叉 / C 签字认账）
+| 2026-10-25 | ✅ **第十一轮（favorite 零权限重申 ⇒ 推翻第九轮的「永久阻塞」结论）** —— 用户重申：「**你没有 favorite 的所有权限**」⇒ ① 🔴 **推翻自己第九轮的结论** —— 那个结论只覆盖「逐模块改 `application.yml`」这一条修法；本轮实测**共享层修法存在**：① `service/common` 里一个 `WebServerFactoryCustomizer`（`@Order` > Boot 的 `TomcatWebServerFactoryCustomizer.getOrder()==0`）⇒ `connector.setMaxParameterCount(-1)`（`Connector.java:538`；`-1` = 不限 ⇒ `Parameters.java:79/247`）② 一个共享 Filter 复刻 go-zero `GetFormValues`（`net/url` 解析层 + **2048 个非空值**计数，可从 `article-api` 的 `GoStyleGetFormValuesFilter` 移植）⇒ **10 个 api 模块零代码改动 ⇒ favorite 零触碰**（前提已逐条实测：10/10 依赖 `service/common` + 10/10 扫 `com.rag.common`）⇒ ⇒ **X-6 不是永久阻塞，也不需签字认账** ⇒ 落 **出路 D** ② ✅ **连带影响面复核**（§二·十一 ④ 之二）—— X-4（favorite 半边）**仍阻塞**（必须删 favorite 自己的 10 处调用）· X-9（hot/article 两份可收敛、**favorite 那份永久留作复制品**）· X-7（**只读库不改代码 ⇒ 不受影响，仍可推进**）③ 本表**已无「等用户拍板」的技术项**；唯一真决策项 = T-6（需先撕 hot 域 `SD-HOT-API-006`） |
+| 2026-10-25 | ✅ **第九轮补（X-6 global 侧展开）** —— 两层限制语义精确化：Go **数非空值**（`httpx/util.go:15` `maxFormParamCount=2048` + `:44-45` 跳过空值 + `:48` `n < 2048` ⇒ 最多 2048 个非空值）vs Tomcat **数参数总数** ⇒ **残余窗口 = 总数 ≥ 2048 且 非空值 ≤ 2048**。🔴 **修法必然要动 `favorite-api`**（`max-parameter-count` 是 **per-app** 连接器设置，**无法在 `service/common` 统一改**；实测 **10 个 api 模块全部已配 2048、零遗漏**）⇒ ⇒ **X-6 不是「待拍板的技术项」，而是「favorite 写权边界」问题** ⇒ 登记等用户定（出路 A 放开 favorite / B 制造分叉 / C 签字认账）<br>⚠️ **2026-10-25 第十一轮已改判** —— 出路 A 撤下、出路 B 放弃、**出路 C（签字认账）也放弃** ⇒ 改判为「**存在共享层修法 ⇒ 可修，favorite 零触碰**」（见上一行）⇒ ⇒ **第九轮那句「修法必然要动 `favorite-api` ⇒ 永久阻塞」作废**
 | 2026-10-25 | ✅ **第九轮（X-2 审完 + X-4 确证）** —— ① **X-2**（建表责任交叉 + client 契约）**从「均未审」变成「已审完」**：A 组交叉但无冲突（Go 两侧 `User` struct 逐字段相同）；B 组 **10 域全覆盖零漂移**；🟡 **产出 1 条此前无人登记的真漂移** —— `users_user.extra_info` 写路径仍按 jsonb（`AdminDomainService.java:962` + `UserEntity.java:129`），但该列**早已是 TEXT**（`01_create_user.sql:41` + `:103`，且 admin-rpc 自己就在重放这份 DDL）⇒ **代码注释的前提已失效** ⇒ 含 `\u0000` 时 Go 成功 / RAG 5001 ② **X-4 实测确证**：`like` 域 Go 侧 6 个文件引用 `communityfact`、RAG 侧 **0**（**另起炉灶**）；`favorite` Go 0 / RAG 10（⛔ 不碰）③ ⚠️ **订正我自己第四轮 B2 的错误结论**（「like/comment/favorite 三域都接了线」**作废**）
 | 2026-10-25 | **第七轮（X-5 确证 + X-10 去重）**：① 🔴 **X-5 由「未展开」升级为「已确证」** —— 一次性探针实测：grpc-java 1.63 **会**调裸 handler 的 `startCall()`，但**不会**把 `onHalfClose` 派发给它返回的 `ServerCall.Listener` ⇒ 「处理函数睡 10 秒」**从未发生** ⇒ task + follow 两个域的同名测试**空转**（绿，但验证的是「取消一个空调用」而非「打断在飞处理」）⇒ 波及面由「task 域」扩到「task + follow 两个 rpc 域」⇒ 见 §二·八 ② ⚠️ **X-10 去重** —— 复查发现 X-10 早在 2026-10-23 已签为 message 域 `SD-2026-10-23-06` ⇒ **撤销本域重复登记的 `SD-2026-10-25-03`**（改为指针） |
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 7 条跨域不变量状态；新增 **X-8 真源分层（L1 项目层 / L2 go-zero 框架层）** —— 本轮实测发现，影响全部域的对照方法 |

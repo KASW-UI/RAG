@@ -159,9 +159,69 @@ RESULT startCall=true  onHalfClose=false  responded=false
 
 ---
 
+## PIT-GLOBAL-012 🔴 **「这个配置是 per-app 的」≠「只能逐模块改」⇒ 会把可修的漂移误判成域边界阻塞**
+
+### 现象
+
+`DRIFT-HOTAPI-030`（Tomcat 数「参数总数」vs Go 数「非空值个数」）的修法需要
+`server.tomcat.max-parameter-count` 改成 `-1`。第九轮查到的实情是：
+
+- 该配置是 **per-app** 的（每个 api 模块一份 `application.yml`，10/10 都配了 `2048`）；
+- ⇒ 于是我写下「**修法必然要动 `favorite-api`** ⇒ **在 favorite 边界下永久阻塞**」。
+
+**这句话是错的。** 它只证明了「**逐模块改 yaml**」这一条修法被边界挡住，
+**没有证明「不存在别的修法」** ⇒ 于是把一条**可修**的真实漂移，错登记成了「不可修」，
+还差点按「认账不改」去登记签字（那就等于把一条本可以修掉的漂移**永久固化**）。
+
+### 根因
+
+**把「配置的绑定方式」当成了「配置的生效方式」。**
+
+`server.tomcat.max-parameter-count` 是 **Spring Boot 属性绑定**到 `ServerProperties`，
+再由 Boot 的 `TomcatWebServerFactoryCustomizer` 通过 `ConnectorCustomizer` 设到 Tomcat 的
+**连接器**上。但 **Tomcat 的上限本身是一个运行期可写的字段**：
+
+| 环节 | 事实 | 出处 |
+|---|---|---|
+| 上限字段 | `Connector.maxParameterCount`（默认 `1000`）**有 setter** | Tomcat `catalina/connector/Connector.java:251` / `:538` |
+| 每请求取值 | `Request` 每请求从 connector 取值 | Tomcat `catalina/connector/Request.java:148` / `:480` |
+| `-1` 的语义 | **不限**（不是「上限 -1」） | Tomcat `tomcat/util/http/Parameters.java:79`（javadoc）+ `:247`（`if (limit > -1 && …)`） |
+| Boot 的接线点 | `ConnectorCustomizer` lambda | Boot 4.0.8 `org.springframework.boot.tomcat.autoconfigure.TomcatWebServerFactoryCustomizer`（javap：`lambda$customizeMaxParameterCount$0(int, Connector)`） |
+| Boot 的执行顺序 | `getOrder()` **返回 0** | 同上（javap 实测）⇒ **后注册的 `@Order > 0` 的 customizer 覆盖它** |
+| 共享层能否进所有 api 上下文 | ✅ **10/10** | ① 10/10 api 模块 `pom.xml` 依赖 `service/common` ② 10/10 扫 `com.rag.common`（9 个 `@SpringBootApplication(scanBasePackages = {…, "com.rag.common"})`；`task-api` = `@ComponentScan(basePackages = {…, "com.rag.common"})`）<br>⚠️ 本仓**不用** `AutoConfiguration.imports`（见 `service/common/.../protection/GoStyleProtectionConfiguration.java:45-49`）⇒ 靠**组件扫描** ⇒ 共享层加个 Bean/Filter 就在所有 api 上下文里 |
+
+⇒ ⇒ **上限可以在运行期由 `service/common` 统一改掉** ⇒ **10 个 api 模块零代码改动** ⇒
+**favorite 零触碰** ⇒ **不存在「边界阻塞」**。
+
+### 判据（下次遇到「X 是 per-app 的，所以只能逐模块改」时，按这四问走）
+
+1. **这个值在框架里最终落到哪个对象/字段上？** —— 落到**运行期可写的对象**上 ⇒ 可能能绕过属性绑定。
+2. **框架自己的设置器在什么顺序执行？** —— `getOrder()` 值 + 我们能不能排在它后面（Boot 4 的 `TomcatWebServerFactoryCustomizer` = **0**）。
+3. **共享层能不能被所有目标模块自动加载？** —— 本仓靠**组件扫描** ⇒ `com.rag.common` 里的 Bean 对 10 个 api 全部生效 ⇒ **零 api 模块改动**（这与 T-6「改 1 处 ⇒ 10 个 api 全部生效 ⇒ 不碰任何 api 模块的代码」是同一手法）。
+4. **「必须改 N 个模块」这个结论，是从「属性绑定是唯一入口」推出来的，还是实测出来的？** —— 前者是**假设** ⇒ 必须实测（§3.3）。
+
+### 教训
+
+> **「修法 A 被边界挡住」≠「这条漂移不可修」。**
+> 边界约束的是**写哪些文件**，不是**能不能改变行为** ——
+> 共享层（`service/common`）本来就是**跨域行为的唯一合法落点**，
+> 而它在 10 个 api 上下文里**自动生效** ⇒ 「碰不到某个域的文件」≠「碰不到那个域的行为」。
+>
+> ⚠️ **反向也要成立**：共享层会**改变 favorite 的可观察行为**（本次是把它本地的 `5003` 变成 Go 的 `400`）⇒
+> **不能静默** ⇒ 必须写进台账并告知该域 owner（global 不碰它的代码，但共享层会改它的行为）。
+
+### 出处
+
+- 踩坑位置：`docs/DRIFT/global/cross-domain.md` §二·十一（X-6）第九轮结论（**已作废**）→ 第十一轮改判
+- 关联：`docs/DRIFT/global/cross-domain.md` §二·十一 ③ 之二（共享层修法的逐条取证）
+- 2026-10-25，`align/global`
+
+---
+
 ## 变更记录
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | **第十一轮新增 PIT-GLOBAL-012** —— 「per-app 配置」≠「只能逐模块改」⇒ 第九轮把 X-6 误判成 favorite 边界下的永久阻塞 ⇒ 第十一轮找到共享层修法（`Connector.setMaxParameterCount(-1)` + Boot customizer 顺序 + `com.rag.common` 组件扫描 10/10）⇒ **该漂移可修、favorite 零触碰**；含四问判据 + 「共享层会改别的域行为 ⇒ 不能静默」的教训 |
 | 2026-10-25 | **第七轮新增 PIT-GLOBAL-011** —— 裸 `ServerCallHandler` 造的「慢服务」**从不执行** ⇒ task + follow 两个域的同名测试**绿但空转**；含探针实测输出、两种裸 handler 的分类判据、修法与变异测试要求 |
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 PIT-GLOBAL-005（全量构建偶发红的判定三步 + 基线对照的 worktree 做法）· PIT-GLOBAL-006（真源分层的指针） |

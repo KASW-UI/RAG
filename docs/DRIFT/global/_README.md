@@ -131,7 +131,7 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 | 事实投递链路 | `like`/`comment`/`favorite` 的 rpc ↔ **仓外 DC 平台** | ✅ **已闭合**（B2）—— 末端 = 仓外 `POST /v1/events`；仓内两侧 4↔4 对齐 ⇒ [`cross-domain.md`](cross-domain.md) §二·七 |
 | 社区消费者差异 | Go 用 `like`，RAG 不用 | ⏸ **仍未决**（交接 #9，与 `DRIFT-LIKE-003` 同一条） |
 | 裸 `ServerCallHandler` 不被 dispatch | **task + follow**（2026-10-25 实测扩面） | 🔴 **已确证**（第七轮探针）—— grpc-java 不向裸 handler 派发 `onHalfClose` ⇒ 两个域的「造慢服务」测试**绿但空转** ⇒ 修法下轮落地（`cross-domain.md` §二·八） |
-| `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🔴 **未修 · 跨域 · 待拍板**（2049~10000 段且非空值 ≤2048 ⇒ Go 200 / RAG 5001） |
+| `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🟡 **未修 · 可修（共享层）**（总数 ≥2048 且非空值 ≤2048 ⇒ Go 200 / RAG 5001）—— ⚠️ **2026-10-25 第十一轮推翻了自己的「favorite 边界下永久阻塞」结论**：上限可在运行期由 `service/common` 改掉（`Connector.setMaxParameterCount(-1)`）⇒ **10 个 api 模块零改动 ⇒ favorite 零触碰** ⇒ 修法落 `service/common`（global 单写权内）⇒ **不是拍板项、不需签字** ⇒ 见 [`cross-domain.md`](cross-domain.md) §二·十一 |
 | DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🟡 **部分闭合（2026-10-25 B3）** —— 查出**已有预设本身已失效**（users/message）⇒ 修好 + 扩到 `comment` ⇒ **可跑的域 1 → 4**；🔴 产出新差异 **X-10**（`message` 域索引列两侧不同）⇒ ✅ **已签字认账**（⚠️ **销账日 = 2026-10-23**，真实记录 = message 域 `SD-2026-10-23-06`：保留 RAG 的复合索引；global 侧的 `SD-2026-10-25-03` 已撤销为重复登记）；⚠️ 仍缺 article/like/hot/follow/favorite 的**双侧库环境** |
 
 ---
@@ -170,9 +170,16 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 ## 七、开工前的纪律
 
 1. **本域是 `service/common/**` 的唯一合法写点** —— 别的域只读（§二 边界表）。
-1b. ⚠️ **写权扩展（2026-10-25 用户授权）** —— 用户明确：「**你有对除了 favorite 外其他所有代码的权限**」
+1b. ⚠️ **写权扩展（2026-10-25 用户授权 + 同日重申）** —— 用户明确：「**你有对除了 favorite 外其他所有代码的权限**」
    ⇒ ⇒ `global` **可以**改**除 `favorite` 外**任何域的代码与文档
    ⇒ ⚠️ **但 `favorite` 一律不碰**（用户原话：「global 里的微服务只有 favorite 不是」）
+   ⇒ 🔴 **2026-10-25 用户再次重申：「你没有 favorite 的所有权限」** ⇒ 口径收紧为：
+   **favorite 域的代码、配置、测试、台账 —— 一律零改动**（不是「代码可改但别乱动」）。
+   ⇒ ⚠️ **但「碰不到 favorite 的文件」≠「碰不到 favorite 的行为」** ——
+   **`service/common` 是共享层，它改了就影响所有域（含 favorite）** ⇒ 这是**合法**的（共享层就是干这个的），
+   但**必须记账并告知该域 owner** ⇒ 不能静默改别人的可观察行为。
+   ⇒ 📌 **由此推出一条纪律**（⇒ [`docs/Pitfalls/global/cross-domain.md` §PIT-GLOBAL-012](../../../Pitfalls/global/cross-domain.md)）：
+   **「修法 A 被边界挡住」≠「这条漂移不可修」** ⇒ 判「不可修」之前必须先查**共享层路径**。
    ⇒ ⚠️ **单写权仍然成立且方向相反**：`service/common/**` **只有 `align/global` 能写**，别的域只读
    ⇒ ⇒ 因此**跨域改动**（同时动 common + 别的域）**必须同一次提交**（§五 规则 2）。
 2. **凡要改 `service/common` + 别的域的代码 ⇒ 同一次提交**（§四 那个循环依赖的教训）。
@@ -188,6 +195,7 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | ✅ **第十二轮（favorite 零权限重申 ⇒ 推翻自己「X-6 永久阻塞」的结论）** —— 用户重申「**你没有 favorite 的所有权限**」⇒ ① 🔴 **X-6 改判：不是 favorite 边界下的永久阻塞** —— 第九轮那句「修法必然要动 `favorite-api`」**只覆盖「逐模块改 yaml」这一条修法**；本轮实测**共享层修法存在**（`Connector.setMaxParameterCount(-1)` + Boot customizer 顺序 `@Order` > 0 + `com.rag.common` 组件扫描 **10/10**）⇒ **10 个 api 模块零改动 ⇒ favorite 零触碰** ⇒ ⇒ **不是拍板项、不需签字认账** ⇒ 落 `service/common`（global 单写权内）② ✅ **连带影响面复核**：X-4（favorite 半边）**仍阻塞**（必须删 favorite 自己的 10 处调用）· X-9（favorite 那份复制品永久留存）· X-7（只读库 ⇒ 不受影响）③ 🆕 **踩坑留痕 `PIT-GLOBAL-012`**（「per-app 配置」≠「只能逐模块改」⇒ 判「不可修」前必须先查共享层路径）④ §七 纪律 1b **口径收紧**（favorite 域代码/配置/测试/台账**一律零改动**；但「碰不到文件」≠「碰不到行为」⇒ 共享层改动必须记账并告知该域 owner） |
 | 2026-10-25 | **第六轮（签字 + 授权范围）**：① **`SD-2026-10-25-CAND-12` → `SD-2026-10-25-02`（已签字）** —— T-4 资源面残留是**框架限制** ⇒ 不存在决策空间 ⇒ 签字只认账事实、**不改任何代码** ② 🔴 **X-10 用户签字** ⇒ 保留 RAG 的 `(recipient_id, is_read)` 复合索引，**不改回** Go 的单列（根因 = Go 侧 gorm tag 的 `priority:1` 写到了另一个索引名）；配套：迁移脚本注释订正（留指针）+ DRIFT 侧移除该条只留指针（§5.3b）③ **#8 销账** —— `docs/Pitfalls/common/_signed-deviations.md` 确认是 0 字节错放文件 ⇒ 删除 ④ **记录写权扩展**：用户授权 global 改**除 favorite 外**所有域的代码（§七 纪律 1b） |
 | 2026-10-25 | ✅ **第十一轮（T-4 资源面已修 · 方案⑤ 落地）** —— 用户拍板「**CAND-12：主动探测写（周期 flush()）（签字偏离）**」⇒ 落地「主动探测写 + gRPC `Context` 取消」⇒ **在飞 gRPC 会被提前取消**（实测 **461ms**）⇒ 🆕 签字 **`SD-2026-10-25-04`**（wire 偏离：客户端先收到 N 行 `103 Early Hints`；快请求零影响）+ 残留时序差 ⇒ ❌ 原 `SD-2026-10-25-02` **撤销**（问题被修掉 ⇒ 不需签字）
 | 2026-10-25 | ✅ **第十轮（T-6 / T-7 / T-8 归因定位）** —— 🔴 **原落点标注有误**（`GoStyleRouterErrorResponses.java:83` 只管 404/405）⇒ 三条分属三层：**T-6** = Spring JSON converter（🟢 可修，被 hot 域 `SD-HOT-API-006` 挡住）· **T-7** = Tomcat 容器层（🔴 真框架限制）· **T-8** = `common` HTTP 入口（🟢 可修，不需拍板）⇒ 「三条同落点一次改」**作废**
