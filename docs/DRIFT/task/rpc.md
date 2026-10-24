@@ -21,7 +21,7 @@
 | 证据强度 | ✅✅✅ **Kafka 端到端活体对拍**（2026-10-23 23:4x，真 Kafka + 真 Redis + 真 PG，两侧同批消息比最终态，见 §四·三）· ✅✅✅ **Kafka 畸形消息活体对拍**（2026-10-24，五个用例，见 §四·五·二）· ✅✅ **gRPC 双向跨语言对拍**（2026-10-24，Java 客户端 + **Go 客户端**各打两端，见 §四·五·一）· ✅ 真启动 + 真 PG 16 容器 |
 | DDL 对拍 | ✅ **GORM AutoMigrate 产物 vs Flyway 产物逐列一致**（本轮实测，见 §四·二） |
 | ⚠️ 仍未覆盖 | ⓿ **「Kafka 写入 → task-api 读到」这条跨域闭环**未做活体对拍 —— 但两侧的读写 Redis key **本来就不一致**（Go 侧也读不到自己写的缓存），⇒ **不是 RAG 的缺陷**，见 §五 第 7 条；① ⚠️ **goka 的「表 topic」config（`cleanup.policy` / `retention.ms`）未做逐项对照** —— 但已实测「compact 不按时间删」且 Go 侧**不创建** topic（§四·七）⇒ 两侧**都不管** topic 生命周期 ⇒ 一致；② ⚠️ **yaml 里查出了三类「死配置」**（`spring.mybatis-plus.*` / `otel.*` / `spring.jpa.*`，§四·九）—— **零行为影响**（三处逐一核过），但 `otel.*` **与 Go 存在观测差异**（Go 真导出 span，Java 侧 no-op）⇒ **全部是跨域共性**（8~20 个模块同款），本域不单方面修 |
-| 测试 | **104 tests / 0 failures / 0 errors / 0 skipped**（其中 15 条真 PG、**9 条真 Redis**；task-api 另 90 条，合计 **194**） |
+| 测试 | **106 tests / 0 failures / 0 errors / 0 skipped**（其中 15 条真 PG、**9 条真 Redis**、**2 条真 gRPC server**；task-api 另 90 条，合计 **196**） |
 
 ### 〇·一、本组件的守门测试清单（2026-10-24 复核补登）
 
@@ -38,6 +38,7 @@
 | `RedisPipelinesRealRedisGateTest`（9） | **DRIFT-TASK-RPC-004/005**：pipeline 语义（**不是** MULTI/EXEC）＋ 错误**向上抛**不吞 | **真 Redis**（非 mock）—— 这是「整条消息链路是死的而 81 条测试全绿」那次的教训 |
 | `TaskProgressUpsertParityTest`（15） | **DRIFT-TASK-RPC-003**：两条 upsert 与 Go 的 `AutoMigrate` 产物逐字对齐 | **真 PG** ＋ `@EnabledIfDockerAvailable` ⇒ **无 Docker 时会静默全跳** ⇒ CI 必须有 Docker |
 | `TaskServiceGrpcImplWireTest`（4） | **wire 层**：客户端真正收到的 gRPC code + description（Go `get_task_logic.go` 的 `codes.InvalidArgument` / `"user_id invalid"`） | **真 channel**（InProcess）—— 领域层抛对了 ≠ 客户端收到了 |
+| `TaskGrpcInterceptorWiringTest`（2）🆕 | **gRPC 拦截器注册链**（Go `task.go:28` `DisableNativeRpcTimeout` ＋ `task.go:44` `AddUnaryInterceptors(NewUnaryServerInterceptor(timeout, SlowThreshold()))`）：**服务端超时真的由容器里的 `GrpcServerConfigurer` 施加到 server 上**（≈300ms 返回 `DEADLINE_EXCEEDED`，而不是等满客户端 5s deadline）＋ 生产 `application.yml` 的 `observability.rpc-timeout` 必须是 **2s**（Go `task.yaml` 未配 ⇒ 走 go-zero `zrpc/config.go` 的 `default=2000`） | **真 gRPC server**（用容器里那个 `GrpcServerConfigurer` 装配一个「睡 10 秒」的服务）＋ **真 PG**<br>⚠️ **只断言「容器里有 `ServerInterceptor` Bean」是假绿** —— devh starter 3.1.0 **从不自动注册**它（common 域已 `javap` 证伪，H2）⇒ 缺 `@Bean GrpcServerConfigurer` 时超时/deadline 传播/span **全部静默消失** |
 | `TaskSinkConsumeTest`（19） | 两个 sink 的消费路径（进度写 Redis + `like:cnt` 语义） | mock 领域层 |
 | `TaskDomainServiceTest`（19） | `GetTask` 的领域逻辑（合并任务定义、pack/unpack 进度） | mock 数据层 |
 | `TaskEventParsingTest`（21） | `LogEvent` 解析（`uid <= 0` / `total <= 0` 的拒绝语义） | 纯函数 |
@@ -404,6 +405,31 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
 | 段数 ≠ 3 ⇒ 0 | `get_task_logic.go:122-124` | `unpackProgressValue` | ✅ |
 | `required_progress` 取自**任务定义**而非 DB `target` | `get_task_logic.go:86-87` 注释 + `:87` | `TaskDefs` + `TaskDomainService:126` | ✅ |
 | 两条任务定义（190/1902, 3/5, 中文名与 desc） | `model/taskModel.go:22-25` | `TaskDefs.ALL_TASK_DEFS` | ✅ 逐字一致 |
+
+### gRPC 拦截器注册链（`task.go:28,44` ↔ `TaskRpcApplication` + `RpcServerInterceptorFactory`）
+
+> 🆕 **2026-10-24 20:1x 三次复核补核**：这条契约**此前从未进入本台账**（台账里连
+> `GrpcServerConfigurer` / `RpcServerInterceptorFactory` 都没出现过），
+> 而 **Go 侧是显式注册的**（行为层，不是表达层）⇒ 属于**必须对照却漏掉**的一类。
+
+| 行为点 | Go 出处 | RAG 出处 | 结论 |
+|---|---|---|---|
+| 关掉 go-zero 自带的 zrpc 服务端超时，**取出**生效 timeout | `service/task/rpc/task.go:28` `rpcTimeout := observability.DisableNativeRpcTimeout(&c.RpcServerConf)` | `TaskRpcApplication` `@Import(ObservabilityProperties.class)` ＋ `application.yml` 的 `observability.rpc-timeout: 2s` | ✅ 口径一致（见下一行） |
+| timeout 的**生效值** = **2000ms**（`task.yaml` **未配** Timeout ⇒ 走 go-zero 默认） | `task.yaml` 无 `Timeout` 键 ⇒ go-zero `zrpc/config.go` 的 `Timeout int64 `json:",default=2000"`` | `application.yml:231` `rpc-timeout: 2s` | ✅ **2s = 2s**（`TaskGrpcInterceptorWiringTest` 第 2 条锁死） |
+| **显式**把拦截器挂到 server 上（**不是**自动注册） | `service/task/rpc/task.go:44` `s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, observability.SlowThreshold()))` | `TaskRpcApplication.rpcInterceptorConfigurer`：`server -> server.intercept(rpcUnaryServerInterceptor)` | ✅ **两件套齐**（`@Import(RpcServerInterceptorFactory.class)` ＋ `@Bean GrpcServerConfigurer`） |
+| 拦截器带 **timeout ＋ slow threshold** 两个参数 | `observability/rpc.go:25-28` `NewUnaryServerInterceptor(timeout, slowThreshold)`，`slowThreshold <= 0` ⇒ 回退 `DefaultSlowThreshold` | `RpcInterceptor`（`common` 域）：`markTimeout` ＋ `markDurationAndSlow` | ✅ 两个参数都有对应物 |
+| 超时把 in-flight 调用打断（**服务端**提前返回 `DEADLINE_EXCEEDED`） | `observability/rpc.go:38-55` `context.WithTimeout` ＋ 独立 goroutine 跑 handler | `RpcInterceptor` 用 `ScheduledExecutorService` 到时 `close(DEADLINE_EXCEEDED)` | ✅ **运行期实测**：≈300ms 返回，不是等满客户端 5s deadline |
+
+⚠️ **这条为什么必须单独守**：devh 的 `grpc-server-spring-boot-starter` 3.1.0 **从不自动注册**
+`ServerInterceptor` Bean（common 域已用 `javap` 对 jar 证伪，H2）⇒ **只产出 Bean 而没有
+`GrpcServerConfigurer` ⇒ 链路上什么都不会发生，且不报错** ⇒
+**「`ctx.getBean(ServerInterceptor.class)` 断言照样是绿的」**（AGENTS.md §3.3 的经典形态）。
+⇒ `TaskGrpcInterceptorWiringTest` 起**真 gRPC server** 来测，且已做 ✅ **变异测试**：
+摘掉 `server.intercept(...)` ⇒ 用例**红**（耗时从 ≈300ms 退到 **5011ms** = 等满客户端 deadline）
+⇒ **证明它不是假绿**。
+
+⚠️ **跨域提醒**：**follow / message / users-user 三域已有同类守门测试，本域此前没有**
+⇒ 「别的域有测试」**不等于**「本域有」⇒ 跨域共有的契约，**各域要各自守**（见 `PITFALL-TASK-RPC-33`）。
 
 ### 点赞 sink（`like_sink.go` ↔ `UserLikeProgressSink`）
 
@@ -1260,7 +1286,87 @@ KEEP_UP=1 ./tools/difftest/run-task-offset-oldest.sh # 跑完保留服务与容�
 ⚠️ 第 6 层的判定要**认两种登记形态**：纯类名（`TaskKafkaTopics`）与带路径的形式
 （`config/TaskKafkaTopics`）⇒ 否则自己写的表会被判成「未点名」（本轮踩到）。
 
-### 四·十·五、复核时踩到的 3 个坑（**都在脚本自己身上**）
+### 四·十·四·三、🔴 第三轮复核（2026-10-24 19:48）：查出的 **commit 清单**结构性缺陷
+
+> 前两轮复核查的是「**内容**对不对」；本轮改查「**元信息**对不对」
+> ⇒ 查出**台账自己的 commit 清单**有 4 类结构性缺陷。
+
+#### ① 4 类缺陷（全部已修）
+
+| # | 缺陷 | 证据 | 后果 |
+|---|---|---|---|
+| 1 | **8 行 commit 栏是占位符「（本轮）」** | 第五轮 2 行 + 第六轮 4 行 + 第五轮之二 2 行 | 占位符**既不是哈希、也不是 commit** ⇒ **完全逃过**「commit 覆盖」判据 ⇒ 读者无法定位它们对应哪个 commit |
+| 2 | **同一个 commit 被写成多行** | `c73d9cf` **3 行**（散落在第五轮与第六轮两处）/ `c52cbea` **2 行** / `c886406` **4 行** | 读者会把 **3 个 commit 误读成 9 个** ⇒ 清单整体**虚增 6 行**（50 行 vs 实际 44 个 commit） |
+| 3 | **2 个 commit 完全没登记** | `79d4aac` / `c886406` | 补登链在 `79d4aac` 处**断掉**（它补登了 `185448c`，自己却没人补） |
+| 4 | 🔴 **「第四轮『写成 4 行却只对应 1 个 commit』」缺陷第三次复发** | 第一次：第四轮；第二次：第五轮；第三次：第六轮 —— **都在同一张表**（commit 清单） | ⇒ 「靠人记着别这么写」**必然复发** ⇒ 判据必须**机械化** |
+
+#### ② 为什么「集合覆盖」这条不变式**抓不到**它们
+
+旧判据是「**每个 commit 的哈希是否在台账里出现过**」—— 只问「**在不在**」，不问「**几行**」：
+
+| 缺陷 | 为什么旧判据看不见 |
+|---|---|
+| 占位符行 | 它**不是哈希** ⇒ 不进「已登记」集合；它**也不是 commit** ⇒ 不进「漏登记」集合 ⇒ **两边都不沾** ⇒ 完全不可见 |
+| 同一个 commit 多行 | 哈希**在**表里 ⇒ 「已登记」判定通过 ⇒ **行数是 1 还是 3 不影响判定** |
+| 行数 ≠ commit 数 | 集合比较**没有基数** ⇒ 50 行对 44 个 commit 与 44 行对 44 个 commit **判出来一样** |
+
+⇒ 判据从「**集合覆盖**」升级为「**一一对应**」。
+
+#### ③ 复核器的 3 个新判据（第 3 层）
+
+| 判据 | 抓什么 |
+|---|---|
+| **占位符残留** | 只允许 **1 个**占位行，且必须在清单**末尾**（那是「本轮还没提交」的那一行） |
+| **同一个 commit 多行** | 同一哈希出现 >1 次 ⇒ 报「读者会把 1 个 commit 误读成 N 个」 |
+| **登记行数守恒** | 登记行数（去重哈希 + 占位）必须与 commit 数对上：提交后 == commit 数，提交前 == commit 数 + 1 |
+
+🔴 **本轮一并补上的另外 2 条「最全性」判据**（在第 3 层，与数字断言并列）：
+
+| 判据 | 抓什么 | 实测 |
+|---|---|---|
+| **编号连续性** | `PITFALL-TASK-RPC-01~32` 必须**无断号** | ✅ 连续（32 条） |
+| **悬空引用** | 台账里引用的 Pitfall / 签字偏离 **ID 必须真有定义** | ✅ 引用的 32 个 Pitfall + 2 个签字偏离全部有定义 |
+
+🔴 **另加两条**（本轮顺手补的判据盲区）：
+**登记了不在本分支上的 commit**（陈旧 / 串分支的登记）· **「台账的行提取」只认 commit 表**
+（`_README.md` 里还有开放项表 / 共享工具表 / 合并冲突表，首列同样是反引号包的东西 ⇒ 混进来判据粒度就错了；
+且 **markdown 允许两张表紧挨着（中间无空行）** ⇒ 按空行切表会把它们并成一张 ⇒ 本轮自检当场抓到）。
+
+#### ④ ✅ 变异测试**进仓**（`--mutation-test`）
+
+| 变异 | 期望 | 结果 |
+|---|---|---|
+| 清单里多一个「（本轮）」行 | 报「占位符残留」 | ✅ 精确命中 |
+| 同一个 commit 写成两行 | 报「被登记了 2 行」 | ✅ 精确命中 |
+| 删掉一行登记（非 HEAD） | 报「完全没登记」 | ✅ 精确命中 |
+| 登记一个不在本分支上的 commit | 报「陈旧登记」 | ✅ 精确命中 |
+| 台账引用了不存在的 Pitfall ID | 报「悬空引用」 | ✅ 精确命中 |
+| Pitfall 编号断号 | 报「编号不连续」 | ✅ 精确命中 |
+| `api.md` §一 标题条数造假 | 第 3 层报错（**回归**仍有效） | ✅ 精确命中 |
+| 复原后 | 第 3 层通过（阳性对照） | ✅ |
+
+⚠️ **写这套变异脚本时自己踩了一个坑（已修）**：第一版按「**改了哪个文件**」自动选判据
+⇒ 「改 `_README.md` 却跑清单判据」⇒ 那个变异**根本没被查**⇒ 判据被误判成「假绿」。
+⇒ **「改哪里」与「查哪条」是两件事**，必须**逐用例显式指定**。
+⇒ 这正是 `PITFALL-TASK-RPC-32` 说的：**判据也要有反向证据，否则「没报错」分不清是「没问题」还是「没查」**。
+
+⚠️ **为什么要进仓**：AGENTS.md 已立「**跑绿 ≠ 对**」的纪律，而「跑绿」本身也要能被证伪
+⇒ 判据必须有一条「**把台账弄坏，它就红**」的反向证据 ⇒ 进仓 = 下一任 agent 一条命令复跑。
+
+#### ⑤ 本轮的**元教训**（已进 Pitfalls 档）
+
+| Pitfall | 一句话 |
+|---|---|
+| `PITFALL-TASK-RPC-31` | 「集合覆盖」不等于「一一对应」—— **占位符**与**重复登记**会同时逃过「每个 commit 都登记过」这条不变式 |
+| `PITFALL-TASK-RPC-32` | 「同一个坑在同一处复发三次」= **靠人记不住**的证据 ⇒ 判据必须机械化，且**机械化判据自己要有反向证据** |
+
+#### ⑥ ⚠️ 本轮新增的**效力边界**（固有，查不出来）
+
+**tip commit 的那一行被删掉 ⇒ 查不出来** —— 因为「提交后未登记」与「提交前登记了 tip」两种状态
+**结构上完全对称**（都是「去重哈希 = N−1 + 1 个占位」）⇒ 复核器**无法区分**。
+⇒ 这不是判据写漏了，是**信息本身不存在**（那一刻的哈希还没出生）⇒ 只能靠「下一轮补登」收敛。
+
+### 四·十·五、复核时踩到的 4 个坑（**都在脚本自己身上**）
 
 1. ⚠️ **禁模式检查必须剥离注释** —— 否则 `auto-offset-reset`（作为反面教材写在注释里）
    会被误判成「修复被回退」。
@@ -1268,3 +1374,7 @@ KEEP_UP=1 ./tools/difftest/run-task-offset-oldest.sh # 跑完保留服务与容�
    索引错了会把它错配到 goka 的同名文件上 ⇒ 报出假的「行号超出」。
 3. ⚠️ **shell 里的 `&` 会拆路径** —— `Sea-RideTheWind_golang` 里的 `&` 不加引号会被 bash 拆成两段
    ⇒ 脚本参数变空 ⇒ 报出「107 条全部找不到」的假警报。
+4. ⚠️🆕 **markdown 里两张表可以紧挨着（中间没有空行）** —— 按空行切表会把它们**并成一张**
+   ⇒ 后一张表的行混进「commit 清单」⇒ 判据的粒度就错了。
+   ⇒ **本轮第 0 层自检当场抓到**（样本里故意让两张表紧挨着）⇒ 切表边界必须靠「**分隔行**」，
+   不能靠空行；且只认「表头首列 == commit」的表。
