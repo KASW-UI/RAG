@@ -130,14 +130,18 @@ Go 侧通读 36 个文件、RAG 侧通读 71 个文件。
 
 | 编号 | 维度 | 一句话 | 风险 | 状态 |
 |---|---|---|---|---|
-| **DRIFT-MSG-V-001** | 结果语义 | `listNotifications(unread_only=true)` 的 **`total` 丢了 `is_read=false` 过滤** | HIGH | 待修 |
-| **DRIFT-MSG-V-002** | 外部交互 | 广播通知**单条 foreach 多行 INSERT**，收件人 ≥ 5462 时整批失败 | HIGH | 待修 |
-| **DRIFT-MSG-V-003** | 错误身份 | DB / 内部故障的业务码 **Go `1015` → RAG `5001`/`5008`** | MED-HIGH | 待决策 |
-| **DRIFT-MSG-V-004** | 排序语义 | 会话消息排序键 **`created_at asc` → `id asc`** | MED | 待修 |
-| **DRIFT-MSG-V-005** | 排序语义 | 会话列表**缺次级排序键 `updated_at DESC`** | MED | 待修 |
-| **DRIFT-MSG-V-006** | 副作用集 | `markConversationRead` **多写一列** `conversation.updated_at` | MED | 待决策 |
-| **DRIFT-MSG-V-007** | 序列化 | 时间列 **`timestamptz` → `timestamp`** + 时区解读不同 | MED（条件性） | UNRESOLVED |
-| **DRIFT-MSG-V-008** | 输入解释 | `String.trim()` vs `strings.TrimSpace` **空白集不同** | MED | 待修 |
+> ⚠️ **2026-10-24 第十一轮前向指针** —— 下面这张表的「状态」列是 **2026-10-22 第二轮**的判断，
+> **V-001 / V-002 / V-004 / V-005 / V-008 已修、V-003 已签字（收窄）、V-006 已修、V-007 已修**
+> ⇒ 与同文件 §0 的速查表**一致**（那边已全部更新）⇒ **不要**照着这列「待修」去估工作量。
+
+| **DRIFT-MSG-V-001** | 结果语义 | `listNotifications(unread_only=true)` 的 **`total` 丢了 `is_read=false` 过滤** | HIGH | ✅ 已修（第一轮） |
+| **DRIFT-MSG-V-002** | 外部交互 | 广播通知**单条 foreach 多行 INSERT**，收件人 ≥ 5462 时整批失败 | HIGH | ✅ 已修（第一轮） |
+| **DRIFT-MSG-V-003** | 错误身份 | DB / 内部故障的业务码 **Go `1015` → RAG `5001`/`5008`** | MED-HIGH | ⏸ 已签字（第八轮**收窄**到只剩「不回显原始错误文本」） |
+| **DRIFT-MSG-V-004** | 排序语义 | 会话消息排序键 **`created_at asc` → `id asc`** | MED | ✅ 已修（第一轮） |
+| **DRIFT-MSG-V-005** | 排序语义 | 会话列表**缺次级排序键 `updated_at DESC`** | MED | ✅ 已修（第一轮） |
+| **DRIFT-MSG-V-006** | 副作用集 | `markConversationRead` **多写一列** `conversation.updated_at` | MED | ✅ 已修（第一轮） |
+| **DRIFT-MSG-V-007** | 序列化 | 时间列 **`timestamptz` → `timestamp`** + 时区解读不同 | MED（条件性） | ✅ 已修（第七轮 V-020：8 列改 `TIMESTAMPTZ`） |
+| **DRIFT-MSG-V-008** | 输入解释 | `String.trim()` vs `strings.TrimSpace` **空白集不同** | MED | ✅ 已修（第一轮） |
 | **DRIFT-MSG-V-009** | 可观测指标 | 直方图 **bucket 布局不同**（DefBuckets vs Micrometer 默认） | LOW | ✅ **已签字留档**（`SD-2026-10-24-02`，2026-10-24） |
 | **DRIFT-MSG-V-010** | 错误传播 | 错误**解包深度不同**（Go `errors.As` 穿透 vs Java `instanceof` 不穿透） | LOW / latent | ✅ **已签字留档**（`SD-2026-10-24-03`，2026-10-24） |
 

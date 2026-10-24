@@ -213,7 +213,7 @@ Java: ConversationMessageEntity.conversationId 是 primitive long（未设置 �
 
 ```
 Go:  zrpc RpcServerConf.Timeout 未配 → go-zero 默认 2000ms（zrpc/config.go:46）→ 服务端强制 deadline
-Java: application.yml:130  observability.rpc-timeout: 2s          ← 配了
+Java: application.yml:208  observability.rpc-timeout: 2s          ← 配了
       → ObservabilityProperties（common/spring，@Component + @ConfigurationProperties("observability")）  ← 绑得上
       → RpcServerInterceptorFactory 产出 ServerInterceptor Bean
          （因 MessageRpcApplication 的 scanBasePackages 含 "com.rag.common"，该 Bean 大概率存在）
@@ -271,7 +271,7 @@ Java: String.trim() → "\u00A0"  → 非空 → 通过校验 → 写入一条 c
 | 维度 | 证据 |
 |---|---|
 | **proto 契约逐字节一致** | 两份 `message.proto` 除 `option go_package` / `java_package`+`java_multiple_files` 外**完全相同**：19 个 message、3 个枚举（`NotificationKind` / `SenderRole` / `ConversationStatus`）、9 个 service 方法的字段号与类型全同 |
-| **错误码与文案表** | 18 个业务码（200/500/1015/5001-5008/5101-5102/5201-5207）+ 22 条文案 1:1；`msg→code` 反查表排除 200/500 的逻辑一致；未知码 fallback `"FAIL"` 一致 |
+| **错误码与文案表** | 20 个业务码（200/500/1015/5001-5008/5101-5102/5201-5207）+ 20 条文案 1:1；`msg→code` 反查表排除 200/500 的逻辑一致；未知码 fallback `"FAIL"` 一致 |
 | **9 个 RPC 的参数校验分支** | `userId>0` / `operatorId>0 && conversationId>0 && validRole` / `senderId>0 && content!="" && validRole` 等逐条一致 |
 | **`normalizeLimit` 与配置值** | `≤0→default`、`maxLimit>0` 截断；配置 `default 20 / max 100 / pageSize 200` 与 Go `etc/message.yaml` 一致 |
 | **四个会话权限函数** | `canonicalParticipants` / `isParticipant` / `peerOf` / `canSend` 逐条一致，**含 `PENDING` 时排除 pending_sender 本方这条易漏规则** |
@@ -301,15 +301,16 @@ Java: String.trim() → "\u00A0"  → 非空 → 通过校验 → 写入一条 c
 
 **仍然存在的证据缺口（勿当成已验证）**：
 
+> ⚠️ **2026-10-24 第十一轮 · 整表已被推翻** —— 下面 5 行是 **2026-10-23 第四轮**的缺口清单，
+> **五项现已全部关闭** ⇒ 这张表整体只作历史留档，**当前状态见 §9 的 Unresolved 表**。
+
 | # | 缺口 | 影响 |
 |---|---|---|
-| **UNRESOLVED-MSG-001** | JVM 运行时区未知 | DRIFT-MSG-010 时间戳 epoch 是否整体偏移仍未定级。查部署环境 `TZ` / `-Duser.timezone`，或两端各发一次请求比对 `created_at` |
-| **UNRESOLVED-MSG-002** | `ServerInterceptor` 挂载只有 `verify(builder).intercept(...)` 这层证据 | 「starter 会在 build 阶段 apply 所有 Configurer」属 starter 自身契约。端到端层面由 §6.6.6 的双端口对拍 + `exp-b1-timeout-cancel.sh` 兜底 |
-| **UNRESOLVED-MSG-003** | 双端口对拍的 12 档**尚未实际执行过** | 脚本已就位且 `javac` 通过、`bash -n` 通过，但**未跑过完整两套栈**（需 `run.sh --keep --serve-only` 起栈）。首次执行前不要把它当作已验证 |
-| **UNRESOLVED-MSG-004** | DRIFT-MSG-004/005/006 未各配独立防回退用例 | 它们目前只被 `MessageTransactionWiringTest` 的「上下文能起来」间接锁住。若有人删掉 `@MapperScan` / `spring-boot-flyway` / Bean 名，测试会红，但**红的原因不是断言点名了它**，而是连带失败 —— 建议后续拆出 `MessageContextWiringTest` 逐条点名 |
-
-> ✅ **2026-10-24 第九轮已关闭**：新增 `MessageContextWiringTest`（4 例，**逐条点名**）+ `MessageApiJarExecutableWiringTest`（2 例）⇒ 详见下方 Unresolved 表。
-| **UNRESOLVED-MSG-005** | `AutoMigrate`（Go 每次启动校验表结构）vs `Flyway`（Java 一次性迁移后不再校验）的存量表漂移 | 需确认是否存在已存在的非 Flyway 建表的库 |
+| **UNRESOLVED-MSG-001** ✅ 已关闭（第十一轮） | JVM 运行时区未知 | ⇒ 已被 `V-019`（JDBC URL 钉 `TimeZone=Asia/Shanghai`）+ `V-020`（8 列改 `TIMESTAMPTZ`）+ 第十轮活体对拍（两侧 `data_type` 0 差异）取代 |
+| **UNRESOLVED-MSG-002** ✅ 已关闭（第十一轮） | `ServerInterceptor` 挂载只有 `verify(builder).intercept(...)` 这层证据 | ⇒ 第八轮真双栈 12 档对拍（EXIT=0）提供端到端证据；第九轮 8 个 rpc 组件的装配层断言补齐 |
+| **UNRESOLVED-MSG-003** ✅ 已关闭（第八轮） | 双端口对拍的 12 档**尚未实际执行过** | ⇒ 真起两套栈跑过，EXIT=0，产物 `tools/difftest/message-grpc-results.txt` |
+| **UNRESOLVED-MSG-004** ✅ 已关闭（第九轮） | DRIFT-MSG-004/005/006 未各配独立防回退用例 | ⇒ 新增 `MessageContextWiringTest`（4 例，**逐条点名**）+ `MessageApiJarExecutableWiringTest`（2 例）⇒ 详见下方 Unresolved 表 |
+| **UNRESOLVED-MSG-005** ✅ 已关闭（第四轮，V-023） | `AutoMigrate`（Go 每次启动校验表结构）vs `Flyway`（Java 一次性迁移后不再校验）的存量表漂移 | ⇒ 原问题前提不成立（GORM 建的是索引）；V4 已把约束降回索引，幂等实测 8 次 `exit=0` |
 
 ---
 
@@ -320,7 +321,7 @@ Java: String.trim() → "\u00A0"  → 非空 → 通过校验 → 写入一条 c
 | 位置 | 注释/配置声称 | 实际 |
 |---|---|---|
 | `createConversationWithMessageTx:385` | 顶部类注释白纸黑字列出 6 个事务方法「放本类上 `@Transactional`」 | 全部 self-invocation，注解形同虚设 |
-| `application.yml:130` | `observability.rpc-timeout: 2s` + 三行注释解释「取 2s 对齐 go-zero 默认」 | 拦截器从未挂上，超时从未执行 |
+| `application.yml:208` | `observability.rpc-timeout: 2s` + 三行注释解释「取 2s 对齐 go-zero 默认」 | 拦截器从未挂上，超时从未执行 |
 | `doSendChatMessage:243-251` | `messageItem` 逐字段 setter 齐全，注释标注每个字段对应的 Go gorm tag | 独缺 `conversationId`，而代码里另有 3 处 `setConversationId` 在 builder 上，肉眼扫过会误判为已覆盖 |
 
 > **这三条印证并扩展了 §3.3 的现有纪律**：本项目已知的静默失效有四类
@@ -497,10 +498,10 @@ Failure:     Go 裸 error 透传（grpc Unknown(2)）；RAG 非 StatusRuntimeExc
 | 维度 | 现状 | Evidence |
 |---|---|---|
 | Spring 上下文 | `@SpringBootApplication`（**无** `scanBasePackages`）+ `@ConfigurationPropertiesScan` + `@MapperScan` + **`@Import` 显式引入 8 个 common Bean** | `MessageRpcApplication.java:64-87` |
-| gRPC server | `@GrpcService` + devh starter 自动注册；**唯一 `ServerInterceptor`（观测三件套）经 `GrpcServerConfigurer` 显式挂上** | `MessageRpcApplication.java:104-108` |
-| 超时 | `observability.rpc-timeout: 2s` → `ObservabilityProperties` → `RpcServerInterceptorFactory` → `RpcInterceptor`，到点 `close(DEADLINE_EXCEEDED)` | `application.yml:143-144`；`RpcServerInterceptorFactory.java:41-47`；`RpcInterceptor.java:148-190` |
+| gRPC server | `@GrpcService` + devh starter 自动注册；**唯一 `ServerInterceptor`（观测三件套）经 `GrpcServerConfigurer` 显式挂上** | `MessageRpcApplication.java:115-117` |
+| 超时 | `observability.rpc-timeout: 2s`（`application.yml:207-208`）→ `ObservabilityProperties` → `RpcServerInterceptorFactory` → `RpcInterceptor`，到点 `close(DEADLINE_EXCEEDED)` | `application.yml:143-144`；`RpcServerInterceptorFactory.java:41-47`；`RpcInterceptor.java:148-190` |
 | MyBatis-Plus 自动配置排序 | Boot 4 把 `DataSourceAutoConfiguration` 挪包 ⇒ MP 的 `@AutoConfigureAfter` 悬空；已用**空类桥**修复并在 imports 文件登记 | `MybatisPlusOrderingBridgeAutoConfiguration.java:49-52`；`META-INF/spring/…AutoConfiguration.imports:1` |
-| Flyway | `spring-boot-flyway:4.0.8` 在 classpath（Boot 4 拆模块后必需）；`spring.flyway.table: flyway_schema_history_message` | `pom.xml:166-169`；`application.yml:53-58` |
+| Flyway | `spring-boot-flyway:4.0.8` 在 classpath（Boot 4 拆模块后必需）；`spring.flyway.table: flyway_schema_history_message` | `pom.xml:166-169`；`application.yml:64-105`（`flyway:` 段：`baseline-version: 0` / `locations` / `table`） |
 | Web 容器 | **无** tomcat-embed-core / jetty / undertow / starter-web（仅 `tomcat-embed-el` 表达式库）⇒ **不会起 servlet 容器** | `mvn -pl service/message/message-rpc dependency:tree`（2026-10-23 隔离跑） |
 
 ---
@@ -526,7 +527,7 @@ Result 只用 5 个枚举值。Evidence 列 `[RUNTIME-PG]` = 本轮真 PG；`[RU
 |---|---|---|---|---|---|
 | 全部 9 个 | Public surface（方法数/名/序） | 9 | 9 | **EQUIVALENT** | `[CODE]` |
 | 全部 9 个 | wire 契约（字段号/类型/枚举/rpc 签名） | 22 msg+enum / 9 rpc | 同 | **EQUIVALENT** | `[CODE]` 归一化 diff 空，双侧计数 22=22、9=9 |
-| 全部 9 个 | 错误码与文案表（21 码 / 21 文案） | 一致 | 一致 | **EQUIVALENT** | `[CODE]` `errmsg.go:28-73` ↔ `MessageErrorCode`+`MessageErrorMessages` |
+| 全部 9 个 | 错误码与文案表（20 码 / 20 文案） | 一致 | 一致 | **EQUIVALENT** | `[CODE]` `errmsg.go:28-73` ↔ `MessageErrorCode`+`MessageErrorMessages` |
 | SendNotification | 校验分支 / broadcast 覆盖 / 收集停止条件 | 逐条 | 逐条 | **EQUIVALENT** | `[CODE]` |
 | SendNotification | 批量写原子性 | GORM `CreateInBatches` 自带事务 | 单 `@Transactional` 内切 200/片 | **EQUIVALENT** | `[RUNTIME-PG]` `batchInsertMustStayAtomicAcrossChunks` |
 | SendNotification | 广播规模上限 | 无上限（分 200/批） | 同（已修 V-002） | **EQUIVALENT** | `[RUNTIME-PG]` 6000 条用例 |
@@ -665,7 +666,7 @@ Go 返回 **SUCCESS + 第一页**；RAG 抛 `BadSqlGrammarException` ⇒ `Messag
 ### ✅ DRIFT-MSG-V-015 ✅ **已修（2026-10-23 第四轮）** gRPC server reflection 的暴露面两侧不对称
 
 > **⚠️ 2026-10-24 状态更正**：标题原无状态标记，**实为已修**——
-> `application.yml:103` 已钉 `reflection-service-enabled: false`（对齐 Go `pro` 模式下不注册 reflection），
+> `application.yml:139` 已钉 `reflection-service-enabled: false`（对齐 Go `pro` 模式下不注册 reflection），
 > 且**装配层已验**。详见下方「✅ FIX-MSG-V-015」。
 
 **Component**: message-rpc　**Operation**: 全部（服务级能力）
@@ -1101,7 +1102,7 @@ Go  internal/model/db.go:22-29
                                                         ^^^^^^^ 来自 conf.Mode
     etc/message.yaml:34   Mode: "disable"     ⇒ sslmode=disable，**明文，永不尝试 TLS**
 
-RAG application.yml:16
+RAG application.yml:27
       url: jdbc:postgresql://…/${POSTGRES_DB:first_db}      ← URL 里没有 sslmode
     ⇒ pgjdbc 使用文档化默认值 sslmode=prefer：先试 TLS，失败再回落明文
 ```
@@ -1143,7 +1144,7 @@ RAG application.yml:16
 | **CASE-R05** | `javap -c GrpcServerProperties` | 构造函数字节码 `iconst_1 → putfield reflectionServiceEnabled` ⇒ 默认 **true** | ✅ **V-015 的判定性证据** |
 | **CASE-R06** | `mvn -pl service/message/message-rpc dependency:tree` | 无任何 servlet 容器 jar | ✅ **DRIFT-MSG-012 可降级** |
 | **CASE-R07** | proto 归一化 diff（剥 option / 注释 / 空白） | 输出为空；`msg+enum` 双侧 22=22、`rpc` 双侧 9=9 | ✅ |
-| **CASE-R08** | 错误码/文案表双侧对读 | 21 码 + 21 文案逐条 1:1，含 `1015 "service busy"` 与未知码 fallback `"FAIL"` | ✅ |
+| **CASE-R08** | 错误码/文案表双侧对读 | 20 码 + 20 文案逐条 1:1，含 `1015 "service busy"` 与未知码 fallback `"FAIL"` | ✅ |
 | **CASE-R09** | `go-zero@v1.10.2` 源码读到**消费点** | `zrpc/config.go:46` 默认 2000ms；`serviceconf.go:35` 默认 `pro`；`zrpc/server.go:131-167` 三拦截器装配条件 | ✅ **满足 §3.3.1「必须读到消费 tag 的控制流」** |
 
 ### 8.2 关键用例的覆盖判定（哪些路径**仍然零覆盖**）
@@ -1172,7 +1173,7 @@ RAG application.yml:16
 | **UNRESOLVED-MSG-006** ✅ **已关闭（2026-10-23 第六轮）** | ~~RAG 侧 handler 抛 `Error`/panic 时客户端到底看到什么~~ | —— | ✅ 已关闭：`GoStyleRecoverInterceptor` 落地后，抛 `Error`（非 `RuntimeException`）也被兜住 ⇒ 客户端见 `INTERNAL` + description 以 `"panic: "` 开头，与 Go 的 `recoverinterceptor.go:39-42` 一致（`MessageRpcRecoverInterceptorWiringTest` 5 例，真 in-process gRPC） |
 | **UNRESOLVED-MSG-007** ✅ **前提消失（2026-10-23 第四轮，FIX-MSG-V-019）** | ~~pgjdbc `sslmode` 默认值对**行为**的实际影响~~ | —— | ✅ **不再是未知项**：JDBC URL 现在**显式**钉 `?sslmode=disable`（对齐 Go `etc/message.yaml` 的 `Mode: "disable"`）⇒ **不再依赖 pgjdbc 的文档化默认值 `prefer`** ⇒ 两侧都是「永不尝试 TLS」。⚠️ 口径：原问法是「默认 `prefer` 在开了 TLS 的 PG 上会怎样」，那已不是当前配置 |
 | **UNRESOLVED-MSG-001** ✅ **已关闭（2026-10-24 第十轮补记）** | ~~JVM 运行时区未知 ⇒ `DRIFT-MSG-010` 时间戳 epoch 是否整体偏移仍未定级~~ | —— | ✅ **已关闭**（三条各自独立成立）：<br>① **2026-10-22 用户确认部署时区 = Asia/Shanghai** ⇒ `DRIFT-MSG-V-007` 的条件化结论确定（实测方向是「RAG 比 Go **晚** 8 小时」，不是「早」—— 方向不能靠推理）；<br>② **V-019** 把 JDBC URL 显式钉上 `options=-c TimeZone=Asia/Shanghai` ⇒ 不再依赖宿主机时区；<br>③ **V-020** 把 8 个时间列改成 `TIMESTAMPTZ` ⇒ **第十轮活体对拍实测两侧列类型逐字一致**（`data_type` 0 差异）⇒ 数据**自描述瞬时**，不再依赖「一个库只由同一时区 JVM 写」 |
-| **UNRESOLVED-MSG-002** ✅ **已关闭（2026-10-24 第十轮补记）** | ~~`ServerInterceptor` 挂载只有 `verify(builder).intercept(...)` 这层证据~~ | —— | ✅ **已关闭**：<br>① **第八轮真双栈 12 档对拍**（EXIT=0）提供**端到端**证据 —— 拦截器链上的行为（熔断码 / shedding 码 / recover 的 `INTERNAL` + `"panic: "` 前缀）在**真实 gRPC 往返**上逐条一致；<br>② **第九轮 V-026** 给 8 个 rpc 组件各补了 `*ProtectionChainWiringTest`（装配层断言「业务 interceptor 真被调到」+「拿到的是**包装过的** call」）⇒ 装配层证据也齐了 |
+| **UNRESOLVED-MSG-002** ✅ **已关闭（2026-10-24 第十轮补记）** | ~~`ServerInterceptor` 挂载只有 `verify(builder).intercept(...)` 这层证据~~ | —— | ✅ **已关闭**：<br>① **第八轮真双栈 12 档对拍**（EXIT=0）提供**端到端**证据 —— 拦截器链上的行为（熔断码 / shedding 码 / recover 的 `INTERNAL` + `"panic: "` 前缀）在**真实 gRPC 往返**上逐条一致；<br>② **第九轮 V-026** 给 8 个 rpc 组件补了装配层断言（装配层断言「业务 interceptor 真被调到」+「拿到的是**包装过的** call」）⇒ 装配层证据也齐了<br>⚠️ **2026-10-24 第十一轮口径更正**：具体是 **7 个 rpc 组件各新增 `*ProtectionChainWiringTest`（article / comment / favorite / follow / like / task / admin，各 2 例）+ `user-rpc` **复用并改造**既有的 `GrpcInterceptorWiringTest`（2 例）** ⇒ 合计 **8 组件 16 例**（不是「8 个组件各新增一个测试类」） |
 | **UNRESOLVED-MSG-008** 🆕 | `Flyway` 独立账本在**三个模块同库**下真的不撞 | 本轮只证了 **message-rpc 单模块**建出 `flyway_schema_history_message`；`like-rpc` / `article-rpc` 未同时启动 | 三模块同时连同一个 `first_db`，`\dt` 确认三本账 + 各自 3 条 `success`<br>⚠️ **本工作树不能做**（需 `like-rpc` / `article-rpc` 同启 ⇒ **跨域**） |
 | **UNRESOLVED-MSG-009** ✅ **已关闭（2026-10-24 第十轮，用户拍板）** | ~~时间列 `TIMESTAMP`（非 `TIMESTAMPTZ`）在**多实例/多时区**下是否仍自洽~~ | —— | ✅ **关闭依据**：<br>① **原问法的前提已消失** —— 它建议的「补一条 `V4` 迁移」**已由 `V5__message_time_columns_timestamptz.sql` 做完**（8 列全部 `TIMESTAMPTZ`）；<br>② **第十轮双侧活体对拍实测**：两侧 `data_type` **0 差异**（全部 `timestamp with time zone`）⇒ 数据**自描述瞬时**，不再依赖「一个库只由同一时区 JVM 写」；<br>③ **剩下的不是代码问题** ——「同一个库被不同时区的 JVM 写」属**部署口径**，无代码可修 ⇒ 转为部署约束（见下）<br>⚠️ **关闭口径**：关闭的是「**代码侧**是否存在不自洽」这个未知项；**部署侧**的约束仍然成立，只是不再是一条待办 |
 
@@ -1186,7 +1187,7 @@ RAG application.yml:16
 | 2 | 正常路径是否一致 | ✅ 正常路径一致（负 offset 的异常输入路径已于 2026-10-23 第二轮修好，见 V-014） |
 | 3 | 边界输入是否一致 | ✅ **负 `offset` 已一致**（V-014 于 2026-10-23 第二轮修好：Go 忽略、RAG 现在也忽略 ⇒ 返回第一页） |
 | 4 | NotFound / Empty / Null 是否一致 | ✅ 会话/通知不存在、extra 为空、时间为 null 三态逐条一致 |
-| 5 | Error meaning 是否一致 | ✅ 业务错误码 21/21 一致；❌ DB 故障码已签字不一致（V-003） |
+| 5 | Error meaning 是否一致 | ✅ 业务错误码 20/20 一致；❌ DB 故障码已签字不一致（V-003） |
 | 6 | Error propagation 是否一致 | ⚠️ 业务错误一致；DB 故障的传播形态已签字不同（V-003）；panic 传播 ✅ 已关闭（`UNRESOLVED-MSG-006`，recover 落地） |
 | 7 | External dependency failure 是否一致 | ⚠️ user/admin 失败兜底一致；**下游故障时两侧都无超时兜底**（共同缺陷，非漂移） |
 | 8 | Cache hit / miss 是否一致 | N/A（本组件无缓存） |
@@ -1199,11 +1200,15 @@ RAG application.yml:16
 | 15 | Concurrency semantics 是否一致 | ✅ 都靠 DB 唯一索引 + 事务，无应用层锁 |
 | 16 | Authentication / Authorization 是否一致 | ✅ 两侧都**不做**鉴权（真源设计，非遗漏） |
 | 17 | Serialization semantics 是否一致 | ✅ 结果一致（V-017 的 `isRead` 字段名已于 2026-10-23 第二轮修好） |
-| 18 | Lifecycle 是否一致 | ❌ reflection 暴露面不对称（V-015）；服务发现后端不同（etcd vs Nacos，历史 UNRESOLVED-MSG-V-001） |
+| 18 | Lifecycle 是否一致 | ✅ **reflection 暴露面已对齐**（V-015 已修：`application.yml:139` 钉 `reflection-service-enabled: false` + `MessageGrpcReflectionExposureWiringTest` 2 例）<br>⚠️ 服务发现后端仍不同（etcd vs Nacos）⇒ `UNRESOLVED-MSG-V-001`，**跨域**（user/admin 域） |
 
 ### **最终判定：`SEMANTICALLY NOT EQUIVALENT`**
 
-**理由（三条各自独立成立）**
+> ⚠️ **2026-10-24 第十一轮 · 判定重述** —— 下面三条理由是 **2026-10-23 第四轮的判定原文**，
+> 其中**两条已被本文件后续章节推翻**（`V-024` 已修、`UNRESOLVED` 大半已关）⇒
+> **不要再照着下面的旧理由去估工作量**。当前有效判定见本节末尾的「**🔁 重述后的判定**」。
+
+**理由（三条各自独立成立）** —— ⚠️ 以下为 **2026-10-23 第四轮原文**：
 
 1. **存在会改变行为的差异**：`DRIFT-MSG-V-024`（DB 异常的 status 分岔，见理由 2）。
    按 §39 的判定规则，只要存在一条会改变行为的差异即判 `NOT EQUIVALENT`。
@@ -1213,16 +1218,34 @@ RAG application.yml:16
    但**索引名不同根本不改变任何行为**（同一列的等价索引 ⇒ 查询能力 / 唯一性 / 性能完全相同），
    且该条已于第十轮**签字**（`SD-2026-10-24-01`）⇒ **从「会改变行为」的证据里撤掉**。
    ⇒ 现在这一条**只剩 `V-024` 一个支撑**。
+   ⚠️ **2026-10-24 第十一轮再更正**：`V-024` **已于第八轮修好**（rpc 兜底码 `INTERNAL` → `UNKNOWN`，
+   `MessageRpcServiceImpl.java:166`；守门 `MessageRpcUnknownStatusWiringTest` 4 例真 gRPC）
+   ⇒ **理由 1 现在没有支撑了**。
 2. **存在会改变系统应如何行为的差异**：`DRIFT-MSG-V-024`（2026-10-24 新挖出）——
    Go 侧 DB / 未知异常**原样返回** ⇒ 客户端见 `UNKNOWN`、**不计熔断失败**；
    RAG 侧 `MessageRpcServiceImpl.invoke:133-140` 把 `RuntimeException` 转 `INTERNAL` ⇒ **计熔断失败**
    ⇒ 同一个 DB 故障，两侧的**熔断开路决策会分岔**。这属于「系统应该如何行为」而非「实现风格」。
    ⚠️ **上一版此条写的是 V-016**（「RAG 侧没有任何对应机制」）—— 该结论已被 2026-10-24 的落地推翻，
    **理由已换成 V-024**（V-016 在 message-rpc 组件内已对齐）。
+   ⚠️ **2026-10-24 第十一轮再更正**：`V-024` **已修** ⇒ 这段描述的「RAG 转 `INTERNAL`」**已不存在**
+   ⇒ **理由 2 也没有支撑了**。
 3. **证据不足以判 EQUIVALENT**：双端口活体对拍从未执行（`UNRESOLVED-MSG-003`），
    `UNRESOLVED-MSG-004/005/007/008/009` 五项未关闭（`UNRESOLVED-MSG-006` 已于 2026-10-23 关闭）。
    按 §39「证据不足 ⇒ UNRESOLVED」的规则，本轮也**不能**下 `UNRESOLVED` 结论 —— 因为 §7 的两条判定依据是**已取证的静态 + 活体探针**，
    不是猜测。
+   ⚠️ **2026-10-24 第十一轮再更正**：这五项里 **`-003` / `-004` / `-005` / `-007` / `-009` 均已关闭**
+   （`-003` 第八轮活体对拍 EXIT=0、`-004` 第九轮点名式守门、`-005` 第四轮 V-023、`-007` 第四轮 V-019、
+   `-009` 第十一轮）⇒ **只剩 `-008`（三模块同库三账本，跨域）未关**。
+
+#### 🔁 重述后的判定（2026-10-24 第十一轮 · **当前有效**）
+
+| 判据 | 状态 |
+|---|---|
+| **组件内代码行为是否一致** | ✅ **一致** —— 38 项组件级对照里，**所有会改变行为的差异都已修或已签字**；`V-024`（status 分岔）、`V-018`、`V-020`、`V-021`、`V-025`、`V-026`、`V-027`、`V-028`、`V-031` 全部闭合 |
+| **剩余差异的构成** | ① **已签字的有意偏离 9 条**（`docs/Intentional_Deviations/message/rpc.md`）—— 是决策不是缺陷<br>② **共享面三件响应头差异**（`MSGAPI-010` charset / `-011` reason phrase / `-013` Traceparent）—— 用户已拍板「保持登记，后续修」<br>③ **跨域待办**：`V-029`（like 域）、`V-030`（6 个 api 域）、`UNRESOLVED-MSG-V-001`（Nacos，user/admin 域）、`UNRESOLVED-MSG-008`（三模块同库） |
+| **最终判定** | ⚠️ **仍写 `SEMANTICALLY NOT EQUIVALENT`，但支撑理由已全部换过** ——<br>不再是「代码行为不一致」（那部分已闭合），而是「**跨组件不变量未闭合**（`UNRESOLVED-MSG-008`）+ **共享面三项待修**」<br>⇒ 按 §39，**签字偏离不计入 NOT EQUIVALENT** ⇒ 严格说应读作「**组件内 EQUIVALENT，跨组件不变量 UNRESOLVED**」 |
+| **本轮实测（2026-10-24 19:50）** | `service/common` 168 / `message-common` 21 / `message-rpc` 76 / `message-api` 88 ⇒ **合计 353 例，0 failures / 0 errors / 0 skipped，BUILD SUCCESS（5:09）** |
+| ⚠️ **不要** | 不要照抄上面那三条旧理由去估工作量 —— 它们描述的是 **2026-10-23 第四轮**的状态 |
 
 **本轮对「能否真的启动并生效」的直接回答**
 

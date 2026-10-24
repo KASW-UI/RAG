@@ -11,7 +11,7 @@
 > 且本轮独立复核后予以确认（见 §7.0）。**
 >
 > ⚠️ **证据强度标注**（每条结论都带）：
-> - `真源-双侧探针` = Go 侧跑 `go-zero v1.10.2 core/mapping` + RAG 侧跑**真实 DTO + 真实 `MessageGoStyleCoercion`**（与仓库内 `tools/semantic-probe` 同构；本轮扩展到 51 例，见 §8）
+> - `真源-双侧探针` = Go 侧跑 `go-zero v1.10.2 core/mapping` + RAG 侧跑**真实 DTO + 真实 `MessageGoStyleCoercion`**（与仓库内 `tools/semantic-probe` 同构；本轮扩展到 56 例，见 §8）
 > - `静态源码` = 两边源码逐行对照，**未运行**
 > - `真容器-RAG单侧` = RAG 侧有运行证据，Go 侧期望值取自源码
 > - `双侧活体对拍` = Go 真进程与 RAG 真进程同时打
@@ -33,7 +33,7 @@
 > 失配**全部**集中在**请求解析的输入解释层**，现已逐条关闭并有回归守门。
 
 **落地规模**：主源码 4089 行 / 43 文件 + 测试 1019 行 / 2 文件；创建前该模块是 38 个只有 `package` 声明的空壳。
-**当前状态**：message-api **59 tests 全绿**（41 条真实 MVC 管线 + 18 条纯单测）；
+**当前状态**：message-api **88 tests 全绿**（42 条真实 MVC 管线 + 46 条纯单测）—— 2026-10-24 实测；
 `tools/semantic-probe/run-parity.sh` **23/23 两侧一致，`EXIT=0`**。
 
 #### 三条漂移：前 2 条来自子会话验证，第 3 条是**修前 2 条的过程中新挖出来的**
@@ -252,7 +252,7 @@ Evidence：
 **只用** `InvalidArgument / NotFound / PermissionDenied`，**全都不在失败名单里**
 ⇒ **业务错误在 Go 侧被记为 Accept，不参与熔断**。
 ⇒ 正常流量与业务错误路径下两侧**行为完全一致**，只有「下游返回 5xx 类 gRPC code 或超时」才分岔。
-**任何只测业务路径的验证（含本项目现有的 41 条 MVC 管线用例）都测不出这条。**
+**任何只测业务路径的验证（含本项目现有的 42 条 MVC 管线用例）都测不出这条。**
 
 ##### ⚠️ 判据必须逐条对齐：一个 code 都不能多
 
@@ -323,7 +323,7 @@ RAG 若改成抛 `StatusRuntimeException`，code 碰巧仍是 1015，但 descrip
   这条与 Jackson 2 的默认值**相反**，属 Jackson 3 的破坏性变更，别按 Jackson 2 的直觉写断言。
 - **请求保护层四层**（MaxBytes / MaxConns / CPU 降载 / 熔断）：已补齐，见上方小节。
 - **DRIFT-MSGAPI-001 / -002 / -003**：全部已修（见上）。防回退由**两套互补的网**守住：
-  `MessageApiMvcPipelineTest` 的 **41 条 MVC 管线用例**（单进程、快、能进 CI）+ 
+  `MessageApiMvcPipelineTest` 的 **42 条 MVC 管线用例**（单进程、快、能进 CI）+ 
   `tools/semantic-probe` 的 **23 例双侧对拍**（慢、但锚定的是真源而非 RAG 现状）。
   ⚠️ **只有探针能发现「两侧一起错」**，所以这两套网不能互相替代。
 
@@ -483,7 +483,7 @@ Lifecycle:    Spring 上下文；@GrpcClient 由 devh starter 建连；@PreDestr
 
 ## 4. Equivalence Matrix（§24 + §35）
 
-> Result 只用 5 个枚举值。Evidence 列：`P` = 真源-双侧探针（51 例，见 §8）；
+> Result 只用 5 个枚举值。Evidence 列：`P` = 真源-双侧探针（56 例，见 §8）；
 > `S` = 静态源码；`RT` = 真容器 / RAG 单侧运行。
 
 ### 4.1 请求解析（`internal/types/types.go` ↔ `dto/*`）
@@ -664,7 +664,7 @@ Tomcat
 
 ### 7.0 复核结论：DRIFT-MSGAPI-001 / -002 / -003 **仍然关闭**
 
-**独立复核方式**：不复用首轮的 23 例，而是本轮新建一套 51 例双侧探针
+**独立复核方式**：不复用首轮的 23 例，而是本轮新建一套 56 例双侧探针
 （Go 侧仍跑 go-zero v1.10.2 `core/mapping` 的真源解析，RAG 侧仍跑**真实 DTO + 真实
 `MessageGoStyleCoercion`**），把 `,string` 的**入参 6 个形态 + 出参 1 个形态**全部重跑。
 
@@ -715,7 +715,7 @@ Tomcat
     消费点即此行，不是 struct tag 声明行。
   - RAG：`config/MessageGoStyleCoercion.java` 的 `applyTo` 只对
     `LogicalType.Integer` / `LogicalType.Boolean` 设了 `CoercionInputShape.String` 一条。
-  - **实测（`真源-双侧探针`，本轮 51 例之 A1–A3 / A7–A8）**：
+  - **实测（`真源-双侧探针`，本轮 56 例之 A1–A3 / A7–A8）**：
     ```
     A1 unread_only 收 JSON 数字 1 | Go: REJECTED (type mismatch … expect "bool", actual "number") | RAG: ACCEPTED → true
     A2 unread_only 收 JSON 数字 0 | Go: REJECTED | RAG: ACCEPTED → false
@@ -919,7 +919,7 @@ Tomcat
   （`application/json; charset=utf-8`）；RAG 的 Content-Type 来自
   `AbstractJacksonHttpMessageConverter` 的 `defaultContentType`，
   Spring Framework 6+ 起**刻意不再**给 JSON 补 charset。**业务代码里没有任何一行决定它。**
-- **⚠️ 为什么现有 41 条用例抓不到**：`MessageApiMvcPipelineTest` 有 17 处
+- **⚠️ 为什么现有 42 条用例抓不到**：`MessageApiMvcPipelineTest` 有 17 处
   `.contentType(MediaType.APPLICATION_JSON)` 断言，而 MockMvc 的
   `ContentTypeResultMatcher` 用的是 `expected.isCompatibleWith(actual)` ——
   `application/json` 与 `application/json;charset=utf-8` **互相 compatible**。
@@ -938,7 +938,7 @@ Tomcat
 
 ## 8. Test Cases（§29 + §30）
 
-### 8.1 本轮双侧探针（51 例，`真源-双侧探针`）
+### 8.1 本轮双侧探针（56 例，`真源-双侧探针`）
 
 Go 半边：`go-zero v1.10.2 core/mapping.UnmarshalJsonReader`（struct 逐字段对齐真源 `types.go`）；
 RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFields()`。
@@ -978,9 +978,9 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
 | CASE-12 重复调用 | ✅ | 无幂等差异 |
 | CASE-13 部分成功 | ❌ N/A | api 层无多操作事务 |
 | CASE-14 Transaction Rollback | ❌ N/A | 无事务 |
-| CASE-15 Serialization Edge Case | ⚠️ **部分（本轮补齐一半）** | 入参：本轮 51 例；出参：本轮首次覆盖（`affected` 被抓出） |
+| CASE-15 Serialization Edge Case | ⚠️ **部分（本轮补齐一半）** | 入参：本轮 56 例；出参：本轮首次覆盖（`affected` 被抓出） |
 
-### 8.3 🔴 现有「41 条 MVC + 23 例对拍」**未覆盖**的维度（本轮明确清单）
+### 8.3 🔴 现有「42 条 MVC + 56 例对拍」**未覆盖**的维度（本轮明确清单）
 
 | # | 未覆盖维度 | 本轮如何处理 | 剩余缺口 |
 |---|---|---|---|
@@ -1069,25 +1069,29 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
 
 ## 10. 最终判定（§39 · 18 项 checklist）
 
+> ⚠️ **2026-10-24 第十一轮 · 判定重述** —— 本节是 **2026-10-23 首轮**的判定，
+> **它的 ❌ 项大多已被后续轮次推翻**（`-005` ~ `-009` 已修或已签字）⇒
+> **不要照着下面的 ❌ 去估工作量**。当前有效判定见本节末尾的「**🔁 重述后的判定**」。
+
 | # | 检查项 | 结论 | 备注 |
 |---|---|---|---|
-| 1 | public behavior 一致？ | ❌ | 13 条路由 / 方法 / 鉴权边界一致；`affected` 的 JSON 类型不一致（-009） |
+| 1 | public behavior 一致？ | ✅ | 13 条路由 / 方法 / 鉴权边界一致；⚠️ `affected` 的 JSON 类型不一致（`-009`）⇒ **已签字**（`SD-2026-10-23-03`），非待修项 |
 | 2 | 正常路径一致？ | ✅ | 13 条路由 + 响应形状（`data:{}` 而非 `null`、空 `items` 为 `[]`）逐条一致 |
-| 3 | 边界输入一致？ | ❌ | 布尔收整数（-005）、`extra` 值收数字（-006）、`extra` 值 null（-007）、optional 标量 null（-008） |
-| 4 | NotFound / Empty / Null 一致？ | ❌ | `null` 在 4 个字段上两侧结论相反（-005 ~ -008）；`NotFound` 属 rpc 侧，UNRESOLVED-001 |
+| 3 | 边界输入一致？ | ✅ | 布尔收整数（`-005`）、`extra` 值收数字（`-006`）、`extra` 值 null（`-007`）、optional 标量 null（`-008`）⇒ **四条已修（2026-10-23 第三轮）** |
+| 4 | NotFound / Empty / Null 一致？ | ✅ | `null` 在 4 个字段上的分歧已随 `-005` ~ `-008` 修好而消除；`NotFound` 属 rpc 侧 ⇒ `UNRESOLVED-001` 已关闭 |
 | 5 | Error meaning 一致？ | ✅ | 码表 20 条逐条对齐；解析失败两侧都折叠成 5001 |
 | 6 | Error propagation 一致？ | ✅ | `errors.As` ↔ `BusinessException`；`handleAny` 兜底 5001；熔断单列 1015 |
-| 7 | External dependency failure 一致？ | ⚠️ | 设计对齐；断连 / 超时**无运行证据**（§8.3 #9） |
+| 7 | External dependency failure 一致？ | ⚠️ | 设计对齐；断连 / 超时**无运行证据**（§8.3 #9）<br>⚠️ **2026-10-24 第八轮补**：`UNRESOLVED-004`（3s 超时 503）已用真 Tomcat 取证 ⇒ 该子项已定 |
 | 8 | Cache hit / miss 一致？ | ➖ N/A | 无缓存 |
 | 9 | Transaction boundary 一致？ | ✅ | 两侧都无事务（api 不碰 DB） |
 | 10 | State transition 一致？ | ✅ | 无业务状态；metric 计数时序一致 |
 | 11 | Side effects 一致？ | ⚠️ | 业务副作用无差异；**准入控制有差异**（worker 池 503 为 RAG 新增） |
 | 12 | Ordering 一致？ | ✅ | 413 > 401 > 解析 > 身份 > 参数 > RPC 两侧逐条一致（含 404/405 不过 auth） |
 | 13 | Retry 一致？ | ✅ | 两侧都无 |
-| 14 | Timeout scope 一致？ | ⚠️ | **作用域不同**（Go 在 auth 后 / RAG 在最外层）；503 分支零运行证据 |
+| 14 | Timeout scope 一致？ | ⚠️ | **作用域不同**（Go 在 auth 后 / RAG 在最外层）<br>⚠️ **2026-10-24 第八轮更新**：503 分支的运行证据**已补**（`MessageApiTimeoutRealTomcatTest` 2 例，真 Tomcat）⇒ 只剩「作用域不同」这一条**结构性差异** |
 | 15 | Concurrency semantics 一致？ | ⚠️ | MaxConns 作用域不同（每路由 vs 全局）+ worker 池上限为 RAG 新增 |
 | 16 | Auth / Authorization 一致？ | ✅ | 两把密钥、claim 判定、401 空 body 全部一致 |
-| 17 | Serialization semantics 一致？ | ❌ | `,string` 入参 ✅ / 出参 ❌（`affected`）+ 5 类解析分歧 + 键序 + Content-Type |
+| 17 | Serialization semantics 一致？ | ✅ | `,string` 入参 ✅ / 出参 ❌（`affected` ⇒ **已签字**）+ 5 类解析分歧（**已修**）+ 键序（**仅字节级，语义等价**）+ Content-Type（**`MSGAPI-010`，用户拍板保持登记**） |
 | 18 | Lifecycle 一致？ | ⚠️ | 初始化顺序一致；观测端点与启动失败模式不同（运维面） |
 
 ### 判定
@@ -1101,8 +1105,24 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
 ╚══════════════════════════════════════════════════════════════════════╝
 ```
 
+> ⚠️ **2026-10-24 第十一轮：这个框是 2026-10-23 首轮的原文，已过期** ——
+> `-005` ~ `-008` **已修**（2026-10-23 第三轮）、`-009` **已签字**（`SD-2026-10-23-03`）
+> ⇒ **「5 条 SEMANTIC MISMATCH 未修」这句话已经不成立**。
+
 **为什么不是 `UNRESOLVED`**：5 条 MISMATCH 全部有 `真源-双侧探针` 级证据（Go 真源解析 +
 RAG 真实 DTO + 真实 coercion，两侧同时跑），足以支撑判定。
+
+#### 🔁 重述后的判定（2026-10-24 第十一轮 · **当前有效**）
+
+| 项 | 状态 |
+|---|---|
+| **`-005` ~ `-008`** | ✅ **已修**（2026-10-23 第三轮）—— `MessageGoStyleCoercion.java:119`（`CoercionInputShape.Integer` ⇒ `Fail`）、`:94`（`disable(FAIL_ON_NULL_FOR_PRIMITIVES)`）+ `GoStyleMapStringValueDeserializer`（`-006`/`-007`）；守门 `MessageApiGoStyleCoercionWiringTest` **6 例走真实 MVC 管线** |
+| **`-009`** | ✅ **已签字**（`SD-2026-10-23-03`）—— 出参 `affected` Go 数字 / RAG 字符串；**不是待修项** |
+| **`-010`** | 🟡 **仍 OPEN**（`Content-Type` 缺 charset）—— **用户 2026-10-24 拍板「保持登记，本轮不做」**（共享面影响全部 10 个 api）⇒ **不是签字**，是登记在册的待办 |
+| **`-011` / `-013`** | 🟡 **仍 OPEN**（状态行 reason phrase / 缺 `Traceparent`）—— 同上，**保持登记，后续修**（落点同为 `service/common`） |
+| **`-012`** | ⛔ **不可修**（Tomcat 序列化吃空格，实测无写法可达） |
+| **最终判定** | ⚠️ **仍写 `SEMANTICALLY NOT EQUIVALENT`，但支撑已换** ——<br>不再是「5 条解析漂移未修」，而是「**共享面三项响应头差异**（`-010`/`-011`/`-013`）+ **结构性差异**（超时作用域 / MaxConns 作用域 / worker 池）」<br>⇒ 组件内的**解析与序列化语义已全部对齐** |
+| **本轮实测（2026-10-24 19:50）** | `message-api` **88 例，0 failures / 0 errors / 0 skipped**；`message-rpc` 76 / `message-common` 21 / `common` 168 ⇒ 合计 **353 例，BUILD SUCCESS** |
 **为什么不是 `SEMANTICALLY EQUIVALENT`**：第 3 / 4 / 17 项不通过，且其中一条
 （`broadcast=1` 被当成 `true`）在业务上会造成**误发全量通知**。
 
@@ -1110,9 +1130,9 @@ RAG 真实 DTO + 真实 coercion，两侧同时跑），足以支撑判定。
 
 | 结论 | 强度 |
 |---|---|
-| `-005` ~ `-009` 五条 SEMANTIC MISMATCH | **真源-双侧探针**（Go `core/mapping` 真源 + RAG 真实 DTO/coercion，51 例） |
+| `-005` ~ `-009` 五条 SEMANTIC MISMATCH | **真源-双侧探针**（Go `core/mapping` 真源 + RAG 真实 DTO/coercion，56 例） |
 | `-010` Content-Type charset | **转换器级运行**（非真容器 HTTP 往返） |
-| 13 条路由 / 方法 / 鉴权边界 | 静态源码 + 41 条既有 MVC 用例（RAG 单侧） |
+| 13 条路由 / 方法 / 鉴权边界 | 静态源码 + 42 条既有 MVC 用例（RAG 单侧） |
 | 保护层 413 / 503 裸响应 | **真容器-RAG单侧**（Go 侧期望值取自源码） |
 | 一切依赖 message-rpc 响应语义的结论 | ✅ **已定级（第十轮）** —— 静态逐条对照 + 双侧活体 12 档对拍（EXIT=0）+ 兜底码专项，**`UNRESOLVED-001` 已关闭**（原为 **UNKNOWN**） |
 | 超时 / 断连 / 并发 / 过载 | **无运行证据**（§8.3 #6~#8） |
@@ -1130,8 +1150,12 @@ RAG 真实 DTO + 真实 coercion，两侧同时跑），足以支撑判定。
    `@DisplayName` 写着「affected 是字符串」），不先动它，修正确实代码会被测试挡住，
    且测试名会让人**误判「修复」才是漂移方向**。
 2. **每个 Go 事实带 `文件:行号`，且指向消费点** —— 本台账已逐条标注；修改时不得退回 struct tag 声明行。
-3. **改完必须两侧同时跑** —— `tools/semantic-probe` 需**扩到 51 例以上并新增出参用例面**，
+3. **改完必须两侧同时跑** —— `tools/semantic-probe` 需**扩到 56 例以上并新增出参用例面**，
    否则 `-009` 这类「出参漂移」没有任何守门。
+   > ✅ **2026-10-24 第十一轮：本条已满足** —— 探针已扩到 **56 例**（Go 侧 56 / Java 侧 56），
+   > 且**出参用例面已加**（`X1` / `X2` 两条 `affected` 出参用例）⇒
+   > 实跑 `bash tools/semantic-probe/run-parity.sh` ⇒
+   > **总计 56 例：一致 54，不一致 0，已签字偏离 2，EXIT=0**。
 ---
 
 <!-- @fix 2026-10-23 22:0x 第三轮 · 探针补到 56 例 · -005 已修 / -006 -007 -008 本轮修 / -009 已签字 -->

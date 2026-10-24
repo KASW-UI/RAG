@@ -181,4 +181,4 @@
 | proto `package` 归一（`comment` / `like` 的 `SD-04` / `-05` 同款） | ❌ **不存在**。两侧 proto package 都是 `message`；Go 生成物的语言包名 `pb` 来自 `option go_package`，不是 proto package。见 [`DRIFT/message/proto.md`](../../DRIFT/message/proto.md) §2 |
 | `Content-Type` 缺 `charset`（`DRIFT-MSGAPI-010`） | ❌ 未签字 —— 属 **DRIFT**，且是 `OBSERVABLE DIFFERENCE` / LOW。见 `DRIFT/message/api.md`<br>⚠️ **2026-10-24 用户拍板「保持登记，本轮不做」**（**不是**签字）—— 理由：改 charset 会让**全部 10 个 api** 的 JSON 响应头都变 ⇒ 属跨域共享面改动。<br>⇒ 读法：它**仍是登记在册的待办**，只是**这一轮不动**；⚠️ **不要**在别的域的会话里「顺手把它修了」 |
 | 状态行缺 reason phrase（`DRIFT-MSGAPI-011`） | ❌ 未签字 —— 同上，**2026-10-24 用户拍板「保持登记，本轮不做」**；且归因尚未定位到共享层的具体一行（台账里写「待查」，不臆断） |
-| `message_conversation` 的时间列 `TIMESTAMP`（`DRIFT-MSG-V-020`） | ❌ 未签字 —— 属 **DRIFT**，且**后果是双向的**（见 `DRIFT/message/rpc.md` 该节 ⚠️ 段：Go 的 AutoMigrate 会反向 `ALTER` 回来）。不要当偏离放行 |
+| `message_conversation` 的时间列 `TIMESTAMP`（`DRIFT-MSG-V-020`） | ✅ **已修（2026-10-23 第五轮）—— 早已不是待办** ⇒ `V5__message_time_columns_timestamptz.sql` 把 8 列改成 `TIMESTAMPTZ`，第十轮双侧活体对拍实测两侧 `data_type` **0 差异**。<br>⚠️ **2026-10-24 第十一轮更正**：本行原先写「❌ 未签字 —— 属 DRIFT」，但该条**早已修好** ⇒ 放在这张「本域**没有**的签字偏离」表里，会让人去重新评审一条**已闭合**的漂移 ⇒ 已改成「已修」。**不要**再去动时间列的类型 |
