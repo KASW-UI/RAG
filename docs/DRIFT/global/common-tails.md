@@ -282,11 +282,51 @@ Tomcat 的 `OutputBuffer.appendByteArray`（`org/apache/catalina/connector/Outpu
 
 ---
 
-### T-6 / T-7 / T-8 🟡 Content-Type / reason phrase / Traceparent —— **仍 OPEN，本轮未展开**
+### T-6 / T-7 / T-8 ✅ **归因已定位（第九轮，2026-10-25）** —— 三条**落点各不相同**，不是「同落点一次改」
 
-落点 `service/common/src/main/java/com/rag/common/http/GoStyleRouterErrorResponses.java:83`
-⇒ 本轮未展开逐条对照，状态维持 🟡 仍 OPEN（待拍板）。
-⚠️ 三条**同落点**，应**一次拍板一次改**，不要分三次动同一文件（并发合并冲突）。
+> ⚠️ **原台账写的「落点 `GoStyleRouterErrorResponses.java:83`」是错的** ——
+> 该文件只管 **404 / 405** 两条框架级错误响应（且**已逐字节对齐**），与这三条**无关**。
+> 九条逐条定位后，**三条的真实落点分属三个不同层次** ⇒ **不能一起拍板、也不能一起改**。
+
+#### T-6 · 成功/失败响应的 `Content-Type` 缺 `charset=utf-8` —— 🟢 **可修（Go 等价）**，但**被一条已签字项挡住**
+
+| | 内容 |
+|---|---|
+| **Go 侧事实** | `go-zero v1.10.2/rest/internal/header/headers.go:17` ⇒ `ContentTypeJson = "application/json; charset=utf-8"`<br>`go-zero v1.10.2/rest/httpx/responses.go` 的 `doWriteJson` ⇒ `w.Header().Set(ContentType, header.ContentTypeJson)`<br>⇒ **Go 的 JSON 响应头 = `application/json; charset=utf-8`（分号后有空格）** |
+| **RAG 侧落点** | **不是** `GoStyleRouterErrorResponses` ⇒ 是 **Spring 的 `MappingJackson2HttpMessageConverter`**：默认 `Content-Type: application/json`（`writeAcceptCharset` 默认 `false` ⇒ 不补 charset） |
+| **修法** | 在 `service/common` 注册一个自定义 `HttpMessageConverter` / `WebMvcConfigurer`，把 JSON 的 Content-Type 设成**原始字符串** `"application/json; charset=utf-8"`<br>⇒ **改 1 处 ⇒ 10 个 api 全部生效 ⇒ 不碰任何 api 模块的代码（`favorite-api` 也不碰）** |
+| **🔴 冲突（必须先解决）** | **hot 域的 `SD-HOT-API-006` 已签字「不复刻」**，其技术理由是「*Spring 的 `MediaType.toString()` 产出 `;` 后**无空格** ⇒ **不可逐字节复刻**」<br>⇒ ⚠️ **该理由已被本仓自己证伪**：`GoStyleRouterErrorResponses.java:81-88` 对 `text/plain; charset=utf-8` 就是**直接写原始字符串**（注释明写「直接写原始字符串是唯一能保证逐字节对上的做法」）⇒ **同一手法用在 `application/json; charset=utf-8` 上即可**<br>⇒ ⇒ **要修 T-6，就必须先撤销 `SD-HOT-API-006`** ⇒ **撤销签字属用户决策** |
+| **证据强度** | ✅ Go 侧常量与调用点逐行取证（`headers.go:17` + `responses.go:doWriteJson`）<br>✅ RAG 侧 6 档真容器响应头对照已在 message 域台账留档（`docs/DRIFT/message/api.md` §2.1 / §2.2） |
+
+#### T-7 · 状态行缺 reason phrase —— 🔴 **框架限制（真）**，落点在**容器层**，不在 `service/common`
+
+| | 内容 |
+|---|---|
+| **Go 侧** | Go 的 `net/http` 写完整状态行：`HTTP/1.1 200 OK` / `401 Unauthorized` / `404 Not Found` / `405 Method Not Allowed` |
+| **RAG 侧** | Tomcat 只写 `HTTP/1.1 200` / `401` / `404` / `405` ⇒ **无 reason phrase** |
+| **归因** | **Tomcat 的 `org.apache.coyote.http11.Http11OutputBuffer`**（状态行由容器生成）⇒ **不是 `service/common` 的任何一行** ⇒ **`service/common` 改不了** |
+| **判定** | 🔴 **真「框架限制」**（与 T-4 同类，但 T-4 是「可绕、代价高」，本条是「**不可绕**」）<br>⇒ RFC 7230/9110 **允许**省略 reason phrase ⇒ 客户端按状态码解析 ⇒ **业务语义无影响**，只是**字节级不等价** |
+| **⚠️ 边界** | 「归因尚未定位到具体一行」这句话**本轮已作废** —— 归因在**容器层**，不在共享层 ⇒ 别再在 `service/common` 里找 |
+
+#### T-8 · 响应缺 `Traceparent` —— 🟢 **可修（Go 等价）**，落点 = `service/common`
+
+| | 内容 |
+|---|---|
+| **Go 侧事实** | `go-zero v1.10.2/rest/handler/tracehandler.go` ⇒ `TraceHandler` 里<br>`propagator.Inject(spanCtx, propagation.HeaderCarrier(w.Header()))`<br>⇒ **把 server span 自己的 span context 注入响应头** ⇒ 客户端收到 `Traceparent: 00-<trace-id>-<span-id>-01`<br>（go-zero 的 `rest.MustNewServer` 默认挂这个 handler ⇒ **10 个 api 全都有**） |
+| **RAG 侧落点** | **完全没有** ⇒ 缺 `Traceparent`（message 域 6 档真容器 dump 里 Go 侧 401/404/200 **都带**，`docs/DRIFT/message/api.md:1366/1383/1401`） |
+| **修法** | 在 `service/common` 的 HTTP 入口（`HttpMiddleware` 或一个专门的 filter）用**当前的 server span 的 SpanContext** 做 W3C `TraceContext` 注入 ⇒ 写 `traceparent`（+ `tracestate`）响应头<br>⇒ **改 1 处 ⇒ 10 个 api 全生效 ⇒ 不碰任何 api 模块的代码** |
+| **⚠️ 注意** | Go 注入的是**当前 server span**（不是入向的 parent）⇒ RAG 侧必须对齐到「**本请求的 server span**」，不能直接回显入向的 `traceparent` |
+
+⇒ **三条的处置汇总**：
+
+| 条目 | 性质 | 落点 | 能否现在做 |
+|---|---|---|---|
+| **T-6** | 真漂移 | `service/common`（Spring converter） | 🟡 **能，但要先撤销 hot 域 `SD-HOT-API-006`**（用户决策） |
+| **T-7** | **框架限制** | **Tomcat 容器层** | ❌ **不能**（`service/common` 够不着）⇒ 只能签字认账 |
+| **T-8** | 真漂移 | `service/common`（HTTP 入口注入） | ✅ **能，且不需要任何拍板** |
+
+⚠️ ⇒ **原台账「三条同落点 ⇒ 一次拍板一次改」的处置方式作废** ——
+**三条分属三个层次，其中两条可修、一条不可修** ⇒ **必须拆开做**。
 
 ---
 
@@ -346,9 +386,9 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 | T-3 | 503/499 缺 nosniff | ✅ 已修 · 待确认 | ✅ **实测确认已修** | ❌ |
 | T-4 | 499 / 2s deadline | 🔴 仍开放 | 🟡 **观测面已修**（499 可见）· **资源面残留待签字**（⇒ `SD-2026-10-25-02`，⏳ **待签字**；⚠️ 原判「框架限制」已降级为「Tomcat 的 Servlet 层不给断连信号」⇒ 6 条替代路径待查） | ✅ |
 | T-5 | MaxConns 作用域 | 🔴 仍开放 | ✅ **已签字**（同 T-2）⇒ 移出本档 | ✅ 指针 |
-| T-6 | 成功/失败 Content-Type | 🟡 仍 OPEN | 🟡 仍 OPEN | ❌ |
-| T-7 | 状态行 reason phrase | 🟡 仍 OPEN | 🟡 仍 OPEN | ❌ |
-| T-8 | 缺 Traceparent | 🟡 仍 OPEN | 🟡 仍 OPEN | ❌ |
+| T-6 | 成功/失败 Content-Type | 🟡 仍 OPEN | ✅ **归因已定位**（落点 = Spring converter，**可 Go 等价修**）· 🟡 **被 hot 域 `SD-HOT-API-006` 挡住**（其「不可逐字节复刻」理由已被本仓证伪） | ✅ 归因 |
+| T-7 | 状态行 reason phrase | 🟡 仍 OPEN | 🔴 **框架限制（真）** —— 归因在 **Tomcat `Http11OutputBuffer`（容器层）** ⇒ `service/common` 够不着 | ✅ 归因 |
+| T-8 | 缺 Traceparent | 🟡 仍 OPEN | ✅ **归因已定位**（Go = go-zero `rest/handler/tracehandler.go` 的 `propagator.Inject`；RAG 落点 = `service/common` HTTP 入口）⇒ **可 Go 等价修** | ✅ 归因 |
 | T-9 | 熔断计数键 | ⬜ 待复核 | ✅ **已修**（键补 target 前缀）+ §3.2 缺陷一并订正 | ✅ |
 | T-10 | UserDomainService 假断言 | ❌ 未销账 | ✅ **已闭环** | ✅ |
 
@@ -371,7 +411,9 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 | ~~2~~ | ~~**T-9**~~ | `service/common/protection/GoStyleGrpcClientBreakerInterceptor.java` | ✅ **已完成**（2026-10-25 第三轮）⇒ 身份源 = `Channel.authority()` |
 | ~~3~~ | ~~**T-2 / T-5**~~ | —— | ✅ **已签字**（`SD-2026-10-25-01`）⇒ 移出本档 |
 | ~~4a~~ | ~~**T-4**~~ | `service/common/observability/HttpMiddleware.java` | 🟡 **观测面已修**（第三轮）；资源面 ⇒ `SD-2026-10-25-02` ⏳ 待签字（⚠️ 2026-10-25 05:46 用户要求先查替代路径） |
-| 4b | **T-6 / T-7 / T-8** | `service/common/http/GoStyleRouterErrorResponses.java` | 🟡 **仍 OPEN**，同落点 ⇒ **一次拍板一次改** |
+| 4b | **T-8**（先做，不需拍板） | `service/common`（HTTP 入口注入 W3C traceparent） | ✅ **归因已定位 ⇒ 可 Go 等价修** |
+| 4c | **T-6** | `service/common`（Spring converter 写原始 Content-Type 字符串） | 🟡 可修，**但要先撤销 hot 域 `SD-HOT-API-006`**（用户决策） |
+| 4d | **T-7** | **Tomcat 容器层** | ❌ 不可修 ⇒ 只能签字认账 |
 
 ⚠️ **排序提醒**：T-1 与 T-9 都改 `service/common` ⇒ **本域独占写点**，别的域此刻在改 common 会撞
 （§5.3b 规则 1）⇒ 这几条**必须串行**。
@@ -382,6 +424,7 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | ✅ **第九轮（T-6 / T-7 / T-8 归因定位）** —— 🔴 **原台账的「落点 `GoStyleRouterErrorResponses.java:83`」是错的**（该文件只管 404/405 且已逐字节对齐）⇒ 三条**分属三个层次**：**T-6** 落点 = Spring `MappingJackson2HttpMessageConverter`（Go = go-zero `rest/internal/header/headers.go:17` 的 `application/json; charset=utf-8`，**带空格**）⇒ **可 Go 等价修**（写原始字符串，绕开 `MediaType.toString()`）🟡 **但 hot 域 `SD-HOT-API-006` 的「不可逐字节复刻」前提已被本仓自己证伪**（`GoStyleRouterErrorResponses` 对 text/plain 就是这么干的）⇒ 需先撤销该签字；**T-7** 落点 = **Tomcat `Http11OutputBuffer`（容器层）** ⇒ 🔴 **真框架限制**，`service/common` 够不着 ⇒ 「归因尚未定位」这句话作废；**T-8** Go 出处 = go-zero `rest/handler/tracehandler.go` 的 `propagator.Inject(spanCtx, HeaderCarrier(w.Header()))` ⇒ RAG **完全没有** ⇒ 落点 = `service/common` HTTP 入口 ⇒ ✅ **可 Go 等价修且不需拍板** ⇒ ⇒ **「三条同落点一次改」的处置作废，必须拆开**
 | 2026-10-25 | **第三轮（A1 / A2 / A3 / A4 四项落地）**。① **T-1 残余 ① 已修** —— 包一层 `SanitizedJsonContentTypeInputMessage` ⇒ 畸形头不再抛 + `charset=gbk` 回归 UTF-8；守门扩到 8 条 + 变异双向转红 ② **T-9 已修** —— 熔断键补 target 前缀（身份源 = `Channel.authority()`，因 grpc-java 1.63 的 `ManagedChannel` 无 `getTarget()`）；守门 6 条 + 变异转红（第一版守门有洞 ⇒ 已改为只调 `interceptCall` 再看 `trackedMethods()`）③ **T-4 观测面已修** —— 499 判据从「worker 内写失败」改成「**filter 写 socket 失败**」；配真 Tomcat 守门 3 条 + M1/M2/M3 三组变异全转红；⚠️ 顺带修掉「提前 flush 把 `Content-Length` 退化成 chunked」这个**新引入的 wire 差异**；🔴 残留「在飞 gRPC 不被提前取消」⇒ **框架限制** ⇒ `SD-2026-10-25-CAND-12`（待签字）④ **CYCLE-002 普查** —— `service/common` 的 `@Deprecated` 归零、无反向 import 业务域、无跨域 `{@link}` ⇒ **0 命中** ⇒ 落成可重跑守门 `tools/difftest/check-cross-domain-holds.py` |
 | 2026-10-25 | **第二轮（T-1 修复）**。T-1 改为**取原始头值**（`getFirst(CONTENT_TYPE)`）⇒ 大小写敏感判定与 Go 对齐；配真 `HttpHeaders` 守门测试 6 条 + 变异测试（转红）。⚠️ 登记 **T-1 残余 ①**（解析层仍走 MediaType ⇒ 畸形头仍抛，Go 不会）。🔴 新增 **X-9**（3 份生产复制品）⇒ [`cross-domain.md`](cross-domain.md)。T-2 / T-5 **用户签字** ⇒ 转 `SD-2026-10-25-01` 并移出本档 |
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 T-1~T-10 逐条复核结论；纠正「Go 出处在项目树里」的方法论错误（真源分 L1 项目层 / L2 go-zero 框架层）；确认 T-1 / T-2 / T-5 / T-9 为真漂移；发现 T-2/T-5 档位错置、T-9 的 §3.2 缺陷；T-10 转 [`cycle-deps.md`](cycle-deps.md) |

@@ -14,9 +14,9 @@
 | # | 不变量 | 涉及组件 | 状态（2026-10-25） | 本轮 |
 |---|---|---|---|---|
 | X-1 | 共享 Flyway 账本 | `message-rpc`↔`like-rpc`↔`article-rpc` | 🟡 配置层 + 运行时已闭环；**三模块同库共存**仍 `unresolved` | 未展开 |
-| X-2 | 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | 🔴 均未审 | 未展开 |
+| X-2 | 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | ✅ **已审完（第九轮）** —— 交叉但无冲突；client 契约 10 域零漂移；🟡 **产出 1 条新真漂移**（`users_user.extra_info` jsonb→text 漏改）⇒ 见 §二·九 | ✅ **已审完** |
 | X-3 | 事实投递链路 | `like`/`comment`/`favorite` 的 rpc ↔ **仓外 DC 平台** | ✅ **已闭合**（2026-10-25 B2）—— 末端不是「第三个仓库」，是仓外 `POST /v1/events`；仓内两侧 4↔4 对齐 | ✅ **已闭合** |
-| X-4 | 社区消费者差异 | Go 用 `like`，RAG 不用 | ⏸ 仍未决（交接 #9，与 `DRIFT-LIKE-003` 同一条） | 未展开 |
+| X-4 | 社区消费者差异 | Go 用 `like`，RAG 不用 | ✅ **已确证（第九轮实测）** —— like 侧 RAG **另起炉灶**（0 引用共享组件）· favorite/article **RAG 多出** ⇒ 一半可修、一半被 favorite 阻塞 ⇒ 见 §二·十 | ✅ **已确证** |
 | X-5 | 裸 `ServerCallHandler` 不被 dispatch | **task + follow**（2026-10-25 实测扩面） | 🔴 **已确证**（第七轮探针）—— grpc-java 不向裸 handler 派发 `onHalfClose` ⇒ 两个域的「造慢服务」测试**空转** ⇒ 见 §二·八 | ✅ **已确证**（机制 + 波及面） |
 | X-6 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🔴 未修 · 跨域 · 待拍板 | 未展开 |
 | X-7 | DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🟡 **部分闭合**（2026-10-25 B3）—— 4 个域已能活体逐列对照；其余 5 域**缺双侧库环境** | ✅ **已跑**（产出真结论 + 1 条新差异 X-10） |
@@ -244,6 +244,93 @@ RESULT startCall=true  onHalfClose=false  responded=false
 
 ---
 
+## 二·九、X-2 ✅ **已审完（第九轮，只读审计）** —— 建表责任交叉 **确实交叉但无冲突**；client 契约 **10 域全覆盖、零漂移**；🟡 **产出 1 条此前无人登记的真漂移**
+
+| 组 | 结论 |
+|---|---|
+| **A · 建表责任交叉** | 🟡 **确实交叉，但无冲突** |
+| **B · api ↔ rpc client 契约** | ✅ **10 个域全覆盖、逐方法核对、零漂移** |
+
+### ① A 组：谁建哪些表（Go ↔ RAG）
+
+| 表 | Go 侧谁建 | RAG 侧谁建 | 重叠 | 冲突 |
+|---|---|---|---|---|
+| `users_user` | **两个都建**：`user/rpc/internal/model/db.go:33` + `admin/rpc/internal/model/db.go:15` | **两个都建**：`user-rpc/.../bootstrap/UserSchemaBootstrap.java:51` + `admin-rpc/.../bootstrap/AdminSchemaBootstrap.java:55` → `users-common/.../ddl/SchemaInitializer.java:63-68` | 是 | **无** —— Go 两侧的 `User` struct 逐字段相同（`user/rpc/.../data_model.go:5-20` vs `admin/rpc/.../data_model.go:35-50`）；RAG 两侧同源同一文件 |
+| `users_user_avatar_history` | 仅 user-rpc（`db.go:33`） | 两个 rpc 都建 | RAG 侧重叠 | 无（覆盖面差异 ⇒ 已登记 `DRIFT-ARPC-005`） |
+| `admin_admin` / `admin_invite` | 仅 admin-rpc（`db.go:15`） | 两个 rpc 都建 | RAG 侧重叠 | 无（同上） |
+
+- **同库事实**：RAG 两侧 `application.yml:10` 同为 `first_db`；Go 两侧同为 `${POSTGRES_DB}` ⇒ **建表责任确实交叉**。
+- **并发保护**：RAG 有 `pg_advisory_lock`（`SchemaInitializer.java:91,115`）；Go 侧 GORM 裸跑 ⇒ **表达层差异（RAG 更强）**。
+
+### ② B 组：api ↔ rpc 方法对（10 域全覆盖）
+
+article-api 6/6 · hot-api 2 · like-api 6/6 · message-api 9/9 · comment-api 7/7 · favorite-api 7/7 ·
+follow-api 8/8 · task-api 1 · user-api 9 · admin-api 13/13 ⇒ **全部有实现、全部与 Go 一致**。
+
+- ✅ **未发现「api 调了但 rpc 没有」**，也未发现「rpc 有而 api 新增调用」的漂移。
+- ℹ️ 唯一「rpc 有、api 从不调」= hot-rpc 的 `LikeArticle/CommentArticle/CoinArticle/ShareArticle`
+  （`HotServiceGrpcImpl.java:70-98`）—— **Go 侧同样无调用方**（`hot_grpc.pb.go:36` 标注「预留」）⇒ **无漂移**。
+- ✅ **proto 字段号无硬编码覆盖**（全仓 `setField(` / `UnknownFieldSet` 零命中）。
+
+### ③ 🟡 本轮产出的真漂移：**`users_user.extra_info` 写路径仍按 jsonb 处理**
+
+| | 内容 |
+|---|---|
+| **Go** | GORM `serializer:json` ⇒ 落库是**原始 JSON 文本**（`admin/rpc/internal/logic/updateuserlogic.go:84-87` + `admin/rpc/.../data_model.go:43`） |
+| **RAG** | 写 `users_user` 时显式 `CAST(? AS jsonb)`（`admin-rpc/.../service/AdminDomainService.java:962`），实体挂 `JsonbTypeHandler`（`admin-rpc/.../domain/UserEntity.java:129`） |
+| **🔴 根因（代码注释的前提已失效）** | 该列**早已是 TEXT**：`users-common/.../db/01_create_user.sql:41`（`extra_info TEXT`）+ `:103`（每次启动 `ALTER … TYPE text`），而 **admin-rpc 自己启动时就在重放这份 DDL** ⇒ 代码里「该列仍是 jsonb」的前提**不成立** |
+| **可观察差异** | ① jsonb 会**规范化 JSON**（键序/空格）⇒ 落库字节与 Go 不同；② 含 `\u0000` 时 PG 报 **`22P02`** ⇒ **Go 成功 / RAG 5001**（与已修的 `DRIFT-ARPC-004①` 同型 —— `admin_admin` 已改、`users_user` **漏改**）；③ 与 RAG 自身 user-rpc 写同一列的 `JsonTextTypeHandler`（`user-rpc/.../domain/UserEntity.java:114`）**自相矛盾** |
+| **登记状态** | `docs/DRIFT/users/admin/api.md:1660` 只列了「仍开放」，**归因缺失**（没落到「建表责任交叉 ⇒ DDL 归属」这条因果链上） |
+| **建议修法** | 删掉 `AdminDomainService.java:962` 的 `CAST(... AS jsonb)`，改用与 `updateSelf` 同款的 `setSql("extra_info = {0}", …)`（`:357`）；`UserEntity.java:129` 换成 `JsonTextTypeHandler` |
+| **可做性** | ✅ **global 现在有权限**（users 域，非 favorite）⇒ **无需拍板** |
+
+### ④ 证据边界（**未查 / 不声称已证明**）
+
+1. ⚠️ **未跑真 PG、未做双栈并发复跑** ⇒ `ADJ-03`（`docs/DRIFT/users/_shared.md:922-929`）要求的「user-rpc + admin-rpc 同时对空库建表」**未复现** ⇒ 并发结论**只来自静态读码**（advisory lock 存在），**不是实测**。
+2. ⚠️ **jsonb→text 的实际行为本轮未实测** ⇒ 差异①②来自仓内已记载的活体证据（`03_create_admin.sql:85-93`）+ PG 语义推断 ⇒ 建议按 `UNRESOLVED-ARPC-004`（`docs/DRIFT/users/admin/rpc.md:724-736`）实跑一次 `updateUser` + `extra_info={"k":"\u0000"}`。
+3. ⚠️ **字段级只抽查了 3 域**（like 7/7、hot 2 项、comment 7/7 + users/admin 的 `extra_info`）⇒ favorite / follow / task / message / article 的**请求字段未逐字段与 Go 对照**。
+4. ⚠️ Go rpc **内部逻辑**（如 `UpdateOneUserByUid` 的 SQL 细节）未逐行对；`proto` 未逐字节重比（沿用 AGENTS.md §3.4 的 10/10 结论）。
+
+---
+
+## 二·十、X-4 ✅ **已确证（第九轮实测复核）** —— `communityfact` **消费者集合两侧不一致**；一半可修，一半被 favorite 永久阻塞
+
+### ① 实测（`grep -rl`，两侧同口径）
+
+| 域 | Go 侧引用 `communityfact` | RAG 侧引用 `com.rag.common.communityfact` | 差 |
+|---|---|---|---|
+| `like` | ✅ **6** | 🔴 **0** | 🔴 **RAG 缺** |
+| `comment` | ✅ **6** | ✅ **5** | ≈ |
+| `favorite` | 🔴 0 | 🔴 **10** | 🔴 **RAG 多**（⛔ favorite 不碰） |
+| `article` | 🔴 0 | 🔴 1 | 🔴 **RAG 多** |
+| 其余（follow/task/hot/message/users） | 0 | 0 | — |
+
+### ② 🔴 RAG 的 `like` 域**另起炉灶**，没有复用共享组件
+
+RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFactDispatchService` /
+`LikeDomainFactOutboxMapper` / `LikeFactStreamMapper` / `LikeDomainFactOutboxEntity` / `LikeFactStreamEntity`
+⇒ **零处引用 `service/common/communityfact`**；
+而 Go 的 like 域用的是**共享组件** `service/common/communityfact` + `cmd/fact-dispatch` / `cmd/fact-authority` 两个进程 + `internal/model/fact_delivery.go`。
+
+⇒ **待判定（本轮未做完）**：RAG 这套「自己实现的 outbox+stream+scheduler」与 Go 的 `communityfact` 链路**行为是否等价**？
+（B2 已钉住共享组件的契约：`POST /v1/events` + 调度形状 **1s / 每轮 16 / 单次 10s / 单条失败即 break** ⇒ 应拿这四条逐条对 RAG 的 `LikeFactDispatchScheduler`。）
+
+### ③ 🔴 我自己第四轮（B2 / X-3）的结论**有误，须订正**
+
+⇒ B2 写的是「`like` / `comment` / `favorite` 三域**都接了线**」⇒ **实测 `like` 域是 0 引用** ⇒ **该句作废**。
+⇒ 准确表述：**`comment` 与 `favorite` 接了共享组件；`like` 域没有（它自己实现了一套）；`article` 多了一处 Go 侧没有的用法。**
+
+### ④ 处置
+
+| 半边 | 判定 | 处置 |
+|---|---|---|
+| **like 缺共享组件接线** | 🟡 **可能可修**（需先做上面 ② 的等价性判定） | 下一步逐条对四条调度契约 |
+| **favorite / article 多出来的用法** | 🔴 **不是漂移**（Go 侧本来就没有 ⇒ RAG 多做了功能）⇒ 属「有意偏离」还是「多余实现」**待判** | ⛔ **favorite 一律不碰** ⇒ 这半边**被 favorite 永久阻塞** |
+
+⚠️ ⇒ **X-4 无法整体关闭**：**可修的一半（like）+ 永久阻塞的一半（favorite）** ⇒ 台账应拆成两条。
+
+---
+
 ## 三、其余 7 条的状态说明（2026-10-25）
 
 本轮**未展开**这 7 条的逐条对照（它们的落点分散在多个域的代码里，
@@ -252,9 +339,9 @@ RESULT startCall=true  onHalfClose=false  responded=false
 | # | 为什么本轮没动 |
 |---|---|
 | X-1 | 需要**三个 rpc 模块同库共存**的运行时验证 ⇒ 需真 PG + 三进程并发 ⇒ 独立一轮 |
-| X-2 | `user-rpc`↔`admin-rpc` 的建表责任与 client 契约 ⇒ 跨 users 域内部两个子域 ⇒ 需先读 users 域台账 |
+| ~~X-2~~ | ✅ **已审完**（第九轮）⇒ 见 §二·九 |
 | ~~X-3~~ | ✅ **已闭合**（2026-10-25 B2）⇒ 见 §二·七（末端 = 仓外 DC 平台；仓内两侧 4↔4 对齐） |
-| X-4 | 与 `DRIFT-LIKE-003` 同一条 ⇒ 归 like 域，但需 global 协调（涉及 common 侧的 communityfact） |
+| ~~X-4~~ | ✅ **已确证**（第九轮）⇒ 见 §二·十（**可修的一半** = like 侧接线；**阻塞的一半** = favorite） |
 | ~~X-5~~ | ✅ **已确证**（2026-10-25 第七轮，探针实测）⇒ 见 §二·八。⚠️ 机制清楚了，但**修法要同时动 task + follow 两个域的测试** ⇒ 下一轮落地 |
 | X-6 | 待**用户拍板**（改 Tomcat 三旋钮 vs 改 10 个 api 的参数解析）⇒ 拍板前不动 |
 | ~~X-7~~ | ✅ **已做**（2026-10-25 B3）⇒ 见 §二·五（4 个域可跑 + 产出 X-10） |
@@ -270,8 +357,9 @@ RESULT startCall=true  onHalfClose=false  responded=false
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | ✅ **第九轮（X-2 审完 + X-4 确证）** —— ① **X-2**（建表责任交叉 + client 契约）**从「均未审」变成「已审完」**：A 组交叉但无冲突（Go 两侧 `User` struct 逐字段相同）；B 组 **10 域全覆盖零漂移**；🟡 **产出 1 条此前无人登记的真漂移** —— `users_user.extra_info` 写路径仍按 jsonb（`AdminDomainService.java:962` + `UserEntity.java:129`），但该列**早已是 TEXT**（`01_create_user.sql:41` + `:103`，且 admin-rpc 自己就在重放这份 DDL）⇒ **代码注释的前提已失效** ⇒ 含 `\u0000` 时 Go 成功 / RAG 5001 ② **X-4 实测确证**：`like` 域 Go 侧 6 个文件引用 `communityfact`、RAG 侧 **0**（**另起炉灶**）；`favorite` Go 0 / RAG 10（⛔ 不碰）③ ⚠️ **订正我自己第四轮 B2 的错误结论**（「like/comment/favorite 三域都接了线」**作废**）
 | 2026-10-25 | **第七轮（X-5 确证 + X-10 去重）**：① 🔴 **X-5 由「未展开」升级为「已确证」** —— 一次性探针实测：grpc-java 1.63 **会**调裸 handler 的 `startCall()`，但**不会**把 `onHalfClose` 派发给它返回的 `ServerCall.Listener` ⇒ 「处理函数睡 10 秒」**从未发生** ⇒ task + follow 两个域的同名测试**空转**（绿，但验证的是「取消一个空调用」而非「打断在飞处理」）⇒ 波及面由「task 域」扩到「task + follow 两个 rpc 域」⇒ 见 §二·八 ② ⚠️ **X-10 去重** —— 复查发现 X-10 早在 2026-10-23 已签为 message 域 `SD-2026-10-23-06` ⇒ **撤销本域重复登记的 `SD-2026-10-25-03`**（改为指针） |
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 7 条跨域不变量状态；新增 **X-8 真源分层（L1 项目层 / L2 go-zero 框架层）** —— 本轮实测发现，影响全部域的对照方法 |
-| 2026-10-25 | **第四轮（B2 / X-3 闭合）**：**「第三个仓库」已定位** —— 链路末端**不是仓库**，是**仓外 DC 平台**的 `POST /v1/events`（`DC_PLATFORM_EVENT_URL` + `DC_PLATFORM_SERVICE_TOKEN`，路径必须以 `/v1/events` 结尾、token ≥ 32，见 Go `service/common/communityfact/wire.go:83-91`）。仓内两侧**都有**：`service/common/communityfact` **4 文件 ↔ 4 类**；authority 端点路径 1:1；调度形状 **1s / 16 / 10s / 单条失败即 break** 四项逐条对齐；`like` / `comment` / `favorite` 三域**都接了线**。唯一差异 = **部署形态**（Go 独立 `cmd/fact-dispatch` vs RAG 进程内 `@Scheduled`）⇒ 表达层差异，不修。⇒ **X-3 关闭**（不是漂移，是架构事实 + 仓外边界） |
+| 2026-10-25 | **第四轮（B2 / X-3 闭合）**：**「第三个仓库」已定位** —— 链路末端**不是仓库**，是**仓外 DC 平台**的 `POST /v1/events`（`DC_PLATFORM_EVENT_URL` + `DC_PLATFORM_SERVICE_TOKEN`，路径必须以 `/v1/events` 结尾、token ≥ 32，见 Go `service/common/communityfact/wire.go:83-91`）。仓内两侧**都有**：`service/common/communityfact` **4 文件 ↔ 4 类**；authority 端点路径 1:1；调度形状 **1s / 16 / 10s / 单条失败即 break** 四项逐条对齐；`like` / `comment` / `favorite` 三域**都接了线**。⚠️ **2026-10-25 第九轮订正**：本条末句「`like` / `comment` / `favorite` 三域**都接了线**」⇒ **实测不成立** —— `like` 域 RAG 侧对 `com.rag.common.communityfact` 是 **0 引用**（它**另起炉灶**实现了自己的 outbox+stream+scheduler）⇒ 准确表述：**`comment` 与 `favorite` 接了共享组件；`like` 域没有；`article` 多了一处 Go 侧没有的用法** ⇒ 详见 §二·十（X-4）。⇒ ⚠️ **X-3 本身（末端 = 仓外 DC 平台 / 共享组件契约）仍成立** —— 订正的只是「哪些域接了线」这一句。 唯一差异 = **部署形态**（Go 独立 `cmd/fact-dispatch` vs RAG 进程内 `@Scheduled`）⇒ 表达层差异，不修。⇒ **X-3 关闭**（不是漂移，是架构事实 + 仓外边界） |
 | 2026-10-25 | **第三轮（B3 / X-7 部分闭合）**：① 查出**已有的域预设本身已失效**（users 容器改名、message 容器+库+用户三重失效）⇒ 修好并给脚本加按域的 `pg_user` ② **扩到 4 个域**（新增 `comment`）⇒ **可跑的域 1 → 4** ③ 跑出**真结论**：task ✅ 11 列逐字相同、message ✅ 37 列逐字相同（+ DEFAULT 6 处=已知刻意保留）、users/comment 各有**环境缺口**（Go 侧对应表未被 AutoMigrate）④ 🔴 **新增 X-10**：`message` 域索引 `idx_notification_recipient_read` **两侧列不同**（Go 单列 `is_read` / RAG 复合 `recipient_id,is_read`）⇒ 根因是 Go 侧 `priority:1` 写到了另一个索引名 ⇒ **落在 message 域的迁移脚本 ⇒ global 只记账不改别域代码，等用户拍板** ⑤ 仍缺 5 个域（article/like/hot/follow/favorite）的**双侧库环境** ⇒ 缺 runner ⇒ 登记为待办 |
 | 2026-10-25 | **第二轮**：新增 **X-9** —— 「Go 是否读 body」判据存在 **3 份生产复制品**（favorite / hot / article）。T-1 修复前 RAG **内部自相矛盾**（闸门说不读 / 解析器说要读）⇒ T-1 修复后已一致。⚠️ **根治需各域自己收敛**（调用唯一真源），global 只记账不改别域代码 |
