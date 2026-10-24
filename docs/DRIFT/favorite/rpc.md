@@ -1,5 +1,10 @@
 # DRIFT 台账 · `service/favorite/favorite-rpc`
 
+> ⚠️ **本文件有两轮记录，不要混读**：
+> · **§0–§8（2026-10-23）**：并发会话产出的首轮对照 + 落地实现记录 —— **本轮（2026-10-25）未重新验证**，
+>   下面每一条的「证据强度」仍按 2026-10-23 的口径读。
+> · **§9（2026-10-25）**：`align/favorite` 工作树的**复核补充**，**只追加、不改上文**。
+>
 > **核对时间：2026-10-23**（Go 冻结版 `Sea-RideTheWind_golang/service/favorite/rpc`）
 > **本轮性质：实现 + 首轮源码级 Go ↔ RAG 逐条对照**（不是只读审计）。
 > ⚠️ **证据强度上限 = 真 PG（Testcontainers）+ 真启动 + 源码逐行对照**；
@@ -188,3 +193,55 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 
 > ⚠️ 真 PG 用例带 `@EnabledIfDockerAvailable` ⇒ 无 Docker 时**静默跳过**，不是失败。
 > 判定「schema 对齐」是否成立时，**必须确认该类真的跑了 13 例**（不是 0 例 / skipped）。
+
+---
+
+## 9. 2026-10-25 复核补充（`align/favorite` 工作树 · 基线 commit 58e8314）
+
+> ⚠️ **本节只追加，不修改 §0–§8。**
+> **本轮的工作范围是 `favorite-common` / `favorite-api` / `favorite-proto`**（此前三者台账为 0 字节）。
+> ⇒ **rpc 侧的 §0–§8 结论本轮未重新验证**，下列条目只记「从 api 侧观察到的、与 rpc 相关的间接事实」。
+
+### 9.1 本轮跑通的事实（可复现）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 四组件编译 + 打包 | `mvn -o -pl service/favorite/{favorite-proto,favorite-common,favorite-rpc,favorite-api} -am install -DskipTests` | **BUILD SUCCESS** |
+| 四组件全量测试 | 同上（不带 `-DskipTests`） | **BUILD SUCCESS**；rpc **58 例全绿** |
+| **真 PG schema 对照** | `FavoriteSchemaParityTest` | **13 例真跑**（Docker 可用 ⇒ **未被 `@EnabledIfDockerAvailable` 跳过**）⇒ §7 要求的「必须确认真的跑了 13 例」**本轮已满足** |
+| 错误码映射回归网 | `FavoriteErrorCodeMappingTest` | **14 例全绿**（§2 的 6 处修复仍然守得住） |
+| 保护链装配 | `FavoriteProtectionChainWiringTest` | **2 例全绿**（含 `DRIFT-MSG-V-026`「熔断/降载链必须真的挂到 gRPC server 上」） |
+
+### 9.2 从 api 侧观察到的、与 rpc 相关的两条事实
+
+| # | 事实 | 依据 |
+|---|---|---|
+| **F1** | **rpc 侧发出的业务错误码，本轮在 api 侧被双侧对拍逐条验过**：Go 的 `GRPCError` 产生的 wire 形态（标准 gRPC 码 + description 文案）与 `BizCodeFromError` 的还原矩阵 **17/17 逐字节一致** ⇒ §2 的 D1–D6（5007/5008/5304 等码）经由 api 侧的还原链路**仍然成立** | 见 [`common.md`](./common.md) §1 与探针 `tools/errmsg-probe/favorite/` |
+| **F2** | **rpc 侧的错误分布已实测**：favorite 域 56 个 `GRPCError` 调用点发出 **7 种标准 gRPC 码**（`Internal`×19、`InvalidArgument`×10、`NotFound`×9、`PermissionDenied`×6、`AlreadyExists`×6、`Unavailable`×4、`FailedPrecondition`×2），**一个越界码都没有** ⇒ §4 的「业务码靠文案反查」这一条**前提成立** | 同上（`FavoriteGrpcError` 类注释记载的分布，本轮探针的 `WIRE` 段侧面印证） |
+
+### 9.3 ⚠️ 仍未决（**沿用 §5 的 7 条，本轮未复核**）
+
+| # | 项 | 本轮状态 |
+|---|---|---|
+| **U1** | 权威端点的 wire 形态（path 参数 servlet，默认关） | ⬜ **未复核**（本轮未触碰 `FavoriteAuthorityEndpointConfig`） |
+| **U2** | preflight 的退出码语义 | ⬜ **未复核** |
+| **U3** | `zrpc.RpcServerConf.Mode` 的取值域 | ⬜ **未复核**（**需 Go 侧提供取值域清单**） |
+| **U4** | authority lookup 的 3s 超时 | ⬜ **未复核** |
+| **U5** | `ObserveRPC` 的 `result` 标签（Go 侧 21 处错误返回被记成 `success`） | ⬜ **未复核** ⇒ **待签字材料尚未落档**，见 [`../../Intentional_Deviations/favorite/rpc.md`](../../Intentional_Deviations/favorite/rpc.md) 的「尚未落档」标注 |
+| **U6** | `favorite_request_seconds_counter` 指标名（Micrometer 追加 `_total`） | ⬜ **未复核** ⇒ 同上 |
+| **U7** | **双侧活体对拍 + 变异验证** | ⬜ **仍未做**。本轮只把 **`favorite-common` 的错误码契约**做成了双侧活体对拍（`tools/errmsg-probe/favorite/`，EXIT=0）⇒ **rpc 侧整体仍无活体对拍** |
+
+> ⚠️ **U7 仍是 rpc 侧最大的证据缺口**：Go 侧 rpc 的 `etcd` / Kafka 依赖本轮仍不可拉起。
+> ⇒ 本轮的做法是**先把能双侧跑的层（错误码契约）单独做成探针**，而不是硬凑一个跑不起来的整域对拍。
+
+### 9.4 一条**跨域观察**（不属于 favorite 域的修法，但影响本域）
+
+`service/like/like-api/.../LikeRpcClient.java:43-48` 的注释写着
+「⚠️ client 熔断：Go 侧有且默认开，Java 侧**尚未接入**（已登记的已知偏离）」。
+
+⚠️ **实测该断言极可能同样是错的**：`LikeApiApplication` 的 `scanBasePackages` **也含 `com.rag.common`**
+⇒ `GoStyleGrpcClientBreakerInterceptor` 同样会**自动注册** ⇒ 像 favorite 域一样，熔断**很可能早已生效**。
+
+⇒ 但 **like 域不是本域的文件**（AGENTS.md §5.3：只写自己域）⇒ **本轮不改、不判**，
+仅在此**登记为跨域线索**，交由 like 域 / `global` 收口域处理。
+⚠️ 别把它当 favorite 域的漂移去「顺手统一」。

@@ -218,18 +218,56 @@ public class FavoriteApiSupport {
     /**
      * 下游返回 {@code null} 响应 —— 对应 Go 的 {@code if rpcResp == nil { ... 5001 }}。
      *
-     * <p>Go 出处（7 个 logic 同构）：
+     * <p><b>Go 出处（4 个 logic：create ×2 + get ×2）</b>：
      * <ul>
-     *   <li>{@code create_favorite_logic.go:64-69}：
-     *       {@code if rpcResp == nil { err = fmt.Errorf("favorite rpc returned nil response"); ... 5001 }}；</li>
-     *   <li>{@code delete_favorite_logic.go:57-62}：
-     *       {@code if rpcResp == nil || !rpcResp.Success { ... 5001 }}。</li>
+     *   <li>{@code create_favorite_folder_logic.go:57-62}、</li>
+     *   <li>{@code create_favorite_logic.go:64-69}、</li>
+     *   <li>{@code get_favorite_folders_logic.go:51-56}、</li>
+     *   <li>{@code get_favorites_by_folder_logic.go:57-62}。</li>
      * </ul>
-     * <p>⚠️ <b>注意 Go 把「nil」与「success=false」合并成同一条 5001 分支</b>，
-     * 本实现用同一条出口保持一致。
+     * <pre>
+     *   if rpcResp == nil {
+     *       err = fmt.Errorf("favorite rpc returned nil response")
+     *       ... ErrorServerCommon(5001)
+     *   }
+     * </pre>
+     * ⚠️ <b>这 4 个 logic 只判 {@code nil}</b>：它们的响应消息里<b>根本没有 {@code success} 字段</b>
+     * ⇒ 不存在「success=false」这条分支。
+     *
+     * <p>⚠️ <b>为什么与 {@link #nullOrUnsuccessfulResponse} 分开成两个出口</b>：
+     * Go 的<b>另 3 个</b> logic（delete ×2 + update ×1）判的是
+     * {@code rpcResp == nil || !rpcResp.Success}，且错误文案是<b>另一句</b>
+     * （{@code "favorite rpc returned unsuccessful response"}）。
+     * ⇒ Go 侧这两类是<b>分开的两条分支</b>（判定不同、措辞不同），
+     * 本实现逐条对齐，<b>不合并</b> —— 合并会让服务端业务日志少掉一条 Go 侧存在的措辞。
+     */
+    public BusinessException nullResponse(Long userId, String articleId) {
+        IllegalStateException cause = new IllegalStateException("favorite rpc returned nil response");
+        logBusinessErr(FavoriteErrorCode.ERROR_SERVER_COMMON.getCode(), cause, userId, articleId);
+        int code = FavoriteErrorCode.ERROR_SERVER_COMMON.getCode();
+        return new BusinessException(code, FavoriteErrorMessages.getMsg(code));
+    }
+
+    /**
+     * 下游返回 {@code null} <b>或</b> {@code success=false} —— 对应 Go 的
+     * {@code if rpcResp == nil || !rpcResp.Success { ... 5001 }}。
+     *
+     * <p><b>Go 出处（3 个 logic：delete ×2 + update ×1）</b>：
+     * <ul>
+     *   <li>{@code delete_favorite_logic.go:57-62}、</li>
+     *   <li>{@code delete_favorite_folder_logic.go:57-62}、</li>
+     *   <li>{@code update_favorite_folder_name_logic.go:59-64}。</li>
+     * </ul>
+     * <pre>
+     *   if rpcResp == nil || !rpcResp.Success {
+     *       err = fmt.Errorf("favorite rpc returned unsuccessful response")
+     *       ... ErrorServerCommon(5001)
+     *   }
+     * </pre>
+     * ⚠️ <b>Go 的措辞是 {@code "unsuccessful"}（不含 "nil or"}</b> ⇒ 本实现用同一句。
      */
     public BusinessException nullOrUnsuccessfulResponse(Long userId, String articleId) {
-        IllegalStateException cause = new IllegalStateException("favorite rpc returned nil or unsuccessful response");
+        IllegalStateException cause = new IllegalStateException("favorite rpc returned unsuccessful response");
         logBusinessErr(FavoriteErrorCode.ERROR_SERVER_COMMON.getCode(), cause, userId, articleId);
         int code = FavoriteErrorCode.ERROR_SERVER_COMMON.getCode();
         return new BusinessException(code, FavoriteErrorMessages.getMsg(code));

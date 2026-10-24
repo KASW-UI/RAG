@@ -92,10 +92,17 @@ public class GlobalExceptionHandler {
      *   <li>{@code rest.WithJwt} → {@code rest/handler/authhandler.go:106-122 unauthorized()}
      *       → {@code WriteHeader(401)}，<b>body 为空</b>；</li>
      *   <li>{@code api/internal/middleware/checkblacklist_middleware.go:39-45}
-     *       → 401 + {@code {"code":5004,"msg":"未登录或登录已失效"}}。</li>
+     *       → 401 + {@code {"code":5004,"msg":"未登录或登录已失效"}}
+     *       （手写 {@code fmt.Sprintf}，<b>没有 {@code data} 字段</b>）。</li>
      * </ul>
-     * <p>本端统一成完整 envelope（{@code {code,msg,data}}）—— 与 users/admin 域同款，
-     * 属 AGENTS.md §3.4 已登记的表达层差异；<b>状态码 401 与 code 5004 是对齐的</b>。
+     * <p>本端统一成完整 envelope（{@code {code,msg,data}}）—— 与 users/admin/comment 域同款。
+     * <p>⚠️ <b>这是本域唯一一处「两侧 body 形状不同」的地方</b>：
+     * Go 的验签失败是<b>空 body</b>、黑名单命中是<b>无 data 字段</b>的两字段 JSON，
+     * RAG 侧两者都是三字段 envelope。<b>HTTP 状态码 401 与 code 5004 是对齐的</b>，
+     * 差的只是 body 的字段集合 ⇒ 属表达层差异，<b>待签字</b>，登记在
+     * {@code docs/Intentional_Deviations/favorite/api.md}（DEV-FAV-API-001）。
+     * <p>⚠️ <b>不要</b>把「§3.4 已登记」当成依据：§3.4 是<b>proto 复制</b>那一节，
+     * 与本条无关（此前本类的注释误引了它）。
      *
      * <p>Spring 挑最具体的 handler，故本方法优先于 {@link #handleBusiness}。
      */
