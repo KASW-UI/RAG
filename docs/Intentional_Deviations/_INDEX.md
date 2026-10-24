@@ -93,6 +93,7 @@
 `article/{api,common}` · `comment/common` · `hot/…` 已全填 · `like/…` 已全填 ·
 `message/…` 已全填 · `task/{api,proto}` · `users/admin/…` 已全填 · `users/user/{rpc}` ·
 `follow/*` · `favorite/*`（本域本轮未做）·
+🆕 **`global/*`**（收口域，§3.5）—— 跨微服务 + `service/common` 影响的搁置漂移；本档定位「集中收编」⇒ **global 的签字偏离也收编至此**，判据不变：**要不要「修回去」**？要 ⇒ `DRIFT`；不要（有意）⇒ 本档 ·
 `_cross/{decisions,go-anchors,message-domain-wide,open-items,status-snapshot-2026-10-22,user-qa-verbatim}`
 
 ## 搬移来源

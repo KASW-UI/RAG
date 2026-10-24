@@ -120,11 +120,29 @@ docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：�
 3. **空文件即坑位**（`Intentional_Deviations` 现有 26 个 0 字节占位、`Pitfalls` 10 个）——
    填了就是新坑位，不填就别建空壳文件。
 
-### ⚠️ 当前缺口（2026-10-23 实测）
+### ⚠️ 域目录缺口现状（2026-10-25 更新）
 
-`comment` / `favorite` / `follow` / `task` 四个新域在 `DRIFT/` 与 `Pitfalls/` 下**尚无子目录**
-（`Intentional_Deviations/comment/` 已有 `proto.md`）。
-⇒ 这四个域开工时**顺手建目录**，别把台账塞进别的域或 `_cross/`。
+`comment` / `favorite` / `follow` / `task` 四个新域的三档子目录**已建齐**（2026-10-23 43 个坑位）。
+`global` 收口域的三档子目录也已建（`common-tails` / `cross-domain` / `cycle-deps` 三个议题档 + `DRIFT/global/_README.md`）。
+
+⇒ **开工前先确认自己域的目录存在**；缺了就建，别把台账塞进别的域或 `_cross/`。
+
+### 1b. 🆕 `global` 收口域的**单写权**（2026-10-25 用户定）
+
+> **`global` 不是第 11 个微服务域，是「收口域」**：单微服务域已各自对齐完毕，
+> 但**修法落在共享层、或影响多个域**的漂移被搁置 ⇒ 全部归 `global`。
+
+| 规则 | 内容 |
+|---|---|
+| **单写权** | **`service/common/**` 只有 `align/global` 能写**，别的域只读 ⇒ 别人发现 common 的 bug，**记台账交给 global**，不自己动手 |
+| **同一次提交** | 修法同时涉及 `service/common` 与别的域代码（`service/users/**` 等）⇒ **必须同一次提交**。否则会留下「一半改完」的半截状态 |
+| **落点** | `docs/DRIFT/global/`（+ `Pitfalls/global/` + `Intentional_Deviations/global/`），按**议题**分档，不是按 api/rpc/proto |
+| **与 `common` 域的边界** | `common` 域问「common 自己对不对」；`global` 问「**别人**因 common 而对不对」 |
+
+⚠️ **为什么需要单写权**：`service/common` 被 **16 个组件**依赖（article/comment/favorite/follow/hot/like/message/task 各自的 api+rpc）
+⇒ 别的域同时改它 ⇒ 合并必冲突 + 语义打架。
+⇒ **这正是「10 域并发对齐吞吐被卡住的那一层」** —— 不是 common 的漂移条目多，
+而是**凡修法落在 common 的条目，都自动从并发任务降级为串行任务**。
 
 ### 2. 域内顺序：`rpc → common → api → proto 消费`
 
@@ -205,6 +223,11 @@ git branch -d align/task
 | 合回主干 | `git merge --no-ff align/<域>` |
 | 同步基线 | `git merge do-my-own-gh`（在工作树内） |
 | 撤 | `git worktree remove <路径>` + `git branch -d <分支>` |
+| 建 `global` 收口域 | `git worktree add "../RAG.worktrees/global" -b align/global do-my-own-gh` |
 
 > ⚠️ IDE 里也能做（Git 工具窗口 ⌘9 → 右键分支 → `Git > 新建工作树…`），
 > 但多建时终端循环更快、不易点错。**不要在主目录上点「签出」**——那会带走另一个会话的未提交改动。
+>
+> ⚠️ **同名分支已存在时**（如旧的 `align/favorite` 仍被某个工作树占用）：
+> `git worktree add` 会报「branch already checked out」⇒ 先 `git worktree remove` + `git branch -D`
+> （**确认无独有提交、无未提交改动后再删**）。

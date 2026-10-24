@@ -57,6 +57,7 @@
 | `comment` | 2 份 | 15 | `comment-rpc` 的 17 个类曾是空壳而全量编译 `EXIT=0` |
 | `follow` | 2 份 | 16 | —— |
 | `common` | 5 份 | 散文式 | 请求保护层四层：**recover → breaker → shedding → 业务观测**；链的定义点必须在共享模块，否则 10 个 rpc server 各写一遍 = 10 个可能写错的地方 |
+| 🆕 `global` | 0 份（3 个坑位已建） | 收口域 | **跨微服务 + `service/common` 影响的搁置漂移**（§3.5）。按议题分档：`common-tails` / `cross-domain` / `cycle-deps` |
 | `_cross` | 4 份 | 散文式 | Flyway 账本撞号；框架机制静默失效实证；「跑绿 ≠ 对」的元教训；**陈旧 surefire 报告抬高测试计数** |
 
 ## 待填（空文件即坑位）
