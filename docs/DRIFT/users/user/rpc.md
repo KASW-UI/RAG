@@ -1629,3 +1629,41 @@ admin 域拥有 `03_create_admin.sql` / `04_create_admin_invite.sql`，**四个�
 ### 本节不改变任何代码
 
 纯台账状态更正，**未改动任何实现**。
+
+---
+
+## 2026-10-24 第十轮：跨组件面登记 —— 「Redis **主机名解析失败**」在 **user-rpc 侧**（**本轮未测 ⇒ 不下结论**）
+
+> 触发：本轮在 **user-api** 侧立了 `DRIFT-USERAPI-015`（见 [`user/api.md`](./api.md)）——
+> 双侧活体实测发现「Redis 主机名**解析不出来**」时 **RAG 的失败耗时贴着 3s 预算** ⇒ 200/503 摇摆。
+> ⇒ 本节只登记**同一故障形态在 user-rpc 侧的面** —— **本轮未测，故不下结论**。
+
+### 事实（已核实到文件与行号）
+
+| 项 | 事实 | 出处 |
+|---|---|---|
+| user-rpc **写**黑名单 | `user:jwt_blacklist:<token>` | `UserDomainService.java:772-775`（`bizRedis.opsForValue().set(key, "banned", ttl)`）|
+| api 侧**读**同一个 key | `user:jwt_blacklist:<token>` | `JwtAuthInterceptor`（见 api.md §4 #38）|
+| user-rpc 的 Redis 配置 | **与 user-api 同款**：`host: ${REDIS_ADDR:redis}` + `timeout: 3s` | `service/users/user/user-rpc/src/main/resources/application.yaml:40-45` |
+| 写失败的行为 | `catch (Exception e)` ⇒ `Status.INTERNAL`「注销失败,Redis写入异常」；<br>`catch (StatusRuntimeException e)`（含 deadline 类）**上抛、不改写** | `UserDomainService.java:774-781` |
+
+⇒ **api 读 / rpc 写同一个 key** ⇒ 这是 AGENTS.md §3.5 意义上的**跨组件不变量**
+（与「建表责任交叉 · client 契约」同型）⇒ **不属于任何单个组件**。
+
+### 待审（本轮**未测**，故**不下结论**）
+
+1. user-rpc 是 **gRPC**（无 HTTP 3s 预算），但它有 gRPC deadline（`checkDeadline()`）
+   ⇒ **「Redis 命令超时 3s」与「gRPC deadline」是否同刻**？
+   ⇒ 若同刻，写失败可能表现为 `INTERNAL`（"注销失败,Redis写入异常"）**或** `DEADLINE_EXCEEDED`
+   ⇒ **形状是否摇摆**（与 api 侧 015 同型）？⇒ **未测**。
+2. 写失败 ⇒ **黑名单没写进去** ⇒ 该 token **仍然有效**；
+   同时 api 侧读取也失败（fail-open）⇒ 两侧一起「失效」
+   ⇒ **这个「一起失效」是不是 Go 侧同款**（Go 的 `logoutlogic` 写失败时的形状）？⇒ **未审**。
+3. ⚠️ **不要**直接套用 api 侧的结论 —— AGENTS.md §3.1 明确禁止
+   「拿『现有 RAG 代码』或另一域的结论当对照基准」。
+
+### 复现入口
+
+`tools/difftest/exp-difftest-redis-neverup.sh`（`REDIS_HOST=redis`）——
+该脚本目前**只探测 api 侧** ⇒ rpc 侧的对应面**需要另加一个探测点**
+（logout 的响应形状 + 耗时），本轮**未加**。

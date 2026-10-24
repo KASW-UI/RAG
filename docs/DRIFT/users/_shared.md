@@ -936,6 +936,10 @@ RAG 曾用 `if (!any) return 0;` 把它挡掉了。修复后双侧实测：空 b
 2. **`user-api` 无真 PG 守门** —— 该组件**零 DB 访问**，「真 PG」对它**不适用**（不是漏做）。
    替代方案：真 MVC 管线 + 真 Redis + mock gRPC 边界（见 [`user/api.md`](./user/api.md) §5）。
 3. **`UNRESOLVED-USERRPC-004②`（Redis 启动 fail-open/fail-fast）未验** —— 时间预算内没做。
+   ⇒ ⚠️ **更正指针（2026-10-24 第十轮复核）**：本条**已于 2026-10-24 闭环**
+   （[`user/rpc.md`](./user/rpc.md) §9.3 · 活体实验**证伪**了原推断：go-zero `RedisConf.NonBlock`
+   默认 `true` ⇒ **启动不 ping** ⇒ 两侧都是「懒连接」）。
+   ⇒ 上面的「未验」是 **2026-10-23 第三轮**当时的诚实边界，**已过期**，**不要再据此认为它还开着**。
 4. **`DRIFT-USERRPC-V-006`（`users_user.id` / `avatar_history.id` 谁胜出）未验** ——
    本轮只验了「两侧 id 不同但同形」，没验「同一 id 是否会撞」。
 5. **`api.md` 的 DRIFT-USERAPI-003 ~ 010 一条没动** —— 本轮只锁 claim 语义两条。

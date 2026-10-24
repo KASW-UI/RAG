@@ -4,23 +4,25 @@
 |---|---|
 | **Go 侧** | `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/user/user/api`（含 `service/user/user/identity/`，该组件的一部分） |
 | **RAG 侧** | `/Users/pr/Documents/java&golang/RAG/service/users/user/user-api` |
-| **核对日期** | **2026-10-23**（本轮） |
-| **判定** | **SEMANTICALLY NOT EQUIVALENT** —— 2 项 SEMANTIC MISMATCH + 7 项 OBSERVABLE DIFFERENCE + 5 项 UNRESOLVED |
+| **核对日期** | **2026-10-24（第十轮）** —— ⚠️ 原写「2026-10-23」，**已过期** |
+| **判定** | **SEMANTICALLY NOT EQUIVALENT** —— **0 项 SEMANTIC MISMATCH + 3 项 OBSERVABLE DIFFERENCE + 0 项 UNRESOLVED**<br>（009② 3s 预算作用域 · 013 过载保护〔跨域〕· 015 Redis 主机名解析失败）⇒ 与 §10 §39 一致<br>⚠️ 原写「2 项 SEMANTIC MISMATCH + 7 项 OBSERVABLE DIFFERENCE + 5 项 UNRESOLVED」，那是 **2026-10-23 的状态，已过期** |
 | **规模** | 9 个 HTTP 端点 / 9 个 gRPC 出向调用 / 1 个 Redis 出向 / 7 个业务码分支族 |
+| **入口** | **§7 条目总索引**（015 条漂移的状态与落点，一表看完）· §10 最终判定 · §8 测试用例与守门清单 |
 
 ## 证据强度声明（本台账每条结论都带标注）
 
-| 标记 | 含义 | 本轮占比 |
+| 标记 | 含义 | 现状（2026-10-24） |
 |---|---|---|
-| `静态源码` | 只读了两侧源码，未运行任何一侧 | **绝大多数条目** |
+| `静态源码` | 只读了两侧源码，未运行任何一侧 | 仍占多数条目 |
 | `字节码核实` | 对 Spring jar 做了 `javap` 反汇编取证（不是靠记忆/文档） | DRIFT-USERAPI-006 |
 | `真 PG` | 真 PostgreSQL 参与 | 本组件无 DB 访问 → 0 条 |
 | `纯 Mockito` | 数据层被 mock | 0 条（本组件无 DB） |
-| `双侧活体对拍` | Go 进程与 RAG 进程同时跑 | **0 条** |
+| `双侧活体对拍` | Go 进程与 RAG 进程同时跑 | **多条** —— 第三轮（claim 语义 17 步）· 第六轮（真 Tomcat 400 header）· 第七轮（客户端熔断 E2E）· 第八轮（四个过载机制）· 第九轮（Redis 故障注入）· **第十轮（Redis「从未连上」两形态）** |
 
-> ⚠️ **本轮没有任何一条结论来自双侧活体对拍。** 全部是 `静态源码` + 1 条 `字节码核实`。
-> 按 `AGENTS.md` §3.3 / spec 硬约束 1、3：**「静态对照」不等于「已闭环」**。
-> 下列 UNRESOLVED 不是客套话，是这份台账的诚实边界。
+> ⚠️ **原写「本轮没有任何一条结论来自双侧活体对拍」—— 该句是 2026-10-23 的状态，已过期。**
+> ⇒ 现在本台账有**多条**结论来自双侧活体对拍（见上表与 §8 的 CASE 表）。
+> ⇒ 按 `AGENTS.md` §3.3：**「静态对照」不等于「已闭环」**，反之「活体对拍」也不等于**全部**闭环 ——
+> 仍 OPEN 的 3 条见 §10 的适用边界。
 
 > ⚠️ **依赖前提（用户任务书给定，必须原样保留）**：`user-rpc` 由**另一个并行会话**审查。
 > 本组件**不假设对端 rpc 是正确的**。凡结论依赖 `user-rpc` 响应语义的，一律进 §9 并注明「需合并判读」。
@@ -373,14 +375,16 @@ Result 只用 5 个枚举值。Evidence 列的强度标记见文件头。
 | 48 | Metrics | login 5 + register 2 埋点 | `metrics.go` + `loginlogic.go:47,59,65,77,82` / `registerlogic.go:46,58` | `UserApiMetrics` 7 个 Counter，调用点逐条对应 | **EQUIVALENT** | 静态源码 |
 | 49 | Metrics | 其余 7 个 RPC 不埋点 | 不埋 | 不埋（1:1 不补） | **EQUIVALENT** | 静态源码 |
 | 50 | 配置 | JWT secret / expire | `etc/usercenter.yaml:11-12` | `application.yml:91-92`（同值 + env 覆盖） | **EQUIVALENT** | 静态源码 |
-| 51 | 配置 | HTTP 超时 3000ms | `rest/config.go:55` `default=3000`（yaml 未写） | `application.yml:142-143` `observability.http-timeout: 3s` | **EQUIVALENT**（配置层） | 静态源码，**运行时未验**（见 §6.7） |
+| 51 | 配置 | HTTP 超时 3000ms | `rest/config.go:55` `default=3000`（yaml 未写） | `application.yml:142-143` `observability.http-timeout: 3s` | **EQUIVALENT**（配置层） | 静态源码；✅ **运行时已验**（2026-10-24 第九/十轮，见 §6.7 · CASE-05/05b/05e/05f）<br>⚠️ 原写「运行时未验 ⇒ 记 UNKNOWN」，**已过期** |
 | 52 | 配置 | gRPC 传输 | Go `zrpc` = plain | `application.yml:81` `negotiation-type: plaintext` | **EQUIVALENT** | 静态源码 + `UserApiGrpcNegotiationTest` |
 | 53 | 错误码表 | code→msg 全表 | `errmsg.go:38-68` | `ErrorCode` 枚举（users-common） | **EQUIVALENT**（以 users-common 为公理，不在本组件复验） | 逐条比对 30 项常量一致 · 静态源码 |
 | 54 | 错误码表 | 未知码 → "FAIL" | `errmsg.go:70-76` `codeMsg[Error]` | `ErrorCode.of` → `ERROR`（`getMsg` 500→"FAIL"） | **EQUIVALENT** | 静态源码 |
 | 55 | 并发 | 本组件的并发语义 | 无状态、无写、无幂等键 | 同 | **EQUIVALENT** | 静态源码 |
 | 56 | 过载 | **客户端熔断打开**时的对外形状 | `zrpc/internal/clientinterceptors/breakerinterceptor.go:13-19` → `core/breaker/breaker.go:18-19` `ErrServiceUnavailable`（**普通 error**）→ `loginlogic.go:46-56` `status.FromError`⇒`Unknown`⇒`default`⇒**1015**；`loginhandler.go` 用 `httpx.OkJson` ⇒ **HTTP 200** | 修前：`GlobalExceptionHandler` **无**该分支 ⇒ 落兜底 ⇒ **HTTP 500 + 5001**，并把**入口**熔断喂开 ⇒ 对外变成 **503 空 body** | ❌ → ✅ **已修**（2026-10-24 第七轮） | **DRIFT-USERAPI-011** · 双侧活体（真 in-process gRPC server + 真 channel） |
-| 56 | 生命周期 | 启动顺序 / 关闭 | `usercenter.go:24-45` | `UserApiApplication.main` + `ObservabilityLifecycle:47` | **EQUIVALENT**（表达层） | 静态源码 |
-| 57 | 并发/事务 | user-rpc 的事务边界、`FOR UPDATE`、`extra_info` jsonb、`is_current` 陈旧 | — | — | **UNKNOWN**（不在本组件职责） | U-005 |
+| 57 | 生命周期 | 启动顺序 / 关闭 | `usercenter.go:24-45` | `UserApiApplication.main` + `ObservabilityLifecycle:47` | **EQUIVALENT**（表达层） | 静态源码 |
+| 58 | 并发/事务 | user-rpc 的事务边界、`FOR UPDATE`、`extra_info` jsonb、`is_current` 陈旧 | — | — | **不在本组件判定权内**（非「未知」）⇒ 结论见 `user/rpc.md`：`extra_info` 列类型 ✅ 已修（V-003，`ec33159`）· `is_current` 派生 ✅ EQUIVALENT | `UNRESOLVED-005` **已关**（2026-10-24） |
+| 59 | 外部依赖 | Redis **断连**时的黑名单查询 | `checkblacklistmiddleware.go:36` `err == nil && exists` ⇒ **fail-open 放行**（实测 ~1.7s） | Lettuce 默认把断连期命令**排队** ⇒ 撞 3s HTTP 预算 ⇒ 503 | **OBSERVABLE DIFFERENCE**（已修：2026-10-24 第九轮，`REJECT_COMMANDS` ⇒ 两侧都 200） | **DRIFT-USERAPI-014** · 双侧活体对拍 |
+| 60 | 外部依赖 | Redis **主机名解析失败**时的黑名单查询 | 同上（5 次拨号快速失败 ⇒ ~1.8s ⇒ **恒 200**） | 失败耗时**贴着 3s commandTimeout** ⇒ 与 3s HTTP 预算竞速 ⇒ **200/503 摇摆**（实测 3.03/2.93/3.01s） | **OBSERVABLE DIFFERENCE**（🔴 待拍板，2026-10-24 第十轮） | **DRIFT-USERAPI-015** · 双侧活体对拍 |
 
 ---
 
@@ -414,7 +418,16 @@ Failure Result:  error
 Semantic:        ⚠️ **error ≠ 黑名单命中**。Go 的判据是 `err == nil && exists`，
                  所以 Redis 挂了会 **fail-open 放行**（checkblacklistmiddleware.go:36）。
                  RAG `JwtAuthInterceptor.java:204-208` 把异常吞成 null，判据同构 ⇒ fail-open。
-Does Failure Block Operation: 否（两侧都不阻塞）
+Does Failure Block Operation: ⚠️ **两侧都不「误拦」，但 RAG 会「被拖住」** ——
+                 「fail-open」只保证**不拒绝请求**，**不保证请求不被延迟/打挂**：
+                 · Go：Redis 失败耗时 ~1.8~1.9s（5 次拨号快速失败）⇒ **< 3s 预算 ⇒ 仍 200**；
+                 · RAG：失败耗时**取决于故障形态** ⇒
+                   断连 ⇒ 29ms（`REJECT_COMMANDS` 秒拒）⇒ 200；
+                   端口拒连 ⇒ 0.57s ⇒ 200；
+                   **主机名解析失败 ⇒ 2.93~3.03s ⇒ 贴着 3s 预算 ⇒ 200/503 摇摆**
+                   ⇒ **DRIFT-USERAPI-015**（🔴 待拍板，2026-10-24 第十轮）。
+                 ⇒ ⚠️ 本行原写「否（两侧都不阻塞）」—— **对 Go 成立，对 RAG 不成立**，
+                 故改为上表的分形态表述。
 Side Effect:     无（只读）
 ```
 
@@ -511,7 +524,18 @@ Side Effect:     无（只读）
 | 客户端断连 | 499 | 499（`markClientCancelled`） |
 
 ⚠️ 作用域差异见 **DRIFT-USERAPI-009**，其后果之一（Redis 慢时的 fail-open vs 503）见 **U-004**。
-⚠️ **运行时未验**：两侧都没有对 3s 超时做过活体对拍 ⇒ 按 §3.3 记 **UNKNOWN**。
+✅ **运行时已验（2026-10-24 第九 / 十轮）** —— ⚠️ 此处原写「两侧都没有对 3s 超时做过活体对拍
+⇒ 按 §3.3 记 **UNKNOWN**」，那是 **2026-10-23 之前**的状态，**已过期**：
+
+| 场景 | Go | RAG | 出处 |
+|---|---|---|---|
+| Redis **很慢**（`CLIENT PAUSE 8000`）| **503** "Request Timeout"（3.003s）| **503** "Request Timeout"（3.018s）| CASE-05b |
+| Redis **断连** | **200**（fail-open）| **200**（fail-open）| CASE-05 |
+| Redis **从未连上·端口拒连** | **200**（1.79s）| **200**（0.57s）| CASE-05e |
+| Redis **主机名解析失败** | **恒 200**（1.81~1.92s）| **200/503 摇摆**（2.93~3.03s）| CASE-05f ⇒ **DRIFT-USERAPI-015** |
+
+⇒ 复现脚本：`tools/difftest/exp-difftest-redis-blacklist.sh`（断连/很慢）
+与 `tools/difftest/exp-difftest-redis-neverup.sh`（从未连上·两形态）。
 
 ### 6.8 Retry（§18）
 
@@ -553,6 +577,32 @@ RAG：Spring 容器装配（`UserRpcClient` 的 `@GrpcClient` + `JwtAuthIntercep
 ---
 
 ## 7. Semantic Drifts（§27 + §36）
+
+### 📇 §7 条目总索引（2026-10-24 第十轮补）
+
+> ⚠️ **本表是 §7 的唯一入口。** 历史上有些条目**只记在附录的轮次节里**（§「第七轮」/「第八轮」），
+> **没有独立的 `###` 标题** ⇒ **只扫 §7 的标题会漏掉它们** ⇒ 本表补齐。
+> ⚠️ 状态一律带**核对日期**（AGENTS.md §6.3：不带日期按 `UNKNOWN` 处理）。
+
+| 编号 | 一句话 | 状态（核对日期） | 落点 |
+|---|---|---|---|
+| `DRIFT-USERAPI-001` | `userId` claim 畸形：Go 走业务层 200+1006，RAG 直接 401 | ✅ 已修（2026-10-23 第三轮） | §7 |
+| `DRIFT-USERAPI-002` | delete/update 的 `uid<=0` 被收窄 | ✅ 已修（2026-10-23 第三轮） | §7 |
+| `DRIFT-USERAPI-003` | gRPC 错误码映射比 Go 的 per-Logic switch 宽 | ✅ 已修（2026-10-23 第四轮） | §7 |
+| `DRIFT-USERAPI-004` | 请求绑定面（原断言「零字段 DTO 也会 400」）| ❌ **已证伪关闭**（2026-10-24，commit `330bafb`） | §7 |
+| `DRIFT-USERAPI-005` | `/user/avatar/history` 读 body（Go 侧不读）| ✅ 已修（2026-10-23 第四轮） | §7 |
+| `DRIFT-USERAPI-006` | 400 的 `Content-Type` 少 `charset` + ISO-8859-1 编码 | ✅ 已修（2026-10-24 第六轮，真 Tomcat 双侧实证） | §7 |
+| `DRIFT-USERAPI-007` | panic / 兜底异常的响应形状 | ✅ 已签字保留（`SD-USERAPI-001`，2026-10-23） | §7 |
+| `DRIFT-USERAPI-008` | 「RAG 侧没有任何过载保护对应物」 | ❌ 原断言**已证伪**（2026-10-24 第八轮） | §7 + 附录「第八轮」 |
+| `DRIFT-USERAPI-009` | observability 的位置（Go 在鉴权之内，RAG 在之外）| ✅ **① 已签字**（`SD-USERAPI-002`，2026-10-24）／🔴 **② 仍 OPEN**（3s 预算作用域） | §7 + §9.x 改法 A |
+| `DRIFT-USERAPI-010` | 黑名单 401 的 `Content-Type` 拼写错误 | ✅ 已签字（N-1，2026-10-23） | §7 |
+| `DRIFT-USERAPI-011` | user-api 缺客户端熔断异常的 handler（应为 200+1015）| ✅ 已修（2026-10-24 第七轮） | ⚠️ **附录「第七轮」· 无独立 §7 条目** |
+| `DRIFT-USERAPI-012` | 降载的 RT 统计口径（Go 浮点+`math.Ceil` vs RAG 整型截断）| ✅ 已修（2026-10-24 第八轮） | ⚠️ **附录「第八轮」· 无独立 §7 条目** |
+| `DRIFT-USERAPI-013` | 过载保护（MaxConns 闸门粒度 + breaker 键空间 + 注释与实现矛盾）| 🔴 **待拍板**（属 `service/common` ⇒ **跨域**） | ⚠️ **附录「第八轮」· 无独立 §7 条目** |
+| `DRIFT-USERAPI-014` | Redis **断连** ⇒ Lettuce 排队 ⇒ 撞 3s 预算 ⇒ 503 | ✅ 已修（2026-10-24 第九轮） | §7 |
+| `DRIFT-USERAPI-015` | Redis **主机名解析失败** ⇒ 200/503 摇摆 | 🔴 **待拍板**（2026-10-24 第十轮新发现） | §7 |
+
+⇒ **当前 OPEN 的只有 3 条**：`009②` / `013` / `015`（与 §10 §39 的 ❌ 3 项一致）。
 
 ### DRIFT-USERAPI-001 —— `userId` claim 缺失/非数字：Go 走业务层（200+1006），RAG 在鉴权层直接 401 —— ✅ **已修（第三轮）**
 
@@ -1240,7 +1290,7 @@ Recommended Verification: `UserApiRedisDisconnectedFastFailTest`（2 条 · 真�
 
 ---
 
-### DRIFT-USERAPI-015 —— Redis **主机名解析不出来**（生产默认形态）：Go 恒 200 fail-open，RAG 在 **200/503 之间摇摆** —— 🔴 **本轮新发现 · 待拍板**
+### DRIFT-USERAPI-015 —— Redis **主机名解析不出来**（生产默认形态）：Go 恒 200 fail-open，RAG 在 **200/503 之间摇摆** —— 🔴 **2026-10-24 第十轮新发现 · 待拍板**
 
 ```text
 Component:    JwtAuthInterceptor（黑名单 EXISTS）/ Lettuce 的连接建立与超时设置
@@ -1490,7 +1540,7 @@ RAG Evidence: 同上；UserRpcClient.java:18 自己也写着「Phase 2b 填肉�
              circuit breaker / deadline propagation（DRIFT-018）」—— 即这三项本组件**明确未实现**。
 Why Unknown: 超出本组件组件边界（§2 strict scope）。
              ⚠️ AGENTS.md §3.5 要求** rpc 必须先于 api **，本条正是该排序约束的体现：
-             在 user-rpc 判读完成前，§4 矩阵第 57 行必须留 UNKNOWN。
+             在 user-rpc 判读完成前，§4 矩阵第 **58** 行（并发/事务 · user-rpc 事务边界）必须留 UNKNOWN。
 Impact:      §4 矩阵第 18/20/22 行（delete/update 的 rpc 响应语义）最终定性取决于 rpc 侧。
 Required Confirmation: 引用 `docs/DRIFT/users/user/rpc.md`（另一会话产出）后回填本节。
 ```
@@ -1503,13 +1553,13 @@ Required Confirmation: 引用 `docs/DRIFT/users/user/rpc.md`（另一会话产�
 
 | # | 检查项 | 结论 | 依据 / 缺口 |
 |---|---|---|---|
-| 1 | 两边的 public behavior 是否一致 | ❌ | **DRIFT-USERAPI-009②**（3s 超时作用域）+ **DRIFT-USERAPI-013**（过载保护，待拍板）+ **DRIFT-USERAPI-015**（Redis 主机名解析失败 ⇒ 200/503 摇摆 · 本轮新发现）。⚠️ 此前写的 001/002/004 **均已修/已证伪关闭** |
+| 1 | 两边的 public behavior 是否一致 | ❌ | **DRIFT-USERAPI-009②**（3s 超时作用域）+ **DRIFT-USERAPI-013**（过载保护，待拍板）+ **DRIFT-USERAPI-015**（Redis 主机名解析失败 ⇒ 200/503 摇摆 · **2026-10-24 第十轮新发现**）。⚠️ 此前写的 001/002/004 **均已修/已证伪关闭** |
 | 2 | 正常路径是否一致 | ✅ | §4 #5,6,7,8,9,12,16,21,22,24 |
 | 3 | 边界输入是否一致 | ✅ | ~~DRIFT-USERAPI-004~~（**已证伪关闭**）· 005（已修）· 006（已修） |
 | 4 | NotFound / Empty / Null 是否一致 | ✅ | §4 #28,29；`list`→`[]`、`history` 不会 null、`data`→null 一致 |
 | 5 | Error meaning 是否一致 | ✅ | ~~DRIFT-USERAPI-003~~（**第四轮已修**）；§4 #7,8,13,14,15,25 |
 | 6 | Error propagation 是否一致 | ✅ | ~~DRIFT-USERAPI-001~~（**第三轮已修**：畸形 claim 走业务层 200+1006） |
-| 7 | External dependency failure 是否一致 | ❌ | **第九轮双侧活体实测**：Redis **断连** ⇒ 两侧都 200（fail-open 放行）；Redis **很慢** ⇒ 两侧都 503 "Request Timeout"。⇒ **DRIFT-USERAPI-014 已修**。⚠️ **第十轮补测**：Redis **从未连上·端口拒连** ⇒ 两侧都 200（014 修法已覆盖）；但 Redis **主机名解析失败**（**生产默认形态**）⇒ Go **恒 200** / RAG **200·503 摇摆** ⇒ **DRIFT-USERAPI-015（本轮新发现）** |
+| 7 | External dependency failure 是否一致 | ❌ | **第九轮双侧活体实测**：Redis **断连** ⇒ 两侧都 200（fail-open 放行）；Redis **很慢** ⇒ 两侧都 503 "Request Timeout"。⇒ **DRIFT-USERAPI-014 已修**。⚠️ **第十轮补测**：Redis **从未连上·端口拒连** ⇒ 两侧都 200（014 修法已覆盖）；但 Redis **主机名解析失败**（**生产默认形态**）⇒ Go **恒 200** / RAG **200·503 摇摆** ⇒ **DRIFT-USERAPI-015（2026-10-24 第十轮新发现）** |
 | 8 | Cache hit / miss 是否一致 | — | **N/A**：本组件无缓存 |
 | 9 | Transaction boundary 是否一致 | — | **N/A**：本组件无 DB；~~见 U-005~~（U-005 **已关**） |
 | 10 | State transition 是否一致 | ⚠️ | 本组件无状态（N/A 性质的等价）；user-rpc 侧 U-005 已关 |
@@ -1533,7 +1583,7 @@ SEMANTICALLY NOT EQUIVALENT
 - **SEMANTIC MISMATCH：0 条** —— ⚠️ 此前记的 2 条（`DRIFT-USERAPI-001/002`）**第三轮均已修**
 - **OBSERVABLE DIFFERENCE：3 条** —— `DRIFT-USERAPI-009②`（3s 超时作用域 · 签字只覆盖 ①）
   · `DRIFT-USERAPI-013`（过载保护 · **待拍板**，属共享层）
-  · `DRIFT-USERAPI-015`（Redis **主机名解析失败** ⇒ Go 恒 200 / RAG **200·503 摇摆** · **第十轮新发现**）
+  · `DRIFT-USERAPI-015`（Redis **主机名解析失败** ⇒ Go 恒 200 / RAG **200·503 摇摆** · **2026-10-24 第十轮新发现**）
 - **UNRESOLVED：0 条** ⇒ **§9 已清空**（001~005 全部闭环：001/005 真 Tomcat、002/003 第四轮、
   004 第九轮双侧活体、005 引 user-rpc 台账）
 - **双侧活体对拍证据：多条** —— ⚠️ 此前写「0 条（全部为静态源码）」是**过期状态**：
@@ -1561,7 +1611,7 @@ SEMANTICALLY NOT EQUIVALENT
 | `DRIFT-USERAPI-013` | 过载保护（breaker 键空间 + 注释与实现矛盾） | **`service/common`**（11 个 protection 类） | ❌ **不能** ⇒ **这才是唯一真正跨域的一条** |
 
 **⇒ 结论**：users/user 域**不是**「只剩跨域的活」。
-**域内可独立闭环 2 条（009② / 015）**，其中 015 是本轮新发现、修法只有一行配置；
+**域内可独立闭环 2 条（009② / 015）**，其中 015 是 **2026-10-24 第十轮新发现**、修法只有一行配置；
 ⇒ 唯一必须等共享层的只有 013（且它当前**未签字**、属「待拍板」而非「已确认漂移」）。
 
 **⚠️ 015 的成立条件不是「用了 Redis 就有」，而是「Redis 命令超时 ≥ HTTP 预算」**（实测全量）：
@@ -2648,7 +2698,7 @@ Go 侧 `breaker.NewBreaker` 在**路由注册时**调用 ⇒ **有界**。
 「少审共享件 = 拿一面没人校过的镜子照自己」的形态。
 ⚠️ **本轮未写该文件** —— 它属 `common` 域会话的工作面（§5.3：只写自己域的文件）。
 
-**② ⚠️ 代码注释给了一个与实现矛盾的安全保证（本轮新发现）**
+**② ⚠️ 代码注释给了一个与实现矛盾的安全保证（2026-10-24 第八轮新发现）**
 
 `service/common/src/main/java/com/rag/common/protection/GoStyleBreakerFilter.java:69-71` 写着：
 
@@ -2661,7 +2711,7 @@ Go 侧 `breaker.NewBreaker` 在**路由注册时**调用 ⇒ **有界**。
 （⇒ 审阅者读注释会以为「键空间天然有界」而漏掉本条）。
 ⚠️ 上文第 ② 段的判断（未匹配路径也建 key）是**对的**；错的是**代码注释**。
 
-**③ ⚠️ 键基数比「路由数」大得多（本轮新发现）**
+**③ ⚠️ 键基数比「路由数」大得多（2026-10-24 第八轮新发现）**
 
 - RAG 的键是 `routeKey()`（`:90-92`）= `method + "://" + request.getRequestURI()`
   ⇒ **实际具体路径**；
@@ -2671,12 +2721,12 @@ Go 侧 `breaker.NewBreaker` 在**路由注册时**调用 ⇒ **有界**。
 - ⚠️ **放大器**：`article-api` 有 `@GetMapping("/article/{id}")`（`ArticleController.java:166,179`）
   这类**路径参数路由** ⇒ **一个 Go 路由对应 N 个 RAG 键**。
 
-**④ ⚠️ 没有回归网（本轮新发现）**
+**④ ⚠️ 没有回归网（2026-10-24 第八轮新发现）**
 
 `GoStyleBreakerFilter.trackedRoutes()`（`:95-97`，专为观测键基数而写的测试钩子）
 在**整个测试目录零引用** ⇒ 键空间无界**没有任何回归网**。
 
-**⑤ 本条在其它域的记录情况（本轮新发现 —— 这就是「单侧」的具体形态）**
+**⑤ 本条在其它域的记录情况（2026-10-24 第八轮新发现 —— 这就是「单侧」的具体形态）**
 
 | 域 | MaxConns 粒度（①） | breaker 键空间（②） |
 |---|---|---|
