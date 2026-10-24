@@ -379,7 +379,7 @@
 |---|---|---|---|
 | **T07 `manage`（`action_type=2` = `MANAGE_UNPIN`）** | **5002**「DB更新失败」 | **200** `{success:true}` | ✅ **已签字偏离**（`SD-2026-10-24-CAND-06`，2026-10-24 用户 Jason）—— 🔴 **Go 侧的 SQL 必报错**：`comment.go:165` `gorm.Expr("attribute & ~?", val)` —— `val` 是 `uint` ⇒ PG 收到**未定型参数** ⇒ `operator is not unique: ~ unknown (SQLSTATE 42725)`。已在 PG 上直接复现（`PREPARE t(unknown) AS SELECT 4::bigint & ~$1` ⇒ 同一错误）。⇒ **RAG 侧实现的是 Go 的*意图***（`attribute & ~#{mask}`，mask 是 **有类型**的 `long` ⇒ PG 解析为 `~ bigint` ⇒ 成功） |
 | **T08 `report`** | **5004**「DB插入失败」 | **200** `{success:true}` | ✅ **已签字偏离**（`SD-2026-10-24-CAND-02`，2026-10-24 用户 Jason）—— 🔴 **Go 侧根本没有 `report_record` 表**：`db.go:15` 的 `AutoMigrate` 列表只有 6 个模型，**不含 `ReportRecord`**；3 个手写迁移脚本也不建它 ⇒ Go 侧**全新部署上 `ReportComment` 必然 5004** |
-| **T20 `404-oversized-body`（1.5 MB → 未注册路径）** | **transport error**（`Broken pipe` / `Connection reset by peer`，**服务端从不返回状态码**） | **HTTP 413**（空 body） | 🔴 **新登记的差异** —— **保护层的覆盖范围**：Go 的 MaxBytes 是 **per-route**（`rest/engine.go:105` 在 `bindRoute` 内拼 chain ⇒ 未注册路径不经它），RAG 的是**全局 servlet Filter** ⇒ 差异详情与处置见 [`api.md` §3.2](./api.md)（D6）⇒ **修法落在 `service/common`，本域不可动 ⇒ 待用户决策** |
+| **T20 `404-oversized-body`（1.5 MB → 未注册路径）** | **transport error**（`Broken pipe` / `Connection reset by peer`，**服务端从不返回状态码**） | **HTTP 413**（空 body） | ✅ **已签字偏离**（`SD-2026-10-24-CAND-08`，2026-10-24 用户 Jason）—— **保护层的覆盖范围**：Go 的 MaxBytes 是 **per-route**（`rest/engine.go:105` 在 `bindRoute` 内拼 chain ⇒ 未注册路径不经它 ⇒ **无界读**），RAG 的是**全局 servlet Filter** ⇒ **RAG 是更严/更安全的一侧** ⇒ **代码零改动**。详见 [`api.md` §3.2](./api.md)（D6） |
 
 > ⚠️ **T07 / T08 现在都是「已签字偏离」，不是待办** ⇒ 后续对拍再看到它们变红，
 > **不得当成新回归去「修」回 Go 的旧行为**（AGENTS.md §0 第 1 条）。
@@ -435,8 +435,8 @@
 | **U2** | ~~MISMATCH-03/04/05/06 一次改动可解 4 条~~ ⇒ ✅ **2026-10-24 已完成**（改动落在 `CommentFactDeliveryService` / `CommentDomainFactService` / `CommentDeliveryValidator` 三处 + 两个 mapper） | ✅ 已闭环 |
 | **U3** | ~~本组件无任何投递路径测试~~ ⇒ ✅ **2026-10-24 已补**：`dispatchOnce` 的三条出口（blocked / failed / accepted）均有真 PG 守门网 | ✅ 已闭环 |
 | **U4** | Go 侧三个 `_test.go`（`domain_fact_test.go` / `fact_process_fixture_test.go` / `fact_delivery_logging_test.go`）**默认 `t.Skip`** ⇒ Go 侧投递链路的**期望行为在 Go 仓里本身也没有活体证据** | ⚠️ 真源侧缺口 |
-| **U5** | `comment_fact_stream` 的 CHECK 在 Go 侧**是否常态存在取决于迁移执行顺序**（生产顺序有 / 测试顺序无） | ⚠️ 待核 |
-| **U6** | `comment_like` 的 Go 侧有**两份互相冲突的 DDL 产物**（AutoMigrate vs 手写 `001`），在 `id`（`bigserial` vs IDENTITY）与唯一约束形态上不同 ⇒ 不存在单一「Go 侧 DDL」基线 | ⚠️ 真源侧歧义 |
+| **U5** | ~~`comment_fact_stream` 的 CHECK 在 Go 侧是否常态存在取决于迁移执行顺序~~ | 🟢 **已查实**（2026-10-24）：Go 那三份手写迁移 `001/002/003` **只被测试脚本** `internal/model/test-community-postgres.sh:47,49` 执行 ⇒ **生产路径只有 `db.go:15` 的 `AutoMigrate`** ⇒ **生产的 `comment_fact_stream` 没有 version CHECK** ⇒ **RAG 侧 V7 多一个 CHECK** ⇒ 登记为 **`SD-2026-10-24-CAND-09`**（待签字）。⚠️ **不可观察**（`version` 从 1 递增，要到 2^53-1 才触发） |
+| **U6** | ~~`comment_like` 的 Go 侧有两份互相冲突的 DDL 产物~~ | 🟢 **已查实**（2026-10-24）：**生产权威 = `AutoMigrate`**（手写 `001` 只在测试脚本跑）⇒ 两份产物的差异只剩**形态等价**项：`id`（`bigserial` ↔ `IDENTITY`）、唯一性（**唯一索引** ↔ **表约束**）⇒ **无行为差异**。🟢 **活体佐证**：两个活库的 `pg_constraint` / `pg_indexes` 差分里，`idx_user_comment_like` 确实是一边索引、一边约束 ⇒ **语义等价** |
 | **U7** | ~~MISMATCH-07（`updated_at` INSERT 取值）—— 未找到任何读取方~~ ⇒ ✅ **2026-10-24 已修**：按 GORM `create.go:340-351` 的实测语义改成入库时刻；**仍无读取方** ⇒ 影响面窄但值已对齐 | ✅ 已修（影响面窄） |
 | **U8** | ✅ **`SD-2026-10-24-CAND-06` 已签字**（2026-10-24，用户 Jason）：Go 的 `attribute & ~?` 在 PG 上**必然报错**（`~ unknown`）⇒ `MANAGE_UNPIN` / `MANAGE_UNFEATURE` **100% 失败**；RAG 侧实现 Go 的*意图*（有类型的 mask）。**签字含义覆盖两处**（manage 清位 + `comment.go:571` 点赞清位）⇒ RAG 侧两处**均已正确、无需改代码** | ✅ 已闭环 |
 | **U9** | ✅ **`SD-2026-10-24-CAND-02` 已签字**（2026-10-24，用户 Jason）：`report_record` 表 Go 侧**不存在** ⇒ Go 的 `ReportComment` **必然 5004**；RAG 侧建了表 ⇒ 可用。**由活体对拍实证**（Go=5004 / RAG=200） | ✅ 已闭环 |
@@ -444,7 +444,7 @@
 | **U11** | ⚠️ **Go 侧潜伏缺陷**：`comment.go:571`（点赞的 `attribute & ~?`）与 `comment.go:165` 同款 ⇒ **Go 侧「作者取消自己的赞」也会 5002**。本轮矩阵 `user 1001 ≠ owner 2002` ⇒ 未触发 ⇒ 两侧一致。⇒ **Go 侧缺陷**，RAG 侧已正确 | ⚠️ 真源侧缺陷（记录，不修 RAG） |
 | **U12** | ✅ **跨栈 gRPC 路径前缀**（未知项 #5）：Go `package pb;` ⇒ `/pb.CommentService/*`，RAG `package comment;` ⇒ `/comment.CommentService/*`。**新增 `PbCommentServiceAlias`**（`@GrpcService` + `BindableService`，用 `MethodDescriptor.toBuilder().setFullMethodName()` 改名 + 复用 `getServerCallHandler()`）⇒ **只增不改**（`comment.` 路径原样保留）⇒ **不推翻**已签字的 `SD-2026-10-23-04`。守门网 `PbCommentServiceAliasGateTest` 6 例（真 in-process server，两条路径都通、同一实现、方法集合对应、未注册方法仍 UNIMPLEMENTED） | ✅ 已闭环（**半修**，见 U13） |
 | **U13** | 🔴 **U12 的伴生阻塞（不可修）**：`io.grpc.Status` **只有 17 个常量** ⇒ grpc-java **发不出** `grpc-status: 1012` ⇒ RAG 的业务码在**自定义 trailer** 里 ⇒ **Go 侧读不到** ⇒ 跨栈错误码必然退化成 `UNKNOWN(2)`。⇒ **结论：混跑必须同栈配对，别名只是兜底** | 🔴 跨栈限制（**协议层**，非本域可修） |
-| **U14** | 🔴 **T20 保护层覆盖范围差异**（见 §4.6.3）：未注册路径 + 超大 body ⇒ Go **从不返回 413** / RAG 返回 **413** ⇒ 登记为 [`api.md` §3.2 D6](./api.md)。⚠️ 修法落在 `service/common/protection`（**六域共用 + `align/common` 并发分支**）⇒ **本域不可动** ⇒ **待用户决策**（改回 Go / 签字为有意偏离） | 🔴 跨域待决 |
+| **U14** | ~~T20 保护层覆盖范围差异~~ | ✅ **已闭环**（2026-10-24 活体实测 T20 ⇒ 登记为 D6 ⇒ **用户已签字** `SD-2026-10-24-CAND-08`：**接受 RAG 更严/更安全的一侧** ⇒ **代码零改动** ⇒ 共享面 `service/common/protection` **不动**） |
 
 ---
 

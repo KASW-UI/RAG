@@ -85,11 +85,21 @@
 | **问题** | 跨栈（Go 客户端 ↔ RAG 服务端）时，路径前缀不一致 ⇒ **直接 `UNIMPLEMENTED`** |
 | **✅ 处置（只增不改）** | **新增** `service/comment/comment-rpc/.../service/impl/PbCommentServiceAlias.java`：`@GrpcService` + 实现 `BindableService`，用 `MethodDescriptor.toBuilder().setFullMethodName()` 把方法名改写成 `/pb.CommentService/*`，并**复用 `getServerCallHandler()`**（⇒ **同一份实现**，不复制逻辑）⇒ **两条路径都通**。<br>⚠️ **`/comment.` 原样保留** ⇒ RAG↔RAG 不受影响 ⇒ **不推翻** `SD-2026-10-23-04` |
 | **🧪 守门网** | **新增** `PbCommentServiceAliasGateTest`（**6 例，真 in-process gRPC server**）：两条路径都通、指向**同一实现**、方法集合一一对应、**未注册方法仍 `UNIMPLEMENTED`** |
-| **🔴 伴生阻塞（不可修）** | `io.grpc.Status` **只有 17 个常量** ⇒ grpc-java **发不出** `grpc-status: 1012` ⇒ RAG 的业务码放在**自定义 trailer** 里 ⇒ **Go 侧读不到** ⇒ **跨栈错误码必然退化成 `UNKNOWN(2)`**。<br>⇒ **结论：混跑必须同栈配对**（Go↔Go、RAG↔RAG），`PbCommentServiceAlias` **只是兜底**（解决「方法找不到」，解决不了「错误码传不过去」） |
+| **🔴 伴生阻塞（不可修）** | `io.grpc.Status` **只有 17 个常量** ⇒ grpc-java **发不出** `grpc-status: 1012` ⇒ RAG 的业务码放在**自定义 trailer** 里 ⇒ **Go 侧读不到** ⇒ **RAG→Go 方向**的业务码**必然退化成 `UNKNOWN(2)`**。<br>⇒ **结论：混跑必须同栈配对**（Go↔Go、RAG↔RAG），`PbCommentServiceAlias` **只是兜底**（解决「方法找不到」，解决不了「错误码传不过去」） |
 
 > ⚠️ **这就是「半修」**：路径通了，**错误码仍然不通**。
 > ⇒ 任何「让 Go 侧调 RAG 的 comment-rpc」的方案都**不能**指望业务码能透传
-> ⇒ 跨栈场景必须**按 `UNKNOWN(2)` 处理**（⇒ 端到端业务语义会退化成「系统内部错误」）。
+> ⇒ **RAG→Go 方向**必须**按 `UNKNOWN(2)` 处理**（⇒ 端到端业务语义会退化成「系统内部错误」）。
+
+> 🟢 **⚠️ 但方向是「不对称」的 —— 这一点必须说准，否则会误判**（2026-10-24 订正）：
+>
+> | 方向 | 业务码能否透传 | 机制 |
+> |---|---|---|
+> | **Go-rpc → RAG-api** | 🟢 **能**（降级为「从 description 文本捞」） | Go 发 `grpc-status: 1012` ⇒ grpc-java 把它映射成 `UNKNOWN(2)` 并把 description 改成 `"Unknown code 1012"` ⇒ `CommentGrpcError.bizCodeFromError` 的**第①优先级**正是捞这个文本 ⇒ **码能捞回来** |
+> | **RAG-rpc → Go-api** | 🔴 **不能** | RAG 侧 grpc-java **发不出** `grpc-status: 1012` ⇒ 只能放自定义 trailer ⇒ **Go 的 `status.FromError` 只读 `grpc-status`，看不见 trailer** ⇒ 端到端只剩 `UNKNOWN(2)` |
+>
+> ⇒ ⚠️ **「跨栈业务码不可传输」只对 RAG→Go 成立**；Go→RAG 是**通的**（靠 description 文本兜底）。
+> ⇒ 这也是 `CommentGrpcError.bizCodeFromError` 判定优先级里**第①条**存在的理由。
 
 ---
 
@@ -100,7 +110,7 @@
 | **U1** | §3.4 效力边界第 1 条的三个子项**本轮全部验完**（`optional` 不适用 / 无字段号硬编码 / 序列化器无交叉）⇒ **本组件的首轮对照收口** | ✅ 已完成 |
 | **U2** | ~~双侧活体对拍尚未做~~ ⇒ ✅ **2026-10-24 已做**：Go 真源 + RAG 四进程同跑，**23 步**矩阵逐字段差分 ⇒ wire 层已验。**路径前缀**按 §3.1 处理 | ✅ 已闭环 |
 | **U4** | 🔴 **跨栈业务码不可传输**（协议层限制，不可修）：`io.grpc.Status` **只有 17 个常量** ⇒ grpc-java **发不出** `grpc-status: 1012` ⇒ RAG 的业务码在**自定义 trailer** 里 ⇒ **Go 侧读不到** ⇒ 跨栈错误码必然退化成 `UNKNOWN(2)` ⇒ **混跑必须同栈配对**，`PbCommentServiceAlias` 只是兜底 | 🔴 协议层限制（**非本域可修**） |
-| **U3** | `check-proto-static.sh` 尚未覆盖 `comment`（既有台账 `new-domains-2026-10-23.md:125-126` 已列待办）⇒ 本轮的「复制忠实」是一次性快照，**不是可持续结论** | ⚠️ 待办 |
+| **U3** | ~~`check-proto-static.sh` 尚未覆盖 `comment` ⇒ 「复制忠实」只是一次性快照~~ | ✅ **已闭环**（2026-10-24）：新增**域内**守门脚本 `tools/difftest/comment/check-proto-parity.py`（**不碰共享的 `tools/difftest/check-proto-static.sh`**）⇒ 剥掉 option/package + **归一化空白**后逐行比对（§3.4 允许缩进与空行统一）＋ 断言 package 仍归一（`SD-2026-10-23-04`）+ 断言 RAG 侧无残留 `go_package`。🧬 **变异实测**：改字段号 ⇒ `EXIT=1`；加回 `go_package` ⇒ `EXIT=1`；恢复 ⇒ `EXIT=0` |
 
 ---
 

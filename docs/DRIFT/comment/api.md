@@ -23,7 +23,7 @@
 |---|---|
 | **总体判定** | 🔴 **`SEMANTICALLY NOT EQUIVALENT`**（其中 2 条已修，见下） |
 | SEMANTIC MISMATCH | **3 条**（§2）—— ✅ **MISMATCH-API-01 / -02 / -03 全部已修**，各配守门网 + **变异验证** |
-| OBSERVABLE DIFFERENCE | **5 条**（§3）—— ~~D1（**已撤销**）~~ / D2 / D3 / **D4（已修）** / **D5（待签字）** / **D6（待决策）** |
+| OBSERVABLE DIFFERENCE | **5 条**（§3）—— ~~D1（**已撤销**）~~ / D2 / D3 / **D4（已修）** / **D5（已签字）** / **D6（已签字）** ⇒ **其中 4 条已闭环**（D1 撤销 / D4 修复 / D5 签字 / D6 签字），**剩余 D2 / D3 两条属 `service/common` 跨域** |
 | 等价确认 | **约 40 个判定点**（§4） |
 | 组件规模 | Go 1,045 行 / 22 文件 ⇒ RAG 2,838 行 / 33 类 |
 | 构建 + 测试 | `mvn -o -pl service/comment/comment-rpc,service/comment/comment-api -am test` ⇒ **BUILD SUCCESS**；**api 45 / rpc 85，合计 130 / 0 failures / 0 errors / 0 skipped**（2026-10-24 实测；修复前 22 条） |
@@ -125,8 +125,8 @@
 | **D2** | Bearer 前缀剥离的**长度边界** | `golang-jwt/jwt/v4/request/oauth2.go:8-14`：`len(tok) > 6 && ToUpper(tok[0:7]) == "BEARER "` | `users-common/.../BearerTokenExtractor.java:74-81`：判据 `length() > 7` | 长度恰为 7 的头（`"Bearer "`）：Go 剥成空串→解析失败→**401**；RAG 保留整串→解析失败→**401**。**结局相同**，仅错误文本不同 ⇒ 当前不可观察，可对齐为 `> 6` 以消除隐患 |
 | **D3** | 熔断**隔离键** | `zrpc/internal/clientinterceptors/breakerinterceptor.go:13-18` `path.Join(cc.Target(), method)` | `common/protection/GoStyleGrpcClientBreakerInterceptor.java:193` `method.getFullMethodName()`（**无 target 前缀**） | 单 channel 下不可观察；将来多 target 会把计数合并。⚠️ 该类在 `service/common` 下，**改动影响多域** ⇒ 只登记不改 |
 | **D4** | **`iat` 在未来**的 token | `golang-jwt/jwt/v4@v4.5.2/map_claims.go:124-141` `MapClaims.Valid()` → `:63-85` `VerifyIssuedAt` → `claims.go:250-255` `verifyIat`：**`now >= iat` 才有效**（**无时钟偏移容忍**）⇒ **拒绝** | **修复前** jjwt 0.12.6 **不校验 iat** ⇒ **接受** | ✅ **已修**（2026-10-24，详见 §3.1）—— 修复前 **RAG 比 Go 松**（安全面更宽） |
-| **D5** | **HS384 / HS512** 的 token | `jwt/v4/hmac.go:49-74` `SigningMethodHMAC.Verify` **不限制 alg**；go-zero 的 `rest/token/tokenparser.go:127-129` `newParser()` 也**没有** `WithValidMethods` ⇒ **接受** | jjwt 的 `verifyWith(key)` 把 key **绑死**在一个算法上（`Keys.hmacShaKeyFor` 对 32 字节 ⇒ `HmacSHA256`）⇒ 头写 HS384/HS512 ⇒ **`WeakKeyException`** ⇒ **拒绝** | 🔴 **RAG 更严** ⇒ **待签字偏离**（`docs/Intentional_Deviations/comment/api.md` 的 `SD-2026-10-24-CAND-07`） |
-| **D6** | **保护层的覆盖范围**：未注册路径上的 **MaxBytes** | go-zero v1.10.2 `rest/engine.go:103-118` `bindRoute` **只把 chain 挂到匹配到的路由上** ⇒ **未注册的路径根本不经 `MaxBytes`** ⇒ 服务端**从不返回 413**（客户端表现为 `Broken pipe`） | 4 个保护是**全局 servlet Filter** ⇒ **未注册路径也经过 MaxBytes** ⇒ **413** | 🔴 **活体对拍实测**（T20）⇒ 差异真实存在。⚠️ 修法落在 `service/common` 的 4 个保护 Filter（**六域共用 + `align/common` 并发分支**）⇒ **本域不可动** ⇒ 见 §3.2 |
+| **D5** | **HS384 / HS512** 的 token | `jwt/v4/hmac.go:49-74` `SigningMethodHMAC.Verify` **不限制 alg**；go-zero 的 `rest/token/tokenparser.go:127-129` `newParser()` 也**没有** `WithValidMethods` ⇒ **接受** | jjwt 的 `verifyWith(key)` 把 key **绑死**在一个算法上（`Keys.hmacShaKeyFor` 对 32 字节 ⇒ `HmacSHA256`）⇒ 头写 HS384/HS512 ⇒ **`WeakKeyException`** ⇒ **拒绝** | ✅ **已签字偏离**（2026-10-24 用户 Jason，`SD-2026-10-24-CAND-07`）—— **RAG 更严一侧** ⇒ 代码不动 |
+| **D6** | ✅ **已签字偏离**（2026-10-24 用户 Jason）—— **保护层的覆盖范围**：未注册路径上的 **MaxBytes** | go-zero v1.10.2 `rest/engine.go:105` —— chain 只在 `bindRoute` 内拼装 ⇒ **未注册的路径根本不经 MaxBytes** ⇒ 服务端**从不返回 413**（客户端表现为 `Broken pipe`） | 4 个保护是**全局 servlet Filter** ⇒ **未注册路径也经过 MaxBytes** ⇒ **413** | ✅ **已签字**（`docs/Intentional_Deviations/comment/api.md` 的 `SD-2026-10-24-CAND-08`）⇒ **RAG 是更严/更安全的一侧** ⇒ 代码不动 ⇒ 详见 §3.2 |
 
 ### 3.1 ✅ D4 已修：`iat` 在未来的 token ⇒ 401（此前 RAG 接受、Go 拒绝）
 
@@ -143,12 +143,12 @@
 > Go 侧探针（`/tmp/jwtprobe`，走 go-zero 的 `rest/token.TokenParser`）
 > 与 Java 侧探针（走本拦截器的真实代码路径）读**同一批字节完全相同的 token** 逐条对拍。
 > ⇒ 「缺 `exp` 两侧都接受」（此前是未知项）、「`iat` 在未来 Go 拒 RAG 收」（**已修**）、
-> 「HS384/HS512 Go 接受 RAG 拒」（**待签字偏离**）三条全部落定。
+> 「HS384/HS512 Go 接受 RAG 拒」（**已签字偏离** `SD-2026-10-24-CAND-07`）三条全部落定。
 > ⇒ 顺带**证明**了 `JwtUtil.padToHmacKeySize` 的 zero-pad 是**空操作**：
 > HMAC 本来就把短 key 零填充到块长（64 字节）⇒ 短 secret 与 pad 后的 secret **恒等**
 > ⇒ 「jjwt 要求 key ≥ 32 字节」这个运行环境约束**不产生行为差异**（守门网里有对应的等价性断言）。
 
-### 3.2 🔴 D6：**保护层的覆盖范围**不同 —— 未注册路径上 Go **从不**返回 413，RAG 返回 413
+### 3.2 ✅ D6 **已签字偏离**：**保护层的覆盖范围**不同 —— 未注册路径上 Go **从不**返回 413，RAG 返回 413
 
 | 项 | 值 |
 |---|---|
@@ -159,8 +159,10 @@
 | **方向判断** | 🔴 **RAG 是更安全的一侧**（Go 侧未注册路径**不限 body 大小** ⇒ 无界读 ⇒ 服务端资源耗尽面更大）。⚠️ 但按 AGENTS.md §3「差异默认判 RAG 错」，**未签字前它仍是 DRIFT，不是缺陷** |
 | **⚠️ 为什么本域改不了** | 修法必然落在 `service/common/protection` 的 4 个保护 Filter 上 —— 该目录**六域共用**，且 `align/common` 分支正在并发改动 ⇒ **本工作树不可动**（共享面禁令） |
 | **可选修法** | ① **把 MaxBytes 从 Filter 改成 HandlerInterceptor**（interceptor 只对**匹配到 handler** 的请求生效 ⇒ 未注册路径自然不经它 ⇒ 与 Go 一致），但要保住「413 压过 401」的顺序 ⇒ 需与 `CommentJwtAuthInterceptor` 比 `@Order` ⇒ **仍是共享面改动**；<br>② **签字为有意偏离**（RAG 更严/更安全的一侧，与 `SD-2026-10-23-01/02/03` 同性质）⇒ 本域**零改动** |
-| **当前处置** | 🟡 **待用户决策**（本工作树**不代签**、**不碰共享面**）⇒ 已登记为 `U9`（§5） |
+| **当前处置** | ✅ **已签字**（2026-10-24，用户 Jason）⇒ 登记为 `SD-2026-10-24-CAND-08`（**RAG 更严/更安全的一侧**）⇒ **代码零改动**；⚠️ **对拍再看到「Go=transport error / RAG=413」不得当成新回归去「修」回 Go 侧行为** |
 
+> ✅ **签字结论（2026-10-24，用户 Jason）**：**接受本偏离** —— RAG 是**更严/更安全的一侧**（Go 侧未注册路径**无界读**）
+> ⇒ 登记为 `SD-2026-10-24-CAND-08`（`docs/Intentional_Deviations/comment/api.md`）⇒ **代码零改动** ⇒ **不改** `service/common` 的共享 Filter。
 > ⚠️ **别把它当成新回归**：T20 是**2026-10-24 本轮对拍新引入的矩阵步骤**，
 > 在此之前 17 步矩阵**没有请求过未注册路径** ⇒ 这条差异**此前从未被观察到**，
 > 但它**不是本轮代码改动引入的**（RAG 的全局 Filter 是既有实现，Go 的 per-route 语义也是既有事实）⇒
@@ -178,7 +180,8 @@
 | **RAG 侧的真实分支** | 应用自己的日志为证：`unreadable request body : Required request body is missing: ...` ⇒ 落在 `CommentGlobalExceptionHandler.handleUnreadableBody`（`HttpMessageNotReadableException`）⇒ **不是** `handleMediaTypeNotSupported` |
 | **判别实验** | `application/json` + 1 字节 body ⇒ Spring 报 **`JSON parse error: Unrecognized token 'x'`**（body **被读了**）<br>`text/plain` + 1 字节 body ⇒ 报 **`Required request body is missing`**（body **读不出字节**）⇒ **判别点是 Content-Type** |
 | **⚠️ 机制未查实** | Spring 7 + Tomcat 11 组合下，**非 JSON Content-Type 时 servlet input stream 读不出字节** ⇒ 具体成因未定位（已排除：本域代码无人调 `getParameter` / `getReader` / `getInputStream`；`GoStyleMaxBytesFilter` 只读 `getContentLengthLong()`，不消费 body）。⇒ **可观察行为已定，机制待查** ⇒ 记为 `U10` |
-| **连带动作** | ✅ **已订正** `CommentGlobalExceptionHandler.java` 的 javadoc（原断言「Java 侧直接判 415」**是错的**）—— §3.2「先改/删错误断言」 |
+| **连带动作** | ✅ **已订正** `CommentGlobalExceptionHandler.java` 的 javadoc（原断言「Java 侧直接判 415」**是错的**）—— §3.2「先改/删错误断言」；
+| | ✅ **对应的签字候选 `SD-2026-10-24-CAND-04` 已作废**（其前提「RAG ⇒ 415」不成立 ⇒ 差异不存在）—— 见 `docs/Intentional_Deviations/comment/api.md` |
 
 > ⚠️ **元教训**：这条差异**从立项到撤销，全程没有一次活体证据** ——
 > 立项靠的是「读 Spring 的异常处理类 + 推断」，撤销靠的是「两侧同时跑」。
@@ -315,13 +318,13 @@
 | **U2** | ~~MISMATCH-API-02 的严格解析 + 订正错误断言~~ | ✅ **已完成**（见 §0.1 / §2） |
 | **U3** | ~~MISMATCH-API-03 的 2s deadline 上限~~ | ✅ **已完成**（2026-10-24）：照抄 `task-api/TaskRpcClient.java:66,105-112` 的 `min(2s, 剩余预算)`；守门网 `CommentApiRpcDeadlineGateTest` 4 例（真 in-process gRPC server）+ 变异 **3/4 精确变红** ⇒ 见 §2 |
 | **U4** | **既有台账的过期结论**：`docs/DRIFT/_cross/new-domains-2026-10-23.md:43-45` 记「已登记未修：gRPC client 熔断缺失（Go `zrpc` `Breaker` 默认 `true`）」—— **实测 RAG 侧熔断已存在**（`application.yml:88-89` + `GoStyleGrpcClientBreakerInterceptor`）⇒ **该结论作废**。⚠️ `_cross/` 是共享文件，本工作树不碰，**合并后由主会话更正** | 🔴 需更正共享台账 |
-| **U5** | `CommentGrpcError.java:97-103` 那段「若未来 comment-api 引入熔断器」的注释**已过时**（熔断早已引入） | ⚠️ 待订正（属 `comment-common`，本工作树可改） |
-| **U6** | `CommentGrpcError.java:150-162` 的「字面搬运」论证需补一句「对 RAG-rpc 对端应读 trailer」 | ⚠️ 待订正（属 `comment-common`）—— ⚠️ 本轮已**订正 `CommentApiSupport` 侧**，`comment-common` 侧尚未动 |
+| **U5** | ~~`CommentGrpcError.java` 那段「若未来 comment-api 引入熔断器」的注释已过时~~ | ✅ **已订正**（2026-10-24，**属 `comment-common`，本工作树可改**）—— 熔断早已引入且两侧失败名单一致 ⇒ 见 [common.md](common.md) §4-U2 |
+| **U6** | ~~`CommentGrpcError.java` 的「字面搬运」论证需补「对 RAG-rpc 对端应读 trailer」~~ | ✅ **已订正**（2026-10-24，**属 `comment-common`**）—— 补上「该论证只对 Go-rpc 对端成立」+ 方向不对称表 ⇒ 见 [common.md](common.md) §4-U3 |
 | **U7** | ~~jjwt 对**缺 `exp` claim** 的 token 的接受性 vs Go `jwt.MapClaims.Valid()`；jjwt 是否接受 HS384/HS512~~ | ✅ **已完成**（2026-10-24）：**双侧探针**（11 个字节完全相同的 token，Go 走 go-zero `rest/token.TokenParser`、Java 走本拦截器真实路径）⇒「缺 `exp` 两侧都接受」「`iat` 在未来 Go 拒 RAG 收」（**已修**）「HS384/HS512 Go 接受 RAG 拒」（**待签字**）三条全部落定 ⇒ 见 §3.1 |
-| **U8** | ~~Go 的 `MaxBytes`/`MaxConns`/`Breaker`/`Shedding` 是 per-route native middleware，RAG 的 4 个是全局 servlet Filter ⇒ 保护层覆盖范围不同~~ | 🟡 **部分落定**（2026-10-24 活体实测 **T20**）：**未注册路径**上 Go **从不返回 413**（服务端不设限）、RAG 返回 **413** ⇒ **差异真实存在** ⇒ 登记为 **D6**（§3.2）。⚠️ 修法落在 `service/common`（**六域共用 + `align/common` 并发分支**）⇒ **本域不可动** ⇒ **待用户决策**（改回 Go / 签字为有意偏离） |
+| **U8** | ~~Go 的 `MaxBytes`/`MaxConns`/`Breaker`/`Shedding` 是 per-route native middleware，RAG 的 4 个是全局 servlet Filter ⇒ 保护层覆盖范围不同~~ | ✅ **已闭环**（2026-10-24 活体实测 **T20** ⇒ 差异真实存在 ⇒ 登记为 **D6** ⇒ **用户已签字** `SD-2026-10-24-CAND-08`：**接受 RAG 更严/更安全的一侧** ⇒ **代码零改动**，不改 `service/common` 的共享 Filter） |
 | **U9** | ~~D1（非 JSON Content-Type ⇒ RAG 415）~~ | 🟢 **撤销**（2026-10-24 活体实测：两侧**都是** 200 + `{code:5001}`）⇒ 并已订正 `CommentGlobalExceptionHandler.java` 里那条**错误的 javadoc 断言** ⇒ 见 §3.3 |
 | **U10** | D1 的**机制**未查实：Spring 7 + Tomcat 11 组合下，**非 JSON Content-Type 时 servlet input stream 读不出字节**（⇒ Spring 判「body 缺失」）。已排除：本域代码无人调 `getParameter`/`getReader`/`getInputStream`；`GoStyleMaxBytesFilter` 只读 `getContentLengthLong()` 不消费 body | ⚠️ 机制待查（**可观察行为已定**，不影响结论） |
-| **U11** | ⚠️ **D6 的候选修法会波及六域**：若采纳「把 MaxBytes 从 Filter 改成 HandlerInterceptor」，需保住「413 压过 401」的顺序 ⇒ 与 `CommentJwtAuthInterceptor` 比 `@Order` ⇒ 仍是共享面改动 | 🔴 跨域（上报主会话） |
+| **U11** | ~~D6 的候选修法会波及六域~~ | ✅ **作废**（2026-10-24 用户签字 **CAND-08** ⇒ 保留全局 Filter ⇒ **不需要改** ⇒ 跨域风险不再存在）。⚠️ 若将来 `align/common` 仍要动保护层覆盖范围，**必须**重估六域并**重新征签** |
 
 ---
 

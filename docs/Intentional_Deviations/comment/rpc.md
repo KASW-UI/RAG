@@ -15,7 +15,7 @@
 > 本轮沿用该惯例**提出候选**，但**代签权在用户** ⇒ 每条都写明了签字栏。
 >
 > ✅ **2026-10-24 用户已签字**：**CAND-02**（`report_record` 表）、**CAND-06**（`manage` 清位）。
-> 🟡 **仍待签字**：**CAND-01**（9 处时间列）、**CAND-03**（authority / dispatch 默认关闭）。
+> 🟡 **仍待签字**：**CAND-01**（9 处时间列）、**CAND-03**（authority / dispatch 默认关闭）、**CAND-09**（RAG 的 DDL 比 Go 生产 DDL 更严：约束 / 索引 / 触发器层）。
 
 ---
 
@@ -115,6 +115,54 @@
 - **连带动作**：`V5` 脚本头部的「该决定留给用户签字，本文件不代签」⇒ 已改为「**已签字（2026-10-24）**」。
 
 **签字人：Jason（用户）　签字日期：2026-10-24**
+
+---
+
+## SD-2026-10-24-CAND-09：RAG 的 DDL **比 Go 生产 DDL 更严**（约束 / 索引 / 触发器层）
+
+| 项 | 值 |
+|---|---|
+| 状态 | 🟡 **待签字**（候选，建议签）—— **不代签** |
+| 组件 | `service/comment/comment-rpc` |
+| 行为层 | **DDL 约束层**（索引 / 唯一约束 / CHECK / 触发器） |
+| 证据强度 | ✅ **活体 schema 差分**（两个活库 `go_comment` vs `rag_comment` 的 `pg_constraint` / `pg_indexes` / `pg_trigger` 逐条 diff） |
+
+### 根因：**RAG 抄的是 Go 的「测试夹具 DDL」，不是「生产 DDL」**
+
+| 路径 | 谁执行 | 何时 |
+|---|---|---|
+| `rpc/internal/model/db.go:15` `db.AutoMigrate(&Subject{}, &CommentContent{}, &CommentIndex{}, &CommentLike{}, &CommentDomainFactOutbox{}, &CommentFactStream{})` | **生产启动路径** | 每次进程启动 |
+| `rpc/internal/model/migrations/001_*.sql` / `002_*.sql` / `003_*.sql` | **仅** `rpc/internal/model/test-community-postgres.sh:47,49` | **只被测试脚本执行** |
+
+⇒ **Go 生产的权威 DDL = GORM `AutoMigrate` 的产物**；
+`001/002/003` 那三份手写迁移是**测试夹具**，**不进生产**。
+⇒ **RAG 的 V4/V6/V7/V8 照抄的是那三份测试夹具** ⇒ 于是 RAG **多**了 Go 生产没有的约束。
+
+### 活体差分清单（`go_comment` = Go 生产 DDL 的产物 vs `rag_comment`）
+
+| 对象 | Go 生产 | RAG | 可观察性 |
+|---|---|---|---|
+| **trigger** `comment_fact_identity_immutable`（BEFORE UPDATE，禁改 `event_id`/`event_type`/`payload`/`aggregate_id`/`fact_version`/`delivery_envelope`） | ❌ **无** | ✅ **有** | ⚠️ **唯一原则上可观察的** —— UPDATE 受保护列 ⇒ RAG 抛 `comment fact envelope is immutable`，Go 生产不抛。**但现有写入/投递路径都不碰受保护列**（`CommentDomainFactOutboxMapper` 的 UPDATE 只写 `delivery_status`/`retry_count`/`technical_*`/`delivered_at`）⇒ **当前不可观察** |
+| **CHECK** `comment_new_fact_has_dc_wire`（NOT VALID） | ❌ 无 | ✅ 有 | 不可观察 —— `append` 永远填齐 `aggregate_id`/`fact_version`/`delivery_envelope` |
+| **CHECK** `comment_fact_stream_version_range`（`version BETWEEN 1 AND 2^53-1`） | ❌ 无 | ✅ 有 | 不可观察 —— `version` 从 1 递增，要到 2^53-1 才触发 |
+| **索引** `idx_comment_fact_delivery`（`delivery_status, created_at, event_id`） | ❌ 无 | ✅ 有 | 纯性能，无行为差异 |
+| **索引** `idx_comment_legacy_fact_aggregate`（部分索引） | ❌ 无 | ✅ 有 | 纯性能，无行为差异 |
+| `uk_comment_fact_stream` | ✅ **有**（模型 tag `uniqueIndex` ⇒ AutoMigrate 会建） | ✅ 有 | ✅ 一致 |
+| `idx_user_comment_like` | ✅ **唯一索引** | ✅ **表约束** | 形态差异，**语义等价**（都保证 `(user_id, comment_id)` 唯一） |
+
+### 为什么倾向签字（而不是改回 Go）
+
+1. **全部是「RAG 更严」** —— RAG 多出来的约束**只会更早拒绝**，不会让 Go 能过的写入在 RAG 上失败（当前写入路径已验证）。
+2. **改回 Go 意味着删掉这些约束/索引** ⇒ **降低数据完整性**，且要改**已应用的 Flyway 迁移**（V6/V7/V8 已落库 ⇒ 只能新写 V9 DROP）⇒ 成本高、风险大。
+3. **与 CAND-01 同族**（RAG 的 DDL 更严侧），保持处置口径一致。
+
+### ⚠️ 需要一并决策的点
+
+- **签字 = 接受「RAG 生产库比 Go 生产库约束更多」** ⇒ 将来任何「让 Go 侧直连 RAG 的库」的方案都要先评估这层差异。
+- 若不签 ⇒ 必须为 V6/V7/V8 的这些对象**新写 V9/V10 DROP** ⇒ 但**触发器一去，事实信封的不可变性就没了** ⇒ 与 Go 的设计意图相反 ⇒ **不建议**。
+- ⚠️ **与 `CAND-01` 的关系**：CAND-01 是「时间列 NOT NULL DEFAULT」；本条是「约束/索引/触发器」⇒ **两个独立条目**，可分别签。
+
+**签字人：______　签字日期：______**
 
 ---
 

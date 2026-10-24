@@ -10,7 +10,8 @@
 > ⚠️ **证据强度**：
 > - ✅ **真构建 + 真测试**：`mvn -o -pl service/comment/comment-common -am test` ⇒ **27 / 0 failures / 0 errors / 0 skipped**（本轮实测）
 > - ✅ **源码逐行对照**：Go 侧 1 个文件（103 行）逐行读过
-> - 🔴 **无双侧活体对拍**
+> - ✅ **双侧活体对拍**（**2026-10-24 补上**）：错误码链路被 23 步矩阵**端到端覆盖** ——
+>   业务码 1012 / 1013 / 1008 / 2001 在**两侧进程同时在跑**时逐条一致（见 [`api.md`](./api.md) §4.6.1）
 >
 > ⇒ ✅ 一律读作「**在该证据强度下一致**」。
 
@@ -108,8 +109,9 @@ RAG 侧按职责拆开是**表达层**重组，行为层逐条对齐（§2）。
 | **Go 事实** | `errmsg.go:33-35` `NewGrpcErr(code, msg)` = `status.Error(codes.Code(code), msg)` ⇒ 业务码（1012/1013/1008/5003/2001…）**原样写进 `grpc-status`** ⇒ api 侧 `int(st.Code())` 字面取回 |
 | **RAG 现状** | `CommentGrpcError.java:105-110` `mapToGrpcCode` 只把 2001 映到 `INVALID_ARGUMENT(3)`，其余全部 `UNKNOWN(2)`；业务码改放 **自定义 trailer** `rag-comment-biz-code`（`:72`、`:130`） |
 | **为何仍判「等价」** | `CommentGrpcError.bizCodeFromError`（`:168-200`）**能**从 trailer 无损取回业务码 ⇒ 契约**在 comment-common 内部是闭合的**。`CommentGrpcErrorTest.java:112-114` 已有断言锁住这一点 |
-| **为何仍是一条差异** | 因为 **comment-api 从不调用 `bizCodeFromError`** ⇒ 这条通道在真实链路上是**断的** ⇒ 客户端拿到的是 `2`/`3` 而不是业务码 |
-| **归属** | **缺陷记在 `comment-api`**（[`docs/DRIFT/comment/api.md`](./api.md) 的 MISMATCH-API-01），本条只登记「通道不同」这一事实 |
+| **🟢 通道现状（2026-10-24 更新）** | **已修复并活体验证**：MISMATCH-API-01 已修 —— `comment-api` 的 `CommentApiSupport.rpcError` 改为调用 `bizCodeFromError` ⇒ **通道在真实链路上已闭合**；对拍矩阵实测 **1012 / 1013 / 1008 / 2001 在两侧进程同时在跑时逐条一致**（见 [`api.md`](./api.md) §4.6.1）⇒ **本条不再是「断的通道」** |
+| **残留面（仅跨栈）** | ⚠️ **方向不对称**：**Go-rpc → RAG-api** 的业务码**能**捞回（grpc-java 降级成 `UNKNOWN + "Unknown code 1012"` ⇒ 第①优先级捞文本）；**RAG-rpc → Go-api** 的业务码**传不过去**（Go 只读 grpc-status，看不见 trailer）⇒ 详见 [`proto.md`](./proto.md) §3.1 |
+| **归属** | **缺陷记在 `comment-api`**（[`docs/DRIFT/comment/api.md`](./api.md) 的 MISMATCH-API-01，**已修**），本条只登记「通道不同」这一事实 |
 | **风险提示** | `CommentGrpcError.java:150-162` 的 javadoc 论证「标准码走原值而不是语义映射，因为 Go 是字面搬运」—— 这段论证**只对 Go-rpc 对端成立**；对 **RAG-rpc 对端**，Go 的「字面搬运」对象是**业务码**（因为 Go 侧业务码就在 `grpc-status` 里）⇒ 两边的「字面搬运」实际搬的不是同一个东西 |
 
 ---
@@ -118,9 +120,9 @@ RAG 侧按职责拆开是**表达层**重组，行为层逐条对齐（§2）。
 
 | # | 事项 | 类型 |
 |---|---|---|
-| **U1** | D1 的修复点**不在本组件**（在 `comment-api` 的 `CommentApiSupport.rpcError`）⇒ 本组件**无需改代码** | ✅ 跨组件，见 api 台账 |
-| **U2** | `CommentGrpcError.java:97-103` 那段「若未来 comment-api 引入熔断器」的注释**已过时**（熔断早已引入，见 api 台账 §4.4） | ⚠️ 待订正（属 `comment-common`，本工作树可改） |
-| **U3** | `CommentGrpcError.java:150-162` 的「字面搬运」论证需补一句「对 RAG-rpc 对端应读 trailer」 | ⚠️ 待订正（属 `comment-common`） |
+| **U1** | ~~D1 的修复点不在本组件~~ ⇒ ✅ **已闭环**（2026-10-24：修复在 `comment-api` 的 `CommentApiSupport.rpcError`，**已完成**；本组件**无需改代码**） | ✅ 跨组件闭环 |
+| **U2** | ~~`CommentGrpcError.java` 那段「若未来 comment-api 引入熔断器」的注释已过时~~ | ✅ **已订正**（2026-10-24）：熔断**早已引入**（`GoStyleGrpcClientBreakerInterceptor` + `rag.protection.breaker.enabled: true`），且**两侧失败名单逐条一致**（Go `codes/accept.go` 的 6 个码 = RAG `isAcceptable` 的 6 个码）⇒ 业务错误**不计入**熔断失败 ⇒ 原文担心的「Java 侧更容易打开熔断」**不成立**；并补上「该一致性是当前成立、不是结构保证」的提醒 |
+| **U3** | ~~`CommentGrpcError.java` 的「字面搬运」论证需补「对 RAG-rpc 对端应读 trailer」~~ | ✅ **已订正**（2026-10-24）：补上「该论证**只对 Go-rpc 对端成立**」+ **方向不对称**表（RAG-rpc 对端必须先读 trailer，否则业务码整个丢掉） |
 
 ---
 
