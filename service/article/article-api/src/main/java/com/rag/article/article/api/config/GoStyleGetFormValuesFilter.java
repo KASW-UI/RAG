@@ -24,7 +24,7 @@ import java.util.Map;
  * 🔴 query 解析与参数总数上限 —— 对应 go-zero {@code rest/httpx} 的 {@code GetFormValues}。
  *
  * <h2>为什么叫这个名字</h2>
- * Go 侧这些行为<b>全在同一个函数里</b>（{@code rest/httpx/util.go:24-64} 的 {@code GetFormValues}）：
+ * Go 侧这些行为<b>全在同一个函数里</b>（{@code rest/httpx/util.go:22-65} 的 {@code GetFormValues}）：
  * <ol>
  *   <li>{@code r.ParseForm()} ⇒ 触发 Go 标准库 {@code net/url} 的解析（<b>含它的三条错误</b>）；</li>
  *   <li>然后才是 go-zero 自己的 {@code maxFormParamCount = 2048} 计数。</li>
@@ -33,14 +33,14 @@ import java.util.Map;
  *
  * <h2>Go 出处（逐行，消费点）</h2>
  * <pre>
- * go-zero@v1.10.2/rest/httpx/util.go:11-17
+ * go-zero@v1.10.2/rest/httpx/util.go:10-16
  *   const (
  *       // most servers and clients have a limit of 8192 bytes (8 KB)
  *       // one parameter at least take 4 chars, for example `?a=b&amp;c=d`
  *       maxFormParamCount = 2048
  *   )
  *
- * go-zero@v1.10.2/rest/httpx/util.go:22-64  GetFormValues
+ * go-zero@v1.10.2/rest/httpx/util.go:22-65  GetFormValues（下面摘录的是其中 :35-54 的双层循环）
  *   for name, values := range r.Form {
  *       for _, v := range values {
  *           if len(v) == 0 { continue }              // ← 空值不计数
@@ -166,13 +166,13 @@ public class GoStyleGetFormValuesFilter implements Filter {
                 return;
             }
             // ② 再按 Go 的分段规则解析（url.go:1023-1054）；错误**要上报**
-            //    （Go 的 ParseForm 把 net/url 的 error 返回，util.go:25-27 原样往上抛）
+            //    （Go 的 ParseForm 把 net/url 的 error 返回，util.go:23-25 原样往上抛）
             GoQueryParse parsed = parseGoQuery(query);
             if (parsed.error != null) {
                 writeGoStyleBadRequest(response, parsed.error);
                 return;
             }
-            // ③ 最后才做 go-zero 的 2048 计数（util.go:44-56）
+            // ③ 最后才做 go-zero 的 2048 计数（util.go:44-53）
             int nonEmpty = countNonEmptyValues(parsed.form);
             if (nonEmpty > MAX_FORM_PARAM_COUNT) {
                 writeGoStyleBadRequest(response,
@@ -554,13 +554,35 @@ public class GoStyleGetFormValuesFilter implements Filter {
     }
 
     /**
-     * Go 的 {@code strconv.IsPrint}（{@code strconv/quote.go:296-303}）：
-     * ASCII 段是 {@code 0x20..0x7E}；非 ASCII 段是 unicode 的 L/M/N/P/S 五类
-     * <b>加</b> ASCII 空格（<b>不含</b>其它 Unicode 空格，如 U+00A0、U+3000）。
+     * Go 的 {@code strconv.IsPrint}（{@code strconv/quote.go:522-563}；
+     * ASCII / Latin-1 段的判据 = {@code quote.go:524-533}）。
+     *
+     * <p>Go 的判据逐条：
+     * <ul>
+     *   <li>ASCII 段 {@code 0x20..0x7E} ⇒ 可打印；</li>
+     *   <li>Latin-1 补充段 {@code 0xA1..0xFF} ⇒ 可打印，
+     *       <b>唯一例外是软连字符 U+00AD</b>（Go 源码的注释叫它 "the bizarre soft hyphen"）；</li>
+     *   <li>{@code > 0xFF} ⇒ unicode 的 L/M/N/P/S 五类 <b>加</b> ASCII 空格
+     *       （<b>不含</b>其它 Unicode 空格，如 U+00A0、U+3000）。</li>
+     * </ul>
+     *
+     * <p>⚠️ <b>Latin-1 补充段在 HTTP 入口是「结构性不可达」的</b>：
+     * Tomcat 在<b>连接器层</b>就拒掉了 query 里任何 {@code >= 0x80} 的字节
+     * （HTTP/1.1：{@code Http11InputBuffer} 的 {@code isQueryRelaxed} 检查；
+     * HTTP/2：{@code StreamProcessor} 的同名检查）⇒ {@code goQuote} 的输入恒为纯 ASCII。
+     * <br>此处仍按 Go 逐条实现（而不是就 ASCII 取近似），理由与逐行证据 ⇒
+     * 本域台账 {@code docs/DRIFT/article/api.md}。
      */
     private static boolean isGoPrintable(int r) {
         if (r <= 0xFF) {
-            return r >= 0x20 && r < 0x7F;
+            // Go strconv/quote.go:524-533（IsPrint 的 Latin-1 快路径）
+            if (r >= 0x20 && r <= 0x7E) {
+                return true;
+            }
+            if (r >= 0xA1 && r <= 0xFF) {
+                return r != 0xAD;          // ← 软连字符是唯一例外
+            }
+            return false;
         }
         switch (Character.getType(r)) {
             case Character.UPPERCASE_LETTER:

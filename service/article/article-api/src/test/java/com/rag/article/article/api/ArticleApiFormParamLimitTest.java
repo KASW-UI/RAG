@@ -33,14 +33,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <h2>Go 出处（逐行，消费点）</h2>
  * <pre>
- * go-zero@v1.10.2/rest/httpx/util.go:11-17
+ * go-zero@v1.10.2/rest/httpx/util.go:10-16
  *   const (
  *       // most servers and clients have a limit of 8192 bytes (8 KB)
  *       // one parameter at least take 4 chars, for example `?a=b&amp;c=d`
  *       maxFormParamCount = 2048
  *   )
  *
- * go-zero@v1.10.2/rest/httpx/util.go:44-56
+ * go-zero@v1.10.2/rest/httpx/util.go:37-54  GetFormValues 的内层循环
  *   for _, v := range values {
  *       if len(v) == 0 { continue }                          // ← 空值不计数
  *       if n &lt; maxFormParamCount { filtered = append(filtered, v); n++ }
@@ -218,7 +218,7 @@ class ArticleApiFormParamLimitTest {
      * </pre>
      *
      * <p>⇒ 这些 error 由 {@code net/http.Request.ParseForm} 返回，
-     * 而 go-zero 的 {@code httpx.GetFormValues}（{@code rest/httpx/util.go:25-27}）
+     * 而 go-zero 的 {@code httpx.GetFormValues}（{@code rest/httpx/util.go:23-25}）
      * <b>把它原样往上抛</b>（不是吞掉）：
      * <pre>
      *   if err := r.ParseForm(); err != nil {
@@ -271,6 +271,17 @@ class ArticleApiFormParamLimitTest {
      * <b>应用层 filter 无从插手</b> ⇒ 与 {@code DRIFT-005} 的残留同一类
      * （Tomcat 的 HTML 错误页 vs Go 的 text/plain）⇒ <b>LOW，决定不修</b>。
      * 本用例锁住现状，将来有人调 Tomcat 的 URI 校验时能立刻看到差异。
+     *
+     * <p>⚠️ <b>2026-10-24 第十二轮已把「实测如此」升级为「结构性必然」</b>
+     * （Tomcat 11.0.24 的逐行证明 ⇒ 换任何配置都绕不过）：
+     * <ul>
+     *   <li>HTTP/1.1：{@code Http11InputBuffer} 解析请求行时逐字节查
+     *       {@code HttpParser.isQueryRelaxed}，不过即 400；</li>
+     *   <li>HTTP/2：{@code StreamProcessor} 对 {@code :path} 的 query 段做<b>同一个</b>检查；</li>
+     *   <li>判据本身：{@code IS_QUERY_RELAXED} 只由 ASCII 集合构成
+     *       ⇒ {@code 0x80..0xFF} 恒为 false；{@code relaxedQueryChars} 只能放宽 ASCII 字符。</li>
+     * </ul>
+     * ⇒ 完整推导见本域台账 {@code docs/DRIFT/article/api.md} 第十二轮（FIX-18）。
      */
     @Test
     @DisplayName("⚠️ characterization: `%` 后面接**多字节字符** ⇒ Tomcat 在**连接器层**就 400（HTML 错误页）—— 应用层不可达")
@@ -292,6 +303,9 @@ class ArticleApiFormParamLimitTest {
      * <p>⚠️ <b>为什么这条不修</b>：同上一条 —— 拒它的是 <b>Tomcat 的 URI 校验</b>，
      * 应用层无从插手 ⇒ LOW。而且<b>正常客户端不会这样发</b>：
      * 实测 {@code ?a=%E4%B8%AD}（合规的百分号编码）⇒ 两侧都 200。
+     *
+     * <p>⚠️ 同上：<b>第十二轮已证明这是结构性必然</b>（HTTP/1.1 + HTTP/2 两条路径同判据）
+     * ⇒ 不是「当前配置碰巧如此」。
      */
     @Test
     @DisplayName("⚠️ characterization: query 里有原始非 ASCII ⇒ Tomcat 连接器层 400（Go 侧接受）—— 应用层不可达，不修")
