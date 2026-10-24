@@ -249,8 +249,8 @@
 | `comment_new_fact_has_dc_wire` CHECK（**NOT VALID**） | ✅ `V6:62-64` 逐字一致 |
 | 信封不可变触发器（函数体 + `BEFORE UPDATE FOR EACH ROW` + 6 列清单 + RAISE 文案） | ✅ `V8:66-84` 逐字一致 |
 | `comment_fact_stream` 的 version 范围 CHECK | ✅ 语义一致（约束名不同 ⇒ 表述差异） |
-| **9 处时间列的 NOT NULL + DEFAULT** | 🔴 **不一致**（Go 可空无 DEFAULT / RAG `NOT NULL DEFAULT CURRENT_TIMESTAMP`）⇒ **10 处是「RAG 更严」** ⇒ 建议签字，见 `docs/Intentional_Deviations/comment/rpc.md` |
-| `report_record` 表在 Go 侧**根本不存在**（`db.go:15` 的 AutoMigrate 列表不含它，3 个手写脚本也不建） | 🔴 RAG V5 建了 ⇒ Go 侧全新部署上 `ReportComment` **必然 5004** ⇒ RAG 侧是「更全」⇒ 建议签字 |
+| **9 处时间列的 NOT NULL + DEFAULT** | 🔴 **不一致**（Go 可空无 DEFAULT / RAG `NOT NULL DEFAULT CURRENT_TIMESTAMP`）⇒ **10 处是「RAG 更严」** ⇒ 🟡 **仍待签字**（`SD-2026-10-24-CAND-01`），见 `docs/Intentional_Deviations/comment/rpc.md` |
+| `report_record` 表在 Go 侧**根本不存在**（`db.go:15` 的 AutoMigrate 列表不含它，3 个手写脚本也不建） | 🔴 RAG V5 建了 ⇒ Go 侧全新部署上 `ReportComment` **必然 5004** ⇒ RAG 侧是「更全」⇒ ✅ **2026-10-24 已签字**（`SD-2026-10-24-CAND-02`） |
 
 ---
 
@@ -299,8 +299,11 @@
 
 | 步骤 | Go 侧 | RAG 侧 | 归因 |
 |---|---|---|---|
-| **T07 `manage`（`action_type=2` = `MANAGE_UNPIN`）** | **5002**「DB更新失败」 | **200** `{success:true}` | 🔴 **Go 侧的 SQL 必报错**：`comment.go:165` `gorm.Expr("attribute & ~?", val)` —— `val` 是 `uint` ⇒ PG 收到**未定型参数** ⇒ `operator is not unique: ~ unknown (SQLSTATE 42725)`。已在 PG 上直接复现（`PREPARE t(unknown) AS SELECT 4::bigint & ~$1` ⇒ 同一错误）。⇒ **RAG 侧实现的是 Go 的*意图***（`attribute & ~#{mask}`，mask 是 **有类型**的 `long` ⇒ PG 解析为 `~ bigint` ⇒ 成功） |
-| **T08 `report`** | **5004**「DB插入失败」 | **200** `{success:true}` | 🔴 **Go 侧根本没有 `report_record` 表**：`db.go:15` 的 `AutoMigrate` 列表只有 6 个模型，**不含 `ReportRecord`**；3 个手写迁移脚本也不建它 ⇒ Go 侧**全新部署上 `ReportComment` 必然 5004**。⇒ 已在 `SD-2026-10-24-CAND-02` 登记（`V5` 脚本头部自登记过），本轮**由静态推断升级为活体实证** |
+| **T07 `manage`（`action_type=2` = `MANAGE_UNPIN`）** | **5002**「DB更新失败」 | **200** `{success:true}` | ✅ **已签字偏离**（`SD-2026-10-24-CAND-06`，2026-10-24 用户 Jason）—— 🔴 **Go 侧的 SQL 必报错**：`comment.go:165` `gorm.Expr("attribute & ~?", val)` —— `val` 是 `uint` ⇒ PG 收到**未定型参数** ⇒ `operator is not unique: ~ unknown (SQLSTATE 42725)`。已在 PG 上直接复现（`PREPARE t(unknown) AS SELECT 4::bigint & ~$1` ⇒ 同一错误）。⇒ **RAG 侧实现的是 Go 的*意图***（`attribute & ~#{mask}`，mask 是 **有类型**的 `long` ⇒ PG 解析为 `~ bigint` ⇒ 成功） |
+| **T08 `report`** | **5004**「DB插入失败」 | **200** `{success:true}` | ✅ **已签字偏离**（`SD-2026-10-24-CAND-02`，2026-10-24 用户 Jason）—— 🔴 **Go 侧根本没有 `report_record` 表**：`db.go:15` 的 `AutoMigrate` 列表只有 6 个模型，**不含 `ReportRecord`**；3 个手写迁移脚本也不建它 ⇒ Go 侧**全新部署上 `ReportComment` 必然 5004** |
+
+> ⚠️ **这两条现在都是「已签字偏离」，不是待办** ⇒ 后续对拍再看到它们变红，
+> **不得当成新回归去「修」回 Go 的旧行为**（AGENTS.md §0 第 1 条）。
 
 > ⚠️ **同款缺陷在 Go 的点赞路径上潜伏**：`comment.go:571` 是**同一个** `attribute & ~?` 写法
 > （仅当 `userId == ownerId` 且取消赞时触发）⇒ **Go 侧「作者取消自己的赞」也会 5002**。
@@ -347,8 +350,8 @@
 | **U5** | `comment_fact_stream` 的 CHECK 在 Go 侧**是否常态存在取决于迁移执行顺序**（生产顺序有 / 测试顺序无） | ⚠️ 待核 |
 | **U6** | `comment_like` 的 Go 侧有**两份互相冲突的 DDL 产物**（AutoMigrate vs 手写 `001`），在 `id`（`bigserial` vs IDENTITY）与唯一约束形态上不同 ⇒ 不存在单一「Go 侧 DDL」基线 | ⚠️ 真源侧歧义 |
 | **U7** | ~~MISMATCH-07（`updated_at` INSERT 取值）—— 未找到任何读取方~~ ⇒ ✅ **2026-10-24 已修**：按 GORM `create.go:340-351` 的实测语义改成入库时刻；**仍无读取方** ⇒ 影响面窄但值已对齐 | ✅ 已修（影响面窄） |
-| **U8** | 🔴 **`SD-2026-10-24-CAND-06` 待签字**：Go 的 `attribute & ~?` 在 PG 上**必然报错**（`~ unknown`）⇒ `MANAGE_UNPIN` / `MANAGE_UNFEATURE` **100% 失败**；RAG 侧实现了 Go 的*意图*（有类型的 mask ⇒ 正常）。**签字权在用户** | 🟡 待签字 |
-| **U9** | 🟡 **`SD-2026-10-24-CAND-02` 待签字**：`report_record` 表 Go 侧**不存在** ⇒ Go 的 `ReportComment` **必然 5004**；RAG 侧建了表 ⇒ 可用。**本轮已由活体对拍实证**（Go=5004 / RAG=200） | 🟡 待签字 |
+| **U8** | ✅ **`SD-2026-10-24-CAND-06` 已签字**（2026-10-24，用户 Jason）：Go 的 `attribute & ~?` 在 PG 上**必然报错**（`~ unknown`）⇒ `MANAGE_UNPIN` / `MANAGE_UNFEATURE` **100% 失败**；RAG 侧实现 Go 的*意图*（有类型的 mask）。**签字含义覆盖两处**（manage 清位 + `comment.go:571` 点赞清位）⇒ RAG 侧两处**均已正确、无需改代码** | ✅ 已闭环 |
+| **U9** | ✅ **`SD-2026-10-24-CAND-02` 已签字**（2026-10-24，用户 Jason）：`report_record` 表 Go 侧**不存在** ⇒ Go 的 `ReportComment` **必然 5004**；RAG 侧建了表 ⇒ 可用。**由活体对拍实证**（Go=5004 / RAG=200） | ✅ 已闭环 |
 | **U10** | 🔴 **跨域**：`service/common` 的 RPC 超时文案两侧不同（`context deadline exceeded` vs `rpc timeout after 2000ms`），code 相同（4）。`service/common` 是六域共用 + `align/common` 并发分支 ⇒ **本轮不动**，上报主会话 | 🔴 跨域待办 |
 | **U11** | ⚠️ **Go 侧潜伏缺陷**：`comment.go:571`（点赞的 `attribute & ~?`）与 `comment.go:165` 同款 ⇒ **Go 侧「作者取消自己的赞」也会 5002**。本轮矩阵 `user 1001 ≠ owner 2002` ⇒ 未触发 ⇒ 两侧一致。⇒ **Go 侧缺陷**，RAG 侧已正确 | ⚠️ 真源侧缺陷（记录，不修 RAG） |
 
