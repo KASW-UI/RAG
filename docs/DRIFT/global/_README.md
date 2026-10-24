@@ -87,7 +87,7 @@
 | **T-1** | `like` | `DRIFT-LIKEAPI-015` | `common/http/GoStyleJsonBodyConverter.java`（原 `:115-117` 用 `getContentType().toString()` ⇒ MediaType 已小写化）vs `goReadsBody` `:98-101`（`contains` 大小写敏感） | Content-Type 大小写敏感判定不同 | ✅ **2026-10-25 已修**（改取原始头值 `getFirst(CONTENT_TYPE)`）⇒ 残余 ① 已登记 |
 | **T-2** | `follow` | `DRIFT-FOLLOW-008` | `common/protection/GoStyleMaxConnsFilter.java` | Go `MaxConnsHandler` **每路由一个** latch，RAG **全局一个** | ✅ **已签字**（2026-10-25）⇒ `SD-2026-10-25-01` ⇒ **已移出本档** |
 | **T-3** | `hot` | `D14` / `DRIFT-HOTAPI-014` | `common/observability/HttpMiddleware.java:431`（`writeTimeoutResponse`） | 503 / 499 响应缺 `X-Content-Type-Options: nosniff` | ✅ 已修 —— **2026-10-25 实测确认在位**，common 侧无需再动 |
-| **T-4** | `hot` | `D25` / `DRIFT-HOTAPI-025` | `common/observability/HttpMiddleware.java`（`flushCaptured`） | 客户端断连后 RAG 等 2s deadline、断连后继续发下游调用、无 499 语义 | ✅ **观测面 + 资源面均已修**（499 可见；**在飞 gRPC 会被提前取消**，实测 461ms）· 🟡 残留**时序差** ⇒ 新签字 `SD-2026-10-25-04`（wire 偏离：客户端先收到 N 行 `103 Early Hints`）；⚠️ 原 `SD-2026-10-25-02` 已**撤销**（问题被修掉）⚠️ **分类已改判**（第八轮）：原「框架限制」被证伪 ⇒ 准确表述 = 「**在『Tomcat + HTTP/1.1 + 同步 Servlet + 保 `Content-Length`』这组约束下没有 Go 等价路径**」⇒ 且**这组约束是项目自己选的** ⇒ 本条是**决策项**不是事实登记；6 条替代路径已全部查证（详见签字档 §①~④） |
+| **T-4** | `hot` | `D25` / `DRIFT-HOTAPI-025` | `common/observability/HttpMiddleware.java`（`flushCaptured`） | 客户端断连后 RAG 等 2s deadline、断连后继续发下游调用、无 499 语义 | ✅ **观测面 + 资源面均已修**（499 可见；**在飞 gRPC 会被提前取消**，实测 461ms）· 🟡 残留**时序差** ⇒ 新签字 `SD-2026-10-25-04`（wire 偏离：客户端先收到 N 行 `103 Early Hints`）；⚠️ 原 `SD-2026-10-25-02` 已**撤销**（问题被修掉）⚠️ **分类已改判**（第八轮）：原「框架限制」被证伪 ⇒ 准确表述 = 「**在『Tomcat + HTTP/1.1 + 同步 Servlet + 保 `Content-Length`』这组约束下没有 Go 等价路径**」⇒ 且**这组约束是项目自己选的** ⇒ 本条是**决策项**不是事实登记；6 条替代路径已全部查证（详见签字档 §①~④）<br>🟡 **2026-10-25 06:40 用户再次明确签字**（「接受现有的 CAND-12 处理」+「签字接受 socket 的偏离」）⇒ **本条闭环，不再另选方案**；并把 **Spring 官方路径记录为「可选后续优化」（非必选）** ⇒ **不触发返工** ⇒ 见签字档 §「`SD-2026-10-25-04` 附记 · 官方路径记录」 |
 | **T-5** | `hot` | `D27` | `common/protection/GoStyleMaxConnsFilter.java` | 同 T-2（MaxConns 作用域） | ✅ **已签字**（同 T-2）⇒ **已移出本档** |
 | **T-6** | `message` | `-010` | **`common` 的 Spring JSON converter**（原标的 `GoStyleRouterErrorResponses.java:83` **有误**——该文件只管 404/405） | 成功 / 失败响应的 `Content-Type` 差异（Go `application/json; charset=utf-8` / RAG `application/json`） | ✅ **归因已定位 · 可 Go 等价修** —— 🟡 **被 hot 域 `SD-HOT-API-006` 挡住**（其「不可逐字节复刻」前提已被本仓证伪）⇒ 需先撤销该签字 |
 | **T-7** | `message` | `-011` | **Tomcat `Http11OutputBuffer`（容器层）** | 状态行 reason phrase 差异 | 🔴 **框架限制（真）** —— `service/common` 够不着 ⇒ 只能签字认账；**「归因尚未定位」已作废** |
@@ -165,6 +165,15 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 ⇒ ⚠️ 其中 **#3（`DRIFT-COMMON-005`：`bindToCurrent` 签名是否允许破坏性变更）** 仍是**唯一被反复确认的未决项**
 ⇒ 本域连续两轮**均未动** `bindToCurrent` 的签名 ⇒ 不与之冲突。
 
+> ✅ **2026-10-25 第十轮 + 第十三轮 最终定案（上面两段是历史过程，不是现状）**：
+> ① **第六轮把 T-4 资源面归位为 `SD-2026-10-25-02`**（判「框架限制」）⇒ **第八轮推翻该定性**（6 条替代路径全查完）
+> ⇒ **第十轮用户拍板方案⑤「主动探测写」并落地** ⇒ **T-4 资源面已修**（在飞 gRPC 会被提前取消，实测 461ms）
+> ⇒ ❌ **`SD-2026-10-25-02` 已撤销**（问题被修掉 ⇒ **从未签字，也不需再签**）
+> ⇒ ✅ **最终记录 = `SD-2026-10-25-04`**（wire 偏离：客户端先收到 N 行 `103 Early Hints` + 499 定型时点晚于 Go）
+> ⇒ 🔴 **2026-10-25 06:40 用户再次明确签字**（「接受现有的 CAND-12 处理」+「签字接受 socket 的偏离」）⇒ **本条闭环，不再另选方案**
+> ⇒ 🟡 **Spring 官方路径已记录为「可选后续优化」（非必选）** ⇒ **不触发返工**
+> ⇒ ⇒ 逐条 ⇒ [`docs/Intentional_Deviations/global/common-tails.md`](../../../Intentional_Deviations/global/common-tails.md)（§`SD-2026-10-25-04` + 其「附记 · 官方路径记录」）。
+
 ---
 
 ## 七、开工前的纪律
@@ -191,10 +200,64 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 
 ---
 
-## 八、变更记录
+## 七之二、📋 **剩余可修漂移 / 未知项盘点**（2026-10-25 06:40）
+
+> **口径**：`global` 收口域（**`favorite` 域零改动**）内**尚未闭环**的全部条目，按「能不能直接动手」分四类。
+> ⇒ **登记类（待签字）不升级为拍板**（用户既定偏好）⇒ 真正需要用户拍板的只有 **D 类 2 条**。
+
+### A · ✅ **可直接修**（落点在 global 单写权范围内 / 非 favorite 域 · **不需拍板**）
+
+| # | 条目 | 落点 | 修法 | 状态 |
+|---|---|---|---|---|
+| **A1** | **X-6** / `DRIFT-HOTAPI-030` | `service/common` × 2 处 | ① `WebServerFactoryCustomizer`（`@Order` > Boot 的 0）⇒ `connector.setMaxParameterCount(-1)`；② 共享 Filter 复刻 go-zero `GetFormValues`（`net/url` 解析层 + **2048 非空值**计数，可从 `article-api` 的 `GoStyleGetFormValuesFilter` 移植） | 🟡 修法**已定案**（第十二轮）· **未落地** ⇒ 需真 Tomcat 守门 + 变异 + **同步改 `tools/difftest/check-tomcat-limits.py`**（yaml 里仍是 2048） |
+| **A2** | **T-8** / `DRIFT-MSGAPI-013`（缺 `Traceparent`） | `service/common` 的 **HTTP 入口** | 注入 W3C `traceparent`（Go = go-zero `rest/handler/tracehandler.go` 的 `propagator.Inject`） | ✅ 归因已定位 · **不需拍板** · 待落地 |
+| **A3** | **X-5**（裸 `ServerCallHandler` 不被 dispatch） | task + follow 的**测试**（非 favorite） | 换 `ServerCalls.asyncUnaryCall` + 补「handler 被调用过」断言 + 变异转红 | ✅ 机制已确证（探针）· 待落地 |
+| **A4** | **B10** `users_user.extra_info` 写路径仍按 jsonb | users 域 2 处（`AdminDomainService.java:962` + `UserEntity.java:129`） | 列**早已是 TEXT** ⇒ 写路径改为按 TEXT 绑定 ⇒ 当前含 `\u0000` 时 PG 报 `22P02`（Go 成功 / RAG 5001） | 🟡 **需真 PG 复现后修** |
+| **A5** | **X-4 的 like 半边** | like 域 + `service/common` | RAG **另起炉灶**的 outbox+stream+scheduler 与 Go `communityfact` 收敛 | 🟡 可修 ⇒ ⚠️ **favorite 半边永久阻塞**（必须删 favorite 自己的 10 处调用） |
+| **A6** | **B6** like 域 `SD-2026-10-23-09` 描述订正 | like 域签字档 | 签字理由把**纳秒**的 `GoStyleRequestDeadline` 说成了毫秒 | ✅ 纯文档 |
+| **A7** | **O-1**（官方路径 · 可选优化） | `service/common` 探针那一处 | 用官方 `DisconnectedClientHelper.isClientDisconnectedException(ex)` 替掉自研断连判定 | 🟡 **可选后续优化，非必选**（见签字档附记） |
+
+### B · ❓ **未知项**（要取证才能定性）
+
+| # | 未知项 | 消解它需要什么 |
+|---|---|---|
+| **B1** | **X-1** 三模块同库共存（`message-rpc` / `like-rpc` / `article-rpc` 同库同 schema） | 真 PG + **三进程并发**运行 ⇒ 配置层与账本表名已闭环，**运行时未验证**（`ADJ-03` 双栈并发建表也未复现） |
+| **B2** | **X-7** 剩余 5 域 DDL 双侧活体逐列对照（article / like / hot / follow / favorite） | 每域的**双侧库环境 + runner**（`tools/difftest/` 现成 runner 只覆盖 hot / message / task）⇒ ⚠️ favorite **只建库、不碰其代码** |
+| **B3** | **X-9** 收敛方案定性 | hot / article 两份复制品**是否**收敛到唯一真源（favorite 那份永久留存 ⇒ 需定「收敛到什么程度」才不算制造新分叉） |
+| **B4** | **X-4 like 半边**的等价性判定 | 对四条调度契约逐条对拍：`POST /v1/events` · 1s 周期 · 每轮 16 条 · 单条失败即 break |
+
+### C · 🏷 **待签字（登记类 —— 不升级为拍板）**
+
+| # | 条目 | 性质 |
+|---|---|---|
+| **C1** | `SD-2026-10-25-CAND-10`（hot 域 `DRIFT-HOTAPI-031`：超长请求行 ⇒ RAG 400+HTML / Go 431+`text/plain`） | 框架限制 |
+| **C2** | **T-7**（状态行缺 reason phrase，落点 Tomcat `Http11OutputBuffer`） | 框架限制 · ⚠️ **尚未登记候选条目** ⇒ 需补 |
+| **C3** | users 域 **8 处 `DEFAULT CURRENT_TIMESTAMP`**（Go 无） | 刻意保留（同 message 域 `SD-2026-10-23-06` 已签的同形态） |
+| **C4** | `users_user.status` 可空性（Go 可空 / RAG `NOT NULL`） | RAG 更严 ⇒ 同 C3 族 |
+| **C5** | `DRIFT-COMMON-005` **差异②**（毫秒 vs 纳秒 ⇒ 必须动 `bindToCurrent` 签名） | 破坏性变更 |
+
+### D · 🔴 **真决策项（需拍板 —— 只有这 2 条）**
+
+| # | 事项 | 为什么必须用户拍板 |
+|---|---|---|
+| **D1** | **T-6**（`DRIFT-MSGAPI-010`：JSON `Content-Type` 缺 `; charset=utf-8`） | 修法**可 Go 等价**（注册自定义 converter 写**原始字符串**）⇒ 但**必须先撤销 hot 域 `SD-HOT-API-006`**（其「不可逐字节复刻」前提已被本仓自己证伪）⇒ **撤销别的域的签字 = 用户的决定** |
+| **D2** | `DRIFT-COMMON-005` **差异①**（墙钟 vs 单调钟） | 与 C5 拆开后，**差异①不必破坏签名即可修** ⇒ 可只拍 C5 |
+
+### ⛔ favorite 相关的两条（**不可动，仅记账**）
+
+- **X-4 favorite 半边** —— RAG 多出 10 处 Go 没有的 `communityfact` 调用 ⇒ 删掉它们 = 改 favorite ⇒ 永久阻塞
+- **X-9 favorite 那份复制品** —— 「Go 是否读 body」判据的第 1 份生产复制品 ⇒ 永久留存
+- ⇒ ⚠️ 但**共享层改动会影响 favorite 的可观察行为** ⇒ 每一次共享层改动**必须记账并告知该域 owner**（§七 纪律 1b）
+
+### 📌 只记不修（**性能非行为**）
+
+- users 域缺 Go 的 **3 条非唯一索引**（AGENTS.md §0 DDL 差异第 2 条）⇒ **性能非行为** ⇒ 不修
+
+---
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | ✅ **第十三轮（官方路径记录 + 再次签字 + 剩余项盘点）** —— 用户 2026-10-25 06:40：「**先记录官方处理**，然后**接受现有的 CAND-12 处理**，然后**签字接受 socket 的偏离**（但是我需要你**把官方的处理列为后续优化选项，而不是必选项**）」⇒ ① 🔴 **`SD-2026-10-25-04` 状态追加「再次明确签字」**（Jason · 2026-10-25 06:40）⇒ **本条闭环，不再另选方案** ② 🆕 **签字档新增「附记 · 官方路径记录（可选后续优化 —— 不是必选项）」** —— 全量 grep spring-web / spring-webmvc 7.0.9 + spring-boot / spring-boot-tomcat 4.0.8 ⇒ **官方没有「检测」API，只有「事件消费」链路**（`DisconnectedClientHelper` 事后分类 · `DefaultHandlerExceptionResolver.handleDisconnectedClientException` since 6.2「do nothing」· `AsyncListener.onError` + `WebAsyncManager` + `DeferredResult.onError`）；Boot 侧 grep = **0 命中**；关键 Tomcat 事实 `AbstractProtocol.java:1494-1503`（**async 期间不注册读兴趣** ⇒ HTTP/1.1 下官方链路**也不更早**，且已被第十轮 RST 实测独立验证）⇒ **方案⑤与官方路径互补而非替代** ⇒ 登记 **O-1~O-4** 四个**可选**优化项（O-1 用官方 `DisconnectedClientHelper` 分类 ⇒ 成本最低）③ ✅ **顺手订正 DRIFT 侧 T-4 的 4 处过期状态**（第十轮已修，但本档仍写「资源面残留待签字」+ 指向**已撤销**的 `SD-2026-10-25-02`）④ 🆕 **§七之二 剩余项盘点**（A 可直接修 7 条 / B 未知项 4 条 / C 待签字 5 条 / D 真决策 2 条 / favorite 不可动 2 条 / 只记不修 1 条） |
 | 2026-10-25 | ✅ **第十二轮（favorite 零权限重申 ⇒ 推翻自己「X-6 永久阻塞」的结论）** —— 用户重申「**你没有 favorite 的所有权限**」⇒ ① 🔴 **X-6 改判：不是 favorite 边界下的永久阻塞** —— 第九轮那句「修法必然要动 `favorite-api`」**只覆盖「逐模块改 yaml」这一条修法**；本轮实测**共享层修法存在**（`Connector.setMaxParameterCount(-1)` + Boot customizer 顺序 `@Order` > 0 + `com.rag.common` 组件扫描 **10/10**）⇒ **10 个 api 模块零改动 ⇒ favorite 零触碰** ⇒ ⇒ **不是拍板项、不需签字认账** ⇒ 落 `service/common`（global 单写权内）② ✅ **连带影响面复核**：X-4（favorite 半边）**仍阻塞**（必须删 favorite 自己的 10 处调用）· X-9（favorite 那份复制品永久留存）· X-7（只读库 ⇒ 不受影响）③ 🆕 **踩坑留痕 `PIT-GLOBAL-012`**（「per-app 配置」≠「只能逐模块改」⇒ 判「不可修」前必须先查共享层路径）④ §七 纪律 1b **口径收紧**（favorite 域代码/配置/测试/台账**一律零改动**；但「碰不到文件」≠「碰不到行为」⇒ 共享层改动必须记账并告知该域 owner） |
 | 2026-10-25 | **第六轮（签字 + 授权范围）**：① **`SD-2026-10-25-CAND-12` → `SD-2026-10-25-02`（已签字）** —— T-4 资源面残留是**框架限制** ⇒ 不存在决策空间 ⇒ 签字只认账事实、**不改任何代码** ② 🔴 **X-10 用户签字** ⇒ 保留 RAG 的 `(recipient_id, is_read)` 复合索引，**不改回** Go 的单列（根因 = Go 侧 gorm tag 的 `priority:1` 写到了另一个索引名）；配套：迁移脚本注释订正（留指针）+ DRIFT 侧移除该条只留指针（§5.3b）③ **#8 销账** —— `docs/Pitfalls/common/_signed-deviations.md` 确认是 0 字节错放文件 ⇒ 删除 ④ **记录写权扩展**：用户授权 global 改**除 favorite 外**所有域的代码（§七 纪律 1b） |
 | 2026-10-25 | ✅ **第十一轮（T-4 资源面已修 · 方案⑤ 落地）** —— 用户拍板「**CAND-12：主动探测写（周期 flush()）（签字偏离）**」⇒ 落地「主动探测写 + gRPC `Context` 取消」⇒ **在飞 gRPC 会被提前取消**（实测 **461ms**）⇒ 🆕 签字 **`SD-2026-10-25-04`**（wire 偏离：客户端先收到 N 行 `103 Early Hints`；快请求零影响）+ 残留时序差 ⇒ ❌ 原 `SD-2026-10-25-02` **撤销**（问题被修掉 ⇒ 不需签字）

@@ -185,7 +185,7 @@ func MaxConnsHandler(n int) func(http.Handler) http.Handler {
 
 | 项 | 值 |
 |---|---|
-| **状态** | ✅ **已签字（2026-10-25）** —— 用户原话：「**CAND-12：主动探测写（周期 flush()）（签字偏离）**」 |
+| **状态** | ✅ **已签字（2026-10-25）** —— 用户原话：「**CAND-12：主动探测写（周期 flush()）（签字偏离）**」<br>🔴 **2026-10-25 06:40 用户再次明确三点**：①「**先记录官方处理**」②「**接受现有的 CAND-12 处理**」③「**签字接受 socket 的偏离**」⇒ ⇒ **本条闭环，不再另选方案**；官方路径 ⇒ **登记为「后续优化选项」，不是必选项**（见 §⑦）⇒ **当前实现不因本记录返工** |
 | **类别** | **有意偏离**（主动选择与 Go 不同 ⇒ 须签字） |
 | **组件** | `service/common/src/main/java/com/rag/common/observability/GoStyleClientDisconnectProbe.java`（**共享层** ⇒ 10 个 api 模块全部适用） |
 | **对应的 DRIFT 条目** | **T-4** 的**资源面**（`hot` 域 `DRIFT-HOTAPI-025`）⇒ ✅ **已修**（不再签字认账） |
@@ -249,6 +249,74 @@ func MaxConnsHandler(n int) func(http.Handler) http.Handler {
 - `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`（切片等待 + 探测 + gRPC Context 取消）
 - `service/common/src/test/java/com/rag/common/observability/GoStyleClientDisconnectProbeGateTest.java`
 - `docs/DRIFT/global/common-tails.md` T-4 ③ · `docs/Pitfalls/global/common-tails.md` PIT-GLOBAL-007
+
+**签字人：Jason（用户）　签字日期：2026-10-25**（首次签字：同日晚，「CAND-12：主动探测写（周期 flush()）（签字偏离）」；**再次明确签字：2026-10-25 06:40**，「接受现有的 CAND-12 处理」+「签字接受 socket 的偏离」）
+
+---
+
+## SD-2026-10-25-04 附记 · 🟡 **官方路径记录（可选后续优化 —— 不是必选项）**
+
+> **用户 2026-10-25 06:40 指示**：「**先记录官方处理**」+「**把官方的处理列为后续优化选项，而不是必选项**」
+> ⇒ ⇒ **本附记只是记录**，**不触发任何返工**；`SD-2026-10-25-04` 的实现（方案⑤）**保持不变**。
+> ⇒ **触发重议的条件只有一个**：① 协议切到 HTTP/2（`RST_STREAM` 真事件）或 ② 栈切到 WebFlux/Netty（`channelInactive` 真事件）。
+
+### ① 官方到底提供了什么（全量 grep：spring-web 7.0.9 + spring-webmvc 7.0.9 + spring-boot 4.0.8 + spring-boot-tomcat 4.0.8）
+
+| 官方机制 | 出处 | 它做什么 | 能不能「提前」 |
+|---|---|---|---|
+| `DisconnectedClientHelper` | `spring-web/.../web/util/DisconnectedClientHelper.java` | **事后**按异常类名 / message 分类（异常名集合 `:48-49`；关键词 `:45`；javadoc 覆盖范围 `:94-96`） | ❌ **不能** —— 输入是**已存在的 `Throwable`** ⇒ 必须先有 IO 失败 |
+| `DefaultHandlerExceptionResolver.handleDisconnectedClientException(...)` | `spring-webmvc/.../mvc/support/DefaultHandlerExceptionResolver.java:249` + `:522`（**since 6.2**） | Spring MVC 官方处理断连异常的地方 | ❌ javadoc 原文：「**By default, do nothing since the response is not usable.**」⇒ 官方立场 = **断连后响应不可用 ⇒ 什么都不做** |
+| `AsyncListener.onError(AsyncEvent)` | `spring-web/.../context/request/async/StandardServletAsyncWebRequest.java:188`（`startAsync()` 在 `:140` 自动 `asyncContext.addListener(this)` `:159`） | Servlet 规范层唯一的**事件式**入口 | 🟡 **条件性** —— 依赖**容器先发现断连** |
+| `WebAsyncManager` 的错误接线 | `spring-web/.../context/request/async/WebAsyncManager.java:342-353` | 容器 error 通知里 `if (ex instanceof IOException)` ⇒ 包成 `new AsyncRequestNotUsableException("Servlet container error notification for disconnected client", ex)`（`:348`） | 🟡 同上 |
+| `DeferredResult.onError / onTimeout / onCompletion` | `spring-web/.../context/request/async/DeferredResult.java:178 / :165 / :188`（`@since 5.0`） | **官方给应用层的钩子**（取消在飞工作就挂这里） | 🟡 同上 |
+| Boot 侧 | `spring-boot` / `spring-boot-tomcat` 4.0.8 | — | ❌ grep「disconnect / broken pipe / ClientAbort」= **0 命中** ⇒ **Boot 没有任何官方断连检测** |
+
+⇒ **官方全部用法都是「拿到异常之后」**（`AbstractHandlerExceptionResolver:177` · `ExceptionHandlerExceptionResolver:463` · `DefaultHandlerExceptionResolver:249` · `HttpWebHandlerAdapter:77`）⇒ **官方没有「检测」API，只有「事件消费」链路**。
+
+### ② 为什么 HTTP/1.1 下官方链路也早不了（Tomcat 源码）
+
+`tomcat-embed-core-11.0.24` `coyote/AbstractProtocol.java:1494-1503`（`Connection.longPoll()`）：
+
+```java
+if (!processor.isAsync()) {
+    socket.registerReadInterest();     // ← 只有非 async 才注册读兴趣
+}
+```
+
+⇒ **async 期间 Tomcat 不读 socket** ⇒ HTTP/1.1 下客户端发 RST，容器**不会主动察觉** ⇒ 事件仍要等「下一次写失败」。
+⇒ ⚠️ **这条源码结论在第十轮已被运行时实测独立验证**：「Servlet 里 `request.startAsync()` + 注册 `AsyncListener`，客户端裸 socket `SO_LINGER{1,0}` 强制 **RST** ⇒ **`onError` / `onTimeout` / `onComplete` 一个都不触发**」⇒ **官方 async 链路在 HTTP/1.1 下确实等不到事件**。
+⇒ 同期实测（RAG 侧）：轮询 Tomcat 内部 `isClosed()` **滞后 5.6 秒** ⇒ 比主动写还慢（第八轮路径③ 已否决）。
+
+### ③ 组合矩阵（**为什么官方路径不能替代方案⑤**）
+
+| 组合 | 事件何时来 | 要不要探针 |
+|---|---|---|
+| HTTP/1.1 + 同步（**当前实现**） | 只有我们自己写失败时才知道 | **要**（方案⑤） |
+| HTTP/1.1 + async（官方链路） | 同样只有写失败时才知道 ⇒ **不更早** | **还是要**（探针） |
+| HTTP/2 + async（官方链路） | Tomcat 收 `RST_STREAM` ⇒ **直接触发 `onError`** ⇒ 真提前 | **不要**（但偏离 Go 的明文 HTTP/1.1） |
+| WebFlux + Netty | `channelInactive` ⇒ 真提前 | 不要（换栈） |
+
+### ④ 后续优化选项清单（**都不是必选项**）
+
+| # | 选项 | 落点 | 收益 | 代价 / 为什么现在不做 |
+|---|---|---|---|---|
+| **O-1** | 用 `DisconnectedClientHelper.isClientDisconnectedException(ex)` 替掉我们自研的断连判定 | `service/common`（探针那一处） | 分类/日志级别与 Spring 官方一致；白拿跨容器（Tomcat / Jetty）判据 | 🟢 **成本最低** ⇒ 若做，是本附记里**唯一值得顺手做**的一项 |
+| **O-2** | handler 改 async（`DeferredResult`），取消逻辑搬进 `DeferredResult.onError(...)` | 10 个 api 的 handler + 线程模型 | 事件分类与异常语义标准化（`AsyncRequestNotUsableException`） | 🔴 HTTP/1.1 下**不更早**，却要改 10 个域的 handler + 响应提交时机 + 拦截器链 ⇒ **风险远大于收益** |
+| **O-3** | 切 HTTP/2 | 网关 / 客户端 / 全部 api | 真事件 ⇒ **可去掉探针 ⇒ wire 偏离（1xx）也随之消失** | 🔴 **偏离 Go**（Go 侧实测明文 HTTP/1.1）⇒ 需整体决策 |
+| **O-4** | 切 WebFlux + Netty | 整个栈 | 真事件 + 官方 `doOnCancel` | 🔴 换栈 ⇒ 成本远超收益 |
+
+⇒ ⚠️ **O-1 ~ O-4 一律是「可选」，不是「必做」** ⇒ **当前实现（方案⑤ + `SD-2026-10-25-04`）保持不变**。
+
+### ⑤ 一条附带的官方立场（值得记住）
+
+对**同步**请求，Spring 官方的默认处理是「**什么都不做**」（`DefaultHandlerExceptionResolver.handleDisconnectedClientException`，since 6.2）
+⇒ 而 RAG 侧做的是「**记录 499 + 取消在飞 gRPC**」⇒ **本来就超出官方默认行为** ⇒ 这部分偏离已由 `SD-2026-10-25-04` 认账。
+
+### ⑥ 留痕
+
+- 取证版本：spring-web / spring-webmvc **7.0.9** · spring-boot / spring-boot-tomcat **4.0.8** · tomcat-embed-core **11.0.24**
+- 取证方式：`javap`（公开 API + `getOrder()` 字节码）+ 各 jar 的 `-sources` 逐行 + Tomcat 源码 ⇒ **均为源码级**，**未做运行时实测**（本附记不触发改动 ⇒ 无需实测）
+- 关联：`docs/DRIFT/global/common-tails.md` T-4 ③ · `docs/DRIFT/global/_README.md` T-4 行
 
 ---
 
@@ -325,6 +393,7 @@ req := r.WithContext(ctx)
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | ✅ **第十三轮（官方路径记录 + 再次明确签字）** —— 用户 2026-10-25 06:40：「**先记录官方处理**，然后**接受现有的 CAND-12 处理**，然后**签字接受 socket 的偏离**（但是我需要你**把官方的处理列为后续优化选项，而不是必选项**）」⇒ ① 🔴 **`SD-2026-10-25-04` 状态追加「再次明确签字」**（签字人 Jason，2026-10-25 06:40）⇒ **本条闭环，不再另选方案** ② 🆕 **新增「附记 · 官方路径记录（可选后续优化 —— 不是必选项）」** —— 全量 grep spring-web 7.0.9 / spring-webmvc 7.0.9 / spring-boot 4.0.8 / spring-boot-tomcat 4.0.8：**官方没有「检测」API，只有「事件消费」链路**（`DisconnectedClientHelper` 事后分类 · `DefaultHandlerExceptionResolver.handleDisconnectedClientException` since 6.2「do nothing」· `AsyncListener.onError` + `WebAsyncManager` + `DeferredResult.onError`）；Boot 侧 grep = **0 命中** ③ 关键 Tomcat 事实：`AbstractProtocol.java:1494-1503` —— **async 期间不注册读兴趣** ⇒ HTTP/1.1 下官方链路**也不更早** ⇒ 方案⑤与官方路径**互补而非替代** ④ 登记 **O-1 ~ O-4** 四个**可选**后续优化（O-1 用官方 `DisconnectedClientHelper` 分类 ⇒ 成本最低；O-2 async 化；O-3 HTTP/2；O-4 WebFlux+Netty）⇒ ⚠️ **一律非必选**，**当前实现不返工** |
 | 2026-10-25 | ✅ **第八轮：6 条路径全部查完（源码 + 2 个真 Tomcat 探针）** ⇒ **「生态做不到」被证伪**：① 换 Jetty（`HttpChannel.Listener#onAbort()`）🟡可行·换运行时 ② 换 WebFlux+Netty 🟡可行·换栈 ③ **轮询 Tomcat 内部 `isClosed()` ❌实测否决**（反射链通，但实测**滞后 5.6s**，比主动写还慢）④ HTTP/2 `RST_STREAM` ⇒ Tomcat **真触发 `AsyncListener.onError`** 🟡可行但**偏离 Go**（Go 侧实测明文 HTTP/1.1）⑤ **主动探测写 ✅实测有效**（断连后 ~500ms 抛 `ClientAbortException`）但**改 framing** ⑥ 缩短在飞 deadline ✅**零改动·零 wire·零签字** ⇒ ⇒ **修正定性**：不是「生态做不到」，而是「**在既定约束下**没有 Go 等价路径」，而约束是项目自己选的 ⇒ ⇒ **本条从「事实登记」改判为「决策项」**
 | 2026-10-25 | ✅ **第十轮（方案⑤ 落地 + 签字）** —— 用户 2026-10-25：「**CAND-12：主动探测写（周期 flush()）（签字偏离）**」⇒ ① 选定**方案⑤**并实现（`GoStyleClientDisconnectProbe` + `HttpMiddleware` 切片等待 + gRPC `Context` 取消）② 🔴 **撤销 `SD-2026-10-25-02`** —— 它记录的是「框架限制」，而**问题本身已被修掉** ⇒ **本条从未被签字也不需再签** ③ 🆕 **新增 `SD-2026-10-25-04`（已签字）** —— 方案⑤ 带来的 **wire 偏离**：客户端先收到 N 行 `103 Early Hints`（快请求零影响）+ **499 定型时点晚于 Go**（~505ms）
 | 2026-10-25 | ⚠️ **改回「待签字」+ 降级原分类（用户质询后）** —— 用户 2026-10-25 05:46：「**先等下签字，我想知道有没有其他办法，springboot 做分布式肯定有办法**」。⇒ ① 第四轮把它**误转正为「已签字」**（用户当时只问了「它是什么」，**未点头**）⇒ **改回待签字**，原候选号 `CAND-12` 保留。② 原分类「**框架限制**」**过宽** ⇒ 降级为「**Tomcat 的 Servlet 层不给断连信号**」⇒ 实测只覆盖「Tomcat + HTTP/1.1 + Spring MVC」一种组合 ⇒ **不等于「Java/Spring 生态做不到」**。③ 登记 **6 条待查技术路径**（换容器 Jetty/Undertow · 换栈 WebFlux+Netty · 反射取 Tomcat 内部 socket 状态 · HTTP/2 的 RST_STREAM 路径 · 主动探测写 · 缩短在飞 deadline）⇒ **研究结论回来前不签字** |
