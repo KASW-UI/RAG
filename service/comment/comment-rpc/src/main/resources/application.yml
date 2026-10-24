@@ -14,6 +14,30 @@ spring:
     # 对应 Go Name: comment.rpc（服务发现名）；Telemetry.Name 亦为 comment-rpc
     name: comment-rpc
 
+  # 🔴🔴 纯 gRPC 进程必须显式声明 web-application-type: none
+  #
+  # 【2026-10-24 双侧活体对拍时实测发现的启动阻塞缺陷】
+  # 本模块的 pom 里有两条 web 相关依赖：
+  #   ① spring-boot-web-server          —— 仅为满足 nacos-discovery 的反射引用
+  #   ② jakarta.servlet:jakarta.servlet-api（**provided**）—— 仅供
+  #      CommentAuthorityEndpointConfig 的 ServletRegistrationBean<HttpServlet> 编译
+  # 两条都**不含**嵌入式 servlet 容器（无 tomcat-embed-core）⇒ 按设计是纯 gRPC 进程。
+  #
+  # ⚠️ 但 Spring Boot 的 WebApplicationType.deduceFromClasspath() 判定「是不是 web 应用」
+  #    只看 **jakarta.servlet.Servlet 在不在 classpath 上** —— **不看有没有容器**。
+  #    而 **Spring Boot 的 repackage 会把 provided 作用域的 jar 也打进 BOOT-INF/lib**
+  #    （实测：comment-rpc 的 fat jar 里确实有 BOOT-INF/lib/jakarta.servlet-api-6.1.0.jar；
+  #      message-rpc / like-rpc 没声明这个依赖 ⇒ 它们的 fat jar 里没有 ⇒ 不受影响）。
+  #    ⇒ Boot 判定为 SERVLET → 启动期去找 ServletWebServerFactory → **找不到** →
+  #      APPLICATION FAILED TO START: "Unable to start web server" ⇒ **组件根本起不来**。
+  #
+  # ⇒ 本行是「纯 gRPC 进程」这个**既有意图**的显式声明，不是补丁。
+  #    Go 侧对应形态：comment.go 起的是 zrpc gRPC server + 一个独立的 promhttp :9091 goroutine，
+  #    **没有** web 容器。
+  # ⚠️ 本行不可省：省掉它 ⇒ 进程起不来 ⇒ 而单元测试全绿（测试不起真实容器）。
+  main:
+    web-application-type: none
+
   # ============== Postgres ==============
   # 对应 Go config.Config.DB.DataSource
   #   "host=${POSTGRES_ADDR} user=… dbname=… port=… sslmode=disable TimeZone=Asia/Shanghai"

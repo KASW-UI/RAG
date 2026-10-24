@@ -155,13 +155,23 @@
             ⚠️ 只断言 `CommentGrpcError.grpcError(...).getTrailers()` 的值**证明不了**它
                穿过了传输层 —— 本仓此前已多次栽在「单测全绿但真实链路上没生效」上
                （AGENTS.md §3.3）。同款写法见 like-common/LikeGrpcErrorTest.java。
-            按项目惯例放在 test scope，comment-api 本身不依赖传输层。
+
+            🔴🔴 **刻意不在这里声明 grpc-inprocess**（2026-10-24 双侧活体对拍时踩过）：
+            本仓所有 api 模块的 grpc-inprocess 都来自
+            `net.devh:grpc-client-spring-boot-starter:3.1.0.RELEASE` 的**传递依赖**
+            （compile 作用域）—— devh 的 `GrpcClientAutoConfiguration` 在**运行期**
+            就要 `io.grpc.inprocess.InProcessChannelBuilder`。
+
+            ⚠️ **Maven「最近者优先」是这里的关键陷阱**：
+            一旦在本模块**直接**声明 `io.grpc:grpc-inprocess` 并标成 `<scope>test</scope>`，
+            它（深度 1）就会**顶掉** devh 传递过来的那份（深度 2、compile 作用域）
+            ⇒ **运行时 classpath 里就没有 grpc-inprocess 了**
+            ⇒ 启动期报 `NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder`
+            （抛点：`GrpcClientAutoConfiguration#shadedNettyGrpcChannelFactory`）
+            ⇒ **组件根本起不来**，而单元测试全绿。
+
+            ⇒ 本模块**不需要**自己声明：devh 的传递依赖已经同时满足
+            「测试要 in-process server」与「运行期要 InProcessChannelBuilder」两个需求。
         -->
-        <dependency>
-            <groupId>io.grpc</groupId>
-            <artifactId>grpc-inprocess</artifactId>
-            <version>${grpc.version}</version>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 </project>

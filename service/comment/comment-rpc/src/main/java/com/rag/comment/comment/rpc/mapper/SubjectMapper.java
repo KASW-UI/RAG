@@ -119,12 +119,33 @@ public interface SubjectMapper {
      * 且仅当被删的是根评论（{@code comment.RootId == 0}）才 {@code root_count - 1}。
      *
      * <p>⚠️ Go 侧<b>不检查</b>这一步的 RowsAffected —— 与 {@code updateState} 不同。
+     *
+     * <p>🔴🔴 <b>2026-10-24 双侧活体对拍时修掉的真实缺陷</b>：
+     * 此前 {@code <if>} 块被拼在 <b>WHERE 子句之后</b>，生成
+     * <pre>
+     * UPDATE subject SET total_count = total_count - 1, updated_at = CURRENT_TIMESTAMP
+     * WHERE target_type = ? AND target_id = ? , root_count = root_count - 1
+     * </pre>
+     * ⇒ {@code rootCountDecrement=true} 时是<b>语法错误</b>
+     * （PG: {@code syntax error at or near ","}）⇒ <b>删根评论必然失败</b>
+     * ⇒ 删评论走 {@code DeleteCommentTx} ⇒ 整个事务回滚 ⇒ 对外报 5002「DB更新失败」。
+     *
+     * <p>⚠️ 为什么单元测试抓不到：本仓**没有任何测试执行过这些 mapper 的动态 SQL**
+     * （此前的 rpc 测试全是纯 Java 逻辑断言 + 裸 JDBC，不经过 MyBatis 动态拼接）
+     * ⇒ 是<b>双侧活体对拍</b>把它抓出来的。
+     *
+     * <p>⇒ 现在用 MyBatis 的 {@code <set>}：它会<b>自动去掉最后一项的尾逗号</b>
+     * （与 {@link CommentIndexMapper#applyInteractionDeltas} 同款写法）。
      */
     @Update("""
             <script>
-            UPDATE subject SET total_count = total_count - 1, updated_at = CURRENT_TIMESTAMP
+            UPDATE subject
+            <set>
+              total_count = total_count - 1,
+              <if test="rootCountDecrement">root_count = root_count - 1,</if>
+              updated_at = CURRENT_TIMESTAMP,
+            </set>
             WHERE target_type = #{targetType} AND target_id = #{targetId}
-            <if test="rootCountDecrement">, root_count = root_count - 1</if>
             </script>
             """)
     int decrementCounts(@Param("targetType") String targetType,
