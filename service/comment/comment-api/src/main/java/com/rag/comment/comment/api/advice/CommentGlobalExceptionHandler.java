@@ -197,13 +197,27 @@ public class CommentGlobalExceptionHandler {
     /**
      * Content-Type 不支持 → 415。
      *
-     * <p><b>已知偏离（OBSERVABLE DIFFERENCE）</b>：Go 侧 go-zero 没有「媒体类型协商」，
-     * {@code withJsonBody} 只判 Content-Type 是否<b>包含</b> {@code application/json}；
-     * 不含时它走 {@code UnmarshalJsonMap(nil, v)} —— 对本模块<b>全必填</b>的 DTO
-     * 仍会报必填错 ⇒ 200 + 5001。Java 侧由 Spring 的消息转换器选择直接判 415。
+     * <p><b>⚠️ 2026-10-24 双侧活体实测后订正：这里原本写的「Java 侧由 Spring 的消息转换器选择直接判 415」
+     * 是<b>错的</b>，据此登记的 OBSERVABLE DIFFERENCE（D1）也已撤销。</b>
      *
-     * <p>取舍：与 message-api 同款，保留 Spring 默认（不为「更接近 Go」去放宽媒体类型协商）。
-     * 差异只在客户端 Content-Type 写错时出现，两侧都是拒绝、都不产生业务副作用。
+     * <p>实测结论（Go 真源 + RAG 同时在跑，6 组 Content-Type × body 形态逐条对拍）：
+     * <b>非 {@code application/json} 的 Content-Type ⇒ 两侧都是 HTTP 200 + {@code {code:5001}} ⇒ 一致。</b>
+     *
+     * <ul>
+     *   <li>Go 侧：go-zero 没有「媒体类型协商」，{@code withJsonBody} 只判 Content-Type 是否<b>包含</b>
+     *       {@code application/json}；不含时走 {@code UnmarshalJsonMap(nil, v)} —— 对本模块<b>全必填</b>的 DTO
+     *       仍会报必填错 ⇒ 200 + 5001。</li>
+     *   <li>RAG 侧：<b>不走本分支</b>。实测日志显示它落在
+     *       {@code HttpMessageNotReadableException("Required request body is missing")}
+     *       （见 {@link #handleUnreadableBody}）⇒ 同样 200 + 5001。
+     *       判别实验：{@code application/json} + 1 字节 body ⇒ Spring 报 <b>JSON parse error</b>（body 被读了）；
+     *       {@code text/plain} + 1 字节 body ⇒ 报 <b>body missing</b>（body 读不出字节）⇒ 判别点是 Content-Type。</li>
+     * </ul>
+     *
+     * <p>⚠️ <b>机制未完全查实</b>（Spring 7 + Tomcat 11 组合下，非 JSON Content-Type 时 servlet input stream 读不出字节）：
+     * 但<b>可观察行为已定</b> ⇒ 台账以活体为准（{@code docs/DRIFT/comment/api.md} §3 D1）。
+     *
+     * <p>本分支保留为<b>防御性兜底</b>：在上述实测形态下不可达，但保留 Spring 默认语义比主动吞掉它更安全。
      */
     @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
     public ResponseEntity<Void> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException e) {
