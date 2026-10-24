@@ -4,8 +4,9 @@
 
 > **核对时间：2026-10-25**
 > **本轮性质**：§3.4 **效力边界第 1 条**（「RAG 侧使用生成代码的方式与 Go 一致」）的首次核对。
-> **证据强度**：✅ **双侧静态全文 diff**（proto 文件本身）+ ✅ **消费点逐条清点**（源码级）。
-> ⚠️ **未做**：真 channel 上的 wire 字节对拍。
+> **证据强度**：✅ **双侧静态全文 diff**（proto 文件本身）+ ✅ **消费点逐条清点**（源码级）
+> + ✅ **双侧活体对拍**（protobuf 消息体的 wire 字节，2026-10-25 第五轮 ⇒ §5）。
+> ⚠️ **仍未做**：**帧层**（HTTP2 / length-prefix / gRPC status 帧）的字节对拍 —— 需两侧同时起服务。
 
 ---
 
@@ -19,6 +20,7 @@
 | 字段号硬编码 | **无命中** |
 | message 构造 | **16 个 message 逐条一致**（字段集合无差异） |
 | RPC 方法 | **7 个逐条一致** |
+| **wire 字节** | ✅ **双侧活体对拍**（6 组消息，Go 真源生成码 vs favorite-proto 生成码，**两个不同运行时**）⇒ §5 |
 
 ---
 
@@ -148,11 +150,48 @@ RAG 侧 7 处用 `nullToEmpty(...)` / `nullToZero(...)` 显式设零值
 | `optional` presence | ✅ **本域零 optional** ⇒ 不适用 |
 | 字段号硬编码 | ✅ 无命中 |
 | **「默认值不落 wire」的生成码级证据** | ✅ **已验**（2026-10-25 第四轮 ⇒ 见 §2 的 `writeTo` 条件表达式） |
-| **真 channel 上的 wire 字节**（protobuf 消息体） | 🔴 **未验**（需要双侧活体对拍）⇒ ⚠️ 注意：**gRPC status 的 description** 那一环**已验**（在 [`common.md`](./common.md) §4，由 `FavoriteGrpcErrorWireFidelityTest` 守着）⇒ **剩下的是 protobuf 消息体本身的字节** |
+| **「默认值不落 wire」的【字节级】证据** | ✅ **已验**（2026-10-25 第五轮 ⇒ 探针 `tools/proto-wire-probe/favorite/`：**零值消息在 wire 上是空字节**）⇒ 见 §5 |
+| **protobuf 消息体的 wire 字节** | ✅ **已验**（2026-10-25 第五轮 ⇒ **双侧活体对拍**：Go 真源的 `favorite.pb.go`（protoc-gen-go 运行时）vs favorite-proto 的生成码（protobuf-java 运行时）⇒ **6 组消息逐字节一致** ⇒ 见 §5） |
+| **真 channel 上的 wire 字节**（gRPC 帧 / status 帧） | 🔴 **未验**（需要两侧同时起服务）⇒ ⚠️ **gRPC status 的 description** 那一环**已验**（在 [`common.md`](./common.md) §4，由 `FavoriteGrpcErrorWireFidelityTest` 守着）⇒ **剩下的是帧层（HTTP2 / length-prefix / status 帧）** |
 
 ---
 
-## 5. 复现命令
+## 5. ✅ 第五轮新增：protobuf 消息体的 wire 字节**双侧活体对拍**
+
+> 🔴 **这一节把 §4 的最后一条「🔴 未验」拆成了两半**：**消息体字节**这一半已闭合，
+> **帧层**那一半仍未闭（需要两侧同时起服务）。
+
+**新工具**：`tools/proto-wire-probe/favorite/`（**EXIT=0**）
+
+| | Go 侧 | RAG 侧 |
+|---|---|---|
+| 代码 | **真源真正在用的** `service/favorite/rpc/pb/favorite.pb.go`（**逐字节复制 + sha256 校验**） | favorite-proto 的生成码 |
+| 运行时 | `google.golang.org/protobuf`（protoc-gen-go 的运行时） | `protobuf-java`（protoc 的 Java 运行时） |
+
+⇒ ⚠️ **两侧运行时不同** ⇒ 这**不是**「同一份实现自证」。
+
+| # | 用例 | 钉住的事实 | 结果 |
+|---|---|---|---|
+| 1 | `folder_full` | 全字段的 varint / length-delimited（用 2^53+1 的雪花 ID ⇒ **int64 在 wire 上不丢精度**） | ✅ 逐字节一致 |
+| 2 | `folder_zero` | 🔴 proto3 的标量零值**不落 wire** ⇒ 必须是**空字节** | ✅ 逐字节一致（两侧都是**空**） |
+| 3 | `item_full` | 8 个字段的完整编码 | ✅ 逐字节一致 |
+| 4 | `item_partial` | 🔴 **只设了的字段才落 wire**（空字符串**不**落 —— 那是 JSON 的行为，不是 proto3 的） | ✅ 逐字节一致 |
+| 5 | `folders_resp_two` | 🔴 `repeated` 的编码（两次 tag 1 + length-delimited，不是 JSON 数组） | ✅ 逐字节一致 |
+| 6 | `create_req` | 请求消息：`int64` 在 wire 上是 **varint**，**不是**字符串（字符串是 api 层的 JSON 约定） | ✅ 逐字节一致 |
+
+**回归网**：`FavoriteProtoWireParityTest`（**6 例**，`favorite-rpc` 模块）
+⚠️ **为什么住在 favorite-rpc 而不是 favorite-proto**：`favorite-proto` 的 pom 里
+**一行 junit 依赖都没有** ⇒ 往那儿加测试要先改 pom ⇒ 放在**消费方**（它本来就依赖 proto）。
+⇒ 副作用：proto 组件从「**0 例测试**」变成「有 1 个字节级守门」。
+
+**它把哪条证据升级了**：§2 此前记的「零值不落 wire」只有**生成码级**证据
+（读 `FavoriteFolder.writeTo` 的条件表达式）⇒ **本轮升级为字节级**。
+
+**仍未闭的**：**帧层**（HTTP2 / length-prefix / gRPC status 帧）⇒ 需要两侧同时起服务。
+
+---
+
+## 6. 复现命令
 
 ```bash
 cd /Users/pr/Documents/java&golang/RAG.worktrees/favorite
@@ -162,4 +201,8 @@ bash tools/difftest/check-proto-static.sh
 
 # 生成码产出（33 java + FavoriteServiceGrpc）
 mvn -o -pl service/favorite/favorite-proto -am package
+
+# 🔴 消息体 wire 字节的双侧活体对拍（Go 真源生成码 vs favorite-proto 生成码）
+bash tools/proto-wire-probe/favorite/run.sh
+echo $?   # 0 = 6 组消息逐字节一致
 ```

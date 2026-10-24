@@ -98,7 +98,7 @@ echo $?   # 0 = 一致（OBS 段差异仍在登记状态）；1 = 主段漂移�
 | 码表 / 回落 / wire 形态 / 业务码反查 | ✅ **双侧活体对拍** | 探针 108 行逐字节一致 |
 | `BizCodeFromError` 在 **HTTP 层**的落点 | ✅ 已验（在 `favorite-api` 侧） | Go 的 `codeFromRPCError` ⇒ `favoritecommon.BizCodeFromError`；RAG 的 `FavoriteApiSupport.invokeRpc` ⇒ `FavoriteGrpcError.bizCodeFromError`。见 [`api.md`](./api.md) |
 | `GRPCError` 在**真实 gRPC 链路上**的 description 保真 | ✅ **已验**（2026-10-25 第四轮） | `FavoriteGrpcErrorWireFidelityTest`（4 例，**真 in-process gRPC**）：description 与 `FavoriteErrorMessages.getMsg(码)` **逐字节相同**；业务码能经 `bizCodeFromError` **还原**；标准 gRPC 码保真；**5304**（唯一只能靠文案反查还原的码）也能还原。⇒ **变异**（去掉 `withDescription`）⇒ 3 例转红，且错误信息精确展示因果链（`5304→1015`、`5007→5001`）⇒ 不是假绿 |
-| 真 channel 上的 **wire 字节**（protobuf 层） | 🔴 **未做** | 上面那条验的是 **gRPC status 的 description**；**protobuf 消息体的字节**对拍仍未做（需两侧同时跑）⇒ 见 [`proto.md`](./proto.md) §4 |
+| 真 channel 上的 **wire 字节**（protobuf 层） | 🟡 **部分已做** | 上面那条验的是 **gRPC status 的 description**；**protobuf 消息体本身的字节** ⇒ ✅ **2026-10-25 第五轮已闭**（探针 `tools/proto-wire-probe/favorite/`，**双侧活体对拍**，6 组消息逐字节一致）⇒ 见 [`proto.md`](./proto.md) §5；<br>⚠️ **仍未闭**：**帧层**（HTTP2 / length-prefix / status 帧）⇒ 需两侧同时起服务 |
 | `favorite-common` **不消费任何 proto message** | ✅ 已确认 | `FavoriteGrpcError` 全文只操作 `io.grpc.Status` ⇒ 该组件在 proto 消费链路上是空的（见 [`proto.md`](./proto.md)） |
 
 ---

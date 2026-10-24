@@ -1,0 +1,11 @@
+CASE|ok_folder_snowflake|200|application/json; charset=utf-8|{"code":200,"msg":"OK","data":{"folderId":"9007199254740993","name":"技术","createdAt":1700000000123,"updatedAt":1700000000456}}
+CASE|ok_folder_zero_values|200|application/json; charset=utf-8|{"code":200,"msg":"OK","data":{"folderId":"0","name":"","createdAt":0,"updatedAt":0}}
+CASE|ok_item_full|200|application/json; charset=utf-8|{"code":200,"msg":"OK","data":{"favoriteId":"9007199254740993","folderId":"7001","targetId":"2001","targetType":"article","title":"标题","cover":"https://example.invalid/c.png","createdAt":1700000000123}}
+CASE|ok_item_empty_optional|200|application/json; charset=utf-8|{"code":200,"msg":"OK","data":{"favoriteId":"1","folderId":"2","targetId":"3","targetType":"article","title":"","cover":"","createdAt":0}}
+CASE|ok_folders_empty_list|200|application/json; charset=utf-8|{"code":200,"msg":"OK","data":{"folders":[]}}
+CASE|ok_folders_one|200|application/json; charset=utf-8|{"code":200,"msg":"OK","data":{"folders":[{"folderId":"7","name":"收藏夹","createdAt":1,"updatedAt":2}]}}
+CASE|err_invalid_param|200|application/json; charset=utf-8|{"code":5003,"msg":"参数错误","data":null}
+CASE|err_unauthorized|200|application/json; charset=utf-8|{"code":5004,"msg":"未登录或登录已失效","data":null}
+CASE|err_not_found|200|application/json; charset=utf-8|{"code":5002,"msg":"not found","data":null}
+CASE|err_too_many_form_params|200|application/json; charset=utf-8|{"code":5003,"msg":"参数错误","data":null}
+OBS|panic_recover_500|500||

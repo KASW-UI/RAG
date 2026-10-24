@@ -210,8 +210,12 @@ Spring 的 `@ExceptionHandler(IllegalArgumentException.class)` **只按类型匹
    ```
    ⚠️ catch `RuntimeException` 而**不是** Tomcat 的具体类：避免把编译期依赖绑到
    `org.apache.tomcat.util.http`（非公开 API 面，Boot 换版本就可能挪位置）。
-2. **兜底 handler（`handleAny`）一旦真的被触发，就是信号** —— 它在 favorite 的 Go 侧**根本不可达**
-   （Go 的 7 个 handler 全部 `httpx.OkJsonCtx` ⇒ HTTP 恒 200）⇒ RAG 侧出现 500 = 有东西没被接住。
+2. **兜底 handler（`handleAny`）一旦真的被触发，就是信号** —— Go 侧的 **7 个 handler 全部
+   `httpx.OkJsonCtx` ⇒ handler 自身永不产出 500** ⇒ RAG 侧出现 500 = 有东西没被接住。
+   ⚠️ **但要说清「不可达」的边界**（2026-10-25 第五轮更正）：Go 的 handler 逻辑虽不产出 500，
+   **panic 仍会走默认中间件 `RecoverHandler` ⇒ 500 + 空 body** ⇒ **那条路径是可达的**
+   （见 [`DEV-FAV-API-002`](../../Intentional_Deviations/favorite/api.md)）⇒
+   「不可达」只对「**handler 自己返回 5xx**」成立，对「**panic**」不成立。
 3. **回归网要挑「容器层的上限」而不是「应用层的上限」** ——
    应用层上限（2048 个**非空**值）会**被容器先拒**（实测同值 ⇒ 两层都触发，测不出归一是否生效）；
    真正只走容器层的形状是「**总「值」数超限、但非空值很少**」（本域用 `folderId=7` + 2048 个空值）。
@@ -219,3 +223,45 @@ Spring 的 `@ExceptionHandler(IllegalArgumentException.class)` **只按类型匹
    一度以为是自己没写对。
 
 ---
+
+## PIT-FAV-API-007 · 🕳️ **「读源码判定」不是「已验」—— 本轮两条都判错了**
+
+### 现象
+
+2026-10-25 第五轮做响应字节对拍时，本台账里两条标着「🟡 源码级」的结论被实测推翻：
+
+| # | 原结论（读源码判的） | 实测（真库跑的） |
+|---|---|---|
+| 1 | 「Go 的 `RecoverHandler` 写 **500 + text/plain**（`http.Error`）」 | go-zero v1.10.2 的 `rest/handler/recoverhandler.go:17` 是 **`w.WriteHeader(500)`** ⇒ **空 body、无 Content-Type** |
+| 2 | 「`title`/`cover` 的 `,optional` 是 go-zero mapping 的选项 ⇒ 不是 `omitempty` ⇒ **永远出现**」 | ✅ 这条**判对了** —— 但**方法不可靠**：`encoding/json` **忽略**它不认识的 tag 选项这一点，只有**真序列化一次**才看得见 |
+
+⇒ 第 1 条还带出**两个连带错误**：
+「Go 的 logic **不会 panic** ⇒ 该分支不可达 ⇒ 不构成漂移」——
+**也不成立**：`RecoverHandler` 是 go-zero 的**默认中间件**（`rest/engine.go:158`）⇒ **可达**。
+
+### 为什么会踩
+
+1. **「读源码」和「跑一遍」被当成了同一档证据** —— 但本台账的 §4 明明写着
+   「🟡 源码级」**不等于**「已验」，**却仍被当成结论用了**（还据此写了「不构成漂移」）。
+2. ⚠️ **框架的默认行为不在框架的文档里**：`http.Error` / `WriteHeader` 的差别、
+   `encoding/json` 忽略未知 tag 选项 —— 这些都**只能从真库的源码或行为里拿**，
+   **不能靠「Go 侧一般怎么写」去推**。
+3. ⚠️ **「不可达」是一个需要证据的断言**，不是观察 —— 而本条当时**没有**任何证据
+   （既没跑 Go，也没有查 go-zero 的默认中间件链）。
+
+### 怎么不再踩
+
+⇒ **凡是「两侧的字节/形态」类结论，一律用「真库跑一次」取证**：
+新建 `tools/api-envelope-probe/favorite/` —— Go 侧直接调**真的** go-zero 函数
+（`httpx.OkJsonCtx` / `httpx.Parse` / `handler.RecoverHandler`）+ **从真源逐字节复制**的类型定义
+（sha256 校验）⇒ 期望值落在 `expected.txt`；RAG 侧用**真实**的生产类 + **容器里那个** mapper。
+
+⇒ **「不可达」要单独拿证据**：要么证明那条路径在两侧都走不到（那就得**两侧都跑**），
+要么承认它**可达**、按「真差异」登记 ⇒ 本条按后者处理（DEV-FAV-API-002）。
+
+⚠️ **教训的形状**：「结论恰好正确」也会掩盖「方法不可靠」——
+第 2 条就是**对的**，可它是用**不可靠的方法**得到的 ⇒ 下一次同样的方法就会错。
+⇒ 所以要盯的是**方法**，不是**这次对了没有**。
+
+⚠️ 另有一条**同源的坑**：`jsonx.Marshal` 会**去掉尾换行**（`encoding/json` 的 `Encoder.Encode`
+会加一个）⇒ 手写复刻 Go 的 JSON 输出时，**多一个或少一个 `\n` 就是字节不一致**。

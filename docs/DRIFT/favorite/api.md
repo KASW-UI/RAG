@@ -15,7 +15,7 @@
 | 项 | 值 |
 |---|---|
 | 落地形态 | 31 个 main 文件 / 2,920 行 / 13 个 DTO / 7 个 Service / 1 个 Controller |
-| 测试 | **5 个测试类 / 84 例全绿**（33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + **8 真 Tomcat 门禁**）→ 第三轮 **+1 个测试类 / +8 例** |
+| 测试 | **6 个测试类 / 89 例全绿**（33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍**）→ 第五轮 **+1 个测试类 / +5 例** |
 | 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条已签字偏离** |
 | 未决 | **1 条已签字**（401 body 形态，✅ 2026-10-25 用户签字）+ **1 条 OBS**（500 兜底 body）+ **1 条跨域待拍板**（容器层参数上限口径 ⇒ 收口在 `global`） |
 | 本台账范围 | **仅 `favorite-api`**。`favorite-common` / `favorite-rpc` / `favorite-proto` 见同目录另三份台账 |
@@ -187,6 +187,37 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 > 静态守门脚本（`check-tomcat-limits.py`）查的是**配置文本**，它**证明不了**容器采用了它；
 > 只有真 Tomcat 的行为断言 + 变异转红才能。
 
+### 2.2 ✅ 本轮补上的证据缺口：响应字节的**双侧活体对拍**（新探针）
+
+> 🔴 **这一节推翻了本台账此前的一条结论**，并把两条 🟡 源码级判定升级为**实测**。
+
+**新工具**：`tools/api-envelope-probe/favorite/`（Go 侧用**真 go-zero v1.10.2 库** +
+**从 Go 真源逐字节复制**的 `response.go` / `types.go` / `errmsg.go`；Java 侧用**真实**的
+`GlobalResponseAdvice` / `com.rag.common.response.Response` / favorite-api 的 `dto/*` +
+**Spring 容器里那个** `ObjectMapper` + **真 HTTP**）⇒ **EXIT=0**。
+⇒ 冻结的 `expected.txt` 是**两侧共用的唯一真源** ⇒ 不会「各说一半」。
+
+| # | 此前结论 | 本轮实测 | 状态 |
+|---|---|---|---|
+| **1** | 「Go 侧「非空值 >2048」时的逐字节响应」= **🟡 源码级**（只读过 `httpx.OkJsonCtx` 的形状） | Go 侧用**真的** `httpx.Parse`（`maxFormParamCount = 2048` 判据真生效）⇒ 2049 个非空值 ⇒ **200 + `{code:5003,msg:"参数错误",data:null}`**；RAG 侧走**真 HTTP**（真 Tomcat + 真 filter 链）⇒ **逐字节相同** | ✅ **活体对拍** |
+| **2** | 「两种 int64 编码方式」（§1.5）= **读源码判定** | 实测：`folderId` ⇒ `"9007199254740993"`（**字符串**，2^53+1 不丢精度）、`createdAt` ⇒ `1700000000123`（**数字**） | ✅ **实测** |
+| **3** | 「go-zero 的 `,optional` 不是 `omitempty`」= **读源码判定** | 实测：`title`/`cover` 为空时**仍然出现**（`""`），不是 null、也不是消失 | ✅ **实测** |
+| **4** | 🔴 「Go 的 `RecoverHandler` 写 **500 + text/plain**（`http.Error`）」 | **原结论错误**：go-zero v1.10.2 的 `rest/handler/recoverhandler.go:17` 是 **`w.WriteHeader(500)`** ⇒ **空 body、无 Content-Type** | 🔴 **已改正**（见 §3） |
+
+> ⚠️ **第 4 条的连带影响**：`RecoverHandler` 是 go-zero 的**默认中间件**
+> （`rest/engine.go:158`，`conf.Middlewares.Recover` 为真时挂上）⇒
+> **「Go 的 logic 不会 panic ⇒ 该分支不可达」是未验证的假设，不是事实** ⇒
+> 该分支**确实可达** ⇒ 两侧形态不同就是**一条真差异** ⇒ 已登记（DEV-FAV-API-002）。
+
+> 📌 **一处归一化（不是漂移）**：Go 写 `application/json; charset=utf-8`（分号后**有**空格），
+> Spring 渲染成 `application/json;charset=utf-8`（**无**空格）⇒ HTTP 媒体类型参数分隔符
+> 两侧的空白是**可选**（RFC 9110 §5.6.2 的 OWS）⇒ 任何解析器都会归一化 ⇒ **无客户端能分辨**
+> ⇒ 属**表达层**差异 ⇒ 探针**只对 Content-Type 这一个字段**做 OWS 归一，**body 仍逐字节比较**。
+
+> ⚠️ **「读源码判定」为什么不够**：本轮两条 🟡（第 2、3 条）此前都是**读源码判定的**，
+> 结论**恰好正确** —— 但**正确不代表方法可靠**：`encoding/json` 会**忽略**它不认识的 tag 选项
+> （`optional`），这一点只有**真的序列化一次**才看得见 ⇒ AGENTS.md §3.3「不能只靠声明推断」。
+
 ---
 
 ## 3. ⚠️ 未决 / 已签字偏离
@@ -207,11 +238,21 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 > ⚠️ 此前两个类（`GlobalExceptionHandler` / `FavoriteJwtAuthInterceptor`）都把这称为
 > 「属 AGENTS.md **§3.4** 已登记的表达层差异」—— **§3.4 是 proto 复制那一节**，与本条无关 ⇒ 已改正。
 
-### OBS · 500 兜底的 body 形态
+### OBS · 500 兜底的 body 形态（🔴 **本轮已改正 Go 侧事实**，并登记为有意偏离）
 
-Go 的 `RecoverHandler` 写 **500 + text/plain**（`http.Error`）；RAG 的 `handleAny:243-252` 写
-**500 + JSON envelope**（`{code:5001,…}`）。
-⇒ favorite 的 Go logic **不会 panic** ⇒ 该分支实际不可达 ⇒ 记 **OBS**，不构成行为漂移。
+Go 侧 **500 + 空 body**（真库 `rest/handler/recoverhandler.go:17` 是 `w.WriteHeader(500)`），
+RAG 侧 **500 + JSON envelope**（`{code:5001,…}`）。
+
+⚠️ **本台账此前写的是「Go 写 500 + text/plain（`http.Error`）」—— 那是错的**，
+已由 `tools/api-envelope-probe/favorite/` 用**真 go-zero 库**实测改正（见 §2.2 第 4 条）。
+
+⇒ 另：此前记的「favorite 的 Go logic **不会 panic** ⇒ 该分支实际不可达 ⇒ 记 OBS，**不构成行为漂移**」
+也**不成立** —— `RecoverHandler` 是 go-zero 的**默认中间件**（`rest/engine.go:158`）⇒
+一旦 handler panic 就会走到 ⇒ **该分支可达** ⇒ 两侧形态不同是**一条真差异**。
+
+⇒ **已登记**：`docs/Intentional_Deviations/favorite/api.md` 的 **DEV-FAV-API-002**。
+⇒ **不修**：RAG 侧给了可解析的 envelope（Go 侧是空 body），且与 users / admin / comment 域一致
+⇒ 改成空 body 只会让客户端在 500 时拿不到任何信息。
 
 ### 🔁 跨域待拍板 · 容器层参数上限的**口径差**（残余窗口，收口在 `global`）
 
@@ -236,7 +277,7 @@ Go 的 `RecoverHandler` 写 **500 + text/plain**（`http.Error`）；RAG 的 `ha
 | 双侧活体对拍（真 Go favorite-api vs RAG） | 🔴 **未做** | Go 侧依赖 `etcd` + favorite-rpc + Redis，本轮起不来 ⇒ 全部结论是「源码级 + RAG 侧运行证据」 |
 | **servlet filter 链真生效** | ✅ **已验**（2026-10-25 第三轮） | `FavoriteApiRealTomcatGateTest`（**8 例**，`webEnvironment = RANDOM_PORT` ⇒ **真 Tomcat**）：MaxBytes → **413 + 空 body + 无 Content-Type**、413 **压过** 401、未超限仍 401、三旋钮各自生效 ⇒ **真容器的 chain 里真的跑了它**（不再只是「Bean 存在 + `@Order` 一致」） |
 | **容器层参数上限的精确口径** | ✅ **已验** | 4 组判别用例（真 Tomcat）⇒ Tomcat 数**总「值」数（含空值）**、Go 数**非空值数** ⇒ 残余窗口见 §3 |
-| **Go 侧「非空值 >2048」时的逐字节响应** | 🟡 **源码级** | Go 侧 handler 的 `httpx.OkJsonCtx` 形状已逐字核对（`get_favorites_by_folder_handler.go:18-26`）+ 码值/文案已核（`errmsg.go:16,51`）⇒ 期望值 **HTTP 200 + `{code:5003, msg:"参数错误", data:null}`**；但**未跑起 Go 侧 favorite-api** ⇒ 无双侧活体对拍 |
+| **Go 侧「非空值 >2048」时的逐字节响应** | ✅ **已验**（2026-10-25 第五轮，**双侧活体对拍**） | Go 侧用**真** `httpx.Parse`（`maxFormParamCount=2048` 真生效）⇒ 2049 个非空值 ⇒ **200 + `{code:5003,msg:"参数错误",data:null}`**；RAG 侧走**真 HTTP** ⇒ **逐字节相同** ⇒ 探针 `tools/api-envelope-probe/favorite/`（EXIT=0）⇒ 见 §2.2 第 1 条 |
 | 真实 gRPC 链路上的 description 保真 | ✅ **已验**（2026-10-25 第四轮） | `FavoriteGrpcErrorWireFidelityTest`（**4 例**，`favorite-common`，**真 in-process gRPC**）⇒ description 与 `FavoriteErrorMessages.getMsg(码)` **逐字节相同**、经 `bizCodeFromError` **能还原回原业务码**（含唯一只能靠文案反查的 **5304**）、标准 gRPC 码在链路上保真 ⇒ **变异**（去掉 `withDescription`）⇒ **3 例转红** ⇒ 不是假绿 |
 | Go 侧 `httpx.Parse` 的入参解析矩阵 | ✅ **已验** | RAG 侧的 DTO 注释记录了 go-zero v1.10.2 真源探针的实测矩阵（缺席/null/类型不符/空串/重复参数/key 大小写），并由 `FavoriteApiInputContractTest`（33 例）守住 |
 | `goFormFirstValue` 的两段语义 | ✅ **已验** | 「先滤空值、再取首值」逐条复刻（`FavoriteApiSupport:327-350`），重复参数 `?folderId=123&folderId=456` ⇒ Go 123 / Spring 逗号拼接会失败 —— 两者已刻意分开 |
@@ -253,13 +294,18 @@ cd /Users/pr/Documents/java&golang/RAG.worktrees/favorite   # align/favorite 工
 mvn -o -pl service/favorite/favorite-proto,service/favorite/favorite-common,\
 service/favorite/favorite-rpc,service/favorite/favorite-api -am install
 
-# 全量测试（favorite-api 84 例：33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + 8 真 Tomcat 门禁）
+# 全量测试（favorite-api 89 例：33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + 8 真 Tomcat 门禁 + 5 响应字节对拍）
 mvn -o -pl service/favorite/favorite-api test
 
 # 单类
 mvn -o -pl service/favorite/favorite-api test -Dtest='FavoriteApiProtectionWiringTest'
 mvn -o -pl service/favorite/favorite-api test -Dtest='FavoriteRpcClientTimeoutTest'
 mvn -o -pl service/favorite/favorite-api test -Dtest='FavoriteApiRealTomcatGateTest'   # 真 Tomcat
+mvn -o -pl service/favorite/favorite-api test -Dtest='FavoriteApiEnvelopeParityTest'     # 响应字节对拍
+
+# 🔴 响应字节的双侧活体对拍（Go 真 go-zero 库 vs RAG 真 advice + 真 HTTP）
+bash tools/api-envelope-probe/favorite/run.sh
+echo $?   # 0 = 10 组 CASE + 1 组 OBS 全部符合冻结期望
 ```
 
 > ⚠️ `FavoriteApiMvcPipelineTest` 走的是 **MockMvc** ⇒ **不覆盖 servlet filter 链**。
