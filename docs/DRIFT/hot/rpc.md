@@ -1,4 +1,24 @@
 <!-- @move AGENTS.md L1392-L1443 · §0 hot-rpc 首次实现 -->
+
+> 🟥 **2026-10-24 第十一轮后回填（本文件头部此前停在第一/第二轮口径）**：
+> 本文件下半部分各轮的记录**一条未删**（历史快照价值），但**头部与若干跨轮表格**一度严重过期
+> ——例如「剩余未闭合项集中在真 Redis / 真 Kafka 集成测试」「topic/group/offset 未做自动化断言」
+> 「Redis keyspace 无 IT」这几条，在写下时全部为真，**到第十一轮已全部被推翻**。
+> ⇒ 当前状态一律以**文件末尾「第十一轮」一节** + 本条回填为准。
+
+**归属**：`align/hot` 工作树产出（`RAG.worktrees/hot`）；基线 = `do-my-own-gh` @ `8422116` 之后的分支点。
+**核对日期**：2026-10-24（**第十一轮**：D1 双侧活体对拍闭合 + U7 闭合 + hot 域 U9 系统变异 25/25）
+**当前证据强度**（按 AGENTS.md §3.3 口径 · 截至第十一轮）：
+
+| 档 | 已取得 | 说明 |
+|---|---|---|
+| ✅ **双侧活体对拍（完整栈）** | **10 组 top_k 逐字节一致** | 真 Kafka（1 broker / 3 分区）+ **2 个真 Redis**（Go 23979 / RAG 23980，因两侧 key 硬编码）+ 真 gRPC（Go 23983 / RAG 23984）+ **自造栅栏**（两侧 group-id 不同 ⇒ 进度天然不对称）⇒ sha256 逐条相同 |
+| ✅ **真 Redis IT** | **12 例**（`HotRedisLuaGateTest`） | 4 段 Lua 逐段行为、**两个 TTL**、`RENAME` 原子性、`EXISTS` 守卫、生产 `flush()` / `loadInto()` / 合并求和路径 |
+| ✅ **真 Kafka IT** | **4 例**（`HotKafkaConsumerGateTest`） | drop 契约、位点推进、零重试 handler 的**实际效果**、RoundRobin 的**实际分配** |
+| ✅ **装配层** | listener 真进容器 registry + group-id 实测 | `HotRpcSpringContextWiringTest` 断言容器**实际 groupId** = `article-hot-group`（Go `KqConsumerConf.Group`） |
+| ✅ **变异验证** | hot-rpc **10/10** + hot-common **4/4** | 第十一轮系统变异；**查出并修补 2 处真实守门缺口**（合并 >100 截断层 / 桶冲突 uint32 衰减概率） |
+| ✅ **契约测试** | **86 条**（基线 84 + 第十一轮新增 2） | 全绿 |
+
 ### ✅ `service/hot/hot-rpc`：已从「13 个 12 行空骨架」落地，Go ↔ Java **双侧对拍逐字节一致**（2026-10-22 晚）
 
 > **§0「从未验证」清单里 `hot` 一项的第二块收口**（第一块是 `hot-common`）。
@@ -115,8 +135,8 @@ Go 侧范围：`service/hot/rpc/`（`hot.go` 75 行 + `etc/`×3 + `internal/{con
 | `TopK` 归一 `≤0→20` / `>100→100` | `:35-40` | `HotRankingQueryService` | `HotRankingQueryServiceTest`（verify 读取范围 `0,19` / `0,99`） |
 | `uint32(z.Score)` **向零截断** | `:62` | `HeavyKeeper.scoreToCount` | `HeavyKeeperUint32OverflowTest` |
 | `redis.Nil` → 空列表不报错 | `:45-48` | Spring 返空集合，天然等价 | `missingKeyReturnsEmptyListWithoutError` |
-| topic / group / offset | `hot.yaml` | `spring.kafka.*` | 配置文件（未做自动化断言） |
-| Redis keyspace 5 个 + 两个 TTL | `hot_handler.go:208,209,390,25` | `HotRedisSnapshotStore` / `HotMergeScheduler` | ⚠️ **无 IT**，见 6.8.6 #5 |
+| topic / group / offset | `hot.yaml`（三份一致：`Topic: article-hot-events` / `Group: article-hot-group`） | `spring.kafka.*`（`hot-rpc.kafka.topic: article-hot-events` / `spring.kafka.consumer.group-id: article-hot-group` / `auto-offset-reset: latest`） | 🟥 **已补断言（第十一轮）**：**group-id** 由 `HotRpcSpringContextWiringTest` 断言容器**实际 groupId** = `article-hot-group`（不是断言配置项字符串）；**offset**（Go `sarama.OffsetNewest` ⇒ `latest`）由 `HotKafkaConsumerGateTest` 的真实 Kafka 行为覆盖；**topic** 由第十一轮 D1 双侧活体对拍覆盖（两侧消费**同一个** `article-hot-events` topic 的同一批消息，消息被两侧都消费到 ⇒ topic 字面量若不一致则 RAG 侧收不到） |
+| Redis keyspace 5 个 + 两个 TTL | `hot_handler.go:208,209,390,25` | `HotRedisSnapshotStore` / `HotMergeScheduler` | 🟥 **已补 IT（第四轮）**：`HotRedisLuaGateTest`（**12 例，真 Redis**）覆盖 4 段 Lua 逐段行为、`RENAME` 原子性、`EXISTS` 守卫、**两个 TTL 不同**（分片 300 硬编码 vs 大 key = `Interaction.TTL`）、生产 `flush()` / `loadInto()` / 合并求和路径 ⇒ 原文「无 IT」**已过期** |
 | 指标名 `article_hot_{kafka_consume,redis_sync}_total` | `hot_handler.go:30-45` | `HotRpcMetrics` | 变异 M9（改名字即 3 条红） |
 
 ⚠️ **`UNKNOWN` 不是 `INTERNAL`，这条极易被 message-rpc 的模板带偏**：
@@ -213,6 +233,7 @@ Go 形态：`Lock()` → 内部函数 `RLock()` ⇒ `sync.RWMutex` 不可重入 
 
 > **范围**：Go `service/hot/rpc/`（+ 强依赖 `service/hot/heavykeeper/`） ↔ RAG `service/hot/hot-rpc/`。
 > **核对日期**：2026-10-23（第二轮验证；第一轮 = 2026-10-22 首次实现记录，见本文件上半部分）。
+> ⚠️ **本行的「核对日期」只覆盖第二轮** —— 后续第三~六轮与第十一轮的结论见本文件对应章节与文件头部快照。
 > **方法论**：`.agents/specs/semantic-verification-prompt.md` 全部 40 章 + 本项目 8 条硬约束。
 > **只读边界**：本轮**未修改任何源码**，只改本文件与 `docs/Pitfalls/hot/rpc.md`。
 > 探针全部落在 `/tmp/hk-verify-20261023/`（Go 侧 `go.mod` 用 `replace` 指向真源，**Go 仓零改动**）。
@@ -877,6 +898,11 @@ SEMANTICALLY NOT EQUIVALENT
 **第二轮的 `SEMANTICALLY NOT EQUIVALENT` 判定里，最重的一条（DRIFT-HOTRPC-001）已修并双侧活体对拍通过；
 另修一条并发语义漂移（-003）；两条需要「决策」的（-004 / -006）已签字。**
 ⇒ 本组件**核心算法层**已对齐真源；**剩余未闭合项集中在「真 Redis / 真 Kafka 集成测试」**。
+🟥 **2026-10-24 第十一轮订正：这一句已过期** —— **第四轮**已取得真 Redis（12 例）+ 真 Kafka（4 例）IT，
+**第十一轮**又取得**完整双栈对拍**（真 Kafka + 2×真 Redis + 真 gRPC + 栅栏 ⇒ 10 组 top_k 逐字节一致）
+⇒ 集成测试这条路**已走完**，不再是剩余项。当前 hot-rpc 的未闭合项只剩**域外**的：
+`DRIFT-HOTRPC-005`（Kafka 位点提交节奏，⏸ 登记不修）+ `DRIFT-HOTRPC-007`（装配层证据缺口，已补测试）
++ 已签字的 004 / 006 / 009 / 010。
 
 ## 逐条处置
 
@@ -1499,6 +1525,9 @@ P22 要求：判「守门缺口」之前必须先证伪「变异本身是 no-op�
 
 ⇒ 补测后 hot-rpc 基线 **86 条**（84 + 新增 2），**三个原本「没变红」的变异点现已 10/10 全被抓住**；
 连同 hot-common 的 4/4 ⇒ **hot 域三个模块合计 24/24 变异点全部有守门**。
+🟥 **2026-10-24 订正：这个 24/24 是本轮写下时的数** —— 同日 hot-api 侧又补了 **M11**（补全预算的绝对 deadline，
+因 U5-OPEN-1 闭合而新增）⇒ **hot 域合计应为 25/25**（hot-api 11 + hot-rpc 10 + hot-common 4）。
+⇒ 以 `docs/DRIFT/hot/api.md` 的 **25/25** 口径为准。
 
 ## 六、连带查出的 3 条**编排级**踩坑（不是产品缺陷，但会伪装成产品缺陷）
 

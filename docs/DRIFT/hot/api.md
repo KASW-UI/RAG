@@ -3,20 +3,31 @@
 > ⚠️ **本文件此前的全部内容只有一句否定式断言**（「13 个文件全是空骨架」）。
 > 2026-10-23 该模块完成首次实现并做了首轮 Go ↔ RAG 对照，本文件已整体重写。
 > 2026-10-23 第二轮（组件级验证，见下文第 11~13 节）在此基础上**增量追加**，历史条目与编号一条未删。
+>
+> 🟥 **2026-10-24 第十一轮后回填（本节的「核对日期」与「证据强度表」此前停在第六轮）**：
+> 下方「语义对照逐项结论」之前的头部**一度严重过期**（写着「D9/U5 仍未做」「变异验证仍未做」、
+> 「hot-rpc 自身的端到端对拍仍未做」）⇒ **这些断言在写下时全部为真，到第十一轮已全部被推翻**。
+> 本次回填只改**头部**；**正文里各轮的原始记录一条未删**（历史快照价值），逐条订正以就近的
+> 🟥 复核批注 + 各轮章节为准。
 
-**核对日期**：2026-10-24（第六轮，5 条签字落地：017 / 019 / 020 / 024 + D6）
+**归属**：`align/hot` 工作树产出（`RAG.worktrees/hot`）；基线 = `do-my-own-gh` @ `8422116` 之后的分支点。
+**核对日期**：2026-10-24（**第十一轮**：hot-rpc D1 闭合 + U7 闭合 + hot 域 U9 系统变异 25/25 + U5-OPEN-1 闭合）
 **真源**：`Sea-RideTheWind_golang/service/hot/api` @ go-zero **v1.10.2**（`go.mod:17`，已核对 module cache 里同时存在 v1.10.0/v1.10.3，**本文件所有行号一律以 v1.10.2 为准**）
-**本轮证据强度**（按 AGENTS.md §3.3 口径）：
+**当前证据强度**（按 AGENTS.md §3.3 口径 · 截至第十一轮）：
 
-| 档 | 本轮用到的 | 说明 |
+| 档 | 已取得 | 说明 |
 |---|---|---|
-| ✅ **双侧活体对拍** | **29 条端到端用例 + 输入上限探针** | 两套 HTTP 栈**同时拉起**，逐字节比**响应体 + 关键响应头**；另有**下游调用序列**比对。详见「第五轮」一节 |
-| ✅ **Go 侧活体探针** | 15 条 form 解析用例 + 25 条分页/归一化用例 + 3 组 wire 字节 | 直接调用真源 `httpx`/`jsonx` 与逐字复制的真实 struct，**跑起来了**（第二轮） |
+| ✅ **双侧活体对拍** | **hot-api 29 条端到端用例**（第五轮）+ **hot-rpc 10 组 top_k 逐字节**（第十一轮） | 两套 HTTP 栈 / 两套 gRPC 栈**同时拉起**，逐字节比**响应体 + 关键响应头**；hot-rpc 侧为**真 Kafka + 2×真 Redis + 真 gRPC** |
+| ✅ **真中间件活体** | 真 Redis（12 例）、真 Kafka（4 例）、真 Tomcat、**真 PG 不适用** | hot-rpc 侧另在第十一轮取得「真 Kafka + 2×Redis + 自造栅栏」的**完整双栈对拍** |
+| ✅ **Go 侧活体探针** | 15 条 form 解析 + 25 条分页/归一化 + 3 组 wire 字节 | 直接调用真源 `httpx`/`jsonx` 与逐字复制的真实 struct，**跑起来了**（第二轮） |
 | ✅ **RAG 侧真实上下文探针** | 同矩阵 MockMvc + `@SpringBootTest` 真 Boot 上下文 | 复用**项目真实的** mapper / advice / controller，非自建（第二轮） |
 | ✅ **双侧差分** | 分页/归一化 25 行 `diff` 输出为空 | 两侧同输入同函数，逐行相同（第二轮） |
-| ⚠️ **静态源码** | 保护层四闸、breaker | 两侧都读了消费点，但**无活体观测**（D9/U5 仍未做） |
-| ❌ **真 PG / 真 Redis / 真 Kafka** | 不适用 | 本组件无 DB、无 Redis、无 MQ、无事务、无缓存。⚠️ 本轮下游是**桩** ⇒ **hot-rpc 自身**的行为不在覆盖范围 |
-| ❌ **变异验证** | 仍未做（系统级） | 已对**新增的修复**做定向变异；见 D2 |
+| ⚠️ **静态源码（平台不可达部分）** | **CpuShedding 四闸之一** | darwin 上 Go 侧 `CpuUsage()` 恒 0 ⇒ **结构性不可达** ⇒ 只能「源码逐条对照 + go-zero 上游自带测试 + RAG 侧 10 例同场景单测」取证（见 U5） |
+| ✅ **变异验证** | **hot 域合计 25/25 变异点全部被守门抓到** | hot-api **11**（第十轮 10 + 第十一轮 M11）/ hot-rpc **10** / hot-common **4**；守门缺口 **3 处**已补（`page_size=51`、合并 >100 截断层、桶冲突 uint32 衰减） |
+| ❌ **真 PG** | 不适用 | 本组件无 DB、无事务、无缓存 |
+
+> ⚠️ **「绿测试」≠「已验证」**（AGENTS.md §0）：本轮所有修复都是在**测试全绿 / 编译通过**的状态下做的
+> ⇒ 「已修」一律读作「**在该证据强度下一致**」。
 
 ---
 
@@ -35,9 +46,9 @@
 |---|---|
 | 代码是否落地 | ✅ 是 |
 | Go ↔ RAG **源码级**对照是否做过 | ✅ 是（逐行读 Go 到控制流级，非只贴声明行） |
-| Java 侧行为是否有断言钉住 | ✅ 是（59 例，含真实 MVC 管线 + 真实 stub 捕获） |
+| Java 侧行为是否有断言钉住 | ✅ 是（**首轮 59 例**；🟥 **截至第十一轮 = 87 条**，含真实 MVC 管线 + 真实 stub 捕获 + 真 Kafka/Redis 门禁） |
 | **双侧活体对拍**（Go 栈真跑起来逐项比对） | ✅ **已做**（2026-10-24 第五轮，29 条端到端用例）—— **但查出 4 条新漂移**（D21~D24），且**推翻了第二轮 4 条 ✅ 结论** |
-| **变异验证**（证明测试不是假绿） | ❌ **未做** |
+| **变异验证**（证明测试不是假绿） | ❌ **未做** 🟥 **2026-10-24 第十/十一轮：已闭合** —— hot-api 11 + hot-rpc 10 + hot-common 4 = **hot 域 25/25 变异点全部被守门抓到**；过程中查出并修补 **3 处真实守门缺口** |
 | **真 PG / 真 Redis / 真 Kafka** | ➖ 本模块**不涉及**（无 DB、无 Redis、无 MQ、无事务、无缓存） |
 
 ⇒ 逐条状态以本文件为准，**不得**据此断言「hot-api 与 Go 语义等价」。
@@ -80,10 +91,10 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | 17 | `PublicOnly=true` / `IncrView=false` / 不带 `RequesterId` | `logic:132-136` + `_test.go:35-37` | `ArticleRpcClient` facade 硬编码 | ✅ **捕获型拦截器读真实下发的请求**（非 mock 数据层） |
 | 18 | gRPC **2s** per-call deadline | `zrpc/config.go:31` → `timeoutinterceptor.go:20-25` | `GoStyleGrpcCallDeadline`（min(2s, 请求剩余预算)） | ✅ 读真实 `CallOptions.getDeadline()` |
 | 19 | **不加 retry** | `zrpc.RpcClientConf` 无 `Retries` 字段 | 无 retry 配置 | ✅ 读到配置定义 |
-| 20 | client 熔断默认开启 | `zrpc/internal/config.go:14` | `com.rag.common.protection` 全局拦截器 | ⚠️ **静态**：扫到 `com.rag.common` 即生效，未做活体验证 |
-| 21 | HTTP **3s** 超时 | `rest/config.go:55`（tag 默认，yaml 未写） | `observability.http-timeout: 3s` | ⚠️ **未活体验证**：未观测到真实 503 + `Request Timeout` |
-| 22 | 请求保护层四闸默认开启 | `rest/config.go:12-22,52-56` | `rag.protection.*`（1 MiB / 10000 / 900 / breaker） | ⚠️ **未活体验证**：未构造超限请求 |
-| 23 | 5 个指标名 + 标签字面量 | `metrics/metrics.go:13-43` | `HotApiMetrics` | ✅ Java 侧断言；⚠️ Prometheus 实际导出**未验** |
+| 20 | client 熔断默认开启 | `zrpc/internal/config.go:14` | `com.rag.common.protection` 全局拦截器 | 🟥 **已升级为活体（第十轮）**：装配层 3 例 + **行为层 E2E**（内嵌恒返 INTERNAL 的 gRPC server ⇒ 判据是「**下游调用次数停止增长**」）⇒ 熔断**真的打开**已被坐实；变异验证变红 ✅ |
+| 21 | HTTP **3s** 超时 | `rest/config.go:55`（tag 默认，yaml 未写） | `observability.http-timeout: 3s` | 🟥 **已升级为活体（第五轮 CASE-21）**：article-rpc 睡 30s 把请求拖过 3s ⇒ 两侧**都**产出 `503 + "Request Timeout\n"`（body 逐字节同），**只差 `nosniff`**（= D14，跨域 common） |
+| 22 | 请求保护层四闸默认开启 | `rest/config.go:12-22,52-56` | `rag.protection.*`（1 MiB / 10000 / 900 / breaker） | 🟥 **已升级为活体（第八轮）**：**三闸双侧坐实**（MaxBytes 超限 ⇒ 两侧 `413` 空 body 无 Content-Type；MaxConns 同阈值 8 ⇒ 两侧各 8 个裸 503；Breaker ⇒ 两侧都真打开）；🔴 **CpuShedding 在 darwin 上 Go 侧结构性不可达**（`//go:build !linux` ⇒ `CpuUsage()` 恒 0）⇒ 该闸只能静态 + go-zero 上游测试取证 |
+| 23 | 5 个指标名 + 标签字面量 | `metrics/metrics.go:13-43` | `HotApiMetrics` | 🟥 **已升级为活体（第四轮 U11）**：真 `/actuator/prometheus` ⇒ 实测 RAG **80** 个 `le` 边界 vs Go 的 **12** ⇒ 查出 **DRIFT-HOTAPI-018**（**已修**，去掉 `publishPercentileHistogram()` ⇒ 复测回到 12 个、数值逐条一致） |
 | 24 | `hot_api_reject_total` 零触发点 | `metrics.go:65-67` | 注册但**不补触发点** | ✅ 保持 Go 形态 |
 | 25 | `secondary_tags` 空时是 `null` 不是 `[]` | Go proto3 nil slice + tag 无 `omitempty` | 构造处显式置 null | ✅ 裸 `ObjectMapper` 断言 |
 | 26 | `hot_score` 是 **uint32** | `hot.proto:17` | `long` + `Integer.toUnsignedLong` | ✅ 对 `0xFFFFFFFF` → `4294967295` 断言 |
@@ -148,19 +159,25 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 
 ## 与已完成的 hot 域两组件的关系
 
+> 🟥 **2026-10-24 第十一轮回填**：本表原写「hot-api 端到端 HTTP 栈未对拍」「hot-api 是证据强度最弱的一个」
+> ⇒ **第五轮已做**（29 条端到端用例，双栈同时拉起）；**第十一轮 hot-rpc 也补齐了端到端对拍**（真 Kafka + 2×Redis + 真 gRPC）
+> ⇒ **hot 域三组件现在全部拿到双侧活体对拍**。
+
 | 组件 | 状态 | 台账 |
 |---|---|---|
-| `hot-common` | ✅ 双侧对拍 sha256 逐字节一致 | [`common.md`](common.md) |
-| `hot-rpc` | ✅ 双侧对拍逐字节一致，46 条契约测试 | [`rpc.md`](rpc.md) |
-| **`hot-api`** | ⚠️ **已实现**（16 文件 / 2,088 行 / 59 例绿）+ **解析层/分页层/wire 层已双侧探针对拍**（15+25+3 组），**端到端 HTTP 栈未对拍** | **本文件** |
+| `hot-common` | ✅ 双侧对拍 sha256 逐字节一致（14 条契约 + 4 个变异点全红） | [`common.md`](common.md) |
+| `hot-rpc` | ✅ 双侧活体对拍逐字节一致（**第十一轮**：真 Kafka + 2×真 Redis + 真 gRPC，10 组 top_k 全同），86 条契约测试 | [`rpc.md`](rpc.md) |
+| **`hot-api`** | ✅ **端到端 HTTP 栈已对拍**（第五轮 29 条用例，24/29 + 修正配方 28/29）+ **解析层/分页层/wire 层双侧探针对拍**（15+25+3 组），87 条测试 | **本文件** |
 
-⇒ hot 域三组件**代码均已落地**；`hot-api` 是其中**证据强度最弱**的一个
-（另两个是双侧对拍逐字节一致，它是「双侧探针（分层）+ Java 侧单测」，缺端到端）。
+⇒ hot 域三组件**代码均已落地且全部拿到双侧活体对拍**；
+⚠️ 剩下的不是「hot-api 证据最弱」，而是**域外**的三条：跨域移交的 D14（nosniff）/ D25（499）/ D27（MaxConns）
++ 全仓约定待拍板的 D21 / D22 / D23。
 
 ## 尚未处理
 
 - 本模块的 `HUMAN_ONLY.MD`
-- D1（端到端双侧活体对拍）—— **这是 hot 域收口的最后一块实质工作**
+- ~~D1（端到端双侧活体对拍）—— 这是 hot 域收口的最后一块实质工作~~ ⇒ ✅ **第五轮已闭合**（hot-api 侧）/ **第十一轮已闭合**（hot-rpc 侧）
+- 剩余未闭合项**全部**落在域外：跨域移交 **D14 / D25 / D27**（代码在 `service/common`）+ 全仓约定待拍板 **D21 / D22 / D23**（Tomcat 三旋钮，影响全部 10 个 api 模块）
 
 ---
 ---
@@ -325,12 +342,12 @@ Lifecycle:      executor 由容器 destroyMethod 关闭
 | GET | 按下标保序 | `hydrated[idx]=` | 下标数组 | EQUIVALENT | 静态 + RAG 乱序断言 |
 | GET | gRPC deadline | 2s 且嵌套于 3s | min(2s, 剩余预算) | EQUIVALENT | 静态（两侧都读到消费点） |
 | GET | 无 retry | 无 Retries 字段 | 无 | EQUIVALENT | 静态 |
-| GET | client breaker | 默认开 | 全局拦截器 | **UNKNOWN** | 静态；未活体验证（D8） |
+| GET | client breaker | 默认开 | 全局拦截器 | ✅ **已闭合（第十轮）** | 🟥 原标 UNKNOWN：**第十轮**取得行为级 E2E 证据（内嵌恒返 INTERNAL 的 gRPC server ⇒ 判据是「**下游调用次数停止增长**」）⇒ 熔断真的打开已被坐实；装配层 3 例另有 `GoStyleGrpcClientBreakerWiringTest` |
 | GET | HTTP 超时时长 | 3s | 3s | EQUIVALENT | 静态 |
-| GET | 超时出口状态码/体 | 503 + `Request Timeout\n` | 503 + 同体 | EQUIVALENT | 静态；未活体观测（D9） |
+| GET | 超时出口状态码/体 | 503 + `Request Timeout\n` | 503 + 同体 | EQUIVALENT | 🟥 原写「未活体观测」：**第五轮 CASE-21** 已活体坐实（article-rpc 睡 30s 拖过 3s ⇒ 两侧状态码与 body 逐字节同，**只差 `nosniff`** = D14）|
 | GET | **超时/499 响应头 nosniff** | **有** | **无** | **OBSERVABLE DIFFERENCE** | 静态双侧 |
-| GET | 断连 499 | `errors.Is(Canceled)`→499 | IOException→499 | **UNKNOWN** | 静态；需活体（D3） |
-| GET | 保护层四闸 | 默认开（tag） | `rag.protection.*` | **UNKNOWN** | 静态；需活体（D9） |
+| GET | 断连 499 | `errors.Is(Canceled)`→499 | IOException→499 | **NOT EQUIVALENT** | 🟥 原标 UNKNOWN：**第七轮**已活体坐实（裸 socket + `SO_LINGER=0` 强制 RST ⇒ Go 侧 8 个在飞 gRPC 在断连后 1~3ms 全部取消、**日志有 `[HTTP] 499`**；RAG 侧**等 2s deadline**、断连后继续发下游调用、**无任何 499 记录**）⇒ **D3 坐实** + 产出 `DRIFT-HOTAPI-025`（代码在 `service/common` ⇒ 跨域）|
+| GET | 保护层四闸 | 默认开（tag） | `rag.protection.*` | ✅ **三闸已闭合（第八轮）** | 🟥 原标 UNKNOWN：**MaxBytes / MaxConns / Breaker 三闸双侧活体坐实**；🔴 **CpuShedding 在 darwin 上 Go 侧结构性不可达**（`//go:build !linux` ⇒ `CpuUsage()` 恒 0）⇒ 该闸只能静态 + go-zero 上游测试取证 |
 | GET | 指标名/标签 | 5 个 collector | 5 个 Micrometer meter | EQUIVALENT | 静态 + RAG 断言 |
 | GET | 指标暴露 | 无端点 | /actuator/prometheus | OBSERVABLE DIFFERENCE（**有意单向增强**，已签字 D5） | 静态 |
 | — | Transaction boundary | 无事务 | 无事务 | EQUIVALENT | — |
@@ -796,6 +813,10 @@ SEMANTICALLY NOT EQUIVALENT
 2. **「已双侧实测」≠「双侧服务同时跑起来对拍」。**
    本轮是**分层双侧探针**（Go 真库 + RAG 真上下文，同输入逐行比对），
    强度高于源码对照、低于端到端对拍（U1/D1 仍未做）。
+   🟥 **2026-10-24 第十一轮订正：这一条已过期** —— **U1 与 D1 均已闭合**：
+   U1 = 第五轮 29 条端到端用例（两套 HTTP 栈同时拉起）；D1 = 第十一轮 hot-rpc 双侧活体对拍
+   （真 Kafka + 2×真 Redis + 真 gRPC）。⇒ 本条**当时成立、现已不适用**，
+   当前 hot 域的证据强度以文件头部「当前证据强度」表为准。
 3. **RAG 侧证据的 mapper 依赖已暴露一次假绿（DRIFT-HOTAPI-015-B）。**
    凡本文件标 ✅ 的 RAG 行，均注明了**用的是哪个 mapper / 哪套上下文**；
    未注明的仍按 AGENTS.md §3.3 记 `UNKNOWN`。
@@ -1167,7 +1188,7 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 | **Prometheus 分桶边界**（DRIFT-HOTAPI-018） | ✅ **本轮已闭合** | 真 Actuator 实测：`publishPercentileHistogram()` 会塞进 69 个 exponential 边界 ⇒ 实测 80 个 vs Go 的 12 个 ⇒ **已修**，3 条变异全红 |
 | **真 Tomcat 响应头 / percent-encoding**（U6/U8/D14） | ✅ **本轮已闭合** | 真 Tomcat（RANDOM_PORT）下：404 = `404 page not found\n` + `text/plain` + `nosniff`；405 = 裸状态码 + `Allow`、无 body；`%2B5` ⇒ 解码成 `+5` ⇒ `page=5`（两侧等价）。⚠️ D14 本身仍**跨域移交** common 域（那是超时/499 路径，不是 404/405） |
 | **Prometheus 导出形态**（U11） | ✅ **本轮已闭合** | 真 `/actuator/prometheus`：Counter 名 `hot_api_request_total`（**两侧都是单 `_total`**，原注释的「双 `_total`」说法已被实测推翻并订正） |
-| **client breaker 装配层**（U4/D8） | 🟡 **部分闭合** | hot-api 此前**没有** wiring 测试（而 `follow-api` / `message-api` 各有一份）⇒ 本轮新增 `GoStyleGrpcClientBreakerWiringTest`（3 例）+ 变异 M-W1 变红。⚠️ **「熔断真的打开」的行为级证据仍未做**（需内嵌恒返 INTERNAL 的 gRPC server，参照 message-api 的 E2E 范式） |
+| **client breaker 装配层**（U4/D8） | ✅ **已闭合（第十轮）** | hot-api 此前**没有** wiring 测试（而 `follow-api` / `message-api` 各有一份）⇒ 第四轮新增 `GoStyleGrpcClientBreakerWiringTest`（3 例）+ 变异 M-W1 变红（**装配层**）；🟥 **第十轮补齐行为层**：`GoStyleGrpcClientBreakerE2ETest` 内嵌恒返 INTERNAL 的 gRPC server，判据是「**下游调用次数停止增长**」（hot-api 响应体前后都是 5001，**看不出**熔断）⇒ **「熔断真的打开」已被行为级证据坐实**；变异（`if (!breaker.accept())` → `&& Boolean.FALSE`）变红 ✅。⚠️ 第十二轮附带修：该测试阶段 F 的**比率型断言**改为**直接计数**（P-HOTAPI-23） |
 | **全局 `application` 标签**（DRIFT-HOTAPI-019） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「保持」⇒ `SD-HOT-API-007`：全仓统一配了同一项 ⇒ hot-api 单独去掉会成为**唯一例外** |
 | **Nacos 服务注册**（DRIFT-HOTAPI-020） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「保持」⇒ `SD-HOT-API-008`。⚠️ 签字即接受残留风险：「Nacos 不可达 ⇒ hot-api 起不来」（实测 `ErrCode:-401`）；缓解手段 = `register-enabled=false` |
 | **日志面已对齐的部分** | ✅ **本轮闭合** | `DRIFT-HOTAPI-016` 已修（`CodeError.Error()` 整串 + 日志级别 + 字段集），3 条变异全红 |
@@ -1370,10 +1391,11 @@ percent-encoding 两侧**确实**逐字节一致。）
 ## 6. 本轮**未**覆盖（不得读成「hot-api 全部闭合」）
 
 > ⚠️ **本节已于 2026-10-24 第十轮刷新**（原表里三行写着「未做」但其实已闭合 ⇒ 陈旧状态订正）。
+> 🟥 **2026-10-24 第十一轮再订正**：表里第一行「hot-rpc 自身的端到端对拍 ❌ 仍未做」**已过期** ⇒ **第十一轮已闭合**。
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| **hot-rpc 自身的端到端对拍** | ❌ **仍未做** | 下游是桩 ⇒ hot-rpc 的行为（Kafka 消费、Redis 快照、TopK 语义）**不在覆盖范围** ⇒ 属 `hot/rpc.md` 的 D1。⚠️ **可行性已查清并写成可接手清单**（见文末「hot-rpc D1」节：两侧 Redis key 硬编码 ⇒ 必须 2 个 Redis；Kafka 消费进度不对称 ⇒ 需自造栅栏） |
+| **hot-rpc 自身的端到端对拍** | ✅ **已闭合（第十一轮）** | 走通了文末「hot-rpc D1」节写下的可行性清单：**2 个真 Redis**（Go 23979 / RAG 23980，因两侧 key 硬编码）+ **真 Kafka**（3 分区）+ **自造栅栏**（两侧 group-id 不同 ⇒ 进度天然不对称）+ **真 gRPC**（Go 23983 / RAG 23984）⇒ **10 组 top_k（0/1/5/20/100/101/200/1000/-1/-100）两侧响应逐字节一致**（sha256 相同）；k≤0 ⇒ 回落 20、k>100 ⇒ clamp、items 两侧都 `descending=true`。⚠️ **方法论要点**：事件必须**无桶冲突**，否则随机衰减分支让两侧发散（比出来只有噪声）⇒ 详见 [`hot/rpc.md`](rpc.md) 第十一轮 |
 | **超时 / 保护层四闸的活体观测**（D9/U2/U5） | ✅ **已闭合（第八轮）** | 超时：`CASE-21` ⇒ 两侧 `503 + Request Timeout\n`（body 逐字节同），只差 `nosniff`（= D14，**跨域**）。保护层四闸：**MaxBytes / MaxConns / Breaker 三闸双侧活体坐实**；🔴 **CpuShedding 在 darwin 上 Go 侧结构性不可达**（`//go:build !linux` ⇒ `CpuUsage()` 恒 0）⇒ 只能静态 + go-zero 上游测试取证 |
 | **客户端断连 499**（D3/U3） | ✅ **已闭合（第七轮）** | 裸 socket + `SO_LINGER=0` 强制 RST ⇒ Go 侧 8 个在飞 gRPC 在**断连后 1~3ms** 全部取消、**日志有 `[HTTP] 499`**；RAG 侧**等 2s deadline**、**断连后继续发下游调用**、**无任何 499 记录** ⇒ **D3 坐实** + 产出 **DRIFT-HOTAPI-025**（代码在 `service/common` ⇒ 跨域） |
 | **变异验证**（D2/U9） | ✅ **已闭合（第十轮，组件级）** | hot-api 主干 **10 个系统变异 ⇒ 10/10 全部被守门抓到**（基线 86/0）；并**查出并修补 1 个真实缺口**。✅ 第十一轮已扩展：hot-rpc **10/10**（基线 86）+ hot-common **4/4**（基线 14）⇒ hot 域合计 **25/25**；hot-rpc 侧查出并修补 **2 个真实守门缺口** |
@@ -1682,6 +1704,11 @@ Go 侧 zrpc 的超时是 `zrpc/client.go:70-71` + `TimeoutInterceptor` ⇒ **min
    而系统性变异会扫到**从没被测过的边界**。
 3. ⚠️ **本轮结论的边界**：变异覆盖的是 hot-api 的**主干实现**（分页/信封/补全/参数/deadline），
    **不含** hot-rpc（84 条）与 hot-common（14 条）⇒ 那两个组件的**系统性变异**仍待做。
+   🟥 **2026-10-24 第十一轮订正：这条边界已到期** —— hot-rpc **10 个**（基线 86）+ hot-common **4 个**（基线 14）
+   的系统性变异**已做完且 4/4 + 10/10 全被守门抓到** ⇒ **hot 域合计 25/25**；
+   hot-rpc 侧**查出并修补 2 处真实守门缺口**（合并的 >100 截断层、桶冲突衰减概率的 uint32 语义）
+   ⇒ **这正是「边界到期」的价值**：第十轮在 hot-api 里挖出的 M01 缺口（`page_size=51`），
+   第十一轮在 hot-rpc 里挖出了**同族**的缺口（只断言条数抓不到排序方向）。
 
 ---
 
