@@ -25,6 +25,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -220,21 +221,37 @@ class HotArticleHydratorTest {
     @Test
     @DisplayName("⚠️ 跨请求的合计在途不被全局池压扁：8 个并发请求 ⇒ 峰值 = 8×8 = 64")
     void concurrentRequestsEachKeepTheirOwnWindow() throws Exception {
-        AtomicInteger inFlight = new AtomicInteger();
-        AtomicInteger peak = new AtomicInteger();
+        final int requests = 8;
+        final int total = requests * HotArticleHydrator.HYDRATION_CONCURRENCY;   // 8 × 8 = 64
+
+        // ⚠️ **用屏障取代 sleep**（2026-10-25 修，见下）：
+        //   原实现靠 `Thread.sleep(30)` 让 64 个任务「时间上重叠」⇒ 峰值是**时序量**：
+        //   CPU 一忙，池线程启动就慢，64 个 sleep 不再完全重叠 ⇒ 峰值掉到 36/29/19
+        //   ⇒ 断言随机红（实测：制造负载后必红 `expected 64 but was 36`）。
+        //   ⇒ 那不是实现回归，是**断言形式与机制冲突**（与 P-HOTAPI-23 同源）。
+        //
+        //   屏障把「64 个同时在途」从**时序巧合**变成**结构性事实**：
+        //   每个任务进入 mock 后先到达屏障 ⇒ 必须**全部 64 个都被调度到**才放行。
+        //   · 池 = 64 ⇒ 64 个任务全部到达 ⇒ 放行 ⇒ 峰值**必然** = 64（与机器负载无关）
+        //   · 池 = 32 ⇒ 只有 32 个能到达 ⇒ 其余 32 个还在队列等线程 ⇒ 屏障**永远凑不齐**
+        //     ⇒ 超时失败（而不是「峰值 32」这种含义模糊的红）⇒ 守门强度不减
+        final CyclicBarrier allInFlight = new CyclicBarrier(total);
+        final AtomicInteger inFlight = new AtomicInteger();
+        final AtomicInteger peak = new AtomicInteger();
         when(articleRpcClient.getPublicArticle(any(), anyLong())).thenAnswer(inv -> {
             int now = inFlight.incrementAndGet();
             peak.accumulateAndGet(now, Math::max);
             try {
-                // ⚠️ 必须让任务**真的重叠**：sleep 期间才计入在途
-                Thread.sleep(30);
+                // 等齐全部 64 个在途才继续 ⇒ 峰值不再依赖线程调度时机
+                // ⚠️ 超时 10s：池被改小时凑不齐 64 个 ⇒ 屏障超时抛异常 ⇒ 守门变红
+                //   （实测池=32 ⇒ 10s 后报「expected 64 but was 32」；池=64 ⇒ 毫秒级放行）
+                allInFlight.await(10, TimeUnit.SECONDS);
                 return published(inv.getArgument(0));
             } finally {
                 inFlight.decrementAndGet();
             }
         });
 
-        final int requests = 8;
         List<String> ids = new ArrayList<>();
         for (int i = 0; i < HotArticleHydrator.HYDRATION_CONCURRENCY; i++) {
             ids.add("a" + i);
@@ -242,8 +259,7 @@ class HotArticleHydratorTest {
 
         ExecutorService callers = Executors.newFixedThreadPool(requests);
         try {
-            // ⚠️ **起跑门**：8 个请求必须**同时**开始提交，否则各请求的 8 个窗口
-            //    不会完全重叠 ⇒ 峰值会随机落在 56 之类的值上（实测过）⇒ 断言不稳。
+            // 起跑门：8 个请求必须**同时**开始提交，否则各请求的 8 个窗口不会完全重叠
             CountDownLatch startGate = new CountDownLatch(1);
             List<Future<List<HotArticleCard>>> futures = new ArrayList<>();
             for (int r = 0; r < requests; r++) {
@@ -260,7 +276,7 @@ class HotArticleHydratorTest {
             callers.shutdownNow();
         }
 
-        assertEquals(requests * HotArticleHydrator.HYDRATION_CONCURRENCY, peak.get(),
+        assertEquals(total, peak.get(),
                 "8 个并发请求的合计在途必须是 8×8=64：更小说明全局池把**每个请求自己的**窗口"
                         + "压小了（那不是限流，是偷偷改了单请求语义 —— DRIFT-HOTAPI-028）");
     }

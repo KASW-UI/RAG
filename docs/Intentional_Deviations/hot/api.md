@@ -264,4 +264,10 @@
     `tools/difftest/probe-hot-latency.py` 复测。
 - **守门**：`HotArticleHydratorTest#concurrentRequestsEachKeepTheirOwnWindow`
   断言「8 个并发请求的合计在途 = 64」⇒ **池被改小 ⇒ 立刻变红**（变异验证：32 ⇒ 变红，实测）。
+  🔴 **2026-10-25 修了「测量方式」，守门强度不变**：原实现用 `Thread.sleep(30)` 制造时间重叠 ⇒
+  峰值是**时序量** ⇒ CPU 忙时（全量并行测试正是此时）峰值掉到 36/29 ⇒ 断言随机红
+  （实测：负载下必红，空闲时连跑 3 次全绿）⇒ 那是**断言形式与机制冲突**，不是实现回归。
+  **现改用 `CyclicBarrier(64)`**：全部 64 个任务都被调度到才放行 ⇒
+  峰值**必然** = 64（与机器负载无关）；池=32 ⇒ 屏障凑不齐 ⇒ 超时变红（实测仍报 `expected 64 but was 32` ✅）。
+  ⇒ **签字要求的守门语义（池被改小立刻变红）完整保留**，只是不再对机器负载敏感。
 - **留痕位置**：`docs/DRIFT/hot/api.md` 的 DRIFT-HOTAPI-028。
