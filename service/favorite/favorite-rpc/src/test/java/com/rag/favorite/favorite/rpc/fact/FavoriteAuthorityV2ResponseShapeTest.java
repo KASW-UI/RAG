@@ -266,13 +266,19 @@ class FavoriteAuthorityV2ResponseShapeTest {
                 INSERT INTO favorite_fact_outbox
                     (event_id, favorite_id, aggregate_version, payload, status, retry_count,
                      technical_receipt_id, technical_input_hash, technical_offset,
-                     technical_received_at, delivered_at)
-                VALUES (?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?)
+                     technical_received_at, delivered_at,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 row.getEventId(), row.getFavoriteId(), row.getAggregateVersion(), row.getPayload(),
                 row.getStatus(), row.getRetryCount(), row.getTechnicalReceiptId(),
                 row.getTechnicalInputHash(), row.getTechnicalOffset(),
-                row.getTechnicalReceivedAt(), row.getDeliveredAt());
+                row.getTechnicalReceivedAt(), row.getDeliveredAt(),
+                // 🔴 V7 起 created_at / updated_at **没有 DEFAULT** ⇒ 必须像生产代码那样
+                //    **显式绑应用层时刻**（Go 侧靠 GORM 的 autoCreateTime / autoUpdateTime
+                //    在应用层赋值；这里用同一个 now ⇒ 同源）
+                OffsetDateTime.ofInstant(now, ZoneOffset.UTC),
+                OffsetDateTime.ofInstant(now, ZoneOffset.UTC));
 
         // 🔴 JCS hash 必须是「**库里读回来**的那份字节」的 hash：
         //   payload 列是 jsonb ⇒ PG 会规范化存储 ⇒ 读回时已不是插入时的原始字节。

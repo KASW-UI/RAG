@@ -193,8 +193,10 @@ class FavoriteAuthorityLookupTimeoutTest {
         // 但足以证明「SQL 不慢 ⇒ 不触发超时」。
         jdbcTemplate.update("""
                 INSERT INTO favorite_fact_outbox
-                    (event_id, favorite_id, aggregate_version, payload, status, retry_count)
-                VALUES ('favorite.9002.v1', 9002, 1, '{}'::jsonb, 1, 0)
+                    (event_id, favorite_id, aggregate_version, payload, status, retry_count,
+                     created_at, updated_at)
+                VALUES ('favorite.9002.v1', 9002, 1, '{}'::jsonb, 1, 0,
+                        '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
                 """);
         try {
             MockHttpServletRequest req = request("favorite.9002.v1");

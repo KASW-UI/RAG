@@ -17,6 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -120,8 +122,7 @@ public class FavoriteFactWriteService {
                 envelopeFactory.build(item, 1L, "assert", Instant.now(clock), schema);
 
         // Go: :291-294
-        outboxMapper.insertFact(fact.getEventId(), fact.getFavoriteId(),
-                fact.getAggregateVersion(), fact.getPayload());
+        insertOutboxFact(fact);
     }
 
     /**
@@ -171,8 +172,7 @@ public class FavoriteFactWriteService {
         // Go: :323-329 —— 继承冻结的 schema 造 v2 retract
         FavoriteFactOutboxEntity fact =
                 envelopeFactory.build(item, 2L, "retract", Instant.now(clock), schema);
-        outboxMapper.insertFact(fact.getEventId(), fact.getFavoriteId(),
-                fact.getAggregateVersion(), fact.getPayload());
+        insertOutboxFact(fact);
 
         // Go: :330
         itemMapper.deleteByFavoriteId(favoriteId);
@@ -230,8 +230,7 @@ public class FavoriteFactWriteService {
             }
             FavoriteFactOutboxEntity fact =
                     envelopeFactory.build(item, 2L, "retract", Instant.now(clock), schema);
-            outboxMapper.insertFact(fact.getEventId(), fact.getFavoriteId(),
-                    fact.getAggregateVersion(), fact.getPayload());
+            insertOutboxFact(fact);
         }
 
         // Go: :373-375
@@ -241,6 +240,33 @@ public class FavoriteFactWriteService {
 
         LOG.debug("favorite folder cascade deleted: folder_id={} items={}",
                 folderId, items.size());
+    }
+
+    /**
+     * 对应 Go 的 {@code tx.Create(&fact)}（favorite_fact.go:291-294 / :323-329 / :366-369）。
+     *
+     * <p>🔴 <b>为什么必须显式绑 {@code created_at} / {@code updated_at}</b>（2026-10-25 第七轮修）：
+     * <ul>
+     *   <li><b>Go 出处</b>：{@code internal/model/favorite_fact.go:158-159} 的 struct 字面量
+     *       <b>没有</b>设这两个字段 ⇒ 靠 tag {@code gorm:"autoCreateTime;not null"} /
+     *       {@code gorm:"autoUpdateTime;not null"} ⇒ 由 <b>GORM 在应用层赋值</b>
+     *       （{@code gorm.io/gorm@v1.31.1/callbacks/create.go:302-306}）
+     *       ⇒ 值来自 <b>Go 进程时钟</b>。</li>
+     *   <li><b>修前</b>：INSERT <b>不绑</b>这两列 ⇒ 落到 DDL 的 {@code DEFAULT now()}
+     *       ⇒ 值来自 <b>PG 服务器时钟</b> ⇒ <b>时钟源不同</b>。</li>
+     *   <li><b>为什么算行为差异</b>：{@code created_at} 是取件查询的排序键
+     *       （{@code ORDER BY created_at, event_id}，favorite_delivery.go:141-147）
+     *       ⇒ 应用进程与数据库之间的时钟偏移会让<b>取件顺序</b>产生分歧。</li>
+     * </ul>
+     *
+     * <p>⚠️ 用 {@link Instant#now(Clock)}（可注入时钟）而不是 {@code Instant.now()} ⇒ 可测。
+     * <p>⚠️ 用 {@link ZoneOffset#UTC} 渲染：{@code timestamptz} 存的是绝对时刻 ⇒ 时区只影响显示，
+     * 不影响存储值 ⇒ 显式 UTC 是为了不依赖 JVM 默认时区。
+     */
+    private void insertOutboxFact(FavoriteFactOutboxEntity fact) {
+        OffsetDateTime now = Instant.now(clock).atOffset(ZoneOffset.UTC);
+        outboxMapper.insertFact(fact.getEventId(), fact.getFavoriteId(),
+                fact.getAggregateVersion(), fact.getPayload(), now, now);
     }
 
     /**

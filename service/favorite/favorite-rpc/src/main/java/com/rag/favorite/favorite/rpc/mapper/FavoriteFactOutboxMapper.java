@@ -31,16 +31,32 @@ public interface FavoriteFactOutboxMapper {
      * <p>⚠️ {@code payload} 显式 {@code ::jsonb}：与 DDL 列类型对齐，
      * 也保证写入的是<b>与 Go 完全相同的字节序列</b>（见
      * {@code FavoriteFactOutboxEntity} 的类注释）。
+     *
+     * <p>🔴 {@code created_at} / {@code updated_at} <b>由本方法显式绑定</b>（2026-10-25 第七轮修）。
+     * <p><b>Go 出处</b>：Go 的 struct 字面量<b>没有</b>设 {@code CreatedAt} / {@code UpdatedAt}
+     * （{@code internal/model/favorite_fact.go:158-159}），靠 struct tag
+     * {@code gorm:"autoCreateTime;not null"} / {@code gorm:"autoUpdateTime;not null"}
+     * ⇒ 由 <b>GORM 在应用层赋值</b>（{@code gorm.io/gorm@v1.31.1/callbacks/create.go:302-306}
+     * 的 {@code field.AutoCreateTime > 0} 分支）⇒ <b>值来自 Go 进程时钟</b>。
+     * <p><b>修前的问题</b>：本方法<b>不绑</b>这两列 ⇒ 落到 DDL 的 {@code DEFAULT now()}
+     * ⇒ 值来自 <b>PG 服务器时钟</b> ⇒ <b>时钟源不同</b>（应用进程 vs 数据库）。
+     * <p><b>为什么这是行为差异</b>：{@code created_at} 是取件查询的排序键
+     * （{@code ORDER BY created_at, event_id}）⇒ 两个时钟偏移会让<b>取件顺序</b>产生分歧。
+     * <p><b>修法</b>：显式绑定应用层时钟 ⇒ 与 Go 的 GORM 同源。
      */
     @Insert("""
             INSERT INTO favorite_fact_outbox
-                (event_id, favorite_id, aggregate_version, payload, status, retry_count)
-            VALUES (#{eventId}, #{favoriteId}, #{aggregateVersion}, #{payload}::jsonb, 0, 0)
+                (event_id, favorite_id, aggregate_version, payload, status, retry_count,
+                 created_at, updated_at)
+            VALUES (#{eventId}, #{favoriteId}, #{aggregateVersion}, #{payload}::jsonb, 0, 0,
+                    #{createdAt}, #{updatedAt})
             """)
     int insertFact(@Param("eventId") String eventId,
                    @Param("favoriteId") long favoriteId,
                    @Param("aggregateVersion") long aggregateVersion,
-                   @Param("payload") String payload);
+                   @Param("payload") String payload,
+                   @Param("createdAt") java.time.OffsetDateTime createdAt,
+                   @Param("updatedAt") java.time.OffsetDateTime updatedAt);
 
     /**
      * 🔴🔴 取件查询 —— 对应 Go {@code favorite_delivery.go:141-147}：
@@ -98,16 +114,38 @@ public interface FavoriteFactOutboxMapper {
      * aggregate_version / payload），所以不会被 {@code favorite_fact_identity_immutable}
      * 误伤 —— 这一点是 V5 触发器的安全性前提。
      */
-    @Update("UPDATE favorite_fact_outbox SET status = 3 WHERE event_id = #{eventId}")
-    int markBlocked(@Param("eventId") String eventId);
-
-    /** 对应 Go 投递失败（favorite_delivery.go:176-177）：{@code status=2, retry_count = retry_count + 1}。 */
+    /**
+     * 对应 Go 冻结信封校验失败时的置 blocked（favorite_delivery.go:156-159）：
+     * {@code tx.Model(&FavoriteFactOutbox{}).Where("event_id = ?", ...).Update("status", 3)}。
+     *
+     * <p>🔴 {@code updated_at} <b>必须推进</b>（2026-10-25 第七轮修）：
+     * Go 的 {@code Update(...)} 走 GORM 的 Update 回调 ⇒ {@code autoUpdateTime} 字段
+     * <b>每次 UPDATE 都会刷新</b>（{@code gorm.io/gorm@v1.31.1/callbacks/update.go}
+     * 的 {@code field.AutoUpdateTime > 0} 分支）⇒ 修前 RAG 的这条 UPDATE
+     * <b>根本不碰 {@code updated_at}</b> ⇒ 行会永远停在「插入时刻」的时间戳。
+     */
     @Update("""
             UPDATE favorite_fact_outbox
-            SET status = 2, retry_count = retry_count + 1
+            SET status = 3, updated_at = #{updatedAt}
             WHERE event_id = #{eventId}
             """)
-    int markFailed(@Param("eventId") String eventId);
+    int markBlocked(@Param("eventId") String eventId,
+                    @Param("updatedAt") java.time.OffsetDateTime updatedAt);
+
+    /**
+     * 对应 Go 投递失败（favorite_delivery.go:176-177）：
+     * {@code status=2, retry_count = retry_count + 1}。
+     *
+     * <p>🔴 {@code updated_at} 同 {@link #markBlocked}：Go 侧 GORM 的 {@code autoUpdateTime}
+     * 会刷新它 ⇒ 修前 RAG 漏刷。
+     */
+    @Update("""
+            UPDATE favorite_fact_outbox
+            SET status = 2, retry_count = retry_count + 1, updated_at = #{updatedAt}
+            WHERE event_id = #{eventId}
+            """)
+    int markFailed(@Param("eventId") String eventId,
+                   @Param("updatedAt") java.time.OffsetDateTime updatedAt);
 
     /**
      * 对应 Go 投递成功（favorite_delivery.go:189-192）：
@@ -116,8 +154,12 @@ public interface FavoriteFactOutboxMapper {
      *
      * <p>⚠️ 这 6 列<b>全部</b>是投递元数据列，都不在不可变触发器的清单里。
      *
-     * <p>⚠️ {@code updated_at} 由本方法显式推进；Go 侧靠 GORM 的 {@code autoUpdateTime}
-     * 在每次 UPDATE 时刷新（favorite_delivery.go:191 用的是 {@code Updates(map)}）。
+     * <p>🔴 {@code updated_at} 由本方法<b>显式绑定应用层时钟</b>；Go 侧靠 GORM 的
+     * {@code autoUpdateTime} 在每次 UPDATE 时刷新（favorite_delivery.go:191 用的是
+     * {@code Updates(map)}）。
+     * <p>⚠️ <b>2026-10-25 第七轮修</b>：原实现是 {@code updated_at = now()}
+     * ⇒ 值来自 <b>PG 服务器时钟</b>，而 Go 的 {@code autoUpdateTime} 是
+     * <b>Go 进程时钟</b> ⇒ 时钟源不同 ⇒ 与 {@link #insertFact} 同源的问题。
      */
     @Update("""
             UPDATE favorite_fact_outbox
@@ -127,7 +169,7 @@ public interface FavoriteFactOutboxMapper {
                 technical_offset = #{offset},
                 technical_received_at = #{receivedAt},
                 delivered_at = #{deliveredAt},
-                updated_at = now()
+                updated_at = #{updatedAt}
             WHERE event_id = #{eventId}
             """)
     int markAccepted(@Param("eventId") String eventId,
@@ -135,7 +177,8 @@ public interface FavoriteFactOutboxMapper {
                      @Param("inputHash") String inputHash,
                      @Param("offset") long offset,
                      @Param("receivedAt") java.time.OffsetDateTime receivedAt,
-                     @Param("deliveredAt") java.time.OffsetDateTime deliveredAt);
+                     @Param("deliveredAt") java.time.OffsetDateTime deliveredAt,
+                     @Param("updatedAt") java.time.OffsetDateTime updatedAt);
 
     /**
      * 对应 Go {@code AuthoritativeFavoriteFact} 的按 event_id 取单行

@@ -321,3 +321,55 @@ v2 权威读端点返回的 `subject_ref` 是 **v1 的三字段**（`authority_i
 
 ⇒ 落点：[`../../DRIFT/favorite/rpc.md`](../../DRIFT/favorite/rpc.md) §11.2 + 回归网
 `FavoriteAuthorityV2ResponseShapeTest`（3 例，真 PG 端到端）。
+
+---
+
+## PIT-FAV-RPC-009 · 🕳️ **「DDL 逐列对照」要先确定三件事，否则结论会错**
+
+### 现象
+
+2026-10-25 第七轮做 favorite 域的 DDL 双侧对拍时，**源码级推理连错两次**，
+最后靠**真 PG 活体对拍**才拿到正确结论：
+
+| # | 源码级推理的结论 | 实测结论 |
+|---|---|---|
+| 1 | 「目标 schema = GORM AutoMigrate **∪** 4 个手写 SQL」 | **漏了顺序** —— 顺序会改结果（见下） |
+| 2 | 「001 变 no-op ⇒ 部分索引也没了」 | ❌ **部分索引是独立语句，照样建出来** —— 只有**内联**在 `CREATE TABLE` 里的 CHECK 才丢 |
+
+### 为什么会踩
+
+1. 🔴 **「schema = A ∪ B」这个写法本身就掩盖了顺序**：Go 侧 `InitDB` 只跑 `AutoMigrate`，
+   那 4 个 `.sql` **没有任何 Go 代码执行**（全仓 grep 可证）⇒ 它们是**运维手工执行**的
+   ⇒ 「A ∪ B」到底是「A 后 B」还是「B 后 A」**完全取决于运维动作**。
+2. 🔴 **`CREATE TABLE IF NOT EXISTS` 变 no-op 时，丢的只有表内联的那部分**：
+   `CHECK (...)` / `UNIQUE (...)`（内联）**会丢**；
+   而同文件里**独立的** `CREATE INDEX` **不会丢**。
+   ⇒ 只看 SQL 文本分不出「哪些语句会丢」⇒ **必须真跑一遍**。
+3. ⚠️ **ORM 的 AutoMigrate 不是「只增不改」**：它会**主动删掉**已存在的 DEFAULT
+   （`gorm.io/gorm@v1.31.1/migrator/migrator.go:543-550` 的「default value → null」分支），
+   也会按 struct 顺序**重排列序**（新表场景）。
+
+### 怎么不再踩
+
+⇒ **建 DDL 对拍时，必须先钉住三件事**：
+
+| # | 要钉住什么 | 本域的答案 |
+|---|---|---|
+| 1 | **真源 schema 的来源与执行顺序** | AutoMigrate（应用启动）**之后**才是运维手工跑 4 个 `.sql`？还是之前？⇒ 由真源文档（`DELIVORY_ACCEPTANCE.md:7`）判定 |
+| 2 | **哪些语句在 no-op 时会丢** | 只有**内联**在 `CREATE TABLE` 里的约束会丢；独立的 `CREATE INDEX` / `ALTER` 不会 |
+| 3 | **ORM 自己会改什么** | AutoMigrate 会删 DEFAULT、会重排列序 ⇒ 「DBA 手写的表」经过 ORM 之后**不等于**手写的样子 |
+
+⇒ **探针必须把「顺序」当成变量**：本探针同时跑 `sql-first` 与 `app-first` 两个场景，
+**并把两者的差**原样打印出来 ⇒ 「顺序是行为的一部分」这句话才**有证据**。
+
+⇒ ⚠️ **附带一条**：探针的 dump 要把**语义**与**名字**拆开。
+把对象名混进语义行 ⇒ PG 的自动命名（`..._check`）与显式命名（`..._nonempty`）会**每次都比出一堆假差异**
+⇒ 真差异被淹没 ⇒ 探针变成「红噪声」，没人看。
+⇒ 本探针的做法：`S|` 行只放语义、`N|` 行只放名字，差异**自动分类**为「命名层」与「语义层」。
+
+### 同源的另一条（本轮同时踩到）
+
+**应用层时钟 ≠ 数据库时钟。** Go 的 `autoCreateTime` 是**应用层**赋值，
+而 DDL 上的 `DEFAULT now()` 是**数据库**时钟 ⇒ 两者不是一回事。
+⇒ 「列上有 DEFAULT」**不等于**「这列的值来自 DB」——**取决于应用层有没有显式绑**。
+⇒ 这条让 `favorite_fact_outbox` 的两列时间戳在两侧**时钟源不同**（详见 `docs/DRIFT/favorite/rpc.md` §13.1）。

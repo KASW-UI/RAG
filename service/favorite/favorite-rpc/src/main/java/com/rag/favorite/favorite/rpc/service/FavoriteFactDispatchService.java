@@ -107,7 +107,7 @@ public class FavoriteFactDispatchService {
             FavoriteDeliveryValidator.FrozenEvent event =
                     FavoriteDeliveryValidator.decodeLenient(row.getPayload());
             if (event == null || !deliveryValidator.validDelivery(row, event)) {
-                outboxMapper.markBlocked(row.getEventId());
+                outboxMapper.markBlocked(row.getEventId(), appLayerNow());
                 LOG.atWarn()
                         .addKeyValue("event", "favorite.delivery.blocked")
                         .addKeyValue("event_id", row.getEventId())
@@ -145,7 +145,7 @@ public class FavoriteFactDispatchService {
             if (!receiptOk) {
                 // Go: :172-187 —— status=2 + retry_count+1 + Commit + 返回错误
                 // 🔴 同样**不** setRollbackOnly：重试次数必须落库。
-                outboxMapper.markFailed(row.getEventId());
+                outboxMapper.markFailed(row.getEventId(), appLayerNow());
                 LOG.atWarn()
                         .addKeyValue("event", "favorite.delivery.deferred")
                         .addKeyValue("event_id", row.getEventId())
@@ -157,9 +157,10 @@ public class FavoriteFactDispatchService {
             }
 
             // Go: :188-194 —— status=1 + 5 个回执列 + delivered_at
+            java.time.OffsetDateTime acceptedAt = appLayerNow();
             outboxMapper.markAccepted(row.getEventId(), receipt.receiptId, receipt.inputHash,
                     receipt.offset, receiptCheck.get().atOffset(java.time.ZoneOffset.UTC),
-                    java.time.OffsetDateTime.now(java.time.Clock.systemUTC()));
+                    acceptedAt, acceptedAt);
             LOG.atInfo()
                     .addKeyValue("event", "favorite.delivery.accepted")
                     .addKeyValue("event_id", event.eventId)
@@ -213,4 +214,24 @@ public class FavoriteFactDispatchService {
         /** {@code (true, nil)} —— 已提交 sent。 */
         SENT
     }
+
+    /**
+     * 🔴 <b>应用层时钟</b>（2026-10-25 第七轮修）。
+     *
+     * <p><b>Go 出处</b>：Go 的 {@code tx.Model(&FavoriteFactOutbox{}).Where(...).Update(...)}
+     * 走 GORM 的 Update 回调 ⇒ {@code autoUpdateTime} 字段<b>每次 UPDATE 都被 GORM 在应用层刷新</b>
+     * （{@code gorm.io/gorm@v1.31.1/callbacks/update.go} 的 {@code field.AutoUpdateTime > 0} 分支）
+     * ⇒ 值来自 <b>Go 进程时钟</b>。
+     *
+     * <p><b>修前的问题</b>：{@code markBlocked} / {@code markFailed} <b>根本不写 {@code updated_at}</b>
+     * ⇒ 行的 {@code updated_at} 永远停在插入时刻；{@code markAccepted} 写的是
+     * {@code updated_at = now()} ⇒ 值来自 <b>PG 服务器时钟</b> ⇒ 两处都与 Go 不同源。
+     *
+     * <p>⚠️ 用 {@link java.time.Clock#systemUTC()}：本类没有注入时钟（Go 侧的 dispatcher
+     * 也没有可注入时钟源）⇒ 与同方法里 {@code delivered_at} 的取法保持一致。
+     */
+    private java.time.OffsetDateTime appLayerNow() {
+        return java.time.OffsetDateTime.now(java.time.Clock.systemUTC());
+    }
+
 }

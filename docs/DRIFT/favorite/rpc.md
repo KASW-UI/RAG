@@ -18,10 +18,10 @@
 | 项 | 值 |
 |---|---|
 | 落地 | **36 个 Java 文件 / 7,057 行 / 6 个迁移脚本**（本轮前：34 个文件全 0 字节、`pom.xml` 零依赖零插件、6 个 `.sql` 全 0 字节） |
-| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §12.4**（9 个测试类 / 76 例全绿） |
+| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §13.5**（**11 个测试类 / 82 例全绿**） |
 | 构建 | `mvn -o -pl service/favorite/favorite-rpc -am install` ⇒ **BUILD SUCCESS** |
 | 本轮发现并修复 | **6 处 L2 语义偏差**（§2）+ **2 处实现期真 bug**（§3） |
-| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / 1 条待外部输入 / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）**<br>🏷 **第六轮新增 1 条候选**：DEV-FAV-RPC-006（GORM 唯一索引名，见 §12.2） |
+| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选**：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK），见 §13.2 |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -120,7 +120,7 @@ RAG 侧 `ArticleRpcClient.getPublicArticle` **固化了同样两个参数**。
 ## 5. ⚠️ 仍未决（7 条）
 
 > ⚠️ **本表的状态已被 §11.6 取代**（2026-10-25 第五轮）：
-> U1 / U2 / U6 → **已签字**；U4 → **已修**；U5 → **已撤销**；U3 → **待外部输入**；U7 → **环境受限**。
+> U1 / U2 / U6 → **已签字**；U4 → **已修**；U5 → **已撤销**；U3 → **第七轮闭合**（§13.3）；U7 → **环境受限**。
 > ⇒ 读本表请以 §11.6 为准，下表保留 2026-10-23 的原始登记以便追溯。
 
 > **纪律**：本表任一条**都没有**「已修」的断言。核对日期一律 2026-10-23。
@@ -129,7 +129,7 @@ RAG 侧 `ArticleRpcClient.getPublicArticle` **固化了同样两个参数**。
 |---|---|---|---|
 | **U1** | **权威端点的 wire 形态** | 按 Go 原样写成 **path 参数** servlet（`/internal/v1\|v2/favorite/facts/{producer}/{event_id}`），**不是** RAG 通用 `AuthorityHandlerFactory` 的 query 形态。整类 `@ConditionalOnProperty(favorite.fact.authority.enabled=true)` **默认关闭 ⇒ 默认不新增任何 HTTP 端口** | 开启时需给**纯 gRPC 进程**加 web connector ⇒ **部署形态变更**，未拍板 |
 | **U2** | **preflight 的退出码语义** | Go 是独立进程 ⇒ 退出码即门禁。Java 进程内**刻意不调 `System.exit`**，改结构化日志（`outcome=succeeded` / `not_reconciled` / `failed` + `error_code`） | CI 需改为**解析日志**判门禁 |
-| **U3** | `zrpc.RpcServerConf.Mode` 的取值域 | **不在本仓库**（Go 侧 `etc/favorite.yaml` 只有 `Mode: dev`）⇒ 用 Spring profile `dev` / `test` 映射 | 需 Go 侧取值域清单 |
+| **U3** | `zrpc.RpcServerConf.Mode` 的取值域 | **不在本仓库**（Go 侧 `etc/favorite.yaml` 只有 `Mode: dev`）⇒ 用 Spring profile `dev` / `test` 映射 | ✅ **第七轮已闭合**（§13.3）—— 取值域 = `dev\|test\|rt\|pre\|pro`，**不需要外部输入** |
 | **U4** | **authority lookup 的 3s 超时** | Go 用 `context.WithTimeout(3s)` 约束 DB 查询；Java 侧走 Hikari `connection-timeout` ⇒ **未对齐** | ✅ **2026-10-25 第四轮已修**（见 §10）⇒ 本行保留作历史 |
 | **U5** | **`ObserveRPC` 的 `result` 标签** | Go 侧 **21 处**错误返回因未赋值命名返回值 `err`，被记成 **`success`**。Java 侧**按真实结果计数**（成功 `success`、异常 `fail`） | ❌ **已撤销**（2026-10-25 第二轮实测证伪）⇒ 见 §9.3 |
 | **U6** | `favorite_request_seconds_counter` 指标名 | Micrometer Counter 会追加 `_total`（Go `client_golang` 不会）⇒ 保留不改 | 与 U5 一并拍板 |
@@ -228,13 +228,13 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 ### 9.3 🔁 U1–U7 复核结论（2026-10-25）
 
 > ⚠️ **本轮把 U1/U2/U4/U5/U6 逐条复核了**（源码级 + 可复现探针）；
-> **U3 仍需 Go 侧提供输入**，**U7 仍是最大缺口**。
+> **U3 已在第七轮闭合**（§13.3，**不需要外部输入**），**U7 仍是最大缺口**。
 
 | # | 项 | 2026-10-23 的登记 | **2026-10-25 复核结论** | 落点 |
 |---|---|---|---|---|
 | **U1** | 权威端点的 wire 形态 | 「按 Go 原样写成 path 参数 servlet，默认关」 | ✅ **路径形态本身是对的**，逐条比对通过（见 §9.5.1）。<br>⚠️ 但**剩余差异比原登记多 4 项**（配置不完整时 Go 起不来 / RAG 照常跑；无启动前 DB 探活；HTTP server 超时值不同；优雅关闭超时不同） | [`../../Intentional_Deviations/favorite/rpc.md`](../../Intentional_Deviations/favorite/rpc.md) **DEV-FAV-RPC-004** |
 | **U2** | preflight 的退出码语义 | 「刻意不调 System.exit，改结构化日志」 | ✅ 结论成立，但**原登记漏了两项**：① Go 的 report 是**写到 stdout 的 JSON**，RAG 不产出 JSON；② Go 的 **「未配置」也是 exit 2**（与 blocked 同级），RAG 的「DB 不可用」落 `failed`（对应 exit 1）⇒ 两侧落档不同 | **DEV-FAV-RPC-003** |
-| **U3** | `zrpc.RpcServerConf.Mode` 的取值域 | 「不在本仓库；Go 侧 `etc/favorite.yaml` 只有 `Mode: dev`」 | ⬜ **仍未决** —— 本轮复核确认该事实**仍成立**（Go 侧确实只出现 `dev`）⇒ **需要 Go 侧给出取值域清单**，否则 Spring profile 的映射无法验证 | 留在本节，**待外部输入** |
+| **U3** | `zrpc.RpcServerConf.Mode` 的取值域 | 「不在本仓库；Go 侧 `etc/favorite.yaml` 只有 `Mode: dev`」 | ✅ **第七轮已闭合**（§13.3）—— **原登记的前提有偏差**：`zrpc.RpcServerConf` 自己**并没有** `Mode` 字段，它嵌的是 `service.ServiceConf`，`Mode` 在那里（`options=dev\|test\|rt\|pre\|pro`，默认 `pro`）⇒ **不需要外部输入** | §13.3 |
 | **U4** | authority lookup 的 3s 超时 | 「Go 用 `context.WithTimeout(3s)` 约束 DB 查询；Java 侧走 Hikari `connection-timeout` ⇒ **未对齐**」 | ✅ **确认未对齐**，并进一步定位：Go 的 3s 约束的是**查询**（ctx 传进 GORM），RAG 侧连到的是**连接超时** ⇒ **不是同一个量纲**。<br>🔴 **2026-10-25 第四轮已修** ⇒ 见 §10-D1（复用仓库已有的 `DeadlineQueryTimeoutInjector` + `SqlTimeoutStatusTranslator`，在调用点绑 3s deadline）。⇒ **DEV-FAV-RPC-005 撤销**（不再是偏离） |
 | **U5** | `ObserveRPC` 的 `result` 标签 | 「Go 侧 21 处错误返回因未赋值命名返回值 `err`，被记成 `success`；Java 按真实结果计数 ⇒ 有意的指标行为变更」 | ❌ **撤销 —— 前提被实测证伪**。Go 的 `return nil, GRPCError(...)` **会**赋值命名返回值 `err` ⇒ defer 里 `ObserveRPC` 看到非 nil ⇒ 记 **`fail`** ⇒ **Go 与 RAG 本来就一致，不存在偏离**。<br>（「21」实为 `return nil, GRPCError(...)` 的出现处数，**实测 22**。） | **撤销记录** + 可复现探针 `tools/metrics-probe/favorite/` |
 | **U6** | `favorite_request_seconds_counter` 指标名 | 「Micrometer Counter 会追加 `_total`（Go `client_golang` 不会）⇒ 保留不改」 | ✅ **确认成立**。补充：其余三个指标名（`favorite_request_total` / `favorite_ops_total` / `favorite_db_error_total`）**两侧完全一致**（名字已以 `_total` 结尾）⇒ **只有这一个**不一致 | **DEV-FAV-RPC-001** |
@@ -274,6 +274,17 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 ⇒ 但 **like 域不是本域的文件**（AGENTS.md §5.3：只写自己域）⇒ **本轮不改、不判**，
 仅在此**登记为跨域线索**，交由 like 域 / `global` 收口域处理。
 ⚠️ 别把它当 favorite 域的漂移去「顺手统一」。
+
+> ✅ **第七轮已把前提核实清楚**（只读，不改 like 的文件）：
+> `service/like/like-api/src/main/java/com/rag/like/like/api/LikeApiApplication.java:75-78`
+> 的 `scanBasePackages` = `{"com.rag.like.like.api", "com.rag.common"}`
+> ⇒ **`com.rag.common` 在内** ⇒ `GoStyleGrpcClientBreakerInterceptor`
+> （`service/common/src/main/java/com/rag/common/protection/GoStyleGrpcClientBreakerInterceptor.java`）
+> **会被扫到** ⇒ 与 `favorite-api`（`FavoriteApiApplication:36-39`，同样含 `com.rag.common`）**同款**
+> ⇒ ⇒ **该注释「Java 侧尚未接入」几乎确定是错的** ⇒ 熔断**很可能早已自动注册**。
+> ⚠️ **仍未最终判定**：要断言「熔断真的生效」，还需查 `favorite-api` 侧同款断言是怎么写的
+> （它有 `FavoriteApiProtectionWiringTest` 守着）⇒ **该结论应由 like 域自己用同款装配层测试关掉**。
+> ⇒ **本域只提供这条线索**，不代 like 域下结论。
 
 ---
 
@@ -455,7 +466,7 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 |---|---|---|---|---|
 | **U1** | 权威端点的 wire 形态 | path 参数 servlet，默认关 | ✅ **已签字**（部署形态差异 = 进程边界降级为配置项）；✅ 路径形态本身经 §10.2 逐条对拍通过 | **DEV-FAV-RPC-004** |
 | **U2** | preflight 的退出码语义 | 改结构化日志 | ✅ **已签字** | **DEV-FAV-RPC-003** |
-| **U3** | `zrpc.RpcServerConf.Mode` 取值域 | 不在本仓库 | ⬜ **仍未决** —— 需 Go 侧提供取值域清单（**外部输入**） | 留在 §5 |
+| **U3** | `zrpc.RpcServerConf.Mode` 取值域 | 不在本仓库 | ✅ **已闭合**（第七轮，§13.3）—— 取值域 = `dev\|test\|rt\|pre\|pro`（默认 `pro`），**不需要外部输入** | §13.3 |
 | **U4** | authority lookup 的 3s 超时 | 走 Hikari 连接超时 | ✅ **已修**（第四轮，§10.1）⇒ **DEV-FAV-RPC-005 撤销** | §10.1 |
 | **U5** | `ObserveRPC` 的 `result` 标签 | Go 21 处被记成 success | ❌ **已撤销**（第二轮实测证伪，§9.3） | 撤销记录 + `tools/metrics-probe/favorite/` |
 | **U6** | `favorite_request_seconds_counter` 指标名 | Micrometer 追加 `_total` | ✅ **已签字**（其余 3 个指标名两侧完全一致） | **DEV-FAV-RPC-001** |
@@ -492,7 +503,15 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 | **关键结论** | `folder_zero` 是**空字节** ⇒ proto3 标量零值**不落 wire** ⇒ 把 §10.4 的「生成码级证据」升级为**字节级**；<br>`item_partial` 证明**空字符串不落 wire**（那是 JSON 的行为，不是 proto3 的）；<br>`create_req` 证明 `int64` 在 wire 上是 **varint**，**不是**字符串（字符串是 api 层的 JSON 约定）。 |
 | **回归网** | `FavoriteProtoWireParityTest`（**6 例**，**住在 `favorite-rpc` 模块**）—— ⚠️ `favorite-proto` 的 pom 里**一行 junit 依赖都没有** ⇒ 放**消费方**（它本就依赖 proto）。⇒ 副作用：proto 组件从「0 例测试」变成「有 1 个字节级守门」。 |
 
-### 12.2 ✅ DDL 的**逐列对照**（本轮首次做，此前只有抽查）
+### 12.2 ⚠️ DDL 的**逐列对照**（**源码级**）—— 🔴 **已被 §13 取代**
+
+> 🔴 **本节是源码级推导，结论对、但方法不可靠** ⇒ 第七轮（§13）用**双侧活体对拍**重做，
+> **推翻了两处结论** ⇒ **以 §13 为准**。
+>
+> 被推翻的两处：① 「目标 schema = AutoMigrate ∪ 4 个手写 SQL」**漏了顺序**（顺序会改结果）；
+> ② 「4 张表列级零差异」**漏了 `created_at`/`updated_at` 的 DEFAULT**（Go 侧无、RAG 侧有 ⇒ 不是零差异）。
+>
+> ⚠️ 保留本节是为了留痕「源码级推导能到哪一步、卡在哪一步」。
 
 > 🔴 **为什么此前是个缺口**：`tools/difftest/check-ddl-static.py` 只有 **users / task / message**
 > 三个域预设 ⇒ **favorite 不在其中**；而本域的 `FavoriteSchemaParityTest`（13 例真 PG）只**抽查**了
@@ -559,7 +578,89 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 
 | 项 | 结果 |
 |---|---|
-| 本域全量测试 | **194 例全绿**（api **89** · rpc **76** · common 29 · proto 0），真 PG 19 例真跑未 skip |
+| 本域全量测试 | **194 例全绿**（api **89** · rpc **76** · common 29 · proto 0），真 PG 19 例真跑未 skip（**此数为第六轮口径** ⇒ 第七轮见 §13.5） |
 | 探针 | api-envelope / proto-wire / authority-path / errmsg / metrics ⇒ **5 个全 EXIT=0** |
 | 守门 | `check-tomcat-limits.py` / `check-flyway-ledger.py` / `check-proto-static.sh` ⇒ 全 **EXIT=0** |
 | 共享面 + `service/common/**` | **零改动** |
+
+---
+
+## 13. 2026-10-25 第七轮（`align/favorite` 工作树 · 基线 commit 58e8314 · 承 `347d338`）
+
+> ⚠️ **本节只追加，不修改 §0–§12。**
+> 本轮目标：**把 §12.2 的「源码级 DDL 对照」升级为「双侧活体对拍」** ⇒ 并**据此修掉 1 条真漂移**。
+
+### 13.1 🔴 D5（L1 漂移）· outbox 时间列的**时钟源**与 `updated_at` 刷新（**已修**）
+
+| | 内容 |
+|---|---|
+| **Go 行为** | `internal/model/favorite_fact.go:158-159` 的 struct 字面量<br>`FavoriteFactOutbox{EventID:…, FavoriteID:…, AggregateVersion:…, Payload:…, Status:…}`<br>⇒ **没有**设 `CreatedAt` / `UpdatedAt` ⇒ 靠 tag `gorm:"autoCreateTime;not null"` / `gorm:"autoUpdateTime;not null"`<br>⇒ **GORM 在应用层赋值**（`gorm.io/gorm@v1.31.1/callbacks/create.go:302-306` 的 `field.AutoCreateTime > 0` 分支）⇒ 值来自 **Go 进程时钟**。<br>⇒ 且 **每次 UPDATE 都会刷新 `updated_at`**（`favorite_delivery.go:156-157 / :176 / :189` 三处 `tx.Model(...).Update(...)` 都走 GORM 的 Update 回调 ⇒ `autoUpdateTime` 生效）。 |
+| **RAG 修复前** | ① `insertFact` **不绑** `created_at` / `updated_at` ⇒ 落到 DDL 的 `DEFAULT now()` ⇒ 值来自 **PG 服务器时钟**；<br>② `markBlocked` / `markFailed` **根本不写 `updated_at`** ⇒ 行的 `updated_at` 永远停在插入时刻；<br>③ `markAccepted` 写 `updated_at = now()` ⇒ 同样是 **PG 服务器时钟**。 |
+| **为什么是行为差异（不是 DDL 差异）** | `created_at` 是取件查询的**排序键**（`ORDER BY created_at, event_id`，`favorite_delivery.go:141-147`）⇒ 应用进程与数据库之间的时钟偏移会让**取件顺序**产生分歧 ⇒ **投递顺序**分叉。<br>⇒ `updated_at` 不刷新 ⇒ 行看不出「被处理过」⇒ 运维按 `updated_at` 判断新鲜度会**读到错值**。 |
+| **修法** | ① `insertFact` / `markBlocked` / `markFailed` / `markAccepted` **全部显式绑定应用层时钟**（`OffsetDateTime`，UTC 渲染 ⇒ 不依赖 JVM 默认时区）；<br>② 新增 `V7__align_favorite_outbox_time_columns_with_go.sql` ⇒ **去掉两列的 `DEFAULT now()`**。<br>⚠️ **为什么必须去掉 DEFAULT**：Go 侧无 DEFAULT ⇒ 漏绑会**硬失败**（NOT NULL 违例）；RAG 侧若留着 ⇒ 同一处遗漏被**静默兜底**成 DB 时钟 ⇒ 两边分叉且**无告警**。去掉之后 ⇒ 两侧**同样硬失败** ⇒ 遗漏立刻暴露。<br>⚠️ 去掉 DEFAULT 的机理（已读源码核实）：`gorm.io/gorm@v1.31.1/migrator/migrator.go:543-550` 的「default value → null」分支 ⇒ **GORM 的 AutoMigrate 会主动删掉已存在的 DEFAULT** ⇒ Go 侧 live schema **确定没有** DEFAULT。 |
+| **回归网** | `FavoriteOutboxTimeColumnTest`（**5 例**，**真 PG** Testcontainers + **真 Flyway** + **真 mapper**）：<br>① INSERT 的两列**精确等于**应用层传入的时刻（并反证「不等于 DB 的 now()」）；<br>② `markBlocked` / `markFailed` / `markAccepted` 后 `updated_at` **被推进**；<br>③ `information_schema` 里两列**没有 DEFAULT**。 |
+| **变异证据** | ① **M1**：`insertFact` 去掉时间列绑定 ⇒ **转红**，精确报出 `expected: <2026-01-02T03:04:05.123456Z> but was: <2026-10-24T21:43:19.435344Z>`（= DB 的 now()）；<br>② **M2**：`markBlocked` 去掉 `updated_at` ⇒ **转红**；<br>③ **M3**：`V7` 的 `DROP DEFAULT` 注释掉 ⇒ **2 例转红**（`created_at=now()` 仍带 DEFAULT ＋ `FavoriteDdlParityTest` 的 MAIN 指纹不符）。⇒ **4 例转红 ⇒ 不是假绿**。 |
+
+### 13.2 🔴 DDL 的**双侧活体对拍**（新增探针 `tools/ddl-parity-probe/favorite/`）
+
+| | 内容 |
+|---|---|
+| **新工具** | `tools/ddl-parity-probe/favorite/`（**EXIT=0**）<br>· **Go 侧**：**真源** `service/favorite/rpc/internal/model/`（**8 个 `.go` + 4 个 `.sql` 逐字节复制 + sha256 校验**）+ **真源** `InitDB()`（AutoMigrate + `migrateFavoriteTargetIDToString`）+ **整体继承真源 `go.mod`/`go.sum`**（gorm v1.31.1 / driver-postgres v1.6.0）<br>· **RAG 侧**：**真 Flyway** 迁移脚本 `V1..V7`<br>· 两侧**共用同一份 dump 查询**（`sql/dump.sql` + `sql/names.sql`）⇒ 不会「各说一半」 |
+| **判定口径** | dump 输出**语义行**（`S\|…`，不含对象名）与**命名行**（`N\|…`）：<br>· 语义不一致 ⇒ 🔴 **真漂移**（exit 1）<br>· 名字不同但语义相同 ⇒ **命名层差异** ⇒ 进 OBS 段冻结<br>· `expected.txt` = `MAIN\|<sha256>`（两侧共同语义内容指纹）+ **13 条 OBS** |
+| **结论** | **4 张表、38 列、全部约束 / 索引 / 触发器 / 函数体**：<br>✅ **列级（类型 / 长度 / 可空性 / DEFAULT / 顺序）零差异**（修完 D5 之后）<br>⚠️ **12 处命名差异**（约束 9 + 索引 3）⇒ 已登记 **DEV-FAV-RPC-006**<br>⚠️ **1 处语义差异**（RAG 侧 `favorite_item` 多一道 CHECK）⇒ 已登记 **DEV-FAV-RPC-007** |
+| **🔴 顺带查明：执行顺序是行为的一部分** | 探针同时跑**两种顺序**：<br>· **sql-first**（运维先跑 `001..004`、应用后起）⇒ **判定基准**（真源文档 `DELIVERY_ACCEPTANCE.md:7` 指定的顺序）<br>· **app-first**（应用先起、运维后跑）⇒ `001` 的 `CREATE TABLE IF NOT EXISTS` 变成 **no-op**<br>⇒ **两者产出的 schema 不同**，差两处：<br>① `CHECK (aggregate_version IN (1,2))` —— 它在 Go 的 `001` 里是**内联**在 CREATE TABLE 里的 ⇒ no-op ⇒ **建不出来**；<br>② `favorite_fact_outbox` 的**列顺序**不同（AutoMigrate 按 struct 序，`001` 按 DDL 序）。<br>⇒ ⚠️ **但 `001` 里的部分索引 `favorite_fact_outbox_pending` 是独立语句 ⇒ 照样建出来** —— 这一点是**实测纠正**的（源码级推理曾猜错）。<br>⇒ **RAG 侧与 sql-first 一致** ⇒ 与真源文档指定的部署顺序一致 ✅ |
+
+### 13.3 ✅ U3 闭合：`zrpc.RpcServerConf.Mode` 的取值域（**不需要外部输入**）
+
+| | 内容 |
+|---|---|
+| **原登记** | 「`zrpc.RpcServerConf.Mode` 的取值域」不在本仓库 ⇒ **需 Go 侧提供清单** ⇒ 标「待外部输入」。 |
+| **🔴 实测：原登记的前提有偏差** | go-zero v1.10.2 的 `zrpc.RpcServerConf`（`zrpc/config.go:37-54`）**自己并没有 `Mode` 字段** ⇒ 它嵌的是 `service.ServiceConf`，`Mode` 在**那里**（`core/service/serviceconf.go`）：<br>`Mode string \`json:",default=pro,options=dev\|test\|rt\|pre\|pro"\`` ⇒ **取值域 = `dev` / `test` / `rt` / `pre` / `pro`（5 个），默认 `pro`**。 |
+| **消费点（全部）** | ① `core/service/serviceconf.go:83-90` `initMode()`：`dev\|test\|rt\|pre` ⇒ `load.Disable()`（关分布式追踪采样）+ `stat.SetReporter(nil)`（关指标上报）；`pro` ⇒ 全开。<br>② `service/favorite/rpc/favorite.go:31`：`SubjectRefV2Facts` 为 true 时，Mode **必须**是 `dev` 或 `test`，否则 `os.Exit(2)`（`LOCAL_CANDIDATE_ONLY`）⇒ **这是唯一会让进程起不来的 Mode 约束**。<br>③ `favorite.go:45`：`Mode == dev \|\| Mode == test` ⇒ 注册 gRPC **reflection**（生产不注册）。 |
+| **⇒ favorite 域实际只需 3 组** | `dev\|test`（+ reflection + 允许 v2）/ `rt\|pre`（initMode 关 load+stat，但无 reflection、v2 被拒）/ `pro`（默认）。 |
+| **RAG 侧现状** | `FavoriteSubjectRefGate`（`DEV_TEST_PROFILES = ["dev","test"]`）⇒ 与 Go 的 `favorite.go:31` / `:45` **一致** ✅；`rt` / `pre` 在 favorite 域**无行为差异**（除 load/stat 上报，属框架层）。<br>⚠️ **默认值也一致**：Go 的 `Mode` 省略时是 `pro`；RAG 的 `getActiveProfiles()` 为空 ⇒ `devOrTest=false` ⇒ 等价于 `pro` ✅。 |
+| **结论** | ✅ **U3 闭合**（从「待外部输入」变成「已查清」）⇒ **不需要 Go 侧再给清单**。<br>⇒ 唯一残留是 `initMode` 的 **stat/load 上报差异**，但它**只影响非 pro 环境**且属**框架层**（go-zero 的 stat vs Micrometer）⇒ **不记入漂移条目**。 |
+
+### 13.4 ✅ 帧层 / 整域对拍的**边界重核**（把「环境受限」拆成「该做」与「不该做」）
+
+| 项 | 判定 | 理由 |
+|---|---|---|
+| **gRPC 帧层字节对拍**（HTTP2 / length-prefix / status 帧） | ⬜ **不属本域可做** ⇒ **不记入漂移条目** | 帧层编码由 **gRPC 库**决定（grpc-go vs grpc-java），**不是 favorite 域的行为**；两侧都用各自的标准 gRPC 实现 ⇒ 若有差异，那是**库级**差异，**不是 RAG 重构引入的** ⇒ 不在本域 scope（AGENTS.md §1）。<br>⇒ 真要对，只能测「两个 gRPC 实现之间的帧层差」⇒ 与「RAG 是否忠实复刻 Go」**无关** ⇒ 收益低。 |
+| **rpc 整域双侧活体对拍**（U7 主项） | 🔴 **仍环境受限**（**真受阻**，非方法缺陷） | Go 侧 favorite-rpc 真进程依赖 `etcd` + Redis + `article-rpc` / `user-rpc` ⇒ 本机拉不起。<br>⇒ **但**已被拆成 **6 项局部双侧对拍**：错误码契约 / path 形态 / 指标 result 语义 / v2 响应体形状 / **protobuf 消息体 wire 字节** / **DDL 逐列** ⇒ 剩下的「整域」只覆盖**业务编排与部署**层面。 |
+| **api 整域双侧活体对拍** | 🔴 **仍环境受限** | 真 Go favorite-api 依赖 `etcd` + favorite-rpc + Redis ⇒ 起不来；⇒ **响应字节层**已用 `tools/api-envelope-probe/favorite/` 拆出来闭合（§2.2）。 |
+| **U3 Mode 取值域** | ✅ **本轮闭合**（§13.3） | 原登记写「需 Go 侧提供清单」⇒ **其实不需要**：go-zero 源码里就有（`options=dev\|test\|rt\|pre\|pro`）⇒ **登记类事项可以自查的，就不该挂着等人**。 |
+
+> 📌 **一条元教训**：这一轮里 **U3 挂了好几轮「等外部输入」**，但真相是**去 go-zero 源码里读一眼就有**
+> ⇒ 「需要外部输入」这个判断本身**也需要证据**（AGENTS.md §3.3.1 的同一条纪律）。
+> ⇒ **先自查，再登记为未知项**。
+
+### 13.5 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| `tools/ddl-parity-probe/favorite/run.sh` | **EXIT=0**（MAIN 指纹一致 + **13 条 OBS** 逐条一致） |
+| `FavoriteDdlParityTest`（**RAG 侧守门**，进 `mvn test`） | **1 例全绿**；变异（V7 不 DROP DEFAULT）⇒ **转红**（MAIN 指纹不符） |
+| `FavoriteOutboxTimeColumnTest`（真 PG + 真 mapper） | **5 例全绿**；变异 ⇒ **4 例转红**（含精确报出 `created_at` 变成了 DB 的 `now()`） |
+| 本域全量测试 | **200 例全绿**（api **89** · rpc **82** · common 29 · proto 0），**21 个测试类**，真 PG 25 例真跑未 skip |
+| 六个探针 | api-envelope / proto-wire / authority-path / errmsg / metrics / **ddl-parity** ⇒ **全 EXIT=0** |
+| 三个守门 | `check-tomcat-limits.py` / `check-flyway-ledger.py` / `check-proto-static.sh` ⇒ 全 **EXIT=0** |
+| 共享面 + `service/common/**` | **零改动** |
+
+### 13.6 ⚠️ V7 是**破坏性 DDL 变更** ⇒ 外部写入方必须同步适配
+
+> 🔴 **V7 去掉了 `created_at` / `updated_at` 的 `DEFAULT now()`** ⇒ **任何直接写
+> `favorite_fact_outbox` 的代码，若没绑这两列 ⇒ 立刻 `NOT NULL` 违例**。
+> ⇒ 本轮**实测到这个后果**：三个既有测试类里的 **6 处裸 INSERT** 全部当场变红
+> （`null value in column "created_at" … violates not-null constraint`）
+> ⇒ **已全部改成显式绑定**（绑**固定的应用层时刻** `2026-01-01T00:00:00Z`）⇒ 复跑全绿。
+>
+> ⇒ 这**正是 V7 的设计意图**（让漏绑**硬失败**而不是被静默兜底）⇒ 但也意味着：
+>
+> | 谁 | 状态 |
+> |---|---|
+> | 本域生产代码（唯一写入方 `insertFact`） | ✅ 已显式绑定 |
+> | 本域测试的裸 INSERT（6 处） | ✅ 已改绑 |
+> | **域外**的直接写入方（人工 SQL / 报表 / 另一个服务 / 数据修复脚本） | ⚠️ **未盘点** ⇒ 上线前**必须**确认没有这类写入方 ⇒ 否则会**突然报错** |
+>
+> ⇒ **登记的前置动作**：**部署 favorite-rpc 的 V7 之前**，先确认「除 `insertFact` 外没有别的写入方
+> 直接写 `favorite_fact_outbox`」⇒ 有的话，先改它们，再上 V7。
