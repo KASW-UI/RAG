@@ -62,7 +62,7 @@ if [[ $BRING_UP -eq 1 ]]; then
   fi
 fi
 
-echo "==> [1/3] 编译 admin-proto 桩 + 计算 classpath"
+echo "==> [1/4] 编译 admin-proto 桩 + 计算 classpath"
 PROTO_CP="$ROOT/service/users/admin/admin-proto/target/classes"
 if [[ ! -d "$PROTO_CP" ]]; then
   (cd "$ROOT" && mvn -q -o -pl service/users/admin/admin-proto -am -DskipTests compile) \
@@ -75,7 +75,7 @@ LIBCP_FILE="/tmp/difftest-grpc-admin-cp.txt"
   || { echo "  FAIL dependency:build-classpath 失败"; exit 1; }
 LIBCP="$(cat "$LIBCP_FILE")"
 
-echo "==> [2/3] 编译 GrpcAdminDualPortRunner"
+echo "==> [2/4] 编译 GrpcAdminDualPortRunner"
 rm -rf /tmp/difftest-grpc-admin-build
 mkdir -p /tmp/difftest-grpc-admin-build
 javac -d /tmp/difftest-grpc-admin-build \
@@ -83,12 +83,40 @@ javac -d /tmp/difftest-grpc-admin-build \
       "$HERE/GrpcAdminDualPortRunner.java" \
   || { echo "  FAIL 编译失败"; exit 1; }
 
-echo "==> [3/3] 跑实验(写入 grpc-admin-results.txt)"
+# ── 3. 种 probe user（2026-10-23 新增）────────────────────────────────
+#
+# 为什么需要：updateUser 作用在 **users_user** 表上，而 seeder 只造 admin（admin_admin）。
+# 本 runner 此前只覆盖 updateUser 的**错误路径**（notfound），成功路径从未被对拍 ——
+# 而 DRIFT-ARPC-002（UpdateUserResp.success：Go=false / RAG=true）
+# **恰好只在成功响应里可见** ⇒ 缺这条种子数据，那条漂移改了也没人能发现。
+#
+# 两侧表名不同（Go `users` / RAG `users_user`）、uid 取不同值（归一化时 uid 一律不比），
+# 但 **username / email / status / score 必须两侧完全一致**，否则 payload_diff 会
+# 把「种子数据不同」误报成语义差异。
+#
+# 幂等：ON CONFLICT (uid) DO NOTHING，可反复重放。
+echo "==> [3/4] 种 probe user（go_db.users / rag_db.users_user）"
+
+docker exec -i difftest-postgres psql -U admin -d go_db -q <<'SQL'
+INSERT INTO users (uid, username, password, email, status, score, extra_info, create_time, update_time)
+VALUES (7700000000000000001, 'probe_updateuser', 'x', 'probe@mail.test', 0, 0, '{}'::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT (uid) DO NOTHING;
+SQL
+docker exec -i difftest-postgres psql -U admin -d rag_db -q <<'SQL'
+INSERT INTO users_user (uid, username, password, email, status, score, extra_info, create_time, update_time)
+VALUES (7700000000000000002, 'probe_updateuser', 'x', 'probe@mail.test', 0, 0, '{}'::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT (uid) DO NOTHING;
+SQL
+echo "    ✓ go_db.users uid=7700000000000000001 / rag_db.users_user uid=7700000000000000002"
+
+echo "==> [4/4] 跑实验(写入 grpc-admin-results.txt)"
 echo "    Go  admin-rpc = $GO_HOST:$GO_ADMIN_PORT"
 echo "    RAG admin-rpc = $RAG_HOST:$RAG_ADMIN_PORT"
 java -cp "/tmp/difftest-grpc-admin-build:$PROTO_CP:$LIBCP" \
      -Dgo.host="$GO_HOST"  -Dgo.admin.port="$GO_ADMIN_PORT" \
      -Drag.host="$RAG_HOST" -Drag.admin.port="$RAG_ADMIN_PORT" \
+     -Dgo.probe.uid=7700000000000000001 \
+     -Drag.probe.uid=7700000000000000002 \
      tools.difftest.GrpcAdminDualPortRunner 2>&1 | tee "$HERE/grpc-admin-results.txt"
 
 RC=${PIPESTATUS[0]}

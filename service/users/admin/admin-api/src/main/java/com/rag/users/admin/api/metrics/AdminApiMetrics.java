@@ -9,7 +9,11 @@ import org.springframework.stereotype.Component;
  *
  * 对应 Go: service/user/admin/api/internal/metrics/metrics.go 的 AdminApiInterceptCount。
  *
- * <p>Go → Java label 映射（17 个具名 Counter，覆盖 7 个 Logic）：
+ * <p>Go → Java label 映射（16 个具名 Counter，覆盖 7 个 Logic）：
+ * <p>〔<b>2026-10-24 复核订正</b>：原写「17 个」—— 实为 <b>16 个</b>
+ * （login 3 + banuser 2 + unbanuser 2 + delete 2 + resetuserpassword 2 + updateuser 2 + invite/create 3）；
+ * Go 侧 {@code metrics.go} 的 {@code CounterVec} 只有 <b>2 个 label 名</b>（path / result），
+ * 16 是<b>组合数</b>、不是 label 名数量。逐条与 Go 的 {@code WithLabelValues} 调用点比对一致。〕
  *
  * <p>login (3 个)：
  * <pre>
@@ -41,6 +45,13 @@ import org.springframework.stereotype.Component;
  * </pre>
  *
  * <p>其它 6 个 RPC（create / getself / getuser / getuserlist / logout / update）Go 端没埋点，1:1 不补。
+ *
+ * <p>⚠️ <b>exposition 上多一个 label（已知、未修）</b>：{@code application.yml} 配了
+ * {@code management.metrics.tags.application: ${spring.application.name}}，
+ * ⇒ Prometheus 输出行是 {@code admin_api_intercept_total{application="admin-api",path=...,result=...}}，
+ * 而 Go 侧 {@code CounterVec} <b>只有 path / result 两个</b>。
+ * ⇒ 按完整 label 集做匹配（scrape 规则 / 告警规则）的下游会失配。
+ * 证据与处置见台账 {@code docs/DRIFT/users/admin/api.md} 的 M-43（2026-10-24 复核）。
  */
 @Component
 public class AdminApiMetrics {

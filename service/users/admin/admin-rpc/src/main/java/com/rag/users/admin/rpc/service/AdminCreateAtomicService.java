@@ -13,7 +13,7 @@ import io.grpc.StatusRuntimeException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -121,7 +121,15 @@ public class AdminCreateAtomicService {
         if (invite == null) {
             throw new InviteUnavailableException("invite code not found: " + inviteCode);
         }
-        LocalDateTime now = LocalDateTime.now();
+        // 🔴 OffsetDateTime，不是 LocalDateTime（2026-10-23，用户拍板修 DRIFT-ARPC-004②）。
+        // Go 出处：createadminlogic.go:64-65
+        //     now := time.Now()
+        //     if invite.UsedAt != nil || !invite.ExpiresAt.After(now) {
+        // Go 的 invite.ExpiresAt 来自 **timestamptz** 列 ⇒ 带 location 的绝对时刻，
+        // `.After(now)` 比的是绝对时刻。
+        // 原 RAG 的 LocalDateTime 版本比的是**墙钟**：单实例同区恰好自洽，
+        // 跨时区多实例部署时（A 区建码、B 区消费）邀请码会刚生成就判为已过期 ⇒ 与 Go 行为分叉。
+        OffsetDateTime now = OffsetDateTime.now();
         if (invite.getUsedAt() != null || !invite.getExpiresAt().isAfter(now)) {
             throw new InviteUnavailableException("invite code expired or used: " + inviteCode);
         }
@@ -172,7 +180,24 @@ public class AdminCreateAtomicService {
         LambdaUpdateWrapper<AdminInviteEntity> inviteWrapper = new LambdaUpdateWrapper<>();
         inviteWrapper.eq(AdminInviteEntity::getId, invite.getId())
                 .set(AdminInviteEntity::getUsedByUid, generatedUid)
-                .set(AdminInviteEntity::getUsedAt, now);
+                .set(AdminInviteEntity::getUsedAt, now)
+                // 🔴 2026-10-23「台账 vs 实际」复核新发现并补上（此前台账与代码都漏了这条 UPDATE）：
+                //   Go 出处：admin.go:141-146
+                //     tx.Model(&AdminInvite{}).Where("id = ?", id).Updates(map[string]any{
+                //         "used_by_uid": …, "used_at": … })
+                //   **消费点**（不是看 struct tag）：gorm.io/gorm@v1.31.1/callbacks/update.go:235-255
+                //     `if !stmt.SkipHooks && stmt.Schema != nil { for _, dbName := range … {
+                //          if field.AutoUpdateTime > 0 && value[…] == nil { … set = append(set, …now) } } }`
+                //     该段位于 map 更新分支内（`default:` 结构体分支**之前**），
+                //     且本调用无 Select ⇒ selectColumns 空、restricted=false ⇒ 条件成立。
+                //   ⇒ Go 用 **map** 更新时**同样会补写 update_time**，不是只有结构体更新才推进。
+                // ⚠️ 此前 AdminDomainService 的注释与 DRIFT-ARPC-001 都写「5 处 UPDATE 入口」，
+                //   那是**只数了 AdminDomainService 自己**、漏了本类这条。
+                //   正确的总数是 **6 处**（AdminDomainService 5 + 本类 1）。
+                //   可观察性：`admin_invite.update_time` 不在 admin.proto 的任何 message 里、
+                //   业务代码也从不读它 ⇒ 补它**不改变任何可观察行为**，
+                //   属「让 DDL 行为与 Go 同构」的纯对齐（台账 §9 复核记录）。
+                .setSql("update_time = CURRENT_TIMESTAMP");
         adminInviteMapper.update(null, inviteWrapper);
 
         return generatedUid;

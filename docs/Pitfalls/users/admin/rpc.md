@@ -253,3 +253,409 @@ AGENTS.md §6.3 问题 3 记的是「显式 `@Import`，不拆包」，那解决
 ⚠️ 同款缺件是否还在别处：**未审**。`AGENTS.md` §3.3.3 已记
 `service/like/like-rpc/pom.xml:120` 只引 `spring-kafka` 的同款问题，尚未修。
 本组件不属于该清单。
+---
+
+## P-8 · 同一个模块里**两张表的同名列类型不同** —— 改 DDL 时按方法名批量替换会改错表
+
+> 2026-10-23 修复 DRIFT-ARPC-004① 时踩到（本轮**没有**踩进去，是靠逐处核对 Go 出处躲过的）。
+
+### 现象
+
+`admin-rpc` 的 `AdminDomainService` 里有**两处形状完全一样**的代码：
+
+```java
+wrapper.setSql("extra_info = CAST({0} AS jsonb)", toJson(extraInfo));
+```
+
+- `:342` 在 `updateSelf` 里，wrapper 是 `LambdaUpdateWrapper<**AdminEntity**>` → 写 **`admin_admin.extra_info`**
+- `:884` 在 `updateUser` 里，wrapper 是 `LambdaUpdateWrapper<**UserEntity**>` → 写 **`users_user.extra_info`**
+
+这一轮把 `admin_admin.extra_info` 从 `jsonb` 改成 `text` ⇒ **`:342` 必须去掉 CAST，`:884` 必须保留**。
+两行文本逐字相同，只有实体泛型不同。
+
+### 为什么会踩
+
+「`extra_info` 是 jsonb，改成 text」这句话在整个模块里是**半真**的：
+`AdminEntity.extraInfo` 变 text，`UserEntity.extraInfo`（映射 `users_user`，**另一个域的表**）**仍是 jsonb**。
+于是：
+
+- `grep -rn "CAST({0} AS jsonb)"` → 2 处，**任何「全部替换」都会改错其中一处**；
+- 改错 `:884` ⇒ `users_user` 那个 jsonb 列收到未 CAST 的字符串 ⇒
+  `ERROR: column "extra_info" is of type jsonb but expression is of type character varying`
+  ⇒ **user 域的 `updateUser` 100% 失败**，而 admin 域自己的测试**照样全绿**
+  （admin 的测试不经过 `users_user` 的写路径）。
+
+### 下次怎么防
+
+1. **按「列的全名」而不是按「文本」定位**。判断依据是实体的 `@TableName` + wrapper 的泛型参数，
+   不是方法名、不是 grep 到的字符串。
+2. **凡是要改某一列的类型，先问「这个模块里还有哪些实体映射了同名列」**。
+   本组件 3 个实体（`AdminEntity` / `AdminInviteEntity` / `UserEntity`）里
+   `extra_info` 出现了**两次**，时间列出现了 **6 次**，分属两张表。
+3. **跨域的表不要在本域顺手改**。`users_user` 的 DDL 归 users/user 域，
+   即使 admin-rpc 也在读写它 —— 这一轮只报告、不改（见 `DRIFT/users/admin/rpc.md` 本轮 §6）。
+
+### 同源的更大一类
+
+`user-rpc` 侧 `users_user.extra_info` **也是 jsonb，而 Go 侧同样是 `serializer:json`（text）**
+⇒ 同一个漂移在 users/user 域也存在，且**尚未修**。
+本轮已作为跨域问题上报 —— 这条坑对整个 users 域都成立。
+
+---
+
+## P-9 · **签字档里的空占位文件**会让人把「已签字」误判成「未签字」
+
+> 2026-10-23 实测，本轮的真实成本来源。
+
+### 现象
+
+2026-10-23 21:3x 的 admin-api 审计轮，在台账里写下：
+
+> 「⚠️ `docs/Intentional_Deviations/users/**` 下 **6 个文件全是 0 字节**（空占位）
+> ⇒ **没有任何一份正式的签字文件覆盖它**」
+
+并据此判定 DRIFT-ADMINAPI-001 / -004「**仍需用户裁决**」。
+
+**这个判定是错的。**
+`docs/Intentional_Deviations/_cross/signed-deviations.md` 里的 **SD-2026-10-23-01**
+标题明写「Go 恒 0 且**不校验 claim**，RAG **严格校验**」—— 两半都在签字范围内。
+
+### 根因
+
+签字信息**分散在三处**，而检索是**逐层下行**的：
+
+```
+docs/Intentional_Deviations/_INDEX.md      ← 索引
+  └─ users/                                 ← 🔴 6 个 0 字节文件，断在这里
+      ├─ admin/_shared.md   （原 0 字节）
+      └─ _cross/signed-deviations.md        ← 真正的签字在 _cross 这一层，绕过了 users/
+```
+
+本域的签字（N-1 / N-4 / N-5）当时**只存在于 `docs/DRIFT/users/admin/_shared.md`** ——
+那是**漂移台账**，按 §7.2 的读法不该当签字档用。
+于是两个 agent 查同一个问题，一个查到「没签字」、一个查到「签了」。
+
+### 为什么这条特别危险
+
+它不是「漏查」这种可恢复的错误，而是**让审计结论反向**：
+一个 agent 会把一条**用户已经拍板过的决策**当成新发现，
+提出「要不要对齐 Go」的疑问 —— 而按 §5.3b 的纪律，
+另一个 agent 可能就**「顺手修回旧行为」**，把用户的决策推翻。
+
+### 下次怎么防
+
+1. **签字档必须逐域落地**，不能只在 `_cross` 留一份转述。
+   本轮已补齐 `docs/Intentional_Deviations/users/admin/{_shared,api,rpc}.md`。
+2. **发现「某档下有 0 字节文件」时，先把它当成事故处理**，而不是当成「该域没有签字偏离」。
+   两者在文件内容上完全一样，只能靠**别的域也有签字**来推断出「这是洞不是空」。
+3. **写「未签字」三个字之前，必须真的走完 `_INDEX.md → 域 → 组件` 三层**，
+   并且**再全文 grep 一次 `signed-deviations.md`**。本轮两次误判都栽在这一步。
+
+> ⚠️ 同型洞仍在：`docs/Intentional_Deviations/users/user/{api,rpc}.md`
+> 与 `users/_shared.md` **仍是 0 字节** ⇒ 归 users/user 域，未处理。
+
+---
+
+## P-10 · **实验失败时，它长得像结论** —— 「等待条件写错」让并发建表实验根本没发生
+
+**核对日期：2026-10-23**（修 UNRESOLVED-ARPC-005 时踩到）
+
+### 症状
+
+跑 Go 侧并发建表实验（`tools/difftest/exp-go-concurrent-automigrate.sh`），
+判定输出是：
+
+```
+  ? user-rpc 连库失败（配置问题，另查）
+  ? admin-rpc 连库失败（配置问题，另查）
+```
+
+进程日志里是：
+
+```
+57P03 the database system is starting up
+unexpected EOF
+```
+
+### 根因（等待条件写错，不是 Go 的问题）
+
+原脚本等待数据库就绪用的是：
+
+```bash
+until docker exec gorace-pg pg_isready -U "$PG_USER" >/dev/null 2>&1; do sleep 1; done
+```
+
+🔴 **`pg_isready` 不带 `-d` 时，在 PG 的「初始化临时服务」阶段就已经返回 OK** ——
+此时数据库系统**还没起来**，连上去必然报 `57P03`。
+⇒ 脚本在库真正可用之前就把两个 rpc 放了出去 ⇒ **两边都连库失败、一张表都没建出来**。
+
+### 为什么这个形态比「跑绿」更危险
+
+判定输出写的是「**连库失败（配置问题，另查）**」——
+读起来像「**Go 侧连不上、结论待查**」，是一个**待办**；
+实际上**实验根本没发生**，既不能推出「Go 没问题」，也不能推出「Go 有问题」。
+
+⇒ 与 AGENTS.md §3.3「跑绿 ≠ 结论对」同源，但**方向相反**：
+§3.3 说的是「绿可能是错误答案的守卫」，这条是「**失败也可能是结论的伪装**」。
+**两种情况下「脚本有输出」都不等于「脚本测到了东西」。**
+
+### 怎么确认实验真的发生了（下次怎么防）
+
+1. **等待条件必须指向「目标对象」而不是「同类里任意一个」**：
+   `pg_isready` 要带 `-d "$PG_DB"`（等**目标库**可连接），不是只等 server 活着。
+2. **断言「被测对象真的动了」**，而不只是「脚本跑完了」：
+   本脚本最后会 `select ... from pg_tables` ⇒ **必须确认表列表非空**。
+   判定列全是「?」时，先怀疑「实验没发生」，而不是「被测对象有问题」。
+3. **失败时的输出里要能区分「连不上」和「连上了但结果不对」** ——
+   前者是**实验基础设施坏了**，必须先修基础设施再谈结论。
+
+### 留下的守门网
+
+修法（已落地）：
+
+```bash
+until docker exec gorace-pg pg_isready -U "$PG_USER" -d "$PG_DB" >/dev/null 2>&1; do sleep 1; done
+sleep 2
+```
+
+本轮修完后**连跑 4 轮**，每轮两进程间隔约 100ms（真并发），
+4 轮全部「两边都未报建表失败 + 4 张表全建出」⇒ 这次才是真的测到了东西。
+
+---
+
+## P-11 · 「yml 里写了这个键」**不等于**「属性被绑进了 POJO」，更不等于「框架真的用它」
+
+**核对日期：2026-10-23**（UNRESOLVED-ARPC-003 的第二层证据）
+
+### 症状（与 §3.3 的「配置里没写 ≠ 没开」互为镜像）
+
+`AdminRedisTimeoutConfigTest` 最初只有一条断言：
+
+```java
+assertEquals("5s", dig(root, "spring", "data", "redis", "connect-timeout"), ...);
+```
+
+它证明的是「**yml 里有这个键**」。
+但这三件事**任何一件错了，Spring 都会静默保持默认值、不报错**：
+
+1. 属性名写错（`connect-timeout` vs `connectTimeout` vs `connecttimeout`）；
+2. relaxed binding 规则不匹配（`spring.data.redis.*` 前缀层级不对）；
+3. 值塞不进 `DataRedisProperties.connectTimeout`（类型不匹配 / Boot 4 里这个字段被搬走了）。
+
+⚠️ **Boot 4 特别容易踩**：`DataRedisProperties` 所在的 `RedisProperties` 已从
+`spring-boot-autoconfigure` **拆出**到 `spring-boot-data-redis` 模块
+⇒ 依赖没引对时，**整个属性类都不存在**，而应用照常启动。
+
+### 怎么证伪 / 怎么确认
+
+**不要自己解析 yml 再断言** —— 自己解析就等于「把自己的期望当成被验证对象」，
+relaxed binding 是 Spring 自己实现的，绕开它就没有验证力。
+
+用 **Spring Boot 真实的 `Binder`** 走一遍：
+
+```java
+MapConfigurationPropertySource src =
+        new MapConfigurationPropertySource(flatten(load("application.yml")));
+DataRedisProperties props = new Binder(src)
+        .bind("spring.data.redis", DataRedisProperties.class)
+        .orElseThrow(() -> new AssertionError("spring.data.redis 绑不上 —— "
+                + "若属性名写错，Spring 会静默用默认值且不报错"));
+
+assertEquals(Duration.ofSeconds(5), props.getConnectTimeout());
+assertEquals(Duration.ofSeconds(3), props.getTimeout());
+```
+
+⚠️ 细节：yml 里 `host`/`port`/`password` 是 `${REDIS_PORT:6379}` 这种**占位符形态**，
+不解析就没法把 `port` 绑成 `int` ⇒ 辅助方法按 Spring 语义取默认值。
+
+### 下次怎么防
+
+1. **配置类断言要分层**，每层一条测试：
+
+   | 层 | 断言什么 |
+   |---|---|
+   | 文本层 | yml 里有这个键、值写对了 |
+   | 绑定层 | **真 `Binder`** 能把它绑进配置 POJO |
+   | 消费层 | 框架的客户端**真的**按这个值工作（socket 层实测） |
+
+2. **从静态断言升到绑定断言**，成本极低（本例几十行），能挡掉一整类静默失效。
+3. **消费层证据要诚实标边界**：本轮只做到绑定层，
+   「Lettuce 在 socket 层真的按 5s 超时」**仍未证**（需指向黑洞 IP 实测失败耗时）
+   ⇒ 台账里明确写「不得因为绑定层绿了就写『Redis 超时已完全对齐』」。
+
+---
+
+## P-12 · **两个超时值会互相遮蔽** —— 你测到的可能不是你想测的那一个
+
+**核对日期：2026-10-24**（做 Lettuce socket 层实证时踩到）
+
+### 现象
+
+要证明 `spring.data.redis.connect-timeout: 5s` **真的在 socket 层生效**，
+做法是「把连接指向黑洞 IP，量它多久失败」。
+
+第一版测试**没有**覆盖 `spring.data.redis.timeout`（yml 里的 `3s`），结果实测 **3266ms** ——
+那既不是 5s，也不是 10s，正好卡在 **`timeout: 3s`** 上。
+
+### 根因（框架机制）
+
+**Lettuce 的连接是异步的**：
+
+```
+getConnection()   → 立刻返回（实测耗时 0ms），真正的 TCP 握手在后台进行
+ping()            → 命令被排在「还没连上的通道」上，命令超时开始计时
+```
+
+⇒ 真正先到期的，是 **命令超时（3s）**，而不是**连接超时（5s）**。
+⇒ 「连不上要多久」这个可观测量，**默认测的是命令超时**。
+
+### 为什么测试抓不到（它绿着，但测错了对象）
+
+第一版测试的断言写的是「落在 [4000, 9500)」，实测 3266ms ⇒ **红了**。
+但如果当时把区间写成 [2500, 3500)，它就**绿了**、而且绿得毫无意义
+（它证明的是「命令超时是 3s」，不是「连接超时是 5s」）。
+
+⇒ 🔴 **危险不在于红，在于「测错了对象还绿着」。**
+
+### 下次怎么防
+
+1. **要测哪一个超时，就把其他的挪开**。
+   本轮的修法：测试里把 `spring.data.redis.timeout` 覆盖成 `30s`
+   （远大于 connect 超时）⇒ **唯一**可能先到的就是 connect 超时。
+2. **先确认「这个超时值在架构上到底会不会先到」** ——
+   异步连接 + 命令超时 ⇒ 命令超时先到；同步连接 ⇒ 连接超时先到。
+   读一遍框架源码（`LettuceConnectionFactory` / `RedisClient`）比试一次快。
+3. **把「量到的耗时」和「预期的耗时」都写进断言消息** ——
+   本轮的断言消息里列了四个可能的来源（5s / 10s / 3s / 75s）及其含义，
+   红的时候不用回头查代码就知道测错的是哪一个。
+4. **区分「配置层的等价」与「故障时的可观察时延的等价」** ——
+   本例里两侧配置都是「连接 5s / 读 3s」，**配置层等价**；
+   但 Redis 不可达时，用户可见的时延由 **3s** 主导 ⇒ **故障表现并不等价于配置的直觉**。
+   写台账时要说清是哪一层。
+
+### 留下的守门网
+
+`AdminRedisConnectTimeoutSocketTest`：
+① 配置消费点断言（`ClientOptions.socketOptions.connectTimeout == 5s`）—— 永远生效；
+② socket 层时长断言（`[4000, 9500)`），且把 `timeout` 覆盖成 30s 以隔离出 connect 超时。
+
+---
+
+## P-13 · bash 在 UTF-8 locale 下会把**多字节字符并进变量名**
+
+**核对日期：2026-10-24**（写实验脚本时踩到）
+
+### 现象
+
+脚本里这一行直接让脚本退出：
+
+```bash
+echo "    ✓ 两套 admin-rpc 就绪（Go $GO_ADMIN_PORT / RAG $RAG_ADMIN_PORT）"
+```
+
+```
+exp-grpc-admin-deadline-probe.sh: line 118: RAG_ADMIN_PORT）: unbound variable
+```
+
+### 根因
+
+在 UTF-8 locale（`LANG=C.UTF-8`）下，bash 的变量名解析**不把多字节字符当终止符**：
+
+```bash
+$ bash -c 'FOO=1; echo "$FOO）"'      # 输出空 —— 它去找名为 FOO） 的变量
+$ bash -c 'FOO=1; echo "${FOO}）"'    # 正常输出 1）
+```
+
+⇒ **`$VAR` 后面紧跟全角括号 / 中文标点时，bash 会把它当成变量名的一部分**，
+于是一个本来存在、刚在上一行赋过值的变量变成「未绑定」。
+
+### 为什么它特别容易在**中文注释/文案密集的脚本**里踩到
+
+这个仓库的脚本普遍是中文文案，`$VAR` 后面跟一个 `）` 或 `，` 的写法非常自然。
+而且**报错信息指向的是那个看起来完全正常的变量名** ——
+`RAG_ADMIN_PORT）: unbound variable` 里那个 `）` 肉眼很难注意到。
+
+### 下次怎么防
+
+1. **凡 `$VAR` 后面紧跟非 ASCII 字符，一律写成 `${VAR}`**。
+   花括号没有任何副作用，纯粹是零成本保险。
+2. **写完脚本先 `bash -n` 语法检查** —— ⚠️ 但 `bash -n` **抓不到这个**
+   （它语法上合法，错误发生在**展开期**）⇒ 还得真跑一遍。
+3. **自检脚本**（本轮用的就是这个）：
+
+   ```bash
+   python3 - << 'PY'
+   import re
+   for i, l in enumerate(open('script.sh', encoding='utf-8'), 1):
+       for m in re.finditer(r'\$(\w+)(.?)', l):
+           nxt = m.group(2)
+           if nxt and ord(nxt) > 127:
+               print(f"  第 {i} 行: ${m.group(1)} 后紧跟 U+{ord(nxt):04X}")
+   PY
+   ```
+
+⇒ 同类教训还有一个（同一轮踩的）：**macOS 自带 bash 3.2，不支持 `declare -A` 关联数组**
+⇒ `declare: -A: invalid option`。写脚本前先确认目标 shell 的版本，
+或者干脆用普通变量（本轮就是这么做的）。
+
+---
+
+## P-14 · **用错仪器**比「没有仪器」更贵：采样窗口比事件本身还粗
+
+**核对日期：2026-10-24**（做 ARPC-002 的 PG 侧阻塞探针时踩到）
+
+### 现象
+
+要测「客户端 deadline 到期后，服务端那条阻塞查询在 PG 上活了多久」，
+第一版用 `pg_stat_activity` 轮询采样。跑出来的结果：
+
+```
+⚠️ [rag] 全程**没有观测到**阻塞查询 —— 实验可能没生效（表没被真正挡住）
+```
+
+⇒ 读起来像「**RAG 侧根本没发那条查询**」——
+那是个**很强的结论**（会指向「RAG 的请求在到达 DB 前就被取消/退出了」）。
+
+**而真相是：查询发了、也活了，只是采样没赶上。**
+
+### 根因
+
+每次采样都要起一个 `psql` 进程（`docker exec` + psql 启动 ≈ **200ms**），
+采样间隔因此比**事件本身**还粗：
+
+| 事件 | 时长 |
+|---|---|
+| RAG 侧那条查询在 1000ms 档下的可见窗口 | ≈ 100ms（客户端 deadline 1000ms 就返回了） |
+| 一次采样的开销 | ≈ 200ms |
+
+⇒ **采样周期 > 事件窗口 ⇒ 必然漏掉。**
+
+### 为什么这比「没有仪器」更贵
+
+「没有仪器」会让人知道「这里缺证据」；
+「仪器失灵」会让人**得到一个看起来很像结论的东西**——
+`全程没有观测到阻塞查询` 读起来完全像「查询压根没到 PG」，
+而它真实的含义是「我的采样太慢」。
+
+⇒ 与 P-10（实验失败时它长得像结论）同源，
+但这次更隐蔽：**第一版还据此在台账里写了「RAG 侧可能没发查询」这种带方向的猜测。**
+
+### 下次怎么防
+
+1. **选仪器时先算「仪器开销 vs 事件时长」** ——
+   采样周期必须**远小于**事件窗口，否则测的不是「没有」，是「没看到」。
+2. **优先选「事件驱动」的仪器，而不是「轮询」** ——
+   本轮换成 **PG 服务端日志**（`canceling statement due to user request` + `STATEMENT:` 行）：
+   - 它给出**取消的确切时刻 + 语句原文**，精度是毫秒；
+   - 而且「**没有日志条目**」本身就是强证据（= 那条查询根本没到 PG）——
+     **这次的「没有」和上次的「没看到」是两回事，但只有换仪器才能区分。**
+3. ⚠️ **别把「没观测到」写成「没发生」**。台账措辞上，
+   「没观测到 ⇒ 可能是 X」必须显式带上「可能是」，并注明仪器的采样周期。
+4. **让探针报绝对墙钟时刻**（`rpc_start_ms` / `rpc_end_ms`），
+   别用「相对进程启动时刻」的偏移 —— 里面混着 JVM 启动时间（每次几百 ms 且每次都不同），
+   直接比会得出错误的差值（本轮第一版就吃了这个亏）。
+
+### 留下的守门网
+
+`tools/difftest/exp-grpc-admin-deadline-probe.sh`：
+主仪器 = PG 服务端日志；指标 = `Δ_start`（查询存活）与 `Δ_end`（客户端返回后仍占 PG 多久）。

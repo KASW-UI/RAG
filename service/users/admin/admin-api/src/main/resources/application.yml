@@ -28,7 +28,17 @@ spring:
       host: ${REDIS_ADDR:redis}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
+      # ⚠️ 取值出处（2026-10-23 补记，此前只有数值没有出处）：
+      #   Go 的 admin.yaml 完全没配 BizRedis 超时
+      #     → go-zero v1.10.2 redisclientmanager.go:32-39 建 red.Options 时不传任何 timeout
+      #     → go-redis/v9 options.go init() 默认：ReadTimeout = 3s
+      #   ⇒ 读命令超时 3s，与 go-redis 默认逐字相同（完整出处链见 admin-rpc 侧同段注释）。
+      #   🔴 go-zero redis.go:27 的 `readWriteTimeout = 2s` 是**死常量**，别被它误导。
       timeout: 3s
+      # 连接超时：Go 的 go-redis DialTimeout 默认 **5s**。
+      # Lettuce 在 connect-timeout 未设时回落到 timeout ⇒ 不配这行会跟着变成 3s。
+      # Boot 4 里这是独立属性（DataRedisProperties.connectTimeout，模块 spring-boot-data-redis）。
+      connect-timeout: 5s
 
   # ===== 2. Nacos 服务发现客户端 =====
   # 配 Nacos server 地址 + namespace + group。
@@ -67,12 +77,43 @@ grpc:
       enable-keep-alive: true
       keep-alive-time: 30s
       permit-keep-alive-without-calls: true
+      # 🔴 DRIFT-ADMINAPI-009：启动期必须能连上 admin-rpc，否则进程起不来。
+      #
+      # Go 出处（逐层到消费点）：
+      #   service/user/admin/api/internal/svc/servicecontext.go:27
+      #       AdminRpc: adminservice.NewAdminService(zrpc.MustNewClient(c.AdminRpc)),
+      #   go-zero v1.10.2 zrpc/client.go:50-54  →  logx.Must(err)   // 失败即 panic
+      #   go-zero v1.10.2 zrpc/internal/client.go:18   →  dialTimeout = time.Second * 3
+      #   go-zero v1.10.2 zrpc/internal/client.go:122-142
+      #       grpc.DialContext(timeCtx, server, options...)  // options 含 WithBlock()
+      # ⇒ Go 启动时阻塞拨号 3s，连不上就 panic ⇒ **进程根本起不来**。
+      #
+      # 本属性对应 devh grpc-client-spring-boot-starter 3.1.0 的
+      # AbstractChannelFactory.newManagedChannel → connectOnStartup：
+      #   channel.getState(true) → 等 READY → 超时则 throw IllegalStateException(
+      #       "Can't connect to channel admin-rpc") ⇒ stub 创建失败 ⇒ 上下文启动失败。
+      # ⇒ 与 Go 的 zrpc.MustNewClient 同型：「连不上 ⇒ 起不来」，不是「起来但请求全失败」。
+      #
+      # ⚠️ **只对 admin-rpc 这一个 channel 开**（不要提到 grpc.client 顶层当全局）：
+      #   Go 侧 admin-api 的 ServiceContext 里**只有** AdminRpc 一个下游依赖
+      #   （service/user/admin/api/internal/svc/servicecontext.go:24-28），
+      #   而本 yml 里下面那条 grpc.client.user-rpc 是**没有对应 Go 依赖的遗留配置**
+      #   （本模块没有任何 @GrpcClient("user-rpc") 注入点）
+      #   ⇒ 设成全局会凭空多出一条 Go 侧不存在的启动期硬依赖。
+      #
+      # ⚠️ devh 的默认值是 0（= 关闭）⇒ 「yml 里没写」就等于「机制没武装」。
+      #   AdminRpcClient.afterPropertiesSet() 会断言本项已武装，删掉这行会让 admin-api 起不来
+      #   （宁可起不来，也不要静默退化成「Pod Ready 但 100% 请求失败」）。
+      immediate-connect-timeout: 3s
     user-rpc:
       address: discovery:///user-rpc
       negotiation-type: plaintext
       enable-keep-alive: true
       keep-alive-time: 30s
       permit-keep-alive-without-calls: true
+      # ⚠️ 这里**刻意不设** immediate-connect-timeout：
+      #   Go 侧 admin-api 根本没有 user-rpc 依赖（见上）⇒ 不该给它加启动期硬依赖。
+      #   本模块也没有 @GrpcClient("user-rpc") 注入点 ⇒ 这条配置当前无消费者。
 
 # ===== 4. 业务配置（对齐 Go 端 AdminAuth.*）=====
 # 对应 Go: AdminAuth.AccessSecret / AdminAuth.AccessExpire

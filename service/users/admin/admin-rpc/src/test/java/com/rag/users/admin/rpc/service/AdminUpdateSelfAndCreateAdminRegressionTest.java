@@ -20,7 +20,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -140,7 +140,7 @@ class AdminUpdateSelfAndCreateAdminRegressionTest {
         AdminInviteEntity invite = new AdminInviteEntity();
         invite.setId(9L);
         invite.setCode("ADM-0123456789ABCDEF");
-        invite.setExpiresAt(LocalDateTime.now().plusMinutes(10));
+        invite.setExpiresAt(OffsetDateTime.now().plusMinutes(10));
         Mockito.when(adminInviteMapper.selectOne(Mockito.any())).thenReturn(invite);
         Mockito.when(adminMapper.selectOne(Mockito.any())).thenReturn(null); // username 未占用
 
@@ -185,8 +185,8 @@ class AdminUpdateSelfAndCreateAdminRegressionTest {
         AdminInviteEntity invite = new AdminInviteEntity();
         invite.setId(9L);
         invite.setCode("ADM-0123456789ABCDEF");
-        invite.setExpiresAt(LocalDateTime.now().plusMinutes(10));
-        invite.setUsedAt(LocalDateTime.now().minusMinutes(1));
+        invite.setExpiresAt(OffsetDateTime.now().plusMinutes(10));
+        invite.setUsedAt(OffsetDateTime.now().minusMinutes(1));
         Mockito.when(adminInviteMapper.selectOne(Mockito.any())).thenReturn(invite);
 
         StatusRuntimeException e = assertThrows(StatusRuntimeException.class,

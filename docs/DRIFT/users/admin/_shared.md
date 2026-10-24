@@ -210,11 +210,11 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 |---|---|---|---|
 | **U-1** | 🔴 `users/user` 的 **DRIFT-USERRPC-V-001 结论被证伪** ⇒ user-rpc 的「status 为 null ⇒ fail-closed 抛 INTERNAL」**与 Go 相反** | users/user owner | `admin/rpc.md` §3 |
 | **U-2** | 🔴 `users_user.status` 的 `NOT NULL` 与 Go 的可空不一致 | users-common owner | `admin/rpc.md` §3 |
-| **U-3** | 🔴 `admin_admin.extra_info` 应 `jsonb` → `text`（Go 用 `serializer:json` 写 text 列）⇒ 当前 Go 成功 / RAG 22P02 失败 | users-common owner | `admin/rpc.md` §4 |
-| **U-4** | 🔴 `admin_admin` / `admin_invite` 的 **6 个时间列**应改 `timestamptz` | users-common owner | `admin/rpc.md` §5 |
-| **U-5** | ⚠️ `users-common/.../03_create_admin.sql:14`、`04_create_admin_invite.sql:8/15` 的注释**写错了 Go 的表名** | users-common owner | `admin/rpc.md` §5 |
+| **U-3** | ✅ **已修**（2026-10-23 修复轮 §1.1）：`admin_admin.extra_info` 已由 `jsonb` 改为 `text`（对齐 Go 的 `serializer:json`），配套新增 `JsonTextTypeHandler`（text 列专用，**不复用** `JsonbTypeHandler`） | ~~users-common owner~~ **本域已改** | `admin/rpc.md` 修复轮 §1.1 |
+| **U-4** | ✅ **已修**（2026-10-23 修复轮 §1.2）：`admin_admin` / `admin_invite` 的 **6 个时间列**已改为 `timestamptz`，实体侧同步改 `OffsetDateTime` | ~~users-common owner~~ **本域已改** | `admin/rpc.md` 修复轮 §1.2 |
+| **U-5** | ✅ **已修**（2026-10-23 验证轮）：两份 DDL 注释里「**GORM 默认表名 admin_admin / admin_invite**」是**事实错误** —— Go 的 `TableName()` 返回 `admins` / `admin_invites`（`data_model.go:16-18` / `:31-33`）。同时订正了 `UserEntity.java` 的同款错误说法（「GORM 默认表名 user_user」⇒ 实际是 `users`） | ~~users-common owner~~ **本域已改** | `admin/rpc.md` 审计轮 §5 第 3 项 |
 | **U-6** | ⚠️ `users/user` 域另有 **3 个 Go 文件**的字面量同样被转码损坏 | users/user owner | `admin/rpc.md` §5 |
 | **A-1** | 🔴 `user-api` 的 400 响应**同样缺 `charset`**（`GlobalExceptionHandler.java:216`） | users/user owner | `admin/api.md` §5 |
-| **A-2** | ⚠️ `docs/Intentional_Deviations/users/**` 下 **6 个文件全是 0 字节**（空占位）⇒ 「已签字」的条目查不到 | 文档 owner | `admin/api.md` §5 |
+| **A-2** | ⚠️ **~~`docs/Intentional_Deviations/users/**` 下 6 个文件全是 0 字节（空占位）~~**<br>**2026-10-23 验证轮复核：admin 域 3 个已补齐为正式签字档（`_shared.md`/`api.md`/`rpc.md`），`users/user` 域 3 个仍空 + `users/_shared.md` 仍空 ⇒ 归 users/user 域** | `wc -c` 实测 | N-1 / N-4 / N-5 / SD-2026-10-23-06/07/08 现已进签字档 |
 | **A-3** | ⚠️ `tools/difftest/diff.py` 把 DRIFT-ADMINAPI-004 标成「N-1 已签字」，但 N-1 只签了 body 形状 | tools owner | `admin/api.md` §5 |
 | **A-4** | ⚠️ `tools/difftest/check-plaintext400-headers.sh` 只打 user-api，**没有 admin 入口**；且只断言「Content-Type 含 text/plain」，**抓不到 charset 差异** | tools owner | `admin/api.md` §5 |

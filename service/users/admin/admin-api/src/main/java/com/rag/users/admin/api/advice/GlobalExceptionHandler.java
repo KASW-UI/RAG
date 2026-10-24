@@ -174,21 +174,25 @@ public class GlobalExceptionHandler {
      */
     private static ResponseEntity<String> goStylePlainTextBadRequest(String message) {
         HttpHeaders headers = new HttpHeaders();
-        // 🔴 2026-10-23 双侧活体对拍（真实 Tomcat，admin-api 58889 vs Go admin-api 18889）实测：
-        //   Go  : Content-Type: text/plain; charset=utf-8
-        //   RAG : Content-Type: text/plain            ← 少了 charset 参数
+        // 🔴 2026-10-24 双侧活体对拍（真实 Tomcat，admin-api 58889 vs Go admin-api 18889）实测：
+        //   Go  : Content-Type: text/plain; charset=utf-8   （分号后有空格）
+        //   RAG : Content-Type: text/plain;charset=utf-8    （无空格）
+        // ⇒ **归一化后（去空格 + 小写）逐字相同，但线上字节不同** ⇒ 差异来自
+        //   **Tomcat 对 Content-Type 的重渲染**，不是本代码写错了。
         // Go 出处：net/http.Error 的实现（Go 1.x）—— `h.Set("Content-Type", "text/plain; charset=utf-8")`
         //   是**逐字**写死的字符串，不是由框架推导出来的。
         //
         // ⚠️ 为什么不用 MediaType.TEXT_PLAIN：Spring 会把它渲染成 `text/plain`（无 charset），
         //   而 `new MediaType("text","plain",UTF_8)` 渲染成 `text/plain;charset=UTF-8`
-        //   （**无空格 + 大写 UTF-8**）—— 与 Go 的 `text/plain; charset=utf-8` 仍不是逐字节相同。
-        //   ⇒ 直接写原始字符串，才是「与 Go 一致」而不是「与 Go 大致一致」。
+        //   （**无空格 + 大写 UTF-8**）—— 同样与 Go 的 `text/plain; charset=utf-8` 不逐字节相同。
+        //   ⇒ 直接写原始字符串，保证「charset 参数在不在」这件事与 Go 一致；
+        //     至于空格/大小写，取决于容器重渲染，**不由本层控制**（见上方实测）。
         //
         // ⚠️ 严重度 LOW：400 的 body 全是 ASCII（`field "x" is not set` / Jackson 的解析文本），
-        //   任何 charset 解释都得到同一串字节 ⇒ **无字节级歧义**，只是响应头与 Go 不逐字相同。
-        //   ⚠️ 现有守门脚本 `tools/difftest/check-plaintext400-headers.sh` 只断言
-        //   「Content-Type 含 text/plain」，**抓不到 charset 的差异** ⇒ 本条需要独立守门。
+        //   任何 charset 解释都得到同一串字节 ⇒ **无字节级歧义**。
+        //   ✅ 守门：`tools/difftest/check-plaintext400-headers.sh` 的 **admin 入口**
+        //   （2026-10-24 补）已断言「Content-Type 必须含 charset=utf-8」且两侧归一化后一致
+        //   ⇒ 这条差异现在有真实 Tomcat 下的可重复守门，不再需要独立守门。
         headers.set(HttpHeaders.CONTENT_TYPE, "text/plain; charset=utf-8");
         headers.set("X-Content-Type-Options", "nosniff");
         String body = (message == null || message.isEmpty() ? "bad request" : message) + "\n";

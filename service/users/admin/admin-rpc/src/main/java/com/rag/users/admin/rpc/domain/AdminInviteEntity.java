@@ -6,7 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /**
  * admin invite 表的 MyBatis-Plus 实体。
@@ -24,20 +24,38 @@ import java.time.LocalDateTime;
  *   id           BIGSERIAL PRIMARY KEY
  *   code         TEXT NOT NULL UNIQUE            -- 前缀 "ADM-" + 8 字节 hex（大写）
  *   inviter_uid  BIGINT NOT NULL                 -- 创建邀请码的 admin uid
- *   expires_at   TIMESTAMP NOT NULL              -- ⚠️ Go 侧是 timestamptz，见下
+ *   expires_at   TIMESTAMPTZ NOT NULL           -- ⚠️ 2026-10-23 由 TIMESTAMP 改来
  *   used_by_uid  BIGINT                          -- nullable，使用该 invite 的新 admin uid
- *   used_at      TIMESTAMP                       -- nullable，使用时间；⚠️ Go 侧是 timestamptz
- *   create_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
- *   update_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ *   used_at      TIMESTAMPTZ                     -- nullable，使用时间
+ *   create_time  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+ *   update_time  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
  * </pre>
  *
- * <p><b>⚠️ 四个时间列两侧类型不同</b>（Go {@code timestamptz} vs 本侧 {@code timestamp}）
- * —— 属 DRIFT-ARPC-004 ②，<b>修法归属 {@code users-common} 的 DDL</b>（本组件无 DDL 所有权）。
- * Go 出处：{@code data_model.go:24,26,27,28} 的 {@code time.Time} 无 type tag。
+ * <p><b>⚠️ 2026-10-23：四个时间列已由 {@code timestamp} 改为 {@code timestamptz}，
+ * 实体同步 {@code LocalDateTime ⇒ OffsetDateTime}</b>，修 DRIFT-ARPC-004②。
+ * Go 出处：{@code data_model.go:24,26,27,28} 的 {@code time.Time} 无 type tag
+ * ⇒ {@code gorm.io/driver/postgres/postgres.go:251-256} 生成 {@code timestamptz}。
+ * <b>DDL 与实体必须同一提交</b>：列改 timestamptz 而实体仍是 LocalDateTime，
+ * 等于把「列类型不一致」换成「值算错」，那比现状更糟。
  *
- * <p><b>可观察性边界</b>：{@code expires_at} 在 wire 上是 <b>Unix 秒</b>
- * （{@code CreateInviteCodeResp.expires_at}），两侧算法一致 ⇒ HTTP 层不可见差异；
- * 差异只在「跨时区多实例部署」时影响 10 分钟有效期的判定（Go 绝对时刻比较 vs 本侧墙钟比较）。
+ * <p><b>为什么 {@code expires_at} 是本域唯一可观察的时间列</b>：
+ * 它参与「邀请码是否仍可用」的判定，而判定代码两侧<b>结构同构、语义不同</b>：
+ * <pre>
+ *   Go  createadminlogic.go:64-68        now := time.Now()
+ *                                       if invite.UsedAt != nil || !invite.ExpiresAt.After(now)
+ *   RAG AdminCreateAtomicService:124-127 （同构，OffsetDateTime 版）
+ * </pre>
+ * Go 的 {@code invite.ExpiresAt} 来自 timestamptz ⇒ <b>带 location 的绝对时刻</b>，
+ * {@code .After(now)} 比绝对时刻；RAG 原先是 {@code timestamp} ⇒ <b>墙钟</b>，
+ * {@code .isAfter(now)} 比墙钟。单实例同时区下两者恰好等价，
+ * <b>跨时区多实例部署时会分叉</b>：实例 A（Asia/Shanghai）建码存下上海墙钟 12:00，
+ * 实例 B（UTC）消费时 now=04:00 ⇒ {@code 04:00.isAfter(12:00)} 为 false
+ * ⇒ <b>邀请码刚生成就被判为已过期</b>。改用 {@link OffsetDateTime} 后与 Go 同构。
+ *
+ * <p><b>其余三列（{@code used_at} / {@code create_time} / {@code update_time}）不可观察</b>：
+ * admin.proto 全部 13 个 rpc message 里<b>没有</b>这三个字段；
+ * {@code used_at} 在 RAG 侧只做 {@code != null} 判定，不参与大小比较。
+ * 改它们是纯 DDL 对齐，但必须一起改 —— 同一张表里一半 timestamptz 一半 timestamp 才是病灶。
  *
  * <p>行为约束（来自 CreateInviteCode + CreateAdminLogic）：
  * <ul>
@@ -48,7 +66,7 @@ import java.time.LocalDateTime;
  * </ul>
  *
  * <p>L4 实现机制差异：Go 端用 {@code *int64 / *time.Time} 表示 nullable；
- * Java 端用包装类型 {@link Long} / {@link LocalDateTime}（{@code null} 表示 SQL NULL）。
+ * Java 端用包装类型 {@link Long} / {@link OffsetDateTime}（{@code null} 表示 SQL NULL）。
  */
 @Data
 @TableName("admin_invite")
@@ -64,17 +82,17 @@ public class AdminInviteEntity {
     private Long inviterUid;
 
     @TableField("expires_at")
-    private LocalDateTime expiresAt;
+    private OffsetDateTime expiresAt;
 
     @TableField("used_by_uid")
     private Long usedByUid;
 
     @TableField("used_at")
-    private LocalDateTime usedAt;
+    private OffsetDateTime usedAt;
 
     @TableField(value = "create_time", insertStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.NEVER, updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.NEVER)
-    private LocalDateTime createTime;
+    private OffsetDateTime createTime;
 
     @TableField(value = "update_time", insertStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.NEVER, updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.NEVER)
-    private LocalDateTime updateTime;
+    private OffsetDateTime updateTime;
 }

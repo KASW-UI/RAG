@@ -216,7 +216,22 @@ public class AdminServiceGrpcImpl extends AdminServiceGrpc.AdminServiceImplBase 
                             ? null
                             : new HashMap<>(request.getExtraInfoMap())
             );
-            return UpdateUserResp.newBuilder().setSuccess(true).setUser(toProtoUser(user)).build();
+            // 🔴 2026-10-23：去掉 setSuccess(true)，对齐 Go（DRIFT-ARPC-002）。
+            // Go 出处：service/user/admin/rpc/internal/logic/updateuserlogic.go:105-113
+            //     return &pb.UpdateUserResp{
+            //         User: &pb.UserInfo{ … },
+            //     }, nil
+            // Go **只 set 了 User**，没有 set Success ⇒ proto3 bool 的默认值 false
+            // ⇒ 线上序列化时该字段缺席，客户端读到 **false**。
+            // RAG 原先 setSuccess(true) ⇒ 线上是 varint 1，客户端读到 true。
+            // ⇒ 这是 **wire 层可观察差异**（不是「业务上无所谓的默认值」）。
+            //
+            // ⚠️ **不要透传，也不要在此补 true**：本层必须与 Go 的 rpc 层逐字一致。
+            //   admin-api 那层 Go 本来就硬编码 true
+            //   （service/user/admin/api/internal/logic/admin/updateuserlogic.go:68），
+            //   所以 HTTP 面两侧不变，仍是 {"success":true} —— 与本条无关、也不受影响。
+            // 守门：AdminRpcGoWireParityTest#updateUserRespSuccessMatchesGoWire。
+            return UpdateUserResp.newBuilder().setUser(toProtoUser(user)).build();
         }, responseObserver);
     }
 

@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.charset.StandardCharsets;
@@ -64,6 +65,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         })
 @AutoConfigureMockMvc
 class AdminApiPlainText400ContentTypeTest {
+
+    /**
+     * 🔴 必须 mock 掉整个 {@link com.rag.users.admin.api.client.AdminRpcClient}。
+     *
+     * <p>2026-10-24 起 admin-api 启动时会做「3s 内连不上 admin-rpc ⇒ 启动失败」的检查
+     * （DRIFT-ADMINAPI-009，对齐 Go 的 {@code zrpc.MustNewClient}）。
+     * ⇒ 本测试**没有**真的 admin-rpc 可连（{@code grpc.client.admin-rpc.address}
+     * 指向 {@code 127.0.0.1:1}，本来就没人监听）⇒ 不 mock 的话上下文启动就会失败。
+     *
+     * <p>被 mock 的 bean <b>不会</b>执行 {@code afterPropertiesSet()} ⇒ 启动期检查被跳过。
+     * ⇒ 该检查本身由 {@code AdminApiStartupFailFastTest} 单独守门。
+     */
+    @MockitoBean
+    private com.rag.users.admin.api.client.AdminRpcClient adminRpcClient;
 
     @Autowired private MockMvc mockMvc;
 
