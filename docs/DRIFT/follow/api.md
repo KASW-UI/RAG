@@ -16,7 +16,19 @@
 |---|---|---|---|
 | DRIFT-FOLLOW-001 | 空列表出参 Go=`"user_ids":null` / RAG=`"user_ids":[]` | **可观察（L1 wire）** | ✅ 已修 |
 | DRIFT-FOLLOW-005 | recommend 出参**字段顺序** Go=`target_id` 在前 / RAG=`mutual_score` 在前 | **可观察（L1 wire 字节序）** | ✅ 已修 |
+| DRIFT-FOLLOW-007 | 指标文本层：多一个 `application` tag / 直方图**零桶** | 可观察（抓取侧） | ✅ **已修**（tag + 桶）· ⚠️ 残留见下（**框架限制**） |
+| DRIFT-FOLLOW-008 | MaxConns 闸门：**每路由一个**（Go）vs **全局一个**（RAG） | 可观察（并发行为） | 🔴 **未修**（`service/common` 共享模块 ⇒ 派单） |
+| DRIFT-FOLLOW-009 | 下游挂死时：Go **2s ⇒ 200+1015**；RAG **3s ⇒ 503 "Request Timeout"** | **可观察（状态码 + 时刻）** | ✅ 已修 |
 | ~~OPEN-001~~ | ~~Content-Type 不支持 ⇒ RAG 415 / Go 不报错~~ | 可观察 | ✅ **已关闭（415 分支实测不可达）**，见下 |
+
+> **2026-10-24 第二轮（未知项 U1–U8 收口）新增 3 条**，全部有**双侧活体对拍**证据：
+> 指标（U1）、保护层四道（U2）、客户端熔断（U3）、超时级联（U4）、
+> 推荐算法深层分支（U5）、JWT 边界（U6）、黑名单 fail-open（U7）、并发竞态（U8）。
+>
+> ⚠️ **U3 / U4 的首轮数字已作废并重测**（测量装置有缺陷：黑洞读完 preface 就 close
+> ⇒ 测的是「连不上」；etcd 前缀下两个键 ⇒ Go 侧轮询）。
+> **重建装置后的受控结论**：U4 ⇒ DRIFT-FOLLOW-009（已修）；
+> **U3 ⇒ 两侧熔断等价，无漂移**（见下方「U3 受控重测」节）。
 
 ## DRIFT-FOLLOW-001 🔴 空列表出参：Go 是 `null`，RAG 是 `[]`（已修）
 
@@ -193,6 +205,200 @@ RAG 走 Spring 消息转换器 ⇒ **HTTP 415**；Go 侧 `withJsonBody` 只判 C
 ⇒ 本轮登记为 **DRIFT OPEN**，请用户签字后再迁到 `docs/Intentional_Deviations/follow/api.md`。
 （签字后的处理方式：把 415 改成「按 Go 规则丢弃 body」，与 `GoStyleJsonBodyConverter` 的既有行为统一。）
 
+## DRIFT-FOLLOW-009 🔴 下游挂死时的超时级联：Go 200+1015 vs RAG 503（已修）
+
+**现象（U4：黑洞下游实测）**
+
+把 follow-rpc 换成一个「**连上但不回话**」的黑洞 TCP（Go 侧改 etcd 的 `follow.rpc`，
+RAG 侧改 `--grpc.client.follow-rpc.address=static://127.0.0.1:19999`），两侧同时打
+`/follow/v1/follow/list`：
+
+| | HTTP | body | 耗时 |
+|---|---|---|---|
+| **Go** | **200** | `{"code":1015,"msg":"service busy","data":null}` | **2.01s** |
+| **RAG（修前）** | **503** | `Request Timeout\n` | **3.07s** |
+| **RAG（修后）** | **200** | `{"code":1015,"msg":"service busy","data":null}` | **2.47s** ✅ |
+
+**根因：Go 侧是「两层预算」，RAG 侧只有一层**
+
+- Go 的 **ctx 预算 3s**：rest 超时中间件
+  （`service/follow/api/followcenter.go:40-42` `DisableNativeRestTimeout` + `NewHTTPMiddleware`；
+  `service/common/observability/http.go:53` `context.WithTimeout(r.Context(), timeout)`，
+  `:67-68` `r = r.WithContext(ctx)`）。
+- Go 的 **zrpc 客户端超时 2s**：`zrpc/config.go:34`
+  `Timeout int64 `json:",default=2000"``（`RpcClientConf`；`etc/followcenter.yaml` 未配 ⇒ 走 default）。
+  客户端拦截器做的是 `context.WithTimeout(ctx, c.Timeout)` ⇒ **两层取更小的生效** ⇒ 2s 先到。
+- ⇒ Go 侧下游挂死时，**api 拿到的是 rpc 错误**（`DeadlineExceeded`）⇒ 走业务错误通道 ⇒
+  **HTTP 200 + 业务码 1015**；**根本走不到** HTTP 超时分支。
+- RAG 侧此前**只有 ctx 预算**（`GoStyleRequestDeadline.applyTo` 把 HTTP 超时的 3s 预算
+  变成 gRPC deadline）⇒ 下游挂死时一路顶到 HTTP 超时分支 ⇒ **503 "Request Timeout"**。
+
+**⚠️ 修前还观测到一个更糟的现象：响应自相矛盾**
+U3 的突发测试里抓到过 **`HTTP 200` + body `Request Timeout`** ——
+业务线程与超时线程抢同一个 response，状态码与 body 来自**不同分支**。
+这在 Go 侧不可能出现（Go 只有一个 goroutine 写响应）。
+
+**修法**：`follow-api` 的 `FollowRpcClient#followRpc()` 在 ctx 预算之上再压一层
+**2s 客户端超时**（`CLIENT_TIMEOUT_MILLIS = 2000L`，注释逐字引用 Go 的 struct tag）。
+⚠️ **没有 ctx 预算时也要套 2s** —— Go 的客户端超时是**拦截器级别**的，
+与有没有 HTTP 超时中间件无关；否则就是「有时有客户端超时、有时没有」。
+
+**证据**：`service/follow/follow-api/src/main/java/com/rag/follow/follow/api/client/FollowRpcClient.java`
+（`CLIENT_TIMEOUT_MILLIS` + `capByClientTimeout`）；
+实测：黑洞下游下 RAG 返回 `HTTP=200 elapsed=2.47s body={"code":1015,...}`。
+
+## U3 受控重测：客户端熔断 ✅ **等价**（首轮结论已撤回）
+
+**首轮结论作废的原因**：首轮 U3/U4 的**测量装置有两处缺陷**，导致测出来的不是目标现象：
+
+| 缺陷 | 后果 |
+|---|---|
+| 黑洞读完 preface 就 **close** | 客户端看到「**连不上**」（`connection error`，0.0ms）⇒ 测的是「连接被拒」，不是「下游不响应」 |
+| etcd 前缀 `follow.rpc/` 下同时挂着「真 rpc」与「黑洞」**两个键** | Go 侧在两个地址之间**轮询** ⇒ 一部分「快失败」其实是打到了真 rpc |
+
+⇒ 首轮得到的「Go 5/5 快失败 / RAG 1/5 快失败」**不可用**。
+（根因与教训 ⇒ [`docs/Pitfalls/follow/api.md`](../../Pitfalls/follow/api.md) 的
+PITFALL-FOLLOW-011 / PITFALL-FOLLOW-012。）
+
+**重建后的受控装置**
+
+1. 黑洞 **v3**：**完成 HTTP/2 握手**（回 SETTINGS + SETTINGS ACK）后**不再回任何业务响应**
+   ⇒ 客户端只能等到自己的 deadline ⇒ 失败码是 `DeadlineExceeded`（=「下游活着但不响应」）。
+2. etcd 前缀 `follow.rpc/` 下**只留一个键**（`follow.rpc/blackhole`）⇒ 寻址确定。
+3. 两侧 api **都刚重启** ⇒ 熔断窗口（10s）为空 ⇒ **起始状态相同**。
+4. 同一串请求：**12 并发 × 2 轮**（第 2 轮前隔 3s，让第 1 轮的失败全部落进窗口）。
+
+> ⚠️ **为什么必须是「并发」**：googlebreaker 有 `protection=5` 冷启动保护
+> （`dropRatio = (total - 5 - weightedAccepts)/(total+1)`）
+> ⇒ 窗口内失败数 ≤5 时 `dropRatio ≤ 0` ⇒ **一律放行，熔断打不开**。
+> 串行请求每发 2s，10s 窗口里最多攒 4~5 次失败 ⇒ **永远打不开** ⇒ 必须并发一批。
+
+**受控对照结果（同一装置、同一串请求、同一起点）**
+
+| | Go | RAG | 一致？ |
+|---|---|---|---|
+| 第 1 轮（12 并发，`total=0`） | **12/12 放行**，每发 **2.0s** | **12/12 放行**，每发 **2.0s** | ✅ |
+| 失败码 | `DeadlineExceeded` | `DEADLINE_EXCEEDED` | ✅ |
+| 第 2 轮（`total≈12`） | **8/12 拒绝**（`circuit breaker is open`）+ 4/12 放行 | **5/12 拒绝**（`[grpc-breaker] dropped, circuit open`）+ 7/12 放行 | ✅ 形状一致 |
+| 对外 body | `{"code":1015,"msg":"service busy","data":null}` | 同左 | ✅ 逐字节一致 |
+
+⇒ **结论：等价，无漂移，不需要改动。**
+第 2 轮拒绝比例 8/12 vs 5/12 的差异**不是差异** ——
+熔断是**概率型**（`rand() < dropRatio`，此处 dropRatio ≈ 0.54），
+逐条不可比，比的是**形状**（第 1 轮全放行 ⇒ 冷启动保护生效；第 2 轮混合 ⇒ 熔断已打开）。
+
+**运行时证据（RAG 侧，熔断机制确实在跑）**
+
+```
+[grpc-breaker] failure, method=follow.FollowService/GetFollowList, code=DEADLINE_EXCEEDED   ×19
+[grpc-breaker] dropped, circuit open, method=follow.FollowService/GetFollowList               ×5
+```
+
+⇒ 拦截器**装了**（`@GrpcGlobalClientInterceptor` 被 devh 的
+`AnnotationGlobalClientInterceptorConfigurer` 收集；`com.rag.common` 在
+`FollowApiApplication` 的 `scanBasePackages` 内）、失败**在计**、熔断**会打开**、拒绝**会快失败**
+⇒ 三件事都有运行证据，不是「注解存在即认为生效」。
+
+**共享实现与 Go 的逐条对照**（`service/common/.../GoStyleBreaker.java`）
+
+| Go `googlebreaker.go` | RAG `GoStyleBreaker.java` | 一致？ |
+|---|---|---|
+| `window=10s` / `buckets=40` / 250ms 每桶 | `BUCKET_DURATION_MS=250` / `BUCKETS=40` | ✅ |
+| `k=1.5` / `minK=1.1` / `protection=5` | `K=1.5` / `MIN_K=1.1` / `PROTECTION=5` | ✅ |
+| `forcePassDuration=1s` | `FORCE_PASS_DURATION_MS=1_000` | ✅ |
+| `dropRatio=(total-protection-weightedAccepts)/(total+1)` | 同式 | ✅ |
+| `dropRatio *= (buckets-workingBuckets)/buckets` | 同式 | ✅ |
+| `RollingWindow.Reduce` 带 `ignoreCurrent`（跳过当前半桶） | `history()` 跳过 `currentIdx` | ✅ |
+| `failingBuckets`/`workingBuckets` 是「连续段长度」而非计数 | 同语义（遇反向归零） | ✅ |
+
+⇒ **算法等价 + 运行时形状等价 ⇒ U3 关闭，无漂移。**
+
+## DRIFT-FOLLOW-008 🔴 MaxConns 闸门：Go 每路由一个，RAG 全局一个（跨域待办）
+
+**现象（U2：把两侧阈值都压到 1 后实测）**
+
+| 场景（max-conns=1） | Go | RAG |
+|---|---|---|
+| A 占住 routeA 的名额后打**同**路由 | 503 | 503 ✅ |
+| B 占住 routeA 的名额后打**异**路由 | **200** | **503** ❌ |
+| C 释放后再打 | 200 | 200 ✅ |
+
+**根因**
+
+- Go：`rest/engine.go:146` 在 **`bindRoute` 的每条路由链里**各建一次
+  `handler.MaxConnsHandler(ng.conf.MaxConns)`；`rest/handler/maxconnshandler.go:20`
+  `latch := syncx.NewLimit(n)` ⇒ **每路由一个闸门**。
+  ⇒ routeA 被慢请求占满时，**routeB 不受影响**。
+- RAG：`com.rag.common.protection.GoStyleMaxConnsFilter` 是 **一个全局 Semaphore**
+  ⇒ routeA 占满 ⇒ **routeB 也被连带拒绝**。
+
+**可观察后果**：一个慢路由能把**其它所有路由**一起拖垮（503）。
+Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述差异。
+
+**为什么本轮没修**：实现位于 **`service/common` 共享模块**
+（`GoStyleMaxConnsFilter`），而 `service/common` 被 10 个微服务共用
+⇒ 按 `docs/Worktree.md`，**域外改动要交主会话派单**（并发写会撞）。
+**修法一句话**：把 `GoStyleMaxConnsFilter` 的 Semaphore 改成
+**按 `method://path` 分桶的 Map**（与 Go 的 `breaker.NewBreaker(WithName(method+"://"+path))`
+同一思路，`GoStyleBreakerFilter` 已经是这么做的，可直接照抄它的 `breakers` map 结构）。
+
+## DRIFT-FOLLOW-007 🟡 指标文本层：多一个 tag + 直方图零桶（已修 + 框架限制残留）
+
+**现象（U1：两侧归零重测后抓 /metrics 对拍）**
+
+- Go 侧出口：`go-zero` 的 **DevServer**（`internal/devserver/server.go:79` `StartAgent`，
+  由 `zrpc/server.go:63` 的 `c.SetUp()` ⇒ `core/service/serviceconf.go:77` 触发）
+  ⇒ `http://<host>:16065/metrics`。
+- RAG 侧出口：`/actuator/prometheus`（`management.endpoints.web.exposure.include`）。
+
+**修前的三处差异**
+
+1. **多一个 `application="follow-api"` 标签**：Go 的 `Subsystem: "follow_api"`
+   **直接变成指标名前缀**（`follow_api_request_total`），RAG 侧 meter 名**已带同一前缀**
+   ⇒ 再挂一个 tag 是**重复信息**，而且它会**改变时间序列的身份**
+   ⇒ 同一份 PromQL（`sum by (le)`）在两侧结果**不同**。
+   ⚠️ 原注释写的「子系统在 Micrometer 侧对应这个 tag」是**搞错了**（Micrometer 没有 subsystem 概念，
+   本项目已用**名字前缀**承载它）⇒ 已删除该 tag（`application.yml`）。
+2. **直方图零桶**：Go 侧 `prometheus.NewHistogramVec(..., Buckets: prometheus.DefBuckets)`
+   ⇒ 12 个 `le` 边界（`.005 .01 .025 .05 .1 .25 .5 1 2.5 5 10 +Inf`）；
+   RAG 侧 `registry.timer(name, tags)` 走 registry 默认配置
+   ⇒ Prometheus 文本格式里**只有 `_count`/`_sum`/`_max`，没有 `_bucket`**
+   ⇒ **`histogram_quantile()` 在本服务侧完全不可用**（实测 `_bucket` 行数：Go 96 / RAG **0**）。
+   ⇒ 已改用 `Timer.builder(...).publishPercentileHistogram().serviceLevelObjectives(GO_DEF_BUCKETS)`
+   （`GO_DEF_BUCKETS` **逐字抄** Go 的 `prometheus.DefBuckets`）。
+3. **rpc 侧的 `publishPercentiles()`**：那是**分位数**开关，
+   Prometheus 文本格式**不支持 quantile**（只有 OpenMetrics 才有）⇒ 对着抓取端是无效配置
+   ⇒ 已一并改成 `publishPercentileHistogram()`。
+
+**修后核验（两侧归零 → 同一请求序列 → 抓取比对）**
+
+- 计数器与 reject：**名字 + 标签集 + 值逐条一致**（60 条 series 中 46 条非直方图 series 全部相等）。
+- 直方图：Go 的 **12 个 `le` 边界全部存在**（数值化对齐后逐条命中）。
+
+**⚠️ 残留（**框架限制**，不是可修的语义漂移）**
+
+| 残留 | Go | RAG | 性质 |
+|---|---|---|---|
+| 浮点字面量 | `1` | `1.0` | Prometheus Java client 的渲染 |
+| `le` 标签值 | `le="1"` / `le="5"` / `le="10"` | `le="1.0"` / `le="5.0"` / `le="10.0"` | 同上 ⇒ **按标签值匹配的 PromQL 两侧不等价**（`le="1"` 在 RAG 侧匹配到 **0** 条 series） |
+| 桶边界总数 | **12**（11 个数值 + `+Inf`） | **80**（Go 的 11 个数值全在 + Micrometer 默认桶 **68** 个 + `+Inf`） | Micrometer `DistributionStatisticConfig.getHistogramBuckets()` **强制并集** |
+| 额外 series | — | `_max` | Prometheus Java client 专有 |
+
+> ⚠️ **桶边界数是可复现的确定值**：Go 的 11 个数值边界
+> （0.005 / 0.01 / 0.025 / 0.05 / 0.1 / 0.25 / 0.5 / 1 / 2.5 / 5 / 10）
+> **逐个都在** RAG 侧（`le="1"` 例外，它是 `le="1.0"`），
+> RAG 侧多出的 **68** 个是 Micrometer 默认桶（0.001 … 30，1.5 倍比）。
+> ⇒ **Go 的 12 个 `le` 边界 100% 覆盖**（数值口径），
+> 差异只在「**多出来的桶**」与「**同值的写法**」两处。
+
+⇒ **Micrometer / Prometheus Java client 无法表达「恰好 12 个 DefBuckets」**：
+`getHistogramBuckets()` 把 `percentileHistogram` 的默认桶与 SLO **取并集**，
+没有「只要 SLO」的开关。
+⇒ **彻底修法**（**需用户拍板**，属架构取舍）：这 2 个指标**绕过 Micrometer**，
+直接用 Prometheus Java client 的原生 `Histogram`（`HistogramConfig.classicBounds(DefBuckets)`）
+注册进同一个 `PrometheusRegistry` ⇒ 代价是它们脱离 Micrometer 抽象
+（与 `jvm_*` / `http_server_*` 不在同一套 registry 管理），且 `le` 渲染仍是 `1.0` 形态。
+
 ## 证据强度
 
 | 项 | 强度 |
@@ -200,14 +406,73 @@ RAG 走 Spring 消息转换器 ⇒ **HTTP 415**；Go 侧 `withJsonBody` 只判 C
 | 源码逐条对照（24 个 Go 文件 ↔ 23 个 Java 文件） | ✅ 双向静态 |
 | 真启动（真 Tomcat + 真 Redis + 真 Nacos） | ✅ **真启动**（`Started FollowApiApplication`） |
 | HTTP 行为 | ✅ **双侧活体对拍** **52/52** 逐字节一致（协议层 20 + 数据路径 16 + 边界/鉴权 16） |
-| 指标数值 | ⚠️ 未对拍 |
+| 指标数值 | ✅ **双侧抓取比对**（归零重测；计数器同名同标签同值；直方图 Go 的 12 个 le 边界全在 ⇒ 残留见 DRIFT-FOLLOW-007） |
+| 保护层四道（MaxConns/MaxBytes/CPU shedding/breaker） | ✅ **双侧活体实测**（阈值压到 1 后对拍）；breaker 为**受控并发对照**（见 U3 节） |
+| 下游挂死的超时级联 | ✅ **双侧活体实测**（黑洞 v3：完成 HTTP/2 握手后挂住） |
+| JWT 边界（过期/错签/alg=none/畸形/无 exp） | ✅ **双侧活体实测**（9 种逐字节一致） |
+| 黑名单 fail-open | ✅ **双侧活体实测**（`docker stop Redis`） |
+| 并发竞态（Follow × Block） | ✅ **双侧活体实测**（各 40 轮）⇒ **两侧共有缺陷**，记 Pitfalls 不记 DRIFT |
+
+## 受控故障注入环境（可复现）
+
+| 组件 | Go 侧 | RAG 侧 |
+|---|---|---|
+| api | `:18893`（`/tmp/go-follow-api -f /tmp/gofollow/followcenter.yaml`） | `:18896`（`java -cp <runtime classpath> FollowApiApplication`） |
+| rpc | `:18092`（`/tmp/go-follow-rpc`） | `:18282`（`java -jar follow-rpc-0.0.1-SNAPSHOT.jar`） |
+| 下游 user-rpc | 隔离 stub `/tmp/userstub`（`:19210`，实现 Go 真源 `GetUser`，恒 `found=true`） | 同左（同一进程，两边都调它） |
+| PG / Redis / etcd / Nacos | `55450` / `56381` / `49329` / `8848`（容器 `followprobe-*`） | 同左 |
+| **故障注入（黑洞）** | `127.0.0.1:19999`（`/tmp/blackhole3.py`：**完成 HTTP/2 握手后挂住**） | 同左 |
+
+**接线（两侧必须完全对称，这是本轮翻车的根源）**
+
+- Go 侧寻址走 **etcd 前缀 `follow.rpc/`** ⇒ 实验期间**该前缀下只能有一个键**
+  （`follow.rpc/blackhole` → `127.0.0.1:19999`）。
+  ⚠️ 裸键 `follow.rpc` **解析不到任何地址**（`makeKeyPrefix` = `key + '/'`）
+  ⇒ 表现为 `produced zero addresses` + 立即 1015，**极易与熔断拒绝混淆**。
+- RAG 侧用启动参数覆盖：`--grpc.client.follow-rpc.address=static://127.0.0.1:19999`。
+- 两侧 api **都刚重启** ⇒ 熔断窗口（10s）为空 ⇒ 起始状态相同。
+
+**探针脚本**
+
+| 脚本 | 用途 |
+|---|---|
+| `/tmp/u3d_probe.sh <base> <label>` | **并发**口径（12 并发 × 2 轮）⇒ 测熔断的「打开」行为 |
+| `/tmp/u3c_probe.sh <base> <label>` | **串行**口径（12 发 × 0.3s 间隔）⇒ 测超时级联 |
+| `/tmp/probe.sh` / `probe_data.sh` / `probe_ext.sh` | 协议层 20 + 数据路径 16 + 边界 16（52/52 逐字节对拍） |
+| `/tmp/cmp.sh` | 两侧同库复位 + 逐行 diff |
+
+> ⚠️ **三个「假绿」陷阱**（详见 [`docs/Pitfalls/follow/api.md`](../../Pitfalls/follow/api.md)）：
+> 探针固定 `-o` 文件 ⇒ 失败时 body 是上次残留（PITFALL-FOLLOW-010）；
+> 黑洞不完成 HTTP/2 握手 ⇒ 测的是「连不上」（PITFALL-FOLLOW-011）；
+> etcd 裸键 ⇒ 零地址伪装成熔断拒绝（PITFALL-FOLLOW-012）。
 
 ## 待办
 
-1. **修订 `GlobalExceptionHandler` 里那段过期的「已知偏离（415）」注释** ——
-   实测该分支不可达（见上），注释应改为「本分支在 `GoStyleJsonBodyConverter` 生效时不可达」。
-   ⚠️ 属**注释订正**，不改行为 ⇒ 可直接改，等主会话或本域下一轮处理。
-2. `follow-api` **没有 `spring-boot-maven-plugin`** ⇒ 打不出可执行 fat jar，
+1. ~~修订 `GlobalExceptionHandler` 里那段过期的「已知偏离（415）」注释~~ ——
+   ✅ **已修**（2026-10-24，commit `d50750e`）：注释已改为「本分支在 `GoStyleJsonBodyConverter`
+   生效时不可达 + 何时会重新变成偏离 + 守住它的回归网是哪两条测试」。
+2. **DRIFT-FOLLOW-008（MaxConns 每路由 vs 全局）需派单到 `service/common`** ——
+   实现位于共享模块，本域不得改（并发写会撞）。修法见该条目。
+3. **DRIFT-FOLLOW-007 的框架限制残留需用户拍板** ——
+   「彻底修法」= 这 2 个指标绕过 Micrometer 直接注册原生 Prometheus histogram，
+   代价是脱离 Micrometer 抽象 ⇒ 属架构取舍，不宜由本域单方面决定。
+4. **DRIFT-FOLLOW-006（follow-rpc 指标无出口）需用户拍板部署形态** ——
+   见 `docs/DRIFT/follow/rpc.md`。
+5. `follow-api` **没有 `spring-boot-maven-plugin`** ⇒ 打不出可执行 fat jar，
    只能用 `java -cp <runtime classpath> <MainClass>` 启动。
    与 `article-api` / `comment-api` / `hot-api` / `like-api` / `message-api` / `task-api` 同款
    （只有 `favorite-api` 有）⇒ 属**打包形态**问题，不是 Go↔RAG 语义漂移，**未改动**。
+6. ⚠️ **故障注入装置应从 `/tmp` 提升为仓库资产** —— 本轮 U3/U4 的结论**反转了两次**，
+   根因都是**装置不对**（黑洞不完成 HTTP/2 握手 / etcd 前缀下多个键 / 探针固定 `-o` 文件）。
+   ⇒ 建议把下面三个脚本固化进 `tools/difftest/fault-harness/`（**本轮未做**，
+   因为它们是**跨域**资产，放进 `tools/` 需主会话拍板）：
+
+   | 脚本（当前只在 `/tmp`） | 作用 |
+   |---|---|
+   | `/tmp/blackhole3.py` | 黑洞 v3：**完成 HTTP/2 握手**后挂住 ⇒ 模拟「下游活着但不响应」 |
+   | `/tmp/u3d_probe.sh` | 受控并发探针：12 并发 × 2 轮，比对熔断的「形状」 |
+   | `/tmp/u3c_probe.sh` | 受控串行探针（用于测超时级联） |
+
+   ⇒ 配套的**两条纪律**（已写进 [`docs/Pitfalls/follow/api.md`](../../Pitfalls/follow/api.md)）：
+   ① 探针的 body 文件**每次请求前必须清空**，且比对前**断言没有 `HTTP=000`**；
+   ② 故障装置必须**自证**（裸 HTTP/2 客户端跑一遍握手，确认收到 SETTINGS + SETTINGS ACK）。

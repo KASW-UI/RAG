@@ -17,6 +17,7 @@
 | DRIFT-FOLLOW-002 | 运行时 classpath 缺 `grpc-inprocess` ⇒ `NoClassDefFoundError` ⇒ 启动失败 | **启动阻塞（硬失败）** | ✅ 已修 |
 | DRIFT-FOLLOW-003 | `discovery://user-rpc` 两斜杠被 devh 拒绝 ⇒ 启动失败 | **启动阻塞（硬失败）** | ✅ 已修 |
 | DRIFT-FOLLOW-004 | `server-addr` 硬编码 `:8848`、忽略 `NACOS_PORT`，与 follow-api 语义冲突 ⇒ api/rpc 连到两台 Nacos | 运行时故障（业务码塌成 1015） | ✅ 已修 |
+| DRIFT-FOLLOW-006 | 5 个 `follow_rpc_*` 指标**无任何抓取出口**（Go 有 DevServer `/metrics`，RAG 的 follow-rpc 是纯 gRPC 进程） | **可观察（抓取侧）** | 🔴 **未修**（修法需用户拍板部署形态） |
 
 > ⚠️ **三条都发生在「测试全绿」的状态下** —— 63 条测试 0 失败，
 > 而 `java -jar` 起不来。根因见 [`docs/Pitfalls/follow/rpc.md`](../../Pitfalls/follow/rpc.md)。
@@ -159,6 +160,66 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 `first_db` 里最终只有 `block_relation` / `follow_relation` / `flyway_schema_history_follow` 三张表
 ⇒ 与 `article-rpc`（默认账本）**不撞号**。
 
+## DRIFT-FOLLOW-006 🔴 follow-rpc 的 5 个指标**无任何抓取出口**
+
+**现象（U1：抓取实测）**
+
+| | 抓取地址 | 结果 |
+|---|---|---|
+| **Go** | `http://<host>:16065/metrics` | ✅ 127 行 `follow_rpc_*` series（5 个指标全部可抓） |
+| **RAG** | —— | ❌ **进程只有 1 个 LISTEN socket**（18282，gRPC）⇒ **没有任何 HTTP 出口** |
+
+**Go 侧的出口从哪来（逐行）**
+
+- `service/follow/rpc/etc/follow.yaml:20-27`：`DevServer.Enabled: true` / `Port: 16065` / `MetricsPath: /metrics`
+- `zrpc/server.go:63`：`c.SetUp()`
+- ⇒ `core/service/serviceconf.go:77`：`devserver.StartAgent(sc.DevServer)`
+- ⇒ `internal/devserver/server.go:79-87`：起一个独立 HTTP server，`:45-47`
+  把 `promhttp.Handler()` 挂在 `MetricsPath` 上。
+
+⇒ **Go 的 follow-rpc 是「纯 gRPC 进程 + 一个独立的小 HTTP 观测端口」**。
+
+**RAG 侧为什么没有**
+
+`follow-rpc` 是 `WebApplicationType.NONE` 的纯 gRPC 进程（classpath 上只有
+`spring-boot-web-server` 这个**抽象**，没有 servlet 容器）⇒
+`spring-boot-starter-actuator` 的 **web endpoint 没有载体**：
+`management.endpoints.web.exposure.include: prometheus` 这行配置**不产生任何效果**。
+
+**实测证据**
+
+```
+$ lsof -nP -a -p <rag-follow-rpc-pid> -iTCP -sTCP:LISTEN
+java    88963   pr  55u  IPv6 ...  TCP *:18282 (LISTEN)      ← 只有 gRPC 端口
+$ curl http://127.0.0.1:18282/actuator/prometheus
+curl: (1) Received HTTP/0.9 when not allowed                 ← 那不是 HTTP
+```
+
+⇒ **5 个指标（`request_total` / `request_duration_seconds` / `relation_action_total` /
+`db_error_total` / `recommendation_size`）在 RAG 侧一个都抓不到** ——
+其中 `recommendation_size` 是**唯一**能看出「本次推荐返回了几条」的指标。
+
+⚠️ **不是「指标没上报」**：RAG 侧的 meter **确实在注册、确实在累加**
+（`FollowRpcMetrics#currentRecommendationSize()` 读回值，
+`FollowRecommendationServiceTest` 断言了 3 个上报点）——
+**缺的是「出口」，不是「数据」**。
+
+**修法选项（**需用户拍板**：都牵动部署形态）**
+
+| 方案 | 做法 | 代价 |
+|---|---|---|
+| A. 仿 Go 的 DevServer | 在 `follow-rpc` 起一个独立的**小 HTTP server**（如 `com.sun.net.httpserver.HttpServer`），只挂 `/metrics`（+ `/healthz`），端口与 Go 一样用 16065 | 要新写代码 + 开新端口；但**不改变进程形态**、不引 servlet 容器 ⇒ 最贴近 Go |
+| B. Spring Boot 管理端口 | 加 `spring-boot-starter-web`，`management.server.port=16065` | 进程变成 servlet web 应用 ⇒ **部署形态变化**（还要决定主应用监听哪个端口） |
+| C. Pushgateway | 改成主动推送 | **不是 scrape 语义** ⇒ 与 Go 不等价 ⇒ 不推荐 |
+
+⇒ 本轮**未改**：A 需要新增一个常驻 HTTP 端口（部署面变化），B 需要改进程形态。
+两者都应先由用户确认。
+
+**顺带修掉的一处**：`FollowRpcMetrics` 的直方图原来用 `publishPercentiles()`
+（**分位数**开关，Prometheus 文本格式**不支持 quantile** ⇒ 对抓取端是无效配置）
+⇒ 已改成 `publishPercentileHistogram()`，**这样等出口补上时格式就已经是对的**
+（详见 `docs/DRIFT/follow/api.md` 的 DRIFT-FOLLOW-007）。
+
 ## 证据强度
 
 | 项 | 强度 |
@@ -192,4 +253,11 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
    `jakarta.servlet.Filter`，而 follow-rpc 运行时 classpath **无 servlet-api**
    ⇒ 进程关闭时抛 `NoClassDefFoundError`（不影响启动，但会污染关闭日志）
    ⇒ 属 `service/common` 职责，**未在本工作树改动**。
-3. **指标数值**未做双侧对拍（Prometheus 抓取比对）。
+3. ~~**指标数值**未做双侧对拍~~ ⇒ ✅ **已做**（2026-10-24，U1）：
+   Go 侧抓到 127 行 `follow_rpc_*`；RAG 侧**零出口** ⇒ 登记为 **DRIFT-FOLLOW-006**，
+   修法（仿 Go 的 DevServer 起独立 metrics HTTP server）**需用户拍板部署形态**。
+4. **新增全仓门禁**（2026-10-24，commit `d50750e`）：
+   `tools/difftest/check-grpc-runtime-classpath.py` ——
+   守住「`grpc-inprocess` 不得是 test scope」与「`discovery:` 必须三斜杠」两类
+   **编译期看不出、测试期测不到、但能让服务起不来**的缺陷；
+   域外已知的 13 处登记在 `tools/difftest/baselines/grpc-runtime-classpath.txt`。

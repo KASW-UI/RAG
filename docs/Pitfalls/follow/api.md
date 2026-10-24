@@ -141,3 +141,160 @@ RAG : {"users":[{"mutual_score":20,"target_id":"4"}]}      ← 字段顺序反�
 
 **处置**：**未改动** —— 这是**打包形态**问题，不是 Go↔RAG 语义漂移，
 且改动会牵动部署方式（超出对齐 scope）⇒ 仅登记。
+
+---
+
+## PITFALL-FOLLOW-010 🔴🔴 探针用**固定** `-o` 文件 ⇒ 请求失败时读到的是**上一次的残留 body**
+
+**症状**：一次「双侧逐字节一致 ✅」的对拍，**两侧其实都没发出一个请求**：
+
+```
+01-无Authorization|HTTP=000|{"code":200,"msg":"OK","data":{"user_ids":[2002,999999]}}
+```
+
+⇒ `HTTP=000`（curl 压根没连上），body 却是一段**正常的 200 响应**。
+
+**根因：两个缺陷叠在一起**
+
+探针取 body 的写法（`/tmp/probe.sh:3`）：
+
+```bash
+p(){ n="$1"; shift; printf "%s|" "$n"; code=$(curl -sS -o /tmp/pb.txt -w "%{http_code}" "$@" 2>/dev/null); printf "HTTP=%s|" "$code"; printf "%s\n" "$(head -c 200 /tmp/pb.txt)"; }
+```
+
+1. `-o` 的目标是**固定文件名** `/tmp/pb.txt`，**每次请求前不清空**；
+2. ⚠️ **curl 连接失败时不会创建、也不会清空 `-o` 目标文件**（实测）：
+
+```bash
+$ printf 'PRIOR-CONTENT\n' > /tmp/curltest.txt
+$ curl -sS -m 3 -o /tmp/curltest.txt -w "http=%{http_code}\n" http://127.0.0.1:1/nope
+http=000
+$ cat /tmp/curltest.txt
+PRIOR-CONTENT          ← 原样保留！
+```
+
+⇒ 于是 **body 列显示的是上一次请求的响应**。
+
+**为什么后果严重**：对拍脚本对两侧**跑同一串探针**，
+只要 BASE 传错（两侧指向同一个不存在的地址），**两侧输出逐字节相同**
+⇒ `diff` 判定「✅ 两侧逐字节一致」⇒ **假绿**。
+而且 body 看起来是**正常的 200 JSON** ⇒ 人眼更难怀疑。
+
+**复现（本轮实测）**
+
+```bash
+$ bash /tmp/probe.sh "http://127.0.0.1:1/follow/v1" > /tmp/fg-a.txt
+$ bash /tmp/probe.sh "http://127.0.0.1:1/follow/v1" > /tmp/fg-b.txt
+$ diff -q /tmp/fg-a.txt /tmp/fg-b.txt && echo "完全一致"
+完全一致        ⇒ 会被判为「✅ 两侧逐字节一致」
+```
+
+**教训**
+
+1. ⚠️ **探针的「失败」必须与「成功」在输出上可区分**：
+   - `http_code == 000` ⇒ curl 没拿到任何响应 ⇒ **该行无效**，
+     比对前必须先断言「输出里没有 000」；
+   - body 文件**每次请求前先 `rm -f`**，或改用**唯一文件名**（`mktemp`）。
+2. ⚠️ **「两侧一致」不等于「两侧都测了」** ——
+   对拍脚本必须**先单侧自检装置**（打一发看是否 200），**再**跑对拍。
+   否则一次打错地址，就得到一份「全绿」的假报告。
+3. ⚠️⚠️ **本轮实际踩到的三种「假绿」，一次比一次隐蔽**：
+
+   | # | 假绿形态 | 表面现象 | 真相 | 判据 |
+   |---|---|---|---|---|
+   | a | BASE 传错 | `✅ 两侧逐字节一致（20 行）` | 两边都 `HTTP=000`（连都没连上） | 断言**无 `HTTP=000`** |
+   | b | **JWT 过期** | `✅ 两侧逐字节一致（52 行）` | 两边都 **401**（数据路径一条没跑成） | 断言**至少 N 条业务成功体**（`{"code":200`） |
+   | c | body 残留 | body 显示**正常的 200 JSON** | 那是**上一次请求**的响应 | 每次请求前 `rm -f` body 文件 |
+
+   ⇒ b 最隐蔽：**52 条探针全部命中「两侧都失败」**，diff 照样全绿。
+   ⇒ **通用判据：对拍必须断言「探针真的跑到了业务路径」**，
+   即：输出里存在业务成功响应、且不存在无效响应行。
+   ⇒ **建议把这条断言写进对拍脚本本身**（本轮已加在收尾复核里，
+   但 `/tmp/cmp.sh` 本身还没内置 ⇒ 属待办）。
+4. ⇒ 推广：**任何「逐字节比对」类脚本，都要能区分「值相同」与「两边都没取到值」。**
+   本条与 PITFALL-FOLLOW-011、013 同源：**假绿比红贵**。
+
+---
+
+## PITFALL-FOLLOW-011 🔴🔴 故障模拟器**不完成 HTTP/2 握手** ⇒ 测的是「连不上」，不是「挂住」
+
+**症状**：U3（gRPC 客户端熔断）首轮实测得到「Go 5/5 快失败、RAG 1/5 快失败」，
+据此写下「RAG 的熔断几乎不生效」的结论。
+
+**重测后结论完全反转**：两侧熔断行为**等价**
+（第 1 轮都全放行、第 2 轮都是概率性混合、失败码都是 `DeadlineExceeded`）
+⇒ 详见 [`docs/DRIFT/follow/api.md`](../../DRIFT/follow/api.md) 的 U3 受控对照段。
+
+**根因：模拟器的故障形态选错了**
+
+| 版本 | 模拟器行为 | 客户端看到的 | 实际测到的是 |
+|---|---|---|---|
+| v1 | 读完 preface 就 **close** | `Unavailable: connection error`（0.0ms） | **连不上** |
+| v2 | 读完 preface 就持有不关 | 卡在 **HTTP/2 握手**（等服务器 SETTINGS） | 通道**建不起来** |
+| **v3（本轮采用）** | **完成 HTTP/2 握手**（回 SETTINGS + SETTINGS ACK）后**不再回任何业务响应** | `DeadlineExceeded`（等满客户端超时） | **下游活着但不响应** |
+
+⚠️ **v2 最隐蔽**：连接还「挂着」，看起来像挂死；
+但客户端卡在**握手阶段**，此时 grpc-java 会 fail-fast（`UNAVAILABLE`，~70ms），
+而 grpc-go 会一直等到 deadline（`DeadlineExceeded`，2s）
+⇒ **两个 gRPC 库的默认差异被当成了业务差异**。
+
+**教训**
+
+1. ⚠️ **故障注入必须复刻「故障发生的那一刻」**，而不是「连接看起来还在」：
+   - 「下游无响应」= **握手已完成 + 之后不回应**；
+   - 「下游不可用」= **握手就失败**。
+   两者在客户端上的表现**完全不同**。
+2. ⚠️ **装置要能自证**：本轮用裸 HTTP/2 客户端手动跑一遍握手，
+   确认收到了 `SETTINGS`（type=0x04 flags=0x00）与 `SETTINGS ACK`（flags=0x01）
+   ⇒ 才敢说装置挂的是「业务层」。
+3. ⚠️ **熔断是概率型**（`dropRatio` 阈值 + `rand() < dropRatio`），
+   且有 **`protection=5` 冷启动保护**（窗口内失败数 ≤ 5 时 `dropRatio ≤ 0` ⇒ 一律放行）
+   ⇒ **串行**请求永远打不开熔断（10s 窗口里攒不够 6 次失败）
+   ⇒ **必须并发**发一批，才能让窗口内瞬间攒够 `total > 5`。
+   ⇒ **探针形态选错 ⇒ 结论直接反转**（本轮就是这么反转的）。
+
+---
+
+## PITFALL-FOLLOW-012 🔴 go-zero 的 etcd 键是「**前缀 + `/`**」⇒ 裸键解析到**零地址**
+
+**症状**：把 etcd 的键写成裸 `follow.rpc` 后，Go 侧每个请求都**立刻**返回 1015：
+
+```
+rpc error: code = Unavailable desc = last resolver error: produced zero addresses
+```
+
+**根因**：`go-zero@v1.10.2/core/discov/internal/registry.go:517`
+
+```go
+func makeKeyPrefix(key string) string {
+	return fmt.Sprintf("%s%c", key, Delimiter)   // Delimiter = '/'
+}
+```
+
+`registry.go:309`：`cli.Get(ctx, makeKeyPrefix(key), clientv3.WithPrefix())`
+⇒ 实际查的是**前缀 `follow.rpc/`**，裸键 `follow.rpc` **不在这个前缀范围内** ⇒ **零个地址**。
+
+⇒ 正确的键形态是 **`follow.rpc/<任意后缀>`**（本轮用 `follow.rpc/blackhole`）。
+
+**为什么这个坑特别危险**：零地址与**熔断拒绝**在对外表现上**几乎一样**：
+
+| 真实原因 | Go 日志里的 `error_reason` | 对外 body | 耗时 |
+|---|---|---|---|
+| 寻址失败（零地址） | `Unavailable desc = ... produced zero addresses` | `{"code":1015,...}` | **0.0ms** |
+| 熔断打开 | `circuit breaker is open` | `{"code":1015,...}` | **0.0ms** |
+
+⇒ **光看响应体和耗时分不出来**，必须去日志里看 `error_reason`。
+本轮就因为没看日志，把「寻址失败」当成「熔断生效」解读了一整轮。
+
+**另一层污染**：`registry.go:309` 用的是**前缀查询** ⇒ **同一前缀下的多个键会被当成多个候选地址**。
+本轮一开始 `follow.rpc/` 下面同时挂着「真 rpc」与「黑洞」两个键
+⇒ Go 侧在两个地址之间**轮询** ⇒ 测出来的「快失败」有一部分其实是**打到了真 rpc**。
+⇒ **实验接线必须保证「前缀下只有一个键」。**
+
+**教训**
+
+1. ⚠️ **同一个业务码（1015 service busy）背后是完全不同的原因**：
+   下游不可用 / 寻址失败 / 熔断打开 / 客户端超时 —— 四者在 HTTP 层都是 `200 + 1015`。
+   ⇒ **对拍必须同时抓两侧日志里的 `error_reason`**，不能只看响应体。
+2. ⚠️ **go-zero 的 etcd 键语义是「前缀」**：键必须是 `prefix/<后缀>`，
+   且**前缀下只应有一个有效地址**，否则寻址结果不确定。

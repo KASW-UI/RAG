@@ -141,9 +141,13 @@ management:
     prometheus:
       enabled: true
   metrics:
-    tags:
-      # 与 Go prometheus 子系统名对齐（Go 侧 5 个指标的 Subsystem 都是 "follow_rpc"）
-      application: follow-rpc
+    # ⚠️ **刻意不加 `tags.application`**（2026-10-24 双侧活体对拍实测修正）。
+    #
+    # Go 侧 5 个指标的 Subsystem 都是 "follow_rpc"，而 Prometheus 导出时
+    # **Subsystem 直接变成指标名前缀** ⇒ Go 的指标名本身就是 `follow_rpc_request_total`。
+    # RAG 侧的 meter 名**已带同一个前缀** ⇒ 再挂 application="follow-rpc" 是重复信息，
+    # 且会让同一份 PromQL 在两侧得到不同聚合结果。
+    # 详见 docs/DRIFT/follow/rpc.md（DRIFT-FOLLOW-007）。
   prometheus:
     metrics:
       export:

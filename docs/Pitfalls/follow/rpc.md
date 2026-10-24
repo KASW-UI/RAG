@@ -143,3 +143,79 @@ WARN ... Destroy method on bean with name 'com.rag.common.spring.ObservabilityLi
 
 **状态**：🔴 **未修** —— `service/common` 是**共享模块**（被 16 个组件依赖），
 本工作树**不碰域外/共享文件** ⇒ 登记为**跨域待办**，待主会话派单。
+
+---
+
+## PITFALL-FOLLOW-013 ⚠️ shell 的两处**词法**陷阱：`&` 未加引号 / `$var` 紧跟多字节字符
+
+**症状 1：路径里的 `&` 被当成后台操作符**
+
+```
+$ cd /Users/pr/Documents/java&golang/RAG.worktrees/follow
+/bin/bash: line 0: cd: /Users/pr/Documents/java: No such file or directory
+/bin/bash: golang/RAG.worktrees/follow: No such file or directory
+```
+
+⇒ bash 把 `&` 当**后台操作符** ⇒ 命令被切成两半：
+`cd /Users/pr/Documents/java`（后台执行）+ `golang/RAG.worktrees/follow`（另一条命令）。
+本仓路径含 `&` ⇒ **每条涉及仓库路径的命令都必须加引号**。
+
+**症状 2：`$var` 紧跟多字节字符 ⇒ 值被吞进变量名**
+
+```bash
+$ N=12; echo "$N，x"
+x                 ← 值没了，逗号也没了
+$ N=12; echo "$N x"
+12 x              ← 中间有空格就没事
+$ N=12; echo "${N}，x"
+12，x             ← 花括号写法正确
+```
+
+⇒ bash 3.2 把 `$N` 后面紧跟的**多字节字符**当作**变量名的一部分** ⇒ `N，` 成了一个不存在的变量名
+⇒ **值直接丢失**（`set -u` 下还会直接报 `unbound variable` ——
+本轮的探针脚本就是这样在最后一行挂掉的：`line 51: N?: unbound variable`）。
+
+**教训**
+
+1. ⚠️ **变量后面紧跟任何非标识符字符（尤其是中文/全角标点）时，一律写 `${var}`**。
+2. ⚠️ **含 `&`、`;`、`(`、`)`、`$` 的路径必须整体加引号**：`cd "...java&golang/..."`。
+3. ⚠️ 这两条与 PITFALL-FOLLOW-010（探针假绿）、PITFALL-FOLLOW-011（装置形态选错）同源：
+   **「看起来在跑、其实跑的不是你以为的东西」—— 假绿比红贵。**
+
+---
+
+## PITFALL-FOLLOW-014 ⚠️ 真源自身就有竞态：**检查黑名单**与**写入关注**不在同一事务
+
+**现象（U8 并发实测，各 40 轮）**
+
+```
+Go  : 破窗（block 与 follow 并存）37/40
+RAG : 破窗（block 与 follow 并存）32/40
+```
+
+**根因（Go 侧）**
+
+- `service/follow/rpc/internal/logic/followlogic.go:48`：`ExistsAnyBlock`（**SELECT**）
+- 同文件 `:60`：`CreateFollow`（**INSERT**）
+  ⇒ **两句不在同一个事务里** ⇒ 检查与写入之间存在窗口。
+- 而 `service/follow/rpc/internal/logic/blocklogic.go:48` 的 `CreateBlockAndCleanup`
+  是**单事务**（`model/follow.go:33-54`：`conn.WithContext(ctx).Transaction(...)`，
+  插 block + 双向删 follow 原子完成）。
+
+⇒ 破窗路径：T1 的 SELECT 早于 T2 的 INSERT，而 T1 的 INSERT 晚于 T2 的 DELETE
+⇒ **block 与 follow 同时存在**，违反「拉黑 ⇒ 不可关注」的不变式。
+
+**结论**：**两侧都有这个缺陷**（Go 37/40、RAG 32/40，同一量级）
+⇒ **这不是 RAG 的漂移**，是**真源的设计缺陷**。
+按 AGENTS.md 的判据（「RAG 与 Go 不一致 ⇒ 漂移」）⇒ **不进 DRIFT 档**，进本档。
+
+**教训**
+
+1. ⚠️ **1:1 复刻会把真源的缺陷一起复刻** —— 这正是「以 Go 为唯一真源」的代价，
+   必须**显式记录**，否则后来人会把「两边都错」当成「RAG 对齐得好」。
+2. ⚠️ **要证明「不是漂移」，必须两侧同口径压测**：
+   本轮把并发窗口做成两侧**完全相同**的装置（同一 PG、同一对 user/target、同一并发方式），
+   才敢说「共有缺陷」。
+   **只测 RAG 一侧 ⇒ 只能证明 RAG 有问题，不能证明 Go 没问题**（AGENTS.md §3.3）。
+3. ⚠️ 修不修是**产品决策**（要修就得两侧都改 ⇒ 属于「改真源行为」，需用户拍板），
+   **不在对齐 scope 内**。

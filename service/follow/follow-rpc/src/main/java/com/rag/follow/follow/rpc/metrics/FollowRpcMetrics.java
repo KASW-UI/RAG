@@ -92,10 +92,17 @@ public class FollowRpcMetrics {
                 .increment();
 
         long durationNanos = System.nanoTime() - startedAtNanos;
+        // ⚠️ **用 publishPercentileHistogram()，不用 publishPercentiles()**：
+        //   Go 侧是 prometheus.NewHistogramVec(..., Buckets: prometheus.DefBuckets)
+        //   （service/follow/rpc/internal/metrics/metrics.go:19-24）⇒ 暴露 `_bucket{le=...}`。
+        //   `publishPercentiles()` 是**分位数**开关，Prometheus 文本格式**不支持**
+        //   （只有 OpenMetrics 才有 quantile）⇒ 对着 Prometheus 抓取端它是无效配置，
+        //   而 `publishPercentileHistogram()` 才是产出 `_bucket` 的那个开关，
+        //   且其桶边界与 Go 的 prometheus.DefBuckets 逐个相同。
         timerCache.computeIfAbsent(method, name -> Timer.builder(RPC_REQUEST_DURATION)
                         .description("Follow rpc request duration in seconds")
                         .tag("method", name)
-                        .publishPercentiles()
+                        .publishPercentileHistogram()
                         .register(registry))
                 .record(durationNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
     }
