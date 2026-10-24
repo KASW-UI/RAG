@@ -1,0 +1,99 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  difftest 专用副本 —— Go 真源 service/hot/rpc/etc/hot.yaml 的复制品
+# ═══════════════════════════════════════════════════════════════════════════
+#  【铁律】绝不修改冻结的 Go 仓库。Go 的运行时配置全部来自本目录的副本，
+#         启动时用 `-f` 指过来（`go run ./service/hot/rpc -f <本文件>`），
+#         真源一个字节都不动。收尾必须 `git status --porcelain -uno` 为空。
+#
+#  与真源的差异（其余逐字一致）：
+#    1. ListenOn 8083 → 23983                    （独占端口段 23xxx）
+#    2. Prometheus.Port 19091 → 23991             （独占端口段 23xxx）
+#    3. RedisConf.Host redis:6379 → 127.0.0.1:23979  （Go 侧专用 Redis 实例）
+#    4. KqConsumerConf/KqPusherConf.Brokers kafka:9092 → 127.0.0.1:23902
+#    5. Etcd 整块删除                            （见下方第 5 项）
+#    6. Log 显式写成 console                      （见下方第 6 项）
+#    7. Telemetry.Endpoint jaeger:4317 → 127.0.0.1:14317（见下方第 7 项）
+#
+#  【第 5 项：为什么 Etcd 必须整块删掉】
+#    hot.go:35 `zrpc.MustNewServer(c.RpcServerConf, ...)` ⇒ go-zero v1.10.2
+#    zrpc/server.go:46 `if c.HasEtcd()` → `internal.NewRpcPubServer(...)`
+#    ⇒ 注册 etcd 失败会 **panic 退出**（zrpc/internal/rpcpubserver.go:48-53）。
+#    对拍环境刻意不起 etcd（tools/difftest/docker-compose.hot-rpc.yml 只起 Kafka + 2×Redis）：
+#    服务发现层不是业务语义层，摘掉它才是**对称**的
+#    （与 RAG 侧 `SPRING_CLOUD_NACOS_DISCOVERY_REGISTER_ENABLED=false` 是同一个思路的两面）。
+#    删掉 Etcd 后 `c.HasEtcd()` 为 false ⇒ 走 `internal.NewRpcServer(c.ListenOn, ...)`，
+#    **纯监听、无注册**（zrpc/config.go:78-80 `HasEtcd()` = Hosts 非空 && Key 非空）。
+#
+#  【第 6 项：为什么 Log 要显式写 console】
+#    真源 yaml 没有 Log 段 ⇒ go-zero v1.10.2 core/logx/config.go:12 的默认值是 `console`
+#    （**不是** file），所以真源本身不写文件。这里**显式写出来**是为了：
+#      · 不依赖默认值（默认值若变，进程会往当前工作目录写 logs/ ⇒ 落进冻结仓库）；
+#      · 与 tools/difftest/conf/go/hot-api.yaml 的写法保持一致。
+#    Encoding 保持默认 `json`（与真源一致）。
+#
+#  【第 7 项：为什么 Telemetry.Endpoint 要改】
+#    真源是 `jaeger:4317`（容器网络内的 DNS 名）。对拍栈里没有 jaeger，
+#    留着会让 OTLP exporter 反复做 DNS 解析失败 ⇒ 启动日志噪音。
+#    改成 127.0.0.1:14317（本机无监听）⇒ 连接被拒、同样只是日志噪音，但不依赖 DNS。
+#    ⚠️ Telemetry **不删**：go-zero core/service/serviceconf.go:67 `trace.StartAgent(sc.Telemetry)`
+#    是无条件调用的，删掉整段会让 tracer 变成 no-op —— 那是对照条件的改变，不是环境适配。
+#    ⇒ 保持「有 OTLP exporter、只是连不上」这个形态，与真源同构。
+# ═══════════════════════════════════════════════════════════════════════════
+
+Name: hot.rpc
+ListenOn: 0.0.0.0:23983
+
+Log:
+  ServiceName: hot.rpc
+  Mode: console          # difftest: 绝不写进冻结仓库
+
+Prometheus:
+  Host: 0.0.0.0
+  Port: 23991
+  Path: /metrics
+
+Telemetry:
+  Name: hot-rpc
+  Endpoint: 127.0.0.1:14317
+  Sampler: 1.0
+  Batcher: otlpgrpc
+
+RedisConf:
+  Host: 127.0.0.1:23979
+  Type: node
+
+KqPusherConf:
+  Brokers:
+    - 127.0.0.1:23902
+  Topic: article-hot-events
+
+KqConsumerConf:
+  Name: article-hot-consumer
+  Brokers:
+    - 127.0.0.1:23902
+  Topic: article-hot-events
+  Group: article-hot-group
+
+HeavyKeeper:
+  Width: 1000
+  Depth: 5
+  Decay: 0.9
+  TopK: 100
+
+Interaction:
+  SyncEvery: 100
+  TTL: 3600
+  PartitionCount: 3
+  Weights:
+    - Code: 1
+      Name: "like"
+      Weight: 1
+    - Code: 2
+      Name: "comment"
+      Weight: 2
+    - Code: 3
+      Name: "coin"
+      Weight: 3
+    - Code: 4
+      Name: "share"
+      Weight: 4

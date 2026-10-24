@@ -1,0 +1,87 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  hot-rpc 双侧活体对拍专用基建（D1）
+# ═══════════════════════════════════════════════════════════════════════════
+#  【为什么必须起 2 个 Redis，而不是 1 个】
+#    Redis key 两侧都**硬编码**，Go 侧没有任何前缀/可配置项：
+#      Go  : get_hot_articles_logic.go:16  redisHotKey = "hot:articles"
+#            hot_handler.go:208/209         "hot:articles:p%d" / "hot:articles:p%d:shadow"
+#            hot_handler.go:390             "hot:articles:shadow"
+#            hot_handler.go:25              "hot:merge:lock"
+#      RAG : HotRedisSnapshotStore.java:53/56/59/62  同上四个 key
+#      RAG : HotMergeScheduler.java:59    "hot:merge:lock"
+#    ⇒ 共用一个 Redis ⇒ 两侧互相覆盖对方的快照 ⇒ 比较结果**必然「相同」且毫无意义**。
+#    ⇒ 唯一的对称做法：**各起一个 Redis 实例**，两边各连各的。
+#
+#  【为什么只起 1 个 Kafka】
+#    Kafka 是**共享状态**，两侧用**不同的 consumer group-id** 消费**同一批消息**，
+#    这正是要验的东西（Go: article-hot-group / RAG: 由环境变量覆盖为 rag-hot-group）。
+#    ⇒ 同一个 topic、3 个分区（Interaction.PartitionCount=3，两侧都只读 p0..p2）。
+#
+#  【端口独占段 23xxx】
+#    23902 Kafka / 23979 Redis(Go) / 23980 Redis(RAG)
+#    23983 Go hot-rpc gRPC / 23984 RAG hot-rpc gRPC / 23991 Go Prometheus
+#    避开：8081/8889/49210/49900（用户自己的服务）、18903/58903/19903/19904（hot-api 对拍栈）。
+#
+#  【数据目录】全部落 /tmp，绝不写进任何仓库。
+# ═══════════════════════════════════════════════════════════════════════════
+
+name: hotrpcdifftest
+
+services:
+  kafka:
+    image: apache/kafka:3.7.2
+    container_name: hotrpcdifftest-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:19092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://127.0.0.1:23902,INTERNAL://localhost:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@127.0.0.1:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    ports:
+      - "127.0.0.1:23902:9092"
+    volumes:
+      - /tmp/hot-rpc-difftest/kafka:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:9092 >/dev/null 2>&1 || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 10s
+
+  redis-go:
+    image: redis:7-alpine
+    container_name: hotrpcdifftest-redis-go
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:23979:6379"
+    volumes:
+      - /tmp/hot-rpc-difftest/redis-go:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis-rag:
+    image: redis:7-alpine
+    container_name: hotrpcdifftest-redis-rag
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:23980:6379"
+    volumes:
+      - /tmp/hot-rpc-difftest/redis-rag:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

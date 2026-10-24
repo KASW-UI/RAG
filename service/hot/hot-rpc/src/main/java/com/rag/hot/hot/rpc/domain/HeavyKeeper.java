@@ -85,7 +85,7 @@ public class HeavyKeeper {
     /** 对应 Go 的 {@code hk.mu sync.Mutex}：全局串行化 sketch 内部状态。 */
     private final ReentrantLock mu = new ReentrantLock();
 
-    /** ���应 Go {@code heavykeeper.DefaultConfig()}。 */
+    /** 对应 Go {@code heavykeeper.DefaultConfig()}。 */
     public HeavyKeeper() {
         this(DEFAULT_WIDTH, DEFAULT_DEPTH, DEFAULT_DECAY, DEFAULT_TOP_K);
     }
@@ -241,8 +241,39 @@ public class HeavyKeeper {
     /**
      * 对应 Go {@code hash}：FNV-1a 64 依次写入 {@code key} 的字节与一个 seed 字节，再 {@code % width}。
      *
-     * <p>⚠️ Go 是 {@code uint64} 取模；Java 的 {@code long} 是有符号的，
-     * FNV 结果最高位为 1 时会变负数 ⇒ 必须先转无符号再取模。
+     * <p><b>Go 出处</b>：{@code service/hot/heavykeeper/heavykeeper.go:185-190}
+     * <pre>{@code
+     * func (hk *HeavyKeeper) hash(key string, seed int) int {
+     *     h := fnv.New64a()
+     *     h.Write([]byte(key))
+     *     h.Write([]byte{byte(seed)})
+     *     return int(h.Sum64() % uint64(hk.width))   // ← uint64 取模
+     * }
+     * }</pre>
+     *
+     * <h3>为什么必须用 {@link Long#remainderUnsigned(long, long)}</h3>
+     * Go 的 {@code h.Sum64()} 是<b>无符号</b> 64 位，取模结果等于「对 2^64 取余」。
+     * Java 的 {@code long} 是有符号的：FNV-64 结果最高位为 1 时 {@code h < 0}
+     * ⇒ 有符号取模算出来的是 {@code Euclidean(-a, width)}，
+     * 而 Go 要的是 {@code Euclidean(2^64 - a, width)}，两者相差 {@code 2^64 mod width}
+     * （width=1000 → <b>616</b>，width=7 → <b>2</b>，<b>永不为 0</b>）。
+     *
+     * <p>⚠️ <b>两条踩过的错路</b>，别再走：
+     * <ol>
+     *   <li>{@code h & 0xFFFFFFFFFFFFFFFFL}：该字面量的位模式<b>全为 1</b>（即 {@code -1L}），
+     *       掩码等于什么都没做 ⇒ 负数取模得负下标 ⇒ {@code ArrayIndexOutOfBounds}。</li>
+     *   <li>{@code Math.floorMod(h, width)}：同样作用在<b>有符号</b> {@code h} 上，
+     *       实测结果与「有符号取模 + 补正」<b>完全相同（仍然错）</b>。</li>
+     * </ol>
+     * ⇒ 唯一正确的是 {@link Long#remainderUnsigned(long, long)}（正除数下即无符号余数）。
+     *
+     * <p><b>可验证形式</b>：2026-10-23 双侧活体对拍 —— Go 侧用真源 {@code heavykeeper.go}
+     * 的<b>逐字节副本</b>（sha256 {@code 2fef39e7a8e35a19e6774fbfb1ed360e138dd73b5baef3090e58a2bbebd4309e}）
+     * + 最小导出探针，Java 侧直接调用<b>生产类</b>本方法（反射）：
+     * 生产口径 {@code width=1000 / depth=5 / topK=100}、405 个 key（含空串、中文、emoji、超长串）
+     * ⇒ 修正前 <b>173/405 个 key 的列号与 Go 不同、Top-100 榜单集合不一致</b>；
+     * 修正后 <b>2025/2025 个列号逐条一致、Top-100 集合完全一致</b>。
+     * 见 {@code docs/DRIFT/hot/rpc.md} DRIFT-HOTRPC-001。
      */
     private int hash(String key, int seed) {
         final long prime = 1099511628211L;
@@ -254,12 +285,8 @@ public class HeavyKeeper {
         }
         h ^= ((byte) seed) & 0xFFL;
         h *= prime;
-        // Go 是 uint64 取模；Java 的 long 是有符号的，FNV 结果最高位为 1 时 h 是负数。
-        // ⚠️ 不能写 `h & 0xFFFFFFFFFFFFFFFFL` —— 该字面量的位模式全为 1（即 -1L），
-        //    掩码等于什么都没做，负数取模会得到负下标 ⇒ ArrayIndexOutOfBounds。
-        // 正确做法：对正除数做有符号取模后补正，得到的就是无符号余数。
-        int remainder = (int) (h % width);
-        return remainder < 0 ? remainder + width : remainder;
+        // Go 是 uint64 取模 ⇒ Java 必须走无符号余数（width 恒为正）。
+        return (int) Long.remainderUnsigned(h, (long) width);
     }
 
     /** Go {@code float64(uint32)} 的等价：无符号数值，不是 int 的符号值。 */

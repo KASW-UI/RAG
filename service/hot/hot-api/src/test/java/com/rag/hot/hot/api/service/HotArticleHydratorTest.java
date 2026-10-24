@@ -21,11 +21,17 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -187,6 +193,78 @@ class HotArticleHydratorTest {
                 "并发峰值必须等于窗口 8：更小=退化成串行（延迟与下游负载都变），更大=突破了 Go 的信号量");
     }
 
+    /**
+     * ⚠️ **DRIFT-HOTAPI-028 的守门用例**（2026-10-24 第十轮 U10 活体对拍后新增）。
+     *
+     * <p><b>它守的是什么</b>：<b>跨请求</b>的合计在途数<b>不能被全局池压到单请求窗口以下</b>。
+     *
+     * <p><b>Go 侧语义</b>（{@code getHotArticlesLogic.go:93}）：
+     * {@code sem := make(chan struct{}, hydrationConcurrency)} 是<b>每个请求各建一个</b>
+     * ⇒ N 个并发请求 ⇒ <b>N × 8</b> 个同时在途的下游调用，<b>无全局封顶</b>。
+     *
+     * <p><b>为什么「每请求窗口 8」的旧测试抓不到这个</b>：
+     * {@link #neverExceedsEightConcurrentHydrations()} 只跑<b>一个</b>请求
+     * ⇒ 单请求的窗口是 8 ⇒ <b>无论池是 32 还是 64 都通过</b>
+     * ⇒ 必须<b>多个请求同时跑</b>，池才会成为瓶颈。
+     *
+     * <p><b>旧值 32 时会怎样</b>：8 个请求 × 8 = 64 个任务 ⇒ 池只有 32 个线程
+     * ⇒ 同时执行的最多 32 ⇒ 峰值 = 32 ⇒ <b>本断言变红</b>。
+     * <b>新值 64 时</b>：64 个任务全部并行 ⇒ 峰值 = 64 ✅。
+     *
+     * <p>⚠️ 阈值本身是<b>部署决策</b>（已按 {@code SD-HOT-API-010} 签字：
+     * RAG 保留跨请求总上限，比 Go 更保守）⇒ 本测试钉的是
+     * 「<b>并发 ≤ 8 时必须与 Go 等价</b>」这条**已签字的等价区间**，
+     * <b>不是</b>「池必须等于 64」这个具体数字
+     * ⇒ 将来若为别的并发档位调池，本测试需同步调整期望值。
+     */
+    @Test
+    @DisplayName("⚠️ 跨请求的合计在途不被全局池压扁：8 个并发请求 ⇒ 峰值 = 8×8 = 64")
+    void concurrentRequestsEachKeepTheirOwnWindow() throws Exception {
+        AtomicInteger inFlight = new AtomicInteger();
+        AtomicInteger peak = new AtomicInteger();
+        when(articleRpcClient.getPublicArticle(any(), anyLong())).thenAnswer(inv -> {
+            int now = inFlight.incrementAndGet();
+            peak.accumulateAndGet(now, Math::max);
+            try {
+                // ⚠️ 必须让任务**真的重叠**：sleep 期间才计入在途
+                Thread.sleep(30);
+                return published(inv.getArgument(0));
+            } finally {
+                inFlight.decrementAndGet();
+            }
+        });
+
+        final int requests = 8;
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < HotArticleHydrator.HYDRATION_CONCURRENCY; i++) {
+            ids.add("a" + i);
+        }
+
+        ExecutorService callers = Executors.newFixedThreadPool(requests);
+        try {
+            // ⚠️ **起跑门**：8 个请求必须**同时**开始提交，否则各请求的 8 个窗口
+            //    不会完全重叠 ⇒ 峰值会随机落在 56 之类的值上（实测过）⇒ 断言不稳。
+            CountDownLatch startGate = new CountDownLatch(1);
+            List<Future<List<HotArticleCard>>> futures = new ArrayList<>();
+            for (int r = 0; r < requests; r++) {
+                futures.add(callers.submit(() -> {
+                    startGate.await();
+                    return hydrator.hydrate(items(ids), -1L);
+                }));
+            }
+            startGate.countDown();
+            for (Future<List<HotArticleCard>> f : futures) {
+                assertNotNull(f.get(60, TimeUnit.SECONDS));
+            }
+        } finally {
+            callers.shutdownNow();
+        }
+
+        assertEquals(requests * HotArticleHydrator.HYDRATION_CONCURRENCY, peak.get(),
+                "8 个并发请求的合计在途必须是 8×8=64：更小说明全局池把**每个请求自己的**窗口"
+                        + "压小了（那不是限流，是偷偷改了单请求语义 —— DRIFT-HOTAPI-028）");
+    }
+
     @Test
     @DisplayName("成功条目的 13 个字段取值来源正确：hot_score 取 hot-rpc，其余取 article 公开投影")
     void mapsFieldsFromTheCorrectUpstream() {
@@ -242,15 +320,63 @@ class HotArticleHydratorTest {
                 "Go 的 proto3 repeated 字段在 wire 上无元素时是 nil ⇒ JSON 输出 null");
     }
 
+    /**
+     * 🔴 <b>本条断言在 2026-10-24 第十一轮被推翻过一次</b> —— 它当时编码的是<b>漂移后的</b>语义。
+     *
+     * <p><b>原断言</b>：「剩余预算被<b>原样</b>传到底层」（{@code verify(...eq(1500L))} × 3）。
+     * <p><b>为什么它是错的</b>：Go 侧共享的是 ctx 上的<b>绝对</b> deadline
+     * （{@code service/common/observability/http.go:56-57}），
+     * 每个补全在<b>自己的发起时刻</b>重新算 {@code min(ctx.deadline, now+2s)}；
+     * 而「把剩余毫秒原样传给所有补全」= <b>冻结快照</b> ⇒
+     * 后发的补全拿到<b>全新的 2s</b>、<b>不被请求 deadline 卡住</b>。
+     * <p><b>活体实测</b>（U5-OPEN-1 隔离实验 E1，真栈双侧对拍）：
+     * Go 侧第 3 批补全死于 t≈2.98s（被请求 deadline 卡住），RAG 侧死于 t≈4.00s ⇒ <b>差 1.03s</b>。
+     *
+     * <p>⇒ 现在的断言是「<b>在调用点重算</b>」，而不是「原样透传」。
+     */
     @Test
-    @DisplayName("剩余预算被原样传到底层（Go 侧 ctx 被所有补全 goroutine 共享）")
-    void forwardsRequestBudgetToEveryHydration() {
-        when(articleRpcClient.getPublicArticle(any(), anyLong())).thenReturn(published("x"));
+    @DisplayName("🔴 补全的剩余预算在**调用点重算**：后发的补全拿到更小的预算（Go 共享 ctx 的绝对 deadline）")
+    void remainingBudgetIsRecomputedAtEachCallSite() {
+        List<Long> budgets = Collections.synchronizedList(new ArrayList<>());
+        when(articleRpcClient.getPublicArticle(any(), anyLong())).thenAnswer(inv -> {
+            budgets.add(inv.getArgument(1));
+            // 让后面的补全晚一点发出（窗口 8 ⇒ 第 9、10 条要等槽位）
+            Thread.sleep(80L);
+            return published("x");
+        });
 
-        hydrator.hydrate(java.util.Arrays.asList(hotItem("a"), hotItem("b"), hotItem("c")), 1500L);
+        // 10 条 > 并发窗口 8 ⇒ 后 2 条必然是「后发」的
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            ids.add("a" + i);
+        }
+        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(1500L);
+        hydrator.hydrate(items(ids), deadlineNanos);
+
+        assertEquals(10, budgets.size());
+        long max = budgets.stream().mapToLong(Long::longValue).max().orElseThrow();
+        long min = budgets.stream().mapToLong(Long::longValue).min().orElseThrow();
+        assertTrue(max - min >= 40L,
+                "后发的补全必须拿到**更小**的剩余预算（差额应 ≥ 40ms）；"
+                        + "实测 max=" + max + " min=" + min
+                        + " ⇒ 若两者相等，说明退回了「一次性快照」语义（即本条修复前的漂移）");
+        assertTrue(max <= 1500L,
+                "预算不得超过请求的绝对 deadline 对应的剩余量（1500ms），实测 max=" + max);
+    }
+
+    @Test
+    @DisplayName("无 HTTP 超时预算 ⇒ 每次补全都拿默认的 2s（对应 Go「ctx 上没有 deadline」）")
+    void withoutRequestDeadlineEachCallGetsDefaultBudget() {
+        List<Long> budgets = Collections.synchronizedList(new ArrayList<>());
+        when(articleRpcClient.getPublicArticle(any(), anyLong())).thenAnswer(inv -> {
+            budgets.add(inv.getArgument(1));
+            return published("x");
+        });
+
+        hydrator.hydrate(java.util.Arrays.asList(hotItem("a"), hotItem("b"), hotItem("c")), -1L);
 
         org.mockito.Mockito.verify(articleRpcClient, org.mockito.Mockito.times(3))
-                .getPublicArticle(any(), eq(1500L));
+                .getPublicArticle(any(), eq(-1L));
     }
 
     @Test

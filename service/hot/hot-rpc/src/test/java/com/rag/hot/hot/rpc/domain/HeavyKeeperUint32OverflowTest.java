@@ -79,10 +79,55 @@ class HeavyKeeperUint32OverflowTest {
                 .containsExactly("huge", "new");
     }
 
+    /**
+     * 🔴 <b>第三处会分岔的地方：桶冲突时的衰减概率</b>（U9 系统变异查出来的守门缺口）。
+     *
+     * <p><b>判据</b>：Go 的 {@code decay^count} 里 {@code count} 是 {@code uint32}，
+     * 而 Java 用 {@code int} 存同一批位 ⇒ 必须走 <b>无符号</b>数值。
+     *
+     * <p><b>为什么这条能确定性地抓住「有符号」改法</b>（不靠随机）：
+     * <pre>
+     *   count 位模式 = -294_967_296（无符号值 4e9）
+     *   无符号：decay^4e9  = 0.0    ⇒ nextDouble() &lt; 0.0 恒假 ⇒ **不衰减**
+     *   有符号：decay^-2.9e8 = +Inf ⇒ nextDouble() &lt; +Inf 恒真 ⇒ **必然衰减**
+     * </pre>
+     * ⇒ 两条路径的结果<b>完全相反且都确定</b>，不依赖随机数。
+     *
+     * <p><b>构造</b>：{@code width=1} ⇒ 所有 key 都落到唯一的桶 ⇒ 第二个 key 必然与第一个<b>冲突</b>
+     * （指纹不同 —— FNV-1a 32 对不同输入必不同，因为乘以奇数是双射）。
+     * 最后再 {@code add("a", 1)} 一次，把桶里的计数<b>回写进 TopK</b>
+     * （{@code updateTopK} 只在同一 key 再次加入时才更新已存在条目的 count，
+     *  否则衰减的效果在 {@code topK()} 上<b>看不见</b>）。
+     *
+     * <p><b>Go 出处</b>：{@code service/hot/heavykeeper/heavykeeper.go:98} 的
+     * {@code rand.Float64() &lt; math.Pow(decay, float64(count))}。
+     */
+    @Test
+    @DisplayName("桶冲突的衰减概率必须按 uint32 无符号取指数：溢出成负位模式 ⇒ 概率为 0 ⇒ 不衰减")
+    void decayProbabilityUsesUnsignedCount() {
+        HeavyKeeper hk = new HeavyKeeper(1, 1, 0.9, 10);
+
+        hk.add("a", 2_000_000_000);
+        hk.add("a", 2_000_000_000); // 累计 4e9 ⇒ int 位模式为负（uint32 语义）
+        hk.add("b", 5);              // 指纹不同 ⇒ 走冲突分支（decay^count）
+        hk.add("a", 1);              // 再加一次 ⇒ 把桶里的计数回写进 TopK
+
+        List<HeavyKeeper.Item> topK = hk.topK();
+        assertThat(topK)
+                .as("冲突且未衰减 ⇒ b 的 count 恒为 0 ⇒ 不进 TopK")
+                .extracting(HeavyKeeper.Item::key)
+                .containsExactly("a");
+
+        // 无符号语义：4e9 + 1 = 4_000_000_001（冲突时 decay^4e9 = 0 ⇒ 不衰减）
+        // 有符号语义（变异）：decay^(-294967296) = +Inf ⇒ 必然衰减 ⇒ 变成 3_999_999_996
+        assertThat(Integer.toUnsignedLong(topK.get(0).count()))
+                .as("有符号取指数会让 decay^count = +Inf ⇒ 冲突必然衰减 ⇒ 计数被减掉 weight")
+                .isEqualTo(4_000_000_001L);
+    }
+
     @Test
     @DisplayName("countToScore：Go float64(uint32) 是无符号数值，不是 int 的符号值")
-    void countToScoreIsUnsigned() {
-        // int 位模式 0xFFFFFFFF 若按有符号解释是 -1；Go 的 float64(uint32) 是 4294967295
+    void countToScoreIsUnsigned() {        // int 位模式 0xFFFFFFFF 若按有符号解释是 -1；Go 的 float64(uint32) 是 4294967295
         assertThat(HeavyKeeper.countToScore(-1)).isEqualTo(4294967295.0);
         assertThat(HeavyKeeper.countToScore(-1)).isNotEqualTo(-1.0);
         assertThat(HeavyKeeper.countToScore(0)).isEqualTo(0.0);

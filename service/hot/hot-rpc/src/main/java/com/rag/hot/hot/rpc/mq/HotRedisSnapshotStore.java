@@ -29,8 +29,12 @@ import org.springframework.stereotype.Component;
  *       {@code Interaction.TTL}（3600）<b>无关</b>；而合并后的大 key {@code hot:articles}
  *       才用 {@code Interaction.TTL}。⇒ 空闲超过 5 分钟的分片 key 会消失，
  *       之后 rebalance 回灌读到空。</li>
- *   <li><b>{@code EXISTS} 守卫</b>（Lua 第一行）：目标分片 key 不存在时直接返回 0、
- *       <b>整个快照被丢弃</b>。⇒ <b>某个分片的首次快照必然丢失</b>。这是 Go 既有行为，原样保留。</li>
+ *   <li><b>{@code EXISTS} 守卫</b>（Lua 第一行）：检查的是 <b>{@code KEYS[1] = shadow}</b>
+ *       （不是目标分片 key！）⇒ shadow 刚被 pipeline 的 ZADD 写入 ⇒ <b>守卫恒为 1</b>
+ *       ⇒ <b>首次快照不会被丢</b>。
+ *       ⚠️ 此前本注释与 DRIFT 台账都写成「守卫检查目标分片 key ⇒ 首次快照必丢」——
+ *       <b>那是错的</b>（与 Go 的 {@code hot_handler.go:227-234} 不符），
+ *       已由真 Redis 守门测试 {@code HotRedisLuaGateTest#firstSnapshotIsNotLost} 实测证伪。</li>
  *   <li><b>shadow → RENAME 的原子性</b>：先写 shadow 再 Lua 原子改名，
  *       避免合并期读到半成品。</li>
  * </ol>
@@ -69,7 +73,10 @@ public class HotRedisSnapshotStore {
     /**
      * 分片快照改名脚本（Go {@code hot_handler.go:227-234}）。
      *
-     * <p>⚠️ {@code EXISTS} 守卫：目标 key 不存在 ⇒ 返回 0 ⇒ <b>首次快照被丢弃</b>。
+     * <p>⚠️ {@code EXISTS} 守卫检查的是 <b>KEYS[1] = shadow</b>，**不是**目标分片 key：
+     * shadow 刚被 pipeline 的 ZADD 写入 ⇒ 守卫恒为 1 ⇒ <b>首次快照不会被丢</b>。
+     * （真 Redis 实测：{@code HotRedisLuaGateTest#firstSnapshotIsNotLost}；
+     * 变异验证：把守卫改成检查 KEYS[2] ⇒ 该用例立刻变红。）
      * KEYS[1]=shadow，KEYS[2]=分区 key。
      */
     static final RedisScript<Long> PARTITION_RENAME_SCRIPT = new DefaultRedisScript<>("""
@@ -160,7 +167,10 @@ public class HotRedisSnapshotStore {
             Long result = redis.execute(PARTITION_RENAME_SCRIPT,
                     List.of(shadowKey, partitionKey));
             if (result == null || result == 0L) {
-                // result==0 = EXISTS 守卫命中（首次快照必丢）或真失败 —— Go 同样走 fail 分支
+                // result==0 = EXISTS 守卫未命中（shadow 在 pipeline 写完之后、Lua 执行之前消失
+                // —— 真实的竞态/外部删除）或真失败；守卫查的是 KEYS[1]=shadow 而非目标分片 key，
+                // 所以「首次快照必丢」是旧注释/旧台账的错误说法，已被真 Redis 实测证伪。
+                // Go 同样走 fail 分支（hot_handler.go:220-224,236-241）。
                 LOG.error("[Sync] partition {} rename failed: result={}", partitionId, result);
                 metrics.redisSyncFail();
             } else {

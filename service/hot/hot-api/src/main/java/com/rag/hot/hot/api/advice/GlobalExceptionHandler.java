@@ -3,6 +3,7 @@ package com.rag.hot.hot.api.advice;
 import com.rag.common.exception.BusinessException;
 import com.rag.common.http.GoStyleRouterErrorResponses;
 import com.rag.common.response.Response;
+import com.rag.hot.hot.api.exception.HotCodeError;
 import com.rag.hot.hot.common.errmsg.HotErrorCode;
 import com.rag.hot.hot.common.errmsg.HotErrorMessages;
 import io.grpc.StatusRuntimeException;
@@ -79,7 +80,23 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<Response> onBusinessException(BusinessException e) {
-        return envelope(e.getCode(), e.getMessage());
+        return envelope(e.getCode(), bizMsgOf(e));
+    }
+
+    /**
+     * 取<b>业务文案</b>填信封 —— 对齐 Go {@code hotcenter.go:53-66} 的<b>逐字段复制</b>：
+     * <pre>
+     *   code = codeErr.Code        // 5001
+     *   msg  = codeErr.Msg         // "internal server error"   ← 纯文案，**不是** Error() 整串
+     * </pre>
+     *
+     * <p>⚠️ {@link HotCodeError} 把 {@code getMessage()} 覆写成了 Go 的 {@code Error()} 整串
+     * （那是<b>给日志</b> 的），所以这里必须走 {@link HotCodeError#getBizMsg()} 拿纯文案；
+     * 用 {@code getMessage()} 会把 {@code "ErrCode:5001, Errmsg:internal server error"}
+     * 写进<b>响应体</b> ⇒ 那是<b>制造新漂移</b>（Go 的信封里没有这段前缀）。
+     */
+    private static String bizMsgOf(BusinessException e) {
+        return (e instanceof HotCodeError hotErr) ? hotErr.getBizMsg() : e.getMessage();
     }
 
     /**

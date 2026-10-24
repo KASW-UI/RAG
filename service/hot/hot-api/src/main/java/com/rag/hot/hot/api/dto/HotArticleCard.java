@@ -1,6 +1,7 @@
 package com.rag.hot.hot.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 
 import java.util.List;
 
@@ -61,12 +62,29 @@ import java.util.List;
  * JSON 输出对 <b>全部</b> uint32 取值都与 Go 逐字节相同。
  * （热度分实际来自 HeavyKeeper 的衰减估计，量级远小于 2^31，这里做的是「不依赖取值假设」的写法。）
  *
+ * <h2>⚠️ 字段顺序必须显式钉住（字节级 L1）</h2>
+ * Go 的 {@code encoding/json} 按<b>结构体声明序</b>输出（{@code types.go:6-20}），
+ * 即 {@code article_id, rank, hot_score, title, brief, cover_image_url, author_id,
+ * create_time, view_count, like_count, comment_count, manual_type_tag, secondary_tags}。
+ * <p>Jackson 的默认行为是<b>声明序</b>，但全局特性
+ * {@code MapperFeature.SORT_PROPERTIES_ALPHABETICALLY} 一旦被打开（Spring Boot 的
+ * mapper 定制、或某个 starter 的 {@code Jackson2ObjectMapperBuilder} 定制），
+ * 输出就会变成<b>字母序</b> ⇒ 与 Go 的字节不同。
+ * <p>⇒ 这里用 {@link JsonPropertyOrder} <b>显式</b>钉死顺序：
+ * 注解优先于全局特性 ⇒ 无论 mapper 怎么配，输出都等于 Go 的声明序。
+ * （全仓已用同一手法对齐：{@code like-rpc} 的 {@code LikeEventContracts}、
+ * {@code comment-rpc} 的 {@code CommentCacheService}。）
+ *
  * <h2>{@code rank} 的含义（L2，最容易被写错的一条）</h2>
  * 它是<b>过滤之后</b>的稠密序号，且<b>跨页连续</b>：第 2 页第一条是 {@code rank=2}，
  * 而不是 1（Go {@code getHotArticlesLogic.go:119} 的 {@code item.Rank = int32(len(result) + 1)}，
  * 在分页<b>之前</b>重算）。对照 Go 测试
  * {@code getHotArticlesLogic_test.go:135-147}（第 2 页首条断言 {@code Rank != 2} 即失败）。
  */
+@JsonPropertyOrder({
+        "article_id", "rank", "hot_score", "title", "brief", "cover_image_url", "author_id",
+        "create_time", "view_count", "like_count", "comment_count", "manual_type_tag", "secondary_tags"
+})
 public class HotArticleCard {
 
     @JsonProperty("article_id")

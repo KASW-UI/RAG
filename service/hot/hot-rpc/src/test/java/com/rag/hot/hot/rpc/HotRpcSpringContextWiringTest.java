@@ -10,6 +10,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -157,5 +158,57 @@ class HotRpcSpringContextWiringTest {
     void hotEventConsumerIsWiredWithThisMapper() {
         HotEventConsumer consumer = context.getBean(HotEventConsumer.class);
         assertNotNull(consumer);
+    }
+
+    // ==================================================================
+    // 3. 定时任务调度器：两条 @Scheduled 必须互不阻塞
+    // ==================================================================
+
+    @Test
+    @DisplayName("🔴 gRPC 标准健康检查的 HealthStatusManager bean 存在（注册失败要能被探针观测到）")
+    void grpcHealthStatusManagerBeanExists() {
+        // Go 出处：zrpc/internal/server.go:36-38（health.NewServer()）
+        //           + zrpc/internal/rpcserver.go:61-63（RegisterHealthServer + Resume）
+        // ⇒ Go 侧**默认**就注册了 grpc 标准 health service（RpcServerConf.Health 的
+        //    json:",default=true"）。
+        //
+        // RAG 侧由 devh starter 的 GrpcHealthServiceAutoConfiguration 提供
+        // （@ConditionalOnClass(HealthStatusManager) + @ConditionalOnProperty(
+        //    "grpc.server.health-service-enabled", matchIfMissing=true)）。
+        //
+        // ⚠️ 这里断言的是**容器里真有这个 bean**，不是「pom 里有 grpc-services」
+        //    —— 没有它，NacosRegistration 就没法把「注册失败」写进探针能读到的状态
+        //    （DRIFT-HOTRPC-010 的配套改动）。
+        io.grpc.protobuf.services.HealthStatusManager manager =
+                context.getBean(io.grpc.protobuf.services.HealthStatusManager.class);
+        assertNotNull(manager,
+                "HealthStatusManager bean 缺失 ⇒ grpc.server.health-service-enabled 可能被关掉了"
+                        + " ⇒ 注册失败将无法被 gRPC 探针观测到");
+    }
+
+    @Test
+    @DisplayName("🔴 调度器线程池 ≥ 2（Boot 4 默认 1 ⇒ 30s 快照与 10s 合并会互相排队）")
+    void taskSchedulerHasAtLeastTwoThreads() {
+        // Go 出处：service/hot/rpc/internal/mqs/hot_handler.go:76-77
+        //     go h.periodicSync(context.Background())
+        //     go h.periodicMerge(context.Background())
+        //   两条**独立 goroutine**，各自的 ticker 互不影响。
+        //
+        // Java 侧：两条 @Scheduled 共用 Boot 的 TaskScheduler。
+        //   Boot 4.0.8 的 TaskSchedulingProperties$Pool 默认 size = 1
+        //   （字节码：<init> → iconst_1; putfield size）
+        //   消费点：TaskSchedulingConfigurations$ThreadPoolTaskSchedulerBuilderConfiguration
+        //        → getPool().getSize() → ThreadPoolTaskSchedulerBuilder.poolSize(int)
+        //   ⇒ 不显式配 spring.task.scheduling.pool.size=2，两条周期任务会**串行排队**：
+        //      合并一次要 pipeline 读 N 个分片 + 写 shadow + 跑 Lua（Redis 命令超时 3s）
+        //      ⇒ 最坏情况会把 30s 快照推迟。
+        //
+        // ⚠️ 这里断言的是**调度器真实的线程池大小**（消费点生效），
+        //    不是「yaml 里写了 2」——写了不等于生效（AGENTS.md §3.3.3）。
+        ThreadPoolTaskScheduler scheduler = (ThreadPoolTaskScheduler) context.getBean("taskScheduler");
+        assertNotNull(scheduler, "taskScheduler Bean 缺失 ⇒ @Scheduled 不会按配置建线程池");
+        assertTrue(scheduler.getPoolSize() >= 2,
+                "调度器只有 " + scheduler.getPoolSize() + " 个线程 ⇒ 30s 快照与 10s 合并互相排队，"
+                        + "而 Go 侧是两条独立 goroutine（hot_handler.go:76-77）");
     }
 }
