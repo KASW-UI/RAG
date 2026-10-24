@@ -219,22 +219,44 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 | **F1** | **rpc 侧发出的业务错误码，本轮在 api 侧被双侧对拍逐条验过**：Go 的 `GRPCError` 产生的 wire 形态（标准 gRPC 码 + description 文案）与 `BizCodeFromError` 的还原矩阵 **17/17 逐字节一致** ⇒ §2 的 D1–D6（5007/5008/5304 等码）经由 api 侧的还原链路**仍然成立** | 见 [`common.md`](./common.md) §1 与探针 `tools/errmsg-probe/favorite/` |
 | **F2** | **rpc 侧的错误分布已实测**：favorite 域 56 个 `GRPCError` 调用点发出 **7 种标准 gRPC 码**（`Internal`×19、`InvalidArgument`×10、`NotFound`×9、`PermissionDenied`×6、`AlreadyExists`×6、`Unavailable`×4、`FailedPrecondition`×2），**一个越界码都没有** ⇒ §4 的「业务码靠文案反查」这一条**前提成立** | 同上（`FavoriteGrpcError` 类注释记载的分布，本轮探针的 `WIRE` 段侧面印证） |
 
-### 9.3 ⚠️ 仍未决（**沿用 §5 的 7 条，本轮未复核**）
+### 9.3 🔁 U1–U7 复核结论（2026-10-25）
 
-| # | 项 | 本轮状态 |
+> ⚠️ **本轮把 U1/U2/U4/U5/U6 逐条复核了**（源码级 + 可复现探针）；
+> **U3 仍需 Go 侧提供输入**，**U7 仍是最大缺口**。
+
+| # | 项 | 2026-10-23 的登记 | **2026-10-25 复核结论** | 落点 |
+|---|---|---|---|---|
+| **U1** | 权威端点的 wire 形态 | 「按 Go 原样写成 path 参数 servlet，默认关」 | ✅ **路径形态本身是对的**，逐条比对通过（见 §9.5.1）。<br>⚠️ 但**剩余差异比原登记多 4 项**（配置不完整时 Go 起不来 / RAG 照常跑；无启动前 DB 探活；HTTP server 超时值不同；优雅关闭超时不同） | [`../../Intentional_Deviations/favorite/rpc.md`](../../Intentional_Deviations/favorite/rpc.md) **DEV-FAV-RPC-004** |
+| **U2** | preflight 的退出码语义 | 「刻意不调 System.exit，改结构化日志」 | ✅ 结论成立，但**原登记漏了两项**：① Go 的 report 是**写到 stdout 的 JSON**，RAG 不产出 JSON；② Go 的 **「未配置」也是 exit 2**（与 blocked 同级），RAG 的「DB 不可用」落 `failed`（对应 exit 1）⇒ 两侧落档不同 | **DEV-FAV-RPC-003** |
+| **U3** | `zrpc.RpcServerConf.Mode` 的取值域 | 「不在本仓库；Go 侧 `etc/favorite.yaml` 只有 `Mode: dev`」 | ⬜ **仍未决** —— 本轮复核确认该事实**仍成立**（Go 侧确实只出现 `dev`）⇒ **需要 Go 侧给出取值域清单**，否则 Spring profile 的映射无法验证 | 留在本节，**待外部输入** |
+| **U4** | authority lookup 的 3s 超时 | 「Go 用 `context.WithTimeout(3s)` 约束 DB 查询；Java 侧走 Hikari `connection-timeout` ⇒ **未对齐**」 | ✅ **确认未对齐**，并进一步定位：Go 的 3s 约束的是**查询**（ctx 传进 GORM），RAG 侧连到的是**连接超时** ⇒ **不是同一个量纲**。<br>⚠️ 修法待定（MyBatis-Plus 的 `@Options(timeout=…)` 能否等价） | **DEV-FAV-RPC-005**（修法待定） |
+| **U5** | `ObserveRPC` 的 `result` 标签 | 「Go 侧 21 处错误返回因未赋值命名返回值 `err`，被记成 `success`；Java 按真实结果计数 ⇒ 有意的指标行为变更」 | ❌ **撤销 —— 前提被实测证伪**。Go 的 `return nil, GRPCError(...)` **会**赋值命名返回值 `err` ⇒ defer 里 `ObserveRPC` 看到非 nil ⇒ 记 **`fail`** ⇒ **Go 与 RAG 本来就一致，不存在偏离**。<br>（「21」实为 `return nil, GRPCError(...)` 的出现处数，**实测 22**。） | **撤销记录** + 可复现探针 `tools/metrics-probe/favorite/` |
+| **U6** | `favorite_request_seconds_counter` 指标名 | 「Micrometer Counter 会追加 `_total`（Go `client_golang` 不会）⇒ 保留不改」 | ✅ **确认成立**。补充：其余三个指标名（`favorite_request_total` / `favorite_ops_total` / `favorite_db_error_total`）**两侧完全一致**（名字已以 `_total` 结尾）⇒ **只有这一个**不一致 | **DEV-FAV-RPC-001** |
+| **U7** | 双侧活体对拍 + 变异验证 | 「未做。Go 侧 etcd / Kafka 依赖不可拉起」 | 🔴 **仍是最大缺口**。本轮推进：<br>· **错误码契约层已做成双侧活体对拍**（`tools/errmsg-probe/favorite/`，EXIT=0，108 行逐字节一致）—— 但那属于 `favorite-common`，**不是 rpc 层**。<br>· **指标 result 语义已做成可复现探针**（`tools/metrics-probe/favorite/`，EXIT=0）—— 单侧 Go 语义锚定 + RAG 侧运行时守门，**不是整域双侧对拍**。<br>· ⬜ **rpc 侧整体仍无双侧活体对拍**（Go 侧 `etcd` / Kafka 仍不可拉起） | 留在本节，**未闭环** |
+
+### 9.4 U1 的逐条复核：权威读端点
+
+| Go 行为（`authority/http.go`） | RAG 实现 | 结论 |
 |---|---|---|
-| **U1** | 权威端点的 wire 形态（path 参数 servlet，默认关） | ⬜ **未复核**（本轮未触碰 `FavoriteAuthorityEndpointConfig`） |
-| **U2** | preflight 的退出码语义 | ⬜ **未复核** |
-| **U3** | `zrpc.RpcServerConf.Mode` 的取值域 | ⬜ **未复核**（**需 Go 侧提供取值域清单**） |
-| **U4** | authority lookup 的 3s 超时 | ⬜ **未复核** |
-| **U5** | `ObserveRPC` 的 `result` 标签（Go 侧 21 处错误返回被记成 `success`） | ⬜ **未复核** ⇒ **待签字材料尚未落档**，见 [`../../Intentional_Deviations/favorite/rpc.md`](../../Intentional_Deviations/favorite/rpc.md) 的「尚未落档」标注 |
-| **U6** | `favorite_request_seconds_counter` 指标名（Micrometer 追加 `_total`） | ⬜ **未复核** ⇒ 同上 |
-| **U7** | **双侧活体对拍 + 变异验证** | ⬜ **仍未做**。本轮只把 **`favorite-common` 的错误码契约**做成了双侧活体对拍（`tools/errmsg-probe/favorite/`，EXIT=0）⇒ **rpc 侧整体仍无活体对拍** |
+| `GET /internal/v1/favorite/facts/{producer}/{event_id}`（:32）/ `GET /internal/v2/…`（:63）—— **path 参数** | `FavoriteAuthorityEndpointConfig` 的两个 `ServletRegistrationBean`（`V1_PREFIX + "*"` / `V2_PREFIX + "*"`） | ✅ 形态一致（**不是** `AuthorityHandlerFactory` 的 query 形态） |
+| `Cache-Control: no-store`（:33 / :64） | `resp.setHeader("Cache-Control", "no-store")` | ✅ |
+| `Authorization` 必须**恰好 1 个** + `Bearer ` 前缀（:34-36） | `Collections.list(req.getHeaders("Authorization"))` + `size() != 1` | ✅ |
+| 恒定时间比较（:36 `subtle.ConstantTimeCompare`） | `MessageDigest.isEqual` | ✅ |
+| 失败 ⇒ 401 + body `unauthorized`（:37） | `writePlain(401, "unauthorized")` | ✅ |
+| **带 query ⇒ 404**（:40-43，**不是** 400） | `getQueryString()` 非空 ⇒ 404 | ✅ |
+| 单次 lookup **3s**（:44 / :80） | **未接到 DB 查询** | 🔴 未对齐 ⇒ **U4 / DEV-FAV-RPC-005** |
+| `ErrFavoriteFactUnavailable` ⇒ 404（:47-50） | `FactUnavailableException` ⇒ 404 | ✅ |
+| 其它 error ⇒ **503** + `source unavailable`（:51-56） | 同 | ✅ |
+| 成功 ⇒ 200 + `Content-Type: application/json`（:57-61） | 同 | ✅ |
+| v2：reader 不实现 `ReaderV2` ⇒ 404（:75-79） | 本实现**始终**支持 V2（Go 侧的 `model.FavoriteModel` 实现了 V2 ⇒ 该分支实际不可达） | ✅ 等价 |
+| `http.Error` 的 text/plain + `X-Content-Type-Options: nosniff` | `writePlain` 显式写两个头 | ✅ |
 
-> ⚠️ **U7 仍是 rpc 侧最大的证据缺口**：Go 侧 rpc 的 `etcd` / Kafka 依赖本轮仍不可拉起。
-> ⇒ 本轮的做法是**先把能双侧跑的层（错误码契约）单独做成探针**，而不是硬凑一个跑不起来的整域对拍。
+> ⚠️ **一处未列的细节**：Go 的 `r.PathValue` 走 `http.ServeMux` 的 pattern 匹配，**自带 path 规范化**
+> （清理 `.`/`..`、合并 `//`、逐段解码）；RAG 侧是 `getRequestURI()` + **手工切分 + 手工 `URLDecoder.decode`**。
+> ⇒ 对含 `%2F` / `//` / `..` 的畸形路径，两侧可能给出不同的 404 判定。
+> ⚠️ **本轮未实测**（需要真 Go 的 `ServeMux` 对拍）⇒ 记为 **OBS**，不进偏离档。
 
-### 9.4 一条**跨域观察**（不属于 favorite 域的修法，但影响本域）
+### 9.5 一条**跨域观察**（不属于 favorite 域的修法，但影响本域）
 
 `service/like/like-api/.../LikeRpcClient.java:43-48` 的注释写着
 「⚠️ client 熔断：Go 侧有且默认开，Java 侧**尚未接入**（已登记的已知偏离）」。

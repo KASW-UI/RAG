@@ -38,16 +38,24 @@ import java.time.Instant;
  * <b>这是已知的指标面差异，不改</b>：把它换成 Timer 会让「累计耗时」的语义变成「分布」，
  * 那是<b>另一个</b>指标而不是同一个指标的修正。
  *
- * <p><b>② Go 侧 21 处错误返回把 {@code result} 记成 {@code success}。</b>
- * 每个 logic 头部是 {@code defer func(){ metrics.ObserveRPC(module, action, started, err) }}()，
- * 读的是<b>命名返回值</b> {@code err}；而 21 处 {@code return nil, favoritecommon.GRPCError(...)}
- * <b>没有先赋值给 err</b> ⇒ {@code err == nil} ⇒ 记成 {@code success}。
- * <br>
- * <b>本实现按真实结果计数</b>（成功记 success、异常记 fail），理由：
- * Java 没有命名返回值 + defer 的组合，要"照抄缺陷"就得在 21 个分支里手写
- * {@code observeRpc(..., SUCCESS)} —— 那是把一个 Go 的编码疏忽固化成 21 处刻意的错误标注，
- * 且必然被后人"顺手修好"。
- * ⇒ <b>这是一处有意的指标行为变更</b>，登记在 docs/Intentional_Deviations/。
+ * <p><b>② 🔴 Go 侧<b>没有</b>「错误被记成 success」这回事 —— 2026-10-25 实测证伪。</b>
+ * 每个 logic 头部是 {@code defer func(){ metrics.ObserveRPC(module, action, started, err) }}()}，
+ * 读的是<b>命名返回值</b> {@code err}；而错误分支写成
+ * {@code return nil, favoritecommon.GRPCError(...)} ——
+ * ⚠️ <b>Go 的 return 语句会把返回值赋给对应的命名返回值</b>
+ * ⇒ {@code err} <b>非 nil</b> ⇒ {@code ObserveRPC} 记的是 <b>{@code fail}</b>，不是 {@code success}。
+ * <p>⚠️ <b>此前本注释写的是「Go 侧 21 处错误返回被记成 success」—— 那是错的</b>：
+ * ① 那个数字是 {@code return nil, GRPCError(...)} 的出现处数（实测 <b>22</b> 处，不是 21）；
+ * ② 更关键的是<b>语义判断反了</b>：这些 return <b>都会</b>赋值命名返回值 {@code err}。
+ * ⇒ <b>Go 与 RAG 在这一点上本来就一致</b>（都按真实结果记 success/fail），
+ * <b>不存在「有意变更」，也不需要签字</b>。
+ * <p>⇒ 2026-10-25 已撤销原 U5 条目（见 {@code docs/DRIFT/favorite/rpc.md} §9.3），
+ * 并用<b>实测</b>（Go 侧最小复刻程序，见 {@code tools/metrics-probe/favorite/}）钉死这条语义。
+ * <p>⚠️ <b>真正需要守的不是「Go 的缺陷」，而是「RAG 侧别漏设」</b>：
+ * Java 没有「命名返回值 + defer」这套组合，RAG 侧靠 try/catch/finally +
+ * 每个失败分支显式 {@code result = RESULT_FAIL} 来达成同一语义
+ * ⇒ <b>新增失败分支时漏设 RESULT_FAIL，指标就会把失败记成 success</b>。
+ * ⇒ 由 {@code FavoriteRpcMetricsResultTagTest} 逐条守住。
  *
  * <p><b>③ 两处 {@code module} label 写错</b>：{@code create_favorite_logic.go:89} 与
  * {@code get_favorites_by_folder_logic.go:68} 都在 <b>item</b> 流程里用了
