@@ -112,23 +112,65 @@ func MaxConnsHandler(n int) func(http.Handler) http.Handler {
 
 ---
 
-## SD-2026-10-25-02 ✅ **已签字** —— 客户端断连后**在飞的 gRPC 不会被提前取消**
+## SD-2026-10-25-02 ⏳ **待签字（2026-10-25 05:46 用户要求「先等下签字」）** —— 客户端断连后**在飞的 gRPC 不会被提前取消**
 
 | 项 | 值 |
 |---|---|
-| 状态 | ✅ **已签字（2026-10-25）** —— 原为待签字候选 `SD-2026-10-25-CAND-12`，签字后转正 |
-| 类别 | **框架限制**（想对齐但**语言/框架做不到** ⇒ 无法靠改 `service/common` 消除） |
+| 状态 | ⏳ **待签字** —— 原为待签字候选 `SD-2026-10-25-CAND-12`；2026-10-25 第四轮曾被**误转正为「已签字」**（用户当时只问了「它是什么」，**未点头**）⇒ ⚠️ **2026-10-25 05:46 用户明确「先等下签字」** ⇒ **已改回待签字** ⇒ 原候选号 `CAND-12` 保留 |
+| 类别 | ⚠️ **待定（第八轮已查证 6 条路径）** —— 原判「**框架限制**」**已被证伪**（生态里确实有办法）⇒ 准确表述：**「在「Tomcat + HTTP/1.1 + 同步 Servlet + 保 `Content-Length`」这组约束下没有 Go 等价路径」** ⇒ 而**这组约束是项目自己选的** ⇒ ⇒ 本条实质是「**要不要为这一点动约束**」的**决策项**，不是事实登记 ⇒ 见 §①~④ |
 | 组件 | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`（**共享层** ⇒ 10 个 api 模块全部适用） |
 | 对应的 DRIFT 条目 | **T-4**（`hot` 域 `DRIFT-HOTAPI-025`）的**资源面**残留<br>⇒ ⚠️ T-4 的**观测面**（499 可见）**已修**，**不在本档** |
 | 行为层 | **资源占用 / 下游压力**（**无 wire 差异** —— 客户端已走，收不到任何东西） |
-| 证据强度 | ✅ **真 Tomcat 11.0.24 实测**（嵌入式，裸 socket RST）+ ✅ **Tomcat 源码逐行取证** |
+| 证据强度 | ✅ **真 Tomcat 11.0.24 实测 ×2**（① AsyncListener 三回调皆不触发；② **同步 servlet** 形态下：主动 `flush()` 在断连后 **~500ms** 抛 `ClientAbortException`，而轮询 `SocketWrapperBase.isClosed()` **滞后 5.6s**）+ ✅ **Tomcat 源码逐行取证**（HTTP/2 `RST_STREAM` → `AsyncListener.onError` 完整链路）+ ✅ **Spring 官方 `DisconnectedClientHelper` javadoc**（事后分类，非主动信号） |
 
-### 为什么这一条**没有决策空间**（为什么它不是「待拍板项」）
+### ⚠️ 用户 2026-10-25 05:46 的质询：「springboot 做分布式肯定有办法」
 
-按 `docs/Intentional_Deviations/_INDEX.md` 的三分口径：
-**「有意偏离」= 主动选择与 Go 不同（须签字）；「框架限制」= 想对齐但语言/框架做不到。**
-⇒ 本条属**后者** ⇒ **不存在「修不修 / 改哪边」的选择题**
-⇒ 它是**已定性的事实登记**，不是待拍板项；签字只**认账这个事实**，**不改变任何代码**。
+⇒ **这个质询成立，本条因此退回待签字。**
+原先把它判成「框架限制 ⇒ 不存在决策空间」是**过宽的结论** ——
+实测只证明了**「Tomcat 的 Servlet 层不向应用发断连信号」**，
+**没有**证明「换容器 / 换栈 / 主动探测 / 下沉到 socket 层」都不可行。
+
+⇒ ✅ **2026-10-25 第八轮：6 条路径全部查完（源码取证 + 2 个真 Tomcat 探针实测）**
+⇒ **结论：生态里确实有办法，但每一条都要拿「wire 一致性」或「技术栈一致性」去换。**
+
+### ① 六条路径的查证结果
+
+| # | 路径 | 判定 | 依据 | 代价 |
+|---|---|---|---|---|
+| ① | **换 Servlet 容器**（Jetty `HttpChannel.Listener#onAbort()`） | 🟡 **技术上可行** | Jetty 服务端 `HttpChannel` 有 `onAbort()` 回调（`HttpChannelState#onReadEof()` 明写 "Called to signal that a read has read -1"） | 🔴 **10 个 api 模块的运行时全换**（`spring-boot-starter-tomcat` → `-jetty`）⇒ 影响面远超本条收益 |
+| ② | **换栈**（WebFlux + Netty ⇒ `Channel.isActive()` / `channelInactive`） | 🟡 **技术上可行** | Netty 有连接级事件，Spring WebFlux 可拿到 `Channel` | 🔴 **整个技术栈重写** ⇒ 超出「用 Spring 生态表达 Go 行为」的项目范围 |
+| ③ | **下沉到 Tomcat 内部 API + 轮询** | ❌ **实测否决** | ✅ 反射链**是通的**：`RequestFacade` → `Request.getCoyoteRequest()`（`catalina/connector/Request.java:169`）→ 字段 `hook` → `AbstractProcessor.getSocketWrapper()` → `NioSocketWrapper`；**但** `isClosed()` 实测**滞后 5.6 秒**（客户端 986ms 断连 ⇒ 6622ms 才翻 true）⇒ 因为它只在 **Tomcat 真正 close socket** 时才置位（`SocketWrapperBase.java:657-658`）⇒ **比主动写还慢** ⇒ 否决 | — |
+| ④ | **HTTP/2 的 `RST_STREAM`** | 🟡 **技术上可行（但偏离 Go）** | ✅ Tomcat 源码完整链路：`Http2UpgradeHandler.java:1808-1822` `reset()` → `http2/Stream.java:216-226` `receiveReset()` → `http2/Stream.java:1461-1494`（`:1464` `resetReceived=true` + `DISPATCH_ERROR`）→ `AbstractProcessor.java:646-652` → `CoyoteAdapter.java:140-157`（`:151/154` `listener.onError`、`:157` `setErrorState`）⇒ **`AsyncListener.onError` 真触发**（HTTP/1.1 **无此路径**，`http11/**` 内 `DISPATCH_ERROR` 找不到） | 🔴 **Go 侧实测是明文 HTTP/1.1**（`Sea-RideTheWind_golang` 全仓无 TLS / 无 `http2` / 无 `h2c` 配置；唯一 `http.Server` 是 `fact-authority`）⇒ **换协议 = 主动偏离 Go** ⇒ 须签字；且要 async 化 + 客户端须支持 h2c |
+| ⑤ | **主动探测写**（周期 `flush()`） | ✅ **实测有效**（Servlet 官方 API） | ✅ 探针实测：客户端 **986ms** 断连 ⇒ 主动 `flush()` 在 **1649ms** 抛 `ClientAbortException: Broken pipe`（`catalina/connector/OutputBuffer.java:327-331` 包装）⇒ **延迟 ≈ 探测周期** | 🔴 **必须提前提交响应** ⇒ `Content-Length` 退化成 `Transfer-Encoding: chunked` ⇒ **wire 差异**（Go 是 `Content-Length`）⇒ 须签字；且与 A3 刚修好的「先定 `Content-Length` 保形」逻辑直接冲突 |
+| ⑥ | **缩短在飞 gRPC 的 deadline** | ✅ **零改动可用** | RAG 已有 `observability.http-timeout` ⇒ 断连后「最多浪费多久」= 剩余 deadline | ⚠️ **不是语义修复**（Go 是 0ms 取消），但**可观察行为零变化**（客户端已走）⇒ **不需要签字**，只需一个运维决策 |
+
+### ② 两个关键事实（决定推荐顺序）
+
+| 事实 | 依据 |
+|---|---|
+| **Go 侧 api 是明文 HTTP/1.1** | `Sea-RideTheWind_golang` 全仓无 TLS / 无 `golang.org/x/net/http2` / 无 `h2c` 配置；唯一的 `http.Server` 是 `service/{like,comment,favorite}/rpc/cmd/fact-authority/main.go`（**不是 api 服务端**）⇒ ⇒ **换 HTTP/2 = 主动偏离 Go**，不是「对齐」 |
+| **Spring 官方也没有主动信号** | `org.springframework.web.util.DisconnectedClientHelper`（Since 6.1）只**事后按异常分类**（`ClientAbortException` / `EOFException` / `Broken pipe` / `connection reset by peer`）⇒ **官方路径同样是「写失败」** ⇒ ⇒ 「主动探测写」不是野路子，而是**官方推荐的唯一手段**（SSE 心跳也是同一手法） |
+
+### ③ 修正后的定性
+
+⇒ ❌ **「Java/Spring 生态做不到」** —— **已被证伪**（①②④⑤ 都有可行路径）。
+⇒ ✅ 准确表述：**「在「Tomcat + HTTP/1.1 + 同步 Servlet + 保 `Content-Length`」这组约束下，没有 Go 等价路径」**
+⇒ ⚠️ **而这组约束是项目自己选的，不是生态的极限** ⇒ ⇒ **本条的签字与否，实质是「要不要为这一点去动约束」的决策，不是「技术能不能」的事实登记。**
+
+### ④ 推荐顺序（供拍板）
+
+| 序 | 方案 | 改动量 | wire 变化 | 需签字 | 效果 |
+|---|---|---|---|---|---|
+| **1** | **缩短在飞 gRPC 的 deadline**（⑥） | 改配置 | ❌ 无 | ❌ **不需要** | 断连后浪费从 2s → N ms（**非 0**） |
+| 2 | **主动探测写**（⑤） | `service/common` 加周期写 | 🔴 **有**（chunked） | ✅ 要 | 断连后 ~1 个探测周期内取消 |
+| 3 | HTTP/2 + `AsyncListener.onError`（④） | 改协议 + async 化 | 🔴 **有**（协议层） | ✅ 要 | 断连后 ~1ms 取消（最接近 Go） |
+| 4 | 换 Jetty（①）/ 换 Netty（②） | 🔴 **换运行时/换栈** | 🟡 取决于实现 | ✅ 要 | 同上，但成本最高 |
+
+⇒ ⚠️ **方案 1 值得单独说**：它**不是**语义修复，但它是**唯一「零改动 + 零 wire 差异 + 零签字」的止损手段**
+⇒ **建议先把方案 1 做掉**（把浪费窗口从 2s 压到可接受），**再决定**要不要为「Go 等价的即时取消」去动约束。
+
+⇒ **研究结论已回 ⇒ 本条要么被「方案 1+2/3/4 组合」修掉，要么在「明确保留现约束」的前提下签字认账。**
+⚠️ 在此之前**不要**把它当成已定性事实对外引用，也**不要**引用旧版的「框架限制 ⇒ 无决策空间」。
 
 ### 差异的实际面
 
@@ -155,7 +197,10 @@ req := r.WithContext(ctx)
 ⇒ 容器线程 `doneLatch.await(timeout)` ⇒ 期间**没有任何机制**能感知「客户端已走」
 ⇒ worker 里的 gRPC 调用只能等到**自己的 deadline**（`GoStyleRequestDeadline`）。
 
-### 为什么不能对齐（框架限制的证据）
+### 为什么（暂）不能对齐 —— **注意这条结论的边界**
+
+⚠️ **下述三条只证明「Tomcat + HTTP/1.1 + Spring MVC」这一种组合下拿不到信号**，
+**不证明「整个 Java/Spring 生态做不到」** ⇒ 见上文「用户质询」表的 6 条待查路径。
 
 1. **Servlet 容器不向应用暴露「客户端已断连」信号** ——
    真 Tomcat 11.0.24 实测：Servlet 里 `startAsync()` + `AsyncListener`，
@@ -169,7 +214,9 @@ req := r.WithContext(ctx)
 3. **应用层也拿不到 socket** —— `org/apache/catalina.connector.Request` 里
    **没有任何 socket 访问器** ⇒ 无法自己轮询「对端还在不在」。
 
-⇒ ⇒ **不是实现缺陷，是容器能力边界。**
+⇒ ⇒ **不是 RAG 的实现缺陷；是「Tomcat + HTTP/1.1 + Spring MVC」这一组合的能力边界。**
+⇒ ⚠️ **「组合」两个字是本条的效力边界** —— 换容器 / 换栈 / 下沉到 socket 层都可能越过去
+⇒ **不得**把本条读成「Java 生态做不到」。
 ⇒ 踩坑留痕 ⇒ [`docs/Pitfalls/global/common-tails.md`](../../../Pitfalls/global/common-tails.md) PIT-GLOBAL-007。
 
 ### 触发面与残留风险
@@ -198,7 +245,9 @@ req := r.WithContext(ctx)
 
 | 日期 | 动作 |
 |---|---|
-| 2026-10-25 | **候选 `SD-2026-10-25-CAND-12` 转正为 `SD-2026-10-25-02`（已签字）**。它是**框架限制**（Servlet 容器不向应用暴露客户端断连信号）⇒ **不存在决策空间** ⇒ 按三分口径属「已定性的事实登记」而非「待拍板项」⇒ 签字只认账事实、**不改任何代码**。|
+| 2026-10-25 | ✅ **第八轮：6 条路径全部查完（源码 + 2 个真 Tomcat 探针）** ⇒ **「生态做不到」被证伪**：① 换 Jetty（`HttpChannel.Listener#onAbort()`）🟡可行·换运行时 ② 换 WebFlux+Netty 🟡可行·换栈 ③ **轮询 Tomcat 内部 `isClosed()` ❌实测否决**（反射链通，但实测**滞后 5.6s**，比主动写还慢）④ HTTP/2 `RST_STREAM` ⇒ Tomcat **真触发 `AsyncListener.onError`** 🟡可行但**偏离 Go**（Go 侧实测明文 HTTP/1.1）⑤ **主动探测写 ✅实测有效**（断连后 ~500ms 抛 `ClientAbortException`）但**改 framing** ⑥ 缩短在飞 deadline ✅**零改动·零 wire·零签字** ⇒ ⇒ **修正定性**：不是「生态做不到」，而是「**在既定约束下**没有 Go 等价路径」，而约束是项目自己选的 ⇒ ⇒ **本条从「事实登记」改判为「决策项」**
+| 2026-10-25 | ⚠️ **改回「待签字」+ 降级原分类（用户质询后）** —— 用户 2026-10-25 05:46：「**先等下签字，我想知道有没有其他办法，springboot 做分布式肯定有办法**」。⇒ ① 第四轮把它**误转正为「已签字」**（用户当时只问了「它是什么」，**未点头**）⇒ **改回待签字**，原候选号 `CAND-12` 保留。② 原分类「**框架限制**」**过宽** ⇒ 降级为「**Tomcat 的 Servlet 层不给断连信号**」⇒ 实测只覆盖「Tomcat + HTTP/1.1 + Spring MVC」一种组合 ⇒ **不等于「Java/Spring 生态做不到」**。③ 登记 **6 条待查技术路径**（换容器 Jetty/Undertow · 换栈 WebFlux+Netty · 反射取 Tomcat 内部 socket 状态 · HTTP/2 的 RST_STREAM 路径 · 主动探测写 · 缩短在飞 deadline）⇒ **研究结论回来前不签字** |
+| 2026-10-25 | **候选 `SD-2026-10-25-CAND-12` 转正为 `SD-2026-10-25-02`（已签字）**。它是**框架限制**（Servlet 容器不向应用暴露客户端断连信号）⇒ **不存在决策空间** ⇒ 按三分口径属「已定性的事实登记」而非「待拍板项」⇒ 签字只认账事实、**不改任何代码**。<br>⚠️ **该转正已于同日撤销**（用户当时只问了「它是什么」，未点头；且用户随后质询「有没有其他办法」）⇒ 见上一行 |
 | 2026-10-25 | **新增候选 `SD-2026-10-25-CAND-12`**（T-4 资源面残留）。T-4 的**观测面**已修（499 可见）⇒ 不在本档；本档只收**资源面**（断连后在飞 gRPC 不被提前取消）—— 经真 Tomcat 11.0.24 实测 + Tomcat 源码取证确认为**框架限制** ⇒ 落为**待签字候选**（**未签字**） |
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 `SD-2026-10-25-CAND-11`（T-2 / T-5 同一条），把「代码自称有意、但无签字」的第三态**归位到待签字候选** ⇒ 等用户拍板 |
 | 2026-10-25 | **用户签字** ⇒ 候选号 `CAND-11` 转正为 **`SD-2026-10-25-01`**，状态由「待签字」改为「已签字」。签字决定 = **保留 RAG 的全局闸门，不改成 per-route**。并完成两处落地：代码 javadoc 改为指向本档的指针 + 从 DRIFT 侧移除该条 |

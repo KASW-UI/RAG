@@ -140,11 +140,32 @@ Servlet 里 `request.startAsync()` + 注册 `AsyncListener`，
 **不是**「客户端消失了」这件事。
 ⇒ 断言任何「容器会通知你客户端断连」的设计前，**先做一次真容器探针**（§3.3）。
 
+### ⚠️ 2026-10-25 第八轮订正：**「容器不给信号」≠「生态做不到」**
+
+⇒ 用户质询「springboot 做分布式肯定有办法」⇒ **成立**。
+⇒ 本坑的**正确边界**是：**「Tomcat 的 Servlet 层不向应用暴露断连信号」**，
+**不是**「Java/Spring 生态做不到」⇒
+⇒ **6 条路径全查**（源码 + 2 个真 Tomcat 探针）后：
+
+| 路径 | 判定 | 关键实测 |
+|---|---|---|
+| 轮询 Tomcat 内部 `SocketWrapperBase.isClosed()` | ❌ **否决** | 反射链**通**（`RequestFacade`→`Request.getCoyoteRequest()`→字段 `hook`→`AbstractProcessor.getSocketWrapper()`），但实测**滞后 5.6 秒**（客户端 986ms 断 ⇒ 6622ms 才翻 true）⇒ 因为它只在 Tomcat **真正 close socket** 时才置位 ⇒ **比主动写还慢** |
+| **主动探测写**（周期 `flush()`） | ✅ **有效** | 客户端 986ms 断 ⇒ `flush()` **1649ms** 抛 `ClientAbortException: Broken pipe`（`catalina/connector/OutputBuffer.java:327-331` 包装）⇒ 延迟 ≈ 探测周期；**代价**：必须提前提交响应 ⇒ `Content-Length` → chunked ⇒ **wire 差异** |
+| HTTP/2 `RST_STREAM` | 🟡 可行但**偏离 Go** | Tomcat **真触发 `AsyncListener.onError`**（`Http2UpgradeHandler.java:1808-1822` → `http2/Stream.java:216-226,1461-1494` → `AbstractProcessor.java:646-652` → `CoyoteAdapter.java:140-157`）；HTTP/1.1 **无此路径**；⚠️ **Go 侧实测是明文 HTTP/1.1** ⇒ 换协议 = 偏离 Go |
+| 换 Jetty / 换 WebFlux+Netty | 🟡 可行 | Jetty `HttpChannel.Listener#onAbort()`；Netty `channelInactive`；**代价** = 换运行时 / 换栈 |
+| 缩短在飞 gRPC 的 deadline | ✅ **零改动可用** | 断连后浪费 = 剩余 deadline；**零 wire 差异、零签字** |
+
+⇒ **教训（本坑的真正教训，比原版更宽）**：
+**「我实测了 A 组合下拿不到信号」⇒ 只能推出「A 组合下拿不到」**，
+**推不出「生态层面做不到」** ⇒
+⇒ **定性前先问一句：「我试的是不是唯一可能的组合？」**
+（这次组合轴 = 容器 × 协议版本 × 同步/异步 × 应用栈，**四轴**都还有别的取值。）
+
 ### 出处
 
 - 踩坑位置：`service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`（T-4 的修法选型）
-- 一次性探针：`/tmp/probe-async/AsyncDisconnectProbe.java`（不进仓）
-- 关联：`docs/DRIFT/global/common-tails.md` T-4 ③；`docs/Intentional_Deviations/global/common-tails.md` `SD-2026-10-25-CAND-12`
+- 一次性探针：`/tmp/probe-async/AsyncDisconnectProbe.java` + `/tmp/probe-tomcat/DisconnectProbe.java`（均不进仓）
+- 关联：`docs/DRIFT/global/common-tails.md` T-4 ③；`docs/Intentional_Deviations/global/common-tails.md` `SD-2026-10-25-02`
 - 2026-10-25，`align/global`
 
 ---
