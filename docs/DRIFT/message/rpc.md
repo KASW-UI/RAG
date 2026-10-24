@@ -1457,7 +1457,7 @@ case schema.Time:
 （`message_notification` 3 + `message_conversation` 3 + `message_conversation_message` 2）。
 同口径更正：`DROP NOT NULL` 的是 **5** 列，不是 6；`DEFAULT` 残差是 **6** 列，不是 7。
 
-### ✅ V-021 —— 两个索引的**名字**不同（列相同）· **已签字**（2026-10-24 第十轮），见 `SD-2026-10-24-01`
+### ✅ DRIFT-MSG-V-021 —— 两个索引的**名字**不同（列相同）· **已签字**（2026-10-24 第十轮），见 `SD-2026-10-24-01`
 
 ```
 Go : idx_message_conversation_last_message_at ON (last_message_at)
@@ -1481,7 +1481,7 @@ RAG 手写迁移时按「读起来更短」命名。
 > 复现：`bash tools/difftest/run-message-ddl-parity.sh`
 > （详见本文件末尾「第十轮」小节）。
 
-### ✅ V-022 —— `idx_notification_recipient_read` 的**列不同**（Go 只有 1 列）· **已签字**，见 `SD-2026-10-23-06`
+### ✅ DRIFT-MSG-V-022 —— `idx_notification_recipient_read` 的**列不同**（Go 只有 1 列）· **已签字**，见 `SD-2026-10-23-06`
 
 ```
 Go : idx_notification_recipient_read ON (is_read)                     ← 1 列
