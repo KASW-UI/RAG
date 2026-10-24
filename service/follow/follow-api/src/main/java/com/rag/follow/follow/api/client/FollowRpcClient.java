@@ -71,6 +71,20 @@ import org.springframework.stereotype.Component;
 @Component
 public class FollowRpcClient {
 
+    /**
+     * gRPC <b>客户端</b>超时（毫秒）—— 对应 Go {@code zrpc/config.go:34} 的
+     * {@code RpcClientConf.Timeout int64 `json:",default=2000"`}。
+     *
+     * <p><b>⚠️ 这是 Go 的 struct 默认值，不是 yaml 字段</b>：
+     * {@code service/follow/api/etc/followcenter.yaml} 的 {@code FollowRpc} 段
+     * 只有 {@code Etcd.{Hosts,Key}}，<b>没有</b> {@code Timeout}
+     * ⇒ 实际生效值来自 go-zero 的 {@code default=2000}。
+     * <p>它与「HTTP 超时 3s」是<b>两层</b>预算，<b>取更小的生效</b>：
+     * Go 侧下游挂死时是 <b>2s 先到</b> ⇒ api 返回 <b>200 + 业务码 1015</b>；
+     * 若只带 3s 的 ctx 预算，就会一路顶到 HTTP 超时分支 ⇒ 返回 503 "Request Timeout"。
+     */
+    private static final long CLIENT_TIMEOUT_MILLIS = 2000L;
+
     @GrpcClient("follow-rpc")
     private FollowServiceGrpc.FollowServiceBlockingStub followServiceBlockingStub;
 
@@ -88,8 +102,52 @@ public class FollowRpcClient {
      *
      * <p>⚠️ <b>不要把返回值缓存到字段上</b>：{@code withDeadlineAfter} 每次返回新实例，
      * 缓存会把「第一次调用时的预算」固化下来，之后每个请求都带着过期 deadline。
+     *
+     * <p><b>⚠️ 还要再压一层「客户端超时」（2s）—— 这一层不能省</b>。
+     * <p>Go 侧<b>同时</b>有两层预算，<b>取更小的那个生效</b>：
+     * <ul>
+     *   <li><b>ctx 预算 3s</b>：来自 rest 超时中间件
+     *       （{@code followcenter.go:40-42} DisableNativeRestTimeout + NewHTTPMiddleware，
+     *       {@code timeouthandler.go:67-68} 的 {@code r.WithContext(ctx)}）。</li>
+     *   <li><b>zrpc 客户端超时 2s</b>：见 {@link #CLIENT_TIMEOUT_MILLIS}。</li>
+     * </ul>
+     * ⇒ Go 侧下游挂死时，<b>2s 的客户端超时先到</b> ⇒ api 拿到 rpc 错误 ⇒
+     * <b>返回 200 + 业务码 1015</b>（不是 HTTP 503）。
+     * <p>而只带 ctx 预算（3s）时，下游挂死会一路顶到 HTTP 超时分支
+     * ⇒ 返回 <b>503 "Request Timeout"</b>；且业务线程与超时线程会抢同一个 response，
+     * 还会出现「HTTP 200 + body "Request Timeout"」这种<b>状态码与 body 不自洽</b>的响应
+     * （2026-10-24 双侧活体对拍实测，见 docs/DRIFT/follow/api.md）。
      */
     public FollowServiceGrpc.FollowServiceBlockingStub followRpc() {
-        return com.rag.common.observability.GoStyleRequestDeadline.applyTo(followServiceBlockingStub);
+        return capByClientTimeout(
+                com.rag.common.observability.GoStyleRequestDeadline.applyTo(followServiceBlockingStub));
+    }
+
+    /**
+     * 把 deadline 压到「ctx 预算」与「客户端超时」里的<b>较小者</b>。
+     *
+     * <p><b>语义</b>：Go 侧客户端拦截器
+     * {@code zrpc/internal/clientinterceptors/timeoutinterceptor.go} 做的是
+     * {@code ctx, cancel := context.WithTimeout(ctx, c.Timeout)} ——
+     * 即「在已有 ctx 预算之上再套一层 2s」，<b>取更小的生效</b>。
+     *
+     * <p><b>⚠️ 没有 ctx 预算时也要套 2s</b>：Go 的客户端超时是
+     * <b>拦截器级别</b>的，与有没有 HTTP 超时中间件无关；
+     * 若此时原样返回，就等于「有时有客户端超时、有时没有」——
+     * 那正是 Go 的 ctx 语义里不存在的不一致。
+     */
+    private FollowServiceGrpc.FollowServiceBlockingStub capByClientTimeout(
+            FollowServiceGrpc.FollowServiceBlockingStub stub) {
+        io.grpc.Deadline deadline = stub.getCallOptions().getDeadline();
+        long remainingNanos = deadline == null
+                ? Long.MAX_VALUE
+                : deadline.timeRemaining(java.util.concurrent.TimeUnit.NANOSECONDS);
+        long capNanos = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(CLIENT_TIMEOUT_MILLIS);
+        if (remainingNanos <= 0L) {
+            // 预算已耗尽 ⇒ 立刻失败（Go 侧 ctx 到期同理）
+            return stub.withDeadlineAfter(1L, java.util.concurrent.TimeUnit.NANOSECONDS);
+        }
+        return stub.withDeadlineAfter(Math.min(remainingNanos, capNanos),
+                java.util.concurrent.TimeUnit.NANOSECONDS);
     }
 }

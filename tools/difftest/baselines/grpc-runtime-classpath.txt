@@ -1,0 +1,17 @@
+# 本文件是 check-grpc-runtime-classpath.py 的「已知未修」清单。
+# 每行一条，键格式：<文件相对路径>|<规则>|<值>。
+# 键在这里的违规**只打印、不失败**；不在这里的违规 ⇒ 退出码 1。
+# 别的域修好对应条目后，请顺手从本文件删掉那一行（脚本会提示「已过期」）。
+service/article/article-rpc/pom.xml|pom|grpc-inprocess
+service/article/article-rpc/src/main/resources/application.yml|yml|discovery://message-rpc
+service/article/article-rpc/src/main/resources/application.yml|yml|discovery://security-rpc
+service/comment/comment-rpc/src/main/resources/application.yml|yml|discovery://article-rpc
+service/comment/comment-rpc/src/main/resources/application.yml|yml|discovery://message-rpc
+service/favorite/favorite-rpc/pom.xml|pom|grpc-inprocess
+service/favorite/favorite-rpc/src/main/resources/application.yml|yml|discovery://article-rpc
+service/favorite/favorite-rpc/src/main/resources/application.yml|yml|discovery://user-rpc
+service/like/like-rpc/pom.xml|pom|grpc-inprocess
+service/like/like-rpc/src/main/resources/application.yml|yml|discovery://message-rpc
+service/message/message-rpc/src/main/resources/application.yml|yml|discovery://admin-rpc
+service/message/message-rpc/src/main/resources/application.yml|yml|discovery://user-rpc
+service/task/task-rpc/pom.xml|pom|grpc-inprocess

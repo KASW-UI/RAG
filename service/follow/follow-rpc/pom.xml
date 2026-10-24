@@ -186,12 +186,31 @@
             ⚠️ 必须显式写版本：根 pom 的 dependencyManagement 只管 grpc-stub / -core /
             -netty-shaded / -protobuf / -protobuf-lite，**没有**管 grpc-inprocess，
             漏写版本会让整个 reactor 在读 POM 阶段就失败。与 like-rpc / message-rpc 保持一致。
+
+            🔴 **scope 必须是 compile（默认），不能是 test**（2026-10-24 真启动实测修正）。
+            根因是 Maven 的「最近者优先」：
+              1) net.devh:grpc-client-spring-boot-starter:3.1.0.RELEASE **自身就传递依赖**
+                 io.grpc:grpc-inprocess（compile scope），它带
+                 net.devh:grpc-client:... → `InProcessChannelFactory`，而那个类的常量池里
+                 硬引用 `io.grpc.inprocess.InProcessChannelBuilder`；
+              2) 本模块**又**显式声明了 grpc-inprocess —— 直接声明永远压过传递声明，
+                 于是 scope 一旦写成 test，**运行时 classpath 上 grpc-inprocess 就整个消失**；
+              3) devh 的 `shadedNettyGrpcChannelFactory` 在创建 channel 时要链接
+                 `InProcessChannelFactory` ⇒ 运行期抛
+                 `NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder`
+                 ⇒ `UserRpcClient` Bean 创建失败 ⇒ **整个服务起不来**（硬失败，不是静默失效）。
+
+            ⚠️ **为什么测试全绿却没发现**：测试跑在 test classpath 上，grpc-inprocess 本来就在，
+            且 FollowRpcWiringTest 把 grpc client 地址覆盖成 `static://127.0.0.1:1`
+            ⇒ 生产 classpath 与生产地址**都没被任何测试跑过**。
+            这正是 AGENTS.md §3.3 的「跑绿 ≠ 对」。
+            ⚠️ 同款 scope 缺陷仍在 article-rpc / favorite-rpc / like-rpc / task-rpc
+            （本域外，未在 align/follow 工作树内改动）。
         -->
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-inprocess</artifactId>
             <version>${grpc.version}</version>
-            <scope>test</scope>
         </dependency>
         <!--
             真 PostgreSQL（不是 H2）：本模块要验证的不变量全部依赖 PG 真实语义 ——

@@ -244,12 +244,28 @@ public class FollowApiSupport {
      * 对应 Go {@code successUserListResp} 的响应 → {@code types.FollowUserListResp} 透传：
      * {@code return &types.FollowUserListResp{UserIds: rpcResp.UserIds}, nil}。
      *
-     * <p>出参是 <b>JSON 数字</b>（Go tag {@code json:"user_ids"} 无 {@code ,string}），
-     * 且空结果输出 {@code []}（见 {@link FollowUserListResp} 的注释）。
+     * <p>出参是 <b>JSON 数字</b>（Go tag {@code json:"user_ids"} 无 {@code ,string}）。
+     *
+     * <h3>⚠️ 空结果必须输出 {@code null} 而不是 {@code []}（2026-10-24 双侧活体对拍修正）</h3>
+     * <p>Go 侧的 {@code rpcResp.UserIds} 是 <b>protobuf 反序列化后的切片</b>：
+     * proto3 的 repeated 字段在为空时整个字段不上 wire ⇒ 反序列化得到 <b>nil</b> ⇒
+     * {@code encoding/json}（无 {@code omitempty}）输出 {@code "user_ids":null}。
+     * <p>⚠️ 「rpc 侧是非 nil 空切片 ⇒ 输出 []」是<b>错</b>的：那是 rpc <b>进程内</b>的值，
+     * 中间隔着一次 protobuf 编解码，wire 上字段已经消失。
+     * <p>⇒ 这里在 rpc 返回空列表时显式置 {@code null}，
+     * 使 RAG 的 body 与 Go 的 body 逐字节相同。
+     * <p>对照：{@link #toRecommendListResp} <b>不需要</b>这个处理 ——
+     * Go 的推荐列表是在 api 进程内 {@code make(...)} 出来的，恒非 nil ⇒ 输出 {@code []}。
      */
     public FollowUserListResp toUserListResp(UserListResp resp) {
         FollowUserListResp out = new FollowUserListResp();
-        List<Long> ids = new ArrayList<>(resp.getUserIdsCount());
+        int count = resp.getUserIdsCount();
+        if (count == 0) {
+            // Go 侧此刻是 nil 切片 ⇒ JSON null。给空 list 会输出 "user_ids":[]，与 Go 不同。
+            out.setUserIds(null);
+            return out;
+        }
+        List<Long> ids = new ArrayList<>(count);
         for (Long id : resp.getUserIdsList()) {
             ids.add(id);
         }

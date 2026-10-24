@@ -158,10 +158,23 @@ management:
   metrics:
     enable:
       prometheus: true
-    tags:
-      # Go 侧是 prometheus.NewCounterVec(CounterOpts{Subsystem: "follow_api"})，
-      # Prometheus 导出时子系统会变成 name 前缀 —— 在 Micrometer 侧对应这个 tag。
-      application: follow-api
+    # ⚠️ **刻意不加 `tags.application`**（2026-10-24 双侧活体对拍实测修正）。
+    #
+    # Go 侧是 prometheus.NewCounterVec(CounterOpts{Subsystem: "follow_api"})，
+    # 而 Prometheus 导出时 **Subsystem 会直接变成指标名的前缀**
+    # ⇒ Go 的指标名本身就是 `follow_api_request_total`。
+    # ⇒ RAG 侧的 Micrometer meter 名**也已经带了同一个前缀**
+    #   （`follow_api_request_total`），**再挂一个 application="follow-api" tag
+    #   就是把名字里已有的信息重复一遍**。
+    #
+    # ⚠️ 这个 tag 的代价是**实打实的**：多出来的 label 会改变时间序列的身份
+    #   ⇒ 抓取侧的 `sum by (le)` / `sum by (route)` 必须写成 `sum by (le, application)`
+    #   才能得到与 Go 侧相同的聚合结果 ⇒ 同一份 PromQL 在两侧**结果不同**。
+    #   去掉它之后，RAG 侧的 series 与 Go 侧**逐条同名同标签**。
+    #
+    # ⚠️ 之前那段注释写的是「子系统在 Micrometer 侧对应这个 tag」—— 那是**搞错了**：
+    #   Micrometer 没有 subsystem 概念，但本项目**已经用名字前缀**（follow_api_ / follow_rpc_）
+    #   承载了子系统语义 ⇒ 不需要也不应该再叠一个 tag。
 
 # =============================================================================
 # OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）

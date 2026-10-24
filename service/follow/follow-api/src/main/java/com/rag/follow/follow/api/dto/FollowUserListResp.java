@@ -2,7 +2,6 @@ package com.rag.follow.follow.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -25,18 +24,31 @@ import java.util.List;
  * 这与同域 {@link RecommendUser#targetId}（<b>带</b> {@code ,string}，出参是字符串）
  * 构成一组<b>必须记住的不对称</b>，详见该类的注释。
  *
- * <h3>⚠️ 空列表输出 {@code []} 而不是 {@code null}</h3>
+ * <h3>⚠️ 空列表输出 {@code null}（不是 {@code []}）—— 2026-10-24 双侧活体对拍修正</h3>
  * <p>Go 侧 api 的三个 list logic 都是 {@code return &types.FollowUserListResp{UserIds: rpcResp.UserIds}, nil}，
- * 看似是原样透传（理论上 rpc 返回 nil 切片时会输出 {@code null}）；
- * 但<b>在本组件能观测到的全部路径上，rpc 都不会返回 nil 切片</b>：
- * follow-rpc 的 {@code successUserListResp}（{@code helper.go:65}）拿到的是
- * {@code ListFollowTargets} / {@code ListBlockTargets} 的返回值，
- * 而那两处都是 {@code userIDs := make([]int64, 0, len(relations)); ...; return userIDs, nil}
- * —— <b>空结果也是非 nil 空切片</b>。
- * ⇒ 两侧的最终输出一致：{@code "user_ids":[]}。
- * 本类把字段初始化成空 list，与那个 {@code make(..., 0, ...)} 对齐；
- * 若改成 {@code null}，就会在「查无结果」这个最常见的场景上多出一个 Go 没有的
- * {@code "user_ids":null}。
+ * 看似是原样透传。关键在 <b>中间隔着一次 protobuf 序列化</b>：
+ * <pre>
+ *   follow-rpc 进程内：UserListResp{UserIds: make([]int64, 0, 0)}   ← 非 nil 空切片
+ *        │  protobuf wire（proto3 repeated 空 ⇒ 字段整体缺失）
+ *        ▼
+ *   follow-api 进程内：rpcResp.UserIds == nil                        ← Go 反序列化得 nil
+ *        │  encoding/json（无 omitempty）
+ *        ▼
+ *   HTTP body：{"user_ids":null}
+ * </pre>
+ * ⇒ <b>Go 输出的是 {@code null}</b>，不是 {@code []}。
+ * ⚠️ 早先的注释据此断言「rpc 不会返回 nil 切片 ⇒ 输出 []」——
+ * 那只看了 rpc 进程内的值，<b>漏了 wire 这一跳</b>；
+ * 2026-10-24 的 Go↔RAG 双侧活体对拍实测证实 Go 输出 {@code "user_ids":null}。
+ * ⇒ 本类的 {@code userIds} <b>允许为 null</b>，由
+ * {@link com.rag.follow.follow.api.service.FollowApiSupport#toUserListResp}
+ * 在「rpc 返回空列表」时显式置 null。
+ *
+ * <p><b>⚠️ 与 {@link RecommendListResp} 的不对称</b>：推荐列表走的是
+ * {@code users := make([]types.RecommendUser, 0, len(rpcResp.Users))} ——
+ * <b>在 api 进程内重新 make 的</b>（Go {@code getrecommendationslogic.go:70-81}），
+ * 不是 rpc 返回值的透传 ⇒ 恒为非 nil 空切片 ⇒ 输出 {@code []}。
+ * 对拍实测：两侧的 {@code "users":[]} 一致。
  *
  * <p><b>⚠️ {@link JsonProperty} 不是装饰，是承载 wire 契约的</b>：Spring Boot 4 / Jackson 3
  * 默认按 Java 属性名（camelCase）序列化，没有全局 snake_case 策略。
@@ -47,7 +59,7 @@ import java.util.List;
 public class FollowUserListResp {
 
     @JsonProperty("user_ids")
-    private List<Long> userIds = new ArrayList<>();
+    private List<Long> userIds;
 
     @JsonProperty("user_ids")
     public List<Long> getUserIds() {

@@ -1,6 +1,7 @@
 package com.rag.follow.follow.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 
 /**
  * 推荐列表里的一项 —— 对应 Go {@code types.go} 的 {@code RecommendUser}。
@@ -38,7 +39,22 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * （camelCase）序列化。漏掉时实际输出是 {@code {"targetId":"123","mutualScore":7}}，
  * 与 Go 的 {@code {"target_id":"123","mutual_score":7}} <b>两个 key 都不匹配</b>，
  * 而客户端不会报错、只会读到 null。
+ *
+ * <h3>⚠️ 字段顺序也要对齐（2026-10-24 双侧活体对拍修正）</h3>
+ * <p>Go 的 {@code encoding/json} 按 <b>struct 字段声明序</b>输出 ⇒
+ * {@code {"target_id":"4","mutual_score":20}}。
+ * <p>⚠️ <b>但 Jackson 在「属性全部显式命名」时按字母序排</b> ——
+ * 本类的两个字段都带 {@link JsonProperty}（为了 snake_case）⇒ 落入该分支
+ * ⇒ 实际输出 {@code {"mutual_score":20,"target_id":"4"}}，<b>与 Go 的字节顺序相反</b>。
+ * <p>⚠️ 这类差异<b>不是语义差异</b>（JSON 对象无序），但它是 <b>wire 级字节差异</b>：
+ * 做 body 快照比对 / 签名校验 / 严格字符串匹配的客户端会失配。
+ * <p>⇒ 用 {@link JsonPropertyOrder} 显式钉死顺序。
+ * <p>⚠️ 对照：{@code service/common} 的 {@code Response}（envelope）<b>没有</b> {@code @JsonProperty}
+ * ⇒ 走「字段声明序」分支 ⇒ {@code code, msg, data} 与 Go 一致 ⇒ <b>不受影响</b>。
+ * <p>本仓已有同款处理先例：{@code like-rpc} 的 {@code LikeEventContracts}、
+ * {@code comment-rpc} 的 {@code CommentCacheService}。
  */
+@JsonPropertyOrder({"target_id", "mutual_score"})
 public class RecommendUser {
 
     @JsonProperty("target_id")

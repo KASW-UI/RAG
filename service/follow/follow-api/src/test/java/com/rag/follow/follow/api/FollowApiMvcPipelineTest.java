@@ -596,7 +596,7 @@ class FollowApiMvcPipelineTest {
     // ==================================================================
 
     @Test
-    @DisplayName("⚠️ user_ids 出参是 JSON 数字（Go tag 无 ,string），空结果输出 [] 而不是 null")
+    @DisplayName("⚠️ user_ids 出参是 JSON 数字（Go tag 无 ,string），空结果输出 null 而不是 []")
     void userIdsAreSerializedAsNumbers() throws Exception {
         when(stub.getFollowList(any())).thenReturn(okUserList(11L, 22L));
 
@@ -609,7 +609,12 @@ class FollowApiMvcPipelineTest {
 
         assertTrue(body.contains("\"user_ids\":[11,22]"),
                 "user_ids 必须是 JSON 数字数组，实际 body = " + body);
-        // ⚠️ 空列表不能是 null
+        // ⚠️ 空列表必须是 null（不是 []）。
+        //   Go 侧的 rpcResp.UserIds 是 protobuf 反序列化后的切片：proto3 的 repeated
+        //   为空时字段不上 wire ⇒ 反序列化得 nil ⇒ encoding/json 输出 "user_ids":null。
+        //   2026-10-24 的 Go↔RAG 双侧活体对拍实测：Go 输出 "user_ids":null。
+        //   ⚠️ 本断言原先写的是 [] —— 那是一条**锁死错误答案**的断言（AGENTS.md §3.3）：
+        //   它只看 rpc 进程内的非 nil 空切片，漏了中间那次 protobuf 编解码。
         when(stub.getFollowList(any())).thenReturn(okUserList());
         String emptyBody = mockMvc.perform(post("/follow/v1/follow/list")
                         .header("Authorization", bearer(userToken()))
@@ -617,8 +622,8 @@ class FollowApiMvcPipelineTest {
                         .content("{}"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
-        assertTrue(emptyBody.contains("\"user_ids\":[]"),
-                "空 user_ids 必须是 []，实际 body = " + emptyBody);
+        assertTrue(emptyBody.contains("\"user_ids\":null"),
+                "空 user_ids 必须是 null（与 Go 的 nil 切片一致），实际 body = " + emptyBody);
     }
 
     @Test
@@ -641,6 +646,32 @@ class FollowApiMvcPipelineTest {
                 "target_id 必须带引号（Go ,string），实际 body = " + body);
         assertTrue(body.contains("\"mutual_score\":7"),
                 "mutual_score 是普通 int32，实际 body = " + body);
+    }
+
+    @Test
+    @DisplayName("⚠️ recommend 出参的**字段顺序**要与 Go 一致（target_id 在前，mutual_score 在后）")
+    void recommendFieldOrderMatchesGo() throws Exception {
+        // Go 的 encoding/json 按 struct 字段声明序输出 ⇒ {"target_id":"4","mutual_score":20}
+        // ⚠️ Jackson 在「属性全部 @JsonProperty 显式命名」时按**字母序**排 ⇒ 会输出
+        //    {"mutual_score":20,"target_id":"4"} —— JSON 语义等价，但**字节顺序不同**。
+        //    做 body 快照比对 / 签名校验的客户端会失配。
+        // ⇒ DTO 用 @JsonPropertyOrder({"target_id","mutual_score"}) 钉死。
+        // 证据：2026-10-24 Go↔RAG 双侧活体对拍（本条为当时抓到的那条漂移）。
+        when(stub.getRecommendations(any())).thenReturn(RecommendResp.newBuilder()
+                .setCode(200).setMsg("OK")
+                .addUsers(RecommendResp.RecommendUser.newBuilder()
+                        .setTargetId(4L).setMutualScore(20))
+                .build());
+
+        String body = mockMvc.perform(post("/follow/v1/recommendations")
+                        .header("Authorization", bearer(userToken()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertTrue(body.contains("\"target_id\":\"4\",\"mutual_score\":20"),
+                "recommend 出参的字段顺序必须与 Go 一致（target_id 在前），实际 body = " + body);
     }
 
     @Test

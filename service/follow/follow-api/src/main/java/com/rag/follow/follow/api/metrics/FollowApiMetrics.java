@@ -58,6 +58,38 @@ public class FollowApiMetrics {
     /** Go {@code APIRequestDuration}。 */
     private static final String REQUEST_DURATION_SECONDS = "follow_api_request_duration_seconds";
 
+    /**
+     * Go {@code prometheus.DefBuckets} —— <b>逐字抄写</b>，单位是<b>秒</b>
+     * （Go 的 Histogram 观测的就是 {@code time.Since(started).Seconds()}）。
+     *
+     * <p>Go 出处：{@code github.com/prometheus/client_golang/prometheus} 的
+     * {@code DefBuckets} 常量（Go 侧
+     * {@code service/follow/api/internal/metrics/metrics.go:29} 的
+     * {@code Buckets: prometheus.DefBuckets} 直接引用它）。
+     *
+     * <p><b>为什么必须显式指定</b>：Micrometer 的 Prometheus registry 在
+     * {@code publishPercentileHistogram()} 打开后，若不给出 SLO，
+     * 会用 <b>Micrometer 自己的默认 69 个桶</b>（0.001 … 30）
+     * ⇒ 两侧的 {@code _bucket{le=...}} 边界与数量都不同
+     * （Go 12 个 vs RAG 69 个）⇒ {@code histogram_quantile()} 的结果不可比。
+     * <p>Micrometer 的桶边界取的就是 SLO 原值
+     * （{@code DistributionStatisticConfig.getHistogramBuckets()}），
+     * Prometheus registry 的 timer 以<b>秒</b>为单位 ⇒ 直接抄 DefBuckets 即可。
+     */
+    private static final java.time.Duration[] GO_DEF_BUCKETS = {
+            java.time.Duration.ofMillis(5),    // 0.005 s
+            java.time.Duration.ofMillis(10),   // 0.01  s
+            java.time.Duration.ofMillis(25),   // 0.025 s
+            java.time.Duration.ofMillis(50),   // 0.05  s
+            java.time.Duration.ofMillis(100),  // 0.1   s
+            java.time.Duration.ofMillis(250),  // 0.25  s
+            java.time.Duration.ofMillis(500),  // 0.5   s
+            java.time.Duration.ofSeconds(1),   // 1     s
+            java.time.Duration.ofMillis(2500), // 2.5   s
+            java.time.Duration.ofSeconds(5),   // 5     s
+            java.time.Duration.ofSeconds(10)   // 10    s
+    };
+
     private final MeterRegistry registry;
 
     public FollowApiMetrics(MeterRegistry registry) {
@@ -80,7 +112,25 @@ public class FollowApiMetrics {
                         "route", route,
                         "result", failed ? "fail" : "success")
                 .increment();
-        registry.timer(REQUEST_DURATION_SECONDS, "route", route)
+        // ⚠️ **必须走 Timer.builder(...).publishPercentileHistogram()，不能用 registry.timer(name, tags)**。
+        //
+        // Go 出处：service/follow/api/internal/metrics/metrics.go:25-30
+        //     prometheus.NewHistogramVec(HistogramOpts{Subsystem:"follow_api",
+    //         Name:"request_duration_seconds", Buckets: prometheus.DefBuckets}, []string{"route"})
+    // ⇒ Go 暴露的是**直方图**：`_bucket{le=...}`（DefBuckets 的 11 个边界 + +Inf）+
+    //   `_sum` + `_count`。
+    //
+    // Micrometer 侧：`registry.timer(name, tags)` 走的是 registry 默认配置 ⇒
+    //   Prometheus 文本格式里**只有 `_count` / `_sum` / `_max`，没有 `_bucket`**
+    //   ⇒ Prometheus 的 histogram_quantile() 在本服务侧**完全不可用**。
+    // `publishPercentileHistogram()` 才是打开 `_bucket` 的开关，
+    // 且 Prometheus Java 客户端的默认桶边界与 Go 的 prometheus.DefBuckets **逐个相同**
+    // （.005 .01 .025 .05 .1 .25 .5 1 2.5 5 10）⇒ 两侧 `_bucket` 的 le 序列一致。
+        Timer.builder(REQUEST_DURATION_SECONDS)
+                .tag("route", route)
+                .publishPercentileHistogram()
+                .serviceLevelObjectives(GO_DEF_BUCKETS)
+                .register(registry)
                 .record(elapsedNanos, TimeUnit.NANOSECONDS);
     }
 

@@ -62,7 +62,17 @@ spring:
   cloud:
     nacos:
       discovery:
-        server-addr: ${NACOS_ADDR:nacos:8848}
+        # ⚠️ **必须是 `host` 与 `port` 分开两个变量**（2026-10-24 真启动实测修正）。
+        #    原写法 `${NACOS_ADDR:nacos:8848}` 把端口**硬编码在变量默认值里** ⇒
+        #    NACOS_PORT 被完全忽略，且 NACOS_ADDR 的语义变成「host:port」，
+        #    与 follow-api 的 `${NACOS_ADDR:nacos}:${NACOS_PORT:8848}` **冲突**：
+        #    同一份部署环境（只设 NACOS_ADDR=host + NACOS_PORT=port）下，
+        #    api 连到 `host:port`、rpc 连到 `host:8848` ⇒ **两个组件连的是两台 Nacos**
+        #    ⇒ rpc 注册在 A、api 在 B 找它 ⇒ 恒 "No servers found" ⇒
+        #    所有业务码塌成 1015（service busy）。
+        #    ⚠️ 这个坑**极难从代码看出来**：两个 yaml 各自都"对"，只有放在一起才冲突。
+        #    与 follow-api 保持同一套变量语义后，两端必然指向同一台 Nacos。
+        server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}
         namespace: ${NACOS_NAMESPACE:public}
         group: ${NACOS_GROUP:DEFAULT_GROUP}
 
@@ -77,8 +87,20 @@ grpc:
   client:
     # 对应 Go follow.yaml:37-41 UserRpc.Etcd.Key: user.rpc → 服务发现名 user-rpc
     # 唯一消费点：logic/helper.go:82 ensureUserExists → UserRpc.GetUser({Uid})
+    # ⚠️ **必须是三斜杠 `discovery:///user-rpc`**（2026-10-24 真启动实测修正）。
+    #    devh 的 `net.devh.boot.grpc.client.nameresolver.DiscoveryClientResolverFactory#newNameResolver`
+    #    判定的是 `uri.getPath()`：**必须非空、长度 > 1、且以 "/" 开头**。
+    #      discovery:///user-rpc → authority="" 、path="/user-rpc"  ✅
+    #      discovery://user-rpc  → authority="user-rpc"、path=""     ❌ 长度 0，直接抛
+    #        IllegalArgumentException: Incorrectly formatted target uri;
+    #        expected: 'discovery:[//]/<service-name>'; but was 'discovery://user-rpc'
+    #    ⇒ 两斜杠写法**不是「少写一个斜杠」**，它把服务名解析成了 authority、path 留空。
+    #    ⚠️ 本仓的 6 个 *-rpc 模块原本全是两斜杠（api 模块反而都是三斜杠）——
+    #    之所以没人发现：**测试把地址覆盖成了 static://127.0.0.1:1**
+    #    （见 FollowRpcWiringTest 的 @SpringBootTest properties），
+    #    生产地址从未被任何测试跑过 ⇒ 「跑绿」与「能启动」无关。
     user-rpc:
-      address: discovery://user-rpc
+      address: discovery:///user-rpc
       enable-keep-alive: true
       keep-alive-time: 30s
       negotiation-type: plaintext
@@ -119,9 +141,13 @@ management:
     prometheus:
       enabled: true
   metrics:
-    tags:
-      # 与 Go prometheus 子系统名对齐（Go 侧 5 个指标的 Subsystem 都是 "follow_rpc"）
-      application: follow-rpc
+    # ⚠️ **刻意不加 `tags.application`**（2026-10-24 双侧活体对拍实测修正）。
+    #
+    # Go 侧 5 个指标的 Subsystem 都是 "follow_rpc"，而 Prometheus 导出时
+    # **Subsystem 直接变成指标名前缀** ⇒ Go 的指标名本身就是 `follow_rpc_request_total`。
+    # RAG 侧的 meter 名**已带同一个前缀** ⇒ 再挂 application="follow-rpc" 是重复信息，
+    # 且会让同一份 PromQL 在两侧得到不同聚合结果。
+    # 详见 docs/DRIFT/follow/rpc.md（DRIFT-FOLLOW-007）。
   prometheus:
     metrics:
       export:
