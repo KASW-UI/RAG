@@ -25,11 +25,18 @@ import org.springframework.stereotype.Component;
  * 每模块各写一份 {@code @PreDestroy} 只是把同一个调用复制 N 份、漏一份就静默失效。
  * 收口到本 Bean 后，<b>凡是注册了本 Bean 的模块都自动生效</b>。
  *
- * <p><b>注册方式</b>：
+ * <p><b>注册方式</b>（两类模块走两条路，<b>互斥</b>，不要同时做）：
  * <ul>
- *   <li>全包扫描 {@code com.rag.common} 的模块（user-api / admin-api / message-rpc）自动生效</li>
- *   <li>显式 {@code @Import} 的 rpc 模块需在 import 列表里带上本类</li>
+ *   <li>全包扫描 {@code com.rag.common} 的 <b>api</b> 模块（10 个：user/admin/article/hot/like/
+ *       message/task/follow/favorite/comment 各自的 api）—— 扫到即生效；</li>
+ *   <li>rpc 进程<b>一律不扫</b> {@code com.rag.common}（会把 servlet 类拖进来），
+ *       必须在 {@code @Import} 列表里显式带上本类。</li>
  * </ul>
+ * ⚠️ 本注释此前把 {@code message-rpc} 列为「全包扫描」类模块，属失准：
+ * {@code MessageRpcApplication} 实际是 <b>裸 {@code @SpringBootApplication}</b> + {@code @Import} 路线
+ * （该文件第 64 行注释亦如此自述），与 api 模块不同路。
+ * 同理，{@code ObservabilityProperties} 仍带 {@code @Component} 也不构成双 Bean ——
+ * 扫描路径（api）与 {@code @Import} 路径（rpc）互斥，同一模块只会注册一次。
  *
  * <p>幂等：两个 {@code shutdown()} 都是 {@code shutdownNow()}，重复调用安全。
  */
