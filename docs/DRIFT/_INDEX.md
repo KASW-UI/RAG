@@ -10,8 +10,9 @@
 |---|---|
 | 源文件 | `AGENTS.md` 369,625 B / 4094 行 |
 | 搬出 | **39 段 / 3,629 行 / 330,494 B**（另 4 处手工搬移：§7.1 锚点表 / §4.3 原话 / §6.3 决策详述 / §0 原文快照） |
-| 保留 + 压缩 | AGENTS.md 最终 **30,207 B / 396 行**，全文可进 32 KB 上下文预算 |
-| 校验 | **零丢失 · 零重复**（逐字节）；删除前另有 39 段互不重叠 + 覆盖全文无空隙的检查 |
+| 保留 + 压缩 | AGENTS.md 搬移当时 **30,207 B / 396 行** ⇒ **2026-10-26 现为 32,734 B / 370 行**（§0 结论订正 + §7.2 守门脚本 ⇒ 仍在 **32 KB 预算内**，余 **34 B**） |
+| 校验（搬移当时） | **零丢失 · 零重复**（逐字节）；删除前另有 39 段互不重叠 + 覆盖全文无空隙的检查 |
+| ⚠️ **校验（2026-10-25 复核）** | 🔴 **`tools/drift-move.py verify` 已转 `EXIT=1`（4 段）** —— `like/rpc.md` L57-71 · `message/rpc.md` L72-101 · `message/api.md` L102-420 · `_cross/fix-round-2026-10-23.md` L54-101 **原文已找不到**。<br>**原因**：**10-25 的 10 域并发对齐把各域台账正文重写了**（追加了大量新轮次章节）⇒ 被搬的那几段原文不再是逐字节可校验的形态。<br>⇒ **本行「零丢失」是 2026-10-23 搬移当时的口径，不是现状**；现状以本行为准。<br>⚠️ **不要**为了让它转绿而回改各域台账正文（那是真实产出）⇒ 该基线（`AGENTS.md` @ `81744d1`）已**作废**。 |
 | 逐段指针 | [`_MANIFEST.json`](./_MANIFEST.json) —— 每段带 `AGENTS.md L<a>-L<b>`；6 段进 `docs/Pitfalls/` |
 | 可重跑脚本 | `tools/drift-move.py`（幂等；重新执行会覆盖同路径文件） |
 
@@ -25,12 +26,21 @@
 | **`users`** | [`users/_shared.md`](./users/_shared.md)（67 KB，最大）<br>[`users/user/api.md`](./users/user/api.md) · [`users/user/rpc.md`](./users/user/rpc.md)<br>[`users/admin/api.md`](./users/admin/api.md) · [`users/admin/rpc.md`](./users/admin/rpc.md)<br>[`users/admin/_shared.md`](./users/admin/_shared.md) | 唯一做过完整 Go↔RAG 行为审计的域 |
 | **`message`** | [`message/api.md`](./message/api.md) · [`message/rpc.md`](./message/rpc.md)<br>[`_cross/message-domain-wide.md`](./_cross/message-domain-wide.md) | 3 处请求解析层漂移 + 6 项启动级缺陷全关 |
 | **`like`** | [`like/api.md`](./like/api.md) · [`like/rpc.md`](./like/rpc.md) | 事实投递链路**跨三个仓库**（含 `Sea-BreakTheWaves`） |
-| **`common`** | [`common/alignment-2026-10-23.md`](./common/alignment-2026-10-23.md) ⭐ **组件级重对齐（最大一份，28 条编号未修）**<br>[`common/protection.md`](./common/protection.md) · [`common/http.md`](./common/http.md)<br>[`common/deadline.md`](./common/deadline.md) · [`common/audit.md`](./common/audit.md)<br>⚠️ 签字偏离已迁出 ⇒ [`../Intentional_Deviations/`](../Intentional_Deviations/_INDEX.md) | 🔴 **不是「请求保护层四层的最终落点」** —— `alignment-2026-10-23.md` §〇 已推翻「audit.md 标『✅ 审计完成』的覆盖面不成立」：5 个可比包 **3 个 NOT EQUIVALENT**（communityfact / logger / observability / snowflake），仅 `response` 逐条等价。**未修 = 28 条编号条目**（DRIFT-COMMON 3 + communityfact 15 + logger 7 + snowflake 3）+ 5 项未编号观察 + 9 项跨域交接 ⇒ **common 是共享层，其他域的尾巴挂在它身上**（like-api 015 / follow-api 008 / hot D14·D25·D27 / message -010·-011·-013 的落点全在此） |
-| **`hot`** | [`hot/rpc.md`](./hot/rpc.md) · [`hot/common.md`](./hot/common.md)<br>[`hot/api.md`](./hot/api.md) | ✅ **三组件现已全部拿到双侧活体对拍**（common 逐字节一致 · rpc 第十一轮真 Kafka + 2×Redis · api 第五轮端到端 29 条）。⚠️ **剩余三条全在域外**：D21 / D22 / D23（Tomcat 请求目标校验 / form 参数上限 1000 vs Go 2048 / 请求行 8 KiB vs Go 1 MiB）**影响全部 10 个 api 模块**，另 D14 / D25 / D27 移交 `service/common` |
+| **`common`** | [`common/alignment-2026-10-23.md`](./common/alignment-2026-10-23.md) ⭐ **组件级重对齐（最大一份，28 条编号未修）**<br>[`common/protection.md`](./common/protection.md) · [`common/http.md`](./common/http.md)<br>[`common/deadline.md`](./common/deadline.md) · [`common/audit.md`](./common/audit.md)<br>⚠️ 签字偏离已迁出 ⇒ [`../Intentional_Deviations/`](../Intentional_Deviations/_INDEX.md) | 🔴 **不是「请求保护层四层的最终落点」** —— `alignment-2026-10-23.md` §〇 已推翻「audit.md 标『✅ 审计完成』的覆盖面不成立」：5 个可比包 **3 个 NOT EQUIVALENT**（communityfact / logger / observability / snowflake），仅 `response` 逐条等价。**未修 = 28 条编号条目**（DRIFT-COMMON 3 + communityfact 15 + logger 7 + snowflake 3）+ 5 项未编号观察 + 9 项跨域交接 ⇒ **common 是共享层，其他域的尾巴挂在它身上**（like-api 015 / follow-api 008 / hot D14·D25·D27 / message -010·-011·-013 的落点全在此）<br>✅ **2026-10-25**：交接项 #1（`hot-rpc` 缺 `GrpcServerConfigurer`）**已由 hot 域认领并关闭** ⇒ 剩余 8 项；§十一 已更新各交接项的结案状态 |
+| **`hot`** | [`hot/rpc.md`](./hot/rpc.md) · [`hot/common.md`](./hot/common.md)<br>[`hot/api.md`](./hot/api.md) | ✅ **三组件现已全部拿到双侧活体对拍**（common 逐字节一致 · rpc 第十一轮真 Kafka + 2×Redis · api 第五轮端到端 29 条）。✅ **2026-10-25 第十二轮**：**hot 域正式认领并修复 `DRIFT-COMMON-004`**（hot-rpc 缺 `GrpcServerConfigurer` ⇒ 拦截器从未挂上 server ⇒ 无 span / **无 deadline 传播** / SQL 不注入 `queryTimeout`）—— 此前该缺口**只在 common 域台账里有记录、hot 域三份台账零提及**。守门：`HotGrpcInterceptorWiringTest`（3 条**行为级**）+ **两档变异**（含「保留 Bean 摘掉 `server.intercept`」的精确 H2 形态）；`check-grpc-interceptor-wiring.py` ⇒ **`EXIT=0`**（修前 `EXIT=1`）。<br>✅ **2026-10-25 第十三轮**：**D21 / D22 / D23（Tomcat 容器输入上限三旋钮）已闭合并已修** —— 10 个 api 模块的 `application.yml` 统一配 `relaxed-query-chars: ["[", "]"]` / `max-parameter-count: 2048` / `max-http-request-header-size: **1028KB**`（⚠️ **不是 1MB**：Go 真实上限 = `DefaultMaxHeaderBytes(1<<20)` **+ 4096 bufio slop**）⇒ 双侧活体复测：`?page[]=5` 两侧 **200 且响应体逐字节相同**、值个数首个翻转 n **两侧都是 2049**、请求行首个翻转长度 **两侧都是 1052536 字节（差 0）**；守门 = `check-tomcat-limits.py`（静态 10/10 ✅，两档变异 `EXIT=1`）＋ `HotApiRealTomcatGateTest` 3 条**真 Tomcat**断言（**MUT-A/B/C 变异全红**）。⚠️ **新查出 2 条残余**：`DRIFT-HOTAPI-030`（两层限制语义不同 ⇒ **跨域待拍板**）/ `DRIFT-HOTAPI-031`（超长请求行 431 vs 400 ⇒ **框架限制**，候选 `SD-2026-10-25-CAND-10`）。⚠️ **剩余仍在域外**：D14 / D25 / D27 移交 `service/common` |
 | **`article`** | [`article/common.md`](./article/common.md)<br>[`article/api.md`](./article/api.md) · [`article/rpc.md`](./article/rpc.md) · [`article/proto.md`](./article/proto.md) | 🔴 **api 与 rpc 均已对照，且都仍判 `NOT EQUIVALENT`**：api 第十三轮（41 文件 / 5,733 行，2026-10-24 修复轮 4 条未修漂移已修 + 变异验证）判定**不变**（仍有 DRIFT / UNRESOLVED 在，无双侧活体对拍）；rpc 13 条已改，**S-5 阻塞于 security 域迁移**，MQ 事件契约未冻结，U-2 真并发用例未写 |
 | **`favorite`** | [`favorite/rpc.md`](./favorite/rpc.md) | **rpc 已落地 + 首轮源码级对照（2026-10-23）**：36 文件 / 7,057 行 / **56 例绿**（真 PG）；本轮**修掉 6 处 L2 语义偏差**（含 3 处「写路径误用读路径 5007」）。🔴 **2026-10-25 本轮未做**（合并时按用户要求跳过）⇒ `api`/`common`/`proto` 仍零台账 |
 | 🆕 **`comment` / `follow` / `task`** | [`comment/api.md`](./comment/api.md) · [`comment/rpc.md`](./comment/rpc.md) · [`comment/common.md`](./comment/common.md) · [`comment/proto.md`](./comment/proto.md)<br>[`follow/api.md`](./follow/api.md) · [`follow/rpc.md`](./follow/rpc.md) · [`follow/common.md`](./follow/common.md) · [`follow/proto.md`](./follow/proto.md)<br>[`task/rpc.md`](./task/rpc.md) · [`task/api.md`](./task/api.md) · [`task/proto.md`](./task/proto.md) · [`task/_README.md`](./task/_README.md) | **2026-10-25 并发对齐后**：三域「零台账」状态已解除，各自 4/4/3 组件全部完成首轮对照。⚠️ 合并前的旧状态见 [`_cross/new-domains-2026-10-23.md`](./_cross/new-domains-2026-10-23.md) 与 [`_cross/component-coverage-matrix.md`](./_cross/component-coverage-matrix.md) |
 | **`_cross`** | [`_cross/open-items.md`](./_cross/open-items.md)<br>[`_cross/decisions.md`](./_cross/decisions.md) | 已知未修表 + 决策详述（**签字偏离已迁出** ⇒ 见 `docs/Intentional_Deviations/`） |
+
+### 🟢 2026-10-25 增量（本轮已修 · 两处「域内桶」缺口）
+
+| 项 | 修前 | 修后 | 台账 |
+|---|---|---|---|
+| **`DRIFT-COMMON-004`**：`hot-rpc` 缺 `GrpcServerConfigurer` ⇒ 拦截器**从未挂上 server**（无 span / **无 deadline 传播** / SQL 不注入 `queryTimeout`） | 🔴 `check-grpc-interceptor-wiring.py` **`EXIT=1`** | ✅ **`EXIT=0`**（10/10 接线完整） | [`hot/rpc.md`](./hot/rpc.md) 第十二轮 |
+| **`DRIFT-MSG-V-030`**：6 个 api 模块（article/comment/follow/hot/like/task-api）产物**不可执行** | 🔴 `check-jar-executable.sh` **`EXIT=1`** | ✅ **`EXIT=0`**（10/10 可执行 fat jar） | [`message/rpc.md`](./message/rpc.md) 第 6 节 |
+
+⇒ **全量回归**：**2109 tests / 0 failures / 0 errors / 0 skipped**（29 模块）⇒ 满足「绿灯必须额外断言 `skipped=0`」纪律。<br>⚠️ **2026-10-26 订正**：本行原写 **2110** —— 与实测差 1，**不是测试少了一条，是统计口径差**（见 [`../Pitfalls/_cross/testing-pitfalls.md`](../Pitfalls/_cross/testing-pitfalls.md)「陈旧 surefire 报告静默抬高测试计数」）。⇒ **现行口径：测试数只取回归日志的模块级汇总，不取 `target/surefire-reports/TEST-*.xml` 求和**（求和会被 10-23 留下的孤儿报告抬高）。
 
 ## 🔴 状态更正（2026-10-23 实测，与 AGENTS.md §0 冲突）
 
@@ -84,7 +94,7 @@
 |---|---|---|
 | **分母缺口（最大）** | ⚠️ **2026-10-23 12:25 已缩小**：Go 有 14 个服务，RAG 现覆盖 **10 个域**（`comment` / `favorite` / `follow` / `task` 已升为范围内，但**仅 proto 层**）。仍**完全未译**的只剩 **3 个**：`knowledge` / `points` / `security` ⇒ 本目录对它们只能停在「未翻译」这一句 | Go `service/*` 目录实测；RAG `service/pom.xml` 现列 10 个 `<module>` |
 | **组件缺口** | 8 个组件**无专属台账文件**：6 个 `*-proto`（`article` / `hot` / `like` / `message` / `user` / `admin`）+ `like-common` + `message-common`。其中 **`article-proto` / `like-proto` / `user-proto` 在两个目录里零提及** | `grep -rl` 全目录扫描 |
-| **Pitfalls 是骨架** | 27 个文件里 **21 个是 0 字节占位**（索引已声明「空文件即待填坑位」），**只有 6 份有内容** | `find docs/Pitfalls -name '*.md' -size 0c` |
+| **Pitfalls 是骨架** | ⚠️ **2026-10-26 更正**：本行原写「27 个文件里 21 个是 0 字节占位，只有 6 份有内容」—— **已过期**。现状：**46 个 `.md` 里 16 个 0 字节、29 份有内容、合计 280 条坑位条目**（`common` 5 份 + `_cross` 4 份为散文式，不计入条数） | `find docs/Pitfalls -name '*.md' -size 0c`（2026-10-26 实测） |
 | **口径陷阱** | 「有台账」≠「已对照」。见 AGENTS.md §0 各域**证据强度列**——`hot/api` 仅源码级、`article/api` 从未对照 | 本目录各 `<域>/<模块>.md` |
 
 ⚠️ `knowledge` 曾被**整个漏出**枚举起（AGENTS.md §2 与本目录 `_cross/status-snapshot-2026-10-22.md` 的「从未验证过的子模块 | 9 个」两处均无它）——

@@ -132,6 +132,6 @@ grep -rn 'getDescriptor|FieldNumber|setField(|getNumber()' service/message/*/src
 6 个 `*-proto` + `like-common` + `message-common` 列为无专属台账；本轮补齐了
 `proto.md`（本文件）与 `common.md`。
 ⇒ message 域四组件的台账现状：**rpc / api / common / proto 均有**，
-`Intentional_Deviations` 侧现有 **7 条**（`SD-2026-10-24-01/02/03/04` + `SD-2026-10-23-06/07/08`，其中 `SD-07` 已撤销；正本在 [`Intentional_Deviations/message/rpc.md`](../Intentional_Deviations/message/rpc.md)），
+`Intentional_Deviations` 侧现有 **7 条**（`SD-2026-10-24-01/02/03/04` + `SD-2026-10-23-06/07/08`，其中 `SD-07` 已撤销；正本在 [`Intentional_Deviations/message/rpc.md`](../../Intentional_Deviations/message/rpc.md)），
 ⚠️ **2026-10-24 第十一轮更正**：本句原先写「只有 api 一条指针（指向 `_cross` 里的 SD-03）」—— **已过期**；
 `Pitfalls` 侧 api / rpc 两份本轮已追加。

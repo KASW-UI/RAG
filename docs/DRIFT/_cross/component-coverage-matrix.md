@@ -2,15 +2,89 @@
 
 # 组件级台账覆盖矩阵（38 组件）
 
-> 🟥 **⚠️ 本文件是 2026-10-23 的快照，已过期（2026-10-25 10 域并发对齐合并后）**
-> 「零台账 14 个 · 下一批主攻」这些结论**已被 10-25 的对齐轮解除** ⇒ **不要拿本表当现状读**。
-> 当前状态**一律回各域台账**（`docs/DRIFT/<域>/<组件>.md`）与 [`../_INDEX.md`](../_INDEX.md) 的「按域索引」。
-> ⚠️ 仍然有效的是本表里**不依赖那一轮的**部分：全量基线（26 模块 / 1630 测试）、`@EnabledIfDockerAvailable` 静默全跳的根因链、以及「rpc 必须先于 api」的排序约束。
+> 🟥 **⚠️ 本文件有两层时间**：
+> - 🟢 **「当前态」节（2026-10-26 实测）= 现状** ⇒ **要拿现状读这里**；
+> - 🕘 「🕘 历史」各节 = **2026-10-23 的快照**，已被 10-25 的 10 域并发对齐 + 10-25 第十三轮**部分推翻** ⇒ **只作追溯用**。
+>
+> ⚠️ **为什么需要这一层**：AGENTS.md §0 与 [`../_INDEX.md`](../_INDEX.md) 的「按域索引」都把本文件当作
+> **组件级现状表**指过去，而本文件原先顶部写着「已过期、不要当现状读」⇒ **指针与内容打架**。
+> ⇒ 2026-10-26 补「当前态」节，把指针重新接上；历史部分**不删**（§6.2 纪律：失效的断言要留口径与时间）。
+>
+> ⚠️ 仍然有效的是本文件里**不依赖 10-25 那一轮**的部分：
+> `@EnabledIfDockerAvailable` 静默全跳的根因链（**已修**，Ryuk 缺口已补）、以及「rpc 必须先于 api」的排序约束。
 
 > **核对时间：2026-10-23 20:06–20:30**（真实执行：`find` + `wc -l` 逐模块扫描 + `mvn -o -T1C install` + `mvn -o -T1C test` + surefire XML 汇总）
 > **本文件回答一个问题：38 个组件里，哪些做过 Go ↔ RAG 对照、证据强度到哪一层、下一刀该切哪。**
 >
 > ⚠️ 按 §6.2 约定 2：**无核对日期的断言一律按 `UNKNOWN` 处理**。本文件所有数字都来自上列命令，不是推断。
+
+---
+
+# 🟢 当前态（2026-10-26 一次真实执行产出）
+
+> **核对时间**：2026-10-26 01:45–01:50（真实执行：`find` + `wc -l` 逐组件扫 `src/main/java` ·
+> `mvn -o test` 两段全量回归（`EXIT=0`）的模块级汇总 · `ls` 台账文件字节数）
+> **本节回答**：38 个组件**今天**各自有没有台账、证据强度到哪层、当前结论是什么。
+>
+> ⚠️ **计数口径**（避免下一轮又对不上）：
+> - **tests** 取**回归日志的模块级汇总**（`[INFO] Tests run: N, Failures: 0, …`），
+>   **不**取 `target/surefire-reports/TEST-*.xml` 的求和 ——
+>   实测 `user-rpc` 的 XML 求和是 **129** 而实际只跑了 **125**，
+>   差额 4 来自一个 **10-23 的陈旧报告文件**（`UserRpcJsonbAndAvatarProjectionTest.xml`，
+>   测试类已改名但旧文件没清）⇒ **按 XML 汇总会多算**。
+> - **proto 组件** `src/main/java` 为 0（代码由 protoc 生成，不手写）⇒ 记 `—`。
+> - **台账** 列的「0 字节」= **文件存在但没写过** ⇒ **不是「已审完」，是「从未对照」**。
+
+| 域 | 组件 | main 文件/LOC | tests | 台账 | 证据强度 | 当前结论 |
+|---|---|---|---|---|---|---|
+| `article` | `article-api` | 41 / 5,759 | 86 | [`api.md`](../article/api.md) | 静态源码 + 真 Tomcat | 🔴 **NOT EQUIVALENT**（第十二轮，不变）· 残留 `DRIFT-006`(LOW) / `-007`(极低) + 若干 `UNRESOLVED` |
+| `article` | `article-rpc` | 39 / 8,041 | 138 | [`rpc.md`](../article/rpc.md) | 真 PG | 🔴 **NOT EQUIVALENT**（第十一轮，不变）· 残留 `U-3`/`U-4`/`U-9`/`U-4'`/`S-5` + `P-U-1`（需 etcd） |
+| `article` | `article-common` | 1 / 257 | 15 | [`common.md`](../article/common.md) | 双侧对拍 | ✅ 一致 |
+| `article` | `article-proto` | — | 0 | [`proto.md`](../article/proto.md) | §3.4 + 逐字段 | ✅ 复制忠实 **且** 消费方式已验（`P-U-2` 已关） |
+| `comment` | `comment-api` | 33 / 3,018 | 45 | [`api.md`](../comment/api.md) | 首轮组件级 | 🔴 **NOT EQUIVALENT** |
+| `comment` | `comment-rpc` | 42 / 8,119 | 87 | [`rpc.md`](../comment/rpc.md) | 首轮 + 真 PG 修复轮 | 🔴 首轮判定；**7 条 MISMATCH 已全部修复**（各配真 PG 守门网 + 变异验证） |
+| `comment` | `comment-common` | 4 / 567 | 27 | [`common.md`](../comment/common.md) | 双侧对拍 | ✅ **EQUIVALENT** |
+| `comment` | `comment-proto` | — | 0 | [`proto.md`](../comment/proto.md) | §3.4 + 消费方式 | ✅ **EQUIVALENT** |
+| `favorite` | `favorite-api` | 31 / 2,920 | 69 | ❌ **0 字节** | — | 🔴 **从未对照** |
+| `favorite` | `favorite-common` | 3 / 456 | 25 | ❌ **0 字节** | — | 🔴 **从未对照** |
+| `favorite` | `favorite-proto` | — | 0 | ❌ **0 字节** | — | 🔴 **从未对照**（§3.4 复制忠实是另一回事） |
+| `favorite` | `favorite-rpc` | 36 / 7,106 | 58 | [`rpc.md`](../favorite/rpc.md) | 真 PG + 真启动 | 🔴 已修 6 处 L2 语义偏差；**7 条未决**（3 条待签字） |
+| `follow` | `follow-api` | 27 / 3,047 | 50 | [`api.md`](../follow/api.md) | **双侧活体对拍** | ✅ **EQUIVALENT** |
+| `follow` | `follow-rpc` | 17 / 2,692 | 70 | [`rpc.md`](../follow/rpc.md) | **双侧活体对拍 + 真 PG** | ✅ **EQUIVALENT** |
+| `follow` | `follow-common` | 4 / 562 | 37 | [`common.md`](../follow/common.md) | 双侧对拍 | ✅ **EQUIVALENT**（16 码 16 文案逐条一致，零漂移） |
+| `follow` | `follow-proto` | — | 0 | [`proto.md`](../follow/proto.md) | §3.4 + 消费方式 | ✅ **EQUIVALENT** |
+| `hot` | `hot-api` | 17 / 2,434 | 89 | [`api.md`](../hot/api.md) | **双侧活体对拍** | 🔴 三组件已全部对拍；**第十三轮已修 D21/D22/D23**；残留 `DRIFT-HOTAPI-030`/`-031` |
+| `hot` | `hot-rpc` | 15 / 2,535 | 89 | [`rpc.md`](../hot/rpc.md) | 真 Kafka + 2×真 Redis + 真 gRPC | ✅ D1 闭合；`DRIFT-COMMON-004` 已修（拦截器接线） |
+| `hot` | `hot-common` | 2 / 172 | 14 | [`common.md`](../hot/common.md) | 双侧对拍 | ✅ 一致 |
+| `hot` | `hot-proto` | — | 0 | ❌ 无专属台账 | §3.4 复制忠实 | ⚠️ **消费方式未验**（§3.4 效力边界第 1 条） |
+| `like` | `like-api` | 35 / 3,094 | 81 | [`api.md`](../like/api.md) | **双侧活体对拍** | 🔴 **9 MISMATCH**（本仓最高） |
+| `like` | `like-rpc` | 42 / 5,845 | 59 | [`rpc.md`](../like/rpc.md) | 真 PG | 🔴 4 MISMATCH + 2 OBS |
+| `like` | `like-common` | 4 / 515 | 18 | ❌ 无专属台账 | — | ⚠️ **本轮未单独审查** |
+| `like` | `like-proto` | — | 0 | ❌ 无专属台账 | §3.4 复制忠实 | ⚠️ **消费方式未验** |
+| `message` | `message-api` | 47 / 4,490 | 88 | [`api.md`](../message/api.md) | 静态源码 | 🔴 5 MISMATCH + 1 OBS |
+| `message` | `message-rpc` | 20 / 3,869 | 76 | [`rpc.md`](../message/rpc.md) | 真 PG | 🔴 1 MISMATCH + 5 OBS |
+| `message` | `message-common` | 3 / 526 | 21 | [`common.md`](../message/common.md) | 契约测试 | ✅ 逐条等价（`FIX-MSG-COMMON-002` 已修） |
+| `message` | `message-proto` | — | 0 | [`proto.md`](../message/proto.md) | §3.4 + 消费方式 | ✅ **EQUIVALENT**（第十轮升档） |
+| `task` | `task-api` | 11 / 1,496 | 90 | [`api.md`](../task/api.md) | 首轮组件级 | ✅ **EQUIVALENT**（2 条漂移已修） |
+| `task` | `task-rpc` | 29 / 4,351 | 108 | [`rpc.md`](../task/rpc.md) | 首轮 + Kafka 端到端 + HTTP 双侧对拍 | ✅ 首轮 5 条漂移**已全部修复并复核**（效力边界见该文件 §五） |
+| `task` | `task-proto` | — | 0 | [`proto.md`](../task/proto.md) | §3.4 + 消费方式 | ✅ 文件零差异 + 消费方式首次核对未发现差异 |
+| `users` | `user-api` | 40 / 3,030 | 107 | [`api.md`](../users/user/api.md) | 静态源码 | 🔴 **NOT EQUIVALENT**（部分已修；`DRIFT-USERAPI-009` ② 仍 OPEN） |
+| `users` | `user-rpc` | 16 / 2,595 | 125 | [`rpc.md`](../users/user/rpc.md) | 真 PG | 🔴 **NOT EQUIVALENT** |
+| `users` | `admin-api` | 52 / 3,467 | 129 | [`api.md`](../users/admin/api.md) | 静态源码 | 🔴 **NOT EQUIVALENT** |
+| `users` | `admin-rpc` | 22 / 3,556 | 101 | [`rpc.md`](../users/admin/rpc.md) | 真 PG | 🔴 **NOT EQUIVALENT**（DDL 半边 ✅ **2026-10-26 实测已对齐**：admin 域 4 张表时间列全 `TIMESTAMPTZ`、类型 0 差异） |
+| `users` | `users-common` | 11 / 1,037 | 33 | [`common.md`](../users/common.md) | 真 PG | ✅ 被 [`_shared.md`](../users/_shared.md) 覆盖 |
+| `users` | `user-proto` | — | 0 | ❌ 无专属台账 | §3.4 复制忠实 | ⚠️ **消费方式未验** |
+| `users` | `admin-proto` | — | 0 | ❌ 无专属台账 | §3.4 复制忠实 | ⚠️ **消费方式未验** |
+| 跨服务 | `service/common` | 44 / 7,529 | 174 | [`alignment-2026-10-23.md`](../common/alignment-2026-10-23.md) | 多层 | 🔴 **不是「已审计完成」** —— 5 个可比包 **3 个 NOT EQUIVALENT**；**28 条编号未修** + 5 项未编号 + 9 项交接 |
+
+### 当前态的三条结论
+
+1. **38 个组件里，3 个仍是「台账 0 字节」** ⇒ `favorite-api` / `favorite-common` / `favorite-proto`
+   **从未对照**（`favorite-rpc` 有台账）⇒ **favorite 域是 38 组件里唯一整块空白**。
+2. **台账齐 ≠ 已对齐**：仍有 🔴 的域 = `article`（2 组件）· `like`（2）· `message`（2）· `users`（4）
+   · `favorite-rpc` · `service/common`；已 ✅ 的域 = `comment`（3/4）· `follow`（4/4）· `hot`（2/3）· `message-common/proto`。
+3. **8 个 `*-proto` 只有 §3.4 的「复制忠实」**（`hot` / `like` / `favorite` / `user` / `admin` / `task` / `comment` / `follow` 各自的 proto），
+   **§3.4 效力边界第 1 条「RAG 消费生成代码的方式与 Go 一致」未验**（已验的只有 `article` / `comment` / `follow` / `message` / `task`）。
 
 ---
 
@@ -24,24 +98,25 @@
 
 ---
 
-## 全量基线（2026-10-23 20:1x–20:2x）
+## 🕘 历史（2026-10-23 快照）：全量基线
 
 | 项 | 实测值 | 命令 |
 |---|---|---|
 | 全量编译 | ✅ **`EXIT=0`**（`mvn -o -q -DskipTests -T1C install`） | 38 个组件无一带病 |
 | 全量测试 | ✅ **BUILD SUCCESS**，`1630 tests / 0 failures / 0 errors / 15 skipped` | `mvn -o -T1C test` + surefire XML 汇总 |
 | 实际执行用例 | **1615**（1630 − 15 skip） | 同上 |
+| 🟢 **2026-10-25 复核** | ✅ **2110 tests / 0 failures / 0 errors / 0 skipped**（**29 模块**）—— 15 条 skip **已清零**（`task-rpc` 的 Ryuk 缺口已补）⇒ **满足「绿灯必须额外断言 `skipped=0`」纪律** | `mvn -o test` + surefire XML 汇总（`service/**/target/surefire-reports/TEST-*.xml`） |
 | 空骨架残留 | **0** —— `<10 行`的 java 共 11 个，全是 `interface` 单行声明（`LikeFactDispatchService` 等）或 3 字段 DTO | `find … -exec wc -l` 过滤 |
 
 ⚠️ **「1630 条全绿」不等于「对齐了 1630 条」**，见下方「绿灯底下的空洞」。
 
 ---
 
-## 🔴 组件级矩阵（38 个）
+## 🕘 历史（2026-10-23 快照）：组件级矩阵（38 个）
 
 **图例**：台账 = 有无专属台账文件 · 强度 = 证据强度分层 · 状态 = 对照结论
 
-### 已有台账（16 个）
+### 🕘 历史（2026-10-23 快照）：已有台账（16 个）
 
 | 域 | 组件 | main/LOC | tests | 台账 | 证据强度 | 结论 |
 |---|---|---|---|---|---|---|
@@ -62,7 +137,7 @@
 | `favorite` | `favorite-rpc` | 36 / 7,057 | 56 | [`rpc.md`](../favorite/rpc.md) | 真 PG + 真启动 | 🔴 已修 6 处 L2 |
 | 跨服务 | `service/common` | 44 / 7,529 | 146 | [`common/`](../common/audit.md) | 多层 | ✅ 审计完成 |
 
-### 零台账（14 个）—— 下一批主攻
+### 🕘 历史（2026-10-23 快照）：零台账（14 个）—— 下一批主攻（**已于 2026-10-25 解除**）
 
 | 域 | 组件 | main/LOC | tests | 台账 | 结论 |
 |---|---|---|---|---|---|
@@ -81,14 +156,14 @@
 | `comment` | `comment-common` | 4 / 537 | 27 | ❌ 无 | 🔴 未对照 |
 | `comment` | `comment-proto` | — / — | — | ❌ 无 | 🔴 消费方式未验 |
 
-### 其余两个 common
+### 🕘 历史（2026-10-23 快照）：其余两个 common
 
 | 组件 | main/LOC | tests | 状态 |
 |---|---|---|---|
 | `message-common` | 3 / 453 | **0** | 🔴 零测试 + 无专属台账（§_INDEX 状态更正 #4 已列「组件缺口」） |
 | `users-common` | 11 / 995 | 11 | ✅ 被 [`users/_shared.md`](../users/_shared.md) 覆盖 |
 
-### proto 层（10 个）
+### 🕘 历史（2026-10-23 快照）：proto 层（10 个）
 
 ✅ §3.4 已验「复制忠实」（message 名/字段名/字段号/类型/枚举 10/10 逐条一致，实测产出 88 java + 4 `*Grpc`）。
 ⚠️ **§3.4 效力边界第 1 条仍然有效**：**不证明 RAG 消费生成代码的方式**与 Go 一致（`optional` presence、字段号被硬编码、Jackson 配置）。
@@ -177,7 +252,7 @@ Ryuk 已禁用时该注解不再有任何作用，留着只会继续掩盖失败
 
 ---
 
-## 下一步：排序（2026-10-23 用户定）
+## 🕘 历史（2026-10-23 用户定的排序）—— **已执行完毕**
 
 **用户决策**：① 主攻**零台账的 14 个**；② **一个微服务一个微服务**做；③ 证据强度取**最严**（真 PG 守门 + 双侧活体对拍）。
 

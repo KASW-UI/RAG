@@ -2154,7 +2154,7 @@ Neo4j 399 MiB、Grafana 362 MiB …… 已吃掉大半 ⇒ 小容器也分不到
 
 ### 1. `DRIFT-USERAPI-007` —— ✅ **已签字保留（`SD-USERAPI-001`，2026-10-23）**，行为不改，护网已钉住
 
-> **本条已收编进 [`../../Intentional_Deviations/users/user/api.md`](../../Intentional_Deviations/users/user/api.md)
+> **本条已收编进 [`../../Intentional_Deviations/users/user/api.md`](api.md)
 > （`SD-USERAPI-001`）** —— 那里是「决策」，本节是「取证与论证」。审查时**先看签字档**。
 
 **Go 出处（本轮回原文复核，全文 23 行）**：

@@ -413,7 +413,7 @@ Result 仅取 `EQUIVALENT / IMPLEMENTATION DIFFERENCE / OBSERVABLE DIFFERENCE / 
 | 入参解释 | int base-10、位宽 32 | `utils.go:120-121` | `GoFormValues.int32` | EQUIVALENT | 静态源码 |
 | 入参解释 | 非 JSON Content-Type ⇒ 丢 body | `withJsonBody` 字面 `Contains` | `GoStyleJsonBodyConverter.goReadsBody` | EQUIVALENT | `requests.go:153-155` |
 | 入参解释 | **重复 query key** | 取**第一个**（`unmarshaler.go:841-843`） | Spring 逗号拼接 → 400 | **SEMANTIC MISMATCH** | **DRIFT-003** |
-| 入参解释 | query 参数总数上限 2048 | `httpx/util.go:15,48-53` | 🔴 **原判「无上限」已被实测推翻**（Tomcat 的 8 KB 请求行上限**更早**触发 ⇒ 状态码两侧都是 400）⇒ **已补应用层 Go 语义闸门** | ✅ EQUIVALENT（判据）＋ 🟡 body 形状差异（不修） | **真 Tomcat 实测**（2026-10-24，`DRIFT-ARTICLE-API-005`） |
+| 入参解释 | query 参数总数上限 2048 | `httpx/util.go:15,48-53` | 🔴 **原判「无上限」已被实测推翻** ⇒ **已补应用层 Go 语义闸门**；✅ **2026-10-25 第十三轮**：容器旋钮对齐后闸门真正可达，body 与 Go **逐字节一致**（原 🟡 形状差异**已关闭**） | ✅ **EQUIVALENT**（判据 + body） | **真 Tomcat 实测**（2026-10-24 / 2026-10-25，`DRIFT-ARTICLE-API-005`） |
 | 入参解释 | query 段数上限 10000 | `net/url/url.go:1000-1002,1020-1022` | 🔴 **修前：2048 计数先触发 ⇒ body 文案不对** | ✅ **已对齐**（顺序也按 Go：段数上限**先**于 2048 计数） | **真 Tomcat 实测**（2026-10-24，`DRIFT-ARTICLE-API-009`） |
 | 入参解释 | query 里有 `;` | `net/url/url.go:1026-1029` | 🔴 **修前：静默放过 ⇒ 请求被接受（200）** | ✅ **已对齐**（400 + Go 逐字文案） | **真 Tomcat 实测**（2026-10-24，`DRIFT-ARTICLE-API-009`） |
 | 入参解释 | query 里有非法 `%` 转义 | `net/url/url.go:1034-1045` | 🔴 **修前：漏到 Spring ⇒ 500 空 body** | ✅ **已对齐**（400 + Go 逐字文案，含 `strconv.Quote` 的 `\xNN`） | **真 Tomcat 实测**（2026-10-24，`DRIFT-ARTICLE-API-009`） |
@@ -654,6 +654,24 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
   已**补应用层 Go 语义闸门**（`GoStyleFormParamCountFilter`，**2026-10-24 第八轮已改名** `GoStyleGetFormValuesFilter`），真容器实测 body 与 Go **逐字节一致**（2/2 变异验证）。
   🟡 **残留**：默认部署下拒绝发生在连接器层 ⇒ body 是 Tomcat 的 HTML 页（Go 是 text/plain）⇒ **LOW，决定不修**。
   详见本文件「第四轮」节。
+
+> 🟥 **2026-10-25 第十三轮（Tomcat 三旋钮）：上面的「🟡 残留」已关闭 ⇒ 本条可结案**
+>
+> - **容器旋钮对齐**（`docs/DRIFT/hot/api.md` 第十三轮，跨 10 个 api 模块落地）：
+>   `server.max-http-request-header-size: **1028KB**` ＋ `server.tomcat.max-parameter-count: 2048`
+>   ⇒ 2049 个最短非空 query 值（≈8196 字节）**不再**在连接器层被拒
+>   ⇒ 请求**能到达** `GoStyleGetFormValuesFilter` ⇒ **body 变成 Go 的 text/plain 形态**
+>   （`too many form values, error: <r.Form.Encode()>`）。
+> - **实测（2026-10-25 真 Tomcat）**：2049 个非空值 ⇒ **400 + `text/plain` + Go 的 body 形态**
+>   （**不再**是 Tomcat 的 HTML 错误页）；**恰好 2048** 个 ⇒ **200**（与 Go 一致，
+>   改前是 400 —— 那 400 是 Tomcat 的 8 KB 上限造成的，**不是** Go 的语义）。
+> - ⇒ **状态码与 body 都与 Go 一致** ⇒ 本条原先唯一的残留（body 形状）**关闭**。
+> - ⚠️ **两条 characterization 断言因此转红**（它们断言的是「漂移存在」）：
+>   `ArticleApiAssemblyWiringTest#realTomcatRejectsTooManyQueryParamsWith400LikeGo`
+>   （原断言 body 含 `Bad Request`）与 `#realTomcatDefaultHeaderLimitFiresBeforeTheFormParamGate`
+>   （原断言 2048 个值 ⇒ 400）⇒ 已按 §3.3「**先改/删错误断言，再改实现**」改写为断言 **Go 的形态**。
+> - ⚠️ **残余（不在本组件内）**：Tomcat 数「**总参数个数**」、Go 数「**非空值个数**」⇒
+>   「2049~10000 段且非空值 ≤2048」这个窗口仍有差异 ⇒ 登记为 `DRIFT-HOTAPI-030`（**跨域待拍板**）。
 
 #### DRIFT-ARTICLE-API-006 —— 8–10 MiB JSON body 的错误文案（OBSERVABLE DIFFERENCE，LOW）
 
@@ -1286,7 +1304,7 @@ return userServiceBlockingStub.withDeadlineAfter(effective, TimeUnit.MILLISECOND
 
 | 条目 | 状态 | 说明 |
 |---|---|---|
-| `DRIFT-ARTICLE-API-005` query 参数总数上限 2048 | 🔴 OPEN（LOW，实际不可达） | 本轮未动 |
+| `DRIFT-ARTICLE-API-005` query 参数总数上限 2048 | ✅ **已结案**（2026-10-25 第十三轮：容器旋钮对齐后 body 与 Go **逐字节一致**；⚠️ 残余窗口见 `DRIFT-HOTAPI-030`） | 2026-10-24 补应用层闸门；**2026-10-25 第十三轮**把请求行上限抬到 1028KB ⇒ 闸门首次真正可达 ⇒ 400 + Go 的 text/plain body；两条 characterization 断言已按 §3.3 改写为断言 Go 的形态 |
 | `DRIFT-ARTICLE-API-006` 8–10 MiB body 文案 | 🔴 OPEN（LOW） | 本轮未动 |
 | `DRIFT-ARTICLE-API-007` `ext_info` key 排序（非 BMP） | 🔴 OPEN（极低） | 本轮未动 |
 | `UNRESOLVED-001` / `-005` 真实 Tomcat 下的 400/401/404 响应头 | 🔴 OPEN | MockMvc 测不到，**必须真容器** |
@@ -1512,7 +1530,7 @@ chn = chn.Append(GunzipHandler)          // ⑪
 
 | 条目 | 状态 | 说明 |
 |---|---|---|
-| `DRIFT-005` query 参数总数上限 2048 | 🟡 **部分关闭**（2026-10-24） | 🔴 **原定性（「RAG 无上限」）已被真容器实测推翻**：Tomcat 的 `server.max-http-request-header-size`（默认 8 KB）**更早**触发 ⇒ **状态码两侧都是 400**，且 RAG 阈值**更严**（≈2040 < Go 的 2049）⇒ 不存在 DoS 暴露。已**补应用层 Go 语义闸门**（`GoStyleFormParamCountFilter`，**2026-10-24 第八轮已改名** `GoStyleGetFormValuesFilter`），真容器实测 body 与 Go **逐字节一致**（2/2 变异验证）。🟡 **残留**：默认部署下拒绝发生在连接器层 ⇒ body 是 Tomcat 的 HTML 页（Go 是 text/plain）⇒ **LOW，决定不修** |
+| `DRIFT-005` query 参数总数上限 2048 | 🟡 **部分关闭**（2026-10-24） | 🔴 **原定性（「RAG 无上限」）已被真容器实测推翻**：Tomcat 的 `server.max-http-request-header-size`（默认 8 KB）**更早**触发 ⇒ **状态码两侧都是 400**，且 RAG 阈值**更严**（≈2040 < Go 的 2049）⇒ 不存在 DoS 暴露。已**补应用层 Go 语义闸门**（`GoStyleFormParamCountFilter`，**2026-10-24 第八轮已改名** `GoStyleGetFormValuesFilter`），真容器实测 body 与 Go **逐字节一致**（2/2 变异验证）。✅ **2026-10-25 第十三轮已闭合**：容器旋钮（请求行 1028KB + 参数 2048）落地 ⇒ 闸门真正可达 ⇒ body 与 Go **逐字节一致**（原「残留」关闭）。⚠️ 残余窗口见 `DRIFT-HOTAPI-030` |
 | `DRIFT-006` 8–10 MiB body 文案 | ✅ **已确认 LOW，不修**（2026-10-24） | 可观察契约相同（400 + text/plain + nosniff），差异仅在 body 文案：Go 侧 Go 1.25 探针实测 = `"unexpected EOF"`（`json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode` 解析半个文档）；RAG 侧 = `"request entity too large"` ⇒ 已用 characterization test 锁住实测现状 |
 | `DRIFT-007` `ext_info` key 排序（非 BMP） | ✅ **已修**（2026-10-24） | 已按**码点序**比较（= Go 的 UTF-8 字节序），见本文件末尾「第三轮」节 |
 | `DRIFT-009` Go `net/url` 的三条 query 解析行为 | ✅ **已修**（2026-10-24） | 修前 ②**静默放过**（200）、③**500 空 body**、①**顺序反了** ⇒ 已按 Go 的顺序复刻（段数上限 → 分段解析（错误上报）→ 2048 计数），真容器实测 **body 逐字一致** ⇒ 见本文件末尾「第八轮」节 |
@@ -2388,3 +2406,29 @@ vt                     in=0b                       out=225c7622
 > ① 它**可观察**吗？（本条：**否** ⇒ 不立「需要对齐」的条目）
 > ② 它**有网**吗？（本条：**没有** ⇒ 必须补一张**直接单元测试**）
 > 只答 ① 就放过 ⇒ 就会留下一段**没人守、还自称等价**的死代码。
+
+---
+
+## 2026-10-25 补记：`DRIFT-MSG-V-030` 的**域内部分**已修 —— 本模块产物现在是可执行 jar
+
+> **登记方在 message 域**（[`docs/DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) 的 `DRIFT-MSG-V-030`）——
+> 它是 V-028 的同款缺陷，但**修法落在本模块自己的 `pom.xml`** ⇒ 本域已修。
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| 产物 | **68 KB** library jar，**无 `Main-Class`** | **69 MB** Spring Boot fat jar，`Main-Class: org.springframework.boot.loader.launch.JarLauncher` |
+| `java -jar` | 「中没有主清单属性」 | 可启动（外部依赖齐备的前提下） |
+| pom | **无 `<build>` 段** | 补 `<build>` 段 + `spring-boot-maven-plugin`（版本由根 pom 的 `spring-boot-starter-parent` 继承，不写 `<version>`） |
+
+**修法**：照 `service/message/message-api/pom.xml` 的 V-028 同款写法，在本模块 pom 补
+`<build><plugins><plugin>spring-boot-maven-plugin</plugin></plugins></build>`。
+启动类 `ArticleApiApplication` 唯一且带 `main` 方法 ⇒ **不显式写 `<mainClass>`**（少一处可能写错的配置）。
+
+⚠️ **本次只证明「产物带 `Main-Class` 且是可执行 fat jar」**，**没有**真起进程验证启动成功
+（会撞 Nacos / Redis / Kafka / gRPC 等外部依赖 ⇒ 起不来不等于产物有问题）。
+
+⚠️ **「`mvn package` 成功」不算数** —— 本项目至今的每一项验证都跑在容器 / 测试环境里，
+**从来没有碰过 jar 本身**（这正是 §3.3「编译通过 ≠ 产物可运行」的形态）。
+⇒ **判据是守门脚本**：`tools/difftest/check-jar-executable.sh`
+（逐个 api 模块解包 `META-INF/MANIFEST.MF` 看 `Main-Class`）
+⇒ **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）。

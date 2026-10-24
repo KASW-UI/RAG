@@ -4,7 +4,7 @@
 
 > 本档记「**明知与 Go 不同、经签字批准**」的偏离。
 > **它是决策不是缺陷**：审查时**不重复质疑**，但也**不得「顺手修正」回 Go 行为**（那会制造新漂移）。
-> 需要对齐的差异在 [`../../DRIFT/task/rpc.md`](../../../../DRIFT/task/rpc.md)。
+> 需要对齐的差异在 [`../../DRIFT/task/rpc.md`](../../DRIFT/task/rpc.md)。
 >
 > **签字日期**：2026-10-23　**基线**：`8422116`
 
@@ -92,9 +92,9 @@ done 标记的段序点赞路 uid 在前、文章路 taskId 在前。
 
 | 关系 | 文件 |
 |---|---|
-| 本域 DRIFT | [`../../DRIFT/task/rpc.md`](../../../../DRIFT/task/rpc.md) · [`api.md`](../../../../DRIFT/task/api.md) · [`proto.md`](../../../../DRIFT/task/proto.md) |
-| 本域踩坑 | [`../../Pitfalls/task/rpc.md`](../../../../Pitfalls/task/rpc.md) |
-| 全仓决策档 | [`_INDEX.md`](./_INDEX.md) · [`_cross/decisions.md`](./_cross/decisions.md) |
+| 本域 DRIFT | [`../../DRIFT/task/rpc.md`](../../DRIFT/task/rpc.md) · [`api.md`](../../DRIFT/task/api.md) · [`proto.md`](../../DRIFT/task/proto.md) |
+| 本域踩坑 | [`../../Pitfalls/task/rpc.md`](../../Pitfalls/task/rpc.md) |
+| 全仓决策档 | [`_INDEX.md`](../_INDEX.md) · [`_cross/decisions.md`](../_cross/decisions.md) |
 ---
 
 ## SD-2026-10-24-TASK-01 · topic 缺失时：Go **进程退出** vs RAG **服务存活**
@@ -130,4 +130,4 @@ done 标记的段序点赞路 uid 在前、文章路 taskId 在前。
 - ⚠️ 本条**不涉及** topic 的 config（`cleanup.policy` / `retention.ms`）——
   那一侧两侧**都不管**（Go 侧 `handleConfigMismatch` 是 `Ignore` 分支、**连日志都不打**，
   `goka topic_manager.go:158-167`）⇒ RAG 侧同样不建、不改 topic ⇒ **一致，无差异**。
-  详见 [`../../DRIFT/task/rpc.md`](../../../../DRIFT/task/rpc.md) §四·七·一。
+  详见 [`../../DRIFT/task/rpc.md`](../../DRIFT/task/rpc.md) §四·七·一。

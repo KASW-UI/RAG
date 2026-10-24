@@ -1543,3 +1543,138 @@ P22 要求：判「守门缺口」之前必须先证伪「变异本身是 no-op�
 其中 item 1 / 2 / 18 的依据已被后续轮次**推翻**（001/002/003 均已修），
 而本轮 D1 又把「进程能否跑起来」「正常路径」从**静态推断**升级为**活体实测**。
 ⇒ **§10 逐条订正见本轮末尾的「§10 复核批注」。**
+
+---
+
+# 第十二轮：认领并修复 `DRIFT-COMMON-004` —— hot-rpc 的 gRPC 拦截器从未挂到 server 上（2026-10-25）
+
+> **本轮性质**：**域内修复**（不是纯台账核对）。基线 = `do-my-own-gh` @ `46363ce`。
+> **真源**：`/Users/pr/Documents/java&golang/Sea-RideTheWind_golang`（冻结，只读）。
+> **核对日期**：2026-10-25（真实执行：`mvn -o -pl service/hot/hot-rpc test` + 两个守门脚本 + **两轮变异**）。
+
+## 本轮一句话
+
+**hot 域此前三份台账（`hot/api.md` / `hot/rpc.md` / `hot/common.md`）对这条缺口「零提及」** ——
+它只被记录在**别的域**的台账里（`docs/DRIFT/common/alignment-2026-10-23.md` 的 `DRIFT-COMMON-004`，
+该处明确判「归属 `align/hot`，本文件只登记证据，不越界修改」）。
+⇒ **本轮由 hot 域正式认领并修掉。**
+
+## 一、缺口本体（H2 形态在 hot 域复发）
+
+| | |
+|---|---|
+| **编号** | `DRIFT-COMMON-004`（common 域登记 ⇒ **本轮由 hot 域认领**） |
+| **Go 出处** | `service/hot/rpc/hot.go:42`：`s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, observability.SlowThreshold()))`<br>另 `hot.go:31` `s := zrpc.MustNewServer(c.RpcServerConf, …)` ⇒ Go 侧由 zrpc **框架级**补上 Trace → Recover → Stat → Prometheus → Breaker → Shedding（消费点 `go-zero/zrpc/server.go:144-163`） |
+| **RAG 落点（修前）** | `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/HotRpcApplication.java` —— 有 `@Import(RpcServerInterceptorFactory.class)` ✅，**全文无 `GrpcServerConfigurer`**、**无 `server.intercept(...)`** |
+| **机制** | ① 齐了（Bean 存在）② 缺（框架不用它）⇒ **正是 H2 的原始形态**（与 2026-10-23 在 `user-rpc` / `admin-rpc` 上判定的形态完全同款） |
+| **可观察面（全部静默）** | ① `interceptCall` / `onHalfClose` **从未执行** ⇒ gRPC 无 span；② **无 deadline 传播** ⇒ handler 线程上 `DeadlineState` 恒未设置 ⇒ 业务层 `checkDeadline()` 全是死代码；③ `DeadlineQueryTimeoutInjector` 因拿不到 `DeadlineState` 而**不给 SQL 设 `queryTimeout`**；④ gRPC 本身无超时（客户端只能等 api 层 `http-timeout`） |
+| **额外证据** | 🔴 hot-rpc **此前无任何 interceptor 接线测试**（其余 9 个 rpc 模块都有 `*GrpcInterceptorWiringTest` 一类）⇒ **缺测试 + 缺接线，绿灯不构成任何保证** |
+| **实测守门** | `tools/difftest/check-grpc-interceptor-wiring.py` 修前 **`EXIT=1`**，精确指向 `service/hot/hot-rpc`；修后 **`EXIT=0`**（10/10 rpc 进程接线完整） |
+
+## 二、修法
+
+```java
+@Bean
+public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryServerInterceptor,
+        GoStyleProtectionProperties protectionProps) {
+    return server -> server.intercept(
+            GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, protectionProps));
+}
+```
+
+外加 `@Import(GoStyleProtectionConfiguration.class)`（`GoStyleProtectionProperties` 的注册载体 ——
+`com.rag.common` 已不被 rpc 进程全包扫描，见 §6.3 问题 3）。
+
+**为什么走共享的链而不是就地拼**（DRIFT-MSG-V-026）：熔断 / 降载在 Go 侧是 **zrpc 框架级**能力
+（每个 rpc server 都自带）⇒ 链的定义点收回共享模块 `com.rag.common.protection`，各组件只负责「挂上去」。
+⇒ hot-rpc 至此与其余 9 个 rpc 组件**接法完全一致**。
+
+## 三、守门测试（新增 `HotGrpcInterceptorWiringTest`，3 条）
+
+> **判据设计**：断言的是**运行时后果**，不是「Bean 存在」（§3.3）。
+
+| 用例 | 断言什么 | 怎么区分 |
+|---|---|---|
+| `serverSideTimeoutIsActuallyEnforced` | 服务端超时真的把请求掐断 | 起**真 gRPC server**，挂上容器里那个 Configurer，注册「睡 10 秒」的服务，客户端给 **5s** deadline<br>⇒ 接上：约 **300ms** 返回 `DEADLINE_EXCEEDED`；没接上：等满 **5000ms** 由客户端 deadline 超时<br>**两者 status 码都是 `DEADLINE_EXCEEDED` ⇒ 必须再断言耗时才能区分** |
+| `deadlineIsPropagatedToHandlerThread` | deadline **传播**到 handler 线程（`onHalfClose` 那一半） | 在 handler 内部读 `DeadlineState.remainingMillis()`：未接上恒为 `Long.MAX_VALUE`，接上则 ≤ 服务端超时 |
+| `productionTimeoutMatchesGoZeroDefault` | 生产 `application.yml` 的 `observability.rpc-timeout: 2s` | Go 侧 `hot.yaml` 未配 Timeout ⇒ 走 go-zero `zrpc/config.go` 的 `default=2000ms` |
+
+⚠️ 两条行为用例的**timeout 压到 300ms**、客户端 deadline 给 5s ⇒ 两者差距足够大、不受机器负载影响。
+⚠️ 测试里**关掉 CPU 自适应降载**（`rag.protection.cpu-shedding.enabled=false`）：否则高负载机器上
+链上的 shedding 层会先返回 `RESOURCE_EXHAUSTED`，把「超时是否生效」这个判据盖掉 ⇒ 变成 flaky。
+**这是测试专用覆盖，不改生产默认值**（默认 `true` 是对齐 Go `zrpc` 的 `Middlewares.Shedding default=true`）。
+
+## 四、变异验证（**两档**，全部按预期变红 ⇒ 守门非假绿）
+
+| # | 变异 | 结果 |
+|---|---|---|
+| **MUT-1** | 整个 `@Bean GrpcServerConfigurer` 注释掉 | ✅ **2 条转红**（`NoSuchBeanDefinition: rpcInterceptorConfigurer`）—— 只证明「Bean 缺失会被抓到」，**较弱** |
+| **MUT-2** | **Bean 保留，但方法体改成 `return server -> { };`**（即**不调 `server.intercept(...)`**） | ✅ **2 条转红，且都是行为断言**：<br>① `serverSideTimeoutIsActuallyEnforced` —— 实际耗时 **5014ms**（只剩客户端 deadline），断言要求 < 3000ms<br>② `deadlineIsPropagatedToHandlerThread` —— handler 线程（`grpc-default-executor-1`）上 `DeadlineState` 恒未设置<br>⇒ **MUT-2 才是 H2 的精确形态**（Bean 在、starter 不用它）⇒ 守门网抓的确实是**机制没生效**，不是「Bean 不存在」 |
+
+⚠️ **MUT-2 才是有意义的那一档** —— 若只做 MUT-1，守门网仍可能「只学会了断言 Bean 存在」。
+
+## 五、🔴 连带查出：裸 `ServerCallHandler` 注册到 unary 方法上**根本不会被 dispatch**
+
+**实测（2026-10-25，写本守门测试时踩到）**：
+
+| 写法 | 方法体是否执行 |
+|---|---|
+| 自己写一个裸 `ServerCallHandler`，`ServerServiceDefinition.builder(...).addMethod(md, handler)` | ❌ **一次都不执行**（`onHalfClose` 不被派发给它） |
+| `io.grpc.stub.ServerCalls.asyncUnaryCall((req, obs) -> { … })` | ✅ 正常执行（走 `ServerCalls.UnaryServerCallListener.onHalfClose()`） |
+
+**为什么这条特别危险**：**服务端超时照样会生效**（超时由拦截器的调度器把 call 关掉，**与 handler 有没有跑无关**）
+⇒ 所以「超时是否生效」这类断言在**裸 handler 写法下依然是绿的** ——
+⇒ 这类断言**证明不了「handler 真的被调用过」**。
+
+⚠️ **同款写法在别处**：[`service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskGrpcInterceptorWiringTest.java`](../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskGrpcInterceptorWiringTest.java)
+的 `slowTaskService()` 用的正是裸 `ServerCallHandler` ⇒ **它的「睡 10 秒的服务」实际从未睡过**
+⇒ 该用例的断言（`elapsed < 3000`）**依然有效地证明了「服务端超时生效」**（这一条它确实证明了），
+但**证明不了「handler 被调用过」**、也**证明不了「deadline 传播到了 handler 线程」**。
+⇒ 归属 `task` 域，本轮**不越界修改**；建议该域把裸 handler 换成 `ServerCalls.asyncUnaryCall`
+并补一条「handler 被调用过」的断言。
+
+## 六、连带查出的第二件事：6 个 api 模块的 jar **不可执行**（跨域，已修）
+
+`tools/difftest/check-jar-executable.sh` 修前 **`EXIT=1`**：
+`article-api` / `comment-api` / `follow-api` / `hot-api` / `like-api` / `task-api` **产物全部没有 `Main-Class`**
+⇒ `java -jar` 直接报「中没有主清单属性」⇒ **这 6 个模块从来没被打成过可部署产物**。
+根因：pom 里**没有 `<build>` 段** ⇒ 无 `spring-boot-maven-plugin` 的 `repackage` ⇒ 只出普通 library jar。
+详见 [`docs/DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) 的 `DRIFT-MSG-V-030`（登记方在 message 域）。
+
+## 七、测试与守门
+
+| 项 | 结果 |
+|---|---|
+| `mvn -o -pl service/hot/hot-rpc test` | ✅ **89 tests / 0 failures / 0 errors / 0 skipped**（原 86 ⇒ **+3**） |
+| `tools/difftest/check-grpc-interceptor-wiring.py` | ✅ **`EXIT=0`**（修前 `EXIT=1`）—— 10/10 rpc 进程接线完整 |
+| `tools/difftest/check-jar-executable.sh` | ✅ **`EXIT=0`**（修前 `EXIT=1`）—— 10/10 api 产物可执行 |
+| 变异验证 | ✅ **MUT-1 / MUT-2 两档全部按预期变红** |
+| ⚠️ **全量 `mvn -o -T1C test` 首轮** | 🔴 **在 hot-rpc 中断**：`HotKafkaConsumerGateTest` 的 Kafka 容器 **启动超时**（`Timed out waiting for log output matching '.*Transitioning from RECOVERY to RUNNING.*'`）⇒ 后续模块 `SKIPPED`。<br>**归因**：**并行下的 Testcontainers 资源竞争**（机器上还挂着 12+ 个历史探针容器），**不是本轮改动** —— 单跑 `mvn -o -pl service/hot/hot-rpc test` **89 / 0 / 0 / 0 全绿**（`HotKafkaConsumerGateTest` 4 条照常跑）。<br>⇒ 续跑用**串行** `mvn -o -rf :hot-rpc test` 补齐。<br>⚠️ **这条与 `docs/Pitfalls/_cross/` 里的「容器起不来 ≠ 产品缺陷」是同一类**，见下方 §九 |
+
+## 九、⚠️ 一条**编排级**观察：全量并行跑时，Testcontainers 容器可能起不来（不是产品缺陷）
+
+**现象**：全量 `mvn -o -T1C test` 在 `hot-rpc` 中断，错误是
+`Container startup failed for image apache/kafka:3.7.2` ⇒
+`Timed out waiting for log output matching '.*Transitioning from RECOVERY to RUNNING.*'`
+⇒ reactor 报 `BUILD FAILURE`，**下游模块全部 `SKIPPED`**。
+
+**归因（已实测排除本轮改动）**：
+- 单跑 `mvn -o -pl service/hot/hot-rpc test` ⇒ **89 / 0 / 0 / 0 全绿**，
+  `HotKafkaConsumerGateTest` 的 **4 条照常跑**（19.91s，容器正常起来）⇒ **不是代码问题**；
+- 失败那次的容器是**起来了但没在超时内切到 RUNNING** ⇒ 典型的**并行资源竞争**
+  （`-T1C` 同时拉起多个 PG + Kafka 容器；且机器上还挂着 12+ 个历史探针容器未回收）。
+
+⇒ **判据**：遇到「容器起不来」先**单模块复跑**再定性 —— 别把它当成回归。
+⚠️ 这与 `docs/Pitfalls/hot/rpc.md` 的 **P-HOTRPC-13 / 14 / 15** 属同一类「**编排级坑会伪装成产品缺陷**」。
+
+## 八、对「组件判定」的影响
+
+`docs/DRIFT/hot/rpc.md` §10 的组件判定**不变**（本轮修的是**装配缺口**，不是行为语义差异），
+但**证据强度**上升一档：
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| gRPC 拦截器是否真挂上 server | ❌ **根本没挂**（H2） | ✅ **已挂**，且有**行为级**守门 + 两档变异 |
+| gRPC deadline 传播 | ❌ **恒不生效**（`DeadlineState` 从未设置） | ✅ **已生效**，行为级断言钉住 |
+| SQL `queryTimeout` 注入 | ❌ 因拿不到 `DeadlineState` 而**不注入** | ✅ 随之恢复 |
+| 组件判定 | `NOT EQUIVALENT`（域外三条 D21/D22/D23 + D14/D25/D27） | **不变** —— 本条**不是**域内漂移，是**装配缺口** |

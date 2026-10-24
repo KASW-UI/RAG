@@ -1,10 +1,10 @@
 # `hot-rpc` 踩坑台账（§31-a：这里记「为什么会踩」，不记差异本身）
 
 > **范围**：`service/hot/hot-rpc`。**归属**：`align/hot` 工作树产出（`RAG.worktrees/hot`）；基线 = `do-my-own-gh` @ `8422116` 之后的分支点。
-> **核对日期**：2026-10-24（**第十一轮**：D1 编排轮连带查出 P-HOTRPC-13 / 14 / 15 三条**编排级**坑）。
-> 差异本体在 [`../../DRIFT/hot/rpc.md`](../../DRIFT/hot/rpc.md)（`DRIFT-HOTRPC-001..010` + `G-HOT-001/002/003`）。
+> **核对日期**：2026-10-25（**第十二轮**：认领并修复 `DRIFT-COMMON-004` ⇒ 连带查出 P-HOTRPC-16 / 17 两条**装配级**坑）。
+> 差异本体在 [`../../DRIFT/hot/rpc.md`](../../DRIFT/hot/rpc.md)（`DRIFT-HOTRPC-001..010` + `G-HOT-001/002/003` + **第十二轮**）。
 > 本文件只回答四件事：**症状像什么 · 真实原因（框架/语言机制）· 为什么测试抓不到 · 下次怎么防**。
-> 累计 **15 条坑**（P-HOTRPC-01..15）。
+> 累计 **18 条坑**（P-HOTRPC-01..18）。
 >
 > 🟥 **2026-10-24 第十一轮回填**：本档头部此前写「累计 **12** 条坑（P-HOTRPC-01..12）」+ 核对日期停在第五轮
 > ⇒ 第十一轮**新增 3 条**（P-HOTRPC-13 / 14 / 15）后**计数与核对日期都没回填** ⇒ 本次订正。
@@ -513,3 +513,172 @@ jcmd <pid> GC.class_histogram | grep 'com.rag.hot.hot.rpc'
    容器内连它连不上 ⇒ 用 `localhost:19092`。
 3. 通用形态：**「CLI 静默接受了未知配置」比「CLI 报错」更危险** ——
    报错会停下，静默接受会一路错到底。投递类脚本必须**回读校验**。
+
+---
+
+## P-HOTRPC-16 🔴「缺陷在别的域的台账里」：**跨域登记 ≠ 域内认领**，缺口能躺多久取决于谁的台账记了它
+
+**症状**：hot-rpc 的 gRPC 拦截器**从来没挂到 server 上** ——
+gRPC 无 span、**无 deadline 传播**（业务层 `checkDeadline()` 全是死代码）、
+SQL 不注入 `queryTimeout`、gRPC 本身无超时。**全部静默、零报错、测试全绿。**
+
+**真实原因（两层）**：
+
+1. **机制层**：devh 的 `grpc-server-spring-boot-starter` 3.1.0 **从不**自动把容器里的
+   `ServerInterceptor` 挂到 server 上（已用 `javap` 对 `GrpcServerFactoryAutoConfiguration` 证伪：
+   三个工厂方法只注入 `List<GrpcServerConfigurer>`，没有 `ServerInterceptor` 形参）
+   ⇒ **每个 rpc 组件要配两件**：`@Import(RpcServerInterceptorFactory.class)` **+** `@Bean GrpcServerConfigurer`。
+   hot-rpc **只配了第 ① 件**。
+
+2. 🔴 **组织层（本坑真正的重点）**：这条缺陷**被记录了**，但**记在别人的台账里** ——
+   `docs/DRIFT/common/alignment-2026-10-23.md` 的 `DRIFT-COMMON-004`
+   （common 域按「共享组件的装配义务随组件下沉」的判据，明确判「**归属 `align/hot`**，本文件只登记证据，不越界修改」）。
+   <br>⇒ 而 **hot 域自己的三份台账（`hot/api.md` / `hot/rpc.md` / `hot/common.md`）对这条缺口「零提及」**
+   （实测 `grep 'DRIFT-COMMON-004\|GrpcServerConfigurer' docs/DRIFT/hot/*.md` ⇒ **0 命中**）。
+   <br>⇒ 结果：**记录方以为已经派单了，承接方不知道自己欠着** ⇒ 缺口一直躺在那儿。
+
+**为什么测试抓不到**：hot-rpc 此前**没有任何 interceptor 接线测试**（其余 9 个 rpc 模块都有
+`*GrpcInterceptorWiringTest` 一类）⇒ 缺测试 + 缺接线，**绿灯不构成任何保证**。
+
+**怎么防**
+
+1. **交接必须双向落账**：共享组件的缺陷记在**根因域**时，**根因域自己的台账也必须有一条**
+   —— 否则「别的域替你记着」就等于「没人记着」。
+   （本仓已有一条例证：`docs/DRIFT/common/alignment-2026-10-23.md` §六·五·6 记的
+   「别的域给共享组件的限制签了字，而 common 域台账对此毫无记录」。）
+2. **守门脚本按「消费方」扫，不按「共享组件」扫**：
+   `tools/difftest/check-grpc-interceptor-wiring.py` 扫的是**每个 rpc 模块**的接线完整性，
+   **不是** common 域自己 ⇒ 才有「common 域全绿、hot 域起不来」这回事。
+3. 🔴 **变异要做两档**（本轮实测）：
+   - **MUT-1**：整个 `@Bean` 摘掉 ⇒ 守门转红，但**只证明「Bean 不存在会被抓到」**；
+   - **MUT-2**：**Bean 保留、方法体改成 `return server -> { };`**（不调 `server.intercept`）⇒ **行为断言转红**
+     （实测耗时 5014ms vs 要求 < 3000ms）⇒ **这才是 H2 的精确形态**。
+   ⇒ **只做 MUT-1 的守门网，可能只是「学会了断言 Bean 存在」。**
+
+---
+
+## P-HOTRPC-17 🔴「裸 `ServerCallHandler` 注册到 unary 方法上，grpc-java 根本不会 dispatch」⇒ **超时类断言照样是绿的**
+
+**症状**：想写一条「服务端超时真的把请求掐断」的测试，注册了一个「睡 10 秒」的服务，
+结果**方法体一次都没执行** —— 但**测试是绿的**。
+
+**真实原因**：grpc-java 对 **unary** 方法的标准派发路径是
+`ServerCalls.UnaryServerCallListener.onHalfClose()` → 调业务方法。
+自己写一个**裸** `ServerCallHandler` 塞进 `ServerServiceDefinition.builder(...).addMethod(md, handler)`，
+**`onHalfClose` 不会被派发给它** ⇒ 方法体不执行。
+
+**为什么这类断言仍是绿的（最危险的部分）**：**服务端超时由拦截器的调度器把 call 关掉**，
+**与 handler 有没有跑完全无关** ⇒ 「超时是否生效」的观测**照样成立** ⇒ 断言照样通过。
+
+| 写法 | 方法体是否执行 | 「超时生效」断言 |
+|---|---|---|
+| 裸 `ServerCallHandler` | ❌ **一次都不执行** | ✅ **照样绿**（假绿） |
+| `ServerCalls.asyncUnaryCall((req, obs) -> { … })` | ✅ 正常执行 | ✅ 绿（真绿） |
+
+**怎么防**
+
+1. 用 `io.grpc.stub.ServerCalls.asyncUnaryCall(...)` / `asyncServerStreamingCall(...)` 等**标准 handler**，
+   不要自己写裸 `ServerCallHandler`。
+2. 🔴 **任何「观测 handler 内部状态」的用例，必须先断言「handler 真的被调用过」**
+   （本轮用的诊断位：`AtomicBoolean handlerEntered`）——
+   否则「观测值恒为初始值」会被误读成「机制没生效」，而真实原因可能是「handler 压根没跑」。
+3. ⚠️ **本仓已有一处同款写法**：`service/task/task-rpc/.../TaskGrpcInterceptorWiringTest.java`
+   的 `slowTaskService()` 用的是裸 `ServerCallHandler`
+   ⇒ **它的「睡 10 秒的服务」实际从未睡过**
+   ⇒ 该用例的断言**依然有效地证明了「服务端超时生效」**，但**证明不了「handler 被调用过」**
+   /「deadline 传播到了 handler 线程」。
+   ⇒ 归属 `task` 域，本轮**不越界修改**；已登记在
+   [`docs/DRIFT/common/alignment-2026-10-23.md`](../../DRIFT/common/alignment-2026-10-23.md) §十一 交接项 #10。
+
+---
+
+## P-HOTRPC-18 🔴 全量并行跑时 Testcontainers 容器「起来了但没到 RUNNING」⇒ reactor `BUILD FAILURE` ⇒ **看起来像回归，其实不是**
+
+**症状**：全量 `mvn -o -T1C test` 在 hot-rpc 中断：
+
+```
+Container startup failed for image apache/kafka:3.7.2
+  Caused by: ContainerLaunchException: Timed out waiting for log output
+              matching '.*Transitioning from RECOVERY to RUNNING.*'
+```
+
+⇒ reactor 报 `BUILD FAILURE`，**下游模块全部 `SKIPPED`** ⇒ 看起来像「我刚改的东西炸了一片」。
+
+**真实原因**：**并行下的容器资源竞争** —— `-T1C` 同时拉起多个 PG + Kafka 容器；
+且开发机上常挂着**历史探针容器未回收**（实测当时有 12+ 个 `difftest-*` / `*probe-*` 容器在跑）。
+
+**怎么区分「产品缺陷」与「编排级 flake」**（本轮实测走通的判据）：
+
+1. **单模块复跑**：`mvn -o -pl service/hot/hot-rpc test`
+   ⇒ 本轮 **89 tests / 0 failures / 0 errors / 0 skipped**，`HotKafkaConsumerGateTest` 的 4 条**照常跑**
+   ⇒ **不是代码问题**。
+2. 看错误的**形态**：容器**启动超时 / 等不到日志模式** ≠ 断言失败 ⇒ 指向环境，不是行为。
+3. 串行补齐：`mvn -o -rf :hot-rpc test`（从失败模块续跑，不带 `-T1C`）。
+
+⚠️ **不要**因为一次全量红就把「刚刚改过的那几行」当成原因来回滚 —— 先单模块复跑定性。
+⚠️ 同属「**编排级坑会伪装成产品缺陷**」这一族：**P-HOTRPC-13 / 14 / 15**（Redis 回灌 / 残缺编译产物 / Kafka CLI 参数）。
+
+---
+
+## P-HOTRPC-19 🔴 **变异打在 `target/classes` 会被 `mvn test` 的资源拷贝覆盖 ⇒ 变异无效 ⇒ 守门「假绿」**
+
+**症状**：给「容器配置类」的守门做变异验证时，摘掉旋钮后**测试照样全绿** ——
+而旋钮明明已经被摘掉了（脚本自己 grep 出来的配置是对的）。
+
+**根因**：`mvn test` 会跑 `process-resources` 阶段，把 `src/main/resources/**`
+**重新拷贝**到 `target/classes/`。⇒ 你变异的是 `target/classes/application.yml`，
+**构建一跑就被原样覆盖回去** ⇒ 测试跑的是**没被变异的配置** ⇒ 绿灯是**假的**。
+
+**判据（怎么认出这一类假绿）**：
+- 变异前后**测试结果完全一致**，且**没有任何一条断言的红**；
+- 而**配置确实被改过**（脚本里 grep 得到的就是变异后的内容）。
+
+**修法**：**变异必须打在 `src/main/resources/<file>`（源文件）上**，不是 `target/classes`。
+⇒ 本轮的正确变异脚本形态（`/tmp/hot-difftest/mutate-tomcat-knobs.sh`）：
+
+```bash
+YML="$ROOT/service/hot/hot-api/src/main/resources/application.yml"   # ← 源文件
+cp "$YML" "$BAK"
+trap 'cp "$BAK" "$YML"' EXIT        # ← 还原一定要挂 trap，变异脚本崩了也不能留下脏配置
+# 变异 → 跑 mvn test → 断言转红 → 还原
+```
+
+⚠️ **还原必须挂 `trap`**：变异脚本自己出错（第一版就栽在 `set -u` + bash 把全角括号
+当成变量名的一部分 ⇒ `name?: unbound variable`）时，**没有 trap 就会把脏配置留在仓库里**。
+
+⚠️ 同族：**「脚本批量改 N 处」之后必须确认改动真的落到了构建产物上** ——
+本轮另一个同源现象：`app-cp.txt` 里的 classpath 指向已合并掉的 worktree ⇒ `--no-build`
+启动报 `ClassNotFoundException`（**P-HOTRPC-14「残缺编译产物」第三次现身**）。
+
+---
+
+## P-HOTRPC-20 ⚠️ **「Go 的上限是个常量」是错的** —— `net/http` 的真实上限 = 常量 **+ bufio slop**
+
+**症状**：按 Go 源码里的 `DefaultMaxHeaderBytes = 1 << 20 // 1 MB` 配了 `1MB`，
+以为对齐了；实测两侧**阈值差 4096 字节**。
+
+**根因**：Go 的 `DefaultMaxHeaderBytes` **不是最终上限**。真实上限还加了一层 bufio 余量：
+
+```go
+// net/http/server.go:940-942（go1.25.11）
+func (s *Server) initialReadLimitSize() int64 {
+	return int64(s.maxHeaderBytes()) + 4096 // bufio slop
+}
+```
+
+⇒ 真实上限 = **1 MiB + 4 KiB** = **1052672 字节**。
+⇒ 双侧活体实测（二分「第一个不再是 200 的 query 长度」）：
+
+| | 首个翻转长度 | 推出的真实上限 |
+|---|---|---|
+| Go | **1052536** 字节（HTTP 431） | 1 MiB **+ 4096** |
+| RAG（配 `1MB`） | **1048440** 字节（HTTP 400） | 1 MiB（**少 4096**） |
+| RAG（配 `1028KB`） | **1052536** 字节 | ✅ 与 Go **差 0 字节** |
+
+**教训（可推广）**：
+1. **「读到一个常量就当成了上限」是错的** —— 源码里的常量常常还要经过**框架层的加法**
+   （bufio slop / 连接器加头 / 代理加字段）。**必须实测出翻转点，再反推真实上限**。
+2. **差值 4096 这个「整数感」本身就是线索** —— 一个看着随意的差值，往往就是某个框架常量。
+   本轮就是靠「4096 = 2^12 = bufio 的经典 slop」把两条完全不同的现象对上了。
+3. **台账里原先写的修法（`1MB`）也要一起订正** —— 照抄旧结论会把「差 4096 字节」固化下来。
+   ⇒ 守门脚本要断言**精确字节数**（1052672），不能只断言「非空」。

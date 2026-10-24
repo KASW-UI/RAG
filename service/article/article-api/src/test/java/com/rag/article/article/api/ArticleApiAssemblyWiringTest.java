@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -326,25 +327,26 @@ class ArticleApiAssemblyWiringTest {
     // =====================================================================
 
     /**
-     * 🔴 真 Tomcat（<b>默认 8 KB 请求行上限</b>）：query 参数过多 ⇒ <b>400</b>。
+     * ✅ 真 Tomcat：query 参数过多 ⇒ <b>400</b>，且 body 是 <b>Go 的 text/plain 形态</b>。
      *
-     * <h2>🔴 本用例推翻台账的一条前提（2026-10-24 真容器实测）</h2>
-     * 台账原写「RAG <b>无上限</b>」⇒ <b>不成立</b>：
-     * Tomcat 自己有请求行/头部长度上限（默认 8 KB），
-     * 而 2049 个<b>最短</b>的非空 query 值（{@code a=1&} × 2049 ≈ 8196 字节）
-     * <b>本身就超了 8 KB</b> ⇒ Tomcat 在<b>连接器层</b>就拒掉，请求<b>根本到不了</b> servlet filter。
-     * <br>⇒ 实测：状态码 <b>400</b>（<b>与 Go 一致</b>），但 body 是 <b>Tomcat 的 HTML 错误页</b>，
-     * 而 Go 是 {@code http.Error} 的 text/plain + {@code "too many form values, error: …"}。
-     * <br>⇒ 真正的差异是<b>响应体形状</b>（以及阈值：RAG 的 8 KB 更严 ≈ 2040 个值 < Go 的 2049），
-     * <b>不是</b>「无上限」⇒ 台账的定性已更正。
-     *
-     * <h2>本用例断言的是「客户端真正收到的那份」</h2>
-     * ⇒ 状态码必须与 Go 一致（400）；body 的差异<b>如实断言为现状</b>（characterization），
-     * 并在 {@code @DisplayName} 里写明与 Go 差在哪。
+     * <h2>🟥 本用例的断言在 2026-10-25（第十三轮「Tomcat 三旋钮」轮）被翻转</h2>
+     * <p>改前（默认 8 KB 请求行上限）：2049 个最短非空 query 值（{@code a=1&} × 2049 ≈ 8196 字节）
+     * <b>本身就超了 8 KB</b> ⇒ Tomcat 在<b>连接器层</b>就拒 ⇒ 请求<b>根本到不了</b> servlet filter
+     * ⇒ 状态码 400（与 Go 一致）但 body 是 <b>Tomcat 的 HTML 错误页</b>。
+     * <p>改后（{@code server.max-http-request-header-size: 1028KB} ＋
+     * {@code server.tomcat.max-parameter-count: 2048}）：请求<b>能到达</b>
+     * {@code GoStyleGetFormValuesFilter} ⇒ 该 filter 按 Go 的语义
+     * （{@code httpx/util.go:44-53}：数<b>非空值</b>，第 2049 个即报错）
+     * 产出 <b>Go 逐字相同的 body</b>：{@code "too many form values, error: " + r.Form.Encode()}。
+     * <br>⇒ <b>状态码与 body 都与 Go 一致</b> ⇒ 原先登记的 body 形状差异
+     * （{@code DRIFT-ARTICLE-API-005}）<b>随容器旋钮对齐而关闭</b>。
+     * <p>⚠️ 本用例此前断言「body 含 {@code Bad Request}」（即<b>断言漂移存在</b>）——
+     * 那是一条 characterization 断言，漂移被修掉后它**必然转红** ⇒ 本次按 §3.3
+     * 「先改/删错误断言，再改实现」的顺序改写为<b>断言 Go 的形态</b>。
      */
     @Test
-    @DisplayName("🔴 真 Tomcat（默认 8 KB 请求行上限）：query 参数过多 ⇒ **400**；"
-            + "⚠️ body 是 Tomcat 的 HTML 页（Go 是 text/plain + too many form values）")
+    @DisplayName("✅ 真 Tomcat：2049 个非空 query 参数 ⇒ **400 + Go 的 text/plain body**"
+            + "（第十三轮容器旋钮对齐后，与 Go 逐字节一致）")
     void realTomcatRejectsTooManyQueryParamsWith400LikeGo() throws Exception {
         HttpResponse<String> resp = http.send(
                 HttpRequest.newBuilder(URI.create(base() + "/v1/articles?" + goQuery(2049)))
@@ -352,37 +354,46 @@ class ArticleApiAssemblyWiringTest {
                 HttpResponse.BodyHandlers.ofString());
 
         assertEquals(400, resp.statusCode(),
-                "Go 侧 httpx/util.go:48-53 超限 ⇒ http.Error(400)；"
-                        + "RAG 侧由 Tomcat 的请求行上限先拒 ⇒ 状态码同样应是 400");
-        // ⚠️ characterization：默认配置下拒绝发生在**连接器层**，body 是 Tomcat 的 HTML 错误页。
-        //    Go 的 body 是 text/plain 的 "too many form values, error: <r.Form.Encode()>"。
-        //    ⇒ 这一条差异已登记（DRIFT-ARTICLE-API-005），**不修**：
-        //    要把它改掉就得动 Tomcat 的错误页产出（ErrorReportValve），风险远大于收益。
-        assertTrue(resp.body() != null && resp.body().contains("Bad Request"),
-                "默认配置下 body 是 Tomcat 的 HTML 错误页（已登记的 body 形状差异）；实际="
+                "Go 侧 httpx/util.go:48-53 超限 ⇒ http.Error(400)");
+        // ✅ 2026-10-25 第十三轮：请求能到达 GoStyleGetFormValuesFilter ⇒ body 是 Go 的形态。
+        assertTrue(resp.body() != null && resp.body().startsWith("too many form values, error: a=1&a=1&"),
+                "body 必须是 Go 的 `too many form values, error: <r.Form.Encode()>` 形态；实际="
                         + (resp.body() == null ? "<null>" : resp.body().substring(0,
                                 Math.min(200, resp.body().length()))));
+        // ⚠️ 反向断言：Tomcat 的 HTML 错误页**不得**再出现（那是这条漂移的现场特征）
+        assertFalse(resp.body() != null && resp.body().contains("Bad Request"),
+                "不得再出现 Tomcat 的 HTML 错误页（该差异已于第十三轮关闭）");
+        assertTrue(resp.headers().firstValue("Content-Type").orElse("").startsWith("text/plain"),
+                "Go 的 http.Error ⇒ text/plain；实际="
+                        + resp.headers().firstValue("Content-Type").orElse("<none>"));
     }
 
     /**
-     * 🔴 恰好 2048 个非空值：在<b>默认</b>配置下<b>仍然</b>是 400 ——
-     * 因为 Tomcat 的 8 KB 请求行上限比 Go 的 2048 个值**更早**触发
-     * （2048 × 4 字节 + 路径 ≈ 8204 > 8192）。
+     * ✅ 恰好 <b>2048</b> 个非空值 ⇒ <b>200</b>（与 Go 一致）。
      *
-     * <p>⇒ 这条用例的作用是<b>钉住"默认配置下这条闸门不可达"</b>这个事实，
-     * 防止下一个人误以为"应用层闸门已经在拦"。
+     * <h2>🟥 断言同样在 2026-10-25 第十三轮被翻转</h2>
+     * <p>改前（默认 8 KB 请求行上限）：2048 × 4 字节 + 路径 ≈ 8204 &gt; 8192
+     * ⇒ Tomcat 的连接器层上限<b>比 Go 的 2048 更早</b>触发 ⇒ 400
+     * ⇒ 本用例当时的作用是「钉住『默认配置下应用层闸门不可达』这个事实」。
+     * <p>改后：请求行上限 1028KB ⇒ 8204 字节<b>远在限内</b>
+     * ⇒ 请求到达 {@code GoStyleGetFormValuesFilter}，其判据是
+     * {@code nonEmpty > 2048} ⇒ <b>2048 不触发</b> ⇒ 放行 ⇒ <b>200</b>。
+     * <br>⇒ 与 Go 的 {@code httpx.GetFormValues}（{@code if n < maxFormParamCount} ⇒
+     * 第 2048 个仍被接受）<b>一致</b> ⇒ 应用层闸门<b>首次真正可达</b>，
+     * 且阈值与 Go 相同。
      */
     @Test
-    @DisplayName("真 Tomcat（默认 8 KB 上限）：**恰好 2048** 个非空 query 值 ⇒ 也是 400"
-            + "（Tomcat 的请求行上限比 Go 的 2048 更早触发 ⇒ 应用层闸门在默认配置下不可达）")
-    void realTomcatDefaultHeaderLimitFiresBeforeTheFormParamGate() throws Exception {
+    @DisplayName("✅ 真 Tomcat：**恰好 2048** 个非空 query 值 ⇒ **200**（与 Go 一致）"
+            + "（第十三轮前是 400 —— Tomcat 的 8 KB 请求行上限先触发）")
+    void realTomcatFormParamGateMatchesGoAtExactly2048() throws Exception {
         HttpResponse<String> resp = http.send(
                 HttpRequest.newBuilder(URI.create(base() + "/v1/articles?" + goQuery(2048)))
                         .GET().build(),
                 HttpResponse.BodyHandlers.ofString());
 
-        assertEquals(400, resp.statusCode(),
-                "默认配置下 Tomcat 的 8 KB 请求行上限先触发 ⇒ 400（与 Go 的状态码一致，body 不同）");
+        assertEquals(200, resp.statusCode(),
+                "Go 的 GetFormValues：第 2048 个非空值仍被接受（`n < maxFormParamCount` 才计数）⇒ 200；"
+                        + "RAG 侧 GoStyleGetFormValuesFilter 的 `nonEmpty > 2048` 判据同样放行 ⇒ 两侧必须一致");
     }
 
     /** 🔴 Go 只数<b>非空</b>值（{@code if len(v) == 0 { continue }}）⇒ 空值再多也不触发。 */

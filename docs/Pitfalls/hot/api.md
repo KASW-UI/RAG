@@ -582,9 +582,13 @@ MockMvc 直接调 `DispatcherServlet`，**不经过 Tomcat 的 HTTP 解析层** 
 
 | 闸 | Tomcat 11 的位置 | Boot 4 属性（默认） | Go 的对应（库级默认） |
 |---|---|---|---|
-| 请求目标字符校验 | `Http11InputBuffer.parseRequestLine` → `HttpParser.isQueryRelaxed` | `server.tomcat.relaxed-query-chars`（无） | `net/http` **允许** `[` `]` |
-| 请求行 + 头总长 | `maxHttpHeaderSize` | `server.max-http-request-header-size`（**8KB**） | `net/http` `MaxHeaderBytes`（**1 MiB**） |
-| 参数个数 | `Parameters` / Connector | `server.tomcat.max-parameter-count`（**1000**） | go-zero `maxFormParamCount`（**2048**） |
+| 请求目标字符校验 | `Http11InputBuffer.parseRequestLine` → `HttpParser.isQueryRelaxed` | `server.tomcat.relaxed-query-chars`（无）⇒ ✅ **已配 `["[", "]"]`** | `net/http` **允许** `[` `]` |
+| 请求行 + 头总长 | `maxHttpHeaderSize` | `server.max-http-request-header-size`（**8KB**）⇒ ✅ **已配 `1028KB`** | `net/http` `MaxHeaderBytes`（**1 MiB** **+ 4096 bufio slop**） |
+| 参数个数 | `Parameters` / Connector | `server.tomcat.max-parameter-count`（**1000**）⇒ ✅ **已配 `2048`** | go-zero `maxFormParamCount`（**2048**） |
+
+> 🟢 **2026-10-25 第十三轮**：上表三道闸**已在 10 个 api 模块全部打开**
+> （配方见 `docs/DRIFT/hot/api.md` 第十三轮）⇒ MockMvc 测不到的那三道闸，
+> 现在由 `HotApiRealTomcatGateTest` 的 **3 条真 Tomcat 断言**守着。
 
 ### 怎么防
 

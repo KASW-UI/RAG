@@ -145,7 +145,7 @@ preflight_ports() {
     who="$( { lsof -nP -iTCP:"$p" -sTCP:LISTEN 2>/dev/null | tail -n +2 | head -1 | awk '{print $1}'; } || true )"
     if [[ -n "$who" ]]; then
       busy=1
-      echo "  端口 $p 已被占用（$who）" >&2
+      echo "  端口 $p 已被占用（${who}）" >&2
       { docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -E "[:.]${p}->" || true; } | sed 's/^/      容器：/' >&2
       echo "      ⇒ 换端口：DIFTEST_PORT_OFFSET / DIFTEST_PG_PORT / DIFTEST_REDIS_PORT" >&2
     fi

@@ -1,6 +1,6 @@
 # 有意偏离 · `service/users/user/user-api`
 
-> **这里是「决策」，不是缺陷。** 与 [`../../DRIFT/users/user/api.md`](../../DRIFT/users/user/api.md) 的分工：
+> **这里是「决策」，不是缺陷。** 与 [`../../DRIFT/users/user/api.md`](api.md) 的分工：
 > DRIFT 记「需要对齐的差异」，本文件记「**决定不对齐**的差异」。
 >
 > ⚠️ **读之前先记住两条**：
@@ -54,7 +54,7 @@ func RecoverHandler(next http.Handler) http.Handler {
 
    ⇒ **Go 的空 body 正是「让客户端踩空」的那一版**。对齐它 = 主动降低信息量。
 2. **已有同款先例**：项目对 `401` 的 body 形状做过完全一样的决策并签字
-   （`SD-2026-10-23-01/02/03` 同批中的 **N-1**，见 [`../_INDEX.md`](../_INDEX.md)）。
+   （`SD-2026-10-23-01/02/03` 同批中的 **N-1**，见 [`../_INDEX.md`](../../_INDEX.md)）。
    ⇒ 同一类响应形状问题，不应在本域出现相反的处置。
 3. **HTTP 500 的语义**：500 意味着「服务端没能正常处理完」。
    带一个**可识别的业务码 5001**，客户端才能区分「系统内部错误」与
@@ -159,12 +159,12 @@ public class HttpMiddlewareFilter implements Filter {
 1. **不覆盖 `DRIFT-USERAPI-009` 的 ② 超时作用域**：Go 的 3s 预算不覆盖 JWT 验签，
    RAG 的覆盖。这**不是观测面差异，是行为差异**，
    且**只有在 Redis 也慢的时候才可观察** ⇒ 仍挂在
-   [`UNRESOLVED-004`](../../DRIFT/users/user/api.md)（需真 Redis 故障注入才能判定）。
+   [`UNRESOLVED-004`](api.md)（需真 Redis 故障注入才能判定）。
    ⇒ **不要因为签了本条就把它当成已解决。**
 2. **不覆盖 `DRIFT-USERAPI-008`**（go-zero 的 Breaker / Shedding / MaxConns 无对应物）——
    那条**尚未签字**，仍是待决项。
 3. **不覆盖 `DRIFT-USERAPI-004`** —— 那条已于同日在
-   [`../../DRIFT/users/user/api.md`](../../DRIFT/users/user/api.md) **被证伪关闭**
+   [`../../DRIFT/users/user/api.md`](api.md) **被证伪关闭**
    （Go 的 user-api 其实**只**吃 JSON body，RAG 已等价），
    与本条无关，不要混谈。
 

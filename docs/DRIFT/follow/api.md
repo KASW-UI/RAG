@@ -560,3 +560,29 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
    ⇒ 配套的**两条纪律**（已写进 [`docs/Pitfalls/follow/api.md`](../../Pitfalls/follow/api.md)）：
    ① 探针的 body 文件**每次请求前必须清空**，且比对前**断言没有 `HTTP=000`**；
    ② 故障装置必须**自证**（裸 HTTP/2 客户端跑一遍握手，确认收到 SETTINGS + SETTINGS ACK）。
+
+---
+
+## 2026-10-25 补记：`DRIFT-MSG-V-030` 的**域内部分**已修 —— 本模块产物现在是可执行 jar
+
+> **登记方在 message 域**（[`docs/DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) 的 `DRIFT-MSG-V-030`）——
+> 它是 V-028 的同款缺陷，但**修法落在本模块自己的 `pom.xml`** ⇒ 本域已修。
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| 产物 | **56 KB** library jar，**无 `Main-Class`** | **79 MB** Spring Boot fat jar，`Main-Class: org.springframework.boot.loader.launch.JarLauncher` |
+| `java -jar` | 「中没有主清单属性」 | 可启动（外部依赖齐备的前提下） |
+| pom | **无 `<build>` 段** | 补 `<build>` 段 + `spring-boot-maven-plugin`（版本由根 pom 的 `spring-boot-starter-parent` 继承，不写 `<version>`） |
+
+**修法**：照 `service/message/message-api/pom.xml` 的 V-028 同款写法，在本模块 pom 补
+`<build><plugins><plugin>spring-boot-maven-plugin</plugin></plugins></build>`。
+启动类 `FollowApiApplication` 唯一且带 `main` 方法 ⇒ **不显式写 `<mainClass>`**（少一处可能写错的配置）。
+
+⚠️ **本次只证明「产物带 `Main-Class` 且是可执行 fat jar」**，**没有**真起进程验证启动成功
+（会撞 Nacos / Redis / Kafka / gRPC 等外部依赖 ⇒ 起不来不等于产物有问题）。
+
+⚠️ **「`mvn package` 成功」不算数** —— 本项目至今的每一项验证都跑在容器 / 测试环境里，
+**从来没有碰过 jar 本身**（这正是 §3.3「编译通过 ≠ 产物可运行」的形态）。
+⇒ **判据是守门脚本**：`tools/difftest/check-jar-executable.sh`
+（逐个 api 模块解包 `META-INF/MANIFEST.MF` 看 `Main-Class`）
+⇒ **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）。

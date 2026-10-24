@@ -55,7 +55,7 @@ RAG :   int64 target_id = 1;        ← 2 空格
 ⇒ 只去一个前导空格会残留 **2 行差异**，让人误判「proto 不一致」
 ⇒ **这是纯空白差异，行为层仍是 0 行差异**（本轮复核实测确认）。
 
-> ⚠️ 与 [`_cross/new-domains-2026-10-23.md`](../../_cross/new-domains-2026-10-23.md)
+> ⚠️ 与 [`_cross/new-domains-2026-10-23.md`](../_cross/new-domains-2026-10-23.md)
 > 的「follow proto 逐行零差异」结论**一致**，本轮复核通过。
 
 > **🧾 台账 ↔ 文件复核（2026-10-24）**：`.proto` 两侧行数、message/字段号/rpc 计数、

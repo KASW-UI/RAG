@@ -2,13 +2,13 @@
 
 # `task-rpc` 踩坑记录
 
-> 记「**为什么会这样**」，不是记「哪条不一样」。不一致本身在 [`../../DRIFT/task/rpc.md`](../../../../DRIFT/task/rpc.md)。
+> 记「**为什么会这样**」，不是记「哪条不一样」。不一致本身在 [`../../DRIFT/task/rpc.md`](../../DRIFT/task/rpc.md)。
 
 ---
 
 ## 🔴 PITFALL-TASK-RPC-01 · `@EnabledIfDockerAvailable` 把「拉不到镜像」压成「Docker 不可用」，15 条真 PG 用例静默全跳
 
-> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-003`](../../../../DRIFT/task/rpc.md#-drift-task-rpc-003--15-条真-pg-用例静默全跳证据缺失)
+> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-003`](../../DRIFT/task/rpc.md#-drift-task-rpc-003--15-条真-pg-用例静默全跳证据缺失)
 > **核对日期**：2026-10-23　**基线**：`8422116`
 
 ### 现象
@@ -90,7 +90,7 @@ DockerClientFactory.instance().client();
 
 ## 🔴 PITFALL-TASK-RPC-02 · relaxed binding 键名对不上 ⇒ 配置键被静默丢弃
 
-> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-002`](../../../../DRIFT/task/rpc.md#-drift-task-rpc-002--taskdefinitions-的四个-ttl-键是死配置)
+> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-002`](../../DRIFT/task/rpc.md#-drift-task-rpc-002--taskdefinitions-的四个-ttl-键是死配置)
 
 ### 现象
 
@@ -137,7 +137,7 @@ when(ops.increment(anyString())).thenAnswer(...)   // redis-pipe-max → 1234 �
 
 ## ⚠️ PITFALL-TASK-RPC-03 · 注释描述的是「代码没实现的契约」
 
-> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-001`](../../../../DRIFT/task/rpc.md#-drift-task-rpc-001--taskcountstore-内存单例--两个-goka-group-串号--重启归零)
+> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-001`](../../DRIFT/task/rpc.md#-drift-task-rpc-001--taskcountstore-内存单例--两个-goka-group-串号--重启归零)
 
 `TaskCountStore` 的 javadoc 原文写着：
 
@@ -157,14 +157,14 @@ when(ops.increment(anyString())).thenAnswer(...)   // redis-pipe-max → 1234 �
 
 | 关系 | 文件 |
 |---|---|
-| 本域 DRIFT | [`../../DRIFT/task/rpc.md`](../../../../DRIFT/task/rpc.md) · [`api.md`](../../../../DRIFT/task/api.md) |
-| 全仓共性踩坑 | [`../../Pitfalls/_cross/testing-pitfalls.md`](../../_cross/testing-pitfalls.md) · [`../../Pitfalls/_cross/framework-mechanism-evidence.md`](../../_cross/framework-mechanism-evidence.md) |
+| 本域 DRIFT | [`../../DRIFT/task/rpc.md`](../../DRIFT/task/rpc.md) · [`api.md`](../../DRIFT/task/api.md) |
+| 全仓共性踩坑 | [`../../Pitfalls/_cross/testing-pitfalls.md`](../_cross/testing-pitfalls.md) · [`../../Pitfalls/_cross/framework-mechanism-evidence.md`](../_cross/framework-mechanism-evidence.md) |
 
 ---
 
 ## 🔴 PITFALL-TASK-RPC-04 · 探针自己也会撒谎：Python `urllib` 会自动补 `Content-Type`
 
-> 场景：2026-10-23 `task` 域双侧活体对拍（见 [`../../DRIFT/task/api.md`](../../../../DRIFT/task/api.md) §二·五）
+> 场景：2026-10-23 `task` 域双侧活体对拍（见 [`../../DRIFT/task/api.md`](../../DRIFT/task/api.md) §二·五）
 
 ### 现象
 
@@ -731,7 +731,7 @@ Nacos **2.x 的客户端用 gRPC 注册**（nacos-client 3.x 的 `NamingGrpcClie
 
 ## 🔴 PITFALL-TASK-RPC-18 · `@KafkaListener(properties=…)` **不走 Boot 松散绑定** ⇒ 连字符写法被 Kafka 静默忽略 ⇒ 「earliest 从未生效」而 326 条测试全绿
 
-> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-006`](../../../../DRIFT/task/rpc.md#-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)
+> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-006`](../../DRIFT/task/rpc.md#-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)
 
 ### 现象
 

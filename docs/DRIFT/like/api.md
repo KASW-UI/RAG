@@ -875,7 +875,7 @@ Go 侧则**正常发出**。
 | 2 | `core/mapping/unmarshaler.go:228-229` | `fillSliceValue` 的 type switch **第一条**就是 `case fmt.Stringer: setValueFromString(baseKind, ithVal, v.String())`；`json.Number` 实现了 `Stringer` ⇒ 数组里的数字被字符串化**接受** |
 | 3 | `core/mapping/utils.go` `convertTypeFromString` | `case reflect.String: return str, nil` —— **原样返回，不解析不校验** ⇒ `99999999999999999999` 连溢出都不管 |
 
-⚠️ **这是 go-zero 自身的��对称**：同一个 JSON 数字，进**标量** String 字段被拒（`processFieldPrimitive`），
+⚠️ **这是 go-zero 自身的不对称**：同一个 JSON 数字，进**标量** String 字段被拒（`processFieldPrimitive`），
 进 **Slice 元素**却被收。只学「String 字段拒数字」必然漏掉这一半 —— 台账原判 HIGH 成立。
 
 **修法**：新增 `GoStyleRawStringListDeserializer`（域内，不动 `users-common`），挂到
@@ -1178,3 +1178,29 @@ return likeServiceBlockingStub.withDeadlineAfter(effectiveNanos, TimeUnit.NANOSE
 |---|---|
 | 015 的修复 | 落点在 **6 域共用**的 `service/common` ⇒ **须单域串行**（§5.3），且已实测排除域内绕过 |
 | 逐条改写 §4 矩阵 / §5.2 / §6.8 / §10.1 的**每个格子** | 那 4 张表是**首轮对照产物**，它的价值就在于「首轮看到了什么」；逐格改会**抹掉历史**。⇒ 改为加「首轮快照」声明 + 各条加「状态」行（**原文一字未删**） |
+
+---
+
+## 2026-10-25 补记：`DRIFT-MSG-V-030` 的**域内部分**已修 —— 本模块产物现在是可执行 jar
+
+> **登记方在 message 域**（[`docs/DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) 的 `DRIFT-MSG-V-030`）——
+> 它是 V-028 的同款缺陷，但**修法落在本模块自己的 `pom.xml`** ⇒ 本域已修。
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| 产物 | **48 KB** library jar，**无 `Main-Class`** | **68 MB** Spring Boot fat jar，`Main-Class: org.springframework.boot.loader.launch.JarLauncher` |
+| `java -jar` | 「中没有主清单属性」 | 可启动（外部依赖齐备的前提下） |
+| pom | **无 `<build>` 段** | 补 `<build>` 段 + `spring-boot-maven-plugin`（版本由根 pom 的 `spring-boot-starter-parent` 继承，不写 `<version>`） |
+
+**修法**：照 `service/message/message-api/pom.xml` 的 V-028 同款写法，在本模块 pom 补
+`<build><plugins><plugin>spring-boot-maven-plugin</plugin></plugins></build>`。
+启动类 `LikeApiApplication` 唯一且带 `main` 方法 ⇒ **不显式写 `<mainClass>`**（少一处可能写错的配置）。
+
+⚠️ **本次只证明「产物带 `Main-Class` 且是可执行 fat jar」**，**没有**真起进程验证启动成功
+（会撞 Nacos / Redis / Kafka / gRPC 等外部依赖 ⇒ 起不来不等于产物有问题）。
+
+⚠️ **「`mvn package` 成功」不算数** —— 本项目至今的每一项验证都跑在容器 / 测试环境里，
+**从来没有碰过 jar 本身**（这正是 §3.3「编译通过 ≠ 产物可运行」的形态）。
+⇒ **判据是守门脚本**：`tools/difftest/check-jar-executable.sh`
+（逐个 api 模块解包 `META-INF/MANIFEST.MF` 看 `Main-Class`）
+⇒ **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）。

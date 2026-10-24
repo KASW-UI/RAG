@@ -247,7 +247,7 @@ RAG 侧 Spring 会对 `form-urlencoded` 的 POST body **参数化重建**，对 
    `X-Content-Type-Options: nosniff` **三条断言全过**，并与 Go 真源同请求的响应头做了对照打印。
    ⚠️ 该脚本里 task 段与 user 段**互不影响**：某域栈没起时判 **SKIP** 而不是 FAIL。
 4. ✅ **Content-Type 无关性有真 Tomcat 守门测试**（2026-10-24 新增
-   [`TaskApiContentTypeTest`](../../../../service/task/task-api/src/test/java/com/rag/task/task/api/TaskApiContentTypeTest.java)）：
+   [`TaskApiContentTypeTest`](../../../service/task/task-api/src/test/java/com/rag/task/task/api/TaskApiContentTypeTest.java)）：
    6 种 Content-Type + 不带 Content-Type 全要 200；**带阳性对照**（畸形 JSON / 空 body 仍须 400）。
    ⚠️ **变异测试已做**：撤掉处理器替换 ⇒ 1 条红；把 multipart 开关改回 `true` ⇒ 2 条红 ⇒ **不是假绿**。
 5. ⚠️ 本轮**未重审** `service/common`（`HttpMiddlewareFilter` / breaker / maxConns 等），
@@ -426,11 +426,11 @@ spring:
 **（B）form-urlencoded ⇒ 消息输入层「body 一律按 JSON 读原始字节」**
 
 新增两个类：
-- [`GoStyleRawBodyArgumentProcessor`](../../../../service/task/task-api/src/main/java/com/rag/task/task/api/config/GoStyleRawBodyArgumentProcessor.java)
+- [`GoStyleRawBodyArgumentProcessor`](../../../service/task/task-api/src/main/java/com/rag/task/task/api/config/GoStyleRawBodyArgumentProcessor.java)
   —— 继承 `RequestResponseBodyMethodProcessor`，**只覆盖 `createInputMessage(NativeWebRequest)`**
   （父类 `AbstractMessageConverterMethodArgumentResolver:269-273`，protected），
   返回一个 `getBody()` 直读 `HttpServletRequest.getInputStream()` 的 `ServletServerHttpRequest` 子类。
-- [`TaskApiRawBodyConfig`](../../../../service/task/task-api/src/main/java/com/rag/task/task/api/config/TaskApiRawBodyConfig.java)
+- [`TaskApiRawBodyConfig`](../../../service/task/task-api/src/main/java/com/rag/task/task/api/config/TaskApiRawBodyConfig.java)
   —— 用 `BeanPostProcessor` 把 `RequestMappingHandlerAdapter` 里的默认
   `RequestResponseBodyMethodProcessor` **就地替换**成本类。
 
@@ -529,3 +529,29 @@ KEEP_UP=1 ./tools/difftest/run-task-http-parity.sh # 跑完不拆服务与容器
 | `$TMPDIR/task-http-parity/logs/parity-task-http.txt` | 对拍报告落盘（编排脚本第 9 步 tee 出来） |
 
 ⚠️ `parity-task.py` **硬编码了本轮的端口**（Go 18886 / RAG 58886）与库名，与 `run.sh` 一样属对拍专用配置。
+
+---
+
+## 2026-10-25 补记：`DRIFT-MSG-V-030` 的**域内部分**已修 —— 本模块产物现在是可执行 jar
+
+> **登记方在 message 域**（[`docs/DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) 的 `DRIFT-MSG-V-030`）——
+> 它是 V-028 的同款缺陷，但**修法落在本模块自己的 `pom.xml`** ⇒ 本域已修。
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| 产物 | **24 KB** library jar，**无 `Main-Class`** | **63 MB** Spring Boot fat jar，`Main-Class: org.springframework.boot.loader.launch.JarLauncher` |
+| `java -jar` | 「中没有主清单属性」 | 可启动（外部依赖齐备的前提下） |
+| pom | **无 `<build>` 段** | 补 `<build>` 段 + `spring-boot-maven-plugin`（版本由根 pom 的 `spring-boot-starter-parent` 继承，不写 `<version>`） |
+
+**修法**：照 `service/message/message-api/pom.xml` 的 V-028 同款写法，在本模块 pom 补
+`<build><plugins><plugin>spring-boot-maven-plugin</plugin></plugins></build>`。
+启动类 `TaskApiApplication` 唯一且带 `main` 方法 ⇒ **不显式写 `<mainClass>`**（少一处可能写错的配置）。
+
+⚠️ **本次只证明「产物带 `Main-Class` 且是可执行 fat jar」**，**没有**真起进程验证启动成功
+（会撞 Nacos / Redis / Kafka / gRPC 等外部依赖 ⇒ 起不来不等于产物有问题）。
+
+⚠️ **「`mvn package` 成功」不算数** —— 本项目至今的每一项验证都跑在容器 / 测试环境里，
+**从来没有碰过 jar 本身**（这正是 §3.3「编译通过 ≠ 产物可运行」的形态）。
+⇒ **判据是守门脚本**：`tools/difftest/check-jar-executable.sh`
+（逐个 api 模块解包 `META-INF/MANIFEST.MF` 看 `Main-Class`）
+⇒ **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）。

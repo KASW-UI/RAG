@@ -1,5 +1,10 @@
 # `service/message/message-api` 语义对照台账（Go ↔ Spring Boot）
 
+> 🟥 **当前态指针（2026-10-26 台账校准轮回填）** —— 本文件按「轮次」追加，**历史各轮一条未删**（快照价值）。
+> ⚠️ **头部一度严重过期**（头部「核对日期：2026-10-23（第二轮）」，而正文已到**第九轮（api 侧）**）⇒ **当前状态一律以文件末尾「2026-10-24 第九轮（api 侧）」一节为准**。
+> ⇒ 本文件里的 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环（AGENTS.md §0 证据强度分层）。
+> **本轮只回填头部口径；正文各轮的原始记录一条未删。**
+
 > **真源**：`/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/message/api`
 > **目标**：`/Users/pr/Documents/java&golang/RAG/service/message/message-api`
 > **核对日期**：2026-10-23（第二轮 · 全维度复核）
@@ -1608,4 +1613,4 @@ message-api：84 + 2（MessageApiTimeoutRealTomcatTest）= 86 tests / 0 failures
 
 **⚠️ 归属**：属**别的域**，按域间纪律本工作树**不改它们的 pom** ⇒ 登记为跨域待办
 （与 `DRIFT-MSG-V-029` 同款处理：登记 + 交接，不越界）。
-⇒ 修法与清单 ⇒ 见 [`docs/DRIFT/message/rpc.md` 第九轮 · 第 4 节](../DRIFT/message/rpc.md)。
+⇒ 修法与清单 ⇒ 见 [`docs/DRIFT/message/rpc.md` 第九轮 · 第 4 节](rpc.md)。

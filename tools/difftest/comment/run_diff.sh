@@ -19,7 +19,7 @@ REDIS="docker exec cdifftest-redis redis-cli"
 
 for f in bin/go-comment-rpc bin/go-comment-api bin/rag-comment-rpc.jar api-cp.txt; do
   if [ ! -e "$f" ]; then
-    echo "❌ 缺前置产物：$f（见同目录 README.md「怎么跑」）"; exit 1
+    echo "❌ 缺前置产物：${f}（见同目录 README.md「怎么跑」）"; exit 1
   fi
 done
 
@@ -73,7 +73,7 @@ infra_ok=1
 for c in cdifftest-postgres cdifftest-redis cdifftest-kafka; do
   st=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo "missing")
   if [ "$st" != "running" ]; then
-    echo "  ❌ 容器 $c 状态 = $st（不是 running）"; infra_ok=0
+    echo "  ❌ 容器 $c 状态 = ${st}（不是 running）"; infra_ok=0
   fi
 done
 $PG psql -t -A -U admin -d go_comment -c "select 1" >/dev/null 2>&1 || { echo "  ❌ PG 不可达"; infra_ok=0; }

@@ -150,9 +150,9 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 
 | # | 项 | 类别 | 状态 |
 |---|---|---|---|
-| **D21** | **Tomcat 请求目标字符校验**拒绝 query 里的 `[` `]` ⇒ `?page[]=5` **Go 200 / RAG 400 + Tomcat HTML 错误页** | **SEMANTIC MISMATCH** | 🔴 **需修（跨域）** ⇒ `DRIFT-HOTAPI-021`。⚠️ **第二轮 CASE-04b/04c 的 ✅ 结论被推翻**（MockMvc 绕过 Tomcat 的请求行校验） |
-| **D22** | **form 参数个数上限**：Go **2048**（应用层）vs RAG **1000**（Tomcat `maxParameterCount`）⇒ 1001~2048 区间 Go 成功 / RAG 5001 | OBSERVABLE DIFFERENCE | 🔴 **需修（跨域）** ⇒ `DRIFT-HOTAPI-022`。⇒ **RAG 侧自己实现的 2048 上限在 GET query 上不可达**（Tomcat 先拒） |
-| **D23** | **请求行长上限**：Go `net/http` **1 MiB** vs RAG Tomcat **8 KiB** ⇒ 8 KiB~1 MiB 的 query：Go 处理 / RAG **400 + Tomcat HTML 错误页**（不是业务信封） | OBSERVABLE DIFFERENCE | 🔴 **需修（跨域）** ⇒ `DRIFT-HOTAPI-023` |
+| **D21** | **Tomcat 请求目标字符校验**拒绝 query 里的 `[` `]` ⇒ `?page[]=5` **Go 200 / RAG 400 + Tomcat HTML 错误页** | **SEMANTIC MISMATCH** | ✅ **已修**（2026-10-25 第十三轮 ⇒ `DRIFT-HOTAPI-021`）：10 个 api 模块统一配 `server.tomcat.relaxed-query-chars: ["[", "]"]` ⇒ 双侧活体复测 **Go 200 / RAG 200，响应体逐字节相同**；真 Tomcat 守门 + **MUT-A 变异转红** ✅。⚠️ **第二轮 CASE-04b/04c 的 ✅ 结论被推翻**（MockMvc 绕过 Tomcat 的请求行校验） |
+| **D22** | **form 参数个数上限**：Go **2048**（应用层）vs RAG **1000**（Tomcat `maxParameterCount`）⇒ 1001~2048 区间 Go 成功 / RAG 5001 | OBSERVABLE DIFFERENCE | ✅ **已修**（2026-10-25 第十三轮 ⇒ `DRIFT-HOTAPI-022`）：统一配 `server.tomcat.max-parameter-count: 2048` ⇒ 双侧活体复测**首个翻转 n 两侧都是 2049**、响应体逐字节相同；真 Tomcat 守门 + **MUT-B 变异转红** ✅。⇒ **RAG 侧自己实现的 2048 上限在 GET query 上不可达** 这个副作用已消除。⚠️ **残余**：`DRIFT-HOTAPI-030`（两层限制语义不同 ⇒ 精确窗口） |
+| **D23** | **请求行长上限**：Go `net/http` **1 MiB** vs RAG Tomcat **8 KiB** ⇒ 8 KiB~1 MiB 的 query：Go 处理 / RAG **400 + Tomcat HTML 错误页**（不是业务信封） | OBSERVABLE DIFFERENCE | ✅ **已修**（2026-10-25 第十三轮 ⇒ `DRIFT-HOTAPI-023`）：统一配 `server.max-http-request-header-size: **1028KB**` ⇒ 双侧活体复测**首个翻转长度两侧都是 1052536 字节（差 0）**；真 Tomcat 守门 + **MUT-C 变异转红** ✅。⚠️ **原台账写的 `1MB` 比 Go 严 4096 字节**（Go = `DefaultMaxHeaderBytes` **+ 4096 bufio slop**）⇒ **本轮已订正**。⚠️ **残余**：`DRIFT-HOTAPI-031`（超限后的 431 vs 400，框架限制） |
 | **D24** | `Content-Type` 媒体类型**参数**：Go `application/json; charset=utf-8`（**分号后有空格**）vs RAG `application/json`（无 charset） | OBSERVABLE DIFFERENCE | ✅ **已签字**（2026-10-24 第六轮，用户拍板「不复刻」⇒ `SD-HOT-API-006`；⚠️ Spring 的 `MediaType.toString()` 产出 `;` 后**无空格** ⇒ **不可逐字节复刻**） |
 
 ---
@@ -689,8 +689,8 @@ Recommended Verification:
 | CASE-02 空输入 | `?page=` / `?page` / `?page_size=` | 1 / 20（**取默认，不报错**） | 1 / 20 | ✅ |
 | CASE-03 不存在 | 空 items | `"items":[]`, total=0 | 同 | ✅ |
 | CASE-04 重复 | `?page=5&page=3` | 5 / 20 | 5 / 20 | ✅ **活体实测**（第五轮） |
-| CASE-04b 重复（数组记法） | `?page[]=5&page[]=9` | 5 / 20 | 5 / 20 | 🔴 **被第五轮推翻** ⇒ 真栈下 RAG 是 **400 + Tomcat HTML 错误页**（`DRIFT-HOTAPI-021`）。⚠️ 原 ✅ 是 **MockMvc 测的** |
-| CASE-04c 单值数组记法 | `?page[]=5` | 5 / 20 | 5 / 20 | 🔴 **被第五轮推翻** ⇒ 同上 |
+| CASE-04b 重复（数组记法） | `?page[]=5&page[]=9` | 5 / 20 | 5 / 20 | ✅ **第十三轮已修**（`DRIFT-HOTAPI-021`）⇒ 配 `relaxed-query-chars: ["[", "]"]` 后两侧 **200 且响应体逐字节相同**。⚠️ 中间的 🔴（第五轮推翻第二轮的 ✅）**成立过**：那是因为 MockMvc 测的 |
+| CASE-04c 单值数组记法 | `?page[]=5` | 5 / 20 | 5 / 20 | ✅ **第十三轮已修**（`DRIFT-HOTAPI-021`）⇒ 同上 |
 | CASE-05 外部依赖失败（fatal） | hot-rpc 报错 | 200 `{code:5001}` | 200 `{code:5001}` | ✅ **活体实测**（第五轮，逐字节相同） |
 | CASE-05b 外部依赖失败（best-effort） | 单条 article-rpc 报错 | 跳过该条，总数减 1 | 同 | ✅ **活体实测**（第五轮：`normal` 模式 total=3 vs `all-ok` 模式 total=4） |
 | CASE-06 超时 | 令下游 >3s | 503 + `Request Timeout\n` + nosniff | 503 + 同体，**缺 nosniff** | 🟡 **第五轮已活体触发**：两侧**状态码与 body 逐字节相同**，差的是 `X-Content-Type-Options`（**D14**，跨域移交 common 域） |
@@ -706,7 +706,7 @@ Recommended Verification:
 | CASE-15c 序列化边界 | 标题含 `<b>` `&` | 不转义 | 不转义 | ✅ **活体实测**（第五轮；含双引号 / 反斜杠 / 换行，逐字节相同） |
 | CASE-15d 序列化边界 | 字段顺序 | 声明序 | 声明序 | ✅ **活体实测**（第五轮，逐字节相同 ⇒ D15 的修正在真栈里站得住） |
 | CASE-16 int32 溢出分页 | `page=42949674&page_size=50` | 空页 | 空页 | ✅ **活体实测**（第五轮，逐字节相同） |
-| CASE-17 参数上限 | 2048 / 2049 个 form 值 | OK / **5001** | OK / **5001**（阈值 1000 ⇒ 1001 起就 5001） | 🔴 **阈值不同**（`DRIFT-HOTAPI-022`）。⚠️ 第二轮原写「RAG: OK / OK」**是错的** |
+| CASE-17 参数上限 | 2048 / 2049 个 form 值 | OK / **5001** | OK / **5001** | ✅ **第十三轮已修**（`DRIFT-HOTAPI-022`）⇒ 配 `max-parameter-count: 2048` 后**首个翻转 n 两侧都是 2049**，响应体各 55 B **逐字节相同**。⚠️ 第二轮原写「RAG: OK / OK」**是错的**；第五轮原写「阈值 1000 ⇒ 1001 起就 5001」也已被订正 |
 | CASE-18 body | 合法 JSON | **忽略** | **忽略** | ✅ **活体实测**（第五轮） |
 | CASE-19 body | 畸形 JSON | **5001** | **5001** | ✅ **活体实测**（第五轮） |
 | CASE-20 路由层 | 404 / 405 | 裸响应 | 裸响应（真栈实测同） | ✅ **活体实测**（第五轮：404 = `404 page not found\n` + `text/plain` + `nosniff`；405 = 裸状态码 + `Allow`、无 body） |
@@ -723,6 +723,8 @@ Recommended Verification:
 > 2. **CASE-17 被推翻** ⇒ 真栈下 RAG 的**值个数阈值是 1000**（Tomcat `maxParameterCount`），
 >    不是 2048 ⇒ 1001~2048 区间 Go 成功 / RAG 5001（`DRIFT-HOTAPI-022`）。
 >    ⇒ **D12「✅ 已实现」在实现层成立、但运行时不可达** ⇒ 须与 D22 合并看。
+>    🟢 **2026-10-25 第十三轮**：D22 已修 ⇒ 阈值 **两侧都是 2049**，
+>    「运行时不可达」这个副作用**已消除**（见 D21/D22/D23 三行）。
 > 3. **CASE-15d / CASE-19 / CASE-20 升级为「活体实测同」** ⇒ 第五轮真栈逐字节确认。
 > 4. **CASE-06 的超时分支已活体触发** ⇒ 两侧状态码与 body 逐字节相同，**只差 `nosniff`**（D14）。
 
@@ -797,13 +799,25 @@ SEMANTICALLY NOT EQUIVALENT
 >
 > | 新增 | 差异 | 修法（**已实测**） | 归属 |
 > |---|---|---|---|
-> | `DRIFT-HOTAPI-021` | `?page[]=5` → Go 200 / RAG **400 + Tomcat HTML 错误页** | `server.tomcat.relaxed-query-chars: "[,]"` | 跨域 |
-> | `DRIFT-HOTAPI-022` | 值个数上限 Go **2048** / RAG **1000** | `server.tomcat.max-parameter-count: 2048` | 跨域 |
-> | `DRIFT-HOTAPI-023` | 请求行长 Go **1 MiB** / RAG **8 KiB** | `server.max-http-request-header-size: 1MB` | 跨域 |
+> | `DRIFT-HOTAPI-021` | `?page[]=5` → Go 200 / RAG **400 + Tomcat HTML 错误页** | ✅ `server.tomcat.relaxed-query-chars: ["[", "]"]`（**第十三轮已落地 10/10**） | 跨域 |
+> | `DRIFT-HOTAPI-022` | 值个数上限 Go **2048** / RAG **1000** | ✅ `server.tomcat.max-parameter-count: 2048`（**第十三轮已落地 10/10**） | 跨域 |
+> | `DRIFT-HOTAPI-023` | 请求行长 Go **1 MiB** / RAG **8 KiB** | ✅ `server.max-http-request-header-size: **1028KB**`（**第十三轮已落地 10/10**；⚠️ **不是 1MB**，见下） | 跨域 |
 > | `DRIFT-HOTAPI-024` | `Content-Type` 的 charset 参数 | **建议不复刻**（Spring 侧不可逐字节复刻） | 待签字 |
 >
 > ⇒ 三条容器类差异**同时打开后**：对拍矩阵 **24/29 → 28/29**，输入上限阈值与 Go **完全一致**
 > （实测首个翻转 n 两侧都是 **2049**）⇒ **配方已被证实**，只剩 D14（`nosniff`，common 域）。
+>
+> 🟥 **2026-10-25 第十三轮订正 + 落地**（本表原先写的三处「修法」有**一处不够准**）：
+>
+> | 项 | 原写 | 订正后 | 依据 |
+> |---|---|---|---|
+> | `-021` 的写法 | `"[,]"`（字符串按逗号切） | `["[", "]"]`（YAML 列表） | 两种都被 Boot 接受（`List<Character>` 的 binder 歧义），**列表无歧义** |
+> | `-023` 的值 | `1MB` | **`1028KB`** | Go 真实上限 = `DefaultMaxHeaderBytes(1<<20)` **+ 4096**（`net/http/server.go:941 // bufio slop`）⇒ 配 1MB 会比 Go **严 4096 字节**（实测：Go 1052536 翻转 / 配 1MB 的 RAG 1048440 翻转） |
+> | `-022` 的值 | `2048` | **保持 2048**（**不是** `-1`） | Tomcat 数「总参数个数」、Go 数「非空值个数」⇒ 语义不同；且另外 7 个 api 模块**没有**应用层判据 ⇒ 配 `-1` 会拆掉它们唯一的上限。详见 `DRIFT-HOTAPI-030` |
+>
+> ⇒ 落地范围 = **10 个 api 模块的 `application.yml`**；
+> 守门 = `tools/difftest/check-tomcat-limits.py`（静态，10/10 ✅）
+> ＋ `HotApiRealTomcatGateTest` 的 3 条**真 Tomcat 运行时**断言（MUT-A/B/C 变异**全红**）。
 
 ### ⚠️ 本结论的效力边界（三条，越界即失效）
 
@@ -1192,6 +1206,9 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 | **全局 `application` 标签**（DRIFT-HOTAPI-019） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「保持」⇒ `SD-HOT-API-007`：全仓统一配了同一项 ⇒ hot-api 单独去掉会成为**唯一例外** |
 | **Nacos 服务注册**（DRIFT-HOTAPI-020） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「保持」⇒ `SD-HOT-API-008`。⚠️ 签字即接受残留风险：「Nacos 不可达 ⇒ hot-api 起不来」（实测 `ErrCode:-401`）；缓解手段 = `register-enabled=false` |
 | **日志面已对齐的部分** | ✅ **本轮闭合** | `DRIFT-HOTAPI-016` 已修（`CodeError.Error()` 整串 + 日志级别 + 字段集），3 条变异全红 |
+| **容器输入上限三旋钮**（D21/D22/D23 ⇒ `DRIFT-HOTAPI-021/022/023`） | ✅ **第十三轮已闭合并已修（跨域落地 10/10）** | 10 个 api 模块的 `application.yml` 统一配 `relaxed-query-chars: ["[", "]"]` / `max-parameter-count: 2048` / `max-http-request-header-size: **1028KB**`（⚠️ **不是 1MB**：Go 真实上限 = `DefaultMaxHeaderBytes(1<<20)` **+ 4096 bufio slop**）。**双侧活体复测**：`?page[]=5` 两侧 **200 且响应体逐字节相同**；值个数首个翻转 n **两侧都是 2049**；请求行首个翻转长度 **两侧都是 1052536 字节（差 0）**。守门 = `tools/difftest/check-tomcat-limits.py`（静态 10/10 ✅）＋ `HotApiRealTomcatGateTest` 3 条**真 Tomcat**运行时断言（**MUT-A/B/C 变异全红** ✅） |
+| ↳ **残余 ①**（`DRIFT-HOTAPI-030`） | 🔴 **未修（跨域 · 待拍板）** | Tomcat 数「**总参数个数**」、Go 数「**非空值个数**」⇒ 语义不同 ⇒ **2049~10000 段且非空值 ≤2048** 时 **Go 200 / RAG 5001**。彻底修需「② 改 `-1` ＋ 每个 api 模块补 Go 的 `net/url` 10000 段上限」⇒ 涉及 10 个域（`favorite` 域台账还是 0 字节）⇒ 本轮不越界改 |
+| ↳ **残余 ②**（`DRIFT-HOTAPI-031`） | 🟡 **未修（框架限制）** | 超长请求行：Go **431 + `text/plain`** vs RAG **400 + Tomcat HTML**（Tomcat 在**连接器层**就拒 ⇒ Spring 的 `GlobalExceptionHandler` 没机会介入）⇒ Tomcat 无对应开关 ⇒ 建议登记为签字偏离候选 `SD-2026-10-25-CAND-10`（**未签字**）。触发条件是请求行 > 1 MiB+4 KiB（病态输入） |
 
 ---
 
@@ -1211,6 +1228,7 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 | `tools/difftest/hot-stub-server.java` | **同构双桩**：一个进程同时提供 `hot.HotService` + `article.ArticleService`，数据固定、可按「模式文件」切行为 |
 | `tools/difftest/diff-hot.py` | 29 条用例的逐字节对拍矩阵 |
 | `tools/difftest/probe-hot-limits.py` | 输入上限探针（二分出两侧的**值个数阈值**与**请求行长阈值**） |
+| `tools/difftest/check-tomcat-limits.py` | **跨模块**静态守门：10 个 api 进程的三个容器旋钮是否配好且**值正确**（第十三轮新增） |
 
 **端口分配**（全部独占，**没有碰**本机的 `Sea-*` 容器与 `Sea-RideTheWind_java` 进程）：
 Go hot-api `18903` · RAG hot-api `58903` · Go 侧桩 `19903` · RAG 侧桩 `19904`。
@@ -1248,6 +1266,19 @@ JSON 比对会放过字段顺序、`null` vs `[]`、uint32 溢出这类差异，
 ## 3. 🆕 本轮新查出的 4 条漂移
 
 ### DRIFT-HOTAPI-021 —— Tomcat 请求目标字符校验拒绝 `?page[]=5` 🔴 SEMANTIC MISMATCH（跨域）
+
+> ✅ **已修（2026-10-25 第十三轮「Tomcat 三旋钮」轮）** —— 10 个 api 模块统一配
+> `server.tomcat.relaxed-query-chars: ["[", "]"]`。
+> **双侧活体复测**（`tools/difftest/run-hot.sh --serve-only` + 双侧探针）：
+> `?page[]=5` ⇒ **Go 200 / RAG 200**，且**响应体逐字节相同**
+> （两侧都是 `{"code":200,"msg":"OK","data":{...,"page":5,...}}`，各 95 B）。
+> **运行时守门**：`HotApiRealTomcatGateTest#bracketArrayNotationIsAcceptedLikeGo`
+> （**真 Tomcat + 裸 socket** —— `URI.create` 会拒 `?page[]=5`，用 JDK HttpClient 等于没测）。
+> **变异验证 MUT-A**（摘掉该旋钮）⇒ 对应断言**转红** ✅ ⇒ 不是假绿。
+> **跨模块守门**：`tools/difftest/check-tomcat-limits.py`（10/10 ✅ `EXIT=0`；
+> 漏配任一模块 ⇒ `EXIT=1` 并指名道姓）。
+> ⚠️ **写法从 `"[,]"` 改成 YAML 列表 `["[", "]"]`** —— 两种写法都被 Boot 接受
+> （`List<Character>` 的 binder 歧义），但列表形式**无歧义**（§3.3：连「配置怎么写」都会漂）。
 
 | | Go 真源 | RAG |
 |---|---|---|
@@ -1305,6 +1336,21 @@ request parameters (GET plus POST) for a single request ([1,000]) were detected.
 **修法（已实测）**：`server.tomcat.max-parameter-count=2048`
 ⇒ 实测阈值变成 **2049**，与 Go **完全一致**。
 
+> ✅ **已修（2026-10-25 第十三轮「Tomcat 三旋钮」轮）** —— 10 个 api 模块统一配
+> `server.tomcat.max-parameter-count: 2048`。
+> **双侧活体复测**：首个翻转 n **两侧都是 2049**
+> （Go 200 + `{code:5001}` / RAG 200 + `{code:5001}`，**响应体各 55 B 且逐字节相同**）。
+> ⇒ 「RAG 自己实现的 2048 上限在 GET query 上**不可达**」这个副作用**已消除**。
+> **运行时守门**：`HotApiRealTomcatGateTest#formValueCountLimitMatchesGo`
+> ⇒ **变异验证 MUT-B**（改回 1000）⇒ 对应断言**转红** ✅。
+> ⚠️ **残余差异（新编号）**：Tomcat 数的是「**总参数个数**」，Go 数的是「**非空值个数**」
+> ⇒ 两者只在「值全非空」时阈值巧合相等 ⇒ 精确窗口见 **`DRIFT-HOTAPI-030`**。
+> ⚠️ **② 为什么配 2048 而不是 `-1`（关掉）**：`service/**` 实测只有 **article / hot / favorite**
+> 三个 api 复刻了 Go 的应用层判据，**另外 7 个 api 模块 Tomcat 这层就是唯一的上限**
+> ⇒ 配 `-1` 等于**拆掉那 7 个模块的唯一上限**；且 Go 1.25 `net/url` 还有 `defaultMaxParams = 10000`
+> 的**段数**上限（`article-api` 复刻了、`hot-api` 没有）⇒ 关掉后顶部会**多出**一段新差异。
+> ⇒ 2048 是「当前各模块应用层复刻程度下」的**最小公倍数**；彻底对齐的修法见 `DRIFT-HOTAPI-030`。
+
 ### DRIFT-HOTAPI-023 —— 请求行长上限：Go 1 MiB vs RAG 8 KiB 🔴 OBSERVABLE DIFFERENCE（跨域）
 
 **实测**（单值 query，隔离长度变量）：
@@ -1322,6 +1368,29 @@ RAG 直接 **400 + HTML 错误页** ⇒ 响应**形状**都不同（不是业务
 
 **修法（已实测）**：`server.max-http-request-header-size=1MB`
 ⇒ 实测到 200000 字节都不翻转，与 Go 一致。
+
+> ✅ **已修（2026-10-25 第十三轮「Tomcat 三旋钮」轮）** —— 10 个 api 模块统一配
+> `server.max-http-request-header-size: 1028KB`。
+> **双侧活体复测**：首个翻转长度 **Go 1052536 字节 = RAG 1052536 字节（差 0 字节）**。
+> **运行时守门**：`HotApiRealTomcatGateTest#requestLineLengthLimitMatchesGo`
+> ⇒ **变异验证 MUT-C**（改回 8KB）⇒ 对应断言**转红** ✅。
+>
+> ⚠️⚠️ **最终值不是 1MB，是 1028KB** —— 本条原先写的 `1MB` **比 Go 严 4096 字节**：
+> Go 的**真实**读上限 = `DefaultMaxHeaderBytes(1<<20)` **+ 4096**，
+> 出处 `net/http/server.go:940-942`
+> ```go
+> func (s *Server) initialReadLimitSize() int64 {
+> 	return int64(s.maxHeaderBytes()) + 4096 // bufio slop
+> }
+> ```
+> ⇒ 实测：Go 在 query 长 **1052536** 字节处翻转（431），
+> 而配 `1MB` 的 RAG 在 **1048440** 字节就翻转（400）—— 差的**正好是这 4096 字节**。
+> ⇒ 配 `1028KB` 后两侧翻转点**完全重合**。
+> ⇒ ⚠️ 改配置时**不要**「顺手改回 1MB」：守门脚本 `check-tomcat-limits.py` 断言的是
+> **1052672 字节**，改回 1MB 会被当场抓住（`EXIT=1`）。
+>
+> ⚠️ **残余差异（新编号）**：超限后的**状态码与错误体形状**仍不同
+> （Go 431 + `text/plain` vs RAG 400 + Tomcat HTML）⇒ 见 **`DRIFT-HOTAPI-031`**（框架限制）。
 
 ### DRIFT-HOTAPI-024 —— `Content-Type` 的 charset 参数 ✅ 已签字（不复刻）
 
@@ -1343,15 +1412,21 @@ Spring 的 `MappingJackson2HttpMessageConverter` 写 `application/json`。
 
 ```yaml
 server:
-  # 对齐 Go net/http 的 MaxHeaderBytes 默认 1 MiB（Boot 4 默认 8KB）
-  max-http-request-header-size: 1MB
+  # 对齐 Go net/http 的真实上限 = DefaultMaxHeaderBytes(1<<20) + 4096 bufio slop
+  # （net/http/server.go:941）⇒ 1028KB；Boot 4 默认 8KB
+  # ⚠️ 不是 1MB —— 1MB 会比 Go 严 4096 字节（实测：Go 1052536 翻转 / 1MB 时 RAG 1048440 翻转）
+  max-http-request-header-size: 1028KB
   tomcat:
     # 对齐 go-zero httpx/util.go:15 的 maxFormParamCount = 2048（Boot 4 默认 1000）
     max-parameter-count: 2048
     # 允许 query 里的 [ ]（Go 的 net/http 允许；Boot 4 默认拒绝 ⇒ 400）
-    # ⚠️ 该属性是 List<Character> ⇒ YAML 里要写成列表，不能写字符串
-    relaxed-query-chars: "[,]"
+    # ⚠️ 该属性是 List<Character> ⇒ 写成**列表**（`"[,]"` 也能被 binder 接受，但列表无歧义）
+    relaxed-query-chars: ["[", "]"]
 ```
+
+> 🟥 **2026-10-25 第十三轮订正**：本块原写 `max-http-request-header-size: 1MB` 与
+> `relaxed-query-chars: "[,]"` ⇒ **两处都不该照抄**（前者少 4096 字节、后者有 binder 歧义）。
+> ⇒ 已落地 **10 个 api 模块**并由 `tools/difftest/check-tomcat-limits.py` 守门。
 
 **实测效果**：
 - 对拍矩阵 **24/29 → 28/29**（`CASE-04b` / `CASE-04c` / `CASE-15` / `CASE-16` 四条全绿）
@@ -1956,3 +2031,166 @@ article-rpc 睡 5s ⇒ 必然拖过 3s 的 HTTP 超时）。
 
 ⇒ 本条修好后，**U5-OPEN-1 的两个候选原因只剩候选 ① 存疑**：
 「客户端熔断开启时机」是否仍有残余差异，本轮的逐波数据**两侧完全一致** ⇒ **未发现残余差异** ⇒ 一并闭合。
+
+---
+
+## 2026-10-25 补记：`DRIFT-MSG-V-030` 的**域内部分**已修 —— 本模块产物现在是可执行 jar
+
+> **登记方在 message 域**（[`docs/DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) 的 `DRIFT-MSG-V-030`）——
+> 它是 V-028 的同款缺陷，但**修法落在本模块自己的 `pom.xml`** ⇒ 本域已修。
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| 产物 | **32 KB** library jar，**无 `Main-Class`** | **67 MB** Spring Boot fat jar，`Main-Class: org.springframework.boot.loader.launch.JarLauncher` |
+| `java -jar` | 「中没有主清单属性」 | 可启动（外部依赖齐备的前提下） |
+| pom | **无 `<build>` 段** | 补 `<build>` 段 + `spring-boot-maven-plugin`（版本由根 pom 的 `spring-boot-starter-parent` 继承，不写 `<version>`） |
+
+**修法**：照 `service/message/message-api/pom.xml` 的 V-028 同款写法，在本模块 pom 补
+`<build><plugins><plugin>spring-boot-maven-plugin</plugin></plugins></build>`。
+启动类 `HotApiApplication` 唯一且带 `main` 方法 ⇒ **不显式写 `<mainClass>`**（少一处可能写错的配置）。
+
+⚠️ **本次只证明「产物带 `Main-Class` 且是可执行 fat jar」**，**没有**真起进程验证启动成功
+（会撞 Nacos / Redis / Kafka / gRPC 等外部依赖 ⇒ 起不来不等于产物有问题）。
+
+⚠️ **「`mvn package` 成功」不算数** —— 本项目至今的每一项验证都跑在容器 / 测试环境里，
+**从来没有碰过 jar 本身**（这正是 §3.3「编译通过 ≠ 产物可运行」的形态）。
+⇒ **判据是守门脚本**：`tools/difftest/check-jar-executable.sh`
+（逐个 api 模块解包 `META-INF/MANIFEST.MF` 看 `Main-Class`）
+⇒ **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）。
+
+---
+
+## 第十三轮（2026-10-25）：「Tomcat 容器输入上限三旋钮」全仓对齐
+
+> **范围**：全部 **10 个 api 模块**的 `application.yml` 的 `server:` 块（D21 / D22 / D23 的修法落点）。
+> **性质**：**跨域**（影响全部 10 个 api 进程），按 §5.3b 本轮**只写 hot 域台账**，
+> 其余 9 个域的台账由各自域补（合并后统一更新共享索引）。
+> **守门**：`tools/difftest/check-tomcat-limits.py`（静态，10/10 ✅ `EXIT=0`）
+> ＋ `HotApiRealTomcatGateTest` 的 3 条**真 Tomcat 运行时**断言（裸 socket）。
+
+| 旋钮 | Boot 4 默认 | 配成 | Go 侧依据 | 修后双侧活体实测 |
+|---|---|---|---|---|
+| ① `server.tomcat.relaxed-query-chars` | 无 | `["[", "]"]` | `net/url.ParseRequestURI` **不校验** query（实测 err=nil）＋ go-zero `httpx.GetFormValues` 支持方括号数组记法 | `?page[]=5` ⇒ **Go 200 / RAG 200，响应体逐字节相同**（各 95 B） |
+| ② `server.tomcat.max-parameter-count` | 1000 | `2048` | go-zero `httpx/util.go:15` `maxFormParamCount = 2048` | 首个翻转 n **两侧都是 2049**，响应体各 55 B **逐字节相同** |
+| ③ `server.max-http-request-header-size` | 8KB | **`1028KB`** | `net/http/server.go:931` `DefaultMaxHeaderBytes = 1<<20` **+ `:941` `+4096 // bufio slop`** | 首个翻转长度 **Go 1052536 字节 = RAG 1052536 字节（差 0）** |
+
+### ⚠️ ③ 为什么是 `1028KB` 而不是 `1MB`（本轮**推翻**了原台账的修法）
+
+原台账写「`server.max-http-request-header-size=1MB`」⇒ **比 Go 严 4096 字节**。
+Go 的真实读上限不是一个常量，是**常量 + bufio 余量**：
+
+```go
+// net/http/server.go:940-942（go1.25.11）
+func (s *Server) initialReadLimitSize() int64 {
+	return int64(s.maxHeaderBytes()) + 4096 // bufio slop
+}
+```
+
+⇒ 实测（双侧活体，二分「第一个不再是 200 的 query 长度」）：
+Go **1052536** 字节翻转（431）；配 `1MB` 的 RAG **1048440** 字节翻转（400）
+—— 差值**正好 4096** ⇒ 反推出两边各自的真实上限：`1 MiB + 4 KiB` vs `1 MiB`。
+⇒ 配 `1028KB`（= 1052672 B）后**两侧翻转点完全重合**。
+
+### ⚠️ ② 为什么是 `2048` 而不是 `-1`（关闭 Tomcat 的上限）
+
+Tomcat 的 `maxParameterCount` 数的是**总参数个数**（query + post），
+go-zero 的 `maxFormParamCount` 数的是**非空值个数** ⇒ **两层语义不同**（详见 `DRIFT-HOTAPI-030`）。
+本轮**没有**选 `-1`，理由：
+
+1. `service/**` 实测：只有 **article-api / hot-api / favorite-api** 三个模块复刻了 Go 的应用层判据；
+   **另外 7 个 api 模块，Tomcat 这层就是唯一的上限** ⇒ 配 `-1` 等于**拆掉那 7 个模块的唯一上限**。
+2. Go 1.25 的 `net/url` 还有**段数**上限 `defaultMaxParams = 10000`
+   （`article-api` 的 `GoStyleGetFormValuesFilter` 复刻了，`hot-api` / `favorite-api` **没有**）
+   ⇒ 关掉 Tomcat 的上限后，「≥10001 段」那段会**从「巧合相同」变成「真的不同」**。
+
+⇒ `2048` 是「当前各模块的应用层复刻程度下」的**最小公倍数**；
+**彻底对齐的修法见 `DRIFT-HOTAPI-030` 的「修法」节**（跨域，需一次拍板）。
+
+---
+
+## DRIFT-HOTAPI-030 —— 🔴 OBSERVABLE DIFFERENCE：Tomcat 数「总参数个数」、Go 数「非空值个数」⇒ 中间一段区间两侧行为不一致（**跨域 · 待拍板**）
+
+### 现象（2026-10-25 双侧活体实测，hot 域）
+
+请求带 **2049 ~ 10000 个 query 参数**、其中**非空值 ≤ 2048** ⇒ **Go 200 / RAG 5001**。
+
+| 输入（query） | Go | RAG | |
+|---|---|---|---|
+| 2049 个 `a=1`（**全非空**） | 200 + `{code:5001}` | 200 + `{code:5001}` | ✅ 相同 |
+| **2049 个 `a=`（全空值）** | **200 + `{code:200}`** | **200 + `{code:5001}`** | 🔴 **不同** |
+| **3000 个 `a=`** | **200 + `{code:200}`** | **200 + `{code:5001}`** | 🔴 **不同** |
+| 10001 个 `a=`（段数超 Go 的 10000） | 200 + `{code:5001}` | 200 + `{code:5001}` | ✅ 相同（**巧合**：Tomcat 的 2048 总数上限先拒） |
+
+### 根因：两层限制的**语义不同**
+
+- **Tomcat**（`org.apache.tomcat.util.http.Parameters.processParameters`）：
+  `limit > -1 && parameterCount >= limit` ⇒ 抛 `InvalidParameterException`，
+  **数的是参数总数**（query + post）。实测触发点：limit=1000 ⇒ 第 1001 个就抛；
+  limit=2048 ⇒ 第 2049 个就抛 ⇒ 与实测完全吻合。
+- **go-zero**（`rest/httpx/util.go:44-53`）：
+  ```go
+  for _, v := range values {
+      if len(v) == 0 { continue }          // ← 空值**不计数**
+      if n < maxFormParamCount { filtered = append(filtered, v); n++ }
+      else { return nil, fmt.Errorf("too many form values, error: %s", r.Form.Encode()) }
+  }
+  ```
+  ⇒ **数的是非空值个数** ⇒ 2049 个**空值**参数在 Go 侧计 **0**。
+
+⇒ 两层阈值**只在「值全非空」时巧合相等**（2049）。
+⚠️ RAG 侧的应用层判据（`GoFormValues.requireFormValueCountWithinLimit`）**逐字复刻了 Go 的空值跳过**
+（`if (v == null || v.isEmpty()) continue;`）—— 但它调 `request.getParameterMap()`，
+**Tomcat 的参数解析在那一刻先抛** ⇒ 应用层那段**根本执行不到**。
+
+### 影响范围
+
+**全部 10 个 api 模块**（Tomcat 层的行为与业务模块无关）。
+
+### 修法（待拍板 · **跨域**）
+
+1. ② 改成 `server.tomcat.max-parameter-count: -1`（**关闭** Tomcat 的总参数上限
+   —— Tomcat 的判定是 `limit > -1`，负值即**完全关闭**）；
+2. **每个 api 模块**都补齐 Go 的应用层两段判据：
+   - Go 1.25 `net/url/url.go:1001-1022` 的 **10000 段**上限
+     （`article-api` 的 `GoStyleGetFormValuesFilter` 已复刻 ⇒ 可作模板）；
+   - go-zero 的 **2048 非空值**上限（`article-api` / `hot-api` / `favorite-api` 已有）。
+
+⇒ **为什么本轮没做**：第 1 步会让第 2 步**成为硬前提** ——
+在只改了 7 个模块（`hot-api` / `favorite-api` 没有 10000 段判据）的情况下关掉 Tomcat 的上限，
+「≥10001 段」那段会**从「巧合相同」变成「真的不同」** ⇒ 那是**引入新漂移**，不是修漂移。
+⇒ 且第 2 步要动 **10 个域 + `favorite` 域（台账为 0 字节）** ⇒ 按 §5.3b **不越界改**。
+
+---
+
+## DRIFT-HOTAPI-031 —— 🟡 框架限制：超长请求行的**状态码与错误体形状**不可配（Go 431 + `text/plain` vs RAG 400 + `text/html`）
+
+### 现象
+
+请求行超过上限时（`?a=` + >1 MiB 的 query）：
+
+| | 状态码 | `Content-Type` | body |
+|---|---|---|---|
+| Go | **431** | `text/plain; charset=utf-8` | `431 Request Header Fields Too Large`（35 B） |
+| RAG | **400** | `text/html;charset=utf-8` | Tomcat 的 HTML 错误页（**435 B**） |
+
+### 根因
+
+Tomcat 在**连接器层**就拒了，请求**根本没进 Servlet**：
+
+```
+INFO  o.apache.coyote.http11.Http11Processor : Error parsing HTTP request header
+java.lang.IllegalArgumentException: Request header is too large
+	at org.apache.coyote.http11.Http11InputBuffer.fill(Http11InputBuffer.java:768)
+```
+
+⇒ Spring 的 `GlobalExceptionHandler` **没有机会介入** ⇒ 状态码与错误体**由 Tomcat 决定**。
+
+### 为什么**配不出来**（框架限制）
+
+- Tomcat 的 `Connector` **没有**「请求行过大 ⇒ 用 431」的开关；
+- `server.error.whitelabel.enabled=false` 只改 **body**，**不改状态码**，
+  而且会**波及其他错误响应**（404 / 405 的形态已与 Go 对齐 ⇒ 不能动）。
+
+⇒ 属**框架限制**（不是「RAG 偷懒」）⇒ 建议登记为**签字偏离候选**
+（`SD-2026-10-25-CAND-10`，**未签字**，见 [`docs/Intentional_Deviations/_INDEX.md`](../../Intentional_Deviations/_INDEX.md)）。
+⚠️ 触发条件是「请求行 > 1 MiB + 4 KiB」⇒ **病态输入**，正常客户端不会碰到。

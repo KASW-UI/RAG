@@ -1,5 +1,10 @@
 <!-- @new 2026-10-23 22:5x–23:1x · align/common 工作树产出 · 基线 commit 8422116 -->
 
+> 🟥 **当前态指针（2026-10-26 台账校准轮回填）** —— 本文件按「轮次」追加，**历史各轮一条未删**（快照价值）。
+> ⚠️ **头部一度严重过期**（文件名与首行仍停在 2026-10-23，而正文已有 §六·五 时效性复验、§八 决策记录、§十一 交接结案状态）⇒ **当前状态一律以文件末尾「§十一「交接事项的结案状态（2026-10-25 更新）」」一节为准**。
+> ⇒ 本文件里的 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环（AGENTS.md §0 证据强度分层）。
+> **本轮只回填头部口径；正文各轮的原始记录一条未删。**
+
 # `service/common` 组件级重对齐（2026-10-23）
 
 > **产出方**：`align/common` 工作树（`RAG.worktrees/common`），基线 commit **`8422116`**（与 `do-my-own-gh` 同点）。
@@ -576,3 +581,24 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 - 「已修」= **有回归测试且测试红→绿可复现**；**不等于**已在真实部署环境验证。
 - 「未修」条目均为**读 Go 原文得出**，未经运行时对拍 ⇒ 一律读作「**在该证据强度下不一致**」。
 - 本文件**不改** `_INDEX.md` / `AGENTS.md` / `_MANIFEST.json`（§5.3 共享面，合并后由主会话统一更新）。
+---
+
+## 十一、📮 交接事项的结案状态（2026-10-25 更新）
+
+> 本节只更新**状态**，不改写上文 §九 的原始记录（那是 2026-10-23 的原始交接快照）。
+
+| # | 事项 | 原归属 | **2026-10-25 状态** |
+|---|---|---|---|
+| 1 | **`hot-rpc` 缺 `GrpcServerConfigurer`** | `align/hot` | ✅ **已关闭** —— 由 hot 域正式认领（该域三份台账此前**零提及**这条缺口）并修复。<br>修法：补 `@Bean GrpcServerConfigurer` → `server.intercept(GoStyleRpcProtectionChain.build(...))` + `@Import(GoStyleProtectionConfiguration.class)`。<br>守门：新增 `HotGrpcInterceptorWiringTest`（3 条，**行为级**）+ **两档变异**（MUT-1 摘 Bean / **MUT-2 摘 `server.intercept` 而保留 Bean** ⇒ 2 条行为断言转红）。<br>`tools/difftest/check-grpc-interceptor-wiring.py` ⇒ **`EXIT=0`**（修前 `EXIT=1`）。<br>逐条证据 ⇒ [`docs/DRIFT/hot/rpc.md`](../hot/rpc.md) 第十二轮 |
+| 3 | **`DRIFT-COMMON-005` 的定案**（`bindToCurrent` 签名是否允许破坏性变更） | 跨域（common + users） | ⏸ **仍未决** —— 本轮**未动**（属「同时动 common + admin-rpc + user-rpc」的破坏性变更，**不是单域可决**） |
+| 4 | **`align/like` 的 `SD-2026-10-23-09` 描述订正** | `align/like` | ⏸ **仍未决** —— like 域本轮未动 |
+| 9 | **社区消费者：Go 用 `like`，RAG 不用** | `align/like` / `align/favorite` | ⏸ **仍未决** —— 与 `DRIFT-LIKE-003`（事实投递链路，末端不在任何仓）是同一条，**favorite 域本轮未做** |
+
+✅ **已关闭**：#1（hot-rpc 接线）。
+
+⚠️ **本轮连带产出的跨域登记（供后续会话接手）**：
+
+| # | 事项 | 归属 | 说明 |
+|---|---|---|---|
+| **10** | **裸 `ServerCallHandler` 注册到 unary 方法上，grpc-java 根本不会 dispatch** ⇒ 「超时生效」类断言在这种写法下**依然是绿的** | **`align/task`** | `service/task/task-rpc/.../TaskGrpcInterceptorWiringTest.java` 的 `slowTaskService()` 用的正是裸 `ServerCallHandler` ⇒ 它的「睡 10 秒的服务」**实际从未睡过**。<br>⇒ 该用例的断言**依然有效地证明了「服务端超时生效」**，但**证明不了「handler 被调用过」/「deadline 传播到了 handler 线程」**。<br>⇒ 建议该域换成 `ServerCalls.asyncUnaryCall` 并补一条「handler 被调用过」的断言。<br>实测证据 ⇒ [`docs/DRIFT/hot/rpc.md`](../hot/rpc.md) 第十二轮 §五 |
+| **11** | **6 个 api 模块的 jar 不可执行** | **跨 6 域（已修）** | `DRIFT-MSG-V-030`，登记方在 message 域 ⇒ **2026-10-25 已统一修完**，守门脚本 `EXIT=0` |

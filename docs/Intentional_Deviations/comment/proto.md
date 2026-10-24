@@ -40,7 +40,7 @@ proto `package` 决定 **gRPC 方法全名**：
 ⇒ **本签字偏离必须从「无实际影响」升级为待处理**：一旦 `comment-api` ↔ `comment-rpc` 走真实 gRPC，
 方法路径前缀不一致（`/pb.` vs `/comment.`）会**直接导致调用失败**，不是「对拍时才会发现」。
 ⚠️ 但这 14 个组件**零台账、尚未做过 Go ↔ RAG 对照** ⇒ 该偏离**到底何时变真，取决于对照结论**，不要在无对照的前提下擅自「修」。
-详见 [`../DRIFT/_cross/component-coverage-matrix.md`](../DRIFT/_cross/component-coverage-matrix.md)。
+详见 [`../DRIFT/_cross/component-coverage-matrix.md`](../../DRIFT/_cross/component-coverage-matrix.md)。
 
 ### 什么时候会变成真差异
 

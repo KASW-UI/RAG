@@ -1,5 +1,10 @@
 <!-- @new 2026-10-23 · task 域组件级对照（rpc 先于 api）· 由 `align/task` 工作树产出 -->
 
+> 🟥 **当前态指针（2026-10-26 台账校准轮回填）** —— 本文件按「轮次」追加，**历史各轮一条未删**（快照价值）。
+> ⚠️ **头部一度严重过期**（头部「核对方式」停在首轮对照，而正文已到「四·十」台账复核 + **三轮复核**）⇒ **当前状态一律以文件末尾「四·十「台账 vs 实际」复核（2026-10-24，含三轮复核与复核器自身的变异测试）」一节为准**。
+> ⇒ 本文件里的 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环（AGENTS.md §0 证据强度分层）。
+> **本轮只回填头部口径；正文各轮的原始记录一条未删。**
+
 # `task-rpc` 组件级语义对照台账
 
 > **基线 commit**：`8422116`（`do-my-own-gh`）
@@ -365,7 +370,7 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
 ⚠️ kq 三处虽「碰巧对」，也必须改：否则将来把全局默认改成 earliest，这三处会**静默**变成 earliest。
 
 **守门**：
-1. [`TaskKafkaOffsetResetContractTest`](../../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mq/TaskKafkaOffsetResetContractTest.java)
+1. [`TaskKafkaOffsetResetContractTest`](../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mq/TaskKafkaOffsetResetContractTest.java)
    （5 条）：**阳性对照**用 Kafka 自己的 `ConsumerConfig` 证明「连字符形式确实不被采纳」
    （加了连字符键 vs 完全不给这个键，效果**完全一样**）
    + 六个 listener 的精确断言 + **通用断言**：所有 per-listener property 的键名
@@ -1000,7 +1005,7 @@ Go 的 compacted table topic 的 key **不按时间过期**。
 
 ⇒ **本轮的交付不是「加 TTL」，而是「把『不设 TTL』锁成契约」**：
 新增真 Redis 守门测试
-[`TaskCountStoreRetentionContractTest`](../../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mq/TaskCountStoreRetentionContractTest.java)
+[`TaskCountStoreRetentionContractTest`](../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mq/TaskCountStoreRetentionContractTest.java)
 （4 条，含阳性对照：先证明「读 TTL」这个探针能区分「有 TTL / 无 TTL」，
 再断言计数 key 的 `TTL == -1`）⇒ **后人若好心加 TTL，测试立刻变红。**
 
@@ -1169,7 +1174,7 @@ KEEP_UP=1 ./tools/difftest/run-task-offset-oldest.sh # 跑完保留服务与容�
 
 ### 四·九·三、固化成守门测试
 
-新增 [`TaskConfigKeyBindingContractTest`](../../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/config/TaskConfigKeyBindingContractTest.java)
+新增 [`TaskConfigKeyBindingContractTest`](../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/config/TaskConfigKeyBindingContractTest.java)
 （**5 条，全绿**），断言四层：
 
 | # | 断言 | 作用 |

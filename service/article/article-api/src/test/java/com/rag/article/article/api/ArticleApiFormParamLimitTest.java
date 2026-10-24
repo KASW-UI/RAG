@@ -68,11 +68,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "logging.level.com.alibaba.nacos=WARN",
                 "management.otlp.tracing.export.enabled=false",
-                // ⭐ 本类存在的**唯一**理由：把 Tomcat 的请求行/请求头上限抬到 64 KB，
-                //    好让请求能进到应用层的闸门（默认 8 KB 时 Tomcat 先拒，闸门不可达）。
+                // ⭐ 本类存在的**唯一**理由：把 Tomcat 的请求行/请求头上限**固定**为 64 KB，
+                //    让本用例的判据只取决于「应用层闸门的语义」，不取决于模块配置。
                 // ⚠️ Boot 4 的属性名是 server.max-http-request-header-size（默认 8 KB）；
                 //    旧的 server.max-http-header-size 在 Boot 4 **已不存在** ⇒ 写它会被**静默忽略**
                 //    （实测：写了它，请求仍被 Tomcat 以 400 拒掉，闸门根本没执行）。
+                // 🟢 2026-10-25 第十三轮：模块自己的 application.yml 已配 1028KB（对齐 Go），
+                //    此处的 64KB **覆盖**它（@SpringBootTest 属性优先级高于 application.yml）
+                //    ⇒ 保留它是为了让这条用例**不受模块配置变动影响**。
                 "server.max-http-request-header-size=64KB"
         })
 class ArticleApiFormParamLimitTest {

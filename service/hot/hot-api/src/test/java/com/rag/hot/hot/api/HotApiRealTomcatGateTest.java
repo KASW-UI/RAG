@@ -48,6 +48,18 @@ import static org.mockito.Mockito.when;
  *     <td><b>U8</b></td>
  *     <td>percent-encoding 在真 Tomcat 下的绑定值</td>
  *   </tr>
+ *   <tr>
+ *     <td><b>D21</b></td>
+ *     <td>容器旋钮 {@code server.tomcat.relaxed-query-chars}：{@code ?page[]=5} 必须被放行</td>
+ *   </tr>
+ *   <tr>
+ *     <td><b>D22</b></td>
+ *     <td>容器旋钮 {@code server.tomcat.max-parameter-count}：form 值个数阈值必须等于 Go 的 2048</td>
+ *   </tr>
+ *   <tr>
+ *     <td><b>D23</b></td>
+ *     <td>容器旋钮 {@code server.max-http-request-header-size}：请求行上限必须等于 Go 的 1 MiB+4 KiB</td>
+ *   </tr>
  * </table>
  *
  * <h2>为什么必须是<b>真 Tomcat</b>（MockMvc 测不到什么）</h2>
@@ -246,8 +258,168 @@ class HotApiRealTomcatGateTest {
     }
 
     // ====================================================================================
+    // D21 / D22 / D23 —— 容器输入上限三旋钮（真 Tomcat 下的**运行时后果**）
+    // ====================================================================================
+    //
+    // ⚠️ **为什么这三条不能用 JDK HttpClient**：`URI.create("...?page[]=5")` 会抛
+    //    URISyntaxException（`[` `]` 在 RFC 3986 里只允许出现在 host 的 IPv6 字面量里），
+    //    而这正是本条要测的输入 ⇒ 用 JDK HttpClient 等于**测不到被测对象**。
+    //    ⇒ 改用**裸 socket**逐字节构造请求行（见 rawGet）。
+    //
+    // ⚠️ **为什么必须是「真 Tomcat」而不是 MockMvc**：三旋钮全是**容器层**配置，
+    //    MockMvc 根本不经过容器 ⇒ 在 MockMvc 上这三条永远绿（假绿）。
+    //    （这正是 D21 当初「第二轮 CASE-04b/04c 的 ✅ 结论被推翻」的原因。）
+
+    /**
+     * D21 —— {@code server.tomcat.relaxed-query-chars}。
+     *
+     * <p>Go 出处：{@code net/url.ParseRequestURI} **不校验 query**（实测 err=nil），
+     * 且 go-zero {@code rest/httpx/util.go} 的 {@code GetFormValues} 明确支持
+     * {@code ?page[]=5} 这种方括号数组记法 ⇒ Go 返回 200 且 {@code page=5}。
+     * <p>Tomcat 默认**拒绝** query 里的 {@code [} {@code ]} ⇒ 400 + **HTML 错误页**
+     * （不是业务信封）⇒ wire 形状完全不同。
+     */
+    @Test
+    @DisplayName("🔴 D21 —— ?page[]=5 在真 Tomcat 下必须 200 且 page=5（Boot 默认会 400 + HTML）")
+    void bracketArrayNotationIsAcceptedLikeGo() throws Exception {
+        RawHttp resp = rawGet("/hot/v1/articles?page[]=5");
+
+        assertThat(resp.status).as("Go 对 ?page[]=5 返回 200").isEqualTo(200);
+        assertThat(resp.contentType).as("必须是业务信封的 JSON，不能是 Tomcat 的 HTML 错误页")
+                .contains("application/json");
+        assertThat(resp.body).as("Go 侧 page=5（方括号记法被正确绑定）").contains("\"page\":5");
+        // ⚠️ 反向断言：Tomcat 的 HTML 错误页**绝不能**出现（它是本次漂移的现场特征）
+        assertThat(resp.body).doesNotContain("<html").doesNotContain("<!doctype");
+    }
+
+    /**
+     * D22 —— {@code server.tomcat.max-parameter-count}。
+     *
+     * <p>Go 出处：go-zero {@code rest/httpx/util.go:15} {@code maxFormParamCount = 2048}
+     * ⇒ 第 **2049** 个**非空** form 值即整体报错（wire 上是 200 + {@code {code:5001}}）。
+     * <p>Boot 4 的 {@code server.tomcat.max-parameter-count} 默认 **1000** ⇒ Tomcat 先拒
+     * ⇒ 1001~2048 这段区间 Go 成功 / RAG 失败。
+     */
+    @Test
+    @DisplayName("🔴 D22 —— form 值个数：2048 个通过、第 2049 个按 Go 语义被拒（200 + {code:5001}，不是 400 HTML）")
+    void formValueCountLimitMatchesGo() throws Exception {
+        RawHttp atLimit = rawGet("/hot/v1/articles?" + queryOf(2048));
+        assertThat(atLimit.status).as("第 2048 个值仍应通过").isEqualTo(200);
+        assertThat(atLimit.body).contains("\"code\":200");
+
+        RawHttp overLimit = rawGet("/hot/v1/articles?" + queryOf(2049));
+        assertThat(overLimit.status).as("Go 对第 2049 个值是 200 + 业务信封里的 5001")
+                .isEqualTo(200);
+        assertThat(overLimit.body).contains("\"code\":5001");
+        // ⚠️ 关键：Tomcat 层拒绝会是 400 + text/html ⇒ 与 Go 的 wire 形状不同
+        assertThat(overLimit.contentType).as("拒绝必须走业务信封，不能是 Tomcat 的 HTML 错误页")
+                .contains("application/json");
+        assertThat(overLimit.body).doesNotContain("<html");
+    }
+
+    /**
+     * D23 —— {@code server.max-http-request-header-size}。
+     *
+     * <p>Go 出处：{@code net/http/server.go:931} {@code DefaultMaxHeaderBytes = 1 << 20}
+     * ＋ {@code :941} {@code initialReadLimitSize() = maxHeaderBytes() + 4096 // bufio slop}
+     * ⇒ Go 的**真实**上限是 **1 MiB + 4 KiB**（不是 1 MiB）。
+     * <p>Boot 4 默认 **8KB** ⇒ 8 KiB~1 MiB 的请求行 Go 处理、RAG 400 + HTML。
+     */
+    @Test
+    @DisplayName("🔴 D23 —— 请求行长度：20 KiB 必须放行（Boot 默认 8KB 会拒）、超 1 MiB+4 KiB 必须被拒")
+    void requestLineLengthLimitMatchesGo() throws Exception {
+        // ① 20 KiB：Boot 4 默认 8KB 会拒（400 + HTML）⇒ 这条断言专门抓「旋钮没生效」
+        RawHttp ok = rawGet("/hot/v1/articles?a=" + "x".repeat(20 * 1024));
+        assertThat(ok.status).as("Go 对 20 KiB 的 query 正常放行").isEqualTo(200);
+        assertThat(ok.body).contains("\"code\":200");
+
+        // ② 超过 Go 的真实上限（1 MiB + 4 KiB）⇒ 两侧都被拒
+        RawHttp tooBig = rawGet("/hot/v1/articles?a=" + "x".repeat(1024 * 1024 + 4096));
+        assertThat(tooBig.status).as("超过 Go 的 1 MiB+4 KiB 上限必须被拒").isNotEqualTo(200);
+        // ⚠️ RAG 是 400 + Tomcat HTML，Go 是 431 + text/plain（"Request Header Fields Too Large"）
+        //    —— 这是 Tomcat **连接器层**的拒绝，没有配置开关能改成 431 ⇒ 框架限制，
+        //    已登记（docs/DRIFT/hot/api.md 的 DRIFT-HOTAPI-031）。
+        //    这里断言 RAG 侧的**实际**形态，把差异钉死而不是让它悄悄漂。
+        assertThat(tooBig.status).isEqualTo(400);
+    }
+
+    // ====================================================================================
     // helpers
     // ====================================================================================
+
+    /**
+     * 构造 {@code n} 个最省的 form 值（{@code a=1&a=1&…}）—— 与
+     * {@code tools/difftest/probe-hot-limits.py} 的 {@code build_query_values} 同款，
+     * 保证「探针量的阈值」与「测试断言的阈值」是同一个东西。
+     */
+    private static String queryOf(int n) {
+        StringBuilder sb = new StringBuilder(n * 4);
+        for (int i = 0; i < n; i++) {
+            if (i > 0) {
+                sb.append('&');
+            }
+            sb.append("a=1");
+        }
+        return sb.toString();
+    }
+
+    /** 裸 socket 的 HTTP 响应（只取本测试需要的三个字段）。 */
+    private static final class RawHttp {
+        final int status;
+        final String contentType;
+        final String body;
+
+        RawHttp(int status, String contentType, String body) {
+            this.status = status;
+            this.contentType = contentType;
+            this.body = body;
+        }
+    }
+
+    /**
+     * 用**裸 socket**发一个 GET —— 逐字节构造请求行，不经过 {@link java.net.URI} 的语法校验。
+     *
+     * <p>⚠️ 必须走 socket 而不是 {@link HttpClient}：{@code URI.create} 会拒绝
+     * {@code ?page[]=5}（{@code [} {@code ]} 在 RFC 3986 里不属于 query 的合法字符），
+     * 而那**正是** D21 要测的输入 ⇒ 用 HttpClient 等于把被测对象过滤掉了。
+     */
+    private RawHttp rawGet(String pathAndQuery) throws Exception {
+        try (java.net.Socket socket = new java.net.Socket("localhost", port)) {
+            socket.setSoTimeout(60_000);
+            byte[] request = ("GET " + pathAndQuery + " HTTP/1.1\r\n"
+                    + "Host: localhost:" + port + "\r\n"
+                    + "Connection: close\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+            socket.getOutputStream().write(request);
+            socket.getOutputStream().flush();
+
+            java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+            byte[] chunk = new byte[8192];
+            int n;
+            java.io.InputStream in = socket.getInputStream();
+            while ((n = in.read(chunk)) > 0) {
+                buf.write(chunk, 0, n);
+            }
+            String raw = buf.toString(java.nio.charset.StandardCharsets.ISO_8859_1);
+
+            int headEnd = raw.indexOf("\r\n\r\n");
+            String head = headEnd < 0 ? raw : raw.substring(0, headEnd);
+            String body = headEnd < 0 ? "" : raw.substring(headEnd + 4);
+
+            int status = -1;
+            String contentType = null;
+            for (String line : head.split("\r\n")) {
+                if (line.startsWith("HTTP/")) {
+                    String[] parts = line.split(" ");
+                    if (parts.length > 1) {
+                        status = Integer.parseInt(parts[1]);
+                    }
+                } else if (line.regionMatches(true, 0, "Content-Type:", 0, 13)) {
+                    contentType = line.substring(13).trim();
+                }
+            }
+            return new RawHttp(status, contentType, body);
+        }
+    }
 
     private String baseUrl() {
         return "http://localhost:" + port;

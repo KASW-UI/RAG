@@ -174,4 +174,18 @@
             「测试要 in-process server」与「运行期要 InProcessChannelBuilder」两个需求。
         -->
     </dependencies>
+
+    <!-- ============== 8. 构建 ==============
+         ⚠️ 缺 <build> ⇒ 没有 spring-boot-maven-plugin 的 repackage ⇒ 产物是普通 library jar，
+            `java -jar` 报「中没有主清单属性」（守门脚本 tools/difftest/check-jar-executable.sh）。
+    -->
+    <build>
+        <plugins>
+            <!-- 启动类 CommentApiApplication 靠 spring-boot-maven-plugin 打成可执行 jar -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
 </project>

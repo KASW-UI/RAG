@@ -174,18 +174,23 @@ def main():
     print("解读（按实测值生成，不要手改）：")
     print("  · Go  侧：值个数阈值 %s（应用层 go-zero httpx/util.go:15 maxFormParamCount=2048）"
           % go_n)
-    print("           请求行长上限 %s 字节（net/http MaxHeaderBytes 默认 1 MiB）"
+    print("           请求行长上限 %s 字节（net/http DefaultMaxHeaderBytes(1<<20) + 4096 bufio slop）"
           % (go_len if go_len else ">200000"))
-    print("  · RAG 侧：值个数阈值 %s（Tomcat maxParameterCount 默认 1000 ⇒ 抛 "
+    print("  · RAG 侧：值个数阈值 %s（Tomcat maxParameterCount 配 2048 ⇒ 第 2049 个抛 "
           "InvalidParameterException ⇒ 被 catch-all 吞成 {code:5001}）"
           % rag_n)
-    print("           请求行长上限 %s 字节（Boot server.max-http-request-header-size 默认 8KB）"
+    print("           请求行长上限 %s 字节（server.max-http-request-header-size 配 1028KB）"
           % (rag_len if rag_len else ">200000"))
     print()
-    print("  对齐配方（已实测：三个旋钮同时打开后 29 条用例 28 条通过，阈值与 Go 完全一致）：")
-    print("    --server.tomcat.relaxed-query-chars='[,]'   # 允许 query 里的 [ ] （Go 的 net/http 允许）")
-    print("    --server.tomcat.max-parameter-count=2048      # 对齐 go-zero maxFormParamCount")
-    print("    --server.max-http-request-header-size=1MB      # 对齐 net/http MaxHeaderBytes")
+    same_n = "✅ 一致" if go_n == rag_n else "🔴 不一致"
+    print("  ⇒ 值个数阈值：Go %s / RAG %s  %s" % (go_n, rag_n, same_n))
+    print()
+    print("  当前生效的配方（2026-10-25 实测：三个旋钮同时打开后两侧阈值完全一致）：")
+    print("    server.tomcat.relaxed-query-chars: [\"[\", \"]\"]  # 允许 query 里的 [ ]（Go 的 net/http 允许）")
+    print("    server.tomcat.max-parameter-count: 2048            # 对齐 go-zero maxFormParamCount")
+    print("    server.max-http-request-header-size: 1028KB        # 对齐 net/http MaxHeaderBytes + 4096 slop")
+    print("  ⚠️ 不是 1MB：Go 的真实上限是 1 MiB **+ 4096**（net/http/server.go:941 'bufio slop'）")
+    print("  ⇒ 守门：tools/difftest/check-tomcat-limits.py（10 个 api 模块静态检查）")
     return 0
 
 

@@ -109,7 +109,7 @@ wait_port_free() {
 
 echo "==> [0/7] 检查构件"
 for b in /tmp/difftest/bin/go-user-rpc /tmp/difftest/bin/go-user-api; do
-  [[ -x "$b" ]] || { echo "  FAIL 缺 Go 二进制 $b（先跑 exp-difftest-redis-blacklist.sh 建栈）" >&2; exit 2; }
+  [[ -x "$b" ]] || { echo "  FAIL 缺 Go 二进制 ${b}（先跑 exp-difftest-redis-blacklist.sh 建栈）" >&2; exit 2; }
 done
 for j in "$ROOT/service/users/user/user-rpc/target/user-rpc-0.0.1-SNAPSHOT.jar" \
          "$ROOT/service/users/user/user-api/target/user-api-0.0.1-SNAPSHOT.jar"; do

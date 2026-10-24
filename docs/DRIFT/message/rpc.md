@@ -1,5 +1,10 @@
 # `service/message/message-rpc` 组件级语义对照台账
 
+> 🟥 **当前态指针（2026-10-26 台账校准轮回填）** —— 本文件按「轮次」追加，**历史各轮一条未删**（快照价值）。
+> ⚠️ **头部一度严重过期**（头部「本轮（第三轮）元信息」停在第三轮，而正文已到**第十轮**（双侧活体 DDL 对拍）+ 2026-10-25 的 `V-030` 关闭）⇒ **当前状态一律以文件末尾「2026-10-24 第十轮（双侧活体 DDL 对拍）+ 末节 `DRIFT-MSG-V-030` 已关闭（2026-10-25）」一节为准**。
+> ⇒ 本文件里的 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环（AGENTS.md §0 证据强度分层）。
+> **本轮只回填头部口径；正文各轮的原始记录一条未删。**
+
 > **本文件的两段结构**：本表头之后、`# 第三轮 · 组件级语义一致性验证（2026-10-23）` 之前，
 > 是从 `AGENTS.md` 搬来的**历史留档**（§0 速查 + §6.6 首轮审计），**一字未删**（2026-10-23 增量合并时 `git diff --numstat` = `506 0`，零删除）；
 > 最后那一节是本轮新增，按验证方法论 spec §31-b 组织。
@@ -2659,3 +2664,39 @@ RAG: message_notification.created_at | timestamptz | 可空 | DEFAULT CURRENT_TI
 
 > ⚠️ **为什么不在本工作树直接改**：该文件是 `_cross` 共享面，users / like / article 等域的会话可能同时在改它
 > ⇒ 事后无法区分台账归属（`docs/Worktree.md` §三.1 的原话）。
+
+---
+
+### 6. ✅ `DRIFT-MSG-V-030` 已关闭（2026-10-25 · 跨 6 个域，本轮统一修完）
+
+> **登记方在 message 域**，修法落在**各域自己的 `pom.xml`** ⇒ 属跨域改动，本轮**串行统一实施**
+> （不走并发 worktree，避免多路并发改同一批 pom）。
+
+**修法**：6 个模块各补 `<build>` 段（含 `spring-boot-maven-plugin`），照 `message-api` 的 V-028 同款写法。
+
+| 模块 | 修前产物 | 修后产物 | `Main-Class` |
+|---|---|---|---|
+| `article-api` | 68 KB | **69 MB** | ✅ `JarLauncher` |
+| `comment-api` | 52 KB | **68 MB** | ✅ `JarLauncher` |
+| `follow-api` | 56 KB | **79 MB** | ✅ `JarLauncher` |
+| `hot-api` | 32 KB | **67 MB** | ✅ `JarLauncher` |
+| `like-api` | 48 KB | **68 MB** | ✅ `JarLauncher` |
+| `task-api` | 24 KB | **63 MB** | ✅ `JarLauncher` |
+
+**守门脚本**：✅ `tools/difftest/check-jar-executable.sh` **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）
+⇒ 10/10 api 模块产物均可执行。
+
+**各模块测试**（修完复跑，`mvn -o -pl <6 模块> test` ⇒ `BUILD SUCCESS`）：
+
+| 模块 | tests / failures / errors / skipped |
+|---|---|
+| `article-api` | 86 / 0 / 0 / 0 |
+| `comment-api` | 45 / 0 / 0 / 0 |
+| `follow-api` | 50 / 0 / 0 / 0 |
+| `hot-api` | 86 / 0 / 0 / 0 |
+| `like-api` | 81 / 0 / 0 / 0 |
+| `task-api` | 90 / 0 / 0 / 0 |
+
+⚠️ **关闭口径**：关闭的是「**这 6 个模块的产物不可执行**」这一条待办。
+**本条没有验证「产物真能启动」** —— 启动会撞 Nacos / Redis / Kafka / gRPC 依赖，
+「起不来」与「产物不可执行」是两件事 ⇒ 如需这一层证据，另做启动探针。

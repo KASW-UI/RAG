@@ -35,6 +35,19 @@ server:
   address: 0.0.0.0
   servlet:
     context-path: /
+  # ⚠️ 容器三旋钮：与 Go 对齐（Go 出处 + 实测 ⇒ docs/DRIFT/hot/api.md 的 DRIFT-HOTAPI-021/022/023；
+  #    守门 ⇒ tools/difftest/check-tomcat-limits.py）
+  #    ① relaxed-query-chars：Go 的 net/http 不校验 query 里的 [ ]，且 go-zero httpx.GetFormValues
+  #       明确支持方括号数组记法；Tomcat 默认拒绝 ⇒ 400 + HTML 错误页（不是业务信封）
+  #    ② max-parameter-count：Go = go-zero httpx/util.go:15 maxFormParamCount=2048（应用层判）；
+  #       Boot 4 默认 1000 ⇒ Tomcat 先拒，RAG 自己实现的 2048 判据在 GET query 上不可达
+  #    ③ max-http-request-header-size：Go 的**真实**上限 = DefaultMaxHeaderBytes(1<<20)
+  #       + 4096（net/http/server.go:941 `return int64(s.maxHeaderBytes()) + 4096 // bufio slop`）
+  #       ⇒ 1 MiB + 4 KiB = **1028KB**；Boot 4 默认 8KB
+  tomcat:
+    relaxed-query-chars: ["[", "]"]
+    max-parameter-count: 2048
+  max-http-request-header-size: 1028KB
 
 # =============================================================================
 # gRPC client（连 hot-rpc / article-rpc）

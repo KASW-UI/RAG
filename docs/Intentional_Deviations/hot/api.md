@@ -271,3 +271,57 @@
   峰值**必然** = 64（与机器负载无关）；池=32 ⇒ 屏障凑不齐 ⇒ 超时变红（实测仍报 `expected 64 but was 32` ✅）。
   ⇒ **签字要求的守门语义（池被改小立刻变红）完整保留**，只是不再对机器负载敏感。
 - **留痕位置**：`docs/DRIFT/hot/api.md` 的 DRIFT-HOTAPI-028。
+
+---
+
+## SD-2026-10-25-CAND-10：超长请求行 ⇒ RAG **400 + Tomcat HTML**，Go **431 + `text/plain`**
+
+| 项 | 值 |
+|---|---|
+| 状态 | 🟡 **待签字候选（未签字）** —— 属**框架限制**，不是「RAG 偷懒」 |
+| 组件 | `service/hot/hot-api`（**性质是 Tomcat 全体** ⇒ 10 个 api 模块都适用） |
+| 行为层 | **HTTP 状态码 + 错误响应体形状**（客户端可见）—— 仅限「请求行 > 1 MiB + 4 KiB」 |
+| 证据强度 | ✅ **双侧活体实测**（2026-10-25，二分出两侧翻转点） |
+
+### 差异的实际面
+
+| 侧 | 状态码 | `Content-Type` | body |
+|---|---|---|---|
+| Go | **431** | `text/plain; charset=utf-8` | `431 Request Header Fields Too Large`（35 B） |
+| RAG | **400** | `text/html;charset=utf-8` | Tomcat 的 HTML 错误页（**435 B**） |
+
+**根因**：Tomcat 在**连接器层**就拒了，请求**根本没进 Servlet**：
+
+```
+INFO  o.apache.coyote.http11.Http11Processor : Error parsing HTTP request header
+java.lang.IllegalArgumentException: Request header is too large
+	at org.apache.coyote.http11.Http11InputBuffer.fill(Http11InputBuffer.java:768)
+```
+
+⇒ Spring 的 `GlobalExceptionHandler` **没有机会介入** ⇒ 状态码与错误体**由 Tomcat 决定**。
+
+### 为什么**配不出来**（⇒ 只能签字，不能「修」）
+
+- Tomcat 的 `Connector` **没有**「请求行过大 ⇒ 用 431」的开关；
+- `server.error.whitelabel.enabled=false` 只改 **body**、**不改状态码**，
+  而且会**波及其他错误响应**（404 / 405 的形态已与 Go 对齐 ⇒ 不能动）。
+
+⇒ 与 `SD-HOT-API-006`（`Content-Type` 的 charset 参数）同族：**框架层不可逐字节复刻**。
+
+### 触发面与残留风险（签字即接受）
+
+- 触发条件是「**请求行 > 1 MiB + 4 KiB**」⇒ **病态输入**，正常客户端不会碰到；
+- ⚠️ **阈值本身已对齐**：RAG 与 Go 的翻转点**都是 1052536 字节（差 0）**
+  ⇒ 这不是「RAG 更严/更松」，只是**拒绝时的呈现形态**不同。
+
+### 守门
+
+`HotApiRealTomcatGateTest#requestLineLengthLimitMatchesGo` 断言
+「20 KiB 放行」＋「超过 1 MiB+4 KiB 被拒且状态码 = 400」⇒
+**把 RAG 侧的实际形态钉死**，避免它悄悄漂成别的样子。
+⚠️ 该断言**故意断言 RAG 的 400 而不是 Go 的 431** —— 目的是记录现状，不是认可它。
+
+### 留痕位置
+
+`docs/DRIFT/hot/api.md` 的 `DRIFT-HOTAPI-031`；
+另一处相关残余（同轮查出的 `DRIFT-HOTAPI-030`）**仍属缺陷**，在本档之外。
