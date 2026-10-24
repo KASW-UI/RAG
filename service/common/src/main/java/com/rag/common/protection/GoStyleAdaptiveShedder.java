@@ -1,6 +1,5 @@
 package com.rag.common.protection;
 
-import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
 import java.util.function.IntSupplier;
 
@@ -69,7 +68,6 @@ final class GoStyleAdaptiveShedder {
     private boolean droppedRecently;
     private long overloadTimeMs;
 
-    private final OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
     /** 注入式 CPU 读数（千分比，-1 表示不可用）；测试可覆盖为确定性值。 */
     private volatile IntSupplier cpuPermilleReader;
 
@@ -260,39 +258,12 @@ final class GoStyleAdaptiveShedder {
         if (injected != null) {
             return injected.getAsInt();
         }
-        double load = switch (cpuSource) {
-            case PROCESS -> processCpuLoad();
-            case SYSTEM -> systemCpuLoad();
+        // ⚠️ 采样实现已抽到 GoStyleCpuReader（与 GoStyleSheddingStat 的统计日志共用同一份口径）。
+        //    保持「SYSTEM 默认 = 整机千分比（Go 的 stat.CpuUsage()）」与「读不到 ⇒ -1 ⇒ fail-open」。
+        return switch (cpuSource) {
+            case PROCESS -> GoStyleCpuReader.processCpuPermille();
+            case SYSTEM -> GoStyleCpuReader.systemCpuPermille();
         };
-        if (load < 0D) {
-            return -1;
-        }
-        // load 是 0..1 的比例；Go 用千分比（900 = 90%）
-        return (int) Math.round(load * CPU_MAX);
-    }
-
-    /**
-     * 整机 CPU 口径，等价 Go 的 {@code stat.CpuUsage()}（Linux 下读 {@code /proc/stat}）。
-     *
-     * <p>⚠️ {@code getSystemCpuLoad()} <b>不在</b> {@link OperatingSystemMXBean} 上，
-     * 而在 {@code com.sun.management.OperatingSystemMXBean} 这个 JDK 扩展接口上。
-     * 若运行时不提供该扩展（非 HotSpot 系），返回 {@code -1} ⇒ 上层 fail-open。
-     */
-    private double systemCpuLoad() {
-        OperatingSystemMXBean bean = osBean;
-        if (bean instanceof com.sun.management.OperatingSystemMXBean sun) {
-            return sun.getSystemCpuLoad();
-        }
-        return -1D;
-    }
-
-    /** 仅本 JVM 进程的 CPU 口径（偏离 Go，需显式配置）。 */
-    private double processCpuLoad() {
-        OperatingSystemMXBean bean = osBean;
-        if (bean instanceof com.sun.management.OperatingSystemMXBean sun) {
-            return sun.getProcessCpuLoad();
-        }
-        return -1D;
     }
 
     // ── 窗口推进：等价 Go 的 RollingWindow + IgnoreCurrentBucket ──────────────────

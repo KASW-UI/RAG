@@ -706,3 +706,142 @@ unzip -l ~/.m2/repository/com/rag/common/0.0.1-SNAPSHOT/common-0.0.1-SNAPSHOT.ja
 **通用教训**：**多工作树并发下，`~/.m2` 里的 SNAPSHOT 是「最后写入者赢」的共享可变状态** ——
 它和 `git stash` 一样，是**工作区级状态**，会被并发 agent 互踩（与 `docs/Worktree.md` 禁用 `git stash` 同源）。
 ⇒ 凡是要验证的行为，**都必须从本工作树源码构建**，不能依赖本地仓库里的 SNAPSHOT。
+
+---
+
+## PITFALL-MSG-R-022 「Go 侧有 X 指标」这句话本身**要核到 Go 源码的消费点** —— 否则会照抄出一套 Go 没有的能力
+
+**背景**：`DRIFT-MSG-V-025` 原记写「Go 侧可以在 `/metrics` 里看到『这个 rpc 降载丢了多少』
+『熔断拒了多少』」⇒ 照这句话去实现，结论会是「给 `service/common` 加 micrometer、
+暴露 `rag_protection_shedding_total` 之类的 Prometheus 指标」。
+
+**实测 Go 源码（go-zero v1.10.2）后的真相**：
+
+| Go 侧的东西 | 真实暴露方式 | 出处 |
+|---|---|---|
+| 降载 `total`/`pass`/`drop` | **每分钟一行的日志**（`logx.Statf`）⇒ **不在 Prometheus 里** | `core/load/sheddingstat.go:52-70` |
+| 熔断 `markDrop`/`markFailure` | 写进 `b.stat`（`collection.RollingWindow`）⇒ **算法内部状态，根本没对外暴露** | `core/breaker/googlebreaker.go:121-130` |
+
+⇒ **照抄旧结论的后果**：
+① 给 20 个组件共享的 `service/common` **加一个 micrometer 依赖**（依赖树影响面）；
+② 暴露一个 **Go 侧根本没有**的 Prometheus 指标 ⇒ 运维看板上会出现一个「Go 没有、RAG 有」的指标
+⇒ 那是**发明**，不是对齐（违反 §3.2「Go 是唯一基准，不『顺手改好』」）；
+③ 而 Go **确实有**的那行日志反而**没做** ⇒ 真正的缺口没补上。
+
+**教训**：**台账里描述 Go 行为的那句话，本身是需要被核实的一手材料**，不是可以直接照抄的需求。
+⇒ 凡是「Go 侧有 X」这种断言，必须给出 **Go 的 `文件:行号`（消费点）**；
+⇒ 特别地，**「指标」这个词要问清楚它在哪儿**：Prometheus？日志？内存计数？算法内部状态？
+—— 这四种的「对应物」完全不同，照错方向会做出一堆用不上的东西。
+
+**同源的另一个坑**：`GoStyleProtectionProperties` 的 javadoc 里把 `CpuThreshold` 的出处写成
+`rest/config.go:56`（**REST** 侧的配置）⇒ 而 rpc 路径上真正生效的是
+`zrpc/internal/config.go`（值同为 900，结论相同，**但出处标错了**）
+⇒ §3.1 要求「行号指向**消费点**」—— REST 的消费点对 rpc 路径不成立。
+
+---
+
+## PITFALL-MSG-R-023 **给别的组件挂熔断/降载之前，必须先核它的兜底码口径**
+
+**形态**：熔断的「失败判据」是 **status code**（Go `zrpc/internal/codes/accept.go:9-17` 的 6 码白名单
+`{DEADLINE_EXCEEDED, INTERNAL, UNAVAILABLE, DATA_LOSS, UNIMPLEMENTED, RESOURCE_EXHAUSTED}`）。
+⇒ **组件的兜底码若与 Go 不一致，挂上 breaker 反而会「把既有漂移激活成新回归」**。
+
+**本轮实测（2026-10-24）逐组件核了两侧**：
+
+| rpc 组件 | Go 的 DB 错误码 | RAG 的 | 挂 breaker 后是否同开路 |
+|---|---|---|---|
+| `message` | 裸 error ⇒ `UNKNOWN` | `UNKNOWN` | ✅ 两侧都不熔断 |
+| `article` | `codes.Internal` | `UNKNOWN` | ⚠️ RAG **熔断更少**（差异**本已存在**，因为 RAG 此前根本没 breaker） |
+| `favorite` / `follow` / `user` / `admin` | `codes.Internal` | `INTERNAL` | ✅ 两侧都熔断 |
+| `comment` / `like` | `codes.Code(5003)` **越界** ⇒ `UNKNOWN` | `UNKNOWN` | ✅ 两侧都不熔断 |
+| `task` | 裸 error ⇒ `UNKNOWN` | `UNKNOWN` | ✅ 两侧都不熔断 |
+
+⚠️ **`comment`/`like` 那两行是本轮最反直觉的发现**：Go 把**业务码**（5003）直接塞进
+`status.Error(codes.Code(5003), …)` ⇒ **5003 不是合法 gRPC code（合法 0–16）**
+⇒ Go 的 `status.Code(err)` 得到一个**不在 6 码白名单里**的值 ⇒ **不判失败、不熔断**。
+⇒ RAG 侧 `CommentGrpcError` / `LikeGrpcError` 早就用 `Status.UNKNOWN` 复刻了这个行为
+（它们的类注释里甚至写着「`Status.fromCodeValue(5003)` → code = UNKNOWN」）⇒ **两侧一致**。
+
+**教训**：**「接上一条共享链」不是纯机械改动** ——
+链的**判据**（哪些 status 算失败）与**被链观察到的那些 status**（组件自己的错误码口径）必须成对成立。
+⇒ 跨域接链之前，先把每个组件的「错误码 → gRPC status」逐条与 Go 对一遍，
+再决定这条链对该组件**是否安全**。
+
+---
+
+## PITFALL-MSG-R-024 用**字符串下标**断言 XML / YAML 结构 ⇒ 会被**注释里提到的同名字符串**打败
+
+**形态**：想断言「pom 的 `<build><plugins>` 里真的有 `spring-boot-maven-plugin`」，
+于是写：
+
+```java
+int buildIdx  = pom.indexOf("<build>");
+int pluginsIdx = pom.indexOf("<plugins>", buildIdx);
+int pluginIdx  = pom.indexOf("spring-boot-maven-plugin", buildIdx);
+assertThat(pluginIdx).isGreaterThan(pluginsIdx);
+```
+
+**实测翻车**（本轮 `MessageApiJarExecutableWiringTest` 第一版就是这么写的）：
+那个 pom 的**说明性注释里**就写着「没有 `<build>` 段」「`spring-boot-maven-plugin`」这些词
+⇒ `indexOf("<build>")` 先撞到**注释里那一次**（行 157），而不是真正的那次（行 169）
+⇒ 断言必红，且**红得莫名其妙**（人看代码会觉得「结构明明是对的」）。
+
+**修法**：**先剥掉注释再取下标**。
+
+```java
+private static String stripXmlComments(String xml) {
+    return xml.replaceAll("(?s)<!--.*?-->", "");
+}
+```
+
+**通用教训**：**字符串下标断言 = 在给自己埋「注释一改就假红」的雷**。
+⇒ 断言结构优先用**解析器**（XML/YAML parser）；
+⇒ 实在要用字符串，也**必须先剥注释**；
+⇒ 否则「配置里写了什么」和「配置里**生效**的是什么」会被注释搅在一起
+—— 这与 §3.3「配置里没写 ≠ 没开」是**同一个坑的两面**：
+**注释里的字面量既可能被当成「没配」，也可能被当成「配了」**。
+
+---
+
+## PITFALL-MSG-R-025 变异验证后用 `shutil.copy2` 还原源码 ⇒ **保留旧 mtime** ⇒ maven 增量编译跳过 ⇒ 后续跑的是**变异过的 class**
+
+**现象（本轮真实踩中）**：
+变异验证（改坏代码 → 跑守门 → 还原）跑完之后，接着跑**同模块**的守门，
+⇒ `GoStyleSheddingStatTest.droppedRequestCountsDrop` **红了**，报 `drop` 计数是 0；
+⇒ 但代码是对的（`stat.incrementDrop()` 明明在 `GoStyleRpcSheddingInterceptor` 里）。
+
+**排查过程**（值得记住，因为它把好几个人带偏）：
+① 读生产代码 ⇒ 逻辑没问题；
+② 单独跑该用例 ⇒ **绿**；
+③ 跑整个测试类 ⇒ **绿**；
+④ `mvn clean test` ⇒ **绿**（168 例全过）；
+⇒ ⇒ **只有「增量构建 + 跑过变异」这个组合会红** ⇒ 指向**编译产物过期**。
+
+**根因**：
+变异验证脚本用 `shutil.copy2(bak, path)` 还原源码 ⇒ **`copy2` 会保留文件的 mtime**
+⇒ 还原后的源码 mtime **比变异期间编译出来的 `.class` 还旧**
+⇒ `maven-compiler-plugin` 的增量检查（按时间戳）判定「class 已是最新」⇒ **跳过重编译**
+⇒ surefire 跑的**是变异过的 class**（少了 `stat.incrementDrop()` 那行）
+⇒ 守门报「代码没生效」，而源码其实是对的。
+
+⚠️ **危险等级比一般编译陷阱更高**：
+- 往小处：守门**假红** ⇒ 让人以为自己的修复没生效 ⇒ 可能去改本来正确的代码；
+- 往大处：如果变异恰好**让某条断言通过**，则守门会**假绿** ⇒ 变异验证的结论直接失效。
+
+**修法（两处都要改）**：
+1. **还原源码必须刷 mtime**：
+   ```python
+   shutil.copyfile(bak, path)     # ⚠️ 不要用 copy2
+   os.utime(path, None)           # 还原后给当前 mtime
+   ```
+2. **变异验证之后、跑其它测试之前，先 clean 或至少 touch 一次被改过的文件**：
+   ```bash
+   mvn -o -B -pl <module> clean test     # 最省心
+   ```
+
+**通用教训**：
+**「源码」与「跑起来的字节码」之间隔着一次编译，而那次编译是按时间戳决定要不要做的。**
+⇒ 在做**任何**「改坏 / 还原 / 打补丁」式的验证后，
+**必须显式确认编译产物是最新的**，否则后面所有的绿灯都不可信。
+⇒ 与 §3.3「编译通过 ≠ 机制生效」同源：**编译这一步本身就有静默失效的路径**
+（这次是「时间戳判定 ⇒ 不重编」）。

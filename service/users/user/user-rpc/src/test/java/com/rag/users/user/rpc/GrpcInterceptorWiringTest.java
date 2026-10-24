@@ -47,17 +47,85 @@ import static org.mockito.Mockito.verify;
 class GrpcInterceptorWiringTest {
 
     @Test
-    @DisplayName("本模块的 GrpcServerConfigurer 必须把 interceptor 交给 ServerBuilder")
+    @DisplayName("本模块的 GrpcServerConfigurer 必须把 interceptor 交给 ServerBuilder（且链里真的能调到它）")
     void configurerPassesInterceptorToBuilder() {
         io.grpc.ServerInterceptor interceptor = mock(io.grpc.ServerInterceptor.class);
+        io.grpc.ServerCall.Listener<Object> listener = new io.grpc.ServerCall.Listener<Object>() {};
+        // ⚠️ 必须打桩：Mockito 对返回类型 ServerCall.Listener 的默认答案是 null，
+        //    而 SimpleForwardingServerCallListener 的构造器 checkNotNull(delegate) ⇒ 不打桩会 NPE。
+        org.mockito.Mockito.doReturn(listener).when(interceptor)
+                .interceptCall(org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any());
+
+        // ⚠️ 关掉 CPU 降载：本用例要验的是「链里能调到业务 interceptor」，
+        //    而降载一旦命中就会短路（handler 不执行）⇒ 断言会变得不确定。
+        com.rag.common.protection.GoStyleProtectionProperties props =
+                new com.rag.common.protection.GoStyleProtectionProperties();
+        props.getCpuShedding().setEnabled(false);
+
         GrpcServerConfigurer configurer =
-                new UserRpcApplication().rpcInterceptorConfigurer(interceptor);
+                new UserRpcApplication().rpcInterceptorConfigurer(interceptor, props);
 
         ServerBuilder<?> builder = mock(ServerBuilder.class);
+        org.mockito.ArgumentCaptor<io.grpc.ServerInterceptor> captor =
+                org.mockito.ArgumentCaptor.forClass(io.grpc.ServerInterceptor.class);
 
         configurer.accept(builder);
 
-        verify(builder).intercept(same(interceptor));
+        verify(builder).intercept(captor.capture());
+        io.grpc.ServerInterceptor chained = captor.getValue();
+
+        // 真跑一遍被交给 builder 的那个拦截器：
+        // 它在被调用时必须**真的调用到**业务 interceptor（否则超时/trace 静默消失）。
+        io.grpc.ServerCall<Object, Object> call = mock(io.grpc.ServerCall.class);
+        io.grpc.ServerCallHandler<Object, Object> next = mock(io.grpc.ServerCallHandler.class);
+        org.mockito.Mockito.doReturn(listener).when(next)
+                .startCall(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+
+        // ⚠️⚠️ **必须打桩 getMethodDescriptor()**：链上的 breaker 用它取隔离 key
+        //    （Go: breakerName := info.FullMethod）⇒ Mockito 默认返回 null ⇒ 链里抛 NPE。
+        //    ⇒ 而那个 NPE 会被**最外层的 recover 静默兜住**（关掉调用、返回 INTERNAL），
+        //    现象是「业务 interceptor 零交互」—— 看起来像"链没生效"，真因却在链里面。
+        org.mockito.Mockito.when(call.getMethodDescriptor())
+                .thenReturn(io.grpc.MethodDescriptor.<Object, Object>newBuilder()
+                        .setType(io.grpc.MethodDescriptor.MethodType.UNARY)
+                        .setFullMethodName("/user.UserService/Login")
+                        .setRequestMarshaller(new NoopMarshaller())
+                        .setResponseMarshaller(new NoopMarshaller())
+                        .build());
+
+        chained.interceptCall(call, new io.grpc.Metadata(), next);
+
+        // ⚠️ 断言**不是**「同一个对象」：2026-10-24（DRIFT-MSG-V-026）起链上有 breaker / shedding，
+        //    它们各自 ForwardingServerCall 包了一层 ⇒ 业务 interceptor 拿到的是**包装后的 call**
+        //    ⇒ same(call) 必然不成立。
+        // ⇒ 换成两条**更强**的断言：
+        //  ① 业务 interceptor 确实被调到了（语义没放松）；
+        //  ② 业务 interceptor 拿到的 call **不是**原始 call ⇒ **证明链上真的有包装层**
+        //     （即 breaker/shedding 确实挂在链上，而不是"配置了但没生效"）。
+        org.mockito.ArgumentCaptor<io.grpc.ServerCall<Object, Object>> callCaptor =
+                org.mockito.ArgumentCaptor.forClass(io.grpc.ServerCall.class);
+        verify(interceptor).interceptCall(callCaptor.capture(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+
+        org.assertj.core.api.Assertions.assertThat(callCaptor.getValue())
+                .as("链上有 breaker/shedding ⇒ 业务 interceptor 拿到的必须是包装过的 call。"
+                        + "若拿到的是原始 call，说明包装层没挂上 —— 即 breaker/shedding 形同虚设。")
+                .isNotSameAs(call);
+    }
+
+    /** 最小可用的 marshaller（测试不真的序列化）。 */
+    private static final class NoopMarshaller implements io.grpc.MethodDescriptor.Marshaller<Object> {
+        @Override
+        public java.io.InputStream stream(Object value) {
+            return new java.io.ByteArrayInputStream(new byte[0]);
+        }
+
+        @Override
+        public Object parse(java.io.InputStream stream) {
+            return new Object();
+        }
     }
 
     @Test

@@ -14,6 +14,9 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.context.annotation.Import;
+import com.rag.common.protection.GoStyleRpcProtectionChain;
+import com.rag.common.protection.GoStyleProtectionProperties;
+import com.rag.common.protection.GoStyleProtectionConfiguration;
 
 /**
  * AdminService gRPC server 入口。
@@ -73,7 +76,11 @@ import org.springframework.context.annotation.Import;
         // SqlTimeoutStatusTranslator：把随之抛出的 57014 query_canceled 翻成 DEADLINE_EXCEEDED，
         //   否则被业务层 catch(Exception) 吞成 INTERNAL → api 层渲染 5001（离 Go 的 1015 更远）。
         DeadlineQueryTimeoutInjector.class,
-        SqlTimeoutStatusTranslator.class
+        SqlTimeoutStatusTranslator.class,
+
+        // ===== 熔断 / 降载（Go zrpc 框架级能力，每个 rpc server 都自带）=====
+        GoStyleProtectionConfiguration.class,  // 熔断/降载链的配置载体（breaker / cpuShedding 的开关与阈值；默认值 = go-zero 的 tag 默认值）
+
 })
 public class AdminRpcApplication {
 
@@ -95,9 +102,14 @@ public class AdminRpcApplication {
      * {@code NewUnaryServerInterceptor}。
      */
     @org.springframework.context.annotation.Bean
-    public net.devh.boot.grpc.server.serverfactory.GrpcServerConfigurer rpcInterceptorConfigurer(
-            io.grpc.ServerInterceptor rpcUnaryServerInterceptor) {
-        return server -> server.intercept(rpcUnaryServerInterceptor);
+    public net.devh.boot.grpc.server.serverfactory.GrpcServerConfigurer rpcInterceptorConfigurer(io.grpc.ServerInterceptor rpcUnaryServerInterceptor,
+            GoStyleProtectionProperties protectionProps) {
+        // ⚠️ DRIFT-MSG-V-026（2026-10-24）：链的定义点在**共享模块**
+        //   com.rag.common.protection.GoStyleRpcProtectionChain ——
+        //   熔断 / 降载在 Go 侧是 **zrpc 框架级**能力（每个 rpc server 都自带），
+        //   10 个 rpc 组件挂的是同一条链，顺序若分散在各处各写一遍，就是 10 个可能写错的地方。
+        //   本仓的链：recover → breaker → shedding → 业务观测拦截器。
+        return server -> server.intercept(GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, protectionProps));
     }
 
     public static void main(String[] args) {

@@ -1420,3 +1420,54 @@ message-api：84 + 2（MessageApiTimeoutRealTomcatTest）= 86 tests / 0 failures
 > `setHeader("X-Content-Type-Options", …)` 不参与转换器选择。
 > ⇒ 归「既有噪音，本轮不改」：改它要动 api 侧的全局异常处理链，**超出本轮 scope**。
 
+
+---
+
+## 2026-10-24 第九轮（api 侧）：**V-028 的点名式防回退** + 挖出 **6 个 api 模块的同款「产物不可执行」**
+
+> 本轮 api 侧**没有改任何业务逻辑**（V-018 / V-025 / V-026 都在 rpc 侧与共享层）。
+> api 侧的产出是**两道守门** + **一条跨域发现**。
+
+### 1. ✅ `DRIFT-MSG-V-028` 的点名式防回退
+
+**新增 `MessageApiJarExecutableWiringTest`（2 例）**，断言 message-api 的 pom
+**`<build><plugins>` 里真的有 `spring-boot-maven-plugin`**。
+
+⚠️ **为什么这里只断言 pom、不断言 jar**：surefire 跑在 `test` 阶段，jar 是 `package` 阶段才生成的
+⇒ **测试运行时 jar 还不存在** ⇒ 写「jar 不存在就跳过」会引入 `skipped`，
+违反「绿灯必须额外断言 `skipped=0`」的纪律。
+⇒ 「产物真的可执行」交给 `tools/difftest/check-jar-executable.sh`（build 完解包 MANIFEST）。
+
+⚠️ **这条断言第一版被自己的注释打败**（实测翻车）：pom 的说明性注释里就写着
+`<build>` 与 `spring-boot-maven-plugin` ⇒ 裸 `indexOf("<build>")` 先撞到**注释里那一次**
+⇒ 修法：**先剥掉 XML 注释再取下标**。
+⇒ 完整教训 ⇒ [`PITFALL-MSG-R-024`](../../Pitfalls/message/rpc.md)。
+
+### 2. 🔴 `DRIFT-MSG-V-030`（新挖出 · **跨域待办**）：**6 个 api 模块的 jar 根本不可执行**
+
+**实测（真实产物，2026-10-24，全仓 `mvn package` 之后逐个解包 MANIFEST）**：
+
+| 模块 | 产物大小 | `Main-Class` | 判定 |
+|---|---|---|---|
+| `article-api` | **68 KB** | ❌ 无 | 🔴 不可执行 |
+| `comment-api` | **52 KB** | ❌ 无 | 🔴 不可执行 |
+| `follow-api` | **56 KB** | ❌ 无 | 🔴 不可执行 |
+| `hot-api` | **32 KB** | ❌ 无 | 🔴 不可执行 |
+| `like-api` | **48 KB** | ❌ 无 | 🔴 不可执行 |
+| `task-api` | **24 KB** | ❌ 无 | 🔴 不可执行 |
+| `favorite-api` / `admin-api` / `user-api` / `message-api` | 68–80 MB | ✅ `JarLauncher` | ✅ 可执行 |
+
+⇒ 与 `DRIFT-MSG-V-028` **同款**（pom 没有 `<build>` 段 ⇒ 无 `repackage` ⇒ library jar）
+⇒ **`java -jar` 报「中没有主清单属性」** ⇒ 那 6 个模块**从来没被打成过可部署产物**。
+
+⚠️ **为什么能潜伏这么久**：本项目至今的每一项验证（测试全绿、`mvn package` 成功、
+上下文能起、双侧对拍通过）**都发生在容器 / 测试环境里**，**从来没有碰过 jar 本身**
+⇒ 这正是 §3.3「编译通过 ≠ 产物可运行」的形态。
+
+**新增守门脚本**：`tools/difftest/check-jar-executable.sh`
+⇒ 逐个 api 模块解包 `META-INF/MANIFEST.MF` 看 `Main-Class`，任一缺失即 `EXIT=1`
+⇒ **2026-10-24 当场实测 `EXIT=1`**（6 个模块不合格）⇒ 门是有效的。
+
+**⚠️ 归属**：属**别的域**，按域间纪律本工作树**不改它们的 pom** ⇒ 登记为跨域待办
+（与 `DRIFT-MSG-V-029` 同款处理：登记 + 交接，不越界）。
+⇒ 修法与清单 ⇒ 见 [`docs/DRIFT/message/rpc.md` 第九轮 · 第 4 节](../DRIFT/message/rpc.md)。

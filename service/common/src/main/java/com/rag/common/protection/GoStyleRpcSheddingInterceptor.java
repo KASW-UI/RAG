@@ -86,9 +86,36 @@ public final class GoStyleRpcSheddingInterceptor implements ServerInterceptor {
 
     private final boolean enabled;
 
+    /**
+     * 降载统计（Go {@code core/load/sheddingstat.go}）—— 进程级单例。
+     *
+     * <p>Go 侧是包级变量 {@code var sheddingStat *load.SheddingStat} + {@code ensureSheddingStat()}，
+     * <b>进程内一个</b>（不是 per-route、也不是 per-interceptor）⇒ 本类用
+     * {@link GoStyleSheddingStat#getInstance()} 取同一个。
+     */
+    private final GoStyleSheddingStat stat;
+
     public GoStyleRpcSheddingInterceptor(GoStyleAdaptiveShedder shedder, boolean enabled) {
         this.shedder = shedder;
         this.enabled = enabled;
+        this.stat = GoStyleSheddingStat.getInstance();
+        // Go: sheddinginterceptor.go:23-25 —— ensureSheddingStat() 就在拦截器**构造时**被调用
+        //   （NewSheddingStat 内部 `go st.run()` 起那个每分钟上报的 goroutine）
+        // ⇒ 只有「降载真的被装配」的进程才会有这条上报线程
+        //   （Go 侧同理：UnarySheddingInterceptor 只在 CpuThreshold > 0 时才被构造）。
+        this.stat.startReporter();
+    }
+
+    /** 测试注入用（让断言能拿到具体的 stat 实例）。 */
+    GoStyleRpcSheddingInterceptor(GoStyleAdaptiveShedder shedder, boolean enabled, GoStyleSheddingStat stat) {
+        this.shedder = shedder;
+        this.enabled = enabled;
+        this.stat = stat;
+    }
+
+    /** 排障用：本次降载统计。 */
+    GoStyleSheddingStat stat() {
+        return stat;
     }
 
     @Override
@@ -100,6 +127,9 @@ public final class GoStyleRpcSheddingInterceptor implements ServerInterceptor {
         }
 
         final long startNanos = System.nanoTime();
+
+        // Go: sheddinginterceptor.go:25 —— **每个进入本拦截器的请求都先 +1**（在 Allow 之前）
+        stat.incrementTotal();
 
         // Go: sheddinginterceptor.go:36-45 的 defer —— 调用结束后结算 promise
         final AtomicBoolean settled = new AtomicBoolean(false);
@@ -117,6 +147,9 @@ public final class GoStyleRpcSheddingInterceptor implements ServerInterceptor {
                         } else {
                             long rtMs = (System.nanoTime() - startNanos) / 1_000_000L;
                             shedder.pass(rtMs);             // Go: promise.Pass()（内部测 RT）
+                            // Go: sheddinginterceptor.go:37 —— IncrementPass() 与 promise.Pass() **同一支**
+                            //    （ctx 超时那一支只 Fail，**不**计 pass）
+                            stat.incrementPass();
                         }
                     }
                 }
@@ -127,6 +160,8 @@ public final class GoStyleRpcSheddingInterceptor implements ServerInterceptor {
         // Go: sheddinginterceptor.go:24-31 —— Allow() 失败即拒
         if (!shedder.allow()) {
             rejected.set(true);
+            // Go: sheddinginterceptor.go:28-29 —— metrics.AddDrop() + sheddingStat.IncrementDrop()
+            stat.incrementDrop();
             // 🔴🔴 必须关 **watched**（本层包装过的那个），**不能关原始 call** ——
             //    关原始 call ⇒ 外层 breaker 的 close 观察点**不会被触发**
             //    ⇒ breaker 看不到这次降载 ⇒ 永远不会因降载而打开 ⇒ **与 Go 行为不同**。

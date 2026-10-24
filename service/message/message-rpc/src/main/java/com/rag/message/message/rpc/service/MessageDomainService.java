@@ -544,18 +544,58 @@ public class MessageDomainService {
         }
 
         // ⑤ build items
+        // ⚠️⚠️ **DRIFT-MSG-V-018（2026-10-24 修）：顺序与埋点必须逐行照 Go 的 buildConversationItem**
+        //    （Go 出处：service/message/rpc/internal/logic/helper.go:160-187）
+        //
+        //    Go 的顺序是 ① peerOf → ② count_unread → ③ loadProfile：
+        //      helper.go:161-164  peerOf(...) !ok ⇒ status.Error(codes.PermissionDenied, GetErrMsg(ErrorForbidden))
+        //                        ⇒ **直接 return，根本不会去查 count_unread**
+        //      helper.go:166-170  CountUnreadMessagesByConversation(...) err != nil
+        //                        ⇒ metrics.ObserveDBError("conversation", "count_unread")
+        //                        ⇒ return nil, err（**原样返回裸 error**）
+        //      helper.go:172      loadProfile(...)
+        //
+        //    【改之前 RAG 的两处偏差】
+        //      a) **顺序反了**：先 count_unread 再 peerOf ⇒ peerOf 失败时**白查一次 DB**，
+        //         而且那次查询的失败**不产生任何埋点**；
+        //      b) **少了埋点**：count_unread 抛异常时**没有** observeDbError("conversation","count_unread")
+        //         ⇒ `message_rpc_db_error_total{action="conversation",type="count_unread"}` 在这条路径上**永不增长**
+        //         ⇒ 运维看板会误以为「从没发生过 count_unread 失败」。
+        //
+        //    【改后的可观察结果】
+        //      · peerOf 失败 ⇒ 仍然 PERMISSION_DENIED + 5005（码不变，**只是不再白查一次 DB**）
+        //      · count_unread 失败 ⇒ 埋点增长（Go 侧同样增长）⇒ 指标口径对齐
+        //      · 异常原样上抛 ⇒ rpc 层按 V-024 的新口径转成 UNKNOWN + 裸 error 语义，与 Go 一致
         List<ConversationItem> itemDtos = new ArrayList<>(items.size());
         for (var conv : items) {
-            long unread = conversationMapper.countUnreadMessagesByConversation(
-                    conv.getId(), in.getOperatorId(), in.getOperatorRole().getNumber());
+            // ① peerOf —— Go: helper.go:161-164（**先判**，失败即短路）
             MessageRpcSupport.PeerResult peer = MessageRpcSupport.peerOf(conv,
                     in.getOperatorRole(), in.getOperatorId());
+            if (!peer.found()) {
+                throw MessageRpcSupport.grpcRuntimeError(Status.Code.PERMISSION_DENIED,
+                        MessageErrorCode.ERROR_FORBIDDEN.getCode());
+            }
+
+            // ② count_unread —— Go: helper.go:166-170（err ⇒ 埋点 ⇒ 原样上抛）
+            long unread;
+            try {
+                unread = conversationMapper.countUnreadMessagesByConversation(
+                        conv.getId(), in.getOperatorId(), in.getOperatorRole().getNumber());
+            } catch (RuntimeException e) {
+                metrics.observeDbError("conversation", "count_unread");
+                throw e;
+            }
+
+            // ③ loadProfile —— Go: helper.go:172
             String[] profile;
             if (peer.role() == SenderRole.USER) {
                 profile = userRpcClient.loadProfile(peer.role(), peer.id());
             } else {
                 profile = adminRpcClient.loadProfile(peer.role(), peer.id());
             }
+            // ⚠️ buildConversationItem 内部**还会再算一次 peerOf**（Go 那边是在同一个函数里算一次的）。
+            //    这里是纯函数、幂等、无副作用 ⇒ 不影响结果；
+            //    保留它是为了「即使调用方忘了先判 peerOf，helper 自己也守得住」——防回退用。
             itemDtos.add(MessageRpcSupport.buildConversationItem(conv,
                     in.getOperatorRole(), in.getOperatorId(),
                     unread, profile[0], profile[1]));

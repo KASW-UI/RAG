@@ -707,7 +707,8 @@ Go 侧同一命令连不上。**同时**：注释给了错误的安全感（§3.
 > `GoStyleRpcProtectionChain`（**全在共享模块 `service/common`**），链序 `recover → breaker → shedding → business`。
 > ⇒ **本条三个拦截器已全部落地**，不再是 OPEN。
 > ⚠️ **但带出两条新的尾巴**：见 [`DRIFT-MSG-V-024`](#drift-msg-v-024)（DB 异常两侧 status 不同 ⇒ 熔断判定分岔）
-> 与 [`DRIFT-MSG-V-026`](#drift-msg-v-026)（**其余 9 个 rpc 组件尚未接入**本链 ⇒ 跨组件不变量未闭合）。
+> 与 [`DRIFT-MSG-V-026`](#drift-msg-v-026)（**截至 2026-10-24 第九轮，其余 8 个带 gRPC server 的 rpc 组件已全部接入**本链；
+> 当时只有 `message-rpc` 接入 ⇒ 跨组件不变量未闭合 ⇒ 已在第九轮闭合）。
 >
 > ⚠️ **2026-10-24 更正**：本节上一版把「其余 9 个 rpc 组件未接入」写成了 `SD-2026-10-23-10` ——
 > **该编号不存在**（本域签字档只到 `SD-2026-10-23-08`）⇒ 已改指 `DRIFT-MSG-V-026`。
@@ -729,7 +730,8 @@ Go 侧同一命令连不上。**同时**：注释给了错误的安全感（§3.
   RAG 现在**同样**以 `RESOURCE_EXHAUSTED` + `"service overloaded"` 拒流。
   熔断侧同理：Go 开路时返回 `UNAVAILABLE` + `"circuit breaker is open"`，RAG 现在**逐字一致**
   （真 in-process gRPC 端到端 2 例已验：连续失败跨桶 ⇒ 客户端见该 status；熔断拒绝时 handler 不再执行）。
-  ⚠️ **但对齐只在 `message-rpc` 一个组件上成立** ⇒ 其余 9 个 rpc 组件见 `DRIFT-MSG-V-026`。
+  ⚠️ **但当时对齐只在 `message-rpc` 一个组件上成立** ⇒ 其余 rpc 组件见 `DRIFT-MSG-V-026`。
+> ✅ **2026-10-24 第九轮**：8 个组件已全部接入共享链（`hot-rpc` 是 Kafka 架构、不适用）。
 
 **Evidence**: `[CODE]` go-zero v1.10.2 三个文件的具体行；`[CODE]` `message.go:34-44` 证明只清了 Timeout。
 **Counterfactual = YES**：Spring 侧开发者通常只会挂「一个观测拦截器」，
@@ -823,7 +825,10 @@ RAG 会对**任何**非业务异常熔断）。
 
 ---
 
-### DRIFT-MSG-V-025 🆕 熔断 / 降载的**指标**在 RAG 侧没有对应物
+### ✅ DRIFT-MSG-V-025 ✅ **已修（2026-10-24 第九轮）** 熔断 / 降载的**指标**在 RAG 侧没有对应物
+
+> **⚠️ 2026-10-24 口径更正（重要）**：原记写「Go 侧可以在 `/metrics` 里看到『这个 rpc 降载丢了多少』
+> 『熔断拒了多少』」—— **这句是错的**，实测 Go 源码后已改写 ⇒ 详见下方「第九轮 · V-025 已修」。
 
 **Component**: message-rpc（实现落在共享模块 `service/common/.../protection/`）
 **Category**: Observability　**Classification**: **`OBSERVABLE DIFFERENCE`（非 wire 契约）**
@@ -909,13 +914,67 @@ V10__create_article_community_revision.sql
 ⚠️ **本条的严重度未经 like 域真 PG 复现**（本工作树不碰别域代码）⇒
 ⇒ like 域接手时应先跑一次真 PG 复现再照抄修法。
 
+#### 📦 交接给 like 域的执行清单（2026-10-24 用户拍板：**留给 like 域自己的 session**）
+
+> 本工作树**没有**改 like 域的任何代码，也没有在 like 域的台账里写任何东西
+> ⇒ 下面这份清单是**自包含**的，like 域的 session 照着做即可，不需要回看本工作树的上下文。
+
+**① 复现（先证明缺陷存在，别直接照抄修法）**
+
+```bash
+# 起一个「schema 已非空」的 PG：users 域的 user-rpc / admin-rpc 先建表即可
+#   （全仓只有 users 域有 SchemaInitializer —— 实测 grep -rln SchemaInitializer）
+# 然后起 like-rpc，应观察到：
+#   - flyway_schema_history_like 的首行是 `<< Flyway Baseline >>`，且 **version = 1**
+#   - `like_record` 表 **不存在**（V1 被整条跳过）
+#   - V2..V6 都是 success（它们不引用 like_record）
+#   - like-rpc **能正常启动**（与 message-rpc 不同：message-rpc 的 V5 引用了 V1 的表 ⇒ 起不来）
+#   - 第一次 like 写入 / 查询 ⇒ relation "like_record" does not exist
+```
+
+**② 修法（一行配置）** —— `service/like/like-rpc/src/main/resources/application.yml`：
+
+```yaml
+spring:
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 0      # ← 加这一行（理由见 message-rpc 的 application.yml 同处注释）
+```
+
+> ⚠️ **不要**改成 `baseline-on-migrate: false` ——
+> 那会让「非空 schema 且无账本」**直接抛异常退出**（`Found non-empty schema(s) … but no schema history table`），
+> 比现在更糟（起不来且无修复路径）。
+
+**③ 守门测试（照抄 message-rpc 的 `MessageFlywaySharedSchemaWiringTest`）**
+
+关键手法：**在 `@DynamicPropertySource` 里先建一张无关表，把 schema 弄成非空**，
+让 Spring 上下文启动（Flyway 才跑）。
+⚠️ 放 `@BeforeEach` **无效** —— 那跑在上下文**之后**，Flyway 早就迁移完了，
+⇒ 结果是「测试全绿但生产起不来/缺表」。
+
+断言三项：
+1. `like_record` 表存在；
+2. 账本里 `<< Flyway Baseline >>` 行的 **version 必须是 0**；
+   （⚠️ **不是**「不许有 BASELINE 行」—— `baseline-on-migrate=true` 时 Flyway **一定**会写这一行；
+   第一版 message-rpc 的守门就是写成「不许有」⇒ 连修好后的状态也判红 ⇒ 被自己的测试当场抓出来。）
+3. V1..V6 **全是 SQL 行**（不是 Baseline 行）。
+
+**④ 变异验证**：把 `baseline-version: 0` 删掉 ⇒ 守门测试**必须转红** ⇒ 再改回来。
+
+**⑤ 收尾**：在 like 域自己的台账（`docs/DRIFT/like/rpc.md`）里把这条记为已修，
+**不要**回改本文件（message 域的台账由 message 域自己维护）。
+
 
 ---
 
-### DRIFT-MSG-V-026 🆕 **其余 9 个 rpc 组件尚未接入**熔断 / 降载链（跨组件不变量未闭合）
+### ✅ DRIFT-MSG-V-026 ✅ **已修（2026-10-24 第九轮）** **其余 9 个 rpc 组件尚未接入**熔断 / 降载链（跨组件不变量未闭合）
+
+> **⚠️ 2026-10-24 状态更新**：本轮**全部 8 个**带 gRPC server 的 rpc 组件已接入共享链
+> （`hot-rpc` 是 Kafka 架构、无 `GrpcServerConfigurer`，不适用）⇒ 跨组件不变量**已闭合**。
+> ⇒ 逐组件的兜底码口径核对（**这是本条真正的前置条件**）见下方「第九轮 · V-026 已修」。
 
 **Component**: `article-rpc` / `comment-rpc` / `favorite-rpc` / `follow-rpc` / `hot-rpc` /
-`like-rpc` / `task-rpc` / `user-rpc` / `admin-rpc`　**（**本轮只改了 `message-rpc`**）**
+`like-rpc` / `task-rpc` / `user-rpc` / `admin-rpc`　**（本轮全部接入，除 `hot-rpc` 不适用）**
 **Category**: 跨组件不变量　**Classification**: **`OBSERVABLE DIFFERENCE`（局部对齐，全域未对齐）**
 **Risk**: **MEDIUM**
 
@@ -989,7 +1048,10 @@ ConversationMessageMapper.java:82-84
 
 ---
 
-### DRIFT-MSG-V-018 🆕 `ListConversations` 组装 item 时少一次埋点、helper 序也不同
+### ✅ DRIFT-MSG-V-018 ✅ **已修（2026-10-24 第九轮）** `ListConversations` 组装 item 时少一次埋点、helper 序也不同
+
+> **⚠️ 2026-10-24 状态更新**：原记「修它的收益低于风险，建议与 V-016 一起决策」——
+> 本轮 V-016 已落地，**本条随之修掉**（修法与风险判断见下方「第九轮 · V-018 已修」）。
 
 **Component**: message-rpc　**Operation**: `ListConversations`
 **Category**: Observability + Internal Ordering　**Classification**: **`OBSERVABLE DIFFERENCE`**
@@ -1100,7 +1162,7 @@ RAG application.yml:16
 | 编号 | 问题 | 为何无法判定 | 需要什么 |
 |---|---|---|---|
 | **UNRESOLVED-MSG-003** ✅ **已关闭（2026-10-24 第八轮）** | ~~`tools/difftest` 的 message 域 12 档对拍是否真的一致~~ | —— | ✅ **已关闭**：真起 Go + RAG 两套栈（2026-10-24，端口段 20082 / 60210），跑 `exp-difftest-grpc-errors-message.sh` ⇒ **11 条 status 码 + happy path 全部逐条一致，EXIT=0**；结果产物 `tools/difftest/message-grpc-results.txt`。<br>⚠️ **关闭它的前提是先修掉 3 个「起不来」的东西**：V-027（Flyway baseline 跳过 V1）、V-028（message-api jar 不可执行）、H5（`POSTGRES_HOST` 占位符不一致）⇒ **「脚本就位」≠「跑得起来」** |
-| **UNRESOLVED-MSG-004**（沿用，**复核仍成立**） | 三项「起不来」缺陷是否有**点名式**防回退 | 现存用例只间接锁住「上下文能起」 | 拆一条 `MessageContextWiringTest`，分别断言 `@MapperScan` 值、`NacosRegistration` 的 Bean 名、`spring-boot-flyway` 在 classpath |
+| **UNRESOLVED-MSG-004** ✅ **已关闭（2026-10-24 第九轮）** | ~~DRIFT-MSG-004/005/006 未各配独立防回退用例~~ | —— | ✅ **已关闭**：新增 `MessageContextWiringTest`（4 例，**逐条点名**）：`@MapperScan` 的包名 / `NacosRegistration` 的 Bean 名 / `FlywayAutoConfiguration` 类可加载 / `baseline-version: 0` + 独立账本表名；另新增 `MessageApiJarExecutableWiringTest`（2 例，V-028 的点名式防回退） |
 | **UNRESOLVED-MSG-005** ✅ **已关闭（2026-10-23 第四轮，FIX-MSG-V-023）** | ~~已存在的非 Flyway 建表的库上能否启动~~ | —— | ✅ 已关闭：**原问题的前提不成立** —— GORM `AutoMigrate` 建的是**索引**，V2 的 `ADD CONSTRAINT` 在 GORM 建过的库上**本来就能跑**；且 V4 已把约束降回索引（`DROP CONSTRAINT IF EXISTS` + `CREATE UNIQUE INDEX IF NOT EXISTS`），幂等实测 8 次执行全 `exit=0`。⚠️ **残留角落**：仅当外部工具恰好用了同名**约束**时才成立 |
 | **UNRESOLVED-MSG-V-001**（沿用，跨轮次） | Nacos namespace/group 不一致 | 需 user/admin 侧同轮次结论 | 两侧 namespace/group 对齐后再判 |
 | **UNRESOLVED-MSG-006** ✅ **已关闭（2026-10-23 第六轮）** | ~~RAG 侧 handler 抛 `Error`/panic 时客户端到底看到什么~~ | —— | ✅ 已关闭：`GoStyleRecoverInterceptor` 落地后，抛 `Error`（非 `RuntimeException`）也被兜住 ⇒ 客户端见 `INTERNAL` + description 以 `"panic: "` 开头，与 Go 的 `recoverinterceptor.go:39-42` 一致（`MessageRpcRecoverInterceptorWiringTest` 5 例，真 in-process gRPC） |
@@ -1862,6 +1924,10 @@ minK    = 1.1
 | **`DRIFT-MSG-V-025`** | **指标缺口**：`GoStyleAdaptiveShedder` **无** Go `SheddingStat` 的 total / drop / pass 三计数 | 🔴 **OPEN** |
 | **`DRIFT-MSG-V-026`** | **其余 9 个 rpc 组件尚未接入**本链（域间不变量未闭合） | 🔴 **OPEN**（**本轮不改**：域间纪律） |
 
+> ✅ **2026-10-24 第九轮更正**：本表记录的是**第七轮当时**的状态。
+> ⇒ **V-024 / V-025 / V-026 三条已全部修掉**（见下方「第九轮」大节），
+> 其中 V-026 是**跨域改动**（改了 8 个 rpc 组件）⇒ 合并时需人工确认。
+
 ### 6. 本轮连带的状态变更
 
 | 条目 | 变更 |
@@ -2103,3 +2169,276 @@ exit code: 0 (0 = message 域双端口等价 / 1 = 至少一档不符)
   ⇒ 影响**全部 10 个 api**（共享模块）⇒ 合并时需人工确认。
 - ⚠️ 另：Go 侧 `net/http` 的 `http.Error` 还会 `h.Del("Content-Length")` ⇒ chunked；
   RAG 侧同样是 chunked ⇒ **这一项一致**。
+
+---
+
+## 2026-10-24 第九轮：**V-018 / V-025 / V-026 三件全做** + 挖出 **6 个 api 模块的同款「产物不可执行」**缺陷
+
+> **用户指示（本轮）**：
+> ① 共享层的两件（`MSGAPI-010` charset / `MSGAPI-011` reason phrase）**不做**，保持登记在台账；
+> ② `like-rpc` 的同款 Flyway baseline 缺陷（V-029）**留给 like 域自己的 session**；
+> ③ 域内剩余三件（V-018 / V-025 / V-026）**全做**；
+> ④ 方向：**继续深挖 message 域**。
+
+---
+
+### 1. ✅ `DRIFT-MSG-V-018` 已修：`ListConversations` 的判定顺序 + `count_unread` 埋点
+
+**Go 出处（消费点）** —— `service/message/rpc/internal/logic/helper.go:160-187`：
+
+```go
+func buildConversationItem(ctx, svcCtx, conv, operatorRole, operatorID) (*pb.ConversationItem, error) {
+    peerRole, peerID, ok := peerOf(&conv, operatorRole, operatorID)
+    if !ok {
+        return nil, status.Error(codes.PermissionDenied, messagecommon.GetErrMsg(messagecommon.ErrorForbidden))
+    }                                                       // ← ① 先判，短路
+    unread, err := svcCtx.MessageModel.CountUnreadMessagesByConversation(ctx, conv.ID, int32(operatorRole), operatorID)
+    if err != nil {
+        metrics.ObserveDBError("conversation", "count_unread")   // ← ② 有埋点
+        return nil, err                                        // ← 原样返回裸 error
+    }
+    name, email := loadProfile(ctx, svcCtx, peerRole, peerID)   // ← ③ 最后才取 profile
+    ...
+}
+```
+
+**改之前 RAG 的两处偏差**（`MessageDomainService#doListConversations`）：
+
+| # | 偏差 | 可观察后果 |
+|---|---|---|
+| a | **顺序反了**：先 `count_unread` 再 `peerOf` | peerOf 失败时**白查一次 DB**（Go 不会）；且那次查询失败**不产生任何埋点** |
+| b | **少了埋点**：`count_unread` 抛异常时**没有** `observeDbError("conversation","count_unread")` | `message_rpc_db_error_total{action="conversation",type="count_unread"}` 在这条路径上**永不增长** ⇒ 看板会误以为「从没发生过 count_unread 失败」 |
+
+**改法**：把 `peerOf` 判定提到 `count_unread` **之前**（`!found` ⇒ `PERMISSION_DENIED` + `5005`，
+与 Go 的 `ErrorForbidden = 5005` 一致），并给 `count_unread` 补上 try/catch + 埋点 + 原样上抛。
+
+⚠️ **可观察结果只变了一处**：peerOf 失败时的**错误码不变**（仍是 `PERMISSION_DENIED` + 5005），
+只是**不再白查一次 DB**；`count_unread` 失败时**多了一个指标**。
+
+**守门**：`MessageListConversationsParityTest`（4 例，纯 mock 单测）
+- ① peerOf 失败 ⇒ 抛 `PERMISSION_DENIED`，且 `countUnreadMessagesByConversation` **从未被调用**，
+  且**不**产生任何 `observeDbError`；
+- ② count_unread 失败 ⇒ `observeDbError("conversation","count_unread")` **必须被调用**，且异常**原样上抛**；
+- ③ count_unread 成功 ⇒ **不**产生该埋点；
+- ④ `ERROR_FORBIDDEN == 5005`（与 Go `errmsg.go:36` 对齐）。
+
+**变异验证**：删掉 `metrics.observeDbError("conversation","count_unread")` ⇒ **1/4 转红** ⇒ 不是假绿。
+
+---
+
+### 2. ✅ `DRIFT-MSG-V-025` 已修：降载的三个计数 + 每分钟统计日志（**含一条口径更正**）
+
+#### 🔴 口径更正：原记「Go 侧可以在 `/metrics` 里看到」是**错的**
+
+实测 Go 源码（go-zero v1.10.2）后确认：
+
+| Go 侧的东西 | 实际暴露方式 | 出处 |
+|---|---|---|
+| 降载的 `total` / `pass` / `drop` | **每分钟一行的日志**（`logx.Statf`）⇒ **不在 Prometheus 里** | `core/load/sheddingstat.go:52-70` |
+| 熔断的 `markDrop` / `markFailure` | 写进 `b.stat`（`collection.RollingWindow`）⇒ **熔断算法自己的状态**，**根本没有对外暴露** | `core/breaker/googlebreaker.go:121-130` |
+
+⇒ 所以本条的**真实缺口**不是「RAG 少了 Prometheus 指标」，而是：
+**RAG 侧连 Go 有的那行日志都没有** ⇒ 降载在不在工作、丢了多少，**从任何地方都看不出来**。
+
+#### 改法（1:1 照 Go，**零依赖变更**）
+
+- 新增 `service/common/.../protection/GoStyleSheddingStat.java`
+  ⇒ 三个 `AtomicLong`（`total` / `pass` / `drop`）+ `snapshot()` + `reset()` +
+  **逐字照抄** Go 的日志格式：
+  `(rpc) shedding_stat [1m], cpu: 123, total: 1, pass: 1, drop: 0`
+  `(rpc) shedding_stat_drop [1m], cpu: 123, total: 1, pass: 1, drop: 1`
+  （`drop == 0` 用 `shedding_stat`，`drop > 0` 用 `shedding_stat_drop` —— Go 的两支）
+- `GoStyleRpcSheddingInterceptor` 按 Go 的**精确位置**接上三个计数：
+  `IncrementTotal` 在 `allow()` **之前**（每个请求都 +1）、
+  `IncrementDrop` 在 `allow()` 失败时、
+  `IncrementPass` 与 `promise.Pass()` **同一支**（ctx 超时那一支只 `Fail`，**不**计 pass）。
+- 进程级单例（Go 的 `var sheddingStat *load.SheddingStat` + `ensureSheddingStat()`）
+  + 守护线程每分钟上报一次（Go 的 `go st.run()`）。
+
+#### ⚠️ 刻意**不**引入 Micrometer
+
+- Go 侧**没有** Prometheus 指标 ⇒ 本仓若凭空加一个 `rag_protection_shedding_total`
+  那是**发明**一个 Go 没有的能力，与「Go 是唯一基准」相悖（§3.2）；
+- 且 `service/common` 是 20 个组件共享的依赖树，给它加 micrometer 属于**跨域影响面**，
+  而用户本轮已明确「共享层不做多余改动」。
+
+#### 顺带的口径修正（`GoStyleProtectionProperties`）
+
+`GoStyleCpuReader`（新）把 CPU 采样从 `GoStyleAdaptiveShedder` 里抽出来，
+让「降载判据」与「统计日志」用**同一份口径**（默认 `SYSTEM` = 整机千分比 = Go 的 `stat.CpuUsage()`）。
+
+#### 守门
+
+`GoStyleSheddingStatTest`（5 例）+ 变异验证（删掉 `stat.incrementDrop()` ⇒ **1/5 转红**）。
+
+---
+
+### 3. ✅ `DRIFT-MSG-V-026` 已修：**8 个 rpc 组件全部接入**熔断 / 降载链
+
+#### 🔴 关键发现：**挂 breaker 有一个逐组件的前置条件**（差点就做错了）
+
+breaker 的「失败判据」是 **status code**（Go `zrpc/internal/codes/accept.go:9-17` 的 6 码白名单）。
+⇒ **组件的兜底码若与 Go 不一致，挂上 breaker 反而会把既有漂移激活成新回归**。
+
+⇒ 因此本轮**逐组件核了两侧**（Go 出处 = 消费点）：
+
+| rpc 组件 | Go 的 DB / 内部错误码 | RAG 的 | 一致？ | 挂 breaker 后是否与 Go 同开路？ |
+|---|---|---|---|---|
+| `message` | 裸 error ⇒ `UNKNOWN`（`logic/**` 19 处原样返回） | `UNKNOWN`（V-024 已对齐） | ✅ | ✅ 两侧都**不**熔断 |
+| `article` | `status.Error(codes.Internal, …)`（`delete_article_logic.go:71` 等） | `UNKNOWN`（`ArticleServiceGrpcImpl:146/150`） | ❌ | ⚠️ **RAG 熔断更少**（差异**本已存在**：RAG 此前根本没 breaker）⇒ 挂上**不会更差** |
+| `favorite` | `GRPCError(codes.Internal, …)` | `INTERNAL` | ✅ | ✅ 两侧都熔断 |
+| `follow` | `GRPCError(codes.Internal, …)` | `INTERNAL` | ✅ | ✅ 两侧都熔断 |
+| `comment` | `NewGrpcErr(ErrorDbSelect=5003, …)` ⇒ **码值越界** ⇒ `UNKNOWN` | `UNKNOWN` | ✅ | ✅ 两侧都**不**熔断 |
+| `like` | 同上（`5003` 越界） | `UNKNOWN` | ✅ | ✅ 两侧都**不**熔断 |
+| `task` | `return nil, err` ⇒ `UNKNOWN` | `UNKNOWN` | ✅ | ✅ 两侧都**不**熔断 |
+| `user` | `status.Error(codes.Internal, …)` | `INTERNAL` | ✅ | ✅ 两侧都熔断 |
+| `admin` | `status.Error(codes.Internal, …)`（`resetuserpasswordlogic.go:53` 等） | `INTERNAL` | ✅ | ✅ 两侧都熔断 |
+
+**8/9 一致**；唯一不一致的 `article` 是**既有漂移**（属 article 域），且挂 breaker 只让 RAG **熔断更少**、
+**不会更差** ⇒ 不阻塞本条。
+
+⚠️ **另一个被核掉疑**：PG 超时（SQLState 57014）在 RAG 侧被 `SqlTimeoutStatusTranslator` 翻成
+`DEADLINE_EXCEEDED`（在 6 码白名单里 ⇒ 会熔断），而 Go 侧 DB 超时是 `context.DeadlineExceeded`
+⇒ `status.FromContextError` ⇒ **也是 `DEADLINE_EXCEEDED`** ⇒ **两侧一致**，不构成漂移。
+
+#### 改法（每个组件两处）
+
+1. `@Import` 列表加 `GoStyleProtectionConfiguration`
+   （它是 `GoStyleProtectionProperties` 这个 `@ConfigurationProperties` 类的**唯一注册点** ——
+   它**不会**被组件扫描自动注册，缺了它 ⇒ 上下文起不来）；
+2. `rpcInterceptorConfigurer` 改成走共享链：
+   `server -> server.intercept(GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, protectionProps))`
+   （链序 `recover → breaker → shedding → 业务观测拦截器`，定义点在共享模块，
+   **不在 10 个组件里各写一遍**）。
+
+#### 守门（**逐组件**，AGENTS.md §3.5 的组件级粒度）
+
+新增 7 个 `*ProtectionChainWiringTest`（article / comment / favorite / follow / like / task / admin）
++ 更新 `user-rpc` 的 `GrpcInterceptorWiringTest` ⇒ **共 8 个组件、16 例**。
+
+每个组件断言两件事：
+- ① `@Import` 列表含 `GoStyleProtectionConfiguration`（反射）；
+- ② 交给 ServerBuilder 的那条链**真跑一遍**后，业务 interceptor **确实被调到**，
+  且拿到的 `call` **不是**原始 call ⇒ **证明链上真的有 breaker/shedding 包装层**。
+
+⚠️ **断言不能是「同一个对象」**：链上有包装层时业务 interceptor 收到的是**包装后的 call**
+⇒ `same(call)` 必然不成立 ⇒ 改成「被调到」+「拿到的是包装过的 call」，**比原来更强**
+（能区分「业务 interceptor 在链里」与「链被拼反 / 没挂上」）。
+
+**变异验证**：把 `article-rpc` 改回裸 `server.intercept(rpcUnaryServerInterceptor)` ⇒ **1/2 转红**。
+
+#### ⚠️ 合并冲突面提示（本轮改了**别的域的代码**）
+
+本轮为 V-026 改了 8 个 rpc 组件的 `Application.java` + 1 个既有测试 + 新增 7 个测试文件。
+这些属于**其它域**的代码 ⇒ **合并时需人工确认**（尤其 `user-rpc` 的既有测试被改了断言形状）。
+
+---
+
+### 4. 🔴 `DRIFT-MSG-V-030`（新挖出 · **跨域待办**）：**6 个 api 模块的 jar 根本不可执行**
+
+**这是 V-028 的同款缺陷，但不在 message 域。**
+
+**实测（真实产物，2026-10-24，全仓 `mvn package` 之后解包 MANIFEST）**：
+
+| 模块 | 产物大小 | `Main-Class` |
+|---|---|---|
+| `article-api` | **68 KB** | ❌ 无 |
+| `comment-api` | **52 KB** | ❌ 无 |
+| `follow-api` | **56 KB** | ❌ 无 |
+| `hot-api` | **32 KB** | ❌ 无 |
+| `like-api` | **48 KB** | ❌ 无 |
+| `task-api` | **24 KB** | ❌ 无 |
+| `favorite-api` / `admin-api` / `user-api` / `message-api` | 68–80 MB | ✅ `JarLauncher` |
+
+⇒ 那 6 个模块**从来没被打成过可部署产物** ⇒ `java -jar` 报「中没有主清单属性」。
+
+**⚠️ 为什么它能潜伏这么久**：这三轮的每一项验证（测试全绿、`mvn package` 成功、上下文能起、
+双侧对拍通过）**都发生在容器 / 测试环境里**，**从来没有碰过 jar 本身**。
+
+**修法**：照 message-api 的 V-028，在该模块 pom 补 `<build>` 段（含 `spring-boot-maven-plugin`）。
+⚠️ 补完**必须重跑本轮新增的守门脚本**确认 `Main-Class` 变成 `JarLauncher` ——
+只看「`mvn package` 成功」不算数。
+
+**新增守门脚本**：`tools/difftest/check-jar-executable.sh`
+⇒ 逐个 api 模块解包 MANIFEST 看 `Main-Class`，任一缺失即 `EXIT=1`。
+（2026-10-24 当场实测：**EXIT=1**，6 个模块不合格 ⇒ 门是有效的。）
+
+**⚠️ 归属**：属**别的域**，按域间纪律**本工作树不改它们的 pom** ⇒ 登记为跨域待办。
+（与 V-029 同款处理：登记 + 交接，不越界。）
+
+---
+
+### 5. ✅ `UNRESOLVED-MSG-004` 已关闭：四项「起不来」缺陷的**点名式**防回退
+
+原问题：「`@MapperScan` / `spring-boot-flyway` / Bean 名 三项**无点名式防回退用例**」
+⇒ 此前只被 `MessageTransactionWiringTest` 的「上下文能起」**间接**锁住
+⇒ 红了但**红的原因不点名**（事后翻日志才知道是哪一条）。
+
+**新增 `MessageContextWiringTest`（4 例，逐条点名）**：
+
+| # | 断言 | 删掉后的症状 |
+|---|---|---|
+| ① | `@MapperScan("com.rag.message.message.rpc.mapper")` | 3 个 Mapper 注册不上 ⇒ `UnsatisfiedDependencyException: messageAtomicService` |
+| ② | `NacosRegistration` 的 Bean 名 == `messageRpcNacosRegistration` | 与 `NacosServiceRegistryAutoConfiguration` 的默认名 `nacosRegistration` 撞车 ⇒ 上下文启动即失败 |
+| ③ | `org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration` **类可加载** | Boot 4 拆模块后缺 `spring-boot-flyway` ⇒ **启动日志里连一行 Flyway 都没有** ⇒ 表永不创建 |
+| ④ | `application.yml` 含 `baseline-version: 0` + `flyway_schema_history_message` | 共享库里 V1 被整条跳过 ⇒ **服务起不来**（V-027） |
+
+⚠️ **③ 的判据踩过一个坑**：第一版去读 `spring-boot-autoconfigure` 那份
+`AutoConfiguration.imports` 找 `FlywayAutoConfiguration` ⇒ **必然红** ——
+因为 Boot 4 把 Flyway 自动配置拆到了**独立模块** `spring-boot-flyway`，
+它带的是**自己那份**同名资源，而 `ClassLoader.getResource()` 只返回**第一份**。
+⇒ 改成**直接断言类可加载**（`Class.forName(..., false, loader)`）才是可靠判据。
+
+**另新增** `MessageApiJarExecutableWiringTest`（2 例）⇒ V-028 的点名式防回退
+（断言 pom 的 `<build><plugins>` 里真有 `spring-boot-maven-plugin`）。
+⚠️ 这条断言**第一版也被自己的注释打败**：pom 的说明性注释里就写着 `<build>` 与
+`spring-boot-maven-plugin` ⇒ 裸 `indexOf("<build>")` 先撞到**注释里那一次** ⇒ 断言必红
+⇒ 修法：**先剥掉 XML 注释再取下标**。
+
+---
+
+### 6. 本轮实测数据（2026-10-24 当场实测）
+
+```
+【clean build 全量回归（12 个模块，10:56 min，BUILD SUCCESS）】
+  service/common        ：168 tests / 0 failures / 0 errors / 0 skipped   （162 → 168，+6）
+  message-common        ： 21 tests / 0 / 0 / 0
+  message-rpc           ： 76 tests / 0 / 0 / 0   （68 → 76，+4 V-018 +4 点名式防回退）
+  message-api           ： 88 tests / 0 / 0 / 0   （86 → 88，+2 V-028 点名式防回退）
+  article-rpc           ：107 tests / 0 / 0 / 0
+  comment-rpc           ：  2 tests / 0 / 0 / 0   （+2 V-026 接线）
+  favorite-rpc          ：  2 tests / 0 / 0 / 0   （+2）
+  follow-rpc            ：  2 tests / 0 / 0 / 0   （+2）
+  like-rpc              ： 48 tests / 0 / 0 / 0   （+2）
+  task-rpc              ：  2 tests / 0 / 0 / 0   （+2）
+  users/user-rpc        ：116 tests / 0 / 0 / 0
+  users/admin-rpc       ： 90 tests / 0 / 0 / 0
+  ⇒ 合计 **722 例**，0 failures / 0 errors / **0 skipped**
+
+【变异验证（本轮 3 条，全部有效 —— 改坏即红）】
+  V-018：删掉 observeDbError 埋点              ⇒ 1/4 转红
+  V-025：删掉 stat.incrementDrop()             ⇒ 1/6 转红
+  V-026：article-rpc 改回裸 intercept          ⇒ 1/2 转红
+
+【新守门脚本】
+  tools/difftest/check-jar-executable.sh ⇒ EXIT=1（6 个 api 模块的 jar 不可执行）
+```
+
+> ⚠️ **本轮又踩出一条坑（已入档 `PITFALL-MSG-R-025`）**：
+> 变异验证脚本用 `shutil.copy2` 还原源码 ⇒ **保留了旧 mtime** ⇒
+> `maven-compiler-plugin` 的增量检查判定「class 已是最新」⇒ **跳过重编译**
+> ⇒ 后续跑的是**变异过的 class** ⇒ 守门报「drop 计数是 0」，而源码其实是对的。
+> ⇒ 排查路径：单独跑绿 ⇒ 整类跑绿 ⇒ `mvn clean test` 绿 ⇒ 锁定「编译产物过期」。
+> ⇒ 修法：还原用 `shutil.copyfile` + `os.utime(path, None)`；
+> ⇒ 且**任何「改坏 / 还原」之后都必须 clean 或显式刷 mtime**，否则后面所有绿灯都不可信。
+> ⇒ 上面的三条变异结果是在**修好还原逻辑之后重跑**的。
+
+---
+
+### 7. ⚠️ 本轮改动落在**共享面 / 别的域**
+
+- `service/common`：新增 `GoStyleSheddingStat` / `GoStyleCpuReader`，
+  改 `GoStyleRpcSheddingInterceptor`（三个计数）、`GoStyleAdaptiveShedder`（CPU 采样抽出）。
+  ⇒ **不引入任何新依赖**（未加 micrometer）⇒ 对 20 个组件的依赖树**零影响**。
+- **别的域的代码**（V-026）：8 个 rpc 组件的 `Application.java` + `user-rpc` 的一个既有测试。
+  ⇒ 合并时需人工确认。

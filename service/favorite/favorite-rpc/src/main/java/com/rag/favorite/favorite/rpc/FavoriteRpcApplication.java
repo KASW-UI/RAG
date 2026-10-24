@@ -18,6 +18,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import com.rag.common.protection.GoStyleRpcProtectionChain;
+import com.rag.common.protection.GoStyleProtectionProperties;
+import com.rag.common.protection.GoStyleProtectionConfiguration;
 
 /**
  * favorite-rpc 进程入口 —— 对应 Go 端<b>四个</b> main 合并后的单 JVM：
@@ -74,7 +77,11 @@ import org.springframework.context.annotation.Import;
 
         // ===== 超时必须能真正取消在途 SQL =====
         DeadlineQueryTimeoutInjector.class, // 按线程 DeadlineState 给每条 SQL 设 setQueryTimeout
-        SqlTimeoutStatusTranslator.class    // 把 57014 query_canceled 翻成 DEADLINE_EXCEEDED
+        SqlTimeoutStatusTranslator.class,    // 把 57014 query_canceled 翻成 DEADLINE_EXCEEDED
+
+        // ===== 熔断 / 降载（Go zrpc 框架级能力，每个 rpc server 都自带）=====
+        GoStyleProtectionConfiguration.class,  // 熔断/降载链的配置载体（breaker / cpuShedding 的开关与阈值；默认值 = go-zero 的 tag 默认值）
+
 })
 public class FavoriteRpcApplication {
 
@@ -91,8 +98,14 @@ public class FavoriteRpcApplication {
      * 超时、deadline 传播、gRPC span 全部静默消失。
      */
     @Bean
-    public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryServerInterceptor) {
-        return server -> server.intercept(rpcUnaryServerInterceptor);
+    public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryServerInterceptor,
+            GoStyleProtectionProperties protectionProps) {
+        // ⚠️ DRIFT-MSG-V-026（2026-10-24）：链的定义点在**共享模块**
+        //   com.rag.common.protection.GoStyleRpcProtectionChain ——
+        //   熔断 / 降载在 Go 侧是 **zrpc 框架级**能力（每个 rpc server 都自带），
+        //   10 个 rpc 组件挂的是同一条链，顺序若分散在各处各写一遍，就是 10 个可能写错的地方。
+        //   本仓的链：recover → breaker → shedding → 业务观测拦截器。
+        return server -> server.intercept(GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, protectionProps));
     }
 
     public static void main(String[] args) {

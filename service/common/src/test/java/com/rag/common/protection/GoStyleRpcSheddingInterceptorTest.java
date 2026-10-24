@@ -76,30 +76,64 @@ class GoStyleRpcSheddingInterceptorTest {
         GoStyleAdaptiveShedder s = shedder(1000);       // 恒过载
         GoStyleRpcSheddingInterceptor interceptor = new GoStyleRpcSheddingInterceptor(s, true);
 
-        // 配方同 GoStyleAdaptiveShedderTest#overloadedAndHighInFlightSheds：
-        //   ① 一批悬着的调用把在途数堆上去
-        for (int i = 0; i < 50; i++) {
-            driveOpen(interceptor);
+        // ⚠️⚠️ **配方（2026-10-24 改）**：本用例原先用「开 50 → 关 50 → 再开」的涌现式配方，
+        //    而 {@code avgFlying} 只在**在途数下降**时更新、且带 0.9 的滞后系数
+        //    （adaptiveshedder.go:139-152）⇒ 全部开完再全部关完，结束时 avgFlying 只剩 ~0.26，
+        //    而 cap 的下界是 {@code maxFlight() * 0.1 >= 0.1} ⇒ **margin 只有 2.6 倍**
+        //    ⇒ 一旦机器负载让这批调用分散到不同时间桶（窗口滚动），cap 变大 ⇒ 降载不发生
+        //    ⇒ **测试随机红**（实测在全量回归里真的红过一次）。
+        // ⇒ 现在改成：开 100 → **只关 90**（关闭时在途数仍高 ⇒ avgFlying 被抬到 ~10）
+        //    ⇒ margin 放大到 100 倍，不再时序敏感。
+        java.util.List<io.grpc.ServerCall<Object, Object>> opened = new java.util.ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            opened.add(openAndCapture(interceptor));
         }
-        //   ② 一批正常完成的调用把 avgFlying 抬上去
-        for (int i = 0; i < 50; i++) {
-            drive(interceptor, Status.Code.OK);
+        for (int i = 0; i < 90; i++) {
+            opened.get(i).close(Status.OK, new Metadata());
         }
-        //   ③ 继续驱动，直到出现降载
-        FakeServerCall dropped = null;
-        for (int i = 0; i < 50 && dropped == null; i++) {
-            FakeServerCall c = driveOpen(interceptor);
-            if (c.closedStatus != null && c.closedStatus.getCode() == Status.Code.RESOURCE_EXHAUSTED) {
-                dropped = c;
+        // 再来一个 ⇒ highThru 成立 ⇒ 应被降载
+        FakeServerCall dropped = new FakeServerCall(METHOD);
+        ServerCallHandler<Object, Object> next = new ServerCallHandler<>() {
+            @Override
+            public ServerCall.Listener<Object> startCall(ServerCall<Object, Object> c, Metadata h) {
+                return new ServerCall.Listener<>() {
+                };
             }
-        }
+        };
+        interceptor.interceptCall(dropped, new Metadata(), next);
 
-        assertThat(dropped).as("CPU 恒过载 + 在途堆积后必须出现降载").isNotNull();
+        assertThat(dropped.closedStatus).as("CPU 恒过载 + 在途堆积后必须出现降载").isNotNull();
+        assertThat(dropped.closedStatus.getCode())
+                .as("Go: sheddinginterceptor.go:30 —— codes.ResourceExhausted")
+                .isEqualTo(Status.Code.RESOURCE_EXHAUSTED);
         assertThat(dropped.closedStatus.getDescription())
                 .as("Go: core/load/adaptiveshedder.go:34 ErrServiceOverloaded 的文案")
                 .isEqualTo("service overloaded");
         assertThat(dropped.handlerRan)
                 .as("Go: Allow() 失败时 handler 从未被调用").isFalse();
+    }
+
+    /**
+     * 驱动一次**悬着**的调用，并返回**被拦截器包装过的**那个 call。
+     *
+     * <p>⚠️ 必须返回<b>包装过的</b> call：拦截器的 promise 结算挂在
+     * {@code ForwardingServerCall#close} 上 ⇒ 关<b>原始</b> call 不会触发结算
+     * ⇒ 在途数不会下降 ⇒ 造不出「交错关闭把 avgFlying 抬高」的效果。
+     */
+    private static io.grpc.ServerCall<Object, Object> openAndCapture(
+            GoStyleRpcSheddingInterceptor interceptor) {
+        FakeServerCall call = new FakeServerCall(METHOD);
+        final io.grpc.ServerCall<Object, Object>[] wrapped = new io.grpc.ServerCall[1];
+        ServerCallHandler<Object, Object> next = new ServerCallHandler<>() {
+            @Override
+            public ServerCall.Listener<Object> startCall(io.grpc.ServerCall<Object, Object> c, Metadata h) {
+                wrapped[0] = c;
+                return new ServerCall.Listener<>() {
+                };
+            }
+        };
+        interceptor.interceptCall(call, new Metadata(), next);
+        return wrapped[0];
     }
 
     // ==================================================================
