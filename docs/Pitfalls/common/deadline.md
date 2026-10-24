@@ -62,7 +62,7 @@
 
 ### 根治
 
-[`tools/difftest/check-grpc-interceptor-wiring.py`](../../../../tools/difftest/check-grpc-interceptor-wiring.py)
+[`tools/difftest/check-grpc-interceptor-wiring.py`](../../../tools/difftest/check-grpc-interceptor-wiring.py)
 （2026-10-24 新增）：逐个 rpc 进程断言 ① 与 ② **同时具备**，当前 `EXIT=1`，精确指向 `hot-rpc`。
 
 ⇒ **凡是「每个消费方都要做 X」的契约，都该有一条可跑的检查**，
@@ -104,3 +104,46 @@
 
 ⚠️ 命名也易混：`docs/DRIFT/common/deadline.md` 讲的是**第 1 行**，
 本文件讲的是**第 2、3 行** —— 两者标题都叫 deadline，内容不重叠。
+
+---
+
+## 坑 4：同一个组件里的两个 deadline 载体，**时基不同** 🔴
+
+2026-10-24 复验时才发现的（`service/common` 内部）：
+
+| 载体 | 方向 | 存的量 | 时基 | 精度 |
+|---|---|---|---|---|
+| `GoStyleRequestDeadline` | **出向**（HTTP→gRPC 客户端） | `ThreadLocal<Long>` **纳秒** | `System.nanoTime()`（**单调钟**） | **纳秒** ✅ |
+| `DeadlineState` | **入向**（gRPC 服务端 handler） | `ThreadLocal<Long>` **epoch 毫秒** | `System.currentTimeMillis()`（**墙钟**） | **毫秒** 🔴 |
+
+⇒ Go 侧 `context.WithTimeout` 存的是 `time.Time` ⇒ **纳秒精度 + 单调时钟读数**，
+`time.Until(d)` 走单调读数。**两侧都对齐的是「出向」那一行**。
+
+### 为什么「同一组件」这件事本身就该触发怀疑
+
+两个载体**不共享实现**（一个存 nanos、一个存 epoch-millis），
+所以：
+
+> **「出向已对齐」推不出「入向也对齐」。**
+> 更何况它们连**时基**都不同 —— 一个抗 NTP 跳变，一个不抗。
+
+⇒ `DeadlineState.isExpired()`（`RpcInterceptor.java:602-605`）用墙钟比较：
+NTP 把墙钟**往前跳** ⇒ 提前判过期；**往后跳** ⇒ 该超时的不超时。
+Go 侧不受此影响（单调读数）。
+
+### 纪律
+
+> **同一个组件里出现第二个「时间/预算」载体时，必须逐个问：时基是哪种？精度是哪种？**
+> 不要因为「另一个已经对齐了」就默认这个也对齐了。
+>
+> 判据：**找 Go 侧的对应读法**（`ctx.Deadline()` / `time.Until()`），
+> 看它用的是**单调读数**还是**墙钟**、精度是纳秒还是毫秒 —— 然后逐条对。
+
+⚠️ 这条已被**别的域签字**了（`align/like` 的 `SD-2026-10-23-09`，
+标注为「共享组件 `GoStyleRequestDeadline` 的公开 API 只暴露毫秒」），
+但**签字描述只对了一半** —— `GoStyleRequestDeadline` 内部是**纳秒**，
+真正只有毫秒的是 `DeadlineState`。⇒ 见
+[`../../DRIFT/common/alignment-2026-10-23.md`](../../DRIFT/common/alignment-2026-10-23.md) 的 DRIFT-COMMON-005。
+
+⇒ **教训二**：**下游域给共享组件的限制签字时，根因域的台账必须同时落一条。**
+否则根因域复审会当新发现重提，而下游的签字理由可能建立在**不准确的描述**上。

@@ -4,8 +4,9 @@
 
 > **产出方**：`align/common` 工作树（`RAG.worktrees/common`），基线 commit **`8422116`**（与 `do-my-own-gh` 同点）。
 > **核对时间**：2026-10-23 22:49–23:10（真实执行：`mvn -o -pl service/common test` ×4 轮 + `javap` ×2 + `find`/`grep` 全仓扫描）。
-> **复验时间**：2026-10-24 19:26–19:50（真实执行：全分支 `git log`/`git diff` 对照 + 全量 `grep -rl`（不加截断）
-> + `mvn -o -pl service/common test` 重跑 + 新增守门脚本实跑）。**复验推翻了一条首版的假结论 —— 见 §二。**
+> **复验时间**：2026-10-24 19:26–19:55（**三轮**，真实执行：全分支 `git log`/`git diff` 对照 + 全量 `grep -rl`（不加截断）
+> + `mvn -o -pl service/common test` 重跑 + 新增守门脚本实跑 + 文档相对链接逐个解析校验 + 台账编号机器计数）。
+> **复验推翻了 1 条首版的假结论**（见 §二），**并新增 2 条此前无记录的条目**（DRIFT-COMMON-005 / -006，见 §一·五）。
 > **本文件回答**：`service/common` 台账标「✅ 审计完成」之后，还剩什么没对齐。
 >
 > ⚠️ **本文件所有行号引用均以基线 `8422116` 为准**。`service/common` 正在被别的域并发改动
@@ -30,9 +31,9 @@
 | 5 个可比包（`communityfact` / `logger` / `observability` / `response` / `snowflake`） | 🔴 **3 个 NOT EQUIVALENT**，1 个（`response`）**逐条等价** |
 | §3.3 机制接线（`spring/*`） | 🔴 1 条**可证伪的假框架断言**（已修）；**1 条 H2 形态在 `hot-rpc` 上复发（DRIFT-COMMON-004，未修，归属 `align/hot`）**；2 条常见担忧**已证伪** |
 | 跨组件不变量 | 🔴 `communityfact` 消费者两侧不一致（见 §四） |
-| 已修 | **3 条 SEMANTIC MISMATCH**（均配回归测试，147 tests / 0 failures） |
-| 已记录未修 | **26 条编号条目**（communityfact 15 + logger 7 + snowflake 3 + 跨域 1）<br>另补录 **5 项未编号的观察**（见 §六·六），含 1 条 `UNRESOLVED`、1 条 API 缺陷、1 条跨域归属 |
-| 2026-10-24 复验 | 🔴 **推翻了首版 1 条假结论**（「H2 已闭环」实为 9/10）；✅ 其余承重断言均仍成立（见 §六·五） |
+| 已修 | **3 条 SEMANTIC MISMATCH**（均配回归测试，147 tests / 0 failures）<br>+ DRIFT-COMMON-006 的**本域侧**（死代码标废弃） |
+| 已记录未修 | **28 条编号条目**（`DRIFT-COMMON` 3 + communityfact 15 + logger 7 + snowflake 3）<br>另补录 **5 项未编号的观察**（见 §六·六），含 1 条 `UNRESOLVED`、1 条 API 缺陷、2 条跨域归属 |
+| 2026-10-24 复验 | 🔴 **推翻了首版 1 条假结论**（「H2 已闭环」实为 9/10）；✅ 其余承重断言均仍成立（见 §六·五）<br>🔴 **新增 2 条**（DRIFT-COMMON-005 / -006），其中 -005 此前被**别的域签了字**却在本域无记录 |
 
 ---
 
@@ -131,6 +132,42 @@ Go 这样做是对的——它的 span 生命周期归 otel 插桩所有，拦�
 
 ---
 
+### DRIFT-COMMON-005 —— `DeadlineState` 用**墙钟**，Go 用**单调钟**；且精度被截到毫秒（`SEMANTIC MISMATCH`）
+
+> **2026-10-24 二次复验时补记。** 这是 `service/common` 自己的东西，但**此前没被任何域记录** ——
+> 连已被别的域签字的同一限制，common 域的台账里也是空白（见 §六·五·6）。
+
+| | |
+|---|---|
+| **Go 出处** | 标准库 `context.WithDeadline`（`context.go:625` / `:632`）把 deadline 存成 `time.Time` ⇒ **纳秒精度**，且 `time.Now()` 带**单调时钟读数**、`Add` 会保留它；`time.Until(d)` 走单调读数。Go 侧业务层就是用 `ctx.Deadline()` / `time.Until()` 读预算（实例：`service/knowledge/api/internal/logic/product/search_tools_client.go:184`） |
+| **RAG 落点** | `RpcInterceptor.java:589` `DeadlineState.DEADLINE = ThreadLocal<Long>`，存 **epoch 毫秒**；`:170-172` `deadlineEpochMs = System.currentTimeMillis() + timeout.toMillis()`；`:602-605` `isExpired()` 与 `:608-612` `remainingMillis()` 都用 `System.currentTimeMillis()` |
+| **差异 ①（时基）** | Go **单调钟** vs RAG **墙钟**。`System.currentTimeMillis()` 受 NTP 校正 / `setSystemTime` / 虚拟机快照恢复影响 ⇒ 可能**倒退**（则 `isExpired()` 长时间为 false ⇒ 超时不触发）或**前跳**（则提前判过期） |
+| **差异 ②（精度）** | Go **纳秒** vs RAG **毫秒** —— 且是在**创建时**就截断（`timeout.toMillis()`），不是读取时 ⇒ 有效 deadline 时刻本身最多差 < 1ms |
+| **🔴 同组件内不一致** | 同一组件的**另一个** deadline 载体 `GoStyleRequestDeadline`（`observability/GoStyleRequestDeadline.java:64`）用的是 `System.nanoTime()`（**单调钟**）+ 纳秒存储 + `withDeadlineAfter(remainingNanos, NANOSECONDS)`（`:115-119`）<br>⇒ **两个载体时基不同**：**出向（HTTP→gRPC）单调钟、入向（gRPC 服务端）墙钟** |
+| **可观察面** | gRPC 服务端超时判定时刻、SQL `queryTimeout` 注入值、业务层 `checkDeadline()` 判定 |
+| **处置** | 🔴 **未修** —— 改法要动公共 API 签名（`bindToCurrent(long epochMillis)` → 纳秒版），而 `admin-rpc` / `user-rpc` 的**测试**直接调它（`AdminDeadlinePassthroughTest.java:150`、`DeadlinePassthroughTest.java:144`）⇒ **跨域破坏性变更，不得单域决定** |
+
+**对照结论（同一件事的两侧，别混谈）**：
+- ✅ `GoStyleRequestDeadline`（**出向**）**纳秒精度 ✅ 与 Go 等价** —— 存 nanos、`applyTo` 用 `withDeadlineAfter(remainingNanos, NANOSECONDS)`。
+- 🔴 `DeadlineState`（**入向**）**墙钟 + 毫秒** —— 本条。
+
+⇒ 两个载体**不共享实现**（一个 `ThreadLocal<Long>` nanos、一个 `ThreadLocal<Long>` epoch-millis），
+所以「出向已对齐」**不能**推出「入向也对齐」。
+
+---
+
+### DRIFT-COMMON-006 —— `DeadlineState.markExpired(long)` 是死代码；且有一处跨域 javadoc 在描述它（`OBSERVABLE`）
+
+| | |
+|---|---|
+| **Go 出处** | 无对应物（ctx 由标准库持有，业务方不需要手动「设过期时刻」） |
+| **RAG 落点** | `RpcInterceptor.java:597` `markExpired(long epochMillis)` |
+| **差异** | 2026-10-24 全仓 grep 实证：**零生产调用方** —— 只有自身定义 + 3 处 javadoc 提及。实际生效路径是 `bindToCurrent(deadlineEpochMs)`（`:281`，`onHalfClose` 里绑定）。<br>且两者有一处实质差别：`bindToCurrent` 返回的 `Scope` 会在 try-with-resources 结束时 `remove()`（**防线程池串味**），`markExpired` **不会自动清** |
+| **连带（跨域）** | 🔴 `service/users/user/user-rpc/.../UserDomainService.java:115` 的 javadoc 声称「配合 `DeadlineState#markExpired(long)`（由 `RpcInterceptor` 调度）」—— **与事实不符**：M7 修复后 deadline 由 **`onHalfClose`** 绑定，且**不在调度线程**上。<br>⇒ **该文件属 users 域，本域不改，仅登记并需知会 `align/users-user`** |
+| **处置** | ✅ **本域已修**：`markExpired` 标 `@Deprecated`，javadoc 改写为陈述事实（真实路径、为何保留、为何不删）<br>⚠️ **未删除** —— users 域的 javadoc 仍以 `{@link DeadlineState#markExpired(long)}` 链它，删除会造成**跨域悬空链接**；等该域自行清理引用后再删（实测 `mvn -pl service/users/user/user-rpc install` **EXIT=0**，链接未悬空） |
+
+---
+
 ## 二、§3.3 机制接线复核（本轮独立自查）
 
 ### 🔴 已修：共享类 javadoc 里的**可证伪假框架断言**
@@ -185,7 +222,7 @@ javap GrpcServerConfigurer
 | `follow-rpc` / `like-rpc` / `message-rpc` / `task-rpc` | ✅ | ✅ |
 | **`hot-rpc`** | ✅ | 🔴 **缺** ⇒ 见 DRIFT-COMMON-004 |
 
-**新增守门脚本**（本轮补）：[`tools/difftest/check-grpc-interceptor-wiring.py`](../../../../tools/difftest/check-grpc-interceptor-wiring.py)
+**新增守门脚本**（本轮补）：[`tools/difftest/check-grpc-interceptor-wiring.py`](../../../tools/difftest/check-grpc-interceptor-wiring.py)
 —— 逐个 rpc 进程断言「① 与 ② 同时具备」，当前 **`EXIT=1`，精确指向 `hot-rpc`**。
 ⇒ 这类缺陷**不该再靠人眼数 grep 命中文件数**。
 
@@ -414,6 +451,31 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 
 ⇒ 看到 `common` 三个字**不能**推断是同一件事。§7.2 已就 `docs/FileTree/` 记过一次同类歧义，此处再记一次。
 
+### 6. 🔴 别的域给**共享组件的限制**签了字，而 common 域台账对此**毫无记录**
+
+2026-10-24 复验发现：`align/like`（commit `cff298c`）新增了
+**`SD-2026-10-23-09`（⏳ 待签字）**，内容是：
+
+> 组件：`service/like/like-api`（全部 6 个端点的下游调用）
+> 性质：**框架限制**（**共享组件 `GoStyleRequestDeadline` 的公开 API 只暴露毫秒**）
+
+⇒ 被签字的根因在 **`service/common`**（共享组件），而 common 域的三档台账里**一个字都没记**。
+
+**本轮补记的结果**（见 DRIFT-COMMON-005）：那条签字的描述**只对了一半** ——
+`GoStyleRequestDeadline` 内部存的是**纳秒**、`applyTo` 用 `withDeadlineAfter(remainingNanos, NANOSECONDS)`，
+**出向链路是纳秒精度的，与 Go 等价**；
+真正只有毫秒的是**另一个载体** `DeadlineState`（gRPC 服务端**入向**），
+它连时基都不同（墙钟 vs 单调钟）。
+
+⇒ **教训**：**「某个域为 X 签了字」不等于「X 的根因已被记录在它所属的域里」。**
+共享组件的限制被下游域签字时，**根因域的台账必须同时落一条**，否则：
+① 根因域复审时会把它当新发现重提一遍；② 下游的签字理由可能建立在**不准确的描述**上（本例就是）。
+
+⇒ 另：`align/like` 把它记在 `docs/Intentional_Deviations/like/api.md`，
+但按 §5.3b「<域> = 微服务名，<组件> = api/rpc/common/proto」，
+**根因属于 `service/common` ⇒ 应在 `docs/Intentional_Deviations/common/` 也有一份**。
+本轮**未动别域文件**，仅在此登记，供主会话合并时协调。
+
 ---
 
 ## 六·六、🔍 本轮查到但**首版台账漏记**的条目（2026-10-24 补录）
@@ -446,6 +508,9 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 3. **`observability` 子审计的完整覆盖清单本轮未收齐** —— 本轮在该包上**独立发现并修掉**了 DRIFT-COMMON-001，
    其余条目（`HttpMiddleware` / `MqConsumer` / `GoStyleRequestDeadline` 的逐函数对照）待补。
    ⚠️ **2026-10-24 追加**：`align/message` 已改 `HttpMiddleware.java`（+10 行）⇒ 该文件的对照基准同样在移动。
+   ⚠️ **2026-10-24 再追加**：**`GoStyleRequestDeadline` 与 `DeadlineState` 已审完**（结论见 DRIFT-COMMON-005）：
+   前者（出向）**纳秒精度、与 Go 等价**；后者（入向）**墙钟 + 毫秒**。
+   ⇒ 本项剩余未审的是 `HttpMiddleware`（758 行）与 `MqConsumer`（145 行）。
 4. **全程无 Go ↔ RAG 双侧活体对拍** —— 本轮最强证据是「真 OTel SDK + 真 span exporter 驱动真实拦截器」+
    `javap` 字节码 + 全仓配置扫描。**仍未达到 §3.3 理想态**（真 PG / 真 Redis / 双栈对拍）。
 5. **`service/common` 自身无启动入口** —— 它是库模块，20 个测试类中仅 `ObservabilityWiringTest` 装配 Spring 上下文，

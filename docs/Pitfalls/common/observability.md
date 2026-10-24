@@ -177,7 +177,7 @@ javap GrpcServerFactoryAutoConfiguration
 
 ### 根治：把「数命中文件」换成「跑一条检查」
 
-同一个晚上新增的 [`tools/difftest/check-grpc-interceptor-wiring.py`](../../../../tools/difftest/check-grpc-interceptor-wiring.py)
+同一个晚上新增的 [`tools/difftest/check-grpc-interceptor-wiring.py`](../../../tools/difftest/check-grpc-interceptor-wiring.py)
 逐个 rpc 进程断言「① `@Import(RpcServerInterceptorFactory)` 与 ② `@Bean GrpcServerConfigurer` + `.intercept(` **同时具备**」，
 当前 **`EXIT=1`，精确指向 `hot-rpc`**。
 
