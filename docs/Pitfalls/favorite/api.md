@@ -121,7 +121,7 @@ RAG 侧原本**只**套了 ctx 预算（3s）⇒ 下游挂死时一路顶到 HTT
 
 ### 现象
 
-favorite-api 的 76 例测试**全部绿**，但它们**一次都没跑过** servlet filter 链
+favorite-api 第三轮之前的 **76 例**测试**全部绿**，但它们**一次都没跑过** servlet filter 链
 （`@SpringBootTest(webEnvironment = MOCK)` ⇒ MockMvc ⇒ 不经过 `Filter`）。
 
 ⇒ 本域的服务端保护层（MaxConns / Breaker / CpuShedding / MaxBytes 四层）
@@ -134,11 +134,16 @@ favorite-api 的 76 例测试**全部绿**，但它们**一次都没跑过** ser
 
 ### 怎么不再踩
 
-⚠️ **本轮没有做真容器验证**（已在 `docs/DRIFT/favorite/api.md` §4 明确标为「未验」）。
-要落实需要：真 Tomcat 启动（`webEnvironment = RANDOM_PORT`），
-然后对**每层**各打一个超限请求，断言响应形态与 Go 侧一致。
+✅ **本轮第三轮已补上真容器验证** ⇒ 新增 `FavoriteApiRealTomcatGateTest`
+（`webEnvironment = RANDOM_PORT` ⇒ **真 Tomcat**，8 例）：
+MaxBytes → **413 + 空 body + 无 Content-Type**、413 **压过** 401、未超限仍 401、
+容器三旋钮各自生效、容器层参数上限的出口形态。
 ⚠️ 参考仓内现成工具：`tools/difftest/check-plaintext400-headers.sh`
 （它就是为了「MockMvc 测不到真 Tomcat」才存在的）。
+
+⇒ **纪律**：凡是「保护层 / 拦截器 / 过滤器」类机制，**MockMvc 那份不算数**；
+要判「机制生效」必须有**真容器**的运行证据（§3.3）。
+⚠️ 而 MockMvc 那份**仍然要留着** —— 它快、且能覆盖「响应体形状」这类不需要真容器的东西。
 
 ---
 
@@ -162,3 +167,55 @@ RAG 侧的出参用「getter 返回 `String`」实现 ✅；
 ⚠️ 另一条同源陷阱：**出参里 `,string` 只加在部分字段上** ——
 `folderId`/`favoriteId` 是字符串，而 `createdAt`/`updatedAt` 是**数字**
 ⇒ 混掉任何一个都会改 L1 出参。
+
+---
+
+## PIT-FAV-API-006 · 🕳️ **容器的「参数过多」异常不在 `IllegalArgumentException` 家族 ⇒ 直接绕过 handler**
+
+### 现象
+
+本轮修的 D4（`docs/DRIFT/favorite/api.md` §2）**在动手前是这样表现的**：
+
+| | 期望（Go） | 实得（RAG 修复前） |
+|---|---|---|
+| 状态码 | **200** | **500** |
+| body | `{code:5003, msg:"参数错误", data:null}` | `{code:5001, msg:"系统内部错误", data:null}` |
+
+⇒ 看着像「业务码映射错了」，实际是**异常根本没进业务异常处理器**。
+
+### 为什么会踩
+
+Spring 的 `@ExceptionHandler(IllegalArgumentException.class)` **只按类型匹配**。
+而 Tomcat 抛的是 `org.apache.tomcat.util.http.InvalidParameterException`
+—— ⚠️ **它不是 `IllegalArgumentException` 的子类**（也不属于任何常见的 `IllegalArgument*` 家族）
+⇒ 直接穿过 `handleIllegalArgument`，落到 `handleAny(Exception)` 兜底 ⇒ **500**。
+
+⇒ 三个叠加因素让它极易漏：
+1. **触发条件很窄**（要真的把参数堆到 2048 个）⇒ 常规功能测试永远碰不到；
+2. **失败形态长得像「兜底」**（500 + 5001）⇒ 很容易被当成「这个域就是有 500 兜底」；
+3. **MockMvc 碰不到**（见 PIT-FAV-API-004）⇒ 当时的 76 例绿测试全都不覆盖。
+
+### 怎么不再踩
+
+1. **凡是要复用「参数非法 ⇒ 200 + 5003」这条出口，就得确认异常类型能进那个 handler** ——
+   本域的做法是在**调用点**把容器异常归一，而不是去改 handler 的匹配面：
+   ```java
+   private static Map<String, String[]> parameterMap(HttpServletRequest request) {
+       try {
+           return request.getParameterMap();
+       } catch (RuntimeException e) {
+           throw new IllegalArgumentException("too many request parameters: " + e.getMessage(), e);
+       }
+   }
+   ```
+   ⚠️ catch `RuntimeException` 而**不是** Tomcat 的具体类：避免把编译期依赖绑到
+   `org.apache.tomcat.util.http`（非公开 API 面，Boot 换版本就可能挪位置）。
+2. **兜底 handler（`handleAny`）一旦真的被触发，就是信号** —— 它在 favorite 的 Go 侧**根本不可达**
+   （Go 的 7 个 handler 全部 `httpx.OkJsonCtx` ⇒ HTTP 恒 200）⇒ RAG 侧出现 500 = 有东西没被接住。
+3. **回归网要挑「容器层的上限」而不是「应用层的上限」** ——
+   应用层上限（2048 个**非空**值）会**被容器先拒**（实测同值 ⇒ 两层都触发，测不出归一是否生效）；
+   真正只走容器层的形状是「**总「值」数超限、但非空值很少**」（本域用 `folderId=7` + 2048 个空值）。
+   ⚠️ 本轮踩过这个坑：最初用「2049 个非空值」当回归用例，变异时**两条一起红**，
+   一度以为是自己没写对。
+
+---

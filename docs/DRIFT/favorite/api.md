@@ -15,9 +15,9 @@
 | 项 | 值 |
 |---|---|
 | 落地形态 | 31 个 main 文件 / 2,920 行 / 13 个 DTO / 7 个 Service / 1 个 Controller |
-| 测试 | 2 个测试类 / **69 例全绿**（33 输入契约 + 36 MVC 管线）→ 本轮 **+2 个测试类 / +6 例** |
-| 本轮发现 | **1 条 L2 语义漂移（已修）** + **2 条 javadoc 假断言（已修）** + **1 条待签字偏离** |
-| 未决 | **1 条待签字**（401 body 形态）+ **1 条 OBS**（500 兜底 body） |
+| 测试 | **5 个测试类 / 84 例全绿**（33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + **8 真 Tomcat 门禁**）→ 第三轮 **+1 个测试类 / +8 例** |
+| 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条待签字偏离** |
+| 未决 | **1 条待签字**（401 body 形态）+ **1 条 OBS**（500 兜底 body）+ **1 条跨域待拍板**（容器层参数上限口径） |
 | 本台账范围 | **仅 `favorite-api`**。`favorite-common` / `favorite-rpc` / `favorite-proto` 见同目录另三份台账 |
 
 ---
@@ -102,11 +102,12 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 
 | 项 | Go | RAG | 结论 |
 |---|---|---|---|
-| `relaxed-query-chars` | Go 的 `net/http` 不校验 query 里的 `[` `]` | `application.yml:65` | ✅ |
-| `max-parameter-count` | `httpx/util.go:15` `maxFormParamCount=2048` | `:66` | ✅ |
-| `max-http-request-header-size` | `DefaultMaxHeaderBytes(1<<20) + 4096` = **1028KB** | `:67` | ✅ |
+| `relaxed-query-chars` | Go 的 `net/http` 不校验 query 里的 `[` `]` | `application.yml:65` | ✅ **运行证据**（真 Tomcat 门禁） |
+| `max-parameter-count`（**容器层**） | Go 的 `net/http` **不限参数个数**；Go 的真实上限是 `net/url` 的 `defaultMaxParams = 10000`（Go 1.25.11 `src/net/url/url.go:1001`） | `:66` = **2048** | ⚠️ **值与口径都不同**（Tomcat 数**总「值」数含空值** / Go 数**非空值数**）⇒ 残余窗口见 §3 |
+| `maxFormParamCount`（**应用层**） | `httpx/util.go:15` = **2048**，数**非空值**、计数器 `n` **跨所有 key 共享** | `FavoriteApiSupport#goFormFirstValue`（Go 逐字复刻） | ✅ 源码级一致；⚠️ **在真 Tomcat 栈上不可达**（容器在第 2049 个就先拒了）⇒ 见 §2-D4 |
+| `max-http-request-header-size` | `DefaultMaxHeaderBytes(1<<20) + 4096` = **1028KB** | `:67` | ✅ **运行证据**（真 Tomcat 门禁） |
 | HTTP 超时 | `rest/config.go:55` `Timeout default=3000` | `observability.http-timeout: 3s` | ✅ |
-| **MaxConns / MaxBytes / CPU 降载 / 熔断（服务端）** | `rest/config.go:52-56` + `zrpc/internal/config.go:14-15` | `GoStyleProtectionProperties` 默认值 = Go 默认值 | ✅ **运行证据**（`FavoriteApiProtectionWiringTest`） |
+| **MaxConns / MaxBytes / CPU 降载 / 熔断（服务端）** | `rest/config.go:52-56` + `zrpc/internal/config.go:14-15` | `GoStyleProtectionProperties` 默认值 = Go 默认值 | ✅ **运行证据**（`FavoriteApiProtectionWiringTest` + 真 Tomcat 门禁） |
 | **client 熔断** | `zrpc/internal/client.go:112-113` | `GoStyleGrpcClientBreakerInterceptor` | ✅ **运行证据**（本轮修，见 §2-D3） |
 
 ---
@@ -147,6 +148,45 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 
 > ⚠️ **「已接入」不等于「已验证」**：本轮正是用**运行证据**（而不是读注解）把它从「假断言」变成「已验证」。
 
+### D4 · 🔴 **L1 语义漂移**：容器的「参数过多」异常绕过异常处理器 ⇒ HTTP 500 + 5001（Go 是 200 + 5003）
+
+| | 内容 |
+|---|---|
+| **Go 行为** | `httpx.Parse` → `httpx.GetFormValues`（`rest/httpx/util.go:37-53`）在非空值超过 `maxFormParamCount` 时返回 `fmt.Errorf("too many form values, …")` ⇒ `httpx.Parse` 失败 ⇒ handler 走 **`httpx.OkJsonCtx`**（`get_favorites_by_folder_handler.go:18-26`）⇒ **HTTP 200 + `{code:5003, msg:"参数错误", data:null}`**（码值 `errmsg.go:16`、文案 `errmsg.go:51`） |
+| **RAG 修复前** | Tomcat 的 `server.tomcat.max-parameter-count=2048` **先**命中 ⇒ 抛 `org.apache.tomcat.util.http.InvalidParameterException` ⇒ ⚠️ **它不是 `IllegalArgumentException` 的子类** ⇒ **绕过** `GlobalExceptionHandler#handleIllegalArgument` ⇒ 落到 `handleAny` 兜底 ⇒ **HTTP 500 + `{code:5001, msg:"系统内部错误"}`** |
+| **可观察差异** | **HTTP 状态码不同**（Go 200 / RAG **500**）+ **业务码不同**（5003 / 5001）⇒ **L1 级**。且 Go 的 api 层**根本不存在 500 出口**（7 个 handler 全部 `OkJsonCtx`）⇒ RAG 这个 500 是**本域独有**的形态 |
+| **修复** | `FavoriteApiSupport#parameterMap` —— **只包住 `request.getParameterMap()` 这一行**，把容器层的 `RuntimeException` 转成 `IllegalArgumentException` ⇒ 复用既有 `handleIllegalArgument` ⇒ 对外统一 **HTTP 200 + 5003**。⚠️ 刻意 catch `RuntimeException` 而非 Tomcat 的类：避免把编译期依赖绑到 `org.apache.tomcat.util.http`（非公开 API 面） |
+| **回归网** | `FavoriteApiRealTomcatGateTest#containerParameterLimitIsSurfacedAsGoParseError`（真 Tomcat `RANDOM_PORT` + 真容器上限触发） |
+| **变异证据** | 去掉 `parameterMap` 的包装 ⇒ **2 例转红**（实测 HTTP 500 + `{code:5001}`）⇒ 该测试**不是假绿** |
+
+> ⚠️ **附带发现（写在这里，因为它改写了对 §1.6 的读法）**：
+> 变异时**「2049 个非空值」那条也一起红了** ⇒ 说明在真 Tomcat 栈里，
+> **容器层永远先于应用层拒** ⇒ `FavoriteApiSupport#goFormFirstValue` 里那道
+> Go 逐字复刻的 2048 判据**在真栈上不可达**（与 hot 域 `check-tomcat-limits.py`
+> 脚本头部写的「RAG 自己实现的 2048 判据在 GET query 上不可达」同源）。
+> ⇒ 它只有在容器层上限被放宽时才生效 ⇒ 见 §3 的跨域条目。
+
+### 2.1 🧪 变异验证表（`FavoriteApiRealTomcatGateTest` 8 例 · 防假绿）
+
+> 目的：证明这 8 条断言**不是假绿** —— 每一行都是「把实现/配置改坏 ⇒ 对应断言必须转红」（§3.3）。
+> ⚠️ 全部变异都在本地临时施加、**立即还原**（已用 `git status` 复核**零残留**）。
+
+| # | 变异 | 预期转红 | 实测 |
+|---|---|---|---|
+| **MUT-A** | 去掉 `parameterMap` 的异常归一（回到裸 `request.getParameterMap()`） | `containerParameterLimitIsSurfacedAsGoParseError` + `nonEmptyFormValueCountOverLimitIsRejected` | ✅ **2 例转红** —— 实测 HTTP **500** + `{code:5001}`（即修复前的形态） |
+| **MUT-B** | `rag.protection.max-bytes` 1024 → 8192 | `oversizedBodyYieldsBare413` + `oversizedBodyBeatsAuth` | ✅ **2 例转红**（413 ⇒ 401） |
+| **MUT-C** | `server.tomcat.max-parameter-count` 2048 → 1000 | `nonEmptyFormValueCountAtLimitIsPassedThrough` | ✅ **1 例转红**（2048 个值被容器提前拒 ⇒ 5003） |
+| **MUT-D** | `server.max-http-request-header-size` 1028KB → 8KB | `longRequestLineIsAccepted` + 3 条带长 query 的 | ✅ **4 例转红**（Tomcat 400 HTML 错误页） |
+| **MUT-E** | `server.tomcat.relaxed-query-chars` → 错值 | `bracketNotationIsAcceptedLikeGo` | ✅ **1 例转红**（Tomcat 400 HTML 错误页） |
+
+> ⚠️ **MUT-E 顺带撞出一条绑定细节**（值得单独记）：用**测试属性**把
+> `server.tomcat.relaxed-query-chars` 覆盖成**空串**时，**断言不转红** ——
+> ⇒ 空串在 Boot 的宽松绑定下**没有绑成空列表**，容器仍用 yml 里的 `["[", "]"]`
+> ⇒ 换成**错值**才测得出来。
+> ⇒ **「配了」与「被采用了」是两件事**（§3.3 的老教训，此处又撞一次）：
+> 静态守门脚本（`check-tomcat-limits.py`）查的是**配置文本**，它**证明不了**容器采用了它；
+> 只有真 Tomcat 的行为断言 + 变异转红才能。
+
 ---
 
 ## 3. ⚠️ 未决 / 待签字
@@ -170,6 +210,20 @@ Go 的 `RecoverHandler` 写 **500 + text/plain**（`http.Error`）；RAG 的 `ha
 **500 + JSON envelope**（`{code:5001,…}`）。
 ⇒ favorite 的 Go logic **不会 panic** ⇒ 该分支实际不可达 ⇒ 记 **OBS**，不构成行为漂移。
 
+### 🔁 跨域待拍板 · 容器层参数上限的**口径差**（残余窗口，收口在 `global`）
+
+| | 内容 |
+|---|---|
+| **事实（2026-10-25 真 Tomcat 实测，4 组判别用例）** | Tomcat 的 `maxParameterCount` 数的是**总参数「值」个数（含空值）**；Go 的 `maxFormParamCount` 数的是**非空值个数**（`httpx/util.go:44-45` 的 `if len(v) == 0 { continue }` 空值不计数），且计数器 `n` **跨所有 key 共享** |
+| **判别用例（每组都带一个合法非空 `folderId` ⇒ 应用层永不拒、字段必在场 ⇒ 结果只可能来自 Tomcat）** | 总「值」=2048（名字 1，非空 1）⇒ **放行**；总「值」=2049（名字 1，非空 1）⇒ **拒**；总「值」=2049（名字 2，非空 1）⇒ **拒**；总「值」=3000（名字 3000，非空 1）⇒ **拒** ⇒ 判定「**数值不数名**」 |
+| **残余窗口（精确）** | **总「值」数 2049~10000 且非空值数 ≤2048** ⇒ Go **放行**（200 + 业务结果）/ RAG **拒**（200 + 5003） |
+| **归属** | 🔴 **跨域**，与 hot 域的 `DRIFT-HOTAPI-030` 是**同一格**（hot 域记的正是「总参数数 2049~10000 且非空值 ≤2048」）⇒ **不在 favorite 域单方面改**：改 `server.tomcat.max-parameter-count` 会让**全仓**守门脚本 `tools/difftest/check-tomcat-limits.py` 变红 ⇒ 收口在 `global` |
+| **给 `global` 的一条具体输入（本轮新增）** | Go 侧 `net/url` 的**真实**上限是 `defaultMaxParams = 10000`（Go 1.25.11 `src/net/url/url.go:1001`，`urlParamsWithinMax` 判 `params <= defaultMaxParams`）⇒ **对已经逐字复刻了应用层判据的 api 模块**（favorite 有：`FavoriteApiSupport#goFormFirstValue`），把容器层上限配成 **10000** 就能让这条轴**完全 Go 等价**（总「值」数 >10000 时两侧都是 `net/url` 解析失败 ⇒ 5003）；而对**没有**应用层判据的模块，**2048 才是对的**（那 7 个模块的 2048 判据只存在于容器层）⇒ ⇒ **旋钮值应按「有没有应用层判据」分档，而不是全仓一刀切 2048** ⚠️ **这是输入，不是结论** —— 是否采纳由 `global` 拍板 |
+
+> ⚠️ 本域**没有**为此新建 `DRIFT-FAV-API-xxx` 条目：同一格已由 hot 域登记为
+> `DRIFT-HOTAPI-030`（AGENTS.md §3.5 把「Tomcat 三旋钮」列为 `global/cross-domain` 的
+> 跨组件不变量）⇒ **重复登记会造成两条台账各说一半、合并时对不上**。
+
 ---
 
 ## 4. 证据边界（明确未验的部分）
@@ -177,7 +231,9 @@ Go 的 `RecoverHandler` 写 **500 + text/plain**（`http.Error`）；RAG 的 `ha
 | 项 | 状态 | 说明 |
 |---|---|---|
 | 双侧活体对拍（真 Go favorite-api vs RAG） | 🔴 **未做** | Go 侧依赖 `etcd` + favorite-rpc + Redis，本轮起不来 ⇒ 全部结论是「源码级 + RAG 侧运行证据」 |
-| **servlet filter 链真生效** | 🔴 **未验** | `FavoriteApiProtectionWiringTest` 断言的是「Bean 存在 + `@Order` 一致」，**不是**「真 Tomcat 的 chain 里跑了它」—— MockMvc **不走** filter chain（§3.3 记录过的坑，`check-plaintext400-headers.sh` 就是为它而生的）⇒ 需真容器验证 |
+| **servlet filter 链真生效** | ✅ **已验**（2026-10-25 第三轮） | `FavoriteApiRealTomcatGateTest`（**8 例**，`webEnvironment = RANDOM_PORT` ⇒ **真 Tomcat**）：MaxBytes → **413 + 空 body + 无 Content-Type**、413 **压过** 401、未超限仍 401、三旋钮各自生效 ⇒ **真容器的 chain 里真的跑了它**（不再只是「Bean 存在 + `@Order` 一致」） |
+| **容器层参数上限的精确口径** | ✅ **已验** | 4 组判别用例（真 Tomcat）⇒ Tomcat 数**总「值」数（含空值）**、Go 数**非空值数** ⇒ 残余窗口见 §3 |
+| **Go 侧「非空值 >2048」时的逐字节响应** | 🟡 **源码级** | Go 侧 handler 的 `httpx.OkJsonCtx` 形状已逐字核对（`get_favorites_by_folder_handler.go:18-26`）+ 码值/文案已核（`errmsg.go:16,51`）⇒ 期望值 **HTTP 200 + `{code:5003, msg:"参数错误", data:null}`**；但**未跑起 Go 侧 favorite-api** ⇒ 无双侧活体对拍 |
 | 真实 gRPC 链路上的 description 保真 | 🔴 **未验** | common 侧探针验的是「构造出的 Status 对象」，不是「真 channel 传输后的字节」 |
 | Go 侧 `httpx.Parse` 的入参解析矩阵 | ✅ **已验** | RAG 侧的 DTO 注释记录了 go-zero v1.10.2 真源探针的实测矩阵（缺席/null/类型不符/空串/重复参数/key 大小写），并由 `FavoriteApiInputContractTest`（33 例）守住 |
 | `goFormFirstValue` 的两段语义 | ✅ **已验** | 「先滤空值、再取首值」逐条复刻（`FavoriteApiSupport:327-350`），重复参数 `?folderId=123&folderId=456` ⇒ Go 123 / Spring 逗号拼接会失败 —— 两者已刻意分开 |
@@ -194,12 +250,15 @@ cd /Users/pr/Documents/java&golang/RAG.worktrees/favorite   # align/favorite 工
 mvn -o -pl service/favorite/favorite-proto,service/favorite/favorite-common,\
 service/favorite/favorite-rpc,service/favorite/favorite-api -am install
 
-# 全量测试（favorite-api 75 例：33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时）
+# 全量测试（favorite-api 84 例：33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + 8 真 Tomcat 门禁）
 mvn -o -pl service/favorite/favorite-api test
 
 # 单类
 mvn -o -pl service/favorite/favorite-api test -Dtest='FavoriteApiProtectionWiringTest'
 mvn -o -pl service/favorite/favorite-api test -Dtest='FavoriteRpcClientTimeoutTest'
+mvn -o -pl service/favorite/favorite-api test -Dtest='FavoriteApiRealTomcatGateTest'   # 真 Tomcat
 ```
 
-> ⚠️ `FavoriteApiMvcPipelineTest` 走的是 **MockMvc** ⇒ **不覆盖 servlet filter 链**（见 §4）。
+> ⚠️ `FavoriteApiMvcPipelineTest` 走的是 **MockMvc** ⇒ **不覆盖 servlet filter 链**。
+> ⇒ filter 链与容器三旋钮由 `FavoriteApiRealTomcatGateTest`（`RANDOM_PORT`）负责，
+> **两者缺一不可**（§3.3：机制要验「生效」，不只是「配了」）。

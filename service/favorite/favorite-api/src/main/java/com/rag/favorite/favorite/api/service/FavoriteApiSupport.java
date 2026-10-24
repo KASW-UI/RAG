@@ -365,7 +365,7 @@ public class FavoriteApiSupport {
     public static String goFormFirstValue(HttpServletRequest request, String name) {
         int seen = 0;
         String selected = null;
-        for (Map.Entry<String, String[]> entry : request.getParameterMap().entrySet()) {
+        for (Map.Entry<String, String[]> entry : parameterMap(request).entrySet()) {
             boolean target = entry.getKey().equals(name);
             for (String value : entry.getValue()) {
                 // Go: `if len(v) == 0 { continue }` —— 空值在计数与取值之前就被丢掉。
@@ -385,6 +385,50 @@ public class FavoriteApiSupport {
             }
         }
         return selected;
+    }
+
+    /**
+     * 取 {@code request.getParameterMap()}，并把 <b>Tomcat 的「参数过多」异常</b>转成
+     * {@link IllegalArgumentException}。
+     *
+     * <p><b>🔴 为什么必须转</b>（2026-10-25 真 Tomcat 实测发现的漂移）：
+     * <ul>
+     *   <li>Tomcat 在请求的参数<b>条目数</b>超过 {@code server.tomcat.max-parameter-count}
+     *       时，会在 {@code getParameterMap()} 里抛
+     *       {@code org.apache.tomcat.util.http.InvalidParameterException}
+     *       （它<b>不是</b> {@code IllegalArgumentException} 的子类）。</li>
+     *   <li>⇒ 它<b>绕过了</b> {@code GlobalExceptionHandler#handleIllegalArgument}
+     *       ⇒ 落到 {@code handleAny} 兜底 ⇒ <b>HTTP 500 + {code:5001}</b>。</li>
+     *   <li>而 Go 侧的对应场景是 {@code httpx.GetFormValues} 超过
+     *       {@code maxFormParamCount=2048} ⇒ {@code httpx.Parse} 失败
+     *       ⇒ handler 落 <b>HTTP 200 + {code:5003, msg:"参数错误"}</b>。</li>
+     * </ul>
+     * ⇒ 两侧在<b>同一个输入</b>下是<b>不同状态码 + 不同业务码</b>（500/5001 vs 200/5003）——
+     * 这是可观察的 L1 差异。
+     *
+     * <p><b>⇒ 本方法把「容器层的参数上限」与「应用层的参数上限」统一收敛到 Go 的出口</b>：
+     * 无论是谁先发现「参数太多」，对外都只呈现 Go 的那一种形态（<b>200 + 5003</b>）。
+     *
+     * <p><b>⚠️ 计数口径仍与 Go 差 1</b>（<b>未修，见 DRIFT-FAV-API-001</b>）：
+     * Tomcat 数的是<b>参数条目数</b>（key + value 合计），Go 的 {@code GetFormValues} 数的是
+     * <b>非空值个数</b> ⇒ 同名 2048 个值时，Tomcat 拒、Go 放行。
+     * ⇒ 修它要动 {@code server.tomcat.max-parameter-count}，而该值由<b>全仓</b>守门脚本
+     * {@code tools/difftest/check-tomcat-limits.py} 统一期望为 2048 ⇒ 需跨域拍板，
+     * <b>不</b>在 favorite 域单方面改。
+     *
+     * <p><b>⚠️ 为什么 catch 的是 {@link RuntimeException} 而不是 Tomcat 的类</b>：
+     * 本方法<b>只包住 {@code getParameterMap()} 这一行</b>（范围极窄），
+     * 且不把 favorite-api 的编译期依赖绑到 Tomcat 的内部类上
+     * （{@code org.apache.tomcat.util.http} 不是 Tomcat 的公开 API 面）。
+     */
+    private static Map<String, String[]> parameterMap(HttpServletRequest request) {
+        try {
+            return request.getParameterMap();
+        } catch (RuntimeException e) {
+            // Tomcat 的 InvalidParameterException（参数条目数超过 max-parameter-count）在此抛出。
+            // ⚠️ 不把原异常吞掉：挂到 cause 上，日志里仍能看到「是哪个容器限制触发的」。
+            throw new IllegalArgumentException("too many request parameters: " + e.getMessage(), e);
+        }
     }
 
     /**
