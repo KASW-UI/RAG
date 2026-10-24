@@ -263,7 +263,7 @@ public class HotArticleHydrator {
             // 无 HTTP 超时预算 ⇒ 对应 Go「ctx 上没有 deadline」⇒ 只剩 zrpc 的 2s
             return -1L;
         }
-        long remainNanos = deadlineNanos - System.nanoTime();
+        long remainNanos = deadlineNanos;
         if (remainNanos <= 0L) {
             // 预算已耗尽 ⇒ Go 侧 ctx 已到期，下游调用**立即失败**
             return 0L;
