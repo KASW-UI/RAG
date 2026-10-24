@@ -15,13 +15,16 @@
 >   —— 手工搭 `SqlSessionTemplate`（`SpringManagedTransactionFactory`）⇒ mapper 的 SQL 与
 >   `CommentFactDeliveryService` 的事务跑在**同一条连接**上，与生产同构
 > - ✅ **变异测试**（**2026-10-24 修复轮**：10 条变异**全部**让对应守门网变红 ⇒「测试不是假绿」已验）
-> - 🔴 **无双侧活体对拍** —— Go 侧依赖 `etcd` + Kafka + 真 PG，起不来；RAG 侧依赖 Nacos + Kafka + Redis
+> - ✅ **双侧活体对拍**（**2026-10-24 对拍轮**：Go 真源 + RAG **四进程同时在跑**，17 步请求矩阵逐字段差分 ⇒ **§4.6**）
+> - 🔴 ~~无双侧活体对拍~~ —— 已于 2026-10-24 补上（Go 侧 `etcd` 块删除 + 下游 RPC 指向死端点；RAG 侧 Nacos 注册关闭）
 >
 > ⇒ 本台账里的 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环。
 >
 > 🟢 **2026-10-24 修复轮**：§2 的 **7 条 MISMATCH 全部已修**，每条都配了**真 PG 守门网**并做了**变异验证**。
 > 本轮同时修掉**一条本轮自己引入的偏差**（MISMATCH-02 的原始 `sendErr` 丢失）与**一条假守卫**
 > （MISMATCH-06 的守门网曾「因错误原因而绿」，见该条下的「⚠️ 假守卫教训」）。
+>
+> 🟢 **2026-10-24 对拍轮**：起真源才发现的 **4 个真实缺陷**（此前单测全绿也测不出来）已就地修掉 —— 见 §4.6.2。
 
 ---
 
@@ -37,6 +40,7 @@
 | 构建 | `mvn -o -q -pl service/comment/comment-rpc -am -DskipTests install` ⇒ **`EXIT=0`**（本轮实测） |
 | 本台账范围 | **仅 `comment-rpc`**。`comment-api` / `comment-common` 各自独立台账 |
 | **修复轮** | **2026-10-24**：§2 的 **7 条 MISMATCH 全部已修**。守门网 = `CommentRpcGoSemanticsGateTest`（**11 例，真 PG**）；本域测试 46 ⇒ **57 例 / 0 failures / 0 skipped**；**10 条变异全部变红** |
+| **对拍轮** | **2026-10-24**：**双侧活体对拍**已跑通（Go 真源 + RAG 四进程同跑，17 步矩阵）。结果 **15 一致 / 6 差异**，6 条差异**全部落在 2 个步骤**上，且**两侧根因都在 Go 侧**（Go 的 SQL 必报错 + Go 缺 `report_record` 表）⇒ **不是 RAG 的漂移**，改为**待签字偏离候选**。对拍过程另发现并修掉 **4 个真实缺陷**（§4.6.2） |
 
 > 🟥 **最严重的 3 条（MISMATCH-01/02/03）都在「事实投递链路」上**，
 > 且**都是 Go 侧的显式 `tx.Commit()` 在 Java 侧被 Spring 的回滚规则吃掉**。
@@ -250,7 +254,89 @@
 
 ---
 
-## 5. 未决 / 待办
+## 4.6 🟢 双侧活体对拍（2026-10-24）—— 证据强度的最后一档
+
+> **性质**：Go 真源与 RAG **同时起四个进程**、跑**同一套请求矩阵**、**逐字段差分**。
+> 这是 AGENTS.md §3.3「两侧同时跑的探针」的**组件级**形态 —— 前面所有 ✅ 都只是「在该证据强度下一致」，
+> **只有本节是「两侧同时在跑时确实一致」**。
+
+### 4.6.1 基建与隔离（隔离不对 ⇒ 差异全是串味）
+
+| 要素 | Go 侧 | RAG 侧 | 为什么必须这么隔离 |
+|---|---|---|---|
+| rpc 端口 | `19001`（`go build` 产物 + 改过的 yaml） | `59001`（fat jar） | 端口不冲突 |
+| api 端口 | `18888` | `58888` | 同上 |
+| 数据库 | `go_comment` | `rag_comment`（同一 PG 容器 `127.0.0.1:55440`） | 两侧各自的库 |
+| Kafka topic | `comment-audit-topic-go` | `comment-audit-topic-rag` | ⚠️ 共用 topic ⇒ **互相消费对方的事实** ⇒ 全是假差异 |
+| Kafka 消费组 | `comment-audit-group-go` | `comment-audit-group-rag` | 同上 |
+| Redis 库 | **db0** | **db1**（`--spring.data.redis.database=1`） | ⚠️ 两侧 Redis key 格式**逐字一致**（`comment:subject:%s` 等）⇒ 不分库必然串味 |
+| 下游 `article-rpc` / `message-rpc` | `127.0.0.1:19999`（**死端点**） | `127.0.0.1:19999`（**同一个死端点**） | 两侧都超时 ⇒ **超时路径可比**；指向不同端点会造成假差异 |
+| Nacos | — | `SPRING_CLOUD_NACOS_DISCOVERY_REGISTER_ENABLED=false` | 本机无 Nacos |
+| `etcd` | yaml 里**整块删除** | — | Go 侧 zrpc 需要，但本项目只用 `static` 端点 |
+
+⚠️ **Go 侧两处 harness 侧的坑（不是产品缺陷）**：
+
+1. **`Offset: last` 会跳过消息**：kafka-go 的 `LastOffset` 把起始位点定到**消息之后** ⇒ 消费组无成员时消息被跳过。
+   ⇒ harness 改用 `Offset: first` + **每轮删 topic**。
+2. **Go 侧 `consumers: 8` 但只发 1 条**：`kq` 的 `startConsumers` 用 `Processors`、`startProducers` 用 `Consumers` ⇒ 8 个消费者会**抢同一条**消息（只有一条时无所谓）。
+
+### 4.6.2 对拍抓出来的 **4 个真实缺陷**（单测全绿时测不出来）
+
+| # | 缺陷 | 症状 | 根因 | 修法 | 守门网 |
+|---|---|---|---|---|---|
+| **P-1** | **`comment-rpc` 进程根本起不来** | `APPLICATION FAILED TO START: Unable to start web server` | 本模块 pom 的 `jakarta.servlet:jakarta.servlet-api`（provided）被 Spring Boot repackage 打进 `BOOT-INF/lib` ⇒ `WebApplicationType.deduceFromClasspath()` 判成 **SERVLET** ⇒ 找不到 `ServletWebServerFactory`。（`message-rpc`/`like-rpc` 无此依赖故不受影响） | `application.yml` 加 `spring.main.web-application-type: none` | **新增** `CommentRpcWebApplicationTypeGateTest`（2 例：断言「危险依赖确实在 classpath 上」+「缓解配置确实生效」） |
+| **P-2** | **缺 MyBatis-Plus 自动配置排序桥** ⇒ `Property 'sqlSessionFactory' or 'sqlSessionTemplate' are required` | 上下文起不来 | `MybatisPlusAutoConfiguration`（3.5.17）的 `@AutoConfigureAfter` 指向 **Boot 3** 的 `org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration`；Boot 4 挪到 `org.springframework.boot.jdbc.autoconfigure...` ⇒ **排序引用悬空** ⇒ MP 在 DataSource 之前求值 ⇒ `@ConditionalOnSingleCandidate(DataSource)` 失败 | 照抄同仓 `like-rpc` 的 `MybatisPlusOrderingBridgeAutoConfiguration` + `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | 同上（Boot 4 下 8 个用 mybatis-plus 的 rpc 模块里**只有 comment-rpc 漏了**） |
+| **P-3** | **`comment-api` 启动即 `NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder`** | api 进程起不来 | ⚠️ **是本仓 `f628fb1` 自己引入的**：把 `grpc-inprocess` 声明成 `<scope>test</scope>`，按 Maven「最近者优先」**顶掉了** devh 传递进来的 **compile 作用域**那份 ⇒ 运行期缺失 | **删掉该声明**（devh 的传递依赖同时满足测试与运行期）+ 在 pom 里写明原因 | 真起 api 进程即验 |
+| **P-4** | **`SubjectMapper.decrementCounts` 的 `<if>` 拼在 WHERE 之后** ⇒ `syntax error at or near ","` ⇒ 删根评论时**整个事务回滚** ⇒ 对外报 5002「DB更新失败」 | 删根评论 100% 失败 | 动态 SQL 的条件片段位置写错（`<set>` 自动去尾逗号，`applyInteractionDeltas` 同款写法） | 改用 `<set>` | **新增** `CommentTransactionalSqlGateTest`（**10 例，真 PG + 真 MyBatis**，覆盖全部带 `<if>`/`<set>` 的 mapper 方法）⇒ **10/10 绿**；🧬 **变异实测**：把 `<if>` 拼回 WHERE 之后 ⇒ **1/10 变红** ⇒ 守门网有效 |
+
+> 🔴 **P-4 是本轮唯一的「单测零覆盖」型缺陷**：mapper 的动态 SQL 在**单测里根本没被拼过**（单测 mock 掉了数据层），
+> 只有**真 PG + 真 MyBatis** 才会撞上语法错。
+> ⇒ 与 AGENTS.md §3.3「纯 Mockito mock 数据层的单测不算数」完全对上。
+
+### 4.6.3 对拍结果：**17 步 / 15 一致 / 6 差异**
+
+**6 条差异全部落在 2 个步骤上，且两侧根因都在 Go 侧** ⇒ **不是 RAG 的漂移**，转 §4.6.4。
+
+| 步骤 | Go 侧 | RAG 侧 | 归因 |
+|---|---|---|---|
+| **T07 `manage`（`action_type=2` = `MANAGE_UNPIN`）** | **5002**「DB更新失败」 | **200** `{success:true}` | 🔴 **Go 侧的 SQL 必报错**：`comment.go:165` `gorm.Expr("attribute & ~?", val)` —— `val` 是 `uint` ⇒ PG 收到**未定型参数** ⇒ `operator is not unique: ~ unknown (SQLSTATE 42725)`。已在 PG 上直接复现（`PREPARE t(unknown) AS SELECT 4::bigint & ~$1` ⇒ 同一错误）。⇒ **RAG 侧实现的是 Go 的*意图***（`attribute & ~#{mask}`，mask 是 **有类型**的 `long` ⇒ PG 解析为 `~ bigint` ⇒ 成功） |
+| **T08 `report`** | **5004**「DB插入失败」 | **200** `{success:true}` | 🔴 **Go 侧根本没有 `report_record` 表**：`db.go:15` 的 `AutoMigrate` 列表只有 6 个模型，**不含 `ReportRecord`**；3 个手写迁移脚本也不建它 ⇒ Go 侧**全新部署上 `ReportComment` 必然 5004**。⇒ 已在 `SD-2026-10-24-CAND-02` 登记（`V5` 脚本头部自登记过），本轮**由静态推断升级为活体实证** |
+
+> ⚠️ **同款缺陷在 Go 的点赞路径上潜伏**：`comment.go:571` 是**同一个** `attribute & ~?` 写法
+> （仅当 `userId == ownerId` 且取消赞时触发）⇒ **Go 侧「作者取消自己的赞」也会 5002**。
+> 本轮矩阵用的是 `user 1001 ≠ owner 2002` ⇒ 该分支**未被触发** ⇒ 两侧一致。
+> ⇒ **这是 Go 侧的潜伏缺陷，不是 RAG 的漂移**（RAG 侧的 `applyInteractionDeltas` 用**有类型**的 `long` mask ⇒ 正常）。
+
+### 4.6.4 对拍另确认的**一致**（此前只有静态证据）
+
+| 判定点 | 结果 |
+|---|---|
+| 7 个 HTTP 路由 + 7 个 RPC 的**响应体逐字段一致** | ✅ 15/17 步全字段一致（含 `subject.total_count` / `root_count` / `state` / `comment[]` 的每一项） |
+| **创建是异步链路**（请求返回 ≠ 已落库） | ✅ 两侧都是「推 Kafka → 消费端落库」：Go `mqs/audit_consumer.go` / RAG `CommentAuditListener` ⇒ **架构同构** |
+| 落库后的**事实投递条数** | ✅ `comment_domain_fact_outbox` 两侧**都是 3 条** |
+| `GetComment` **不按 `state` 过滤**（已删评论仍在列表里） | ✅ 两侧一致（Go `OnlyNormal:false`；RAG `<if test="onlyNormal">` 恒 false）⇒ 删除后**两侧的 list 都仍返回该评论**（对拍里 `等 delete 落库` 两侧**同时**超时，属**一致**而非差异） |
+| `CreateCommentResp.subject_count` **恒 0** | ✅ 两侧一致 |
+| 越权 / 空内容 / 缺字段的**业务码**（1008 / 2001 / 1006 / 1013） | ✅ 逐条一致 |
+| 缺失 Authorization / 坏 JWT ⇒ **401** | ✅ 两侧一致 |
+
+### 4.6.5 ⚠️ 对拍 harness 的两个坑（**不是**产品缺陷，但会制造假差异）
+
+| 坑 | 现象 | 判据 / 修法 |
+|---|---|---|
+| **不等异步落库就往下跑** | 第一轮跑出 **24 条差异**，其中 20 条是**同一根因**：RAG 侧 `create` 返回 200 但**库里当时还没有这一行** ⇒ 后续 `list`/`like`/`delete` 全部「评论不存在」 | ⚠️ **固定 `sleep(3)` 不可靠**（实测 RAG 侧迟 19s）⇒ harness 改成**轮询到「可见/已消失」为止**（上限 40s / 15s） |
+| **Kafka topic 不预建 ⇒ 消费者组 rebalance 退避** | RAG 消费者 **订阅于 18:23:00、19 秒后（18:23:34）才 join 成功拿到分区** ⇒ create→可见迟到 19s。根因：topic 在启动前被删掉 ⇒ 消费者订阅了一个**不存在的 topic** ⇒ Kafka 4.x 的 rebalance **指数退避**（`group.initial.rebalance.delay.ms=3000` 起，上限 `group.rebalance.backoff.max.ms=30000`） | harness 改成**「先删后建」**（`--create --partitions 1`）⇒ 消费者订阅时 topic 已存在 ⇒ 立刻 join。⚠️ **Go 侧不受影响**（kafka-go Reader 不走组协调 ⇒ 同样是毫秒级）⇒ 这是 **Kafka 客户端实现差异**，不是 comment 域语义差异，但**在产品上会表现为「RAG 的审计管道延迟远高于 Go」** |
+
+> ⚠️ **这两条都写进了 `docs/Pitfalls/comment/rpc.md`**（PIT-COMMENT-RPC-07 / -08）。
+
+### 4.6.6 跨域发现（**不在本域 scope，未改**）
+
+| 发现 | 两侧事实 | 处置 |
+|---|---|---|
+| **RPC 超时的错误文案不同** | Go `service/common/observability/rpc.go:69` ⇒ `context deadline exceeded`；RAG `service/common/observability/RpcInterceptor.java:187` ⇒ `rpc timeout after 2000ms`。**两侧 code 都是 4（DeadlineExceeded）** | 🔴 `service/common` 是**六域共用 + `align/common` 并发分支** ⇒ 本轮**不动**，上报主会话 |
+| `comment-api` 缺 gRPC 熔断 | —— | ✅ **已作废**（`docs/DRIFT/_cross/new-domains-2026-10-23.md:43-45`）：实测 RAG 侧熔断**已存在** |
+
+---
+
 
 | # | 事项 | 类型 |
 |---|---|---|
@@ -261,6 +347,10 @@
 | **U5** | `comment_fact_stream` 的 CHECK 在 Go 侧**是否常态存在取决于迁移执行顺序**（生产顺序有 / 测试顺序无） | ⚠️ 待核 |
 | **U6** | `comment_like` 的 Go 侧有**两份互相冲突的 DDL 产物**（AutoMigrate vs 手写 `001`），在 `id`（`bigserial` vs IDENTITY）与唯一约束形态上不同 ⇒ 不存在单一「Go 侧 DDL」基线 | ⚠️ 真源侧歧义 |
 | **U7** | ~~MISMATCH-07（`updated_at` INSERT 取值）—— 未找到任何读取方~~ ⇒ ✅ **2026-10-24 已修**：按 GORM `create.go:340-351` 的实测语义改成入库时刻；**仍无读取方** ⇒ 影响面窄但值已对齐 | ✅ 已修（影响面窄） |
+| **U8** | 🔴 **`SD-2026-10-24-CAND-06` 待签字**：Go 的 `attribute & ~?` 在 PG 上**必然报错**（`~ unknown`）⇒ `MANAGE_UNPIN` / `MANAGE_UNFEATURE` **100% 失败**；RAG 侧实现了 Go 的*意图*（有类型的 mask ⇒ 正常）。**签字权在用户** | 🟡 待签字 |
+| **U9** | 🟡 **`SD-2026-10-24-CAND-02` 待签字**：`report_record` 表 Go 侧**不存在** ⇒ Go 的 `ReportComment` **必然 5004**；RAG 侧建了表 ⇒ 可用。**本轮已由活体对拍实证**（Go=5004 / RAG=200） | 🟡 待签字 |
+| **U10** | 🔴 **跨域**：`service/common` 的 RPC 超时文案两侧不同（`context deadline exceeded` vs `rpc timeout after 2000ms`），code 相同（4）。`service/common` 是六域共用 + `align/common` 并发分支 ⇒ **本轮不动**，上报主会话 | 🔴 跨域待办 |
+| **U11** | ⚠️ **Go 侧潜伏缺陷**：`comment.go:571`（点赞的 `attribute & ~?`）与 `comment.go:165` 同款 ⇒ **Go 侧「作者取消自己的赞」也会 5002**。本轮矩阵 `user 1001 ≠ owner 2002` ⇒ 未触发 ⇒ 两侧一致。⇒ **Go 侧缺陷**，RAG 侧已正确 | ⚠️ 真源侧缺陷（记录，不修 RAG） |
 
 ---
 

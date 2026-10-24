@@ -81,6 +81,18 @@
 ⇒ **Go 侧全新部署上，`ReportComment` 必然返回 5004** —— 这不是「Go 的 bug」，是**Go 侧漏把表加进 AutoMigrate**。
 ⇒ **RAG 侧比 Go 多一张表 ⇒ 「举报」功能可用**。
 
+### 🟢 活体对拍实证（2026-10-24，本条从「静态推断」升级为「运行期观测」）
+
+| 侧 | 实际响应 | 证据 |
+|---|---|---|
+| **Go** | `code=5004` `msg=DB插入失败` | Go rpc 日志：`comment.go:243 ERROR: relation "report_record" does not exist (SQLSTATE 42P01)`；`go_comment` 库的 `\dt` 只有 6 张业务表、**无 `report_record`** |
+| **RAG** | `code=200` `{success:true}` | `rag_comment` 库有 `report_record`；行已落库（`count=1`） |
+
+⚠️ 这次对拍**收紧了一个前提**：本条原先只写「Go 侧全新部署必然 5004」，
+容易被读成「**Go 现有环境有这张表、只是迁移脚本没写**」。
+**实测否定了这一点** —— 全新库上 Go 侧**根本没有**这张表，**RAG 侧与 Go 侧的差异是运行期真实存在的**。
+⇒ 本条**不是「表述差异」**，是**功能面差异**：同一份请求，Go 报错、RAG 成功。
+
 ### 为什么这是「更全」而不是「更宽」
 
 多一张表**不改变任何其他路径的行为**，只让一条 Go 侧走不通的路径走得通。
@@ -123,6 +135,63 @@
 
 - 默认部署下 **RAG 侧不会向 DC 投递任何事实**（Go 侧会）⇒ **DC 侧看到的事实流会与 Go 侧不一致**。
 - 开启 authority 端点需要**新增一个 HTTP 端口** ⇒ 属 **wire 面变更**，须人工拍板对外暴露面。
+
+**签字人：______　签字日期：______**
+
+---
+
+## SD-2026-10-24-CAND-06：`manage` 的**清位**分支 —— Go 侧 SQL **必然报错**，RAG 侧正常
+
+| 项 | 值 |
+|---|---|
+| 状态 | 🟡 **待签字**（候选，建议签） |
+| 组件 | `service/comment/comment-rpc` |
+| 行为层 | **RPC 响应码**（`ManageComment` 的 4 个 action_type 里有 2 个） |
+| 触发动作 | `MANAGE_UNPIN`（取消置顶）/ `MANAGE_UNFEATURE`（取消精选）—— 即 `action_type=2` / `action_type=4` |
+| 证据 | ✅ **2026-10-24 双侧活体对拍**（Go 真源 + RAG 同跑，同一份请求） |
+
+### 差异的实际面
+
+| 侧 | 事实 | 出处 |
+|---|---|---|
+| **Go** | 清位用 `gorm.Expr("attribute & ~?", val)`，`val` 是 `uint` ⇒ PG 收到**未定型参数** ⇒ **`operator is not unique: ~ unknown (SQLSTATE 42725)`** ⇒ logic 发 `errmsg.ErrorDbUpdate`(5002) | `service/comment/rpc/internal/model/comment.go:157-165`（`expr = gorm.Expr("attribute & ~?", val)` 在 `:165`）；错误日志 `comment.go:168` |
+| **Go** | `manage_comment_logic.go:66-86` 的映射：`MANAGE_PIN ⇒ bitOffset=2, isSet=true`；`MANAGE_UNPIN ⇒ bitOffset=2, isSet=false` ⇒ **只有清位分支会炸** | `manage_comment_logic.go:66-86` |
+| **RAG** | 清位用 `attribute & ~#{mask}`，`mask` 是**有类型的 `long`** ⇒ PG 解析为 `~ bigint` ⇒ **成功**（200 `{success:true}`） | `CommentIndexMapper.java:189`（`clearAttributeBits`）+ `CommentDomainService.java:627-651`（mask 计算与 Go 逐位一致） |
+
+### 证据链（可复现）
+
+1. **活体对拍**：同一请求 `action_type=2` ⇒ Go `code=5002 msg=DB更新失败` / RAG `code=200 {success:true}`。
+2. **Go 日志原文**：`comment.go:168 ERROR: operator is not unique: ~ unknown (SQLSTATE 42725)`。
+3. **PG 直接复现**（排除「是不是 RAG 侧环境问题」）：
+   ```sql
+   PREPARE t(unknown) AS SELECT 4::bigint & ~$1;  -- $1 为未定型
+   EXECUTE t('4');
+   -- ERROR:  operator is not unique: ~ unknown
+   -- HINT:  Could not choose a best candidate operator.
+   ```
+   ⇒ **同样的 SQL 形态，在 PG 上必然报错** ⇒ 根因在 Go 的**参数定型**，不在 RAG。
+
+### 为什么这是「更对」而不是「更宽」
+
+- Go 的**意图**很清楚：`attribute & ~mask`（清掉第 N 位）。
+  RAG 实现的是**同一个意图**，只是让 PG 能定型 ⇒ **RAG 侧执行的是 Go 想执行的那条语句**。
+- ⚠️ **不能改成 `attribute - mask`**：借位会把相邻低位全部翻成 1（Go 的注释在 `comment.go:163` 附近也强调过位运算而非减法）。
+- **Go 侧「取消置顶 / 取消精选」两个功能在真源上就是 100% 失败的** ⇒ 照搬 Go ⇒ RAG 侧这两个功能也会 100% 失败。
+
+### ⚠️ 一并需要决策的点
+
+1. **同款缺陷在 Go 的点赞路径上潜伏**：`comment.go:571` 是**同一个** `attribute & ~?` 写法
+   （仅当 `userId == ownerId` 且取消赞时触发）⇒ **Go 侧「作者取消自己的赞」也会 5002**。
+   本轮对拍用 `user 1001 ≠ owner 2002` ⇒ **未触发**（两侧一致）。
+   ⇒ RAG 侧 `applyInteractionDeltas` 用**有类型的** `long` mask ⇒ 正常。
+   ⚠️ **本条若签字，含义要覆盖两处**（manage 清位 + 点赞清位），不只是 manage。
+2. **若不签**（要求与 Go 完全一致）⇒ RAG 侧必须**故意**让这两个 action 失败 ⇒ 需要一条测试把这个行为钉死，
+   否则下一次「顺手优化」就会把它改回去。
+
+### 撤销方式
+
+把 `CommentDomainService` 的清位分支改成**故意抛 `dbUpdateOnManage()`**（模拟 Go 的 5002）⇒ 即完全退回 Go 的可观察行为。
+**该决定留给用户签字，本条不代签。**
 
 **签字人：______　签字日期：______**
 

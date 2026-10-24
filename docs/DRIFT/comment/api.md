@@ -10,7 +10,8 @@
 > ⚠️ **证据强度**：
 > - ✅ **真实 MVC 管线**：`CommentApiContractTest` 用 `@SpringBootTest` + `@AutoConfigureMockMvc`（非 `standaloneSetup` 假绿）
 > - ✅ **源码逐行对照**：Go 侧 22 个 `.go`（1,045 行）逐文件读过
-> - 🔴 **无双侧活体对拍** —— Go 侧 api 依赖 `comment-rpc` + `etcd` + 真 PG，起不来
+> - ✅ **双侧活体对拍**（**2026-10-24 补上**）：Go 真源 + RAG **四进程同跑**，17 步请求矩阵逐字段差分 ⇒ **§4.6**
+>   —— ⚠️ **覆盖面有限**：只覆盖「正常 JSON 请求 + 鉴权 + 业务码」这一面；D1 / D2 / MISMATCH-API-03 / U7 / U8 **未被触发**（§4.6.3）
 >
 > ⇒ ✅ 一律读作「**在该证据强度下一致**」。
 
@@ -26,6 +27,7 @@
 | 等价确认 | **约 40 个判定点**（§4） |
 | 组件规模 | Go 1,045 行 / 22 文件 ⇒ RAG 2,838 行 / 33 类 |
 | 构建 + 测试 | `mvn -o -pl service/comment/comment-api -am test` ⇒ **BUILD SUCCESS**，**30 / 0 failures / 0 errors / 0 skipped**（本轮实测；修复前 22 条） |
+| **对拍轮** | **2026-10-24**：**双侧活体对拍**跑通（Go 18888 ↔ RAG 58888，17 步矩阵）⇒ **15 一致 / 6 差异**。api 侧覆盖到的判定点（响应码 / envelope / 鉴权 / 业务码）**全部一致**；6 条差异**全在 rpc 侧**（根因在 Go 侧）⇒ 见 §4.6 |
 
 > 🟥 **MISMATCH-API-01 是「两个模块各自都对、拼起来就错」的典型**：
 > `comment-rpc` 把业务码放进自定义 trailer，`comment-api` 从不读它 ——
@@ -188,6 +190,47 @@
 | 5 处入参兜底（`sort∉{0,1}⇒0` / `page≤0⇒1` / `size≤0⇒20` / `size>50⇒50` / `rootId<0⇒0`） | `getcommentlogic.go:42-60` | `GetCommentService.java:91-96` | ✅ 反直觉的 `sort_type=0 ⇒ 热度` 被保留 |
 | 校验只判空、**不回写 trim** | `getcommentlogic.go:34/37` 只有 `TrimSpace(...)==""`，无赋值 | `GetCommentService.java:79-88` | ✅ 带空格的 `target_type` 原样下发 |
 | `GetComment` 的**裸抛**（不经 `FromError`）⇒ 兜底 5001 | `getcommentlogic.go:72-75` | `GetCommentService.java:99-107` 不 catch | ✅ 6 个端点给业务码、`GetComment` 给 5001，**两侧同样不对称** |
+
+---
+
+## 4.6 🟢 双侧活体对拍（2026-10-24）—— api 层被**真正跑过**的部分
+
+> 基建见 [`rpc.md` §4.6.1](./rpc.md)。本节只记 **api 层**的结论。
+
+### 4.6.1 🟢 MISMATCH-API-01 的修复**被活体验证**（此前只有单测证据）
+
+对拍矩阵走过的路径里，有多条会触发 **rpc 侧返回业务码**（1013 / 2001 / 1008 / 1012）。
+**修复前**这些码在 HTTP 出口会退化成 gRPC 状态码（2 / 5001）；**修复后逐条与 Go 一致**：
+
+| 场景 | Go | RAG |
+|---|---|---|
+| 点赞不存在的评论 | `code=1013` `评论不存在` | `code=1013` `评论不存在` ✅ |
+| 空评论内容 | `code=2001` `评论内容不能为空` | `code=2001` `评论内容不能为空` ✅ |
+| 越权改 subject state | `code=1008` `非up主无法评论` | `code=1008` `非up主无法评论` ✅ |
+| 缺 Authorization 头 | **HTTP 401** | **HTTP 401** ✅ |
+| 坏 JWT（`not.a.jwt`） | **HTTP 401** | **HTTP 401** ✅ |
+
+⇒ **业务码跨进程传递链路的活体证据**（本仓自建 trailer 方案）在**双侧同时在跑**时成立。
+⚠️ 对拍用的 JWT 是**自签 HS256**（`diff_comment.py` 用同一份 secret 签）⇒ **只覆盖 HS256**。
+
+### 4.6.2 🔴 api 侧起不来（**本仓自己引入的**）
+
+`NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder`
+⇒ 根因与修法见 [`rpc.md` §4.6.2 P-3](./rpc.md) 与 `docs/Pitfalls/comment/rpc.md` PIT-COMMENT-RPC-09。
+⇒ **单测完全测不出来**（test 作用域那份依赖还在）。
+
+### 4.6.3 ⚠️ 本轮对拍**没有覆盖**的 api 侧判定点（别把「没差异」读成「已验证」）
+
+| 判定点 | 为什么没覆盖 |
+|---|---|
+| **D1**（非 JSON Content-Type ⇒ 415 vs 200+5001） | 矩阵固定用 `application/json` ⇒ **未触发** ⇒ D1 仍是**静态结论** |
+| **D2**（Bearer 前缀长度边界 `>7` vs `>6`） | 矩阵只发正常 `Bearer <token>` ⇒ **未触发** |
+| **MISMATCH-API-03**（gRPC 2s deadline 上限） | 需要下游耗时落在 **2.0–3.0s** 才能观察 ⇒ 矩阵里的下游是**死端点**（立即拒连）⇒ **未触发** |
+| **U7**（缺 `exp` claim 的 token / HS384 / HS512） | 矩阵只签了**带 `exp` 的 HS256** ⇒ **未触发** |
+| **U8**（Go 的 per-route native middleware vs RAG 的全局 Filter） | 矩阵未请求**未注册的路径**（404 / 405）⇒ **未触发** |
+
+⇒ **本轮对拍把 api 层的「响应码 / envelope / 鉴权」这一面钉死了**，
+**但 D1 / D2 / MISMATCH-API-03 / U7 / U8 仍是静态结论**，其状态码在本台账里**不变**。
 
 ---
 
