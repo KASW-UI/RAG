@@ -107,6 +107,17 @@ final class GoStyleBreaker {
     }
 
     /**
+     * 供测试与排障读取：窗口内（<b>只算已完成桶</b>）的请求总数（accepts + fails）。
+     *
+     * <p>⚠️ <b>因为 Go 的 {@code ignoreCurrent} 语义（{@code rollingwindow.go:70-72}），
+     * 刚刚发生的失败不会出现在这里</b> —— 要看到它，必须<b>跨过一个桶边界</b>（250ms）。
+     * ⇒ 写用例时若不跨桶，会看到「失败明明发生了，窗口却是空的」，那是<b>机制</b>不是 bug。
+     */
+    long historyTotal() {
+        return history().total;
+    }
+
+    /**
      * {@code markSuccess()}：Go {@code googlebreaker.go:128-130}。
      * 由 {@code promise.Accept()} 调用。
      */

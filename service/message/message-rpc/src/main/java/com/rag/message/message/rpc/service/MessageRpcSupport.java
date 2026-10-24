@@ -16,8 +16,8 @@ import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDateTime;
-import java.time.ZoneId;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -76,10 +76,10 @@ public class MessageRpcSupport {
      * 读出来是 time.Time（一个绝对瞬时）⇒ .Unix() 直接就是真实 epoch 秒，**与时区无关**。
      * </pre>
      *
-     * <p><b>RAG 侧的差异</b>：DDL 用的是 {@code TIMESTAMP}（无时区），实体是 {@link LocalDateTime}。
-     * pgjdbc 对无时区列<b>不做任何换算</b>，写进去什么墙钟就读出什么墙钟
-     * ⇒ 这是一个<b>无时区墙钟</b>，本身不含 epoch 信息。
-     * 修复前用的是 {@code toEpochSecond(ZoneOffset.UTC)} —— 把墙钟<b>当成 UTC</b>。
+     * <p><b>RAG 侧的差异（已关闭 · DRIFT-MSG-V-020）</b>：
+     * ① DDL 曾用 {@code TIMESTAMP}（无时区）+ 实体 {@code LocalDateTime}，
+     *    读出来是无时区墙钟 ⇒ 不含 epoch 信息，必须**再猜一个时区**才能算出瞬时；
+     * ② 最初用的是 {@code toEpochSecond(ZoneOffset.UTC)} —— 把墙钟<b>当成 UTC</b>。
      *
      * <p><b>后果（部署时区 = Asia/Shanghai，已实测）</b>：
      * <pre>
@@ -93,20 +93,21 @@ public class MessageRpcSupport {
      * ⇒ 客户端看到的所有 {@code created_at} / {@code latest_message_at} / {@code updated_at}
      * <b>都比真源晚 8 小时</b>。
      *
-     * <p><b>为什么用 {@link ZoneId#systemDefault()} 而不是硬编码 {@code Asia/Shanghai}</b>：
-     * 写侧用的就是 {@code LocalDateTime.now()}（= JVM 本地墙钟），读侧也用本地时区解释，
-     * <b>写读自洽 ⇒ 无论 JVM 跑在哪个时区，epoch 都正确</b>。
-     * 硬编码 Asia/Shanghai 反而在「JVM 改成 UTC」的部署里会错。
-     * 这也是本次决策的结论：<b>不要求部署时区固定，只要求写读用同一个时区解释</b>。
-     *
-     * <p><b>剩下的稳健性缺口（不在本次修复范围）</b>：
-     * 列类型仍是 {@code TIMESTAMP} 而非 {@code TIMESTAMPTZ}。
-     * 在「一个 DB 只由一个时区的 JVM 写」的前提下，上面的自洽成立；
-     * 但一旦出现多时区写入（迁移期新旧实例并存）或换时区回读历史数据，就会重新错位。
-     * 要根治需 {@code V4} 迁移把列改成 {@code TIMESTAMPTZ}（连带修读侧），见 AGENTS.md §6.7.10。
+     * <p><b>⚠️ 2026-10-23 V-020 根治（本段为当前结论，取代上面两段历史推理）</b>：
+     * 列已由 {@code V5} 迁到 {@code TIMESTAMPTZ}，实体改为 {@link OffsetDateTime}，
+     * 于是<b>「再猜一个时区」这一步被彻底删掉</b> ——
+     * {@code OffsetDateTime.toEpochSecond()} 直接给真实瞬时，
+     * <b>无论 JVM 默认时区、无论 JDBC 会话时区是哪一个，结果都相同</b>。
+     * <br>⇒ 上一轮结论「不要求部署时区固定，只要求写读用同一个时区解释」这条<b>额外不变量消失了</b>，
+     * 现在与 Go 的 {@code time.Time.Unix()} 是<b>同一个语义</b>（都只认瞬时）。
+     * <br>⇒ 遗留的<b>不可逆</b>部分：历史 {@code timestamp} 值不携带时区，
+     * {@code V5} 只能按「当初写入时的 JVM 时区 = Asia/Shanghai」这一个假设解释；
+     * 若库里混过其它时区写入的墙钟，那部分**无法事后分辨**，已在台账登记为信息损失。
      */
-    private static long toEpochSecond(LocalDateTime wallClock) {
-        return wallClock.atZone(ZoneId.systemDefault()).toEpochSecond();
+    private static long toEpochSecond(OffsetDateTime instant) {
+        // 🔴 OffsetDateTime.toEpochSecond() **与时区无关**：它持有真实瞬时（offset + 墙上时间）
+        //    读出来是什么 offset 都给出同一个 epoch —— 这才是 Go 侧 time.Time.Unix() 的语义。
+        return instant.toEpochSecond();
     }
 
     /** 对应 Go {@code toNotificationItem(item model.Notification) *pb.NotificationItem}：
@@ -496,7 +497,7 @@ public class MessageRpcSupport {
     public static NotificationEntity newNotificationRecord(
             long recipientId, long senderId, SenderRole senderRole,
             NotificationKind kind, String title, String content,
-            Map<String, String> extra, java.time.LocalDateTime now, long snowflakeId) {
+            Map<String, String> extra, java.time.OffsetDateTime now, long snowflakeId) {
         Map<String, String> safeExtra = (extra == null || extra.isEmpty())
                 ? Collections.emptyMap() : extra;
         NotificationEntity n = new NotificationEntity();

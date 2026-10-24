@@ -83,7 +83,17 @@ import org.springframework.context.annotation.Import;
         // 两者都是 org.apache.ibatis.plugin.Interceptor Bean，MyBatis-Plus 自动配置会
         //   收集容器内全部 Interceptor 并 setPlugins，因此这里只需保证它们成为 Bean。
         DeadlineQueryTimeoutInjector.class,
-        SqlTimeoutStatusTranslator.class
+        SqlTimeoutStatusTranslator.class,
+
+        // ===== DRIFT-MSG-V-016：服务端熔断 / CPU 降载的配置载体（2026-10-24）=====
+        // GoStyleProtectionConfiguration 携带 @EnableConfigurationProperties(GoStyleProtectionProperties)，
+        //   两者必须一起 @Import —— 只 Import properties 类不会触发绑定。
+        // ⚠️ 为什么 rpc 模块要显式 @Import：本模块**刻意不扫** com.rag.common
+        //   （扫了会把 jakarta.servlet.Filter 那一族拖进纯 gRPC 进程），
+        //   所以 protection 包里的 @Configuration 不会被扫到 ⇒ properties Bean 不会自动注册。
+        //   GoStyleProtectionConfiguration 本身无 @ConditionalOnWebApplication（它只带一个纯 POJO），
+        //   非 web 进程里 Import 它是安全的。
+        com.rag.common.protection.GoStyleProtectionConfiguration.class
 })
 public class MessageRpcApplication {
 
@@ -103,8 +113,26 @@ public class MessageRpcApplication {
      */
     @org.springframework.context.annotation.Bean
     public net.devh.boot.grpc.server.serverfactory.GrpcServerConfigurer rpcInterceptorConfigurer(
-            io.grpc.ServerInterceptor rpcUnaryServerInterceptor) {
-        return server -> server.intercept(rpcUnaryServerInterceptor);
+            io.grpc.ServerInterceptor rpcUnaryServerInterceptor,
+            com.rag.common.protection.GoStyleProtectionProperties protectionProps) {
+        // ⚠️ **顺序在这里被显式钉死，不用 server.intercept(a, b) 的多次调用**。
+        //
+        // Go 侧的注册序（zrpc/server.go:144-163 + zrpc/internal/server.go:58「append 到尾部」
+        // ⇒ 先注册的最外层）：Trace → Recover → Stat → Prometheus → Breaker → Shedding
+        //   → Timeout → observability（本仓的观测拦截器是最后加的，因此最内层）
+        // ⇒ recover 必须在业务观测拦截器之**外**：否则观测拦截器自身或业务链上的 panic 兜不住。
+        //
+        // 为什么手工串链而不直接 server.intercept(recover, observability)：
+        // io.grpc.ServerBuilder#intercept 每次只收一个，且多次调用的执行顺序是
+        // 「added in reverse order」—— 依赖它等于把嵌套关系交给一个容易记错的细节。
+        //
+        // ⚠️ 2026-10-24（DRIFT-MSG-V-016）：链的定义点已**上提到共享模块**
+        //   com.rag.common.protection.GoStyleRpcProtectionChain —— 因为 breaker / shedding
+        //   是**框架级**能力（Go 侧在 zrpc 库里），10 个 rpc 组件都要挂同一套链，
+        //   顺序若分散在 10 个组件里各写一遍，就是 10 个可能写错的地方。
+        //   本仓的链：recover → breaker → shedding → 业务观测拦截器。
+        return server -> server.intercept(com.rag.common.protection.GoStyleRpcProtectionChain
+                .build(rpcUnaryServerInterceptor, protectionProps));
     }
 
     public static void main(String[] args) {

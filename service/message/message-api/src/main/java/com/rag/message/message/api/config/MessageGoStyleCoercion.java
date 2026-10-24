@@ -1,6 +1,7 @@
 package com.rag.message.message.api.config;
 
 import com.rag.users.common.http.GoStyleCoercion;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.cfg.CoercionAction;
 import tools.jackson.databind.cfg.CoercionInputShape;
 import tools.jackson.databind.json.JsonMapper;
@@ -64,6 +65,33 @@ public final class MessageGoStyleCoercion {
     public static void applyTo(JsonMapper.Builder builder) {
         // 共享的两条：float 不进整数字段（ACCEPT_FLOAT_AS_INT）、number/bool 不进 String 字段
         GoStyleCoercion.applyTo(builder);
+
+        // 🔴 补强 4（2026-10-23，DRIFT-MSGAPI-008）：`,optional` 标量字段的**显式 null** 应等于零值。
+        //
+        // Go 出处（消费点）：core/mapping/unmarshaler.go:854-863 processNamedFieldWithValue
+        //     if mapValue == nil {
+        //         if opts.optional() { return nil }        ← ,optional 走这条：不报错，值保持零值
+        //         return fmt.Errorf("field %q mustn't be nil", key)
+        //     }
+        //
+        // ⚠️ Jackson 3 的 FAIL_ON_NULL_FOR_PRIMITIVES **默认 true**
+        //    ⇒ {"offset":null} / {"kind":null} / {"unread_only":null} 三种形态全部
+        //      被拒成 "Cannot map `null` into type `int`"，而 Go 侧一律 ACCEPTED。
+        //
+        // 📌 为什么在本模块**全局**关掉是安全的（不是"顾此失彼"）：
+        //   本模块**没有任何必填的原始类型字段**。逐字段核过 Go 真源 types.go：
+        //     PageReq                  offset/limit/unread_only —— 三者全部 ,optional
+        //     AdminSendNotificationReq broadcast(,optional) kind(,optional)
+        //                              target_id(,string,optional) title/content(String 引用类型)
+        //     AdminSendChatReq         recipient_id(,string) conversation_id(,string,optional)
+        //                              content(String)
+        //     ConversationMessagesReq  conversation_id(,string) offset/limit(,optional)
+        //     MarkConversationReadReq / MarkNotificationReq / UserSendChatReq 同上
+        //   而**必填字段**（title / content / conversation_id …）全是**引用类型**（String / Long），
+        //   它们收显式 null 的拒绝**根本不靠这个 feature**，而是靠
+        //   GoStyleRequired#field(...)（Controller 层调用）⇒ 关掉它动不到必填语义。
+        //   探针用例「required 显式 null(conversation_id)」把这条钉死。
+        builder.disable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES);
 
         // 补强 1：JSON 字符串不进整数字段（仅影响无 ,string 的字段）
         builder.withCoercionConfig(LogicalType.Integer, cfg -> cfg

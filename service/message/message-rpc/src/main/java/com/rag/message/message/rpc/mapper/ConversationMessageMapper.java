@@ -10,7 +10,7 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 import org.apache.ibatis.annotations.Insert;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 /**
@@ -69,13 +69,13 @@ public interface ConversationMessageMapper extends BaseMapper<ConversationMessag
     int markReadByConversationAndRecipient(@Param("conversationId") long conversationId,
                                             @Param("recipientId") long recipientId,
                                             @Param("recipientRole") int recipientRole,
-                                            @Param("readAt") LocalDateTime readAt);
+                                            @Param("readAt") OffsetDateTime readAt);
 
     /**
      * 对应 Go 端 markAllConversationsReadTx 内的 UPDATE：
      * UPDATE ... SET is_read=true, read_at=? WHERE recipient_id=? AND recipient_role=? AND is_read=false。
      */
-    default int markAllReadByRecipient(long recipientId, int recipientRole, LocalDateTime readAt) {
+    default int markAllReadByRecipient(long recipientId, int recipientRole, OffsetDateTime readAt) {
         LambdaUpdateWrapper<ConversationMessageEntity> w = new LambdaUpdateWrapper<>();
         w.eq(ConversationMessageEntity::getRecipientId, recipientId)
                 .eq(ConversationMessageEntity::getRecipientRole, recipientRole)

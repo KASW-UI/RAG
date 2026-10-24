@@ -1,9 +1,11 @@
 package com.rag.message.message.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.rag.message.message.api.config.GoStyleMapStringValueDeserializer;
 import com.rag.users.common.http.GoStyleRequired;
 import com.rag.users.common.http.GoStyleRequiredFields;
 import java.util.Map;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 
 
@@ -99,8 +101,21 @@ public class AdminSendNotificationReq implements GoStyleRequiredFields {
      * ⇒ {@code core/mapping/unmarshaler.go:857-862} 的
      * {@code if mapValue == nil { if optional { return nil } ... }} 走 optional 分支<b>放行</b>。
      * 探针实测：{@code {"title":"t","content":"c","extra":null}} → <b>ACCEPTED</b>。
+     *
+     * <p><b>⚠️ {@code contentUsing} 管的是<b>元素</b>，不是字段本身</b>（2026-10-23 新增，
+     * DRIFT-MSGAPI-006 / -007）：
+     * <ul>
+     *   <li><b>元素</b>收数字（{@code {"extra":{"k":1}}}）⇒ Go <b>接受</b>并字符串化，
+     *       本字段靠共享的 {@code LogicalType.Textual + Integer → Fail} 会<b>拒</b> ⇒ 必须豁免；</li>
+     *   <li><b>元素</b>显式 null（{@code {"extra":{"k":null}}}）⇒ Go <b>拒绝</b>，
+     *       Jackson 默认<b>放行</b>（null 值走 {@code getNullValue}，不进 {@code deserialize}）。</li>
+     * </ul>
+     * 两条的 Go 出处都是 {@code core/mapping/unmarshaler.go:385-417} 的 {@code generateMap}
+     * {@code default} 分支（元素级判据与顶层标量字段<b>不同</b>）⇒ 详见
+     * {@link com.rag.message.message.api.config.GoStyleMapStringValueDeserializer} 的类注释。
      */
     @JsonProperty("extra")
+    @JsonDeserialize(contentUsing = GoStyleMapStringValueDeserializer.class)
     public void setExtra(Map<String, String> extra) {
         this.extra = extra;
     }

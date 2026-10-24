@@ -16,7 +16,10 @@ Go 侧通读 36 个文件、RAG 侧通读 71 个文件。
 > 其余 8 项的价值在于**定级 + 修复 + 防回退**（§6.6 原标 `UNKNOWN`）。
 > 完整对照见 §6.7.0。
 
-#### 第一批（10 项静态对照）：**6 项已修 + 2 项签字留档 + 2 项待外部条件**
+#### 第一批（10 项静态对照）：**6 项已修 + 4 项签字留档 + 0 项待外部条件**
+
+> ⚠️ **2026-10-24 第十轮更新**：`V-009` / `V-010` 已由**用户拍板签字留档**
+> （`SD-2026-10-24-02` / `SD-2026-10-24-03`）⇒ 「2 项待外部条件」归零。
 
 | 编号 | 一句话 | 状态 |
 |---|---|---|
@@ -28,8 +31,8 @@ Go 侧通读 36 个文件、RAG 侧通读 71 个文件。
 | **DRIFT-MSG-V-006** | `markConversationRead` **多写一列** `conversation.updated_at` | ✅ 已修 |
 | **DRIFT-MSG-V-007** | 时间列 `timestamptz`→`timestamp` + 读侧按 UTC 解释墙钟 ⇒ **部署时区非 UTC 时全部时间戳偏一个时区差**（上海 = 偏晚 8h） | ✅ 已修（§6.7.10，部署时区已确认为 Asia/Shanghai） |
 | **DRIFT-MSG-V-008** | `String.trim()` vs `strings.TrimSpace` **空白集不同** | ✅ 已修 |
-| **DRIFT-MSG-V-009** | 直方图 bucket 布局不同 | ⏸ 留档（Prometheus 规则适配） |
-| **DRIFT-MSG-V-010** | 错误解包深度不同（Go 穿透 / Java 不穿透） | ⏸ 留档（当前无发作路径） |
+| **DRIFT-MSG-V-009** | 直方图 bucket 布局不同（**第十轮实测：两侧桶边界零交集** —— Go 11 桶 vs Micrometer 69 桶） | ✅ **已签字留档**（`SD-2026-10-24-02`） |
+| **DRIFT-MSG-V-010** | 错误解包深度不同（**第十轮订正**：真正不一致的只有 `CodeError` 那一支，`status` 那一支两侧都已穿透） | ✅ **已签字留档**（`SD-2026-10-24-03`） |
 
 #### 🔴 第二批：**补测试时当场挖出 3 条 P0，静态审计两轮都没抓到**（§6.7.7）
 
@@ -127,16 +130,20 @@ Go 侧通读 36 个文件、RAG 侧通读 71 个文件。
 
 | 编号 | 维度 | 一句话 | 风险 | 状态 |
 |---|---|---|---|---|
-| **DRIFT-MSG-V-001** | 结果语义 | `listNotifications(unread_only=true)` 的 **`total` 丢了 `is_read=false` 过滤** | HIGH | 待修 |
-| **DRIFT-MSG-V-002** | 外部交互 | 广播通知**单条 foreach 多行 INSERT**，收件人 ≥ 5462 时整批失败 | HIGH | 待修 |
-| **DRIFT-MSG-V-003** | 错误身份 | DB / 内部故障的业务码 **Go `1015` → RAG `5001`/`5008`** | MED-HIGH | 待决策 |
-| **DRIFT-MSG-V-004** | 排序语义 | 会话消息排序键 **`created_at asc` → `id asc`** | MED | 待修 |
-| **DRIFT-MSG-V-005** | 排序语义 | 会话列表**缺次级排序键 `updated_at DESC`** | MED | 待修 |
-| **DRIFT-MSG-V-006** | 副作用集 | `markConversationRead` **多写一列** `conversation.updated_at` | MED | 待决策 |
-| **DRIFT-MSG-V-007** | 序列化 | 时间列 **`timestamptz` → `timestamp`** + 时区解读不同 | MED（条件性） | UNRESOLVED |
-| **DRIFT-MSG-V-008** | 输入解释 | `String.trim()` vs `strings.TrimSpace` **空白集不同** | MED | 待修 |
-| **DRIFT-MSG-V-009** | 可观测指标 | 直方图 **bucket 布局不同**（DefBuckets vs Micrometer 默认） | LOW | 待决策 |
-| **DRIFT-MSG-V-010** | 错误传播 | 错误**解包深度不同**（Go `errors.As` 穿透 vs Java `instanceof` 不穿透） | LOW / latent | 留档 |
+> ⚠️ **2026-10-24 第十一轮前向指针** —— 下面这张表的「状态」列是 **2026-10-22 第二轮**的判断，
+> **V-001 / V-002 / V-004 / V-005 / V-008 已修、V-003 已签字（收窄）、V-006 已修、V-007 已修**
+> ⇒ 与同文件 §0 的速查表**一致**（那边已全部更新）⇒ **不要**照着这列「待修」去估工作量。
+
+| **DRIFT-MSG-V-001** | 结果语义 | `listNotifications(unread_only=true)` 的 **`total` 丢了 `is_read=false` 过滤** | HIGH | ✅ 已修（第一轮） |
+| **DRIFT-MSG-V-002** | 外部交互 | 广播通知**单条 foreach 多行 INSERT**，收件人 ≥ 5462 时整批失败 | HIGH | ✅ 已修（第一轮） |
+| **DRIFT-MSG-V-003** | 错误身份 | DB / 内部故障的业务码 **Go `1015` → RAG `5001`/`5008`** | MED-HIGH | ⏸ 已签字（第八轮**收窄**到只剩「不回显原始错误文本」） |
+| **DRIFT-MSG-V-004** | 排序语义 | 会话消息排序键 **`created_at asc` → `id asc`** | MED | ✅ 已修（第一轮） |
+| **DRIFT-MSG-V-005** | 排序语义 | 会话列表**缺次级排序键 `updated_at DESC`** | MED | ✅ 已修（第一轮） |
+| **DRIFT-MSG-V-006** | 副作用集 | `markConversationRead` **多写一列** `conversation.updated_at` | MED | ✅ 已修（第一轮） |
+| **DRIFT-MSG-V-007** | 序列化 | 时间列 **`timestamptz` → `timestamp`** + 时区解读不同 | MED（条件性） | ✅ 已修（第七轮 V-020：8 列改 `TIMESTAMPTZ`） |
+| **DRIFT-MSG-V-008** | 输入解释 | `String.trim()` vs `strings.TrimSpace` **空白集不同** | MED | ✅ 已修（第一轮） |
+| **DRIFT-MSG-V-009** | 可观测指标 | 直方图 **bucket 布局不同**（DefBuckets vs Micrometer 默认） | LOW | ✅ **已签字留档**（`SD-2026-10-24-02`，2026-10-24） |
+| **DRIFT-MSG-V-010** | 错误传播 | 错误**解包深度不同**（Go `errors.As` 穿透 vs Java `instanceof` 不穿透） | LOW / latent | ✅ **已签字留档**（`SD-2026-10-24-03`，2026-10-24） |
 
 #### 6.7.2 两项 HIGH 的取证
 
@@ -194,9 +201,9 @@ Postgres 协议单条 SQL 绑定参数上限 **65535** ⇒ `floor(65535/12) = 54
 | 编号 | 问题 | 为何无法判定 | 需要什么 |
 |---|---|---|---|
 | ~~UNRESOLVED-MSG-V-000~~ | ~~JVM 实际时区 ⇒ V-007 是否真的发作~~ | — | ✅ **2026-10-22 用户已确认：部署时区 = Asia/Shanghai** ⇒ 该漂移**真实发作**。见 §6.7.10 |
-| **UNRESOLVED-MSG-V-001** | Nacos namespace/group 不一致 | `message-rpc` 用 `public`/`DEFAULT_GROUP`，user/admin 用 `sea-rtw`/`USER_GROUP`（`message-api/application.yml:14-19` 自述） | 两侧对齐后才能做活体对拍 |
-| **UNRESOLVED-MSG-V-002** | `insertBatch` 参数上限的确切触发点 | 静态推导（12 列 × 65535），**未做活体验证** | 造 5462 条 recipient 实跑一次 |
-| **UNRESOLVED-MSG-V-003** | DDL 的索引 / 唯一约束 / NOT NULL / DEFAULT | `check-ddl-static.py` 需活库连接，本轮未运行 | 起 PG 后跑该脚本；时间列的 10 处差异本轮已单独取证 |
+| **UNRESOLVED-MSG-V-001** | Nacos namespace/group 不一致 | `message-rpc` 用 `public`/`DEFAULT_GROUP`，user/admin 用 `sea-rtw`/`USER_GROUP`（`message-api/application.yml:14-19` 自述） | 两侧对齐后才能做活体对拍（**跨域**：user/admin 域） |
+| **UNRESOLVED-MSG-V-002** ✅ **已关闭（2026-10-24 第十轮）** | ~~`insertBatch` 参数上限的确切触发点~~ | —— | ✅ **关闭依据**：真 PG 守门 `notificationBatchInsertMustSurviveTheParameterLimit` **真造了 6000 条** recipient（> 5461 阈值）并断言全部落库 ⇒ 阈值已被活体覆盖；且 `DRIFT-MSG-V-002` 的修法本身（按 200 分片）**已把参数上限变成不可达** ⇒ 原问法已**过时** |
+| **UNRESOLVED-MSG-V-003** ✅ **已关闭（2026-10-24 第十轮）** | ~~DDL 的索引 / 唯一约束 / NOT NULL / DEFAULT~~ | —— | ✅ **关闭依据**：**双侧活体 DDL 对拍**（Go 侧跑真源自己的 `AutoMigrate`、RAG 侧按序执行 V1~V5，逐条 dump `pg_indexes` / `pg_constraint` / `information_schema.columns`）⇒ 索引 12 个、约束 3 个、37 列的可空性与 DEFAULT **全部核过**。<br>⚠️ **关闭的是「未核过」这个状态，不是「DDL 完全一致」** —— 实测差异：索引 3 处（V-021 ×2 名字 + V-022 ×1 列数）+ **DEFAULT 6 处**（⇒ 新登记 `DRIFT-MSG-V-031`）。<br>⇒ 复现：`bash tools/difftest/run-message-ddl-parity.sh` |
 
 > ⚠️ **DRIFT-MSG-V-007 的条件化结论**（本轮唯一「影响面覆盖全部时间字段」的一条）：
 > Go 侧 `gorm.io/driver/postgres@v1.6.0` 的 `postgres.go:251-255` 把 `schema.Time` 映射为
@@ -250,8 +257,8 @@ Postgres 协议单条 SQL 绑定参数上限 **65535** ⇒ `floor(65535/12) = 54
 | **DRIFT-MSG-V-005** | ✅ 已修 | `listByParticipant` 补次级键 `orderByDesc(updatedAt)` | `conversationListMustUseUpdatedAtAsTiebreaker`（真 PG，**last_message_at 完全并列**） | ✅ 去掉次级键 ⇒ 红 |
 | **DRIFT-MSG-V-006** | ✅ 已修 | 删掉 `markConversationReadTx` 里的 `touchUpdatedAt`（**理由**：DRIFT-MSG-V-005 修好后，它当初的补偿对象已消失） | `markConversationReadMustNotTouchConversationUpdatedAt`（真 PG + **正向确认消息真被标读**，防假绿） | ✅ 加回 `touchUpdatedAt` ⇒ 红 |
 | **DRIFT-MSG-V-008** | ✅ 已修 | `trimContent` / `trimPreview` 改走 `trimGoSpace`；逐码点复刻 Go `unicode.IsSpace` 的 **25 个码点**（`go run` 实测枚举得出，非凭记忆） | `MessageRpcSupportTrimPreviewTest` +5 例（NBSP / U+3000 / 分隔符 / **U+001C–1F 反向断言** / 25 码点全枚举 / 全空白塌成空串） | ✅ 3 次：`trim()` ⇒ 4 红、**`strip()` ⇒ 4 红**、改共享 helper ⇒ 5 红 |
-| **DRIFT-MSG-V-009** | ⏸ 留档 | 未改代码（Prometheus 规则适配，属运维侧） | — | — |
-| **DRIFT-MSG-V-010** | ⏸ 留档 | 未改代码（当前无发作路径，见 6.7.4 说明） | — | — |
+| **DRIFT-MSG-V-009** | ✅ **已签字留档**（`SD-2026-10-24-02`，2026-10-24 用户拍板） | 未改代码（留档）；⚠️ 第十轮**双侧实测**：Go 11 桶 vs Micrometer 69 桶，**边界零交集** | — | — |
+| **DRIFT-MSG-V-010** | ✅ **已签字留档**（`SD-2026-10-24-03`，2026-10-24 用户拍板） | 未改代码（留档）；⚠️ 第十轮**逐行核对两侧消费点**并**订正了描述**：真正不一致的只有 `CodeError` 那一支 | — | — |
 
 ##### 🔴 由新测试**当场挖出**的 3 条 P0 —— 静态审计两轮都没抓到
 
@@ -371,6 +378,10 @@ RAG 侧列是 **`TIMESTAMP`（无时区）**，实体 `LocalDateTime`，pgjdbc �
 ③ §6.7.4 的 `UNRESOLVED-MSG-V-003`（索引/唯一约束/NOT NULL/DEFAULT 完全 NOT CHECKED）说明
 **这张 DDL 还没有被系统性核对过**，在没核对前做类型迁移是盲改。
 ⇒ 记为**已知缺口**，与 `tools/difftest/check-ddl-static.py` 的跑库核对一起做。
+> ✅ **2026-10-24 第十轮更新**：`UNRESOLVED-MSG-V-003` **已关闭**（双侧活体 DDL 对拍，见 §6.7.4 与
+> [`DRIFT/message/rpc.md`](../message/rpc.md) 的「第十轮」小节）⇒ 这条「盲改」的约束**已解除**。
+> ⚠️ 但对拍同时实测出 **6 列 DEFAULT 残差**（⇒ `DRIFT-MSG-V-031`）——
+> 若将来要动时间列的迁移，**那 6 列的 DEFAULT 也要一起想清楚**（别再叠一层没核过的改动）。
 
 #### 6.7.8 DRIFT-MSG-V-003 决策：**签字保留 RAG 侧，不对齐 Go**（2026-10-22）
 
@@ -422,3 +433,25 @@ Go 侧这条同时命中信息泄露与错误归因两条，已属缺陷而非�
 > 本轮的 `MessageSemanticEquivalenceTest` 是**进程内直调 service 层**，不是双端口对拍；
 > 真源对拍仍要等 `UNRESOLVED-MSG-003`（Go 真源在本环境起不来）。
 
+
+---
+
+## 2026-10-24 第十轮：**双侧活体 DDL 对拍**（关掉 `UNRESOLVED-MSG-V-002` / `-003`）+ 3 条签字 + 1 条新登记
+
+> **用户指示**：「A5：起真 PG 跑 `check-ddl-static.py`，核对 DDL 索引/唯一约束/NOT NULL/DEFAULT」
+> ⇒ 本轮**没改任何业务代码**。
+
+| 项 | 结论 |
+|---|---|
+| **新守门** | `bash tools/difftest/run-message-ddl-parity.sh` —— 一条命令建两个真库（Go 侧跑**真源自己的 `AutoMigrate`**，RAG 侧执行 V1~V5）并逐维度比对。**全程不写被冻结的真源仓库**（只复制副本） |
+| **脚本升级** | `tools/difftest/check-ddl-static.py` 新增 `--domain message` / `--indexes` / `--allow-idx` / `--allow-default` —— 补上 §3.1 对照清单里**最后两项从未被机器核过**的维度（`pg_indexes` / `pg_constraint`） |
+| **列类型 / 长度** | ✅ **0 差异**（37 列逐字相同） |
+| **NOT NULL（可空性）** | ✅ **0 差异**（`V-020` 的 `DROP NOT NULL` 精确命中） |
+| **约束（`pg_constraint`）** | ✅ **两侧完全一致**（各 3 个 PK）⇒ **V-023 双向确认**（两侧的 `uk_conversation_pair` 都是**唯一索引**而非表约束） |
+| **索引** | 🔴 **3 处差异**：`idx_notification_recipient_read`（Go 1 列 / RAG 2 列 ⇒ **V-022**，已签字 `SD-06`）＋ `idx_conversation_*` ×2 名字不同（⇒ **V-021**，**本轮签字** `SD-2026-10-24-01`）⇒ 其余 9 个逐条一致 |
+| **DEFAULT** | 🔴 **6 处差异** ⇒ **`DRIFT-MSG-V-031`（本轮已签字保留，`SD-2026-10-24-04`）** —— RAG 侧多 `DEFAULT CURRENT_TIMESTAMP`，Go 侧无默认；**当前不可观测**（3 条 INSERT 全显式绑定），但**必须知情**：这是「当前无路径」而非「结构性无路径」 |
+| **关闭** | ✅ `UNRESOLVED-MSG-V-002`（6000 条真 PG 守门已覆盖阈值，且原问题已因分片修法而过时）<br>✅ `UNRESOLVED-MSG-V-003`（**关的是「未核过」，不是「DDL 完全一致」**）<br>✅ `UNRESOLVED-MSG-009`（用户 2026-10-24 拍板关闭 —— `V5` 已把 8 列改 `TIMESTAMPTZ`，活体对拍实测两侧类型 0 差异；剩下的是**部署口径**，不是代码问题） |
+| **签字** | ✅ `SD-2026-10-24-01`（V-021 索引名）· `SD-2026-10-24-02`（V-009 直方图桶，**双侧实测边界零交集**）· `SD-2026-10-24-03`（V-010 错误解包深度，**并订正了原描述**）· `SD-2026-10-24-04`（**V-031 六列 DEFAULT，保留签字**） |
+| **顺手更正** | `UNRESOLVED-MSG-009` 的**前提已过期**（它建议的「补一条 `V4` 迁移」已由 `V5` 做完）⇒ 别再去补；剩下的只是部署口径问题 |
+
+⚠️ **逐条证据在** [`DRIFT/message/rpc.md`](../message/rpc.md) 的「第十轮」小节（含实测量、复现命令、踩到的两个环境坑）。

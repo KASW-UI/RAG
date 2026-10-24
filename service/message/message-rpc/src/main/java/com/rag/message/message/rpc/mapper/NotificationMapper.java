@@ -125,7 +125,7 @@ public interface NotificationMapper extends BaseMapper<NotificationEntity> {
      * 无法附加 {@code recipient_id} 条件（§3.3 记录的
      * 「{@code LambdaUpdateWrapper.set()} 丢字段类型信息」同源问题）。
      */
-    default int markRead(long id, long recipientId, java.time.LocalDateTime readAt) {
+    default int markRead(long id, long recipientId, java.time.OffsetDateTime readAt) {
         NotificationEntity patch = new NotificationEntity();
         patch.setRead(true);
         patch.setReadAt(readAt);
@@ -146,7 +146,7 @@ public interface NotificationMapper extends BaseMapper<NotificationEntity> {
      * 返回受影响行数。
      */
     default int markAllReadByRecipient(long recipientId, int role, int kind,
-                                       java.time.LocalDateTime readAt) {
+                                       java.time.OffsetDateTime readAt) {
         // 用 wrapper + 手写 SQL（MyBatis-Plus 的 updateById 不支持条件 UPDATE）
         com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<NotificationEntity> w =
                 new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();

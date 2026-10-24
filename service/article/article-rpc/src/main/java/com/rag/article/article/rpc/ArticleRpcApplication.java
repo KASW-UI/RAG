@@ -75,7 +75,11 @@ import org.mybatis.spring.annotation.MapperScan;
 
         // ===== 超时必须能真正取消在途 SQL =====
         com.rag.common.persistence.DeadlineQueryTimeoutInjector.class, // 按线程 DeadlineState 给每条 SQL 设 queryTimeout
-        com.rag.common.persistence.SqlTimeoutStatusTranslator.class    // 把 57014 query_canceled 翻成 DEADLINE_EXCEEDED
+        com.rag.common.persistence.SqlTimeoutStatusTranslator.class,    // 把 57014 query_canceled 翻成 DEADLINE_EXCEEDED
+
+        // ===== 熔断 / 降载（Go zrpc 框架级能力，每个 rpc server 都自带）=====
+        com.rag.common.protection.GoStyleProtectionConfiguration.class,  // 熔断/降载链的配置载体（breaker / cpuShedding 的开关与阈值；默认值 = go-zero 的 tag 默认值）
+
 })
 public class ArticleRpcApplication {
 
@@ -106,8 +110,14 @@ public class ArticleRpcApplication {
      * 锁死用例：{@code ArticleGrpcInterceptorWiringTest}。
      */
     @Bean
-    public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryServerInterceptor) {
-        return server -> server.intercept(rpcUnaryServerInterceptor);
+    public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryServerInterceptor,
+            com.rag.common.protection.GoStyleProtectionProperties protectionProps) {
+        // ⚠️ DRIFT-MSG-V-026（2026-10-24）：链的定义点在**共享模块**
+        //   com.rag.common.protection.GoStyleRpcProtectionChain ——
+        //   熔断 / 降载在 Go 侧是 **zrpc 框架级**能力（每个 rpc server 都自带），
+        //   10 个 rpc 组件挂的是同一条链，顺序若分散在各处各写一遍，就是 10 个可能写错的地方。
+        //   本仓的链：recover → breaker → shedding → 业务观测拦截器。
+        return server -> server.intercept(com.rag.common.protection.GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, protectionProps));
     }
 
     /**

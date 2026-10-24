@@ -139,6 +139,28 @@ public final class MessageGrpcError {
     }
 
     /**
+     * 取 gRPC status 的 message（即 description），语义等同 Go 的
+     * {@code st, ok := status.FromError(err); st.Message()}。
+     *
+     * <p><b>存在理由是「只有一份实现」</b>：{@code message-api} 的
+     * {@code shared.RPCError}（{@code api/internal/logic/shared/helper.go:27-36}）
+     * 也需要这份 message 来决定 envelope 的 {@code msg} 字段。
+     * 若 api 层自己再写一遍 {@code instanceof}，两处迟早会分叉 ——
+     * 而分叉的后果是「码对了、msg 错了」这种最难在端到端测试里看出来的不一致
+     * （§3.3.3「绿测试锁死错误答案」的同源形态）。
+     *
+     * <p>返回 {@code null} 表示「整条 cause 链上都没有 status」，对应 Go 的 {@code ok=false}。
+     */
+    public static String statusMessage(Throwable err) {
+        FoundStatus found = extractStatus(err);
+        if (found == null) {
+            return null;
+        }
+        // 与 Go 的 `p.Message = err.Error()` 对齐：解包路径用外层文本
+        return found.wrapped() ? err.getMessage() : found.status().getDescription();
+    }
+
+    /**
      * msg → code 反查表，对应 Go 的
      * <pre>
      * var bizCodeByMsg = func() map[string]int {
@@ -197,17 +219,29 @@ public final class MessageGrpcError {
             return MessageErrorCode.SUCCESS.getCode();
         }
 
-        Status status = extractStatus(err);
-        if (status != null) {
-            Integer code = BIZ_CODE_BY_MSG.get(status.getDescription());
+        // ⚠️ 顺序必须与 Go 完全一致（errmsg.go:104-106）：**先判 CodeError，再判 status**。
+        // Go 的原文是：
+        //     if codeErr, ok := err.(*CodeError); ok { return codeErr.Code }
+        //     st, ok := status.FromError(err)
+        // 本实现此前把这两步对调了，并写成「status 也可能裹着业务码，所以先看 status」——
+        // 那是**自己发明的理由**，Go 里没有。今天两类在 Java 里互斥（CodeError 不是
+        // StatusException）所以不可观察，但一旦 CodeError 开始携带 status 载荷，
+        // 两侧就会给出不同的码。照 Go 排，别再对调。
+        if (err instanceof CodeError) {
+            return ((CodeError) err).getCode();
+        }
+
+        FoundStatus found = extractStatus(err);
+        if (found != null) {
+            // ⚠️ 这一行对应 grpc-go 的 `p.Message = err.Error()`（仅在**解包**路径上发生）：
+            //    Go 用**外层**异常文本覆盖 description，于是按 description 反查业务码会查不中，
+            //    最终落到下面的 code class 映射。直接命中时不做覆盖。
+            String description = found.wrapped() ? err.getMessage() : found.status().getDescription();
+            Integer code = BIZ_CODE_BY_MSG.get(description);
             if (code != null) {
                 return code;
             }
-            return mapStatusCodeToBizCode(status.getCode());
-        }
-
-        if (err instanceof CodeError) {
-            return ((CodeError) err).getCode();
+            return mapStatusCodeToBizCode(found.status().getCode());
         }
 
         return MessageErrorCode.CODE_SERVER_BUSY.getCode();
@@ -238,20 +272,56 @@ public final class MessageGrpcError {
     }
 
     /**
-     * 同时识别 checked 的 {@link StatusException} 和 unchecked 的
-     * {@link StatusRuntimeException} —— gRPC client stub 经常抛后者，
-     * 而手写 server 端一般抛前者，所以两端都要兜住。
+     * 取出 gRPC status —— <b>沿 cause 链向上找</b>。
      *
-     * <p>返回 {@code null} 表示这个 throwable 不是 gRPC status error，
-     * 调用方会进入 CodeError / 其它异常分支。
+     * <p><b>Go 出处（消费点，不是声明点）</b>：{@code errmsg.go:108} 调 {@code status.FromError(err)}，
+     * 而 grpc-go v1.81.1（{@code go.mod:25}）的 {@code status.FromError} 实现里有两段：
+     * <pre>
+     *   if gs, ok := err.(grpcstatus); ok { ... }              ← 直接命中
+     *   var gs grpcstatus
+     *   if errors.As(err, &amp;gs) {                            ← **沿错误链解包**
+     *       p := gs.GRPCStatus().Proto()
+     *       p.Message = err.Error()                             ← 且用**外层**文本覆盖 message
+     *       return status.FromProto(p), true
+     *   }
+     *   return New(codes.Unknown, err.Error()), false
+     * </pre>
+     *
+     * <p>⚠️ <b>本方法此前只做 {@code instanceof}，是 {@code DRIFT-MSG-COMMON-001}</b>：
+     * gRPC-Java 的异步 stub 会抛 {@code CompletionException}、Spring 的
+     * {@code @Async}/AOP 也常包一层，这些都不是 {@code StatusRuntimeException} 本身
+     * ⇒ 旧实现直接落到兜底 {@code 1015 service busy}，而 Go 会解包后按
+     * gRPC code class 映射（NOT_FOUND ⇒ {@code 5002} 等）。
+     *
+     * <p><b>返回值语义</b>：{@code null} 表示「整条链上都没有 status」，对应 Go 的 {@code ok=false}。
+     * 返回 {@link FoundStatus} 而不是裸 {@link Status}，是为了把 Go 那句
+     * 「用外层文本覆盖 message」也带出来（见 {@link FoundStatus#descriptionForReverseLookup()}）。
      */
-    private static Status extractStatus(Throwable err) {
-        if (err instanceof StatusException) {
-            return ((StatusException) err).getStatus();
-        }
-        if (err instanceof StatusRuntimeException) {
-            return ((StatusRuntimeException) err).getStatus();
+    private static FoundStatus extractStatus(Throwable err) {
+        for (Throwable t = err; t != null; t = t.getCause()) {
+            if (t instanceof StatusException se) {
+                return new FoundStatus(se.getStatus(), t != err);
+            }
+            if (t instanceof StatusRuntimeException sre) {
+                return new FoundStatus(sre.getStatus(), t != err);
+            }
+            // 防环：自引用的 cause 会让上面的循环变成死循环
+            if (t.getCause() == t) {
+                break;
+            }
         }
         return null;
+    }
+
+    /**
+     * 「找到了 status」的返回载体，额外带一个标记：这个 status 是<b>直接命中</b>还是
+     * <b>沿 cause 链解包得到</b>的。
+     *
+     * <p>用途只有一个：忠实复刻 grpc-go {@code status.FromError} 在解包路径上的那句
+     * {@code p.Message = err.Error()} —— 解包时 Go 会用<b>外层</b>异常的文本覆盖 description。
+     * 于是「按 description 反查业务码」会<b>查不中</b>，最终按 gRPC code class 兜底。
+     * 不复刻这一步，解包路径就会比 Go 多命中一层反查，码可能从 {@code 5002} 变成别的值。
+     */
+    private record FoundStatus(Status status, boolean wrapped) {
     }
 }

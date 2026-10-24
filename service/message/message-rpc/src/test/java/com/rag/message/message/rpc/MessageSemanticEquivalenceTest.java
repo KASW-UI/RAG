@@ -23,7 +23,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -171,7 +172,7 @@ class MessageSemanticEquivalenceTest {
     void notificationBatchInsertMustSurviveTheParameterLimit() {
         final int recipients = 6000;
         List<NotificationEntity> batch = new ArrayList<>(recipients);
-        LocalDateTime now = LocalDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         for (int i = 0; i < recipients; i++) {
             NotificationEntity n = notification(2000L + i, 777L, false);
             n.setCreatedAt(now);
@@ -203,7 +204,7 @@ class MessageSemanticEquivalenceTest {
     @Test
     @DisplayName("DRIFT-MSG-V-002：分片后仍是单一事务，中途失败必须全部回滚")
     void batchInsertMustStayAtomicAcrossChunks() {
-        LocalDateTime now = LocalDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         List<NotificationEntity> batch = new ArrayList<>();
         for (int i = 0; i < 250; i++) {   // > INSERT_BATCH_SIZE(200) ⇒ 必被切成 2 片
             NotificationEntity n = notification(3000L + i, 888L, false);
@@ -238,10 +239,10 @@ class MessageSemanticEquivalenceTest {
     @DisplayName("DRIFT-MSG-V-004：会话消息必须按 created_at ASC 排序（构造与 id 相反的次序）")
     void conversationMessagesMustBeOrderedByCreatedAtNotId() {
         long convId = 7001L;
-        insertConversation(convId, 1L, 11L, LocalDateTime.now());
+        insertConversation(convId, 1L, 11L, OffsetDateTime.now(ZoneOffset.UTC));
 
-        LocalDateTime t1 = LocalDateTime.of(2026, 1, 1, 0, 0, 0);
-        LocalDateTime t2 = t1.plusHours(1);
+        OffsetDateTime t1 = OffsetDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
+        OffsetDateTime t2 = t1.plusHours(1);
         // id 小的那行 created_at 更大 ⇒ 按 id 得 [id1, id2]，按 created_at 得 [id2, id1]
         insertMessage(9001L, convId, t2, 11L, SenderRole.USER.getNumber());
         insertMessage(9002L, convId, t1, 11L, SenderRole.USER.getNumber());
@@ -275,7 +276,7 @@ class MessageSemanticEquivalenceTest {
     @DisplayName("DRIFT-MSG-V-005：last_message_at 并列时必须按 updated_at DESC 决定顺序")
     void conversationListMustUseUpdatedAtAsTiebreaker() {
         long uid = 12L;
-        LocalDateTime sameLastMessageAt = LocalDateTime.of(2026, 2, 2, 12, 0, 0);
+        OffsetDateTime sameLastMessageAt = OffsetDateTime.of(2026, 2, 2, 12, 0, 0, 0, ZoneOffset.UTC);
         // 两个会话的 last_message_at 完全相同，只有 updated_at 不同。
         // ⚠️ 参与者组合必须不同：uk_conversation_pair 是 (p1_role,p1_id,p2_role,p2_id) 唯一，
         //    同一对参与者只能有一个会话。让 operator 分别落在 p1 / p2 两侧即可绕开。
@@ -312,17 +313,17 @@ class MessageSemanticEquivalenceTest {
     void markConversationReadMustNotTouchConversationUpdatedAt() {
         long convId = 7201L;
         long uid = 13L;
-        LocalDateTime originalUpdatedAt = LocalDateTime.of(2026, 3, 3, 8, 0, 0);
-        insertConversation(convId, 1L, uid, LocalDateTime.now(), originalUpdatedAt);
+        OffsetDateTime originalUpdatedAt = OffsetDateTime.of(2026, 3, 3, 8, 0, 0, 0, ZoneOffset.UTC);
+        insertConversation(convId, 1L, uid, OffsetDateTime.now(ZoneOffset.UTC), originalUpdatedAt);
 
-        LocalDateTime createdAt = LocalDateTime.of(2026, 3, 3, 7, 0, 0);
+        OffsetDateTime createdAt = OffsetDateTime.of(2026, 3, 3, 7, 0, 0, 0, ZoneOffset.UTC);
         // recipient 必须就是 operator（uid/USER）—— MarkConversationRead 的 WHERE 带
         // recipient_role + recipient_id，对不上就更新 0 行，本用例会因"什么都没做"而假绿。
         insertMessage(9101L, convId, createdAt, uid, SenderRole.USER.getNumber());
 
-        LocalDateTime before = jdbcTemplate.queryForObject(
+        OffsetDateTime before = jdbcTemplate.queryForObject(
                 "SELECT updated_at FROM message_conversation WHERE id = ?",
-                LocalDateTime.class, convId);
+                OffsetDateTime.class, convId);
         assertEquals(originalUpdatedAt, before);
 
         domainService.markConversationRead(
@@ -332,9 +333,9 @@ class MessageSemanticEquivalenceTest {
                         .setConversationId(convId)
                         .build());
 
-        LocalDateTime after = jdbcTemplate.queryForObject(
+        OffsetDateTime after = jdbcTemplate.queryForObject(
                 "SELECT updated_at FROM message_conversation WHERE id = ?",
-                LocalDateTime.class, convId);
+                OffsetDateTime.class, convId);
         assertEquals(originalUpdatedAt, after,
                 "DRIFT-MSG-V-006：Go 的 MarkConversationRead 只 UPDATE 消息表（message.go:176-184）。"
                         + "修复前 RAG 额外 touch 了 conversation.updated_at —— "
@@ -354,20 +355,20 @@ class MessageSemanticEquivalenceTest {
     /**
      * <b>DB 往返用例</b>：单测证明了「转换函数算得对」，
      * 这条证明**它依赖的前提也成立** —— 即 {@code TIMESTAMP}（无时区）列对
-     * {@code LocalDateTime} 墙钟<b>不做任何换算、原样存取</b>。
+     * {@code OffsetDateTime} 墙钟<b>不做任何换算、原样存取</b>。
      *
      * <p>整个 DRIFT-MSG-V-007 的修法（读侧用 {@code atZone(systemDefault())}）就建立在这个前提上：
      * 若某天有人把列改成 {@code TIMESTAMPTZ}、或换掉 JDBC 驱动，
      * 这个前提就不成立了，读侧也必须跟着改 —— <b>而没有任何单测会发现</b>。
      *
-     * <p>断言用「写入一个非当前时间的固定墙钟」，避免用 {@code LocalDateTime.now()}
+     * <p>断言用「写入一个非当前时间的固定墙钟」，避免用 {@code OffsetDateTime.now(ZoneOffset.UTC)}
      * 时把「写对读错」和「读写都对」混在一起看不出来。
      */
     @Test
     @DisplayName("DRIFT-MSG-V-007：写入的墙钟经 TIMESTAMP 列往返后必须逐秒相等")
     void notificationTimestampsMustRoundTripLosslessly() {
         long uid = 9500L;
-        LocalDateTime wallClock = LocalDateTime.of(2026, 10, 23, 2, 0, 0);
+        OffsetDateTime wallClock = OffsetDateTime.of(2026, 10, 23, 2, 0, 0, 0, ZoneOffset.UTC);
 
         NotificationEntity n = notification(1900L, uid, false);
         n.setCreatedAt(wallClock);
@@ -375,9 +376,9 @@ class MessageSemanticEquivalenceTest {
         atomicService.insertNotificationsTx(List.of(n));
 
         // 直接从库里读，绕开 mapper，确认列本身没做换算
-        LocalDateTime rawFromDb = jdbcTemplate.queryForObject(
+        OffsetDateTime rawFromDb = jdbcTemplate.queryForObject(
                 "SELECT created_at FROM message_notification WHERE id = ?",
-                LocalDateTime.class, 1900L);
+                OffsetDateTime.class, 1900L);
         assertEquals(wallClock, rawFromDb,
                 "TIMESTAMP（无时区）列必须原样存取墙钟。"
                         + "若这一步发生换算，读侧的 atZone(systemDefault) 就不再是正确修法");
@@ -390,10 +391,13 @@ class MessageSemanticEquivalenceTest {
                     NotificationListReq.newBuilder().setUserId(uid).setLimit(10).build());
 
             assertEquals(1, resp.getItemsCount());
-            long expected = wallClock.atZone(java.time.ZoneId.of("Asia/Shanghai"))
-                    .toInstant().getEpochSecond();
+            // 🔴 V-020：列已是 TIMESTAMPTZ、实体是 OffsetDateTime ⇒ 值自带 offset，
+            //    「按本地时区解释」这一步**已被删除**。这里刻意在 JVM=Asia/Shanghai 下
+            //    断言一个**用 +08:00 构造**的瞬时 —— 若实现偷偷把 offset 丢掉、按 JVM
+            //    时区重新解释，结果会差 8 小时而本用例转红。
+            long expected = wallClock.toEpochSecond();
             assertEquals(expected, resp.getItems(0).getCreatedAt(),
-                    "端到端：墙钟 → TIMESTAMP 列 → proto epoch，必须等于按本地时区解释的瞬时");
+                    "端到端：带 offset 的瞬时 → TIMESTAMPTZ 列 → proto epoch，必须原样往返");
         } finally {
             java.util.TimeZone.setDefault(original);
         }
@@ -418,35 +422,35 @@ class MessageSemanticEquivalenceTest {
         // —— @TableField(fill = INSERT) 的自动填充**只作用于 MP 生成的 SQL**，
         // 手写 SQL 不填。生产的 MessageRpcSupport.newNotificationRecord 总是显式赋值，
         // 所以这里也必须显式给，否则撞 NOT NULL。
-        n.setCreatedAt(LocalDateTime.now());
-        n.setUpdatedAt(LocalDateTime.now());
+        n.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
+        n.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
         return n;
     }
 
-    private void insertConversation(long id, long p1Id, long p2Id, LocalDateTime lastMessageAt) {
+    private void insertConversation(long id, long p1Id, long p2Id, OffsetDateTime lastMessageAt) {
         insertConversation(id, p1Id, p2Id, lastMessageAt, lastMessageAt);
     }
 
     private void insertConversation(long id, long p1Id, long p2Id,
-                                    LocalDateTime lastMessageAt, LocalDateTime updatedAt) {
+                                    OffsetDateTime lastMessageAt, OffsetDateTime updatedAt) {
         insertConversationAsP1(id, p1Id, p2Id, lastMessageAt, updatedAt);
     }
 
     /** operator 落在 participant1 侧。 */
     private void insertConversationAsP1(long id, long p1Id, long p2Id,
-                                        LocalDateTime lastMessageAt, LocalDateTime updatedAt) {
+                                        OffsetDateTime lastMessageAt, OffsetDateTime updatedAt) {
         insertConversationRow(id, p1Id, p2Id, lastMessageAt, updatedAt);
     }
 
     /** operator 落在 participant2 侧（用于绕开 uk_conversation_pair 的唯一约束）。 */
     private void insertConversationAsP2(long id, long peerId, long operatorId,
-                                        LocalDateTime lastMessageAt, LocalDateTime updatedAt) {
+                                        OffsetDateTime lastMessageAt, OffsetDateTime updatedAt) {
         insertConversationRow(id, operatorId, peerId, lastMessageAt, updatedAt);
     }
 
     private void insertConversationRow(long id, long p1Id, long p2Id,
-                                       LocalDateTime lastMessageAt, LocalDateTime updatedAt) {
-        LocalDateTime createdAt = lastMessageAt;
+                                       OffsetDateTime lastMessageAt, OffsetDateTime updatedAt) {
+        OffsetDateTime createdAt = lastMessageAt;
         jdbcTemplate.update("""
                 INSERT INTO message_conversation
                   (id, participant1_role, participant1_id, participant2_role, participant2_id,
@@ -459,7 +463,7 @@ class MessageSemanticEquivalenceTest {
                 id, p1Id, p2Id, p1Id, lastMessageAt, createdAt, updatedAt);
     }
 
-    private void insertMessage(long id, long convId, LocalDateTime createdAt,
+    private void insertMessage(long id, long convId, OffsetDateTime createdAt,
                                long recipientId, int recipientRole) {
         jdbcTemplate.update("""
                 INSERT INTO message_conversation_message

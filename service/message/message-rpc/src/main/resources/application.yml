@@ -13,7 +13,18 @@ spring:
   # ============== Postgres ==============
   # 对应 Go Postgres.*：Host / Port / User / Password / DBName / Mode
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}
+    # ⚠️ 两个连接参数不是「锦上添花」，是逐字对齐 Go 的 DSN（2026-10-23 实测确认）：
+    #   Go  service/message/rpc/internal/model/db.go:21-29
+    #       host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=Asia/Shanghai
+    #       ↑ 等于 etc/message.yaml:34 的 Mode: "disable" ⇒ sslmode=disable
+    #
+    # ① sslmode=disable —— Go **永不尝试 TLS**；URL 里不写时 pgjdbc 用文档化默认值
+    #    `prefer`（先试 TLS 再回落明文）。对当前没开 TLS 的容器两边都是明文，
+    #    但 PG 一旦启用 TLS：Go 连不上，RAG 会自动升级成加密连接。
+    # ② options=-c TimeZone=Asia/Shanghai —— Go 把**会话时区**钉死；pgjdbc 没有 TimeZone
+    #    这个连接属性（PGProperty 里查无此项，实测），只能用 options 透传。
+    #    ⚠️ 本域时间列当前是 `TIMESTAMP`（无时区），会话时区直接决定读出来的是哪一刻。
+    url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}?sslmode=disable&options=-c%20TimeZone%3DAsia%2FShanghai
     username: ${POSTGRES_USER:admin}
     password: ${POSTGRES_PASSWORD:password}
     driver-class-name: org.postgresql.Driver
@@ -53,6 +64,42 @@ spring:
   flyway:
     enabled: true
     baseline-on-migrate: true
+    # ⚠️⚠️ **baseline-version 必须显式钉 0**（2026-10-24 实测修掉的真缺陷）
+    #
+    # 【现象】message-rpc 与 user-rpc / admin-rpc **连同一个库**（rag_db / first_db），
+    #         而 user-rpc / admin-rpc 用的是 SchemaInitializer 幂等重放（无账本），
+    #         它们先启动 ⇒ **public schema 已经非空**（users_user / admin_admin …）。
+    #         ⇒ message-rpc 启动时 Flyway 看到「非空 schema + 没有自己的账本」
+    #         ⇒ 因 baseline-on-migrate=true ⇒ **在 V1 处打 baseline 标记**
+    #         ⇒ **V1 的 SQL 从未执行** ⇒ `message_notification` 表永远建不出来
+    #         ⇒ V5（ALTER 那 8 个时间列）报 `relation "message_notification" does not exist`
+    #         ⇒ **服务起不来**。
+    #
+    # 【为什么 Testcontainers 永远测不出来】
+    #         `MessageTransactionWiringTest` 每个用例都是**全新空库** + 只有 message-rpc 一个进程
+    #         ⇒ schema 是空的 ⇒ baseline 根本不触发 ⇒ V1 正常执行。
+    #         ⇒ 「测试全绿」与「生产拓扑下根本起不来」同时成立（§3.3 的经典形态）。
+    #
+    # 【证据】真 PG 16 + 真 jar 实测（2026-10-24，difftest 并行实例）：
+    #         非空 schema + baseline-on-migrate=true（默认 baseline-version=1）
+    #           ⇒ 账本首行 = `<< Flyway Baseline >>`（version 1）
+    #           ⇒ message_notification **不存在** ⇒ V5 失败 ⇒ 启动失败
+    #         非空 schema + **baseline-version=0**
+    #           ⇒ 账本 = V1..V5 **五条全部真实执行**
+    #           ⇒ message_notification 建出 ⇒ `Started MessageRpcApplication in 4.09 seconds`
+    #
+    # 【为什么 0 而不是关掉 baseline-on-migrate】
+    #         baseline-on-migrate=false 时，非空 schema 且无账本 ⇒ Flyway **直接抛异常退出**
+    #         （"Found non-empty schema(s) … but no schema history table"）⇒ 更糟（起不来且无修复路径）。
+    #         baseline-version=0 ⇒ baseline 标记打在 version 0 ⇒ **V1 之后全部迁移照常执行**
+    #         ⇒ 既能在共享库里安全启动，又不丢任何迁移。
+    #
+    # 【影响面】同一套写法（独立账本 + baseline-on-migrate=true + 共享 schema）
+    #         在 **like-rpc** 上**同样成立**（它的迁移从 V1 起步 ⇒ V1 会被顶掉
+    #         ⇒ like_record 表建不出来）⇒ 见 DRIFT 台的 `DRIFT-MSG-V-029`。
+    #         ⚠️ **article-rpc 不受影响**：它的迁移从 V8 起步，没有 V1 可跳
+    #         ⇒ baseline 落在 version 1 ⇒ V8..V10 照常执行（2026-10-24 实测更正）。
+    baseline-version: 0
     locations: classpath:db/migration
     schemas: public
     table: flyway_schema_history_message
@@ -72,7 +119,24 @@ grpc:
   server:
     port: 8082
     address: 0.0.0.0
-    # Go 端 reflection 在 DevMode/TestMode 启用，Java 端由 devh starter 默认注册 reflection
+    # 🔴 DRIFT-MSG-V-015（2026-10-23 修）
+    # ⚠️ 原来的注释写「Go 端 reflection 在 DevMode/TestMode 启用，Java 端由 devh starter
+    #    默认注册 reflection」—— **这句是错的**：它把「devh 默认 true」写成了「与 Go 一致」。
+    #
+    # Go 出处（message.go:40-42）：
+    #     if c.Mode == service.DevMode || c.Mode == service.TestMode { reflection.Register(grpcServer) }
+    # 消费点判定：Config 内嵌 zrpc.RpcServerConf，其 Mode 字段带
+    #   `json:",default=pro,options=dev|test|rt|pre|pro"`（go-zero@v1.10.2
+    #   core/service/serviceconf.go:35），而 etc/message.yaml **没有配 Mode**
+    #   ⇒ 取默认值 "pro" ⇒ 分支不成立 ⇒ **真源生产形态不暴露 reflection**。
+    #
+    # devh 的 GrpcServerProperties 默认 reflectionServiceEnabled = true
+    # （spring-configuration-metadata.json 实测 defaultValue=True）
+    # ⇒ 不显式关掉的话，RAG 会比真源多暴露一整个反射面：
+    #    `grpcurl -plaintext localhost:8082 list` 能列出全部 9 个方法并下载 proto 描述符。
+    # 本模块**不配** DevMode/TestMode 切换（Go 侧也没有对应配置项），
+    # 因此生产等价物就是关掉；需要本地调试时用 profile 临时打开。
+    reflection-service-enabled: false
 
   # ============== gRPC client：user-rpc / admin-rpc（被调） ==============
   # 对应 Go UserRpc: zrpc.RpcClientConf{ Etcd: { Hosts: [...], Key: "user.rpc" } }

@@ -6,7 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /**
  * 会话内单条消息表 ORM 实体。
@@ -65,10 +65,10 @@ public class ConversationMessageEntity {
     private boolean read;
 
     /** 对应 Go {@code ReadAt *time.Time gorm:"column:read_at"}。 */
-    private LocalDateTime readAt;
+    private OffsetDateTime readAt;
 
     @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -86,8 +86,8 @@ public class ConversationMessageEntity {
     public void setContent(String content) { this.content = content; }
     public boolean isRead() { return read; }
     public void setRead(boolean read) { this.read = read; }
-    public LocalDateTime getReadAt() { return readAt; }
-    public void setReadAt(LocalDateTime readAt) { this.readAt = readAt; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    public OffsetDateTime getReadAt() { return readAt; }
+    public void setReadAt(OffsetDateTime readAt) { this.readAt = readAt; }
+    public OffsetDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
 }

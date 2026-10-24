@@ -6,7 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -93,7 +93,7 @@ public class NotificationEntity {
     private boolean read;
 
     /** 对应 Go {@code ReadAt *time.Time gorm:"column:read_at"}。 */
-    private LocalDateTime readAt;
+    private OffsetDateTime readAt;
 
     /**
      * 对应 Go {@code Extra JSONMap gorm:"column:extra;type:jsonb"}。
@@ -106,11 +106,11 @@ public class NotificationEntity {
 
     /** 对应 Go {@code CreatedAt time.Time gorm:"column:created_at;autoCreateTime"}。 */
     @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     /** 对应 Go {@code UpdatedAt time.Time gorm:"column:updated_at;autoUpdateTime"}。 */
     @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updatedAt;
+    private OffsetDateTime updatedAt;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -128,12 +128,12 @@ public class NotificationEntity {
     public void setContent(String content) { this.content = content; }
     public boolean isRead() { return read; }
     public void setRead(boolean read) { this.read = read; }
-    public LocalDateTime getReadAt() { return readAt; }
-    public void setReadAt(LocalDateTime readAt) { this.readAt = readAt; }
+    public OffsetDateTime getReadAt() { return readAt; }
+    public void setReadAt(OffsetDateTime readAt) { this.readAt = readAt; }
     public Map<String, String> getExtra() { return extra; }
     public void setExtra(Map<String, String> extra) { this.extra = extra; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    public OffsetDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
+    public OffsetDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

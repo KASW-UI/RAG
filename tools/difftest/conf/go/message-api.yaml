@@ -1,0 +1,58 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  difftest 专用副本 —— Go 真源 service/message/api/etc/messagecenter.yaml 的复制品
+#
+#  【铁律】绝不修改冻结的 Go 仓库。Go 的运行时配置全部来自本目录的副本，
+#         启动时用 `-f` 指过来，真源一个字节都不动。
+#  【铁律】Go 不写任何文件进仓库。真源 yaml 的 `Log.Mode: file` + `Path` 是相对 etc/ 的，
+#         会直接落到冻结仓库里，所以副本改成 `Mode: console`。
+#
+#  与 message-rpc.yaml 副本的差异（message-api 侧）：
+#    1. 真源 Port 8892 → 18892（独占 Go 段 1xxxx；18888=user-api / 18889=admin-api）
+#    2. DevServer 16066 → 19096（19094=user-rpc / 19095=user-api / 19097=admin-rpc
+#                              / 19098=message-rpc ⇒ 19096 空着）
+#    3. MessageRpc 的 Etcd 整块换成 Endpoints 直连
+#    4. message-api **没有** Postgres 配置（它只验签 + 转发给 message-rpc）
+#
+#  为什么 Etcd 能整块删掉：
+#   go-zero v1.10.2 zrpc/config.go:91-95 RpcClientConf.BuildTarget() 对 Endpoints **短路**
+#   （len(Endpoints)>0 ⇒ resolver.BuildDirectTarget(Endpoints)），优先于 Etcd 分支。
+#   服务端同理：zrpc/server.go:42 `if c.HasEtcd()` 不成立 ⇒ 不注册到 Etcd。
+#   ⇒ 对拍环境不需要 etcd 容器，也不需要真源那套 flat key。
+# ═══════════════════════════════════════════════════════════════════════════
+
+Name: messagecenter
+Host: 0.0.0.0
+Port: 18892
+
+Log:
+  ServiceName: messagecenter
+  Mode: console          # difftest: 绝不写进冻结仓库
+
+UserAuth:
+  AccessSecret: ae0536f9-6450-4606-8e13-5a19ed505da0
+  AccessExpire: 31536000
+
+AdminAuth:
+  AccessSecret: "yU-hCm)2*?NQmWG"
+  AccessExpire: 2592000
+
+Telemetry:
+  Name: message-api
+  Endpoint: jaeger:4317
+  Sampler: 1.0
+  Batcher: otlpgrpc
+
+DevServer:
+  Enabled: true
+  Host: 0.0.0.0
+  Port: 19099
+  MetricsPath: /metrics
+  HealthPath: /healthz
+  EnableMetrics: true
+  EnablePprof: true
+
+MessageRpc:
+  # difftest: Endpoints 直连 Go message-rpc（difftest 端口），不需要 etcd
+  # Go 出处: go-zero v1.10.2 zrpc/config.go:91-95 RpcClientConf.BuildTarget()
+  Endpoints:
+    - 127.0.0.1:18082
