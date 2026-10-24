@@ -470,7 +470,7 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 | **U4** | authority lookup 的 3s 超时 | 走 Hikari 连接超时 | ✅ **已修**（第四轮，§10.1）⇒ **DEV-FAV-RPC-005 撤销** | §10.1 |
 | **U5** | `ObserveRPC` 的 `result` 标签 | Go 21 处被记成 success | ❌ **已撤销**（第二轮实测证伪，§9.3） | 撤销记录 + `tools/metrics-probe/favorite/` |
 | **U6** | `favorite_request_seconds_counter` 指标名 | Micrometer 追加 `_total` | ✅ **已签字**（其余 3 个指标名两侧完全一致） | **DEV-FAV-RPC-001** |
-| **U7** | 双侧活体对拍 + 变异验证 | 未做 | 🔴 **仍未闭** —— Go 侧 `etcd` / Kafka 不可拉起（**环境受限**）⇒ 但**已有 4 项局部双侧对拍**：错误码契约（`tools/errmsg-probe/favorite/`）、path 形态（`tools/authority-path-probe/favorite/`）、指标 result 语义（`tools/metrics-probe/favorite/`）、v2 响应体形状（本轮，真 PG 端到端 + 变异） | §11.2 / 各探针 |
+| **U7** | 双侧活体对拍 + 变异验证 | 未做 | 🔴 **仍未闭** —— Go 侧 `etcd` / Kafka 不可拉起（**环境受限**）⇒ 但**已有 6 项局部双侧对拍**：错误码契约（`tools/errmsg-probe/favorite/`）、path 形态（`tools/authority-path-probe/favorite/`）、指标 result 语义（`tools/metrics-probe/favorite/`）、v2 响应体形状、**protobuf 消息体 wire 字节**（`tools/proto-wire-probe/favorite/`）、**DDL 逐列**（`tools/ddl-parity-probe/favorite/`）⇒ **最新见 §13.4** | §11.2 / §13.2 / 各探针 |
 
 ### 11.7 本轮验证
 
@@ -571,7 +571,7 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 |---|---|---|
 | **rpc 侧整域双侧活体对拍** | 🔴 未闭（Go 侧 `etcd` / Kafka 不可拉起） | 🔴 **仍未闭**（**环境受限**，非方法缺陷） |
 | **已做的局部双侧对拍** | **4 项**：错误码契约 / path 形态 / 指标 result 语义 / v2 响应体形状 | **5 项**：＋ **protobuf 消息体 wire 字节** |
-| **DDL 逐列对照** | 🔴 未做（`check-ddl-static.py` 无 favorite 预设） | 🟡 **源码级已完成**（§12.2）⇒ **活体对拍仍未做** |
+| **DDL 逐列对照** | 🔴 未做（`check-ddl-static.py` 无 favorite 预设） ⇒ ✅ **活体对拍已完成**（第七轮，§13.2）⇒ **本行已被 §13.2 取代** |
 | **仍未闭的** | — | **帧层**（HTTP2 / length-prefix / gRPC status 帧）⇒ 需两侧同时起服务 |
 
 ### 12.4 本轮验证
@@ -664,3 +664,85 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 >
 > ⇒ **登记的前置动作**：**部署 favorite-rpc 的 V7 之前**，先确认「除 `insertFact` 外没有别的写入方
 > 直接写 `favorite_fact_outbox`」⇒ 有的话，先改它们，再上 V7。
+
+---
+
+## 14. 2026-10-25 第八轮（`align/favorite` 工作树 · 基线 commit 58e8314 · 承 `7ab9f91`）
+
+> ⚠️ **本节只追加，不修改 §0–§13。**
+> 本轮目标：**把「首轮（2026-10-23）产出的结论」做一次机器化复核** ——
+> 因为 §0–§8 的头部一直写着「**本轮未重新验证**」⇒ 那是本域最长的一个悬空点。
+
+### 14.1 ✅ rpc 侧：56 个 `GRPCError` 调用点的 **(gRPC 码, 业务码)** 逐条复核
+
+**方法**（机器可复现）：
+
+| 侧 | 提取方式 |
+|---|---|
+| Go | `grep` 出 `internal/logic/*.go` 里全部 `GRPCError(codes.X, favoritecommon.Y)` ⇒ **56 处** |
+| RAG | `grep` 出 `FavoriteExceptions.*Factory(` 调用点 ⇒ 再从 `FavoriteExceptions` 的**工厂方法体**读出它产出的 `(Status.Code, bizCode)` |
+
+**两侧的 16 种 (gRPC 码, 业务码) 组合 ⇒ 逐条一一同构**：
+
+| (gRPC 码, 业务码) | Go 处数 | RAG 工厂 | RAG 处数 | 判定 |
+|---|---|---|---|---|
+| `InvalidArgument` / `ErrorInvalidParam`(5003) | 7 | `invalidParam()` | 7 | ✅ |
+| `InvalidArgument` / `ErrorFavoriteFolderNameEmpty`(5202) | 2 | `folderNameEmpty()` | 2 | ✅ |
+| `InvalidArgument` / `ErrorFavoriteTargetEmpty`(5303) | 1 | `favoriteTargetEmpty()` | 1 | ✅ |
+| `NotFound` / `ErrorFavoriteFolderNotFound`(5201) | 4 | `folderNotFound()` | 4 | ✅ |
+| `NotFound` / `ErrorFavoriteNotFound`(5301) | 1 | `favoriteNotFound()` | 1 | ✅ |
+| `NotFound` / `ErrorUserNotFound`(5101) | 2 | `userNotFound()` | 2 | ✅ |
+| `NotFound` / `ErrorNotFound`(5002) | 2 | `articleNotFound()` | 2 | ✅ |
+| `AlreadyExists` / `ErrorFavoriteFolderNameExists`(5203) | 4 | `folderNameExists()` | 4 | ✅ |
+| `AlreadyExists` / `ErrorFavoriteAlreadyExist`(5302) | 2 | `favoriteAlreadyExist()` | 2 | ✅ |
+| `PermissionDenied` / `ErrorForbidden`(5005) | 6 | `forbidden()` | 6 | ✅ |
+| `Unavailable` / `ErrorServerCommon`(5001) | 4 | `unavailableServerCommon()` | — | ✅（**刻意**与 `Internal` 分开） |
+| `Internal` / `ErrorServerCommon`(5001) | 2 | `internalServerCommon()` | — | ✅ |
+| `Internal` / `ErrorDbSelect`(5007) | 10 | `dbSelect()` | — | ✅ |
+| `Internal` / `ErrorDbUpdate`(5008) | 5 | `dbUpdate()` | — | ✅ |
+| `Internal` / `ErrorGenerateID`(5009) | 2 | `generateId()` | — | ✅ |
+| `FailedPrecondition` / `ErrorFavoriteHistoryBlocked`(5304) | 2 | `historyBlocked()` | 2 | ✅ |
+
+⇒ **`ErrorServerCommon` 同时用 `Unavailable` 与 `Internal`**（Go 4+2）这条最容易被"统一"掉的规则，
+RAG 侧**也**拆成两个工厂 ⇒ 一致 ✅。
+
+### 14.2 📌 四组「调用点数不等」的**逐条归因**（**全部等价，零漂移**）
+
+机器比对时出现 4 组不等，逐条查清后**全部是统计口径，不是行为差**：
+
+| # | 组 | Go / RAG | 归因 | 证据 |
+|---|---|---|---|---|
+| 1 | `Unavailable/ErrorServerCommon` | 4 / 7 | RAG 侧把 Go `helper.go` 里 `ensureUserExists` / `resolveArticleSnapshot` 的失败**合并**成同一个工厂 | Go 侧 `helper.go` 的 4 处里 3 处是 `resolveArticleSnapshot` |
+| 2 | `Internal/ErrorDbSelect` | 10 / 8 | RAG 把「收藏夹读」抽成私有方法 `requireOwnedFolder`（内含 1 处 `dbSelect`）⇒ 按方法归位后**两处都在**（`FavoriteDomainService:642` 收藏夹读 + `:655` item 读） | Go `get_favorites_by_folder_logic.go:71`（收藏夹读）+ `:87`（item 读） |
+| 3 | `Internal/ErrorDbUpdate` | 5 / 11 | RAG 的**互斥 catch 块**（`OwnerMismatch` / `NotFound` / `DataAccessException`）⇒ **一次失败只命中一个** ⇒ 运行时仍记 1 次 | 与 §11.5 的 `ObserveDBError` 同型，但**这次比的是错误码产出点**，所以逐条核到了 catch 块 |
+| 4 | `Internal/ErrorGenerateID` | 2 / 1 | RAG 把雪花 ID 抽成 `nextId()`（`FavoriteDomainService:712-718`）⇒ 两个调用点共用 | Go `create_favorite_folder_logic.go` + `create_favorite_logic.go` 各 1 处 |
+
+⇒ **结论：§2 的 D1–D6（5007/5008/5304 的读写路径之分）至今仍然成立**，没有新漂移。
+
+> ⚠️ **方法上的一个坑**：第一遍统计按「方法名」归位 ⇒ 把 `requireOwnedFolder` / `nextId` 里的调用点
+> 算到了**它们自己名下** ⇒ 看起来少了几处 ⇒ **差点误判成漂移**。
+> ⇒ 复核必须**按调用链归位**（公共子步骤要摊回它的调用方），否则会造出假漂移（同 §11.5 的教训）。
+
+### 14.3 ✅ api 侧：7 条路由契约复核
+
+| Method | Path | Go（`routes.go`） | RAG（`FavoriteController`） | 判定 |
+|---|---|---|---|---|
+| POST | `/favorite/v1/folder/create` | `routes.go` 第 1 条 | `@PostMapping("/folder/create")` `:129` | ✅ |
+| DELETE | `/favorite/v1/folder/delete` | 第 2 条 | `@DeleteMapping("/folder/delete")` `:136` | ✅ |
+| GET | `/favorite/v1/folder/list` | 第 3 条 | `@GetMapping("/folder/list")` `:143` | ✅ |
+| POST | `/favorite/v1/folder/update` | 第 4 条 | `@PostMapping("/folder/update")` `:156` | ✅ |
+| POST | `/favorite/v1/item/create` | 第 5 条 | `@PostMapping("/item/create")` `:167` | ✅ |
+| DELETE | `/favorite/v1/item/delete` | 第 6 条 | `@DeleteMapping("/item/delete")` `:174` | ✅ |
+| GET | `/favorite/v1/item/list` | 第 7 条 | `@GetMapping("/item/list")` `:190` | ✅ |
+
+⇒ 前缀 `/favorite/v1` 两侧一致 ✅；中间件挂载（黑名单在 JWT 之内）见 `api.md` §1.4 ✅。
+
+### 14.4 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| rpc 侧 56 个调用点的 (gRPC 码, 业务码) | ✅ **16 种组合逐条同构** |
+| 4 组调用点数不等的归因 | ✅ **全部等价，零漂移** |
+| api 侧 7 条路由 + 前缀 | ✅ **逐条一致** |
+| 代码改动 | **零**（本轮是**只读复核**） |
+| 全量测试 | **200 例全绿**（未变） |
