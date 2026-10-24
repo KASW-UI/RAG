@@ -5,7 +5,8 @@
 
 > ## 📌 怎么读这份台账（**先看这一段**）
 >
-> 本文件是**多轮累积**的，里面有**十一轮**（2026-10-23 ~ 2026-10-24）的记录，
+> 本文件是**多轮累积**的，里面有**十个轮次小节**（2026-10-23 ~ 2026-10-24：
+> 2 个「修复轮」+ 8 个编号轮：第二 / 第三 / 第四 / 第五 / 第七 / 第九 / 第十 / 第十一轮），
 > 每轮各有一张「判定变化（FIX-xx）」表 ⇒ **那些表是历史快照，只反映当轮结论，不要当现状读。**
 >
 > | 你要找的东西 | **唯一权威面** |
@@ -16,6 +17,31 @@
 > | 某条结论的**完整取证过程** | 对应轮次的小节（第三轮 / 第四轮 / 第五轮 / 第七轮 / 第九轮 / 第十轮 / 第十一轮） |
 >
 > ⇒ **判断「某条现在是什么状态」，一律回 §7 / §9 与最新一轮，不要回历史轮次表。**
+>
+> ### ⚠️ 「第 N 轮」**跨文件会撞号** —— 引用时必须带「哪个文件」
+>
+> article 域的轮次编号**不是本文件私有的**；但**两份文件在第 2~5 轮区间是撞的**
+> （各自从 1 开始数）⇒ **只写「第 N 轮」会指错**。
+>
+> | 轮次 | 落在哪个文件 | 主题 |
+> |---|---|---|
+> | 「2026-10-23 修复轮」/「2026-10-23 第二轮」/「2026-10-24 修复轮」（前两个未编号） | **rpc.md** | 初始对齐 / `DRIFT-004` 不修 / `DRIFT-003` 已修 |
+> | 第二轮 | **api.md** | 装配层真容器测试（关 5 条 `UNRESOLVED`） |
+> | 第三轮 | **api.md** | `DRIFT-007` 码点序 |
+> | 第四轮 | **api.md** | `DRIFT-005` query 参数上限 |
+> | 第五轮 | **api.md** | `UNRESOLVED-007` / `-008` |
+> | 第六轮 | **api.md** | `DRIFT-006` LOW 不修 |
+> | 第七轮 | **rpc.md** | `U-2` 锁序实测 |
+> | 第八轮 | **api.md** | `UNRESOLVED-010` 关闭 + `DRIFT-009` 已修 |
+> | 第九轮 | **rpc.md** | `DRIFT-007` Kafka brokers |
+> | 第十轮 | **rpc.md** | `U-5'` 关闭 + `DRIFT-004` 展开并关闭 |
+> | 第十一轮 | **rpc.md** | `P-U-2` 关闭（wire 字节级） |
+> | 第十二轮 | **api.md** | `strconv.Quote` 的 Latin-1 补充段 |
+>
+> ⇒ **第 6 轮起**两份文件的编号**不再撞**（每轮只落在一个文件里，编号顺延），
+> 且与 commit 顺序一致（已用 `git log` 逐条核对）。
+> ⚠️ 「**修复轮**」这个标题**不参与**数字编号（`api.md` 1 个、`rpc.md` 2 个，日期不同）
+> ⇒ 引用时**必须带日期**。
 >
 > ⚠️ 组件判定（2026-10-24 第十一轮）：**`SEMANTICALLY NOT EQUIVALENT`**（不变）。
 > ⚠️ 证据强度上限：**真 PG / 真上下文 / 真 Tomcat / 双侧探针**，
@@ -316,6 +342,8 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 
 ### DRIFT-ARTICLE-RPC-001 —— 三处 `@Select` 缺 `@ResultMap`，jsonb 两列静默变 null
 
+> **当前状态（✅ **已修**（2026-10-23 修复轮 · FIX-01，4 处；真 PG 守门 + 变异验证））**
+
 - **Component**: RPC 服务端 + 公开读（Mapper 层）
 - **Operation**: `ListArticles`(author) / `GetArticle`(public) / `ListArticles`(public)
 - **Category**: Serialization / Result-mapping semantics（§19）
@@ -339,6 +367,8 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 
 ### DRIFT-ARTICLE-RPC-002 —— `updated_at` 在所有更新路径上永不推进
 
+> **当前状态（✅ **已修**（2026-10-23 修复轮 · FIX-02；真 PG 守门，含 SkipHooks 反向断言 + 变异验证））**
+
 - **Component**: RPC 服务端（写入侧）+ 公开读（legacy 视图）
 - **Operation**: `UpdateArticle`（A/B/C 三分支）、`ArticleReviewConsumer.rejectAsAd`、`queueSyncOutboxWithLock`、`acceptSyncResult`（失败/成功分支）、`handleDeleteResult`
 - **Category**: State transition / Side effect（§12 + §22）
@@ -355,6 +385,8 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 - **Evidence**: **真 PG 探针** PROBE5 + 静态（实体无 fill 注解 + 全仓零 `MetaObjectHandler`）。
 
 ### DRIFT-ARTICLE-RPC-003 —— 公开读的三处 Go `INTERNAL` 退化为 `UNKNOWN`（业务码 5001 → 1015）
+
+> **当前状态（✅ **已修**（2026-10-24 修复轮 · FIX-04；真 PG + 变异验证））**
 
 - **Component**: RPC 服务端 · 公开读视图
 - **Operation**: `GetArticle`（`publicOnly=true`）
@@ -375,6 +407,8 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 
 ### DRIFT-ARTICLE-RPC-004 —— `updateById` 会写已软删行；Go 的 `Save` 会拒绝
 
+> **当前状态（🔴 **撤销**（2026-10-23 第二轮：复核发现台账的 **Go 侧描述有误** ⇒ 该条**不是**漂移，照台账修反而会制造新漂移 ⇒ 不修）<br>⚠️ **它的相邻差异**（`Save` 的 `Selects="*"` vs MP `NOT_NULL`）已在 **第十轮** 单独展开并关闭（差异真实但**不可观察**）⇒ 见本文件「第十轮」节。）**
+
 - **Component**: RPC 服务端 · 写入侧
 - **Operation**: 全部 `articleMapper.updateById` 调用点
 - **Category**: Concurrency / State（§16）
@@ -390,6 +424,8 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 - **Evidence**: **真 PG 探针** PROBE6（Java 侧）+ 静态（GORM 软删除插件行为，**Go 侧未实跑** ⇒ 归入 U-4 的一部分）。
 
 ### DRIFT-ARTICLE-RPC-005 —— schema 门禁发生在开始收流量之后 ✅ **已修（2026-10-24）**
+
+> **当前状态（✅ **已修**（2026-10-24 第四轮 · FIX-07；真进程实测 + 变异验证））**
 
 - **Component**: 启动 / 生命周期
 - **Operation**: 进程启动
@@ -417,6 +453,8 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 
 ### DRIFT-ARTICLE-RPC-006 —— outbox 中继的 `pollIntervalMs<=0` 兜底根本没接上
 
+> **当前状态（✅ **已修**（2026-10-24 修复轮 · FIX-05；真容器 + 变异验证））**
+
 - **Component**: MQ · outbox 中继
 - **Operation**: `SendPending` 调度
 - **Category**: Configuration（§20）
@@ -437,7 +475,7 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 > 「配置声明与实际生效不一致」这个**能力差异没有消除**（RAG 仍不能逐通道切 broker），
 > 但**静默忽略**已改成**启动即失败** ⇒ 差异从「无人察觉」变成「响亮报错」。
 > ⇒ 完整取证与判定变化 ⇒ 本文件「2026-10-24 第九轮」节；
-> ⇒ 能力差异落 [`docs/Intentional_Deviations/article/rpc.md`](../../../Intentional_Deviations/article/rpc.md)
+> ⇒ 能力差异落 [`docs/Intentional_Deviations/article/rpc.md`](../../Intentional_Deviations/article/rpc.md)
 > （**SD-2026-10-24-02，待签字**），**本文不重复记**（一条问题只落一档）。
 
 - **Component**: 配置
@@ -467,6 +505,8 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 
 ### DRIFT-ARTICLE-RPC-008 —— `@Scheduled` 首次执行时机与 Go ticker 不同
 
+> **当前状态（✅ **已修**（2026-10-24 修复轮 · FIX-05；真容器 + 变异验证））**
+
 - **Component**: MQ · outbox 中继
 - **Operation**: `SendPending` 调度
 - **Category**: Lifecycle / Timing（§21）
@@ -479,6 +519,8 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 - **Evidence**: 静态（Go 侧确证）；**Spring 侧默认值未读源码** ⇒ 该项的 Java 侧行为同时登记为 **U-4**。
 
 ### DRIFT-ARTICLE-RPC-009 —— 通知标题取冻结 payload，Go 取当前行（**原台账判成"两者必相等"，该论证已证伪**）
+
+> **当前状态（✅ **已修**（2026-10-24 第三轮 · FIX-06；真 PG + 变异验证））**
 
 - **Component**: MQ · 同步结果消费者
 - **Operation**: `acceptSyncResult` 的一次性通知
@@ -535,6 +577,8 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 ⇒ 回归网同时断言这两个源（任一取错都红），见 `docs/Pitfalls/article/rpc.md` `PF-ARTICLE-RPC-009`。
 
 ### DRIFT-ARTICLE-RPC-010 —— MinIO 耗时的直方图**实际有 77 个桶**，Go 只有 8 个
+
+> **当前状态（✅ **已修**（2026-10-24 第五轮 · FIX-08；真 scrape + 变异验证））**
 
 - **Component**: 指标 · MinIO 耗时直方图
 - **Operation**: `ArticleRpcMetrics.observeMinio`
@@ -614,7 +658,7 @@ DistributionStatisticConfig.getHistogramBuckets(boolean supportsAggregablePercen
 | **U-7**（新） | Micrometer 直方图的实际输出（`_seconds` 后缀 + 8 个桶边界 + `_count/_sum`）与 Go `HistogramVec` 是否逐桶一致？ | `metrics.go:41-49`（显式 8 桶） | ~~`ArticleRpcMetrics:131-139`（`serviceLevelObjectives` + `publishPercentileHistogram`）~~ | ✅ **已关闭**（2026-10-24） | 真 `PrometheusMeterRegistry` scrape 实测 ⇒ 发现 `publishPercentileHistogram` 与 SLO 桶取**并集** ⇒ 实际 **77** 个边界（Go 只有 **9**：8 + 固有的 `+Inf`）⇒ 已立 `DRIFT-ARTICLE-RPC-010` 并**修复**（去掉 `publishPercentileHistogram`） |
 | **U-8**（新） | `@Scheduled` 首次执行的 `initialDelay` 默认值 | `article.go:94` ticker ⇒ 首次在 1s 后 | ~~未读 `ScheduledAnnotationBeanPostProcessor` 源码~~ | ✅ **已关闭**（2026-10-24，**零新代码**，用 FIX-05 已有的实测证据） | ① FIX-05 的变异 #4「去掉 `initialDelayString`」实测首触发在 **84ms** ⇒ **Spring 的默认值就是"立即执行"**；② 修复后由 `ArticleOutboxRelayScheduleTest#firstExecutionHappensAfterTheIntervalNotImmediately` 断言首次 ≥ 900ms（兜底间隔 1000ms）⇒ 与 Go ticker 同款 |
 | **U-9**（新） | 并发（8 handler）下的 offset 提交/跳过语义两侧是否一致 | `kq/queue.go:219-246`（8 个 processor 各自 `CommitMessages`，**不保证连续**） | RECORD + 上面那套 handler | 两边都**没有**活体对拍；顺序错乱窗口未量化 | 真 Kafka 压测 + 逐条比对 |
-| **U-2**（沿用） | 锁顺序反转 | Go 侧两条路径都由 `RetractPublicationTx` 的 `FOR UPDATE` 串行化 | Java 已统一成 article → publication，但 `retractAndUpdate` 多了一次 `selectByIdForUpdate` 提前 return | ✅ **已关闭**（2026-10-24） | 补 **CASE-R12 并发真 PG 用例** + **锁序探针**（真 PG 上同时扣住两把锁，观测被阻塞的 SQL）+ **Go 侧探针**（pgx + 真 PG，两种锁序各跑一次）⇒ 结论已定：**Go 自身**存在锁序反转（探针实测 `40P01 deadlock detected`），RAG 统一为 `article → publication` ⇒ **无反转**。⇒ 差异落档到 [`docs/Intentional_Deviations/article/rpc.md`](../../../Intentional_Deviations/article/rpc.md)（**SD-2026-10-24-01，待签字**），**不在本文重复记** |
+| **U-2**（沿用） | 锁顺序反转 | Go 侧两条路径都由 `RetractPublicationTx` 的 `FOR UPDATE` 串行化 | Java 已统一成 article → publication，但 `retractAndUpdate` 多了一次 `selectByIdForUpdate` 提前 return | ✅ **已关闭**（2026-10-24） | 补 **CASE-R12 并发真 PG 用例** + **锁序探针**（真 PG 上同时扣住两把锁，观测被阻塞的 SQL）+ **Go 侧探针**（pgx + 真 PG，两种锁序各跑一次）⇒ 结论已定：**Go 自身**存在锁序反转（探针实测 `40P01 deadlock detected`），RAG 统一为 `article → publication` ⇒ **无反转**。⇒ 差异落档到 [`docs/Intentional_Deviations/article/rpc.md`](../../Intentional_Deviations/article/rpc.md)（**SD-2026-10-24-01，待签字**），**不在本文重复记** |
 | **U-4'**（沿用） | 双侧活体对拍 | Go 依赖 `etcd:2379`，本机拉不起 | — | 本轮仍 **0** 条 | 起 etcd |
 | **U-5'**（沿用） | S-2 / S-3 / S-4 / S-7 新回归网**非假绿**未证 | — | 只有 S-1 做过变异验证 | AGENTS.md §3.3 | ✅ **已关闭**（2026-10-24 第十轮）：S-2 / S-3 / S-4 / S-7 **4/4 全部 MUT-RED** —— 逐条把修复改回去，用例都转红（详见本文件「第十轮」节的变异表）⇒ 五条回归网（S-1~S-4、S-7）**全部**证实非假绿 |
 
@@ -636,7 +680,7 @@ DistributionStatisticConfig.getHistogramBuckets(boolean supportsAggregablePercen
 | 12 | Ordering 是否一致 | ✅ | 作者/公开两条排序规则各自对齐（S-2 已改 + 真 PG） |
 | 13 | Retry 是否一致 | ✅ | 两侧均**零**进程内重试（`FixedBackOff(0,0)` ↔ kq 无重试循环） |
 | 14 | Timeout scope 是否一致 | ✅ | 70s / 10s / 2s 三处均为 **operation 级**；SQL 超时可取消已接线 |
-| 15 | Concurrency semantics 是否一致 | ⚠️ | 行锁集合一致；软删行可写（004）+ **锁顺序：U-2 已关闭（结论落 `Intentional_Deviations/article/rpc.md` 的 SD-2026-10-24-01，RAG 更安全 ⇒ 决定不对齐）** + offset 语义（U-9，仍 OPEN） |
+| 15 | Concurrency semantics 是否一致 | ⚠️ | 行锁集合一致；软删行可写（004）+ **锁顺序：U-2 已关闭（结论落 `../../Intentional_Deviations/article/rpc.md` 的 SD-2026-10-24-01，RAG 更安全 ⇒ 决定不对齐）** + offset 语义（U-9，仍 OPEN） |
 | 16 | Authentication / Authorization 是否一致 | ✅ | 两侧 rpc 层都不做认证；操作人/作者校验三处逐条一致 |
 | 17 | Serialization semantics 是否一致 | ❌ | 001（结果映射）；HTML 转义差异仅影响不经 PG 的四个字段（低） |
 | 18 | Lifecycle 是否一致 | ⚠️ | 四部件同启同停 ✅；门禁时机不同（005）；首次 tick 时刻不同（008/U-8） |
@@ -1325,7 +1369,7 @@ Timer.builder("article_service_minio_request_duration")
   ⇒ 同样并发下**只是串行化，不会失败**。
 - ⇒ 这是一条**真实、可观察**的差异，方向是「**RAG 更安全**」
   ⇒ 按 `docs/Worktree.md` 的判据「**这条差异要不要修回去？**」（不要 —— 修回去 = 重新引入死锁）
-  ⇒ **落档到 [`docs/Intentional_Deviations/article/rpc.md`](../../../Intentional_Deviations/article/rpc.md)**
+  ⇒ **落档到 [`docs/Intentional_Deviations/article/rpc.md`](../../Intentional_Deviations/article/rpc.md)**
   （**SD-2026-10-24-01，待签字**），**本文不重复记**（一条问题只落一档）。
 
 #### 两侧锁序逐条对照（行号指向**消费点**）
@@ -1408,7 +1452,7 @@ Timer.builder("article_service_minio_request_duration")
 
 | 项 | 修复前 | 修复后 |
 |---|---|---|
-| `U-2` 锁顺序反转 | 🔴 OPEN（真并发用例未写） | ✅ **已关闭**（RAG 侧锁序探针 + Go 侧探针，双侧实测）；**差异落 `Intentional_Deviations/article/rpc.md`（SD-2026-10-24-01，待签字）** |
+| `U-2` 锁顺序反转 | 🔴 OPEN（真并发用例未写） | ✅ **已关闭**（RAG 侧锁序探针 + Go 侧探针，双侧实测）；**差异落 `../../Intentional_Deviations/article/rpc.md`（SD-2026-10-24-01，待签字）** |
 | `U-3` / `U-4` / `U-9`（Kafka 位点 / seek / 并发 offset） | 🔴 OPEN | 🔴 **OPEN（不变）**（需真 Kafka） |
 | `U-4'` / `U-5'`（双侧活体对拍 / 回归网非假绿） | 🔴 OPEN | 🔴 **OPEN（不变）** |
 | `S-5`（content security） | 🔴 OPEN | 🔴 **OPEN（不变）**（阻塞于 security 域，不在本项目范围） |
@@ -1449,7 +1493,7 @@ Timer.builder("article_service_minio_request_duration")
   但当前两侧取值**恰好相同**（`kafka:9092`）⇒ **今天没有行为差异**。
 - ⇒ 本轮的处置**不是**「消除差异」（那要新建四套 Kafka 客户端，代价见下），
   而是**把「静默忽略」变成「启动即失败」** ⇒ 差异从「无人察觉」变成「响亮报错」。
-- ⇒ 能力差异本身落 [`docs/Intentional_Deviations/article/rpc.md`](../../../Intentional_Deviations/article/rpc.md)
+- ⇒ 能力差异本身落 [`docs/Intentional_Deviations/article/rpc.md`](../../Intentional_Deviations/article/rpc.md)
   （**SD-2026-10-24-02，待签字**），**本文不重复记**（一条问题只落一档）。
 
 #### 🔴 证据①：Go 侧的完整证据链（声明点 → 消费点，AGENTS.md §3.3.1）

@@ -9,6 +9,53 @@
 > `DRIFT-ARTICLE-API-0xx`（本台账的**权威编号**）与上游源码注释里的 `DRIFT-001…007`（**另一套**）
 > **同形不同义** —— 例如 `DRIFT-006` 在前者是「8–10 MiB body 文案」，在后者是「type mismatch 三段式文案」。
 > ⇒ 引用**必须带全前缀**（`DRIFT-ARTICLE-API-006`）；见 §7.6 的对照表。
+> ## 📌 怎么读这份台账（**先看这一段**）
+>
+> 本文件是**多轮累积**的（2026-10-24 一整天），每个轮次小节各有一张
+> 「判定变化（FIX-xx）」表 ⇒ **那些表是历史快照，只反映当轮结论，不要当现状读。**
+>
+> | 你要找的东西 | **唯一权威面** |
+> |---|---|
+> | 某条 `DRIFT-ARTICLE-API-0xx` 的**现状** | **§7 的对应条目**（带「当前状态（日期）」横幅 ⇒ 指向关闭它的那一轮） |
+> | 某条 `UNRESOLVED-xxx` 的**现状** | **§9 Unresolved**（逐条标了 ✅ 已关闭 + 关闭依据） |
+> | 最新的整体判定变化 | **最后一轮**的「判定变化」表（当前是**第十二轮 / FIX-18**） |
+> | 某条结论的**完整取证过程** | 对应轮次的小节（见下方**轮次对照表**） |
+>
+> ⇒ **判断「某条现在是什么状态」，一律回 §7 / §9 与最新一轮，不要回历史轮次表。**
+>
+> ⚠️ 组件判定（2026-10-24 第十二轮）：**`SEMANTICALLY NOT EQUIVALENT`**（不变）。
+> ⚠️ 证据强度上限：**真 Tomcat / 真 PG / 双侧探针**，
+> **无双侧活体对拍**（Go 侧仍需 `etcd:2379`）⇒ 所有 ✅ 一律读作
+> 「**在该证据强度下一致**」，不是「已闭环」。
+>
+> ### ⚠️ 「第 N 轮」**跨文件会撞号** —— 引用时必须带「哪个文件」
+>
+> article 域的轮次编号**不是**本文件私有的；但**两份文件的编号在第 2~5 轮区间是撞的**
+> （各自从 1 开始数）⇒ **只写「第 N 轮」会指错**。
+>
+> | 轮次 | 落在哪个文件 | 主题 |
+> |---|---|---|
+> | 「2026-10-24 修复轮」（未编号） | **api.md** | 4 条未修漂移 + article-proto 建台账 |
+> | 第二轮 | **api.md** | 装配层真容器测试（关 5 条 `UNRESOLVED`） |
+> | 第二轮 | **rpc.md** | `DRIFT-ARTICLE-RPC-004` 不修（台账 Go 侧描述有误） |
+> | 第三轮 | **api.md** | `DRIFT-007` 码点序 |
+> | 第三轮 | **rpc.md** | `U-5` 关闭 + `DRIFT-009` |
+> | 第四轮 | **api.md** | `DRIFT-005` query 参数上限 |
+> | 第四轮 | **rpc.md** | `DRIFT-005` schema 门禁 |
+> | 第五轮 | **api.md** | `UNRESOLVED-007` / `-008` |
+> | 第五轮 | **rpc.md** | `U-7` 关闭 + `DRIFT-010` |
+> | 第六轮 | **api.md** | `DRIFT-006` LOW 不修 |
+> | 第七轮 | **rpc.md** | `U-2` 锁序实测 |
+> | 第八轮 | **api.md** | `UNRESOLVED-010` 关闭 + `DRIFT-009` 已修 |
+> | 第九轮 | **rpc.md** | `DRIFT-007` Kafka brokers |
+> | 第十轮 | **rpc.md** | `U-5'` 关闭 + `DRIFT-004` 展开并关闭 |
+> | 第十一轮 | **rpc.md** | `P-U-2` 关闭（wire 字节级） |
+> | **第十二轮** | **api.md**（本轮） | `strconv.Quote` 的 Latin-1 补充段 |
+>
+> ⇒ **第 6 轮起**两份文件的编号**不再撞**（每轮只落在一个文件里，编号顺延），
+> 且与 commit 顺序一致（已用 `git log` 逐条核对）。
+> ⚠️ 另：`api.md` 有 1 个、`rpc.md` 有 2 个标题叫「**修复轮**」（日期不同）⇒
+> 它**不参与**数字编号，引用时**必须带日期**。
 
 ---
 
@@ -69,6 +116,41 @@
 
 ⇒ **教训**：§0 那次「实测」在**同一天内**就已经过期。
 计数类指标必须带**时间戳 + 该时间之后是否还有写入**，否则会被下一个会话当成现状。
+
+### 0.2 2026-10-24 复核（第十二轮 · 台账审计）：§0.1 的计数**又过期了一次**（原文同样保留，不抹除）
+
+> 依据：第十二轮做「台账是不是最新、最全状态」的审计 ⇒ 逐条核对 §7 的断言。
+> 命令（本会话实跑）：
+> `find service/article/article-api/src/main/java -name "*.java" | wc -l`
+> 与 `find service/article/article-api/src/main/java -name "*.java" -exec cat {} + | wc -l`。
+
+| 项 | §0 原文（00:1x 实测） | §0.1 复核实测（2026-10-23 02:0x） | **本轮复核实测（2026-10-24）** | 结论 |
+|---|---|---|---|---|
+| `src/main/java` `.java` 文件数 | 36 | 38 | **41** | ⬆ **再次被推翻**（见下方来源） |
+| `src/test/java` `.java` 文件数 | 未记 | 2 | **6** | ⬆（本域 11 轮加了 4 个测试类） |
+| 主源码总行数 | 4,275 | 4,666 | **5,733** | ⬆ +1,067 |
+| `src/main/java` 最新写入 | 2026-10-22 23:56 | 2026-10-23 | **2026-10-24**（`ArticleApiApplication` / `GlobalExceptionHandler` / `GoStylePlainTextErrors` 等） | ⬆ |
+
+**这 3 个新增文件是本域自己的对齐工作带来的**（不是外部改动）⇒ **不是异常，是台账过期**：
+
+| 新增文件 | 加入的 commit | 来源 |
+|---|---|---|
+| `http/GoStyleGrpcStatusMapper.java` | `2aabe8c` | 修复轮 · 状态码映射对齐 Go |
+| `http/GoStyleHttpErrorException.java` | `2aabe8c` | 修复轮 · 错误映射对齐 Go |
+| `config/GoStyleGetFormValuesFilter.java` | `3eff5cd` | 第八轮 · `DRIFT-009`（`GoStyleFormParamCountFilter` **改名**而来 ⇒ 净增 0） |
+
+⇒ `git log --diff-filter=AD --name-status do-my-own-gh..HEAD -- service/article/article-api/src/main/java` 逐条核对：
+`d8c382b` 加 `GoStyleFormParamCountFilter`（+1），`3eff5cd` 删它、加 `GoStyleGetFormValuesFilter`（净 0）
+⇒ 38 + 2（`2aabe8c`）+ 1（`d8c382b`）= **41** ✅ 与实测一致。
+
+⚠️ **又一次踩了 §0.1 自己写下的那个坑**（本仓 Pitfalls `P-6`：「台账里的『实测计数』会在同一天内过期」）：
+**计数类指标必须带时间戳 + 该时间之后是否还有写入**，否则会被下一个会话当成现状。
+⇒ 本节按 §0.1 的同样规矩处理：**不抹除原文，追加新节**。
+
+⇒ **对 `DRIFT-ARTICLE-API-008` 的影响**：那条「文件计数结论已被再次推翻」**本身依然成立**
+（§0 原文的 36 确实错了），但**它记的具体数字（38 / 4,666）也已成为历史** ——
+⇒ 该条的状态横幅已在第十二轮补上**核对日期**，并指向本节。
+
 
 ---
 
@@ -471,6 +553,8 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 
 ### 7.1 DRIFT-ARTICLE-API-001 —— 上传路径下游 gRPC 失败的 HTTP 状态码
 
+> **当前状态（✅ **已修**（2026-10-24 修复轮 · F-1；3/3 变异转红））**
+
 | 字段 | 内容 |
 |---|---|
 | **Component** | `article-api` / `POST /v1/upload` |
@@ -493,6 +577,8 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 ---
 
 ### 7.2 DRIFT-ARTICLE-API-002 —— `user-rpc`（昵称补全）单次调用超时作用域
+
+> **当前状态（✅ **已修**（2026-10-24 修复轮 · F-2；2/2 变异转红））**
 
 | 字段 | 内容 |
 |---|---|
@@ -517,6 +603,8 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 
 ### 7.3 DRIFT-ARTICLE-API-003 —— 重复 query key 的解释
 
+> **当前状态（✅ **已修**（2026-10-24 修复轮 · F-3；2/2 变异转红））**
+
 | 字段 | 内容 |
 |---|---|
 | **Component** | `article-api` / `GET /v1/article/:id`、`GET /v1/articles` |
@@ -535,6 +623,8 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 
 ### 7.4 DRIFT-ARTICLE-API-004 —— 一条**锁死了错误答案**的绿测试
 
+> **当前状态（✅ **已修**（断言已按本条「处置」拆开：`codes.Internal` ⇒ 500 / `codes.Unavailable` ⇒ 503 / 非 gRPC ⇒ 400；原「恒 400」那条把 **RAG 行为**写成 **Go 事实**的用例已被取代））**
+
 | 字段 | 内容 |
 |---|---|
 | **Component** | `article-api` 测试 |
@@ -552,6 +642,8 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 ### 7.5 其余条目（低危 / 上游已自登记）
 
 #### DRIFT-ARTICLE-API-005 —— query 参数总数上限（OBSERVABLE DIFFERENCE，LOW）
+
+> **当前状态（✅ **已修**（2026-10-24 第四轮：真 Tomcat 实测**推翻了原定性**，并补上应用层 Go 语义闸门））**
 - **Go**：`httpx/util.go:15` `maxFormParamCount = 2048`；消费点 `util.go:48-53` —— 累计超过 2048 个非空值即 `return nil, fmt.Errorf("too many form values, …")` ⇒ **400**。
 - **RAG（首轮静态判定，已被实测推翻）**：`ArticleController` 的 8 个 `@RequestParam` 无总数上限，Tomcat 只在 `maxHttpHeaderSize` 等处限流。
 - **影响**：需要 >2048 个 query 值的请求 Go 拒、RAG 收。本组件的 query 字段只有 8 个，**实际不可达** ⇒ LOW。
@@ -564,6 +656,8 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
   详见本文件「第四轮」节。
 
 #### DRIFT-ARTICLE-API-006 —— 8–10 MiB JSON body 的错误文案（OBSERVABLE DIFFERENCE，LOW）
+
+> **当前状态（🟡 **LOW，确认不修**（2026-10-24 第六轮；characterization test + 变异验证））**
 - **Go**：`requests.go:21` `maxBodyLen = 8 << 20`（**框架常量，不在任何 tag/yaml 里**）→ `io.LimitReader` **静默截断** → 解析器报 `unexpected EOF` → 400。
 - **RAG**：`GoStyleJsonBodyLimitFilter.java:93-97` 显式拒绝，body 为 `request entity too large\n`。
 - **可观察契约相同**（400 + text/plain + nosniff + 业务不执行），差异仅在 body 文案。
@@ -578,6 +672,8 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
   详见本文件「第六轮」节。
 
 #### DRIFT-ARTICLE-API-007 —— `ext_info` key 排序在非 BMP 字符上不同（OBSERVABLE DIFFERENCE，极低）✅ **已修**
+
+> **当前状态（✅ **已修**（2026-10-24 第三轮 · FIX-09；双侧探针 + 变异验证））**
 - **Go**：`encoding/json/encode.go:793-807`，`slices.SortFunc` 按 `ks`（Go string `<` = **UTF-8 字节序**）。
 - **RAG（修复前）**：`ArticleApiSupport.java:226` `new java.util.TreeMap<>(source)` ⇒ `String.compareTo` = **UTF-16 码元序**。
 - **影响**：仅当 `ext_info` 的 key 含增补平面字符（代理对）时两者序不同；ASCII / BMP 范围内逐字节一致。
@@ -587,6 +683,10 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
   并配回归网 + 变异验证 MUT-RED。详见本文件「第三轮」节。
 
 #### DRIFT-ARTICLE-API-008 —— 本仓台账的文件计数结论已被再次推翻（台账卫生）
+
+> **当前状态（✅ **已修**（台账卫生：§0.1 已按实测更正为 **38** 个主源文件 / **4,666** 行；
+> **核对日期 2026-10-23**；⚠️ **该计数已于 2026-10-24 再过期一次** ⇒ 现为 **41** 个 / **5,733** 行，
+> 逐文件来源见 **§0.2**））**
 见 **§0.1**。`src/main/java` 实测 **38**（原文 36），主源码 **4,666** 行（原文 4,275），
 且 7 个主源文件在 **2026-10-23 当日**仍有写入。
 - **Risk**（作为台账风险）：MEDIUM —— 任何按「36 个文件 / 4,275 行」做的完备性推断都已失效。
@@ -594,6 +694,8 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 - **证据**：本会话 `find`/`wc` 实跑。
 
 #### DRIFT-ARTICLE-API-009 —— Go `net/url` 的三条 query 解析行为，RAG 曾**静默放过** ✅ **已修（2026-10-24）**
+
+> **当前状态（✅ **已修**（2026-10-24 第八轮 · FIX-14；真 Tomcat 逐字一致 + 3/3 变异转红））**
 - **Go**（Go 1.25 **标准库** `net/url/url.go:1019-1054` `parseQuery`）：
   | # | 行为 | 出处 | Go 侧的文案（**探针实测**） |
   |---|---|---|---|
@@ -601,7 +703,7 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
   | ② | 段内含 `;` ⇒ **400** | `url.go:1026-1029` | `invalid semicolon separator in query` |
   | ③ | key/value 的 `%` 转义非法 ⇒ **400** | `url.go:1034-1045` | `invalid URL escape "%zz"` |
   ⇒ 这些 error 由 `net/http.Request.ParseForm` 返回，而 go-zero 的
-  `httpx.GetFormValues`（`rest/httpx/util.go:25-27`）**原样往上抛**
+  `httpx.GetFormValues`（`rest/httpx/util.go:23-25`）**原样往上抛**
   ⇒ `httpx.Parse` 失败 ⇒ `httpx.ErrorCtx` ⇒ `http.Error(w, err.Error(), 400)`。
 - **RAG（修复前）**：`GoStyleFormParamCountFilter`（现 `GoStyleGetFormValuesFilter`）
   按 Go 的**分段规则**处理这三种输入，但**只跳过该段、不上报错误**
@@ -615,6 +717,34 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
   ⇒ 真容器实测 **body 与 Go 逐字一致**（含 `strconv.Quote` 的转义文案）。
   ⚠️ **残留（LOW，不修）**：请求行含**原始非 ASCII 字节** ⇒ Tomcat 在**连接器层**就 400
   ⇒ 应用层不可达 ⇒ 与 `DRIFT-005` 的残留同类。详见本文件末尾「第八轮」节。
+
+  ⚠️ **第十二轮已把这条从「实测如此」升级为「结构性必然」**：Tomcat 11.0.24 的
+  HTTP/1.1 与 HTTP/2 **两条路径**都拒 query 里任何 `>= 0x80` 的字节 ⇒ 换配置也绕不过。
+
+#### DRIFT-ARTICLE-API-010 —— Go `strconv.IsPrint` 的 **Latin-1 补充段**（`0xA1..0xFF`）RAG 曾**判成不可打印** ✅ **已修（2026-10-24）**
+
+> **当前状态（✅ **已修**（2026-10-24 第十二轮 · FIX-18；Go 侧真标准库探针 + 直接单元测试 + 4/4 变异转红））**
+- **Go**（Go 1.25.11 **标准库** `strconv/quote.go:522-563` `IsPrint`）：
+  | 码点段 | Go 的判据 | 出处 |
+  |---|---|---|
+  | `0x20..0x7E` | 可打印 | `quote.go:525-528` |
+  | `0xA1..0xFF` | 可打印，**唯一例外 `0xAD`（软连字符）** | `quote.go:529-532` |
+  | `> 0xFF` | unicode 的 L/M/N/P/S 五类 **加** ASCII 空格（不含其它 Unicode 空格） | `quote.go:536-562` |
+  ⇒ 消费点 `quote.go:79-81`（`appendEscapedRune`）：`IsPrint(r) == true` ⇒ `utf8.AppendRune`
+  **原样输出**；否则落到 `\u00XX` / `\xNN` 分支。
+- **RAG（修复前）**：`GoStyleGetFormValuesFilter.isGoPrintable` 写作 `return r >= 0x20 && r < 0x7F;`
+  ⇒ 把**整个 `0x7F..0xFF`** 判成不可打印 ⇒ 与 Go 的 `0xA1..0xFF` 段**不一致**
+  （Go 判可打印、RAG 判不可打印 ⇒ 输出 `\u00XX` 而非原样字节）。
+- **⚠️ 影响面（这条最容易被误判成「不重要」）**：**端到端不可达** ——
+  `goQuote` 的唯一输入是 **query 串**里 `%` 开头的切片，而
+  **Tomcat 在连接器层就拒掉了 query 里任何 `>= 0x80` 的字节**
+  （HTTP/1.1 与 HTTP/2 **两条路径同判据** ⇒ 逐行证明见「第十二轮」节）
+  ⇒ query 串恒为纯 ASCII ⇒ 该分支是**结构性死代码**。
+  **但源码里的偏离是真的，且 javadoc 曾写着「Go 的 `strconv.IsPrint`」** ——
+  按 AGENTS.md §3.2 / §3.3.2，**「以 Go 措辞断言等价」却没实现** = 无出处的 idiomatization
+  ⇒ 必须消除，不能拿「端到端测不到」当借口。
+- **证据**：Go 侧探针（真标准库 `strconv.Quote`，逐字节十六进制）+ RAG 侧**直接单元测试**
+  （端到端测不到 ⇒ 必须直测）+ **4/4 变异转红**。详见本文件末尾「第十二轮」节。
 
 
 ---
@@ -1515,14 +1645,14 @@ $GOROOT/src/encoding/json/encode.go:805-807
 **Go 出处（逐行，消费点）**
 
 ```
-go-zero@v1.10.2/rest/httpx/util.go:11-17
+go-zero@v1.10.2/rest/httpx/util.go:10-16
   const (
       // most servers and clients have a limit of 8192 bytes (8 KB)
       // one parameter at least take 4 chars, for example `?a=b&c=d`
       maxFormParamCount = 2048
   )
 
-go-zero@v1.10.2/rest/httpx/util.go:44-56  GetFormValues
+go-zero@v1.10.2/rest/httpx/util.go:22-65  GetFormValues（下面摘录的是其中 :35-54 的双层循环）
   for name, values := range r.Form {
       for _, v := range values {
           if len(v) == 0 { continue }                             // ← 空值不计数
@@ -1852,10 +1982,10 @@ Go 1.25 标准库 net/url/url.go:1019-1054  parseQuery
   }
 ```
 ⇒ 这些 error 由 `net/http.Request.ParseForm` 返回，而 go-zero 的
-`httpx.GetFormValues`（`rest/httpx/util.go:25-27`）**原样往上抛**：
+`httpx.GetFormValues`（`rest/httpx/util.go:23-25`）**原样往上抛**：
 
 ```
-go-zero@v1.10.2/rest/httpx/util.go:25-27
+go-zero@v1.10.2/rest/httpx/util.go:23-25
   if err := r.ParseForm(); err != nil {
       return nil, err
   }
@@ -1963,7 +2093,7 @@ Go 的转义错误文案是 `"invalid URL escape " + strconv.Quote(那一小截)
 > **「Go 的错误会一路冒泡」这件事，必须读到**消费点**才知道它会不会变成 400。**
 >
 > 本轮的链路是：`net/url.parseQuery` 记 error ⇒ `net/http.Request.ParseForm` **返回**它
-> ⇒ go-zero 的 `httpx.GetFormValues` **原样往上抛**（`util.go:25-27`，**不是吞掉**）
+> ⇒ go-zero 的 `httpx.GetFormValues` **原样往上抛**（`util.go:23-25`，**不是吞掉**）
 > ⇒ `httpx.Parse` 失败 ⇒ `httpx.ErrorCtx` ⇒ `http.Error(w, err.Error(), 400)`。
 >
 > ⇒ **中间任何一层把它吞了，Go 就不会返 400** —— 而这一层恰好是 go-zero 的一行代码。
@@ -1972,3 +2102,289 @@ Go 的转义错误文案是 `"invalid URL escape " + strconv.Quote(那一小截)
 > ⇒ 也因此，RAG 侧复刻时**不能只复刻"分段规则"** ——
 > 「解析失败时怎么办」才是 Go 的**可观察行为**，
 > 漏掉它就不是"漏了个细节"，而是**把一个 400 变成了 200**。
+
+## 2026-10-24 第十二轮：**台账审计** —— 逐条核对「现状权威面」，并修掉一条**源码级偏离**（`strconv.Quote` 的 Latin-1 补充段）
+
+### 🔴 为什么这一轮突然做「审计」而不是「对齐」
+
+前面十一轮都在**往外找差异**（Go ↔ RAG）。这一轮反过来：**往里看台账本身**——
+「台账是不是最新、最全状态」。做法是七个维度逐项过：
+
+| 维度 | 查什么 | 结论 |
+|---|---|---|
+| 1 | 四个台账文件的「**现状权威面**」是否唯一且明确 | rpc.md ✅ 有指针；**api.md ❌ 缺** ⇒ 本轮补 |
+| 2 | §7 / §9 / 最新轮次**三面**是否一致 | ✅ 一致（本轮补完 9+7 条状态横幅后无矛盾） |
+| 3 | 编号体系有无**撞号 / 断号** | ✅ `DRIFT-ARTICLE-API-001..010`、`RPC-001..010` 连续无撞号 |
+| 4 | 交叉引用（相对链接 / 章节号 / 跨档） | ❌ 4 处失效相对链接（已修）；✅ 21 条相对链接现已全有效 |
+| 5 | Go 出处的 `文件:行号` 抽样验证 | ❌ **8 处指错消费点**（本轮全修，见下） |
+| 6 | 状态表纪律（断言是否带核对日期） | ❌ **抓到 1 条**：`DRIFT-ARTICLE-API-008` 的横幅**缺核对日期**，且它记的计数**已过期** ⇒ 本轮补日期 + 新增 **§0.2**（详见下） |
+| 7 | 测试计数与实际是否一致 | ✅ 通过（本轮全量重跑：`article-api` **86**（80 → 86，+6 新网）、`article-common` 15、`article-rpc` 136 ⇒ **article 域 237 / 0 failures / 0 errors / 0 skipped**，`BUILD SUCCESS`） |
+
+⇒ **维度 5 挖出了一条真偏离**（下面）。
+
+### ✅ FIX-18 —— `DRIFT-ARTICLE-API-010` 已修（`isGoPrintable` 对齐 Go 的 `IsPrint`）
+
+#### 1. 发现路径
+
+审计维度 5 抽样核对 Go 行号时，发现
+`GoStyleGetFormValuesFilter.java` 里 `isGoPrintable` 的 javadoc 写着
+「Go 的 `strconv.IsPrint`（`strconv/quote.go:296-303`）」——
+而 `quote.go:296-303` 落在 **`UnquoteChar` 的转义解析**里（`UnquoteChar` 起于 `:259`），
+**`IsPrint` 根本不在那儿**（真身在 `:522`）。
+
+⇒ 按 AGENTS.md §3.3.2（「以 Go 措辞断言等价」是高危项），
+**必须先确认代码到底实没实现 Go 的语义** —— 一查，**它没实现**：
+
+| 码点 | Go 的 `IsPrint` | RAG（修复前） | 一致？ |
+|---|---|---|---|
+| `0x20..0x7E` | ✅ 可打印 | ✅ 可打印 | ✅ |
+| `0x7F`（DEL） | ❌ 不可打印 | ❌ 不可打印 | ✅ |
+| **`0xA1..0xFF`** | ✅ **可打印**（唯一例外 `0xAD`） | ❌ **不可打印** | 🔴 **不一致** |
+| `0xAD`（软连字符） | ❌ 不可打印 | ❌ 不可打印 | ✅ |
+| `0xA0`（NBSP） | ❌ 不可打印 | ❌ 不可打印 | ✅ |
+| `> 0xFF` | unicode L/M/N/P/S + ASCII 空格 | 同 | ✅ |
+
+⇒ **Go 会原样输出 `é`，RAG 会输出 `\u00e9`** ⇒ **wire 字节不同**。
+
+#### 2. ⚠️ 但它在 HTTP 入口**结构上不可达** —— 这是本条最关键的一步
+
+`goQuote` 的**唯一**调用点是 `escapeErrorMessage`，它拿到的输入是
+**query 串**里 `%` 开头的**原始字节**切片（`%` + 最多 2 字节）。
+⇒ 要让非 ASCII 字节进到这里，请求行里就得有**原始非 ASCII 字节**。
+⇒ **而 Tomcat 在连接器层就把这类请求全拒了**（Tomcat 11.0.24，逐行）：
+
+```
+HTTP/1.1 —— org/apache/coyote/http11/Http11InputBuffer.java:468-473
+    } else if (parsingRequestLineQPos != -1 && !httpParser.isQueryRelaxed(chr)) {
+        String invalidRequestTarget = parseInvalid(parsingRequestLineStart, byteBuffer);
+        throw new IllegalArgumentException(sm.getString("iib.invalidRequestTarget", invalidRequestTarget));
+    }
+    ⇒ 请求行里 `?` 之后的每个字节都要过 isQueryRelaxed；不过 ⇒ 400（连接器层）
+
+HTTP/2  —— org/apache/coyote/http2/StreamProcessor.java:539-545
+    String qs = request.queryString().toString();
+    if (qs != null) {
+        for (char c : qs.toCharArray()) {
+            if (!httpParser.isQueryRelaxed(c)) { return false; }      // ⇒ 400
+        }
+    }
+    ⇒ HTTP/2 的 `:path` 走**同一个** isQueryRelaxed 判据
+
+判据本身 —— org/apache/tomcat/util/http/parser/HttpParser.java:145-172
+    for (int i = 0; i < ARRAY_SIZE; i++) {                  // ARRAY_SIZE = 256
+        if (IS_USERINFO[i] || i == '@' || i == '/') { IS_ABSOLUTEPATH_RELAXED[i] = true; }
+        if (IS_ABSOLUTEPATH_RELAXED[i] || i == '?') { IS_QUERY_RELAXED[i] = true; }
+    }
+    ⇒ IS_USERINFO 只由 IS_UNRESERVED / '%' / IS_SUBDELIM / ':' 组成（:97-108），
+      **全是 ASCII** ⇒ IS_QUERY_RELAXED 在 0x80..0xFF 上**恒为 false**
+
+放宽口子 —— HttpParser.java:1138-1148（relax）
+    if (isRelaxable(c)) { flags[c] = true; ... }
+    ⇒ isRelaxable 的字符集是 " < > [ \ ] ^ ` { | }"（:114-117），**同样全是 ASCII**
+    ⇒ **任何 relaxedQueryChars 配置都放宽不了非 ASCII**
+```
+
+⇒ **结论：query 串恒为纯 ASCII** ⇒ `goQuote` 的输入恒为 ASCII
+⇒ `isGoPrintable` 的 **Latin-1 分支是结构性死代码**。
+
+**真容器实测（2026-10-24，article-api，裸 socket）**：
+
+| 请求行 | 状态码 | body | 谁拒的 |
+|---|---|---|---|
+| `?a=%zz` | 400 | `invalid URL escape "%zz"`（**Go 文案**） | **应用层**（filter） |
+| `?a=%é`（`25 c3 a9`） | 400 | `<!doctype html>…` | **连接器层** |
+| `?a=%©`（`25 c2 a9`） | 400 | `<!doctype html>…` | **连接器层** |
+| `?a=%ÿ`（`25 c3 bf`） | 400 | `<!doctype html>…` | **连接器层** |
+| `?a=%­`（`25 c2 ad`） | 400 | `<!doctype html>…` | **连接器层** |
+| `?a=%中`（`25 e4 b8 ad`） | 400 | `<!doctype html>…` | **连接器层** |
+| `?a=é`（`25 c3 a9`） | 400 | `<!doctype html>…` | **连接器层** |
+
+#### 3. 那为什么还要修？（三条理由，缺一不可）
+
+1. **留痕断言失真**（AGENTS.md §3.2 / §3.3.2）——
+   javadoc 声称「Go 的 `strconv.IsPrint`」，而代码**没实现**它 ⇒
+   这是**无出处的 idiomatization**，本身就不该合入。
+   ⇒ **javadoc 写 Go 等价 ≠ 代码是 Go 等价**；必须反向核。
+2. **端到端测不到 ⇒ 端到端测不到就一直没人管** ——
+   既然这个分支在 HTTP 路径上不可达，那**唯一的守门网就是直接单元测试**。
+   没有它，下次有人「简化」这段代码（或换 Tomcat 版本）时**没有任何网会响**。
+3. **修复成本为零、行为影响为零** ——
+   改的是一段**死代码** ⇒ 生产行为**逐字节不变**；
+   但源码从此**可证**与 Go 的 `IsPrint` 等价。
+
+> ⚠️ 这与本域第十轮的 `DRIFT-004` 相邻差异处置**刻意不同**：
+> 那一条是「差异真实存在但 API 层面不可观察 ⇒ **不修**、不立条目」；
+> 这一条是「差异真实存在 **且** javadoc 声称等价 **且** 修复零风险 ⇒ **修**」。
+> 分野在于：**留痕是否在说谎**。
+
+#### 4. Go 出处（逐行，消费点）
+
+```
+Go 标准库 strconv/quote.go:522-563  IsPrint
+    if r <= 0xFF {
+        if 0x20 <= r && r <= 0x7E { return true }              // ← :525-528
+        if 0xA1 <= r && r <= 0xFF { return r != 0xAD }           // ← :529-532
+        return false
+    }
+    … // > 0xFF：isPrint16 / isPrint32 表（:536-562）
+
+消费点 —— strconv/quote.go:68-119  appendEscapedRune
+    } else if IsPrint(r) || graphicOnly && isInGraphicList(r) {
+        return utf8.AppendRune(buf, r)                          // ← :79-81 原样输出
+    }
+    switch r { case '\a': … }                                  // ← :82+ 落到转义分支
+```
+
+⇒ **RAG 的修复**（`GoStyleGetFormValuesFilter.isGoPrintable`）：
+
+```java
+if (r <= 0xFF) {
+    // Go strconv/quote.go:524-533（IsPrint 的 Latin-1 快路径）
+    if (r >= 0x20 && r <= 0x7E) {
+        return true;
+    }
+    if (r >= 0xA1 && r <= 0xFF) {
+        return r != 0xAD;          // ← 软连字符是唯一例外
+    }
+    return false;
+}
+```
+
+#### 5. 回归网 + 变异验证（§3.3 硬要求：证明新网**非假绿**）
+
+**新建 `ArticleGoStrconvQuoteParityTest`（6 条）** —— 用**反射**调 `goQuote`（不动生产代码的可见性），
+逐**字节**比对 Go 的输出。
+
+⚠️ **为什么必须是「直接单元测试」而不是端到端**：
+端到端路径上非 ASCII 进不了这个 filter（见 §2）⇒ 端到端**测不到**这段分支
+⇒ 端到端测试对它**恒绿**，等于**没有网**。
+
+**变异验证（4/4 MUT-RED）**：
+
+| # | 变异 | 结果 |
+|---|---|---|
+| MUT-1 | 整段 Latin-1 分支退回旧实现（`r < 0x7F`） | ✅ **转红**（3 条 Latin-1 断言） |
+| MUT-2 | 软连字符不再排除（`r != 0xAD` ⇒ `true`） | ✅ **转红** |
+| MUT-3 | Latin-1 下界 `0xA1` ⇒ `0xA0`（把 NBSP 也当可打印） | ✅ **转红** |
+| MUT-4 | ASCII 上界 `0x7E` ⇒ `0x7F`（把 DEL 也当可打印） | ✅ **转红** |
+
+⇒ 4 个变异**全部有效** ⇒ 这张网**不是假绿**。
+
+#### 6. Go 侧探针（**可复现**：源码与逐字输出都记在这里）
+
+> ⚠️ 探针**不进仓**（`tools/` 是共享面，多域并发必撞）⇒ 源码与输出记在本台账，复制即可复跑。
+
+**探针源码**（Go 1.25.11 标准库，无第三方依赖）：
+
+```go
+package main
+
+import (
+	"fmt"
+	"strconv"
+)
+
+func main() {
+	cases := []struct {
+		name string
+		b    []byte
+	}{
+		{"ascii_zz", []byte{0x25, 0x7A, 0x7A}},
+		{"latin1_e_acute", []byte{0x25, 0xC3, 0xA9}},
+		{"latin1_copyright", []byte{0x25, 0xC2, 0xA9}},
+		{"latin1_y_diaeresis", []byte{0x25, 0xC3, 0xBF}},
+		{"soft_hyphen", []byte{0x25, 0xC2, 0xAD}},
+		{"truncated_euro", []byte{0x25, 0xE2, 0x82}},
+		{"truncated_cjk", []byte{0x25, 0xE4, 0xB8}},
+		{"nbsp", []byte{0xC2, 0xA0}},
+		{"cjk", []byte{0xE4, 0xB8, 0xAD}},
+		{"emoji", []byte{0xF0, 0x9F, 0x98, 0x80}},
+		{"quote_char", []byte{0x25, 0x22}},
+		{"backslash", []byte{0x25, 0x5C}},
+		{"space", []byte{0x20}},
+		{"del", []byte{0x7F}},
+		{"nul", []byte{0x00}},
+		{"soh", []byte{0x01}},
+		{"bel", []byte{0x07}},
+		{"vt", []byte{0x0B}},
+	}
+	for _, c := range cases {
+		q := strconv.Quote(string(c.b))
+		fmt.Printf("%-22s in=%-24x out=%-30x\n", c.name, c.b, []byte(q))
+	}
+}
+```
+
+**逐字输出**（`out` 列即 Java 侧测试表里的 `expectedHex`）：
+
+```
+ascii_zz               in=257a7a                   out=22257a7a22
+latin1_e_acute         in=25c3a9                   out=2225c3a922
+latin1_copyright       in=25c2a9                   out=2225c2a922
+latin1_y_diaeresis     in=25c3bf                   out=2225c3bf22
+soft_hyphen            in=25c2ad                   out=22255c753030616422
+truncated_euro         in=25e282                   out=22255c7865325c78383222
+truncated_cjk          in=25e4b8                   out=22255c7865345c78623822
+nbsp                   in=c2a0                     out=225c753030613022
+cjk                    in=e4b8ad                   out=22e4b8ad22
+emoji                  in=f09f9880                 out=22f09f988022
+quote_char             in=2522                     out=22255c2222
+backslash              in=255c                     out=22255c5c22
+space                  in=20                       out=222022
+del                    in=7f                       out=225c78376622
+nul                    in=00                       out=225c78303022
+soh                    in=01                       out=225c78303122
+bel                    in=07                       out=225c6122
+vt                     in=0b                       out=225c7622
+```
+
+⇒ 逐条读出来：
+- `latin1_e_acute` 的 out 是 `2225c3a922` ⇒ **`é` 原样输出**（不是 `\u00e9`）⇒ 这就是 RAG 修复前**做错**的那条。
+- `soft_hyphen` 的 out 是 `22255c753030616422` ⇒ `\u00ad` ⇒ **软连字符确实是唯一例外**。
+- `nbsp` 的 out 是 `225c753030613022` ⇒ `\u00a0` ⇒ **`0xA0` 在 Latin-1 段下界之下**（MUT-3 钉的就是这条）。
+
+#### 7. 🧹 本轮顺带修掉的**台账卫生**（8 处 Go 行号指错消费点）
+
+| # | 位置 | 原写法 | 改成 | 为什么原写法错 |
+|---|---|---|---|---|
+| 1 | `DRIFT/article/api.md` ×3 + `Pitfalls/article/api.md` ×1 | `httpx/util.go:25-27` | **`util.go:23-25`** | `:25-27` 是 `ParseMultipartForm` 那段；`ParseForm` 的 error 上抛在 `:23-25` |
+| 2 | `DRIFT/article/api.md` ×1 | `util.go:44-56  GetFormValues` | **`util.go:22-65`**（摘录的是其中 `:35-54`） | `:44-56` 是循环体，不是函数 |
+| 3 | `DRIFT/article/api.md` ×1 | `util.go:11-17` | **`util.go:10-16`** | const 块是 `:10-16` |
+| 4 | `GoStyleGetFormValuesFilter.java` ×5 | `util.go:24-64` / `11-17` / `22-64` / `25-27` / `44-56` | **`22-65` / `10-16` / `22-65` / `23-25` / `44-53`** | 同上（源码 javadoc 也算留痕） |
+| 5 | `ArticleApiFormParamLimitTest.java` ×3 | `util.go:11-17` / `44-56` / `25-27` | **`10-16` / `37-54` / `23-25`** | 同上 |
+| 6 | `DRIFT-ARTICLE-API-008` 的状态横幅 | 无核对日期 + 计数 **38 / 4,666** | **补「核对日期 2026-10-23」+ 新增 §0.2（现为 41 / 5,733）** | §6.2：断言不带核对日期 ⇒ 按 `UNKNOWN` 处理；且计数**又过期了一次**（本仓 Pitfalls `P-6`） |
+
+⚠️ **教训**：`文件:行号` 的**偏移一两行**在通读时**完全看不出来** ——
+本轮是抽样 34 条才抓到 4 条 ⇒ **抽样比例要够**，且**声明点 ≠ 消费点**的坑（§3.3.1）同样适用于行号**范围**。
+
+### 判定变化（FIX-18）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `DRIFT-ARTICLE-API-010`（新增条目） | 🔴 `isGoPrintable` 与 Go 的 `IsPrint` 在 `0xA1..0xFF` 不一致 | ✅ **已修**（Go 侧真标准库探针 + 直接单元测试 + 4/4 MUT-RED） |
+| `isGoPrintable` 的 javadoc | 🔴 写着 Go 等价，行号**指到 `UnquoteChar`** | ✅ 行号改到 `quote.go:522-563`，语义描述与代码**一致** |
+| 「请求行含原始非 ASCII ⇒ 连接器层 400」 | 🟡 **实测如此**（characterization test） | 🟢 **结构性必然**（HTTP/1.1 + HTTP/2 双路径逐行证明）⇒ 换配置也绕不过 |
+| `api.md` 的「怎么读这份台账」指针 | ❌ **缺失** | ✅ 已补（含**跨文件轮次撞号**的警示） |
+| Go 行号抽样（34 条） | ❌ 4 条指错 | ✅ **8 处全修**（台账 7 + 源码 8） |
+| `DRIFT-005` / `DRIFT-006` / `DRIFT-007` / `DRIFT-009` | 已关闭 | **不变** |
+| `UNRESOLVED-002` 跨栈活体对拍 | 🟡 部分关闭 | 🟡 **部分关闭（不变）** |
+| **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
+
+⚠️ **判定不变的理由**：本轮修的是一段**端到端不可达**的死代码 ⇒
+**行为层面零变化**；其余 `DRIFT` / `UNRESOLVED` 仍在，且**无双侧活体对拍**（Go 侧仍需 `etcd:2379`）。
+
+#### 📌 一条可复用的元教训
+
+> **「javadoc 说它等价于 Go」不是证据，是「待核实的断言」。**
+>
+> 本轮正是从一句 javadoc 的**行号写错**出发，顺藤摸到**代码也没实现 Go 的语义**。
+> ⇒ **行号错**与**语义错**往往是**同一个疏漏的两面**：抄的时候抄的是「看起来像」的那一段，
+> 而不是**真正在消费这个值**的那一段。
+>
+> ⇒ 与 AGENTS.md §3.3.2 呼应：**以 Go 措辞写下的断言，本身就是高危项** ——
+> 它**必须在被 review 时被反向验证**（读 Go 源码 ⇒ 确认代码真的这么判）。
+>
+> ⇒ 另一条：**「端到端测不到」要分成两问** ——
+> ① 它**可观察**吗？（本条：**否** ⇒ 不立「需要对齐」的条目）
+> ② 它**有网**吗？（本条：**没有** ⇒ 必须补一张**直接单元测试**）
+> 只答 ① 就放过 ⇒ 就会留下一段**没人守、还自称等价**的死代码。
