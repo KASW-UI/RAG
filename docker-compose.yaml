@@ -1,24 +1,216 @@
+# Sea-RideTheWind_java — user microservice 编排
+# 目的：让 user-rpc + user-api 能跑起来；不包含 admin / 其他域 / Kafka / MinIO / Milvus 等。
+# 镜像版本策略（Infrastructure.md §5.4）：沿用 Go 版同名同版本。
+# 端口重映射（Infrastructure.md §2）：host 端口搬到 49xxx 段，容器内端口保持 5432/6379/8848/4317/9090 不变。
+# 服务发现（Infrastructure.md §5.1）：etcd → Nacos。etcd 仅 Milvus 元数据用，本栈不直连 etcd。
+
 services:
 
-  # ============ 关系型数据库 ============
+  # ===================== 1. 关系数据库 =====================
   postgres:
-    image: postgres:18.4
-    container_name: "${CONTAINER_PREFIX:-RAG}-postgres"
-    ports:
-      - "49432:5432"
+    image: postgres:latest
+    container_name: "${CONTAINER_PREFIX:-Sea}-postgres"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-RAG-DB}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-first_db}
+    ports:
+      - "49432:5432"   # Infrastructure.md §2: 49432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-first_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
 
-  # ============ 缓存 & 键值存储 ============
+  # ===================== 2. 缓存 =====================
   redis:
-    image: redis:8.6.3
+    image: redis:latest
     container_name: "${CONTAINER_PREFIX:-Sea}-redis"
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "49380:6379"
+      - "49380:6379"   # Infrastructure.md §2: 49380
     volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/redis:/data
-    command: redis-server --appendonly yes --dir /data
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
+
+  # ===================== 3. 服务发现 / 配置中心 =====================
+  # Go 版 etcd → Java 版 Nacos（Infrastructure.md §5.1 唯一硬决策）
+  # standalone 模式：默认无 auth（本地开发友好；生产解开 auth 见 Nacos 文档）
+  nacos:
+    image: nacos/nacos-server:v2.3.2-slim
+    container_name: "${CONTAINER_PREFIX:-Sea}-nacos"
+    environment:
+      MODE: standalone
+      JVM_XMS: 512m
+      JVM_XMX: 512m
+      JVM_XMN: 256m
+    ports:
+      - "49848:8848"   # Infrastructure.md §2: HTTP 49848
+      - "50848:9848"   # Infrastructure.md §2: gRPC 50848
+    volumes:
+      - nacos_data:/home/nacos/data
+      - nacos_logs:/home/nacos/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8848/nacos/v1/ns/instance/list?serviceName=user-rpc >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  # ===================== 4. 链路追踪 =====================
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: "${CONTAINER_PREFIX:-Sea}-jaeger"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "49686:16686"   # UI
+      - "49317:4317"    # OTLP gRPC（user-rpc / user-api 调这里）
+      - "49318:4318"    # OTLP HTTP
+    restart: unless-stopped
+
+  # ===================== 5. Prometheus =====================
+  # 选项 C：只 scrape user-api（HTTP gateway，本来就有 Spring Web）；
+  # user-rpc 不暴露 /actuator/prometheus（与 Go 端行为一致），不 scrape
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: "${CONTAINER_PREFIX:-Sea}-prometheus"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    volumes:
+      - ./prometheus/settings.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "49090:9090"   # Infrastructure.md §2
+    depends_on:
+      # 选项 C：删掉 user-rpc 依赖 —— user-rpc 不暴露 /actuator/prometheus，scrape 不上去
+      user-api:
+        condition: service_started
+    restart: unless-stopped
+
+  # ===================== 6. user-rpc（纯 gRPC，对齐 Go 端行为）=====================
+  # 选项 C：user-rpc 严格保持"纯 gRPC service"，不暴露 HTTP 端点。
+  # 与 Go 端 service/user/user/rpc 1:1：Go user-rpc 也没有 HTTP endpoint，
+  # 它的 metrics 通过独立的 DevServer（端口 9094，dev 模式工具，不进生产）暴露，
+  # Docker 里也不抓。Java user-rpc 同理：Micrometer 仍注册，但 HTTP 端点不开。
+  #   - gRPC :49210  业务 RPC（9 个 endpoint）
+  user-rpc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # BuildKit cache mount：让 Docker 构建容器复用宿主机的 ~/.m2/repository，
+      # 否则每次构建都从 Maven Central 下载 protoc + grpc-java 二进制（很慢）
+      args:
+        SERVICE_NAME: user-rpc
+      cache_from:
+        - type=local,src=~/.m2/repository
+      cache_to:
+        - type=local,dest=~/.m2/repository
+    image: sea/user-rpc:latest
+    container_name: "${CONTAINER_PREFIX:-Sea}-user-rpc"
+    environment:
+      # Postgres（容器内 DNS 名 + 容器内端口；DNS 名跟着 CONTAINER_PREFIX 走）
+      POSTGRES_ADDR: ${CONTAINER_PREFIX:-Sea}-postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-first_db}
+      # Redis
+      REDIS_ADDR: ${CONTAINER_PREFIX:-Sea}-redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # Nacos discovery
+      NACOS_ADDR: ${CONTAINER_PREFIX:-Sea}-nacos
+      NACOS_PORT: "8848"
+      NACOS_NAMESPACE: ${NACOS_NAMESPACE:-sea-rtw}
+      NACOS_GROUP: ${NACOS_GROUP:-USER_GROUP}
+      NACOS_USERNAME: ${NACOS_USERNAME:-}
+      NACOS_PASSWORD: ${NACOS_PASSWORD:-}
+      # OTel
+      OTEL_ADDR: ${CONTAINER_PREFIX:-Sea}-jaeger
+      OTLP_PORT: "4317"
+      OTEL_SERVICE_NAME: user-rpc
+      # Snowflake（集群内 node_id 必须唯一）
+      SNOWFLAKE_NODE_ID: ${SNOWFLAKE_NODE_ID:-1}
+      # JWT 签名（user-api / user-rpc 共享同一密钥）
+      USER_JWT_SECRET: ${USER_JWT_SECRET}
+      USER_JWT_EXPIRE: ${USER_JWT_EXPIRE:-2592000}
+    ports:
+      - "49210:49210"  # 仅 gRPC（Infrastructure.md §3）
+      # ⚠️ 选项 C：删掉 49200:49200；user-rpc 不暴露 HTTP 端口（与 Go 端行为一致）
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ===================== 7. user-api（HTTP gateway）=====================
+  # 对应 Go 端 service/user/user/api（独立 HTTP gateway 进程）
+  # 通过 Nacos discovery://user-rpc 自动发现 user-rpc 实例
+  user-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # 同 user-rpc：复用宿主机 Maven 缓存
+      args:
+        SERVICE_NAME: user-api
+      cache_from:
+        - type=local,src=~/.m2/repository
+      cache_to:
+        - type=local,dest=~/.m2/repository
+    image: sea/user-api:latest
+    container_name: "${CONTAINER_PREFIX:-Sea}-user-api"
+    environment:
+      # Redis（JWT 黑名单）
+      REDIS_ADDR: ${CONTAINER_PREFIX:-Sea}-redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # Nacos discovery（用于解析 discovery://user-rpc）
+      NACOS_ADDR: ${CONTAINER_PREFIX:-Sea}-nacos
+      NACOS_PORT: "8848"
+      NACOS_NAMESPACE: ${NACOS_NAMESPACE:-sea-rtw}
+      NACOS_GROUP: ${NACOS_GROUP:-USER_GROUP}
+      NACOS_USERNAME: ${NACOS_USERNAME:-}
+      NACOS_PASSWORD: ${NACOS_PASSWORD:-}
+      # OTel
+      OTEL_ADDR: ${CONTAINER_PREFIX:-Sea}-jaeger
+      OTLP_PORT: "4317"
+      OTEL_SERVICE_NAME: user-api
+      # JWT 签名（必须与 user-rpc 一致）
+      USER_JWT_SECRET: ${USER_JWT_SECRET}
+      USER_JWT_EXPIRE: ${USER_JWT_EXPIRE:-2592000}
+    ports:
+      - "49900:49900"  # HTTP（Infrastructure.md §3）
+    depends_on:
+      nacos:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      user-rpc:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  nacos_data:
+  nacos_logs:
+  prometheus_data:
+
+networks:
+  default:
+    name: "${DOCKER_NETWORK:-Sea-TryGo-java}"
+    external: true   # 复用已有网络（基础设施在 Sea-TryGo 上跑着，user 服务加入同网络）

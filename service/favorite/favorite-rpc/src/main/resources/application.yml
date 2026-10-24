@@ -1,0 +1,193 @@
+# =============================================================================
+# favorite-rpc application.yml —— 对应 Go 端两个配置源的合并：
+#   P1  service/favorite/rpc/etc/favorite.yaml      （gRPC server + Postgres + Etcd + UserRpc/ArticleRpc）
+#   P2/P3/P4  service/favorite/rpc/cmd/*/main.go    （三个独立进程的环境变量）
+#
+# 本服务是**单 JVM**，承载 Go 侧 4 个 main（gRPC / fact-dispatch / fact-authority /
+# legacy-preflight）。合并依据见 docs/FileTree/favorite/rpc.md §12.1「四个 Go main → 1 个 Spring Boot JVM」。
+#
+# ★ favorite 域**零 Kafka、零 Redis**（Go 侧 rpc/internal/ 下没有 mq/ 目录，
+#   ServiceContext 也没有任何 Redis 字段）⇒ pom 不引 spring-kafka / spring-boot-kafka /
+#   spring-boot-starter-data-redis，也不配相关连接。
+# =============================================================================
+
+spring:
+  application:
+    # 对应 Go Name: favorite.rpc（服务发现用）；Telemetry.Name 亦为 favorite-rpc
+    name: favorite-rpc
+
+  # ============== Postgres ==============
+  # 对应 Go internal/config/config.go:7-14 的 Postgres{Host,Port,User,Password,DBName,Mode}
+  #   etc/favorite.yaml:9-15 → postgres:5432 / admin / first_db / sslmode=disable
+  datasource:
+    # ⚠️ 参数里必须带 TimeZone=Asia/Shanghai：Go 侧 db.go:21-28 的 DSN 显式写了它。
+    #   这不是随手加的—— favorite_item.create_time / favorite_folder.create_time|update_time
+    #   都是 timestamptz，Go 写、两侧按 UnixMilli() 读出（helper.go:69,83）。
+    #   时区配错会让 create_time / updated_at 整体平移 ⇒ **直接改变 L1 返回值**。
+    #   与 users 域「TIMESTAMP⇒TIMESTAMPTZ」（AGENTS.md §0 users 行）是同一时区风险面。
+    url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}?TimeZone=Asia/Shanghai
+    username: ${POSTGRES_USER:admin}
+    password: ${POSTGRES_PASSWORD:password}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # 对应 Go：sqlDB 未显式设置 ⇒ 用 database/sql 默认值（MaxIdleConns=2, MaxOpenConns=0=无上限）。
+      # 这里给显式上限，避免 N 副本下把 PG 连接打满；属容量参数，非行为契约。
+      maximum-pool-size: 100
+      minimum-idle: 10
+
+  # ============== MyBatis-Plus ==============
+  mybatis-plus:
+    configuration:
+      map-underscore-to-camel-case: true
+    global-config:
+      db-config:
+        # 表名 / 主键策略在 Entity 注解上显式钉死（favorite 的代理键 id 是 GORM 自增，
+        # 业务 ID 是 folder_id / favorite_id / event_id，三者不能混）
+        id-type: ASSIGN_ID
+      banner: false
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+
+  # ============== Flyway ==============
+  # ⚠️ **独立账本表名**（AGENTS.md §6.3 问题 4，2026-10-23 用户拍板）。
+  #   `flyway_schema_history` 是 **schema 级**账本，一个 schema 只能有一本账。
+  #   favorite-rpc / message-rpc / like-rpc / article-rpc 连同一个 first_db、同一个 public schema，
+  #   共用默认账本时后启动者会把自己的迁移判为「已应用」而静默跳过 ——
+  #   favorite 的 V1-V3 与 message / like / article 的 V1-V3 版本号直接撞车且内容不同。
+  #   改账本表名即可消除病根，**迁移文件名一个字都不用动**。
+  # ⛔ 不要用 validate-on-migrate=false / out-of-order=true 绕道（已用真 jar + 真 PG 实测证伪）。
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+    schemas: public
+    table: flyway_schema_history_favorite
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+
+# ============== gRPC server（devh）==============
+# 对应 Go etc/favorite.yaml:2  ListenOn: 0.0.0.0:8082
+grpc:
+  server:
+    port: 8082
+    address: 0.0.0.0
+    # Go 侧 reflection 仅在 DevMode/TestMode 注册（favorite.go:45-47）；
+    # Java 侧 devh starter 默认即开启 reflection，此处不额外配置。
+    # ⚠️ Go 还开了 DevServer（favorite.yaml:23-30，16062 端口 + /metrics + /healthz + pprof）。
+    #   那是 go-zero 的开发服务器，Java 侧对应的 /metrics 由 actuator 承担（见 management 段）。
+  client:
+    # 对应 Go etc/favorite.yaml:37-39  UserRpc.Etcd.Key: user.rpc
+    user-rpc:
+      address: discovery://user-rpc
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      negotiation-type: plaintext
+    # 对应 Go etc/favorite.yaml:43-47  ArticleRpc.Etcd.Key: article.rpc
+    article-rpc:
+      address: discovery://article-rpc
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      negotiation-type: plaintext
+
+# ============== favorite 域专属配置 ==============
+favorite:
+  # ---------- subject_ref 版本（对应 Go config.go:17-18）----------
+  # Go: SubjectRefV2Facts bool `json:",optional"`，注释明写 "Omitted is v1"。
+  # ★ **默认必须是 false（v1）**：Go 侧省略即为 v1，而 v2 是尚未放开的候选形态
+  #   （favorite.go:31-35 有一条「非 dev/test 模式开 v2 直接 exit(2)」的硬门禁）。
+  #   见 FavoriteSubjectRefGate。
+  subject-ref-v2-facts: false
+
+  fact:
+    # ---------- 事实投递（对应 Go cmd/fact-dispatch/main.go）----------
+    # Go :35-40 要求三个环境变量齐全（FAVORITE_DATABASE_URL / DC_PLATFORM_EVENT_URL /
+    #      DC_PLATFORM_SERVICE_TOKEN），任一缺失即 return error → 进程退出。
+    # Java 侧是单 JVM 合并进程，**不能因为缺 DC 配置就让整个 favorite-rpc 起不来**
+    # ⇒ 改为「默认关闭 + 启动时显式告警」；关闭时该功能完全不参与运行。
+    dispatch:
+      enabled: false
+      # Go :56  NewFavoriteDCEventSender(endpoint, token, &http.Client{Timeout: 8 * time.Second})
+      dc-endpoint: ${DC_PLATFORM_EVENT_URL:}
+      dc-token: ${DC_PLATFORM_SERVICE_TOKEN:}
+      dc-timeout: 8s
+      # Go :23 的 -once flag（单次模式，适合 cron / CronJob）。
+      # 常驻模式下由 FavoriteFactDispatchScheduler 驱动 Dispatcher.run(..., once=false)。
+      once: false
+
+    # ---------- 权威读（对应 Go cmd/fact-authority/main.go + internal/authority/http.go）----------
+    # Go :35 要求 FAVORITE_AUTHORITY_LISTEN 非空 + FAVORITE_AUTHORITY_TOKEN ≥32 字节。
+    #
+    # ⚠️ wire 形态：Go favorite **自持** path 参数版 servlet
+    #      GET /internal/v1|favorite/facts/{producer}/{event_id}
+    #      （internal/authority/http.go:32,63），**不是** RAG 通用
+    #      AuthorityHandlerFactory 的 /internal/v1/community/facts?producer=&event_id=。
+    #   本实现按 Go 原样写 favorite 专用 servlet（保住 L1 wire），见 FavoriteAuthorityEndpointConfig。
+    # ⚠️ 纯 gRPC 进程默认**没有** HTTP 端口；本端点默认关闭 ⇒ 不新增任何对外 wire 面。
+    #   开启时需要一个 web connector（Spring MVC），这属于部署形态变更，见剩余问题。
+    authority:
+      enabled: false
+      token: ${FAVORITE_AUTHORITY_TOKEN:}
+
+    # ---------- legacy 预检（对应 Go cmd/fact-legacy-preflight/main.go）----------
+    # Go :20-25 缺 FAVORITE_DATABASE_URL ⇒ exit 2；:45-51 报告不 clear ⇒ exit 2。
+    # Spring 进程内**没有退出码语义**（kill -9 会连 gRPC 一起带走）⇒ 改为
+    # 「结构化报表 + 由人工/CI 判读日志」，见 FavoriteLegacyPreflightRunner。
+    legacy-preflight:
+      enabled: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      # 对应 Go prometheus Subsystem: "favorite"（metrics.go:16,24,32,40）
+      application: favorite-rpc
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+otel:
+  service:
+    # 对应 Go Telemetry.Name: favorite-rpc（etc/favorite.yaml:17-21）
+    name: favorite-rpc
+  exporter:
+    otlp:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:jaeger:4317}
+  traces:
+    exporter: otlp
+    # 对应 Go Telemetry.Sampler: 1.0（= always on）
+    sampler: parentbased_always_on
+
+logging:
+  level:
+    root: INFO
+    com.rag: INFO
+    io.grpc: WARN
+
+# ===== observability（对齐 Go service/common/observability）=====
+# Go favorite.go:40 observability.DisableNativeRpcTimeout(&c.RpcServerConf)
+#     + favorite.go:49 s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(...))
+# Go yaml 未配 Timeout ⇒ go-zero zrpc/config.go 的 default=2000ms。
+observability:
+  rpc-timeout: 2s
+
+# ===== snowflake =====
+# 对应 Go service/common/snowflake：只用于 folder_id / favorite_id（两处 GetID），
+# ⚠️ **不用于游标**（favorite 的两个 list 用例全量返回，无分页）。
+snowflake:
+  # 不设 workerId：走 SnowflakeBean 的三级优先级（env SNOWFLAKE_NODE_ID > 本项 > SERVICE_NAME+PID 哈希）

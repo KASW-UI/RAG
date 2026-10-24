@@ -1,0 +1,259 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>user</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>user-rpc</artifactId>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <opentelemetry.version>1.44.0</opentelemetry.version>
+    </properties>
+
+    <!-- 引入 OTel BOM，让下面 opentelemetry-exporter-otlp 等 artifact 不用手写版本 -->
+    <!-- 与 service/common/pom.xml 中的 opentelemetry-bom 保持同版本号 -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>${opentelemetry.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>user-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            users-common：用户模块私有的 PasswordUtil / JwtUtil / ErrorCode
+            对应 Go 端 service/user/common/{cryptx,jwt,errmsg}（user-rpc / user-api / admin-rpc / admin-api 共用）
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>users-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            service/common（artifactId=common）：服务级共享
+            对应 Go 端 service/common/* —— Logger / Observability / RpcInterceptor / Snowflake / OpenTelemetry / Jackson
+            * 通过传递依赖引入 opentelemetry-{api,sdk,context}
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot 基础（gRPC server 不需要 web，纯 gRPC） ============== -->
+        <!--
+            选项 C 决定：user-rpc 严格保持"纯 gRPC service"，不加 spring-boot-starter-web。
+            与 Go 端 service/user/user/rpc 行为 1:1：Go user-rpc 是纯 gRPC 进程，
+            没有任何 HTTP 端点；Go 端 user-rpc 的 metrics 也是通过独立的 DevServer
+            （端口 9094，dev 模式工具，不是主进程一部分）暴露的，Docker 里也不抓。
+            Java user-rpc 同理：metrics 仍注册到 Micrometer（Micrometer 内存里仍可读），
+            但 HTTP 端点不暴露 —— 与 Go 端行为对齐。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <!-- @Valid 入参校验（Go 端无显式校验；Java 侧属"早抛"增强，可移除） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <!--
+            spring-cloud-commons 的 AbstractAutoServiceRegistration（Nacos 自动注册用）
+            通过反射引用 org.springframework.boot.web.server.context.WebServerInitializedEvent。
+            user-rpc 纯 gRPC，不引 spring-boot-starter-web，但 Nacos 这条反射链需要这个类。
+            spring-boot-web-server 只含这个类 + 抽象接口，不会拉 Tomcat/Jetty。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-web-server</artifactId>
+        </dependency>
+        <!-- devh grpc-server-spring-boot-starter 也把 grpc-core 排掉了，
+             io.grpc.internal.ServerImplBuilder 等内部类在 grpc-core 里。
+             根 pom dependencyManagement 已管版本。 -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+
+        <!-- ============== 3. gRPC server（@GrpcService 自动起 gRPC server） ============== -->
+        <!-- 版本由根 pom dependencyManagement 管理（3.1.0.RELEASE） -->
+        <!-- ⚠️ 3.1.0.RELEASE 是 2024 年发版，针对 Spring Boot 3.x；与 Spring Boot 4.0.8 可能不兼容，build 时盯一下 -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-server-spring-boot-starter</artifactId>
+            <!-- 排除 devh 默认拖的 grpc-core 1.63.0（与 user-proto 的 1.66.0 不兼容） -->
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ============== 4. 数据访问：Postgres + MyBatis-Plus + Flyway ============== -->
+        <!--
+            对齐 Go 端 Postgres.* 配置 + GORM 模型
+            HUMAN_ONLY.MD 强制 MyBatis-Plus 取代 JPA：
+              - @TableName("user_user") + @TableId 取代 @Entity/@Table + @Id
+              - Mapper extends BaseMapper<UserEntity> 取代 EntityManager.createQuery
+              - Flyway V*__create_*.sql 取代 Hibernate ddl-auto: update
+            ⚠️ 注意 strict HUMAN_ONLY 偏离 Go GORM 默认：表名 user_user vs Go users
+        -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!--
+            MyBatis-Plus：MyBatis 增强版，提供 BaseMapper / LambdaQueryWrapper / 分页插件
+            版本由根 pom dependencyManagement 管理（3.5.x 系列兼容 Spring Boot 3.x）
+            Phase 1 填肉阶段确认具体版本号
+        -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-boot-starter</artifactId>
+        </dependency>
+        <!--
+            建表已移除 Flyway（2026-10-21），详见 AGENTS.md §6.2.5 DRIFT-NEW-015：
+              flyway_schema_history 是 schema 级账本，而 user-rpc 与 admin-rpc 的迁移
+              版本号撞车、内容不同，两个进程又必须连同一个库
+              ⇒ 后启动的那个要么静默跳过自己的迁移，要么 checksum mismatch 启动失败。
+
+            ⚠️ 必须**连 spring-boot-flyway 一起删**，不能只删 flyway-core：
+              只要它还在 classpath 上，FlywayAutoConfiguration 就会用默认值自动装配并
+              migrate()，于是「表已建好但没有 schema history」直接致命：
+              Found non-empty schema(s) "public" but no schema history table.
+
+            现在的做法：bootstrap/UserSchemaBootstrap 在 @PostConstruct 里调
+            users-common 的 com.rag.users.common.ddl.SchemaInitializer，
+            把 users-common/src/main/resources/db/*.sql 幂等重放一遍
+            （全部 CREATE ... IF NOT EXISTS，无账本、无版本号，谁先启动都行）。
+            这正是 Go 侧 service/user/user/rpc/internal/model/db.go:33 的
+            db.AutoMigrate(&User{}, &UserAvatarHistory{}) 的无状态语义。
+            spring-jdbc（ScriptUtils 所在）由 users-common 以 compile scope 传递进来。
+        -->
+
+        <!-- ============== 5. Redis（仅 Logout 用 Setex） ============== -->
+        <!-- 对齐 Go 端 BizRedis 配置，spring-boot-starter-data-redis 默认 Lettuce client -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- ============== 6. Metrics：复刻 Go 端 user_rpc_register_total / user_rpc_login_total ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 7. 测试：JUnit 5 + Mockito + AssertJ（test scope，不进生产 jar） ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            Testcontainers 2.0.5（版本由 spring-boot-starter-parent 的 testcontainers.version 管理，不写 version）。
+            为什么 user-rpc 必须有真 PostgreSQL、且不能用 H2：
+              - extra_info 是 jsonb 列。JsonbTypeHandler 走 ps.setObject(..., Types.OTHER)，
+                这个绑参方式对不对，**只有真 PG 能证伪**：改成 setString 会被 PG 直接拒收
+                （column "extra_info" is of type jsonb but expression is of type character varying）。
+              - updateUserById 的 wrapper.setSql("extra_info = CAST({0} AS jsonb)") 显式 CAST。
+              - @Select 手写 SQL 读 jsonb 列时，@Results 是否真的把列映射成 Map（而不是 null）。
+              - createAvatarHistory 4 步 / selectAvatarHistory 5 步的**真实回滚**。
+            这几样 H2 都不支持或语义不同，替换掉等于把要验证的东西换没了。
+            此前 AvatarTransactionWiringTest 用的是"记录型事务管理器"，只能证明 begin/rollback
+            被调用过，证明不了 PG 真的回滚了行 —— 那条缺口由本依赖配套的
+            UserRpcContainerWiringTest 关闭。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- ============== 8. OpenTelemetry OTLP exporter ============== -->
+        <!--
+            opentelemetry-{api,sdk,context} 已通过 service/common 传递依赖进来
+            这里只补一个：opentelemetry-exporter-otlp —— 让 OTel SDK 把采集到的 span 真正发出去（Jaeger / Tempo / OTel Collector）
+            Go 端用的是 otlgrpc（user.yaml: Telemetry.Batcher: otlpgrpc），Java 侧对应 OTLP/gRPC
+        -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 8. Nacos service discovery（修 DRIFT-NEW-001） ============== -->
+        <!--
+            user-api 通过 Nacos 自动发现 user-rpc 实例需要 user-rpc 先注册到 Nacos。
+            与 user-api 端 spring-cloud-starter-alibaba-nacos-discovery 配套使用。
+            修 DRIFT-NEW-001：把"Go 端 etcd 静态寻址"对齐到 Java 端 Nacos dynamic discovery。
+        -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- 启动类 UserRpcApplication 靠 spring-boot-maven-plugin 打成可执行 jar -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
+                集成测试必须关掉 Ryuk，否则在本机/CI 上起不了任何容器。
+                理由与 admin-rpc 的同名配置完全相同（那里有完整的实测记录）：
+                  1. Testcontainers 2.x 的 ResourceReaper.instance() 读的是**环境变量**
+                     System.getenv("TESTCONTAINERS_RYUK_DISABLED")，testcontainers.properties
+                     与 -D 都无效，只有 surefire 注入 env 才有效。
+                  2. Ryuk 镜像 testcontainers/ryuk:0.14.0 需从 Docker Hub 拉，本机走加速器拉
+                     Docker Hub 会 EOF 失败，且发生在 @Container 之前 —— 整个类直接挂。
+                关掉后改用 JVMHookResourceReaper（纯 shutdown hook，不起容器）。
+                代价 = 容器不再自动回收，跑完可能残留。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

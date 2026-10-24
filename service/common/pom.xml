@@ -1,0 +1,340 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>service</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>common</artifactId>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <opentelemetry.version>1.44.0</opentelemetry.version>
+        <java-json-canonicalization.version>1.1</java-json-canonicalization.version>
+    </properties>
+
+    <!-- 统一管理 OpenTelemetry 各模块版本，避免子模块手写版本号 -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>${opentelemetry.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>2.22.3</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- ============ 0. Spring Boot starter（Spring 化入口，Bean 化所需） ============ -->
+        <!--
+            引入 spring-boot-starter 让 common 模块可以定义 @Component / @Configuration / @Value /
+            @ConfigurationProperties 等 Spring 注入能力。注意这是 common 模块首次引入 Spring 依赖，
+            是不可逆决策——common 不再是"框架无关库"，而是 Spring Boot 模块。
+            当前业务模块继续使用 static 入口；Spring Bean 入口作为未来平滑迁移的备份路径。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+
+        <!-- ============ 1. 日志门面 + 实现（替代 go-zero logx） ============ -->
+        <!--
+            对应 Go 版 logger/logger.go 中 logx.WithContext(ctx).Errorw / Infow 的日志输出：
+            Go 版用 go-zero 自带的 logx（封装 zap），Java 版走 SLF4J 门面 + logback-classic 实现
+        -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <!--
+            logback-classic：**移除硬编码版本号**，交由 spring-boot-starter-parent 的
+            dependencyManagement 统一管理（logback-core 也由它管理）。
+
+            为什么改：此前这里钉死 1.6.3，而同一模块的 logback-core 被 spring-boot-starter-parent
+            解析成 1.5.38（dependencyManagement 优先级高于传递依赖）—— 两者 API 不兼容，
+            任何真正启动的 Spring Boot 应用都会在日志初始化阶段抛：
+                java.lang.AbstractMethodError: Receiver class ch.qos.logback.classic.PatternLayout
+                does not define or inherit an implementation of the resolved method
+                'abstract java.util.Map getDefaultConverterMap()'
+                            of abstract class ch.qos.logback.core.pattern.PatternLayoutBase
+
+            这个缺陷此前能长期潜伏，正是因为 service/common 的 9 个测试全是纯单元测试 ——
+            不起 Spring 容器就永远走不到 LoggingApplicationListener。
+            加了 ObservabilityWiringTest（@SpringBootTest）后第一次被暴露出来。
+
+            能力校验：ProcessLogger 用到的 ILoggingEvent#getKeyValuePairs() 自 logback 1.3.0 起提供，
+            由父 pom 管理的版本满足，无需降级功能。
+        -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+        </dependency>
+
+        <!-- ============ 2. OpenTelemetry：tracing + context propagation ============ -->
+        <!--
+            对应 Go 版 observability/*.go + communityfact/{logging,authority_http}.go 中
+            go.opentelemetry.io/otel/* 的 Span / TracerProvider / TextMapPropagator 用法
+        -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-api</artifactId>
+            <version>1.62.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-context</artifactId>
+        </dependency>
+
+        <!-- ============ 3. gRPC server interceptor（替代 go-zero zrpc） ============ -->
+        <!--
+            对应 Go 版 observability/rpc.go 的 grpc.UnaryServerInterceptor；
+            grpc-stub 包含 grpc-api，足够写服务端拦截器
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+        </dependency>
+
+        <!-- ============ 3a. gRPC **client** 全局拦截器（Go zrpc client 熔断，2026-10-22） ============ -->
+        <!--
+            对应 Go 版 zrpc 的 client breaker：
+              - zrpc/internal/config.go:14  ClientMiddlewaresConf.Breaker bool `json:",default=true"`
+              - zrpc/internal/client.go:112-113  if c.middlewares.Breaker { append(..., BreakerInterceptor) }
+            ⚠️ Go 的 yaml 里一个字都没写，但 breaker **默认开**（同 §3.3.1）。
+
+            为什么 optional=true（同 spring-web 那条的理由，但后果更严重）：
+              com.rag.common 是**所有**业务模块的公共下游。若用普通 compile，
+              devh grpc-client starter 会沿 Maven 传递给 like-common / users-common /
+              hot-common / message-common …… 即每一个只需要一个错误码表的纯库模块，
+              都会拖进一整套 gRPC 客户端栈 + Nacos + 服务发现自动配置。
+              optional=true 表示：common 自己能编译 com.rag.common.protection 下那个
+              ClientInterceptor，但**不传递给下游**。真正要用它的 api 模块自己显式声明。
+
+            运行期安全性：GoStyleGrpcClientBreakerInterceptor 上挂了
+            @ConditionalOnClass(GrpcGlobalClientInterceptor.class)，
+            没有 devh starter 的进程在**类加载之前**就被条件挡掉，不会 NoClassDefFoundError。
+            这不是预防性洁癖：本模块声明的是 optional，依赖方**不保证**有它，
+            「声明方自己也不该假设下游有」是 optional 的基本契约。
+        -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot-starter.version}</version>
+            <exclusions>
+                <!-- 与 message-api / like-api 同款：devh 默认拖 grpc-core 1.63.0，版本统一由根 pom 管 -->
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- ============ 3b. MyBatis 拦截器（B-1 超时缓解，2026-10-21） ============ -->
+        <!--
+            对应 Go 版 context.WithTimeout 到点后 database/sql 主动取消查询的语义。
+            Go 侧不需要任何额外依赖（database/sql 内建）；Java 侧必须借 MyBatis 的
+            Interceptor 钩子把 deadline 落到 Statement.setQueryTimeout 上。
+
+            ⚠️ 这里只要 **mybatis 本体**，不要 mybatis-plus-boot-starter：
+            starter 会带 MybatisPlusAutoConfiguration，把所有依赖本模块的服务
+            （含纯 gRPC 进程与无数据源的 api 模块）都拖进自动配置扫描范围。
+            mybatis 本体是纯 jar、零自动配置，任何模块引它都不会凭空多出 Bean。
+
+            ⚠️ 版本必须与 user-rpc / admin-rpc 实际解析到的一致（当前 3.5.19，
+            由 mybatis-plus 传递进来），否则同一个 Executor 接口可能被加载两份
+            —— 拦截器的 type/signature 匹配会静默失效（§3.3：不报错的失效）。
+        -->
+        <dependency>
+            <groupId>org.mybatis</groupId>
+            <artifactId>mybatis</artifactId>
+        </dependency>
+
+        <!-- ============ 4. Jakarta Servlet API（替代 go-zero rest middleware） ============ -->
+        <!--
+            对应 Go 版 observability/http.go 的 rest.Middleware / http.HandlerFunc；
+            Java 侧用 Servlet Filter 等价物，scope=provided 由运行容器提供实现
+        -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- ============ 5. JSON Canonicalization (RFC 8785 / JCS) ============ -->
+        <!--
+            对应 Go 版 communityfact/wire.go 的 github.com/cyberphone/json-canonicalization
+            用于 CanonicalHash 计算事件摘要
+        -->
+        <dependency>
+            <groupId>io.github.erdtman</groupId>
+            <artifactId>java-json-canonicalization</artifactId>
+            <version>${java-json-canonicalization.version}</version>
+        </dependency>
+
+        <!-- ============ 6. Jackson（替换 Go 版 encoding/json + gin 的 JSON 序列化） ============ -->
+        <!--
+            对应 Go 版 communityfact/wire.go + response.go：
+            - encoding/json → Jackson databind
+            - @JsonInclude 注解 → jackson-annotations
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <!-- 版本由 BOM 管理，不再手写 -->
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <!-- 版本由 BOM 管理，不再手写 -->
+        </dependency>
+
+        <!-- ============ 测试：JUnit 5 + Mockito + OTEL SDK 测试 util + spring-test（MockHttpServletRequest 等） ============ -->
+        <!--
+            spring-boot-starter-test：§3.3 要求「凡引入框架机制必须配真正触发该机制的测试」。
+            此前 service/common 的 9 个测试类全是纯单元测试（不装配 Spring 上下文），
+            所以「Bean 根本没被注册」「@ConfigurationProperties 没绑定」这类缺陷天然测不到 ——
+            H1/H2 恰恰就是这两类。
+            @SpringBootTest + @EnableConfigurationProperties 才能真正走一遍 binder + Bean 生命周期。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-testing</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            grpc-core：**仅测试**。主源码只需要 grpc-api（grpc-stub 已带），
+            但 GoStyleRequestDeadlineTest 要用 io.grpc.inprocess.InProcessServerBuilder
+            起一个「故意挂住」的真 gRPC server，才能证明 deadline 真的中断了调用。
+            scope=test ⇒ 不会传递给任何下游模块。
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-test</artifactId>
+            <version>7.0.0</version>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            spring-web：H5 修复需要 RequestContextHolder。
+            为什么是 optional 而不是普通 compile：
+              RequestContextHolder 是 Spring Web 把「当前请求」存进 ThreadLocal 的入口，
+              超时分支把 chain.doFilter 换到 worker 线程后必须手工搬运它，否则整条 Spring Web 链
+              （@RequestScope / LocaleContextHolder / 未来引入的 SecurityContextHolder）在 worker 上全空。
+            为什么必须 optional：
+              service/common 同时被纯 gRPC 进程（user-rpc / admin-rpc）依赖。若用普通 compile，
+              spring-web 会沿 Maven 传递进那些模块 —— 那正是 §6.3 定案里
+              「com.rag.common 不能进 scanBasePackages，否则纯 gRPC 进程被拖进 web 类」的同一个坑。
+              optional=true 表示：service/common 自己能编译，但不传递给下游。
+            运行期安全性：RequestContextHolder 只在 HttpMiddleware 的超时分支被引用；
+              纯 gRPC 进程不注册 HttpMiddlewareFilter → 不加载 HttpMiddleware → 该类引用不会被解析。
+        -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+            <version>7.0.0</version>
+            <optional>true</optional>
+        </dependency>
+        <!--
+            spring-webmvc：**Go 风格请求体判据**（com.rag.common.http.GoStyleJsonBodyConverter）需要
+            org.springframework.http.converter.json.JacksonJsonHttpMessageConverter。
+            为什么必须 optional（与上面 spring-web 同理，但对纯 gRPC 进程更致命）：
+              本类继承 Jackson 转换器，class 签名直接引用 spring-webmvc 的类型。
+              若非 optional，它会沿 Maven 传递给只需要一张错误码表的纯库模块，
+              而那些模块的运行期**没有 servlet / 没有 MVC**，一旦该类被加载就是 NoClassDefFoundError。
+            运行期安全性：GoStyleJsonBodyConverterConfig 只在 servlet web 进程里生效
+            （它是 WebMvcConfigurer，Web MVC 栈不装配它就不会被实例化）。
+        -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
+            <!--
+                ⚠️ **刻意不写 version**，交给 spring-boot-dependencies 管理。
+                理由：本仓库离线（-o）可用的是 7.0.5 / 7.0.9，写死 7.0.0 会直接解析失败；
+                更要命的是写死版本等于**在同一个 classpath 上引入第二个 Spring Framework 版本** ——
+                那会让 @ConditionalOnWebApplication、WebMvcConfigurer 等类型出现「同名不同类」，
+                装配结果不可预测（§3.3 同款：不报错的失效）。
+                （旁边那条 spring-web 7.0.0 的硬编码是**既有**技术债，本次不动它，
+                  但绝不能照抄 —— 那正是它想避免的问题。）
+            -->
+            <optional>true</optional>
+        </dependency>
+        <!--
+            Jackson 3（tools.jackson.core:jackson-databind）：编译期需要，
+            因为 GoStyleJsonBodyConverter 的父类 JacksonJsonHttpMessageConverter 的
+            构造器签名里就是 tools.jackson.databind.json.JsonMapper。
+            ⚠️ 本模块同时还声明了 Jackson 2（jackson-databind，communityfact 在用）——
+            两代并存是既有事实，本次只把 Jackson 3 以 optional 补进来，**不删不改** Jackson 2。
+            ⚠️ 同样是 optional：只需要一张错误码表的纯库模块不需要 Jackson 3。
+            运行期安全性：本类的实例只在 servlet web 进程里由 WebMvcConfigurer 创建。
+        -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

@@ -1,0 +1,52 @@
+# 双端对拍专用基建 —— 只起 postgres + redis，刻意不起 etcd / Nacos / jaeger
+#
+# 为什么不需要 etcd：
+#   Go 侧 api 的 zrpc 客户端在 conf/go/*.yaml 里用 Endpoints 直连，
+#   go-zero v1.10.2 zrpc/config.go:91-95 RpcClientConf.BuildTarget() 对 Endpoints **短路**，
+#   不进 Etcd 分支；server 侧把 Etcd 整块删掉，zrpc/server.go:42 `if c.HasEtcd()` 不成立 ⇒ 不注册。
+# 为什么不需要 Nacos：
+#   RAG 侧用环境变量把 grpc.client.*.address 覆盖成 static://127.0.0.1:<port>，绕开 discovery:///。
+#
+# 两个数据库（不是两个容器）：
+#   go_db  —— Go 用 GORM AutoMigrate 建表（users / user_avatar_history）
+#   rag_db —— RAG 用 Flyway 建表（users_user / users_user_avatar_history）
+# 表名不同是 AGENTS.md §3.4 的**已签字有意偏离**（A-03），所以两边物理上无法共用 schema，
+# 对拍只能落在 HTTP wire 层。这是设计约束，不是缺陷。
+# ⚠️ **并行实例（2026-10-24 新增）**：
+#   container_name 与端口都做成**可覆盖**的，因为多域并发对齐时
+#   另一个会话可能正在跑同一套 harness（实测：users-admin 工作树在跑）。
+#   默认值保持不变 ⇒ 老调用方零改动；并行实例用
+#   DIFTEST_CONTAINER_PREFIX=msgdifftest DIFTEST_PG_PORT=65432 DIFTEST_REDIS_PORT=66379
+#   起一套完全独立的容器与端口段，**互不踩**。
+#   ⚠️ 踩过一次的坑：容器名写死时，`docker compose down -v` 会把**别人正在用的**
+#   PG 数据卷一起删掉 —— 那是静默的、且毁掉的是别人的中间态。
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${DIFTEST_CONTAINER_PREFIX:-difftest}-postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: difftest
+      POSTGRES_DB: go_db
+    ports:
+      # 用 55432 而不是 5432：避开本机可能已在跑的 docker-compose 基础设施
+      # （可覆盖：并行实例靠 DIFTEST_PG_PORT 换端口段）
+      - "127.0.0.1:${DIFTEST_PG_PORT:-55432}:5432"
+    volumes:
+      - ./initdb.sql:/docker-entrypoint-initdb.d/10-initdb.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d go_db"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${DIFTEST_CONTAINER_PREFIX:-difftest}-redis
+    ports:
+      - "127.0.0.1:${DIFTEST_REDIS_PORT:-56379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

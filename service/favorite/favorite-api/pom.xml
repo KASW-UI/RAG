@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>favorite</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>favorite-api</artifactId>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <!--
+            favorite-proto：FavoriteServiceGrpc client Stub + pb.* 消息类型。
+            对应 Go 端 service/favorite/api/internal/svc/service_context.go 的 FavoriteRpc 字段
+            （favoriteservice.NewFavoriteService(zrpc.MustNewClient(c.FavoriteRpc))）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>favorite-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            favorite-common：FavoriteErrorCode / FavoriteErrorMessages / FavoriteGrpcError。
+            对应 Go 端 service/favorite/common/errmsg.go —— api 侧 logic 的
+            codeFromRPCError（即 BizCodeFromError）与 handler 的 GetErrMsg 都直接依赖这一层。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>favorite-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            users-common：复用【跨域通用】的 HTTP gateway 原语，避免第 2 份实现：
+              - JwtUtil.padToHmacKeySize        （jjwt 强制 ≥32 字节；Go 的 golang-jwt 不强制）
+              - BearerTokenExtractor           （golang-jwt 的 Bearer 前缀剥离三条规则）
+              - GoStyleCoercion                （Jackson 3 标量强转规则，对齐 go-zero core/mapping）
+              - GoStyleRequired / GoStyleRequiredFields / GoRequiredFieldException
+              - GoStyleStringInt64             （Go `,string` int64 字段的宽松入参语义）
+            ⚠️ 只依赖这几个静态工具类：本模块 scanBasePackages 刻意【不含】com.rag.users.*，
+            因此 users-common 里的 Bean（如 SchemaInitializer）不会被拖进 favorite-api 的上下文。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>users-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            service/common（artifactId=common）：
+            Response envelope + BusinessException / AuthenticationException
+            + GoStyleRouterErrorResponses（404/405 字节形状）
+            + HttpMiddlewareFilter（Go 端 observability.NewHTTPMiddleware）+ LoggerFactoryBean。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot Web（HTTP server） ============== -->
+        <!-- 对应 Go 端 rest.MustNewServer(c.RestConf) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- ============== 3. Redis（JWT 黑名单） ============== -->
+        <!--
+            Go 出处：service/favorite/api/internal/svc/service_context.go:20
+              redisDB := redis.MustNewRedis(c.BizRedis)
+            与 api/internal/middleware/checkblacklist_middleware.go:37 的
+              m.Redis.ExistsCtx(r.Context(), "user:jwt_blacklist:"+token)
+            ⇒ favorite/api 是【唯一】在 api 层用 Redis 的 favorite 组件（favorite-rpc 零 Redis）。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- ============== 4. Metrics ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 5. JWT 验签（jjwt，版本由根 pom 管理） ============== -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- ============== 6. gRPC client（连 favorite-rpc） ============== -->
+        <!--
+            与 user-api / admin-api / message-api / like-api 同款：devh 3.1.0.RELEASE + Nacos discovery。
+            ⚠️ 必须 exclude io.grpc:grpc-core（devh 默认拖 1.63.0），版本统一由根 pom 管。
+            ⚠️ negotiation-type 必须在 application.yml 里显式写 plaintext：
+               devh 的 GrpcChannelProperties 默认值是 TLS，不写会静默变 TLS，
+               而 Go zrpc.MustNewServer 是明文 gRPC。
+        -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot-starter.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+
+        <!-- ============== 7. Nacos 服务发现 ============== -->
+        <!-- 对应 Go 端 FavoriteRpc.Etcd.Key: favorite.rpc -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- ============== 8. OpenTelemetry OTLP exporter ============== -->
+        <!-- 对应 Go 端 Telemetry.*（favorite.yaml:19-23） -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 9. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            Boot 4 把测试切片拆成独立 artifact：@AutoConfigureMockMvc 在
+            org.springframework.boot.webmvc.test.autoconfigure，不再在 spring-boot-test-autoconfigure 里。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            Testcontainers：黑名单检查走 StringRedisTemplate.hasKey，
+            「JWT 先验签、黑名单后查」的顺序必须对着【真 Redis】验证（§3.3：纯 mock 不算）。
+            用 GenericContainer（core 自带）即可，无需额外 module。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                关掉 Ryuk：Testcontainers 2.x 的 ResourceReaper.instance()
+                只读环境变量 System.getenv("TESTCONTAINERS_RYUK_DISABLED")，
+                properties 与 -D 都无效；而 ryuk 镜像走 Docker Hub 拉不下来会导致整类 ContainerFetch。
+                代价：容器不再自动回收。与 admin-api 同款。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

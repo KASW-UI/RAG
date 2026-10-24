@@ -1,0 +1,173 @@
+# admin-api 启动配置 —— 对齐 Go 端 service/user/admin/api/etc/admincenter.yaml
+# 独立 HTTP gateway 进程；下游通过 gRPC 调 admin-rpc，调 Redis 查 JWT 黑名单。
+#
+# 字段重映射：
+#   Go etc/admincenter.yaml          →         application.yml
+#   ============================================================
+#   Name=admincenter                 →   spring.application.name=admin-api
+#   Host=0.0.0.0                     →   server.address=0.0.0.0
+#   Port=8889                        →   server.port=（与 user-api 段同款，按 Infrastructure.md §3 实际部署填写）
+#   Log.ServiceName/Mode/Path        →   （交由 service/common Logger.java + application.yml logging 节）
+#   AdminAuth.AccessSecret           →   admin-api.admin-auth.access-secret
+#   AdminAuth.AccessExpire           →   admin-api.admin-auth.access-expire
+#   AdminRpc.Etcd.Hosts/Key          →   grpc.client.admin-rpc.address（discovery://admin-rpc 走 Nacos）
+#   BizRedis.Host/Type/Pass          →   spring.data.redis.*
+#   Telemetry.Endpoint/Sampler       →   otel.exporter.otlp.* + otel.traces.sampler
+#   DevServer.Enabled/Port/Paths     →   management.endpoints + management.server.port
+
+spring:
+  application:
+    name: admin-api
+
+  # ===== 1. Redis（对齐 Go 端 BizRedis）=====
+  # Go: BizRedis.Host=redis:6379 / Type=node / Pass=""
+  # Java 侧用 Spring Data Redis（Lettuce）
+  # REDIS_ADDR/REDIS_PORT 来自 docker-compose.yaml（容器内 DNS 名 + 容器内端口 6379）
+  data:
+    redis:
+      host: ${REDIS_ADDR:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      # ⚠️ 取值出处（2026-10-23 补记，此前只有数值没有出处）：
+      #   Go 的 admin.yaml 完全没配 BizRedis 超时
+      #     → go-zero v1.10.2 redisclientmanager.go:32-39 建 red.Options 时不传任何 timeout
+      #     → go-redis/v9 options.go init() 默认：ReadTimeout = 3s
+      #   ⇒ 读命令超时 3s，与 go-redis 默认逐字相同（完整出处链见 admin-rpc 侧同段注释）。
+      #   🔴 go-zero redis.go:27 的 `readWriteTimeout = 2s` 是**死常量**，别被它误导。
+      timeout: 3s
+      # 连接超时：Go 的 go-redis DialTimeout 默认 **5s**。
+      # Lettuce 在 connect-timeout 未设时回落到 timeout ⇒ 不配这行会跟着变成 3s。
+      # Boot 4 里这是独立属性（DataRedisProperties.connectTimeout，模块 spring-boot-data-redis）。
+      connect-timeout: 5s
+
+  # ===== 2. Nacos 服务发现客户端 =====
+  # 配 Nacos server 地址 + namespace + group。
+  # env 覆盖：NACOS_ADDR / NACOS_PORT / NACOS_NAMESPACE / NACOS_GROUP / NACOS_USERNAME / NACOS_PASSWORD
+  cloud:
+    nacos:
+      discovery:
+        # NACOS_ADDR/NACOS_PORT 来自 docker-compose.yaml（容器内 DNS 名 + 容器内端口 8848）
+        server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}
+        namespace: ${NACOS_NAMESPACE:sea-rtw}
+        group: ${NACOS_GROUP:USER_GROUP}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+
+# ===== 3. HTTP server 监听端口（对齐 Go 端 etc/admincenter.yaml: Host=0.0.0.0, Port=8889）=====
+# Java 版端口按实际部署填写（与 user-api 段同款，按 Infrastructure.md §3）
+server:
+  port: 8889
+  address: 0.0.0.0
+  servlet:
+    context-path: /
+
+# ===== 3.5. gRPC client（端到端验证期：走 Nacos discovery 找到 admin-rpc）=====
+# devh grpc-client-spring-boot-starter 3.1.0.RELEASE 的 discovery scheme：
+#   address: discovery:///admin-rpc   ← 三斜杠（discovery://[authority]/<service-name>）
+# admin-rpc 端已通过新增的 NacosBootstrap（DRIFT-NEW-011）显式注册到 Nacos，
+# admin-api 这里走标准 Spring Cloud Nacos discovery 路径，不走 static:// 旁路。
+#
+# DRIFT-NEW-008：devh 3.1.0.RELEASE 的 GLOBAL 默认 negotiation-type=TLS，与 admin-rpc plaintext 不符。
+# 显式覆写为 plaintext（admin-rpc server 是 plain gRPC，没有 TLS）。
+grpc:
+  client:
+    admin-rpc:
+      address: discovery:///admin-rpc
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      permit-keep-alive-without-calls: true
+      # 🔴 DRIFT-ADMINAPI-009：启动期必须能连上 admin-rpc，否则进程起不来。
+      #
+      # Go 出处（逐层到消费点）：
+      #   service/user/admin/api/internal/svc/servicecontext.go:27
+      #       AdminRpc: adminservice.NewAdminService(zrpc.MustNewClient(c.AdminRpc)),
+      #   go-zero v1.10.2 zrpc/client.go:50-54  →  logx.Must(err)   // 失败即 panic
+      #   go-zero v1.10.2 zrpc/internal/client.go:18   →  dialTimeout = time.Second * 3
+      #   go-zero v1.10.2 zrpc/internal/client.go:122-142
+      #       grpc.DialContext(timeCtx, server, options...)  // options 含 WithBlock()
+      # ⇒ Go 启动时阻塞拨号 3s，连不上就 panic ⇒ **进程根本起不来**。
+      #
+      # 本属性对应 devh grpc-client-spring-boot-starter 3.1.0 的
+      # AbstractChannelFactory.newManagedChannel → connectOnStartup：
+      #   channel.getState(true) → 等 READY → 超时则 throw IllegalStateException(
+      #       "Can't connect to channel admin-rpc") ⇒ stub 创建失败 ⇒ 上下文启动失败。
+      # ⇒ 与 Go 的 zrpc.MustNewClient 同型：「连不上 ⇒ 起不来」，不是「起来但请求全失败」。
+      #
+      # ⚠️ **只对 admin-rpc 这一个 channel 开**（不要提到 grpc.client 顶层当全局）：
+      #   Go 侧 admin-api 的 ServiceContext 里**只有** AdminRpc 一个下游依赖
+      #   （service/user/admin/api/internal/svc/servicecontext.go:24-28），
+      #   而本 yml 里下面那条 grpc.client.user-rpc 是**没有对应 Go 依赖的遗留配置**
+      #   （本模块没有任何 @GrpcClient("user-rpc") 注入点）
+      #   ⇒ 设成全局会凭空多出一条 Go 侧不存在的启动期硬依赖。
+      #
+      # ⚠️ devh 的默认值是 0（= 关闭）⇒ 「yml 里没写」就等于「机制没武装」。
+      #   AdminRpcClient.afterPropertiesSet() 会断言本项已武装，删掉这行会让 admin-api 起不来
+      #   （宁可起不来，也不要静默退化成「Pod Ready 但 100% 请求失败」）。
+      immediate-connect-timeout: 3s
+    user-rpc:
+      address: discovery:///user-rpc
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      permit-keep-alive-without-calls: true
+      # ⚠️ 这里**刻意不设** immediate-connect-timeout：
+      #   Go 侧 admin-api 根本没有 user-rpc 依赖（见上）⇒ 不该给它加启动期硬依赖。
+      #   本模块也没有 @GrpcClient("user-rpc") 注入点 ⇒ 这条配置当前无消费者。
+
+# ===== 4. 业务配置（对齐 Go 端 AdminAuth.*）=====
+# 对应 Go: AdminAuth.AccessSecret / AdminAuth.AccessExpire
+# gRPC channel 目标由 devh starter 通过 grpc.client.admin-rpc.address 装配（见上面 §3.5）
+admin-api:
+  admin-auth:
+    access-secret: ${ADMIN_JWT_SECRET:yU-hCm)2*?NQmWG}
+    access-expire: ${ADMIN_JWT_EXPIRE:2592000}    # 30 天，与 Go 端 etc/admincenter.yaml 一致
+
+# ===== 5. Metrics：暴露 /actuator/prometheus =====
+# Spring Web 已在 server.port；Actuator 复用同一 Tomcat。
+# Prometheus 从同 docker 网络内 scrape：http://admin-api:<server>/actuator/prometheus
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+    enabled-by-default: false      # 只显式开启下面三个
+  endpoint:
+    health:
+      enabled: true
+    info:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    enable:
+      prometheus: true
+    tags:
+      application: ${spring.application.name}
+
+# ===== 6. OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）=====
+# Go: Endpoint=jaeger:4317, Batcher=otlpgrpc, Sampler=1.0, Name=admin-api
+# OTEL_ADDR/OTLP_PORT 来自 docker-compose.yaml（容器内 DNS 名 + 容器内端口 4317）
+otel:
+  exporter:
+    otlp:
+      endpoint: http://${OTEL_ADDR:jaeger}:${OTLP_PORT:4317}
+      protocol: grpc
+  resource:
+    attributes:
+      service.name: admin-api
+  traces:
+    sampler: always_on          # 对齐 Go Sampler: 1.0
+
+# ===== 7. 日志（Spring Boot 默认走 logback-classic，SLF4J）=====
+# Logger.java 已显式调 Logger.init("admin-api")，MDC trace_id 会被自动填入
+logging:
+  level:
+    root: INFO
+    com.rag.users.admin.api: INFO
+    com.rag.common: INFO
+# ===== observability（对齐 Go service/user/admin/api 的 DisableNativeRestTimeout + NewHTTPMiddleware）=====
+# 取值依据：Go 侧 service/user/admin/api/etc/admincenter.yaml 未配置 Timeout，
+# 实际生效值为 go-zero v1.10.2 `rest/config.go:55` 的 `json:",default=3000"` → 3000ms。
+observability:
+  http-timeout: 3s

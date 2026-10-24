@@ -1,0 +1,183 @@
+# =============================================================================
+# message-api application.yml —— 对应 Go 端 service/message/api/etc/messagecenter.yaml
+# =============================================================================
+# 1:1 迁移原则：Go yaml 的每个字段都在这里有对应；Spring / devh starter 用自己的
+# 字段名表达同一语义。不新增 Go 侧不存在的开关。
+# =============================================================================
+
+spring:
+  application:
+    name: message-api
+
+  # ============== 3. Nacos 服务发现（用于解析 discovery:///message-rpc）==============
+  # Go 端是 etcd flat key "message.rpc"（无 namespace / group 分层）。
+  # Java 端用 Nacos，namespace / group 取默认值与 <b>message-rpc 自身保持一致</b>
+  # （message-rpc/src/main/resources/application.yml: namespace=public / group=DEFAULT_GROUP）。
+  # ⚠️ 两端必须一致，否则 message-api 解析不到 message-rpc，所有业务码塌成 1015。
+  #   已知的不一致：user / admin 域用的是 sea-rtw / USER_GROUP（docker-compose 默认值），
+  #   message-rpc 用的是 public / DEFAULT_GROUP。本次不改 message-rpc（已交付模块），
+  #   由 message-api 向它看齐；见 AGENTS.md 交付说明的 Remaining Issues。
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+
+# =============================================================================
+# HTTP server
+# =============================================================================
+# Go: etc/messagecenter.yaml 的 Host=0.0.0.0 / Port=8892。
+# 这里保持 Go 的 8892（与 message-rpc 保留 Go 的 8082 是同一条策略）。
+# ⚠️ Infrastructure.md §3 给 message 预占的是 18803；两者不同，改端口前先对齐那张表。
+server:
+  port: ${MESSAGE_API_PORT:8892}
+  address: 0.0.0.0
+  servlet:
+    context-path: /
+
+# =============================================================================
+# gRPC client（连 message-rpc :8082）
+# =============================================================================
+# Go: MessageRpc.Etcd{ Hosts: [etcd:2379], Key: "message.rpc" }。
+# Java: devh grpc-client-spring-boot-starter + Nacos name resolver。
+# ⚠️ negotiation-type 不能省（DRIFT-NEW-014）：devh 的默认值是 TLS，
+#   不写会静默发 TLS ClientHello，而 message-rpc 是明文 gRPC
+#   （Go service/message/rpc/message.go zrpc.MustNewServer 全仓无 TLS 配置）。
+grpc:
+  client:
+    message-rpc:
+      address: discovery:///message-rpc
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      permit-keep-alive-without-calls: true
+
+# =============================================================================
+# 业务配置（对齐 Go 端 UserAuth.* / AdminAuth.*）
+# =============================================================================
+# Go: etc/messagecenter.yaml
+#   UserAuth.AccessSecret / AccessExpire = ae0536f9-… / 31536000（365 天）
+#   AdminAuth.AccessSecret / AccessExpire = yU-hCm)2*?NQmWG / 2592000（30 天）
+#
+# ⚠️ 两段密钥都必须与<b>签发方</b>一致：
+#   - user 段  ← user-api 签发（users-common/JwtUtil，padToHmacKeySize 到 32 字节）
+#   - admin 段 ← admin-api 签发（同上；Go 侧 15 字节 secret，jjwt 强制 ≥32 字节故需补齐）
+# ⚠️ message-api 只验签、不签发：Go 侧本服务没有 login / register 端点。
+message-api:
+  user-auth:
+    access-secret: ${USER_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}
+    access-expire: ${USER_JWT_EXPIRE:31536000}
+  admin-auth:
+    access-secret: ${ADMIN_JWT_SECRET:yU-hCm)2*?NQmWG}
+    access-expire: ${ADMIN_JWT_EXPIRE:2592000}
+
+# =============================================================================
+# rag.protection —— Go「请求保护层」四道中间件（2026-10-22 从 message-api.protection 迁来）
+# =============================================================================
+# ⚠️ **前缀变更**：这套保护层的实现已从 message-api 下沉到 service/common
+#    （com.rag.common.protection），供所有 api 域共用。带业务域前缀的共享组件
+#    是错的，因此前缀由 message-api.protection 改为 rag.protection。
+#    部署侧若有外部配置覆盖旧键名，必须同步改名。
+#    漏改的后果是「回落默认值」，而默认值 == go-zero 的 tag 默认值，
+#    不会静默关闭保护层（刻意选的 fail-safe 方向）。
+#
+# ⚠️⚠️ 下面四项在 Go 的 etc/messagecenter.yaml 里 **一个字都没写**，
+#    但在 Go 侧 **是开启的**。照 yaml 逐字段对，永远看不见这四层。
+#
+# 证据（go-zero v1.10.2）：
+#   rest/config.go:52      MaxConns     int   `json:",default=10000"`
+#   rest/config.go:53      MaxBytes     int64 `json:",default=1048576"`
+#   rest/config.go:56      CpuThreshold int64 `json:",default=900,range=[0:1000)"`
+#   rest/config.go:12-22   MiddlewaresConf 九个开关 **全部** `json:",default=true"`
+#                          （含 MaxConns / Breaker / Shedding / MaxBytes）
+#
+# ⇒ 「Go yaml 里没写」≠「Go 没开」。这是 AGENTS.md §3.1 的一条延伸：
+#   对照基准不能只看数据文件，**框架 tag 里的默认值同样是行为定义**。
+#
+# ⚠️ 四层的拒绝响应都是 **裸状态码 + 空 body + 无 Content-Type**，不走 envelope
+#    （Go 侧是裸 w.WriteHeader，没有 httpx.Error）。这与本模块
+#    「所有业务错误恒 200 + envelope」的约定刻意不同：保护层在到达
+#    业务逻辑之前就拒绝了，没有 envelope 可包。
+#
+# ⚠️ 与 Go 的一处表达层差异（已在 GoStyleMaxConnsFilter javadoc 留痕）：
+#    Go 的 MaxConns 闸门是 **每路由一个**（engine.go:146 对每条路由各建一次），
+#    本实现取 **全局一个**。
+rag:
+  protection:
+    # Go rest/config.go:52
+    max-conns: 10000
+    # Go rest/config.go:53（1 MiB）。注意 Go 只看 Content-Length 头，
+    # chunked 请求（无 Content-Length）会绕过这层 —— 刻意保留该行为。
+    max-bytes: 1048576
+    cpu-shedding:
+      # Go rest/config.go:22 Middlewares.Shedding
+      enabled: true
+      # Go rest/config.go:56（千分比，900 = 90% CPU）
+      cpu-threshold: 900
+      # Go 读整机 CPU（Linux /proc/stat）⇒ SYSTEM 对齐；
+      # PROCESS 只看本 JVM，偏离 Go，仅在多副本各自限流时才用。
+      cpu-source: SYSTEM
+    breaker:
+      # Go rest/config.go:15 Middlewares.Breaker
+      enabled: true
+
+# =============================================================================
+# Metrics
+# =============================================================================
+# Go 端 internal/metrics/metrics.go 的三个 metric，prometheus 子系统名 = message_api：
+#   message_api_request_total{route,result}          success / fail
+#   message_api_reject_total{route,reason}           user_id_missing / admin_id_missing / target_missing
+#   message_api_request_duration_seconds{route}      Histogram(DefBuckets)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+    enabled-by-default: false
+  endpoint:
+    health:
+      enabled: true
+    info:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    enable:
+      prometheus: true
+    tags:
+      # Go 侧是 prometheus.NewCounterVec(CounterOpts{Subsystem: "message_api"})，
+      # Prometheus 导出时子系统会变成 name 前缀 —— 在 Micrometer 侧对应这个 tag。
+      application: message-api
+
+# =============================================================================
+# OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）
+# =============================================================================
+# Go: Telemetry.Name=message-api / Endpoint=jaeger:4317 / Batcher=otlpgrpc / Sampler=1.0
+otel:
+  exporter:
+    otlp:
+      endpoint: http://${OTEL_ADDR:jaeger}:${OTLP_PORT:4317}
+      protocol: grpc
+  resource:
+    attributes:
+      service.name: message-api
+  traces:
+    sampler: always_on
+
+logging:
+  level:
+    root: INFO
+    com.rag.message.message.api: INFO
+    com.rag.common: INFO
+
+# =============================================================================
+# observability
+# =============================================================================
+# 取值依据：Go 侧 etc/messagecenter.yaml <b>未配置</b> Timeout，
+# 实际生效值来自 go-zero v1.10.2 rest/config.go:55 的 `Timeout int64 json:",default=3000"`。
+# DisableNativeRestTimeout 已把 go-zero 原生超时中间件关掉，超时只有 observability 一个执行者。
+observability:
+  http-timeout: 3s

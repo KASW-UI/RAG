@@ -1,0 +1,385 @@
+{
+  "_comment": "AGENTS.md → DRIFT/ 搬移台账。phase A 纯搬移期间 AGENTS.md 保持零改动；phase B 依本表删除源行区间。",
+  "_moved_at": "2026-10-23",
+  "_source": "AGENTS.md @ 81744d1 + 工作区未提交增量（369625 bytes / 4093 lines）",
+  "entries": [
+    {
+      "src": [
+        57,
+        71
+      ],
+      "dst": "docs/DRIFT/like/rpc.md",
+      "label": "§0 like-rpc 事实投递链路跨三个仓库"
+    },
+    {
+      "src": [
+        72,
+        101
+      ],
+      "dst": "docs/DRIFT/message/rpc.md",
+      "label": "§0 message-rpc 3 项 P0 + 3 项新挖出缺陷"
+    },
+    {
+      "src": [
+        102,
+        420
+      ],
+      "dst": "docs/DRIFT/message/api.md",
+      "label": "§0 message-api 落地与 3 处请求解析层漂移 + 请求保护层 + client 熔断"
+    },
+    {
+      "src": [
+        421,
+        483
+      ],
+      "dst": "docs/DRIFT/_cross/message-domain-wide.md",
+      "label": "§0 message 全域第二轮语义验证"
+    },
+    {
+      "src": [
+        484,
+        590
+      ],
+      "dst": "docs/DRIFT/like/api.md",
+      "label": "§0 like-api 2 条 HIGH 漂移"
+    },
+    {
+      "src": [
+        591,
+        733
+      ],
+      "dst": "docs/DRIFT/common/protection.md",
+      "label": "§0 请求保护层下沉到 service/common"
+    },
+    {
+      "src": [
+        734,
+        827
+      ],
+      "dst": "docs/DRIFT/like/api.md",
+      "label": "§0 404/405 字节级对齐 DRIFT-LIKEAPI-007/-008/-011"
+    },
+    {
+      "src": [
+        828,
+        927
+      ],
+      "dst": "docs/DRIFT/common/deadline.md",
+      "label": "§0 HTTP 超时取消语义（池加界 + deadline 透传）"
+    },
+    {
+      "src": [
+        928,
+        1088
+      ],
+      "dst": "docs/DRIFT/common/http.md",
+      "label": "§0 DRIFT-006 请求体 Content-Type 判据"
+    },
+    {
+      "src": [
+        1089,
+        1142
+      ],
+      "dst": "docs/DRIFT/users/_shared.md",
+      "label": "§0 补网：admin-api / user-api 继承共享组件却无测试"
+    },
+    {
+      "src": [
+        1143,
+        1342
+      ],
+      "dst": "docs/DRIFT/like/rpc.md",
+      "label": "§0 like-rpc 12 条漂移"
+    },
+    {
+      "src": [
+        1343,
+        1391
+      ],
+      "dst": "docs/DRIFT/hot/common.md",
+      "label": "§0 hot-common 双侧对拍"
+    },
+    {
+      "src": [
+        1392,
+        1443
+      ],
+      "dst": "docs/DRIFT/hot/rpc.md",
+      "label": "§0 hot-rpc 首次实现"
+    },
+    {
+      "src": [
+        1444,
+        1534
+      ],
+      "dst": "docs/DRIFT/article/common.md",
+      "label": "§0 article-common 双侧对拍"
+    },
+    {
+      "src": [
+        1864,
+        1888
+      ],
+      "dst": "docs/Intentional_Deviations/_cross/signed-deviations.md",
+      "label": "§3.4 已知偏离主表（N-1..N-5）"
+    },
+    {
+      "src": [
+        1889,
+        1924
+      ],
+      "dst": "docs/DRIFT/users/user/api.md",
+      "label": "§3.4.2 service/users 语义审计后两条新增留档"
+    },
+    {
+      "src": [
+        1925,
+        1977
+      ],
+      "dst": "docs/DRIFT/users/admin/_shared.md",
+      "label": "§3.4.3 service/users/admin 审计后三条新增留档"
+    },
+    {
+      "src": [
+        1978,
+        2066
+      ],
+      "dst": "docs/DRIFT/users/_shared.md",
+      "label": "§3.4.4 service/users 基础组件审计后新增留档"
+    },
+    {
+      "src": [
+        2067,
+        2191
+      ],
+      "dst": "docs/DRIFT/users/_shared.md",
+      "label": "§3.4.5 DTO 边界矩阵产出差异 R1~R5"
+    },
+    {
+      "src": [
+        2192,
+        2331
+      ],
+      "dst": "docs/Intentional_Deviations/common/_signed-deviations.md",
+      "label": "§3.4.1 service/common 的 Java 端差异"
+    },
+    {
+      "src": [
+        2387,
+        2409
+      ],
+      "dst": "docs/DRIFT/users/user/api.md",
+      "label": "§6.1 service/users 行为一致性审计已完成"
+    },
+    {
+      "src": [
+        2410,
+        2442
+      ],
+      "dst": "docs/DRIFT/_cross/open-items.md",
+      "label": "§6.2 已知未修（按优先级）"
+    },
+    {
+      "src": [
+        2443,
+        2481
+      ],
+      "dst": "docs/DRIFT/users/admin/api.md",
+      "label": "§6.2.4① Go 对空 body 的三段取证（admin-api）"
+    },
+    {
+      "src": [
+        2482,
+        2522
+      ],
+      "dst": "docs/DRIFT/message/rpc.md",
+      "label": "§6.2.4② NotificationEntity.isRead 运行期致命（实为 message-rpc）"
+    },
+    {
+      "src": [
+        2523,
+        2585
+      ],
+      "dst": "docs/DRIFT/users/admin/_shared.md",
+      "label": "§6.2.2 users/admin 语义审计修复清单 #71186443"
+    },
+    {
+      "src": [
+        2586,
+        2611
+      ],
+      "dst": "docs/DRIFT/users/admin/_shared.md",
+      "label": "§6.2.3 users/admin 的 UNRESOLVED"
+    },
+    {
+      "src": [
+        2612,
+        2899
+      ],
+      "dst": "docs/DRIFT/users/_shared.md",
+      "label": "§6.2.5 tools/difftest 产出（users 全域）"
+    },
+    {
+      "src": [
+        2900,
+        2909
+      ],
+      "dst": "docs/DRIFT/_cross/open-items.md",
+      "label": "§6.2.1 本次从本表移出"
+    },
+    {
+      "src": [
+        2910,
+        3054
+      ],
+      "dst": "docs/DRIFT/users/_shared.md",
+      "label": "§6.2.6 service/users 证据边界台账 E-1~E-6"
+    },
+    {
+      "src": [
+        3158,
+        3256
+      ],
+      "dst": "docs/DRIFT/common/audit.md",
+      "label": "§6.5 service/common 语义一致性审计与修复"
+    },
+    {
+      "src": [
+        3257,
+        3574
+      ],
+      "dst": "docs/DRIFT/message/rpc.md",
+      "label": "§6.6 message-rpc 审计 + 修复"
+    },
+    {
+      "src": [
+        3575,
+        3933
+      ],
+      "dst": "docs/DRIFT/_cross/message-domain-wide.md",
+      "label": "§6.7 service/message 全域语义一致性验证"
+    },
+    {
+      "src": [
+        3934,
+        4057
+      ],
+      "dst": "docs/DRIFT/hot/rpc.md",
+      "label": "§6.8 hot-rpc 首次实现 L1~L3"
+    },
+    {
+      "src": [
+        1692,
+        1706
+      ],
+      "dst": "docs/Pitfalls/users/_shared.md",
+      "label": "§3.3.3 第四类完整经过：mybatis 前缀写错，注入静默归零（B-1 实验）"
+    },
+    {
+      "src": [
+        1719,
+        1753
+      ],
+      "dst": "docs/Pitfalls/common/http.md",
+      "label": "§3.3.3 E-1 案例：text/plain 400 丢 Content-Type —— 「代码里写了」≠「客户端收到」"
+    },
+    {
+      "src": [
+        1755,
+        1769
+      ],
+      "dst": "docs/Pitfalls/_cross/testing-pitfalls.md",
+      "label": "§3.3.3 元教训：把没看过的东西变成看过了"
+    },
+    {
+      "src": [
+        1773,
+        1785
+      ],
+      "dst": "docs/Pitfalls/_cross/testing-pitfalls.md",
+      "label": "§3.3.3 H2 案例：断言「Bean 存在」≠ 断言「机制生效」"
+    },
+    {
+      "src": [
+        1790,
+        1811
+      ],
+      "dst": "docs/Pitfalls/users/_shared.md",
+      "label": "§3.3.3 46 处批量插入：为什么必须配守恒断言"
+    },
+    {
+      "src": [
+        1841,
+        1855
+      ],
+      "dst": "docs/Pitfalls/like/rpc.md",
+      "label": "§3.3.3 Boot 4 把 Kafka 自动配置搬出 autoconfigure ⇒ @KafkaListener 静默失效"
+    },
+    {
+      "src": [
+        54,
+        101
+      ],
+      "dst": "docs/DRIFT/_cross/fix-round-2026-10-23.md",
+      "label": "2026-10-23 修复轮逐组件记录（含仍未修清单）",
+      "note": "元教训部分另入 docs/Pitfalls/_cross/fix-round-lessons.md"
+    }
+  ],
+  "_kept_in_agents_md": [
+    {
+      "lines": "1535-1691",
+      "why": "§一 项目身份与双轨策略 / §二 HUMAN_ONLY / §三 3.1~3.3.3 纪律条文"
+    },
+    {
+      "lines": "1707-1718",
+      "why": "§3.3.3 规则：必须配能真正触发机制的测试；判断注入生效不能看启动日志"
+    },
+    {
+      "lines": "1754-1754",
+      "why": "§3.3.3 分隔空行"
+    },
+    {
+      "lines": "1770-1772",
+      "why": "§3.3.3 规则：断言「Bean 存在」≠ 断言「机制生效」"
+    },
+    {
+      "lines": "1786-1789",
+      "why": "§3.3.3 规则：批量改 N 处必须配守恒断言"
+    },
+    {
+      "lines": "1812-1840",
+      "why": "§3.3.3 规则：绿测试可能是错误答案的守卫 + 强制三条 + Boot 4 规则头"
+    },
+    {
+      "lines": "1856-1863",
+      "why": "§3.3.3 强制三条 + like-rpc 缺 spring-boot-kafka 未修"
+    },
+    {
+      "lines": "1-56",
+      "why": "文件头 + §0 已关闭/仍存在两张总览表 —— 这是索引本体，phase B 需重写为精简版"
+    },
+    {
+      "lines": "2332-2386",
+      "why": "§四 当前重构 phase 计划 / §五 用户协作规则 —— 纯政策；含 §六 标题与「状态表纪律」三条约定（任何已修/未修断言必须带核对日期，否则按 UNKNOWN）"
+    },
+    {
+      "lines": "3055-3157",
+      "why": "§6.3 架构决策（是决策不是漂移）+ §6.4 其他子模块索引"
+    },
+    {
+      "lines": "4058-4127",
+      "why": "§七 引用清单（含末行：user/rpc/internal/logic 是 7 个 _test.go 的孤儿目录，搬迁勿带）"
+    }
+  ],
+  "_phase_b": {
+    "moved_at": "2026-10-23 00:3x",
+    "new_entries": 6,
+    "note": "§3.3 的案例段进 docs/Pitfalls/（踩坑档案），规则条文留在 AGENTS.md §3.3 并加指针。"
+  },
+  "_rehomed": {
+    "signed_deviations": {
+      "moved_at": "2026-10-23 02:5x",
+      "note": "§3.4「已知偏离（有意为之，需留档）」独立成 docs/Intentional_Deviations/ 档案；台账保留源行区间不变。"
+    }
+  }
+}

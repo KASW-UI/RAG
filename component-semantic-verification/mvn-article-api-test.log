@@ -1,0 +1,82 @@
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.8)
+
+2026-10-23T00:10:22.271+08:00  INFO 94367 --- [article-api] [           main] .r.a.a.a.ArticleApiRouteAuthBoundaryTest : Starting ArticleApiRouteAuthBoundaryTest using Java 21.0.10 with PID 94367 (started by pr in /Users/pr/Documents/java&golang/RAG/service/article/article-api)
+2026-10-23T00:10:22.273+08:00  INFO 94367 --- [article-api] [           main] .r.a.a.a.ArticleApiRouteAuthBoundaryTest : No active profile set, falling back to 1 default profile: "default"
+2026-10-23T00:10:22.826+08:00  INFO 94367 --- [article-api] [           main] o.s.cloud.context.scope.GenericScope     : BeanFactory id=80a09a1b-ab4f-3c7c-bede-03725e91be9a
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A Java agent has been loaded dynamically (/Users/pr/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+2026-10-23T00:10:23.678+08:00  INFO 94367 --- [article-api] [           main] com.rag.common.snowflake.Snowflake       : Snowflake initialized with nodeId: 325
+2026-10-23T00:10:23.760+08:00  INFO 94367 --- [article-api] [           main] o.s.v.b.OptionalValidatorFactoryBean     : Failed to set up a Bean Validation provider: jakarta.validation.NoProviderFoundException: Unable to create a Configuration, because no Jakarta Validation provider could be found. Add a provider like Hibernate Validator (RI) to your classpath.
+2026-10-23T00:10:24.113+08:00  INFO 94367 --- [article-api] [           main] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-10-23T00:10:24.113+08:00  INFO 94367 --- [article-api] [           main] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-10-23T00:10:24.118+08:00  INFO 94367 --- [article-api] [           main] o.s.b.a.e.web.EndpointLinksResolver      : Exposing 3 endpoints beneath base path '/actuator'
+2026-10-23T00:10:24.124+08:00  INFO 94367 --- [article-api] [           main] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 10 ms
+2026-10-23T00:10:24.179+08:00  INFO 94367 --- [article-api] [           main] .r.a.a.a.ArticleApiRouteAuthBoundaryTest : Started ArticleApiRouteAuthBoundaryTest in 2.323 seconds (process running for 3.119)
+2026-10-23T00:10:24.306+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : no handler for v1/nope : No static resource v1/nope for request '/v1/nope'.
+2026-10-23T00:10:24.367+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : no handler for v1/article/1/extra : No static resource v1/article/1/extra for request '/v1/article/1/extra'.
+2026-10-23T00:10:24.371+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : no handler for nope : No static resource nope for request '/nope'.
+2026-10-23T00:10:24.387+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : no handler for v1/nope : No static resource v1/nope for request '/v1/nope'.
+2026-10-23T00:10:24.397+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.i.JwtAuthInterceptor           : article-api path /v1/article with missing Authorization header
+2026-10-23T00:10:24.402+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : AuthenticationException code=1005 msg=请先登录
+2026-10-23T00:10:24.406+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.i.JwtAuthInterceptor           : article-api path /v1/article/1 with missing Authorization header
+2026-10-23T00:10:24.406+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : AuthenticationException code=1005 msg=请先登录
+2026-10-23T00:10:24.407+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.i.JwtAuthInterceptor           : article-api path /v1/article/1 with missing Authorization header
+2026-10-23T00:10:24.407+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : AuthenticationException code=1005 msg=请先登录
+2026-10-23T00:10:24.408+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.i.JwtAuthInterceptor           : article-api path /v1/me/article/1 with missing Authorization header
+2026-10-23T00:10:24.408+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : AuthenticationException code=1005 msg=请先登录
+2026-10-23T00:10:24.494+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=1002 msg=文章不存在
+2026-10-23T00:10:24.520+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=5001 msg=系统内部错误
+2026-10-23T00:10:24.554+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=1002 msg=文章不存在
+2026-10-23T00:10:24.582+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : method not supported : Request method 'PATCH' is not supported
+2026-10-23T00:10:24.583+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : method not supported : Request method 'PATCH' is not supported
+2026-10-23T00:10:24.779+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : request parse failed : JSON parse error: No content to map due to end-of-input
+2026-10-23T00:10:24.806+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=5001 msg=系统内部错误
+2026-10-23T00:10:24.817+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : method not supported : Request method 'POST' is not supported
+2026-10-23T00:10:24.821+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=5001 msg=系统内部错误
+2026-10-23T00:10:24.826+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : no handler for v1/nope : No static resource v1/nope for request '/v1/nope'.
+2026-10-23T00:10:24.830+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : method not supported : Request method 'POST' is not supported
+2026-10-23T00:10:24.903+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=1005 msg=请先登录
+2026-10-23T00:10:25.005+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=1002 msg=文章不存在
+2026-10-23T00:10:25.007+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=5001 msg=系统内部错误
+2026-10-23T00:10:25.010+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=1015 msg=服务繁忙
+2026-10-23T00:10:25.020+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=1006 msg=只能编辑或删除自己的文章
+2026-10-23T00:10:25.033+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : go-style required field missing : field=title explicitNull=true
+2026-10-23T00:10:25.051+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : request parse failed : JSON parse error: Unexpected character ('n' (code 110)): was expecting double-quote to start property name
+2026-10-23T00:10:25.059+08:00 ERROR 94367 --- [article-api] [obs-http-worker] article-api                              : business_error
+2026-10-23T00:10:25.067+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : go-style bad request : type mismatch for field "incr_view"
+2026-10-23T00:10:25.072+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=1002 msg=文章不存在
+2026-10-23T00:10:25.075+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=1002 msg=文章不存在
+2026-10-23T00:10:25.077+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.i.JwtAuthInterceptor           : article-api path /v1/me/article/draft with missing Authorization header
+2026-10-23T00:10:25.077+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : AuthenticationException code=1005 msg=请先登录
+2026-10-23T00:10:25.079+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=1006 msg=只能编辑或删除自己的文章
+2026-10-23T00:10:25.084+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=1006 msg=只能编辑或删除自己的文章
+2026-10-23T00:10:25.087+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=5001 msg=系统内部错误
+2026-10-23T00:10:25.092+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.i.JwtAuthInterceptor           : article-api path /v1/article with missing Authorization header
+2026-10-23T00:10:25.092+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : AuthenticationException code=1005 msg=请先登录
+2026-10-23T00:10:25.094+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.i.JwtAuthInterceptor           : article-api path /v1/article/1 with missing Authorization header
+2026-10-23T00:10:25.094+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : AuthenticationException code=1005 msg=请先登录
+2026-10-23T00:10:25.094+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.i.JwtAuthInterceptor           : article-api path /v1/article/1 with missing Authorization header
+2026-10-23T00:10:25.095+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : AuthenticationException code=1005 msg=请先登录
+2026-10-23T00:10:25.095+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.i.JwtAuthInterceptor           : article-api path /v1/me/article/1 with missing Authorization header
+2026-10-23T00:10:25.095+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : AuthenticationException code=1005 msg=请先登录
+2026-10-23T00:10:25.111+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : request parse failed : JSON parse error: type mismatch for field "title"
+2026-10-23T00:10:25.119+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : request parse failed : JSON parse error: Cannot coerce String value ("2") to `java.lang.Integer` value (but might if coercion using `CoercionConfig` was enabled)
+2026-10-23T00:10:25.124+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : go-style required field missing : field=title explicitNull=false
+2026-10-23T00:10:25.142+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : CreateFailure code=1004 msg=文章发布失败 articleId=1792670400123
+2026-10-23T00:10:25.145+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=1001 msg=文章已存在
+2026-10-23T00:10:25.157+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : go-style bad request : rpc call UploadFile failed: Status{code=INTERNAL, description=minio down, cause=null}
+2026-10-23T00:10:25.183+08:00  WARN 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : request parse failed : Required part 'image' is not present.
+2026-10-23T00:10:25.192+08:00 ERROR 94367 --- [article-api] [obs-http-worker] c.r.a.a.a.advice.GlobalExceptionHandler  : BusinessException code=1006 msg=只能编辑或删除自己的文章
+EXIT=0

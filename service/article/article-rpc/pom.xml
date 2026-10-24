@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>article</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>article-rpc</artifactId>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <!--
+            article-proto：ArticleServiceGrpc（server ImplBase + client Stub）。
+            proto 源文件逐字复制自 Go 端 proto/article.proto，仅多了两行 java_package /
+            java_multiple_files 选项（L1 契约：字段号、message 名、enum 值一律未改）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>article-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            article-common：ErrorCode（15 个码 + 文案表 + 未知码回落）。
+            article 域与 like 域相反——Go 侧 rpc 发的是**标准 gRPC code**，业务码从不上线，
+            因此本模块不需要 gRPC 错误转换类，只用 ErrorCode 打业务错误日志字段。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>article-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            message-proto：MessageServiceBlockingStub。
+            对应 Go svc.SecurityConf 之外的第三个数：MessageRpc.SendNotification
+            （发布成功通知，SenderRole_SYSTEM + NotificationKind_ARTICLE_PUBLISHED）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>message-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            common（artifactId=common）：SnowflakeBean / LoggerFactoryBean /
+            RpcServerInterceptorFactory / DeadlineQueryTimeoutInjector 等。
+            Go 侧 snowflake.GetID 对应 SnowflakeBean.nextId；snowflake.Init() 由本模块
+            bootstrap/SnowflakeBootstrap 承担（见该文件说明）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot 基础（gRPC server，无 web） ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-web-server</artifactId>
+        </dependency>
+
+        <!-- ============== 3. gRPC server + client ============== -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-server-spring-boot-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>3.1.0.RELEASE</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ============== 4. Kafka（Go 侧 2 个 consumer + 2 个 pusher） ============== -->
+        <!--
+            Spring Kafka 取代 go-queue/kq。
+            ⚠️ ack 语义方向相反：Go 是「返回 error ⇒ 不确认」，Java 是「抛异常 ⇒ 不提交」。
+            本模块的 drop/retry 区分见 mq/ArticleReviewConsumer 的类级注释。
+
+            ⚠️ spring-boot-kafka **不可省**：Boot 4 把 Kafka 的自动配置拆成了独立模块，
+            只有 spring-kafka（底层库）时 **KafkaTemplate / ConsumerFactory /
+            ConcurrentKafkaListenerContainerFactory 全都没有**，
+            表现为 ArticleSyncOutboxRelay 启动时
+            「No qualifying bean of type 'org.springframework.kafka.core.KafkaTemplate'」。
+            这是"编译通过、测试全绿、进程起不来"的典型：与 AGENTS.md §6.6 的
+            DRIFT-MSG-003~006 同型，都是 message-rpc 付出代价才补上的装配点。
+        -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-kafka</artifactId>
+        </dependency>
+
+        <!-- ============== 5. 对象存储（Go 侧 minio-go/v7） ============== -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>${minio.version}</version>
+        </dependency>
+
+        <!-- ============== 6. 数据访问：Postgres + MyBatis-Plus + Flyway ============== -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+        </dependency>
+        <!--
+            ⚠️ scope 不能是 runtime：本模块的 JsonbTypeHandler 直接引用
+            org.postgresql.util.PGobject（把 jsonb 列按 PG 类型绑定，缺它 jsonb 写入报类型不匹配），
+            那是**编译期**依赖。message-rpc / like-rpc 之所以能用 runtime，
+            是因为它们的 TypeHandler 不 import PG 类。
+        -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <!--
+            ⚠️ spring-boot-flyway 必需（Boot 4 拆模块，同 message-rpc DRIFT-MSG-006）。
+            缺它时启动日志里连一行 Flyway 都没有，迁移脚本永不执行，
+            第一次真正执行 SQL 才炸 relation "article" does not exist。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+        </dependency>
+
+        <!-- ============== 7. Metrics ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 8. OpenTelemetry OTLP exporter ============== -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 9. Nacos service discovery ============== -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- ============== 10. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-inprocess</artifactId>
+            <version>${grpc.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            真 PostgreSQL 容器，不用 H2：本模块要验证的不变量本身就是 PG 语义——
+              - article_revision 的 BEFORE UPDATE/DELETE 不可变触发器（H2 无此能力）
+              - article_publication.state 的 CHECK 约束
+              - FOR UPDATE 行锁的并发串行化
+              - jsonb 列（secondary_tags / ext_info）与 @> 操作符
+              - @@Transactional(isolation = REPEATABLE_READ, readOnly = true) 快照
+            换成 H2 等于把要验证的东西换没了（同 message-rpc / admin-rpc 的理由）。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
+                关掉 Ryuk：Testcontainers 2.x 的 ResourceReaper 读的是**环境变量**
+                System.getenv("TESTCONTAINERS_RYUK_DISABLED")，testcontainers.properties 与 -D 无效，
+                只有 surefire 注入 env 才有效（同 message-rpc / like-rpc 的实测结论）。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

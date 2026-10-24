@@ -1,0 +1,272 @@
+# =============================================================================
+# comment-rpc application.yml
+#
+# 对应 Go 端的**四个** main 合并后的单 JVM：
+#   P1  service/comment/rpc/comment.go        （gRPC server + Kafka 审计消费者 + promhttp :9091）
+#   P2  service/comment/rpc/cmd/fact-authority（权威读 HTTP 端点，默认关闭）
+#   P3  service/comment/rpc/cmd/fact-dispatch（事实投递，默认关闭）
+#
+# 配置项按来源分段标注，1:1 保留 Go 同名字段。
+# =============================================================================
+
+spring:
+  application:
+    # 对应 Go Name: comment.rpc（服务发现名）；Telemetry.Name 亦为 comment-rpc
+    name: comment-rpc
+
+  # 🔴🔴 纯 gRPC 进程必须显式声明 web-application-type: none
+  #
+  # 【2026-10-24 双侧活体对拍时实测发现的启动阻塞缺陷】
+  # 本模块的 pom 里有两条 web 相关依赖：
+  #   ① spring-boot-web-server          —— 仅为满足 nacos-discovery 的反射引用
+  #   ② jakarta.servlet:jakarta.servlet-api（**provided**）—— 仅供
+  #      CommentAuthorityEndpointConfig 的 ServletRegistrationBean<HttpServlet> 编译
+  # 两条都**不含**嵌入式 servlet 容器（无 tomcat-embed-core）⇒ 按设计是纯 gRPC 进程。
+  #
+  # ⚠️ 但 Spring Boot 的 WebApplicationType.deduceFromClasspath() 判定「是不是 web 应用」
+  #    只看 **jakarta.servlet.Servlet 在不在 classpath 上** —— **不看有没有容器**。
+  #    而 **Spring Boot 的 repackage 会把 provided 作用域的 jar 也打进 BOOT-INF/lib**
+  #    （实测：comment-rpc 的 fat jar 里确实有 BOOT-INF/lib/jakarta.servlet-api-6.1.0.jar；
+  #      message-rpc / like-rpc 没声明这个依赖 ⇒ 它们的 fat jar 里没有 ⇒ 不受影响）。
+  #    ⇒ Boot 判定为 SERVLET → 启动期去找 ServletWebServerFactory → **找不到** →
+  #      APPLICATION FAILED TO START: "Unable to start web server" ⇒ **组件根本起不来**。
+  #
+  # ⇒ 本行是「纯 gRPC 进程」这个**既有意图**的显式声明，不是补丁。
+  #    Go 侧对应形态：comment.go 起的是 zrpc gRPC server + 一个独立的 promhttp :9091 goroutine，
+  #    **没有** web 容器。
+  # ⚠️ 本行不可省：省掉它 ⇒ 进程起不来 ⇒ 而单元测试全绿（测试不起真实容器）。
+  main:
+    web-application-type: none
+
+  # ============== Postgres ==============
+  # 对应 Go config.Config.DB.DataSource
+  #   "host=${POSTGRES_ADDR} user=… dbname=… port=… sslmode=disable TimeZone=Asia/Shanghai"
+  #
+  # ⚠️ **TimeZone=Asia/Shanghai 不能省**（AGENTS.md §0 item 2 的同类教训）：
+  #    get_comment_logic.go:139 用 `CreatedAt.Format("2006-01-02 15:04:05")` 把时间戳
+  #    渲染进 wire，而 created_at 是 TIMESTAMPTZ。Go 侧显式把 PG session 时区钉成
+  #    Asia/Shanghai，Java 侧必须在 JDBC URL 里带上同一个参数，否则渲染出来会差一个时区。
+  #    （兜底：CommentDateTimes 里仍显式按 Asia/Shanghai 格式化，不依赖 JVM 默认时区。）
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}?TimeZone=Asia/Shanghai
+    username: ${POSTGRES_USER:admin}
+    password: ${POSTGRES_PASSWORD:password}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # ⚠️ Go 侧 comment-rpc **没有**设 MaxIdleConns / MaxOpenConns（service_context.go 无相关调用），
+      #    走的是 GORM/database-sql 默认（MaxIdle=2, MaxOpen=无上限）。
+      #    这里取 100/10 是**表达层**选择（同 message-rpc / like-rpc），不改可观察行为：
+      #    Go 未设 ⇒ 没有「池上限触发的连接拒绝」这条路径可观测，Java 也不引入它。
+      maximum-pool-size: 100
+      minimum-idle: 10
+
+  # ============== MyBatis-Plus ==============
+  mybatis-plus:
+    configuration:
+      map-underscore-to-camel-case: true
+      default-fetch-size: 100
+    global-config:
+      db-config:
+        # 表名 / 主键策略在 Entity 注解上显式钉死（comment_index / comment_content /
+        # comment_like / comment_fact_stream 的主键都**不自增** —— 值来自雪花算法，
+        # 由 Kafka 消息携带落库）
+        id-type: ASSIGN_ID
+      banner: false
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+
+  # ============== Flyway ==============
+  # ⚠️ **独立账本表名**（AGENTS.md §6.3 问题 4，2026-10-23 定案）。
+  #    `flyway_schema_history` 是 **schema 级**账本，一个 schema 只能有一本账。
+  #    comment-rpc 与 message-rpc / like-rpc / article-rpc 连同一个 first_db、
+  #    同一个 public schema ⇒ 共用默认账本时后启动者会把别人的迁移判成「已应用」而静默跳过。
+  #    改账本表名即可消除病根，**迁移文件名一个字都不用动**。
+  #    ⛔ 不要用 validate-on-migrate=false / out-of-order=true 绕道（已被真 jar + 真 PG 证伪）。
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+    schemas: public
+    table: flyway_schema_history_comment
+
+  # ============== Redis ==============
+  # 对应 Go config.Config.BizRedis（go-zero redis.RedisConf：Host/Type/Pass）
+  # ⚠️ Go Type: node = 单节点直连，不是集群。Java 端 Lettuce 默认即单节点，
+  #    不要配 cluster 相关项，否则会变成 CLUSTER 拓扑解析。
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      # 对应 Go cache/redis.go:21-22 的 `context.WithTimeout(3s)` Ping
+      timeout: 3s
+      # ⚠️ pool.enabled=true ⇒ pom **必须**引 commons-pool2，否则
+      #    NoClassDefFoundError: GenericObjectPoolConfig ⇒ 组件起不来（like-rpc 实测）
+      lettuce:
+        pool:
+          enabled: true
+          max-active: 64
+          max-idle: 16
+          min-idle: 4
+
+  # ============== Kafka ==============
+  # 对应 Go etc/comment.yaml 的 KqPusherConf（生产）与 KqConsumerConf（消费）
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:kafka:9092}
+
+    consumer:
+      # 对应 Go KqConsumerConf.Group
+      group-id: comment-audit-group
+      # 对应 Go KqConsumerConf.Offset: last
+      # ⚠️ 与 like-rpc 的 earliest 不同 —— comment 审计从**最新**开始，
+      #    已写进库的历史评论不会被重复审核。
+      auto-offset-reset: latest
+      # 关掉自动提交：位点由容器在 listener 正常返回后提交。
+      # 这是 audit_consumer.go:36-51 那 4 条出口的载体：
+      #   解析失败 ⇒ return（= 提交/drop）· 事务失败 ⇒ throw（= 不提交/retry）
+      # enable-auto-commit 若留 true，「事务失败 → 不提交 → 重投」这条契约就不成立。
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # ⚠️ 与 like-rpc 的 acks=1 **刻意不同**：Go 的 kq.Pusher.Push 是**同步阻塞**写，
+      #    且 create_comment_logic.go:126-132 在 Push 失败时返回 ERROR_KAFKA_PUSH(5009)。
+      #    ⇒ 「Kafka 失败会让 CreateComment 失败」是本域的 L1 行为，Java 侧必须保留。
+      #    配 acks=all 让这个保证在多副本 broker 下也成立。
+      acks: all
+    listener:
+      # RECORD = listener 正常返回后提交位点（drop/retry 契约的实现载体）
+      ack-mode: record
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+
+# ============== gRPC server（devh）==============
+# 对应 Go etc/comment.yaml `ListenOn: 0.0.0.0:9001`
+grpc:
+  server:
+    port: 9001
+    address: 0.0.0.0
+    # Go 侧 reflection 仅在 DevMode/TestMode 注册（comment.go:50-52）；
+    # Java 侧 devh starter 默认即开启 reflection，此处不额外配置。
+  client:
+    # 对应 Go MessageRpc.Etcd.Key: message.rpc → 服务发现名 message-rpc
+    message-rpc:
+      address: discovery://message-rpc
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      negotiation-type: plaintext
+    # 对应 Go ArticleRpc.Etcd.Key: article.rpc
+    article-rpc:
+      address: discovery://article-rpc
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      negotiation-type: plaintext
+
+# ============== comment 服务专属配置 ==============
+comment:
+  kafka:
+    # Go KqPusherConf.Topic == KqConsumerConf.Topic（comment.yaml:26 与 :32）
+    # ★ 生产与消费同一个 topic 是 Go 的现状，不是笔误。
+    audit-topic: comment-audit-topic
+    # 对应 Go KqConsumerConf.Consumers: 8（同进程 8 个并发 Consume）
+    audit-concurrency: 8
+    # ⚠️ 对应 go-queue Pusher 的同步写语义：Java KafkaTemplate.send 是异步的，
+    #    要还原 Go 的「Push 失败 ⇒ CreateComment 返回 5009」必须**等 future 结果**。
+    #    上界取 kafka-go Writer 的默认 WriteTimeout 10s。
+    publish-timeout: 10s
+
+  # ---------- 敏感词（对应 service_context.go:29 的硬编码黑名单）----------
+  # Go 侧写死在代码里：`blackwords := []string{"傻逼", "我草"}`。
+  # 这里外提到配置，便于运营调整；默认值与 Go 逐字一致。
+  sensitive-words:
+    - "傻逼"
+    - "我草"
+
+  # ---------- 事实流派发（P3 fact-dispatch，默认关闭）----------
+  # Go cmd/fact-dispatch/main.go:52-57 要求同时具备：
+  #   COMMENT_DATABASE_URL 非空 / DC_PLATFORM_EVENT_URL 非空 / DC_PLATFORM_SERVICE_TOKEN ≥32 字节
+  # 任一不满足即 return error ⇒ **进程退出**。
+  # Java 侧是单 JVM（还跑着 gRPC 与 Kafka 消费），不能因为缺 DC 配置就让整个 comment-rpc
+  # 起不来 ⇒ 改为「默认关闭 + 启动时显式告警」，关闭时该功能完全不参与运行。
+  fact:
+    dispatch-enabled: false
+    dc-endpoint: ${DC_PLATFORM_EVENT_URL:}
+    dc-token: ${DC_PLATFORM_SERVICE_TOKEN:}
+    dc-timeout: 8s          # 对应 Go cmd/fact-dispatch/main.go:73 的 &http.Client{Timeout: 8 * time.Second}
+    # 对应 Go cmd/fact-dispatch/main.go:26 的 -once 标志：
+    #   true = 单次投递后退出（Go 的 CronJob 形态）；false = 常驻循环。
+    once: false
+
+  # ---------- 权威读（P2 fact-authority，默认关闭）----------
+  # Go cmd/fact-authority/main.go:50-55 要求 COMMENT_DATABASE_URL /
+  # COMMENT_FACT_AUTHORITY_LISTEN / COMMENT_FACT_AUTHORITY_TOKEN(≥32 字节) 齐备。
+  # ⚠️ 该端点在 Go 侧是**独立进程 + 独立监听端口**。Java 单 JVM 合并后若要提供它，
+  #    必须给本模块引入 servlet 容器 ⇒ **新增 HTTP 端口 = wire 面变更**。
+  #    本仓库 message-rpc / like-rpc / article-rpc 三个先例都没有这么做，
+  #    且 like-rpc 的同款文件（LikeAuthorityEndpointConfig.java:3）自记为「待拍板」。
+  #    ⇒ 这里默认关闭；打开它需要人工同时 ① 引 spring-boot-starter-web
+  #      ② 显式设置 management.server.port / server.port ③ 拍板对外暴露面。
+  authority:
+    enabled: false
+    token: ${COMMENT_FACT_AUTHORITY_TOKEN:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+    prometheus:
+      enabled: true
+  metrics:
+    # ⚠️ Go metrics.go:42-43 **主动注销**了 collectors.NewGoCollector() 与
+    #    NewProcessCollector()，即 Go 的 :9091 只暴露 5 个 comment_* 向量。
+    #    Micrometer 默认会额外暴露 jvm_* / process_* / system_* ⇒ 照搬就是新增可观测面。
+    #    这里显式关掉，对齐 Go 现状（不是「顺手增强」）。
+    enable:
+      jvm: false
+      process: false
+    tags:
+      application: comment-rpc
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+otel:
+  service:
+    name: comment-rpc
+  exporter:
+    otlp:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:jaeger:4317}
+  traces:
+    exporter: otlp
+    sampler: parentbased_always_on
+
+logging:
+  level:
+    root: INFO
+    com.rag: INFO
+    io.grpc: WARN
+
+# ===== observability（对齐 Go service/common/observability）=====
+# Go comment.go:33  observability.DisableNativeRpcTimeout(&c.RpcServerConf)
+#      comment.go:54  s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, SlowThreshold()))
+# Go etc/comment.yaml 未配 Timeout ⇒ go-zero zrpc/config.go 的 default = 2000ms。
+# ⚠️ 这一项**不是装饰**：CommentRpcApplication#rpcInterceptorConfigurer 少一行，
+#    超时 / deadline 传播 / gRPC span 会**全部静默消失**，而 Bean 断言照样是绿的
+#    （like-rpc LikeRpcApplication.java:83-97 的同款教训）。
+observability:
+  rpc-timeout: 2s

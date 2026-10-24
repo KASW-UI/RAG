@@ -1,0 +1,174 @@
+# =============================================================================
+# task-api application.yml —— 对应 Go 端 service/task/api/etc/task.yaml
+#
+# 字段重映射：
+#   Name: task-api / Host: 0.0.0.0 / Port: 18886 → spring.application.name / server.*
+#   TaskRpc{Target, NonBlock}                      → grpc.client.task-rpc.*
+#   Telemetry{Name, Endpoint, Sampler}             → otel.*
+#   Auth{AccessSecret, AccessExpire}               → **不迁移**（见下方说明）
+#
+# ⚠️ task.yaml 有一段 Telemetry，而 internal/config/config.go 的 Config 结构体
+#    **没有** Telemetry 字段（只有 RestConf + TaskRpc + Auth）。即该段在 Go 侧
+#    没有任何消费点。Java 侧仍然落 otel.*，因为它是「观测配置」而非 wire 契约，
+#    落它不改变任何客户端可见行为；不落则会丢掉 Go 想表达的采样意图。
+# =============================================================================
+
+spring:
+  application:
+    name: task-api
+
+  # ============== multipart 关掉（本服务不支持 multipart）==============
+  # ⚠️⚠️ 属性名是 `spring.servlet.multipart.enabled`，**没有 `mvc.`**。
+  #    Boot 4 的 MultipartAutoConfiguration 上是
+  #      @ConditionalOnBooleanProperty(name = "spring.servlet.multipart.enabled", matchIfMissing = true)
+  #    （在 spring-boot-servlet-4.0.8.jar 里）⇒ 写成 `spring.mvc.servlet.multipart.enabled`
+  #    是**静默失效**的：属性没人读，开关根本没关上。
+  #    ⚠️ 上一轮台账（DRIFT-TASK-API-003）记的就是那个错名字 ⇒ 当时那句
+  #    「已实测排除 Spring 侧」是**假阴性**（探针用的就是错名字，一直是通的）。
+  #
+  # 为什么关：Go 侧 task-api **没有 multipart 概念**——
+  #   · service/task/api/internal/handler/routes.go:15-25 只有一条路由；
+  #   · gettaskhandler.go:19-21 是裸 `json.NewDecoder(r.Body)`，
+  #     **不读任何 form part**，multipart body 到它那儿就是一段 JSON 文本，
+  #     解析失败 ⇒ 400。
+  # ⇒ Spring 侧也不该让 multipart resolver 先把 body 吃掉
+  #   （DispatcherServlet 的 multipart resolver 调 getParts() 消费 body），
+  #   否则 body 到 handler 时已被消费 ⇒ 报「Required request body is missing」。
+  # 关掉之后 multipart body 原样流给 Jackson ⇒ 与 Go 侧同样按 JSON 解析 ⇒ 同样的 400。
+  servlet:
+    multipart:
+      enabled: false
+
+  # ============== Nacos 服务发现 ==============
+  # Go 侧 task-api **不走服务发现**（etc/task.yaml 用 Target 直连，见下方 grpc 段）。
+  # 这里保留 Nacos 配置是为了「切到 discovery:///task-rpc 时不必改代码/依赖」。
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+
+# =============================================================================
+# HTTP server
+# =============================================================================
+# 端口：18886 = Go 的**真实取值**（两处一致）
+#   · Go service/task/api/etc/task.yaml:3   Port: 18886
+#   · Go manage.sh:842                      -p 18886:18886
+#
+# ⚠️ 本行 2026-10-23 从 18809 改为 18886（DRIFT-TASK-API-001）。原值 18809 来自
+#    Infrastructure.md:89 的「端口号段预占表」，那份表自己写明
+#    「Java 版只是先按这个号段预占，**等具体域实装时再校验**」（Infrastructure.md:91）
+#    —— task 域现已实装，就是那个校验点。
+#    且 Infrastructure.md 的 18809 与 Go 的真实值 18886 **对不上**，
+#    同一份文档 §3 对 hot 写的 18897 同样与 Go 的 8893 对不上（该表是照 18889/18891/18893
+#    的等差序列**推算**出来的，不是从 Go manage.sh 抄的）。
+#    本仓已实装的域一律用 Go 原值，task 不应例外：
+#       article-api 8889 = Go 8889   comment-api 8888 = Go 8888
+#       message-api 8892 = Go 8892   like-api 18887 = Go 18887
+#    （like-api 尤其关键：Infrastructure.md 给的是 18801，实装时采用了 Go 的 18887。）
+#    原值仍可用环境变量传回：TASK_API_PORT=18809。
+server:
+  port: ${TASK_API_PORT:18886}
+  address: 0.0.0.0
+  servlet:
+    context-path: /
+
+# =============================================================================
+# gRPC client（连 task-rpc）
+# =============================================================================
+# ⚠️⚠️ 下游寻址：**默认保持 Go 的直连**，这是与 hot/message/like/api 的唯一分歧点。
+#    Go  etc/task.yaml:5-7   TaskRpc{Target: 127.0.0.1:9005, NonBlock: true}
+#        —— 硬编码 localhost，**没有 Etcd 段**（对比 task/rpc/etc/task.yaml:3-6 有
+#           Etcd.Key: task.rpc）。即 Go 的 api 与 rpc 是**同机部署 + 直连**。
+#    本仓其余模块一律 discovery:///xxx-rpc，但那些模块的 Go 侧**也有 Etcd 段**
+#    （寻址方式本来就不同），照搬过来反而是漂移。
+#    ⇒ 这里默认 127.0.0.1:9005（对齐 Go），并保留环境变量口：
+#         TASK_RPC_ADDRESS=discovery:///task-rpc   ← 切服务发现只改环境变量
+#    ⚠️ NonBlock（L4）：go-zero 的「非阻塞拨号」是连接建立策略，grpc-java 无对应概念，
+#       且不进入 wire 契约 ⇒ 不迁移。
+#
+# ⚠️ negotiation-type 不能省（hot-api 的 DRIFT-NEW-014）：devh 的
+#    GrpcChannelProperties 默认值是 TLS，不写会静默发 TLS ClientHello，
+#    而 Go 侧 zrpc.MustNewClient 是明文 gRPC。
+# ⚠️ 这里**没有** default-deadline 是刻意的：devh starter 不提供默认 deadline，
+#    Go 侧的 2s 来自 zrpc.RpcClientConf.Timeout 的 struct tag 默认值，
+#    由 client/TaskRpcClient#withDeadline 显式施加（min(2s, 请求剩余预算)）。
+grpc:
+  client:
+    task-rpc:
+      address: ${TASK_RPC_ADDRESS:127.0.0.1:9005}
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      permit-keep-alive-without-calls: true
+
+# =============================================================================
+# observability —— 对齐 Go observability.DisableNativeRestTimeout + NewHTTPMiddleware
+# =============================================================================
+# 取值依据：Go 侧 etc/task.yaml **没有** Timeout 字段，实际生效值来自 go-zero v1.10.2
+#     rest/config.go:55  Timeout int64 `json:",default=3000"`
+# ⇒ task-api 的 HTTP 超时是 3000ms，由 observability 中间件单独执行
+#   （DisableNativeRestTimeout 已把 go-zero 原生超时中间件关掉，超时只有一个执行者）。
+observability:
+  http-timeout: 3s
+
+# =============================================================================
+# rag.protection —— Go「请求保护层」四道中间件
+# =============================================================================
+# ⚠️⚠️ 下面四项在 Go 的 etc/task.yaml 里**一个字都没写**，但它们**是开启的**。
+#    照 yaml 逐字段对，永远看不见（依据在 go-zero 的 struct tag 里）：
+#
+#   rest/config.go:12-22   MiddlewaresConf 十个开关**全部** `json:",default=true"`
+#                         （含 MaxConns / Breaker / Shedding / MaxBytes）
+#   rest/config.go:52      MaxConns     int   `json:",default=10000"`
+#   rest/config.go:53      MaxBytes     int64 `json:",default=1048576"`
+#   rest/config.go:56      CpuThreshold int64 `json:",default=900,range=[0:1000)"`
+#
+# ⚠️ max-bytes 用 tag 默认的 **1 MiB**：task.yaml 没有覆盖它，routes.go 也没有
+#    rest.WithMaxBytes ⇒ 本端点（POST，有 body）的正文上限就是 1 MiB。
+#
+# ⚠️ 四层的拒绝响应都是**裸状态码 + 空 body + 无 Content-Type**，不走 text/plain
+#    （Go 侧是裸 w.WriteHeader）。这与「handler 内部错误 = 状态码 + text/plain」
+#    刻意不同：保护层在到达业务逻辑之前就拒绝了。
+rag:
+  protection:
+    max-conns: 10000
+    max-bytes: 1048576
+    cpu-shedding:
+      enabled: true
+      cpu-threshold: 900      # 千分比，900 = 90% CPU
+      cpu-source: SYSTEM      # Go core/load/adaptiveshedder.go:41-43 读整机 CPU（/proc/stat）
+    breaker:
+      enabled: true
+
+# =============================================================================
+# OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）
+# =============================================================================
+otel:
+  exporter:
+    otlp:
+      endpoint: http://${OTEL_ADDR:jaeger}:${OTLP_PORT:4317}
+      protocol: grpc
+  resource:
+    attributes:
+      service.name: task-api
+  traces:
+    sampler: always_on          # 对齐 Go Sampler: 1.0
+
+logging:
+  level:
+    root: INFO
+    com.rag.task.task.api: INFO
+    com.rag.common: INFO
+
+# =============================================================================
+# ⚠️ Auth 段刻意不存在
+# =============================================================================
+# Go etc/task.yaml:9-11 有
+#     Auth: {AccessSecret: "replace-with-a-long-random-secret", AccessExpire: 1800}
+# 但 internal/config/config.go:14-17 只把它声明进 Config 结构体，
+# servicecontext.go / gettasklogic.go / routes.go **零消费点** ⇒ 死配置。
+# 迁移它 = 新增一段没人读的配置，反而会让人误以为本端点受鉴权保护
+# （它不受：routes.go 没有 rest.WithJwt，uid 来自请求体的 id）。
+# 该端点存在水平越权面，是 Go 的既定行为，按原样保留；补鉴权属新增行为，需单独拍板。

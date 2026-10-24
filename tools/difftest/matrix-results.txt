@@ -1,0 +1,13 @@
+E-3 DTO 边界矩阵 —— 11.1s  共 273 条   run_id=1792602663396
+端口 go={user:http://127.0.0.1:18888, admin:http://127.0.0.1:18889} rag={user:http://127.0.0.1:59900, admin:http://127.0.0.1:58889}
+
+  MATCH                   130
+  KNOWN_FORM_EMPTY          1
+  KNOWN_FRAMEWORK_TEXT    142
+
+  根因聚类:
+    R1     0  JSON 标量被 Jackson 静默强转/截断,Go 一律拒
+    R2     0  显式 null ≠ 字段缺席:Go 对 map 字段也判 null
+    R3     0  DDL 列宽:text vs varchar(255)
+    R4     0  分页越界:Go 的 GORM 静默抑制负 OFFSET/LIMIT,RAG 直传 PG
+

@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>follow</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>follow-api</artifactId>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <!--
+            follow-proto：FollowServiceGrpc client Stub。
+            对应 Go 端 service/follow/api/internal/svc/servicecontext.go 的 FollowRpc 字段
+            （followservice.NewFollowService(zrpc.MustNewClient(c.FollowRpc))）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>follow-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            follow-common：FollowErrorCode / FollowErrorMessages / FollowGrpcError。
+            对应 Go 端 service/follow/common/errmsg.go —— follow-api 的
+            httpx.SetErrorHandler 与 8 个 logic 的 codeFromRPCError 都直接依赖这一层。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>follow-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            users-common：复用 4 个<b>跨域通用</b>的 HTTP gateway 工具，避免第 2 份实现：
+              - JwtUtil.padToHmacKeySize   （Go 端 36 字节 secret 已合规，jjwt 仍强制 ≥32 的统一入口）
+              - BearerTokenExtractor      （golang-jwt 的 Bearer 前缀剥离规则）
+              - GoStyleCoercion           （Jackson 3 标量强转规则，对齐 go-zero core/mapping）
+              - GoStyleStringInt64 / GoStyleRequired / GoStyleRequiredFields / GoStyleRequest
+            ⚠️ <b>只依赖这几个静态工具类</b>：本模块 scanBasePackages 刻意<b>不含</b>
+            com.rag.users.*，因此 users-common 里的 Bean（如 SchemaInitializer）
+            不会被拖进 follow-api 的 Spring 上下文。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>users-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            service/common（artifactId=common）：Response envelope + BusinessException /
+            AuthenticationException + HttpMiddlewareFilter（Go 端 observability.NewHTTPMiddleware）
+            + GoStyleJsonBodyConverter（withJsonBody 判据）+ GoStyleRouterErrorResponses（404/405）
+            + com.rag.common.protection（MaxConns / MaxBytes / Shedding / Breaker 四道保护层）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot Web（HTTP server） ============== -->
+        <!-- 对应 Go 端 rest.MustNewServer(c.RestConf) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- ============== 3. Redis（JWT 黑名单） ============== -->
+        <!--
+            Go 出处：service/follow/api/internal/svc/servicecontext.go:23
+              redisDB := redis.MustNewRedis(c.BizRedis)
+            与 api/internal/middleware/checkblacklistmiddleware.go:40 的
+              m.Redis.ExistsCtx(r.Context(), "user:jwt_blacklist:"+token)
+            ⇒ follow/api 的 Redis <b>唯一</b>用途就是这层黑名单闸门（api 层无任何缓存）。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- ============== 4. Metrics：复刻 Go 端 follow_api_* 三个 metric ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 5. JWT 验签（jjwt，版本由根 pom 管理） ============== -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- ============== 6. gRPC client（连 follow-rpc） ============== -->
+        <!--
+            与 user-api / admin-api / message-api 同款：devh 3.1.0.RELEASE + Nacos discovery。
+            ⚠️ 必须 exclude io.grpc:grpc-core（devh 默认拖 1.63.0），版本统一由根 pom 管。
+            ⚠️ 必须显式写 negotiation-type: plaintext（DRIFT-NEW-014）：
+               devh 的 GrpcChannelProperties 默认值是 TLS，不写会静默变 TLS，
+               而 follow-rpc 是明文 gRPC（Go zrpc.MustNewServer 无 TLS）。
+        -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot-starter.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+
+        <!-- ============== 7. Nacos 服务发现 ============== -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- ============== 8. OpenTelemetry OTLP exporter（Go Telemetry.*） ============== -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 9. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            Boot 4 把测试切片拆成独立 artifact：@AutoConfigureMockMvc 在
+            org.springframework.boot.webmvc.test.autoconfigure，不再在
+            spring-boot-test-autoconfigure 里。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

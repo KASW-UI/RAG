@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>comment</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>comment-common</artifactId>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!--
+            CommentGrpcError 构造 io.grpc.StatusException / 解析 StatusRuntimeException /
+            读 Status.Code，这些类全在 grpc-api；grpc-stub 会传递依赖 grpc-api。
+            这里引 grpc-stub 是为了与 like-common / message-common 保持同源，
+            避免在 -common 模块里写死版本号（版本由根 pom 的 dependencyManagement 统一管理）。
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+        </dependency>
+
+        <!--
+            CommentCodeError 需要 @JsonAutoDetect / @JsonProperty 钉住 JSON key，
+            让 comment-api 层 Jackson 序列化时输出与 Go 端 `json:"code"` / `json:"msg"` 标签
+            完全一致、且不多出 Throwable 继承来的 message / cause / stackTrace 字段。
+            单独引 jackson-annotations（仅注解模块，无 databind/core）保持 comment-common 是
+            "纯工具库"——Jackson 反射实现由 API 层引入，common 只声明契约。
+            版本由 spring-boot-dependencies BOM 管理。
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+        </dependency>
+
+        <!--
+            focused test：错误码表 / 未知码回退 / Jackson 输出 / bizCode 跨 gRPC 往返。
+            版本由 spring-boot-dependencies BOM 管理（spring-boot-starter-parent 提供）。
+        -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            JSON 序列化测试需要 ObjectMapper（jackson-databind），验证 @JsonAutoDetect /
+            @JsonProperty 实际生效；只放 test scope，不让 comment-common 把 databind
+            拉进生产 classpath。
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            真 in-process gRPC server + client：验证 bizCode 真的能跨传输往返，
+            而不只是「同一个 Status 对象在内存里过一遍」。
+            grpc-inprocess 未被根 pom dependencyManagement 收录，故显式写版本。
+            按项目惯例放 test scope，comment-common 本身不依赖传输层。
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-inprocess</artifactId>
+            <version>${grpc.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

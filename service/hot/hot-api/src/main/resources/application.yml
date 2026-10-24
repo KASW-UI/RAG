@@ -1,0 +1,158 @@
+# =============================================================================
+# hot-api application.yml —— 对应 Go 端 service/hot/api/etc/hotcenter.yaml
+#
+# 字段重映射：
+#   Name: hotcenter / Host: 0.0.0.0 / Port: 8893  →  spring.application.name / server.*
+#   Log{Mode:file, Path:../../../../log/hot-api}   →  logging.*（logback）
+#   HotRpcConf.Etcd{Key: hot.rpc}                  →  grpc.client.hot-rpc.address
+#   ArticleRpcConf.Etcd{Key: article.rpc}          →  grpc.client.article-rpc.address
+#   Telemetry{Name:hot-api, Endpoint:jaeger:4317}  →  otel.exporter.otlp.*
+# =============================================================================
+
+spring:
+  application:
+    name: hot-api
+
+  # ============== Nacos 服务发现（解析 discovery:///hot-rpc 与 /article-rpc）==============
+  # Go 端是 etcd flat key "hot.rpc" / "article.rpc"（无 namespace / group 分层）。
+  # ⚠️ namespace / group 必须与**被调方**一致：
+  #    hot-rpc 与 article-rpc 的 application.yml 都用 public / DEFAULT_GROUP，
+  #    写错 ⇒ 解析不到实例 ⇒ 所有 RPC 塌成 1015（CodeServerBusy）。
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+
+# =============================================================================
+# HTTP server（Go: Hotcenter.yaml: Host=0.0.0.0 / Port=8893）
+# ⚠️ Infrastructure.md §3 为 hot 预占 18897；两处不一致，这里按已分配的 18897 落，
+#    并保留环境变量覆盖口。原值 8893 可用 HOT_API_PORT 传回。
+# =============================================================================
+server:
+  port: ${HOT_API_PORT:18897}
+  address: 0.0.0.0
+  servlet:
+    context-path: /
+
+# =============================================================================
+# gRPC client（连 hot-rpc / article-rpc）
+# =============================================================================
+# ⚠️ negotiation-type 不能省（DRIFT-NEW-014）：devh 的 GrpcChannelProperties
+#    默认值是 TLS，字段为 null 时 getNegotiationType() 回落到该默认值 ⇒
+#    不写会静默发 TLS ClientHello，而 hot-rpc / article-rpc 都是明文 gRPC
+#    （Go 侧 zrpc.MustNewServer 全仓无 TLS 配置）。
+# ⚠️ **这里没有 default-deadline 是刻意的**：devh starter 不提供默认 deadline，
+#    Go 侧的 2s 来自 zrpc.RpcClientConf.Timeout 的 struct tag 默认值，
+#    由 client/GoStyleGrpcCallDeadline 显式施加（min(2s, 请求剩余预算)）。
+#    配在 yaml 上的任何值都不会被 grpc-java 用作 per-call deadline。
+grpc:
+  client:
+    hot-rpc:
+      address: discovery:///hot-rpc
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      permit-keep-alive-without-calls: true
+    article-rpc:
+      address: discovery:///article-rpc
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      permit-keep-alive-without-calls: true
+
+# =============================================================================
+# observability —— 对齐 Go observability.DisableNativeRestTimeout + NewHTTPMiddleware
+# =============================================================================
+# 取值依据：Go 侧 etc/hotcenter.yaml **没有** Timeout 字段，
+# 实际生效值来自 go-zero v1.10.2 rest/config.go:55
+#     Timeout int64 `json:",default=3000"`
+# ⇒ hot-api 的 HTTP 超时是 3000ms，由 observability 中间件单独执行
+# （DisableNativeRestTimeout 已把 go-zero 原生超时中间件关掉，超时只有一个执行者）。
+# 超时响应 = 裸 503 + "Request Timeout"（不是信封）。
+observability:
+  http-timeout: 3s
+
+# =============================================================================
+# rag.protection —— Go「请求保护层」四道中间件
+# =============================================================================
+# ⚠️⚠️ 下面四项在 Go 的 etc/hotcenter.yaml 里**一个字都没写**，但它们**是开启的**。
+#    照 yaml 逐字段对，永远看不见（依据在 go-zero 的 struct tag 里）：
+#
+#   rest/config.go:12-22   MiddlewaresConf 九个开关**全部** `json:",default=true"`
+#                         （含 MaxConns / Breaker / Shedding / MaxBytes）
+#   rest/config.go:52      MaxConns     int   `json:",default=10000"`
+#   rest/config.go:53      MaxBytes     int64 `json:",default=1048576"`
+#   rest/config.go:56      CpuThreshold int64 `json:",default=900,range=[0:1000)"`
+#
+# ⚠️ max-bytes 用 tag 默认的 **1 MiB**，不是 article-api 的 10 MiB：
+#    Go 侧只有 article-api.yaml 显式覆盖成 10485760；hotcenter.yaml 没有，
+#    routes.go 也没有 rest.WithMaxBytes ⇒ 本端点（GET，无 body）的正文上限就是 1 MiB。
+#
+# ⚠️ 四层的拒绝响应都是**裸状态码 + 空 body + 无 Content-Type**，不走 envelope
+#    （Go 侧是裸 w.WriteHeader）。这与「业务错误恒 200 + 信封」刻意不同：
+#    保护层在到达业务逻辑之前就拒绝了，没有信封可包。
+rag:
+  protection:
+    max-conns: 10000
+    max-bytes: 1048576
+    cpu-shedding:
+      enabled: true
+      cpu-threshold: 900      # 千分比，900 = 90% CPU
+      cpu-source: SYSTEM      # Go core/load/adaptiveshedder.go:41-43 读整机 CPU（/proc/stat）
+    breaker:
+      enabled: true
+
+# =============================================================================
+# Metrics / Actuator
+# =============================================================================
+# ⚠️ 这是与 Go 侧的一处**有意单向增强**：Go 的 5 个 hot_api_* 指标虽然注册进了
+#    默认 registry，但**没有任何端点暴露它们**（yaml 的 Prometheus 块没给 Host
+#    ⇒ StartAgent 提前返回；DevServer 块在 go-zero v1.10.2 里没有对应字段）。
+#    Java 侧接 Actuator 后它们会真的出现在 /actuator/prometheus。
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+    enabled-by-default: false
+  endpoint:
+    health:
+      enabled: true
+    info:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    enable:
+      prometheus: true
+    # ⚠️ 这里**刻意不配** distribution.slo / percentiles-histogram：
+    #    Go 侧 APIRequestDuration 是 prometheus.HistogramVec（带 _bucket{le=…}），
+    #    Micrometer 的 Timer 默认只导出 _count/_sum/_max —— 形态与分桶边界已由
+    #    metrics/HotApiMetrics 里的 GO_DEF_BUCKETS（= prometheus.DefBuckets）在代码侧对齐。
+    #    走配置项反而会踩坑：Boot 的 ServiceLevelObjectiveBoundary 转换器解析不了
+    #    小数秒（"2.5s" → NumberFormatException），且该异常会让整个 MetricsProperties
+    #    绑定失败 ⇒ 上下文起不来（实测已复现）。
+    tags:
+      application: hot-api
+
+# =============================================================================
+# OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）
+# =============================================================================
+otel:
+  exporter:
+    otlp:
+      endpoint: http://${OTEL_ADDR:jaeger}:${OTLP_PORT:4317}
+      protocol: grpc
+  resource:
+    attributes:
+      service.name: hot-api
+  traces:
+    sampler: always_on          # 对齐 Go Sampler: 1.0
+
+logging:
+  level:
+    root: INFO
+    com.rag.hot.hot.api: INFO
+    com.rag.common: INFO

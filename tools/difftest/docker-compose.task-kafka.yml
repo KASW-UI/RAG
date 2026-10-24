@@ -1,0 +1,97 @@
+# task 域 Kafka 端到端对拍专用基建 —— postgres + redis + **kafka**
+#
+# ⚠️ 为什么单独一个 compose 文件（不并进 docker-compose.yml）：
+#   现有的 docker-compose.yml 是 **user 域** 的基建（容器名 difftest-*、端口 55432/56379），
+#   两个域的**库名不同**（users_* vs task_*）且可能**同时**在跑。
+#   ⇒ 这里用独立的一组名字与端口（taskprobe-* / 55433 / 56380 / 59992），
+#     避免与其它域、其它并发会话互相抢端口。
+#
+# ⚠️ 为什么**必须有 Kafka**（task 域与 user 域最不一样的地方）：
+#   Go 侧 task-rpc 的 goka 三个 processor 走
+#   goka.NewProcessor(WithTopicManagerBuilder(...))，连不上会在
+#   initGoKa.go:143-145 / :183-185 / :217-219 直接 **log.Fatal**（进程直接死）；
+#   首次实测报 `Error fetching partitions for topic task.logs.raw: requested topic was not found`
+#   后进程退出 ⇒ **没有 Kafka，Go 侧 task-rpc 根本起不来**，对拍无从谈起。
+#
+# ⚠️ Kafka 的 advertised.listeners 是 **PLAINTEXT://127.0.0.1:59992**（宿主机端口），
+#    另开一个 **INTERNAL://localhost:19092** 给**容器内**的 CLI 用：
+#    容器内客户端 bootstrap 到 localhost:9092 后，broker 回头告知 127.0.0.1:59992
+#    —— 那是**宿主机**的端口，在容器自己的 netns 里没人监听 ⇒ 永远连不上。
+#    ⇒ 容器内一律用 `--bootstrap-server localhost:19092`。
+#    （宿主机上的 Go / RAG 客户端不受影响：宿主机视角 59992 → 容器 9092 是通的。）
+# ⚠️⚠️ `name:` 不是装饰 —— 它是**项目名**，缺了会误删别的域的容器（2026-10-24 实测踩到）
+#
+# docker compose 的**项目名默认从 compose 文件所在目录名推导**。
+# 本文件在 `tools/difftest/` ⇒ 目录名 `difftest` ⇒ 项目名就是 `difftest`
+# ⇒ 与**同目录**的 user 域基建 `tools/difftest/docker-compose.yml`
+#    （容器 `difftest-postgres` / `difftest-redis`）**撞成同一个 project**。
+#
+# 实测后果（2026-10-24 本轮踩到）：
+#   `docker compose -f tools/difftest/docker-compose.task-kafka.yml up -d`
+#   ⇒ compose 把 user 域那两个容器判成「同 project 的同名服务」⇒ **Recreate**
+#      （= 删掉重建）⇒ user 域的基建容器当场消失。
+#   `down -v` 更狠 ⇒ 还会连带删掉 user 域的**数据卷**。
+#   （两个方向的脚本都会中招：user 域的 `run.sh` 也会把 taskprobe 的容器/卷删掉。）
+#
+# ⇒ 这里显式声明 `name: taskprobe` ⇒ 项目名与 user 域彻底分开，
+#    两个方向的 `up` / `down -v` / `rm` 都只影响自己的 project。
+# ⇒ **改动本文件时不要删掉这一行**；新增 task 域的 compose 文件也必须带独立 `name:`。
+name: taskprobe
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: taskprobe-postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: difftest
+      # ⚠️ task_go_db 由此创建（Go 侧 GORM AutoMigrate 只建**表**，不建库）；
+      #    task_rag_db 由 initdb-task.sql 补建（RAG 侧 Flyway 同样只建表）。
+      POSTGRES_DB: task_go_db
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - ./initdb-task.sql:/docker-entrypoint-initdb.d/10-initdb.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d task_go_db"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    container_name: taskprobe-redis
+    ports:
+      # ⚠️ Go 侧用 db0、RAG 侧用 db1（见 tools/difftest/conf/go/task-rpc.yaml 与
+      #    run-task-kafka-e2e.sh 的 --spring.data.redis.database=1）⇒ 两侧互不污染。
+      - "127.0.0.1:56380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  kafka:
+    image: apache/kafka:latest
+    container_name: taskprobe-kafka
+    ports:
+      - "127.0.0.1:59992:9092"
+    environment:
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@127.0.0.1:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NODE_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://127.0.0.1:59992,INTERNAL://localhost:19092
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list >/dev/null 2>&1"]
+      interval: 3s
+      timeout: 10s
+      retries: 40

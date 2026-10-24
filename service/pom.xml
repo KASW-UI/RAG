@@ -7,7 +7,7 @@
 
     <parent>
         <groupId>com.rag</groupId>
-        <artifactId>RAG</artifactId>
+        <artifactId>Sea-RideTheWind_java</artifactId>
         <version>0.0.1-SNAPSHOT</version>
     </parent>
 
@@ -15,7 +15,28 @@
     <packaging>pom</packaging>
 
     <modules>
-        <!-- 子模块后面填 -->
-        <module>user</module>
+        <!--
+            只列磁盘上真实存在的子模块。
+
+            2026-10-22 修：task / favorite / follow / points / security 五个模块的工作区目录
+            已被删除（git status 里是 staged deletion），但本 pom 的 <modules> 仍引用它们，
+            导致 **整个 service 聚合 POM 读不出来** —— `mvn` 在解析阶段就报
+                Child module /…/service/task of /…/service/pom.xml does not exist
+            连 `-pl service/message/message-rpc -am` 都跑不了，所有模块的构建被一起阻断。
+
+            Maven 对「module 指向不存在的目录」是硬错误（不是警告），
+            所以这不是配置洁癖问题，而是构建可用性问题。
+            若日后恢复这些模块，把对应的 <module> 行加回来即可。
+        -->
+        <module>users</module>
+        <module>article</module>
+        <module>common</module>
+        <module>hot</module>
+        <module>message</module>
+        <module>like</module>
+        <module>task</module>
+        <module>follow</module>
+        <module>favorite</module>
+        <module>comment</module>
     </modules>
 </project>

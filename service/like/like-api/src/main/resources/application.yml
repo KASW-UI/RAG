@@ -1,0 +1,115 @@
+# like-api 运行配置
+#
+# 对应 Go 端 service/like/api/etc/likecenter.yaml。
+#
+# ⚠️⚠️ 头部纪律（本文件每一条都对应 Go 侧一个「yaml 里看不到、但代码里开着」的事实）
+#
+# ① 【2026-10-22 更正】Go 的 RestConf **有** 3s 超时，虽然 yaml 里一个字都没写
+#    出处：go-zero v1.10.2 rest/config.go:55
+#          Timeout int64 `json:",default=3000"`
+#    ⇒ conf.MustLoad 会套用这个 struct tag 默认值 ⇒ Timeout == 3000，**不是 0**
+#    ⇒ observability.DisableNativeRestTimeout 返回 3s，并关掉 go-zero 自带的
+#      rest 超时中间件（conf.Middlewares.Timeout = false）—— 超时只有一个执行者
+#    ⇒ observability.NewHTTPMiddleware 用它包住整个请求，超时写
+#      http.Error(w, "Request Timeout", http.StatusServiceUnavailable)
+#
+#    ⚠️ 本文件此前**故意不配** http-timeout，理由写的是「yaml 没写 Timeout
+#       ⇒ TimeoutFromMillis(0)==0 ⇒ 无超时」。那个推理**字面自洽但完全错误** ——
+#       它只看了 yaml，没看 rest/config.go 的 tag。这就是 DRIFT-LIKEAPI-001。
+#       改之前 message-api / user-api / admin-api 三个兄弟模块都配了 3s，
+#       com.rag.common.spring.ObservabilityProperties.java:45 也已写明
+#       「各模块 yaml 须显式写出同值，不得留空」；like-api 曾是唯一不配的那个。
+#
+#    ⚠️ 残留差异（未消）：Go 的 3s 跑在**独立 goroutine** 上，超时后 handler 仍在执行、
+#       只是写丢弃；Java 的 HttpMiddleware 用 Future.cancel(true) 去中断 worker 线程，
+#       而**阻塞中的 gRPC 调用不可中断**。⇒ 补上本配置修好了状态码与等待时长，
+#       但**取消语义仍不等价**，需要单独设计（如显式 deadline 透传给 stub）。
+observability:
+  # 对齐 Go rest.RestConf.Timeout 的实际生效值 3000ms（rest/config.go:55）
+  http-timeout: 3s
+
+server:
+  # Go: likecenter.yaml Host: 0.0.0.0 / Port: 18887
+  port: 18887
+
+spring:
+  application:
+    name: likecenter
+  cloud:
+    nacos:
+      discovery:
+        # 对应 Go 端 DevServer/Name：Name: likecenter
+        server-addr: ${NACOS_ADDR:nacos:8848}
+
+like-api:
+  user-auth:
+    # Go: likecenter.yaml:6  AccessSecret: ae0536f9-6450-4606-8e13-5a19ed505da0
+    # ⚠️ 36 字节 UUID，jjwt 要求 ≥32 字节，天然满足（JwtUtil.padToHmacKeySize 对它其实是 no-op）。
+    #    必须与**签发方** user-api 完全一致，否则验签必失败 → HTTP 401 + 空 body。
+    access-secret: ae0536f9-6450-4606-8e13-5a19ed505da0
+    # Go: likecenter.yaml:7  AccessExpire: 31536000（365 天）
+    # ⚠️ 本模块只验签、不签发，与 message-api 一样**不读**该值；
+    #   保留是为了让 yaml 与 Go 端 1:1 可对照。
+    access-expire: 31536000
+
+# =============================================================================
+# rag.protection —— Go「请求保护层」四道中间件 + gRPC client 熔断
+# =============================================================================
+# ⚠️ **本段不需要任何装配代码就已生效**：2026-10-22 保护层从 message-api 下沉到
+#    com.rag.common.protection，而本模块的 scanBasePackages 已含 com.rag.common，
+#    ⇒ 四个 Filter、GoStyleProtectionProperties 的注册、gRPC client breaker
+#      都是**扫到即生效**的（见 com.rag.common.protection.GoStyleProtectionConfiguration）。
+#    下面这些值写出来只是为了运维可读 + 与 Go yaml 可逐字段对照；
+#    **删掉整段不会关闭保护层**，只会回落到下方这些默认值，
+#    而默认值 == go-zero 的 tag 默认值（fail-safe 方向）。
+#
+# ⚠️⚠️ 这四项在 Go 的 etc/likecenter.yaml 里 **一个字都没写**，但 Go 侧 **是开启的**：
+#   rest/config.go:52      MaxConns     int   `json:",default=10000"`
+#   rest/config.go:53      MaxBytes     int64 `json:",default=1048576"`
+#   rest/config.go:56      CpuThreshold int64 `json:",default=900,range=[0:1000)"`
+#   rest/config.go:12-22   MiddlewaresConf 九个开关 **全部** `json:",default=true"`
+# ⇒ 「Go yaml 里没写」≠「Go 没开」（AGENTS.md §3.3.1）。
+#
+# ⚠️ 拒绝响应是 **裸状态码 + 空 body + 无 Content-Type**（Go 是裸 w.WriteHeader，
+#    没有 httpx.Error），刻意不走本模块的 200+envelope 约定。
+# ⚠️ 熔断拒绝（503）的 msg 为空，与 Go 的裸响应一致。
+# ⚠️ 超限请求返回 413 而不是 401 —— 与 Go engine.go:105-112 同（MaxBytes 在 Authorize 之外）。
+#    ⚠️ 但这**不是**因为 @Order(+6)：所有 Filter 都包在 DispatcherServlet 外、
+#    HandlerInterceptor 跑在其内，先后由容器结构决定，与 order 数值无关
+#    （实测：把 @Order 改成 LOWEST_PRECEDENCE，该断言依然绿）。详见 GoStyleMaxBytesFilter。
+rag:
+  protection:
+    # Go rest/config.go:52
+    max-conns: 10000
+    # Go rest/config.go:53（1 MiB）。Go 只看 Content-Length 头，chunked 会绕过 —— 刻意保留。
+    max-bytes: 1048576
+    cpu-shedding:
+      # Go rest/config.go:22 Middlewares.Shedding
+      enabled: true
+      # Go rest/config.go:56（千分比，900 = 90% CPU）
+      cpu-threshold: 900
+      # Go 读整机 CPU（Linux /proc/stat）⇒ SYSTEM 对齐
+      cpu-source: SYSTEM
+    breaker:
+      # Go rest/config.go:15 Middlewares.Breaker
+      enabled: true
+
+grpc:
+  client:
+    # 对应 Go 端 likecenter.yaml:31-36 的 LikeRpc.Etcd.Key: like.rpc
+    # ⚠️ negotiation-type 必须显式写 plaintext：
+    #   devh 的 GrpcChannelProperties 默认值是 TLS，不写会静默变 TLS，
+    #   而 Go zrpc.MustNewServer 是明文 gRPC（DRIFT-NEW-014）。
+    like-rpc:
+      address: discovery:///like-rpc
+      negotiation-type: plaintext
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # 对应 Go 端 DevServer 的 MetricsPath / HealthPath
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always

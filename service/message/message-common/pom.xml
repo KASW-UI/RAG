@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2000/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>message</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>message-common</artifactId>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!--
+            MessageGrpcError 构造 io.grpc.StatusException / 解析 StatusRuntimeException /
+            读 Status.Code，这些类全在 grpc-api；grpc-stub 会传递依赖 grpc-api。
+            这里引 grpc-stub 是为了与 follow-common 保持同源、避免在不同 -common 模块里写死版本号。
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+        </dependency>
+
+        <!--
+            CodeError 需要 @JsonProperty("code") / @JsonProperty("msg") 显式钉住 JSON key，
+            让未来 message-api 层 Jackson 序列化时输出与 Go 端 `json:"code"` / `json:"msg"` 标签
+            完全一致的字段名。
+            单独引 jackson-annotations（仅注解模块，无 databind/core）保持 message-common 是
+            "纯工具库"——Jackson 反射实现由 API 层引入，common 只声明契约。
+            版本由 spring-boot-dependencies BOM 管理。
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+        </dependency>
+
+        <!--
+            focused test：MessageErrorCode / MessageErrorMessages / MessageGrpcError 的契约等价测试。
+            版本由 spring-boot-dependencies BOM 管理（spring-boot-starter-parent 提供）。
+        -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            JSON 序列化测试需要 ObjectMapper（jackson-databind），验证 @JsonProperty
+            实际生效；只放在 test scope，不让 message-common 把 databind 拉进生产 classpath，
+            保持工具库定位。
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

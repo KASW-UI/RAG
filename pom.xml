@@ -11,10 +11,10 @@
     </parent>
 
     <groupId>com.rag</groupId>
-    <artifactId>RAG</artifactId>
+    <artifactId>Sea-RideTheWind_java</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>RAG</name>
-    <description>RAG</description>
+    <name>Sea-RideTheWind_java</name>
+    <description>Sea-RideTheWind_java</description>
 
     <packaging>pom</packaging>
 
@@ -23,12 +23,62 @@
         <spring-cloud.version>2025.1.0</spring-cloud.version>
         <spring-cloud-alibaba.version>2025.1.0.0</spring-cloud-alibaba.version>
         <jjwt.version>0.12.6</jjwt.version>
-        <grpc.version>1.66.0</grpc.version>
+        <!--
+            grpc 1.66.0 是项目原计划版本，但 devh grpc-spring-boot-starter 3.1.0.RELEASE
+            硬编码 1.63.0（grpc-inprocess 1.63.0 内部类不兼容 1.66）。降到 1.63.0 全栈对齐。
+            升 devh starter 后可重新升回 1.66.0。
+        -->
+        <grpc.version>1.63.0</grpc.version>
         <protobuf.version>3.25.5</protobuf.version>
         <grpc-spring-boot-starter.version>3.1.0.RELEASE</grpc-spring-boot-starter.version>
         <protobuf-maven-plugin.version>0.6.1</protobuf-maven-plugin.version>
         <build-helper-maven-plugin.version>3.6.0</build-helper-maven-plugin.version>
         <os-maven-plugin.version>1.7.1</os-maven-plugin.version>
+        <!-- MyBatis-Plus：BOM 统一管理版本；与 Spring Boot 4.0.8 兼容选 3.5.14+ -->
+        <mybatis-plus.version>3.5.17</mybatis-plus.version>
+        <!--
+            MyBatis 本体版本：2026-10-21 实测 user-rpc / admin-rpc 解析到的正是 3.5.19
+            （由 mybatis-plus 传递进来；MP 的 BOM **不管理** mybatis 本体）。
+
+            service/common 的 B-1 缓解拦截器（DeadlineQueryTimeoutInjector /
+            SqlTimeoutStatusTranslator）需要 org.mybatis:mybatis 的 Interceptor 契约，
+            因此必须在这里显式声明。锁成 3.5.19 与既有解析结果一致 ⇒ 本次不改任何
+            运行时行为，只是不再依赖「恰好由 MP 传递到这个版本」。
+
+            ⚠️ 将来升级 mybatis-plus 时这里必须同步核对，否则同一个 org.apache.ibatis
+            接口可能被两个版本各加载一份，拦截器的 type/signature 匹配会**静默失效**
+            ——不抛异常，只是拦截器不起作用（AGENTS.md §3.3 的典型形态）。
+        -->
+        <mybatis.version>3.5.19</mybatis.version>
+        <!--
+            mybatis-spring 必须强制锁版本，不能用 mybatis-plus-boot-starter 自带的那个。
+
+            实测（2026-10-20，user-rpc 真实 jar 启动）：
+              mybatis-plus-boot-starter:3.5.14 → org.mybatis:mybatis-spring:2.1.2
+              Spring Boot 4.0.8 带的是 Spring Framework 7.0.9（spring-beans / spring-context / spring-core 都是 7.0.9）
+              mybatis-spring 2.1.2 的 MapperFactoryBean 把 factoryBeanObjectType 注册成 String，
+              Spring 6+ 要求 Class / ResolvableType
+              → BeanDefinitionStoreException: Invalid value type for attribute 'factoryBeanObjectType'，
+                应用上下文直接启动失败。
+
+            之前 pom 里"Spring Boot 4.0.8 还未官方适配，但 3.5.14 走 mybatis-spring 适配链能跑"的判断，
+            已被实测推翻 —— 跑不起来。4.0.0 是对应 Spring 7 的那条线。
+        -->
+        <mybatis-spring.version>4.0.0</mybatis-spring.version>
+        <!--
+            MinIO Java SDK —— 服务端是 article-rpc 首次引入的（Go 端用 minio-go/v7 v7.2.0）。
+            ⚠️ 它不是 Spring 组件，Spring 没有对象存储抽象可替代，因此用官方 SDK。
+            选 8.5.17 而非 8.6.0：8.5.x 是与 Go 端 minio-go/v7 同代的稳定线，
+            且它依赖的 Jackson 2.18.0 落在本仓已解析的 2.17.2~2.22 区间内
+            （本仓内部序列化统一用 Jackson 2 的 com.fasterxml.jackson 包，
+              Spring Boot 4 自动配置的 tools.jackson 只在 message-api 的 HTTP 边界用）。
+            ⇒ 引入它不会把任何模块的 Jackson 主版本顶掉。
+        -->
+        <minio.version>8.5.17</minio.version>
+        <!-- Flyway：不引入 BOM（org.flywaydb 没有 flyway-bom 这个 artifact；用 flyway-parent 但 parent 不适合消费者）
+             改用 Spring Boot 4.0.8 的 spring-boot-dependencies BOM 自带的 Flyway 版本管理。
+             如需显式锁定版本，在子 pom 直接写 <version> 即可。 -->
+        <flyway.version>10.22.0</flyway.version>
     </properties>
 
     <!-- 统一管理版本：子模块加依赖不写版本号 -->
@@ -48,6 +98,39 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!--
+                MyBatis-Plus：BOM 统一管 mybatis-plus-boot-starter / mybatis-plus-extension / mybatis-plus-jsqlparser 版本
+                注意：BOM 里不包含 mybatis-spring 的版本（它不在 MP 的 BOM 管理范围内），
+                必须在这里单独锁，否则会退回 starter 自带的 2.1.2 → Spring Framework 7 下启动失败。
+            -->
+            <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-bom</artifactId>
+                <version>${mybatis-plus.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- 强制把 mybatis-spring 顶到 4.0.0（对应 Spring 7 / Spring Boot 4） -->
+            <dependency>
+                <groupId>org.mybatis</groupId>
+                <artifactId>mybatis-spring</artifactId>
+                <version>${mybatis-spring.version}</version>
+            </dependency>
+            <!--
+                mybatis 本体：MP 的 BOM 不含它，Spring Boot 的 BOM 虽然含但版本未必
+                与 MP 传递链一致（实测两者都是 3.5.19）。显式锁一份，让
+                service/common 的 B-1 拦截器与 user-rpc / admin-rpc 用的是同一个 jar。
+            -->
+            <dependency>
+                <groupId>org.mybatis</groupId>
+                <artifactId>mybatis</artifactId>
+                <version>${mybatis.version}</version>
+            </dependency>
+            <!--
+                Flyway 不引入 BOM：org.flywaydb:flyway-bom 不存在（maven central 无此 artifact）
+                Spring Boot 4.0.8 的 spring-boot-dependencies BOM 自带 Flyway 版本管理
+                如需在子 pom 显式锁定版本，可直接 <version>${flyway.version}</version>
+            -->
             <dependency>
                 <groupId>io.jsonwebtoken</groupId>
                 <artifactId>jjwt-api</artifactId>
@@ -69,6 +152,11 @@
             <dependency>
                 <groupId>io.grpc</groupId>
                 <artifactId>grpc-stub</artifactId>
+                <version>${grpc.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.grpc</groupId>
+                <artifactId>grpc-core</artifactId>
                 <version>${grpc.version}</version>
             </dependency>
             <dependency>

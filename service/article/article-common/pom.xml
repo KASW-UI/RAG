@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>article</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>article-common</artifactId>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!--
+            本模块对应 Go 端 service/article/common/errmsg（全文 45 行、零 import），
+            迁移后仍然只提供「码值 + 文案 + 未知码回落」这一层纯契约，
+            因此**生产依赖为空**，与 Go 侧零 import 对称。
+
+            异常载体 BusinessException（com.rag.common）只吃 (int code, String msg)，
+            信封 Response 与业务错误日志 Logger.logBusinessErr 也只吃 int 业务码，
+            三者都无需本模块反向依赖 —— 依赖方向保持 article-common → 无 → 业务模块，
+            不引入 article-common → com.rag.common 的边，避免下层模块耦合上层约定。
+        -->
+
+        <!--
+            focused test：错误码表逐条对齐 Go 真源、未知码回落 "FAIL"、跨域码值撞车防护。
+            仅 test scope，不进生产 classpath。版本由 spring-boot-starter-parent 的 BOM 管理。
+        -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+</project>

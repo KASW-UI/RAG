@@ -1,0 +1,39 @@
+-- 双端对拍专用初始化。
+--
+-- go_db 由 POSTGRES_DB 环境变量在容器初始化时创建（见 docker-compose.yml）。
+-- 这里只补 RAG 侧的 rag_db —— **一个**，不是两个。
+--
+-- 为什么 RAG 侧两个 rpc 必须共用一个库：
+--   admin-rpc 也读写 users_user 表。Go 侧的直接证据是
+--   service/user/admin/rpc/internal/model/db.go:15 的
+--     db.AutoMigrate(&Admin{}, &AdminInvite{}, &User{})   ← 那个 &User{}
+--   Java 侧继承了这个设计意图（BanUser / DeleteUser / ResetUserPassword / UpdateUser
+--   都在改 users_user）。
+--   也就是说**共用是设计要求，不是偷懒**。而一旦拆成两个库，admin 的
+--   getuser / banuser / unbanuser / resetuserpassword / updateuser / delete
+--   就会全部返回「用户不存在」—— 第一次跑对拍时正是这样，7 个端点全红。
+--
+-- 为什么 Go 与 RAG 之间仍不能共用：
+--   Go 用 GORM AutoMigrate，表名 `users` / `user_avatar_history`
+--     （service/user/user/rpc/internal/model/data_model.go:18-20,34-36）；
+--   RAG 的 DDL 脚本建的是 `users_user` / `users_user_avatar_history`。
+--   表名差异是 AGENTS.md §3.4 已签字的有意偏离（A-03），
+--   所以 Go 与 RAG 物理上无法共用 schema —— 对拍只比 HTTP wire 层的可观察行为。
+--
+-- ------------------------------------------------------------------
+-- 历史留档：这里曾经需要手工应用 admin-rpc 的 DDL
+-- ------------------------------------------------------------------
+-- 2026-10-21 之前，两个 rpc 各自用 Flyway，而 Flyway 的 flyway_schema_history
+-- 是 **schema 级**账本 —— 一个 schema 只能有一本账。两个模块的迁移
+-- V1/V2 版本号相同、内容不同，后启动的要么静默跳过自己的迁移
+-- （进程照样 Started，表却是空的），要么 checksum mismatch 直接启动失败。
+-- 对拍环境当时的权宜之计是：admin-rpc 设 SPRING_FLYWAY_ENABLED=false，
+-- 再由 run.sh 用 psql 手工喂它的两份 DDL。
+--
+-- 那一整套已经删掉了。现在两个 rpc 的建表都由各自的
+-- bootstrap/UserSchemaBootstrap / AdminSchemaBootstrap 在 @PostConstruct 里
+-- 调 users-common 的 SchemaInitializer，把 4 份 db/*.sql 幂等重放一遍
+-- （全部 CREATE ... IF NOT EXISTS）—— 无账本、无版本号、谁先启动都行，
+-- 也就是 Go 侧 GORM AutoMigrate 的无状态语义。
+-- 被证伪的「加两个 Flyway 开关糊过去」方案见 exp-drift015-flyway-flags.sh。
+CREATE DATABASE rag_db;

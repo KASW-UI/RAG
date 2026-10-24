@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>hot</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>hot-rpc</artifactId>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <!--
+            hot-proto：HotServiceGrpc base + 5 个方法的服务端 Stub
+            （对应 Go 端 rpc/pb/hot_grpc.pb.go + rpc/internal/server/hot_service_server.go）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>hot-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            common（artifactId=common）：服务级共享能力，对应 Go 端 service/common/*：
+              - logger.Logger / LoggerFactoryBean        ← Go common/logger（hot.go:47 的 logger.Init("hot.rpc")）
+              - spring.RpcServerInterceptorFactory         ← Go observability.NewUnaryServerInterceptor（2s deadline）
+              - observability.MqConsumer                   ← Go observability.TraceConsumer（hot_handler.go:105）
+            ⚠️ 依赖本模块不等于 scanBasePackages 自动含 com.rag.common：
+               HotRpcApplication 必须显式写 scanBasePackages = "com.rag.common"
+               或用 @Import 显式引 RpcServerInterceptorFactory（AGENTS.md §3.3 记录的装配陷阱：
+               @Component 不等于自动注册）。
+
+            ⚠️ **刻意不依赖 hot-common** —— service/hot/common/errmsg.go 经 grep 验证在
+               rpc/ 下**零引用**，本模块 3 个互动方法返回的是 gRPC UNIMPLEMENTED status 而非业务码，
+               不需要任何错误码常量类。依据 FileTree/hot/common.md §12.5 判据 2
+               （不给死代码建结构；like-rpc 的 258 行 LikeGrpcError 是反面样本）。
+               ✅ 这条「依赖了但不用」的取舍已定（2026-10-22）：码表落进 hot-common，
+               而本模块**刻意不声明**对它的依赖 ⇒ 「依赖了但不用」并不成立，本段无需改动。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot 基础（纯 gRPC，不带 web） ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <!--
+            spring-boot-web-server：只为满足 nacos-discovery 的反射引用
+            （org.springframework.boot.web.server.context.WebServerInitializedEvent）。
+            不引它启动不了 Nacos 自动配置，但**不会**因此起 web 容器 —— 本服务无 WebApplicationType。
+            与 message-rpc / like-rpc 完全同款。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-web-server</artifactId>
+        </dependency>
+
+        <!-- ============== 3. Redis（对应 Go 端 *redis.Redis） ============== -->
+        <!--
+            ★ Go 侧 svc.ServiceContext.Redis，唯一的 keyspace 是热度榜：
+              - hot:articles        ZSet，GetHotArticles 的读取源
+              - hot:articles:p{i}   分区快照
+              - …:shadow            合并期的影子榜
+              - hot:merge:lock      合并分布式锁
+              - 4 段 Lua（对应 hot_handler.go 的 Redis 快照段）
+
+            ⚠️ 错误语义是真正的缺口，见 HotRedisSnapshotStore 的类注释：
+               Go 的同步失败只 log + return（不抛），而 Spring Data Redis 一律抛异常。
+               必须显式吞掉，否则会把 Go 的「快照失败不影响主流程」变成「消费失败触发重试」。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- ============== 4. Kafka（对应 Go go-queue / sarama ConsumerGroupHandler） ============== -->
+        <!--
+            ★ Go 侧 rpc/internal/mqs/hot_handler.go 是 sarama ConsumerGroupHandler：
+              - topic=article-hot-events，group=article-hot-group，3 个分区对应 3 个实例副本
+              - rebalance 时把该分区的 sketch 落盘 Redis，重新获得分区时从 Redis 回灌
+
+            Spring 侧对应：@KafkaListener（HotEventConsumer）+ partition assign/revoke 回调
+            （HotPartitionSketchRegistry）。ack 模式 / 并发度 / 重试策略都是必须显式声明的
+            独立关注点 —— 见 FileTree/hot/rpc.md §12.5「新增包说明」mq/。
+        -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <!--
+            ⚠️ Spring Boot 4 把 Kafka 自动配置整体搬出了 spring-boot-autoconfigure，
+               改由独立模块 spring-boot-kafka 提供（实测 autoconfigure-4.0.8.jar 内
+               Kafka 类数量为 0；KafkaAutoConfiguration / ConcurrentKafkaListenerContainerFactoryConfigurer
+               都在 spring-boot-kafka 里）。
+               只引 spring-kafka ⇒ **没有 ConsumerFactory Bean、没有 @KafkaListener 后置处理器**，
+               @KafkaListener 会被完全静默忽略，且启动不报错。
+               版本由 spring-boot-dependencies BOM 管理，不显式写 version。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-kafka</artifactId>
+        </dependency>
+
+        <!-- ============== 5. gRPC server ============== -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+        <!-- @GrpcService 自动起 gRPC server（替代 zrpc.MustNewServer） -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-server-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot-starter.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!--
+            ⚠️ 刻意不引 grpc-client-spring-boot-starter：Go 侧 hot-rpc **零下游 gRPC 客户端**
+               （FileTree/hot/rpc.md §12.5「不建 client/」）。引入会多一条永远不用的通道。
+            ⚠️ Go 侧存在 client 熔断（zrpc/internal/config.go:14 default=true），
+               但那作用于下游调用；本模块无下游调用 ⇒ 无需对应拦截器。
+        -->
+
+        <!-- ============== 6. Nacos 服务发现（替代 Go etcd 注册） ============== -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- ============== 7. Metrics：复刻 Go 端 hot_* metric ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 8. OpenTelemetry OTLP exporter（Go Telemetry.*） ============== -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 9. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            🔴 真 Redis / 真 Kafka 守门测试（Testcontainers）。
+
+            本组件此前最大的证据缺口就是「4 段 Lua / 两个 TTL / EXISTS 守卫 / RENAME 原子性 /
+            RoundRobin 实际分配 / 零重试 handler 只有静态源码证据」（DRIFT/hot/rpc.md UNR-1/2/4/5）。
+            这些语义位**无法**用 mock 或手写假 Redis 代替：
+              · Lua 里 KEYS[1]/KEYS[2] 绑反 ⇒ 结果 key 写错，不报错；
+              · EXPIRE 写死 300 vs 配置 3600 ⇒ 两个 TTL 被"统一"成一个，静态读代码看不出来；
+              · RENAME 的原子性是 Redis 单命令保证的；
+              · compare-and-EXPIRE / compare-and-DEL 的"值不匹配就不动手"必须真 Redis 才能验；
+              · 分区分配策略（RoundRobin vs Range）必须真 Kafka + 多消费者才能观察。
+
+            ⚠️ 与本仓其它域的真 PG 守门测试同口径（见 comment-rpc 的 CommentSchemaPgGateTest）：
+               **默认跑、不 skip**。理由是 Go 侧那三个 _test.go 在没有 DSN 时 t.Skip，
+               于是"没人验证过"的状态长期存在 —— 静默 skip 会让缺口重新变成缺口。
+
+            版本由 spring-boot-starter-parent 的 testcontainers.version 管理，不写 <version>。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                ⚠️ 显式关掉 Testcontainers 的 Ryuk 资源回收器。
+
+                理由（实测 2026-10-23）：
+                  · Ryuk 镜像 testcontainers/ryuk:0.14.0 需要从 Docker Hub 拉；
+                  · 本机 Docker Hub 直连不通（registry-1.docker.io 超时），
+                    虽然 daemon 配了 3 个镜像加速器，但 TC 自带的 30s 拉取看门狗
+                    仍会在「无进度」时直接 abort ⇒ 整轮 IT 挂 4.5 分钟才失败。
+                  · 而本模块用到的两个镜像（redis:7-alpine / apache/kafka:3.7.2）
+                    **本地已有**，不需要拉。
+
+                关掉 Ryuk 是否安全？
+                  · Ryuk 只是「JVM 崩溃后回收孤儿容器」的安全网；
+                  · 本模块的容器是 @Container 托管的，由 JUnit 扩展在类结束时
+                    显式 stop() ⇒ 正常路径不依赖 Ryuk；
+                  · 遗留风险：测试进程被 kill -9 时容器会残留 ⇒ 可用 docker ps
+                    配合 label org.testcontainers=true 手工清理。
+
+                ⚠️ 这是**显式取舍**，不是「图省事」：把它写进 pom 是为了让
+                   「这个模块的 IT 不需要访问 Docker Hub」这件事**可复现**，
+                   而不是依赖某个开发者的 shell 环境变量。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!--
+                        ⚠️ 必须用**环境变量**而不是 system property：
+                        Testcontainers 2.0.5 的 ResourceReaper.instance() 只读
+                            System.getenv("TESTCONTAINERS_RYUK_DISABLED")
+                        （字节码取证：ResourceReaper.class 的 instance() 方法，
+                          ldc "TESTCONTAINERS_RYUK_DISABLED" → System.getenv → Boolean.parseBoolean）
+                        ⇒ 写成 <ryuk.disabled>true</ryuk.disabled> 这种 system property
+                          **完全无效**（实测：仍然去拉 ryuk 并挂 4.5 分钟后失败）。
+                    -->
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

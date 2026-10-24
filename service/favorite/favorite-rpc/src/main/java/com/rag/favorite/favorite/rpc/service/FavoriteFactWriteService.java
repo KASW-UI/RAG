@@ -1,0 +1,256 @@
+package com.rag.favorite.favorite.rpc.service;
+
+import com.rag.favorite.favorite.rpc.config.FavoriteRpcProperties;
+import com.rag.favorite.favorite.rpc.domain.FavoriteFactOutboxEntity;
+import com.rag.favorite.favorite.rpc.domain.FavoriteFolderEntity;
+import com.rag.favorite.favorite.rpc.domain.FavoriteItemEntity;
+import com.rag.favorite.favorite.rpc.exception.FavoriteExceptions;
+import com.rag.favorite.favorite.rpc.mapper.FavoriteFactOutboxMapper;
+import com.rag.favorite.favorite.rpc.mapper.FavoriteFolderMapper;
+import com.rag.favorite.favorite.rpc.mapper.FavoriteItemMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.util.List;
+
+/**
+ * 🔴 三个事务写 —— 对应 Go
+ * {@code service/favorite/rpc/internal/model/favorite_fact.go:270-378} 的
+ * {@code InsertFavorite}、{@code DeleteFavoriteByFavoriteId}、{@code DeleteFolderCascade}。
+ *
+ * <h2>🔴 为什么必须是<b>独立 Bean</b>（AGENTS.md §3.3）</h2>
+ *
+ * <p>Go 的这三个方法都是 {@code FavoriteModel} 的内部方法，自己开事务、自己提交。
+ * Java 的 {@code @Transactional} 走 Spring AOP 代理 ——
+ * <b>同一个类内部自调用不经过代理 ⇒ 注解静默失效</b>。
+ * ⇒ 这三个方法必须被 {@code FavoriteDomainService} <b>从外部调用</b>。
+ *
+ * <p>⚠️ 这是 §3.3 的典型形态：注解在、方法被调、<b>测试全绿</b>，但事务根本没开 ——
+ * 「assert 失败后业务行仍然留下」这种 bug 在单测里看不出来。
+ * 回归网：{@code FavoriteFactTransactionTest}（注入 outbox 写失败 ⇒ 业务行必须同事务回滚）。
+ *
+ * <h2>🔴 三个方法的锁顺序不可调换</h2>
+ *
+ * <p>Go 的注释（favorite_fact.go:267-269）说明了原子性的含义：
+ * 「commits the existing favorite ID and its business fact in the same owner database.
+ *  An already saved folder target fails its unique key <b>before</b> an outbox row can be committed.」
+ * ⇒ <b>业务行与它的事实必须同生共死</b>：不能出现「收藏已存在但没有 assert 事实」。
+ *
+ * <h2>🔴 v2 开关只影响新建</h2>
+ * <p>{@code InsertFavorite} 用当前进程的开关决定新 assert 的 schema（:286-289）；
+ * {@code DeleteFavoriteByFavoriteId} / {@code DeleteFolderCascade}
+ * 则用 {@code FavoriteAssertionSchemaResolver} 返回的<b>冻结 schema</b> ——
+ * 所以进程重启后翻转开关，不会让旧收藏的撤回事件形状错乱。
+ */
+@Service
+public class FavoriteFactWriteService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FavoriteFactWriteService.class);
+
+    private final FavoriteFolderMapper folderMapper;
+    private final FavoriteItemMapper itemMapper;
+    private final FavoriteFactOutboxMapper outboxMapper;
+    private final FavoriteAssertionSchemaResolver assertionResolver;
+    private final FavoriteFactEnvelopeFactory envelopeFactory;
+    private final FavoriteRpcProperties properties;
+    private final Clock clock;
+
+    public FavoriteFactWriteService(FavoriteFolderMapper folderMapper,
+                                    FavoriteItemMapper itemMapper,
+                                    FavoriteFactOutboxMapper outboxMapper,
+                                    FavoriteAssertionSchemaResolver assertionResolver,
+                                    FavoriteFactEnvelopeFactory envelopeFactory,
+                                    FavoriteRpcProperties properties) {
+        this.folderMapper = folderMapper;
+        this.itemMapper = itemMapper;
+        this.outboxMapper = outboxMapper;
+        this.assertionResolver = assertionResolver;
+        this.envelopeFactory = envelopeFactory;
+        this.properties = properties;
+        // Go 全篇用 time.Now()（favorite_fact.go:290/323/365）。注入 Clock 便于测试固定时间。
+        this.clock = Clock.systemUTC();
+    }
+
+    /**
+     * 🔴 对应 Go {@code InsertFavorite}（favorite_fact.go:270-296）。
+     *
+     * <p>Go 的事务体：
+     * <pre>
+     * SELECT folder FOR UPDATE                          → :276-277
+     * folder.UserId != item.UserId ⇒ OwnerMismatch      → :280-282
+     * CREATE item                                       → :283-285
+     * fact := newFavoriteOutbox(*item, 1, "assert", now, schema)  → :286-290
+     * CREATE fact                                       → :291-294
+     * </pre>
+     *
+     * @throws FavoriteExceptions.OwnerMismatchException 归属复核失败（⇒ Go 的普通 error
+     *         ⇒ logic 侧输出 {@code Internal/5008}，<b>不是</b> PermissionDenied）
+     */
+    @Transactional(propagation = Propagation.REQUIRED,
+            isolation = Isolation.READ_COMMITTED,
+            rollbackFor = Exception.class)
+    public void insertFavorite(FavoriteItemEntity item) {
+        // Go: :276-277 —— SELECT folder FOR UPDATE
+        FavoriteFolderEntity folder = lockFolder(item.getFolderId());
+        if (folder == null) {
+            // Go: :277 —— tx.First 的 ErrRecordNotFound 原样返回
+            // （调用方 create_favorite_logic.go:79-93 已在事务外查过，
+            //  这里再失败只可能是并发删除 ⇒ 归一化为 NotFound 哨兵）
+            throw new FavoriteExceptions.NotFoundException("favorite_folder");
+        }
+        // Go: :280-282
+        if (!folder.getUserId().equals(item.getUserId())) {
+            throw new FavoriteExceptions.OwnerMismatchException();
+        }
+
+        // Go: :283-285 —— 先写业务行：唯一键冲突必须发生在 outbox 之前
+        itemMapper.insertItem(item.getFavoriteId(), item.getFolderId(), item.getUserId(),
+                item.getTargetId(), item.getTargetType(), item.getTargetRevision(),
+                item.getTitle(), item.getCover());
+
+        // Go: :286-290 —— schema = m.subjectRefV2Facts ? 2 : 1
+        int schema = properties.isSubjectRefV2Facts() ? 2 : 1;
+        FavoriteFactOutboxEntity fact =
+                envelopeFactory.build(item, 1L, "assert", Instant.now(clock), schema);
+
+        // Go: :291-294
+        outboxMapper.insertFact(fact.getEventId(), fact.getFavoriteId(),
+                fact.getAggregateVersion(), fact.getPayload());
+    }
+
+    /**
+     * 🔴 对应 Go {@code DeleteFavoriteByFavoriteId}（favorite_fact.go:300-332）。
+     *
+     * <p>Go 的事务体：
+     * <pre>
+     * SELECT item FOR UPDATE                            → :306-312（NotFound ⇒ ErrorNotFound）
+     * item.UserId != userID ⇒ OwnerMismatch            → :313-315
+     * schema, legacy, err := favoriteAssertionSchema(tx, item)  → :316-318
+     * legacy ⇒ 只 DELETE item（不产撤回事实）            → :320-322
+     * 否则 ⇒ CREATE v2 retract + DELETE item            → :323-330
+     * </pre>
+     *
+     * <p>🔴 <b>legacy 分支刻意不产撤回事实</b>：
+     * 这条收藏<b>从来没有</b> assert 事实被下游接受过，凭空造一条 retract
+     * 会让下游收到「我撤回了从未宣告过的东西」。
+     */
+    @Transactional(propagation = Propagation.REQUIRED,
+            isolation = Isolation.READ_COMMITTED,
+            rollbackFor = Exception.class)
+    public void deleteFavoriteByFavoriteId(long favoriteId, long userId) {
+        // Go: :301-303 —— 参数校验（model 层内部校验）
+        if (favoriteId <= 0 || userId <= 0) {
+            throw new IllegalArgumentException("invalid favorite delete");
+        }
+
+        // Go: :306-312
+        FavoriteItemEntity item = itemMapper.lockByFavoriteId(favoriteId);
+        if (item == null) {
+            throw new FavoriteExceptions.NotFoundException("favorite_item");
+        }
+        // Go: :313-315
+        if (!item.getUserId().equals(userId)) {
+            throw new FavoriteExceptions.OwnerMismatchException();
+        }
+
+        // Go: :316-318
+        int schema = assertionResolver.resolve(item);
+
+        if (schema == FavoriteAssertionSchemaResolver.SCHEMA_LEGACY) {
+            // Go: :320-322 —— legacy：只删业务行
+            itemMapper.deleteByFavoriteId(favoriteId);
+            return;
+        }
+
+        // Go: :323-329 —— 继承冻结的 schema 造 v2 retract
+        FavoriteFactOutboxEntity fact =
+                envelopeFactory.build(item, 2L, "retract", Instant.now(clock), schema);
+        outboxMapper.insertFact(fact.getEventId(), fact.getFavoriteId(),
+                fact.getAggregateVersion(), fact.getPayload());
+
+        // Go: :330
+        itemMapper.deleteByFavoriteId(favoriteId);
+    }
+
+    /**
+     * 🔴 对应 Go {@code DeleteFolderCascade}（favorite_fact.go:336-378）。
+     *
+     * <p>Go 的事务体：
+     * <pre>
+     * SELECT folder FOR UPDATE                          → :342-348
+     * folder.UserId != userID ⇒ OwnerMismatch            → :349-351
+     * SELECT items FOR UPDATE ORDER BY favorite_id       → :352-356
+     * for each item: schema, legacy := favoriteAssertionSchema(...)
+     *                legacy ⇒ continue（不产事件）
+     *                否则 ⇒ CREATE v2 retract
+     * DELETE items                                      → :373-375
+     * DELETE folder                                     → :376
+     * </pre>
+     *
+     * <p>🔴 <b>逐条</b>调 {@code resolve} 而不是批量：每个 item 的 schema 各不相同，
+     * 且 legacy 行会被跳过（Go 的 {@code continue}，:363）。
+     *
+     * <p>Go 注释（:334-335）：
+     * 「Deleting an empty folder emits none; a retry cannot fabricate a second
+     *  business transition.」⇒ 空夹不产任何事件；重试因为业务行已删而查不到，
+     * 也不会再产一次。
+     */
+    @Transactional(propagation = Propagation.REQUIRED,
+            isolation = Isolation.READ_COMMITTED,
+            rollbackFor = Exception.class)
+    public void deleteFolderCascade(long folderId, long userId) {
+        // Go: :337-339
+        if (folderId <= 0 || userId <= 0) {
+            throw new IllegalArgumentException("invalid favorite folder delete");
+        }
+
+        // Go: :342-348
+        FavoriteFolderEntity folder = lockFolder(folderId);
+        if (folder == null) {
+            throw new FavoriteExceptions.NotFoundException("favorite_folder");
+        }
+        // Go: :349-351
+        if (!folder.getUserId().equals(userId)) {
+            throw new FavoriteExceptions.OwnerMismatchException();
+        }
+
+        // Go: :352-356 —— FOR UPDATE + ORDER BY favorite_id（确定性顺序）
+        List<FavoriteItemEntity> items = itemMapper.lockAllByFolderIdOrdered(folderId);
+        for (FavoriteItemEntity item : items) {
+            int schema = assertionResolver.resolve(item);
+            if (schema == FavoriteAssertionSchemaResolver.SCHEMA_LEGACY) {
+                // Go: :362-364 —— legacy ⇒ continue，不产撤回事件
+                continue;
+            }
+            FavoriteFactOutboxEntity fact =
+                    envelopeFactory.build(item, 2L, "retract", Instant.now(clock), schema);
+            outboxMapper.insertFact(fact.getEventId(), fact.getFavoriteId(),
+                    fact.getAggregateVersion(), fact.getPayload());
+        }
+
+        // Go: :373-375
+        itemMapper.deleteByFolderId(folderId);
+        // Go: :376
+        folderMapper.deleteByFolderId(folderId);
+
+        LOG.debug("favorite folder cascade deleted: folder_id={} items={}",
+                folderId, items.size());
+    }
+
+    /**
+     * 对应 Go 的 {@code tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("folder_id = ?").First()}。
+     *
+     * <p>⚠️ <b>必须带 FOR UPDATE</b>：这是「并发删除同一收藏夹」时保证
+     * 「一方看到全部 items、另一方看到空集」的锁点。缺它会让两个事务
+     * 各算出一半的 retract 集合，然后互相撞上 {@code UNIQUE(favorite_id, aggregate_version)}。
+     */
+    private FavoriteFolderEntity lockFolder(long folderId) {
+        return folderMapper.findByFolderIdForUpdate(folderId);
+    }
+}

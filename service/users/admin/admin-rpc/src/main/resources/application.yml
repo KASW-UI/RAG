@@ -1,0 +1,148 @@
+# admin-rpc 启动配置 —— 对齐 Go 端 service/user/admin/rpc/etc/admin.yaml
+
+spring:
+  application:
+    name: admin-rpc
+
+  # ===== 1. Postgres（对齐 Go 端 DataSource）=====
+  datasource:
+    # POSTGRES_ADDR/POSTGRES_PORT 来自 docker-compose.yaml（默认 postgres:5432）
+    url: jdbc:postgresql://${POSTGRES_ADDR:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}?sslmode=disable
+    username: ${POSTGRES_USER:admin}
+    password: ${POSTGRES_PASSWORD:Sea-TryGo}
+    driver-class-name: org.postgresql.Driver
+
+  # ===== 2. MyBatis-Plus + Flyway（Phase 3 重构：去 JPA，用 MyBatis-Plus + Flyway DDL）=====
+  # ⚠️ 建表**不再用 Flyway**（2026-10-21，DRIFT-NEW-015）。
+  #   flyway_schema_history 是 schema 级账本，而 admin-rpc 与 user-rpc 的迁移版本号撞车、
+  #   内容不同，两个进程又必须连同一个库（admin-rpc 也读写 users_user）
+  #   ⇒ admin-rpc 在生产拓扑下根本无法启动。
+  #   现在的做法：bootstrap/AdminSchemaBootstrap 在 @PostConstruct 里用
+  #   com.rag.users.common.ddl.SchemaInitializer 把 users-common 里的 4 份 db/*.sql
+  #   幂等重放一遍（全部 CREATE ... IF NOT EXISTS），无账本、无版本号。
+  #   时序：AdminSeederBootstrap 用 @DependsOn("adminSchemaBootstrap") 显式排在它之后 ——
+  #   以前那条靠 Flyway + MyBatis-Plus detector 的传递链，去掉 Flyway 后已经不存在。
+  #   详见 SchemaInitializer 与 AdminSeederBootstrap 的 javadoc。
+
+  # MyBatis-Plus 配置：Map 字段 JSONB 序列化走 JacksonTypeHandler
+  mybatis-plus:
+    configuration:
+      map-underscore-to-camel-case: true
+      default-fetch-size: 100
+    global-config:
+      db-config:
+        id-type: AUTO
+        table-underline: true
+        logic-not-delete-field: deleted
+        logic-delete-value: 1
+        logic-not-delete-value: 0
+    # JacksonTypeHandler 自动注册（在 Phase 3 entity 上 @TableField(typeHandler = JacksonTypeHandler.class) 引用）
+    type-handlers-package: com.baomidou.mybatisplus.extension.handlers
+
+  # ===== 3. Redis（对齐 Go 端 BizRedis）=====
+  data:
+    redis:
+      host: ${REDIS_ADDR:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      # ⚠️ 取值出处（2026-10-23 补记，此前只有数值没有出处）：
+      #   Go 的 admin.yaml **完全没有** BizRedis 超时配置
+      #     → go-zero v1.10.2 core/stores/redis/redisclientmanager.go:32-39
+      #       建 red.Options 时**三个 timeout 一个都没传**（只传 Addr/User/Pass/DB/…）
+      #     → github.com/redis/go-redis/v9 options.go 的 init() 填库默认值：
+      #         DialTimeout = 5s          （:329-330）
+      #         ReadTimeout = 3 * time.Second（`switch opt.ReadTimeout { case 0: … }`）
+      #   ⇒ **读命令超时 3s**。本值与 go-redis 的 ReadTimeout 默认逐字相同。
+      #   ⚠️ 这是一致但**无回归网**的巧合：go-zero 升 go-redis、默认值一变即静默分叉。
+      #      故在此写明出处，并配 AdminRedisTimeoutConfigTest 守住这个值。
+      #   🔴 红鲱鱼提醒：go-zero core/stores/redis/redis.go:27 有一行
+      #      `readWriteTimeout = 2 * time.Second` —— **它是死常量，全文件仅此一处、
+      #      从未被使用**。只看它会错判成「Go 的 Redis 超时是 2s」。
+      timeout: 3s
+      # 连接（dial）超时：Go 侧 go-redis 的 DialTimeout 默认 **5s**；
+      # 而上面那个 timeout 同时管命令与连接（Lettuce 在 connect-timeout 未设时回落到 timeout）
+      # ⇒ 不显式配这一项，连接超时会跟着变成 3s，与 Go 的 5s 不一致。
+      # Boot 4 里这是**独立属性**（DataRedisProperties.connectTimeout，
+      # 模块 spring-boot-data-redis；注意 RedisProperties 已从 spring-boot-autoconfigure 拆出）。
+      connect-timeout: 5s
+
+  # ===== 4. Nacos 服务注册（修 DRIFT-NEW-001）=====
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost}:${NACOS_PORT:8848}
+        namespace: ${NACOS_NAMESPACE:sea-rtw}
+        group: ${NACOS_GROUP:USER_GROUP}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+
+# ===== 5. gRPC server（对齐 Go 端 ListenOn: 0.0.0.0:8081）=====
+# 选项 C：admin-rpc 严格保持纯 gRPC，不加 spring-boot-starter-web，
+# 因此 application.yaml 里没有 server.port（Spring Web 也不会起）。
+grpc:
+  server:
+    port: 8081
+    reflection-service-enabled: false
+    enable-keep-alive: true
+    keep-alive-time: 30s
+    permit-keep-alive-without-calls: true
+
+# ===== 6. 业务配置（对齐 Go 端 AdminAuth.* + System.*）=====
+# 对应 Go: AdminAuth.AccessSecret / AdminAuth.AccessExpire + System.DefaultPassword
+admin-rpc:
+  admin-auth:
+    access-secret: ${ADMIN_JWT_SECRET:yU-hCm)2*?NQmWG}
+    access-expire: ${ADMIN_JWT_EXPIRE:2592000}    # 30 天
+  system:
+    # 用于 ensureDefaultAdmin bootstrap 时给默认账号加密
+    # Go 端 etc/admin.yaml: System.DefaultPassword = "123456"
+    default-password: ${ADMIN_DEFAULT_PASSWORD:123456}
+
+# ===== 7. Spring Boot Actuator：禁掉 HTTP 端点，admin-rpc 保持纯 gRPC =====
+# Go 端 admin-rpc 没有 HTTP endpoint，Java 侧必须 align。
+# metrics 仍注册到 Micrometer（Metrics.java 显式 Counter.builder），只是无法通过 /actuator/prometheus 抓取。
+management:
+  server:
+    port: -1
+  endpoints:
+    enabled-by-default: false
+  endpoint:
+    health:
+      enabled: false
+    prometheus:
+      enabled: false
+  metrics:
+    enable:
+      prometheus: true
+    tags:
+      application: ${spring.application.name}
+
+# ===== 8. OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）=====
+# Go: Endpoint=jaeger:4317, Batcher=otlpgrpc, Sampler=1.0, Name=admin-rpc
+otel:
+  exporter:
+    otlp:
+      endpoint: http://${OTEL_ADDR:jaeger}:${OTLP_PORT:4317}
+      protocol: grpc
+  resource:
+    attributes:
+      service.name: admin-rpc
+  traces:
+    sampler: always_on
+
+# ===== 9. Snowflake worker ID =====
+# 优先环境变量 SNOWFLAKE_NODE_ID；不设则 Snowflake.java 用 SHA-256(SERVICE_NAME + "-" + PID) 兜底
+# 见 service/common/Snowflake.java
+
+# ===== 10. 日志（Spring Boot 默认走 logback-classic，SLF4J）=====
+# Logger.java 已显式调 Logger.init("admin-rpc")，MDC trace_id 会被自动填入
+logging:
+  level:
+    root: INFO
+    com.rag.users.admin.rpc: INFO
+    com.rag.common: INFO
+# ===== observability（对齐 Go service/user/admin/rpc 的 DisableNativeRpcTimeout + NewUnaryServerInterceptor）=====
+# 取值依据：Go 侧 service/user/admin/rpc/etc/admin.yaml 未配置 Timeout，
+# 实际生效值为 go-zero v1.10.2 `zrpc/config.go:46` 的 `Timeout int64 json:",default=2000"` → 2000ms。
+observability:
+  rpc-timeout: 2s

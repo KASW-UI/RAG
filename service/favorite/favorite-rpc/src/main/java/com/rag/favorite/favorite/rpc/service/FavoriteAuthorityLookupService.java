@@ -1,0 +1,366 @@
+package com.rag.favorite.favorite.rpc.service;
+
+import com.rag.common.communityfact.Wire;
+import com.rag.favorite.favorite.rpc.domain.FavoriteAuthorityFact;
+import com.rag.favorite.favorite.rpc.domain.FavoriteFactOutboxEntity;
+import com.rag.favorite.favorite.rpc.domain.FavoriteItemEntity;
+import com.rag.favorite.favorite.rpc.exception.FavoriteExceptions;
+import com.rag.favorite.favorite.rpc.mapper.FavoriteFactOutboxMapper;
+import com.rag.favorite.favorite.rpc.mapper.FavoriteItemMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.regex.Pattern;
+
+/**
+ * 🔴 权威读的 17 道校验 —— 对应 Go
+ * {@code service/favorite/rpc/internal/model/favorite_authority.go:126-282} 的
+ * {@code authoritativeFavoriteRow} 与 {@code authoritativeFavoriteFact}。
+ *
+ * <p><b>它回答什么</b>：给定 {@code (producer, event_id)}，能否证明「这条事实
+ * 确实由 RTW 冻结发出、确实被 DC 技术接受、且内容与当时的业务行一致」？
+ *
+ * <p>Go 的注释说得很清楚（favorite_authority.go:24-26）：
+ * <pre>
+ * // FavoriteAuthorityFact is source-owned evidence for a downstream binder. A DC
+ * // batch alone cannot authorize a subject: the immutable RTW outbox and the
+ * // source-recorded DC technical receipt must both agree with its input hash.
+ * </pre>
+ * ⇒ <b>DC 的批次本身不足以授权</b>：RTW 侧的不可变 outbox 与 DC 回执必须就
+ * {@code input_hash} 达成一致。这就是本类 17 道校验的意义。
+ *
+ * <h2>两个公开入口</h2>
+ * <ul>
+ *   <li>{@link #authoritativeFactV1} —— {@code AuthoritativeFavoriteFact}，期望 schema 1。
+ *       响应体的 {@code subject_ref} 是<b>三字段</b>（见 {@link FavoriteAuthorityFact}）。</li>
+ *   <li>{@link #authoritativeFactV2} —— {@code AuthoritativeFavoriteFactV2}，期望 schema 2。
+ *       响应体的 {@code subject_ref} 是<b>两字段</b>（可直接用 {@code Wire.AuthorityFact}）。</li>
+ * </ul>
+ */
+@Service
+public class FavoriteAuthorityLookupService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FavoriteAuthorityLookupService.class);
+
+    /** Go {@code favorite_delivery.go:20} {@code favoriteReceiptHash = ^[a-f0-9]{64}$}。 */
+    private static final Pattern RECEIPT_HASH = Pattern.compile("^[a-f0-9]{64}$");
+
+    private final FavoriteFactOutboxMapper outboxMapper;
+    private final FavoriteItemMapper favoriteItemMapper;
+    private final FavoriteDeliveryValidator deliveryValidator;
+
+    public FavoriteAuthorityLookupService(FavoriteFactOutboxMapper outboxMapper,
+                                          FavoriteItemMapper favoriteItemMapper,
+                                          FavoriteDeliveryValidator deliveryValidator) {
+        this.outboxMapper = outboxMapper;
+        this.favoriteItemMapper = favoriteItemMapper;
+        this.deliveryValidator = deliveryValidator;
+    }
+
+    /** {@code authoritativeRow} 的产物：权威事实 + 它解析出的 payload。 */
+    private static final class AuthoritativeRow {
+
+        final FavoriteAuthorityFact.FactV1 fact;
+        final FavoriteDeliveryValidator.AuthorityPayload payload;
+
+        AuthoritativeRow(FavoriteAuthorityFact.FactV1 fact,
+                         FavoriteDeliveryValidator.AuthorityPayload payload) {
+            this.fact = fact;
+            this.payload = payload;
+        }
+    }
+
+    /**
+     * 🔴 对应 Go {@code AuthoritativeFavoriteFact}（favorite_authority.go:191-193）——
+     * 期望 {@code schemaVersion == 1}。
+     *
+     * <p>⚠️ 与 v2 的区别<b>不只是</b>期望值不同：响应体的 {@code subject_ref} 形状也不同
+     * （v1 三字段 / v2 两字段）。Go 的 v1 端点返回 {@code FavoriteAuthorityFact}，
+     * v2 端点返回 {@code FavoriteAuthorityFactV2}。
+     */
+    public FavoriteAuthorityFact.FactV1 authoritativeFactV1(String producer, String eventId) {
+        return resolve(producer, eventId, 1).fact;
+    }
+
+    /**
+     * 🔴 对应 Go {@code AuthoritativeFavoriteFactV2}（favorite_authority.go:195-204）——
+     * 期望 {@code schemaVersion == 2}。
+     *
+     * <p>Go 的实现（:200-203）把 v1 的结果<b>压扁</b>成 v2 形状：
+     * {@code SubjectRefV2{Issuer: fact.SubjectRef.AuthorityID, SubjectID: fact.SubjectRef.SubjectID}}。
+     */
+    public FavoriteAuthorityFact.FactV1 authoritativeFactV2(String producer, String eventId) {
+        // Go 侧两个入口共用 authoritativeFavoriteFact(ctx, producer, eventID, expectedSchema)
+        // ⇒ 这里同样复用同一个 resolve，只把 schema 期望值改成 2。
+        return resolve(producer, eventId, 2).fact;
+    }
+
+    /**
+     * 🔴 对应 Go {@code authoritativeFavoriteFact(ctx, producer, eventID, expectedSchema)}
+     * （favorite_authority.go:206-282）。
+     *
+     * <p>步骤逐条对应：
+     * <ol>
+     *   <li><b>入口校验</b>（:208-211）：{@code producer != favoriteProducer} /
+     *       {@code eventID == ""} / {@code len > 128} /
+     *       {@code strings.ContainsAny(eventID, "/\\?&#")} ⇒ {@code ErrFavoriteFactUnavailable}。
+     *       🔴 最后一条防的是<b>路径穿越</b>：event_id 会进 URL 的 path 段。</li>
+     *   <li><b>查行</b>（:213-219）：不存在或不是恰好 1 行 ⇒ 不可用。</li>
+     *   <li><b>17 道行校验</b>（{@code authoritativeFavoriteRow}，:126-177）。</li>
+     *   <li><b>schema 必须匹配</b>（:221-223）。</li>
+     *   <li><b>v1 时</b>（:224-251）：独立核对活着的业务行；
+     *       若业务行已不在，则必须有<b>恰好一条</b> v2 墓碑。</li>
+     *   <li><b>v2 时</b>（:253-280）：活业务行必须<b>不存在</b>，
+     *       且 v1 前驱必须存在、两者的 subject/target/folder/source_ref/revision 全部一致、
+     *       且前驱的 DC offset < 撤回的 offset。</li>
+     * </ol>
+     *
+     * @throws FavoriteExceptions.FactUnavailableException 任一校验不通过
+     */
+    private AuthoritativeRow resolve(String producer, String eventId, int expectedSchema) {
+        // Go: :208-211
+        if (!FavoriteFactEnvelopeFactory.PRODUCER.equals(producer)
+                || eventId == null || eventId.isEmpty()
+                || eventId.length() > 128
+                || eventId.indexOf('/') >= 0 || eventId.indexOf('\\') >= 0
+                || eventId.indexOf('?') >= 0 || eventId.indexOf('#') >= 0
+                || eventId.indexOf('&') >= 0) {
+            throw new FavoriteExceptions.FactUnavailableException("invalid producer or event id");
+        }
+
+        // Go: :213-219
+        FavoriteFactOutboxEntity row = outboxMapper.selectByEventId(eventId);
+        if (row == null) {
+            throw new FavoriteExceptions.FactUnavailableException("no such event");
+        }
+
+        // Go: :220-223
+        AuthoritativeRow resolved = authoritativeRow(row);
+        if (resolved.fact.event.schemaVersion != expectedSchema) {
+            throw new FavoriteExceptions.FactUnavailableException("schema version mismatch");
+        }
+
+        if (!isVersion2(row)) {
+            // ═══ v1（assert）路径 ═══
+            // Go: :224-240 —— 收藏还在时，独立核对业务行（不信只信冻结事件）
+            long liveCount = outboxMapper.countLiveItemsByFavoriteId(row.getFavoriteId());
+            if (liveCount == 1L) {
+                FavoriteDeliveryValidator.AuthorityPayload payload = resolved.payload;
+                long uid = parseSubjectId(resolved.fact.subjectRef.subjectId);
+                long folderId = FavoriteDeliveryValidator.parseAuthorityId(payload.folderId);
+                FavoriteItemSnapshot live = liveRow(row.getFavoriteId());
+                if (live == null
+                        || live.userId != uid
+                        || live.folderId != folderId
+                        || !live.targetType.equals(payload.targetType)
+                        || !live.targetId.equals(payload.targetId)
+                        || !FavoriteDeliveryValidator.sameFavoriteRevision(live.targetRevision, payload.targetRevision)) {
+                    throw new FavoriteExceptions.FactUnavailableException(
+                            "live favorite row disagrees with the frozen assert");
+                }
+            } else {
+                // Go: :241-250 —— 收藏已删 ⇒ 必须恰好一条 v2 墓碑
+                if (outboxMapper.countRetractsForAuthority(row.getFavoriteId()) != 1L) {
+                    throw new FavoriteExceptions.FactUnavailableException(
+                            "favorite is gone but the retract tombstone is missing or duplicated");
+                }
+            }
+            return resolved;
+        }
+
+        // ═══ v2（retract）路径 ═══
+        // Go: :253-260 —— 活业务行必须已不存在
+        if (outboxMapper.countLiveItemsByFavoriteId(row.getFavoriteId()) != 0L) {
+            throw new FavoriteExceptions.FactUnavailableException("retract but favorite still exists");
+        }
+
+        // Go: :261-269 —— v1 前驱必须存在
+        FavoriteFactOutboxEntity predecessorRow = outboxMapper.selectAssertPredecessor(
+                resolved.fact.predecessorEventId, row.getFavoriteId());
+        if (predecessorRow == null) {
+            throw new FavoriteExceptions.FactUnavailableException("assert predecessor is missing");
+        }
+
+        // Go: :270-280 —— 前驱自身也必须通过全部 17 道校验
+        AuthoritativeRow prior = authoritativeRow(predecessorRow);
+        if (prior.fact.event.schemaVersion != resolved.fact.event.schemaVersion) {
+            throw new FavoriteExceptions.FactUnavailableException("predecessor schema mismatch");
+        }
+        if (prior.fact.technicalReceipt.offset >= resolved.fact.technicalReceipt.offset) {
+            // Go: :274 —— prior.TechnicalReceipt.Offset >= fact.TechnicalReceipt.Offset
+            throw new FavoriteExceptions.FactUnavailableException(
+                    "retract offset is not after the assert offset");
+        }
+        if (!prior.fact.subjectRef.equals(resolved.fact.subjectRef)) {
+            throw new FavoriteExceptions.FactUnavailableException("predecessor subject mismatch");
+        }
+        if (!prior.payload.targetType.equals(resolved.payload.targetType)
+                || !prior.payload.targetId.equals(resolved.payload.targetId)
+                || !prior.payload.sourceRef.equals(resolved.payload.sourceRef)) {
+            throw new FavoriteExceptions.FactUnavailableException("predecessor target mismatch");
+        }
+        long priorFolderId = FavoriteDeliveryValidator.parseAuthorityId(prior.payload.folderId);
+        long folderId = FavoriteDeliveryValidator.parseAuthorityId(resolved.payload.folderId);
+        if (priorFolderId <= 0 || priorFolderId != folderId) {
+            throw new FavoriteExceptions.FactUnavailableException("predecessor folder mismatch");
+        }
+        if (!FavoriteDeliveryValidator.sameFavoriteRevision(
+                prior.payload.targetRevision, resolved.payload.targetRevision)) {
+            throw new FavoriteExceptions.FactUnavailableException("predecessor revision mismatch");
+        }
+        return resolved;
+    }
+
+    /**
+     * 🔴 对应 Go {@code authoritativeFavoriteRow(row)}（favorite_authority.go:126-177）——
+     * 本域<b>最长的单个判定函数</b>，17 项。
+     */
+    private AuthoritativeRow authoritativeRow(FavoriteFactOutboxEntity row) {
+        // ① 投递元数据必须齐全（Go: :127-129）
+        if (row.getStatus() != Wire.DeliveryStatus.DELIVERY_ACCEPTED.code()
+                || row.getDeliveredAt() == null
+                || row.getTechnicalReceivedAt() == null
+                || row.getTechnicalReceiptId() == null || row.getTechnicalReceiptId().isEmpty()
+                || row.getTechnicalOffset() < 1L
+                || row.getTechnicalInputHash() == null
+                || !RECEIPT_HASH.matcher(row.getTechnicalInputHash()).matches()) {
+            throw unavailable(row, "technical receipt is incomplete");
+        }
+
+        // ② 信封必须 strict-decode 且通过 12 条交叉校验（Go: :131-133）
+        FavoriteDeliveryValidator.FrozenEvent event;
+        try {
+            event = FavoriteDeliveryValidator.decodeStrict(row.getPayload(), FavoriteDeliveryValidator.FrozenEvent.class);
+        } catch (RuntimeException e) {
+            throw unavailable(row, "frozen envelope is not strict-decodable");
+        }
+        if (event == null || !deliveryValidator.validDelivery(row, event)) {
+            throw unavailable(row, "frozen envelope does not match its outbox row");
+        }
+
+        // ③ payload（Go: :135-138）
+        FavoriteDeliveryValidator.AuthorityPayload payload;
+        try {
+            payload = FavoriteDeliveryValidator.decodeStrict(event.payload.toString(),
+                    FavoriteDeliveryValidator.AuthorityPayload.class);
+        } catch (RuntimeException e) {
+            throw unavailable(row, "frozen payload is not strict-decodable");
+        }
+        long favoriteId = FavoriteDeliveryValidator.parseAuthorityId(payload.favoriteId);
+        long folderId = FavoriteDeliveryValidator.parseAuthorityId(payload.folderId);
+        FavoriteDeliveryValidator.SubjectResult subject =
+                FavoriteDeliveryValidator.subjectV1(event.schemaVersion, payload.subject);
+
+        // ④ payload 与事件/行的自洽（Go: :139-148）
+        if (favoriteId != row.getFavoriteId()
+                || folderId <= 0
+                || !subject.ok
+                || payload.schemaVersion != event.schemaVersion
+                || !event.eventId.equals(payload.eventId)
+                || payload.targetType == null || payload.targetType.isEmpty()
+                || payload.targetId == null || payload.targetId.isEmpty()
+                || !("rtw.favorite/" + row.getFavoriteId()).equals(payload.sourceRef)
+                || !event.occurredAt.equals(payload.eventTime)
+                || !event.occurredAt.equals(payload.availableAt)) {
+            throw unavailable(row, "frozen payload disagrees with the frozen event");
+        }
+
+        // ⑤ operation 与 aggregate_version 匹配（Go: :149-156）
+        String operation = isVersion2(row) ? "retract" : "assert";
+        if (!operation.equals(payload.operation)
+                || !("rtw.favorite." + operation).equals(event.eventType)
+                || !event.eventId.equals("favorite." + row.getFavoriteId() + ".v" + row.getAggregateVersion())) {
+            throw unavailable(row, "operation does not match the aggregate version");
+        }
+
+        // ⑥ available_at 必须是可解析时间（Go: :157-159）
+        try {
+            Instant.parse(payload.availableAt);
+        } catch (RuntimeException e) {
+            throw unavailable(row, "available_at is not a valid instant");
+        }
+
+        // ⑦🔴 JCS hash 必须与 DC 回执的 input_hash 一致（Go: :160-166）
+        //    这是「RTW 不可变 outbox」与「DC 技术回执」互相印证的核心。
+        String hash;
+        try {
+            hash = Wire.canonicalHash(row.getPayload().getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            throw unavailable(row, "JCS hash could not be computed");
+        }
+        if (!hash.equals(row.getTechnicalInputHash())) {
+            throw unavailable(row, "payload hash does not match the DC input hash");
+        }
+
+        // ⑧ 组装回执（Go: :167-176）
+        Wire.TechnicalReceipt receipt = new Wire.TechnicalReceipt();
+        receipt.eventId = row.getEventId();
+        receipt.producer = event.producer;
+        receipt.technicalStatus = "accepted";
+        receipt.receiptId = row.getTechnicalReceiptId();
+        receipt.inputHash = row.getTechnicalInputHash();
+        receipt.offset = row.getTechnicalOffset();
+        receipt.receivedAt = FavoriteFactEnvelopeFactory.rfc3339Nano(row.getTechnicalReceivedAt().toInstant());
+
+        FavoriteAuthorityFact.SubjectRefV1 subjectRef = subject.value;
+        String predecessorEventId = isVersion2(row)
+                ? "favorite." + row.getFavoriteId() + ".v1"
+                : null;                                   // Go: :173-175 —— assert 不带这个字段
+
+        FavoriteAuthorityFact.FactV1 fact = new FavoriteAuthorityFact.FactV1(
+                FavoriteDeliveryValidator.toWireEvent(event), subjectRef, predecessorEventId,
+                receipt, hash);
+        return new AuthoritativeRow(fact, payload);
+    }
+
+    // ==================== 小工具 ====================
+
+    private static boolean isVersion2(FavoriteFactOutboxEntity row) {
+        return row.getAggregateVersion() != null && row.getAggregateVersion() == 2L;
+    }
+
+    private static long parseSubjectId(String subjectId) {
+        try {
+            return subjectId == null ? 0L : Long.parseLong(subjectId);
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
+
+    private static FavoriteExceptions.FactUnavailableException unavailable(
+            FavoriteFactOutboxEntity row, String reason) {
+        LOG.atWarn()
+                .addKeyValue("event", "favorite.authority.lookup_failed")
+                .addKeyValue("event_id", row == null ? null : row.getEventId())
+                .addKeyValue("outcome", "rejected")
+                .addKeyValue("error_code", "SOURCE_READ_FAILED")
+                .addKeyValue("reason", reason)
+                .log("favorite authority lookup rejected");
+        return new FavoriteExceptions.FactUnavailableException(reason);
+    }
+
+    /** 活业务行的最小快照（对应 Go 的 {@code FavoriteItem} 局部变量，favorite_authority.go:228）。 */
+    private record FavoriteItemSnapshot(long userId, long folderId, String targetType,
+                                        String targetId, String targetRevision) {
+    }
+
+    /**
+     * 对应 Go {@code favorite_authority.go:229}：
+     * {@code query := m.conn.Where("favorite_id = ?", row.FavoriteID).Limit(1).Find(&item)}。
+     *
+     * <p>⚠️ <b>无 {@code FOR UPDATE}</b>：权威读是纯读路径，不加锁。
+     * ⇒ 这里读到的是一个<b>快照</b>，可能与随后的其它判断来自不同时刻 ——
+     * 这与 Go 一致（Go 同样是三个独立查询）。
+     */
+    private FavoriteItemSnapshot liveRow(long favoriteId) {
+        FavoriteItemEntity entity = favoriteItemMapper.findByFavoriteId(favoriteId);
+        if (entity == null) {
+            return null;
+        }
+        return new FavoriteItemSnapshot(entity.getUserId(), entity.getFolderId(),
+                entity.getTargetType(), entity.getTargetId(), entity.getTargetRevision());
+    }
+}

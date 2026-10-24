@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>admin</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>admin-rpc</artifactId>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>${opentelemetry.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-bom</artifactId>
+                <version>${mybatis-plus.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>admin-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>users-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot 基础（gRPC server 不需要 web） ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-web-server</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+
+        <!-- ============== 3. gRPC server（@GrpcService 自动起 gRPC server） ============== -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-server-spring-boot-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ============== 4. 数据访问：Postgres + MyBatis-Plus ============== -->
+        <!--
+            对应 Go 端 Postgres + GORM。Java 侧用 MyBatis-Plus 3.5.14 + MyBatis-Spring-Boot-Starter。
+            MyBatis-Plus 的 BaseMapper 提供标准 CRUD，业务复杂方法（createAdminAtomic 4 步事务 /
+            findUserListByKeyword 分页+LIKE）写在 Mapper 接口的 default 方法里，用 @Transactional。
+        -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+        </dependency>
+
+        <!-- ============== 5. 建表（已移除 Flyway，2026-10-21） ============== -->
+        <!--
+            原先这里是 flyway-core + spring-boot-flyway + flyway-database-postgresql 三件套，
+            现已**全部移除**，理由见 AGENTS.md §6.2.5 DRIFT-NEW-015：
+
+              flyway_schema_history 是 schema 级账本，一个 schema 只能有一本账；
+              而 admin-rpc 与 user-rpc 各自的迁移 V1/V2 版本号相同、内容不同，
+              两个进程又必须连同一个库（admin-rpc 也读写 users_user）
+              ⇒ 后启动的那个要么静默跳过自己的迁移，要么 checksum mismatch 直接启动失败。
+              「加 validate-on-migrate=false + out-of-order=true 糊过去」也已实测证伪，
+              见 tools/difftest/exp-drift015-flyway-flags.sh。
+
+            ⚠️ 这里必须**连 spring-boot-flyway 一起删**，不能只删 flyway-core：
+              Spring Boot 4 把自动配置拆成了独立 artifact，只要 spring-boot-flyway 还在
+              classpath 上，FlywayAutoConfiguration 就会用默认值自动装配并跑 migrate()
+              —— 于是「已经建好表但没有 schema history」直接变成致命错误：
+              Found non-empty schema(s) "public" but no schema history table.
+              （本次改造实测撞到过，见对话记录。）
+
+            现在的做法：bootstrap/AdminSchemaBootstrap 在 @PostConstruct 里调
+            users-common 的 com.rag.users.common.ddl.SchemaInitializer，
+            把 users-common/src/main/resources/db/*.sql 幂等重放一遍
+            （全部 CREATE ... IF NOT EXISTS，无账本、无版本号，谁先启动都行）。
+            spring-jdbc（ScriptUtils 所在）由 users-common 以 compile scope 传递进来。
+        -->
+
+        <!-- ============== 6. Redis（Logout 用 Setex 写 blacklist） ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- ============== 7. Metrics：复刻 Go 端 admin_rpc_login_total / admin_rpc_high_risk_action_logal ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 8. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            Testcontainers 2.0.5（版本由 spring-boot-starter-parent 的 testcontainers.version 管理，不写 version）。
+            为什么必须是真 PostgreSQL、不能用 H2：
+              - extra_info 是 jsonb 列，JsonbTypeHandler 走 ps.setObject(..., Types.OTHER)
+              - AdminCreateAtomicService 的 SELECT ... FOR UPDATE 悲观锁
+              - setSql("extra_info = CAST({0} AS jsonb)") 的显式 CAST
+            这三样 H2 都不支持/语义不同，替换掉等于把要验证的东西换没了。
+            对应 AGENTS.md §6.2.3 的 A-U0 / A-U2 / A-U3。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- ============== 9. OpenTelemetry OTLP exporter ============== -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ============== 10. Nacos service discovery ============== -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+    </dependencies>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
+                集成测试必须关掉 Ryuk，否则在本机/CI 上起不了任何容器。
+
+                原因（实测，非推测）：
+                  1. Testcontainers 2.x 的 ResourceReaper.instance() 读的是
+                     **环境变量** System.getenv("TESTCONTAINERS_RYUK_DISABLED")，
+                     字节码里就一句 getenv —— testcontainers.properties 与 -D 都无效，
+                     只有 surefire 注入 env 才有效。
+                  2. Ryuk 镜像 testcontainers/ryuk:0.14.0 需要从 Docker Hub 拉，
+                     本机走镜像加速器拉 Docker Hub 会 EOF 失败，
+                     表现为 "Can't get Docker image: RemoteDockerImage(ryuk:0.14.0)"，
+                     且发生在 @Container 之前 —— 整个类直接 ContainerFetch 失败。
+
+                关掉后的行为：改用 JVMHookResourceReaper（纯 JVM shutdown hook，不起容器）。
+                代价 = 容器不再自动回收，CI 跑完可能残留。测试用的 postgres:16-alpine
+                镜像需在本地已有（或换可达镜像源）。
+
+                恢复方式：删掉下面这段；Ryuk 会自动启用（前提是 Docker Hub 可达）。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

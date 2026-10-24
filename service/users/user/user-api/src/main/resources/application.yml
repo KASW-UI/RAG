@@ -1,0 +1,143 @@
+# user-api 启动配置 —— 对齐 Go 端 service/user/user/api/etc/usercenter.yaml
+# 独立 HTTP gateway 进程，端口 49900（Infrastructure.md §3）。
+# 下游通过 gRPC 调 user-rpc（:49210），调 Redis :49380 查 JWT 黑名单。
+
+spring:
+  application:
+    name: user-api
+
+  # ===== 1. Redis（对齐 Go 端 BizRedis）=====
+  # Go: BizRedis.Host=redis:6379 / Type=node / Pass=""
+  # Java 侧用 Spring Data Redis（Lettuce）
+  # REDIS_ADDR/REDIS_PORT 来自 docker-compose.yaml（容器内 DNS 名 + 容器内端口 6379）
+  data:
+    redis:
+      host: ${REDIS_ADDR:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3s
+
+  # ===== 2. Jackson 全局时间戳策略：对齐 Go 版 encoding/json 默认 =====
+  # Jackson 3.x（Spring Boot 4）默认写 ISO 8601 字符串，移除了 WRITE_DATES_AS_TIMESTAMPS 选项。
+  # 与 Go 版 encoding/json 默认行为（写 time.Time 为 RFC3339 字符串）一致，无需配置。
+  # jackson:
+  #   serialization:
+  #     write-dates-as-timestamps: false  # Jackson 3.x 移除
+
+  # ===== 2.5. Nacos 服务发现客户端（修 DRIFT-NEW-001）=====
+  # 配 Nacos server 地址 + namespace + group。
+  # env 覆盖：NACOS_ADDR / NACOS_PORT / NACOS_NAMESPACE / NACOS_GROUP / NACOS_USERNAME / NACOS_PASSWORD
+  cloud:
+    nacos:
+      discovery:
+        # NACOS_ADDR/NACOS_PORT 来自 docker-compose.yaml（容器内 DNS 名 + 容器内端口 8848）
+        server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}
+        namespace: ${NACOS_NAMESPACE:sea-rtw}
+        group: ${NACOS_GROUP:USER_GROUP}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+
+# ===== 3. HTTP server 监听端口（对齐 Go 端 etc/usercenter.yaml: Host=0.0.0.0, Port=8888）=====
+# Java 版重映射为 49900（Infrastructure.md §3）
+server:
+  port: 49900
+  address: 0.0.0.0
+  servlet:
+    context-path: /
+
+# ===== 3.5. gRPC client（走 Nacos 自动发现 user-rpc）=====
+# devh grpc-client-spring-boot-starter 的 Nacos name resolver：
+#   address: discovery:///user-rpc   ← 三斜杠（discovery://[authority]/<service-name>）
+#   Nacos 注册的服务名 = user-rpc 本名（与 spring.application.name 对齐）
+# 修 DRIFT-NEW-001：从 Go 端 etcd static 寻址对齐到 Nacos dynamic discovery
+#
+# ⚠️ DRIFT-NEW-014（2026-10-21 双端对拍抓出）：negotiation-type 不能省。
+#   devh 的 GrpcChannelProperties.DEFAULT_NEGOTIATION_TYPE = TLS
+#   （net/devh/boot/grpc/client/config/GrpcChannelProperties 的静态初始化，
+#     字节码 offset 33-36），且 getNegotiationType() 在字段为 null 时
+#     **回落到该默认值**（同文件 offset 1-10）——
+#     所以「不写」不等于「不生效」，它会静默变成 TLS。
+#   而 user-rpc 是 plain gRPC：Go 侧 service/user/user/rpc/user.go:36
+#   zrpc.MustNewServer 全仓无 TLS 配置，RAG 侧 application.yaml 也没有
+#   任何 server 端 TLS 配置。漏掉这一行 ⇒ user-api 发 TLS ClientHello，
+#   user-rpc 的 netty 报
+#     Http2Exception: HTTP/2 client preface string missing or corrupt.
+#     Hex dump: 16030301...        ← 0x16 = TLS handshake record
+#   所有经 user-rpc 的业务码塌成 1015 服务繁忙。
+#
+#   admin-api/application.yml **已经有**这一行，并带 DRIFT-NEW-008 注释
+#   解释了为什么必须有 —— 当年 admin 侧踩过并修了，**user 侧单纯被漏掉**。
+#   对照 ShadedNettyChannelFactory.createChannel：它是直接
+#     builder.negotiationType(shaded NegotiationType.of(properties.getNegotiationType()));
+#   配置值直接决定握手方式，没有任何兜底。
+#
+#   Go 出处：Go user-rpc 为纯 gRPC 明文传输，故 Java 客户端必须同样走明文。
+#   回归锁定：UserApiGrpcNegotiationTest（真 plaintext gRPC server + 真 channel，
+#   外加一条 TLS 负向对照，保证不是假绿）。
+grpc:
+  client:
+    user-rpc:
+      address: discovery:///user-rpc
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      permit-keep-alive-without-calls: true
+
+# ===== 4. 业务配置（对齐 Go 端 UserAuth.*）=====
+# 对应 Go: UserAuth.AccessSecret / UserAuth.AccessExpire
+# gRPC channel 目标由 devh starter 通过 grpc.client.user-rpc.address 装配（见上面 §3.5）
+user-api:
+  user-auth:
+    access-secret: ${USER_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}
+    access-expire: ${USER_JWT_EXPIRE:2592000}    # 30 天，与 Go 端 etc/usercenter.yaml 一致
+
+# ===== 5. Metrics：暴露 /actuator/prometheus =====
+# Spring Web 已在 server.port=49900；Actuator 复用同一 Tomcat。
+# Prometheus 从同 docker 网络内 scrape：http://user-api:49900/actuator/prometheus
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+    enabled-by-default: false      # 只显式开启下面三个
+  endpoint:
+    health:
+      enabled: true
+    info:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    enable:
+      prometheus: true
+    tags:
+      application: ${spring.application.name}
+
+# ===== 6. OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）=====
+# Go: Endpoint=jaeger:4317, Batcher=otlpgrpc, Sampler=1.0, Name=user-api
+# OTEL_ADDR/OTLP_PORT 来自 docker-compose.yaml（容器内 DNS 名 + 容器内端口 4317）
+otel:
+  exporter:
+    otlp:
+      endpoint: http://${OTEL_ADDR:jaeger}:${OTLP_PORT:4317}
+      protocol: grpc
+  resource:
+    attributes:
+      service.name: user-api
+  traces:
+    sampler: always_on          # 对齐 Go Sampler: 1.0
+
+# ===== 7. 日志（Spring Boot 默认走 logback-classic，SLF4J）=====
+# Logger.java 已显式调 Logger.init("user-api")，MDC trace_id 会被自动填入
+logging:
+  level:
+    root: INFO
+    com.rag.users.user.api: INFO
+    com.rag.common: INFO
+# ===== observability（对齐 Go service/user/user/api 的 DisableNativeRestTimeout + NewHTTPMiddleware）=====
+# 取值依据：Go 侧 service/user/user/api/etc/usercenter.yaml **未配置 Timeout**，
+# 实际生效值来自 go-zero v1.10.2 `rest/config.go:55` 的 `Timeout int64 json:",default=3000"`。
+# 即 Go 的 user-api HTTP 超时是 3000ms，由 observability 中间件单独执行
+# （DisableNativeRestTimeout 已把 go-zero 原生超时中间件关掉，超时只有一个执行者）。
+observability:
+  http-timeout: 3s

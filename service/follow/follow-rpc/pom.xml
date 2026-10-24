@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rag</groupId>
+        <artifactId>follow</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>follow-rpc</artifactId>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <!--
+        follow-rpc：Go 端 service/follow/rpc 的 Spring Boot 等价物（单 JVM、纯 gRPC、无 Redis、无 Kafka）。
+
+        与 like-rpc / message-rpc 的差别只有一处：**不引 Redis、不引 Kafka**。
+        Go 端 follow/rpc/internal/svc/servicecontext.go 只有两个依赖 ——
+        FollowModel（PG）+ UserRpc（gRPC），没有 cache、没有 MQ。
+        ⇒ 任何 redis/kafka starter 在本模块都属于「新增 Go 侧不存在的能力」，一律不引。
+    -->
+    <dependencies>
+        <!-- ============== 1. 内部模块依赖 ============== -->
+        <!--
+            follow-proto：FollowServiceGrpc（server ImplBase）+ RelationReq / BaseResp / ListReq /
+            UserListResp / RecommendResp。proto 已与 Go 端 follow.proto 对齐
+            （message 名 / 字段名 / 字段号 / 类型逐条一致），生成物直接可用。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>follow-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            follow-common：FollowErrorCode / FollowErrorMessages / FollowGrpcError / FollowCodeError。
+            业务码 → gRPC 码的转换**全部**在这里（follow-rpc 是纯 gRPC 进程，不引 web，
+            因此不需要 GlobalExceptionHandler —— 那是 HTTP 错误模型）。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>follow-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            user-proto：UserServiceGrpc.UserServiceBlockingStub。
+            Go 出处：service/follow/rpc/internal/svc/servicecontext.go:30
+              UserRpc: userservice.NewUserService(zrpc.MustNewClient(c.UserRpc))
+            唯一调用点是 helper.go:82 的 ensureUserExists → GetUser({Uid: userID})。
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>user-proto</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!--
+            common（artifactId=common）：服务级共享能力，对应 Go 端 service/common/*：
+              - LoggerFactoryBean            ← Go common/logger（logBusinessErr / logInfo 带 user_id 结构化字段）
+              - RpcServerInterceptorFactory / Observability*  ← Go common/observability（超时/deadline/OTEL）
+              - persistence.DeadlineQueryTimeoutInjector / SqlTimeoutStatusTranslator（超时要能取消在途 SQL）
+        -->
+        <dependency>
+            <groupId>com.rag</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- ============== 2. Spring Boot 基础（纯 gRPC，不带 web） ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <!--
+            spring-boot-web-server：只为满足 nacos-discovery 的反射引用
+            （org.springframework.boot.web.server.context.WebServerInitializedEvent）。
+            不引它启动不了 Nacos 自动配置，但**不会**因此起 web 容器 —— 本服务无 WebApplicationType。
+            与 message-rpc / like-rpc 完全同款。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-web-server</artifactId>
+        </dependency>
+
+        <!-- ============== 3. gRPC server + client ============== -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
+        </dependency>
+        <!-- @GrpcService 自动起 gRPC server（替代 zrpc.MustNewServer） -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-server-spring-boot-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- @GrpcClient("user-rpc")：替代 zrpc.MustNewClient(c.UserRpc) -->
+        <!--
+            ⚠️ 这个 <version> 是必需的，**不是**冗余：
+            根 pom 的 <dependencyManagement> 只管理了 grpc-**server**-spring-boot-starter，
+            没有管理 grpc-**client**-spring-boot-starter。
+            缺版本 ⇒ `'dependencies.dependency.version' for net.devh:grpc-client-spring-boot-starter:jar is missing`
+            ⇒ **整个 reactor 的 POM 解析失败**，任何模块都构建不了。
+            与 favorite-rpc 同款缺陷（2026-10-23 一并修掉）。
+            取值与根 pom 的 ${grpc-spring-boot-starter.version} 一致。
+        -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot-starter.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.grpc</groupId>
+                    <artifactId>grpc-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ============== 4. 数据访问：Postgres + MyBatis-Plus + Flyway ============== -->
+        <!--
+            对应 Go 端 gorm.Open(postgres.Open(...)) + db.AutoMigrate(&FollowRelation{}, &BlockRelation{})。
+            AutoMigrate 依据 struct tag 生成 follow_relation / block_relation 两张表；
+            Java 侧改由 Flyway V1/V2 显式建表，列类型 / 索引 / 唯一约束 / NOT NULL 与 GORM 产物逐条对齐
+            （见两个 V*__*.sql 的逐列注释）。
+        -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <!--
+            ⚠️ spring-boot-flyway **不可省**：Boot 4 把 Flyway 自动配置拆成了独立模块。
+            缺它时**启动日志里连一行 Flyway 都没有**（不是报错，是根本没加载），
+            follow_relation / block_relation 永不创建 ⇒ 第一次真正执行 SQL 才炸。
+            同款见 like-rpc / message-rpc 的 pom。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+        </dependency>
+
+        <!-- ============== 5. Metrics：Micrometer + Prometheus ============== -->
+        <!-- 对应 Go 端 metrics.InitMetrics() + prometheus.MustRegister(...) 的 5 个指标 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ============== 6. Nacos service discovery ============== -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- ============== 7. 测试 ============== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            ⚠️ 必须显式写版本：根 pom 的 dependencyManagement 只管 grpc-stub / -core /
+            -netty-shaded / -protobuf / -protobuf-lite，**没有**管 grpc-inprocess，
+            漏写版本会让整个 reactor 在读 POM 阶段就失败。与 like-rpc / message-rpc 保持一致。
+
+            🔴 **scope 必须是 compile（默认），不能是 test**（2026-10-24 真启动实测修正）。
+            根因是 Maven 的「最近者优先」：
+              1) net.devh:grpc-client-spring-boot-starter:3.1.0.RELEASE **自身就传递依赖**
+                 io.grpc:grpc-inprocess（compile scope），它带
+                 net.devh:grpc-client:... → `InProcessChannelFactory`，而那个类的常量池里
+                 硬引用 `io.grpc.inprocess.InProcessChannelBuilder`；
+              2) 本模块**又**显式声明了 grpc-inprocess —— 直接声明永远压过传递声明，
+                 于是 scope 一旦写成 test，**运行时 classpath 上 grpc-inprocess 就整个消失**；
+              3) devh 的 `shadedNettyGrpcChannelFactory` 在创建 channel 时要链接
+                 `InProcessChannelFactory` ⇒ 运行期抛
+                 `NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder`
+                 ⇒ `UserRpcClient` Bean 创建失败 ⇒ **整个服务起不来**（硬失败，不是静默失效）。
+
+            ⚠️ **为什么测试全绿却没发现**：测试跑在 test classpath 上，grpc-inprocess 本来就在，
+            且 FollowRpcWiringTest 把 grpc client 地址覆盖成 `static://127.0.0.1:1`
+            ⇒ 生产 classpath 与生产地址**都没被任何测试跑过**。
+            这正是 AGENTS.md §3.3 的「跑绿 ≠ 对」。
+            ⚠️ 同款 scope 缺陷仍在 article-rpc / favorite-rpc / like-rpc / task-rpc
+            （本域外，未在 align/follow 工作树内改动）。
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-inprocess</artifactId>
+            <version>${grpc.version}</version>
+        </dependency>
+        <!--
+            真 PostgreSQL（不是 H2）：本模块要验证的不变量全部依赖 PG 真实语义 ——
+              - INSERT ... ON CONFLICT (user_id, target_id) DO NOTHING 的幂等插入
+              - uk_follow_pair / uk_block_pair 复合唯一约束触发的那条冲突路径
+              - Block 的「插 block + 双向删 follow」必须整事务回滚
+            H2 在 upsert 与部分索引上与 PG 行为不同，替换等于把要验证的东西换没了。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
+                集成测试必须关掉 Ryuk，否则在本机/CI 上起不了任何容器。
+                原因与恢复方式见 message-rpc/pom.xml 同款注释（Testcontainers 2.x 的
+                ResourceReaper 只读环境变量 TESTCONTAINERS_RYUK_DISABLED）。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

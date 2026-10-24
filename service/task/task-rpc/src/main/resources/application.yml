@@ -1,0 +1,269 @@
+# =============================================================================
+# task-rpc application.yml —— 对应 Go 端 service/task/rpc/etc/task.yaml
+# 1:1 迁移原则：Go yaml 的每个字段要么在此有落点，要么注明「Go 里就没有读取点」。
+# =============================================================================
+
+spring:
+  application:
+    # 对应 Go Name: task.rpc（Etcd.Key 也是 task.rpc ⇒ 服务发现名统一为 task-rpc）
+    name: task-rpc
+
+  # ============== Postgres ==============
+  # 对应 Go Postgres.Dsn: "host=… dbname=… TimeZone=Asia/Shanghai"
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}
+    username: ${POSTGRES_USER:admin}
+    password: ${POSTGRES_PASSWORD:password}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # 对应 Go service_context.go:43-44
+      #   sqlDB.SetMaxOpenConns(c.Postgres.MaxOpenConns)   = 50
+      #   sqlDB.SetMaxIdleConns(c.Postgres.MaxIdleConns)   = 50
+      maximum-pool-size: 50
+      minimum-idle: 50
+      # ⚠️ 对应 Go service_context.go:45
+      #   sqlDB.SetConnMaxLifetime(time.Duration(c.Postgres.ConnMaxLifetimeMinutes))
+      # Go 这里**漏了 `* time.Minute`** ⇒ 实际生效值是 30 **纳秒**，
+      # 连接会被立刻回收成「每次查询都重新建连」。
+      #
+      # 【有意偏离 · 不做 1:1】这里是 30 分钟（1800000ms）而不是 30ns：
+      #   · HikariCP 硬性拒绝 maxLifetime < 30s（IllegalArgumentException），
+      #     连「照抄」都做不到；
+      #   · 即便能抄，30ns 的语义是「连接池永不命中」，那是把一个配置笔误变成运行故障，
+      #     属于改变可观察行为而非保留行为。
+      # 依据：yaml 里作者写的是 `ConnMaxLifetimeMinutes: 30`，
+      # 单位在**字段名**上已经声明；缺失的乘法是 Go 代码侧的笔误。
+      # 同类取舍见 hot-rpc 的 SetConnMaxIdleTime 等条。
+      max-lifetime: 1800000
+
+  # ============== MyBatis-Plus ==============
+  mybatis-plus:
+    configuration:
+      map-underscore-to-camel-case: true
+    global-config:
+      db-config:
+        id-type: INPUT     # 复合主键（user_id, task_id）由业务给值，不用雪花
+      banner: false
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+
+  # ============== Flyway ==============
+  # ⚠️ **独立账本表名**（AGENTS.md §6.3 问题 4）：`flyway_schema_history` 是 **schema 级**账本，
+  #    一个 schema 只能有一本账。本仓 message-rpc / like-rpc / article-rpc 都连同一个
+  #    first_db、同一个 public schema，共用默认账本时后启动者会把别人的迁移判为「已应用」
+  #    而静默跳过。改账本表名即可消除病根，**迁移文件名一个字都不用动**。
+  # ⚠️ 漏掉这一行 ⇒ task 的 V1/V2 与 message、like 的 V1/V2 版本号直接撞车且内容不同。
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    # 🔴 **baseline-version: 0 是必需的，不是"多写的一行"**
+    #
+    # 实测（2026-10-23，真实进程启动 + 真 PG 16）：
+    #   baseline-on-migrate=true 遇到**非空且无账本**的 schema 时，
+    #   Flyway 会按 baselineVersion（**默认 1**）插一条基线记录，然后只执行 **版本 > 基线** 的迁移。
+    #   ⇒ **V1 被静默跳过**，日志里只有 "Migrating schema to version 2"，
+    #     看起来迁移成功了，`user_like_count` 建出来了，唯独 `task_progress` 根本没建。
+    #   ⇒ 后果是「第一次真正查库才炸」：relation "task_progress" does not exist。
+    #
+    # 为什么这个库是非空的：本仓所有 rpc 模块连同一个 first_db / public schema，
+    # 里面已经有 article 域的 paper / user_paper 等表（实测 \dt 见 paper 系列）。
+    #
+    # baseline-version: 0 ⇒ 基线落在 0 ⇒ V1 与 V2 都会执行。
+    # ⚠️ 这是本模块**必须**显式声明的；漏掉它的表现与 message-rpc 的 DRIFT-MSG-006 同型
+    #    （Flyway 引擎在、启动日志看着正常、迁移却是残缺的）。
+    baseline-version: 0
+    locations: classpath:db/migration
+    schemas: public
+    table: flyway_schema_history_task
+
+  # ============== Redis ==============
+  # 对应 Go LikeRedis（go-redis/v9）
+  # ⚠️ Go 的 ServiceContext 只读了 LikeRedis 的三个字段：Addr / Pass / DB
+  #    （service_context.go:25-29）。DialTimeoutMs / ReadTimeoutMs / WriteTimeoutMs /
+  #    PoolSize / MinIdleConns / consumerName **全部没有读取点**
+  #    ⇒ Java 侧刻意不映射，避免让人误以为这些超时已生效。
+  #    consumerName（task.reward.test）只被 reward Worker 用，而 Worker 没被启动
+  #    （task.go:35 的 StartInitReward 调用被注释、initReward.go 整个文件是注释）。
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0        # 对应 Go LikeRedis.DB: 0
+
+  # ============== Kafka ==============
+  # 对应 Go Kafka.Brokers
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:kafka:9092}
+    consumer:
+      # ⚠️ Go yaml 写的是 `Offset: latest`，但 **Init/*.go 里三个 kq 消费者全部硬编码了
+      #    `Offset: "latest"`**（initKafkaRaw.go:32 / initUserFilter.go:47 / initArticleFilter.go:40），
+      #    yaml 这个字段**从未被读取**。Java 侧把默认值设为 latest，与那三处硬编码一致。
+      #    三个 goka processor 相反：硬编码 `sarama.OffsetOldest` ⇒ earliest，
+      #    在各自的 @KafkaListener 上用 properties 逐个覆盖（见 mq/ 包的注释）。
+      auto-offset-reset: latest
+      # Go kq 用 segmentio/kafka-go：Consume 返回 error ⇒ 不调 CommitMessages。
+      # Java 侧对应「listener 抛异常 ⇒ 不提交」，靠 AckMode.RECORD 表达。
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # ⚠️ Go kq 的 handler 签名是 Consume(ctx, key, val **string**)，
+      #    且用 `string(msg.Value)` 直接取裸字节（go-queue/kq/queue.go:230）——
+      #    **没有任何反序列化器**。goka 的 codec.Int64 编出来的也是十进制 ASCII 字符串
+      #    （goka/codec/codec.go:56 `[]byte(strconv.FormatInt(intVal, 10))`），
+      #    不是二进制。故这里必须是 StringDeserializer，用 ByteArray 会改变可观察行为。
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Go 的 kq.Pusher 走 ChunkExecutor，**异步**批量刷（默认无 WithSyncPush ⇒ executor != nil）。
+      # Spring 的 send() 同样是异步，语义一致；失败一律只记日志不阻塞主流程。
+      acks: 1
+    listener:
+      # RECORD = listener 正常返回后提交位点，是「返回 error ⇒ 不确认」的等价载体
+      ack-mode: record
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+
+# =============================================================================
+# gRPC server（devh）—— 对应 Go ListenOn: 0.0.0.0:9005
+# =============================================================================
+grpc:
+  server:
+    port: 9005
+    address: 0.0.0.0
+    # Go 侧 reflection 仅在 DevMode/TestMode 注册（task.go:40-42）；
+    # Java 侧 devh starter 默认即开启 reflection，此处不额外配置。
+
+# =============================================================================
+# task 域专属配置 —— 逐个对应 Go etc/task.yaml 的 Kafka.* / LikeRedis.*
+# =============================================================================
+task:
+  kafka:
+    # ---------- topic ----------
+    # Go Kafka.InTopic —— goka 主组的输入 + kq 诊断消费者的输入
+    in-topic: task.logs.raw
+    # Go Kafka.RawUserTopic / RawArticleTopic —— goka 主组的两个输出（值都是**原始 raw 字节**）
+    raw-user-topic: task.logs.raw.User
+    raw-article-topic: task.logs.raw.Article
+    # Go Kafka.OutUserTopic / OutArticleTopic
+    #   · goka 计数组的输出
+    #   · 两个 sink 的输入
+    # ⚠️ 这两个 topic 同时被 like-rpc 的 TaskUserPusher / TaskArticlePusher 生产
+    #    （Go likeactionlogic.go:312-343），是跨域契约，改名即断链。
+    out-user-topic: task.logs.filtered.User
+    out-article-topic: task.logs.filtered.Article
+
+    # ---------- consumer group ----------
+    # Go Kafka.GroupKafkaRaw —— kq 诊断消费者（initKafkaRaw.go:25）
+    group-kafka-raw: task.rpc.consumer31
+    # Go Kafka.GroupGoKa / GroupGoKaUser / GroupGoKaArticle —— 三个 goka processor
+    group-goka: task.rpc.consumer41
+    group-goka-user: task.rpc.consumer61
+    group-goka-article: task.rpc.consumer71
+    # Go Kafka.GroupFilterUser —— 用户点赞 sink（initUserFilter.go:30）
+    group-filter-user: task.rpc.consumer81
+    # Go Kafka.GroupKafkaFilter —— ⚠️ 注意是**这一个**，不是 GroupFilterArticle：
+    #   initArticleFilter.go:30 读的是 GroupKafkaFilter。
+    #   GroupFilterArticle（task.rpc.consumer91）在 Go 里**从未被读取**，保留仅为配置面完整。
+    group-kafka-filter: task.rpc.consumer101
+    group-filter-article: task.rpc.consumer91
+
+    # ⚠️ Go yaml 的 `Offset: latest` / `Consumers: 8` / `Processors: 8` **三个字段都没有读取点**：
+    #   Init/*.go 每个 kq.NewQueue 都硬编码了 `Consumers: 1, Processors: 1, Offset: "latest"`。
+    #   Java 侧因此同样不映射这三个属性（映射了会让人误以为并发度是 8）。
+    #   Spring Kafka 的 listener 默认 concurrency=1，与那三处硬编码一致。
+
+  # ---------- 任务定义（对应 Go Model.AllTaskDefs 的两处硬编码常量）----------
+  # ⚠️ Go 里这些常量**写死在 Go 代码里**（like_sink.go:31-34、article_sink.go:18-31），
+  #    提到 yaml 只是为了让「改这个值」必须显式可见，而不是藏在代码魔数里。
+  #    ⚠️ 但 Model.AllTaskDefs（get_task_logic.go 读的那份，model/taskModel.go:22-25）
+  #       与 sink 的常量是**两套独立硬编码**：Go 从来没有校验它们一致。
+  #       Java 侧同样不合并（合并会新增一条 Go 没有的一致性约束），
+  #       见 TaskDefs 的「两份真相」注释。
+  definitions:
+    # ---- 点赞任务（like_sink.go 的 taskID / target）----
+    like:
+      task-id: 1902
+      target: 5
+      # like_sink.go:47 taskProgressTTL 无关，这是各处 Redis TTL：
+      init-ttl: 90d          # task:init:<uid>:<taskId> / task:done:<uid>:<taskId> / like:total:<uid>
+      # like_sink.go:69-71 批量阈值
+      redis-pipe-max: 5000
+      pg-batch-max: 2000
+      flush-every-ms: 1000   # like_sink.go:69 flushEvery = 1 * time.Second
+    # ---- 文章获赞任务（article_sink.go 的 articleTaskID / articleTarget）----
+    article:
+      task-id: 190
+      target: 3
+      # article_sink.go:22 articleDoneTTL = 90d + 30d
+      done-ttl: 120d
+      # article_sink.go:23 articleInitTTL
+      init-ttl: 24h
+      redis-pipe-max: 5000   # article_sink.go:25 redisPipeMaxDefault
+      pg-batch-max: 2000     # article_sink.go:26 pgBatchMaxDefault（当前未被使用，见类注释）
+      flush-every-ms: 1000   # article_sink.go:24 articleFlushEvery
+
+  # ---------- 奖励事件流（对应 Go internal/reward/type.go 的常量）----------
+  reward:
+    # Go reward.StreamKey = "stream:task:reward"
+    stream-key: stream:task:reward
+    # ⚠️ Go reward.GroupName = "task-reward-group" 只被 Worker 使用，
+    #    而 Worker **没有被启动** ⇒ 消费组不存在于线上。
+    #    这里只保留配置面，本模块不创建消费组。
+    group-name: task-reward-group
+
+# =============================================================================
+# observability —— 对齐 Go task.go:28
+#   rpcTimeout := observability.DisableNativeRpcTimeout(&c.RpcServerConf)
+# ⚠️ Go task.yaml **未配 Timeout** ⇒ 生效值来自 go-zero zrpc/config.go 的
+#    `Timeout int64 `json:",default=2000"`` = 2000ms。
+#    漏掉这一项 ⇒ 无 gRPC deadline，且不报任何错（RpcServerInterceptorFactory 收到 null
+#    会静默回退 Duration.ZERO = 不限时）。
+# =============================================================================
+observability:
+  rpc-timeout: 2s
+
+# =============================================================================
+# Actuator / Metrics
+# =============================================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: task-rpc
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# =============================================================================
+# OpenTelemetry OTLP —— 对应 Go Telemetry{Name: task-rpc, Endpoint: jaeger:4317, Sampler: 1.0}
+# =============================================================================
+otel:
+  service:
+    name: task-rpc
+  exporter:
+    otlp:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:jaeger:4317}
+  traces:
+    exporter: otlp
+    sampler: parentbased_always_on
+
+logging:
+  level:
+    root: INFO
+    com.rag: INFO
+    io.grpc: WARN
