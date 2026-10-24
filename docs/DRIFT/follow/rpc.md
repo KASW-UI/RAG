@@ -96,6 +96,25 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 > `message-rpc` 的 grpc client 地址**全是两斜杠**；而**全部 api 模块都是三斜杠**。
 > ⇒ 这是「rpc 层单方面的写法偏差」，本域已修，域外 5 个模块待修。
 
+### 🛡️ 防回归网：`FollowRpcProductionAddressTest`（2026-10-24 补录，commit `d50750e`）
+
+> ⚠️ 2026-10-24 复核发现：这条**守门测试此前没进台账** ⇒ 「已修」缺证据链 ⇒ 现补录。
+
+`service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/FollowRpcProductionAddressTest.java`
+（**3 条用例** + helper 内 1 条交叉核对断言）守的是 **DRIFT-FOLLOW-003 这类「编译期看不出、测试期测不到、但能让服务起不来」**的缺陷：
+
+| 用例 | 断言 |
+|---|---|
+| `productionAddressUsesThreeSlashes` | **生产 `application.yml`**（不是 test 资源）里的 grpc client 地址 == `discovery:///user-rpc`（三斜杠） |
+| `devhNameResolverAcceptsProductionAddressAndRejectsTwoSlash` | 把该地址喂给 **devh 真正的消费点**（`DiscoveryClientResolverFactory#newNameResolver`）⇒ **不抛**；换成两斜杠 ⇒ **必须抛** `IllegalArgumentException` 且消息含 `Incorrectly formatted target uri` |
+| `productionAddressResolvesToExpectedServiceName` | 该地址解析出的服务名 == `user-rpc`（与 `NacosRegistration` 的注册名一致） |
+| （helper `productionAddress()` 内的交叉核对） | `target/classes` 里**打包的副本**与源码树里的地址一致 ⇒ 防止「上次构建产物是旧的，测试结论不可信」 |
+
+> 🔑 **为什么必须是「真消费点」**：AGENTS.md §3.3「不得凭注解/配置名称断定机制已启用」。
+> 光断言字符串等于 `"discovery:///user-rpc"` 只能证明**代码写成了这样**；
+> **调用 devh 的解析器并断言两斜杠被拒**，才证明**这条地址在运行时真的能被消费**。
+> ⇒ 这是 §3.3「两侧同时跑的探针」的单侧最小形态。
+
 ## DRIFT-FOLLOW-004 🔴 `NACOS_ADDR` 在 api / rpc 两侧语义不一致
 
 **现象**：修完 002/003 后，follow-api 报
@@ -298,6 +317,12 @@ threading.GoSafe(func() {
 ⇒ 已改成 `publishPercentileHistogram()`，**这样等出口补上时格式就已经是对的**
 （详见 `docs/DRIFT/follow/api.md` 的 DRIFT-FOLLOW-007）。
 
+> **🧾 第二轮复核（2026-10-24 · 最全性）**：补录「逐文件对照索引」——
+> 此前「逐条对照」这条断言**无法从台账里核对**
+> （`FollowRpcApplication`、`UserRpcClient`、`FollowRpcProperties`、
+> `MybatisPlusOrderingBridgeAutoConfiguration`、两个 Entity、4 个 `errmsg` 类
+> 共 **10 个类从未出现过**）⇒ 现每个源文件都有落点；
+> **实测覆盖率：Java 侧 21/21、Go 侧 22/22**（含 goctl 生成物与 Go 侧死代码的说明）。
 > **🧾 台账 ↔ 代码复核（2026-10-24）**：本文件的每条状态断言已逐条回代码/真源核对 ——
 > 「✅ 已修」3 条（002/003/004）**逐条在代码里坐实**；
 > 「🔴 未修」1 条（006，follow-rpc 指标无出口）**仍然成立**；
@@ -305,15 +330,62 @@ threading.GoSafe(func() {
 > 全部 `file:line` 引用**逐条命中**；
 > 复核中发现 4 处表述偏差已当场订正（对拍条数、Go 源文件数、测试条数、探针清单）。
 
+## 逐文件对照索引（21 个 Java ↔ 22 个 Go，**全量无遗漏**）
+
+> ⚠️ 2026-10-24 复核补录：同 api.md，「逐条对照」这条断言此前**无法从台账里核对**
+> （`FollowRpcApplication`、`UserRpcClient`、`FollowRpcProperties`、
+> `MybatisPlusOrderingBridgeAutoConfiguration`、两个 Entity、4 个 `errmsg` 类
+> 共 **10 个类从未出现过**）⇒ 现补全索引。
+
+| # | RAG 源文件（follow-rpc 17 + follow-common 4） | Go 对应物（follow/rpc 21 + follow/common 1） | 承重点 | 结论 |
+|---|---|---|---|---|
+| 1 | `rpc/FollowRpcApplication.java` | `follow.go`（`main()`） | Go main 的五步逐条对应（**无 ticker/cron**） | ✅ |
+| 2 | `rpc/bootstrap/NacosRegistration.java` | `follow.go` → `zrpc.MustNewServer` → `zrpc/server.go:63 SetUp()` | 注册名 `follow-rpc`；Go 侧由 zrpc 自动注册 | ✅ |
+| 3 | `rpc/client/UserRpcClient.java` | `internal/svc/servicecontext.go` 的 `UserRpc` + `internal/logic/helper.go:81-94` | `GetUser` 的三分支判定 | ✅ |
+| 4 | `rpc/config/FollowRpcProperties.java` | `internal/config/config.go`（struct tag 默认值） | `ListConf` / `RecommendConf`；**`default=20` 与 `default=50` 是两个独立常量** | ✅ |
+| 5 | `rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` | **无 Go 对应物** | ⚠️ **表达层**：刻意为空，只建立自动配置排序边（`after=DataSource`、`before=MybatisPlus`），**不注册任何 bean** ⇒ 无行为影响 | ✅ |
+| 6 | `rpc/domain/FollowRelationEntity.java` | `internal/model/data_model.go` `FollowRelation` | `@TableName("follow_relation")`；主键 / `autoCreateTime` 的差异已在 DDL 节说明 | ✅ |
+| 7 | `rpc/domain/BlockRelationEntity.java` | `internal/model/data_model.go` `BlockRelation` | **两张表刻意不复用同一个 Entity**（Go 侧也是两个 struct + 两个 `TableName()`） | ✅ |
+| 8 | `rpc/mapper/FollowRelationMapper.java` | `internal/model/follow.go` 的 follow 查询 | 过滤列 / 投影列 | ✅ |
+| 9 | `rpc/mapper/BlockRelationMapper.java` | `internal/model/follow.go` 的 block 查询 | 过滤列 / 投影列 | ✅ |
+| 10 | `rpc/mapper/GoStyleLimitOffset.java` | `internal/model/follow.go:79-87` 等 **6 处** | **条件拼接**：`offset>0` / `limit>0` 才出现 LIMIT/OFFSET | ✅ |
+| 11 | `rpc/metrics/FollowRpcMetrics.java` | `internal/metrics/metrics.go` | 4 写方法 2 指标 / 4 读方法 1 指标；**直方图桶**（DRIFT-007） | ✅ |
+| 12 | `rpc/service/FollowBlockTransactionService.java` | `internal/model/follow.go:33-54` `CreateBlockAndCleanup` | 插 block + 双向删 follow **单事务**（独立 Bean，避开 `@Transactional` self-invocation 静默失效） | ✅ |
+| 13 | `rpc/service/FollowDomainService.java` | `internal/logic/{follow,unfollow,block,unblock}logic.go` | 校验分支、存在性校验、动作方法 | ✅ |
+| 14 | `rpc/service/FollowRecommendationService.java` | `internal/logic/getrecommendationslogic.go` | 推荐算法 6 条硬语义（提前返回/三重过滤/expanded 防环/末层不展开/升序/offset 越界返空） | ✅ |
+| 15 | `rpc/service/FollowRpcSupport.java` | `internal/logic/helper.go` | 校验（5003/5201）；列表归一化三段序（offset→limit→截断） | ✅ |
+| 16 | `rpc/service/FollowUserExistenceService.java` | `internal/logic/helper.go:81-94` `ensureUserExists` | 三分支（5101/5001/5101） | ✅ |
+| 17 | `rpc/service/impl/FollowServiceGrpcImpl.java` | `internal/server/followserviceserver.go:26-64` | 8 个 RPC 方法与返回类型逐条一致 | ✅ |
+| 18 | `common/errmsg/FollowErrorCode.java` | `service/follow/common/errmsg.go` | 错误码常量表 + 顺序 | ✅ |
+| 19 | `common/errmsg/FollowErrorMessages.java` | 同上 | 文案表 + 顺序 | ✅ |
+| 20 | `common/errmsg/FollowCodeError.java` | 同上 | Go `CodeError` 的承载（code + msg） | ✅ |
+| 21 | `common/errmsg/FollowGrpcError.java` | 同上 + go-zero `zrpc/internal/codes` | gRPC 码 ↔ 业务码的**三段转换** | ✅ |
+
+**Go 侧其余 5 个文件的落点**（未单列进上表，因为它们不是「一对一对应某个 Java 类」）：
+
+| Go 文件 | 落点 | 说明 |
+|---|---|---|
+| `followservice/followservice.go` | [`proto.md`](./proto.md) ＋ api 侧的 `client/FollowRpcClient.java`（**见 [`api.md` 行 #6](./api.md)，不是本表的 #6**） | **goctl 生成的 client 包装层**（`FollowService` interface + `NewFollowService`）⇒ 对应 RAG 的 `follow-proto` 生成 stub + api 侧 `FollowRpcClient`；**生成物，非手写语义**。⚠️ 它虽然**物理位置**在 `follow/rpc/` 目录下，但**语义上是给 api 侧调 rpc 用的客户端**，不是 rpc 服务端的一部分 ⇒ 不算 rpc 模块的对应物 |
+| `internal/model/db.go` | `follow-rpc/src/main/resources/application.yml`（datasource 段）＋ `db/migration/V1,V2` | **建库与连接参数**（此前只在本文件 DDL 段被顺带提及，**未进索引** ⇒ 2026-10-24 复核补录）：DSN 的 `sslmode=`（← Go 的 `Mode` 字段）＋ **硬编码 `TimeZone=Asia/Shanghai`**（会话时区，影响 `timestamptz` 读出值）；`SetMaxIdleConns(10)` / `SetMaxOpenConns(100)` ⇒ RAG 侧 `hikari.minimum-idle:10` / `maximum-pool-size:100`；`AutoMigrate(&FollowRelation{}, &BlockRelation{})` ⇒ RAG 侧 **Flyway `V1/V2` + 独立账本 `flyway_schema_history_follow`** |
+| `internal/model/vars.go` | **无对应物（有意不复制）** | Go 侧一个**无消费者的死变量** `ErrorNotFound`（`errors.New("record not found")`）⇒ RAG 侧不复制死代码 |
+| `pb/follow.pb.go` / `pb/follow_grpc.pb.go` | [`proto.md`](./proto.md) | **protoc 生成物**；行为层的对照在 `.proto` 源文件层完成（逐行 diff 0 差异） |
+
+> ⚠️ **2026-10-24 复核订正**：本表此前**误把 Go `api/internal/handler/follow/` 下 8 个 handler 算进 rpc 侧**，
+> 且引用的「表 #5 `controller/FollowController.java`」是 **`api.md` 的行号、本表无此行** ⇒ 跨文档串行号。
+> 根因：8 个 handler 物理上属于 **Go `follow/api`**（HTTP 层），**已在 [`api.md` 行 #5](./api.md) 单独列出**。
+> ⇒ 本表改为只收 rpc 侧真实剩余的 5 个文件（`followservice.go` / `db.go` / `vars.go` / `pb`×2），
+> 账目因此对上：**行 #1–#21 覆盖 17 个 Go 文件**（16 个 rpc 侧 + `common/errmsg.go`）**+ 本表 5 个 = 22
+> = Go `follow/rpc` 21 + `follow/common` 1**（`find` 实测，非估算）。
+
 ## 证据强度
 
 | 项 | 强度 |
 |---|---|
-| 源码逐条对照（21 个 Go 文件 ↔ 17 个 Java 文件） | ✅ 双向静态 |
+| 源码逐条对照（**22 个 Go 文件 ↔ 21 个 Java 文件**） | ✅ 双向静态（**逐文件索引见上节，可 grep 自证**） |
 | 真启动（`java -jar` 真 PG + 真 Nacos） | ✅ **真启动**，非 test classpath |
 | DDL vs GORM 产物 | ✅ **双侧真产物逐行对比** |
 | gRPC 行为 | ✅ **双侧活体对拍**（Go follow-rpc 与 RAG follow-rpc 同跑，52/52 逐字节一致） |
-| 指标口径 | ⚠️ **未对拍**（Prometheus 指标名/label 已逐条对照，数值未双侧比） |
+| 指标口径 | ⚠️ **无法对拍**（Go 侧抓到 127 行 `follow_rpc_*`；**RAG 侧零抓取出口** ⇒ 取不到值可比）⇒ 已登记 **DRIFT-FOLLOW-006** |
 
 ## 对拍环境（可复现）
 
@@ -347,8 +419,21 @@ threading.GoSafe(func() {
 5. **跨域派单（5 处同款缺口）**：`favorite-rpc`(16062) / `message-rpc`(16067) / `like-rpc`(9098) /
    `user-user-rpc`(9094) / `user-admin-rpc`(9097) —— Go 有 DevServer、RAG 零出口。
    ⇒ 连同端口规划一起交主会话（本域不得改域外文件）。
-6. **新增全仓门禁**（2026-10-24，commit `d50750e`）：
-   `tools/difftest/check-grpc-runtime-classpath.py` ——
-   守住「`grpc-inprocess` 不得是 test scope」与「`discovery:` 必须三斜杠」两类
-   **编译期看不出、测试期测不到、但能让服务起不来**的缺陷；
-   域外已知的 13 处登记在 `tools/difftest/baselines/grpc-runtime-classpath.txt`。
+6. 🔴 **共享索引已过时 ⇒ 交主会话更新（本工作树不得改共享文件）** ——
+   `AGENTS.md:32` 的域表仍写「`comment`/`favorite`/`follow`/`task` **14 个组件全部零台账**」，
+   `docs/DRIFT/_INDEX.md:32` 仍写 follow「**仅 proto 层**」「14 个组件零台账、对照尚未开始」，
+   `docs/DRIFT/_INDEX.md:85` 仍把 follow 算作「仅 proto 层」。
+   ⇒ **与事实不符**（2026-10-24 实测：follow 域 4 个组件全部完成组件级对照，
+   9 条 DRIFT + 15 条 PITFALL + 逐文件索引）⇒ 需主会话在合并时统一刷新这三处。
+   ⚠️ `tools/drift-move.py verify` 另报 4 处缺失，**全在其它域**
+   （`like/rpc.md`、`message/rpc.md`、`message/api.md`、`_cross/fix-round-2026-10-23.md`）
+   ⇒ **follow 域 4 份 DRIFT 台账本身无缺失**，域外那 4 处同样交主会话。
+7. **新增全仓门禁 + 本域守门测试**（2026-10-24，commit `d50750e`）：
+   - 门禁脚本 `tools/difftest/check-grpc-runtime-classpath.py` ——
+     守住「`grpc-inprocess` 不得是 test scope」与「`discovery:` 必须三斜杠」两类
+     **编译期看不出、测试期测不到、但能让服务起不来**的缺陷；
+     域外已知的 13 处登记在 `tools/difftest/baselines/grpc-runtime-classpath.txt`。
+   - 守门测试 `FollowRpcProductionAddressTest` ——
+     把生产地址喂给 **devh 真正的消费点**并断言两斜杠写法被拒（详见 DRIFT-003 节）。
+     ⇒ **门禁脚本管「源码写法」，守门测试管「运行时能不能被消费」**，两者互补、缺一不可。
+     ✅ **2026-10-24 复跑**：`Tests run: 3, Failures: 0, Errors: 0`（`BUILD SUCCESS`）。

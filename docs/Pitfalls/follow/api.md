@@ -347,3 +347,54 @@ true ⇒ 并集；false ⇒ **`_bucket` 根本不产生**）。
    应该早点把「做不到」这件事说清楚，而不是埋头改桶。
    ⇒ **手段与目标要对齐**：目标若是「`histogram_quantile()` 两侧可比」，
    那数值口径就够了，**不需要**为它付出脱离 Micrometer 抽象的代价。
+
+---
+
+## PITFALL-FOLLOW-016 🔴 对拍**装置**自身会骗人：端口撞车 / 时钟跳变 / 启动时序 / 端口未释放
+
+**症状一：单测红了，但代码没动**
+
+```
+FollowGrpcInterceptorWiringTest » ContainerLaunch
+  Container startup failed for image postgres:16-alpine
+  → failed to bind host port 0.0.0.0:56583/tcp: address already in use
+```
+
+⇒ 镜像在本地、代码没改 ⇒ **重跑一次即过**（实测：第 1 次重试 `EXIT=0`）
+⇒ 这是 **Testcontainers 随机端口与宿主已占端口撞车**，**不是代码缺陷**。
+
+**症状二：JWT「突然过期」**
+
+⇒ 本轮 07:13 签的 token，07:19 就 401 了 ⇒ 查 `exp` 发现
+**系统时钟从 07:23 跳到了 18:00（≈10.5 小时）**（机器挂起/唤醒或时间同步事件）
+⇒ **所有基于时间的判据同时失效**：JWT 的 `exp`、etcd 的租约、
+gRPC 连接的 keepalive、Nacos 的实例心跳。
+
+**症状三：「下游找不到」被误判成漂移**
+
+| 场景 | 表面现象 | 真相 |
+|---|---|---|
+| RAG api 启动**早于** follow-rpc 注册进 Nacos | `1015 service busy` | 通道还没发现到实例 ⇒ **装置时序问题** |
+| Go api 启动**早于** etcd 里有 `follow.rpc/` 键 | `produced zero addresses` | 同上（见 PITFALL-FOLLOW-012） |
+
+**症状四：重启后新进程起不来**
+
+```
+java.net.BindException: Address already in use
+```
+
+⇒ 老进程被 `kill` 了，但 **Nacos 优雅关停 10s + Tomcat 优雅关停**还没结束 ⇒ 端口没释放
+⇒ 必须**轮询等端口真正空闲**再启新进程（`lsof -iTCP:<port> -sTCP:LISTEN` 为空）。
+
+**教训**
+
+1. ⚠️ **失败先分三类再动手**：**代码缺陷** / **装置缺陷** / **环境缺陷**（时钟、端口、资源）。
+   本轮症状一、二、三、四**全是后两类** —— 只有分清了，才不会去「修」不该修的地方。
+2. ⚠️ **装置必须能自证**：每轮对拍**开始前**先单侧打一发，确认响应的**形态**符合预期
+   （业务 200？200+1015？401？），不对就**先修装置**、再谈结论。
+   ⇒ 这是 PITFALL-FOLLOW-011 的延伸：**装置不对 ⇒ 结论必错**。
+3. ⚠️ **长任务要防时钟跳变**：挂起/唤醒后所有时间相关判据作废
+   ⇒ 重跑前先 `date` 看一眼；token、租约、窗口、TTL 全部重签/重建。
+4. ⚠️ **「进程被杀」≠「端口已释放」** ⇒ 重启脚本里必须有「等端口空闲」的轮询。
+5. ⚠️ **测试红了先看是不是 flake**：Testcontainers / 端口 / 资源类报错，
+   **重跑一次再判断**；只有「重跑仍红」才当作代码缺陷去查。

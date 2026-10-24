@@ -425,11 +425,53 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 且 `le` 渲染问题**依然存在**（收益只有「桶数对齐 + 去掉 `_max`」）。
 ⇒ **本轮未改**（用户 2026-10-24 未拍板）。
 
+> **🧾 第二轮复核（2026-10-24 · 最全性）**：补录「逐文件对照索引」——
+> 此前「源码逐条对照（24 个 Go ↔ 27 个 Java）」这条断言**无法从台账里核对**
+> （**11 个类从未出现过**，含 `FollowJwtAuthInterceptor`、`FollowApiProperties`、
+> `FollowGoStyleCoercion`、2 个入参 DTO、`AbstractFollowApiService` 及 6 个业务 Service）
+> ⇒ 现每个源文件都有落点；**实测覆盖率：Java 侧 27/27、Go 侧 24/24（另 4 类落在通配/生成物/死代码说明里）**。
 > **🧾 台账 ↔ 代码复核（2026-10-24）**：本文件的每条状态断言已逐条回代码/真源核对 ——
 > 「✅ 已修」5 条（001 / 005 / 007 / 009 + OPEN-001）**逐条在代码里坐实**；
 > 「🔴 未修」2 条（006/008）**仍然成立**；
 > 约 25 条 `file:line` 引用（Go 侧 / go-zero 侧 / RAG 侧）**逐条命中**；
 > 复核中发现 5 处表述偏差已当场订正（对拍条数、文件计数、指标数值对拍状态等）。
+
+## 逐文件对照索引（27 个 Java ↔ 24 个 Go，**全量无遗漏**）
+
+> ⚠️ 2026-10-24 复核补录：此前台账只列了「承重」文件，
+> 「源码逐条对照（24 个 Go 文件 ↔ 27 个 Java 文件）」这条断言**无法从台账里核对**
+> （**11 个类从未出现过**）⇒ 现补全索引，**每个源文件都有落点**。
+> 结论列的 ✅ 表示「该文件的行为已在双侧对照中核过」。
+
+| # | RAG 源文件（follow-api，27） | Go 对应物（follow/api，24） | 承重点 | 结论 |
+|---|---|---|---|---|
+| 1 | `FollowApiApplication.java` | `followcenter.go` | main 的 8 件事逐条对应 | ✅ |
+| 2 | `config/FollowApiProperties.java` | `internal/config/config.go`（`UserAuth` 段） | `accessExpire` 本模块不读（Go 同样不读） | ✅ |
+| 3 | `config/FollowGoStyleCoercion.java` | `internal/types/types.go` + go-zero `core/mapping` | `,string` 强转（字符串/数字等价） | ✅ |
+| 4 | `config/WebMvcConfig.java` | `internal/handler/routes.go` | **JWT 在外、黑名单在内**；8 端点全要 JWT | ✅ |
+| 5 | `controller/FollowController.java` | `internal/handler/follow/*handler.go`（8 个） | 8 路由方法 + 路径逐条一致 | ✅ |
+| 6 | `client/FollowRpcClient.java` | `internal/svc/servicecontext.go` + `zrpc.MustNewClient` | 无 retry；熔断默认开；**客户端超时 2s**（DRIFT-009） | ✅ |
+| 7 | `dto/FollowListReq.java` | `internal/types/types.go` `FollowListReq` | 三字段 optional；offset 类型不匹配被拒 | ✅ |
+| 8 | `dto/RelationActionReq.java` | `internal/types/types.go` `RelationActionReq` | `target_id` **不校验 >0**（Go 同样不校验） | ✅ |
+| 9 | `dto/FollowUserListResp.java` | `internal/types/types.go` `FollowUserListResp` | **空 ⇒ `null`**（DRIFT-001） | ✅ |
+| 10 | `dto/RelationActionResp.java` | `internal/types/types.go` `RelationActionResp` | 单字段 | ✅ |
+| 11 | `dto/RecommendListResp.java` | `internal/types/types.go` `RecommendListResp` | 单字段 | ✅ |
+| 12 | `dto/RecommendUser.java` | `internal/types/types.go` `RecommendUser` | **字段顺序** `target_id` 在前（DRIFT-005） | ✅ |
+| 13 | `interceptor/FollowJwtAuthInterceptor.java` | `rest/handler/authhandler.go` + `rest/token/tokenparser.go` | 验签失败 = **401 + 空 body**；`handler instanceof HandlerMethod` ⇒ 404 不被鉴权遮蔽；Bearer 前缀大小写不敏感；jjwt ≥32 字节 vs Go 不校验长度 | ✅ |
+| 14 | `interceptor/FollowBlacklistInterceptor.java` | `internal/middleware/checkblacklistmiddleware.go` | key 前缀 `user:jwt_blacklist:`；fail-open；401 body 无 `data` | ✅ |
+| 15 | `advice/GlobalExceptionHandler.java` | `followcenter.go` `httpx.SetErrorHandler` | 业务错误 = **HTTP 200 + envelope**；415 分支实测不可达（OPEN-001） | ✅ |
+| 16 | `advice/GlobalResponseAdvice.java` | `followcenter.go` `httpx.SetOkHandler` | 成功 = `{code:200,msg:"OK",data:<v>}` | ✅ |
+| 17 | `metrics/FollowApiMetrics.java` | `internal/metrics/metrics.go` | 3 counter + 1 histogram；label 名一致；**直方图桶**（DRIFT-007） | ✅ |
+| 18 | `service/FollowApiSupport.java` | `internal/logic/follow/helper.go` | `extractUserID` 五种类型；`resolveUserID` 回落 | ✅ |
+| 19 | `service/AbstractFollowApiService.java` | 8 个 logic 共同的 `defer metrics.ObserveRequest` 骨架 | 计时 + 成败计数；**reject 埋点在 return 之前**（顺序不可颠倒） | ✅ |
+| 20 | `service/FollowService.java` | `internal/logic/follow/followlogic.go` | 拉黑检查（5202）；错误码映射 | ✅ |
+| 21 | `service/UnfollowService.java` | `internal/logic/follow/unfollowlogic.go` | **不**校验存在性 | ✅ |
+| 22 | `service/BlockService.java` | `internal/logic/follow/blocklogic.go` | 插 block + 双向删 follow | ✅ |
+| 23 | `service/UnblockService.java` | `internal/logic/follow/unblocklogic.go` | **不**校验存在性 | ✅ |
+| 24 | `service/GetFollowListService.java` | `internal/logic/follow/getfollowlistlogic.go` | 列表归一化三段序 | ✅ |
+| 25 | `service/GetFollowerListService.java` | `internal/logic/follow/getfollowerlistlogic.go` | 列表归一化三段序 | ✅ |
+| 26 | `service/GetBlockListService.java` | `internal/logic/follow/getblocklistlogic.go` | **归属校验**（只能查自己） | ✅ |
+| 27 | `service/GetRecommendationsService.java` | `internal/logic/follow/getrecommendationslogic.go` | **归属校验** + 推荐算法 6 条硬语义 | ✅ |
 
 ## 证据强度
 
@@ -498,11 +540,13 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
    **按 `le` 字符串精确匹配的查询两侧不等价** ⇒ 建议改数值口径，而不是为它改客户端库。
 4. **DRIFT-FOLLOW-006（follow-rpc 指标无出口）：用户 2026-10-24 定 ⇒ 本轮不落地**，
    转「**全仓 rpc 层统一方案**」交主会话拍板（调查结论见 `docs/DRIFT/follow/rpc.md`）。
-5. `follow-api` **没有 `spring-boot-maven-plugin`** ⇒ 打不出可执行 fat jar，
+5. 🔴 **共享索引已过时 ⇒ 交主会话更新**（`AGENTS.md:32` 与 `docs/DRIFT/_INDEX.md:32,85`
+   仍写 follow「零台账 / 仅 proto 层」）—— 详见 [`rpc.md` 的待办 6](./rpc.md)。
+6. `follow-api` **没有 `spring-boot-maven-plugin`** ⇒ 打不出可执行 fat jar，
    只能用 `java -cp <runtime classpath> <MainClass>` 启动。
    与 `article-api` / `comment-api` / `hot-api` / `like-api` / `message-api` / `task-api` 同款
    （只有 `favorite-api` 有）⇒ 属**打包形态**问题，不是 Go↔RAG 语义漂移，**未改动**。
-6. ⚠️ **故障注入装置应从 `/tmp` 提升为仓库资产** —— 本轮 U3/U4 的结论**反转了两次**，
+7. ⚠️ **故障注入装置应从 `/tmp` 提升为仓库资产** —— 本轮 U3/U4 的结论**反转了两次**，
    根因都是**装置不对**（黑洞不完成 HTTP/2 握手 / etcd 前缀下多个键 / 探针固定 `-o` 文件）。
    ⇒ 建议把下面三个脚本固化进 `tools/difftest/fault-harness/`（**本轮未做**，
    因为它们是**跨域**资产，放进 `tools/` 需主会话拍板）：
