@@ -2609,3 +2609,121 @@ Redis 不可达的实际表现由 **3s 的命令超时**主导，5s 的连接超
 > ⚠️ `getConnection` 耗时 **0ms** 这一个数字，就证实了「**Lettuce 的连接是异步的**」
 > （`getConnection()` 立刻返回，真正握手在后台）⇒ 命令超时会先于连接超时到期。
 > ⇒ 这也是第一版测试实测出 3266ms（= `timeout: 3s`）的原因。
+
+---
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- 2026-10-24 完整性复核轮：「台账是否最新、最全」体检 —— 新增 DRIFT-ARPC-009 -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+# 2026-10-24 完整性复核轮（admin 域 · 「台账是否最新、最全」体检）
+
+> **核对日期**：2026-10-24　**分支**：`align/users-admin`
+> 与 `api.md` 的同名章节配对阅读。本轮**发现 1 处此前完全缺失的维度**（gRPC 拦截器链）。
+
+## 1. 🔴 新增 DRIFT-ARPC-009 · admin-rpc 的 **gRPC 服务端拦截器链**缺 6 层（Go zrpc 框架级自带 vs RAG 只有 1 个）
+
+- **Component**：admin-rpc / 全部 13 个 RPC 的**服务端**入口
+- **Category**：Reliability / Resilience / Error Mapping
+- **Classification**：OBSERVABLE DIFFERENCE　**Risk**：**MEDIUM-HIGH**（最严重的一条是 panic 的 status/业务码不同）
+- **⚠️ 这是本轮才发现的维度**：此前 8 条 ARPC 全部聚焦「**单个 RPC 的语义**」，
+  **没有一条检查过「服务端拦截器链」** ⇒ 属于**审计盲区**，不是「已审过没问题」。
+
+### 1.1 Go 侧：zrpc **框架级**自带 7 个 unary 拦截器
+
+**装配点**：`zrpc/server.go:143-170` `setupUnaryInterceptors`（按顺序 `AddUnaryInterceptors`）
+＋ `zrpc/internal/config.go:57-60`（`AddUnaryInterceptors` 是 **append 到尾部** ⇒ **先注册的最外层**）
+＋ `service/user/admin/rpc/admin.go:33,43`。
+
+| # | 拦截器 | 装不装 | 依据 |
+|---|---|---|---|
+| 1 | `UnaryTracingInterceptor` | ✅ **装** | `Middlewares.Trace` 默认 `true`（`zrpc/internal/config.go:20`） |
+| 2 | `UnaryRecoverInterceptor` | ✅ **装** | `Middlewares.Recover` 默认 `true`（`:21`） |
+| 3 | `UnaryStatInterceptor` | ✅ **装** | `Middlewares.Stat` 默认 `true`（`:22`） |
+| 4 | `UnaryPrometheusInterceptor` | ✅ **装** | `Middlewares.Prometheus` 默认 `true`（`:24`） |
+| 5 | `UnaryBreakerInterceptor` | ✅ **装** | `Middlewares.Breaker` 默认 `true`（`:25`） |
+| 6 | `UnarySheddingInterceptor` | ✅ **装** | `CpuThreshold` 默认 **900** > 0（`zrpc/config.go:47`）⇒ 自适应降载，CPU 阈值 90% |
+| 7 | `UnaryTimeoutInterceptor` | ❌ **不装** | `admin.go:33` `DisableNativeRpcTimeout(&c.RpcServerConf)` 把 `conf.Timeout` 置 **0**（`observability/rpc.go:19-23`）⇒ `if c.Timeout > 0` 为假 |
+| — | `UnaryAuthorizeInterceptor` | ❌ **不装** | `Auth bool json:",optional"` 默认 false（`zrpc/config.go:42`） |
+| 8 | `observability.NewUnaryServerInterceptor(2000ms, slowThreshold)` | ✅ **装（最内层）** | `admin.go:43`（超时由它接管，见第 7 行） |
+
+⇒ **Go 侧最终链（外→内）**：
+`Tracing → Recover → Stat → Prometheus → Breaker → Shedding → observability(2000ms) → handler`
+= **7 个拦截器**。
+
+### 1.2 RAG 侧：**只有 1 个**
+
+```java
+// AdminRpcApplication.java:97-101
+public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryServerInterceptor) {
+    return server -> server.intercept(rpcUnaryServerInterceptor);
+}
+```
+
+- 唯一那个是 `RpcInterceptor.newUnaryServerInterceptor(rpcTimeout, slowThreshold)`（`RpcServerInterceptorFactory.java:41-46`）⇒ **超时 + 观测**合一。
+- `service/users/admin/admin-rpc/src/main/` 对 `com.rag.common.protection` **零引用**（grep 零命中）
+  ⇒ **recover / breaker / shedding 三层全无**；
+- `recover` grep 零命中、admin-rpc 的 `application.yml` 关掉了 `management.endpoint.prometheus` ⇒ **stat / prometheus 两层全无**。
+
+⇒ **缺 6 层：Tracing / Recover / Stat / Prometheus / Breaker / Shedding**。
+
+### 1.3 最严重的一条：**panic 时 gRPC status 与业务码都不同**（端到端可观察）
+
+| | Go | RAG |
+|---|---|---|
+| 谁兜底 panic | `UnaryRecoverInterceptor`（`zrpc/internal/serverinterceptors/recoverinterceptor.go:24-31`） | **无显式 recover 层** ⇒ 落到 grpc-java 框架默认 |
+| 兜底后的 status | **`codes.Internal`（13）** + `"panic: <值>"`（`recoverinterceptor.go:39-42`：`status.Errorf(codes.Internal, "panic: %v", r)`） | **`Status.UNKNOWN`（2）** + `"Application error processing RPC"`（grpc-java `grpc-core-1.63.0` `io/grpc/internal/ServerImpl.java:811-814` `internalClose` ⇒ `Status.UNKNOWN.withDescription(...)`；`:858-865` catch 后**再 `throw t` 重抛**） |
+| 服务端日志 | `logc.Errorf(ctx, "%+v\n\n%s", r, debug.Stack())` ⇒ **完整堆栈** | 依赖 grpc-java 的 uncaught handler ⇒ **无 Go 式堆栈日志** |
+| **admin-api 渲染出的业务码** | `codes.Internal` ⇒ `getselflogic.go:57-58` `case codes.Internal: return nil, errmsg.ErrorServerCommon` ⇒ **5001** | `Status.UNKNOWN` **不在** `mapRPCStatusToCode`（`GlobalExceptionHandler.java:83-91`）的任何分支 ⇒ 落 **default** ⇒ **`CODE_SERVER_BUSY` = 1015** |
+
+⇒ **同一个 panic，两侧 HTTP 业务码一个 5001、一个 1015。**
+⚠️ 这**不是** `DRIFT-ADMINAPI-008` 已记的那 4 种 code（`ALREADY_EXISTS`/`PERMISSION_DENIED`/`UNAUTHENTICATED`/`INVALID_ARGUMENT`）——
+`UNKNOWN` 是**第 5 种**，而且恰恰是 **panic 路径上真实会出现的那个**。
+
+### 1.4 其余 5 层缺失的影响
+
+| 层 | Go 行为 | RAG 现状 |
+|---|---|---|
+| **Breaker** | 熔断（`Middlewares.Breaker` 默认 true） | 无 ⇒ 慢下游不熔断，请求持续堆积 |
+| **Shedding** | CPU > 90% 自适应降载 | 无 ⇒ 无降载保护 |
+| **Stat** | go-zero stat 日志（慢请求阈值默认 **500ms**，`zrpc/internal/serverinterceptors/statinterceptor.go`） | 无 |
+| **Prometheus** | gRPC server 侧指标 | admin-rpc 的 `application.yml` 关掉了 `management.endpoint.prometheus` ⇒ 无 HTTP 抓取口 |
+| **Tracing** | go-zero `UnaryTracingInterceptor` | RAG 侧有 span（`RpcInterceptor` + 8 处 `AdminSpans.traced`）⇒ **部分覆盖**，但**不是同一层**，覆盖度未实测 |
+
+### 1.5 处置：`align/message` 分支**已修**（未合并），本域**不重复改**
+
+- `align/message` 给 `AdminRpcApplication` 加了 `@Import(GoStyleProtectionConfiguration.class)`，
+  并把 `rpcInterceptorConfigurer` 改成
+  `server.intercept(GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, protectionProps))`
+  ⇒ 链 = **recover → breaker → shedding → 业务观测拦截器**。
+- ⚠️ **该 recover 是 Go 兼容的**：`GoStyleRecoverInterceptor.closeAsPanic` 用
+  `Status.INTERNAL` + `PANIC_DESCRIPTION_PREFIX = "panic: "`（`observability/GoStyleRecoverInterceptor.java:71-72,140-145`）
+  ⇒ **合并后 panic 的 status 与业务码都回到 Go 的一侧**（5001）。
+- ⇒ **本域不重复改**（§5.3：工作树只写自己域；`service/common` 是共享模块）
+  ⇒ **合并后本条自动消失**；**合并前本条成立**。
+- ⚠️ **合并时留意**：别的域分支**动了我域的文件**
+  （`align/message` 新增 `service/users/admin/admin-rpc/src/test/.../AdminProtectionChainWiringTest.java`）
+  ⇒ 合并时该文件是**新增**，与本分支无冲突；但其结论（链是否真挂上）**属 admin-rpc**，已记在本条。
+
+### 1.6 Evidence strength
+
+`静态源码·双侧`（Go 侧读了 `zrpc/server.go` / `zrpc/internal/config.go` / `zrpc/config.go` /
+`recoverinterceptor.go` ＋ **配置默认值**；RAG 侧读了 `AdminRpcApplication.java` /
+`RpcServerInterceptorFactory.java` / `RpcInterceptor.java` / `GlobalExceptionHandler.java`；
+grpc-java 侧读了 `grpc-core-1.63.0` 的 `io/grpc/internal/ServerImpl.java` 源码）
+⚠️ **未做活体验证**（未构造 panic、未实测 5001 vs 1015）⇒ **待实测**。
+
+## 2. 本轮在 rpc.md 侧的其他结论
+
+| 项 | 结论 |
+|---|---|
+| 13 个 gRPC RPC 的**逐个语义** | ✅ 覆盖完整（§4 Equivalence Matrix 逐条） |
+| `admin-proto` 13 rpc | ✅ 逐字节一致（`check-proto-static.sh` EXIT=0，`rpc.md:1066`） |
+| 共用 DDL（`03`/`04`） | ✅ 已覆盖（ARPC-004 等） |
+| 表名 `admins` vs `admin_admin` | ✅ **已记录**（`rpc.md:1289` + `Intentional_Deviations/users/admin/_shared.md:22`）——族内约定，**非缺陷**；且标注「两侧物理上不共用 schema」 |
+| 8 条 ARPC + 3 条 H-* | ✅ 复核通过（H-2 的 `.last("FOR UPDATE")` 在 **119** 行，台账原文 `116-120` **范围正确**） |
+| 跨分支影响 | ⚠️ `align/message` 改了 `AdminRpcApplication.java`（本条）+ `HttpMiddleware.java`（见 `api.md` 的 ADMINAPI-007）；`align/users-user` 改了 `JwtUtil.java`（**N-5 的 padding 未变**，结论仍成立，但签名档引用的代码已变 ⇒ 合并后应复核一次） |
+
+## 3. 本轮改动清单（rpc.md 侧）
+
+- **零代码改动** ⇒ 不需要重跑测试门禁（上次全量门禁：admin-rpc **99/0/0/0**、`skipped=0`）。

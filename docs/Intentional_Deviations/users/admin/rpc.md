@@ -9,7 +9,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **组件** | `admin-rpc`（台账：[`DRIFT/users/admin/rpc.md`](../../DRIFT/users/admin/rpc.md) DRIFT-ARPC-003） |
+| **组件** | `admin-rpc`（台账：[`DRIFT/users/admin/rpc.md`](../../../DRIFT/users/admin/rpc.md) DRIFT-ARPC-003） |
 | **Go 行为** | 配置为空时**照常执行**：把空串交给 bcrypt，**成功**并把该用户密码重置成「空串的哈希」⇒ 该用户之后可用**空密码登录** |
 | **RAG 行为** | 空/null 配置 ⇒ 直接抛 `INTERNAL`「密码加密失败」⇒ admin-api 返回 `5001` |
 | **类别** | `AUTHENTICATION SEMANTIC MISMATCH`（**RAG 更严的那一侧**） |
@@ -59,7 +59,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **组件** | `admin-rpc`（台账：[`DRIFT/users/admin/rpc.md`](../../DRIFT/users/admin/rpc.md) DRIFT-ARPC-007） |
+| **组件** | `admin-rpc`（台账：[`DRIFT/users/admin/rpc.md`](../../../DRIFT/users/admin/rpc.md) DRIFT-ARPC-007） |
 | **Go 行为** | admin/rpc 的 **4 个文件、12 处**中文字面量在磁盘上就是**乱码字节**，提交进 git HEAD 的就是乱的 |
 | **RAG 行为** | 同样的 12 个位置吐**正常中文** |
 | **类别** | `SERIALIZATION / ERROR IDENTITY`（**只在 gRPC 直连时可见**） |

@@ -9,7 +9,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **组件** | `admin-api`（台账：[`DRIFT/users/admin/api.md`](../../DRIFT/users/admin/api.md) DRIFT-ADMINAPI-004） |
+| **组件** | `admin-api`（台账：[`DRIFT/users/admin/api.md`](../../../DRIFT/users/admin/api.md) DRIFT-ADMINAPI-004） |
 | **Go 行为** | `{"code":401,"msg":"登录已失效,请重新登陆"}` |
 | **RAG 行为** | `{"code":1006,"msg":"TOKEN已过期","data":null}` |
 | **类别** | `ERROR SEMANTIC / RESPONSE ENVELOPE` |

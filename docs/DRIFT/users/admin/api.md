@@ -345,7 +345,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | M-35 | ALL | 标量强转 / 浮点截断 | number/bool→String **拒**；float→int **拒**（含 `1.0`） | 同（`GoStyleCoercion` 全局生效） | EQUIVALENT | R1 已修；⚠️ Jackson 3 类级 coercion 实测无效 ⇒ 只能全局（`GoStyleCoercion` 类注释「第三个坑」） |
 | M-36 | ALL | 超时时长 | **3000ms**（yaml 未写，来自 `rest/config.go:55` 的 `json:",default=3000"`） | `observability.http-timeout: 3s` | EQUIVALENT | **消费点**：`TimeoutFromMillis(conf.Timeout)`；`application.yml:131-132` |
 | M-37 | ALL | 超时的**包含范围** | 计时器在 Authorize **之后**起算 ⇒ **JWT 验签不计入** | 计时器在 `HttpMiddlewareFilter`(+5) 起算，位于 JWT 拦截器**外层** ⇒ **验签计入** | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-006（**2026-10-24 复核：差异成立**；差异**仅**在 JWT 验签这一段 —— 黑名单 Redis 两侧都计入） |
-| M-38 | ALL | 超时响应 | `503` + `text/plain; charset=utf-8` + `nosniff` + 尾换行 | `503` + `text/plain; charset=utf-8` + 尾换行，**无 nosniff** | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-007（**代码在 `service/common`，非本组件文件**） |
+| M-38 | ALL | 超时响应 | `503` + `text/plain; charset=utf-8` + `nosniff` + 尾换行 | `503` + `text/plain; charset=utf-8` + 尾换行，**无 nosniff** | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-007（**代码在 `service/common`，非本组件文件**）<br>〔**2026-10-24 完整性复核补记 ①**：上表两边写的都是**源码字面量**；**线上字节** Tomcat 会把 `Content-Type` 重渲染成 `text/plain;charset=utf-8`（**分号后无空格**）⇒ 与 Go 的 `text/plain; charset=utf-8`（**有空格**）**逐字节不同**（归一化后相同）。**499/503 都走这条**；400 的同款残差已记在 §UNRESOLVED-002<br>〔**2026-10-24 完整性复核补记 ②**：**nosniff 已被 `align/message` 分支跨域修掉**（`HttpMiddleware.writeTimeoutResponse` 加了 `setHeader("X-Content-Type-Options","nosniff")`）⇒ **未合并前本条仍成立，合并后本条自动消失** —— 见 ADMINAPI-007 的处置栏〕 |
 | M-39 | ALL | 中间件外层顺序 / 遥测面 | 签名无效的请求：**Sea 侧 `markHTTPResult` 观测数据不产生**（`Authorize` 短路 ⇒ 内层中间件不执行）；但 go-zero native `TraceHandler` 在**链首**，**仍产生 OTel server span** | 会产生（401 的观测数据与 span 都产生） | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-006（**2026-10-24 复核：原写「完全不产生 observability span」口径过宽**） |
 | M-40 | 全部外部调用 | Retry | **无** | **无** | EQUIVALENT | 两侧 `application.yml` / `admincenter.yaml` 均无重试配置 |
 | M-41 | 启动 | 下游依赖不可达 | `zrpc.MustNewClient` **启动即失败**（进程不启动） | Nacos + devh 懒连接，**进程能起**、每请求失败 | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-009 |
@@ -669,6 +669,30 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
   影响面是**所有 api 组件**，不是 admin-api 独有。
 - **Evidence strength**：`静态源码·双侧`
 
+> #### ⚠️ 2026-10-24 完整性复核补记：**本条已被别的域分支跨域修掉（未合并）**
+>
+> `align/message` 分支在 `HttpMiddleware.writeTimeoutResponse` 里补了
+> `resp.setHeader("X-Content-Type-Options", "nosniff")`（+ 一段说明为什么 Tomcat 吃掉分号后空格），
+> 并把它纳入 `exp-http-headers-message.sh` 的对拍。
+> ⇒ **合并后本条的 nosniff 部分自动消失**（`service/common` 是共享模块，改一处所有 api 组件受益）。
+>
+> ⇒ **处置纪律**：
+> 1. **合并前**：本条仍成立（RAG 侧确实缺 nosniff）；
+> 2. **合并后**：**不要再当新回归去「修」**，也不要从台账里删 —— 应当改成「已由 `align/message` 跨域修复」并标注提交；
+> 3. **本域不重复改**（§5.3：工作树只写自己域）⇒ 本轮**零代码改动**。
+>
+> #### ⚠️ 同批复记：**503/499 的 `Content-Type` 还有一条「空格残差」，本条原先没记**
+>
+> Go 的 `http.Error` 逐字写死 `text/plain; charset=utf-8`（**分号后有空格**）；
+> RAG 的 `writeTimeoutResponse` 源码写的也是同一个字符串（**逐字相同**），
+> 但 **Tomcat 会把它重渲染成 `text/plain;charset=utf-8`（无空格）** ⇒ **线上字节不同**。
+> ⇒ 400 的同款残差已在 §UNRESOLVED-002 实测并记录（归一化后一致、逐字节不一致），
+> **503/499 这条本轮补上**（证据：同一 Tomcat 的同一条重渲染路径 + `align/message` 分支在
+> **同一个 `writeTimeoutResponse` 方法**上的实测结论）。
+> ⚠️ **归类**：这是**框架限制**（Tomcat 的 `setContentType` 会解析成 `MediaType` 再序列化），
+> **不是 RAG 写错了** ⇒ 与 Go 的 `text/plain; charset=utf-8` **无法逐字节一致**，
+> 任何写法都产出不了那个空格 ⇒ 归「框架限制」，**不必修**。
+
 ---
 
 ### DRIFT-ADMINAPI-008 · `getself` 的 gRPC 兜底映射与 Go 的 per-endpoint switch 不一致
@@ -688,6 +712,19 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **Evidence strength**：`静态源码·双侧`
 - **需合并判读**：admin-rpc 的 `GetSelf` 实际会抛哪几种 code（§9 UNRESOLVED-001）。
   **在 admin-rpc 侧未确认前不得改通用表**（改通用表会波及 12 个已对齐的端点）。
+
+> #### ⚠️ 2026-10-24 完整性复核补记：本条之外还有**第 5 种** code，且它是 panic 路径上真实会出现的
+>
+> 上文列的 4 种是**业务异常**路径。**还有 `Status.UNKNOWN`**：
+> admin-rpc **没有 recover 拦截器** ⇒ handler panic 时由 grpc-java 兜底，
+> 产出的是 **`UNKNOWN` + `"Application error processing RPC"`**（不是 Go 的 `INTERNAL` + `"panic: …"`）
+> ⇒ 落进 `mapRPCStatusToCode` 的 **default** ⇒ **业务码 1015**；
+> 而 Go 侧 `codes.Internal` ⇒ `errmsg.ErrorServerCommon` ⇒ **5001**。
+>
+> ⇒ **同一个 panic，两侧业务码 5001 vs 1015。**
+> ⇒ 完整证据链（含 Go 侧 7 个拦截器 vs RAG 侧 1 个的对照）⇒
+> [`DRIFT-ARPC-009`](./rpc.md)（在 `rpc.md` 的「2026-10-24 完整性复核轮」§1）。
+> ⚠️ `align/message` 分支已修（recover 精确复刻 Go 的 `INTERNAL + "panic: "`）⇒ **合并后自动消失**。
 
 ---
 
@@ -1603,7 +1640,7 @@ RAG 的 admin-api 现在**必须在 admin-rpc ready 之后起**（fail-fast ⇒ 
 | 组 | 条目 | 结论 |
 |---|---|---|
 | ARPC-001~008 | 8 条 | 全部与代码一致（含 `update_time` **6** 处、Go `updateuserlogic.go:105-113` 不 set Success ⇒ RAG 已去掉 `setSuccess(true)`、空 `default-password` 守卫 `:1075-1076`、DDL `extra_info` TEXT + 6 个 `timestamptz`、SchemaInitializer 重放 4 脚本、**RAG 8 处 `AdminSpans.traced(` ↔ Go 8 处 `tracer.Start`**、Go `errmsg.go` 字面量确为乱码、`= 0L` 与 Go 一致） |
-| H-1~H-3 | 3 条 | 独立 Bean + `@Transactional`；`.last("FOR UPDATE")` 实际在 `AdminCreateAtomicService.java:120-123`（台账写 116-120，**行号微偏**，不影响结论）；pom 里 flyway 只剩注释 |
+| H-1~H-3 | 3 条 | 独立 Bean + `@Transactional`；`.last("FOR UPDATE")` 在 `AdminCreateAtomicService.java:119`（台账原文写 `116-120`，**范围正确**，含 119）；pom 里 flyway 只剩注释 |
 | 签字偏离 | 7 条 | 全部一致（SD-01 `claim instanceof Number`、SD-06、SD-07、SD-08 `ERROR_TOKEN_RUNTIME(1006)`、N-1 401 envelope、N-4 `IdentityResolver.claimedUID`、N-5 `padToHmacKeySize`） |
 | 前提不可达 | 3 条 | ADMINAPI-002 / 005 / 008（`getSelf`/`getUser` 找不到抛 `Status.NOT_FOUND`） |
 | 契约 | 2 条 | 黑名单 key 两侧逐字节一致（`admin:jwt_blacklist:<token>`）；proto 13 RPC 逐字节一致（`check-proto-static.sh` EXIT=0） |
@@ -1633,3 +1670,97 @@ RAG 的 admin-api 现在**必须在 admin-rpc ready 之后起**（fail-fast ⇒ 
 ⚠️ 但**上一轮的实现改动**（ADMINAPI-009 v2 等）已有守门网：
 `mvn -o -pl service/users/admin/admin-api,service/users/admin/admin-rpc -am test`
 ⇒ **admin-api 129/0/0/0、admin-rpc 99/0/0/0，skipped=0**（2026-10-24 实测，见上文 §9）。
+
+---
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- 2026-10-24 完整性复核轮：「台账是否最新、最全」体检 -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+# 2026-10-24 完整性复核轮（admin 域 · 「台账是否最新、最全」体检）
+
+> **核对日期**：2026-10-24　**分支**：`align/users-admin`
+> **问题**：「台账是不是当前代码的真实全貌？」
+> ⇒ 分三个维度查：**① 覆盖完整性**（代码里有没有行为点台账没写）
+> **② 时效性**（台账写的「已修/未修」现在还成立吗）
+> **③ 内部一致性**（链接、锚点、行号引用是否还指得对）
+
+## 0. 结论摘要
+
+| 维度 | 结论 |
+|---|---|
+| **① 覆盖完整性** | ✅ HTTP 端点 **13/13**、gRPC RPC **13/13**、共用 DDL（`03`/`04`）、`admin-proto`（13 rpc 逐字节）、7 条签字偏离 —— **全部有记录**。<br>🔴 **但缺一整类维度**：**admin-rpc 的 gRPC 拦截器链**（Go 7 个 vs RAG 1 个）⇒ 已补 **DRIFT-ARPC-009**（见 `rpc.md`） |
+| **② 时效性** | 🔴 **DRIFT-ADMINAPI-007 的 nosniff 已被 `align/message` 分支跨域修掉（未合并）** ⇒ 本条合并后自动消失 ⇒ 已加处置纪律<br>🔴 **M-38 缺一条 charset 空格残差**（503/499 的线上字节与 Go 不同）⇒ 已补<br>🔴 **签字档 3 处链接失效** ⇒ 已修（见 §3） |
+| **③ 内部一致性** | ✅ 行号引用逐条校准（`engine.go:154-155`、`server.go:222-235` 等）<br>🔴 **上一轮复核自己引入了一处误判**（H-2 行号）⇒ 已订正（见 §4） |
+
+## 1. 跨分支影响体检（**合并时会发生什么**）
+
+本域台账的若干断言**依赖共享模块的代码**，而这些共享文件正被别的域分支改动。
+⇒ 逐个查了「别的域分支碰了什么」，结论：
+
+| 共享文件 | 改动方 | 是否影响本域断言 |
+|---|---|---|
+| `service/common/.../observability/HttpMiddleware.java` | `align/message` | 🔴 **影响** —— 补了 `nosniff` ⇒ **ADMINAPI-007 合并后自动消失**（已加处置栏） |
+| `service/common/.../protection/GoStyleCpuSheddingFilter.java` | `align/users-user` | ✅ **不影响** —— 只新增静态辅助方法 `elapsedRtMs`，**`@Order` 未变** ⇒ M-37 / M-39 的 filter 顺序断言仍成立 |
+| `service/users/users-common/.../jwt/JwtUtil.java` | `align/users-user` | ⚠️ **不影响 N-5 的结论** —— 改的是 `signWith` 的实现（`Keys.hmacShaKeyFor` → 显式 `SecretKeySpec(..., "HmacSHA256")` + `SignatureAlgorithm`），**`padToHmacKeySize` 本身未动** ⇒「Go 签的 token 在 RAG 验不过」仍成立。**但**：该改动顺带修掉了「密钥 ≥48 字节时 `header.alg` 漂移到 HS384/HS512」的问题 ⇒ **N-5 签字档引用的代码已变**，合并后应复核一次 |
+| `service/users/users-common/db/01_create_user.sql` | `align/users-user` | ✅ 不影响（属 users/user 域；admin-rpc 只**读** `users_user`） |
+| `service/users/admin/admin-rpc/src/main/.../AdminRpcApplication.java` | `align/message` | 🔴 **影响** —— 给 admin-rpc 补挂熔断/降载链 ⇒ **DRIFT-ARPC-009 合并后自动消失**（详见 `rpc.md`） |
+
+> ⚠️ **另一条需要合并时留意**：别的域分支**动了我域的测试文件**
+> （`align/message` 新增 `service/users/admin/admin-rpc/src/test/.../AdminProtectionChainWiringTest.java`）。
+> ⇒ 合并时该文件**新增**，与本分支无冲突；但**归属上它属于 admin-rpc（我域）**，
+> 其结论（熔断/降载链是否真挂上）**应记进本域台账** ⇒ 本轮已记（`rpc.md` 的 DRIFT-ARPC-009）。
+
+## 2. 判定为「已记录、无需动」的项（避免下轮重复查）
+
+| 项 | 台账位置 |
+|---|---|
+| 表名 `admins`/`admin_invites`（Go）vs `admin_admin`/`admin_invite`（RAG） | `rpc.md:1289` + `Intentional_Deviations/users/admin/_shared.md:22`（**族内约定**，非缺陷；且标注「两侧物理上不共用 schema」） |
+| 400 响应的 `Content-Type` 分号后空格残差 | 本文件 §UNRESOLVED-002 段（**实测**：归一化后一致、逐字节不一致） |
+| 13 个 HTTP 端点 / 13 个 gRPC RPC 逐条覆盖 | §4 Equivalence Matrix |
+| `admin-proto` 13 rpc 逐字节一致 | `_shared.md:164` + `rpc.md:1066`（`check-proto-static.sh` EXIT=0） |
+
+## 3. 本轮修掉的 3 处失效链接（**签字档**）
+
+`docs/Intentional_Deviations/users/admin/{api,rpc}.md` 里指向本域 DRIFT 台账的相对路径**少了一级**：
+
+| 文件 | 原（失效） | 改成 |
+|---|---|---|
+| `Intentional_Deviations/users/admin/api.md` | `../../DRIFT/users/admin/api.md` | `../../../DRIFT/users/admin/api.md` |
+| `Intentional_Deviations/users/admin/rpc.md`（2 处） | `../../DRIFT/users/admin/rpc.md` | `../../../DRIFT/users/admin/rpc.md` |
+
+> 从 `docs/Intentional_Deviations/users/admin/` 出发，`..`→`users/`、`../..`→`Intentional_Deviations/`、
+> `../../..`→`docs/` ⇒ 目标在 **`docs/DRIFT/...`** ⇒ 必须三级。
+> ⚠️ 这类链接**平时点不出来就没人发现** —— 它不影响台账正确性，但会让「顺着签字档找证据」的人扑空。
+
+## 4. 🔴 本轮订正了**上一轮复核自己引入的误判**
+
+上一轮（复核轮）在 §3 的表里写了：
+> 「`.last("FOR UPDATE")` 实际在 `AdminCreateAtomicService.java:120-123`（台账写 116-120，**行号微偏**）」
+
+**这是错的**：`.last("FOR UPDATE")` 在 **119** 行，**落在台账原文 `116-120` 范围内** ⇒ **台账原文是对的**，
+是我的「订正」把一处本来正确的引用改错了。
+
+⇒ **与 P-ADMINAPI-016 同源**：复核时如果预设「台账总该有几条是错的」，就会制造出「假订正」。
+⇒ 本轮已在 §3 的表里改回，并在此留痕（**不静默改掉**）。
+
+## 5. 只报告、不改（**共享文件 / 跨域**，本域无权动）
+
+| # | 事项 | 归属 |
+|---|---|---|
+| 1 | `docs/DRIFT/_INDEX.md` 的证据强度行仍写「`admin-api` 的上限是**静态源码**」⇒ **已过期**：admin-api 已拿到**双侧活体对拍**（§UNRESOLVED-006 关闭，admin 22 步 + 全量 39 步，`unexpected=0`） | **共享索引** |
+| 2 | `docs/DRIFT/_INDEX.md` 记「`admin-proto` **无专属台账文件**」⇒ 事实层已覆盖（`_shared.md` + `rpc.md`），但索引口径与事实层不一致 | **共享索引** |
+| 3 | `AGENTS.md §0` users 行三处出入（`update_time ×5`→**×6**、撤销「`status=0L` 未修」、`extra_info` 标注 users/user 域已改） | **共享文件 `AGENTS.md`** |
+| 4 | `Intentional_Deviations/users/admin/_shared.md` 的 **N-5** 引用的 `JwtUtil` 已被 `align/users-user` 改动（padding 未变，但签名实现变了）⇒ 合并后应复核一次 | **本域**（下轮复核） |
+| 5 | `align/message` 在 `service/common` 补的 nosniff **顺带带出一个新事实**：Tomcat 的 `Content-Type` 重渲染会吃掉分号后空格 ⇒ **所有 api 组件**的 400/499/503 都有这条残差（⇒ 归「框架限制」） | **跨域**（已在 M-38 / ADMINAPI-007 记） |
+
+## 6. 本轮改动清单
+
+| 文件 | 改动 | 性质 |
+|---|---|---|
+| `docs/DRIFT/users/admin/api.md` | M-38 补 charset 残差 + nosniff 处置栏；ADMINAPI-007 补处置栏与残差；§3 表订正 H-2 误判；新增本章节 | 台账 |
+| `docs/DRIFT/users/admin/rpc.md` | 新增 **DRIFT-ARPC-009**（gRPC 拦截器链缺口）+ 完整性复核轮章节 | 台账 |
+| `docs/Intentional_Deviations/users/admin/api.md` / `rpc.md` | 修 3 处失效链接 | 台账 |
+| `docs/Pitfalls/users/admin/api.md` | 追加 **P-ADMINAPI-017**（复核的「假订正」风险） | 踩坑档 |
+
+**零代码改动** ⇒ 不需要重跑测试门禁（上次全量门禁见 §9，admin-api 129/0/0/0、admin-rpc 99/0/0/0）。
