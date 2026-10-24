@@ -38,11 +38,11 @@
 
 | ID | 组件 / operation | 问题 | 状态 | 证据 |
 |---|---|---|---|---|
-| **S-7** | RPC 服务端 · `ListArticles`（作者视角） | `countAuthorView` / `selectAuthorView` 的 `<if test="secondaryTag != null">` 引用了一个**不存在**的参数（`@Param` 名是 `secondaryTagJson`）⇒ MyBatis `BindingException` ⇒ **该接口 100% 报错** | 已改 | **真 PG**：`ArticleTransactionWiringTest:457` 实际调用该方法 |
+| **S-7** | RPC 服务端 · `ListArticles`（作者视角） | `countAuthorView` / `selectAuthorView` 的 `<if test="secondaryTag != null">` 引用了一个**不存在**的参数（`@Param` 名是 `secondaryTagJson`）⇒ MyBatis `BindingException` ⇒ **该接口 100% 报错** | 已改 | **真 PG + 变异验证**（2026-10-24）：`ArticleJsonbResultMapWiringTest#selectAuthorViewReadsJsonb` 真调 MyBatis；把 `<if>` 的参数名改回 `secondaryTag` ⇒ `BindingException` ⇒ **用例转红** |
 | **S-1** | 公开读视图 · `getPublicArticle(incrView=true)` | `@Transactional(readOnly=true)` 包住一条 `UPDATE` ⇒ pgjdbc `BEGIN READ ONLY` ⇒ PG `25006` ⇒ **每次调用必失败** | 已改 | **真 PG + 变异验证**：把注解加回去 ⇒ `25006 cannot execute UPDATE in a read-only transaction`，用例转红（2026-10-23 实测） |
-| **S-2** | RPC 服务端 · `ListArticles`（作者视角） | Go `model/article.go:161-176` 把方向拼接整体放在 `if SortBy != ""` 内 ⇒ `sort_by` 为空时**恒 DESC**；Java 无条件方向 ⇒ 默认调用**整页顺序颠倒** | 已改 | **真 PG**：`ArticleTransactionWiringTest:455` 显式用 `sortBy=""` + `desc=false`（proto3 默认形态）比对 ASC/DESC |
-| **S-3** | MQ 消费者 · 失败位点 | Go `kq/config.go:24` `ForceCommit default=true` ⇒ 消费点 `queue.go:235` 不 continue ⇒ **失败也提交位点**；Java 原设 `seekAfterError=false` ⇒ 语义相反 | 已改 | **真上下文**：`ArticleSpringContextWiringTest` 断言 `isSeekAfterError()==true` |
-| **S-4** | MQ 消费者 · 并发度 | Go `kq/config.go:19` `Processors default=8`（消费点 `queue.go:220`）；yaml 只配了 `Consumers: 1`。Java 默认 `concurrency=1` 串行 | 已改（=8） | **真上下文** |
+| **S-2** | RPC 服务端 · `ListArticles`（作者视角） | Go `model/article.go:161-176` 把方向拼接整体放在 `if SortBy != ""` 内 ⇒ `sort_by` 为空时**恒 DESC**；Java 无条件方向 ⇒ 默认调用**整页顺序颠倒** | 已改 | **真 PG + 变异验证**（2026-10-24）：`ArticleTransactionWiringTest#authorViewDefaultsToNewestFirst` 显式用 `sortBy=""` + `desc=false`（proto3 默认形态）比对 ASC/DESC；把方向拼接改回「无条件方向」⇒ **用例转红** |
+| **S-3** | MQ 消费者 · 失败位点 | Go `kq/config.go:24` `ForceCommit default=true` ⇒ 消费点 `queue.go:235` 不 continue ⇒ **失败也提交位点**；Java 原设 `seekAfterError=false` ⇒ 语义相反 | 已改 | **真上下文 + 变异验证**（2026-10-24）：`ArticleSpringContextWiringTest#kafkaContainersCarryTheForceCommitErrorHandler` 断言 `isSeekAfterError()==true`；把 `setSeekAfterError(true)` 改回 `false` ⇒ **用例转红**（⚠️ 但「机制对不对」仍归 `U-3`/`U-4`，需真 Kafka） |
+| **S-4** | MQ 消费者 · 并发度 | Go `kq/config.go:19` `Processors default=8`（消费点 `queue.go:220`）；yaml 只配了 `Consumers: 1`。Java 默认 `concurrency=1` 串行 | 已改（=8） | **真上下文 + 变异验证**（2026-10-24）：`ArticleSpringContextWiringTest#kafkaHandlerConcurrencyMatchesGoProcessorsDefault` 断言**工厂真正产出的容器**的 `getConcurrency()==8`；把 `setConcurrency(8)` 改回 `1` ⇒ **用例转红**（⚠️ 「8 个独立 consumer 线程」vs Go「8 个 handler 拉同一 channel」的模型差异仍归 `U-9`） |
 | **S-5** | 外部客户端占位 · content security | 两个 gRPC 客户端是 4 行空文件；唯一实现恒抛 ⇒ **审核链路不可用** | ⛔ **被阻塞**（security 域未迁移） | 静态 |
 | **S-5b** | 同上 · 端口契约 | `ContentSecurityPort` **无 success 字段** ⇒ Go 的 `!result.Success` / `!resp.GetSuccess()` 两条重投分支无处安放 ⇒ 未来接真实现会 fail-open | 已补契约 | **纯 Mockito**（`ArticleSemanticsRegressionTest:241`） |
 | **S-6** | gRPC 边界 · SQL 超时 | `SqlTimeoutStatusTranslator` 产出的 `DEADLINE_EXCEEDED` 被 `invoke` 的 `catch(RuntimeException)` 降级为 `UNKNOWN` ⇒ 业务码 5001 → 1015 | 已改 | **纯 Mockito**（异常映射逻辑不依赖容器，可接受） |
@@ -90,9 +90,10 @@
 | `ArticleSpringContextWiringTest`（真上下文 + 真 PG） | S-3 / S-4 | ✅ 会真正触发机制 |
 | `ArticleSemanticsRegressionTest`（新增 10 例） | S-6 / O-1 / O-2 / O-3 / S-5b | ⚠️ 纯 Mockito，只锁调用形态 |
 
-⚠️ **按 §0「本项目 4 条漂移里有 3 条都曾被绿测试锁死」**：上表只有 S-1 做过变异验证
+⚠️ **按 §0「本项目 4 条漂移里有 3 条都曾被绿测试锁死」**：本表曾只有 S-1 做过变异验证
 （把 `@Transactional(readOnly=true)` 加回去 ⇒ 真 PG 报 `25006` ⇒ 用例转红，2026-10-23 实测）。
-**S-2 / S-3 / S-4 / S-7 的新用例尚未做变异验证**，按 §3.3 记为**未证实非假绿**。
+**2026-10-24 第十轮已补齐 S-2 / S-3 / S-4 / S-7 四条 ⇒ 5/5 全部做过变异验证**（见下），
+本表的回归网**不再有「未证实非假绿」的条目**。
 
 ### 仍未决
 
@@ -101,7 +102,7 @@
   与 `ConfidenceThreshold: 0.7` + `EnableTextExtraction: true`，并**先改端口再接**（S-5b 已把契约补好）。
 - **无双侧活体对拍**：Go 依赖 `etcd:2379` 本机不可拉起。S-1/S-3/O-6 的**存在性**已由框架层字节码与依赖源码取证确认，
   但运行时表现缺对拍确认。
-- **S-2/S-3/S-4/S-7 的新回归网未做变异验证**（见上）。
+- **S-2/S-3/S-4/S-7 的新回归网非假绿** —— ✅ **2026-10-24 已证**（第十轮，4/4 MUT-RED）。
 - **O-4 / O-6 缺容器级用例**，目前只有静态取证。
 - U-2 锁顺序反转：已把 `retractAndUpdate` 对齐到 article → publication，四条写路径顺序统一；**真并发用例未写**。
 - `spring.jackson.time-zone` 因自定义 `ObjectMapper` 不生效（对 proto 面无影响，意图未达成）。
@@ -109,7 +110,7 @@
 ## 尚未处理
 
 - **S-5**：content security 真实实现（阻塞于 security 域迁移）
-- **S-2/S-3/S-4/S-7 的变异验证**（证明新回归网非假绿）
+- ~~**S-2/S-3/S-4/S-7 的变异验证**（证明新回归网非假绿）~~ ⇒ ✅ **2026-10-24 第十轮已做，4/4 MUT-RED**
 - Go `service/article/rpc` ↔ RAG `article-rpc` 的**双侧活体对拍**（需可用的 etcd）
 - MQ 事件契约冻结（`ArticleSyncEventTypes` 625 行仍无冻结留档，本次只验证了与 Go 结构逐字一致，未冻结）
 - 本模块的 `HUMAN_ONLY.MD`
@@ -596,7 +597,7 @@ DistributionStatisticConfig.getHistogramBuckets(boolean supportsAggregablePercen
 | **U-9**（新） | 并发（8 handler）下的 offset 提交/跳过语义两侧是否一致 | `kq/queue.go:219-246`（8 个 processor 各自 `CommitMessages`，**不保证连续**） | RECORD + 上面那套 handler | 两边都**没有**活体对拍；顺序错乱窗口未量化 | 真 Kafka 压测 + 逐条比对 |
 | **U-2**（沿用） | 锁顺序反转 | Go 侧两条路径都由 `RetractPublicationTx` 的 `FOR UPDATE` 串行化 | Java 已统一成 article → publication，但 `retractAndUpdate` 多了一次 `selectByIdForUpdate` 提前 return | ✅ **已关闭**（2026-10-24） | 补 **CASE-R12 并发真 PG 用例** + **锁序探针**（真 PG 上同时扣住两把锁，观测被阻塞的 SQL）+ **Go 侧探针**（pgx + 真 PG，两种锁序各跑一次）⇒ 结论已定：**Go 自身**存在锁序反转（探针实测 `40P01 deadlock detected`），RAG 统一为 `article → publication` ⇒ **无反转**。⇒ 差异落档到 [`docs/Intentional_Deviations/article/rpc.md`](../../../Intentional_Deviations/article/rpc.md)（**SD-2026-10-24-01，待签字**），**不在本文重复记** |
 | **U-4'**（沿用） | 双侧活体对拍 | Go 依赖 `etcd:2379`，本机拉不起 | — | 本轮仍 **0** 条 | 起 etcd |
-| **U-5'**（沿用） | S-2 / S-3 / S-4 / S-7 新回归网**非假绿**未证 | — | 只有 S-1 做过变异验证 | AGENTS.md §3.3 | 逐条把修复改回去看用例是否转红 |
+| **U-5'**（沿用） | S-2 / S-3 / S-4 / S-7 新回归网**非假绿**未证 | — | 只有 S-1 做过变异验证 | AGENTS.md §3.3 | ✅ **已关闭**（2026-10-24 第十轮）：S-2 / S-3 / S-4 / S-7 **4/4 全部 MUT-RED** —— 逐条把修复改回去，用例都转红（详见本文件「第十轮」节的变异表）⇒ 五条回归网（S-1~S-4、S-7）**全部**证实非假绿 |
 
 ## 10. 最终判定（§39 的 18 项 checklist）
 
@@ -675,8 +676,14 @@ null / 空数组在「没映射上」和「真值是空」两种情况下读起�
 + 实体上补 `@TableField(fill = FieldFill.INSERT_UPDATE)`。
 
 **Go 出处**：声明点 `service/article/rpc/internal/model/article.go:31`
-（`gorm:"autoUpdateTime"`）；消费点 `gorm@v1.31.2/callbacks/update.go:243-259`
-（`Updates(map)` 路径）与 `:279-281`（`Updates(struct)` 路径）。
+（`gorm:"autoUpdateTime"`）；消费点 `gorm@v1.31.1/callbacks/update.go:238-254`
+（`Updates(map)` 路径）与 `:274-281`（`Updates(struct)` 路径）。
+
+> ⚠️ **2026-10-24 修正 gorm 版本号**：本条原写 `gorm@v1.31.2/...` ——
+> 但真源仓库 `go.mod:28` 写的是 **`gorm.io/gorm v1.31.1`**（`go.sum:428` 佐证，**无 replace 指令**），
+> ⇒ 引用的版本与行号都是 v1.31.2 的（v1.31.2 是 `:243-259` / `:279-281`）。
+> ⇒ 本条已改为 v1.31.1 的真实行号。
+> （⚠️ 同类错误在 `like` / `users-admin` / `users-user` 三个域的台账里也有，见「跨域待办」。）
 
 > 🔴 **为什么不能用 `strictUpdateFill`（这是本轮最反直觉的一点）**
 > `mybatis-plus-core` 3.5.17 的 `MetaObjectHandler.strictFillStrategy` 消费点是
@@ -782,12 +789,14 @@ article-rpc 当前：`mvn -o -pl service/article/article-rpc -am test` ⇒
 ### 复核结果（已验到消费点）
 
 **① 软删过滤确实加在 UPDATE 上**（这部分台账是对的）：
-`gorm@v1.31.2/soft_delete.go:76-96` `SoftDeleteQueryClause.ModifyStatement`
-在 `!stmt.Unscoped` 时追加 `WHERE deleted_at = <ZeroValue>`，
+`gorm@v1.31.1/soft_delete.go:76-96` `SoftDeleteQueryClause.ModifyStatement`
+在 `!stmt.Unscoped` 时追加 `WHERE deleted_at = <ZeroValue>`（`:91-93`），
 经 `:98-100 UpdateClauses` 挂到 UPDATE。
+（⚠️ 2026-10-24 修正版本号：原写 `gorm@v1.31.2` —— 真源仓库 `go.mod:28` 是 **`v1.31.1`**；
+本条的行号 `76-96` 在两个版本里**恰好相同**，只有版本号错。）
 
 **② 0 行之后的回落是 `ON CONFLICT DO UPDATE`，不是报错**：
-`finisher_api.go:117-121`
+`finisher_api.go:109-110`（v1.31.1）
 ```go
 updateTx := tx.callbacks.Update().Execute(...)
 if updateTx.Error == nil && updateTx.RowsAffected == 0 && !updateTx.DryRun && !selectedUpdate {
@@ -821,13 +830,29 @@ if updateTx.Error == nil && updateTx.RowsAffected == 0 && !updateTx.DryRun && !s
 MP 会返回「影响 0 行」，而调用方<b>不检查 RowsAffected</b>（8 处调用点均未检查）
 ⇒ 变成<b>完全不写</b>，而 Go 是<b>写了</b> ⇒ **这会把一个不存在的缺陷修成一个真实的新漂移**。
 
-### ⚠️ 真正存在的相邻差异（另立条目，未修）
+### ⚠️ 相邻差异（`Selects="*"` vs `NOT_NULL`）—— **2026-10-24 已展开：存在，但不可观察 ⇒ 不修**
 
-Go 的 `Save` 走 `finisher_api.go:113-114` 的 `Selects = append(Selects, "*")`
-——「update 时使用<b>全部</b>字段，含零值字段」；
-MP `updateById` 默认 `updateStrategy = NOT_NULL`，<b>只写非 null 字段</b>。
-⇒ 一个「把某列显式置为零值」的更新，两侧结果不同。
-**这才是真实差异**，但它与 004 描述的不是同一件事，且需逐调用点核对 Go 是否真的用 `Save`（部分路径用 `Updates(map)`）⇒ 未展开。
+> **当前状态（2026-10-24 第十轮）**：🔴 **未展开 → 🟢 已展开并关闭**。
+> 结论：**差异真实存在，但 API 层面不可观察** ⇒ **不立新条目、不改代码**。
+> ⇒ 完整取证（Go 侧探针 + RAG 侧真 PG 对拍 + 4/4 变异验证）⇒ 本文件「2026-10-24 第十轮」节。
+> ⇒ 新增守门用例 `ArticleNotNullUpdateStrategyWiringTest`（真 PG，5 条）。
+
+**原文的推理（2026-10-24 复核后判定：结论对、但推理错）**：
+
+> Go 的 `Save` 走 `finisher_api.go` 的 `Selects = append(Selects, "*")`
+> ——「update 时使用<b>全部</b>字段，含零值字段」；
+> MP `updateById` 默认 `updateStrategy = NOT_NULL`，<b>只写非 null 字段</b>。
+> ⇒ 一个「把某列置为零值」的更新，两侧结果不同。
+
+⚠️ **错在「零值」这个词上**（真 PG 实测，见第十轮节）：
+MP 的 `NOT_NULL` 跳过的只是 **null**；
+**零值（`""` / `0` / `false`）照样会被写** ⇒ **两侧在零值上本来就一致**。
+真正可能不同的是 **NULL** —— 而 Go 的 `Article` 模型**全是值类型（无指针）**，
+`Save` 写的是**零值**（`""` / `0`）⇒ **Go 侧对 `article` 表从来不会写 SQL NULL**。
+
+⇒ 真正剩下的差异面只有两个可空对象列（`secondary_tags` / `ext_info`），
+且两侧都在写前 ensure 非空 ⇒ **存储表示可能差一层（SQL NULL vs jsonb `'null'`），
+但读回的值与过滤结果完全一致 ⇒ 不可观察**。
 
 ### 台账维护教训
 
@@ -1550,3 +1575,168 @@ Caused by: java.lang.IllegalStateException: article-rpc 的 Kafka 通道「kq-pu
 > 省掉之后，代价不是「测试没抓住」，而是**运维在生产上按错误的假设操作**。
 
 <!-- @fix 2026-10-24 第九轮 · 结束 -->
+
+---
+
+<!-- @fix 2026-10-24 第十轮 · 由 align/article 工作树产出 · 基线 commit d06ad63 -->
+
+## 2026-10-24 第十轮：`U-5'` 关闭（4/4 MUT-RED） + `DRIFT-004` 相邻差异**展开并关闭**
+
+### ✅ FIX-15 —— `U-5'`：S-2 / S-3 / S-4 / S-7 的新回归网**证实非假绿**
+
+#### 本轮要补的是什么
+
+§9 的 `U-5'` 原文：
+
+> S-2 / S-3 / S-4 / S-7 新回归网**非假绿**未证 —— 只有 S-1 做过变异验证
+> ⇒ 逐条把修复改回去看用例是否转红。
+
+⇒ 即：把每条修复**改回缺陷态**，看对应的守门用例**会不会红**。
+
+#### 变异验证结果（4/4 全部 MUT-RED）
+
+| # | 回归网 | 变异（把修复改回去） | 守门用例 | 结果 |
+|---|---|---|---|---|
+| 1 | **S-2** | `ArticleMapper.selectAuthorView` 的方向拼接改回「无条件方向」（删掉 `sortBy == null or sortBy == '' ⇒ DESC` 那一支） | `ArticleTransactionWiringTest#authorViewDefaultsToNewestFirst`（真 PG） | ✅ **转红** |
+| 2 | **S-7** | `ArticleMapper` 的 `<if>` 参数名改回不存在的 `secondaryTag`（`@Param` 名是 `secondaryTagJson`） | `ArticleJsonbResultMapWiringTest#selectAuthorViewReadsJsonb`（真 PG + 真 MyBatis） | ✅ **转红**（`BindingException`） |
+| 3 | **S-3** | `ArticleRpcApplication#articleNoCommitErrorHandler` 的 `setSeekAfterError(true)` 改回 `false` | `ArticleSpringContextWiringTest#kafkaContainersCarryTheForceCommitErrorHandler`（真上下文） | ✅ **转红** |
+| 4 | **S-4** | `ArticleRpcApplication#articleKafkaListenerContainerFactory` 的 `setConcurrency(8)` 改回 `1` | `ArticleSpringContextWiringTest#kafkaHandlerConcurrencyMatchesGoProcessorsDefault`（真上下文） | ✅ **转红** |
+
+⇒ **五条回归网（S-1 ~ S-4、S-7）至此全部做过变异验证，没有「未证实非假绿」的条目。**
+
+⚠️ **但要说清这条关闭的边界**：
+变异验证证明的是「**用例确实在测这件事**」（改坏就红），
+**不**证明「这件事的**机制**在真 Kafka 上与 Go 同构」⇒
+`U-3` / `U-4`（失败位点的真实机制）与 `U-9`（并发 offset）**仍 OPEN**，它们要的是**真 Kafka**。
+
+### ✅ FIX-16 —— `DRIFT-004` 的相邻差异（`Selects="*"` vs `NOT_NULL`）**展开并关闭**
+
+#### 先说结论
+
+- ⚠️ **台账原文的推理错在「零值」这个词上**：
+  MP 的 `NOT_NULL` 跳过的只是 **null**；
+  **零值（`""` / `0` / `false`）照样会被写** ⇒ **两侧在零值上本来就一致**。
+- Go 的 `Article` 模型**全是值类型（无指针）** ⇒ `Save` 写的是**零值**，**Go 侧对 `article` 表从来不会写 SQL NULL**。
+- ⇒ 真正剩下的差异面只有两个可空对象列（`secondary_tags` / `ext_info`），
+  且两侧都在写前 **ensure 非空**（Go `EnsureExtInfo` ↔ RAG `ensureExtInfo`，**调用点一一对应**）
+  ⇒ 最多差一层**存储表示**（SQL NULL vs jsonb `'null'`）。
+- ⇒ 但**读回的值与过滤结果完全一致** ⇒ **API 层面不可观察**
+  ⇒ 按 `docs/Worktree.md` 的判据「这条差异要不要修回去？」—— **不用修** ⇒ **不立新条目**。
+- ⇒ 同时**新增一条真 PG 守门网**，把这个「不可观察」的结论钉住（否则结论会随实现漂移）。
+
+#### 🔴 证据①：Go 侧探针（gorm **v1.31.1** + 真 PG，模块 `probe/save`）
+
+⚠️ **版本纠正**：真源仓库 `go.mod:28` 是 **`gorm.io/gorm v1.31.1`**（`go.sum:428` 佐证，**无 replace**），
+台账原先引的 `v1.31.2` 是**错版本** ⇒ 本轮用 **v1.31.1** 实跑。
+探针的 `Article` / `StringArray` / `JSONMap` 三个类型**逐字抄自**
+`service/article/rpc/internal/model/article.go`；GORM 配置也照抄 `internal/model/db.go:39-45`
+（`SingularTable: true` + `SkipDefaultTransaction: true`）。
+
+| 探针 | 做法 | 实测结果 |
+|---|---|---|
+| **A** | 只改 `title` 后 `Save`（实体是从库里读出的） | `secondary_tags` / `ext_info` 被**原样写回**（**不写 null**） |
+| **B** | 把 `SecondaryTags` / `ExtInfo` 显式置 `nil` 后 `Save` | 写成 **jsonb `'null'`**（**不是 SQL NULL**）；读回是 `nil` |
+| **C** | 把 `Brief` 置 `''`、`ViewCount` 置 `0` 后 `Save`（**零值**） | 写成 **`''` / `0`** —— **不是 NULL，也不是「跳过」** |
+| **D** | 库里的 jsonb 列本来就是 **SQL NULL**，再 `Save` 一次 | SQL NULL 被**升级成 jsonb `'null'`**；但**读回的值不变**（都是 `nil`） |
+
+⭐ **探针 C 是本轮最关键的一条**：它**直接推翻**了台账那句
+「Go 写全部字段含零值 vs MP 只写非 null ⇒ 零值被跳过」。
+**Go 的 `Save` 写零值；MP 的 `NOT_NULL` 也写零值 ⇒ 两侧一致。**
+
+#### 🔴 证据②：RAG 侧真 PG 对拍（`ArticleNotNullUpdateStrategyWiringTest`，**新建**，5 条）
+
+真 PG + 真 `@SpringBootTest` 上下文 + **真 Mapper**（不是 mock、不是 H2）。
+
+| # | 用例 | 钉住什么 | 与 Go 探针对应 |
+|---|---|---|---|
+| 1 | `zeroValuesAreWrittenJustLikeGoSave` | 零值（`""` / `0`）**照样被写** | **探针 C** |
+| 2 | `untouchedJsonbColumnsAreWrittenBackUnchanged` | 没碰过的 jsonb 列**原样写回** | **探针 A** |
+| 3 | `nullJsonbFieldsAreSkippedInsteadOfWrittenAsJsonNull` | 实体的 jsonb 字段为 null ⇒ 该列**被跳过**（Go 会写 jsonb `'null'`）⇒ **存储表示不同** | **探针 B** |
+| 4 | `sqlNullJsonbColumnsReadBackIdenticallyToGo` | 库里是 SQL NULL 时：RAG 保持 SQL NULL，**但读回与 Go 完全一致（都是 null）** | **探针 D** |
+| 5 | `filterBehaviourIsIdenticalForSqlNullAndJsonNull` | **过滤面**同样一致：SQL NULL ⇒ 表达式为 NULL、jsonb `'null'` ⇒ `false`，**两者都把行排除** | 补齐第 4 条的另一半 |
+
+⇒ 第 3 条（**存储表示不同**）+ 第 4/5 条（**读回与过滤都一致**）合起来才是完整结论：
+**差异真实存在，但不可观察。**
+
+#### 🔴 证据③：变异验证（4/4 全部 MUT-RED）
+
+| # | 变异 | 结果 |
+|---|---|---|
+| 1 | 给 `secondary_tags` 加 `updateStrategy = ALWAYS`（null 也写 ⇒ 列被清成 SQL NULL） | ✅ **转红** |
+| 2 | 给 `brief` 加 `updateStrategy = NOT_EMPTY`（空串被跳过 ⇒ 零值不再写下去） | ✅ **转红** |
+| 3 | `JsonbTypeHandler.readList` 对 SQL NULL 返回空 list 而不是 null | ✅ **转红** |
+| 4 | `JsonbTypeHandler.readMap` 对 SQL NULL 返回空 map 而不是 null | ✅ **转红** |
+
+⇒ 这条网**不是装饰**：把写入策略或读出归一改掉，它立刻红。
+
+#### 为什么「不可观察」不是「不存在」—— 逐条列清
+
+| # | 面 | Go | RAG | 结论 |
+|---|---|---|---|---|
+| 1 | 零值（`""`/`0`/`false`） | 写下去（探针 C） | 写下去（用例 1） | ✅ **一致** |
+| 2 | 字符串零值（`""`） | 写下去 | 写下去（`NOT_NULL` 不跳空串） | ✅ **一致** |
+| 3 | `int` 计数列的 `0` | 写下去 | 写下去（**原始类型，永不为 null**） | ✅ **一致** |
+| 4 | 没碰过的 jsonb 列 | 原样写回（探针 A） | 原样写回（用例 2） | ✅ **一致** |
+| 5 | `ext_info` 写前 ensure | `EnsureExtInfo`（Go 6 处调用） | `ensureExtInfo`（RAG 10 处调用，**一一对应**） | ✅ **一致** |
+| 6 | `updated_at` | `autoUpdateTime`（gorm v1.31.1 `callbacks/update.go:238-254`） | `ArticleMetaObjectHandler.updateFill` | ✅ **一致**（都写非零值） |
+| 7 | `deleted_at` | 取自库里读出的值 | 取自库里读出的值 | ✅ **一致** |
+| 8 | **jsonb 列的存储表示** | SQL NULL ⇒ 升级成 jsonb `'null'`（探针 D） | 保持 SQL NULL（用例 4） | ⚠️ **不同** |
+| 9 | **jsonb 列的读回值** | `nil` | `null` | ✅ **一致**（`readList`/`readMap` 把 SQL NULL、空白、JSON `'null'` 一律读成 null；Go 的 `Scan` 同理） |
+| 10 | **过滤面**（`@>` 算子） | SQL NULL ⇒ NULL、jsonb `'null'` ⇒ false ⇒ **都排除该行** | 同 | ✅ **一致**（用例 5） |
+| 11 | **创建路径**（`secondary_tags`） | `model.StringArray(in.SecondaryTags)` ⇒ 空 ⇒ jsonb `'null'` | `new ArrayList<>(...)` ⇒ 空 ⇒ jsonb `'[]'` | ⚠️ **存储不同**，但 proto3 `repeated` 字段**两侧都是空**、按具体标签的过滤**两侧都排除** ⇒ ✅ **不可观察** |
+
+⇒ 唯一剩下的存储层差异（#8 / #11）在**读回**（#9）与**过滤**（#10）上都不可见
+⇒ **API 层面不可观察 ⇒ 不修。**
+
+#### 测试计数
+
+- **新增** `ArticleNotNullUpdateStrategyWiringTest` **5 条全绿**（真 PG + 真 Mapper）；
+- `article-rpc` **133 tests / 0 failures / 0 errors / 0 skipped**（原 128 ⇒ **+5**）；
+- 连同 `article-api` 80 + `article-common` 15 ⇒ **article 域合计 228 / 0 / 0 / 0**（`BUILD SUCCESS`）。
+
+#### ⚠️ 台账卫生修正（本轮一并修掉的三处引用错误）
+
+| # | 错误 | 修正 |
+|---|---|---|
+| 1 | `gorm@v1.31.2/...`（**错版本**） | 真源仓库 `go.mod:28` 是 **`v1.31.1`**（`go.sum:428` 佐证，无 replace）⇒ 行号随之改为 v1.31.1 的真实值（`finisher_api.go:104,109-110`、`callbacks/update.go:238-254`）；`soft_delete.go:76-96` 两版本**恰好相同**，只有版本号错 |
+| 2 | 「MP `NOT_NULL` 只写非 null ⇒ **零值被跳过**」 | ⭐ **错**：MP 的 `NOT_NULL` 只跳 **null**，**零值照样写**（真 PG 实测，见证据①探针 C + 证据②用例 1） |
+| 3 | 「需逐调用点核对 Go 是否真的用 `Save`（部分路径用 `Updates(map)`）」 | ✅ **已核对**：`article` 表的**全部** Go 写路径都用 `Save`（`model/article.go:100,104`；`article_sync_result_consumer.go:90,152`；`article_consumer.go:125`）；`Updates(map)` 只出现在 **`article_sync_outbox` 表**（`article_sync_outbox.go:67,77`）⇒ 与 `article` 表无关 |
+
+#### 判定变化（FIX-15 / FIX-16）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `U-5'` S-2/S-3/S-4/S-7 回归网非假绿 | 🔴 OPEN（只做过 S-1） | ✅ **已关闭**（4/4 MUT-RED） |
+| `DRIFT-004` 相邻差异（`Selects="*"` vs `NOT_NULL`） | 🟡 **未展开**（且推理有误） | 🟢 **已展开**：差异真实存在但**不可观察** ⇒ **不修、不立条目**；新增真 PG 守门网（5 条 + 4/4 MUT-RED） |
+| `U-3` / `U-4` / `U-9` | 🔴 OPEN | 🔴 **OPEN（不变）**（需真 Kafka） |
+| `U-4'` | 🔴 OPEN | 🔴 **OPEN（不变）**（需 etcd） |
+| `S-5` | ⛔ 阻塞 | ⛔ **仍阻塞**（security 域，不在本项目范围） |
+| **组件判定** | `SEMANTICALLY NOT EQUIVALENT` | **`SEMANTICALLY NOT EQUIVALENT`（不变）** |
+
+⚠️ **判定不变的理由**：本轮**没有改变任何运行时行为**
+（只把两条「未验证 / 未展开」定性与关掉，并给前者补了回归网），
+且其余 `DRIFT` / `UNRESOLVED` 仍在，也**无双侧活体对拍**（Go 侧仍需 `etcd:2379`）
+⇒ 本条的 ✅ 读作「**在真 PG / 真上下文证据下一致**」，不是「已闭环」。
+
+#### 📌 跨域待办（不属于 article 域 scope，登记供主会话处理）
+
+| # | 待办 | 位置 | 依据 |
+|---|---|---|---|
+| 1 | 🔴 **`gorm@v1.31.2` 的错版本引用**（同一个 Go 仓库、同一份 `go.mod` ⇒ 版本是 v1.31.1） | `docs/DRIFT/like/rpc.md:881`（`schema/field.go:330-341`）<br>`docs/DRIFT/users/admin/rpc.md:863,1087`<br>`docs/DRIFT/users/user/rpc.md:507,767` | `Sea-RideTheWind_golang/go.mod:28` = `gorm.io/gorm v1.31.1`；`go.sum:428` 佐证；**无 replace 指令** |
+| 2 | 🔴 `*SchemaGate` 仍用 `@EventListener(ApplicationReadyEvent.class)`（应挪到对外服务**之前**，见 `DRIFT-ARTICLE-RPC-005`） | `like-rpc` / `comment-rpc` / `favorite-rpc` / `task-rpc` | article 域已完成同型改造（`ArticleSchemaGate` 改用 `SmartInitializingSingleton`） |
+
+#### 📌 一条可复用的元教训
+
+> **「ORM 的字段策略」不能靠「读文档」对齐，必须靠「真 PG 上写一行再读回来」对齐。**
+>
+> 本轮的实测：台账凭「`NOT_NULL` = 只写非 null」推出「零值被跳过 ⇒ 两侧不同」，
+> 而真 PG 上 **MP 的 `NOT_NULL` 把 `""` 和 `0` 都写了下去** ——
+> **Go 的 `Save` 也写零值** ⇒ **两侧在零值上本来就一致** ⇒ 那条差异的**主要论据直接不成立**。
+>
+> ⇒ 通用判据：**ORM 语义（哪些列进 SET、哪些被跳过）属于「只能实测」的层**。
+> 读 `field-strategy` 的文档或注解名称，得到的都只是**声明点**；
+> 必须真 PG 上「写一行 → 查 `information_schema` / 读回」才是**消费点**证据
+> （与 AGENTS.md §3.3.1「Go 事实必须读到消费点」同源，只是这次的对象从 Go 换成了 MP）。
+>
+> ⇒ 附带一条：**「差异不可观察」也是一个结论**，而且需要**正面证明**
+> （读回一致 + 过滤一致），不能只说「应该没影响」。
