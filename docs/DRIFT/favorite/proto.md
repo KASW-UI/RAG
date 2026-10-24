@@ -101,9 +101,27 @@ RAG 侧 7 处用 `nullToEmpty(...)` / `nullToZero(...)` 显式设零值
 ⇒ Go 侧**同样是 struct literal 无条件写零值**（`Title: req.Title, Cover: req.Cover` 等）
 ⇒ **两侧都是「总是设」而非「有时不设」** ⇒ 在隐式 presence 下 wire 等价。
 
-> ⚠️ **未验**：「默认值不落 wire」这一条目前依赖 protobuf 规范，
-> **本仓无生成码级证据**（`favorite-proto/target/generated-sources` 不在版本库内）。
-> ⇒ 要落实需跑一次 `mvn -pl service/favorite/favorite-proto package` 后读生成码的 `writeTo` 条件表达式。
+> ✅ **已验（2026-10-25 第四轮，生成码级证据）**：
+> 读 `favorite-proto/target/generated-sources/protobuf/java/com/rag/favorite/favorite/proto/FavoriteFolder.java`
+> 的 `writeTo`，**零值有条件表达式**：
+> ```
+> if (folderId_ != 0L) { output.writeInt64(1, folderId_); }
+> if (userId_  != 0L) { output.writeInt64(2, userId_); }
+> if (!com.google.protobuf.GeneratedMessageV3.isStringEmpty(name_)) {
+>     com.google.protobuf.GeneratedMessageV3.writeString(output, 3, name_);
+> }
+> if (createdAt_ != 0L) { output.writeInt64(4, createdAt_); }
+> if (updatedAt_ != 0L) { output.writeInt64(5, updatedAt_); }
+> ```
+> ⇒ **零值确实不落 wire** ⇒ 与 Go 侧「struct literal 无条件写零值」在隐式 presence 下**wire 等价**。
+> ⇒ ⚠️ 取证方法记在这里：生成码**不在版本库内**（`target/` 被忽略）⇒
+> 要复现必须先 `mvn -o -pl service/favorite/favorite-proto package` 生成再读 `writeTo`。
+>
+> ⚠️ 顺带确认：生成码 extends `GeneratedMessageV3`（**protobuf-java full runtime**），
+> 而 `favorite-proto/pom.xml` **同时**声明了 `protobuf-javalite`
+> ⇒ 两者 `com.google.protobuf.*` 包名重叠。
+> ⇒ **实测全仓 10 个 `*-proto` 都是这个模板**（§3）⇒ **不是 favorite 域的新问题**，
+> 且 `message-proto` 已被验证过不会遮蔽生成码 ⇒ **不记入漂移条目**。
 
 ---
 
@@ -129,8 +147,8 @@ RAG 侧 7 处用 `nullToEmpty(...)` / `nullToZero(...)` 显式设零值
 | 消费点构造方式 | ✅ 16 个 message + 7 个 RPC 逐条清点 |
 | `optional` presence | ✅ **本域零 optional** ⇒ 不适用 |
 | 字段号硬编码 | ✅ 无命中 |
-| **真 channel 上的 wire 字节** | 🔴 **未验**（需要双侧活体对拍） |
-| 「默认值不落 wire」的生成码级证据 | 🔴 未验（需先构建出生成码） |
+| **「默认值不落 wire」的生成码级证据** | ✅ **已验**（2026-10-25 第四轮 ⇒ 见 §2 的 `writeTo` 条件表达式） |
+| **真 channel 上的 wire 字节**（protobuf 消息体） | 🔴 **未验**（需要双侧活体对拍）⇒ ⚠️ 注意：**gRPC status 的 description** 那一环**已验**（在 [`common.md`](./common.md) §4，由 `FavoriteGrpcErrorWireFidelityTest` 守着）⇒ **剩下的是 protobuf 消息体本身的字节** |
 
 ---
 

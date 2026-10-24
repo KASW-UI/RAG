@@ -126,7 +126,7 @@ RAG 侧 `ArticleRpcClient.getPublicArticle` **固化了同样两个参数**。
 | **U1** | **权威端点的 wire 形态** | 按 Go 原样写成 **path 参数** servlet（`/internal/v1\|v2/favorite/facts/{producer}/{event_id}`），**不是** RAG 通用 `AuthorityHandlerFactory` 的 query 形态。整类 `@ConditionalOnProperty(favorite.fact.authority.enabled=true)` **默认关闭 ⇒ 默认不新增任何 HTTP 端口** | 开启时需给**纯 gRPC 进程**加 web connector ⇒ **部署形态变更**，未拍板 |
 | **U2** | **preflight 的退出码语义** | Go 是独立进程 ⇒ 退出码即门禁。Java 进程内**刻意不调 `System.exit`**，改结构化日志（`outcome=succeeded` / `not_reconciled` / `failed` + `error_code`） | CI 需改为**解析日志**判门禁 |
 | **U3** | `zrpc.RpcServerConf.Mode` 的取值域 | **不在本仓库**（Go 侧 `etc/favorite.yaml` 只有 `Mode: dev`）⇒ 用 Spring profile `dev` / `test` 映射 | 需 Go 侧取值域清单 |
-| **U4** | **authority lookup 的 3s 超时** | Go 用 `context.WithTimeout(3s)` 约束 DB 查询；Java 侧走 Hikari `connection-timeout` ⇒ **未对齐** | 需确认这是否算可观察差异 |
+| **U4** | **authority lookup 的 3s 超时** | Go 用 `context.WithTimeout(3s)` 约束 DB 查询；Java 侧走 Hikari `connection-timeout` ⇒ **未对齐** | ✅ **2026-10-25 第四轮已修**（见 §10）⇒ 本行保留作历史 |
 | **U5** | **`ObserveRPC` 的 `result` 标签** | Go 侧 **21 处**错误返回因未赋值命名返回值 `err`，被记成 **`success`**。Java 侧**按真实结果计数**（成功 `success`、异常 `fail`） | **有意的指标行为变更，未签字** ⇒ 需走 `docs/Intentional_Deviations/` |
 | **U6** | `favorite_request_seconds_counter` 指标名 | Micrometer Counter 会追加 `_total`（Go `client_golang` 不会）⇒ 保留不改 | 与 U5 一并拍板 |
 | **U7** | **双侧活体对拍 + 变异验证** | 未做。Go 侧 `etcd` / Kafka 依赖不可拉起 | 需要一套能同时拉起两侧的环境 |
@@ -229,7 +229,7 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 | **U1** | 权威端点的 wire 形态 | 「按 Go 原样写成 path 参数 servlet，默认关」 | ✅ **路径形态本身是对的**，逐条比对通过（见 §9.5.1）。<br>⚠️ 但**剩余差异比原登记多 4 项**（配置不完整时 Go 起不来 / RAG 照常跑；无启动前 DB 探活；HTTP server 超时值不同；优雅关闭超时不同） | [`../../Intentional_Deviations/favorite/rpc.md`](../../Intentional_Deviations/favorite/rpc.md) **DEV-FAV-RPC-004** |
 | **U2** | preflight 的退出码语义 | 「刻意不调 System.exit，改结构化日志」 | ✅ 结论成立，但**原登记漏了两项**：① Go 的 report 是**写到 stdout 的 JSON**，RAG 不产出 JSON；② Go 的 **「未配置」也是 exit 2**（与 blocked 同级），RAG 的「DB 不可用」落 `failed`（对应 exit 1）⇒ 两侧落档不同 | **DEV-FAV-RPC-003** |
 | **U3** | `zrpc.RpcServerConf.Mode` 的取值域 | 「不在本仓库；Go 侧 `etc/favorite.yaml` 只有 `Mode: dev`」 | ⬜ **仍未决** —— 本轮复核确认该事实**仍成立**（Go 侧确实只出现 `dev`）⇒ **需要 Go 侧给出取值域清单**，否则 Spring profile 的映射无法验证 | 留在本节，**待外部输入** |
-| **U4** | authority lookup 的 3s 超时 | 「Go 用 `context.WithTimeout(3s)` 约束 DB 查询；Java 侧走 Hikari `connection-timeout` ⇒ **未对齐**」 | ✅ **确认未对齐**，并进一步定位：Go 的 3s 约束的是**查询**（ctx 传进 GORM），RAG 侧连到的是**连接超时** ⇒ **不是同一个量纲**。<br>⚠️ 修法待定（MyBatis-Plus 的 `@Options(timeout=…)` 能否等价） | **DEV-FAV-RPC-005**（修法待定） |
+| **U4** | authority lookup 的 3s 超时 | 「Go 用 `context.WithTimeout(3s)` 约束 DB 查询；Java 侧走 Hikari `connection-timeout` ⇒ **未对齐**」 | ✅ **确认未对齐**，并进一步定位：Go 的 3s 约束的是**查询**（ctx 传进 GORM），RAG 侧连到的是**连接超时** ⇒ **不是同一个量纲**。<br>🔴 **2026-10-25 第四轮已修** ⇒ 见 §10-D1（复用仓库已有的 `DeadlineQueryTimeoutInjector` + `SqlTimeoutStatusTranslator`，在调用点绑 3s deadline）。⇒ **DEV-FAV-RPC-005 撤销**（不再是偏离） |
 | **U5** | `ObserveRPC` 的 `result` 标签 | 「Go 侧 21 处错误返回因未赋值命名返回值 `err`，被记成 `success`；Java 按真实结果计数 ⇒ 有意的指标行为变更」 | ❌ **撤销 —— 前提被实测证伪**。Go 的 `return nil, GRPCError(...)` **会**赋值命名返回值 `err` ⇒ defer 里 `ObserveRPC` 看到非 nil ⇒ 记 **`fail`** ⇒ **Go 与 RAG 本来就一致，不存在偏离**。<br>（「21」实为 `return nil, GRPCError(...)` 的出现处数，**实测 22**。） | **撤销记录** + 可复现探针 `tools/metrics-probe/favorite/` |
 | **U6** | `favorite_request_seconds_counter` 指标名 | 「Micrometer Counter 会追加 `_total`（Go `client_golang` 不会）⇒ 保留不改」 | ✅ **确认成立**。补充：其余三个指标名（`favorite_request_total` / `favorite_ops_total` / `favorite_db_error_total`）**两侧完全一致**（名字已以 `_total` 结尾）⇒ **只有这一个**不一致 | **DEV-FAV-RPC-001** |
 | **U7** | 双侧活体对拍 + 变异验证 | 「未做。Go 侧 etcd / Kafka 依赖不可拉起」 | 🔴 **仍是最大缺口**。本轮推进：<br>· **错误码契约层已做成双侧活体对拍**（`tools/errmsg-probe/favorite/`，EXIT=0，108 行逐字节一致）—— 但那属于 `favorite-common`，**不是 rpc 层**。<br>· **指标 result 语义已做成可复现探针**（`tools/metrics-probe/favorite/`，EXIT=0）—— 单侧 Go 语义锚定 + RAG 侧运行时守门，**不是整域双侧对拍**。<br>· ⬜ **rpc 侧整体仍无双侧活体对拍**（Go 侧 `etcd` / Kafka 仍不可拉起） | 留在本节，**未闭环** |
@@ -254,7 +254,8 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 > ⚠️ **一处未列的细节**：Go 的 `r.PathValue` 走 `http.ServeMux` 的 pattern 匹配，**自带 path 规范化**
 > （清理 `.`/`..`、合并 `//`、逐段解码）；RAG 侧是 `getRequestURI()` + **手工切分 + 手工 `URLDecoder.decode`**。
 > ⇒ 对含 `%2F` / `//` / `..` 的畸形路径，两侧可能给出不同的 404 判定。
-> ⚠️ **本轮未实测**（需要真 Go 的 `ServeMux` 对拍）⇒ 记为 **OBS**，不进偏离档。
+> ⚠️ **2026-10-25 第四轮：已实测** ⇒ **不是「可能」，是确实不同，而且挖出 5 处漂移** ⇒ 见 §10-D2。
+> ⇒ 双侧对拍探针 = `tools/authority-path-probe/favorite/`（EXIT=0）。
 
 ### 9.5 一条**跨域观察**（不属于 favorite 域的修法，但影响本域）
 
@@ -267,3 +268,106 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 ⇒ 但 **like 域不是本域的文件**（AGENTS.md §5.3：只写自己域）⇒ **本轮不改、不判**，
 仅在此**登记为跨域线索**，交由 like 域 / `global` 收口域处理。
 ⚠️ 别把它当 favorite 域的漂移去「顺手统一」。
+
+---
+
+## 10. 2026-10-25 第四轮（`align/favorite` 工作树 · 基线 commit 58e8314 · 承 `d753572`）
+
+> ⚠️ **本节只追加，不修改 §0–§9。**
+> 本轮目标：**修 U4 / DEV-FAV-RPC-005**，并**解决 §4 证据边界里的未知项**。
+> ⇒ §0–§8 的结论本轮**仍未重新验证**（那是 2026-10-23 的另一轮）。
+
+### 10.1 🔴 D1（U4 / DEV-FAV-RPC-005）· 权威读的单次 lookup 3s 预算**没有接到 DB 查询**
+
+| | 内容 |
+|---|---|
+| **Go 行为** | `authority/http.go:44` / `:80`：`ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)` ⇒ **约束的是 DB 查询**（`m.conn.WithContext(ctx)` 把 ctx 带进 GORM）⇒ pg 驱动在 ctx 到点时发 CancelRequest ⇒ 查询在服务端立刻停止 ⇒ `query.Error != nil` ⇒ Go **原样上抛**（`favorite_authority.go:215-217`，**不**包成 `ErrFavoriteFactUnavailable`）⇒ ⇒ **503 "source unavailable"** |
+| **RAG 修复前** | `FavoriteAuthorityLookupService` 走 MyBatis-Plus + HikariCP，**没有**把 deadline 接到查询上 ⇒ 慢查询一路顶到 Hikari 的 `connection-timeout`（**连接**超时 ⇒ **量纲不同**）⇒ 响应时长与 Go 不一致 |
+| **等价物论证** | ⚠️ **不是** `@Options(timeout=3)`：那是**每条语句**各给 3s，而 Go 的一个 ctx **覆盖整次 lookup**（17 道校验里的多次查询共用）⇒ 6 条慢查询能拖到 18s。<br>⇒ **复用仓库已有的成套机制**（本模块**早已注册**，`FavoriteRpcApplication:79-80`）：<br>· `DeadlineQueryTimeoutInjector`（MyBatis 拦 `StatementHandler.prepare`）—— 按**当前线程**的 `DeadlineState.remainingMillis()` 给每条 SQL 设 `setQueryTimeout` ⇒ pgjdbc 到点发 CancelRequest ⇒ **与服务端语义同一条，且连接保可用**（对比 `socketTimeout`：那是读超时，连接会报废，语义相反）；<br>· `SqlTimeoutStatusTranslator` —— 把 CancelRequest 的 SQLState `57014` 翻成 `DEADLINE_EXCEEDED`。<br>⇒ 本域只需在**调用点**用 `DeadlineState.bindToCurrent(...)` 绑 3s ⇒ 一次 lookup 的多条 SQL **共用一个预算** ⇒ 与 Go 的 ctx 逐字一致 |
+| **绑定位置** | **放在 servlet（handler）里**，与 Go 的绑定点（`http.go:44`）一致；⚠️ 下沉到 service 会让 service 的**其它**调用方也被套上这个预算（Go 侧没有这层） |
+| **超时值** | **硬编码 3s**，**刻意不做成配置项**：Go 侧是硬编码常量，做成配置就等于允许部署时改掉它 ⇒ 那时两侧行为又不一致了 |
+| **修复** | `FavoriteAuthorityEndpointConfig`：调用点包 `DeadlineState.bindToCurrent(now + 3_000)`；`FavoriteAuthorityLookupService` 的 javadoc 补「调用方必须先绑预算」 |
+| **回归网** | `FavoriteAuthorityLookupTimeoutTest`（3 例，**真 PG** Testcontainers + **真 MyBatis** + **真 CancelRequest**） |
+| **变异证据** | 去掉 `bindToCurrent` ⇒ **1 例转红**，实测 elapsed = **10024ms**（落到了测试安全网设的 PG `statement_timeout=10s`，而不是 3s）⇒ 证明该测试**不是假绿**，且修复**真的**把预算从 10s 压到了 3s |
+
+> ⚠️ **为什么必须断言「耗时」而不能只断言状态码**：
+> 「查不到」（404）与「查询超时」（503）在本域是**两条不同的分支**，
+> 但**在更早的版本里二者都落 500** ⇒ 只断言状态码区分不出来。
+> ⇒ 本测试**同时**断言「状态码 = 503」「body = source unavailable」「elapsed ∈ [2.5s, 8s]」三件事。
+
+> ⚠️ **测试里那条 `statement_timeout=10s` 是安全网，不是被测行为**：
+> 它保证「实现被改坏」时查询在 ~10s 后返回（而不是永久阻塞）⇒ 变异运行**不会挂死**；
+> 但因为 10s > 3s，**3s 的预算必然先到** ⇒ 它不可能影响判定。
+
+### 10.2 🔴 D2（§9.4 末尾那条 OBS）· path 形态与错误响应：实测出 **5 处**漂移
+
+> ⚠️ **本轮把「未实测 ⇒ 记为 OBS」升级成了双侧活体对拍** ——
+> 新增 `tools/authority-path-probe/favorite/`（Go 侧**只用标准库**复刻 `http.ServeMux` +
+> `http.Error` / `http.NotFound` / `http.Redirect`，15 行矩阵；`EXIT=0`）。
+
+| # | 漂移 | Go（实测） | RAG 修复前 | 严重度 |
+|---|---|---|---|---|
+| **1** | **少一段的 path** | **404** page not found | 🔴 **抛 `StringIndexOutOfBoundsException` ⇒ HTTP 500** | **真 bug** |
+| **2** | **需要清理的 path**（`//` / `/./` / `/../`） | **301** + `Location` | **404**（无重定向） | L1 |
+| **3** | **404 的 body** | `"404 page not found\n"` + `text/plain; charset=utf-8` + `nosniff` | **只写状态码，无 body、无头** | L1 |
+| **4** | **401 的 body** | `"unauthorized\n"`（`http.Error` 用 `fmt.Fprintln`） | `"unauthorized"`（**少一个 `\n`**） | 逐字节 |
+| **5** | **判定顺序** | mux 层判定（301 / 404）**先于鉴权** ⇒ 「畸形 path + 无 token」是 **404** | 先撞鉴权 ⇒ **401** | L1 |
+
+**根因与修法**
+
+| # | 根因 | 修法 |
+|---|---|---|
+| 1 | 段数判据写成 `rest.indexOf('/') != rest.lastIndexOf('/')` ⇒ **没有 `/` 时两者都是 -1 ⇒ 判据不成立** ⇒ 继续走 ⇒ `substring(0, -1)` 抛异常 | 改成 `slash < 0 \|\| slash != rest.lastIndexOf('/')` |
+| 2 | 手写 servlet **没有 mux 层** | 逐字复刻 Go 的 `net/http.cleanPath`（⚠️ **不能用 `Paths.get(p).normalize()`** —— 那是文件系统语义）+ `escape(path, encodePath)` + `htmlEscape` ⇒ 301 + `Location` |
+| 3 | 404 分支只 `setStatus` | 统一走 `writeGoError`（Go 的 `http.Error` 形状：状态码 + `text/plain; charset=utf-8` + `nosniff` + body） |
+| 4 | `writePlain` 少写 `\n` | 同上（`http.Error` 用 `fmt.Fprintln` ⇒ body = `msg + "\n"`） |
+| 5 | 鉴权在 path 判定之前 | 重排为 **mux 层（清理 → 形状）→ 鉴权 → query → lookup**，与 Go 的 `findHandler → handler` 一致 |
+
+**⚠️ 三条「照抄 Go 而不是照抄正确」的**（都刻意保留）
+
+1. **Go 的 `Location` 会二次转义**：`/…//a%2Fb` ⇒ `Location: /…/a%252Fb`
+   （Go 构造 `url.URL{Path: escapedPath}` 时**没设** `RawPath` ⇒ `EscapedPath()` 又把 `%` 转义成 `%25`）。
+   ⇒ 看着像 Go 的缺陷，但**偏离它会让客户端跟随到不同路径** ⇒ 照抄并标注。
+2. **Go 的 301 body 末尾是**两个** `\n`**（`http.Redirect` 先拼一个 `\n` 再交给 `fmt.Fprintln`）。
+3. **Go 的 404 / 401 body 末尾都有一个 `\n`**。
+
+**回归网**：`FavoriteAuthorityPathParityTest`（2 例 = 12 条矩阵 + 1 条「少一段不得抛异常」），
+且每条都断言**状态码 + Location + Content-Type + nosniff + body 逐字节**；
+末尾 `verifyNoInteractions(lookupService)` 把「这 12 条都到不了业务层」也钉住
+⇒ 本测试**不需要 PG、不需要 Spring 上下文** ⇒ 不会因环境问题变绿/变红。
+
+### 10.3 ✅ 未知项闭合：common 的「description 在真实 gRPC 链路上逐字节保真」
+
+`docs/DRIFT/favorite/common.md` §4 记的那条「⚠️ 未做活体对拍」⇒ **本轮闭合**：
+
+- 新增 `FavoriteGrpcErrorWireFidelityTest`（**4 例**，`favorite-common` 模块，**真 in-process gRPC**）：
+  ① description 与 `FavoriteErrorMessages.getMsg(码)` **逐字节相同**；
+  ② 该 description 经 `bizCodeFromError` **能还原回原业务码**；
+  ③ 标准 gRPC 码在链路上保真（不被改写成 `UNKNOWN`）；
+  ④ **5304**（唯一只能靠文案反查还原的码）在真链路上也能还原。
+- **变异证据**：把 `FavoriteGrpcError.grpcError` 的 `withDescription(...)` 去掉 ⇒ **3 例转红**，
+  且错误信息精确展示因果链：`5304 → 1015`、`5007 → 5001`
+  ⇒ **证明「文案就是业务码的载体」这条核心机制，也证明该测试不是假绿**。
+
+### 10.4 ✅ 未知项闭合：proto 的「默认值不落 wire」的生成码级证据
+
+`docs/DRIFT/favorite/proto.md` §2 记的那条「⚠️ **未验**（本仓无生成码级证据）」⇒ **本轮闭合**：
+
+- 实测 `favorite-proto/target/generated-sources/protobuf/java/…/FavoriteFolder.java` 的
+  `writeTo`：**零值有条件表达式** ⇒
+  `if (folderId_ != 0L)` / `if (!com.google.protobuf.GeneratedMessageV3.isStringEmpty(name_))`
+  ⇒ **零值确实不落 wire** ⇒ 与 Go 侧「struct literal 无条件写零值」在隐式 presence 下**wire 等价**。
+- ⚠️ 顺带确认：生成码 extends `GeneratedMessageV3`（**full runtime**），
+  而 `protobuf-javalite` 虽在 pom 里也在 classpath 上 ⇒ **实测全仓 10 个 `*-proto` 都是这个模板**
+  （`message-proto` 已被验证过不会遮蔽生成码）⇒ **不是 favorite 域的新问题**，不记入漂移条目。
+
+### 10.5 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| `FavoriteAuthorityLookupTimeoutTest`（真 PG 慢查询） | **3 例全绿**；变异 ⇒ 1 例转红（elapsed 10024ms） |
+| `FavoriteAuthorityPathParityTest` | **2 例全绿**（12 条矩阵 + 少一段） |
+| `FavoriteGrpcErrorWireFidelityTest`（真 in-process gRPC） | **4 例全绿**；变异 ⇒ 3 例转红 |
+| `tools/authority-path-probe/favorite/run.sh` | **EXIT=0**（Go 侧 15 行矩阵 == `expected.txt`；Java 侧断言全绿） |
+| `tools/errmsg-probe/favorite/run-parity.sh` | **EXIT=0**（108 行 sha256 一致） |
+| `tools/metrics-probe/favorite/run.sh` | **EXIT=0** |

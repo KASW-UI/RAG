@@ -22,6 +22,17 @@
 
 ---
 
+## 撤销记录 · DEV-FAV-RPC-005（权威读的单次 lookup 3s 超时未接到 DB 查询）· ❌ **撤销**
+
+| | 内容 |
+|---|---|
+| **原结论（2026-10-25 第三轮）** | 「Go 的 3s 是**单次 lookup 的预算**，RAG 侧更贴近的等价物是「查询超时」而非「连接超时」⇒ 需要先确认 MyBatis-Plus 侧能否把 deadline 传到 SQL 层再决定是修还是登记」⇒ **待签字 · 修法待定**。 |
+| **本轮结论（2026-10-25 第四轮）** | ✅ **已修，不再是偏离** ⇒ 本条**撤销**。<br>① 仓库里**已有**成套机制且本模块**早已注册**：`DeadlineQueryTimeoutInjector`（按线程 deadline 给每条 SQL 设 `setQueryTimeout` ⇒ pgjdbc 发 CancelRequest ⇒ **与服务端语义同一条、连接保可用**）+ `SqlTimeoutStatusTranslator`（把 `57014` 翻成 `DEADLINE_EXCEEDED`）。<br>② 只需在**调用点**（`FavoriteAuthorityEndpointConfig`，与 Go 的绑定点 `http.go:44` 一致）用 `DeadlineState.bindToCurrent(now + 3_000)` 绑上 ⇒ 一次 lookup 的多条 SQL **共用一个 3s 预算** ⇒ 与 Go 的「一个 ctx 覆盖整次 lookup」逐字一致。<br>③ ⚠️ **不是** `@Options(timeout=3)`：那是**每条语句**各给 3s（6 条慢查询能拖到 18s）⇒ **量纲不同**。 |
+| **证据** | `FavoriteAuthorityLookupTimeoutTest`（3 例，真 PG Testcontainers + 真 MyBatis + 真 CancelRequest）⇒ **3 例全绿**；<br>**变异**（去掉 `bindToCurrent`）⇒ **1 例转红**，实测 elapsed = **10024ms**（落到安全网的 PG `statement_timeout=10s`，而不是 3s）⇒ **不是假绿**。<br>逐条记录 ⇒ [`../../DRIFT/favorite/rpc.md`](../../DRIFT/favorite/rpc.md) §10.1。 |
+| **保留的说明** | ⚠️ **超时值刻意硬编码 3s，不做配置项**：Go 侧是硬编码常量，做成配置就等于允许部署时改掉它 ⇒ 那时两侧行为又不一致了。 |
+
+---
+
 ## DEV-FAV-RPC-001 · 🟡 **待签字** · `favorite_request_seconds_counter` 的 Prometheus 渲染名
 
 | | 内容 |
@@ -76,15 +87,13 @@
 
 ---
 
-## DEV-FAV-RPC-005 · 🟡 **待签字** · 权威读的单次 lookup 3s 超时未接到 DB 查询（U4）
+## ~~DEV-FAV-RPC-005~~ · ❌ **已撤销**（2026-10-25 第四轮）
 
-| | 内容 |
-|---|---|
-| **Go 行为** | `authority/http.go:44` / `:80`：`ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)` ⇒ **约束的是 DB 查询**（`AuthoritativeFavoriteFact(ctx, …)` 把 ctx 传进 GORM）。慢查询 ⇒ 3s 后 ctx 到期 ⇒ 返回 error ⇒ 走 **503 "source unavailable"** 分支。 |
-| **RAG 行为** | `FavoriteAuthorityLookupService` 走 MyBatis-Plus + HikariCP，**没有**把该 deadline 接到连接/查询上 ⇒ 要等到 Hikari 的 `connection-timeout` 或 PG 的 `statement_timeout`。 |
-| **可观察差异** | 慢查询下的**响应时长**不同（3s vs 更久）；**功能分支不变**（查不到 → 404 / 出错 → 503）。 |
-| **为什么接受（暂记为待签字）** | ⚠️ 这一条**尚未定论**：Go 的 3s 是**单次 lookup 的预算**，RAG 侧更贴近的等价物是「查询超时」而非「连接超时」⇒ 需要先确认 MyBatis-Plus 侧能否把 deadline 传到 SQL 层（`@Options(timeout=…)`）再决定是修还是登记。 |
-| **状态** | 🟡 **待签字 · 修法待定** |
+> **权威读的单次 lookup 3s 超时未接到 DB 查询** ⇒ **已修，不再是偏离**。
+> ⇒ 完整记录见本档顶部的「撤销记录 · DEV-FAV-RPC-005」，
+> 逐条证据见 [`../../DRIFT/favorite/rpc.md`](../../DRIFT/favorite/rpc.md) §10.1。
+>
+> ⚠️ **别把这条当新回归去「修」**：它现在**已经与 Go 一致**了。
 
 ---
 

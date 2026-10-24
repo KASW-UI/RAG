@@ -111,3 +111,91 @@ RAG 侧把 4 个进程合并成 1 个 JVM ⇒ 该开关变成 `@ConditionalOnPro
 
 1. 凡把「独立进程」降级成「同进程开关」的域，必须在台账里写清**开启后的失败姿态**。
 2. 端点类能力建议加一个**就绪探针**（本轮未做，已记在 DEV-FAV-RPC-004 的「什么时候会变成真差异」里）。
+
+---
+
+## PIT-FAV-RPC-004 · 🕳️ **共享的「SQL 超时」机制只认 gRPC 线程 ⇒ HTTP 路径上它全程静默**
+
+### 现象
+
+仓库里有一套现成机制（本模块**早已注册**）：
+
+- `DeadlineQueryTimeoutInjector`（MyBatis 拦截器）—— 按**当前线程**的
+  `DeadlineState.remainingMillis()` 给每条 SQL 设 `setQueryTimeout`；
+- `SqlTimeoutStatusTranslator` —— 把 CancelRequest 的 SQLState `57014` 翻成 `DEADLINE_EXCEEDED`。
+
+而 `DeadlineState` **只由 gRPC 的 `RpcInterceptor` 绑定**（`RpcInterceptor.java:281 / :372`）。
+
+⇒ **权威读端点是 HTTP servlet**，跑在 Tomcat 的 worker 线程上 ⇒ 那条线程**没有** deadline
+⇒ ⇒ 拦截器读到的 `remainingMillis()` 是 `Long.MAX_VALUE`（= 无 deadline）⇒ **完全不动**
+⇒ **每条 SQL 都没有超时**。
+
+### 为什么会踩
+
+这套机制「在 rpc 侧工作得很好」⇒ 很容易以为**全进程**都受 deadline 保护。
+⚠️ 而它**静默失效**：没有 deadline 时拦截器**直接 return**（连 WARN 都没有）——
+「SQL 不设超时」正是引入它之前的行为 ⇒ **一切照常跑，只是保护没了**。
+
+⚠️ 更坑的一层：Go 侧的 3s 是 `context.WithTimeout(r.Context(), 3s)`，
+**绑在 handler 里**（`http.go:44`）⇒ 它对 **HTTP 路径**一样生效。
+⇒ **Go 有、RAG 没有** ⇒ 而这个差异要等到「DB 慢查询」才暴露。
+
+### 怎么不再踩
+
+1. **凡新增非 gRPC 的入口（HTTP servlet / 定时任务 / MQ 消费），
+   都要显式判断「这个线程有没有 deadline」** ⇒ 本域的修法是
+   在**调用点**用 `DeadlineState.bindToCurrent(now + 3_000)` 显式绑。
+2. ⚠️ **绑定位置要与 Go 一致**：Go 绑在 **handler** 里 ⇒ RAG 也绑在 servlet 里。
+   下沉到 service 会让 service 的**其它**调用方也被套上预算（Go 侧没有这层）。
+3. ⚠️ **不要用 `@Options(timeout=3)` 代替**：那是**每条语句**各给 3s，
+   而 Go 的一个 ctx **覆盖整次 lookup**（17 道校验里的多次查询共用）⇒ 6 条慢查询能拖到 18s
+   ⇒ **量纲不同**。
+4. **超时值硬编码，不做配置项**：Go 侧是硬编码常量 ⇒ 做成配置就等于允许部署时改掉它。
+
+⇒ 回归网 `FavoriteAuthorityLookupTimeoutTest`（真 PG + 真 CancelRequest），
+**且必须断言「耗时」**：只断言状态码区分不出「3s 预算到期」与「其它错误」。
+
+---
+
+## PIT-FAV-RPC-005 · 🕳️ **手写 servlet = 你要自己实现 `http.ServeMux`**
+
+### 现象
+
+Go 的权威读端点是 `http.NewServeMux()` + 一个 handler。
+RAG 侧是**手写的 `HttpServlet`**（`FavoriteAuthorityEndpointConfig.FavoriteAuthorityServlet`）。
+
+⇒ 2026-10-25 第四轮实测：**Go 侧有 5 处行为，手写 servlet 一处都没有**。
+
+| # | Go | RAG 修复前 |
+|---|---|---|
+| 1 | 少一段的 path ⇒ **404** | 🔴 抛 `StringIndexOutOfBoundsException` ⇒ **500** |
+| 2 | path 需要清理 ⇒ **301 + Location** | **404** |
+| 3 | 404 的 body = `"404 page not found\n"` + text/plain + nosniff | **只写状态码** |
+| 4 | 401 的 body = `"unauthorized\n"` | `"unauthorized"`（**少一个 `\n`**） |
+| 5 | mux 层判定**先于**鉴权 | 先撞鉴权 ⇒ **401** |
+
+### 为什么会踩
+
+1. **「Go 的 mux 是框架的一部分」这个事实不会出现在 handler 的源码里** ——
+   只读 `http.go` 的人看到的是「注册了一个 pattern + 一个 handler」，
+   **看不到 mux 自己会做 path 清理、会在匹配失败时给 404、会在清理后重定向**。
+2. ⚠️ **段数判定是最容易写错的一行**：
+   `rest.indexOf('/') != rest.lastIndexOf('/')` 在「**没有** `/`」时两者都是 **-1**
+   ⇒ 判据**不成立** ⇒ 继续往下走 ⇒ `substring(0, -1)` 抛异常。
+   ⇒ 一行判据、两个取值、一个符号，就制造了一个 **500**。
+3. **`http.Error` 用 `fmt.Fprintln`** ⇒ body 末尾**有** `\n`；
+   手写 `getWriter().write(msg)` ⇒ **没有** ⇒ 逐字节不一致但**看不出**。
+
+### 怎么不再踩
+
+⇒ **把 Go 的框架行为也变成可测的东西**：
+`tools/authority-path-probe/favorite/` 用 **Go 标准库**复刻 `ServeMux` +
+`http.Error` / `http.NotFound` / `http.Redirect` 的行为，输出 15 行矩阵，
+与 Java 侧的 `FavoriteAuthorityPathParityTest` **逐行比对**。
+
+⚠️ **探针只用标准库是刻意的**：本探针不需要真源仓库、不需要网络 ⇒ 能在任何机器上跑。
+⇒ 而**期望值必须来自 Go 真源的实测**，不是「读 Go 源码推断」。
+
+⚠️ **三条「照抄 Go 而不是照抄正确」的**（都是 Go 的既有行为，偏离会造成客户端行为分叉）：
+① `Location` **二次转义**（`%` → `%25`）；② 301 的 body 末尾**两个** `\n`；
+③ 404/401 的 body 末尾**一个** `\n`。

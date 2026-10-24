@@ -119,6 +119,16 @@ public class FavoriteAuthorityLookupService {
      * </ol>
      *
      * @throws FavoriteExceptions.FactUnavailableException 任一校验不通过
+     *
+     * <p><b>🔴 调用方必须先绑定查询预算</b>（Go: {@code http.go:44} / {@code :80} 的
+     * {@code context.WithTimeout(r.Context(), 3*time.Second)}）：
+     * Go 的 ctx 覆盖<b>整次 lookup</b>（含下面 17 道校验里的多次查询），
+     * 由它派生出的每条 SQL 都带同一个 deadline。
+     * ⇒ Java 侧由 {@code FavoriteAuthorityEndpointConfig} 在<b>调用点</b>用
+     * {@code DeadlineState.bindToCurrent(...)} 绑定（与 Go 的绑定点一致），
+     * 再由已注册的 {@code DeadlineQueryTimeoutInjector} 把它转成每条 SQL 的
+     * {@code setQueryTimeout}。
+     * ⚠️ <b>本方法不自带超时</b>：没绑 deadline 时 SQL 不设超时（与引入该机制前逐字一致）。
      */
     private AuthoritativeRow resolve(String producer, String eventId, int expectedSchema) {
         // Go: :208-211
