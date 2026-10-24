@@ -10,6 +10,13 @@
 > ⚠️ **证据强度上限 = 真 PG（Testcontainers）+ 真启动 + 源码逐行对照**；
 > **无双侧活体对拍**（Go 侧 `etcd` / Kafka 依赖不可拉起）、**未做变异验证**。
 > ⇒ 本台账里的 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环（AGENTS.md §0 证据强度分层）。
+>
+> ⚠️ **⚠️ 上面那段「证据强度上限 / 未做变异验证」只适用于 §0–§8（2026-10-23 的首轮）** ——
+> **§9 之后（2026-10-25 第十一轮）已大幅提高**：
+> · **变异验证** ✅ 已做（§11.7 的 M1/M2、§13.x 的 4 例转红等）；
+> · **双侧活体对拍** ✅ 已做 **6 项**（错误码契约 / path 形态 / 指标 result 语义 / v2 响应体形状 /
+>   **protobuf 消息体 wire 字节** / **DDL 逐列**）⇒ **U7 仍未闭**，但剩下的只是「整域」层面（业务编排与部署）。
+> ⇒ **读结论时按「§号越大证据越强」来读**，不要拿 2026-10-23 的上限套全文件。
 
 ---
 
@@ -21,9 +28,10 @@
 | 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §13.5**（**11 个测试类 / 82 例全绿**） |
 | 构建 | `mvn -o -pl service/favorite/favorite-rpc -am install` ⇒ **BUILD SUCCESS** |
 | 本轮发现并修复 | **6 处 L2 语义偏差**（§2）+ **2 处实现期真 bug**（§3） |
-| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选**：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK），见 §13.2 |
+| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选已签字**（2026-10-25）：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK）⇒ **本域已无 🏷 候选**，见 §13.2 |
 | 第九轮 | 🆕 **注释可核验性审计**（§15）—— 抓出 **3 条「断言对、锚点指错行」的真缺陷**，门禁级发现 **67 → 0**；**零行为改动** |
 | 第十轮 | 🆕 **补完 §15.8 记下的 I1 欠账**（§16）—— **153 条**内联断言补上锚点，再抓 **5 条**（4 条行号指错 + 1 条把 Java 事实误记成 Go）；**台账体检**：2 条死指针 + 3 处过期数字 + 4 处裸行号 + **6 处 RAG 侧锚点位移**已修，**6 个 Go 源文件未落点**已补记 ⇒ 新工具 `tools/ledger-lint/favorite/check-ledger-selfcheck.py`（EXIT=0） |
+| 第十一轮 | 🆕 **三条候选签字**（§17）—— DEV-FAV-API-002 / RPC-006 / RPC-007 ⇒ **本域已无 🏷 候选**；顺带改正 §0 头部一处**过期断言**（「未做变异验证」只适用 §0–§8）<br>📌 **域内「可动项」清单**（§18）—— 🔴 **权威读 HTTP 面的双侧活体对拍其实做得了**（不需要 etcd/Kafka/Redis/user-rpc/article-rpc）· 🟡 域外写入方盘点（V7 前置）· ⬜ 跨域项收口在 `global` |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -408,14 +416,18 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 | `docs/Intentional_Deviations/favorite/common.md` | DEV-FAV-COMMON-001 / -002 | ✅ **已签字** —— 两条的**豁免依据都是「不可达」**（favorite 域 56 个 `GRPCError` 调用点**没有一个**传 `codes.OK`；实际 error **全部**来自 gRPC stub）⇒ 各自附了「若将来出现该形态，必须先回来重评」的前置动作 |
 | `docs/Intentional_Deviations/favorite/rpc.md` | DEV-FAV-RPC-001 / -003 / -004 | ✅ **已签字** —— 各自附了前置动作（迁看板时改指标名 / CI 门禁改解析日志 / 开启开关前补就绪探针） |
 | `docs/Intentional_Deviations/favorite/rpc.md` | **DEV-FAV-RPC-002** | ❌ **本轮撤销**（见 §11.4）⇒ **不在签字范围内** |
+| `docs/Intentional_Deviations/favorite/api.md` | **DEV-FAV-API-002**（500 兜底 body） | ✅ **已签字**（2026-10-25）—— 附前置动作：客户端若靠 500 的 body 区分成因 ⇒ 告知客户端方（RAG 侧更宽，不是更窄）；「5xx ⇒ 不解析 body」的客户端**两侧都安全** |
+| `docs/Intentional_Deviations/favorite/rpc.md` | **DEV-FAV-RPC-006**（12 处命名差异） | ✅ **已签字**（2026-10-25）—— 附前置动作：若统一索引 / 约束名（迁库）⇒ **按名字 DROP / 重建的运维脚本会失效**（部署脚本层） |
+| `docs/Intentional_Deviations/favorite/rpc.md` | **DEV-FAV-RPC-007**（RAG 更严的 CHECK） | ✅ **已签字**（2026-10-25）—— 附前置动作：出现**第二个写入方**直接写 `favorite_item` ⇒ 写入方需知道 RAG 多这条约束（23514 拒）；**不需要改 RAG** |
 
 > ⚠️ **共享索引未动**：`docs/Intentional_Deviations/_INDEX.md` 属共享面（AGENTS.md §5.3）⇒ 本轮**不碰**。
-> ⇒ **合并后需主会话统一更新**：已签字条数 **49 → 55**
-> （新增 **6** 条：API-001 / COMMON-001 / COMMON-002 / RPC-001 / RPC-003 / RPC-004）。
+> ⇒ **合并后需主会话统一更新**：已签字条数 **49 → 58**
+> （新增 **9** 条：API-001 / **API-002** / COMMON-001 / COMMON-002 / RPC-001 / RPC-003 / RPC-004 / **RPC-006** / **RPC-007**）。
 > ⚠️ **口径待主会话定**：另有 **2 条已撤销**（DEV-FAV-RPC-002 / -005）—— 共享索引的口径
-> 是「一条 = 一个有**独立编号**的签字条目」，**没说撤销怎么算** ⇒ 若计入则 **57**。
-> ⚠️ **第六轮新增 1 条候选**（DEV-FAV-API-002，🏷 候选建议签）⇒ 若签字则 **56**（撤销不计）/ **58**（计入）。
-> 🔴 **订正**：本行原先写的是「49 → 51」—— **算术错了**（49 + 6 = 55，不是 51）⇒ 已改正。
+> 是「一条 = 一个有**独立编号**的签字条目」，**没说撤销怎么算** ⇒ 若计入则 **60**。
+> 🔴 **订正**：本行原先写的是「49 → 51」—— **算术错了**（49 + 6 = 55，不是 51）⇒ 已改正；
+> 第十轮再补 3 条（API-002 / RPC-006 / RPC-007）⇒ **55 → 58**。
+> ⇒ ✅ **favorite 域已无 🏷 候选**（本轮三条候选全部签字）。
 
 ### 11.2 🔴 D3 · v2 权威读端点的响应体形状错误（**新发现并已修**）
 
@@ -557,7 +569,7 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 ⇒ 依据 `gorm.io/gorm@v1.31.1/schema/index.go:119-134`（未命名的 `uniqueIndex` 走
 `namer.IndexName(table, column)` ⇒ `idx_<table>_<column>`，**与是否 UNIQUE 无关**）
 ⇒ **列集合相同、唯一性相同、约束语义相同 ⇒ 行为等价**，仅**标识符**不同。
-⇒ 已登记：`docs/Intentional_Deviations/favorite/rpc.md` 的 **DEV-FAV-RPC-006**（🏷 候选，建议签）。
+⇒ 已登记：`docs/Intentional_Deviations/favorite/rpc.md` 的 **DEV-FAV-RPC-006**（✅ **2026-10-25 已签字**）。
 
 > ⚠️ **为什么这条必须登记、不能默默「统一」**：两边名字不同 ⇒ **统一到任何一边都是行为变化**
 > （PG 目录里索引名变了；23505 的错误信息里带的约束名也变了）⇒
@@ -1072,3 +1084,92 @@ breakerName := path.Join(cc.Target(), method)
 
 ⇒ 元教训已登记 ⇒ [`docs/Pitfalls/favorite/rpc.md`](../../Pitfalls/favorite/rpc.md) **PIT-FAV-RPC-011**。
 
+
+---
+
+## 17. 2026-10-25 第十一轮（`align/favorite` 工作树 · 承 `a2fcbc4`）—— **三条候选签字**
+
+> 本轮**无代码改动**：只把三条 🏷 候选转成 ✅ 已签字，并同步各处状态引用。
+
+| 条目 | 签字前 | 签字后 | 附带的前置动作 |
+|---|---|---|---|
+| **DEV-FAV-RPC-006**（12 处约束 / 索引**命名**差异） | 🏷 候选，建议签 | ✅ **已签字** | 若统一索引 / 约束名（迁库）⇒ **按名字 DROP / 重建的运维脚本会失效**（部署脚本层） |
+| **DEV-FAV-RPC-007**（RAG 多一道 `target_revision scope` CHECK，**更严**） | 🏷 候选，建议签 | ✅ **已签字** | 出现**第二个写入方**直接写 `favorite_item` ⇒ 写入方需知道 RAG 多这条约束（23514 拒）；**不需要改 RAG** |
+
+⇒ **favorite 域现无 🏷 候选**。
+
+⚠️ **共享索引未动**（AGENTS.md §5.3 共享面禁写）⇒ **合并后需主会话统一更新**：
+`docs/Intentional_Deviations/_INDEX.md` 的已签字条数 **49 → 58**（+9：API-001 / **API-002** /
+COMMON-001 / COMMON-002 / RPC-001 / RPC-003 / RPC-004 / **RPC-006** / **RPC-007**）；
+⚠️ **口径待主会话定**：另有 **2 条已撤销**（RPC-002 / -005）⇒ 若计入则 **60**。
+
+### 17.1 顺带改正的一处**过期断言**
+
+§0 头部原写「**未做变异验证**」⇒ 那是 **2026-10-23 首轮（§0–§8）**的口径，
+**第五轮起已做**（§11.7 的 M1/M2 等）⇒ 已把该断言**限定到 §0–§8**，
+并补上「**§9 之后证据强度大幅提高**（变异验证 + 6 项双侧活体对拍）」的读法指引。
+
+⇒ 这正是第十轮体检抓出的那类「**过期断言**」——只是这次是从**台账自己**身上找到的。
+
+---
+
+## 18. 2026-10-25 第十一轮（续）· 📌 **favorite 域内「可动项」清单**
+
+> 用户问「现在域内可修漂移、未知项有哪些」⇒ 本节给出**带证据的清单**，
+> 并把「可动」与「不可动（跨域 / 环境 / 已决策）」分开。
+
+### 18.1 🔴 可动项 A：**权威读 HTTP 面的双侧活体对拍 —— 其实做得了**
+
+⚠️ **本节修正一处过宽的判定**：此前「U7 环境受限」的理由是
+「Go 侧 favorite-rpc 依赖 `etcd` + Kafka + Redis + article-rpc / user-rpc ⇒ 本机拉不起」。
+**这个理由只对 gRPC 整域成立**，对**权威读 HTTP 面不成立**：
+
+| 依赖 | Go `cmd/fact-authority/main.go` | RAG `FavoriteAuthorityEndpointConfig` |
+|---|---|---|
+| **etcd** | ❌ **不需要**（`:32-37` 只读 `FAVORITE_DATABASE_URL` / `_LISTEN` / `_TOKEN`） | ❌ 不需要（favorite 域**零 Redis 零 Kafka**，`application.yml:9-11`） |
+| **Kafka** | ❌ 不需要 | ❌ 不需要 |
+| **Redis** | ❌ 不需要 | ❌ 不需要 |
+| **PG** | ✅ 需要（`:38` `gorm.Open`） | ✅ 需要 |
+| **user-rpc / article-rpc** | ❌ **不需要** —— `AuthoritativeFavoriteFact`（`model/favorite_authority.go:208+`）只查 `favorite_fact_outbox` + `favorite_item` 两张表 | ❌ **不需要** —— `FavoriteAuthorityLookupService` 的依赖只有 `outboxMapper` / `favoriteItemMapper` / `deliveryValidator`（`:51-53`） |
+| **形态** | 独立 `http.Server`（`:56-57`，`ReadHeaderTimeout: 3s` / `WriteTimeout: 5s`） | path 参数 servlet（`@ConditionalOnProperty` 默认关 ⇒ 需 `favorite.fact.authority.enabled=true` + token ≥32 字节） |
+
+⇒ **两侧都是 HTTP + PG ⇒ 真双侧活体对拍可行**，且对拍面是**字节层**的
+（Go `json.NewEncoder(w).Encode(fact)` vs RAG Jackson 序列化 + `Cache-Control: no-store` + 401/404/503 形态）。
+
+⇒ **建议的对拍矩阵**（复用 `tools/authority-path-probe/favorite/` 的期望文件结构）：
+`v1`/`v2` × {token 正确 / 缺失 / 前缀错 / 重复 Authorization 头 / token 短于 32} ×
+{事件存在 / 不存在 / schema 不匹配 / 撤回态 / 撤回后收藏仍在} × {带 query / 路径不匹配}。
+
+⚠️ **本节只是「判定可做」，尚未实施** ⇒ 实现归下一轮。
+
+### 18.2 🟡 可动项 B：**域外直接写入方盘点**（V7 上线前置）
+
+| 项 | 状态 |
+|---|---|
+| 本域生产代码（唯一写入方 `insertFact`） | ✅ 已显式绑定 `created_at` / `updated_at` |
+| 本域测试的裸 INSERT（6 处） | ✅ 已改绑 |
+| **域外**的直接写入方（人工 SQL / 报表 / 另一个服务 / 数据修复脚本） | ⚠️ **未盘点** ⇒ **V7 上线前必须确认** |
+
+⇒ **可做成工具**：全仓扫 `favorite_fact_outbox` 的裸 INSERT（跨仓库 / 跨服务），
+把「盘点」从人工变成机检 ⇒ 建议归下一轮（**只读扫描，不改别域代码**）。
+
+### 18.3 ⬜ **不可动（跨域 / 收口在别处）** —— 本轮**只登记、不动手**
+
+| 项 | 归属 | 本域动作 |
+|---|---|---|
+| 容器层参数上限口径（Tomcat 数总「值」数 vs Go 数非空值数） | 🔴 `global`（与 hot 域 `DRIFT-HOTAPI-030` 同一格） | 已在 `api.md` §3 登记 |
+| `like-api` 的 `LikeRpcClient.java:43-48` 熔断注释（疑似把 Java 事实误记成未接入） | `like` 域文件 ⇒ 本域**只读** | 已登记在 §9.5，**未改** |
+| gRPC **帧层**字节对拍（HTTP2 / length-prefix / status 帧） | 库级差异 ⇒ **不属本域** | 已判定 |
+| **gRPC 整域**活体对拍 | 🔴 真受阻（Go gRPC server 注册走 etcd） | 已拆成 6 项局部对拍 |
+
+### 18.4 ✅ **本域已完成、无需再动**（避免重复劳动）
+
+| 类别 | 条数 | 落点 |
+|---|---|---|
+| **已签字偏离** | **9** 条 | API-001 / **API-002** / COMMON-001 / COMMON-002 / RPC-001 / RPC-003 / RPC-004 / **RPC-006** / **RPC-007** ⇒ **本域已无 🏷 候选** |
+| **已撤销**（前提被证伪 ⇒ 不是偏离） | 2 条 | RPC-002（`:89`/`:68` 实为**正确**）/ RPC-005（U4 已修） |
+| **已修漂移** | rpc 6 处 L2 + 2 处真 bug；api 4 处（L2 ×2 + 假断言 ×2 + L1 ×1） | §2 / §3 / `api.md` §2 |
+| **已闭合** | U1 / U2 / U3 / U4 / U5 / U6 | §11.6 |
+| **Go 侧源文件覆盖** | **50/50** 有台账落点 | §16.7 |
+
+⇒ **favorite 域本轮无「未决的已识别漂移」** —— 剩下的全是**证据强度问题**（§18.1 / §18.2）与**跨域项**（§18.3）。
