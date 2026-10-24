@@ -66,6 +66,11 @@ RAG_EVENTS="$RUN_DIR/calls-rag.log.events"
 BUILD=1
 KEEP=0
 SERVE_ONLY=0
+# ⚠️ **只把 diff-hot.py 认识的参数传下去**（2026-10-24 实测踩过）：
+#    脚本自己的开关（--no-build / --keep / --serve-only）若原样透传给 diff-hot.py，
+#    它会因「unrecognized arguments」直接 exit 2 ⇒ **整轮对拍根本没跑**，
+#    而外层只看到「EXIT=2」，很容易误读成「对拍失败」。
+DIFF_ARGS=()
 for a in "$@"; do
   case "$a" in
     --no-build) BUILD=0 ;;
@@ -73,7 +78,9 @@ for a in "$@"; do
     # 起完两套栈就停下、不跑对拍、进程留在前台。
     # 专供 probe-hot-limits.py 这类「栈已经在跑」的取证脚本复用编排逻辑。
     --serve-only) SERVE_ONLY=1 ;;
-    *) echo "未知参数：${a}（可选：--no-build / --keep / --serve-only）" >&2; exit 2 ;;
+    --only)     DIFF_ARGS+=("$a") ;;
+    --only=*)   DIFF_ARGS+=("$a") ;;
+    *) echo "未知参数：${a}（可选：--no-build / --keep / --serve-only / --only CASE）" >&2; exit 2 ;;
   esac
 done
 
@@ -236,7 +243,7 @@ set +e
 GO_HOT_API_BASE="http://127.0.0.1:$GO_API_PORT" \
 RAG_HOT_API_BASE="http://127.0.0.1:$RAG_API_PORT" \
 HOT_DIFFTEST_DIR="$RUN_DIR" \
-python3 "$HERE/diff-hot.py" "$@"
+python3 "$HERE/diff-hot.py" ${DIFF_ARGS[@]+"${DIFF_ARGS[@]}"}
 RC=$?
 set -e
 
