@@ -1,0 +1,85 @@
+# =============================================================================
+# task-rpc 对拍专用配置副本（Go 真源 service/task/rpc/etc/task.yaml 的副本）
+#
+# ⚠️ 纪律：Sea-RideTheWind_golang 是**冻结只读**的真源，本文件是副本。
+#    真源一个字节都不动；运行时用 `-f` 指到本文件。
+#    改法与 tools/difftest/conf/go/user-rpc.yaml 逐条同构。
+# =============================================================================
+Name: task.rpc
+ListenOn: 0.0.0.0:19005
+
+Log:
+  ServiceName: task-rpc
+  Mode: console          # difftest: 真源没写 Log 块，默认会落文件，绝不能写进冻结仓库
+
+# ---- 服务发现：Etcd 整块移除 ----
+# zrpc/server.go:42 `if c.HasEtcd()` 不成立 ⇒ 不注册。
+# Go 出处: go-zero v1.10.2 zrpc/config.go:83-85 / :78-81 HasEtcd()
+# ⚠️ 本域比 user 域多一条理由：etcd 不可达时 go-zero 的 keeper 会不停重连，
+#    日志会把真正的启动结果淹掉。
+
+# ---- Postgres ----
+# 真源写的是 Dsn: "host=${POSTGRES_ADDR} user=${POSTGRES_USER} ... TimeZone=Asia/Shanghai"
+# ⚠️ 占位符**不会**被展开：task.go:27 调的是 conf.MustLoad(*configFile, &c)，
+#    **没带 conf.UseEnv()**，而 go-zero v1.10.2 core/conf/config.go:62-63 只在
+#    opt.env 为真时才 os.ExpandEnv ⇒ ${...} 会被当成字面量，DSN 直接语法错。
+# 对拍副本必须写字面值（与 user-rpc.yaml 同款理由）。
+#
+# ⚠️ DBName 用 task_go_db（与 RAG 侧 task_rag_db 分开）：
+#    让 GORM AutoMigrate 与 Flyway 各自建自己的表，互不看到对方的账本对象。
+Postgres:
+  Dsn: "host=127.0.0.1 user=admin password=difftest dbname=task_go_db port=55433 sslmode=disable TimeZone=Asia/Shanghai"
+  MaxOpenConns: 50
+  MaxIdleConns: 50
+  ConnMaxLifetimeMinutes: 30
+
+# ---- Redis ----
+# ⚠️ task 域的 LikeRedis 只有 Addr/Pass/DB 三个字段真被读
+#    （service_context.go:25-29）；DialTimeoutMs 等在 yaml 里但无读取点，
+#    与真源保持一致，不额外添加。
+LikeRedis:
+  Addr: 127.0.0.1:56380
+  Pass: ""
+  DB: 0
+  DialTimeoutMs: 500
+  ReadTimeoutMs: 1000
+  WriteTimeoutMs: 1000
+  PoolSize: 200
+  MinIdleConns: 20
+  consumerName: task.reward.test
+
+# ---- Kafka ----
+# ⚠️ 本域**必须有真 Kafka**：四个 goroutine 里
+#   · goka 的三个 processor 走 goka.NewProcessor(WithTopicManagerBuilder(...))，
+#     连不上会在 initGoKa.go:143-145 / :183-185 / :217-219 **log.Fatal**（进程直接死）；
+#   · kq 的三个消费者是 MustNewQueue（initKafkaRaw.go:27 等）。
+#   ⇒ 没有 Kafka，Go 侧 task-rpc **根本起不来**，对拍无从谈起。
+Kafka:
+  Brokers:
+    - 127.0.0.1:59992
+  InTopic: task.logs.raw
+  RawUserTopic: task.logs.raw.User
+  RawArticleTopic: task.logs.raw.Article
+  OutUserTopic: task.logs.filtered.User
+  OutArticleTopic: task.logs.filtered.Article
+
+  GroupKafkaRaw: task.rpc.consumer31
+  GroupKafkaFilter: task.rpc.consumer101
+
+  GroupGoKa: task.rpc.consumer41
+
+  GroupGoKaUser: task.rpc.consumer61
+  GroupGoKaArticle: task.rpc.consumer71
+
+  GroupFilterUser: task.rpc.consumer81
+  GroupFilterArticle: task.rpc.consumer91
+
+  Offset: latest
+  Consumers: 8
+  Processors: 8
+
+Telemetry:
+  Name: task-rpc
+  Endpoint: jaeger:4317
+  Sampler: 1.0
+  Batcher: otlpgrpc

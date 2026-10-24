@@ -63,19 +63,33 @@ public class TaskUserCountConsumer {
      *
      * <p>⚠️ <b>无失败分支</b>：Go 的 {@code processUserCount} 唯一会出错的是
      * {@code v.(int64)} 的类型断言，而 goka 用 {@code codec.Int64} 保证了类型 ⇒ 实际不会触发。
-     * 所以本方法<b>不抛异常</b>（位点照常提交），与 Go 一致。
+     * 所以本方法<b>不主动抛异常</b>（位点照常提交），与 Go 一致。
+     *
+     * <p>⚠️ 唯一的例外是 <b>计数器存储本身</b>不可用（Redis 挂）——那种情况下
+     * {@link TaskCountStore#increment} 会抛，位点不提交、该条重投，
+     * 对应 Go 侧 goka store 写失败时的退避重投。
      */
     @KafkaListener(id = "task-goka-user-count",
             topics = "${task.kafka.raw-user-topic}",
             groupId = "${task.kafka.group-goka-user}",
             // ⚠️ goka 硬编码 OffsetOldest（initGoKa.go:173），与 kq 那三处的 "latest" 相反
-            properties = "auto-offset-reset=earliest",
+            //
+            // 🔴 2026-10-24 修正：必须是**点分**的 `auto.offset.reset`。
+            //    `@KafkaListener(properties=...)` 不走 Boot 松散绑定，原样传给 Kafka；
+            //    连字符形式 `auto-offset-reset` **不是 Kafka 的合法配置名 ⇒ 被直接忽略**
+            //    （实测：consumer config dump 里 `auto.offset.reset = latest`，
+            //      且 Kafka 打出 "These configurations '[auto-offset-reset]' were supplied but are not used yet."）
+            //    ⇒ 此前这里写的 earliest **从未生效**，实际是全局的 latest。
+            //    详见 {@link TaskRawLogRouter} 同名注解处的完整说明。
+            properties = "auto.offset.reset=earliest",
             containerFactory = "kafkaListenerContainerFactory")
     public void onMessage(ConsumerRecord<String, String> record) {
         String key = record.key() == null ? "" : record.key();
 
         // Go: cur := ctx.Value()（首条为 nil ⇒ 0）; cur++; ctx.SetValue(cur)
-        long cur = countStore.increment(key);
+        // ⚠️ group 作为命名空间传入：Go 侧两个 goka processor 各有独立 store
+        //    （goka processor.go:82 按 group 名分 LevelDB 目录），见 TaskCountStore 类注释。
+        long cur = countStore.increment(topics.getGroupGokaUser(), key);
 
         // Go: ctx.Emit(goka.Stream(outTopicTaskUser), ctx.Key(), cur)
         try {

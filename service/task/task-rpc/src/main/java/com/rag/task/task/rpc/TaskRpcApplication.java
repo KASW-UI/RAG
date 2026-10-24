@@ -158,15 +158,29 @@ public class TaskRpcApplication {
      * 若在 Java 侧加 {@code FixedBackOff} 做 N 次进程内重试，那是<b>新增行为</b>
      * （改变重试节奏与日志量）。所以错误处理器只记日志、不 seek、不提交。
      *
-     * <p>⚠️ <b>但要诚实说明一处差异</b>：Go 用的 segmentio/kafka-go Reader 带
-     * {@code CommitInterval: 1s}（{@code go-queue/kq/queue.go:125,151}），
-     * 它会<b>周期性自动提交已 fetch 的位点</b>，因此 Go 那句
-     * 「error ⇒ 不 CommitMessages」在实践中<b>会被自动提交抵消</b>（约 1 秒后照样提交）。
-     * Java 侧 {@code enable-auto-commit: false} + {@code AckMode.RECORD}
-     * 是<b>严格更强</b>的「失败不提交」。
-     * ⇒ 失败消息在 Java 侧的重投次数可能多于 Go 侧。
-     * 这是本仓 like-rpc / article-rpc 已统一采纳的约定
-     * （取 Go 代码声明的契约，而非 kafka-go 的实现副作用），此处保持一致。
+     * <p>⚠️ <b>但要诚实说明一处曾经写错、2026-10-24 已纠正的断言</b>：
+     * 本 javadoc 此前写「Go 用的 segmentio/kafka-go Reader 带 {@code CommitInterval: 1s}
+     * （{@code go-queue/kq/queue.go:125,151}），它会周期性自动提交已 fetch 的位点，
+     * 因此 Go 那句『error ⇒ 不 CommitMessages』在实践中会被自动提交抵消」
+     * —— <b>这条是错的</b>，两处证据：
+     * <ol>
+     *   <li><b>kafka-go 自己的文档</b>（segmentio/kafka-go@v0.4.47 {@code reader.go:811-812}）：
+     *       「{@code FetchMessage} does not commit offsets automatically when using
+     *       consumer groups. Use CommitMessages to commit the offset.」
+     *       而 kq 用的正是 {@code FetchMessage}（{@code go-queue/kq/queue.go:264}）
+     *       ⇒ {@code CommitInterval} 的自动提交路径<b>根本不生效</b>。</li>
+     *   <li><b>2026-10-24 活体对拍</b>（{@code tools/difftest/run-task-kafka-malformed.sh} Case C）：
+     *       往 filtered.User 注入一条 key 解析失败的消息后，
+     *       <b>两侧</b>的 committed offset 都不推进（实测基线=3，2s 后=3，10s 后=3）
+     *       ⇒ Go 侧并没有「被自动提交抵消」。</li>
+     * </ol>
+     * ⇒ <b>两侧的真实差异只有一处</b>：失败的那一刻<b>都</b>不提交位点，
+     * 但<b>都</b>会继续处理下一条；下一条成功时提交会<b>跨过</b>失败那条
+     * ⇒ 失败那条实质被跳过（运行期不重投；只有在下一次 rebalance 且此前没有后续消息时才会重投）。
+     * 本实现的 {@code noCommitErrorHandler}（不重试 / 不 seek / 不 ack / 不 commitRecovered）
+     * 正是这条语义的等价载体。
+     * <p>⇒ 「不做进程内重试」的理由仍然成立（Go kq 没有重试循环），
+     * 但它<b>不是</b>因为「Go 会被自动提交抵消」。
      */
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory(

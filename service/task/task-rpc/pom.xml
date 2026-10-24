@@ -214,4 +214,36 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <!--
+            ⚠️ 集成测试必须关掉 Ryuk，否则 TaskProgressUpsertParityTest 的 15 条用例
+            **静默全跳**（不是失败，是 skip，reactor 照报 BUILD SUCCESS）。
+
+            原因链（每一环都实测过，见 docs/DRIFT/task/rpc.md 的 DRIFT-TASK-RPC-PITFALL-01）：
+              1. 本类加了 @EnabledIfDockerAvailable ⇒ 判定发生在**类级**、早于任何测试方法；
+              2. 该注解内部走 DockerAvailableDetector → DockerClientFactory.instance().client()，
+                 而 client() 会顺带确保 **Ryuk 资源回收容器**可用；
+              3. 本机拉不到 testcontainers/ryuk:0.14.0 ⇒ 抛 ContainerFetchException；
+              4. DockerAvailableDetector 的实现是 `catch (Throwable) { return false; }`
+                 ⇒ 「基础设施拉镜像失败」与「Docker 真不可用」被压成同一个 false；
+              5. 整类被判 disabled ⇒ 15 条一条不跑。
+
+            本模块此前是**全仓唯一漏配这一项**的容器模块
+            （article/comment/favorite/follow/like/message + users 各 rpc/api 都配了）。
+            注：Testcontainers 2.x 的 ResourceReaper 只读环境变量，
+            `testcontainers.properties` 与 -D 系统属性均无效 —— 与 message-rpc 同款，不要换写法。
+        -->
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

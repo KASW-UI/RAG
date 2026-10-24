@@ -46,6 +46,7 @@
 #   bash tools/difftest/check-plaintext400-headers.sh          # 两个域都跑（默认 all）
 #   bash tools/difftest/check-plaintext400-headers.sh admin    # 只跑 admin 域
 #   bash tools/difftest/check-plaintext400-headers.sh user     # 只跑 user 域
+#   bash tools/difftest/check-plaintext400-headers.sh task     # 只跑 task 域
 #
 # 为什么需要分域：本脚本是**共享资产**，同时守 user 域与 admin 域。
 # 2026-10-24 实测：admin 域两侧**归一化后逐字一致**（✅），
@@ -57,15 +58,29 @@ set -uo pipefail
 
 SCOPE="${1:-all}"
 case "$SCOPE" in
-    all|admin|user) ;;
-    *) echo "用法：$0 [all|admin|user]" >&2; exit 2 ;;
+    all|admin|user|task) ;;
+    *) echo "用法：$0 [all|admin|user|task]" >&2; exit 2 ;;
 esac
 
-RAG_USER="http://127.0.0.1:59900"
-GO_USER="http://127.0.0.1:18888"
-RAG_ADMIN="http://127.0.0.1:58889"
-GO_ADMIN="http://127.0.0.1:18889"
+RAG_USER="${RAG_USER:-http://127.0.0.1:59900}"
+GO_USER="${GO_USER:-http://127.0.0.1:18888}"
+RAG_ADMIN="${RAG_ADMIN:-http://127.0.0.1:58889}"
+GO_ADMIN="${GO_ADMIN:-http://127.0.0.1:18889}"
+RAG_TASK="${RAG_TASK:-http://127.0.0.1:58886}"
+GO_TASK="${GO_TASK:-http://127.0.0.1:18886}"
 fail=0
+
+# 端口是否可达 —— 用来让「某一域没起」变成 **SKIP** 而不是 **FAIL**。
+# ⚠️ 只探 TCP 连通性，不发业务请求：发业务请求去判断「有没有起」会把
+#    「起来但业务 400」误判成「没起」。
+port_open() {
+    local url="$1" host port
+    host=$(printf '%s' "$url" | sed -E 's#^[a-z]+://([^:/]+).*#\1#')
+    port=$(printf '%s' "$url" | sed -E 's#^[a-z]+://[^:/]+:?([0-9]*).*#\1#')
+    [[ -z "$port" ]] && port=80
+    (exec 3<>"/dev/tcp/$host/$port") >/dev/null 2>&1 && { exec 3<&- 2>/dev/null; exec 3>&- 2>/dev/null; return 0; }
+    return 1
+}
 
 # 取响应头（一次性取全部字段：status / content-type / nosniff）
 fetch() {  # url, body → 写三个全局变量：F_STATUS / F_CT / F_NOSNIFF
@@ -143,23 +158,48 @@ echo "    RAG admin = $RAG_ADMIN"
 echo "    Go  admin = $GO_ADMIN"
 
 if [[ "$SCOPE" == "all" || "$SCOPE" == "user" ]]; then
-    probe_pair "[user] register 缺 email（GoRequiredFieldException 分支）" \
-        "$RAG_USER/user/v1/register" "$GO_USER/usercenter/v1/user/register" \
-        '{"username":"e1hdr","password":"pw123456"}'
+    # ⚠️ 域栈没起 ⇒ SKIP 而非 FAIL：某个域的差异不该拖红其它域的守门。
+    if port_open "$RAG_USER"; then
+        probe_pair "[user] register 缺 email（GoRequiredFieldException 分支）" \
+            "$RAG_USER/user/v1/register" "$GO_USER/usercenter/v1/user/register" \
+            '{"username":"e1hdr","password":"pw123456"}'
 
-    probe_pair "[user] register email 类型错（数字塞进 string 字段）" \
-        "$RAG_USER/user/v1/register" "$GO_USER/usercenter/v1/user/register" \
-        '{"username":"e2hdr","password":"pw123456","email":123}'
+        probe_pair "[user] register email 类型错（数字塞进 string 字段）" \
+            "$RAG_USER/user/v1/register" "$GO_USER/usercenter/v1/user/register" \
+            '{"username":"e2hdr","password":"pw123456","email":123}'
+    else
+        echo "    [SKIP] user 域：$RAG_USER 不可达（该域栈未起）"
+    fi
 fi
 
 if [[ "$SCOPE" == "all" || "$SCOPE" == "admin" ]]; then
-    probe_pair "[admin] create 缺 username（public 路径 ⇒ 400 text/plain）" \
-        "$RAG_ADMIN/admin/v1/create" "$GO_ADMIN/admincenter/v1/admin/create" \
-        '{}'
+    if port_open "$RAG_ADMIN"; then
+        probe_pair "[admin] create 缺 username（public 路径 ⇒ 400 text/plain）" \
+            "$RAG_ADMIN/admin/v1/create" "$GO_ADMIN/admincenter/v1/admin/create" \
+            '{}'
 
-    probe_pair "[admin] create email 类型错" \
-        "$RAG_ADMIN/admin/v1/create" "$GO_ADMIN/admincenter/v1/admin/create" \
-        '{"username":"e4hdr","password":"pw123456","email":123}'
+        probe_pair "[admin] create email 类型错" \
+            "$RAG_ADMIN/admin/v1/create" "$GO_ADMIN/admincenter/v1/admin/create" \
+            '{"username":"e4hdr","password":"pw123456","email":123}'
+    else
+        echo "    [SKIP] admin 域：$RAG_ADMIN 不可达（该域栈未起）"
+    fi
+fi
+
+if [[ "$SCOPE" == "all" || "$SCOPE" == "task" ]]; then
+    # ⚠️ task-api 的 400 分支（畸形 JSON / 空 body）**不经过 task-rpc**
+    #    ⇒ 只起 task-api 就能守（DRIFT-TASK-API-004）。
+    if port_open "$RAG_TASK"; then
+        probe_pair "[task] get 畸形 JSON" \
+            "$RAG_TASK/taskcenter/v1/task/get" "$GO_TASK/taskcenter/v1/task/get" \
+            '{not json'
+
+        probe_pair "[task] get 空 body" \
+            "$RAG_TASK/taskcenter/v1/task/get" "$GO_TASK/taskcenter/v1/task/get" \
+            ''
+    else
+        echo "    [SKIP] task 域：$RAG_TASK 不可达（task-api 未起）"
+    fi
 fi
 
 echo "════════════════════════════════════════════════"

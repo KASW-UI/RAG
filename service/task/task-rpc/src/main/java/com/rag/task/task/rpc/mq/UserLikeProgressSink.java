@@ -98,7 +98,7 @@ public class UserLikeProgressSink {
         this.properties = properties;
         this.taskId = properties.getLike().getTaskId();
         this.target = properties.getLike().getTarget();
-        this.ttl = Duration.ofDays(properties.getLike().getInitTtlDays());
+        this.ttl = properties.getLike().getInitTtl();
     }
 
     // ==================== 消费 ====================
@@ -117,7 +117,16 @@ public class UserLikeProgressSink {
             topics = "${task.kafka.out-user-topic}",
             groupId = "${task.kafka.group-filter-user}",
             // ⚠️ kq 硬编码 Offset: "latest"（initUserFilter.go:47）
-            properties = "auto-offset-reset=latest",
+            //
+            // 🔴 2026-10-24 修正：必须是**点分**的 `auto.offset.reset`。
+            //    `@KafkaListener(properties=...)` 不走 Boot 松散绑定，原样传给 Kafka；
+            //    连字符形式 `auto-offset-reset` **不是 Kafka 的合法配置名 ⇒ 被直接忽略**
+            //    （实测：consumer config dump 里 `auto.offset.reset = latest`，
+            //      且 Kafka 打出 "These configurations '[auto-offset-reset]' were supplied but are not used yet."）
+            //    ⇒ 本处写的 latest 此前**从未生效**；它「看起来对」只是因为
+            //      全局默认恰好也是 latest ⇒ **属于碰巧对，不是配置生效**。
+            //    ⇒ 显式写成点分形式后，即使全局默认将来改成 earliest，本处也仍是 latest。
+            properties = "auto.offset.reset=latest",
             containerFactory = "kafkaListenerContainerFactory")
     public void onMessage(ConsumerRecord<String, String> record) {
         String key = record.key() == null ? "" : record.key();
@@ -314,9 +323,14 @@ public class UserLikeProgressSink {
      * <b>只有 {@code setNX(byte[],byte[])}，没有带 TTL 的重载</b>
      * （{@code javap RedisStringCommands} 实测），而带 TTL 的版本只在高层的
      * {@code ValueOperations.setIfAbsent(K, V, Duration)} 上。
-     * SessionCallback 恰好两边都满足：既能一条连接里发一批命令（= Go 的 pipeline），
-     * 又能通过 {@code exec()} 拿到<b>与命令同序</b>的结果列表 ——
-     * 而 Go 正是靠 {@code it.cmd.Result()} 在 exec 之后按下标配对的。
+     * SessionCallback 恰好两边都满足：一条连接里发一批命令（= Go 的 pipeline），
+     * 且 {@code executePipelined} <b>自己</b>返回<b>与命令同序</b>的结果列表 ——
+     * 而 Go 正是靠 {@code it.cmd.Result()} 在 {@code pipe.Exec} 之后按下标配对的。
+     *
+     * <p>⚠️ <b>结果元素是单个 {@code Boolean}，不是事务模式下的 {@code [value, ok]} 数组</b>
+     * （真 Redis 实测：{@code [true, true, true]}，元素类型 {@code java.lang.Boolean}）——
+     * 因为 Go 的 {@code Pipeline()} 不是事务（go-redis {@code redis.go:1508}）。
+     * {@code RedisPipelines.toBooleans} 依赖这一点，已在那边加了防呆。
      */
     private List<Boolean> pipelineSetNx(List<Long> chunk) {
         return RedisPipelines.toBooleans(RedisPipelines.exec(redis, ops -> {
@@ -326,11 +340,23 @@ public class UserLikeProgressSink {
         }));
     }
 
-    /** 批量 HSET 同一组字段到各自的进度 Hash。 */
+    /**
+     * 批量 HSET 同一组字段到各自的进度 Hash。
+     *
+     * <p>⚠️ <b>出错必须抛出，不能吞</b>：Go 出处 {@code like_sink.go:210-225} ——
+     * {@code pipe2 := c.rdb.Pipeline()} … {@code if _, err := pipe2.Exec(ctx); err != nil { return err }}。
+     * 而 Go 的 {@code flushOnce}（{@code like_sink.go:134-142}）在
+     * {@code lazyInitTaskIfNeeded} 出错时<b>直接 return</b>，后面的
+     * {@code flushRedis} / {@code flushPostgres} <b>都不会执行</b>。
+     *
+     * <p>⇒ 若这里吞掉错误，RAG 会继续往下写 PG 初始行，最终变成
+     * <b>「PG 有初始行、Redis 进度 Hash 缺失」</b>，与 Go 的最终态分叉。
+     * 2026-10-23 Kafka 端到端对拍时发现并修正（此前误用 {@code execQuietly}）。
+     */
     private void pipelineHSet(List<Long> chunk,
                               java.util.function.LongFunction<String> keyBuilder,
                               Map<String, String> fields) {
-        RedisPipelines.execQuietly(redis, ops -> {
+        RedisPipelines.exec(redis, ops -> {
             for (Long uid : chunk) {
                 ops.opsForHash().putAll(keyBuilder.apply(uid), fields);
             }

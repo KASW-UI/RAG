@@ -1,0 +1,39 @@
+# =============================================================================
+# task-api 对拍专用配置副本（Go 真源 service/task/api/etc/task.yaml 的副本）
+#
+# ⚠️ 纪律：Sea-RideTheWind_golang 是**冻结只读**的真源，本文件是副本。
+#    改法与 tools/difftest/conf/go/user-api.yaml 同构。
+# =============================================================================
+Name: task-api
+Host: 0.0.0.0
+# ⚠️ 18886 = Go 真源的真实取值（etc/task.yaml:3 + manage.sh:842 `-p 18886:18886`），
+#    本仓 task-api 也已对齐到 18886 ⇒ **两侧同端口号但各自独立监听**，
+#    对拍时 RAG 侧必须换端口（用 58886），否则会互相抢。
+Port: 18886
+
+Log:
+  ServiceName: task-api
+  Mode: console          # difftest: 绝不写进冻结仓库
+
+TaskRpc:
+  # difftest: 用 Endpoints 直连，BuildTarget() 对 Endpoints 短路 ⇒ 不需要 etcd
+  # Go 出处: go-zero v1.10.2 zrpc/config.go:91-95 RpcClientConf.BuildTarget()
+  Endpoints:
+    - 127.0.0.1:19005
+  # 真源写的是 `Target: 127.0.0.1:9005`；对拍时 Go rpc 跑在 19005，故改 Endpoints。
+  # ⚠️ 两者的 Timeout 都取 zrpc/config.go:31 的 `json:",default=2000"`（yaml 未配 Timeout），
+  #    改 Endpoints 不影响超时取值 ⇒ 两端超时预算相同，可比。
+  NonBlock: true
+
+# ⚠️ Auth 保留真源原样（AccessSecret/AccessExpire）—— 本域路由**不带 JWT**
+#    （handler/routes.go 只有 rest.WithPrefix），这两个字段在 Go 侧没有消费点，
+#    但删掉会掩盖「它们确实无人读取」这一事实。
+Auth:
+  AccessSecret: "replace-with-a-long-random-secret"
+  AccessExpire: 1800
+
+Telemetry:
+  Name: task-api
+  Endpoint: jaeger:4317
+  Sampler: 1.0
+  Batcher: otlpgrpc

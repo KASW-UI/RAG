@@ -2,6 +2,8 @@ package com.rag.task.task.rpc.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.time.Duration;
+
 /**
  * 两个 sink 的运行参数 —— 对应 Go 端两处<b>互相独立</b>的常量块：
  * <ul>
@@ -44,8 +46,18 @@ public class TaskSinkProperties {
         /** Go {@code like_sink.go:33} {@code target = 5}。达标判定与 DB 的 target 列都用它。 */
         private long target = 5L;
 
-        /** Go {@code like_sink.go:188,284,339}：init / done / like:total 三处 TTL 均为 90 天。 */
-        private long initTtlDays = 90L;
+        /**
+         * Go {@code like_sink.go:188,284,339}：init / done / like:total 三处 TTL 均为 90 天。
+         *
+         * <p>⚠️ <b>类型必须是 {@link Duration}，不能是 {@code long}</b>（2026-10-23 修正）：
+         * 本字段曾经叫 {@code initTtlDays: long}，而 {@code application.yml} 里写的是
+         * {@code init-ttl: 90d} —— Spring Boot 的 relaxed binding 要求
+         * 「配置键去掉分隔符 == JavaBean 属性名去掉分隔符」，{@code initttl ≠ initttldays}，
+         * 且 {@code ignoreUnknownFields} 默认 {@code true} ⇒ <b>这个键被静默丢弃</b>，
+         * 改 yaml 不报错、也不生效。实测见 {@code TaskSinkPropertiesBindingTest}。
+         * 改成 {@link Duration} 后键名与 yaml 逐字对应（{@code init-ttl}），配置面才是活的。
+         */
+        private Duration initTtl = Duration.ofDays(90);
 
         /** Go {@code like_sink.go:70} {@code redisPipeMax = 5000}：Redis pipeline 分块上限。 */
         private int redisPipeMax = 5000;
@@ -72,12 +84,12 @@ public class TaskSinkProperties {
             this.target = target;
         }
 
-        public long getInitTtlDays() {
-            return initTtlDays;
+        public Duration getInitTtl() {
+            return initTtl;
         }
 
-        public void setInitTtlDays(long initTtlDays) {
-            this.initTtlDays = initTtlDays;
+        public void setInitTtl(Duration initTtl) {
+            this.initTtl = initTtl;
         }
 
         public int getRedisPipeMax() {
@@ -114,11 +126,21 @@ public class TaskSinkProperties {
         /** Go {@code article_sink.go:21} {@code articleTarget = int64(3)}。 */
         private long target = 3L;
 
-        /** Go {@code article_sink.go:22} {@code articleDoneTTL = 90d + 30d}：done 标记与 like:cnt 的 TTL。 */
-        private long doneTtlDays = 120L;
+        /**
+         * Go {@code article_sink.go:22} {@code articleDoneTTL = 90d + 30d}：done 标记与 like:cnt 的 TTL。
+         *
+         * <p>⚠️ 类型说明同 {@link Like#getInitTtl()}：必须是 {@link Duration} 才能与 yaml 的
+         * {@code done-ttl: 120d} 对上（2026-10-23 实测修正，见 TaskSinkPropertiesBindingTest）。
+         */
+        private Duration doneTtl = Duration.ofDays(120);
 
-        /** Go {@code article_sink.go:23} {@code articleInitTTL = 24h}：init 标记 TTL（比点赞路短得多）。 */
-        private long initTtlDays = 1L;
+        /**
+         * Go {@code article_sink.go:23} {@code articleInitTTL = 24h}：init 标记 TTL（比点赞路短得多）。
+         *
+         * <p>⚠️ 类型说明同 {@link Like#getInitTtl()}：yaml 写的是 {@code init-ttl: 24h}，
+         * 键名与类型都对得上才是活配置。
+         */
+        private Duration initTtl = Duration.ofHours(24);
 
         /** Go {@code article_sink.go:25} {@code redisPipeMaxDefault = 5000}。 */
         private int redisPipeMax = 5000;
@@ -152,20 +174,20 @@ public class TaskSinkProperties {
             this.target = target;
         }
 
-        public long getDoneTtlDays() {
-            return doneTtlDays;
+        public Duration getDoneTtl() {
+            return doneTtl;
         }
 
-        public void setDoneTtlDays(long doneTtlDays) {
-            this.doneTtlDays = doneTtlDays;
+        public void setDoneTtl(Duration doneTtl) {
+            this.doneTtl = doneTtl;
         }
 
-        public long getInitTtlDays() {
-            return initTtlDays;
+        public Duration getInitTtl() {
+            return initTtl;
         }
 
-        public void setInitTtlDays(long initTtlDays) {
-            this.initTtlDays = initTtlDays;
+        public void setInitTtl(Duration initTtl) {
+            this.initTtl = initTtl;
         }
 
         public int getRedisPipeMax() {

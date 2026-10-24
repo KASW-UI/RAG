@@ -17,6 +17,28 @@ spring:
   application:
     name: task-api
 
+  # ============== multipart 关掉（本服务不支持 multipart）==============
+  # ⚠️⚠️ 属性名是 `spring.servlet.multipart.enabled`，**没有 `mvc.`**。
+  #    Boot 4 的 MultipartAutoConfiguration 上是
+  #      @ConditionalOnBooleanProperty(name = "spring.servlet.multipart.enabled", matchIfMissing = true)
+  #    （在 spring-boot-servlet-4.0.8.jar 里）⇒ 写成 `spring.mvc.servlet.multipart.enabled`
+  #    是**静默失效**的：属性没人读，开关根本没关上。
+  #    ⚠️ 上一轮台账（DRIFT-TASK-API-003）记的就是那个错名字 ⇒ 当时那句
+  #    「已实测排除 Spring 侧」是**假阴性**（探针用的就是错名字，一直是通的）。
+  #
+  # 为什么关：Go 侧 task-api **没有 multipart 概念**——
+  #   · service/task/api/internal/handler/routes.go:15-25 只有一条路由；
+  #   · gettaskhandler.go:19-21 是裸 `json.NewDecoder(r.Body)`，
+  #     **不读任何 form part**，multipart body 到它那儿就是一段 JSON 文本，
+  #     解析失败 ⇒ 400。
+  # ⇒ Spring 侧也不该让 multipart resolver 先把 body 吃掉
+  #   （DispatcherServlet 的 multipart resolver 调 getParts() 消费 body），
+  #   否则 body 到 handler 时已被消费 ⇒ 报「Required request body is missing」。
+  # 关掉之后 multipart body 原样流给 Jackson ⇒ 与 Go 侧同样按 JSON 解析 ⇒ 同样的 400。
+  servlet:
+    multipart:
+      enabled: false
+
   # ============== Nacos 服务发现 ==============
   # Go 侧 task-api **不走服务发现**（etc/task.yaml 用 Target 直连，见下方 grpc 段）。
   # 这里保留 Nacos 配置是为了「切到 discovery:///task-rpc 时不必改代码/依赖」。
@@ -30,14 +52,24 @@ spring:
 # =============================================================================
 # HTTP server
 # =============================================================================
-# ⚠️ 端口两处不一致，取值理由与 hot-api 的 application.yml 完全同款：
-#    - Go  etc/task.yaml:3          Port: 18886
-#    - 本仓 Infrastructure.md:89    task → 18809（Go manage.sh 号段的 1:1 预占）
-#    端口是**部署形态**不是 wire 契约（客户端按 URL 打，不按端口号写死在协议里），
-#    而 Infrastructure.md 是本仓的编排事实源 ⇒ 落 18809。
-#    Go 的原值用 TASK_API_PORT 传回即可，无需改代码。
+# 端口：18886 = Go 的**真实取值**（两处一致）
+#   · Go service/task/api/etc/task.yaml:3   Port: 18886
+#   · Go manage.sh:842                      -p 18886:18886
+#
+# ⚠️ 本行 2026-10-23 从 18809 改为 18886（DRIFT-TASK-API-001）。原值 18809 来自
+#    Infrastructure.md:89 的「端口号段预占表」，那份表自己写明
+#    「Java 版只是先按这个号段预占，**等具体域实装时再校验**」（Infrastructure.md:91）
+#    —— task 域现已实装，就是那个校验点。
+#    且 Infrastructure.md 的 18809 与 Go 的真实值 18886 **对不上**，
+#    同一份文档 §3 对 hot 写的 18897 同样与 Go 的 8893 对不上（该表是照 18889/18891/18893
+#    的等差序列**推算**出来的，不是从 Go manage.sh 抄的）。
+#    本仓已实装的域一律用 Go 原值，task 不应例外：
+#       article-api 8889 = Go 8889   comment-api 8888 = Go 8888
+#       message-api 8892 = Go 8892   like-api 18887 = Go 18887
+#    （like-api 尤其关键：Infrastructure.md 给的是 18801，实装时采用了 Go 的 18887。）
+#    原值仍可用环境变量传回：TASK_API_PORT=18809。
 server:
-  port: ${TASK_API_PORT:18809}
+  port: ${TASK_API_PORT:18886}
   address: 0.0.0.0
   servlet:
     context-path: /

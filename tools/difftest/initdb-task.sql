@@ -1,0 +1,15 @@
+-- task 域对拍专用的第二个数据库（RAG 侧）。
+--
+-- ⚠️ 为什么只有一个：
+--   task_go_db 由容器的 POSTGRES_DB 环境变量在初始化时创建（见 docker-compose.task-kafka.yml），
+--   Go 侧的 GORM AutoMigrate 只建**表**、不建库。
+--   task_rag_db 归 RAG 侧的 Flyway 建表（同样只建表、不建库）⇒ 必须手工补建。
+--
+-- ⚠️ 为什么两侧**不能共用一个库**：
+--   Go 用 GORM AutoMigrate，RAG 用 Flyway 迁移脚本，两边各自管自己的表对象；
+--   共用会让任一方先启动就把表建出来，另一方看到「表已存在但不是我的迁移产物」。
+--   ⇒ 物理隔离到两个库，对拍时各自只看到自己那一侧的对象。
+--
+-- ⚠️ 本文件**只在容器首次初始化时**执行（/docker-entrypoint-initdb.d/）。
+--    容器已存在时改这里无效 ⇒ 要重跑请 `docker compose -f docker-compose.task-kafka.yml down -v`。
+CREATE DATABASE task_rag_db;

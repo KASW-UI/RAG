@@ -105,8 +105,8 @@ public class ArticleLikeProgressSink {
         this.objectMapper = objectMapper;
         this.taskId = properties.getArticle().getTaskId();
         this.target = properties.getArticle().getTarget();
-        this.doneTtl = Duration.ofDays(properties.getArticle().getDoneTtlDays());
-        this.initTtl = Duration.ofDays(properties.getArticle().getInitTtlDays());
+        this.doneTtl = properties.getArticle().getDoneTtl();
+        this.initTtl = properties.getArticle().getInitTtl();
     }
 
     /** Go {@code articleAgg}：{@code UserID int64; total int64}。 */
@@ -135,7 +135,13 @@ public class ArticleLikeProgressSink {
             //    **不是** GroupFilterArticle（task.rpc.consumer91，Go 侧无读取点）。
             //    见 TaskKafkaTopics 的类注释。
             // ⚠️ kq 硬编码 Offset: "latest"（initArticleFilter.go:40）
-            properties = "auto-offset-reset=latest",
+            //
+            // 🔴 2026-10-24 修正：必须是**点分**的 `auto.offset.reset`。
+            //    `@KafkaListener(properties=...)` 不走 Boot 松散绑定，原样传给 Kafka；
+            //    连字符形式 `auto-offset-reset` **不是 Kafka 的合法配置名 ⇒ 被直接忽略**
+            //    ⇒ 本处写的 latest 此前**从未生效**（「碰巧对」：全局默认恰好也是 latest）。
+            //    详见 {@link TaskRawLogRouter} 同名注解处的完整说明。
+            properties = "auto.offset.reset=latest",
             containerFactory = "kafkaListenerContainerFactory")
     public void onMessage(ConsumerRecord<String, String> record) {
         String key = record.key() == null ? "" : record.key();
@@ -310,7 +316,11 @@ public class ArticleLikeProgressSink {
         fields.put("createAt", String.valueOf(now));
         fields.put("updateAt", String.valueOf(now));
 
-        RedisPipelines.execQuietly(redis, ops -> {
+        // ⚠️ 出错必须抛出，不能吞：Go 出处 article_sink.go:308-310
+        //    `if _, err := pipe2.Exec(ctx); err != nil { return err }`，
+        //    而 Go 的 flushOnce 在 lazyInit 出错时直接 return，后面的 flushRedis /
+        //    flushPostgres 都不会执行 ⇒ 吞掉会让 RAG 变成「PG 有初始行、Redis Hash 缺失」。
+        RedisPipelines.exec(redis, ops -> {
             for (InitCandidate c : newOnes) {
                 ops.opsForHash().putAll(
                         TaskRedisKeys.articleTaskProgress(taskId, c.userId(), c.articleId()), fields);
