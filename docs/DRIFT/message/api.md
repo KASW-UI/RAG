@@ -1407,9 +1407,26 @@ RAG ： Content-Type: text/plain;charset=utf-8       （无空格）
 Go  ： Traceparent: 00-<trace-id>-<span-id>-01     （每个响应都有）
 RAG ： 无
 ```
-⇒ Go 侧是 tracing 中间件带出来的（W3C trace context 头）。
 ⇒ 归类：**响应头集合不对称** ⇒ 影响分布式追踪的**跨域接力**（下游拿不到上游的 trace context）。
-⚠️ RAG 侧是否有等价的传播机制（OTel）需另查 ⇒ 本轮只登记事实，**不下「谁更对」的结论**。
+
+> ✅ **2026-10-24 第十轮：RAG 侧「有没有等价传播机制」这个问题已经查实了** ——
+> 原台账写「需另查 ⇒ 本轮只登记事实，不下结论」，现在有结论了：
+>
+> | 事实 | 证据 |
+> |---|---|
+> | **Go 侧的 `Traceparent` 响应头来自 go-zero 内置的 trace 中间件**（**不是** message 域的业务代码） | `go-zero@v1.10.2/rest/handler/tracehandler.go:61` `propagator.Inject(spanCtx, propagation.HeaderCarrier(w.Header()))`<br>⇒ 传播器是 `core/trace/propagation.go:9-11` 的 `otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))` ⇒ `TraceContext{}.Inject` 写出的正是 **`traceparent`**（+ `tracestate`）到 `w.Header()` |
+> | **前提是 `Telemetry` 开启** | `service/message/api/etc/messagecenter.yaml:18-22`：`Telemetry: {Name: message-api, Endpoint: jaeger:4317, Sampler: 1.0, Batcher: otlpgrpc}` |
+> | **RAG 侧「有 span，只是没写成响应头」** | ① span **存在**：`service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:305-310 / 346-351 / 376-378` 用 `Span.fromContext(ctx)` 打 `service.name` / `http.route` / `http.method` / `http.status_code`<br>② OTel 依赖**存在**：`service/message/message-api/pom.xml:131-135` `opentelemetry-exporter-otlp`（全仓 18 个组件都有）<br>③ **缺的只是最后一步**：把 span 的 trace context 写进 HTTP 响应头 |
+>
+> ⇒ **结论（替代原来那句「需另查」）**：**RAG 不是「没有追踪」，是「追踪没透出到响应头」**。
+> 修法落点是 `service/common` 的 `HttpMiddleware`（或 message-api 自己的 filter），
+> 用 `Span.fromContext(ctx).getSpanContext()` 的 `traceId` / `spanId` / `traceFlags`
+> 拼成 `00-<32hex>-<16hex>-01` 写进 `w.Header()` ⇒ **与 Go 的输出格式逐字节同构**。
+>
+> ⚠️ **为什么它仍然算「共享面」**：落点在 `service/common` ⇒ **影响全部 10 个 api** ⇒
+> 与 `MSGAPI-010`（charset）/ `MSGAPI-011`（reason phrase）**同类** ⇒ **需用户拍板后再动**。
+> ⚠️ **不得做的事**：不要在 message 域单独加一个 filter 就完事 ——
+> 那样会变成「message-api 有、其它 9 个 api 没有」的**新的不对称**（比现状更难解释）。
 
 ### 4. `DRIFT-MSGAPI-010` 的修法（已定位，**本轮未实施**）
 
