@@ -307,6 +307,8 @@ Java: String.trim() → "\u00A0"  → 非空 → 通过校验 → 写入一条 c
 | **UNRESOLVED-MSG-002** | `ServerInterceptor` 挂载只有 `verify(builder).intercept(...)` 这层证据 | 「starter 会在 build 阶段 apply 所有 Configurer」属 starter 自身契约。端到端层面由 §6.6.6 的双端口对拍 + `exp-b1-timeout-cancel.sh` 兜底 |
 | **UNRESOLVED-MSG-003** | 双端口对拍的 12 档**尚未实际执行过** | 脚本已就位且 `javac` 通过、`bash -n` 通过，但**未跑过完整两套栈**（需 `run.sh --keep --serve-only` 起栈）。首次执行前不要把它当作已验证 |
 | **UNRESOLVED-MSG-004** | DRIFT-MSG-004/005/006 未各配独立防回退用例 | 它们目前只被 `MessageTransactionWiringTest` 的「上下文能起来」间接锁住。若有人删掉 `@MapperScan` / `spring-boot-flyway` / Bean 名，测试会红，但**红的原因不是断言点名了它**，而是连带失败 —— 建议后续拆出 `MessageContextWiringTest` 逐条点名 |
+
+> ✅ **2026-10-24 第九轮已关闭**：新增 `MessageContextWiringTest`（4 例，**逐条点名**）+ `MessageApiJarExecutableWiringTest`（2 例）⇒ 详见下方 Unresolved 表。
 | **UNRESOLVED-MSG-005** | `AutoMigrate`（Go 每次启动校验表结构）vs `Flyway`（Java 一次性迁移后不再校验）的存量表漂移 | 需确认是否存在已存在的非 Flyway 建表的库 |
 
 ---
@@ -1118,6 +1120,8 @@ RAG application.yml:16
 |---|---|
 | `AGENTS.md §6.3 问题 3`：**「`message-rpc` 归一到显式 `@Import` 仍未做（现在能跑属撞运气）」** | 🔴 **原结论已过期，修正为：已完成。** `MessageRpcApplication.java:64` 是**裸** `@SpringBootApplication`（**已无** `scanBasePackages = "com.rag.common"`），`:67-87` 是 8 项显式 `@Import`，`:104-108` 是 `GrpcServerConfigurer`。⚠️ **该条仍写在 `AGENTS.md` 里，属他文件，本轮无权改 —— 需由持有者同步修正，否则后人仍会以为 message-rpc 是「撞运气」** |
 | `UNRESOLVED-MSG-004`：`@MapperScan` / `spring-boot-flyway` / Bean 名 三项**无点名式防回退用例** | ✅ **复核为仍然成立**。`grep -rn "MapperScan\|nacosRegistration\|Flyway\|flyway" service/message/message-rpc/src/test/` 命中 **0 条**。三项目前只被 `MessageTransactionWiringTest` 的「上下文能起」**间接**锁住 —— 红了但红的原因不点名 |
+
+> ✅ **2026-10-24 第九轮已关闭**（本行是**当时**的复核结论）：`MessageContextWiringTest` 已把四项逐条点名 ⇒ 详见 Unresolved 表。
 | `UNRESOLVED-MSG-003`：`tools/difftest` 的 12 档**从未实际执行** | ✅ **复核为仍然成立**。`tools/difftest/` 下只有 `exp-difftest-grpc-errors-message.sh` 与 `grpc-message-dual-port-runner.java`（均 2026-10-22 12:17），**没有任何结果产物目录** |
 | `UNRESOLVED-MSG-005`：`AutoMigrate`（每次启动校验表结构）vs `Flyway`（一次性迁移） | ✅ 仍成立，且本轮**部分加重**：`V2__create_message_conversation.sql:27-29` 用的是**裸 `ALTER TABLE … ADD CONSTRAINT`**，**没有 `IF NOT EXISTS`**。在一个「已被 GORM `AutoMigrate` 建过 `message_conversation`」的库上，这条迁移**会失败**。这条在本轮实测里没暴露，是因为 Testcontainers 每次都是**全新空库** |
 | `DRIFT-MSG-012`（部署面：无 servlet 容器 vs 引了 web starter） | 🟡 **本轮可降级**。`mvn -pl service/message/message-rpc dependency:tree` 实测：无 `tomcat-embed-core` / `jetty` / `undertow` / `spring-boot-starter-web`，只有 `tomcat-embed-el`（纯表达式库）⇒ **不会起 servlet 容器**。剩余差异仅为 classpath 上多一个 `spring-boot-web-server`（为满足 nacos-discovery 对 `WebServerInitializedEvent` 的反射引用而必需）。**建议把 `UNKNOWN` 改为「已确证无行为影响」** |
