@@ -47,6 +47,47 @@
 
 ---
 
+## SD-HOT-API-002 ✅ 已留痕 · 客户端**断连**的取消信号不再向 100 次补全传播
+
+> 🟥 **2026-10-24 第十一轮回填**：本条原先**只有汇总表一行、正文缺章节** ⇒ 已补齐。
+
+- **Component**：`GET /hot/v1/articles` 的补全阶段，**客户端断连**时的取消传播
+- **Go 出处**：Go 把**请求 ctx** 传进 100 次补全的每一次调用 ⇒ 客户端断连 ⇒ ctx 被取消 ⇒ **在飞的 gRPC 立即取消**
+- **RAG 形态**：Servlet 断连**不会自动取消**在飞的 gRPC；RAG 用「请求线程取一次预算 + 显式下传」保住了**超时**语义，
+  但**断连**语义不等价 ⇒ 🔴 第七轮**活体坐实**（裸 socket + `SO_LINGER=0` 强制 RST）：
+  Go 侧断连后 **1~3ms** 内 8 个在飞 gRPC **全部取消**；RAG 侧**要等到 2s deadline** 才结束，**且断连后继续发第二批**下游调用
+- **留痕位置**：`docs/DRIFT/hot/api.md` 的 **D3** 行 + **DRIFT-HOTAPI-025**（⚠️ 后者代码在 `service/common` ⇒ **跨域**，
+  hot 域内不可修）
+
+---
+
+## SD-HOT-API-003 ✅ 已留痕 · Go panic 时指标被误记为 `success`，RAG 按客户端实际看到的结果记 `fail`
+
+> 🟥 **2026-10-24 第十一轮回填**：本条原先**只有汇总表一行、正文缺章节** ⇒ 已补齐。
+
+- **Component**：`hot_api_request_total` 的结果标签（`success` / `fail`）
+- **Go 出处**：Go 的 `defer` 读的是**命名返回值** `err` ⇒ panic 展开时该变量**仍为 nil** ⇒ 指标被记成 `success`
+- **RAG 形态**：Java 按客户端**实际看到的结果**记 `fail`
+- **为何接受**：**该路径无代码可达**（panic 是不可恢复的进程级事件，客户端根本收不到响应）⇒ 差异**无可观察后果**
+- **留痕位置**：`docs/DRIFT/hot/api.md` 的 **D4** 行
+
+---
+
+## SD-HOT-API-004 ✅ 已留痕 · 5 个 `hot_api_*` 指标**真的被暴露**（Go 注册了但无端点暴露）
+
+> 🟥 **2026-10-24 第十一轮回填**：本条原先**只有汇总表一行、正文缺章节** ⇒ 已补齐。
+
+- **Component**：`hot_api_*` 指标的**暴露面**（是否有 `/actuator/prometheus` 端点）
+- **Go 出处**：Go 侧 5 个 collector 全部 `prometheus.MustRegister(...)` 注册到**默认 registry**，
+  但 `hotcenter.yaml` 的 Prometheus 块**无 `Host`**、`DevServer` 块在 go-zero v1.10.2 **无对应字段**
+  ⇒ **注册了但没有端点暴露**
+- **RAG 形态**：Spring Boot Actuator **真的暴露** `/actuator/prometheus` ⇒ 指标**可被抓取**
+- **为何接受**：这是**单向增强**（RAG 多一个观察面，Go 侧看不到）⇒ **不改任何指标数值、不改任何业务判定**
+- **⚠️ 边界**：本条**只**管「有没有端点」；**分桶边界的数值差异**是另一条（`DRIFT-HOTAPI-018`，**已修** ⇒ 两侧都是 12 个 `le` 边界）
+- **留痕位置**：`docs/DRIFT/hot/api.md` 的 **D5** 行
+
+---
+
 ## SD-HOT-API-005 ✅ 已签字 · 下游 gRPC 失败的日志串用 grpc-java 形态
 
 - **Component**：hot-api 业务错误日志的 `error_reason` 字段，在**下游 gRPC 调用失败**时的形态

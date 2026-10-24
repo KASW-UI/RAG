@@ -153,3 +153,47 @@
 - **可观察影响**：**低且是修复方向**（把「假活」变成「探针可见的失败」）——
   唯一残留差异是失败时 gRPC 端口仍可连、方法仍可调（Go 是直接断连）。
 - **留痕位置**：`docs/DRIFT/hot/rpc.md` 的 DRIFT-HOTRPC-010 条目 + `NacosRegistration` 的 javadoc。
+
+---
+
+## SD-1 ✅ 已签字（第一轮，2026-10-22）· 分区撤销路径的**锁升级**：Go 必然自死锁，RAG 改「锁内取引用 → 锁外落盘」
+
+> 🟥 **2026-10-24 第十一轮回填**：本条原先**只有汇总表一行、正文缺章节** ⇒ 已补齐。
+> ⚠️ **编号说明**：`SD-1 / SD-2 / SD-3` 是**第一轮的旧编号**，与 `SD-HOT-RPC-001..004` 是**两批不同条目**，不是同一批的两种写法。
+
+- **Component**：`HotPartitionSketchRegistry` 的分区撤销（revoke）路径
+- **Go 出处**：`hot_handler.go:132` `hkMu.Lock()` → `:136` `syncToRedis` → `:196` `hkMu.RLock()`
+  ⇒ Go 的 `sync.RWMutex` **不可重入** ⇒ **第一次 rebalance 撤销分区即必然自死锁**，
+  `defer Unlock` 永不执行，`delete` 从不执行 ⇒ **分片快照从未落盘过**
+- **RAG 形态**：改用 Go 另外两个调用点已有的形态——**锁内取引用 → 锁外 Redis I/O**
+- **签字理由**：**照抄会复现 Go 的死锁**；且 Java 的 `ReentrantReadWriteLock` **允许**写锁持有者再取读锁
+  ⇒ 直译会把 Go 的死锁**悄悄变成「能正常跑」** ⇒ 两套实现行为不一致且**零告警**
+  ⇒ **这类差异不能靠 review 结构发现，只能靠「先复现 Go 的行为」再决定怎么写**
+- **可观察影响**：Go 侧该路径**实际不可达**（必然死锁）⇒ 差异无客户端可见后果，但**必须留痕**
+- **留痕位置**：`docs/DRIFT/hot/rpc.md` 的 **G-HOT-001** + `FileTree/hot/rpc.md §12.5`
+
+---
+
+## SD-2 ✅ 复核通过（2026-10-23）· Redis ZSet member 非字符串时**跳过**（Go 是裸类型断言 ⇒ panic）
+
+- **Component**：`HotRedisSnapshotStore` 的 ZSet member 解析
+- **Go 出处**：`hot_handler.go:370` `scoreMap[z.Member.(string)] += …` ——
+  **裸类型断言**，member 非字符串直接 **panic**；且该代码在 `periodicMerge` goroutine 内，
+  **不在 sarama 的 recover 范围内 ⇒ 崩进程**
+  （⚠️ **同文件 `:275` 与 `get_hot_articles_logic.go:55` 都有 `, ok` 保护** ⇒ **Go 自身三处不一致**）
+- **RAG 形态**：改为**跳过**该 member
+- **复核结论**：2026-10-23 复核**通过**，且等级可下调为 `IMPLEMENTATION DIFFERENCE`
+  （Go 的裸断言在**其自身另外两个调用点**都做了保护 ⇒ 属 Go 侧的历史不一致，不是契约）
+- **留痕位置**：`docs/DRIFT/hot/rpc.md` 的 **G-HOT-002**
+
+---
+
+## SD-3 ✅ 复核通过（2026-10-23，照抄 Go）· Redis 脚本报错被**误报成「lock lost」**
+
+- **Component**：`HotRedisSnapshotStore` 的 Lua 脚本执行结果判定
+- **Go 出处**：`hot_handler.go:311` / `:408` `result, _ := …Int()` ——
+  Redis **脚本执行失败**也被报成「lock lost」⇒ **排障指向错误方向**
+- **RAG 形态**：**照抄**（AGENTS.md §15：不擅自修复 Go 行为）
+- **复核结论**：2026-10-23 复核**通过**；「两边一样错」是**刻意保留**的行为，
+  已在代码注释与测试里留痕 ⇒ **不得**被当新漂移「顺手修回」
+- **留痕位置**：`docs/DRIFT/hot/rpc.md` 的 **G-HOT-003**
