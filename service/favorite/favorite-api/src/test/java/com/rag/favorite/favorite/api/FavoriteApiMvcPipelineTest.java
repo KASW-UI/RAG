@@ -307,7 +307,7 @@ class FavoriteApiMvcPipelineTest {
     @Test
     @DisplayName("gRPC 错误 → 按 description 反查还原业务码（5304 收藏暂不可撤回）")
     void rpcFailureMapsBizCodeByDescription() throws Exception {
-        // Go：favorite-rpc 用 GRPCError(codes.FailedPrecondition, 5304) 发出，
+        // Go：favorite-rpc 用 GRPCError(codes.FailedPrecondition, 5304) 发出，（service/favorite/rpc/internal/logic/delete_favorite_logic.go:86）
         // wire 上只有 grpc-status + description 文案 ⇒ api 侧只能靠文案反查。
         when(stub.deleteFavorite(any())).thenThrow(
                 Status.FAILED_PRECONDITION.withDescription("收藏暂不可撤回").asRuntimeException());
@@ -572,7 +572,7 @@ class FavoriteApiMvcPipelineTest {
     @Test
     @DisplayName("GET /item/list：query 里带无值的额外参数 → 仍按 folderId 正常处理")
     void listItemsIgnoresValuelessExtraQueryParam() throws Exception {
-        // Go：r.Form = {"folderId": ["123"], "456": [""]} ⇒ form 通道只取 "folderId" ⇒ 123
+        // Go：r.Form = {"folderId": ["123"], "456": [""]} ⇒ form 通道只取 "folderId" ⇒ 123（go-zero@v1.10.2/rest/httpx/requests.go:85）
         when(stub.getFavoritesByFolder(any())).thenReturn(
                 com.rag.favorite.favorite.proto.GetFavoritesByFolderResp.newBuilder().build());
 

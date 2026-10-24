@@ -117,3 +117,17 @@ mvn -o -pl service/favorite/favorite-common test
 
 > ⚠️ 探针**没有**挂进 `mvn test`：它需要 Go toolchain + module cache，进 CI 等于给流水线引入新依赖。
 > 它是独立脚本，由人（或后续 agent）在改了 favorite 码表后手动跑。
+
+---
+
+## 6. 2026-10-25 第十轮（`align/favorite` 工作树 · 承 `a72a6f2`）
+
+| 项 | 结果 |
+|---|---|
+| 改了什么 | **2 条内联注释**里的 Go 断言补上 `文件:行号`（口径见 `rpc.md` §16.2） |
+| 可执行逻辑改动 | **零** |
+| 码表规模 | **24 个** —— 复核 2026-10-25：Go `errmsg.go` 的 const 块 **24**、`codeMsg` **24**、RAG 枚举 **24** ⇒ **三方一致** ✅ |
+| 全量测试 | **29 例全绿**（4 个测试类），**BUILD SUCCESS** |
+| 探针 | `tools/errmsg-probe/favorite/run-parity.sh` ⇒ **EXIT=0**（未变） |
+| 审计器 | `check-assertion-sources.py` ⇒ **EXIT=0** |
+| 台账自检 | `tools/ledger-lint/favorite/check-ledger-selfcheck.py` ⇒ **EXIT=0**（本档的 `DEV-FAV-COMMON-001/002` 两条编号均已闭合） |

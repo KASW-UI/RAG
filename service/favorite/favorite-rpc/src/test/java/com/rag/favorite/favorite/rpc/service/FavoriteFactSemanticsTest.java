@@ -51,7 +51,7 @@ class FavoriteFactSemanticsTest {
         @Test
         @DisplayName("normalizeFolderName 只 TrimSpace，不小写、不压缩内部空白")
         void folderNameIsTrimOnly() {
-            // Go: return strings.TrimSpace(name)
+            // Go: return strings.TrimSpace(name)（service/favorite/rpc/internal/logic/helper.go:56-58）
             assertEquals("My Folder", FavoriteRpcSupport.normalizeFolderName("  My Folder  "));
             // ⚠️ 不可"顺手"加 toLowerCase —— 唯一键 uk_user_folder_name 建在规范化后的值上
             assertEquals("MyFolder", FavoriteRpcSupport.normalizeFolderName("MyFolder"));
@@ -63,7 +63,7 @@ class FavoriteFactSemanticsTest {
         @Test
         @DisplayName("normalizeTargetType 强制小写 —— 这是唯一键 uk_folder_target 的前提")
         void targetTypeIsLowercased() {
-            // Go: strings.ToLower(strings.TrimSpace(targetType))
+            // Go: strings.ToLower(strings.TrimSpace(targetType))（service/favorite/rpc/internal/logic/helper.go:60-62）
             assertEquals("article", FavoriteRpcSupport.normalizeTargetType("  Article  "));
             assertEquals("post", FavoriteRpcSupport.normalizeTargetType("POST"));
             // 🔴 Locale 必须与 Go 的 Unicode ToLower 一致；土耳其语 locale 下 "I".toLowerCase() = "ı"
@@ -122,7 +122,7 @@ class FavoriteFactSemanticsTest {
         @Test
         @DisplayName("十进制字符串：任意精度都接受（含 > 2^53 的雪花 ID）")
         void acceptsDecimalStrings() {
-            // Go: raw[0] == '"' ⇒ 解包成 text，再走 ParseInt
+            // Go: raw[0] == '"' ⇒ 解包成 text，再走 ParseInt（service/favorite/rpc/internal/model/favorite_authority.go:79-86）
             assertEquals(1001L, FavoriteDeliveryValidator.parseAuthorityId(node("\"1001\"")));
             // 🔴 生产雪花 ID 超过 2^53 ⇒ 只有字符串形态才允许
             assertEquals(9007199254740993L,
@@ -132,7 +132,7 @@ class FavoriteFactSemanticsTest {
         @Test
         @DisplayName("裸 JSON 数字：必须 <= 2^53-1")
         void rejectsBareNumbersAbove53Bits() {
-            // Go: if raw[0] != '"' && id > maxExactJSONInteger { return 0, false }
+            // Go: if raw[0] != '"' && id > maxExactJSONInteger { return 0, false }（service/favorite/rpc/internal/model/favorite_authority.go:90-92）
             assertEquals(1001L, FavoriteDeliveryValidator.parseAuthorityId(node("1001")));
             assertEquals(9007199254740991L,
                     FavoriteDeliveryValidator.parseAuthorityId(node("9007199254740991")));
@@ -143,7 +143,7 @@ class FavoriteFactSemanticsTest {
         @Test
         @DisplayName("非规范十进制一律拒绝：前导零 / 正号 / 负数 / 空串")
         void rejectsNonCanonicalForms() {
-            // Go: strconv.FormatInt(id, 10) != text ⇒ false
+            // Go: strconv.FormatInt(id, 10) != text ⇒ false（service/favorite/rpc/internal/model/favorite_authority.go:87）
             assertEquals(0L, FavoriteDeliveryValidator.parseAuthorityId(node("\"01001\"")));
             assertEquals(0L, FavoriteDeliveryValidator.parseAuthorityId(node("\"+1001\"")));
             assertEquals(0L, FavoriteDeliveryValidator.parseAuthorityId(node("\"-1\"")));
@@ -182,7 +182,7 @@ class FavoriteFactSemanticsTest {
             assertEquals("platform", ok.value.tenantId);
             assertEquals("1001", ok.value.subjectId);
 
-            // tenant_id 必须是 "platform" —— Go: legacy.TenantID != "platform" ⇒ false
+            // tenant_id 必须是 "platform" —— Go: legacy.TenantID != "platform" ⇒ false（service/favorite/rpc/internal/model/favorite_authority.go:109-112）
             assertFalse(FavoriteDeliveryValidator.subjectV1(
                     1, node("{\"authority_id\":\"rtw.identity\",\"tenant_id\":\"other\",\"subject_id\":\"1001\"}")).ok);
         }
@@ -190,7 +190,7 @@ class FavoriteFactSemanticsTest {
         @Test
         @DisplayName("schema=2 接受两字段，并归一化成 v1 三元组")
         void acceptsV2Shape() {
-            // Go: :118 —— legacy = {v2.Issuer, "platform", v2.SubjectID}
+            // Go: service/favorite/rpc/internal/model/favorite_authority.go:118 —— legacy = {v2.Issuer, "platform", v2.SubjectID}
             FavoriteDeliveryValidator.SubjectResult ok = FavoriteDeliveryValidator.subjectV1(
                     2, node("{\"issuer\":\"rtw.identity\",\"subject_id\":\"1001\"}"));
             assertTrue(ok.ok);
@@ -227,7 +227,7 @@ class FavoriteFactSemanticsTest {
         @Test
         @DisplayName("🔴 SubjectRefV1 的 equals 是值相等 —— retract 前驱一致性校验的正确性载体")
         void subjectRefValueEquality() {
-            // Go: prior.SubjectRef != fact.SubjectRef 用的是 struct 值比较。
+            // Go: prior.SubjectRef != fact.SubjectRef 用的是 struct 值比较。（service/favorite/rpc/internal/model/favorite_authority.go:275）
             // Java 若用引用比较，所有 retract 的权威读都会永远失败。
             FavoriteAuthorityFact.SubjectRefV1 a =
                     new FavoriteAuthorityFact.SubjectRefV1("rtw.identity", "platform", "1001");
@@ -502,7 +502,7 @@ class FavoriteFactSemanticsTest {
     @Test
     @DisplayName("🔴 null 与空串不可混用 —— 这正是 target_revision 的语义边界")
     void sameFavoriteRevisionDistinguishesNullFromEmpty() {
-        // Go: if left == nil || right == nil { return left == nil && right == nil }
+        // Go: if left == nil || right == nil { return left == nil && right == nil }（service/favorite/rpc/internal/model/favorite_authority.go:96-101）
         assertTrue(FavoriteDeliveryValidator.sameFavoriteRevision(null, null));
         assertFalse(FavoriteDeliveryValidator.sameFavoriteRevision(null, ""));
         assertFalse(FavoriteDeliveryValidator.sameFavoriteRevision("", null));

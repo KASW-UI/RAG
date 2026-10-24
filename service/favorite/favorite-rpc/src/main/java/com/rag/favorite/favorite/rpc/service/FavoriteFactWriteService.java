@@ -98,7 +98,7 @@ public class FavoriteFactWriteService {
             isolation = Isolation.READ_COMMITTED,
             rollbackFor = Exception.class)
     public void insertFavorite(FavoriteItemEntity item) {
-        // Go: :276-277 —— SELECT folder FOR UPDATE
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:276-277 —— SELECT folder FOR UPDATE
         FavoriteFolderEntity folder = lockFolder(item.getFolderId());
         if (folder == null) {
             // Go: :277 —— tx.First 的 ErrRecordNotFound 原样返回
@@ -106,22 +106,22 @@ public class FavoriteFactWriteService {
             //  这里再失败只可能是并发删除 ⇒ 归一化为 NotFound 哨兵）
             throw new FavoriteExceptions.NotFoundException("favorite_folder");
         }
-        // Go: :280-282
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:280-282
         if (!folder.getUserId().equals(item.getUserId())) {
             throw new FavoriteExceptions.OwnerMismatchException();
         }
 
-        // Go: :283-285 —— 先写业务行：唯一键冲突必须发生在 outbox 之前
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:283-285 —— 先写业务行：唯一键冲突必须发生在 outbox 之前
         itemMapper.insertItem(item.getFavoriteId(), item.getFolderId(), item.getUserId(),
                 item.getTargetId(), item.getTargetType(), item.getTargetRevision(),
                 item.getTitle(), item.getCover());
 
-        // Go: :286-290 —— schema = m.subjectRefV2Facts ? 2 : 1
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:286-290 —— schema = m.subjectRefV2Facts ? 2 : 1
         int schema = properties.isSubjectRefV2Facts() ? 2 : 1;
         FavoriteFactOutboxEntity fact =
                 envelopeFactory.build(item, 1L, "assert", Instant.now(clock), schema);
 
-        // Go: :291-294
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:291-294
         insertOutboxFact(fact);
     }
 
@@ -145,36 +145,36 @@ public class FavoriteFactWriteService {
             isolation = Isolation.READ_COMMITTED,
             rollbackFor = Exception.class)
     public void deleteFavoriteByFavoriteId(long favoriteId, long userId) {
-        // Go: :301-303 —— 参数校验（model 层内部校验）
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:301-303 —— 参数校验（model 层内部校验）
         if (favoriteId <= 0 || userId <= 0) {
             throw new IllegalArgumentException("invalid favorite delete");
         }
 
-        // Go: :306-312
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:306-312
         FavoriteItemEntity item = itemMapper.lockByFavoriteId(favoriteId);
         if (item == null) {
             throw new FavoriteExceptions.NotFoundException("favorite_item");
         }
-        // Go: :313-315
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:313-315
         if (!item.getUserId().equals(userId)) {
             throw new FavoriteExceptions.OwnerMismatchException();
         }
 
-        // Go: :316-318
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:316-318
         int schema = assertionResolver.resolve(item);
 
         if (schema == FavoriteAssertionSchemaResolver.SCHEMA_LEGACY) {
-            // Go: :320-322 —— legacy：只删业务行
+            // Go: service/favorite/rpc/internal/model/favorite_fact.go:320-322 —— legacy：只删业务行
             itemMapper.deleteByFavoriteId(favoriteId);
             return;
         }
 
-        // Go: :323-329 —— 继承冻结的 schema 造 v2 retract
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:323-329 —— 继承冻结的 schema 造 v2 retract
         FavoriteFactOutboxEntity fact =
                 envelopeFactory.build(item, 2L, "retract", Instant.now(clock), schema);
         insertOutboxFact(fact);
 
-        // Go: :330
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:330
         itemMapper.deleteByFavoriteId(favoriteId);
     }
 
@@ -205,27 +205,27 @@ public class FavoriteFactWriteService {
             isolation = Isolation.READ_COMMITTED,
             rollbackFor = Exception.class)
     public void deleteFolderCascade(long folderId, long userId) {
-        // Go: :337-339
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:337-339
         if (folderId <= 0 || userId <= 0) {
             throw new IllegalArgumentException("invalid favorite folder delete");
         }
 
-        // Go: :342-348
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:342-348
         FavoriteFolderEntity folder = lockFolder(folderId);
         if (folder == null) {
             throw new FavoriteExceptions.NotFoundException("favorite_folder");
         }
-        // Go: :349-351
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:349-351
         if (!folder.getUserId().equals(userId)) {
             throw new FavoriteExceptions.OwnerMismatchException();
         }
 
-        // Go: :352-356 —— FOR UPDATE + ORDER BY favorite_id（确定性顺序）
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:352-356 —— FOR UPDATE + ORDER BY favorite_id（确定性顺序）
         List<FavoriteItemEntity> items = itemMapper.lockAllByFolderIdOrdered(folderId);
         for (FavoriteItemEntity item : items) {
             int schema = assertionResolver.resolve(item);
             if (schema == FavoriteAssertionSchemaResolver.SCHEMA_LEGACY) {
-                // Go: :362-364 —— legacy ⇒ continue，不产撤回事件
+                // Go: service/favorite/rpc/internal/model/favorite_fact.go:362-364 —— legacy ⇒ continue，不产撤回事件
                 continue;
             }
             FavoriteFactOutboxEntity fact =
@@ -233,9 +233,9 @@ public class FavoriteFactWriteService {
             insertOutboxFact(fact);
         }
 
-        // Go: :373-375
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:373-375
         itemMapper.deleteByFolderId(folderId);
-        // Go: :376
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:376
         folderMapper.deleteByFolderId(folderId);
 
         LOG.debug("favorite folder cascade deleted: folder_id={} items={}",

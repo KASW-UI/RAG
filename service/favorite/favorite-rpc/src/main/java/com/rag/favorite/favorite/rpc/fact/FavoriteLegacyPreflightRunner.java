@@ -135,7 +135,8 @@ public class FavoriteLegacyPreflightRunner {
                     """, report.isClear(), report.contract, report.missingAssert,
                     report.approvedLegacy, report.blocked, report.orphanRetracts);
         } catch (RuntimeException e) {
-            // Go: :38-44 —— 读取失败 ⇒ exit 1
+            // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:48-50（读取失败）
+            //     ⇒ cmd/fact-legacy-preflight/main.go:38 的 os.Exit(1)
             processLogger.atError()
                     .addKeyValue("event", "favorite.legacy_preflight")
                     .addKeyValue("outcome", "failed")
@@ -157,10 +158,10 @@ public class FavoriteLegacyPreflightRunner {
     public Report preflight() {
         Report report = new Report();
 
-        // Go: :40-47 —— 一条 LEFT JOIN 拉出「无 v1 断言」的行 + 它们的 marker
+        // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:40-47 —— 一条 LEFT JOIN 拉出「无 v1 断言」的行 + 它们的 marker
         List<FavoriteLegacyPreflightRow> rows = outboxMapper.selectRowsWithoutAssertion();
 
-        // Go: :50-78 —— 逐行比对 12 项，分 Blocked / ApprovedLegacy
+        // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:50-78 —— 逐行比对 12 项，分 Blocked / ApprovedLegacy
         for (FavoriteLegacyPreflightRow row : rows) {
             report.missingAssert++;
             if (!markerMatches(row)) {
@@ -170,7 +171,7 @@ public class FavoriteLegacyPreflightRunner {
             report.approvedLegacy++;
         }
 
-        // Go: :86-91 —— 孤儿撤回统计
+        // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:86-91 —— 孤儿撤回统计
         report.orphanRetracts = outboxMapper.countOrphanRetracts();
         return report;
     }
@@ -189,7 +190,7 @@ public class FavoriteLegacyPreflightRunner {
                 || row.markerSourceSnapshotSha256 == null || row.markerApprovalRef == null) {
             return false;
         }
-        // Go: :69-73 —— 逐字段相等
+        // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:69-73 —— 逐字段相等
         if (!row.markerFavoriteId.equals(row.favoriteId)
                 || !row.markerUserId.equals(row.userId)
                 || !row.markerFolderId.equals(row.folderId)
@@ -197,15 +198,15 @@ public class FavoriteLegacyPreflightRunner {
                 || !row.markerTargetId.equals(row.targetId)) {
             return false;
         }
-        // Go: :72 —— markerRevision.Valid != revision.Valid ⇒ 不匹配（null 与空串不可混）
+        // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:72 —— markerRevision.Valid != revision.Valid ⇒ 不匹配（null 与空串不可混）
         if (!FavoriteDeliveryValidator.sameFavoriteRevision(row.markerTargetRevision, row.targetRevision)) {
             return false;
         }
-        // Go: :70 —— markerApproval.String == "" ⇒ 不匹配
+        // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:71 —— markerApproval.String == "" ⇒ 不匹配
         if (row.markerApprovalRef.isEmpty()) {
             return false;
         }
-        // Go: :70 —— markerHash.String != hash ⇒ 不匹配（重新算一遍业务行快照）
+        // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:71 —— markerHash.String != hash ⇒ 不匹配（重新算一遍业务行快照）
         return row.markerSourceSnapshotSha256.equals(snapshotHash(row));
     }
 

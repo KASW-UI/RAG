@@ -83,7 +83,7 @@ public class FavoriteAssertionSchemaResolver {
     public int resolve(FavoriteItemEntity item) {
         long favoriteId = item.getFavoriteId();
 
-        // Go: :214-215 —— 找 v1 断言（FOR UPDATE）
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:214-215 —— 找 v1 断言（FOR UPDATE）
         FavoriteFactOutboxEntity row = outboxMapper.lockAssertByFavoriteId(favoriteId);
         if (row == null) {
             return resolveLegacy(item);
@@ -95,7 +95,7 @@ public class FavoriteAssertionSchemaResolver {
      * 分支 A —— Go {@code favorite_fact.go:245-264} 的 11 项交叉校验。
      */
     private int resolveFromFrozenAssert(FavoriteFactOutboxEntity row, FavoriteItemEntity item) {
-        // Go: :246-251
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:246-251
         //   if strictFavoriteJSON([]byte(row.Payload), &event) != nil ||
         //      event.EventID != row.EventID || event.AggregateVersion != 1 ||
         //      event.EventType != "rtw.favorite.assert" ||
@@ -118,7 +118,7 @@ public class FavoriteAssertionSchemaResolver {
             throw blocked(row, item, "assert envelope does not match its outbox row", null);
         }
 
-        // Go: :253-263
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:253-263
         //   var payload authorityPayload
         //   if strictFavoriteJSON(event.Payload, &payload) != nil { → blocked }
         //   subject, ok := favoriteSubjectV1(event.SchemaVersion, payload.Subject)
@@ -147,7 +147,7 @@ public class FavoriteAssertionSchemaResolver {
             throw blocked(row, item, "assert payload disagrees with the live business row", null);
         }
 
-        // Go: :264 —— return event.SchemaVersion, false, nil
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:264 —— return event.SchemaVersion, false, nil
         return event.schemaVersion;
     }
 
@@ -157,7 +157,7 @@ public class FavoriteAssertionSchemaResolver {
     private int resolveLegacy(FavoriteItemEntity item) {
         long favoriteId = item.getFavoriteId();
 
-        // Go: :220-226
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:220-226
         //   var marker FavoriteLegacyFactMarker
         //   if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
         //        Where("favorite_id = ?", item.FavoriteId).Take(&marker).Error; err != nil {
@@ -172,7 +172,7 @@ public class FavoriteAssertionSchemaResolver {
             throw blockedLegacy(item, "no legacy marker approved for this row", null);
         }
 
-        // Go: :227-234
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:227-234
         //   snapshotHash, hashErr := favoriteLegacySnapshotHash(item)
         //   if hashErr != nil || marker.FavoriteID != item.FavoriteId || marker.UserID != item.UserId ||
         //      marker.FolderID != item.FolderId || marker.TargetType != item.TargetType ||
@@ -201,7 +201,7 @@ public class FavoriteAssertionSchemaResolver {
             throw blockedLegacy(item, "legacy marker anchors do not match the live business row", null);
         }
 
-        // Go: :235-242 —— 已有 v2 撤回 ⇒ 这条收藏撤过一次，标记不能让它再撤一次
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:235-242 —— 已有 v2 撤回 ⇒ 这条收藏撤过一次，标记不能让它再撤一次
         //   var orphanCount int64
         //   tx.Model(&FavoriteFactOutbox{}).
         //      Where("favorite_id = ? AND aggregate_version = 2", item.FavoriteId).Count(&orphanCount)
@@ -210,7 +210,7 @@ public class FavoriteAssertionSchemaResolver {
             throw blockedLegacy(item, "an orphan retract already exists for this favorite", null);
         }
 
-        // Go: :243 —— return 0, true, nil（legacy，无需产撤回事实）
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:243 —— return 0, true, nil（legacy，无需产撤回事实）
         return SCHEMA_LEGACY;
     }
 

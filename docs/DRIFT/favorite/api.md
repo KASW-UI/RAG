@@ -19,7 +19,7 @@
 
 | 项 | 值 |
 |---|---|
-| 落地形态 | 31 个 main 文件 / 2,920 行 / 13 个 DTO / 7 个 Service / 1 个 Controller |
+| 落地形态 | 31 个 main 文件 / **3,116 行** / **15 个 DTO** / 7 个 Service / 1 个 Controller<br>⚠️ **核对 2026-10-25（第十轮）**：行数比首轮台账记的 2,920 多 196 行 ⇒ **全部是各轮的纯注释增量**（可执行逻辑零改动）；DTO 数首轮记的 **13 是错的**（基线 `58e8314` 就是 15 个） |
 | 测试 | **6 个测试类 / 89 例全绿**（33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍**）→ 第六轮 **+1 个测试类 / +5 例** |
 | 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条已签字偏离** |
 | 未决 | **1 条已签字**（401 body 形态，✅ 2026-10-25 用户签字）+ **1 条 🏷 候选**（500 兜底 body ⇒ DEV-FAV-API-002，第六轮新登记）+ **1 条跨域待拍板**（容器层参数上限口径 ⇒ 收口在 `global`） |
@@ -85,7 +85,7 @@ Go 侧 7 个 logic **完全同构**（`extractUserID` → 调 rpc → `codeFromR
 | claim `userId` 原样存入 ctx | `authhandler.go:71-79` | `request.setAttribute("userId", claims.get("userId"))` | ✅ |
 | 黑名单 key | `user:jwt_blacklist:<token>` | `BLACKLIST_KEY_PREFIX:110` | ✅ |
 | 黑名单 token 取法 | `TrimSpace(TrimPrefix(authHeader,"Bearer "))`（**大小写敏感** + TrimSpace） | `:197` `goTrimSpace(BearerTokenExtractor.trimBearerPrefix(authHeader))` | ✅（且验签用的大小写不敏感取法，两段不一致也原样保留） |
-| **Redis 故障** | `err == nil && exists` ⇒ **fail-open 放行** | `isBlacklisted:220-230` 吞异常 ⇒ 放行 | ✅ |
+| **Redis 故障** | `err == nil && exists` ⇒ **fail-open 放行** | `isBlacklisted:221-231` 吞异常 ⇒ 放行 | ✅ |
 | **执行顺序** | 先验签（JWT）→ 后黑名单 | `preHandle` 阶段 1 → 阶段 2 | ✅ |
 | **404 / 405 不经鉴权** | chain 只挂在匹配上的路由 | `handler instanceof HandlerMethod` | ✅ |
 
@@ -286,7 +286,7 @@ RAG 侧 **500 + JSON envelope**（`{code:5001,…}`）。
 | 真实 gRPC 链路上的 description 保真 | ✅ **已验**（2026-10-25 第四轮） | `FavoriteGrpcErrorWireFidelityTest`（**4 例**，`favorite-common`，**真 in-process gRPC**）⇒ description 与 `FavoriteErrorMessages.getMsg(码)` **逐字节相同**、经 `bizCodeFromError` **能还原回原业务码**（含唯一只能靠文案反查的 **5304**）、标准 gRPC 码在链路上保真 ⇒ **变异**（去掉 `withDescription`）⇒ **3 例转红** ⇒ 不是假绿 |
 | Go 侧 `httpx.Parse` 的入参解析矩阵 | ✅ **已验** | RAG 侧的 DTO 注释记录了 go-zero v1.10.2 真源探针的实测矩阵（缺席/null/类型不符/空串/重复参数/key 大小写），并由 `FavoriteApiInputContractTest`（33 例）守住 |
 | `goFormFirstValue` 的两段语义 | ✅ **已验** | 「先滤空值、再取首值」逐条复刻（`FavoriteApiSupport:327-350`），重复参数 `?folderId=123&folderId=456` ⇒ Go 123 / Spring 逗号拼接会失败 —— 两者已刻意分开 |
-| `GET /folder/list` 的空 struct body 校验 | ✅ **已验** | Go `httpx.Parse` 无条件跑 `ParseJsonBody` ⇒ 非法 body ⇒ 5003；RAG 用 `assertGoEmptyStructBody` 复刻（`FavoriteController:234-263`） |
+| `GET /folder/list` 的空 struct body 校验 | ✅ **已验** | Go `httpx.Parse` 无条件跑 `ParseJsonBody` ⇒ 非法 body ⇒ 5003；RAG 用 `assertGoEmptyStructBody` 复刻（`FavoriteController:235-264`） |
 
 ---
 
@@ -316,3 +316,58 @@ echo $?   # 0 = 10 组 CASE + 1 组 OBS 全部符合冻结期望
 > ⚠️ `FavoriteApiMvcPipelineTest` 走的是 **MockMvc** ⇒ **不覆盖 servlet filter 链**。
 > ⇒ filter 链与容器三旋钮由 `FavoriteApiRealTomcatGateTest`（`RANDOM_PORT`）负责，
 > **两者缺一不可**（§3.3：机制要验「生效」，不只是「配了」）。
+
+---
+
+## 6. 2026-10-25 第十轮（`align/favorite` 工作树 · 承 `a72a6f2`）
+
+### 6.1 本轮只改注释，零行为改动
+
+| 项 | 结果 |
+|---|---|
+| 改了什么 | **12 条内联注释**里的 Go 断言补上 `文件:行号`（形态 A 10 + 形态 B 2；口径见 `rpc.md` §16.2） |
+| 可执行逻辑改动 | **零**（机器复核：`git diff -U0 -- '*.java'` 去掉注释行后无剩余） |
+| 全量测试 | **89 例全绿**（6 个测试类），**BUILD SUCCESS** |
+| 审计器 | `python3 tools/assertion-audit/favorite/check-assertion-sources.py` ⇒ **EXIT=0** |
+
+### 6.2 台账体检（本档）
+
+| 项 | 原值 | 现值 | 说明 |
+|---|---|---|---|
+| **落地形态 · 行数** | 2,920 | **3,116** | +196 行**全部是各轮的纯注释增量**（可执行逻辑零改动） |
+| **落地形态 · DTO 数** | **13** | **15** | ⚠️ **13 是从一开始就写错了** —— 基线 `58e8314` 就是 15 个 DTO |
+| **RAG 侧行号锚点位移** | `isBlacklisted:220-230` / `FavoriteController:234-263` | **`221-231`** / **`235-264`** | ⚠️ **本轮改注释 ⇒ 行号位移 ⇒ 台账自己的锚点过期** ⇒ 已修（详见 `rpc.md` §16.8 + 坑档 **PIT-FAV-RPC-011**） |
+
+⇒ 按 AGENTS.md §6 的「状态表纪律」补上**核对日期**（2026-10-25）与增量性质。
+
+### 6.3 本档 §3 的「未决 / 已签字偏离」状态（核对 2026-10-25）
+
+| 项 | 状态 |
+|---|---|
+| **401 body 形态** | ✅ **已签字**（2026-10-25，用户 Jason）—— 不是缺陷 |
+| **DEV-FAV-API-002（500 兜底 body）** | 🏷 **候选，建议签** —— 登记在 `docs/Intentional_Deviations/favorite/api.md`；⚠️ **本轮未改** |
+| **容器层参数上限口径** | 🔴 **跨域待拍板** ⇒ 收口在 `global`（与 hot 域 `DRIFT-HOTAPI-030` 同一格）—— **本域不动** |
+
+### 6.4 Go 侧 `api/internal/svc/service_context.go` 的落点（第十轮补记）
+
+Go 侧的 api 依赖装配在 `service/favorite/api/internal/svc/service_context.go`：
+
+```go
+redisDB := redis.MustNewRedis(c.BizRedis)      // ← 黑名单用的 Redis
+FavoriteRpc: favoriteservice.NewFavoriteService(zrpc.MustNewClient(c.FavoriteRpc)),
+CheckBlacklistMiddleware: middleware.NewCheckBlacklistMiddleware(redisDB).Handle,
+```
+
+⇒ **本轮补记**（此前台账只对照了黑名单的**行为**，没点名它的**装配出处**）：
+
+| 装配项 | Go | RAG | 状态 |
+|---|---|---|---|
+| **Redis 黑名单** | `redis.MustNewRedis(c.BizRedis)` + `NewCheckBlacklistMiddleware` | `FavoriteJwtAuthInterceptor` 的 `isBlacklisted`（`:220-230`） | ✅ 行为已在 §1.4 逐条对照（key 前缀 / fail-open / token 取法） |
+| **favorite-rpc 客户端** | `zrpc.MustNewClient(c.FavoriteRpc)` | `FavoriteRpcClient` | ✅ 契约在 `proto.md`（7 个 RPC） |
+
+⚠️ **注意 Go 用的是 `Must*`（配置错 ⇒ 启动即 panic）**，RAG 侧是 Spring 的构造注入 ⇒
+失败形态不同（Go = 进程起不来；RAG = 容器起不来）⇒ 属于**表达层**，
+但**两侧都是「启动即失败」** ⇒ 行为等价，已在 §1.4 的结论中覆盖。
+
+⇒ 本轮新增工具 `tools/ledger-lint/favorite/check-ledger-selfcheck.py`
+（Go 源文件覆盖闭合检查）初次跑出的 6 个「未落点」里，本文件是其中之一 ⇒ 现已补记。

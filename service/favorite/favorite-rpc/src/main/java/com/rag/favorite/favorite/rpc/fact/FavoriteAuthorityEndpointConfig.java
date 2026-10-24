@@ -205,7 +205,7 @@ public class FavoriteAuthorityEndpointConfig {
             // 【Go mux 层】—— 发生在 handler 之前 ⇒ **也在鉴权之前**
             // ═══════════════════════════════════════════════════════════════
             //
-            // Go: http.NewServeMux() 的 findHandler：
+            // Go: http.NewServeMux() 的 findHandler：（net/http/server.go:2695）
             //   ① path 需要清理（// 、 /./ 、 /../）⇒ **301** 重定向到清理后的路径；
             //   ② 模式不匹配 ⇒ **404 page not found**。
             // ⚠️ 两者都**先于** handler ⇒ 先于鉴权 ⇒
@@ -213,16 +213,16 @@ public class FavoriteAuthorityEndpointConfig {
             String rawUri = req.getRequestURI();
             String cleanedUri = goCleanPath(rawUri);
             if (!cleanedUri.equals(rawUri)) {
-                // Go: mux 的 path 清理 ⇒ 301 Moved Permanently
+                // Go: mux 的 path 清理 ⇒ 301 Moved Permanently（net/http/server.go:2716）
                 writeMovedPermanently(resp, goRedirectLocation(cleanedUri, req.getQueryString()));
                 return;
             }
 
-            // Go: r.PathValue("producer") / r.PathValue("event_id")
+            // Go: r.PathValue("producer") / r.PathValue("event_id")（net/http/request.go:1469）
             // ⚠️ 用**清理后**的 path（Go 的匹配也发生在清理后的路径上）。
             String[] pathParams = extractPathParams(cleanedUri, v2);
             if (pathParams == null) {
-                // Go: mux 模式不匹配 ⇒ http.NotFound
+                // Go: mux 模式不匹配 ⇒ http.NotFound（net/http/server.go:2735-2748）
                 writeNotFound(resp);
                 return;
             }
@@ -233,7 +233,7 @@ public class FavoriteAuthorityEndpointConfig {
             // Go: :33 / :64 —— 第一个字节就写，任何分支都不缓存
             resp.setHeader("Cache-Control", "no-store");
 
-            // Go: :34-39 —— Authorization 必须恰好 1 个 + Bearer 前缀 + 恒定时间比较
+            // Go: service/favorite/rpc/internal/authority/http.go:34-39 —— Authorization 必须恰好 1 个 + Bearer 前缀 + 恒定时间比较
             List<String> authorization = Collections.list(req.getHeaders("Authorization"));
             if (authorization.size() != 1 || !authorization.get(0).startsWith("Bearer ")) {
                 writeGoError(resp, HttpServletResponse.SC_UNAUTHORIZED, "unauthorized");
@@ -248,7 +248,7 @@ public class FavoriteAuthorityEndpointConfig {
                 return;
             }
 
-            // 🔴 Go: :40-43 —— 只要带 query 就 404（不是 400）
+            // 🔴 Go: service/favorite/rpc/internal/authority/http.go:40-43 —— 只要带 query 就 404（不是 400）
             if (req.getQueryString() != null && !req.getQueryString().isEmpty()) {
                 writeNotFound(resp);
                 return;
@@ -279,7 +279,7 @@ public class FavoriteAuthorityEndpointConfig {
                             : lookupService.authoritativeFactV1(producer, eventId);
                 }
             } catch (FavoriteExceptions.FactUnavailableException e) {
-                // Go: :47-50 —— ErrFavoriteFactUnavailable ⇒ 404
+                // Go: service/favorite/rpc/internal/authority/http.go:47-50 —— ErrFavoriteFactUnavailable ⇒ 404
                 writeNotFound(resp);
                 return;
             } catch (RuntimeException e) {
@@ -297,14 +297,14 @@ public class FavoriteAuthorityEndpointConfig {
                 return;
             }
 
-            // Go: :57-61 —— 200 + application/json
+            // Go: service/favorite/rpc/internal/authority/http.go:57-61 —— 200 + application/json
             resp.setContentType("application/json");
             byte[] body = FavoriteRpcSupport.STRICT_JSON.writeValueAsBytes(fact);
             resp.setStatus(HttpServletResponse.SC_OK);
             try {
                 resp.getOutputStream().write(body);
             } catch (IOException e) {
-                // Go: :58-60 —— Encode 失败只记日志，不改状态码
+                // Go: service/favorite/rpc/internal/authority/http.go:58-60 —— Encode 失败只记日志，不改状态码
                 LOG.atWarn()
                         .addKeyValue("event", v2 ? "favorite.authority.v2.response_interrupted"
                                 : "favorite.authority.response_interrupted")

@@ -126,7 +126,7 @@ public class FavoriteFactEnvelopeFactory {
         String userId = decimal(item.getUserId());
         String folderId = decimal(item.getFolderId());
 
-        // Go: :147-154 —— payload 的字段顺序逐条照抄 struct 声明顺序
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:147-154 —— payload 的字段顺序逐条照抄 struct 声明顺序
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("schema_version", 1);
         payload.put("event_id", eventId);
@@ -141,7 +141,7 @@ public class FavoriteFactEnvelopeFactory {
         payload.put("favorite_id", favoriteId);
         payload.put("folder_id", folderId);
 
-        // Go: :143-155 —— 外层信封
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:143-155 —— 外层信封
         Map<String, Object> event = new LinkedHashMap<>();
         event.put("event_id", eventId);
         event.put("event_type", "rtw.favorite." + operation);
@@ -164,7 +164,7 @@ public class FavoriteFactEnvelopeFactory {
         String userId = decimal(item.getUserId());
         String folderId = decimal(item.getFolderId());
 
-        // Go: :172-177 —— 与 v1 逐字相同，唯一差别是 subject_ref
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:172-177 —— 与 v1 逐字相同，唯一差别是 subject_ref
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("schema_version", 2);
         payload.put("event_id", eventId);
@@ -179,7 +179,7 @@ public class FavoriteFactEnvelopeFactory {
         payload.put("favorite_id", favoriteId);
         payload.put("folder_id", folderId);
 
-        // Go: :180-191 —— 外层 schema_version 也是 2（v1 写的是 1）
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:180-191 —— 外层 schema_version 也是 2（v1 写的是 1）
         Map<String, Object> event = new LinkedHashMap<>();
         event.put("event_id", eventId);
         event.put("event_type", "rtw.favorite." + operation);

@@ -90,15 +90,15 @@ public class FavoriteFactDispatchService {
         // ⚠️ 显式编程式事务：见类注释「为什么用 TransactionTemplate」
         TransactionTemplate template = new TransactionTemplate(transactionManager);
         DispatchOutcome outcome = template.execute(status -> {
-            // Go: :140-152 —— SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1
+            // Go: service/favorite/rpc/internal/model/favorite_delivery.go:140-152 —— SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1
             FavoriteFactOutboxEntity row = outboxMapper.claimNextDeliverable();
             if (row == null) {
-                // Go: :148-150 —— ErrRecordNotFound ⇒ (false, nil)：队列空，不是错误
+                // Go: service/favorite/rpc/internal/model/favorite_delivery.go:148-150 —— ErrRecordNotFound ⇒ (false, nil)：队列空，不是错误
                 status.setRollbackOnly();   // 只读事务，无写入 ⇒ 回滚即可（Go 的 defer Rollback）
                 return DispatchOutcome.EMPTY;
             }
 
-            // Go: :154-167 —— 解码 + 校验失败 ⇒ status=3 blocked + Commit + 返回错误
+            // Go: service/favorite/rpc/internal/model/favorite_delivery.go:154-167 —— 解码 + 校验失败 ⇒ status=3 blocked + Commit + 返回错误
             //
             // 🔴🔴 下面三个写状态分支都**刻意不调用** status.setRollbackOnly()：
             //   Go 在这三处是 `tx.Commit()`，不是 `tx.Rollback()`。
@@ -125,7 +125,7 @@ public class FavoriteFactDispatchService {
                     .addKeyValue("aggregate_version", event.aggregateVersion)
                     .log("favorite fact delivery started");
 
-            // Go: :170 —— sender.Send(ctx, event, json.RawMessage(row.Payload))
+            // Go: service/favorite/rpc/internal/model/favorite_delivery.go:170 —— sender.Send(ctx, event, json.RawMessage(row.Payload))
             // ⚠️ 发出去的是**行内原始字节**，不是「解码后再序列化」的字节
             //   ⇒ DC 算出的 input_hash 与权威读重算的 input_hash 才必然相同。
             Wire.TechnicalReceipt receipt = null;
@@ -137,13 +137,13 @@ public class FavoriteFactDispatchService {
                 sendError = t;
             }
 
-            // Go: :171 —— received, receiptOK := validFavoriteReceipt(event, receipt)
+            // Go: service/favorite/rpc/internal/model/favorite_delivery.go:171 —— received, receiptOK := validFavoriteReceipt(event, receipt)
             Wire.Result<Instant> receiptCheck = Wire.validateReceipt(
                     FavoriteDeliveryValidator.toWireEvent(event), receipt);
             boolean receiptOk = sendError == null && receiptCheck.isOk();
 
             if (!receiptOk) {
-                // Go: :172-187 —— status=2 + retry_count+1 + Commit + 返回错误
+                // Go: service/favorite/rpc/internal/model/favorite_delivery.go:172-187 —— status=2 + retry_count+1 + Commit + 返回错误
                 // 🔴 同样**不** setRollbackOnly：重试次数必须落库。
                 outboxMapper.markFailed(row.getEventId(), appLayerNow());
                 LOG.atWarn()
@@ -156,7 +156,7 @@ public class FavoriteFactDispatchService {
                 return DispatchOutcome.FAILED;
             }
 
-            // Go: :188-194 —— status=1 + 5 个回执列 + delivered_at
+            // Go: service/favorite/rpc/internal/model/favorite_delivery.go:188-194 —— status=1 + 5 个回执列 + delivered_at
             java.time.OffsetDateTime acceptedAt = appLayerNow();
             outboxMapper.markAccepted(row.getEventId(), receipt.receiptId, receipt.inputHash,
                     receipt.offset, receiptCheck.get().atOffset(java.time.ZoneOffset.UTC),
@@ -175,7 +175,7 @@ public class FavoriteFactDispatchService {
         if (outcome == null) {
             return false;
         }
-        // Go: :166 / :186 —— 在 Commit 之后才把错误交出去（保证状态变更已落库）
+        // Go: service/favorite/rpc/internal/model/favorite_delivery.go:166 / :service/favorite/rpc/internal/model/favorite_delivery.go:186 —— 在 Commit 之后才把错误交出去（保证状态变更已落库）
         if (outcome == DispatchOutcome.BLOCKED) {
             throw Wire.ERR_FROZEN_ENVELOPE_BLOCKED;
         }

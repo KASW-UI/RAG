@@ -175,7 +175,7 @@ public final class FavoriteGrpcError {
 
         Status status = extractStatus(err);
         if (status == null) {
-            // Go: status.FromError 返回 ok=false ⇒ return CodeServerBusy
+            // Go: status.FromError 返回 ok=false ⇒ return CodeServerBusy（service/favorite/common/errmsg.go:113-116）
             return FavoriteErrorCode.CODE_SERVER_BUSY.getCode();
         }
 

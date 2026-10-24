@@ -156,7 +156,7 @@ public class FavoriteJwtAuthInterceptor implements HandlerInterceptor {
             throw unauthorized();
         }
 
-        // Go: golang-jwt/v4 request/oauth2.go stripBearerPrefixFromTokenString
+        // Go: golang-jwt/v4 request/oauth2.go stripBearerPrefixFromTokenString（golang-jwt/jwt/v4@v4.5.2/request/oauth2.go:8）
         //     —— 大小写不敏感、不匹配时原样返回整串。三条规则都在 BearerTokenExtractor 里。
         String token = BearerTokenExtractor.tokenForSignatureVerification(authHeader);
         if (token.isEmpty()) {

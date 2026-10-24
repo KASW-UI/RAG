@@ -359,7 +359,7 @@ public class FavoriteDeliveryValidator {
             text = raw.asText();
             wasQuoted = false;
         } else {
-            // Go：非字符串时 text = string(raw)，ParseInt 对 true/{}/[] 一律失败
+            // Go：非字符串时 text = string(raw)，ParseInt 对 true/{}/[] 一律失败（service/favorite/rpc/internal/model/favorite_authority.go:83-86）
             return 0L;
         }
         if (text == null || text.isEmpty()) {
@@ -371,7 +371,7 @@ public class FavoriteDeliveryValidator {
         } catch (NumberFormatException e) {
             return 0L;
         }
-        // Go: strconv.FormatInt(id, 10) != text ⇒ 非规范十进制
+        // Go: strconv.FormatInt(id, 10) != text ⇒ 非规范十进制（service/favorite/rpc/internal/model/favorite_authority.go:87）
         if (id <= 0 || !Long.toString(id, 10).equals(text)) {
             return 0L;
         }
@@ -425,7 +425,7 @@ public class FavoriteDeliveryValidator {
                 if (v2 == null || !"rtw.identity".equals(v2.issuer)) {
                     return new SubjectResult(null, false);
                 }
-                // Go: :118 —— 归一化成 v1 三元组
+                // Go: service/favorite/rpc/internal/model/favorite_authority.go:118 —— 归一化成 v1 三元组
                 authorityId = v2.issuer;
                 tenantId = "platform";
                 subjectId = v2.subjectId;
@@ -436,7 +436,7 @@ public class FavoriteDeliveryValidator {
             return new SubjectResult(null, false);
         }
 
-        // Go: :122-123 —— subject_id 必须是规范正整数
+        // Go: service/favorite/rpc/internal/model/favorite_authority.go:122-123 —— subject_id 必须是规范正整数
         if (subjectId == null || subjectId.isEmpty()) {
             return new SubjectResult(null, false);
         }

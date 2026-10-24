@@ -80,12 +80,12 @@ public class FavoriteApiSupport {
     public long userId(HttpServletRequest request) {
         Object raw = request.getAttribute(FavoriteJwtAuthInterceptor.CLAIM_ATTRIBUTE);
         if (raw == null) {
-            // Go: ctx userId is nil
+            // Go: ctx userId is nil（service/favorite/api/internal/logic/favorite/helper.go:16-18）
             log.warn("ctx userId is nil, uri={}", request.getRequestURI());
             throw unauthorized();
         }
         if (raw instanceof String s) {
-            // Go: strconv.ParseInt(v, 10, 64)
+            // Go: strconv.ParseInt(v, 10, 64)（service/favorite/api/internal/logic/favorite/helper.go:24）
             try {
                 return Long.parseLong(s);
             } catch (NumberFormatException e) {
@@ -94,7 +94,7 @@ public class FavoriteApiSupport {
             }
         }
         if (raw instanceof BigInteger bi) {
-            // Go: json.Number("...").Int64() ⇒ strconv.ParseInt 越界即失败。
+            // Go: json.Number("...").Int64() ⇒ strconv.ParseInt 越界即失败。（service/favorite/api/internal/logic/favorite/helper.go:21-22）
             // BigInteger.bitLength() >= 64 ⟺ 越出 int64 值域（与 GoStyleStringInt64 同判据）。
             if (bi.bitLength() >= 64) {
                 log.warn("ctx userId is out of int64 range : {}", bi);
@@ -104,7 +104,7 @@ public class FavoriteApiSupport {
         }
         if (raw instanceof Byte || raw instanceof Short
                 || raw instanceof Integer || raw instanceof Long) {
-            // Go: json.Number("123").Int64() —— 整数字面量精确等价
+            // Go: json.Number("123").Int64() —— 整数字面量精确等价（service/favorite/api/internal/logic/favorite/helper.go:21-22）
             return ((Number) raw).longValue();
         }
         if (raw instanceof Double || raw instanceof Float) {
@@ -112,7 +112,7 @@ public class FavoriteApiSupport {
             log.warn("ctx userId is a non-integer number : {}", raw);
             throw unauthorized();
         }
-        // Go: default 分支 —— unexpected type
+        // Go: default 分支 —— unexpected type（service/favorite/api/internal/logic/favorite/helper.go:31-32）
         log.warn("ctx userId has unexpected type : {}", raw.getClass().getName());
         throw unauthorized();
     }
@@ -372,11 +372,11 @@ public class FavoriteApiSupport {
         for (Map.Entry<String, String[]> entry : parameterMap(request).entrySet()) {
             boolean target = entry.getKey().equals(name);
             for (String value : entry.getValue()) {
-                // Go: `if len(v) == 0 { continue }` —— 空值在计数与取值之前就被丢掉。
+                // Go: `if len(v) == 0 { continue }` —— 空值在计数与取值之前就被丢掉。（go-zero@v1.10.2/rest/httpx/util.go:44）
                 if (value == null || value.isEmpty()) {
                     continue;
                 }
-                // Go: `if n < maxFormParamCount { ... n++ } else { return nil, fmt.Errorf(...) }`
+                // Go: `if n < maxFormParamCount { ... n++ } else { return nil, fmt.Errorf(...) }`（go-zero@v1.10.2/rest/httpx/util.go:15,48）
                 // ⇒ 恰好放行 2048 个，第 2049 个触发报错。
                 if (seen >= GO_MAX_FORM_PARAM_COUNT) {
                     throw new IllegalArgumentException("too many form values");

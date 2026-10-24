@@ -70,7 +70,7 @@ public class FavoriteSubjectRefGate implements ApplicationRunner {
                 properties.getFact().getAuthority().isEnabled(),
                 properties.getFact().getLegacyPreflight().isEnabled());
 
-        // Go: :31-35 —— 门禁本体
+        // Go: service/favorite/rpc/favorite.go:31-35 —— 门禁本体
         if (properties.isSubjectRefV2Facts() && !devOrTest) {
             // ⚠️ 抛 FatalError 而不是 System.exit(2)：
             //    FatalError 的契约（common/logger/FatalError.java）就是

@@ -75,7 +75,7 @@
 
 > **Go 侧两处 `module` label 写错，RAG 原样保留** ⇒ **前提被证伪，撤销**。
 > ⇒ 完整记录见本档上方的「撤销记录 · DEV-FAV-RPC-002」，
-> 逐条行号证据见 [`../../DRIFT/favorite/rpc.md`](../../DRIFT/favorite/rpc.md) §10.8。
+> 逐条行号证据见 [`../../DRIFT/favorite/rpc.md`](../../DRIFT/favorite/rpc.md) §11.4。
 >
 > ⚠️ **别把这条当新回归去「修」**：它**从来不是偏离** ——
 > 那两行是**收藏夹查询**的失败分支，`folderModule` 本来就是对的 ⇒ **Go 与 RAG 一直一致**。

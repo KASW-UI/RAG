@@ -99,7 +99,10 @@ class FavoriteProtectionChainWiringTest {
         doReturn(listener).when(next).startCall(any(), any());
 
         // ⚠️⚠️ **必须打桩 getMethodDescriptor()**：链上的 breaker 用它取隔离 key
-        //    （Go: breakerName := info.FullMethod）⇒ Mockito 默认返回 null ⇒ 链里抛 NPE。
+        //    （Go: {@code breakerName := path.Join(cc.Target(), method)}，
+        //     {@code go-zero@v1.10.2/zrpc/internal/clientinterceptors/breakerinterceptor.go:15}）
+        //    ⇒ Mockito 默认返回 null ⇒ 链里抛 NPE。
+        //    ⚠️ 注意 {@code info.FullMethod} 是 **grpc-java** 的 {@code MethodInfo}，**不是 Go 侧写法**。
         //    ⇒ 而那个 NPE 会被**最外层的 recover 静默兜住**（关掉调用、返回 INTERNAL），
         //    现象是「业务 interceptor 零交互」—— 看起来像"链没生效"，真因却在链里面。
         when(call.getMethodDescriptor()).thenReturn(MethodDescriptor.<Object, Object>newBuilder()

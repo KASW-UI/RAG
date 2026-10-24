@@ -86,7 +86,7 @@ public final class FavoriteErrorMessages {
     public static String getMsg(int code) {
         String msg = MSG_BY_CODE.get(code);
         if (msg == null) {
-            // Go: return codeMsg[Error] —— 500 号的文案，即 "FAIL"
+            // Go: return codeMsg[Error] —— 500 号的文案，即 "FAIL"（service/favorite/common/errmsg.go:94）
             return MSG_BY_CODE.get(FavoriteErrorCode.ERROR.getCode());
         }
         return msg;

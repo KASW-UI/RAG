@@ -250,7 +250,7 @@ public class FavoriteController {
             // ⚠️ Jackson 3 把 JacksonException 改成【unchecked】（extends RuntimeException，
             //    不再继承 IOException）—— 写 `catch (IOException)` 接不住，
             //    实测 `{` 会以 UnexpectedEndOfInputException 逃出去落到兜底分支 ⇒ 500。
-            //    Go: jsonx.UnmarshalFromReader 的语法错误（unexpected EOF）⇒ Parse 报错 ⇒ 5003
+            //    Go: jsonx.UnmarshalFromReader 的语法错误（unexpected EOF）⇒ Parse 报错 ⇒ 5003（go-zero@v1.10.2/core/jsonx/json.go:63）
             throw new IllegalArgumentException("malformed json body", e);
         } catch (IOException e) {
             // 流本身读不动（连接中断等）

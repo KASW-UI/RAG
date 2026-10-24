@@ -17,12 +17,13 @@
 
 | 项 | 值 |
 |---|---|
-| 落地 | **36 个 Java 文件 / 7,057 行 / 6 个迁移脚本**（本轮前：34 个文件全 0 字节、`pom.xml` 零依赖零插件、6 个 `.sql` 全 0 字节） |
+| 落地 | **36 个 Java 文件 / 7,571 行 / 7 个迁移脚本**（V7 为第十轮前新增的时钟源对齐脚本）<br>⚠️ **核对 2026-10-25（第十轮）**：行数首轮记 7,057 ⇒ 现 **7,571**，增量 514 行**全部是各轮的纯注释增量**（可执行逻辑零改动）（本轮前：34 个文件全 0 字节、`pom.xml` 零依赖零插件、6 个 `.sql` 全 0 字节） |
 | 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §13.5**（**11 个测试类 / 82 例全绿**） |
 | 构建 | `mvn -o -pl service/favorite/favorite-rpc -am install` ⇒ **BUILD SUCCESS** |
 | 本轮发现并修复 | **6 处 L2 语义偏差**（§2）+ **2 处实现期真 bug**（§3） |
 | 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选**：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK），见 §13.2 |
 | 第九轮 | 🆕 **注释可核验性审计**（§15）—— 抓出 **3 条「断言对、锚点指错行」的真缺陷**，门禁级发现 **67 → 0**；**零行为改动** |
+| 第十轮 | 🆕 **补完 §15.8 记下的 I1 欠账**（§16）—— **153 条**内联断言补上锚点，再抓 **5 条**（4 条行号指错 + 1 条把 Java 事实误记成 Go）；**台账体检**：2 条死指针 + 3 处过期数字 + 4 处裸行号 + **6 处 RAG 侧锚点位移**已修，**6 个 Go 源文件未落点**已补记 ⇒ 新工具 `tools/ledger-lint/favorite/check-ledger-selfcheck.py`（EXIT=0） |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -233,7 +234,7 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 
 | # | 项 | 2026-10-23 的登记 | **2026-10-25 复核结论** | 落点 |
 |---|---|---|---|---|
-| **U1** | 权威端点的 wire 形态 | 「按 Go 原样写成 path 参数 servlet，默认关」 | ✅ **路径形态本身是对的**，逐条比对通过（见 §9.5.1）。<br>⚠️ 但**剩余差异比原登记多 4 项**（配置不完整时 Go 起不来 / RAG 照常跑；无启动前 DB 探活；HTTP server 超时值不同；优雅关闭超时不同） | [`../../Intentional_Deviations/favorite/rpc.md`](../../Intentional_Deviations/favorite/rpc.md) **DEV-FAV-RPC-004** |
+| **U1** | 权威端点的 wire 形态 | 「按 Go 原样写成 path 参数 servlet，默认关」 | ✅ **路径形态本身是对的**，逐条比对通过（见 §10.2）。<br>⚠️ 但**剩余差异比原登记多 4 项**（配置不完整时 Go 起不来 / RAG 照常跑；无启动前 DB 探活；HTTP server 超时值不同；优雅关闭超时不同） | [`../../Intentional_Deviations/favorite/rpc.md`](../../Intentional_Deviations/favorite/rpc.md) **DEV-FAV-RPC-004** |
 | **U2** | preflight 的退出码语义 | 「刻意不调 System.exit，改结构化日志」 | ✅ 结论成立，但**原登记漏了两项**：① Go 的 report 是**写到 stdout 的 JSON**，RAG 不产出 JSON；② Go 的 **「未配置」也是 exit 2**（与 blocked 同级），RAG 的「DB 不可用」落 `failed`（对应 exit 1）⇒ 两侧落档不同 | **DEV-FAV-RPC-003** |
 | **U3** | `zrpc.RpcServerConf.Mode` 的取值域 | 「不在本仓库；Go 侧 `etc/favorite.yaml` 只有 `Mode: dev`」 | ✅ **第七轮已闭合**（§13.3）—— **原登记的前提有偏差**：`zrpc.RpcServerConf` 自己**并没有** `Mode` 字段，它嵌的是 `service.ServiceConf`，`Mode` 在那里（`options=dev\|test\|rt\|pre\|pro`，默认 `pro`）⇒ **不需要外部输入** | §13.3 |
 | **U4** | authority lookup 的 3s 超时 | 「Go 用 `context.WithTimeout(3s)` 约束 DB 查询；Java 侧走 Hikari `connection-timeout` ⇒ **未对齐**」 | ✅ **确认未对齐**，并进一步定位：Go 的 3s 约束的是**查询**（ctx 传进 GORM），RAG 侧连到的是**连接超时** ⇒ **不是同一个量纲**。<br>🔴 **2026-10-25 第四轮已修** ⇒ 见 §10-D1（复用仓库已有的 `DeadlineQueryTimeoutInjector` + `SqlTimeoutStatusTranslator`，在调用点绑 3s deadline）。⇒ **DEV-FAV-RPC-005 撤销**（不再是偏离） |
@@ -734,7 +735,7 @@ RAG 侧**也**拆成两个工厂 ⇒ 一致 ✅。
 | POST | `/favorite/v1/folder/update` | 第 4 条 | `@PostMapping("/folder/update")` `:156` | ✅ |
 | POST | `/favorite/v1/item/create` | 第 5 条 | `@PostMapping("/item/create")` `:167` | ✅ |
 | DELETE | `/favorite/v1/item/delete` | 第 6 条 | `@DeleteMapping("/item/delete")` `:174` | ✅ |
-| GET | `/favorite/v1/item/list` | 第 7 条 | `@GetMapping("/item/list")` `:190` | ✅ |
+| GET | `/favorite/v1/item/list` | 第 7 条 | `@GetMapping("/item/list")` `:191` | ✅ |
 
 ⇒ 前缀 `/favorite/v1` 两侧一致 ✅；中间件挂载（黑名单在 JWT 之内）见 `api.md` §1.4 ✅。
 
@@ -882,3 +883,192 @@ follow / user 域用 `checkblacklistmiddleware.go`（无下划线）⇒ **字面
 | **可执行逻辑改动** | **零** —— 43 个 java 文件的改动**全部落在注释里**；机器复核（`git diff -U0 -- '*.java'` 去掉注释行）只剩 **6 行**，全是**测试展示文本**（2 处断言失败消息 + 1 处 `@DisplayName`），不参与任何判定 |
 | 全量测试 | **200 例全绿**（未变） |
 | 六个探针 + 三个守门 | 全部 **EXIT=0**（未变） |
+
+---
+
+## 16. 2026-10-25 第十轮（`align/favorite` 工作树 · 基线 commit 58e8314 · 承 `a72a6f2`）
+
+### 16.1 本轮做两件事
+
+1. **把第九轮记下的 I1 欠账补掉** —— 153 条内联注释里的 Go 断言没有 `文件:行号`。
+2. **台账体检** —— 查 favorite 域的 12 份台账是不是「最新、最全」。
+
+### 16.2 I1 补锚点：153 条 → 0
+
+| 形态 | 条数 | 原样 | 补法 |
+|---|---|---|---|
+| **A** | **124** | `// Go: :51-57 —— …` | **行号已写、文件缺失** ⇒ 补文件前缀 |
+| **B** | **29** | `// Go: <自由文本>` | 行号也没写 ⇒ 追加 `（文件:行号）` |
+
+⚠️ **补文件不是「按类猜」**：favorite 的 api 侧与 rpc 侧**各有同名 logic 文件**，
+`FavoriteDomainService` 一个类就横跨 **8 个 Go 文件**（7 个 logic + model 层的 `favorite_fact.go`）。
+
+⇒ 本轮用**两条证据**反查目标文件，再用**第三条**核对行号：
+
+| # | 证据 | 作用 |
+|---|---|---|
+| 1 | **行段在界约束** | 声称的行号必须落在候选文件的行数内 ⇒ 直接排除不可能的文件 |
+| 2 | **特征 token 命中数** | 注释里 `{@code X}` / 反引号 / CamelCase 的标识符，有几个出现在**该行段内** |
+| 3 | **打印 Go 原文逐条核对** | 86 条单文件类 + 37 条 `FavoriteDomainService` 全部打印原文，人工过一遍 |
+
+⇒ 复核中确认 `FavoriteDomainService` 的 37 条**跨 8 个 Go 文件**（logic 层 7 个 + model 层 1 个），
+其中 `model/favorite_fact.go:280-282` 属于 **model 层**而非 logic 层 —— 只按「类 ↔ 文件」映射会**解析错**。
+
+### 16.3 🔴 补锚点时又抓到 **4 处「行号指错」**（断言内容对，行号错）
+
+| # | 位置 | 原锚点 | 实际 | 修正 |
+|---|---|---|---|---|
+| **E-a** | `FavoriteLegacyPreflightRunner.java:138` | `:38-44` | 38-44 是那条 **SELECT 的尾巴**；**读失败分支在 48-50**，`exit 1` 在 cmd 的 38 | `model/favorite_legacy_preflight.go:48-50` ＋ `cmd/fact-legacy-preflight/main.go:38` |
+| **E-b** | `FavoriteLegacyPreflightRunner.java:205` | `:70` | `markerApproval.String == ""` 在 **71** 行 | `model/favorite_legacy_preflight.go:71` |
+| **E-c** | `FavoriteLegacyPreflightRunner.java:209` | `:70` | `markerHash.String != hash` 在 **71** 行 | `model/favorite_legacy_preflight.go:71` |
+| **E-d** | `FavoriteDomainService.java:295` | 补成 `create_favorite_logic.go:280-282` ⇒ **越界**（该文件仅 170 行） | 该行是 **model 层**的 `folder.UserId != item.UserId ⇒ ErrFavoriteOwnerMismatch` | `model/favorite_fact.go:280-282` |
+
+⇒ **E-a 是第九轮那 3 条之外的第 4 条** —— 形态是「行号存在、但指向了邻近的别的语句」。
+
+⚠️ **本表自身的锚点也守同一条纪律**：E-a~E-d 的「实际 / 修正」列写的是**裸行号**，
+本轮已全部补上文件前缀（`model/favorite_legacy_preflight.go` / `model/favorite_fact.go`）
+⇒ 否则台账自己就违反本轮「补锚点」的主题。
+
+### 16.4 🔴 1 处**把 Java 事实误记成 Go 断言**
+
+`FavoriteProtectionChainWiringTest.java:102-103` 原写：
+
+> `（Go: breakerName := info.FullMethod）`
+
+⇒ **`info.FullMethod` 是 grpc-java 的 `MethodInfo`**，**不是 Go 侧写法**。
+Go 侧的真值是：
+
+```go
+// go-zero@v1.10.2/zrpc/internal/clientinterceptors/breakerinterceptor.go:15
+breakerName := path.Join(cc.Target(), method)
+```
+
+⇒ 已改正，并**显式标注** `info.FullMethod` 属 grpc-java ⇒ 以后不会再被当成 Go 证据引用。
+
+⚠️ 这条的形态与 §15.3 那 3 条**不同**：那 3 条是「Go 的事实写对了、锚点指错行」；
+这条是「**根本不是 Go 的事实**，却挂在 Go 名下」⇒ **更难发现**，因为它读起来完全像一条 Go 断言。
+
+### 16.5 台账体检结果（12 份台账全查）
+
+本轮体检分**两遍**：第一遍手工（查死指针 / 过期数字），第二遍**机器化**（见 §16.7 的新工具）。
+
+| 类别 | 条数 | 处理 |
+|---|---|---|
+| **死指针** | **2** | ✅ 已修 |
+| **过期/错误数字** | **3** | ✅ 已修（并注明增量为纯注释） |
+| **台账自身的裸行号锚点** | **4** | ✅ 已修（§16.3 表内 3 处 + §16.2 1 处） |
+| **RAG 侧行号锚点位移** | **6** | ✅ 已修（§16.8）—— **本轮改注释 ⇒ 自己把台账的锚点挪了** |
+| **Go 侧源文件未落点** | **6** | ✅ 已补记（§16.7）—— 全部**行为已对照**，缺的是台账点名 |
+| **本轮新发现未登记** | 本节 | ✅ 已登记 |
+
+**死指针 2 条**（都是**跨文件**的章节引用，单文件内查不出来）：
+
+| 位置 | 原引用 | 实况 | 改为 |
+|---|---|---|---|
+| `DRIFT/favorite/rpc.md` §5-U1 行 | 「见 §9.5.1」 | rpc.md **没有 §9.5.1**（§9.5 是 like-api 的跨域观察） | **§10.2**（D2 · path 形态与错误响应逐条比对） |
+| `Intentional_Deviations/favorite/rpc.md`「撤销记录 · DEV-FAV-RPC-002」 | 指向 DRIFT 的 **§10.8** | rpc.md 的 §10 只到 **§10.5** | **§11.4**（D4 · 前提被逐行核对证伪） |
+
+**过期数字 3 条**：
+
+| 位置 | 原值 | 现值 | 判定 |
+|---|---|---|---|
+| `DRIFT/favorite/api.md` 落地形态 | 2,920 行 / **13 个 DTO** | **3,116 行 / 15 个 DTO** | ⚠️ **DTO 数 13 从一开始就写错了**（基线 `58e8314` 就是 15 个）；行数 +196 = **各轮纯注释增量** |
+| `DRIFT/favorite/rpc.md` 落地 | 7,057 行 / 6 个迁移脚本 | **7,571 行 / 7 个迁移脚本** | V7 是第七轮加的时钟源对齐脚本；行数增量 **全部是纯注释** |
+| `DRIFT/favorite/common.md` 落地形态 | 456 行 | **456 行** | ✅ 仍准确（基线 453） |
+
+⇒ ⚠️ **「落地形态」这类数字一旦被后续轮次改过就会过期** ⇒ 已按 AGENTS.md §6 的
+「状态表纪律」补上**核对日期**，并注明增量的性质（**纯注释 vs 行为**）。
+
+### 16.6 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| `check-assertion-sources.py` | ✅ **EXIT=0**（门禁级 **0** / **I1 0** / I2 0） |
+| `check-ledger-selfcheck.py`（本轮新建） | ✅ **EXIT=0**（门禁级 **0**：章节指针全解析 + 32 个编号全闭合 + Go 侧 50/50 有落点；提示级 59 处裸行号已逐条判定语境） |
+| 锚点规模 | 91 文件 / 1029 注释块 / 416 含 Go 断言的块 / **553 个锚点**（真源 457 / 依赖 76 / 标准库 20 / **悬空 0 / 越界 0 / 仅靠文件名定位 0**） |
+| 补锚点 | **153 条**（形态 A 124 + 形态 B 29）—— 按模块：rpc **139** / api **12** / common **2**，覆盖 **22 个 java 文件** |
+| 新抓出的真缺陷 | **5 条**（E-a~E-d 四条行号指错 + 一条把 Java 事实误记成 Go） |
+| **RAG 侧行号锚点位移** | **6 条**（R-1~R-6）⇒ 越界检查全过但**内容偏 1~2 行** ⇒ 靠「打印实际内容逐条对」抓出（§16.8） |
+| **可执行逻辑改动** | **零** —— 26 个 java 文件的改动**全部落在注释里**；机器复核（`git diff -U0 -- '*.java'` 去掉注释行）**剩余为空** |
+| 改动规模 | 26 个文件 / **+303 / −157**（全为注释） |
+| 全量测试 | **200 例全绿**（api 89 / rpc 82 / common 29 / proto 0），**BUILD SUCCESS** |
+| 六个探针 + 三个守门 | 全部 **EXIT=0**（未变） |
+
+### 16.7 🆕 机器化体检：Go 侧源文件**覆盖闭合**
+
+**问题**：「台账是不是**全**的」以前只能靠人肉翻 50 个 Go 文件。
+**解法**：新工具 [`tools/ledger-lint/favorite/check-ledger-selfcheck.py`](../../../../tools/ledger-lint/favorite/check-ledger-selfcheck.py)
+（域内文件，**不碰共享面**）⇒ 机检三件事：**章节指针** / **编号闭合** / **Go 源文件覆盖**。
+
+#### 16.7.1 机检结果（核对 2026-10-25）
+
+| 项 | 规模 | 结果 |
+|---|---|---|
+| 章节指针 | 文件级 12 处 + 裸引用 186 处 | ✅ **全部可解析**（含 4 个外部目标：根 `AGENTS.md` + 三个共享 `_INDEX.md`） |
+| 编号闭合 | 32 个 `DEV-FAV-*` / `PIT-FAV-*` | ✅ **全部有定义处** |
+| Go 侧源文件覆盖 | **50 个**非测试源文件 | ⚠️ 初次跑出 **6 个未落点** ⇒ 见下表 |
+| 裸行号锚点 | 59 处 | ℹ️ **提示级**（非门禁）⇒ 逐条判定：55 处有语境列，4 处无语境 ⇒ 已修 |
+
+#### 16.7.2 6 个「台账未点名」的 Go 文件 —— **行为全部已对照，缺的只是点名**
+
+| Go 文件 | 性质 | 行为对照落点 | 处置 |
+|---|---|---|---|
+| `rpc/internal/model/favorite_legacy_preflight.go` | 🔴 **真逻辑** | RAG `FavoriteLegacyPreflightRunner`：SQL `40-47` / 逐行比对 `50-78` / `69-73` / 孤儿撤回 `86-91` / `Clear()` `22-25` 逐条对齐；事务参数 `@Transactional(readOnly = true, isolation = REPEATABLE_READ)` ↔ Go `sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}`（`:35`） | ✅ 本轮点名（§16.3） |
+| `rpc/internal/model/vars.go` | 🔴 **契约** | `ErrorNotFound` 哨兵（`errors.New("record not found")`）⇒ Go 侧 7 个 logic 用 `errors.Is` 区分「记录不存在」与别的 DB 错误 ⇒ 映射 `codes.NotFound`；RAG 侧对应 `FavoriteExceptions.NotFoundException`（`FavoriteFolderMapper:19-21` 已注明映射关系） | ✅ 本轮点名（本表） |
+| `rpc/internal/svc/service_context.go` | 装配层 | 注入 `FavoriteModel` / `UserRpc` / `ArticleRpc`，并把 `c.SubjectRefV2Facts` 接成 `model.WithSubjectRefV2Facts()` ⇒ **v1/v2 事实信封的行为开关**（台账 §0-156 已覆盖该开关语义） | ✅ 本轮点名（本表） |
+| `api/internal/svc/service_context.go` | 装配层 | 注入 `FavoriteRpc`（zrpc client）+ `CheckBlacklistMiddleware`（Redis）⇒ 黑名单 fail-open 语义已在 `api.md` §1.4 逐条对照 | ✅ 本轮点名（本表） |
+| `rpc/favoriteservice/favorite_service.go` | goctl **生成** | `// Code generated by goctl. DO NOT EDIT.` ⇒ 但它是 **7 个 RPC 方法签名的权威声明处** ⇒ `proto.md` §… 的 7 条 RPC 契约以此为准 | ✅ 本轮点名（本表） |
+| `rpc/pb/favorite_grpc.pb.go` | protoc **生成** | wire 契约产物 ⇒ 由 `tools/proto-wire-probe/favorite/` 做双侧字节对拍（已 EXIT=0） | ✅ 本轮点名（本表） |
+
+⇒ **结论：favorite 域的 Go 侧 50 个非测试源文件现已 50/50 有台账落点。**
+⚠️ **这不等于「行为全对」** —— 它只等于「**没有文件被漏看**」
+⇒ 行为层结论仍以各域台账的「证据强度」列为准（§0 口径）。
+
+#### 16.7.3 工具的误报处理（**工具自身的第一版必须先修再信**）
+
+| 误报类 | 处理 |
+|---|---|
+| 正文里裸写的路径（如 ``DRIFT/favorite/rpc.md`` §5-U1``）被判死链 | ⇒ 只有 **markdown 链接** ``[..](path.md) §x.y`` 才做文件级解析；裸路径是「位置描述」，不判 |
+| 指向根 `AGENTS.md` / 共享 `_INDEX.md` 的引用被判死节 | ⇒ 把这 4 个外部目标纳入索引，按**真实标题**判定 |
+| RAG 侧 `target/` 下的 protoc 产物被算成源文件 | ⇒ 生成代码不计入覆盖检查 |
+| 表格里**有语境列**的裸行号（`:129`，列头已写「RAG（`FavoriteController`）」）被判问题 | ⇒ 裸行号降级为**提示级**；无语境才需人工修 |
+
+⚠️ **与第九轮同一条教训**：这个工具的第一版也踩了坑（正则漏捕获组导致崩溃、`FILES_REF` 定义顺序颠倒）
+⇒ **先修工具再信工具**，且 §16.7.2 的 6 条结论是**工具与人工双向独立得出**的（结论一致才算数）。
+
+### 16.8 🔴 6 处 **RAG 侧行号锚点位移**（本轮改注释 ⇒ 自己把台账的锚点挪了）
+
+**根因**：台账的「位置」列引用的是 **RAG 侧 java 文件的行号**（如 `FavoriteController:190`）。
+而本轮**改了 26 个 java 文件的注释** ⇒ **行号整体位移** ⇒ 台账自己引用的位置**当场过期**。
+
+⇒ 这是**自指的漂移**：本轮修的是「java 注释里的 Go 锚点」，却顺手弄坏了「台账里的 java 锚点」。
+
+| # | 位置 | 台账写的 | 实际 | 判定 |
+|---|---|---|---|---|
+| **R-1** | `api.md` §1.4「Redis 故障」行 | `isBlacklisted:220-230` | **221-231** | ❌ 整体偏 1 行 |
+| **R-2** | `api.md` §4「空 struct body 校验」行 | `FavoriteController:234-263` | **235-264** | ❌ 首尾各偏 1 行 |
+| **R-3** | `rpc.md` §14.3 路由表（item/list 行） | `FavoriteController:190` | **191** | ❌ 偏 1 行 |
+| **R-4** | 本档 §16.3 **E-b** 的「位置」列 | `FavoriteLegacyPreflightRunner.java:204` | **205** | ❌ 偏 1 行 |
+| **R-5** | 本档 §16.3 **E-c** 的「位置」列 | `FavoriteLegacyPreflightRunner.java:208` | **209** | ❌ 偏 1 行 |
+| **R-6** | 本档 §16.4 的「位置」列 | `FavoriteProtectionChainWiringTest.java:101` | **102-103** | ❌ 偏 1~2 行 |
+
+⇒ ✅ **6 处已全部修正**（本轮 2026-10-25 核对）。
+
+⚠️ **注意 R-4/R-5/R-6 的讽刺之处**：它们是**本轮自己新写的**行号 ——
+写的时候用的是**补锚点之前**的文件状态，补锚点又改了同一个文件 ⇒ 又偏了。
+⇒ **「写完锚点必须再核一遍行号」不是可选项**，哪怕改动是纯注释。
+
+#### 16.8.1 机检：RAG 侧锚点的行号越界 + 内容抽查
+
+| 项 | 结果 |
+|---|---|
+| 台账里可判定的 RAG 侧行号锚点 | **50 个**（修正前口径；修正并补记后重跑为 **64 个**） |
+| **越界**（行号超出文件行数） | **0** ✅ —— 但**这不代表对**（R-1~R-3 越界检查全过，内容却偏了 1 行） |
+| **逐条打印实际内容人工抽查** | **6 处漂移**，其余 44 处 ✅ |
+| **修正后重跑** | 64 个锚点**越界 0**；6 处修正逐条打印复核 ⇒ **全部对上** |
+
+⇒ ⚠️ **越界检查是必要不充分条件**：行号落在文件内 **≠** 指对了那一行。
+真正能抓出的是「**打印实际内容逐条对**」⇒ 这是**人工动作**，本轮已把范围压到 50 个锚点。
+
+⇒ 元教训已登记 ⇒ [`docs/Pitfalls/favorite/rpc.md`](../../Pitfalls/favorite/rpc.md) **PIT-FAV-RPC-011**。
+

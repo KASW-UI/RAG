@@ -199,7 +199,7 @@ public final class FavoriteAuthorityFact {
         v2.event = v1.event;
         Wire.SubjectRef subjectRef = new Wire.SubjectRef();
         if (v1.subjectRef != null) {
-            // Go: :201 —— Issuer 来自 v1 的 AuthorityID，SubjectID 来自 v1 的 SubjectID。
+            // Go: service/favorite/rpc/internal/model/favorite_authority.go:201 —— Issuer 来自 v1 的 AuthorityID，SubjectID 来自 v1 的 SubjectID。
             // ⚠️ v1 的 TenantID 在 Go 侧【没有被带过来】—— 不要"顺手"补上。
             subjectRef.issuer = v1.subjectRef.authorityId;
             subjectRef.subjectId = v1.subjectRef.subjectId;

@@ -76,7 +76,7 @@ public class FavoriteUserGuard {
             // Go: svcCtx.UserRpc.GetUser(depCtx, &userservice.GetUserReq{Uid: userID})  (helper.go:98)
             resp = userRpcClient.userRpc().getUser(GetUserReq.newBuilder().setUid(userId).build());
         } catch (StatusRuntimeException e) {
-            // Go: :100-107
+            // Go: service/favorite/rpc/internal/logic/helper.go:100-107
             if (e.getStatus().getCode() == Status.Code.NOT_FOUND) {
                 metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
                         FavoriteRpcLabels.ACTION_USER_GET, FavoriteRpcLabels.RESULT_FAIL);
@@ -89,7 +89,7 @@ public class FavoriteUserGuard {
             throw FavoriteExceptions.internalServerCommon();
         }
 
-        // Go: :109-112 —— resp == nil || !resp.Found || resp.User == nil
+        // Go: service/favorite/rpc/internal/logic/helper.go:109-112 —— resp == nil || !resp.Found || resp.User == nil
         if (resp == null || !resp.getFound() || !resp.hasUser()) {
             metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
                     FavoriteRpcLabels.ACTION_USER_GET, FavoriteRpcLabels.RESULT_FAIL);
@@ -98,7 +98,7 @@ public class FavoriteUserGuard {
 
         UserInfo user = resp.getUser();
 
-        // 🔴 Go: :113-116
+        // 🔴 Go: service/favorite/rpc/internal/logic/helper.go:113-116
         //   if resp.User.Uid != userID || resp.User.Status == nil {
         //       return favoritecommon.GRPCError(codes.Unavailable, favoritecommon.ErrorServerCommon)
         //   }
@@ -118,7 +118,7 @@ public class FavoriteUserGuard {
             throw FavoriteExceptions.unavailableServerCommon();
         }
 
-        // Go: :117-120 —— resp.User.GetStatus() != 0
+        // Go: service/favorite/rpc/internal/logic/helper.go:117-120 —— resp.User.GetStatus() != 0
         if (user.getStatus() != 0L) {
             metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
                     FavoriteRpcLabels.ACTION_USER_GET, FavoriteRpcLabels.RESULT_FAIL);
@@ -126,7 +126,7 @@ public class FavoriteUserGuard {
             throw FavoriteExceptions.forbidden();
         }
 
-        // Go: :122 —— metrics.ObserveOp("dependency", "user_get", resultSuccess)
+        // Go: service/favorite/rpc/internal/logic/helper.go:122 —— metrics.ObserveOp("dependency", "user_get", resultSuccess)
         metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
                 FavoriteRpcLabels.ACTION_USER_GET, FavoriteRpcLabels.RESULT_SUCCESS);
     }
