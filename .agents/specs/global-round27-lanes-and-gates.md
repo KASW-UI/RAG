@@ -141,10 +141,19 @@ globalOpenTelemetry = new ObfuscatedOpenTelemetry(openTelemetry);   // ← 存�
 - **变异 4/4 全红**（`STABLE` 注入 / 函数改名 / `BEFORE→AFTER` / 去掉计失败行）
 - 全 9 域复跑 ⇒ **逐域退出码与 L3 基线一致**，新维度**增加 0 处差异**
 
-### 4.6 L11（Flyway 三条边界）
+### 4.6 L11（Flyway 三条边界）—— ✅ **全部做到**
 
-见 [`docs/DRIFT/global/lanes/L11-flywaydeep.md`](../../docs/DRIFT/global/lanes/L11-flywaydeep.md)。
-🔴 本 lane 挖出的**生产阻塞级新发现**已由整合者先行落档（见 §五）。
+| 边界 | 结论 |
+|---|---|
+| ① 真 rpc 进程并发同库 | ✅ `follow ‖ task ‖ message` 三个**真 `*RpcApplication` 进程**（真 gRPC server + 真 Kafka/Redis + 真 Flyway + 真连同一个 PG 16 库）⇒ 🔴 **advisory-lock 屏障**：预先占住 Flyway 的迁移锁（`locknum = 77431708279161 + javaHash("public"."flyway_schema_history_<模块>")`，**实测捕获**）⇒ 三者**同时**卡在 `pg_try_advisory_xact_lock`（`pg_stat_activity` 可见、此时迁移计数 = 0）⇒ 才放锁 ⇒ **并发不是墙钟凑巧** |
+| ② 迁移中途失败 / 回滚 + 同模块两副本 | ✅ 用 `filesystem:` **额外 Flyway location** 注入必然失败的 V900（**不动生产代码**）⇒ 失败迁移**零残留**（PG 事务性 DDL）· 同库他域**不受影响** · 同模块两副本账本 **2 行（不是 4）** |
+| ③ N 轮 + 随机启动延迟 | ✅ 每轮**新库** + 每域 **0~4000ms 随机启动偏移** ⇒ 全绿 |
+
+**反向注入**：两模块共用一本账本 ⇒ **EXIT=1**（红在「表没建出来 + 迁移记录互相污染」）⇒ 正常跑 **EXIT=0**（13 个进程全 SUCCESS）。
+
+⚠️ **边界**：只覆盖 **3/7 域** · 只验**迁移面**（依赖全是不可达地址）· 没测 SIGKILL / PG 重启 / 锁超时 · 判定器**不进 `mvn test`** ⇒ 全仓回归不覆盖它。
+
+台账 ⇒ [`docs/DRIFT/global/lanes/L11-flywaydeep.md`](../../docs/DRIFT/global/lanes/L11-flywaydeep.md) 第七节。
 
 ---
 

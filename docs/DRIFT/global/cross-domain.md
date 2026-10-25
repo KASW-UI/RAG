@@ -942,6 +942,30 @@ L9 只读分析（**未改 `service/common`**）：
 
 ⇒ ⇒ **L2 缺口清单第 5 条**（「在飞处理被打断」这一维）**销账为「框架限制」**，**不补守门**（没有「应当被打断」的可观察行为可守）。
 
+### ⑤ 🔴 L11：Flyway 三条边界 —— **全部做到**，且用 **advisory-lock 屏障**证明是**真并发**
+
+> L4 留下的边界是「起的是**最小 Spring 上下文**（只 import DataSource + Flyway）」⇒ 那不是「三个真 rpc 服务同时起」。
+> ⇒ L11 改用**真 `*RpcApplication` 进程**（真 gRPC server + 真 Kafka/Redis + 真 Flyway + 真连同一个 PG 16 库）。
+
+| 边界 | 结论 | 证据 |
+|---|---|---|
+| **① 真 rpc 进程并发同库** | ✅ **做到** | `follow ‖ task ‖ message` 三个**真进程**并发连同一个库 ⇒ 🔴 **用 advisory-lock 屏障证明「同时」**：预先占住 Flyway 的 advisory lock（`locknum = 77431708279161 + javaHash("public"."flyway_schema_history_<模块>")`，**实测捕获**）⇒ 三个进程**同时**卡在 `pg_try_advisory_xact_lock`（`pg_stat_activity` 可见、此时 `Migrating schema` 计数 = 0）⇒ 才放锁 ⇒ **并发不是墙钟凑巧** ⇒ 三者 `ok=true` · `gRPC 监听=true`（TCP 探测 + `gRPC Server started` 双证据） |
+| **② 迁移中途失败 / 回滚 + 同模块两副本** | ✅ **做到** | ① 用 `filesystem:` **额外 Flyway location** 注入必然失败的 V900（**不动生产代码**）⇒ follow 真进程起不来（`FlywayMigrateException` / SQLSTATE 42883）⇒ **失败迁移建的表零残留**（PG 事务性 DDL）⇒ **同库的 task 进程完全不受影响** ② 同模块两副本 ⇒ 账本 **2 行（不是 4）** · `follow_relation` 表数 = 1 |
+| **③ N 轮 + 随机启动延迟** | ✅ **做到** | 每轮**新库** + 每域 **0~4000ms 随机启动偏移** ⇒ 全绿 |
+
+**反向注入（判定器非空转）**：把 `message` + `task` 的 `spring.flyway.table` 指向**同一本** `flyway_schema_history_shared`
+⇒ **EXIT=1**，红在 **A3-表建出**（`task_progress` / `user_like_count` 没建出来）+ 汇总的「**迁移记录互相污染**」
+⇒ 查库确认：共享账本里只剩 message 的 5 行、task 的表**根本没建出来**
+⇒ 正常跑同一脚本 ⇒ **EXIT=0**（`--rounds=2` ⇒ 13 个进程全 SUCCESS）。
+
+⚠️ **边界（不许读成「Flyway 已对齐」）**：
+- 只覆盖 **3/7 域**（另 4 域用**当前生产 yaml 起不来** ⇒ 需跨 lane 的行为修复）
+- 依赖全是**不可达地址**（Nacos / Kafka / Redis）⇒ 只验**迁移面**，不验业务面
+- **没测**：迁移中途 SIGKILL · PG 重启 / 网络抖动 / 锁超时
+- 随机延迟只覆盖**启动偏移**，没覆盖「极慢机器」
+- **本 lane 一句「与 Go 一致」都没说**（Go 侧是 GORM `AutoMigrate` ⇒ **无账本无锁**）
+- 判定器是**脚本**，**不进 `mvn test`** ⇒ 全仓回归不覆盖它
+
 ### ⑤ 🟡 本轮新发现（**登记，不在 lane 内修**）
 
 | # | 发现 | 落点 | 处置 |
@@ -951,6 +975,11 @@ L9 只读分析（**未改 `service/common`**）：
 | **N3** | 「slow 阈值的**配置被忽略**」是可静默发生的退化（回退 Go 兜底 500ms）⇒ 守门的占用时长必须 **< 500ms** | 全部 slow 轴守门 | ✅ **取值已核**（见 ② 表）⇒ 教训 **PIT-GLOBAL-028** |
 | **N4** | `LikeRpcApplication.java:117-119` 的注释说「目前没有」锁死用例，并提到一个**全仓不存在**的类名 | `service/like/like-rpc`（生产代码注释） | ✅ **整合者已订正**（L7 发现，本轮修） |
 | **N5** | `CommentFactDispatchScheduler` **不是** `@Scheduled` 驱动 ⇒ 定时方法在本进程不跑 | `service/comment` | **只登记、不定性**（超本轮范围） |
+| **N6** | 🔴 **`discovery://<name>`（**两斜杠**）在 5/7 个 rpc 模块的 yaml 里** ⇒ devh 的 `DiscoveryClientResolverFactory` 要求 `targetUri.getPath()` **长度 > 1** ⇒ **真 fat jar 起不来**（**连 Flyway 都跑不到** —— grpc client bean post-processor 先失败）⇒ 只有 `follow-rpc` 是三斜杠（正确）⇒ ⚠️ **与 Nacos 在不在线无关**（检查发生在任何网络调用之前） | 5 个 rpc 模块的 `application.yml` | 🔴 **生产阻塞级** ⇒ **只登记不修**（需各域 owner 改 yaml）⇒ 已落 `AGENTS.md` §3.5 |
+| **N7** | `like-rpc` / `article-rpc` 的 `grpc-inprocess` 是 **`test` scope** ⇒ 不在 fat jar 里 ⇒ 实测 `NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder` | 2 个模块的 `pom.xml` | **只登记不修** |
+| **N8** | `task-rpc` 的 jar **没有 `Main-Class`**（没接 `spring-boot-maven-plugin`）⇒ `java -jar` 起不了 | `service/task/task-rpc/pom.xml` | **只登记不修** |
+| **N9** | 共享库并发启动时，**后启动者**账本会多一条 `BASELINE(0)`（**不跳迁移**，但会让「行数 == 迁移条数」这条断言**误红**） | 判定器口径 | ✅ **已记进台账**（判定器已按此调整口径） |
+| **N10** | postgres 镜像**初始化期**的临时 server 会**吞掉刚建的库**（⇒ 容器刚起时连不上，是镜像行为不是缺陷） | 测试基建 | ✅ **已记进台账** |
 
 ## 三、其余 7 条的状态说明（2026-10-25）
 
