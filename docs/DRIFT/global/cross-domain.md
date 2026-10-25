@@ -381,8 +381,19 @@ RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFact
 ⇒ **零处引用 `service/common/communityfact`**；
 而 Go 的 like 域用的是**共享组件** `service/common/communityfact` + `cmd/fact-dispatch` / `cmd/fact-authority` 两个进程 + `internal/model/fact_delivery.go`。
 
-⇒ **待判定（本轮未做完）**：RAG 这套「自己实现的 outbox+stream+scheduler」与 Go 的 `communityfact` 链路**行为是否等价**？
+⇒ **待判定（第九轮留的）**：RAG 这套「自己实现的 outbox+stream+scheduler」与 Go 的 `communityfact` 链路**行为是否等价**？
 （B2 已钉住共享组件的契约：`POST /v1/events` + 调度形状 **1s / 每轮 16 / 单次 10s / 单条失败即 break** ⇒ 应拿这四条逐条对 RAG 的 `LikeFactDispatchScheduler`。）
+
+#### 🔴 2026-10-25 第十九轮末**实测重判**（这条「待判定」已被证伪 ⇒ 定性变了）
+
+| 事实 | 出处 | 推论 |
+|---|---|---|
+| ① **共享层的 `Dispatcher` 已经按 Go 的形状实现** | `service/common/.../communityfact/Dispatcher.java:176-203`（ticker 1s + 内层 `for (i<16)` + 单条失败/未发送即 `break` + 单次 10s 超时，对 Go `communityfact/process.go:41-53`） | ⇒ 🔴 **不存在「共享组件 ticker 语义漂移」**（此前 todo 里那条描述**作废**）⇒ **B4 的等价性判定不必单独做**（形状已对齐，且 comment 域已在用） |
+| ② `Dispatcher.run(ctx, DispatcherImpl, Sender, …)` 的 `DispatcherImpl` 是 **`@FunctionalInterface`** | `Dispatcher.java:35-36`（+ `:64/:86` 签名） | ⇒ 共享层**不绑死任何域的表** ⇒ like 域**可直接复用**（自己实现取件/结算回调即可） |
+| ③ **Go 侧 like 域本来就有自己的 outbox/stream 表** | Go `service/like/rpc/internal/model/domain_fact.go:31,40`（`like_domain_fact_outbox` / `like_fact_stream`）+ `migrations/001,002` | ⇒ 🔴 「RAG 另起炉灶」的说法**只对了一半** ⇒ **表名两侧同名**（RAG V4/V5 ✔）⇒ **数据层不是问题** |
+| ④ 真正缺的只有**投递那一段** | `LikeFactDispatchService.java`（**4 行 · 骨架占位 · 未实现**）+ `LikeFactDispatchScheduler.java`（**4 行 · 骨架占位**） | ⇒ 🔴 这是**功能缺口**，**不是语义漂移** ⇒ ⇒ **不能签字认账**（签了等于认下「少一个功能」） |
+| ⑤ 数据层已齐 | `LikeDomainFactOutboxEntity`(340 行) + `LikeFactStreamEntity` + 2 mapper + `LikeDomainFactService`(175 行) + V4/V5/V6 迁移 + `LikeDomainFactSchemaParityTest` | ⇒ 只差「把件送出去」那一段 |
+| ⑥ **样板现成** | comment 域：`CommentFactDispatchScheduler`(118 行) + `CommentAuthorityEndpointConfig`(90 行) | ⇒ 修法 = **照 comment 的接法**补齐 like 的两个骨架 ⇒ **共享层零改动** ⇒ ⛔ **不需拍板** |
 
 ### ③ 🔴 我自己第四轮（B2 / X-3）的结论**有误，须订正**
 
@@ -393,7 +404,7 @@ RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFact
 
 | 半边 | 判定 | 处置 |
 |---|---|---|
-| **like 缺共享组件接线** | 🟡 **可能可修**（需先做上面 ② 的等价性判定） | 下一步逐条对四条调度契约 |
+| **like 缺共享组件接线** | 🟢 **可修，且定性已改**（第十九轮末实测：① 共享层形状已对齐 Go ② `DispatcherImpl` 是函数式接口 ⇒ 通用 ③ Go 侧 like 本来就有自己的表 ⇒ 数据层无问题 ④ 真正缺的只是**投递那段 4 行骨架**） | ✅ **照 comment 域的接法补齐 `LikeFactDispatchService` + `LikeFactDispatchScheduler`**（共享层零改动）⇒ **不需拍板**；⚠️ 这是**功能缺口** ⇒ **不能签字认账** |
 | **favorite / article 多出来的用法** | 🔴 **不是漂移**（Go 侧本来就没有 ⇒ RAG 多做了功能）⇒ 属「有意偏离」还是「多余实现」**待判** | ⛔ **favorite 一律不碰** ⇒ 这半边**被 favorite 永久阻塞** |
 
 ⚠️ ⇒ **X-4 无法整体关闭**：**可修的一半（like）+ 永久阻塞的一半（favorite）** ⇒ 台账应拆成两条。
