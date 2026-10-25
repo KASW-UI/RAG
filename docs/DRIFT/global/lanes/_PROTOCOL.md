@@ -42,12 +42,12 @@
 
 | lane | 分支 | 工作树 | 议题 | 独占写权 |
 |---|---|---|---|---|
-| **L6** | `align/global-x5gate` | `../RAG.worktrees/global-x5gate` | **X-5 轴**真 server 守门（admin-rpc / article-rpc）+ article slow 轴 + 缺口④ 复评 | `service/users/admin/admin-rpc/src/test/**` · `service/article/article-rpc/src/test/**` · `docs/DRIFT/global/lanes/L6-x5gate.md` |
-| **L7** | `align/global-slowgate` | `../RAG.worktrees/global-slowgate` | **X-5 轴** + **slow 轴**（comment-rpc / like-rpc） | `service/comment/comment-rpc/src/test/**` · `service/like/like-rpc/src/test/**` · `docs/DRIFT/global/lanes/L7-slowgate.md` |
-| **L8** | `align/global-slowgate2` | `../RAG.worktrees/global-slowgate2` | **slow 轴**推广（user-rpc / message-rpc / hot-rpc） | `service/users/user/user-rpc/src/test/**` · `service/message/message-rpc/src/test/**` · `service/hot/hot-rpc/src/test/**` · `docs/DRIFT/global/lanes/L8-slowgate2.md` |
-| **L9** | `align/global-interrupt` | `../RAG.worktrees/global-interrupt` | **slow 轴**（task-rpc / follow-rpc）+ **缺口③ 的定性**（打断维度） | `service/task/task-rpc/src/test/**` · `service/follow/follow-rpc/src/test/**` · `docs/DRIFT/global/lanes/L9-interrupt.md` |
-| **L10** | `align/global-ddldeep` | `../RAG.worktrees/global-ddldeep` | **DDL 盲区**：触发器函数体逐条核对 + task/message DDL runner 重建 | `tools/difftest/check-ddl-static.py` · `tools/difftest/ddl*` · `docs/DRIFT/global/lanes/L10-ddldeep.md` |
-| **L11** | `align/global-flywaydeep` | `../RAG.worktrees/global-flywaydeep` | **Flyway 三条边界**：真 rpc 形态 / 迁移失败与回滚 / 压力与随机延迟 | `tools/difftest/check-flyway-concurrent.sh` · `tools/difftest/flyway*` · `tools/difftest/check-flyway-ledger.py` · `docs/DRIFT/global/lanes/L11-flywaydeep.md` |
+| **L6** | `align/global-x5gate` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-x5gate` | **X-5 轴**真 server 守门（admin-rpc / article-rpc）+ article slow 轴 + 缺口④ 复评 | `service/users/admin/admin-rpc/src/test/**` · `service/article/article-rpc/src/test/**` · `docs/DRIFT/global/lanes/L6-x5gate.md` |
+| **L7** | `align/global-slowgate` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-slowgate` | **X-5 轴** + **slow 轴**（comment-rpc / like-rpc） | `service/comment/comment-rpc/src/test/**` · `service/like/like-rpc/src/test/**` · `docs/DRIFT/global/lanes/L7-slowgate.md` |
+| **L8** | `align/global-slowgate2` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-slowgate2` | **slow 轴**推广（user-rpc / message-rpc / hot-rpc） | `service/users/user/user-rpc/src/test/**` · `service/message/message-rpc/src/test/**` · `service/hot/hot-rpc/src/test/**` · `docs/DRIFT/global/lanes/L8-slowgate2.md` |
+| **L9** | `align/global-interrupt` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-interrupt` | **slow 轴**（task-rpc / follow-rpc）+ **缺口③ 的定性**（打断维度） | `service/task/task-rpc/src/test/**` · `service/follow/follow-rpc/src/test/**` · `docs/DRIFT/global/lanes/L9-interrupt.md` |
+| **L10** | `align/global-ddldeep` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-ddldeep` | **DDL 盲区**：触发器函数体逐条核对 + task/message DDL runner 重建 | `tools/difftest/check-ddl-static.py` · `tools/difftest/ddl*` · `docs/DRIFT/global/lanes/L10-ddldeep.md` |
+| **L11** | `align/global-flywaydeep` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-flywaydeep` | **Flyway 三条边界**：真 rpc 形态 / 迁移失败与回滚 / 压力与随机延迟 | `tools/difftest/check-flyway-concurrent.sh` · `tools/difftest/flyway*` · `tools/difftest/check-flyway-ledger.py` · `docs/DRIFT/global/lanes/L11-flywaydeep.md` |
 
 ⇒ **6 条 lane 按模块零重叠** ⇒ 可同时开工。
 

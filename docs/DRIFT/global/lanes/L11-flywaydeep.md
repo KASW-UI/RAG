@@ -16,7 +16,7 @@
 | **可写（台账）** | `docs/DRIFT/global/lanes/L11-flywaydeep.md` |
 | **只读** | `service/**`（本 lane **不碰任何生产代码与测试**）· `service/favorite/**`（⛔ 零写权）· `tools/difftest/README.md`（共享说明文件 ⇒ 整合者统一更新） |
 
-**分支**：`align/global-flywaydeep` · **工作树**：`../RAG.worktrees/global-flywaydeep` · **基线**：`align/global` HEAD
+**分支**：`align/global-flywaydeep` · **工作树**：`/Users/pr/Documents/java&golang/RAG.worktrees/global-flywaydeep` · **基线**：`align/global` HEAD
 
 ---
 

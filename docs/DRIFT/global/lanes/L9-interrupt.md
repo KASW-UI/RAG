@@ -15,7 +15,7 @@
 | **可写（台账）** | `docs/DRIFT/global/lanes/L9-interrupt.md` |
 | **只读** | `service/common/**`（共享层只有 `align/global` 能改；缺口③ 的定性**只读不改**）· `service/*/src/main/**`（生产代码零改动）· `service/favorite/**`（⛔ 零写权） |
 
-**分支**：`align/global-interrupt` · **工作树**：`../RAG.worktrees/global-interrupt` · **基线**：`align/global` HEAD
+**分支**：`align/global-interrupt` · **工作树**：`/Users/pr/Documents/java&golang/RAG.worktrees/global-interrupt` · **基线**：`align/global` HEAD
 
 ---
 

@@ -15,7 +15,7 @@
 | **可写（台账）** | `docs/DRIFT/global/lanes/L7-slowgate.md` |
 | **只读** | `service/common/**`（共享层只有 `align/global` 能改）· `service/*/src/main/**`（生产代码零改动）· `service/favorite/**`（⛔ 零写权） |
 
-**分支**：`align/global-slowgate` · **工作树**：`../RAG.worktrees/global-slowgate` · **基线**：`align/global` HEAD
+**分支**：`align/global-slowgate` · **工作树**：`/Users/pr/Documents/java&golang/RAG.worktrees/global-slowgate` · **基线**：`align/global` HEAD
 
 ---
 
