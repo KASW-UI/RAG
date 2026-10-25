@@ -135,3 +135,80 @@ go-zero 的必填校验在 `UnmarshalJsonReader` **内部**一次完成；RAG �
   少一侧的用例会被报成 `<<缺失>>` 并 exit 1（这条分支也做过验证）。
 - Go struct 必须逐字段对齐真源 `types.go`，新增字段就要新增用例。
 - **不要**在本文件里写「与 Go 一致」却只跑 RAG 侧 —— 那正是 AGENTS.md §3.3 要防的事。
+---
+
+# 第二个探针：`trace/`（Go ↔ RAG 的 **trace 链路**活体对拍）
+
+> 位置：`tools/semantic-probe/trace/` · 跑法：`bash tools/semantic-probe/trace/run-trace-parity.sh`
+> 退出码：`0` = 两侧一致 · `1` = 有漂移 · `2` = 环境不满足
+
+## 为什么要有它（AGENTS.md §3.3 规则 2 的**第二个**落地）
+
+T-11（全局 OpenTelemetry）落地后，RAG 侧有守门（`GoStyleOtelSamplerProtocolGateTest` 等），
+但 Go 侧**只有「逐行读源码」** ⇒ 而 §3.3 明确要求：
+
+> 凡写「与 Go 一致」，必须有**两侧同时跑的探针**（不是只跑 RAG）。
+
+⇒ 本探针把 **go-zero 的真源跑起来**，与 RAG 侧的**生产类**逐条对拍。
+
+## 结构
+
+| 文件 | 角色 |
+|---|---|
+| `trace/go/liveprobe_test.go` | **Go 半边**：**包内**测试（`package trace`）⇒ 能调未导出的 `createExporter` / `startAgent` |
+| `trace/java/TraceProbe.java` | **RAG 半边**：只调**生产类** `GoStyleOtelAgent` / `GoStyleOtelConfig`（不复制装配逻辑） |
+| `trace/run-trace-parity.sh` | 跑两侧 → 按用例名配对 → 打印对比表 → 不一致则 exit 1 |
+
+## 三条纪律（都是踩出来的）
+
+**① Go 半边必须进包内（`package trace`）。**
+`createExporter` / `startAgent` 是**未导出**的 ⇒ 外部包调不到 ⇒
+「unknown exporter」「端点为空不校验」「四种 exporter 都能构造」这三条**只能**靠包内测试活体证。
+
+**② 模块缓存是只读的，且 `go -overlay` 不允许替换 `GOMODCACHE` 下的文件。**
+实测报错：`Files beneath GOMODCACHE must not be replaced`
+⇒ 做法：把缓存里的 go-zero **整份拷到临时目录** → 放入包内探针 → `go test ./core/trace/`。
+⇒ **拷完必须逐字节校验**（`diff -r -x liveprobe_test.go`）⇒ 确认「跑的就是缓存里那份真源」。
+
+**③ 「只输出稳定值」。**
+trace-id 是**随机**的 ⇒ 探针只输出布尔 / 枚举（`parent_trace_id_inherited=true`），
+**不输出原始 id** ⇒ 否则两侧永远对不上。
+
+## 用例（11 条）
+
+| 用例 | 测什么 | Go 出处 |
+|---|---|---|
+| `G1_startAgent_failure` | 装配失败 ⇒ 只记 ERROR、**不 panic**、全局仍是 no-op | `core/trace/agent.go:43-52` |
+| `G2_unknown_exporter` | 非法 batcher + 端点非空 ⇒ 抛 `unknown exporter` | `core/trace/agent.go:100-101` |
+| `G3_empty_endpoint` | 非法 batcher + **端点为空** ⇒ **不报错** | `core/trace/agent.go:115-124` |
+| `G4_ratio_zero` | `Sampler=0.0` ⇒ 不 recording / 不 sampled，但 **SpanContext 仍有效** | `core/trace/agent.go:110` + `config.go:10` |
+| `G5_parentbased_sampled_parent` | `Sampler=0.0` + 入向 **sampled** parent ⇒ 子 span 仍采样 | `core/trace/agent.go:110` 的 ParentBased |
+| `G6_parentbased_unsampled_parent` | `Sampler=1.0` + 入向 **未采样** parent ⇒ 子 span **不**采样 | 同上（`remoteParentNotSampled ⇒ AlwaysOff`） |
+| `G7_exporter_{otlpgrpc,otlphttp,zipkin,file}` | Go 的**四种** batcher 都能构造 | `core/trace/agent.go:60-103` |
+| `G8_propagation` | 全局传播器 = Composite(TraceContext, Baggage) | `core/trace/propagation.go:8-11` |
+
+### 🔴 G6 是本探针**挖出来的缺口**
+
+RAG 侧的 `GoStyleTraceparentFilter` 类注释里写着「入向 parent 不采样时子 span 也不采样」，
+但**此前没有任何守门** ⇒ 那是一条**写在注释里、没有运行期证据**的断言（AGENTS.md §3.3.2）。
+⇒ 本探针用 Go 真源活体确认了这条语义 ⇒ 随后在 RAG 侧补了对应的 JUnit 守门
+（`GoStyleOtelSamplerProtocolGateTest#remoteParentNotSampledDropsChildSpanEvenWhenRatioIsOne`）。
+
+## 已知能力缺口（不计入失败，但**始终打印**）
+
+RAG 只实现了 `otlpgrpc`；Go 还支持 `otlphttp` / `zipkin` / `file`
+⇒ 这三行**必然**不一致 ⇒ 放在脚本里的 `KNOWN_GAP` 白名单
+⇒ 标成「预期差异」，**不计入失败**，但**始终打印出来**，让人看得见它还在那儿。
+
+> ⚠️ 加白名单是**有后果的动作**：它等于承认「这条差异不修」。
+> ⇒ 每条都必须能在 global 台账里找到出处；没有出处的**不许**进来。
+
+## 已知边界
+
+- **不是完整进程**：Go 半边只跑 `core/trace` 这个包 ⇒ 不起 HTTP server、不起 Kafka/Nacos。
+- **不比对 span 的导出字节**：只比对**采样决策 / 装配结果 / 传播器字段**；
+  「OTLP 字节真的出了机器」由 RAG 侧的 `FakeOtlpCollector` 守门负责（真 gRPC 接收端）。
+- **不覆盖 Go 侧的 `rest/handler/tracehandler.go`**（HTTP 层的 span 命名 / 属性）——
+  那属于响应头层，RAG 侧由 `GoStyleTraceparentFilter*` 系列守门负责。
+- **Go 侧 OTel SDK 是 1.40.0，RAG 侧是 1.44.0** ⇒ 版本不同 ⇒ 探针证的是**语义**，
+  不是「逐字节同版本」。

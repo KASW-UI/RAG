@@ -133,6 +133,77 @@ class GoStyleOtelSamplerProtocolGateTest {
         }
     }
 
+    // ====================================================================================
+    // ParentBased 的**另一半**（🔴 2026-10-25 第二十四轮：由 Go 侧活体探针挖出来的缺口）
+    // ====================================================================================
+
+    /**
+     * 🔴🔴 **本条是 Go 侧活体探针（{@code tools/semantic-probe/trace/}）挖出来的缺口。**
+     *
+     * <p>此前本文件只证了 ParentBased 的<b>一半</b>：「入向 parent <b>已采样</b> ⇒ 子 span 仍采样」。
+     * <b>另一半</b>（「入向 parent <b>未采样</b> ⇒ 子 span <b>不</b>采样」）<b>没有守门</b>，
+     * 而它<b>正是</b> {@code GoStyleTraceparentFilter} 类注释里那句断言
+     * 「<b>入向 parent 不采样时子 span 也不采样</b>」——
+     * ⇒ 那是一条<b>写在注释里但没有任何运行期证据</b>的断言（AGENTS.md §3.3.2 点名的形态）。
+     *
+     * <p>Go 出处（<b>活体跑出来的</b>，不是读源码转述）：
+     * <pre>
+     *   go-zero@v1.10.2/core/trace/agent.go:110
+     *       sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(c.Sampler)))
+     *   ⇒ sdktrace.ParentBased 的默认四分支：
+     *       remoteParentSampled     ⇒ AlwaysSample()
+     *       remoteParentNotSampled ⇒ AlwaysOff()     ← 本条守的就是这一支
+     *       localParentSampled      ⇒ AlwaysSample()
+     *       localParentNotSampled  ⇒ AlwaysOff()
+     *
+     *   活体证据：tools/semantic-probe/trace/go/liveprobe_test.go 的 G6
+     *       ratio=1.0 + 入向 traceparent(flags=00)
+     *       ⇒ recording=false | sampled=false | sc_valid=true
+     * </pre>
+     *
+     * <p>⚠️ <b>为什么这条重要</b>：入向 {@code traceparent} 的 flags 位由<b>上游</b>决定
+     * ⇒ 上游说「这条 trace 不采样」时，本服务<b>必须</b>跟着不采样
+     * ⇒ 否则整个链路上的采样率会被逐跳放大。
+     */
+    @Test
+    @DisplayName("🔴 ParentBased：入向 parent **未采样** ⇒ 即使 Sampler=1.0，子 span 也**不**采样"
+            + "（Go: ParentBased 的 remoteParentNotSampled ⇒ AlwaysOff）")
+    void remoteParentNotSampledDropsChildSpanEvenWhenRatioIsOne() throws Exception {
+        try (FakeOtlpCollector collector = new FakeOtlpCollector()) {
+            var provider = GoStyleOtelAgent.buildProvider(
+                    new GoStyleOtelConfig("common-otel-sampler-gate", collector.endpoint(), "grpc", 1.0d));
+            try {
+                // 入向 traceparent：flags = 00 ⇒ **未采样**
+                Map<String, String> incoming = new HashMap<>();
+                incoming.put("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00");
+
+                Context parent = io.opentelemetry.context.propagation.TextMapPropagator
+                        .composite(io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator.getInstance())
+                        .extract(Context.root(), incoming, MapGetter.INSTANCE);
+
+                Tracer tracer = provider.get("gate");
+                Span span = tracer.spanBuilder("child-span").setParent(parent).startSpan();
+
+                assertThat(span.isRecording())
+                        .as("ParentBased ⇒ 入向 parent **未采样** ⇒ 子 span **必须不**被采样"
+                                + "（Go: sdktrace.ParentBased 的 remoteParentNotSampled ⇒ AlwaysOff）")
+                        .isFalse();
+                assertThat(span.getSpanContext().isSampled())
+                        .as("子 span 的 sampled 标志必须为 false（trace flags = 00）")
+                        .isFalse();
+                assertThat(span.getSpanContext().isValid())
+                        .as("被 DROP 的 span：**SpanContext 仍有效**（Go 同款：Drop 决策仍给有效 SpanContext）")
+                        .isTrue();
+                span.end();
+            } finally {
+                provider.close();
+            }
+            assertThat(collector.requestCount())
+                    .as("未采样的子 span **不该出机器**")
+                    .isEqualTo(0);
+        }
+    }
+
     @Test
     @DisplayName("🔴 sampler 名字 → 比例 的映射：always_on⇒1.0 / always_off⇒0.0 / traceidratio⇒arg / 非法名⇒炸")
     void samplerNameMapsToGoRatio() {
