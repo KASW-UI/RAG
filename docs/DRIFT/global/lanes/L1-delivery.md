@@ -429,3 +429,17 @@ RAG 侧它**没覆写 `flushBuffer()`** ⇒ **worker 线程能提交响应** ⇒
 | ③ | 把**本轮变异脚本**落仓到 `tools/difftest/`（建议名 `timeout-race-mutation.py`） | `tools/` **不在 L1 白名单** ⇒ 只留在会话临时目录 `/tmp/mutation-round22.py`；§10.5 已把 5 条变异的锚点与期望红点写全 ⇒ 可据此重建 |
 | ④ | **新坑 `PIT-GLOBAL-021`（判定正则）** ⇒ 落 `docs/Pitfalls/global/` | 那是 **L5** 的白名单 |
 | ⑤ | `align/global` → `do-my-own-gh` 的合并 | 由 Jason 决定时机 |
+
+### 10.10 验证记录（2026-10-25 收口）
+
+| 项 | 结果 |
+|---|---|
+| **全仓回归**（`mvn -o test -fae`） | ✅ **BUILD SUCCESS** · **2218 tests / 0 failures / 0 errors / 0 skipped**（276 份 XML） |
+| **上一轮（T-11 收口时）** | 🔴 BUILD FAILURE · 2217 tests · **1 error**（就是本轮修掉的那条偶发超时测试）⇒ **2218 = 2217 + 本轮新增的 1 条门** |
+| **`service/common` 模块** | ✅ 239 条全绿（含新增门） |
+| **那条偶发测试**（`MessageApiTimeoutRealTomcatTest`） | ✅ **连跑 5 次全绿**（修前：单独复跑也绿 ⇒ 属偶发 ⇒ 回归时才撞出） |
+| **新门在回归里** | ✅ `GoStyleTimeoutResponseRaceGateTest` 1 条 / 7.092 s / 0 失败 |
+| **变异** | ✅ **5/5 全部转红**（隔离工作树 `/tmp/rag-round22-mut`，已清理）+ 还原校验逐字节相同 |
+| **A/B 对拍** | ✅ `aac691c`（T-11 之前）同门 **同样全坏** ⇒ **缺陷早于 T-11** |
+| **favorite** | ✅ 代码 / 配置 / 测试 / 台账 **零改动**（`git diff` 可验）；共享层影响已记账（§10.8） |
+| **提交 / 推送** | `ea0ae25` · origin `1d179ff..ea0ae25` · upstream `1d179ff..ea0ae25`（均 fast-forward） |

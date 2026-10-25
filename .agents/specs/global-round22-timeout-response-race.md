@@ -207,4 +207,6 @@ no-op 挡的是「worker 抢先提交」⇒ 少任一条都留缺口。
 | ① | 把本节 fold 进 `docs/DRIFT/global/common-tails.md` | 共享台账 ⇒ 协议 §二.3 |
 | ② | 更新 `AGENTS.md` §0 的 `global` 行 + 三个 `_INDEX.md` + `_MANIFEST.json` | 共享索引 |
 | ③ | 把**本轮变异脚本**落仓到 `tools/difftest/`（建议名 `timeout-race-mutation.py`） | `tools/` **不在 L1 白名单** ⇒ 只留在会话临时目录 `/tmp/mutation-round22.py`；§5 已把 5 条变异的锚点与期望红点写全 ⇒ 可据此重建 |
-| ④ | `align/global` → `do-my-own-gh` 的合并 | 由 Jason 决定时机 |
+| ④ | **新坑 `PIT-GLOBAL-021`**（变异判定的正则要匹配 surefire 的**全限定名**，否则红/绿都读不出来 ⇒ 5 条全报 `NO_RESULT`，看起来像「守门没被触达」，实际是「红了但读不出来」）⇒ 落 `docs/Pitfalls/global/` | 那是 **L5** 的白名单 |
+| ⑤ | **把 L1 白名单正式更新**：`service/common/**` 事实上已被 T-11 与 T-13 两条 lane 纳入写权，但 §四 只列了 `service/common/communityfact/Dispatcher.java` | 共享台账 ⇒ 协议 §二.3 |
+| ⑥ | `align/global` → `do-my-own-gh` 的合并 | 由 Jason 决定时机 |
