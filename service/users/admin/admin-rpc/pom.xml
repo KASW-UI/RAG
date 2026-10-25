@@ -145,10 +145,12 @@
         <!--
             Testcontainers 2.0.5（版本由 spring-boot-starter-parent 的 testcontainers.version 管理，不写 version）。
             为什么必须是真 PostgreSQL、不能用 H2：
-              - extra_info 是 jsonb 列，JsonbTypeHandler 走 ps.setObject(..., Types.OTHER)
+              - extra_info 是 text 列，JsonTextTypeHandler 走 ps.setString(...)
               - AdminCreateAtomicService 的 SELECT ... FOR UPDATE 悲观锁
-              - setSql("extra_info = CAST({0} AS jsonb)") 的显式 CAST
-            这三样 H2 都不支持/语义不同，替换掉等于把要验证的东西换没了。
+              - setSql("extra_info = {0}") 的参数绑定 + 「逐字节落库」这类只有真 PG 才有的观察
+                （⚠️ 2026-10-25 第十八轮起，这一条不再是 CAST —— 显式 CAST 成 jsonb 已被移除，
+                 因为 users_user.extra_info 与 admin_admin.extra_info **都是 text**）
+            这几样 H2 都不支持/语义不同，替换掉等于把要验证的东西换没了。
             对应 AGENTS.md §6.2.3 的 A-U0 / A-U2 / A-U3。
         -->
         <dependency>

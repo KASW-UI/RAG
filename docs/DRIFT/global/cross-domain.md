@@ -1,7 +1,8 @@
 <!-- @new 2026-10-25 · global 收口域 · 由 `align/global` 工作树产出 + 基线 commit 58e8314 -->
-<!-- 核对日期：2026-10-25（第十七轮）· 本轮**只改了跨域测试**：`task-rpc` + `follow-rpc` 两个域的
-     `*GrpcInterceptorWiringTest` 换 `ServerCalls.asyncUnaryCall` + 补两条断言（X-5 落地）
-     ⇒ **生产代码零改动** · 详见 §二·八 ⑤ -->
+<!-- 核对日期：2026-10-25（第十八轮）· 本轮修了 **users 域真漂移 B10**：`users_user.extra_info`
+     写路径 jsonb → text（真 PG 坐实「Go 成功 / RAG 5001」）⇒ 落点跨 `users-common` + `admin-rpc`
+     ⇒ **同一次提交** · 详见 §二·十四 -->
+<!-- ⚠️ 第十八轮起，**SQLSTATE 22P05（不是 22P02）** 是本档的必读订正（§二·十四 ②） -->
 <!-- ⚠️ 第十六轮起，本档的「端到端 vs 解析层」区分是必读项（见 §二·十三 ③ 与 PIT-GLOBAL-015） -->
 <!-- ⚠️ 第十七轮起，**变异脚本的「假绿」判据**是必读项（见 PIT-GLOBAL-018）：编译不过 ⇒ 测试没跑 ⇒ 旧 XML ⇒ 假绿 -->
 
@@ -346,10 +347,11 @@ follow-api 8/8 · task-api 1 · user-api 9 · admin-api 13/13 ⇒ **全部有实
 | **Go** | GORM `serializer:json` ⇒ 落库是**原始 JSON 文本**（`admin/rpc/internal/logic/updateuserlogic.go:84-87` + `admin/rpc/.../data_model.go:43`） |
 | **RAG** | 写 `users_user` 时显式 `CAST(? AS jsonb)`（`admin-rpc/.../service/AdminDomainService.java:962`），实体挂 `JsonbTypeHandler`（`admin-rpc/.../domain/UserEntity.java:129`） |
 | **🔴 根因（代码注释的前提已失效）** | 该列**早已是 TEXT**：`users-common/.../db/01_create_user.sql:41`（`extra_info TEXT`）+ `:103`（每次启动 `ALTER … TYPE text`），而 **admin-rpc 自己启动时就在重放这份 DDL** ⇒ 代码里「该列仍是 jsonb」的前提**不成立** |
-| **可观察差异** | ① jsonb 会**规范化 JSON**（键序/空格）⇒ 落库字节与 Go 不同；② 含 `\u0000` 时 PG 报 **`22P02`** ⇒ **Go 成功 / RAG 5001**（与已修的 `DRIFT-ARPC-004①` 同型 —— `admin_admin` 已改、`users_user` **漏改**）；③ 与 RAG 自身 user-rpc 写同一列的 `JsonTextTypeHandler`（`user-rpc/.../domain/UserEntity.java:114`）**自相矛盾** |
+| **可观察差异** | ① jsonb 会**规范化 JSON**（键序/空格）⇒ 落库字节与 Go 不同；② 含 `\u0000` 时 PG 报 **`22P05`** ⇒ **Go 成功 / RAG 5001**（与已修的 `DRIFT-ARPC-004①` 同型 —— `admin_admin` 已改、`users_user` **漏改**；⚠️ **SQLSTATE 是 22P05 不是 22P02**，第十八轮真 PG 实测订正）；③ 与 RAG 自身 user-rpc 写同一列的 `JsonTextTypeHandler`（`user-rpc/.../domain/UserEntity.java:114`）**自相矛盾** |
 | **登记状态** | `docs/DRIFT/users/admin/api.md:1660` 只列了「仍开放」，**归因缺失**（没落到「建表责任交叉 ⇒ DDL 归属」这条因果链上） |
 | **建议修法** | 删掉 `AdminDomainService.java:962` 的 `CAST(... AS jsonb)`，改用与 `updateSelf` 同款的 `setSql("extra_info = {0}", …)`（`:357`）；`UserEntity.java:129` 换成 `JsonTextTypeHandler` |
 | **可做性** | ✅ **global 现在有权限**（users 域，非 favorite）⇒ **无需拍板** |
+| **✅ 落地状态** | ✅ **2026-10-25 第十八轮已修** ⇒ 见 **§二·十四**（真 PG 坐实 + 真 PG 守门 + 3 条变异全红） |
 
 ### ④ 证据边界（**未查 / 不声称已证明**）
 
@@ -776,6 +778,93 @@ go-zero v1.10.2 rest/engine.go:163-164
 
 ---
 
+## 二·十四、B10 ✅ **已落地（2026-10-25 第十八轮）** —— `users_user.extra_info` 写路径仍按 jsonb ⇒ Go 成功 / RAG 5001
+
+> ⚠️ 本条由**第九轮 §二·九 ③** 的只读审计产出 ⇒ **第十八轮修完**。
+> 🔴 **它不是「X-2（建表责任交叉）」的一部分** —— 属 users 域单域漂移，
+> 之所以落 global：① 修法落点跨 `users-common`（DDL 资源）+ `admin-rpc`（写路径）⇒ 同一次提交
+> ② §5.3b 规定 users 域台账不归 global 写 ⇒ 本档是**唯一**能记它的地方。
+
+### ① 漂移本体（2026-10-25 第十八轮真 PG 坐实）
+
+| | 内容 |
+|---|---|
+| **Go** | GORM `serializer:json` ⇒ 产出**字符串** ⇒ 落进 **text** 列（`service/user/admin/rpc/internal/model/data_model.go:43` 的 `ExtraInfo map[string]string` + `gorm:"column:extra_info;serializer:json"`）⇒ **没有 jsonb 那层校验** |
+| **RAG（修前）** | `AdminDomainService.java:962` 写死 `extra_info = CAST({0} AS jsonb)`；实体挂 `JsonbTypeHandler`（`UserEntity.java:129`） |
+| **🔴 前提失效** | 原注释写「该列**仍是 jsonb**，CAST 必须保留」—— **假**：`users-common/.../db/01_create_user.sql:41` 建表就是 `extra_info  TEXT`，`:103` 每次启动幂等 `ALTER … TYPE text USING extra_info::text` ⇒ 这一列**不可能**是 jsonb |
+| **可观察差异①** | 含 `\u0000` 的 payload ⇒ **PG 拒收**（真 PG 16 实测）⇒ **Go 成功 / RAG 5001**（与已修的 `DRIFT-ARPC-004①` 同型：`admin_admin` 已改、`users_user` **漏改**） |
+| **可观察差异②** | jsonb 会**规范化 JSON**（键重排 / 冒号后补空格）⇒ **落库字节与 Go 不同**（实测 `{"k":"v"}` → `{"k": "v"}`） |
+| **可观察差异③** | 与 RAG 自身 user-rpc 写**同一张表同一列**的 `JsonTextTypeHandler` **自相矛盾** |
+
+### ② 🔴 顺手订正一个**到处写错的 SQLSTATE**
+
+台账与旧注释都写「PG 报 **22P02**」⇒ **错**。真 PG 16 实测：
+
+```
+ERROR:  22P05: unsupported Unicode escape sequence
+DETAIL:  \u0000 cannot be converted to text.
+CONTEXT:  JSON data, line 1: {"k":"\u0000...
+LOCATION:  json_errsave_error, jsonfuncs.c:634
+```
+
+⇒ **22P05**（`json_bad_unicode_escape`），**不是** 22P02（`invalid_text_representation`）。
+
+⚠️ **本轮已改**（5 处，本域/共享层内）：`AdminDomainService.java`（2 处）·
+`AdminRpcColumnTypeParityTest.java`（2 处）· `users-common/.../03_create_admin.sql`（1 处）。
+⛔ **未改（不在 global 写权内）**：`docs/DRIFT/users/admin/rpc.md:483,732` ·
+`docs/Pitfalls/users/admin/api.md:386` ⇒ **记账 + 交该域 owner**。
+
+### ③ 改了什么（`service/users/admin/admin-rpc`）
+
+| # | 动作 |
+|---|---|
+| ① | `AdminDomainService.updateUser`：`extra_info = CAST({0} AS jsonb)` ⇒ **`extra_info = {0}`**（与 `updateSelf` 同款） |
+| ② | `admin-rpc/domain/UserEntity.java:129`：`JsonbTypeHandler` ⇒ **`JsonTextTypeHandler`** |
+| ③ | **删除** `admin-rpc/mapper/JsonbTypeHandler.java` —— 它的**全部存在理由**（「jsonb 列拒收 varchar 绑参」）在该列变成 text 后**不复存在** ⇒ 与 user-rpc 2026-10-23 的改名同型（类名继续叫 `Jsonb…` 就是在骗下一个读代码的人） |
+| ④ | 订正 5 处失效前提的注释（`UserEntity` 的 DDL 块 / `AdminEntity` / `JsonTextTypeHandler` / `admin-api WebMvcConfig` / `admin-rpc pom.xml` / `AdminRpcContainerWiringTest`） |
+
+⚠️ **② 为什么安全**：admin-rpc 写 `users_user` 的**每一条**语句都是
+`userMapper.update(null, wrapper)`（实体为 **null**）⇒ 实体的 typeHandler **在写路径上从未被用到**
+⇒ 真正的分歧**只有**那句 CAST。② 是「让实体与真实列型一致」的收尾，不是行为改动。
+
+### ④ 守门（真 PG 16 + 真业务链 + 变异）
+
+| 用例 | 断言 |
+|---|---|
+| `AdminRpcColumnTypeParityTest#userExtraInfoColumnIsTextAndAcceptsJsonbHostilePayload` | ① `users_user.extra_info` 的**库内真实列型** = `text` ② payload 对 jsonb **确实敌意**（自证：PG 报 `unsupported Unicode escape sequence`）③ `updateUser` 收下含 `\u0000` 的 payload ⇒ 行还在、库里存着 6 个 ASCII 字符的 `\u0000` |
+| `AdminRpcColumnTypeParityTest#userExtraInfoLandsVerbatimNotJsonbNormalized` | 落库**逐字节** = `{"k":"v"}`（若变成 `{"k": "v"}` ⇒ jsonb 的规范化还在链路上） |
+
+⚠️ **为什么不碰「键序」那条轴**：Go 的 `json.Marshal` 按字典序排键、Jackson 保持插入序
+⇒ 那是**既有**差异，user-rpc 的 `JsonTextTypeHandler` 类注释已写明**不改** ⇒ 本轮不碰。
+
+### ⑤ 变异（三条全部转红，且**红在目标断言上**）
+
+| # | 变异 | 结果 |
+|---|---|---|
+| **M1** | 把 `updateUser` 的 CAST 加回去 | 🔴 **RED** —— 两条新用例各红在自己的目标断言上（`INTERNAL: DB更新失败` / `{"k":"v"}` ≠ `{"k": "v"}`） |
+| **M2** | DDL 把 `users_user.extra_info` 改回 jsonb（`:41` + `:103` 同时改） | 🔴 **RED** —— 红在列类型断言：`expected: <text> but was: <jsonb>` |
+| **M3** | 把 `updateSelf` 的 CAST 也加回去（**旧守门对照**） | 🔴 **RED** —— 红在**旧**用例 `extraInfoAcceptsPayloadJsonbWouldReject` ⇒ 证明旧守门仍有效、且本轮改动**没顺手动** `updateSelf` |
+
+### ⑥ 🔴 变异脚本踩的**第三个**坑：**改上游模块的资源，测试根本读不到**
+
+M2 首跑 **GREEN**（假阴性）—— 根因：`01_create_user.sql` 是 **`users-common` 的资源**，
+而只跑 `admin-rpc` 时 Maven 从 `~/.m2` 解析**旧的** `users-common` jar
+⇒ **改动压根到不了运行代码**。
+⇒ 修法：把 `users-common` **拉进同一个 reactor**（`mvn -o test -pl service/users/users-common,service/users/admin/admin-rpc`）
+⇒ 顺带发现 surefire 的参数名换代：`-DfailIfNoTests=false` **管不住** `-Dtest` 模式，
+要加 **`-Dsurefire.failIfNoSpecifiedTests=false`**，否则上游模块会因「没匹配到测试」直接 BUILD FAILURE。
+⇒ 同族：§PIT-GLOBAL-016。
+
+### ⑦ 证据边界（**不声称已证明的**）
+
+1. ⚠️ 本轮**只**验了 `updateUser` 一条写路径 ⇒ admin-rpc 里**其它**写 `users_user.extra_info` 的语句
+   （`updateUserStatusByUid` / `updateUserPasswordByUid` 等）**不写 extra_info** ⇒ 未逐条核对。
+2. ⚠️ **Go 侧未做活体对拍** —— Go 的「落库成功」由**真 PG 16 的 text 列实测** +
+   `encoding/json` 的转义规则（U+0000 → 6 个 ASCII 字符）推得，**不是**真跑 Go 进程写库。
+3. ⚠️ **键序差异仍在**（Go 字典序 / Jackson 插入序）⇒ **不在本轮范围** ⇒ 仍记为既有差异。
+
+---
+
 ## 三、其余 7 条的状态说明（2026-10-25）
 
 本轮**未展开**这 7 条的逐条对照（它们的落点分散在多个域的代码里，
@@ -809,6 +898,7 @@ go-zero v1.10.2 rest/engine.go:163-164
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | ✅ **第十八轮（B10 落地）** —— ① 🔴 **真 PG 16 坐实漂移** —— 独立探针实测：`text` 列收下 Go 侧 `encoding/json` 产出的 14 字节 `{"k":"\u0000"}`（成功）；`CAST('{"k":"\u0000"}' AS jsonb)` **被拒** ⇒ **Go 成功 / RAG 5001** 坐实 ② 🔴 **顺手订正一个到处写错的 SQLSTATE** —— 台账与旧注释都写「PG 报 **22P02**」⇒ **错** ⇒ 实测是 **22P05**（`json_bad_unicode_escape`，`jsonfuncs.c:634`）⇒ 本域/共享层内 **5 处已改**；⛔ `docs/DRIFT/users/admin/rpc.md:483,732` 与 `docs/Pitfalls/users/admin/api.md:386` **不在 global 写权内** ⇒ 记账 + 交该域 owner ③ ✅ **三处改完** —— `AdminDomainService.updateUser` 去掉 `CAST({0} AS jsonb)` + `admin-rpc/domain/UserEntity` 的 typeHandler 换 `JsonTextTypeHandler` + **删除** `admin-rpc/mapper/JsonbTypeHandler.java`（它的全部存在理由「jsonb 列拒收 varchar 绑参」在该列变 text 后**不复存在** ⇒ 与 user-rpc 2026-10-23 的改名同型）④ ✅ **真 PG 守门 2 条**（列型查**库内真实 schema** + `\u0000` payload 自证敌意 + **逐字节落库**）⇒ **M1/M2/M3 三条变异全红且红在目标断言上** ⑤ 🔴 **变异脚本踩第三个坑**：M2 首跑 **GREEN 假阴性** —— `01_create_user.sql` 是 `users-common` 的**资源**，只跑 `admin-rpc` 时 Maven 从 `~/.m2` 解析**旧 jar** ⇒ 改动到不了运行代码 ⇒ 修法 = 把 `users-common` 拉进**同一 reactor**；顺带发现 surefire 参数换代：`-DfailIfNoTests=false` **管不住** `-Dtest` 模式，要加 **`-Dsurefire.failIfNoSpecifiedTests=false`** ⇒ 同族 §PIT-GLOBAL-016 ⑥ ⚠️ **边界**：Go 侧**未做活体对拍**；「键序」差异（Go 字典序 / Jackson 插入序）**不在本轮范围** |
 | 2026-10-25 | ✅ **第十七轮（X-5 落地）** —— ① 🔴 **第七轮只取证、这轮改完** —— `service/task/task-rpc` + `service/follow/follow-rpc` 两个域的 `*GrpcInterceptorWiringTest` 把**裸** `ServerCallHandler`（手写 `startCall` + `onHalfClose`）换成 grpc-java 的**标准派发入口** `ServerCalls.asyncUnaryCall(...)` ⇒ 处理函数**真的执行** ② 🔴 **补上原来缺的那一维** —— 两条新断言：「**handler 确实被调用过**」+「**取消发生时它仍在跑**」⇒ 并把 `Thread.sleep(10_000)` 换成 `probe.release.await(30, SECONDS)`（latch）⇒ 两条断言在 `sleep` 方案下**根本写不出来** ③ ✅ **生产代码一行没动**（`server.intercept(...)` 原样）⇒ **这不是行为修复，是守门修复**（超时机制本来就是真的，缺的只是「在飞处理被打断」这一维从未被验证）④ ✅ **三条变异全部转红** —— M1 去 `server.intercept` ⇒ `elapsed 5010/5009ms`；M2 换回裸 handler ⇒ 红在**新增**的 `entered` 断言；M3「完成但**不回包**」⇒ 红在**新增**的 `completed` 断言 ⑤ 🔴 **变异脚本踩了两个坑**（详见 ⑤·三 与 `docs/Pitfalls/global/cross-domain.md` PIT-GLOBAL-018）—— ① 首版 M1 写成**编译不过**的表达式 lambda ⇒ maven **压根没跑测试** ⇒ surefire 目录里留着**上一轮**的 XML ⇒ 脚本读旧结果 ⇒ **报成假绿**（靠「跑前删旧 XML + 看 maven 退出码 + 查 COMPILATION ERROR」三道闸才拦住）② 首版 M3 只做 `await(0)` 不去回包 ⇒ handler 秒完成**并正常回包** ⇒ 客户端拿到 OK ⇒ 红在**更早**的 `assertThrows` 上 ⇒ **目标断言压根没被执行到** ⇒ 变异要红在**目标断言**上 ⑥ ⚠️ **边界**：slow threshold 分支**仍无独立守门**；其余 8 个 rpc 域的同名测试**未逐一复查** ⇒ 「还有没有别的空转形态」**未穷尽** |
 | 2026-10-25 | ✅ **第十六轮（X-9 收敛 + 解析层补 `maxBodyLen`）** —— ① ✅ **新建双侧活体探针 `tools/json-body-probe/`**（Go 半边**真调** go-zero 的 `httpx.Parse` + Java 半边走 hot 域**真实实现** ⇒ **期望值不是人写的**；**无 known-dev 白名单** ⇒ 任一条不一致即 exit 1）② ✅ **首跑 19/20 一致，J20 不一致** ⇒ 坐实「RAG 整个读 body、Go 只读前 8 MiB」⇒ Go 侧错误详情长度 **8388643 = 8 MiB + 3** ⇒ 截断点精确 ⇒ ✅ **共享层补 `GO_MAX_BODY_LEN` + `goLimitedBody`（Go `io.LimitReader` 等价物）+ servlet 版判据重载**；✅ **hot 域补上并改用唯一真源**（改**流式**读 ⇒ 不会为一个小 JSON 等满 8 MiB）；✅ **article 域删本地判据改调唯一真源** ⇒ **3 份复制品 → 1 份** ③ 🔴 **澄清一条差点写错的话**：Go 的 `MaxBytes` **默认 1 MiB 且挂在引擎上全局生效**（`rest/config.go:53` + `rest/engine.go:163-164`）⇒ 9 MiB body **先被拦成裸 413** ⇒ **端到端那条漂移根本不存在** ⇒ 本次修的是**解析层**，端到端今天**零行为变化**（唯一可达的 article 段已被它自己的 filter 覆盖）⇒ 逐域可达性已列表 ④ ✅ **6 条守门**（真 Tomcat 裸 socket 验原始头值 / 8 MiB 边界卡 ±1 字节 / hot 端到端 413 + 解析层 5001 / article 判别式断言 / **新 tools 守卫 `check-go-json-body-predicate.py`**）+ **全部做过变异** ⑤ ⛔ **favorite 那份复制品永久残留**（零权限）⇒ 记账 + 写明修法与前提 ⑥ 📌 **新增 PIT-GLOBAL-015**（「探针测的层 ≠ 端到端跑的层」） |
 | 2026-10-25 | ✅ **第十五轮（X-1 取证与修复）** —— ① 🔴 **取证推翻「同库共存是边缘场景」** —— **7 个 Flyway rpc 模块的 DSN 默认值全部是同一个 `first_db`** ⇒ 「先启动者把 public schema 弄非空」是**必然** ⇒ 每个 V1 起始的模块都必须扛得住 ② 🔴 **查出 3 个域缺 `spring.flyway.baseline-version: 0`** —— `baseline-on-migrate=true` + 非空 schema + 无账本 ⇒ Flyway 在 **version 1** 处打 BASELINE ⇒ **V1 的 SQL 从未执行** ⇒ 首张表永远建不出来 ⇒ **服务起不来** ⇒ 同款缺陷 `message-rpc` **2026-10-24 已修并留了守门** ⇒ **同一个坑在另外 3 个域原封不动地留着** ③ ✅ **三域已修**（各一行 yaml）+ **各配一个真 PG 守门**（真 PG 16 + 真 Flyway 引擎 + **配置取自模块自己的 yaml** + **先把 schema 弄成非空**）⇒ **变异（删掉那行）⇒ 6 条全红** ④ ⚠️ **`article-rpc` 逐模块判定后排除**（最低迁移版本 **V8** > baseline 默认值 1 ⇒ 不受影响 ⇒ **差点误修一个不存在的缺陷**）⑤ ⛔ **`favorite-rpc` 同款缺陷零触碰** ⇒ 记账 + **明确告知该域 owner**（含修法与守门思路）⇒ **不静默** ⑥ 🟡 **「三进程并发」的运行时形态仍未验证** ⇒ 留一轮 |

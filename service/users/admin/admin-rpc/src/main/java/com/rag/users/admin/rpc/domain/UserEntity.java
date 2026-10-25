@@ -39,12 +39,24 @@ import java.util.Map;
  *   email       TEXT UNIQUE                      -- 非 null（与 Admin.Email nullable 不同）
  *   status      BIGINT NOT NULL DEFAULT 0        -- 0=正常 1=封禁（BanUser / UnBanUser 改此列）
  *   score       INTEGER
- *   extra_info  JSONB
+ *   extra_info  TEXT
  *   create_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
  *   update_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
  * </pre>
  *
- * <p>⚠️ 本块原注释写 {@code VARCHAR(255)} 与 {@code TIMESTAMP}，两者<b>都已被修掉</b>：
+ * <p>⚠️ <b>2026-10-25（第十八轮 · global B10）更正</b>：上面这一版里
+ * {@code extra_info} 原写作 {@code JSONB} —— <b>那是错的</b>：
+ * <ul>
+ *   <li>{@code users-common/.../db/01_create_user.sql:41} 建表就是 {@code extra_info  TEXT}；</li>
+ *   <li>{@code :103} 每次启动幂等 {@code ALTER ... TYPE text USING extra_info::text}；</li>
+ *   <li>Go 出处 {@code service/user/admin/rpc/internal/model/data_model.go:43} 的
+ *       {@code serializer:json} ⇒ GORM 按 <b>String</b> 建列 ⇒ 就是 text。</li>
+ * </ul>
+ * ⇒ 本类的 {@code extra_info} 已于同日从 {@code JsonbTypeHandler} 改为
+ * {@link com.rag.users.admin.rpc.mapper.JsonTextTypeHandler}，
+ * 与同模块 {@link AdminEntity#extraInfo} 统一 ⇒ <b>admin-rpc 的 JsonbTypeHandler 已整体删除</b>。
+ *
+ * <p>⚠️ 原注释写 {@code VARCHAR(255)} 与 {@code TIMESTAMP}，两者<b>都已被修掉</b>：
  * 2026-10-22（E-3 根因 R3）按 Go 的 GORM AutoMigrate 改成 {@code TEXT}（无长度上限），
  * 2026-10-23（DRIFT-USERRPC-V-004）按 Go 的 {@code postgres.go:251-256} 改成 {@code TIMESTAMPTZ}。
  * 「L1 与 DDL 严格对齐」的说法已恢复为真 —— 此前它恰好是不成立的那一版。
@@ -126,7 +138,7 @@ public class UserEntity {
     @TableField("score")
     private Integer score;
 
-    @TableField(value = "extra_info", typeHandler = com.rag.users.admin.rpc.mapper.JsonbTypeHandler.class)
+    @TableField(value = "extra_info", typeHandler = com.rag.users.admin.rpc.mapper.JsonTextTypeHandler.class)
     private Map<String, String> extraInfo;
 
     @TableField(value = "create_time", insertStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.NEVER, updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.NEVER)

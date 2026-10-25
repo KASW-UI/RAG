@@ -15,30 +15,39 @@ import java.util.Map;
 /**
  * PostgreSQL <b>{@code text}</b> 列 ↔ {@code Map<String, String>} 的 TypeHandler。
  *
- * <p><b>为什么 {@link JsonbTypeHandler} 不能用于 {@code admin_admin.extra_info}</b>
- * —— 那个 handler 用 {@code ps.setObject(i, json, Types.OTHER)} 让 PG 按 jsonb 解释参数，
- * 这只对 **jsonb 列**成立。{@code admin_admin.extra_info} 在 Go 侧是 **text** 列
- * （{@code data_model.go:11} 的 {@code serializer:json} ⇒ GORM 按 String 建列，
- * 见本文件末尾「Go 出处」），而 jsonb 列比 text 列**多一套校验**，
- * 会拒收 {@code encoding/json} 能合法产出的内容。
+ * <p><b>2026-10-25（第十八轮 · global B10）：本类现在是 admin-rpc 里
+ * {@code extra_info} 列的<b>唯一</b> handler</b>，同模块的
+ * {@code JsonbTypeHandler} 已<b>整体删除</b>。
  *
- * <p><b>这不是洁癖，有活体对拍证据（DRIFT-ARPC-004①，2026-10-23）</b>：
+ * <p><b>为什么不能用「jsonb 味」的写法</b>（{@code ps.setObject(i, json, Types.OTHER)}
+ * 让 PG 按 jsonb 解释参数）——
+ * 那只对 **jsonb 列**成立。本模块的两张表（{@code admin_admin} / {@code users_user}）
+ * 的 {@code extra_info} 列在 Go 侧都是 <b>text</b>
+ * （{@code data_model.go:11} 与 {@code :43} 的 {@code serializer:json} ⇒ GORM 按 String 建列），
+ * 而 jsonb 列比 text 列<b>多一套校验</b>，会拒收 {@code encoding/json} 能合法产出的内容。
+ *
+ * <p><b>这不是洁癖，有活体对拍证据（DRIFT-ARPC-004①，2026-10-23；B10，2026-10-25）</b>：
  * <pre>
  *   同一份请求体（extra_info 含 U+0000）：
  *     Go  → HTTP 200 {code:200}，行已落库
- *     RAG → HTTP 200 {code:5001}，无行，PG 报 22P02
+ *     RAG → HTTP 200 {code:5001}，无行，PG 报 22P05
  *            ERROR: unsupported Unicode escape sequence
+ *            DETAIL: \u0000 cannot be converted to text.
  * </pre>
  * 根因：{@code encoding/json} 把 U+0000 转义成 6 个 ASCII 字符 {@code \u0000}
  * （**不是**裸 NUL 字节），而 jsonb 的 unicode escape 校验拒绝 {@code \u0000}；
  * text 列照单全收，与 Go 完全一致。
  *
- * <p><b>⚠️ 不要把本 handler 与 {@code JsonbTypeHandler} 合并</b>：
- * admin-rpc 里<b>另一张</b>表的同名列是 jsonb ——
- * {@code users_user.extra_info}（DDL 归属 users/user 域，
- * {@code users-common/.../01_create_user.sql:41} 仍是 {@code JSONB}），
- * 实体是 {@code domain/UserEntity}，走 {@link JsonbTypeHandler}。
- * 两个 handler 服务两张表，列类型不同 ⇒ 写参方式必须不同。
+ * <p>⚠️ <b>2026-10-25 订正</b>：本文件此前写「<b>不要把本 handler 与 JsonbTypeHandler 合并</b>：
+ * admin-rpc 里另一张表的同名列 {@code users_user.extra_info} 仍是 JSONB」——
+ * <b>那个前提早已失效</b>：
+ * <ul>
+ *   <li>{@code users-common/.../db/01_create_user.sql:41} 建表就是 {@code extra_info  TEXT}；</li>
+ *   <li>{@code :103} 每次启动幂等 {@code ALTER ... TYPE text USING extra_info::text}
+ *       （{@code SchemaInitializer} 每次启动原样重放）⇒ 这一列<b>不可能</b>是 jsonb；</li>
+ *   <li>⇒ 两张表的同名列<b>都是 text</b> ⇒ 两个 handler 没有存在理由 ⇒ 合并为
+ *       <b>本类</b>。</li>
+ * </ul>
  *
  * <p><b>写</b>：{@code ps.setString}（text 列的原生绑定）。
  * <b>读</b>：{@code ResultSet.getString} 取回 JSON 文本，Jackson 解析。
@@ -48,7 +57,8 @@ import java.util.Map;
  *
  * <p><b>Go 出处（声明点 + 消费点）</b>：
  * <ul>
- *   <li>声明点 {@code service/user/admin/rpc/internal/model/data_model.go:11}：
+ *   <li>声明点 {@code service/user/admin/rpc/internal/model/data_model.go:11}（{@code admin_admin}）
+ *       与 {@code :43}（{@code users_user}）：
  *       {@code ExtraInfo map[string]string `gorm:"column:extra_info;serializer:json"`}</li>
  *   <li>消费点 {@code gorm.io/gorm@v1.31.1/schema/field.go}：字段带 {@code SERIALIZER} tag 时
  *       {@code field.DataType} 被置为 {@code String} ⇒ 列按<b>字符串</b>建；

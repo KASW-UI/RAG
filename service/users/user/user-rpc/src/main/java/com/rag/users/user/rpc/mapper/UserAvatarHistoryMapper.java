@@ -190,9 +190,14 @@ public interface UserAvatarHistoryMapper extends BaseMapper<UserAvatarHistoryEnt
         // 注意：这里<b>不能</b>再调 userMapper.updateById(user) 做「第二次写入」。
         //   1. updateUserExtraInfo 已经把同一份数据写进去了，重复写没有意义；
         //   2. MyBatis-Plus 生成的 updateById 走 @TableField(typeHandler=JacksonTypeHandler)，
-        //      而 JacksonTypeHandler 是用 setString 绑参的，Postgres 会拒绝
-        //      varchar → jsonb：ERROR: column "extra_info" is of type jsonb but expression
-        //      is of type character varying → 整个事务回滚，uploadAvatar 永远失败。
+        //      而 JacksonTypeHandler 是用 setString 绑参的。
+        //      ⚠️ 2026-10-25 订正：这一列**早就不是 jsonb 了**（users_user.extra_info 是 text，
+        //      见 01_create_user.sql:41 + :103）⇒ 「PG 会拒绝 varchar → jsonb」这个理由
+        //      **已经不成立**。但**结论不变**：这里仍然不应该走第二次写入 ——
+        //      真正的理由是「重复写没有意义」+「会绕过 updateUserExtraInfo 的那条 SQL 语义」。
+        //      （顺带一提：真走 updateById 还会踩 §3.3 的坑 —— MP 生成的 updateById 不走
+        //      实体字段上的 typeHandler，extra_info 会被 JacksonTypeHandler 序列化，
+        //      与本方法自己拼的 JSON 文本不是同一份来源。）
 
         return history;
     }

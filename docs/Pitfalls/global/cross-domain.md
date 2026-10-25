@@ -1,5 +1,5 @@
 <!-- @new 2026-10-25 · global 收口域 · 由 `align/global` 工作树产出 · 基线 commit 58e8314 -->
-<!-- 核对日期：2026-10-25 -->
+<!-- 核对日期：2026-10-25（第十八轮）· 新增 PIT-GLOBAL-019（改上游模块的资源做变异 ⇒ 假阴性） -->
 
 # global · 跨域踩坑档（cross-domain）
 
@@ -572,10 +572,65 @@ return server -> server;   // 🔴 与 void 函数接口不兼容 ⇒ 编译不�
 
 ---
 
+## PIT-GLOBAL-019 🔴 **改「上游模块的资源」做变异，而只跑下游 ⇒ 变异到不了运行代码 ⇒ 报成 GREEN（假阴性）**
+
+> **一句话**：变异测试的「没转红」有两种：① **守门真的不灵** ② **变异根本没跑起来**。
+> 本条是 ② 的一个**很隐蔽**的变种：改的代码**编译通过**、**测试也跑了**，
+> 只是**跑的不是你改的那份**。
+
+### 实测（2026-10-25 第十八轮，B10 的变异 M2）
+
+| 事实 | 后果 |
+|---|---|
+| `users-common/src/main/resources/db/01_create_user.sql` 是 **`users-common` 的**资源 | 单独跑 `admin-rpc` 时，Maven 从 `~/.m2` 解析**旧的** `users-common` jar |
+| 变异改的是 **`users-common` 的源文件** | ⇒ admin-rpc 运行时 classpath 上的 DDL **是旧版本** ⇒ **改动压根到不了运行代码** |
+| ⇒ 变异跑完，测试**照样全绿** | ⇒ 报成 **GREEN** ⇒ 若照着这个结论写台账，就会写成「**这条守门对 DDL 回退无感**」⇒ **结论完全错**（守门其实很灵） |
+
+### ⇒ 修法：把上游模块**拉进同一个 reactor**
+
+```bash
+# ❌ 错：只跑下游 ⇒ 上游从 ~/.m2 解析旧 jar ⇒ 资源是旧的
+mvn -o test -pl service/users/admin/admin-rpc -Dtest='XxxTest'
+
+# ✅ 对：上游进同一个 reactor ⇒ Maven 用 reactor 的 target/classes（含被改的资源）
+mvn -o test -pl service/users/users-common,service/users/admin/admin-rpc -Dtest='XxxTest'
+```
+
+### ⚠️ 顺带一个 **surefire 参数换代**（本轮实测踩到）
+
+`-DfailIfNoTests=false` **管不住** `-Dtest` 模式 ⇒ 上游模块会因为
+「**没匹配到测试**」直接 **BUILD FAILURE**：
+
+```
+[ERROR] No tests matching pattern "AdminRpcColumnTypeParityTest" were executed!
+        (Set -Dsurefire.failIfNoSpecifiedTests=false to ignore this error.)
+```
+
+⇒ 必须加 **`-Dsurefire.failIfNoSpecifiedTests=false`**。
+
+⚠️ **注意这条与 §PIT-GLOBAL-014 是同一族但方向相反**：
+PIT-GLOBAL-014 讲的是「`-DfailIfNoTests=false` 会**静默通过** ⇒ 假阴性」
+⇒ 本条讲的是「`-DfailIfNoTests=false` **挡不住** `-Dtest` 的失败 ⇒ 直接 BUILD FAILURE」
+⇒ **两个参数名要分清**：前者是「没有测试可跑」，后者是「指定的测试没匹配上」。
+
+### ⇒ 判据（怎么知道我的变异到底跑没跑）
+
+1. 变异改的文件**属于哪个模块**？那个模块**在 reactor 里吗**？
+2. 跑完**核对测试条数**（`Tests run:`）与**基线**一致吗？
+3. 变异是**资源 / DDL / 配置**吗？⇒ 那它**跟着 jar 走**，不是跟着 class 走。
+
+### 出处
+
+- 踩坑位置：2026-10-25 第十八轮的变异 M2（`docs/DRIFT/global/cross-domain.md` §二·十四 ⑥）
+- 同族：§PIT-GLOBAL-016（单独跑下游 ⇒ 运行时 `NoSuchMethodError`）· §PIT-GLOBAL-014（surefire 多类名分隔符）· §PIT-GLOBAL-018（编译不过 ⇒ 旧 XML ⇒ 假绿）
+
+---
+
 ## 变更记录
 
 | 日期 | 动作 |
 |---|---|---|
+| 2026-10-25 | **第十八轮新增 PIT-GLOBAL-019** —— **改「上游模块的资源」（DDL / 配置）做变异，而只跑下游 ⇒ Maven 从 `~/.m2` 解析旧 jar ⇒ 变异到不了运行代码 ⇒ 报成 **GREEN 假阴性****（本轮 M2 首跑实测：编译通过、测试也跑了、只是跑的不是改过的那份）** ⇒ 修法 = 把上游拉进**同一 reactor**；顺带一个 **surefire 参数换代**：`-DfailIfNoTests=false` **管不住** `-Dtest` 模式（上游模块会直接 BUILD FAILURE）⇒ 要加 **`-Dsurefire.failIfNoSpecifiedTests=false`**（与 PIT-GLOBAL-014 同族但**方向相反**：一个静默通过、一个直接失败）|
 | 2026-10-25 | **第十七轮新增 PIT-GLOBAL-018** —— **变异脚本的两种「假绿」**：① **变异编译不过 ⇒ maven 压根没跑测试 ⇒ surefire 目录里留着上一轮的 XML ⇒ 脚本读到旧结果 ⇒ 报成 GREEN**（本轮 M1 首版实测：`server -> server` 与 void 函数接口不兼容）⇒ 假绿方向最恶劣（会让人写下「守门无感」的结论，而守门根本**没被问过**）⇒ 三道闸：**跑前删旧 XML + 看 maven 退出码 + grep `COMPILATION ERROR` 直接判本次无效**；② **红在更早的断言上 ⇒ 目标断言压根没被执行到**（本轮 M3 首版实测：`await(0)` 让 handler 秒完成**并正常回包** ⇒ 客户端拿到 OK ⇒ 短路在 `assertThrows`）⇒ 判据：**看红的那条断言的失败消息，确认它就是目标断言** |
 | 2026-10-25 | **第十六轮新增 PIT-GLOBAL-017** —— **用「被测的那个常量」构造测试输入 ⇒ 变异常量时测试跟着变 ⇒ 恒绿**（本轮变异 M2 实测 0 红）⇒ 断言恒真比没测试更危险；含判据（阈值边界**必须用字面值** + 常量断言单独钉住实现）+ 一条探针的能力边界（**探针守「判定」，边界测试守「阈值」**） |
 | 2026-10-25 | **第十六轮新增 PIT-GLOBAL-016** —— 共享层新增方法后**单独**跑下游模块 ⇒ **运行时** `NoSuchMethodError`（**不是编译错误**）⇒ 根因是 Maven 从 `~/.m2` 解析**旧的** `common` jar ⇒ 下游 3 个测试类 21 条用例一起红 ⇒ 极易误判成「我改坏了整个域」⇒ 含两条教训：① 跑测试要把上游模块放进**同一个 reactor**（或先 `install`）② 看到 `NoSuchMethodError` / `NoClassDefFoundError` **先查 classpath**，别先改代码 |

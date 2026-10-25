@@ -86,7 +86,8 @@ ALTER TABLE admin_admin ALTER COLUMN email    TYPE text;
 --   jsonb 列会**校验并拒绝**某些 json.Marshal 能产出的合法 JSON。
 --   实测（2026-10-23 双侧活体对拍，同一份请求体）：
 --     Go  → HTTP 200 {code:200}，行已落库，extra_info = {"k":" "}
---     RAG → HTTP 200 {code:5001}，**无行**，PG 报 22P02
+--     RAG → HTTP 200 {code:5001}，**无行**，PG 报 22P05
+--     （⚠️ 2026-10-25 真 PG 16 实测订正：是 22P05 json_bad_unicode_escape，不是 22P02）
 --            `ERROR: unsupported Unicode escape sequence`
 --   根因：`encoding/json` 把 U+0000 转义成 6 个 ASCII 字符 `\u0000`，
 --   而 jsonb 的 unicode escape 校验**拒绝 \u0000**；text 列照单全收。

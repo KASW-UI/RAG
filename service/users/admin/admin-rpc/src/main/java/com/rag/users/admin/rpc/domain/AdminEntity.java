@@ -36,11 +36,16 @@ import java.util.Map;
  *
  * <p><b>⚠️ 2026-10-23：{@code extra_info} 由 {@code JSONB} 改为 {@code TEXT}</b>
  * —— 对齐 Go 的 {@code serializer:json}（{@code data_model.go:11}），修 DRIFT-ARPC-004①。
- * 双侧活体对拍实测：含 U+0000 的 extra_info，Go 落库成功、RAG 被 jsonb 以 22P02 拒收
+ * 双侧活体对拍实测：含 U+0000 的 extra_info，Go 落库成功、RAG 被 jsonb 以 <b>22P05</b> 拒收
  * （{@code unsupported Unicode escape sequence}）⇒ 真实可观察差异。
- * 配套改用 {@link com.rag.users.admin.rpc.mapper.JsonTextTypeHandler}；
- * <b>同模块的 {@code UserEntity.extra_info} 仍走 {@code JsonbTypeHandler}</b> ——
- * 那列是 {@code users_user.extra_info}，仍是 jsonb，DDL 归属 users/user 域，勿一并改。
+ * 配套改用 {@link com.rag.users.admin.rpc.mapper.JsonTextTypeHandler}。
+ *
+ * <p><b>⚠️ 2026-10-25（第十八轮 · global B10）：那句「同模块的 {@code UserEntity.extra_info}
+ * 仍走 {@code JsonbTypeHandler}」已作废</b> —— 那一列<b>也是 text</b>：
+ * {@code users-common/.../db/01_create_user.sql:41} 建表就是 {@code extra_info  TEXT}，
+ * {@code :103} 每次启动幂等 {@code ALTER ... TYPE text USING extra_info::text}。
+ * ⇒ 两张表的同名列<b>都是 text</b> ⇒ {@code JsonbTypeHandler} 已整体删除，
+ * 本模块的 {@code extra_info} 统一走 {@code JsonTextTypeHandler}。
  *
  * <p><b>⚠️ 2026-10-23：两个时间列已由 {@code timestamp} 改为 {@code timestamptz}，
  * 实体同步 {@code LocalDateTime ⇒ OffsetDateTime}</b> —— 对齐 Go 的

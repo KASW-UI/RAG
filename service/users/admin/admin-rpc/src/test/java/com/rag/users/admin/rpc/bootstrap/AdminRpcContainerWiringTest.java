@@ -32,10 +32,11 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p><b>为什么必须用真 PG、不能用 H2</b>：本模块依赖三样 H2 没有/语义不同的能力：
  * <ol>
- *   <li>{@code extra_info} 是 jsonb 列，写入走 {@code JsonbTypeHandler} 的
- *       {@code ps.setObject(..., Types.OTHER)}</li>
+ *   <li>{@code extra_info} 是 <b>text</b> 列，写入走 {@code JsonTextTypeHandler} 的
+ *       {@code ps.setString(...)}（且必须<b>逐字节</b>落库，不能被 jsonb 规范化）</li>
  *   <li>{@code AdminCreateAtomicService} 的 {@code SELECT ... FOR UPDATE} 悲观锁</li>
- *   <li>{@code setSql("extra_info = CAST({0} AS jsonb)")} 的显式 CAST</li>
+ *   <li>{@code setSql("extra_info = {0}")} 的参数绑定
+ *       （⚠️ 2026-10-25 第十八轮起不再是 {@code CAST(... AS jsonb)} —— 那一列本来就是 text）</li>
  * </ol>
  * 换掉数据库等于把要验证的东西换没了。
  *
