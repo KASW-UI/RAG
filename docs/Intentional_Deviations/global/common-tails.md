@@ -108,7 +108,7 @@ func MaxConnsHandler(n int) func(http.Handler) http.Handler {
 
 - `docs/DRIFT/global/common-tails.md` T-2 / T-5（**已按 §5.3b 硬边界 2 移除该两条，只留指针**）；
 - `docs/DRIFT/global/_README.md` §三 T-2 / T-5（同步）；
-- 踩坑 ⇒ [`docs/Pitfalls/global/common-tails.md`](../../../Pitfalls/global/common-tails.md) PIT-GLOBAL-002「档位错置」。
+- 踩坑 ⇒ [`docs/Pitfalls/global/common-tails.md`](../../Pitfalls/global/common-tails.md) PIT-GLOBAL-002「档位错置」。
 
 ---
 
@@ -365,7 +365,7 @@ req := r.WithContext(ctx)
 ⇒ ⇒ **不是 RAG 的实现缺陷；是「Tomcat + HTTP/1.1 + Spring MVC」这一组合的能力边界。**
 ⇒ ⚠️ **「组合」两个字是本条的效力边界** —— 换容器 / 换栈 / 下沉到 socket 层都可能越过去
 ⇒ **不得**把本条读成「Java 生态做不到」。
-⇒ 踩坑留痕 ⇒ [`docs/Pitfalls/global/common-tails.md`](../../../Pitfalls/global/common-tails.md) PIT-GLOBAL-007。
+⇒ 踩坑留痕 ⇒ [`docs/Pitfalls/global/common-tails.md`](../../Pitfalls/global/common-tails.md) PIT-GLOBAL-007。
 
 ### 触发面与残留风险
 
@@ -389,10 +389,155 @@ req := r.WithContext(ctx)
 
 ---
 
+## SD-2026-10-25-CAND-14 · 🏷 **待签字候选** —— HTTP 状态行**缺 reason phrase**（Go `HTTP/1.1 200 OK` / RAG `HTTP/1.1 200`）
+
+| 项 | 值 |
+|---|---|
+| 状态 | 🏷 **候选，建议签** —— **未签字**（登记完就躺着，**不升级为拍板**） |
+| 性质分类 | 🔴 **框架限制（容器层）** —— 想对齐但**语言/框架做不到** |
+| 组件 | **Tomcat 全体** ⇒ **10 个 api 模块全部适用**（不是某个域的） |
+| 对应的 DRIFT 条目 | **T-7**（[`docs/DRIFT/global/common-tails.md`](../../DRIFT/global/common-tails.md) §一·T-7）· 另见 [`docs/DRIFT/global/_README.md`](../../DRIFT/global/_README.md) §三 域表行 |
+| 行为层 | **HTTP 状态行的字节形态**（客户端可见）⇒ **不影响任何业务语义** |
+| 证据强度 | ✅ **源码级逐行对照**（Go 标准库写状态行处 + go-zero 写状态码处 + Tomcat 写状态行处，**三侧均已定位到行**） |
+
+### 差异的实际面
+
+| 侧 | 状态行 |
+|---|---|
+| **Go** | `HTTP/1.1 200 OK` · `HTTP/1.1 401 Unauthorized` · `HTTP/1.1 404 Not Found` · `HTTP/1.1 405 Method Not Allowed`（**带 reason phrase**） |
+| **RAG** | `HTTP/1.1 200` · `HTTP/1.1 401` · `HTTP/1.1 404` · `HTTP/1.1 405`（**只有状态码，无 reason phrase**） |
+
+### Go 出处（**消费点**，§3.3.1）
+
+- **`go-zero@v1.10.2/rest/httpx/responses.go:183`** —— `doWriteJson` 里 `w.WriteHeader(code)` ⇒ 状态行交给 Go 标准库写；
+- **Go 标准库 `net/http/server.go:1596-1611`** 的 `writeStatusLine` ⇒ 其中 **`:1602-1605`**：
+  `if text := StatusText(code); text != "" { bw.Write(...code...); bw.WriteByte(' '); bw.WriteString(text) }`
+  ⇒ **reason phrase 由 `StatusText(code)` 写进状态行**。
+
+> ⚠️ **Go 出处不在项目树里** ⇒ 在 `Sea-RideTheWind_golang/` 里 grep `writeStatusLine` **必然落空**
+> ⇒ 见 [`docs/Pitfalls/global/common-tails.md`](../../Pitfalls/global/common-tails.md) **PIT-GLOBAL-001**（查 Go 出处只在项目树里 grep 一定会落空）与 **PIT-GLOBAL-006**（Go 出处要分两层）。
+> ⚠️ 本条 Go 事实的取证版本：**Go 1.25.11 标准库**（真源仓库冻结在 `go-zero v1.10.2`，其 `net/http` 依赖宿主 Go 工具链）。
+
+### RAG 出处（**容器层** ⇒ `service/common` 够不着）
+
+- **Tomcat `org/apache/coyote/http11/Http11OutputBuffer.java:372-374`** —— 原文注释：
+  > `// The reason phrase is optional but the space before it is not. Skip`
+  > `// sending the reason phrase. Clients should ignore it (RFC 7230) and it`
+  > `// just wastes bytes.`
+
+  ⇒ **Tomcat 是刻意省略的**，不是漏写；
+- 同一方法 **`:358-367`** ⇒ 200 / 400 / 404 三种状态码直接写**预置字节常量**
+  （`org/apache/coyote/http11/Constants.java:112` `_200_BYTES` = `"200"` · `:116` `_400_BYTES` = `"400"` · `:120` `_404_BYTES` = `"404"`）
+  ⇒ 常量里**本来就没有** reason phrase；
+- 取证版本：**tomcat-embed-core 11.0.24**（`-sources.jar`）。
+
+⇒ **落点在容器层**（状态行由 Tomcat 生成）⇒ **不是 `service/common` 的任何一行** ⇒ **共享层改不了**。
+
+### 判定与残留风险
+
+- RFC 7230 §3.1.2 / RFC 9112 **允许**省略 reason phrase ⇒ 客户端按状态码解析 ⇒ **业务语义无影响**，只是**字节级不等价**；
+- ⚠️ 本条**不是**「RAG 偷懒」，也**不是**「忘了配开关」—— Tomcat **没有**「把 reason phrase 写回去」的开关；
+- ⚠️ **效力边界**：本条**只**覆盖 **HTTP/1.1 状态行**；响应**头**与**体**各条另计（见 `SD-2026-10-25-04` 与 hot 域 `Content-Type` 各条）；
+- ⚠️ 「归因尚未定位」这句话**已作废**（第九轮已定位到 `Http11OutputBuffer`）⇒ **别再在 `service/common` 里找修法**。
+
+### 守门
+
+⚠️ **本条没有守门，也不可能有** —— 状态行由容器写，**应用层没有任何 API 能改它** ⇒ 无从断言。
+
+### 留痕位置
+
+- [`docs/DRIFT/global/common-tails.md`](../../DRIFT/global/common-tails.md) §一·T-7（**只留指针 + 差异面**，不搬内容）；
+- [`docs/DRIFT/global/_README.md`](../../DRIFT/global/_README.md) §三（T-7 行）。
+
+---
+
+## SD-2026-10-25-CAND-15 · 🏷 **待签字候选** —— 「方法不匹配」这个出口，RAG 比 Go **多带**一个 `Traceparent`
+
+| 项 | 值 |
+|---|---|
+| 状态 | 🏷 **候选，建议签** —— **未签字**（登记完就躺着，**不升级为拍板**） |
+| 性质分类 | 🔴 **框架限制 / 出口层级差异** —— **不是**「RAG 忘了删」 |
+| 组件 | `service/common` 的 `GoStyleTraceparentFilter`（`@Order(HIGHEST_PRECEDENCE + 3)`，见 `GoStyleTraceparentFilter.java:190`）⇒ **10 个 api 模块全部适用** |
+| 对应的 DRIFT 条目 | **T-12**（[`docs/DRIFT/global/common-tails.md`](../../DRIFT/global/common-tails.md) §一·T-12） |
+| 行为层 | **响应头**（`Traceparent` 多一个）⇒ **不影响任何业务语义** |
+| 证据强度 | ✅ Go 侧**控制流逐行取证**（**注册点** + 三条出口）；✅ RAG 侧**真 Tomcat 实测**（`ArticleApiAssemblyWiringTest`）<br>⚠️ **未做双侧活体对拍**（Go 侧未起进程）⇒ 「Go 的该响应无 `Traceparent`」目前是**源码级**结论 |
+
+### 差异的实际面
+
+| 出口 | Go | RAG | 判定 |
+|---|---|---|---|
+| ① 路由命中（path + method 都对） | 带 `Traceparent` | 带 `Traceparent` | ✅ 一致 |
+| ② 路径**未注册** ⇒ 404 | **带** `Traceparent` | 带 `Traceparent` | ✅ 一致 |
+| ③ **路径命中、方法不匹配** ⇒ 405 | ❌ **不带** | ✅ **带**（多一个） | 🔴 **差异** |
+
+⇒ ⚠️ **别把它读成「RAG 的 `Traceparent` 一律多一个」** —— 差异**只**在「方法不匹配」这**一个**出口。
+
+### Go 出处（**注册点** —— 这是判定的关键，§3.3.1）
+
+- **`go-zero@v1.10.2/rest/engine.go:113-115`** ——
+  `handle := chn.ThenFunc(route.Handler)` ⇒ `router.Handle(route.Method, route.Path, handle)`
+  ⇒ **含 `TraceHandler` 的链是被「注册进 router」的**（那个 handler 来自 `rest/handler/tracehandler.go:35`）
+  ⇒ ⇒ **router 自己生成的响应（405）根本不经过这条链** ⇒ 不带 `Traceparent`；
+- **`rest/engine.go:134-138`** —— `TraceHandler` 是 native middleware 链**第一个**（`:146` MaxConns / `:149` Breaker / `:152` Shedding 都在它之后）；
+- **`rest/router/patrouter.go:59-83`** —— 分发器的**三条出口**：
+  - `:61-68` 路由命中 ⇒ `result.Item.(http.Handler).ServeHTTP(w, r)` ⇒ **经过**注册进去的链 ⇒ **带**；
+  - `:71-75` 路径未注册 ⇒ `pr.handleNotFound(w, r)` ⇒ 走 `engine.go:245-251` 的 `notFoundHandler`，
+    该处**自建一条以 `handler.TraceHandler(...)` 开头的新链**（`:248`）⇒ **带**；
+  - `:77-82` **方法不匹配** ⇒ `pr.notAllowed.ServeHTTP(w, r)`（`:78`）或 `w.WriteHeader(http.StatusMethodNotAllowed)`（`:81`）
+    ⇒ **两条都在 router 层** ⇒ **不经过**任何含 `TraceHandler` 的链 ⇒ **不带**；
+- **`rest/server.go:58`** —— `opts = append([]RunOption{WithNotFoundHandler(nil)}, opts...)`
+  ⇒ 每个 api **默认**都装上了 notFoundHandler ⇒ 出口② 的 404 之所以带 traceparent，是因为它**确实经过**了 `TraceHandler`；
+- **`rest/handler/tracehandler.go:61`** —— `propagator.Inject(spanCtx, propagation.HeaderCarrier(w.Header()))`
+  ⇒ 注入点在**每路由链内部** ⇒ 这才是「出口③ 拿不到」的**结构性**原因。
+
+### RAG 出处
+
+- 出口③ 落在 **`DispatcherServlet` 内**
+  （`service/article/article-api/src/main/java/com/rag/article/article/api/advice/GlobalExceptionHandler.java:339`
+  的 `handleMethodNotSupported` ⇒ 404 空 body）
+  ⇒ servlet **Filter 链早已跑完** ⇒ 共享层的 `GoStyleTraceparentFilter` **已经注入过头** ⇒ **多带一个**；
+- ⚠️ **RAG 侧在 filter 阶段无法知道**「这个请求最终会不会落到方法不匹配」——
+  那要等 `RequestMappingHandlerMapping` 匹配完才知道，**那时响应已经开始写了**。
+
+### 实测证据
+
+- ✅ `service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiAssemblyWiringTest.java:532`
+  `methodNotAllowedCarriesTraceparentUnlikeGo`（**真 Tomcat**）——
+  `GET /v1/article`（该路径只注册了 POST）⇒ **404 + 空 body + 带 `Traceparent`**
+  ⇒ 与 Go 的同一路径（404 空 body、**无** `Traceparent`）**只差这一个头**；
+- ⚠️ 该断言是 **characterization test**（钉的是**实测现状**，不是 Go 的事实）⇒ `@DisplayName` 已明说「残留差异」。
+
+### 为什么**不修**（代价 vs 收益）
+
+| 修法 | 代价 |
+|---|---|
+| 在共享层**自建一份路由表** | 与各域的 controller **重复维护** ⇒ **新的漂移源** |
+| 让**各域把路由元数据**暴露给共享层 | **改 10 个域的代码** ⇒ 跨域改动 ⇒ 超出 global 单写权 |
+
+⇒ 为了「少一个**不影响业务语义**的响应头」而引入「10 个域的路由元数据耦合」⇒ **代价远超收益** ⇒ **建议签字认账**。
+
+### 触发面与残留风险
+
+- 影响面 = **10 个 api 全适用**（共享层），但**只影响「方法不匹配」这一个出口**；
+- ⚠️ **方向上是「RAG 更全」那一侧**（多带一个头）⇒ `trace-id` 本来就在正常响应里给出 ⇒ **不构成信息泄漏**；
+- ⚠️ 若将来有客户端**严格逐字节比对** 405 响应 ⇒ 需在客户端侧兼容（**不是服务端能修的**）。
+
+### 守门
+
+`ArticleApiAssemblyWiringTest.methodNotAllowedCarriesTraceparentUnlikeGo`（characterization test，见上）。
+
+### 留痕位置
+
+- [`docs/DRIFT/global/common-tails.md`](../../DRIFT/global/common-tails.md) §一·T-12（**只留指针 + 差异面**，不搬内容）；
+- [`docs/DRIFT/global/lanes/L1-delivery.md`](../../DRIFT/global/lanes/L1-delivery.md) §十二（T-8 落地后才暴露出来的残留）。
+
+---
+
 ## 变更记录
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | 🆕 **第二十六轮（L5 · `align/global-signoff`）—— 补登 2 条待签字候选** ⇒ ① 🆕 **`SD-2026-10-25-CAND-14`（T-7 状态行缺 reason phrase）** —— 性质 = **框架限制（容器层）**；Go 出处 = `go-zero@v1.10.2/rest/httpx/responses.go:183` → Go 标准库 `net/http/server.go:1596-1611`（`:1602-1605` 写 `StatusText(code)`）；RAG 出处 = **Tomcat `Http11OutputBuffer.java:372-374`**（原文注释「Skip sending the reason phrase」）+ `Constants.java:112/116/120`（预置常量里本就没有 reason phrase）⇒ **落点在容器层，`service/common` 够不着** ⇒ **候选，建议签** ② 🆕 **`SD-2026-10-25-CAND-15`（T-12「方法不匹配」出口 RAG 多带一个 `Traceparent`）** —— 性质 = **出口层级差异**；Go 出处 = `rest/engine.go:113-115`（**注册点**：含 `TraceHandler` 的链被注册进 router）+ `rest/router/patrouter.go:59-83`（三条出口）+ `rest/engine.go:245-251`（404 自建链）+ `rest/server.go:58`（默认装 notFoundHandler）+ `rest/handler/tracehandler.go:61`（注入点）；RAG 出处 = `GlobalExceptionHandler.java:339`（出口③ 落在 `DispatcherServlet` 内）⇒ **filter 阶段无法预知最终是否落到方法不匹配 ⇒ 共享层改不动** ⇒ **候选，建议签**。⚠️ **两条均登记完就躺着，不升级为拍板**（用户既定偏好） |
 | 2026-10-25 | ✅ **第十三轮（官方路径记录 + 再次明确签字）** —— 用户 2026-10-25 06:40：「**先记录官方处理**，然后**接受现有的 CAND-12 处理**，然后**签字接受 socket 的偏离**（但是我需要你**把官方的处理列为后续优化选项，而不是必选项**）」⇒ ① 🔴 **`SD-2026-10-25-04` 状态追加「再次明确签字」**（签字人 Jason，2026-10-25 06:40）⇒ **本条闭环，不再另选方案** ② 🆕 **新增「附记 · 官方路径记录（可选后续优化 —— 不是必选项）」** —— 全量 grep spring-web 7.0.9 / spring-webmvc 7.0.9 / spring-boot 4.0.8 / spring-boot-tomcat 4.0.8：**官方没有「检测」API，只有「事件消费」链路**（`DisconnectedClientHelper` 事后分类 · `DefaultHandlerExceptionResolver.handleDisconnectedClientException` since 6.2「do nothing」· `AsyncListener.onError` + `WebAsyncManager` + `DeferredResult.onError`）；Boot 侧 grep = **0 命中** ③ 关键 Tomcat 事实：`AbstractProtocol.java:1494-1503` —— **async 期间不注册读兴趣** ⇒ HTTP/1.1 下官方链路**也不更早** ⇒ 方案⑤与官方路径**互补而非替代** ④ 登记 **O-1 ~ O-4** 四个**可选**后续优化（O-1 用官方 `DisconnectedClientHelper` 分类 ⇒ 成本最低；O-2 async 化；O-3 HTTP/2；O-4 WebFlux+Netty）⇒ ⚠️ **一律非必选**，**当前实现不返工** |
 | 2026-10-25 | ✅ **第八轮：6 条路径全部查完（源码 + 2 个真 Tomcat 探针）** ⇒ **「生态做不到」被证伪**：① 换 Jetty（`HttpChannel.Listener#onAbort()`）🟡可行·换运行时 ② 换 WebFlux+Netty 🟡可行·换栈 ③ **轮询 Tomcat 内部 `isClosed()` ❌实测否决**（反射链通，但实测**滞后 5.6s**，比主动写还慢）④ HTTP/2 `RST_STREAM` ⇒ Tomcat **真触发 `AsyncListener.onError`** 🟡可行但**偏离 Go**（Go 侧实测明文 HTTP/1.1）⑤ **主动探测写 ✅实测有效**（断连后 ~500ms 抛 `ClientAbortException`）但**改 framing** ⑥ 缩短在飞 deadline ✅**零改动·零 wire·零签字** ⇒ ⇒ **修正定性**：不是「生态做不到」，而是「**在既定约束下**没有 Go 等价路径」，而约束是项目自己选的 ⇒ ⇒ **本条从「事实登记」改判为「决策项」**
 | 2026-10-25 | ✅ **第十轮（方案⑤ 落地 + 签字）** —— 用户 2026-10-25：「**CAND-12：主动探测写（周期 flush()）（签字偏离）**」⇒ ① 选定**方案⑤**并实现（`GoStyleClientDisconnectProbe` + `HttpMiddleware` 切片等待 + gRPC `Context` 取消）② 🔴 **撤销 `SD-2026-10-25-02`** —— 它记录的是「框架限制」，而**问题本身已被修掉** ⇒ **本条从未被签字也不需再签** ③ 🆕 **新增 `SD-2026-10-25-04`（已签字）** —— 方案⑤ 带来的 **wire 偏离**：客户端先收到 N 行 `103 Early Hints`（快请求零影响）+ **499 定型时点晚于 Go**（~505ms）
