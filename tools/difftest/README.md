@@ -173,6 +173,8 @@ ERROR: duplicate key value violates unique constraint "pg_type_typname_nsp_index
 | `initdb.sql` | 建 `go_db` 与 `rag_db` |
 | `conf/go/*.yaml` | **冻结 Go 仓库的副本**，运行时用 `-f` 指过去；真源一个字节都不动 |
 | **`check-global-lane-ownership.py`** | 🆕 **多 lane 写权守门** —— `global` 域 2026-10-25 拆成 5 条 lane 并行（协议见 `docs/DRIFT/global/lanes/_PROTOCOL.md`）⇒ 本脚本断言：① 5 条 lane 的**白名单两两不重叠**（glob 展开成实际文件集合后求交集 ⇒ 目录级写法也抓得到）② 10 个**共享文件**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / 4 个规范台账 / 本 README）**无人拥有**（归整合者统一更新）③ **`favorite` 域零写权**。⇒ `EXIT=0` 才算合规；已做 4 条变异（抢文件 / 占用共享文件 / 碰 favorite / 同名脚本）**全部转红且红在目标断言上** |
+| **`ddl-parity.sh`** | 🆕 **五域 DDL 双侧活体逐列对照编排**（第二十四轮 L3 lane）—— 为 `check-ddl-static.py` 的新增域预设（`article` / `like` / `hot` / `follow` / `favorite`）准备**两侧真库**：Go 侧 `AutoMigrate` + RAG 侧 Flyway 迁移 ⇒ 再由 `check-ddl-static.py --domain <域> --indexes` 逐列比对（类型/长度 + 可空性 + DEFAULT + 索引/约束 + 触发器）⇒ ⚠️ **`hot` = N/A**（两侧都无数据库 ⇒ 脚本给独立退出码 **3**，不许用 `EXIT=0` 冒充「已对齐」）⇒ 逐条 ⇒ [`docs/DRIFT/global/lanes/L3-ddl.md`](../../docs/DRIFT/global/lanes/L3-ddl.md) |
+| **`check-flyway-concurrent.sh`** | 🆕 **三进程并发同库共存验证**（第二十四轮 L4 lane）—— 真 PG 16 起**三个 rpc 进程**同时连同一个库 ⇒ 断言**各本账互不干扰**（独立 `spring.flyway.table` + advisory lock **按账本表名**隔离）⇒ 配套 `flyway-concurrent-boot.java`（启动器）+ `flyway-concurrent-verify.py`（账本/表断言）⇒ 结论矩阵 ⇒ [`docs/DRIFT/global/lanes/L4-flyway.md`](../../docs/DRIFT/global/lanes/L4-flyway.md) §8.4；⚠️ **`favorite-rpc` 不在其中**（缺 `spring.flyway.baseline-version: 0` ⇒ **起得来、首次查库才炸** ⇒ 只记账不修） |
 
 ### `exp-*` 实验脚本（**各自带完整的设计说明在脚本头部**）
 

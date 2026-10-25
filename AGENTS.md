@@ -30,7 +30,7 @@
 | `article` | 🔴 rpc 4 MISMATCH + 4 OBS；api 2 MISMATCH（**首次对照即 NOT EQUIVALENT**）。⚠️ `DRIFT-ARTICLE-RPC-004` 复核后**撤销** | [`article/`](docs/DRIFT/article/rpc.md) |
 | `comment`/`follow`/`task` | ✅ **2026-10-25 并发对齐后「零台账」已解除**，各域 4/4/3 组件全部完成首轮对照 | [`_cross/`](docs/DRIFT/_cross/component-coverage-matrix.md) |
 | `favorite` | 🔴 `api`/`common`/`proto` 台账 **0 字节**（从未对照）；rpc 7 条未决。⚠️ **2026-10-25 本轮未做** | [`favorite/`](docs/DRIFT/favorite/rpc.md) |
-| 🆕 **`global`** | **收口域**（非微服务，见 §3.5）—— 跨微服务 + `service/common` 影响的**搁置漂移**。已 **26 轮**（含 5 条 lane 并行）⇒ **待办清单见 `_README.md` §七之二** · **逐 lane 台账见 `docs/DRIFT/global/lanes/`** | [`global/`](docs/DRIFT/global/_README.md) |
+| 🆕 **`global`** | **收口域**（非微服务，见 §3.5）—— 跨微服务 + `service/common` 影响的**搁置漂移**。已 **26 轮**（含 5 条 lane 并行）⇒ **待办清单见 `_README.md` §七之二** · **lane 台账见 `global/lanes/`** · ✅ **C 类候选已补齐** | [`global/`](docs/DRIFT/global/_README.md) |
 | 其余 | ⚠️ 10 个 `*-proto` 语义层一致（**8 个无回归网** ⇒ §3.4）；5 个 `*-common` 本轮未单独审查 | 见 DRIFT 索引 |
 
 > ⚠️ **「已改」≠「已验证」；「源码级对照」≠「双侧活体对拍」** ⇒ 台账里的 ✅ 一律读作「**在该证据强度下一致**」，
@@ -168,9 +168,7 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 加 `java_package` + `java_multiple_files=true` / 缩进与首尾空行统一（10/10 表达层，Go 专用项 Java 不消费）；
 `user.proto` 改名 `users.proto` + 加注释（仅 user）。**message 名 / 字段名 / 字段号 / 类型 / 枚举值 10/10 逐条一致 = 行为层**。
 
-⚠️ **12:25 补齐的 4 个 `*-proto` 此前只有 `pom.xml`**（依赖与 build 全空 ⇒ 从未生成代码，产出空 jar）；
-本次除拷入 `.proto` 外还接上 protoc 插件段，否则没有插件消费、等于没放（§3.3）。实测产出 **88 java + 4 `*Grpc`**。
-⇒ 实测数据与待办 ⇒ [`docs/DRIFT/_cross/proto-verification.md`](docs/DRIFT/_cross/proto-verification.md)
+⚠️ **12:25 补齐的 4 个 `*-proto` 此前只有 `pom.xml`**（依赖与 build 全空 ⇒ 空 jar）⇒ 本次**同时接上 protoc 插件段**，否则没有插件消费、等于没放（§3.3）⇒ 实测产出 **88 java + 4 `*Grpc`**。⇒ 待办 ⇒ [`proto-verification.md`](docs/DRIFT/_cross/proto-verification.md)
 
 ⚠️ **本条的效力边界（三条，越界即失效）**：
 1. **复制忠实 ≠ 消费方式已验**。本条只证明 `.proto` **文件本身**两侧一致，
