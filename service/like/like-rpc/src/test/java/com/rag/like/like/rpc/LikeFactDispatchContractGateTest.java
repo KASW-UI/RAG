@@ -246,7 +246,7 @@ class LikeFactDispatchContractGateTest {
     // ====================================================================================
 
     @Test
-    @DisplayName("🔴 契约④：单条投递失败 ⇒ 内层批次立即 break（Go main.go:75-79）⇒ 后一条**一次都不许被尝试**")
+    @DisplayName("🔴 契约④：单条投递失败 ⇒ 内层批次立即 break（Go main.go:75-79）⇒ 同一轮里**只试一次**")
     void failedDeliveryBreaksTheInnerBatchImmediately() throws Exception {
         // msg-01 = 毒丸（DC 永远回 500）；msg-02 = 正常
         insertValidFact("msg-01");
@@ -254,13 +254,35 @@ class LikeFactDispatchContractGateTest {
         poisonEventId = eventId("msg-01");
         startDispatcher();
 
-        // 等毒丸至少被尝试一次（它每轮都会被重试 ⇒ 计数会涨）
-        awaitTrue(() -> requestCountFor("rtw.like.msg-01") >= 1, Duration.ofSeconds(10));
+        // 🔴🔴 判别点是「**同一轮内试了几次**」，不是「后面那条有没有被试」
+        //
+        // Go process.go:41-53 的内层循环是
+        //     for i := 0; i < 16; i++ { sent, err := dispatch(); if err != nil { …; break } … }
+        // ⇒ break 打掉的是**这一轮剩下的 15 次机会** ⇒ 毒丸每 tick 只被试 1 次。
+        //
+        // ⚠️ 为什么「msg-02 一次都没被试」这条断言**测不出** break：
+        //    毒丸失败后 delivery_status=2（仍可领）且 created_at 最老
+        //    ⇒ 下一轮 claim 又拿到它 ⇒ 无论 break 在不在，msg-02 都被饿死
+        //    ⇒ 那条断言对两种实现**都成立**（本次变异测试实测踩过：M14 去掉 break 后用例照样绿）。
+        //
+        // ⇒ 改成**固定窗口内数毒丸的请求数**：
+        //    有 break ⇒ ≈ tick 数（3.5s ⇒ 4 次上下）；
+        //    无 break ⇒ 每 tick 连打 16 次（3.5s ⇒ 50+ 次）。
+        //    阈值 8：两种实现差着一个数量级 ⇒ 不受机器快慢影响。
+        Thread.sleep(3500L);
+        int poisonRequests = requestCountFor(eventId("msg-01"));
+        assertThat(poisonRequests)
+                .as("失败即 break ⇒ 同一轮只试一次 ⇒ 3.5s 窗口内毒丸请求数应≈tick 数（≤8）；"
+                        + "去掉 break 则是每 tick 连打 16 次（3.5s ⇒ 50+ 次）")
+                .isLessThanOrEqualTo(8);
+        assertThat(poisonRequests)
+                .as("窗口内毒丸至少被试过一次（否则下面那些断言全是空转）")
+                .isGreaterThanOrEqualTo(1);
 
         assertThat(deliveryStatus("msg-02"))
                 .as("毒丸失败后同轮 break ⇒ msg-02 不该被尝试过（应仍是 pending=0）")
                 .isEqualTo(0);
-        assertThat(requestCountFor("rtw.like.msg-02"))
+        assertThat(requestCountFor(eventId("msg-02")))
                 .as("msg-02 的请求一次都不许发到 DC（不是「发了失败」，是「压根没发」）")
                 .isZero();
         assertThat(deliveryStatus("msg-01"))
@@ -427,6 +449,12 @@ class LikeFactDispatchContractGateTest {
             }
             Thread.sleep(50);
         }
+        // 🔴 超时必须**炸**，不能静默返回。
+        //    否则「等条件成立」退化成「等到了就等、等不到也无所谓」
+        //    ⇒ 后面那些依赖该条件的断言会在条件根本没发生时**空转通过**
+        //    （本轮实测踩过：④ 用例的 awaitTrue 超时后不报错，
+        //      而「msg-02 请求数 == 0」在什么都没发生的情况下**恒真**）。
+        throw new AssertionError("条件在 " + timeout.toMillis() + "ms 内未成立");
     }
 
     /** 一次被 DC 收到的请求。 */

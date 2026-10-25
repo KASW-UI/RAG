@@ -398,6 +398,25 @@ class LikeFactDeliveryGoSemanticsGateTest {
         String payload2 = payloadJson("msg-2", OCCURRED_AT, AVAILABLE_AT, null, null);
         insertFactWithVersion("msg-2", payload2, envelopeJson("msg-2", "1", payload2, 2L), 2L);
 
+        // 🔴🔴 把版本 2 的 created_at **提前**（比版本 1 早 1 分钟）
+        //    ⇒ 取件排序（ORDER BY created_at, event_id）**先看到版本 2**
+        //    ⇒ 此时**只有前序屏障**能挡住它。
+        //
+        //    ⚠️ 为什么必须这么拧一下（本轮变异测试实测踩过：M9 去掉 NOT EXISTS 后用例照样绿）：
+        //    两条事实是**先后插入**的 ⇒ 版本 1 的 created_at 天然更早
+        //    ⇒ 排序本来就先看到版本 1 ⇒ 拿掉屏障结果一模一样 ⇒ **用例是空转的**
+        //    ⇒ 守门形同虚设。
+        //    现实场景也支持这个拧法：人工迁移 / 时钟漂移都可能让高版本事实**先于**低版本落库，
+        //    这时「按版本序投递」就**只能**靠前序屏障保证，不能靠 created_at 排序。
+        jdbc.update("UPDATE like_domain_fact_outbox SET created_at = now() - interval '1 minute' "
+                + "WHERE event_id = ?", eventId("msg-2"));
+
+        // 夹具自检：排序必须**真的**先看到版本 2（否则下面那条断言证明不了屏障在起作用）
+        assertThat(firstByClaimOrder())
+                .as("夹具自检：created_at 调整后，取件排序必须先看到版本 2，"
+                        + "否则本用例测的是排序而不是前序屏障")
+                .isEqualTo(eventId("msg-2"));
+
         // 先领一次 ⇒ 只能领到版本 1（版本 2 被前序屏障挡住）
         boolean first = deliveryService.dispatchFactOnce(Context.root(), acceptedSender("2026-10-25T06:00:09Z"), LOG);
         assertThat(first).isTrue();
@@ -529,6 +548,19 @@ class LikeFactDeliveryGoSemanticsGateTest {
                 .matcher(envelope);
         assertThat(matcher.find()).isTrue();
         return Long.parseLong(matcher.group(1));
+    }
+
+    /**
+     * 取件排序（{@code ORDER BY created_at, event_id}）下的第一条 event_id。
+     *
+     * <p>⚠️ <b>只用于夹具自检</b>，不参与被测逻辑 ——
+     * 它回答的是「如果把前序屏障拿掉，调度器**会先领到谁**」，
+     * 用来证明本用例真的在测屏障，而不是在测排序。
+     */
+    private static String firstByClaimOrder() {
+        return jdbc.queryForObject(
+                "SELECT event_id FROM like_domain_fact_outbox ORDER BY created_at, event_id LIMIT 1",
+                String.class);
     }
 
     private static int deliveryStatus() {
