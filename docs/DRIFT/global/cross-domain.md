@@ -881,6 +881,77 @@ M2 首跑 **GREEN**（假阴性）—— 根因：`01_create_user.sql` 是 **`us
 
 ---
 
+## 二·十五、✅ **第二十七轮：X-5 轴 / slow 轴守门补齐（6 条 lane）** —— 逐域证据从「1 个样板」到「8 个域」
+
+> 本轮把 L2 留下的 4 条缺口 + L3 的 2 条盲区 + L4 的 3 条边界**一次性打完**
+> ⇒ 6 条 lane（L6~L11）并行 ⇒ **全部生产代码零改动**（只有守门与脚本）。
+
+### ① L2 缺口①（X-5 轴真 server 守门）—— ✅ **4 个组件补齐**
+
+| 组件 | 守门类 | 用例 / 断言 |
+|---|---|---|
+| `users/admin/admin-rpc` | `AdminRpcGrpcInterceptorWiringTest`（新增） | 3 / 14 |
+| `article/article-rpc` | `ArticleGrpcInterceptorWiringTest`（新增） | 3 / 14 |
+| `comment/comment-rpc` | `CommentRpcGrpcInterceptorWiringTest`（新增） | 3 / 14 |
+| `like/like-rpc` | `LikeRpcGrpcInterceptorWiringTest`（新增） | 3 / 14 |
+
+⇒ **9 个 rpc 组件**里，X-5 轴真 server 守门现已覆盖 **8 个**（user / message / hot / task / follow / admin / article / comment / like）
+⇒ ⛔ **只剩 `favorite-rpc`**（域零写权 ⇒ 只能记账）。
+
+⚠️ **一条不可外推的结论**：这 8 份守门证明的是「**RAG 侧的机制生效**」
+⇒ **不能**据此宣称 Go ↔ RAG 已对齐（Go 侧活体对拍**本轮仍未做**）。
+
+### ② L2 缺口②（slow threshold 逐域证据）—— ✅ **8 个域从 1 个样板补齐**
+
+| 域 | 阈值 / 占用时长 | 守门类 |
+|---|---|---|
+| admin | 100ms / 400ms | `AdminRpcSlowThresholdGateTest`（L2 原件，本轮**加固**） |
+| article | 100ms / 400ms | `ArticleRpcSlowThresholdGateTest`（新增） |
+| comment | 100ms / 400ms | `CommentRpcSlowThresholdGateTest`（新增） |
+| like | 100ms / 400ms | `LikeRpcSlowThresholdGateTest`（新增） |
+| user / message / hot | 200ms / 300ms | `UserRpcSlowThresholdGateTest` / `MessageRpcSlowThresholdGateTest` / `HotRpcSlowThresholdGateTest`（新增） |
+| task / follow | 100ms / 400ms | `TaskRpcSlowThresholdGateTest` / `FollowRpcSlowThresholdGateTest`（新增） |
+
+⇒ ⛔ **`favorite-rpc` 仍缺**（零写权 ⇒ 记账）。
+
+### ③ 🔴 整合者修掉的**跨 lane 守门缺陷**（本轮最重要的**代码**产出）
+
+两处**跨 6 条 lane 的共性缺陷**，由整合者统一修（生产代码零改动）：
+
+| # | 缺陷 | 现象 | 修法 | 证据 |
+|---|---|---|---|---|
+| **③a** | **slow 轴守门缺「预热」** | 7 份里有 **5 份**（admin/article/user/message/hot）的「快调用」用例**首调就红**（实测 follow-rpc 首调 duration = **138.333ms** > 阈值 100ms）⇒ 它们之所以绿，**只因 JUnit 按声明序** ⇒ **顺序依赖的假稳定** | 每个守门在被测调用前先做一次**预热调用**，再 `EXPORTER.clear()` ⇒ 预热必须用**独立 probe / 独立 server**（否则「handler 真被调用过」那条判别式断言会**永远为真** ⇒ 守门空转） | L9 §七·五 N2 · **PIT-GLOBAL-027** |
+| **③b** | **slow 轴守门不断言「前提成立」** | 前提「`GlobalOpenTelemetry` 在 refresh 前被换成本测试的 SDK」是**侥幸成立**（`GoStyleOtelAgent` 有「已 set 就放弃」分支）⇒ 将来有人先装了别的 SDK ⇒ 用例会以**「找不到 span」**这种看不懂的形态变红 | 把前提**显式断言** ⇒ 前提不成立时直接说「前提不成立」 | L6 §7.3 缺口④ · **PIT-GLOBAL-026** |
+
+⚠️ **③a 的连带修正**：整合者第一版断言写成 `assertSame(testSdk, GlobalOpenTelemetry.get(), …)`
+⇒ **两条用例全红** ⇒ **自曝错账 #4** —— OTel Java 1.55.0 的 `set()` 存的是
+`new ObfuscatedOpenTelemetry(sdk)` **包装器** ⇒ `get()` **永远不等于** sdk 本身
+⇒ 正确判据是比 **`getTracerProvider()`**（包装器原样委托 ⇒ 同一实例）。
+⇒ **教训**：断言「全局单例是不是我装的那个」之前，**先读那个单例的 `set()` 实现**。
+
+### ④ 缺口③ 的定性：「在飞处理被打断」这一维 —— ✅ **框架限制成立，不是新发现**
+
+L9 只读分析（**未改 `service/common`**）：
+
+| 问 | 答 |
+|---|---|
+| ① `RpcInterceptor` 实际有没有打断在飞 handler 线程？ | **没有** —— `:196-210` 超时只 `close`；`:287-314` `onCancel` 不打断；`:395/:406` 唯一的 interrupt 在 `handle(...)`（**非 gRPC 入口**）⇒ grpc-java 1.63.0 的 `ServerCallImpl` 只取消 grpc-java 的 `Context` |
+| ② Go 侧对应行为？ | `rpc.go:38-39` `context.WithTimeout`；`:47-57` handler goroutine 拿 `timeoutCtx`；`:68-71` 超时分支**不等** goroutine ⇒ **Go 也不杀 goroutine**；`rpc.go:21` `conf.Timeout=0` ⇒ go-zero 自带超时（`zrpc/server.go:164-168`）未挂上 |
+| ③ 是否行为不一致？ | 仅在「**取消自动传播到在途操作**」这一维（Go ctx 自动 / RAG `DeadlineState` ThreadLocal 需显式轮询）⇒ **框架限制**，非可修局部缺陷（已签字 B-1） |
+| ④ L2 的 javadoc 自陈「DRIFT-018 框架限制」是否成立？ | **成立** ⇒ **不是新发现** |
+
+⇒ ⇒ **L2 缺口清单第 5 条**（「在飞处理被打断」这一维）**销账为「框架限制」**，**不补守门**（没有「应当被打断」的可观察行为可守）。
+
+### ⑤ 🟡 本轮新发现（**登记，不在 lane 内修**）
+
+| # | 发现 | 落点 | 处置 |
+|---|---|---|---|
+| **N1** | `RpcInterceptor.java:134-135` 的 javadoc 把「两层补救」**并列**陈述，但第 ② 层**只在 `handle()` 路径** ⇒ 可能写出**永不触发**的 `InterruptedException` 处理 | `service/common`（共享层） | 交整合者 ⇒ 归 `common-tails` |
+| **N2** | 「首调 span duration 被类加载撑大」⇒ slow 轴守门**必须预热** | 全部 slow 轴守门 | ✅ **整合者已统一修**（见 ③a） |
+| **N3** | 「slow 阈值的**配置被忽略**」是可静默发生的退化（回退 Go 兜底 500ms）⇒ 守门的占用时长必须 **< 500ms** | 全部 slow 轴守门 | ✅ **取值已核**（见 ② 表）⇒ 教训 **PIT-GLOBAL-028** |
+| **N4** | `LikeRpcApplication.java:117-119` 的注释说「目前没有」锁死用例，并提到一个**全仓不存在**的类名 | `service/like/like-rpc`（生产代码注释） | ✅ **整合者已订正**（L7 发现，本轮修） |
+| **N5** | `CommentFactDispatchScheduler` **不是** `@Scheduled` 驱动 ⇒ 定时方法在本进程不跑 | `service/comment` | **只登记、不定性**（超本轮范围） |
+
 ## 三、其余 7 条的状态说明（2026-10-25）
 
 本轮**未展开**这 7 条的逐条对照（它们的落点分散在多个域的代码里，

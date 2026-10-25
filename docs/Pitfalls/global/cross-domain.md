@@ -795,3 +795,154 @@ for tc in root.iter('testcase'):
 - 关联：`docs/DRIFT/global/lanes/L1-delivery.md` §十三·13.7（提出）
   · `docs/DRIFT/global/lanes/_PROTOCOL.md`（PIT-GLOBAL-020 / 变异流程）
   · `docs/Pitfalls/global/cross-domain.md` PIT-GLOBAL-014 / 018 / 019。
+
+---
+
+## PIT-GLOBAL-026 🔴 **`GlobalOpenTelemetry.set(sdk)` 存的是「包装器」不是 sdk ⇒ 断言 `get() == sdk` 永远不成立**
+
+> 第二十七轮 · **整合者自曝错账 #4**（我自己写出来的坑 ⇒ 记在这里，因为它会骗过每一个想断言「全局 SDK 装对了」的人）。
+
+### 现象
+
+给 slow 轴守门补一条「前提断言」时，写成：
+
+```java
+assertSame(testSdk, GlobalOpenTelemetry.get(), "前提不成立：…");
+```
+
+⇒ **两条用例全红**，红在「前提不成立」，而**前提其实是成立的** ⇒ 一眼看过去像「生产代码有缺陷」，
+其实**是断言写错了**。
+
+### 根因
+
+OTel Java **1.55.0** 的 `GlobalOpenTelemetry.set(...)` 实现：
+
+```java
+public static void set(OpenTelemetry openTelemetry) {
+  synchronized (mutex) {
+    if (globalOpenTelemetry != null) { throw new IllegalStateException("GlobalOpenTelemetry.set has already been called. …"); }
+    globalOpenTelemetry = new ObfuscatedOpenTelemetry(openTelemetry);   // ← 存的是**包装器**
+    setGlobalCaller = new Throwable();
+  }
+}
+```
+
+⇒ `get()` 返回的是 `new ObfuscatedOpenTelemetry(sdk)` ⇒ **永远不等于 `sdk` 本身**
+（包装器的设计目的就是**阻止**调用方用 `==` 去比较底层实例）。
+
+### 正确处置
+
+要比就比 **`TracerProvider`**（包装器会**原样委托**下去 ⇒ 拿到的是同一个实例）：
+
+```java
+assertSame(testSdk.getTracerProvider(), GlobalOpenTelemetry.get().getTracerProvider(), "前提不成立：…");
+```
+
+### 教训
+
+**「断言某个全局单例是不是我装的那个」之前，先读那个单例的 `set()` 实现 ——
+`set()` 存进去的**未必**是你传进去的那个对象**（包装 / 装饰 / 代理 是常见手法）。
+
+⇒ 同族：**「引用相等」类断言在有包装的单例上恒红** ⇒ 看到「引用相等」失败，
+第一反应应该是「**是不是包装层**」，而不是「**是不是生产代码坏了**」。
+
+### 出处
+
+- 首踩位置：2026-10-26 第二十七轮整合阶段 · 给 7 份 slow 轴守门补前提断言时；
+- 证据：`opentelemetry-api-1.55.0-sources.jar` 的 `io/opentelemetry/api/GlobalOpenTelemetry.java`（`set` / `get`）；
+- 关联：`docs/DRIFT/global/lanes/L6-x5gate.md` §7.3（缺口④ 复评 ⇒ 前提是「侥幸成立」）
+  · `docs/DRIFT/global/lanes/L9-interrupt.md` §七·五。
+
+---
+
+## PIT-GLOBAL-027 🔴 **守门的「快调用」用例可能因「首调类加载开销」而首调就红 ⇒ 绿是执行顺序的副产品**
+
+> 第二十七轮 · L9 实测撞到 ⇒ **跨 6 条 lane 的共性缺陷**（整合者统一修）。
+
+### 现象
+
+L9 写 `follow-rpc` 的 slow 轴守门时，「快调用必须**没有** `sea.slow`」那条**首调就红**：
+
+```
+sea.duration_ms = 138.333   （阈值 100ms）
+```
+
+⇒ 原因不是 slow 判定写错了，而是 **JVM 里的第一次 gRPC 调用**要把
+protobuf 编解码 / netty 缓冲 / 拦截器链的类**全部加载一遍** ⇒ **这些成本落在 span 的 duration 里**。
+
+### 为什么这条特别阴
+
+第二十六轮之前，**全仓 5 份 slow 轴守门都没有预热**（admin / article / user / message / hot）
+⇒ 它们的「快调用」用例之所以是绿的，**只因为 JUnit 默认按声明序执行** ⇒ **慢用例先跑**把类预热了。
+
+⇒ 换句话说：**那些绿是「执行顺序」的副产品，不是守门本身的性质**。
+一旦有人调整方法顺序、加一个新用例在前、或换 surefire 的执行顺序 ⇒ 立刻红。
+
+### 正确处置
+
+**每个要断言「快」的守门，在被测调用之前先做一次预热调用**，然后**清空 exporter** 再做被测调用：
+
+```java
+// 预热：把这条路径的类加载成本一次性付掉
+stub.withDeadlineAfter(10, SECONDS).call(req);
+EXPORTER.clear();
+// ……再做被测调用
+```
+
+⚠️ **预热必须用独立的 probe / 独立的 server**：
+若被测路径的「handler 真的被调用过」证据是一次性的 `CountDownLatch` ⇒ 预热会把它消耗掉 ⇒
+那条判别式断言**永远为真** ⇒ 守门变空转。
+
+### 教训
+
+**「守门是绿的」必须问一句「它绿得**独立**吗」** ——
+凡是用到**执行顺序**才能成立的绿，都是**顺序依赖的假稳定**。
+
+⇒ 自检口径：**把「被测的那个用例」单独跑一遍**（`-Dtest=Class#方法`）⇒ 若单独跑就红 ⇒ 它是顺序依赖的。
+
+### 出处
+
+- 首踩位置：2026-10-26 第二十七轮 L9（`follow-rpc` 的 fast 用例首调 138.333ms）；
+- 扩散面：第二十七轮整合者核查发现 **7 份 slow 轴守门里有 5 份没有预热**（admin / article / user / message / hot）⇒ 已统一补；
+- 关联：`docs/DRIFT/global/lanes/L9-interrupt.md` §七·五（N2）
+  · `docs/DRIFT/global/lanes/L8-slowgate2.md` §7.4（同类取值陷阱）。
+
+---
+
+## PIT-GLOBAL-028 🔴 **slow 阈值的「配置被忽略」是可静默发生的退化 ⇒ 守门的「占用时长」必须 < Go 的兜底阈值**
+
+> 第二十七轮 · L8 发现 ⇒ 影响**所有** slow 轴守门的设计。
+
+### 现象
+
+slow 判定的阈值来自两处：RAG 的 `observability.slow-threshold` 配置，**兜底**是 Go 的
+`DefaultSlowThreshold = 500ms`（`observability.go:21`）。
+
+⇒ 若某域把「本域配置」**忽略了**（回退到 500ms 兜底），那么：
+- 一个**占用 1000ms** 的慢调用 ⇒ 阈值 500ms ⇒ **照样**会被打上 `sea.slow` ⇒ **任何只看「有没有 `sea.slow`」的守门都抓不住**。
+
+### 正确处置
+
+守门里那个「模拟慢业务」的**占用时长**必须落在**窄区间**：
+
+```
+Go 兜底阈值 (500ms)  >  占用时长  >  本域阈值
+```
+
+⇒ 这样「阈值被忽略」⇒ 占用时长不再超过阈值 ⇒ **快用例那条会红**（或慢用例那条会红）⇒ 退化被抓住。
+
+实例（第二十七轮的取值）：
+- admin / article / comment / like：阈值 100ms · 占用 **400ms**（400 < 500 ⇒ 抓得住）；
+- user / message / hot：阈值 200ms · 占用 **300ms**；
+- task / follow：阈值 100ms · 占用 **400ms**。
+
+### 教训
+
+**守门里出现的「阈值」类常量，不能只对「被测阈值」敏感 —— 还要对「阈值被换掉」敏感。**
+⇒ 用例的取值区间要**卡在两个阈值的中间**，让退化可观察。
+
+### 出处
+
+- 首踩位置：2026-10-26 第二十七轮 L8（把占用时长从「≥500ms」收到 300ms ⇒ 变异 C「忽略本域配置」才抓得住）；
+- 关联：`docs/DRIFT/global/lanes/L8-slowgate2.md` §7.4；
+- 同族：`docs/Pitfalls/global/cross-domain.md` PIT-GLOBAL-027（同样是「守门绿得不独立」）。

@@ -43,6 +43,7 @@ import static com.rag.common.observability.ObservabilityConstants.ATTR_SLOW;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -149,17 +150,35 @@ class AdminRpcSlowThresholdGateTest {
 
     private static final CollectingExporter EXPORTER = new CollectingExporter();
 
+    /**
+     * 本测试装进 {@link GlobalOpenTelemetry} 的那个 SDK —— 用来**断言前提成立**。
+     *
+     * <p>🔴 <b>为什么要断言</b>（第二十七轮 L6 · 缺口④ 的结论）：
+     * 本守门的前提是「{@code GlobalOpenTelemetry} 在 Spring 上下文 refresh <b>之前</b>被换成本测试的 SDK」。
+     * 但 {@code GoStyleOtelAgent} 里有一条「<b>已 set 就放弃</b>」的分支 ⇒ 这个前提今天是
+     * <b>侥幸成立</b>（靠「没人先 set」），**不是时序保证**。
+     * ⇒ 一旦将来有人先装了别的全局 SDK，本测试的 exporter 就会收不到 span ⇒ 用例以
+     * 「找不到 span」这种**看不懂的形态**变红。
+     * ⇒ 所以把前提<b>显式断言</b>：前提不成立时，失败信息直接说「前提不成立」。
+     * <p>⚠️ <b>断言只能比 {@code getTracerProvider()}</b>，**不能**比 {@code GlobalOpenTelemetry.get()}
+     * 本身 —— OTel Java 1.55.0 的 {@code set()} 存的是 {@code new ObfuscatedOpenTelemetry(sdk)}
+     * <b>包装器</b>（{@code globalOpenTelemetry = new ObfuscatedOpenTelemetry(openTelemetry)}）
+     * ⇒ {@code get()} 永远**不等于** sdk 本身 ⇒ 那样断言<b>恒红</b>（自曝错账 #4）。
+     */
+    private static OpenTelemetrySdk testSdk;
+
     @BeforeAll
     static void installSdk() {
         // 🔴 关键：把 GlobalOpenTelemetry 指向本测试的收集器，否则 span 是 no-op。
         //    必须在**上下文创建之前**装好 —— RpcInterceptor 在 Bean 创建期就取了 Tracer
         //    （RpcInterceptor.java:154），而 Spring 上下文在第一个用例实例化时才创建。
         GlobalOpenTelemetry.resetForTest();
-        GlobalOpenTelemetry.set(OpenTelemetrySdk.builder()
+        testSdk = OpenTelemetrySdk.builder()
                 .setTracerProvider(SdkTracerProvider.builder()
                         .addSpanProcessor(SimpleSpanProcessor.create(EXPORTER))
                         .build())
-                .build());
+                .build();
+        GlobalOpenTelemetry.set(testSdk);
     }
 
     @AfterAll
@@ -221,8 +240,30 @@ class AdminRpcSlowThresholdGateTest {
         ManagedChannel channel = io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
                 .forTarget("dns:///127.0.0.1:" + server.getPort()).usePlaintext().build();
         try {
-            EXPORTER.clear();
             var stub = AdminServiceGrpc.newBlockingStub(channel);
+
+            // 🔴🔴 **预热调用（必须有）**：JVM 里的**第一次** gRPC 调用要把
+            //    protobuf 编解码 / netty 缓冲 / 拦截器链的类全部加载一遍
+            //    ⇒ 这些成本落在 span 的 duration 里
+            //    ⇒ 「快调用」那条会被误判成慢调用（**首调就红**）。
+            //    实测：follow-rpc 首调 duration = 138.333ms > 本模块阈值 100ms。
+            //    ⇒ 没有预热 ⇒ 本用例的绿**依赖「慢用例先跑」**（JUnit 默认按声明序）
+            //    ⇒ 换个执行顺序就会红 ⇒ 那是**顺序依赖的假稳定**，不是守门。
+            //    ⇒ 先调一次把这条路径预热，再清空 exporter，然后才做**被测**的那一次。
+            stub.withDeadlineAfter(10, TimeUnit.SECONDS)
+                    .getUser(GetUserReq.newBuilder().setUid(1L).build());
+
+            EXPORTER.clear();
+
+            // 🔴 前提断言：GlobalOpenTelemetry 必须**此刻**仍是本测试装的 SDK。
+            //    （否则 exporter 收不到 span ⇒ 用例会以「找不到 span」这种看不懂的形态变红）
+            assertSame(testSdk.getTracerProvider(), GlobalOpenTelemetry.get().getTracerProvider(),
+                    "前提不成立：全局 TracerProvider 不是本测试装的 SDK ⇒ 本守门测不到 slow 标记。"
+                            + "（GoStyleOtelAgent 有「已 set 就放弃」的分支 ⇒ 今天的成立是侥幸，不是保证。）"
+                            + "⚠️ 只能比 TracerProvider，**不能**比 GlobalOpenTelemetry.get() 本身 ——"
+                            + " OTel Java 的 set() 存的是 new ObfuscatedOpenTelemetry(sdk) 包装器（1.55.0）"
+                            + " ⇒ get() 永远不等于 sdk 本身（自曝错账 #4）。");
+
             // 必须**成功**返回：Go 的 slow 判定只在 err == nil 时走（rpc.go:86-89）。
             GetUserResp resp = stub.withDeadlineAfter(10, TimeUnit.SECONDS)
                     .getUser(GetUserReq.newBuilder().setUid(1L).build());
