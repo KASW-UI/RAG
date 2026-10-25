@@ -16,7 +16,7 @@
 |---|---|
 | 状态 | ❌ **已撤销（2026-10-25，本轮自查发现）** —— **不是**一条新的签字偏离，**不产生第二条签字** |
 | 撤销理由 | **同一条偏离早已被签字过一次**：message 域的 [`SD-2026-10-23-06`](../../Intentional_Deviations/message/rpc.md)（**2026-10-23 用户拍板**）**内容完全同条** —— 同一个索引 `idx_notification_recipient_read`、同一处根因（Go 侧 gorm tag 的 `priority:1` 写到了另一个索引名）、同一条保留理由（真实过滤是 `WHERE recipient_id = ? AND is_read = false`）⇒ 本条属**重复登记** ⇒ 按 §5.3b 硬边界 2「一条问题只在一个档落笔」撤销 |
-| ⚠️ **编号不可寻址** | `SD-2026-10-23-06` 在 **3 个域各有含义**（`like/rpc.md` / `message/rpc.md` / `users/admin/rpc.md`）⇒ **本条指的是 `message/rpc.md` 那一条**（索引列数）⇒ 引用时**必须带域限定**，别按编号盲查（见 [`docs/Intentional_Deviations/_INDEX.md` §编号不可寻址](../../../Intentional_Deviations/_INDEX.md)） |
+| ⚠️ **编号不可寻址** | `SD-2026-10-23-06` 在 **3 个域各有含义**（`like/rpc.md` / `message/rpc.md` / `users/admin/rpc.md`）⇒ **本条指的是 `message/rpc.md` 那一条**（索引列数）⇒ 引用时**必须带域限定**，别按编号盲查（见 [`docs/Intentional_Deviations/_INDEX.md` §编号不可寻址](../_INDEX.md)） |
 | 真实记录处 | [`docs/Intentional_Deviations/message/rpc.md` §SD-2026-10-23-06](../../Intentional_Deviations/message/rpc.md) |
 | 对应的 DRIFT 条目 | `docs/DRIFT/message/rpc.md` §7 `DRIFT-MSG-V-022`（**2026-10-23 已签字销账**，按该域惯例**保留原始差异记录**）⇒ global 侧的 X-10 同理**只留指针** |
 | 行为层 | **索引定义**（列集合）⇒ **无 wire 差异**（索引不改变返回行） |

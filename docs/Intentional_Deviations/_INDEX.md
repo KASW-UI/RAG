@@ -25,9 +25,9 @@
 | `N-x` 族（`users/admin/_shared.md`，2026-10-21 用户拍板） | **3 条**（N-1 / N-4 / N-5） | ✅ 已签字 —— ⚠️ **原「41 条」没把它算进去** |
 | `A/C/D-x` 族（`common/_signed-deviations.md`） | **5 条**（A-1 / A-2 / C-1 / D-1 / D-2；B-1 已关闭） | ✅ 已签字 —— ⚠️ **原「41 条」也没算进去** |
 | **✅ 已签字合计** | **48 条** | |
-| `CAND` 族（`SD-2026-10-24-CAND-01..09` + `SD-2026-10-25-CAND-10`） | **10 条** | ⏳ **未签字** |
+| `CAND` 族（`SD-2026-10-24-CAND-01..09` + `SD-2026-10-25-CAND-10` + `SD-2026-10-25-CAND-11..17`） | **14 条** | ⏳ **未签字** —— ⚠️ **2026-10-25 第二十六轮新增 4 条**：`CAND-14`（T-7 状态行缺 reason phrase）· `CAND-15`（T-12 方法不匹配出口多带 `Traceparent`）· `CAND-16`（users 域 8 处 `DEFAULT CURRENT_TIMESTAMP`）· `CAND-17`（`users_user.status` 可空性）⇒ **全部「🏷 候选，建议签」**（登记完就躺着，**不升级为拍板**）<br>⚠️ `CAND-13` **已回收**（`docs/DRIFT/global/cross-domain.md:492`「编号已回收，勿引用」）⇒ 本轮从 **CAND-14** 起编 |
 | `like/api.md` 的「⏳（候选）」4 条（`SD-2026-10-23-08` / `-09` / `SD-2026-10-24-10` / `-11`） | **4 条** | ⏳ **未签字** —— ⚠️ **编号成 `SD-` 而非 `CAND-` ⇒ 原计数漏掉** |
-| **⏳ 未签字候选合计** | **14 条** | |
+| **⏳ 未签字候选合计** | **18 条** | |
 
 ⚠️ **2026-10-25 第二十五轮订正**：`SD-HOT-API-006`（hot 域「`Content-Type` 不带 `charset=utf-8`」）**已撤销**
 ⇒ 用户拍板撤销 + `service/common` 新增 `GoStyleJsonContentTypeAdvice` ⇒ RAG 侧 JSON 响应**现在带** `charset=utf-8`
@@ -88,10 +88,11 @@
 | `like` | `api.md` · `proto.md` · `rpc.md` | 3 份 |
 | `message` | `api.md` · `rpc.md` | — |
 | `task` | `rpc.md` | — |
-| `users` | `_shared.md` · `admin/{_shared,api,rpc}.md` · `common.md` · `user/api.md` | 6 份 |
+| `users` | `_shared.md`（**2 条** · 第二十六轮 fold 进来）· `admin/{_shared,api,rpc}.md` · `common.md` · `user/api.md` | 6 份 |
 | `common` | `_signed-deviations.md` | — |
 | `follow` | 0 份 | 本轮该域未产出签字偏离 |
 | `favorite` | 0 份 | 本轮该域**未做**（合并时按要求跳过） |
+| 🆕 `global` | `common-tails.md`（**2 条** · `CAND-14` / `CAND-15`）· `cross-domain.md` · `cycle-deps.md`（0 字节） | **收口域**（§3.5）—— 跨微服务 + `service/common` 影响的搁置漂移<br>⚠️ **域内条目仍属域自己的档**：`global` 只是**代收**，本轮已把 `global/users-domain.md`（临时落点）fold 回 `users/_shared.md` 并删除该档 ⇒ §5.3b 硬边界 2「一条问题只在一个档落笔」 |
 
 ⚠️ **本档定位已明确（2026-10-25）**：**集中收编** —— 域内发现的签字倾向也收编到本档的 `<域>/<组件>.md`，
 不再只放跨域的。原先「集中收编 vs 只放跨域」这个悬而未决的问题就此定案。

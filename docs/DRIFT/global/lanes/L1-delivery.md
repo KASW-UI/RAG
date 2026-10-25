@@ -886,3 +886,56 @@ org/apache/coyote/Http11OutputBuffer.writeHeaders()
 | **变异** | ✅ **2/2 全部转红**（隔离树 `/tmp/rag-round25-mut`，已清理）+ 还原**逐字节一致** |
 | **favorite** | ✅ 代码 / 配置 / 测试 / 台账 **零改动**；共享层影响已记账（§13.9） |
 | **全仓回归** | ⏳ 待跑（改动在共享层 ⇒ 影响面 = 全部 10 个 api） |
+
+---
+
+## 十四、第二十六轮 · 全仓回归收尾：**两处缺陷 + 一条自曝错账**
+
+> **触发**：第二十五轮（T-6）改完后跑全仓回归 `mvn -o test -fae` ⇒ **2 条红** ⇒ 按「**先归因再修**」逐条定性。
+> ⇒ **两条都不是生产缺陷**（一条是**共享层实现缺陷**、一条是**守门自身缺陷**），但**一条打红的是别的域的守门**。
+
+### 14.1 🔴 自曝错账 #3：T-6 初版写的原始串**只在真 Tomcat 上「看起来对」**
+
+| 项 | 内容 |
+|---|---|
+| **原实现** | `GoStyleJsonContentTypeAdvice.GO_JSON_CONTENT_TYPE = "application/json; charset=utf-8"`（**Go 的字面量，带空格**） |
+| **原判断** | 「本类写的是**原始字符串**（Go 的字面量）⇒ 意图在代码里可见，且万一哪天容器归一化行为变了，就会**自动**回到与 Go 逐字节一致」 |
+| **🔴 为什么是错账** | 那个推理**只在真 Tomcat 上成立**：Tomcat 11 把 Content-Type 拆成 (type/subtype, charset) 重新拼 ⇒ **写什么都被归一化** ⇒ 真 Tomcat 守门 3/3 绿 ⇒ **看起来对**。<br>⇒ 但 **MockMvc 路径没有容器归一化**（各域 `*MvcPipelineTest` 走那条）⇒ 写什么就**原样**出现在响应头里 ⇒ **带空格**的原始串 ⇒ 把 **favorite-api** 的 `FavoriteApiMvcPipelineTest.responseContentTypeMatchesGoConstant` 打红了（期望 `application/json;charset=utf-8`，实得 `application/json; charset=utf-8`）。<br>⇒ ⇒ **「真容器守门绿」不等于「这个改动在所有观测路径上都无害」**。 |
+| **修法** | 改写 **`application/json;charset=utf-8`（无空格）** ⇒ 那是 **各域自己的 advice 产出的值**（favorite 的 `GlobalResponseAdvice` 用 `MediaType.parseMediaType("application/json; charset=utf-8")`，而 Spring **保留原样的大小写** ⇒ 产出小写 `utf-8`）⇒<br>① **真 Tomcat**：写什么都归一化成同一个值 ⇒ **不变**；<br>② **MockMvc**：写的值 **== Spring 转换器自己会写的值** ⇒ **零变化** ⇒ **别的域的守门不会被共享层改动打到** ⇒ ⇒ **favorite 一行都不用改**（零写权约束满足）。 |
+| **⚠️ 不能这样写期望值** | `new MediaType(APPLICATION_JSON, UTF_8).toString()` = `application/json;charset=UTF-8`（**大写** UTF-8）⇒ 与各域实际产出的**小写**不一致 ⇒ 用它当期望值会把**正确**的实现判成红。（实测：`jshell --class-path spring-web-7.0.9.jar`） |
+| **⇒ 教训** | **PIT-GLOBAL-025**（新坑） |
+
+### 14.2 🔴 守门自身的缺陷：`LikeFactDispatchContractGateTest` 的**调度器句柄永远拿不到**
+
+| 项 | 内容 |
+|---|---|
+| **症状** | `failedDeliveryBreaksTheInnerBatchImmediately` **偶发红**（上一轮全绿、这一轮红）：`expected: 0 but was: 1`（msg-02 的 `delivery_status` 变成了 1 = 已被投递） |
+| **定性过程** | ① **结构 diff**：读实现 ⇒ `Dispatcher.run(...)` 是**阻塞式**（在调用线程上跑循环，**直到 `stop()` 才返回**），而守门把句柄**设在 `run` 之后** ⇒ **句柄永远拿不到** ⇒ `@AfterEach` 停不掉调度器 ⇒ **跨用例泄漏**。<br>② **复现门**：泄漏的调度器仍在 1s 一跳地领行 ⇒ 与本用例的调度器**并发抢行** ⇒ 领到毒丸 `msg-01` 的一方把它标成 `delivery_status=1`（在途）⇒ 另一方就领走了 `msg-02` ⇒ 「毒丸失败 ⇒ 同轮 break ⇒ 下一条一次都不许被试」这条断言**因为并发**（而不是因为 break）而变红。<br>③ **A/B 对拍**：改用 `Dispatcher.runAsync` ⇒ 句柄立刻可拿 ⇒ `@AfterEach` 真能停 ⇒ **必绿**。 |
+| **🔴 更糟的一面** | 泄漏**污染兄弟用例**：第 2 个用例断言「每轮 16 条」，而第 1 个用例泄漏的调度器也在同时领行 ⇒ 那个 16 是**两个调度器凑出来的** ⇒ 那条断言即使绿，**测的也不是它声称在测的东西**。 |
+| **生产代码有没有同款缺陷** | ❌ **没有** —— `LikeFactDispatchScheduler` / `CommentFactDispatchScheduler` 都用 `runAsync`（句柄在**进入循环之前**发布）。<br>⚠️ **`FavoriteFactDispatchScheduler` 用的是阻塞式 `Dispatcher.run`** —— 但它的触发点是 **`@EventListener(ApplicationReadyEvent)`**（**不是** `@PostConstruct`）⇒ **上下文已刷新** ⇒ 不会卡住启动，但会**占住主线程** ⇒ **favorite 域零写权 ⇒ 只记账 + 告知 owner**（见 §14.4）。 |
+| **⇒ 教训** | **PIT-GLOBAL-024**（新坑） |
+
+### 14.3 修复与新守门
+
+| 项 | 内容 |
+|---|---|
+| **改 `service/common`** | `GoStyleJsonContentTypeAdvice.GO_JSON_CONTENT_TYPE` ⇒ `"application/json;charset=utf-8"`（无空格）⇒ **类注释同步改写**（把「写原始字符串是为了逐字节对上 Go」那段**已被证伪**的推理删掉，改成「写 Spring 自己会写的那个值 ⇒ MockMvc 路径零变化」） |
+| **改 `service/like/like-rpc`（测试）** | `LikeFactDispatchContractGateTest.startDispatcher()` ⇒ 改用 `Dispatcher.runAsync` ⇒ 句柄可拿 ⇒ `@AfterEach` 真能停 ⇒ **不再泄漏** |
+| **新守门（门 4）** | `GoStyleJsonContentTypeCharsetTomcatTest.adviceWritesExactlyWhatDomainsOwnAdviceWritesInMockMvc`<br>⇒ 锁「**Advice 写的值 == 各域自己 advice 会写的值**」⇒ 期望值取 `MediaType.parseMediaType("application/json; charset=utf-8").toString()`（**不是** `new MediaType(...)`，后者大写）<br>⇒ 该类 **3 条 ⇒ 4 条** |
+| **favorite 影响** | 🔴 **MockMvc 路径上，favorite 的响应头值**在修前（带空格）与修后（无空格）**不同** ⇒ 即便 favorite 的守门被修复，**favorite 域的 owner 也需要知道**：共享层改过共享层会改到的响应头 ⇒ **记账 + 告知**（见 §14.4） |
+
+### 14.4 🔴 favorite 记账（**本轮对 favorite 仍是零文件改动**）
+
+| 项 | 内容 |
+|---|---|
+| **改动量** | `service/favorite/**` 与 `docs/*/favorite/**` **零改动** |
+| **① MockMvc 路径的响应头** | T-6 的共享层改动**曾经**把 favorite-api 的 JSON 响应头从 `application/json;charset=utf-8` 变成 `application/json; charset=utf-8`（带空格）⇒ **打红了 favorite 自己的守门** ⇒ 已由**共享层**改成无空格形态 ⇒ **favorite 的观测值回到与改动前逐字节相同** ⇒ favorite 侧**不需要改任何代码**。<br>⇒ ⚠️ 但 favorite owner 需要知道：**共享层改响应头时，会同时改到 favorite 的 MockMvc 守门**（favorite-api 与 follow-api **各有自己的 advice** ⇒ 共享层的 advice 与它们**竞争同一个响应头**）⇒ **谁最后写谁赢** ⇒ 共享层必须写成**与各域自己 advice 相同的值**。 |
+| **② `FavoriteFactDispatchScheduler` 用阻塞式 `Dispatcher.run`** | 触发点是 `@EventListener(ApplicationReadyEvent)`（**不是** `@PostConstruct`）⇒ **上下文已刷新** ⇒ **不会卡住启动**；但它**占住主线程**直到 `stop()` ⇒ 与 `like-rpc` 的 `runAsync` 写法**不一致** ⇒ 🔴 **建议 favorite owner 改成 `runAsync`**（与 `LikeFactDispatchScheduler` 同款）⇒ **global 不改**（零写权）。 |
+
+### 14.5 本轮**没有**证明的事（不声称已证明的）
+
+| # | 未证成项 | 原因 |
+|---|---|---|
+| ① | **其余 8 个 api 的 MockMvc 路径**逐域对拍 | 本轮只在 **favorite-api**（实测被打红的那一个）与 **follow-api**（它也有自己的 advice ⇒ 同形态）上验证了「无空格形态 = 各域自己的值」⇒ **没有逐域跑** |
+| ② | **真 Tomcat 下**「无空格形态」与「带空格形态」确实**归一化成同一个值** | 由 **Tomcat 源码**（`MediaTypeCache.parse` + `Http11OutputBuffer.writeHeaders`）坐实 + **真 Tomcat 守门**间接印证 ⇒ 但**没有**写一个「两种字面量都发一次、逐字节比对」的对照用例 |
+| ③ | **RFC 8259 的规范方向取舍** | `SD-HOT-API-006` 的理由②说「RFC 8259 规定 JSON 的 charset 恒为 UTF-8，**不应**声明」⇒ 本轮按**用户决策**加了 charset ⇒ 该规范方向的取舍**仍未在台账重评** |

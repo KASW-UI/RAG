@@ -155,7 +155,7 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 ⇒ **第三轮（2026-10-25）新增归位**：**T-4 的资源面残留**（「断连后在飞 gRPC 不被提前取消」）
 经真 Tomcat 11.0.24 实测 + Tomcat 源码取证 ⇒ **Tomcat 的 Servlet 层不向应用暴露客户端断连信号**
 ⇒ 归位为 **`SD-2026-10-25-02`**
-⇒ [`docs/Intentional_Deviations/global/common-tails.md`](../../../Intentional_Deviations/global/common-tails.md)。
+⇒ [`docs/Intentional_Deviations/global/common-tails.md`](../../Intentional_Deviations/global/common-tails.md)。
 
 > ⚠️ **2026-10-25 05:46 订正 —— 本条退回「待签字」**：用户要求「**先等下签字，我想知道有没有其他办法**」
 > ⇒ ① 原判「**框架限制、不可修**⇒ 不存在决策空间」**过宽** ⇒ 实测只覆盖「**Tomcat + HTTP/1.1 + Spring MVC**」
@@ -172,7 +172,7 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 > ⇒ ✅ **最终记录 = `SD-2026-10-25-04`**（wire 偏离：客户端先收到 N 行 `103 Early Hints` + 499 定型时点晚于 Go）
 > ⇒ 🔴 **2026-10-25 06:40 用户再次明确签字**（「接受现有的 CAND-12 处理」+「签字接受 socket 的偏离」）⇒ **本条闭环，不再另选方案**
 > ⇒ 🟡 **Spring 官方路径已记录为「可选后续优化」（非必选）** ⇒ **不触发返工**
-> ⇒ ⇒ 逐条 ⇒ [`docs/Intentional_Deviations/global/common-tails.md`](../../../Intentional_Deviations/global/common-tails.md)（§`SD-2026-10-25-04` + 其「附记 · 官方路径记录」）。
+> ⇒ ⇒ 逐条 ⇒ [`docs/Intentional_Deviations/global/common-tails.md`](../../Intentional_Deviations/global/common-tails.md)（§`SD-2026-10-25-04` + 其「附记 · 官方路径记录」）。
 
 ---
 
@@ -187,7 +187,7 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
    ⇒ ⚠️ **但「碰不到 favorite 的文件」≠「碰不到 favorite 的行为」** ——
    **`service/common` 是共享层，它改了就影响所有域（含 favorite）** ⇒ 这是**合法**的（共享层就是干这个的），
    但**必须记账并告知该域 owner** ⇒ 不能静默改别人的可观察行为。
-   ⇒ 📌 **由此推出一条纪律**（⇒ [`docs/Pitfalls/global/cross-domain.md` §PIT-GLOBAL-012](../../../Pitfalls/global/cross-domain.md)）：
+   ⇒ 📌 **由此推出一条纪律**（⇒ [`docs/Pitfalls/global/cross-domain.md` §PIT-GLOBAL-012](../../Pitfalls/global/cross-domain.md)）：
    **「修法 A 被边界挡住」≠「这条漂移不可修」** ⇒ 判「不可修」之前必须先查**共享层路径**。
    ⇒ ⚠️ **单写权仍然成立且方向相反**：`service/common/**` **只有 `align/global` 能写**，别的域只读
    ⇒ ⇒ 因此**跨域改动**（同时动 common + 别的域）**必须同一次提交**（§五 规则 2）。
@@ -220,7 +220,7 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 | **A3** | **X-5**（裸 `ServerCallHandler` 不被 dispatch） | task + follow 的**测试**（非 favorite） | 换 `ServerCalls.asyncUnaryCall` + 补「handler 被调用过」断言 + 变异转红 | ✅ **第十七轮已落地** —— 两域已改（`sleep(10s)` ⇒ latch，因两条新断言在 sleep 方案下写不出来）⇒ **M1/M2/M3 三条变异全红** ⇒ 🟢 **生产代码零改动**（是**守门修复**，不是行为修复）⇒ 详见 [cross-domain.md §二·八 ⑤](cross-domain.md) |
 | **A4** | **B10** `users_user.extra_info` 写路径仍按 jsonb | users 域 2 处（`AdminDomainService.java:962` + `UserEntity.java:129`） | 列**早已是 TEXT** ⇒ 写路径改为按 TEXT 绑定 ⇒ 当前含 `\u0000` 时 PG 报 `22P05`（Go 成功 / RAG 5001） | ✅ **第十八轮已落地** —— 🔴 **真 PG 16 坐实**（`text` 列收下 14 字节；`CAST … AS jsonb` 被拒，**SQLSTATE 是 22P05 不是 22P02** ⇒ 台账旧结论已订正）⇒ ✅ **三处改完**（去掉 CAST + 实体换 `JsonTextTypeHandler` + **删除** `JsonbTypeHandler`）⇒ ✅ **真 PG 守门 2 条 + 3 条变异全红** ⇒ 详见 [cross-domain.md §二·十四](cross-domain.md) |
 | **A5** | **X-4 的 like 半边** | like 域 + `service/common` | RAG **另起炉灶**的 outbox+stream+scheduler 与 Go `communityfact` 收敛 | ✅ **第二十轮已落地**（like 事实投递链路 + 三套守门 22 条 + 变异 14/14 + 全仓 2213 条绿）⇒ ⛔ **favorite 半边永久阻塞**（必须删 favorite 自己的 10 处调用 ⇒ 零写权） |
-| **A6** | **B6** like 域 `SD-2026-10-23-09` 描述订正 | like 域签字档 | 签字理由把**纳秒**的 `GoStyleRequestDeadline` 说成了毫秒 | 🟡 **补丁已由 L5 出** ⇒ **待整合者 fold**（⚠️ `docs/DRIFT/common/alignment-2026-10-23.md:575/:600` 的**编号也记错了** ⇒ `-09` 是 worker 池裸 503 那条） |
+| **A6** | **B6** like 域 `SD-2026-10-23-09` 描述订正 | like 域签字档 | 签字理由把**纳秒**的 `GoStyleRequestDeadline` 说成了毫秒 | ✅ **已订正（第二十六轮 L5 · 已 fold）** —— 编号订正为 **`SD-2026-10-24-10`**（原文 `SD-2026-10-23-09` **记错** ⇒ `-09` 是 worker 池裸 503 那条）；理由订正为「**只读 API（`remainingMillis()`）只有毫秒粒度**」⇒ ⚠️ **不是「整个公开 API 只有毫秒」**（`applyTo(stub)` 是**纳秒**的）⇒ 落点 ⇒ [`docs/Intentional_Deviations/like/api.md`](../../Intentional_Deviations/like/api.md) + [`docs/DRIFT/common/alignment-2026-10-23.md`](../common/alignment-2026-10-23.md) §九·④ / §十一·④ |
 | **A7** | **O-1**（官方路径 · 可选优化） | `service/common` 探针那一处 | 用官方 `DisconnectedClientHelper.isClientDisconnectedException(ex)` 替掉自研断连判定 | ⛔ **不是待办** —— 用户 2026-10-25 06:40 已签字「**保持不变**」⇒ **不列入待办**（见签字档附记） |
 
 ### B · ❓ **未知项**（要取证才能定性）
@@ -237,10 +237,12 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 | # | 条目 | 性质 |
 |---|---|---|
 | **C1** | `SD-2026-10-25-CAND-10`（hot 域 `DRIFT-HOTAPI-031`：超长请求行 ⇒ RAG 400+HTML / Go 431+`text/plain`） | 框架限制 |
-| **C2** | **T-7**（状态行缺 reason phrase，落点 Tomcat `Http11OutputBuffer`） | 框架限制 · 🟡 **候选条目由 L5 落档**（`docs/Intentional_Deviations/global/`） |
-| **C3** | users 域 **8 处 `DEFAULT CURRENT_TIMESTAMP`**（Go 无） | 刻意保留（同 message 域 `SD-2026-10-23-06` 已签的同形态） |
-| **C4** | `users_user.status` 可空性（Go 可空 / RAG `NOT NULL`） | RAG 更严 ⇒ 同 C3 族 |
+| **C2** | **T-7**（状态行缺 reason phrase，落点 Tomcat `Http11OutputBuffer`） | 框架限制 ⇒ 🏷 **已登记 `SD-2026-10-25-CAND-14`**（`docs/Intentional_Deviations/global/common-tails.md`）<br>Go 出处：Go 标准库 `net/http/server.go:1602-1605` 写 `StatusText(code)`；RAG 侧 Tomcat `Http11OutputBuffer.java:372-374` **刻意省略** |
+| **C3** | users 域 **8 处 `DEFAULT CURRENT_TIMESTAMP`**（Go 无） | 刻意保留 ⇒ 🏷 **已登记 `SD-2026-10-25-CAND-16`**（`docs/Intentional_Deviations/global/users-domain.md`）<br>⚠️ **先例指针订正（第二十六轮 L5）**：「同 message 域 `SD-2026-10-23-06`」**不成立**（那条讲的是**索引列数**，与 DEFAULT 无关）⇒ 真实同形态先例 = `message/rpc.md` 的 **`SD-2026-10-24-04`**（6 列 DEFAULT，已签）+ `comment/rpc.md` 的 **`SD-2026-10-24-CAND-01`**（9 处 `NOT NULL DEFAULT`，⏳ 未签）⇒ 教训 ⇒ **PIT-GLOBAL-022** |
+| **C4** | `users_user.status` 可空性（Go 可空 / RAG `NOT NULL`） | RAG 更严 ⇒ 同 C3 族 ⇒ 🏷 **已登记 `SD-2026-10-25-CAND-17`**（`docs/Intentional_Deviations/global/users-domain.md`）<br>Go 出处：`data_model.go:11` 有 `default:0` 但**无** `not null`；RAG `01_create_user.sql:39` 是 `NOT NULL` |
 | **C5** | `DRIFT-COMMON-005` **差异②**（毫秒 vs 纳秒 ⇒ 必须动 `bindToCurrent` 签名） | 破坏性变更 |
+| **C6** | **T-11**（trace **导出**链路整体缺失） | ✅ **已修**（第二十一 ~ 二十四轮）⇒ **不是误报** —— Go `core/trace/agent.go:126-127` 确实装全局 provider + `:123` `WithBatcher` ⇒ **Go 确实导出** ⇒ 曾是真漂移 ⇒ **登记保留**（不撤销）<br>⇒ 详见 [common-tails.md §一·T-11](common-tails.md) 与 [lanes/L1-delivery.md](lanes/L1-delivery.md) §九 / §十一 / §十二 |
+| **C7** | **T-12**（「方法不匹配」出口 RAG **多带**一个 `Traceparent`） | 🔴 **出口层级差异** ⇒ **共享层改不动**（filter 阶段无法知道最终会不会落到方法不匹配）⇒ 🏷 **已登记 `SD-2026-10-25-CAND-15`**（`docs/Intentional_Deviations/global/common-tails.md`）<br>⚠️ **只影响「方法不匹配」这一个出口** —— 404 与正常响应**两侧都带** traceparent ⇒ 别读成「RAG 一律多一个」<br>⇒ 判据落在**注册点**（Go `rest/engine.go:113-115` + `patrouter.go:59-83`）⇒ 教训 ⇒ **PIT-GLOBAL-023** |
 
 ### D · 🔴 **真决策项（需拍板 —— 只有这 2 条）**
 
@@ -262,6 +264,9 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 | **E5** | **X-5** 剩余 3 个 rpc 域的拦截器守门复查 | `service/{users/user/user-rpc,users/admin/admin-rpc,message/message-rpc,hot/hot-rpc}/src/test/**` | ✅ **第二十四轮 L2 已补齐**（user-rpc / message-rpc **缺测试** ⇒ 新建真 server 守门；hot-rpc **守门不严** ⇒ 加固；admin-rpc **新增** slow threshold 守门）⇒ 变异 8/8 全红 ⇒ ⛔ admin / article / comment / like / favorite **仍只有纯 mock**（登记在 L2 台账） |
 | **E6** | **X-7** 5 域 DDL 双侧活体逐列对照 | `tools/difftest/ddl-parity.sh` | ✅ **第二十四轮 L3 已闭合** ⇒ article / follow **0 差异**；like / favorite 的 7 处差异**全是「RAG 更严」** ⇒ 待签字候选；⚠️ **hot = N/A**（两侧都无数据库 ⇒ **不是「已对齐」**） |
 | **E7** | **X-1** 三进程同库共存 | `tools/difftest/check-flyway-concurrent.sh` | ✅ **第二十四轮 L4 已闭合**（六个域可安全并发同库）⇒ 🔴 **favorite 不行**（缺 `baseline-version: 0` ⇒ **起得来、首次查库才炸**）⇒ **只记账不修** |
+| **E8** | **C 类签字候选补齐**（T-7 / T-12 / users 8 处 DEFAULT / `users_user.status` 可空性） | `docs/Intentional_Deviations/` | ✅ **第二十六轮 L5 已登记 4 条**（`CAND-14..17`，全部「🏷 候选，建议签」⇒ **登记完就躺着**）⇒ ⛔ **C1 不重复登记**（`SD-2026-10-25-CAND-10` 已在 `hot/api.md`）⇒ **需拍板 0 条** |
+| **E9** | 🔴 **T-6 的实现缺陷**：写的原始串**只在真 Tomcat 上**成立 ⇒ **MockMvc 路径**分叉 | `service/common`（`GoStyleJsonContentTypeAdvice`） | ✅ **第二十六轮已修**（改写**无空格**形态 = 各域自己 advice 会写的值 ⇒ 真 Tomcat 不变 · MockMvc 零变化 ⇒ **favorite 一行不用改**）⇒ 🆕 **门 4** 锁住这个等式 ⇒ **自曝错账 #3** ⇒ 教训 **PIT-GLOBAL-025** ⇒ 逐条见 [`lanes/L1-delivery.md`](lanes/L1-delivery.md) §14.1 |
+| **E10** | 🔴 **守门自身的缺陷**：`LikeFactDispatchContractGateTest` 的调度器**句柄永远拿不到** ⇒ 跨用例泄漏 ⇒ 偶发红 | `service/like/like-rpc/src/test/**`（测试文件） | ✅ **第二十六轮已修**（改用 `Dispatcher.runAsync`）⇒ ⚠️ 生产路径本来就是 `runAsync` ⇒ **无此缺陷**；⚠️ **`favorite-rpc` 的 `FavoriteFactDispatchScheduler` 用阻塞式 `run`** ⇒ 但触发点是 `ApplicationReadyEvent` ⇒ **不卡启动**，只是占住主线程 ⇒ **只记账 + 告知 owner** ⇒ 教训 **PIT-GLOBAL-024** ⇒ 逐条见 [`lanes/L1-delivery.md`](lanes/L1-delivery.md) §14.2 |
 
 ### ⛔ favorite 相关的两条（**不可动，仅记账**）
 
@@ -277,6 +282,10 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | ✅ **第二十六轮（整合收口）** —— ① **L5（signoff）lane 合回**（`22e1cc6`）⇒ 🆕 **4 条待签字候选**（`CAND-14..17`，全部「🏷 候选，建议签」⇒ **登记完就躺着**）· **T-11 = ✅ 已修**（Go `core/trace/agent.go:126-127` 确实装全局 provider ⇒ **不是误报** ⇒ 登记不撤销）· **T-12 = 出口层级差异**（判据落到 Go `rest/engine.go:113-115` 的**注册点**）⇒ **需拍板 0 条**
+| 2026-10-25 | ✅ **第二十六轮 · 🔴 自曝错账 #3** —— T-6 初版写的原始串**只在真 Tomcat 上「看起来对」**（Tomcat 归一化 ⇒ 写什么都一样）⇒ **MockMvc 路径没有归一化** ⇒ **打红了 favorite 自己的守门** ⇒ 而 favorite 对 global **零写权** ⇒ 修法只能落共享层 ⇒ 改为**无空格**形态（= 各域自己 advice 会写的值）⇒ 真 Tomcat 不变 · MockMvc 零变化 ⇒ **favorite 一行不用改** ⇒ 🆕 门 4 锁住 ⇒ 教训 **PIT-GLOBAL-025**
+| 2026-10-25 | ✅ **第二十六轮 · 🔴 守门自身的缺陷** —— `LikeFactDispatchContractGateTest` 的调度器**句柄永远拿不到**（阻塞式 `Dispatcher.run` + 「句柄设在 `run` 之后」）⇒ **跨用例泄漏** ⇒ 与本用例的调度器**并发抢行** ⇒ 「毒丸失败 ⇒ 同轮 break」**因为并发**而偶发红 ⇒ 改用 `runAsync` 即修 ⇒ 教训 **PIT-GLOBAL-024** ⇒ ⚠️ 生产路径本来就用 `runAsync` ⇒ **无此缺陷**；⚠️ `favorite-rpc` 的 scheduler 用阻塞式 `run`（但触发点是 `ApplicationReadyEvent` ⇒ **不卡启动**）⇒ **只记账 + 告知 owner**
+| 2026-10-25 | ✅ **第二十六轮 · 共享索引整合** —— 三个 `_INDEX.md` + `AGENTS.md` §0/§3.5/§6.3 + `tools/difftest/README.md` + L2/L3/L4 的共享台账补丁（**X-1 运行时已闭环** / **favorite-rpc 故障形态订正** / **DDL 探针 4 → 9 域**）+ **21 处坏相对链接**修正（链接自检 `MISSING_LINKS = 0`）+ **`AGENTS.md` 压回 32 KB 预算内**（34,151 → 32,680 B）⇒ 逐条 ⇒ [`lanes/L1-delivery.md`](lanes/L1-delivery.md) §十四 · [`lanes/L5-signoff.md`](lanes/L5-signoff.md)
 | 2026-10-25 | ✅ **第二十五轮（T-6 落地）** —— ① 用户拍板「撤销 `SD-HOT-API-006`，修 T-6」⇒ 共享层新增 `GoStyleJsonContentTypeAdvice`（`@AutoConfiguration` ⇒ **10 个 api 全生效**、零 api 代码改动）⇒ JSON 响应头从裸 `application/json` 变成 `application/json;charset=utf-8` ② 🟢 **真 Tomcat + 裸 socket 守门 3 条 + 变异 2/2 全红**（M8 不写头 ⇒ 两个 JSON 门红；M9 无条件写 ⇒ 「不误伤」门红）③ 🔴 **自曝错账 #2**：本档原写的「`SD-HOT-API-006` 的『不可逐字节复刻』前提已被本仓证伪」**不成立** —— 真实原因是 **Tomcat 11 归一化**（`Response.setContentType` 把 Content-Type 拆成 (type/subtype, charset) 重新拼）⇒ 应用层**根本拿不到那个空格** ⇒ 原始理由**成立且更强** ⇒ 撤销的性质 = **纯用户决策** ④ ⚠️ 顺带订正 `GoStyleRouterErrorResponses` 一条**被证伪的注释**（原文称「写原始字符串是唯一能保证逐字节对上的做法」⇒ 实测证伪） |
 | 2026-10-25 | ✅ **第二十四轮（Go 侧活体对拍 + 三条 lane 收口）** —— ① 🟢 **新增 `tools/semantic-probe/trace/`**（**第二个** semantic probe）：Go 半边是 go-zero **真源包内**测试（`createExporter` / `startAgent` 未导出 ⇒ 只能进包内）+ RAG 半边只调**生产类** ⇒ **11 用例 · 8 一致 · 3 已知能力缺口 · 0 漂移** ⇒ ⚠️ **挖出一条 RAG 侧没有守门的语义**（「入向 parent 未采样 ⇒ 子 span 不采样」）⇒ 补了**门 8** + 变异 2/2 ② 🟢 **L3**（5 域 DDL 活体对照）· **L4**（三进程同库共存）· **L2**（3 域 rpc 守门复查 + slow threshold）三条 lane **全部收口并合回** ③ 🔴 **白名单订正**：L1 补登记 `service/common`（T-11/T-13 实际写了但当时只记账没登记 ⇒ 守门给的是假保证）· L2 补登记 admin-rpc ⇒ 机器守门 EXIT=0 |
 | 2026-10-25 | ✅ **第十九轮 · 第二轮（T-8 链上位置定案 + T-12 登记）** —— ① 🔴 **链上位置是「承重」的**：三条约束各有 Go 出处（CORS **之前** / MaxConns·Shedding **之后** / `HttpMiddleware` **之前**）⇒ 9 个 filter 的 `@Order` **整体后移**（**相对顺序不变**）⇒ 顺带修掉「CORS 与 path.Clean 同级 ⇒ 靠 Bean 注册序定序」的**隐式依赖** ② 🟢 `article-api` 真容器 **+3 条**守门（完整链序 / `cors < traceparent < maxConns` / **OPTIONS 预检 204 不带 `Traceparent`**）③ 🟢 **变异 M4/M5 全红且红在目标断言上** ⇒ ⚠️ 这两条**只有 article-api 的守门能抓**（`service/common` 那 6 条看不见 `@Order`）④ 🔴 **新增 T-12**（「方法不匹配」出口 RAG **多带**一个 `Traceparent` ⇒ 随 T-8 落地才暴露 ⇒ **只登记、未修**）⑤ ⚠️ 顺带查清易误判点：Go 的「未注册路径 404」**也带** traceparent（`rest/server.go:58` 的 `NewServer` **默认** prepend `WithNotFoundHandler(nil)`）⇒ T-12 **只**涉及「方法不匹配」这一个出口 |

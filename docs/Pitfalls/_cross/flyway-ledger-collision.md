@@ -1,7 +1,8 @@
 # 🔴 Pitfall：多个服务共用同一个 PG schema 时，Flyway 账本必然撞号
 
 > **归档时间**：2026-10-23 · **性质**：跨模块基础设施坑（影响 `message-rpc` / `like-rpc` / `article-rpc`）
-> **决策记录**：AGENTS.md §6.3 问题 4 · **状态**：**配置层 + 运行时均已闭环**（2026-10-23 实测）；⚠️ **「三模块同库共存」仍记 `unresolved`**
+> **决策记录**：AGENTS.md §6.3 问题 4 · **状态**：**配置层 + 运行时 + 多模块同库共存**均已闭环
+> （2026-10-23 配置层/运行时实测；2026-10-25 L4 真 PG 三进程并发实测）；⚠️ **唯一例外 = `favorite-rpc`**（缺 `baseline-version: 0` ⇒ 只记账不修）
 > **守门**：`tools/difftest/check-flyway-ledger.py`（由 `EXIT=1` 转 `EXIT=0`）
 
 ## 一句话
@@ -106,11 +107,17 @@ spring:
 - ✅ **运行时已确证（2026-10-23 实测，`UNKNOWN` 可关闭）**：`message-rpc` 启动日志出现
   `Creating Schema History table "public"."flyway_schema_history_message"`；`like-rpc` 真 PG 启动
   **已建出** `flyway_schema_history_like` + 5 张表 ⇒ 静态脚本 + 启动日志 + 真 PG 三重证据。
-- ⚠️ **仍未闭环的是「三模块同库共存」**：单模块各自确证 **≠** 三本账能同时跑，该项记 `unresolved`。
-- ⚠️ **文档缺陷**：多处文档声称运行时那一条「由各模块的 `FlywayLedgerIsolationTest` 负责」，
-  **该测试类全仓不存在**（`grep -r FlywayLedgerIsolationTest` 只命中文档自身）
-  —— 又一条「文件已写」型未核实断言。真要闭环：要么真写这个测试，要么改掉这句声明。
+- ✅ **「多模块同库共存」已闭环（2026-10-25 · 第二十四轮 L4 lane）** —— **真 PG 16 三进程并发同库实测** ⇒ **六个域可安全并发同库**
+  （独立账本表名 + advisory lock **按账本表名**隔离）⇒ 工具 `tools/difftest/check-flyway-concurrent.sh`
+  （+ `flyway-concurrent-boot.java` + `flyway-concurrent-verify.py`）⇒ 逐条 ⇒ [`docs/DRIFT/global/lanes/L4-flyway.md`](../../DRIFT/global/lanes/L4-flyway.md) §8.4。
+  ⇒ ⚠️ **唯一例外 = `favorite-rpc`**（缺 `spring.flyway.baseline-version: 0` ⇒ **起得来、首次查库才炸**）⇒ **只记账不修**（favorite 域对 global 零写权）。
+- ⚠️ **「文档缺陷」那条已处置（2026-10-25）**：多处文档声称运行时那一条「由各模块的 `FlywayLedgerIsolationTest` 负责」，
+  而**该测试类全仓不存在**（`grep -r FlywayLedgerIsolationTest` 只命中文档自身）
+  —— 又一条「文件已写」型未核实断言。
+  ⇒ **处置方式：改掉那句声明，不新造那个类** ⇒ 运行时那一条实际由
+  **`tools/difftest/check-flyway-concurrent.sh`（三进程并发）+ 各域 `*FlywaySharedSchemaGateTest`（逐模块非空 schema）** 承担
+  ⇒ 文档已同步（AGENTS.md §6.3 问题 4 + `docs/DRIFT/global/cross-domain.md` §二·十二）。
 
-**效力边界**：静态检查只保证**声明层**账本表名两两不同；
-**不证明 Flyway 运行时真的按 `spring.flyway.table` 建表** ——
-那需要真 PG 上双模块对启动，属 AGENTS.md §3.3「框架机制必须验证实际生效」，**尚未做**。
+**效力边界（已收窄）**：静态检查只保证**声明层**账本表名两两不同；
+**运行时那一条**（Flyway 真的按 `spring.flyway.table` 建表）已由
+**`tools/difftest/check-flyway-concurrent.sh`**（真 PG 三进程并发同库）承担 ⇒ **已做**（L4，2026-10-25）。

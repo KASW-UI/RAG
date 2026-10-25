@@ -332,3 +332,153 @@ return router.Handle(route.Method, route.Path, handle)
 - 关联：`docs/DRIFT/global/common-tails.md` §一·T-12 ·
   `docs/Intentional_Deviations/global/common-tails.md` §`SD-2026-10-25-CAND-15` ·
   `docs/Pitfalls/global/cross-domain.md` PIT-GLOBAL-015（探针测的层 ≠ 端到端跑的层）
+
+---
+
+## PIT-GLOBAL-024 🔴 **阻塞式启动器 + 句柄设在「返回之后」⇒ 句柄永远拿不到 ⇒ 调度器跨用例泄漏 ⇒ 守门失真**
+
+### 现象
+
+2026-10-25 第二十五轮全仓回归里，`LikeFactDispatchContractGateTest.failedDeliveryBreaksTheInnerBatchImmediately`
+**偶发红**（上一轮全绿、这一轮红），失败信息：
+
+```
+expected: 0
+ but was: 1
+[毒丸失败后同轮 break ⇒ msg-02 不该被尝试过（应仍是 pending=0）]
+```
+
+### 根因（**不是生产缺陷，是守门自身的缺陷**）
+
+`service/common` 的 `Dispatcher` 有两个入口：
+
+| 入口 | 语义 | 句柄什么时候拿得到 |
+|---|---|---|
+| `Dispatcher.run(...)` | **阻塞式** —— 在**调用线程**上跑整个循环，**直到 `stop()` 被调用才返回** | **永远拿不到**（除非循环先结束） |
+| `Dispatcher.runAsync(...)` | **非阻塞** —— 在独立线程跑循环，**进入循环之前**就把句柄发布出去 | 立刻拿到 |
+
+守门当时的写法是：
+
+```java
+Thread runner = new Thread(() -> {
+    Dispatcher.DispatcherHandle handle = Dispatcher.run(...);   // ← 阻塞，直到 stop 才返回
+    handleRef.set(handle);                                       // ← 只有 run 返回后才设
+}, "like-contract-dispatcher");
+runner.start();
+```
+
+⇒ `run` **永不返回** ⇒ `handleRef.set(...)` **永不执行** ⇒ `handleRef` 永远是 `null`
+⇒ `@AfterEach` 的 `handleRef.getAndSet(null)` 每次都拿到 `null` ⇒ **调度器永远停不掉**
+⇒ **每个用例都往下一个用例泄漏一个还在 1s 一跳的调度器线程**。
+
+### 为什么它表现为「偶发红」，而且红得莫名其妙
+
+泄漏的调度器**仍在领行**（`FOR UPDATE SKIP LOCKED`，1s 一跳）⇒ 它和本用例的调度器**并发抢行**：
+
+1. 泄漏的调度器领到毒丸 `msg-01` ⇒ 把它标成 `delivery_status=1`（**在途**）；
+2. 本用例的调度器再领行时，`msg-01` 已被标成 1 ⇒ 被排除 ⇒ **领走了 `msg-02`**；
+3. ⇒ 「毒丸失败 ⇒ 同轮 break ⇒ 下一条一次都不许被试」这条断言就**因为并发**、而不是因为 break 而变红。
+
+⚠️ 更糟的是它**污染兄弟用例**：第 2 个用例断言「每轮 16 条」，而第 1 个用例泄漏的调度器也在同时领行
+⇒ 16 条这个数是**两个调度器凑出来的** ⇒ 那条断言即使绿，**测的也不是它声称在测的东西**。
+
+### 正确处置
+
+```java
+// ✅ 守门必须用 runAsync：句柄立刻可拿 ⇒ @AfterEach 真的能停
+Dispatcher.DispatcherHandle handle = Dispatcher.runAsync(
+        Context.current(), deliveryService::dispatchFactOnce, sender, LOG, false, false);
+handleRef.set(handle);
+```
+
+⇒ 生产路径（`LikeFactDispatchScheduler` / `CommentFactDispatchScheduler`）**本来就是 `runAsync`** ⇒ **没有这个缺陷**。
+⇒ ⚠️ 但 `FavoriteFactDispatchScheduler`（**favorite 域，global 零写权**）用的是**阻塞式 `Dispatcher.run`**，
+不过它的触发点是 `@EventListener(ApplicationReadyEvent)`（**不是** `@PostConstruct`）
+⇒ **上下文已刷新** ⇒ 不会卡住启动，但会**占住主线程** ⇒ **记账 + 告知 owner**，global 不改。
+
+### 教训
+
+**「拿到句柄」这件事，要先确认启动器是阻塞式还是非阻塞式** ——
+阻塞式入口 + 「句柄设在返回之后」= **句柄永远拿不到**，而代码读起来完全正常（编译过、类型对）。
+
+⚠️ 同族：**PIT-GLOBAL-009**（显式声明 test 作用域依赖把 compile classpath 上的同名 artifact 顶掉）
+—— 那条是「**声明看起来对、实际被顶掉**」；本条是「**赋值看起来对、实际永不执行**」
+⇒ 两者都是「**代码写成了这样，但那一行永远跑不到 / 跑到的不是它**」。
+
+### 出处
+
+- 首踩位置：2026-10-25 第二十五轮全仓回归（`mvn -o test -fae`）——
+  `LikeFactDispatchContractGateTest` 偶发红 ⇒ 按「**先归因再修**」做结构 diff ⇒ 定位到句柄拿不到；
+- 定性依据：`service/common/src/main/java/com/rag/common/communityfact/Dispatcher.java`
+  的 `run`（阻塞）与 `runAsync`（句柄在进循环前发布）·
+  `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/mq/LikeFactDispatchScheduler.java`（生产路径用 `runAsync`）；
+- 守门：`service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeFactDispatchContractGateTest.java`
+  （`startDispatcher()` 改用 `runAsync`）；
+- 关联：`docs/DRIFT/global/lanes/L1-delivery.md` §十三（第二十五轮 T-6）。
+
+---
+
+## PIT-GLOBAL-025 🔴 **MockMvc 与真 Tomcat 是「两条」观测路径 ⇒ 共享层写的响应头在两条路径上表现不同**
+
+### 现象
+
+2026-10-25 第二十五轮全仓回归里，**favorite 域**的一条守门红了：
+
+```
+FavoriteApiMvcPipelineTest.responseContentTypeMatchesGoConstant
+Response header 'Content-Type' expected:<application/json;charset=utf-8> but was:<application/json; charset=utf-8>
+```
+
+⇒ 而本轮的 T-6 修法在**真 Tomcat** 守门里是**全绿**的（`GoStyleJsonContentTypeCharsetTomcatTest` 3 条全绿）。
+
+### 根因
+
+**两个测试跑的不是同一条路径**：
+
+| 路径 | 谁在写 Content-Type | 有没有归一化 |
+|---|---|---|
+| **真 Tomcat**（`@SpringBootTest(webEnvironment = RANDOM_PORT)` + 裸 socket） | Tomcat 11 的 `Response.setContentType(String)` 把值**拆成 (type/subtype, charset) 两份存**，写出去时**重新拼**（`Http11OutputBuffer.writeHeaders` ⇒ `";"` 后面**没有空格**） | ✅ **有** ⇒ 写什么都是 `application/json;charset=utf-8` |
+| **MockMvc**（各域的 `*MvcPipelineTest`） | 没有容器 ⇒ **原样**写出去 | ❌ **没有** ⇒ 写什么就是什么 |
+
+⇒ T-6 初版写的是 Go 的字面量 `"application/json; charset=utf-8"`（**带空格**）
+⇒ 真 Tomcat 路径**照样**归一化成无空格（所以真 Tomcat 守门绿）
+⇒ **MockMvc 路径原样保留带空格** ⇒ 把 **favorite** 的守门打红了
+⇒ 而 **favorite 域对 global 零写权** ⇒ 修法**只能**落在共享层。
+
+### 正确处置
+
+共享层改写 **`application/json;charset=utf-8`（无空格）** —— 也就是
+**各域自己的 advice 产出的那个值**（favorite 的 `GlobalResponseAdvice` 用
+`MediaType.parseMediaType("application/json; charset=utf-8")`，而 Spring **保留原样的大小写** ⇒ 产出小写 `utf-8`）：
+
+- **真 Tomcat**：写什么都被归一化成同一个值 ⇒ **不变**；
+- **MockMvc**：写的值 **== Spring 转换器自己会写的值** ⇒ **零变化** ⇒ 别的域的守门不会被共享层改动打到。
+
+⚠️ **不能用 `new MediaType(APPLICATION_JSON, UTF_8).toString()` 写死期望值**：
+它产出的是 `application/json;charset=UTF-8`（**大写** UTF-8）⇒ 与各域实际产出的**小写**不一致
+⇒ 用它当期望值会把**正确**的实现判成红。
+
+### 教训
+
+**「真容器守门绿」不等于「这个改动在所有路径上都无害」** ——
+**MockMvc 路径没有容器的归一化**，它看到的是**应用层写的原始字节**。
+
+⇒ **共享层改响应头/响应体这类「会被容器再加工」的东西时，必须同时问两句**：
+① **真容器**上是什么样？（本仓已有先例：`GoStyleJsonContentTypeCharsetTomcatTest` 用裸 socket 逐字节比对）
+② **MockMvc** 上是什么样？（各域的 `*MvcPipelineTest` 钉的就是这个）
+⇒ **两条路径都要钉**，否则改一边只会打红另一边。
+
+⚠️ 同族：**PIT-GLOBAL-015**（探针测的层 ≠ 端到端跑的层）——
+那条讲「**测**的层」；本条讲「**同一份代码在两种测试基座上被观测的方式不同**」
+⇒ 指向同一条纪律：**链路有分层 ⇒ 必须逐层点名，不能靠「层」的直觉。**
+
+### 出处
+
+- 首踩位置：2026-10-25 第二十五轮全仓回归（`mvn -o test -fae`）——
+  `FavoriteApiMvcPipelineTest.responseContentTypeMatchesGoConstant` 红 ⇒ 先归因（不是 favorite 域的问题，是共享层改动）；
+- 修法：`service/common/src/main/java/com/rag/common/http/GoStyleJsonContentTypeAdvice.java`
+  的 `GO_JSON_CONTENT_TYPE` 改为**无空格**形态；
+- 新守门：`service/common/src/test/java/com/rag/common/http/GoStyleJsonContentTypeCharsetTomcatTest.java`
+  的第 4 条 `adviceWritesExactlyWhatDomainsOwnAdviceWritesInMockMvc`
+  ⇒ 锁「Advice 写的值 == 各域自己 advice 会写的值」；
+- 关联：`docs/DRIFT/global/lanes/L1-delivery.md` §十三（第二十五轮 T-6 + 自曝错账 #3）。

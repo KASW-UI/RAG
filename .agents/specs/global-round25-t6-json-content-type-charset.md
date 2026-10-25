@@ -52,7 +52,7 @@ global 台账（`common-tails.md` §一·T-6）原写：
 
 | # | 文件 | 改动 |
 |---|---|---|
-| ① | `service/common/.../http/GoStyleJsonContentTypeAdvice.java`（**新增**） | `@AutoConfiguration` + `@RestControllerAdvice` ⇒ JSON 响应头写**原始字符串** `application/json; charset=utf-8` |
+| ① | `service/common/.../http/GoStyleJsonContentTypeAdvice.java`（**新增**） | `@AutoConfiguration` + `@RestControllerAdvice` ⇒ JSON 响应头写 `application/json;charset=utf-8`<br>⚠️ **2026-10-25 第二十六轮订正**：初版写的是 **Go 的字面量（带空格）** ⇒ 只在**真 Tomcat** 上「看起来对」⇒ 在 **MockMvc** 路径上分叉 ⇒ 打红了 favorite 的守门 ⇒ **已改为无空格形态**（= 各域自己 advice 会写的那个值）⇒ 详见本 spec 末尾「第二十六轮订正」 |
 | ② | `service/common/src/main/resources/META-INF/spring/...AutoConfiguration.imports` | 登记上面这个 advice ⇒ **10 个 api 全部生效** |
 | ③ | `service/common/.../http/GoStyleRouterErrorResponses.java` | **订正一条被证伪的注释**（「写原始字符串是唯一能保证逐字节对上的做法」⇒ 实测证伪） |
 
@@ -148,3 +148,36 @@ global 台账（`common-tails.md` §一·T-6）原写：
 | ④ | 更新 `AGENTS.md` §0 的 `global` 行 + 三个 `_INDEX.md` + `_MANIFEST.json` |
 | ⑤ | **L2 / L5 两条 lane 的合并**（L3 / L4 已合并） |
 | ⑥ | `align/global` → `do-my-own-gh` 的合并 |
+
+
+---
+
+## 十二、🔴 第二十六轮订正（全仓回归收尾 · 由整合者执行）
+
+> **触发**：第二十五轮改完后跑全仓回归 `mvn -o test -fae` ⇒ **2 条红** ⇒ 逐条定性 ⇒ **两条都不是生产缺陷**。
+> ⇒ 逐条记录 ⇒ [`docs/DRIFT/global/lanes/L1-delivery.md`](../../docs/DRIFT/global/lanes/L1-delivery.md) §十四。
+
+### 12.1 自曝错账 #3：本 spec 第五节写的「原始字符串」在 **MockMvc 路径上**不成立
+
+| 项 | 内容 |
+|---|---|
+| **本 spec 第五节的推理** | 「JSON 响应头写**原始字符串** `application/json; charset=utf-8` ⇒ 意图在代码里可见，且万一哪天容器归一化行为变了，就会**自动**回到与 Go 逐字节一致」 |
+| **🔴 为什么错** | 那个推理**只在真 Tomcat 上成立**（Tomcat 11 归一化 ⇒ 写什么都一样 ⇒ 真 Tomcat 守门 3/3 绿 ⇒ **看起来对**）。<br>⇒ **MockMvc 路径没有容器归一化** ⇒ 写什么就原样出现 ⇒ **带空格** ⇒ **打红 favorite-api 的守门**（`FavoriteApiMvcPipelineTest.responseContentTypeMatchesGoConstant`）。 |
+| **改法** | 写成 **`application/json;charset=utf-8`（无空格）** = **各域自己 advice 会写的值**（`MediaType.parseMediaType("application/json; charset=utf-8").toString()` ⇒ Spring **保留原样大小写** ⇒ 小写 `utf-8`）⇒<br>真 Tomcat：**不变**；MockMvc：**零变化** ⇒ **favorite 一行不用改**。 |
+| **⚠️ 陷阱** | `new MediaType(APPLICATION_JSON, UTF_8).toString()` = `application/json;charset=UTF-8`（**大写**）⇒ **不能**拿它当期望值。 |
+| **⇒ 教训** | **PIT-GLOBAL-025** |
+
+### 12.2 守门自身的缺陷：`LikeFactDispatchContractGateTest` 调度器句柄永远拿不到
+
+⇒ 阻塞式 `Dispatcher.run` + 「句柄设在 `run` 之后」⇒ **句柄永远拿不到** ⇒ 调度器**跨用例泄漏**
+⇒ 并发抢行 ⇒ 「毒丸失败 ⇒ 同轮 break」那条断言**因为并发**而偶发红 ⇒ 改用 `Dispatcher.runAsync` 即修。
+⇒ **生产路径本来就是 `runAsync`** ⇒ 无此缺陷。⇒ 教训 ⇒ **PIT-GLOBAL-024**。
+
+### 12.3 新守门（门 4）
+
+`GoStyleJsonContentTypeCharsetTomcatTest.adviceWritesExactlyWhatDomainsOwnAdviceWritesInMockMvc`
+⇒ 锁「**Advice 写的值 == 各域自己 advice 会写的值**」⇒ 该类 **3 条 ⇒ 4 条**。
+
+### 12.4 本轮**没有**证明的事
+
+见 [`docs/DRIFT/global/lanes/L1-delivery.md`](../../docs/DRIFT/global/lanes/L1-delivery.md) §14.5（其余 8 个 api 的 MockMvc 路径未逐域对拍 · RFC 8259 的规范方向取舍未重评）。

@@ -133,7 +133,7 @@ Go 侧 `service/like/rpc/internal/model/migrations/001~003` 与 **comment 域那
 | 14 | `follow` | — | ✅ **五维全等（10 列 / 8 索引 / 2 约束）** | `/tmp/ddl-all.log` follow 段 |
 | 15 | `hot` | — | ⚪ **N/A（本维度不适用）** | Go 侧 `service/hot/` 全域 `grep gorm` = **0 命中**（只有 Redis + Kafka）· RAG 侧 `service/hot/hot-rpc/` **无 `db/migration` 目录、无 Mapper/Entity** ⇒ **两侧都没有数据库** |
 | 16 | `users`（复核） | `users_user.status` 可空性 | 🔴 **已知真漂移（未修）** `DRIFT-USERRPC-V-002` | 本轮**复现**：`users_user.status go=(nullable=YES) rag=(nullable=NO)` |
-| 17 | `users`（复核） | 8 处时间列 DEFAULT `CURRENT_TIMESTAMP` | 🟢 **已知、刻意保留**（待裁决） | 与 [`docs/DRIFT/_cross/ddl-type-divergences.md`](../../../_cross/ddl-type-divergences.md) §2.2 **逐条一致** |
+| 17 | `users`（复核） | 8 处时间列 DEFAULT `CURRENT_TIMESTAMP` | 🟢 **已知、刻意保留**（待裁决） | 与 [`docs/DRIFT/_cross/ddl-type-divergences.md`](../../_cross/ddl-type-divergences.md) §2.2 **逐条一致** |
 | 18 | `users`（复核） | Go 独有 3 条索引 / RAG 独有 4 条索引 | 🟢 **只记不修（性能非行为）** | 与同文件 §2.3.1 / §2.3.2 **逐条一致** |
 | 19 | `comment`（复核） | `report_record` 表 **仅 RAG 有** | ✅ **已签字** `SD-2026-10-24-CAND-02`（2026-10-24，用户 Jason） | Go：`service/comment/rpc/internal/model/db.go:15` 的 AutoMigrate 列表**不含** `ReportRecord`，全仓无任何 `.sql` 建它 ⇒ Go 生产侧**根本没有这张表** |
 | 20 | `message`（复核） | 6 处 DEFAULT + 索引 `idx_notification_recipient_read` 列不同 | ✅ **已签字** `DRIFT-MSG-V-020` / `SD-2026-10-23-06`（= **X-10**） | 本轮**复现**，未重复登记 |
@@ -146,7 +146,7 @@ Go 侧 `service/like/rpc/internal/model/migrations/001~003` 与 **comment 域那
 | **新增 5 个域预设**（`article`/`like`/`hot`/`follow`/`favorite`）+ `users`/`comment` 切到 runner 管理的容器 | 原 `users` 预设的容器 `uudifftest-postgres` **Go 侧没有 admin 两张表**（admin 的表由 `service/user/admin/rpc/internal/model/db.go:15` 另一个包产出）⇒ 每次跑都撞「列集合不一致」 | users 域从「环境缺口」变成**可完整对照**（35 列全量） |
 | **加 `expected_tables` 环境闸门** | 「两侧都是 0 张表」原来会**静默判成一致** | 少一张表 ⇒ `EXIT=2` + 点名缺哪张（实测：like 域容器重建中途被扫到 ⇒ 报「Go 侧缺 like_consume_inbox / like_domain_fact_outbox / like_fact_stream」⇒ **闸门有效**） |
 | **退出码 3 = N/A** | `hot` 域两侧都没有数据库 ⇒ `EXIT=0` 会冒充「已对齐」 | hot 域现在**明确**是 N/A |
-| **「命名形态差」不再算失败**（索引 + 约束） | 名字不同但「表 + 唯一性 + 列」完全等价 ⇒ PG 语义零影响（[`ddl-type-divergences.md`](../../../_cross/ddl-type-divergences.md) §2.4 已这么判定，**但脚本原来把它算成失败**） | `task` 域从 `EXIT=1`（误报 4 条主键名差）变成 **`EXIT=0`**；`message`/`users` 退出码不变（仍 1） |
+| **「命名形态差」不再算失败**（索引 + 约束） | 名字不同但「表 + 唯一性 + 列」完全等价 ⇒ PG 语义零影响（[`ddl-type-divergences.md`](../../_cross/ddl-type-divergences.md) §2.4 已这么判定，**但脚本原来把它算成失败**） | `task` 域从 `EXIT=1`（误报 4 条主键名差）变成 **`EXIT=0`**；`message`/`users` 退出码不变（仍 1） |
 | **「唯一约束 ↔ 唯一索引」载体不同不再算失败** | 唯一性判定 / 23505 / ON CONFLICT 仲裁完全相同 | favorite 域的 `uk_favorite_fact_version` 从「实质差异」降为「语义等价」 |
 | **DEFAULT 的「序列名映射」不再算真差** | 两侧表名不同 ⇒ 序列名必然不同（`users_id_seq` ↔ `users_user_id_seq`）⇒ 是**表名映射的副产品**（同文件 §2.2「已知的 4 处假差」） | users 域 DEFAULT 差异从 12 处收敛到 **8 处**（与既有台账一致） |
 | **新增触发器维度**（`pg_trigger`） | article / like / favorite 的「不可变信封」语义**只由触发器承载** ⇒ 不查它等于把最硬的约束漏在门外 | like 域的 RAG 多 1 个触发器**因此才可见** |
@@ -221,5 +221,5 @@ message  EXIT=1 | == 实质差异合计 7 处 ⇒ 退出码 1 ==      # 6 DEFAUL
 ```
 
 ⚠️ **`EXIT=1` ≠ 「有 bug」** —— users / message 的 1 是**已登记的已知差异**（与
-[`docs/DRIFT/_cross/ddl-type-divergences.md`](../../../_cross/ddl-type-divergences.md) 逐条一致），
+[`docs/DRIFT/_cross/ddl-type-divergences.md`](../../_cross/ddl-type-divergences.md) 逐条一致），
 本轮只是**复现**，不重复登记。

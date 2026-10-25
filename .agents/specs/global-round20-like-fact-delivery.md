@@ -157,7 +157,7 @@ M14 单点删 `break` 无效（两个 break 共同保证「失败即 break」，
 ⚠️ **判定口径**：目标 testcase **变红**即可（`failure` 或 `error` 都算）；
 **连带红数**必须记录（过强变异会连带带红别的用例）。
 
-⇒ 逐条论证、证据行号与未证成部分 ⇒ [`docs/DRIFT/global/lanes/L1-delivery.md`](../docs/DRIFT/global/lanes/L1-delivery.md) §8。
+⇒ 逐条论证、证据行号与未证成部分 ⇒ [`docs/DRIFT/global/lanes/L1-delivery.md`](../../docs/DRIFT/global/lanes/L1-delivery.md) §8。
 
 ---
 

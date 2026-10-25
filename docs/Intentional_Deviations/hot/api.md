@@ -335,6 +335,7 @@ org/apache/coyote/Http11OutputBuffer.writeHeaders()
 |---|---|
 | 状态 | 🟡 **待签字候选（未签字）** —— 属**框架限制**，不是「RAG 偷懒」 |
 | 组件 | `service/hot/hot-api`（**性质是 Tomcat 全体** ⇒ 10 个 api 模块都适用） |
+| **Go 出处** | **Go 标准库 `net/http/server.go`**（⚠️ **不在 `Sea-RideTheWind_golang` 项目树里** ⇒ 见 **PIT-GLOBAL-001** / **PIT-GLOBAL-006**）：<br>· **`:931`** `const DefaultMaxHeaderBytes = 1 << 20 // 1 MB` ⇒ **上限基数 = 1 MiB**；<br>· **`:941`** `return int64(s.maxHeaderBytes()) + 4096 // bufio slop` ⇒ **真实阈值 = 1 MiB + 4096**（**RAG 侧的 `1028KB` 就是照这条配的**）；<br>· **`:2040`** `const errorHeaders = "\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n"` ⇒ **`Content-Type` 是 `text/plain; charset=utf-8`**；<br>· **`:2049-2050`** `const publicErr = "431 Request Header Fields Too Large"` + `fmt.Fprintf(c.rwc, "HTTP/1.1 "+publicErr+errorHeaders+publicErr)` ⇒ **状态码 431 + body 就是这行字**。<br>**RAG 侧** Tomcat `org/apache/coyote/http11/Http11InputBuffer.java:768`（`fill`）抛 `IllegalArgumentException: Request header is too large` ⇒ 请求**没进 Servlet** ⇒ 状态码与错误体由 Tomcat 决定（`Constants.java` 无 431 预置常量 ⇒ 走 `Http11OutputBuffer` 的默认分支）。<br>⚠️ **阈值本身两侧已对齐**（翻转点**都是 1052536 字节，差 0**）⇒ 差异**只在拒绝时的呈现形态**（状态码 + `Content-Type` + body） |
 | 行为层 | **HTTP 状态码 + 错误响应体形状**（客户端可见）—— 仅限「请求行 > 1 MiB + 4 KiB」 |
 | 证据强度 | ✅ **双侧活体实测**（2026-10-25，二分出两侧翻转点） |
 

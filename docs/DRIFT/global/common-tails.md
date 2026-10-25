@@ -8,7 +8,7 @@
 
 > **归属**：`global` 收口域的「common-tails」议题档（§5.3b）。
 > **对象**：**别的域**的漂移，但**修法落在** `service/common` 的共享类里 ⇒ 不是 `common` 域自身的语义漂移
-> （边界见 [`_README.md`](../_README.md) §二）。
+> （边界见 [`_README.md`](_README.md) §二）。
 > **基线**：`align/global` @ `58e8314`（`do-my-own-gh`）。
 >
 > ⚠️ **本轮（2026-10-25）只做「复核 + 定位 + 事实认定」**：把 10 条里标「⬜ 待复核」的 3 条
@@ -38,7 +38,7 @@
 ⇒ RAG 的 `service/common/http/` + `service/common/protection/` **整体对应的是 go-zero 的对应件**，不是 Go 项目的 `service/common`。
 
 ⚠️ **对后续所有域的含义**：查「请求保护层」类漂移的 Go 出处时，**只在项目树里 grep 一定会落空**。
-⇒ 已登记为踩坑 ⇒ [`docs/Pitfalls/global/common-tails.md`](../../../Pitfalls/global/common-tails.md)。
+⇒ 已登记为踩坑 ⇒ [`docs/Pitfalls/global/common-tails.md`](../../Pitfalls/global/common-tails.md)。
 
 ---
 
@@ -115,7 +115,7 @@
 ### T-2 / T-5 ✅ `MaxConns` 闸门作用域 —— **已签字为有意偏离**（移出本档）
 
 > ⚠️ **本两条已不在 DRIFT 档**（§5.3b 硬边界 2：「不要在 DRIFT 里记『决定不对齐』的偏离」）
-> ⇒ 决策记录在 [`docs/Intentional_Deviations/global/common-tails.md` §SD-2026-10-25-01`](../../../Intentional_Deviations/global/common-tails.md)
+> ⇒ 决策记录在 [`docs/Intentional_Deviations/global/common-tails.md` §SD-2026-10-25-01`](../../Intentional_Deviations/global/common-tails.md)
 > ⇒ 下面是**历史记录**，保留以便追溯「它曾是第三态、怎么归位的」。
 
 **（以下为签字前的历史）**
@@ -140,7 +140,7 @@
 **它目前既不是 DRIFT 也不是签字偏离 —— 是个无归属的第三态。**
 ⇒ **已归位**到待签字候选 `SD-2026-10-25-CAND-11` ⇒ **2026-10-25 用户已签字**
 ⇒ 候选号转正为 **`SD-2026-10-25-01`**（状态：已签字）⇒ 详见
-[`docs/Intentional_Deviations/global/common-tails.md`](../../../Intentional_Deviations/global/common-tails.md)。
+[`docs/Intentional_Deviations/global/common-tails.md`](../../Intentional_Deviations/global/common-tails.md)。
 ⇒ **签字决定 = 保留 RAG 的全局闸门，不改成 per-route**。
 ⇒ 配套落地：`GoStyleMaxConnsFilter` 的 javadoc 已从「有意的表达层收敛」自述
 **改成指向该签字档的指针**（并加一句「不要因为 Go 是 per-route 就顺手改回」）。
@@ -204,7 +204,7 @@ RAG 的 499 由 **worker 内的写失败** 驱动（而本组件的写发生在 
 | 断连后是否继续发下游调用 | **否** | 🟡 探测判定断连后不再发新的下游调用 |
 
 ⇒ ⚠️ **本条不再是「不修」项**：第九轮查明 6 条替代路径后，**第十轮落地方案⑤**（用户 2026-10-25 拍板）⇒
-⇒ 🆕 **新签字条目** [`docs/Intentional_Deviations/global/common-tails.md` §`SD-2026-10-25-04`](../Intentional_Deviations/global/common-tails.md)
+⇒ 🆕 **新签字条目** [`docs/Intentional_Deviations/global/common-tails.md` §`SD-2026-10-25-04`](../../Intentional_Deviations/global/common-tails.md)
    —— 记的是**方案⑤ 带来的 wire 偏离**（客户端先收到 N 行 `103 Early Hints`）+ **499 定型时点晚于 Go**；
 ⇒ ❌ 原「框架限制」记录 `SD-2026-10-25-02` **已撤销**（问题被修掉 ⇒ 不需签字）。
 
@@ -229,13 +229,13 @@ RAG 的 499 由 **worker 内的写失败** 驱动（而本组件的写发生在 
 > · **① 换 Jetty / ② 换 WebFlux+Netty** 🟡 可行但**换运行时/换栈**
 > · **⑥ 缩短在飞 deadline** ✅ **零改动 · 零 wire 差异 · 零签字**
 > ⇒ ⇒ **定性从「框架限制（事实登记）」改判为「要不要为这一点动约束（决策项）」**
-> ⇒ **逐条 ⇒ [`docs/Intentional_Deviations/global/common-tails.md` §①②③④](../../../Intentional_Deviations/global/common-tails.md)**。
+> ⇒ **逐条 ⇒ [`docs/Intentional_Deviations/global/common-tails.md` §①②③④](../../Intentional_Deviations/global/common-tails.md)**。
 
 ⇒ **本条 ⇒ 已闭环（第十轮修掉）⇒ 偏离由 `SD-2026-10-25-04` 签字认账**（2026-10-25 06:40 用户再次明确签字）
-⇒ [`docs/Intentional_Deviations/global/common-tails.md`](../../../Intentional_Deviations/global/common-tails.md)。
+⇒ [`docs/Intentional_Deviations/global/common-tails.md`](../../Intentional_Deviations/global/common-tails.md)。
 ⚠️ **签字权在用户**：本轮**未**自行批准（⚠️ 第四轮曾误转正为「已签字」，已撤销）。
 ⇒ 🟡 **官方路径已记录为「可选后续优化」（不是必选项）** ⇒ **不触发返工**
-⇒ ⇒ [`docs/Intentional_Deviations/global/common-tails.md` §「`SD-2026-10-25-04` 附记 · 官方路径记录」](../../../Intentional_Deviations/global/common-tails.md)
+⇒ ⇒ [`docs/Intentional_Deviations/global/common-tails.md` §「`SD-2026-10-25-04` 附记 · 官方路径记录」](../../Intentional_Deviations/global/common-tails.md)
    —— 记录：Spring 官方**没有「检测」API**（只有 `DisconnectedClientHelper` 事后分类 + `AsyncListener.onError` / `DeferredResult.onError` 这条**事件消费**链路）
    + Tomcat `AbstractProtocol.java:1494-1503`（**async 期间不注册读兴趣** ⇒ HTTP/1.1 下官方链路也不更早）
    + 四个**可选**优化项 O-1~O-4（O-1 用官方 `DisconnectedClientHelper` 分类 ⇒ 成本最低）。
@@ -307,8 +307,9 @@ Tomcat 的 `OutputBuffer.appendByteArray`（`org/apache/catalina/connector/Outpu
 |---|---|
 | **Go 侧事实** | `go-zero v1.10.2/rest/internal/header/headers.go:17` ⇒ `ContentTypeJson = "application/json; charset=utf-8"`<br>`go-zero v1.10.2/rest/httpx/responses.go` 的 `doWriteJson` ⇒ `w.Header().Set(ContentType, header.ContentTypeJson)`<br>⇒ **Go 的 JSON 响应头 = `application/json; charset=utf-8`（分号后有空格）** |
 | **RAG 侧落点** | **不是** `GoStyleRouterErrorResponses` ⇒ 是 **Spring 的 `MappingJackson2HttpMessageConverter`**：默认 `Content-Type: application/json`（`writeAcceptCharset` 默认 `false` ⇒ 不补 charset） |
-| **修法（实际落地）** | ✅ 在 `service/common` 新增 `GoStyleJsonContentTypeAdvice`（`@AutoConfiguration` + `@RestControllerAdvice`）⇒ JSON 响应头写**原始字符串** `"application/json; charset=utf-8"`<br>⇒ **改 1 处 ⇒ 10 个 api 全部生效 ⇒ 不碰任何 api 模块的代码（`favorite-api` 也不碰）**<br>⚠️ **为什么挂在 Advice 而不是 `HttpMessageConverter`**：共享层的 `GoStyleJsonBodyConverter` **不是所有 api 都启用**（`task-api` 明确把它排除在组件扫描之外）⇒ 挂在它上面 ⇒ **task-api 不生效** ⇒ Advice 按「响应体是不是 JSON」判定 ⇒ **与用哪个转换器无关** |
+| **修法（实际落地）** | ✅ 在 `service/common` 新增 `GoStyleJsonContentTypeAdvice`（`@AutoConfiguration` + `@RestControllerAdvice`）⇒ JSON 响应头写 **`"application/json;charset=utf-8"`（无空格）**<br>⇒ **改 1 处 ⇒ 10 个 api 全部生效 ⇒ 不碰任何 api 模块的代码（`favorite-api` 也不碰）**<br>⚠️ **为什么挂在 Advice 而不是 `HttpMessageConverter`**：共享层的 `GoStyleJsonBodyConverter` **不是所有 api 都启用**（`task-api` 明确把它排除在组件扫描之外）⇒ 挂在它上面 ⇒ **task-api 不生效** ⇒ Advice 按「响应体是不是 JSON」判定 ⇒ **与用哪个转换器无关**<br>⚠️ **为什么写「无空格」而不是 Go 的字面量（带空格）**：**第二十六轮订正** —— 见下方「🔴 自曝错账 #3」。**无空格**形态 = **各域自己的 advice 会写的那个值**（`MediaType.parseMediaType("application/json; charset=utf-8").toString()` ⇒ Spring 保留原样大小写 ⇒ 小写 `utf-8`）⇒ 真 Tomcat 路径**不变**（照样归一化）· MockMvc 路径**零变化** ⇒ **别的域的守门不会被共享层改动打到** |
 | **🔴 冲突（已解决）** | **hot 域的 `SD-HOT-API-006` 已签字「不复刻」** ⇒ **2026-10-25 21:57 用户拍板撤销** ⇒ 撤销属**用户决策**（签字权在用户，§5.3b）<br>⇒ ⇒ **签字项已撤销**（`docs/Intentional_Deviations/hot/api.md`）⇒ 被它签字描述的行为（「RAG 的 JSON 响应不带 charset」）**已不存在** |
+| **🔴 自曝错账 #3（第二十六轮订正）** | ⚠️ **「写 Go 的原始字符串（带空格）」这个修法只在真 Tomcat 上成立** —— 当时的推理是「Tomcat 归一化 ⇒ 写什么都一样 ⇒ 写原始字符串就能**自动**回到与 Go 逐字节一致」<br>⇒ ⇒ **第二十六轮全仓回归实测推翻**：**MockMvc 路径没有容器归一化** ⇒ 写什么就**原样**出现在响应头里 ⇒ **带空格** ⇒ **打红了 favorite-api 自己的守门**（`FavoriteApiMvcPipelineTest.responseContentTypeMatchesGoConstant`：期望 `application/json;charset=utf-8`，实得 `application/json; charset=utf-8`）⇒ 而 favorite 域对 global **零写权** ⇒ **修法只能落在共享层**<br>⇒ ⇒ **改写无空格形态**（= 各域自己 advice 会写的值）⇒ 真 Tomcat **不变** · MockMvc **零变化** ⇒ **favorite 一行不用改**<br>⇒ ⇒ **教训**：「**真容器守门绿**」≠「**这个改动在所有观测路径上都无害**」⇒ ⇒ **PIT-GLOBAL-025**<br>⇒ 逐条 ⇒ [`lanes/L1-delivery.md`](lanes/L1-delivery.md) §十四 · 教训 ⇒ [`docs/Pitfalls/global/common-tails.md`](../../Pitfalls/global/common-tails.md) PIT-GLOBAL-025 |
 | **🔴 自曝错账 #2（本轮订正）** | ⚠️ **本文档原先写的「该理由已被本仓自己证伪」是错的** —— 当时的推理是「`GoStyleRouterErrorResponses.java:81-88` 对 `text/plain; charset=utf-8` 就是直接写原始字符串 ⇒ 同一手法用在 `application/json; charset=utf-8` 上即可」<br>⇒ ⇒ **第二十五轮实测证明这个推理不成立**：**写原始字符串并不管用** —— **Tomcat 11 把 Content-Type 拆成 (type/subtype, charset) 两份存、写出时重新拼**：<br>`Response.setContentType(String)`（11.0.24）⇒ `MediaTypeCache.parse(type)` ⇒ 有 charset 时 `coyoteResponse.setContentTypeNoCharset(parsedType[0])` + `setCharsetHolder(parsedType[1])`；`Http11OutputBuffer.writeHeaders()` ⇒ `put(contentType)` + `put(SEMICOLON)` + `put(CHARSET)` ⇒ **线上恒为 `type/subtype;charset=xxx`（分号后无空格）**<br>⇒ ⇒ `setContentType` / `setHeader` / `addHeader` 三条路都汇到 `setContentType` ⇒ **应用层根本拿不到那个空格**<br>⇒ ⇒ **`SD-HOT-API-006` 的原始理由「不可逐字节复刻」是成立的，而且比当初写的更强**（真实原因是**容器层**，不是 Spring 的 `MediaType.toString()`）⇒ ⇒ **撤销的性质因此是「纯用户决策」**（「技术上仍不可逐字节复刻，但选择向 Go 靠拢」） |
 | **残余（已接受，不新签）** | 修后 RAG = `application/json;charset=utf-8`（**无空格**）vs Go = `application/json; charset=utf-8`（**有空格**）⇒ **只差一个 OWS** ⇒ 按 RFC 9110，参数分隔符两旁的 **OWS 不显著** ⇒ **语义相同**<br>⇒ ⇒ 与 **404 路径是同一类、仓库早已接受**的做法（`LikeApiRouterErrorRealTomcatTest` 对 404 就是**刻意解析后比对**，注释明写「比原始字符串会得到一个『必然红、且红了也不代表有错』的断言（已实测）」）⇒ **不需要新登记** |
 | **守门** | ✅ `service/common` 的 `GoStyleJsonContentTypeCharsetTomcatTest`（**真 Tomcat + 裸 socket**，3 条：JSON 成功 / JSON 失败 / **显式 Content-Type 不许被误伤**）<br>⇒ ✅ **变异 2/2 全红**（M8 不写头 ⇒ 两个 JSON 门红；M9 无条件写 ⇒ 「不误伤」门红）⇒ **各打各的** |
@@ -501,7 +502,7 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 
 | | 内容 |
 |---|---|
-| **Go 侧** | `go-zero@v1.10.2/core/trace/agent.go` 的 `startAgent` 装**全局** `TracerProvider`（OTLP exporter + `Sampler`）⇒ `rest` 的 `TraceHandler` 建的 span **真的被导出**到 jaeger<br>Go 各 api yaml：`Telemetry: { Name: …, Endpoint: jaeger:4317, Sampler: 1.0, Batcher: otlpgrpc }` |
+| **Go 侧** | `go-zero@v1.10.2/core/trace/agent.go:105-132` 的 `startAgent` 装 `sdktrace.NewTracerProvider(opts...)`（**`:126`**）+ **`otel.SetTracerProvider(tp)`（`:127`）** ⇒ **全局 provider 真的被装上**；`core/trace/agent.go:115-124` **端点非空**才装 exporter（**`:123`** `sdktrace.WithBatcher(exp)`）⇒ **span 真的被导出**；`core/trace/agent.go:100-101` 非法 exporter ⇒ `unknown exporter`；`core/trace/agent.go:43-52` `StartAgent` 用 `sync.Once`（`:48`）⇒ 装不上**只 `logx.Error`（`:50`）继续启动**；`core/trace/propagation.go:8-11` 全局传播器 = `Composite(TraceContext, Baggage)`，**无条件**装<br>Go 各 api yaml：`Telemetry: { Name: …, Endpoint: jaeger:4317, Sampler: 1.0, Batcher: otlpgrpc }` |
 | **RAG 侧（实测）** | ① 全仓**无** `micrometer-tracing-bridge-otel`、**无** `opentelemetry-sdk-extension-autoconfigure` ⇒ Spring Boot 的 tracing 自动配置**不生效**<br>② `GlobalOpenTelemetry.get()` 是 **no-op** ⇒ 既有代码里所有 `GlobalOpenTelemetry.get().getTracer(...).spanBuilder(...)`（`RpcInterceptor` / `MqConsumer` / `AdminSpans` / `MessageDomainService` / `UserDomainService` / `FavoriteFactDispatchScheduler`）建出来的 span **全部无效**（`SpanContext` 为 INVALID）⇒ **既没有 span，也没有导出**<br>③ 各 api yaml 里 `otel: { exporter.otlp.endpoint: jaeger:4317, traces.sampler: parentbased_always_on }` **一直是对的** ⇒ 缺的只是**装配**（自动配置 / exporter / 关闭钩子） |
 | **可观察差异** | Go 的 trace 在 jaeger 里**可见**；RAG 的 trace **不存在** ⇒ 线上排障时「没有 trace」这件事两侧表现不同 |
 | **本轮做了什么** | **只**闭合 T-8 的「**响应头**」那一维：`GoStyleTraceparentFilter` 自带**私有** `SdkTracerProvider`（**不配任何 SpanProcessor**）⇒ span 的 `SpanContext` **有效** ⇒ 响应头能写；但 **span 不会被导出** |
@@ -511,14 +512,23 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 
 ---
 
-### T-12 🔴 **第十九轮新发现 · 未修** —— 「方法不匹配」这个出口，RAG 比 Go **多带**一个 `Traceparent`
+### T-12 🔴 **已定性（第二十六轮 L5）= 出口层级差异 · 共享层改不动** —— 「方法不匹配」这个出口，RAG 比 Go **多带**一个 `Traceparent`
 
 > **本轮（第十九轮）只登记、未修** —— 它是 **T-8 落地后才暴露的残留**（修之前 RAG 压根没有这个头
 > ⇒ 不存在差异）⇒ **T-8 与 T-12 必须一起读**。
+>
+> ✅ **第二十六轮 L5 定性（基于 Go 真源实读）** —— **不是推断，是落到注册点的结论**：
+> Go `rest/engine.go:113-115` `handle := chn.ThenFunc(route.Handler)` ⇒ `router.Handle(route.Method, route.Path, handle)`
+> ⇒ **含 `TraceHandler` 的链是被「注册进 router」的** ⇒ **router 自己生成的 405 根本不经过它**；
+> `rest/router/patrouter.go:59-83` 三条出口里 **`:77-82` 就是「方法不匹配（405）」** ⇒ **绕过 `TraceHandler`**
+> ⇒ ⇒ **性质 = 出口层级差异（Go 在 router 层 / RAG 在 `DispatcherServlet` 内）** ⇒ **共享层改不动**
+> ⇒ 🏷 **已登记为待签字候选 `SD-2026-10-25-CAND-15`**（`docs/Intentional_Deviations/global/common-tails.md`）。
+> ⇒ 教训 ⇒ **PIT-GLOBAL-023**（「这个出口在 XX 层 ⇒ 不经过 X」是推断 ⇒ 必须落到**注册点**）。
+> ⚠️ **效应边界（不要越读）**：差异**只**在「方法不匹配」**这一个**出口 —— 404 与正常响应**两侧都带** traceparent。
 
 | | 内容 |
 |---|---|
-| **Go 侧的三个出口** | `go-zero@v1.10.2/rest/router/patrouter.go:56-72` 的分发有**三条**出口，**只有前两条经过 TraceHandler**：<br>① **路由命中** ⇒ 路由链（`TraceHandler` 在 `engine.go:135`）⇒ **带**<br>② **路径都没注册** ⇒ `pr.handleNotFound` ⇒ `engine.notFoundHandler`（`engine.go:245-251`，**也挂** TraceHandler）⇒ **带**<br>③ **路径命中、方法不对** ⇒ `pr.notAllowed`（article 侧 = `cors.NotAllowedHandler`）或 `w.WriteHeader(405)` ⇒ **两条都在 router 层 ⇒ 都不经过 TraceHandler ⇒ 不带** |
+| **Go 侧的三个出口** | `go-zero@v1.10.2/rest/router/patrouter.go:59-83` 的分发有**三条**出口，**只有前两条经过 TraceHandler**：<br>① **路由命中**（`:61-68`）⇒ 路由链（**注册点** `rest/engine.go:113-115`；`TraceHandler` 是 native 链第一个，`engine.go:134-138`）⇒ **带**<br>② **路径都没注册**（`:71-75`）⇒ `pr.handleNotFound` ⇒ `engine.notFoundHandler`（`engine.go:245-251`，**也挂** TraceHandler）⇒ **带**<br>③ **路径命中、方法不对**（**`:77-82`**）⇒ `pr.notAllowed`（article 侧 = `cors.NotAllowedHandler`）或 `w.WriteHeader(405)` ⇒ **两条都在 router 层 ⇒ 都不经过 TraceHandler ⇒ 不带**<br>⇒ 🔴 **注册点才是判据**（不是「router 层」这种层级的说法）：`router.Handle(...)` 注册的是**已被 `TraceHandler` 包过的 handler** ⇒ **router 自己生成的 405 没有被包过** |
 | **② 为什么 Go 的 404 也带**（易误判点） | `rest/server.go:58` 的 `NewServer` **默认** `opts = append([]RunOption{WithNotFoundHandler(nil)}, opts...)` ⇒ **每个 api 都装上了 notFoundHandler** ⇒ 未注册路径的 404 **经过**它 ⇒ 带 traceparent。<br>⚠️ 与之相对，**方法不匹配**走的是 `SetNotAllowedHandler`，**全仓 10 个 api 只有 article 注册**（`article/api/article.go:33` 的 `rest.WithCors()` 顺带注册）⇒ 其余 9 个 api 走**默认 405** ⇒ **同样在 router 层 ⇒ 同样不带** |
 | **RAG 侧** | 出口③ 落在 `DispatcherServlet` **内**（`article-api` 的 `GlobalExceptionHandler.handleMethodNotSupported` ⇒ 404 空 body）⇒ filter 链**早已跑完** ⇒ 共享层的 traceparent filter **已经注入过头** ⇒ **多带一个 `Traceparent`** |
 | **实测证据** | ✅ `ArticleApiAssemblyWiringTest.methodNotAllowedCarriesTraceparentUnlikeGo`（**真 Tomcat**）：`GET /v1/article`（该路径只注册了 POST）⇒ **404 + 空 body + 带 `Traceparent`** ⇒ 与 Go 的同一路径（404 空 body、**无** `Traceparent`）**只差这一个头** |
@@ -526,7 +536,7 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 | **修它的代价** | 要么在共享层**自建一份路由表**（与各域的 controller 重复维护 ⇒ 新的漂移源）· 要么让**各域把路由元数据**暴露给共享层（⇒ 改 10 个域的代码，且**跨域改动**）⇒ **代价远超「多一个头」的收益** ⇒ 建议**签字认账** |
 | **影响面** | **10 个 api 全适用**（共享层）⇒ 但**只影响「方法不匹配」这一个出口**；<br>**404（路径未注册）与所有正常响应都与 Go 一致**（都带）⇒ 别把它读成「RAG 的 traceparent 一律多一个」 |
 | **守门** | ✅ `ArticleApiAssemblyWiringTest.methodNotAllowedCarriesTraceparentUnlikeGo` —— **characterization test**（钉的是**实测现状**，不是 Go 的事实；`@DisplayName` 已明说「残留差异」） |
-| **证据边界** | ✅ Go 侧三出口的**控制流逐行取证**（`patrouter.go:56-72` + `server.go:58` + `engine.go:135/245-251`）· ✅ RAG 侧**真 Tomcat 实测**<br>⚠️ **未做双侧活体对拍**（本轮未起 Go 侧进程）⇒ 「Go 的该响应无 traceparent」是**源码级**结论；如需升级为活体证据，须在 Go 侧起 api 实测同一请求 |
+| **证据边界** | ✅ Go 侧三出口的**控制流逐行取证**（**注册点** `rest/engine.go:113-115` + `patrouter.go:59-83` + `server.go:58` + `engine.go:245-251` + `tracehandler.go:61`）· ✅ RAG 侧**真 Tomcat 实测**<br>⚠️ **未做双侧活体对拍**（未起 Go 侧进程）⇒ 「Go 的该响应无 traceparent」是**源码级**结论；如需升级为活体证据，须在 Go 侧起 api 实测同一请求 |
 
 ---
 

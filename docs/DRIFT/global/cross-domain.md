@@ -18,7 +18,7 @@
 
 | # | 不变量 | 涉及组件 | 状态（2026-10-25） | 本轮 |
 |---|---|---|---|---|
-| X-1 | 共享 Flyway 账本 | `message-rpc`↔`like-rpc`↔`article-rpc` | ✅ **第十五轮**：🔴 **7 个 Flyway rpc 模块全连同一个库 ⇒ 同库共存是常态** ⇒ 查出 **comment/follow/like 三个域缺 `spring.flyway.baseline-version: 0`** ⇒ 非空 schema 下 **V1 被整条跳过 ⇒ 首张表永远建不出来 ⇒ 服务起不来**（同款缺陷 `message-rpc` 2026-10-24 已修并留了守门，**没被推广**）⇒ ✅ **三域已修 + 各配真 PG 守门**；⛔ **`favorite-rpc` 同款缺陷零触碰 ⇒ 记账 + 告知该域 owner**；🟡 **「三进程并发」那个形态仍未验证** | ✅ **部分闭环**（见 §二·十二） |
+| X-1 | 共享 Flyway 账本 | `message-rpc`↔`like-rpc`↔`article-rpc` | ✅ **第十五轮**：🔴 **7 个 Flyway rpc 模块全连同一个库 ⇒ 同库共存是常态** ⇒ 查出 **comment/follow/like 三个域缺 `spring.flyway.baseline-version: 0`** ⇒ 非空 schema 下 **V1 被整条跳过 ⇒ 首张表永远建不出来** ⇒ ✅ **三域已修 + 各配真 PG 守门**；⛔ **`favorite-rpc` 同款缺陷零触碰 ⇒ 记账 + 告知该域 owner**；✅ **「三进程并发」运行时形态已验（第二十四轮 L4 · 真 PG 16 三进程并发）⇒ 六域可安全并发同库** ⇒ 仅 `favorite-rpc` 例外（**起得来、首次查库才炸**） | ✅ **已闭环**（配置层 + 运行时；`favorite-rpc` 例外只记账） |
 | X-2 | 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | ✅ **已审完（第九轮）** —— 交叉但无冲突；client 契约 10 域零漂移；🟡 **产出 1 条新真漂移**（`users_user.extra_info` jsonb→text 漏改）⇒ 见 §二·九 | ✅ **已审完** |
 | X-3 | 事实投递链路 | `like`/`comment`/`favorite` 的 rpc ↔ **仓外 DC 平台** | ✅ **已闭合**（2026-10-25 B2）—— 末端不是「第三个仓库」，是仓外 `POST /v1/events`；仓内两侧 4↔4 对齐 | ✅ **已闭合** |
 | X-4 | 社区消费者差异 | Go 用 `like`，RAG 不用 | ✅ **已确证（第九轮实测）** —— like 侧 RAG **另起炉灶**（0 引用共享组件）· favorite/article **RAG 多出** ⇒ 一半可修、一半被 favorite 阻塞 ⇒ 见 §二·十 | ✅ **已确证** |
@@ -56,7 +56,7 @@ AGENTS.md §3.1 规定「任何行为一致性审查必须**以 Go 为唯一基�
 台账前几版把 Go 出处写成「Go 侧 `service/common/...`」⇒ 实测**全部落空**
 （`withJsonBody` / `MaxConnsHandler` / `path.Join(cc.Target(), method)` 在项目树里**都不存在**）。
 ⇒ 已在本域 [`common-tails.md`](common-tails.md) §〇 纠正，并给出两侧逐行出处。
-⇒ 已登记为踩坑 ⇒ [`docs/Pitfalls/global/common-tails.md`](../../../Pitfalls/global/common-tails.md)。
+⇒ 已登记为踩坑 ⇒ [`docs/Pitfalls/global/common-tails.md`](../../Pitfalls/global/common-tails.md)。
 
 ### 1.4 ⚠️ **给其它域的提醒（不属 global 的写权范围，只记账）**
 
@@ -171,7 +171,7 @@ Content-Type: Application/JSON
 |---|---|
 | 签字决定 | **保留 RAG 的 `(recipient_id, is_read)` 复合索引**，**不改回** Go 的单列 `(is_read)` |
 | 根因 | **Go 侧 gorm tag 的 `priority:1` 写到了另一个索引名**上 ⇒ GORM 只建出单列索引 ⇒ 是**声明笔误的产物** |
-| 决策记录 | [`docs/Intentional_Deviations/message/rpc.md` §`SD-2026-10-23-06`](../../../Intentional_Deviations/message/rpc.md)（**message 域那一条** —— 该编号在 3 个域各有含义，引用必须带域限定）<br>⚠️ **global 侧的 `SD-2026-10-25-03` 已撤销（重复登记）** ⇒ 见 [`docs/Intentional_Deviations/global/cross-domain.md`](../../../Intentional_Deviations/global/cross-domain.md) |
+| 决策记录 | [`docs/Intentional_Deviations/message/rpc.md` §`SD-2026-10-23-06`](../../Intentional_Deviations/message/rpc.md)（**message 域那一条** —— 该编号在 3 个域各有含义，引用必须带域限定）<br>⚠️ **global 侧的 `SD-2026-10-25-03` 已撤销（重复登记）** ⇒ 见 [`docs/Intentional_Deviations/global/cross-domain.md`](../../Intentional_Deviations/global/cross-domain.md) |
 | 代码侧指针 | `service/message/message-rpc/src/main/resources/db/migration/V1__create_message_notification.sql:27-38` |
 
 ⚠️ **别把它悄悄改回单列** ⇒ 那里已留指针 + 签字档是唯一记录处。
@@ -416,7 +416,7 @@ RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFact
 > ⚠️ **第九轮结论已被本轮推翻**：第九轮写「修法必然要动 `favorite-api` ⇒ 永久阻塞」——
 > **那个结论只覆盖了「逐模块改 `application.yml`」这一条修法**，而**不是全部修法**。
 > 本轮实测发现**共享层修法**（落在 `service/common`）⇒ **10 个 api 模块零改动 ⇒ favorite 零触碰**。
-> ⇒ **教训已登记** ⇒ [`docs/Pitfalls/global/cross-domain.md`](../../../Pitfalls/global/cross-domain.md)。
+> ⇒ **教训已登记** ⇒ [`docs/Pitfalls/global/cross-domain.md`](../../Pitfalls/global/cross-domain.md)。
 
 ### ① 两层限制的**精确语义**（第九轮实测取证）
 
@@ -665,18 +665,23 @@ spring.flyway.baseline-version                ← 🔴 部分模块【没配】�
 | 缺陷 | `service/favorite/favorite-rpc/src/main/resources/application.yml` 的 `spring.flyway` 块**缺 `baseline-version`** ⇒ 与 comment/follow/like **完全同款**（V1 = `favorite_folder`） |
 | 为什么 global 不能改 | favorite 域**零写权**（AGENTS.md §5.3c，用户重申「你没有 favorite 的所有权限」）⇒ **代码 / 配置 / 测试 / 台账一律不碰** |
 | 为什么共享层也代劳不了 | 这次**不是共享层的问题** —— 缺的是**该域自己 yaml 里的一行** ⇒ 共享层无法代劳（与第十四轮 X-6 不同：那条可以靠「共享层 + 缺省 off」规避） |
-| 后果（若不修） | favorite-rpc 在**非首个启动者**时，V1 被 baseline 跳过 ⇒ `favorite_folder` 表建不出来 ⇒ 后续迁移失败 ⇒ **服务起不来** ⇒ 属**生产可用性**问题（不是形状漂移） |
+| 后果（若不修） | 🔴 **2026-10-25 · L4 实测订正故障形态**：**不是「服务起不来」**，而是「**服务起得来、首次查库才炸**」<br>（L4-01：`baseline-version` 缺失 ⇒ V1 被跳过 ⇒ `favorite_folder` 建不出来；但**上下文本身能起来** ⇒ 启动探针/存活探针**全绿** ⇒ 故障推迟到第一次真实查库才暴露 ⇒ **比「起不来」更难被发现**）<br>⇒ 属**生产可用性**问题（不是形状漂移） |
 | **交给 favorite 域 owner 的修法** | 在 `spring.flyway:` 块下加 `baseline-version: 0`（与 comment/follow/like 完全同款）⇒ 建议照抄 `CommentFlywaySharedSchemaGateTest` 的守门思路 |
 | 记账位置 | 本档（global 台账）+ 本轮 spec §七「不做」⇒ **不静默** |
 
 ### ⑥ 残留（本条**未**闭环的部分）
 
-1. **三进程并发的运行时验证**仍未做（需真 PG + 同时起 `message-rpc` / `like-rpc` / `article-rpc`
-   ⇒ 观察账本互不干扰 + 全部表建成）⇒ 本轮做的是**逐模块的非空 schema 验证**（等价且更聚焦），
-   但**不是「三进程同时跑」那个形态** ⇒ 留一轮。
+1. ~~**三进程并发的运行时验证**仍未做~~ ⇒ ✅ **已完成（2026-10-25 · 第二十四轮 L4 lane）** ——
+   **真 PG 16 三进程并发同库实测**：**六个域可安全并发同库**
+   （独立账本表名 + advisory lock **按账本表名**隔离）
+   ⇒ 工具 `tools/difftest/check-flyway-concurrent.sh` + `flyway-concurrent-boot.java` + `flyway-concurrent-verify.py`
+   ⇒ 逐条证据 ⇒ [`lanes/L4-flyway.md`](lanes/L4-flyway.md) §8.4（结论矩阵）
+   ⇒ ⚠️ **唯一例外 = `favorite-rpc`**（缺 `baseline-version: 0` ⇒ 见 ⑤ ⇒ **只记账不修**）。
 2. ⚠️ `article-rpc` 用**默认账本表名** ⇒ 任何**新增**的 Flyway 模块若忘了配 `table` ⇒ 直接撞上它
    （AGENTS.md §6.3 问题 4 已记为残留风险）⇒ 本轮**未动**（动它需要改 `article-rpc` 的表名
    ⇒ 属跨域迁移，代价大于收益）。
+   ⚠️ **L4 补的第二条残留**：新增模块若忘了配 **`baseline-version: 0`** ⇒ 故障形态**不是「服务起不来」**
+   （上下文能起来）⇒ 是「**起得来、首次查库才炸**」⇒ **更难被发现**。
 
 ---
 

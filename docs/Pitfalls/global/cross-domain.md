@@ -729,3 +729,69 @@ stat -f "%Sm  %N" -t "%H:%M:%S" \
 | 2026-10-25 | **第十一轮新增 PIT-GLOBAL-012** —— 「per-app 配置」≠「只能逐模块改」⇒ 第九轮把 X-6 误判成 favorite 边界下的永久阻塞 ⇒ 第十一轮找到共享层修法（`Connector.setMaxParameterCount(-1)` + Boot customizer 顺序 + `com.rag.common` 组件扫描 10/10）⇒ **该漂移可修、favorite 零触碰**；含四问判据 + 「共享层会改别的域行为 ⇒ 不能静默」的教训 |
 | 2026-10-25 | **第七轮新增 PIT-GLOBAL-011** —— 裸 `ServerCallHandler` 造的「慢服务」**从不执行** ⇒ task + follow 两个域的同名测试**绿但空转**；含探针实测输出、两种裸 handler 的分类判据、修法与变异测试要求 |
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 PIT-GLOBAL-005（全量构建偶发红的判定三步 + 基线对照的 worktree 做法）· PIT-GLOBAL-006（真源分层的指针） |
+
+---
+
+## PIT-GLOBAL-021 🔴 **变异判定只认 surefire 的 XML —— stdout 的 `-- in` 行在类有 `@DisplayName` 时是「显示名」不是 FQN**
+
+### 现象
+
+2026-10-25 第二十二~二十四轮写变异脚本时，第一版判定正则**只匹配 surefire 打印的全限定名**：
+
+```
+[INFO] Tests run: 3, Failures: 1, Errors: 0, Skipped: 0 ... -- in com.rag.like.like.rpc.LikeFactDispatchContractGateTest
+```
+
+⇒ 但**类上有 `@DisplayName` 时**，surefire 打印的是**显示名**：
+
+```
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.825 s -- in 🔴 真 Tomcat：JSON 响应的 Content-Type 必须带 charset=utf-8（Go: application/json; charset=utf-8）
+```
+
+⇒ ⇒ **红与绿都读不出来** ⇒ 脚本误报 `NO_RESULT`
+⇒ ⇒ 看着像「守门压根没被触达」（其实**红了，只是读不出来**）
+⇒ ⇒ 若就此收手 ⇒ **会误删一个好守门**（正是 **PIT-GLOBAL-014** 说的那个坑）。
+
+### 根因
+
+判定用了 **stdout 的 `-- in` 行**做锚点，而那一行的格式**取决于类上有没有 `@DisplayName`**：
+- 无 `@DisplayName` ⇒ 打印 **FQN**（`com.rag.like.like.rpc.LikeFactDispatchContractGateTest`）；
+- 有 `@DisplayName` ⇒ 打印**显示名**（可能是中文 + emoji + 括号）。
+
+⇒ **判定锚点不能建立在「人写的、可变的」文本上。**
+
+### 正确处置
+
+**判定只认 surefire 的 XML**（逐条 `testcase`）：
+
+```python
+# ✅ 判定锚点 = XML 里 testcase 的 classname/name（机器生成的，稳定）
+root = ET.parse('target/surefire-reports/TEST-<FQN>.xml').getroot()
+for tc in root.iter('testcase'):
+    if tc.find('failure') is not None or tc.find('error') is not None:
+        failed.append(tc.get('name'))
+```
+
+⇒ XML 的文件名与 `testcase/@classname` 都是 **FQN** ⇒ 与 `@DisplayName` 无关 ⇒ **稳定可寻址**。
+
+⚠️ 配套（**PIT-GLOBAL-018** 的三道闸仍然要跑）：
+① **跑前删旧 XML**（否则读到上一轮的）；② **看 maven 的退出码**（不是看脚本自己的判定）；
+③ **grep `COMPILATION ERROR`**（编译失败 ⇒ 测试压根没跑 ⇒ XML 是旧的 ⇒ 报成绿）。
+
+### 教训
+
+**判定锚点必须选「机器生成且不受人写文本影响」的那一份。**
+
+⇒ 同族：
+- **PIT-GLOBAL-018**（变异脚本的两种假绿）——
+  那条讲「**没跑**」被当成「**红了**」；本条讲「**跑了但读不出来**」被当成「**没跑**」；
+- **PIT-GLOBAL-014**（报「没转红」时先排除「测试压根没跑」）——
+  本条是它的**姊妹坑**：先排除「**判定读不出来**」，再排除「测试没跑」。
+
+### 出处
+
+- 首踩位置：2026-10-25 第二十二轮（超时响应撕裂）的**第一版变异脚本** ⇒ 判定行全报 `NO_RESULT`，而 XML 逐条判定是对的；
+- 补充确认：第二十四轮（Go 侧活体探针）再次踩到 ⇒ 类上有 `@DisplayName` 的守门一律读不出 FQN；
+- 关联：`docs/DRIFT/global/lanes/L1-delivery.md` §十三·13.7（提出）
+  · `docs/DRIFT/global/lanes/_PROTOCOL.md`（PIT-GLOBAL-020 / 变异流程）
+  · `docs/Pitfalls/global/cross-domain.md` PIT-GLOBAL-014 / 018 / 019。

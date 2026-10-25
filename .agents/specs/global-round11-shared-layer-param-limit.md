@@ -29,7 +29,7 @@
 > **没有证明「不存在别的修法」**。
 
 ⇒ 这是一条**方法论错误**：把**属性绑定的入口**当成了**配置的唯一生效途径**。
-⇒ 已登记踩坑 ⇒ [`docs/Pitfalls/global/cross-domain.md` §PIT-GLOBAL-012](../../../docs/Pitfalls/global/cross-domain.md)。
+⇒ 已登记踩坑 ⇒ [`docs/Pitfalls/global/cross-domain.md` §PIT-GLOBAL-012](../../docs/Pitfalls/global/cross-domain.md)。
 
 ### ② 共享层修法存在（逐条实测取证）
 
