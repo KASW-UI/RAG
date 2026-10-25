@@ -24,6 +24,9 @@
 1. **lane 基线 = `align/global` 的 HEAD**（⛔ 不是 `do-my-own-gh`）
    —— 否则看不到 19 轮的代码产出与台账，等于重做已修项。
 2. **每条 lane 只写自己任务书里的白名单文件** ⇒ 文件级零重叠 ⇒ 永不冲突。
+   ⇒ 🟢 **机器守门**：`python3 tools/difftest/check-global-lane-ownership.py`
+   （断言 5 条 lane 白名单**两两不重叠** · 10 个共享文件**无人拥有** · **favorite 零写权**；`EXIT=0` 才算合规；
+   已做 4 条变异**全部转红且红在目标断言上**）
 3. **lane 不写共享文件**
    —— ⛔ `AGENTS.md` · 三个 `_INDEX.md` · `docs/DRIFT/_MANIFEST.json` ·
    ⛔ `docs/DRIFT/global/{_README,common-tails,cross-domain,cycle-deps}.md`

@@ -172,6 +172,7 @@ ERROR: duplicate key value violates unique constraint "pg_type_typname_nsp_index
 | `docker-compose.yml` | 只起 postgres + redis（刻意不起 etcd / Nacos / jaeger） |
 | `initdb.sql` | 建 `go_db` 与 `rag_db` |
 | `conf/go/*.yaml` | **冻结 Go 仓库的副本**，运行时用 `-f` 指过去；真源一个字节都不动 |
+| **`check-global-lane-ownership.py`** | 🆕 **多 lane 写权守门** —— `global` 域 2026-10-25 拆成 5 条 lane 并行（协议见 `docs/DRIFT/global/lanes/_PROTOCOL.md`）⇒ 本脚本断言：① 5 条 lane 的**白名单两两不重叠**（glob 展开成实际文件集合后求交集 ⇒ 目录级写法也抓得到）② 10 个**共享文件**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / 4 个规范台账 / 本 README）**无人拥有**（归整合者统一更新）③ **`favorite` 域零写权**。⇒ `EXIT=0` 才算合规；已做 4 条变异（抢文件 / 占用共享文件 / 碰 favorite / 同名脚本）**全部转红且红在目标断言上** |
 
 ### `exp-*` 实验脚本（**各自带完整的设计说明在脚本头部**）
 
