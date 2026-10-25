@@ -268,6 +268,22 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 | **E9** | 🔴 **T-6 的实现缺陷**：写的原始串**只在真 Tomcat 上**成立 ⇒ **MockMvc 路径**分叉 | `service/common`（`GoStyleJsonContentTypeAdvice`） | ✅ **第二十六轮已修**（改写**无空格**形态 = 各域自己 advice 会写的值 ⇒ 真 Tomcat 不变 · MockMvc 零变化 ⇒ **favorite 一行不用改**）⇒ 🆕 **门 4** 锁住这个等式 ⇒ **自曝错账 #3** ⇒ 教训 **PIT-GLOBAL-025** ⇒ 逐条见 [`lanes/L1-delivery.md`](lanes/L1-delivery.md) §14.1 |
 | **E10** | 🔴 **守门自身的缺陷**：`LikeFactDispatchContractGateTest` 的调度器**句柄永远拿不到** ⇒ 跨用例泄漏 ⇒ 偶发红 | `service/like/like-rpc/src/test/**`（测试文件） | ✅ **第二十六轮已修**（改用 `Dispatcher.runAsync`）⇒ ⚠️ 生产路径本来就是 `runAsync` ⇒ **无此缺陷**；⚠️ **`favorite-rpc` 的 `FavoriteFactDispatchScheduler` 用阻塞式 `run`** ⇒ 但触发点是 `ApplicationReadyEvent` ⇒ **不卡启动**，只是占住主线程 ⇒ **只记账 + 告知 owner** ⇒ 教训 **PIT-GLOBAL-024** ⇒ 逐条见 [`lanes/L1-delivery.md`](lanes/L1-delivery.md) §14.2 |
 
+### 🆕 七之四、第二十七轮（**2026-10-26**）—— 9 条「能直接动手」的未知项 → **6 条 lane 并行**
+
+> 本轮把第二十六轮盘点出的 **9 条**「落点在 global 写权内、不需要拍板」的未知项
+> 拆成 **6 条 lane（L6~L11）** 并行推进 ⇒ **全部生产代码零改动**（只有守门与脚本）。
+
+| # | 条目 | 落点 | 状态 |
+|---|---|---|---|
+| **E11** | **L2 缺口①**：4 个 rpc 组件的 **X-5 轴真 server 守门**（admin / article / comment / like） | `service/{users/admin/admin-rpc,article/article-rpc,comment/comment-rpc,like/like-rpc}/src/test/**` | ✅ **第二十七轮 L6 + L7 已补齐**（各 3 用例 / 14 断言）⇒ X-5 轴覆盖 **8/9 个 rpc 组件** ⇒ ⛔ 只剩 `favorite-rpc`（零写权） |
+| **E12** | **L2 缺口②**：slow threshold 守门从 1 个样板推广到其余 8 个 rpc 组件 | 8 个 rpc 组件的 `src/test/**` | ✅ **第二十七轮 L7 + L8 + L9 已补齐** ⇒ 逐域证据齐 ⇒ ⛔ 只剩 `favorite-rpc`（零写权） |
+| **E13** | **L2 缺口⑤**：「主动打断 handler 线程」这一维的定性 | 只读 `service/common` | ✅ **第二十七轮 L9 已定性** = **框架限制成立**（RAG 不打断；**Go 也不杀 goroutine**）⇒ **L2 的 javadoc 自陈成立，不是新发现** ⇒ **销账，不补守门**（没有「应当被打断」的可观察行为可守） |
+| **E14** | **L2 缺口⑦**：admin-rpc slow 守门前提（`GlobalOpenTelemetry` 在 refresh 前被替换）失效复评 | 只读 `service/common` | ✅ **第二十七轮 L6 已复评** ⇒ ① **Boot 的 OTel 自动配置不在依赖里**（pom 零命中 · m2 无 jar · autoconfigure jar 里零个 `*OpenTelemetry*` 类）⇒ 本仓是**自研**装配 ② 前提**侥幸成立** ⇒ ✅ **整合者已把前提变成断言**（7 份守门）⇒ 剩余加固建议 ⇒ [`common-tails.md` §一·T-15](common-tails.md) |
+| **E15** | **L3 盲区①**：触发器函数体（`reject_*_mutation()`）逐条核对 | `tools/difftest/check-ddl-static.py` | ✅ **第二十七轮 L10 已闭合** ⇒ 脚本新增**结构化语义属性**比对（函数名 / 返回类型 / 参数 / volatility / timing / 事件集 / 粒度 / constraint / `WHEN`）⇒ **不逐字比 SQL 文本** ⇒ 人工逐条核对 3 对函数体（like / favorite ×2 / article 上下文）⇒ 三对**逐字节相同** ⇒ 🆕 顺带补上一个旧盲区（`pg_get_triggerdef` **查了却从不比对**） |
+| **E16** | **L3 盲区②**：`task` / `message` 两域的 DDL runner 重建 | `tools/difftest/check-ddl-static.py` + `ddl-parity.sh` | ✅ **第二十七轮 L10 已闭合** ⇒ 两域改用 **runner 自管容器**（`ddl-task-pg` / `ddl-message-pg`）⇒ 退出码语义与其它域统一 ⇒ 全 9 域复跑**逐域与 L3 基线一致** |
+| **E17** | **L4 边界①~③**：真 rpc 形态 / 迁移失败与回滚 + 同模块两副本 / 多轮压力与随机延迟 | `tools/difftest/flyway*` | ⏳ **第二十七轮 L11 进行中**（见下方「🔴 L11 的重大新发现」） |
+| **E18** | 🔴 **整合者修的两处跨 lane 守门缺陷** | 7 份 slow 轴守门 | ✅ **第二十七轮整合阶段已修** ⇒ ① **慢轴守门缺预热** ⇒ 绿是**执行顺序的副产品** ② **慢轴守门不断言前提成立** ⇒ 将来会以「找不到 span」变红 ⇒ 连带 **自曝错账 #4**（OTel 的 `set()` 存的是包装器 ⇒ 引用相等类断言恒红）⇒ 3 条新坑 **PIT-GLOBAL-026/027/028** |
+
 ### ⛔ favorite 相关的两条（**不可动，仅记账**）
 
 - **X-4 favorite 半边** —— RAG 多出 10 处 Go 没有的 `communityfact` 调用 ⇒ 删掉它们 = 改 favorite ⇒ 永久阻塞
@@ -282,6 +298,7 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-26 | ✅ **第二十七轮（6 条 lane 并行 + 整合者修缺陷）** —— ① **9 条「能直接动手」的未知项**拆成 **6 条 lane**（L6 x5gate / L7 slowgate / L8 slowgate2 / L9 interrupt / L10 ddldeep / L11 flywaydeep）⇒ **按模块零重叠**（L2 的教训：同模块两个 lane 会互踩 `target/`）⇒ ② 🟢 **X-5 轴真 server 守门补到 8 个 rpc 组件**（admin/article/comment/like 各 3 用例 14 断言）· **slow 轴守门补到 8 个域**（逐域证据齐）⇒ **生产代码零改动** ③ ✅ **缺口③ 定性** = 框架限制成立（**Go 也不杀 goroutine**）⇒ **L2 缺口⑤ 销账** ④ ✅ **缺口④ 复评** = Boot 的 OTel 自动配置**不在依赖里** ⇒ 本仓自研装配 ⇒ 前提**侥幸成立** ⇒ ⑤ 🔴 **整合者修两处跨 lane 守门缺陷**（slow 守门缺**预热** ⇒ 绿是执行顺序的副产品 · 不断言**前提成立**）⇒ **自曝错账 #4**（`GlobalOpenTelemetry.set()` 存的是**包装器** ⇒ 引用相等类断言恒红）⇒ 3 条新坑 **PIT-GLOBAL-026/027/028** ⑥ ✅ **L10 闭合 DDL 两条盲区**（触发器函数体**结构化语义属性**比对 + task/message runner 重建）⇒ 9 域复跑逐域与 L3 基线一致 ⑦ 🔴 **L11 挖出重大新发现**：`discovery://<name>`（**两斜杠**）在 **5/7 个 rpc 模块**的 yaml 里 ⇒ devh 的 `DiscoveryClientResolverFactory` 要求 `targetUri.getPath()` 长度 > 1 ⇒ **真 fat jar 起不来** ⇒ **连 Flyway 都跑不到** ⇒ 详见 `cross-domain.md` §二·十五 |
 | 2026-10-25 | ✅ **第二十六轮（整合收口）** —— ① **L5（signoff）lane 合回**（`22e1cc6`）⇒ 🆕 **4 条待签字候选**（`CAND-14..17`，全部「🏷 候选，建议签」⇒ **登记完就躺着**）· **T-11 = ✅ 已修**（Go `core/trace/agent.go:126-127` 确实装全局 provider ⇒ **不是误报** ⇒ 登记不撤销）· **T-12 = 出口层级差异**（判据落到 Go `rest/engine.go:113-115` 的**注册点**）⇒ **需拍板 0 条**
 | 2026-10-25 | ✅ **第二十六轮 · 🔴 自曝错账 #3** —— T-6 初版写的原始串**只在真 Tomcat 上「看起来对」**（Tomcat 归一化 ⇒ 写什么都一样）⇒ **MockMvc 路径没有归一化** ⇒ **打红了 favorite 自己的守门** ⇒ 而 favorite 对 global **零写权** ⇒ 修法只能落共享层 ⇒ 改为**无空格**形态（= 各域自己 advice 会写的值）⇒ 真 Tomcat 不变 · MockMvc 零变化 ⇒ **favorite 一行不用改** ⇒ 🆕 门 4 锁住 ⇒ 教训 **PIT-GLOBAL-025**
 | 2026-10-25 | ✅ **第二十六轮 · 🔴 守门自身的缺陷** —— `LikeFactDispatchContractGateTest` 的调度器**句柄永远拿不到**（阻塞式 `Dispatcher.run` + 「句柄设在 `run` 之后」）⇒ **跨用例泄漏** ⇒ 与本用例的调度器**并发抢行** ⇒ 「毒丸失败 ⇒ 同轮 break」**因为并发**而偶发红 ⇒ 改用 `runAsync` 即修 ⇒ 教训 **PIT-GLOBAL-024** ⇒ ⚠️ 生产路径本来就用 `runAsync` ⇒ **无此缺陷**；⚠️ `favorite-rpc` 的 scheduler 用阻塞式 `run`（但触发点是 `ApplicationReadyEvent` ⇒ **不卡启动**）⇒ **只记账 + 告知 owner**
