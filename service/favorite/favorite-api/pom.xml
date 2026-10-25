@@ -136,18 +136,24 @@
             <artifactId>grpc-core</artifactId>
         </dependency>
         <!--
-            🔴🔴🔴 **grpc-inprocess 必须是 runtime scope，不能只出现在 test classpath**
-            （2026-10-25 第十四轮实测钉死）：
-            devh 的 `GrpcClientAutoConfiguration.shadedNettyGrpcChannelFactory`
+            🔴 **grpc-inprocess 必须出现在 runtime classpath 里**（不是只在 test classpath）
+            —— devh 的 `GrpcClientAutoConfiguration.shadedNettyGrpcChannelFactory`
             （grpc-client-spring-boot-starter 3.1.0.RELEASE:160）在**运行期**会引用
             `io.grpc.inprocess.InProcessChannelBuilder`（它要挂一个 in-process 兜底通道）⇒
             运行时 classpath 缺这个类 ⇒ **进程起不来**：
 
                 java.lang.NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder
 
-            ⚠️ 本模块原先**根本没声明** grpc-inprocess（favorite-rpc 声明了但是 test scope）
-            ⇒ 两个模块都靠 `@SpringBootTest` 的 test classpath 才活着
-            ⇒ 「测试全绿」≠「jar 能跑」。
+            ⚠️⚠️ **2026-10-25 第十五轮更正了第十四轮的归因**（实测 `dependency:tree`）：
+            · 那次 `NoClassDefFoundError` 的现场是 **favorite-rpc** 启动时
+              （`✗ RAG favorite-rpc 端口 … 超时未就绪`），**不是本模块**；
+            · **本模块原先「没声明」grpc-inprocess 其实是对的** ——
+              devh starter 的 inprocess 是 **compile** ⇒ 传递下来就有
+              （改前实测 `io.grpc:grpc-inprocess:jar:1.63.0:compile`）；
+            · 真正的病根是「**自己声明成 test scope，把传递来的 compile 顶掉了**」
+              （maven「最近者优先」）⇒ favorite-rpc 就是这么挂的。
+            ⇒ 所以这里这条显式声明的定位是 **加固**（不依赖 starter 的传递作用域），
+              **不是**「修本模块的缺陷」—— 显式优于隐式：将来 starter 改作用域也不会断。
             ⚠️ 必须显式写版本：根 pom 的 dependencyManagement **没有**管 grpc-inprocess。
         -->
         <dependency>

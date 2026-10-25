@@ -22,7 +22,7 @@
 | 落地形态 | 31 个 main 文件 / **3,116 行** / **15 个 DTO** / 7 个 Service / 1 个 Controller<br>⚠️ **核对 2026-10-25（第十轮）**：行数比首轮台账记的 2,920 多 196 行 ⇒ **全部是各轮的纯注释增量**（可执行逻辑零改动）；DTO 数首轮记的 **13 是错的**（基线 `58e8314` 就是 15 个） |
 | 测试 | **8 个测试类 / 94 例全绿**（33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍** + **1 探针（自动 skip）** + **4 端口归属守门**）→ 第六轮 **+1 个测试类 / +5 例**；第十四轮收尾 **+1 个测试类 / +4 例**（`RealTomcatPortTest`） |
 | 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条已签字偏离** |
-| 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **2 条跨域待拍板**：① 容器层参数上限口径 ⇒ 收口在 `global`（与 hot 域 `DRIFT-HOTAPI-030` 同一格）；② **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，落点在 `service/common` ⇒ 同样收口在 `global`） |
+| 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **2 条跨域待拍板**：① 容器层参数上限口径 ⇒ 收口在 `global`（与 hot 域 `DRIFT-HOTAPI-030` 同一格）；② **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，落点在 `service/common` ⇒ 同样收口在 `global`）<br>🆕 **第十五轮**：域内**唯一一条可动的业务路径缺口** = **U8**（create 成功路径未双侧对拍）⇒ 登记在 [`rpc.md`](./rpc.md) **§24.2**；盘点全表 ⇒ **§24.1** |
 | 本台账范围 | **仅 `favorite-api`**。`favorite-common` / `favorite-rpc` / `favorite-proto` 见同目录另三份台账 |
 
 ---
@@ -478,12 +478,15 @@ CheckBlacklistMiddleware: middleware.NewCheckBlacklistMiddleware(redisDB).Handle
 
 ### 9.5 ⚠️ 推广面（**归 `global` 收口域**，本域只写自己这份）
 
-全仓实测 **7 个域 / 14 个测试类**在用 `RANDOM_PORT`：
+**2026-10-25 第十五轮复核后的实测口径**（只算**真用**的 ⇒ **剥掉注释**再数 ——
+本域那两个只在 javadoc 里提到它的**支撑类**因此不计）：
+
+⇒ **修完之后**：**6 个域 / 10 个测试类**还在用 `RANDOM_PORT`（**favorite 域已归零** ⇒ 本轮已修）。
 
 | 域 | 个数 | 文件 |
 |---|---|---|
-| `message` | **4** | `MessageApiProtectionRealTomcatTest` / `MessageApiTimeoutRealTomcatTest` / `MessageApiProtectionMvcTest` / `GoStyleGrpcClientBreakerE2ETest` |
-| `favorite` | 2 | ✅ **本轮已修** |
+| `message` | **3** | `MessageApiProtectionRealTomcatTest` / `MessageApiTimeoutRealTomcatTest` / `GoStyleGrpcClientBreakerE2ETest`（⚠️ `MessageApiProtectionMvcTest` 的 `RANDOM_PORT` 只出现在**注释**里 ⇒ 不算） |
+| `favorite` | **0** | ✅ **本轮已修** ⇒ 改成 `DEFINED_PORT` + 自选端口段 ⇒ **现在 0 个** |
 | `hot` | 2 | `HotApiRealTomcatGateTest` / `GoStyleGrpcClientBreakerE2ETest` |
 | `article` | 2 | `ArticleApiFormParamLimitTest` / `ArticleApiAssemblyWiringTest` |
 | `users/user` | 1 | `GoStyleGrpcClientBreakerE2ETest` |
@@ -493,3 +496,21 @@ CheckBlacklistMiddleware: middleware.NewCheckBlacklistMiddleware(redisDB).Handle
 ⇒ **同款暴露面全仓都在** ⇒ 需要一份**共享**的端口选取实现
 ⇒ 落点二选一（**本域不拍板**）：`service/common` 的 test-jar，**或**各域各自复制本域这份
 ⇒ **本域只写自己这份**（`service/common/**` 是共享面，本域不碰）。
+
+---
+
+## 10. 2026-10-25 第十五轮 —— 📌 **域内「可修漂移 / 未知项」盘点**（本档只留指针）
+
+> 盘点全表在 [`rpc.md`](./rpc.md) **§24.1**（四类：A 已修/已签字 · B 域内可补 · C 跨域 · D 库级不做）。
+> **本档相关的两条**：
+
+| 项 | 内容 |
+|---|---|
+| **本域的「可修漂移」** | **0 条** —— 本档 §2 的 4 处（L2×2 + javadoc 假断言×2 + L1×1）已修；2 条已签字（DEV-FAV-API-001/002）⇒ **无 🏷 候选** |
+| **U8（唯一可动的业务路径缺口）** | `create_folder` / `create_item` 的**成功路径**未双侧对拍 —— 本档 §4 的「双侧活体对拍（真 Go favorite-api vs RAG）」已 ✅ 闭（32 case），但**那 32 个 case 里 create 只有失败形态**（`b01`/`b02` = `downstream_absent` ⇒ 5001）⇒ 详见 [`rpc.md`](./rpc.md) §24.2 |
+| **跨域 2 条** | ① 容器层参数上限口径 ② 405 多一个 `Content-Type` ⇒ 收口在 `global`（本档 §3） |
+
+⇒ **台账数字过期问题的守门网** ⇒ 新工具
+[`tools/ledger-lint/favorite/check-ledger-vs-reality.py`](../../../../tools/ledger-lint/favorite/check-ledger-vs-reality.py)
+（**从台账正文抽断言** ⇄ **独立从仓库算实际值** ⇒ 逐条比对）
+⇒ 详见 [`rpc.md`](./rpc.md) §24.3。

@@ -28,7 +28,7 @@
 | 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §13.5**（**11 个测试类 / 82 例全绿**） |
 | 构建 | `mvn -o -pl service/favorite/favorite-rpc -am install` ⇒ **BUILD SUCCESS** |
 | 本轮发现并修复 | **6 处 L2 语义偏差**（§2）+ **2 处实现期真 bug**（§3） |
-| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选已签字**（2026-10-25）：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK）⇒ **本域已无 🏷 候选**，见 §13.2 |
+| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选已签字**（2026-10-25）：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK）⇒ **本域已无 🏷 候选**，见 §13.2<br>🆕 **第十五轮新增 U8**（**域内可动的最后一条**）：create / create_item 的**成功路径**未双侧对拍 ⇒ **§24.2**；盘点全表 ⇒ **§24.1** |
 | 第九轮 | 🆕 **注释可核验性审计**（§15）—— 抓出 **3 条「断言对、锚点指错行」的真缺陷**，门禁级发现 **67 → 0**；**零行为改动** |
 | 第十轮 | 🆕 **补完 §15.8 记下的 I1 欠账**（§16）—— **153 条**内联断言补上锚点，再抓 **5 条**（4 条行号指错 + 1 条把 Java 事实误记成 Go）；**台账体检**：2 条死指针 + 3 处过期数字 + 4 处裸行号 + **6 处 RAG 侧锚点位移**已修，**6 个 Go 源文件未落点**已补记 ⇒ 新工具 `tools/ledger-lint/favorite/check-ledger-selfcheck.py`（EXIT=0） |
 | 第十二轮 | 🆕 **可动项 A + B 落地**（§19）—— 🔴 **权威读 HTTP 面的双侧活体对拍做成了**（新工具 `tools/authority-live-probe/favorite/`，**21 个 case：20 个逐字节一致 + 1 个 SKIP**）⇒ **U7 的局部活体对拍 6 项 → 7 项**；并抓出并**已修 1 条真缺陷**（200 路径少一个尾部换行字节）<br>🆕 **域外写入方盘点机检**（新工具 `tools/outbox-writer-audit/favorite/`）⇒ 本仓 **0 个域外写入方**（EXIT=0）<br>| 第十一轮 | 🆕 **三条候选签字**（§17）—— DEV-FAV-API-002 / RPC-006 / RPC-007 ⇒ **本域已无 🏷 候选**；顺带改正 §0 头部一处**过期断言**（「未做变异验证」只适用 §0–§8）<br>📌 **域内「可动项」清单**（§18）—— 🔴 **权威读 HTTP 面的双侧活体对拍其实做得了**（不需要 etcd/Kafka/Redis/user-rpc/article-rpc）· 🟡 域外写入方盘点（V7 前置）· ⬜ 跨域项收口在 `global` |
@@ -1564,7 +1564,7 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 | # | 现象 | 根因 | 修法 | 落点 |
 |---|---|---|---|---|
 | **1** | `APPLICATION FAILED TO START`：`no ServletWebServerFactory bean defined` | pom 只有 `spring-boot-web-server` + `jakarta.servlet-api`，**没有** `spring-boot-starter-web`（无内嵌 Tomcat）⇒ Boot 默认按 SERVLET 起 | 启动加 `--spring.main.web-application-type=none`（对齐 Go 的「纯 gRPC、零 HTTP 端口」，见 DEV-FAV-RPC-004） | `service/favorite/favorite-rpc/pom.xml` 的依赖说明 + 探针启动参数 |
-| **2** | `NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder` | devh 的 `GrpcClientAutoConfiguration.shadedNettyGrpcChannelFactory`（3.1.0.RELEASE:160）在**运行期**引用它，而 `grpc-inprocess` 只有 **test scope**（favorite-api **干脆没声明**） | rpc 的 scope 改 `runtime`；api 补声明（runtime scope） | `favorite-rpc/pom.xml` + `favorite-api/pom.xml` |
+| **2** | `NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder` | devh 的 `GrpcClientAutoConfiguration.shadedNettyGrpcChannelFactory`（3.1.0.RELEASE:160）在**运行期**引用它，而本模块**直接声明**的 `grpc-inprocess` 是 **test scope** ⇒ **直接声明覆盖了传递来的 compile**（maven「最近者优先」）⇒ 运行时 classpath 里没有 | scope 改 **runtime** | `favorite-rpc/pom.xml` |
 
 ⚠️ **这两个缺陷被 `@SpringBootTest` 完全掩盖**（`webEnvironment=NONE` + test classpath）
 ⇒ 「**测试全绿**」与「**jar 能跑**」之间有一道没人测过的缝
@@ -1577,22 +1577,25 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 而 **favorite-api 恰恰相反**（走 spring-cloud 自动注册 ⇒ Nacos 不可达时 failFast ⇒ 必须关）。
 ⇒ 两侧处置**相反** ⇒ 坑档 **PIT-FAV-RPC-019**。
 
-⚠️ **第 2 条的跨域清单（本域只读 ⇒ 归 `global`）** —— 全仓用 `grpc-client-spring-boot-starter`
-却**运行时缺 `io.grpc:inprocess`** 的**可执行应用模块**（`service/common` 是库，不在其中）：
+⚠️ **第 2 条的跨域清单（本域只读 ⇒ 归 `global`）** —— 🔴 **2026-10-25 第十五轮实测推翻本节的原判定**
+（原表说「13 个模块的**可部署 jar** 都起不来」，且把「**没声明** grpc-inprocess」判成缺陷 ⇒ **条数与方向都错了**）：
 
-| 模块 | 现状 | 模块 | 现状 |
-|---|---|---|---|
-| `article/article-api` | 🔴 没声明 | `like/like-api` | 🔴 没声明 |
-| `article/article-rpc` | 🔴 test scope | `like/like-rpc` | 🔴 test scope |
-| `comment/comment-api` | 🔴 test scope | `message/message-api` | 🔴 没声明 |
-| `comment/comment-rpc` | 🔴 没声明 | `message/message-rpc` | 🔴 没声明 |
-| `follow/follow-api` | 🔴 没声明 | `task/task-api` | 🔴 没声明 |
-| `follow/follow-rpc` | ✅ compile（唯一对的） | `task/task-rpc` | 🔴 test scope |
-| `hot/hot-api` | 🔴 没声明 | `users/user/user-api` | 🔴 没声明 |
-| `hot/hot-rpc` | 🔴 没声明 | `users/admin/admin-api` | 🔴 没声明 |
+**实测口径**（`mvn -o dependency:tree -Dincludes=io.grpc:grpc-inprocess`，全仓 25 个模块逐个看）：
 
-⇒ **13 个模块**（含本域已修的 2 个之外）⇒ 它们的**可部署 jar 都起不来**
-⇒ ⚠️ 本域**只登记不动别域文件**（AGENTS.md §5.3）⇒ 收口在 `global`。
+| 形态 | 判定 | 实测模块 |
+|---|---|---|
+| **直接声明 `grpc-inprocess` 且 scope=test** | 🔴 **真缺**（直接声明**覆盖**了传递的 compile ⇒ 运行时没有） | `article/article-rpc` · `like/like-rpc` · `task/task-rpc` |
+| **直接声明 `grpc-inprocess` 且 scope=compile/runtime** | ✅ 有 | `favorite/favorite-api` · `favorite/favorite-rpc`（本域第十四轮已修）· `users/{user/user-api,user/user-rpc,admin/admin-api,admin/admin-rpc}` · `article/article-api` · `hot/{hot-api,hot-rpc}` · `message/{message-api,message-rpc}` · `like/like-api` · `task/task-api` · `follow/{follow-api,follow-rpc}` · `comment/{comment-api,comment-rpc}` |
+| **完全没声明** | ✅ **有**（devh starter 的 `grpc-inprocess` 是 **compile** ⇒ 传递下来就有） | 同上一行的 api 模块 |
+| **直接声明成 test 的 `-common` 库** | 🟡 **不是可执行模块** ⇒ **不影响 jar 启动**（运行时由应用模块提供）；但它们**自己**跑测试/作为客户端用时会缺 | `like/like-common` · `follow/follow-common` · `comment/comment-common` · `favorite/favorite-common` |
+
+⇒ **可执行应用模块真缺 = 3 个**（`article-rpc` / `like-rpc` / `task-rpc`）⇒ **它们的可部署 jar 起不来**。
+⇒ ⚠️ **原表把「没声明」判成缺陷是方向性错误** —— 实测证明**没声明反而是对的**（传递 compile）；
+真正的病根是「**自己声明成 test scope，把传递来的 compile 顶掉了**」。
+⇒ ⚠️ **本域第十四轮也有一次同样的误判**（把 favorite-api 的「没声明」当成第二个受害者）⇒
+**第十四轮那次 `NoClassDefFoundError` 的现场日志证明：它出在 `favorite-rpc` 启动时**（`✗ RAG favorite-rpc 端口 … 超时未就绪`）
+⇒ favorite-api **本来就有** compile 的传递依赖（改前 `dependency:tree` 实测 = compile）⇒ **不是受害者**。
+⇒ 本域只登记不动别域文件（AGENTS.md §5.3）⇒ 收口在 `global`。
 
 ### 22.4 🔴 两条**跨域**发现（本域**只登记**，收口在 `global`）
 
@@ -1646,6 +1649,8 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 | `docs/Intentional_Deviations/_INDEX.md` | ⚠️ **本轮无新增签字项** ⇒ 已签字条数**不变**（仍是 58；撤销计入则 60）⇒ 合并时只需确认未被误改 |
 | `docs/Pitfalls/_INDEX.md` | （第十四轮**收尾**追加）坑档再增 **1 条**：**PIT-FAV-RPC-020**（探针的「环境红」不是「被测代码红」—— 等待过短 / 探活探错目标 ⇒ 假红）⇒ **本域坑位 19 → 20 条** |
 | `docs/DRIFT/_INDEX.md` | （第十四轮**收尾**追加）本域探针清单加 `probe-gate`（**PG 就绪守门网**，新工具）⇒ §23 |
+| `docs/DRIFT/_INDEX.md` | （第十五轮追加）本域**台账复核工具**清单加 `ledger-lint/check-ledger-vs-reality`（新工具）⇒ §24.3 / §24.4 |
+| `docs/DRIFT/global/` | 🔴 **第十五轮复核的更正项（必须转交 `global`）** —— §22.3 那条**跨域清单已被实测推翻**：<br>· 原写「**13 个模块**的**可部署 jar** 都起不来」⇒ 🔴 **实际只有 3 个可执行应用模块真缺**：`article/article-rpc` · `like/like-rpc` · `task/task-rpc`（其余 api 模块实测都是 **compile**）<br>· 原把「**没声明** grpc-inprocess」判成缺陷 ⇒ 🔴 **方向性错误**：devh starter 的 inprocess 是 **compile** ⇒ **没声明反而有**；真病根是「**自己声明成 test scope 把传递来的 compile 顶掉**」<br>· 另有 **4 个 `-common` 库**声明成 test scope（**不是可执行模块** ⇒ 不影响 jar 启动，但它们自己跑测试/当客户端用时会缺）<br>⇒ 本域**只登记不动别域文件**（AGENTS.md §5.3）⇒ **收口在 `global`**；证据 = 全仓 `mvn -o dependency:tree -Dincludes=io.grpc:grpc-inprocess` |
 
 > ⚠️ **本轮新增的 2 条跨域项**（§22.4）收口在 `global`：
 > ① **405 响应多一个 `Content-Type`**（落点 `service/common` 的 `GoStyleRouterErrorResponses` —— 它的 javadoc 说「容器不会补 Content-Type」，**实测被证伪**）；
@@ -1754,3 +1759,93 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 - ⇒ **别的域需各自复制 `tools/probe-gate/<域>/`** ⇒ 登记在 `global`。
 
 ⇒ 元教训全文 ⇒ [`docs/Pitfalls/favorite/rpc.md`](../../Pitfalls/favorite/rpc.md) 的 **PIT-FAV-RPC-020**。
+
+---
+
+## 24. 2026-10-25 第十五轮（`align/favorite` 工作树 · 承 `dccb234`）—— 📌 **域内「可修漂移 / 未知项」盘点** + 🆕 **U8**
+
+> 用户问「现在 favorite 域内可修漂移、未知项有哪些」⇒ 本节给出**带证据的盘点**，
+> 并把其中**唯一一条真正的业务路径缺口**从行内备注提升为**编号未决项 U8**。
+> ⚠️ **本节不改产品代码** ⇒ **0 条新漂移**。
+
+### 24.1 盘点结论（四类）
+
+| 类别 | 条数 | 内容 | 落点 |
+|---|---|---|---|
+| **A · 已识别且可修的漂移** | **0** | 已修：rpc 6 处 L2 + 2 处真 bug；api 4 处（L2×2 + javadoc 假断言×2 + L1×1）；DDL 14 处 DEFAULT + 3 条索引（**性能非行为**）<br>已签字 **9** 条（API-001/002 · COMMON-001/002 · RPC-001/003/004/006/007）· 已撤销 2 条（RPC-002/005）· 🏷 候选 **0** | §2 / §3 · `api.md` §2 · `docs/Intentional_Deviations/favorite/` |
+| **B · 域内能补的证据缺口** | **1 + 1** | **B1 = U8**：create / create_item 的**成功路径**未双侧对拍（⇒ 见 §24.2）<br>**B2**：V7 上线前的 **6 条域外写入方人工确认**（**流程项，不是代码项**） | §24.2 · [`tools/outbox-writer-audit/favorite/CHECKLIST.md`](../../../../tools/outbox-writer-audit/favorite/CHECKLIST.md) |
+| **C · 跨域（本域只读）** | **5** | ① 容器层参数上限口径（与 hot 域 `DRIFT-HOTAPI-030` 同一格）② 405 多一个 `Content-Type`（落点 `service/common`，其 javadoc 被实测证伪）③ Go 多一个 `traceparent`（落点 `service/common` 的 `HttpMiddlewareFilter`）④ **13 个别域模块**运行时缺 `grpc-inprocess` ⇒ 可部署 jar 起不来 ⑤ `like-api` 的熔断注释 | §22.3 / §22.4 · `api.md` §3 / §9.5 ⇒ **收口在 `global`** |
+| **D · 库级 / 不可观测（明确「不做」）** | **3** | ① gRPC **措辞**（grpc-go 区分未知方法/未知服务，grpc-java 共用一种）② gRPC **响应头 key 集合**（grpc-java 多 `grpc-accept-encoding` / `grpc-encoding`）③ percent-encoding 的 `~` 边界差 1 字节（L0 帧层；本域 24 条文案**无 `~`** ⇒ 客户端不可观测） | §20.4 / §20.5 ⇒ 两侧 `code` 语义一致 ⇒ **属库级，不是不一致** |
+
+⇒ **域内没有「已知但没改」的语义漂移了**；剩下的只有 **U8**（一条路径）+ **B2**（一条流程）+ 跨域与库级。
+
+### 24.2 🆕 **U8** · 🔴 `create_folder` / `create_item` 的**成功路径**从未被双侧对拍
+
+| 项 | 内容 |
+|---|---|
+| **现象** | 两套活体对拍探针**都故意不接 user-rpc** ⇒ `ensureUserExists` **必失败** ⇒ **create 的成功路径一次都没跑到** |
+| **证据（逐条）** | `tools/grpc-contract-probe/favorite/`：`c01`/`c05` = `uid=0` ⇒ `INVALID_ARGUMENT｜参数错误`；`c04`/`c09` = `user_rpc_absent` ⇒ 依赖失败分支<br>`tools/api-full-parity-probe/favorite/`：`b01`/`b02` = `downstream_absent` ⇒ `200 + code 5001｜系统内部错误` |
+| ⇒ **缺口到底是什么** | 「**uid 合法 + user-rpc 在场 ⇒ 真创建成功**」这条路径，**两侧都没跑到** ⇒ 落库、id 生成、`favorite_item` / `favorite_fact_outbox` 的联动**未获双侧证据** |
+| **不是什么** | **不是出参字节契约的缺口** —— `folderId` 以字符串出参等**已由 `tools/api-envelope-probe/favorite/` 覆盖**（真 go-zero 库实测）⇒ 缺的是**端到端成功路径** |
+| **可动性** | ✅ **域内可闭环** —— 探针自带一个**最小 user-rpc 桩**（只需实现 `CheckUserExists` 一个方法）作为**两侧共同上游** ⇒ 就能走成功路径并双侧对拍（与 api 探针自带 JWT 签发器 `cmd/token` 同一思路）⇒ **不需要 users 域的产物** |
+| ⚠️ **桩的边界（必须先说清）** | **桩 ≠ 真 user-rpc** ⇒ 这一测能证明的是「**favorite 域自己在这条路径上的行为两侧一致**」，**不能**证明「favorite 与 user-rpc 的交互契约」⇒ 期望值**不能**从真 user-rpc 取，只能由「Go 真源 favorite-rpc 的 logic + 真 PG」产出 |
+| ⚠️ **代价** | 多一个常驻进程 + 桩的 `CheckUserExists` 语义要与 Go 真源的调用约定一致；否则**会把「桩的语义」当成「真源语义」测** |
+
+### 24.3 🔁 「台账 vs 实际」复核（新工具）
+
+| 项 | 值 |
+|---|---|
+| **新工具** | [`tools/ledger-lint/favorite/check-ledger-vs-reality.py`](../../../../tools/ledger-lint/favorite/check-ledger-vs-reality.py) |
+| **它管什么** | 现有 `check-ledger-selfcheck.py` 管的是「**台账之间**」（指针 / 编号 / Go 源文件落点）⇒ **不管「台账说的」vs「仓库实际的」** ⇒ 本工具补这一层 |
+| **做法** | **从台账正文里抽断言**（不把「真相」写死在工具里）⇒ 再**独立**从仓库算实际值 ⇒ 逐条比对 ⇒ 不一致即红 |
+| **覆盖的断言类型** | 测试计数 · 已签字条数 · 🏷 候选数 · 跨域清单的条数 · 探针清单 · 端口段声明 · 「零产品代码改动」声明 · Go 源文件覆盖 |
+| **为什么必须有** | 盘点当场就抓到一处**过期断言**（`api.md` 写「6 个测试类 / 89 例」，实际已是 8 类 / 94 例）⇒ 与 §16「台账体检」同款缺陷，只是**发生在数字上** |
+
+### 24.4 🔁 本轮「台账 vs 实际」复核的**结果**（工具 + 人工双向独立）
+
+> 工具：[`tools/ledger-lint/favorite/check-ledger-vs-reality.py`](../../../../tools/ledger-lint/favorite/check-ledger-vs-reality.py)
+> 口径：**断言从台账正文里抽** ⇒ **独立**从仓库算实际值 ⇒ 逐条比对。
+> ⇒ 工具与人工**各算一遍**，结论必须一致（§7「工具第一版输出不能直接当结论用」）。
+
+**第一次跑：4 条不一致 ⇒ 逐条人工核实 ⇒ 2 条台账真错 + 2 条工具抽取 bug。**
+
+| # | 检查项 | 台账说 | 实际 | 判定 |
+|---|---|---|---|---|
+| ① | favorite-api **用例数** | 「89 例」 | surefire 求和 = **94** | 🔧 **工具抽取 bug** —— 正则匹配到了 **§6 第十二轮的旧口径**（「**89 例全绿**（6 个测试类）」）⇒ 已改成**锚定 §0 的「\| 测试 \|」行** |
+| ② | **grpc-inprocess 缺失模块数** | 「**13 个模块**…它们的可部署 jar 都起不来」 | **可执行应用模块真缺 = 3 个**（article-rpc / like-rpc / task-rpc） | 🔴 **台账真错（条数 + 方向都错）** ⇒ 已按 `dependency:tree` 全仓实测重写 ⇒ 见 §22.3 的更正表 |
+| ③ | 全仓 `RANDOM_PORT` 暴露面 | 「7 个域 / **14 个测试类**」 | **13 个测试类** | 🔴 **台账真错**（把两个**只在 javadoc 里提到**它的支撑类算进去了）⇒ 已改 13，并写明口径 |
+| ④ | 端口段（探针侧） | 探针侧 21400–21599 | 探针实际 21400–21599 | 🔧 **工具抽取 bug** —— 正则先匹配到了 Java 侧那句（「专用端口段」两处同形）⇒ 已改成锚定「同样改成\*\*专用端口段」 |
+
+#### 🔴 最重要的一条：**第十四轮的归因翻案**（由 ② 引出）
+
+第十四轮 §22.3 写「`grpc-inprocess` 运行时缺失 ⇒ **13 个模块**的 jar 起不来」，
+并把 **favorite-api 的「没声明」也判成第二个受害者**。本轮实测（`mvn -o dependency:tree`）：
+
+| 原判 | 实测 | 结论 |
+|---|---|---|
+| 「**没声明** grpc-inprocess ⇒ 缺」 | devh starter 的 inprocess 是 **compile** ⇒ **没声明反而有** | 🔴 **方向性错误** |
+| 「13 个模块的 jar 起不来」 | **可执行模块真缺 = 3 个**（其余 api 模块实测都是 compile） | 🔴 **条数高估 4 倍** |
+| 「favorite-api 也缺」 | 改前 `dependency:tree` = `grpc-inprocess:1.63.0:compile` ⇒ **本来就不缺**；那次 `NoClassDefFoundError` 的现场日志（`✗ RAG favorite-rpc 端口 … 超时未就绪`）证明**出在 favorite-rpc** | 🔴 **误判** |
+
+⇒ **真机制**（这才是该记住的）：
+> **直接声明会覆盖传递依赖**（maven「最近者优先」）⇒
+> 「自己声明成 test scope」把传递来的 compile **顶掉** ⇒ 运行时没有；
+> 而「**没声明**」是安全的。
+> ⇒ **判「运行时有没有」不能看 pom 写没写，要看 `dependency:tree` 的最终作用域。**
+
+⚠️ 连带处置：
+- **favorite-api 的 pom 注释已更正**（原文把「没声明」写成缺陷 ⇒ 现改为「**加固**：显式优于隐式，不依赖 starter 的传递作用域」）；
+- **favorite-api 的 runtime 声明保留**（实测它本来就有 ⇒ 这次只是把隐式变显式，**无害**）；
+- **favorite-rpc 的注释无需改**（它**确实**自己声明成 test scope ⇒ 缺陷是真的）。
+
+#### 元教训
+
+⚠️ **第十四轮那条跨域清单，正好撞上 AGENTS.md §3.3.2 说的「无出处断言」**：
+当时是**推断**「没声明 ⇒ 也缺」⇒ 没实测就写进了台账 ⇒ 清单的方向从根上就错了。
+⇒ **判据**：
+> **跨域清单里的每一条，都要能指出「它凭什么说缺」** ——
+> 「pom 里没写」**不是**依据，「`dependency:tree` 显示 test scope」**才是**。
+
+⚠️ 也正好印证了「**台账 vs 实际**」这一层的价值：
+前三个门禁（`check-ledger-selfcheck.py` 查指针 / `check-assertion-sources.py` 查注释锚点）
+**全都不会响** —— 它们查的是「台账内部自洽」，而本条错的是「**台账说的 ≠ 仓库实际的**」。
