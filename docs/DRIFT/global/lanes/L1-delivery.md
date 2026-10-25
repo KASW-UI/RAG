@@ -208,3 +208,85 @@ M6 的目标用例是 `<error>`（合法事实被判 BLOCKED ⇒ 收到 `FrozenE
 （PIT-GLOBAL-020 的直接要求；本轮已因该坑误提交过一次 ⇒ `5c3b424` 修回）。
 
 **推送**：`origin/align/global` `76e227b..c27cff1` · `upstream/align/global` `43c7c8d..c27cff1`（均 fast-forward）。
+
+---
+
+## 九、第二十一轮 · T-11：装全局 OpenTelemetry（trace 导出链路 + 传播器）
+
+> 本节是**本 lane 的台账片段**（协议 §二.3）⇒ 自足。共享台账 `common-tails.md` 的 T-11 段**由整合者 fold**。
+> spec：`.agents/specs/global-round21-otel-global-sdk.md`
+> ⚠️ **该 spec 文件是 L1 白名单的「延伸」** —— 原白名单只列了 round20 那份 spec；
+> 但 `.agents/specs/**` **不在 L2~L5 任何一条 lane 的白名单里** ⇒ **文件级零重叠** ⇒ 不会撞车（已请整合者复核）。
+
+### 9.1 一句话结论
+
+RAG 侧此前**全仓无 exporter 装配** ⇒ `GlobalOpenTelemetry.get()` 是 no-op ⇒ span 的 `SpanContext` 恒 INVALID
+⇒ **既没有 span，也没有导出**；而 Go 侧每个服务启动时都装**全局** provider + 传播器 ⇒
+⇒ 本轮在 `service/common` 补上装配 ⇒ **10 条守门**（真 Spring 上下文 / 真 gRPC 假 OTLP 接收端 / 真 Tomcat）全绿、**4/4 变异**证明守门非空转。
+
+### 9.2 已证等价（Go 消费点 → RAG 落点 → 守门 → 变异）
+
+| # | 语义 | Go 出处（**消费点**） | RAG 落点 | 守门 | 变异 |
+|---|---|---|---|---|---|
+| 1 | `ParentBased(TraceIDRatioBased(Sampler))` | `core/trace/agent.go:111` | `GoStyleOtelAgent.buildProvider` | `sampledFlagFollowsInboundParent`（既有，filter 那条） | N1 |
+| 2 | Resource 带 `service.name` | `core/trace/agent.go:106` + `:112` | 同上 | ①（全局装配真跑） | N1 |
+| 3 | **endpoint 非空才装 batcher** | `core/trace/agent.go:114-121` | `buildProvider` 的 `if (config.endpoint() != null)` | `spanIsActuallyExportedToTheWire` | **N2** |
+| 4 | `otel.SetTracerProvider(tp)`（**全局**） | `core/trace/agent.go:127` | `GoStyleOtelAgent.install` | `globalProviderIsRealInsideRealSpringContext` | **N1** |
+| 5 | 传播器 `TraceContext + Baggage`（**无条件**） | `core/trace/propagation.go:8-11` | `OpenTelemetrySdk.builder().setPropagators(...)` | 同上（inject 出 traceparent） | N1 |
+| 6 | `sync.Once` ⇒ 同 JVM 只装一次 | `core/trace/agent.go:43-52` | `GoStyleOtelAgent.INSTALLED` | — | — |
+| 7 | 装不上**只记 ERROR，继续启动** | `core/trace/agent.go:49-51` | `catch (IllegalStateException) { LOG.error(...); }` | — | — |
+| 8 | 关停 flush | `core/trace/agent.go:55-62` + `serviceconf.go:71-73` | `shutdown()` + JVM shutdown hook | `shutdownFlushesPendingSpans` | **N3** |
+| 9 | 端点无 scheme ⇒ 明文 | `core/trace/agent.go:70-71`（`WithInsecure`） | `GoStyleOtelConfig.normalizeEndpoint` | ②（真导出 ⇒ 传输通） | N2 |
+| 10 | **一个** provider：server span 既写响应头又被导出 | `rest/handler/tracehandler.go:32-64` | `GoStyleTraceparentFilter` 改用全局 tracer | `responseTraceparentBelongsToTheExportedSpan` | **N4** |
+
+### 9.3 变异结果表
+
+| 变异 | 改了什么 | 期望红在 | 结果 | 连带红 |
+|---|---|---|---|---|
+| **N1** | `install` 不调 `GlobalOpenTelemetry.set(sdk)` | `globalProviderIsRealInsideRealSpringContext` | ✅ 红 | 1 |
+| **N2** | `buildProvider` 不装 exporter | `spanIsActuallyExportedToTheWire` | ✅ 红 | 1 |
+| **N3** | `shutdown()` 不 close provider | `shutdownFlushesPendingSpans` | ✅ 红 | 0 |
+| **N4** | filter 退回私有 provider | `responseTraceparentBelongsToTheExportedSpan` | ✅ 红 | 0 |
+
+⇒ **4/4 全部转红**；隔离工作树 `/tmp/rag-round21-mut` 内跑（PIT-GLOBAL-020）⇒ 结束后**还原校验通过**。
+
+### 9.4 🔴 可观察变化（**记账，不静默**）
+
+| # | 变化 | 依据 | 影响面 |
+|---|---|---|---|
+| ① | **出向 DC 请求多一个 `traceparent` 头** | Go `communityfact/wire.go:104` 就是这么做的 ⇒ RAG 此前**少一个**（全局传播器是 no-op） | like / comment / favorite 的事实投递链路 |
+| ② | **rpc / MQ / communityfact 的 span 从 no-op 变真**（会被导出） | Go 侧本来就是真建 span | `RpcInterceptor` / `MqConsumer` / `Dispatcher` / `AuthorityHandler` / `MessageDomainService` / `UserDomainService` / `AdminSpans` / `FavoriteFactDispatchScheduler` |
+| ③ | **响应头的 traceparent 与导出物同源**（此前**不同源** ⇒ trace 在边界处断成两截） | Go 只有一个 provider | 10 个 api 模块 |
+| ④ | ⚠️ **Go 的 `otel.SetErrorHandler` 在 OTel Java 1.44.0 里没有对应物** | 实测：api / sdk / sdk-trace / sdk-common **四个 jar 里都没有 `ErrorHandler` 这个类/接口** | 导出失败由 SDK 默认路径处理 ⇒ **已知残留** |
+
+### 9.5 未证成（**不声称已证明的**）
+
+| # | 未证成项 | 原因 |
+|---|---|---|
+| ① | **Go 侧未活体对拍** | 本轮 Go 事实全部来自**逐行读源码** ⇒ 没有真跑 Go 进程看 jaeger |
+| ② | **真 jaeger 未接触** | 守门用**自制假 OTLP 接收端** ⇒ 证的是「OTLP/gRPC 字节真的出了机器」，**不是**「jaeger 真的收到了」 |
+| ③ | **采样比例只覆盖 1.0** | 本仓 20 个模块都写 `always_on` / `parentbased_always_on` ⇒ `toRatio` 的其它分支未测 |
+| ④ | **协议只支持 `grpc`** | 与 Go 的 `Batcher: otlpgrpc` 一致；非 grpc 的 `protocol` ⇒ **抛错**（不静默降级） |
+| ⑤ | **多进程下的 agent 行为未验** | Go 的 `sync.Once` 是**进程内**语义；跨进程各自装一份（Go 侧同款） |
+
+### 9.6 🔴 favorite 记账（**本轮对 favorite 零文件改动**）
+
+> `service/favorite/**` 与 `docs/*/favorite/**` **零改动**（`git diff` 可验）。
+> 但**共享层改动会影响 favorite 的可观察行为** ⇒ 按协议 §六「必须记账并告知 owner」：
+
+| 项 | 内容 |
+|---|---|
+| **favorite 侧受影响的地方** | ① `FavoriteFactDispatchScheduler.java:146` 建的 span 从 no-op 变真（会被导出）；② favorite 域的 yaml 有 `otel:` 段 ⇒ 自动配置清单生效 ⇒ favorite-api / favorite-rpc **也会装上全局 provider** ⇒ ③ favorite-api 的**响应头**会多一个由**全局** provider 生成的 `Traceparent`（此前是 filter 的私有 provider 生成的 ⇒ **trace-id 变了**，但仍是合法格式） |
+| **favorite 代码需要改吗** | **不需要** ⇒ 装配在共享层自动完成 |
+| **favorite owner 需要知道什么** | ① favorite 的 trace 现在**真的会被导出**到 jaeger（此前不会）；② favorite-api 的响应头 traceparent 的 **trace-id 变了**（内容格式不变）⇒ 若 favorite 域有守门断言 trace-id 的**具体值**，需要复核（若有 ⇒ 那是**依赖 no-op 行为的断言**，属于该域自己的问题） |
+| **本轮对 favorite 的改动量** | **0 个文件** |
+
+### 9.7 交接整合者（本 lane 越权做不了的事）
+
+| # | 事项 | 为什么本 lane 做不了 |
+|---|---|---|
+| ① | 把本节 fold 进 `docs/DRIFT/global/common-tails.md` 的 T-11 段 | 共享台账 ⇒ 协议 §二.3 |
+| ② | 更新 `AGENTS.md` §0 的 `global` 行 ＋ 三个 `_INDEX.md` ＋ `_MANIFEST.json` | 共享索引 |
+| ③ | 把**本轮变异脚本**落仓到 `tools/difftest/`（建议名 `otel-mutation.py`） | `tools/` **不在 L1 白名单**（L3 写 `ddl*`、L4 写 `flyway*`）⇒ 只留在会话临时目录 `/tmp/mutation-round21.py`；§9.3 已把 4 条变异的锚点与期望红点写全 ⇒ 可据此重建 |
+| ④ | §9.2 / §9.4 的结论 fold 进 `docs/Intentional_Deviations/global/`（若有需签字项） | 那是 L5 的白名单 |
+| ⑤ | `align/global` → `do-my-own-gh` 的合并 | 由 Jason 决定时机 |
