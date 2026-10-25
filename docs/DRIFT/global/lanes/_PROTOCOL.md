@@ -40,13 +40,21 @@
 
 | lane | 分支 | 工作树 | 议题 | 独占写权 |
 |---|---|---|---|---|
-| **L1** | `align/global`（**本体**） | `../RAG.worktrees/global` | **X-4** like 半边（社区事实投递链路）+ 共享层 `Dispatcher.runAsync` | `service/like/like-rpc/**` · `service/comment/comment-rpc/**` · `service/common/communityfact/Dispatcher.java` |
-| **L2** | `align/global-rpcgate` | `../RAG.worktrees/global-rpcgate` | **X-5** 残留（3 个 rpc 域守门复查 + slow threshold） | `service/{users/user/user-rpc,message/message-rpc,hot/hot-rpc}/src/test/**` |
+| **L1** | `align/global`（**本体**） | `../RAG.worktrees/global` | **X-4** like 半边（社区事实投递链路）+ 共享层 `Dispatcher.runAsync`；**第二十一~二十三轮**：`service/common` 的 OTel 全局 SDK（trace 导出链路）与超时响应单写者语义 | `service/like/like-rpc/**` · `service/comment/comment-rpc/**` · `service/common/communityfact/Dispatcher.java` · `service/common/pom.xml` · `service/common/src/main/java/com/rag/common/{http,observability}/**` · `service/common/src/main/resources/**` · `service/common/src/test/java/com/rag/common/{http,observability}/**` |
+| **L2** | `align/global-rpcgate` | `../RAG.worktrees/global-rpcgate` | **X-5** 残留（3 个 rpc 域守门复查 + slow threshold） | `service/{users/user/user-rpc,users/admin/admin-rpc,message/message-rpc,hot/hot-rpc}/src/test/**` |
 | **L3** | `align/global-ddl` | `../RAG.worktrees/global-ddl` | **X-7** 残留（5 域 DDL 双侧活体逐列对照） | `tools/difftest/check-ddl-static.py` + `tools/difftest/ddl*` |
 | **L4** | `align/global-flyway` | `../RAG.worktrees/global-flyway` | **X-1** 残留（三进程同库共存真 PG 验证） | `tools/difftest/check-flyway-concurrent.sh` + `tools/difftest/flyway*` |
-| **L5** | `align/global-signoff` | `../RAG.worktrees/global-signoff` | **C 类登记** + T-7/T-11/T-12 定性 + A6 订正 | `docs/DRIFT/global/lanes/**` + `docs/Intentional_Deviations/global/**` + `docs/Pitfalls/global/**` |
+| **L5** | `align/global-signoff` | `../RAG.worktrees/global-signoff` | **C 类登记** + T-7/T-11/T-12 定性 + A6 订正 | `docs/DRIFT/global/lanes/L5-signoff.md` + `docs/Intentional_Deviations/global/**` + `docs/Pitfalls/global/**` |
 
 ⇒ **L2~L5 文件级零重叠** ⇒ 四路可同时开工。
+
+> ⚠️ **2026-10-25 两处白名单订正**（机器守门同步改过 ⇒ `EXIT=0`）：
+> ① **L1 补登记 `service/common`** —— T-11 / T-13 两轮把写权扩到了 `service/common`
+>    （observability / http / pom / resources / test）⇒ 当时**只记账没登记**
+>    ⇒ 守门给的是**假保证**（它查的是「声明」，不是「实际」）⇒ 现补齐，使声明 = 实际。
+> ② **L2 补登记 `service/users/admin/admin-rpc/src/test/**`** —— slow-threshold 守门
+>    选域时选到 admin-rpc ⇒ 原白名单不含它 ⇒ 属**越权**⇒ 现补进白名单
+>    （⚠️ **只加 test 目录** ⇒ admin-rpc 的**生产代码**仍不归 L2）。
 
 > ⚠️ **L1 不是「新开」的** —— 它就是 `align/global` 本体（**已有一个会话在上面跑**）
 > ⇒ ① **不要另开 `align/global-delivery`**（会与在跑的会话重复劳动）；

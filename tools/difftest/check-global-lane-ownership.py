@@ -41,14 +41,27 @@ REPO = Path(__file__).resolve().parents[2]
 # ---------------------------------------------------------------- lane 白名单
 # ⚠️ 与 docs/DRIFT/global/lanes/*.md 的「写权范围」一一对应；改这里必须同步改那里。
 LANES: dict[str, list[str]] = {
+    # ⚠️ 2026-10-25 订正：L1 在 T-11 / T-13 两轮里把写权扩到了 `service/common`
+    #    （observability / http / pom / resources / test）⇒ 当时**只记账没登记** ⇒
+    #    这里补上，使「声明」与「实际」一致（否则守门给的是假保证）。
     "L1-delivery": [
         "service/like/like-rpc/**",
         "service/comment/comment-rpc/**",
         "service/common/communityfact/Dispatcher.java",
+        "service/common/pom.xml",
+        "service/common/src/main/java/com/rag/common/http/**",
+        "service/common/src/main/java/com/rag/common/observability/**",
+        "service/common/src/main/resources/**",
+        "service/common/src/test/java/com/rag/common/http/**",
+        "service/common/src/test/java/com/rag/common/observability/**",
         "docs/DRIFT/global/lanes/L1-delivery.md",
     ],
+    # ⚠️ 2026-10-25 订正：L2 的 slow-threshold 守门原计划选 admin-rpc
+    #    ⇒ admin-rpc 的 test 目录不在原白名单内 ⇒ 2026-10-25 补进白名单
+    #    （admin-rpc 的**生产代码**仍不归 L2 ⇒ 只能加测试）。
     "L2-rpcgate": [
         "service/users/user/user-rpc/src/test/**",
+        "service/users/admin/admin-rpc/src/test/**",
         "service/message/message-rpc/src/test/**",
         "service/hot/hot-rpc/src/test/**",
         "docs/DRIFT/global/lanes/L2-rpcgate.md",
