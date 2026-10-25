@@ -583,3 +583,306 @@ batcher 协议现在**真的会校验**（写错 ⇒ 装配失败 ⇒ 记 ERROR 
 | **favorite** | ✅ 代码 / 配置 / 测试 / 台账 **零改动**（`git diff` 可验）；共享层影响已记账（§11.8） |
 | **全仓回归** | ⏳ **未跑**（本轮只动了 `service/common` 的 otel 配置与 agent ⇒ 影响面 = 全仓 20 个模块的 otel 装配 ⇒ 收口前补跑） |
 | **提交 / 推送** | ⏳ 待提交 |
+
+---
+
+## 十二、第二十四轮 · T-11「Go 侧未活体对拍」闭环 **+ 探针挖出的新缺口（门 8）**
+
+> **基线**：`71477ff`（第二十三轮收口）· **性质**：**新增双侧活体探针（工具）+ 一条新守门**；**生产代码零改动**
+> **本轮对 favorite 的改动量**：**0 个文件**（§12.8 记账）
+
+### 12.1 一句话结论
+
+第二十一~二十三轮的 T-11 台账一直挂着一条未证成 ——「**Go 侧未活体对拍**（Go 事实全部来自逐行读源码）」——
+而 AGENTS.md **§3.3 规则 2** 要求「凡写『与 Go 一致』，必须有**两侧同时跑的探针**」。
+
+⇒ **本轮把这一半补上**：新增 `tools/semantic-probe/trace/`（**Go 包内探针 + RAG 生产类探针 + 对拍脚本**），
+**11 个用例 · 8 一致 · 3 已知能力缺口 · 0 条漂移**。
+⇒ 并且**顺手挖出一条 RAG 侧从来没有守门的语义** ⇒ 补了**门 8**。
+
+### 12.2 Go 侧活体探针：怎么跑起来的（三个坑）
+
+| # | 坑 | 现象 | 处置 |
+|---|---|---|---|
+| ① | **必须进包内** | `createExporter` / `startAgent` 是 go-zero `core/trace` 的**未导出**函数 ⇒ 外部包**根本调不到** ⇒ 「unknown exporter」「端点为空不校验」「四种 exporter 都能构造」这三条**只能**靠**包内测试**活体证 | 探针写成 `package trace`（不是 `trace_test`）⇒ **直接跑真源**，不是「照抄真源逻辑再自己跑一遍」 |
+| ② | **模块缓存只读，且 `go -overlay` 不许改它** | 实测报错：`Files beneath GOMODCACHE must not be replaced` ⇒ overlay 这条路走不通 | 改成：把 module cache 里的 go-zero **整份拷到临时目录** → 放入包内探针 → `go test ./core/trace/`；**拷完做 `diff -r` 逐字节校验** ⇒ 确认「跑的就是缓存里那份真源」 |
+| ③ | **只输出稳定值** | trace-id 是**随机**的 ⇒ 两侧永远对不上 | 探针只输出布尔 / 枚举（`parent_trace_id_inherited=true`），**不输出原始 id** |
+
+⇒ 落点：`tools/semantic-probe/trace/{go/liveprobe_test.go, java/TraceProbe.java, run-trace-parity.sh}`（**第二个** semantic probe）。
+
+### 12.3 双侧对拍结果（11 个用例）
+
+| 用例 | 测什么 | Go | RAG | 判定 |
+|---|---|---|---|---|
+| `G1_startAgent_failure` | 装配失败 ⇒ 不 panic、返回 null、全局仍 no-op | ✅ | ✅ | **一致** |
+| `G2_unknown_exporter` | 非法 batcher + 端点非空 ⇒ 抛 `unknown exporter` | ✅ | ✅ | **一致** |
+| `G3_empty_endpoint` | 非法 batcher + **端点为空** ⇒ 不报错 | ✅ | ✅ | **一致** |
+| `G4_ratio_zero` | `Sampler=0.0` ⇒ 不 recording / 不 sampled / **SpanContext 仍有效** | ✅ | ✅ | **一致** |
+| `G5_parentbased_sampled_parent` | `Sampler=0.0` + 入向 **sampled** parent ⇒ 子 span 仍采样 | ✅ | ✅ | **一致** |
+| `G6_parentbased_unsampled_parent` | `Sampler=1.0` + 入向 **未采样** parent ⇒ 子 span **不**采样 | ✅ | ✅ | **一致**（但 RAG 侧**此前无守门** ⇒ §12.4） |
+| `G7_exporter_otlpgrpc` | OTLP/gRPC | ✅ | ✅ | **一致** |
+| `G7_exporter_otlphttp` | OTLP/HTTP | ✅ | ❌ | ⚠️ **已知能力缺口** |
+| `G7_exporter_zipkin` | Zipkin | ✅ | ❌ | ⚠️ **已知能力缺口** |
+| `G7_exporter_file` | 文件 | ✅ | ❌ | ⚠️ **已知能力缺口** |
+| `G8_propagation` | 全局传播器 = Composite(TraceContext, Baggage) | ✅ | ✅ | **一致** |
+
+⇒ **11 个用例：8 一致 · 3 已知能力缺口 · 0 条漂移**
+
+⚠️ 3 条能力缺口进脚本的 `KNOWN_GAP` 白名单 ⇒ **不计入失败，但始终打印**，且每条必须带台账出处
+（与 `tools/semantic-probe/run-parity.sh` 的 `known-dev` 白名单同款纪律：**加白名单 = 承认「这条差异不修」**）。
+
+### 12.4 🔴 探针挖出的缺口：RAG 侧**没有**「入向 parent 未采样 ⇒ 子 span 不采样」这条守门
+
+`GoStyleTraceparentFilter` 的类注释里写着：
+
+> ⇒ 根 span 必采样；**入向 parent 不采样时子 span 也不采样**。
+
+⇒ 但这句话**没有任何运行期证据** ⇒ 正是 AGENTS.md **§3.3.2** 点名的形态
+（「以『Go: …』形式写的断言，本身是高危项」）。
+
+⇒ 本轮用 Go 真源**活体**确认了这条语义（Go 的 `sdktrace.ParentBased` 的
+`remoteParentNotSampled ⇒ AlwaysOff` 分支，探针 G6）
+⇒ 随后在 RAG 侧补了对应的 JUnit 守门：
+
+**新增守门**：`GoStyleOtelSamplerProtocolGateTest#remoteParentNotSampledDropsChildSpanEvenWhenRatioIsOne`
+（该类 **7 → 8** 条）—— 断言：子 span **不 recording** · **不 sampled** · **SpanContext 仍有效** · **零导出**。
+
+### 12.5 变异测试（2 条，**全部转红**）
+
+隔离工作树 `/tmp/rag-round24-mut`（已清理）+ 三道闸（PIT-GLOBAL-018）+ 全限定名判定（PIT-GLOBAL-021）。
+
+| # | 变异 | 期望红点 | 实测 |
+|---|---|---|---|
+| **M6** | `setRemoteParentNotSampled(alwaysOn())` | **只有门 8 红**，门 2 保持绿 | ✅ `Tests run: 8, Failures: 1` · 目标门 FAIL · 兄弟门 PASS |
+| **M7** | 去掉 `parentBased` 包装 | 门 2 红 | ✅ `Tests run: 8, Failures: 2` · 兄弟门 FAIL |
+
+⇒ **M6 的设计要点**：用 OTel Java 的 `Sampler.parentBasedBuilder(...).setRemoteParentNotSampled(...)`
+**只改一个分支** ⇒ 证明门 8 守的**正是那一个分支**（而不是被别的门「顺带」照红）。
+
+### 12.6 🔴 探针自身**非空转**的证明
+
+在隔离树注入 **M7** 后跑 `run-trace-parity.sh` ⇒ **报出 2 条不一致**（`G5` / `G6`）且 **exit 1**
+⇒ **不是「永远打平」的假绿**。
+
+### 12.7 可观察变化（**记账，不静默**）
+
+| # | 变化 | 影响面 |
+|---|---|---|
+| ① | **生产代码零改动** ⇒ **零行为变化** | 全仓 |
+| ② | **新增一条 JUnit 守门**（门 8）⇒ 今后若有人把 `parentBased` 改成非 ParentBased 变体 ⇒ 红 | `service/common` |
+| ③ | **新增一个双侧探针** ⇒ 「T-11 与 Go 一致」从此**有两侧同时跑的证据** | 工具层 |
+| ④ | 探针的 `KNOWN_GAP` 白名单**明写**了 3 条能力缺口 ⇒ 它们**始终可见**，不会被当成「已对齐」 | 工具层 |
+
+### 12.8 🔴 favorite 记账（**本轮对 favorite 零文件改动**）
+
+> `service/favorite/**` 与 `docs/*/favorite/**` **零改动**；**生产代码零改动** ⇒ favorite 的可观察行为**零变化**
+> ⇒ 仍按协议 §六记账并告知 owner。
+
+### 12.9 未证成（**不声称已证明的**）
+
+| # | 未证成项 | 原因 |
+|---|---|---|
+| ① | **真 jaeger 未接触** | 探针只验「装配结果 / 采样决策 / 传播器字段」⇒ **不是**「jaeger 真的收到了 span」 |
+| ② | **Go 侧 OTel SDK 1.40.0 vs RAG 侧 1.44.0** | 版本不同 ⇒ 探针证的是**语义**，不是「逐字节同版本」 |
+| ③ | **多进程下的 agent 行为未验** | Go 的 `sync.Once` 是**进程内**语义 |
+| ④ | **`otlphttp` / `zipkin` / `file` 仍未实现** | 能力缺口（Go 能装、RAG 装不上）⇒ **行为同构、能力不等价** |
+| ⑤ | **Go 的 `rest/handler/tracehandler.go`（HTTP 层）不在探针范围** | 响应头层由 RAG 侧 `GoStyleTraceparentFilter*` 系列守门负责 |
+| ⑥ | **探针不是 CI 门** | 与既有 `tools/semantic-probe/run-parity.sh` 同款定位：**手动跑**（需 Go toolchain + module cache） |
+
+### 12.10 交接整合者（本 lane 越权做不了的事）
+
+| # | 事项 | 为什么本 lane 做不了 |
+|---|---|---|
+| ① | 把本节 fold 进 `docs/DRIFT/global/common-tails.md` 的 T-11 段 | 共享台账 ⇒ 协议 §二.3 |
+| ② | 更新 `AGENTS.md` §0 的 `global` 行 + 三个 `_INDEX.md` + `_MANIFEST.json` | 共享索引 |
+| ③ | `tools/difftest/README.md` 的工具清单补一行（新的 `semantic-probe/trace`） | 共享文件 |
+| ④ | **L2 / L3 / L4 三条 lane 的合并** | ⇒ **L3 / L4 本轮已由整合者合并**（`eee3bbb` / `8e6b7b2`）；**L2 仍在跑** |
+| ⑤ | `align/global` → `do-my-own-gh` 的合并 | 由 Jason 决定时机 |
+
+### 12.11 验证记录（2026-10-25 收口）
+
+| 项 | 结果 |
+|---|---|
+| **双侧活体对拍** | ✅ `run-trace-parity.sh` **EXIT=0** —— 11 用例 · 8 一致 · 3 已知缺口 · 0 漂移 |
+| **Go 半边** | ✅ go-zero v1.10.2 **真源包内**探针，11 行 `PROBE|` 输出；拷贝**逐字节校验**通过（`diff -r` 无差异） |
+| **RAG 半边** | ✅ 只调**生产类** `GoStyleOtelAgent` / `GoStyleOtelConfig`（不复制装配逻辑） |
+| **新门** | ✅ `GoStyleOtelSamplerProtocolGateTest` **8 条 / 0 失败**（原 7 条） |
+| **变异** | ✅ **2/2 全部转红**（隔离树 `/tmp/rag-round24-mut`，已清理）+ 还原**逐字节一致** |
+| **探针非空转** | ✅ 注入 M7 ⇒ 探针报 2 条不一致 + **exit 1** |
+| **机器守门** | ✅ `check-global-lane-ownership.py` **EXIT=0**（含本轮两处白名单订正） |
+| **favorite** | ✅ 代码 / 配置 / 测试 / 台账 **零改动**（`git diff` 可验） |
+| **全仓回归** | ⏳ 见 §12.12（第二十三轮改动 + 本轮新门的合并回归） |
+| **提交** | `af8b542`（探针 + 门 8）· `d88604e`（白名单订正 + spec）· `eee3bbb`（合并 L3）· `8e6b7b2`（合并 L4） |
+
+### 12.12 全仓回归（第二十三轮改动 + 本轮新门）
+
+| 项 | 结果 |
+|---|---|
+| **命令** | `mvn -o test -fae` |
+| **结果** | ⏳ 待填 |
+
+---
+
+## 十三、第二十五轮 · **T-6**：JSON 响应的 `Content-Type` 补上 `charset=utf-8`（对齐 Go）
+
+> **基线**：`8e6b7b2`（第二十四轮 + L3/L4 合并）· **性质**：**共享层改动**（`service/common`）⇒ **10 个 api 全部生效**
+> **触发**：**用户拍板**（2026-10-25 21:57）——「撤销 `SD-HOT-API-006`，修 T-6」
+> **本轮对 favorite 的改动量**：**0 个文件**（§13.9 记账）
+
+### 13.1 一句话结论
+
+T-6 修好了：**RAG 的 JSON 响应头从裸 `application/json` 变成 `application/json;charset=utf-8`** ⇒
+**「Go 有 charset、RAG 完全没有」这个实质差距关闭**。
+
+⇒ 但**逐字节**与 Go 一致**做不到** —— 原因**不是** Spring 的 `MediaType.toString()`，
+而是 **Tomcat 11 把 Content-Type 拆成 (type/subtype, charset) 两份存、写出时重新拼**
+⇒ 线上恒为 `type/subtype;charset=xxx`（**分号后无空格**）⇒ **应用层拿不到那个空格**。
+
+### 13.2 🔴 自曝错账 #2：台账说「`SD-HOT-API-006` 的理由已被本仓自己证伪」—— **这个判断不成立**
+
+global 台账（`common-tails.md` §一·T-6）原写：
+
+> ⚠️ **该理由已被本仓自己证伪**：`GoStyleRouterErrorResponses.java:81-88` 对 `text/plain; charset=utf-8`
+> 就是**直接写原始字符串** ⇒ **同一手法用在 `application/json; charset=utf-8` 上即可**
+> ⇒ ⇒ **要修 T-6，就必须先撤销 `SD-HOT-API-006`**
+
+⇒ ⇒ **第二十五轮实测证明这个推理是错的**：**写原始字符串并不管用**。真 Tomcat 11 会归一化：
+
+```
+org/apache/catalina/connector/Response.java（11.0.24）setContentType(String)
+    String[] parsedType = MediaTypeCache.parse(type);
+    if (parsedType[1] == null) { coyoteResponse.setContentTypeNoCharset(parsedType[0]); }
+    else {                                   // 有 charset ⇒ **拆开存**
+        coyoteResponse.setContentTypeNoCharset(parsedType[0]);
+        coyoteResponse.setCharsetHolder(CharsetHolder.getInstance(parsedType[1]));
+    }
+org/apache/coyote/Http11OutputBuffer.writeHeaders()
+    headerBuffer.put(contentType); headerBuffer.put(SEMICOLON); headerBuffer.put(CHARSET);
+    ⇒ 线上恒为 type/subtype;charset=xxx（**分号后没有空格**）
+```
+
+⇒ ⇒ **两个入口都汇到 `setContentType`**（`setHeader` / `addHeader` 都先走 `checkSpecialHeader`）
+⇒ ⇒ **应用层根本拿不到那个空格**。
+
+⇒ ⇒ ⇒ **所以 `SD-HOT-API-006` 的原始理由「不可逐字节复刻」是成立的，而且比当初写的更强**
+（当初写的是「Spring 的 `MediaType.toString()` 少个空格」；真实原因是「**容器层**归一化」）。
+
+⇒ ⇒ ⇒ **撤销的性质因此改变**：**不是**「技术上变得可行了」，而是
+**「技术上仍然不可逐字节复刻，但我们选择向 Go 靠拢（补上 charset 参数）」** ⇒ **纯用户决策**。
+
+### 13.3 实施（3 个文件）
+
+| # | 文件 | 改动 |
+|---|---|---|
+| ① | `service/common/.../http/GoStyleJsonContentTypeAdvice.java`（**新增**） | `@AutoConfiguration` + `@RestControllerAdvice` ⇒ JSON 响应头写**原始字符串** `application/json; charset=utf-8` |
+| ② | `service/common/src/main/resources/META-INF/spring/...AutoConfiguration.imports` | 登记上面这个 advice ⇒ **10 个 api 全部生效**（含 favorite） |
+| ③ | `service/common/.../http/GoStyleRouterErrorResponses.java` | **订正一条被证伪的注释**（见 §13.4） |
+
+#### 为什么挂在 **ResponseBodyAdvice** 而不是转换器上
+
+共享层那个 JSON 转换器（`GoStyleJsonBodyConverter`）**不是所有 api 都启用** ——
+`task-api` 明确把它排除在组件扫描之外（`TaskApiApplication` 的 `@ComponentScan` exclude）
+⇒ 挂在它上面 ⇒ **task-api 不生效** ⇒ 不满足「改 1 处 ⇒ 10 个 api 全部生效」。
+⇒ Advice 是**按「响应体是不是 JSON」判定**的 ⇒ **与用哪个转换器无关**。
+
+#### 判定规则（两条取或）
+
+1. **选中的转换器是 Jackson 系** ⇒ 响应体就是 JSON；
+2. **选中的 Content-Type 是 JSON** ⇒ 即使转换器不是 Jackson，body 仍是 JSON。
+
+⇒ 404 / 405 那条 `ResponseEntity<byte[]>`（`ByteArrayHttpMessageConverter` + 显式 `text/plain`）
+**两条都不满足** ⇒ **不会被误伤** ⇒ 这条由守门第 3 条钉死。
+
+### 13.4 🔴 顺带订正一条**被证伪的注释**（`GoStyleRouterErrorResponses`）
+
+原文（现已被订正）：
+
+> 直接写原始字符串是**唯一能保证逐字节对上的做法**。
+
+⇒ **实测证伪**：容器照样归一化 ⇒ 写原始字符串**并不能**逐字节对上。
+⇒ 写原始字符串的**真正**作用是：**保证 charset 参数存在**（不会被退化成裸 `text/plain`）。
+⇒ 新注释补上了 Tomcat 的逐行依据 + 仓库既有先例。
+
+### 13.5 守门（3 条，真 Tomcat + 裸 socket）
+
+`GoStyleJsonContentTypeCharsetTomcatTest`
+
+| # | 守门 | 断言 |
+|---|---|---|
+| 1 | `jsonResponseContentTypeMatchesGoByteForByte` | JSON 成功响应 ⇒ `application/json;charset=utf-8`（**charset 必须在**） |
+| 2 | `jsonErrorResponseContentTypeMatchesGoByteForByte` | JSON 失败响应（`@ExceptionHandler`）⇒ 同一个 |
+| 3 | `explicitContentTypeIsNotClobbered` | 显式 `text/plain; charset=utf-8` ⇒ **不许**被改写成 JSON |
+
+⚠️ **为什么断言的是「归一化后」的形态**：与仓库既有先例一致 ——
+`LikeApiRouterErrorRealTomcatTest` 对 404 的 `text/plain; charset=utf-8`
+就是**刻意解析后比对**（去空格），注释明写「比原始字符串会得到一个『必然红、且红了也不代表有错』的断言（已实测）」。
+⇒ ⇒ 本守门沿用同一口径：锁「charset 必须在 + type 必须是 application/json」，**不去锁那个空格**。
+
+### 13.6 变异（2 条，**全部转红**）
+
+| # | 变异 | 期望红点 | 实测 |
+|---|---|---|---|
+| **M8** | Advice 不写 Content-Type | 两个 JSON 门红 + 不误伤门绿 | ✅ `maven_exit=1 · tests=3 · fail=2` |
+| **M9** | Advice 无条件写（去掉 JSON 判定） | 不误伤门红 + 两个 JSON 门绿 | ✅ `maven_exit=1 · tests=3 · fail=1` |
+
+⇒ ⇒ 两条变异**各打各的**：M8 证明「charset 必须出现」非空转；M9 证明「不许误伤显式声明」非空转。
+
+### 13.7 🔴 踩到的一个新坑：`PIT-GLOBAL-021` 需要补一条
+
+**`surefire` 打印的 `-- in` 后面跟的是类的 `@DisplayName`（若有），不是全限定名。**
+
+⇒ ⇒ 只匹配 FQN 的判定正则 ⇒ **红与绿都读不出来** ⇒ 误报 `NO_RESULT`
+⇒ ⇒ 本轮第一版变异脚本就踩了（判定行全报 `NO_RESULT`，但 XML 逐条判定是对的）。
+
+⇒ ⇒ **修法**：判定**只认 surefire 的 XML**（逐条 `testcase`），**不依赖 stdout 的 `-- in` 行**。
+
+### 13.8 可观察变化（**记账，不静默**）
+
+| # | 变化 | 影响面 |
+|---|---|---|
+| ① | **JSON 响应头多一个 `charset=utf-8`**（`application/json` ⇒ `application/json;charset=utf-8`）⇒ **向 Go 收敛** | **全部 10 个 api**（共享层） |
+| ② | 与 Go 的**残余** = 只差一个 OWS（`;` 后有无空格）⇒ RFC 9110 **OWS 不显著** ⇒ **语义相同** | 同上 |
+| ③ | 404 / 405 的 `text/plain; charset=utf-8` **不受影响**（走 `ByteArrayHttpMessageConverter` + 显式头 ⇒ advice 不介入） | 同上 |
+
+### 13.9 🔴 favorite 记账（**本轮对 favorite 零文件改动**）
+
+> `service/favorite/**` 与 `docs/*/favorite/**` **零改动**。
+> 但**共享层改动会影响 favorite 的可观察行为** ⇒ 按协议 §六「必须记账并告知 owner」：
+
+| 项 | 内容 |
+|---|---|
+| **favorite 侧受影响的地方** | favorite-api 的 **JSON 响应头**现在带 `charset=utf-8`（原先没有）⇒ **向 Go 收敛**（Go 的 favorite api 同样带） |
+| **favorite 代码需要改吗** | **不需要** ⇒ 修法全在 `service/common` |
+| **favorite owner 需要知道什么** | ① favorite 的 JSON 响应头**多了** `charset=utf-8`；② 若 favorite 域有守门断言「响应 Content-Type 恰为 `application/json`」⇒ 需要复核（若是 ⇒ 那是**依赖旧缺陷的断言**） |
+| **本轮对 favorite 的改动量** | **0 个文件** |
+
+### 13.10 未证成（**不声称已证明的**）
+
+| # | 未证成项 | 原因 |
+|---|---|---|
+| ① | **Go 侧未活体对拍** | Go 的 `ContentTypeJson` 取自**逐行读源码**（`rest/internal/header/headers.go:17`）⇒ 没跑 Go 进程 |
+| ② | **「那个空格」在应用层彻底不可达** | 已坐实（Tomcat 归一化）⇒ 但**没试过**改 Tomcat 配置 / 换容器 ⇒ 未穷尽所有绕法 |
+| ③ | **其余 9 个 api 未逐域对拍** | 本轮在 `service/common` 用**真 Tomcat** 证明「共享层语义」；各 api 的业务链形态不同 ⇒ 是否还有别的 Content-Type 出口**未逐域验** |
+| ④ | **RFC 8259 的规范方向问题未重估** | `SD-HOT-API-006` 的理由②说「RFC 8259 规定 JSON 的 charset 恒为 UTF-8，**不应**声明」⇒ 本轮按**用户决策**加了 charset ⇒ 该规范方向的取舍**未在台账重评** |
+
+### 13.11 交接整合者（本 lane 越权做不了的事）
+
+| # | 事项 | 为什么本 lane 做不了 |
+|---|---|---|
+| ① | 把本节 fold 进 `docs/DRIFT/global/common-tails.md` 的 **T-6** 段 + **订正 §一·T-6 里那条被证伪的「理由已被证伪」** | 共享台账 ⇒ 协议 §二.3 |
+| ② | `docs/DRIFT/hot/api.md` 的 `DRIFT-HOTAPI-024` 已由本 lane 更新（状态改「已修」）⇒ **请复核** | 跨域台账（global 有写权，但 hot 域 owner 需知会） |
+| ③ | `docs/Intentional_Deviations/hot/api.md` 的 `SD-HOT-API-006` 已由本 lane **撤销** ⇒ `docs/Intentional_Deviations/_INDEX.md` 需同步 | 共享索引 |
+| ④ | 更新 `AGENTS.md` §0 的 `global` 行 + 三个 `_INDEX.md` + `_MANIFEST.json` | 共享索引 |
+| ⑤ | **L2 / L5 两条 lane 的合并** | ⇒ **L3 / L4 本轮已合并**（`eee3bbb` / `8e6b7b2`）；**L2 已完成待合**（`0e2efaf`）；**L5 待启动** |
+| ⑥ | `align/global` → `do-my-own-gh` 的合并 | 由 Jason 决定时机 |
+
+### 13.12 验证记录（2026-10-25 收口）
+
+| 项 | 结果 |
+|---|---|
+| **守门验红** | ✅ 修前 `Content-Type: application/json` ⇒ **两个 JSON 门红**（证明守门非空转 + 坐实漂移） |
+| **修后** | ✅ `Content-Type: application/json;charset=utf-8` ⇒ 3 条门全绿 |
+| **`service/common` 全量** | ✅ **250 条全绿**（原 247 + 本轮 3） |
+| **变异** | ✅ **2/2 全部转红**（隔离树 `/tmp/rag-round25-mut`，已清理）+ 还原**逐字节一致** |
+| **favorite** | ✅ 代码 / 配置 / 测试 / 台账 **零改动**；共享层影响已记账（§13.9） |
+| **全仓回归** | ⏳ 待跑（改动在共享层 ⇒ 影响面 = 全部 10 个 api） |

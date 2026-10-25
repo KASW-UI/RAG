@@ -802,7 +802,7 @@ SEMANTICALLY NOT EQUIVALENT
 > | `DRIFT-HOTAPI-021` | `?page[]=5` → Go 200 / RAG **400 + Tomcat HTML 错误页** | ✅ `server.tomcat.relaxed-query-chars: ["[", "]"]`（**第十三轮已落地 10/10**） | 跨域 |
 > | `DRIFT-HOTAPI-022` | 值个数上限 Go **2048** / RAG **1000** | ✅ `server.tomcat.max-parameter-count: 2048`（**第十三轮已落地 10/10**） | 跨域 |
 > | `DRIFT-HOTAPI-023` | 请求行长 Go **1 MiB** / RAG **8 KiB** | ✅ `server.max-http-request-header-size: **1028KB**`（**第十三轮已落地 10/10**；⚠️ **不是 1MB**，见下） | 跨域 |
-> | `DRIFT-HOTAPI-024` | `Content-Type` 的 charset 参数 | **建议不复刻**（Spring 侧不可逐字节复刻） | 待签字 |
+> | `DRIFT-HOTAPI-024` | `Content-Type` 的 charset 参数 | ✅ **已修**（**第二十五轮 global T-6**：共享层加 charset ⇒ 10 个 api 全部生效）⇒ ⚠️ 「不可逐字节复刻」**仍成立**（Tomcat 归一化）⇒ 残余只差一个 OWS | ✅ 已修 |
 >
 > ⇒ 三条容器类差异**同时打开后**：对拍矩阵 **24/29 → 28/29**，输入上限阈值与 Go **完全一致**
 > （实测首个翻转 n 两侧都是 **2049**）⇒ **配方已被证实**，只剩 D14（`nosniff`，common 域）。
@@ -1392,7 +1392,26 @@ RAG 直接 **400 + HTML 错误页** ⇒ 响应**形状**都不同（不是业务
 > ⚠️ **残余差异（新编号）**：超限后的**状态码与错误体形状**仍不同
 > （Go 431 + `text/plain` vs RAG 400 + Tomcat HTML）⇒ 见 **`DRIFT-HOTAPI-031`**（框架限制）。
 
-### DRIFT-HOTAPI-024 —— `Content-Type` 的 charset 参数 ✅ 已签字（不复刻）
+### DRIFT-HOTAPI-024 —— `Content-Type` 的 charset 参数 ✅ **已修**（第二十五轮 · global T-6）
+
+> 🟥 **2026-10-25 订正 + 落地**（本条原先的状态是「✅ 已签字（不复刻）」⇒ **该签字已被用户撤销**）：
+> ① `SD-HOT-API-006` **已撤销**（用户拍板）⇒ 被它签字描述的行为（「RAG 的 JSON 响应不带 charset」）**已不存在**；
+> ② 修法 = **共享层** `service/common` 新增 `GoStyleJsonContentTypeAdvice`
+>    （`@AutoConfiguration` ⇒ **10 个 api 全部生效** ⇒ **零 api 代码改动** ⇒ 含 favorite）；
+> ③ ⚠️ **「不可逐字节复刻」这个结论**（本节原文写的「Spring 的 `MediaType.toString()` 少个空格」）
+>    **仍然成立，而且理由更强**：真 Tomcat 11 把 Content-Type 拆成 (type/subtype, charset) 重新拼
+>    ⇒ 线上恒为 `application/json;charset=utf-8` ⇒ **写原始字符串也拿不到那个空格**；
+> ④ ⇒ 修后残余 = **只差一个 OWS**（RFC 9110 OWS 不显著 ⇒ 语义相同）
+>    ⇒ 与 404 路径同属**仓库早已接受**的类别（`LikeApiRouterErrorRealTomcatTest` 解析后比对）。
+> ⑤ 守门 = `service/common` 的 `GoStyleJsonContentTypeCharsetTomcatTest`（真 Tomcat + 裸 socket，3 条）
+>    + 变异 2/2 全红。**逐条证据 ⇒ global 台账 `docs/DRIFT/global/lanes/L1-delivery.md` §十三。**
+
+<details><summary>（以下为 2026-10-24 的原始记录，留档）</summary>
+
+**原始状态**：✅ 已签字（不复刻）—— 当时结论是「即使 RAG 侧显式补 charset，Spring 的 `MediaType.toString()`
+产出的是 `application/json;charset=utf-8`（**分号后无空格**）⇒ 与 Go **仍不逐字节相同**」。
+
+</details>
 
 | | 响应头 |
 |---|---|
