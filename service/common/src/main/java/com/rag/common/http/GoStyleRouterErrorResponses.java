@@ -26,6 +26,10 @@ import java.nio.charset.StandardCharsets;
  *          （无 body、无 Content-Type）          ← 裸状态码
  * </pre>
  *
+ * <p>⚠️ 上面是 <b>Go 侧</b>的形态。真 Tomcat 会把 Content-Type <b>归一化</b>
+ * ⇒ RAG 侧线上实际是 {@code text/plain;charset=utf-8}（<b>分号后无空格</b>）
+ * ⇒ 按 RFC 9110 两者<b>语义相同</b> ⇒ 详见 {@link #TEXT_PLAIN_UTF8} 的注释。
+ *
  * <p>两条路径在 Go 侧<b>根本不进任何路由的 chain</b>：
  * {@code engine.go:104-118} 的 {@code bindRoute} 只把 chain（native middlewares + auth + 用户中间件）
  * 挂到 {@code router.Handle(method, path, handle)} 上，即<b>只对匹配上的路由生效</b>；
@@ -83,7 +87,29 @@ public final class GoStyleRouterErrorResponses {
      * <p>⚠️ 这里<b>不</b>用 {@code MediaType.TEXT_PLAIN}：那会产出 {@code text/plain}（无 charset），
      * 而 {@code StringHttpMessageConverter} 是否补 charset 取决于
      * {@code writeAcceptCharset}（默认 {@code false}）⇒ **不可靠**。
-     * 直接写原始字符串是唯一能保证逐字节对上的做法。
+     *
+     * <h3>🔴 订正（2026-10-25 · 第二十五轮 · global T-6）：「直接写原始字符串就逐字节对上」是<b>错的</b></h3>
+     * <p>本方法<b>一直</b>写的是原始字符串，但真 Tomcat 会把它<b>归一化</b> ⇒ 线上其实是
+     * {@code text/plain;charset=utf-8}（<b>无空格</b>）⇒ <b>并没有</b>逐字节对上 Go。
+     * <pre>
+     * org/apache/catalina/connector/Response.java（11.0.24）setContentType(String)
+     *     String[] parsedType = MediaTypeCache.parse(type);
+     *     if (parsedType[1] == null) { coyoteResponse.setContentTypeNoCharset(parsedType[0]); }
+     *     else {                                  // 有 charset ⇒ **拆开存**
+     *         coyoteResponse.setContentTypeNoCharset(parsedType[0]);
+     *         coyoteResponse.setCharsetHolder(CharsetHolder.getInstance(parsedType[1]));
+     *     }
+     * org/apache/coyote/Http11OutputBuffer.writeHeaders()
+     *     headerBuffer.put(contentType); headerBuffer.put(SEMICOLON); headerBuffer.put(CHARSET);
+     *     ⇒ 线上恒为 type/subtype;charset=xxx（**分号后没有空格**）
+     * </pre>
+     * ⇒ ⇒ <b>写原始字符串的唯一作用</b>是：<b>保证 charset 参数存在</b>（不会被退化成裸
+     * {@code text/plain}）—— 这才是它相对 {@code MediaType.TEXT_PLAIN} 的真正优势。
+     * ⇒ ⇒ 「那个空格」在 Tomcat 11 上<b>应用层拿不到</b>（{@code setContentType} /
+     * {@code setHeader} / {@code addHeader} 三条路都汇到同一处归一化）
+     * ⇒ ⇒ 按 RFC 9110，参数分隔符两旁的 OWS <b>不显著</b> ⇒ 两者<b>语义相同</b>
+     * ⇒ ⇒ 仓库既有先例：{@code LikeApiRouterErrorRealTomcatTest} 对本 404 就是<b>刻意解析后比对</b>
+     * （去空格），注释明写「比原始字符串会得到一个『必然红、且红了也不代表有错』的断言（已实测）」。
      */
     private static final String TEXT_PLAIN_UTF8 = "text/plain; charset=utf-8";
 

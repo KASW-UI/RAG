@@ -1,1 +1,2 @@
 com.rag.common.observability.GoStyleOtelAutoConfiguration
+com.rag.common.http.GoStyleJsonContentTypeAdvice
