@@ -41,7 +41,8 @@
 
 **只写这些**：
 - `tools/difftest/check-flyway-concurrent.sh`（**新建**，名字固定 ⇒ 别与 L3 撞）
-- `tools/difftest/` 下**新**建的、按本 lane 需要的小脚本
+- `tools/difftest/` 下**新**建的、按本 lane 需要的小脚本 ⇒ ⚠️ **文件名必须以 `flyway` 开头**
+  ⇒ 与 L3 的 `ddl*` 前缀脚本**天然不撞名**
 - `docs/DRIFT/global/lanes/L4-flyway.md`（本文件）
 
 ⚠️ 若验证结论要求改某个域的 `application.yml`（比如还要补一行 baseline 配置）

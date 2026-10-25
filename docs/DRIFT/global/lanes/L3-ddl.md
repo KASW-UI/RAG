@@ -39,7 +39,8 @@
 
 **只写这些**：
 - `tools/difftest/check-ddl-static.py`（扩 `DOMAINS` 预设）
-- `tools/difftest/` 下**新**建的脚本（命名自取，但**不得覆盖** L4 的 `check-flyway-concurrent.sh`）
+- `tools/difftest/` 下**新**建的脚本 ⇒ ⚠️ **文件名必须以 `ddl` 开头**（如 `check-ddl-article.sh` / `run-ddl-parity.sh`）
+  ⇒ 与 L4 的 `check-flyway-concurrent.sh` **天然不撞名**（两条 lane 同写 `tools/difftest/` 目录 ⇒ git 只跟踪文件不跟踪目录 ⇒ 文件名不撞即零冲突）
 - `docs/DRIFT/global/lanes/L3-ddl.md`（本文件）
 
 **⛔ 禁区**：

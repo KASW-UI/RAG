@@ -45,6 +45,10 @@
 
 ⇒ **L1~L5 文件级零重叠** ⇒ 五路可同时开工。
 
+> ⚠️ **L3 与 L4 同写 `tools/difftest/` 目录** ⇒ git 只跟踪**文件**不跟踪目录 ⇒
+> 只要**文件名**不撞就零冲突 ⇒ 约定：**L3 的新脚本一律 `ddl*` 前缀，L4 的一律 `flyway*` 前缀**。
+> ⇒ 且 **`tools/difftest/README.md` 两条 lane 都不许写**（共享说明文件 ⇒ 整合者统一更新）。
+
 ## 四、每条 lane 的开工检查（缺一不可）
 
 1. `git fetch upstream && git log --oneline -1` ⇒ 确认基线没被别的会话推走。
