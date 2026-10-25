@@ -124,6 +124,12 @@ public interface LikeDomainFactOutboxMapper {
     /**
      * 对应 Go 投递成功：
      * {@code delivery_status=1, technical_receipt_id, technical_input_hash, technical_offset, technical_received_at, delivered_at}。
+     *
+     * <p>🔴 <b>2026-10-25（第二十轮）：{@code delivered_at} 由 SQL 的 {@code now()} 改为<b>调用方传入</b>
+     * —— Go {@code fact_delivery.go:116} 写的是 {@code deliveredAt := time.Now().UTC()}
+     * ⇒ 是<b>应用进程的墙钟</b>；而 SQL 的 {@code now()} 是<b>数据库服务器的墙钟</b>
+     * ⇒ 两者在「应用与数据库不同机 / 不同时区 / 时钟漂移」时**写的不是同一个时刻**。
+     * ⇒ 改成传参 ⇒ 与 Go 逐条同构（同源：调用方取 {@code OffsetDateTime.now(UTC)}）。
      */
     @Update("""
             UPDATE like_domain_fact_outbox
@@ -139,7 +145,8 @@ public interface LikeDomainFactOutboxMapper {
                       @Param("receiptId") String receiptId,
                       @Param("inputHash") String inputHash,
                       @Param("offset") long offset,
-                      @Param("receivedAt") java.time.OffsetDateTime receivedAt);
+                      @Param("receivedAt") java.time.OffsetDateTime receivedAt,
+                      @Param("deliveredAt") java.time.OffsetDateTime deliveredAt);
 
     /**
      * 对应 Go {@code AuthoritativeFact} 的两条查询。

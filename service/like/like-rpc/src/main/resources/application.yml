@@ -233,6 +233,8 @@ like:
     dc-endpoint: ${DC_PLATFORM_EVENT_URL:}
     dc-token: ${DC_PLATFORM_SERVICE_TOKEN:}
     dc-timeout: 8s
+    # Go cmd/fact-dispatch/main.go:24 的 -once flag（默认 false）：只投递至多一条待发事实
+    once: false
 
   # ---------- 权威读（P4 fact-authority）----------
   # Go cmd/fact-authority/main.go 要求 LIKE_FACT_AUTHORITY_LISTEN / _TOKEN（≥32 字节）。
