@@ -197,6 +197,12 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
    `docs/Intentional_Deviations/global/`；三个 `_INDEX.md` 合并后统一更新。
 5. ⚠️ **跨域改动前先 `git fetch upstream` 确认基线** —— `service/common` 是共享面，
    别的域的并发会话可能同时在改（§3.3 的「共享文件改动要尽早提交」）。
+6. 🆕 **多 lane 并行（2026-10-25）** —— 本域待办横跨 6 个微服务域 + 共享层 + `tools/` + 三档台账，
+   单会话串行每轮要重读 **221 KB** 台账 ⇒ 上下文才是瓶颈。
+   ⇒ 拆成 **5 条 lane**（`align/global-delivery` / `-rpcgate` / `-ddl` / `-flyway` / `-signoff`），
+   **按「叶子文件」切**（议题会跨文件，文件才是不冲突的单位）⇒ **文件级零重叠**。
+   ⇒ **协议 + 5 份任务书 ⇒ [`lanes/_PROTOCOL.md`](lanes/_PROTOCOL.md)**
+   （lane 基线 = `align/global` HEAD；lane 不写 4 个规范台账文件与 `AGENTS.md` ⇒ 共享文件由整合者统一更新）。
 
 ---
 
