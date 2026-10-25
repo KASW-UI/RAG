@@ -101,7 +101,7 @@ public class LikeFactDispatchScheduler {
             //    而 Dispatcher.run 是**阻塞式**的（循环跑在调用线程上，直到 stop() 才返回）
             //    ⇒ 用 run 会让**上下文永远刷新不完** ⇒ 整个 like-rpc 起不来。
             //    这类缺陷在「开关默认关闭」时测不出来（绿测试 + 起不来）⇒ 必须有真启动守门。
-            this.handle = Dispatcher.run(
+            this.handle = Dispatcher.runAsync(
                     Context.current(),
                     deliveryService::dispatchFactOnce,
                     sender,
