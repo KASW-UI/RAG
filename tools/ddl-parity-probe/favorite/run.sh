@@ -103,26 +103,47 @@ say "真源 go.mod：gorm ${GORM_VER} / driver/postgres ${PGSQL_VER}（go.mod + 
 command -v docker >/dev/null 2>&1 || die "没装 docker"
 PG_CONTAINER="ddl-parity-favorite-$$"
 say "起 postgres:16-alpine 容器：${PG_CONTAINER}"
-docker run -d --rm --name "${PG_CONTAINER}" \
-  -e POSTGRES_PASSWORD=probe \
-  -e POSTGRES_HOST_AUTH_METHOD=trust \
-  -e POSTGRES_USER=postgres \
-  -p 0:5432 postgres:16-alpine >/dev/null || die "容器启动失败"
-
-PG_PORT="$(docker port "${PG_CONTAINER}" 5432/tcp | head -1 | sed 's/.*://')"
-[ -n "${PG_PORT}" ] || die "拿不到映射端口"
+# ⚠️ PG 就绪等待三件套（2026-10-25 第十四轮修 —— 批跑时机器高负载 ⇒ **假红**）：
+#   ① 必须探 **TCP**（-h 127.0.0.1）：PG 官方镜像的初始化阶段会起一个**临时 server**，
+#      那个临时 server 只监听 unix socket（listen_addresses=''）⇒ 走 socket 的探活会
+#      **过早地**报 ready ⇒ 紧接着的 CREATE DATABASE 会撞上"系统正在启动"而随机失败。
+#   ② 上限 **180s**（不是 60s）：机器高负载时 initdb 本身就要几十秒。
+#   ③ 没就绪就**重建容器重来一次**：容器起不来（资源竞争 / 端口映射失败）时重来更稳。
+wait_pg_tcp() {
+  local tries="$1" i
+  for i in $(seq 1 "${tries}"); do
+    docker exec "${PG_CONTAINER}" pg_isready -U postgres -h 127.0.0.1 -p 5432 >/dev/null 2>&1 && return 0
+    # 容器自己退出了就别白等满超时（--rm ⇒ 退出会被删掉 ⇒ inspect 失败）
+    [ "$(docker inspect -f '{{.State.Running}}' "${PG_CONTAINER}" 2>/dev/null || echo false)" = "true" ] || return 1
+    sleep 1
+  done
+  return 1
+}
+PG_PORT=""
+PG_READY=0
+for attempt in 1 2; do
+  docker rm -f "${PG_CONTAINER}" >/dev/null 2>&1 || true
+  if ! docker run -d --rm --name "${PG_CONTAINER}" \
+      -e POSTGRES_PASSWORD=probe \
+      -e POSTGRES_HOST_AUTH_METHOD=trust \
+      -e POSTGRES_USER=postgres \
+      -p 0:5432 postgres:16-alpine >/dev/null; then
+    say "   PG 容器第 ${attempt} 次启动失败 ⇒ 重来"
+    continue
+  fi
+  PG_PORT="$(docker port "${PG_CONTAINER}" 5432/tcp | head -1 | sed 's/.*://')"
+  if [ -z "${PG_PORT}" ]; then
+    say "   第 ${attempt} 次拿不到映射端口 ⇒ 重来"
+    continue
+  fi
+  if wait_pg_tcp 180; then PG_READY=1; break; fi
+  say "   PG 第 ${attempt} 次 180s 内没就绪 ⇒ 重建容器重来"
+done
+[ "${PG_READY}" = "1" ] || die "PG 没就绪（已重建容器重试 1 次）"
+ok "PG 就绪（TCP 探活）"
 say "PG 端口：${PG_PORT}"
 
 export PGPASSWORD=probe
-# ⚠️ 必须探 **TCP**（-h 127.0.0.1）：PG 官方镜像的初始化阶段会起一个**临时 server**，
-#    那个临时 server 只监听 unix socket（listen_addresses=''）⇒ 走 socket 的探活会
-#    **过早地**报 ready ⇒ 紧接着的 CREATE DATABASE 会撞上"系统正在启动"而随机失败。
-for i in $(seq 1 60); do
-  if docker exec "${PG_CONTAINER}" pg_isready -U postgres -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then break; fi
-  sleep 1
-  [ "$i" = "60" ] && die "PG 60 秒内没就绪"
-done
-ok "PG 就绪（TCP 探活）"
 
 psql_q() { docker exec -i "${PG_CONTAINER}" psql -U postgres -v ON_ERROR_STOP=1 "$@"; }
 for db in godb godb_sql ragdb; do

@@ -32,6 +32,8 @@
 | 第九轮 | 🆕 **注释可核验性审计**（§15）—— 抓出 **3 条「断言对、锚点指错行」的真缺陷**，门禁级发现 **67 → 0**；**零行为改动** |
 | 第十轮 | 🆕 **补完 §15.8 记下的 I1 欠账**（§16）—— **153 条**内联断言补上锚点，再抓 **5 条**（4 条行号指错 + 1 条把 Java 事实误记成 Go）；**台账体检**：2 条死指针 + 3 处过期数字 + 4 处裸行号 + **6 处 RAG 侧锚点位移**已修，**6 个 Go 源文件未落点**已补记 ⇒ 新工具 `tools/ledger-lint/favorite/check-ledger-selfcheck.py`（EXIT=0） |
 | 第十二轮 | 🆕 **可动项 A + B 落地**（§19）—— 🔴 **权威读 HTTP 面的双侧活体对拍做成了**（新工具 `tools/authority-live-probe/favorite/`，**21 个 case：20 个逐字节一致 + 1 个 SKIP**）⇒ **U7 的局部活体对拍 6 项 → 7 项**；并抓出并**已修 1 条真缺陷**（200 路径少一个尾部换行字节）<br>🆕 **域外写入方盘点机检**（新工具 `tools/outbox-writer-audit/favorite/`）⇒ 本仓 **0 个域外写入方**（EXIT=0）<br>| 第十一轮 | 🆕 **三条候选签字**（§17）—— DEV-FAV-API-002 / RPC-006 / RPC-007 ⇒ **本域已无 🏷 候选**；顺带改正 §0 头部一处**过期断言**（「未做变异验证」只适用 §0–§8）<br>📌 **域内「可动项」清单**（§18）—— 🔴 **权威读 HTTP 面的双侧活体对拍其实做得了**（不需要 etcd/Kafka/Redis/user-rpc/article-rpc）· 🟡 域外写入方盘点（V7 前置）· ⬜ 跨域项收口在 `global` |
+| 第十四轮 | 🆕 **api 整域双侧活体对拍**（§22）—— 新探针 `tools/api-full-parity-probe/favorite/`：**32 case · 24 SAME / 1 SAME_CODE / 2 SAME_BODY / 4 SAME_STATUS / 1 OBS ⇒ 0 条新缺陷**；两侧 = **Go 真源**（22 个逐字节复制件 + sha256 校验）与 **RAG 两个 `java -jar` 真进程** + **共用一个 Redis**<br>🔴 **B-1 闭合并推翻第十三轮结论**（grpc-go 未知方法/服务的措辞差异 = **探针自己把 `:path` 拼成双斜杠**）<br>🔴 **2 个 RAG 侧启动阻塞已修**（`favorite-rpc`/`favorite-api` **从未被验证能以真实进程启动**）<br>🆕 **域外写入方盘点机检扩面**（`tools/outbox-writer-audit/favorite/` + `CHECKLIST.md`） |
+| 第十四轮收尾 | 🔴 **探针健壮性加固**（§23）—— 消除「**环境红**」假红：4 个起 PG 的探针**统一**改成 **探 TCP + 180s + 重建重试 + 容器退出即放弃**；新增守门网 `tools/probe-gate/favorite/`（含变异验证）；**零行为改动**、**0 条新漂移** |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -1642,9 +1644,113 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 | `docs/Pitfalls/_INDEX.md` | 坑档新增 **3 条**：**PIT-FAV-RPC-017**（grpc-java 的 fullMethodName 不带前导斜杠）/ **PIT-FAV-RPC-018**（`@SpringBootTest` 掩盖「模块能不能真起」）/ **PIT-FAV-RPC-019**（rpc 与 api 的 Nacos 处置相反） |
 | `docs/DRIFT/_MANIFEST.json` | 重新生成（`python3 tools/drift-move.py verify`） |
 | `docs/Intentional_Deviations/_INDEX.md` | ⚠️ **本轮无新增签字项** ⇒ 已签字条数**不变**（仍是 58；撤销计入则 60）⇒ 合并时只需确认未被误改 |
+| `docs/Pitfalls/_INDEX.md` | （第十四轮**收尾**追加）坑档再增 **1 条**：**PIT-FAV-RPC-020**（探针的「环境红」不是「被测代码红」—— 等待过短 / 探活探错目标 ⇒ 假红）⇒ **本域坑位 19 → 20 条** |
+| `docs/DRIFT/_INDEX.md` | （第十四轮**收尾**追加）本域探针清单加 `probe-gate`（**PG 就绪守门网**，新工具）⇒ §23 |
 
 > ⚠️ **本轮新增的 2 条跨域项**（§22.4）收口在 `global`：
 > ① **405 响应多一个 `Content-Type`**（落点 `service/common` 的 `GoStyleRouterErrorResponses` —— 它的 javadoc 说「容器不会补 Content-Type」，**实测被证伪**）；
 > ② **Go 响应多一个 W3C `traceparent`**（可观测层）。
 > ⇒ 两条**本域只登记不修**（`service/common/**` 是共享面）。
 > ⚠️ 另有一条**更广的跨域清单**（§22.3 的 `grpc-inprocess` 运行时缺失 ⇒ **全仓 13 个别域模块**同样起不来）⇒ 归 `global`。
+
+---
+
+## 23. 第十四轮收尾 · 🔴 **探针健壮性加固**（消除「环境红」假红）
+
+> **建章时间**：2026-10-25（第十四轮交付后的收尾）
+> **性质**：**零行为改动** —— 改的全是 `tools/*/favorite/run.sh`（探针设施）+ 新增守门网，
+> **不碰** `service/favorite/**` 的任何一行 Java / SQL。
+> ⚠️ **本域 0 条新漂移** —— 本章记的是**探针基建缺陷**，不是 Go ↔ RAG 差异。
+
+### 23.1 现象：单跑绿、连跑红
+
+第十四轮把 favorite 域 9 个探针**串行连跑**（机器 load avg ≈ 10，别的会话在跑）：
+
+| 探针 | 单跑 | 连跑 |
+|---|---|---|
+| api 整域对拍 · gRPC 契约对拍 · api envelope · DDL · proto wire · authority path · metrics · errmsg | ✅ EXIT=0 | ✅ EXIT=0 |
+| **authority live 对拍** | ✅ EXIT=0 | ❌ **EXIT=2 · `PG 没起来`** |
+
+⇒ **同一个 commit、同一份代码**，单跑绿、连跑红 ⇒ **第一反应不该是「被测代码坏了」**。
+
+### 23.2 根因（两条叠在一起）
+
+1. **探活探错了目标** —— `pg_isready -U postgres`（**没带 `-h`**）⇒ 走 **unix socket**。
+   PG 官方镜像初始化阶段只起一个**临时 server**，它**只监听 unix socket**（`listen_addresses=''`）
+   ⇒ socket 探活会**假就绪**；紧接着的 `CREATE DATABASE` 才去撞「系统正在启动」而随机失败。
+   ⚠️ 4 个探针里**只有 `authority-live` 探 socket**，另外 3 个（`ddl-parity` / `grpc-contract` /
+   `api-full-parity`）**本来就带 `-h`** ⇒ 这次假红**只有它中招**，不是全部。
+2. **等待上限太短** —— `for _ in $(seq 1 40)`（**40s**）⇒ 机器高负载时 PG 的 `initdb` 本身就要几十秒
+   ⇒ **还没起来就判死**。
+
+⇒ ⚠️ **反向风险更大**：socket 假就绪后若 `CREATE DATABASE` 恰好蒙对 ⇒
+探针会**带着一个没真正就绪的 PG 跑下去** ⇒ **那一轮的结论本身不可信**（不只是报错不可信）。
+
+### 23.3 修法：4 个起 PG 的探针**统一**加固
+
+新工具：[`tools/probe-gate/favorite/`](../../../../tools/probe-gate/favorite/README.md)
+
+| 探针 | 原等待 | 改后 |
+|---|---|---|
+| `authority-live` | 40s · **探 socket** | **180s · 探 TCP** · 重建重试 · 容器退出即放弃 |
+| `ddl-parity` | 60s · 探 TCP | **180s · 探 TCP** · 重建重试 · 容器退出即放弃 |
+| `grpc-contract` | 60s · 探 TCP | **180s · 探 TCP** · 重建重试 · 容器退出即放弃 |
+| `api-full-parity` | 60s · 探 TCP | **180s · 探 TCP** · 重建重试 · 容器退出即放弃 |
+
+统一后的三件套（4 份 `run.sh` **逐条一致**）：
+- ① **探 TCP**（`-h 127.0.0.1`）—— 不是 socket；
+- ② 上限 **180s**；
+- ③ 没就绪 ⇒ **重建容器再来一次**（容器起不来 = 资源竞争 / 端口映射失败）；
+- ④ **容器自己退出 ⇒ 立刻放弃等待**（`--rm` ⇒ 退出会被删掉 ⇒ `docker inspect` 失败 ⇒ 别白等满超时）。
+
+顺带（同类脆弱点，一并收紧）：
+- `api-full-parity` 的 **Redis** 等待 30s → **60s** + 「容器退出即放弃」；
+- `grpc-contract` 的 **Go server 端口**等待 60s → **120s**（Go server 启动要连 PG 跑 InitDB）。
+
+🔴 **另有一处同源脆弱点（端口归属）—— 与 §23.1 是同一类「环境红」，但后果更重**：
+`api-full-parity` 与 `grpc-contract` 原先用 `bind(("127.0.0.1", 0))` 拿 **OS 随机端口**
+⇒ 落在**临时端口段 49152–65535** ⇒ **正是 Docker 随机发布容器端口的段**
+⇒ macOS 上 `127.0.0.1:P` 会**抢占**服务绑的 `0.0.0.0:P`
+⇒ 探针客户端会**打到别人的服务**（本机实测那次打到了 PostgreSQL）
+⇒ ⚠️ 探针侧比 JUnit 侧更危险：`wait_port` **只验「连得上」** ⇒ **连到别人的服务也算就绪**
+⇒ ⇒ 探针结论会**整个不可信**（而不只是报错）。
+⇒ 已一并改成**专用端口段 21400–21599 + 双绑定自检**（`0.0.0.0:P` 且 `127.0.0.1:P` 都要能绑）。
+⇒ 完整实证与判据 ⇒ [`docs/DRIFT/favorite/api.md`](api.md) §9 · [`docs/Pitfalls/favorite/api.md`](../../Pitfalls/favorite/api.md) **PIT-FAV-API-008**。
+
+### 23.4 守门网（**新工具**）—— 加固自己不能变成橡皮章
+
+`tools/probe-gate/favorite/check-pg-readiness.sh`：**从每个 `run.sh` 原样 `sed` 出真函数**
+（`awk '/^wait_pg_tcp\(\) \{/,/^\}$/'`，**不重写、不 mock**）⇒ 跑 3 个场景：
+
+| # | 场景 | 期望 | 抓什么 |
+|---|---|---|---|
+| ① | 容器**根本不存在** | 返回 `1` | **假就绪** ⇒ 探针带空环境往下跑 ⇒ **假绿** |
+| ② | 容器**启动即退** | 返回 `1` 且 **< 30s** | **白等满 180s 超时** |
+| ③ | **真 PG 容器** | 返回 `0` | 把真就绪判成没就绪 ⇒ 探针永远跑不起来 |
+
+⚠️ **4 份副本漂移也会被 ①③ 抓到**（域内不共享 `tools/` 根 ⇒ 4 份副本是既成事实）。
+
+⇒ **变异验证**（守门网自己不是橡皮章）：把 `authority-live` 的 `wait_pg_tcp` 改成**永远 `return 0`**
+⇒ 守门网 **EXIT=1**，且**只**报 `authority-live` 这一份红（场景① 假就绪 + 场景② 误判就绪），
+其余 3 份仍绿 ⇒ **能定位到具体副本**，不是「全红」。
+
+### 23.5 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| `tools/probe-gate/favorite/check-pg-readiness.sh`（新） | ✅ **EXIT=0**（4 个探针 × 3 场景 = 12 项全过） |
+| ↳ **变异验证** | `wait_pg_tcp` 永远 `return 0` ⇒ **EXIT=1 · 2 项红**（只报被改的那一份）⇒ 非假绿 |
+| `tools/probe-gate/favorite/check-port-ownership.sh`（新） | ✅ **EXIT=0**（2 个探针 × 4 场景 = 8 项全过） |
+| 本域 9 个探针**串行连跑** | ✅ **全 EXIT=0**（authority-live 30s · ddl 9s · grpc-contract 34s · api-full-parity 52s · api-envelope 17s · proto-wire 9s · authority-path 13s · metrics 1s · errmsg 5s） |
+| 本域全量测试 | ✅ **BUILD SUCCESS** —— `mvn -o -pl service/favorite/favorite-{proto,common,rpc,api} -am test`：<br>favorite-api **94 例**（含 1 skip；**新增 4 例**端口归属守门测试）· favorite-rpc **84 例**（含 1 skip）· favorite-common **29 例** · service/common **174 例** · users-common **33 例** ⇒ **全绿，0 失败 0 错误** |
+| `service/favorite/**` 的**产品代码** | **零改动**（本轮只动 `tools/` 与 **测试**代码 ⇒ `service/favorite/**/src/main/**` 一行没动） |
+
+### 23.6 ⚠️ 推广面（**归 `global` 收口域**，本域只写自己这份）
+
+- `tools/difftest/` 下**别的域**的脚本有**同款**写法（`run-message-ddl-parity.sh` /
+  `exp-go-concurrent-automigrate.sh` 里就带着**同款注释**与同款坑）⇒ **大概率普遍存在**；
+- `hot` 域**已记过同款**（「并行跑时 Testcontainers 容器起不来 ⇒ 看起来像回归其实不是」）
+  ⇒ 两条合起来说明这是**探针基建约定层**的问题，不是某一域的个别 bug；
+- ⇒ **别的域需各自复制 `tools/probe-gate/<域>/`** ⇒ 登记在 `global`。
+
+⇒ 元教训全文 ⇒ [`docs/Pitfalls/favorite/rpc.md`](../../Pitfalls/favorite/rpc.md) 的 **PIT-FAV-RPC-020**。

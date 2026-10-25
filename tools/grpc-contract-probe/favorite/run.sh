@@ -114,17 +114,40 @@ say "   真源 go.mod：go-zero ${GOZERO_VER}（不写死版本、不 tidy）"
 
 # ── 3. 起真 PG（两个库：godb = Go 侧 / first_db = RAG 侧）──────────────────
 say "起 postgres:16-alpine 容器：${PG_CONTAINER}"
-docker run -d --rm --name "${PG_CONTAINER}" \
-  -e POSTGRES_PASSWORD=probe -e POSTGRES_USER=postgres \
-  -p 0:5432 postgres:16-alpine >/dev/null || die "容器启动失败"
-PG_PORT="$(docker port "${PG_CONTAINER}" 5432/tcp | head -1 | sed 's/.*://')"
-[ -n "${PG_PORT}" ] || die "拿不到 PG 映射端口"
-# ⚠️ 必须探 TCP（-h 127.0.0.1）：PG 官方镜像初始化阶段的临时 server 只监听 unix socket
-for _ in $(seq 1 60); do
-  docker exec "${PG_CONTAINER}" pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1 && break
-  sleep 1
+# ⚠️ PG 就绪等待三件套（2026-10-25 第十四轮修 —— 批跑时机器高负载 ⇒ **假红**）：
+#   ① 必须探 **TCP**（-h 127.0.0.1）：PG 官方镜像初始化阶段的临时 server 只监听 unix socket
+#      ⇒ 走 socket 探活会**假就绪**（然后 CREATE DATABASE 撞上"系统正在启动"而随机失败）。
+#   ② 上限 **180s**（不是 60s）：机器高负载时 initdb 本身就要几十秒。
+#   ③ 没就绪就**重建容器重来一次**：容器起不来（资源竞争 / 端口映射失败）时重来更稳。
+wait_pg_tcp() {
+  local tries="$1" i
+  for i in $(seq 1 "${tries}"); do
+    docker exec "${PG_CONTAINER}" pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1 && return 0
+    # 容器自己退出了就别白等满超时（--rm ⇒ 退出会被删掉 ⇒ inspect 失败）
+    [ "$(docker inspect -f '{{.State.Running}}' "${PG_CONTAINER}" 2>/dev/null || echo false)" = "true" ] || return 1
+    sleep 1
+  done
+  return 1
+}
+PG_PORT=""
+PG_READY=0
+for attempt in 1 2; do
+  docker rm -f "${PG_CONTAINER}" >/dev/null 2>&1 || true
+  if ! docker run -d --rm --name "${PG_CONTAINER}" \
+      -e POSTGRES_PASSWORD=probe -e POSTGRES_USER=postgres \
+      -p 0:5432 postgres:16-alpine >/dev/null; then
+    say "   PG 容器第 ${attempt} 次启动失败 ⇒ 重来"
+    continue
+  fi
+  PG_PORT="$(docker port "${PG_CONTAINER}" 5432/tcp | head -1 | sed 's/.*://')"
+  if [ -z "${PG_PORT}" ]; then
+    say "   第 ${attempt} 次拿不到 PG 映射端口 ⇒ 重来"
+    continue
+  fi
+  if wait_pg_tcp 180; then PG_READY=1; break; fi
+  say "   PG 第 ${attempt} 次 180s 内没就绪 ⇒ 重建容器重来"
 done
-docker exec "${PG_CONTAINER}" pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1 || die "PG 没就绪"
+[ "${PG_READY}" = "1" ] || die "PG 没就绪（已重建容器重试 1 次）"
 for db in godb first_db; do
   ok_db=0
   for _ in $(seq 1 15); do
@@ -148,8 +171,41 @@ say "Go 侧建表（sql-first：AutoMigrate(老表) → 真源 001..004 → 应�
 ok "Go 侧 schema 就绪"
 
 # ── 5. 起 Go 真源 favorite-rpc server ─────────────────────────────────────
-GO_PORT="$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')"
-RAG_PORT="$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')"
+# ⚠️ 端口选取：**专用端口段 + 双绑定自检**（2026-10-25 实测踩出来的坑）
+#   OS 随机端口在临时端口段 49152–65535 ⇒ 正是 Docker 随机发布容器端口的段；
+#   macOS 上 `127.0.0.1:P` 会**抢占**通配地址 `0.0.0.0:P` ⇒ 客户端连 127.0.0.1:P
+#   会打到**别的容器**（实测那次打到了 PostgreSQL）⇒ 表现为「连上了但不是自己的服务」。
+#   ⇒ 专用端口段 21400–21599，且 `0.0.0.0:P` 与 `127.0.0.1:P` **都要能绑**才算可用。
+pick_free_port() {
+  python3 - "$@" <<'PY'
+import socket, sys
+FIRST, LAST = 21400, 21599
+used = {int(x) for x in sys.argv[1:] if x.strip()}
+for p in range(FIRST, LAST + 1):
+    if p in used:
+        continue
+    socks = []
+    try:
+        for addr in (("0.0.0.0", p), ("127.0.0.1", p)):
+            s = socket.socket()
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(addr)
+            s.listen(1)
+            socks.append(s)
+        print(p)
+        break
+    except OSError:
+        for s in socks:
+            s.close()
+else:
+    sys.exit("端口段 %d-%d 已占满（并行会话太多？）" % (FIRST, LAST))
+PY
+}
+USED_PORTS=()
+# ⚠️ macOS 自带 bash 3.2：`set -u` 下展开**空数组**会报 `unbound variable`
+#    ⇒ 用 ${arr[@]+"${arr[@]}"} 这个 bash 3.2 安全的写法。
+GO_PORT="$(pick_free_port ${USED_PORTS[@]+"${USED_PORTS[@]}"})"; USED_PORTS+=("${GO_PORT}")
+RAG_PORT="$(pick_free_port ${USED_PORTS[@]+"${USED_PORTS[@]}"})"
 say "Go server 端口 ${GO_PORT} / RAG server 端口 ${RAG_PORT}"
 
 cat > "${TMP}/probe.yaml" <<YAML
@@ -188,8 +244,9 @@ say "编译并启动 Go 真源 favorite-rpc server"
 GO_PID=$!
 
 # 等端口真的在监听（不能只看进程还在）
+# ⚠️ 上限 120s（不是 60s）：Go server 启动要连 PG 跑 InitDB，机器高负载时会慢。
 UP=0
-for _ in $(seq 1 60); do
+for _ in $(seq 1 120); do
   if python3 -c "import socket,sys;s=socket.socket();s.settimeout(0.5);sys.exit(0 if s.connect_ex(('127.0.0.1',${GO_PORT}))==0 else 1)"; then
     UP=1; break
   fi

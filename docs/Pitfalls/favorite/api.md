@@ -265,3 +265,98 @@ Spring 的 `@ExceptionHandler(IllegalArgumentException.class)` **只按类型匹
 
 ⚠️ 另有一条**同源的坑**：`jsonx.Marshal` 会**去掉尾换行**（`encoding/json` 的 `Encoder.Encode`
 会加一个）⇒ 手写复刻 Go 的 JSON 输出时，**多一个或少一个 `\n` 就是字节不一致**。
+
+---
+
+## PIT-FAV-API-008 · 🔴 **`RANDOM_PORT` 挑的端口可能根本不是你的**（同号端口被别的会话的容器抢走 ⇒ 请求打到 PostgreSQL 上）
+
+### 现象
+
+2026-10-25 第十四轮收尾跑全量测试，`favorite-api` 的
+`FavoriteApiRealTomcatGateTest` **8 个用例全部 ERROR**：
+
+```
+java.io.IOException: HTTP/1.1 header parser received no bytes
+  Caused by: java.io.EOFException: EOF reached while reading
+```
+
+⇒ 8 个用例**秒挂**（总共 0.829s），而同一 commit：
+- 单独跑该类 ⇒ **全绿**（8/8）；
+- 同 JVM 里 **5 秒后**启动的另一个 Tomcat（`FavoriteApiEnvelopeParityTest`）⇒ **全绿**；
+- 前 20 分钟的同一次全量跑 ⇒ **全绿**。
+
+⇒ **同一份代码、同一个执行顺序**，绿↔红翻转 ⇒ 第一反应不该是「被测代码坏了」。
+
+### 根因（本机实测实证，不是推断）
+
+1. `@SpringBootTest(webEnvironment = RANDOM_PORT)` ⇒ **OS 从临时端口段（macOS：49152–65535）里挑**。
+   ⚠️ **Docker 随机发布容器端口用的就是同一段** ⇒ 本机是**多会话并行**的机器，
+   别的会话的容器随时可能在 `127.0.0.1:P` 上挂一个 PG / Redis。
+   ⇒ 2026-10-25 09:10 那次，**别的会话的 `cdifftest-postgres` 已经连续 26 小时占着
+   `127.0.0.1:55440`**（`docker ps` 实测），而本测试的 Tomcat **恰好挑中了 55440**。
+2. **macOS/BSD 的 socket 语义让这件事「静默」**（本机 Python 实测）：
+   - `127.0.0.1:P` 与 `0.0.0.0:P` **可以共存**（都带 `SO_REUSEADDR`）
+     ⇒ **Tomcat 绑 `0.0.0.0:55440` 会照样启动成功**，启动日志照样打
+     「Tomcat started on port 55440」⇒ **它并不知道这个端口号还有另一个更具体的监听者**；
+   - 客户端连 `127.0.0.1:P` ⇒ **命中更具体的那个**（实测命中 `specific-127.0.0.1`，
+     **不是** `wildcard-0.0.0.0`）。
+3. ⇒ 于是客户端把 HTTP 请求打到了 **PostgreSQL** 上 ⇒ 协议不匹配 ⇒
+   **一个字节都不回就关连接** ⇒ 客户端报 `EOFException` ⇒
+   表现成 `HTTP/1.1 header parser received no bytes`。
+
+⇒ **最阴的地方**：Tomcat **确实起来了**、**端口号确实是我们挑的**、**日志一切正常** ——
+只有「客户端连的地址」被别人截胡了 ⇒ **不查端口归属就永远查不出来**。
+
+### 怎么不再踩
+
+⇒ **判据**：
+> 「端口号是我挑的」**不等于**「这个端口是我的」。
+> macOS 上**必须同时**满足：`0.0.0.0:P` 可绑（没别的 Tomcat 抢通配地址）
+> **且** `127.0.0.1:P` 可绑（没别的容器抢更具体的地址）。
+
+⇒ 本域落地（`service/favorite/favorite-api/src/test/java/.../support/RealTomcatPort.java`）：
+- **自己挑端口**：专用端口段 **21300–21399**（刻意**避开** OS 临时端口段
+  ⇒ 与 Docker 随机发布端口**不同段**）；
+- **双绑定自检**：先把 `0.0.0.0:P` 与 `127.0.0.1:P` **同时**绑上（绑不上 ⇒ 跳过该端口）
+  ⇒ 任何第三方持有者都会被排除（实测：Docker 占着 `127.0.0.1:55440` 时，
+  绑 `127.0.0.1:55440` 报 `EADDRINUSE`）；
+- 两个测试类 ⇒ `DEFINED_PORT` + `@DynamicPropertySource`（⚠️ **两个都要探**：
+  只探 `127.0.0.1` 会漏掉「上一个测试类的 Tomcat 还占着通配地址」⇒ 两个类拿到同一个端口
+  ⇒ 后一个类 `PortInUseException` **启动失败** —— 这是本条落地时**实测踩到**的第二个坑）；
+- **失败时要说人话**：请求层把 `IOException` 包装成
+  「端口 N 上读到了 0 字节（本请求没打到本测试的 Tomcat？）；该端口的监听者=[lsof 输出]」
+  ⇒ 下一次看到就是一眼定位。
+
+⚠️ **推广面（归 `global` 收口域）**：全仓实测 **7 个域 / 14 个测试类**在用 `RANDOM_PORT`
+（`message-api` 4 · `favorite-api` 2(+1 本条的支撑类) · `hot-api` 2 · `article-api` 2 ·
+`users/user/user-api` 1 · `task-api` 1 · `like-api` 1）⇒ **同款暴露面全仓都在**
+⇒ 需要一份**共享**的端口选取实现 ⇒ 落点在 `service/common` 的 test-jar 或各域各自复制
+⇒ **本域只写自己这份**（`service/common/**` 是共享面，本域不碰）。
+
+⚠️ **同源的第二处**：本域的**探针**（`tools/api-full-parity-probe` / `tools/grpc-contract-probe`）
+原先也用 `bind(("127.0.0.1", 0))` 拿 OS 随机端口 ⇒ **同样的暴露面**
+⇒ 已一并改成「专用端口段 21400–21599 + 双绑定自检」。
+⇒ 探针侧更危险：探针的 `wait_port` 只验「连得上」⇒ **连到别人的服务也算就绪**
+⇒ 探针结论会**整个不可信**（而不只是报错）。
+
+### ⚠️ 附一条：**守门测试自己也会被环境左右**
+
+修完之后给它配守门测试时，第一版写法是「**占住端口段的第一个端口**，然后断言 `pick()` 绕开它」
+⇒ **单独跑绿，全量套件里直接红**：
+
+```
+RealTomcatPortTest.skipsPortHeldOnWildcard » BindException: Address already in use
+```
+
+⇒ 原因：**同一个 JVM 里，上一个 Spring 测试类的 Tomcat 还活着**
+（Spring 会**缓存**测试上下文 ⇒ 它的端口**本来就是**端口段的第一个）
+⇒ 测试想占的那个端口**早就被占着** ⇒ 守门测试自己被环境左右。
+
+⇒ **怎么不再踩**：
+> 守门测试**不许去抢「被测对象正在用的资源」** ——
+> 它必须用**独立的脚手架资源**（这里是另一段端口）⇒ 与「谁还活着」完全无关。
+
+⇒ 本域落地：判定逻辑 `RealTomcatPort.isFree(int)` 改成**包级可见** ⇒ 守门测试直接断言它；
+「被占」样本用**独立脚手架端口段 21950–21999**（不碰生产用的 21300–21399）。
+⇒ 附带一条通用判据：**「守门网在单跑与全量里结论不同」⇒ 先怀疑守门网自己依赖了共享状态**，
+而不是先怀疑被测代码。

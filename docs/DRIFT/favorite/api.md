@@ -402,3 +402,94 @@ CheckBlacklistMiddleware: middleware.NewCheckBlacklistMiddleware(redisDB).Handle
 
 ⚠️ **共享索引未动**（AGENTS.md §5.3 共享面禁写）⇒ **合并后需主会话统一更新**：
 `docs/Intentional_Deviations/_INDEX.md` 的已签字条数 **49 → 58**（含本条 API-002）。
+
+---
+
+## 8. 2026-10-25 第十四轮收尾 —— **探针健壮性加固**（零行为改动 · 0 条新漂移）
+
+> 本节**只记指针**：细节在 [`rpc.md`](rpc.md) 的 **§23**（探针基建缺陷，不属于 api 组件的语义漂移）。
+
+| 项 | 值 |
+|---|---|
+| 影响到的 api 侧探针 | `tools/api-full-parity-probe/favorite/`（**api 整域双侧活体对拍**，32 case） |
+| 改了什么 | 探针的 **PG 就绪等待**：40s→**180s**、**探 TCP**（不是 unix socket）、没就绪**重建容器重试**、容器退出即放弃；顺带 Redis 等待 30s→**60s** |
+| 对**被测代码**的影响 | **零** —— `service/favorite/**` 本轮**一行没动**；**0 条新漂移** |
+| 为什么改 | 第十四轮连跑时 `authority-live` 探针**假红**（单跑绿 / 连跑红）⇒ 根因是**探针自己的等待逻辑**，不是被测代码 ⇒ 元教训 **PIT-FAV-RPC-020** |
+| 新守门网 | `tools/probe-gate/favorite/check-pg-readiness.sh`（**EXIT=0**；变异验证：改坏一份 ⇒ 守门网**只**报那一份红） |
+| 本轮复跑 | 本域 **9 个探针串行连跑全 EXIT=0**（含 api-full-parity 82s） |
+
+⚠️ **共享索引未动**（AGENTS.md §5.3 共享面禁写）⇒ **合并后需主会话统一更新**：
+`docs/Pitfalls/_INDEX.md` 增 **PIT-FAV-RPC-020**；`docs/DRIFT/_INDEX.md` 的 favorite 探针清单加 `probe-gate`。
+
+---
+
+## 9. 2026-10-25 第十四轮收尾 —— 🔴 **真 Tomcat 测试的「端口归属」**（`RANDOM_PORT` 会被别的会话抢号）
+
+> 本节记的是**测试设施缺陷**，**不是** Go ↔ RAG 语义漂移 ⇒ **0 条新漂移**、**产品代码零改动**。
+> 完整经过与判据 ⇒ [`docs/Pitfalls/favorite/api.md`](../../Pitfalls/favorite/api.md) 的 **PIT-FAV-API-008**。
+
+### 9.1 现象
+
+全量测试里 `FavoriteApiRealTomcatGateTest` **8 例全 ERROR**（`HTTP/1.1 header parser received no bytes`），
+但**单跑绿**、**同 JVM 里后一个 Tomcat 也绿**、**前 20 分钟的同一次全量跑也绿**
+⇒ 同 commit、同顺序，**绿↔红翻转**。
+
+### 9.2 根因（**本机实测实证**）
+
+| 环节 | 实测事实 |
+|---|---|
+| 端口来源 | `RANDOM_PORT` ⇒ OS 从**临时端口段 49152–65535** 挑 —— **Docker 随机发布端口就在这一段** |
+| 占用者 | 别的会话的 `cdifftest-postgres` 已连续 **26 小时**占着 `127.0.0.1:55440`（`docker ps` 实测） |
+| socket 语义 | `127.0.0.1:P` 与 `0.0.0.0:P` **可共存**（SO_REUSEADDR）⇒ **Tomcat 绑 `0.0.0.0:55440` 照样启动成功** |
+| 路由 | 客户端连 `127.0.0.1:P` ⇒ **命中更具体的那个**（实测：specific-127.0.0.1，不是 wildcard-0.0.0.0） |
+| 结果 | 请求打到 **PostgreSQL** ⇒ 协议不匹配 ⇒ **零字节即关** ⇒ `EOFException` |
+
+⇒ **Tomcat 确实起来了、端口号确实是我们挑的、日志一切正常** —— 只有客户端连的地址被别人截胡。
+
+### 9.3 修法（**零产品代码改动**，只动测试设施）
+
+| 项 | 改前 | 改后 |
+|---|---|---|
+| 端口来源 | `RANDOM_PORT`（OS 临时端口段） | **自选专用端口段 21300–21399**（避开临时端口段 ⇒ 与 Docker 发布端口不同段） |
+| 端口自检 | 无 | **双绑定自检**：`0.0.0.0:P` **且** `127.0.0.1:P` 都要能绑 ⇒ 任何第三方持有者都被排除 |
+| 测试类配置 | `webEnvironment = RANDOM_PORT` | `DEFINED_PORT` + `@DynamicPropertySource`（⚠️ **两个都要探**：只探 `127.0.0.1` 会漏掉「上一个类的 Tomcat 还占着通配地址」⇒ 本轮落地时**实测踩到**） |
+| 失败信息 | 裸 `IOException` | 包装成「端口 N 上读到了 0 字节…；该端口的监听者=[lsof 输出]」 |
+| 探针侧（**同源**） | `tools/{api-full-parity,grpc-contract}-probe` 用 `bind(("127.0.0.1",0))` | 同样改成**专用端口段 21400–21599 + 双绑定自检**（⚠️ 探针侧更危险：`wait_port` 只验「连得上」⇒ **连到别人的服务也算就绪** ⇒ 探针结论**整个不可信**） |
+
+新增支撑类：`service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/support/RealTomcatPort.java`
+
+### 9.4 验证
+
+| 项 | 结果 |
+|---|---|
+| `FavoriteApiRealTomcatGateTest` + `FavoriteApiEnvelopeParityTest` | ✅ **8/8 + 5/5 全绿**，且**两个 Tomcat 各拿各的端口**（21300 / 21301 ⇒ 双绑定自检确实避开了上一个类） |
+| 新增守门测试 `RealTomcatPortTest` | ✅ **4/4 全绿**（**与 Spring 测试同 JVM 跑** ⇒ 证明它不依赖「谁还活着」） |
+| `tools/probe-gate/favorite/check-port-ownership.sh`（新） | ✅ **EXIT=0**（2 个探针 × 4 场景 = 8 项全过） |
+| 端口分配逻辑单测（自写） | ✅ 连续取 5 个**互不相同**；人为占住 `127.0.0.1:21400` 后**跳过它** ⇒ 双绑定自检有效 |
+| 本域全量测试 | ✅ **BUILD SUCCESS** —— `favorite-api` **94 例**（含 1 skip）· `favorite-rpc` 84 例（含 1 skip）· `favorite-common` 29 例 · `service/common` 174 例 · `users-common` 33 例 ⇒ **全绿，0 失败 0 错误** |
+
+⚠️ **守门测试自己也被环境左右过一次（已修，值得记）**：
+第一版守门测试写的是「**占住端口段的第一个端口** ⇒ 断言 `pick()` 绕开它」
+⇒ **单独跑绿、全量套件里红**（`BindException: Address already in use`）
+⇒ 因为**同一个 JVM 里上一个 Spring 测试类的 Tomcat 还活着**（Spring 缓存测试上下文）
+⇒ 它占的**本来就是**端口段第一个端口 ⇒ 测试想占的那个**早就被占着**
+⇒ ⇒ 改成：判定逻辑 `RealTomcatPort.isFree(int)` **包级可见** + 守门测试用**独立脚手架端口段 21950–21999**。
+⇒ 通用判据：**「守门网在单跑与全量里结论不同」⇒ 先怀疑守门网自己依赖了共享状态。**
+
+### 9.5 ⚠️ 推广面（**归 `global` 收口域**，本域只写自己这份）
+
+全仓实测 **7 个域 / 14 个测试类**在用 `RANDOM_PORT`：
+
+| 域 | 个数 | 文件 |
+|---|---|---|
+| `message` | **4** | `MessageApiProtectionRealTomcatTest` / `MessageApiTimeoutRealTomcatTest` / `MessageApiProtectionMvcTest` / `GoStyleGrpcClientBreakerE2ETest` |
+| `favorite` | 2 | ✅ **本轮已修** |
+| `hot` | 2 | `HotApiRealTomcatGateTest` / `GoStyleGrpcClientBreakerE2ETest` |
+| `article` | 2 | `ArticleApiFormParamLimitTest` / `ArticleApiAssemblyWiringTest` |
+| `users/user` | 1 | `GoStyleGrpcClientBreakerE2ETest` |
+| `task` | 1 | `TaskApiContentTypeTest` |
+| `like` | 1 | `LikeApiRouterErrorRealTomcatTest` |
+
+⇒ **同款暴露面全仓都在** ⇒ 需要一份**共享**的端口选取实现
+⇒ 落点二选一（**本域不拍板**）：`service/common` 的 test-jar，**或**各域各自复制本域这份
+⇒ **本域只写自己这份**（`service/common/**` 是共享面，本域不碰）。

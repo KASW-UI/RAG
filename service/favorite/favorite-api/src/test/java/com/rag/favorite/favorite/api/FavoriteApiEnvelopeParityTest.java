@@ -7,6 +7,7 @@ import com.rag.favorite.favorite.api.client.FavoriteRpcClient;
 import com.rag.favorite.favorite.api.dto.FavoriteFolder;
 import com.rag.favorite.favorite.api.dto.FavoriteItem;
 import com.rag.favorite.favorite.api.dto.GetFavoriteFoldersResp;
+import com.rag.favorite.favorite.api.support.RealTomcatPort;
 import com.rag.favorite.favorite.common.errmsg.FavoriteErrorCode;
 import com.rag.favorite.favorite.common.errmsg.FavoriteErrorMessages;
 import com.rag.users.common.jwt.JwtUtil;
@@ -20,10 +21,13 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.server.ServerHttpResponse;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -72,12 +76,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 自己 {@code new ObjectMapper()} 就是「拿自己的一份副本自证」（AGENTS.md §3.3）。
  * ⇒ 本类注入 <b>Spring 管理的</b> {@link ObjectMapper}，并用<b>真实</b>的
  * {@link GlobalResponseAdvice} 走一遍 advice ⇒ 产出与容器里完全相同的字节。
- * <p>⇒ 另有一条用例走<b>真 HTTP</b>（{@code webEnvironment = RANDOM_PORT}），
+ * <p>⇒ 另有一条用例走<b>真 HTTP</b>（{@code webEnvironment = DEFINED_PORT} + 自选端口），
  * 用真实响应体反证「advice + mapper == 真实管线」这条等价关系成立。
  */
 @SpringBootTest(
         classes = FavoriteApiApplication.class,
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT,
         properties = {
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "spring.cloud.nacos.discovery.enabled=false",
@@ -98,6 +102,20 @@ class FavoriteApiEnvelopeParityTest {
 
     @LocalServerPort
     private int port;
+
+    /**
+     * <b>为什么不用 {@code RANDOM_PORT}</b>（2026-10-25 实测踩出来的，见
+     * {@link RealTomcatPort} 的类注释）：{@code RANDOM_PORT} 挑的是 OS <b>临时端口段</b>，
+     * 而<b>别的会话的 Docker 容器正好在那一段发布端口</b>；macOS 上 {@code 127.0.0.1:P} 会
+     * <b>抢占</b> Tomcat 绑的 {@code 0.0.0.0:P} ⇒ 客户端把请求打到了别的服务 ⇒
+     * <b>零字节即关</b> ⇒ 看着像被测代码炸了，其实压根没打到。
+     *
+     * <p>⇒ 改成 <b>自己挑一个确定归我们的端口</b>（专用端口段 + bind 自检）。
+     */
+    @DynamicPropertySource
+    static void serverPort(DynamicPropertyRegistry registry) {
+        registry.add("server.port", RealTomcatPort::pick);
+    }
 
     @MockitoBean
     private FavoriteRpcClient rpcClient;
@@ -404,6 +422,24 @@ class FavoriteApiEnvelopeParityTest {
                 .build();
     }
 
+    /**
+     * 发请求；<b>把「一个字节都没读到」的传输层失败翻译成人能读懂的诊断</b>
+     * （端口号 + 占用者）⇒ 免得下次又要查一轮「到底谁占了这个端口」。
+     *
+     * <p>⚠️ 背景见 {@link RealTomcatPort} 的类注释：2026-10-25 实测那次，
+     * 客户端连上 {@code 127.0.0.1:55440} 读到 0 字节 ⇒ 对端是别的会话的 <b>PostgreSQL</b>
+     * （协议不匹配 ⇒ 不回任何字节就关连接）。
+     */
+    private HttpResponse<String> send(HttpRequest req) throws Exception {
+        try {
+            return client().send(req, HttpResponse.BodyHandlers.ofString());
+        } catch (IOException e) {
+            throw new IOException("端口 " + port + " 上读到了 0 字节（本请求没打到本测试的 Tomcat？）"
+                    + "；该端口的监听者=[" + RealTomcatPort.holders(port) + "]"
+                    + "；原异常=" + e, e);
+        }
+    }
+
     private String token() {
         return JwtUtil.getToken(ACCESS_SECRET, System.currentTimeMillis() / 1000L, 3600L, 42L);
     }
@@ -413,7 +449,7 @@ class FavoriteApiEnvelopeParityTest {
                 .timeout(Duration.ofSeconds(30))
                 .GET()
                 .build();
-        return client().send(req, HttpResponse.BodyHandlers.ofString());
+        return send(req);
     }
 
     private HttpResponse<String> getWithToken(String path) throws Exception {
@@ -422,7 +458,7 @@ class FavoriteApiEnvelopeParityTest {
                 .header("Authorization", "Bearer " + token())
                 .GET()
                 .build();
-        return client().send(req, HttpResponse.BodyHandlers.ofString());
+        return send(req);
     }
 
     /**

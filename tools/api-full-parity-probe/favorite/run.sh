@@ -81,12 +81,47 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# ── 0.1 端口分配（全部随机空闲端口 ⇒ 绝不与别的会话撞）────────────────────
+# ── 0.1 端口分配（专用端口段 + 双绑定自检 ⇒ 绝不与别的会话撞）─────────────
+# ⚠️ 2026-10-25 实测踩出来的坑（**不能**再用 OS 随机端口）：
+#   OS 随机端口在**临时端口段 49152–65535**，而这正是 **Docker 随机发布容器端口**的段
+#   ⇒ 本机多会话并行时，别的会话的容器随时可能在 `127.0.0.1:P` 上挂一个 PG / Redis；
+#   ⇒ macOS/BSD 上 `127.0.0.1:P` 与 `0.0.0.0:P` **能共存**（都带 SO_REUSEADDR）
+#      ⇒ 本探针的客户端连 `127.0.0.1:P` 会**命中更具体的那个**（实测那次打到了 PostgreSQL）
+#      ⇒ 表现为「连上了但不是自己的服务」⇒ 探针结果**整个不可信**（而不只是报错）。
+#   ⇒ 改用**专用端口段 21400–21599**（避开临时端口段），且**双绑定自检**：
+#      `0.0.0.0:P` 与 `127.0.0.1:P` **都要能绑** ⇒ 任何第三方持有者都会被排除。
 free_port() {
-  python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()'
+  python3 - "$@" <<'PY'
+import socket, sys
+FIRST, LAST = 21400, 21599
+used = {int(x) for x in sys.argv[1:] if x.strip()}
+for p in range(FIRST, LAST + 1):
+    if p in used:
+        continue
+    socks = []
+    try:
+        for addr in (("0.0.0.0", p), ("127.0.0.1", p)):
+            s = socket.socket()
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(addr)
+            s.listen(1)
+            socks.append(s)
+        print(p)
+        break
+    except OSError:
+        for s in socks:
+            s.close()
+else:
+    sys.exit("端口段 %d-%d 已占满（并行会话太多？）" % (FIRST, LAST))
+PY
 }
-GO_RPC_PORT="$(free_port)"; GO_API_PORT="$(free_port)"
-RAG_RPC_PORT="$(free_port)"; RAG_API_PORT="$(free_port)"
+USED_PORTS=()
+# ⚠️ macOS 自带 bash 3.2：`set -u` 下展开**空数组**会报 `unbound variable`
+#    ⇒ 用 ${arr[@]+"${arr[@]}"} 这个 bash 3.2 安全的写法。
+GO_RPC_PORT="$(free_port ${USED_PORTS[@]+"${USED_PORTS[@]}"})"; USED_PORTS+=("${GO_RPC_PORT}")
+GO_API_PORT="$(free_port ${USED_PORTS[@]+"${USED_PORTS[@]}"})"; USED_PORTS+=("${GO_API_PORT}")
+RAG_RPC_PORT="$(free_port ${USED_PORTS[@]+"${USED_PORTS[@]}"})"; USED_PORTS+=("${RAG_RPC_PORT}")
+RAG_API_PORT="$(free_port ${USED_PORTS[@]+"${USED_PORTS[@]}"})"; USED_PORTS+=("${RAG_API_PORT}")
 say "端口：Go rpc=${GO_RPC_PORT} api=${GO_API_PORT} · RAG rpc=${RAG_RPC_PORT} api=${RAG_API_PORT}"
 
 wait_port() {  # $1=port $2=name $3=tries
@@ -144,17 +179,40 @@ say "   真源 go.mod：go-zero ${GOZERO_VER}（不写死版本、不 tidy）"
 
 # ── 3. 起真 PG（两个库：godb = Go 侧 / first_db = RAG 侧）+ 真 Redis ─────────
 say "起 postgres:16-alpine 容器：${PG_CONTAINER}"
-docker run -d --rm --name "${PG_CONTAINER}" \
-  -e POSTGRES_PASSWORD=probe -e POSTGRES_USER=postgres \
-  -p 0:5432 postgres:16-alpine >/dev/null || die "PG 容器启动失败"
-PG_PORT="$(docker port "${PG_CONTAINER}" 5432/tcp | head -1 | sed 's/.*://')"
-[ -n "${PG_PORT}" ] || die "拿不到 PG 映射端口"
-# ⚠️ 必须探 TCP（-h 127.0.0.1）：PG 官方镜像初始化阶段的临时 server 只监听 unix socket
-for _ in $(seq 1 60); do
-  docker exec "${PG_CONTAINER}" pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1 && break
-  sleep 1
+# ⚠️ PG 就绪等待三件套（2026-10-25 第十四轮修 —— 批跑时机器高负载 ⇒ **假红**）：
+#   ① 必须探 **TCP**（-h 127.0.0.1）：PG 官方镜像初始化阶段的临时 server 只监听 unix socket
+#      ⇒ 走 socket 探活会**假就绪**（然后 CREATE DATABASE 撞上"系统正在启动"而随机失败）。
+#   ② 上限 **180s**（不是 60s）：机器高负载时 initdb 本身就要几十秒。
+#   ③ 没就绪就**重建容器重来一次**：容器起不来（资源竞争 / 端口映射失败）时重来更稳。
+wait_pg_tcp() {
+  local tries="$1" i
+  for i in $(seq 1 "${tries}"); do
+    docker exec "${PG_CONTAINER}" pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1 && return 0
+    # 容器自己退出了就别白等满超时（--rm ⇒ 退出会被删掉 ⇒ inspect 失败）
+    [ "$(docker inspect -f '{{.State.Running}}' "${PG_CONTAINER}" 2>/dev/null || echo false)" = "true" ] || return 1
+    sleep 1
+  done
+  return 1
+}
+PG_PORT=""
+PG_READY=0
+for attempt in 1 2; do
+  docker rm -f "${PG_CONTAINER}" >/dev/null 2>&1 || true
+  if ! docker run -d --rm --name "${PG_CONTAINER}" \
+      -e POSTGRES_PASSWORD=probe -e POSTGRES_USER=postgres \
+      -p 0:5432 postgres:16-alpine >/dev/null; then
+    say "   PG 容器第 ${attempt} 次启动失败 ⇒ 重来"
+    continue
+  fi
+  PG_PORT="$(docker port "${PG_CONTAINER}" 5432/tcp | head -1 | sed 's/.*://')"
+  if [ -z "${PG_PORT}" ]; then
+    say "   第 ${attempt} 次拿不到 PG 映射端口 ⇒ 重来"
+    continue
+  fi
+  if wait_pg_tcp 180; then PG_READY=1; break; fi
+  say "   PG 第 ${attempt} 次 180s 内没就绪 ⇒ 重建容器重来"
 done
-docker exec "${PG_CONTAINER}" pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1 || die "PG 没就绪"
+[ "${PG_READY}" = "1" ] || die "PG 没就绪（已重建容器重试 1 次）"
 for db in godb first_db; do
   db_ok=0
   for _ in $(seq 1 15); do
@@ -171,8 +229,10 @@ say "起 redis:7-alpine 容器（**两侧共用** ⇒ 黑名单 key 在同一命
 docker run -d --rm --name "${REDIS_CONTAINER}" -p 0:6379 redis:7-alpine >/dev/null || die "Redis 容器启动失败"
 REDIS_PORT="$(docker port "${REDIS_CONTAINER}" 6379/tcp | head -1 | sed 's/.*://')"
 [ -n "${REDIS_PORT}" ] || die "拿不到 Redis 映射端口"
-for _ in $(seq 1 30); do
+# ⚠️ 同 PG：上限 60s（不是 30s）+ 容器退出了就别白等（redis-cli ping 对已删容器恒失败）
+for _ in $(seq 1 60); do
   docker exec "${REDIS_CONTAINER}" redis-cli ping 2>/dev/null | grep -q PONG && break
+  [ "$(docker inspect -f '{{.State.Running}}' "${REDIS_CONTAINER}" 2>/dev/null || echo false)" = "true" ] || break
   sleep 1
 done
 docker exec "${REDIS_CONTAINER}" redis-cli ping 2>/dev/null | grep -q PONG || die "Redis 没就绪"
