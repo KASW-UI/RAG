@@ -1,7 +1,12 @@
-# L1 · `align/global-delivery` —— X-4 like 半边（社区事实投递链路）
+# L1 · `align/global`（本体）—— X-4 like 半边（社区事实投递链路）
 
 > 本文件既是**任务书**也是本 lane 的**台账片段**：开工前读它，做完把结论追加在本文件末尾。
 > 协议见 [`_PROTOCOL.md`](_PROTOCOL.md)。
+>
+> ⚠️ **本 lane 就是 `align/global` 本体**（工作树 `../RAG.worktrees/global`）——
+> **已有一个会话在上面跑**，且它是 **L2~L5 的集成目标分支** ⇒
+> ① **不要另开 `align/global-delivery`**（重复劳动）；
+> ② **提交前只 `git add` 自己改过的文件**，⛔ **不要 `git add -A`**（会扫进别人的在途编辑，见 PIT-GLOBAL-020）。
 
 ## 一、目标
 
@@ -51,10 +56,11 @@ RAG 的 like 域**另起炉灶**写了一套 outbox + stream + scheduler，与 G
 **只写这些**：
 - `service/like/like-rpc/**`
 - `service/comment/comment-rpc/**`
+- `service/common/communityfact/Dispatcher.java`（共享层非阻塞 API —— **本域对 `service/common` 有单写权**，但**只碰这一个文件**）
 - `docs/DRIFT/global/lanes/L1-delivery.md`（本文件）
 
 **⛔ 禁区**：
-- `service/common/**`（**独占 lane 的写权在本 lane，但 `service/common` 是共享面 —— 若确需改，先在台账里写明理由与影响面，并让整合者知道**）
+- `service/common/**` 的**其余**文件（`http/` · `observability/` · `protection/` · `pom.xml` 等）
 - `service/favorite/**` 与 `docs/*/favorite/`（零写权）
 - `service/{article,hot,message,users,follow,task}/**`（别的 lane / 别的域）
 - `docs/DRIFT/global/{_README,common-tails,cross-domain,cycle-deps}.md` · `AGENTS.md` · 三个 `_INDEX.md`（共享文件，整合者统一更新）

@@ -40,13 +40,18 @@
 
 | lane | 分支 | 工作树 | 议题 | 独占写权 |
 |---|---|---|---|---|
-| **L1** | `align/global-delivery` | `../RAG.worktrees/global-delivery` | **X-4** like 半边（社区事实投递链路） | `service/like/like-rpc/**` + `service/comment/comment-rpc/**` |
+| **L1** | `align/global`（**本体**） | `../RAG.worktrees/global` | **X-4** like 半边（社区事实投递链路）+ 共享层 `Dispatcher.runAsync` | `service/like/like-rpc/**` · `service/comment/comment-rpc/**` · `service/common/communityfact/Dispatcher.java` |
 | **L2** | `align/global-rpcgate` | `../RAG.worktrees/global-rpcgate` | **X-5** 残留（3 个 rpc 域守门复查 + slow threshold） | `service/{users/user/user-rpc,message/message-rpc,hot/hot-rpc}/src/test/**` |
-| **L3** | `align/global-ddl` | `../RAG.worktrees/global-ddl` | **X-7** 残留（5 域 DDL 双侧活体逐列对照） | `tools/difftest/check-ddl-static.py` + 新脚本 |
-| **L4** | `align/global-flyway` | `../RAG.worktrees/global-flyway` | **X-1** 残留（三进程同库共存真 PG 验证） | `tools/difftest/check-flyway-concurrent.sh`（新） |
+| **L3** | `align/global-ddl` | `../RAG.worktrees/global-ddl` | **X-7** 残留（5 域 DDL 双侧活体逐列对照） | `tools/difftest/check-ddl-static.py` + `tools/difftest/ddl*` |
+| **L4** | `align/global-flyway` | `../RAG.worktrees/global-flyway` | **X-1** 残留（三进程同库共存真 PG 验证） | `tools/difftest/check-flyway-concurrent.sh` + `tools/difftest/flyway*` |
 | **L5** | `align/global-signoff` | `../RAG.worktrees/global-signoff` | **C 类登记** + T-7/T-11/T-12 定性 + A6 订正 | `docs/DRIFT/global/lanes/**` + `docs/Intentional_Deviations/global/**` + `docs/Pitfalls/global/**` |
 
-⇒ **L1~L5 文件级零重叠** ⇒ 五路可同时开工。
+⇒ **L2~L5 文件级零重叠** ⇒ 四路可同时开工。
+
+> ⚠️ **L1 不是「新开」的** —— 它就是 `align/global` 本体（**已有一个会话在上面跑**）
+> ⇒ ① **不要另开 `align/global-delivery`**（会与在跑的会话重复劳动）；
+> ② L1 同时是**集成目标分支** ⇒ L2~L5 干完直接合回 `align/global`。
+> ⇒ **代价**：L1 在 `align/global` 上提交时，**必须确认自己在改的文件**（见 §七 的并发坑）。
 
 > ⚠️ **L3 与 L4 同写 `tools/difftest/` 目录** ⇒ git 只跟踪**文件**不跟踪目录 ⇒
 > 只要**文件名**不撞就零冲突 ⇒ 约定：**L3 的新脚本一律 `ddl*` 前缀，L4 的一律 `flyway*` 前缀**。
@@ -81,6 +86,7 @@
 | 坑 | 现象 | 处置 |
 |---|---|---|
 | **PIT-GLOBAL-019** | 构建**进行中**改源码 ⇒ 绿的是**旧字节码** | 改完源码**重跑一遍**才算数（`stat` 比对 class/source mtime） |
+| **PIT-GLOBAL-020** | 变异测试在**共享工作树**里跑 ⇒ 变异态被**提交进 HEAD**（实测：`Dispatcher.runAsync` 被误提交成阻塞式 `Dispatcher.run` ⇒ 开关一开 like-rpc 起不来） | ① **变异只在 lane 自己的工作树里跑**；② **提交前 `git diff` 逐个确认变异已还原**（比对备份文件，别凭印象）；③ **不要在别人也在用的工作树里用 `git add -A`** —— 会把别人的**在途编辑**一并扫进提交 |
 | **PIT-GLOBAL-018** | 变异脚本首版写成**编译不过**的表达式 lambda ⇒ maven 压根没跑测试 ⇒ surefire 里留着上一轮 XML ⇒ **报成假绿** | 「跑前删旧 XML + 看 maven 退出码 + 查 COMPILATION ERROR」三道闸 |
 | **B10 变异坑** | 改**上游模块的资源**（`users-common` 的 DDL）只跑下游 ⇒ Maven 从 `~/.m2` 解析旧 jar ⇒ 改动到不了运行代码 | 把上游拉进**同一 reactor**（`-am`）+ 加 `-Dsurefire.failIfNoSpecifiedTests=false` |
 | **§3.3** | 「注解存在 / Bean 存在 / 编译通过」≠「机制生效」 | 纯 Mockito 单测**不算** ⇒ 必须真容器 / 真 PG / 真启动 |

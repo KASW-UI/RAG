@@ -44,6 +44,7 @@ LANES: dict[str, list[str]] = {
     "L1-delivery": [
         "service/like/like-rpc/**",
         "service/comment/comment-rpc/**",
+        "service/common/communityfact/Dispatcher.java",
         "docs/DRIFT/global/lanes/L1-delivery.md",
     ],
     "L2-rpcgate": [
