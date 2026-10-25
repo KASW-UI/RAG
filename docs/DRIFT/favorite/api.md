@@ -20,7 +20,7 @@
 | 项 | 值 |
 |---|---|
 | 落地形态 | 31 个 main 文件 / **3,116 行** / **15 个 DTO** / 7 个 Service / 1 个 Controller<br>⚠️ **核对 2026-10-25（第十轮）**：行数比首轮台账记的 2,920 多 196 行 ⇒ **全部是各轮的纯注释增量**（可执行逻辑零改动）；DTO 数首轮记的 **13 是错的**（基线 `58e8314` 就是 15 个） |
-| 测试 | **6 个测试类 / 89 例全绿**（33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍**）→ 第六轮 **+1 个测试类 / +5 例** |
+| 测试 | **8 个测试类 / 94 例全绿**（33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍** + **1 探针（自动 skip）** + **4 端口归属守门**）→ 第六轮 **+1 个测试类 / +5 例**；第十四轮收尾 **+1 个测试类 / +4 例**（`RealTomcatPortTest`） |
 | 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条已签字偏离** |
 | 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **2 条跨域待拍板**：① 容器层参数上限口径 ⇒ 收口在 `global`（与 hot 域 `DRIFT-HOTAPI-030` 同一格）；② **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，落点在 `service/common` ⇒ 同样收口在 `global`） |
 | 本台账范围 | **仅 `favorite-api`**。`favorite-common` / `favorite-rpc` / `favorite-proto` 见同目录另三份台账 |
@@ -315,7 +315,7 @@ cd /Users/pr/Documents/java&golang/RAG.worktrees/favorite   # align/favorite 工
 mvn -o -pl service/favorite/favorite-proto,service/favorite/favorite-common,\
 service/favorite/favorite-rpc,service/favorite/favorite-api -am install
 
-# 全量测试（favorite-api 89 例：33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + 8 真 Tomcat 门禁 + 5 响应字节对拍）
+# 全量测试（favorite-api 94 例：33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + 8 真 Tomcat 门禁 + 5 响应字节对拍 + 1 探针（skip）+ 4 端口归属守门）
 mvn -o -pl service/favorite/favorite-api test
 
 # 单类
@@ -343,7 +343,7 @@ echo $?   # 0 = 10 组 CASE + 1 组 OBS 全部符合冻结期望
 |---|---|
 | 改了什么 | **12 条内联注释**里的 Go 断言补上 `文件:行号`（形态 A 10 + 形态 B 2；口径见 `rpc.md` §16.2） |
 | 可执行逻辑改动 | **零**（机器复核：`git diff -U0 -- '*.java'` 去掉注释行后无剩余） |
-| 全量测试 | **89 例全绿**（6 个测试类），**BUILD SUCCESS** |
+| 全量测试 | **89 例全绿**（6 个测试类），**BUILD SUCCESS** ⚠️ **此行是第十二轮口径** ⇒ **最新见 §0**（8 个测试类 / 94 例） |
 | 审计器 | `python3 tools/assertion-audit/favorite/check-assertion-sources.py` ⇒ **EXIT=0** |
 
 ### 6.2 台账体检（本档）
