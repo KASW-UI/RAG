@@ -22,7 +22,7 @@
 | 落地形态 | 31 个 main 文件 / **3,116 行** / **15 个 DTO** / 7 个 Service / 1 个 Controller<br>⚠️ **核对 2026-10-25（第十轮）**：行数比首轮台账记的 2,920 多 196 行 ⇒ **全部是各轮的纯注释增量**（可执行逻辑零改动）；DTO 数首轮记的 **13 是错的**（基线 `58e8314` 就是 15 个） |
 | 测试 | **6 个测试类 / 89 例全绿**（33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍**）→ 第六轮 **+1 个测试类 / +5 例** |
 | 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条已签字偏离** |
-| 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **1 条跨域待拍板**：容器层参数上限口径 ⇒ 收口在 `global`（与 hot 域 `DRIFT-HOTAPI-030` 同一格） |
+| 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **2 条跨域待拍板**：① 容器层参数上限口径 ⇒ 收口在 `global`（与 hot 域 `DRIFT-HOTAPI-030` 同一格）；② **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，落点在 `service/common` ⇒ 同样收口在 `global`） |
 | 本台账范围 | **仅 `favorite-api`**。`favorite-common` / `favorite-rpc` / `favorite-proto` 见同目录另三份台账 |
 
 ---
@@ -273,13 +273,29 @@ RAG 侧 **500 + JSON envelope**（`{code:5001,…}`）。
 > `DRIFT-HOTAPI-030`（AGENTS.md §3.5 把「Tomcat 三旋钮」列为 `global/cross-domain` 的
 > 跨组件不变量）⇒ **重复登记会造成两条台账各说一半、合并时对不上**。
 
+### 🔁 跨域待拍板 · **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，收口在 `global`）
+
+| | 内容 |
+|---|---|
+| **事实（api 整域活体对拍实测）** | Go 侧 405 是**裸状态码**：`status=405` · **无 body** · **无 Content-Type**（go-zero `router/patrouter.go:79-82`：`w.Header().Set("Allow", allows)` + `w.WriteHeader(405)`，既不 `fmt.Fprintln` 也不 `http.Error`）；<br>RAG 侧 405：`status=405` · **body 同为空** · **但多一项 `Content-Type: application/json;charset=utf-8`** |
+| **落点** | `service/common` 的 `GoStyleRouterErrorResponses.methodNotAllowed` —— 它的 javadoc **明写**「刻意返回 `ResponseEntity<Void>`（body == null）：**容器不会补 Content-Type**」⇒ **实测把这句话证伪了**：Spring 仍会为响应选出一个 MediaType 并写进响应头 |
+| **为什么本域不能改** | `service/common/**` 是**共享面**（AGENTS.md §5.3）⇒ favorite 域**只读** ⇒ 只登记 |
+| **影响面** | **全仓所有 api 模块**都走这一个类 ⇒ 不止 favorite |
+| **探针里怎么记** | `SAME_BODY` 档（status 与 body 两侧全等，**只**允许 Content-Type 不同）⇒ 差异被**量化 + 冻结**，但没被「顺手修掉」 |
+| **证据** | 探针 `tools/api-full-parity-probe/favorite/`（EXIT=0）的 `r02_method_not_allowed_post` / `r03_method_not_allowed_get` 两条 ⇒ 逐条值见 `expected.txt` |
+
+> ⚠️ **同类风险**：`GoStyleRouterErrorResponses` 的 `Allow` 头顺序在 Go 侧**不确定**
+> （go-zero `patrouter.go:101-117` 遍历 Go map）⇒ 本域路由里 `/folder/list` 同时注册了 GET 与 POST
+> ⇒ **Go 的 `Allow` 顺序可能每次不同** ⇒ 探针**刻意不比 `Allow` 的值**（只比 key 集合）
+> ⇒ ⚠️ 这是 Go 自身的不稳定，**不是** RAG 的漂移 ⇒ 登记在 `service/common` 的类 javadoc 里。
+
 ---
 
 ## 4. 证据边界（明确未验的部分）
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| 双侧活体对拍（真 Go favorite-api vs RAG） | 🔴 **未做** | Go 侧依赖 `etcd` + favorite-rpc + Redis，本轮起不来 ⇒ 全部结论是「源码级 + RAG 侧运行证据」 |
+| 双侧活体对拍（真 Go favorite-api vs RAG） | ✅ **已验**（2026-10-25 **第十四轮**） | 探针 [`tools/api-full-parity-probe/favorite/`](../../../../tools/api-full-parity-probe/favorite/README.md) ⇒ **EXIT=0**：<br>· **32 个 case**（鉴权 6 / 路由 3 / 解析 7 / 业务 7 / 只读 4 / 响应头面 1 / 写入 3 / 写入生效验证 1）<br>· **24 条逐字节全等**（含 int64 以字符串出参、时间戳、空集合 `[]`）<br>· 业务组 **7 条**穿过 **HTTP → gRPC → description 反查 → 业务码 → envelope** 全链 ⇒ **逐字节一致**<br>· 1 条 SAME_CODE（黑名单命中，业务码两侧都是 5004）/ 4 条 SAME_STATUS（Go 的 401 是**空 body** ⇒ 取不到业务码；形态差异**已签字** DEV-FAV-API-001）/ 2 条 SAME_BODY（405 的 **Content-Type** 不同 ⇒ **新发现的跨域漂移**）/ 1 条 OBS（Go 多 `traceparent`）<br>⇒ **两个模块都是 `java -jar` 真进程**（⇒ 顺带查出 2 个启动阻塞，见 [`rpc.md`](./rpc.md) §22.3） |
 | **servlet filter 链真生效** | ✅ **已验**（2026-10-25 第三轮） | `FavoriteApiRealTomcatGateTest`（**8 例**，`webEnvironment = RANDOM_PORT` ⇒ **真 Tomcat**）：MaxBytes → **413 + 空 body + 无 Content-Type**、413 **压过** 401、未超限仍 401、三旋钮各自生效 ⇒ **真容器的 chain 里真的跑了它**（不再只是「Bean 存在 + `@Order` 一致」） |
 | **容器层参数上限的精确口径** | ✅ **已验** | 4 组判别用例（真 Tomcat）⇒ Tomcat 数**总「值」数（含空值）**、Go 数**非空值数** ⇒ 残余窗口见 §3 |
 | **Go 侧「非空值 >2048」时的逐字节响应** | ✅ **已验**（2026-10-25 第六轮，**双侧活体对拍**） | Go 侧用**真** `httpx.Parse`（`maxFormParamCount=2048` 真生效）⇒ 2049 个非空值 ⇒ **200 + `{code:5003,msg:"参数错误",data:null}`**；RAG 侧走**真 HTTP** ⇒ **逐字节相同** ⇒ 探针 `tools/api-envelope-probe/favorite/`（EXIT=0）⇒ 见 §2.2 第 1 条 |

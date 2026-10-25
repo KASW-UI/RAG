@@ -515,8 +515,25 @@ class FavoriteGrpcContractParityTest {
             // ⚠️ 服务名必须是真源 proto 里的 **favorite.FavoriteService**
             //    （favorite.pb.go:22 FullMethodName = "/favorite.FavoriteService/..."）
             //    ⇒ 用错名字会测到「未知服务」而不是「未知方法」，两种措辞不一样。
-            case "c35_unknown_method" -> "/favorite.FavoriteService/DoesNotExist";
-            case "c36_unknown_service" -> "/favorite.NoSuchService/DoesNotExist";
+            //
+            // 🔴🔴🔴 **fullMethodName 不带前导斜杠**（2026-10-25 第十四轮实测钉死）：
+            //   grpc-java 的 `MethodDescriptor.generateFullMethodName(service, method)`
+            //   = `service + "/" + method`（**不**补前导斜杠，字节码实测）；
+            //   而 **netty 客户端写 `:path` 时会自己补一个 "/"** ⇒ 线上真实路径恒为
+            //   `/favorite.FavoriteService/DoesNotExist`。
+            //   ⇒ 若这里手写成 "/favorite.FavoriteService/DoesNotExist"，
+            //     线上路径就成了 **双斜杠** `//favorite.FavoriteService/DoesNotExist`，
+            //     而 grpc-go v1.81.1 `server.go:1826` **只剥掉一个**前导 `/` ⇒
+            //     它切出的 service 名 = **"/favorite.FavoriteService"**（带斜杠）
+            //     ⇒ 查注册表必然落空 ⇒ 走 `unknown service` 分支，
+            //     **而不是**「已注册服务 + 未注册方法」的 `unknown method` 分支。
+            //   ⇒ 措辞会**误报**成「Go 对未注册方法返回 unknown service」，
+            //     实则那是**探针自己把路径拼坏**造成的假象。
+            //   ⇒ 实证锚点：c34 的描述符**本来就不带**前导斜杠 ⇒ 线上路径是
+            //     `/grpc.health.v1.Health/Check` ⇒ 真源 go-zero 注册的 health 服务
+            //     **正常应答**（`body=hex:0801` = SERVING）⇒ 客户端确实会补斜杠。
+            case "c35_unknown_method" -> "favorite.FavoriteService/DoesNotExist";
+            case "c36_unknown_service" -> "favorite.NoSuchService/DoesNotExist";
             default -> throw new IllegalStateException("未登记的裸方法用例：" + caseId);
         };
         MethodDescriptor<byte[], byte[]> md = MethodDescriptor.<byte[], byte[]>newBuilder()

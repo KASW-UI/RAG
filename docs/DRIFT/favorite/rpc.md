@@ -1335,15 +1335,14 @@ breakerName := path.Join(cc.Target(), method)
 | # | 差异 | 两侧实测 | 归因 |
 |---|---|---|---|
 | 1 | **响应头 key 集合** | Go：`content-type`；RAG：`content-type` + **`grpc-accept-encoding=gzip`** + **`grpc-encoding=identity`** | grpc-java 的传输层发的（`io/grpc/internal/GrpcUtil.java:111-112` 的 `MESSAGE_ACCEPT_ENCODING_KEY`）；grpc-go 不发 ⇒ **库级**，非本域行为 |
-| 2 | **未注册方法的 description 措辞** | Go：`unknown service /favorite.FavoriteService`；RAG：`Method not found: /favorite.FavoriteService/DoesNotExist` | 两侧 `code` 都是 `UNIMPLEMENTED`（**语义一致**）；措辞由 gRPC 库决定（grpc-java 的 `io/grpc/internal/ServerImpl.java:541-543`） |
-| 3 | **未注册服务的 description 措辞** | 同上形态 | 同上 |
+| 2 | **未注册方法的 description 措辞** | Go：`unknown method DoesNotExist for service favorite.FavoriteService`；RAG：`Method not found: favorite.FavoriteService/DoesNotExist` | 两侧 `code` 都是 `UNIMPLEMENTED`（**语义一致**）；措辞由 gRPC 库决定（grpc-java 的 `io/grpc/internal/ServerImpl.java:541-543`） |
+| 3 | **未注册服务的 description 措辞** | Go：`unknown service favorite.NoSuchService`；RAG：`Method not found: favorite.NoSuchService/DoesNotExist` | 同上 |
 
-⚠️ **第 2/3 条的措辞归因本轮**未**查清** —— grpc-go v1.81.1 的 `server.go:1869-1874` 实测产出的是
-`unknown method DoesNotExist for service favorite.FavoriteService` / `unknown service favorite.NoSuchService`
-（**不带前导斜杠**，已用同一份 grpc-go 起最小 server 实测），与观测到的串**对不上**；
-grpc-java 侧也**没有** `unknown service` 这个串（只有 `Method not found: `）。
-⇒ ⇒ 本探针**只断言「status code 相同 + 措辞不同」**，**不对措辞内容下结论**（expected.txt 的 `SAME_CODE` 档）。
-⚠️ **这条「归因未查清」本身就是登记项**，不是结论。
+⚠️ **第 2/3 条的措辞归因已于 2026-10-25 第十四轮查清并修正** ⇒ 详见 §22.2。
+⚠️ **本节原记的「Go 侧 `unknown service /favorite.FavoriteService`（带前导斜杠）」是探针自己把
+`:path` 拼坏造成的假象，已被推翻** ⇒ 上表的措辞值按修正后的实测**重新冻结**。
+⇒ ⇒ 本探针**只断言「status code 相同」**（expected.txt 的 `SAME_CODE` 档），
+**不对措辞内容下结论** —— 因为措辞**由 gRPC 库决定**，不是本域行为。
 
 ### 20.5 percent-encoding 的**源码级**量化（wire 层，本域不可观测）
 
@@ -1461,15 +1460,191 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 
 ### 21.5 ⚠️ 本轮**未实施**（显式登记，不是「已完成」）
 
-- **状态**：🔴 **待做**。本轮只交付「**可行性判定 + 实施配方**」（§21.1–§21.4）。
-- **为什么没做**：本轮预算已用于「帧层重新评估 + gRPC 级契约对拍 + 变异验证」（§20）；
-  api 级探针需要**再复制 ~15 个真源 api 包文件** + **再起 4 个应用进程**（含两个 Spring 上下文同时起）
-  ⇒ 在同一轮里做，交付质量不可控 ⇒ **宁可不交，也不交一个半成品探针**（AGENTS.md §3.3 的纪律）。
-- **下一轮可直接开工的入口**：
-  1. 复制 `service/favorite/api/**`（15 个文件）+ 复用本轮已复制的 `favoriteservice` / `favorite/common` / `common/logger` / `common/observability`；
-  2. 探针 yaml：`FavoriteRpc.Endpoints`（指向真源 favorite-rpc）+ `BizRedis`（指向真 Redis 容器）；
-  3. Java 侧：用 `SpringApplicationBuilder` **手工起两个上下文**（favorite-rpc + favorite-api），
-     ⚠️ 不能靠两个 `@SpringBootTest`（一个测试类只有一个上下文）；
-  4. HTTP 客户端用 `java.net.http.HttpClient`，请求矩阵复用 §20 的 7 个用例（同一个 userId / folderId / favoriteId），
-     两侧共用同一份 seed；
-  5. 判定沿用 §20 的 `expected.txt` 四档（SAME / SAME_CODE / OBS / SKIP）。
+> ✅ **2026-10-25 第十四轮已实施** ⇒ 见 §22.1（探针 `tools/api-full-parity-probe/favorite/`，EXIT=0）。
+> ⚠️ **实施时与本配方有出入，如实记录**（以 §22.1 + §22.3 为准）：
+>
+> | 配方 | 实际做法 | 为什么改 |
+> |---|---|---|
+> | ① 复制 `service/favorite/api/**`（15 个文件） | **21 个** api 文件 + **1 个** `service/common/response/response.go`（api 的 handler 要用真源的 envelope） | 漏掉 `service/common/response` ⇒ 编译期直接失败 |
+> | ③ 用 `SpringApplicationBuilder` 手工起两个 Spring 上下文 | 改成**两个 `java -jar` 真实进程** | 真实进程 = **可部署产物本身** ⇒ 顺带查出 §22.3 的两个启动阻塞（`@SpringBootTest` 永远查不到） |
+> | ④ 请求矩阵复用 §20 的 7 个用例 | 自建 **32 个 case**（8 组） | §20 的 7 个是 **gRPC 层**的；api 层要覆盖路由 / 鉴权 / 解析 / 黑名单 / 响应头面 |
+> | ⑤ 四档（SAME / SAME_CODE / OBS / SKIP） | 扩成**五档**（加 `SAME_BODY` / `SAME_STATUS`） | Go 的 401 是**空 body** ⇒ 取不到业务码；405 的 Content-Type 两侧不同 ⇒ 需要「只比 status / 只比 body」这两档 |
+>
+> ⚠️ 原配方里**漏掉**的三件事（实施时踩到）：
+> ① **JWT token 必须由 Go 侧签**（探针的 `cmd/token`）⇒ 两侧拿到**逐字节相同**的 token；
+> ② **RAG 的两个模块的 Nacos 处置相反**（见 PIT-FAV-RPC-019）；
+> ③ **RAG 的两个模块都需要修 pom 才发现得了启动阻塞**（见 PIT-FAV-RPC-018）。
+
+---
+
+## 22. 2026-10-25 第十四轮（`align/favorite` 工作树 · 承 `b0b2d6f`）—— **api 整域活体对拍落地** + **B-1 归因闭合** + **2 个启动阻塞**
+
+> 本轮做三件事：
+> ① 第十三轮 §21.5 登记为「待做」的 **api 整域活体对拍** —— **已实施**；
+> ② 第十三轮 §20.4 登记为「**归因未查清**」的那条 —— **已闭合**（并**推翻了原结论**）；
+> ③ 顺带查出 **2 个 RAG 侧启动阻塞**（favorite-rpc / favorite-api **从未被验证能以真实进程启动**）。
+
+### 22.1 ✅ api 整域双侧活体对拍（探针 `tools/api-full-parity-probe/favorite/` ⇒ EXIT=0）
+
+| 项 | 值 |
+|---|---|
+| 补的缺口 | [`api.md`](./api.md) §4 第一行「🔴 未做：双侧活体对拍（真 Go favorite-api vs RAG）」 |
+| 验的层 | **整个 HTTP 面**：路由 / method / JWT 中间件 / 黑名单中间件 / **gRPC 往返** / 状态码 / 响应头 |
+| 矩阵 | **32 个 case**（鉴权 6 · 路由 3 · 解析 7 · 业务 7 · 只读 4 · 响应头面 1 · 写入 3 · 写入生效验证 1） |
+| 结果 | **24 SAME** / **1 SAME_CODE** / **2 SAME_BODY** / **4 SAME_STATUS** / **1 OBS** ⇒ **0 条新缺陷** |
+| Go 侧 | 真源 `service/favorite/api`（22 个逐字节复制件 + sha256 校验）+ 真源 `service/favorite/rpc`（42 个，**复用同域 rpc 级探针的复制件**）⇒ 真 `rest.MustNewServer` + 真 `zrpc.MustNewServer` + 真 PG |
+| RAG 侧 | `java -jar favorite-api.jar` + `java -jar favorite-rpc.jar`（**可部署产物本身**）+ 真 Flyway + 真 MyBatis + 真 PG |
+| 中间件 | 真 PG（两个库：`godb` / `first_db`）+ 真 Redis（**两侧共用** ⇒ 黑名单 key 在同一命名空间） |
+| 客户端 | **同一个 `java.net.http.HttpClient`** 打两侧 ⇒ 消掉客户端自身差异 |
+
+**为什么这条链值得单独活体对**（本探针的增量价值）：
+
+> favorite-api 的**业务码不在 gRPC status 里，而在 description 文案里**
+> （Go `favoritecommon.BizCodeFromError` 反查 ⇒ RAG `FavoriteGrpcError.bizCodeFromError`）
+> ⇒ 「api 的业务码对不对」**只有真的把请求从 HTTP 打通到 gRPC 再打回来**才能验。
+> 在此之前它只被 §20 的 rpc 级对拍**间接**覆盖 —— api 级从未活体对过。
+
+⇒ **实测证据**：业务组 **7 条**全部**逐字节一致**，包括
+「下游 user-rpc 缺席 ⇒ rpc 返回 INTERNAL/5001 ⇒ api 经文案反查还原成 5001 ⇒ 包成 envelope」这条全链。
+
+**🔴 变异验证（防假绿）** —— 把 `FavoriteGrpcError.bizCodeFromMessage` 改成**恒返回 null**
+（= 彻底打掉「文案反查」）：基线 **EXIT=0** ⇒ 变异后 **EXIT=1**，**4 个 case 转红**：
+
+| case | Go（真源） | 变异后的 RAG | 说明 |
+|---|---|---|---|
+| `b03_delete_folder_not_found` | `5201` 收藏夹不存在 | `5002` not found | NotFound 走标准码兜底 |
+| `b04_delete_item_not_found` | `5301` 收藏记录不存在 | `5002` not found | 同上 |
+| `b05_update_folder_not_found` | `5201` 收藏夹不存在 | `5002` not found | 同上 |
+| `w02_delete_item` | `5304` 收藏暂不可撤回 | `1015` 服务繁忙 | FailedPrecondition 不在白名单 ⇒ 落 `default` |
+
+⇒ 转红的**恰好是「业务码只能靠文案反查」的那几条** ⇒ **探针确实在测真 gRPC wire 上的反查**，不是假绿。
+（变异已立即还原，`git diff` 为空。）
+
+⚠️ **仍未验的部分**（诚实登记）：**create 成功路径**没被测到 —— 本探针**故意不接** user-rpc ⇒
+`ensureUserExists` 必失败 ⇒ create 落「下游不可用」5001。
+⇒ 但 create 成功路径的**出参字节契约**（`folderId` 以字符串出参）已由 `tools/api-envelope-probe/favorite/` 覆盖（真 go-zero 库实测）。
+
+### 22.2 ✅ B-1 闭合：「未知服务 vs 未知方法」的措辞差 = **探针自己把 `:path` 拼坏**
+
+第十三轮 §20.4 记的是「Go 侧 `unknown service /favorite.FavoriteService`（**带前导斜杠**）」，
+并标注「**归因未查清**」。**本轮查清了 ⇒ 原结论被推翻**：
+
+| 环节 | 事实 | 出处 |
+|---|---|---|
+| ① grpc-java 的 `generateFullMethodName(service, method)` | = `service + "/" + method`（**不**补前导斜杠） | 字节码实测 |
+| ② netty 客户端写 `:path` | **自己补一个 `/`** ⇒ 线上路径恒为 `/service/method` | 实测锚点见下 |
+| ③ 探针却手写成 `"/favorite.FavoriteService/DoesNotExist"` | **多带一个斜杠** ⇒ 线上路径成 **`//…`（双斜杠）** | 探针自己的代码 |
+| ④ grpc-go v1.81.1 解析 | `sm = sm[1:]` **只剥一个**前导 `/` ⇒ service 名 = `"/favorite.FavoriteService"`（**带斜杠**） | `server.go:1826` |
+| ⑤ 结果 | 查 `s.services` 注册表**落空** ⇒ 走 `unknown service` 分支，**而不是**「已注册服务 + 未注册方法」的 `unknown method` 分支 | `server.go:1869-1874` |
+
+**实证锚点**（怎么证明客户端确实会补斜杠）：同一矩阵里的 `c34_health_check` 描述符**本来就不带**
+前导斜杠 ⇒ 线上路径合法 ⇒ 真源 go-zero 注册的 health 服务**正常应答**（`body=hex:0801` = SERVING）。
+
+⇒ **修正后的真实库级差异**：
+
+| 用例 | Go（grpc-go） | RAG（grpc-java） |
+|---|---|---|
+| 未注册**方法**（服务已注册） | `unknown method DoesNotExist for service favorite.FavoriteService` | `Method not found: favorite.FavoriteService/DoesNotExist` |
+| 未注册**服务** | `unknown service favorite.NoSuchService` | `Method not found: favorite.NoSuchService/DoesNotExist` |
+
+⇒ **grpc-go 区分「未知方法 / 未知服务」两种措辞；grpc-java 两种情形共用一种措辞**
+⇒ **grpc-java 丢掉了「方法 vs 服务」的区分**（且回显的是**不含前导斜杠**的全方法名）。
+⇒ 两侧 `code` 都是 `UNIMPLEMENTED` ⇒ **语义一致** ⇒ 仍是库级差异，不是不一致。
+
+⇒ 已修探针（描述符去掉前导斜杠）+ **重新冻结** `expected.txt` 的 c35 / c36 两条。
+⇒ 元教训 ⇒ [`docs/Pitfalls/favorite/rpc.md`](../../Pitfalls/favorite/rpc.md) **PIT-FAV-RPC-017**。
+
+### 22.3 🔴🔴 两个**启动阻塞**（RAG 侧真实缺陷，**已修**）：本模块**从未被验证能以真实进程启动**
+
+> AGENTS.md §0 的「每个模块接手的第一件事仍是『先让它真的启动一次』」
+> —— 本轮第一次真的起，**两个模块都起不来**。
+
+| # | 现象 | 根因 | 修法 | 落点 |
+|---|---|---|---|---|
+| **1** | `APPLICATION FAILED TO START`：`no ServletWebServerFactory bean defined` | pom 只有 `spring-boot-web-server` + `jakarta.servlet-api`，**没有** `spring-boot-starter-web`（无内嵌 Tomcat）⇒ Boot 默认按 SERVLET 起 | 启动加 `--spring.main.web-application-type=none`（对齐 Go 的「纯 gRPC、零 HTTP 端口」，见 DEV-FAV-RPC-004） | `service/favorite/favorite-rpc/pom.xml` 的依赖说明 + 探针启动参数 |
+| **2** | `NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder` | devh 的 `GrpcClientAutoConfiguration.shadedNettyGrpcChannelFactory`（3.1.0.RELEASE:160）在**运行期**引用它，而 `grpc-inprocess` 只有 **test scope**（favorite-api **干脆没声明**） | rpc 的 scope 改 `runtime`；api 补声明（runtime scope） | `favorite-rpc/pom.xml` + `favorite-api/pom.xml` |
+
+⚠️ **这两个缺陷被 `@SpringBootTest` 完全掩盖**（`webEnvironment=NONE` + test classpath）
+⇒ 「**测试全绿**」与「**jar 能跑**」之间有一道没人测过的缝
+⇒ `tools/difftest/check-jar-executable.sh` 只查 `Main-Class`，**查不出少一个运行时依赖**。
+⇒ 元教训 ⇒ [`docs/Pitfalls/favorite/rpc.md`](../../Pitfalls/favorite/rpc.md) **PIT-FAV-RPC-018**。
+
+⚠️ **连带的一条部署形态事实**（本轮实测）：**favorite-rpc 不能关掉 Nacos discovery**
+（`FavoriteNacosRegistration` 把 `NacosServiceManager` 设成了**构造器硬依赖** ⇒
+`--spring.cloud.nacos.discovery.enabled=false` ⇒ 上下文起不来）；
+而 **favorite-api 恰恰相反**（走 spring-cloud 自动注册 ⇒ Nacos 不可达时 failFast ⇒ 必须关）。
+⇒ 两侧处置**相反** ⇒ 坑档 **PIT-FAV-RPC-019**。
+
+⚠️ **第 2 条的跨域清单（本域只读 ⇒ 归 `global`）** —— 全仓用 `grpc-client-spring-boot-starter`
+却**运行时缺 `io.grpc:inprocess`** 的**可执行应用模块**（`service/common` 是库，不在其中）：
+
+| 模块 | 现状 | 模块 | 现状 |
+|---|---|---|---|
+| `article/article-api` | 🔴 没声明 | `like/like-api` | 🔴 没声明 |
+| `article/article-rpc` | 🔴 test scope | `like/like-rpc` | 🔴 test scope |
+| `comment/comment-api` | 🔴 test scope | `message/message-api` | 🔴 没声明 |
+| `comment/comment-rpc` | 🔴 没声明 | `message/message-rpc` | 🔴 没声明 |
+| `follow/follow-api` | 🔴 没声明 | `task/task-api` | 🔴 没声明 |
+| `follow/follow-rpc` | ✅ compile（唯一对的） | `task/task-rpc` | 🔴 test scope |
+| `hot/hot-api` | 🔴 没声明 | `users/user/user-api` | 🔴 没声明 |
+| `hot/hot-rpc` | 🔴 没声明 | `users/admin/admin-api` | 🔴 没声明 |
+
+⇒ **13 个模块**（含本域已修的 2 个之外）⇒ 它们的**可部署 jar 都起不来**
+⇒ ⚠️ 本域**只登记不动别域文件**（AGENTS.md §5.3）⇒ 收口在 `global`。
+
+### 22.4 🔴 两条**跨域**发现（本域**只登记**，收口在 `global`）
+
+| # | 发现 | 落点 | 为什么本域不能改 |
+|---|---|---|---|
+| **1** | **405 响应多一个 `Content-Type: application/json;charset=utf-8`**（Go 是**裸状态码**：既无 body 也无 Content-Type） | `service/common` 的 `GoStyleRouterErrorResponses.methodNotAllowed` —— 它的 javadoc 明写「容器不会补 Content-Type」，**实测被证伪**（Spring 仍会选出一个 MediaType） | `service/common/**` 是**共享面** ⇒ 本域**只读** |
+| **2** | Go 的响应**多一个 W3C `traceparent` 响应头**（go-zero 的 otelhttp 注入 ⇒ 响应回显活动 trace context）；RAG 侧没有 | 同属**可观测层**（RAG 侧落点在 `service/common` 的 `HttpMiddlewareFilter`） | 同上 |
+
+⇒ 探针里：**#1 用 `SAME_BODY` 档**（status 与 body 两侧全等，只有 Content-Type 不同）、
+**#2 用 `OBS` 档**（单独量化，不混进业务用例）⇒ **真差异被量化、被冻结、可见**，但没被「顺手修掉」。
+
+### 22.5 ✅ A-2：写入方盘点工具**拓宽覆盖面** + 产出**人工确认清单**
+
+第十三轮 §18.2 的「可动项 B」已落地为机检工具，但只覆盖 `favorite_fact_outbox` 的**字面量 SQL**。
+本轮拓宽：
+
+| 项 | 拓宽前 | 拓宽后 |
+|---|---|---|
+| 覆盖的表 | 1 张（`favorite_fact_outbox`） | **2 张**（+ `favorite_item` ⇒ V6 的额外 CHECK 那条，DEV-FAV-RPC-007） |
+| **ORM 写入路径** | ❌ **看不见**（MyBatis-Plus 的 `mapper.insert(entity)` 不含 `INSERT INTO` 字面量）⇒ **假绿漏洞** | ✅ **机器自动判定**：找 `interface XxxMapper extends BaseMapper<该表实体>` ⇒ 有则**额外扫** `.insert(`/`.save(` 调用点；无则明确写「该表只有显式 SQL 写入 ⇒ 字面量扫描即**全覆盖**」 |
+| `tools/**` 下的写入 | 整目录排除 | **登记但不判失败**（探针设施不是部署产物）⇒ 报告里可见 |
+| 机器的边界 | 散在 stdout 的一句话 | **独立清单文件** ⇒ `tools/outbox-writer-audit/favorite/CHECKLIST.md`（6 条可逐条勾掉的确认项 + 「去哪看 / 确认口径」） |
+
+⇒ 机检结果（**EXIT=0**）：outbox **9 个 INSERT 站点全部已绑两列** / item **12 个 INSERT 全部域内**
+/ **两张表都无 ORM 写入路径**（机器判定）/ **域外写入方 0 个**。
+⇒ ⚠️ **机器看不见的仍需人工确认一次**（人工 psql / 报表 / 仓库外脚本 / 另一个服务 / DBA 触发器）
+⇒ 清单已落地 ⇒ 「上线前人工确认一次」从一句话变成**可勾选的 6 条**。
+
+### 22.6 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| `tools/api-full-parity-probe/favorite/run.sh`（新） | **EXIT=0** · 32 case · 24 SAME / 1 SAME_CODE / 2 SAME_BODY / 4 SAME_STATUS / 1 OBS |
+| ↳ **变异验证** | 打掉「文案反查」⇒ **EXIT=1** · **4 个 case 转红**（5201→5002 · 5301→5002 · 5304→1015）⇒ 非假绿 |
+| `tools/grpc-contract-probe/favorite/run.sh` | **EXIT=0**（c35 / c36 重新冻结后复跑） |
+| `tools/outbox-writer-audit/favorite/check-outbox-writers.py` | **EXIT=0**（扩面后复跑） |
+| 本域全量测试 | ✅ **BUILD SUCCESS** —— `mvn -o -pl service/favorite/favorite-{proto,common,rpc,api} -am test`：<br>favorite-api **90 例**（含 1 skip = 本轮新探针，无 env 时自动跳过）· favorite-rpc **84 例**（含 1 skip = gRPC 契约探针）· favorite-common **29 例** · service/common **174 例** · users-common **33 例** ⇒ **全绿，0 失败 0 错误** |
+| 断言审计器 | `python3 tools/assertion-audit/favorite/check-assertion-sources.py` ⇒ **EXIT=0**（586 锚点 · 真源 483 / 依赖 81 / **悬空 0 / 越界 0**） |
+| 台账自检 | `python3 tools/ledger-lint/favorite/check-ledger-selfcheck.py` ⇒ **EXIT=0** |
+| 写入方盘点 | `python3 tools/outbox-writer-audit/favorite/check-outbox-writers.py` ⇒ **EXIT=0**（扩面后复跑） |
+| Tomcat 三旋钮 / Flyway 账本 / proto 静态 / jar 可执行性 | 全 **EXIT=0** |
+| 共享面（`docs/DRIFT/_INDEX.md` / `_MANIFEST.json` / `docs/Intentional_Deviations/_INDEX.md` / `docs/Pitfalls/_INDEX.md` / `AGENTS.md` / `docs/DRIFT/_cross/`） | **零改动** |
+
+### 22.7 ⚠️ 合并后需主会话统一更新的共享面（本域**未碰**）
+
+| 文件 | 要改什么 |
+|---|---|
+| `docs/DRIFT/_INDEX.md` | favorite 域状态：api 侧「🔴 未做」⇒「✅ 已验（32 case 活体对拍）」；新增 2 条**跨域**收口项（405 的 Content-Type、Go 的 `traceparent` 响应头）；本域探针清单加 `api-full-parity-probe` |
+| `docs/Pitfalls/_INDEX.md` | 坑档新增 **3 条**：**PIT-FAV-RPC-017**（grpc-java 的 fullMethodName 不带前导斜杠）/ **PIT-FAV-RPC-018**（`@SpringBootTest` 掩盖「模块能不能真起」）/ **PIT-FAV-RPC-019**（rpc 与 api 的 Nacos 处置相反） |
+| `docs/DRIFT/_MANIFEST.json` | 重新生成（`python3 tools/drift-move.py verify`） |
+| `docs/Intentional_Deviations/_INDEX.md` | ⚠️ **本轮无新增签字项** ⇒ 已签字条数**不变**（仍是 58；撤销计入则 60）⇒ 合并时只需确认未被误改 |
+
+> ⚠️ **本轮新增的 2 条跨域项**（§22.4）收口在 `global`：
+> ① **405 响应多一个 `Content-Type`**（落点 `service/common` 的 `GoStyleRouterErrorResponses` —— 它的 javadoc 说「容器不会补 Content-Type」，**实测被证伪**）；
+> ② **Go 响应多一个 W3C `traceparent`**（可观测层）。
+> ⇒ 两条**本域只登记不修**（`service/common/**` 是共享面）。
+> ⚠️ 另有一条**更广的跨域清单**（§22.3 的 `grpc-inprocess` 运行时缺失 ⇒ **全仓 13 个别域模块**同样起不来）⇒ 归 `global`。

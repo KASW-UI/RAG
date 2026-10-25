@@ -135,6 +135,27 @@
             <groupId>io.grpc</groupId>
             <artifactId>grpc-core</artifactId>
         </dependency>
+        <!--
+            🔴🔴🔴 **grpc-inprocess 必须是 runtime scope，不能只出现在 test classpath**
+            （2026-10-25 第十四轮实测钉死）：
+            devh 的 `GrpcClientAutoConfiguration.shadedNettyGrpcChannelFactory`
+            （grpc-client-spring-boot-starter 3.1.0.RELEASE:160）在**运行期**会引用
+            `io.grpc.inprocess.InProcessChannelBuilder`（它要挂一个 in-process 兜底通道）⇒
+            运行时 classpath 缺这个类 ⇒ **进程起不来**：
+
+                java.lang.NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder
+
+            ⚠️ 本模块原先**根本没声明** grpc-inprocess（favorite-rpc 声明了但是 test scope）
+            ⇒ 两个模块都靠 `@SpringBootTest` 的 test classpath 才活着
+            ⇒ 「测试全绿」≠「jar 能跑」。
+            ⚠️ 必须显式写版本：根 pom 的 dependencyManagement **没有**管 grpc-inprocess。
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-inprocess</artifactId>
+            <version>${grpc.version}</version>
+            <scope>runtime</scope>
+        </dependency>
 
         <!-- ============== 7. Nacos 服务发现 ============== -->
         <!-- 对应 Go 端 FavoriteRpc.Etcd.Key: favorite.rpc -->

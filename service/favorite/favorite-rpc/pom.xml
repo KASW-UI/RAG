@@ -249,12 +249,28 @@
             ⚠️ 必须显式写版本：根 pom 的 dependencyManagement 只管 grpc-stub / -core /
             -netty-shaded / -protobuf / -protobuf-lite，**没有**管 grpc-inprocess，
             漏写版本会让整个 reactor 在读 POM 阶段就失败。
+
+            🔴🔴🔴 **scope 必须是 runtime，不能是 test**（2026-10-25 第十四轮实测钉死）：
+            devh 的 `GrpcClientAutoConfiguration.shadedNettyGrpcChannelFactory`
+            （grpc-client-spring-boot-starter 3.1.0.RELEASE:160）在**运行期**会引用
+            `io.grpc.inprocess.InProcessChannelBuilder`（它要挂一个 in-process 兜底通道）⇒
+            运行时 classpath 缺这个类 ⇒ **进程起不来**：
+
+                java.lang.NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder
+                  at net.devh.boot.grpc.client.autoconfigure.GrpcClientAutoConfiguration
+                     .shadedNettyGrpcChannelFactory(GrpcClientAutoConfiguration.java:160)
+
+            ⚠️ 这个缺陷被 `@SpringBootTest` **完全掩盖**了：测试上下文的 classpath
+            含 test scope ⇒ 永远走不到这条分支 ⇒
+            「测试全绿」与「jar 能跑」是两件事（本仓 `check-jar-executable.sh` 查的也只是
+            Main-Class，查不出「少一个运行时依赖」）。
+            ⇒ 2026-10-25 起 favorite-rpc / favorite-api **都必须能以 `java -jar` 真起一次**。
         -->
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-inprocess</artifactId>
             <version>${grpc.version}</version>
-            <scope>test</scope>
+            <scope>runtime</scope>
         </dependency>
         <!--
             真 PostgreSQL（不是 H2）：favorite_fact_outbox 上有 UNIQUE(favorite_id,aggregate_version)

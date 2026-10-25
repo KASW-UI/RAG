@@ -682,3 +682,141 @@ L0（帧原始字节）确实不可比，但 **L1（status code / description / 
 
 ⚠️ **反面做法**（禁止）：维护一张「已知差异清单」然后把它们从值里剔除
 ⇒ 那等于**把真差异也一并豁免**，且清单一旦漏了新差异就永远抓不到。
+
+---
+
+## PIT-FAV-RPC-017 · 🔴 **手写 gRPC 方法名时别带前导斜杠**（否则你会测到「未知服务」而不是「未知方法」）
+
+### 现象
+
+2026-10-25 第十四轮实测：同一个 grpc-java 客户端、同一个 `MethodDescriptor`，
+打 Go 真源 server 与 RAG server，两侧的 description 分别是：
+
+```
+Go : unknown service /favorite.FavoriteService     ← 🔴 带前导斜杠、且没有方法名
+RAG: Method not found: /favorite.FavoriteService/DoesNotExist
+```
+
+⇒ 上一轮把它登记成「Go 对未注册方法返回 unknown service」，并标「**归因未查清**」。
+
+### 根因（**已定位到行号**）
+
+🔴 **探针自己把 `:path` 拼坏了**：
+
+1. grpc-java 的 `MethodDescriptor.generateFullMethodName(service, method)`
+   = `service + "/" + method`（**不**补前导斜杠，字节码实测）；
+2. 而 **netty 客户端写 `:path` 时会自己补一个 `/`** ⇒ 线上路径恒为 `/service/method`；
+3. 探针却手写成 `"/favorite.FavoriteService/DoesNotExist"`（**多带了一个斜杠**）
+   ⇒ 线上路径变成 **`//favorite.FavoriteService/DoesNotExist`**（**双斜杠**）；
+4. grpc-go v1.81.1 `server.go:1826` 的 `sm = sm[1:]` **只剥掉一个**前导 `/`
+   ⇒ 它切出的 service 名 = `"/favorite.FavoriteService"`（**带斜杠**）
+   ⇒ 查 `s.services` 注册表**必然落空** ⇒ 走 `unknown service` 分支，
+   **而不是**「已注册服务 + 未注册方法」的 `unknown method` 分支。
+
+⇒ 一句话：**措辞被探针自己污染了**，Go 与 grpc-java 在这一点上根本没被测到。
+
+### 实证锚点（怎么证明客户端确实会补斜杠）
+
+同一个矩阵里的 `c34_health_check` 用例，描述符**本来就不带**前导斜杠
+（`grpc.health.v1.Health/Check`）⇒ 线上路径合法 ⇒ 真源 go-zero 注册的 health 服务
+**正常应答**（`body=hex:0801` = SERVING）⇒ 客户端**确实**会补斜杠。
+
+### 怎么不再踩
+
+⇒ **判据**：
+> 测「未注册方法」之前，先确认 `:path` 的**斜杠个数**。
+> grpc-java 的 `fullMethodName` **不带**前导斜杠（由 netty 补）；
+> grpc-go 只剥**一个** ⇒ 多一个斜杠就会掉进「未知服务」分支。
+
+⇒ 修正后两侧测的才是同一件事，真实库级差异是：
+**grpc-go 区分「未知方法 / 未知服务」两种措辞；grpc-java 两种情形共用一种措辞**
+⇒ grpc-java **丢掉了「方法 vs 服务」的区分**。
+
+⚠️ **元教训**：「**归因未查清**」这一栏不是终点 —— 它是**待办**。
+下一轮必须把它变成「已查清」或「明确不可查」，
+不能让它带着一个**自造的**假象进台账。
+
+---
+
+## PIT-FAV-RPC-018 · 🔴 **`@SpringBootTest` 会把「模块能不能真起」这件事整个掩盖掉**
+
+### 现象
+
+2026-10-25 第十四轮第一次把 favorite-rpc / favorite-api 当作**真实进程**（`java -jar`）启动时，
+**两个模块都起不来**：
+
+```
+① favorite-rpc：
+   APPLICATION FAILED TO START
+   Web application could not be started as there was no
+   org.springframework.boot.web.server.servlet.ServletWebServerFactory bean defined in the context.
+   ⇒ 根因：pom 里只有 spring-boot-web-server + jakarta.servlet-api，
+            **没有** spring-boot-starter-web（无内嵌 Tomcat）
+            ⇒ Boot 默认按 SERVLET 起 ⇒ 找不到 ServletWebServerFactory
+            ⇒ 修法：--spring.main.web-application-type=none（对齐 Go 的「纯 gRPC、零 HTTP 端口」）
+
+② favorite-rpc（修好 ① 之后）：
+   NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder
+     at net.devh.boot.grpc.client.autoconfigure.GrpcClientAutoConfiguration
+        .shadedNettyGrpcChannelFactory(GrpcClientAutoConfiguration.java:160)
+   ⇒ 根因：devh 的 channel factory 在**运行期**引用 InProcessChannelBuilder，
+            而 grpc-inprocess 只在 **test scope**（favorite-api 干脆没声明）
+            ⇒ 修法：scope 改成 runtime / 补声明
+```
+
+### 根因
+
+**测试上下文与真实进程不是同一个东西**：
+`@SpringBootTest(webEnvironment = NONE)` 强制 `web-application-type=none` ⇒ 永远走不到 ①；
+测试 classpath 含 test scope 的 `grpc-inprocess` ⇒ 永远走不到 ②。
+
+⇒ 于是「**测试全绿**」与「**jar 能起**」之间出现了一道**没人测过的缝**。
+（`tools/difftest/check-jar-executable.sh` 只查 `Main-Class`，查不出「少一个运行时依赖」。）
+
+### 怎么不再踩
+
+⇒ **判据**（AGENTS.md §0 的「先让它真的启动一次」，本条把它落成可执行形式）：
+> 任何模块要声称「对齐完成」，至少要有一次**以真实进程启动**的证据。
+> `@SpringBootTest` 起的上下文**不算**。
+
+⇒ 落地：`tools/api-full-parity-probe/favorite/run.sh` 里，
+RAG 侧两个模块**都是 `java -jar` 真起的** ⇒ ① ② 这类问题**当场暴露**。
+
+⚠️ **推论**：本条一旦成立，就会连带查出**别的域**也有同样的缝
+（见 `docs/DRIFT/favorite/rpc.md` §22.4 的跨域清单）⇒ 那部分归 `global`。
+
+---
+
+## PIT-FAV-RPC-019 · 🔴 **「关掉 Nacos discovery」在 rpc 侧与 api 侧是**相反**的两件事**
+
+### 现象
+
+2026-10-25 第十四轮实测：
+
+| 侧 | 处置 | 结果 |
+|---|---|---|
+| **rpc** | `--spring.cloud.nacos.discovery.enabled=false` | ❌ **起不来**：`No qualifying bean of type 'com.alibaba.cloud.nacos.NacosServiceManager' available` |
+| **rpc** | `--spring.cloud.nacos.discovery.server-addr=127.0.0.1:1`（**指向死地址**） | ✅ 起来；注册在 `ApplicationReadyEvent` 时失败 ⇒ **只打一条 ERROR**，进程照常 |
+| **api** | `--spring.cloud.nacos.discovery.enabled=false` | ✅ 起来（api 走 spring-cloud 的**自动**注册，没有硬依赖组件） |
+| **api** | 指向死地址 | ❌ **起不来**：`NacosServiceRegistry.register ⇒ failFast=true ⇒ Client not connected ⇒ Failed to start bean 'webServerStartStop'` |
+
+### 根因
+
+- **rpc 侧**：本域**自己手写**了注册组件 `FavoriteNacosRegistration`，
+  它的**构造器硬依赖** `NacosServiceManager` ⇒
+  「关掉 discovery」= 「 autoconfiguration 不存在」= 「拿不到那个 Bean」= **上下文起不来**。
+  （类注释明写「显式手写注册而不依赖自动注册」⇒ 这个硬依赖是**手写带来的必然结果**。）
+- **api 侧**：走 spring-cloud 的**自动**注册 ⇒ 它在 Nacos 不可达时 **failFast** ⇒ 整个 api 起不来。
+
+### 怎么不再踩
+
+⇒ **判据**：
+> 「把服务发现关掉」不是万能的降级开关 —— **两个模块的失败语义相反**。
+> 关 discovery 是**去掉 autoconfiguration**，不等于「让注册失败」。
+
+⇒ 本探针的落地：
+- **rpc** ⇒ 指向**死地址**（保留 autoconfiguration ⇒ 保留 Bean ⇒ 注册失败只打日志）；
+- **api** ⇒ **关掉** discovery（避免自动注册的 failFast）。
+
+⚠️ 顺带记一条**部署形态事实**：**favorite-rpc 的启动硬依赖「Nacos autoconfiguration 存在」**
+（不是依赖「Nacos 服务可用」）⇒ 「禁用服务发现」这个运维动作会让 favorite-rpc **起不来**。

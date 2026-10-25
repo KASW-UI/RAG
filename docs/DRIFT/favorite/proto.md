@@ -153,7 +153,7 @@ RAG 侧 7 处用 `nullToEmpty(...)` / `nullToZero(...)` 显式设零值
 | **「默认值不落 wire」的生成码级证据** | ✅ **已验**（2026-10-25 第四轮 ⇒ 见 §2 的 `writeTo` 条件表达式） |
 | **「默认值不落 wire」的【字节级】证据** | ✅ **已验**（2026-10-25 第六轮 ⇒ 探针 `tools/proto-wire-probe/favorite/`：**零值消息在 wire 上是空字节**）⇒ 见 §5 |
 | **protobuf 消息体的 wire 字节** | ✅ **已验**（2026-10-25 第六轮 ⇒ **双侧活体对拍**：Go 真源的 `favorite.pb.go`（protoc-gen-go 运行时）vs favorite-proto 的生成码（protobuf-java 运行时）⇒ **6 组消息逐字节一致** ⇒ 见 §5） |
-| **真 channel 上的 wire 字节**（gRPC 帧 / status 帧） | 🟡 **已重新评估并拆成三层**（第十三轮 ⇒ [`rpc.md`](./rpc.md) §20.1）<br>· **L0 帧原始字节**（HPACK / 帧序 / WINDOW_UPDATE）⇒ 🔴 **不做比对**：库级、客户端不可观测（已量化到行号：percent-encoding 的 `~` 边界差 1 字节 ⇒ 本域 24 条文案无 `~` ⇒ 不可观测）<br>· **L1 帧层之上、消息层之下**（status code / description / 消息字节 / metadata key）⇒ ✅ **已双侧活体对拍**（`tools/grpc-contract-probe/favorite/`，36 个 case：33 SAME / 2 SAME_CODE / 1 OBS ⇒ **业务契约逐字节一致**）<br>· **L2 消息体字节** ⇒ ✅ 见本表上一行 |
+| **真 channel 上的 wire 字节**（gRPC 帧 / status 帧） | 🟡 **已重新评估并拆成三层**（第十三轮 ⇒ [`rpc.md`](./rpc.md) §20.1）<br>· **L0 帧原始字节**（HPACK / 帧序 / WINDOW_UPDATE）⇒ 🔴 **不做比对**：库级、客户端不可观测（已量化到行号：percent-encoding 的 `~` 边界差 1 字节 ⇒ 本域 24 条文案无 `~` ⇒ 不可观测）<br>· **L1 帧层之上、消息层之下**（status code / description / 消息字节 / metadata key）⇒ ✅ **已双侧活体对拍**（`tools/grpc-contract-probe/favorite/`，36 个 case：33 SAME / 2 SAME_CODE / 1 OBS ⇒ **业务契约逐字节一致**）<br>· **L2 消息体字节** ⇒ ✅ 见本表上一行<br>⚠️ **第十四轮修正**：L1 那两条 `SAME_CODE`（c35 / c36）的**措辞归因已查清** —— 上一轮记的「Go 侧 `unknown service /favorite.FavoriteService`（带前导斜杠）」是**探针自己把 `:path` 拼坏**（多一个斜杠 ⇒ 双斜杠 ⇒ grpc-go 只剥一个 ⇒ service 名带斜杠 ⇒ 查不到注册表）造成的**假象**，已被推翻 ⇒ 真实差异是「**grpc-go 区分未知方法/未知服务两种措辞，grpc-java 两种情形共用一种措辞**」⇒ 详见 [`rpc.md`](./rpc.md) §22.2 与坑档 **PIT-FAV-RPC-017** |
 
 ---
 

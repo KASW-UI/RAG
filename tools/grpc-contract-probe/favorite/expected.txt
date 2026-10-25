@@ -20,8 +20,22 @@
 #
 # ⚠️ SAME_CODE 的两条（c35 / c36）：两侧 **status code 都是 UNIMPLEMENTED**（语义一致），
 #    但 description 措辞不同 ⇒ 属 gRPC 库层 ⇒ 只断言 code 相同，不断言文案相同。
-#    ⚠️ 措辞的具体归因**未查清**（grpc-go v1.81.1 与 grpc-java 的源码里都找不到
-#    观测到的那串文案）⇒ 本探针只断言「code 相同 + 措辞不同」，不对文案内容下结论。
+#    ✅ **归因已于 2026-10-25 第十四轮查清并修正**（此前记的「Go 侧 unknown service
+#    /favorite.FavoriteService（带前导斜杠）」是**探针自己把 :path 拼坏**造成的假象）：
+#    · grpc-java 的 `MethodDescriptor.generateFullMethodName` = `service + "/" + method`
+#      （**不**补前导斜杠），而 netty 客户端写 `:path` 时**自己补一个 "/"**
+#      ⇒ 描述符若手写成 "/favorite.FavoriteService/DoesNotExist"，
+#        线上路径就成了**双斜杠** "//favorite.…"。
+#    · grpc-go v1.81.1 `server.go:1826` **只剥掉一个**前导 "/" ⇒ 它切出的 service 名
+#      = "/favorite.FavoriteService"（带斜杠）⇒ 查注册表必然落空
+#      ⇒ 误落到 `unknown service` 分支，而不是「已注册服务 + 未注册方法」的
+#        `unknown method` 分支 ⇒ **措辞被探针自己污染**。
+#    · 修正后（描述符不带前导斜杠）两侧测的是同一件事，真实库级差异是：
+#      Go 对「未注册方法」说 `unknown method X for service Y`、对「未注册服务」说
+#      `unknown service Y`（**两种措辞**）；grpc-java 两种情形**共用一种措辞**
+#      `Method not found: <full method name>` ⇒ **grpc-java 丢掉了「方法 vs 服务」的区分**。
+#    ⇒ 实证锚点：c34 的描述符本来就不带前导斜杠 ⇒ 线上路径合法 ⇒ 真源 go-zero 注册的
+#      health 服务**正常应答**（body=hex:0801 = SERVING）⇒ 客户端确实会补斜杠。
 #
 # ⚠️ c30 必须排在写入用例之前（否则它读的收藏夹被改名用例改过 ⇒ updated_at 变成
 #    「本次运行的时刻」⇒ 冻结值每次都不同 ⇒ 假红）。
@@ -61,5 +75,5 @@ c31_delete_folder_ok	SAME	code=OK|desc=-|body=hex:0801|rhdr=content-type=applica
 c32_delete_item_ok	SAME	code=FAILED_PRECONDITION|desc=收藏暂不可撤回|body=-|rhdr=-|rtrl=content-type=application/grpc
 c33_update_folder_ok	SAME	code=OK|desc=-|body=hex:0801|rhdr=content-type=application/grpc|rtrl=-
 c34_health_check	SAME	code=OK|desc=-|body=hex:0801|rhdr=content-type=application/grpc|rtrl=-
-c35_unknown_method	SAME_CODE	code=UNIMPLEMENTED|desc=unknown service /favorite.FavoriteService|body=-|rhdr=-|rtrl=content-type=application/grpc
-c36_unknown_service	SAME_CODE	code=UNIMPLEMENTED|desc=unknown service /favorite.NoSuchService|body=-|rhdr=-|rtrl=content-type=application/grpc
+c35_unknown_method	SAME_CODE	code=UNIMPLEMENTED|desc=unknown method DoesNotExist for service favorite.FavoriteService|body=-|rhdr=-|rtrl=content-type=application/grpc
+c36_unknown_service	SAME_CODE	code=UNIMPLEMENTED|desc=unknown service favorite.NoSuchService|body=-|rhdr=-|rtrl=content-type=application/grpc
