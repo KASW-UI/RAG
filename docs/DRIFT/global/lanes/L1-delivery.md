@@ -290,3 +290,142 @@ RAG 侧此前**全仓无 exporter 装配** ⇒ `GlobalOpenTelemetry.get()` 是 n
 | ③ | 把**本轮变异脚本**落仓到 `tools/difftest/`（建议名 `otel-mutation.py`） | `tools/` **不在 L1 白名单**（L3 写 `ddl*`、L4 写 `flyway*`）⇒ 只留在会话临时目录 `/tmp/mutation-round21.py`；§9.3 已把 4 条变异的锚点与期望红点写全 ⇒ 可据此重建 |
 | ④ | §9.2 / §9.4 的结论 fold 进 `docs/Intentional_Deviations/global/`（若有需签字项） | 那是 L5 的白名单 |
 | ⑤ | `align/global` → `do-my-own-gh` 的合并 | 由 Jason 决定时机 |
+
+---
+
+## 十、第二十二轮 · T-13：超时路径的「响应撕裂 / 状态码被抢」⇒ 对齐 Go 的**单写者**语义
+
+> **触发**：第二十一轮（T-11）全仓回归的**唯一一条红**
+> （`MessageApiTimeoutRealTomcatTest.slowDownstreamYieldsGoTimeoutContract` ⇒ 客户端 `IOException: HTTP/1.1 header parser received no bytes`
+> ⇒ 服务端 Tomcat `NullPointerException: Cannot invoke "MimeHeaderField.getName()" because "this.headers[i]" is null`）。
+>
+> ⚠️ **白名单延伸（请整合者一并复核）** —— 本节是**本 lane 的台账片段**（协议 §二.3）⇒ 自足；
+> 共享台账 `common-tails.md` 的 T-13 段**由整合者 fold**。
+> spec：`.agents/specs/global-round22-timeout-response-race.md`（同样**不在 L2~L5 任何一条 lane 的白名单里** ⇒ 文件级零重叠）。
+> 🔴 **且本轮改了 `service/common/**`（`observability/HttpMiddleware.java` + 新增一个 test）** ——
+> 而 §四 的 L1 白名单**原本只允许 `service/common/communityfact/Dispatcher.java`**。
+> ⇒ **事实上的延伸始于第二十一轮（T-11）**：那一轮已经改了 `service/common/{observability,http}/**` + `pom.xml`
+> + `src/main/resources/**` + `src/test/**`，**但 §九 没有把它登记成白名单延伸**（只登记了 spec 那一份）——
+> ⇒ **本节把这条账补上**：T-11 与 T-13 两条 lane 都把 `service/common/**` 纳入了实际写权，
+> **请整合者复核并把 §四 的白名单正式更新**（否则台账与实际写权不一致，review 时会误判成越权）。
+
+### 10.1 一句话结论
+
+🔴 **这条缺陷早于 T-11**（A/B 对拍坐实）⇒ **T-11 的全局 OpenTelemetry 没有引入任何回归**；
+真正的问题是 RAG 的 `ObservabilityResponseWriter` **不是** Go 的 `observabilityResponseWriter` 的等价物
+—— Go 侧它是**纯 buffer**（`Write`/`WriteHeader` 从不碰底层 `http.ResponseWriter` ⇒ **socket 永远只有一个写者**），
+RAG 侧它**没覆写 `flushBuffer()`** ⇒ **worker 线程能提交响应** ⇒ 两个写者同时改 Tomcat 的头数组
+⇒ ① `MimeHeaders` 留 null 洞 ⇒ 读头 NPE ⇒ 响应一个字都发不出去（EOF）；
+② 状态码被 worker 抢走（客户端收到 **200** 而不是 503）。**已修**（4 条改动，缺一不可）。
+
+### 10.2 归因（A/B 对拍 ⇒ 排除 T-11）
+
+| 步骤 | 做法 | 结果 |
+|---|---|---|
+| ① 结构取证 | `git diff aac691c..1d179ff -- service/common/.../HttpMiddleware.java service/common/.../GoStyleMaxBytesFilter.java` | **空** ⇒ 涉事的竞态代码在 T-11 前后**逐字节相同** |
+| ② 可复现的门 | 新增 `GoStyleTimeoutResponseRaceGateTest`（真 Tomcat + **生产用的** `HttpMiddleware` + 30ms 超时 + 200 轮 + 裸 socket） | 修前 **200/200 全坏** |
+| ③ **A/B 对拍** | 同一个门拷到 **`aac691c`（T-11 之前）** 的隔离工作树 | **同样 200/200 全坏** |
+
+⇒ ⇒ **缺陷早于 T-11 ⇒ 不是 T-11 引入的**（T-11 的回归只是**第一次把它撞出来**）。
+
+### 10.3 根因（Go 出处 → RAG 落点）
+
+| Go 位置（真源） | 语义 | RAG 落点（修前） | 判定 |
+|---|---|---|---|
+| `service/common/observability/http.go` 的 `type observabilityResponseWriter` | `header`/`body`/`status` + `mu` + `timedOut` ⇒ **纯 buffer** | `ObservabilityResponseWriter` 同名字段，但**额外持有 `original` 并实时透传** | ❌ 不等价 |
+| 同文件 `func (w *observabilityResponseWriter) Write(...)` | `if w.timedOut { return 0, http.ErrHandlerTimeout }` ⇒ 超时后**丢弃**业务写 | `getWriter()` 的 write 也有 `timedOut` 判断 ✓ | ✅ 等价 |
+| 同文件 `flushTo(dst)` | **只在 done 分支**调用 ⇒ 唯一落 socket 的地方 | `flushTo` 也只在 done 分支调用 ✓ | ✅ 等价 |
+| 同文件 `case <-ctx.Done(): rec.markTimedOut(); … http.Error(w, ...)` | **先标记、后写**；`w` 是**原始** writer | 修前：`workerFuture.cancel(true)` **在** `markTimedOut()` **之前** ⇒ worker 可能抢先提交 | ❌ 不等价 |
+| 同文件 `observabilityResponseWriter` **没有** flush/commit 概念 | ⇒ worker **结构上无法**提交响应 | 修前：`ObservabilityResponseWriter` **没覆写 `flushBuffer()`** ⇒ `ServletResponseWrapper` **透传** ⇒ worker 能提交 | ❌ **根因** |
+
+⇒ **修法（4 条，缺一不可）**：
+
+| # | 改动 | 挡的是 |
+|---|---|---|
+| ① | `ObservabilityResponseWriter` 加 `underlyingLock`；所有对底层的写 + `markTimedOut`/`markClientCancelled` **同一把锁** | NPE（`count` 交错 ⇒ null 洞） |
+| ② | 超时/断连后 `flushBuffer()` **no-op** | 状态码被抢（worker 抢先 commit） |
+| ③ | **先标记、后中断**（`markTimedOut()` 提到 `cancel(true)` 之前） | 标记落地前的漏网写 |
+| ④ | 超时响应**显式 `Content-Length: 15`** | wire 对齐（Go 走 net/http 缓冲 ⇒ 算长度；RAG `flush()` 即提交 ⇒ 退化成 chunked） |
+
+⚠️ ② **不是**「永远 no-op」：Servlet 规范「commit 后设 status 无效」是**容器语义**
+（`HttpMiddlewareTest#statusSetAfterCommitIsIgnoredByServletSemantics` 把它固化成显式契约）
+⇒ 正常路径必须照常透传 ⇒ 只在超时/断连之后掐掉。
+
+### 10.4 已证等价（Go 消费点 → RAG 落点 → 守门 → 变异）
+
+| # | Go 消费点 | RAG 落点 | 守门 | 变异 |
+|---|---|---|---|---|
+| 1 | `http.Error(w, httpTimeoutBody, 503)` ⇒ 状态码 503 | `writeTimeoutResponse` 的 `setStatus(503)` | `timeoutResponseIsNeverTorn` | M1 / M2 |
+| 2 | `http.Error` ⇒ body = `"Request Timeout\n"` | `getWriter().write(body); write('\n')` | 同上（解 chunk 后逐字节比对） | M0 |
+| 3 | `http.Error` ⇒ `X-Content-Type-Options: nosniff` | `setHeader("X-Content-Type-Options","nosniff")` | 同上 | M0 |
+| 4 | `http.Error` ⇒ `Content-Type: text/plain; charset=utf-8` | `setContentType(...)`（**分号后的空格是 Tomcat 框架限制**，已记录） | 同上（只断言到 charset） | M0 |
+| 5 | Go 的 writer 超时后**丢弃**业务写 | `flushBuffer()` 超时后 no-op + `writeToOriginal` 的标志检查 | 同上（断言无 `X-Late-Write`） | M1 / M3 / M4 |
+| 6 | Go：**只有一个写者**碰 socket | `underlyingLock` 串行化 + ②③ | 同上（200 轮全干净） | M0 / M1 / M2 |
+
+### 10.5 变异结果表
+
+> 隔离工作树 `/tmp/rag-round22-mut`（**PIT-GLOBAL-020**：不在共享工作树跑）· 基线 `1d179ff` + 本轮修复 + 新门
+> 三道闸（PIT-GLOBAL-018）：① 跑前删旧 surefire XML ② 看 maven 退出码 ③ grep `COMPILATION ERROR`（编译失败 ≠ 转红）
+> 判定口径：目标 testcase **变红**（failure 或 error 都算）；连带红数记录但不扣分。
+
+| # | 变异 | 目标 testcase | 结果 | 坏轮次 / 200 | 红点（门实际报出的） |
+|---|---|---|---|---|---|
+| **M0** | **整体回退**（`git checkout` 生产文件 ⇒ 修前状态） | `timeoutResponseIsNeverTorn` | ✅ 红 | **194** | 状态行 = `HTTP/1.1 200`（worker 抢走） |
+| **M1** | `flushBuffer()` 去掉「超时后 no-op」 | 同上 | ✅ 红 | **131** | 状态行 = `HTTP/1.1 200` |
+| **M2** | `writeTimeoutResponseQuietly` 改走 `writeToOriginal`（被「已超时」标志 no-op 吞掉） | 同上 | ✅ 红 | **200** | 状态行 = `HTTP/1.1 200`（503 根本没写出） |
+| **M3** | `writeToOriginal` 去掉「超时/断连后 no-op」标志检查 | 同上 | ✅ 红 | **163** | **worker 的晚写漏进响应（`X-Late-Write`）** |
+| **M4** | 顺序倒转：`cancel(true)` 提到 `markTimedOut()` 之前 | 同上 | ✅ 红 | **1** | 状态行 = `HTTP/1.1 200` |
+
+⇒ **5/5 全部转红**；还原校验通过（隔离树的生产文件与工作树**逐字节相同**）。
+
+⚠️ **两条要如实说的**：
+1. **M4 只坏 1/200** ⇒ 「先标记、后中断」这一条守的是**窄窗口**（生产里偶发的那次就落在这个窗口）
+   ⇒ 它**不能**单独证明这条改动是必需的 ⇒ **真正的承重墙是 M1/M3（超时后不许 worker 再碰底层）**。
+2. **M0 只坏 194/200（不是 200/200）** ⇒ 说明**缺陷形态本身有随机性**（取决于两条线程路径的相对时序）
+   ⇒ ⇒ 「修前 200/200 全坏」这个说法**只在 A/B 那一次成立**，**不应作为稳定结论引用**。
+   ⇒ 稳定结论是：**修前 100% 会坏**（A/B 两次独立运行：200/200 与 194/200）⇒ **每一轮都有很高概率坏**。
+
+⚠️ **本轮踩到的一个新坑（⇒ 建议 L5 立 `PIT-GLOBAL-021`）**：
+**变异结果的判定正则必须匹配 surefire 打印的「全限定名」**（`-- in com.rag.common.observability.XxxTest`），
+而不是简单类名 ⇒ 否则**红与绿都读不出来** ⇒ 5 条全报 `NO_RESULT`，
+**看起来像「守门没被触达」，实际是「守门红了但脚本读不出来」**。
+⇒ 与 PIT-GLOBAL-014（「没转红」先排除「测试没跑」）同源，但方向相反：**这次是「跑了红，但没读出来」**。
+
+### 10.6 🔴 可观察变化（**记账，不静默**）
+
+| # | 变化 | 依据 | 影响面 |
+|---|---|---|---|
+| ① | **超时响应不再可能被 worker 抢走** ⇒ 稳定 `503 + "Request Timeout\n"`（原先可能是 200 / 撕裂 / EOF） | Go 的单写者语义 | **全部 10 个 api**（共享层） |
+| ② | **超时响应多一个 `Content-Length: 15`**（原先 `Transfer-Encoding: chunked`） | Go 的 `http.Error` ⇒ net/http 算长度 | 全部 10 个 api |
+| ③ | **错误处理路径（`@ExceptionHandler` 返回 `ResponseEntity`）的响应改由 `flushCaptured` 统一提交** ⇒ 框架从 chunked 变 `Content-Length` | 同上 | 全部 10 个 api（**向 Go 收敛**） |
+
+### 10.7 未证成（**不声称已证明的**）
+
+| # | 未证成项 | 原因 |
+|---|---|---|
+| ① | **Tomcat 那条 `103 Early Hints` 的触发点未定位** | Tomcat 11 只有 `Response.sendError(103)` → `sendEarlyHints()` 会发它，而 RAG 侧**无人**调 `sendError(103)` ⇒ 触发链未查清；**但**它 ① 是 informational（客户端按 RFC 9110 忽略）② 修前修后都出现 ③ 最终响应完好 ⇒ **判为无影响** |
+| ② | **Go 侧未活体对拍** | Go 事实全部来自**逐行读源码**（`service/common/observability/http.go`） |
+| ③ | **并发压测未做** | 本门是 200 轮串行；未做多线程并发压测 |
+| ④ | **其余 9 个 api 的超时路径未逐域对拍** | 本门在 `service/common` 用生产中间件证明「语义层」；各 api 的**业务链**（控制器 / 异常处理器）形态不同 ⇒ 是否还有别的「晚写」形态**未验** |
+
+### 10.8 🔴 favorite 记账（**本轮对 favorite 零文件改动**）
+
+> `service/favorite/**` 与 `docs/*/favorite/**` **零改动**。
+> 但**共享层改动会影响 favorite 的可观察行为** ⇒ 按协议 §六「必须记账并告知 owner」：
+
+| 项 | 内容 |
+|---|---|
+| **favorite 侧受影响的地方** | favorite-api 的**超时路径**现在稳定返回 `503 + "Request Timeout\n" + Content-Length: 15`（原先可能返回 200 / 撕裂 / EOF）⇒ **向 Go 收敛** |
+| **favorite 代码需要改吗** | **不需要** ⇒ 修法全在 `service/common` |
+| **favorite owner 需要知道什么** | ① favorite 的超时响应**不再可能状态码被抢**；② 多一个 `Content-Length` 头；③ 若 favorite 域有守门断言「超时时是 chunked / 是 200」⇒ 需要复核（若有 ⇒ 那是**依赖缺陷行为的断言**） |
+| **本轮对 favorite 的改动量** | **0 个文件** |
+
+### 10.9 交接整合者（本 lane 越权做不了的事）
+
+| # | 事项 | 为什么本 lane 做不了 |
+|---|---|---|
+| ① | 把本节 fold 进 `docs/DRIFT/global/common-tails.md` 的 T-13 段 | 共享台账 ⇒ 协议 §二.3 |
+| ② | 更新 `AGENTS.md` §0 的 `global` 行 + 三个 `_INDEX.md` + `_MANIFEST.json` | 共享索引 |
+| ③ | 把**本轮变异脚本**落仓到 `tools/difftest/`（建议名 `timeout-race-mutation.py`） | `tools/` **不在 L1 白名单** ⇒ 只留在会话临时目录 `/tmp/mutation-round22.py`；§10.5 已把 5 条变异的锚点与期望红点写全 ⇒ 可据此重建 |
+| ④ | **新坑 `PIT-GLOBAL-021`（判定正则）** ⇒ 落 `docs/Pitfalls/global/` | 那是 **L5** 的白名单 |
+| ⑤ | `align/global` → `do-my-own-gh` 的合并 | 由 Jason 决定时机 |

@@ -414,11 +414,12 @@ public final class HttpMiddleware {
                 } catch (InterruptedException ie) {
                     // 容器关闭 / 请求被容器取消：Go 侧对应 ctx.Err() == context.Canceled
                     Thread.currentThread().interrupt();
-                    workerFuture.cancel(true);
+                    // 🔴 2026-10-25（第二十二轮 · global）：**先标记、后中断**（同超时分支的理由）
                     rec.markClientCancelled();
+                    workerFuture.cancel(true);
                     markTimeout(currentOtelContext(), new java.util.concurrent.TimeoutException("client cancelled: " + ie.getMessage()),
                             Duration.between(start, Instant.now()), httpAttrs(serviceName, httpReq, HTTP_CLIENT_CLOSED_REQUEST));
-                    writeTimeoutResponseQuietly(httpResp, HTTP_CLIENT_CLOSED_REQUEST, httpReq);
+                    rec.writeTimeoutResponseQuietly(HTTP_CLIENT_CLOSED_REQUEST, httpReq);
                     return;
                 }
 
@@ -434,11 +435,17 @@ public final class HttpMiddleware {
                         grpcCtx.cancel(null);
                     }
                     // ② 中断 worker 线程（对齐 Go：ctx 取消后所有 ctx-aware 调用立即返回）
+                    //    🔴 2026-10-25（第二十二轮 · global）：**先标记、后中断** ——
+                    //    recordClientDisconnected() 里也会 markClientCancelled()，但它在中断**之后**，
+                    //    ⇒ 业务可能在标记落地前就 commit 了响应 ⇒ 499 响应被抢走。
+                    //    ⇒ 这里提前标记（同超时分支的理由）。
+                    rec.markClientCancelled();
                     workerFuture.cancel(true);
                     // ③ 记录 499 + 写响应 —— **复用已有的 499 路径**（flushCaptured 里的那一套）
                     recordClientDisconnected(rec, currentOtelContext(), serviceName, httpReq,
                             Duration.between(start, Instant.now()));
-                    writeTimeoutResponseQuietly(httpResp, HTTP_CLIENT_CLOSED_REQUEST, httpReq);
+                    // 🔴 走 rec ⇒ 与 worker 线程对底层的写互斥（见超时分支的注释）
+                    rec.writeTimeoutResponseQuietly(HTTP_CLIENT_CLOSED_REQUEST, httpReq);
                     return;
                 }
 
@@ -477,10 +484,19 @@ public final class HttpMiddleware {
                     rethrowAsServlet(panic);
                 } else if (!workerDone) {
                     // 对齐 Go 版 ctx.Done() == DeadlineExceeded → 503
+                    //
+                    // 🔴 2026-10-25（第二十二轮 · global）：**先标记、后中断**。
+                    //   Go 出处：service/common/observability/http.go 的 `case <-ctx.Done():`
+                    //     rec.markTimedOut()      // ← 先把业务写封掉
+                    //     http.Error(w, ...)      // ← 再写超时响应
+                    //   ⇒ Go 的业务 goroutine 被 ctx 取消的时刻与 markTimedOut 同一瞬间，
+                    //     **但它写的是 rec（纯 buffer），碰不到 socket** ⇒ 无论怎么交错都安全。
+                    //   ⇒ RAG 侧要拿到同样的保证，前提是「超时标记」必须**早于**「业务被唤醒」，
+                    //     否则业务可能在标记落地前就把响应 commit 掉（见下面 markTimedOut 的注释）。
+                    rec.markTimedOut();
                     // 取消业务线程（对应 Go 里 ctx 被 cancel，所有 ctx-aware 调用立即返回）
                     workerFuture.cancel(true);
                     int statusCode = 503;
-                    rec.markTimedOut();
                     Context tCtx = currentOtelContext();
                     Span tSpan = Span.fromContext(tCtx);
                     if (tSpan.isRecording()) {
@@ -492,7 +508,11 @@ public final class HttpMiddleware {
                     markTimeout(tCtx, new java.util.concurrent.TimeoutException("http timeout"), duration, httpAttrs(serviceName, httpReq, statusCode));
                     // D-11 修复：Go 的 http.Error 会写 text/plain + 尾部换行，
                     // 裸 getWriter().write() 两样都没有，客户端看到的是无 Content-Type 的裸串
-                    writeTimeoutResponseQuietly(httpResp, statusCode, httpReq);
+                    //
+                    // 🔴 2026-10-25（第二十二轮 · global）：走 rec ⇒ **与 worker 线程对底层的写互斥**
+                    //   （否则两个线程同时改 Tomcat 的 MimeHeaders ⇒ createHeader() 的 count++ 交错
+                    //     ⇒ 数组留 null 洞 ⇒ 读头 NPE ⇒ 响应一个字都发不出去）
+                    rec.writeTimeoutResponseQuietly(statusCode, httpReq);
                 } else {
                     markHttpResult(currentOtelContext(), serviceName, httpReq, rec.statusCode(), rec.bodyBytes(), duration, finalSlow);
                     flushCaptured(httpResp, rec, serviceName, httpReq, duration, currentOtelContext());
@@ -670,6 +690,14 @@ public final class HttpMiddleware {
         //   实测 `setHeader("Content-Type", ...)` 也一样（Tomcat 内部转手调 setContentType）
         //   ⇒ 该空格在 Tomcat 上无任何写法能产出 ⇒ 归「框架限制」，不改。
         resp.setHeader("X-Content-Type-Options", "nosniff");
+        // 🔴 2026-10-25（第二十二轮 · global）：**显式定 Content-Length** ——
+        //   Go 的 `http.Error` → `fmt.Fprintln(w, error)` 写进 net/http 的缓冲 ⇒
+        //   收尾时 net/http 按缓冲内容算长度 ⇒ 线上是 `Content-Length: 15`。
+        //   而 RAG 这里用 `getWriter().write(...)` + `flush()` ⇒ flush 即提交
+        //   ⇒ Tomcat 已经没机会算长度 ⇒ 退化成 `Transfer-Encoding: chunked` ⇒ **wire 不一致**。
+        //   ⇒ 显式写死长度（body 固定是 "Request Timeout\n" = 15 字节）⇒ 与 Go 逐字节对齐。
+        //   （与 `flushCaptured` 里那段「保形」注释是同一条理由。）
+        resp.setContentLength(HTTP_TIMEOUT_BODY.length() + 1);
         resp.getWriter().write(HTTP_TIMEOUT_BODY);
         resp.getWriter().write('\n');
         resp.getWriter().flush();
@@ -830,6 +858,46 @@ public final class HttpMiddleware {
         private volatile boolean timedOut = false;
         private volatile boolean clientCancelled = false;
 
+        /**
+         * 🔴 **底层响应的写锁**（2026-10-25 · 第二十二轮 · global）。
+         *
+         * <p><b>为什么必须有</b>：worker 线程（业务）与容器线程（超时 / 断连分支）<b>都可能碰底层响应</b>。
+         * Tomcat 11 的 {@code MimeHeaders.createHeader()}（{@code tomcat-embed-core-11.0.24}）：
+         * <pre>
+         *   if ((mh = headers[count]) == null) { headers[count] = mh = new MimeHeaderField(); }
+         *   count++;
+         * </pre>
+         * ⇒ 两个线程同时加头时，各自 {@code count++} 却只填了一个槽位 ⇒ <b>数组里留 null 洞</b>
+         * ⇒ 随后任何线程读头（{@code Http11Processor.prepareResponse} 读 {@code "Date"}）
+         * ⇒ {@code headers[i].getName()} ⇒ <b>NPE</b> ⇒ 响应一个字都发不出去（客户端只看到 EOF）。
+         *
+         * <p>⇒ 这把锁把「对底层响应的所有修改」串行化 ⇒ 洞不可能出现。
+         *
+         * <p>⚠️ <b>锁是止血，不是根治</b>：根治是「worker 根本不碰底层」⇒ 见 {@link #flushBuffer()}。
+         * 两者都要：锁挡掉「标记落地前已在飞行中的那次写」，no-op flushBuffer 挡掉「worker 抢先提交」。
+         */
+        private final java.util.concurrent.locks.ReentrantLock underlyingLock =
+                new java.util.concurrent.locks.ReentrantLock();
+
+        /** 对底层响应做一次写：<b>加锁</b> + <b>标志检查</b>（超时 / 断连后一律 no-op）。 */
+        private void writeToOriginal(OriginalAction action) {
+            underlyingLock.lock();
+            try {
+                if (timedOut || clientCancelled) {
+                    return;
+                }
+                action.run((HttpServletResponse) this.original);
+            } finally {
+                underlyingLock.unlock();
+            }
+        }
+
+        /** 写动作（不抛 IOException 的那批）。 */
+        @FunctionalInterface
+        private interface OriginalAction {
+            void run(HttpServletResponse resp);
+        }
+
         ObservabilityResponseWriter(HttpServletResponse original) {
             super(original);
             this.original = original;
@@ -837,40 +905,50 @@ public final class HttpMiddleware {
 
         @Override
         public void setStatus(int sc) {
-            if (timedOut || clientCancelled) {
-                return;
-            }
-            this.status = sc;
-            // 关键修复（2026-10-21 实测）：status 必须立即 propagate 到 underlying。
-            // 只缓存到 this.status 的旧实现里，下层 chain.doFilter() 跑完时已经
-            // outputMessage.flush() → wrapper.flushBuffer() → 底层 MockHttpServletResponse
-            // 标 committed，HttpMiddleware.flushTo 再写 status 直接被 !isCommitted() 吞掉。
-            // 实测表象：HTTP 401 / 5003 一律降到 200，DRIFT-009 / DRIFT-004 全程不可见。
-            // Go 对应的是 responseWriter.WriteHeader 同步语义，超时分支走未经 wrapper 的
-            // writeTimeoutResponse(httpResp, 503) 兜底，与本改动无冲突。
-            // 用 this.original 显式拿 HttpServletResponse，避免 inner class 字段遮蔽 super.getResponse()
-            // return-type narrowing（javac 在某些版本会回退到 ServletResponseWrapper.getResponse()）。
-            ((HttpServletResponse) this.original).setStatus(sc);
+            // 🔴 2026-10-25（第二十二轮 · global）：加锁 + 标志检查（见 writeToOriginal 的注释）
+            writeToOriginal(resp -> {
+                this.status = sc;
+                // 关键修复（2026-10-21 实测）：status 必须立即 propagate 到 underlying。
+                // 只缓存到 this.status 的旧实现里，下层 chain.doFilter() 跑完时已经
+                // outputMessage.flush() → wrapper.flushBuffer() → 底层 MockHttpServletResponse
+                // 标 committed，HttpMiddleware.flushTo 再写 status 直接被 !isCommitted() 吞掉。
+                // 实测表象：HTTP 401 / 5003 一律降到 200，DRIFT-009 / DRIFT-004 全程不可见。
+                // Go 对应的是 responseWriter.WriteHeader 同步语义，超时分支走未经 wrapper 的
+                // writeTimeoutResponse(httpResp, 503) 兜底，与本改动无冲突。
+                // 用 this.original 显式拿 HttpServletResponse，避免 inner class 字段遮蔽 super.getResponse()
+                // return-type narrowing（javac 在某些版本会回退到 ServletResponseWrapper.getResponse()）。
+                resp.setStatus(sc);
+            });
         }
 
         @Override
         public void sendError(int sc) throws IOException {
-            if (timedOut || clientCancelled) {
-                return;
+            underlyingLock.lock();
+            try {
+                if (timedOut || clientCancelled) {
+                    return;
+                }
+                this.status = sc;
+                // 与 setStatus 同步 propagate（见 setStatus 的注释）
+                ((HttpServletResponse) this.original).sendError(sc);
+            } finally {
+                underlyingLock.unlock();
             }
-            this.status = sc;
-            // 与 setStatus 同步 propagate（见 setStatus 的注释）
-            ((HttpServletResponse) this.original).sendError(sc);
         }
 
         @Override
         public void sendError(int sc, String msg) throws IOException {
-            if (timedOut || clientCancelled) {
-                return;
+            underlyingLock.lock();
+            try {
+                if (timedOut || clientCancelled) {
+                    return;
+                }
+                this.status = sc;
+                // 与 setStatus 同步 propagate（见 setStatus 的注释）
+                ((HttpServletResponse) this.original).sendError(sc, msg);
+            } finally {
+                underlyingLock.unlock();
             }
-            this.status = sc;
-            // 与 setStatus 同步 propagate（见 setStatus 的注释）
-            ((HttpServletResponse) this.original).sendError(sc, msg);
         }
 
         @Override
@@ -938,31 +1016,33 @@ public final class HttpMiddleware {
 
         @Override
         public void setHeader(String name, String value) {
-            if (timedOut || clientCancelled) return;
-            capturedHeaders.put(name, value);
-            // 关键修复（2026-10-22 E-1 实测取证）：与 setStatus 同构的问题，头也要**实时** propagate。
-            //
-            // 旧实现只写 capturedHeaders，等 flushTo 再统一写回 underlying。实测（真实 Tomcat）：
-            //   200 JSON 响应   → Content-Type: application/json 正常
-            //   400 text/plain   → **Content-Type 完全丢失**，且 Transfer-Encoding: chunked
-            //                       + Connection: close
-            // 原因是 flushTo 在 chain.doFilter() **之后**才执行，此时下游
-            // outputMessage.flush() → wrapper.flushBuffer() → 底层 Tomcat 已 committed，
-            // 此时再 dst.setHeader(...) 会被 Tomcat **静默忽略**（不报错、不断言）。
-            //
-            // ⚠️ 这正是 §3.3「框架机制必须验证实际生效」第四类的又一次实例：
-            // 「代码里 headers.set(...) 明明写了」不等于「客户端收到的响应里有」。
-            // 它此前 4 轮对拍全绿，只因为 difftest **只比 body 不比响应头**，
-            // 而 body 恰好是对的（DRIFT-006 对齐的正是正文）。
-            ((HttpServletResponse) this.original).setHeader(name, value);
+            writeToOriginal(resp -> {
+                capturedHeaders.put(name, value);
+                // 关键修复（2026-10-22 E-1 实测取证）：与 setStatus 同构的问题，头也要**实时** propagate。
+                //
+                // 旧实现只写 capturedHeaders，等 flushTo 再统一写回 underlying。实测（真实 Tomcat）：
+                //   200 JSON 响应   → Content-Type: application/json 正常
+                //   400 text/plain   → **Content-Type 完全丢失**，且 Transfer-Encoding: chunked
+                //                       + Connection: close
+                // 原因是 flushTo 在 chain.doFilter() **之后**才执行，此时下游
+                // outputMessage.flush() → wrapper.flushBuffer() → 底层 Tomcat 已 committed，
+                // 此时再 dst.setHeader(...) 会被 Tomcat **静默忽略**（不报错、不断言）。
+                //
+                // ⚠️ 这正是 §3.3「框架机制必须验证实际生效」第四类的又一次实例：
+                // 「代码里 headers.set(...) 明明写了」不等于「客户端收到的响应里有」。
+                // 它此前 4 轮对拍全绿，只因为 difftest **只比 body 不比响应头**，
+                // 而 body 恰好是对的（DRIFT-006 对齐的正是正文）。
+                resp.setHeader(name, value);
+            });
         }
 
         @Override
         public void addHeader(String name, String value) {
-            if (timedOut || clientCancelled) return;
-            capturedHeaders.merge(name, value, (a, b) -> a + "," + b);
-            // 与 setHeader 同理：实时 propagate（见上面注释）
-            ((HttpServletResponse) this.original).addHeader(name, value);
+            writeToOriginal(resp -> {
+                capturedHeaders.merge(name, value, (a, b) -> a + "," + b);
+                // 与 setHeader 同理：实时 propagate（见上面注释）
+                resp.addHeader(name, value);
+            });
         }
 
         /**
@@ -975,11 +1055,76 @@ public final class HttpMiddleware {
          */
         @Override
         public void setContentType(String type) {
-            if (timedOut || clientCancelled) return;
-            if (type != null) {
-                capturedHeaders.put("Content-Type", type);
+            writeToOriginal(resp -> {
+                if (type != null) {
+                    capturedHeaders.put("Content-Type", type);
+                }
+                resp.setContentType(type);
+            });
+        }
+
+        /**
+         * 🔴🔴 **超时 / 断连之后，不再把底层响应提交出去**（2026-10-25 · 第二十二轮 · global）。
+         *
+         * <p><b>Go 出处</b>：{@code Sea-RideTheWind_golang/service/common/observability/http.go}
+         * <pre>
+         *   type observabilityResponseWriter struct {
+         *       header http.Header
+         *       body   bytes.Buffer
+         *       status int
+         *       mu       sync.Mutex
+         *       timedOut bool
+         *   }
+         *
+         *   func (w *observabilityResponseWriter) Write(p []byte) (int, error) {
+         *       w.mu.Lock(); defer w.mu.Unlock()
+         *       if w.timedOut { return 0, http.ErrHandlerTimeout }
+         *       return w.body.Write(p)
+         *   }
+         *   func (w *observabilityResponseWriter) flushTo(dst http.ResponseWriter) { ... }
+         * </pre>
+         * ⇒ Go 的 writer 只实现 {@code Header/WriteHeader/Write} ⇒ 它<b>根本没有</b>「提交响应」的能力；
+         * 唯一把 buffer 落到 socket 的地方是 {@code flushTo(dst)}，而 {@code flushTo} 只在
+         * <b>done 分支</b>（{@code case <-done:}）被调用；超时分支是
+         * {@code http.Error(w, ...)}（写<b>原始</b> w）⇒ <b>socket 的写者永远只有一个</b>。
+         *
+         * <p><b>RAG 侧此前</b>：本类<b>没有</b>覆写 {@code flushBuffer()}
+         * ⇒ {@code ServletResponseWrapper.flushBuffer()} 直接透传给底层
+         * ⇒ <b>worker 线程能提交响应</b> ⇒ 两个写者 ⇒ ① 状态码被抢（客户端收到 200 而不是 503）
+         * ② Tomcat 的 {@code MimeHeaders} 被写坏 ⇒ NPE ⇒ 客户端只看到 EOF。
+         * ⇒ 生产实证：2026-10-25 全仓回归唯一一条红
+         * （{@code MessageApiTimeoutRealTomcatTest.slowDownstreamYieldsGoTimeoutContract}）
+         * ⇒ 客户端 {@code IOException: HTTP/1.1 header parser received no bytes}。
+         *
+         * <p><b>为什么改成 no-op 不会影响正常路径</b>：正常路径下<b>没有人</b>调
+         * {@code flushBuffer()}（Spring 写 body 走的是本类的缓冲流，不会 flush）⇒
+         * 真正提交响应的是 {@code flushCaptured}（容器线程）⇒ 行为不变。
+         * ⇒ 唯一会调它的是<b>异常处理路径</b>：{@code @ExceptionHandler} 返回
+         * {@code ResponseEntity} ⇒ Spring 的 {@code HttpEntityMethodProcessor.handleReturnValue}
+         * ⇒ {@code ServletServerHttpResponse.flush()} ⇒ {@code flushBuffer()}
+         * ⇒ 那正是要掐掉的那次提交（超时被 interrupt 时，异常处理器正好在写响应）。
+         *
+         * <p>⚠️ SSE（{@code Accept: text/event-stream}）<b>不走本中间件</b>
+         * （{@code shouldSkipHTTPTimeout} 会短路）⇒ 不受影响。
+         *
+         * <p>⚠️ <b>为什么是「超时后 no-op」而不是「永远 no-op」</b>：Servlet 规范里
+         * 「commit 之后设 status 无效」是<b>容器语义</b>（{@code HttpMiddlewareTest#statusSetAfterCommitIsIgnoredByServletSemantics}
+         * 把它固化成显式契约）⇒ 正常路径下 {@code flushBuffer()} 必须<b>照常透传</b>、
+         * 该提交还得提交 ⇒ 否则那条契约就失去了它要守的语义。
+         * ⇒ 只在<b>超时 / 断连之后</b>把它掐掉 —— 那正是 worker 不该再碰底层响应的时刻。
+         */
+        @Override
+        public void flushBuffer() throws IOException {
+            underlyingLock.lock();
+            try {
+                if (timedOut || clientCancelled) {
+                    // Go: 超时后业务写被丢弃（ErrHandlerTimeout）⇒ worker 不许再提交响应
+                    return;
+                }
+                ((HttpServletResponse) this.original).flushBuffer();
+            } finally {
+                underlyingLock.unlock();
             }
-            ((HttpServletResponse) this.original).setContentType(type);
         }
 
         int statusCode() {
@@ -991,11 +1136,43 @@ public final class HttpMiddleware {
         }
 
         void markTimedOut() {
-            this.timedOut = true;
+            // 🔴 2026-10-25（第二十二轮 · global）：**与对底层的写同一把锁** ⇒
+            //   「置标志」与「写底层」不会交错 ⇒ 不存在「标志还没落地，worker 就把响应提交了」的窗口。
+            underlyingLock.lock();
+            try {
+                this.timedOut = true;
+            } finally {
+                underlyingLock.unlock();
+            }
         }
 
         void markClientCancelled() {
-            this.clientCancelled = true;
+            underlyingLock.lock();
+            try {
+                this.clientCancelled = true;
+            } finally {
+                underlyingLock.unlock();
+            }
+        }
+
+        /**
+         * 写超时 / 断连响应（<b>容器线程</b>用）—— 与 worker 线程对底层的写<b>互斥</b>。
+         *
+         * <p>🔴 2026-10-25（第二十二轮 · global）：这是「双写 MimeHeaders ⇒ NPE」的最后一块拼图 ——
+         * 容器线程写 503（{@code setStatus} + {@code setContentType} + {@code setHeader} + body）
+         * 与 worker 线程的晚写<b>同时</b>进 Tomcat 的头数组 ⇒ 必须串行化。
+         *
+         * <p>⚠️ 这里<b>不能</b>走 {@code writeToOriginal}：那个方法在 timedOut / clientCancelled
+         * 时是 no-op，而超时响应恰恰要在这两个标志已置位时写出去 ⇒ 这里直接持锁写。
+         */
+        void writeTimeoutResponseQuietly(int statusCode, HttpServletRequest req) {
+            underlyingLock.lock();
+            try {
+                HttpMiddleware.writeTimeoutResponseQuietly(
+                        (HttpServletResponse) this.original, statusCode, req);
+            } finally {
+                underlyingLock.unlock();
+            }
         }
 
         /**
@@ -1011,15 +1188,22 @@ public final class HttpMiddleware {
                 // 超时 / 客户端断连时不 flush captured body（避免污染 timeout 响应）
                 return;
             }
-            // 2026-10-22（E-1）更新：setHeader / addHeader / setContentType 均已改为**实时 propagate**，
-            // 与 setStatus 同一策略。这里保留二次写入作为兜底：Tomcat 的 setHeader 是
-            // **覆盖**语义（不是 add），所以重复写入不会产生重复 header；
-            // 它覆盖的是「下游完全没碰过 underlying」的少数路径。
-            for (Map.Entry<String, String> e : capturedHeaders.entrySet()) {
-                dst.setHeader(e.getKey(), e.getValue());
-            }
-            if (body.size() > 0) {
-                dst.getOutputStream().write(body.toByteArray());
+            // 🔴 2026-10-25（第二十二轮 · global）：持锁 ⇒ 与 worker 线程对底层的写互斥
+            //   （done 分支时 worker 已结束 ⇒ 实际上不会争用；持锁是为了**结构上**保证只有一个写者）
+            underlyingLock.lock();
+            try {
+                // 2026-10-22（E-1）更新：setHeader / addHeader / setContentType 均已改为**实时 propagate**，
+                // 与 setStatus 同一策略。这里保留二次写入作为兜底：Tomcat 的 setHeader 是
+                // **覆盖**语义（不是 add），所以重复写入不会产生重复 header；
+                // 它覆盖的是「下游完全没碰过 underlying」的少数路径。
+                for (Map.Entry<String, String> e : capturedHeaders.entrySet()) {
+                    dst.setHeader(e.getKey(), e.getValue());
+                }
+                if (body.size() > 0) {
+                    dst.getOutputStream().write(body.toByteArray());
+                }
+            } finally {
+                underlyingLock.unlock();
             }
         }
 
