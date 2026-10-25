@@ -50,39 +50,6 @@ REPO = Path(__file__).resolve().parents[2]
 # ⚠️ **在跑的 lane**（ACTIVE）：重叠只在这些之间算违规。
 ACTIVE: dict[str, list[str]] = {
     # ---- 第二十七轮（2026-10-26）：6 条新 lane，按**模块**零重叠 ----
-    # ⚠️ 「按模块零重叠」而不是纯按文件：同模块两个 lane 会互踩 `target/`。
-    "L6-x5gate": [
-        "service/users/admin/admin-rpc/src/test/**",
-        "service/article/article-rpc/src/test/**",
-        "docs/DRIFT/global/lanes/L6-x5gate.md",
-    ],
-    "L7-slowgate": [
-        "service/comment/comment-rpc/src/test/**",
-        "service/like/like-rpc/src/test/**",
-        "docs/DRIFT/global/lanes/L7-slowgate.md",
-    ],
-    "L8-slowgate2": [
-        "service/users/user/user-rpc/src/test/**",
-        "service/message/message-rpc/src/test/**",
-        "service/hot/hot-rpc/src/test/**",
-        "docs/DRIFT/global/lanes/L8-slowgate2.md",
-    ],
-    "L9-interrupt": [
-        "service/task/task-rpc/src/test/**",
-        "service/follow/follow-rpc/src/test/**",
-        "docs/DRIFT/global/lanes/L9-interrupt.md",
-    ],
-    "L10-ddldeep": [
-        "tools/difftest/check-ddl-static.py",
-        "tools/difftest/ddl*",
-        "docs/DRIFT/global/lanes/L10-ddldeep.md",
-    ],
-    "L11-flywaydeep": [
-        "tools/difftest/check-flyway-concurrent.sh",
-        "tools/difftest/flyway*",
-        "tools/difftest/check-flyway-ledger.py",
-        "docs/DRIFT/global/lanes/L11-flywaydeep.md",
-    ],
     # ---- 第二十八轮（2026-10-26）：4 条 lane，按**模块**零重叠 ----
     # ⚠️ 本轮修的是**生产启动阻塞**（不是守门）⇒ 白名单含 `src/main/resources` 与 `pom.xml`。
     # ⚠️ L12/L13/L14 各占互不相交的 **maven 模块**（按模块零重叠 ⇒ 不互踩 `target/`）。
@@ -123,6 +90,42 @@ ACTIVE: dict[str, list[str]] = {
 #    ⇒ 与在跑的 lane 重叠**不算违规**（但仍要守「共享文件无人拥有」与「favorite 零写权」）。
 #    留档是为了让「声明」与「历史」可对照，不是为了参与重叠判定。
 CLOSED: dict[str, list[str]] = {
+    # ---- 第二十七轮（2026-10-26）：6 条 lane，**已全部合回** ⇒ 移入本档 ----
+    # ⚠️ 它们与第二十八轮在跑的 L12~L15 白名单**必然重叠**（同模块的 test 目录）
+    #    ⇒ 但**已合回的不是并发方** ⇒ 重叠不算违规（与 L2~L5 同款）。
+    # ⚠️ 「按模块零重叠」而不是纯按文件：同模块两个 lane 会互踩 `target/`。
+    "L6-x5gate": [
+        "service/users/admin/admin-rpc/src/test/**",
+        "service/article/article-rpc/src/test/**",
+        "docs/DRIFT/global/lanes/L6-x5gate.md",
+    ],
+    "L7-slowgate": [
+        "service/comment/comment-rpc/src/test/**",
+        "service/like/like-rpc/src/test/**",
+        "docs/DRIFT/global/lanes/L7-slowgate.md",
+    ],
+    "L8-slowgate2": [
+        "service/users/user/user-rpc/src/test/**",
+        "service/message/message-rpc/src/test/**",
+        "service/hot/hot-rpc/src/test/**",
+        "docs/DRIFT/global/lanes/L8-slowgate2.md",
+    ],
+    "L9-interrupt": [
+        "service/task/task-rpc/src/test/**",
+        "service/follow/follow-rpc/src/test/**",
+        "docs/DRIFT/global/lanes/L9-interrupt.md",
+    ],
+    "L10-ddldeep": [
+        "tools/difftest/check-ddl-static.py",
+        "tools/difftest/ddl*",
+        "docs/DRIFT/global/lanes/L10-ddldeep.md",
+    ],
+    "L11-flywaydeep": [
+        "tools/difftest/check-flyway-concurrent.sh",
+        "tools/difftest/flyway*",
+        "tools/difftest/check-flyway-ledger.py",
+        "docs/DRIFT/global/lanes/L11-flywaydeep.md",
+    ],
     # ⚠️ 2026-10-25 订正：L1 在 T-11 / T-13 两轮里把写权扩到了 `service/common`
     #    （observability / http / pom / resources / test）⇒ 当时**只记账没登记** ⇒
     #    这里补上，使「声明」与「实际」一致（否则守门给的是假保证）。
