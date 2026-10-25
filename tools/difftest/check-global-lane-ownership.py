@@ -83,6 +83,40 @@ ACTIVE: dict[str, list[str]] = {
         "tools/difftest/check-flyway-ledger.py",
         "docs/DRIFT/global/lanes/L11-flywaydeep.md",
     ],
+    # ---- 第二十八轮（2026-10-26）：4 条 lane，按**模块**零重叠 ----
+    # ⚠️ 本轮修的是**生产启动阻塞**（不是守门）⇒ 白名单含 `src/main/resources` 与 `pom.xml`。
+    # ⚠️ L12/L13/L14 各占互不相交的 **maven 模块**（按模块零重叠 ⇒ 不互踩 `target/`）。
+    # ⚠️ L15 只碰 `tools/difftest/` 的**指定文件**（不是目录级）⇒ 不与任何 service lane 相撞。
+    "L12-rpcboot-a": [
+        "service/article/article-rpc/pom.xml",
+        "service/article/article-rpc/src/main/resources/application.yml",
+        "service/article/article-rpc/src/test/**",
+        "service/comment/comment-rpc/src/main/resources/application.yml",
+        "service/comment/comment-rpc/src/test/**",
+        "service/like/like-rpc/pom.xml",
+        "service/like/like-rpc/src/main/resources/application.yml",
+        "service/like/like-rpc/src/test/**",
+        "docs/DRIFT/global/lanes/L12-rpcboot-article-comment-like.md",
+    ],
+    "L13-rpcboot-b": [
+        "service/message/message-rpc/src/main/resources/application.yml",
+        "service/message/message-rpc/src/test/**",
+        "service/task/task-rpc/pom.xml",
+        "service/task/task-rpc/src/main/resources/application.yml",
+        "service/task/task-rpc/src/test/**",
+        "docs/DRIFT/global/lanes/L13-rpcboot-message-task.md",
+    ],
+    "L14-rpcboot-hot": [
+        "service/hot/hot-rpc/pom.xml",
+        "service/hot/hot-rpc/src/test/**",
+        "docs/DRIFT/global/lanes/L14-rpcboot-hot.md",
+    ],
+    "L15-rpcboot-tools": [
+        "tools/difftest/check-jar-executable.sh",
+        "tools/difftest/check-grpc-runtime-classpath.py",
+        "tools/difftest/baselines/grpc-runtime-classpath.txt",
+        "docs/DRIFT/global/lanes/L15-rpcboot-tools.md",
+    ],
 }
 
 # ⚠️ **已合回**的 lane（CLOSED）：它们的写权已并入 `align/global` ⇒ 不是并发方

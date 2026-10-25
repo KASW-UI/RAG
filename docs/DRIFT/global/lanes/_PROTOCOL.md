@@ -36,22 +36,41 @@
 > ⚠️ **共享文件（含 `AGENTS.md`）的改动要尽早提交** —— 实测已被并发会话 `git checkout` 整体回滚过一次。
 > ⚠️ **`git stash` 不作隔离手段** —— 它是工作区级状态，会被并发 agent 互偷。
 
-## 三、lane 清单（2026-10-25 建 · 2026-10-26 扩到 11 条）
+## 三、lane 清单（2026-10-25 建 · 2026-10-26 扩到 15 条）
 
-### 3.1 在跑（第二十七轮 · 6 条）
+### 3.1 在跑（第二十八轮 · 4 条）
+
+> ⚠️ **本轮修的是「生产启动阻塞」**（不是守门）⇒ 白名单含 `src/main/resources` 与 `pom.xml`。
+> ⚠️ **背景**：第 27 轮后盘点发现，各域台账里有一批「域外 ⇒ 交主会话派单」的条目从未被 global 收口
+> （2026-10-24 follow 域 `rpc.md:65-97` 已写明并点名 5 个模块）⇒ 本轮把它们真正修掉。
 
 | lane | 分支 | 工作树 | 议题 | 独占写权 |
 |---|---|---|---|---|
-| **L6** | `align/global-x5gate` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-x5gate` | **X-5 轴**真 server 守门（admin-rpc / article-rpc）+ article slow 轴 + 缺口④ 复评 | `service/users/admin/admin-rpc/src/test/**` · `service/article/article-rpc/src/test/**` · `docs/DRIFT/global/lanes/L6-x5gate.md` |
-| **L7** | `align/global-slowgate` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-slowgate` | **X-5 轴** + **slow 轴**（comment-rpc / like-rpc） | `service/comment/comment-rpc/src/test/**` · `service/like/like-rpc/src/test/**` · `docs/DRIFT/global/lanes/L7-slowgate.md` |
-| **L8** | `align/global-slowgate2` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-slowgate2` | **slow 轴**推广（user-rpc / message-rpc / hot-rpc） | `service/users/user/user-rpc/src/test/**` · `service/message/message-rpc/src/test/**` · `service/hot/hot-rpc/src/test/**` · `docs/DRIFT/global/lanes/L8-slowgate2.md` |
-| **L9** | `align/global-interrupt` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-interrupt` | **slow 轴**（task-rpc / follow-rpc）+ **缺口③ 的定性**（打断维度） | `service/task/task-rpc/src/test/**` · `service/follow/follow-rpc/src/test/**` · `docs/DRIFT/global/lanes/L9-interrupt.md` |
-| **L10** | `align/global-ddldeep` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-ddldeep` | **DDL 盲区**：触发器函数体逐条核对 + task/message DDL runner 重建 | `tools/difftest/check-ddl-static.py` · `tools/difftest/ddl*` · `docs/DRIFT/global/lanes/L10-ddldeep.md` |
-| **L11** | `align/global-flywaydeep` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-flywaydeep` | **Flyway 三条边界**：真 rpc 形态 / 迁移失败与回滚 / 压力与随机延迟 | `tools/difftest/check-flyway-concurrent.sh` · `tools/difftest/flyway*` · `tools/difftest/check-flyway-ledger.py` · `docs/DRIFT/global/lanes/L11-flywaydeep.md` |
+| **L12** | `align/global-rpcboot-a` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-rpcboot-a` | **生产启动阻塞**（article-rpc / comment-rpc / like-rpc）：`discovery://` 两斜杠 ×5 + `grpc-inprocess` test scope ×2 | article-rpc · comment-rpc · like-rpc 的 `pom.xml` / `application.yml` / `src/test/**` |
+| **L13** | `align/global-rpcboot-b` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-rpcboot-b` | **生产启动阻塞**（message-rpc / task-rpc）：两斜杠 ×2 + `grpc-inprocess` test scope ×1 + **task-rpc 无 `Main-Class`** | message-rpc · task-rpc 的 `pom.xml` / `application.yml` / `src/test/**` |
+| **L14** | `align/global-rpcboot-hot` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-rpcboot-hot` | **hot-rpc 无 `Main-Class`**（L11 漏报的那一条） | hot-rpc 的 `pom.xml` / `src/test/**` |
+| **L15** | `align/global-rpcboot-tools` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-rpcboot-tools` | **守门缺口**：`check-jar-executable.sh` 纳入 rpc + `check-grpc-runtime-classpath.py` 排除 `target/`（存量恒红缺陷） | `tools/difftest/` 的 3 个**指定文件**（不是目录级） |
 
-⇒ **6 条 lane 按模块零重叠** ⇒ 可同时开工。
+⇒ **4 条 lane 按 maven 模块零重叠**（L12: article/comment/like · L13: message/task · L14: hot · L15: 只碰 tools）
+⇒ **可同时开工**。
 
-### 3.2 已合回（历史 lane，写权已并入 `align/global`）
+⚠️ **favorite 域全程零触碰**：`favorite-rpc` 的 2 处两斜杠 + 1 处 `grpc-inprocess` test scope
+**保留在 baseline 里**（L15 的 M3 变异专门验证这一点）⇒ **不修、不记账成「已修」**。
+
+### 3.2 已合回（第二十七轮 · 6 条）
+
+> ✅ **6 条全部已合回** ⇒ 不再是并发方 ⇒ 其白名单与在跑的 L12~L15 的重叠**不算违规**。
+
+| lane | 分支 | 议题 | 状态 |
+|---|---|---|---|
+| **L6** | `align/global-x5gate` | **X-5 轴**真 server 守门（admin-rpc / article-rpc）+ article slow 轴 + 缺口④ 复评 | ✅ 已合回 |
+| **L7** | `align/global-slowgate` | **X-5 轴** + **slow 轴**（comment-rpc / like-rpc） | ✅ 已合回 |
+| **L8** | `align/global-slowgate2` | **slow 轴**推广（user-rpc / message-rpc / hot-rpc） | ✅ 已合回 |
+| **L9** | `align/global-interrupt` | **slow 轴**（task-rpc / follow-rpc）+ **缺口③ 的定性**（打断维度） | ✅ 已合回 |
+| **L10** | `align/global-ddldeep` | **DDL 盲区**：触发器函数体逐条核对 + task/message DDL runner 重建 | ✅ 已合回 |
+| **L11** | `align/global-flywaydeep` | **Flyway 三条边界**：真 rpc 形态 / 迁移失败与回滚 / 压力与随机延迟 | ✅ 已合回 |
+
+### 3.3 已合回（历史 lane，写权已并入 `align/global`）
 
 | lane | 分支 | 议题 | 状态 |
 |---|---|---|---|
