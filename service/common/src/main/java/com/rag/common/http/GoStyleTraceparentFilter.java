@@ -11,7 +11,6 @@ import io.opentelemetry.context.propagation.TextMapGetter;
 import io.opentelemetry.context.propagation.TextMapPropagator;
 import io.opentelemetry.context.propagation.TextMapSetter;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
-import io.opentelemetry.sdk.trace.samplers.Sampler;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -86,30 +85,45 @@ import java.util.Collections;
  *       ⇒ {@code Span.fromContext(ctx).getSpanContext()} 恒为 <b>INVALID</b>
  *       ⇒ <b>任何</b>「从当前上下文取 traceparent 再写出去」的实现都写不出东西。</li>
  * </ul>
- * ⇒ 所以本类自带一个<b>私有</b> {@link SdkTracerProvider}（<b>不碰全局</b>，理由见下），
- * 每个请求起一个 <b>SERVER</b> span，再注入。
+ * ⇒ 第一版（T-8，第十九轮）因此让本类自带一个<b>私有</b> {@link SdkTracerProvider}
+ * （<b>不碰全局</b>）每个请求起一个 <b>SERVER</b> span 再注入。
  *
- * <h2>🔴 为什么 <b>不</b>碰 {@code GlobalOpenTelemetry}</h2>
+ * <h2>🔴 2026-10-25（第二十一轮 · global T-11）：改用<b>全局</b> provider</h2>
+ * <p>T-11 已在共享层装配了<b>全局</b> provider ＋ OTLP exporter（对齐 Go 的
+ * {@code core/trace/agent.go} 的 {@code startAgent}）⇒ 本类随之改用全局 tracer：
  * <ul>
- *   <li>{@code GlobalOpenTelemetry.set(...)} <b>全局只能设一次</b>
+ *   <li><b>同源</b>：Go 侧只有<b>一个</b> provider（{@code rest/handler/tracehandler.go:32-64}
+ *       用 {@code otel.GetTracer(...)} 起 server span）⇒ 响应头里的 traceparent
+ *       与 jaeger 里导出的 span <b>是同一条 trace</b>；
+ *       继续用私有 provider ⇒ 两边<b>不同源</b> ⇒ trace 在边界处断成两截。</li>
+ *   <li>此前「不碰全局」的理由（{@code set()} 全局只能设一次 ⇒ 会改变
+ *       {@code RpcInterceptor} / {@code MqConsumer} 等调用方的行为）<b>已由 T-11 正面解决</b>
+ *       ⇒ 那条顾虑不再成立。</li>
+ * </ul>
+ *
+ * <h2>🔴 2026-10-25（第二十一轮 · global T-11）：「不碰全局」的理由已被正面解决</h2>
+ * <ul>
+ *   <li>此前顾虑：{@code GlobalOpenTelemetry.set(...)} <b>全局只能设一次</b>
  *       ⇒ 一旦本类设了，<b>同 JVM 内</b>所有 {@code GlobalOpenTelemetry.get().getTracer(...)}
  *       的调用方（如 {@code RpcInterceptor} / {@code MqConsumer} / {@code AdminSpans}）
- *       的行为<b>全部改变</b>（从 no-op 变成真建 span）⇒ <b>那是另一件事，不该由本条带出来</b>。</li>
- *   <li>本类只需要「一个能产生<b>有效</b> SpanContext 的 tracer」⇒ 私有实例足够，
- *       且 {@code HttpMiddleware} 取当前 span 走的是 {@code Span.fromContext(Context.current())}
- *       ⇒ <b>不依赖全局</b>，照样拿得到。</li>
+ *       的行为<b>全部改变</b>（从 no-op 变成真建 span）⇒ 那时判断「那是另一件事，不该由本条带出来」。
+ *       <br>⇒ <b>现在 T-11 正是为了这个变化而做</b>（Go 侧本来就是真建 span）
+ *       ⇒ 这条顾虑<b>已消解</b>，不再是理由。</li>
+ *   <li>「私有实例足够」的另一层顾虑（{@code HttpMiddleware} 取当前 span 走
+ *       {@code Span.fromContext(Context.current())} ⇒ 不依赖全局）<b>依然成立</b>
+ *       ⇒ 本类的改动只是「用哪个 provider 起 server span」。</li>
  * </ul>
  *
  * <h2>🔴 sampler 必须与 Go 一致</h2>
  * <pre>
- * go-zero@v1.10.2/core/trace/agent.go:110
+ * go-zero@v1.10.2/core/trace/agent.go:111
  *   sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(c.Sampler)))
  * Go 侧 yaml：Telemetry: { Sampler: 1.0 }        （各 api 的 etc/*.yaml）
  * ⇒ 根 span 必采样；入向 parent 不采样时子 span 也不采样。
  * </pre>
- * ⇒ 本类用 {@code Sampler.parentBased(Sampler.traceIdRatioBased(1.0))}，
+ * ⇒ sampler 现在由<b>全局</b> provider 提供（{@code GoStyleOtelAgent} 照 Go 逐条装配），
  * 与 RAG 各 api yaml 里已写的 {@code otel.traces.sampler: parentbased_always_on} <b>同义</b>
- * （那份 yaml 一直是对的，缺的只是「把 SDK 装上并接进请求」——本类补的就是这一步）。
+ * （那份 yaml 一直是对的，缺的只是「把 SDK 装上并接进请求」——T-11 补的就是这一步）。
  *
  * <h2>⚠️ 头名<b>大小写</b>：本类主动 canonical 化</h2>
  * <p>Go 的 {@code propagation.HeaderCarrier.Set} 走 {@code textproto.MIMEHeader.Set}
@@ -177,18 +191,34 @@ import java.util.Collections;
 public class GoStyleTraceparentFilter implements Filter {
 
     /**
-     * 🔴 <b>私有</b> tracer provider —— <b>刻意不注册成全局</b>（理由见类注释）。
+     * 🔴 <b>全局</b> tracer provider —— 2026-10-25（第二十一轮 · global T-11）改。
      *
-     * <p>⚠️ <b>没有配任何 SpanProcessor</b> ⇒ span 会被创建（SpanContext 有效）
-     * 但<b>不会导出</b> ⇒ 本类只负责「响应头」这一维（Go 的导出链路缺失是另一条缺口）。
-     * ⇒ 好处：<b>不产生任何后台线程</b>（BatchSpanProcessor 才会）⇒ 不需要关闭钩子。
+     * <p><b>此前本类自带一个<b>私有</b> {@link SdkTracerProvider}</b>（不配任何 SpanProcessor）
+     * ⇒ span 的 SpanContext <b>有效</b>（所以响应头能写）但<b>不会导出</b>
+     * ⇒ 那时的取舍是：「只保证『响应头』这一维，导出链路是另一条独立缺口」。
+     *
+     * <p><b>为什么现在必须改用全局</b>：
+     * T-11 已在共享层装配了<b>全局</b> provider ＋ OTLP exporter（对齐 Go 的
+     * {@code core/trace/agent.go} 的 {@code startAgent}）⇒
+     * <ul>
+     *   <li>Go 侧只有<b>一个</b> provider：{@code rest} 的 {@code TraceHandler}
+     *       （{@code rest/handler/tracehandler.go:32-64}）用 {@code otel.GetTracer(...)} 起 server span
+     *       ⇒ <b>响应头里的 traceparent 与 jaeger 里导出的 span 是同一条 trace</b>；</li>
+     *   <li>若本类继续用私有 provider ⇒ 响应头指向<b>另一条</b>（未导出的）trace
+     *       ⇒ <b>trace 在边界处断成两截</b>（客户端拿到的 trace-id 在 jaeger 里查不到）
+     *       ⇒ 与 Go 不等价。</li>
+     * </ul>
+     * ⇒ ⇒ 改用全局 provider 后，本类的 span <b>会被导出</b> ⇒ 响应头与导出<b>同源</b> ✓。
+     *
+     * <p>⚠️ <b>不在静态字段里缓存 tracer</b>：全局 provider 是<b>运行期</b>才装配的
+     * （装配点在容器刷新早期，见 {@code GoStyleOtelAutoConfiguration}）
+     * ⇒ 静态初始化时缓存会拿到 no-op tracer。
      */
-    private static final SdkTracerProvider PROVIDER = SdkTracerProvider.builder()
-            // Go: sdktrace.ParentBased(sdktrace.TraceIDRatioBased(c.Sampler))，c.Sampler = 1.0
-            .setSampler(Sampler.parentBased(Sampler.traceIdRatioBased(1.0)))
-            .build();
+    private static final String TRACER_NAME = "rag-http-server";
 
-    private static final Tracer TRACER = PROVIDER.get("rag-http-server");
+    private static Tracer tracer() {
+        return io.opentelemetry.api.GlobalOpenTelemetry.get().getTracer(TRACER_NAME);
+    }
 
     /**
      * propagator 组成与 Go 一致：W3C TraceContext + W3C Baggage。
@@ -240,7 +270,7 @@ public class GoStyleTraceparentFilter implements Filter {
         Context parent = PROPAGATOR.extract(Context.current(), httpReq, REQUEST_GETTER);
 
         // ② Start：起一个 SERVER span（Go: tracer.Start(ctx, spanName, WithSpanKind(SpanKindServer), …)）
-        Span span = TRACER.spanBuilder(spanName(httpReq))
+        Span span = tracer().spanBuilder(spanName(httpReq))
                 .setParent(parent)
                 .setSpanKind(SpanKind.SERVER)
                 .startSpan();

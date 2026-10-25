@@ -1,6 +1,9 @@
 package com.rag.common.http;
 
 import org.apache.catalina.Context;
+import com.rag.common.observability.GoStyleOtelAgent;
+import com.rag.common.observability.GoStyleOtelConfig;
+import io.opentelemetry.api.GlobalOpenTelemetry;
 import org.apache.catalina.startup.Tomcat;
 import org.apache.tomcat.util.descriptor.web.FilterDef;
 import org.apache.tomcat.util.descriptor.web.FilterMap;
@@ -68,6 +71,17 @@ class GoStyleTraceparentFilterTest {
 
     @BeforeAll
     static void startTomcat() throws Exception {
+        // 🔴 2026-10-25（第二十一轮 · global T-11）：本类现在**依赖全局 provider**
+        //    （filter 改用 GlobalOpenTelemetry.get().getTracer(...) 起 server span）。
+        //    ⇒ 必须在这里**显式装配**，否则本类会变成「顺序依赖的假绿」——
+        //    实测踩过：整套 service/common 跑下来是绿的，但只是因为**别的测试类**
+        //    恰好先装过全局 provider ⇒ 单跑本类就会红。
+        //    ⇒ 装的是**生产装配代码**（GoStyleOtelAgent），不是仿写 ⇒ 顺带覆盖了
+        //    「全局 sampler = ParentBased(TraceIDRatioBased(1.0))」这条 Go 语义。
+        GlobalOpenTelemetry.resetForTest();
+        GoStyleOtelAgent.shutdown();
+        GoStyleOtelAgent.install(new GoStyleOtelConfig("common-traceparent-gate", null, "grpc", 1.0d));
+
         File base = new File(System.getProperty("java.io.tmpdir"), "rag-common-traceparent-test");
         base.mkdirs();
         tomcat = new Tomcat();
@@ -116,6 +130,9 @@ class GoStyleTraceparentFilterTest {
                 // 收尾失败不影响判定
             }
         }
+        // 🔴 还原全局：GlobalOpenTelemetry 全局只能设一次 ⇒ 不还原会污染同 JVM 的其它测试类。
+        GoStyleOtelAgent.shutdown();
+        GlobalOpenTelemetry.resetForTest();
     }
 
     private static void addFilter(Context ctx, String name, jakarta.servlet.Filter filter) {

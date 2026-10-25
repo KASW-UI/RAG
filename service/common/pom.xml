@@ -119,6 +119,24 @@
             <artifactId>opentelemetry-context</artifactId>
         </dependency>
 
+        <!--
+            🔴 2026-10-25（第二十一轮 · global T-11）：**OTLP exporter** ——
+            对应 Go 侧 core/trace/agent.go:114-121（if len(c.Endpoint) > 0 才装 batcher）
+            与各服务 etc/*.yaml 的 `Telemetry: { Endpoint: jaeger:4317, Batcher: otlpgrpc }`。
+
+            为什么必须是 **compile（非 optional）**：装配点在本包内的
+            GoStyleOtelAutoConfiguration ⇒ **凡依赖 service/common 的进程都会加载它**
+            ⇒ exporter 的类必须对所有下游可见 ⇒ optional=true 会让运行时 NoClassDefFoundError。
+            （对比：grpc-client-spring-boot-starter 用 optional=true，是因为只有本包自己用。）
+
+            ⚠️ 版本**不写**：由上面的 opentelemetry-bom（${opentelemetry.version} = 1.44.0）管
+            ⇒ 与同模块的 api / sdk / context 同版本 ⇒ 不会出现「api 1.62 + sdk 1.44」那种错配。
+        -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
         <!-- ============ 3. gRPC server interceptor（替代 go-zero zrpc） ============ -->
         <!--
             对应 Go 版 observability/rpc.go 的 grpc.UnaryServerInterceptor；
@@ -342,6 +360,20 @@
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            🔴 2026-10-25（第二十一轮 · global T-11）：grpc-netty-shaded —— **仅测试**。
+            用途：守门要起一个**真的** OTLP/gRPC 接收端（假 jaeger），证明
+            「span 真的被导出到网络上」而不是「exporter 被配上了」（§3.3：注解/配置存在 ≠ 机制生效）。
+            为什么是 netty-shaded：OTLP/gRPC 的 **客户端**由 opentelemetry-exporter-otlp
+            内部的 OkHttp 传输承担，服务端用 grpc-netty-shaded 起 ⇒ 两侧都是 HTTP/2 + gRPC 帧。
+            ⚠️ 版本**不写**：由根 pom 的 grpc-bom（${grpc.version} = 1.63.0）管。
+            scope=test ⇒ 不会传递给任何下游模块。
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-netty-shaded</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
