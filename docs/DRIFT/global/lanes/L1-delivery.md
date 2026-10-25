@@ -719,7 +719,10 @@ batcher 协议现在**真的会校验**（写错 ⇒ 装配失败 ⇒ 记 ERROR 
 | 项 | 结果 |
 |---|---|
 | **命令** | `mvn -o test -fae` |
-| **结果** | ⏳ 待填 |
+| **结果** | ✅ **BUILD SUCCESS** · **2235 tests / 0 failures / 0 errors / 0 skipped**（52 模块 · 19 分 28 秒）<br>⇒ 与上一轮基线（`full4` = 2224 条全绿）比：**+11 条**（第二十三轮采样/batcher 门 7 + 第二十四轮门 8 与探针相关门 + L2 的 8 条新 rpc 守门 + L3/L4 的门）<br>⚠️ **口径**：测试数**只取回归日志的模块级汇总**（`[INFO] Tests run: …` 逐模块行），**不取** `target/surefire-reports/TEST-*.xml` 求和（会被历史残留 XML 抬高 ⇒ 见 [`docs/Pitfalls/_cross/testing-pitfalls.md`](../../../Pitfalls/_cross/testing-pitfalls.md)） |
+
+> ⚠️ **本轮中途的一次回归（`full5`）曾有 2 条红** ⇒ 那是**第二十五轮 T-6 初版**与**like 守门自身缺陷**造成的
+> ⇒ 已在**第二十六轮**逐条定性并修掉 ⇒ 最终 `full6` = **2235 / 0 / 0 / 0** ⇒ 详见 **§十四**。
 
 ---
 
@@ -885,7 +888,7 @@ org/apache/coyote/Http11OutputBuffer.writeHeaders()
 | **`service/common` 全量** | ✅ **250 条全绿**（原 247 + 本轮 3） |
 | **变异** | ✅ **2/2 全部转红**（隔离树 `/tmp/rag-round25-mut`，已清理）+ 还原**逐字节一致** |
 | **favorite** | ✅ 代码 / 配置 / 测试 / 台账 **零改动**；共享层影响已记账（§13.9） |
-| **全仓回归** | ⏳ 待跑（改动在共享层 ⇒ 影响面 = 全部 10 个 api） |
+| **全仓回归** | ✅ **已跑** —— 首次跑（`full5`）= **2234 / 2 failures** ⇒ 两条红分别是 **T-6 初版的 MockMvc 路径分叉**（打红 favorite 守门）与 **like 守门自身的调度器泄漏** ⇒ **均非生产缺陷** ⇒ 已在**第二十六轮**修掉 ⇒ 最终（`full6`）= **2235 tests / 0 failures / 0 errors / 0 skipped** · BUILD SUCCESS（52 模块 · 19 分 28 秒）⇒ 逐条 ⇒ **§十四** |
 
 ---
 
@@ -939,3 +942,14 @@ org/apache/coyote/Http11OutputBuffer.writeHeaders()
 | ① | **其余 8 个 api 的 MockMvc 路径**逐域对拍 | 本轮只在 **favorite-api**（实测被打红的那一个）与 **follow-api**（它也有自己的 advice ⇒ 同形态）上验证了「无空格形态 = 各域自己的值」⇒ **没有逐域跑** |
 | ② | **真 Tomcat 下**「无空格形态」与「带空格形态」确实**归一化成同一个值** | 由 **Tomcat 源码**（`MediaTypeCache.parse` + `Http11OutputBuffer.writeHeaders`）坐实 + **真 Tomcat 守门**间接印证 ⇒ 但**没有**写一个「两种字面量都发一次、逐字节比对」的对照用例 |
 | ③ | **RFC 8259 的规范方向取舍** | `SD-HOT-API-006` 的理由②说「RFC 8259 规定 JSON 的 charset 恒为 UTF-8，**不应**声明」⇒ 本轮按**用户决策**加了 charset ⇒ 该规范方向的取舍**仍未在台账重评** |
+
+### 14.6 验证记录（2026-10-26 收口）
+
+| 项 | 结果 |
+|---|---|
+| **定向验证** | ✅ `GoStyleJsonContentTypeCharsetTomcatTest` **4 条 / 0 失败**（含新门 4）· `LikeFactDispatchContractGateTest` **3 条 / 0 失败** · `FavoriteApiMvcPipelineTest` **36 条 / 0 失败** —— **favorite 一行未改** ⇒ BUILD SUCCESS（`-pl service/common,favorite-api,like-rpc -am`） |
+| **全仓回归** | ✅ `mvn -o test -fae` ⇒ **BUILD SUCCESS** · **2235 tests / 0 failures / 0 errors / 0 skipped**（52 模块 · 19 分 28 秒）<br>⇒ 与 `full5`（2234 / **2**）比：**+1 条** = 新门 4；**2 条红全部消除** |
+| **机器守门** | ✅ `python3 tools/difftest/check-global-lane-ownership.py` ⇒ **EXIT=0**（PASS） |
+| **链接自检** | ✅ `docs/` + `.agents/` + `tools/` 全量相对链接 ⇒ **MISSING_LINKS = 0**（本轮修了 **21 处**多/少一级的坏链接） |
+| **`AGENTS.md` 预算** | ✅ **32,680 B / 32,768 B**（余 88 B）⇒ 仍在 §0 明写的预算内 |
+| **favorite** | ✅ 代码 / 配置 / 测试 / 台账 **零改动**；共享层影响已记账（§14.4） |

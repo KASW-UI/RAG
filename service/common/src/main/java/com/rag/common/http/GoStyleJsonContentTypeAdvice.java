@@ -111,8 +111,15 @@ public class GoStyleJsonContentTypeAdvice implements ResponseBodyAdvice<Object> 
      *       就是被这个带空格字面量打红的 ⇒ 而 favorite 域对 global <b>零写权</b> ⇒ 修法必须落在本类。
      *       ⇒ 写<b>无空格</b>形态 ⇒ MockMvc 路径<b>零变化</b> ⇒ 别的域的守门不会被共享层改动打到。</li>
      * </ol>
-     * ⇒ 结论：<b>写 {@link MediaType#APPLICATION_JSON} + UTF-8 的序列化形态</b>
-     * （= Spring {@code MediaType.toString()} 的输出）⇒ <b>两条路径都收敛到同一个值</b>。
+     * ⇒ 结论：<b>写「各域 MockMvc 路径观测到的那个值」</b> —— 即
+     * {@code MediaType.parseMediaType("application/json; charset=utf-8").toString()}
+     * （Spring **保留原样的大小写** ⇒ 小写 {@code utf-8}）⇒ <b>两条路径都收敛到同一个值</b>。
+     *
+     * <p>⚠️ <b>别拿 {@code new MediaType(APPLICATION_JSON, UTF_8).toString()} 当依据</b> ——
+     * 那条路走的是 {@code Charset.name()} ⇒ 产出 {@code application/json;charset=UTF-8}（<b>大写</b> UTF-8）
+     * ⇒ 与各域实际产出的<b>小写</b>不一致 ⇒ 拿它当期望值会把<b>正确</b>的实现判成红。
+     * ⇒ 守门（{@code GoStyleJsonContentTypeCharsetTomcatTest} 的第 4 条）用的就是
+     * {@code MediaType.parseMediaType(...).toString()} 那一支。
      *
      * <p>⚠️ 与 Go 的「差一个空格」属<b>框架限制</b>（与 T-7「状态行缺 reason phrase」同族）
      * ⇒ 已登记在 global 台账，不在本类的职责内。
