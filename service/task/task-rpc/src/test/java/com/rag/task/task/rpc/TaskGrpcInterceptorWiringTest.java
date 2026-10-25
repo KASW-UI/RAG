@@ -4,14 +4,13 @@ import com.rag.task.task.proto.GetTaskReq;
 import com.rag.task.task.proto.GetTaskResp;
 import com.rag.task.task.proto.TaskServiceGrpc;
 import io.grpc.ManagedChannel;
-import io.grpc.Metadata;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
-import io.grpc.ServerCall;
 import io.grpc.ServerCallHandler;
 import io.grpc.ServerServiceDefinition;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.grpc.stub.ServerCalls;
 import net.devh.boot.grpc.server.serverfactory.GrpcServerConfigurer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,7 +25,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -63,7 +64,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * 而超时 / deadline 传播 / gRPC span 已全部静默消失 ——
  * 这正是 §3.3「断言 Bean 存在 ≠ 断言机制生效」的反面教材。
  * <p>所以本类起一个<b>真实 gRPC server</b>，用容器里那个 {@link GrpcServerConfigurer} 装配它，
- * 注册一个「故意睡 10 秒」的服务，然后用 5 秒的客户端 deadline 去调：
+ * 注册一个「处理函数一直不返回」的服务（用 latch 阻塞，不是 {@code sleep}），
+ * 然后用 5 秒的客户端 deadline 去调：
  * <ul>
  *   <li>若服务端超时生效 ⇒ <b>约 300ms</b> 就返回 {@code DEADLINE_EXCEEDED}
  *       （远早于客户端的 5 秒）；</li>
@@ -71,6 +73,16 @@ import static org.junit.jupiter.api.Assertions.*;
  * </ul>
  * 两者返回的 status 码<b>都是</b> {@code DEADLINE_EXCEEDED}，因此必须再断言<b>耗时</b>
  * 才能区分 —— 这正是「只断言结果不看机制」会漏掉的地方。
+ *
+ * <h2>🔴 2026-10-25（第十七轮 · global X-5）：本测试原先是<b>空转</b>的</h2>
+ * <p>原实现用<b>裸</b> {@link ServerCallHandler} 注册慢服务 ⇒ grpc-java <b>不会</b>把
+ * {@code onHalfClose} 派发给它返回的 Listener ⇒ <b>「睡 10 秒」从未发生</b>
+ * ⇒ 客户端拿到的永远是<b>自己</b>的 5s deadline 超时 ⇒ 原断言「elapsed &lt; 3000ms」
+ * 验的是「服务端能取消一个<b>空调用</b>」，而不是它 DisplayName 声称的
+ * 「服务端超时打断一个<b>正在执行</b>的处理」。
+ * <p>⇒ 已改为 {@link ServerCalls#asyncUnaryCall}（标准派发入口），
+ * 并补上两条原来缺的断言：<b>handler 确实被调用过</b> + <b>取消发生时它仍在跑</b>。
+ * （探针证据与完整经过 ⇒ {@code docs/DRIFT/global/cross-domain.md} §二·八）
  */
 @SpringBootTest(
         classes = TaskRpcApplication.class,
@@ -123,7 +135,8 @@ class TaskGrpcInterceptorWiringTest {
 
         ServerBuilder<?> builder = ServerBuilder.forPort(0);
         configurer.accept(builder);                  // ← 被测的那一行（接口其实是 Consumer<ServerBuilder<?>>）
-        Server server = builder.addService(slowTaskService()).build().start();
+        SlowHandlerProbe probe = new SlowHandlerProbe();
+        Server server = builder.addService(slowTaskService(probe)).build().start();
 
         // ⚠️ **必须显式写 dns:/// scheme**：Nacos discovery 在全局 NameResolverRegistry 里
         //    注册了一个高优先级 provider，会把任何无 scheme 的 target 当作 serviceId 去 Nacos 拉实例。
@@ -136,7 +149,7 @@ class TaskGrpcInterceptorWiringTest {
             StatusRuntimeException e = assertThrows(StatusRuntimeException.class,
                     () -> stub.withDeadlineAfter(5, TimeUnit.SECONDS).getTask(
                             GetTaskReq.newBuilder().setUserId(1L).build()),
-                    "睡 10 秒的服务必须被超时打断");
+                    "「处理函数一直不返回」的服务必须被服务端超时打断");
             long elapsedMillis = (System.nanoTime() - startNanos) / 1_000_000;
 
             assertEquals(Status.Code.DEADLINE_EXCEEDED, e.getStatus().getCode(),
@@ -147,7 +160,19 @@ class TaskGrpcInterceptorWiringTest {
                     "必须在服务端超时（300ms）附近返回，实际耗时 " + elapsedMillis
                             + "ms。若接近 5000ms，说明只有客户端 deadline 生效 —— "
                             + "即 server.intercept(...) 没挂上，超时/deadline 传播/gRPC span 已静默消失。");
+
+            // 🔴 2026-10-25（第十七轮 · global X-5）：下面这两条断言是**原来缺的**那一维。
+            //    原测试只看「客户端拿到什么 status、耗时多久」—— 而这两件事在
+            //    「handler 压根没被调用过」时**同样成立**（客户端照样等到自己的 5s deadline）
+            //    ⇒ 守门是空的，只能证明「服务端能取消一个空调用」。
+            assertTrue(probe.entered.await(2, TimeUnit.SECONDS),
+                    "handler 必须**真的被调用过**。若为 false，说明 grpc-java 根本没把 onHalfClose "
+                            + "派发下去（裸 ServerCallHandler 就是这种情形）⇒ 本测试验的不是超时，而是空调用。");
+            assertFalse(probe.completed.get(),
+                    "服务端超时取消发生时，handler 必须**仍在跑**（未完成）。"
+                            + "若为 true，说明取消发生在处理完成之后 ⇒ 超时闸根本没作用在处理过程上。");
         } finally {
+            probe.release.countDown();               // 放行 handler，让它别挂在 30s 上
             channel.shutdownNow();
             server.shutdownNow();
         }
@@ -168,29 +193,41 @@ class TaskGrpcInterceptorWiringTest {
         }
     }
 
-    /** 注册一个「处理函数睡 10 秒」的服务 —— 用来观察超时是否真的生效。 */
-    private static ServerServiceDefinition slowTaskService() {
-        ServerCallHandler<GetTaskReq, GetTaskResp> slowHandler = new ServerCallHandler<GetTaskReq, GetTaskResp>() {
-            @Override
-            public ServerCall.Listener<GetTaskReq> startCall(ServerCall<GetTaskReq, GetTaskResp> call,
-                                                            Metadata headers) {
-                return new ServerCall.Listener<GetTaskReq>() {
-                    @Override
-                    public void onHalfClose() {
-                        try {
-                            Thread.sleep(10_000);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                        }
-                        // ⚠️ grpc-java 1.63 的 ServerCall.close 签名是 (Status, Metadata) ——
-                        //    响应体必须先 sendMessage，再 close 传空 trailers。
-                        call.sendHeaders(new Metadata());
-                        call.sendMessage(GetTaskResp.getDefaultInstance());
-                        call.close(Status.OK, new Metadata());
+    /** 注册一个「处理函数一直不返回」的服务 —— 用来观察超时是否真的生效。 */
+    private static ServerServiceDefinition slowTaskService(SlowHandlerProbe probe) {
+        // 🔴 2026-10-25（第十七轮 · global X-5）：这里**必须**用 grpc-java 的**标准派发入口**
+        //    {@link ServerCalls#asyncUnaryCall}，**不能**用裸 {@link ServerCallHandler}。
+        //
+        //    探针实测（grpc-java 1.63 真 server + **生成代码**的方法描述符）：
+        //      ① 裸 ServerCallHandler   ⇒ startCall=true, onHalfClose=**false**, 方法**从未执行**
+        //      ② ServerCalls.asyncUnaryCall ⇒ methodRan=**true**, 客户端拿到 OK
+        //    ⇒ 裸 handler 的话，grpc-java **不会**把 `onHalfClose` 派发给它返回的 Listener
+        //      ⇒ 「睡 10 秒」从未发生 ⇒ 服务端从一开始就不打算响应
+        //      ⇒ 客户端最终拿到的是**自己**的 5s deadline 超时
+        //      ⇒ 原断言「elapsed < 3000ms」验的是「服务端能取消一个**空调用**」，
+        //        而不是它 DisplayName 声称的「服务端超时打断一个**正在执行**的处理」。
+        //
+        //    ⚠️ 这就是 AGENTS.md §3.3 点名的形态：**绿测试可能是错误答案的守卫**。
+        ServerCallHandler<GetTaskReq, GetTaskResp> slowHandler =
+                ServerCalls.asyncUnaryCall((req, observer) -> {
+                    probe.entered.countDown();
+                    try {
+                        // 「业务处理很慢」：用 latch 而不是 sleep 10s ⇒
+                        // ① 测试可以在 finally 里**立刻**放行，不必等满 10 秒；
+                        // ② 可以**精确**观测「取消发生时它还在跑」。
+                        probe.release.await(30, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
                     }
-                };
-            }
-        };
+                    probe.completed.set(true);
+                    try {
+                        observer.onNext(GetTaskResp.getDefaultInstance());
+                        observer.onCompleted();
+                    } catch (RuntimeException ignored) {
+                        // 调用已被服务端超时关闭 ⇒ 这里再写就会抛。
+                        // ⚠️ **不是**掩盖问题：本测试要断言的正是「关闭发生时它还在跑」这个时序。
+                    }
+                });
         // ⚠️ 自建一个只含 GetTask 这一个方法的 ServiceDescriptor：
         //    ① 必须用生成代码里的**同一个** getGetTaskMethod() 实例，否则报
         //       "Bound method ... not same instance as method in service descriptor"；
@@ -202,5 +239,20 @@ class TaskGrpcInterceptorWiringTest {
         return ServerServiceDefinition.builder(onlyGetTask)
                 .addMethod(TaskServiceGrpc.getGetTaskMethod(), slowHandler)
                 .build();
+    }
+
+    /**
+     * 「处理函数确实被调用过」+「取消发生时它仍在跑」这两个证据。
+     *
+     * <p>⚠️ 这两个信号是**原来缺的那一维**：原测试只看「客户端拿到什么 status、耗时多久」，
+     * 而那两件事在「handler 压根没执行」时**同样成立** ⇒ 守门是空的。
+     */
+    private static final class SlowHandlerProbe {
+        /** handler 真的被调用 ⇒ countDown。 */
+        final CountDownLatch entered = new CountDownLatch(1);
+        /** 测试收尾时放行 ⇒ 让 handler 立刻退出，不必等满 30s。 */
+        final CountDownLatch release = new CountDownLatch(1);
+        /** handler 跑完了（= 取消发生时它已经不在跑了）。 */
+        final AtomicBoolean completed = new AtomicBoolean(false);
     }
 }

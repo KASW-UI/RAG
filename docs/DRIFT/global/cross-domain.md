@@ -1,7 +1,9 @@
 <!-- @new 2026-10-25 · global 收口域 · 由 `align/global` 工作树产出 + 基线 commit 58e8314 -->
-<!-- 核对日期：2026-10-25（第十六轮）· 本轮**改了跨域代码**：共享层补 Go 的 `maxBodyLen = 8 MiB` + servlet 版判据重载；
-     hot / article 两域的判据副本改为调用唯一真源（X-9 收敛）⇒ 详见 §二 与 §二·十三 -->
+<!-- 核对日期：2026-10-25（第十七轮）· 本轮**只改了跨域测试**：`task-rpc` + `follow-rpc` 两个域的
+     `*GrpcInterceptorWiringTest` 换 `ServerCalls.asyncUnaryCall` + 补两条断言（X-5 落地）
+     ⇒ **生产代码零改动** · 详见 §二·八 ⑤ -->
 <!-- ⚠️ 第十六轮起，本档的「端到端 vs 解析层」区分是必读项（见 §二·十三 ③ 与 PIT-GLOBAL-015） -->
+<!-- ⚠️ 第十七轮起，**变异脚本的「假绿」判据**是必读项（见 PIT-GLOBAL-018）：编译不过 ⇒ 测试没跑 ⇒ 旧 XML ⇒ 假绿 -->
 
 # global · 跨域不变量台账（cross-domain）
 
@@ -19,7 +21,7 @@
 | X-2 | 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | ✅ **已审完（第九轮）** —— 交叉但无冲突；client 契约 10 域零漂移；🟡 **产出 1 条新真漂移**（`users_user.extra_info` jsonb→text 漏改）⇒ 见 §二·九 | ✅ **已审完** |
 | X-3 | 事实投递链路 | `like`/`comment`/`favorite` 的 rpc ↔ **仓外 DC 平台** | ✅ **已闭合**（2026-10-25 B2）—— 末端不是「第三个仓库」，是仓外 `POST /v1/events`；仓内两侧 4↔4 对齐 | ✅ **已闭合** |
 | X-4 | 社区消费者差异 | Go 用 `like`，RAG 不用 | ✅ **已确证（第九轮实测）** —— like 侧 RAG **另起炉灶**（0 引用共享组件）· favorite/article **RAG 多出** ⇒ 一半可修、一半被 favorite 阻塞 ⇒ 见 §二·十 | ✅ **已确证** |
-| X-5 | 裸 `ServerCallHandler` 不被 dispatch | **task + follow**（2026-10-25 实测扩面） | 🔴 **已确证**（第七轮探针）—— grpc-java 不向裸 handler 派发 `onHalfClose` ⇒ 两个域的「造慢服务」测试**空转** ⇒ 见 §二·八 | ✅ **已确证**（机制 + 波及面） |
+| X-5 | 裸 `ServerCallHandler` 不被 dispatch | **task + follow**（2026-10-25 实测扩面） | ✅ **第十七轮已落地** —— grpc-java 不向裸 handler 派发 `onHalfClose` ⇒ 两个域的「造慢服务」测试**曾是空转的** ⇒ ✅ **两域已换 `ServerCalls.asyncUnaryCall` + 补「handler 真被调用过」与「取消时仍在跑」两条断言** ⇒ **M1/M2/M3 三条变异全部转红** ⇒ 🟢 **生产代码零改动**（超时机制本来就是真的，缺的是「在飞处理被打断」这一维从未被验证）⇒ 见 §二·八 | ✅ **已修**（见 §二·八 ⑤） |
 | X-6 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | ✅ **第十四轮已落地**（共享层 6 个类 + 9 个域一行 yaml）⇒ 🔴 **Go 的拒绝形状按域而异**（5 域注册 `SetErrorHandler` ⇒ 200+信封；4 域未注册 ⇒ 400+原文）⇒ 共享层按 `mode` 分派、**文案由各域自己的兜底 handler 渲染** ⇒ **favorite 缺省 = off ⇒ 零触碰** ⇒ 🟢 **真容器 + 真 MVC + 变异测试** | ✅ **已修**（见 §二·十一 ⑤） |
 | X-7 | DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🟡 **部分闭合**（2026-10-25 B3）—— 4 个域已能活体逐列对照；其余 5 域**缺双侧库环境** | ✅ **已跑**（产出真结论 + 1 条新差异 X-10） |
 | **X-8** | 🆕 **真源分层（Go 出处一半在框架里）** | **全部域** | ✅ **本轮已查明并记账** | ✅ **本轮新增** |
@@ -176,11 +178,13 @@ Content-Type: Application/JSON
 
 ---
 
-## 二·八、X-5 🔴 **已确证（2026-10-25 第七轮实测）** —— 裸 `ServerCallHandler` 不被 dispatch ⇒「造慢服务」的测试**是空转的**
+## 二·八、X-5 ✅ **已落地（2026-10-25 第十七轮）** —— 裸 `ServerCallHandler` 不被 dispatch ⇒「造慢服务」的测试**曾是空转的**
 
-> ⚠️ **本条由「仍未决 · 未展开」升级为「已确证」** —— 机制已用**一次性探针**实测清楚，
-> **波及面从「task 域 1 处」扩到「task + follow 两个 rpc 域各 1 处」**。
-> ⚠️ **本轮只取证、未改代码**（改法涉及 task / follow 两个域的测试 ⇒ 下一轮落地）。
+> ⚠️ **本条由「仍未决 · 未展开」升级为「已确证」（第七轮）⇒ 再升级为「已落地」（第十七轮）**
+> —— 机制已用**一次性探针**实测清楚，**波及面从「task 域 1 处」扩到「task + follow 两个 rpc 域各 1 处」**，
+> 且**两个域的测试已改完、变异转红**。
+> ⚠️ **改的是测试，不是生产代码** —— 超时机制**本来就是真的**（见 ⑤·三），
+> 缺的只是「正在执行的处理被打断」这一维**从未被验证过**。
 
 ### ① 机制（探针实测，非推断）
 
@@ -244,13 +248,66 @@ RESULT startCall=true  onHalfClose=false  responded=false
 ⇒ 🔴 **实际波及 = 2 个 rpc 域各 1 条测试**（task + follow），
 **不是**先前台账写的「task 域内部 ⇒ 会反噬所有 rpc 域」—— **反噬面比预估的窄，但确实是跨域的**。
 
-### ④ 修法（下一轮落地）
+### ④ 修法（**第十七轮已落地**）
 
-| # | 动作 |
+| # | 动作 | 状态 |
+|---|---|---|
+| ① | 把裸 `ServerCallHandler` 换成 grpc-java 的**标准派发入口** `io.grpc.stub.ServerCalls.asyncUnaryCall(...)` ⇒ `onHalfClose` 才会被派发 ⇒ 处理函数**真的执行** | ✅ **已做**（task + follow） |
+| ② | 补一条断言：「**handler 确实被调用过**」（计数器 / latch）+「服务端在 handler **执行中途**取消它」⇒ 补上现在缺失的那一维语义 | ✅ **已做**（两条断言） |
+| ③ | **变异测试**：去掉 `server.intercept(...)` ⇒ 客户端 5s deadline 生效 ⇒ `elapsed ≈ 5000ms` ⇒ **转红**（证明守门非空转） | ✅ **已做**（M1 转红） |
+
+---
+
+### ⑤ 第十七轮落地（2026-10-25）
+
+#### ⑤·一 改了什么（**两个域同构** ⇒ 逐条相同）
+
+| 文件 | 改动 |
 |---|---|
-| ① | 把裸 `ServerCallHandler` 换成 grpc-java 的**标准派发入口** `io.grpc.stub.ServerCalls.asyncUnaryCall(...)` ⇒ `onHalfClose` 才会被派发 ⇒ 处理函数**真的执行** |
-| ② | 补一条断言：「**handler 确实被调用过**」（计数器 / latch）+「服务端在 handler **执行中途**取消它」⇒ 补上现在缺失的那一维语义 |
-| ③ | **变异测试**：去掉 `server.intercept(...)` ⇒ 客户端 5s deadline 生效 ⇒ `elapsed ≈ 5000ms` ⇒ **转红**（证明守门非空转） |
+| `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskGrpcInterceptorWiringTest.java` | 裸 `ServerCallHandler`（手写 `startCall` + `onHalfClose`）⇒ **`ServerCalls.asyncUnaryCall((req, observer) -> {...})`**；`Thread.sleep(10_000)` ⇒ **`probe.release.await(30, SECONDS)`**（latch）；**新增两条断言**（`entered` / `completed`）；`finally` 里加 `probe.release.countDown()` |
+| `service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/FollowGrpcInterceptorWiringTest.java` | 同款 |
+
+⚠️ **生产代码一行没动**（`TaskRpcApplication` / `FollowRpcApplication` 的
+`server -> server.intercept(GoStyleRpcProtectionChain.build(...))` 原样保留）
+⇒ **本轮不是行为修复，是「守门修复」**。
+
+#### ⑤·二 为什么用 latch 而不是 `sleep`
+
+| | `Thread.sleep(10_000)` | `probe.release.await(30, SECONDS)` |
+|---|---|---|
+| 测试收尾 | 必须等满 10 秒 | `finally` 里**立刻**放行 |
+| 「取消时它还在跑」可观测 | ❌ 等到断言时它早跑完了 | ✅ 精确 |
+
+⇒ ② 的两条断言**在 `sleep` 方案下根本写不出来**。
+
+⚠️ **补一条签名事实**（改造时会踩）：grpc-java 1.63 的 `ServerCalls.asyncUnaryCall` 有
+**单参重载** `asyncUnaryCall(UnaryMethod<ReqT,RespT>)`（**不带** `MethodDescriptor`）
+⇒ 照抄网上常见的双参写法会编译不过。
+
+#### ⑤·三 变异证据（三条全部转红）
+
+| # | 变异 | 结果 |
+|---|---|---|
+| **M1** | 去掉 `server.intercept(...)`（两域的 `rpcInterceptorConfigurer` ⇒ 块 lambda 空实现） | 🔴 **RED** —— task `5010ms` / follow `5009ms`（红在「必须在服务端超时（300ms）附近返回」） |
+| **M2** | 把 `asyncUnaryCall` 换回**裸** `ServerCallHandler` | 🔴 **RED** —— 红在**新增**的 `entered` 断言：「handler 必须**真的被调用过**」 |
+| **M3** | handler 在超时前**完成但不回包**（`await(0)` + 去掉 `observer.onNext/onCompleted`） | 🔴 **RED** —— 红在**新增**的 `completed` 断言：「取消发生时 handler 必须**仍在跑**」 |
+
+⚠️ **M3 的第一版写错了**：只做 `await(0)` 不去回包 ⇒ handler 秒完成**并正常回包** ⇒
+客户端拿到 **OK** ⇒ 红在**更早**的 `assertThrows` 上 ⇒ **新增的 `completed` 断言压根没被执行到**
+⇒ 等于没验。改成「完成但**不回包**」⇒ 超时照常触发 ⇒ 才红在**目标断言**上。
+⇒ **教训**：变异要红在**目标断言**上，红在更早的断言上**不算数**（见 `docs/Pitfalls/global/cross-domain.md` PIT-GLOBAL-018）。
+
+#### ⑤·四 证据边界（**不声称已证明的**）
+
+1. ⚠️ 本轮**只验了「服务端超时打断在飞处理」这一条语义**；
+   同一条测试**没有**覆盖 Go 的 **slow threshold** 分支（Go `observability.SlowThreshold()`）——
+   两个域的 `server.intercept(...)` 链里那条阈值**仍无独立守门**。
+2. ⚠️ **没有**做「Go 侧同一场景的活体对拍」—— 本轮是**RAG 侧自洽性**修复（测试没在验它 ⇒ 改成在验它），
+   **不是** Go↔RAG 的 wire 层差异 ⇒ **不涉及** proto / DDL / 错误码。
+3. ⚠️ `message-rpc` / `like-rpc` / `users-user-rpc` / `admin-rpc` / `comment-rpc` / `hot-rpc` /
+   `article-rpc` / `favorite-rpc` 的同名 `*GrpcInterceptorWiringTest` **未逐一复查**
+   ⇒ 「还有没有别的域用裸 handler 造慢服务」**本轮未穷尽**（第七轮的扫描结论是 task + follow 两个域，
+   但那次扫描的是**「裸 handler 注册进 server」**这一形态；**若别的域用了别的空转形态，本轮查不出来**）。
 
 ---
 
@@ -730,12 +787,12 @@ go-zero v1.10.2 rest/engine.go:163-164
 | ~~X-2~~ | ✅ **已审完**（第九轮）⇒ 见 §二·九 |
 | ~~X-3~~ | ✅ **已闭合**（2026-10-25 B2）⇒ 见 §二·七（末端 = 仓外 DC 平台；仓内两侧 4↔4 对齐） |
 | ~~X-4~~ | ✅ **已确证**（第九轮）⇒ 见 §二·十（**可修的一半** = like 侧接线；**阻塞的一半** = favorite） |
-| ~~X-5~~ | ✅ **已确证**（2026-10-25 第七轮，探针实测）⇒ 见 §二·八。⚠️ 机制清楚了，但**修法要同时动 task + follow 两个域的测试** ⇒ 下一轮落地 |
+| ~~X-5~~ | ✅ **已落地**（2026-10-25 第十七轮）⇒ 见 §二·八 ⑤。机制第七轮已确证（探针实测）⇒ **task + follow 两个域的测试已改完**（换 `ServerCalls.asyncUnaryCall` + 补两条断言）⇒ **M1/M2/M3 三条变异全部转红** ⇒ 🟡 **slow threshold 分支仍无独立守门**；🟡 **其余 8 个 rpc 域的同名测试未逐一复查** |
 | ~~X-6~~ | ✅ **已展开 + 已改判 + 已落地**（第九轮展开 / 第十一轮改判 / **第十四轮落地**）⇒ 见 §二·十一（**不是 favorite 边界下的永久阻塞** —— 共享层修法存在 ⇒ **可修**、**不需签字**；🔴 第十四轮补：**Go 的拒绝形状按域而异** ⇒ 共享层按 `mode` 分派 ⇒ **favorite 缺省 off ⇒ 零触碰**） |
 | ~~X-7~~ | ✅ **已做**（2026-10-25 B3）⇒ 见 §二·五（4 个域可跑 + 产出 X-10） |
 
 ⇒ **排期建议（2026-10-25 更新）**：~~X-7~~ **已做**（§二·五）→ **X-1**（真 PG 三进程）
-→ **X-2** → ~~X-3~~（**已闭合**）→ ~~X-5~~（**已确证**，§二·八）→ **X-5 修法落地**（task + follow）
+→ **X-2** → ~~X-3~~（**已闭合**）→ ~~X-5~~（**已落地**，§二·八 ⑤）
 → **X-4**（like 半边可修 / favorite 半边**仍阻塞** —— 必须删 favorite 自己的 10 处调用）；
 → **X-6 修法落地**（**共享层 2 处**：`service/common` 的 Tomcat 上限解除 + 共享 Filter 复刻 Go 判据 ⇒ **favorite 零触碰**）；
 ~~X-10~~（**已签字认账**，真实记录 = message 域 `SD-2026-10-23-06`）。
@@ -752,6 +809,7 @@ go-zero v1.10.2 rest/engine.go:163-164
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | ✅ **第十七轮（X-5 落地）** —— ① 🔴 **第七轮只取证、这轮改完** —— `service/task/task-rpc` + `service/follow/follow-rpc` 两个域的 `*GrpcInterceptorWiringTest` 把**裸** `ServerCallHandler`（手写 `startCall` + `onHalfClose`）换成 grpc-java 的**标准派发入口** `ServerCalls.asyncUnaryCall(...)` ⇒ 处理函数**真的执行** ② 🔴 **补上原来缺的那一维** —— 两条新断言：「**handler 确实被调用过**」+「**取消发生时它仍在跑**」⇒ 并把 `Thread.sleep(10_000)` 换成 `probe.release.await(30, SECONDS)`（latch）⇒ 两条断言在 `sleep` 方案下**根本写不出来** ③ ✅ **生产代码一行没动**（`server.intercept(...)` 原样）⇒ **这不是行为修复，是守门修复**（超时机制本来就是真的，缺的只是「在飞处理被打断」这一维从未被验证）④ ✅ **三条变异全部转红** —— M1 去 `server.intercept` ⇒ `elapsed 5010/5009ms`；M2 换回裸 handler ⇒ 红在**新增**的 `entered` 断言；M3「完成但**不回包**」⇒ 红在**新增**的 `completed` 断言 ⑤ 🔴 **变异脚本踩了两个坑**（详见 ⑤·三 与 `docs/Pitfalls/global/cross-domain.md` PIT-GLOBAL-018）—— ① 首版 M1 写成**编译不过**的表达式 lambda ⇒ maven **压根没跑测试** ⇒ surefire 目录里留着**上一轮**的 XML ⇒ 脚本读旧结果 ⇒ **报成假绿**（靠「跑前删旧 XML + 看 maven 退出码 + 查 COMPILATION ERROR」三道闸才拦住）② 首版 M3 只做 `await(0)` 不去回包 ⇒ handler 秒完成**并正常回包** ⇒ 客户端拿到 OK ⇒ 红在**更早**的 `assertThrows` 上 ⇒ **目标断言压根没被执行到** ⇒ 变异要红在**目标断言**上 ⑥ ⚠️ **边界**：slow threshold 分支**仍无独立守门**；其余 8 个 rpc 域的同名测试**未逐一复查** ⇒ 「还有没有别的空转形态」**未穷尽** |
 | 2026-10-25 | ✅ **第十六轮（X-9 收敛 + 解析层补 `maxBodyLen`）** —— ① ✅ **新建双侧活体探针 `tools/json-body-probe/`**（Go 半边**真调** go-zero 的 `httpx.Parse` + Java 半边走 hot 域**真实实现** ⇒ **期望值不是人写的**；**无 known-dev 白名单** ⇒ 任一条不一致即 exit 1）② ✅ **首跑 19/20 一致，J20 不一致** ⇒ 坐实「RAG 整个读 body、Go 只读前 8 MiB」⇒ Go 侧错误详情长度 **8388643 = 8 MiB + 3** ⇒ 截断点精确 ⇒ ✅ **共享层补 `GO_MAX_BODY_LEN` + `goLimitedBody`（Go `io.LimitReader` 等价物）+ servlet 版判据重载**；✅ **hot 域补上并改用唯一真源**（改**流式**读 ⇒ 不会为一个小 JSON 等满 8 MiB）；✅ **article 域删本地判据改调唯一真源** ⇒ **3 份复制品 → 1 份** ③ 🔴 **澄清一条差点写错的话**：Go 的 `MaxBytes` **默认 1 MiB 且挂在引擎上全局生效**（`rest/config.go:53` + `rest/engine.go:163-164`）⇒ 9 MiB body **先被拦成裸 413** ⇒ **端到端那条漂移根本不存在** ⇒ 本次修的是**解析层**，端到端今天**零行为变化**（唯一可达的 article 段已被它自己的 filter 覆盖）⇒ 逐域可达性已列表 ④ ✅ **6 条守门**（真 Tomcat 裸 socket 验原始头值 / 8 MiB 边界卡 ±1 字节 / hot 端到端 413 + 解析层 5001 / article 判别式断言 / **新 tools 守卫 `check-go-json-body-predicate.py`**）+ **全部做过变异** ⑤ ⛔ **favorite 那份复制品永久残留**（零权限）⇒ 记账 + 写明修法与前提 ⑥ 📌 **新增 PIT-GLOBAL-015**（「探针测的层 ≠ 端到端跑的层」） |
 | 2026-10-25 | ✅ **第十五轮（X-1 取证与修复）** —— ① 🔴 **取证推翻「同库共存是边缘场景」** —— **7 个 Flyway rpc 模块的 DSN 默认值全部是同一个 `first_db`** ⇒ 「先启动者把 public schema 弄非空」是**必然** ⇒ 每个 V1 起始的模块都必须扛得住 ② 🔴 **查出 3 个域缺 `spring.flyway.baseline-version: 0`** —— `baseline-on-migrate=true` + 非空 schema + 无账本 ⇒ Flyway 在 **version 1** 处打 BASELINE ⇒ **V1 的 SQL 从未执行** ⇒ 首张表永远建不出来 ⇒ **服务起不来** ⇒ 同款缺陷 `message-rpc` **2026-10-24 已修并留了守门** ⇒ **同一个坑在另外 3 个域原封不动地留着** ③ ✅ **三域已修**（各一行 yaml）+ **各配一个真 PG 守门**（真 PG 16 + 真 Flyway 引擎 + **配置取自模块自己的 yaml** + **先把 schema 弄成非空**）⇒ **变异（删掉那行）⇒ 6 条全红** ④ ⚠️ **`article-rpc` 逐模块判定后排除**（最低迁移版本 **V8** > baseline 默认值 1 ⇒ 不受影响 ⇒ **差点误修一个不存在的缺陷**）⑤ ⛔ **`favorite-rpc` 同款缺陷零触碰** ⇒ 记账 + **明确告知该域 owner**（含修法与守门思路）⇒ **不静默** ⑥ 🟡 **「三进程并发」的运行时形态仍未验证** ⇒ 留一轮 |
 | 2026-10-25 | ✅ **第十四轮（X-6 落地）** —— ① 🔴 **推翻第十三轮修法草案的一个隐含前提**：草案假设「共享 Filter 统一写 Go 的 400 原文」⇒ **错** —— **Go 的拒绝形状按域而异**（5 域注册 `httpx.SetErrorHandler` ⇒ **200 + 业务信封**；article/user/task/favorite 未注册 ⇒ **400 + Go 原文**）⇒ 且各域 5001 **文案不同**（like/comment =「系统内部错误」，hot/follow/message = `"internal server error"`）⇒ ⇒ **共享层写不出信封** ⇒ 拒绝形状必须**由域自己渲染** ② 落地结构 = `service/common` **6 个类**（`GoStyleFormValues` 判据 / `GoStyleFormLimitMode` 模式 / `GoStyleFormLimitExceededException` / `GoStyleFormValueLimitInterceptor` / `GoStyleFormLimitWebMvcConfig` / `GoStyleTomcatParameterLimitCustomizer`）+ **9 个域各一行 yaml**（`rag.http.go-form-limit.mode: raw\|envelope`）⇒ **favorite 缺省 = off ⇒ 容器上限与闸门都不生效 ⇒ 零触碰、行为逐字节不变** ③ 🔴 **闸门是 `HandlerInterceptor` 不是 servlet `Filter`** —— Filter 在 DispatcherServlet **之外** ⇒ 抛的异常到不了 `@RestControllerAdvice` ⇒ envelope 模式无法渲染 ④ 顺带订正 `service/common/pom.xml` 的 **spring-web / spring-test 硬编码 7.0.0**（与 starter-web 的 7.0.9 错配 ⇒ `NoClassDefFoundError: ApiVersionHolder`）⇒ 改为跟随 BOM ⑤ 🟢 证据强度首次达 **真容器 + 真 Spring MVC + 真 advice + 变异测试**（raw 5/5 · envelope 4/4 · 模式 8/8 · 变异 M1/M2 均转红）· `check-tomcat-limits.py` 新增第四旋钮 + **favorite 零触碰守卫** ⇒ EXIT=0 ⑥ 残留（有界，修前已存在）：**鉴权与闸门的先后**（Go 先鉴权后解析 / RAG 先解析后鉴权）⇒ 记录不改 |
