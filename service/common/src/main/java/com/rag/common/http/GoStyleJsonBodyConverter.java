@@ -78,6 +78,127 @@ public class GoStyleJsonBodyConverter extends JacksonJsonHttpMessageConverter {
     /** Go 的判据字面量，刻意不做媒体类型兼容判定。 */
     private static final String GO_JSON_CONTENT_TYPE_MARK = "application/json";
 
+    /**
+     * Go {@code rest/httpx/requests.go:21} 的 {@code maxBodyLen = 8 << 20}（8 MiB）。
+     *
+     * <h3>⚠️ 为什么它<b>不可配置</b></h3>
+     * <p>Go 侧它是<b>框架常量</b>（{@code const} 块，{@code requests.go:17-22}），
+     * 既不是 {@code RestConf} 的字段、也不在任何 yaml / struct tag 里
+     * ⇒ 做成 RAG 侧的 property 等于<b>凭空多出 Go 没有的开关</b>
+     * ⇒ 同 {@code maxMemory} 的处理方式：照抄，不给开关。
+     *
+     * <h3>⚠️ 它为什么必须存在（2026-10-25 第十六轮 · 双侧探针实测）</h3>
+     * <pre>
+     * rest/httpx/requests.go:117-124
+     *     func ParseJsonBody(r *http.Request, v any) error {
+     *         if withJsonBody(r) {
+     *             reader := io.LimitReader(r.Body, maxBodyLen)   // ← 静默截断在 8 MiB
+     *             return mapping.UnmarshalJsonReader(reader, v)
+     *         }
+     *         return mapping.UnmarshalJsonMap(nil, v)
+     *     }
+     * </pre>
+     * ⇒ Go 对 JSON body 有两道闸：<b>① 只读前 8 MiB</b> · <b>② 命中判据才读</b>。
+     * ⇒ RAG 侧原先只复刻了 ② ⇒ <b>① 缺失</b> ⇒ 一个 &gt; 8 MiB 的 JSON body
+     * 在 Go 侧被<b>截断</b>（⇒ 解析器拿到半个文档 ⇒ 报错），
+     * 在 RAG 侧却被<b>整个读进堆里</b>并成功解析 ⇒ 两侧行为相反。
+     * ⇒ 实测证据：{@code tools/json-body-probe/} 的用例 J20（9 MiB 单个 JSON 对象）
+     * ⇒ Go = REJECTED（错误详情长度 8388643 = 8 MiB + 3 ⇒ 证实截断点精确在 8 MiB）。
+     *
+     * <h3>⚠️ 端到端可达性（别把它写成「端到端漂移」）</h3>
+     * <p>Go 的 {@code MaxBytes} <b>默认 1 MiB 且挂在引擎上全局生效</b>
+     * （{@code rest/config.go:53} + {@code rest/engine.go:163-164}）
+     * ⇒ 超过 1 MiB 的 body <b>先被 MaxBytes 拦成裸 413</b> ⇒ 根本走不到 {@code ParseJsonBody}
+     * ⇒ ⇒ <b>本条是「解析层」对齐，不是「端到端」对齐</b>；
+     * 端到端唯一可达的 8–10 MiB 段（article 的 MaxBytes = 10 MiB）已被它自己的
+     * {@code GoStyleJsonBodyLimitFilter} 覆盖 ⇒ 详见
+     * {@code docs/DRIFT/global/cross-domain.md} §二·十三 ③。
+     */
+    public static final int GO_MAX_BODY_LEN = 8 * 1024 * 1024;
+
+    /**
+     * Go {@code io.LimitReader(r.Body, maxBodyLen)} 的等价物 —— <b>最多</b>读
+     * {@link #GO_MAX_BODY_LEN} 字节。
+     *
+     * <h3>⚠️ 为什么不能简单用 {@code in.readNBytes(GO_MAX_BODY_LEN)} 代替</h3>
+     * <p>两者<b>判定结果</b>相同，但<b>读取时机</b>不同，差别是实质性的：
+     * <ul>
+     *   <li>{@code readNBytes(n)} 会<b>一直读到 n 字节或 EOF</b> ⇒ 客户端「发了一个小 JSON
+     *       然后停住」时，RAG 会<b>一直等</b>，Go 却早就返回了
+     *       （Go 的 {@code json.Decoder.Decode} 只读它需要的那个值）。</li>
+     *   <li>本包装是<b>流式</b>的：Jackson 边解析边从底层流取字节，
+     *       解析完一个完整 JSON 值就停 ⇒ 与 Go 的行为同形。</li>
+     * </ul>
+     *
+     * @param in 底层请求流（不可为 null）
+     * @return 一个最多只从 {@code in} 取 {@link #GO_MAX_BODY_LEN} 字节的流
+     */
+    public static java.io.InputStream goLimitedBody(java.io.InputStream in) {
+        return new GoLimitedInputStream(in, GO_MAX_BODY_LEN);
+    }
+
+    /**
+     * {@link #goLimitedBody(java.io.InputStream)} 的实现 —— Go {@code io.LimitReader} 的 Java 等价物。
+     *
+     * <p>⚠️ <b>刻意不</b>实现 {@code mark/reset}：Go 的 {@code io.LimitReader} 同样不支持
+     * {@code io.Seeker}；而 {@code java.io.InputStream} 的默认实现会抛
+     * {@code UnsupportedOperationException} ⇒ 与 Go 的「不支持」同形。
+     */
+    private static final class GoLimitedInputStream extends java.io.InputStream {
+
+        private final java.io.InputStream delegate;
+        private long remaining;
+
+        GoLimitedInputStream(java.io.InputStream delegate, long limit) {
+            this.delegate = delegate;
+            this.remaining = limit;
+        }
+
+        @Override
+        public int read() throws java.io.IOException {
+            if (remaining <= 0L) {
+                return -1;
+            }
+            int b = delegate.read();
+            if (b >= 0) {
+                remaining--;
+            }
+            return b;
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws java.io.IOException {
+            if (remaining <= 0L) {
+                return -1;
+            }
+            int n = delegate.read(b, off, (int) Math.min(len, remaining));
+            if (n > 0) {
+                remaining -= n;
+            }
+            return n;
+        }
+
+        @Override
+        public long skip(long n) throws java.io.IOException {
+            if (remaining <= 0L) {
+                return 0L;
+            }
+            long skipped = delegate.skip(Math.min(n, remaining));
+            remaining -= skipped;
+            return skipped;
+        }
+
+        @Override
+        public int available() throws java.io.IOException {
+            return (int) Math.min(delegate.available(), remaining);
+        }
+
+        @Override
+        public void close() throws java.io.IOException {
+            delegate.close();
+        }
+    }
+
     public GoStyleJsonBodyConverter(JsonMapper mapper) {
         super(mapper);
         // 认领所有媒体类型，让 Spring 不再在到达转换器之前就抛 415。
@@ -103,17 +224,80 @@ public class GoStyleJsonBodyConverter extends JacksonJsonHttpMessageConverter {
      * 且 {@code goReadsBody} 与 {@link #read} 必须永远一致 ⇒ 让业务模块的测试能直接断言
      * 它的边界，而不是复制一份判据到测试里（复制品必然与实现漂移）。
      *
-     * <p>⚠️ <b>2026-10-25 补记：仓库里存在 3 份「复制品」</b>（favorite / hot / article 各自抄了一份
+     * <p>⚠️ <b>2026-10-25 补记：仓库里曾存在 3 份「复制品」</b>（favorite / hot / article 各自抄了一份
      * {@code contentType.contains("application/json")}）—— 它们当时取的是<b>原始头值</b>
      * ⇒ 判定与 Go 一致，但**没有调用本方法** ⇒ 是一枚定时炸弹：
      * 哪天有人把其中一份改成「用 MediaType 解析」，RAG 就会**内部自相矛盾**
      * （闸门说不读、解析器说要读）。⇒ 详见
      * {@code docs/DRIFT/global/cross-domain.md} X-9。
+     *
+     * <p>✅ <b>2026-10-25 第十六轮收敛</b>：hot 与 article 两份已改为<b>调用</b>本类的
+     * {@link #goReadsBody(jakarta.servlet.http.HttpServletRequest)} ⇒ 判据与取输入都只剩一份实现。
+     * ⇒ <b>只剩 favorite 一份</b>（用户重申 favorite 零权限 ⇒ 该份<b>永久残留</b>，只能记账不能改）。
+     * <br>⇒ 残留的那一份仍然取原始头值 ⇒ 判定仍与 Go 一致 ⇒ <b>当前行为无偏差</b>；
+     * 风险仅在于「未来有人把它改成 MediaType 解析」⇒ 由
+     * {@code tools/difftest/check-go-json-body-predicate.py} 守门（favorite 列入白名单并写明原因）。
      */
     public static boolean goReadsBody(String contentType, long contentLength) {
         return contentLength > 0L
                 && contentType != null
                 && contentType.contains(GO_JSON_CONTENT_TYPE_MARK);
+    }
+
+    /**
+     * {@link #goReadsBody(String, long)} 的 <b>servlet 版</b> —— 连「怎么从请求里取这两个输入」
+     * 一起收进唯一真源。
+     *
+     * <h2>为什么连取输入这一步也要收进来（2026-10-25 第十六轮）</h2>
+     *
+     * <p>之前各域是自己取输入、自己判的（favorite / hot / article 各抄一份）⇒ 三处都可能取错。
+     * 真正的坑在<b>取头值</b>这一步，而不是判据本身：
+     * <ul>
+     *   <li>取 {@code request.getContentType()} ⇒ <b>原始</b>头值 ⇒ 大小写敏感 ⇒ 与 Go 同形 ✔</li>
+     *   <li>取 {@code request.getHeader("Content-Type")} ⇒ 同样是原始头值 ✔</li>
+     *   <li>取 {@code MediaType.parseMediaType(...).toString()} ⇒ <b>已被小写化</b> ⇒
+     *       判定变成大小写<b>不</b>敏感 ⇒ 与 Go <b>相反</b> ❌</li>
+     * </ul>
+     *
+     * <h3>⚠️ {@code getContentType()} 在 Tomcat 上确实是原始值（逐行实测，非推测）</h3>
+     * <pre>
+     * org/apache/catalina/connector/Request.java:1081-1083
+     *     public String getContentType() { return coyoteRequest.getContentType(); }
+     * org/apache/coyote/Request.java:694-700
+     *     public String getContentType() { contentType(); … return contentTypeMB.toStringType(); }
+     * org/apache/tomcat/util/buf/MessageBytes.java:214-229
+     *     public String toStringType() { … case T_BYTES: setString(byteC.toString()); … }
+     * org/apache/tomcat/util/buf/ByteChunk.java:602-609
+     *     public String toString() { return toString(REPLACE, REPLACE); }   // ← 只做字符集解码
+     * </pre>
+     * ⇒ 全链<b>没有</b>任何小写化 / MIME 归一 ⇒ {@code Content-Type: Application/JSON}
+     * 到达应用层时<b>仍是</b> {@code Application/JSON} ⇒ {@code contains("application/json")}
+     * 判定为假 ⇒ 与 Go 的 {@code strings.Contains}（同样大小写敏感）<b>同形</b>。
+     * <br>⇒ ⚠️ 真容器上的这条事实另有<b>真 Tomcat 守门</b>（裸 socket 逐字发头）：
+     * {@code service/common} 的 {@code GoStyleJsonBodyRawHeaderTomcatTest}。
+     *
+     * <h3>⚠️ 为什么用 {@code getContentLengthLong()} 而不是 {@code getContentLength()}</h3>
+     * <pre>
+     * org/apache/coyote/Request.java:664-671
+     *     public int getContentLength() {
+     *         long length = getContentLengthLong();
+     *         if (length &lt; Integer.MAX_VALUE) { return (int) length; }
+     *         return -1;                       // ← ⚠️ 超 2GiB 变成 -1
+     *     }
+     * </pre>
+     * ⇒ Go 的 {@code r.ContentLength} 是 <b>int64</b>，2GiB 以上仍是正数 ⇒ 命中
+     * {@code r.ContentLength > 0} ⇒ <b>读 body</b>；
+     * ⇒ 而 Java 侧取 int 版会拿到 {@code -1} ⇒ 判据为假 ⇒ <b>不读</b> ⇒ 与 Go 相反。
+     * ⇒ 必须取 {@code getContentLengthLong()}（{@code Request.java:999-1001}）。
+     *
+     * @param request servlet 请求（{@code null} 视为「不读」）
+     * @return Go 是否会读这个请求体
+     */
+    public static boolean goReadsBody(jakarta.servlet.http.HttpServletRequest request) {
+        if (request == null) {
+            return false;
+        }
+        return goReadsBody(request.getContentType(), request.getContentLengthLong());
     }
 
     /**
@@ -222,7 +406,22 @@ public class GoStyleJsonBodyConverter extends JacksonJsonHttpMessageConverter {
 
         @Override
         public InputStream getBody() throws IOException {
-            return delegate.getBody();
+            // ⚠️ 2026-10-25（第十六轮）：这里必须加 Go 的 maxBodyLen 上限。
+            //
+            //   Go: rest/httpx/requests.go:119
+            //       reader := io.LimitReader(r.Body, maxBodyLen)   // maxBodyLen = 8 << 20
+            //
+            //   ⇒ Go 对 JSON body **只读前 8 MiB** ⇒ 一个 > 8 MiB 的 JSON body
+            //     在 Go 侧被**静默截断** ⇒ 解析器拿到半个文档 ⇒ 报错（域自己的错误形状）。
+            //   ⇒ 而 RAG 原先**整个读进堆里**并成功解析 ⇒ 两侧行为相反。
+            //
+            //   ⇒ 实测证据：tools/json-body-probe 的用例 J20（9 MiB 单个 JSON 对象）
+            //     ⇒ Go REJECTED（错误详情长度 8388643 = 8 MiB + 3 ⇒ 截断点精确在 8 MiB）
+            //     ⇒ RAG 原先 ACCEPTED。
+            //
+            //   ⇒ 这里用 goLimitedBody（流式）而不是 readNBytes：Go 的 json.Decoder
+            //     只读它需要的那个值，不会为一个小 JSON 等满 8 MiB（详见该方法的注释）。
+            return GoStyleJsonBodyConverter.goLimitedBody(delegate.getBody());
         }
     }
 

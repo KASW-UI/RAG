@@ -3,6 +3,7 @@ package com.rag.hot.hot.api.form;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rag.common.exception.BusinessException;
+import com.rag.common.http.GoStyleJsonBodyConverter;
 import com.rag.hot.hot.common.errmsg.HotErrorCode;
 import com.rag.hot.hot.common.errmsg.HotErrorMessages;
 import jakarta.servlet.http.HttpServletRequest;
@@ -265,25 +266,42 @@ public final class GoFormValues {
      */
     public static void requireParsableJsonBody(HttpServletRequest request) {
         // Go: httpx/requests.go:153-155 withJsonBody(r)
-        if (request.getContentLength() <= 0) {
+        //
+        // ⚠️ 2026-10-25（第十六轮 · global X-9）：判据**不再**在本地抄一份，
+        //    改调共享层唯一真源 com.rag.common.http.GoStyleJsonBodyConverter#goReadsBody。
+        //    理由：复制品必然与实现漂移（详见 docs/DRIFT/global/cross-domain.md X-9）。
+        //    ⇒ 顺带修掉两处本地实现与 Go 的差异：
+        //      ① 本地用的是 request.getContentLength()（**int**）⇒ > 2 GiB 时 Tomcat 返回 -1
+        //         ⇒ 判据为假（不读 body）；Go 的 r.ContentLength 是 **int64** ⇒ 仍 > 0 ⇒ 读 body。
+        //      ② 本地没有 Go 的 maxBodyLen 上限（见下）。
+        if (!GoStyleJsonBodyConverter.goReadsBody(request)) {
             return;
-        }
-        String contentType = request.getContentType();
-        if (contentType == null || !contentType.contains("application/json")) {
-            return;
-        }
-        byte[] body;
-        try (InputStream in = request.getInputStream()) {
-            body = in.readAllBytes();
-        } catch (IOException e) {
-            throw parseFailure(new IllegalArgumentException("read json body failed: " + e.getMessage(), e));
         }
         JsonNode node;
-        try {
-            node = JSON_SYNTAX_CHECKER.readTree(body);
+        try (InputStream in = GoStyleJsonBodyConverter.goLimitedBody(request.getInputStream())) {
+            // ⚠️ 2026-10-25（第十六轮）：Go 对 JSON body 有**第二道闸** ——
+            //   rest/httpx/requests.go:119
+            //       reader := io.LimitReader(r.Body, maxBodyLen)   // maxBodyLen = 8 << 20（:21）
+            //
+            //   ⇒ Go **只读前 8 MiB** ⇒ 一个 > 8 MiB 的 JSON body 在 Go 侧被**静默截断**
+            //     ⇒ 解析器拿到半个文档 ⇒ "unexpected EOF" ⇒ 5001。
+            //   ⇒ 原先这里用 in.readAllBytes() **整个读进堆里**并成功解析 ⇒ 与 Go 相反。
+            //
+            //   实测证据（双侧探针 tools/json-body-probe，用例 J20 = 9 MiB 单个 JSON 对象）：
+            //     Go  = REJECTED，且错误详情长度 = 8388643 = 8 MiB + 3 ⇒ 截断点精确在 8 MiB；
+            //     RAG = ACCEPTED（原状）⇒ 真漂移，本轮修掉。
+            //
+            //   ⚠️ 为什么用**流式**读（readTree(InputStream)）而不是 readAllBytes()：
+            //     Go 的 json.Decoder 只读它需要的那个 JSON 值 ⇒ 客户端「发一个小 JSON 然后停住」
+            //     时 Go 早就返回了；readAllBytes 会**一直等**到 8 MiB 或 EOF ⇒ 白占线程。
+            //     ⇒ 流式读与 Go 同形（且顺带把「读满 8 MiB」这个内存尖峰去掉）。
+            node = JSON_SYNTAX_CHECKER.readTree(in);
+        } catch (IOException e) {
+            throw parseFailure(new IllegalArgumentException("read json body failed: " + e.getMessage(), e));
         } catch (Exception e) {
             // Go: jsonx.UnmarshalFromReader 语法错误 → "unexpected EOF" 之类
             // Go: jsonx.formatError → fmt.Errorf("string: `%s`, error: `%w`", ...) ⇒ 带包装
+            // ⚠️ 这一支同时覆盖「被 8 MiB 截断后的半个文档」⇒ 与 Go 同一条拒绝路径。
             throw parseFailure(new IllegalArgumentException("json body parse failed: " + e.getMessage(), e));
         }
         if (node == null || !node.isObject()) {

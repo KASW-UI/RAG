@@ -1,5 +1,6 @@
 package com.rag.article.article.api.config;
 
+import com.rag.common.http.GoStyleJsonBodyConverter;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -114,12 +115,29 @@ public class GoStyleJsonBodyLimitFilter implements Filter {
         response.getOutputStream().write((message + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
-    /** Go {@code httpx.ParseJsonBody} 的 {@code withJsonBody} 判据，逐条对齐。 */
+    /**
+     * Go {@code httpx.ParseJsonBody} 的 {@code withJsonBody} 判据。
+     *
+     * <p>⚠️ <b>2026-10-25（第十六轮 · global X-9）：这里不再抄一份判据</b>，
+     * 改调共享层唯一真源
+     * {@code com.rag.common.http.GoStyleJsonBodyConverter#goReadsBody(HttpServletRequest)}。
+     *
+     * <p>为什么必须收口（X-9 的核心风险）：
+     * <pre>
+     *   Content-Type: Application/JSON
+     *     ├─ 本类（闸门）      ⇒ 「不是 JSON body」⇒ 不读
+     *     └─ 共享转换器（解析器）⇒ 「是 JSON body」⇒ 读
+     * </pre>
+     * ⇒ 同一个请求<b>闸门说不读、解析器说要读</b> ⇒ RAG 内部自相矛盾。
+     * ⇒ 判据一旦只剩一份实现，这个矛盾就<b>结构上</b>不可能再发生。
+     *
+     * <p>⚠️ 取值口径也一并收口：唯一真源内部取
+     * {@code request.getContentType()}（<b>原始</b>头值 ⇒ 大小写敏感 ⇒ 与 Go 同形）
+     * + {@code request.getContentLengthLong()}（<b>int64</b> ⇒ 与 Go 的
+     * {@code r.ContentLength} 同形；本地原先用的 {@code getContentLength()} 是 int 版，
+     * > 2 GiB 时 Tomcat 返回 -1 ⇒ 会与 Go 判成相反）。
+     */
     private static boolean goReadsJsonBody(HttpServletRequest request) {
-        long contentLength = request.getContentLengthLong();
-        String contentType = request.getContentType();
-        return contentLength > 0L
-                && contentType != null
-                && contentType.contains("application/json");
+        return GoStyleJsonBodyConverter.goReadsBody(request);
     }
 }

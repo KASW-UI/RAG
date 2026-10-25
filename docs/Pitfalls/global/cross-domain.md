@@ -315,30 +315,206 @@ mvn -Dtest=GoStyleParamLimitGateTest+GoStyleFormLimitEnvelopeGateTest+GoStyleFor
 
 ⇒ ⇒ 二者必须**先分开**，否则会把好守门当成没用的删掉（而它其实正是在防下一次回归）。
 
-### 判据（三条，缺一不可）
+### 判据（**五条**，缺一不可）
 
 1. **变异脚本必须先断言「变异确实写进去了」**（例如 `assert old in source` 后再写）⇒
    否则「源文本没命中 ⇒ 什么都没改」也会表现为「零红」。
 2. **跑完必须看 `Tests run:` 行**，确认**跑了多少条** ⇒ `Tests run: 0` 或**没有该行** ⇒ 就是「没跑」。
 3. **`-Dtest` 的多类名分隔符是逗号**（`,`），**不是** `+`；且加 `-DfailIfNoTests=false` 时
    「没匹配上」会**静默通过** ⇒ ⇒ 这条组合最容易制造假阴性 ⇒ **要么别加 `-DfailIfNoTests=false`，要么手动核对 `Tests run:` 的条数**。
+4. 🔴 **同一个 reactor 里，上游模块失败 ⇒ 依赖它的下游模块被 Maven 直接跳过**（2026-10-25 第十六轮实测）
+   ⇒ 变异打在 `service/common` 上时，`mvn -pl service/common,service/hot/hot-api -fae`
+   只会看到 common 的红，**hot-api 根本没跑** ⇒ 「hot-api 没转红」是**假阴性**。
+   ⇒ 修法：① **逐模块单独跑**（先把被变异的上游 `install` 进 `~/.m2`），或 ② 逐模块核对 `Tests run:` 条数。
+5. 🔴 **还原**不要用 `git checkout -- <file>`（2026-10-25 第十六轮实测）
+   ⇒ 它把文件还原到 **HEAD** ⇒ **本轮尚未提交的改动一起被抹掉**
+   ⇒ 本轮实测：共享层文件被回滚 ⇒ hot / article 两域的调用点立刻编译不过 ⇒
+   **看起来像「变异把代码改坏了」，其实是还原动作干的**。
+   ⇒ 修法：变异前 `cp` 一份**备份副本**，还原时 `cp` 回去（**不要**用 git）。
 
 ### 教训
 
 > **「没转红」是一个需要二次确认的信号，不是结论。**
 > 在把它写成「守门空转」之前，先问一句：**这次测试到底跑了没有？**
 
+⇒ 第十六轮补一问：**这次变异到底写进去了吗？还原动作有没有顺手抹掉别的东西？**
+
 ### 出处
 
 - 踩坑位置：2026-10-25 第十四轮的变异测试 M2（`docs/DRIFT/global/cross-domain.md` §二·十一 ⑤ 之三）
+- 补充：2026-10-25 第十六轮的变异脚本（M1 只看到 common 的红 ⇒ 下游被跳过；
+  且 `git checkout --` 还原把本轮共享层改动一起抹了 ⇒ 判据 4 / 判据 5 由此而来）
 - 关联：`docs/Pitfalls/global/cross-domain.md` §PIT-GLOBAL-013
+
+---
+
+## PIT-GLOBAL-015 🔴 **探针测的层 ≠ 端到端跑的层** ⇒ 「解析层漂移」不一定是「端到端漂移」
+
+### 现象（第十六轮实测）
+
+第十六轮用双侧探针查出「Go 的 `ParseJsonBody` 只读前 8 MiB，而 RAG 整个读进堆里」⇒
+按「探针红了 = 端到端行为相反」写进台账 ⇒ **修完跑端到端时，hot 的 9 MiB body 返回的是 413，不是 5001**。
+
+⇒ 回头查才看清层次：
+
+```
+go-zero v1.10.2 rest/config.go:53   MaxBytes int64 `json:",default=1048576"`   ← 1 MiB 默认值
+go-zero v1.10.2 rest/config.go:21   Middlewares.MaxBytes bool `json:",default=true"`
+go-zero v1.10.2 rest/engine.go:163-164
+    if ng.conf.Middlewares.MaxBytes {
+        chn = chn.Append(handler.MaxBytesHandler(ng.checkedMaxBytes(fr.maxBytes)))
+    }                                                  ← ← 挂在**引擎**上 ⇒ 对所有路由生效
+```
+
+⇒ Go 的 **MaxBytes 默认 1 MiB 且全局生效** ⇒ 9 MiB 的 body **先被拦成裸 413**
+（net/http 的 `requestTooLarge()`）⇒ **根本走不到** `ParseJsonBody`
+⇒ ⇒ **端到端那条漂移根本不存在**（两侧都是 413）。
+
+### 根因
+
+**一条请求在 Go 侧要穿过好几道闸**，每道闸都可能**提前把请求挡掉** ⇒ 下游那道闸的行为就**不可达**：
+
+```
+Tomcat/Go 的请求保护层顺序（Go 侧）
+  MaxConns → Breaker → Shedding(CPU) → Timeout → MaxBytes → … → handler 内的 Parse / ParseJsonBody
+                                                              ↑ 8 MiB 的 maxBodyLen 在**这一层之后**
+```
+
+⇒ **探针直接调最里层的那道闸**（`httpx.Parse`），**端到端跑的是整条链**
+⇒ 两者测的**不是同一层** ⇒ 探针的红**不自动等于**端到端的红。
+
+### 🔴 教训一：**报「端到端漂移」之前，先把「端到端跑的是哪条链」写出来**
+
+- 每一层闸门都要标出：**它的阈值 / 它在链上的位置 / 它后面还有没有闸**；
+- 只要**后一道闸的阈值更小**，前一道闸在端到端就**不可达** ⇒ 它的差异只能报在**解析层**。
+
+### 🔴 教训二：**「解析层忠实」仍然值得做，但要如实标注它的可达性**
+
+本轮的处置：
+- ✅ **照做**（解析层与 Go 对齐）—— 因为解析层是 Go 规则**真正所在的那一层**，
+  而共享层的无上限读本来就是隐患；
+- ✅ **同时如实写**：「端到端今天**没有任何域**会因它改变行为」；
+- ⇒ **不夸大**：既不写成「端到端漂移」（不实），也不写成「没价值因而不用做」（也不对）。
+
+### 🔴 教训三：**端到端守门与解析层守门要分开写**
+
+- 端到端守门断言的是**整条链**的结果（hot 的 9 MiB ⇒ **413**）；
+- 解析层守门断言的是**那一层**的行为（直接调用 `requireParsableJsonBody` ⇒ **5001**）；
+- ⇒ 把两者混在一条用例里 ⇒ 就会出现「端到端被上一道闸挡掉 ⇒ 断言永远走不到目标分支」的**假绿**。
+
+### 出处
+
+- 踩坑位置：2026-10-25 第十六轮的探针 J20 与 hot 端到端用例（`docs/DRIFT/global/cross-domain.md` §二·十三 ③）
+- 关联：PIT-GLOBAL-011（裸 `ServerCallHandler` 造的慢服务**从不执行** ⇒ 绿但空转）——
+  **同一种病**：测试没跑到目标分支，却因为「绿」而被当成有覆盖
+
+---
+
+## PIT-GLOBAL-016 🔴 **共享层新增方法后，单独跑下游模块 ⇒ `NoSuchMethodError`**（不是编译错误！）
+
+### 现象（第十六轮实测）
+
+第十六轮给共享层 `GoStyleJsonBodyConverter` 加了一个重载
+`goReadsBody(HttpServletRequest)`，然后**单独**跑下游模块：
+
+```
+$ mvn -o test -pl service/article/article-api
+⇒ java.lang.NoSuchMethodError: 'boolean com.rag.common.http.GoStyleJsonBodyConverter.goReadsBody(jakarta.servlet.http.HttpServletRequest)'
+    at com.rag.article.article.api.config.GoStyleJsonBodyLimitFilter.goReadsJsonBody(GoStyleJsonBodyLimitFilter.java:141)
+```
+
+⇒ **编译是过的**（article-api 的源码确实调用了新方法）⇒ **报错发生在运行时**
+⇒ 而报错点落在**共享层的调用方** ⇒ 一眼看着像「我的新方法写错了」。
+
+### 根因
+
+**单独跑 `-pl <下游模块>`（不带 `-am`、也不把上游模块放进同一个 reactor）时，
+Maven 会从本地仓库 `~/.m2/repository/com/rag/common/0.0.1-SNAPSHOT/common-0.0.1-SNAPSHOT.jar`
+解析依赖** —— 那是**上一次 `install` 留下的旧 jar**，里面没有本轮新加的方法。**
+
+⇒ 症状伪装成「运行时错误」，实际是**classpath 指错了**。
+⇒ ⚠️ 危险之处：**下游模块里所有经过该调用点的测试会一起红**
+（本轮实测 article-api 的 3 个测试类、21 条用例一起红）⇒ 很容易被误判成「我改坏了整个域」。
+
+### 🔴 教训一：**共享层改了 API ⇒ 跑测试必须把上游模块放进同一个 reactor**
+
+```bash
+# ✅ 对：service/common 与下游模块在同一个 reactor ⇒ 用的是本轮的 target/classes
+mvn -o test -pl service/common,service/article/article-api -fae
+
+# ❌ 错：下游单独跑 ⇒ 从 ~/.m2 拿旧 jar ⇒ NoSuchMethodError
+mvn -o test -pl service/article/article-api
+```
+
+⇒ 或者先 `mvn -o install -pl service/common` 把新 jar 装进本地仓库。
+
+### 🔴 教训二：**看到 `NoSuchMethodError` 先查 classpath，不要先改代码**
+
+`NoSuchMethodError` / `NoClassDefFoundError` 这两类**运行时**链接错误，
+在「上游模块刚改了 API」的场景下，**九成是 classpath 指旧了**，不是逻辑写错。
+⇒ 判据：**同一份代码在「把上游放进同一 reactor」后还红不红** ⇒ 还红才是真问题。
+
+### 出处
+
+- 踩坑位置：2026-10-25 第十六轮的 article-api 测试（`docs/DRIFT/global/cross-domain.md` §二·十三 ⑤）
+- 同源记录：`tools/semantic-probe/run-parity.sh` 的 classpath 注释（那里已因 users-common 踩过同一类坑，
+  解法一样：**用 `target/classes`，不要用 `~/.m2` 里的 jar**）
+
+---
+
+## PIT-GLOBAL-017 🔴 **用「被测的那个常量」构造测试输入 ⇒ 变异常量时测试跟着变 ⇒ 恒绿**
+
+### 现象（第十六轮实测）
+
+第十六轮给共享层加了 Go 的 `maxBodyLen = 8 MiB`（`GO_MAX_BODY_LEN`），
+并写了一条边界守门 `GoStyleJsonBodyMaxBodyLenTest`：
+
+```java
+private static final int MAX = GoStyleJsonBodyConverter.GO_MAX_BODY_LEN;   // ← 🔴 错
+byte[] body = jsonObjectOfSize(MAX);           // 「正好 8 MiB 的合法 JSON」
+assertNotNull(read("application/json", body)); // 「必须能解析成功」
+```
+
+⇒ 变异测试把 `GO_MAX_BODY_LEN` 从 `8 * 1024 * 1024` 改成 `1 * 1024 * 1024` ⇒
+**这条守门一条都没红** ⇒ common 227 条全绿。
+
+### 根因
+
+**测试的输入是由「被测的那个常量」算出来的** ⇒ 常量一改，测试构造的 body 也跟着缩
+⇒ 断言「正好上限的 body 必须能过」在**任何**上限下都成立 ⇒ **恒真**。
+
+⇒ 这不是「覆盖不够」，是**断言恒真** ⇒ 比「没有测试」更危险（它给人「已覆盖」的错觉）。
+
+### 🔴 判据：**输入里出现「被测常量」就要警觉**
+
+- 若断言的是「在阈值 X 处恰好翻转」⇒ **阈值必须是字面值**（带 Go 出处注释），
+  **不能**引用实现里的常量；
+- 若确实要引用常量（例如断言「实现用的就是这个常量」）⇒ 那条断言本身就是**把常量钉死**的，
+  而**边界测试必须另用字面值**；
+- ⇒ 两者分工：**字面值守边界 · 常量断言守「实现用的就是这个值」**。
+
+### 🔴 顺带一条：**探针守「判定」，边界测试守「阈值」**
+
+同一轮的另一条实测：把上限改成 1 MiB 后，**双侧探针 20/20 仍绿**
+⇒ 因为探针比的是**判定**（读 / 不读、拒绝 / 接受），上限从 8 MiB 改成 1 MiB 时
+**两侧都判「拒绝」** ⇒ 判定一致 ⇒ 探针无感。
+
+⇒ ⇒ **限值类差异（「同一个判定、不同阈值」）只能由边界测试守** ⇒ 别指望探针。
+
+### 出处
+
+- 踩坑位置：2026-10-25 第十六轮的变异 M2（`docs/DRIFT/global/cross-domain.md` §二·十三 ⑤·二）
+- 同族：`docs/Pitfalls/global/cross-domain.md` §PIT-GLOBAL-011（绿但空转）· §PIT-GLOBAL-014（变异「没转红」的三类假阴性）
 
 ---
 
 ## 变更记录
 
 | 日期 | 动作 |
-|---|---|
+|---|---|---|
+| 2026-10-25 | **第十六轮新增 PIT-GLOBAL-017** —— **用「被测的那个常量」构造测试输入 ⇒ 变异常量时测试跟着变 ⇒ 恒绿**（本轮变异 M2 实测 0 红）⇒ 断言恒真比没测试更危险；含判据（阈值边界**必须用字面值** + 常量断言单独钉住实现）+ 一条探针的能力边界（**探针守「判定」，边界测试守「阈值」**） |
+| 2026-10-25 | **第十六轮新增 PIT-GLOBAL-016** —— 共享层新增方法后**单独**跑下游模块 ⇒ **运行时** `NoSuchMethodError`（**不是编译错误**）⇒ 根因是 Maven 从 `~/.m2` 解析**旧的** `common` jar ⇒ 下游 3 个测试类 21 条用例一起红 ⇒ 极易误判成「我改坏了整个域」⇒ 含两条教训：① 跑测试要把上游模块放进**同一个 reactor**（或先 `install`）② 看到 `NoSuchMethodError` / `NoClassDefFoundError` **先查 classpath**，别先改代码 |
+| 2026-10-25 | **第十六轮新增 PIT-GLOBAL-015** —— **探针测的层 ≠ 端到端跑的层** ⇒ 探针直接调 `httpx.Parse`（最里层），端到端跑的是整条链 ⇒ Go 的 `MaxBytes`（默认 1 MiB、**引擎级全局生效**）先把 9 MiB body 拦成 413 ⇒ **端到端那条漂移根本不存在**（两侧都是 413）⇒ 差点把「解析层漂移」写成「端到端漂移」；含三条教训：① 报端到端漂移前先把链和每道闸的阈值写出来 ② 解析层忠实仍值得做，但要如实标注可达性 ③ 端到端守门与解析层守门要分开写（混着写会假绿） |
 | 2026-10-25 | **第十四轮新增 PIT-GLOBAL-014** —— 变异测试报「没转红」时**先排除「测试压根没跑」**：surefire 的 `-Dtest` 多类名分隔符是**逗号**不是 `+`，配上 `-DfailIfNoTests=false` 会**静默通过** ⇒ 「零红」是假阴性 ⇒ 差点把好守门当成空转删掉；含三条判据（变异脚本先断言写进去了 / 跑完看 `Tests run:` 条数 / 别把「没匹配上」当通过） |
 | 2026-10-25 | **第十四轮新增 PIT-GLOBAL-013** —— Go 的 `httpx.SetErrorHandler` 是**逐 api 注册**的 ⇒ 解析失败的 wire 形状**按域而异**（200+信封 vs 400+原文）且信封文案**在域自己的错误码表**里 ⇒ 共享层**不能有单一形状**；含四条教训：① 复刻 Go 前先问「这条行为在 Go 侧是全局的吗」② servlet Filter 抛的异常到不了 advice ⇒ 必须 Interceptor ③ 搬运判据会改变它的位置 ⇒ 域里钉住旧位置的测试会红（是断言过期，不是回归）④ 共享层若会改别的域行为，能用开关规避就规避（favorite 缺省 off ⇒ 零变化） |
 | 2026-10-25 | **第十一轮新增 PIT-GLOBAL-012** —— 「per-app 配置」≠「只能逐模块改」⇒ 第九轮把 X-6 误判成 favorite 边界下的永久阻塞 ⇒ 第十一轮找到共享层修法（`Connector.setMaxParameterCount(-1)` + Boot customizer 顺序 + `com.rag.common` 组件扫描 10/10）⇒ **该漂移可修、favorite 零触碰**；含四问判据 + 「共享层会改别的域行为 ⇒ 不能静默」的教训 |

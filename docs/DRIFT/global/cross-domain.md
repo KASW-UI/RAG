@@ -1,5 +1,7 @@
 <!-- @new 2026-10-25 · global 收口域 · 由 `align/global` 工作树产出 + 基线 commit 58e8314 -->
-<!-- 核对日期：2026-10-25 · 本轮只做状态更新 + 一条新发现，未改动任何跨域代码 -->
+<!-- 核对日期：2026-10-25（第十六轮）· 本轮**改了跨域代码**：共享层补 Go 的 `maxBodyLen = 8 MiB` + servlet 版判据重载；
+     hot / article 两域的判据副本改为调用唯一真源（X-9 收敛）⇒ 详见 §二 与 §二·十三 -->
+<!-- ⚠️ 第十六轮起，本档的「端到端 vs 解析层」区分是必读项（见 §二·十三 ③ 与 PIT-GLOBAL-015） -->
 
 # global · 跨域不变量台账（cross-domain）
 
@@ -21,7 +23,7 @@
 | X-6 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | ✅ **第十四轮已落地**（共享层 6 个类 + 9 个域一行 yaml）⇒ 🔴 **Go 的拒绝形状按域而异**（5 域注册 `SetErrorHandler` ⇒ 200+信封；4 域未注册 ⇒ 400+原文）⇒ 共享层按 `mode` 分派、**文案由各域自己的兜底 handler 渲染** ⇒ **favorite 缺省 = off ⇒ 零触碰** ⇒ 🟢 **真容器 + 真 MVC + 变异测试** | ✅ **已修**（见 §二·十一 ⑤） |
 | X-7 | DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🟡 **部分闭合**（2026-10-25 B3）—— 4 个域已能活体逐列对照；其余 5 域**缺双侧库环境** | ✅ **已跑**（产出真结论 + 1 条新差异 X-10） |
 | **X-8** | 🆕 **真源分层（Go 出处一半在框架里）** | **全部域** | ✅ **本轮已查明并记账** | ✅ **本轮新增** |
-| **X-9** | 🆕 **「Go 是否读 body」判据有 3 份生产复制品** | favorite / hot / article | 🟡 **当前行为正确，但是定时炸弹** | ✅ **本轮新增** |
+| **X-9** | 🆕 **「Go 是否读 body」判据有 3 份生产复制品** | favorite / hot / article | ✅ **第十六轮已收敛到只剩 1 份**（favorite）—— hot / article 两份已改为**调用**共享层唯一真源（判据 + 取输入一起收口）⇒ 🔴 **探针实测发现解析层还缺 Go 的第二道闸 `maxBodyLen = 8 MiB`**（RAG 整个读进堆里）⇒ ✅ 已在共享层 + hot 域补上 ⇒ ⚠️ **端到端今天不可达**（Go 的 MaxBytes 默认 1 MiB 全局生效 ⇒ 先拒成 413）⇒ ⛔ **favorite 那份永久残留**（零权限） | ✅ **已修**（见 §二·十三） |
 
 ---
 
@@ -60,7 +62,7 @@ AGENTS.md §3.1 规定「任何行为一致性审查必须**以 Go 为唯一基�
 
 ---
 
-## 二、X-9 🆕 **「Go 是否读 body」判据有 3 份生产复制品**（2026-10-25 新发现）
+## 二、X-9 ✅ **第十六轮已收敛到只剩 1 份** —— 「Go 是否读 body」判据的生产复制品（2026-10-25 新发现 → 同日收敛）
 
 ### 2.1 事实
 
@@ -68,14 +70,14 @@ AGENTS.md §3.1 规定「任何行为一致性审查必须**以 Go 为唯一基�
 「Go 何时读 body」这条规则的**唯一真源**，并明确警告「复制品必然与实现漂移」。
 ⇒ **但仓库里有 3 份生产代码各自抄了一份判据**：
 
-| # | 位置 | 抄法 | 取的头值 |
-|---|---|---|---|
-| 1 | `service/favorite/favorite-api/.../controller/FavoriteController.java:242` | `contentType.contains("application/json")` | `httpRequest.getHeader("Content-Type")` ⇒ **原始** ✔ |
-| 2 | `service/hot/hot-api/.../form/GoFormValues.java:272` | `contentType.contains("application/json")` | `request.getContentType()` ⇒ **原始** ✔ |
-| 3 | `service/article/article-api/.../config/GoStyleJsonBodyLimitFilter.java:123` | `contentType.contains("application/json")` | `request.getContentType()` ⇒ **原始** ✔ |
+| # | 位置 | 抄法 | 取的头值 | 第十六轮后 |
+|---|---|---|---|---|
+| 1 | `service/favorite/favorite-api/.../controller/FavoriteController.java:146` | `contentType.contains("application/json")` | `httpRequest.getHeader("Content-Type")` ⇒ **原始** ✔ | ⛔ **永久残留**（favorite 零权限） |
+| 2 | `service/hot/hot-api/.../form/GoFormValues.java` | 同上 | `request.getContentType()` ⇒ **原始** ✔ | ✅ **已改为调用唯一真源** |
+| 3 | `service/article/article-api/.../config/GoStyleJsonBodyLimitFilter.java` | 同上 | `request.getContentType()` ⇒ **原始** ✔ | ✅ **已改为调用唯一真源** |
 
-⇒ **三份当前都取原始头值 ⇒ 判定与 Go 一致 ⇒ 当前行为是「对的」**。
-（`FavoriteController.java:241` 的注释甚至已经写明「Go 用 strings.Contains（大小写敏感），不是 MIME 解析 —— 别用 MediaType.parseMediaType」）
+⇒ **三份当前都取原始头值 ⇒ 判定与 Go 一致 ⇒ 行为是对的**
+（`FavoriteController.java:241` 的注释甚至已经写明「Go 用 strings.Contains（大小写敏感），不是 MIME 解析 —— 别用 MediaType.parseMediaType」）。
 
 ### 2.2 为什么它仍是**跨域**问题（而不是三个域各自的小事）
 
@@ -90,18 +92,25 @@ Content-Type: Application/JSON
 ⇒ 同一个请求，**闸门说不读、解析器说要读** ⇒ 这不是「某域的 bug」，是**共享判据被复制**造成的一致性风险。
 ⇒ **T-1 已于 2026-10-25 修复**（唯一真源改取原始头值）⇒ 现在两侧一致。
 
-### 2.3 残留风险（**本轮未修，已登记**）
+### 2.3 ✅ 第十六轮的收敛（**3 份 → 1 份**）
+
+**收敛方式不是「把三份都改成调真源」**（favorite 改不了），而是**把真源变厚**：
+
+| 改动 | 内容 | 为什么这样改 |
+|---|---|---|
+| 共享层 | 新增 `goReadsBody(HttpServletRequest)` | 连「**怎么从请求里取头值与长度**」一起收进真源 ⇒ 以后没人能在取输入这一步取错（取 `MediaType.parseMediaType` 就会大小写不敏感 ⇒ 与 Go 相反） |
+| `hot-api` | `GoFormValues.requireParsableJsonBody` 改调该重载 | 顺带修掉 `request.getContentLength()`（**int**）⇒ > 2 GiB 时 Tomcat 返 -1 ⇒ 与 Go 的 `int64` 判成相反 |
+| `article-api` | `GoStyleJsonBodyLimitFilter` 删掉本地判据，改调该重载 | 该 Filter **仍在链上**（它守的是 Go 的 `maxBodyLen`，与判据收敛是两件事） |
+
+**🔴 收敛时顺带查出的第二道闸** ⇒ 见本档 **§二·十三**（解析层还缺 Go 的 `maxBodyLen`；端到端今天不可达）。
+
+### 2.4 残留风险（**favorite 那份永久无法收敛**）
 
 | 风险 | 说明 |
 |---|---|
-| 🔴 **复制品可能漂移** | 哪天有人把其中一份改成「用 `MediaType` 解析」（看起来更「地道」）⇒ RAG 立刻**内部自相矛盾**（闸门 vs 解析器），且**没有任何测试会红** |
-| 🔴 **修法在别的域** | 要根治 ⇒ 三份复制品都应改为**调用** `GoStyleJsonBodyConverter.goReadsBody(...)`（唯一真源）⇒ **但那三个文件分别在 favorite / hot / article 域** ⇒ **不是 global 的写权范围**（§5.3b 规则 1：`service/common/**` 只有 `align/global` 能写；**反向不成立** —— global 也不该去改别的域的业务代码） |
-| 🔴 **favorite 那份永久无法收敛** | 2026-10-25 用户重申 favorite 零权限 ⇒ **hot + article 两份**可改为调用唯一真源，**favorite 那份不能** ⇒ 收敛后仍是「共享真源 + favorite 一份复制品」⇒ **「3 份复制品」的风险在 favorite 上永久存在** ⇒ 缓解手段只剩唯一真源 javadoc 的显式点名 |
-| ✅ **已做的缓解** | 已在唯一真源的 javadoc 里**显式列出这 3 份复制品的位置**，并写明「哪天有人改成 MediaType 解析 ⇒ RAG 会内部自相矛盾」⇒ 下一个改它的人会看到 |
-
-⇒ **归属**：这 3 份文件的修改**属于 favorite / hot / article 三域** ⇒ 应由各域自行收敛
-（各域台账可链到本条）⇒ **global 只做记账与协调**。
-⚠️ **本轮不去改它们**（§5.3b：别的域的代码，别的域自己改；global 只写自己的台账）。
+| ⛔ **favorite 那份永久无法收敛** | 2026-10-25 用户重申 favorite 零权限 ⇒ **hot + article 两份**可改，**favorite 那份不能** ⇒ 收敛后仍是「共享真源 + favorite 一份复制品」⇒ **「3 份复制品」的风险在 favorite 上永久存在** |
+| ✅ **当前行为无偏差** | favorite 那份取的仍是**原始头值** ⇒ 判定仍与 Go 一致 ⇒ **今天没有任何可观察差异** ⇒ 风险只在于「未来有人把它改成 MediaType 解析」 |
+| ✅ **已做的缓解** | ① 唯一真源的 javadoc 点名了残留位置；② 新增 `tools/difftest/check-go-json-body-predicate.py` —— **复制品白名单只留 favorite 一条**，多一份即 `EXIT 1` |
 
 ---
 
@@ -601,6 +610,115 @@ spring.flyway.baseline-version                ← 🔴 部分模块【没配】�
 
 ---
 
+## 二·十三、X-9 续 —— **解析层还缺 Go 的 `maxBodyLen`；端到端今天不可达**（2026-10-25 第十六轮）
+
+### ① 怎么发现的：先建探针，再动代码
+
+AGENTS.md §3.3 要求「凡写『与 Go 一致』，必须有**两侧同时跑的**探针」。
+本轮新建 **`tools/json-body-probe/`**（Go 半边 + Java 半边 + `run-parity.sh`）：
+Go 半边**直接调** go-zero v1.10.2 的 `httpx.Parse`，Java 半边走 **hot 域真实实现**
+（`GoFormValues.requireParsableJsonBody`）⇒ **期望值不是人写的，是这份输出**。
+
+> ⚠️ 与 `tools/semantic-probe/` 的差别：本探针**没有 known-dev 白名单** ⇒
+> 任一条不一致即 `EXIT 1` ⇒ 因为这 20 条全是「Go 的字面语义」，两侧必须逐条一致。
+
+### ② 🔴 首跑：19/20 一致，**J20 不一致**
+
+```
+J20 9MiB 单个 JSON 对象 + JSON 头 | Go REJECTED | RAG ACCEPTED | XX 判定不一致
+```
+
+Go 侧错误详情长度 = **8388643 = 8 MiB + 3** ⇒ **截断点精确在 8 MiB** ⇒ 坐实：
+
+| | Go | RAG（修前） |
+|---|---|---|
+| > 8 MiB 的 JSON body | `io.LimitReader(r.Body, 8MiB)` **静默截断** ⇒ 半个文档 ⇒ **报错** | `readAllBytes()` / Jackson 无上限 ⇒ **整个读进堆里并解析成功** |
+
+Go 出处：`rest/httpx/requests.go:21`（`maxBodyLen = 8 << 20`）+ `:119`（`io.LimitReader`）。
+
+⇒ 而 `maxBodyLen` 在 go-zero 的 `httpx` 包里 ⇒ **所有**走 `httpx.ParseJsonBody` 的域都有
+⇒ ⇒ **必须修在共享层**（一次覆盖 like / follow / message / task / user / admin / article）⇒ 属 global 收口域。
+
+### ③ 🔴 **但端到端今天不可达**（本轮最要紧的一条澄清）
+
+修完跑端到端时发现：**hot 的 9 MiB body 端到端是 413，不是 5001** ⇒ 回头查 Go 的 MaxBytes：
+
+```
+go-zero v1.10.2 rest/config.go:53   MaxBytes int64 `json:",default=1048576"`   ← 1 MiB 默认值
+go-zero v1.10.2 rest/config.go:21   Middlewares.MaxBytes bool `json:",default=true"`
+go-zero v1.10.2 rest/engine.go:163-164
+    if ng.conf.Middlewares.MaxBytes {
+        chn = chn.Append(handler.MaxBytesHandler(ng.checkedMaxBytes(fr.maxBytes)))
+    }                                                  ← ← 挂在**引擎**上 ⇒ 对所有路由生效
+```
+
+⇒ Go 的 MaxBytes **默认 1 MiB 且全局生效** ⇒ 9 MiB 的 body **先被拦成裸 413**
+（net/http 的 `requestTooLarge()`）⇒ **根本走不到** `ParseJsonBody`。
+
+⇒ **逐域算「8–10 MiB 段端到端可不可达」**（RAG 各 api 的 `max-bytes`）：
+
+| api 模块 | `max-bytes` | 8–10 MiB 段端到端可达？ |
+|---|---|---|
+| `article-api` | **10485760**（10 MiB） | 🟢 可达 ⇒ 但已被 `GoStyleJsonBodyLimitFilter` 覆盖（显式 400，已签字 DRIFT-006） |
+| `hot` / `comment` / `follow` / `like` / `message` / `task` | 1 MiB（Go 默认） | ⛔ 不可达（MaxBytes 先拒） |
+| `user-api` / `admin-api` / `favorite-api` | 未配 ⇒ 走共享 `GoStyleMaxBytesFilter` 默认值 | ⛔ 不可达 |
+
+⇒ **诚实结论**：
+- 本次修的是**解析层**与 Go 的对齐（探针直接验的就是这一层）；
+- **端到端今天没有任何域会因它而改变行为**（唯一可达的 article 段已被它自己的 filter 覆盖）；
+- ⇒ 价值 = **解析层忠实** + **去掉共享层的无上限读** + **防「哪天 MaxBytes 被调大」**；风险 = **零**。
+
+⚠️ **这个层次区分本身是一条产出**：差点把「解析层漂移」写成「端到端漂移」，
+而端到端那条**根本不存在**（MaxBytes 先拒）⇒ 这是「跑绿 ≠ 对」的另一个形态：
+**探针测的层 ≠ 端到端跑的层**。
+
+### ④ 改动
+
+| 层 | 改动 |
+|---|---|
+| 共享层 `service/common` | `GoStyleJsonBodyConverter`：新增 `GO_MAX_BODY_LEN`（8 MiB，**不可配置** —— Go 侧是框架常量）+ `goLimitedBody(InputStream)`（Go `io.LimitReader` 的等价物）+ servlet 版判据重载；`SanitizedJsonContentTypeInputMessage#getBody` 改走限流 |
+| `hot-api` | `requireParsableJsonBody`：判据改调唯一真源；读 body 改走 `goLimitedBody`；解析从 `readTree(byte[])` 改 `readTree(InputStream)`（**流式** ⇒ 不会为一个小 JSON 等满 8 MiB） |
+| `article-api` | `GoStyleJsonBodyLimitFilter`：删本地判据，改调唯一真源（该 Filter **仍在链上**） |
+
+### ⑤ 守门（每条都做过变异）
+
+| # | 守门 | 位置 |
+|---|---|---|
+| G1 | **双侧活体探针** 20 例（**无白名单**） | `tools/json-body-probe/run-parity.sh` |
+| G2 | **真 Tomcat + 裸 socket**：原始 Content-Type 不被归一 | `service/common` `GoStyleJsonBodyRawHeaderTomcatTest` |
+| G3 | 共享转换器只读前 8 MiB（边界卡到 **±1 字节** + 「底层流最多被读走 8 MiB」） | `service/common` `GoStyleJsonBodyMaxBodyLenTest` |
+| G4 | hot 域：9 MiB 端到端 ⇒ **413**（MaxBytes，Go 同形）；**解析层**直接调用 ⇒ 5001；大小写 ⇒ 不读 | `service/hot/hot-api` `HotApiJsonBodyGateTest` |
+| G5 | article 域闸门走共享判据（大小写 ⇒ 闸门**不触发**，判别式：body 含 `is not set` 而非 `request entity too large`） | `service/article/article-api` `ArticleApiJsonBodyLimitCaseTest` |
+| G6 | 判据只有一份实现（复制品白名单只留 favorite 一条） | `tools/difftest/check-go-json-body-predicate.py` |
+
+### ⑤·二 🔴 变异测试抓到的**我自己守门**的同义反复（本轮最重要的一条）
+
+| 变异 | 结果 |
+|---|---|
+| M1 共享真源判据改成**大小写不敏感** | ✅ common **5** 条 · hot **2** 条 · article **1** 条 · 探针 **3** 条不一致 ⇒ 全中 |
+| M2 `GO_MAX_BODY_LEN` 改成 1 MiB | 🔴 **首跑 0 红** ⇒ 抓到 G3 的同义反复（见下）⇒ 修正后**复验转红**：common 228 条里 `maxBodyLenConstantMatchesGo` 失败 + `exactlyMaxBodyLenIsAccepted` 报错 |
+| M3 某域重新抄一份判据 | ✅ `tools` 守卫 `EXIT 1` |
+| M4 去掉共享转换器的限流 | ✅ common **3** 条转红（`oneByteOverMaxBodyLenIsRejected` / `nineMiBJsonObjectIsRejected` / `underlyingStreamIsCappedAtEightMiB`） |
+
+🔴 **M2 抓到的是**：G3 的边界 body **是用 `GO_MAX_BODY_LEN` 这个常量构造的**
+⇒ 变异把常量改成 1 MiB 后，**测试构造的 body 也跟着缩到 1 MiB** ⇒ **恒绿**
+⇒ 即：**那条守门当时根本没在守那个上限值**。
+⇒ 修正：边界一律用**字面值** `8 * 1024 * 1024`（Go 出处 `rest/httpx/requests.go:21` 的 `maxBodyLen = 8 << 20`）
++ 另配一条断言把**常量本身**钉住 ⇒ 它成为 M2 的唯一拦截点。
+
+⚠️ **探针抓不到 M2**（实测：探针 20/20 仍绿）⇒ 因为探针比的是**判定**（读 / 不读、拒绝 / 接受），
+上限从 8 MiB 改成 1 MiB 时**两侧都判「拒绝」** ⇒ 判定一致 ⇒ 探针无感
+⇒ ⇒ **探针守「判定」、边界测试守「阈值」⇒ 两者缺一不可**（已写进 `tools/json-body-probe/README.md`）。
+
+### ⑥ favorite 域的待办（**本轮零触碰**）
+
+| 项 | 说明 |
+|---|---|
+| `FavoriteController.java:146` 那份复制品 | 用户重申 favorite 零权限 ⇒ **永久残留**。当前取原始头值 ⇒ 判定仍与 Go 一致 ⇒ **当前行为无偏差**；风险仅在「未来被改成 MediaType 解析」⇒ 已进 G6 白名单 |
+| 修法 | 改成 `GoStyleJsonBodyConverter.goReadsBody(httpRequest)`（**前提**：`favorite-api` 的 classpath 上有 Jackson 3 —— `spring-boot-starter-web` 已带，实测 `hot-api` 同款可用） |
+
+---
+
 ## 三、其余 7 条的状态说明（2026-10-25）
 
 本轮**未展开**这 7 条的逐条对照（它们的落点分散在多个域的代码里，
@@ -634,6 +752,7 @@ spring.flyway.baseline-version                ← 🔴 部分模块【没配】�
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | ✅ **第十六轮（X-9 收敛 + 解析层补 `maxBodyLen`）** —— ① ✅ **新建双侧活体探针 `tools/json-body-probe/`**（Go 半边**真调** go-zero 的 `httpx.Parse` + Java 半边走 hot 域**真实实现** ⇒ **期望值不是人写的**；**无 known-dev 白名单** ⇒ 任一条不一致即 exit 1）② ✅ **首跑 19/20 一致，J20 不一致** ⇒ 坐实「RAG 整个读 body、Go 只读前 8 MiB」⇒ Go 侧错误详情长度 **8388643 = 8 MiB + 3** ⇒ 截断点精确 ⇒ ✅ **共享层补 `GO_MAX_BODY_LEN` + `goLimitedBody`（Go `io.LimitReader` 等价物）+ servlet 版判据重载**；✅ **hot 域补上并改用唯一真源**（改**流式**读 ⇒ 不会为一个小 JSON 等满 8 MiB）；✅ **article 域删本地判据改调唯一真源** ⇒ **3 份复制品 → 1 份** ③ 🔴 **澄清一条差点写错的话**：Go 的 `MaxBytes` **默认 1 MiB 且挂在引擎上全局生效**（`rest/config.go:53` + `rest/engine.go:163-164`）⇒ 9 MiB body **先被拦成裸 413** ⇒ **端到端那条漂移根本不存在** ⇒ 本次修的是**解析层**，端到端今天**零行为变化**（唯一可达的 article 段已被它自己的 filter 覆盖）⇒ 逐域可达性已列表 ④ ✅ **6 条守门**（真 Tomcat 裸 socket 验原始头值 / 8 MiB 边界卡 ±1 字节 / hot 端到端 413 + 解析层 5001 / article 判别式断言 / **新 tools 守卫 `check-go-json-body-predicate.py`**）+ **全部做过变异** ⑤ ⛔ **favorite 那份复制品永久残留**（零权限）⇒ 记账 + 写明修法与前提 ⑥ 📌 **新增 PIT-GLOBAL-015**（「探针测的层 ≠ 端到端跑的层」） |
 | 2026-10-25 | ✅ **第十五轮（X-1 取证与修复）** —— ① 🔴 **取证推翻「同库共存是边缘场景」** —— **7 个 Flyway rpc 模块的 DSN 默认值全部是同一个 `first_db`** ⇒ 「先启动者把 public schema 弄非空」是**必然** ⇒ 每个 V1 起始的模块都必须扛得住 ② 🔴 **查出 3 个域缺 `spring.flyway.baseline-version: 0`** —— `baseline-on-migrate=true` + 非空 schema + 无账本 ⇒ Flyway 在 **version 1** 处打 BASELINE ⇒ **V1 的 SQL 从未执行** ⇒ 首张表永远建不出来 ⇒ **服务起不来** ⇒ 同款缺陷 `message-rpc` **2026-10-24 已修并留了守门** ⇒ **同一个坑在另外 3 个域原封不动地留着** ③ ✅ **三域已修**（各一行 yaml）+ **各配一个真 PG 守门**（真 PG 16 + 真 Flyway 引擎 + **配置取自模块自己的 yaml** + **先把 schema 弄成非空**）⇒ **变异（删掉那行）⇒ 6 条全红** ④ ⚠️ **`article-rpc` 逐模块判定后排除**（最低迁移版本 **V8** > baseline 默认值 1 ⇒ 不受影响 ⇒ **差点误修一个不存在的缺陷**）⑤ ⛔ **`favorite-rpc` 同款缺陷零触碰** ⇒ 记账 + **明确告知该域 owner**（含修法与守门思路）⇒ **不静默** ⑥ 🟡 **「三进程并发」的运行时形态仍未验证** ⇒ 留一轮 |
 | 2026-10-25 | ✅ **第十四轮（X-6 落地）** —— ① 🔴 **推翻第十三轮修法草案的一个隐含前提**：草案假设「共享 Filter 统一写 Go 的 400 原文」⇒ **错** —— **Go 的拒绝形状按域而异**（5 域注册 `httpx.SetErrorHandler` ⇒ **200 + 业务信封**；article/user/task/favorite 未注册 ⇒ **400 + Go 原文**）⇒ 且各域 5001 **文案不同**（like/comment =「系统内部错误」，hot/follow/message = `"internal server error"`）⇒ ⇒ **共享层写不出信封** ⇒ 拒绝形状必须**由域自己渲染** ② 落地结构 = `service/common` **6 个类**（`GoStyleFormValues` 判据 / `GoStyleFormLimitMode` 模式 / `GoStyleFormLimitExceededException` / `GoStyleFormValueLimitInterceptor` / `GoStyleFormLimitWebMvcConfig` / `GoStyleTomcatParameterLimitCustomizer`）+ **9 个域各一行 yaml**（`rag.http.go-form-limit.mode: raw\|envelope`）⇒ **favorite 缺省 = off ⇒ 容器上限与闸门都不生效 ⇒ 零触碰、行为逐字节不变** ③ 🔴 **闸门是 `HandlerInterceptor` 不是 servlet `Filter`** —— Filter 在 DispatcherServlet **之外** ⇒ 抛的异常到不了 `@RestControllerAdvice` ⇒ envelope 模式无法渲染 ④ 顺带订正 `service/common/pom.xml` 的 **spring-web / spring-test 硬编码 7.0.0**（与 starter-web 的 7.0.9 错配 ⇒ `NoClassDefFoundError: ApiVersionHolder`）⇒ 改为跟随 BOM ⑤ 🟢 证据强度首次达 **真容器 + 真 Spring MVC + 真 advice + 变异测试**（raw 5/5 · envelope 4/4 · 模式 8/8 · 变异 M1/M2 均转红）· `check-tomcat-limits.py` 新增第四旋钮 + **favorite 零触碰守卫** ⇒ EXIT=0 ⑥ 残留（有界，修前已存在）：**鉴权与闸门的先后**（Go 先鉴权后解析 / RAG 先解析后鉴权）⇒ 记录不改 |
 | 2026-10-25 | ✅ **第十一轮（favorite 零权限重申 ⇒ 推翻第九轮的「永久阻塞」结论）** —— 用户重申：「**你没有 favorite 的所有权限**」⇒ ① 🔴 **推翻自己第九轮的结论** —— 那个结论只覆盖「逐模块改 `application.yml`」这一条修法；本轮实测**共享层修法存在**：① `service/common` 里一个 `WebServerFactoryCustomizer`（`@Order` > Boot 的 `TomcatWebServerFactoryCustomizer.getOrder()==0`）⇒ `connector.setMaxParameterCount(-1)`（`Connector.java:538`；`-1` = 不限 ⇒ `Parameters.java:79/247`）② 一个共享 Filter 复刻 go-zero `GetFormValues`（`net/url` 解析层 + **2048 个非空值**计数，可从 `article-api` 的 `GoStyleGetFormValuesFilter` 移植）⇒ **10 个 api 模块零代码改动 ⇒ favorite 零触碰**（前提已逐条实测：10/10 依赖 `service/common` + 10/10 扫 `com.rag.common`）⇒ ⇒ **X-6 不是永久阻塞，也不需签字认账** ⇒ 落 **出路 D** ② ✅ **连带影响面复核**（§二·十一 ④ 之二）—— X-4（favorite 半边）**仍阻塞**（必须删 favorite 自己的 10 处调用）· X-9（hot/article 两份可收敛、**favorite 那份永久留作复制品**）· X-7（**只读库不改代码 ⇒ 不受影响，仍可推进**）③ 本表**已无「等用户拍板」的技术项**；唯一真决策项 = T-6（需先撕 hot 域 `SD-HOT-API-006`） |

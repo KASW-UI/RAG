@@ -46,7 +46,7 @@
 | | 事实 |
 |---|---|
 | **Go 出处** | `go-zero@v1.10.2/rest/httpx/requests.go:153-155`<br>`func withJsonBody(r *http.Request) bool { return r.ContentLength > 0 && strings.Contains(r.Header.Get(header.ContentType), header.ApplicationJson) }`<br>常量：`rest/internal/header/headers.go:5` ⇒ `ApplicationJson = "application/json"` |
-| **RAG 出处** | `service/common/src/main/java/com/rag/common/http/GoStyleJsonBodyConverter.java:115-117`（`read()` 取 Content-Type）<br>判定在 `:98-101`（`goReadsBody`）⇒ `contentType.contains(GO_JSON_CONTENT_TYPE_MARK)`，`GO_JSON_CONTENT_TYPE_MARK = "application/json"`（`:77`） |
+| **RAG 出处** | `service/common/src/main/java/com/rag/common/http/GoStyleJsonBodyConverter.java:331`（`read()` 取 Content-Type）<br>判定在 `:241-244`（`goReadsBody(String,long)`）⇒ `contentType.contains(GO_JSON_CONTENT_TYPE_MARK)`，`GO_JSON_CONTENT_TYPE_MARK = "application/json"`（`:79`）<br>🆕 **第十六轮新增**：servlet 版判据 `:296`（`goReadsBody(HttpServletRequest)`）· Go 的第二道闸 `maxBodyLen = 8 MiB` 在 `:117`（`GO_MAX_BODY_LEN`）+ `goLimitedBody(...)` |
 | **差异根因** | Go 读的是**原始头值**（`r.Header.Get` **不做大小写归一**）⇒ `strings.Contains` **大小写敏感**；<br>RAG 读的是 `getContentType().toString()` ⇒ **Spring 的 `MediaType.toString()` 已把 type/subtype 小写化** ⇒ `contains` **大小写不敏感** |
 | **可观察差异** | 请求头 `Content-Type: Application/JSON`（大写 A/J）⇒<br>**Go：不读 body**（走 `mapping.UnmarshalJsonMap(nil, v)`，body 被忽略）<br>**RAG（修前）：读 body**（进 Jackson 反序列化） |
 | **状态** | ✅ **2026-10-25 已修**（`align/global` 收口提交） |
