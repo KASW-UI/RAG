@@ -137,6 +137,39 @@ class GoStyleJsonContentTypeCharsetTomcatTest {
     }
 
     // ==================================================================
+    // ④ 🔴🔴 MockMvc 路径：共享层写的值必须 == 各域自己的 advice 会写的值
+    // ==================================================================
+
+    /**
+     * 🔴🔴🔴 **这条守门锁的是「共享层改动不许打红别的域的 MockMvc 守门」**。
+     *
+     * <p><b>事故经过（2026-10-25 第二十五轮实测）**：本 Advice 初版写的是 Go 的<b>带空格</b>字面量
+     * {@code "application/json; charset=utf-8"} ⇒ <b>真 Tomcat 路径没事</b>（容器归一化成无空格），
+     * 但 <b>MockMvc 路径没有容器归一化</b> ⇒ 写什么就原样出现 ⇒ 把
+     * {@code FavoriteApiMvcPipelineTest.responseContentTypeMatchesGoConstant} 打红了
+     * ⇒ 而 favorite 域对 global <b>零写权</b> ⇒ 修法只能落在本类。
+     *
+     * <p><b>不变量</b>：各域自己的 advice（如 favorite 的 {@code GlobalResponseAdvice}）
+     * 用 {@code MediaType.parseMediaType("application/json; charset=utf-8")}
+     * ⇒ Spring <b>保留原样的大小写</b> ⇒ 产出 {@code application/json;charset=utf-8}（小写 utf-8）。
+     * ⇒ 本 Advice 必须写<b>同一个值</b> ⇒ MockMvc 路径<b>零变化</b> ⇒ 别的域的守门不会被共享层改动打到。
+     *
+     * <p>⚠️ <b>不能用 {@code new MediaType(APPLICATION_JSON, UTF_8).toString()}</b> 写死期望值：
+     * 那条路产出的是 {@code application/json;charset=UTF-8}（<b>大写</b> UTF-8）
+     * ⇒ 与各域实际产出的<b>小写</b>不一致 ⇒ 用它当期望值会把正确的实现判成红。
+     */
+    @Test
+    @DisplayName("🔴 MockMvc 路径：Advice 写的值 == 各域自己 advice 会写的值 ⇒ 共享层改动不误伤别的域的 MockMvc 守门")
+    void adviceWritesExactlyWhatDomainsOwnAdviceWritesInMockMvc() {
+        assertThat(GoStyleJsonContentTypeAdvice.GO_JSON_CONTENT_TYPE)
+                .as("各域自己的 advice（favorite GlobalResponseAdvice 等）用 "
+                        + "MediaType.parseMediaType(\"application/json; charset=utf-8\") ⇒ 产出 "
+                        + "application/json;charset=utf-8（Spring 保留原样大小写）"
+                        + " ⇒ 共享层必须写同一个值，否则 MockMvc 路径的值会变 ⇒ 别的域的守门会被打红")
+                .isEqualTo(MediaType.parseMediaType("application/json; charset=utf-8").toString());
+    }
+
+    // ==================================================================
     // ③ 🔴 不许误伤：显式指定 Content-Type 的响应必须原样保留
     // ==================================================================
 

@@ -355,17 +355,35 @@ class LikeFactDispatchContractGateTest {
         return "http://127.0.0.1:" + dcServer.getAddress().getPort() + "/v1/events";
     }
 
-    /** 在后台线程驱动共享层的 {@link Dispatcher}（它本身是阻塞式 ⇒ 必须放独立线程）。 */
+    /**
+     * 在后台线程驱动共享层的 {@link Dispatcher}。
+     *
+     * <p>🔴🔴🔴 <b>必须用 {@link Dispatcher#runAsync}，不能用 {@link Dispatcher#run}</b>
+     * （2026-10-25 第二十五轮全仓回归实测出的<b>守门自身缺陷</b>）：
+     * <ul>
+     *   <li>{@code run} 是<b>阻塞式</b>的 —— 它在调用线程上跑整个投递循环，<b>直到 {@code stop()} 被调用才返回</b>
+     *       ⇒ 而初版把句柄<b>设在 {@code run} 之后</b> ⇒ <b>句柄永远拿不到</b>
+     *       ⇒ {@code @AfterEach} 的 {@code handleRef.getAndSet(null)} 每次都是 {@code null}
+     *       ⇒ <b>调度器永远停不掉</b> ⇒ <b>跨用例泄漏</b>。</li>
+     *   <li>泄漏的后果<b>不是「测试变慢」</b>，是<b>守门失真</b>：上一个用例留下的调度器线程
+     *       仍在 1s 一跳地领行 ⇒ 与本用例的调度器<b>并发抢行</b>
+     *       ⇒ 领到的那条被标成 {@code delivery_status=1}（在途）
+     *       ⇒ 另一个调度器就领走了<b>下一条</b> ⇒ 「毒丸失败 ⇒ 同轮 break ⇒ 下一条一次都不许被试」
+     *       这条断言就<b>因为并发而不是因为 break</b> 而变红。</li>
+     * </ul>
+     * ⇒ 实测症状：全仓回归里 {@code failedDeliveryBreaksTheInnerBatchImmediately}
+     * 偶发红（上一轮绿、这一轮红）⇒ <b>先定性再动手</b>：结构 diff → 读到「句柄永远拿不到」
+     * → 复现门（连续多轮）→ A/B 对拍（修前偶发红 / 修后必绿）⇒ 结论是**守门缺陷**，不是生产缺陷。
+     *
+     * <p>⚠️ <b>顺带说明</b>：生产路径（{@code LikeFactDispatchScheduler}）用的是 {@code runAsync}
+     * ⇒ <b>没有这个缺陷</b>（{@code runAsync} 在进入循环<b>之前</b>就把句柄发布出去）。
+     */
     private static void startDispatcher() {
-        Thread runner = new Thread(() -> {
-            Wire.Sender sender = Wire.DCEventSender.create(endpoint(), TOKEN,
-                    HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build());
-            Dispatcher.DispatcherHandle handle = Dispatcher.run(
-                    Context.current(), deliveryService::dispatchFactOnce, sender, LOG, false, false);
-            handleRef.set(handle);
-        }, "like-contract-dispatcher");
-        runner.setDaemon(true);
-        runner.start();
+        Wire.Sender sender = Wire.DCEventSender.create(endpoint(), TOKEN,
+                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build());
+        Dispatcher.DispatcherHandle handle = Dispatcher.runAsync(
+                Context.current(), deliveryService::dispatchFactOnce, sender, LOG, false, false);
+        handleRef.set(handle);
     }
 
     /**
