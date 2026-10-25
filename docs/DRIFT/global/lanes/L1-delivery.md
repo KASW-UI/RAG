@@ -443,3 +443,143 @@ RAG 侧它**没覆写 `flushBuffer()`** ⇒ **worker 线程能提交响应** ⇒
 | **A/B 对拍** | ✅ `aac691c`（T-11 之前）同门 **同样全坏** ⇒ **缺陷早于 T-11** |
 | **favorite** | ✅ 代码 / 配置 / 测试 / 台账 **零改动**（`git diff` 可验）；共享层影响已记账（§10.8） |
 | **提交 / 推送** | `ea0ae25` · origin `1d179ff..ea0ae25` · upstream `1d179ff..ea0ae25`（均 fast-forward） |
+
+---
+
+## 十一、第二十三轮 · T-11 残留：采样比例（`Telemetry.Sampler`）+ batcher（`Telemetry.Batcher`）补齐 **+ 一处错账订正**
+
+> **基线**：`25f6837`（第二十二轮 T-13 收口）· **性质**：**共享层（`service/common`）的补齐 + 一条自曝错账的订正**
+> **本轮对 favorite 的改动量**：**0 个文件**（§11.8 记账）
+
+### 11.1 一句话结论
+
+**第二十一轮台账 §9.5 ③④ 两条「未证成」本轮关闭**：采样比例现在真的按 Go 的 `Telemetry.Sampler` 生效（不再是哑配置），
+batcher 协议现在**真的会校验**（写错 ⇒ 装配失败 ⇒ 记 ERROR ⇒ **继续启动**，照 Go 的 `startAgent` 失败路径）。
+⇒ **同时自曝并订正了第二十一轮的一处错账**（§9.5 ④ 声称「非 grpc 的 protocol ⇒ 抛错」，**代码里根本没有这层校验** ⇒ 那是真缺陷）。
+
+### 11.2 🔴 自曝错账：§9.5 ④ 写的是「抛错」，**代码里没有这层校验**
+
+第二十一轮台账原文：
+
+> ④ | **协议只支持 `grpc`** | 与 Go 的 `Batcher: otlpgrpc` 一致；非 grpc 的 `protocol` ⇒ **抛错**（不静默降级）
+
+⇒ **复查代码时发现**：`GoStyleOtelAgent.buildProvider(...)` **压根没读 `config.protocol()`**
+⇒ 任何协议值都被**静默当成 grpc** ⇒ **不是文档问题，是真缺陷**。
+
+⇒ 这正是 AGENTS.md **§3.3.2** 点名的形态：「以『Go: …』形式写的断言，本身是高危项」——
+本轮是**自曝**一条，不是被别人抓的。
+
+### 11.3 🔴 第二个坑：两侧的**协议值字面量就不一样**
+
+| 侧 | 位置 | 值 |
+|---|---|---|
+| Go | `core/trace/config.go:12` `Batcher string` | **`otlpgrpc`**（合法集合 `zipkin\|otlpgrpc\|otlphttp\|file`） |
+| RAG | 10 个 api 的 yaml `otel.exporter.otlp.protocol` | **`grpc`** |
+
+⇒ 字面量差一个 `otlp` 前缀 ⇒ **不显式映射就会把合法值判成非法值**
+⇒ ⇒ 本轮**第一版实现就是这么写错的**（判 `otlpgrpc`）⇒ **被自己的新门当场抓住**（`unknown exporter: grpc`）。
+
+### 11.4 已证等价（Go 消费点 → RAG 落点 → 守门 → 变异）
+
+| Go 消费点 | Go 语义 | RAG 落点（修后） | 守门 |
+|---|---|---|---|
+| `core/trace/config.go:9` `Sampler float64` | 采样是**比例**（默认 1.0） | `GoStyleOtelConfig.toRatio(...)`：Boot 的采样器名 → 比例 | 门 3 |
+| `core/trace/agent.go:111` `ParentBased(TraceIDRatioBased(c.Sampler))` | **永远** ParentBased ⇒ 入向 parent 不采样 ⇒ 子 span 也不采样 | `Sampler.parentBased(Sampler.traceIdRatioBased(ratio))`（**不变**，本轮补的是它的守门） | 门 1 · 门 2 |
+| `core/trace/config.go:12` `options=zipkin\|otlpgrpc\|otlphttp\|file` | Batcher 的**合法集合** | `GoStyleOtelConfig.GO_BATCHERS` + `RAG_PROTOCOL_TO_GO_BATCHER` | 门 5 |
+| `core/trace/agent.go:100-101` `default: return nil, fmt.Errorf("unknown exporter: %s", ...)` | 不认识的 exporter ⇒ **整个 agent 装不上** | `GoStyleOtelConfig.validateBatcher()` ⇒ `IllegalStateException` | 门 4 |
+| `core/trace/agent.go:114-121` `if len(c.Endpoint) > 0 { createExporter(c) }` | **端点为空 ⇒ 根本不看 Batcher** | `validateBatcher()` 的 `if (endpoint == null) return;` | 门 6 |
+| `core/trace/agent.go:43-52` `tp, err := startAgent(c); if err != nil { logx.Error(err); return }` | 装不上 ⇒ **只记 ERROR，继续启动**（全局仍是 no-op） | `GoStyleOtelAgent.install(...)` catch 住 ⇒ 记 ERROR ⇒ 返回 null ⇒ **异常不逃出去** | 门 7 |
+
+### 11.5 改动（3 个文件）
+
+| # | 文件 | 改动 |
+|---|---|---|
+| ① | `service/common/.../observability/GoStyleOtelConfig.java` | 新增 `GO_BATCHERS` / `RAG_PROTOCOL_TO_GO_BATCHER` / `IMPLEMENTED_BATCHER` + `validateBatcher()` |
+| ② | `service/common/.../observability/GoStyleOtelAgent.java` | `buildProvider` 开头调 `config.validateBatcher()`；`install` 把 `buildProvider` 包进 try/catch ⇒ **失败不阻断启动** |
+| ③ | `service/common/src/test/.../observability/GoStyleOtelSamplerProtocolGateTest.java`（**新增**） | 7 条守门 |
+
+#### 守门（7 条）
+
+| # | 守门 | 断言 | Go 出处 |
+|---|---|---|---|
+| 1 | `ratioZeroMeansNothingIsExported` | `Sampler=0.0` ⇒ 根 span **不 recording**、**不 sampled**、**一个 span 都不出机器**（关停 flush 后 collector 仍是 0） | `agent.go:111` |
+| 2 | `parentBasedKeepsSampledParentEvenWhenRatioIsZero` | `Sampler=0.0` + 入向 `traceparent`（flags=01）⇒ 子 span **仍被采样并导出** | `agent.go:111` 的 ParentBased |
+| 3 | `samplerNameMapsToGoRatio` | `always_on`⇒1.0 / `always_off`⇒0.0 / `traceidratio`⇒arg / 非法名⇒**炸** | `config.go:9` + `agent.go:111` |
+| 4 | `unknownBatcherMustFailInsteadOfSilentlyUsingGrpc` | 非法协议 + 端点非空 ⇒ **抛错**（消息含 `unknown exporter`） | `agent.go:100-101` |
+| 5 | `goSupportedButUnimplementedBatcherMustFail` | Go 支持但本仓未实现（`otlphttp`）⇒ **同样抛错**（不许静默降级） | `config.go:12` |
+| 6 | `emptyEndpointSkipsBatcherValidation` | 端点为空 ⇒ **不校验**、能装出 provider | `agent.go:114-121` |
+| 7 | `installFailureDoesNotBreakStartup` | 装不上 ⇒ `install` **返回 null 不抛** + 「已装配」标志为 false + 全局仍是 no-op | `agent.go:43-52` |
+
+⚠️ **门 1 的一处自我订正**：第一版断言「被 DROP 的 span 的 SpanContext **无效**」⇒ **红了**
+⇒ 复查 OTel Java 1.44.0 与 Go SDK 的真实语义：**DROP 决策下 SpanContext 仍有效**（有 trace-id/span-id），
+只是 **sampled 标志为 false**（trace flags = `00`）⇒ ⇒ 响应头里**仍会有** `traceparent`（flags=00）。
+⇒ 断言改成 `isRecording()==false` + `isSampled()==false` + **一个 span 都不导出**。
+
+### 11.6 变异结果表（5 条，**全部转红**）
+
+| # | 变异 | 期望红点 | 实测 |
+|---|---|---|---|
+| M1 | `buildProvider` 去掉 `validateBatcher()` | 门 4 | ✅ 红（fail=3） |
+| M2 | `validateBatcher` 去掉「端点为空不校验」 | 门 6 | ✅ 红（err=1） |
+| M3 | `install` 不再吞异常 | 门 7 | ✅ 红（fail=1） |
+| M4 | sampler 去掉 `ParentBased` 包装 | 门 2 | ✅ 红（fail=1） |
+| M5 | `toRatio` 的 `always_off` 改成 1.0 | 门 3 | ✅ 红（fail=1） |
+
+⇒ **5/5 全部转红**（隔离工作树 `/tmp/rag-round23-mut`，已清理）+ **还原校验逐字节相同**。
+
+### 11.7 🔴 可观察变化（**记账，不静默**）
+
+| # | 变化 | 依据 | 影响面 |
+|---|---|---|---|
+| ① | **协议值写错 ⇒ 装配失败**（记 ERROR + 继续启动）⇒ 全局 trace **不生效** | Go：`unknown exporter` ⇒ `startAgent` 返错 ⇒ 只 `logx.Error` | 本仓 20 个模块的 yaml 现在只写 `grpc` ⇒ **今天零行为变化**；写错值时**不再静默当 grpc** |
+| ② | **`Sampler` 的非 1.0 取值现在真的生效** | Go：`Telemetry.Sampler` 是比例 | 本仓 yaml 全是 `always_on`/`parentbased_always_on`（⇒ 比例 1.0）⇒ **今天零行为变化**；但**以后**改 yaml 就能真的改采样率（此前是「配了也不生效」的哑配置） |
+
+### 11.8 🔴 favorite 记账（**本轮对 favorite 零文件改动**）
+
+> `service/favorite/**` 与 `docs/*/favorite/**` **零改动**。
+> 但**共享层改动会影响 favorite 的可观察行为** ⇒ 按协议 §六「必须记账并告知 owner」：
+
+| 项 | 内容 |
+|---|---|
+| **favorite 侧受影响的地方** | favorite 的 yaml 写 `otel.exporter.otlp.protocol: grpc` + `otel.traces.sampler: parentbased_always_on` ⇒ **两个值都合法** ⇒ **零行为变化** |
+| **favorite 代码需要改吗** | **不需要** ⇒ 修法全在 `service/common` |
+| **favorite owner 需要知道什么** | ① favorite **不受**本轮「协议写错 ⇒ 装配失败」的影响（它的协议值合法）；② 采样比例若将来改成非 1.0，favorite 的 trace 采样率会**真的变**（此前是哑配置） |
+| **本轮对 favorite 的改动量** | **0 个文件** |
+
+### 11.9 未证成（**不声称已证明的**）
+
+| # | 未证成项 | 原因 |
+|---|---|---|
+| ① | **Go 侧未活体对拍** | Go 事实全部来自**逐行读源码**（`core/trace/{config,agent}.go`）⇒ 没有真跑 Go 进程 |
+| ② | **真 jaeger 未接触** | 守门用**自制假 OTLP 接收端** ⇒ 证的是「OTLP/gRPC 字节真的出了机器」，**不是**「jaeger 真的收到了」 |
+| ③ | **多进程下的 agent 行为未验** | Go 的 `sync.Once` 是**进程内**语义 |
+| ④ | **`otlphttp` / `zipkin` / `file` 三种 exporter 未实现**（**能力缺口**，不是静默降级） | 本轮只登记（Go 能装、RAG 装不上 ⇒ 行为同构但**能力不等价**）；实现它们要引入新依赖 ⇒ 超出本轮 scope |
+
+### 11.10 ✅ 本轮**关闭**的上一轮未证成项
+
+| 项 | 结论 |
+|---|---|
+| **T-13 未证成 ①「`103 Early Hints` 触发点未定位」** | ✅ **已定位**：是 `GoStyleClientDisconnectProbe` 的**主动探测写** —— 它用 `SocketWrapperBase.write + flush` **直接写 socket**（绕过 Tomcat `OutputBuffer` ⇒ 不提交响应），写的就是 `HTTP/1.1 103 Early Hints\r\n\r\n` ⇒ **正是已签字偏离 `SD-2026-10-25-04`**（「响应流最前面多出 N 行 103」）⇒ **不是新缺陷** ⇒ 本轮关闭 |
+| **T-11 未证成 ③「采样比例只覆盖 1.0」** | ✅ **已证**（门 1/2/3） |
+| **T-11 未证成 ④「协议只支持 grpc」** | ✅ **已证 + 修好**（门 4/5/6/7；且订正了「代码里没抛」这条错账） |
+
+### 11.11 交接整合者（本 lane 越权做不了的事）
+
+| # | 事项 | 为什么本 lane 做不了 |
+|---|---|---|
+| ① | 把本节 fold 进 `docs/DRIFT/global/common-tails.md` 的 T-11 段 | 共享台账 ⇒ 协议 §二.3 |
+| ② | **订正共享台账的过期行**（清单见 spec §九，共 10 行） | 同上 |
+| ③ | 把**本轮变异脚本**落仓到 `tools/difftest/`（建议名 `otel-sampler-mutation.py`） | `tools/` **不在 L1 白名单** ⇒ 只留在会话临时目录 `/tmp/mutation-round23.py`；§11.6 已把 5 条变异的锚点与期望红点写全 |
+| ④ | **`PIT-GLOBAL-021`（变异判定正则必须匹配全限定名）** ⇒ 落 `docs/Pitfalls/global/` | 那是 **L5** 的白名单 |
+| ⑤ | `align/global` → `do-my-own-gh` 的合并 | 由 Jason 决定时机 |
+
+### 11.12 验证记录（2026-10-25 收口）
+
+| 项 | 结果 |
+|---|---|
+| **`service/common` 模块全量** | ✅ **246 条全绿**（239 + 本轮新增 7 条） |
+| **本轮新门** | ✅ `GoStyleOtelSamplerProtocolGateTest` **7 条 / 0 失败** |
+| **变异** | ✅ **5/5 全部转红**（隔离工作树 `/tmp/rag-round23-mut`，已清理）+ 还原校验逐字节相同 |
+| **favorite** | ✅ 代码 / 配置 / 测试 / 台账 **零改动**（`git diff` 可验）；共享层影响已记账（§11.8） |
+| **全仓回归** | ⏳ **未跑**（本轮只动了 `service/common` 的 otel 配置与 agent ⇒ 影响面 = 全仓 20 个模块的 otel 装配 ⇒ 收口前补跑） |
+| **提交 / 推送** | ⏳ 待提交 |
