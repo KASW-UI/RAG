@@ -958,3 +958,134 @@ RAG 侧两个模块**都是 `java -jar` 真起的** ⇒ ① ② 这类问题**�
 ⚠️ **工具的第一版必须先修再信**：本轮它第一次跑就报了 4 条红 ⇒ 人工逐条核实后
 **2 条是台账真错、2 条是工具自己的抽取 bug**（正则匹配到了旧章节 / 两条断言措辞同形）
 ⇒ **工具与人工双向独立一致**，才算数。
+
+## PIT-FAV-RPC-023 · 🔴 **端口排除列表必须包含「本轮已分配的全部端口」**（撞号 ⇒ 症状伪装成「unknown service」）
+
+### 现象
+
+2026-10-25 第十六轮给 gRPC 契约探针加「第二轮」（create 成功路径）时，第一版这样分配端口：
+
+```bash
+STUB_PORT="$(pick_free_port "${GO_PORT}")"                                  # ← 只排除了自己看得见的那个
+GO_PORT_SUCCESS="$(pick_free_port "${GO_PORT}" "${STUB_PORT}")"
+RAG_PORT_SUCCESS="$(pick_free_port "${GO_PORT}" "${STUB_PORT}" "${GO_PORT_SUCCESS}")"
+```
+
+⇒ 结果：**桩抢到了第一轮 RAG server 的端口** ⇒ 第一轮的客户端把请求打到了**桩**上
+⇒ 而桩只注册了 `UserService` / `ArticleService` ⇒ 于是报：
+
+```
+code=UNIMPLEMENTED|desc=unknown service favorite.FavoriteService
+```
+
+### 为什么难查
+
+🔴 **症状离根因很远**：
+- 报错说的是「服务不存在」⇒ 直觉会去查**服务注册**（proto package / `@GrpcService` / 服务名）；
+- 实际是**两个进程抢同一个端口**；
+- 而且 `pick_free_port` 的自检（`0.0.0.0:P` 与 `127.0.0.1:P` 都能绑）在**分配那一刻**是通过的 ——
+  因为那时 RAG server **还没起**（它要到 maven 那一步才起）⇒ **自检根本发现不了**。
+
+⇒ 这正是 **PIT-FAV-API-008** 的**同型**坑的另一半：
+那次是「别的会话的容器抢号」，这次是「**自己这一轮**的另一个进程抢号」。
+
+### 怎么不再踩
+
+⇒ **判据**：
+> 端口排除列表 = **「本轮至今已分配的全部端口」**，不是「我这次新加的那几个」。
+> ⇒ 新增一轮时，**必须把上一轮的端口一起列进去**。
+
+⇒ 本域落地：
+1. `pick_free_port` 的调用改成**显式列出全部已分配端口**（不再用数组展开）；
+2. 分配完立刻做**互异性自检**（5 个端口去重后必须仍是 5 个）⇒ 撞号当场红，不留到运行期。
+
+⚠️ 附带踩到的第二个坑（见 **PIT-FAV-RPC-025**）：为了绕开 bash 3.2 的数组展开坑，
+新写的 `${arr[@]+"${arr[@]}"}` **多了一个 `"`** ⇒ 整份脚本在 `$( )` 里解析失败。
+
+## PIT-FAV-RPC-024 · 🔴 **种子显式写自增主键 ⇒ 序列不推进 ⇒ 首次 INSERT 撞 PK**（症状伪装成「重名 5203」）
+
+### 现象
+
+第十六轮第一次跑「create 成功路径」时，Go 真源侧报的是：
+
+```
+ERROR: duplicate key value violates unique constraint "favorite_folder_pkey" (SQLSTATE 23505)
+  INSERT INTO "favorite_folder" ("folder_id","user_id","name",...) VALUES (2114307093964140544,2001,'ParityFolder',...)
+error_code=5203
+```
+
+⇒ 而 `5203` = **「收藏夹名称已存在」**（`ErrorFavoriteFolderNameExists`）。
+
+### 为什么难查
+
+🔴 **症状在业务层，真因在基础设施层**：
+- 看到 `5203 名称已存在` ⇒ 直觉是「重名检查误报」⇒ 会去查 `FindFolderByUserIdAndName`；
+- 实际是 **INSERT 撞了主键**（`favorite_folder_pkey`，即 `id` 列）；
+- 而 `id` 是**自增主键**：Go 侧 `INSERT ... RETURNING "id"`、RAG 侧 mapper 也不带 `id`
+  ⇒ **两边都靠序列**；
+- 种子却**显式写了 `id`（1/2/3）** ⇒ **PostgreSQL 不会因为显式 INSERT 推进序列**
+  ⇒ 序列仍停在 1 ⇒ 种子灌完后第一次 INSERT 拿到的还是 `id=1` ⇒ 撞上种子里那行。
+
+⇒ 也就是说：**「名字唯一」与「主键唯一」两个错误被同一条 SQLSTATE 23505 掩盖了**，
+而业务码把前者翻译成了 5203。
+
+### 怎么不再踩
+
+⇒ **判据**：
+> **种子只写业务列，自增主键让它自己走。**
+> ⇒ 空表上自增的结果与手写 1/2/3 **完全一样**（值不变）⇒ 没有任何理由显式写。
+
+⇒ 本域落地：`tools/grpc-contract-probe/favorite/seed.sql` 已去掉 `id` 列，
+并在文件头写明「为什么不能写」＋「症状长什么样」。
+
+⚠️ **注意**：这份种子被 `tools/api-full-parity-probe/favorite/run.sh` **共用**
+⇒ 改它必须**两个探针一起复跑**（本轮已复跑，冻结值不变 —— 因为响应体里本就没有 `id`）。
+
+## PIT-FAV-RPC-025 · 🐚 **bash 3.2 的 `${arr[@]+"${arr[@]}"}` 多一个 `"` ⇒ 整份脚本 `unexpected EOF`**
+
+### 现象
+
+在 `$( )` 里写：
+
+```bash
+STUB_PORT="$(pick_free_port ${USED_PORTS[@]+"${USED_PORTS[@]}"}")"
+```
+
+⇒ `bash -n` 直接报：
+
+```
+run.sh: line 275: unexpected EOF while looking for matching `)'
+run.sh: line 419: syntax error: unexpected end of file
+```
+
+### 根因
+
+探针里**原本就有**这个写法（`GO_PORT=...`、`RAG_PORT=...` 两行）⇒ 它是**对的**：
+
+```bash
+GO_PORT="$(pick_free_port ${USED_PORTS[@]+"${USED_PORTS[@]}"}")"
+#                                   └─ `+` 后一个 `"` · 内层 `}` 后一个 `"` · 然后 `}` ─┘
+```
+
+⚠️ 手写新行时**多打了一个 `"`**（`...[@]}"}"`）⇒ 那个 `"` 把 `$( )` 里的引号配对搞乱
+⇒ bash 3.2 在 `$( )` 里遇到 `${arr[@]+"…"` 时按「引号内不再解析 `$(`」处理
+⇒ 于是外层的 `$(` 找不到配对的 `)`。
+
+### 后果
+
+🔴 **报错行号指向最后那个 `)`，离真凶很远**：
+真正的错字在**第 3 行**（新写的端口分配那几行），报错却说 `line 275`。
+⇒ 第一反应会去查「275 行附近的那个 `)` 是什么」⇒ 白查。
+
+### 怎么不再踩
+
+⇒ **判据**：
+> macOS 自带 **bash 3.2**，`set -u` 下展开**空数组**会报 `unbound variable`
+> ⇒ 用 `${arr[@]+"${arr[@]}"}` 绕开；但这个写法**对引号数量极其敏感**，
+> **抄的时候要连字节一起抄**，不要凭记忆重打。
+
+⇒ 本域落地：新增端口一律**显式传参**（`pick_free_port "${A}" "${B}"`），
+**不再新增数组展开写法** ⇒ 这类解析错误从根上少一个来源。
+
+⚠️ 顺带提醒：`bash -n` 是**免费的语法门禁** —— 改完 shell 脚本先 `bash -n` 一遍，
+比跑一遍探针（几分钟）便宜两个数量级。

@@ -164,6 +164,71 @@ def check_test_cases(root):
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# ②' favorite-rpc **测试类数 / 用例数**（PIT-FAV-RPC-022：数字必须有能复跑的机检）
+# ══════════════════════════════════════════════════════════════════════════
+def check_rpc_test_counts(root):
+    """favorite-rpc 的测试计数。
+
+    🔴 **为什么要给它也加机检**：PIT-FAV-RPC-022 说「台账里最危险的断言是数字」——
+    指针有自检兜底、编号有自检兜底，**数字没有**。
+    ⇒ 第十六轮新增了一个测试类（+1 例）⇒ 若只改台账不改工具，
+    下一个人再加一个测试类就会**又**过期一次，而**什么都不会响**。
+    """
+    md = read(os.path.join(root, DRIFT, "rpc.md"))
+    # ⚠️ 必须锚定「favorite-rpc：**N 个测试类 / M 例**」这段**唯一**的措辞
+    #    （§0 摘要的「| 测试 |」行里）—— 不能用「N 个测试类」这种泛匹配，
+    #    否则会命中旧章节里的旧口径 ⇒ 报一个假的差异。
+    m, err = grep1(md, r"favorite-rpc：\*\*(\d+) 个测试类 / (\d+) 例\*\*",
+                   "§0「| 测试 |」行的 favorite-rpc 口径")
+    if err:
+        record("门禁", False, "favorite-rpc 测试类数", "—", err)
+        return
+    claim_classes = int(m.group(1))
+    claim_cases = int(m.group(2))
+
+    src_root = os.path.join(root, "service/favorite/favorite-rpc/src/test")
+    actual_classes = sum(1 for _r, _d, fs in os.walk(src_root) for f in fs if f.endswith("Test.java"))
+    record("门禁", claim_classes == actual_classes, "favorite-rpc 测试类数",
+           f"台账 §0：{claim_classes} 个测试类", f"仓库实际：{actual_classes} 个（*Test.java）")
+
+    # 用例数：有歧义 ⇒ 提示级（surefire 求和 vs 源码 @Test 注解）
+    rep_dir = os.path.join(root, "service/favorite/favorite-rpc/target/surefire-reports")
+    surefire_total, stale = 0, []
+    if os.path.isdir(rep_dir):
+        newest_src = max((os.path.getmtime(os.path.join(r, f))
+                           for r, _d, fs in os.walk(src_root) for f in fs), default=0)
+        for name in os.listdir(rep_dir):
+            if not name.startswith("TEST-") or not name.endswith(".xml"):
+                continue
+            p = os.path.join(rep_dir, name)
+            try:
+                root_el = ET.parse(p).getroot()
+                surefire_total += int(root_el.get("tests") or 0)
+            except Exception:
+                continue
+            if os.path.getmtime(p) < newest_src:
+                stale.append(name)
+
+    def strip_comments(src):
+        src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+        src = re.sub(r"//[^\n]*", "", src)
+        return src
+
+    ann = 0
+    for r, _d, fs in os.walk(src_root):
+        for f in fs:
+            if f.endswith(".java"):
+                ann += len(re.findall(r"@Test\b", strip_comments(read(os.path.join(r, f)))))
+
+    detail = f"surefire 求和={surefire_total} · 源码 @Test 注解={ann}"
+    if stale:
+        detail += f" · ⚠️ {len(stale)} 份报告比源码旧（陈旧报告会抬高计数 ⇒ 已排除）"
+        surefire_total = None
+    record("提示", claim_cases in (surefire_total, ann), "favorite-rpc 用例数",
+           f"台账 §0：{claim_cases} 例", detail)
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # ③ 已签字偏离条数
 # ══════════════════════════════════════════════════════════════════════════
 def check_signed_deviations(root):
@@ -358,9 +423,10 @@ def main():
         print(f"❌ 找不到 favorite 域台账目录：{root}", file=sys.stderr)
         return 2
 
-    for fn in (check_test_classes, check_test_cases, check_signed_deviations,
-               check_candidates, check_grpc_inprocess, check_random_port,
-               check_port_ranges, check_probe_dirs, check_shared_surface):
+    for fn in (check_test_classes, check_test_cases, check_rpc_test_counts,
+               check_signed_deviations, check_candidates, check_grpc_inprocess,
+               check_random_port, check_port_ranges, check_probe_dirs,
+               check_shared_surface):
         try:
             fn(root)
         except Exception as e:  # 工具自身出错 ⇒ 不静默放过

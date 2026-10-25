@@ -163,12 +163,14 @@ class FavoriteGrpcContractParityTest {
     // ══════════════════════════ 矩阵 ══════════════════════════
 
     /** 调用体：返回 protobuf 响应对象；出错时抛 {@link StatusRuntimeException}。 */
-    private interface Call {
+    // ⚠️ 可见性是 package-private（不是 private）：`FavoriteCreateSuccessParityTest`
+    //    **复用这一整套观测代码**，好让「两个探针的观测口径」不可能漂移。
+    interface Call {
         Object invoke(FavoriteServiceGrpc.FavoriteServiceBlockingStub stub);
     }
 
     /** 响应体的呈现方式。 */
-    private interface Shape {
+    interface Shape {
         String render(Object response);
 
         /** 错误用例：没有响应体。 */
@@ -198,12 +200,12 @@ class FavoriteGrpcContractParityTest {
                 : "shape:favorite_id>0=" + (((CreateFavoriteResp) response).getFavoriteId() > 0);
     }
 
-    private record Case(String id, Shape shape, Call call, boolean fullHeaders) {
+    /** 一个用例：id + 响应呈现方式 + 调用体。 */
+    record Case(String id, Shape shape, Call call, boolean fullHeaders) {
         Case(String id, Shape shape, Call call) {
             this(id, shape, call, false);
         }
     }
-
     /**
      * 记录响应头 / trailer 时的过滤规则。
      *
@@ -222,8 +224,7 @@ class FavoriteGrpcContractParityTest {
      *       （任何<b>非</b> grpc-* 的头差异都仍然会被抓出来）。</li>
      * </ul>
      */
-    private static final String GRPC_NAMESPACE_PREFIX = "grpc-";
-
+    static final String GRPC_NAMESPACE_PREFIX = "grpc-";
     /**
      * 请求矩阵。
      *
@@ -486,7 +487,7 @@ class FavoriteGrpcContractParityTest {
 
     // ══════════════════════════ 单次观测 ══════════════════════════
 
-    private String observe(Case c, Channel rawChannel) throws Exception {
+    static String observe(Case c, Channel rawChannel) throws Exception {
         CapturingInterceptor capture = new CapturingInterceptor();
         Channel channel = ClientInterceptors.intercept(rawChannel, capture);
 
@@ -509,7 +510,7 @@ class FavoriteGrpcContractParityTest {
     }
 
     /** 服务面探针（health / 未知方法）：用裸 byte[] marshaller，不依赖任何 proto。 */
-    private String observeRaw(String caseId, Channel channel, CapturingInterceptor capture) throws Exception {
+    static String observeRaw(String caseId, Channel channel, CapturingInterceptor capture) throws Exception {
         String method = switch (caseId) {
             case "c34_health_check" -> "grpc.health.v1.Health/Check";
             // ⚠️ 服务名必须是真源 proto 里的 **favorite.FavoriteService**
@@ -555,7 +556,7 @@ class FavoriteGrpcContractParityTest {
         }
     }
 
-    private String render(Status status, Object response, CapturingInterceptor capture, Shape shape) {
+    static String render(Status status, Object response, CapturingInterceptor capture, Shape shape) {
         StringBuilder sb = new StringBuilder();
         sb.append("code=").append(status.getCode().name());
         String desc = status.getDescription();
@@ -567,7 +568,7 @@ class FavoriteGrpcContractParityTest {
     }
 
     /** 完整（不过滤）的头 key 集合 —— 供「服务面」用例显式量化库级差异。 */
-    private String renderFullHeaders(Status status, Object response, CapturingInterceptor capture, Shape shape) {
+    static String renderFullHeaders(Status status, Object response, CapturingInterceptor capture, Shape shape) {
         StringBuilder sb = new StringBuilder();
         sb.append("code=").append(status.getCode().name());
         String desc = status.getDescription();
@@ -583,7 +584,7 @@ class FavoriteGrpcContractParityTest {
      *
      * @param full true = 不过滤 grpc-*；false = 只保留<b>非</b> grpc-* 的 key
      */
-    private static String keys(Metadata metadata, boolean full) {
+    static String keys(Metadata metadata, boolean full) {
         if (metadata == null || metadata.keys().isEmpty()) {
             return "-";
         }
@@ -602,7 +603,7 @@ class FavoriteGrpcContractParityTest {
 
     // ══════════════════════════ 辅助 ══════════════════════════
 
-    private static final MethodDescriptor.Marshaller<byte[]> BYTE_MARSHALLER =
+    static final MethodDescriptor.Marshaller<byte[]> BYTE_MARSHALLER =
             new MethodDescriptor.Marshaller<>() {
                 @Override
                 public InputStream stream(byte[] value) {
@@ -620,7 +621,7 @@ class FavoriteGrpcContractParityTest {
             };
 
     /** 抓响应头与 trailer 的 metadata key 集合。 */
-    private static final class CapturingInterceptor implements ClientInterceptor {
+    static final class CapturingInterceptor implements ClientInterceptor {
         private Metadata responseHeaders;
         private Metadata trailers;
 
@@ -691,7 +692,7 @@ class FavoriteGrpcContractParityTest {
         return out;
     }
 
-    private static String hex(byte[] bytes) {
+    static String hex(byte[] bytes) {
         StringBuilder sb = new StringBuilder(bytes.length * 2);
         for (byte b : bytes) {
             sb.append(Character.forDigit((b >> 4) & 0xF, 16));

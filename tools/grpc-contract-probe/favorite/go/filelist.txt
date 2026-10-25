@@ -1,5 +1,6 @@
 # 真源逐字节复制件清单（run.sh 逐个 sha256 校验）
 # ⚠️ **不含** service/favorite/rpc/cmd/schemaprep/main.go —— 那是探针代码，不是复制件
+# ⚠️ **也不含** service/favorite/rpc/cmd/upstreamstub/main.go —— 同上（上游桩）
 service/article/rpc/articleservice/article_service.go
 service/article/rpc/pb/article.pb.go
 service/article/rpc/pb/article_grpc.pb.go

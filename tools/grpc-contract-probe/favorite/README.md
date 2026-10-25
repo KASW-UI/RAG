@@ -13,6 +13,29 @@
 
 ---
 
+## 〇、探针现在跑**两轮**（2026-10-25 第十六轮起）
+
+| | **第一轮**（`expected.txt` · 36 case） | **第二轮**（`expected-success.txt` · 15 case） |
+|---|---|---|
+| **上游** | **故意不接** user-rpc / article-rpc（指 `127.0.0.1:1` 死地址） | **接上**探针自带的**最小桩**（user-rpc + article-rpc） |
+| **测的是** | 「**下游不可用**」这条契约分支（`c04`/`c09` ⇒ `Internal/5001`） | 「**下游在场**」这条：create **成功路径** + `ensureUserExists` 的**其余四条分支** + **落库等价性** |
+| **Go 真源 server** | 第 1 个（`ListenOn` = 端口 A） | 第 2 个（同一份二进制，`UserRpc/ArticleRpc` 改指桩） |
+| **冻结结论** | SAME 33 / SAME_CODE 2 / OBS 1 | **SAME 15 / SAME_CODE 0 / OBS 0** |
+
+⇒ **为什么要两个 server 而不是改第一个**：两条分支**都要有活体证据**
+⇒ 改第一个会把「下游不可用」那条证据**弄丢** ⇒ 冻结值互不影响。
+
+⚠️ **第二轮的桩有明确边界**（读结论前必看）：
+
+> 桩 ≠ 真 user-rpc / 真 article-rpc ⇒ 第二轮证明的是
+> 「**favorite 域自己在这条路径上的行为，两侧一致**」，
+> **不**证明「favorite 与 user-rpc / article-rpc 之间的交互契约」。
+> ⇒ 期望值**只能**由「Go 真源 favorite-rpc + 真 PG」产出。
+> ⇒ 桩的实现见 [`go/service/favorite/rpc/cmd/upstreamstub/main.go`](go/service/favorite/rpc/cmd/upstreamstub/main.go)
+> （**探针代码，不是真源复制件** ⇒ 不在 `go/filelist.txt` 的 sha256 清单里）。
+
+---
+
 ## 一、为什么用「同一个客户端打两侧」
 
 帧层的**原始字节**由 gRPC 库决定，grpc-go 与 grpc-java 必然不同，**而且客户端不可观测**
@@ -88,13 +111,26 @@ CHECK / 部分索引 / 两个不可变触发器 / `favorite_legacy_fact_marker` 
 
 ---
 
-## 四、探针自身的两个坑（都真实踩过）
+## 四、探针自身的几个坑（都真实踩过）
 
 1. **用例顺序 = 副作用顺序** ⇒ 「读同一行的用例」必须排在「写同一行的用例」之前。
    第一版把「响应头全集」用例放在最后 ⇒ 它读的收藏夹已被改名用例改过 ⇒ `updated_at` 变成
    「本次运行的时刻」⇒ 冻结值每次都不同 ⇒ **假红**。
 2. **错误分支的 shape 渲染必须 null-safe** ⇒ 声明「预期成功」但服务端实际报错时，
    若不判空会抛 NPE，把「两侧行为不一致」这个**真结论**变成看不懂的测试崩溃。
+3. 🔴 **端口排除列表必须包含「本轮已分配的全部端口」**（第十六轮）⇒ 第一版漏了第一轮的
+   `RAG_PORT` ⇒ **桩抢到了 RAG server 的端口** ⇒ 客户端打到桩上 ⇒ 报
+   「unknown service favorite.FavoriteService」（症状离根因很远）。
+   ⇒ 现已加**互异性自检**（5 个端口去重后必须仍是 5 个）。
+   ⇒ 详见 [`docs/Pitfalls/favorite/rpc.md`](../../../../docs/Pitfalls/favorite/rpc.md) **PIT-FAV-RPC-023**。
+4. 🔴 **种子不能显式写自增主键**（第十六轮）⇒ 显式 `id` **不会**推进 PostgreSQL 的序列
+   ⇒ 种子灌完后第一次 INSERT 撞 `favorite_folder_pkey` ⇒ 而业务码把 23505 翻译成
+   「名称已存在 5203」⇒ **症状伪装成重名误报**。
+   ⇒ 现已只写业务列，让序列自己走（空表上值不变）。
+   ⇒ 详见 **PIT-FAV-RPC-024**。
+5. 🐚 **bash 3.2 的 `${arr[@]+"${arr[@]}"}` 多一个 `"` ⇒ 整份脚本 `unexpected EOF`**
+   （报错行号指向最后那个 `)`，离真凶很远）⇒ 新增端口一律**显式传参**。
+   ⇒ 详见 **PIT-FAV-RPC-025**。
 
 ---
 
@@ -107,7 +143,7 @@ echo $?   # 0 = 一致；1 = 有差异；2 = 环境问题
 
 # 可覆盖
 GO_REPO=/path/to/Sea-RideTheWind_golang bash tools/grpc-contract-probe/favorite/run.sh
-# KEEP_TMP=1 ⇒ 保留临时目录（go-server.log / schemaprep.log / mvn.log）
+# KEEP_TMP=1 ⇒ 保留临时目录（go-server.log / schemaprep.log / mvn.log / stub.log）
 ```
 
 ⚠️ **必须带 `-am`**（run.sh 已带）：`-pl` 不带 `-am` 会用过期上游产物 ⇒ 假红
@@ -115,13 +151,22 @@ GO_REPO=/path/to/Sea-RideTheWind_golang bash tools/grpc-contract-probe/favorite/
 
 ## 六、单独跑 Java 侧（回归门禁）
 
-`FavoriteGrpcContractParityTest` 自己会读 `expected.txt` 判定 ⇒ **直接 `mvn test` 也是一道回归门禁**：
+两个测试类**自己**会读各自的冻结期望判定 ⇒ **直接 `mvn test` 也是一道回归门禁**：
 
 ```bash
 mvn -o -pl service/favorite/favorite-rpc -am test \
   -Dtest=FavoriteGrpcContractParityTest -Dsurefire.failIfNoSpecifiedTests=false
+
+mvn -o -pl service/favorite/favorite-rpc -am test \
+  -Dtest=FavoriteCreateSuccessParityTest -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-但它**需要编排环境**（`PROBE_GO_TARGET` / `PROBE_RAG_PORT` / `PROBE_JDBC_*` / `PROBE_SEED` /
-`PROBE_OUT_GO` / `PROBE_OUT_RAG` / `PROBE_EXPECTED`）⇒ 单跑会被
-`@EnabledIfEnvironmentVariable` 跳过（**跳过 ≠ 通过**，别把 skip 当绿）。
+但它们**需要编排环境**（第一轮：`PROBE_GO_TARGET` / `PROBE_RAG_PORT` / `PROBE_JDBC_*` /
+`PROBE_SEED` / `PROBE_OUT_GO` / `PROBE_OUT_RAG` / `PROBE_EXPECTED`；
+第二轮再加 `PROBE_*_SUCCESS` 一组 + `PROBE_USER_RPC_ADDR` / `PROBE_ARTICLE_RPC_ADDR`）
+⇒ 单跑会被 `@EnabledIfEnvironmentVariable` 跳过（**跳过 ≠ 通过**，别把 skip 当绿）。
+
+⚠️ **两个测试类共用同一套观测代码**（`FavoriteGrpcContractParityTest` 的
+`observe` / `Shape` / `Case` / `keys` / `hex` 已放宽成 package-private 后被第二个类**原样复用**）
+⇒ 两个探针的「观测口径」**不可能漂移**。
+（若另写一套渲染逻辑，两份冻结值的格式就会各走各的 ⇒ 失守。）

@@ -69,8 +69,12 @@ command -v docker >/dev/null 2>&1 || die "没装 docker（探针需要真 PG）"
 TMP="$(mktemp -d)"
 PG_CONTAINER="fav-grpc-contract-probe-pg-$$"
 GO_PID=""
+GO2_PID=""
+STUB_PID=""
 cleanup() {
   [ -n "${GO_PID}" ] && kill "${GO_PID}" >/dev/null 2>&1
+  [ -n "${GO2_PID}" ] && kill "${GO2_PID}" >/dev/null 2>&1
+  [ -n "${STUB_PID}" ] && kill "${STUB_PID}" >/dev/null 2>&1
   docker rm -f "${PG_CONTAINER}" >/dev/null 2>&1 || true
   # KEEP_TMP=1 ⇒ 保留临时目录（排查用：go-server.log / schemaprep.log / mvn.log）
   if [ "${KEEP_TMP:-0}" = "1" ]; then
@@ -256,6 +260,85 @@ done
 [ "${UP}" = "1" ] || { bad "Go server 没起来"; tail -30 "${TMP}/go-server.log"; exit 2; }
 ok "Go 真源 favorite-rpc server 已在 127.0.0.1:${GO_PORT} 监听"
 
+# ── 5b. 起上游桩 + 第二个 Go 真源 server（下游**在场**那一侧）──────────────
+# 为什么要「第二个 Go server」而不是把第一个改成指桩：
+#   · 第一个 server 故意指 127.0.0.1:1 ⇒ 它测的是**「下游不可用」**这条契约分支
+#     （c04 / c09 ⇒ helper.go:107 ⇒ Internal/5001）；
+#   · 第二个 server 指桩 ⇒ 测的是**「下游在场」**这条（成功路径 + helper.go 的其余分支）。
+#   ⇒ 两条分支都要有活体证据 ⇒ 两个 server 各测各的，**冻结值互不影响**。
+say "编译并启动上游桩（user-rpc + article-rpc 的最小实现，两侧共同上游）"
+( cd "${TMP}/src" && CGO_ENABLED=0 GOPROXY=off GOFLAGS=-mod=mod GOTOOLCHAIN=local \
+    go build -o "${TMP}/upstreamstub" ./service/favorite/rpc/cmd/upstreamstub ) > "${TMP}/stubbuild.log" 2>&1 \
+  || { bad "上游桩编译失败"; tail -30 "${TMP}/stubbuild.log"; exit 2; }
+# 🔴 端口**显式**传给 pick_free_port（它内部按「已占用端口」列表跳过）：
+#    ⚠️ 不要写成 `${arr[@]+"${arr[@]}"}` 那种「数组展开 + 嵌套引号」的写法 ——
+#       bash 3.2 在 `$( )` 里解析它会直接报 unexpected EOF ⇒ 整份脚本挂掉。
+# 🔴🔴 **排除列表必须包含「本轮已分配的全部端口」**（2026-10-25 第十六轮实测踩到）：
+#    第一版这里只排除了自己新加的端口 ⇒ 忘了第一轮已经占掉的 ${RAG_PORT}
+#    ⇒ 桩抢到了 RAG server 的端口 ⇒ 客户端打到桩上 ⇒ 报
+#    「unknown service favorite.FavoriteService」（桩只注册 User/Article 两个服务）
+#    —— **症状离根因很远**，不查端口表根本想不到。
+STUB_PORT="$(pick_free_port "${GO_PORT}" "${RAG_PORT}")"
+GO_PORT_SUCCESS="$(pick_free_port "${GO_PORT}" "${RAG_PORT}" "${STUB_PORT}")"
+RAG_PORT_SUCCESS="$(pick_free_port "${GO_PORT}" "${RAG_PORT}" "${STUB_PORT}" "${GO_PORT_SUCCESS}")"
+# 互异性自检：5 个端口必须两两不同（撞号 ⇒ 上面那个坑）
+UNIQUE_PORTS="$(printf '%s\n' "${GO_PORT}" "${RAG_PORT}" "${STUB_PORT}" "${GO_PORT_SUCCESS}" "${RAG_PORT_SUCCESS}" | sort -u | wc -l | tr -d ' ')"
+[ "${UNIQUE_PORTS}" = "5" ] || die "5 个端口里有撞号（唯一值只有 ${UNIQUE_PORTS} 个）⇒ 端口分配被污染"
+say "上游桩端口 ${STUB_PORT} / 第二个 Go server 端口 ${GO_PORT_SUCCESS} / 第二个 RAG server 端口 ${RAG_PORT_SUCCESS}"
+"${TMP}/upstreamstub" -addr "127.0.0.1:${STUB_PORT}" > "${TMP}/stub.log" 2>&1 &
+STUB_PID=$!
+UP=0
+for _ in $(seq 1 30); do
+  if python3 -c "import socket,sys;s=socket.socket();s.settimeout(0.5);sys.exit(0 if s.connect_ex(('127.0.0.1',${STUB_PORT}))==0 else 1)"; then
+    UP=1; break
+  fi
+  kill -0 "${STUB_PID}" 2>/dev/null || break
+  sleep 1
+done
+[ "${UP}" = "1" ] || { bad "上游桩没起来"; cat "${TMP}/stub.log"; exit 2; }
+ok "上游桩已在 127.0.0.1:${STUB_PORT} 监听"
+
+cat > "${TMP}/probe-success.yaml" <<YAML
+Name: favorite.rpc
+ListenOn: 127.0.0.1:${GO_PORT_SUCCESS}
+
+Log:
+  ServiceName: favorite-rpc-success
+  Mode: console
+  Encoding: plain
+
+Postgres:
+  Host: "127.0.0.1"
+  Port: "${PG_PORT}"
+  User: "postgres"
+  Password: "probe"
+  DBName: "godb"
+  Mode: "disable"
+
+# 🔴 这里指**探针自带的桩** ⇒ 走的是「下游在场」那条路径（成功路径）
+UserRpc:
+  Endpoints:
+    - "127.0.0.1:${STUB_PORT}"
+
+ArticleRpc:
+  Endpoints:
+    - "127.0.0.1:${STUB_PORT}"
+YAML
+
+say "启动第二个 Go 真源 favorite-rpc server（下游指向上游桩）"
+"${TMP}/favorite-rpc" -f "${TMP}/probe-success.yaml" > "${TMP}/go-server-success.log" 2>&1 &
+GO2_PID=$!
+UP=0
+for _ in $(seq 1 120); do
+  if python3 -c "import socket,sys;s=socket.socket();s.settimeout(0.5);sys.exit(0 if s.connect_ex(('127.0.0.1',${GO_PORT_SUCCESS}))==0 else 1)"; then
+    UP=1; break
+  fi
+  kill -0 "${GO2_PID}" 2>/dev/null || break
+  sleep 1
+done
+[ "${UP}" = "1" ] || { bad "第二个 Go server 没起来"; tail -30 "${TMP}/go-server-success.log"; exit 2; }
+ok "第二个 Go 真源 favorite-rpc server 已在 127.0.0.1:${GO_PORT_SUCCESS} 监听"
+
 # ── 6. 灌种子（Go 侧）────────────────────────────────────────────────────
 say "灌种子到 Go 侧库（godb）"
 docker exec -i "${PG_CONTAINER}" psql -U postgres -h 127.0.0.1 -d godb -v ON_ERROR_STOP=1 \
@@ -293,91 +376,50 @@ ok "两侧各产出 $(wc -l < "${TMP}/go.txt" | tr -d ' ') 个 case"
 
 # ── 8. 逐条比对 ───────────────────────────────────────────────────────────
 say "逐条比对（Go 侧 vs 冻结值 vs RAG 侧）"
-python3 - "${HERE}/expected.txt" "${TMP}/go.txt" "${TMP}/rag.txt" <<'PY'
-import sys, os
+python3 "${HERE}/compare.py" "${HERE}/expected.txt" "${TMP}/go.txt" "${TMP}/rag.txt" \
+  "gRPC 级可观测契约"
+RC=$?
+[ "${RC}" -eq 0 ] || exit 1
 
-exp_path, go_path, rag_path = sys.argv[1], sys.argv[2], sys.argv[3]
+# ── 9. 第二轮：create 成功路径（下游**在场**）────────────────────────────────
+# 目的：补上 U8（docs/DRIFT/favorite/rpc.md §24.2）——
+#   「uid 合法 + user-rpc 在场 ⇒ 真创建成功」这条路径，
+#   以及 ensureUserExists 的其余四条分支，原探针**一次都没跑到过**。
+# ⚠️ 必须是**另一次 mvn 调用**（不是同一个 JVM 里加一个类）：
+#    两个测试类的 @SpringBootTest 属性不同 ⇒ Spring 上下文缓存键不同 ⇒ 同 JVM 里
+#    会起**两个**上下文；分开跑则每次只有一个上下文 ⇒ 端口 / 数据源都不会打架。
+say "第二轮：create 成功路径（上游在场）"
+PROBE_GO_TARGET_SUCCESS="127.0.0.1:${GO_PORT_SUCCESS}" \
+PROBE_RAG_TARGET_SUCCESS="127.0.0.1:${RAG_PORT_SUCCESS}" \
+PROBE_RAG_PORT_SUCCESS="${RAG_PORT_SUCCESS}" \
+PROBE_USER_RPC_ADDR="static://127.0.0.1:${STUB_PORT}" \
+PROBE_ARTICLE_RPC_ADDR="static://127.0.0.1:${STUB_PORT}" \
+PROBE_JDBC_URL="jdbc:postgresql://127.0.0.1:${PG_PORT}/first_db?TimeZone=Asia/Shanghai" \
+PROBE_JDBC_URL_GO="jdbc:postgresql://127.0.0.1:${PG_PORT}/godb?TimeZone=Asia/Shanghai" \
+PROBE_JDBC_USER="postgres" \
+PROBE_JDBC_PASSWORD="probe" \
+PROBE_OUT_GO_SUCCESS="${TMP}/go-success.txt" \
+PROBE_OUT_RAG_SUCCESS="${TMP}/rag-success.txt" \
+PROBE_EXPECTED_SUCCESS="${HERE}/expected-success.txt" \
+  mvn -o -q -pl service/favorite/favorite-rpc -am test \
+    -Dtest=FavoriteCreateSuccessParityTest -DfailIfNoTests=false \
+    -Dsurefire.failIfNoSpecifiedTests=false \
+  > "${TMP}/mvn-success.log" 2>&1
+MVN_RC=$?
+if [ "${MVN_RC}" -ne 0 ]; then
+  bad "Java 侧 FavoriteCreateSuccessParityTest 失败（exit ${MVN_RC}）"
+  grep -E 'ERROR|FAIL|expected|AssertionError' "${TMP}/mvn-success.log" | head -40
+  echo "---- mvn-success.log 尾部 ----"
+  tail -60 "${TMP}/mvn-success.log"
+  exit 1
+fi
+[ -s "${TMP}/go-success.txt" ] || die "Java 侧没有产出 Go 侧成功路径结果文件"
+[ -s "${TMP}/rag-success.txt" ] || die "Java 侧没有产出 RAG 侧成功路径结果文件"
+ok "成功路径两侧各产出 $(wc -l < "${TMP}/go-success.txt" | tr -d ' ') 个 case"
 
-def load(p):
-    out = {}
-    if not os.path.exists(p):
-        return out
-    for line in open(p, encoding="utf-8"):
-        line = line.rstrip("\n")
-        if not line.strip():
-            continue
-        parts = line.split("\t", 1)
-        out[parts[0]] = parts[1] if len(parts) > 1 else ""
-    return out
-
-go = load(go_path)
-rag = load(rag_path)
-
-if not os.path.exists(exp_path):
-    print("  ⚠️ expected.txt 尚不存在 ⇒ 下面是首次运行的逐条实测（请人工分类成 SAME/OBS/SKIP 后冻结）")
-    for cid in go:
-        g = go.get(cid, "<缺>")
-        r = rag.get(cid, "<缺>")
-        mark = "SAME" if g == r else "DIFF"
-        print(f"  [{mark}] {cid}")
-        print(f"      Go : {g}")
-        print(f"      RAG: {r}")
-    sys.exit(0)
-
-kinds = {}
-frozen = {}
-for line in open(exp_path, encoding="utf-8"):
-    line = line.rstrip("\n")
-    if not line.strip() or line.lstrip().startswith("#"):
-        continue
-    cols = line.split("\t", 2)
-    if len(cols) < 3:
-        print(f"❌ expected.txt 行格式错误：{line}")
-        sys.exit(1)
-    kinds[cols[0]] = cols[1]
-    frozen[cols[0]] = cols[2]
-
-problems = []
-same = same_code = obs = skip = 0
-for cid, kind in kinds.items():
-    g, r = go.get(cid), rag.get(cid)
-    if g is None or r is None:
-        problems.append(f"  · {cid} —— 有一侧没跑这个 case")
-        continue
-    if kind == "SKIP":
-        skip += 1
-        continue
-    if frozen[cid] != g:
-        problems.append(f"  · {cid} —— Go 侧与冻结值不一致 ⇒ **Go 真源的 gRPC 契约变了**\n"
-                       f"      冻结: {frozen[cid]}\n      实测: {g}")
-        continue
-    if kind == "OBS":
-        obs += 1
-        if g == r:
-            problems.append(f"  · {cid} —— OBS 段期望两侧不同，但变成一样了 ⇒ 请重评台账")
-        continue
-    if kind == "SAME_CODE":
-        same_code += 1
-        def _code(v):
-            for part in v.split("|"):
-                if part.startswith("code="):
-                    return part[len("code="):]
-            return ""
-        if _code(g) != _code(r):
-            problems.append(f"  · {cid} —— 两侧 status code 不一致\n"
-                           f"      Go : {g}\n      RAG: {r}")
-        continue
-    same += 1
-    if g != r:
-        problems.append(f"  · {cid} —— 两侧不一致\n      Go : {g}\n      RAG: {r}")
-
-print(f"  SAME {same} 条 / SAME_CODE {same_code} 条 / OBS {obs} 条 / SKIP {skip} 条（共 {len(kinds)} 个 case）")
-if problems:
-    print("❌ 不一致：")
-    print("\n".join(problems))
-    sys.exit(1)
-print("✅ gRPC 级可观测契约两侧一致（SAME 全等；OBS 仍不同；SKIP 已登记理由）")
-PY
+say "逐条比对（成功路径：Go 侧 vs 冻结值 vs RAG 侧）"
+python3 "${HERE}/compare.py" "${HERE}/expected-success.txt" \
+  "${TMP}/go-success.txt" "${TMP}/rag-success.txt" "create 成功路径 + 落库等价性"
 RC=$?
 [ "${RC}" -eq 0 ] || exit 1
 

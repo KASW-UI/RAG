@@ -25,14 +25,15 @@
 | 项 | 值 |
 |---|---|
 | 落地 | **36 个 Java 文件 / 7,571 行 / 7 个迁移脚本**（V7 为第十轮前新增的时钟源对齐脚本）<br>⚠️ **核对 2026-10-25（第十轮）**：行数首轮记 7,057 ⇒ 现 **7,571**，增量 514 行**全部是各轮的纯注释增量**（可执行逻辑零改动）（本轮前：34 个文件全 0 字节、`pom.xml` 零依赖零插件、6 个 `.sql` 全 0 字节） |
-| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §13.5**（**11 个测试类 / 82 例全绿**） |
+| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §25**（favorite-rpc：**14 个测试类 / 85 例**（含 2 skip）） |
 | 构建 | `mvn -o -pl service/favorite/favorite-rpc -am install` ⇒ **BUILD SUCCESS** |
 | 本轮发现并修复 | **6 处 L2 语义偏差**（§2）+ **2 处实现期真 bug**（§3） |
-| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选已签字**（2026-10-25）：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK）⇒ **本域已无 🏷 候选**，见 §13.2<br>🆕 **第十五轮新增 U8**（**域内可动的最后一条**）：create / create_item 的**成功路径**未双侧对拍 ⇒ **§24.2**；盘点全表 ⇒ **§24.1** |
+| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选已签字**（2026-10-25）：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK）⇒ **本域已无 🏷 候选**，见 §13.2<br>✅ **U8（第十五轮新增 · 域内可动的最后一条）已于第十六轮闭合**：create / create_item 的**成功路径** + `ensureUserExists` 五分支 + **落库等价性**全部拿到双侧活体证据（**15 case 全 SAME**）⇒ **§25**（盘点全表 ⇒ §24.1）⇒ **域内「未知项」归零**（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认） |
 | 第九轮 | 🆕 **注释可核验性审计**（§15）—— 抓出 **3 条「断言对、锚点指错行」的真缺陷**，门禁级发现 **67 → 0**；**零行为改动** |
 | 第十轮 | 🆕 **补完 §15.8 记下的 I1 欠账**（§16）—— **153 条**内联断言补上锚点，再抓 **5 条**（4 条行号指错 + 1 条把 Java 事实误记成 Go）；**台账体检**：2 条死指针 + 3 处过期数字 + 4 处裸行号 + **6 处 RAG 侧锚点位移**已修，**6 个 Go 源文件未落点**已补记 ⇒ 新工具 `tools/ledger-lint/favorite/check-ledger-selfcheck.py`（EXIT=0） |
 | 第十二轮 | 🆕 **可动项 A + B 落地**（§19）—— 🔴 **权威读 HTTP 面的双侧活体对拍做成了**（新工具 `tools/authority-live-probe/favorite/`，**21 个 case：20 个逐字节一致 + 1 个 SKIP**）⇒ **U7 的局部活体对拍 6 项 → 7 项**；并抓出并**已修 1 条真缺陷**（200 路径少一个尾部换行字节）<br>🆕 **域外写入方盘点机检**（新工具 `tools/outbox-writer-audit/favorite/`）⇒ 本仓 **0 个域外写入方**（EXIT=0）<br>| 第十一轮 | 🆕 **三条候选签字**（§17）—— DEV-FAV-API-002 / RPC-006 / RPC-007 ⇒ **本域已无 🏷 候选**；顺带改正 §0 头部一处**过期断言**（「未做变异验证」只适用 §0–§8）<br>📌 **域内「可动项」清单**（§18）—— 🔴 **权威读 HTTP 面的双侧活体对拍其实做得了**（不需要 etcd/Kafka/Redis/user-rpc/article-rpc）· 🟡 域外写入方盘点（V7 前置）· ⬜ 跨域项收口在 `global` |
 | 第十四轮 | 🆕 **api 整域双侧活体对拍**（§22）—— 新探针 `tools/api-full-parity-probe/favorite/`：**32 case · 24 SAME / 1 SAME_CODE / 2 SAME_BODY / 4 SAME_STATUS / 1 OBS ⇒ 0 条新缺陷**；两侧 = **Go 真源**（22 个逐字节复制件 + sha256 校验）与 **RAG 两个 `java -jar` 真进程** + **共用一个 Redis**<br>🔴 **B-1 闭合并推翻第十三轮结论**（grpc-go 未知方法/服务的措辞差异 = **探针自己把 `:path` 拼成双斜杠**）<br>🔴 **2 个 RAG 侧启动阻塞已修**（`favorite-rpc`/`favorite-api` **从未被验证能以真实进程启动**）<br>🆕 **域外写入方盘点机检扩面**（`tools/outbox-writer-audit/favorite/` + `CHECKLIST.md`） |
+| 第十六轮 | ✅ **U8 销账 —— create 成功路径双侧活体对拍**（§25）—— gRPC 契约探针加**第二轮**（上游**在场**：探针自带**最小 user-rpc/article-rpc 桩**当**两侧共同上游**）⇒ **15 case 全 SAME**（0 OBS / 0 SAME_CODE）⇒ `ensureUserExists` **五条分支**首次拿到活体证据 + **落库等价性**（`favorite_folder`/`favorite_item`/`favorite_fact_outbox` 三张表投影逐字段相同 ⇒ 「公开修订冻结」被实测执行到）<br>🔴 **1 条注释断言被实测证伪并修正**（`getStatus()!=0` 的后果是 **fail-open 放行**，不是原文写的「误判封禁 5005」）⇒ **产品代码行为零改动**<br>🆕 坑档 **PIT-FAV-RPC-023/024/025**（端口撞号 / 种子显式 id 毒化序列 / bash 3.2 引号）|
 | 第十四轮收尾 | 🔴 **探针健壮性加固**（§23）—— 消除「**环境红**」假红：4 个起 PG 的探针**统一**改成 **探 TCP + 180s + 重建重试 + 容器退出即放弃**；新增守门网 `tools/probe-gate/favorite/`（含变异验证）；**零行为改动**、**0 条新漂移** |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
@@ -1849,3 +1850,145 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 ⚠️ 也正好印证了「**台账 vs 实际**」这一层的价值：
 前三个门禁（`check-ledger-selfcheck.py` 查指针 / `check-assertion-sources.py` 查注释锚点）
 **全都不会响** —— 它们查的是「台账内部自洽」，而本条错的是「**台账说的 ≠ 仓库实际的**」。
+
+## 25. 2026-10-25 第十六轮（`align/favorite` 工作树 · 承 `598bc93`）—— ✅ **U8 销账**：create 成功路径双侧活体对拍落地
+
+> 目标：把 §24.2 的 **U8**（「create / create_item 的**成功路径**从未被双侧对拍」）**关掉**。
+> ⇒ **0 条新漂移**；**1 条注释断言被实测证伪并修正**（行为零改动）；探针自身踩了 **3 个坑**。
+
+### 25.1 做法：给 gRPC 契约探针加「第二轮」（上游**在场**）
+
+| | **第一轮**（既有 · `expected.txt`） | **第二轮**（新增 · `expected-success.txt`） |
+|---|---|---|
+| **上游** | **故意不接** user-rpc / article-rpc（`Endpoints: 127.0.0.1:1` 死地址） | **接上**探针自带的**最小桩**（user-rpc + article-rpc，Go 写的） |
+| **测的分支** | 「**下游不可用**」⇒ `helper.go:103-107` ⇒ `Internal/5001` | 「**下游在场**」⇒ create **成功路径** + `ensureUserExists` 的**其余四条分支** |
+| **Go 真源 server** | 第 1 个（`ListenOn` = 端口 A） | **第 2 个**（**同一份二进制**，`UserRpc/ArticleRpc` 改指桩） |
+| **RAG 侧** | 第 1 个 Spring 上下文 | **另一次 `mvn` 调用**（第 2 个上下文） |
+| **结论** | SAME 33 / SAME_CODE 2 / OBS 1 / SKIP 0 | **SAME 15 / SAME_CODE 0 / OBS 0 / SKIP 0** |
+
+🔴 **为什么是「两个 server / 两次 maven」而不是改第一轮**：
+「下游不可用」与「下游在场」是**两条不同的契约分支**，**都要有活体证据**
+⇒ 改第一轮会把前者的证据**弄丢** ⇒ 两条分支各测各的，**冻结值互不影响**。
+
+🔴 **为什么第二轮是「另一次 `mvn` 调用」**（而不是同一个 JVM 里加第二个测试类）：
+两个 `@SpringBootTest` 的属性不同 ⇒ **Spring 上下文缓存键不同** ⇒ 同 JVM 里会起**两个**上下文
+⇒ 两个 gRPC server 端口 + 两套数据源都得错开 ⇒ 分开跑则**每次只有一个上下文**，冲突面最小。
+
+### 25.2 桩：实现、位置、以及它的边界
+
+| 项 | 值 |
+|---|---|
+| **实现** | [`tools/grpc-contract-probe/favorite/go/service/favorite/rpc/cmd/upstreamstub/main.go`](../../../../tools/grpc-contract-probe/favorite/go/service/favorite/rpc/cmd/upstreamstub/main.go)（**Go**，~200 行） |
+| **它是什么** | `UserService.GetUser` + `ArticleService.GetArticle` 的**最小实现**，按 **uid / article_id** 查一张写死的表 |
+| **它不是什么** | ⚠️ **不是 user-rpc / article-rpc 的实现** ⇒ **不在** `go/filelist.txt` 的 sha256 复制件清单里（与 `cmd/schemaprep` 同款） |
+| **两侧怎么用** | **两侧共同打它** ⇒ 两边收到的**字节相同** ⇒ 差出来的才是 favorite 自己的行为差异，不是「两个桩的差异」 |
+| **框架层** | 用**裸** `grpc.NewServer`（不走 go-zero 的 `zrpc`）⇒ 桩不带任何拦截器 / metrics / 熔断 ⇒ 测不出「桩的框架差异」 |
+
+⚠️🔴 **证据边界（读结论前必看）**：
+> **桩 ≠ 真 user-rpc / 真 article-rpc** ⇒ 本轮证明的是
+> 「**favorite 域自己在这条路径上的行为，两侧一致**」，
+> **不**证明「favorite 与 user-rpc / article-rpc 之间的交互契约」。
+> ⇒ 期望值**不能**从真 user-rpc 取，只能由「**Go 真源 favorite-rpc + 真 PG**」产出。
+> ⇒ 桩返回的 `published_revision_id` 用了 `<id>:r<N>` 这个 **favorite 侧写死的约定**
+> （Go `helper.go:159-166` / RAG `FavoriteArticleSnapshotResolver:166-207`）
+> ⇒ **不构成 article 域的任何证据**。
+
+### 25.3 结论：15 个 case **全部 SAME**（0 条 OBS / 0 条 SAME_CODE）
+
+| case | 打的是什么 | Go 侧（= 冻结值） |
+|---|---|---|
+| `s01_create_folder_ok` | `create_favorite_folder_logic.go:89-113` 正常创建 | `OK`（雪花 ID > 0） |
+| `s02_create_folder_duplicate` | `:75-87` 重名 | `ALREADY_EXISTS｜收藏夹名称已存在` |
+| `s03_create_folder_user_notfound_resp` | `helper.go:109-112` `found=false` | `NOT_FOUND｜用户不存在` |
+| `s04_create_folder_user_notfound_rpc` | `helper.go:103-106` RPC NotFound | `NOT_FOUND｜用户不存在` |
+| `s05_create_folder_user_status_absent` | `helper.go:113-116` **status 字段缺失** | `UNAVAILABLE｜系统内部错误` |
+| `s06_create_folder_user_uid_mismatch` | `helper.go:113-116` uid 不符 | `UNAVAILABLE｜系统内部错误` |
+| `s07_create_folder_user_forbidden` | `helper.go:117-120` status≠0 | `PERMISSION_DENIED｜无权限操作` |
+| `s08_create_folder_user_rpc_internal` | `helper.go:107` RPC 其它错误 | `INTERNAL｜系统内部错误` |
+| `s09_create_item_ok_post` | `create_favorite_logic.go:102-134` target=post | `OK`（title/cover 用**请求里的值**） |
+| `s10_create_item_ok_article` | `:105-120` target=article | `OK`（title/cover/revision **只**来自公开投影） |
+| `s11_create_item_ok_article_ext_cover` | `helper.go:180-202` `articleCover` 二级回退 | `OK` |
+| `s12_create_item_duplicate` | `:122-127` 同 folder+target | `ALREADY_EXISTS｜该内容已收藏` |
+| `d01_db_folder_rows` | 落库：`favorite_folder` | `rows=1;names=ParityFolder` |
+| `d02_db_item_rows` | 落库：`favorite_item` | `rows=3;items=art-1~article~art-1:r7~probe-article-title~probe-article-cover~owner=2001, …` |
+| `d03_db_outbox_rows` | 落库：`favorite_fact_outbox` | `rows=3;facts=1~0~rtw.favorite.assert~1~rtw.community.favorite~post~t-77~~assert, …` |
+
+⇒ **`ensureUserExists`（Go `helper.go:92-124`）的五条分支，现在全部有双侧活体证据**
+（此前**一条**都没有：只有源码级）。
+
+### 25.4 落库等价性：**「公开修订冻结」这条最核心的规则被实测执行到了**
+
+🔴 `d02` / `d03` 是「**写下去的东西也一样**」的**直接**证据（不只是「返回码一样」）：
+
+- `s10` / `s11` 的请求里 `title/cover` 故意写成 `req-title-ignored*`；
+- 而**落库里存的是** `probe-article-title` / `probe-article-cover*`（来自上游公开投影）
+  ⇒ **两侧都真的执行了「请求参数不得覆盖冻结修订」**（Go `create_favorite_logic.go:113-115`）；
+- `d03` 同理：`favorite_fact_outbox` 的**事实 payload 形状**（版本 / 事件类型 / schema / producer /
+  目标三元组 / 操作）两侧逐字相同 ⇒ **「业务行 + 事实行同事务落库」这条联动两侧一致**。
+
+⚠️ **投影口径（为什么进投影的列是这些）**：
+雪花 ID（`folder_id` / `favorite_id` / `id`）与「本次运行的时刻」**两侧必然不同**
+⇒ 进投影就等于**制造假红** ⇒ 只投影**契约形状**：
+`folder` 只取名字 · `item` 取 `target_id/type/revision/title/cover` + **归属收藏夹的 owner**（用 owner 代替雪花 folder_id，保住归属不变量又不引入雪花值）·
+`outbox` 取 `aggregate_version/status` + payload 的 7 个稳定字段。
+
+### 25.5 变异验证（**2 条** ⇒ 守门网不是假绿）
+
+| # | 变异点 | 期望转红的 case | 实测 |
+|---|---|---|---|
+| **M1** | `FavoriteUserGuard.ensureExists`：`!user.hasStatus()` ⇒ `user.getStatus() != 0L`（**丢掉 presence 语义**） | `s05_create_folder_user_status_absent` | ✅ **转红** —— Go `UNAVAILABLE｜系统内部错误` vs RAG **`code=OK`（并真的建出了收藏夹）**；其余 14 条仍绿 ⇒ 归因明确 |
+| **M2** | `FavoriteDomainService.createFavorite`：**不**用公开投影覆盖 title/cover | `d02_db_item_rows` | ✅ **转红** —— Go `probe-article-title` vs RAG `req-title-ignored`；其余 14 条仍绿 ⇒ 归因明确 |
+
+⇒ 两次变异都是「**只该红的那一条红**」⇒ 第二轮的 15 条断言**没有假绿**。
+
+### 25.6 🔴 一条注释断言被**实测证伪**并修正（行为零改动）
+
+`FavoriteUserGuard.ensureExists` 的注释原文写着：
+
+> ⚠️ Java 侧必须用 `hasStatus()`，不能用 `getStatus() != 0` ——
+> 后者会把「下游没给 status」**误判成「用户被封禁」，于是 PermissionDenied/5005**……
+
+🔴 **这句是错的**（M1 实测）：
+`getStatus()` 对**缺失**的 `optional int64` 返回**默认值 0** ⇒ 换成 `getStatus() != 0L` 之后
+presence 检查**变成永真** ⇒ 请求被**直接放行**（`code=OK`，**真的建出了收藏夹**），
+**不是** `PermissionDenied/5005`。
+
+⇒ **真正的漂移方向是 fail-open（放行），不是 fail-closed（误判封禁）** ——
+方向搞反的话，下一个读注释的人会把「改错的后果」记错。
+⇒ 已按实测结论改写注释（并补上 M1 的**实测锚点**与 case id）⇒ **产品代码行为零改动**。
+
+⚠️ 归类：这是**注释纠错**，不是缺陷修复 ⇒ **不计入「已修漂移」**，也不进 `docs/Intentional_Deviations/`。
+
+### 25.7 探针自身踩的 3 个坑（都记进坑档）
+
+| # | 坑 | 坑档 |
+|---|---|---|
+| 1 | **端口排除列表漏了第一轮的 `RAG_PORT`** ⇒ 桩抢到 RAG server 的端口 ⇒ 客户端打到桩上 ⇒ 报「unknown service favorite.FavoriteService」（**症状离根因很远**）⇒ 已加**互异性自检**（5 个端口去重后必须仍是 5 个） | **PIT-FAV-RPC-023** |
+| 2 | **种子显式写自增主键 `id`** ⇒ PG **不**推进序列 ⇒ 首次 INSERT 撞 `favorite_folder_pkey` ⇒ 而业务码把 23505 翻译成「名称已存在 5203」⇒ **症状伪装成重名误报** ⇒ 已改为只写业务列 | **PIT-FAV-RPC-024** |
+| 3 | **bash 3.2 的 `${arr[@]+"${arr[@]}"}` 多一个 `"`** ⇒ 整份脚本 `unexpected EOF`（报错行号指向最后那个 `)`，离真凶很远）⇒ 新增端口一律**显式传参** | **PIT-FAV-RPC-025** |
+
+⚠️ 坑 2 改的是**共用种子**（`tools/api-full-parity-probe/favorite/run.sh` 也用它）
+⇒ **两个探针都已复跑**，api 侧冻结值**不变**（响应体里本就没有 `id`）。
+
+### 25.8 ✅ **U8 销账** + 域内现状
+
+| 项 | 状态 |
+|---|---|
+| **U8** | ✅ **已闭**（本节）—— create / create_item 成功路径 + `ensureUserExists` 五分支 + 落库等价性，**全部双侧活体证据** |
+| **本轮新漂移** | **0 条** |
+| **本轮改动** | 探针（`tools/grpc-contract-probe/favorite/`）+ 1 个新测试类（`favorite-rpc`，**只读断言**）+ 1 条**注释**纠错（`favorite-rpc`）⇒ **产品代码行为零改动** |
+| **域内「可修漂移」** | **仍是 0 条**（§24.1 的盘点结论不变） |
+| **域内「未知项」** | **U8 已销账 ⇒ 归零**；剩下的只有 **B2**（V7 上线前的 6 条域外写入方人工确认 · **流程项**）⇒ 见 [`tools/outbox-writer-audit/favorite/CHECKLIST.md`](../../../../tools/outbox-writer-audit/favorite/CHECKLIST.md) |
+| **跨域** | 仍是 §24.1-C 的 5 条 + §3.5 的 `global` 收口项 ⇒ **本域只读**，不归本轮 |
+
+### 25.9 本轮全量验证（全部实测）
+
+| 项 | 结果 |
+|---|---|
+| **本域全量测试** | ✅ **BUILD SUCCESS** —— `mvn -o -pl service/favorite/favorite-{proto,common,rpc,api} -am test -Dsurefire.failIfNoSpecifiedTests=false`：<br>favorite-api **94 例**（含 1 skip）· favorite-rpc **85 例**（含 2 skip，**+1 例** = 本轮新增的成功路径探针测试类）· favorite-common **29 例** ⇒ **全绿，0 失败 0 错误** |
+| **gRPC 契约探针（两轮）** | ✅ `bash tools/grpc-contract-probe/favorite/run.sh` ⇒ **EXIT=0**<br>第一轮 36 case：SAME 33 / SAME_CODE 2 / OBS 1<br>**第二轮 15 case：SAME 15 / SAME_CODE 0 / OBS 0** |
+| **变异验证** | ✅ **2 条**（M1 `s05` / M2 `d02`）⇒ 都按预期转红 ⇒ **守门网不是假绿** |
+| **台账 vs 实际** | ✅ `tools/ledger-lint/favorite/check-ledger-vs-reality.py` ⇒ **EXIT=0** |
+| **台账自检** | ✅ `tools/ledger-lint/favorite/check-ledger-selfcheck.py` ⇒ **EXIT=0** |
+| **注释锚点审计** | ✅ `tools/assertion-audit/favorite/check-assertion-sources.py` ⇒ **EXIT=0** |
+| **共享面** | ✅ **零改动**（`docs/DRIFT/_INDEX.md` / `_MANIFEST.json` / `docs/Intentional_Deviations/_INDEX.md` / `docs/Pitfalls/_INDEX.md` / `AGENTS.md` / `docs/DRIFT/_cross/` / `service/common/**` 一律不碰） |

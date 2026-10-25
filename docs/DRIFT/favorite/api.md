@@ -22,7 +22,7 @@
 | 落地形态 | 31 个 main 文件 / **3,116 行** / **15 个 DTO** / 7 个 Service / 1 个 Controller<br>⚠️ **核对 2026-10-25（第十轮）**：行数比首轮台账记的 2,920 多 196 行 ⇒ **全部是各轮的纯注释增量**（可执行逻辑零改动）；DTO 数首轮记的 **13 是错的**（基线 `58e8314` 就是 15 个） |
 | 测试 | **8 个测试类 / 94 例全绿**（33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍** + **1 探针（自动 skip）** + **4 端口归属守门**）→ 第六轮 **+1 个测试类 / +5 例**；第十四轮收尾 **+1 个测试类 / +4 例**（`RealTomcatPortTest`） |
 | 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条已签字偏离** |
-| 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **2 条跨域待拍板**：① 容器层参数上限口径 ⇒ 收口在 `global`（与 hot 域 `DRIFT-HOTAPI-030` 同一格）；② **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，落点在 `service/common` ⇒ 同样收口在 `global`）<br>🆕 **第十五轮**：域内**唯一一条可动的业务路径缺口** = **U8**（create 成功路径未双侧对拍）⇒ 登记在 [`rpc.md`](./rpc.md) **§24.2**；盘点全表 ⇒ **§24.1** |
+| 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **2 条跨域待拍板**：① 容器层参数上限口径 ⇒ 收口在 `global`（与 hot 域 `DRIFT-HOTAPI-030` 同一格）；② **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，落点在 `service/common` ⇒ 同样收口在 `global`）<br>✅ **U8（第十五轮登记的唯一一条业务路径缺口）已于第十六轮闭合**：create 成功路径 + `ensureUserExists` 五分支 + 落库等价性全部拿到双侧活体证据（15 case 全 SAME）⇒ [`rpc.md`](./rpc.md) **§25**；盘点全表 ⇒ **§24.1** ⇒ **域内「未知项」归零**（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认） |
 | 本台账范围 | **仅 `favorite-api`**。`favorite-common` / `favorite-rpc` / `favorite-proto` 见同目录另三份台账 |
 
 ---
@@ -507,7 +507,7 @@ CheckBlacklistMiddleware: middleware.NewCheckBlacklistMiddleware(redisDB).Handle
 | 项 | 内容 |
 |---|---|
 | **本域的「可修漂移」** | **0 条** —— 本档 §2 的 4 处（L2×2 + javadoc 假断言×2 + L1×1）已修；2 条已签字（DEV-FAV-API-001/002）⇒ **无 🏷 候选** |
-| **U8（唯一可动的业务路径缺口）** | `create_folder` / `create_item` 的**成功路径**未双侧对拍 —— 本档 §4 的「双侧活体对拍（真 Go favorite-api vs RAG）」已 ✅ 闭（32 case），但**那 32 个 case 里 create 只有失败形态**（`b01`/`b02` = `downstream_absent` ⇒ 5001）⇒ 详见 [`rpc.md`](./rpc.md) §24.2 |
+| **U8** | ✅ **已闭（第十六轮）** —— 本档 §4 的「双侧活体对拍（真 Go favorite-api vs RAG）」那 32 个 case **保持不变**（**create 仍只有失败形态**：`b01`/`b02` = `downstream_absent` ⇒ 5001，**这一层不需要动**：api 面要证明的是「下游不在时 API 怎么表现」）；<br>成功路径改由 **rpc 域**的 gRPC 契约探针**第二轮**覆盖（create_folder / create_item 真成功 + `ensureUserExists` 五分支 + 落库等价性 ⇒ **15 case 全 SAME**）⇒ 详见 [`rpc.md`](./rpc.md) **§25** |
 | **跨域 2 条** | ① 容器层参数上限口径 ② 405 多一个 `Content-Type` ⇒ 收口在 `global`（本档 §3） |
 
 ⇒ **台账数字过期问题的守门网** ⇒ 新工具
