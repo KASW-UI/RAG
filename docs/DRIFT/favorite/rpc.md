@@ -1774,13 +1774,20 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 | 类别 | 条数 | 内容 | 落点 |
 |---|---|---|---|
 | **A · 已识别且可修的漂移** | **0** | 已修：rpc 6 处 L2 + 2 处真 bug；api 4 处（L2×2 + javadoc 假断言×2 + L1×1）；DDL 14 处 DEFAULT + 3 条索引（**性能非行为**）<br>已签字 **9** 条（API-001/002 · COMMON-001/002 · RPC-001/003/004/006/007）· 已撤销 2 条（RPC-002/005）· 🏷 候选 **0** | §2 / §3 · `api.md` §2 · `docs/Intentional_Deviations/favorite/` |
-| **B · 域内能补的证据缺口** | **1 + 1** | **B1 = U8**：create / create_item 的**成功路径**未双侧对拍（⇒ 见 §24.2）<br>**B2**：V7 上线前的 **6 条域外写入方人工确认**（**流程项，不是代码项**） | §24.2 · [`tools/outbox-writer-audit/favorite/CHECKLIST.md`](../../../../tools/outbox-writer-audit/favorite/CHECKLIST.md) |
-| **C · 跨域（本域只读）** | **5** | ① 容器层参数上限口径（与 hot 域 `DRIFT-HOTAPI-030` 同一格）② 405 多一个 `Content-Type`（落点 `service/common`，其 javadoc 被实测证伪）③ Go 多一个 `traceparent`（落点 `service/common` 的 `HttpMiddlewareFilter`）④ **13 个别域模块**运行时缺 `grpc-inprocess` ⇒ 可部署 jar 起不来 ⑤ `like-api` 的熔断注释 | §22.3 / §22.4 · `api.md` §3 / §9.5 ⇒ **收口在 `global`** |
+| **B · 域内能补的证据缺口** | ~~**1 + 1**~~ ⇒ **0 + 1** | **B1 = U8**：create / create_item 的**成功路径**未双侧对拍（⇒ 见 §24.2）—— ✅ **已于第十六轮闭合**（15 case 全 SAME ⇒ **§25**）<br>**B2**：V7 上线前的 **6 条域外写入方人工确认**（**流程项，不是代码项** ⇒ **仍待办，但不是「未知项」**） | §24.2 · §25 · [`tools/outbox-writer-audit/favorite/CHECKLIST.md`](../../../../tools/outbox-writer-audit/favorite/CHECKLIST.md) |
+| **C · 跨域（本域只读）** | **5** | ① 容器层参数上限口径（与 hot 域 `DRIFT-HOTAPI-030` 同一格）② 405 多一个 `Content-Type`（落点 `service/common`，其 javadoc 被实测证伪）③ Go 多一个 `traceparent`（落点 `service/common` 的 `HttpMiddlewareFilter`）④ 🔴 **别域模块**运行时缺 `grpc-inprocess` ⇒ 可部署 jar 起不来 —— ⚠️ **本条数字已被同节 §24.4 归因翻案**：真缺 = **3 个可执行应用模块**（article-rpc / like-rpc / task-rpc）+ **4 个 `-common` 库**（不算可执行模块）；原写「13 个」**是错的**（详见 §24.4） ⑤ `like-api` 的熔断注释 | §22.3 / §22.4 · `api.md` §3 / §9.5 ⇒ **收口在 `global`** |
 | **D · 库级 / 不可观测（明确「不做」）** | **3** | ① gRPC **措辞**（grpc-go 区分未知方法/未知服务，grpc-java 共用一种）② gRPC **响应头 key 集合**（grpc-java 多 `grpc-accept-encoding` / `grpc-encoding`）③ percent-encoding 的 `~` 边界差 1 字节（L0 帧层；本域 24 条文案**无 `~`** ⇒ 客户端不可观测） | §20.4 / §20.5 ⇒ 两侧 `code` 语义一致 ⇒ **属库级，不是不一致** |
 
 ⇒ **域内没有「已知但没改」的语义漂移了**；剩下的只有 **U8**（一条路径）+ **B2**（一条流程）+ 跨域与库级。
 
+> ✅ **2026-10-25 第十六轮更新**：**U8 已闭合**（⇒ §25）⇒ **B 类归零**；
+> **A 类仍是 0 条**、**C 类仍是 5 条**（本域只读 ⇒ 收口在 `global`）、**D 类仍是 3 条**（库级 / 明确不做）⇒
+> ⇒ **域内「可修漂移 = 0 条」「未知项 = 0 条」**（只剩 **B2** 这一条**流程项**）。
+
 ### 24.2 🆕 **U8** · 🔴 `create_folder` / `create_item` 的**成功路径**从未被双侧对拍
+
+> ✅ **已于 2026-10-25 第十六轮闭合** ⇒ **§25**（15 case 全 SAME + 2 条变异验证）。
+> ⚠️ 下面保留的是**第十五轮当时的原始记录**（只追加、不改上文）⇒ 读结论请以 §25 为准。
 
 | 项 | 内容 |
 |---|---|
