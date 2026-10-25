@@ -194,3 +194,17 @@ M6 的目标用例是 `<error>`（合法事实被判 BLOCKED ⇒ 收到 `FrozenE
 | ③ | 把**变异脚本**落仓到 `tools/difftest/`（建议名 `like-mutation.py`） | `tools/` **不在 L1 白名单**（L3 写 `ddl*`、L4 写 `flyway*` 前缀文件）⇒ 本 lane 只把它留在会话临时目录 `/tmp/mutation-round20.py`；**§8.3 的表已把 14 条变异的锚点与期望红点写全** ⇒ 可据此重建 |
 | ④ | §8.5 的 4 条坑建议立成 `docs/Pitfalls/global/` 条目 | `docs/Pitfalls/global/**` 在 **L5** 白名单 |
 | ⑤ | `align/global` → `do-my-own-gh` 的合并 | 由 Jason 决定时机 |
+
+### 8.8 验证记录（2026-10-25 收口）
+
+| 验证 | 命令 | 结果 |
+|---|---|---|
+| 三套守门单独跑 | `mvn -o test -pl service/like/like-rpc -am -Dtest='LikeFactDeliveryGoSemanticsGateTest,LikeFactDispatchContractGateTest'` | **17 条全绿**（14 + 3） |
+| like-rpc ＋ comment-rpc 全量 | `mvn -o test -pl service/like/like-rpc,service/comment/comment-rpc -am test` | **like-rpc 83 条 / comment-rpc 89 条** ⇒ failures=0 errors=0 **skipped=0** |
+| **全仓** | `mvn -o test -fae` | **BUILD SUCCESS**；按 surefire XML 的 `tests=` 汇总：**2213 条 / failures=0 / errors=0 / skipped=0**（273 个 XML） |
+| 变异套件 | `MUT_WT=<隔离工作树> python3 mutation-round20.py` | **14/14 全部转红**；末尾**还原校验** 6 个被改文件**逐字节一致** |
+
+⚠️ 变异跑在**隔离工作树**（`/tmp/rag-round20-mut`，已 `git worktree remove` 清理）⇒ 变异态**没有**污染 `align/global`
+（PIT-GLOBAL-020 的直接要求；本轮已因该坑误提交过一次 ⇒ `5c3b424` 修回）。
+
+**推送**：`origin/align/global` `76e227b..c27cff1` · `upstream/align/global` `43c7c8d..c27cff1`（均 fast-forward）。
