@@ -53,12 +53,18 @@ import java.util.Deque;
  * 若两者不一致，会出现「路由匹配到了但不鉴权」或「鉴权了但路由没匹配」这类错位。
  *
  * <h3>⚠️ {@code @Order}：必须在<b>所有</b>会读路径的 Filter 之前</h3>
- * 取 {@link Ordered#HIGHEST_PRECEDENCE}（与 CORS 同级，靠 bean 名稳定顺序）。
+ * 取 {@link Ordered#HIGHEST_PRECEDENCE} + 2。
+ * <p>⚠️ <b>2026-10-25（第十九轮 · global T-8）：由 {@code HIGHEST_PRECEDENCE} 改为 {@code +2}</b> ——
+ * ① 与 CORS <b>明确分开</b>（原先两者<b>同级</b> ⇒ 相对顺序靠 Bean 注册序，是隐式依赖）；
+ * ② 排在共享层 {@code GoStyleTraceparentFilter}(+3) <b>之前</b>（它要读 {@code getRequestURI()} 取 span 名）。
+ * <p>⇒ <b>与 CORS 的相对顺序不变</b>（仍是 CORS 在外、本类在内 —— 与 Go 的 router 层结构一致）。
+ * <p>⇒ 与 traceparent filter 的相对位置<b>不影响任何响应头</b>：本 Filter <b>不短路</b>
+ * （只包装 request 后继续下传）⇒ 它自己<b>不产生响应</b>。
  * 本 Filter <b>不改</b>任何其它行为，只改「路径长什么样」。
  */
 @Component
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(Ordered.HIGHEST_PRECEDENCE + 2)
 public class GoStylePathNormalizingFilter implements Filter {
 
     @Override

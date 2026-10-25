@@ -42,7 +42,10 @@ import java.io.IOException;
  * 两处都照搬：Go 侧一个看 {@code == 503}、一个看 {@code < 500}，不是笔误。
  *
  * <p><b>链上位置</b>：Go {@code engine.go:151-153} 在 Breaker 之后、Timeout 之前
- * ⇒ 本类注册在 {@link Ordered#HIGHEST_PRECEDENCE} + 3。
+ * ⇒ 本类注册在 {@link Ordered#HIGHEST_PRECEDENCE} + 6。
+ *
+ * <p>⚠️ <b>2026-10-25（第十九轮 · global T-8）：由 +3 改为 +6</b>（给 traceparent filter 让出位置，
+ * 相对顺序不变 —— 见 {@code GoStyleMaxConnsFilter} 的同款说明）。
  *
  * <p><b>为什么必须自定义、不能用现成件</b>：Spring Boot 4 / Actuator / Tomcat
  * <b>没有任何 CPU 负载降载机制</b>（Actuator 的 {@code HealthEndpoint} 只是被动上报，
@@ -57,7 +60,7 @@ import java.io.IOException;
  */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 3)
+@Order(Ordered.HIGHEST_PRECEDENCE + 6)
 public class GoStyleCpuSheddingFilter implements Filter {
 
     private final boolean enabled;

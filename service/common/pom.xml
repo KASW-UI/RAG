@@ -90,11 +90,25 @@
         <!--
             对应 Go 版 observability/*.go + communityfact/{logging,authority_http}.go 中
             go.opentelemetry.io/otel/* 的 Span / TracerProvider / TextMapPropagator 用法
+
+            🔴 2026-10-25（第十九轮 · global T-8）：**opentelemetry-api 原来手写了 1.62.0**，
+            而同模块的 opentelemetry-context / opentelemetry-sdk / opentelemetry-sdk-testing
+            都由上面的 opentelemetry-bom（1.44.0）管 ⇒ **本模块自己 classpath 上版本错配**。
+            ⇒ 实测后果（真跑，不是推断）：api 1.62.0 的 W3CBaggagePropagator 会调用
+               `TextMapGetter.getAll(carrier, key)`，而 context 1.44.0 的 TextMapGetter
+               **没有这个方法**（1.55.0 才加）⇒ 运行时
+               `NoSuchMethodError: io.opentelemetry.context.propagation.TextMapGetter.getAll`
+               ⇒ 凡是走 baggage propagator 的 extract 路径都会炸。
+            ⇒ 修法：**不写版本号**，统一由 BOM（${opentelemetry.version} = 1.44.0）管
+               —— 这本来就是本段注释写着的意图（「统一管理 OpenTelemetry 各模块版本，
+               避免子模块手写版本号」）。
+            ⚠️ **对 10 个 api 模块零影响**：它们的 otel 版本由**根 pom 的 Spring Boot BOM**
+               （1.55.0）管 ⇒ 实测 hot-api 的 otel 全家是 1.55.0（api/context/sdk 同版本）
+               ⇒ 本模块改版本**不会**改变 api 进程实际跑的版本。
         -->
         <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-api</artifactId>
-            <version>1.62.0</version>
         </dependency>
         <dependency>
             <groupId>io.opentelemetry</groupId>

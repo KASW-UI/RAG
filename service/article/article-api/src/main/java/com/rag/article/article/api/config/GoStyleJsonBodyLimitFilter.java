@@ -69,13 +69,13 @@ import java.io.IOException;
  * Java 侧由 {@code GoStyleJsonBodyConverter.goReadsBody} 已经同样处理（返回 null → 零值 DTO）。
  *
  * <h3>{@code @Order} 的真实作用是「在 Filter 之间排序」</h3>
- * 必须<b>在 {@code GoStyleMaxBytesFilter}(+6) 之后</b>：先让 10 MiB 的闸门按 Go 的链序
+ * 必须<b>在 {@code GoStyleMaxBytesFilter}(+8) 之后</b>：先让 10 MiB 的闸门按 Go 的链序
  * （MaxBytes 在本层<b>之外</b>）拒绝，超出 MaxBytes 的请求得到<b>裸 413</b>而不是 400。
- * 取 {@code HIGHEST_PRECEDENCE + 7}。
+ * 取 {@code HIGHEST_PRECEDENCE + 9}。
  */
 @Component
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-@Order(Ordered.HIGHEST_PRECEDENCE + 7)
+@Order(Ordered.HIGHEST_PRECEDENCE + 9)
 public class GoStyleJsonBodyLimitFilter implements Filter {
 
     /**

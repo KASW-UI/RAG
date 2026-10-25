@@ -1,7 +1,10 @@
 <!-- @new 2026-10-25 · global 收口域 · 由 `align/global` 工作树产出 + 基线 commit 58e8314 -->
-<!-- 核对日期：2026-10-25 · 本轮只做「复核 + 定位」，未改动 common 代码 -->
+<!-- 核对日期：2026-10-25（第十九轮 · 第二轮）· 本轮**改了共享层代码**：新增 `GoStyleTraceparentFilter`（T-8 落地）
+     + 统一 `service/common` 的 OpenTelemetry 版本（修运行时 `NoSuchMethodError`）
+     + **T-8 的「链上位置」定案**（9 个 filter 的 `@Order` 整体后移，相对顺序不变）
+     ⇒ 详见 §一·T-8 / §一·T-12 与文末变更记录 -->
 
-# global · common 尾巴台账（T-1 ~ T-10）
+# global · common 尾巴台账（T-1 ~ T-12）
 
 > **归属**：`global` 收口域的「common-tails」议题档（§5.3b）。
 > **对象**：**别的域**的漂移，但**修法落在** `service/common` 的共享类里 ⇒ 不是 `common` 域自身的语义漂移
@@ -327,13 +330,107 @@ Tomcat 的 `OutputBuffer.appendByteArray`（`org/apache/catalina/connector/Outpu
 | **修法** | 在 `service/common` 的 HTTP 入口（`HttpMiddleware` 或一个专门的 filter）用**当前的 server span 的 SpanContext** 做 W3C `TraceContext` 注入 ⇒ 写 `traceparent`（+ `tracestate`）响应头<br>⇒ **改 1 处 ⇒ 10 个 api 全生效 ⇒ 不碰任何 api 模块的代码** |
 | **⚠️ 注意** | Go 注入的是**当前 server span**（不是入向的 parent）⇒ RAG 侧必须对齐到「**本请求的 server span**」，不能直接回显入向的 `traceparent` |
 
+#### T-8 · ✅ **已修（2026-10-25 第十九轮落地）** —— 响应头补 W3C `Traceparent`
+
+**落点**：`service/common` 新增 `com/rag/common/http/GoStyleTraceparentFilter.java`
+（`@Component` + `@Order(HIGHEST_PRECEDENCE + 3)` ⇒ **10 个 api 全生效，零 api 代码改动**）。
+
+**🔴 链上位置是「承重」的，不是随手挑的** —— 三条约束各有 Go 出处，缺一条就产生字节级差异：
+
+| # | 约束 | Go 出处（**消费点**，§3.3.1） | 违反后的差异 |
+|---|---|---|---|
+| ① | **CORS 必须在本类之前** | `rest/internal/cors/handlers.go:53-67` 的 `cors.Middleware` 对 `OPTIONS` **短路**（`:61-63` 写 204、**不调 next**）⇒ 预检响应**不经过 router** ⇒ **不经过 TraceHandler** | 预检响应**多带**一个 `Traceparent`（Go 没有） |
+| ② | **MaxConns/Breaker/Shedding 必须在本类之后** | `rest/engine.go:135` 的 `TraceHandler` 是 native middleware 链**第一个**（`:146/:149/:152` 才是 MaxConns/Breaker/Shedding） | 被拒成 503 的响应**丢头**（Go 带着） |
+| ③ | **必须在 `HttpMiddlewareFilter` 之前** | `HttpMiddleware.java:269` 在**容器线程**抓 `Context.current()`（`parentOtelCtx`），`:312` 在 worker 线程 `parentOtelCtx.makeCurrent()` 复原 ⇒ 它给 span 打的属性（`:358/:455/:485` 的 `Span.fromContext`）落在「**进入 HttpMiddleware 时当前的那个 span**」上 | 属性全落到 no-op span 上（本类的 server span 不 current） |
+
+⇒ **实测链序**（`article-api` 真容器，`ArticleApiAssemblyWiringTest` 钉死）：
+
+```
+ArticleGoStyleCorsFilter(+1) → GoStylePathNormalizingFilter(+2) → GoStyleTraceparentFilter(+3)
+  → GoStyleMaxConnsFilter(+4) → GoStyleBreakerFilter(+5) → GoStyleCpuSheddingFilter(+6)
+  → HttpMiddlewareFilter(+7) → GoStyleMaxBytesFilter(+8) → GoStyleJsonBodyLimitFilter(+9)
+```
+
+⚠️ **相对顺序没变，变的是整块的取值**（保护层四件套 + `HttpMiddleware` + `MaxBytes` **整体后移**）
+—— 因为要给本类腾出「CORS 之后、MaxConns 之前」这个**整数位**。
+⚠️ 顺带修掉一个**隐式依赖**：原先 CORS 与 `path.Clean` **同为** `HIGHEST_PRECEDENCE`
+⇒ 两者相对顺序靠 **Bean 注册序** ⇒ 现在**各自显式取值**（`+1` / `+2`）⇒ 由 `@Order` 表达。
+⚠️ `path.Clean` 与本类的相对位置**不影响任何响应头**：RAG 的 `GoStylePathNormalizingFilter`
+**不短路**（只包装 request 后继续下传）⇒ 它自己**不产生响应**。
+
+**🔴 根因不是「忘了写一行」，而是「RAG 侧压根没有 server span」**：
+全仓**没有** `micrometer-tracing-bridge-otel`、也没有 `opentelemetry-sdk-extension-autoconfigure`
+⇒ Spring Boot 的 tracing 自动配置**不生效** ⇒ `GlobalOpenTelemetry.get()` 是 **no-op**
+⇒ `Span.fromContext(ctx).getSpanContext()` 恒为 **INVALID**
+⇒ **任何**「从当前上下文取 traceparent 再写出去」的实现都写不出东西。
+⇒ 故本类自带一个**私有** `SdkTracerProvider`（**刻意不注册成全局**，理由见类注释），
+每个请求起一个 `SpanKind.SERVER` 的 span，再注入。
+
+**对齐的三条语义**（对着 go-zero `rest/handler/tracehandler.go:47-63` 逐条）：
+
+| # | 语义 | Go 出处 | 本实现 |
+|---|---|---|---|
+| ① | 注入的是**当前 server span**，**不是**回显入向 parent | `tracer.Start(ctx, …)` ⇒ `propagator.Inject(spanCtx, …)` | `PROPAGATOR.inject(Context.current(), …)`（scope 内的当前 context） |
+| ② | 注入在**业务执行之前** ⇒ 任何状态码都带 | Inject 在 `next.ServeHTTP` 之前 | 在 `chain.doFilter` 之前 `setHeader` |
+| ③ | trace-id **沿用入向**（server span 是入向的子 span） | `propagator.Extract(r.Context(), …)` → `tracer.Start(ctx, …)` | `PROPAGATOR.extract(...)` → `.setParent(parent)` |
+
+**🔴 头名大小写**：Go 的 `propagation.HeaderCarrier.Set` 走 `textproto.MIMEHeader.Set`
+⇒ 键被 canonical 成 **`Traceparent`**；而 OTel Java 的 propagator 写的是**小写** `traceparent`，
+Tomcat 又**原样**发出 ⇒ 直接照抄会得到 `traceparent: …`（与 Go **字节级不一致**）
+⇒ 本类的 setter 主动 canonical 化（**变异 M3 实测**：不 canonical 化时 wire 上就是小写）。
+
+**✅ 守门**（真 Tomcat + **裸 socket**，看**原始字节**）：`service/common` 的
+`GoStyleTraceparentFilterTest`（**6 条**）——
+trace-id 沿用 / span-id 换新（**证明不是回显**）/ 采样位随入向（`ParentBased` 语义）/
+无入向也生成 / 错误状态码也带 / 头名 canonical。
+**🟢 变异 3 条全部转红且红在目标断言上**：M1 去注入 · M2 改成回显入向 · M3 去 canonical 化。
+
+**✅ 守门（第二轮 · 链上位置）**：`article-api` 的 `ArticleApiAssemblyWiringTest`
+（**+3 条**，共 13 条）——
+① 完整链序**逐条钉死**（含本类的位置）· ② `cors < traceparent < maxConns` **成对断言** ·
+③ **OPTIONS 预检 204 不带 `Traceparent`**（真容器 ⇒ 证明 CORS 确实在本类之前）·
+④ 正常请求的响应**带** `Traceparent`（证明共享层 filter 真进了 api 的链，§3.3）。
+**🟢 变异 2 条全部转红且红在目标断言上**：
+**M4** 把本类挪到 `MaxConns` **之后**（`+3 → +10`）⇒ 红在「traceparent 必须在 MaxConns 之前」；
+**M5** 把 CORS 挪到本类**之后**（`+1 → +10`）⇒ 红在「OPTIONS 预检**不带** Traceparent」。
+⚠️ 这两条**只有 article-api 的守门能抓住** —— `service/common` 的 6 条**全绿**
+（它们手工把 filter 挂进 Tomcat，**看不见 `@Order`**）⇒ 这正是「链序断言必须放在**真容器**里」的例证。
+
+**⚠️ 一并修掉的共享层缺陷**：`service/common/pom.xml` 里 `opentelemetry-api` 被**手写成 1.62.0**，
+而同模块的 context/sdk/sdk-testing 由 BOM（1.44.0）管 ⇒ **本模块 classpath 版本错配**
+⇒ 实测运行时 `NoSuchMethodError: TextMapGetter.getAll`（该方法 1.55.0 才有）
+⇒ 已统一由 BOM 管（**对 10 个 api 零影响**：它们的 otel 版本由根 pom 的 Boot BOM 1.55.0 管）。
+
+**⚠️ 边界（本轮不碰，已记账）**：
+
+1. **trace 导出链路在 RAG 侧整体缺失**（Go 导出到 jaeger；RAG 侧**没有任何装配** ——
+   ⚠️ **措辞订正（2026-10-25 实测 `mvn dependency:tree -pl service/article/article-api`）**：
+   `opentelemetry-exporter-otlp:1.55.0` **其实已在 api 的 classpath 上**（Boot BOM 带进来的）
+   ⇒ **不是「jar 都没装」，而是「装了 jar 但没人装配它」**
+   ⇒ 真正缺的是 **`opentelemetry-sdk-extension-autoconfigure`**（Boot 的 tracing 自动配置所在模块）
+   ⇒ ⇒ **一句话**：缺的是**装配**，不是**依赖**
+   ⇒ 新登记 **T-11**（见下）—— **另一条独立缺口**，本轮只闭合「响应头」这一维。
+2. **容器级 404**（Tomcat error valve 生成的错误页）**不经过 filter 链** ⇒ 任何 filter 都加不上头
+   ⇒ **不构成**与 Go 的漂移（Go 的 404 由链内的 `notFoundHandler` 生成）。
+3. span 名：Go 用**路由 pattern**，本类用请求 URI ⇒ span 名**不可 wire 观察** ⇒ 本轮不追求一致。
+4. 🔴 **「方法不匹配」这个出口，RAG 比 Go 多带一个 `Traceparent`** ⇒ 新登记 **T-12**（见下）。
+   ⚠️ 这是**本轮修 T-8 才产生的新差异**（修之前 RAG 压根没有这个头 ⇒ 不存在差异）
+   ⇒ **T-8 与 T-12 必须一起读**：T-8 把「绝大多数响应」补齐了，T-12 是剩下那一个出口的残留。
+
+**📌 交各域 owner 的账**：
+
+| 域 | 事项 |
+|---|---|
+| **favorite** | 代码 / 配置 / 测试 / 台账**全零改动**；但共享层生效 ⇒ favorite 的响应也**多带**了 `Traceparent`（**不是新漂移**：Go 的 favorite api 同样挂 `TraceHandler`）⇒ favorite 也**同吃 T-12** ⇒ 仅需知悉 |
+| **article** | ⚠️ **本轮改到了 `article-api` 的代码**：它的 6 个 filter 的 `@Order` **数值变了**（**相对顺序不变**）+ 中间插入 `GoStyleTraceparentFilter` ⇒ **`docs/DRIFT/article/api.md` ~`:1410-1435` 的「真容器实测链序（2026-10-24）」快照已过期**（数值全变、多了 traceparent、且「前两位同级 ⇒ 靠 Bean 注册序定序」**已不成立**）⇒ ⚠️ **该文件不在 global 的写权内** ⇒ **只记账，不改** ⇒ 请 article owner 下次动该域时一并刷新 |
+
 ⇒ **三条的处置汇总**：
 
 | 条目 | 性质 | 落点 | 能否现在做 |
 |---|---|---|---|
 | **T-6** | 真漂移 | `service/common`（Spring converter） | 🟡 **能，但要先撤销 hot 域 `SD-HOT-API-006`**（用户决策） |
 | **T-7** | **框架限制** | **Tomcat 容器层** | ❌ **不能**（`service/common` 够不着）⇒ 只能签字认账 |
-| **T-8** | 真漂移 | `service/common`（HTTP 入口注入） | ✅ **能，且不需要任何拍板** |
+| **T-8** | 真漂移 | `service/common`（HTTP 入口注入） | ✅ **第十九轮已落地**（不需拍板） |
 
 ⚠️ ⇒ **原台账「三条同落点 ⇒ 一次拍板一次改」的处置方式作废** ——
 **三条分属三个层次，其中两条可修、一条不可修** ⇒ **必须拆开做**。
@@ -387,6 +484,42 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 
 ---
 
+### T-11 🔴 **第十九轮新发现 · 未修** —— trace **导出**链路在 RAG 侧整体缺失（span 建了也无人收）
+
+> **本轮（第十九轮）只登记、未修** —— 它是**独立于 T-8 的一条缺口**，修它要装 exporter + 生命周期，
+> 属于另一件事（§5.3 的「不擅自扩大 scope」）。
+
+| | 内容 |
+|---|---|
+| **Go 侧** | `go-zero@v1.10.2/core/trace/agent.go` 的 `startAgent` 装**全局** `TracerProvider`（OTLP exporter + `Sampler`）⇒ `rest` 的 `TraceHandler` 建的 span **真的被导出**到 jaeger<br>Go 各 api yaml：`Telemetry: { Name: …, Endpoint: jaeger:4317, Sampler: 1.0, Batcher: otlpgrpc }` |
+| **RAG 侧（实测）** | ① 全仓**无** `micrometer-tracing-bridge-otel`、**无** `opentelemetry-sdk-extension-autoconfigure` ⇒ Spring Boot 的 tracing 自动配置**不生效**<br>② `GlobalOpenTelemetry.get()` 是 **no-op** ⇒ 既有代码里所有 `GlobalOpenTelemetry.get().getTracer(...).spanBuilder(...)`（`RpcInterceptor` / `MqConsumer` / `AdminSpans` / `MessageDomainService` / `UserDomainService` / `FavoriteFactDispatchScheduler`）建出来的 span **全部无效**（`SpanContext` 为 INVALID）⇒ **既没有 span，也没有导出**<br>③ 各 api yaml 里 `otel: { exporter.otlp.endpoint: jaeger:4317, traces.sampler: parentbased_always_on }` **一直是对的** ⇒ 缺的只是**装配**（自动配置 / exporter / 关闭钩子） |
+| **可观察差异** | Go 的 trace 在 jaeger 里**可见**；RAG 的 trace **不存在** ⇒ 线上排障时「没有 trace」这件事两侧表现不同 |
+| **本轮做了什么** | **只**闭合 T-8 的「**响应头**」那一维：`GoStyleTraceparentFilter` 自带**私有** `SdkTracerProvider`（**不配任何 SpanProcessor**）⇒ span 的 `SpanContext` **有效** ⇒ 响应头能写；但 **span 不会被导出** |
+| **为何不全局注册** | `GlobalOpenTelemetry.set(...)` 全局只能设一次 ⇒ 一旦本轮就设，**同 JVM 内**所有 `GlobalOpenTelemetry.get().getTracer(...)` 的调用方行为**全部改变**（从 no-op 变真建 span）⇒ 那是**另一件事**，不该由 T-8 带出来 |
+| **建议修法（下一轮）** | ① 在 `service/common` 装一个**全局** `OpenTelemetrySdk`（`ParentBased(TraceIDRatioBased(1.0))` + OTLP exporter + `BatchSpanProcessor`）⇒ 接管 yaml 的 `otel.*` 配置<br>② 补 `SpanProcessor` 的**关闭钩子**（`ObservabilityLifecycle` 已有 `@PreDestroy` 收口线程池的位置）<br>③ ⚠️ 装了之后 **rpc 侧**（`RpcInterceptor` 等）的 span 会从 no-op 变真 ⇒ **必须配套守门**（否则那条变更没人盯）<br>④ ⚠️ **favorite 域零改动**：共享层装配 ⇒ 10 个 api 全部受影响 ⇒ 按 §5.3c 记账并告知 owner |
+| **证据边界** | 本条**未实测**「RAG 侧真的没有 span 被导出」—— 依据是**依赖树 + `GlobalOpenTelemetry` 无 provider**（静态取证）。⚠️ 若某处**运行时**装过 provider（进程启动脚本 / 环境变量），本条结论需重判 ⇒ **下一轮第一步应是用真进程验证** |
+
+---
+
+### T-12 🔴 **第十九轮新发现 · 未修** —— 「方法不匹配」这个出口，RAG 比 Go **多带**一个 `Traceparent`
+
+> **本轮（第十九轮）只登记、未修** —— 它是 **T-8 落地后才暴露的残留**（修之前 RAG 压根没有这个头
+> ⇒ 不存在差异）⇒ **T-8 与 T-12 必须一起读**。
+
+| | 内容 |
+|---|---|
+| **Go 侧的三个出口** | `go-zero@v1.10.2/rest/router/patrouter.go:56-72` 的分发有**三条**出口，**只有前两条经过 TraceHandler**：<br>① **路由命中** ⇒ 路由链（`TraceHandler` 在 `engine.go:135`）⇒ **带**<br>② **路径都没注册** ⇒ `pr.handleNotFound` ⇒ `engine.notFoundHandler`（`engine.go:245-251`，**也挂** TraceHandler）⇒ **带**<br>③ **路径命中、方法不对** ⇒ `pr.notAllowed`（article 侧 = `cors.NotAllowedHandler`）或 `w.WriteHeader(405)` ⇒ **两条都在 router 层 ⇒ 都不经过 TraceHandler ⇒ 不带** |
+| **② 为什么 Go 的 404 也带**（易误判点） | `rest/server.go:58` 的 `NewServer` **默认** `opts = append([]RunOption{WithNotFoundHandler(nil)}, opts...)` ⇒ **每个 api 都装上了 notFoundHandler** ⇒ 未注册路径的 404 **经过**它 ⇒ 带 traceparent。<br>⚠️ 与之相对，**方法不匹配**走的是 `SetNotAllowedHandler`，**全仓 10 个 api 只有 article 注册**（`article/api/article.go:33` 的 `rest.WithCors()` 顺带注册）⇒ 其余 9 个 api 走**默认 405** ⇒ **同样在 router 层 ⇒ 同样不带** |
+| **RAG 侧** | 出口③ 落在 `DispatcherServlet` **内**（`article-api` 的 `GlobalExceptionHandler.handleMethodNotSupported` ⇒ 404 空 body）⇒ filter 链**早已跑完** ⇒ 共享层的 traceparent filter **已经注入过头** ⇒ **多带一个 `Traceparent`** |
+| **实测证据** | ✅ `ArticleApiAssemblyWiringTest.methodNotAllowedCarriesTraceparentUnlikeGo`（**真 Tomcat**）：`GET /v1/article`（该路径只注册了 POST）⇒ **404 + 空 body + 带 `Traceparent`** ⇒ 与 Go 的同一路径（404 空 body、**无** `Traceparent`）**只差这一个头** |
+| **性质** | 🔴 **真字节级差异**（RAG **多**一个头 ⇒ 属「更严/更全」那一侧，**不影响任何业务语义**）<br>🔴 **根因是「出口所在层级不同」**（router 层 vs DispatcherServlet 内）⇒ **共享层改不动**：filter 阶段**无法知道**「这个请求最终会不会落到方法不匹配」—— 那要等 `RequestMappingHandlerMapping` 匹配完才知道，而那时响应已经开始写了 |
+| **修它的代价** | 要么在共享层**自建一份路由表**（与各域的 controller 重复维护 ⇒ 新的漂移源）· 要么让**各域把路由元数据**暴露给共享层（⇒ 改 10 个域的代码，且**跨域改动**）⇒ **代价远超「多一个头」的收益** ⇒ 建议**签字认账** |
+| **影响面** | **10 个 api 全适用**（共享层）⇒ 但**只影响「方法不匹配」这一个出口**；<br>**404（路径未注册）与所有正常响应都与 Go 一致**（都带）⇒ 别把它读成「RAG 的 traceparent 一律多一个」 |
+| **守门** | ✅ `ArticleApiAssemblyWiringTest.methodNotAllowedCarriesTraceparentUnlikeGo` —— **characterization test**（钉的是**实测现状**，不是 Go 的事实；`@DisplayName` 已明说「残留差异」） |
+| **证据边界** | ✅ Go 侧三出口的**控制流逐行取证**（`patrouter.go:56-72` + `server.go:58` + `engine.go:135/245-251`）· ✅ RAG 侧**真 Tomcat 实测**<br>⚠️ **未做双侧活体对拍**（本轮未起 Go 侧进程）⇒ 「Go 的该响应无 traceparent」是**源码级**结论；如需升级为活体证据，须在 Go 侧起 api 实测同一请求 |
+
+---
+
 ## 二、本轮复核汇总表
 
 | # | 条目 | 复核前 | 复核后 | 本轮动了？ |
@@ -398,9 +531,11 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 | T-5 | MaxConns 作用域 | 🔴 仍开放 | ✅ **已签字**（同 T-2）⇒ 移出本档 | ✅ 指针 |
 | T-6 | 成功/失败 Content-Type | 🟡 仍 OPEN | ✅ **归因已定位**（落点 = Spring converter，**可 Go 等价修**）· 🟡 **被 hot 域 `SD-HOT-API-006` 挡住**（其「不可逐字节复刻」理由已被本仓证伪） | ✅ 归因 |
 | T-7 | 状态行 reason phrase | 🟡 仍 OPEN | 🔴 **框架限制（真）** —— 归因在 **Tomcat `Http11OutputBuffer`（容器层）** ⇒ `service/common` 够不着 | ✅ 归因 |
-| T-8 | 缺 Traceparent | 🟡 仍 OPEN | ✅ **归因已定位**（Go = go-zero `rest/handler/tracehandler.go` 的 `propagator.Inject`；RAG 落点 = `service/common` HTTP 入口）⇒ **可 Go 等价修** | ✅ 归因 |
+| T-8 | 缺 Traceparent | 🟡 仍 OPEN | ✅ **第十九轮已落地**（共享层新增 `GoStyleTraceparentFilter` ⇒ 10 个 api 全生效、零 api 代码改动）⇒ 🟢 **真 Tomcat + 裸 socket 守门 6 条 + 变异 3 条全红**（含「不是回显入向」「头名 canonical」）<br>⇒ 🟢 **第二轮（链上位置）**：`article-api` 真容器 **+3 条**（完整链序钉死 / `cors < traceparent < maxConns` 成对断言 / **OPTIONS 预检 204 不带 `Traceparent`**）+ **变异 M4/M5 全红**（红在目标断言上）⇒ ⚠️ 这两条**只有 article-api 的守门能抓**（common 那 6 条看不见 `@Order`） | ✅ **已修** |
 | T-9 | 熔断计数键 | ⬜ 待复核 | ✅ **已修**（键补 target 前缀）+ §3.2 缺陷一并订正 | ✅ |
 | T-10 | UserDomainService 假断言 | ❌ 未销账 | ✅ **已闭环** | ✅ |
+| **T-11** | **trace 导出链路整体缺失** | 🟢 **此前无人登记** | 🔴 **第十九轮新发现，未修**（RAG **缺装配**：`opentelemetry-sdk-extension-autoconfigure` 不在 ⇒ Boot 的 tracing 自动配置不生效 ⇒ span 建了也无人收；⚠️ exporter 的 **jar 是在的**，缺的是装配）⇒ 见 §一·T-11 | 🟢 **登记** |
+| **T-12** | **「方法不匹配」出口多带 `Traceparent`** | 🟢 **此前无人登记** | 🔴 **第十九轮新发现（随 T-8 落地暴露），未修**（Go 的该出口在 router 层 ⇒ 不带；RAG 在 DispatcherServlet 内 ⇒ 多带）⇒ 见 §一·T-12 | 🟢 **登记** |
 
 ⇒ **首轮净效果**：10 条里 **1 条闭环**（T-10）· **3 条从「待复核」升级为「已确认的真漂移」并补齐 Go 出处**
 （T-1 / T-2+T-5 / T-9）· **6 条维持原状**（未展开）。
@@ -408,6 +543,18 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 ⇒ **第三轮净效果（2026-10-25）**：**T-1 残余 ① / T-9 / T-4 全部落地**
 ⇒ 10 条里 **7 条已闭环或已签字**（T-1 + 残余① / T-2 / T-3 / **T-4 观测面 + 资源面** / T-5 / T-9 / T-10）·
 **T-6 / T-7 / T-8 维持 🟡 仍 OPEN**（同落点，待用户拍板）。
+
+⇒ **第十九轮净效果（2026-10-25）**：**T-8 落地**（真 Tomcat + 裸 socket 守门 6 条 + 变异 3 条全红）
+⇒ 10 条里 **8 条已闭环或已签字** ⇒ **T-6 / T-7 维持**（T-6 需先撤销 hot 域签字 ⇒ 用户决策；T-7 真框架限制）
+⇒ **新增 T-11**（trace 导出链路整体缺失，**本轮只登记、未修**）。
+
+⇒ **第十九轮 · 第二轮净效果（2026-10-25）**：**T-8 的「链上位置」定案**
+⇒ ① 🔴 **链上位置是承重的**（不是随手挑的）：CORS **之前** / MaxConns·Breaker·Shedding **之后** /
+`HttpMiddleware` **之前** —— 三条约束各有 Go 出处 ⇒ 整块 filter 的 `@Order` 整体后移
+（**相对顺序不变**），并顺带修掉「CORS 与 path.Clean 同级 ⇒ 靠 Bean 注册序定序」的**隐式依赖**
+⇒ ② 🟢 `article-api` 真容器 **+3 条**守门 + **变异 M4/M5 全红**（红在目标断言上）
+⇒ ③ 🔴 **新增 T-12**（「方法不匹配」出口多带一个 `Traceparent` —— **随 T-8 落地才暴露的残留**，
+**本轮只登记、未修**）⇒ **T-8 与 T-12 必须一起读**。
 
 ---
 
@@ -420,7 +567,8 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 | ~~2~~ | ~~**T-9**~~ | `service/common/protection/GoStyleGrpcClientBreakerInterceptor.java` | ✅ **已完成**（2026-10-25 第三轮）⇒ 身份源 = `Channel.authority()` |
 | ~~3~~ | ~~**T-2 / T-5**~~ | —— | ✅ **已签字**（`SD-2026-10-25-01`）⇒ 移出本档 |
 | ~~4a~~ | ~~**T-4**~~ | `service/common/observability/HttpMiddleware.java` | ✅ **已闭环**（第三轮观测面 + 第十轮资源面方案⑤）⇒ 偏离签字 `SD-2026-10-25-04`（2026-10-25 06:40 用户再次明确签字）⇒ 🟡 官方路径 = **可选后续优化**，不返工 |
-| 4b | **T-8**（先做，不需拍板） | `service/common`（HTTP 入口注入 W3C traceparent） | ✅ **归因已定位 ⇒ 可 Go 等价修** |
+| ~~4b~~ | ~~**T-8**~~（先做，不需拍板） | `service/common`（HTTP 入口注入 W3C traceparent） | ✅ **已完成**（2026-10-25 第十九轮 · 含第二轮「链上位置」定案）⇒ 残留见 **T-12** |
+| 4b′ | **T-12** | 共享层**改不动**（出口层级差异）⇒ 建议**签字认账** | ⚠️ 修它要动 **10 个域**（暴露路由元数据）或在共享层**自建路由表** ⇒ 代价远超收益 |
 | 4c | **T-6** | `service/common`（Spring converter 写原始 Content-Type 字符串） | 🟡 可修，**但要先撤销 hot 域 `SD-HOT-API-006`**（用户决策） |
 | 4d | **T-7** | **Tomcat 容器层** | ❌ 不可修 ⇒ 只能签字认账 |
 
@@ -433,6 +581,8 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | ✅ **第十九轮 · 第二轮（T-8 链上位置定案 + T-12 登记）** —— ① 🔴 **链上位置是「承重」的**：三条约束各有 Go 出处 —— **CORS 必须在本类之前**（`rest/internal/cors/handlers.go:61-63` 的 `cors.Middleware` 对 `OPTIONS` **短路** ⇒ 预检**不经过 router** ⇒ **不经过 TraceHandler** ⇒ Go 的 204 预检**没有** traceparent）、**MaxConns/Breaker/Shedding 必须在它之后**（`rest/engine.go:135` 的 TraceHandler 是 native 链**第一个** ⇒ 503 响应**也带**头）、**必须在 `HttpMiddlewareFilter` 之前**（`HttpMiddleware.java:269` 在容器线程抓 `Context.current()`、`:312` 在 worker 线程复原 ⇒ 它给 span 打的属性落在「进入时当前的那个 span」上）⇒ 整块 filter 的 `@Order` **整体后移**（CORS `+1` / path.Clean `+2` / **traceparent `+3`** / MaxConns `+4` / Breaker `+5` / Shedding `+6` / HttpMiddleware `+7` / MaxBytes `+8` / JsonBodyLimit `+9`）⇒ **相对顺序不变**；⚠️ 顺带修掉「CORS 与 path.Clean **同级** ⇒ 靠 Bean 注册序定序」的**隐式依赖**（现各自显式取值）② 🟢 `article-api` 真容器 **+3 条**守门（完整链序钉死 / `cors < traceparent < maxConns` 成对断言 / **OPTIONS 预检 204 不带 `Traceparent`** / 正常请求带 `Traceparent`）③ 🟢 **变异 M4/M5 全红且红在目标断言上**（M4 挪到 MaxConns 之后 ⇒ 红在「必须在 MaxConns 之前」；M5 CORS 挪到本类之后 ⇒ 红在「预检不带 Traceparent」）⇒ ⚠️ **这两条只有 article-api 的守门能抓**（`service/common` 那 6 条**看不见 `@Order`** ⇒ 全绿）④ 🔴 **新增 T-12**（「方法不匹配」出口 RAG **多带**一个 `Traceparent`）⇒ 随 T-8 落地才暴露 ⇒ **T-8 与 T-12 必须一起读**；⚠️ 顺带查清一个**易误判点**：Go 的「未注册路径 404」**也带** traceparent（`rest/server.go:58` 的 `NewServer` **默认** prepend `WithNotFoundHandler(nil)`）⇒ T-12 **只**涉及「方法不匹配」这一个出口 ⑤ ✅ **全仓 `mvn -o test -fae` BUILD SUCCESS**（36 模块 / 15:11 / surefire 汇总 **2191 条 0 失败**）⇒ ⚠️ **第一轮那次全仓构建不算数**（构建**进行中**改了源码 ⇒ 绿的是**旧字节码** ⇒ `stat` 比对 class/source mtime 才发现）⇒ **重跑了一遍**才算数（教训已并入 `PIT-GLOBAL-019` 的第 4 种形态） |
+| 2026-10-25 | ✅ **第十九轮（T-8 落地）** —— ① ✅ **T-8 落地**（`service/common` 新增 `GoStyleTraceparentFilter` ⇒ **10 个 api 全生效、零 api 代码改动**）：🔴 **根因不是「忘了写一行」，而是 RAG 侧压根没有 server span**（无 `micrometer-tracing-bridge-otel` / 无 otel 自动配置 ⇒ `GlobalOpenTelemetry.get()` 是 no-op ⇒ `SpanContext` 恒 INVALID ⇒ **任何**「从当前上下文取 traceparent 再写出去」的实现都写不出东西）⇒ 故自带**私有** `SdkTracerProvider`（**刻意不注册成全局**：全局只能设一次，一设就改变同 JVM 内所有 `GlobalOpenTelemetry.get().getTracer(...)` 调用方的行为 ⇒ 那是另一件事）② ✅ **对齐 Go 的三条语义**：注入的是**当前 server span**（**不是**回显入向 parent）/ 注入在**业务执行之前**（任何状态码都带）/ trace-id **沿用入向** ③ 🔴 **头名大小写**：Go 的 `propagation.HeaderCarrier.Set` 走 `textproto.MIMEHeader.Set` ⇒ canonical 成 **`Traceparent`**；OTel Java 写的是**小写**且 Tomcat **原样**发出 ⇒ 照抄会**字节级不一致** ⇒ 本类 setter 主动 canonical 化（**变异 M3 实测** wire 上就是小写）④ 🟢 **守门 6 条**（**真 Tomcat + 裸 socket**，看**原始字节**）+ **变异 3 条全部转红且红在目标断言上**（M1 去注入 / M2 改回显 / M3 去 canonical）⑤ 🔴 **一并修掉的共享层缺陷**：`service/common/pom.xml` 的 `opentelemetry-api` 被手写成 **1.62.0** 而 context/sdk 由 BOM **1.44.0** 管 ⇒ **本模块 classpath 版本错配** ⇒ 实测运行时 `NoSuchMethodError: TextMapGetter.getAll`（该方法 1.55.0 才有）⇒ 已统一由 BOM 管（**对 10 个 api 零影响**：它们的 otel 版本由根 pom 的 Boot BOM 1.55.0 管）⑥ 🟢 **新增 T-11**（**trace 导出链路整体缺失** —— RAG **缺装配**（`opentelemetry-sdk-extension-autoconfigure` 不在 ⇒ Boot 的 tracing 自动配置不生效；⚠️ exporter 的 jar 是在的）⇒ span 建了也无人收 ⇒ **本轮只登记、未修**）⑦ ⚠️ **边界**：**容器级 404**（Tomcat error valve）**不经过 filter 链** ⇒ 加不上头 ⇒ **不构成**与 Go 的漂移（Go 的 404 由链内 `notFoundHandler` 生成） |
 | 2026-10-25 | ✅ **第十轮（T-4 资源面已修 · 方案⑤）** —— 用户 2026-10-25 拍板「**CAND-12：主动探测写（周期 flush()）（签字偏离）**」⇒ 🔴 **「在飞 gRPC 不会被提前取消」不再是事实** —— 落地**方案⑤**：① `GoStyleClientDisconnectProbe`（反射取 Tomcat `SocketWrapper`，`write(true, "HTTP/1.1 103 Early Hints\r\n\r\n")` **+ `flush(true)`** ⇒ 断连时抛 `IOException`；两个前置守卫：非 HTTP/1.1 跳过、`isCommitted()` 跳过；探测间隔默认 500ms，system property 可覆盖，**未动任何 `application.yml`**）② `HttpMiddleware` 单次 `await` ⇒ **切片等待 + 周期探测**（总预算按真实经过时间重算 ⇒ **不延长不缩短**）③ worker 线程上 `io.grpc.Context.withCancellation()` + `attach/detach` ⇒ 探针判定断连即 `cancel(null)` ⇒ **在飞下游 RPC 立刻中止**（grpc-core 1.63 `ClientCallImpl:363` `context.addListener(this, …)`）④ 🟡 **残留时序差**：取消延迟 **461ms**（Go 1~3ms）⇒ 签字记入 `SD-2026-10-25-04`（含 wire 偏离：客户端先收到 N 行 `103 Early Hints`）
 | 2026-10-25 | ✅ **第九轮（T-6 / T-7 / T-8 归因定位）** —— 🔴 **原台账的「落点 `GoStyleRouterErrorResponses.java:83`」是错的**（该文件只管 404/405 且已逐字节对齐）⇒ 三条**分属三个层次**：**T-6** 落点 = Spring `MappingJackson2HttpMessageConverter`（Go = go-zero `rest/internal/header/headers.go:17` 的 `application/json; charset=utf-8`，**带空格**）⇒ **可 Go 等价修**（写原始字符串，绕开 `MediaType.toString()`）🟡 **但 hot 域 `SD-HOT-API-006` 的「不可逐字节复刻」前提已被本仓自己证伪**（`GoStyleRouterErrorResponses` 对 text/plain 就是这么干的）⇒ 需先撤销该签字；**T-7** 落点 = **Tomcat `Http11OutputBuffer`（容器层）** ⇒ 🔴 **真框架限制**，`service/common` 够不着 ⇒ 「归因尚未定位」这句话作废；**T-8** Go 出处 = go-zero `rest/handler/tracehandler.go` 的 `propagator.Inject(spanCtx, HeaderCarrier(w.Header()))` ⇒ RAG **完全没有** ⇒ 落点 = `service/common` HTTP 入口 ⇒ ✅ **可 Go 等价修且不需拍板** ⇒ ⇒ **「三条同落点一次改」的处置作废，必须拆开**
 | 2026-10-25 | **第三轮（A1 / A2 / A3 / A4 四项落地）**。① **T-1 残余 ① 已修** —— 包一层 `SanitizedJsonContentTypeInputMessage` ⇒ 畸形头不再抛 + `charset=gbk` 回归 UTF-8；守门扩到 8 条 + 变异双向转红 ② **T-9 已修** —— 熔断键补 target 前缀（身份源 = `Channel.authority()`，因 grpc-java 1.63 的 `ManagedChannel` 无 `getTarget()`）；守门 6 条 + 变异转红（第一版守门有洞 ⇒ 已改为只调 `interceptCall` 再看 `trackedMethods()`）③ **T-4 观测面已修** —— 499 判据从「worker 内写失败」改成「**filter 写 socket 失败**」；配真 Tomcat 守门 3 条 + M1/M2/M3 三组变异全转红；⚠️ 顺带修掉「提前 flush 把 `Content-Length` 退化成 chunked」这个**新引入的 wire 差异**；🔴 残留「在飞 gRPC 不被提前取消」⇒ **框架限制** ⇒ `SD-2026-10-25-CAND-12`（待签字）④ **CYCLE-002 普查** —— `service/common` 的 `@Deprecated` 归零、无反向 import 业务域、无跨域 `{@link}` ⇒ **0 命中** ⇒ 落成可重跑守门 `tools/difftest/check-cross-domain-holds.py` |

@@ -1,5 +1,6 @@
 <!-- @new 2026-10-25 · global 收口域 · 由 `align/global` 工作树产出 · 基线 commit 58e8314 -->
-<!-- 核对日期：2026-10-25（第十八轮）· 新增 PIT-GLOBAL-019（改上游模块的资源做变异 ⇒ 假阴性） -->
+<!-- 核对日期：2026-10-25（第十九轮）· PIT-GLOBAL-019 补记第 4 种形态（构建中改源码 ⇒ 绿的是旧字节码）
+     （首踩于第十八轮：改上游模块的资源做变异 ⇒ 假阴性） -->
 
 # global · 跨域踩坑档（cross-domain）
 
@@ -619,9 +620,39 @@ PIT-GLOBAL-014 讲的是「`-DfailIfNoTests=false` 会**静默通过** ⇒ 假�
 2. 跑完**核对测试条数**（`Tests run:`）与**基线**一致吗？
 3. 变异是**资源 / DDL / 配置**吗？⇒ 那它**跟着 jar 走**，不是跟着 class 走。
 
+### 🔴 2026-10-25 第十九轮补记：**第 4 种形态** —— 「构建**进行中**我改了源码」⇒ 绿的是**旧字节码**
+
+**现象**（本轮实测）：全仓 `mvn -o test -fae` **正在跑**的时候，我补了一个注解
+（`GoStyleTraceparentFilter` 加 `@ConditionalOnWebApplication(SERVLET)`）。
+那轮构建 **BUILD SUCCESS · 2191 条全绿** —— 但**跑的不是改完的代码**：
+
+```
+10:04:29  service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java   ← 源码
+10:03:04  service/common/target/classes/com/rag/common/http/GoStyleTraceparentFilter.class  ← 字节码（更旧！）
+```
+
+⇒ `common` 模块在 reactor 里排**第 7 位**（早）⇒ 那轮构建在**我改源码之前**就编译完了 `common`
+⇒ **后面 30 个模块跑的都是旧字节码** ⇒ 「全仓绿」这句话当时**是假的**（对这次改动而言）。
+
+**判据（一行）**：
+
+```bash
+stat -f "%Sm  %N" -t "%H:%M:%S" \
+  service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java \
+  service/common/target/classes/com/rag/common/http/GoStyleTraceparentFilter.class
+# class 的时间**必须新于** source；否则 ⇒ 那轮构建没覆盖这次改动 ⇒ **重跑**
+```
+
+⇒ **通用化**：**「跑绿」≠「跑的是你现在的代码」**。本条把「假绿」的来源从
+「测试没跑 / 跑的不是改过的那份 / 读的是旧结果」补到第 4 种：
+**「跑的是旧字节码」** —— 而它**最难发现**，因为它不报错、不留痕、**日志完全正常**。
+
+⇒ **纪律**：**构建开始后不要再改源码**；若非改不可 ⇒ **改完必须重跑**，并用上面那行 `stat` 核对。
+
 ### 出处
 
-- 踩坑位置：2026-10-25 第十八轮的变异 M2（`docs/DRIFT/global/cross-domain.md` §二·十四 ⑥）
+- 踩坑位置：2026-10-25 第十九轮的 T-8 收尾（全仓回归时中途补注解 ⇒ 第一轮全仓绿**不算数** ⇒ 重跑了一遍）
+- 首踩位置：2026-10-25 第十八轮的变异 M2（`docs/DRIFT/global/cross-domain.md` §二·十四 ⑥）
 - 同族：§PIT-GLOBAL-016（单独跑下游 ⇒ 运行时 `NoSuchMethodError`）· §PIT-GLOBAL-014（surefire 多类名分隔符）· §PIT-GLOBAL-018（编译不过 ⇒ 旧 XML ⇒ 假绿）
 
 ---
@@ -630,6 +661,7 @@ PIT-GLOBAL-014 讲的是「`-DfailIfNoTests=false` 会**静默通过** ⇒ 假�
 
 | 日期 | 动作 |
 |---|---|---|
+| 2026-10-25 | 🔴 **第十九轮补记 PIT-GLOBAL-019 的第 4 种形态** —— **「构建进行中我改了源码」⇒ 全仓绿的是「旧字节码」**：全仓 `mvn -o test -fae` 跑到一半时补了个注解（`@ConditionalOnWebApplication`）⇒ 那轮 **BUILD SUCCESS · 2191 条全绿**，但 `common` 模块在 reactor 里排第 7 位（早）⇒ **后面 30 个模块跑的都是改动前的字节码** ⇒ 「全仓绿」当时**是假的**；⇒ 判据一行：`stat` 比对 `target/classes/*.class` 与 `src/main/java/*.java` 的 mtime（class 必须新于 source，否则**重跑**）；⇒ 纪律：**构建开始后不要再改源码**，非改不可 ⇒ **改完必须重跑** + 核对 mtime；⇒ 本条把「假绿」的来源从「测试没跑 / 跑的不是改过的那份 / 读的是旧结果」补到第 4 种，且它**最难发现**（不报错、不留痕、日志全正常） |
 | 2026-10-25 | **第十八轮新增 PIT-GLOBAL-019** —— **改「上游模块的资源」（DDL / 配置）做变异，而只跑下游 ⇒ Maven 从 `~/.m2` 解析旧 jar ⇒ 变异到不了运行代码 ⇒ 报成 **GREEN 假阴性****（本轮 M2 首跑实测：编译通过、测试也跑了、只是跑的不是改过的那份）** ⇒ 修法 = 把上游拉进**同一 reactor**；顺带一个 **surefire 参数换代**：`-DfailIfNoTests=false` **管不住** `-Dtest` 模式（上游模块会直接 BUILD FAILURE）⇒ 要加 **`-Dsurefire.failIfNoSpecifiedTests=false`**（与 PIT-GLOBAL-014 同族但**方向相反**：一个静默通过、一个直接失败）|
 | 2026-10-25 | **第十七轮新增 PIT-GLOBAL-018** —— **变异脚本的两种「假绿」**：① **变异编译不过 ⇒ maven 压根没跑测试 ⇒ surefire 目录里留着上一轮的 XML ⇒ 脚本读到旧结果 ⇒ 报成 GREEN**（本轮 M1 首版实测：`server -> server` 与 void 函数接口不兼容）⇒ 假绿方向最恶劣（会让人写下「守门无感」的结论，而守门根本**没被问过**）⇒ 三道闸：**跑前删旧 XML + 看 maven 退出码 + grep `COMPILATION ERROR` 直接判本次无效**；② **红在更早的断言上 ⇒ 目标断言压根没被执行到**（本轮 M3 首版实测：`await(0)` 让 handler 秒完成**并正常回包** ⇒ 客户端拿到 OK ⇒ 短路在 `assertThrows`）⇒ 判据：**看红的那条断言的失败消息，确认它就是目标断言** |
 | 2026-10-25 | **第十六轮新增 PIT-GLOBAL-017** —— **用「被测的那个常量」构造测试输入 ⇒ 变异常量时测试跟着变 ⇒ 恒绿**（本轮变异 M2 实测 0 红）⇒ 断言恒真比没测试更危险；含判据（阈值边界**必须用字面值** + 常量断言单独钉住实现）+ 一条探针的能力边界（**探针守「判定」，边界测试守「阈值」**） |

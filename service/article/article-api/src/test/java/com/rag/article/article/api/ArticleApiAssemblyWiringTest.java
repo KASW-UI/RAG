@@ -199,15 +199,38 @@ class ArticleApiAssemblyWiringTest {
         assertTrue(pathNormalizing < maxConns && cors < maxConns,
                 "Go 侧 CORS/path.Clean 属路由层，在整条 middleware 链之外 ⇒ 必须最先，实际=" + order);
 
-        // ③ 🔴 **完整链序**钉死（2026-10-24 真容器实测得出）
-        // ⚠️ 前两位同为 @Order(HIGHEST_PRECEDENCE) ⇒ 它们的**相对**顺序由 Bean 注册序决定，
-        //    不是 @Order 表达的 ⇒ 这一条是「**当前实际**链序」的回归网，不是 @Order 的推论。
+        // ②bis 🔴 2026-10-25 第十九轮（T-8）：**traceparent filter 的位置是「承重」的**，
+        //        两条约束各有 Go 出处，缺一条就产生字节级差异：
+        //   ① **CORS 必须在它之前** —— Go `rest/internal/cors/handlers.go:61-63` 的
+        //      `cors.Middleware` 对 `OPTIONS` **短路**（写 204，**不调 next**）
+        //      ⇒ 预检响应**不经过 router** ⇒ **不经过 TraceHandler**
+        //      ⇒ **Go 的 204 预检响应没有 traceparent**。
+        //      ⇒ 本类若排在 traceparent filter **之后** ⇒ 预检响应会**多带**一个 traceparent。
+        //   ② **MaxConns 必须在它之后** —— Go `rest/engine.go:135` 的 `TraceHandler` 是
+        //      native middleware 链**里的第一个**（MaxConns/Breaker/Shedding 在 `:146/:149/:152`）
+        //      ⇒ 被它们拒成 503 的响应**也带** traceparent。
+        //      ⇒ 本类若排在 MaxConns **之后** ⇒ 503 响应**丢头**。
+        int traceparent = order.indexOf("GoStyleTraceparentFilter");
+        assertTrue(traceparent >= 0,
+                "共享层的 GoStyleTraceparentFilter 必须真在 Filter 链里"
+                        + "（§3.3：Bean 存在 ≠ 进了链），实际=" + order);
+        assertTrue(cors < traceparent,
+                "CORS 必须排在 traceparent filter **之前**（Go 的 cors.Middleware 对 OPTIONS 短路 ⇒ "
+                        + "Go 的 204 预检**没有** traceparent）；实际=" + order);
+        assertTrue(traceparent < maxConns,
+                "traceparent filter 必须排在 MaxConns **之前**（Go 的 TraceHandler 是 native 链第一个 ⇒ "
+                        + "被拒成 503 的响应**也带** traceparent）；实际=" + order);
+
+        // ③ 🔴 **完整链序**钉死（2026-10-24 真容器实测得出，2026-10-25 第十九轮插入 traceparent）
+        // ⚠️ 2026-10-25 起**前两位不再同级**：CORS(+1) / path.Clean(+2) **各自显式取值**
+        //    ⇒ 它们的相对顺序现在**由 @Order 表达**，不再依赖 Bean 注册序（此前是隐式依赖）。
         //    而 Go 侧这个相对顺序是明确的：**CORS 在外、path.Clean 在内**
         //    （server.go:148-153 的 WithCors 包装的是 router，patrouter.go:48,60 的 path.Clean 在 router 内部）
         //    ⇒ 实测结果与 Go **一致**，不是巧合。
         assertEquals(List.of(
                         "ArticleGoStyleCorsFilter",
                         "GoStylePathNormalizingFilter",
+                        "GoStyleTraceparentFilter",
                         "GoStyleMaxConnsFilter",
                         "GoStyleBreakerFilter",
                         "GoStyleCpuSheddingFilter",
@@ -432,6 +455,93 @@ class ArticleApiAssemblyWiringTest {
         assertNotEquals(400, resp.statusCode(),
                 "Go 的 GetFormValues 对空值 `continue`（不计数）⇒ 空值再多也不该被拒；"
                         + "实测=" + resp.statusCode());
+    }
+
+    // =====================================================================
+    // 5. 第十九轮（T-8）：真 Tomcat 下「谁带 Traceparent、谁不带」
+    // =====================================================================
+
+    /**
+     * 🔴 Go 侧事实：{@code rest/internal/cors/handlers.go:53-67} 的 {@code cors.Middleware}
+     * 对 {@code OPTIONS} <b>短路</b>（{@code :61-63} 直接写 204，<b>不调 next</b>）
+     * ⇒ 预检响应<b>根本不经过 router</b> ⇒ <b>不经过 TraceHandler</b>
+     * ⇒ <b>Go 的 204 预检响应没有 traceparent</b>。
+     *
+     * <p>⇒ 这条断言钉的是「<b>CORS 必须在 traceparent filter 之前</b>」这条<b>承重</b>约束：
+     * 顺序一旦反过来，预检响应就会<b>多带</b>一个 traceparent ⇒ 与 Go 不一致。
+     */
+    @Test
+    @DisplayName("🔴 真 Tomcat：OPTIONS 预检 204 **不带** Traceparent（Go 的 cors.Middleware 短路 ⇒ 不经过 TraceHandler）")
+    void optionsPreflightHasNoTraceparent() throws Exception {
+        HttpRequest req = HttpRequest.newBuilder(URI.create(base() + "/v1/article"))
+                .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(204, resp.statusCode(),
+                "OPTIONS 预检必须是 204（CORS filter 短路，不下传）");
+        assertTrue(resp.headers().firstValue("Traceparent").isEmpty(),
+                "🔴 Go 的预检响应**没有** traceparent（cors.Middleware 短路 ⇒ 不经过 TraceHandler）；"
+                        + "RAG 若带上 ⇒ 说明 traceparent filter 排在了 CORS **之前**（顺序被改坏了）。实际头="
+                        + resp.headers().map());
+    }
+
+    /**
+     * ✅ 共享层的 {@code GoStyleTraceparentFilter} 必须<b>真进了 api 的 Filter 链</b> ——
+     * 「Bean 存在」≠「机制生效」（AGENTS.md §3.3）⇒ 这里看<b>客户端真正收到的那份字节</b>。
+     */
+    @Test
+    @DisplayName("✅ 真 Tomcat：正常请求的响应**带** Traceparent（共享层 filter 真进了 api 的链，§3.3）")
+    void normalResponseCarriesTraceparent() throws Exception {
+        HttpRequest req = HttpRequest.newBuilder(URI.create(base() + "/v1/me/article/1"))
+                .GET().build();
+        HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(401, resp.statusCode(),
+                "本用例只关心响应头；缺 Authorization ⇒ 401（Go 侧同样是 401 且带 traceparent）");
+        String traceparent = resp.headers().firstValue("Traceparent").orElse(null);
+        assertNotNull(traceparent,
+                "共享层的 GoStyleTraceparentFilter 必须真在 api 的 Filter 链里（§3.3）。实际头="
+                        + resp.headers().map());
+        assertTrue(traceparent.matches("^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$"),
+                "Traceparent 必须是 W3C 的 00-<32hex traceid>-<16hex spanid>-<flags>。实际=" + traceparent);
+    }
+
+    /**
+     * 🔴 <b>characterization test</b> —— 钉的是<b>实测现状</b>，不是 Go 的事实。
+     *
+     * <p><b>Go 侧事实</b>：{@code rest/router/patrouter.go:56-72} 的路由分发有<b>三个</b>出口：
+     * <pre>
+     *   ① 路由命中          → 路由链（TraceHandler 在 engine.go:135 ⇒ **带** traceparent）
+     *   ② 路径都没注册      → handleNotFound → engine.notFoundHandler（engine.go:245-251，**也挂** TraceHandler）⇒ **带**
+     *   ③ 路径命中、方法不对 → pr.notAllowed（= cors.NotAllowedHandler，**router 层**）
+     *                          或 w.WriteHeader(405)（**router 层**）
+     *                          ⇒ **两条都在 router 层，都不经过 TraceHandler** ⇒ **不带**
+     * </pre>
+     *
+     * <p><b>RAG 侧</b>：③ 落在 {@code DispatcherServlet} <b>内</b>（{@code GlobalExceptionHandler}
+     * 的 {@code handleMethodNotSupported}）⇒ filter 链<b>早已跑完</b>
+     * ⇒ 共享层的 traceparent filter <b>已经注入过头</b> ⇒ <b>多带一个 {@code Traceparent}</b>。
+     *
+     * <p>⇒ 这是一条<b>已确认的残留字节级差异</b>（Go 侧无、RAG 侧有），
+     * 根因是<b>出口所在层级不同</b>（router 层 vs DispatcherServlet 内）⇒ 共享层改不动。
+     * ⇒ 本断言的作用是「<b>若哪天这里变了，说明行为又动过</b>」，<b>不是</b>把现状写成 Go 的形状。
+     */
+    @Test
+    @DisplayName("🔴 真 Tomcat：方法不匹配（Go = 404 空 body）的响应**多带**一个 Traceparent —— 残留差异，characterization")
+    void methodNotAllowedCarriesTraceparentUnlikeGo() throws Exception {
+        // /v1/article 只注册了 POST（ArticleController:123）⇒ GET 它 = 「路径命中、方法不对」
+        HttpRequest req = HttpRequest.newBuilder(URI.create(base() + "/v1/article")).GET().build();
+        HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(404, resp.statusCode(),
+                "Go 侧 cors.NotAllowedHandler 对非 OPTIONS 写 404（article 的 DRIFT-001）");
+        assertTrue(resp.body() == null || resp.body().isEmpty(),
+                "Go 的 cors.NotAllowedHandler 只写状态码、body 为空；实际=" + resp.body());
+        assertTrue(resp.headers().firstValue("Traceparent").isPresent(),
+                "🔴 **实测现状**：RAG 的这个出口在 DispatcherServlet 内 ⇒ filter 链已跑完 ⇒ **多带** traceparent；"
+                        + "Go 的同一出口在 router 层 ⇒ **不带**。这是已登记的残留差异（global 台账 T-12），"
+                        + "本断言锁的是**现状**；若哪天这里变了，说明行为又动过。实际头=" + resp.headers().map());
     }
 
     /** 造 N 个非空 query 值（{@code a=1&a=1&…}，最短字节 ⇒ 尽量不撞 Tomcat 的请求行上限）。 */

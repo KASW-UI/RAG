@@ -76,7 +76,15 @@ import java.util.concurrent.Semaphore;
  *
  * <p><b>链上位置</b>：Go {@code engine.go:145-147} 的 MaxConns 在
  * Trace/Log/Prometheus 之后、Breaker 之前，是<b>四层保护里最外层</b>的
- * ⇒ 本类注册在 {@link Ordered#HIGHEST_PRECEDENCE} + 1。
+ * ⇒ 本类注册在 {@link Ordered#HIGHEST_PRECEDENCE} + 4。
+ *
+ * <p>⚠️ <b>2026-10-25（第十九轮 · global T-8）：由 +1 改为 +4</b> ——
+ * 为了让共享层的 {@code GoStyleTraceparentFilter} 能落在「<b>CORS 之后、MaxConns 之前</b>」
+ * （Go 侧 Trace 是<b>链内第一个</b>，{@code engine.go:135}
+ * ⇒ 被 MaxConns/Shedding 拒成 503 的响应<b>也带</b> traceparent）
+ * ⇒ 整块（保护层四件套 + {@code HttpMiddlewareFilter} + {@code GoStyleMaxBytesFilter}）
+ * **整体后移**，但<b>各 filter 之间的相对顺序完全不变</b>
+ * （MaxConns 仍在 Breaker 之前、Breaker 仍在 Shedding 之前）。
  *
  * <p><b>为什么默认 10000 在本部署下几乎不可达</b>（仍必须实现的原因见上）：
  * Tomcat 默认 {@code max-threads=200}，请求会先在容器层排队，
@@ -85,7 +93,7 @@ import java.util.concurrent.Semaphore;
  */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 1)
+@Order(Ordered.HIGHEST_PRECEDENCE + 4)
 public class GoStyleMaxConnsFilter implements Filter {
 
     private final int maxConns;

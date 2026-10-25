@@ -41,9 +41,17 @@ import java.io.IOException;
  *
  * <h2>⚠️ {@code @Order} 的真实作用是「在 Filter 之间排序」</h2>
  * Go 的 {@code corsRouter} 在整条链<b>最外层</b>（Trace / Log / MaxConns / … 之前）。
- * Java 侧 Filter 顺序用 {@code @Order} 表达，取 {@link Ordered#HIGHEST_PRECEDENCE}
- * ⇒ 排在 {@code GoStyleMaxConnsFilter}(+1) / {@code GoStyleCpuSheddingFilter}(+3) /
- * {@code HttpMiddlewareFilter}(+5) / {@code GoStyleMaxBytesFilter}(+6) 之前。
+ * Java 侧 Filter 顺序用 {@code @Order} 表达，取 {@link Ordered#HIGHEST_PRECEDENCE} + 1。
+ * <p>⚠️ <b>2026-10-25（第十九轮 · global T-8）：由 {@code HIGHEST_PRECEDENCE} 改为 {@code +1}</b> ——
+ * <b>本类必须排在共享层的 {@code GoStyleTraceparentFilter}(+3) 之前</b>，理由是 Go 侧
+ * {@code rest/internal/cors/handlers.go:53-67}：{@code cors.Middleware} 对 {@code OPTIONS}
+ * <b>短路</b>（{@code :61-63} 直接写 204，<b>不调 next</b>）⇒ 预检响应<b>根本不经过 router</b>
+ * ⇒ <b>不经过 TraceHandler</b> ⇒ <b>Go 的 204 预检响应没有 traceparent</b>
+ * ⇒ 本类若排在 traceparent filter <b>之后</b> ⇒ 预检响应会<b>多带</b>一个 traceparent ⇒ 与 Go 不一致。
+ * ⇒ <b>CORS 仍在整条链最外层</b>（Go 等价性不变），
+ * 排在 {@code GoStylePathNormalizingFilter}(+2) / {@code GoStyleTraceparentFilter}(+3) /
+ * {@code GoStyleMaxConnsFilter}(+4) / {@code GoStyleCpuSheddingFilter}(+6) /
+ * {@code HttpMiddlewareFilter}(+7) / {@code GoStyleMaxBytesFilter}(+8) 之前。
  *
  * <p><b>可观察后果</b>：一个超限（413）或 OPTIONS 预检请求在 Go 与 RAG 上<b>都</b>带 CORS 头。
  * 若把本 Filter 放到 MaxBytes 之后，一个 {@code OPTIONS} 预检会被 MaxBytes 拦下
@@ -68,7 +76,7 @@ import java.io.IOException;
  */
 @Component
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(Ordered.HIGHEST_PRECEDENCE + 1)
 public class ArticleGoStyleCorsFilter implements Filter {
 
     private static final String ALLOW_ORIGIN = "Access-Control-Allow-Origin";
