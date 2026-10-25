@@ -86,6 +86,9 @@ comment 要求「载荷 `comment_id` == 信封 `aggregate_id`」，
 |---|---|---|
 | `LikeFactDeliveryGoSemanticsGateTest` | **真 PG 16（Testcontainers）+ 真 MyBatis（`SqlSessionTemplate` ＋ `SpringManagedTransactionFactory`）+ 真 `DataSourceTransactionManager`**；独立账本 `flyway_schema_history_like_fact_gate` | **14** |
 | `LikeFactDispatchSchedulerStartupTest` | **真 Spring 上下文**（`AnnotationConfigApplicationContext` ⇒ `@PostConstruct`/`@PreDestroy` 真的跑）＋ `refresh()` 放**独立线程** ＋ **超时** | **5** |
+| `LikeFactDispatchContractGateTest` | **真 PG 16 + 真 `com.sun.net.httpserver.HttpServer` 扮演 DC**（**不 mock**）＋ 共享层 `Dispatcher` 真实驱动 | **3** |
+
+⇒ **合计 22 条**，全部落在「真 PG / 真 Spring 上下文 / 真 HTTP」上 ⇒ **零 mock**。
 
 ⚠️ **为什么必须真启动**：启动阻塞这类缺陷**「开关默认关闭」时完全测不出来**（测试全绿，真启动就挂）⇒
 只有「真起一个 Spring 上下文 ＋ 把 `refresh()` 放进独立线程并超时」才能抓住。
@@ -107,11 +110,54 @@ comment 要求「载荷 `comment_id` == 信封 `aggregate_id`」，
 2. **`Dispatcher.run` 的阻塞性**：第一版调度器守门直接用 `Dispatcher.run` ⇒ 上下文刷新被堵 ⇒ 改 `runAsync`。
 3. **构建进行中改源码 ⇒ 绿的是旧字节码**（§PIT-GLOBAL-019 第 4 种形态，本轮再次撞上）：改完必须**重跑**。
 
+### 🔴 四条变异测试本身踩到的坑（第二轮：守门与变异**互相**咬出）
+
+4. **「守门空转」与「变异无效」是两件事**（M8 / M14 首版都踩）：
+   - **M8**：删掉 `.enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)` 什么也没改变
+     ⇒ **Jackson 该特性默认就是 true** ⇒ **变异无效**，守门是好的
+     ⇒ 真正能咬住的是 `.disable(...)`。
+   - **M14**：删掉失败分支的 `break;` 什么也没改变
+     ⇒ Go `process.go:46-53` 的内层循环有**两个** break（`err != nil` 与 `!sent`），
+       而失败路径上 `sent` 恒为 false ⇒ **单删任一个都不改变行为** ⇒ 必须**复合变异**。
+   ⇒ 报「守门空转」之前，先确认**变异真的改变了行为**。
+5. **判别点选错 ⇒ 守门测的不是被测语义**（M14）：原断言「后面那条一次都没被试」对**有无 break 都成立**
+   ⇒ 改成「**同一轮内试了几次**」（Go 的 break 打的是内层 16 次批次）。
+6. **排序天然掩盖被测语义**（M9）：两条事实先后插入 ⇒ 低版本 `created_at` 更早 ⇒ 拿掉屏障结果一样
+   ⇒ 把高版本 `created_at` **提前** ＋ 加**夹具自检断言**。
+7. **「等条件成立」超时静默返回 ⇒ 后续断言空转通过**：`awaitTrue` 超时**即抛**。
+
 ---
 
 ## 六、变异结果表
 
-> 见本轮提交信息与 `docs/Pitfalls/global/cross-domain.md`。
+**14 条变异全部转红（14/14），6 个被改文件全部还原。**
+
+| 变异 | 改了什么 | 期望红在 | 结果 | 连带红 |
+|---|---|---|---|---|
+| M1 | 去掉 `markBlocked`（`LikeFactDispatchService.java:140`） | `blockedFrozenEnvelopeIsPersistedEvenThoughTheCallThrows` | ✅ | 6 |
+| M2 | 去掉 `markDeliveryFailed`（`:173`） | `failedDeliveryIsPersistedWithRetryCountEvenThoughTheCallThrows` | ✅ | 0 |
+| M3 | BLOCKED 分支在事务内直接抛（`:145`） | 同 M1 | ✅ | 6 |
+| M4 | `delivered_at` 改回 SQL `now()`（mapper `:141`） | `deliveredAtIsTakenAfterTheSendNotAtTransactionStart` | ✅ | 0 |
+| M5 | 去掉 `payload.aggregateVersion != null`（validator `:208`） | `payloadWithAggregateVersionIsBlocked` | ✅ | 0 |
+| M6 | **加上** comment 那条 aggregate_id 判据（validator `:209`） | `payloadAggregateIdMayDifferFromEnvelopeAggregateId` | ✅ | 5（过强） |
+| M7 | 去掉三个时间字段的 RFC3339 校验（validator `:230`） | `payloadWithMalformedEventTimeIsBlocked` | ✅ | 1 |
+| M8 | `.enable(FAIL_ON_UNKNOWN_PROPERTIES)` → `.disable`（validator `:84`） | `payloadWithUnknownFieldIsBlocked` | ✅ | 0 |
+| M9 | 去掉 `NOT EXISTS` 前序屏障（mapper `:96`） | `laterVersionIsBlockedByUnacceptedPredecessor` | ✅ | 0 |
+| M10 | `runAsync` → 阻塞式 `run`（scheduler `:104`） | `enabledSchedulerDoesNotBlockContextRefresh` | ✅ | 1 |
+| M11 | 去掉 `@PreDestroy` | `enabledSchedulerRunsInBackgroundAndStopsOnClose` | ✅ | 2 |
+| M12 | `dispatchEnabled` 默认改 `true`（props `:118`） | `defaultConfigurationKeepsDispatchDisabled` | ✅ | 0 |
+| M13 | 批次 16 → 64（`Dispatcher.java:258`） | `dispatcherDeliversSixteenPerRoundWithOneSecondTick` | ✅ | 0 |
+| **M14** | 去掉失败分支的 `break` **＋** 失败路径报 `sent=true`（`Dispatcher.java:269` ＋ `:209`）⇒ **复合变异** | `failedDeliveryBreaksTheInnerBatchImmediately` | ✅ | 0 |
+
+⚠️ **M8 / M14 首版是「无效变异」而不是「守门空转」**：
+M8 删掉 `.enable(...)` 无效（Jackson 该特性**默认就是 true**）；
+M14 单点删 `break` 无效（两个 break 共同保证「失败即 break」，错误路径上 `sent` 恒 false）。
+⇒ 报「守门空转」之前，**先确认变异真的改变了行为**。
+
+⚠️ **判定口径**：目标 testcase **变红**即可（`failure` 或 `error` 都算）；
+**连带红数**必须记录（过强变异会连带带红别的用例）。
+
+⇒ 逐条论证、证据行号与未证成部分 ⇒ [`docs/DRIFT/global/lanes/L1-delivery.md`](../docs/DRIFT/global/lanes/L1-delivery.md) §8。
 
 ---
 
@@ -120,8 +166,10 @@ comment 要求「载荷 `comment_id` == 信封 `aggregate_id`」，
 | # | 事项 | 性质 | 处置 |
 |---|---|---|---|
 | ① | `LikeAuthorityEndpointConfig`（**DC → like 的入向权威读端点**） | 仍是**未实现骨架**；自带说明「监听地址与端口 UNKNOWN，需给 like-rpc 新增 HTTP connector（**wire 面变更 ⇒ 待拍板**）」 | ⛔ 本轮**不碰**（属 wire 面变更 ⇒ 需用户拍板）⇒ **记账** |
-| ② | `favorite` 域的 `FavoriteFactDispatchScheduler` | **同款启动阻塞缺陷**（`@EventListener(ApplicationReadyEvent)` 里调阻塞式 `Dispatcher.run`） | ⛔ **favorite 零触碰** ⇒ **记账 + 明确告知该域 owner**（修法：改调 `Dispatcher.runAsync`，共享层方法已就位） |
+| ② | `favorite` 域的 `FavoriteFactDispatchScheduler` | **同类缺陷**（阻塞式 `Dispatcher.run`），但**触发点不同 ⇒ 症状不同**：favorite 是 `@EventListener(ApplicationReadyEvent)`（`:77`）⇒ 上下文已刷新、**能服务**，但 `SpringApplication.run()` **永不返回**（主线程被占住）；like/comment 改前是 `@PostConstruct` ⇒ **起不来** | ⛔ **favorite 零触碰（本轮 0 个文件）** ⇒ **记账 + 明确告知 owner**（修法：改调已就位的 `Dispatcher.runAsync`） |
 | ③ | `article` 域 | Go 侧 `article` **没有**事实投递（`communityfact` 只被 like / comment / favorite 用） | 无需处理 |
+| ④ | **变异脚本落仓**（`tools/difftest/like-mutation.py`） | `tools/` **不在 L1 白名单**（L3 写 `ddl*`、L4 写 `flyway*`）⇒ 本轮只留在会话临时目录 | ⇒ **交接整合者**；§六 的表已把 14 条变异的**锚点与期望红点**写全 ⇒ 可据此重建 |
+| ⑤ | 本轮 4 条新坑（变异测试与守门互相咬出） | 属 `docs/Pitfalls/global/**` ⇒ 在 **L5** 白名单 | ⇒ **交接 L5**（明细见 `docs/DRIFT/global/lanes/L1-delivery.md` §8.5） |
 
 ---
 
