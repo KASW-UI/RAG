@@ -6,7 +6,8 @@
 > **本轮性质**：§3.4 **效力边界第 1 条**（「RAG 侧使用生成代码的方式与 Go 一致」）的首次核对。
 > **证据强度**：✅ **双侧静态全文 diff**（proto 文件本身）+ ✅ **消费点逐条清点**（源码级）
 > + ✅ **双侧活体对拍**（protobuf 消息体的 wire 字节，2026-10-25 第六轮 ⇒ §5）。
-> ⚠️ **仍未做**：**帧层**（HTTP2 / length-prefix / gRPC status 帧）的字节对拍 —— 需两侧同时起服务。
+> ⚠️ **帧层**：**第十三轮已重新评估并拆成三层** ⇒ L0（帧原始字节）库级、不做比对；
+> L1（status code / description / 消息字节 / metadata key）**已双侧活体对拍** ⇒ 见 [`rpc.md`](./rpc.md) §20。
 
 ---
 
@@ -152,7 +153,7 @@ RAG 侧 7 处用 `nullToEmpty(...)` / `nullToZero(...)` 显式设零值
 | **「默认值不落 wire」的生成码级证据** | ✅ **已验**（2026-10-25 第四轮 ⇒ 见 §2 的 `writeTo` 条件表达式） |
 | **「默认值不落 wire」的【字节级】证据** | ✅ **已验**（2026-10-25 第六轮 ⇒ 探针 `tools/proto-wire-probe/favorite/`：**零值消息在 wire 上是空字节**）⇒ 见 §5 |
 | **protobuf 消息体的 wire 字节** | ✅ **已验**（2026-10-25 第六轮 ⇒ **双侧活体对拍**：Go 真源的 `favorite.pb.go`（protoc-gen-go 运行时）vs favorite-proto 的生成码（protobuf-java 运行时）⇒ **6 组消息逐字节一致** ⇒ 见 §5） |
-| **真 channel 上的 wire 字节**（gRPC 帧 / status 帧） | 🔴 **未验**（需要两侧同时起服务）⇒ ⚠️ **gRPC status 的 description** 那一环**已验**（在 [`common.md`](./common.md) §4，由 `FavoriteGrpcErrorWireFidelityTest` 守着）⇒ **剩下的是帧层（HTTP2 / length-prefix / status 帧）** |
+| **真 channel 上的 wire 字节**（gRPC 帧 / status 帧） | 🟡 **已重新评估并拆成三层**（第十三轮 ⇒ [`rpc.md`](./rpc.md) §20.1）<br>· **L0 帧原始字节**（HPACK / 帧序 / WINDOW_UPDATE）⇒ 🔴 **不做比对**：库级、客户端不可观测（已量化到行号：percent-encoding 的 `~` 边界差 1 字节 ⇒ 本域 24 条文案无 `~` ⇒ 不可观测）<br>· **L1 帧层之上、消息层之下**（status code / description / 消息字节 / metadata key）⇒ ✅ **已双侧活体对拍**（`tools/grpc-contract-probe/favorite/`，36 个 case：33 SAME / 2 SAME_CODE / 1 OBS ⇒ **业务契约逐字节一致**）<br>· **L2 消息体字节** ⇒ ✅ 见本表上一行 |
 
 ---
 
@@ -188,6 +189,7 @@ RAG 侧 7 处用 `nullToEmpty(...)` / `nullToZero(...)` 显式设零值
 （读 `FavoriteFolder.writeTo` 的条件表达式）⇒ **本轮升级为字节级**。
 
 **仍未闭的**：**帧层**（HTTP2 / length-prefix / gRPC status 帧）⇒ 需要两侧同时起服务。
+⇒ ✅ **第十三轮已闭**（见 [`rpc.md`](./rpc.md) §20）：L0 判定为库级、不可观测；**L1 已双侧活体对拍**。
 
 ---
 

@@ -583,10 +583,10 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 
 | | 2026-10-25 第五轮后 | **第六轮后** |
 |---|---|---|
-| **rpc 侧整域双侧活体对拍** | 🔴 未闭（Go 侧 `etcd` / Kafka 不可拉起） | 🔴 **仍未闭**（**环境受限**，非方法缺陷） |
-| **已做的局部双侧对拍** | **4 项**：错误码契约 / path 形态 / 指标 result 语义 / v2 响应体形状 | **5 项**：＋ **protobuf 消息体 wire 字节** |
+| **rpc 侧整域双侧活体对拍** | 🔴 未闭（Go 侧 `etcd` / Kafka 不可拉起） | 🔴 **仍未闭**（**环境受限**，非方法缺陷）⇒ ⚠️ **第十三轮已部分推翻**：见 §20.6（**不需要 etcd**）与 §20.7（局部活体对拍 6 项 → **9 项**） |
+| **已做的局部双侧对拍** | **4 项**：错误码契约 / path 形态 / 指标 result 语义 / v2 响应体形状 | **5 项**：＋ **protobuf 消息体 wire 字节** ⇒ ⚠️ **第十三轮 ⇒ 9 项**（＋ gRPC **status code / description / 消息字节 / metadata key 集合**，见 §20.3） |
 | **DDL 逐列对照** | 🔴 未做（`check-ddl-static.py` 无 favorite 预设） ⇒ ✅ **活体对拍已完成**（第七轮，§13.2）⇒ **本行已被 §13.2 取代** |
-| **仍未闭的** | — | **帧层**（HTTP2 / length-prefix / gRPC status 帧）⇒ 需两侧同时起服务 |
+| **仍未闭的** | — | **帧层**（HTTP2 / length-prefix / gRPC status 帧）⇒ 需两侧同时起服务 ⇒ ⚠️ **第十三轮已重新评估并拆成三层**（见 §20.1）：L0 不做比对（库级）、**L1 已双侧活体对拍**、L2 早已闭 |
 
 ### 12.4 本轮验证
 
@@ -639,7 +639,7 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 
 | 项 | 判定 | 理由 |
 |---|---|---|
-| **gRPC 帧层字节对拍**（HTTP2 / length-prefix / status 帧） | ⬜ **不属本域可做** ⇒ **不记入漂移条目** | 帧层编码由 **gRPC 库**决定（grpc-go vs grpc-java），**不是 favorite 域的行为**；两侧都用各自的标准 gRPC 实现 ⇒ 若有差异，那是**库级**差异，**不是 RAG 重构引入的** ⇒ 不在本域 scope（AGENTS.md §1）。<br>⇒ 真要对，只能测「两个 gRPC 实现之间的帧层差」⇒ 与「RAG 是否忠实复刻 Go」**无关** ⇒ 收益低。 |
+| **gRPC 帧层字节对拍**（HTTP2 / length-prefix / status 帧） | ⬜ **不属本域可做** ⇒ **不记入漂移条目** | 帧层编码由 **gRPC 库**决定（grpc-go vs grpc-java），**不是 favorite 域的行为**；两侧都用各自的标准 gRPC 实现 ⇒ 若有差异，那是**库级**差异，**不是 RAG 重构引入的** ⇒ 不在本域 scope（AGENTS.md §1）。<br>⇒ 真要对，只能测「两个 gRPC 实现之间的帧层差」⇒ 与「RAG 是否忠实复刻 Go」**无关** ⇒ 收益低。<br>🔴 **第十三轮已修订本行**（原判定**方向对但把三层一起打包扔掉了**）⇒ 见 **§20.1**：L0（帧原始字节）仍**不做**（已量化到行号）；**L1（status code / description / 消息字节 / metadata key）本域该管** ⇒ **已双侧活体对拍**（§20.3）。 |
 | **rpc 整域双侧活体对拍**（U7 主项） | 🔴 **仍环境受限**（**真受阻**，非方法缺陷） | Go 侧 favorite-rpc 真进程依赖 `etcd` + Redis + `article-rpc` / `user-rpc` ⇒ 本机拉不起。<br>⇒ **但**已被拆成 **6 项局部双侧对拍**：错误码契约 / path 形态 / 指标 result 语义 / v2 响应体形状 / **protobuf 消息体 wire 字节** / **DDL 逐列** ⇒ 剩下的「整域」只覆盖**业务编排与部署**层面。 |
 | **api 整域双侧活体对拍** | 🔴 **仍环境受限** | 真 Go favorite-api 依赖 `etcd` + favorite-rpc + Redis ⇒ 起不来；⇒ **响应字节层**已用 `tools/api-envelope-probe/favorite/` 拆出来闭合（§2.2）。 |
 | **U3 Mode 取值域** | ✅ **本轮闭合**（§13.3） | 原登记写「需 Go 侧提供清单」⇒ **其实不需要**：go-zero 源码里就有（`options=dev\|test\|rt\|pre\|pro`）⇒ **登记类事项可以自查的，就不该挂着等人**。 |
@@ -1167,8 +1167,8 @@ breakerName := path.Join(cc.Target(), method)
 |---|---|---|
 | 容器层参数上限口径（Tomcat 数总「值」数 vs Go 数非空值数） | 🔴 `global`（与 hot 域 `DRIFT-HOTAPI-030` 同一格） | 已在 `api.md` §3 登记 |
 | `like-api` 的 `LikeRpcClient.java:43-48` 熔断注释（疑似把 Java 事实误记成未接入） | `like` 域文件 ⇒ 本域**只读** | 已登记在 §9.5，**未改** |
-| gRPC **帧层**字节对拍（HTTP2 / length-prefix / status 帧） | 库级差异 ⇒ **不属本域** | 已判定 |
-| **gRPC 整域**活体对拍 | 🔴 真受阻（Go gRPC server 注册走 etcd） | 已拆成 6 项局部对拍 |
+| gRPC **帧层**字节对拍（HTTP2 / length-prefix / status 帧） | 库级差异 ⇒ **不属本域**（**第十三轮已修订**：拆成三层，L0 仍不做、L1 已对拍）⇒ 见 §20.1 | 已判定 ⇒ 第十三轮补做 **§20** |
+| **gRPC 整域**活体对拍 | 🔴 真受阻（Go gRPC server 注册走 etcd）⇒ ⚠️ **第十三轮已推翻**：**Endpoints 优先级 ⇒ 不需要 etcd** | 已拆成 6 项局部对拍 ⇒ **第十三轮 ⇒ 9 项**（§20.3） |
 
 ### 18.4 ✅ **本域已完成、无需再动**（避免重复劳动）
 
@@ -1276,3 +1276,200 @@ breakerName := path.Join(cc.Target(), method)
 ⇒ U7 的**局部**双侧活体对拍由 **6 项 → 7 项**（新增「**权威读 HTTP 面**」，21 个 case 逐字节）。
 ⇒ **U7 仍未闭** —— 剩下的「整域」= **gRPC 整域**（Go gRPC server 注册走 etcd ⇒ 真受阻）
 + **api 整域**（Go favorite-api 依赖 etcd + favorite-rpc + Redis）。
+
+---
+
+## 20. 2026-10-25 第十三轮（`align/favorite` 工作树 · 承 `2208cab`）—— **帧层重新评估 + gRPC 级可观测契约双侧活体对拍**
+
+> **本轮性质**：把挂了三轮的那条「🔴 未验：帧层（HTTP2 / length-prefix / gRPC status 帧）」**拆成三层**分别给结论，
+> 同时**推翻了此前「favorite-rpc 的双侧活体对拍被环境锁死」的判定**。
+>
+> **新工具**：`tools/grpc-contract-probe/favorite/`（EXIT=0）· **新测试**：`FavoriteGrpcContractParityTest`
+> **证据强度**：✅ **双侧活体对拍** —— Go 真源 server 与 RAG server **同时在跑**，
+> 由**同一个 grpc-java 客户端**分别打两侧（排除客户端自身差异）。
+
+### 20.1 旧判定的重评：「帧层」不是一个东西，必须拆成三层
+
+| 层 | 内容 | 判定 | 依据（带行号） |
+|---|---|---|---|
+| **L0 帧原始字节** | HPACK 编码 / 帧序 / WINDOW_UPDATE / PING / HTTP2 SETTINGS | 🔴 **不做字节比对**（旧判定**成立**，理由更精确） | 由 **gRPC 库**决定（grpc-go vs grpc-java）；且**客户端不可观测** —— 客户端的 HTTP/2 实现会**重新编码**对端帧 ⇒ 属**库级**差异，**不是 favorite 域的行为** |
+| **L1 帧层之上、消息层之下** | gRPC **status code** / **description** / 响应消息**字节** / **metadata key 集合** | ✅ **本域该管**（旧判定**漏了这一层**） | 这四项**客户端可观测**，且**由 favorite 域的代码决定**：Go `service/favorite/common/errmsg.go:104-106` 的 `GRPCError(grpcCode, bizCode)` → `status.Error(code, GetErrMsg(bizCode))`；RAG `favorite-common/.../FavoriteGrpcError.java:94-98` 的 `grpcError(code, bizCode)` → `Status.fromCode(code).withDescription(getMsg(bizCode))` |
+| **L2 消息层** | protobuf 消息体 wire 字节 | ✅ 已在第六轮闭合 | [`tools/proto-wire-probe/favorite/`](../..) |
+
+**⇒ 旧判定的错误所在**：把「帧层」当成一整块，于是 **L0 的「客户端不可观测」被外推成「L1 也不该管」**。
+
+**⇒ L1 恰恰是本域责任最高的一层**：favorite 域把**业务码藏在 description 文案里**（业务码本身不上线），
+客户端（favorite-api）靠文案反查还原
+（Go `service/favorite/common/errmsg.go:108-137` 的 `BizCodeFromError`；RAG `FavoriteGrpcError.java:171-188` 的 `bizCodeFromError`）
+⇒ **description 一旦变形，业务码直接丢** ⇒ 必须守，而且**必须用真实 HTTP/2 通道守**（in-process 传输不施加 percent-encoding）。
+
+### 20.2 方法论：为什么必须「同一个客户端打两侧」
+
+- 帧层的原始字节由库决定 ⇒ 直接拿两边的字节互比 = 在测「两个 gRPC 实现之间的差异」，**与「RAG 是否忠实复刻 Go」无关**。
+- L1 可以比，但要**消掉客户端自身的差异** ⇒ **两侧用同一个 grpc-java 客户端、同一份 stub、同一套 metadata 处理**。
+- ⇒ 本探针的全部结论都建立在这一条上：**换一个客户端，结论就不成立**。
+
+### 20.3 结果：36 个 case（33 SAME / 2 SAME_CODE / 1 OBS）
+
+| 档 | 条数 | 覆盖 |
+|---|---|---|
+| **SAME**（两侧**逐字节相同**） | **33** | 7 个方法的全部参数校验分支 / `NotFound` / `PermissionDenied` / **`FAILED_PRECONDITION`+5304** / 成功响应的**消息字节** / **下游 user-rpc 缺席**的依赖失败分支 |
+| **SAME_CODE**（**status code 相同**，措辞允许不同） | **2** | 未注册的方法 / 未注册的服务 ⇒ 两侧 `code` 都是 `UNIMPLEMENTED` |
+| **OBS**（两侧**必须不同**，已登记） | **1** | 完整响应头 key 集合 |
+
+**⇒ 关键结论（逐条都有实测值）**：
+
+1. **中文业务文案在真实 HTTP/2 通道上逐字节一致** ⇒ `参数错误` / `收藏夹名称不能为空` / `收藏夹不存在` /
+   `收藏记录不存在` / `无权限操作` / `收藏目标不能为空` / `收藏暂不可撤回` / `系统内部错误` 两侧完全相同
+   ⇒ **favorite-api 的「文案反查业务码」链路成立**（这是本域最脆的一环）。
+2. **成功响应的 protobuf 字节逐字节一致**（含 `seed.sql` 写死的时间列 ⇒ `UnixMilli()` 相同）
+   ⇒ L1 与 L2 在同一份数据上对齐。
+3. **5304「收藏暂不可撤回」两侧同为 `FAILED_PRECONDITION`** ⇒ 这条**最容易被 presence 语义走偏**的分支（且它
+   **不在** `BizCodeFromError` 的 switch 白名单里，只能靠文案还原）实测一致。
+4. **下游 user-rpc 缺席 ⇒ 两侧同为 `INTERNAL` + 5001「系统内部错误」**
+   （Go `internal/logic/helper.go:103-107` ⇒ `GRPCError(codes.Internal, ErrorServerCommon)`；
+   RAG `FavoriteUserGuard.java:78-90` ⇒ `internalServerCommon()`）⇒ **依赖失败契约也一致**。
+
+### 20.4 库级差异的量化（3 条，全部显式登记为 OBS）
+
+| # | 差异 | 两侧实测 | 归因 |
+|---|---|---|---|
+| 1 | **响应头 key 集合** | Go：`content-type`；RAG：`content-type` + **`grpc-accept-encoding=gzip`** + **`grpc-encoding=identity`** | grpc-java 的传输层发的（`io/grpc/internal/GrpcUtil.java:111-112` 的 `MESSAGE_ACCEPT_ENCODING_KEY`）；grpc-go 不发 ⇒ **库级**，非本域行为 |
+| 2 | **未注册方法的 description 措辞** | Go：`unknown service /favorite.FavoriteService`；RAG：`Method not found: /favorite.FavoriteService/DoesNotExist` | 两侧 `code` 都是 `UNIMPLEMENTED`（**语义一致**）；措辞由 gRPC 库决定（grpc-java 的 `io/grpc/internal/ServerImpl.java:541-543`） |
+| 3 | **未注册服务的 description 措辞** | 同上形态 | 同上 |
+
+⚠️ **第 2/3 条的措辞归因本轮**未**查清** —— grpc-go v1.81.1 的 `server.go:1869-1874` 实测产出的是
+`unknown method DoesNotExist for service favorite.FavoriteService` / `unknown service favorite.NoSuchService`
+（**不带前导斜杠**，已用同一份 grpc-go 起最小 server 实测），与观测到的串**对不上**；
+grpc-java 侧也**没有** `unknown service` 这个串（只有 `Method not found: `）。
+⇒ ⇒ 本探针**只断言「status code 相同 + 措辞不同」**，**不对措辞内容下结论**（expected.txt 的 `SAME_CODE` 档）。
+⚠️ **这条「归因未查清」本身就是登记项**，不是结论。
+
+### 20.5 percent-encoding 的**源码级**量化（wire 层，本域不可观测）
+
+`grpc-message` 在 wire 上是 percent-encoded 的，两个实现的**转义边界差 1 个字节**：
+
+| 实现 | 条件 | 出处 |
+|---|---|---|
+| grpc-go | 转义当 `b < 0x20 \|\| b > 0x7E \|\| b == '%'` ⇒ **`~`(0x7E) 不转义** | `google.golang.org/grpc@v1.81.1/internal/transport/http_util.go:256`（函数体 :227-265） |
+| grpc-java | 转义当 `b < ' ' \|\| b >= '~' \|\| b == '%'` ⇒ **`~`(0x7E) 转义成 `%7E`** | `io/grpc/Status.java:591-593`（marshaller `StatusMessageMarshaller` :573-621） |
+
+⇒ **对本域无影响，两条理由**：
+1. 本域 24 条文案里**没有 `~`**（`service/favorite/common/errmsg.go:43-76` 的 `codeMsg`）⇒ wire 上不可观测；
+2. 即便有，两侧**客户端都会 percent-decode**（grpc-go `http_util.go:268-299`、grpc-java `Status.java:623+`）
+   ⇒ **客户端看到的 description 相同** ⇒ 对「文案反查业务码」**零影响**。
+
+⇒ **结论**：这属于 **L0（帧层）**，**库级、客户端不可观测** ⇒ **不做比对**，但**已量化到行号**（旧判定只有一句「库级差异」，没有边界）。
+
+### 20.6 为什么本轮能推翻「环境受限」
+
+| 事实 | 出处 |
+|---|---|
+| `BuildTarget()` 优先级 = **Endpoints > Target > Etcd** ⇒ 填 `Endpoints` **完全不需要 etcd** | go-zero `zrpc/config.go:92-114` |
+| `if c.HasEtcd()` 才注册 etcd ⇒ `Etcd.Key` 留空就不注册 | go-zero `zrpc/server.go:42-43` |
+| `RpcClientConf.NonBlock` 默认 `true` ⇒ **启动不需要对方在线** | go-zero `zrpc/config.go`（`RpcClientConf`） |
+| 7 个 RPC 里**只有 `internal/logic/helper.go`** 引用 `UserRpc` / `ArticleRpc` ⇒ **6 个 RPC 不需要任何外部 rpc** | 真源 `service/favorite/rpc/internal/logic/helper.go` |
+| Go 侧 schema 按 **sql-first** 部署顺序建（AutoMigrate 建不出 CHECK / 触发器 / `favorite_legacy_fact_marker`） | 真源 `internal/model/db.go:20-41` + `DELIVERY_ACCEPTANCE.md:7` |
+
+⇒ **既不需要 fake etcd，也不需要桩**：探针把 `UserRpc` / `ArticleRpc` 指向**死地址** `127.0.0.1:1`，
+顺带把「下游不可用」这条契约分支变成被测对象。
+
+### 20.7 U7 状态更新
+
+| 项 | 旧状态（第十三轮之前） | 新状态 |
+|---|---|---|
+| 「帧层」 | 🔴 未验（且判定为「库级、不属本域」） | ✅ **拆成三层**：L0 **不做**（已量化到行号）；L1 **已双侧活体对拍**；L2 早已闭 |
+| rpc 侧整域双侧活体对拍 | 🔴 环境受限 | ✅ **局部活体对拍 6 项 → 9 项**（新增：gRPC status code / description / 消息字节 / metadata key 集合） |
+| 本域缺陷 | — | **0 条新缺陷**（33 条 SAME）⇒ 本域 gRPC 契约**未发现漂移** |
+| 库级差异 | 一句「库级差异」 | **3 条量化 + 1 条源码级量化**（percent-encoding 的 `~` 边界） |
+
+### 20.8 复现
+
+```bash
+bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
+```
+
+⚠️ 必须带 `-am`（run.sh 已带）—— 见 [`docs/Pitfalls/favorite/rpc.md`](../../Pitfalls/favorite/rpc.md) PIT-FAV-RPC-013。
+
+### 20.9 探针自身的两个坑（本轮真实踩到，已记进坑档）
+
+1. **用例顺序 = 副作用顺序** ⇒「读同一行的用例」必须排在「写同一行的用例」之前
+   （第一版把「响应头全集」用例放在最后 ⇒ 它读的收藏夹已被改名用例改过 ⇒ `updated_at` 变成「本次运行的时刻」
+   ⇒ 冻结值每次都不同 ⇒ **假红**）。
+2. **错误分支的 shape 渲染必须 null-safe** ⇒ 声明「预期成功」但服务端实际报错时，不判空会抛 NPE，
+   把「两侧行为不一致」这个**真结论**变成看不懂的测试崩溃。
+
+---
+
+## 21. 2026-10-25 第十三轮（续）—— **api 整域活体对拍的可行性再评估**（结论：**可行，且不需要 fake etcd**）
+
+> **本节性质**：用户提问「Go favorite-api 依赖 etcd + favorite-rpc + Redis；**也许能用桩（fake etcd / 内嵌 redis）拉起来**」
+> ⇒ 本节把三个依赖**逐个查清**（查源码，不是推理），给出结论 + 实施配方。
+> ⚠️ **本节只做「可行性判定 + 配方」，探针本身本轮未实施**（见 §21.5）⇒ **不冒充已完成**。
+
+### 21.1 三个依赖逐个查清 ⇒ **无一需要「桩」**
+
+| 依赖 | Go favorite-api 的用法（出处） | 结论 |
+|---|---|---|
+| **etcd** | `FavoriteRpc zrpc.RpcClientConf`（真源 `service/favorite/api/internal/config/config.go:15`），真源 yaml 用 `Etcd` 段（`etc/favorite.yaml:34-38`） | ✅ **完全不需要** ⇒ **不需要 fake etcd**<br>go-zero `zrpc/config.go:92-114` 的 `BuildTarget()` 优先级 = **Endpoints > Target > Etcd** ⇒ 探针 yaml 里改填 `FavoriteRpc.Endpoints`（指向 favorite-rpc 的实际地址）即**绕开 etcd**；<br>且 `HasEtcd()`（`zrpc/server.go:42-43`）为 false 时服务端**根本不注册** etcd |
+| **Redis** | `BizRedis redis.RedisConf`（`internal/config/config.go:16`）→ `redis.MustNewRedis`（`internal/svc/service_context.go:20`）→ 黑名单中间件 `Redis.ExistsCtx`（`internal/middleware/checkblacklist_middleware.go:37`） | 🟡 **需要真 Redis**（一个容器即可），**不需要「内嵌 redis」**<br>go-zero 的 `RedisConf` 只认 `Host/Type/Pass` ⇒ 指向一个真 Redis 容器即可；<br>⚠️ 更精确：**只有带 `Authorization` 头的请求才会碰 Redis** —— 中间件 `:24-34` 在没有 token 时直接 `next(w, r)` ⇒ **不带 token 的矩阵在链路上根本不触碰 Redis** |
+| **favorite-rpc** | `favoriteservice.NewFavoriteService(zrpc.MustNewClient(c.FavoriteRpc))`（`internal/svc/service_context.go:24`） | ✅ **本轮已实测可拉起** ⇒ 第十三轮已把「真源 favorite-rpc 起**真 gRPC server**」跑通（[`tools/grpc-contract-probe/favorite/`](../..)）⇒ 直接当子进程用即可 |
+
+⇒ **⇒ 结论：可行**。用户的两个猜测（fake etcd / 内嵌 redis）**都不需要**：
+**etcd 被 `Endpoints` 优先级直接绕开；Redis 用真容器即可，且无 token 的用例链路上根本不碰它。**
+
+### 21.2 两侧配置怎么覆盖（都已有现成入口，不改代码）
+
+| 侧 | 要覆盖的项 | 入口 |
+|---|---|---|
+| **Go api** | favorite-rpc 地址 | 探针 yaml 的 `FavoriteRpc.Endpoints`（新写一份 api 用的 yaml） |
+| **Go api** | Redis | 探针 yaml 的 `BizRedis.{Host,Port,Pass}`（对应真源 `etc/favorite.yaml:14-16`） |
+| **RAG api** | favorite-rpc 地址 | `grpc.client.favorite-rpc.address=static://127.0.0.1:<port>`（现值 `discovery:///favorite-rpc`，见 `favorite-api/src/main/resources/application.yml:77-81`） |
+| **RAG api** | Redis | `REDIS_ADDR` / `REDIS_PORT` / `REDIS_PASSWORD`（同上 `:27-35`） |
+| **两侧** | JWT 密钥 | Go `UserAuth.AccessSecret`（真源 `etc/favorite.yaml:10-12`）与 RAG `favorite.user-auth.access-secret`（`FavoriteApiProperties.UserAuth`）**必须填同一个值**，否则同一个 token 一边认一边不认 ⇒ 矩阵本身就会分叉 |
+
+### 21.3 进程图（4 个应用进程 + 2 个中间件）
+
+```
+                    ┌───────────────────────── 探针编排（run.sh）─────────────────────────┐
+                    │                                                                    │
+  docker: postgres  │   Go favorite-rpc (真源副本) ──PG──┐                                 │
+  docker: redis     │            ▲ Endpoints            │                                 │
+                    │            │                       │      ┌──────────────┐            │
+                    │   Go favorite-api (真源副本) ───────┘      │ RAG favorite-│            │
+                    │            ▲                              │ rpc (Spring)  │            │
+                    │            │ HTTP :port                  └──────┬───────┘            │
+                    │      同一个 HTTP 客户端（同一套请求矩阵）        │ static://          │
+                    │            │                              ┌──────┴───────┐            │
+                    └────────────┼──────────────────────────────│ RAG favorite-│────────────┘
+                                 └──────────────────────────────│ api (Spring) │
+                                                                └──────────────┘
+```
+
+⇒ **Go 侧两进程之间用 `Endpoints` 直连**（不经 etcd）⇒ 与真源部署的**服务发现语义不同**，
+但**业务编排语义相同**（同一份 logic、同一套 pb）。
+⚠️ 这条差异必须登记：**服务发现本身不在本域 scope**（AGENTS.md §3.3：框架层），
+探针只用来比**业务编排的可观测结果**。
+
+### 21.4 它比已有的 `api-envelope-probe` 多验什么
+
+| | `tools/api-envelope-probe/favorite/`（已闭） | api 整域活体对拍（待做） |
+|---|---|---|
+| 验的层 | **响应字节**（envelope + DTO 字段 tag），用**真 go-zero 库**跑 | **整个 HTTP 面**：路由 / method / JWT 中间件 / 黑名单中间件 / **gRPC 往返** / 状态码 / 响应头 |
+| 两侧 | Go 真源（真库）vs RAG（**单侧断言**） | Go 真源 api ↔ RAG api（**同一客户端双打**） |
+| 增量价值 | — | 🔴 **JWT 之后的整条链路**：favorite-api 的业务码是靠 **favorite-rpc 的 description 文案**反查的（`favoritecommon.BizCodeFromError`）⇒ **这条链路的端到端正确性目前只被 §20 的 rpc 级对拍间接覆盖**，api 级从未活体对过 |
+
+### 21.5 ⚠️ 本轮**未实施**（显式登记，不是「已完成」）
+
+- **状态**：🔴 **待做**。本轮只交付「**可行性判定 + 实施配方**」（§21.1–§21.4）。
+- **为什么没做**：本轮预算已用于「帧层重新评估 + gRPC 级契约对拍 + 变异验证」（§20）；
+  api 级探针需要**再复制 ~15 个真源 api 包文件** + **再起 4 个应用进程**（含两个 Spring 上下文同时起）
+  ⇒ 在同一轮里做，交付质量不可控 ⇒ **宁可不交，也不交一个半成品探针**（AGENTS.md §3.3 的纪律）。
+- **下一轮可直接开工的入口**：
+  1. 复制 `service/favorite/api/**`（15 个文件）+ 复用本轮已复制的 `favoriteservice` / `favorite/common` / `common/logger` / `common/observability`；
+  2. 探针 yaml：`FavoriteRpc.Endpoints`（指向真源 favorite-rpc）+ `BizRedis`（指向真 Redis 容器）；
+  3. Java 侧：用 `SpringApplicationBuilder` **手工起两个上下文**（favorite-rpc + favorite-api），
+     ⚠️ 不能靠两个 `@SpringBootTest`（一个测试类只有一个上下文）；
+  4. HTTP 客户端用 `java.net.http.HttpClient`，请求矩阵复用 §20 的 7 个用例（同一个 userId / folderId / favoriteId），
+     两侧共用同一份 seed；
+  5. 判定沿用 §20 的 `expected.txt` 四档（SAME / SAME_CODE / OBS / SKIP）。

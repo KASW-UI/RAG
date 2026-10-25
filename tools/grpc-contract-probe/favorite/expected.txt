@@ -1,0 +1,65 @@
+# ============================================================================
+# gRPC 级可观测契约 · 双侧活体对拍 · favorite 域 · 冻结期望
+# ----------------------------------------------------------------------------
+# 生成方式：bash tools/grpc-contract-probe/favorite/run.sh（首次运行自动产出实测值）
+#
+# 格式：case_id 	 kind 	 value
+#   value = **Go 真源 server 被同一个 grpc-java 客户端观测到的完整值**
+#          （code=...|desc=...|body=...|rhdr=...|rtrl=...）
+#          ⇒ 它同时是「Go 真源变了探针立刻响」的哨兵 + 两侧比对的基准。
+#
+# kind 四档：
+#   SAME      —— 两侧**逐字节相同**（status code / description / 消息字节 / metadata key）
+#   SAME_CODE —— 两侧 **status code 相同**（语义等价），description 措辞允许不同
+#   OBS       —— 两侧**必须不同**（已登记的框架/库层差异）⇒ 变成一样反而是回归
+#   SKIP      —— 显式跳过，理由必须写在本文件里
+#
+# ⚠️ 业务用例的 rhdr 只保留**非 grpc-*} 的 key（理由见 README 第三节）。
+#    grpc-* 的头由 gRPC 协议与传输库产生，不是 favorite 域的行为 ⇒ 被单独放进
+#    c30_response_header_surface 这一个 OBS 用例里量化。
+#
+# ⚠️ SAME_CODE 的两条（c35 / c36）：两侧 **status code 都是 UNIMPLEMENTED**（语义一致），
+#    但 description 措辞不同 ⇒ 属 gRPC 库层 ⇒ 只断言 code 相同，不断言文案相同。
+#    ⚠️ 措辞的具体归因**未查清**（grpc-go v1.81.1 与 grpc-java 的源码里都找不到
+#    观测到的那串文案）⇒ 本探针只断言「code 相同 + 措辞不同」，不对文案内容下结论。
+#
+# ⚠️ c30 必须排在写入用例之前（否则它读的收藏夹被改名用例改过 ⇒ updated_at 变成
+#    「本次运行的时刻」⇒ 冻结值每次都不同 ⇒ 假红）。
+# ============================================================================
+
+c01_create_folder_uid0	SAME	code=INVALID_ARGUMENT|desc=参数错误|body=-|rhdr=-|rtrl=content-type=application/grpc
+c02_create_folder_name_empty	SAME	code=INVALID_ARGUMENT|desc=收藏夹名称不能为空|body=-|rhdr=-|rtrl=content-type=application/grpc
+c03_create_folder_name_blank	SAME	code=INVALID_ARGUMENT|desc=收藏夹名称不能为空|body=-|rhdr=-|rtrl=content-type=application/grpc
+c04_create_folder_user_rpc_absent	SAME	code=INTERNAL|desc=系统内部错误|body=-|rhdr=-|rtrl=content-type=application/grpc
+c05_create_item_uid0	SAME	code=INVALID_ARGUMENT|desc=参数错误|body=-|rhdr=-|rtrl=content-type=application/grpc
+c06_create_item_folder0	SAME	code=INVALID_ARGUMENT|desc=参数错误|body=-|rhdr=-|rtrl=content-type=application/grpc
+c07_create_item_target_empty	SAME	code=INVALID_ARGUMENT|desc=收藏目标不能为空|body=-|rhdr=-|rtrl=content-type=application/grpc
+c08_create_item_target_type_blank	SAME	code=INVALID_ARGUMENT|desc=收藏目标不能为空|body=-|rhdr=-|rtrl=content-type=application/grpc
+c09_create_item_user_rpc_absent	SAME	code=INTERNAL|desc=系统内部错误|body=-|rhdr=-|rtrl=content-type=application/grpc
+c10_list_folders_uid0	SAME	code=INVALID_ARGUMENT|desc=参数错误|body=-|rhdr=-|rtrl=content-type=application/grpc
+c11_list_folders_ok	SAME	code=OK|desc=-|body=hex:0a1a08aa4610e9071a04426574612085bfc8d7b7332885bfc8d7b7330a1b08a94610e9071a05416c70686120aeb6c8d7b73328aeb6c8d7b733|rhdr=content-type=application/grpc|rtrl=-
+c12_list_folders_empty	SAME	code=OK|desc=-|body=hex:|rhdr=content-type=application/grpc|rtrl=-
+c13_list_items_uid0	SAME	code=INVALID_ARGUMENT|desc=参数错误|body=-|rhdr=-|rtrl=content-type=application/grpc
+c14_list_items_folder0	SAME	code=INVALID_ARGUMENT|desc=参数错误|body=-|rhdr=-|rtrl=content-type=application/grpc
+c15_list_items_notfound	SAME	code=NOT_FOUND|desc=收藏夹不存在|body=-|rhdr=-|rtrl=content-type=application/grpc
+c16_list_items_forbidden	SAME	code=PERMISSION_DENIED|desc=无权限操作|body=-|rhdr=-|rtrl=content-type=application/grpc
+c17_list_items_ok	SAME	code=OK|desc=-|body=hex:0a2608da3610a94618e9072203742d322a0761727469636c65320254323a02633240d08dccd7b7330a2308d93610a94618e9072203742d312a04706f7374320254313a02633140e885ccd7b733|rhdr=content-type=application/grpc|rtrl=-
+c18_list_items_empty	SAME	code=OK|desc=-|body=hex:|rhdr=content-type=application/grpc|rtrl=-
+c19_delete_folder_uid0	SAME	code=INVALID_ARGUMENT|desc=参数错误|body=-|rhdr=-|rtrl=content-type=application/grpc
+c20_delete_folder_notfound	SAME	code=NOT_FOUND|desc=收藏夹不存在|body=-|rhdr=-|rtrl=content-type=application/grpc
+c21_delete_folder_forbidden	SAME	code=PERMISSION_DENIED|desc=无权限操作|body=-|rhdr=-|rtrl=content-type=application/grpc
+c22_delete_item_uid0	SAME	code=INVALID_ARGUMENT|desc=参数错误|body=-|rhdr=-|rtrl=content-type=application/grpc
+c23_delete_item_notfound	SAME	code=NOT_FOUND|desc=收藏记录不存在|body=-|rhdr=-|rtrl=content-type=application/grpc
+c24_delete_item_forbidden	SAME	code=PERMISSION_DENIED|desc=无权限操作|body=-|rhdr=-|rtrl=content-type=application/grpc
+c25_update_folder_uid0	SAME	code=INVALID_ARGUMENT|desc=参数错误|body=-|rhdr=-|rtrl=content-type=application/grpc
+c26_update_folder_name_empty	SAME	code=INVALID_ARGUMENT|desc=收藏夹名称不能为空|body=-|rhdr=-|rtrl=content-type=application/grpc
+c27_update_folder_notfound	SAME	code=NOT_FOUND|desc=收藏夹不存在|body=-|rhdr=-|rtrl=content-type=application/grpc
+c28_update_folder_forbidden	SAME	code=PERMISSION_DENIED|desc=无权限操作|body=-|rhdr=-|rtrl=content-type=application/grpc
+c29_update_folder_same_name	SAME	code=OK|desc=-|body=hex:0801|rhdr=content-type=application/grpc|rtrl=-
+c30_response_header_surface	OBS	code=OK|desc=-|body=hex:0a1a08aa4610e9071a04426574612085bfc8d7b7332885bfc8d7b7330a1b08a94610e9071a05416c70686120aeb6c8d7b73328aeb6c8d7b733|rhdr=content-type=application/grpc|rtrl=-
+c31_delete_folder_ok	SAME	code=OK|desc=-|body=hex:0801|rhdr=content-type=application/grpc|rtrl=-
+c32_delete_item_ok	SAME	code=FAILED_PRECONDITION|desc=收藏暂不可撤回|body=-|rhdr=-|rtrl=content-type=application/grpc
+c33_update_folder_ok	SAME	code=OK|desc=-|body=hex:0801|rhdr=content-type=application/grpc|rtrl=-
+c34_health_check	SAME	code=OK|desc=-|body=hex:0801|rhdr=content-type=application/grpc|rtrl=-
+c35_unknown_method	SAME_CODE	code=UNIMPLEMENTED|desc=unknown service /favorite.FavoriteService|body=-|rhdr=-|rtrl=content-type=application/grpc
+c36_unknown_service	SAME_CODE	code=UNIMPLEMENTED|desc=unknown service /favorite.NoSuchService|body=-|rhdr=-|rtrl=content-type=application/grpc
