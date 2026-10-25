@@ -282,6 +282,7 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 | **E15** | **L3 盲区①**：触发器函数体（`reject_*_mutation()`）逐条核对 | `tools/difftest/check-ddl-static.py` | ✅ **第二十七轮 L10 已闭合** ⇒ 脚本新增**结构化语义属性**比对（函数名 / 返回类型 / 参数 / volatility / timing / 事件集 / 粒度 / constraint / `WHEN`）⇒ **不逐字比 SQL 文本** ⇒ 人工逐条核对 3 对函数体（like / favorite ×2 / article 上下文）⇒ 三对**逐字节相同** ⇒ 🆕 顺带补上一个旧盲区（`pg_get_triggerdef` **查了却从不比对**） |
 | **E16** | **L3 盲区②**：`task` / `message` 两域的 DDL runner 重建 | `tools/difftest/check-ddl-static.py` + `ddl-parity.sh` | ✅ **第二十七轮 L10 已闭合** ⇒ 两域改用 **runner 自管容器**（`ddl-task-pg` / `ddl-message-pg`）⇒ 退出码语义与其它域统一 ⇒ 全 9 域复跑**逐域与 L3 基线一致** |
 | **E17** | **L4 边界①~③**：真 rpc 形态 / 迁移失败与回滚 + 同模块两副本 / 多轮压力与随机延迟 | `tools/difftest/flyway*` | ⏳ **第二十七轮 L11 进行中**（见下方「🔴 L11 的重大新发现」） |
+| **E19** | 🟢 **第二十七轮全仓回归** | `align/global` @ 第二十七轮收口 | ✅ **BUILD SUCCESS · 52 模块 · 2263 条 · 0 failures / 0 errors / 0 skipped**（上一轮 2235 ⇒ **净增 28 条** = X-5 轴 4×3 + slow 轴 8×2）⇒ 跑前删过全部旧 surefire XML ⇒ 条数无历史残留污染 |
 | **E18** | 🔴 **整合者修的两处跨 lane 守门缺陷** | 7 份 slow 轴守门 | ✅ **第二十七轮整合阶段已修** ⇒ ① **慢轴守门缺预热** ⇒ 绿是**执行顺序的副产品** ② **慢轴守门不断言前提成立** ⇒ 将来会以「找不到 span」变红 ⇒ 连带 **自曝错账 #4**（OTel 的 `set()` 存的是包装器 ⇒ 引用相等类断言恒红）⇒ 3 条新坑 **PIT-GLOBAL-026/027/028** |
 
 ### ⛔ favorite 相关的两条（**不可动，仅记账**）

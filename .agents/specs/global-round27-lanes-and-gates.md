@@ -143,7 +143,7 @@ globalOpenTelemetry = new ObfuscatedOpenTelemetry(openTelemetry);   // ← 存�
 
 ### 4.6 L11（Flyway 三条边界）
 
-见 [`docs/DRIFT/global/lanes/L11-flywaydeep.md`](../docs/DRIFT/global/lanes/L11-flywaydeep.md)。
+见 [`docs/DRIFT/global/lanes/L11-flywaydeep.md`](../../docs/DRIFT/global/lanes/L11-flywaydeep.md)。
 🔴 本 lane 挖出的**生产阻塞级新发现**已由整合者先行落档（见 §五）。
 
 ---
@@ -185,6 +185,8 @@ L4 的**最小 Spring 上下文**验证**看不到**这些问题（它不起真�
 - [x] **生产代码零改动**（唯一 `src/main` 改动 = `LikeRpcApplication` 的**过期注释**订正）
 - [x] `service/common` **零改动**
 - [x] **favorite 零改动**
+- [x] 🟢 **全仓回归**：`mvn -o test -fae` ⇒ **BUILD SUCCESS · 52 模块 · 2263 条 · 0 failures / 0 errors / 0 skipped**
+      （跑前删过全部旧 surefire XML ⇒ 条数无历史残留污染；上一轮 2235 ⇒ **净增 28 条**）
 - [x] 每条守门**都做过变异**且**红在目标断言上**
 - [x] 整合者的修复也**做过变异**（M-A：前提断言 ⇒ EXIT=1 且红在目标断言上）
 - [ ] ⚠️ **本轮仍未做 Go ↔ RAG 双侧活体对拍** ⇒ ⇒ **不能**据此宣称 Go↔RAG 已对齐（守门证明的是「RAG 侧机制生效」）

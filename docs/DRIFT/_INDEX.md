@@ -42,7 +42,7 @@
 | **`DRIFT-MSG-V-030`**：6 个 api 模块（article/comment/follow/hot/like/task-api）产物**不可执行** | 🔴 `check-jar-executable.sh` **`EXIT=1`** | ✅ **`EXIT=0`**（10/10 可执行 fat jar） | [`message/rpc.md`](./message/rpc.md) 第 6 节 |
 
 ⇒ **全量回归**：**2235 tests / 0 failures / 0 errors / 0 skipped**（**52 模块** · 2026-10-26 实测）⇒ 满足「绿灯必须额外断言 `skipped=0`」纪律。<br>⚠️ **2026-10-25 订正**：本行原写 **2110** —— 与实测差 1，**不是测试少了一条，是统计口径差**（见 [`../Pitfalls/_cross/testing-pitfalls.md`](../Pitfalls/_cross/testing-pitfalls.md)「陈旧 surefire 报告静默抬高测试计数」）。⇒ **现行口径：测试数只取回归日志的模块级汇总，不取 `target/surefire-reports/TEST-*.xml` 求和**（求和会被 10-23 留下的孤儿报告抬高）。
-> ⚠️ **2026-10-26 更新**：本行的数字已更新到 **2235 条 / 52 模块**（`align/global` @ 第二十六轮收口）⇒ 上一次全仓回归的中途快照（`full5`）曾是 **2234 条 / 2 failures**（两条红 = T-6 初版的 MockMvc 路径分叉 + like 守门自身的调度器泄漏 ⇒ **均非生产缺陷** ⇒ 已修）⇒ 逐条 ⇒ [`global/lanes/L1-delivery.md`](./global/lanes/L1-delivery.md) §十四。
+> ⚠️ **2026-10-26 更新（第二十七轮）**：本行的数字已更新到 **2263 条 / 52 模块**（`align/global` @ 第二十七轮收口 · 6 条 lane 合回后）⇒ 上一轮（第二十六轮）是 **2235 条**⇒ 本轮净增 **28 条**（X-5 轴 4 个组件 ×3 + slow 轴 8 个域 ×2）⇒ **0 failures / 0 errors / 0 skipped**⇒ 上一次全仓回归的中途快照（`full5`）曾是 **2234 条 / 2 failures**（两条红 = T-6 初版的 MockMvc 路径分叉 + like 守门自身的调度器泄漏 ⇒ **均非生产缺陷** ⇒ 已修）⇒ 逐条 ⇒ [`global/lanes/L1-delivery.md`](./global/lanes/L1-delivery.md) §十四。
 
 ## 🔴 状态更正（2026-10-23 实测，与 AGENTS.md §0 冲突）
 
