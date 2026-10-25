@@ -30,7 +30,7 @@
 | `article` | 🔴 rpc 4 MISMATCH + 4 OBS；api 2 MISMATCH（**首次对照即 NOT EQUIVALENT**）。⚠️ `DRIFT-ARTICLE-RPC-004` 复核后**撤销** | [`article/`](docs/DRIFT/article/rpc.md) |
 | `comment`/`follow`/`task` | ✅ **2026-10-25 并发对齐后「零台账」已解除**，各域 4/4/3 组件全部完成首轮对照 | [`_cross/`](docs/DRIFT/_cross/component-coverage-matrix.md) |
 | `favorite` | 🔴 `api`/`common`/`proto` 台账 **0 字节**（从未对照）；rpc 7 条未决。⚠️ **2026-10-25 本轮未做** | [`favorite/`](docs/DRIFT/favorite/rpc.md) |
-| 🆕 **`global`** | **收口域**（非微服务，见 §3.5）—— 跨微服务 + `service/common` 影响的**搁置漂移**。首版：common 尾巴 10 条 + 跨域不变量 7 条 + 4 仍未决 / 2 未销账 | [`global/`](docs/DRIFT/global/_README.md) |
+| 🆕 **`global`** | **收口域**（非微服务，见 §3.5）—— 跨微服务 + `service/common` 影响的**搁置漂移**。已 20 轮 ⇒ **待办清单见 `_README.md` §七之二** | [`global/`](docs/DRIFT/global/_README.md) |
 | 其余 | ⚠️ 10 个 `*-proto` 语义层一致（**8 个无回归网** ⇒ §3.4）；5 个 `*-common` 本轮未单独审查 | 见 DRIFT 索引 |
 
 > ⚠️ **「已改」≠「已验证」；「源码级对照」≠「双侧活体对拍」** ⇒ 台账里的 ✅ 一律读作「**在该证据强度下一致**」，
@@ -198,23 +198,21 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 ⚠️ **落地 ≠ 已对照** ⇒ 逐组件状态见 [`docs/DRIFT/_INDEX.md` 覆盖矩阵](docs/DRIFT/_INDEX.md)。
 **为什么不能退到微服务粒度**：域粒度下 `hot` 与 `article` 都会被打成 ✅ —— **那是假绿灯**。
 
-**跨组件不变量（不属于任何单个组件，别塞进组件任务里）** —— **收口域 = `global`**（2026-10-25 用户定）：
+**跨组件不变量（不属于任何单个组件）** —— **收口域 = `global`**（2026-10-25 用户定）：
 
-> **`global` 不是第 11 个微服务域，是「收口域」**：单微服务域已各自对齐完毕，但**修法落在共享层、或影响多个域**的漂移被搁置 ⇒ 全部归它。
-> 它**不是** api/rpc/proto 组件，而按**议题**分档：`common-tails`（别的域的漂移、落点在 `service/common`）· `cross-domain`（3+ 域不变量）· `cycle-deps`（需同一次提交走完）。
-> ⇒ **台账** [`docs/DRIFT/global/`](docs/DRIFT/global/_README.md)。
-> ⚠️ **边界**：`common` 域问「common 自己对不对」，`global` 问「**别人**因 common 而对不对」。
+> **`global` 不是第 11 个微服务域，是「收口域」**：修法落在共享层、或影响多个域的搁置漂移全部归它；按**议题**分档：`common-tails`（落点在 `service/common`）· `cross-domain`（3+ 域不变量）· `cycle-deps`（需同一次提交走完）。
+> ⇒ **台账** [`docs/DRIFT/global/`](docs/DRIFT/global/_README.md)。⚠️ **边界**：`common` 域问「common 自己对不对」，`global` 问「**别人**因 common 而对不对」。
 
 | 不变量 | 涉及组件 | 状态 | 落点 |
 |---|---|---|---|
 | 共享 Flyway 账本 | `message-rpc`↔`like-rpc`↔`article-rpc` | 配置层 + 运行时已闭环；**三模块同库共存**仍 `unresolved`（§6.3 问题 4） | `global/cross-domain` |
 | 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | **均未审** | `global/cross-domain` |
 | 事实投递链路 | `like` 的 api ↔ rpc ↔ 第三个仓库 | 链路本身不是任何组件的属性 | `global/cross-domain` |
-| `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🔴 未修 · 待拍板 | `global/cross-domain` |
-| DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🔴 未修（`check-ddl-static.py` 仅 4 域预设） | `global/cross-domain` |
+| `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | ✅ **已落地**（共享层修法 · favorite 零触碰） | `global/cross-domain` |
+| DDL 双侧活体逐列对照 | 其余 5 域（favorite 只建库） | 🔴 未修（`check-ddl-static.py` 仅 4 域预设） | `global/cross-domain` |
 
 **排序约束**：**rpc 必须先于 api**（Go 侧边界是 api→rpc；rpc 没验对就先验 api ⇒ 产出「RAG api 行为正确」的假结论——`message-rpc` 曾有 21 条全绿测试却一次没起过）。
-**跨域收口**：修法落在 `service/common` ⇒ **只有 `global` 能写**（别的域只读）⇒ 并发在这一点上必然排队。
+**跨域收口**：修法落在 `service/common` ⇒ **只有 `global` 能写**（别的域只读）⇒ 并发必排队 ⇒ **靠 lane 按「叶子文件」切**（§5.3c）。
 
 ## 四、当前重构（多 phase · 真理之源 = Go）
 
@@ -250,14 +248,13 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
    （`align/<域>` + `../RAG.worktrees/<域>`，均从 `do-my-own-gh` 切，主干最后接合并）。**工作树内只写自己域的台账文件；
    共享索引（各 `_INDEX.md`/`AGENTS.md`/`_MANIFEST.json`）合并后统一更新** ⇒ 多路并发必撞，且事后无法区分台账归属。
    ⚠️ `git stash` 是工作区级状态，会被并发 agent 互偷 ⇒ 不再作隔离手段。⚠️ **共享文件的改动要尽早提交**（实测已被并发会话
-   `git checkout` 整体回滚过一次）。操作手册 ⇒ [`docs/Worktree.md`](docs/Worktree.md)。
+   `git checkout` 整体回滚过一次）。⇒ 手册见 §7.2。
 3b. **三档台账：每域必读 + 必写**（2026-10-23 用户定）—— 开工前**必读** `docs/DRIFT/` + `docs/Intentional_Deviations/` +
-   `docs/Pitfalls/` 的**本域子目录 + `_cross/`**（否则会重复已修项、误把签字偏离当新漂移「顺手修回」）；
-   产出**必写回**同名的**本域子目录**：`<台账>/<域>/<组件>.md`（不一致 / 签字偏离 / 踩坑各归各档）。
-   ⚠️ **只写自己域，三个 `_INDEX.md` 合并后统一更新**。
+   `docs/Pitfalls/` 的**本域子目录 + `_cross/`**；产出**必写回**同名的**本域子目录**。⚠️ **只写自己域，三个 `_INDEX.md` 合并后统一更新**。⇒ 细则 ⇒ [`docs/Worktree.md`](docs/Worktree.md) §二·五
 3c. **`global` 收口域（2026-10-25 用户定）** —— 跨微服务 + `service/common` 影响的搁置漂移**全部归它**
    （§3.5）。⇒ **`service/common/**` 只有 `align/global` 能写**，别的域只读；
    修法同时涉及 `service/common` 与别的域代码时**必须同一次提交**（否则留下半截）。
+   ⇒ 🆕 **一个域可开多棵 lane 树并行**（`global` 已拆 5 条 lane，**按「叶子文件」切**）⇒ 协议 ⇒ [`docs/DRIFT/global/lanes/_PROTOCOL.md`](docs/DRIFT/global/lanes/_PROTOCOL.md)
 4. **作用范围**：仅限 RAG 仓库。`Sea-RideTheWind_golang` 已冻结只读；其他非 Spring Boot 的 Java 实现不在范围内。
 5. **Go 是真理之源**（2026-10-20 第三次切换，全子模块适用）。proto 字段号、错误码、JWT claims、表结构、HTTP path、
    Kafka topic 等语义细节一律以 Go 对应子模块为准；差异**只允许出现在表达层**，出现行为差异时默认判 **RAG 错**。
@@ -309,7 +306,7 @@ RAG 不是从 Go「推测」行为，而是**逐字对照 Go 源码**（§3.1）
 
 > **读法**：想知道「某条结论的依据在哪」查本表；想知道「怎么自己跑一遍」看 `复现` 列。⚠️ 任何「已修 / 未修 / 已对齐」断言**以对应台账为准**，本表只负责指路。
 
-**根目录**：`/Users/pr/Documents/java&golang/RAG`
+**根目录**：见 §一 表首行
 
 #### 文档档（`docs/`）
 
@@ -318,7 +315,7 @@ RAG 不是从 Go「推测」行为，而是**逐字对照 Go 源码**（§3.1）
 | [`docs/DRIFT/`](docs/DRIFT/_INDEX.md) | **语义漂移台账** —— 「RAG 与 Go 不一致」逐条留档。结构 `<域>/<组件>.md`（+ `global/` 收口域），`_cross/` 放跨模块档案 | 判定某模块是否已对齐、要查某条漂移的证据 |
 | [`docs/Pitfalls/`](docs/Pitfalls/_INDEX.md) | **踩坑档** —— 「为什么会踩」：框架机制静默失效、绿测试锁死错误答案、基础设施误用 | 写测试 / 接新框架 / 「配了却没生效」时 |
 | [`docs/Intentional_Deviations/`](docs/Intentional_Deviations/_INDEX.md) | **有意偏离档** —— 「明知与 Go 不同、**经签字批准**」。⚠️ **是决策不是缺陷：不重复质疑，也不得「顺手修正回旧行为」**。三类不可混谈：有意偏离 / 框架限制 / 表述差异 | 判断某条差异「要不要修」时 |
-| [`docs/FileTree/`](docs/FileTree/README.MD) · [`docs/HUMAN_ONLY/`](docs/HUMAN_ONLY/simple.md) · [`docs/MappingTable/`](docs/MappingTable/README.MD) · [`docs/Worktree.md`](docs/Worktree.md) | 理论文件树（15 份，⚠️ **迁移期脚手架**）· 包级阅读指南（api/rpc 两份）· 表名字段名映射 · **worktree 并发工作流**（§5.3 操作手册） | 规划模块结构 / 第一次进包 / 跨服务对表 / 开并发对齐前 |
+| [`docs/FileTree/`](docs/FileTree/README.MD) · [`docs/HUMAN_ONLY/`](docs/HUMAN_ONLY/simple.md) · [`docs/MappingTable/`](docs/MappingTable/README.MD) · [`docs/Worktree.md`](docs/Worktree.md) | 理论文件树（15 份，⚠️ **迁移期脚手架**）· 包级阅读指南（api/rpc 两份）· 表名字段名映射 · **worktree 并发工作流**（§5.3 · **global 多 lane**） | 规划模块结构 / 第一次进包 / 跨服务对表 / 开并发对齐前 |
 
 - ⚠️ **`docs/` 下两个 `common` 不是同一个组件**：`FileTree/common.md` = Go `service/common`（跨服务共享）；
   `FileTree/hot/common.md` = Go `service/hot/common`（**hot 专属，仅 1 个 `errmsg.go`**）。

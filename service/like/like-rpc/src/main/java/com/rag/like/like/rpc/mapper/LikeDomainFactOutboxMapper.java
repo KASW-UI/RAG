@@ -138,7 +138,7 @@ public interface LikeDomainFactOutboxMapper {
                 technical_input_hash = #{inputHash},
                 technical_offset = #{offset},
                 technical_received_at = #{receivedAt},
-                delivered_at = now()
+                delivered_at = #{deliveredAt}
             WHERE event_id = #{eventId}
             """)
     int markDelivered(@Param("eventId") String eventId,
