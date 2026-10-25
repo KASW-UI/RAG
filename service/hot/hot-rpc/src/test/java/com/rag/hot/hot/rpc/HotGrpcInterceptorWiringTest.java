@@ -24,12 +24,14 @@ import org.springframework.test.context.DynamicPropertySource;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -79,7 +81,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 而超时 / deadline 传播 / gRPC span 已全部静默消失 ——
  * 这正是 §3.3「断言 Bean 存在 ≠ 断言机制生效」的反面教材。
  * <p>所以本类起一个<b>真实 gRPC server</b>，用容器里那个 {@link GrpcServerConfigurer} 装配它，
- * 注册一个「故意睡 10 秒」的服务，然后用 5 秒的客户端 deadline 去调：
+ * 注册一个「处理函数一直不返回」的服务（用 latch 阻塞，不是 {@code sleep}），
+ * 然后用 5 秒的客户端 deadline 去调：
  * <ul>
  *   <li>若服务端超时生效 ⇒ <b>约 300ms</b> 就返回 {@code DEADLINE_EXCEEDED}
  *       （远早于客户端的 5 秒）；</li>
@@ -94,6 +97,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>⇒ 本类在 handler 内部读 {@link DeadlineState#remainingMillis()}：
  * 未接上时恒为 {@code Long.MAX_VALUE}（未设置），接上时 ≤ 服务端超时。
  * <b>两条用例分别覆盖 {@code interceptCall} 与 {@code onHalfClose} 两半。</b>
+ *
+ * <h2>🔴 2026-10-25（第二十三轮 · global L2 · X-5 残留）：本类原先<b>守门不严</b></h2>
+ * <p>本类的慢服务<b>已经</b>用 {@link io.grpc.stub.ServerCalls#asyncUnaryCall}（标准派发入口）注册
+ * ⇒ grpc-java 会把 {@code onHalfClose} 派发下去 ⇒ <b>handler 真的跑起来了</b>
+ * ⇒ 所以它<b>不是</b> task/follow 那种「绿但空转」的形态。
+ * <p><b>但它守不住退化</b>：原用例只断言「客户端拿到什么 status、耗时多久」，
+ * 而这两件事在「handler 压根没被调用过」时<b>同样成立</b>
+ * ⇒ 把 {@code asyncUnaryCall} 换回<b>裸</b> {@code ServerCallHandler}，本类<b>照样全绿</b>
+ * ⇒ 等于「一次没被验证过的修复」。
+ * <p>⇒ 本轮补上 task/follow 已有的两条断言：<b>handler 确实被调用过</b> +
+ * <b>取消发生时它仍在跑</b>；并把 {@code Thread.sleep(10_000)} 换成 latch
+ * （sleep 方案下这两条断言根本写不出来）。
+ * （探针证据与完整经过 ⇒ {@code docs/DRIFT/global/cross-domain.md} §二·八）
  *
  * <h2>为什么不需要真 PG / Testcontainers</h2>
  * <p>hot-rpc 没有 {@code @MapperScan}、没有 {@code DataSource} 依赖（存储侧是 Redis，
@@ -138,8 +154,8 @@ class HotGrpcInterceptorWiringTest {
 
         ServerBuilder<?> builder = ServerBuilder.forPort(0);
         configurer.accept(builder);                  // ← 被测的那一行（接口其实是 Consumer<ServerBuilder<?>>）
-        Server server = builder.addService(slowHotService(new AtomicLong(), new AtomicBoolean(), new AtomicReference<>()))
-                .build().start();
+        SlowHandlerProbe probe = new SlowHandlerProbe();
+        Server server = builder.addService(slowHotService(probe)).build().start();
 
         // ⚠️ **必须显式写 dns:/// scheme**：Nacos discovery 在全局 NameResolverRegistry 里
         //    注册了一个高优先级 provider，会把任何无 scheme 的 target 当作 serviceId 去 Nacos 拉实例。
@@ -152,7 +168,7 @@ class HotGrpcInterceptorWiringTest {
             StatusRuntimeException e = assertThrows(StatusRuntimeException.class,
                     () -> stub.withDeadlineAfter(5, TimeUnit.SECONDS)
                             .getHotArticles(GetHotArticlesRequest.newBuilder().setTopK(20).build()),
-                    "睡 10 秒的服务必须被超时打断");
+                    "「处理函数一直不返回」的服务必须被服务端超时打断");
             long elapsedMillis = (System.nanoTime() - startNanos) / 1_000_000;
 
             assertEquals(Status.Code.DEADLINE_EXCEEDED, e.getStatus().getCode(),
@@ -163,7 +179,21 @@ class HotGrpcInterceptorWiringTest {
                     "必须在服务端超时（300ms）附近返回，实际耗时 " + elapsedMillis
                             + "ms。若接近 5000ms，说明只有客户端 deadline 生效 —— "
                             + "即 server.intercept(...) 没挂上，超时/deadline 传播/gRPC span 已静默消失。");
+
+            // 🔴 2026-10-25（第二十三轮 · global L2 · X-5 残留）：下面这两条断言是**原来缺的**那一维。
+            //    原用例只看「客户端拿到什么 status、耗时多久」—— 而这两件事在
+            //    「handler 压根没被调用过」时**同样成立**（客户端照样等到自己的 5s deadline）
+            //    ⇒ 守门是空的，只能证明「服务端能取消一个空调用」。
+            //    ⇒ 本类原先用 asyncUnaryCall ⇒ 当前实现下 handler 确实跑起来了，
+            //      但**守不住退化**（换回裸 ServerCallHandler 仍全绿）⇒ 必须把这条维度钉死。
+            assertTrue(probe.entered.await(2, TimeUnit.SECONDS),
+                    "handler 必须**真的被调用过**。若为 false，说明 grpc-java 根本没把 onHalfClose "
+                            + "派发下去（裸 ServerCallHandler 就是这种情形）⇒ 本测试验的不是超时，而是空调用。");
+            assertFalse(probe.completed.get(),
+                    "服务端超时取消发生时，handler 必须**仍在跑**（未完成）。"
+                            + "若为 true，说明取消发生在处理完成之后 ⇒ 超时闸根本没作用在处理过程上。");
         } finally {
+            probe.release.countDown();               // 放行 handler，让它别挂在 30s 上
             channel.shutdownNow();
             server.shutdownNow();
         }
@@ -177,12 +207,12 @@ class HotGrpcInterceptorWiringTest {
 
         // handler 内部观测到的「剩余预算」；Long.MAX_VALUE = 未设置（= 没接上）
         AtomicLong observedRemaining = new AtomicLong(Long.MAX_VALUE);
-        AtomicBoolean handlerEntered = new AtomicBoolean(false);
         AtomicReference<String> handlerThread = new AtomicReference<>("<未进入>");
+        SlowHandlerProbe probe = new SlowHandlerProbe();
 
         ServerBuilder<?> builder = ServerBuilder.forPort(0);
         configurer.accept(builder);
-        Server server = builder.addService(slowHotService(observedRemaining, handlerEntered, handlerThread)).build().start();
+        Server server = builder.addService(slowHotService(probe, observedRemaining, handlerThread)).build().start();
 
         ManagedChannel channel = io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
                 .forTarget("dns:///127.0.0.1:" + server.getPort()).usePlaintext().build();
@@ -191,9 +221,9 @@ class HotGrpcInterceptorWiringTest {
             assertThrows(StatusRuntimeException.class,
                     () -> stub.withDeadlineAfter(5, TimeUnit.SECONDS)
                             .getHotArticles(GetHotArticlesRequest.newBuilder().setTopK(20).build()),
-                    "睡 10 秒的服务必须被超时打断");
+                    "「处理函数一直不返回」的服务必须被服务端超时打断");
 
-            assertTrue(handlerEntered.get(),
+            assertTrue(probe.entered.await(2, TimeUnit.SECONDS),
                     "handler 根本没被调用（线程 = " + handlerThread.get() + "）"
                             + "⇒ 本用例无法证明 deadline 传播；先确认 handler 入口本身可达");
 
@@ -205,7 +235,16 @@ class HotGrpcInterceptorWiringTest {
             assertTrue(remaining > 0 && remaining <= 300,
                     "handler 观测到的剩余预算应是服务端超时（300ms）之内，实际 = " + remaining
                             + "ms。若远超 300ms，说明绑的不是服务端超时而是别的时刻");
+
+            // 🔴 2026-10-25（第二十三轮 · global L2）：本条与上一条同源 ——
+            //    「deadline 传到了 handler 线程」只说明 onHalfClose 执行过，
+            //    还要证明「取消发生时它**仍在跑**」⇒ 超时闸作用在**处理过程**上，
+            //    而不是「处理早就结束了、事后才收到取消」。
+            assertFalse(probe.completed.get(),
+                    "取消发生时 handler 必须**仍在跑**（未完成）。"
+                            + "若为 true，说明取消发生在处理完成之后 ⇒ 超时闸根本没作用在处理过程上。");
         } finally {
+            probe.release.countDown();
             channel.shutdownNow();
             server.shutdownNow();
         }
@@ -225,18 +264,22 @@ class HotGrpcInterceptorWiringTest {
     }
 
     /**
-     * 注册一个「处理函数睡 10 秒」的服务 —— 用来观察超时是否真的生效。
+     * 注册一个「处理函数一直不返回」的服务 —— 用来观察超时是否真的生效。
      *
      * @param observedRemaining 供 handler 写入它观测到的剩余预算（{@code Long.MAX_VALUE} = 未设置）
      */
-    private static ServerServiceDefinition slowHotService(AtomicLong observedRemaining,
-            AtomicBoolean handlerEntered, AtomicReference<String> handlerThread) {
+    private static ServerServiceDefinition slowHotService(SlowHandlerProbe probe) {
+        return slowHotService(probe, new AtomicLong(Long.MAX_VALUE), new AtomicReference<>("<未进入>"));
+    }
+
+    private static ServerServiceDefinition slowHotService(SlowHandlerProbe probe,
+            AtomicLong observedRemaining, AtomicReference<String> handlerThread) {
         // ⚠️⚠️ **必须用 grpc-java 的标准 unary handler（ServerCalls.asyncUnaryCall）**，
         //    不能自己写一个裸 ServerCallHandler。
         //
         //    实测（2026-10-25）：用裸 ServerCallHandler 注册到 **unary** 方法上时，
         //    grpc-java **根本不会**把 onHalfClose 派发给它 ⇒ 方法体一次都不执行
-        //    （本类的诊断位 handlerEntered 恒为 false）。
+        //    （handlerEntered 恒为 false）。
         //    ⇒ 后果：服务端超时照样会由拦截器的调度器把 call 关掉 ⇒
         //    「超时生效」这类断言<b>照样是绿的</b>，但 handler 从未跑过
         //    ⇒ **这类断言证明不了「handler 真的被调用过」**。
@@ -247,18 +290,27 @@ class HotGrpcInterceptorWiringTest {
                 io.grpc.stub.ServerCalls.asyncUnaryCall(
                         (GetHotArticlesRequest req,
                          io.grpc.stub.StreamObserver<GetHotArticlesResponse> obs) -> {
-                            handlerEntered.set(true);
+                            probe.entered.countDown();
                             handlerThread.set(Thread.currentThread().getName());
                             // ⚠️ 此刻正是 RpcInterceptor 的 onHalfClose 绑定 deadline 的作用域内，
                             //    所以这里读到的就是「服务端看到的剩余预算」。
                             observedRemaining.set(DeadlineState.remainingMillis());
                             try {
-                                Thread.sleep(10_000);
+                                // 🔴 2026-10-25（第二十三轮 · global L2）：用 latch 而不是 sleep 10s ⇒
+                                // ① 测试可以在 finally 里**立刻**放行，不必等满 10 秒；
+                                // ② 可以**精确**观测「取消发生时它还在跑」。
+                                probe.release.await(30, TimeUnit.SECONDS);
                             } catch (InterruptedException e) {
                                 Thread.currentThread().interrupt();
                             }
-                            obs.onNext(GetHotArticlesResponse.getDefaultInstance());
-                            obs.onCompleted();
+                            probe.completed.set(true);
+                            try {
+                                obs.onNext(GetHotArticlesResponse.getDefaultInstance());
+                                obs.onCompleted();
+                            } catch (RuntimeException ignored) {
+                                // 调用已被服务端超时关闭 ⇒ 这里再写就会抛。
+                                // ⚠️ **不是**掩盖问题：本测试要断言的正是「关闭发生时它还在跑」这个时序。
+                            }
                         });
         // ⚠️ 自建一个只含 GetHotArticles 这一个方法的 ServiceDescriptor：
         //    ① 必须用生成代码里的**同一个** getGetHotArticlesMethod() 实例，否则报
@@ -271,5 +323,20 @@ class HotGrpcInterceptorWiringTest {
         return ServerServiceDefinition.builder(onlyGetHotArticles)
                 .addMethod(HotServiceGrpc.getGetHotArticlesMethod(), slowHandler)
                 .build();
+    }
+
+    /**
+     * 「处理函数确实被调用过」+「取消发生时它仍在跑」这两个证据。
+     *
+     * <p>⚠️ 这两个信号是<b>原来缺的那一维</b>：原用例只看「客户端拿到什么 status、耗时多久」，
+     * 而那两件事在「handler 压根没执行」时<b>同样成立</b> ⇒ 守门是空的。
+     */
+    private static final class SlowHandlerProbe {
+        /** handler 真的被调用 ⇒ countDown。 */
+        final CountDownLatch entered = new CountDownLatch(1);
+        /** 测试收尾时放行 ⇒ 让 handler 立刻退出，不必等满 30s。 */
+        final CountDownLatch release = new CountDownLatch(1);
+        /** handler 跑完了（= 取消发生时它已经不在跑了）。 */
+        final AtomicBoolean completed = new AtomicBoolean(false);
     }
 }
