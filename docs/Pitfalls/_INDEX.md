@@ -13,6 +13,9 @@
 > **20**：「Go 的上限是个常量」是错的 —— `net/http` 的真实上限 = 常量 **+ 4096 bufio slop**。
 > **2026-10-25 增量**：`_cross/testing-pitfalls.md` 新增 **「陈旧 surefire 报告静默抬高测试计数」**
 > （`user-rpc` 实测 XML 求和 129 / 真实 125，差 4 来自 10-23 的孤儿报告）⇒ **测试计数的口径已定死**。
+> **2026-10-25 第二十五轮增量**：`global/` 三份台账**已填**（`PIT-GLOBAL-001..019` 共 **19 条**）
+> ⇒ 本索引「已有内容」表里 global 那行原写的 **「0 份（3 个坑位已建）」已过期**（那是从「坑位已建、内容未填」时代留下的快照）。
+> 另：`PIT-GLOBAL-020`（变异只准在隔离工作树跑）**记录在** [`../DRIFT/global/lanes/_PROTOCOL.md`](../DRIFT/global/lanes/_PROTOCOL.md)（不重复落本档）。
 
 ## 计数（2026-10-25 机械扫描实测）
 
@@ -21,9 +24,17 @@
 
 | 项 | 值 |
 |---|---|
-| **全域坑位条目** | **280 条** / **29 份有内容的台账**（另 **16 份 0 字节**坑位，见「待填」）；另有 `common` 5 份 + `_cross` 4 份用**散文式**标题，不计入条数 |
-| **编号前缀族** | **8 族 / 15 个具体前缀**：`P-`（article/users/like 四家共用裸号）· `PIT-` · `PF-` · `PITFALL-` · `P-ADMINAPI-` · `P-HOTAPI-` · `P-HOTRPC-` · `P-MSGAPI-` |
+| **全域坑位条目** | **299 条** / **32 份有内容的台账**（另 **15 份 0 字节**坑位，见「待填」）；另有 `common` 5 份 + `_cross` 4 份 + `hot/common` 1 份用**散文式**标题，不计入条数 |
+| **编号前缀族** | **8 族 / 15 个具体前缀**：`P-`（article/users/like 四家共用裸号）· `PIT-` · `PF-` · `PITFALL-` · `P-ADMINAPI-` · `P-HOTAPI-` · `P-HOTRPC-` · `P-MSGAPI-` ·（+ `PIT-GLOBAL-` / `PIT-LIKEAPI-` / `PIT-USERSCOMMON-` / `PF-ARTICLE-` / `PITFALL-TASK-` / `PITFALL-MSG-` / `PITFALL-FOLLOW-` / `PIT-COMMENT-` / `PIT-LIKE-` / `PIT-USERS-`）|
 | **编号撞号** | **22 处** —— 见下方「编号撞号」 |
+
+> ⚠️ **2026-10-25 第二十五轮复核（口径已复现）**：本表原先写 **280 条 / 29 份 / 16 份 0 字节**，其中
+> **「280 条」本身是对的**（八域 users 67 + task 34 + message 36 + like 30 + hot 45 + article 37 + comment 15 + follow 16 = 280），
+> 但**漏算了 `global/` 三份的 19 条** ⇒ 本次改为 **299 条**；「有内容份数」29 → **32**（+global 三份）·
+> 「0 字节」16 → **15**（其中 1 份已被散文式内容填上）。
+> ⚠️ **复现口径（供后续重扫照抄，否则数会飘）**：一条 = 一个 `##`/`###` 标题，
+> 标题在去掉 `##` 与前置装饰字符（emoji 等）后**以 `P` / `PIT` / `PF` / `PITFALL` 开头并紧跟数字或编号段**；
+> `## 🔴 PITFALL-TASK-RPC-01`（emoji 在前）与 `## P1 — …`（无分隔符）**都算** ⇒ 漏任一条都会少算 34（task）或 22（hot）。
 
 ⚠️ **与 `docs/Intentional_Deviations/` 同款缺陷**：两档的编号**都**跨文件复用 ⇒ **编号不可寻址**。
 ⇒ 引用坑位时**必须同时给出「文件 + 域」**，不能只写 `P-1`。
@@ -42,6 +53,10 @@
 ⇒ **修法方向（未实施）**：统一前缀 + 域内连续（`P-<域>-<NN>`）。
 ⚠️ **改编号会破坏既有引用**（DRIFT 台账、javadoc、测试注释都按旧号检索）⇒ 属**跨档改造**，**本轮只登记不动**。
 
+⚠️ **2026-10-25 第二十五轮复核**：`global/` 域用的是**域内唯一前缀** `PIT-GLOBAL-` ⇒ **不新增撞号（+0）**。
+本表 **22 处**仍是 2026-10-25 首扫口径，**本轮未重算**（重算会因「同文件内重复编号」（如 `PITFALL-TASK-RPC-15` 与 `PITFALL-TASK-RPC-15·补`）
+是否算「一处」而产生口径漂移 ⇒ 宁可不改数，也不用一个**没验证过的口径**去覆盖一个**已标注日期的快照**。
+
 ## 目录结构与 `docs/DRIFT` 同构（`<域>/<api|rpc>.md`），空文件即待填坑位
 
 ## 已有内容（按域）
@@ -57,17 +72,28 @@
 | `comment` | 2 份 | 15 | `comment-rpc` 的 17 个类曾是空壳而全量编译 `EXIT=0` |
 | `follow` | 2 份 | 16 | —— |
 | `common` | 5 份 | 散文式 | 请求保护层四层：**recover → breaker → shedding → 业务观测**；链的定义点必须在共享模块，否则 10 个 rpc server 各写一遍 = 10 个可能写错的地方 |
-| 🆕 `global` | 0 份（3 个坑位已建） | 收口域 | **跨微服务 + `service/common` 影响的搁置漂移**（§3.5）。按议题分档：`common-tails` / `cross-domain` / `cycle-deps` |
+| 🆕 `global` | **3 份** | **19** | **跨微服务 + `service/common` 影响的搁置漂移**（§3.5）收口域。按议题分档：`common-tails` / `cross-domain` / `cycle-deps`。<br>主要坑：**查 Go 出处只在项目树里 grep 必落空**（真源在 `~/go/pkg/mod` 的 go-zero 源码里）· **「配置里没写」≠「没开」**· **变异两种假绿**（编译不过⇒读旧 XML / 红在更早断言上）· **改上游资源做变异而只跑下游⇒假阴性**· **用被测常量构造输入⇒恒绿** |
 | `_cross` | 4 份 | 散文式 | Flyway 账本撞号；框架机制静默失效实证；「跑绿 ≠ 对」的元教训；**陈旧 surefire 报告抬高测试计数** |
 
 ## 待填（空文件即坑位）
 
-`article/{common}` · `common/{_signed-deviations}` · `hot/…` 已全填 ·
-`like/…` 已全填 · `message/…` 已全填 · `task/{api,common,proto}` ·
-`users/admin/…` 已全填 · `users/user/…` 已全填 ·
-`favorite/*`（本域本轮未做）· `follow/common` 已填、`follow/proto` ·
-`comment/{common,proto}` 已填、`comment/proto` ·
-`_cross/{message-domain-wide,open-items,signed-deviations}`
+> **2026-10-25 第二十五轮机械扫描订正**（原表有 4 处「已填」断言与磁盘不符）：
+
+| 坑位 | 状态 |
+|---|---|
+| `_cross/{message-domain-wide, open-items, signed-deviations}` | 0 字节 |
+| `article/common` | 0 字节 |
+| `comment/{common, proto}` | 0 字节（⚠️ 原表写「已填」⇒ **实为未填**） |
+| `favorite/{api, common, proto, rpc}` | 0 字节（本域本轮未做） |
+| `follow/{common, proto}` | 0 字节（⚠️ 原表写「`follow/common` 已填」⇒ **实为未填**） |
+| `task/{api, proto}` | 0 字节 |
+| `users/admin/_shared` | 0 字节（⚠️ 原表写「`users/admin/…` 已全填」⇒ **实为未填**） |
+
+⇒ **已全填**：`hot/…`（3 份）· `like/…`（2 份）· `message/…`（2 份）· `users/{_shared, common, user/*}`（6 份）· `global/…`（3 份）· `common/…`（5 份，散文式）· `_cross/`（4 份散文式 + 3 份 0 字节）。
+
+⚠️ **两个「本目录不存在」的路径**（原表把它们列进待填 ⇒ 指错了地方）：
+- `task/common` —— **不存在**（Go 侧 `task` 域同样没有 `-common`，不是遗漏，是设计如此）；
+- `common/_signed-deviations` —— **不在本目录** ⇒ 它在 [`../Intentional_Deviations/common/_signed-deviations.md`](../Intentional_Deviations/common/_signed-deviations.md)（签字档，不是踩坑档）。
 
 ## 与 AGENTS.md §3.3 的关系
 
@@ -77,5 +103,5 @@ AGENTS.md **§3.3 保留全部规则条文**（那是每次都会进上下文的
 ## 搬移来源
 
 每段内容首行为 `<!-- @move AGENTS.md L<a>-L<b> · 标题 -->` 哨兵，正文为原样字节拷贝。
-逐段台账见 [`../DRIFT/_MANIFEST.json`](../DRIFT/_MANIFEST.json)（39 段），
+逐段台账见 [`../DRIFT/_MANIFEST.json`](../DRIFT/_MANIFEST.json)（**39 段**搬移 + **1 段**后补 ⇒ `entries` 实测 **40**），
 可重跑脚本 `tools/drift-move.py`（`extract` / `verify` / `delete`）。

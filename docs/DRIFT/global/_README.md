@@ -126,13 +126,13 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 
 | 不变量 | 涉及组件 | 状态（2026-10-25） |
 |---|---|---|
-| 共享 Flyway 账本 | `message-rpc`↔`like-rpc`↔`article-rpc` | 配置层 + 运行时已闭环；**三模块同库共存**仍 `unresolved`（§6.3 问题 4） |
-| 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | **均未审** |
+| 共享 Flyway 账本 | `message-rpc`↔`like-rpc`↔`article-rpc` | ✅ **已闭环** —— **第二十四轮 L4 真 PG 16 实测**：六个域（article / comment / follow / like / message / task）**可安全并发同库**（三本账本互不覆盖、Flyway advisory lock **按账本表名**算 key ⇒ 互不阻塞）⇒ 🔴 **favorite 不行**（缺 `spring.flyway.baseline-version: 0` ⇒ 故障形态是「**起得来、首次查库才炸**」）⇒ **只记账不修**（favorite 零写权）⇒ 工具 `tools/difftest/check-flyway-concurrent.sh` |
+| 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | ✅ **已审完**（第九轮）—— 交叉但无冲突 · client 契约 **10 域零漂移** ⇒ [`cross-domain.md`](cross-domain.md) §二·九 |
 | 事实投递链路 | `like`/`comment`/`favorite` 的 rpc ↔ **仓外 DC 平台** | ✅ **已闭合**（B2）—— 末端 = 仓外 `POST /v1/events`；仓内两侧 4↔4 对齐 ⇒ [`cross-domain.md`](cross-domain.md) §二·七 |
-| 社区消费者差异 | Go 用 `like`，RAG 不用 | ⏸ **仍未决**（交接 #9，与 `DRIFT-LIKE-003` 同一条） |
-| 裸 `ServerCallHandler` 不被 dispatch | **task + follow**（2026-10-25 实测扩面） | 🔴 **已确证**（第七轮探针）—— grpc-java 不向裸 handler 派发 `onHalfClose` ⇒ 两个域的「造慢服务」测试**绿但空转** ⇒ 修法下轮落地（`cross-domain.md` §二·八） |
+| 社区消费者差异 | Go 用 `like`，RAG 不用 | ✅ **已确证 + like 半边已落地**（**第二十轮**：like 事实投递链路 + 三套守门 22 条 + 变异 14/14）⇒ ⛔ **favorite 半边永久阻塞**（必须删 favorite 自己的 10 处调用） |
+| 裸 `ServerCallHandler` 不被 dispatch | **task + follow + user-rpc + message-rpc + hot-rpc** | ✅ **已修**（**第十七轮** task + follow 落地 ⇒ latch 取代 sleep + 补「handler 被调用过」断言）⇒ 🟢 **第二十四轮 L2 扩面**：10 个 rpc 组件里**只有 5 个**（user / message / hot / task / follow）有真 server 守门 ⇒ user-rpc / message-rpc **缺测试**（纯 Mockito）、hot-rpc **守门不严**（变异仍全绿）⇒ 三处**已补真 server 守门 + 加固** ⇒ 变异 8/8 全红 ⇒ ⛔ admin / article / comment / like / favorite **仍只有纯 mock**（登记在 L2 台账） |
 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🟡 **未修 · 可修（共享层）**（总数 ≥2048 且非空值 ≤2048 ⇒ Go 200 / RAG 5001）—— ⚠️ **2026-10-25 第十一轮推翻了自己的「favorite 边界下永久阻塞」结论**：上限可在运行期由 `service/common` 改掉（`Connector.setMaxParameterCount(-1)`）⇒ **10 个 api 模块零改动 ⇒ favorite 零触碰** ⇒ 修法落 `service/common`（global 单写权内）⇒ **不是拍板项、不需签字** ⇒ 见 [`cross-domain.md`](cross-domain.md) §二·十一 |
-| DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🟡 **部分闭合（2026-10-25 B3）** —— 查出**已有预设本身已失效**（users/message）⇒ 修好 + 扩到 `comment` ⇒ **可跑的域 1 → 4**；🔴 产出新差异 **X-10**（`message` 域索引列两侧不同）⇒ ✅ **已签字认账**（⚠️ **销账日 = 2026-10-23**，真实记录 = message 域 `SD-2026-10-23-06`：保留 RAG 的复合索引；global 侧的 `SD-2026-10-25-03` 已撤销为重复登记）；⚠️ 仍缺 article/like/hot/follow/favorite 的**双侧库环境** |
+| DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | ✅ **已闭合（第二十四轮 L3）** —— **真 PG 16 两侧各建真库**逐列对照（类型/长度/可空性/DEFAULT/索引/约束/触发器）：article **0 差异**（56 列）· follow **0 差异**（10 列）· like / favorite 的 7 处差异**全部是「RAG 更严」**（多 CHECK / 多触发器 / 多部分索引；根因 = Go 的 `CREATE TABLE IF NOT EXISTS` 在 AutoMigrate 之后是**空操作**）⇒ 已登记为**待签字候选** ⇒ ⚠️ **hot 域两侧都无数据库 ⇒ N/A（不是「已对齐」）** ⇒ 工具 `tools/difftest/ddl-parity.sh` |
 
 ---
 
@@ -145,12 +145,12 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 |---|---|---|---|
 | 2 | `UserDomainService` javadoc 假断言 | `UserDomainService.java:113` **原样还在** | ✅ **已销账**（2026-10-25，两步走完 ⇒ 见 [`cycle-deps.md`](cycle-deps.md)） |
 | 3 | `DRIFT-COMMON-005` 定案（`bindToCurrent` 签名是否允许破坏性变更） | 跨域（common + admin-rpc + user-rpc）的破坏性变更 | ⏸ **仍未决**（唯一被反复确认的未决项） |
-| 4 | `like` 的 `SD-2026-10-23-09` 描述订正 | like 域本轮未动 | ⏸ **仍未决** |
+| 4 | `like` 的 `SD-2026-10-23-09` 描述订正 | 🟡 **补丁已由 L5 出**（订正内容：`GoStyleRequestDeadline.applyTo` **是纳秒的** ⇒ 真实理由是「**只读** API 只有毫秒粒度」）⇒ **待整合者 fold** |
 | 8 | `docs/Pitfalls/common/_signed-deviations.md` 疑似错放 | ✅ **2026-10-25 已销账**：确认是 **0 字节空文件**（真名在 `docs/Intentional_Deviations/common/_signed-deviations.md`）⇒ **直接删除**（0 字节 ⇒ 删掉不可能丢内容） | ✅ **已销账** |
-| 9 | 社区消费者：Go 用 `like`，RAG 不用 | 与 `DRIFT-LIKE-003` 同一条，favorite 域本轮未做 | ⏸ **仍未决** |
+| 9 | 社区消费者：Go 用 `like`，RAG 不用 | ✅ **已销账**（**第二十轮**：like 半边事实投递链路落地 + 三套守门 22 条 + 变异 14/14）⇒ ⛔ **favorite 半边永久阻塞**（零写权 ⇒ 只记账） |
 | 10 | 裸 `ServerCallHandler` 不被 dispatch（task 域） | ✅ **2026-10-25 第七轮已确证**（探针实测 ⇒ grpc-java 不向裸 handler 派发 `onHalfClose` ⇒ task + follow 两域的测试空转）⇒ **未知项消解，转为待修** |
 
-⇒ **真实分布（2026-10-25 第七轮更新）**：已销账 **7 条**（#1/#5/#6/#7/#11/#2/**#8**）· **未销账 0 条**· **仍未决 3 条**（#3/#4/#9）—— #10 已由第七轮**确证**（机制 + 波及面）⇒ 从「未知」转为「待修」。
+⇒ **真实分布（2026-10-25 第二十四轮更新）**：已销账 **8 条**（#1/#5/#6/#7/#11/#2/**#8**/**#9**）· **未销账 0 条**· **仍未决 2 条**（#3/**#4**，其中 #4 的补丁已由 L5 出）—— #10 已由第七轮**确证**（机制 + 波及面）⇒ 从「未知」转为「待修」⇒ **第二十四轮 L2 已把 user-rpc / message-rpc / hot-rpc 三处补齐**。
 
 ⇒ **第三轮（2026-10-25）新增归位**：**T-4 的资源面残留**（「断连后在飞 gRPC 不被提前取消」）
 经真 Tomcat 11.0.24 实测 + Tomcat 源码取证 ⇒ **Tomcat 的 Servlet 层不向应用暴露客户端断连信号**
@@ -219,25 +219,25 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 | **A2** | **T-8** / `DRIFT-MSGAPI-013`（缺 `Traceparent`） | `service/common` 的 **HTTP 入口** | 注入 W3C `traceparent`（Go = go-zero `rest/handler/tracehandler.go` 的 `propagator.Inject`） | ✅ **第十九轮已落地** —— 🔴 根因不是「忘了写一行」，而是 **RAG 侧压根没有 server span**（无 `micrometer-tracing-bridge-otel` / 无 otel 自动配置 ⇒ `GlobalOpenTelemetry.get()` 是 no-op ⇒ `SpanContext` 恒 INVALID）⇒ 新增 `GoStyleTraceparentFilter`（**私有** `SdkTracerProvider`，**不碰全局**）⇒ **10 个 api 全生效、零 api 代码改动** ⇒ 🟢 **真 Tomcat + 裸 socket 守门 6 条 + 变异 3 条全红**（含「不是回显入向」「头名 canonical」）⇒ ⚠️ **同时新登记 T-11**：trace **导出**链路在 RAG 侧整体缺失（**本轮只登记、未修**）<br>⇒ 🔴 **第二轮：链上位置定案**（9 个 filter 的 `@Order` 整体后移，**相对顺序不变**）—— CORS 必须在 traceparent **之前**（Go 的 `cors.Middleware` 对 OPTIONS 短路 ⇒ 预检不带头）/ MaxConns·Shedding 必须在它**之后**（Go 的 TraceHandler 是 native 链第一个）/ 必须在 `HttpMiddleware` **之前**（它把容器线程的 `Context.current()` 搬进 worker ⇒ span 属性落在本类的 server span 上）⇒ 🟢 `article-api` 真容器 **+3 条**守门 + **变异 M4/M5 全红**（红在目标断言上）⇒ 🔴 **同时新登记 T-12**：「方法不匹配」出口 RAG **多带**一个 `Traceparent`（**只登记、未修**）⇒ 详见 [common-tails.md §一·T-8](common-tails.md) / [§一·T-12](common-tails.md) |
 | **A3** | **X-5**（裸 `ServerCallHandler` 不被 dispatch） | task + follow 的**测试**（非 favorite） | 换 `ServerCalls.asyncUnaryCall` + 补「handler 被调用过」断言 + 变异转红 | ✅ **第十七轮已落地** —— 两域已改（`sleep(10s)` ⇒ latch，因两条新断言在 sleep 方案下写不出来）⇒ **M1/M2/M3 三条变异全红** ⇒ 🟢 **生产代码零改动**（是**守门修复**，不是行为修复）⇒ 详见 [cross-domain.md §二·八 ⑤](cross-domain.md) |
 | **A4** | **B10** `users_user.extra_info` 写路径仍按 jsonb | users 域 2 处（`AdminDomainService.java:962` + `UserEntity.java:129`） | 列**早已是 TEXT** ⇒ 写路径改为按 TEXT 绑定 ⇒ 当前含 `\u0000` 时 PG 报 `22P05`（Go 成功 / RAG 5001） | ✅ **第十八轮已落地** —— 🔴 **真 PG 16 坐实**（`text` 列收下 14 字节；`CAST … AS jsonb` 被拒，**SQLSTATE 是 22P05 不是 22P02** ⇒ 台账旧结论已订正）⇒ ✅ **三处改完**（去掉 CAST + 实体换 `JsonTextTypeHandler` + **删除** `JsonbTypeHandler`）⇒ ✅ **真 PG 守门 2 条 + 3 条变异全红** ⇒ 详见 [cross-domain.md §二·十四](cross-domain.md) |
-| **A5** | **X-4 的 like 半边** | like 域 + `service/common` | RAG **另起炉灶**的 outbox+stream+scheduler 与 Go `communityfact` 收敛 | 🟡 可修 ⇒ ⚠️ **favorite 半边永久阻塞**（必须删 favorite 自己的 10 处调用） |
-| **A6** | **B6** like 域 `SD-2026-10-23-09` 描述订正 | like 域签字档 | 签字理由把**纳秒**的 `GoStyleRequestDeadline` 说成了毫秒 | ✅ 纯文档 |
-| **A7** | **O-1**（官方路径 · 可选优化） | `service/common` 探针那一处 | 用官方 `DisconnectedClientHelper.isClientDisconnectedException(ex)` 替掉自研断连判定 | 🟡 **可选后续优化，非必选**（见签字档附记） |
+| **A5** | **X-4 的 like 半边** | like 域 + `service/common` | RAG **另起炉灶**的 outbox+stream+scheduler 与 Go `communityfact` 收敛 | ✅ **第二十轮已落地**（like 事实投递链路 + 三套守门 22 条 + 变异 14/14 + 全仓 2213 条绿）⇒ ⛔ **favorite 半边永久阻塞**（必须删 favorite 自己的 10 处调用 ⇒ 零写权） |
+| **A6** | **B6** like 域 `SD-2026-10-23-09` 描述订正 | like 域签字档 | 签字理由把**纳秒**的 `GoStyleRequestDeadline` 说成了毫秒 | 🟡 **补丁已由 L5 出** ⇒ **待整合者 fold**（⚠️ `docs/DRIFT/common/alignment-2026-10-23.md:575/:600` 的**编号也记错了** ⇒ `-09` 是 worker 池裸 503 那条） |
+| **A7** | **O-1**（官方路径 · 可选优化） | `service/common` 探针那一处 | 用官方 `DisconnectedClientHelper.isClientDisconnectedException(ex)` 替掉自研断连判定 | ⛔ **不是待办** —— 用户 2026-10-25 06:40 已签字「**保持不变**」⇒ **不列入待办**（见签字档附记） |
 
 ### B · ❓ **未知项**（要取证才能定性）
 
 | # | 未知项 | 消解它需要什么 |
 |---|---|---|
-| **B1** | **X-1** 三模块同库共存（`message-rpc` / `like-rpc` / `article-rpc` 同库同 schema） | 🟡 **第十五轮已部分消解** —— 🔴 取证发现 **7 个 Flyway rpc 模块全部连同一个库** ⇒ 同库共存是**常态** ⇒ 查出 **comment / follow / like 三个域缺 `spring.flyway.baseline-version: 0`** ⇒ 非空 schema 下 **V1 被整条跳过 ⇒ 首张表建不出来 ⇒ 服务起不来**（同款缺陷 `message-rpc` 2026-10-24 已修并留了守门，**没被推广**）⇒ ✅ **三域已修 + 各配真 PG 守门（变异 6 条全红）**；⛔ **`favorite-rpc` 同款缺陷零触碰 ⇒ 记账 + 告知 owner**；🟢 **`article-rpc` 不受影响**（最低迁移版本 V8 > baseline 默认值 1 ⇒ 逐模块判定后排除，差点误修）；🟡 **「三进程并发」那个形态仍未验证** ⇒ 留一轮 |
-| **B2** | **X-7** 剩余 5 域 DDL 双侧活体逐列对照（article / like / hot / follow / favorite） | 每域的**双侧库环境 + runner**（`tools/difftest/` 现成 runner 只覆盖 hot / message / task）⇒ ⚠️ favorite **只建库、不碰其代码** |
+| **B1** | ✅ **已消解（第二十四轮 L4）** —— 真 PG 16 三进程并发同库实测：六个域**可安全并发同库**（独立账本表名 + advisory lock 按账本表名隔离）⇒ 🔴 **favorite 不行**（缺 `spring.flyway.baseline-version: 0`）⇒ **只记账不修**（零写权）<br>🟡 **X-1** 三模块同库共存（`message-rpc` / `like-rpc` / `article-rpc` 同库同 schema） | 🟡 **第十五轮已部分消解** —— 🔴 取证发现 **7 个 Flyway rpc 模块全部连同一个库** ⇒ 同库共存是**常态** ⇒ 查出 **comment / follow / like 三个域缺 `spring.flyway.baseline-version: 0`** ⇒ 非空 schema 下 **V1 被整条跳过 ⇒ 首张表建不出来 ⇒ 服务起不来**（同款缺陷 `message-rpc` 2026-10-24 已修并留了守门，**没被推广**）⇒ ✅ **三域已修 + 各配真 PG 守门（变异 6 条全红）**；⛔ **`favorite-rpc` 同款缺陷零触碰 ⇒ 记账 + 告知 owner**；🟢 **`article-rpc` 不受影响**（最低迁移版本 V8 > baseline 默认值 1 ⇒ 逐模块判定后排除，差点误修）；🟡 **「三进程并发」那个形态仍未验证** ⇒ 留一轮 |
+| **B2** | ✅ **已消解（第二十四轮 L3）** —— 5 域**真 PG 16 双侧活体逐列对照**跑完（类型/长度/可空性/DEFAULT/索引/约束/触发器）⇒ article / follow **0 差异**；like / favorite 的 7 处差异**全是「RAG 更严」** ⇒ 登记为待签字候选；⚠️ **hot = N/A**（两侧都无数据库 ⇒ **不是「已对齐」**）⇒ 工具 `tools/difftest/ddl-parity.sh` ⇒ ⛔ favorite **只建库、不碰其代码** |
 | **B3** | **X-9** 收敛方案定性 | hot / article 两份复制品**是否**收敛到唯一真源（favorite 那份永久留存 ⇒ 需定「收敛到什么程度」才不算制造新分叉） |
-| **B4** | **X-4 like 半边**的等价性判定 | 对四条调度契约逐条对拍：`POST /v1/events` · 1s 周期 · 每轮 16 条 · 单条失败即 break |
+| **B4** | ✅ **已消解（第二十轮）** —— 四条调度契约**逐条对拍通过**（`POST /v1/events` · 1s 周期 · 每轮 16 条 · 单条失败即 break）⇒ 三套守门 22 条（真 PG 16 14 条 + 真 Spring 上下文 5 条 + 真 HTTP 假 DC 3 条）+ 变异 14/14 全红 |
 
 ### C · 🏷 **待签字（登记类 —— 不升级为拍板）**
 
 | # | 条目 | 性质 |
 |---|---|---|
 | **C1** | `SD-2026-10-25-CAND-10`（hot 域 `DRIFT-HOTAPI-031`：超长请求行 ⇒ RAG 400+HTML / Go 431+`text/plain`） | 框架限制 |
-| **C2** | **T-7**（状态行缺 reason phrase，落点 Tomcat `Http11OutputBuffer`） | 框架限制 · ⚠️ **尚未登记候选条目** ⇒ 需补 |
+| **C2** | **T-7**（状态行缺 reason phrase，落点 Tomcat `Http11OutputBuffer`） | 框架限制 · 🟡 **候选条目由 L5 落档**（`docs/Intentional_Deviations/global/`） |
 | **C3** | users 域 **8 处 `DEFAULT CURRENT_TIMESTAMP`**（Go 无） | 刻意保留（同 message 域 `SD-2026-10-23-06` 已签的同形态） |
 | **C4** | `users_user.status` 可空性（Go 可空 / RAG `NOT NULL`） | RAG 更严 ⇒ 同 C3 族 |
 | **C5** | `DRIFT-COMMON-005` **差异②**（毫秒 vs 纳秒 ⇒ 必须动 `bindToCurrent` 签名） | 破坏性变更 |
@@ -246,8 +246,22 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 
 | # | 事项 | 为什么必须用户拍板 |
 |---|---|---|
-| **D1** | **T-6**（`DRIFT-MSGAPI-010`：JSON `Content-Type` 缺 `; charset=utf-8`） | 修法**可 Go 等价**（注册自定义 converter 写**原始字符串**）⇒ 但**必须先撤销 hot 域 `SD-HOT-API-006`**（其「不可逐字节复刻」前提已被本仓自己证伪）⇒ **撤销别的域的签字 = 用户的决定** |
-| **D2** | `DRIFT-COMMON-005` **差异①**（墙钟 vs 单调钟） | 与 C5 拆开后，**差异①不必破坏签名即可修** ⇒ 可只拍 C5 |
+| ~~**D1**~~ | ✅ **已拍板并落地（第二十五轮，2026-10-25 21:57）** —— 用户选「**撤销 `SD-HOT-API-006`，修 T-6**」⇒ 共享层 `GoStyleJsonContentTypeAdvice` ⇒ JSON 响应带 `charset=utf-8` ⇒ 10 个 api 全生效 ⇒ 真 Tomcat 守门 3 条 + 变异 2/2 全红<br>⚠️ **顺带订正一处错账**：原判「`SD-HOT-API-006` 的『不可逐字节复刻』前提已被本仓证伪」**不成立** —— 真实原因是 **Tomcat 11 归一化** ⇒ 应用层拿不到那个空格 ⇒ **原始理由成立且更强** ⇒ 撤销的性质 = **纯用户决策** | — |
+| ~~**D2**~~ | ⏸ **不再上报** —— 用户 **2026-10-24 已拍板**「`DRIFT-COMMON-005` **先记入台账，本轮不改**」（记录在 `docs/DRIFT/common/alignment-2026-10-23.md` §八·决策 2）⇒ **不重复占用拍板额度** | — |
+
+### 🆕 七之三、第二十一~二十五轮新增项（**2026-10-25 06:40 快照之后**）
+
+> ⚠️ 上面的 §七之二是 **2026-10-25 06:40 的快照** ⇒ **第十九轮之后的五轮都没进去** ⇒ 本节补齐。
+
+| # | 条目 | 落点 | 状态 |
+|---|---|---|---|
+| **E1** | **T-6** JSON 响应的 `Content-Type` 缺 `charset=utf-8` | `service/common`（新增 `GoStyleJsonContentTypeAdvice`） | ✅ **第二十五轮已修**（用户拍板撤销 `SD-HOT-API-006`）⇒ 10 个 api 全生效、零 api 代码改动 ⇒ 真 Tomcat 守门 3 条 + 变异 2/2 全红 ⇒ ⚠️ 残余**只差一个 OWS**（Tomcat 11 归一化 ⇒ 应用层拿不到那个空格 ⇒ **RFC 9110 OWS 不显著 ⇒ 语义相同**）⇒ 逐条证据见 [`lanes/L1-delivery.md`](lanes/L1-delivery.md) §十三 |
+| **E2** | **T-11** trace **导出**链路在 RAG 侧整体缺失 | `service/common`（全局 `OpenTelemetrySdk` + OTLP exporter + 关停 flush） | ✅ **第二十一~二十四轮已修** ⇒ **第二十四轮补上了 Go 侧活体对拍**（`tools/semantic-probe/trace/`：11 用例 · 8 一致 · 3 已知能力缺口 · **0 漂移**）⇒ 逐条证据见 [`lanes/L1-delivery.md`](lanes/L1-delivery.md) §九 / §十一 / §十二 |
+| **E3** | **T-12** 「方法不匹配」出口 RAG **多带**一个 `Traceparent` | 出口层级差异（Go router 层 vs RAG `DispatcherServlet` 内）⇒ **共享层改不动** | 🏷 **签字候选**（定性由 L5 落档）⇒ 根因与代价见 [`common-tails.md`](common-tails.md) §一·T-12 |
+| **E4** | **T-13** 超时路径的「响应撕裂 / 状态码被抢」 | `service/common`（`ObservabilityResponseWriter` 的单写者语义） | ✅ **第二十二轮已修**（锁串行化 + 超时后 worker 不许提交 + 先标记后中断 + `Content-Length` 对齐）⇒ 真 Tomcat 守门 + 变异 5/5 全红 ⇒ 逐条证据见 [`lanes/L1-delivery.md`](lanes/L1-delivery.md) §十 |
+| **E5** | **X-5** 剩余 3 个 rpc 域的拦截器守门复查 | `service/{users/user/user-rpc,users/admin/admin-rpc,message/message-rpc,hot/hot-rpc}/src/test/**` | ✅ **第二十四轮 L2 已补齐**（user-rpc / message-rpc **缺测试** ⇒ 新建真 server 守门；hot-rpc **守门不严** ⇒ 加固；admin-rpc **新增** slow threshold 守门）⇒ 变异 8/8 全红 ⇒ ⛔ admin / article / comment / like / favorite **仍只有纯 mock**（登记在 L2 台账） |
+| **E6** | **X-7** 5 域 DDL 双侧活体逐列对照 | `tools/difftest/ddl-parity.sh` | ✅ **第二十四轮 L3 已闭合** ⇒ article / follow **0 差异**；like / favorite 的 7 处差异**全是「RAG 更严」** ⇒ 待签字候选；⚠️ **hot = N/A**（两侧都无数据库 ⇒ **不是「已对齐」**） |
+| **E7** | **X-1** 三进程同库共存 | `tools/difftest/check-flyway-concurrent.sh` | ✅ **第二十四轮 L4 已闭合**（六个域可安全并发同库）⇒ 🔴 **favorite 不行**（缺 `baseline-version: 0` ⇒ **起得来、首次查库才炸**）⇒ **只记账不修** |
 
 ### ⛔ favorite 相关的两条（**不可动，仅记账**）
 
@@ -263,6 +277,8 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 
 | 日期 | 动作 |
 |---|---|
+| 2026-10-25 | ✅ **第二十五轮（T-6 落地）** —— ① 用户拍板「撤销 `SD-HOT-API-006`，修 T-6」⇒ 共享层新增 `GoStyleJsonContentTypeAdvice`（`@AutoConfiguration` ⇒ **10 个 api 全生效**、零 api 代码改动）⇒ JSON 响应头从裸 `application/json` 变成 `application/json;charset=utf-8` ② 🟢 **真 Tomcat + 裸 socket 守门 3 条 + 变异 2/2 全红**（M8 不写头 ⇒ 两个 JSON 门红；M9 无条件写 ⇒ 「不误伤」门红）③ 🔴 **自曝错账 #2**：本档原写的「`SD-HOT-API-006` 的『不可逐字节复刻』前提已被本仓证伪」**不成立** —— 真实原因是 **Tomcat 11 归一化**（`Response.setContentType` 把 Content-Type 拆成 (type/subtype, charset) 重新拼）⇒ 应用层**根本拿不到那个空格** ⇒ 原始理由**成立且更强** ⇒ 撤销的性质 = **纯用户决策** ④ ⚠️ 顺带订正 `GoStyleRouterErrorResponses` 一条**被证伪的注释**（原文称「写原始字符串是唯一能保证逐字节对上的做法」⇒ 实测证伪） |
+| 2026-10-25 | ✅ **第二十四轮（Go 侧活体对拍 + 三条 lane 收口）** —— ① 🟢 **新增 `tools/semantic-probe/trace/`**（**第二个** semantic probe）：Go 半边是 go-zero **真源包内**测试（`createExporter` / `startAgent` 未导出 ⇒ 只能进包内）+ RAG 半边只调**生产类** ⇒ **11 用例 · 8 一致 · 3 已知能力缺口 · 0 漂移** ⇒ ⚠️ **挖出一条 RAG 侧没有守门的语义**（「入向 parent 未采样 ⇒ 子 span 不采样」）⇒ 补了**门 8** + 变异 2/2 ② 🟢 **L3**（5 域 DDL 活体对照）· **L4**（三进程同库共存）· **L2**（3 域 rpc 守门复查 + slow threshold）三条 lane **全部收口并合回** ③ 🔴 **白名单订正**：L1 补登记 `service/common`（T-11/T-13 实际写了但当时只记账没登记 ⇒ 守门给的是假保证）· L2 补登记 admin-rpc ⇒ 机器守门 EXIT=0 |
 | 2026-10-25 | ✅ **第十九轮 · 第二轮（T-8 链上位置定案 + T-12 登记）** —— ① 🔴 **链上位置是「承重」的**：三条约束各有 Go 出处（CORS **之前** / MaxConns·Shedding **之后** / `HttpMiddleware` **之前**）⇒ 9 个 filter 的 `@Order` **整体后移**（**相对顺序不变**）⇒ 顺带修掉「CORS 与 path.Clean 同级 ⇒ 靠 Bean 注册序定序」的**隐式依赖** ② 🟢 `article-api` 真容器 **+3 条**守门（完整链序 / `cors < traceparent < maxConns` / **OPTIONS 预检 204 不带 `Traceparent`**）③ 🟢 **变异 M4/M5 全红且红在目标断言上** ⇒ ⚠️ 这两条**只有 article-api 的守门能抓**（`service/common` 那 6 条看不见 `@Order`）④ 🔴 **新增 T-12**（「方法不匹配」出口 RAG **多带**一个 `Traceparent` ⇒ 随 T-8 落地才暴露 ⇒ **只登记、未修**）⑤ ⚠️ 顺带查清易误判点：Go 的「未注册路径 404」**也带** traceparent（`rest/server.go:58` 的 `NewServer` **默认** prepend `WithNotFoundHandler(nil)`）⇒ T-12 **只**涉及「方法不匹配」这一个出口 |
 | 2026-10-25 | ✅ **第十九轮（T-8 落地）** —— ① ✅ **T-8 已落地**（`service/common` 新增 `GoStyleTraceparentFilter`）⇒ **10 个 api 全生效、零 api 代码改动**② 🔴 **根因**：RAG 侧**压根没有 server span**（无 `micrometer-tracing-bridge-otel` / 无 otel 自动配置 ⇒ `GlobalOpenTelemetry.get()` 是 no-op）⇒ 故自带**私有** `SdkTracerProvider`（**不碰全局**）③ 🔴 **头名大小写**：Go canonical 成 `Traceparent`，OTel Java 写小写且 Tomcat 原样发出 ⇒ **字节级不一致** ⇒ 主动 canonical 化（变异 M3 实测）④ 🟢 **真 Tomcat + 裸 socket 守门 6 条 + 变异 3 条全红** ⑤ 🔴 **一并修掉** `service/common` 的 **OpenTelemetry 版本错配**（api 1.62.0 vs context/sdk 1.44.0 ⇒ 运行时 `NoSuchMethodError`）⇒ 统一由 BOM 管（**对 10 个 api 零影响**）⑥ 🟢 **新增 T-11**（trace **导出**链路整体缺失 ⇒ **只登记、未修**） |
 | 2026-10-25 | ✅ **第十八轮（B10 落地）** —— ① 🔴 **真 PG 16 坐实** —— `text` 列收下 Go 侧 `encoding/json` 产出的 14 字节 `{"k":"\u0000"}`；`CAST(… AS jsonb)` **被拒** ⇒ **Go 成功 / RAG 5001** 坐实 ② 🔴 **订正到处写错的 SQLSTATE**：**22P05**（`json_bad_unicode_escape`），**不是** 22P02 ⇒ 本域 5 处已改；⛔ users 域台账 3 处**不在 global 写权内** ⇒ 记账 + 交 owner ③ ✅ **三处改完**（去 CAST + 实体换 `JsonTextTypeHandler` + **删** `JsonbTypeHandler`）④ ✅ **真 PG 守门 2 条 + 3 条变异全红**⑤ 🔴 **变异脚本第三个坑**：改**上游模块的资源**（`users-common` 的 DDL）而只跑下游 ⇒ Maven 从 `~/.m2` 解析旧 jar ⇒ **改动到不了运行代码** ⇒ 必须把上游拉进**同一 reactor**；surefire 参数换代 ⇒ `-Dsurefire.failIfNoSpecifiedTests=false` |

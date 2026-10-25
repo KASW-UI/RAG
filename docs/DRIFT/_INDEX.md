@@ -9,11 +9,11 @@
 | 项 | 值 |
 |---|---|
 | 源文件 | `AGENTS.md` 369,625 B / 4094 行 |
-| 搬出 | **39 段 / 3,629 行 / 330,494 B**（另 4 处手工搬移：§7.1 锚点表 / §4.3 原话 / §6.3 决策详述 / §0 原文快照） |
+| 搬出 | **39 段 / 3,629 行 / 330,494 B**（另 4 处手工搬移：§7.1 锚点表 / §4.3 原话 / §6.3 决策详述 / §0 原文快照）<br>⚠️ **2026-10-25 订正**：`_MANIFEST.json` 的 `entries` 实测 **40 段** —— **搬移本身仍是 39 段**，第 40 段（`_cross/fix-round-2026-10-23.md` L54-101）是**搬移之后**补登记的（`e993ff0`）⇒ 本行的「39 段」指**搬移动作**，与 manifest 的条数不是同一口径 |
 | 保留 + 压缩 | AGENTS.md 搬移当时 **30,207 B / 396 行** ⇒ **2026-10-25 现为 32,734 B / 370 行**（§0 结论订正 + §7.2 守门脚本 ⇒ 仍在 **32 KB 预算内**，余 **34 B**） |
 | 校验（搬移当时） | **零丢失 · 零重复**（逐字节）；删除前另有 39 段互不重叠 + 覆盖全文无空隙的检查 |
 | ⚠️ **校验（2026-10-25 复核）** | 🔴 **`tools/drift-move.py verify` 已转 `EXIT=1`（4 段）** —— `like/rpc.md` L57-71 · `message/rpc.md` L72-101 · `message/api.md` L102-420 · `_cross/fix-round-2026-10-23.md` L54-101 **原文已找不到**。<br>**原因**：**10-25 的 10 域并发对齐把各域台账正文重写了**（追加了大量新轮次章节）⇒ 被搬的那几段原文不再是逐字节可校验的形态。<br>⇒ **本行「零丢失」是 2026-10-23 搬移当时的口径，不是现状**；现状以本行为准。<br>⚠️ **不要**为了让它转绿而回改各域台账正文（那是真实产出）⇒ 该基线（`AGENTS.md` @ `81744d1`）已**作废**。 |
-| 逐段指针 | [`_MANIFEST.json`](./_MANIFEST.json) —— 每段带 `AGENTS.md L<a>-L<b>`；6 段进 `docs/Pitfalls/` |
+| 逐段指针 | [`_MANIFEST.json`](./_MANIFEST.json) —— 每段带 `AGENTS.md L<a>-L<b>`；6 段进 `docs/Pitfalls/`；`entries` 实测 **40** |
 | 可重跑脚本 | `tools/drift-move.py`（幂等；重新执行会覆盖同路径文件） |
 
 每个搬入文件的首行是 `<!-- @move AGENTS.md L<a>-L<b> · 标题 -->` 哨兵行。
@@ -31,7 +31,7 @@
 | **`article`** | [`article/common.md`](./article/common.md)<br>[`article/api.md`](./article/api.md) · [`article/rpc.md`](./article/rpc.md) · [`article/proto.md`](./article/proto.md) | 🔴 **api 与 rpc 均已对照，且都仍判 `NOT EQUIVALENT`**：api 第十三轮（41 文件 / 5,733 行，2026-10-24 修复轮 4 条未修漂移已修 + 变异验证）判定**不变**（仍有 DRIFT / UNRESOLVED 在，无双侧活体对拍）；rpc 13 条已改，**S-5 阻塞于 security 域迁移**，MQ 事件契约未冻结，U-2 真并发用例未写 |
 | **`favorite`** | [`favorite/rpc.md`](./favorite/rpc.md) | **rpc 已落地 + 首轮源码级对照（2026-10-23）**：36 文件 / 7,057 行 / **56 例绿**（真 PG）；本轮**修掉 6 处 L2 语义偏差**（含 3 处「写路径误用读路径 5007」）。🔴 **2026-10-25 本轮未做**（合并时按用户要求跳过）⇒ `api`/`common`/`proto` 仍零台账 |
 | 🆕 **`comment` / `follow` / `task`** | [`comment/api.md`](./comment/api.md) · [`comment/rpc.md`](./comment/rpc.md) · [`comment/common.md`](./comment/common.md) · [`comment/proto.md`](./comment/proto.md)<br>[`follow/api.md`](./follow/api.md) · [`follow/rpc.md`](./follow/rpc.md) · [`follow/common.md`](./follow/common.md) · [`follow/proto.md`](./follow/proto.md)<br>[`task/rpc.md`](./task/rpc.md) · [`task/api.md`](./task/api.md) · [`task/proto.md`](./task/proto.md) · [`task/_README.md`](./task/_README.md) | **2026-10-25 并发对齐后**：三域「零台账」状态已解除，各自 4/4/3 组件全部完成首轮对照。⚠️ 合并前的旧状态见 [`_cross/new-domains-2026-10-23.md`](./_cross/new-domains-2026-10-23.md) 与 [`_cross/component-coverage-matrix.md`](./_cross/component-coverage-matrix.md) |
-| 🆕 **`global`**（收口域） | [`global/_README.md`](./global/_README.md)<br>[`global/common-tails.md`](./global/common-tails.md) · [`global/cross-domain.md`](./global/cross-domain.md) · [`global/cycle-deps.md`](./global/cycle-deps.md)<br>🆕 [`global/lanes/_PROTOCOL.md`](./global/lanes/_PROTOCOL.md)（多 lane 并行协议 + 5 份任务书） | **跨微服务 + `service/common` 影响的搁置漂移**收口处（§3.5）。**不是第 11 个微服务域**，按议题分档。已推进 20 轮：common 尾巴 T-1~T-12 + 跨域不变量 X-1~X-10 + 循环依赖 CYCLE-001~002；**待办清单 ⇒ `_README.md` §七之二** |
+| 🆕 **`global`**（收口域） | [`global/_README.md`](./global/_README.md)<br>[`global/common-tails.md`](./global/common-tails.md) · [`global/cross-domain.md`](./global/cross-domain.md) · [`global/cycle-deps.md`](./global/cycle-deps.md)<br>🆕 [`global/lanes/_PROTOCOL.md`](./global/lanes/_PROTOCOL.md)（多 lane 并行协议 + 5 份任务书）<br>🆕 **lane 台账（自足片段，共享文件由整合者 fold）**：[`L1-delivery.md`](./global/lanes/L1-delivery.md)（第二十~二十五轮 · 含 Go 侧活体探针 + T-6）· [`L2-rpcgate.md`](./global/lanes/L2-rpcgate.md)（X-5 残留）· [`L3-ddl.md`](./global/lanes/L3-ddl.md)（五域 DDL 双侧活体）· [`L4-flyway.md`](./global/lanes/L4-flyway.md)（三进程同库共存）· [`L5-signoff.md`](./global/lanes/L5-signoff.md)（C 类登记 + T-11/T-12 定性） | **跨微服务 + `service/common` 影响的搁置漂移**收口处（§3.5）。**不是第 11 个微服务域**，按议题分档。已推进 **25 轮**：common 尾巴 T-1~T-12（**T-6 已修** · T-11 已修）· 跨域不变量 X-1~X-10 · 循环依赖 CYCLE-001~002；**待办清单 ⇒ `_README.md` §七之二** |
 | **`_cross`** | [`_cross/open-items.md`](./_cross/open-items.md)<br>[`_cross/decisions.md`](./_cross/decisions.md) | 已知未修表 + 决策详述（**签字偏离已迁出** ⇒ 见 `docs/Intentional_Deviations/`） |
 
 ### 🟢 2026-10-25 增量（本轮已修 · 两处「域内桶」缺口）
