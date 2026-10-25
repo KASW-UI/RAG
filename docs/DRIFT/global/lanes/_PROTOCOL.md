@@ -25,7 +25,7 @@
    —— 否则看不到 19 轮的代码产出与台账，等于重做已修项。
 2. **每条 lane 只写自己任务书里的白名单文件** ⇒ 文件级零重叠 ⇒ 永不冲突。
    ⇒ 🟢 **机器守门**：`python3 tools/difftest/check-global-lane-ownership.py`
-   （断言 5 条 lane 白名单**两两不重叠** · 10 个共享文件**无人拥有** · **favorite 零写权**；`EXIT=0` 才算合规；
+   （断言**在跑的 6 条** lane 白名单**两两不重叠**（已合回的 L1~L5 单独归档、不参与重叠判定）· 10 个共享文件**无人拥有** · **favorite 零写权**；`EXIT=0` 才算合规；
    已做 4 条变异**全部转红且红在目标断言上**）
 3. **lane 不写共享文件**
    —— ⛔ `AGENTS.md` · 三个 `_INDEX.md` · `docs/DRIFT/_MANIFEST.json` ·
@@ -36,17 +36,42 @@
 > ⚠️ **共享文件（含 `AGENTS.md`）的改动要尽早提交** —— 实测已被并发会话 `git checkout` 整体回滚过一次。
 > ⚠️ **`git stash` 不作隔离手段** —— 它是工作区级状态，会被并发 agent 互偷。
 
-## 三、lane 清单（2026-10-25 建）
+## 三、lane 清单（2026-10-25 建 · 2026-10-26 扩到 11 条）
+
+### 3.1 在跑（第二十七轮 · 6 条）
 
 | lane | 分支 | 工作树 | 议题 | 独占写权 |
 |---|---|---|---|---|
-| **L1** | `align/global`（**本体**） | `../RAG.worktrees/global` | **X-4** like 半边（社区事实投递链路）+ 共享层 `Dispatcher.runAsync`；**第二十一~二十三轮**：`service/common` 的 OTel 全局 SDK（trace 导出链路）与超时响应单写者语义 | `service/like/like-rpc/**` · `service/comment/comment-rpc/**` · `service/common/communityfact/Dispatcher.java` · `service/common/pom.xml` · `service/common/src/main/java/com/rag/common/{http,observability}/**` · `service/common/src/main/resources/**` · `service/common/src/test/java/com/rag/common/{http,observability}/**` |
-| **L2** | `align/global-rpcgate` | `../RAG.worktrees/global-rpcgate` | **X-5** 残留（3 个 rpc 域守门复查 + slow threshold） | `service/{users/user/user-rpc,users/admin/admin-rpc,message/message-rpc,hot/hot-rpc}/src/test/**` |
-| **L3** | `align/global-ddl` | `../RAG.worktrees/global-ddl` | **X-7** 残留（5 域 DDL 双侧活体逐列对照） | `tools/difftest/check-ddl-static.py` + `tools/difftest/ddl*` |
-| **L4** | `align/global-flyway` | `../RAG.worktrees/global-flyway` | **X-1** 残留（三进程同库共存真 PG 验证） | `tools/difftest/check-flyway-concurrent.sh` + `tools/difftest/flyway*` |
-| **L5** | `align/global-signoff` | `../RAG.worktrees/global-signoff` | **C 类登记** + T-7/T-11/T-12 定性 + A6 订正 | `docs/DRIFT/global/lanes/L5-signoff.md` + `docs/Intentional_Deviations/global/**` + `docs/Pitfalls/global/**` |
+| **L6** | `align/global-x5gate` | `../RAG.worktrees/global-x5gate` | **X-5 轴**真 server 守门（admin-rpc / article-rpc）+ article slow 轴 + 缺口④ 复评 | `service/users/admin/admin-rpc/src/test/**` · `service/article/article-rpc/src/test/**` · `docs/DRIFT/global/lanes/L6-x5gate.md` |
+| **L7** | `align/global-slowgate` | `../RAG.worktrees/global-slowgate` | **X-5 轴** + **slow 轴**（comment-rpc / like-rpc） | `service/comment/comment-rpc/src/test/**` · `service/like/like-rpc/src/test/**` · `docs/DRIFT/global/lanes/L7-slowgate.md` |
+| **L8** | `align/global-slowgate2` | `../RAG.worktrees/global-slowgate2` | **slow 轴**推广（user-rpc / message-rpc / hot-rpc） | `service/users/user/user-rpc/src/test/**` · `service/message/message-rpc/src/test/**` · `service/hot/hot-rpc/src/test/**` · `docs/DRIFT/global/lanes/L8-slowgate2.md` |
+| **L9** | `align/global-interrupt` | `../RAG.worktrees/global-interrupt` | **slow 轴**（task-rpc / follow-rpc）+ **缺口③ 的定性**（打断维度） | `service/task/task-rpc/src/test/**` · `service/follow/follow-rpc/src/test/**` · `docs/DRIFT/global/lanes/L9-interrupt.md` |
+| **L10** | `align/global-ddldeep` | `../RAG.worktrees/global-ddldeep` | **DDL 盲区**：触发器函数体逐条核对 + task/message DDL runner 重建 | `tools/difftest/check-ddl-static.py` · `tools/difftest/ddl*` · `docs/DRIFT/global/lanes/L10-ddldeep.md` |
+| **L11** | `align/global-flywaydeep` | `../RAG.worktrees/global-flywaydeep` | **Flyway 三条边界**：真 rpc 形态 / 迁移失败与回滚 / 压力与随机延迟 | `tools/difftest/check-flyway-concurrent.sh` · `tools/difftest/flyway*` · `tools/difftest/check-flyway-ledger.py` · `docs/DRIFT/global/lanes/L11-flywaydeep.md` |
 
-⇒ **L2~L5 文件级零重叠** ⇒ 四路可同时开工。
+⇒ **6 条 lane 按模块零重叠** ⇒ 可同时开工。
+
+### 3.2 已合回（历史 lane，写权已并入 `align/global`）
+
+| lane | 分支 | 议题 | 状态 |
+|---|---|---|---|
+| **L1** | `align/global`（**本体**） | **X-4** like 半边 + 共享层 `Dispatcher.runAsync` / OTel 全局 SDK / 超时响应单写者 | ✅ 已合回（= 集成目标分支） |
+| **L2** | `align/global-rpcgate` | **X-5** 残留（3 个 rpc 域守门复查 + slow threshold） | ✅ 已合回 `d7a126a` |
+| **L3** | `align/global-ddl` | **X-7** 残留（5 域 DDL 双侧活体逐列对照） | ✅ 已合回 `eee3bbb` |
+| **L4** | `align/global-flyway` | **X-1** 残留（三进程同库共存真 PG 验证） | ✅ 已合回 `8e6b7b2` |
+| **L5** | `align/global-signoff` | **C 类登记** + T-7/T-11/T-12 定性 + A6 订正 | ✅ 已合回 `2076d42` |
+
+> ⚠️ **L2~L5 与在跑的 lane 有白名单重叠**（例如 L2 曾拥有 `user-rpc/src/test/**`，L8 现在也拥有它）⇒
+> **这不是违规** —— 它们**已合回**，不再是并发方 ⇒ 机器守门把「在跑」与「已合回」**分开断言**：
+> **重叠只在「在跑」的 lane 之间为违规**。
+
+### 3.3 ⚠️ 第二十七轮新增的两条拆分纪律
+
+1. **按模块零重叠**（不是纯按文件）—— L2 的教训：同模块两个 lane 会互踩 `target/`（同一模块并发 `mvn` ⇒ `target/` 竞争）
+   ⇒ 6 条 lane 分配到 **9 个互不相交的 maven 模块**（admin/article/comment/like/user/message/hot/task/follow）
+   + 2 条 `tools/difftest/` 脚本 lane（`ddl*` / `flyway*` 前缀互不撞）。
+2. **每条 lane 一个工作树** ⇒ 变异在自己的工作树里跑（PIT-GLOBAL-020）⇒ 提交前 `git diff` 逐个确认变异已还原。
+
 
 > ⚠️ **2026-10-25 两处白名单订正**（机器守门同步改过 ⇒ `EXIT=0`）：
 > ① **L1 补登记 `service/common`** —— T-11 / T-13 两轮把写权扩到了 `service/common`

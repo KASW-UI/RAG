@@ -3,18 +3,25 @@
 
 背景
 ----
-`global` 收口域 2026-10-25 起拆成 5 条 lane 并行推进（协议见
+`global` 收口域 2026-10-25 起拆成 lane 并行推进（协议见
 `docs/DRIFT/global/lanes/_PROTOCOL.md`）。并行能成立的前提只有一个：
 **每条 lane 只写自己白名单里的文件** ⇒ 合并时零冲突。
 
 ⚠️ 本守门查的是**写权范围**（白名单），不是「实际改了哪些文件」——
 后者靠 git 的合并冲突兜底，前者才是需要守的**契约**。
 
+⚠️ **2026-10-26 拆分：在跑 / 已合回 分开断言**
+第二十七轮新开 6 条 lane（L6~L11），而**已合回**的 L1~L5 里，
+L2 曾拥有 `user-rpc/src/test/**`、L1 曾拥有 `like-rpc/**` / `comment-rpc/**`
+—— 与在跑的 L7 / L8 **白名单必然重叠**。
+⇒ 但这**不是违规**：已合回的 lane **不再是并发方** ⇒ 重叠只在「在跑」的 lane 之间算违规。
+⇒ 若不分档，守门会恒红 ⇒ 恒红的守门等于没有守门。
+
 查什么
 ------
-1. **白名单两两不重叠** —— 用 glob 展开成**实际文件集合**后求交集。
+1. **在跑的 lane 白名单两两不重叠** —— 用 glob 展开成**实际文件集合**后求交集。
    ⚠️ 必须展开成文件集合再比：光比 pattern 字符串会漏掉
-   「`tools/difftest/` 下新脚本」这种**目录级**写法（L3/L4 同写 `tools/difftest/`）。
+   「`tools/difftest/` 下新脚本」这种**目录级**写法（L10/L11 同写 `tools/difftest/`）。
 2. **共享文件无人拥有** —— `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` /
    4 个规范台账 / `tools/difftest/README.md` 必须**不在任何 lane 的白名单里**
    ⇒ 它们由**整合者**在合并后统一更新（§5.3 同款纪律）。
@@ -40,7 +47,48 @@ REPO = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------- lane 白名单
 # ⚠️ 与 docs/DRIFT/global/lanes/*.md 的「写权范围」一一对应；改这里必须同步改那里。
-LANES: dict[str, list[str]] = {
+# ⚠️ **在跑的 lane**（ACTIVE）：重叠只在这些之间算违规。
+ACTIVE: dict[str, list[str]] = {
+    # ---- 第二十七轮（2026-10-26）：6 条新 lane，按**模块**零重叠 ----
+    # ⚠️ 「按模块零重叠」而不是纯按文件：同模块两个 lane 会互踩 `target/`。
+    "L6-x5gate": [
+        "service/users/admin/admin-rpc/src/test/**",
+        "service/article/article-rpc/src/test/**",
+        "docs/DRIFT/global/lanes/L6-x5gate.md",
+    ],
+    "L7-slowgate": [
+        "service/comment/comment-rpc/src/test/**",
+        "service/like/like-rpc/src/test/**",
+        "docs/DRIFT/global/lanes/L7-slowgate.md",
+    ],
+    "L8-slowgate2": [
+        "service/users/user/user-rpc/src/test/**",
+        "service/message/message-rpc/src/test/**",
+        "service/hot/hot-rpc/src/test/**",
+        "docs/DRIFT/global/lanes/L8-slowgate2.md",
+    ],
+    "L9-interrupt": [
+        "service/task/task-rpc/src/test/**",
+        "service/follow/follow-rpc/src/test/**",
+        "docs/DRIFT/global/lanes/L9-interrupt.md",
+    ],
+    "L10-ddldeep": [
+        "tools/difftest/check-ddl-static.py",
+        "tools/difftest/ddl*",
+        "docs/DRIFT/global/lanes/L10-ddldeep.md",
+    ],
+    "L11-flywaydeep": [
+        "tools/difftest/check-flyway-concurrent.sh",
+        "tools/difftest/flyway*",
+        "tools/difftest/check-flyway-ledger.py",
+        "docs/DRIFT/global/lanes/L11-flywaydeep.md",
+    ],
+}
+
+# ⚠️ **已合回**的 lane（CLOSED）：它们的写权已并入 `align/global` ⇒ 不是并发方
+#    ⇒ 与在跑的 lane 重叠**不算违规**（但仍要守「共享文件无人拥有」与「favorite 零写权」）。
+#    留档是为了让「声明」与「历史」可对照，不是为了参与重叠判定。
+CLOSED: dict[str, list[str]] = {
     # ⚠️ 2026-10-25 订正：L1 在 T-11 / T-13 两轮里把写权扩到了 `service/common`
     #    （observability / http / pom / resources / test）⇒ 当时**只记账没登记** ⇒
     #    这里补上，使「声明」与「实际」一致（否则守门给的是假保证）。
@@ -82,6 +130,8 @@ LANES: dict[str, list[str]] = {
         "docs/DRIFT/global/lanes/L5-signoff.md",
     ],
 }
+
+LANES = {**ACTIVE, **CLOSED}
 
 # ---------------------------------------------------------------- 共享文件
 # 这些**不属于任何 lane** ⇒ 只能由整合者在合并后统一更新。
@@ -141,18 +191,25 @@ def expand(pattern: str) -> set[str]:
 
 
 def main() -> int:
-    expanded = {lane: set() for lane in LANES}
-    for lane, patterns in LANES.items():
+    expanded_active = {lane: set() for lane in ACTIVE}
+    for lane, patterns in ACTIVE.items():
         for pat in patterns:
-            expanded[lane] |= expand(pat)
+            expanded_active[lane] |= expand(pat)
 
+    expanded_closed = {lane: set() for lane in CLOSED}
+    for lane, patterns in CLOSED.items():
+        for pat in patterns:
+            expanded_closed[lane] |= expand(pat)
+
+    expanded = {**expanded_active, **expanded_closed}
     failures: list[str] = []
 
-    # ---- 1. 两两不重叠 --------------------------------------------------
-    names = list(LANES)
+    # ---- 1. 在跑的 lane 两两不重叠 ----------------------------------------
+    # ⚠️ 已合回的 lane **不参与**（它们的写权已并入 align/global，不是并发方）。
+    names = list(ACTIVE)
     for i, a in enumerate(names):
         for b in names[i + 1 :]:
-            overlap = sorted(expanded[a] & expanded[b])
+            overlap = sorted(expanded_active[a] & expanded_active[b])
             if overlap:
                 failures.append(
                     f"🔴 写权重叠：`{a}` ∩ `{b}` = {len(overlap)} 个文件\n"
@@ -161,7 +218,7 @@ def main() -> int:
                 )
 
     # ---- 2. 共享文件无人拥有 -------------------------------------------
-    for lane in names:
+    for lane in list(ACTIVE) + list(CLOSED):
         for shared in SHARED:
             if shared in expanded[lane]:
                 failures.append(
@@ -170,7 +227,7 @@ def main() -> int:
                 )
 
     # ---- 3. favorite 零写权 --------------------------------------------
-    for lane in names:
+    for lane in list(ACTIVE) + list(CLOSED):
         for pat in LANES[lane]:
             norm = pat.rstrip("/*")
             for forbid in FORBIDDEN:
@@ -184,8 +241,10 @@ def main() -> int:
     # ---- 输出 -----------------------------------------------------------
     print("global 多 lane 写权守门")
     print("=" * 60)
-    for lane in names:
-        print(f"  {lane:<14} 白名单展开 {len(expanded[lane]):>4} 个文件")
+    for lane in ACTIVE:
+        print(f"  {lane:<16} [在跑]   白名单展开 {len(expanded_active[lane]):>4} 个文件")
+    for lane in CLOSED:
+        print(f"  {lane:<16} [已合回] 白名单展开 {len(expanded_closed[lane]):>4} 个文件")
     print("-" * 60)
 
     if failures:
@@ -197,8 +256,9 @@ def main() -> int:
         return 1
 
     print("✅ PASS")
-    print("  · 5 条 lane 的写权范围两两不重叠")
-    print("  · 10 个共享文件无人拥有（归整合者）")
+    print(f"  · 在跑的 {len(ACTIVE)} 条 lane 写权范围两两不重叠")
+    print(f"  · 已合回的 {len(CLOSED)} 条 lane 单列归档（不参与重叠判定）")
+    print(f"  · {len(SHARED)} 个共享文件无人拥有（归整合者）")
     print("  · favorite 域零写权")
     return 0
 
