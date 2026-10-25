@@ -104,6 +104,71 @@ public final class GoStyleOtelConfig {
     }
 
     /**
+     * Go 的 {@code Batcher} <b>合法集合</b> ——
+     * {@code core/trace/config.go:12}
+     * {@code Batcher string `json:",default=otlpgrpc,options=zipkin|otlpgrpc|otlphttp|file"`}。
+     *
+     * <p>⚠️ Go 侧的 yaml 解析器（go-zero 的 config loader）会按 {@code options} tag <b>先校验</b>
+     * ⇒ 写错值在<b>启动读配置</b>时就炸 ⇒ 根本走不到 {@code createExporter}。
+     * ⇒ 但 RAG 侧没有这一层校验 ⇒ <b>必须自己补</b>（否则非法值会被静默当成 grpc）。
+     */
+    private static final java.util.Set<String> GO_BATCHERS =
+            java.util.Set.of("zipkin", "otlpgrpc", "otlphttp", "file");
+
+    /**
+     * 🔴 <b>两侧的命名空间不一样</b>，必须显式映射：
+     *
+     * <table border="1">
+     *   <caption>Go 的 Batcher ↔ RAG 的 otel.exporter.otlp.protocol</caption>
+     *   <tr><th>Go（{@code Telemetry.Batcher}）</th><th>RAG（{@code otel.exporter.otlp.protocol}）</th>
+     *       <th>本仓是否实现</th></tr>
+     *   <tr><td>{@code otlpgrpc}</td><td>{@code grpc}</td><td>✅ <b>唯一实现</b>（Go 各服务 yaml 也都是它）</td></tr>
+     *   <tr><td>{@code otlphttp}</td><td>—</td><td>❌ 未实现（<b>能力缺口</b>，不是静默降级）</td></tr>
+     *   <tr><td>{@code zipkin}</td><td>—</td><td>❌ 未实现（同上）</td></tr>
+     *   <tr><td>{@code file}</td><td>—</td><td>❌ 未实现（同上）</td></tr>
+     * </table>
+     *
+     * <p>⚠️ 注意 Go 侧的 yaml 写的是 {@code Batcher: otlpgrpc}，
+     * 而本仓 10 个 api 的 yaml 写的是 {@code otel.exporter.otlp.protocol: grpc}
+     * ⇒ <b>字面量就差一个 {@code otlp} 前缀</b> ⇒ 不显式映射就会把「合法值」判成「非法值」。
+     */
+    private static final java.util.Map<String, String> RAG_PROTOCOL_TO_GO_BATCHER =
+            java.util.Map.of("grpc", "otlpgrpc");
+
+    /** 本仓<b>只实现了</b> OTLP/gRPC（对齐 Go 各服务 yaml 的 {@code Batcher: otlpgrpc}）。 */
+    public static final String IMPLEMENTED_BATCHER = "grpc";
+
+    /**
+     * 🔴 校验 batcher —— 对齐 Go 的两条路径：
+     *
+     * <ul>
+     *   <li><b>端点为空 ⇒ 根本不看 batcher</b>：Go 的 {@code core/trace/agent.go:114-121}
+     *       只在 {@code len(c.Endpoint) > 0} 时才调 {@code createExporter(c)}
+     *       ⇒ {@code Batcher} 写错也<b>不报错</b>（只是不装 exporter）⇒ RAG 侧同款。</li>
+     *   <li><b>端点非空 + 不认识的协议 ⇒ 整个 agent 装不上</b>：Go 的 {@code createExporter} 的
+     *       {@code default} 分支返回 {@code fmt.Errorf("unknown exporter: %s", c.Batcher)}
+     *       ⇒ {@code startAgent} 返错 ⇒ {@code StartAgent} 只 {@code logx.Error} ⇒
+     *       <b>继续启动</b>（全局 trace 不生效）。</li>
+     * </ul>
+     *
+     * @throws IllegalStateException 协议不认识时
+     */
+    void validateBatcher() {
+        if (endpoint == null) {
+            // Go: createExporter 只在 len(c.Endpoint) > 0 时被调用 ⇒ 端点为空不看 batcher
+            return;
+        }
+        if (!RAG_PROTOCOL_TO_GO_BATCHER.containsKey(protocol)) {
+            throw new IllegalStateException(
+                    "unknown exporter: " + protocol
+                            + "（RAG 侧只实现了 otel.exporter.otlp.protocol=" + IMPLEMENTED_BATCHER
+                            + "（= Go 的 Telemetry.Batcher=" + RAG_PROTOCOL_TO_GO_BATCHER.get(IMPLEMENTED_BATCHER)
+                            + "）；Go 的合法 Batcher 集合 = " + GO_BATCHERS
+                            + "，其余三种本仓未实现）");
+        }
+    }
+
+    /**
      * Go 的 {@code Telemetry.Sampler} 是<b>比例</b>（{@code core/trace/config.go:9}
      * {@code Sampler float64 `json:",default=1.0"`}），
      * 而本仓 yaml 里写的是 Boot 风格的<b>采样器名字</b> ⇒ 这里做一次映射。

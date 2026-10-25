@@ -122,7 +122,19 @@ public final class GoStyleOtelAgent {
                 // Go: core/trace/agent.go:44 once.Do ⇒ 第二次调用什么都不做
                 return GlobalOpenTelemetry.get();
             }
-            SdkTracerProvider provider = buildProvider(config);
+            // 🔴 2026-10-25（第二十三轮 · global）：buildProvider 也可能失败
+            //   （batcher 非法 / Go 支持但 RAG 未实现）⇒ 照 Go 的 startAgent 失败路径
+            //   —— 记 ERROR ⇒ **继续启动**（全局仍是 no-op）⇒ 绝不让异常逃出去阻断容器启动。
+            //   Go 出处：core/trace/agent.go:114-121（createExporter 返错 ⇒ logx.Error + return err）
+            //           ⇒ core/trace/agent.go:43-52（StartAgent 的 once.Do 里只 logx.Error）
+            SdkTracerProvider provider;
+            try {
+                provider = buildProvider(config);
+            } catch (RuntimeException bad) {
+                LOG.error("[otel] error: 全局 TracerProvider 装配失败（{}），trace 导出不可用（服务照常启动）",
+                        bad.getMessage());
+                return null;
+            }
             OpenTelemetrySdk sdk = OpenTelemetrySdk.builder()
                     .setTracerProvider(provider)
                     // Go: core/trace/propagation.go:8-11（TraceContext + Baggage 的 composite）
@@ -159,6 +171,10 @@ public final class GoStyleOtelAgent {
      * @param config Go 的 Telemetry 四字段投影
      */
     public static SdkTracerProvider buildProvider(GoStyleOtelConfig config) {
+        // 🔴 2026-10-25（第二十三轮 · global）：batcher 校验 —— 照 Go 的 createExporter 的 default 分支
+        //   （core/trace/agent.go:100-101：unknown exporter ⇒ 返错 ⇒ 整个 agent 装不上）
+        //   ⚠️ 端点为空时**不校验**（Go 同款：createExporter 只在 len(c.Endpoint) > 0 时被调用）。
+        config.validateBatcher();
         SdkTracerProviderBuilder builder = SdkTracerProvider.builder()
                 // Go: core/trace/agent.go:111
                 //   sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(c.Sampler)))
