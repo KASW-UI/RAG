@@ -1,0 +1,276 @@
+package com.rag.users.admin.rpc;
+
+import com.rag.users.admin.proto.GetUserReq;
+import com.rag.users.admin.proto.GetUserResp;
+import com.rag.users.admin.proto.AdminServiceGrpc;
+import io.grpc.ManagedChannel;
+import io.grpc.Server;
+import io.grpc.ServerBuilder;
+import io.grpc.ServerCallHandler;
+import io.grpc.ServerServiceDefinition;
+import io.grpc.stub.ServerCalls;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
+import io.opentelemetry.sdk.common.CompletableResultCode;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import io.opentelemetry.sdk.trace.data.SpanData;
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
+import io.opentelemetry.sdk.trace.export.SpanExporter;
+import net.devh.boot.grpc.server.serverfactory.GrpcServerConfigurer;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+
+import static com.rag.common.observability.ObservabilityConstants.ATTR_DURATION;
+import static com.rag.common.observability.ObservabilityConstants.ATTR_SLOW;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * 🔴 <b>slow threshold 分支的独立守门</b>（global L2 · X-5 残留的第二半）。
+ *
+ * <h2>为什么它必须是「独立」的一条</h2>
+ * <p>「服务端超时打断在飞处理」与「slow threshold 标记慢调用」是<b>两条不同的路径</b>：
+ * <ul>
+ *   <li>超时路径 ⇒ {@code close(DEADLINE_EXCEEDED)} ⇒ {@code markTimeout}（打 {@code sea.timeout}）；</li>
+ *   <li>slow 路径 ⇒ {@code close(OK)} ⇒ {@code markDurationAndSlow}（打 {@code sea.duration_ms}
+ *       <b>与</b> {@code sea.slow}）。</li>
+ * </ul>
+ * ⇒ 「超时那条守门全绿」<b>证明不了</b> slow threshold 这条路径被走过。
+ *
+ * <h2>Go 出处（逐字对照，行为层）</h2>
+ * <pre>
+ *   service/common/observability/rpc.go:76-99  markRPCResult
+ *       if err == nil { MarkDurationAndSlow(ctx, duration, slowThreshold, attrs...); return }
+ *   service/common/observability/observability.go:131-144  MarkDurationAndSlow
+ *       base := []attribute.KeyValue{ attribute.Float64(AttrDuration, durationMilliseconds(duration)) }
+ *       if slowThreshold &gt; 0 &amp;&amp; duration &gt; slowThreshold {
+ *           base = append(base, attribute.Bool(AttrSlow, true))
+ *       }
+ *       span.SetAttributes(append(base, attrs...)...)
+ * </pre>
+ * ⇒ 语义 = <b>「只有成功（OK）的调用才走 slow 判定；且只有耗时超过阈值才打 slow 标记」</b>。
+ * <p>⚠️ Go 的阈值来源：{@code observability.SlowThreshold()}（{@code observability.go:41-55}）
+ * ⇒ env var {@code SEA_OBSERVABILITY_SLOW_THRESHOLD[_MS]} ⇒ 兜底 {@code DefaultSlowThreshold = 500ms}
+ * （{@code observability.go:21}）。RAG 侧多一层 Spring 配置 {@code observability.slow-threshold}
+ * （{@code ObservabilityProperties#getSlowThreshold()} → {@code RpcServerInterceptorFactory:77-79}）。
+ *
+ * <h2>为什么必须走「真 server + 真链 + 真 span」</h2>
+ * <p>§3.3：纯 Mockito 单测不算「机制生效」的证据。
+ * ⇒ 本类起一个<b>真 gRPC server</b>，用容器里那个 {@link GrpcServerConfigurer}
+ * （= recover → breaker → shedding → 业务观测拦截器，<b>整条链</b>）装配它，
+ * 注册一个「处理函数耗时 N ms 且成功返回」的服务，装一个<b>真 OTel SDK</b>
+ * + 收集型 exporter ⇒ 断言<b>导出的 span 上真的有 {@code sea.slow}</b>。
+ *
+ * <h2>两条断言缺一不可</h2>
+ * <ol>
+ *   <li><b>慢的那条</b>：耗时 400ms &gt; 阈值 100ms ⇒ {@code sea.slow} 必须为 {@code true}；</li>
+ *   <li><b>快的那条</b>：耗时 ≪ 阈值 ⇒ {@code sea.slow} 必须<b>不存在</b>
+ *       ⇒ 证明这条路径是<b>真比较</b>出来的，而不是「恒为 true」。</li>
+ * </ol>
+ */
+@SpringBootTest(
+        classes = AdminRpcApplication.class,
+        webEnvironment = SpringBootTest.WebEnvironment.NONE,
+        properties = {
+                "grpc.server.port=0",
+                "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
+                "management.otlp.tracing.export.enabled=false",
+                "logging.level.com.alibaba.nacos=WARN",
+                // 绕过 Redis：Lettuce 连接懒建，不真正连。
+                "spring.data.redis.host=127.0.0.1",
+                "spring.data.redis.port=1",
+                // ⚠️ **被测参数**：慢调用阈值压到 100ms（生产侧走 DefaultSlowThreshold=500ms，
+                //    见 Go observability.go:21）。下面的 handler 睡 400ms ⇒ 必然超过它。
+                "observability.slow-threshold=100ms",
+                // ⚠️ 关掉 CPU 自适应降载，让判据**只**取决于「慢调用标记」这一条。
+                "rag.protection.cpu-shedding.enabled=false"
+        })
+@Testcontainers
+class AdminRpcSlowThresholdGateTest {
+
+    @Container
+    static final PostgreSQLContainer<?> POSTGRES =
+            new PostgreSQLContainer<>("postgres:16-alpine")
+                    .withDatabaseName("admin_rpc_slow_threshold_it")
+                    .withUsername("rag")
+                    .withPassword("rag");
+
+    @DynamicPropertySource
+    static void datasource(DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+        r.add("spring.datasource.username", POSTGRES::getUsername);
+        r.add("spring.datasource.password", POSTGRES::getPassword);
+    }
+
+    /** 自建收集型 exporter（不引 {@code opentelemetry-sdk-testing}，与 AdminSpanWiringTest 同款）。 */
+    static final class CollectingExporter implements SpanExporter {
+        final List<SpanData> spans = Collections.synchronizedList(new ArrayList<>());
+
+        @Override
+        public CompletableResultCode export(Collection<SpanData> batch) {
+            spans.addAll(batch);
+            return CompletableResultCode.ofSuccess();
+        }
+
+        @Override
+        public CompletableResultCode flush() {
+            return CompletableResultCode.ofSuccess();
+        }
+
+        @Override
+        public CompletableResultCode shutdown() {
+            return CompletableResultCode.ofSuccess();
+        }
+
+        void clear() {
+            spans.clear();
+        }
+    }
+
+    private static final CollectingExporter EXPORTER = new CollectingExporter();
+
+    @BeforeAll
+    static void installSdk() {
+        // 🔴 关键：把 GlobalOpenTelemetry 指向本测试的收集器，否则 span 是 no-op。
+        //    必须在**上下文创建之前**装好 —— RpcInterceptor 在 Bean 创建期就取了 Tracer
+        //    （RpcInterceptor.java:154），而 Spring 上下文在第一个用例实例化时才创建。
+        GlobalOpenTelemetry.resetForTest();
+        GlobalOpenTelemetry.set(OpenTelemetrySdk.builder()
+                .setTracerProvider(SdkTracerProvider.builder()
+                        .addSpanProcessor(SimpleSpanProcessor.create(EXPORTER))
+                        .build())
+                .build());
+    }
+
+    @AfterAll
+    static void uninstallSdk() {
+        GlobalOpenTelemetry.resetForTest();
+    }
+
+    @Autowired private ApplicationContext ctx;
+
+    /**
+     * 被测的方法全名 —— span 名 = 方法全名（RpcInterceptor.java:162,164）。
+     *
+     * <p>⚠️ grpc-java 的 {@code MethodDescriptor#getFullMethodName()} 返回的是
+     * {@code "service/method"}（<b>无前导斜杠</b>，与 {@code getServiceName() + "/" + getBareMethodName()} 同形）
+     * ⇒ 不是 {@code "/admin.AdminService/GetUser"}。
+     * <p>（实测踩坑：先前写成带斜杠的形态 ⇒ 断言「找不到 span」⇒ 两个用例都红在<b>更早</b>的断言上。）
+     */
+    private static final String METHOD = "admin.AdminService/GetUser";
+
+    @Test
+    @DisplayName("慢调用（400ms > 阈值 100ms）必须被打上 sea.slow=true"
+            + "（Go: observability.go:140-142 duration > slowThreshold ⇒ AttrSlow）")
+    void slowCallMustBeMarkedSlow() throws Exception {
+        SpanData span = callAndGetSpan(400L);
+
+        assertEquals(Boolean.TRUE, span.getAttributes().get(AttributeKey.booleanKey(ATTR_SLOW)),
+                "耗时 400ms > 阈值 100ms ⇒ 必须打 sea.slow=true。"
+                        + "实际 span 属性 = " + span.getAttributes());
+        assertNotNull(span.getAttributes().get(AttributeKey.doubleKey(ATTR_DURATION)),
+                "Go MarkDurationAndSlow 无条件打 AttrDuration（observability.go:138）⇒ RAG 也必须有 sea.duration_ms");
+    }
+
+    @Test
+    @DisplayName("快调用（≪ 阈值）必须**不带** sea.slow ⇒ 证明这条路径是真比较出来的")
+    void fastCallMustNotBeMarkedSlow() throws Exception {
+        SpanData span = callAndGetSpan(0L);
+
+        assertNull(span.getAttributes().get(AttributeKey.booleanKey(ATTR_SLOW)),
+                "耗时远小于阈值 100ms ⇒ 不该打 sea.slow。若为 true，说明 slow 标记是「恒真」的，"
+                        + "或阈值没被真正比较（Go: observability.go:140-142 要求 duration > slowThreshold 才打）。"
+                        + "实际 span 属性 = " + span.getAttributes());
+    }
+
+    /**
+     * 起一个真 server、调一次、返回该方法对应的 span。
+     *
+     * @param sleepMillis handler 的耗时（0 = 立即返回）
+     */
+    private SpanData callAndGetSpan(long sleepMillis) throws Exception {
+        GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
+        assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
+
+        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        configurer.accept(builder);                  // ← 整条链（recover→breaker→shedding→业务拦截器）
+        Server server = builder.addService(slowAdminService(sleepMillis)).build().start();
+
+        // ⚠️ **必须显式写 dns:/// scheme**：Nacos discovery 在全局 NameResolverRegistry 里
+        //    注册了一个高优先级 provider，会把任何无 scheme 的 target 当作 serviceId 去 Nacos 拉实例。
+        ManagedChannel channel = io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
+                .forTarget("dns:///127.0.0.1:" + server.getPort()).usePlaintext().build();
+        try {
+            EXPORTER.clear();
+            var stub = AdminServiceGrpc.newBlockingStub(channel);
+            // 必须**成功**返回：Go 的 slow 判定只在 err == nil 时走（rpc.go:86-89）。
+            GetUserResp resp = stub.withDeadlineAfter(10, TimeUnit.SECONDS)
+                    .getUser(GetUserReq.newBuilder().setUid(1L).build());
+            assertNotNull(resp, "本用例要的是一次**成功**的调用（Go: markRPCResult 只在 err==nil 时走 slow 判定）");
+
+            Optional<SpanData> found = EXPORTER.spans.stream()
+                    .filter(s -> METHOD.equals(s.getName()))
+                    .findFirst();
+            assertTrue(found.isPresent(),
+                    "必须导出名为 " + METHOD + " 的 span。实际导出的 = "
+                            + EXPORTER.spans.stream().map(SpanData::getName).toList());
+            return found.get();
+        } finally {
+            channel.shutdownNow();
+            server.shutdownNow();
+        }
+    }
+
+    /**
+     * 注册一个「处理函数耗时 {@code sleepMillis} 且成功返回」的服务。
+     *
+     * <p>⚠️ **必须**用 grpc-java 的标准派发入口 {@link ServerCalls#asyncUnaryCall}：
+     * 裸 {@link ServerCallHandler} 不会被派发 {@code onHalfClose} ⇒ 方法体一次都不执行
+     * ⇒ span 永不 end ⇒ 导出列表为空（这正是 §3.3「绿测试可能是错误答案的守卫」的形态）。
+     */
+    private static ServerServiceDefinition slowAdminService(long sleepMillis) {
+        ServerCallHandler<GetUserReq, GetUserResp> handler =
+                ServerCalls.asyncUnaryCall((req, observer) -> {
+                    if (sleepMillis > 0) {
+                        try {
+                            Thread.sleep(sleepMillis);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                    observer.onNext(GetUserResp.getDefaultInstance());
+                    observer.onCompleted();
+                });
+        // ⚠️ 自建一个只含 GetUser 这一个方法的 ServiceDescriptor：
+        //    ① 必须用生成代码里的**同一个** getGetUserMethod() 实例，否则报
+        //       "Bound method ... not same instance as method in service descriptor"；
+        //    ② 描述符里的每个方法都必须有绑定。
+        io.grpc.ServiceDescriptor onlyGetUser = io.grpc.ServiceDescriptor
+                .newBuilder(AdminServiceGrpc.getServiceDescriptor().getName())
+                .addMethod(AdminServiceGrpc.getGetUserMethod())
+                .build();
+        return ServerServiceDefinition.builder(onlyGetUser)
+                .addMethod(AdminServiceGrpc.getGetUserMethod(), handler)
+                .build();
+    }
+}
