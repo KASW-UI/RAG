@@ -30,6 +30,16 @@ RAG 那 4 份 `db/*.sql` 是照着**旧 JPA @Column** 写的,不是照着 Go 的
     `--indexes` 时还查 **触发器**（pg_trigger，2026-10-25 L3/X-7 新增）——
     article / like / favorite 三个域的「不可变信封」语义**只由触发器承载**，
     不查它等于把最硬的那条约束漏在门外。
+    `--indexes` 时还查 **触发器形式 + 触发器函数体的结构化语义属性**
+    （2026-10-26 global 域 L10 新增）——
+    ⚠️ **只比结构化属性，不逐字比 SQL 文本**：
+      · 触发器形式：timing（BEFORE/AFTER/INSTEAD OF）/ 事件集 / 粒度（ROW|STATEMENT）
+        / 是否 constraint trigger / 有无 WHEN 条件
+      · 函数体属性：函数名 / 返回类型 / 参数列表 / volatility
+        （VOLATILE|STABLE|IMMUTABLE）/ 是否 RETURNS trigger / 语言
+    ⇒ 「写法不同但语义相同」（`IS DISTINCT FROM` vs `<>`、缩进、注释）**不会**被报成差异。
+    ⇒ 函数体的**语义**（它到底在拒绝什么、Go 侧有没有**生产**对应物）
+      **机器判不了** ⇒ 走人工逐条核对（台账：docs/DRIFT/global/lanes/L10-ddldeep.md §8.2）。
 
 不查:**外键的引用目标（只查 contype + 定义文本）/ 分区 / 存储过程** —— 本仓
     两侧都没有这些对象，故不查；别的域若有，需要另开。
@@ -76,6 +86,14 @@ RAG 那 4 份 `db/*.sql` 是照着**旧 JPA @Column** 写的,不是照着 Go 的
        库名 `go_msg_db` / `rag_msg_db`，
        由 tools/difftest/run-message-ddl-parity.sh 拉起。
 
+    ⚠️ **2026-10-26（global 域 L10）新增 2 域**：`task` / `message`。
+       这两域原先指向 **B3 轮遗留**的容器（`taskprobe-postgres` / `msg_ddl_pg`
+       —— 还能跑、退出码正常，但**不是本 runner 的产物**）
+       ⇒ 现已改指向 **tools/difftest/ddl-parity.sh 统一拉起**的
+          `ddl-task-pg` / `ddl-message-pg`（库名 `go_<域>_db` / `rag_<域>_db`）
+       ⇒ 退出码语义与其它域统一（0/1/2/3）。
+       ⇒ 一键复现：`bash tools/difftest/ddl-parity.sh task|message`。
+
     ⚠️ **2026-10-25（global 域 L3 / X-7）新增 5 域**：`article` / `like` / `hot` /
        `follow` / `favorite`。这 5 域的容器与库由 **tools/difftest/ddl-parity.sh**
        统一拉起（容器名 `ddl-<域>-pg`，库名 `go_<域>_db` / `rag_<域>_db`）⇒
@@ -87,7 +105,7 @@ RAG 那 4 份 `db/*.sql` 是照着**旧 JPA @Column** 写的,不是照着 Go 的
     0  两侧列集合一致，且所有被核对的维度**无实质差异**
        （「名字不同但表 + 唯一性 + 列完全等价」**不算**差异 —— 见下）
     1  存在**实质差异**（类型/长度 / 可空性 / DEFAULT / 索引定义 / 单边索引 /
-       单边约束）
+       单边约束 / 单边触发器 / 触发器形式 / 触发器函数体属性）
     2  **环境不满足**：读不到容器里的库、列集合不一致（表名映射写错或某一侧
        schema 没初始化）、预期业务表缺失（`expected_tables` 闸门）
     3  本域**不适用（N/A）**：两侧都没有业务表（如 hot 域 —— 它根本没有数据库）
@@ -148,9 +166,16 @@ DOMAINS = {
         "prepare_hint": "先起 tools/difftest/ddl-parity.sh users",
     },
     "task": {
-        "container": "taskprobe-postgres",
-        "go_db": "task_go_db",
-        "rag_db": "task_rag_db",
+        # ✅ 2026-10-26（global 域 L10）订正：原写 `taskprobe-postgres` / `task_go_db`
+        #   / `task_rag_db` ⇒ 那套环境是 **B3 轮遗留**的（由
+        #   tools/difftest/run-task-http-parity.sh 拉起，**不是本 runner 的产物**）
+        #   ⇒ 退出码虽然正常，但「能跑」≠「是统一 runner 产出的」。
+        #   ⇒ 改指向 tools/difftest/ddl-parity.sh 统一拉起的 `ddl-task-pg`
+        #   （探针复刻真源 service/task/rpc/internal/svc/service_context.go:47
+        #     的 `gdb.AutoMigrate(&Model.TaskProgress{}, &Model.UserLikeCount{})`）。
+        "container": "ddl-task-pg",
+        "go_db": "go_task_db",
+        "rag_db": "rag_task_db",
         # ⚠️ task 域两侧表名相同 ⇒ 不需要映射（写错映射才会引入差异）
         "table_map": {},
         "expected_tables": ("task_progress", "user_like_count"),
@@ -163,18 +188,22 @@ DOMAINS = {
                  "  int64 ⇒ bigint、string ⇒ text、time.Time ⇒ timestamptz，\n"
                  "  RAG 的 V1/V2 迁移脚本就是照这条规则写的。\n"
                  "⇒ 本域出现任何差异都应视为**新漂移**，而不是「已知的历史包袱」。"),
-        "prepare_hint": ("先起 tools/difftest/run-task-http-parity.sh（会拉起 taskprobe-postgres "
-                         "并建好 task_go_db / task_rag_db）"),
+        "prepare_hint": "先起 tools/difftest/ddl-parity.sh task",
     },
     "message": {
-        # ⚠️ 2026-10-25（B3/X-7）订正：原写 `msgddl-pg` / `go_msg_db` / `rag_msg_db`
-        #   ⇒ **实测容器名带下划线（`msg_ddl_pg`）、库名是 `go_db` / `rag_db`**，
-        #   且该容器的 PG 超级用户是 `postgres`（**没有 admin 角色**）
-        #   ⇒ 原预设三重失效（容器 / 库 / 用户）⇒ 全部按实测订正。
-        "container": "msg_ddl_pg",
-        "go_db": "go_db",
-        "rag_db": "rag_db",
-        "pg_user": "postgres",
+        # ✅ 2026-10-26（global 域 L10）订正：原写 `msg_ddl_pg` / `go_db` / `rag_db`
+        #   + `pg_user=postgres` ⇒ 那套环境是 **B3 轮遗留**的（由
+        #   tools/difftest/run-message-ddl-parity.sh 拉起，**不是本 runner 的产物**）
+        #   ⇒ 退出码虽然正常，但「能跑」≠「是统一 runner 产出的」。
+        #   ⇒ 改指向 tools/difftest/ddl-parity.sh 统一拉起的 `ddl-message-pg`
+        #   （探针走真源自己的 model.InitDB(DBConf)，即
+        #     service/message/rpc/internal/model/db.go:44 的
+        #     `AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})`）。
+        "container": "ddl-message-pg",
+        "go_db": "go_message_db",
+        "rag_db": "rag_message_db",
+        # ⚠️ ddl-parity.sh 统一用 PG_USER=admin 起容器 ⇒ 用户名跟着走
+        "pg_user": "admin",
         # ⚠️ message 域两侧表名相同（Go AutoMigrate 与 RAG Flyway 同名）⇒ 不需要映射
         "table_map": {},
         "expected_tables": ("message_notification", "message_conversation",
@@ -187,8 +216,7 @@ DOMAINS = {
                  "  int64 ⇒ bigint、string ⇒ text、time.Time ⇒ timestamptz，\n"
                  "  RAG 的 V1~V5 迁移脚本就是照这条规则写的。\n"
                  "⇒ 本域出现任何差异都应视为**新漂移**，而不是「已知的历史包袱」。"),
-        "prepare_hint": ("先起 tools/difftest/run-message-ddl-parity.sh"
-                         "（会拉起 msg_ddl_pg 并建好 go_db / rag_db）"),
+        "prepare_hint": "先起 tools/difftest/ddl-parity.sh message",
     },
     "comment": {
         # ✅ 2026-10-25（B3/X-7 扩域）：本域**已有现成的双侧库**（comment 域对拍环境）
@@ -337,6 +365,29 @@ QUERY_TRIGGER = (
     "(select oid from pg_class where relnamespace='public'::regnamespace) order by 1;"
 )
 
+# 触发器**函数体**的结构化语义属性 —— --indexes 开关才查（2026-10-26 global 域 L10 新增）
+# ⚠️ **只比结构化语义属性，不逐字比 SQL 文本**：
+#    函数体是 SQL 源码，「写法不同但语义相同」（`IS DISTINCT FROM` vs `<>`、缩进、
+#    注释、字符串字面量）逐字比对**全部**会被报成差异 ⇒ 反而制造噪音。
+#    ⇒ 机器只比这 6 个属性：函数名 / 返回类型 / 参数列表 /
+#      volatility（VOLATILE|STABLE|IMMUTABLE）/ 是否 RETURNS trigger / 语言。
+#    ⇒ 函数体的**语义**（它到底在拒绝什么、Go 侧有没有**生产**对应物）
+#      **机器判不了**（「两个语义相同的函数体」不可判定）⇒ 走**人工逐条核对**。
+QUERY_TRIGGER_FUNC = (
+    "select t.tgrelid::regclass::text || '|' || t.tgname || '|' || p.proname || '|' || "
+    "p.prorettype::regtype::text || '|' || "
+    "replace(coalesce(pg_get_function_arguments(p.oid), ''), '|', '') || '|' || "
+    "case p.provolatile when 'i' then 'IMMUTABLE' when 's' then 'STABLE' "
+    "else 'VOLATILE' end || '|' || "
+    "case when p.prorettype = 'trigger'::regtype then 'trigger' else 'other' end || '|' || "
+    "l.lanname "
+    "from pg_trigger t "
+    "join pg_proc p on p.oid = t.tgfoid "
+    "join pg_language l on l.oid = p.prolang "
+    "where not t.tgisinternal and t.tgrelid in "
+    "(select oid from pg_class where relnamespace='public'::regnamespace) order by 1;"
+)
+
 _INDEXDEF_RE = re.compile(
     r"^CREATE\s+(UNIQUE\s+)?INDEX\s+(\S+)\s+ON\s+\S+\s+USING\s+\w+\s+\((.*)\)\s*$")
 
@@ -415,6 +466,109 @@ def load_triggers(container, db, table_map, exclude_tables=(), user="admin"):
             continue
         trig[(table_map.get(tbl, tbl), name)] = tdef
     return trig
+
+
+def load_trigger_funcs(container, db, table_map, exclude_tables=(), user="admin"):
+    """⇒ {(表名, 触发器名): (函数名, 返回类型, 参数列表, volatility, 是否trigger, 语言)}
+
+    ⚠️ 这是**函数体的结构化语义属性**，**不是函数体文本** ——
+    逐字比 SQL 文本会把「写法不同但语义相同」报成差异（见 QUERY_TRIGGER_FUNC 注释）。
+    """
+    out = subprocess.run(
+        ["docker", "exec", "-i", container, "psql", "-U", user, "-d", db,
+         "-t", "-A", "-c", QUERY_TRIGGER_FUNC],
+        capture_output=True, text=True, check=True).stdout
+    funcs = {}
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        parts = line.strip().split("|")
+        if len(parts) != 8:
+            continue
+        tbl, name = parts[0], parts[1]
+        if any(tbl == x or tbl.startswith(x) for x in exclude_tables):
+            continue
+        funcs[(table_map.get(tbl, tbl), name)] = tuple(parts[2:])
+    return funcs
+
+
+_TRIGGER_FORM_FIELDS = ("timing", "events", "粒度", "constraint", "WHEN")
+
+
+def parse_trigger_form(tdef):
+    """从 `pg_get_triggerdef` 的文本里抽**结构化语义属性**（不比文本本身）。
+
+    ⚠️ 文本里含 schema 限定名（`public.xxx`）与函数名 ⇒ 逐字比会把
+       「表名映射」「函数改名」误报成差异 ⇒ 只取这 5 个**语义**属性：
+       timing（BEFORE/AFTER/INSTEAD OF）· 事件集 · 粒度（ROW|STATEMENT）
+       · 是否 constraint trigger · 有无 WHEN 条件。
+    """
+    s = " ".join(tdef.split())
+    up = s.upper()
+    timing = "?"
+    for t in ("INSTEAD OF", "BEFORE", "AFTER"):
+        if t in up:
+            timing = t
+            break
+    events = ()
+    if timing != "?":
+        m = re.search(re.escape(timing) + r"\s+(.*?)\s+ON\s+", s, re.I | re.S)
+        if m:
+            events = tuple(sorted(
+                e.strip().upper()
+                for e in re.split(r"\s+OR\s+", m.group(1), flags=re.I)
+                if e.strip().upper() in ("INSERT", "UPDATE", "DELETE", "TRUNCATE")))
+    m = re.search(r"FOR EACH (ROW|STATEMENT)", s, re.I)
+    level = m.group(1).upper() if m else "?"
+    return (timing, events, level,
+            "CREATE CONSTRAINT TRIGGER" in up,
+            bool(re.search(r"\bWHEN\s*\(", s, re.I)))
+
+
+def compare_trigger_funcs(go_t, rag_t, go_tf, rag_tf):
+    """⇒ (形式实质差异, 函数属性实质差异, 单边触发器的属性明细)
+
+    ⚠️ **单边触发器不在这里计失败** —— 单边触发器已由「触发器集合」维度计过一次
+       ⇒ 这里再计一次就是**重复计数**（会污染退出码语义）。
+       单边的只**打印**（让人看见它长什么样），供人工核对用。
+
+    「形式」= timing / 事件集 / 粒度 / constraint / WHEN；
+    「函数属性」= 函数名 / 返回类型 / 参数列表 / volatility / 是否 trigger / 语言。
+    """
+    form_diffs, func_diffs, one_sided = [], [], []
+    for k in sorted(set(go_t) & set(rag_t)):
+        gf, rf = parse_trigger_form(go_t[k]), parse_trigger_form(rag_t[k])
+        if gf != rf:
+            detail = "; ".join(
+                f"{_TRIGGER_FORM_FIELDS[i]} (go={gf[i]} rag={rf[i]})"
+                for i in range(len(gf)) if gf[i] != rf[i])
+            form_diffs.append((f"{k[0]}.{k[1]}", gf, rf, detail))
+        g, r = go_tf.get(k), rag_tf.get(k)
+        if g is None or r is None:
+            # 触发器在、但函数属性查不到 ⇒ 环境异常（不该发生）⇒ 记成单边
+            one_sided.append((k, g, r))
+            continue
+        if g != r:
+            fields = ("函数名", "返回类型", "参数列表", "volatility", "是否RETURNS trigger", "语言")
+            detail = "; ".join(
+                f"{fields[i]} (go={g[i]} rag={r[i]})"
+                for i in range(min(len(g), len(r))) if g[i] != r[i])
+            func_diffs.append((f"{k[0]}.{k[1]}", g, r, detail))
+    for k in sorted(set(go_t) - set(rag_t)):
+        one_sided.append((k, go_tf.get(k), None))
+    for k in sorted(set(rag_t) - set(go_t)):
+        one_sided.append((k, None, rag_tf.get(k)))
+    return form_diffs, func_diffs, one_sided
+
+
+def _fmt_func_attrs(attrs):
+    if attrs is None:
+        return "<无>"
+    names = ("fn", "rettype", "args", "volatility", "is_trigger", "lang")
+    parts = []
+    for n, v in zip(names, attrs):
+        parts.append(f"{n}={v if v != '' else '<无>'}")
+    return " ".join(parts)
 
 
 def compare_constraints(go_k, rag_k, go_i=None, rag_i=None):
@@ -576,6 +730,8 @@ def main():
         rag_k = load_constraints(container, rag_db, table_map, exclude_tables, pg_user) if args.indexes else {}
         go_t = load_triggers(container, go_db, table_map, exclude_tables, pg_user) if args.indexes else {}
         rag_t = load_triggers(container, rag_db, table_map, exclude_tables, pg_user) if args.indexes else {}
+        go_tf = load_trigger_funcs(container, go_db, table_map, exclude_tables, pg_user) if args.indexes else {}
+        rag_tf = load_trigger_funcs(container, rag_db, table_map, exclude_tables, pg_user) if args.indexes else {}
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         print(f"FATAL: 读不到 {container} 里的库 —— {e}\n{cfg['prepare_hint']}")
         return 2
@@ -721,13 +877,62 @@ def main():
         if not t_only_go and not t_only_rag:
             print("  （两侧触发器集合完全一致 ✓）")
         failures += len(t_only_go) + len(t_only_rag)
+
+        # ---- 触发器形式 + 触发器函数体的**结构化语义属性**（2026-10-26 L10 新增）----
+        # ⚠️ **不比 SQL 文本**：函数体逐字比会把「写法不同但语义相同」报成差异。
+        #    机器只比「形式」与「函数属性」⇒ 语义核对仍需**人工逐条**（台账 §8.2）。
+        form_diffs, func_diffs, one_sided = compare_trigger_funcs(
+            go_t, rag_t, go_tf, rag_tf)
+        paired = len(set(go_t) & set(rag_t))
+        print(f"\n对照 · 触发器形式（pg_get_triggerdef → 结构化属性，不比文本）："
+              f"两侧各 {len(go_t)}/{len(rag_t)} 个，**可比对 {paired} 个**")
+        if form_diffs:
+            for label, g, r, detail in form_diffs:
+                print(f"  实质差异: {label}")
+                print(f"      go  = {g}")
+                print(f"      rag = {r}")
+                print(f"      ⇒ {detail}")
+        elif paired:
+            print(f"  （{paired} 个可比对的触发器形式逐条一致 ✓）")
+        else:
+            print("  ⚠️ 两侧**没有可成对比对的触发器** ⇒ 本维度**什么都没比**"
+                  "（不是「已对齐」）")
+
+        print(f"\n对照 · 触发器函数体（pg_proc → 结构化语义属性，**不比 SQL 文本**）："
+              f"两侧各 {len(go_tf)}/{len(rag_tf)} 个，**可比对 {paired} 个**")
+        if func_diffs:
+            for label, g, r, detail in func_diffs:
+                print(f"  实质差异: {label}")
+                print(f"      go  = {_fmt_func_attrs(g)}")
+                print(f"      rag = {_fmt_func_attrs(r)}")
+                print(f"      ⇒ {detail}")
+        elif paired:
+            print(f"  （{paired} 个可比对的函数属性逐条一致 ✓）")
+        else:
+            print("  ⚠️ 两侧**没有可成对比对的触发器函数** ⇒ 本维度**什么都没比**"
+                  "（不是「已对齐」）")
+        for k in sorted(set(go_tf) & set(rag_tf)):
+            print(f"  ✓ {k[0]}.{k[1]}")
+            print(f"      go  = {_fmt_func_attrs(go_tf[k])}")
+            print(f"      rag = {_fmt_func_attrs(rag_tf[k])}")
+        if one_sided:
+            print("  单边触发器的函数属性（**不在此计失败** —— 已由上面的"
+                  "「触发器集合」维度计过）：")
+            for k, g, r in one_sided:
+                print(f"    · {k[0]}.{k[1]}")
+                if g is not None:
+                    print(f"        go  = {_fmt_func_attrs(g)}")
+                if r is not None:
+                    print(f"        rag = {_fmt_func_attrs(r)}")
+        failures += len(form_diffs) + len(func_diffs)
         # ⚠️ 实质差异才计失败：索引的「仅一侧有 / 同名定义不同」+ 约束的「仅一侧有 /
         #    同名定义不同」⇒ 计；「语义等价（命名形态差 / 唯一索引↔唯一约束）」⇒ 不计。
         failures += len(i_diffs) - len(i_waived)
         failures += len(k_diffs)
     else:
         print("\nNOT CHECKED（脚本没查，别把本脚本的结论读成「DDL 已一致」）："
-              "索引 / 唯一约束 / 约束 / 触发器。加 --indexes 可核。")
+              "索引 / 唯一约束 / 约束 / 触发器 / 触发器形式 / 触发器函数体属性。"
+              "加 --indexes 可核。")
 
     if diffs:
         print()

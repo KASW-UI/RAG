@@ -23,8 +23,9 @@
 # ⚠️ 真源仓库是**只读**的（AGENTS.md §5.4）：本脚本**只复制**它，从不写入。
 #
 # 【用法】
-#   ./ddl-parity.sh <域> [<域> ...]     建库 + 跑对拍（域：article like hot follow favorite users comment）
-#   ./ddl-parity.sh all                 串行跑全部 7 个域
+#   ./ddl-parity.sh <域> [<域> ...]     建库 + 跑对拍
+#            （域：article like hot follow favorite users comment task message）
+#   ./ddl-parity.sh all                 串行跑全部 9 个域
 #   ./ddl-parity.sh like --no-check     只建库，不跑对拍
 #   ./ddl-parity.sh like --cleanup      跑完删掉容器（默认**保留**，方便直接重跑对拍）
 #
@@ -52,14 +53,14 @@ for a in "$@"; do
     --no-check) RUN_CHECK=0 ;;
     --cleanup)  CLEANUP=1 ;;
     --with-go-sql) WITH_GO_SQL=1 ;;
-    all)        DOMAINS=(article like hot follow favorite users comment) ;;
-    -h|--help)  sed -n '1,48p' "$0"; exit 0 ;;
+    all)        DOMAINS=(article like hot follow favorite users comment task message) ;;
+    -h|--help)  sed -n '1,37p' "$0"; exit 0 ;;   # 37 = 头部注释的结束行
     *)          DOMAINS+=("$a") ;;
   esac
 done
 [ "${#DOMAINS[@]}" -gt 0 ] || { echo "用法: $0 <域>|all [--no-check] [--cleanup]" >&2; exit 2; }
 
-ALL_DOMAINS=(article like hot follow favorite users comment)
+ALL_DOMAINS=(article like hot follow favorite users comment task message)
 
 # ── 每个域一个独立容器 / 端口（串行跑，避免与其他 lane 抢 Docker 资源）──────
 port_for() {
@@ -71,6 +72,8 @@ port_for() {
     favorite) echo 55564 ;;
     users)    echo 55565 ;;
     comment)  echo 55566 ;;
+    task)     echo 55568 ;;
+    message)  echo 55569 ;;
     *)        echo 55567 ;;
   esac
 }
@@ -156,6 +159,31 @@ service/comment/comment-rpc/src/main/resources/db/migration/V5__create_comment_r
 service/comment/comment-rpc/src/main/resources/db/migration/V6__create_comment_domain_fact_outbox.sql
 service/comment/comment-rpc/src/main/resources/db/migration/V7__create_comment_fact_stream.sql
 service/comment/comment-rpc/src/main/resources/db/migration/V8__align_comment_fact_delivery_with_go.sql"
+      ;;
+    task)
+      # ✅ 2026-10-26（global 域 L10）新增：task 域进**本 runner 自管的容器**。
+      # ⚠️ task 域**没有** model.InitDB —— 真源是在
+      #    service/task/rpc/internal/svc/service_context.go:47 里**直接**
+      #    `gdb.AutoMigrate(&Model.TaskProgress{}, &Model.UserLikeCount{})`
+      #    ⇒ 探针必须复刻那**同一行**调用（同一份 struct tag + 同一个 gorm 版本），
+      #    否则建出来的表就不是真源生产那张。
+      # ⚠️ Model 包的路径是 **internal/Model（大写 M）** —— 与其它域的 internal/model 不同。
+      PROBE_PKGS="task:automigrate:service/task/rpc"
+      GO_SQL=""
+      RAG_SQL="service/task/task-rpc/src/main/resources/db/migration/V1__create_task_progress.sql
+service/task/task-rpc/src/main/resources/db/migration/V2__create_user_like_count.sql"
+      ;;
+    message)
+      # ✅ 2026-10-26（global 域 L10）新增：message 域进**本 runner 自管的容器**。
+      # ⚠️ message 域**有** model.InitDB(DBConf) ⇒ 走 dbconf 探针
+      #    （service/message/rpc/internal/model/db.go:20，内部 db.go:44 跑 AutoMigrate）。
+      PROBE_PKGS="message:dbconf:service/message/rpc"
+      GO_SQL=""
+      RAG_SQL="service/message/message-rpc/src/main/resources/db/migration/V1__create_message_notification.sql
+service/message/message-rpc/src/main/resources/db/migration/V2__create_message_conversation.sql
+service/message/message-rpc/src/main/resources/db/migration/V3__create_message_conversation_message.sql
+service/message/message-rpc/src/main/resources/db/migration/V4__conversation_pair_unique_index.sql
+service/message/message-rpc/src/main/resources/db/migration/V5__message_time_columns_timestamptz.sql"
       ;;
     *)
       echo "FATAL: 未知域: $1" >&2; exit 2 ;;
@@ -243,6 +271,48 @@ func main() {
 	conf.Postgres.Dbname = os.Getenv("PGDATABASE")
 	if _, err := model.InitDB(conf); err != nil {
 		fmt.Println("INITDB_ERR:", err)
+		return
+	}
+	fmt.Println("AUTOMIGRATE_OK")
+}
+EOF
+      ;;
+    automigrate)
+      # ⚠️ task 域**没有** model.InitDB —— 真源是在
+      #    service/task/rpc/internal/svc/service_context.go:47 里**直接**
+      #    `gdb.AutoMigrate(&Model.TaskProgress{}, &Model.UserLikeCount{})`
+      #    ⇒ 探针复刻那**同一行**调用（同一份 struct tag + 同一个 gorm 版本）。
+      cat > "$dir/main.go" <<'EOF'
+// ddlprobe：用真源的 GORM AutoMigrate 在目标库里建出本域的表。
+// 只读真源源码的副本，不修改被冻结的真源仓库。
+//
+// ⚠️ 本探针对应真源里**没有** InitDB 包装的域（task）：
+//    真源在 service/task/rpc/internal/svc/service_context.go:47 直接调
+//    `gdb.AutoMigrate(&Model.TaskProgress{}, &Model.UserLikeCount{})`
+//    ⇒ 这里复刻**同一行**调用（gorm 版本与 struct tag 都取自真源副本）。
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+
+	"sea-try-go/PKG/internal/Model"
+)
+
+func main() {
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable TimeZone=Asia/Shanghai",
+		os.Getenv("PGHOST"), os.Getenv("PGPORT"), os.Getenv("PGUSER"),
+		os.Getenv("PGPASSWORD"), os.Getenv("PGDATABASE"))
+	gdb, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		fmt.Println("GORM_OPEN_ERR:", err)
+		return
+	}
+	if err := gdb.AutoMigrate(&Model.TaskProgress{}, &Model.UserLikeCount{}); err != nil {
+		fmt.Println("AUTOMIGRATE_ERR:", err)
 		return
 	}
 	fmt.Println("AUTOMIGRATE_OK")
