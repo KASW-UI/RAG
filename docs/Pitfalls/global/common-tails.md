@@ -262,3 +262,73 @@ ObservabilityLifecycle.java:[52,6] 找不到符号: 类 PreDestroy
 - 踩坑位置：`service/common/pom.xml`
 - 关联：`docs/DRIFT/global/common-tails.md` T-4 ⑤（守门落在 `service/common` ⇒ 需要真 Tomcat）
 - 2026-10-25，`align/global`
+
+---
+
+## PIT-GLOBAL-023 🔴 **「这个出口在 XX 层 ⇒ 不经过 X」是推断，不是证据** —— 「层」的判断必须落到**注册点**
+
+### 现象（2026-10-25 第二十六轮 L5 实测）
+
+T-12 的判定要立在一句话上：
+
+> 「Go 的『**方法不匹配**』这个出口在 **router 层** ⇒ 不经过 `TraceHandler` ⇒ 不带 `Traceparent`。」
+
+⇒ 如果**只读到** `rest/router/patrouter.go:59-83` 的出口分支（`pr.notAllowed.ServeHTTP` / `w.WriteHeader(405)`），
+这句话就只是**听起来合理的推断** ——
+`TraceHandler` 到底是挂在 router **外面**（包住整个分发 ⇒ 那 405 **也会**经过它 ⇒ 结论相反），
+还是**挂在每条路由里面**（被注册进 router ⇒ router 自己生成的 405 **不会**经过它），
+**光看 `rest/router/patrouter.go:59-83` 看不出来**。
+
+### 根因
+
+go-zero 的 `TraceHandler` **不是**一个「全局中间件」，它是**每条路由的 handler 链的一部分**：
+
+```go
+// go-zero@v1.10.2/rest/engine.go:113-115
+handle := chn.ThenFunc(route.Handler)
+return router.Handle(route.Method, route.Path, handle)
+```
+
+⇒ `chn` 的**第一个**就是 `handler.TraceHandler(...)`（`rest/engine.go:134-138`），
+但这条链是被**注册进 router** 的 ⇒ **router 自己产生的响应（405）根本不经过它**。
+
+⇒ ⇒ 「层」这个说法，必须落到**注册点**才站得住：
+**注册进去的 handler 内部产生 ⇒ 有**；**分发器自己产生 ⇒ 没有**。
+
+### 正确做法
+
+判定「某个响应头 / 副作用在某个出口是否发生」时：
+
+1. **逐条枚举分发器的出口**（不要只测「命中路由」那一条）；
+2. 对每条出口回答**同一个问题**：**这个响应是在「被注册进去的 handler」里产生的，还是在「分发器自己」里产生的？**
+3. **别忘了「分发器自建链」的那条** —— 本条的出口②（404）之所以**带** `Traceparent`，
+   就是因为 go-zero 在 `rest/engine.go:245-251` 的 `notFoundHandler` 里**自建了一条以 `TraceHandler` 开头的新链**；
+   而 `rest/server.go:58`（`opts = append([]RunOption{WithNotFoundHandler(nil)}, opts...)`）
+   让**每个 api 默认**都装上了它 ⇒ **默认 404 也是带 traceparent 的**。
+
+⇒ 落到本条的具体行号（**判定所需的全部证据**）：
+
+| 事实 | 出处 |
+|---|---|
+| 含 `TraceHandler` 的链被**注册进 router**（⇒ 405 绕过它） | `rest/engine.go:113-115` |
+| `TraceHandler` 是 native 链**第一个** | `rest/engine.go:134-138` |
+| 分发器的**三条出口** | `rest/router/patrouter.go:59-83`（`:61-68` 命中 / `:71-75` 404 / `:77-82` 405） |
+| 404 走**自建的** TraceHandler 链 | `rest/engine.go:245-251`（`:248`） |
+| 每个 api **默认**装了 notFoundHandler | `rest/server.go:58` |
+| 注入点在**每路由链内部** | `rest/handler/tracehandler.go:61` |
+
+### 教训
+
+**「层」的判断必须落到「注册点」** —— 否则「router 层 ⇒ 不经过」只是一个**听起来合理**的说法，
+而它的**反面**（router 层 ⇒ 也会经过）在另一种实现下**同样成立**。
+
+⚠️ 同族：**PIT-GLOBAL-015**（探针测的层 ≠ 端到端跑的层）——
+那条讲「**测**的层」，本条讲「**注入发生在哪一层**」；
+两者指向同一条纪律：**链路有分层 ⇒ 必须逐层点名，不能靠「层」的直觉。**
+
+### 出处
+
+- 首踩位置：2026-10-25 第二十六轮（L5 lane `align/global-signoff`）—— 给 T-12 定性时；
+- 关联：`docs/DRIFT/global/common-tails.md` §一·T-12 ·
+  `docs/Intentional_Deviations/global/common-tails.md` §`SD-2026-10-25-CAND-15` ·
+  `docs/Pitfalls/global/cross-domain.md` PIT-GLOBAL-015（探针测的层 ≠ 端到端跑的层）

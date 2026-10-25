@@ -657,10 +657,67 @@ stat -f "%Sm  %N" -t "%H:%M:%S" \
 
 ---
 
+## PIT-GLOBAL-022 🔴 **抄来的「同形态先例」编号也要复核** —— 指针不是证据，它本身是一条**待核对的断言**
+
+### 现象（2026-10-25 第二十六轮 L5 实测）
+
+`docs/DRIFT/global/_README.md` §七之二 的 **C3** 行原文：
+
+> | **C3** | users 域 **8 处 `DEFAULT CURRENT_TIMESTAMP`**（Go 无） | 刻意保留（同 message 域 `SD-2026-10-23-06` 已签的同形态） |
+
+⇒ 按这个指针去 `docs/Intentional_Deviations/message/rpc.md` 找 `SD-2026-10-23-06`
+⇒ 那一条讲的是 **`idx_notification_recipient_read` 的列数（Go 1 列 / RAG 2 列）**，
+**与 `DEFAULT CURRENT_TIMESTAMP` 毫无关系** ⇒ **指针是错的**。
+
+### 根因（两条，互相叠加）
+
+1. **台账里的「同形态先例」指针是「抄来的」，不是「当场核对过的」** ——
+   它和「Go 侧的结论」一样，**是需要证据的断言**，却因为长得像「引用」而被当成了证据；
+2. **编号不可寻址** —— 同一个 `SD-2026-10-23-06` 在 **3 个域各有含义**
+   （`like/rpc.md` / `message/rpc.md` / `users/admin/rpc.md`，见
+   [`docs/Intentional_Deviations/_INDEX.md`](../../Intentional_Deviations/_INDEX.md) §编号撞号）
+   ⇒ **只凭编号检索必然有歧义**，检索命中 ≠ 讲的同一件事。
+
+### 正确做法（三条）
+
+1. **引用任何「先例编号」之前，先打开被引条目核对它的标题** ——
+   判据一行：**被引条目的标题必须与当前条目讲的是同一件事**（同一个编号不算）；
+2. **引用时写「文件 + 域 + 编号」三键**，不要只写编号；
+3. **找不到同形态的已签先例 ⇒ 就写「本条是首次登记」** ——
+   **宁可留空，也不要挂一个没核对过的指针**（错的指针比空指针更贵：它会让下一个人以为「有人已经踩过这条坑了」）。
+
+### 核对后的**真实**同形态先例（本轮实际用到的两条）
+
+| 先例 | 位置 | 形态 |
+|---|---|---|
+| `SD-2026-10-24-04` | `docs/Intentional_Deviations/message/rpc.md:80` | 6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧**多出来的**（Go 侧无默认）✅ **已签字** |
+| `SD-2026-10-24-CAND-01` | `docs/Intentional_Deviations/comment/rpc.md:22` | 9 处时间列的 `NOT NULL DEFAULT CURRENT_TIMESTAMP`（RAG 更严）⏳ **未签字候选** |
+
+⇒ ⇒ 本轮登记的 `SD-2026-10-25-CAND-16`（users 域 8 处 DEFAULT）**挂的是上面这两条**，不是 `_README.md` 原先写的那个。
+
+### 教训
+
+**台账里的「同形态先例」指针是待核对的断言，不是证据。**
+⇒ 与 AGENTS.md §3.3 的「凡写『与 Go 一致』必须有两侧同时跑的探针」**同源**：
+**结论需要证据，指向结论的指针也需要证据。**
+⇒ **抄来的指针也要复核** —— 这是「对照纪律」在**台账之间**的延伸：
+本项目的漂移台账互相引用极多，**引用链越长，未核对的指针越容易变成事实上的幻觉**。
+
+### 出处
+
+- 首踩位置：2026-10-25 第二十六轮（L5 lane `align/global-signoff`）——
+  复核 `docs/DRIFT/global/_README.md` §七之二 C3 行时；
+- 连带订正：`docs/DRIFT/global/_README.md` §七之二 C3 行的先例指针
+  （**共享文件** ⇒ 补丁写在 [`docs/DRIFT/global/lanes/L5-signoff.md`](../../DRIFT/global/lanes/L5-signoff.md) §五，交整合者）；
+- 关联：`docs/Intentional_Deviations/_INDEX.md` §编号撞号 · `docs/Pitfalls/global/common-tails.md` PIT-GLOBAL-001（Go 出处只查项目树会落空）
+
+---
+
 ## 变更记录
 
 | 日期 | 动作 |
 |---|---|---|
+| 2026-10-25 | 🔴 **第二十六轮新增 PIT-GLOBAL-022** —— **抄来的「同形态先例」编号也要复核**：`_README.md` §七之二 C3 行写「同 message 域 `SD-2026-10-23-06` 已签的同形态」，而 message 域的 `SD-2026-10-23-06` 讲的是**索引列数**、与 `DEFAULT CURRENT_TIMESTAMP` **毫无关系** ⇒ 根因 = ① 台账里的「同形态先例」指针是**抄来的**、不是**当场核对过的** ② 编号**不可寻址**（同一个号在 3 个域各有含义）⇒ 纪律：**引用先例前必须打开被引条目核对标题** + **引用写「文件+域+编号」三键** + **找不到同形态先例就写「首次登记」**（错的指针比空指针更贵）⇒ 核对后的真实先例 = `message/rpc.md:80` 的 `SD-2026-10-24-04` + `comment/rpc.md:22` 的 `SD-2026-10-24-CAND-01` |
 | 2026-10-25 | 🔴 **第十九轮补记 PIT-GLOBAL-019 的第 4 种形态** —— **「构建进行中我改了源码」⇒ 全仓绿的是「旧字节码」**：全仓 `mvn -o test -fae` 跑到一半时补了个注解（`@ConditionalOnWebApplication`）⇒ 那轮 **BUILD SUCCESS · 2191 条全绿**，但 `common` 模块在 reactor 里排第 7 位（早）⇒ **后面 30 个模块跑的都是改动前的字节码** ⇒ 「全仓绿」当时**是假的**；⇒ 判据一行：`stat` 比对 `target/classes/*.class` 与 `src/main/java/*.java` 的 mtime（class 必须新于 source，否则**重跑**）；⇒ 纪律：**构建开始后不要再改源码**，非改不可 ⇒ **改完必须重跑** + 核对 mtime；⇒ 本条把「假绿」的来源从「测试没跑 / 跑的不是改过的那份 / 读的是旧结果」补到第 4 种，且它**最难发现**（不报错、不留痕、日志全正常） |
 | 2026-10-25 | **第十八轮新增 PIT-GLOBAL-019** —— **改「上游模块的资源」（DDL / 配置）做变异，而只跑下游 ⇒ Maven 从 `~/.m2` 解析旧 jar ⇒ 变异到不了运行代码 ⇒ 报成 **GREEN 假阴性****（本轮 M2 首跑实测：编译通过、测试也跑了、只是跑的不是改过的那份）** ⇒ 修法 = 把上游拉进**同一 reactor**；顺带一个 **surefire 参数换代**：`-DfailIfNoTests=false` **管不住** `-Dtest` 模式（上游模块会直接 BUILD FAILURE）⇒ 要加 **`-Dsurefire.failIfNoSpecifiedTests=false`**（与 PIT-GLOBAL-014 同族但**方向相反**：一个静默通过、一个直接失败）|
 | 2026-10-25 | **第十七轮新增 PIT-GLOBAL-018** —— **变异脚本的两种「假绿」**：① **变异编译不过 ⇒ maven 压根没跑测试 ⇒ surefire 目录里留着上一轮的 XML ⇒ 脚本读到旧结果 ⇒ 报成 GREEN**（本轮 M1 首版实测：`server -> server` 与 void 函数接口不兼容）⇒ 假绿方向最恶劣（会让人写下「守门无感」的结论，而守门根本**没被问过**）⇒ 三道闸：**跑前删旧 XML + 看 maven 退出码 + grep `COMPILATION ERROR` 直接判本次无效**；② **红在更早的断言上 ⇒ 目标断言压根没被执行到**（本轮 M3 首版实测：`await(0)` 让 handler 秒完成**并正常回包** ⇒ 客户端拿到 OK ⇒ 短路在 `assertThrows`）⇒ 判据：**看红的那条断言的失败消息，确认它就是目标断言** |
