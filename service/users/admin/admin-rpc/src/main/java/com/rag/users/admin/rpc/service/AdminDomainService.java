@@ -55,6 +55,44 @@ import java.util.Map;
  *
  * <p>业务错误统一抛 {@link StatusRuntimeException}，由 {@code AdminServiceGrpcImpl.invoke}
  * 统一捕获透传；任何非 {@code StatusRuntimeException} 兜底成 {@code Status.INTERNAL}。
+ *
+ * <p><b>🔴 B-1 放行分支：为什么 {@code catch (StatusRuntimeException e) { throw e; }} 必须排在宽 catch 之前
+ * —— 完整论证（2026-10-26 订正<b>理由</b>，<b>行为零改动</b>）</b>
+ *
+ * <p><b>① 结论（不变）</b>：客户端可见的 HTTP 业务码，<b>两侧都是 1015</b>。
+ *
+ * <p><b>② 但「Go 的 logic 返回 1015」这个理由是错的</b>（2026-10-26 之前各站点注释里写的说法，已订正）：
+ * <ul>
+ *   <li><b>Go 侧</b>：{@code service/user/admin/rpc/internal/logic/} 里<b>每一条 DB 错误都被改写成</b>
+ *       {@code status.Error(codes.Internal, "DB查询失败")} ⇒
+ *       <b>Go 的 logic 层根本不返回 1015</b>
+ *       （本域 <b>20 处</b> DB 错误出口，已逐一核过行号与文案）。</li>
+ *   <li><b>1015 实际从哪来</b>：{@code service/common/observability/rpc.go} 那个 select ——
+ *       {@code case <-done:}（handler 先返回，<b>要</b> {@code lock.Lock()}）
+ *       <b>vs</b> {@code case <-timeoutCtx.Done():}（<b>不需要锁</b>）⇒
+ *       <b>ctx 一取消，超时分支立刻就绪</b> ⇒ select 几乎总走超时分支
+ *       ⇒ 客户端拿到 {@code DEADLINE_EXCEEDED} ⇒ admin-api 落
+ *       {@code mapRPCStatusToCode} 的 <b>default</b> ⇒ {@code CODE_SERVER_BUSY = 1015}。</li>
+ *   <li><b>RAG 侧</b>：{@code SqlTimeoutStatusTranslator} 把 PG 的 57014 {@code query_canceled}
+ *       翻成 {@code DEADLINE_EXCEEDED}（{@code io.grpc.StatusRuntimeException}）
+ *       ⇒ 被本类这些放行分支原样上抛 ⇒ admin-api 同样落 default ⇒ <b>1015</b>。</li>
+ * </ul>
+ *
+ * <p><b>③ 反向风险（放行分支存在的真正理由）</b>：
+ * 若照 Go 的 logic 把这些宽 catch 改成 {@code codes.Internal}，
+ * RAG 就会渲染 <b>5001</b>（语义 =「数据库故障」），
+ * 而 Go 在同一场景给的是 <b>1015</b>（语义 =「超时 / 服务繁忙」）
+ * ⇒ ⇒ <b>那是离 Go 更远，不是更近</b>。
+ *
+ * <p><b>④ 残留（不声称 100%）</b>：Go 那个 select 是<b>竞速</b> ⇒ 机制上存在
+ * 「handler 先返回 ⇒ 客户端拿到 5001」的窗口；
+ * E-4 的 4 组采样全命中 1015，但那是 <b>4 次采样、不是概率刻画</b>
+ * ⇒ ⇒ <b>不声称「Go 侧 100% 是 1015」</b>。
+ *
+ * <p><b>⑤ 分类</b>：源码层形态两侧不同（Go 改写成 INTERNAL / RAG 保留 DEADLINE_EXCEEDED），
+ * 但 <b>客户端可见面一致</b> ⇒ ⇒ <b>不是 wire 级漂移</b>
+ * ⇒ 归「<b>表述差异</b>」类（<b>不是</b>「有意偏离」⇒ <b>不需要用户签字</b>）
+ * ⇒ 但仍<b>留档防回退</b> ⇒ 见台账 {@code DRIFT-ARPC-011}。
  */
 @Service
 public class AdminDomainService {
@@ -173,7 +211,8 @@ public class AdminDomainService {
             metrics.getLoginUserNotFound().increment();
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getLoginDbError().increment();
@@ -227,7 +266,8 @@ public class AdminDomainService {
         try {
             stringRedisTemplate.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds));
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin logout Redis setex failed", e);
@@ -255,7 +295,8 @@ public class AdminDomainService {
         } catch (NotFoundException e) {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin getSelf DB error, uid={}", uid, e);
@@ -290,7 +331,8 @@ public class AdminDomainService {
         } catch (NotFoundException e) {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin updateSelf findOneAdminByUid DB error, uid={}", uid, e);
@@ -307,7 +349,8 @@ public class AdminDomainService {
             } catch (NotFoundException ignored) {
                 // 未被占用，名字可用
             } catch (StatusRuntimeException e) {
-                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
                 throw e;
             } catch (Exception e) {
                 log.error("admin updateSelf findOneAdminByUsername DB error", e);
@@ -325,7 +368,8 @@ public class AdminDomainService {
             try {
                 wrapper.set(AdminEntity::getPassword, PasswordUtil.encrypt(password));
             } catch (StatusRuntimeException e) {
-                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
                 throw e;
             } catch (Exception e) {
                 log.error("admin updateSelf PasswordUtil.encrypt failed", e);
@@ -362,7 +406,8 @@ public class AdminDomainService {
         try {
             adminMapper.update(null, wrapper);
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin updateSelf update DB error, uid={}", uid, e);
@@ -376,7 +421,8 @@ public class AdminDomainService {
         } catch (NotFoundException e) {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin updateSelf re-findOneAdminByUid DB error, uid={}", uid, e);
@@ -460,7 +506,8 @@ public class AdminDomainService {
         try {
             uid = Snowflake.nextId();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin createAdmin Snowflake.nextId failed", e);
@@ -480,7 +527,8 @@ public class AdminDomainService {
         } catch (UsernameTakenException e) {
             throw Status.ALREADY_EXISTS.withDescription("用户名已存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             if (AdminExceptions.isUniqueViolation(e)) {
@@ -536,7 +584,8 @@ public class AdminDomainService {
             metrics.getCreateInviteUserNotFound().increment();
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getCreateInviteDbError().increment();
@@ -558,7 +607,8 @@ public class AdminDomainService {
             try {
                 code = generateInviteCode();
             } catch (StatusRuntimeException e) {
-                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
                 throw e;
             } catch (Exception e) {
                 metrics.getCreateInviteInternalError().increment();
@@ -574,7 +624,8 @@ public class AdminDomainService {
             try {
                 adminInviteMapper.insert(invite);
             } catch (StatusRuntimeException e) {
-                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
                 throw e;
             } catch (Exception e) {
                 if (AdminExceptions.isUniqueViolation(e)) {
@@ -634,7 +685,8 @@ public class AdminDomainService {
                     .setSql("update_time = CURRENT_TIMESTAMP");
             rows = userMapper.update(null, wrapper);
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getBanDbError().increment();
@@ -675,7 +727,8 @@ public class AdminDomainService {
                     .setSql("update_time = CURRENT_TIMESTAMP");
             rows = userMapper.update(null, wrapper);
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getUnbanDbError().increment();
@@ -710,7 +763,8 @@ public class AdminDomainService {
         } catch (NotFoundException e) {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin getUser DB error, uid={}", uid, e);
@@ -787,7 +841,8 @@ public class AdminDomainService {
             Long totalLong = userMapper.selectCount(countWrapper);
             total = totalLong == null ? 0L : totalLong;
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin getUserList count DB error", e);
@@ -810,7 +865,8 @@ public class AdminDomainService {
             rows = userMapper.selectList(listWrapper);
             if (rows == null) rows = Collections.emptyList();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin getUserList DB error", e);
@@ -902,7 +958,8 @@ public class AdminDomainService {
             metrics.getUpdateUserUserNotFound().increment();
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getUpdateUserDbError().increment();
@@ -920,7 +977,8 @@ public class AdminDomainService {
             } catch (NotFoundException e) {
                 existing = null;
             } catch (StatusRuntimeException e) {
-                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
                 throw e;
             } catch (Exception e) {
                 metrics.getUpdateUserDbError().increment();
@@ -939,7 +997,8 @@ public class AdminDomainService {
             try {
                 wrapper.set(UserEntity::getPassword, PasswordUtil.encrypt(password));
             } catch (StatusRuntimeException e) {
-                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
                 throw e;
             } catch (Exception e) {
                 metrics.getUpdateUserInternalError().increment();
@@ -968,7 +1027,8 @@ public class AdminDomainService {
         try {
             userMapper.update(null, wrapper);
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getUpdateUserDbError().increment();
@@ -981,7 +1041,8 @@ public class AdminDomainService {
         try {
             newUser = findOneUserByUid(uid);
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getUpdateUserDbError().increment();
@@ -1014,7 +1075,8 @@ public class AdminDomainService {
         try {
             rows = userMapper.delete(new LambdaQueryWrapper<UserEntity>().eq(UserEntity::getUid, uid));
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getDeleteUserDbError().increment();
@@ -1063,7 +1125,8 @@ public class AdminDomainService {
             metrics.getResetPasswordUserNotFound().increment();
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getResetPasswordDbError().increment();
@@ -1099,7 +1162,8 @@ public class AdminDomainService {
         try {
             hash = PasswordUtil.encrypt(defaultPassword);
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getResetPasswordInternalError().increment();
@@ -1115,7 +1179,8 @@ public class AdminDomainService {
                     .setSql("update_time = CURRENT_TIMESTAMP");
             userMapper.update(null, wrapper);
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getResetPasswordDbError().increment();
@@ -1197,7 +1262,8 @@ public class AdminDomainService {
         try {
             return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(map);
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin extraInfo JSON serialize failed", e);

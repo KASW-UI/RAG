@@ -1,6 +1,8 @@
 package com.rag.users.admin.rpc.bootstrap;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.rag.common.persistence.DeadlineQueryTimeoutInjector;
+import com.rag.common.persistence.SqlTimeoutStatusTranslator;
 import com.rag.users.admin.rpc.AdminRpcApplication;
 import com.rag.users.admin.rpc.domain.AdminEntity;
 import com.rag.users.admin.rpc.domain.UserEntity;
@@ -8,6 +10,10 @@ import com.rag.users.admin.rpc.mapper.AdminMapper;
 import com.rag.users.admin.rpc.mapper.UserMapper;
 import com.rag.users.admin.rpc.service.AdminDomainService;
 import com.rag.users.common.cryptx.PasswordUtil;
+import org.apache.ibatis.plugin.Intercepts;
+import org.apache.ibatis.plugin.Interceptor;
+import org.apache.ibatis.plugin.Signature;
+import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +25,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -94,6 +101,8 @@ class AdminRpcContainerWiringTest {
     private AdminDomainService adminDomainService;
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private SqlSessionFactory sqlSessionFactory;
 
     // ==================================================================
     // A-U0 / DRIFT-010：Flyway 与 seeder 的真实时序
@@ -292,6 +301,191 @@ class AdminRpcContainerWiringTest {
         assertEquals(3L, r.total(), "total 与分页无关");
         assertFalse(r.users().isEmpty(),
                 "offset=-20 被抑制 ⇒ 等价于首页，应当有数据返回，而不是报错");
+    }
+
+    // ==================================================================
+    // B-1：SQL 超时翻译链的**装配层**断言（§3.3：注解存在 ≠ 机制生效）
+    // ==================================================================
+
+    /**
+     * <b>本方法证明 admin-rpc 的 MyBatis 插件链里真的装着 B-1 那两个拦截器。</b>
+     *
+     * <p><b>为什么不能靠「{@code @Import} 写了」当证据</b>：
+     * {@code AdminRpcApplication} 上确实写着
+     * {@code @Import({DeadlineQueryTimeoutInjector.class, SqlTimeoutStatusTranslator.class})}，
+     * 但那是<b>声明</b>；MyBatis-Plus 到底有没有把容器里的 {@code Interceptor} Bean
+     * 收进 {@code Configuration}，是<b>运行期</b>的事 —— 本仓已经吃过两次同款亏
+     * （P-4「{@code @Import} 只让 Bean 存在」· P-ADMINAPI-009「最小上下文 ≠ 生产装配」）。
+     *
+     * <p><b>这条链断了，本域的具体后果</b>：
+     * <ol>
+     *   <li>缺 {@link DeadlineQueryTimeoutInjector} ⇒ 每条 SQL 不带 {@code statement_timeout}
+     *       ⇒ 客户端 deadline 到点时<b>在途查询继续跑满</b>
+     *       ⇒ Go 侧 ctx 会同步取消 ⇒ 两侧在「客户端已放弃后 PG 还占着多久」上出现差值</li>
+     *   <li>缺 {@link SqlTimeoutStatusTranslator} ⇒ PG 的 57014 {@code query_canceled}
+     *       不会变成 {@code DEADLINE_EXCEEDED}
+     *       ⇒ 落进业务层的 {@code catch (Exception e)}
+     *       ⇒ <b>被改写成 INTERNAL</b> ⇒ api 侧渲染 5001（Go 是 1015）⇒ <b>wire 面就漂了</b></li>
+     * </ol>
+     *
+     * <p>⚠️ 本方法只证明<b>装配</b>（链里有这两个）。
+     * <b>「链断了会怎样」的两个后果本身各有各自的守门</b>：
+     * 放行分支由 {@code AdminDomainServiceCatchStructureTest}（字节码级，28/28）守，
+     * 翻译器本体由 {@code service/common} 的 {@code SqlTimeoutStatusTranslatorTest} 守。
+     * ⇒ 三段合起来才覆盖整条链，缺一段就有洞。
+     */
+    @Test
+    @DisplayName("B-1：MyBatis 插件链里真的装着 DeadlineQueryTimeoutInjector + SqlTimeoutStatusTranslator")
+    void sqlTimeoutInterceptorsAreReallyInThePluginChain() {
+        List<Interceptor> chain = sqlSessionFactory.getConfiguration().getInterceptors();
+        List<String> names = chain.stream().map(i -> i.getClass().getName()).toList();
+
+        assertTrue(chain.stream().anyMatch(SqlTimeoutStatusTranslator.class::isInstance),
+                "MyBatis 插件链里没有 SqlTimeoutStatusTranslator ⇒ PG 的 57014 不会被翻成 "
+                        + "DEADLINE_EXCEEDED ⇒ 会落进 catch(Exception) 被改写成 INTERNAL（5001 ≠ Go 的 1015）；"
+                        + "实际链 = " + names);
+        assertTrue(chain.stream().anyMatch(DeadlineQueryTimeoutInjector.class::isInstance),
+                "MyBatis 插件链里没有 DeadlineQueryTimeoutInjector ⇒ 每条 SQL 不带 statement_timeout "
+                        + "⇒ 客户端 deadline 到点后在途查询继续跑满；实际链 = " + names);
+    }
+
+    /**
+     * 翻译器必须挂在<b>执行点</b>（{@code Executor.query} / {@code Executor.update}）——
+     * CancelRequest 引发的 {@code SQLException} 是在<b>执行</b>阶段抛出的，
+     * {@code StatementHandler.prepare} 阶段根本看不到它
+     * ⇒ 挂错点 = <b>永远翻译不到</b>（而且是静默的：链里有它、测试也全绿）。
+     */
+    @Test
+    @DisplayName("B-1：SqlTimeoutStatusTranslator 挂在 Executor 执行点（不是 StatementHandler.prepare）")
+    void translatorInterceptsTheExecutionPoint() {
+        assertMountedOnExecutor(SqlTimeoutStatusTranslator.class);
+    }
+
+    /**
+     * 🔴 <b>负控</b>：把<b>同一条判据</b>跑在一枚<b>故意挂错点</b>的变异体上，要求它<b>必须被拒绝</b>。
+     *
+     * <p><b>为什么必须要有这条</b>（users/user 域 2026-10-26 指出）：
+     * 用例 ② 读的是<b>注解元数据</b> ⇒ <b>判据若写松就恒绿</b>
+     * ——例如只查「有没有 {@code @Intercepts}」而不查「挂哪个方法」，
+     * 那它对<b>任何</b>挂载方式都通过 ⇒ <b>等于没守门</b>。
+     * ⇒ 所以守门本身必须<b>被证明会红</b>。
+     *
+     * <p><b>变异体为什么放在测试类里</b>：它是一个
+     * <b>静态嵌套类</b>、<b>没有</b>被 {@code @Import}、<b>不在</b>组件扫描路径上
+     * ⇒ <b>不参与生产装配</b>，只作为判据的输入。
+     *
+     * <p>⚠️ <b>不要照抄结论</b>：本条是本域自己写的、自己跑过的（变异见 §5.3 的 M2/M3 记档）。
+     */
+    @Test
+    @DisplayName("B-1 负控：挂错到 StatementHandler.prepare 的变异体必须被同一条判据拒绝")
+    void mountPointGuardRejectsWrongMountPoint() {
+        WrongMountTranslatorVariant variant = new WrongMountTranslatorVariant();
+        assertNotNull(variant.getClass().getAnnotation(Intercepts.class),
+                "变异体自身得先有 @Intercepts，否则这条负控就没意义");
+
+        // ⚠️ 这里**只要「判据拒绝了它」**，不检查拒绝的理由 ——
+        // 理由检查会**误报**：判据被合法重构（例如把「方法覆盖」那条提到「类型」那条前面）
+        // 就会让本条变红，而守卫其实还好 ⇒ ⇒ **判据的内部顺序不该被本条绑住**。
+        // 「必须红在挂载点那条」由下面的 NC-B 单独证明（那条的变异体只违反挂载点一条规则）。
+        assertThrows(AssertionError.class,
+                () -> assertMountedOnExecutor(variant.getClass()),
+                "同一条判据对「故意挂在 StatementHandler.prepare 上的翻译器」竟然通过了 "
+                        + "⇒ 判据写松了（恒绿）⇒ 这条守门等于没守");
+    }
+
+    /**
+     * 🔴 <b>负控之二（把「挂载点」这一条单独隔离出来）</b>。
+     *
+     * <p>NC-A 证明的是「判据不是恒绿」；但它**不能**证明「判据真的在看挂载点」——
+     * 判据只要有任意一条别的规则（覆盖 query/update、不得挂 StatementHandler…）在拦，
+     * NC-A 就会绿。
+     *
+     * <p><b>本条的变异体是「一切正确 + 额外挂错」</b>：
+     * 它**同时**声明了正确的 {@code Executor.query}/{@code Executor.update}
+     * **和**错误的 {@code StatementHandler.prepare}
+     * ⇒ ⇒ <b>只有「不得挂在 StatementHandler 上」那条规则能拒绝它</b>
+     * ⇒ ⇒ 于是本条变红 ⇒ **证明挂载点那条规则真的在生效**。
+     */
+    @Test
+    @DisplayName("B-1 负控之二：只违反「挂载点」一条规则的变异体，必须由该规则拒绝")
+    void mountPointRuleAloneRejectsCorrectPlusWrongMount() {
+        CorrectPlusWrongMountVariant variant = new CorrectPlusWrongMountVariant();
+
+        AssertionError caught = assertThrows(AssertionError.class,
+                () -> assertMountedOnExecutor(variant.getClass()),
+                "「一切正确 + 额外挂 StatementHandler.prepare」的变异体竟然通过了 "
+                        + "⇒ 判据没有在看挂载点 ⇒ 挂载点这条规则是摆设");
+
+        // 这条**可以**检查理由：NC-B 的变异体只违反挂载点一条规则 ⇒ 拒绝它的**只可能是**那条规则
+        assertTrue(caught.getMessage().contains("StatementHandler"),
+                "负控抛了 AssertionError，但**不是挂载点那条规则**抛的（消息 = " + caught.getMessage()
+                        + "）⇒ 变异没有精确命中 ⇒ 本条的隔离性不成立");
+    }
+
+    /**
+     * <b>挂载点判据本体</b>：一个翻译器必须挂在 {@code Executor}（{@code query} + {@code update}）上。
+     *
+     * <p>抽成独立方法是为了让<b>正例</b>（用例 ②）与<b>负控</b>（用例 ③）跑<b>同一段代码</b>
+     * ⇒ 否则负控验的是另一份逻辑，等于没验。
+     */
+    private static void assertMountedOnExecutor(Class<?> translatorClass) {
+        Intercepts intercepts = translatorClass.getAnnotation(Intercepts.class);
+        assertNotNull(intercepts,
+                translatorClass.getSimpleName() + " 没有 @Intercepts ⇒ 根本不会被 MyBatis 收进插件链");
+
+        Set<String> types = new HashSet<>();
+        Set<String> methods = new HashSet<>();
+        for (Signature s : intercepts.value()) {
+            types.add(s.type().getSimpleName());
+            methods.add(s.method());
+        }
+
+        assertTrue(types.contains("Executor"),
+                translatorClass.getSimpleName() + " 没有拦截 Executor ⇒ 执行阶段抛出的 57014 看不到；"
+                        + "实际拦截类型 = " + types);
+        assertTrue(methods.contains("query") && methods.contains("update"),
+                translatorClass.getSimpleName() + " 没有覆盖 query/update 两个执行方法；实际 = " + methods);
+        assertFalse(types.contains("StatementHandler"),
+                translatorClass.getSimpleName() + " 若挂在 StatementHandler.prepare 上，"
+                        + "CancelRequest 引发的 SQLException 永远翻译不到");
+    }
+
+    /**
+     * 🔴 <b>故意挂错点的变异体</b> —— 只用来喂给负控用例，<b>不参与生产装配</b>。
+     *
+     * <p>它挂在 {@code StatementHandler.prepare} 上（真实翻译器挂在 {@code Executor} 上）
+     * ⇒ 正是「CancelRequest 引发的 SQLException 在执行阶段才抛 ⇒ prepare 阶段看不到它」
+     * 那个真实错误形状。
+     */
+    @Intercepts({
+            @Signature(type = org.apache.ibatis.executor.statement.StatementHandler.class,
+                    method = "prepare",
+                    args = {java.sql.Connection.class, Integer.class})
+    })
+    static class WrongMountTranslatorVariant {
+        // 故意留空：它只需要「类型 + 挂载点」这个形状
+    }
+
+    /**
+     * 🔴 <b>「一切正确 + 额外挂错」的变异体</b> —— 用来把「挂载点」那条规则<b>单独隔离</b>出来。
+     *
+     * <p>它声明了正确的 {@code Executor.query}/{@code Executor.update}（⇒ 前两条规则都过）
+     * <b>再加上</b>错误的 {@code StatementHandler.prepare}
+     * ⇒ ⇒ <b>只有「不得挂在 StatementHandler 上」那条规则能拒绝它</b>。
+     */
+    @Intercepts({
+            @Signature(type = org.apache.ibatis.executor.Executor.class, method = "query",
+                    args = {org.apache.ibatis.mapping.MappedStatement.class, Object.class,
+                            org.apache.ibatis.session.RowBounds.class,
+                            org.apache.ibatis.session.ResultHandler.class}),
+            @Signature(type = org.apache.ibatis.executor.Executor.class, method = "update",
+                    args = {org.apache.ibatis.mapping.MappedStatement.class, Object.class}),
+            @Signature(type = org.apache.ibatis.executor.statement.StatementHandler.class,
+                    method = "prepare",
+                    args = {java.sql.Connection.class, Integer.class})
+    })
+    static class CorrectPlusWrongMountVariant {
+        // 故意留空：它只需要「类型 + 挂载点」这个形状
     }
 
     // ==================================================================

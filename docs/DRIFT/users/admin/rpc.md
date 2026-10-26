@@ -309,7 +309,7 @@ OP-SCHEMA  AdminSchemaBootstrap.initSchema（:51-64）
 | §14 | **Auth/Authz** | **两侧都不在本组件鉴权**，一律信任入参 `uid` / `operator_id`。JWT 校验全在 admin-api（不在本组件范围）⇒ **EQUIVALENT**。⚠️ 这也意味着 N-4（`operator_id` 恒 0 vs 真实 uid）**在本组件不可观测** —— 它只影响 OTel span 属性，而 RAG 的 admin-rpc **完全没有手写 span**（见下） |
 | §15 | **Transaction Semantics** | 只有 CreateAdmin 有事务，4 步原子、失败全回滚。其余 12 个用例两侧**都无事务**（Go 无 `Transaction` 包裹；RAG 主源码 `@Transactional` 只出现在 AdminCreateAtomicService 的两个重载上，无第三处）⇒ **EQUIVALENT**（真 PG 实测） |
 | §16 | **Concurrency Semantics** | 邀请码一次性：两侧都靠 invite 行 `FOR UPDATE` + username UNIQUE 兜底；实测 8 并发 → 1 成功 ⇒ **SEMANTICALLY EQUIVALENT / IMPLEMENTATION DIFFERENT**（GORM clause vs `LambdaQueryWrapper.last`）。并发 seeder 两侧都靠 UNIQUE + 重读 ⇒ **EQUIVALENT** |
-| §17 | **Timeout Semantics** | 服务端 2s 一致。⚠️ scope 有一处未定：是否 min 客户端 deadline（UNRESOLVED-ARPC-002）。⚠️ 在途 SQL 取消时长 4455ms vs 378ms（B-1/E-4，跨组件） |
+| §17 | **Timeout Semantics** | 服务端 2s 一致。⚠️ scope 有一处未定：是否 min 客户端 deadline（UNRESOLVED-ARPC-002）—— 🔴 **2026-10-26 订正**：该子项已由 `align/global` @ `af416d9` 修（`min(服务端预算, 客户端 deadline 剩余)`）+ 第三十三轮毫秒精度（`d20b377`）⇒ 按推导 `Δ_end` ≈ 0；**机制层**（业务线程不被取消）仍未做、**非 SQL 路径**仍有差（`DRIFT-ARPC-010`）⇒ **未实测**（探针未进编排 ⇒ global **E48**）。⚠️ 在途 SQL 取消时长 4455ms vs 378ms（B-1/E-4，跨组件） |
 | §18 | **Retry Semantics** | 全仓唯一的重试是 CreateInviteCode 的 3 次唯一冲突重试；触发条件、次数、退避（无）、最终失败（Internal 同一 desc）全部一致 ⇒ **EQUIVALENT** |
 | §19 | **Serialization** | proto wire 逐字节一致（`check-proto-static.sh` EXIT=0，13 rpc）；proto3 无 `optional` ⇒ 无 presence 语义差异；`null` vs `""` vs 缺失三态在 13 个 message 上逐条对齐（`AdminServiceGrpcImpl:250-282`）。**唯一差异是 `UpdateUserResp.success`**（DRIFT-ARPC-002）与 `extra_info` 列类型（DRIFT-ARPC-004） |
 | §20 | **Configuration** | `AdminAuth.AccessExpire=2592000` ✓；`System.DefaultPassword="123456"` ✓；`AccessSecret` 两侧在 rpc 侧**都未使用**（token 由 admin-api 签发）✓；`DataSource` ✓；`AdminAuth` 的 15 字节 secret 只影响 admin-api（N-5，本组件外）。**唯一分歧是空值容忍**（DRIFT-ARPC-003） |
@@ -369,7 +369,7 @@ Why It Matters:
   ① 它是**已修过的同款漂移**在另一模块的漏修：user-rpc 侧的 UserMapper.java:81-127 已按
      **完全相同的 Go 出处**修过（DRIFT-001，javadoc 直引 `autoUpdateTime` tag），
      修法是 `wrapper.setSql("update_time = CURRENT_TIMESTAMP")`，
-     并有回归测试 `UserRpcJsonbAndAvatarProjectionTest:113-148` 钉住 SET 子句必须含该列。
+     并有回归测试 `UserRpcJsonTextAndAvatarProjectionTest:113-148` 钉住 SET 子句必须含该列。
      **admin-rpc 没有同步修** —— 这正是「按组件粒度逐个审计」的漏网形态。
   ② DRIFT-001 当时的修法注释写的是「依赖 Postgres CURRENT_TIMESTAMP 在 row-level 触发」，
      那条注释已被证伪并改成显式 setSql。admin-rpc 若照抄会引入同一个错。
@@ -379,8 +379,31 @@ Evidence:      静态源码 + GORM 框架源码消费点 + 仓库内同款修复
 Must Preserve: 每条成功 UPDATE 都把 update_time 推到当次写入时刻
 Recommended:   按 UserMapper.java:127 的同款手法，在 6 条写路径的 wrapper 上补
                `setSql("update_time = CURRENT_TIMESTAMP")`，并加一条「SET 子句必须含
-               update_time」的守恒断言（照 UserRpcJsonbAndAvatarProjectionTest 的写法）。
+               update_time」的守恒断言（照 UserRpcJsonTextAndAvatarProjectionTest 的写法）。
 ```
+
+> #### ⚠️ 2026-10-26 范围补充：本条**只覆盖 UPDATE 路径**，`create_time` 在 **INSERT 路径**上**不在本条范围内**
+>
+> 本条的 6 条写路径**全是 UPDATE**。而 **INSERT 路径的时间列是另一回事**，两侧**机制不同**：
+>
+> | | `create_time` 在 INSERT 时怎么来 | 依据 |
+> |---|---|---|
+> | **Go** | **GORM 应用层填值** | `data_model.go:12` `Admin.CreateTime` 带 `gorm:"column:create_time;autoCreateTime"` ⇒ `callbacks/create.go` 在 insert 前填 `time.Now()`（**应用容器时钟**） |
+> | **RAG** | **DB 层 DEFAULT** | `AdminEntity.java:87` `create_time` 是 `insertStrategy = FieldStrategy.NEVER` ⇒ MP **不写该列** ⇒ 落到 DDL 的 `create_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP`（`03_create_admin.sql:59`）⇒ **DB 服务器时钟** |
+>
+> ⇒ **两侧都有值，但来源不同**（应用时钟 vs DB 时钟）⇒ 这与本条的 `update_time` **不是同一种严重性**：
+> - 本条（`update_time`）：RAG 侧**值冻结在建表那一刻** ⇒ **明显不同**（OBSERVABLE）；
+> - 本补充（`create_time`）：两侧都是「插入时自动填当前时间」⇒ 差异只剩**时钟源与时区**偏差
+>   ⇒ 同一台宿主机上的容器（应用与 PG 共用同一内核时钟）⇒ **实际不可观察**。
+>
+> ⚠️ **为什么必须单独写出来**：本条标题写的是「`update_time` 永不推进（**所有写路径**）」，
+> 而**所有写路径**这个措辞会让人以为 INSERT 路径也被覆盖了 ⇒ **实际没有**。
+> ⇒ 修本条时**不要**顺手把 `create_time` 的 INSERT 路径一起改（那是另一个判断），
+> **也别**因为本条被修了就认为 `create_time` 也被证明了。
+>
+> **关联**：`users_user` 侧（user 域）的 `create_time` 是**另一张表、另一套结论** ——
+> user 半边两侧都显式写该列 ⇒ 不可观察（见 `users/_shared.md` ADJ-04；
+> **admin 侧对 `users_user` 没有 INSERT** ⇒ 该结论对 admin 侧亦成立 ⇒ 已答，见 `admin/_shared.md` §5 U-7）。
 
 ### DRIFT-ARPC-002 —— `UpdateUserResp.success` 在 wire 上两侧相反
 
@@ -555,7 +578,7 @@ Go: 7 个 logic 文件在方法入口显式开 span 并打业务属性：
 
 RAG: AdminServiceGrpcImpl 与 AdminDomainService **零手写 span**；
      只有 service/common 的 RpcInterceptor 会开一个 method 名的 server span
-     （RpcInterceptor.java:162-165），**不含 audit.* 属性**。
+     （`RpcInterceptor` 里 `tracer.startSpan` 那一处），**不含 audit.* 属性**。<br>     ⚠️ 原写 `RpcInterceptor.java:162-165`，2026-10-26 改为**符号名** —— `service/common` 正被 `align/global` 持续改动，行号会漂。
      AdminDomainService 字段里只有 log + metrics（类注释 :57-58 明确说明「admin 侧没有 span 上下文」）。
 
 Observable Impact:
@@ -649,7 +672,7 @@ Question:   客户端带一个比 2s 更短的 grpc-timeout 时，两侧是否�
 Go Evidence:    service/common/observability/rpc.go:38
                 timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
                 ⇒ 父 ctx（已含客户端 deadline）**被继承**，客户端更早 ⇒ 提前取消
-Java Evidence:  service/common 的 RpcInterceptor.java:170-172
+Java Evidence:  service/common 的 RpcInterceptor —— deadlineEpochMs 的计算：
                 deadlineEpochMs = System.currentTimeMillis() + timeout.toMillis()
                 ⇒ **只算服务端自己的 2s**，没有读 Context.current().getDeadline()
 Why Unknown:    语义上确有差异，但「客户端 deadline 是否被 gRPC 库单独处理到 handler 之前」
@@ -658,6 +681,33 @@ Impact:         短 deadline 客户端 + 慢 handler 的组合下，两侧 handl
 Required Confirm: 用 exp-difftest-grpc-errors.sh 对同一用例分别用 100ms / 2000ms / 5000ms
                 三档客户端 deadline 打两侧 grpc 端点，比对响应时刻与 handler 副作用。
 ```
+
+> ⚠️ **行号引用已改为符号名**（2026-10-26）：原写 `RpcInterceptor.java:170-172` ——
+> `service/common` 正被 `align/global` 持续改动（该文件在 2026-10-26 已从 170 行漂到 214 行）
+> ⇒ **行号会随别人改动而失效** ⇒ 改引**表达式 / 符号名**（AGENTS.md §3.1：证据指向**消费点**）。
+
+> #### ⚠️ 2026-10-26 销账状态：**只销了「一格 desc 文案」，**本条本体**未销**
+>
+> | | 状态 |
+> |---|---|
+> | **档位 B 的 desc 文案**（Go `context deadline exceeded` vs RAG `rpc timeout after 2000ms`） | ✅ **已由 `align/global` 修掉**（`RpcInterceptor` 换用 `GO_DEADLINE_EXCEEDED_DESCRIPTION = "context deadline exceeded"`；配套真 Netty 守门 `RpcInterceptorTimeoutDescriptionGateTest` + `tools/semantic-probe/rpc-timeout/` 双侧活体探针）<br>**状态（2026-10-26 实查）**：修复**已提交**（`align/global` = `22a9111`，含 `49808ad` 主改动 + `22a9111` 台账订正），且**已推 `origin` + `upstream` 双远端**（三处 ref 指向一致，实查过）⇒ **不会再丢**。<br>⚠️ **但尚未合回 `do-my-own-gh`** ⇒ 本条在本域台账里**仍记「待合回」**，**合回后才改成「已销账」**。<br>📌 **合回与否已拍板（2026-10-26，用户 Jason）：暂不合回**（`align/global` 与 `align/favorite` 都暂不并入主仓）⇒ 维持「待合回」**不是「忘了合」** |
+> | **本条本体**（服务端 2s **不继承**客户端 deadline） | 🟡 **拆成三层**：① desc 文案 ✅已修（`22a9111`）· ② 期限计算 ✅已修（`af416d9`）· ③ 资源取消 🟡**机制层未做，但可观察面已被 ② + 第三十三轮（`d20b377`）消掉**（详见下方「三层拆分」与 §1.3 的销账补记）<br>⇒ 🔴 **2026-10-26 复核后改判**：原写「整条定性不变：CONFIRMED SEMANTIC MISMATCH 仍成立（可观察差距 `Δ_end = +1111ms` 来自未修的第 ③ 层）」⇒ **这句错了** —— `Δ_end` 由 **PG 取消时刻**决定（即 `statement_timeout`），**与业务线程是否被取消无关** ⇒ 第 ③ 层未修**拦不住**它归零<br>⇒ **现状态**：子项「是否 min 客户端 deadline」✅ 已闭环；**原观察依据按推导已失效**（`Δ_end` ≈ 0）；**机制层仍未做**（框架限制）；**非 SQL 路径仍有差**（⇒ `DRIFT-ARPC-010`）<br>⚠️ **推导未实测**（探针未进编排 ⇒ global **E48**）⇒ **不得记「已闭环」**<br>⇒ 已由 global 登记为 **E38**（`docs/DRIFT/global/_README.md` §七之五，**A 类 backlog**，落点在 global 写权内 ⇒ 不需拍板） |
+>
+> ⇒ **修文案 ≠ 修继承**：改完后**档位 A 的 `Δ_end` 仍是 +1111ms**（🔴 **此句为 2026-10-26 修前状态**；现按第 ② 层 + 第三十三轮推导 ≈ 0，**待实测**）。
+> ⇒ ⚠️ **不得以「desc 对齐了」把本条判为已闭环** —— 修法落点仍是 `service/common` 的 `RpcInterceptor`
+> （`service/common` 单写权归 `align/global`，本域无权改）。
+>
+> > #### 🟡 2026-10-26 更新：**本条已拆成三层，第 ② 层（期限计算）也修了**
+> >
+> > | 层 | 内容 | 状态 |
+> > |---|---|---|
+> > | ① | 超时响应的 **description 文案** | ✅ 已修（`22a9111`，待合回） |
+> > | ② | **期限计算**（本条原问题本体：服务端预算 min 客户端 deadline） | ✅ **已修**（`af416d9`，待合回）—— `effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())`，两处消费点都用它；取值点 `io.grpc.Context.current().getDeadline()` 服务端**实测可用**（客户端 1s ⇒ 读到 932ms 剩余） |
+> > | ③ | **资源取消**（客户端放弃后 PG 查询仍在跑 ⇒ `Δ_end = +1111ms`） | 🟡 **机制层未做 · 可观察面已消** —— ❌ grpc-java 的 `ServerCall.close()` **不取消业务线程**（与 T-14 同根因）⇒ 真正对齐需「handler 挪受控 executor + 超时 interrupt」⇒ **架构级 · 影响 10 个 rpc 组件**<br>⇒ **Jason 2026-10-26 已拍板（经 global 域转述）：① 本轮做，② 另立项**<br>🔴 **E46 对第③层有两处实测修正**（global 第三十二轮末，comment 域 owner 触发）：**量级被高估**（SQL 侧已有 B-1 缓解 ⇒ 真剩 ≤1s 窗口）· **「挪受控 executor + interrupt」单独做不够**（pgjdbc 不响应线程中断 ⇒ 必须配「取消正在跑的 JDBC 语句」）⇒ E46 **已从 E38② 拆出独立成条**，**第三十三轮已落地**（`d20b377`）<br>🟢 **第三十三轮（`d20b377`）对本层的额外收益**（🔴 本表原先没有）：**毫秒精度**（`setQueryTimeoutMs`）⇒ **取消时刻 == deadline** ⇒ **`Δ_end` 由第 ② 层后的「≈ +80ms」再压到「≈ 0」** ⇒ **第 ③ 层「未修」并不阻止 `Δ_end` 归零**（口径纠正见 §1.3） |
+> >
+> > ⇒ **子项「是否 min 客户端 deadline」已答「是」且已修** ✅；
+> > 🔴 **整条定性已改判**（2026-10-26 复核）—— 原文写「定性不变（第 ③ 层未修 ⇒ 可观察差距仍在）」⇒ **错**：
+> > **`Δ_end` 测的是「SQL 超时上限有没有继承客户端 deadline」，不是「业务线程有没有被取消」** ⇒ ② + 第三十三轮已把它压到 ≈0（**推导，未实测**）。
 
 > ✅ **2026-10-24 验证轮续 §1：本条从「静态推断」升级为「运行期实证」**（结论**未变**，证据强度**变了**）。
 >
@@ -1502,7 +1552,7 @@ users 域 DDL，多建 `users_user_avatar_history`。
 |---|---|---|---|
 | 1 | 🔴 **`users_user.extra_info` 也是 jsonb，而 Go 是 text**（`serializer:json`） | **跨域 · 未修** | DDL 归 users/user 域（`01_create_user.sql:41`），本 worker 无权改。**与本轮 ① 完全同型**：Go 落库成功 / RAG 被 jsonb 以 22P02 拒收。⇒ 建议 users-user 域照本节 §1.1 的三处同提交改法处理。**注意 `admin-rpc` 的 `updateUser` 也要跟着去掉那处 CAST**，否则跨域合并时会产生行为分叉 |
 | 2 | 🟡 **DRIFT-ARPC-006**（RAG 侧零手写 span，Go 逐 Logic 打 `audit.*` 属性） | ~~未修~~ **✅ 实施轮 §2 已修（8 处 span）** | | ⚠️ **本条原先的判断「需动 `service/common`、不在本域」已被推翻** —— `admin-rpc` 自己的 `pom.xml` 已引 `opentelemetry-bom`，`GlobalOpenTelemetry.getTracer` 与 Go `otel.Tracer` 是同一套 API ⇒ 在 admin-rpc 内即可补齐，不动 `service/common`。另**订正计数**：Go 是 **8 个 logic** 有 span，不是 13（13 是 attribute 条数）⇒ 刻意不给 getself/getuser/getuserlist/logout/updateself 加 span，用负向断言钉死 |
-| 3 | 🟡 **UNRESOLVED-ARPC-002**（超时是否 min 客户端 deadline） | ~~仍未定~~ **✅ 定性轮 §1 定性 → 验证轮续 §1 拿到运行期实证** | | **CONFIRMED SEMANTIC MISMATCH**（结论未变，证据强度变了：静态推断 → 实测）。实测：客户端 deadline 1000ms 时，Go 的查询随客户端一起死（Δ_end=0ms），**RAG 的查询在客户端返回后仍占着 PG 1111ms**。修法落在 `service/common` 的 `RpcInterceptor`（不继承入站 deadline），**不在本域**，故本 worker 无权改。⚠️ 现有 HTTP 对拍工具在结构上抓不到这条（见定性轮 §1.4）⇒ 不得以「对拍全绿」当它已闭环 |
+| 3 | 🟡 **UNRESOLVED-ARPC-002**（超时是否 min 客户端 deadline） | ~~仍未定~~ **✅ 定性轮 §1 定性 → 验证轮续 §1 拿到运行期实证** | | **CONFIRMED SEMANTIC MISMATCH**（结论未变，证据强度变了：静态推断 → 实测）。实测：客户端 deadline 1000ms 时，Go 的查询随客户端一起死（Δ_end=0ms），**RAG 的查询在客户端返回后仍占着 PG 1111ms**。修法落在 `service/common` 的 `RpcInterceptor`（不继承入站 deadline），**不在本域**，故本 worker 无权改。⚠️ 现有 HTTP 对拍工具在结构上抓不到这条（见定性轮 §1.4）⇒ 不得以「对拍全绿」当它已闭环。<br>**2026-10-26 更新**：`align/global` 已修**档位 B 的 desc 文案**（`rpc timeout after 2000ms` → `context deadline exceeded`）⇒ **只销那一格**；**本条本体（不继承客户端 deadline）未修**，定性**不变**。该修复**已提交并推双远端**（`22a9111`，三处 ref 一致），**待合回 `do-my-own-gh`**。<br>**2026-10-26 再更新**：本条已拆成三层 —— ① desc 文案 ✅已修（`22a9111`）· ② **期限计算 ✅已修**（`af416d9`，`effectiveTimeoutMs = min(服务端预算, 客户端 deadline 剩余)`，待合回）· ③ **资源取消 🟡 机制层未做 / 可观察面已消**（grpc-java `ServerCall.close()` 不取消业务线程）⇒ 🔴 **2026-10-26 再复核：原写「`Δ_end` 不变」是错的** —— `Δ_end` 由 **PG 取消时刻**（= `statement_timeout`）决定 ⇒ **与业务线程是否被取消无关** ⇒ 第②层 + 第三十三轮（`d20b377`，毫秒精度 ⇒ 取消时刻 == deadline）⇒ **`Δ_end` ≈ 0**（**推导，未实测**）⇒ **子项已闭环；整条定性降级为「机制层未闭环 + 非 SQL 路径残余（`DRIFT-ARPC-010`）」**。⚠️ **探针未进编排**（global **E48**）⇒ **不得记「已闭环」**。本条已由 global 登记为 **E38**（A 类 backlog）；第③层机制部分已另立项（E38② 维持「另立项」），其 SQL 侧精度部分由 **E46** 在第三十三轮落地 |
 | 4 | 🟡 **UNRESOLVED-ARPC-003**（Redis 客户端超时配置） | ~~仍未定~~ **✅ 定性轮 §2 + 实施轮 §1 + 验证轮 §2 + 验证轮续 §2 ⇒ **已关闭**（含 socket 层实证）** | | 读超时 3s 两侧一致（但**一致是巧合**，无出处无回归网）；连接超时已补 `connect-timeout: 5s`，**socket 层已用黑洞 IP 实测**（失败耗时落在 [4000,9500)ms ⇒ 只有 5s 落得进去）。⚠️ 但要记住：**Lettuce 的连接是异步的** ⇒ 故障时**先到期的往往是 3s 的命令超时**，5s 的连接超时通常不决定用户可见时延 |
 | 5 | 🟡 **UNRESOLVED-ARPC-005**（`users_user` 建表责任交叉） | ~~跨组件~~ **✅ 验证轮 §1 已关闭（双侧并发实测）** | | RAG 侧 advisory lock **机制性**串行（同一把锁 8675309，两进程严格错开）；Go 侧 GORM AutoMigrate 是 check-then-act，**机制上仍有竞态窗口**，实测未撞≠机制保证 ⇒ 两侧性质不同，不可混谈 |
 | 6 | 🟡 **DDL 的 `SET TIME ZONE` 副作用** | ~~已记录未验证~~ **✅ 修复轮 §8 已闭环（变异实测偏移 28800 秒）** | | 本轮新增的 `SET/RESET TIME ZONE` 与 `01`/`02` 同款；`SchemaInitializer` 四份脚本共用**一条连接**依次执行 ⇒ `03`/`04` 的 `SET` 只影响其自身语句区间，随后 `RESET` 还原。**未做「多实例并发建表 + 非 UTC 会话时区」的运行时验证** |
@@ -1514,16 +1564,16 @@ users 域 DDL，多建 `users_user_avatar_history`。
 |---|---|
 | `service/users/users-common/src/main/resources/db/03_create_admin.sql` | `extra_info`→TEXT、2 个时间列→TIMESTAMPTZ、幂等自愈 ALTER |
 | `service/users/users-common/src/main/resources/db/04_create_admin_invite.sql` | 4 个时间列→TIMESTAMPTZ、幂等自愈 ALTER |
-| `service/users/admin/admin-rpc/.../mapper/JsonTextTypeHandler.java` | **新增**（text 列专用；**不复用** `JsonbTypeHandler`） |
-| `service/users/admin/admin-rpc/.../domain/AdminEntity.java` | `extraInfo` 换 handler、时间列→`OffsetDateTime`、javadoc 按 §3.2/§3.3.2 重写 |
-| `service/users/admin/admin-rpc/.../domain/AdminInviteEntity.java` | 4 个时间列→`OffsetDateTime`、javadoc 补可观察性论证 |
-| `service/users/admin/admin-rpc/.../service/AdminDomainService.java` | `updateSelf` 去 CAST、`createInviteCode` 改 `OffsetDateTime`、空密码守卫加签字注释 |
-| `service/users/admin/admin-rpc/.../service/AdminCreateAtomicService.java` | `now` 改 `OffsetDateTime` |
-| `service/users/admin/admin-rpc/.../service/AdminServiceGrpcImpl.java` | 删 `setSuccess(true)`（DRIFT-ARPC-002） |
-| `service/users/admin/admin-api/.../service/AdminUpdateUserService.java` | 订正 Go 出处（引错的文件/行号） |
-| `service/users/admin/admin-rpc/src/test/.../AdminRpcColumnTypeParityTest.java` | **新增**，真 PG 3 条（列类型 / `\u0000` 边界 / 跨时区 invite 判定） |
-| `service/users/admin/admin-rpc/src/test/.../AdminRpcGoWireParityTest.java` | tripwire 反转：断言 `success == false` |
-| `service/users/admin/admin-rpc/src/test/.../AdminUpdateSelfAndCreateAdminRegressionTest.java` | 跟随实体类型改 `OffsetDateTime` |
+| `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/mapper/JsonTextTypeHandler.java` | **新增**（text 列专用；**不复用** `JsonbTypeHandler`） |
+| `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/AdminEntity.java` | `extraInfo` 换 handler、时间列→`OffsetDateTime`、javadoc 按 §3.2/§3.3.2 重写 |
+| `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/AdminInviteEntity.java` | 4 个时间列→`OffsetDateTime`、javadoc 补可观察性论证 |
+| `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminDomainService.java` | `updateSelf` 去 CAST、`createInviteCode` 改 `OffsetDateTime`、空密码守卫加签字注释 |
+| `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminCreateAtomicService.java` | `now` 改 `OffsetDateTime` |
+| `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminServiceGrpcImpl.java` | 删 `setSuccess(true)`（DRIFT-ARPC-002） |
+| `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/AdminUpdateUserService.java` | 订正 Go 出处（引错的文件/行号） |
+| `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcColumnTypeParityTest.java` | **新增**，真 PG 3 条（列类型 / `\u0000` 边界 / 跨时区 invite 判定） |
+| `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcGoWireParityTest.java` | tripwire 反转：断言 `success == false` |
+| `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/service/AdminUpdateSelfAndCreateAdminRegressionTest.java` | 跟随实体类型改 `OffsetDateTime` |
 | `docs/Intentional_Deviations/users/admin/{_shared,api,rpc}.md` | **0 字节 → 正式签字档** |
 | `docs/Pitfalls/users/admin/rpc.md` | 追加 P-8（同名列跨表）、P-9（签字档空占位） |
 
@@ -1810,6 +1860,21 @@ Required Confirm 是「跑 `exp-difftest-grpc-errors.sh`」。
 > **两侧的有效 deadline 不同：Go = min(客户端, 服务端配置)；RAG = 只有服务端配置。**
 > ⇒ 客户端给一个比服务端更短的 deadline 时，**Go 会在客户端那一刻中止服务端的工作，
 > RAG 不会** —— 它会一直干到自己的 2000ms。
+>
+> 🟢 **⚠️ 2026-10-26：上面这两句描述的是「修前」状态** —— E38 第①层已修
+> （`align/global` @ `d531abd`，已推双远端、待合回）⇒ **RAG 侧现在也是 `min(客户端, 服务端配置)`**
+> ⇒ 「RAG 不会在客户端那一刻停」**已不成立**。
+> ⚠️ **但「中止」与「取消在途工作」是两回事**（详见 §1.3 可观察后果表）：
+> 第①层只让**超时 close 的时刻**对齐（`Δ_start` 会变），
+> **在途 PG 查询随客户端放弃而被取消**那一层（第③层 / E38③ / E46）**仍未做**（`Δ_end` 不变）。
+>
+> 🔴 **2026-10-26 复核订正（上一行末句「`Δ_end` 不变」是错的）**：
+> `Δ_end` 的主仪器是 **PG 服务端日志的取消时刻**（= `statement_timeout` 触发）⇒
+> **它测的是「SQL 超时上限有没有继承客户端 deadline」，不是「业务线程有没有被 interrupt」** ⇒
+> 第②层（期限计算，`af416d9`）一改，`Δ_end` 就跟着从 **+1111ms** 掉到 **≈ +80ms**（秒级取整残差），
+> 第三十三轮（`d20b377`，毫秒精度）再把它压到 **≈ 0** ⇒
+> **第③层「机制未做」拦不住 `Δ_end` 归零**（**推导，未实测**）。
+> ⇒ 第③层真正剩下的是**机制层**（业务线程不被取消）+ **非 SQL 路径**（⇒ `DRIFT-ARPC-010`）。
 
 ### 1.2 逐层证据链
 
@@ -1817,11 +1882,48 @@ Required Confirm 是「跑 `exp-difftest-grpc-errors.sh`」。
 |---|---|---|
 | 1 | Go `service/common/observability/rpc.go:38` | `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` —— **`ctx` 是 handler ctx**，gRPC 会把客户端的 `grpc-timeout` 传播进来 |
 | 2 | Go 语言语义 | `context.WithTimeout(parent, d)` 在 parent deadline 已更早时**等价于 parent** ⇒ 有效 deadline = **min(parent, now+d)** = **min(客户端, 服务端)** |
-| 3 | RAG `service/common/observability/RpcInterceptor.java:170-172` | `deadlineEpochMs = System.currentTimeMillis() + timeout.toMillis()` —— **从不读入站 `Context` 上的 deadline** ⇒ 有效 deadline = **只有服务端配置** |
-| 4 | RAG `RpcInterceptor.java:184-198` | `TIMEOUT_SCHEDULER.schedule(…, timeoutMs, …)` —— 到点才 `close(DEADLINE_EXCEEDED)`，同样**不受客户端 deadline 影响** |
+| 3 | RAG `service/common/observability/RpcInterceptor` —— `deadlineEpochMs` 的计算 | **〔修前〕** `deadlineEpochMs = System.currentTimeMillis() + timeout.toMillis()` —— **从不读入站 `Context` 上的 deadline** ⇒ 有效 deadline = **只有服务端配置**<br>🟢 **〔2026-10-26 已变〕** 第①层落地后改为 `effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())` ⇒ **有效 deadline = min(客户端, 服务端)**，与 Go 侧第 1/2 行**同构**<br>⚠️ 本行与第 4 行**不再写行号**（`service/common` 被 `align/global` 持续改动 ⇒ 行号会漂）⇒ 改引表达式；现位置见下方「行号对照」 |
+| 4 | RAG `RpcInterceptor` —— `TIMEOUT_SCHEDULER.schedule(…, timeoutMs, …)` | **〔修前〕** 到点才 `close(DEADLINE_EXCEEDED)`，**不受客户端 deadline 影响**<br>🟢 **〔2026-10-26 已变〕** 调度器延时改用 `effectiveTimeoutMs` ⇒ **close 时刻也随客户端 deadline 前移** |
 | 5 | 配置值 | 两侧**配置相同**：Go 未配 `Timeout` ⇒ go-zero v1.10.2 `zrpc/config.go` 的 `Timeout int64 json:",default=2000"` = **2000ms**；RAG `application.yml:129` `rpc-timeout: 2s` = **2000ms** |
 
 ⇒ **差异不在配置值，在「是否继承」。** 这是本条最容易被误判成「两边都是 2s 所以一样」的地方。
+
+> #### 📌 行号对照（2026-10-26，global 域逐条实测提供 · 本域**只读不改**）
+>
+> `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`
+> 在 `align/global` 上现共 **792 行**。本域旧引用 → 现位置：
+>
+> | 本域旧引用 | 现应指向 | 现内容 |
+> |---|---|---|
+> | `RpcInterceptor.java:162-165`（`rpc.md:558`） | **`:160-166`** | 「超时两层模型」的 javadoc（含「**本拦截器（gRPC 路径）没有第②层**」） |
+> | `RpcInterceptor.java:170-172`（`rpc.md:652` / `:1820` / `:2511`） | **`:234-237`** | `effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())` + `deadlineEpochMs = …` |
+> | `RpcInterceptor.java:184-198`（`rpc.md:1821`） | **`:263-264`** | `long timeoutMs = effectiveTimeoutMs;` + `TIMEOUT_SCHEDULER.schedule(() -> {` |
+> | （E38 第①层新增的取值方法） | **`:592`** | `private static long clientDeadlineRemainingMs()`（从 `io.grpc.Context.current().getDeadline()` 取） |
+>
+> ⚠️ **本域已把这 4 处活引用改成符号名**（见各处的「原写 …，2026-10-26 改为符号名」留痕）
+> ⇒ 上表是**给后人的定位辅助**，不是本域的活引用 ⇒ **行号仍会随 `align/global` 后续提交漂移**
+> ⇒ **判据不变：共享层一律引符号名**（AGENTS.md §3.1：证据指向**消费点**）。
+>
+> #### 📌 精确 commit SHA（便于「合回后」逐条销账）
+>
+> | 条目 | commit | 状态 |
+> |---|---|---|
+> | **E30**（RPC 超时的 status description ⇒ Go 的 `context deadline exceeded`） | `49808ad` + `22a9111` | ✅ 已推 origin + upstream，**待合回** |
+> | **E38 第①层**（超时有效期限 ⇒ `min(客户端 deadline, 服务端 timeout)`） | `d531abd` | ✅ 已推 origin + upstream，**待合回** |
+> | **第三十二轮**（共享复核工具 `tools/check-ledger-selfcheck.py` 三处缺陷） | `bb680a3` | ✅ 已推 origin + upstream |
+
+> #### ⚠️ C-1：遥测侧的 **gRPC code 名表示**两侧不同（**已登记的表述差异，不要去「修」**）
+>
+> | | 码名 |
+> |---|---|
+> | Go | `codes.Code.String()` ⇒ **`DeadlineExceeded`**（CamelCase） |
+> | RAG | grpc-java 的 `Code.name()` ⇒ **`DEADLINE_EXCEEDED`**（全大写下划线） |
+>
+> - code 与 desc **均已保留**，**仅常量表示不同** ⇒ 已登记为 **C-1**
+>   （`docs/Intentional_Deviations/common/_signed-deviations.md` · C 类）⇒ 明确「**不做臆造映射**」。
+> - ⚠️ **不要为了对齐它去改 grpc-java 的命名** ⇒ 那是框架 API，改不了也不该改。
+> - ⇒ **本表上文所有 `DEADLINE_EXCEEDED` 字样都是 grpc-java 的码名**；
+>   与 Go 侧的 `DeadlineExceeded` 指**同一个 code** ⇒ **不是漂移**。
 
 ### 1.3 可观察后果
 
@@ -1830,8 +1932,8 @@ Required Confirm 是「跑 `exp-difftest-grpc-errors.sh`」。
 | | Go | RAG |
 |---|---|---|
 | **客户端看到** | `DEADLINE_EXCEEDED` @~100ms | `DEADLINE_EXCEEDED` @~100ms（**gRPC 库替客户端兜的，与本条无关**） |
-| **服务端 handler** | ctx 在 100ms 即 Done ⇒ **任何 ctx-aware 操作（SQL / 下游 RPC）中止**，在途查询被取消 | **继续跑到 2000ms** |
-| **副作用** | 100ms 之后的写**不发生** | 100ms 之后的写**照样落库** —— 客户端看到失败，数据却变了 |
+| **服务端 handler** | ctx 在 100ms 即 Done ⇒ **任何 ctx-aware 操作（SQL / 下游 RPC）中止**，在途查询被取消 | **〔修前〕继续跑到 2000ms**<br>🟢 **〔第①层已修〕超时 close 时刻 = min ⇒ 100ms 即 close**（`Δ_start` 会变）<br>🟢 **〔第②层 + 第三十三轮后〕SQL 路径**：`DeadlineState` 继承客户端 deadline ⇒ `statement_timeout` 也继承 ⇒ **在途查询在 deadline 时刻被取消**（`57014`）⇒ **handler 线程 ≈ 100ms 即结束**（与 Go 同款）<br>🔴 **〔仍未修〕但 close ≠ 取消在途工作** —— `ServerCall.close()` **不取消业务线程** ⇒ 业务线程**要等 SQL 的错误传回来**才知道失败（≈ deadline，不再是「跑满 2s」）<br>🔴 **〔非 SQL 路径未被覆盖〕** ⇒ 例如 Redis 写不绑 deadline ⇒ 跑满 Redis 自己的超时（⇒ 本域 `DRIFT-ARPC-010`） |
+| **副作用** | 100ms 之后的写**不发生** | **〔修前〕100ms 之后的写照样落库**<br>🟢 **〔第②层 + 第三十三轮后 · SQL 路径〕** 在途查询在 deadline 时刻被 `statement_timeout` 取消 ⇒ **事务随异常回滚** ⇒ 写**不落库** ⇒ **与 Go 一致**<br>⚠️ **〔仍成立的缺口〕** ① **业务线程不被取消**（框架限制）⇒ 只能靠 SQL 错误回传感知 ② **非 SQL 路径**（Redis 等）不受 deadline 约束<br>⇒ ⚠️ 修的是「**何时 close**」+「**SQL 超时上限**」，**不是「业务线程会不会被 interrupt」** ⇒ **别把第①②层当成这条销账** |
 
 ⇒ **分类：`SEMANTIC MISMATCH`，Risk MEDIUM**（属于「客户端已放弃但服务端仍提交副作用」，
 与本仓 B-1 那轮超时取消工作是同族问题）。
@@ -1846,9 +1948,16 @@ Required Confirm 是「跑 `exp-difftest-grpc-errors.sh`」。
 ⇒ **关闭本条需要的是 PG 侧探针，不是 gRPC 用例。** 最小做法复用现成范式：
 照 `tools/difftest/exp-b1-timeout-cancel.sh` 的手法 —— 用另一个 psql 会话锁住一行
 （`SELECT … FOR UPDATE`），让 handler 的 UPDATE 阻塞，然后发一个**短 deadline** 的请求，
-最后**查 PG 侧那次查询是否被取消**（Go 应出现 cancel/短滞留；RAG 应跑满）。
+最后**查 PG 侧那次查询是否被取消**（Go 应出现 cancel/短滞留；**RAG 修前跑满、修后也应在 deadline 时刻被取消**）。
 ⚠️ 造阻塞的脚本必须先证明「锁真的加上了」（`to_regclass()` 校验）——
 `tools/difftest/README.md` 与 `Intentional_Deviations/_cross/signed-deviations.md` 都记了这个坑。
+
+🟢 **2026-10-26 订正：本条写的「需要 PG 侧探针」这个前提，探针其实早已存在** ——
+`tools/difftest/exp-grpc-admin-deadline-probe.sh`（**2026-10-24 就有**，17KB）**就是**它
+（含短/长 deadline 双档 + `exit 1 ⟺ 短档下两侧 PG 查询存活时长差异 > 1s` + 配套 `GrpcAdminDeadlineProbe.java`）
+⇒ **本条 §1.4 下面那句「现有工具抓不到」对 HTTP/gRPC 对拍仍成立，但对「PG 侧探针」不成立**
+⇒ **真正的缺口是「探针没进常规编排」**（`run.sh` / `diff.py` 都不调它 ⇒ 它是手动取证工具 ⇒ 改坏了不会被自动抓到）
+⇒ 已由 global 登记为 **E48**（落点 `tools/difftest/run.sh` ⇒ global 写权内 ⇒ A 类 · 下一轮做）。
 
 > ⚠️ 本条的 Required Confirm 原文写的是「用 100ms / 2000ms / 5000ms 三档 deadline 对拍」。
 > **那条 recipe 本身是无效的** —— 三档都只在客户端可见差异，测不出服务端行为。
@@ -2042,7 +2151,7 @@ go-zero `core/stores/redis/redis.go:27` 的 `readWriteTimeout = 2 * time.Second`
 
 ### 2.3 改法
 
-新增 `service/AdminSpans.java`：`GlobalOpenTelemetry.getTracer("admin-rpc")` + `Scope` + `finally span.end()`。
+新增 `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminSpans.java`：`GlobalOpenTelemetry.getTracer("admin-rpc")` + `Scope` + `finally span.end()`。
 `AdminDomainService` 的 **8 个** public 方法改成「薄壳 + 原体改名 `doXxx`」——
 **原方法体一行未动**，只改签名处，diff 可读。
 
@@ -2308,8 +2417,8 @@ func (User) TableName() string        { return "users" }          // :48-50
 
 | | 位置 | 归属域 |
 |---|---|---|
-| 副本 1 | `service/users/admin/admin-rpc/.../mapper/JsonTextTypeHandler.java` | **users/admin（本域）** |
-| 副本 2 | `service/users/user/user-rpc/.../mapper/JsonTextTypeHandler.java` | users/user |
+| 副本 1 | `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/mapper/JsonTextTypeHandler.java` | **users/admin（本域）** |
+| 副本 2 | `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/mapper/JsonTextTypeHandler.java` | users/user |
 
 **两份的 `setNonNullParameter` / `getNullableResult` / `toJson` / `parse` 逐行相同**，
 只有包名与 javadoc 不同（副本 2 是从 `JsonbTypeHandler` 改名而来，
@@ -2362,16 +2471,16 @@ javadoc 里记了改名理由与 Go 出处）。
 |---|---|
 | `component-semantic-verification/springboot-semantic-model.md` | 5 |
 | `tools/errmsg-probe/README.md` | 3 |
-| `service/users/user/user-rpc/.../UserRpcLoginNullStatusReadsAsZeroTest.java` | 3 |
-| `service/message/message-api/.../GoStyleGrpcClientBreakerE2ETest.java` | 3 |
-| `service/like/like-rpc/.../LikeOutboxEventEntity.java` | 3 |
-| `service/hot/hot-rpc/.../HeavyKeeper.java` | 3 |
-| `service/favorite/favorite-rpc/.../FavoriteFactSemanticsTest.java` | 3 |
-| `service/favorite/favorite-rpc/.../FavoriteRpcLabels.java` | 3 |
-| `service/comment/comment-rpc/.../CommentAuditPublisher.java` | 3 |
-| `service/hot/hot-rpc/.../Jackson2ObjectMapperConfiguration.java` | 2 |
-| `service/favorite/favorite-rpc/.../FavoriteRpcSupport.java` | 2 |
-| `service/favorite/favorite-rpc/.../FavoriteItemMapper.java` | 2 |
+| `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcLoginNullStatusReadsAsZeroTest.java` | 3 |
+| `service/message/message-api/src/test/java/com/rag/message/message/api/GoStyleGrpcClientBreakerE2ETest.java` | 3 |
+| `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/domain/LikeOutboxEventEntity.java` | 3 |
+| `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/domain/HeavyKeeper.java` | 3 |
+| `service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/service/FavoriteFactSemanticsTest.java` | 3 |
+| `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/config/FavoriteRpcLabels.java` | 3 |
+| `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentAuditPublisher.java` | 3 |
+| `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/config/Jackson2ObjectMapperConfiguration.java` | 2 |
+| `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/service/FavoriteRpcSupport.java` | 2 |
+| `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/mapper/FavoriteItemMapper.java` | 2 |
 | `docs/Pitfalls/users/user/rpc.md` | 1 |
 
 ⚠️ **其中 8 处在 `src/main/java` 的生产代码里**（like / hot / favorite / comment 四域）
@@ -2425,9 +2534,9 @@ javadoc 里记了改名理由与 Go 出处）。
 
 | 文件 | 性质 |
 |---|---|
-| `service/users/admin/admin-rpc/src/test/.../AdminRedisTimeoutConfigTest.java` | **+1 条**：用真 `Binder` 证明 `connect-timeout` 被绑进 `DataRedisProperties` |
+| `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRedisTimeoutConfigTest.java` | **+1 条**：用真 `Binder` 证明 `connect-timeout` 被绑进 `DataRedisProperties` |
 | `tools/difftest/exp-go-concurrent-automigrate.sh` | **修等待逻辑**：等库加 `-d "$PG_DB"` + 沉降 2s（原写法让实验根本没发生） |
-| `service/users/admin/admin-rpc/src/main/.../domain/UserEntity.java` | **订正 javadoc**：「GORM 默认表名 user_user」是错的（Go 返回 `users`） |
+| `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/UserEntity.java` | **订正 javadoc**：「GORM 默认表名 user_user」是错的（Go 返回 `users`） |
 | `service/users/users-common/src/main/resources/db/03_create_admin.sql` | **订正 2 处注释**（`:14` / `:33`）：Go 表名是 `admins`，不是 `admin_admin`；**另修 1 处 U+FFFD 乱码**（`:10`「共用库必然出现」） |
 | `service/users/users-common/src/main/resources/db/04_create_admin_invite.sql` | **订正 2 处注释**（`:8` / `:15`）：Go 表名是 `admin_invites` |
 | `docs/DRIFT/users/admin/rpc.md` | 本文件：扫 8+4 处过期标记、关闭 UNRESOLVED-ARPC-005、新增验证轮 §1–§8、**修 1 处 U+FFFD** |
@@ -2484,17 +2593,74 @@ javadoc 里记了改名理由与 Go 出处）。
 | 档位 | 侧 | `Δ_start` 查询存活 | `Δ_end` 客户端返回后仍占 PG | 客户端看到的 desc |
 |---|---|---|---|---|
 | **A** 客户端 deadline **1000ms** | **Go** | **+1005ms** | **+0ms** | `CallOptions deadline exceeded`（客户端自己的） |
-| **A** 客户端 deadline **1000ms** | **RAG** | **+2117ms** | **+1111ms** | `CallOptions deadline exceeded`（客户端自己的） |
+| **A** 客户端 deadline **1000ms** | **RAG** | **+2117ms**　**〔修前实测值〕** | **+1111ms**　**〔修前实测值〕** | `CallOptions deadline exceeded`（客户端自己的） |
 | **B** 客户端 deadline **5000ms**（对照） | **Go** | +2113ms | −3ms | `context deadline exceeded` |
-| **B** 客户端 deadline **5000ms**（对照） | **RAG** | +2124ms | +3ms | `rpc timeout after 2000ms` |
+| **B** 客户端 deadline **5000ms**（对照） | **RAG** | +2124ms | +3ms | `rpc timeout after 2000ms`　**〔2026-10-24 修前实测值，见下方销账补记〕** |
+
+> #### ✅ 2026-10-26 销账补记：档位 B 的 **desc 差异已消失**（`align/global` 修完，**已提交并推双远端，待合回 `do-my-own-gh`**）
+>
+> | | desc（客户端看到） |
+> |---|---|
+> | Go | `context deadline exceeded`（`service/common/observability/rpc.go:68-71`：`status.Error(codes.DeadlineExceeded, timeoutCtx.Err().Error())`） |
+> | RAG **修前** | `rpc timeout after 2000ms` |
+> | RAG **修后** | **`context deadline exceeded`** —— 与 Go **逐字相同** |
+>
+> - **修法**：`align/global` 在 `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 里把超时 description
+>   换成常量 `GO_DEADLINE_EXCEEDED_DESCRIPTION = "context deadline exceeded"`；
+>   配套守门 `RpcInterceptorTimeoutDescriptionGateTest`（真 Netty server + 真客户端，断言**网络上真正传过来的字节**）
+>   ＋ 双侧活体探针 `tools/semantic-probe/rpc-timeout/`（Go 半边 `replace` 引用冻结仓真源，不改冻结仓一字节）。
+> - **状态（2026-10-26 实查）**：`align/global` = `22a9111`（含 `49808ad` 主改动 + `22a9111` 台账订正），
+>   `align/global` / `origin/align/global` / `upstream/align/global` **三处指向一致** ⇒ 修复**已提交、已推双远端**。
+>   ⚠️ **尚未合回 `do-my-own-gh`** ⇒ **本表仍记「待合回」，合回后才改成「已销账」**。
+> - 📌 **合回与否已拍板（2026-10-26，用户 Jason）**：**暂不合回**（`align/global` 与 `align/favorite` **都暂不并入**主仓）
+>   ⇒ **本条维持「待合回」状态，不是「忘了合」** ⇒ 将来若合回，再把措辞改成「已销账」；
+>   在合回之前，**主仓代码仍是旧串**（`RpcInterceptor` 的超时 description 尚未生效）。
+> - ⚠️ **本条只销「档位 B 的 desc」这一格**，**不销 ARPC-002 的本体** —— 见下方「⚠️ 必须一起读」。
+>
+> **⚠️ 必须一起读：这条差异分三层，global 已修两层，剩一层。**
+>
+> | 层 | 内容 | 状态（2026-10-26 实查） |
+> |---|---|---|
+> | **① description 文案** | 超时响应给客户端的 `status.description`（**档位 B** 那一格） | ✅ **已修** —— `RpcInterceptor` 换用 `GO_DEADLINE_EXCEEDED_DESCRIPTION = "context deadline exceeded"`（`align/global` @ `22a9111`，**已推双远端，待合回**） |
+> | **② 期限计算**（**本条原问题本体**） | 服务端预算**不 min 客户端 deadline** ⇒ 服务端干等满自己的 2s（**档位 A** 的 `Δ_start = +2117ms`） | ✅ **已修** —— `effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())`，两处消费点（`deadlineEpochMs` + 超时调度器延时）都用它（`align/global` @ `af416d9`，**已推双远端，待合回**）<br>⇒ 取值点 `io.grpc.Context.current().getDeadline()`（grpc-java 服务端**实测可用**：客户端 1s ⇒ 服务端读到 **932ms** 剩余） |
+> | **③ 资源取消** | 客户端放弃后，**PG 上的查询仍在跑**（**档位 A** 的 `Δ_end = +1111ms`） | 🟡 **可观察面已被第 ② 层 + 第三十三轮消掉；机制层仍未做** —— 🔴 **先纠正一个测量口径（2026-10-26 复核，本行原表述把「`Δ_end`」当成「业务线程是否被取消」的度量，那是错的）**：<br>`Δ_end` = **PG 取消时刻 − 客户端返回时刻**，主仪器是 **PG 服务端日志**的 `canceling statement due to user request`（`tools/difftest/exp-grpc-admin-deadline-probe.sh` 的 `pg_log_cancel_events` 抓的就是这条）⇒ **它由 `statement_timeout` 决定** ⇒ **与「业务线程有没有被 interrupt」无关**<br>⇒ ⇒ **第 ③ 层「未修」并不阻止 `Δ_end` 归零**；**两道合起来正好把它压到 ≈0**：<br>① **第 ② 层**（`af416d9`）⇒ 服务端业务线程的 `DeadlineState`（`RpcInterceptor` 的 `onHalfClose()` 绑定 `deadlineEpochMs`）= `min(客户端, 服务端)` ⇒ **SQL 超时上限继承客户端 deadline** ⇒ `Δ_end` 从 **+1111ms** 降到 **≈ +80ms**（剩下的就是秒级向上取整的残差）<br>② **第三十三轮**（`d20b377`，`align/global`）⇒ **毫秒精度**（pgjdbc ≥ 42.7 的 `setQueryTimeoutMs(long)`，`remaining` 毫秒原样传下去）⇒ 残差也消掉 ⇒ **取消时刻 == deadline** ⇒ **`Δ_end` ≈ 0**<br>❌ **仍未做的是「机制层」**：grpc-java 的 `ServerCall.close()` **不取消业务线程**（**与 T-14 同根因**：框架限制）⇒ 业务线程要等 SQL 的 `57014` 错误传回来才知道失败（**E46** 的「查询级检查」已把这条尾巴从「跑满 2s」压到「≈ deadline」）<br>🔴 **本域实证：非 SQL 路径不被这层覆盖** ⇒ **`DRIFT-ARPC-010`**（admin `logout` 的 Redis 写**不绑 deadline** ⇒ 跑满 Redis 自己的 3s command timeout；Go 侧 `SetexCtx(l.ctx, …)` 在 deadline 时刻立即失败）⇒ **这是第 ③ 层在本域真正的残余**<br>⚠️ **E38② 维持「另立项」**（架构级：handler 挪受控 executor + 超时 interrupt）⇒ **E46 已从 E38② 拆出独立成条**，Jason 拍板「拆出来单独做」，**第三十三轮已落地**<br>🔴 **E46 对第 ③ 层的两处修正（global 实测，本表原先没有）**：① **量级被高估** —— SQL 侧**已有 B-1 缓解**（10 个 rpc 组件全部注册了 `DeadlineQueryTimeoutInjector`）⇒ 真正剩下的**只有 ≤1s 窗口**，不是「SQL 完全不受 deadline 约束」；② **「handler 挪受控 executor + 超时 interrupt」单独做不够** —— pgjdbc **不响应线程中断**（实测：interrupt 后等锁查询照常跑 **11014ms**）⇒ 必须配「**取消正在跑的 JDBC 语句**」 |
+>
+> ⇒ **本条（`UNRESOLVED-ARPC-002`）的定性要分两层读 —— 2026-10-26 复核后改判（🔴 本行原表述有误，见下）**
+>
+> | 维度 | 状态 |
+> |---|---|
+> | **子项「服务端是否 min 客户端 deadline」** | ✅ **已答「是」且已修**（第 ② 层，`af416d9`） |
+> | **原「CONFIRMED SEMANTIC MISMATCH」的观察依据**（`Δ_end = +1111ms` vs `0ms`） | 🔴 **按机制推导已失效** —— 第 ② 层 + 第三十三轮 ⇒ `Δ_end` ≈ 0 ⇒ **原来支撑「CONFIRMED」的那一格差值不再成立** |
+> | **机制层（业务线程不被取消）** | ❌ **仍未做**（框架限制，`ServerCall.close()` 不 interrupt 业务线程）⇒ **这一层本身不再是「可观察差异」**（SQL 路径已由 E46 对齐到 ≈ deadline） |
+> | **非 SQL 路径** | 🔴 **仍有差** ⇒ 已在 **`DRIFT-ARPC-010`** 单独登记（admin `logout` 的 Redis 写不绑 deadline） |
+>
+> ⚠️ **本行原表述（2026-10-26 复核前）**：「可观察的差距（`Δ_end = +1111ms`）来自第 ③ 层，而第 ③ 层未修 ⇒ 定性不变」
+> **⇒ 这句是错的** —— 它把 `Δ_end` 当成了「业务线程有没有被取消」的度量；
+> **实际上 `Δ_end` 测的是「SQL 超时上限有没有继承客户端 deadline」**（主仪器 = PG 取消时刻）⇒
+> **第 ② 层一改它就跟着变，第 ③ 层「未修」拦不住它归零。**
+>
+> ⚠️ **⚠️ 但这是「机制推导」，不是「活体实测」** —— 探针 `exp-grpc-admin-deadline-probe.sh`
+> **未进常规编排**（global **E48**：缺口 = 「没进编排」，不是「缺探针」）⇒ **修后值待实测**。
+> ⇒ **实测前本条既不得销账、也不得按「已闭环」记账** ⇒ 状态写「**机制层未闭环 · 观察依据待复测**」。
+> ⇒ **复测的前置条件**：① `align/global` 的 `af416d9` + `d20b377` 合回主仓（Jason 2026-10-26 拍板**暂不合回**）② 探针接进 `run.sh`（E48 的三步：补 `DIFTEST_PORT_OFFSET` → 接编排 → 一次变异证明它真被调）。
+>
+> ⚠️ ⇒ 上表两格都标了「修前实测值」——**它们是 2026-10-24 的活体测量，价值正在于它是「修前」的原始快照**；
+> **修后的值待实测**（探针已就位，见 §1.4 的边界块）。
+> ⚠️ **别把「desc 对齐了」或「期限算对了」读成「ARPC-002 销账了」** —— 整条销账要等**实测**确认 `Δ_end` 归零，**且**非 SQL 路径（`DRIFT-ARPC-010`）另行闭环。
 
 ### 1.4 结论
+
+> 🔴 **2026-10-26 订正：本节全部数字是「修前」的活体测量（2026-10-24 快照）** ——
+> **第②层（期限计算，`af416d9`）+ 第三十三轮（毫秒精度，`d20b377`）落地后，档位 A 的 `Δ_end` 按机制推导 ≈ 0**
+> （口径纠正见 §1.3 的三层表第③层行：**`Δ_end` 由 `statement_timeout` 决定，与业务线程是否被取消无关**）
+> ⇒ **本节结论是「修前状态」，不是「现状」** ⇒ 修后值**待实测**（探针未进编排 ⇒ global **E48**）。
 
 1. **档位 A（客户端 1000ms < 服务端 2s）**：
    - **Go**：查询在 **1005ms** 被取消 ⇒ `context.WithTimeout(ctx, timeout)` **继承了客户端 deadline**（`rpc.go:38`），有效期限 = min(1000ms, 2s) = 1000ms。
      `Δ_end = 0ms` ⇒ **客户端一走，查询同步被 CancelRequest 掐掉**。
    - **RAG**：查询活到 **2117ms**（= 它自己的 2s），
      而客户端在 1006ms 就返回了 ⇒ **`Δ_end = +1111ms`：客户端已经放弃，服务端的查询还在 PG 上占着 1.1 秒。**
+     （🔴 **此为修前值** ⇒ 修后按推导 ≈ 0，**待实测**）
 2. **档位 B（客户端 5000ms > 服务端 2s）**：两侧 `Δ_end` **都 ≈ 0**（−3ms / +3ms）
    ⇒ **差异确实只来自「是否继承客户端 deadline」**，与两侧各自的 SQL 超时机制无关。
    ⇒ 这就是**对照组**的作用：把「SQL 超时机制不同」这个替代解释排除掉。
@@ -2502,14 +2668,59 @@ javadoc 里记了改名理由与 Go 出处）。
 ⇒ **UNRESOLVED-ARPC-002 从「静态推断」升级为「运行期实证」。**
 定性轮 §1 的结论（CONFIRMED SEMANTIC MISMATCH）**得到实证支持**，不再是推断。
 
+> ⚠️ **本节两条结论都不依赖「两侧 desc 是否相同」** ——
+> 它们全部由 **`Δ_start` / `Δ_end` 两个时间差**支撑（档位 A 的 `+1111ms` vs `0ms`）。
+> ⇒ 因此 2026-10-26 global 修掉档位 B 的 desc 差异后，**本节结论一个字都不用改** ——
+> 这也正是当初把 desc 差异单独列一格、而把结论建立在时间差上的价值。
+> （反过来：若当初的结论是「desc 不同 ⇒ 有漂移」，那么这次修文案就会**错误地销掉整条 ARPC-002**。）
+
+> 🔴 **要把这条本体纳入回归网，需要一个「客户端 deadline 档」的双侧活体探针。**
+>
+> - **现有 HTTP/gRPC 对拍工具在结构上抓不到它**：`exp-difftest-grpc-admin-errors.sh` 用**默认 deadline**，
+>   没开「客户端 deadline 档」⇒ **即便 `diff.py` 全绿，也抓不出这条**
+>   ⇒ ⚠️ **不得以「对拍全绿」当它已闭环**（这条纪律已由 global 写进 **E38**）。
+> - 🟢 **2026-10-26 订正：「必须新写探针」这个前提不成立** —— 探针**早已存在**
+>   （`tools/difftest/exp-grpc-admin-deadline-probe.sh`，**2026-10-24 就有**，含短/长双档）
+>   ⇒ **真正的缺口是「探针没进常规编排」**（`run.sh` / `diff.py` 都不调它 ⇒ 手动取证工具 ⇒ 改坏了不会被自动抓到）
+>   ⇒ 已由 global 登记为 **E48**（落点 `tools/difftest/run.sh` ⇒ global 写权内 ⇒ A 类 · 下一轮做）。
+> - **探针形态**（沿用本节 §1.2 的设计，主仪器 = PG 服务端日志）：
+>   同一用例分别用 **短档**（客户端 100ms/1000ms）与 **对照档**（客户端 5000ms）打两侧 gRPC 端点，
+>   比对 **`Δ_start` / `Δ_end`** —— ⚠️ **不是**比 desc、**不是**比客户端耗时
+>   （§1.1 已记：客户端耗时两侧必然相同，量它会得出「两侧一致」的错误结论）。
+> - ✅ **探针已经存在，不必新写**：`tools/difftest/exp-grpc-admin-deadline-probe.sh`
+>   （2026-10-24 本轮 §1 就是用它产出的这张表）**已经带客户端 deadline 档 + 对照档**，
+>   判定条件是 `exit 1 ⟺ 短档下两侧 PG 查询存活时长差异 > 1s` ⇒ **它就是抓这条的探针**。
+> - 🔴 **真正的缺口不是「缺探针」，而是「探针没进常规编排」** ——
+>   `tools/difftest/run.sh` 与 `diff.py` **都不调它** ⇒ 它是**手动跑**的取证工具，
+>   **不在每轮门禁里** ⇒ 回归网缺这一环（改坏了不会被自动抓到）。
+>   ⇒ 补法是把**已有**探针接进 `run.sh`（**落点：`tools/difftest/` 共享资产**）
+>   + 它要用的 `service/common` 改动（**global 写权**）⇒ 属 global **E38** 的范围（**A 类 backlog，不需拍板**）。
+>
+> #### 🔴 2026-10-26 补记：**探针的档位设计有一个必须先满足的前提**（global 实测踩出来的）
+>
+> ⚠️ **客户端 deadline 必须早于服务端 timeout**，否则
+> `effectiveTimeoutMs = min(服务端预算, 客户端 deadline 剩余)` **算出来就等于服务端值**
+> ⇒ **两侧分不出差别** ⇒ **探针失效（会假绿）**。
+> ⇒ 探针必须开一档**客户端 deadline < 服务端 2s** 的用例（如客户端 100ms）
+> ＋ 一档**客户端 deadline > 服务端 2s** 的对照组（如 5000ms）。
+> ⇒ **这条是「探针能不能验到修法」的前提，不是可选参数** ——
+> 档位选错 ⇒ 探针恒绿 ⇒ **第 ② 层修没修都看不出来**。
+> ⇒ global 已据此在 `tools/semantic-probe/rpc-timeout/` 的 Go 半边加 `client_deadline_ctx` 用例
+> （**修前** Go=`client_100ms` vs RAG=`server_own` ⇒ **漂移坐实，EXIT=1**；**修后**两侧一致 ⇒ EXIT=0）
+> ＋ 守门 `RpcInterceptorClientDeadlineGateTest` 2 条
+> （① 客户端 deadline 早于服务端 ⇒ 有效期限必须落在客户端那档；
+> ② 客户端**没带** deadline ⇒ 仍是服务端预算，防「把无 deadline 错当成有 deadline」）。
+
 ### 1.5 ⚠️ 效力边界（必须一起记，否则会被过度解读）
 
 | | 内容 |
 |---|---|
-| **差异的可观察形态** | 「**服务端资源在客户端放弃后继续占用**」（PG 上多占 1.1s），**不是**「客户端响应不同」。客户端响应**两侧相同**。 |
-| **HTTP 层更看不见** | admin-api 把 gRPC status 翻译成业务码，deadline 差异在 HTTP 响应体里**根本不存在** ⇒ `diff.py` 的 HTTP 对拍**永远抓不到这条**。 |
-| **修法归属** | 仍在 `service/common` 的 `RpcInterceptor`（`RpcInterceptor.java:170-172` 只算服务端自己的 2s）⇒ **不在本域**，本 worker 无权改。 |
+| **差异的可观察形态** | 「**服务端资源在客户端放弃后继续占用**」（PG 上多占 1.1s），**不是**「客户端响应不同」。<br>⚠️ **精确化（2026-10-26）**：「客户端响应两侧相同」**只对档位 A 成立**（两侧都是客户端自己的 `CallOptions deadline exceeded`）；**档位 B 修前 desc 是不同的**（Go `context deadline exceeded` vs RAG `rpc timeout after 2000ms`）⇒ **global 修完后，档位 B 的 desc 也对齐了 ⇒ 这句话才在两个档位上都成立**。**但差异本体（档位 A 的资源占用）依旧没修** |
+| **HTTP 层更看不见** | admin-api 把 gRPC status 翻译成业务码，deadline 差异在 HTTP 响应体里**根本不存在** ⇒ `diff.py` 的 HTTP 对拍**永远抓不到这条**。<br>（`DEADLINE_EXCEEDED` 两侧都落 `mapRPCStatusToCode` 的 default ⇒ 同为 `1015` ⇒ 修文案前后都**不体现**） |
+| **修法归属** | 仍在 `service/common` 的 `RpcInterceptor` —— **只算服务端自己的 2s**（`RpcInterceptor` 里 `deadlineEpochMs` 的计算：`System.currentTimeMillis() + timeout.toMillis()`，**没有**取 `min(客户端 deadline, 服务端 2s)`）⇒ **不在本域**，本 worker 无权改。<br>⚠️ **本行原先写的是行号 `RpcInterceptor.java:170-172`，已改为符号名** —— `service/common` 正被 `align/global` 持续改动（该文件在 2026-10-26 已从 170 行漂到 214 行），**行号会随别人改动而失效** ⇒ 行号引用一律换成**符号名 / 表达式**（AGENTS.md §3.1：证据要指向**消费点**） |
 | **未覆盖** | 只测了 `Login` 一个 RPC。机制在 `RpcInterceptor` 里 ⇒ **对全部 13 个 RPC 生效**，但**逐个 RPC 的实测**未做。 |
+| **🔴 本体未销** | **2026-10-26 的销账只覆盖「档位 B 的 desc 文案」**（global 修，已提交并推双远端 `22a9111`，**待合回**）⇒ **ARPC-002 的本体（服务端 2s 不继承客户端 deadline）未被修**。<br>🔴 **2026-10-26 再复核：原写「条目的 CONFIRMED SEMANTIC MISMATCH 定性不变」需改判** —— 该定性原靠 `Δ_end = +1111ms` 支撑，而 `Δ_end` 由 **PG 取消时刻**（= `statement_timeout`）决定 ⇒ **第②层（`af416d9`）+ 第三十三轮（`d20b377`，毫秒精度）⇒ `Δ_end` ≈ 0**（推导，未实测）⇒ **原观察依据按推导已失效**；剩下的是**机制层**（业务线程不被取消，框架限制）+ **非 SQL 路径**（⇒ 本域 `DRIFT-ARPC-010`）。修法落点仍是 `service/common` 的 `RpcInterceptor`（`service/common` 单写权归 `align/global`）⇒ 已登记为 global **E38** |
+| **⚠️ 本体的修法分两层（不可只做一半）** | **global 2026-10-26 补充的边界**（本表原先没有）：<br>**① 纯 deadline 计算**（可做）：`deadlineEpochMs` 与超时调度器延时改成 `min(客户端 deadline, now+timeout)` —— grpc-java 服务端 `Context.current().getDeadline()` **拿得到**客户端 deadline ⇒ `DeadlineState` 感知时刻与超时 close 时刻都正确。　🟢 **2026-10-26 已修**（`align/global` @ `af416d9`，待合回）<br>⚠️ **② 业务线程不被取消（机制层）**：Go 的 ctx 一取消 ⇒ **一切 ctx-aware 操作**（SQL / 下游 RPC / Redis）同步中止；grpc-java 的 `ServerCall.close()` **不取消业务线程**（**与 T-14 同一根因**：框架限制）⇒ 真正对齐要「handler 挪到受控 executor + 超时 interrupt」⇒ **架构级改动，影响 10 个 rpc 组件**。　🔴 **未修**，已另立项（**E38② 维持「另立项」**）<br>🔴 **E46 的两处实测修正（别照搬旧描述去做）**：① **量级被高估** —— SQL 侧**已有 B-1 缓解**（10 个 rpc 组件全部注册 `DeadlineQueryTimeoutInjector`）⇒ 真剩下**只有 ≤1s 窗口**；② **「挪受控 executor + 超时 interrupt」单独做不够** —— pgjdbc **不响应线程中断**（实测 interrupt 后等锁查询照常跑 **11014ms**）⇒ 必须配「**取消正在跑的 JDBC 语句**」<br>🟢 **第三十三轮（`d20b377`）已把 ② 的「SQL 侧」补上**：毫秒精度（`setQueryTimeoutMs`）⇒ **取消时刻 == deadline** ＋ 已过期 ⇒ 不发 SQL ⇒ ⇒ **`Δ_end` ≈ 0**（🔴 **口径纠正**：本行原写「但 PG 查询仍会跑满」⇒ **过时** —— `Δ_end` 由 `statement_timeout` 决定，**第①层一改它就跟着变**）⇒ **② 剩下的只有「非 SQL 路径」**（本域 ⇒ `DRIFT-ARPC-010`）<br>⇒ **只做 ① 只能修一半 ⇒ 修 ① 必须同时评估 ②** ⇒ **「desc 对齐了」更不等于「本体闭环了」** |
 
 ## 2. ✅ Lettuce socket 层 —— connect-timeout 5s 已证（第 3、4 层）
 
@@ -2593,7 +2804,7 @@ Redis 不可达的实际表现由 **3s 的命令超时**主导，5s 的连接超
 |---|---|
 | `tools/difftest/GrpcAdminDeadlineProbe.java` | **新增**：带 **deadline 档位**的 gRPC 双端口客户端（报 RPC 绝对墙钟起止） |
 | `tools/difftest/exp-grpc-admin-deadline-probe.sh` | **新增**：C 项实验编排（持表锁 → 打 deadline → 读 PG 服务端日志） |
-| `service/users/admin/admin-rpc/src/test/.../AdminRedisConnectTimeoutSocketTest.java` | **新增**：Lettuce socket 层守门（配置消费点 + 黑洞实测） |
+| `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRedisConnectTimeoutSocketTest.java` | **新增**：Lettuce socket 层守门（配置消费点 + 黑洞实测） |
 
 ## 4. 本轮实测数字
 
@@ -2702,7 +2913,7 @@ public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryS
 - ⇒ **本域不重复改**（§5.3：工作树只写自己域；`service/common` 是共享模块）
   ⇒ **合并后本条自动消失**；**合并前本条成立**。
 - ⚠️ **合并时留意**：别的域分支**动了我域的文件**
-  （`align/message` 新增 `service/users/admin/admin-rpc/src/test/.../AdminProtectionChainWiringTest.java`）
+  （`align/message` 新增 `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminProtectionChainWiringTest.java`）
   ⇒ 合并时该文件是**新增**，与本分支无冲突；但其结论（链是否真挂上）**属 admin-rpc**，已记在本条。
 
 ### 1.6 Evidence strength
@@ -2712,6 +2923,130 @@ public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryS
 `RpcServerInterceptorFactory.java` / `RpcInterceptor.java` / `GlobalExceptionHandler.java`；
 grpc-java 侧读了 `grpc-core-1.63.0` 的 `io/grpc/internal/ServerImpl.java` 源码）
 ⚠️ **未做活体验证**（未构造 panic、未实测 5001 vs 1015）⇒ **待实测**。
+
+### 1.7 🔴 新增 DRIFT-ARPC-010 · `logout` 的 **Redis 写不绑 deadline** ⇒ 超时被记成「Redis 挂了」（**与 user 域 V-012 同型**）
+
+- **Component**：admin-rpc / OP `Logout`
+- **Category**：Error Mapping / Observability
+- **Classification**：OBSERVABLE DIFFERENCE（**观测面**；**wire 面两侧一致**）　**Risk**：LOW-MEDIUM
+- **来源**：**users/user 域 owner 2026-10-26 报**「同型新发现」`DRIFT-USERRPC-V-012` ⇒ **本域逐行复核后确认成立**（不是推测）
+- **与 E38② 的关系**：**同型**（都属「在途工作不随客户端 deadline 取消」）⇒ **修法口径要与 global / user 域一起定，别两边各修各的**
+
+#### 1.7.1 两侧行为逐行对照
+
+| | Go | RAG |
+|---|---|---|
+| **Redis 写** | `service/user/admin/rpc/internal/logic/logoutlogic.go:38`<br>`l.svcCtx.BizRedis.SetexCtx(l.ctx, blackListKey, "banned", int(expireTime))`<br>⇒ **`SetexCtx`（绑 ctx）** | `AdminDomainService.java:228`<br>`stringRedisTemplate.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds));`<br>⇒ **不绑 deadline** |
+| **超时时的表现** | ctx 到点 ⇒ `SetexCtx` **立即**返回 ctx 错误 | 无人取消 ⇒ **跑满自己的 3s command timeout** 才失败 |
+| **日志归因** | `logger.LogBusinessErr(ctx, errmsg.ErrorRedisUpdate, err)` ⇒ 与客户端**同时**发生 | `catch (Exception e)` ⇒ `log.error("admin logout Redis setex failed", e)` ⇒ **晚于**客户端 |
+| **对外 status** | `codes.Internal` + `"注销失败,Redis写入异常"` | `Status.INTERNAL` + `"注销失败,Redis写入异常"` ⇒ ✅ **逐字相同** |
+
+#### 1.7.2 差异本体（**只在观测面**）
+
+- **wire 面两侧一致**：`INTERNAL` + 同一句中文 description ⇒ 客户端**看不出**差别。
+- **观测面不一致**：
+  - 客户端在 **2s**（服务端 gRPC deadline）就收到 `DEADLINE_EXCEEDED`；
+  - 而服务端日志**再过 1s** 才记「**Redis 写入异常**」⇒ **日志说「Redis 挂了」，实际是超时**；
+  - ⇒ **排障会被指向错误方向**（去查 Redis 基础设施，而不是查超时预算）。
+- Go 侧因为 ctx 绑定 ⇒ Redis 写**立即**失败 ⇒ 日志与客户端**同时**发生 ⇒ 归因一致。
+
+#### 1.7.3 ⚠️ RAG 侧那个 `catch (StatusRuntimeException e) { throw e; }` 守卫**挡不住这条**
+
+`AdminDomainService.java:230-233` 有一条 **B-1 守卫**（`StatusRuntimeException` 上抛，不被改写成 INTERNAL）——
+但它**只挡得住 SQL 路径**：`SqlTimeoutStatusTranslator` 把 PG 的 `57014 query_canceled` 翻成
+`StatusRuntimeException(DEADLINE_EXCEEDED)`。
+⇒ **Redis 超时抛的是普通异常**（`RedisConnectionFailureException` / `QueryTimeoutException`）⇒ **不在守卫覆盖内**
+⇒ 落进 `catch (Exception e)` ⇒ 被记成 `INTERNAL`「注销失败,Redis写入异常」。
+⇒ ⚠️ **这是本条与 B-1 守卫的边界**：B-1 覆盖 SQL，**Redis 路径一直不在覆盖内**。
+
+#### 1.7.4 处置
+
+- **本轮不改代码**（修法口径未定 ⇒ 跨域统一决定）⇒ **只登记**。
+- ⇒ 归 **`global` 的 E38② 同型**（在途工作不随客户端 deadline 取消）；
+  `service/common` 单写权在 global ⇒ **本域无权改**。
+- ⚠️ **与 E38② 的差别**：E38② 说的是 **PG 查询**；本条是 **Redis 写**
+  ⇒ **两者是不同资源、不同路径**，但**根因同型**（业务层没有把 gRPC deadline 传到客户端调用）
+  ⇒ 修 E38② 时**顺带覆盖 Redis 路径**才是正解，否则会只修一半。
+
+- **Evidence strength**：`静态源码·双侧`（Go 侧 `logoutlogic.go:38`；RAG 侧 `AdminDomainService.java:220/228/230-234`）
+  ⚠️ **未做活体验证**（未构造 Redis 超时）⇒ **待实测**。
+
+### 1.8 🟢 新增 DRIFT-ARPC-011 · **防回退留档**：29 处 catch 放行分支**不得**改回 Go 的 `codes.Internal`
+
+- **Component**：admin-rpc（`AdminDomainService` 28 处 + `AdminCreateAtomicService` 1 处）
+- **Category**：Error Mapping
+- **Classification**：**留档（防回退）** —— **不是缺陷**：源码层形态两侧不同，**客户端可见面一致**
+- **来源**：global **第三十六轮**（`697f547`）订正 E47 ⇒ 说「RAG 保留了更精确的 `DEADLINE_EXCEEDED`」
+  ⇒ 并登记 **E58（有意偏离候选 🏷 建议签）** ⇒ **users/user 域**再复核 ⇒ 指出**「客户端可见」这一层不成立**
+  ⇒ ⇒ **本条是本域对两侧的独立复核结论**（见 1.8.1 / 1.8.2），**顺带把 global 的 Go 侧清单数纠正了**。
+
+#### 1.8.1 客户端可见面：**两侧都是 1015**（⇒ 不是 wire 级漂移 ⇒ 不需要签字）
+
+| 层 | Go | RAG |
+|---|---|---|
+| **logic / service 层** | 🔴 **每条 DB 错误都改写成** `status.Error(codes.Internal, "DB查询失败")` ⇒ **logic 层根本不返回 1015** | ✅ 保留 `DEADLINE_EXCEEDED`（`SqlTimeoutStatusTranslator` 把 PG 的 57014 翻的）⇒ 原样上抛 |
+| **interceptor 层** | `service/common/observability/rpc.go` 的 select：`case <-done:`（handler 先返回，**要** `lock.Lock()`）**vs** `case <-timeoutCtx.Done():`（**不需要锁**）⇒ **ctx 一取消超时分支立刻就绪** ⇒ select 几乎总走超时分支 ⇒ 客户端拿 `DEADLINE_EXCEEDED` | 同 ⇒ `RpcInterceptor` 的超时调度器在 deadline 时刻 close ⇒ `DEADLINE_EXCEEDED` |
+| **api 层渲染** | `codes.DeadlineExceeded` **不在** `mapRPCStatusToCode` 的任何分支 ⇒ 落 **default** ⇒ **`CODE_SERVER_BUSY` = 1015** | 同 ⇒ 落 default ⇒ **1015** |
+
+⇒ ⇒ **客户端可见的 HTTP 响应体两侧逐字一致** ⇒ ⇒ **不是 wire 级漂移**
+⇒ ⇒ 按 `docs/Intentional_Deviations/` 的三类（**有意偏离 / 框架限制 / 表述差异**）
+⇒ **归「表述差异」** ⇒ ⇒ **不需要用户签字**（⇒ 与 global 的 E58「有意偏离候选 🏷 建议签」**定性不同**，已回信）
+
+⚠️ **残留（不声称 100%）**：Go 那个 select 是**竞速** ⇒ 机制上存在「handler 先返回 ⇒ 客户端拿到 5001」的窗口；
+E-4 的 4 组采样全命中 1015，但那是 **4 次采样、不是概率刻画** ⇒ **不声称「Go 侧 100% 是 1015」**。
+
+#### 1.8.2 🔴 顺手纠正 global 的 Go 侧清单（**本域自己数的，别照抄**）
+
+global 第三十六轮列的 admin 域 Go 侧清单是 **12 处**、行号 `getuserlogic.go:38` · `banuserlogic.go:51` · …
+⇒ **本域逐一核过**：`grep -rn "codes.Internal" service/user/admin/rpc/internal/logic/`（去掉 `_test.go`）
+⇒ **共 26 处 `codes.Internal`**，其中：
+
+| 类别 | 处数 | 清单 |
+|---|---|---|
+| **DB 错误出口** | **20** | `loginlogic.go:53` · `getuserlogic.go:39` · `getuserlistlogic.go:35` · `getselflogic.go:40` · `banuserlogic.go:52` · `unbanuserlogic.go:53` · `deleteuserlogic.go:54` · `createadminlogic.go:119` · `createinvitecodelogic.go:60` / `:94` · `resetuserpasswordlogic.go:53` / `:68` · `updateselflogic.go:40` / `:51` / `:77` / `:86` · `updateuserlogic.go:53` / `:66` / `:92` / `:100` |
+| 非 DB 的 `codes.Internal` | 6 | 密码加密失败 ×3（`resetuserpasswordlogic.go:61` · `updateselflogic.go:63` · `updateuserlogic.go:77`）· 邀请码生成失败 ×2（`createinvitecodelogic.go:70` / `:101`）· **Redis 写入失败 ×1**（`logoutlogic.go:41`「注销失败,Redis写入异常」） |
+
+⇒ 🔴 **global 的清单漏了 8 处**（`updateselflogic` 4 处 + `updateuserlogic` 4 处），
+且 **它列的 12 处行号全部比实际小 1**（38↔39 · 51↔52 · 118↔119 · 59↔60 · 93↔94 · 53↔54 · 39↔40 · 34↔35 · 52↔53 · 52/67↔53/68 · 52↔53）
+⇒ ⇒ **12 + 8 = 20** ✅ 账对上。
+⇒ ⚠️ **那两个数根本不可比**：global 的「12」是 **Go 侧 DB 出口**，
+而它同时把 RAG 侧的「28」（`catch (Exception e)` 数）拿来对照 ⇒ **两把尺子**。
+
+#### 1.8.3 本域已做的动作（**行为零改动**）
+
+1. **29 处 catch 注释的「理由」订正**（结论不变）：
+   原文写「（**对齐 Go 的 1015**）」⇒ 让人以为**Go 的 logic 会返回 1015**，而**Go 侧没有任何 DB 路径返回 1015**
+   ⇒ 按 AGENTS.md §3.3 强制第 3 条「**先改/删错误断言，再改实现**」：
+   **只订正理由**，**生产行为一个字节都不改**。
+   ⇒ 完整论证写**一次**（`AdminDomainService` 的类级 javadoc「B-1 放行分支」段），
+   各站点只留一行指针 ⇒ **29 处注释都指向同一份论证**。
+2. **本条（`DRIFT-ARPC-011`）留档防回退**（对标 users/user 域的 `DRIFT-USERRPC-V-013`）。
+
+#### 1.8.4 与 `DRIFT-ARPC-010`（Redis 不绑 deadline）的分工
+
+🔴 **两个不同的面**（users/user 域 2026-10-26 提出的「面 A / 面 B」洞见，本域采用）：
+
+| | 面 A：**装配层** | 面 B：**异常类型** |
+|---|---|---|
+| 失效形态 | 翻译器/注入器**不在链里** | 异常**到了业务层但类型不对** |
+| 后果 | 57014 不翻译 ⇒ 落进 `catch(Exception)` ⇒ **被改写成 INTERNAL** | Lettuce / `QueryTimeout` 异常**不是** `StatusRuntimeException` ⇒ 放行分支**永不命中** |
+| 守网 | **插件链断言**（`AdminRpcContainerWiringTest` §5，2026-10-26 补） | **本条 + `DRIFT-ARPC-010`** |
+| 本域状态 | ✅ **已闭环**（+3 条守卫 + 4 次变异） | 🔴 **ARPC-010 仍开着**（Redis 路径） |
+
+⇒ ⇒ **两者表现都是「超时被当成 DB 故障」，但修法不同、守网不能互相替代** ⇒ **两边都补才算完整**。
+
+#### 1.8.5 V-012 / ARPC-010 的「补日志」口径 —— **本域已经符合，无需改代码**
+
+users/user 域的候选修法：「`catch (Exception e)` 里补一行记原始异常，**status/description 一个字不改**」
+⇒ 本域实测：**29 处 `log.error(...)` 全部带原始异常 `e`**
+⇒ **SQL 路径**（如 `log.error("admin banUser update DB error, uid={}", uid, e)`）
+**与 Redis 路径**（`log.error("admin logout Redis setex failed", e)`）**两条都已记** ✅
+⇒ ⇒ **本域无需改代码**；**wire 面本来就在两侧逐字一致**（两侧都是 INTERNAL + 同一句 desc）⇒ 不动它是**对的**。
+
+- **Evidence strength**：`静态源码·双侧`（Go 侧 20 处 DB 出口逐一核过 + `rpc.go` 的 select 逐行读过；
+  RAG 侧 29 处 catch + 29 处 `log.error` 逐处核过）
+  ⚠️ **未做活体验证**（本域没跑 E-4 那套双栈活体）⇒ **客户端可见面的一致性目前靠 users/user 域的 E-4 实测 + 本域的机制推导**
+  ⇒ **待本域复测**（探针在 `tools/difftest/exp-b1-timeout-cancel.sh`）。
 
 ## 2. 本轮在 rpc.md 侧的其他结论
 
@@ -2724,6 +3059,357 @@ grpc-java 侧读了 `grpc-core-1.63.0` 的 `io/grpc/internal/ServerImpl.java` �
 | 8 条 ARPC + 3 条 H-* | ✅ 复核通过（H-2 的 `.last("FOR UPDATE")` 在 **119** 行，台账原文 `116-120` **范围正确**） |
 | 跨分支影响 | ⚠️ `align/message` 改了 `AdminRpcApplication.java`（本条）+ `HttpMiddleware.java`（见 `api.md` 的 ADMINAPI-007）；`align/users-user` 改了 `JwtUtil.java`（**N-5 的 padding 未变**，结论仍成立，但签名档引用的代码已变 ⇒ 合并后应复核一次） |
 
-## 3. 本轮改动清单（rpc.md 侧）
+## 3. 🔴 2026-10-26 补：共享复核工具 `tools/check-ledger-selfcheck.py` 对本域的效果（**只有第 1 层有效**）
+
+**核对日期**：2026-10-26　**工具版本**：`align/global` @ `bb680a3`（第三十二轮，N8~N13 六条去噪）
+（⚠️ 该工具改动**尚未合回主仓** ⇒ 主仓上的版本**无** N8~N13）
+
+### 3.1 第 1 层：缺失 **33 → 0**（✅ 属实，已独立对照验证）
+
+用 `--domain users-admin` 跑，本域三个台账文件（`api.md` / `rpc.md` / `_shared.md`）：
+
+| 工具版本 | 台账引用路径 | 缺失 | 说明 |
+|---|---|---|---|
+| 主仓版（无 N8~N13） | 75 个 | **33 个** | **全是误报** —— N8 省略写法（`...`）、N9 裸文件名、N10 短路径 |
+| `bb680a3` 版（N8~N13） | 75 个 | **0 个** | 33 条**全部去噪**（不计 FAIL） |
+
+⇒ global 说的「**第 1 层从 33 条缺失 → 0**」**属实** ✅（我做了新旧两版对照，不是只看新版的输出）。
+
+### 3.2 ⚠️ 但**第 2/3/4 层对非 `task` 域是误报或零信息量** ⇒ 不能当本域健康度结论
+
+| 层 | 对 `users-admin` 的输出 | 判定 |
+|---|---|---|
+| 第 2 层「已修断言 → 仓库里查得到对应物」 | 断言清单写的是 **`DRIFT-TASK-RPC-001/002/005/006`** 等 | ❌ **误报** —— 判据**硬编码 task 域的编号前缀**（`tools/check-ledger-selfcheck.py:86-95`）⇒ 与本域无关 |
+| 第 3 层「数字断言（实测 vs 台账）」 | 报「**commit 清单有 50 处缺陷**」 | ❌ **误报** —— 判据认的是 task 域的 `DRIFT-TASK-RPC-` / `PITFALL-TASK-RPC-` 编号与「commit 清单表」格式（`:624-658`）⇒ **本域台账是 append 式章节、根本没有那种表** |
+| 第 4 层「Go 侧 file:line 是否悬空」 | 「引用不悬空: **0 条**」+ 已去噪 **201 条** | ⚠️ **零信息量** —— 201 条全被 N7（「台账已自陈并记档」）去噪 ⇒ 这个「0」**不代表没有悬空引用** |
+
+⇒ ⚠️ **结论**：**该工具目前只对 `task` 域做了完整实现**；
+对 `users-admin` 域**只有第 0/1 层可用**（第 0 层是工具自检，第 1 层是路径存在性），
+**第 2/3/4 层跑出来的数字不要当本域台账的健康度结论** ——
+尤其别把「50 处缺陷」当成本域台账有 50 个问题（**全是工具的任务域判据套错了域**）。
+⇒ 工具在 `tools/`（**共享资产**），**不在本域写权内** ⇒ 本域**只报告、不改**。
+
+## 4. 本轮改动清单（rpc.md 侧）
 
 - **零代码改动** ⇒ 不需要重跑测试门禁（上次全量门禁：admin-rpc **99/0/0/0**、`skipped=0`）。
+
+---
+
+# 2026-10-26 global 第五轮通知消化（E46 落地 · E47 / E48 登记 · 🔴 推翻本域自己的一条断言）
+
+> **本轮性质**：**台账订正 + 一处守卫测试**（唯一一处代码改动，见 §5）⇒ **需要重跑门禁**（结果见 §4）。
+> **本轮最重要的一件事**：🔴 **本域台账里一条被引用 6 处的结论性断言是错的** —— 被自己推翻（不是被对方推翻）。
+> ⇒ **坑位已立 `P-16`**（`docs/Pitfalls/users/admin/rpc.md`）：**仪器测的是什么 ≠ 你以为它在测什么**。
+
+## 1. 🔴 被推翻的那条断言（本域自己的错）
+
+**原文（2026-10-24 起，一直沿用到 2026-10-26）**：
+
+> 「档位 A 的 `Δ_start` 那一格修后会变、**`Δ_end` 那格不变**（第 ③ 层未做）」
+
+**错在哪** —— 我把 `Δ_end` 归因到了**错的机制**上：
+
+| | 内容 |
+|---|---|
+| `Δ_end` 的定义 | **PG 取消时刻** − **客户端返回时刻**（`tools/difftest/exp-grpc-admin-deadline-probe.sh`） |
+| 主仪器 | **PG 服务端日志**的 `canceling statement due to user request` ⇒ **取消时刻由 `statement_timeout` 决定** |
+| 我原来的归因 | 「业务线程没被取消」（第③层）⇒ ❌ **与 `Δ_end` 无关** |
+| 真正的归因 | 「**SQL 超时上限有没有继承客户端 deadline**」（第②层）⇒ ✅ |
+
+⇒ **`Δ_end` 随第②层动，不随第③层动** ⇒ 「第③层未修 ⇒ `Δ_end` 不变」这条推理的**前提整个是错的**。
+
+**六环归因链（每一环都有落点，可复现）**：
+
+1. `Δ_end` = PG 取消时刻 − 客户端返回时刻（探针脚本的 `pg_log_cancel_events` + `python3` 差值计算）
+2. PG 的取消时刻 = `statement_timeout` 到点 ⇒ pgjdbc 发 CancelRequest（**不是** PG 自己的 `statement_timeout` 超时 —— 那条日志文案是 `canceling statement due to statement timeout`，探针抓的是 `...due to user request` ⇒ **两者可区分**）
+3. `statement_timeout` 由 `DeadlineQueryTimeoutInjector.applyQueryTimeout` 从 **`DeadlineState.remainingMillis()`** 设 ⇒ **与业务线程是否被 interrupt 无关**
+4. 服务端业务线程的 `DeadlineState` 在 `RpcInterceptor` 的 **`onHalfClose()`** 里绑定 `deadlineEpochMs`（= `now + effectiveTimeoutMs`）⇒ **第②层（`af416d9`）让这个值 = `min(服务端预算, 客户端 deadline 剩余)`**
+5. ⇒ **第②层一改，SQL 超时上限就继承了客户端 deadline** ⇒ `Δ_end` 从 **+1111ms** 掉到 **≈ +80ms**（剩下的就是秒级向上取整的残差）
+6. ⇒ **第三十三轮（`d20b377`）的毫秒精度**（pgjdbc ≥ 42.7 的 `setQueryTimeoutMs(long)`）把残差也消掉 ⇒ **取消时刻 == deadline** ⇒ **`Δ_end` ≈ 0**
+
+**第 6 环的驱动侧证据（本轮实测，不采信任何转述）**：
+
+- `javap`（pgjdbc **42.7.13**）：`org.postgresql.jdbc.PgStatement` **有** `public void setQueryTimeoutMs(long)`；
+  接口 `org.postgresql.PGStatement` **没有** ⇒ 与 E46「反射按方法名探测」的理由一致
+- `javap -c`：`setQueryTimeoutMs` → 写字段 `timeout:J` → `new StatementCancelTimerTask` → `PgConnection.addTimerTask(task, timeout)`
+  → `Timer.schedule(task, delayMillis)` ⇒ **延时单位是毫秒**
+- ⇒ 到点 ⇒ `PgConnection.cancelQuery()`（字节码里紧邻的调用点）⇒ 发 CancelRequest ⇒ **PG 记 `canceling statement due to user request`**
+- **版本前提已核实**：`mvn -pl service/users/admin/admin-rpc dependency:tree` ⇒ `org.postgresql:postgresql:jar:42.7.13:runtime`
+  ⇒ **≥ 42.7 ⇒ 毫秒路径生效**（若落到 42.6.2 则**没有** `setQueryTimeoutMs` ⇒ 反射探测失败 ⇒ 退回秒级 ⇒ `Δ_end` 会留 ≤999ms ⇒ **这个前提必须每次核**）
+
+## 2. 订正后的状态（**推导，未实测**）
+
+| 维度 | 状态 |
+|---|---|
+| 子项「服务端是否 min 客户端 deadline」 | ✅ **已答「是」且已修**（第②层 `af416d9`） |
+| 原「CONFIRMED SEMANTIC MISMATCH」的观察依据（`Δ_end = +1111ms` vs `0ms`） | 🔴 **按机制推导已失效**（`Δ_end` ≈ 0） |
+| 机制层（业务线程不被取消，`ServerCall.close()` 不 interrupt） | ❌ **仍未做**（框架限制，**与 T-14 同根因**）⇒ 但它**不再产生 SQL 路径上的可观察差异** |
+| 非 SQL 路径（Redis 等） | 🔴 **仍有差** ⇒ 已在 **`DRIFT-ARPC-010`** 登记（admin `logout` 的 Redis 写不绑 deadline） |
+
+⚠️ **本轮没做实测，两条硬理由**：
+
+1. **探针与编排会互踩**：探针脚本把容器名 `difftest-postgres` 与 `RUN_DIR=/tmp/difftest` **写死**
+   ⇒ 与并发域会话的 harness 抢同一套 PG 容器 ⇒ **本仓明令禁止的并行踩踏**（`tools/difftest/run.sh` 头部）
+2. **要测的 RAG 侧代码不在本分支**：`af416d9` + `d20b377` 都在 `align/global` 上 ⇒ 要测就得把 global 合进本域分支
+   ⇒ 而 **E48 的落点正是 `tools/difftest/run.sh`**（global 写权内）⇒ 本域去改 = **抢 global 的活 + 越 §5.3 写权**
+
+⇒ ⇒ **本轮只写推导，不写实测值**；**台账状态写「机制层未闭环 · 观察依据待复测」，不写「已闭环」**。
+
+## 3. E47（业务层吞掉 `DEADLINE_EXCEEDED`）—— 🔴 **本域不命中**（独立核实，非采信对方盘点）
+
+global 的 E47 列出「24 处硬改写 + 3 处静默降级」，落点在 like / comment / follow / message / article 五个域。
+⇒ **本域已被 global 明确列入「不吞的（已修好，不必动）」那一栏** —— 但**本域仍独立核了一遍**（§3.3：不得采信转述）：
+
+| 核项 | 结果 |
+|---|---|
+| `AdminDomainService.java` | `catch (Exception e)` **28** 处 ↔ `catch (StatusRuntimeException e) { throw e; }` **28** 处 ⇒ **1:1 全配对** |
+| `AdminCreateAtomicService.java` | 1 ↔ 1 ⇒ 配对 |
+| `AdminServiceGrpcImpl.java` | `catch (StatusRuntimeException e)` **在前**（`obs.onError(e)` 原样保留）· `catch (Throwable t)` **在后**（才转 INTERNAL）⇒ **不吞** |
+| 合计 | **29** 处宽 catch 全配对 ⇒ 与 global 的「admin-rpc 30 处同款」**数字差 1**（global 第三十六轮已订正为 **28**，指的是 `AdminDomainService` 单类） |
+| 翻译器抛什么 | `SqlTimeoutStatusTranslator` ⇒ `Status.DEADLINE_EXCEEDED.withDescription(...).asRuntimeException()` ⇒ **`io.grpc.StatusRuntimeException`** ⇒ **正是被 rethrow 捕获的那一类** ⇒ 透传成立 |
+| **静默降级**（把超时当「计数为 0」而**接口返回成功**） | ❌ **无** —— `AdminDomainService` 里 5 处 `return true`（`:236` / `:650` / `:691` / `:1030` / `:1128`）**逐处查了上下文，全部在 catch 块之外的正常路径** ⇒ **admin-rpc 不命中 E47** |
+
+⇒ 🟢 **E47 对本域无待办**。⚠️ **但这条结论只覆盖「catch 改写」这一形态** ——
+**`DRIFT-ARPC-010`（Redis 写不绑 deadline）是另一形态**（不是吞异常，是**根本没有 deadline 可吞**）⇒ **仍开着**。
+
+### 3.1 🔴 2026-10-26 global 第三十六轮（`697f547`）的订正 + 本域的再复核
+
+global 第三十六轮把 E47 的定性**反过来了**：
+「Go 侧**每一条 DB 错误都改写成** `codes.Internal` ⇒ **RAG 保留了更精确的 `DEADLINE_EXCEEDED`**
+⇒ 方向是「**RAG 做了更准确的那一侧**」⇒ 登记 **E58（有意偏离候选 🏷 建议签）** ⇒ **不要改回 Go 行为**。」
+
+⇒ ✅ **「不要改回 Go 行为」本域完全同意**（且已在 `DRIFT-ARPC-011` 留档防回退）。
+⇒ 🔴 **但「wire 上码值不同 ⇒ 客户端可见」这一层，本域复核后不成立** ——
+**客户端可见的 HTTP 业务码两侧都是 1015**（机制逐环见 `DRIFT-ARPC-011` §1.8.1：
+Go 侧 logic 返 INTERNAL，但 `rpc.go` 的 select 在 ctx 取消时走 `timeoutCtx.Done()` 分支
+—— **该分支不需要锁，而 `case <-done:` 要 `lock.Lock()`** ⇒ 超时分支先就绪
+⇒ 客户端拿 `DEADLINE_EXCEEDED` ⇒ admin-api 落 `mapRPCStatusToCode` 的 **default** ⇒ **1015**）。
+⇒ ⇒ **这是「源码层形态差异」，不是 wire 级漂移** ⇒ 归「**表述差异**」类 ⇒ **不需要用户签字**
+⇒ ⇒ 与 global 的 E58「有意偏离候选 🏷 建议签」**定性不同** ⇒ **已回信 global 请其复核**。
+⇒ ⚠️ **本域另外把 global 的 Go 侧清单数纠正了**（它列 12 处、行号全部小 1 ⇒ 实际 **20 处**）⇒ 详见 `DRIFT-ARPC-011` §1.8.2。
+
+### 3.2 🔴 顺带纠正 global 的另一处：E47 的**原始登记方向**错了
+
+E47 第三十三轮的原始登记是「**业务层把 SQL 被 deadline 取消改写/吞掉 ⇒ DEADLINE_EXCEEDED 被消灭**」，
+它是**只读盘点 RAG 侧 catch 形态**的产物 ⇒ **没核 Go 侧** ⇒ **方向错了**（真实情况见 §3.1）。
+⇒ 📌 **坑位**：global 已立 `PIT-GLOBAL-051`（「登记某域把异常改写了之前 ⇒ 必须逐条核 Go 侧」）
+⇒ **本域的对应教训**：**「跨域的定性也要自己核」**（P-15 的同一条纪律，这次用在**反方向**）——
+⇒ **两域对同一件事给出相反定性时，以「有活体实测 + 逐行源码」的那一侧为准**，并把冲突显式报回去。
+
+## 4. E48（探针未进编排）—— 指针 + 本域视角
+
+- **E48 原文**：`docs/DRIFT/global/_README.md` §七之五（落点 `tools/difftest/run.sh` ⇒ **global 单写权** ⇒ A 类 · 下一轮做）
+- **E48 的前提正确**（本域独立核过）：探针 `tools/difftest/exp-grpc-admin-deadline-probe.sh` **2026-10-24 就有**（17KB），
+  含短档 `DEADLINE_SHORT=1000ms` / 对照档 `DEADLINE_LONG=5000ms` + `exit 1 ⟺ 短档下两侧 PG 查询存活时长差异 > 1s`
+  ⇒ **「缺探针」是错的**，**真缺口 = 没进编排**（`run.sh` / `diff.py` 都不调它）
+- **本域的三步前置**（global 已在 E48 里写了前两步，本域补第三步的判据）：
+  ① 探针补 `DIFTEST_PORT_OFFSET` 支持（现在端口与容器名都写死 ⇒ 破坏并行实例纪律）
+  ② 排在 `diff.py` **之后**（它持 `ACCESS EXCLUSIVE` 表锁）
+  ③ 🟢 **一次变异证明它真被调** —— 改坏探针 ⇒ 编排必须红
+  ⇒ **本域的判据**：**编排层不能只看「脚本退出码 0」**，得看**「探针真的跑过并报出了两个 `Δ` 值」**
+  ⇒ 判据出处：**AGENTS.md §3.3（2026-10-21 补）** ——
+  **「判断一个注入/开关有没有真生效不能看启动日志」**（实证：注入点的 echo 照打、jar 照起、日志零告警，效果却是零）
+  ⇒ **唯一可靠的判据是运行时证据** ⇒ 编排层要断言**「探针产出了两个 `Δ` 值」**，不是断言**「脚本退出码 = 0」**
+- ⚠️ **E48 未做 ⇒ 本域 `Δ_end` 的修后值永远没有实测** ⇒ 这就是本条**不能记「已闭环」**的直接原因。
+
+## 5. 🟢 顺带闭环：MyBatis 插件链的**装配层**覆盖缺口（本轮**唯一一处代码改动**）
+
+**触发**：users/user 域回信指出 **B-1 的放行守卫只挡 SQL 路径**
+（它们用 `javap` 读字节码得出：`QueryTimeoutException` / `RedisConnectionFailureException`
+的继承链**都不是** `io.grpc.StatusRuntimeException`）⇒ 本域自查发现**同源的另一处**。
+
+### 5.1 缺口是什么
+
+`AdminRpcApplication` 上写着
+`@Import({DeadlineQueryTimeoutInjector.class, SqlTimeoutStatusTranslator.class})`，
+**但 admin-rpc 没有任何测试断言这两个 Bean 真进了 MyBatis 的插件链** ——
+⇒ **这正是 P-4 的形状**（**声明点 ≠ 消费点**），只是消费点这次是 **MyBatis 插件链**，不是 gRPC 的 interceptor 链。
+
+⇒ **链断掉的后果（本域的具体面）**：
+
+| 缺哪个 | 后果 | 与 Go 的差 |
+|---|---|---|
+| `DeadlineQueryTimeoutInjector` | 每条 SQL 不带 `statement_timeout` ⇒ 客户端 deadline 到点时**在途查询继续跑满** | `Δ_end` 比 Go 多出「客户端返回后」那一段 |
+| `SqlTimeoutStatusTranslator` | PG 的 57014 `query_canceled` **不会**变成 `DEADLINE_EXCEEDED` ⇒ 落进业务层 `catch (Exception e)` ⇒ **被改写成 INTERNAL** | **wire：5001 vs Go 的 1015** |
+
+⇒ 🔴 **而且是静默的**：链里有它、其余测试也全绿（`AdminDeadlinePassthroughTest` 是 **mock** mapper
+直接抛 `StatusRuntimeException` ⇒ 它验的是「catch 分支放不放行」，**不验**「异常到达时是不是那一类」）。
+
+### 5.2 本轮的闭环（`AdminRpcContainerWiringTest` 加 **4 条** · **真 PG + 真容器**）
+
+| # | 断言 | 钉住什么 |
+|---|---|---|
+| 1 | `sqlSessionFactory.getConfiguration().getInterceptors()` 里**真的有**这两个拦截器 | **消费点**（不是「容器里有没有这个 Bean」） |
+| 2 | 翻译器的 `@Intercepts` 挂在 **`Executor`**（`query` + `update`）而**不是** `StatementHandler.prepare` | CancelRequest 引发的 `SQLException` 是**执行阶段**才抛的 ⇒ 挂 `prepare` 上就**永远翻译不到** |
+| 3 | **负控 NC-A**：一枚**故意挂在 `StatementHandler.prepare` 上**的变异体，跑**同一条判据**，**必须被拒绝** | 判据**不是恒绿**（判据写松 ⇒ 用例 2 恒绿 ⇒ 等于没守门） |
+| 4 | **负控 NC-B**：一枚「**一切正确 + 额外挂 `StatementHandler.prepare`**」的变异体 ⇒ **只有挂载点那条规则**能拒绝它 ⇒ 必须被拒绝、且**红在挂载点那条** | 判据**真的在看挂载点**（用例 3 只证明「不是恒绿」，证明不了「在看挂载点」） |
+
+⇒ **① ② 两条合起来 = 整条 SQL 超时翻译链的装配层闭环**：
+① 翻译器在链里（§5.2 表 1）→ ② 它挂在能看到执行期异常的位置（§5.2 表 2）→
+③ 业务层放行分支在（`AdminDomainServiceCatchStructureTest`，字节码级 **28/28**）→
+④ 翻译器本体行为对（`service/common` 的 `SqlTimeoutStatusTranslatorTest`）⇒ **四段都在，才算链通**。
+
+⇒ **③ ④ 两条负控 = 证明 ② 那条判据本身不是摆设**（**users/user 域 2026-10-26 指出本域缺这一层**，
+⇒ 他们说「你要抄的话**先自己跑一遍**，别照抄结论」⇒ **本域自己写了、自己跑了**，见 §5.3）。
+
+### 5.3 变异证明它**不是假绿**（M1~M4）
+
+| 变异 | 做法 | 预期（谁该红） | 实测 |
+|---|---|---|---|
+| **M1** | 摘 `@Import` 的 `SqlTimeoutStatusTranslator.class` | ① 红，实际链 `[DeadlineQueryTimeoutInjector]` | ✅ **只红 1 条**，红在目标断言，其余**仍绿** ⇒ 精确命中 |
+| **M2** | 摘 `@Import` 的 `DeadlineQueryTimeoutInjector.class` | ① 红，实际链 `[SqlTimeoutStatusTranslator]` | ✅ **只红 1 条**，红在目标断言 ⇒ 精确命中 |
+| **M3** | 把挂载点判据**弱化到恒绿**（只剩 `assertNotNull`） | **③ 负控必须红**（`Expected AssertionError to be thrown, but nothing was thrown`） | ✅ **②③④ 红**（三条负控/正例一起红）⇒ 判据恒绿被抓住 |
+| **M4** | **只**去掉「不得挂 `StatementHandler`」那一条规则 | **只有 ④ 红、③ 仍绿** | ✅ **只红 1 条**（④）⇒ **证明 ④ 把挂载点规则单独隔离出来了** |
+
+⇒ 每次变异后**还原 + sha256 一致 + `git diff` 为空**（`AdminRpcApplication.java` = `eb0afe29…`）。
+⇒ ⚠️ **M3 的过程中本域踩到一次「过严的断言」并已改掉**：
+最初本域在负控里加了一条「**必须红在特定那句断言**」的消息检查 ⇒ M3 只弱化其中一条规则时，
+负控虽然红了，但**红的理由不是挂载点那条** ⇒ **那条消息检查把一次合法的部分弱化误报成失败**
+⇒ ⇒ **判据的内部顺序不该被负控绑住** ⇒ 已改为：**③ 只要求「被拒绝」**（不查理由），
+**④ 才查理由**（因为 ④ 的变异体**只违反一条规则** ⇒ 拒绝它的**只可能是**那条规则 ⇒ 查理由不会误报）。
+⇒ 📌 **元教训**：**负控的「必须红在目标断言」要按「变异体违反了几条规则」来定强度** ——
+**违反多条 ⇒ 不能查理由**（会误报）；**只违反一条 ⇒ 可以查理由**（且这才有隔离力）。
+
+### 5.4 门禁结果（本轮实测 · **两口径一致**）
+
+| 模块 | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `service/common` | 174 | 0 | 0 | 0 |
+| **`service/users/admin/admin-rpc`** | **105** | **0** | **0** | **0** |
+
+⇒ 105 = 上轮 103 + **2 条负控**（③ ④）⇒ 净增 **+2**（本轮两条负控各 1 条）。
+⚠️ **与更早记录的「99 / 16 个测试类」的差**：那 **+2** 来自 **message 域的 `21e4124`** 往 admin-rpc 加的
+`AdminProtectionChainWiringTest`（**2 条**）⇒ **99 + 2 = 101 = 本轮基线** ⇒ **账正好对上**。
+⇒ 📌 **「全量条数」这个数字会被别的域的提交改动** ⇒ **引用它时必须带核对日期与模块口径**，
+否则下一个人会先怀疑「我是不是多写了测试」（本轮就怀疑了 ⇒ 靠基线实测才排掉）。
+⇒ **实测口径**：基线用「把本轮唯一的测试文件改动 `git checkout` 回 HEAD ⇒ 跑同一条 `mvn -o -pl service/users/admin/admin-rpc -am test`」取
+⇒ **不用 stash**（AGENTS.md §5.3：`git stash` 是工作区级状态，不作隔离手段）。
+
+## 6. `hot-rpc` 未注册 `SqlTimeoutStatusTranslator` —— 🔴 **前提不成立，本域亦无影响**
+
+global 第三十三轮已销案（`hot-rpc` **无 mapper / 无 MyBatis / 无 SQL**，Go 侧同样无 model 层 ⇒ **不是缺陷**）。
+⇒ **本域独立核了「这是否波及 admin-rpc」**：**不波及** ——
+`admin-rpc` **两个拦截器都注册了**（`AdminRpcApplication.java`：`DeadlineQueryTimeoutInjector.class` + `SqlTimeoutStatusTranslator.class`）
+⇒ 且 admin-rpc **确有 SQL**（`userMapper` / `adminMapper` / `adminInviteMapper`）⇒ **适用面成立**。
+
+## 7. 本轮改动清单（rpc.md 侧）
+
+- **代码改动 2 处**：
+  ① `AdminRpcContainerWiringTest` **新增 4 条**守卫（插件链 / 挂载点 / **负控 NC-A** / **负控 NC-B**）⇒ 详见 §5
+  ② `AdminDomainService`（28 处）+ `AdminCreateAtomicService`（1 处）**只订正 catch 注释的「理由」**，
+  完整论证写进 `AdminDomainService` 类级 javadoc ⇒ **生产行为零改动** ⇒ 详见 `DRIFT-ARPC-011`
+- 台账订正 **6 处**过期断言 + **新增 `DRIFT-ARPC-011`**（防回退留档）+ **新增章节** + **新增 `P-16`** + **P-4 补一条当场闭环实例**。
+- **33 处路径引用**由 `...` 缩写式展开为完整路径 ⇒ 见 §8（含**根因判断的自我订正**）。
+- ⚠️ **回信 global**：① 「`Δ_end` 不变」这条错误结论 ② 与他们「`UNRESOLVED-ARPC-002` 的定性不变」的**冲突**
+  ③ **E47/E58 的「客户端可见」这层不成立**（两侧都是 1015 ⇒ 非 wire 漂移 ⇒ 不需签字）
+  ④ **他们 Go 侧 admin 清单漏了 8 处、行号全部小 1**（实际 **20** 处）⑤ E47 不命中 ⑥ E48 第三步判据 ⑦ hot-rpc 销案。
+- ⚠️ **回信 users/user 域**：① 确认其 B-1 结论在我域成立、**面 A / 面 B 的分离**（我域面 A 已闭环、面 B = ARPC-010 仍开着）
+  ② **负控已补**（M1~M4 全跑过，**自己写的没照抄**）③ **V-012/ARPC-010 口径我域已符合**（SQL + Redis 两条路径的 `log.error` 都带原始异常 ⇒ 无需改代码）
+  ④ **客户端可见面我域复核后支持他们的结论** ⑤ 合并提醒已收到 ⇒ 同步主干。
+- ⚠️ **合并提醒（users/user 域两次提）**：`align/users-admin` 从旧的 `do-my-own-gh` 分出 ⇒ **落后主干**
+  ⇒ ⇒ **本轮已先同步主干再合**（否则主干会把我域的文件显示成「删除」）。
+
+## 8. 🟢 附带修掉：第 1 层报 33 处 MISSING（**🔴 根因判断已被自己订正，见下**）
+
+### 8.1 当时的发现
+
+跑共享工具 `tools/check-ledger-selfcheck.py --domain users-admin`
+⇒ **第 1 层（「台账引用的仓库内路径是否存在」）报 33 处 MISSING**（其中 api.md 7 处 / rpc.md 28 处 / 签字档 1 处 / 本节 3 处）。
+
+### 8.2 🔴 订正：**「缩写式对工具永久不可解析」这句，在新版工具下不成立**
+
+**当时的根因判断**（已作废）：本域路径引用大量用 `...` 省略中间包
+⇒ 「缩写式对工具是永久不可解析的 ⇒ 第 1 层对它永远瞎 ⇒ 路径写错也没有机制能发现」。
+
+**为什么作废**（2026-10-26 users/user 域提醒 ⇒ 本域复核确认）：
+global 的 **`35a7b8e`**（第三十四轮 · 域适配 + commit 清单口径）给第 1 层**加了简写去噪**：
+**N8**（省略写法）/ **N9**（裸文件名）/ **N10**（短路径）/ **N11**（Go 侧路径）/ **N12**（仓外引用）
+⇒ ⇒ **新版工具把简写正确识别为「简写」并放过，不再报成「缺失」**
+⇒ ⇒ **「缩写式 = 工具永远瞎」是旧版工具的口径问题，不是本域路径写错。**
+
+**⇒ 本轮 33 处**逐条解析**全部唯一命中真实文件**（`service/common/.../observability/RpcInterceptor.java`
+⇒ `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`，…）
+⇒ ⇒ **零「真缺失」** ⇒ **本域的路径引用本来就都指向真实存在的文件。**
+
+⇒ 📌 **本轮那条「真缺失 = 0」的结论是对的**（解析全部唯一命中），
+但**「因为缩写式不可校验所以要展开」的因果是错的** ⇒ 下面 §8.4 的理由已改写。
+
+### 8.3 仍然展开成完整路径（**但理由变了**）
+
+**新理由**（两条，都成立）：
+
+1. **工具能校验它** —— 展开后它进得了第 1 层的**存在性判定**；
+   缩写式则只能靠**去噪规则**放过（= 工具**不验证**它，只是不报错）⇒ **展开 = 从「不被检查」变成「被检查」**。
+2. **人和工具都能直达** —— 完整路径可直接 `open` / 可被 IDE 定位；缩写式要人自己拼。
+
+⚠️ **仍然不违反「共享层引用要用符号名」那条**（P-15）：那条针对**行号**（会随别人的改动漂移），
+**完整路径不会漂移**（只有文件搬家才会，而搬家必是显式动作 ⇒ 可被工具抓到）⇒ **两者不冲突**：
+**行号 → 符号名 / 路径 → 完整路径**，两类引用各自用各自稳定的锚点。
+
+### 8.4 新版工具复测结果（本轮实测 · **2026-10-26**）
+
+⚠️ **必须用新版工具跑**（`35a7b8e`，在 `align/global` 上，**尚未进主干** ⇒ 主干那份还是旧版 `7a01b51`）：
+旧版对 users-admin 会给 60 条「不一致」，**拆开全是旧版误判** ⇒ 别把那个数字当本域问题。
+
+```
+python3 <新版 tools/check-ledger-selfcheck.py> \
+        --repo-root <本 worktree> --go-root <Go 真源> --domain users-admin
+```
+
+| 层 | 新版对本域的判定 | 备注 |
+|---|---|---|
+| 第 0 层 · 复核器自检 | ✅ 全绿 | 含 40+ 条阳性对照 |
+| **第 1 层 · 路径存在性** | ✅ **「台账引用路径 73 个 ⇒ 缺失 0 个」** | 展开后它们**真的被校验了** |
+| 第 2 层 | ⏭ **「不适用」** —— 工具原话：**「不是『通过』，是『没查』」** | 该层的「已修断言」清单只覆盖 `task` 域 |
+| 第 3 层 | ⏭ **「不适用」** —— 工具原话：**「判据尚未为 `users-admin` 域定义」** | 编号前缀 / 章节结构 / commit 清单表都不一样 |
+| 第 4 层 · Go 侧 file:line 悬空 | ✅ **「引用不悬空: 168 条」**（去重 204 → 去噪 36） | 去噪口径比旧版精确（N5/N7 分开） |
+| 第 5/6 层 | ⚠️ 扫的仍是 `task` 域的类 ⇒ **不适用** | 工具自己标注「不算失败」 |
+
+⇒ **总判定：层 0~4 全部通过**。
+
+⚠️ **但「不适用」≠「通过」**（工具自己在输出里写了这句话）⇒
+⇒ **不得拿「工具全绿」当「本域台账已复核」** —— 层 2/3 对本域**根本没查**。
+
+### 8.5 本条自己踩到的元教训
+
+🔴 **这是本域第 3 次**「跨域销账通知要自己核」（P-15）——
+**users/user 域说「global 的工具缺陷已修」⇒ 我复核后发现：**
+**我上一轮基于旧版工具写的「根因」结论需要作废** ⇒
+⇒ **「别人的工具升级」会让我自己 previously 写下的「根因判断」过期** ⇒
+**凡是引用工具输出得出的结论，都必须写明「用哪个版本的工具」+ 核对日期**（§6.3 状态表纪律）。
+
+⚠️ **本轮净变更**：33 处路径展开 + 6 处断言订正 + 1 个新坑位（`P-16`）+ **2 条守卫测试**（§5）+ 本章节。
+
+### 8.6 🔴 本域同款「基于主仓的验证看不到守门」的雷（global 2026-10-26 撞过 ⇒ 本域主动自查）
+
+global 第 37 轮实测 `--domain users --repo-root <主仓>` 时，第 1 层报
+「`RpcInterceptorTimeoutDescriptionGateTest.java` 缺失」⇒ **那不是缺陷，是那个守门类只在 `align/global` 上、主干上没有**
+⇒ global 已在台账写明（否则下一轮有人会去「补」一个已存在的守门）。
+
+⇒ **本域主动自查了同一颗雷**（**不因为别人撞到就当自己没事** —— P-15 的同一条纪律）：
+
+| 核项 | 实测（2026-10-26） |
+|---|---|
+| 主仓上我域台账的版本 | 🔴 **`023b63b`（2026-10-24，完整性复核轮）** ⇒ **落后 8 个提交** |
+| ⇒ 别的域从主干读我域台账，读到的是 | ❌ **订正前**的旧版 ⇒ **含那条被推翻的 `Δ_end` 断言** · ❌ 无 `DRIFT-ARPC-010`（Redis 不绑 deadline）· ❌ 无 `DRIFT-ARPC-011`（防回退）· ❌ 无 `P-16` · ❌ 无第 1 层的路径展开 |
+| 主仓上我域的 4 条新守门 | 🔴 **0 条**（`AdminRpcContainerWiringTest` 里的 4 条全只在 `align/users-admin` 上） |
+| 第 1 层跑 `--repo-root <主仓>` | 「**71 个引用 ⇒ 缺失 0 个**」⇒ ⇒ **但这不代表我域的守门在** |
+
+⚠️ ⇒ **本域与 global 的症状不同、根因同款**：
+global 那个守门类是**分支上新加的** ⇒ 主干没有 ⇒ **触发 MISSING**；
+**本域那个测试类是主干上早就有的** ⇒ 只是**方法不在** ⇒ **不触发 MISSING、也不影响路径计数**
+⇒ ⇒ **本域更隐蔽**：第 1 层「0 缺失」与「层 0~4 全通过」**都照常显示**，**没有任何告警提示「守门其实不在主干上」**。
+
+⇒ 📌 **判据（建议写进通用纪律）**：
+**「工具全绿」要问一句「它验的是哪棵树」** —— `--repo-root` 指向**主仓**时，
+验的是**主仓那份台账 + 主仓那份代码**，**不是**本域分支上的最新状态
+⇒ ⇒ **分支未合回时，「工具全绿」的含义要打折扣**。
+
+⇒ ⏳ **待办：合回主干** ⇒ 合回后主仓才含本域的台账订正 + 4 条守门
+⇒ ⚠️ **合回前，主干上的我域台账是 `023b63b`（2026-10-24）** ⇒ **别的域引用我域台账时须以 `align/users-admin` 分支为准**。
+
+⇒ 🟢 **合回不会与并发域撞车**（本轮实测）：`git diff origin/do-my-own-gh...align/users-admin` 的改动文件
+**全部落在本域自己的三档台账 + `service/users/admin/admin-rpc/`** ⇒
+⇒ **不含任何共享索引**（`docs/DRIFT/_INDEX.md` / `docs/Pitfalls/_INDEX.md` /
+`docs/Intentional_Deviations/_INDEX.md` / `docs/DRIFT/_MANIFEST.json` / `AGENTS.md`）⇒
+⇒ ⇒ **合回主干时不会撞掉别的域正在改的共享文件**（AGENTS.md §5.3 说的「多路并发必撞」在本域不成立）。

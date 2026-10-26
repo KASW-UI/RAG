@@ -75,7 +75,7 @@ Go 侧每次 UPDATE 都会把它推到当次写入时刻。
 **它已经在同一个仓库里被修过一次了。**
 `service/users/user/user-rpc/.../mapper/UserMapper.java:81-127` 按**完全相同的 Go 出处**
 修过（注释里直引 `autoUpdateTime` tag），修法是 `wrapper.setSql("update_time = CURRENT_TIMESTAMP")`，
-并有回归测试 `UserRpcJsonbAndAvatarProjectionTest:113-148` 钉住「SET 子句必须含 update_time」。
+并有回归测试 `UserRpcJsonTextAndAvatarProjectionTest:113-148` 钉住「SET 子句必须含 update_time」。
 
 **admin-rpc 的审计没有发现它**，因为它长得跟「文档写的是对的」一模一样：
 三个 Entity 的 javadoc 明明白白列了 `create_time / update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP`
@@ -89,7 +89,7 @@ Go 侧每次 UPDATE 都会把它推到当次写入时刻。
 
 1. 遇到 `FieldStrategy.NEVER` 的列，**必须回答「谁在写它」**；答案是「没人」就是 bug。
 2. 加一条**守恒断言**（不是行为断言）：抓 mapper 生成的 SQL，断言 `setSql` 里出现了该列。
-   参考 `UserRpcJsonbAndAvatarProjectionTest` 的写法。
+   参考 `UserRpcJsonTextAndAvatarProjectionTest` 的写法。
 3. 审查时把「Go 的哪个 tag / 框架哪个字段」列成一张对照清单，逐项问「RAG 侧对应物在哪一行」。
 
 ---
@@ -163,6 +163,34 @@ public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryS
 2. 加 framework 能力时，**先查框架有没有自动装配**（`javap` 那个 autoconfiguration 类 /
    `AutoConfiguration.imports`），再决定要不要写 hook。
 3. 测试要断言**消费点**（server 的 interceptor 链里有没有它），不是**声明点**（容器里有没有它）。
+
+### 🟢 2026-10-26：同款形态的**第三处**，这次是**当场闭环**（不是事后补记）
+
+**触发**：users/user 域回信指出 **B-1 的放行守卫只挡 SQL 路径**（它们用 `javap` 读字节码得出
+`QueryTimeoutException` / `RedisConnectionFailureException` 的继承链**都不是** `io.grpc.StatusRuntimeException`）。
+⇒ 本域自查发现**同源的另一处**：`AdminRpcApplication` 上写着
+`@Import({DeadlineQueryTimeoutInjector.class, SqlTimeoutStatusTranslator.class})`，
+**但 admin-rpc 没有任何测试断言这两个 Bean 真进了 MyBatis 的插件链** ——
+⇒ **这正是 P-4 的形状**（声明点 ≠ 消费点），只是这次在 **MyBatis 插件链**这个消费点上，
+而不是 gRPC 的 interceptor 链。
+
+**本轮闭环方式**（`AdminRpcContainerWiringTest` 加 2 条，**真 PG + 真容器**）：
+
+1. `sqlTimeoutInterceptorsAreReallyInThePluginChain()` ⇒ 断言
+   `sqlSessionFactory.getConfiguration().getInterceptors()` **里真的有**这两个拦截器
+   （⇒ 消费点，不是声明点）
+2. `translatorInterceptsTheExecutionPoint()` ⇒ 断言翻译器的 `@Intercepts` 挂在 **`Executor`**
+   （`query` + `update`）而**不是** `StatementHandler.prepare`
+   ⇒ 因为 CancelRequest 引发的 `SQLException` 是**执行阶段**才抛的，挂在 `prepare` 上就**永远翻译不到**
+   （且是**静默**的：链里有它、测试也全绿）
+
+**变异证明它不是假绿**（M1）：把 `@Import` 里的 `SqlTimeoutStatusTranslator.class` 摘掉
+⇒ **只红 1 条**、红在**目标断言**（链里只剩 `[DeadlineQueryTimeoutInjector]`），
+其余 8 条（含第 2 条，因为它断言的是注解不是链）**仍绿** ⇒ **精确命中**；
+还原后 sha256 一致。
+
+⇒ **本条的判据（3）在此处再次生效**：链里少一个拦截器 ⇒ **PG 的 57014 不会被翻成 `DEADLINE_EXCEEDED`**
+⇒ 落进业务层 `catch (Exception e)` ⇒ **被改写成 INTERNAL（5001）**，而 Go 是 **1015** ⇒ **wire 面就漂了**。
 
 ---
 
@@ -659,3 +687,145 @@ $ bash -c 'FOO=1; echo "${FOO}）"'    # 正常输出 1）
 
 `tools/difftest/exp-grpc-admin-deadline-probe.sh`：
 主仪器 = PG 服务端日志；指标 = `Δ_start`（查询存活）与 `Δ_end`（客户端返回后仍占 PG 多久）。
+
+---
+
+## P-15 · 🔴 跨域「销账通知」要**自己核**：①「已修」可能还没提交 ②**修文案 ≠ 修语义**
+
+**核对日期**：2026-10-26
+
+### 现象
+
+global 域发来销账通知：「Go 侧 `rpc.go:68-71` ⇒ `context deadline exceeded`，
+RAG 侧原为 `rpc timeout after 2000ms`，**已由 global 修完**，请 users/admin 回写销账」。
+
+按通知直接销账，会错两次：
+
+### 坑 ①：「已修完」可能**一行都还没提交**
+
+实查三个地方，全部对不上：
+
+| 查什么 | 结果 |
+|---|---|
+| `align/global` **分支**上的 `RpcInterceptor.java` | ❌ 仍是旧串 `"rpc timeout after " + timeoutMs + "ms"` |
+| 全仓 25 个分支逐个 `git show` | ❌ **没有任何分支**含新串，也**没有任何分支**含 `RpcInterceptorTimeoutDescriptionGateTest.java` |
+| `RAG.worktrees/global` 的**工作区** | ✅ 修复在这儿：`M service/common/.../RpcInterceptor.java`（**已改未提交**）＋ `?? RpcInterceptorTimeoutDescriptionGateTest.java`（**未跟踪**） |
+
+⇒ 通知说的「已在 `align/global` 分支修完」，**实际状态是「改在 worktree 工作区、尚未 commit、尚未合并」**。
+
+- **为什么难发现**：`git branch` 上的提交历史看起来完全正常（没有异常、没有冲突），
+  **只有 `git status` 看得见工作区的未提交改动**；
+- ⚠️ **风险是实的**：AGENTS.md §5.3 记过「共享文件的改动要尽早提交（**实测已被并发会话 `git checkout` 整体回滚过一次**）」，
+  而 `service/common` 正是共享文件 ⇒ 未提交 = 随时可能丢。
+- ⇒ **销账台账前固定三查**：
+  1. `git diff <基线>..<对方分支> -- <落点文件>` ⇒ 看**分支上**有没有；
+  2. `git branch -a --contains` / `git log --all -S"<新串>"` ⇒ 全 ref 搜一遍；
+  3. `cd <对方 worktree> && git status` ⇒ 看**工作区**有没有。
+  三处都没有 ⇒ 写「**尚未提交/未合并**」，不要写「已修完」。
+
+### 坑 ②：**修文案 ≠ 修语义** —— 差点把整条漂移误销
+
+| | 是什么 | global 本轮修了吗 |
+|---|---|---|
+| **文案** | 超时响应给客户端的 `status.description` 那一串 | ✅ 修了（`context deadline exceeded`） |
+| **语义** | 服务端 2s 预算**不继承客户端 deadline** ⇒ 客户端放弃后，PG 上的查询继续占 1.1s（`Δ_end = +1111ms`） | ❌ **没碰** —— deadline 仍是 `System.currentTimeMillis() + timeout.toMillis()`（服务端自己的 2s），**没取** `min(客户端 deadline, 服务端 2s)` |
+
+> 🟢 **2026-10-26 订正（表本身是「当轮的历史快照」，保留不改；但结论已变）**：
+> **第②层（期限计算）随后由 `align/global` @ `af416d9` 修掉** ⇒ 「没取 min」这一格**已过时**。
+> ⇒ 且 🔴 **本行把 `Δ_end` 当成「语义层未修」的证据，也是错的** ⇒ 详见 **P-16**（仪器口径）。
+>
+> ⇒ **本坑的结论依然成立且更强**：**「修文案 ≠ 修语义」是对的，但更要命的是「**你以为你在修的那件事，和仪器测的那件事，不是同一件**」** ——
+> ⇒ **在动「本体/可观察形态」那张表之前，先把仪器的口径钉死**（P-16 的判据）。
+
+⇒ 「客户端看到的文案一致了」**不等于**「这条漂移的本体修好了」。
+⇒ **两者碰巧落在同一个文件、同一个方法里** ⇒ 只看 diff 会以为整条都修了。
+
+⇒ **销账前必做**：把这条漂移的**本体**（差异的**成因**）与**可观察形态**（差异的**表现**）分开列一张表，
+逐格标「修了/没修」。本轮正是靠这张表才发现「只销了一格」。
+
+### 附带一条：编号会歧义
+
+global 通知里说的那条，在我台账里是 **`UNRESOLVED-ARPC-002`**（超时是否 min 客户端 deadline）；
+而 **`DRIFT-ARPC-002`** 是另一条（`UpdateUserResp.success` 的 wire 差异，已修）。
+⇒ 同域内 `DRIFT-xxx` 与 `UNRESOLVED-xxx` **各有一套独立编号**，都带 `ARPC` 前缀 ⇒ 光说「ARPC-002」必然歧义。
+⇒ **跨域沟通一律带全前缀**（`UNRESOLVED-ARPC-002` / `DRIFT-ARPC-002`）。
+
+### 附带一条：行号引用会因**别人**的改动而失效
+
+global 提醒「`RpcInterceptor.java:192-194` 这类行号本轮改动后会漂移」⇒ 属实：
+该文件在 2026-10-26 已从 **170 行漂到 214 行**。
+⇒ 本域 4 处 `RpcInterceptor.java:NNN` 活引用已改成**符号名 / 表达式**
+（`deadlineEpochMs` 的计算、`TIMEOUT_SCHEDULER.schedule(...)`、`tracer.startSpan`）。
+⇒ **判据**：引用**共享层**代码时，行号的保质期取决于**别的域的合并节奏**，不由本域控制
+⇒ 共享层一律引**符号名**（AGENTS.md §3.1：证据要指向**消费点**）。
+
+---
+
+## P-16 · 🔴 **仪器测的是什么 ≠ 你以为它在测什么** —— 把 `Δ_end` 归因到了错的机制上
+
+**核对日期：2026-10-26**（复盘 global 域第三十三轮 `d20b377` 时，本域台账被自己推翻的一条断言）
+
+### 现象
+
+本域台账从 2026-10-24 起一直写着这句话：
+
+> 「档位 A 的 `Δ_start` 那一格修后会变、**`Δ_end` 那格不变**（第 ③ 层未做）」
+
+背后的推理链看起来很顺：
+`Δ_end` = **客户端返回后，PG 上那条查询还占着多久** ⇒
+「客户端都放弃了，查询还在跑」⇒ **一定是「业务线程没被取消」造成的** ⇒
+⇒ 所以「只要第③层（资源取消）没做，`Δ_end` 就一定还是 +1111ms」。
+
+**这句话是错的。** 而且它是本域台账里**被反复引用 6 处**的**结论性断言**（§1.3 三层表 / §1 定性轮 / §1.4 结论 / 销账补记 / 修法边界表 / §17 汇总表）——
+⇒ **一处错，六处跟着错**。
+
+### 根因：**仪器的口径被搞错了**
+
+`Δ_end` 的定义（`tools/difftest/exp-grpc-admin-deadline-probe.sh`）：
+
+```
+Δ_end = PG 取消时刻 − 客户端返回时刻
+```
+
+主仪器是 **PG 服务端日志**里的 `canceling statement due to user request` ⇒
+⇒ **这个「取消时刻」由 `statement_timeout` 决定**，而 `statement_timeout` 由
+`DeadlineQueryTimeoutInjector` 从 `DeadlineState.remainingMillis()` 设 ⇒
+⇒ **与「业务线程有没有被 interrupt」毫无关系。**
+
+| 我以为 `Δ_end` 在测 | `Δ_end` 实际在测 |
+|---|---|
+| 「业务线程有没有被取消」（机制层，第③层） | 「**SQL 超时上限有没有继承客户端 deadline**」（期限层，第②层） |
+
+⇒ **第②层一改，`Δ_end` 就跟着动**；**第③层做完不做，它都不动。**
+⇒ 所以「第③层未修 ⇒ `Δ_end` 不变」这条推理，**前提整个是错的**。
+
+### 为什么会犯
+
+因为**「客户端放弃后服务端还在干活」这个现象，确实同时由两件事造成**：
+
+1. **期限算错**（第②层）⇒ SQL 超时上限没继承客户端 deadline ⇒ 查询跑到自己的预算才被取消；
+2. **业务线程不被取消**（第③层）⇒ 客户端走了，handler 线程还在跑。
+
+⇒ **现象是「合取」，但我当时默认把整个现象记在了「更显眼的那一项」账上**
+⇒ 而**仪器只对其中一项敏感**。
+
+### 下次怎么防（判据）
+
+1. 🔴 **给指标做「归因」时，必须把「谁决定这个数字」一路追到物理量，不能停在直觉层。**
+   本轮追的六环（每一环都有落点）：
+   `Δ_end` → **PG 取消时刻** → `statement_timeout` → `DeadlineState.remainingMillis()`
+   → `RpcInterceptor` 的 `deadlineEpochMs` → `effectiveTimeoutMs = min(服务端预算, 客户端 deadline 剩余)`。
+   ⇒ **追到这一环才发现「第③层跟这个数字无关」。**
+2. 🔴 **「现象 → 机制」是合取时，先问一句：「仪器对这两项分别敏感吗？」**
+   ⇒ 敏感的那项才是你能用这个指标判的那项。
+3. ⚠️ **别把「同一个现象的多个成因」写成「A ⇒ B」的因果链**——
+   台账里写成因果链，后人会当成**已证的单因**，于是**反过来用它去否定另一个成因的修复效果**。
+4. 🟢 **反向用法**：这条也解释了**为什么 E46（毫秒精度）能意外消掉 `Δ_end`** ——
+   E46 改的是 `statement_timeout` 的**精度**，正好是 `Δ_end` 的直接决定量 ⇒
+   **而 E46 的作者把它记成了「不改 `UNRESOLVED-ARPC-002` 的定性」** ⇒ **跨域的「定性」也得自己核**（P-15 的同一条纪律，这次用在了**反方向**）。
+
+### 同族
+
+- **P-14**（用错仪器 · 精度错）：采样周期比事件窗口粗 ⇒ 「没看到」被读成「没发生」。
+- **P-16**（用错仪器 · **口径错**）：仪器测的量 ≠ 你以为它测的量 ⇒ **数字全对，结论全错**。
+  ⇒ **两者都不会报错** ⇒ P-14 的判据（「先算仪器开销 vs 事件时长」）**不足以防住 P-16** ⇒ 必须再加一条：**追到物理量**。

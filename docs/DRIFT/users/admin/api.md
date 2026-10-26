@@ -1472,7 +1472,7 @@ BeanCreationException: Error creating bean with name 'adminRpcClient':
 | 2 | 包出来的是 `io.grpc.ClientInterceptors$InterceptorChannel extends io.grpc.Channel`，**不暴露 `getState`** | `javap`（grpc-api 1.63.0） |
 | 3 | `io.grpc.Channel`（grpc-api 1.63.0）**只有** `newCall` 与 `authority` —— **根本没有 `getState`** | `javap` / sources jar |
 | 4 | `getState` 只在 `io.grpc.ManagedChannel` 上 | `javap` |
-| 5 | 生产里**必然**有全局拦截器：`GoStyleGrpcClientBreakerInterceptor` 是 `@Component + @GrpcGlobalClientInterceptor`，admin-api 依赖 `service/common` | `service/common/.../GoStyleGrpcClientBreakerInterceptor.java:103-106` |
+| 5 | 生产里**必然**有全局拦截器：`GoStyleGrpcClientBreakerInterceptor` 是 `@Component + @GrpcGlobalClientInterceptor`，admin-api 依赖 `service/common` | `service/common/src/main/java/com/rag/common/protection/GoStyleGrpcClientBreakerInterceptor.java:103-106` |
 
 ⇒ ⇒ **`instanceof ManagedChannel` 在生产永远为 false** ⇒ admin-api 根本起不来。
 
@@ -1647,7 +1647,7 @@ RAG 的 admin-api 现在**必须在 admin-rpc ready 之后起**（fail-fast ⇒ 
 
 ## 4. 本轮顺带改的代码（**1 处，纯注释**）
 
-- `service/users/admin/admin-api/.../metrics/AdminApiMetrics.java`
+- `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/metrics/AdminApiMetrics.java`
   - javadoc「**17 个**具名 Counter」→「**16 个**」（并在注释里写明「2 个 label 名 / 16 个组合」的区别）。
   - 补一段：RAG exposition **多一个 `application` label**（`management.metrics.tags`），Go 侧没有。
 
@@ -1700,14 +1700,14 @@ RAG 的 admin-api 现在**必须在 admin-rpc ready 之后起**（fail-fast ⇒ 
 
 | 共享文件 | 改动方 | 是否影响本域断言 |
 |---|---|---|
-| `service/common/.../observability/HttpMiddleware.java` | `align/message` | 🔴 **影响** —— 补了 `nosniff` ⇒ **ADMINAPI-007 合并后自动消失**（已加处置栏） |
-| `service/common/.../protection/GoStyleCpuSheddingFilter.java` | `align/users-user` | ✅ **不影响** —— 只新增静态辅助方法 `elapsedRtMs`，**`@Order` 未变** ⇒ M-37 / M-39 的 filter 顺序断言仍成立 |
-| `service/users/users-common/.../jwt/JwtUtil.java` | `align/users-user` | ⚠️ **不影响 N-5 的结论** —— 改的是 `signWith` 的实现（`Keys.hmacShaKeyFor` → 显式 `SecretKeySpec(..., "HmacSHA256")` + `SignatureAlgorithm`），**`padToHmacKeySize` 本身未动** ⇒「Go 签的 token 在 RAG 验不过」仍成立。**但**：该改动顺带修掉了「密钥 ≥48 字节时 `header.alg` 漂移到 HS384/HS512」的问题 ⇒ **N-5 签字档引用的代码已变**，合并后应复核一次 |
+| `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java` | `align/message` | 🔴 **影响** —— 补了 `nosniff` ⇒ **ADMINAPI-007 合并后自动消失**（已加处置栏） |
+| `service/common/src/main/java/com/rag/common/protection/GoStyleCpuSheddingFilter.java` | `align/users-user` | ✅ **不影响** —— 只新增静态辅助方法 `elapsedRtMs`，**`@Order` 未变** ⇒ M-37 / M-39 的 filter 顺序断言仍成立 |
+| `service/users/users-common/src/main/java/com/rag/users/common/jwt/JwtUtil.java` | `align/users-user` | ⚠️ **不影响 N-5 的结论** —— 改的是 `signWith` 的实现（`Keys.hmacShaKeyFor` → 显式 `SecretKeySpec(..., "HmacSHA256")` + `SignatureAlgorithm`），**`padToHmacKeySize` 本身未动** ⇒「Go 签的 token 在 RAG 验不过」仍成立。**但**：该改动顺带修掉了「密钥 ≥48 字节时 `header.alg` 漂移到 HS384/HS512」的问题 ⇒ **N-5 签字档引用的代码已变**，合并后应复核一次 |
 | `service/users/users-common/db/01_create_user.sql` | `align/users-user` | ✅ 不影响（属 users/user 域；admin-rpc 只**读** `users_user`） |
-| `service/users/admin/admin-rpc/src/main/.../AdminRpcApplication.java` | `align/message` | 🔴 **影响** —— 给 admin-rpc 补挂熔断/降载链 ⇒ **DRIFT-ARPC-009 合并后自动消失**（详见 `rpc.md`） |
+| `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/AdminRpcApplication.java` | `align/message` | 🔴 **影响** —— 给 admin-rpc 补挂熔断/降载链 ⇒ **DRIFT-ARPC-009 合并后自动消失**（详见 `rpc.md`） |
 
 > ⚠️ **另一条需要合并时留意**：别的域分支**动了我域的测试文件**
-> （`align/message` 新增 `service/users/admin/admin-rpc/src/test/.../AdminProtectionChainWiringTest.java`）。
+> （`align/message` 新增 `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminProtectionChainWiringTest.java`）。
 > ⇒ 合并时该文件**新增**，与本分支无冲突；但**归属上它属于 admin-rpc（我域）**，
 > 其结论（熔断/降载链是否真挂上）**应记进本域台账** ⇒ 本轮已记（`rpc.md` 的 DRIFT-ARPC-009）。
 
@@ -1763,4 +1763,54 @@ RAG 的 admin-api 现在**必须在 admin-rpc ready 之后起**（fail-fast ⇒ 
 | `docs/Intentional_Deviations/users/admin/api.md` / `rpc.md` | 修 3 处失效链接 | 台账 |
 | `docs/Pitfalls/users/admin/api.md` | 追加 **P-ADMINAPI-017**（复核的「假订正」风险） | 踩坑档 |
 
-**零代码改动** ⇒ 不需要重跑测试门禁（上次全量门禁见 §9，admin-api 129/0/0/0、admin-rpc 99/0/0/0）。
+**本轮零代码改动** ⇒ 不需要重跑 admin-api 门禁（上次全量门禁见 §9：admin-api **129/0/0/0**、admin-rpc **99/0/0/0** ⇒ ⚠️ 后者已被本轮更新为 **103/0/0/0**，见 [`rpc.md`](rpc.md) §5.4）。
+
+---
+
+# 2026-10-26 global 第五轮通知消化（admin-api 侧：路径引用清零 + 一条跨域结论）
+
+> **本轮零代码改动** ⇒ 不需要重跑 admin-api 门禁（上次：admin-api **129/0/0/0**、`skipped=0`）。
+> ⚠️ **但本域的 admin-rpc 门禁本轮有更新**（新增 2 条守卫 ⇒ **103/0/0/0**）⇒ 详见 [`rpc.md`](rpc.md) §5。
+> **详细推导与证据链在 [`rpc.md`](rpc.md) 的「global 第五轮通知消化」章节**（本节只记 admin-api 侧的净变更）。
+
+## 1. 🟢 第 1 层报的 7 处路径引用已展开为完整路径（**🔴 根因判断已订正**）
+
+旧版共享工具 `tools/check-ledger-selfcheck.py --domain users-admin` 的**第 1 层**
+（「台账引用的仓库内路径是否存在」）报 **33 处 MISSING**，其中 **7 处在本文件**。
+
+🔴 **订正（2026-10-26，users/user 域提醒 ⇒ 本域复核）**：我原先写的根因是
+「**缩写式路径对工具永久不可解析 ⇒ 第 1 层对它永远瞎 ⇒ 路径写错也没机制能发现**」
+⇒ **这句在 global 的 `35a7b8e` 之后不成立** —— 新版第 1 层给简写加了去噪
+（**N8** 省略写法 / **N9** 裸文件名 / **N10** 短路径 / **N11** Go 侧路径 / **N12** 仓外引用）
+⇒ **简写被正确识别为「简写」并放过，不再报成「缺失」** ⇒ **那 33 处是旧版工具的口径问题**。
+⇒ 且本轮 33 处**逐条解析全部唯一命中真实文件** ⇒ **零「真缺失」** ⇒ **本域路径本来就都指向真实文件**。
+
+⇒ **仍然展开的理由（已改写）**：① **展开 = 从「不被检查」变成「被检查」**（缩写式只靠去噪规则放过，工具**不验证**它）
+② 人和工具都能直达。⚠️ **仍不违反「共享层引用用符号名」**（P-15）：那条针对**行号**，完整路径不漂移
+⇒ **行号 → 符号名 / 路径 → 完整路径**。
+
+⇒ **新版工具复测（2026-10-26）**：**层 0~4 全部通过**；第 1 层「**台账引用路径 73 个 ⇒ 缺失 0 个**」；
+第 4 层「**引用不悬空: 168 条**」。
+⚠️ 但工具自己写明：第 2/3 层对 `users-admin` 域 **「不适用 —— 不是『通过』，是『没查』」** ⇒ **不得拿「工具全绿」当「已复核」**。
+⇒ 完整经过与元教训（**本域第 3 次「跨域销账通知要自己核」**）⇒ 详见 [`rpc.md`](rpc.md) §8。
+
+## 2. 一条**跨域结论**（admin-api 侧受益，但成因在 `admin-rpc`）
+
+global **E47**（业务层把「SQL 被 deadline 取消」改写/吞掉 ⇒ 事务 / 指标 / wire 三重口径失真）
+⇒ 🟢 **admin 域不命中**：admin-rpc 的 **30 处**宽 catch **全部 1:1 配对** `catch (StatusRuntimeException e) { throw e; }`
+⇒ `DEADLINE_EXCEEDED`（由 `SqlTimeoutStatusTranslator` 抛的 `io.grpc.StatusRuntimeException`）**原样透传**
+⇒ **admin-api 侧收到的 wire 与 Go 一致**（本域无待办）。
+⚠️ **但这不等于 admin 域「超时语义已闭环」** —— 真正的残余是**非 SQL 路径**
+（admin `logout` 的 Redis 写不绑 deadline ⇒ ⇒ `DRIFT-ARPC-010`），
+且 `Δ_end` 的**修后值待实测**（探针未进编排 ⇒ global **E48**）。
+⇒ 详见 [`rpc.md`](rpc.md) 同轮章节 + [`docs/Pitfalls/users/admin/rpc.md`](../../../Pitfalls/users/admin/rpc.md) 的 **P-16**。
+
+## 3. 本轮改动清单（api.md 侧）
+
+| 文件 | 改动 | 性质 |
+|---|---|---|
+| `docs/DRIFT/users/admin/api.md` | 7 处路径展开 + 本章节 | 台账 |
+| `docs/DRIFT/users/admin/rpc.md` | 6 处断言订正 + 1 个新章节 + 33 处路径展开 | 台账 |
+| `docs/Pitfalls/users/admin/rpc.md` | 追加 **P-16**（仪器口径 ≠ 归因） | 踩坑档 |
+
+**零代码改动** ⇒ 不需要重跑测试门禁。
