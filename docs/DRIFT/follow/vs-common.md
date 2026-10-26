@@ -68,3 +68,39 @@
 - [ ] §3 的域侧修法**落码 + 守门**（含变异验证）
 - [ ] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）
 - [ ] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
+
+---
+
+## 6. 🆕 **G1 ⇄ G4 配合范围**（常驻 · 2026-10-27 02:4x 记）
+
+> ⚠️ 本节 = **操作口径**（谁写哪 · 怎么派 · 派单长什么样）⇒ **不替代** AGENTS.md §5.3d·§5.3e 与
+> [`cross-domain-coupling.md`](../_cross/cross-domain-coupling.md) §三 **C1~C7**。
+> ⇒ **通用口径写在 [`docs/DRIFT/users/vs-common.md` §6](../users/vs-common.md)（users 侧那份更全）** ⇒
+> **本节只记 follow 域特有的部分**，不重复抄一遍。
+
+### 6.1 follow 侧写权（守门：`tools/difftest/check-wave-lane-ownership.py` ⇒ EXIT=0）
+
+| 面 | G1（`align/g1-users-follow`） | G4（`align/g4-service-common`） |
+|---|---|---|
+| `service/follow/**`（api/rpc/common/proto） | ✅ **可写**（含 `follow-common` ⇒ **本域真私有**，§5.3f） | 🔴 只读 |
+| `service/common/**` · `service/users/users-common/**` | 🔴 **只读** | ✅ **可写（唯一）** |
+| `docs/DRIFT/follow/**` | ✅ 可写 | 🔴 只读 |
+| `docs/DRIFT/global/vs-common.md` | 🔴 只读 | ✅ 可写 |
+| `AGENTS.md` · 三个 `_INDEX.md` · `_MANIFEST.json` · `docs/DRIFT/_cross/**` · `docs/Worktree.md` · `docs/DRIFT/global/{_README,common-tails,cross-domain,cycle-deps}.md` | 🔴 **无人拥有** | 🔴 **无人拥有** ⇒ **合并后由整合者统一更新** |
+
+### 6.2 follow 侧派单（G4）—— **1 条，已核准落点**
+
+| 编号 | 摘要 | 落点 | 归属 | 状态（2026-10-27 核） |
+|---|---|---|---|---|
+| `DRIFT-FOLLOW-008` | **MaxConns 闸门**：Go **每路由一个**（`rest/handler/maxconnshandler.go:12` 按 `route.Path` 建闸）vs RAG **全局一个** | `service/common`（`GoStyleMaxConnsFilter`） | 🔴 **G4** | 🔴 未修 · **与 users 侧 `DRIFT-USERAPI-013` 同族 ⇒ 两条一起对账，别各修各的** |
+
+⚠️ **派单口径（7 项 · 缺项不进排期）**见 [`users/vs-common.md` §6.2](../users/vs-common.md) ⇒
+**编号必须带全前缀**（`DRIFT-FOLLOW-008` ≠ `DRIFT-USERAPI-013` ⇒ 同族 ≠ 同一条）⇒
+**落点双轨**：实时 `session send` 给 G4 会话 ＋ 正式按写权写台账（**G1 写本文件、G4 写 `docs/DRIFT/global/vs-common.md`** ⇒ 合并前互相看不见对方的文件）。
+
+### 6.3 follow 侧**自修**（不甩 G4）
+
+- `follow-api` 的 A3 接线：`mode=envelope`（Go 侧 `service/follow/api/followcenter.go:53` `httpx.SetErrorHandler` ⇒ Go = 200 + 业务信封 ⇒ 同向 ✅）
+- `follow-api` 的 `JsonMapperBuilderCustomizer` 注册的是**本域私有**的 `FollowGoStyleCoercion::applyTo` ⇒
+  **不共用 `users-common` 的通用版** ⇒ ✅ 域侧自修面，**不牵连 users 通用版**（对比：`favorite-api` 直接复用了 users 通用版 ⇒ 见 users 侧 §6.4.1）
+- `follow-common` 是**本域真私有**（§5.3f：只被本域引用）⇒ **G1 可写** ⇒ 共享层缺陷不适用
