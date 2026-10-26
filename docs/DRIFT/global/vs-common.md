@@ -370,6 +370,46 @@
 | 3 | 🔴 **`DRIFT-HOTRPC-004` 的范围澄清** | **登记（防销错账）**：它闭的是 **`hot-api` 侧**，**不是 `hot-rpc` 侧** ⇒ ⇒ **别把它当「hot-rpc 侧已闭合」销掉**；另：权威面里「client breaker 是否真在链上」那条编号是 **`U4`**（`hot/api.md` §9 Unresolved 表），**不是** `DRIFT-HOTRPC-004`（那条是**另一条**：Redis 客户端重试） | 域台账（`docs/DRIFT/hot/**`）= 域侧 ⇒ 回执时已提醒对应 owner |
 | 4 | **`E65`** | **不重复派单**：已是 global 台账的 OPEN 项 ⇒ 重复派会造出两个编号指同一件事 | 已在 global 台账 ⇒ 本 lane 不再登记 |
 
+### 4.8 🆕 单 4（Jason 拍板）—— MyBatis-Plus 排序桥进**共享层主 jar**（核对日期 2026-10-27 · 基线 `align/g4-service-common` @ `a1a2e05`）
+
+> **来源**：G3 的回执转达（Jason 拍板原方案 = **桥放主 jar + 各域删自己那份**）。
+
+#### 4.8.1 🔴 本层先前的顾虑**不成立**（但**是我自己**的 grep 假阳性，不是对方的错）
+
+| 项 | 结论 |
+|---|---|
+| 我先前的顾虑 | 「桥放主 jar ⇒ 会波及 16 个消费者的 MP 自动配置启用状态 ⇒ 是行为变更」 |
+| **实测** | **有效 classpath 上有 mybatis-plus 的只有 9 个 rpc**（article / comment / favorite / follow / like / message / task / users-user / users-admin）；**其余 11 个**（10 个 api ＋ `hot-rpc`）**没有** ⇒ ⇒ 那 9 个**各自已有同向的域侧桥** ⇒ ⇒ 放主 jar 只是**多一个同向排序节点、无环、功能等价** ⇒ ⇒ **不改变任何消费者的启用状态** |
+| ⚠️ **我错在哪** | 我用 `grep -rln "mybatis-plus" --include=pom.xml service/` 判定 ⇒ **命中了 `task-api/pom.xml` 里的注释文本**（「刻意**不**引入的：mybatis-plus / flyway —— task-api 不碰 DB」）⇒ ⇒ **把「注释里提到」当成了「依赖里有」** ⇒ ⇒ **假阳性** ⇒ ⇒ 权威口径是 `mvn dependency:list`（实测：task-api **无** mybatis）⇒ ⇒ 对方的实测是对的 |
+| ⇒ 教训 | 「某依赖在不在 classpath 上」**必须**用 `mvn dependency:list` 判定；grep pom.xml 分不出「直接依赖 / `<exclusions>` 排除 / 注释提及」三种 ⇒ 与「javadoc 污染 grep 计数」「跨行数组注解单行正则必然 0 命中」同族 |
+
+#### 4.8.2 本层落码：**用字符串形式** ⇒ 对「没有 MP」的消费者**结构性安全**
+
+- 新增 `service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java`（**主 jar**）并登记进 `service/common` 的 `AutoConfiguration.imports`。
+- 🔴 **关键取舍：排序注解写成 `afterName` / `beforeName`（字符串），不是类字面量**。
+  Boot 4 的 `@AutoConfiguration` 有 `beforeName`/`afterName`
+  （`@AliasFor(annotation = AutoConfigureBefore.class, attribute = "name")`）
+  ⇒ ⇒ 类名只是**字符串** ⇒ ⇒ **目标类在不在 classpath 上都不影响本类的加载**
+  ⇒ ⇒ 若写类字面量（域侧那 9 份的写法）⇒ 任何在**反射**层面读该注解的消费者
+  ⇒ 抛 `TypeNotPresentException` ⇒ ⇒ **上下文直接起不来**。
+  ⇒ ⇒ **本层这版比域侧那 9 份更稳**（域侧那 9 份能工作，只因为它们所在模块恰好都有 MP）。
+- **顺带**：删掉单 1 探针原先自造的 **test scope** 那座桥（探针在 `service/common` 里、看不到域侧那 9 座，当时必须自造）
+  ⇒ ⇒ 探针改为**复用主 jar 这座** ⇒ ⇒ **单 1 的守门从此直接验证共享层主 jar 的桥**（更强）。
+
+#### 4.8.3 证据（两个方向都验）
+
+| 场景 | 验证 | 结果 |
+|---|---|---|
+| **有 MP** | `MybatisPlusInterceptorChainGateTest`（真 PG + 真 mapper + 三层加码） | **3 / 3 绿** |
+| **没有 MP** | article-api 的 `ArticleApiAssemblyWiringTest`（**真 Tomcat + 真应用上下文**；article-api classpath 上**没有** MP） | **13 / 13 绿** ⇒ ⇒ 桥在无 MP 消费者上**不炸上下文** |
+
+#### 4.8.4 🔴 域侧协调项（**各域写权，本层不代删**）
+
+- **9 个 rpc 组件各自的域侧桥**（例：`service/message/message-rpc/src/main/java/com/rag/message/message/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java`）可删 ⇒ ⇒ 删后全仓只剩**共享层这一份**。
+- ⚠️ **删除前置**：必须先让共享层这份（`a1a2e05`）**合进各域的树** ⇒ 否则删掉域侧那份 ⇒ 该域**彻底失去**排序桥 ⇒ MP 自动配置不生效。
+- ⚠️ **共存期间无风险**：两份桥是**同向**排序边 ⇒ 排序图多一个同向节点、**无环、功能等价** ⇒ ⇒ 不改变任何行为 ⇒ ⇒ **删除不是「必须立刻」**，是「合并后清理」。
+- ⚠️ **顺带发现（不在本层写权，也不在本单范围）**：`task-api` 的 pom 里**没有** MP（实测 `dependency:list`）⇒ ⇒ 它**本来就不需要**桥 ⇒ ⇒ 本单**没有**改变 task-api 的任何行为。
+
 ## 5. 交付物清单
 
 - [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
