@@ -195,3 +195,19 @@ installed_rank | version |      description       | success
 | A 组（不设 `NACOS_GROUP`） | ✅ **6/6 组件真启动** · **0 解析失败** |
 | B 组（设 `NACOS_GROUP=G1_GROUP`） | ⚠️ 3 rpc 注册到写死 group · `admin-api` 进程退出 · `user-api`/`follow-api` 起得来但运行时解析不到 |
 | 证据强度 | **RAG 侧 = L3 活体**（真容器 + 真 Nacos + 真 PG + 真 Redis + 真 HTTP 请求）· **Go 侧 = L1 源码行号** ⇒ **两侧未同时活体对拍 ⇒ 不是 L4** |
+
+---
+
+## 8. 🆕 **双侧同时跑的探针**（2026-10-27 · G1 lane 实跑）
+
+> ⚠️ **完整结果见 [`docs/DRIFT/users/vs-common.md` §8](../users/vs-common.md)**（同一轮、同一批命令）。
+> ⇒ **本节只记 follow 侧的定位**。
+
+| 探针 | 结果 | 对 follow 域的定位 |
+|---|---|---|
+| `tools/semantic-probe/run-parity.sh` | ✅ **EXIT=0**（56 例 · 一致 54 · 不一致 0 · 已签字偏离 2） | ⚠️ 覆盖的是 **message 域 DTO ＋ `users-common` 的必填校验/coercion** ⇒ 对 follow 是**间接旁证**（users-common 侧）<br>⇒ ⚠️ **`follow` 自己的 DTO 解析语义（`FollowGoStyleCoercion` 私有变体）本轮无双侧活体对拍** ⇒ **A4 / A6 / A7 在 follow 侧仍是「台账既有证据强度」** |
+| `tools/semantic-probe/rpc-timeout/run-rpc-timeout-parity.sh` | ✅ **EXIT=0**（3/3 一致 · `client_deadline_ctx` 一致） | 🟢 **`client_deadline_ctx` = E38② 第①层的验证用例** ⇒ **① 层已闭环** ⇒ 直接改写了 §1.1 的 `UNRESOLVED-ARPC-002` 状态与 §4 #3 的派单内容（**已向 G4 发订正**） |
+
+⚠️ **follow 域的 A8 轴本轮反而拿到了新证据**（不是探针，是**真启动**）：`baseline-version: 0` 在非空 schema 下真生效 ⇒ 见 §7.3。
+
+⚠️ **本轮探针推翻了我自己的一条派单** ⇒ 教训见 users 侧 §8.3（**「落点」核准 ≠ 「状态」核准；状态的校准器是探针**）。

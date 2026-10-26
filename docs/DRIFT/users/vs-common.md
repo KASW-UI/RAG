@@ -24,7 +24,7 @@
 | 编号 | 摘要 | 落点 | 状态 | 域台账 |
 |---|---|---|---|---|
 | 🔴 `DRIFT-ARPC-010` = **E66** | Redis 写**不绑 deadline**（admin `logout` 的 Redis 写） | `service/common`（Redis 调用路径） | 🔴 **OPEN**（两侧同编号 ⇒ 销账别当两条） | [`admin/api.md`](admin/api.md) |
-| 🔴 `UNRESOLVED-ARPC-002` = **E38②** | 超时是否 **min 客户端 deadline**（Go `context.WithTimeout(parent,2s)` 继承 vs RAG 只算自己 2s）⇒ 定性为 **CONFIRMED SEMANTIC MISMATCH** | `service/common` | 🔴 **未闭合** ⇒ 修法在共享层 | [`admin/rpc.md`](admin/rpc.md) |
+| ✅ `UNRESOLVED-ARPC-002` = **E38②** | 超时是否 **min 客户端 deadline**（Go `context.WithTimeout(parent,2s)` 继承）⇒ 🔴 曾定性为 **CONFIRMED SEMANTIC MISMATCH** ⇒ ✅ **2026-10-27 口径订正：① 已闭环**（RAG 侧 2026-10-26 已落地 `Math.min(serverBudgetMs, clientDeadlineRemainingMs())`）⇒ **② 架构级（业务线程不被取消）已另立项** ⇒ **不是「① 没做」** | `service/common` | ✅ **① 已闭环**（双侧活体探针 `client_deadline_ctx` 一致）· ⏸ **② 未做**（Jason 2026-10-26 拍板另立项）⇒ **本轮不落码** | [`admin/rpc.md`](admin/rpc.md) |
 | 🔴 `DRIFT-USERAPI-013` | 过载保护：**MaxConns 闸门粒度** + **breaker 键空间**（Go key = 注册期 `route.Path` 模板 ⇒ 基数 = 路由数；RAG = raw `getRequestURI()` ⇒ 基数 = 参数取值数）+ 注释与实现矛盾 | `service/common` | 🔴 **待拍板**（域台账原文）；⚠️ **与 follow 域 `DRIFT-FOLLOW-008` 同族** | [`user/api.md`](user/api.md) |
 | 🟡 `DRIFT-ADMINAPI-007` | 503 超时响应缺 `X-Content-Type-Options: nosniff` | `service/common` | 🟡 **半修** —— `nosniff` **已落地**（`HttpMiddleware.java:692`）⇒ 原条自动消失；**charset 分号后空格残差仍在** ⇒ 需重开一条 | [`admin/api.md`](admin/api.md) |
 | `DRIFT-ARPC-006` | OTel `audit.*` span 属性（`operator_id` 不恒为 0） | `service/common`（otel 埋点） | ✅ **已修** | [`admin/_shared.md`](admin/_shared.md) |
@@ -41,7 +41,7 @@
 | `UNRESOLVED-USERSCOMMON-003` | 🔴 未核（落点 `service/common`） | ✅ **口径已订正** ⇒ **不再整条甩 G4**（拆成「域侧自修」＋「共享层」两半） | **本轮实测 8 个域的 `WebMvcConfig`**（L3 活体）⇒ 见 §6.4.1 |
 | `DRIFT-USERAPI-013` | 🔴 待拍板 | 🔴 **维持待拍板**；只读复核已于 2026-10-26 完成（键语义钉死 · **可观察面在 `article-api` ⇒ user-api 本组件不可观察**）⇒ 落点确认在共享层 ⇒ **派 G4** | 域台账原文（L1） |
 | `DRIFT-ARPC-010`（= E66） | 🔴 OPEN | 🔴 **维持 OPEN**（本轮**未复核落点**）⇒ 派单时仍须核 Go 侧 `文件:行号` | 本轮未查 |
-| `UNRESOLVED-ARPC-002`（= E38②） | 🔴 未闭合 | 🔴 **维持未闭合**（Jason 已拍板：① 纯 deadline 计算下一轮做 ② 架构级另立项 ⇒ **① 不销本条**） | 拍板记录 |
+| `UNRESOLVED-ARPC-002`（= E38②） | 🔴 未闭合 | ✅ **口径订正（2026-10-27）＝「① 已闭环 ② 未做（已另立项）」** ⇒ **本轮不需要落码**：① 纯 deadline 计算**已落地**（`RpcInterceptor.java:234` 的 `Math.min(serverBudgetMs, clientDeadlineRemainingMs())`）⇒ 剩下**第②层**（grpc-java `ServerCall#close()` **不取消业务线程** ⇒ 在途 SQL 不随客户端 deadline 取消 ⇒ 与 T-14 同根 ⇒ 架构级 ⇒ Jason 2026-10-26 拍板「**另立项**」）⇒ ⚠️ **「① 不销本条」的正解是「① 已做、② 在等立项」⇒ 不是「① 没做」** | **L3 双侧活体**（`tools/semantic-probe/rpc-timeout/` ⇒ EXIT=0 · `client_deadline_ctx` 一致 · 3/3 一致）+ L1 源码（`RpcInterceptor.java:234/263/592-601`） |
 | `DRIFT-ADMINAPI-007` | 🟡 半修 | 🟡 **维持半修**（`nosniff` 已落地于 `HttpMiddleware.java:692` ⇒ 原条自动消失；**charset 分号后空格残差仍在** ⇒ **需重开一条**） | 域台账原文（L1） |
 | `DRIFT-USERRPC-V-007` | ✅ 已合回 `4f839f9` | ✅ **维持**（本轮**未重跑**双侧活体 ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」） | 域台账原文（L3，2026-10-26） |
 
@@ -89,7 +89,7 @@
 |---|---|---|---|---|---|---|---|---|
 | **1** | `DRIFT-USERAPI-013` ＋ `DRIFT-FOLLOW-008`（**同族，两条一起对账**） | ① **MaxConns 闸门粒度**：Go **每路由一个** latch（RAG = 全局一个）② **breaker 键空间**：Go key = 注册期 `route.Path` **模板**（基数 = 路由数）vs RAG = raw `getRequestURI()`（基数 = 参数取值数 ⇒ 无界）③ `GoStyleBreakerFilter` 的 javadoc 给「无界风险为零」的**错误安全保证** | ① `rest/handler/maxconnshandler.go:12`（`func MaxConnsHandler(n int) func(http.Handler) http.Handler`）<br>② `rest/engine.go:149` → `rest/handler/breakerhandler.go:15,19`（`breakerSeparator="://"`）<br>③ `rest/config.go:52` | `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java`（全局单闸门）· `GoStyleBreakerFilter.java`（raw URI 建 key）· 11 个 `protection/` 类 | **L1 源码逐行对照**（域台账 2026-10-26 只读复核：键语义已钉死 · **可观察面在 `article-api`**，user-api 的 9 条路由零路径变量 ⇒ 本组件不可观察） | 两侧都应是 **Y** = 「**每路由一个 latch**」＋「**breaker key 用注册期 `route.Path` 模板**」＋「**404 取不到模板 ⇒ 不得用 raw URI 兜底**」（这是方案 B 的硬约束） | `service/common` 的 `protection/`（11 类）⇒ **编译面 16 个组件** | 🟡 **不阻塞**（但**与 #2 同族** ⇒ 若 #2 落码，#1 宜同批） |
 | **2** | `DRIFT-ARPC-010`（= **E66**，两侧同编号 ⇒ **销账别当两条**） | Redis **写**不绑 deadline（admin `logout` 的 Redis 写）⇒ 超时后写仍在途 | `service/common/observability/rpc.go:38`（`context.WithTimeout(ctx, timeout)` ⇒ ctx 带 deadline ⇒ **出向调用天然继承**） | `service/common` 的 Redis 调用路径 **未绑 `GoStyleRequestDeadline`** ⇒ 只算服务端自己的预算 | **L1 源码**（域台账原文）+ 与 `UNRESOLVED-ARPC-002` 同型 | 两侧都应是 **Y** = 「**Redis 写出向调用绑定请求 deadline**」⇒ 与 gRPC 出向（E65）**同一套绑定机制** | `service/common` ⇒ 编译面 16 个组件 | 🟡 不阻塞 |
-| **3** | `UNRESOLVED-ARPC-002`（= **E38②**） | 超时是否 **min(客户端 deadline, 服务端 timeout)**：Go 继承父 ctx ⇒ 客户端更早就提前取消；RAG 只算 `now + timeout` ⇒ 客户端 deadline **完全不参与** | `service/common/observability/rpc.go:38` ⇒ `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)`<br>**已核 ✅**：该行内容逐字 = `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` | `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 的 `deadlineEpochMs = System.currentTimeMillis() + timeout.toMillis()` ⇒ **只算服务端自己的 2s** | **L3 双侧活体**（`tools/semantic-probe/rpc-timeout/` 的 `client_deadline_ctx` 用例；Go 半边 `bucket=client_100ms` vs RAG 半边 `bucket=server_own` ⇒ 实测信号 833ms） | 两侧都应是 **Y** = 「**有效期限 = min(客户端 deadline, 服务端 timeout)**」⇒ 修 `deadlineEpochMs` **与**超时调度器延时**两处**（只改一处 = 只修一半） | `service/common` ⇒ 编译面 16 个组件 | 🟡 不阻塞（Jason 已拍板：① **纯 deadline 计算下一轮做** ② 架构级另立项 ⇒ **① 不销本条**） |
+| **3** | `UNRESOLVED-ARPC-002`（= **E38②**） ⚠️ **2026-10-27 订正：此条本轮不需要落码** | 超时是否 **min(客户端 deadline, 服务端 timeout)**：Go 继承父 ctx ⇒ 客户端更早就提前取消。**RAG 侧已于 2026-10-26 落地该语义** ⇒ **① 已闭环** | `service/common/observability/rpc.go:38` ⇒ `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)`<br>**已核 ✅**：该行内容逐字 = `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` | ✅ **已落地**：`RpcInterceptor.java:234` ⇒ `Math.min(serverBudgetMs, clientDeadlineRemainingMs())`；`:263` 调度器用 `effectiveTimeoutMs`；`:592-601` 从 `io.grpc.Context.current().getDeadline()` 取 | **L3 双侧活体**（`tools/semantic-probe/rpc-timeout/` **本轮实跑 EXIT=0**：`client_deadline_ctx` **一致** · `timeout_wire` 一致 · 3/3 一致） | 两侧都应是 **Y** = 「**有效期限 = min(客户端 deadline, 服务端 timeout)**」⇒ ✅ **这个 Y 已经达成** ⇒ ⛔ **请勿改 `RpcInterceptor` 的 deadline 计算**（会把对的改错 ⇒ 制造新漂移）<br>剩下**第②层**（`ServerCall#close()` 不取消业务线程 ⇒ 架构级 ⇒ Jason 2026-10-26 已拍板「**另立项**」）⇒ **不是本轮落码项** | `service/common` ⇒ 编译面 16 个组件 | 🟢 **不阻塞**（**本轮不落码**） |
 | **4** | `DRIFT-ADMINAPI-007` | 503 超时响应的 `Content-Type` **charset 分号后空格**残差（`nosniff` 已于 `HttpMiddleware.java:692` 落地 ⇒ **原条自动消失** ⇒ **需重开一条**） | `service/common/observability/http.go:88` ⇒ `http.Error(w, httpTimeoutBody, statusCode)`（Go 标准库 `net/http.Error` 的 5 件事：`text/plain; charset=utf-8` ＋ `nosniff` ＋ 状态码 ＋ 尾换行） | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`（超时分支）＋ `http/GoStyleRouterErrorResponses.java` | **L1 源码**（⚠️ 响应头层须**真 Tomcat** 验 ⇒ MockMvc 测不到，见 `Pitfalls/common/http.md`） | 两侧都应是 **Y** = 「**503 的 `Content-Type` = `text/plain; charset=utf-8`（分号后**无**空格）**」⇒ 与 `DRIFT-MSGAPI-010` 同族（那条用户已拍板「保持登记，本轮不做」⇒ **本条要不要做请 G4 明确**） | `service/common` ⇒ 编译面 16 个组件 | 🟡 不阻塞 |
 | **5** | `UNRESOLVED-USERSCOMMON-003`（**只派一半**） | `users-common` 的**通用版** `GoStyleCoercion::applyTo` 被 **user-api / admin-api / favorite-api** 三域注册（**favorite 是外域**）⇒ 规则一改，favorite 的解析语义跟着变 ⇒ 「通用版规则内容是否该被外域复用」待定 | go-zero `core/mapping/unmarshaler.go`（`UnmarshalJsonReader` 的 coercion 与必填校验规则）—— ⚠️ **本条 Go 侧行号本轮未核** ⇒ 落码前请回真源逐条核 | `service/users/users-common/src/main/java/com/rag/users/common/http/GoStyleCoercion.java`（**通用版**，G4 写权）· 另 5 域用**本域私有**变体 | **L1 源码**（规则内容）＋ **L3 活体**（本轮实测 8 个 api 域的 `WebMvcConfig` 注册了哪个变体 ⇒ **落点口径已订正**，见 §6.4.1） | 两侧都应是 **Y** = 「**通用版的规则集合 = Go 侧 `UnmarshalJsonReader` 的等价规则**」⇒ 是否允许外域复用，由**规则内容**决定，不由「通用版」这个文件名决定 | `service/users/users-common` ⇒ **被 6 个外域 api 引用** ⇒ 编译面大 | 🟡 不阻塞 |
 | **6** | `DRIFT-USERRPC-V-002` | DDL：`users_user.status` 的 **NOT NULL** 两侧不同（Go `status bigint DEFAULT 0` **可空** / RAG `status BIGINT NOT NULL DEFAULT 0`）⇒ RAG 侧任何写 NULL 的代码在 PG 层被拒 | Go `service/user/user/rpc/internal/model/data_model.go:11` ⇒ `Status int64`（值类型 ⇒ GORM 建出**可空**）· ⚠️ **本条 Go 侧行号本轮未核** | `service/users/users-common/src/main/resources/db/01_create_user.sql:39` ⇒ `status BIGINT NOT NULL DEFAULT 0` | **L2 真库实证**（`information_schema` 对照） | 两侧都应是 **Y** = 「**`users_user.status` 可空**」⇒ ⚠️ **改动必须与 admin 域同一次提交**（域台账原文「被卡」） | `service/users/users-common` ⇒ **6 个外域 api 引用** | 🟡 不阻塞（但**须与 users 域同一次提交** ⇒ 属 C3「不甩单」的例外：落点真在共享层） |
@@ -225,6 +225,55 @@ POST /user/v1/login  {"username":"probe","password":"probe123"}
 
 ---
 
+## 8. 🆕 **双侧同时跑的探针**（2026-10-27 · G1 lane 实跑）
+
+> ⚠️ **口径**：AGENTS.md §3.3 —— 「凡写『与 Go 一致』，必须有**两侧同时跑**的探针（不是只跑 RAG）」。
+> ⚠️ 本轮实跑 2 套，**两侧都是真跑**（Go 半边跑冻结真源 / RAG 半边跑生产类）⇒ **不是只跑 RAG**。
+
+### 8.1 `tools/semantic-probe/run-parity.sh` ⇒ ✅ **EXIT=0**
+
+```
+总计 56 例：一致 54，不一致 0，已签字偏离 2
+```
+
+| 项 | 值 |
+|---|---|
+| Go 半边 | **冻结真源** `Sea-RideTheWind_golang/service/message/api/internal/types/types.go`（`go/main.go` 的 struct 逐字段对齐） |
+| RAG 半边 | **生产类** `com.rag.message.message.api.dto.*` ＋ `com.rag.message.message.api.config.*` ＋ **`com.rag.users.common.http.*`** |
+| 已签字偏离 2 条 | `SD-2026-10-23-03`（出参 `affected`：Go 输出数字 / RAG 按签字结论输出字符串）—— `X1` / `X2` |
+| ⚠️ **覆盖面边界（对本 lane 的诚实定位）** | ① 覆盖的是 **message 域**的 DTO（`conversation_id` / `target_id` / `broadcast` / `kind` / `extra` / `unread_only`）**＋ `users-common` 的必填校验与 coercion** ⇒ 对 G1 是**间接旁证**（users-common 侧）<br>② ⚠️ **`users/user` 与 `follow` 自己的 DTO 解析语义**（users-common 的**通用版** `GoStyleCoercion` 在 user-api / admin-api / follow-api 上的实际行为）**本轮仍无双侧活体对拍** ⇒ ⇒ **A4 / A6 / A7 在 G1 侧仍是「台账既有证据强度」，不是本轮新证** |
+| 🟡 **文档过期（不在 G1 写权 ⇒ 仅报备 G4）** | `tools/semantic-probe/README.md` 写「用例清单（**23 例**）」，脚本本轮实跑 **56 例** ⇒ README 的用例数已过期 ⇒ `tools/` 不在 G1 白名单 ⇒ 已随派单调剂报备 G4 |
+
+### 8.2 `tools/semantic-probe/rpc-timeout/run-rpc-timeout-parity.sh` ⇒ ✅ **EXIT=0**
+
+```
+✅ client_deadline_ctx    一致
+✅ timeout_wire           一致
+⚠️  timeout_telemetry     预期差异（不计入失败）= C-1 表述差异
+✅ PASS —— 3 个用例两侧一致
+```
+
+| 项 | 值 |
+|---|---|
+| Go 半边 | 冻结真源 `service/common/observability` ＋ **真 gRPC server**（grpc-go） |
+| RAG 半边 | **生产类** `RpcInterceptor` ＋ 真 Netty server ＋ 真 channel（`dns:///127.0.0.1:<port>` 直连，绕开 Nacos） |
+| `timeout_telemetry` 已知差异 | Go `codes.Code.String()` = `DeadlineExceeded`（驼峰）vs RAG grpc-java `Code.name()` = `DEADLINE_EXCEEDED`（全大写）⇒ **已登记的表述差异 C-1**（`docs/Intentional_Deviations/common/_signed-deviations.md`）⇒ 不计入失败但始终打印 |
+| ⭐ **对本 lane 的直接价值** | **`client_deadline_ctx` 正是 E38② 第①层的验证用例** ⇒ **① 层已闭环** ⇒ 直接改写 §1.1 / §4 #3 / §6.4 的状态（见 §8.3） |
+
+### 8.3 🆕 本轮探针**推翻了我自己的一条派单**（教训记在这里）
+
+⚠️ 我第一版派单把 `UNRESOLVED-ARPC-002`（E38②）写成「RAG 只算 `now+timeout` ⇒ 客户端 deadline 完全不参与」⇒
+**那是域台账的过期快照**（同一份台账的「E38 第①层影响面记账」段已记「本组件结论：无变化、无可观察差异」）⇒
+**本轮探针 + 读 `RpcInterceptor.java:234/263/592-601` 证实 ① 层已落地** ⇒ **已向 G4 发订正**（`session send`，queued）。
+
+⇒ **元教训（比 §7.4 更强的一层）**：我这次**做了「落点」核准、却漏了「状态」核准** ⇒
+⇒ **派单前必须同时核「落点」与「状态」；而「状态」的校准器是探针** ⇒ **凡有对应探针的条目，落码前先跑探针复核状态**（探针几十秒，比读 200 行台账更快更准）。
+
+⚠️ **风险已经发生**（所以这条必须记）：若 G4 按错误描述去改 `RpcInterceptor` 的 deadline 计算 ⇒ **会把已经对的改错 ⇒ 制造新漂移** ⇒
+⇒ 这正是 AGENTS.md §3.2 说的「**无出处 idiomatization**」的同族：**基于过期快照的改动 = 无出处改动**。
+
+---
+
 ## 6. 🆕 **G1 ⇄ G4 配合范围**（常驻 · 2026-10-27 02:4x 记）
 
 > ⚠️ 本节 = **操作口径**（谁写哪 · 怎么派 · 派单长什么样）⇒ **不替代** AGENTS.md §5.3d·§5.3e 与
@@ -289,7 +338,7 @@ G4 落码 ⇒ 共享层行为变 ⇒ **G1 这域的 A1~A9 结论要复核**（�
 |---|---|---|---|---|
 | `DRIFT-USERAPI-013` | 过载保护：MaxConns 闸门粒度 + breaker 键空间 + 注释与实现矛盾 | `service/common`（`GoStyleMaxConnsFilter` / breaker） | 🔴 **G4** | 🔴 待拍板 · **与 `DRIFT-FOLLOW-008` 同族 ⇒ 两条一起对账** |
 | `DRIFT-ARPC-010`（= **E66**） | Redis 写不绑 deadline（admin `logout` 的 Redis 写） | `service/common`（Redis 调用路径） | 🔴 **G4** | 🔴 OPEN（两侧同编号 ⇒ 销账别当两条） |
-| `UNRESOLVED-ARPC-002`（= **E38②**） | 超时是否 min 客户端 deadline | `service/common`（`RpcInterceptor` 的 `deadlineEpochMs`） | 🔴 **G4** | 🔴 未闭合 · Jason 已拍板：① 纯 deadline 计算下一轮做 ② 架构级另立项 ⇒ **① 不销本条** |
+| `UNRESOLVED-ARPC-002`（= **E38②**） | 超时是否 min 客户端 deadline | `service/common`（`RpcInterceptor` 的 `effectiveTimeoutMs`） | ✅ **① 已闭环**（2026-10-26 落地）· ⏸ **② 未做**（架构级，已另立项）⇒ **本轮不派落码** | ✅ ① 双侧活体一致（探针 `client_deadline_ctx`）· ⏸ ② 等立项 |
 | `UNRESOLVED-USERSCOMMON-003` | `GoStyleCoercion` 规则是否波及非 users 域 | 🟡 **拆两半**（见 §6.4.1） | 🟡 **域侧 + G4 各一半** | 🔴 未核 · **口径已订正**（2026-10-27） |
 | `DRIFT-ADMINAPI-007` | 503 响应 `Content-Type` charset 分号后空格残差 | `service/common` | 🔴 **G4** | 🟡 半修（`nosniff` 已落地 ⇒ 原条消失）⇒ **需重开一条** |
 
