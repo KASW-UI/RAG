@@ -147,6 +147,35 @@
 ⇒ 主工作区（target 4485）/ G3 树（target 0）/ G4 树（target 0）**三处完全一致** ⇒ 这才是**可写进台账的数字口径**。
 ⇒ ⚠️ 改法②不动任何断言的判定结果，**但会改变守门打印的计数** ⇒ G1~G3 正在跑这个守门 ⇒ 落码时点需知会（不改则计数不可复算，风险为潜在）。
 
+### 4.3 🆕 预告预登记（**G3 实时轨预告 · 非正式派单** · 落点已独立核准 · 核对日期 2026-10-27）
+
+> **来源**：G3 跨会话消息（实时轨）预告 article 域 2 条待派单。**正式派单未到 ⇒ 本节只做落点核准，不落码。**
+> ⚠️ **本节的存在意义 = 「派单前先核准落点，别照抄台账的落点列」**（AGENTS.md §3.1：只贴声明行不算证据）
+
+#### 预告 1：`DRIFT-ARTICLE-API-006`（Go 必填字段校验）⇒ ⛔ **不进 G4 排期**
+
+| 核查项 | 结论 |
+|---|---|
+| **编号 ↔ 主题是否对得上** | ❌ **对不上** —— 权威面 `docs/DRIFT/article/api.md:676-682` 的 `DRIFT-ARTICLE-API-006` = 「**8–10 MiB JSON body 的错误文案**（LOW，**2026-10-24 已确认不修**）」；而 `docs/DRIFT/article/vs-common.md:27` 把「**Go 必填字段校验**」挂在**同一编号**下 ⇒ 命中 `api.md:8-11` 自己警告的「**两套编号同形不同义**」 |
+| **该机制是否还缺共享层实现** | ✅ **不缺** —— 契约 `GoStyleRequiredFields` 已落地于 `service/users/users-common/.../http/GoStyleRequiredFields.java:46-53`，带**三段 Go 出处**（`core/mapping/utils.go` `parseOption` · `unmarshaler.go:918-969` · `:1199`）＋ 运行时探针 `tools/difftest/probe-go-required-fields.py`（2026-10-21） |
+| **article 域接入情况** | `CreateArticleReq implements GoStyleRequiredFields`（`service/article/article-api/.../dto/CreateArticleReq.java:57` + `:109`）⇒ **已接入**；`DeleteArticleReq.java:14` / `UpdateArticleReq.java:31` **显式不实现**（附了理由） |
+| **落点复核结果** | ⇒ 若真残留，落点在 **`service/article/article-api/**`（DTO 层）= G3 自己的写权面** ⇒ 按 C3「域侧能自修的自修」⇒ **不甩给 G4** |
+| **结论** | ⛔ **不进 G4 排期** —— ① 编号撞号（须先由 G3 订正编号/摘要）；② 落点疑在域侧 ⇒ 派单前请 G3 核实行号 + 明确落点 |
+
+#### 预告 2：`S-6` 的 `SqlTimeoutStatusTranslator` **javadoc 归因** ⇒ ✅ **可进排期，落点已核准**
+
+| 核查项 | 结论 |
+|---|---|
+| **落点** | ✅ `service/common/src/main/java/com/rag/common/persistence/SqlTimeoutStatusTranslator.java` 的 javadoc **「Go 出处」段（第 31-35 行）** ⇒ **G4 写权面内**（`service/common/**`） |
+| **问题定性** | 该段以「**Go 出处**」措辞断言 Go 行为，**却一个 `文件:行号` 都没有** ⇒ 命中 AGENTS.md **§3.3.2**（以「Go: …」措辞写的断言是高危项，须满足 §3.3.1 三条，否则不得用该措辞） |
+| **更深的发现** | 🟡 **结论对、归因措辞错** —— javadoc 写「Go 侧 ctx 到点后…**经 go-zero 的错误映射**成为 1015」⇒ 实测 Go 侧 **1015 不是框架映射、也不是 deadline 映射**：它是**各 api logic 显式 `switch st.Code()` 的 `default` 分支**产出（`service/user/admin/api/internal/logic/admin/getuserlistlogic.go:44-48`，同族 13 个 admin logic ＋ `service/user/user/api/internal/logic/user/selectavatarlogic.go:60`）⇒ **落点被写偏了一层** |
+| **Go 侧真源出处（已逐条核实，2026-10-27）** | ① `service/user/admin/api/internal/logic/admin/getuserlistlogic.go:44-48` —— `switch st.Code()`(44) / `case codes.Internal:`(45) → `ErrorServerCommon`(46) / `default:`(47) → `errmsg.CodeServerBusy`(48)<br>② `service/user/common/errmsg/errmsg.go:6`（`CodeServerBusy = 1015`）＋ `:41`（`"服务繁忙"`）—— ⚠️ 路径是 **`errmsg/errmsg.go`（目录）**，不是 `errmsg.go`<br>③ `service/common/observability/observability.go:146-158` —— `IsTimeoutError` 是 Go 侧**唯一** `errors.Is(err, context.DeadlineExceeded)` 的公共处理点（`:150` `errors.Is` / `:153` `codes.DeadlineExceeded` / `:157` `netErr.Timeout()`），且**只做可观测性判定、不产码** |
+| **RAG 侧出处（已核实）** | ① `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/advice/GlobalExceptionHandler.java:83`（`mapRPCStatusToCode`）＋ **`:90`（default → 1015）**<br>② `service/users/user/user-api/src/main/java/com/rag/users/user/api/advice/GlobalExceptionHandler.java:153` ＋ **`:162`（default → 1015）** |
+| **建议修法（两侧都应是 Y）** | ① javadoc 的「Go 出处」段**逐条补上上述 `文件:行号`**（指向**消费点**而非声明点，§3.3.1-3）；② **改正归因措辞** —— 1015 来自 **api logic 的 `switch st.Code()` default 分支**，不是「go-zero 的错误映射」；③ 保留原结论（`DEADLINE_EXCEEDED` 未被单列 ⇒ 落 default ⇒ 1015 ⇒ **api 层无需改动**）—— 该结论经上表 Go/RAG 两侧行号**证实成立** |
+| **证据强度** | **L1 源码对照**（Go 侧行号已逐条核实存在）＋ RAG 侧行号已核实 ⇒ **满足正式派单的「Go 侧行号必须真实存在」前置** |
+| **落码影响面** | **纯 javadoc** ⇒ 零字节码变化 ⇒ 编译面不受影响；⚠️ 需在回执里说明「全量 2411 对纯 javadoc 改动无增量信息」的取舍，或按 C2 仍跑一次作为共享层复验窗口 |
+| **是否阻塞本波** | **否** ⇒ 进 G4 排期（等正式派单到达后落码） |
+
 ## 5. 交付物清单
 
 - [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
