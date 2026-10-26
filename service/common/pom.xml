@@ -469,10 +469,71 @@
             <artifactId>lombok</artifactId>
             <scope>provided</scope>
         </dependency>
+        <!-- ============ 3c. MyBatis-Plus（**仅 test 作用域** · 2026-10-27 新增）============ -->
+        <!--
+            用途：让本模块的守门能证明「**MyBatis-Plus 自动收集容器内的 `Interceptor[]` Bean**」
+            这条机制**真的生效**（AGENTS.md §3.3：注解存在 ≠ 机制生效 ⇒ 必须有运行证据）。
+
+            ⚠️ **为什么 scope 必须是 test（而不是 3b 段明令禁止的 compile）**：
+            3b 段禁止 mybatis-plus-boot-starter 的理由是「starter 会带 MybatisPlusAutoConfiguration，
+            把所有依赖本模块的服务（含纯 gRPC 进程与无数据源的 api 模块）都拖进自动配置扫描范围」。
+            而 **test 作用域不传递给下游**（Maven 语义：test 依赖不可传递）
+            ⇒ ⇒ 下游 16 个组件的编译期与运行期 classpath **完全不受影响**
+            ⇒ ⇒ 3b 段的顾虑**在 test 作用域下不成立** ⇒ 这正是把这条机制钉死在共享层的唯一可行落点
+            （写在某个域的 rpc 模块里 ⇒ 就变成「那个域的证据」，不是「全仓的证据」）。
+
+            ⚠️ **版本必须与生产一致**：mybatis-plus 由根 pom 的 `mybatis-plus-bom`（3.5.17）管、
+            mybatis 本体由根 pom 显式锁 3.5.19 ⇒ ⇒ 本模块的测试解析到的
+            **与 10 个 rpc 组件运行时解析到的完全一致** ⇒ ⇒ 不会出现「同一个 Executor 接口被加载两份、
+            拦截器的 type/signature 匹配静默失效」（3b 段的告诫）。
+
+            ⚠️ **实测前提（javap，2026-10-27）**：MP 3.5.17 的 `MybatisPlusAutoConfiguration`
+            构造器收 `ObjectProvider<org.apache.ibatis.plugin.Interceptor[]>` ⇒ ⇒ 它**确实**会把容器内
+            全部 `Interceptor` Bean 收集起来交给 `SqlSessionFactoryBean.setPlugins(...)`。
+            ⚠️ 该类在 **3.5.17 里位于 `mybatis-plus-spring-boot3-starter` jar 内**（不在 autoconfigure jar），
+            且 **3.5.5 与 3.5.17 的包结构不同** ⇒ ⇒ 结论必须在**项目实际使用的版本**上验证，不能拿旧版推。
+        -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- 真 PostgreSQL（守门要真 PG，不是 H2 替身）—— 版本由 spring-boot-starter-parent 的 BOM 管 -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
+
 
     <build>
         <plugins>
+            <!--
+                关掉 Ryuk：Testcontainers 2.x 的 ResourceReaper 读的是**环境变量**
+                System.getenv("TESTCONTAINERS_RYUK_DISABLED")，testcontainers.properties 与 -D 无效，
+                只有 surefire 注入 env 才有效（同 message-rpc / like-rpc / article-rpc 的实测结论）。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
