@@ -71,7 +71,47 @@ LEDGER_FILES = {
     ],
 }
 
+# ──────────────────────────────────────────────────────────────────────────
+# **域配置**（2026-10-26 第三十五轮 · users/user 域实测带出）
+# ──────────────────────────────────────────────────────────────────────────
+# 🔴 **为什么需要这张表**：第 2/3 层原先把「已修断言清单 / 台账路径 / surefire 模块名 /
+#    漂移编号前缀 / commit 清单表」**全部写死成 task 域**
+#    ⇒ `--domain users` 的第 2/3 层输出与 `--domain task` **完全相同**
+#    ⇒ 读者会把 **task 域的缺陷当成自己域的** ⇒ **结论不可用**
+#    （users/user 域实测：三个 `--domain` 的第 2 层都是「10/10 OK（断言全是 task 域）」、
+#      第 3 层都是「实测 task-rpc / task-api」⇒ 域筛选**根本没传到这两层**）
+#
+# ⇒ 口径：某个域**没有**配置 ⇒ 该层**明确打印「⏭ 不适用于本域」并跳过**
+#    （**不是「通过」** —— 沉默地跳过同样会让人以为查过了）。
+#
+# ⚠️ 本表只登记**本仓真实存在**的域配置；users / users-admin 域的台账格式
+#    （`DRIFT-USERRPC-V-001` 这类前缀、无「## 一、已修（N 条）」标题、无 commit 清单表）
+#    与 task 域**没有共同点** ⇒ ⇒ 它们的第 2/3 层判据**尚未定义** ⇒ 本轮先显式跳过。
+DOMAIN_CFG = {
+    'task': {
+        # 第 2 层的「已修断言」清单（只覆盖 task 域）
+        'claims': 'task',
+        # 第 3 层要读的三份台账
+        'readme': 'docs/DRIFT/task/_README.md',      # commit 清单表 + 域自述分支
+        'api_md': 'docs/DRIFT/task/api.md',
+        'pit_md': 'docs/Pitfalls/task/rpc.md',
+        'dev_md': 'docs/Intentional_Deviations/task/rpc.md',
+        # surefire 实测模块（rpc 侧、api 侧）
+        'modules': [('task-rpc', 'rpc'), ('task-api', 'api')],
+        # 台账里的编号前缀
+        'drift_prefix': 'DRIFT-TASK-RPC',
+        'api_prefix': 'DRIFT-TASK-API',
+        'pit_prefix': 'PITFALL-TASK-RPC',
+        'dev_prefix': r'SD-\d{4}-\d{2}-\d{2}-TASK-\d{2}',
+    },
+}
+
 # 第三方库：版本取自**真源 go.mod**（不是本地碰巧有的版本）
+# ⚠️ **这张表只作兜底** —— 权威是**真源 `go.mod`**（`_go_mod_requires()` 动态解析，
+#    含 `// indirect`）⇒ 详见第三十四轮 E51。users/user 域实测：真源 go.mod 第 28 行
+#    明写 `gorm.io/gorm v1.31.1`（**直接依赖**）⇒ 而这张表**没有 gorm**
+#    ⇒ 凡引用 gorm 出处的台账**一律判「在真源与全部第三方库里都找不到」** ⇒ **假 FAIL**。
+#    （`gorm.io` 是**带斜杠的模块路径**，不是 `go-redis` 那种单段名 ⇒ 补表时须单独处理。）
 THIRD_PARTY = {
     'goka': 'github.com/lovoo/goka@v1.1.16',
     'kafka-go': 'github.com/segmentio/kafka-go@v0.4.47',
@@ -80,6 +120,10 @@ THIRD_PARTY = {
     'go-redis': 'github.com/redis/go-redis/v9@v9.20.0',
     'sarama': 'github.com/IBM/sarama@v1.43.3',
 }
+
+# 第 2 层的「已修断言」清单 —— **按域索引**
+# ⚠️ 原来只有一个**写死 task 域**的列表 ⇒ 别的域跑这一层，拿到的是 **task 域的结论**。
+CLAIMS_BY_DOMAIN = {}   # 由下方 CLAIMS 定义后填充（见 CLAIMS_BY_DOMAIN 的构造处）
 
 # 台账断言 → 仓库里应当存在的证据（路径、必须出现的正则、最少出现次数、禁止出现的正则）
 CLAIMS = [
@@ -114,6 +158,12 @@ CLAIMS = [
      'service/task/task-rpc/src/main/resources/application.yml',
      r'baseline-version:\s*0', 1, None),
 ]
+
+# 🔴 **第 2 层的断言清单必须按域索引**（第三十五轮 · users/user 域实测带出）——
+#    原来只有一个**写死 task 域**的列表 ⇒ 别的域跑第 2 层 ⇒ 拿到的是 **task 域的结论**
+#    ⇒ 读者会把 task 域的缺陷当成自己域的 ⇒ **结论不可用**。
+#    ⇒ 某个域**没有**清单 ⇒ 该层**明确打印「⏭ 不适用于本域」并跳过**（**不是「通过」**）。
+CLAIMS_BY_DOMAIN['task'] = CLAIMS
 
 PATH_RE = re.compile(r'(?:service|tools|docs)/[A-Za-z0-9_./-]+\.(?:java|md|py|sh|yml|MD|json)')
 CLASS_RE = re.compile(r'`([A-Z][A-Za-z0-9]*(?:Test|ContractTest|GateTest))\b')
@@ -449,12 +499,22 @@ def layer1_paths(root, texts, go_root=DEFAULT_GO_ROOT):
     return len(missing)
 
 
-def layer2_claims(root):
+def layer2_claims(root, domain):
     print('=' * 78)
     print('第 2 层 · 台账「已修」断言 → 仓库里能不能查到对应物')
     print('=' * 78)
+    # 🔴 **必须按域取断言清单**（第三十五轮 · users/user 域实测带出）——
+    #    原来这一层**完全没有域参数** ⇒ `--domain users` 跑出来的第 2 层
+    #    **仍然是 task 域的结论**（实测：三个域的输出都是「10/10 OK（断言全是 task 域）」）
+    #    ⇒ 读者会把 **task 域的缺陷当成自己域的** ⇒ **结论不可用**。
+    #    ⇒ 某个域**没有**清单 ⇒ 明确打印「⏭ 不适用于本域」并跳过（**不是「通过」**）。
+    claims = CLAIMS_BY_DOMAIN.get(domain)
+    if not claims:
+        print(f'  ⏭ 本层的「已修断言」清单只覆盖 {sorted(CLAIMS_BY_DOMAIN)} 域'
+              f' ⇒ **{domain} 域不适用**（⚠️ 不是「通过」—— 是「没查」）')
+        return 0
     bad = 0
-    for desc, path, must_re, min_count, forbid_re in CLAIMS:
+    for desc, path, must_re, min_count, forbid_re in claims:
         target = os.path.join(root, path)
         files = []
         if os.path.isdir(target):
@@ -486,7 +546,7 @@ def layer2_claims(root):
             print(f'    ✅ OK       {desc}  (代码 0 处 / 注释 {in_comment} 处[反面教材])')
             continue
         print(f'    ✅ OK       {desc}  (匹配 {n} 处)')
-    print(f'  ⇒ {len(CLAIMS) - bad}/{len(CLAIMS)} 条断言有对应物')
+    print(f'  ⇒ {len(claims) - bad}/{len(claims)} 条断言有对应物')
     return bad
 
 
@@ -540,22 +600,76 @@ def commit_manifest_rows(text):
     return rows
 
 
-def check_commit_manifest(hashes, head, rows):
-    """台账 commit 清单 vs 分支 commit 列表。
+def _git_rc(root, *args):
+    """git 命令的**退出码**（不取输出）"""
+    return subprocess.run(['git'] + list(args), cwd=root,
+                          capture_output=True).returncode
 
-    返回 (problems, notes)：problems = 人类可读的缺陷描述（空 ⇒ 通过）。
-    ⚠️ 纯函数（不碰磁盘）⇒ 可以用**人造样本**验证它有区分力（第 0 层自检）。
+
+def _commit_exists(root, h):
+    """该哈希是不是仓库里**真实存在**的 commit"""
+    return _git_rc(root, 'cat-file', '-e', f'{h}^{{commit}}') == 0
+
+
+def _repo_topo_order(root):
+    """仓库里所有 commit 的拓扑序（**一次** git 调用 ⇒ 452 个 commit 约 70ms）。
+
+    ⚠️ `--topo-order` 输出是**新 → 旧** ⇒ 下标越大 = 越老。
+    """
+    return [h[:7] for h in
+            git(root, 'rev-list', '--topo-order', '--all').splitlines()]
+
+
+def manifest_chain(root, keys):
+    """登记的 commit 哈希 ⇒ 它们在 git 里的**祖先链**。
+
+    返回 `(oldest, newest, span_keys)`；不构成一条链时返回 `(None, None, None)`。
+
+    🔴 **为什么不能用「与主干的公共祖先」当窗口**（第三十五轮 · users/user 域实测带出）——
+    原口径是 `merge-base HEAD do-my-own-gh` ⇒ **主干上 `HEAD == do-my-own-gh`**
+    ⇒ 公共祖先 == HEAD ⇒ `rev-list HEAD..HEAD` = **空** ⇒ 44 个登记哈希**全部**被判
+    「不在本分支上」+ 1 条行数不守恒 = **45 处假阳性** ⇒ ⇒ **一个恒红的守门等于没有守门**。
+    ⇒ **改成「登记的哈希自己构成的链」** ⇒ **不依赖任何分支** ⇒ 跨分支一致。
+
+    @param keys  登记的哈希（7 位前缀）列表
+    """
+    keys = [k[:7] for k in keys if k]
+    if not keys:
+        return None, None, None
+    order = _repo_topo_order(root)
+    pos = {h: i for i, h in enumerate(order)}
+    if any(k not in pos for k in keys):
+        return None, None, None          # 有哈希不在这份拓扑序里（不存在 / 悬空）
+    # `--topo-order` 是**新 → 旧** ⇒ 下标最大 = 最老
+    oldest = max(keys, key=lambda k: pos[k])
+    newest = min(keys, key=lambda k: pos[k])
+    # ⚠️ `--no-merges` 与原窗口口径保持一致（实测 task 域区间内无 merge ⇒ 两种口径同值）
+    span = git(root, 'rev-list', '--abbrev-commit', '--no-merges',
+               f'{oldest}^..{newest}').splitlines()
+    if not span:
+        # oldest 是根提交（没有父）⇒ `^..` 退化 ⇒ 退回 `..` 并把 oldest 补回去
+        span = [oldest] + git(root, 'rev-list', '--abbrev-commit', '--no-merges',
+                               f'{oldest}..{newest}').splitlines()
+    return oldest, newest, {s[:7] for s in span}
+
+
+def check_manifest_integrity(root, rows):
+    """台账 commit 清单的**域无关**判据（**不依赖任何分支口径**）。
+
+    ① 占位符残留（只允许 1 个，且必须在末尾）
+    ② 同一个 commit 被写成多行
+    ③ 登记的哈希在仓库里**必须存在**（抓「台账引述了一个不存在的 SHA」）
+    ④ 登记的哈希必须构成**连续祖先链**（区间内零漏零多 ⇒ 抓「跳号漏登」与「多登」）
+
+    返回 (problems, notes)。
     """
     problems, notes = [], []
     hash_rows = [r for r in rows if HASH_RE.match(r)]
     ph_rows = [r for r in rows if PLACEHOLDER in r]
-    # ⚠️ 一律按 **7 位前缀**比较：台账里可能写 7 位、git 也可能给 7 位，长度不一致会误判
     keys = [r[:7] for r in hash_rows]
     dedup = set(keys)
-    hashes7 = {h[:7] for h in hashes}
-    head7 = head[:7]
 
-    # ① 占位符残留：只允许 1 个（那是「刚写完、还没提交」的这一轮），且必须在清单末尾
+    # ① 占位符残留
     if len(ph_rows) > 1:
         problems.append(f'commit 清单里有 **{len(ph_rows)} 个占位符行**（只允许 1 个）'
                         f'⇒ 读者无法知道它们各自对应哪个 commit')
@@ -569,49 +683,78 @@ def check_commit_manifest(hashes, head, rows):
         problems.append(f'commit `{h}` 被登记了 **{keys.count(h)} 行**'
                         f' ⇒ 读者会把 1 个 commit 误读成 {keys.count(h)} 个')
 
-    # ③ 漏登记：只允许 HEAD 那一个未登记（它此刻还没有哈希）
-    missing = sorted(hashes7 - dedup)
-    for h in missing:
-        if h != head7:
-            problems.append(f'commit `{h}` **完全没登记**（既不在清单里，也不是 HEAD）')
+    # ③ 登记的哈希必须真实存在
+    if dedup:
+        ghost = sorted(h for h in dedup if not _commit_exists(root, h))
+        if ghost:
+            problems.append(f'commit 清单里登记了 **{len(ghost)} 个仓库里不存在的哈希**'
+                            f'（读者点进去是空的）: {ghost[:5]}')
+        else:
+            notes.append(f'登记的 {len(dedup)} 个哈希在仓库里**全部存在**')
 
-    # ④ 登记了不在本分支上的 commit（陈旧 / 串分支的登记）
-    for h in sorted(dedup - hashes7):
-        problems.append(f'commit 清单里登记了 `{h}`，但它**不在本分支上** ⇒ 陈旧登记')
-
-    # ⑤ 守恒：登记行数（去重哈希 + 占位）必须与 commit 数对上
-    #    提交后：HEAD 还没登记 ⇒ 行数 == commit 数
-    #    提交前：HEAD 已登记 + 1 个占位 ⇒ 行数 == commit 数 + 1
-    total_rows = len(dedup) + len(ph_rows)
-    expected = len(hashes7) + (1 if head7 in dedup else 0)
-    if total_rows != expected:
-        problems.append(f'commit 清单**行数不守恒**：登记 {total_rows} 行'
-                        f'（去重哈希 {len(dedup)} + 占位 {len(ph_rows)}），'
-                        f'但分支有 {len(hashes7)} 个 commit ⇒ 期望 {expected} 行')
-
-    if head7 in dedup:
-        state = (f'提交前（HEAD 已登记 ⇒ 本次提交将产生第 {len(hashes7) + 1} 个哈希）')
-    else:
-        state = '提交后（HEAD 尚未登记 ⇒ 等下一次补登）'
-    notes.append(f'分支 {len(hashes7)} 个 commit / 登记 {total_rows} 行'
-                 f'（去重哈希 {len(dedup)} + 占位 {len(ph_rows)}）· '
-                 f'状态：{state}')
+    # ④ 登记的哈希必须构成连续祖先链
+    if dedup:
+        old, new, span = manifest_chain(root, sorted(dedup))
+        if old is None:
+            problems.append('登记的哈希**无法构成一条祖先链**'
+                            '（有哈希不在这份仓库的拓扑序里 ⇒ 登记了不存在的 commit）')
+        else:
+            missing = sorted(span - dedup)
+            extra = sorted(dedup - span)
+            if missing or extra:
+                problems.append(f'登记的 commit **不构成连续链**：区间 `{old}..{new}` '
+                                f'共 {len(span)} 个 commit，登记 {len(dedup)} 个 '
+                                f'⇒ 漏登 {len(missing)} 个 / 多登 {len(extra)} 个'
+                                + (f'（漏登示例 {missing[:3]}）' if missing else '')
+                                + (f'（多登示例 {extra[:3]}）' if extra else '')
+                                + '（⚠️ 若该域台账登记的是**多条分支**的 commit '
+                                  '⇒ 需按分支拆开登记，否则本判据不适用）')
+            else:
+                notes.append(f'登记的 {len(dedup)} 个 commit 构成**连续链**'
+                             f'（`{old}..{new}` 区间零漏零多）')
     return problems, notes
 
 
-def layer3_numbers(root, texts):
+def check_manifest_unregistered(hashes, keys):
+    """「分支上有、台账没登记」的 commit（**分支相关** ⇒ 只在域与分支自洽时启用）。
+
+    返回 (problems, notes)。纯函数 ⇒ 可用人造样本验证它有区分力。
+    """
+    problems, notes = [], []
+    dedup = {k[:7] for k in keys}
+    missing = sorted({h[:7] for h in hashes} - dedup)
+    for h in missing:
+        problems.append(f'commit `{h}` **完全没登记**（既不在清单里，也不是 HEAD）')
+    if not missing:
+        notes.append(f'窗口内 {len({h[:7] for h in hashes})} 个 commit 全部已登记')
+    return problems, notes
+
+
+def layer3_numbers(root, texts, domain):
     print('=' * 78)
     print('第 3 层 · 数字断言（实测 vs 台账）')
     print('=' * 78)
-    rpc = surefire_counts(root, 'task-rpc')
-    api = surefire_counts(root, 'task-api')
+    # 🔴 **必须按域取配置**（第三十五轮 · users/user 域实测带出）——
+    #    原来这一层把「surefire 模块名 / 台账路径 / 编号前缀 / commit 清单表」**全写死成 task 域**
+    #    ⇒ `--domain users` 跑出来的第 3 层**仍然是 task 域的结论**
+    #    ⇒ 读者会把 task 域的缺陷当成自己域的 ⇒ **结论不可用**。
+    cfg = DOMAIN_CFG.get(domain)
+    if cfg is None:
+        print(f'  ⏭ 本层的判据**尚未为 `{domain}` 域定义**（台账格式不同：'
+              f'编号前缀 / 章节结构 / commit 清单表都不一样）')
+        print(f'     ⇒ **{domain} 域本层不适用**（⚠️ 不是「通过」—— 是「没查」）')
+        print(f'     ⇒ 已定义的域：{sorted(DOMAIN_CFG)}')
+        return 0
+    modules = cfg['modules']
+    rpc = surefire_counts(root, modules[0][0])
+    api = surefire_counts(root, modules[1][0])
     txt = ''.join(texts.values())
     bad = 0
 
     if rpc:
-        print(f'  实测 task-rpc: {rpc}')
+        print(f'  实测 {modules[0][0]}: {rpc}')
     if api:
-        print(f'  实测 task-api: {api}')
+        print(f'  实测 {modules[1][0]}: {api}')
 
     m = re.search(r'\*\*(\d+) tests / 0 failures / 0 errors / 0 skipped\*\*', txt)
     claimed = int(m.group(1)) if m else None
@@ -621,29 +764,29 @@ def layer3_numbers(root, texts):
         bad += 0 if good else 1
         print(f'  {"✅" if good else "❌"} rpc.md 测试数: 台账 {claimed} / 实测 {actual}')
 
-    a = re.search(r'已修 \| \*\*(\d+) 条\*\*（DRIFT-TASK-RPC', txt)
+    a = re.search(r'已修 \| \*\*(\d+) 条\*\*（' + cfg['drift_prefix'], txt)
     b = re.search(r'## 一、已修（(\d+) 条）', txt)
     if a and b:
         good = a.group(1) == b.group(1)
         bad += 0 if good else 1
         print(f'  {"✅" if good else "❌"} 已修条数两处一致: §〇={a.group(1)} §一标题={b.group(1)}')
 
-    ids = sorted(set(int(x) for x in re.findall(r'DRIFT-TASK-RPC-(\d{3})', txt)))
+    ids = sorted(set(int(x) for x in re.findall(cfg['drift_prefix'] + r'-(\d{3})', txt)))
     if ids:
         good = ids == list(range(1, len(ids) + 1))
         bad += 0 if good else 1
-        print(f'  {"✅" if good else "❌"} DRIFT-TASK-RPC 编号连续: {ids}')
+        print(f'  {"✅" if good else "❌"} {cfg["drift_prefix"]} 编号连续: {ids}')
 
     # ⚠️ **api 域要单独查** —— §〇 的「已修 N 条」与 §一 的实际条数必须对得上
     #    （本轮实测抓到过：api.md §〇 写「已修 3 条」而 §一 标题写「已修（2 条）」，
     #      而 §一 下面实际有 4 条 ⇒ **标题与内容不符**）
-    api_md = read(os.path.join(root, 'docs/DRIFT/task/api.md'))
+    api_md = read(os.path.join(root, cfg['api_md']))
     if api_md:
-        m_fixed = re.search(r'已修 \| \*\*(\d+) 条\*\*（DRIFT-TASK-API', api_md)
+        m_fixed = re.search(r'已修 \| \*\*(\d+) 条\*\*（' + cfg['api_prefix'], api_md)
         # ⚠️ 标题的措辞会变（「已修（N 条）」/「逐条对照（N 条：…）」）
         #    ⇒ 只抓「## 一、…（N 条」里的那个 N，**不要**锚定具体措辞
         m_sec = re.search(r'^## 一、[^\n（]*（(\d+) 条', api_md, re.M)
-        m_items = len(re.findall(r'^### .*DRIFT-TASK-API-\d{3}', api_md, re.M))
+        m_items = len(re.findall(r'^### .*' + cfg['api_prefix'] + r'-\d{3}', api_md, re.M))
         if m_sec and m_items:
             good = int(m_sec.group(1)) == m_items
             bad += 0 if good else 1
@@ -651,37 +794,37 @@ def layer3_numbers(root, texts):
         elif m_items:
             print(f'  ⚠️ api.md §一 标题里没解析出条数（实际小节 {m_items} 个）⇒ 标题措辞可能又变了')
         if m_fixed:
-            ids_api = sorted(set(int(x) for x in re.findall(r'DRIFT-TASK-API-(\d{3})', api_md)))
+            ids_api = sorted(set(int(x) for x in re.findall(cfg['api_prefix'] + r'-(\d{3})', api_md)))
             if ids_api:
                 good = ids_api == list(range(1, len(ids_api) + 1))
                 bad += 0 if good else 1
-                print(f'  {"✅" if good else "❌"} DRIFT-TASK-API 编号连续: {ids_api}')
+                print(f'  {"✅" if good else "❌"} {cfg["api_prefix"]} 编号连续: {ids_api}')
 
     # ── 三档台账的**编号连续性**与**悬空引用**（「最全」维度）──
     #    ⚠️ 这两项查的是「台账之间**互相引得到**」⇒ 引用一个不存在的编号 = 读者点进去是空的
     all_text = '\n'.join(texts.values())
-    pit_text = read(os.path.join(root, 'docs/Pitfalls/task/rpc.md'))
+    pit_text = read(os.path.join(root, cfg['pit_md']))
     if pit_text:
         # ⚠️ Pitfall 的编号是**两位**（`PITFALL-TASK-RPC-01`），不是 DRIFT 的三位
         #    ⇒ 正则用 `\d{2,3}`，且「已定义」直接取**文件里出现过的字符串**
         #    （不按序号重建 —— 重建会在位数不一致时错判）
-        ids = sorted(set(int(x) for x in re.findall(r'PITFALL-TASK-RPC-(\d{2,3})', pit_text)))
+        ids = sorted(set(int(x) for x in re.findall(cfg['pit_prefix'] + r'-(\d{2,3})', pit_text)))
         good = bool(ids) and ids == list(range(1, len(ids) + 1))
         bad += 0 if good else 1
-        print(f'  {"✅" if good else "❌"} PITFALL-TASK-RPC 编号连续: '
+        print(f'  {"✅" if good else "❌"} {cfg["pit_prefix"]} 编号连续: '
               f'{ids[0]}~{ids[-1]}（{len(ids)} 条）')
-        defined = set(re.findall(r'PITFALL-TASK-RPC-\d{2,3}', pit_text))
-        refs = set(re.findall(r'PITFALL-TASK-RPC-\d{2,3}', all_text))
+        defined = set(re.findall(cfg['pit_prefix'] + r'-\d{2,3}', pit_text))
+        refs = set(re.findall(cfg['pit_prefix'] + r'-\d{2,3}', all_text))
         dangling = sorted(refs - defined)
         if dangling:
             bad += 1
             print(f'  ❌ 台账引用了**不存在**的 Pitfall: {dangling}')
         else:
             print(f'  ✅ 台账引用的 {len(refs)} 个 Pitfall ID 全部有定义')
-    sd_text = read(os.path.join(root, 'docs/Intentional_Deviations/task/rpc.md'))
+    sd_text = read(os.path.join(root, cfg['dev_md']))
     if sd_text:
-        defined = set(re.findall(r'SD-\d{4}-\d{2}-\d{2}-TASK-\d{2}', sd_text))
-        refs = set(re.findall(r'SD-\d{4}-\d{2}-\d{2}-TASK-\d{2}', all_text))
+        defined = set(re.findall(cfg['dev_prefix'], sd_text))
+        refs = set(re.findall(cfg['dev_prefix'], all_text))
         dangling = sorted(refs - defined)
         if dangling:
             bad += 1
@@ -690,7 +833,7 @@ def layer3_numbers(root, texts):
             print(f'  ✅ 台账引用的 {len(refs)} 个签字偏离 ID 全部有定义'
                   f'（偏离档共定义 {len(defined)} 条）')
 
-    for name, r in (('task-rpc', rpc), ('task-api', api)):
+    for name, r in ((modules[0][0], rpc), (modules[1][0], api)):
         if r:
             good = r['failures'] == 0 and r['errors'] == 0 and r['skipped'] == 0
             bad += 0 if good else 1
@@ -698,32 +841,58 @@ def layer3_numbers(root, texts):
             if not good:
                 print(f'       ⚠️ skipped={r["skipped"]} ⇒ 「全绿」可能意味着「没跑」')
 
-    # commit 清单的「**一一对应**」检查（不是比对写死的计数 —— 那个必然自指滞后）
-    #   不变式：台账 commit 清单的**每一行**对应**恰好一个**分支 commit
-    #   ⇒ 漏登记 / 占位符残留 / 同一个 commit 多行 / 行数不守恒 —— 四类都立刻被抓到
+    # ── commit 清单检查：**拆成「域无关」与「分支相关」两段**（第三十五轮）──
+    #   🔴 **原口径的根因**：`merge_base = git(root,'merge-base','HEAD','do-my-own-gh')`
+    #      ⇒ **主干上 `HEAD == do-my-own-gh`** ⇒ 公共祖先 == HEAD ⇒ 窗口 = **空**
+    #      ⇒ 44 个登记哈希**全部**被判「不在本分支上」+ 1 条行数不守恒 = **45 处假阳性**
+    #      ⇒ 而在 `align/global` 上窗口非空 ⇒ 变成**反向**的 141 处假阳性
+    #      ⇒ ⇒ **一个恒红 / 恒漂的门禁等于没有门禁**。
+    #   ✅ **新口径**：
+    #      ① **域无关**（任何分支都跑）：占位符残留 / 同一 commit 多行 /
+    #         登记的哈希**必须存在** / 登记的哈希必须构成**连续祖先链**
+    #      ② **分支相关**（只在「当前分支 == 台账自述的分支」时启用）：漏登记
+    #         ⇒ 因为「别的域的 commit 该不该被本域登记」**是台账作者的口径，工具判不了**
     branch = git(root, 'rev-parse', '--abbrev-ref', 'HEAD')
-    merge_base = git(root, 'merge-base', 'HEAD', 'do-my-own-gh')
-    if merge_base:
-        hashes = git(root, 'rev-list', '--abbrev-commit', '--no-merges',
-                     f'{merge_base}..HEAD').splitlines()
-        hashes = [h.strip() for h in hashes if h.strip()]
-        head = git(root, 'rev-parse', '--short=7', 'HEAD')
-        readme = read(os.path.join(root, 'docs/DRIFT/task/_README.md'))
-        rows = commit_manifest_rows(readme)
-        problems, notes = check_commit_manifest(hashes, head, rows)
+    readme = read(os.path.join(root, cfg['readme']))
+    rows = commit_manifest_rows(readme)
+    if not rows:
+        print(f'  ℹ️  {cfg["readme"]} 里**没有 commit 清单表** ⇒ commit 清单检查不适用')
+    else:
+        problems, notes = check_manifest_integrity(root, rows)
         for n in notes:
             print(f'  ℹ️  {n}')
+
+        # ── ② 分支相关判据：只在「当前分支 == 台账自述的分支」时启用 ──
+        m_branch = re.search(r'分支\s*`([^`]+)`', readme)
+        declared = m_branch.group(1) if m_branch else None
+        if declared and declared != branch:
+            print(f'  ⏭ 台账自述的分支是 `{declared}`，当前分支是 `{branch}`'
+                  f' ⇒ **漏登记检查不适用**（⚠️ 不是「通过」—— 在别人的分支上，'
+                  f'别的域的 commit 本来就不该被本域登记）')
+        elif not declared:
+            print(f'  ⏭ 台账里**没有自述分支** ⇒ 漏登记检查不适用（⚠️ 不是「通过」）')
+        else:
+            old, new, span = manifest_chain(root, sorted(
+                {r[:7] for r in rows if HASH_RE.match(r)}))
+            if old is None or new is None:
+                print('  ⏭ 登记的哈希无法构成链 ⇒ 漏登记检查不适用')
+            else:
+                window = [h.strip() for h in git(
+                    root, 'rev-list', '--abbrev-commit', '--no-merges',
+                    f'{new}..HEAD').splitlines() if h.strip()]
+                p2, n2 = check_manifest_unregistered(
+                    window, [r[:7] for r in rows if HASH_RE.match(r)])
+                for n in n2:
+                    print(f'  ℹ️  {n}')
+                problems += p2
+
         if problems:
             bad += len(problems)
-            print(f'  ❌ commit 清单有 {len(problems)} 处缺陷'
-                  f'（分支 {branch}，共 {len(hashes)} 个 commit）：')
+            print(f'  ❌ commit 清单有 {len(problems)} 处缺陷（分支 {branch}）：')
             for p in problems:
                 print(f'      · {p}')
         else:
-            print(f'  ✅ commit 清单与分支**一一对应**'
-                  f'（{len(hashes)} 个 commit = 登记 {len(rows)} 行）')
-    else:
-        print('  ⚠️  未找到主干分叉点 ⇒ 跳过 commit 覆盖检查')
+            print(f'  ✅ commit 清单检查通过（分支 {branch}，登记 {len(rows)} 行）')
     return bad
 
 
@@ -1308,29 +1477,104 @@ def layer0_selfcheck(root):
         bad += 1
 
 
-    # ③′ 层 3（新）：commit 清单「一一对应」判据 —— 四类缺陷必须都能被抓到
-    #    ⚠️ 用**人造样本**做阳性对照：正常样本必须**不报**，坏样本必须**报**
-    #    （否则「全绿」只是「什么都没查」—— 本轮实测：8 行占位符一路绿灯）
-    H = ['aaa1111', 'bbb2222', 'ccc3333']
-    HEAD = 'ccc3333'
-    p_good, _ = check_commit_manifest(H, HEAD, ['aaa1111', 'bbb2222', '（本轮）'])
-    if p_good:
-        print(f'    ❌ 层 3 新判据**误报**：正常样本被判有缺陷 ⇒ {p_good}')
-        bad += 1
+    # ③′ 层 3（第三十五轮重写）：commit 清单判据 —— **域无关**与**分支相关**两段都要有区分力
+    #    ⚠️ 域无关判据需要**真 git**（算链）⇒ 用**真台账 + 真仓库**做对照
+    _readme_text = read(os.path.join(root, 'docs/DRIFT/task/_README.md'))
+    _rows = commit_manifest_rows(_readme_text)
+    _hash_rows = [r for r in _rows if HASH_RE.match(r)]
+    _p, _n = check_manifest_integrity(root, _rows)
+    if not _p:
+        print(f'    ✅ 层 3 的 commit 清单**域无关判据**不误报'
+              f'（真台账 {len(_rows)} 行通过）')
     else:
-        print('    ✅ 层 3 新判据不误报（正常样本通过）')
-    for label, rows in [
-        ('占位符残留', ['aaa1111', '（本轮）', '（本轮）']),
-        ('同一个 commit 多行', ['aaa1111', 'aaa1111', '（本轮）']),
-        ('登记行数不守恒', ['aaa1111', 'bbb2222']),
-        ('漏登记（非 HEAD）', ['bbb2222', '（本轮）']),
-    ]:
-        p, _ = check_commit_manifest(H, HEAD, rows)
-        if p:
-            print(f'    ✅ 层 3 新判据能抓到「{label}」')
+        print(f'    ❌ 层 3 的 commit 清单域无关判据**误报** ⇒ {_p}')
+        bad += 1
+    # ① 占位符残留（多一个）
+    _p1, _ = check_manifest_integrity(root, _rows + ['（本轮）'])
+    if any('占位符行' in x for x in _p1):
+        print('    ✅ 层 3 能抓到「占位符残留」')
+    else:
+        print(f'    ❌ 层 3 **抓不到**「占位符残留」⇒ 变异测试没意义（{_p1}）')
+        bad += 1
+    # ② 同一个 commit 被写成多行
+    if _hash_rows:
+        _p2, _ = check_manifest_integrity(root, _rows + [_hash_rows[0]])
+        if any('被登记了' in x for x in _p2):
+            print('    ✅ 层 3 能抓到「同一个 commit 多行」')
         else:
-            print(f'    ❌ 层 3 新判据**抓不到**「{label}」⇒ 变异测试没意义')
+            print(f'    ❌ 层 3 **抓不到**「同一个 commit 多行」（{_p2}）')
             bad += 1
+    # ③ 登记了一个**仓库里不存在**的哈希
+    _p3, _ = check_manifest_integrity(root, _rows + ['deadbee'])
+    if any('不存在的哈希' in x for x in _p3):
+        print('    ✅ 层 3 能抓到「登记了不存在的 commit」')
+    else:
+        print(f'    ❌ 层 3 **抓不到**「登记了不存在的 commit」（{_p3}）')
+        bad += 1
+    # ④ 链断裂（删掉链**中间**的一行 ⇒ 区间里就多出一个没登记的 commit）
+    if len(_hash_rows) >= 3:
+        _mid = _hash_rows[len(_hash_rows) // 2]
+        _rows_no_mid = [r for r in _rows if r != _mid]
+        _p4, _ = check_manifest_integrity(root, _rows_no_mid)
+        if any('不构成连续链' in x for x in _p4):
+            print('    ✅ 层 3 能抓到「链断裂（跳号漏登）」')
+        else:
+            print(f'    ❌ 层 3 **抓不到**「链断裂」（{_p4}）')
+            bad += 1
+    # ⑤ 分支相关段：漏登记（纯函数）
+    _p5, _ = check_manifest_unregistered(['aaa1111', 'bbb2222'], ['aaa1111'])
+    if any('完全没登记' in x for x in _p5):
+        print('    ✅ 层 3 能抓到「漏登记」')
+    else:
+        print(f'    ❌ 层 3 **抓不到**「漏登记」（{_p5}）')
+        bad += 1
+    _p6, _ = check_manifest_unregistered(['aaa1111'], ['aaa1111'])
+    if not _p6:
+        print('    ✅ 层 3 的漏登记判据不误报（已登记的不报）')
+    else:
+        print(f'    ❌ 层 3 的漏登记判据**误报** ⇒ {_p6}')
+        bad += 1
+
+    # ⑤′ 层 2/3 的**域适配**（第三十五轮 · users/user 域实测带出）：
+    #     别的域跑这两层 ⇒ 必须**显式跳过**，而不是拿 task 域的结论去报
+    #     （users/user 域实测：三个 `--domain` 的第 2/3 层输出**完全相同**
+    #      ⇒ 域筛选**根本没传到这两层** ⇒ 读者会把 task 域的缺陷当成自己域的）
+    import contextlib as _ctx35
+    import io as _io35
+    _buf = _io35.StringIO()
+    with _ctx35.redirect_stdout(_buf):
+        _b2 = layer2_claims(root, 'users')
+    if _b2 == 0 and '本层的「已修断言」清单只覆盖' in _buf.getvalue():
+        print('    ✅ 层 2 在**没有断言清单**的域上显式跳过（不拿别的域的结论去报）')
+    else:
+        print('    ❌ 层 2 在别的域上**没有显式跳过** ⇒ 报的是别的域的结论')
+        bad += 1
+    _buf = _io35.StringIO()
+    with _ctx35.redirect_stdout(_buf):
+        _b3 = layer3_numbers(root, ledger_texts(root, 'users'), 'users')
+    if _b3 == 0 and '本层的判据**尚未为' in _buf.getvalue():
+        print('    ✅ 层 3 在**没有域配置**的域上显式跳过（不拿别的域的结论去报）')
+    else:
+        print('    ❌ 层 3 在别的域上**没有显式跳过** ⇒ 报的是别的域的结论')
+        bad += 1
+
+    # ⑤″ 层 3 的**链判据必须能处理「不在当前分支上」的 commit**（第三十五轮 · E56）
+    #     ⇒ 旧口径（与主干的公共祖先）正是栽在这一点上：**主干上窗口恒空** ⇒ 45 处假阳性
+    _off = [h.strip() for h in git(root, 'rev-list', '--abbrev-commit',
+                                    'do-my-own-gh', '--not', 'HEAD').splitlines()
+            if h.strip()]
+    if _off:
+        _x = _off[0]
+        _parent = git(root, 'rev-parse', '--short=7', f'{_x}^').strip()
+        _o, _n, _sp = manifest_chain(root, [_parent, _x])
+        if _o is not None and _n == _x and len(_sp) == 2:
+            print('    ✅ 层 3 的链判据能处理**不在当前分支上**的 commit（不依赖分支口径）')
+        else:
+            print(f'    ❌ 层 3 的链判据**依赖当前分支** ⇒ 不在本分支上的 commit 判不出来'
+                  f'（{_parent} / {_x}）')
+            bad += 1
+    else:
+        print('    ⚠️ 找不到「不在当前分支上」的 commit ⇒ 该项无法自检（不算失败）')
 
     # ③″ commit 清单的**行提取**必须只认 commit 表（普通表的首列不是登记项）
     #    ⚠️ 样本里两张表**故意紧挨着**（中间无空行）—— markdown 允许这样，
@@ -1470,16 +1714,12 @@ def run_mutation_tests(root):
     #       ⇒ ⇒ 判据可逆性的正确口径是「**回到变异前**」，不是「== 0」。
     buf0 = io.StringIO()
     with contextlib.redirect_stdout(buf0):
-        baseline_layer3 = layer3_numbers(root, ledger_texts(root, 'task'))
-
-    merge_base = git(root, 'merge-base', 'HEAD', 'do-my-own-gh')
-    hashes = [h.strip() for h in git(root, 'rev-list', '--abbrev-commit',
-                                      '--no-merges', f'{merge_base}..HEAD').splitlines() if h.strip()]
-    head = git(root, 'rev-parse', '--short=7', 'HEAD')
+        baseline_layer3 = layer3_numbers(root, ledger_texts(root, 'task'), 'task')
 
     def manifest_problems():
+        """**域无关**判据（不依赖分支 ⇒ 任何分支上都有效）。"""
         rows = commit_manifest_rows(read(readme))
-        return check_commit_manifest(hashes, head, rows)[0]
+        return check_manifest_integrity(root, rows)[0]
 
     def layer3_problems():
         """跑整层第 3 层（覆盖编号连续性 / 悬空引用这类**跨文件**判据）。"""
@@ -1487,7 +1727,7 @@ def run_mutation_tests(root):
         import io as _io
         buf = _io.StringIO()
         with contextlib.redirect_stdout(buf):
-            n = layer3_numbers(root, ledger_texts(root, 'task'))
+            n = layer3_numbers(root, ledger_texts(root, 'task'), 'task')
         out = buf.getvalue()
         ps = []
         for line in out.split('\n'):
@@ -1511,13 +1751,16 @@ def run_mutation_tests(root):
          lambda t: _insert_before_last_placeholder(
              t, '| `c886406` | 变异样本：同一个 commit 的第二行 |'),
          lambda ps: any('被登记了' in p for p in ps), MANIFEST),
-        ('删掉一行登记（非 HEAD）', readme,
+        # ⚠️ 「删掉一行登记」在**别人分支上**抓不到（漏登记是分支相关判据）
+        #    ⇒ 改用它的**分支无关等价物**：删掉链**中间**的一行 ⇒ 区间里就多出一个
+        #    没登记的 commit ⇒ 被「不构成连续链」抓到（域无关判据 ⇒ 任何分支都有效）
+        ('删掉链中间的一行登记', readme,
          lambda t: re.sub(r'^\| `185448c`.*\n', '', t, count=1, flags=re.M),
-         lambda ps: any('完全没登记' in p for p in ps), MANIFEST),
-        ('登记了一个不在本分支上的 commit', readme,
+         lambda ps: any('不构成连续链' in p for p in ps), MANIFEST),
+        ('登记了一个仓库里不存在的 commit', readme,
          lambda t: _insert_before_last_placeholder(
-             t, '| `deadbee` | 变异样本：本分支上没有的 commit |'),
-         lambda ps: any('不在本分支上' in p for p in ps), MANIFEST),
+             t, '| `deadbee` | 变异样本：仓库里不存在的 commit |'),
+         lambda ps: any('不存在的哈希' in p for p in ps), MANIFEST),
         ('台账引用了不存在的 Pitfall ID', readme,
          # ⚠️ 追加到**文件末尾**（不是表格行）⇒ 只影响「悬空引用」判据，不影响清单判据
          lambda t: t.rstrip('\n') + '\n\n（变异样本：引用 `PITFALL-TASK-RPC-99`）\n',
@@ -1553,7 +1796,7 @@ def run_mutation_tests(root):
                                orig_api, count=1, flags=re.M))
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
-                n = layer3_numbers(root, ledger_texts(root, 'task'))
+                n = layer3_numbers(root, ledger_texts(root, 'task'), 'task')
             if n > 0:
                 print('  ✅ 变异「api.md §一 标题条数造假」⇒ 第 3 层报错（回归仍有效）')
             else:
@@ -1566,7 +1809,7 @@ def run_mutation_tests(root):
         # 阳性对照：复原后必须**回到变异前**的计数（不是「== 0」—— 见上方口径说明）
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            n = layer3_numbers(root, ledger_texts(root, 'task'))
+            n = layer3_numbers(root, ledger_texts(root, 'task'), 'task')
         if n == baseline_layer3:
             print(f'  ✅ 复原后第 3 层回到变异前的 {n} 处（阳性对照：变异可逆、判据不误报）')
         else:
@@ -1617,8 +1860,8 @@ def main():
 
     bad += layer0_selfcheck(root)
     bad += layer1_paths(root, texts, args.go_root)
-    bad += layer2_claims(root)
-    bad += layer3_numbers(root, texts)
+    bad += layer2_claims(root, args.domain)
+    bad += layer3_numbers(root, texts, args.domain)
     bad += layer4_golines(root, texts, args.go_root)
     unmentioned = layer5_unmentioned(root, texts)
     unmentioned_prod = layer6_unmentioned_production(root, texts)
