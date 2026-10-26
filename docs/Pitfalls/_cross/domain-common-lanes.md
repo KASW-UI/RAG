@@ -134,6 +134,36 @@ Go 侧未注册 ⇒ 返回 **400 + Go 原文**。
 
 ---
 
+## PIT-LANE-05 · 「统计类/模块被谁用」的两个假阳性陷阱（2026-10-27 实测）
+
+**现象**：为 `users-common` / `service/common` 做「跨域引用度数」统计时，得到了一份**看起来合理、实则偏高**的表。
+
+### 陷阱 A：全文正则匹配 ⇒ 把 **javadoc 里的 `{@code …}` 提及**当成真引用
+
+- 实测：`service/common/src/main/java/com/rag/common/exception/BusinessException.java:14` 的注释里写了
+  `{@code com.rag.users.common.errmsg.ErrorCode}` ⇒ 全文正则判定「`common` 域用了 `ErrorCode`」。
+- 但 `service/common/pom.xml` **并不依赖** `users-common` ⇒ 那处提及**不是引用**。
+- ⇒ 误判后果：`ErrorCode` 被判成「共享层 + users 共用」⇒ **users 专用类被错误提级到共享层**（写权面平白扩大）。
+- ✅ **修法**：**只认 `import` 语句**（`^import\s+(?:static\s+)?([\w.]+)\s*;`），不看正文全文。
+
+### 陷阱 B：裸类名匹配 ⇒ 撞各域同名类
+
+- `ErrorCode` / `SchemaInitializer` / `Response` 在多个域**各有同名类** ⇒ 裸类名匹配产生大量假阳性。
+- ✅ **修法**：**全限定名**匹配（如 `com.rag.users.common.jwt.JwtUtil`）。
+
+### 订正
+
+本仓据此订正过一次：`users-common` 的分类从「**9 个真共享 + `ErrorCode` 半共享 + 2 个 users 专用**」
+改为「**8 个跨域类 + 3 个 users 专用类**」⇒ 提级清单从 10 个类缩到 8 个类。
+
+### 机器守门
+
+`tools/difftest/check-wave-coupling.py` 的 `scan_users_common_classes()` / `scan_common_radiation()`
+**一律用 import 判定** ⇒ 同一口径重算，与文档快照比对 ⇒ 漂移即 `EXIT=1`。
+⇒ **守门本身也要能被变异测**：该守门已做两次变异（注入新 gRPC 边 / 改跨域 topic 名）⇒ 均 `EXIT=1` 且精确点名。
+
+---
+
 ## 效力边界
 
 - PIT-LANE-01 的「建完确认脚手架」是**人工检查**（一条 `ls`）⇒ **没有机器守门**。

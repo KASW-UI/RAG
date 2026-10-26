@@ -58,6 +58,11 @@
 ⚠️ **它不是旧的 `align/global`** —— 旧的 `align/global` 是**全域 mega 工作树**（覆盖除 favorite 外的所有域）
 ⇒ **2026-10-27 已弃用**（Jason：一个工作树跨多域 ⇒ **粒度与操作内容不可控**）⇒ 其工作树已拆、内容已 100% 合回主干。
 ⇒ **`global-common` 的范围只有一个：`service/common/**`（外加 `docs/DRIFT/global/vs-common.md`）** ⇒ 粒度是**窄**的。
+
+⇒ 🆕 **落码窗口（2026-10-27）**：`global-common` 是**共享层波**的唯一 owner ⇒
+   **域波进行期间 `service/common/**` 只读、只登记反馈单**（7 项，AGENTS.md §5.3e）；
+   **共享层波激活时**才落码 ⇒ 域波中改共享层 ⇒ **该波测试结论作废**（编译绿 ≠ 行为对）。
+   ⇒ 波次表 / 依赖 DAG ⇒ [`../../../_cross/cross-domain-coupling.md`](../../../_cross/cross-domain-coupling.md) §二·§三。
 ⇒ 各域**域内**的待办归**各域自己的 `<域>-common` lane** ⇒ 不再需要一个跨全域的 mega 工作树。
 
 ### 3.2 已合回（第二十八轮 · 4 条）

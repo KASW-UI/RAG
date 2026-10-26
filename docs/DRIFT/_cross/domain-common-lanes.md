@@ -22,7 +22,8 @@
 | 工作树目录 | `/Users/pr/Documents/java&golang/RAG.worktrees/<域>-common` |
 | 分支 | `align/<域>-common`（全部从 `do-my-own-gh` 切，主干最后接合并） |
 | 基点 | **`do-my-own-gh` @ 2026-10-27**（= lane 脚手架落地那次提交；此前已合并 25/25 分支 + 全量回归 BUILD SUCCESS）⇒ 主干再前进时 lane `merge` 一次即可（**文件级不重叠 ⇒ 零冲突**） |
-| `service/common/**` 写权 | 🔴 **只有 `align/global-common` 能写**（AGENTS.md §5.3c·§5.3d）；其余 9 条 lane **只读 common 侧** |
+| `service/common/**` 写权 | 🔴 **只有 `align/global-common` 能写**（AGENTS.md §5.3c·§5.3d·**§5.3e**）；其余 9 条 lane **只读 common 侧** |
+| 🆕 **阶段划分（2026-10-27）** | **两阶段，不并行**：<br>**阶段 1 = 只读对账**（10 条 lane 并行，逐轴出结论 + 填**反馈单**）⇒ **不落任何代码**；<br>**阶段 2 = 按波次落地**（域波 + **共享层波**，波次表见 [`cross-domain-coupling.md`](cross-domain-coupling.md) §二）⇒ **共享层统一在共享层波落**。<br>⚠️ **阶段 1 若落域侧代码，会与阶段 2 同域撞文件** ⇒ 阶段 1 **必须全只读** |
 | ⚠️ **不是旧的 `align/global`** | 旧的 `align/global` 是**全域 mega 工作树**（覆盖除 favorite 外所有域）⇒ **2026-10-27 弃用**（Jason：一个工作树跨多域 ⇒ **粒度与操作内容不可控**）⇒ 其工作树已拆、内容已 100% 合回主干。**`global-common` 的范围只有一个共享层**（`service/common/**`）⇒ 粒度是窄的 |
 | **每条 lane 的台账** | **`docs/DRIFT/<域>/vs-common.md`**（**每条 lane 独占一份** ⇒ 10 路并发零冲突） |
 | common 侧机制面台账 | [`docs/DRIFT/common/`](../common/)：`deadline.md` · `http.md` · `protection.md` · `audit.md` · `alignment-2026-10-23.md` |
@@ -74,12 +75,18 @@
 | 面 | 谁可写 | 依据 |
 |---|---|---|
 | `service/common/**` | 🔴 **只有 `align/global-common`** | AGENTS.md §5.3c·§5.3d |
+| `service/users/users-common` 的 **8 个跨域类** | 🔴 **同 `align/global-common`**（物理位置不动，只改**写权归属**） | AGENTS.md §5.3f · [`cross-domain-coupling.md`](cross-domain-coupling.md) §四 |
+| `service/users/users-common` 的 **3 个 users 专用类**（`ErrorCode`/`PasswordUtil`/`SchemaInitializer`） | ✅ **users 域 lane** | AGENTS.md §5.3f |
 | 本域的 `service/<域>/**` ＋ `docs/DRIFT/<域>/**` | ✅ 本域 lane | AGENTS.md §5.3b（只写自己域） |
 | `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` | 🔴 合并后统一更新 | AGENTS.md §5.3 |
 
-⇒ **lane 发现 common 侧缺陷时**：① 域侧先把**现象 + 证据 + 建议修法**写进**本域台账**（`docs/DRIFT/<域>/vs-common.md`）；
+⇒ **lane 发现 common 侧缺陷时**：① 域侧先把**现象 + 证据 + 建议修法**写进**本域台账**（`docs/DRIFT/<域>/vs-common.md`），
+   **反馈单 7 项**（现象 / Go 侧 `文件:行号` / RAG 侧现状 / 证据强度 / 建议修法 / 影响面 / 是否阻塞本波；缺项不得进排期）；
 ② 转派 `global-common`（`docs/DRIFT/global/_README.md` §七之二的跨域桶）；③ **不得**在域 lane 里改 `service/common`（§5.3d：否则留下半截）。
 ⇒ **域侧能自修的**（本域代码里的调用方式、配置、断言、装配）**一律本域修**，不要甩给 global。
+⇒ 🆕 **落码窗口**（AGENTS.md §5.3e）：**域波期间 `service/common` 只读、只登记**；**共享层波才激活写权**
+   ⇒ 域波进行中改共享层 ⇒ **该波测试结论作废**（编译绿 ≠ 行为对：全仓无 API 兼容门禁）。
+   ⇒ **例外升级**：某波「不改 common 就过不了」⇒ 该波**就地升级为全量回归波**（2411 条），等共享层改完再重跑。
 
 ---
 

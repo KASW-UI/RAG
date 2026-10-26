@@ -183,6 +183,7 @@ service/task/task-rpc/…/TaskProgressUpsertParityTest
 | [`message-domain-wide.md`](_cross/message-domain-wide.md) | `service/message` 全域语义验证 |
 | [`component-coverage-matrix.md`](_cross/component-coverage-matrix.md) | **组件级覆盖矩阵（38 组件逐个）** —— 谁对照过 / 证据强度到哪层 / 下一刀切哪。**要按微服务逐个做时看这份** |
 | 🆕 [`domain-common-lanes.md`](_cross/domain-common-lanes.md) | **10 条 `<域>-common` lane 总纲**（2026-10-27 建）—— 语义 =「**本域 ↔ `service/common`**」跨层对账（⚠️ **不是**各域自己的 `-common` 库）：lane 清单（分支/工作树/台账）· **9 条机制面轴 A1~A9** · **写权边界**（`service/common/**` 只 `align/global-common` 能写）· **跨 2+ 域未闭合项** · 执行协议。**每条 lane 的台账 = `docs/DRIFT/<域>/vs-common.md`**（各 lane 独占 ⇒ 10 路并发零冲突） |
+| 🆕 [`cross-domain-coupling.md`](_cross/cross-domain-coupling.md) | **跨域耦合矩阵与分波方案**（2026-10-27 建）—— 实测**依赖 DAG**（gRPC `@GrpcClient` + Kafka topic，**契约边 vs 编译边**分列）· **拓扑层级 L0~L3** · **波次表**（3 组 + 1 共享层波 / 层级 4 波两方案）· **共享层写权规则**（写权唯一 · 落码窗口 · 反馈单 7 项 · 例外升级）· **`users-common` 按类判定**（8 跨域类提级 / 3 专用类留 users）· 3 个缺口登记。**守门** = `tools/difftest/check-wave-coupling.py`（矩阵漂移 ⇒ EXIT=1） |
 
 ## 🔴 跨域项（配置层已修，运行时验证仍缺）
 
