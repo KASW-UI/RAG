@@ -1,6 +1,8 @@
 package com.rag.users.admin.rpc.bootstrap;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.rag.common.persistence.DeadlineQueryTimeoutInjector;
+import com.rag.common.persistence.SqlTimeoutStatusTranslator;
 import com.rag.users.admin.rpc.AdminRpcApplication;
 import com.rag.users.admin.rpc.domain.AdminEntity;
 import com.rag.users.admin.rpc.domain.UserEntity;
@@ -8,6 +10,10 @@ import com.rag.users.admin.rpc.mapper.AdminMapper;
 import com.rag.users.admin.rpc.mapper.UserMapper;
 import com.rag.users.admin.rpc.service.AdminDomainService;
 import com.rag.users.common.cryptx.PasswordUtil;
+import org.apache.ibatis.plugin.Intercepts;
+import org.apache.ibatis.plugin.Interceptor;
+import org.apache.ibatis.plugin.Signature;
+import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +25,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -94,6 +101,8 @@ class AdminRpcContainerWiringTest {
     private AdminDomainService adminDomainService;
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private SqlSessionFactory sqlSessionFactory;
 
     // ==================================================================
     // A-U0 / DRIFT-010：Flyway 与 seeder 的真实时序
@@ -292,6 +301,79 @@ class AdminRpcContainerWiringTest {
         assertEquals(3L, r.total(), "total 与分页无关");
         assertFalse(r.users().isEmpty(),
                 "offset=-20 被抑制 ⇒ 等价于首页，应当有数据返回，而不是报错");
+    }
+
+    // ==================================================================
+    // B-1：SQL 超时翻译链的**装配层**断言（§3.3：注解存在 ≠ 机制生效）
+    // ==================================================================
+
+    /**
+     * <b>本方法证明 admin-rpc 的 MyBatis 插件链里真的装着 B-1 那两个拦截器。</b>
+     *
+     * <p><b>为什么不能靠「{@code @Import} 写了」当证据</b>：
+     * {@code AdminRpcApplication} 上确实写着
+     * {@code @Import({DeadlineQueryTimeoutInjector.class, SqlTimeoutStatusTranslator.class})}，
+     * 但那是<b>声明</b>；MyBatis-Plus 到底有没有把容器里的 {@code Interceptor} Bean
+     * 收进 {@code Configuration}，是<b>运行期</b>的事 —— 本仓已经吃过两次同款亏
+     * （P-4「{@code @Import} 只让 Bean 存在」· P-ADMINAPI-009「最小上下文 ≠ 生产装配」）。
+     *
+     * <p><b>这条链断了，本域的具体后果</b>：
+     * <ol>
+     *   <li>缺 {@link DeadlineQueryTimeoutInjector} ⇒ 每条 SQL 不带 {@code statement_timeout}
+     *       ⇒ 客户端 deadline 到点时<b>在途查询继续跑满</b>
+     *       ⇒ Go 侧 ctx 会同步取消 ⇒ 两侧在「客户端已放弃后 PG 还占着多久」上出现差值</li>
+     *   <li>缺 {@link SqlTimeoutStatusTranslator} ⇒ PG 的 57014 {@code query_canceled}
+     *       不会变成 {@code DEADLINE_EXCEEDED}
+     *       ⇒ 落进业务层的 {@code catch (Exception e)}
+     *       ⇒ <b>被改写成 INTERNAL</b> ⇒ api 侧渲染 5001（Go 是 1015）⇒ <b>wire 面就漂了</b></li>
+     * </ol>
+     *
+     * <p>⚠️ 本方法只证明<b>装配</b>（链里有这两个）。
+     * <b>「链断了会怎样」的两个后果本身各有各自的守门</b>：
+     * 放行分支由 {@code AdminDomainServiceCatchStructureTest}（字节码级，28/28）守，
+     * 翻译器本体由 {@code service/common} 的 {@code SqlTimeoutStatusTranslatorTest} 守。
+     * ⇒ 三段合起来才覆盖整条链，缺一段就有洞。
+     */
+    @Test
+    @DisplayName("B-1：MyBatis 插件链里真的装着 DeadlineQueryTimeoutInjector + SqlTimeoutStatusTranslator")
+    void sqlTimeoutInterceptorsAreReallyInThePluginChain() {
+        List<Interceptor> chain = sqlSessionFactory.getConfiguration().getInterceptors();
+        List<String> names = chain.stream().map(i -> i.getClass().getName()).toList();
+
+        assertTrue(chain.stream().anyMatch(SqlTimeoutStatusTranslator.class::isInstance),
+                "MyBatis 插件链里没有 SqlTimeoutStatusTranslator ⇒ PG 的 57014 不会被翻成 "
+                        + "DEADLINE_EXCEEDED ⇒ 会落进 catch(Exception) 被改写成 INTERNAL（5001 ≠ Go 的 1015）；"
+                        + "实际链 = " + names);
+        assertTrue(chain.stream().anyMatch(DeadlineQueryTimeoutInjector.class::isInstance),
+                "MyBatis 插件链里没有 DeadlineQueryTimeoutInjector ⇒ 每条 SQL 不带 statement_timeout "
+                        + "⇒ 客户端 deadline 到点后在途查询继续跑满；实际链 = " + names);
+    }
+
+    /**
+     * 翻译器必须挂在<b>执行点</b>（{@code Executor.query} / {@code Executor.update}）——
+     * CancelRequest 引发的 {@code SQLException} 是在<b>执行</b>阶段抛出的，
+     * {@code StatementHandler.prepare} 阶段根本看不到它
+     * ⇒ 挂错点 = <b>永远翻译不到</b>（而且是静默的：链里有它、测试也全绿）。
+     */
+    @Test
+    @DisplayName("B-1：SqlTimeoutStatusTranslator 挂在 Executor 执行点（不是 StatementHandler.prepare）")
+    void translatorInterceptsTheExecutionPoint() {
+        Intercepts intercepts = SqlTimeoutStatusTranslator.class.getAnnotation(Intercepts.class);
+        assertNotNull(intercepts, "SqlTimeoutStatusTranslator 没有 @Intercepts ⇒ 根本不会被 MyBatis 收进插件链");
+
+        Set<String> types = new HashSet<>();
+        Set<String> methods = new HashSet<>();
+        for (Signature s : intercepts.value()) {
+            types.add(s.type().getSimpleName());
+            methods.add(s.method());
+        }
+
+        assertTrue(types.contains("Executor"),
+                "翻译器没有拦截 Executor ⇒ 执行阶段抛出的 57014 看不到；实际拦截类型 = " + types);
+        assertTrue(methods.contains("query") && methods.contains("update"),
+                "翻译器没有覆盖 query/update 两个执行方法；实际 = " + methods);
+        assertFalse(types.contains("StatementHandler"),
+                "翻译器若挂在 StatementHandler.prepare 上，CancelRequest 引发的 SQLException 永远翻译不到");
     }
 
     // ==================================================================

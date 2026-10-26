@@ -29,7 +29,7 @@
 
 ### RAG 出处
 
-`service/users/admin/admin-rpc/.../service/AdminDomainService.java`
+`service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminDomainService.java`
 `resetUserPassword` 的 W3 步骤：`defaultPassword == null || isEmpty()` ⇒ 抛 INTERNAL。
 
 ### ⚠️ 代价（必须知情）

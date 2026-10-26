@@ -164,6 +164,34 @@ public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryS
    `AutoConfiguration.imports`），再决定要不要写 hook。
 3. 测试要断言**消费点**（server 的 interceptor 链里有没有它），不是**声明点**（容器里有没有它）。
 
+### 🟢 2026-10-26：同款形态的**第三处**，这次是**当场闭环**（不是事后补记）
+
+**触发**：users/user 域回信指出 **B-1 的放行守卫只挡 SQL 路径**（它们用 `javap` 读字节码得出
+`QueryTimeoutException` / `RedisConnectionFailureException` 的继承链**都不是** `io.grpc.StatusRuntimeException`）。
+⇒ 本域自查发现**同源的另一处**：`AdminRpcApplication` 上写着
+`@Import({DeadlineQueryTimeoutInjector.class, SqlTimeoutStatusTranslator.class})`，
+**但 admin-rpc 没有任何测试断言这两个 Bean 真进了 MyBatis 的插件链** ——
+⇒ **这正是 P-4 的形状**（声明点 ≠ 消费点），只是这次在 **MyBatis 插件链**这个消费点上，
+而不是 gRPC 的 interceptor 链。
+
+**本轮闭环方式**（`AdminRpcContainerWiringTest` 加 2 条，**真 PG + 真容器**）：
+
+1. `sqlTimeoutInterceptorsAreReallyInThePluginChain()` ⇒ 断言
+   `sqlSessionFactory.getConfiguration().getInterceptors()` **里真的有**这两个拦截器
+   （⇒ 消费点，不是声明点）
+2. `translatorInterceptsTheExecutionPoint()` ⇒ 断言翻译器的 `@Intercepts` 挂在 **`Executor`**
+   （`query` + `update`）而**不是** `StatementHandler.prepare`
+   ⇒ 因为 CancelRequest 引发的 `SQLException` 是**执行阶段**才抛的，挂在 `prepare` 上就**永远翻译不到**
+   （且是**静默**的：链里有它、测试也全绿）
+
+**变异证明它不是假绿**（M1）：把 `@Import` 里的 `SqlTimeoutStatusTranslator.class` 摘掉
+⇒ **只红 1 条**、红在**目标断言**（链里只剩 `[DeadlineQueryTimeoutInjector]`），
+其余 8 条（含第 2 条，因为它断言的是注解不是链）**仍绿** ⇒ **精确命中**；
+还原后 sha256 一致。
+
+⇒ **本条的判据（3）在此处再次生效**：链里少一个拦截器 ⇒ **PG 的 57014 不会被翻成 `DEADLINE_EXCEEDED`**
+⇒ 落进业务层 `catch (Exception e)` ⇒ **被改写成 INTERNAL（5001）**，而 Go 是 **1015** ⇒ **wire 面就漂了**。
+
 ---
 
 ## P-5 · 79 条全绿，仍漏 6 条差异 —— 测试条数不是质量指标（再次实证）
@@ -702,6 +730,13 @@ RAG 侧原为 `rpc timeout after 2000ms`，**已由 global 修完**，请 users/
 | **文案** | 超时响应给客户端的 `status.description` 那一串 | ✅ 修了（`context deadline exceeded`） |
 | **语义** | 服务端 2s 预算**不继承客户端 deadline** ⇒ 客户端放弃后，PG 上的查询继续占 1.1s（`Δ_end = +1111ms`） | ❌ **没碰** —— deadline 仍是 `System.currentTimeMillis() + timeout.toMillis()`（服务端自己的 2s），**没取** `min(客户端 deadline, 服务端 2s)` |
 
+> 🟢 **2026-10-26 订正（表本身是「当轮的历史快照」，保留不改；但结论已变）**：
+> **第②层（期限计算）随后由 `align/global` @ `af416d9` 修掉** ⇒ 「没取 min」这一格**已过时**。
+> ⇒ 且 🔴 **本行把 `Δ_end` 当成「语义层未修」的证据，也是错的** ⇒ 详见 **P-16**（仪器口径）。
+>
+> ⇒ **本坑的结论依然成立且更强**：**「修文案 ≠ 修语义」是对的，但更要命的是「**你以为你在修的那件事，和仪器测的那件事，不是同一件**」** ——
+> ⇒ **在动「本体/可观察形态」那张表之前，先把仪器的口径钉死**（P-16 的判据）。
+
 ⇒ 「客户端看到的文案一致了」**不等于**「这条漂移的本体修好了」。
 ⇒ **两者碰巧落在同一个文件、同一个方法里** ⇒ 只看 diff 会以为整条都修了。
 
@@ -723,3 +758,74 @@ global 提醒「`RpcInterceptor.java:192-194` 这类行号本轮改动后会漂�
 （`deadlineEpochMs` 的计算、`TIMEOUT_SCHEDULER.schedule(...)`、`tracer.startSpan`）。
 ⇒ **判据**：引用**共享层**代码时，行号的保质期取决于**别的域的合并节奏**，不由本域控制
 ⇒ 共享层一律引**符号名**（AGENTS.md §3.1：证据要指向**消费点**）。
+
+---
+
+## P-16 · 🔴 **仪器测的是什么 ≠ 你以为它在测什么** —— 把 `Δ_end` 归因到了错的机制上
+
+**核对日期：2026-10-26**（复盘 global 域第三十三轮 `d20b377` 时，本域台账被自己推翻的一条断言）
+
+### 现象
+
+本域台账从 2026-10-24 起一直写着这句话：
+
+> 「档位 A 的 `Δ_start` 那一格修后会变、**`Δ_end` 那格不变**（第 ③ 层未做）」
+
+背后的推理链看起来很顺：
+`Δ_end` = **客户端返回后，PG 上那条查询还占着多久** ⇒
+「客户端都放弃了，查询还在跑」⇒ **一定是「业务线程没被取消」造成的** ⇒
+⇒ 所以「只要第③层（资源取消）没做，`Δ_end` 就一定还是 +1111ms」。
+
+**这句话是错的。** 而且它是本域台账里**被反复引用 6 处**的**结论性断言**（§1.3 三层表 / §1 定性轮 / §1.4 结论 / 销账补记 / 修法边界表 / §17 汇总表）——
+⇒ **一处错，六处跟着错**。
+
+### 根因：**仪器的口径被搞错了**
+
+`Δ_end` 的定义（`tools/difftest/exp-grpc-admin-deadline-probe.sh`）：
+
+```
+Δ_end = PG 取消时刻 − 客户端返回时刻
+```
+
+主仪器是 **PG 服务端日志**里的 `canceling statement due to user request` ⇒
+⇒ **这个「取消时刻」由 `statement_timeout` 决定**，而 `statement_timeout` 由
+`DeadlineQueryTimeoutInjector` 从 `DeadlineState.remainingMillis()` 设 ⇒
+⇒ **与「业务线程有没有被 interrupt」毫无关系。**
+
+| 我以为 `Δ_end` 在测 | `Δ_end` 实际在测 |
+|---|---|
+| 「业务线程有没有被取消」（机制层，第③层） | 「**SQL 超时上限有没有继承客户端 deadline**」（期限层，第②层） |
+
+⇒ **第②层一改，`Δ_end` 就跟着动**；**第③层做完不做，它都不动。**
+⇒ 所以「第③层未修 ⇒ `Δ_end` 不变」这条推理，**前提整个是错的**。
+
+### 为什么会犯
+
+因为**「客户端放弃后服务端还在干活」这个现象，确实同时由两件事造成**：
+
+1. **期限算错**（第②层）⇒ SQL 超时上限没继承客户端 deadline ⇒ 查询跑到自己的预算才被取消；
+2. **业务线程不被取消**（第③层）⇒ 客户端走了，handler 线程还在跑。
+
+⇒ **现象是「合取」，但我当时默认把整个现象记在了「更显眼的那一项」账上**
+⇒ 而**仪器只对其中一项敏感**。
+
+### 下次怎么防（判据）
+
+1. 🔴 **给指标做「归因」时，必须把「谁决定这个数字」一路追到物理量，不能停在直觉层。**
+   本轮追的六环（每一环都有落点）：
+   `Δ_end` → **PG 取消时刻** → `statement_timeout` → `DeadlineState.remainingMillis()`
+   → `RpcInterceptor` 的 `deadlineEpochMs` → `effectiveTimeoutMs = min(服务端预算, 客户端 deadline 剩余)`。
+   ⇒ **追到这一环才发现「第③层跟这个数字无关」。**
+2. 🔴 **「现象 → 机制」是合取时，先问一句：「仪器对这两项分别敏感吗？」**
+   ⇒ 敏感的那项才是你能用这个指标判的那项。
+3. ⚠️ **别把「同一个现象的多个成因」写成「A ⇒ B」的因果链**——
+   台账里写成因果链，后人会当成**已证的单因**，于是**反过来用它去否定另一个成因的修复效果**。
+4. 🟢 **反向用法**：这条也解释了**为什么 E46（毫秒精度）能意外消掉 `Δ_end`** ——
+   E46 改的是 `statement_timeout` 的**精度**，正好是 `Δ_end` 的直接决定量 ⇒
+   **而 E46 的作者把它记成了「不改 `UNRESOLVED-ARPC-002` 的定性」** ⇒ **跨域的「定性」也得自己核**（P-15 的同一条纪律，这次用在了**反方向**）。
+
+### 同族
+
+- **P-14**（用错仪器 · 精度错）：采样周期比事件窗口粗 ⇒ 「没看到」被读成「没发生」。
+- **P-16**（用错仪器 · **口径错**）：仪器测的量 ≠ 你以为它测的量 ⇒ **数字全对，结论全错**。
+  ⇒ **两者都不会报错** ⇒ P-14 的判据（「先算仪器开销 vs 事件时长」）**不足以防住 P-16** ⇒ 必须再加一条：**追到物理量**。
