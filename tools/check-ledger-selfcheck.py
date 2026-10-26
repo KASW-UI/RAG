@@ -198,7 +198,13 @@ CLAIMS = [
 CLAIMS_BY_DOMAIN['task'] = CLAIMS
 
 PATH_RE = re.compile(r'(?:service|tools|docs)/[A-Za-z0-9_./-]+\.(?:java|md|py|sh|yml|MD|json)')
-CLASS_RE = re.compile(r'`([A-Z][A-Za-z0-9]*(?:Test|ContractTest|GateTest))\b')
+# ⚠️ **2026-10-27 补 `[a-z]IT` 这一支**（`TaskRpcFatJarArtifactGateIT` 这类 **`*IT.java`**）：
+#    原来只认 `Test` / `ContractTest` / `GateTest` 结尾 ⇒ **`*IT` 命名的测试类**（surefire 第二个
+#    execution `artifact-gate` 绑 `verify` 阶段、只挑 `**/*IT.java` 的**产物层守门**）
+#    **永远无法被判定为「已点名」** ⇒ 第 5 层把「台账已登记」误报成「覆盖缺口」⇒ **台账怎么改都消不掉**。
+#    ⚠️ 用 `[a-z]IT` 而不是 `IT`：`LIMIT` / `WAIT` 这类**全大写词**不该被当成类名
+#    （`[a-z]` 要求 `IT` 前面紧邻一个小写字母 ⇒ 只有 CamelCase 的 `…GateIT` 才命中）。
+CLASS_RE = re.compile(r'`([A-Z][A-Za-z0-9]*(?:Test|ContractTest|GateTest|[a-z]IT))\b')
 REF_RE = re.compile(r'`?([A-Za-z0-9_][A-Za-z0-9_./-]*\.go):(\d+)(?:-(\d+))?`?')
 
 
@@ -2373,7 +2379,15 @@ def run_mutation_tests(root):
                 _ns['layer4_golines'](root, _ns['all_ledger_texts'](root),
                                       DEFAULT_GO_ROOT)
             _mut_out = _buf.getvalue()
-            _stayed_ok = [r for r in _stdlib_refs if r not in _mut_out]
+            # ⚠️ **2026-10-27 改成只认「❌ 失败行」**（原来只判「输出里有没有这个子串」）：
+            #    favorite 域台账（2026-10-27 合入主干）里带了 `src/net/url/url.go:1001` 这条
+            #    **N7「台账已自陈并记档」的豁免引用** ⇒ 它出现在**通过行**里
+            #    ⇒ 朴素子串匹配把「**通过**」误当成「**报了**」⇒ 阴性对照恒红 ⇒ 变异测试假失败。
+            #    ⇒ 判据必须是「该引用出现在**失败行**里」，而不是「出现在输出里」。
+            _mut_fail_lines = [ln for ln in _mut_out.splitlines()
+                               if ln.strip().startswith('❌')]
+            _stayed_ok = [r for r in _stdlib_refs
+                          if not any(r in ln for ln in _mut_fail_lines)]
             if not _stayed_ok:
                 print('  ✅ 变异「关掉标准库 basename 通道」⇒ 13 条标准库引用**全部重新变红**'
                       f'（抽样：{", ".join(_stdlib_refs)}）')
@@ -2381,11 +2395,13 @@ def run_mutation_tests(root):
                 print('  ❌ 变异「关掉标准库 basename 通道」**没被抓到** ⇒ 该判据是假绿'
                       f'（仍不报：{_stayed_ok}）')
                 bad += 1
-            # 阴性对照：**未变异**时这 3 条必须**不**出现（否则是恒红）
+            # 阴性对照：**未变异**时这 3 条必须**不出现在失败行里**（否则是恒红）
             _buf2 = io.StringIO()
             with contextlib.redirect_stdout(_buf2):
                 layer4_golines(root, all_ledger_texts(root), DEFAULT_GO_ROOT)
-            _leak = [r for r in _stdlib_refs if r in _buf2.getvalue()]
+            _leak = [r for r in _stdlib_refs
+                     if any(r in ln and ln.strip().startswith('❌')
+                            for ln in _buf2.getvalue().splitlines())]
             if not _leak:
                 print('  ✅ 阴性对照：未变异时那 3 条标准库引用**不报**（判据不是恒红）')
             else:
