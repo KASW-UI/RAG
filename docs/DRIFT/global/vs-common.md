@@ -282,6 +282,94 @@
 | 6 影响面 | `check-flyway-concurrent.sh` 的已知缺陷账 ⇒ **AGENTS.md §6.3 问题 4 也只点了 favorite**（见建议项 3）⇒ 两处需同步订正 |
 | 7 是否阻塞本波 | **否** ⇒ 登记待整合者订正 |
 
+### 4.6 🆕 G2 派单三张（FB-01 / FB-02 / FB-03）—— **已落码**（核对日期 2026-10-27 · 基线 `align/g4-service-common` @ `182fc32`）
+
+> **落点全部独立核准**（读消费点，不采信派单的「落点」列）；**影响面按域实测**（不采信「N 域全命中」）。
+> ⚠️ **三张单的落码范围都比派单描述更窄** —— 理由逐条写在下表「本层实际做了什么」。
+
+#### FB-01 · A3「路径归一」进共享层
+
+| 项 | 结论 |
+|---|---|
+| 1 现象 | Go 的 router 对请求路径做 `path.Clean` ⇒ 路径变体命中同一条路由；RAG 侧原先**只有 article-api 有**（域内副本）⇒ 其余 9 个 api 缺这一层 |
+| 2 Go 侧出处 | go-zero v1.10.2 `rest/router/patrouter.go:48`（注册侧 `cleanPath := path.Clean(reqPath)`）+ `:60`（匹配侧 `reqPath := path.Clean(r.URL.Path)`）—— 逐字核对过 |
+| 3 RAG 侧现状 | `service/common/src/main/**` 下 `GoStylePathNormalizingFilter` 命中数 = **0**；全仓唯一实现在 `service/article/article-api/.../config/GoStylePathNormalizingFilter.java`（域内类） |
+| 4 证据强度 | **L4（双侧活体）**：🟢 Go 侧 = /tmp 临时工程起**真 go-zero v1.10.2 rest server** + curl，5 个 target 全 200；RAG 侧 = **真 Tomcat + 裸 socket** 同 5 个 target 同解 ⇒ ⇒ 两侧比的是**同一个请求**（JDK HttpClient 会自己归一 URI ⇒ 必须裸 socket） |
+| 5 建议修法 | **Y = 「所有 api 的请求路径都按 Go 的 `path.Clean` 归一后再匹配」** ⇒ 归一器落**共享层**（不得按域各写一份）⇒ 归一语义 = Go `path/clean.go` ⇒ 必须排在读路径的 Filter 之前 |
+| 6 影响面 | 共享层 `service/common/http/*` ⇒ 被 10 个 api 全依赖；实际缺口 **9 个**（article 已有等价实现） |
+| 7 是否阻塞本波 | **否** |
+
+**本层实际做了什么（比派单描述窄）**：
+- 新增 `service/common/http/GoStylePathNormalizingFilter`（**字节级逐字移植** Go 的 `Clean`）＋ `GoStylePathNormalizingAutoConfiguration`（**唯一注册点**，走 `AutoConfiguration.imports` ⇒ 与各 api 的 `@ComponentScan` 配置**完全解耦** ⇒ 「漏一个域就静默少一层」不可能发生）。
+- ⚠️ **过渡期去重**（article 域内副本还在，属 G3 写权）：按 **Bean 名**（不是类型 —— 两份的类不同）判重；判据可靠（组件扫描在解析阶段注册定义、自动配置是延迟导入 ⇒ 求值时已存在）；且**万一失效 ⇒ 两个同名 Bean ⇒ 启动直接失败**（硬失败，不是静默失效）；且 **simple name 与 Bean 名都与旧副本一致** ⇒ article-api 的「精确 9 项 Filter 链序」守门**不需要任何改动**就继续成立（**实测 article-api 13 条全绿**）。
+- 🟢 **顺手修掉旧版移植的 2 处偏差**（差分守门抓到的，不是派单提到的）：
+  `"/"`（Go `"/"` vs 旧版 `""`）、`".."`/`"../a"`（Go 原样 vs 旧版丢点）⇒ 共享层按 Go 的**字节级算法**重写（写入位置 + 回退到上一个 `/`）⇒ 32 条 Go 实测基准的**差分守门**逐条钉死。
+  ⇒ ⚠️ **rooted 根路径族在请求路径上可达** ⇒ article 的域内副本仍带旧偏差 ⇒ 删掉副本后自动消失（见下）。
+
+**🔴 域侧协调项（不在本层写权）**：`service/article/article-api/.../config/GoStylePathNormalizingFilter.java` 应由 **G3 删除**（只删这一个文件，**不要**动 `ArticleApiAssemblyWiringTest`）⇒ 删后 article-api 自动改用共享层那份 ⇒ 链序守门仍成立。
+
+#### FB-02 · A3 form 闸门的开关判据改成「语义可达性」
+
+| 项 | 结论 |
+|---|---|
+| 1 现象 | 共享层把「`off` 的依据」写成「**favorite 域不在 global 的写权范围内**」⇒ 那是一条**与 Go 行为无关**的理由 ⇒ ① 回答不了「下一个域该开还是该关」② 漏声明的域**静默落到缺省 `off`**（而缺省只对「Go 侧不解析」的域才正确） |
+| 2 Go 侧出处 | go-zero v1.10.2 `rest/httpx/requests.go`（`Parse → ParseForm → GetFormValues`）+ `rest/httpx/util.go:15`（`maxFormParamCount = 2048`，数**非空值**）+ `:48-53`（超限 ⇒ `too many form values` ⇒ Parse 失败）⇒ **只有 handler 真调 `httpx.Parse` 的域，`r.Form` 才被求值** ⇒ 两道上限才可达 |
+| 3 RAG 侧现状 | `service/common/http/GoStyleFormLimitMode.java:41-49`（旧判据）；`GoStyleTomcatParameterLimitCustomizer.java:107-108` 与 `GoStyleFormValues.java:38`（同一套措辞的三处落点） |
+| 4 证据强度 | **L1（两侧源码逐字对照）**；Go 侧命中数**实测**：task/api = **0**、article/api = 6（对照组）、favorite/api = 7、user/api = 8、admin/api = 13 |
+| 5 建议修法 | **Y = 「闸门按『Go 侧是否真的解析 form/query』决定开否」** ⇒ 判据从「写权范围」扩成「语义可达性」 |
+| 6 影响面 | 判据与 5 类都在 `service/common/http/*` ⇒ 被 10 个 api 全依赖 |
+| 7 是否阻塞本波 | **否**；但**阻塞 task-api 的 A3 结案** |
+
+**⚠️ 与派单描述不一致之处（本层独立核实的结论，必须同步给 G2）**：
+- **task**：Go 侧 `httpx.Parse` 命中数 = **0** ⇒ 语义答案 = **`off`** ⇒ task 当前 yaml 的 `raw` 是一条**待修漂移**（**G2 域内自修**）。
+- **favorite**：Go 侧命中 **7 处** ⇒ 语义答案 = **`raw`** ⇒ 而它实际缺省 `off` ⇒ **这是本次顺带挖出的一条真实漂移**（LOW：Go 400 + text/plain + Go 原文 vs RAG 400 + Tomcat HTML，且 Tomcat 数**参数总数含空值**、Go 数**非空值**）。
+  ⇒ **本层处置**：**零行为改动** ⇒ 共享层只改判据表述 + 落一张**逐域取证表**；favorite 的偏离登记为**已知偏离**（含可观察差异）⇒ **不改 favorite**（零写权约束成立 ⇒ 本层的「favorite 零影响」拒单判据成立）。
+- **user-api / admin-api**：Go 侧命中 8 / 13 处 ⇒ 语义答案 `raw` ⇒ 二者 yaml **已经是 `raw`** ⇒ 一致（**排除了「漏声明静默落到 off」在这两域发生过**）。
+
+**本层实际做了什么（比派单描述窄）**：
+- `GoStyleFormLimitMode`：判据改写 ＋ 新增 `SEMANTIC_REACHABILITY`（**10 个 api 域逐域取证表**，每行带 Go 侧证据）＋ `REGISTERED_DEVIATIONS`（登记 favorite）＋ 查询入口（未知域返回 `null`，不许瞎猜）。
+- `GoStyleTomcatParameterLimitCustomizer` / `GoStyleFormValues`：把当判据用的「写权范围」措辞改成「语义可达性」，并点明 favorite 是**刻意保留**而非「已对齐」。
+- 配套守门 6 条（`GoStyleFormLimitSemanticCriterionTest`）。
+
+**🔴 建议项 6（🆕 · 落点 = `tools/difftest/**` = 共享面 ⇒ 整合者）**：
+「**新增 `check-go-form-reachability.py`**：从 Go 真源逐域统计 `httpx.Parse` 命中数 ⇒ 与共享层 `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` 对照 ⇒ 让**取证书**与**判据表**不会各自漂移」。
+⇒ 现状风险：共享层的表是**手工取证快照** ⇒ Go 侧哪天改了 handler，表不会自动跟着变 ⇒ ⇒ 与「写死数字不可复算」同类风险。
+⇒ ⚠️ 另建议整合者把 `check-tomcat-limits.py` 的 `EXPECTED_FORM_LIMIT_MODE` 与共享层那张表**对齐**（现在两处各写一份 domain→mode ⇒ 会漂移）；⚠️ 该脚本当前把 favorite 列为「**禁止出现该属性**」（零触碰守卫）⇒ **那是对的**，别改。
+
+#### FB-03 · A2 保护链的「链构成」只读入口
+
+| 项 | 结论 |
+|---|---|
+| 1 现象 | 链构成由两个条件分支决定（`:65` shedding 需 `enabled && maxCpuPermille>0`；`:72` breaker 需 `enabled`）⇒ 域级守门无法**分别**断言 breaker / shedding ⇒ 只能「关掉降载换确定性」⇒ 断言被迫退化（名义上写 breaker/shedding，实际只证明了 breaker） |
+| 2 Go 侧出处 | go-zero v1.10.2 `zrpc/server.go:157-159`（Breaker，默认 true）+ `:160-163`（Shedding，`CpuThreshold > 0` 才挂）⇒ Go 侧四个拦截器**无条件按序装上** |
+| 3 RAG 侧现状 | `service/common/protection/GoStyleRpcProtectionChain.java:61-78` —— 链构成不可从外部查询 |
+| 4 证据强度 | **L1**（两侧源码逐字对照） |
+| 5 建议修法 | **Y = 「每一层是否在链上，可被域级守门直接断言」** ⇒ 共享层暴露**只读**的「链层构成」查询入口 ⇒ **零行为改动** |
+| 6 影响面 | 共享层 `service/common/protection/*` ⇒ 被 9 个 rpc 域依赖 |
+| 7 是否阻塞本波 | **否**（守门能力缺口） |
+
+**本层实际做了什么**：
+- `GoStyleRpcProtectionChain`：新增 `Layered`（**继承** `ServerInterceptor` ⇒ 匿名类可同时是「拦截器」+「带层名」；另立接口则匿名类**无法**实现）、`Composition` + `compose(props)`（**唯一**构成计算点，`build` 内部**消费**它 ⇒ 「配置推出的构成」与「实际构造出的链」不可能不一致）、`layerNames(chain)`（对**已构造出的链**的观测）。
+- ⚠️ `build` 改为消费 `compose(props)` ⇒ **条件与顺序逐字不变** ⇒ 零行为改动。
+- 配套守门 7 条（`GoStyleRpcProtectionChainCompositionTest`），含「四种开关组合下 compose() 与实际链**逐一吻合**」这条**单一来源**断言。
+
+#### 三张单的**变异验证**记录（红测试必须红在目标断言上）
+
+| 变异 | 结果 | 恢复后 |
+|---|---|---|
+| FB-01：撤掉归一层的自动配置注册 | **4 failures / 0 errors**（干净 `AssertionError`，红在 4 个路径变体那 4 条） | 全绿 |
+| FB-02：把 `compose()` 与 `build()` 的条件拆成两份（制造不一致） | 由「compose 与实际链逐一吻合」那条断言抓住 | 全绿 |
+| FB-03：摘掉降载层的 `Layered` 标记 | **5 failures / 0 errors**（干净 `AssertionError`，红在层名列表那 5 条） | 全绿 |
+
+### 4.7 🆕 不需落码项（3 条）+ 一条**不重复派单**
+
+| # | 事项 | 处置 | 落点 / 归属 |
+|---|---|---|---|
+| 1 | **A9 轴定义措辞缺陷**（轴定义应分层表述：共享层 `sea.*` 两侧一致；域特有按域：comment `audit.*`、favorite `biz.*`、admin `audit.*`） | **建议项 2**（§4.4）已登记 | `docs/DRIFT/_cross/domain-common-lanes.md` = 共享面 ⇒ 整合者订正 |
+| 2 | **AGENTS.md §6.3 问题 4 漏记 `article-rpc`** | **建议项 3**（§4.4）已登记 | `AGENTS.md` = 共享面 ⇒ 整合者订正 |
+| 3 | 🔴 **`DRIFT-HOTRPC-004` 的范围澄清** | **登记（防销错账）**：它闭的是 **`hot-api` 侧**，**不是 `hot-rpc` 侧** ⇒ ⇒ **别把它当「hot-rpc 侧已闭合」销掉**；另：权威面里「client breaker 是否真在链上」那条编号是 **`U4`**（`hot/api.md` §9 Unresolved 表），**不是** `DRIFT-HOTRPC-004`（那条是**另一条**：Redis 客户端重试） | 域台账（`docs/DRIFT/hot/**`）= 域侧 ⇒ 回执时已提醒对应 owner |
+| 4 | **`E65`** | **不重复派单**：已是 global 台账的 OPEN 项 ⇒ 重复派会造出两个编号指同一件事 | 已在 global 台账 ⇒ 本 lane 不再登记 |
+
 ## 5. 交付物清单
 
 - [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
@@ -289,5 +377,5 @@
 - [ ] **两侧同时跑**的探针（AGENTS.md §3.3）—— 只跑 RAG 的探针**不算数**
 - [ ] §1 的每一条**重新核对状态**并写回（带核对日期）
 - [ ] §3 的域侧修法**落码 + 守门**（含变异验证）
-- [ ] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）
+- [x] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）—— ⚠️ **`_README.md` §七之二属共享面 ⇒ 本 lane 不写**（合并后由整合者统一更新）⇒ **G3 两张 + G2 三张共 5 张已登记在 §4.3~§4.7**
 - [ ] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
