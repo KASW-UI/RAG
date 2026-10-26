@@ -76,6 +76,12 @@
 | **⑥ 影响面** | 共享层 `service/common/http/*` ⇒ 被 **10 个 api 全依赖**；**实际缺口 9 个**（article 已有等价实现）⇒ 跨域引用域数 = **9** |
 | **⑦ 是否阻塞本波** | **否**（不阻塞本波台账；阻塞 A3 结案） |
 
+> 📌 **共享层落点（按**符号**记，不钉行号）** —— G4 树 `182fc32` 的行号**合并后会位移** ⇒ 本域台账只记符号，避免合并后行号失准：
+> - **FB-01**：`service/common/.../http/GoStylePathNormalizingFilter.java`（`@Order(HIGHEST_PRECEDENCE+2)` + `goPathClean`）＋ `GoStylePathNormalizingAutoConfiguration.java`（唯一注册点）＋ `AutoConfiguration.imports` +1 行
+> - **FB-02**：`service/common/.../http/GoStyleFormLimitMode.java`（`SEMANTIC_REACHABILITY` ＋ `REGISTERED_DEVIATIONS` ＋ `parse` 行为不变）＋ `GoStyleTomcatParameterLimitCustomizer.java` ＋ `GoStyleFormValues.java`（「开不开」与「拒成什么形状」两条独立的轴）
+> - **FB-03**：`service/common/.../protection/GoStyleRpcProtectionChain.java`（`Layered` ＋ `Composition` ＋ `compose(props)` ＋ `layerNames(chain)` ＋ `build` 改为消费 `compose` ⇒ 条件与顺序逐字不变）
+> ⇒ **共享层侧回归（G4 自测）**：全量 `mvn -B clean verify`（仓库根，**不是**只跑「看起来受影响」的域）⇒ **52 个模块 / 2442 条 / 0 failures / 0 errors / 4 skipped**（4 条 skip 全是 favorite 的对拍探针自动 skip）/ 21:59 min ⇒ 变异验证：FB-01 撤掉归一层的自动配置注册 ⇒ **4 failures**；FB-03 摘掉降载层的 `Layered` 标记 ⇒ **5 failures** ⇒ 均红在目标断言
+> ⇒ ⚠️ **本域的三域回归与之重叠过**（我 04:45 看到 G4 的 surefire 进程 ⇒ 机器负载高、我的回归变慢）⇒ 已在台账登记「错峰」共识
 > ✅ **G4 回执（2026-10-27 · `182fc32`）**：共享层已落码 `GoStylePathNormalizingFilter`（**字节级逐字移植** Go `path.Clean`）+ `GoStylePathNormalizingAutoConfiguration`（唯一注册点）⇒ 🟢 **Go 侧已 L4 活体坐实**（真 go-zero rest server + curl：5 种路径变体全 200）⇒ **共享层那半已闭环**<br>⚠️ **但仍未合入本树** ⇒ **本域 A3 暂不整体升 ✅** ⇒ 合并后本域只需跑**真 Tomcat 探针**复核即可<br>⚠️ **跨域协调项（G3 的活）**：article-api 的**域内副本** `service/article/article-api/.../config/GoStylePathNormalizingFilter.java` 仍在 ⇒ G4 用「按 Bean 名去重」保证 article-api 的守门仍绿 ⇒ **由 G3 删**（不在本域写权内） |
 
 ### 🆕 FB-02 · A3 form 闸门的开关判据缺「语义可达性」维度（本域多出一条 Go 没有的拒绝）
@@ -90,6 +96,12 @@
 | **⑥ 影响面** | 判据与 `GoStyleFormValues` / `GoStyleFormValueLimitInterceptor` / `GoStyleFormLimitWebMvcConfig` / `GoStyleTomcatParameterLimitCustomizer` / `GoStyleFormLimitMode` 全部在 `service/common/http/*` ⇒ 被 **10 个 api 全依赖**<br>⇒ **当前实际受影响的域** = 用裸 decoder（不调 `httpx.Parse`）的 api —— **task（本单）**；其余 9 域受共享层改动的连带影响 ⇒ 跨域引用域数 = **10** |
 | **⑦ 是否阻塞本波** | **否**（不阻塞本波台账）；但**阻塞 task-api 的 A3 结案**（A3 在此之前只能记 🟡） |
 
+> 📌 **共享层落点（按**符号**记，不钉行号）** —— G4 树 `182fc32` 的行号**合并后会位移** ⇒ 本域台账只记符号，避免合并后行号失准：
+> - **FB-01**：`service/common/.../http/GoStylePathNormalizingFilter.java`（`@Order(HIGHEST_PRECEDENCE+2)` + `goPathClean`）＋ `GoStylePathNormalizingAutoConfiguration.java`（唯一注册点）＋ `AutoConfiguration.imports` +1 行
+> - **FB-02**：`service/common/.../http/GoStyleFormLimitMode.java`（`SEMANTIC_REACHABILITY` ＋ `REGISTERED_DEVIATIONS` ＋ `parse` 行为不变）＋ `GoStyleTomcatParameterLimitCustomizer.java` ＋ `GoStyleFormValues.java`（「开不开」与「拒成什么形状」两条独立的轴）
+> - **FB-03**：`service/common/.../protection/GoStyleRpcProtectionChain.java`（`Layered` ＋ `Composition` ＋ `compose(props)` ＋ `layerNames(chain)` ＋ `build` 改为消费 `compose` ⇒ 条件与顺序逐字不变）
+> ⇒ **共享层侧回归（G4 自测）**：全量 `mvn -B clean verify`（仓库根，**不是**只跑「看起来受影响」的域）⇒ **52 个模块 / 2442 条 / 0 failures / 0 errors / 4 skipped**（4 条 skip 全是 favorite 的对拍探针自动 skip）/ 21:59 min ⇒ 变异验证：FB-01 撤掉归一层的自动配置注册 ⇒ **4 failures**；FB-03 摘掉降载层的 `Layered` 标记 ⇒ **5 failures** ⇒ 均红在目标断言
+> ⇒ ⚠️ **本域的三域回归与之重叠过**（我 04:45 看到 G4 的 surefire 进程 ⇒ 机器负载高、我的回归变慢）⇒ 已在台账登记「错峰」共识
 > ✅ **G4 回执（2026-10-27 · `182fc32`）**：**本单已闭环**（零行为改动）—— 共享层把判据从「写权范围」改成「**语义可达性**」+ 落一张 **10 个 api 域逐域取证表**（每行带 Go 侧 `文件:行号` / 命中数）⇒ 判据**只有一份**且可被机器核对 ⇒ 「下一个裸 decoder 域不会重复踩」有了机制<br>🟢 **本域那半（task 的 `mode: "off"`）已在 `4786eb5` 落码**，且**与共享层表里的 task 行（`Mode.OFF`）同向** ⇒ 两侧一致、无需再动<br>⚠️ **favorite 的偏离已由共享层登记**（`REGISTERED_DEVIATIONS`，写清可观察差异：Go 400+text/plain vs RAG 400+Tomcat HTML，且 Tomcat 计**参数总数**、Go 计**非空值**）⇒ **不在本域写权内 ⇒ 本域不动** |
 
 ### 🆕 FB-03 · A2 保护链缺「层构成」只读查询入口 ⇒ 域级守门无法分别断言 breaker / shedding
@@ -104,6 +116,12 @@
 | **⑥ 影响面** | 共享层 `service/common/protection/*` ⇒ 被 **10 个 rpc 组件**依赖（`service/common` 依赖度数 20）⇒ 跨域引用域数 = **9**（全部 rpc 域） |
 | **⑦ 是否阻塞本波** | **否**（属守门能力缺口；task 域的 shedding 断言可先按 D-2 的最小版做） |
 
+> 📌 **共享层落点（按**符号**记，不钉行号）** —— G4 树 `182fc32` 的行号**合并后会位移** ⇒ 本域台账只记符号，避免合并后行号失准：
+> - **FB-01**：`service/common/.../http/GoStylePathNormalizingFilter.java`（`@Order(HIGHEST_PRECEDENCE+2)` + `goPathClean`）＋ `GoStylePathNormalizingAutoConfiguration.java`（唯一注册点）＋ `AutoConfiguration.imports` +1 行
+> - **FB-02**：`service/common/.../http/GoStyleFormLimitMode.java`（`SEMANTIC_REACHABILITY` ＋ `REGISTERED_DEVIATIONS` ＋ `parse` 行为不变）＋ `GoStyleTomcatParameterLimitCustomizer.java` ＋ `GoStyleFormValues.java`（「开不开」与「拒成什么形状」两条独立的轴）
+> - **FB-03**：`service/common/.../protection/GoStyleRpcProtectionChain.java`（`Layered` ＋ `Composition` ＋ `compose(props)` ＋ `layerNames(chain)` ＋ `build` 改为消费 `compose` ⇒ 条件与顺序逐字不变）
+> ⇒ **共享层侧回归（G4 自测）**：全量 `mvn -B clean verify`（仓库根，**不是**只跑「看起来受影响」的域）⇒ **52 个模块 / 2442 条 / 0 failures / 0 errors / 4 skipped**（4 条 skip 全是 favorite 的对拍探针自动 skip）/ 21:59 min ⇒ 变异验证：FB-01 撤掉归一层的自动配置注册 ⇒ **4 failures**；FB-03 摘掉降载层的 `Layered` 标记 ⇒ **5 failures** ⇒ 均红在目标断言
+> ⇒ ⚠️ **本域的三域回归与之重叠过**（我 04:45 看到 G4 的 surefire 进程 ⇒ 机器负载高、我的回归变慢）⇒ 已在台账登记「错峰」共识
 > ✅ **G4 回执（2026-10-27 · `182fc32`）**：共享层已落码 `Layered` 标记 + `Composition` + `compose(props)`（**唯一**构成计算点，`build` 内部消费它）+ `layerNames(chain)`（观测已构造出的链）⇒ **零行为改动**（条件与顺序逐字不变）⇒ 配套守门 7 条，变异（摘掉降载层的 `Layered` 标记）**5 failures**<br>⚠️ **本树尚未合入** ⇒ 本域守门 D-2 改用**等价**判据（「包装层归属」，见 §2/A2）⇒ **合并后**按 §5.3e 重跑收口回归时**升级为 `layerNames(chain)` 断言** |
 
 ### 🆕 FB-05 · A3 form 闸门开关值 `off` 在 YAML 里**写不出来**（YAML 1.1 把 `off` 解析成布尔 false）
