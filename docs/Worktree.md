@@ -1,6 +1,6 @@
 <!-- @new 2026-10-23 21:4x · worktree 并发工作流（配套改写 AGENTS.md §5.3） -->
 
-# worktree 并发工作流（2026-10-23）
+# worktree 并发工作流（2026-10-27）
 
 > **本文件是操作手册**，AGENTS.md §5.3 只留一行指针。
 > 起因：原 §5.3 写「不建独立 worktree、需要隔离时用 `git stash`」——那条在**串行**方式下成立，
@@ -60,6 +60,45 @@ RAG.worktrees/          ← 11 个工作树（在 RAG 外面，不进版本库�
 它是请求保护层。它不依赖任何其他域 ⇒ 并发自由度最高，值得先跑。
 但反过来：**若 common 挖出新漂移，那 16 个组件的 api 全要复查。**
 
+### 🆕 lane 版：`align/<域>-common`（2026-10-27 用户定，当前在跑的那一套）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG"
+git fetch upstream
+
+for d in article comment favorite follow hot like message task users global; do
+  git worktree add "../RAG.worktrees/$d-common" -b "align/$d-common" do-my-own-gh
+done
+
+git worktree list
+```
+
+⇒ **10 条** = 9 个微服务域 + `global` 收口域；语义 =「**本域 ↔ `service/common`**」的跨层对账
+（⚠️ **不是**「本域自己的 `-common` 库」）⇒ **总纲 ⇒ [`docs/DRIFT/_cross/domain-common-lanes.md`](DRIFT/_cross/domain-common-lanes.md)**。
+
+当前布局：
+
+```
+RAG/                          ← 主工作区，停在 do-my-own-gh
+RAG.worktrees/                ← 10 个 lane 工作树
+├── article-common/           ← align/article-common
+├── comment-common/  favorite-common/  follow-common/
+├── hot-common/      like-common/      message-common/
+├── task-common/     users-common/      global-common/
+```
+
+⚠️ **两套 lane 不可同域并行**：`align/<域>`（组件级对齐）与 `align/<域>-common`（跨层对账）
+虽然台账文件不重叠（`docs/DRIFT/<域>/<组件>.md` vs `docs/DRIFT/<域>/vs-common.md`），
+但**会同时改 `service/<域>/**` 的代码** ⇒ 合并时语义打架 ⇒ **同一域只开一套**。
+
+⚠️ **建完 lane 立刻确认脚手架在位**（否则回并会撞 **add/add 冲突**）：
+
+```bash
+ls ../RAG.worktrees/<域>-common/docs/DRIFT/<域>/vs-common.md
+```
+
+⇒ 缺文件 = 基线早于脚手架落地那次提交 ⇒ 先 `git merge do-my-own-gh` 再开工。
+
 ---
 
 ## 三、纪律（硬约束）
@@ -69,6 +108,7 @@ RAG.worktrees/          ← 11 个工作树（在 RAG 外面，不进版本库�
 | 文件 | 谁写 |
 |---|---|
 | `docs/DRIFT/<域>/<组件>.md` | ✅ 该域工作树自己写 |
+| `docs/DRIFT/<域>/vs-common.md` | ✅ 该域的 `<域>-common` lane 自己写（**每条 lane 独占一份**） |
 | `docs/DRIFT/_INDEX.md` | ❌ **所有工作树都不许碰**，合并后由主会话统一更新 |
 | `AGENTS.md` | ❌ 同上 |
 | `docs/DRIFT/_MANIFEST.json` | ❌ 同上 |
@@ -127,6 +167,10 @@ docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：�
 
 ⇒ **开工前先确认自己域的目录存在**；缺了就建，别把台账塞进别的域或 `_cross/`。
 
+🆕 **2026-10-27**：`docs/DRIFT/<域>/vs-common.md` × **10** 已建齐
+（article / comment / favorite / follow / hot / like / message / task / users / global）
+⇒ 每条 `<域>-common` lane 的台账坑位**已就位** ⇒ lane agent **不用再建文件**，直接开工填 §2 的 9 轴表。
+
 ### 1b. 🆕 `global` 收口域的**单写权**（2026-10-25 用户定）
 
 > **`global` 不是第 11 个微服务域，是「收口域」**：单微服务域已各自对齐完毕，
@@ -134,7 +178,7 @@ docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：�
 
 | 规则 | 内容 |
 |---|---|
-| **单写权** | **`service/common/**` 只有 `align/global` 能写**，别的域只读 ⇒ 别人发现 common 的 bug，**记台账交给 global**，不自己动手 |
+| **单写权** | **`service/common/**` 只有 `align/global` / `align/global-common` 能写**，别的域只读 ⇒ 别人发现 common 的 bug，**记台账交给 global**，不自己动手 |
 | **同一次提交** | 修法同时涉及 `service/common` 与别的域代码（`service/users/**` 等）⇒ **必须同一次提交**。否则会留下「一半改完」的半截状态 |
 | **落点** | `docs/DRIFT/global/`（+ `Pitfalls/global/` + `Intentional_Deviations/global/`），按**议题**分档，不是按 api/rpc/proto |
 | **与 `common` 域的边界** | `common` 域问「common 自己对不对」；`global` 问「**别人**因 common 而对不对」 |
@@ -163,6 +207,30 @@ docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：�
 （`_README.md` 49,886 + `common-tails.md` 68,534 + `cross-domain.md` 93,286 + `cycle-deps.md` 9,699）
 ⇒ **单会话每轮都要重读一遍** ⇒ 单轮约 6~7 万 token 的纯台账
 ⇒ **瓶颈是上下文，不是写码速度** ⇒ 拆 lane 必须配「定向读」（任务书里给精确到段的指针）。
+
+### 1d. 🆕 `<域>-common` lane：**域 ↔ `service/common` 的跨层对账**（2026-10-27 用户定）
+
+> **语义**：lane 名 `<域>-common` = 「**本域 ↔ `service/common`**」这条**跨层**专项
+> —— ⚠️ **不是**「本域自己的 `-common` 库」（那是 `service/<域>/<域>-common`，台账见 `docs/DRIFT/<域>/common.md`）
+> **总纲 ⇒ [`docs/DRIFT/_cross/domain-common-lanes.md`](DRIFT/_cross/domain-common-lanes.md)**（以它为准）
+
+| 规则 | 内容 |
+|---|---|
+| **切法** | **10 条** = 9 个微服务域 + `global`；分支 `align/<域>-common` ＋ 目录 `../RAG.worktrees/<域>-common`（**与 §二 的 `align/<域>` 同族、不撞名**） |
+| **基线** | `do-my-own-gh` @ 2026-10-27（= lane 脚手架落地那次提交）⇒ 主干再前进就 `merge do-my-own-gh` 一次（**文件级不重叠 ⇒ 零冲突**） |
+| **写权** | ✅ 本域 `service/<域>/**` ＋ `docs/DRIFT/<域>/**`；🔴 **`service/common/**` 只读** —— 只有 `align/global-common` 能写 |
+| **lane 台账** | **`docs/DRIFT/<域>/vs-common.md`**（每条 lane **独占一份** ⇒ 10 路并发**文件级零重叠**，不必抢同一个大文件） |
+| **共享面** | lane ⛔ 不写 `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` ⇒ **整合者在合并后统一更新** |
+| **交付物** | **9 条机制面轴（A1~A9）**的**本域侧**逐轴结论（✅/🔴/🟡 ＋ **证据强度** ＋ **核对日期**）＋ **两侧同时跑**的探针（§3.3：只跑 RAG 的探针**不算数**） |
+| **派单** | 发现 common 侧缺陷 ⇒ 本域**只登记**（现象 + 证据 + 建议修法）⇒ **转派 `global-common`**；**域侧能自修的域侧修**（本域的调用方式/配置/断言/装配）⇒ 不甩单、不留半截 |
+
+📌 **为什么单列一套 lane**：§1c 的多 lane 是 `global` **一个域内**的拆分；
+本条是**跨域**的机制面对账 —— 10 个域**各自**负责「我看到的现象 ↔ common 侧的真实机制」这条对账线，
+而 common 侧**只由 `global-common` 一条 lane 改** ⇒ 9 条域 lane 并行看、1 条 lane 收口改。
+
+⚠️ **建 lane 前必看**：lane 的基线必须**已经包含** `docs/DRIFT/<域>/vs-common.md` 这份脚手架
+⇒ 否则 lane 提交后回并会撞 **add/add 冲突**（主干加了同一个文件、lane 也加了）。
+⇒ **建完立刻确认**：`ls ../RAG.worktrees/<域>-common/docs/DRIFT/<域>/vs-common.md`
 
 ### 2. 域内顺序：`rpc → common → api → proto 消费`
 
@@ -217,6 +285,11 @@ HEAD 前进到 `61e6d7a`（`5977c64` / `0a5aa0e` / `61e6d7a` 三个 commit）。
 是请求保护层。它不依赖任何其他域 ⇒ 并发自由度最高，值得先跑。
 但反过来：**若 common 挖出新漂移，那 16 个组件的 api 全要复查。**
 
+🆕 **2026-10-27：这条「共享层」现在有了一个专门的并发协议** ——
+`align/global-common` 单写 `service/common/**`（**唯一**），其余 **9 条** `<域>-common` lane **只读** common 侧、
+各自负责对账自己那一域看到的现象（§三·1d）⇒
+**「谁都能发现、只有一个人能改」** 这个约束从口头约定变成了台账里的硬规则。
+
 ---
 
 ## 五、拆（干完撤掉）
@@ -227,6 +300,19 @@ git branch -d align/task
 ```
 
 `remove` 前必须确认该目录无未提交改动，否则 Git 会拦（这是好事）。
+
+🆕 **拆 lane（`<域>-common`）**：
+
+```bash
+git worktree remove ../RAG.worktrees/task-common
+git branch -d align/task-common
+```
+
+⚠️ **先确认已合回**（与「删之前逐个确认未提交=0 且已合回」同款纪律）：
+
+```bash
+git merge-base --is-ancestor align/task-common do-my-own-gh && echo "已合回"
+```
 
 ⚠️ 历史上的 4 个 `row/*` 工作树已确认**真合并**（`git merge-base --is-ancestor` 逐个验过），
 `RAG.worktrees/` 下的目录可清理，与新建工作树不冲突（名字不撞）。
@@ -239,6 +325,8 @@ git branch -d align/task
 |---|---|
 | 看挂了哪几个 | `git worktree list` |
 | 建（分支+目录一起） | `git worktree add "<路径>" -b "<分支>" do-my-own-gh` |
+| 建 `<域>-common` lane | `git worktree add "../RAG.worktrees/<域>-common" -b "align/<域>-common" do-my-own-gh` |
+| 确认 lane 脚手架在位 | `ls ../RAG.worktrees/<域>-common/docs/DRIFT/<域>/vs-common.md` |
 | 推 feature 分支 | `git push -u upstream align/<域>` |
 | 合回主干 | `git merge --no-ff align/<域>` |
 | 同步基线 | `git merge do-my-own-gh`（在工作树内） |
