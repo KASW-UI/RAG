@@ -1,11 +1,11 @@
-<!-- @new 2026-10-27 · `favorite-common` lane 台账 · 主会话（Jason 指定）建 lane 时预填 · 基线 = `do-my-own-gh` @ 2026-10-27  · **2026-10-27 02:0x 改：归属 G3 波次工作树（`align/g3-article-comment-favorite-hot`）** -->
+<!-- @new 2026-10-27 · `favorite-common` lane 台账 · 主会话（Jason 指定）建 lane 时预填 · 基线 = `do-my-own-gh` @ 2026-10-27  · **2026-10-27 02:0x 改：归属 G3 波次工作树（`align/g3-article-comment-favorite-hot`）**  · **2026-10-27 03:0x G3 阶段 1 复核轮：§1 状态复核 ＋ §2 九轴逐轴填实 ＋ §3 自修项 ＋ §4 派单项（全部带核对日期与证据强度）** -->
 
 # `favorite-common` lane 台账 —— 「favorite ↔ `service/common`」跨层对账
 
 > **lane 语义**：本域与**共享机制层 `service/common`** 之间的漂移对账
 > —— ⚠️ **不是**「本域自己的 `-common` 库」（那是 `service/favorite/favorite-common`，台账见 [`common.md`](common.md)）
 > **总纲** ⇒ [`docs/DRIFT/_cross/domain-common-lanes.md`](../_cross/domain-common-lanes.md)（**G1~G4 波次映射** · 9 条机制面轴 · 写权边界 · 跨域未闭合项）
-> ⇒ **本文件由 `G3` 波次工作树独占**（**按域各一份** ⇒ 跨树文件级零重叠）；**共享面（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json`）合并后统一更新**（AGENTS.md §5.3d）
+> ⇒ **本文件由 `G3` 波次工作树独占**（**按域各一份** ⇒ 跨树文件级零重叠）；**共享面（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**`）合并后统一更新**（AGENTS.md §5.3d）
 
 ## 0. lane 身份
 
@@ -13,60 +13,79 @@
 |---|---|
 | lane（历史名） | `favorite-common`（**原第 3/10 条**） |
 | **现分支 / 工作树** | **`align/g3-article-comment-favorite-hot`** / `/Users/pr/Documents/java&golang/RAG.worktrees/g3-article-comment-favorite-hot`<br>⚠️ 原 `align/favorite-common` 工作树已于 **2026-10-27 01:44 撤掉** ⇒ 粒度从「一个域一棵」改为「**一个波次一棵**」 |
-| 基点 | **`do-my-own-gh` @ 2026-10-27**（= lane 脚手架落地那次提交；此前已合并 25/25 分支 + 全量回归 BUILD SUCCESS）⇒ 主干再前进时 lane `merge` 一次即可（**文件级不重叠 ⇒ 零冲突**） |
+| 基点 | **`do-my-own-gh` @ 2026-10-27`（= lane 脚手架落地那次提交）⇒ 主干再前进时 lane `merge` 一次即可（**文件级不重叠 ⇒ 零冲突**） |
 | 本域模块 | `service/favorite/{favorite-api, favorite-rpc, favorite-common, favorite-proto}` |
 | 域侧台账 | [`rpc.md`](rpc.md) · [`api.md`](api.md) · [`common.md`](common.md) · [`proto.md`](proto.md) |
 | **写权** | ✅ 可写**本域** `service/favorite/**` ＋ `docs/DRIFT/favorite/**`；🔴 **`service/common/**` 只读**（只有 `align/g4-service-common` 能写）；⚠️ 旧的 `align/global` 全域 lane **已弃用** |
 | common 侧机制面台账 | [`docs/DRIFT/common/`](../common/)：`deadline.md` · `http.md` · `protection.md` · `audit.md` · `alignment-2026-10-23.md` |
+| **本轮复核口径** | **核对日期 2026-10-27** · 阶段 1（**全只读对账**，不落任何代码）· 真源 = `Sea-RideTheWind_golang`（`go.mod:17` 锁 go-zero **v1.10.2**，框架源码在 `/Users/pr/go/pkg/mod/github.com/zeromicro/go-zero@v1.10.2/`）· **证据强度上限 L4**（本域有域级双侧活体探针） |
 
-## 1. 本域侧已知的 common 相关条目（**2026-10-27 抽取**，逐条证据以域台账为准）
+## 1. 本域侧已知的 common 相关条目（**2026-10-27 抽取 + 同日复核**）
 
 | 编号 | 摘要 | 落点 | 状态 | 域台账 |
 |---|---|---|---|---|
 | `E21` | `grpc-inprocess` 是 `test` scope ⇒ 运行时 classpath 上整个 artifact 消失 | `service/common`（pom 依赖作用域） | ✅ **已修**（global L12/L13 · 随 `4f839f9` 合入主干 ⇒ 真缺 = 0） | [`rpc.md`](rpc.md) |
-| `E62` | 共享层 `DeadlineQueryTimeoutInjector` 的**毫秒精度** + 「deadline 已过 ⇒ 不执行 SQL」两处行为变化 | `service/common` | ✅ **已修并合回主干**；✅ **favorite 域零条依赖旧行为** | [`rpc.md`](rpc.md) |
-| `E65` | 出向 gRPC 调用**不继承请求 deadline**（`RpcInterceptor` 只绑 `DeadlineState`、不绑 `GoStyleRequestDeadline` ⇒ `applyTo` 是 no-op） | `service/common` | 🔴 **OPEN** | [`rpc.md`](rpc.md) |
+| `E62` | 共享层 `DeadlineQueryTimeoutInjector` 的**毫秒精度** + 「deadline 已过 ⇒ 不执行 SQL」两处行为变化 | `service/common` | ✅ **已修并合回主干**；✅ **favorite 域零条依赖旧行为**（第十九轮实测） | [`rpc.md`](rpc.md) |
+| `E65` | 出向 gRPC 调用**不继承请求 deadline**（`RpcInterceptor` 只绑 `DeadlineState`、不绑 `GoStyleRequestDeadline` ⇒ `applyTo` 是 no-op） | `service/common` | 🔴 **OPEN**（**复核 2026-10-27 仍 OPEN**）：`favorite-rpc` 两处出向 client（`client/UserRpcClient.java:45-47` / `client/ArticleRpcClient.java:49-51`）在 gRPC 服务端路径上 `applyTo` **恒 no-op** ⇒ **零期限** | [`rpc.md`](rpc.md) |
 | `E68` | 「行号合法但指错文件」的错锚点判据（共享复核器第 4+ 层补判据） | 共享工具 | ✅ **已落**（`97a1fa8` / `0107845`）⇒ favorite 域**抓出 1 条**，已订正 | [`rpc.md`](rpc.md) |
-| （域侧 · 非编号） | `favorite-rpc` **缺 `baseline-version: 0`** ⇒ 同 `article-rpc` 的基线缺陷（起得来、首次查库才炸） | **域侧** `service/favorite/favorite-rpc/src/main/resources/application.yml` | 🔴 **未修**（AGENTS.md §3.5 已点名 favorite 是例外） | — |
+| （域侧 · 非编号） | `favorite-rpc` **缺 `baseline-version: 0`** ⇒ 同 `article-rpc` 的基线缺陷（起得来、首次查库才炸） | **域侧** `service/favorite/favorite-rpc/src/main/resources/application.yml:86-91` | 🔴 **未修**（**复核 2026-10-27 实测确认**：flyway 段 = `enabled:true` / `baseline-on-migrate:true` / `locations` / `schemas` / `table: flyway_schema_history_favorite` ⇒ **无 `baseline-version`**） | — |
+| （域侧 · 非编号） | `favorite-api` **无 `rag.http.go-form-limit.mode` 声明** ⇒ 落缺省 `off` ⇒ **无 form 参数闸门** | **域侧** `service/favorite/favorite-api/src/main/resources/application.yml` | 🔴 **未修**（**复核 2026-10-27**：实测无该键 ⇒ 默认 `OFF`；⇒ 与 Go 侧**不一致**，详见 §2 的 A3） | [`api.md`](api.md) |
 
 > ⚠️ **写死数字/状态的纪律**（AGENTS.md §6）：本表是**抽取快照**；每条**逐条证据**以「域台账」列指向的正文为准，
-> **状态必须带核对日期** ⇒ lane 复核后请就地更新本表并写入核对日期。
+> **状态必须带核对日期** ⇒ ✅ **2026-10-27 复核轮已就地订正/确认 6 条**（`E65` 复核仍 OPEN ＋ 两条域侧项复核 ＋ 三条已闭合项标注日期）。
+> ⇒ **教训**：抽取快照的「落点」与「状态」两列**都要独立复核**，落点尤其不能照抄。
 
-## 2. 9 条机制面轴 · 本域侧逐轴结论（**lane 的交付主体**）
+## 2. 9 条机制面轴 · 本域侧逐轴结论（**lane 的交付主体** · 核对日期 **2026-10-27**）
 
 | 轴 | 机制 | 本域侧的落点 / 调用 | 结论 | 证据强度 | 核对日期 |
 |---|---|---|---|---|---|
-| **A1** | 超时 / deadline | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A2** | gRPC 拦截器链 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A3** | HTTP 保护链 | 本域 `application.yml` 的 `rag.http.go-form-limit.mode` = **off（缺省）** ＋ 共享层 6 个类 | ⬜ **待 lane 复核**（共享层已验 ⇒ 缺「本域真实请求」证据） | — | — |
-| **A4** | 错误码 / envelope | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A5** | 端口治理 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A6** | errmsg 契约 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A7** | proto 契约 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A8** | DDL 时间列 / 类型 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A9** | trace / otel | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
+| **A1** | 超时 / deadline | 服务端：`favorite-rpc/.../application.yml:252` `observability.rpc-timeout: 2s` ＋ `FavoriteRpcApplication.java:101,108`（`server.intercept(...)`）；消费点 `service/common/.../spring/RpcServerInterceptorFactory.java:75-82`；出向 api：`favorite-api/.../client/FavoriteRpcClient.java:111`（`CLIENT_TIMEOUT_MILLIS=2000`）`:156-168`（`capByClientTimeout`）；出向 rpc：`favorite-rpc/.../client/UserRpcClient.java:45-47` / `ArticleRpcClient.java:49-51` | 🟡 **服务端 ✅ / 出向 🔴** —— **服务端一致**：Go `service/favorite/rpc/etc/favorite.yaml` 未配 `Timeout` ⇒ 走 go-zero default **2000ms**（`zrpc/config.go:46`）⇒ 两侧同为 **2s**；Go 侧 `favorite.go:40` `DisableNativeRpcTimeout` ＋ `:49` `NewUnaryServerInterceptor` ⇒ 唯一超时执行者，RAG 侧同构。<br>🔴 **出向 rpc 两处零期限**：`GoStyleRequestDeadline.begin` 的**唯一**主代码调用点在 `service/common/.../observability/HttpMiddleware.java:304`（HTTP worker）⇒ gRPC 服务端路径**永不绑定** ⇒ `applyTo` 恒返回原 stub ⇒ `favorite-rpc → user-rpc / article-rpc` **既无 2s 客户端超时、也无服务端 deadline 继承**；Go 侧 `zrpc/internal/client.go:115-117` + `clientinterceptors/timeoutinterceptor.go:17-29` **无条件**套 2s 且经 `depCtx` 传播父 deadline ⇒ **= `E65`**（落点共享层 ⇒ §4-G4-1） | **L3**（服务端侧：Go L1 ＋ RAG 装配面）<br>**L1**（出向侧：零期限是可静态判定的否定事实） | 2026-10-27 |
+| **A2** | gRPC 拦截器链 | `FavoriteRpcApplication.java:100-109`（`@Bean GrpcServerConfigurer` ⇒ `server.intercept(GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, protectionProps))`）＋ `:68-85`（`@Import RpcServerInterceptorFactory` / `ObservabilityProperties` / `GoStyleProtectionConfiguration`）；链序唯一定义点 `service/common/.../protection/GoStyleRpcProtectionChain.java:61-78`（recover → breaker → shedding → 业务观测） | ✅ **一致** —— Go `zrpc/server.go:144-167`（`setupUnaryInterceptors`：Trace/Recover/Stat/Prometheus/Breaker/Shedding/Timeout 逐条按 `c.Middlewares.*` 装配）⇒ RAG 三层 ＋ 业务观测层的**顺序与判据逐条对齐**；breaker key＝gRPC 全方法名（`GoStyleRpcBreakerInterceptor.java:117-129`）、shedding `fail()` 判据＝客户端 deadline 过期而非任意 `DEADLINE_EXCEEDED`（`GoStyleRpcSheddingInterceptor.java:56-66`）⇒ 与 Go 语义同。<br>🟡 Go 专属的 `Stat`/`Prometheus` 两层 RAG 改用 Micrometer 承接（**表达层**，非行为漂移） | **L3**（链序 ＋ `@Import`/`@Bean` 装配面扫描）；🟡 **本域缺「真触发」级装配测试**（见 §3-L-5） | 2026-10-27 |
+| **A3** | HTTP 保护链 | 共享层 `service/common/.../protection/{GoStyleBreakerFilter,GoStyleCpuSheddingFilter,GoStyleMaxBytesFilter,GoStyleMaxConnsFilter}.java`（靠 `favorite-api/.../FavoriteApiApplication.java:36-39` 的 `scanBasePackages` 含 `com.rag.common` ⇒ 四个 Filter ＋ `GoStyleTraceparentFilter` 全部注册）＋ 共享层 `service/common/.../http/{GoStyleFormValueLimitInterceptor,GoStyleFormLimitMode,GoStyleTomcatParameterLimitCustomizer}.java`；域侧 `favorite-api/.../application.yml` | 🔴 **漂移（form 值闸门）** —— ⚠️ **本轮实测推翻了 §2 原预填锚点**（原文：「两侧都不过 form 限 ⇒ 零触碰 ✅」）：**Go 侧有 2048 闸门**（`rest/httpx/util.go:15` `maxFormParamCount = 2048`；`favorite/api/internal/types.go:67` 的 `form:"folderId,string"` 触发 `ParseForm`）⇒ 超限时 Go 的 handler **自己捕获** `httpx.Parse` 的错 ⇒ `httpx.OkJsonCtx` ＋ `response.Response{Code: ErrorInvalidParam}` ⇒ **HTTP 200 + `{code:5003, msg:"参数错误", data:null}`**（`api/internal/handler/favorite/get_favorites_by_folder_handler.go:18-25`；**7 个 handler 全部同构**）⇒ ⚠️ 与「是否注册 `httpx.SetErrorHandler`」**无关**（favorite 未注册，但 handler 自捕获 ⇒ 仍走 200+5003）。<br>RAG 侧 `favorite-api` **未声明** `rag.http.go-form-limit.mode` ⇒ 落缺省 **`OFF`** ⇒ **无闸门** ⇒ 超限请求**照常成功**返回列表 ⇒ **两侧可观察行为分叉**。<br>✅ 其余四层（breaker / shedding / maxBytes / maxConns）阈值与拒绝形状（裸 503 / 裸 413 空 body）**与 Go 逐条同值同形** | **L1**（两侧逐行对照 ＋ 否定事实「本域无该键」） | 2026-10-27 |
+| **A4** | 错误码 / envelope | 共享层 `service/common/.../response/Response.java:14-17`（三字段、**无** `@JsonInclude` ⇒ `data:null` 也输出）＋ `service/common/.../http/GoStyleRouterErrorResponses.java:121-140`（404 = `text/plain; charset=utf-8` + `nosniff` + `"404 page not found\n"`；405 裸状态码 + `Allow`）；域侧 `favorite-api/.../advice/GlobalResponseAdvice.java:65-89` / `GlobalExceptionHandler.java:80-136,144-190,200-230` | ✅ **一致** —— Go `service/common/response/response.go:3-7`（`Code/Msg/Data` 三字段**无 omitempty**）⇒ `data:null` 一定出现；业务错误恒 **HTTP 200 + `{code,msg,data}`**；gRPC 失败经 `FavoriteGrpcError.bizCodeFromError`（先按 description 反查文案、再按 6 码白名单兜底）还原业务码 ⇒ 与 Go `service/favorite/common/errmsg.go:108-137`（`BizCodeFromError`）**同序**；404/405 裸响应形状与 Go `rest/router/patrouter.go:73,79-82` 一致。<br>🟡 **鉴权失败 body 形状**：Go 空 body（`rest/handler/authhandler.go:106-122`）/ 两字段无 `data`（`checkblacklist_middleware.go:39-45`）vs RAG 统一三字段（`FavoriteJwtAuthInterceptor.java:296-299`）⇒ HTTP 码与业务码 5004 对齐，**差 body 字段集合** ⇒ 已登记 `DEV-FAV-API-001`（✅ 2026-10-25 用户签字） | **L1**（两侧逐行对照） | 2026-10-27 |
+| **A5** | 端口治理 | `favorite-api/.../application.yml:51` `server.port: ${FAVORITE_API_PORT:18893}` ＋ `favorite-rpc/.../application.yml:104` `grpc.server.port: 8082` ＋ `:126` `reflection-service-enabled: false`；测试用专用段 `favorite-api/src/test/.../support/RealTomcatPort.java:61,64`（**21300–21399**，避开 OS 临时段 49152–65535） | 🟡 **OBS** —— ✅ **gRPC 8082 与 Go 完全一致**（Go `service/favorite/rpc/etc/favorite.yaml:2` `ListenOn: 0.0.0.0:8082`）；🟡 **HTTP 18893 ≠ Go 8890**（`service/favorite/api/etc/favorite.yaml:3` `Port: 8890`）⇒ 属 `Infrastructure.md §3` 给 favorite 域预占的号段（**已记录的部署口径差异**）。⚠️ **Go 的 DevServer 面（16062/16063 metrics/healthz/pprof）RAG 没有** ⇒ 已登记为域内未决项 **U9**（部署形态类，待拍板）。🔴 **`favorite-rpc` 无 `RealTomcatPort` 等价物** —— 其 gRPC 测试用 `port=0`（OS 临时段）⇒ **暴露面未治理** | **L3**（yaml 静态 ＋ 测试支撑类源码；未实测端口占用） | 2026-10-27 |
+| **A6** | errmsg 契约 | `favorite-common/.../errmsg/FavoriteErrorCode.java:41-108`（24 个枚举，声明顺序＝Go const 块顺序）· `FavoriteErrorMessages.java:44-93`（24 条文案，未知码回落 `"FAIL"`）· `FavoriteGrpcError.java:94-98`（`grpcError`＝标准码＋文案 description）`:129-142`（文案反查表，`putIfAbsent`＝Go 的 first-write-wins）`:234-242`（`extractStatus` **单层**判定，不沿 cause 链） | ✅ **一致** —— 24 个码值与文案与 Go `service/favorite/common/errmsg.go:8-41`（const）`:43-76`（codeMsg）**逐条相同**（含 5002＝英文 `"not found"`、5004＝`"未登录或登录已失效"`）；`bizCodeFromError` 判定顺序＝null→200 / 非 status→1015 / description 反查 / 6 码兜底 / default→1015，与 Go `:108-137` **同序**；`FAILED_PRECONDITION` **刻意不入**白名单（还原 5304 只能靠文案）⇒ 与 Go 一致 | **L4**（`bash tools/errmsg-probe/favorite/run-parity.sh` ⇒ **EXIT=0**：Go sha256 == Java sha256 == `03be9aa6e55916453e015e0b9c11139d1a64f7118256ab5da46939a139150f81`，**108 行** = CONST ＋ TABLE ＋ FALLBACK ＋ WIRE ＋ BIZCODE；真源 sha256 校验通过）<br>ℹ️ OBS 段 2 条已知不可达差异仍在登记状态（`obs_custom_grpcstatus` Go=5007/Java=1015 · `obs_ok_status` Go=200/Java=5001） | 2026-10-27 |
+| **A7** | proto 契约 | `service/favorite/favorite-proto/src/main/proto/favorite.proto` | ✅ **一致** —— 逐条对照：10 个 message（`FavoriteFolder`/`FavoriteItem`/`CreateFavoriteFolderReq·Resp`/`CreateFavoriteReq·Resp`/`DeleteFavoriteFolderReq·Resp`/`DeleteFavoriteReq·Resp`/`UpdateFavoriteFolderNameReq·Resp`/`GetFavoriteFoldersReq·Resp`/`GetFavoritesByFolderReq·Resp`）＋ `service FavoriteService` 的 7 个 rpc ⇒ **message 名 / 字段名 / 字段号 / 类型 / 顺序全部一致**；唯一差异在 option 块：Go `option go_package = ".";` ⇒ RAG 换成 `option java_package = "com.rag.favorite.favorite.proto";` ＋ `option java_multiple_files = true;`（**表达层**，Go 专用项 Java 不消费）；注释与空行也保持。 | **L1**（逐行对照）；📌 **本域有现成双侧探针** `tools/proto-wire-probe/favorite/run.sh`（Go 侧跑真源生成码 ＋ sha256 校验，Java 侧跑**真实** `favorite-proto` 生成码的 `FavoriteProtoWireParityTest`，两侧对同一份冻结 `expected.txt`）⇒ **可升 L4**，本轮未跑 | 2026-10-27 |
+| **A8** | DDL 时间列 / 类型 | `favorite-rpc/.../db/migration/V1__create_favorite_folder.sql:14-40` · `V2__create_favorite_item.sql:24-69` · `V3__create_favorite_fact_outbox.sql:25,32,34` · `V6__align_favorite_schema_with_go.sql:19-165` · `V7__align_favorite_outbox_time_columns_with_go.sql:31-32`；jsonb typeHandler `favorite-rpc/.../mapper/JsonbTypeHandler.java:33-48` | ✅ **一致** —— 时间列全 `timestamptz`；`jsonb` **保留为 jsonb**（轴描述的「jsonb⇒text」**在本域不适用**：`favorite_item` 无 jsonb 列，`outbox.payload` 是 jsonb 且有 TypeHandler）⇒ 与 Go `type:jsonb` 一致；outbox 时间列已按 Go **去掉 DEFAULT**（V7）。<br>🔴 **但 `baseline-version: 0` 缺**（`application.yml:86-91`）⇒ 非空 schema 下 **V1 被整条跳过** ⇒ **域侧自修**（见 §3-L-1）。<br>ℹ️ **V7 的论证**（质量很高，供参照）：Go 侧 gorm tag 是 `autoCreateTime`/`autoUpdateTime`（**无 default tag**）⇒ AutoMigrate 产物无 DEFAULT；且 **GORM 的 AutoMigrate 会主动把已存在的 DEFAULT 删掉**（`gorm.io/gorm@v1.31.1/migrator/migrator.go:543-550` 的「default value → null」分支）⇒ Go 侧 live schema 确定无 DEFAULT ⇒ V7 用 `ALTER COLUMN … DROP DEFAULT` 对齐（理由：Go 侧漏绑时间列会**硬失败**，RAG 侧留 DEFAULT 会**静默兜底**成 DB 时钟 ⇒ 两边分叉且无告警） | **L4**（`bash tools/ddl-parity-probe/favorite/run.sh` ⇒ **EXIT=0**：MAIN 指纹 `fd69ec7e5854b1cc37734c706fcdebf8c39bcf45a1b9765384d6725b4e6854ab` **两侧一致** ＋ OBS 段 **13 条逐条一致**（12 命名差异 ＋ 1 条表达层 `::text` 归一）；Go 侧跑真源 `InitDB()`（AutoMigrate ＋ 4 个真源 .sql，**逐字节复制 + sha256 校验**），RAG 侧跑**真 Flyway V1..V7**，两侧共用同一份 dump 查询）<br>＋ 配置面 L3 | 2026-10-27 |
+| **A9** | trace / otel | 共享层 `service/common/.../observability/ObservabilityConstants.java:57-116`（属性名 = **`sea.error.kind` / `sea.biz_code` / `sea.biz_msg` / `sea.timeout` / `sea.slow` / `sea.duration_ms`**）+ `RpcInterceptor.java:207-336`（SERVER span ＋ `rpc.system`/`rpc.method`/`rpc.grpc.status_code`）+ `service/common/.../http/GoStyleTraceparentFilter.java:188-191`（`@Component` ＋ `@Order(HIGHEST_PRECEDENCE+3)`） | 🔴 **漂移（域侧业务 span 全缺）** —— 共享层的 span 属性与 `Traceparent` 传播**已就位**；但 **favorite 域自己的业务 span 全缺**：Go 侧 favorite-api 7 个（`FavoriteAPI.CreateFavoriteFolder` 等，`api/internal/logic/favorite/*.go:33,42-48`）＋ favorite-rpc 7 个 logic span（`rpc/internal/logic/*.go:42-49`）＋ 2 个依赖 span（`Dependency.User.GetUser` / `Dependency.Article.GetArticle`，`rpc/internal/logic/helper.go:93,96,127,131`）及 `biz.user_id` / `biz.folder_id` / `biz.favorite_id` / `biz.target_id` / `biz.target_type` / `biz.folder_name` / `biz.article_id` 属性 ⇒ RAG 侧**一个都没有** ⇒ 遥测里 favorite 的业务维度全空（`favorite/**` 全域 grep `otel|OpenTelemetry|Span|Tracer` 仅 2 处命中，均为固定依赖 touch）。<br>⇒ **域侧可自修**（域内私有 `FavoriteSpans` 类，**不动共享层**）<br>ℹ️ **属性名是 `biz.*`（本域）**：共享层通用前缀是 `sea.*`；`audit.*` 只存在于 users/admin 域 ⇒ **本轴定义的「`audit.*`」措辞对本域 = N/A** | **L1**（两侧逐行；「没有 spanBuilder」是可静态判定的否定事实） | 2026-10-27 |
 
-> **A3 已预填一条实测锚点（2026-10-27 核）** —— X-6（`DRIFT-HOTAPI-030`）共享层 6 个类已落码
-> （`GoStyleFormValues` / `GoStyleFormLimitMode` / `GoStyleFormLimitExceededException` /
-> `GoStyleFormValueLimitInterceptor` / `GoStyleFormLimitWebMvcConfig` / `GoStyleTomcatParameterLimitCustomizer`）；
-> 本域 `go-form-limit.mode` = **off（缺省）**；Go 侧：**未注册**（真源 `service/favorite/api/` 无 `httpx.SetErrorHandler`）⇒ Go 侧 = **400 + Go 原文**；⚠️ **RAG 侧 X-6 也刻意置 `off`** ⇒ **两侧都不过 form 限 ⇒ 零触碰** ✅
-> ⇒ ⚠️ **共享层已验 ≠ 本域已验** ⇒ lane 仍须在本域**跑一次真实请求**确认拒绝形状。
+> **A3 原预填锚点的复核结论（2026-10-27 核 · 原文保留供追溯）**
+> 原文断言：「本域 `go-form-limit.mode` = **off（缺省）**；Go 侧：**未注册** ⇒ Go 侧 = **400 + Go 原文**；⚠️ **RAG 侧 X-6 也刻意置 `off`** ⇒ **两侧都不过 form 限 ⇒ 零触碰** ✅」
+> ⚠️ **该锚点已过期并订正**：
+> ① **Go 侧 favorite 确实未注册 `httpx.SetErrorHandler`**（实测：全仓仅 `comment/api/commentservice.go:47` ＋ `hot/api/hotcenter.go:53` 注册）—— 这一半成立；
+> ② ❌ **「Go 侧 = 400 + 原文」不成立** —— favorite 的 **7 个 handler 自己捕获** `httpx.Parse` 的错 ⇒ 走 `httpx.OkJsonCtx` ＋ `{code:5003}` ⇒ **200 + 业务信封**（`get_favorites_by_folder_handler.go:18-25`）；
+> ③ ❌ **「两侧都不过 form 限 ⇒ 零触碰」不成立** —— Go 侧**有** 2048 闸门（`rest/httpx/util.go:15`）⇒ RAG 侧无闸门 ⇒ **两侧行为分叉** ⇒ 🔴 本域自修项（见 §3-L-3）。
+> ⇒ **教训**：**「未注册 `SetErrorHandler`」不能推出「400 + 原文」** —— 要看**handler 自己有没有捕获** `httpx.Parse` 的错；favorite 与 article 在这一点上**恰好相反**（article 用 `httpx.ErrorCtx` ⇒ 400；favorite 自捕获 ⇒ 200+5003）。
 
 ## 3. 域侧能自修的（**本域直接修**，不要甩给 G4）
 
-- `favorite-rpc` 的 `baseline-version: 0`（**域侧 yaml ⇒ 本 lane 自修**）
-- `favorite-api` 的 A3 复核：⚠️ **X-6 对 favorite 刻意 `off`** ⇒ 本域**不引入** form 限；本 lane 只需确认「共享层的 `off` 分支在本域确实不生效」
+| # | 事项 | 落点 | 依据 / 修法 |
+|---|---|---|---|
+| **L-1** | 🔴 **补 `baseline-version: 0`** | `service/favorite/favorite-rpc/src/main/resources/application.yml:86-91` | 域侧 yaml ⇒ 域侧自改；写法照抄 `comment-rpc/.../application.yml:90-109` 的既有注释块（含「为什么必须钉 0」的论证） |
+| **L-2** | 🔴 **favorite-rpc 两处出向 client 补 2s 客户端封顶** | `favorite-rpc/.../client/UserRpcClient.java:45-47` · `ArticleRpcClient.java:49-51` | 照抄**本域现成实现** `favorite-api/.../client/FavoriteRpcClient.java:111,156-168`（`capByClientTimeout`）⇒ **不发明第三种写法**（AGENTS.md §3.2）；Go 出处 `zrpc/internal/client.go:115-117`。⚠️ **只解决「2s 封顶」这一半**；「继承服务端 deadline」那一半落点在共享层 ⇒ §4-G4-1 |
+| **L-3** | 🔴 **form 值闸门：装上 ＋ 形状对齐 `200 + {code:5003}`** | ① `favorite-api/.../application.yml`（声明 `rag.http.go-form-limit.mode`）② `favorite-api/.../advice/GlobalExceptionHandler.java`（新增 `@ExceptionHandler(GoStyleFormLimitExceededException.class)` ⇒ **200 ＋ `{code:5003, "参数错误", null}`**） | ⚠️ **不要用 `raw` 档**（那是 400+原文，Go 侧 favorite 不是这个形状）⇒ 共享层现有三档 `off|raw|envelope` 都对不上 ⇒ **本域自己写 handler**（域内文件，不动共享层）。⚠️ 现状 `handleAny(Exception)` 会把它渲染成 **500+5001** ⇒ 必须显式加 handler 才等于 Go |
+| **L-4** | 🔴 **补 favorite 域自己的 otel span ＋ `biz.*` 属性** | `favorite-api/.../service/*`（7 个 Service）＋ `favorite-rpc/.../service/*`（`FavoriteDomainService` / `FavoriteUserGuard` / `FavoriteArticleSnapshotResolver`） | Go 清单：`api/internal/logic/favorite/*.go:33,42-48`（7 个 `FavoriteAPI.*` span）· `rpc/internal/logic/*.go:42-49`（7 个 `FavoriteRPC.*` span）· `rpc/internal/logic/helper.go:93,96,127,131`（2 个 `Dependency.*` span）。**仓内已有正确先例**：`service/users/admin/admin-rpc/.../AdminSpans.java:91`（域内私有 `ATTR_*` 常量类）⇒ 建同款 `FavoriteSpans` |
+| **L-5** | 🟡 **favorite-rpc 的测试端口未治理** | `favorite-rpc/src/test/**` | `RealTomcatPort`（专用段 21300–21399）**只存在于 favorite-api** ⇒ favorite-rpc 的 gRPC 测试用 `port=0`（OS 临时段）⇒ 暴露面未治理 ⇒ 域内补一个等价支撑类（**域内文件**） |
+| **L-6** | 🟡 **A7 proto 回归网**（本域**有**现成探针 `tools/proto-wire-probe/favorite/` ⇒ 已可跑） | `favorite-proto` ＋ `favorite-rpc/src/test/**` | 探针已存在 ⇒ **只需把它挂进收口回归的例行执行**（否则冻结值漂移无人发现）⇒ 域侧自修 |
 
 ## 4. 需转派 **G4**（`align/g4-service-common`）的（**本域只登记：现象 + 证据 + 建议修法**）
 
-- `E65` ⇒ 落点 `service/common` ⇒ **派单 **G4****（favorite 是**发现方**，但修法不在本域）
+> 派单走**实时轨**（`session send` ＋ 反馈单 7 项）＋ **正式轨**（本表）⇒ 两轨内容须一致（AGENTS.md §5.3e）。
+> ⚠️ **落点必须独立核准**（不要照抄台账快照）—— 本轮已实测两处落点与快照不同。
+
+| # | 事项 | 落点 | 建议修法（**两侧都应是 Y**） |
+|---|---|---|---|
+| **G4-1** | 🔴 **`E65`**：出向 gRPC **不继承请求 deadline**（服务端路径恒 no-op）＋ 缺**共享的客户端 2s 封顶** | `service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:110-120`（`applyTo`）＋ `service/common/.../observability/HttpMiddleware.java:304`（`begin` 的唯一主代码调用点，只在 HTTP worker） | **两侧都应是 Y**：Go 侧 zrpc client **无条件**套 2s（`zrpc/internal/client.go:115-117`）且父 deadline 经 `depCtx` 传播（`rpc/internal/logic/helper.go:98,133`）⇒ 共享层应让 **gRPC 服务端路径也把 deadline 写进 `GoStyleRequestDeadline`**（或让 client 直接读 `DeadlineState`），并提供**一个共享的客户端 2s 封顶**（目前只有 favorite-api 有域内私有实现 `FavoriteRpcClient.capByClientTimeout` ⇒ 10 域各写一遍 = 10 个可能写错的地方）。**影响面**：全部 rpc → 下游的出向调用（10 域）。**是否阻塞本波**：否 |
+| **G4-2** | 🔴 **MyBatis-Plus 自动收集 `Interceptor[]` Bean 的机制** —— 全仓**无任何测试**证明 `@Import` 的 `DeadlineQueryTimeoutInjector` 真进了 MyBatis-Plus 执行链 | `service/common/src/main/java/com/rag/common/persistence/DeadlineQueryTimeoutInjector.java` ＋ MyBatis-Plus 自动配置 | **实测缺口**：`CommentSqlDeadlinePrecisionGateTest.java:130-142` 走**手工** `new Configuration()` ＋ `configuration.addInterceptor(new DeadlineQueryTimeoutInjector())` ⇒ **绕开 Spring 与 MyBatis-Plus 自动配置**；`FavoriteSqlTimeoutProductionPathTest.java:161` 也是手工 `addInterceptor(PROBE)`（PROBE 是测试自己的探针）⇒ **两条测试都证明不了「`@Import` 的 Bean 被自动收集」**（AGENTS.md §3.3.3：注解存在 ≠ 机制生效）。⇒ 建议：在**共享层**补一条**真 Spring 上下文 + 真 mapper + 真 PG** 的测试，一次性为 10 个 rpc 域钉死该机制。**是否阻塞本波**：是（它决定 A1 在 SQL 侧是否真生效） |
+| **G4-3** | 🟡 **A9 轴定义的措辞缺陷**（共享面 `_cross`） | `docs/DRIFT/_cross/domain-common-lanes.md` 的 A9 行 | 轴定义写「span 属性 **`audit.*`**」⇒ 实测：**共享层 = `sea.*`**（`ObservabilityConstants.java:57-116`）· **admin = `audit.*`** · **favorite = `biz.*`** ⇒ 轴定义应按域区分 ⇒ **共享面文件，G3 不写** ⇒ 已请 G4 登记进 `global/vs-common.md` 的建议项段 |
+| **G4-4** | 🟡 **`GoStyleFormLimitMode` 的档位覆盖面** | `service/common/src/main/java/com/rag/common/http/GoStyleFormLimitMode.java:59-66`（`off`/`raw`/`envelope`） | 现有三档对不上 favorite 的真实形状（**200 + `{code:5003}`**）⇒ 但 ⚠️ **默认 `OFF` 是刻意设计**（同文件 `:41-49` 的 javadoc：「favorite 不在 global 的写权范围 ⇒ 共享层对它必须零影响 ⇒ 默认 `OFF`」）⇒ **不要**为 favorite 提「共享层加一档」的改动 ⇒ favorite 走 §3-L-3 的域侧自修。⇒ 若要共享层加档，须先明确「域自定义业务码」是否属于共享层职责 |
 
 ## 5. 交付物清单
 
-- [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
-- [ ] **9 条轴**逐轴填表（§2）：结论 ✅/🔴/🟡/N/A ＋ **证据强度** ＋ **核对日期**
-- [ ] **两侧同时跑**的探针（AGENTS.md §3.3）—— 只跑 RAG 的探针**不算数**
-- [ ] §1 的每一条**重新核对状态**并写回（带核对日期）
-- [ ] §3 的域侧修法**落码 + 守门**（含变异验证）
-- [ ] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）
-- [ ] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
+- [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ⚠️ **本轮为阶段 1（只读），未起进程**；域内已有 `FavoriteSqlTimeoutProductionPathTest`（真 Spring 上下文）等资产，**待阶段 2 收口回归统一跑**
+- [x] **9 条轴**逐轴填表（§2）：结论 ✅/🔴/🟡/N/A ＋ **证据强度** ＋ **核对日期**（**2026-10-27**）
+- [x] **两侧同时跑**的探针（AGENTS.md §3.3）—— ✅ `tools/errmsg-probe/favorite/run-parity.sh` **EXIT=0**（A6 ⇒ **L4**）· ✅ `tools/ddl-parity-probe/favorite/run.sh` **EXIT=0**（A8 ⇒ **L4**）· ⬜ `tools/proto-wire-probe/favorite/run.sh`（A7 可升 L4，**本轮未跑**）
+- [x] §1 的每一条**重新核对状态**并写回（带核对日期）
+- [ ] §3 的域侧修法**落码 + 守门**（含变异验证）—— **阶段 2 才做**
+- [ ] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）—— 🔴 **`_README.md` 属 SHARED 面 ⇒ G3 不写**（AGENTS.md §5.3e）⇒ 派单走**实时轨**（`session send`），`_README.md` 由整合者合并后统一更新
+- [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）

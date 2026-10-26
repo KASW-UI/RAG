@@ -1,73 +1,82 @@
-<!-- @new 2026-10-27 · `comment-common` lane 台账 · 主会话（Jason 指定）建 lane 时预填 · 基线 = `do-my-own-gh` @ 2026-10-27  · **2026-10-27 02:0x 改：归属 G3 波次工作树（`align/g3-article-comment-favorite-hot`）** -->
+<!-- @new 2026-10-27 · `comment-common` lane 台账 · 主会话（Jason 指定）建 lane 时预填 · 基线 = `do-my-own-gh` @ 2026-10-27  · **2026-10-27 02:0x 改：归属 G3 波次工作树（`align/g3-article-comment-favorite-hot`）**  · **2026-10-27 03:0x G3 阶段 1 复核轮：§1 状态复核 ＋ §2 九轴逐轴填实 ＋ §3 自修项 ＋ §4 派单项（全部带核对日期与证据强度）** -->
 
 # `comment-common` lane 台账 —— 「comment ↔ `service/common`」跨层对账
 
 > **lane 语义**：本域与**共享机制层 `service/common`** 之间的漂移对账
 > —— ⚠️ **不是**「本域自己的 `-common` 库」（那是 `service/comment/comment-common`，台账见 [`common.md`](common.md)）
 > **总纲** ⇒ [`docs/DRIFT/_cross/domain-common-lanes.md`](../_cross/domain-common-lanes.md)（**G1~G4 波次映射** · 9 条机制面轴 · 写权边界 · 跨域未闭合项）
-> ⇒ **本文件由 `G3` 波次工作树独占**（**按域各一份** ⇒ 跨树文件级零重叠）；**共享面（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json`）合并后统一更新**（AGENTS.md §5.3d）
+> ⇒ **本文件由 `G3` 波次工作树独占**（**按域各一份** ⇒ 跨树文件级零重叠）；**共享面（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**`）合并后统一更新**（AGENTS.md §5.3d）
 
 ## 0. lane 身份
 
 | 项 | 值 |
 |---|---|
 | lane（历史名） | `comment-common`（**原第 2/10 条**） |
-| **现分支 / 工作树** | **`align/g3-article-comment-favorite-hot`** / `/Users/pr/Documents/java&golang/RAG.worktrees/g3-article-comment-favorite-hot`<br>⚠️ 原 `align/comment-common` 工作树已于 **2026-10-27 01:44 撤掉** ⇒ 粒度从「一个域一棵」改为「**一个波次一棵**」 |
-| 基点 | **`do-my-own-gh` @ 2026-10-27**（= lane 脚手架落地那次提交；此前已合并 25/25 分支 + 全量回归 BUILD SUCCESS）⇒ 主干再前进时 lane `merge` 一次即可（**文件级不重叠 ⇒ 零冲突**） |
+| **现分支 / 工作树** | **`align/g3-article-comment-favorite-hot`** / `/Users/pr/Documents/java&golang/RAG.worktrees/g3-article-comment-favorite-hot` |
+| 基点 | **`do-my-own-gh` @ 2026-10-27**（= lane 脚手架落地那次提交）⇒ 主干再前进时 lane `merge` 一次即可（**文件级不重叠 ⇒ 零冲突**） |
 | 本域模块 | `service/comment/{comment-api, comment-rpc, comment-common, comment-proto}` |
 | 域侧台账 | [`api.md`](api.md) · [`rpc.md`](rpc.md) · [`common.md`](common.md) · [`proto.md`](proto.md) |
 | **写权** | ✅ 可写**本域** `service/comment/**` ＋ `docs/DRIFT/comment/**`；🔴 **`service/common/**` 只读**（只有 `align/g4-service-common` 能写）；⚠️ 旧的 `align/global` 全域 lane **已弃用** |
 | common 侧机制面台账 | [`docs/DRIFT/common/`](../common/)：`deadline.md` · `http.md` · `protection.md` · `audit.md` · `alignment-2026-10-23.md` |
+| **本轮复核口径** | **核对日期 2026-10-27** · 阶段 1（**全只读对账**，不落任何代码）· 真源 = `Sea-RideTheWind_golang`（`go.mod:17` 锁 go-zero **v1.10.2**）· **证据强度上限 L3**（本域**无**域级双侧活体探针 —— 仓内 `tools/*-probe/` 的域级实例**只覆盖 favorite**） |
 
-## 1. 本域侧已知的 common 相关条目（**2026-10-27 抽取**，逐条证据以域台账为准）
+## 1. 本域侧已知的 common 相关条目（**2026-10-27 抽取 + 同日复核**）
 
 | 编号 | 摘要 | 落点 | 状态 | 域台账 |
 |---|---|---|---|---|
-| `D8` / `D9` | = global 台账 **E65**（出向 gRPC 不继承请求 deadline）/ **E66**（Redis 写不绑 deadline） | `service/common`（`RpcInterceptor` / Redis 拦截器） | 🔴 **OPEN**（两侧同编号 ⇒ 销账别当两条） | [`rpc.md`](rpc.md) |
+| `D8` / `D9` | = global 台账 **E65**（出向 gRPC 不继承请求 deadline）/ **E66**（Redis 写不绑 deadline） | `service/common`（`RpcInterceptor` / Redis 拦截器） | 🔴 **OPEN**（两侧同编号 ⇒ **销账别当两条**）<br>**E65 本轮复核确认仍 OPEN 且 comment 域受害**：`comment-rpc/.../client/ArticleRpcClient.java:65-72` 与 `client/MessageRpcClient.java:63-83` **裸调**（无 `withDeadlineAfter`）⇒ 出向零期限（核对日期 **2026-10-27**） | [`rpc.md`](rpc.md) |
 | `E30` / `E38` / `E46` / `E47` | **只读指针（归属 global）**：超时未继承客户端 deadline / 业务层吞掉「SQL 被 deadline 取消」等 | `service/common` | 🟡 **只读**（按**编号**指，不按行号） | [`rpc.md`](rpc.md) |
 | `PIT-GLOBAL-051` | 与「SQL 被 deadline 取消」同族的踩坑记录 | `service/common` | 🟡 只读指针 | [`rpc.md`](rpc.md) |
 | `SD-2026-10-24-CAND-08` | 保护层覆盖范围：**未注册路径**上的 MaxBytes（Go 的 chain 只在 `bindRoute` 内拼装 ⇒ 服务端从不返回 413） | — | ✅ **已签字偏离**（2026-10-24 用户 Jason）⇒ **不重复质疑** | [`api.md`](api.md) |
-| `DRIFT-HOTAPI-030` | Tomcat 参数个数口径 | `service/common`（X-6） | ✅ **已落地** | [`api.md`](api.md) |
+| `DRIFT-HOTAPI-030` | Tomcat 参数个数口径 | `service/common`（X-6） | ✅ **已落地**<br>✅ **本域侧已验**（核对日期 **2026-10-27**）：`comment-api/.../application.yml:125` = `mode: envelope` ⇒ **与 Go 同向**（Go 侧 `service/comment/api/commentservice.go:47` **注册了** `httpx.SetErrorHandler` ⇒ 解析失败走业务信封 ⇒ **200 + `{code:5001}`**；实测全仓**仅** comment 与 hot 两个 api 注册） | [`api.md`](api.md) |
+| （域侧 · 非编号） | `comment-rpc` **缺 `baseline-version: 0`** ⇒ 起得来、首次查库才炸 | **域侧** `service/comment/comment-rpc/src/main/resources/application.yml` | ✅ **不缺**（核对日期 **2026-10-27** 实测）：`:109 baseline-version: 0` ＋ `:112 table: flyway_schema_history_comment` ⇒ **本域无此缺陷**（⚠️ 与 `article-rpc` / `favorite-rpc` 不同）⇒ 本条**销账** | — |
+| （域侧 · 非编号） | `comment-rpc` 缺 `DeadlineQueryTimeoutInjector` 的 MyBatis-Plus 自动装配证明 | **域侧测试** `CommentSqlDeadlinePrecisionGateTest.java:130-142` | 🔴 **证明缺口**（见 §2 的 A1 与 §4 的 G4-1）：该测试走**手工** `new Configuration()` ＋ `addInterceptor(new DeadlineQueryTimeoutInjector())` ⇒ **绕开 Spring 与 MyBatis-Plus 自动配置** ⇒ **证明不了「`@Import` 的 Bean 被自动收集」** | [`rpc.md`](rpc.md) |
 
 > ⚠️ **写死数字/状态的纪律**（AGENTS.md §6）：本表是**抽取快照**；每条**逐条证据**以「域台账」列指向的正文为准，
-> **状态必须带核对日期** ⇒ lane 复核后请就地更新本表并写入核对日期。
+> **状态必须带核对日期** ⇒ ✅ **2026-10-27 复核轮已就地订正/确认 7 条**（`D8`/`D9` 的 E65 受害面 ＋ `DRIFT-HOTAPI-030` 本域侧已验 ＋ `baseline-version` **销账** ＋ 新增 MyBatis-Plus 装配证明缺口）。
+> ⇒ **教训**：抽取快照的「落点」与「状态」两列**都要独立复核**，落点尤其不能照抄。
 
-## 2. 9 条机制面轴 · 本域侧逐轴结论（**lane 的交付主体**）
+## 2. 9 条机制面轴 · 本域侧逐轴结论（**lane 的交付主体** · 核对日期 **2026-10-27**）
 
 | 轴 | 机制 | 本域侧的落点 / 调用 | 结论 | 证据强度 | 核对日期 |
 |---|---|---|---|---|---|
-| **A1** | 超时 / deadline | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A2** | gRPC 拦截器链 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A3** | HTTP 保护链 | 本域 `application.yml` 的 `rag.http.go-form-limit.mode` = **envelope** ＋ 共享层 6 个类 | ⬜ **待 lane 复核**（共享层已验 ⇒ 缺「本域真实请求」证据） | — | — |
-| **A4** | 错误码 / envelope | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A5** | 端口治理 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A6** | errmsg 契约 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A7** | proto 契约 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A8** | DDL 时间列 / 类型 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A9** | trace / otel | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-
-> **A3 已预填一条实测锚点（2026-10-27 核）** —— X-6（`DRIFT-HOTAPI-030`）共享层 6 个类已落码
-> （`GoStyleFormValues` / `GoStyleFormLimitMode` / `GoStyleFormLimitExceededException` /
-> `GoStyleFormValueLimitInterceptor` / `GoStyleFormLimitWebMvcConfig` / `GoStyleTomcatParameterLimitCustomizer`）；
-> 本域 `go-form-limit.mode` = **envelope**；Go 侧：**已注册**（真源 `service/comment/api/commentservice.go:47` `httpx.SetErrorHandler`）⇒ Go 侧解析失败 = **200 + 业务信封** ⇒ 与 RAG `mode=envelope` 同向 ✅
-> ⇒ ⚠️ **共享层已验 ≠ 本域已验** ⇒ lane 仍须在本域**跑一次真实请求**确认拒绝形状。
+| **A1** | 超时 / deadline | 服务端：`comment-rpc/.../application.yml:303-304` `rpc-timeout: 2s` ＋ `CommentRpcApplication.java:91-100`（`server.intercept(...)`）；消费点 `service/common/.../spring/RpcServerInterceptorFactory.java:75-82`；超时执行 `service/common/.../observability/RpcInterceptor.java:232-237`（`min(服务端预算, 客户端剩余)`）`:258-288`（到点 `close(DEADLINE_EXCEEDED)`）；SQL 侧 `service/common/.../persistence/DeadlineQueryTimeoutInjector.java:164-176`（三路径）`:207-229`（毫秒探测）；装配 `CommentRpcApplication.java:67-68`（`@Import`）；api→rpc 出向 `comment-api/.../client/CommentRpcClient.java:96-102` | 🔴 **漂移（限 rpc 出向）** —— ✅ **服务端一致**：Go `service/comment/rpc/etc/comment.yaml` **未配 `Timeout`** ⇒ 走 go-zero default **2000ms**（`zrpc/config.go:46`）⇒ 两侧同为 2s；Go 侧 `comment.go:33` `DisableNativeRpcTimeout` ＋ `:54` `NewUnaryServerInterceptor` ⇒ 唯一超时执行者，RAG 同构；`RpcInterceptor.java:232-237` 的「取小」语义 ≡ Go `context.WithTimeout` 的父子取早。<br>✅ **api→rpc 出向一致**：`CommentRpcClient.java:96-102` 取 `min(2000ms, 剩余预算)`。<br>🔴 **rpc→article-rpc / message-rpc 出向零期限**：`comment-rpc/.../client/ArticleRpcClient.java:65-72`（`stub.getArticle(...)` 裸调）与 `client/MessageRpcClient.java:63-83`（`stub.sendNotification(...)` 裸调）**都没有 `withDeadlineAfter`**（全域 grep 只命中 `comment-api` 的 `CommentRpcClient`）⇒ Go 侧 `zrpc/internal/client.go:115-117` **无条件**套 2s ⇒ **行为分叉**（Go 到点即失败不写；RAG 照跑会写）。<br>🔴 **附带缺口**：SQL deadline 的 MyBatis-Plus 装配链**无任何运行证据**（见 §4-G4-1） | **L1**（两侧逐行；「没有 `withDeadlineAfter`」是可静态判定的否定事实） | 2026-10-27 |
+| **A2** | gRPC 拦截器链 | 链定义 `service/common/.../protection/GoStyleRpcProtectionChain.java:61-78`（recover → breaker → shedding → 业务）；装配 `CommentRpcApplication.java:91-100`；client breaker `service/common/.../protection/GoStyleGrpcClientBreakerInterceptor.java:103-106`（`@Component` ＋ **`@GrpcGlobalClientInterceptor`** ⇒ **只能靠组件扫描生效**） | 🔴 **漂移（限 rpc 出向 client breaker）** —— ✅ **服务端链一致**：Go `zrpc/server.go:144-167`（Trace→Recover→Stat→Prometheus→Breaker→Shedding→Timeout 逐条按 `c.Middlewares.*` 装配）⇒ RAG recover→breaker→shedding→业务 ＋ 阈值（`cpuThreshold=900`／`cpuSource=SYSTEM`，`GoStyleProtectionProperties.java:151-168`）≡ `zrpc/config.go:47`；Go 侧 native timeout 被 `DisableNativeRpcTimeout` 置 0 ⇒ RAG 不挂 native timeout 也一致。<br>🔴 **comment-rpc 出向 client breaker 缺失**：`CommentRpcApplication.java:53` 的 `@SpringBootApplication` **无 `scanBasePackages`**（实测；`:54` 只有 `@ConfigurationPropertiesScan`）＋ `:56-76` 的 `@Import` 显式清单**不含** `GoStyleGrpcClientBreakerInterceptor` ⇒ 该 `@GrpcGlobalClientInterceptor` **不在容器里** ⇒ comment-rpc→article-rpc/message-rpc **无熔断**；Go 侧两个 client 的 breaker 默认开（`zrpc/internal/config.go:14` ＋ `zrpc/internal/client.go:113`）。<br>✅ **comment-api 侧在位**：扫 `com.rag.common`（`CommentApiApplication.java:68-71`）⇒ client breaker 生效 | **L1**（链定义点 ＋ 装配点 ＋ `@Component` 生效条件三处逐行读）；🟡 域内 `CommentRpcGrpcInterceptorWiringTest.java:149-155` 会起**真 gRPC server** 验服务端链，但**本轮未跑** ⇒ 不算 L4 | 2026-10-27 |
+| **A3** | HTTP 保护链 | 共享层 `service/common/.../protection/{GoStyleMaxConnsFilter,GoStyleBreakerFilter,GoStyleCpuSheddingFilter,GoStyleMaxBytesFilter}.java`（靠 `comment-api` 扫 `com.rag.common` 生效）＋ `service/common/.../http/{GoStyleFormValueLimitInterceptor,GoStyleFormLimitWebMvcConfig,GoStyleTomcatParameterLimitCustomizer}.java`；域侧 `comment-api/.../application.yml:122-125`（`mode: envelope`）`:126-134`（四层阈值）`:44-47`（容器三旋钮） | ✅ **一致** —— 四层阈值与 Go tag 默认**逐条同值**（`rest/config.go:52-56`：`MaxConns=10000` / `MaxBytes=1048576` / `CpuThreshold=900`）且 comment-api **显式写出同样数值**；**拒绝形状**：RAG 四层为**裸状态码 + 空 body**（`GoStyleProtectionProperties.java:53-57`）≡ Go 四层同为裸 `w.WriteHeader(code)`（`breakerhandler.go:18-42` 裸 503 · `maxconnshandler.go:12,23,34` 裸 503 · `maxbyteshandler.go:10,19,22` 裸 413 · `sheddinghandler.go:22,34-42` 裸 503）；**相对顺序** MaxConns<Breaker<Shedding<MaxBytes ≡ `rest/engine.go:134-168`；**form 计数口径**：RAG `GoStyleFormValues` 数**非空值**（空值跳过）≡ Go `rest/httpx/util.go:44-45`（空值 `continue` 不计数）；form 上限 **2048** ≡ `rest/httpx/util.go:15` `maxFormParamCount = 2048`；容器旋钮 `max-parameter-count: 2048` / `relaxed-query-chars: [ ]` / `max-http-request-header-size: 1028KB`。<br>ℹ️ Go 另有 Trace/Log/Prometheus/Recover/Metrics 五层，RAG 无同构实现（Spring 无对应物）⇒ **不改变可观察契约** | **L1** | 2026-10-27 |
+| **A4** | 错误码 / envelope | 共享层 `service/common/.../response/Response.java:14-17`（三字段、**无** `@JsonInclude`）＋ `service/common/.../http/GoStyleRouterErrorResponses.java:121-140`；域侧 `comment-api/.../advice/CommentGlobalExceptionHandler.java:79-83`（401 **空 body**）`:100-104`（业务异常 → 200 + envelope）`:170-193`（解析失败 → 200 + 5001）`:236-249`（404/405）`:273-280`（兜底 → 200 + 5001）；gRPC 载体 `comment-common/.../errmsg/CommentGrpcError.java:116-121,139-145,194-226` | ✅ **一致** —— Go `service/common/response/response.go:3-7`（三字段**无 omitempty** ⇒ `data:null` 一定出现）≡ RAG；业务错误恒 **HTTP 200 + `{code,msg,data}`** ≡ Go `commentservice.go:47-60`（ErrorHandler **恒 `http.StatusOK`**）；401/404/405 三种例外形状逐条对上（Go `rest/handler/authhandler.go` 裸状态码无 body ＋ `rest/router/patrouter.go:73,79-82`）。<br>ℹ️ **净差异仅 `grpc-status` 数值载体**：Go 把业务码直接写进 `grpc-status`（`codes.Code(5003)`）⇒ `grpc-status: 5003`；grpc-java 只能发 17 个标准码 ⇒ RAG 把业务码移到**自定义 trailer**（`rag-comment-biz-code`）、文案仍在 description ⇒ **业务码与文案对客户端仍无损**，但 `grpc-status` 字段的数值不可复原（`CommentGrpcError.java:32-57` 自记为平台强制偏离） | **L1** | 2026-10-27 |
+| **A5** | 端口治理 | `comment-api/.../application.yml:30-31`（`server.port: 8888`）`:32`（`address: 0.0.0.0`）＋ `comment-rpc/.../application.yml:175-178`（`grpc.server.port: 9001`）`:38-39`（`web-application-type: none`）`:255-259`（management 暴露面） | 🟡 **OBS** —— ✅ **业务端口逐字一致**：Go `service/comment/api/etc/commentservice.yaml:2-3`（`Host: 0.0.0.0` / `Port: 8888`）＋ `service/comment/rpc/etc/comment.yaml:2`（`ListenOn: 0.0.0.0:9001`）；且 `comment-rpc/.../application.yml:183-194` 记录了 devh `discovery:///` **三斜杠**要求（`CommentRpcProductionAddressTest` 守门）。<br>🔴 **Go 的 `:9091` promhttp 暴露面 RAG 没有**：Go `comment/rpc/comment.go:38-41` 起独立 goroutine 暴露 `/metrics`（5 个 `comment_*` 向量，`internal/metrics/metrics.go:42-49`）；RAG comment-rpc 是 `web-application-type: none` ⇒ **无任何 HTTP connector**，且**未配** `management.server.port` ⇒ `management.endpoints.web.exposure.include` 在无 web server 时不可达。<br>**N/A（`RealTomcatPort` 子项）**：该工具类**只存在于** `service/favorite/favorite-api/src/test/.../support/RealTomcatPort.java` ⇒ comment 域测试全用 MockMvc、**未使用 RANDOM_PORT** ⇒ 该子项对本域不适用 | **L1** | 2026-10-27 |
+| **A6** | errmsg 契约 | `comment-common/.../errmsg/CommentErrorCode.java:29-116`（27 个枚举，声明序＝Go const 块序）· `CommentErrorMessages.java:40-75`（27 条文案 `LinkedHashMap`，序同 Go）`:83-89`（`getMsg` 未知码回退 `"FAIL"`）· `CommentGrpcError.java:116-121,139-145,194-226` · `CommentCodeError.java` | ✅ **一致** —— 27 个码值与文案与 Go `service/comment/common/errmsg/errmsg.go:37-65`（const）`:67-95`（`codeMsg`）**逐条同值同字**（含「系统内部错误」「评论区不存在」「评论不存在」「输入有误」）；未知码回退 `"FAIL"` ≡ Go `:97-103`（`codeMsg[Error]`）；`CodeError.Error()` 格式 `"ErrCode:%d, Errmsg:%s"` ≡ Go `:15-17`；gRPC 编码方式 ≡ Go `:33-35`（`NewGrpcErr`） | **L1**（两侧逐条对照）；📌 本域**无** errmsg 探针实例（`tools/errmsg-probe/` 只有顶层 article ＋ `favorite/`）⇒ **可复制 article 的骨架到 `comment/` 升 L4** | 2026-10-27 |
+| **A7** | proto 契约 | `service/comment/comment-proto/src/main/proto/comment.proto` | 🟡 **OBS（表达层归一）** —— 逐条比对 **4 个 enum（值 0/1/2/3、0/1/2、0~8+99、0~4）＋ 13 个 message ＋ 全部字段名/字段号/类型 ＋ 7 个 rpc 方法** ⇒ **行为层 100% 一致**；差异仅 option/包名块：Go `proto/comment.proto:4` `package pb` → RAG `:3` `package comment`；`option go_package` → `java_package` ＋ `java_multiple_files`。<br>ℹ️ **`package` 归一会改 gRPC 方法全名**（`/pb.CommentService/CreateComment` → `/comment.CommentService/CreateComment`）⇒ wire 上方法路径不同 ⇒ 属 AGENTS.md §0 第 1 条说的「**proto `package` 归一（表达层）**」家族 ⇒ **对拍看到它变红先确认是不是签字项，不要当新回归去「修」**。⚠️ **但 comment 的 proto 也无机器回归网**（`check-proto-static.sh` 只覆盖 user/admin/task） | **L1** | 2026-10-27 |
+| **A8** | DDL 时间列 / 类型 | 迁移 `service/comment/comment-rpc/src/main/resources/db/migration/V1..V8`；Flyway `comment-rpc/.../application.yml:87-112`（`:109 baseline-version: 0` ＋ `:112 table: flyway_schema_history_comment`）；jsonb `comment-rpc/.../mapper/JsonbTypeHandler.java:39-69`（`PGobject` ＋ `type=jsonb`）；守门 `CommentFlywaySharedSchemaGateTest.java:78-97`（断言 V1~V7 七张表真实存在）`:124-125`（断言 BASELINE 行的 version 必须是 `"0"`）`:165-169`（断言 `spring.flyway.baseline-version == "0"`） | ✅ **一致** —— 时间列**全部 `TIMESTAMPTZ`**（V1:27,28 / V2:22,23 / V3:18,19 / V4:24,25 / V5:34 / V6:24）✅；**jsonb 未降级为 text**：三处保持 `JSONB`（V3:17 `comment_content.meta`、V6:19 `payload`、V6:23 `delivery_envelope`）＋ `JsonbTypeHandler` ⇒ 与 Go `type:jsonb` 一致（⚠️ 轴提示写的「jsonb⇒text」**在本域不成立**）；长度/约束（`VARCHAR(32/64/128)`、`CHAR(64)`、唯一索引 `idx_target`/`idx_user_comment_like`/`idx_user_comment_report`/`uk_comment_fact_stream`、普通索引 `idx_target_root_time`）与 Go struct tag 逐条对上。<br>⚠️ **`DEFAULT CURRENT_TIMESTAMP` 残留**属 AGENTS.md §0 第 2 条列明的「**刻意保留**」项（不是漂移）。<br>✅ **`baseline-version: 0` 已在位** ⇒ 非空 schema 时 BASELINE 标记打在 version 0 ⇒ **V1 照常执行** ⇒ **无「V1 被跳过 ⇒ `subject` 表建不出来」的缺陷**（本条与 `article-rpc`/`favorite-rpc` 不同 ⇒ **销账**）。<br>ℹ️ **本域 `report_record` 表 RAG 有、Go 无** ⇒ 属**已签字偏离 `SD-2026-10-24-CAND-02`**（Go 侧 `AutoMigrate` 列表不含 `&ReportRecord{}` ⇒ 表从不被建出 ⇒ Go 侧举报功能实际报 `relation "report_record" does not exist`）⇒ **不是新回归，不要去「修」** | **L3**（迁移文件 ＋ yaml 静态实测）＋ L1（列级对照）<br>⚠️ **DDL 列级双侧活体对拍在本域未做**（`check-ddl-static.py --domain comment` ⇒ **EXIT=2「列集合不一致」= 那张签字表**，不是缺陷） | 2026-10-27 |
+| **A9** | trace / otel | 全局 SDK `service/common/.../observability/GoStyleOtelAutoConfiguration.java:51-83`（`BeanFactoryPostProcessor` ＋ `AutoConfiguration.imports:1` ⇒ **不经组件扫描** ⇒ comment-rpc / comment-api 都生效）；Kafka 消费 span `comment-rpc/.../service/CommentAuditListener.java:94-101`（`MqConsumer.traceConsumer(Context.current(), "comment-rpc", "AuditConsumer.Consume", attrs, …)`）；共享实现 `service/common/.../observability/MqConsumer.java:71-123`；Traceparent `service/common/.../http/GoStyleTraceparentFilter.java:188-191` | 🔴 **漂移（两处）** —— ① 🔴 **`messaging.destination` 落的是未解析的占位符字面量**：`CommentAuditListener.java:96` 写的是 **Java 字符串字面量** `attrs.put("messaging.destination", "${comment.kafka.audit-topic}")` ⇒ **Spring 的 `${}` 只在 `@Value`/`@ConfigurationProperties`/yaml 里被解析**，Java 字面量里的 `${}` **永远不会被替换** ⇒ span 上落的是这串占位文本（既不是 Go 的 `"comment_audit"`，也不是真 topic 名）。⚠️ **同文件 `:90` 的 `@KafkaListener(topics = "${comment.kafka.audit-topic}")` 却是正确用法** ⇒ **同一文件里一处解析、一处不解析的疏漏**（Go 侧 `rpc/internal/mqs/audit_consumer.go:34` 传的是字面量 `"comment_audit"`）。<br>② 🔴 **5 个 `audit.*` 业务 span 在 comment 域整体缺失**：Go 在 create/delete/manage/report/update_subject_state 五个 logic 各起 span（`Action-Comment-Create` 等）并写 `audit.operator_id`/`comment_id`/`target_type`/`target_id`/`root_id`/`parent_id`/`reason`/`action_type`/`target_state`（`create_comment_logic.go:41-43,55-61` 等）⇒ RAG 侧 `service/comment` 下 grep `Action-Comment|spanBuilder` **0 命中** ⇒ **连 span 名都没有**。<br>✅ **Traceparent 传播在位**（Go `rest/handler/tracehandler.go:61` `propagator.Inject(spanCtx, HeaderCarrier(w.Header()))` 确实写响应头） | **L1**（两侧逐行；「没有 spanBuilder」与「字面量不被解析」都是可静态判定的否定事实） | 2026-10-27 |
 
 ## 3. 域侧能自修的（**本域直接修**，不要甩给 G4）
 
-- `comment-api` 的 A3 接线复核：`mode=envelope` ⇒ 拒绝形状 = **200 + 业务信封**（文案在**域自己的**错误码表里）
-- 本域调用 `service/common` 的**调用方式 / 配置 / 断言 / 装配**问题 ⇒ 域侧自修（**不要甩给 global**）
+| # | 事项 | 落点 | 依据 / 修法 |
+|---|---|---|---|
+| **C-1** | 🔴 **comment-rpc → article-rpc / message-rpc 出向加 deadline** | `comment-rpc/.../client/ArticleRpcClient.java:65-72` · `client/MessageRpcClient.java:63-83` | 照抄**同域现成实现** `comment-api/.../CommentRpcClient.java:96-102`（`min(2000ms, 剩余预算)`）⇒ **不发明第三种范式**（AGENTS.md §3.2；该写法在 `task-api`/`article-api` 亦有同款）。Go 出处 `zrpc/internal/client.go:115-117`。⚠️ 只解决「2s 封顶」这一半；「继承服务端 deadline」那一半落点在共享层 ⇒ §4-G4-3 |
+| **C-2** | 🔴 **`messaging.destination` 占位符未解析** | `comment-rpc/.../service/CommentAuditListener.java:96` | 改成**注入配置值**（`props.getKafka().getAuditTopic()`）或按 Go 的字面量 `"comment_audit"`。⚠️ **取值口径需先定**：Go 用的是 `"comment_audit"`（**不是真 topic 名** `comment-audit-topic`）⇒ 建议**照抄 Go 字面量**（遥测是契约）⇒ 需在同域台账登记该口径 |
+| **C-3** | 🔴 **comment 域 5 个 `audit.*` span 缺失** | `comment-rpc/src/main/java/.../service/`（建同款 `CommentSpans`） | Go 清单：`create/delete/manage/report/update_subject_state_logic.go` 共 9 个属性；**仓内已有正确先例** `service/users/admin/admin-rpc/.../AdminSpans.java:91`（域内私有 `ATTR_*` 常量类）⇒ **域内文件，不动共享层** |
+| **C-4** | 🟡 **`:9091` metrics 暴露面** | `comment-rpc` 的部署形态 | Go `comment.go:38-41` 的独立 goroutine ⇒ RAG `web-application-type: none` ⇒ 无对应面 ⇒ 属**部署形态类**，与本域已登记的 U9 同款 ⇒ 需拍板（**不是代码缺陷**） |
+| **C-5** | 🟡 **A6/A7 升 L4 的探针** | `tools/errmsg-probe/{go,java}` → 复制出 `comment/` | 探针骨架已有（顶层 article ＋ `favorite/`）⇒ 复制一份到 `comment/` 即可拿 A6 的 L4 证据（A7 的 wire 探针同理）⇒ **域内可自建** |
 
 ## 4. 需转派 **G4**（`align/g4-service-common`）的（**本域只登记：现象 + 证据 + 建议修法**）
 
-- `D8`/`D9`（E65/E66）⇒ 落点 `service/common` ⇒ **派单 **G4****
-- `E30`/`E38`/`E46`/`E47` ⇒ global 域内编号 ⇒ 本域**只读指针**，不重复登记
+> 派单走**实时轨**（`session send` ＋ 反馈单 7 项）＋ **正式轨**（本表）⇒ 两轨内容须一致（AGENTS.md §5.3e）。
+> ⚠️ **落点必须独立核准**（不要照抄台账快照）。
+
+| # | 事项 | 落点 | 建议修法（**两侧都应是 Y**） |
+|---|---|---|---|
+| **G4-1** | 🔴 **MyBatis-Plus 自动收集 `Interceptor[]` Bean 的机制** —— 全仓**无任何测试**证明 `@Import` 的 `DeadlineQueryTimeoutInjector` 真进了 MyBatis-Plus 执行链 | `service/common/src/main/java/com/rag/common/persistence/DeadlineQueryTimeoutInjector.java` ＋ MyBatis-Plus 自动配置 | **实测缺口**：`CommentSqlDeadlinePrecisionGateTest.java:130-142` 走**手工** `new Configuration()` ＋ `configuration.addInterceptor(new DeadlineQueryTimeoutInjector())` ⇒ **绕开 Spring 与 MyBatis-Plus 自动配置**；`FavoriteSqlTimeoutProductionPathTest.java:161` 也是手工 `addInterceptor(PROBE)`（PROBE 是测试自己的探针）⇒ **两条测试都证明不了「`@Import` 的 Bean 被自动收集」**（AGENTS.md §3.3.3：注解存在 ≠ 机制生效）。⇒ 建议：在**共享层**补一条**真 Spring 上下文 + 真 mapper + 真 PG** 的测试，一次性为 10 个 rpc 域钉死该机制。**影响面**：全部 rpc 域（同一机制）。**是否阻塞本波**：**是**（它直接决定 A1 在 SQL 侧是否真生效） |
+| **G4-2** | 🔴 **`GoStyleGrpcClientBreakerInterceptor` 在 rpc 侧无装配路径** | `service/common/src/main/java/com/rag/common/protection/GoStyleGrpcClientBreakerInterceptor.java:103-106` ＋ `GoStyleProtectionConfiguration.java:51-53` | 它是 `@Component @GrpcGlobalClientInterceptor` ⇒ **只能组件扫描**；而 rpc 进程**刻意不扫 `com.rag.common`**（`CommentRpcApplication.java:53` 无 `scanBasePackages`，`:56-76` 的 `@Import` 清单不含它）⇒ **comment-rpc 这类进程永远拿不到 client breaker**（Go 侧 client breaker 默认开：`zrpc/internal/config.go:14` ＋ `zrpc/internal/client.go:113`）⇒ **出向调用无熔断**。⇒ 建议：共享层提供**一个 rpc 进程可用的装配入口**（例如把该拦截器改为可被 `@Import` 引入，或提供 `@Configuration` 供 rpc 侧显式导入），并补一条「rpc 侧出向调用确实经过 breaker」的**装配层**测试（AGENTS.md §3.3.3）。**影响面**：全部 rpc 域 ＋ 它们的出向调用。**是否阻塞本波**：否 |
+| **G4-3** | 🔴 **`E65`**：出向 gRPC **不继承请求 deadline**（服务端路径恒 no-op）＋ 缺**共享的客户端 2s 封顶** | `service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:110-120` ＋ `service/common/.../observability/HttpMiddleware.java:304`（`begin` 的唯一主代码调用点，只在 HTTP worker） | **两侧都应是 Y**：Go 侧 zrpc client **无条件**套 2s（`zrpc/internal/client.go:115-117`）且父 deadline 经 `depCtx` 传播 ⇒ 共享层应让 **gRPC 服务端路径也把 deadline 写进 `GoStyleRequestDeadline`**（或让 client 直接读 `DeadlineState`），并提供**一个共享的客户端 2s 封顶**（目前只有 favorite-api 有域内私有实现 ⇒ 10 域各写一遍 = 10 个可能写错的地方）。**影响面**：全部 rpc → 下游的出向调用（10 域）。**是否阻塞本波**：否 |
 
 ## 5. 交付物清单
 
-- [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
-- [ ] **9 条轴**逐轴填表（§2）：结论 ✅/🔴/🟡/N/A ＋ **证据强度** ＋ **核对日期**
-- [ ] **两侧同时跑**的探针（AGENTS.md §3.3）—— 只跑 RAG 的探针**不算数**
-- [ ] §1 的每一条**重新核对状态**并写回（带核对日期）
-- [ ] §3 的域侧修法**落码 + 守门**（含变异验证）
-- [ ] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）
-- [ ] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
+- [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ⚠️ **本轮为阶段 1（只读），未起进程**；域内已有 `CommentRpcGrpcInterceptorWiringTest`（真 gRPC server）、`CommentFlywaySharedSchemaGateTest`（真 PG ＋ 真 Flyway）等资产，**待阶段 2 收口回归统一跑**
+- [x] **9 条轴**逐轴填表（§2）：结论 ✅/🔴/🟡/N/A ＋ **证据强度** ＋ **核对日期**（**2026-10-27**）
+- [ ] **两侧同时跑**的探针（AGENTS.md §3.3）—— ⬜ **本域无现成域级探针**（`tools/*-probe/` 的域级实例只覆盖 favorite）⇒ 结论最高 **L3** ⇒ 已在 §3-C-5 登记「复制探针骨架」的自修项
+- [x] §1 的每一条**重新核对状态**并写回（带核对日期）
+- [ ] §3 的域侧修法**落码 + 守门**（含变异验证）—— **阶段 2 才做**
+- [ ] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md`）—— 🔴 `global/_README.md` §七之二属 SHARED 面 ⇒ G3 不写 ⇒ 派单走**实时轨**（`session send`）
+- [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
