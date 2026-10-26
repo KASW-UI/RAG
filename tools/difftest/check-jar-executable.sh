@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 守门：**每个 api 模块的 jar 必须是可执行的 Spring Boot fat jar**
+# 守门：**每个 api + rpc 模块的 jar 必须是可执行的 Spring Boot fat jar**
 #
 # 缺陷形态（DRIFT-MSG-V-028 的同款，2026-10-24 在 message 域首次实测到）：
 #   pom 里**没有 <build> 段** ⇒ 没有 spring-boot-maven-plugin 的 repackage
@@ -13,9 +13,23 @@
 #   这三者全部发生在**容器/测试环境**里，从来没碰过 jar 本身。
 #   message-api 的这个缺陷潜伏了很久就是这样：每一轮验证都在容器里跑。
 #
+# ⚠️ **2026-10-26（L15）：rpc 模块纳入枚举 —— 存量缺口**
+#   本脚本原先只枚举 `*-api` ⇒ **10 个 rpc 模块的产物可执行性从来没有被任何守门查过**
+#   ⇒ 第 27 轮 L11 **手工**查 pom 时**漏报了 hot-rpc**（手工必漏 ⇒ 这正是要机器守门的理由）。
+#   实测（改前）：`hot-rpc`（58 KB）与 `task-rpc`（83 KB）**无 Main-Class** ⇒ `java -jar` 起不来。
+#   ⚠️ 这 2 个模块的 pom 由 L13 / L14 修 ⇒ **本脚本在它们修好之前对它们报红是正确的**
+#      （守门该报的必须报；见 docs/DRIFT/global/lanes/L15-rpcboot-tools.md）。
+#
+# ⚠️ **`service/common` 刻意不在枚举里**：
+#   它既不是 `*-api` 也不是 `*-rpc` ⇒ **是 library 模块**（被别的模块依赖）
+#   ⇒ **不得**给它加 `spring-boot-maven-plugin` 的 repackage ⇒ 否则打出的 jar 变成 fat jar
+#   ⇒ 会**污染下游依赖**（依赖方拿到一个内嵌了全部依赖的胖 jar）。
+#   ⇒ 下一个人若要扩大枚举范围，**请保持 `service/common` 在外**。
+#
 # 用法：
-#   bash tools/difftest/check-jar-executable.sh            # 检查全部 api 模块
-#   bash tools/difftest/check-jar-executable.sh service/like/like-api   # 只查指定模块
+#   bash tools/difftest/check-jar-executable.sh                  # 检查全部 api + rpc 模块
+#   bash tools/difftest/check-jar-executable.sh service/like/like-api    # 只查指定模块
+#   bash tools/difftest/check-jar-executable.sh service/task/task-rpc    # 只查指定 rpc 模块
 #
 # 退出码：0 = 全部可执行；1 = 至少一个模块的 jar 不可执行（不可部署）
 # =============================================================================
@@ -24,18 +38,19 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-# 全部 api 模块（含 users 域的二级路径）
+# 全部 api + rpc 模块（含 users 域的二级路径）
+# ⚠️ **不要**把 `service/common` 加进来 —— 它是 library 模块，repackage 会污染下游依赖（见上）。
 if [[ $# -gt 0 ]]; then
   MODULES=("$@")
 else
   MODULES=()
   while IFS= read -r d; do MODULES+=("$d"); done < <(
-    ls -d service/*/*-api service/users/*/*-api 2>/dev/null | sort
+    ls -d service/*/*-api service/*/*-rpc service/users/*/*-api service/users/*/*-rpc 2>/dev/null | sort
   )
 fi
 
 fail=0
-printf '检查 %d 个 api 模块的产物可执行性\n' "${#MODULES[@]}"
+printf '检查 %d 个 api + rpc 模块的产物可执行性\n' "${#MODULES[@]}"
 for d in "${MODULES[@]}"; do
   jar="$(ls "$d"/target/*.jar 2>/dev/null | grep -v -- '-original' | head -1)"
   if [[ -z "$jar" ]]; then
@@ -71,5 +86,5 @@ EOF
   exit 1
 fi
 
-echo "全部 api 模块的 jar 均可执行 ✓"
+echo "全部 api + rpc 模块的 jar 均可执行 ✓"
 exit 0

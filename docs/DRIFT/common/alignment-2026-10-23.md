@@ -572,7 +572,7 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 | 1 | **`hot-rpc` 缺 `GrpcServerConfigurer`** | `align/hot` | DRIFT-COMMON-004。`align/hot` 当前 3 个 commit 都在 `hot-api` 侧，**未触及 hot-rpc 的 Application**。修法 + 必备测试见 §一·五 |
 | 2 | **`UserDomainService.java:115` 的 javadoc 假断言** | `align/users-user` | DRIFT-COMMON-006 连带项：声称 deadline 由「`markExpired`（RpcInterceptor 调度）」设置，实际是 `onHalfClose` 的 `bindToCurrent` |
 | 3 | **DRIFT-COMMON-005 的定案** | 跨域（common + users） | 决策 2 关闭条件：`bindToCurrent` 签名是否允许破坏性变更 |
-| 4 | **`align/like` 的 `SD-2026-10-23-09` 描述订正** | `align/like` | 签字理由说 `GoStyleRequestDeadline` 只暴露毫秒，实际它内部是**纳秒**；真正只有毫秒的是 `DeadlineState` |
+| 4 | **`align/like` 的 `SD-2026-10-24-10` 描述订正** | `align/like` | 签字理由说 `GoStyleRequestDeadline` 只暴露毫秒，实际它内部是**纳秒**；真正只有毫秒的是 `DeadlineState`。⚠️ **2026-10-25 订正编号**：原文写 `SD-2026-10-23-09` ⇒ **记错了** —— `-09` 是**同档的另一条**（worker 池饱和的**裸 503**），与 deadline **无关** ⇒ 正确编号 = **`SD-2026-10-24-10`** ⇒ 勿按编号盲查 |
 | 5 | **守门脚本进 AGENTS.md §7.2 工具表** | 主会话 | 决策 1 的配套；不进表 = 不可被发现 |
 | 6 | **`align/message` ↔ `align/users-user` 合并冲突** | 主会话 | 两者都改了 `service/common/protection/GoStyleAdaptiveShedder.java` / `GoStyleCpuSheddingFilter.java` / `GoStyleRpcSheddingInterceptor.java` |
 | 7 | **共享面索引更新** | 主会话 | `_INDEX.md` / `AGENTS.md` / `_MANIFEST.json`（§5.3：本域一律不碰） |
@@ -597,7 +597,7 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 |---|---|---|---|
 | 1 | **`hot-rpc` 缺 `GrpcServerConfigurer`** | `align/hot` | ✅ **已关闭** —— 由 hot 域正式认领（该域三份台账此前**零提及**这条缺口）并修复。<br>修法：补 `@Bean GrpcServerConfigurer` → `server.intercept(GoStyleRpcProtectionChain.build(...))` + `@Import(GoStyleProtectionConfiguration.class)`。<br>守门：新增 `HotGrpcInterceptorWiringTest`（3 条，**行为级**）+ **两档变异**（MUT-1 摘 Bean / **MUT-2 摘 `server.intercept` 而保留 Bean** ⇒ 2 条行为断言转红）。<br>`tools/difftest/check-grpc-interceptor-wiring.py` ⇒ **`EXIT=0`**（修前 `EXIT=1`）。<br>逐条证据 ⇒ [`docs/DRIFT/hot/rpc.md`](../hot/rpc.md) 第十二轮 |
 | 3 | **`DRIFT-COMMON-005` 的定案**（`bindToCurrent` 签名是否允许破坏性变更） | 跨域（common + users） | ⏸ **仍未决** —— 本轮**未动**（属「同时动 common + admin-rpc + user-rpc」的破坏性变更，**不是单域可决**） |
-| 4 | **`align/like` 的 `SD-2026-10-23-09` 描述订正** | `align/like` | ⏸ **仍未决** —— like 域本轮未动 |
+| 4 | **`align/like` 的 `SD-2026-10-24-10` 描述订正** | `align/like` | ✅ **已订正**（2026-10-25 · 第二十六轮 L5）—— 编号订正为 **`SD-2026-10-24-10`**（原文 `SD-2026-10-23-09` **记错** ⇒ `-09` 是 worker 池裸 503 那条）；签字理由订正为「**只读 API（`remainingMillis()`）只有毫秒粒度**」—— ⚠️ **不是「整个公开 API 只有毫秒」**（`applyTo(stub)` 是**纳秒**的，`GoStyleRequestDeadline.java:110-120`）；真实限制在**只读那一侧**：`applyTo` **没有「上界」概念** ⇒ 表达不了 `min(上限, 剩余)`（`LikeRpcClient.java:108-121`）⇒ 落点 ⇒ [`docs/Intentional_Deviations/like/api.md`](../../Intentional_Deviations/like/api.md) |
 | 9 | **社区消费者：Go 用 `like`，RAG 不用** | `align/like` / `align/favorite` | ⏸ **仍未决** —— 与 `DRIFT-LIKE-003`（事实投递链路，末端不在任何仓）是同一条，**favorite 域本轮未做** |
 
 ✅ **已关闭**：#1（hot-rpc 接线）。

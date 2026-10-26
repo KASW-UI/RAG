@@ -66,11 +66,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <tr><td>{@code #inviteExpiryJudgedOnAbsoluteInstantNotWallClock}</td>
  *       <td>列退回 {@code timestamp}（偏移量被 PG 丢弃 ⇒ 绝对时刻错位）</td>
  *       <td><b>实体类型退回 {@code LocalDateTime} 会编译不过</b>（编译期守卫，不是运行期）</td></tr>
+ *   <tr><td>{@code #userExtraInfoColumnIsTextAndAcceptsJsonbHostilePayload}
+ *       （<b>第十八轮新增</b>）</td>
+ *       <td>{@code users_user.extra_info} 退回 jsonb、或 {@code updateUser} 重新 CAST 成 jsonb</td>
+ *       <td>无</td></tr>
+ *   <tr><td>{@code #userExtraInfoLandsVerbatimNotJsonbNormalized}
+ *       （<b>第十八轮新增</b>）</td>
+ *       <td>同上（用<b>落库字节</b>这条更细的轴再验一次）</td>
+ *       <td>无</td></tr>
  * </table>
  *
- * <p>⇒ 三条<b>叠加</b>覆盖：列类型由第 1 条确定性守住，
+ * <p>⇒ 五条<b>叠加</b>覆盖：列类型由第 1 条确定性守住，
  * 跨时区语义由第 3 条在 JVM 时区 ≠ 写入时区时守住（用 {@link #pickForeignZone()} 保证偏移量非零），
- * 边界 payload 由第 2 条守住。
+ * 边界 payload 由第 2 条守住，
+ * <b>另一张表的同名列</b>（{@code users_user.extra_info}）由第 4、5 条守住。
  */
 @SpringBootTest(
         classes = AdminRpcApplication.class,
@@ -105,6 +114,8 @@ class AdminRpcColumnTypeParityTest {
     @Autowired private javax.sql.DataSource dataSource;
 
     private static final long ADMIN_UID = 8801L;
+    /** {@code users_user} 的测试 uid（admin-rpc 也读写这张表，见 AdminSchemaBootstrap 的类注释）。 */
+    private static final long USER_UID = 8802L;
 
     // ==================================================================
     // 1. 列类型：库里的真实 schema，不是脚本文本
@@ -213,7 +224,7 @@ class AdminRpcColumnTypeParityTest {
         // 若哪天 Jackson 不再把 U+0000 转义成 \u0000，下面这行会抛异常 ⇒ 测试会失败提醒人重判。
         assertThrows(Exception.class,
                 () -> jdbcTemplate.queryForObject("select cast(? as jsonb)", String.class, "{\"k\":\"\\u0000\"}"),
-                "前提断言：这段字面量必须能被 jsonb 拒收（22P02 unsupported Unicode escape sequence），"
+                "前提断言：这段字面量必须能被 jsonb 拒收（22P05 unsupported Unicode escape sequence），"
                         + "否则本用例测不到任何东西");
 
         // 真业务链：updateSelf 原本写死 `extra_info = CAST({0} AS jsonb)`，jsonb 列会直接拒收。
@@ -222,7 +233,7 @@ class AdminRpcColumnTypeParityTest {
 
         String stored = jdbcTemplate.queryForObject(
                 "select extra_info from admin_admin where uid = ?", String.class, ADMIN_UID);
-        assertNotNull(stored, "行必须还在：修复前这里会因 22P02 整条 UPDATE 失败");
+        assertNotNull(stored, "行必须还在：修复前这里会因 22P05 整条 UPDATE 失败");
         assertTrue(stored.contains("\\u0000"),
                 "库里应存着 Jackson 转义后的 6 个 ASCII 字符 \\u0000（不是裸 NUL 字节）。实际 = " + stored);
 
@@ -274,6 +285,103 @@ class AdminRpcColumnTypeParityTest {
     }
 
     // ==================================================================
+    // 4. users_user.extra_info —— **另一张表的同名列，也是 text**（第十八轮）
+    // ==================================================================
+
+    /**
+     * 🔴 <b>第十八轮（global · B10）</b>：{@code users_user.extra_info} 与
+     * {@code admin_admin.extra_info} 是<b>两张表</b>的<b>同一个列名</b>，
+     * 而 2026-10-23 的 {@code DRIFT-ARPC-004①} 只改了<b>后一张</b>。
+     *
+     * <p><b>被漏掉的那一列，DDL 其实早已是 text</b>：
+     * <ul>
+     *   <li>{@code users-common/.../db/01_create_user.sql:41} → {@code extra_info  TEXT}</li>
+     *   <li>{@code users-common/.../db/01_create_user.sql:103} →
+     *       {@code ALTER TABLE users_user ALTER COLUMN extra_info TYPE text USING extra_info::text;}
+     *       （<b>每次启动都重放</b> ⇒ 幂等自愈 ⇒ 这一列<b>不可能</b>是 jsonb）</li>
+     * </ul>
+     * ⇒ 而 {@code AdminDomainService.updateUser} 里的
+     * {@code wrapper.setSql("extra_info = CAST({0} AS jsonb)", ...)}
+     * 及其注释「<b>该列仍是 jsonb</b>」<b>都是失效的前提</b>。
+     *
+     * <p><b>可观察差异</b>（真 PG 16 实测，见本方法的「自证」断言）：
+     * <pre>
+     *   同一份 payload（extra_info 含 U+0000）：
+     *     Go  → 落库成功，存下 14 字节的 {"k":"\u0000"}
+     *     RAG → CAST 成 jsonb ⇒ PG 拒收
+     *            ERROR:  unsupported Unicode escape sequence
+     *            DETAIL: \u0000 cannot be converted to text.
+     *            SQLSTATE = 22P05 (json_bad_unicode_escape)
+     * </pre>
+     * ⚠️ <b>SQLSTATE 是 22P05，不是 22P02</b>（{@code invalid_text_representation}）——
+     * 台账与旧注释写的是 22P02，<b>本轮已订正</b>。
+     *
+     * <p><b>Go 出处</b>：{@code service/user/admin/rpc/internal/model/data_model.go:43}
+     * {@code ExtraInfo map[string]string `gorm:"column:extra_info;serializer:json"`}
+     * ⇒ GORM 的 serializer 产出<b>字符串</b> ⇒ 落进 text 列 ⇒ <b>没有 jsonb 那层校验</b>。
+     */
+    @Test
+    @DisplayName("✅ users_user.extra_info 是 text：updateUser 收下 jsonb 会拒收的 \\u0000 payload")
+    void userExtraInfoColumnIsTextAndAcceptsJsonbHostilePayload() {
+        seedUser(USER_UID, "col-parity-user");
+
+        // 🔴 列类型：断言打在**库的真实 schema** 上，不是 DDL 脚本文本上。
+        //    这一列若退回 jsonb，下面整条业务链都会以 22P05 失败 ⇒ 本断言不是冗余。
+        assertEquals("text", columnType("users_user", "extra_info"),
+                "users-common/.../01_create_user.sql:41 建表就是 TEXT，:103 每次启动幂等 ALTER 回 text。"
+                        + "Go 侧 serializer:json 按 String 落库（data_model.go:43）⇒ 这一列必须是 text。"
+                        + "若这里是 jsonb，PG 会拒收 encoding/json 能合法产出的内容（见下一条断言）。");
+
+        // 自证：这个 payload 对 jsonb 确实是敌意的 —— 否则本用例会变成空断言。
+        // ⚠️ 2026-10-25（第十八轮）：真 PG 16 实测，PG 对 jsonb 的 \u0000 报错是
+        //    SQLSTATE **22P05**（json_bad_unicode_escape），**不是** 22P02。
+        //    （台账与旧注释写的是 22P02 —— 本轮已订正。）
+        Exception hostile = assertThrows(Exception.class,
+                () -> jdbcTemplate.queryForObject("select cast(? as jsonb)", String.class, "{\"k\":\"\\u0000\"}"),
+                "前提断言：这段字面量必须能被 jsonb 拒收（unsupported Unicode escape sequence），"
+                        + "否则本用例测不到任何东西");
+        assertTrue(String.valueOf(hostile.getMessage()).contains("unsupported Unicode escape sequence"),
+                "PG 对 jsonb 的 \\u0000 必须报 'unsupported Unicode escape sequence'（SQLSTATE 22P05）。"
+                        + "若报错变了（PG 换版本 / 列型又变），本用例的前提要重新判定。实际 = " + hostile.getMessage());
+
+        // 真业务链：updateUser 原本写死 `extra_info = CAST({0} AS jsonb)` ⇒ jsonb 拒收 ⇒ 整条 UPDATE 失败。
+        Map<String, String> payload = Map.of("k", "\u0000");
+        domain.updateUser(USER_UID, 9001L, null, null, null, payload);
+
+        String stored = jdbcTemplate.queryForObject(
+                "select extra_info from users_user where uid = ?", String.class, USER_UID);
+        assertNotNull(stored, "行必须还在：修复前这里会因 22P05 整条 UPDATE 失败");
+        assertTrue(stored.contains("\\u0000"),
+                "库里应存着 Jackson 转义后的 6 个 ASCII 字符 \\u0000（不是裸 NUL 字节）。实际 = " + stored);
+    }
+
+    /**
+     * 🔴 <b>逐字节落库</b>（第十八轮）：证明写进去的是<b>原文</b>，没被 jsonb 规范化。
+     *
+     * <p><b>怎么区分 jsonb 与 text</b>：jsonb 的输出函数会重排键、并在冒号后加空格
+     * （{@code {"k": "v"}}），text 列则是<b>原样</b>（{@code {"k":"v"}}）。
+     * ⇒ 断言整串相等即可区分，不需要碰「键序」那条轴
+     * （Go 的 {@code json.Marshal} 按字典序排键、Jackson 保持插入序 ——
+     * 那是<b>既有</b>差异，user-rpc 的 JsonTextTypeHandler 类注释已写明<b>不改</b>，本轮不碰）。
+     *
+     * <p><b>可证伪性</b>：把 {@code CAST({0} AS jsonb)} 加回去 ⇒ 本条立刻红
+     * （实际落库会变成 {@code {"k": "v"}}）。
+     */
+    @Test
+    @DisplayName("✅ users_user.extra_info 逐字节落库，没被 jsonb 规范化重排（CAST 残留守门）")
+    void userExtraInfoLandsVerbatimNotJsonbNormalized() {
+        seedUser(USER_UID, "verbatim-user");
+
+        domain.updateUser(USER_UID, 9001L, null, null, null, Map.of("k", "v"));
+
+        String stored = jdbcTemplate.queryForObject(
+                "select extra_info from users_user where uid = ?", String.class, USER_UID);
+        assertEquals("{\"k\":\"v\"}", stored,
+                "text 列必须原样落库。若这里是 {\"k\": \"v\"}（冒号后有空格），"
+                        + "说明值被 CAST 成 jsonb 又转回 text 了 ⇒ jsonb 的规范化仍在链路上（与 Go 不一致）。");
+    }
+
+    // ==================================================================
     // 辅助
     // ==================================================================
 
@@ -301,6 +409,19 @@ class AdminRpcColumnTypeParityTest {
     private void seedAdmin(long uid, String username) {
         jdbcTemplate.update(
                 "insert into admin_admin (uid, username, password, email, extra_info) "
+                        + "values (?, ?, 'hash', null, null) on conflict (uid) do nothing",
+                uid, username);
+    }
+
+    /**
+     * 种一行 {@code users_user}。
+     *
+     * <p>⚠️ {@code email} 留 NULL：{@code users_user.email} 是 {@code TEXT UNIQUE}，
+     * 而 PG 的唯一索引把多个 NULL 视为互不相同 ⇒ 多行 NULL email 不会撞约束。
+     */
+    private void seedUser(long uid, String username) {
+        jdbcTemplate.update(
+                "insert into users_user (uid, username, password, email, extra_info) "
                         + "values (?, ?, 'hash', null, null) on conflict (uid) do nothing",
                 uid, username);
     }

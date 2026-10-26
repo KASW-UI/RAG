@@ -2,16 +2,24 @@
 # 每行一条，键格式：<文件相对路径>|<规则>|<值>。
 # 键在这里的违规**只打印、不失败**；不在这里的违规 ⇒ 退出码 1。
 # 别的域修好对应条目后，请顺手从本文件删掉那一行（脚本会提示「已过期」）。
-service/article/article-rpc/pom.xml|pom|grpc-inprocess
-service/article/article-rpc/src/main/resources/application.yml|yml|discovery://message-rpc
-service/article/article-rpc/src/main/resources/application.yml|yml|discovery://security-rpc
-service/comment/comment-rpc/src/main/resources/application.yml|yml|discovery://article-rpc
-service/comment/comment-rpc/src/main/resources/application.yml|yml|discovery://message-rpc
 service/favorite/favorite-rpc/pom.xml|pom|grpc-inprocess
 service/favorite/favorite-rpc/src/main/resources/application.yml|yml|discovery://article-rpc
 service/favorite/favorite-rpc/src/main/resources/application.yml|yml|discovery://user-rpc
-service/like/like-rpc/pom.xml|pom|grpc-inprocess
-service/like/like-rpc/src/main/resources/application.yml|yml|discovery://message-rpc
-service/message/message-rpc/src/main/resources/application.yml|yml|discovery://admin-rpc
-service/message/message-rpc/src/main/resources/application.yml|yml|discovery://user-rpc
-service/task/task-rpc/pom.xml|pom|grpc-inprocess
+
+# ── 2026-10-26 第二十八轮清理：L12/L13 已修的 10 条移除（修完 ⇒ 门禁转绿）──
+# ⚠️ favorite 的 3 条**保留** —— favorite 域对 global 零写权 ⇒ 仍是「已知未修」
+#    （L15 的 M3 变异专门验证：删掉它们 ⇒ 门禁会报「未登记违规」⇒ EXIT=1）
+#
+# ⚠️⚠️ 2026-10-26 第二十八轮**复查**（favorite 侧只查不动 —— global 零写权）⇒
+#    这 3 条的**性质不同**，合并时应分别处理：
+#
+#  ① `pom|grpc-inprocess` ⇒ ✅ **已被 favorite owner 自己修掉**
+#     （`align/favorite` @ `e76ea8e`，2026-10-25 第十四轮：`test` → `runtime`，
+#      且 pom 里留了 devh `GrpcClientAutoConfiguration:160` 的实测论证）。
+#     ⇒ 本条在 `align/global` 上仍可见，**只因本分支未合并 favorite 的提交**
+#     ⇒ 合并后脚本会提示「已过期」⇒ **届时删掉这一行即可**。
+#
+#  ② ③ 两条 `yml|discovery://...` ⇒ 🔴 **favorite owner 尚未修**（2026-10-26 复查：
+#     `align/favorite` @ `fbac7fc` 的 `application.yml:88,94` **仍是两斜杠**）
+#     ⇒ 修法已备好（三斜杠 `discovery:///<name>`，devh 取 `path.substring(1)`
+#        仍是服务名 ⇒ **服务名一个字不改**）⇒ **交 favorite owner** ⇒ 本行不动。

@@ -184,3 +184,36 @@ logging:
 # 实际生效值为 go-zero v1.10.2 `rest/config.go:55` 的 `json:",default=3000"` → 3000ms。
 observability:
   http-timeout: 3s
+
+rag:
+  http:
+    # =============================================================================
+    # 🔴 Go 风格 form 值上限闸门（2026-10-25 第十四轮 · global 收口域 · X-6 / DRIFT-HOTAPI-030）
+    # =============================================================================
+    # Go 出处：go-zero rest/httpx/util.go:15  maxFormParamCount = 2048
+    #          （数的是**非空值**；util.go:44-45 空值 continue 不计数）
+    #          Go 1.25 net/url/url.go:1001  defaultMaxParams = 10000（数的是**段数**）
+    #
+    # mode = 本域的 form 超限时应该输出什么形状 —— 依据是「Go 侧该 api 有没有注册
+    #        httpx.SetErrorHandler」（逐域取证）：
+    #   · raw      ⇒ Go 未注册 SetErrorHandler ⇒ http.Error(w, err.Error(), 400)
+    #                ⇒ **400 + text/plain; charset=utf-8 + nosniff + Go 原文**
+    #   · envelope ⇒ Go 注册了 SetErrorHandler ⇒ 走业务信封
+    #                ⇒ **200 + {"code":5001,"msg":"<该域自己的错误码表文案>","data":null}**
+    #
+    # ⚠️ 本属性**同时**决定两件事（缺一不可）：
+    #   ① service/common 的 GoStyleTomcatParameterLimitCustomizer 把 Tomcat 的
+    #      maxParameterCount 抬到 10001（= Go 段数上限 +1）⇒ 否则 Tomcat 会先于应用层拒绝，
+    #      且拒绝形状是 400 + HTML 错误页（与 Go 不同）；
+    #   ② service/common 的 GoStyleFormValueLimitInterceptor 按 Go 的语义判定。
+    #
+    # ⚠️ 各域 5001 的文案**不一样**（like/comment =「系统内部错误」，
+    #    hot/follow/message = "internal server error"）⇒ 共享层**不硬编码文案**：
+    #    envelope 模式下共享层只抛异常，由**本域自己的**兜底 handler 查本域的错误码表渲染。
+    #
+    # 🔴 favorite 域**故意没有这一项**（= off）⇒ global 对该域零影响：
+    #    既不改它的容器上限、也不装闸门 ⇒ 行为逐字节不变。
+    #    （favorite 不在 global 的写权范围内，AGENTS.md §5.3c）
+    go-form-limit:
+      # Go 侧 user/api **没有** httpx.SetErrorHandler ⇒ 同 article ⇒ **400 + Go 原文** ⇒ mode: raw
+      mode: raw

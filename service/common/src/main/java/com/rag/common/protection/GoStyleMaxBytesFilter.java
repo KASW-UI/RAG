@@ -70,17 +70,17 @@ import java.io.IOException;
  * ⇒ Filter 与 Interceptor 的先后是<b>容器结构</b>决定的，与两者的 order 数值<b>无关</b>；
  * 把 Filter 挪到 order 链尾，它仍然包着 servlet，仍然先于任何拦截器。
  * <p>⇒ {@code @Order} 在本类的<b>真实作用</b>是<b>在 Filter 之间排序</b>：
- * 相对 {@code com.rag.common.spring.HttpMiddlewareFilter}（{@code +5}）、
- * 相对同包另外三个保护 Filter（{@code +1 / +2 / +3}）。
+ * 相对 {@code com.rag.common.spring.HttpMiddlewareFilter}（{@code +7}）、
+ * 相对同包另外三个保护 Filter（{@code +4 / +5 / +6}）。
  * <p>⇒ 真正锁死「413 压过 401」这条语义的变异是<b>让本层失效</b>（摘掉 {@code @Component}），
  * 此时请求会走到鉴权并返回 401 —— 已实测。
- * 本文件保留 {@code HIGHEST_PRECEDENCE + 6} 是为了<b>与 Go 的 native middleware 同序</b>
+ * 本文件保留 {@code HIGHEST_PRECEDENCE + 8} 是为了<b>与 Go 的 native middleware 同序</b>
  * （Go 侧 MaxBytes 也排在 trace/logging 等 native middleware 之内），
  * <b>不是</b>为了压过拦截器。
  */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 6)
+@Order(Ordered.HIGHEST_PRECEDENCE + 8)
 public class GoStyleMaxBytesFilter implements Filter {
 
     private final long maxBytes;

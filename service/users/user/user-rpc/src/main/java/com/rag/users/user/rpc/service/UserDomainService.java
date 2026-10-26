@@ -135,9 +135,19 @@ public class UserDomainService {
      * 任一为 true 抛 {@code StatusRuntimeException(DEADLINE_EXCEEDED)}。
      *
      * 业务 Logic 在每次 DB / bcrypt / snowflake / 下游调用前调此方法。
-     * 配合 {@link DeadlineState#markExpired(long)}（由 {@code RpcInterceptor} 调度）
-     * 或 {@link Thread#interrupt()}（由 {@code RpcInterceptor.handle()} 路径的
-     * {@code Future.cancel(true)} 触发），可让 handler 在 timeout 后立即感知并退出。
+     *
+     * <p><b>deadline 的实际来源</b>（2026-10-25 更正 —— 原 javadoc 误写为
+     * {@code DeadlineState#markExpired(long)}，该断言为假）：
+     * <ul>
+     *   <li><b>主路径</b>：{@code RpcInterceptor} 的 {@code onHalfClose} 在
+     *       <b>真正跑 handler 的线程</b>上调用 {@link DeadlineState#bindToCurrent(long)}，
+     *       作用域随 handler 调用结束自动清理（避免线程池复用串味）；</li>
+     *   <li><b>兜底</b>：{@link Thread#interrupt()} —— 由 {@code RpcInterceptor.handle()} 路径的
+     *       {@code Future.cancel(true)} 触发；该路径同样以 {@code bindToCurrent} 绑定 deadline
+     *       （worker 提交处），不是「超时调度线程设值」。</li>
+     * </ul>
+     * ⇒ 曾被列为候选来源的 {@code markExpired(long)} <b>已移除</b>：它无任何生产调用方，
+     * 且设在超时调度线程上时对 handler 线程<b>不可见</b>（ThreadLocal 语义）。
      *
      * 未注册 deadline 时为 no-op（业务不受影响）。
      */

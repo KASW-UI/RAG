@@ -126,6 +126,17 @@ public class LikeRpcProperties {
         /** Go {@code http.Client{Timeout: 8 * time.Second}}。 */
         private Duration dcTimeout = Duration.ofSeconds(8);
 
+        /**
+         * Go {@code cmd/fact-dispatch/main.go:24} 的 {@code -once} flag（默认 false）：
+         * 「只投递至多一条待发事实」。
+         *
+         * <p>🔴 <b>2026-10-25（第二十轮）新增</b> —— Go 侧它是<b>独立进程的命令行 flag</b>
+         * ⇒ Java 侧合并成单 JVM 后没有天然的对应物 ⇒ 补一个配置项，
+         * 与 comment 域（{@code comment.fact.once}）、favorite 域（{@code favorite.dispatch.once}）**同款**。
+         * 默认 false ⇒ 与 Go 的默认值一致。
+         */
+        private boolean once = false;
+
         public boolean isDispatchEnabled() {
             return dispatchEnabled;
         }
@@ -156,6 +167,14 @@ public class LikeRpcProperties {
 
         public void setDcTimeout(Duration dcTimeout) {
             this.dcTimeout = dcTimeout;
+        }
+
+        public boolean isOnce() {
+            return once;
+        }
+
+        public void setOnce(boolean once) {
+            this.once = once;
         }
     }
 

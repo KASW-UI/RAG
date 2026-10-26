@@ -177,11 +177,37 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+            ⚠️ **scope 必须是 compile（默认），不能是 test**（2026-10-26 真启动实测修正）。
+            根因是 Maven 的「最近者优先」：
+              1) net.devh:grpc-server-spring-boot-starter:3.1.0.RELEASE **自身就传递依赖**
+                 io.grpc:grpc-inprocess（compile scope）—— 实测 `mvn dependency:tree`：
+                 `net.devh:grpc-server-spring-boot-starter:3.1.0.RELEASE:compile`
+                 → `io.grpc:grpc-inprocess:jar:1.63.0:compile`；
+              2) 本模块**又**显式声明了 grpc-inprocess —— 直接声明永远压过传递声明，
+                 于是 scope 一旦写成 test，**运行时 classpath 上 grpc-inprocess 就整个消失**；
+              3) devh 的 `GrpcServerFactoryAutoConfiguration` 里
+                 `net/devh/boot/grpc/server/serverfactory/InProcessGrpcServerFactory`
+                 的类签名硬引用 `io.grpc.inprocess.InProcessServerBuilder`
+                 （实测 javap：该类 4 处引用 io/grpc/inprocess）⇒ 运行期链接失败
+                 ⇒ `NoClassDefFoundError: io/grpc/inprocess/InProcessServerBuilder`
+                 ⇒ **整个服务起不来**（硬失败，不是静默失效）。
+
+            ⚠️ **为什么测试全绿却没发现**：测试跑在 test classpath 上，grpc-inprocess 本来就在，
+            ⇒ **生产 classpath 从没被任何测试跑过**。
+            这正是 AGENTS.md §3.3 的「跑绿 ≠ 对」。
+            ⚠️ 同款 scope 缺陷（已修）：article-rpc / like-rpc（L12 lane）·
+            follow-rpc（2026-10-24 已修，是本条的样板）。
+            ⚠️ favorite-rpc 是同款缺陷但属 **favorite 禁区** ⇒ 本 lane 不碰。
+
+            ⚠️ **必须显式写版本**：根 pom 的 dependencyManagement 只管 grpc-stub / -core /
+            -netty-shaded / -protobuf / -protobuf-lite，**没有**管 grpc-inprocess，
+            漏写版本会让整个 reactor 在读 POM 阶段就失败。与 follow-rpc / message-rpc 保持一致。
+        -->
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-inprocess</artifactId>
             <version>${grpc.version}</version>
-            <scope>test</scope>
         </dependency>
         <!--
             Testcontainers：装配层测试必须接**真 PostgreSQL**，不能用 H2。
@@ -235,6 +261,48 @@
             `testcontainers.properties` 与 -D 系统属性均无效 —— 与 message-rpc 同款，不要换写法。
         -->
         <plugins>
+            <!--
+                🔴 **必须声明 spring-boot-maven-plugin**（2026-10-26 实测）。
+
+                缺陷形态（与 message-api 的 DRIFT-MSG-V-028 同款，但本模块从未被发现）：
+                  本模块此前**只有** maven-surefire-plugin 段 ⇒ 没有 repackage goal
+                  ⇒ 打出来的是**普通 library jar**
+                     （实测 83,827 B —— 对比 message-rpc 的 69,793,492 B fat jar）
+                  ⇒ `java -jar task-rpc.jar` 直接报：
+                     "no main manifest attribute, in task-rpc-0.0.1-SNAPSHOT.jar"
+                     （中文环境：「中没有主清单属性」）
+                  ⇒ **该模块从来没有被打成过可部署产物**。
+
+                ⚠️ **不写 <mainClass>** —— 与 message-rpc / hot-rpc 保持一致，
+                  让插件自动探测 `com.rag.task.task.rpc.TaskRpcApplication`
+                  （service/task/task-rpc/src/main/java/com/rag/task/task/rpc/TaskRpcApplication.java:1）。
+                ⚠️ 版本**不写**：由 spring-boot-starter-parent 的 pluginManagement 管（4.0.8）。
+                ⚠️ **不要给 service/common 加这个 plugin** —— 它是 library 模块，
+                  给它 repackage 会污染下游依赖（下游会拿到 fat jar）。
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
+                ⚠️ 集成测试必须关掉 Ryuk，否则 TaskProgressUpsertParityTest 的 15 条用例
+                **静默全跳**（不是失败，是 skip，reactor 照报 BUILD SUCCESS）。
+
+                原因链（每一环都实测过，见 docs/DRIFT/task/rpc.md 的 DRIFT-TASK-RPC-PITFALL-01）：
+                  1. 本类加了 @EnabledIfDockerAvailable ⇒ 判定发生在**类级**、早于任何测试方法；
+                  2. 该注解内部走 DockerAvailableDetector → DockerClientFactory.instance().client()，
+                     而 client() 会顺带确保 **Ryuk 资源回收容器**可用；
+                  3. 本机拉不到 testcontainers/ryuk:0.14.0 ⇒ 抛 ContainerFetchException；
+                  4. DockerAvailableDetector 的实现是 `catch (Throwable) { return false; }`
+                     ⇒ 「基础设施拉镜像失败」与「Docker 真不可用」被压成同一个 false；
+                  5. 整类被判 disabled ⇒ 15 条一条不跑。
+
+                本模块此前是**全仓唯一漏配这一项**的容器模块
+                （article/comment/favorite/follow/like/message + users 各 rpc/api 都配了）。
+                注：Testcontainers 2.x 的 ResourceReaper 只读环境变量，
+                `testcontainers.properties` 与 -D 系统属性均无效 —— 与 message-rpc 同款，不要换写法。
+            -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
@@ -243,6 +311,41 @@
                         <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
                     </environmentVariables>
                 </configuration>
+                <executions>
+                    <!--
+                        🔴 **产物层守门必须跑在 package 之后**（2026-10-26 实测）。
+
+                        缺陷形态：surefire 的**默认执行**绑在 `test` 阶段，
+                        而 fat jar 是 `package` 阶段（maven-jar-plugin:jar +
+                        spring-boot:repackage）才生成的
+                        ⇒ `test` 阶段 jar **还不存在** ⇒ 产物守门**根本没法在默认执行里跑**。
+
+                        ⇒ 这里加**第二个 surefire execution**，绑在 `verify` 阶段
+                        （`verify` 在 `package` 之后 ⇒ 产物已经是本次构建刚打出来的，
+                        **不是**上一轮的旧副本 ⇒ 避开 PIT-GLOBAL-019「构建进行中改源码 ⇒ 绿的是旧字节码」）。
+                        ⇒ 只挑 `**/*IT.java` 挑出来跑（`*IT` **不**匹配 surefire 默认 include
+                        `**/Test*.java` / `**/*Test.java` / `**/*Tests.java` / `**/*TestCase.java`
+                        ⇒ 默认执行**不会**重复跑它）。
+
+                        ⚠️ **为什么不用 maven-failsafe-plugin**：
+                        本仓**没有任何模块**用它（实测全仓 0 处 `<artifactId>maven-failsafe-plugin</artifactId>`），
+                        且本地 ~/.m2 只有 failsafe 3.5.4（parent 管的是 3.5.6）⇒ 离线构建会缺件。
+                        ⇒ 用 surefire 的第二个 execution，**判定仍落在 surefire 的 XML**
+                        （PIT-GLOBAL-021：判定只认 surefire XML，不认 stdout 的输出行）。
+                    -->
+                    <execution>
+                        <id>artifact-gate</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>test</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>**/*IT.java</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

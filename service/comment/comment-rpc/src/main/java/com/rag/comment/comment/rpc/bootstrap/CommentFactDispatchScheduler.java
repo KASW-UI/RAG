@@ -31,8 +31,15 @@ import java.time.Duration;
  * <p>它只驱动一个后台循环，投递方向是「本进程 → DataCenter 的 HTTP 端点」，
  * 对外不暴露端口。真正对外的是 {@link CommentAuthorityEndpointConfig}（默认也关闭）。
  *
- * <p>⚠️ like-rpc 的同名文件（{@code LikeFactDispatchScheduler.java:3}）是<b>未实现骨架</b>，
- * 不是先例。本类是按 {@code common.Dispatcher} 的实际签名写的可运行实现。
+ * <p>⚠️ like-rpc 的同名文件（{@code LikeFactDispatchScheduler.java}）在 2026-10-25（第二十轮）
+ * 之前是<b>未实现骨架</b>，现已按同一形状实现 ⇒ 两域可互为参照。
+ *
+ * <h2>🔴🔴 必须用 {@link Dispatcher#runAsync}，<b>不能</b>用 {@link Dispatcher#run}</h2>
+ * <p>{@code Dispatcher.run} 是<b>阻塞式</b>的：它在<b>调用线程</b>上跑整个投递循环，
+ * 直到 {@code stop()} 被调用才返回。
+ * 而本类的启动点挂在 {@code @PostConstruct} 上 ⇒ 那是 <b>Spring 上下文刷新线程</b>
+ * ⇒ 用 {@code run} 会让<b>上下文永远刷新不完</b> ⇒ <b>整个 comment-rpc 起不来</b>。
+ * <p>⚠️ 这类缺陷<b>「开关默认关闭」时完全测不出来</b>：测试全绿，而真启动就挂。
  */
 @Component
 public class CommentFactDispatchScheduler {
@@ -79,12 +86,17 @@ public class CommentFactDispatchScheduler {
                     fact.getDcEndpoint(), fact.getDcToken(), httpClient);
 
             boolean once = fact.isOnce();
-            this.handle = Dispatcher.run(
+            // 🔴🔴 必须用 **runAsync**（非阻塞）：@PostConstruct 跑在 Spring 上下文刷新线程上，
+            //    而 Dispatcher.run 是**阻塞式**的（循环跑在调用线程上，直到 stop() 才返回）
+            //    ⇒ 用 run 会让**上下文永远刷新不完** ⇒ 整个 comment-rpc 起不来。
+            //    这类缺陷在「开关默认关闭」时测不出来（绿测试 + 起不来）。
+            this.handle = Dispatcher.runAsync(
                     Context.current(),
                     deliveryService::dispatchOnce,
                     sender,
                     LOG,
-                    once);
+                    once,
+                    false);
             LOG.info("CommentFactDispatchScheduler: 事实流派发已启动，once={} endpoint={}",
                     once, fact.getDcEndpoint());
         } catch (Exception e) {

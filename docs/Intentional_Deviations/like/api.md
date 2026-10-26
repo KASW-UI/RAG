@@ -81,7 +81,7 @@
 | 状态 | ⏳ **待签字**（第五轮修复时提出，尚未获批） |
 | 原台账编号 | `DRIFT-LIKEAPI-017` 的**精度取舍**部分（该条的**主体漂移已修**，这里只留取整这一处） |
 | 组件 | `service/like/like-api`（全部 6 个端点的下游调用） |
-| 性质 | **框架限制**（共享组件 `GoStyleRequestDeadline` 的公开 API 只暴露毫秒） |
+| 性质 | **框架限制**（共享组件 `GoStyleRequestDeadline` 的**只读 API（`remainingMillis()`）只有毫秒粒度** —— ⚠️ **不是「整个公开 API 只有毫秒」**：`applyTo(stub)` 是**纳秒**的（`GoStyleRequestDeadline.java:110-120` ⇒ `stub.withDeadlineAfter(remainingNanos, TimeUnit.NANOSECONDS)`）；**真实限制**在**只读那一侧**：`applyTo` **没有「上界」概念** ⇒ **表达不了 `min(上限, 剩余)`**（`LikeRpcClient.java:108-121`）） |
 
 **差异**
 

@@ -63,14 +63,28 @@ import java.util.concurrent.Semaphore;
  *       对 13 个端点的并发度来说，两种口径的差别只在「单个端点打满 10000 且
  *       同时另一端点也有接近 10000」时才显现，而那时 Tomcat 的
  *       {@code max-threads=200} 早已先成为瓶颈（见 §2）。
- *       <b>此处为有意的表达层收敛，已在此显式留痕</b>，不是等价性的隐藏缺口。</li>
+ *       <br>
+ *       <b>⚠️ 本条是经签字批准的「有意偏离」</b> ⇒ 落点：
+ *       {@code docs/Intentional_Deviations/global/common-tails.md}
+ *       的 {@code SD-2026-10-25-01}（原候选号 {@code CAND-11}，2026-10-25 用户签字）。
+ *       ⚠️ 那个档才是<b>决策记录</b>；本段只是代码侧的指针。
+ *       ⇒ <b>不要</b>因为「Go 是 per-route」就把它当缺陷顺手改回
+ *       （§5.3b：签字偏离不重复质疑，也不得「顺手修正回旧行为」）。</li>
  *   <li><b>{@code n <= 0} ⇒ no-op</b>：照搬 Go 的短路，配 0 = 不限流。</li>
  *   <li>拒绝时<b>裸 503 空 body</b>，理由同 {@link GoStyleMaxBytesFilter}（不用 {@code sendError}）。</li>
  * </ol>
  *
  * <p><b>链上位置</b>：Go {@code engine.go:145-147} 的 MaxConns 在
  * Trace/Log/Prometheus 之后、Breaker 之前，是<b>四层保护里最外层</b>的
- * ⇒ 本类注册在 {@link Ordered#HIGHEST_PRECEDENCE} + 1。
+ * ⇒ 本类注册在 {@link Ordered#HIGHEST_PRECEDENCE} + 4。
+ *
+ * <p>⚠️ <b>2026-10-25（第十九轮 · global T-8）：由 +1 改为 +4</b> ——
+ * 为了让共享层的 {@code GoStyleTraceparentFilter} 能落在「<b>CORS 之后、MaxConns 之前</b>」
+ * （Go 侧 Trace 是<b>链内第一个</b>，{@code engine.go:135}
+ * ⇒ 被 MaxConns/Shedding 拒成 503 的响应<b>也带</b> traceparent）
+ * ⇒ 整块（保护层四件套 + {@code HttpMiddlewareFilter} + {@code GoStyleMaxBytesFilter}）
+ * **整体后移**，但<b>各 filter 之间的相对顺序完全不变</b>
+ * （MaxConns 仍在 Breaker 之前、Breaker 仍在 Shedding 之前）。
  *
  * <p><b>为什么默认 10000 在本部署下几乎不可达</b>（仍必须实现的原因见上）：
  * Tomcat 默认 {@code max-threads=200}，请求会先在容器层排队，
@@ -79,7 +93,7 @@ import java.util.concurrent.Semaphore;
  */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 1)
+@Order(Ordered.HIGHEST_PRECEDENCE + 4)
 public class GoStyleMaxConnsFilter implements Filter {
 
     private final int maxConns;
