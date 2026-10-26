@@ -23,7 +23,7 @@
 | 分支 | 🆕 **G1~G4**：`align/{g1-users-follow,g2-message-like-task,g3-article-comment-favorite-hot,g4-service-common}`（全部从 `do-my-own-gh` 切，主干最后接合并） |
 | 基点 | **`do-my-own-gh` @ 2026-10-27**（= lane 脚手架落地那次提交；此前已合并 25/25 分支 + 全量回归 BUILD SUCCESS）⇒ 主干再前进时 lane `merge` 一次即可（**文件级不重叠 ⇒ 零冲突**） |
 | **`service/common` + `users-common` 写权** | 🔴 **只有 `align/g4-service-common` 能写**（AGENTS.md §5.3c·§5.3d·**§5.3e·§5.3f**）；G1~G3 **只读共享层侧** |
-| 🆕 **阶段划分（2026-10-27）** | **两阶段，不并行**：<br>**阶段 1 = 只读对账**（在 G1~G3 四棵工作树里做，逐轴出结论 + 填**反馈单**）⇒ **不落任何代码**；<br>**阶段 2 = 按波次落地**（G1→G2→G3→**G4 共享层波**，波次表见 [`cross-domain-coupling.md`](cross-domain-coupling.md) §二）⇒ **共享层统一在 G4 落**。<br>⚠️ **阶段 1 若落域侧代码，会与阶段 2 同域撞文件** ⇒ 阶段 1 **必须全只读** |
+| 🆕 **阶段划分（2026-10-27）** | **两阶段**：<br>**阶段 1 = 只读对账**（在 G1~G3 三棵工作树里做，逐轴出结论 + 填**反馈单**）⇒ **不落任何代码**；<br>**阶段 2 = 落码，两路并行** —— **域侧 G1→G2→G3**（契约 DAG 定序），**共享层侧由 G4 随时落**（G4 是**常设执行者**，**不在域波顺序里**；波次表见 [`cross-domain-coupling.md`](cross-domain-coupling.md) §二·§三）。<br>⚠️ **阶段 1 若落域侧代码，会与阶段 2 同域撞文件** ⇒ 阶段 1 **必须全只读** |
 | 🆕 **执行形态（2026-10-27 01:44 重整）** | 原 **10 条 `<域>-common` lane 工作树全部撤掉** ⇒ 收敛为 **4 棵波次工作树**：`align/g1-users-follow`（users 不含 users-common + follow）· `align/g2-message-like-task` · `align/g3-article-comment-favorite-hot` · `align/g4-service-common`（共享层）。⇒ **粒度 = 一个波次一棵**，不再是「一个域一棵」 |
 | ⚠️ **不是旧的 `align/global`** | 旧的 `align/global` 是**全域 mega 工作树**（覆盖除 favorite 外所有域）⇒ **2026-10-27 弃用**（Jason：一个工作树跨多域 ⇒ **粒度与操作内容不可控**）⇒ 其工作树已拆、内容已 100% 合回主干。<br>🆕 **也不是 10 条 `<域>-common` lane**（那 10 棵工作树 2026-10-27 01:44 一并撤掉）⇒ 执行形态 = **G1~G4 四棵**（一波次一棵） |
 | **每域的台账** | **`docs/DRIFT/<域>/vs-common.md`**（**按域各一份** ⇒ 跨工作树**文件级零重叠**，不必抢同一个大文件） |
@@ -43,7 +43,7 @@
 | **G1** | `align/g1-users-follow` / `../RAG.worktrees/g1-users-follow` | `users-common`（**含 users 域**）+ `follow-common` ⇒ 台账 [`users/vs-common.md`](../users/vs-common.md) · [`follow/vs-common.md`](../follow/vs-common.md) | G1 |
 | **G2** | `align/g2-message-like-task` / `../RAG.worktrees/g2-message-like-task` | `message-common` + `like-common` + `task-common` ⇒ [`message/`](../message/vs-common.md) · [`like/`](../like/vs-common.md) · [`task/`](../task/vs-common.md) | G2 |
 | **G3** | `align/g3-article-comment-favorite-hot` / `../RAG.worktrees/g3-article-comment-favorite-hot` | `article-common` + `comment-common` + `favorite-common` + `hot-common` ⇒ [`article/`](../article/vs-common.md) · [`comment/`](../comment/vs-common.md) · [`favorite/`](../favorite/vs-common.md) · [`hot/`](../hot/vs-common.md) | G3 |
-| **G4** | `align/g4-service-common` / `../RAG.worktrees/g4-service-common` | 原 `global-common` lane（= `service/common` **本身**）＋ `users-common` 的**共享层侧** ⇒ [`global/vs-common.md`](../global/vs-common.md) | **G4（共享层波）** |
+| **G4** | `align/g4-service-common` / `../RAG.worktrees/g4-service-common` | 原 `global-common` lane（= `service/common` **本身**）＋ `users-common` 的**共享层侧** ⇒ [`global/vs-common.md`](../global/vs-common.md) | **随时**（常设执行者，不排在域波序列里） |
 
 ⇒ ⚠️ **`users` 域被 G1 与 G4 切两半**：G1 拿 `service/users/{user,admin}/**`（用户/管理业务），
 G4 拿 `service/users/users-common/**`（**跨 6 个外域的共享层**）⇒ **文件级零重叠**（守门可证）。
@@ -101,13 +101,17 @@ G4 拿 `service/users/users-common/**`（**跨 6 个外域的共享层**）⇒ *
 ⇒ **lane 发现 common 侧缺陷时**：① 域侧先把**现象 + 证据 + 建议修法**写进**本域台账**（`docs/DRIFT/<域>/vs-common.md`），
    **反馈单 7 项**（现象 / Go 侧 `文件:行号` / RAG 侧现状 / 证据强度 / 建议修法 / 影响面 / 是否阻塞本波；缺项不得进排期）；
 ② 转派 **G4**（`align/g4-service-common`；台账 [`global/vs-common.md`](../global/vs-common.md) + `docs/DRIFT/global/_README.md` §七之二的跨域桶）；
-③ **不得**在 G1~G3 里改 `service/common` 或 `users-common`（§5.3d·§5.3e：否则留下半截 + 该波结论作废）。
+③ **不得**在 G1~G3 里改 `service/common` 或 `users-common`（§5.3d·§5.3e：写权唯一 ⇒ 留下半截）。
 ⇒ **域侧能自修的**（本域代码里的调用方式、配置、断言、装配）**一律本域修**，不要甩给 global。
-⇒ 🆕 **落码窗口**（AGENTS.md §5.3e）：**G1~G3 期间 `service/common` + `users-common` 只读、只登记**；**G4 才激活写权**
-   ⇒ G1~G3 进行中改共享层 ⇒ **该波测试结论作废**（编译绿 ≠ 行为对：全仓无 API 兼容门禁）。
-   ⇒ **例外升级**：某波「不改共享层就过不了」⇒ 该波**就地升级为全量回归波**（2411 条），等共享层改完再重跑。
+⇒ 🆕 **G4 = 共享层常设执行者**（AGENTS.md §5.3e · 2026-10-27 02:23 Jason 定）：
+   **先于 G1 就位 standby**，**随时接收** G1/G2/G3 的反馈单 ⇒ **执行落码** ⇒ 跑**全量 2411** ⇒ 回执反馈方。
+   ⇒ **落码窗口常开**（不是「只在 G4 波激活」）：G1~G3 期间 `service/common` + `users-common` **只读、只登记**。
+   ⇒ ✅ **撤销「基线不可变 / 结论作废」**：域波**收口回归在波次末尾跑** ⇒ 天然含 G4 至今的共享层改动
+   ⇒ **不存在「基线作废」**；唯一窗口 = **收口回归跑完 ～ 合并进主干之前** ⇒ 该窗口内共享层变了 ⇒ **重跑一次收口回归**。
+   ⇒ **例外升级**：某波「不改共享层就过不了」⇒ 该波**就地升级为全量回归波**（2411 条），等 **G4 落码后**再重跑。
    ⇒ **机器守门**：`tools/difftest/check-wave-lane-ownership.py`（G1~G4 写权两两不重叠 + `favorite` 只归 G3
-   + 共享层只归 G4 + **白名单路径必须命中真实文件** + **分支必须真实存在**）。
+   + 共享层只归 G4 + **白名单路径必须命中真实文件** + **分支必须真实存在**）
+   ＋ `tools/difftest/check-wave-role-model.py`（**旧模型措辞不得回流**：G4 不得再被写成「最后/单独成波/结论作废」）。
 
 ---
 

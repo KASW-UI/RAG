@@ -101,9 +101,12 @@ RAG.worktrees/                ← 4 个波次工作树
 └── g4-service-common/               ← align/g4-service-common
 ```
 
-⚠️ **顺序不可乱**：**G1 → G2 → G3 → G4**。
-**G4（共享层）必须在 G3 之后** —— G1~G3 期间 `service/common` + `users-common` **只读、只登记反馈单**
-⇒ 期间改共享层 ⇒ **那三波的测试结论全部作废**（AGENTS.md §5.3e）。
+⚠️ **域波顺序**：**G1 → G2 → G3**（契约 DAG 定序）。
+⚠️ **G4 不在域波顺序里** —— 它是**常设的共享层执行者**（**2026-10-27 02:23 Jason 定**）：
+**先于 G1 就位 standby**，**随时接收** G1/G2/G3 的反馈单 ⇒ **执行落码** ⇒ 跑**全量 2411** ⇒ 回执反馈方
+⇒ **落码窗口常开**；G1~G3 期间 `service/common` + `users-common` **只读、只登记反馈单**。
+⇒ ✅ **撤销「基线不可变 / 结论作废」**：**收口回归在波次末尾跑** ⇒ 天然含 G4 至今的改动
+⇒ 唯一窗口 = **收口回归跑完 ～ 合并进主干之前** ⇒ 该窗口内共享层变了 ⇒ **重跑一次收口回归**（AGENTS.md §5.3e）。
 ⇒ 波次表 / 依赖 DAG ⇒ [`docs/DRIFT/_cross/cross-domain-coupling.md`](DRIFT/_cross/cross-domain-coupling.md) §二·§三。
 
 ⚠️ **写权机器守门**：`tools/difftest/check-wave-lane-ownership.py`
@@ -247,7 +250,7 @@ docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：�
 | **切法** | **4 棵** = G1（`users` 不含 `users-common` + `follow`）· G2（`message`+`like`+`task`）· G3（`article`+`comment`+`favorite`+`hot`）· G4（**共享层**）；分支 `align/g<N>-<slug>` ＋ 目录 `../RAG.worktrees/g<N>-<slug>` |
 | **基线** | `do-my-own-gh`（主干再前进就 `merge do-my-own-gh` 一次，**文件级不重叠 ⇒ 零冲突**） |
 | **写权** | ✅ 各自表里那个面；🔴 **`service/common/**` + `service/users/users-common/**` 只读** —— 只有 `align/g4-service-common` 能写 |
-| **顺序** | **G1 → G2 → G3 → G4**；**G4 必须最后**（G1~G3 期间共享层只读 ⇒ 期间改共享层 ⇒ 那三波结论作废） |
+| **顺序** | **域波 G1 → G2 → G3**（契约 DAG 定序）；**G4 不在域波顺序里** —— 它是**常设的共享层执行者**，**随时**接收反馈单并落码，**并行、不阻塞** |
 | **lane 台账** | **`docs/DRIFT/<域>/vs-common.md`**（**按域各一份** ⇒ 跨树**文件级零重叠**，不必抢同一个大文件） |
 | **共享面** | 工作树 ⛔ 不写 `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/Worktree.md` ⇒ **整合者在合并后统一更新** |
 | **交付物** | **9 条机制面轴（A1~A9）**的**本域侧**逐轴结论（✅/🔴/🟡 ＋ **证据强度** ＋ **核对日期**）＋ **两侧同时跑**的探针（§3.3：只跑 RAG 的探针**不算数**） |

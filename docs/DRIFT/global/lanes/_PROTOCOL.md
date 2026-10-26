@@ -50,7 +50,7 @@
 | **G1** | `align/g1-users-follow` / `../RAG.worktrees/g1-users-follow` | `users`（**不含 `users-common`**）+ `follow` | `service/users/{user,admin}/**` ＋ `service/follow/**` ＋ `docs/DRIFT/{users,follow}/**` |
 | **G2** | `align/g2-message-like-task` / `../RAG.worktrees/g2-message-like-task` | `message` + `like` + `task` | `service/{message,like,task}/**` ＋ `docs/DRIFT/{message,like,task}/**` |
 | **G3** | `align/g3-article-comment-favorite-hot` / `../RAG.worktrees/g3-article-comment-favorite-hot` | `article` + `comment` + `favorite` + `hot` | `service/{article,comment,favorite,hot}/**` ＋ `docs/DRIFT/{article,comment,favorite,hot}/**` |
-| **G4** | `align/g4-service-common` / `../RAG.worktrees/g4-service-common` | **共享层波**：`service/common` + `service/users/users-common` | `service/common/pom.xml` ＋ `service/common/src/**` ＋ `service/users/users-common/**` ＋ [`../vs-common.md`](../vs-common.md) |
+| **G4** | `align/g4-service-common` / `../RAG.worktrees/g4-service-common` | **共享层常设执行者**：`service/common` + `service/users/users-common` | `service/common/pom.xml` ＋ `service/common/src/**` ＋ `service/users/users-common/**` ＋ [`../vs-common.md`](../vs-common.md) |
 
 ⚠️ **2026-10-27 01:44 工作树重组**（Jason 定）：原先的 **10 条 `<域>-common` lane 工作树全部撤掉**
 ⇒ 执行形态收敛为**这 4 棵** ⇒ 粒度 = 「一个波次 = 一棵工作树」，不再是「一个域 = 一棵」。
@@ -64,8 +64,12 @@
 ⚠️ **G4 的范围比旧 `global-common` 宽**：多了 `service/users/users-common/**`
 （§5.3f：`users-common` 跨 **6 个外域** ⇒ 它是**第二个共享层** ⇒ 写权归共享层波，**不归 G1**）。
 
-⇒ **落码窗口**：**G1~G3 期间 `service/common` + `users-common` 只读、只登记反馈单**（7 项，AGENTS.md §5.3e）；
-   **G4 激活时**才落码 ⇒ G1~G3 中改共享层 ⇒ **该波测试结论作废**（编译绿 ≠ 行为对）。
+⇒ **G4 = 共享层常设执行者**（**2026-10-27 02:23 Jason 定**）：**先于 G1 就位 standby**，
+   **随时接收** G1/G2/G3 的反馈单（7 项，AGENTS.md §5.3e）⇒ **执行落码** ⇒ 跑**全量 2411** ⇒ **回执**反馈方；
+   **落码窗口常开**（**不是**「只在 G4 波激活」）⇒ G1~G3 期间 `service/common` + `users-common` **只读、只登记**。
+⇒ **域波顺序 G1→G2→G3**（契约 DAG 定序）⇒ **G4 与之并行、不阻塞**。
+⇒ ✅ **撤销「基线不可变 / 结论作废」**：**收口回归在波次末尾跑** ⇒ 天然含 G4 至今的共享层改动
+   ⇒ **不存在「基线作废」**；唯一窗口 = **收口回归跑完 ～ 合并进主干之前** ⇒ 该窗口内共享层变了 ⇒ **重跑一次收口回归**。
    ⇒ 波次表 / 依赖 DAG ⇒ [`../../_cross/cross-domain-coupling.md`](../../_cross/cross-domain-coupling.md) §二·§三。
 
 ### 3.2 已合回（第二十八轮 · 4 条）
