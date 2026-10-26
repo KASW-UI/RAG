@@ -193,12 +193,11 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 | 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | ✅ **已审完**（第九轮：交叉但无冲突 · client 契约 10 域零漂移） |
 | 事实投递链路 | `like` 的 api ↔ rpc ↔ 第三个仓库 | ✅ **已落地**（第二十轮 A5′ · 守门 22 条） |
 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | ✅ **已落地**（共享层修法 · favorite 零触碰） |
-| 🔴 **rpc 真进程可启动性** | **7 个 rpc 组件** | 🟡 **第二十八轮修复中** —— `discovery://<name>`（**两斜杠**）⇒ devh 要求 `path` 长度 > 1 ⇒ **真 fat jar 起不来**（连 Flyway 都跑不到）⇒ 只有 `follow-rpc` 是三斜杠（正确）⇒ **「测试全绿但进程起不来」的老形态** ⇒ 🟢 **守门缺口已补**（`check-jar-executable.sh` 纳入 rpc） |
+| 🔴 **rpc 真进程可启动性** | **7 个 rpc 组件** | ✅ **第二十八轮已修** —— `discovery://<name>`（**两斜杠**）7 处 ⇒ devh 要求 `path` 长度 > 1 ⇒ **真 fat jar 起不来**（连 Flyway 都跑不到）⇒ 已全部改三斜杠 · `grpc-inprocess` test scope 3 处已改 · `hot-rpc`/`task-rpc` 无 `Main-Class` 已补 ⇒ 🟢 **两个守门缺口同批闭合**（`check-jar-executable.sh` 纳入 rpc ⇒ **20/20 全绿**） |
 | DDL 双侧活体逐列对照 | 其余 5 域（favorite 只建库） | ✅ **已做**（L3 ⇒ **9 域**；`article`/`follow` **0 差异**；`like`/`favorite` 差异全是「RAG 更严」⇒ 签字候选；`hot` = **N/A**） |
 
 **排序约束**：**rpc 必须先于 api**（Go 侧边界是 api→rpc；rpc 没验对就先验 api ⇒ 产出「RAG api 行为正确」的假结论——`message-rpc` 曾有 21 条全绿测试却一次没起过）。
 **跨域收口**：修法落在 `service/common` ⇒ **只有 `global` 能写**（别的域只读）⇒ 并发必排队 ⇒ **靠 lane 按「叶子文件」切**（§5.3c）。
-
 ## 四、当前重构（多 phase · 真理之源 = Go）
 
 ### 4.1 锁定的决策（来自用户问答，2026-10-18）
@@ -316,7 +315,7 @@ RAG 不是从 Go「推测」行为，而是**逐字对照 Go 源码**（§3.1）
 | `tools/difftest/check-proto-static.sh` | proto 契约对照（字段号 / message 名 / RPC 签名） | `bash tools/difftest/check-proto-static.sh` |
 | `tools/difftest/check-plaintext400-headers.sh` | 真 Tomcat 下 400 的 `Content-Type`/`nosniff`（**MockMvc 测不到**） | `bash …` |
 | `tools/difftest/check-flyway-ledger.py` | Flyway 账本隔离（按库+schema 断言表名两两不同）⇒ `EXIT=0`；**运行时**同库共存 ⇒ `check-flyway-concurrent.sh`（§6.3 问题 4） | `python3 …` |
-| `tools/difftest/check-grpc-runtime-classpath.py` | devh client 的**运行时 classpath + 服务发现地址**门禁：`grpc-inprocess` 不得是 `test` scope · `discovery:` 必须三斜杠 ⇒ **baseline 机制**（baseline 里的已知未修项只打印、不失败） | `python3 tools/difftest/check-grpc-runtime-classpath.py` |
+| `tools/difftest/check-grpc-runtime-classpath.py` | devh client 的**运行时 classpath + 服务发现地址**门禁：`grpc-inprocess` 不得是 `test` scope · `discovery:` 必须三斜杠 ⇒ **baseline 机制**（已知未修项只打印、不失败） | `python3 tools/difftest/check-grpc-runtime-classpath.py` |
 | `tools/difftest/check-{grpc-interceptor-wiring,tomcat-limits,global-lane-ownership}.py` | **三个装配/写权守门**：① 每个 rpc 进程的拦截器接线（`@Import` 齐 **且** 挂上 `server.intercept`）② 10 个 api 的容器输入上限三旋钮 ③ **多 lane 写权**（白名单两两不重叠 · 共享文件无人拥有 · favorite 零写权 ⇒ `EXIT=0` 才算合规） | `python3 tools/difftest/check-*.py` |
 | `tools/difftest/check-jar-executable.sh` | **产物可执行性**：`MANIFEST.MF` 有 `Main-Class`（**api + rpc 共 20 个模块** ⇒ 漏配 1 个即「有的域 200、有的域 400」） | `bash tools/difftest/check-jar-executable.sh` |
 | `tools/drift-move.py` | AGENTS.md ↔ docs/ 搬移工具（`extract`/`verify`/`delete` 幂等）。台账 `docs/DRIFT/_MANIFEST.json` | `python3 tools/drift-move.py verify` |

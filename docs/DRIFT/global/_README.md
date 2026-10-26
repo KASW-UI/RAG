@@ -303,6 +303,23 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 | **E19** | 🟢 **第二十七轮全仓回归** | `align/global` @ 第二十七轮收口 | ✅ **BUILD SUCCESS · 52 模块 · 2263 条 · 0 failures / 0 errors / 0 skipped**（上一轮 2235 ⇒ **净增 28 条** = X-5 轴 4×3 + slow 轴 8×2）⇒ 跑前删过全部旧 surefire XML ⇒ 条数无历史残留污染 |
 | **E18** | 🔴 **整合者修的两处跨 lane 守门缺陷** | 7 份 slow 轴守门 | ✅ **第二十七轮整合阶段已修** ⇒ ① **慢轴守门缺预热** ⇒ 绿是**执行顺序的副产品** ② **慢轴守门不断言前提成立** ⇒ 将来会以「找不到 span」变红 ⇒ 连带 **自曝错账 #4**（OTel 的 `set()` 存的是包装器 ⇒ 引用相等类断言恒红）⇒ 3 条新坑 **PIT-GLOBAL-026/027/028** |
 
+### 🆕 七之五、第二十八轮（**2026-10-26**）—— **生产启动阻塞**修复 + **两个守门缺口**闭合
+
+> **触发**：Jason 追问「不是已经清空未知了嘛，怎么又有」⇒ 查证发现 §七之二的盘点口径
+> **漏了第五个来源**（各域台账的「域外/跨域移交/交主会话」段，63 行 / 14 份文件）
+> ⇒ 本轮把那批**挂着不动 = 永久漂移**的条目真正修掉。
+
+| # | 条目 | 落点 | 状态 |
+|---|---|---|---|
+| **E20** | 🔴 **N6**：`discovery://<name>` 两斜杠 ⇒ devh 要求 `path` 长度 > 1 ⇒ **真 fat jar 起不来**（连 Flyway 都跑不到） | 7 个 rpc 模块的 `application.yml` | ✅ **已修**（L12 修 5 处 + L13 修 2 处）⇒ 🟢 3 个 `XxxRpcProductionAddressTest`（读**生产** yaml · 遍历**全部** client · **真调 devh 消费点**：生产不抛 + 两斜杠**必须**抛）⇒ ⛔ **favorite 2 处零触碰** |
+| **E21** | 🔴 **N7**：`grpc-inprocess` 是 `test` scope ⇒ 运行时 classpath 上整个 artifact 消失 | article / like / task 的 `pom.xml` | ✅ **已修** ⇒ 🟢 产物层守门（解包真 fat jar 查 `BOOT-INF/lib/`）⇒ 🟢 独立实测：修后 `grpc-inprocess-1.63.0.jar` **在** `BOOT-INF/lib/`、修前不在 ⇒ ⛔ favorite 1 处零触碰 |
+| **E22** | 🔴 **N8**：`task-rpc` / `hot-rpc` 的 jar **没有 `Main-Class`** | 2 个 `pom.xml` | ✅ **已修**（L13 + L14）⇒ 🔴 **L11 漏报了 `hot-rpc`**（逐个解包 10 个 rpc 才看出来）⇒ **根因 = 守门缺口** ⇒ ✅ L15 已把 rpc 纳入 jar 门禁 |
+| **E23** | 🔴 **守门缺口①**：`check-jar-executable.sh` 只扫 `*-api` ⇒ **10 个 rpc 模块的产物可执行性从来没被守门查过** | `tools/difftest/check-jar-executable.sh` | ✅ **已闭合**（L15）⇒ 枚举 10 → **20** 个模块 ⇒ 实测 **20/20 全绿** ⇒ 教训 **PIT-GLOBAL-030** |
+| **E24** | 🔴 **守门缺口②**：`check-grpc-runtime-classpath.py` 扫到 `target/classes` ⇒ 同一违规算两遍 ⇒ **门禁恒红**（实测 `EXIT=1`，而源码树只有 9 处违规） | `tools/difftest/check-grpc-runtime-classpath.py` | ✅ **已闭合**（L15）⇒ **存量缺陷**（脚本是 2026-10-24 建的）⇒ 修后 **EXIT=0** ⇒ 教训 **PIT-GLOBAL-029** |
+| **E25** | 🔴 **盘点口径漏了第五个来源** | `global/_README.md` §七之二 | ✅ **已订正** ⇒ 口径 = ① 四桶（域内）＋ ② 各域台账的域外交接段 ⇒ 连带订正：第 27 轮的 N6/N7 是**重发现**（follow 域 2026-10-24 已写明并点名同样 5 个模块）⇒ **真新发现只有 N8 / T-14 / T-15** |
+| **E26** | 🔴 **整合者修的守门缺陷**：`HotRpcJarExecutableWiringTest` 的一条断言**没剥 XML 注释** ⇒ 而 pom 的注释里就写着那个字符串 ⇒ **M1 变异时它居然是绿的** ⇒ 恒真 | `service/hot/hot-rpc/src/test/**` | ✅ **已修** ⇒ 三条涉及字面量的断言全部先 `stripXmlComments()` ⇒ 复跑 M1 那条也红 ⇒ 教训 **PIT-GLOBAL-031** |
+| **E27** | 🟢 **hot 域台账的过期快照** | `docs/DRIFT/hot/{api,rpc}.md` | ✅ **已订正** ⇒ D14（nosniff，`HttpMiddleware.java:692` 已实现）· D25（T-13 已闭合）· D27（**已签字偏离** `SD-2026-10-25-01`）· D21/D22/D23（第十三轮已落地 10/10）⇒ **hot 域内未闭合项清单为空** |
+
 ### ⛔ favorite 相关的两条（**不可动，仅记账**）
 - **X-4 favorite 半边** —— RAG 多出 10 处 Go 没有的 `communityfact` 调用 ⇒ 删掉它们 = 改 favorite ⇒ 永久阻塞
 - **X-9 favorite 那份复制品** —— 「Go 是否读 body」判据的第 1 份生产复制品 ⇒ 永久留存
