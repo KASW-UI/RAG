@@ -34,19 +34,39 @@
 > ⚠️ **写死数字/状态的纪律**（AGENTS.md §6）：本表是**抽取快照**；每条**逐条证据**以「域台账」列指向的正文为准，
 > **状态必须带核对日期** ⇒ lane 复核后请就地更新本表并写入核对日期。
 
+### 1.1 §1 抽取快照的**逐条状态复核**（2026-10-27 · G1 lane）
+
+| 编号 | 快照状态 | **复核结论（核对日期 2026-10-27）** | 复核依据 / 强度 |
+|---|---|---|---|
+| `UNRESOLVED-USERSCOMMON-003` | 🔴 未核（落点 `service/common`） | ✅ **口径已订正** ⇒ **不再整条甩 G4**（拆成「域侧自修」＋「共享层」两半） | **本轮实测 8 个域的 `WebMvcConfig`**（L3 活体）⇒ 见 §6.4.1 |
+| `DRIFT-USERAPI-013` | 🔴 待拍板 | 🔴 **维持待拍板**；只读复核已于 2026-10-26 完成（键语义钉死 · **可观察面在 `article-api` ⇒ user-api 本组件不可观察**）⇒ 落点确认在共享层 ⇒ **派 G4** | 域台账原文（L1） |
+| `DRIFT-ARPC-010`（= E66） | 🔴 OPEN | 🔴 **维持 OPEN**（本轮**未复核落点**）⇒ 派单时仍须核 Go 侧 `文件:行号` | 本轮未查 |
+| `UNRESOLVED-ARPC-002`（= E38②） | 🔴 未闭合 | 🔴 **维持未闭合**（Jason 已拍板：① 纯 deadline 计算下一轮做 ② 架构级另立项 ⇒ **① 不销本条**） | 拍板记录 |
+| `DRIFT-ADMINAPI-007` | 🟡 半修 | 🟡 **维持半修**（`nosniff` 已落地于 `HttpMiddleware.java:692` ⇒ 原条自动消失；**charset 分号后空格残差仍在** ⇒ **需重开一条**） | 域台账原文（L1） |
+| `DRIFT-USERRPC-V-007` | ✅ 已合回 `4f839f9` | ✅ **维持**（本轮**未重跑**双侧活体 ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」） | 域台账原文（L3，2026-10-26） |
+
+⚠️ **本轮复核范围声明（诚实边界）**：§1 表里**只有 `UNRESOLVED-USERSCOMMON-003` 的落点被本轮实测订正**；
+其余 5 条**状态未变**（其中 3 条**本轮未复核**）⇒ 按 AGENTS.md §6 记「状态未变」，
+**派单时仍须按反馈单 7 项重新核 Go 侧 `文件:行号`**（台账的「抽取快照」**不算数**）。
+
 ## 2. 9 条机制面轴 · 本域侧逐轴结论（**lane 的交付主体**）
+
+> ⚠️ **口径声明（2026-10-27 · G1 lane 复核）**：本轮 = **第 0 步真启动** ＋ **台账状态逐条复核** ＋ **两条新缺陷的活体坐实**。
+> ⚠️ **A1~A9 的逐轴「双侧活体对拍」本轮尚未重跑** ⇒ 下表的 ✅ 一律读作「**在台账既有证据强度下一致**」，
+> **不是「本轮重新证明了等价」**（AGENTS.md §0：「已改」≠「已验证」；「源码级对照」≠「双侧活体对拍」）。
+> ⚠️ **「证据强度」列 = 台账原有强度**（本轮复核沿用），**不是本轮新证的强度**。
 
 | 轴 | 机制 | 本域侧的落点 / 调用 | 结论 | 证据强度 | 核对日期 |
 |---|---|---|---|---|---|
-| **A1** | 超时 / deadline | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A2** | gRPC 拦截器链 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A3** | HTTP 保护链 | 本域 `application.yml` 的 `rag.http.go-form-limit.mode` = **raw（user-api ＋ admin-api 各一行）** ＋ 共享层 6 个类 | ⬜ **待 lane 复核**（共享层已验 ⇒ 缺「本域真实请求」证据） | — | — |
-| **A4** | 错误码 / envelope | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A5** | 端口治理 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A6** | errmsg 契约 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A7** | proto 契约 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A8** | DDL 时间列 / 类型 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A9** | trace / otel | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
+| **A1** | 超时 / deadline | ① `DRIFT-USERAPI-009②`（**3s 预算作用域**：Go 不覆盖 JWT 验签，RAG 覆盖验签+黑名单+handler）② `DRIFT-USERAPI-015`（Redis 主机名解析失败 ⇒ 200/503 摇摆，**已降级为「条件性成立·证据不足」**）③ `DRIFT-USERRPC-V-012`（超时业务日志归因 ⇒ **落点在本域 `UserDomainService.logout`**）④ `DRIFT-USERRPC-V-013`（DB 超时的源码层形态差异 ⇒ **非 wire 漂移，不得改回 Go 行为**） | 🔴 **4 条 OPEN**（其中 ②③ **域内可闭环**） | L1 源码 + L3 双侧活体（台账原有） | 2026-10-27 |
+| **A2** | gRPC 拦截器链 | `DRIFT-USERAPI-011`（客户端熔断 handler）✅ · `DRIFT-USERRPC-V-007`（超时 description 逐字）✅ 已合回 `4f839f9` · ① 三拦截器链（recover/breaker/shedding）已全处置 | ✅ **一致**（在该证据强度下） | L3 双侧活体 | 2026-10-27 |
+| **A3** | HTTP 保护链 | ① 本域 `application.yml` 的 `rag.http.go-form-limit.mode` = **raw**（user-api ＋ admin-api 各一行）② `DRIFT-USERAPI-008`（过载保护「不存在」）**已证伪** ③ `DRIFT-USERAPI-012`（降载 RT 口径）✅ ④ `DRIFT-USERAPI-013`（**MaxConns 粒度 + breaker 键空间 + javadoc 矛盾**）🔴 ⑤ `009② 补充`（MaxBytes 相对 observability 的位置）**未签字** | 🔴 **1 条 G4** ＋ 🟡 **1 条待拍板** ＋ 🔴 **1 条域内**（009②） | L1 源码 + L2 运行时 | 2026-10-27 |
+| **A4** | 错误码 / envelope | `DRIFT-USERAPI-003/-006/-007/-010` ✅（后两条为**签字偏离** `SD-USERAPI-001` 与 N-1）· `UNRESOLVED-001/003/004` **全部已关**（`UNRESOLVED-001` = 真 Tomcat 双侧 + `check-plaintext400-headers.sh` EXIT=0） | ✅ **一致**（**4 条签字偏离**覆盖 ⇒ 审查见红先查签字档） | L3 真 Tomcat + 双侧活体 | 2026-10-27 |
+| **A5** | 端口治理 | ① api 监听 8888 → **49900**（`OBSERVABLE DIFFERENCE`，已签字 `Infrastructure.md §3`）② rpc gRPC `0.0.0.0:9004` → **49210**（`IMPLEMENTATION DIFFERENCE`，已锁定）③ ⚠️ **台账无 `RANDOM_PORT` / `RealTomcatPort` 任何记录** | 🟡 **台账零覆盖 `RANDOM_PORT` 面**（非「已对齐」） | L1 静态 | 2026-10-27 |
+| **A6** | errmsg 契约 | code→msg 全表 **30 项 EQUIVALENT**（Go `errmsg.go:38-68` ↔ `users-common.ErrorCode`，以 users-common 为公理，本组件不复验）· N-2（Go 侧 9 处 GBK 双重编码乱码）✅ 签字 | ✅ **一致**（N-2 已签字 ⇒ **不得当新发现再「修」**） | L1 静态 + L3 双侧活体 | 2026-10-27 |
+| **A7** | proto 契约 | 两侧 `.proto` 剥离 option/注释/空行后**逐行 diff 零差异** ＋ 常驻守门 `check-proto-static.sh` ＋ `UserInfo.status` 的 `optional` 两侧同 | ✅ **一致** | L1 实测 diff | 2026-10-27 |
+| **A8** | DDL 时间列 / 类型 | ① `DRIFT-USERRPC-V-002`（`users_user.status` **可空性**）🔴 **被卡**（改动须与 admin 域同改 ⇒ 落点 `users-common` ⇒ **G4 写权**）② `DRIFT-USERRPC-V-011`（时间列 `DEFAULT CURRENT_TIMESTAMP`）⚠️ **未修**（8 处，刻意保留）③ `V-003`（`extra_info` text↔jsonb）✅ `V-004`（4 个时间列 timestamptz）✅ `V-006`（id 取值来源）✅ ④ 表名 `users`→`users_user` ✅ 签字 ⑤ 建表责任交叉 EQUIVALENT（**双侧对称并发启动 9 轮**） | 🔴 **2 条**（V-002 落 G4 ＋ V-011 待裁决） | L4 真 PG（并发 9 轮） | 2026-10-27 |
+| **A9** | trace / otel | ① `DRIFT-USERAPI-009①`（401 是否计入观测面）✅ 签字 `SD-USERAPI-002`（**只覆盖 ①**）② `DRIFT-USERRPC-V-012`（业务日志归因）🔴 ③ ⚠️ **本域台账无任何 `Traceparent` / `audit.*` / span 属性条目** | 🟡 **本域台账零覆盖**（A9 在 users/user 域几乎是**空白轴**，不是「已对齐」） | L1 静态 | 2026-10-27 |
 
 > **A3 已预填一条实测锚点（2026-10-27 核）** —— X-6（`DRIFT-HOTAPI-030`）共享层 6 个类已落码
 > （`GoStyleFormValues` / `GoStyleFormLimitMode` / `GoStyleFormLimitExceededException` /
@@ -73,6 +93,120 @@
 - [ ] §3 的域侧修法**落码 + 守门**（含变异验证）
 - [ ] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）
 - [ ] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
+
+---
+
+## 7. 🆕 **第 0 步真启动抓到的两条域内真缺陷**（2026-10-27 · G1 lane）
+
+> ⚠️ **这两条是「跑绿测试永远抓不到、只有真启动才暴露」的类型**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）。
+> ⇒ **落点全在本域写权内**（`service/users/{user,admin}/**`）⇒ **域侧能自修 ⇒ 不派 G4**。
+> ⇒ **编号**：本 lane 自立 `DRIFT-G1-001` / `DRIFT-G1-002`（**G1 波次编号段**，避免与各域既有编号撞号）。
+
+### 7.0 第 0 步的执行口径（先记，避免「跑绿」被误读）
+
+| 项 | 值 |
+|---|---|
+| 工作树 | `align/g1-users-follow` @ `e8b428f`（基线 `a282012`）· **组件全部由本工作树 `mvn package` 产出**（不碰 `Sea-user-api` 容器里的旧镜像） |
+| 隔离 | PG `userprobe-postgres:56432` 上的**自建库 `g1probe`**（不碰 `go_db`）· Redis `userprobe-redis:57379` · Nacos `nacos-standalone:8848` 的**自建 namespace `g1probe`**（不碰 `public` / `sea-rtw`）· 端口全在 5xxxx 段（`59210`/`58081`/`58082`/`59900`/`58889`/`58891`）—— **不碰 `8081`/`8889`/`8082`（有别人的进程）** |
+| **A 组（不设 `NACOS_GROUP`）** | ✅ **6/6 组件全部真启动**（user-rpc 7.52s · admin-rpc 7.13s · follow-rpc 6.26s · user-api 6.66s · admin-api 6.81s · follow-api 6.62s）· **0 解析失败** |
+| **B 组（设 `NACOS_GROUP=G1_GROUP`）** | ⚠️ 3 个 rpc 起得来但**注册到写死的 group** · `admin-api` **进程退出** · `user-api`/`follow-api` **起得来但运行时解析不到** |
+| 建表 | users 域走 `SchemaInitializer`（`users_user`/`users_user_avatar_history`/`admin_admin`/`admin_invite`）· follow 域走 Flyway（`flyway_schema_history_follow`）⇒ **同库共存、账本独立** ✅ |
+| 🆕 **A8 活体证据（新增）** | `flyway_schema_history_follow` 里 **`installed_rank=1 / version=0 / << Flyway Baseline >>`** ⇒ 因为 users 域先建了表 ⇒ `public` schema **非空** ⇒ `baseline-on-migrate: true` 触发 ⇒ **baseline 标记打在 version 0** ⇒ **V1/V2 照常执行**（`installed_rank=2/3`）⇒ ✅ **`baseline-version: 0` 这道闸在非空 schema 下真的生效**（AGENTS.md §6.3 问题 4 的残留风险，本轮实测**没踩**） |
+| 证据强度 | **RAG 侧 = L3 活体**（真容器 + 真 Nacos + 真 PG + 真 Redis + 真 HTTP 请求）· **Go 侧 = L1 源码行号** ⇒ **两侧未同时活体对拍 ⇒ 不是 L4** |
+
+### 7.1 `DRIFT-G1-001` — 🔴 `NACOS_GROUP` 对三个 rpc 组件**完全无效**（配置项形同虚设）
+
+**现象**：设 `NACOS_GROUP=<自定义>` ⇒ 三个 api 全部解析不到自己的 rpc 下游。
+
+**根因（逐条读消费点，不是读 yml）**：
+
+| 组件 | 位置 | 代码 | 读配置？ |
+|---|---|---|---|
+| `user-rpc` | `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/bootstrap/NacosRegistration.java:77` | `String groupName = "USER_GROUP";` | ❌ **写死** |
+| `admin-rpc` | `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/bootstrap/NacosRegistration.java:62` | `String groupName = "USER_GROUP";` | ❌ **写死** |
+| `follow-rpc` | `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/bootstrap/NacosRegistration.java:113` | `.registerInstance(SERVICE_NAME, DEFAULT_GROUP, instance)` | ❌ **写死** |
+| `user-api` / `admin-api` | 各自 `application.yml` 的 `spring.cloud.nacos.discovery.group` | `group: ${NACOS_GROUP:USER_GROUP}` | ✅ 读配置 |
+| `follow-api` | `service/follow/follow-api/src/main/resources/application.yml:42` | `group: ${NACOS_GROUP:DEFAULT_GROUP}` | ✅ 读配置 |
+
+⚠️ **yml 里的占位符看着完全正常** ⇒ **纯读代码 / 读配置都发现不了** ⇒ 只有真启动 + 改 `NACOS_GROUP` 才暴露。
+
+**Go 侧（group/key 可配置）**：
+- `service/user/user/rpc/etc/user.yaml:44-47` ⇒ `Etcd: { Hosts: [...], Key: user.rpc }`
+- `service/follow/rpc/etc/follow.yaml:4-7` ⇒ `Etcd: { Hosts: [...], Key: follow.rpc }`
+
+⇒ **DRIFT 性质 = 配置面收窄**（Go 可配 / RAG 写死）⇒ **不是纯表达层差异**（改环境变量即断链 ⇒ 行为面漂移）。
+
+**活体 A/B 对照（唯一变量 = `NACOS_GROUP`）**：
+
+| 组 | `NACOS_GROUP` | user-rpc | admin-rpc | follow-rpc | user-api | admin-api | follow-api |
+|---|---|---|---|---|---|---|---|
+| **A** | 未设置 | ✅ 注册 `USER_GROUP` | ✅ 注册 `USER_GROUP` | ✅ 注册 `DEFAULT_GROUP` | ✅ 6.66s 起 · 解析正常 | ✅ 6.81s 起 · 解析正常 | ✅ 6.62s 起 · 解析正常 |
+| **B** | `G1_GROUP` | ✅ 注册 `USER_GROUP`（**无视环境变量**） | ✅ 注册 `USER_GROUP`（**无视**） | ✅ 注册 `DEFAULT_GROUP`（**无视**） | ⚠️ 起得来（6.68s）· **运行时解析不到** | ❌ **进程退出** | ⚠️ 起得来（6.50s）· **运行时解析不到** |
+
+**B 组的两种表现（取决于 api 有没有 `immediate-connect-timeout`）**：
+- `admin-api`（**有** `application.yml:120` `immediate-connect-timeout: 3s`）⇒ `No servers found for admin-rpc` ×4 ⇒ **上下文启动失败 ⇒ 进程退出**；
+- `user-api` / `follow-api`（**没有**）⇒ **照样启动** ⇒ 首次业务请求才解析失败（见 `DRIFT-G1-002`）。
+
+⚠️ **默认配置下两侧恰好都是 `USER_GROUP` / `DEFAULT_GROUP` ⇒ 一致 ⇒ 不暴露** ⇒ 这就是它一直没被发现的原因。
+
+### 7.2 `DRIFT-G1-002` — 🔴 `user-api` / `follow-api` 缺 `immediate-connect-timeout` ⇒ 与 Go 的 `MustNewClient` panic 语义不一致
+
+**Go 侧（真源逐条核实行号）**：
+- `service/user/user/api/internal/svc/servicecontext.go:26` ⇒ `userservice.NewUserService(zrpc.MustNewClient(c.UserRpc))`
+- `service/user/admin/api/internal/svc/servicecontext.go:27` ⇒ `adminservice.NewAdminService(zrpc.MustNewClient(c.AdminRpc))`
+- `service/follow/api/internal/svc/servicecontext.go:27` ⇒ `followservice.NewFollowService(zrpc.MustNewClient(c.FollowRpc))`
+- go-zero v1.10.2 `zrpc/client.go:50-54` ⇒ `logx.Must(err)` ⇒ **失败即 panic** ⇒ **进程起不来**
+- go-zero v1.10.2 `zrpc/internal/client.go:18` ⇒ `dialTimeout = time.Second * 3`
+
+⇒ **Go 三个 api 的语义一致**：下游连不上 ⇒ **进程起不来**。
+
+**RAG 侧**：
+- ✅ `admin-api` ⇒ `application.yml:120` `immediate-connect-timeout: 3s` ⇒ **已对齐**（`DRIFT-ADMINAPI-009` 已修）
+- 🔴 `user-api` ⇒ `grpc.client.user-rpc` **没有** `immediate-connect-timeout`
+- 🔴 `follow-api` ⇒ `grpc.client.follow-rpc` **没有**
+
+**活体实证（B 组 · user-api）**：
+
+```
+POST /user/v1/login  {"username":"probe","password":"probe123"}
+  → HTTP 200  {"code":1015,"msg":"服务繁忙","data":null}
+日志：DiscoveryClientNameResolver : No servers found for user-rpc
+      ManagedChannelImpl            : Failed to resolve name … UNAVAILABLE
+      GoStyleGrpcClientBreakerInterceptor : [grpc-breaker] failure, method=user.UserService/Login, code=UNAVAILABLE
+      GlobalExceptionHandler        : unhandled exception      ← 走的是 /login 的另一条路径，渲染成 5001
+```
+
+⇒ **RAG user-api = 「起得来 + 每次请求塌成 1015（service busy）」**；**Go = 「起不来（panic）」**
+⇒ 🔴 **DRIFT：启动期语义不一致**（一个 fail-fast、一个静默降级）⇒ **落点 = 各域自己的 `application.yml`** ⇒ **域内可修**。
+⇒ ⚠️ 这个形态**正是 `DRIFT-FOLLOW-004` 台账原文描述过的「所有业务码塌成 1015（service busy）」** ⇒ 本条是它的**新变体**（不是同一个成因，但**可观察面一模一样**）。
+
+### 7.3 两条缺陷的**关系**：同一条链上的两个断点，且互相放大
+
+| 只修哪条 | 后果 |
+|---|---|
+| 只修 `DRIFT-G1-002`（加 `immediate-connect-timeout`） | ⚠️ **B 组会从「起来但全失败」变成「三个 api 全部起不来」** ⇒ 运维改 `NACOS_GROUP` 时，故障面从**静默降级**扩大成**全面不可用** |
+| 只修 `DRIFT-G1-001`（rpc 侧读配置） | 两侧 group 一致 ⇒ `DRIFT-G1-002` 的**暴露面归零**（但 Go 语义仍不一致，只是更难触发） |
+| **两条同批修** | ✅ 默认配置下行为零变化；`NACOS_GROUP` 可配；Go 的 fail-fast 语义对齐 |
+
+⇒ ⇒ **必须同一次提交**（否则留下「一半改完」的半截状态）。
+
+### 7.4 元教训：**「配置项存在」≠「配置项被消费」**
+
+⚠️ `DRIFT-FOLLOW-004`（`server-addr` 硬编码 `:8848` ⇒ 忽略 `NACOS_PORT`）**已于 2026-10-24 修复** ⇒ 那一轮审的是
+「`NACOS_ADDR` / `NACOS_PORT` 的**变量语义**」这一维 ⇒ ⚠️ **「`NACOS_GROUP` 是否真被消费」这一维没人查过** ⇒
+
+⇒ 这是 AGENTS.md §3.3.1 的**反向形态**：不是「配置里没写却生效了」，而是「**配置里写了、yml 看着正常，但代码根本不读**」。
+⇒ **审 Nacos / 配置面时，必须逐个变量问「谁在消费它、消费点在哪个文件的哪一行」** ⇒ **yml 占位符齐不齐不能作为证据**。
+
+### 7.5 修复口径建议（**阶段 2 落码时用；本轮阶段 1 只读 ⇒ 不落码**）
+
+| 项 | 建议修法 | 落点（G1 写权内） | 必需的回归网 |
+|---|---|---|---|
+| `DRIFT-G1-001` | rpc 侧 `NacosRegistration` 的 group **改为从 `spring.cloud.nacos.discovery.group` 读**，默认值保持现状（`USER_GROUP` / `DEFAULT_GROUP`）⇒ **默认行为零变化** | `service/users/user/user-rpc/.../NacosRegistration.java`<br>`service/users/admin/admin-rpc/.../NacosRegistration.java`<br>`service/follow/follow-rpc/.../NacosRegistration.java` | **真启动**守门：改 `NACOS_GROUP` ⇒ rpc 注册到新 group 且 api 能解析 ⇒ **MockMvc / 纯单测测不到**（§3.3） |
+| `DRIFT-G1-002` | 给 `user-api` 的 `grpc.client.user-rpc` / `follow-api` 的 `grpc.client.follow-rpc` 加 `immediate-connect-timeout: 3s`（与 `admin-api` 同款） | `service/users/user/user-api/src/main/resources/application.yml`<br>`service/follow/follow-api/src/main/resources/application.yml` | **真启动**守门：下游不可达 ⇒ **进程退出**（`exp-admin-startup-failfast.sh` 同款，user / follow 各一条） |
+
+⚠️ 两处落点都在 G1 写权内 ⇒ **不派 G4** ⇒ 走**阶段 2（域波 G1）**落码。
+⚠️ 阶段 2 落码后 ⇒ **重跑收口回归**（C7：收口回归跑完 ～ 合并主干之前，共享层变了就重跑）。
 
 ---
 
