@@ -87,7 +87,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Testcontainers
 class FavoriteApiMvcPipelineTest {
 
-    /** 与 favorite-api/application.yml 的默认密钥一致（Go 端 favorite.yaml:11）。 */
+    /** 与 favorite-api/application.yml 的默认密钥一致（Go 端
+     *     {@code service/favorite/api/etc/favorite.yaml:11}，读取点
+     *     {@code service/favorite/api/internal/handler/routes.go:57}）。 */
     private static final String SECRET = "ae0536f9-6450-4606-8e13-5a19ed505da0";
     private static final long EXPIRE_SEC = 2592000L;
     private static final long CLAIM_UID = 4242L;
@@ -133,7 +135,8 @@ class FavoriteApiMvcPipelineTest {
         return JwtUtil.getToken(SECRET, System.currentTimeMillis() / 1000L, EXPIRE_SEC, CLAIM_UID);
     }
 
-    /** 签一个【没有 userId claim】的 token（Go 侧 Authorize 不校验 claim 取值）。 */
+    /** 签一个【没有 userId claim】的 token（Go 侧 Authorize 不校验 claim 取值，
+     *     {@code go-zero@v1.10.2/rest/handler/authhandler.go:45}）。 */
     private static String tokenWithoutUserId() {
         return tokenWithUserIdClaim(null);
     }
@@ -304,7 +307,7 @@ class FavoriteApiMvcPipelineTest {
     @Test
     @DisplayName("gRPC 错误 → 按 description 反查还原业务码（5304 收藏暂不可撤回）")
     void rpcFailureMapsBizCodeByDescription() throws Exception {
-        // Go：favorite-rpc 用 GRPCError(codes.FailedPrecondition, 5304) 发出，
+        // Go：favorite-rpc 用 GRPCError(codes.FailedPrecondition, 5304) 发出，（service/favorite/rpc/internal/logic/delete_favorite_logic.go:86）
         // wire 上只有 grpc-status + description 文案 ⇒ api 侧只能靠文案反查。
         when(stub.deleteFavorite(any())).thenThrow(
                 Status.FAILED_PRECONDITION.withDescription("收藏暂不可撤回").asRuntimeException());
@@ -425,7 +428,8 @@ class FavoriteApiMvcPipelineTest {
     }
 
     /**
-     * <b>整张「拒绝矩阵」在真实 MVC 管线上的断言</b> —— 与 Go 的 {@code httpx.Parse} 逐条对齐。
+     * <b>整张「拒绝矩阵」在真实 MVC 管线上的断言</b> —— 与 Go 的 {@code httpx.Parse}
+     * （{@code go-zero@v1.10.2/rest/httpx/requests.go:50}）逐条对齐。
      *
      * <p><b>为什么放在 MVC 层而不是 DTO 层</b>：DTO 层测的是「Jackson 能不能反序列化出来」，
      * 而 MVC 层测的是「<b>整条管线</b>把这次请求判成参数错误」。
@@ -568,7 +572,7 @@ class FavoriteApiMvcPipelineTest {
     @Test
     @DisplayName("GET /item/list：query 里带无值的额外参数 → 仍按 folderId 正常处理")
     void listItemsIgnoresValuelessExtraQueryParam() throws Exception {
-        // Go：r.Form = {"folderId": ["123"], "456": [""]} ⇒ form 通道只取 "folderId" ⇒ 123
+        // Go：r.Form = {"folderId": ["123"], "456": [""]} ⇒ form 通道只取 "folderId" ⇒ 123（go-zero@v1.10.2/rest/httpx/requests.go:85）
         when(stub.getFavoritesByFolder(any())).thenReturn(
                 com.rag.favorite.favorite.proto.GetFavoritesByFolderResp.newBuilder().build());
 
@@ -684,7 +688,7 @@ class FavoriteApiMvcPipelineTest {
      * 若先取下标 0 再判空，{@code ?folderId=&folderId=456} 会退化成「字段缺席」⇒ 5003。
      */
     @Test
-    @DisplayName("GET /item/list：?folderId=&folderId=456 → 456（空值先被滤掉，Go util.go:37-43）")
+    @DisplayName("GET /item/list：?folderId=&folderId=456 → 456（空值先被滤掉，Go go-zero@v1.10.2/rest/httpx/util.go:37-43）")
     void leadingEmptyFolderIdIsFilteredBeforeTakingFirst() throws Exception {
         when(stub.getFavoritesByFolder(any())).thenReturn(
                 com.rag.favorite.favorite.proto.GetFavoritesByFolderResp.newBuilder().build());
@@ -714,7 +718,8 @@ class FavoriteApiMvcPipelineTest {
         verify(stub, never()).getFavoritesByFolder(any());
     }
 
-    /** Go 的 GetFormValues 里 n++ 是跨所有 key 累计的，超过 2048 个非空值直接报错 ⇒ 5003。 */
+    /** Go 的 GetFormValues 里 n++ 是跨所有 key 累计的，超过 2048 个非空值直接报错 ⇒ 5003
+     *     （{@code go-zero@v1.10.2/rest/httpx/util.go:15,22,48}）。 */
     @Test
     @DisplayName("GET /item/list：非空 query 值超 2048 个 → 5003（Go util.go:15 maxFormParamCount）")
     void tooManyFormValuesIsRejected() throws Exception {
@@ -752,6 +757,7 @@ class FavoriteApiMvcPipelineTest {
 
     /**
      * 真源探针实测：{@code null} / 标量 / 数组 / 语法错误在 Go 侧
+     * （{@code go-zero@v1.10.2/core/mapping/utils.go:38}），
      * 分别落 {@code unsupported type on setting field value}、{@code type mismatch}、
      * {@code unexpected EOF}，<b>全都是 5003</b>。
      */
@@ -793,7 +799,7 @@ class FavoriteApiMvcPipelineTest {
 
     /**
      * Go 出处 {@code rest/internal/header/headers.go:17}：{@code ContentTypeJson = "application/json; charset=utf-8"}，
-     * 且 {@code responses.go:182} 对每个业务响应无条件写入。Spring 默认发的是不带 charset 的版本。
+     * 且 {@code go-zero@v1.10.2/rest/httpx/responses.go:182} 对每个业务响应无条件写入。Spring 默认发的是不带 charset 的版本。
      */
     @Test
     @DisplayName("响应 Content-Type 是 application/json; charset=utf-8（Go header.ContentTypeJson）")

@@ -101,8 +101,16 @@
         <!--
             spring-boot-web-server：**只为满足 nacos-discovery 的反射引用**
             （org.springframework.boot.web.server.context.WebServerInitializedEvent）。
-            不引它启动不了 Nacos 自动配置，但**不会**因此起 web 容器 —— 本服务无 WebApplicationType。
-            与 like-rpc / message-rpc 完全同款。
+            不引它启动不了 Nacos 自动配置。
+            ⚠️ **2026-10-26 第十七轮更正**：本注释原文写「**不会**因此起 web 容器 ——
+            本服务无 WebApplicationType」—— **那句是错的**。
+            真正决定 web 应用类型的是**classpath 上有没有 jakarta.servlet**（见下一条依赖），
+            不是有没有引 spring-boot-web-server。
+            ⇒ 本模块因为下面那条 `jakarta.servlet-api`，Boot 会判定成 **SERVLET** web app
+            ⇒ 必须靠 `spring.main.web-application-type: none`（production application.yml）压回去
+            ⇒ 少了那一行，**真 fat jar 启动即死**（实测：no ServletWebServerFactory bean defined）。
+            与 like-rpc / message-rpc 的差异：那两个模块**没有**这条 jakarta.servlet 依赖
+            ⇒ 它们的 classpath 上没有 servlet ⇒ Boot 判定 NONE ⇒ 不需要那行配置。
         -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -121,9 +129,24 @@
             （这正是 AGENTS.md §3.3「不能凭声明推断能力存在」的同型问题：
             本模块的 like/message 域都没写过 authority 端点，所以从未踩到。）
 
-            jakarta.servlet-api 是**纯 API jar**（不含任何实现），加进运行时 classpath
-            不会启动任何容器；favorite-rpc 仍然是 WebApplicationType.NONE 的纯 gRPC 进程，
-            不监听任何 HTTP 端口 —— 与 Go etc/favorite.yaml 只有 ListenOn: 8082 一致。
+            🔴🔴 **2026-10-26 第十七轮更正（本注释原文有两句都错）**：
+            原文写「jakarta.servlet-api 是纯 API jar，**加进运行时 classpath 不会启动任何容器**；
+            favorite-rpc 仍然是 WebApplicationType.NONE 的纯 gRPC 进程」—— **前半句是错的**：
+            正是**因为它在运行时 classpath 上**，Spring Boot 的
+            `WebApplicationType.deduceFromClasspath()` 才把本进程判定成 **SERVLET** web app
+            ⇒ 而本服务没有 servlet 容器 ⇒ 启动期报
+            「no org.springframework.boot.web.server.servlet.ServletWebServerFactory bean defined」
+            ⇒ **真 fat jar 起不来**（2026-10-26 实测）。
+            ⇒ 修法是**配置层**压回去：`spring.main.web-application-type: none`
+            （production application.yml）⇒ 显式声明「不是 web 应用」。
+
+            ⚠️ 原文的另一半「与 Go etc/favorite.yaml 只有 ListenOn: 8082 一致」**也错**：
+            Go 侧除了 8082 还有 go-zero 内置的 DevServer（etc/favorite.yaml:23-30 →
+            0.0.0.0:16062 的 /metrics / /healthz / pprof；`internal/devserver/server.go:79-82`
+            的 `if !c.Enabled { return }` ⇒ **与 mode 无关，生产也开**）——
+            那是 **go-zero 自带的 HTTP server，不依赖 servlet 容器**。
+            ⇒ RAG 侧因此**没有** 16062 那个面 ⇒ **这本身是一条与 Go 的偏离**，
+            已单独登记为域内未决项 **U9**（部署形态类，待拍板）⇒ **不与本条混谈**。
             ⚠️ 真要<b>开启</b>权威读端点（favorite.fact.authority.enabled=true），
             还需运维另加一个 servlet 容器（tomcat / jetty），那是部署形态变更，
             见剩余问题。
@@ -249,12 +272,28 @@
             ⚠️ 必须显式写版本：根 pom 的 dependencyManagement 只管 grpc-stub / -core /
             -netty-shaded / -protobuf / -protobuf-lite，**没有**管 grpc-inprocess，
             漏写版本会让整个 reactor 在读 POM 阶段就失败。
+
+            🔴🔴🔴 **scope 必须是 runtime，不能是 test**（2026-10-25 第十四轮实测钉死）：
+            devh 的 `GrpcClientAutoConfiguration.shadedNettyGrpcChannelFactory`
+            （grpc-client-spring-boot-starter 3.1.0.RELEASE:160）在**运行期**会引用
+            `io.grpc.inprocess.InProcessChannelBuilder`（它要挂一个 in-process 兜底通道）⇒
+            运行时 classpath 缺这个类 ⇒ **进程起不来**：
+
+                java.lang.NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder
+                  at net.devh.boot.grpc.client.autoconfigure.GrpcClientAutoConfiguration
+                     .shadedNettyGrpcChannelFactory(GrpcClientAutoConfiguration.java:160)
+
+            ⚠️ 这个缺陷被 `@SpringBootTest` **完全掩盖**了：测试上下文的 classpath
+            含 test scope ⇒ 永远走不到这条分支 ⇒
+            「测试全绿」与「jar 能跑」是两件事（本仓 `check-jar-executable.sh` 查的也只是
+            Main-Class，查不出「少一个运行时依赖」）。
+            ⇒ 2026-10-25 起 favorite-rpc / favorite-api **都必须能以 `java -jar` 真起一次**。
         -->
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-inprocess</artifactId>
             <version>${grpc.version}</version>
-            <scope>test</scope>
+            <scope>runtime</scope>
         </dependency>
         <!--
             真 PostgreSQL（不是 H2）：favorite_fact_outbox 上有 UNIQUE(favorite_id,aggregate_version)

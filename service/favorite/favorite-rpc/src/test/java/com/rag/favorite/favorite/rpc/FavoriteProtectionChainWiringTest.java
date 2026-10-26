@@ -23,6 +23,8 @@ import static org.mockito.Mockito.when;
  * <b>DRIFT-MSG-V-026 的逐组件守门</b>：熔断 / 降载链必须<b>真的</b>挂到本组件的 gRPC server 上。
  *
  * <p><b>为什么必须是「组件级」而不是「一条共用测试」</b>（AGENTS.md §3.5）：
+ * Go 侧的熔断 / 降载拦截器挂在 zrpc 客户端拦截器链上
+ * （{@code go-zero@v1.10.2/zrpc/internal/client.go:112-117}），
  * 熔断 / 降载在 Go 侧是 <b>zrpc 框架级</b>能力，每个 rpc server 都自带；
  * 本仓把链的定义点放在共享模块 {@code GoStyleRpcProtectionChain}，
  * 但<b>每个组件仍然要自己把链交给 ServerBuilder</b> ——
@@ -97,7 +99,10 @@ class FavoriteProtectionChainWiringTest {
         doReturn(listener).when(next).startCall(any(), any());
 
         // ⚠️⚠️ **必须打桩 getMethodDescriptor()**：链上的 breaker 用它取隔离 key
-        //    （Go: breakerName := info.FullMethod）⇒ Mockito 默认返回 null ⇒ 链里抛 NPE。
+        //    （Go: {@code breakerName := path.Join(cc.Target(), method)}，
+        //     {@code go-zero@v1.10.2/zrpc/internal/clientinterceptors/breakerinterceptor.go:15}）
+        //    ⇒ Mockito 默认返回 null ⇒ 链里抛 NPE。
+        //    ⚠️ 注意 {@code info.FullMethod} 是 **grpc-java** 的 {@code MethodInfo}，**不是 Go 侧写法**。
         //    ⇒ 而那个 NPE 会被**最外层的 recover 静默兜住**（关掉调用、返回 INTERNAL），
         //    现象是「业务 interceptor 零交互」—— 看起来像"链没生效"，真因却在链里面。
         when(call.getMethodDescriptor()).thenReturn(MethodDescriptor.<Object, Object>newBuilder()

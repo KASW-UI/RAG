@@ -43,7 +43,8 @@ public class FavoriteSubjectRefGate implements ApplicationRunner {
 
     private static final Logger LOG = LoggerFactory.getLogger(FavoriteSubjectRefGate.class);
 
-    /** 视为「Go 的 DevMode / TestMode」的 Spring profile 名。 */
+    /** 视为「Go 的 DevMode / TestMode」的 Spring profile 名
+     *     （{@code go-zero@v1.10.2/core/service/serviceconf.go:16,18}）。 */
     private static final java.util.List<String> DEV_TEST_PROFILES = java.util.List.of("dev", "test");
 
     private final FavoriteRpcProperties properties;
@@ -59,7 +60,7 @@ public class FavoriteSubjectRefGate implements ApplicationRunner {
         boolean devOrTest = DEV_TEST_PROFILES.stream()
                 .anyMatch(profile -> java.util.Arrays.asList(environment.getActiveProfiles()).contains(profile));
 
-        // 对应 Go favorite.go:52-54 —— 启动日志带 subject_ref_version
+        // 对应 Go service/favorite/rpc/favorite.go:52-54 —— 启动日志带 subject_ref_version
         // （Go 的 favoriteSubjectVersion 产出 "v1" / "v2"）
         String version = properties.isSubjectRefV2Facts() ? "v2" : "v1";
         LOG.info("favorite-rpc starting: subject_ref_version={} profiles={} fact.dispatch.enabled={} "
@@ -69,7 +70,7 @@ public class FavoriteSubjectRefGate implements ApplicationRunner {
                 properties.getFact().getAuthority().isEnabled(),
                 properties.getFact().getLegacyPreflight().isEnabled());
 
-        // Go: :31-35 —— 门禁本体
+        // Go: service/favorite/rpc/favorite.go:31-35 —— 门禁本体
         if (properties.isSubjectRefV2Facts() && !devOrTest) {
             // ⚠️ 抛 FatalError 而不是 System.exit(2)：
             //    FatalError 的契约（common/logger/FatalError.java）就是

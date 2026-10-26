@@ -17,37 +17,57 @@ import java.util.List;
  * <p>⚠️ AGENTS.md §4.1 已锁定的决策：Go 的单个 {@code FavoriteModel} 按实体拆成多个 Mapper。
  *
  * <p><b>「查不到」的约定</b>：Go 侧所有 Find* 方法把 {@code gorm.ErrRecordNotFound}
- * 归一化成 {@code model.ErrorNotFound}（favorite.go:55,69,101,115），由 logic 决定
+ * 归一化成 {@code model.ErrorNotFound}（internal/model/favorite.go:55,69,101,115），由 logic 决定
  * 翻译成哪个业务码。⇒ 本 Mapper 的单条查询<b>返回 {@code null}</b>，
  * 由 {@code FavoriteDomainService} 统一翻译（避免每处各写一遍判空）。
  *
- * <p>⚠️ <b>全部无 LIMIT</b>（Go 侧 favorite.go:37-47 的 {@code FindFoldersByUserId}
+ * <p>⚠️ <b>全部无 LIMIT</b>（Go 侧 internal/model/favorite.go:37-47 的 {@code FindFoldersByUserId}
  * 也没有分页）⇒ 这里<b>不加</b> {@code LIMIT}。加了就改变了可观察行为。
  */
 @Mapper
 public interface FavoriteFolderMapper {
 
     /**
-     * 对应 Go {@code InsertFolder}（favorite.go:33-35）：
+     * 对应 Go {@code InsertFolder}（internal/model/favorite.go:33-35）：
      * {@code m.conn.WithContext(ctx).Create(folder).Error}。
      *
      * <p>{@code id} 是 bigserial 自增代理键，<b>不写入</b>（Go 的 struct 里
      * {@code Id uint64} 零值 0 也是由 PG 分配）。
      *
-     * <p>⚠️ {@code create_time} / {@code update_time} 由 PG 的 {@code now()} 生成，
-     * 与 Go 的 {@code autoCreateTime} / {@code autoUpdateTime}（GORM 在 INSERT 时填
-     * Go 侧的 {@code time.Now()}）<b>时区语义一致</b>：都是 timestamptz 的绝对时刻。
+     * <p>🔴 <b>2026-10-26 第二十三轮修</b>：本方法<b>原来不绑</b> {@code create_time} /
+     * {@code update_time} ⇒ DDL（{@code V1__create_favorite_folder.sql:24-26}）里这两列
+     * <b>没有 DEFAULT</b> ⇒ 落库 <b>NULL</b> ⇒ 对外 {@code created_at} / {@code updated_at}
+     * 变成 {@code 0}（{@code FavoriteRpcSupport.unixMillis}：{@code null → 0L}）⇒
+     * <b>L1 可观察的漂移</b>（Go 侧是真实毫秒）。
+     *
+     * <p><b>Go 出处（消费点，不是声明点）</b>：
+     * <ul>
+     *   <li>struct tag：{@code internal/model/data_model.go:10-11}
+     *       （{@code create_time} / {@code update_time} 带 {@code autoCreateTime} / {@code autoUpdateTime}）</li>
+     *   <li>赋值点：{@code gorm.io/gorm@v1.31.1/callbacks/create.go:246} —— {@code curTime := stmt.DB.NowFunc()}
+     *       <b>整条 INSERT 只取一次</b> ⇒ 两个 auto-time 字段拿到<b>同一个时刻</b>
+     *       ⇒ 本实现绑**同一个** {@code now}（{@code create_time} 与 {@code update_time} 相等）</li>
+     *   <li>填充分支：{@code gorm.io/gorm@v1.31.1/callbacks/create.go:302-305}（字段零值时才填）</li>
+     * </ul>
+     *
+     * <p><b>语义等价论证</b>：Go 侧的值来自 <b>Go 进程时钟</b>（{@code NowFunc} = {@code time.Now()}）
+     * ⇒ 本实现绑 <b>Java 进程时钟</b>（{@code Instant.now(clock)}）⇒ <b>时钟源同侧</b>（应用进程，
+     * <b>不是</b>数据库侧）⇒ 与 Go 同源。
+     * ⚠️ <b>不能</b>用 DDL 的 {@code DEFAULT now()}（PG 服务器时钟）⇒ 那是<b>另一个时钟源</b>
+     * ⇒ 应用与数据库时钟偏移时会产生分歧 ⇒ 且 DDL 根本<b>没有</b>这个 DEFAULT。
      */
     @Insert("""
-            INSERT INTO favorite_folder (folder_id, user_id, name)
-            VALUES (#{folderId}, #{userId}, #{name})
+            INSERT INTO favorite_folder (folder_id, user_id, name, create_time, update_time)
+            VALUES (#{folderId}, #{userId}, #{name}, #{createTime}, #{updateTime})
             """)
     int insertFolder(@Param("folderId") long folderId,
                      @Param("userId") long userId,
-                     @Param("name") String name);
+                     @Param("name") String name,
+                     @Param("createTime") java.time.OffsetDateTime createTime,
+                     @Param("updateTime") java.time.OffsetDateTime updateTime);
 
     /**
-     * 对应 Go {@code FindFoldersByUserId}（favorite.go:37-47）：
+     * 对应 Go {@code FindFoldersByUserId}（internal/model/favorite.go:37-47）：
      * <pre>Where("user_id = ?", userId).Order("create_time desc")</pre>
      *
      * <p>🔴 <b>{@code ORDER BY create_time DESC} 是 L2 语义</b>：收藏夹列表的展示顺序。
@@ -61,7 +81,7 @@ public interface FavoriteFolderMapper {
             """)
     List<FavoriteFolderEntity> findByUserId(@Param("userId") long userId);
 
-    /** 对应 Go {@code FindFolderByFolderId}（favorite.go:49-59）：{@code Where("folder_id = ?").First()}。 */
+    /** 对应 Go {@code FindFolderByFolderId}（internal/model/favorite.go:49-59）：{@code Where("folder_id = ?").First()}。 */
     @Select("""
             SELECT id, folder_id, user_id, name, create_time, update_time
             FROM favorite_folder
@@ -91,7 +111,7 @@ public interface FavoriteFolderMapper {
             """)
     FavoriteFolderEntity findByFolderIdForUpdate(@Param("folderId") long folderId);
 
-    /** 对应 Go {@code FindFolderByUserIdAndName}（favorite.go:61-73）。 */
+    /** 对应 Go {@code FindFolderByUserIdAndName}（internal/model/favorite.go:61-73）。 */
     @Select("""
             SELECT id, folder_id, user_id, name, create_time, update_time
             FROM favorite_folder
@@ -102,22 +122,34 @@ public interface FavoriteFolderMapper {
                                              @Param("name") String name);
 
     /**
-     * 🔴 对应 Go {@code UpdateFolderNameByFolderId}（favorite.go:75-80）。
+     * 🔴 对应 Go {@code UpdateFolderNameByFolderId}（internal/model/favorite.go:75-80）。
      *
-     * <p><b>只更新 name 一列</b>，<b>刻意不碰 {@code update_time}</b>。
+     * <p>🔴 <b>2026-10-26 第二十三轮修</b>：本方法<b>原来只写 name 一列</b>，
+     * 且当时的 javadoc <b>自相矛盾</b>（前半句说「Go 也只写 name」，后半句又说「GORM 会追加
+     * autoUpdateTime」，而结论却是「刻意不碰 update_time」）⇒ <b>结论是错的</b>。
      *
-     * <p>⚠️ 这不是遗漏：Go 的 {@code Update("name", name)} 也只写 name。
-     * 但 GORM 的 {@code Update} 会同时刷新 {@code autoUpdateTime} 字段，
-     * Java 侧若照直觉加 {@code update_time = now()} 就会让
-     * {@code GetFavoriteFolders} 返回的 {@code updated_at} 变化 ——
-     * 那是 <b>对外可观察</b>的差异（helper.go:70 把 UpdateTime.UnixMilli() 放进响应）。
+     * <p><b>Go 出处（消费点）</b>：{@code gorm.io/gorm@v1.31.1/callbacks/update.go:236-254}
+     * —— map 形式的 {@code Update} 会<b>自动追加</b>所有 {@code AutoUpdateTime > 0} 的字段：
+     * {@code now := stmt.DB.NowFunc()} ⇒ 追加 {@code update_time = now}。
+     * ⇒ <b>Go 实际写两列：name + update_time</b>。
+     *
+     * <p><b>语义等价论证</b>：本实现写 {@code name} + {@code update_time}（应用层时钟）
+     * ⇒ 与 Go 的两列写入<b>逐列一致</b>；值来自 <b>Java 进程时钟</b> vs Go 的
+     * <b>Go 进程时钟</b> ⇒ 时钟源同侧。
+     *
+     * <p><b>为什么这是 L1 可观察的</b>：{@code GetFavoriteFolders} 把
+     * {@code UpdateTime.UnixMilli()} 放进响应（{@code internal/logic/helper.go:70}）
+     * ⇒ 不推进 {@code update_time} ⇒ 客户端看到的 {@code updated_at} <b>永远不变</b>
+     * ⇒ 与 Go 不一致（第二轮 SQL 层对拍实测：Go 侧 {@code u=} 是新毫秒，RAG 侧是旧毫秒）。
      */
     @Update("""
             UPDATE favorite_folder
-            SET name = #{name}
+            SET name = #{name}, update_time = #{updateTime}
             WHERE folder_id = #{folderId}
             """)
-    int updateNameByFolderId(@Param("folderId") long folderId, @Param("name") String name);
+    int updateNameByFolderId(@Param("folderId") long folderId,
+                              @Param("name") String name,
+                              @Param("updateTime") java.time.OffsetDateTime updateTime);
 
     /**
      * 🔴 对应 Go {@code DeleteFolderCascade} 的最后一步（favorite_fact.go:376）：

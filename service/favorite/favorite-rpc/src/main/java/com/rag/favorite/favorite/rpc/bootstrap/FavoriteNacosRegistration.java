@@ -17,7 +17,7 @@ import java.net.UnknownHostException;
 import java.util.Enumeration;
 
 /**
- * favorite-rpc 启动后注册到 Nacos —— 对应 Go 端 {@code service/favorite/rpc/favorite.go} 里
+ * favorite-rpc 启动后注册到 Nacos —— 对应 Go 端 {@code service/favorite/rpc/favorite.go:42} 里
  * {@code zrpc.MustNewServer(c.RpcServerConf, …)} 的隐式 etcd 注册。
  *
  * <p>Go {@code etc/favorite.yaml:32-35} 的 {@code Etcd.Key: favorite.rpc}

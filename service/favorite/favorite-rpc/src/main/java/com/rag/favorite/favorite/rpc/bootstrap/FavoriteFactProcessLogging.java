@@ -37,7 +37,10 @@ public class FavoriteFactProcessLogging {
 
     private static final Logger LOG = LoggerFactory.getLogger(FavoriteFactProcessLogging.class);
 
-    /** Go 侧四个进程的 service 身份（逐字照抄 cmd/* 里的字面量）。 */
+    /** Go 侧四个进程的 service 身份（逐字照抄 cmd/* 里的字面量：
+     *     {@code service/favorite/rpc/cmd/fact-authority/main.go:22}、
+     *     {@code service/favorite/rpc/cmd/fact-dispatch/main.go:25}、
+     *     {@code service/favorite/rpc/cmd/fact-legacy-preflight/main.go:19}）。 */
     public static final String SERVICE_DISPATCH = "rtw-favorite-fact-dispatch";
     public static final String SERVICE_AUTHORITY = "rtw-favorite-fact-authority";
     public static final String SERVICE_PREFLIGHT = "rtw-favorite-legacy-preflight";

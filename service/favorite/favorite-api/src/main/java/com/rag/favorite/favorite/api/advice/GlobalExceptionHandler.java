@@ -65,7 +65,7 @@ public class GlobalExceptionHandler {
 
     /**
      * go-zero 解析失败在 favorite 域的<b>唯一</b>业务码。
-     * Go: {@code favoritecommon.ErrorInvalidParam = 5003}（{@code errmsg.go:16}）。
+     * Go: {@code favoritecommon.ErrorInvalidParam = 5003}（{@code service/favorite/common/errmsg.go:16}）。
      */
     private static final int ERROR_INVALID_PARAM = FavoriteErrorCode.ERROR_INVALID_PARAM.getCode();
 
@@ -73,7 +73,8 @@ public class GlobalExceptionHandler {
      * 业务异常 → HTTP 200 + envelope。
      *
      * <p>Go 出处：所有 logic 的 {@code return nil, code} 形态，handler 侧
-     * {@code httpx.OkJsonCtx(w, &response.Response{Code: code, Msg: GetErrMsg(code), Data: resp})}。
+     * {@code httpx.OkJsonCtx(w, &response.Response{Code: code, Msg: GetErrMsg(code), Data: resp})}
+     * （{@code service/favorite/api/internal/handler/favorite/create_favorite_folder_handler.go:29-33}）。
      * <b>HTTP 恒为 200</b>，业务成败由 body 的 {@code code} 表达。
      */
     @ExceptionHandler(BusinessException.class)
@@ -92,10 +93,17 @@ public class GlobalExceptionHandler {
      *   <li>{@code rest.WithJwt} → {@code rest/handler/authhandler.go:106-122 unauthorized()}
      *       → {@code WriteHeader(401)}，<b>body 为空</b>；</li>
      *   <li>{@code api/internal/middleware/checkblacklist_middleware.go:39-45}
-     *       → 401 + {@code {"code":5004,"msg":"未登录或登录已失效"}}。</li>
+     *       → 401 + {@code {"code":5004,"msg":"未登录或登录已失效"}}
+     *       （手写 {@code fmt.Sprintf}，<b>没有 {@code data} 字段</b>）。</li>
      * </ul>
-     * <p>本端统一成完整 envelope（{@code {code,msg,data}}）—— 与 users/admin 域同款，
-     * 属 AGENTS.md §3.4 已登记的表达层差异；<b>状态码 401 与 code 5004 是对齐的</b>。
+     * <p>本端统一成完整 envelope（{@code {code,msg,data}}）—— 与 users/admin/comment 域同款。
+     * <p>⚠️ <b>这是本域唯一一处「两侧 body 形状不同」的地方</b>：
+     * Go 的验签失败是<b>空 body</b>、黑名单命中是<b>无 data 字段</b>的两字段 JSON，
+     * RAG 侧两者都是三字段 envelope。<b>HTTP 状态码 401 与 code 5004 是对齐的</b>，
+     * 差的只是 body 的字段集合 ⇒ 属表达层差异，<b>待签字</b>，登记在
+     * {@code docs/Intentional_Deviations/favorite/api.md}（DEV-FAV-API-001）。
+     * <p>⚠️ <b>不要</b>把「§3.4 已登记」当成依据：§3.4 是<b>proto 复制</b>那一节，
+     * 与本条无关（此前本类的注释误引了它）。
      *
      * <p>Spring 挑最具体的 handler，故本方法优先于 {@link #handleBusiness}。
      */
@@ -236,7 +244,8 @@ public class GlobalExceptionHandler {
     /**
      * 兜底：未预期的异常 → HTTP 500 + 5001。
      *
-     * <p>Go 侧的等价物是 go-zero 的 {@code RecoverHandler}（把 panic 转成 500），
+     * <p>Go 侧的等价物是 go-zero 的 {@code RecoverHandler}（把 panic 转成 500，
+     * {@code go-zero@v1.10.2/rest/handler/recoverhandler.go:12}），
      * 但 Go 的 logic 不会 panic —— 本分支对应的是「RAG 侧的实现缺陷」，
      * 不属于迁移需要保留的语义。
      */
@@ -255,7 +264,8 @@ public class GlobalExceptionHandler {
      * 解析失败的统一出口：<b>HTTP 200 + {@code {code:5003, msg:"参数错误", data:null}}</b>。
      *
      * <p>Go: {@code httpx.OkJsonCtx(w, &response.Response{Code: ErrorInvalidParam,
-     * Msg: GetErrMsg(ErrorInvalidParam), Data: nil})}。
+     * Msg: GetErrMsg(ErrorInvalidParam), Data: nil})}
+     * （{@code service/favorite/api/internal/handler/favorite/create_favorite_folder_handler.go:19-23}）。
      */
     private static ResponseEntity<Response> invalidParam() {
         return ResponseEntity.status(HttpStatus.OK)

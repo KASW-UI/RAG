@@ -46,7 +46,7 @@ import java.util.Map;
  * 目的是避开 go-zero 熔断的失败名单。但<b>本域的 Go 端本来就大量发 {@code Internal} 与
  * {@code Unavailable}</b>（例如 {@code rpc/internal/logic/delete_favorite_logic.go:72} 的
  * {@code GRPCError(codes.Internal, ErrorDbSelect)}、
- * {@code rpc/internal/logic/helper.go:115} 的
+ * {@code service/favorite/rpc/internal/logic/helper.go:115} 的
  * {@code GRPCError(codes.Unavailable, ErrorServerCommon)}），
  * 即 Go 侧<b>确实</b>把这些计入依赖失败统计。
  * ⇒ {@link #grpcError} <b>原样透传</b>调用方给的 gRPC 码；
@@ -175,7 +175,7 @@ public final class FavoriteGrpcError {
 
         Status status = extractStatus(err);
         if (status == null) {
-            // Go: status.FromError 返回 ok=false ⇒ return CodeServerBusy
+            // Go: status.FromError 返回 ok=false ⇒ return CodeServerBusy（service/favorite/common/errmsg.go:113-116）
             return FavoriteErrorCode.CODE_SERVER_BUSY.getCode();
         }
 

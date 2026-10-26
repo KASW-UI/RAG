@@ -16,6 +16,31 @@ spring:
     # 对应 Go Name: favorite.rpc（服务发现用）；Telemetry.Name 亦为 favorite-rpc
     name: favorite-rpc
 
+  main:
+    # 🔴🔴 **必须显式声明「不是 web 应用」**（2026-10-26 第十七轮实测后补上）。
+    #
+    # 现象：真 fat jar 用**生产 yaml 原样**起 ⇒ 直接死：
+    #   APPLICATION FAILED TO START
+    #   Description: Web application could not be started as there was no
+    #     org.springframework.boot.web.server.servlet.ServletWebServerFactory bean defined
+    #     in the context.
+    # 根因：classpath 上有 jakarta.servlet（pom 里为编译期引用
+    #   `jakarta.servlet.http.HttpServlet/Request/Response` 而显式声明了
+    #   `jakarta.servlet:jakarta.servlet-api`）⇒ Spring Boot 的
+    #   `WebApplicationType.deduceFromClasspath()` 判定为 **SERVLET**
+    #   ⇒ 但本服务**没有** servlet 容器（没有 tomcat）⇒ 找不到 ServletWebServerFactory。
+    #   ⚠️ 这与 pom 里那句「不引它…**不会**因此起 web 容器」是**相反**的（那条注释已更正）。
+    #
+    # 与 Go 的对应关系（不要误读成「少了一个功能」）：
+    #   Go 侧 favorite-rpc 的 gRPC 端口是 8082（etc/favorite.yaml:2 ListenOn: 0.0.0.0:8082），
+    #   另有 go-zero 内置的 DevServer（etc/favorite.yaml:23-30 → 16062 的 /metrics / /healthz / pprof）——
+    #   那是 **go-zero 自带的 HTTP server，不依赖 servlet 容器**。
+    #   ⚠️ RAG 侧**不**引 servlet 容器（纯 gRPC 进程，见本文件「权威读」段的注释）
+    #      ⇒ 就没有 16062 那个面 ⇒ **这本身是一条与 Go 的偏离**，
+    #      已单独登记为域内未决项 **U9**（部署形态类，待拍板）⇒ **不与本条混谈**。
+    #   ⇒ 本条只解决「**起不来**」：**不新增任何对外 wire 面**（与既有设计意图一致）。
+    web-application-type: none
+
   # ============== Postgres ==============
   # 对应 Go internal/config/config.go:7-14 的 Postgres{Host,Port,User,Password,DBName,Mode}
   #   etc/favorite.yaml:9-15 → postgres:5432 / admin / first_db / sslmode=disable
@@ -78,20 +103,60 @@ grpc:
   server:
     port: 8082
     address: 0.0.0.0
-    # Go 侧 reflection 仅在 DevMode/TestMode 注册（favorite.go:45-47）；
-    # Java 侧 devh starter 默认即开启 reflection，此处不额外配置。
+    # 🔴 reflection **必须显式关掉**（2026-10-26 第十七轮核对时发现本域**漏配**）。
+    #
+    # Go 出处（service/favorite/rpc/favorite.go:45-47）：
+    #     if c.Mode == service.DevMode || c.Mode == service.TestMode { reflection.Register(grpcServer) }
+    # 消费点判定：Config 内嵌 zrpc.RpcServerConf → service.ServiceConf，
+    #   其 Mode 字段带 `json:",default=pro,options=dev|test|rt|pre|pro"`
+    #   （go-zero@v1.10.2 core/service/serviceconf.go:35），
+    #   而 etc/favorite.yaml **没有配顶层 Mode** ⇒ 取默认值 "pro"
+    #   ⇒ **分支不成立 ⇒ 真源生产形态不暴露 reflection**。
+    #
+    # devh 侧默认是**开着**的：
+    #   GrpcServerProperties.reflectionServiceEnabled 默认 true；
+    #   GrpcReflectionServiceAutoConfiguration 上是
+    #   `@ConditionalOnProperty(prefix="grpc.server", name="reflection-service-enabled", matchIfMissing=true)`
+    #   ⇒ **不写这一行 = 开着** ⇒ RAG 会比真源多暴露一整个反射面
+    #   （`grpcurl -plaintext <host>:8082 list` 能列出全部方法并下载 proto 描述符）。
+    #
+    # ⇒ 与 user-rpc / admin-rpc / message-rpc / hot-rpc **同款显式关闭**；
+    #   本模块不配 DevMode/TestMode 切换（Go 侧也没有对应配置项），
+    #   因此生产等价物就是关掉；需要本地调试时用环境变量覆盖为 true。
+    reflection-service-enabled: false
     # ⚠️ Go 还开了 DevServer（favorite.yaml:23-30，16062 端口 + /metrics + /healthz + pprof）。
     #   那是 go-zero 的开发服务器，Java 侧对应的 /metrics 由 actuator 承担（见 management 段）。
   client:
-    # 对应 Go etc/favorite.yaml:37-39  UserRpc.Etcd.Key: user.rpc
+    # 对应 Go etc/favorite.yaml:37-41  UserRpc.Etcd.Key: user.rpc
+    # 🔴 地址必须是**三斜杠**（`discovery:///user-rpc`），不是两斜杠。
+    #
+    # 判据出处（**字节码实测**，devh grpc-client-spring-boot-starter 3.1.0.RELEASE 的
+    # net/devh/boot/grpc/client/nameresolver/DiscoveryClientResolverFactory.newNameResolver）：
+    #   String path = targetUri.getPath();
+    #   if (path == null || path.length() <= 1 || !path.startsWith("/")) {
+    #       throw new IllegalArgumentException("Incorrectly formatted target uri; ...");
+    #   }
+    #   ... newNameResolver(path.substring(1), args);   // ← 服务名 = path 去掉首斜杠
+    #   ⇒ `discovery://user-rpc` 解析出 path=""（长度 0）⇒ 不合格 ⇒ **启动期抛异常**
+    #   ⇒ 这个检查发生在**任何网络调用之前** ⇒ 与 Nacos 在不在线无关
+    #   ⇒ 炸点在 gRPC client bean 后处理 ⇒ **连 Flyway 都跑不到** ⇒ 真 fat jar 起不来。
+    #
+    # ⚠️ 三斜杠**不改变服务发现名**：devh 取 path.substring(1) = "user-rpc"
+    #    ⇒ 仍是 Nacos 上的服务名 `user-rpc`（与 spring.application.name 同族命名）。
+    # ⚠️ 这**不是**「与 Go 对齐」—— 两侧注册中心本来就不同（Go 用 etcd 键 `user.rpc`，
+    #    那是**已签字的有意偏离**）；本条修的是「RAG 侧写法非法导致起不来」。
+    # ⇒ 守门：FavoriteRpcProductionAddressTest（读**生产** yaml · 遍历**全部** client ·
+    #   **真调** devh 的 newNameResolver：生产不抛 + 两斜杠**必须**抛）。
     user-rpc:
-      address: discovery://user-rpc
+      address: discovery:///user-rpc
       enable-keep-alive: true
       keep-alive-time: 30s
       negotiation-type: plaintext
     # 对应 Go etc/favorite.yaml:43-47  ArticleRpc.Etcd.Key: article.rpc
     article-rpc:
-      address: discovery://article-rpc
+      # 🔴 同上：三斜杠。devh 取 path.substring(1) = "article-rpc"
+      #    ⇒ 服务名不变（users 域的 article-rpc 侧服务名同样是 article-rpc）。
+      address: discovery:///article-rpc
       enable-keep-alive: true
       keep-alive-time: 30s
       negotiation-type: plaintext

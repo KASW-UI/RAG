@@ -80,12 +80,12 @@ public class FavoriteApiSupport {
     public long userId(HttpServletRequest request) {
         Object raw = request.getAttribute(FavoriteJwtAuthInterceptor.CLAIM_ATTRIBUTE);
         if (raw == null) {
-            // Go: ctx userId is nil
+            // Go: ctx userId is nil（service/favorite/api/internal/logic/favorite/helper.go:16-18）
             log.warn("ctx userId is nil, uri={}", request.getRequestURI());
             throw unauthorized();
         }
         if (raw instanceof String s) {
-            // Go: strconv.ParseInt(v, 10, 64)
+            // Go: strconv.ParseInt(v, 10, 64)（service/favorite/api/internal/logic/favorite/helper.go:24）
             try {
                 return Long.parseLong(s);
             } catch (NumberFormatException e) {
@@ -94,7 +94,7 @@ public class FavoriteApiSupport {
             }
         }
         if (raw instanceof BigInteger bi) {
-            // Go: json.Number("...").Int64() ⇒ strconv.ParseInt 越界即失败。
+            // Go: json.Number("...").Int64() ⇒ strconv.ParseInt 越界即失败。（service/favorite/api/internal/logic/favorite/helper.go:21-22）
             // BigInteger.bitLength() >= 64 ⟺ 越出 int64 值域（与 GoStyleStringInt64 同判据）。
             if (bi.bitLength() >= 64) {
                 log.warn("ctx userId is out of int64 range : {}", bi);
@@ -104,7 +104,7 @@ public class FavoriteApiSupport {
         }
         if (raw instanceof Byte || raw instanceof Short
                 || raw instanceof Integer || raw instanceof Long) {
-            // Go: json.Number("123").Int64() —— 整数字面量精确等价
+            // Go: json.Number("123").Int64() —— 整数字面量精确等价（service/favorite/api/internal/logic/favorite/helper.go:21-22）
             return ((Number) raw).longValue();
         }
         if (raw instanceof Double || raw instanceof Float) {
@@ -112,7 +112,7 @@ public class FavoriteApiSupport {
             log.warn("ctx userId is a non-integer number : {}", raw);
             throw unauthorized();
         }
-        // Go: default 分支 —— unexpected type
+        // Go: default 分支 —— unexpected type（service/favorite/api/internal/logic/favorite/helper.go:31-32）
         log.warn("ctx userId has unexpected type : {}", raw.getClass().getName());
         throw unauthorized();
     }
@@ -150,7 +150,8 @@ public class FavoriteApiSupport {
     }
 
     /**
-     * 业务日志 —— 对应 Go 的 {@code logger.LogInfo(ctx, msg, userLogOption(userID), ...)}。
+     * 业务日志 —— 对应 Go 的 {@code logger.LogInfo(ctx, msg, userLogOption(userID), ...)}
+     * （{@code service/common/logger/logger.go:85}）。
      *
      * <p>⚠️ <b>日志失败不得影响业务</b>：Go 侧的 logger 写不出去不会让请求失败，
      * 本实现用 try/catch 包住，保证语义一致（与 hot-api 的 {@code logQuietly} 同款处理）。
@@ -165,7 +166,8 @@ public class FavoriteApiSupport {
 
     /**
      * 业务错误日志 —— 对应 Go 的
-     * {@code logger.LogBusinessErr(ctx, code, err, userLogOption(userID), articleLogOption(...))}。
+     * {@code logger.LogBusinessErr(ctx, code, err, userLogOption(userID), articleLogOption(...))}
+     * （{@code service/common/logger/logger.go:77}）。
      */
     public void logBusinessErr(int code, Throwable err, Long userId, String articleId) {
         try {
@@ -177,8 +179,10 @@ public class FavoriteApiSupport {
 
     /**
      * 构造 Go 的两个 log option：
-     * {@code userLogOption} = {@code logger.WithUserID(strconv.FormatInt(userID, 10))}、
-     * {@code articleLogOption} = {@code logger.WithArticleID(strings.TrimSpace(articleID))}。
+     * {@code userLogOption} = {@code logger.WithUserID(strconv.FormatInt(userID, 10))}
+     * （{@code service/common/logger/logger.go:35}）、
+     * {@code articleLogOption} = {@code logger.WithArticleID(strings.TrimSpace(articleID))}
+     * （{@code service/common/logger/logger.go:42}）。
      */
     private static LogOption[] options(Long userId, String articleId) {
         LogOption[] opts = new LogOption[2];
@@ -218,18 +222,56 @@ public class FavoriteApiSupport {
     /**
      * 下游返回 {@code null} 响应 —— 对应 Go 的 {@code if rpcResp == nil { ... 5001 }}。
      *
-     * <p>Go 出处（7 个 logic 同构）：
+     * <p><b>Go 出处（4 个 logic：create ×2 + get ×2）</b>：
      * <ul>
-     *   <li>{@code create_favorite_logic.go:64-69}：
-     *       {@code if rpcResp == nil { err = fmt.Errorf("favorite rpc returned nil response"); ... 5001 }}；</li>
-     *   <li>{@code delete_favorite_logic.go:57-62}：
-     *       {@code if rpcResp == nil || !rpcResp.Success { ... 5001 }}。</li>
+     *   <li>{@code create_favorite_folder_logic.go:57-62}、</li>
+     *   <li>{@code create_favorite_logic.go:64-69}、</li>
+     *   <li>{@code get_favorite_folders_logic.go:51-56}、</li>
+     *   <li>{@code get_favorites_by_folder_logic.go:57-62}。</li>
      * </ul>
-     * <p>⚠️ <b>注意 Go 把「nil」与「success=false」合并成同一条 5001 分支</b>，
-     * 本实现用同一条出口保持一致。
+     * <pre>
+     *   if rpcResp == nil {
+     *       err = fmt.Errorf("favorite rpc returned nil response")
+     *       ... ErrorServerCommon(5001)
+     *   }
+     * </pre>
+     * ⚠️ <b>这 4 个 logic 只判 {@code nil}</b>：它们的响应消息里<b>根本没有 {@code success} 字段</b>
+     * ⇒ 不存在「success=false」这条分支。
+     *
+     * <p>⚠️ <b>为什么与 {@link #nullOrUnsuccessfulResponse} 分开成两个出口</b>：
+     * Go 的<b>另 3 个</b> logic（delete ×2 + update ×1）判的是
+     * {@code rpcResp == nil || !rpcResp.Success}，且错误文案是<b>另一句</b>
+     * （{@code "favorite rpc returned unsuccessful response"}）。
+     * ⇒ Go 侧这两类是<b>分开的两条分支</b>（判定不同、措辞不同），
+     * 本实现逐条对齐，<b>不合并</b> —— 合并会让服务端业务日志少掉一条 Go 侧存在的措辞。
+     */
+    public BusinessException nullResponse(Long userId, String articleId) {
+        IllegalStateException cause = new IllegalStateException("favorite rpc returned nil response");
+        logBusinessErr(FavoriteErrorCode.ERROR_SERVER_COMMON.getCode(), cause, userId, articleId);
+        int code = FavoriteErrorCode.ERROR_SERVER_COMMON.getCode();
+        return new BusinessException(code, FavoriteErrorMessages.getMsg(code));
+    }
+
+    /**
+     * 下游返回 {@code null} <b>或</b> {@code success=false} —— 对应 Go 的
+     * {@code if rpcResp == nil || !rpcResp.Success { ... 5001 }}。
+     *
+     * <p><b>Go 出处（3 个 logic：delete ×2 + update ×1）</b>：
+     * <ul>
+     *   <li>{@code delete_favorite_logic.go:57-62}、</li>
+     *   <li>{@code delete_favorite_folder_logic.go:57-62}、</li>
+     *   <li>{@code update_favorite_folder_name_logic.go:59-64}。</li>
+     * </ul>
+     * <pre>
+     *   if rpcResp == nil || !rpcResp.Success {
+     *       err = fmt.Errorf("favorite rpc returned unsuccessful response")
+     *       ... ErrorServerCommon(5001)
+     *   }
+     * </pre>
+     * ⚠️ <b>Go 的措辞是 {@code "unsuccessful"}（不含 "nil or"}</b> ⇒ 本实现用同一句。
      */
     public BusinessException nullOrUnsuccessfulResponse(Long userId, String articleId) {
-        IllegalStateException cause = new IllegalStateException("favorite rpc returned nil or unsuccessful response");
+        IllegalStateException cause = new IllegalStateException("favorite rpc returned unsuccessful response");
         logBusinessErr(FavoriteErrorCode.ERROR_SERVER_COMMON.getCode(), cause, userId, articleId);
         int code = FavoriteErrorCode.ERROR_SERVER_COMMON.getCode();
         return new BusinessException(code, FavoriteErrorMessages.getMsg(code));
@@ -327,14 +369,14 @@ public class FavoriteApiSupport {
     public static String goFormFirstValue(HttpServletRequest request, String name) {
         int seen = 0;
         String selected = null;
-        for (Map.Entry<String, String[]> entry : request.getParameterMap().entrySet()) {
+        for (Map.Entry<String, String[]> entry : parameterMap(request).entrySet()) {
             boolean target = entry.getKey().equals(name);
             for (String value : entry.getValue()) {
-                // Go: `if len(v) == 0 { continue }` —— 空值在计数与取值之前就被丢掉。
+                // Go: `if len(v) == 0 { continue }` —— 空值在计数与取值之前就被丢掉。（go-zero@v1.10.2/rest/httpx/util.go:44）
                 if (value == null || value.isEmpty()) {
                     continue;
                 }
-                // Go: `if n < maxFormParamCount { ... n++ } else { return nil, fmt.Errorf(...) }`
+                // Go: `if n < maxFormParamCount { ... n++ } else { return nil, fmt.Errorf(...) }`（go-zero@v1.10.2/rest/httpx/util.go:15,48）
                 // ⇒ 恰好放行 2048 个，第 2049 个触发报错。
                 if (seen >= GO_MAX_FORM_PARAM_COUNT) {
                     throw new IllegalArgumentException("too many form values");
@@ -347,6 +389,50 @@ public class FavoriteApiSupport {
             }
         }
         return selected;
+    }
+
+    /**
+     * 取 {@code request.getParameterMap()}，并把 <b>Tomcat 的「参数过多」异常</b>转成
+     * {@link IllegalArgumentException}。
+     *
+     * <p><b>🔴 为什么必须转</b>（2026-10-25 真 Tomcat 实测发现的漂移）：
+     * <ul>
+     *   <li>Tomcat 在请求的参数<b>条目数</b>超过 {@code server.tomcat.max-parameter-count}
+     *       时，会在 {@code getParameterMap()} 里抛
+     *       {@code org.apache.tomcat.util.http.InvalidParameterException}
+     *       （它<b>不是</b> {@code IllegalArgumentException} 的子类）。</li>
+     *   <li>⇒ 它<b>绕过了</b> {@code GlobalExceptionHandler#handleIllegalArgument}
+     *       ⇒ 落到 {@code handleAny} 兜底 ⇒ <b>HTTP 500 + {code:5001}</b>。</li>
+     *   <li>而 Go 侧的对应场景是 {@code httpx.GetFormValues} 超过
+     *       {@code maxFormParamCount=2048} ⇒ {@code httpx.Parse} 失败
+     *       ⇒ handler 落 <b>HTTP 200 + {code:5003, msg:"参数错误"}</b>。</li>
+     * </ul>
+     * ⇒ 两侧在<b>同一个输入</b>下是<b>不同状态码 + 不同业务码</b>（500/5001 vs 200/5003）——
+     * 这是可观察的 L1 差异。
+     *
+     * <p><b>⇒ 本方法把「容器层的参数上限」与「应用层的参数上限」统一收敛到 Go 的出口</b>：
+     * 无论是谁先发现「参数太多」，对外都只呈现 Go 的那一种形态（<b>200 + 5003</b>）。
+     *
+     * <p><b>⚠️ 计数口径仍与 Go 差 1</b>（<b>未修，见 DRIFT-FAV-API-001</b>）：
+     * Tomcat 数的是<b>参数条目数</b>（key + value 合计），Go 的 {@code GetFormValues} 数的是
+     * <b>非空值个数</b> ⇒ 同名 2048 个值时，Tomcat 拒、Go 放行。
+     * ⇒ 修它要动 {@code server.tomcat.max-parameter-count}，而该值由<b>全仓</b>守门脚本
+     * {@code tools/difftest/check-tomcat-limits.py} 统一期望为 2048 ⇒ 需跨域拍板，
+     * <b>不</b>在 favorite 域单方面改。
+     *
+     * <p><b>⚠️ 为什么 catch 的是 {@link RuntimeException} 而不是 Tomcat 的类</b>：
+     * 本方法<b>只包住 {@code getParameterMap()} 这一行</b>（范围极窄），
+     * 且不把 favorite-api 的编译期依赖绑到 Tomcat 的内部类上
+     * （{@code org.apache.tomcat.util.http} 不是 Tomcat 的公开 API 面）。
+     */
+    private static Map<String, String[]> parameterMap(HttpServletRequest request) {
+        try {
+            return request.getParameterMap();
+        } catch (RuntimeException e) {
+            // Tomcat 的 InvalidParameterException（参数条目数超过 max-parameter-count）在此抛出。
+            // ⚠️ 不把原异常吞掉：挂到 cause 上，日志里仍能看到「是哪个容器限制触发的」。
+            throw new IllegalArgumentException("too many request parameters: " + e.getMessage(), e);
+        }
     }
 
     /**
@@ -366,7 +452,8 @@ public class FavoriteApiSupport {
     /**
      * 构造 Go 的 {@code favoritecommon.ErrorUnauthorized}（5004）业务异常。
      *
-     * <p>Go: {@code return nil, favoritecommon.ErrorUnauthorized} ⇒
+     * <p>Go: {@code return nil, favoritecommon.ErrorUnauthorized}
+     * （{@code service/favorite/common/errmsg.go:17}）⇒
      * handler 写 {@code {code:5004, msg:"未登录或登录已失效", data:null}}，<b>HTTP 200</b>。
      */
     private static BusinessException unauthorized() {

@@ -144,7 +144,8 @@ public class FavoriteDeliveryValidator {
         public String subjectId;
     }
 
-    /** Go 的 {@code (T, bool)} 多返回值包装（{@code favoriteSubjectV1} 的返回）。 */
+    /** Go 的 {@code (T, bool)} 多返回值包装（{@code favoriteSubjectV1} 的返回，
+     *     {@code service/favorite/rpc/internal/model/favorite_authority.go:105}）。 */
     public static final class SubjectResult {
 
         /** 归一化后的 v1 三元组；{@code ok=false} 时为 {@code null}。 */
@@ -169,7 +170,7 @@ public class FavoriteDeliveryValidator {
             new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
     /**
-     * 🔴 对应 Go {@code favoriteDelivery.go:155} 的
+     * 🔴 对应 Go {@code favorite_delivery.go:155} 的
      * {@code json.Unmarshal([]byte(row.Payload), &event)}。
      *
      * @return 解码结果；解析失败返回 {@code null}（Go 侧是 {@code err != nil}）
@@ -358,7 +359,7 @@ public class FavoriteDeliveryValidator {
             text = raw.asText();
             wasQuoted = false;
         } else {
-            // Go：非字符串时 text = string(raw)，ParseInt 对 true/{}/[] 一律失败
+            // Go：非字符串时 text = string(raw)，ParseInt 对 true/{}/[] 一律失败（service/favorite/rpc/internal/model/favorite_authority.go:83-86）
             return 0L;
         }
         if (text == null || text.isEmpty()) {
@@ -370,7 +371,7 @@ public class FavoriteDeliveryValidator {
         } catch (NumberFormatException e) {
             return 0L;
         }
-        // Go: strconv.FormatInt(id, 10) != text ⇒ 非规范十进制
+        // Go: strconv.FormatInt(id, 10) != text ⇒ 非规范十进制（service/favorite/rpc/internal/model/favorite_authority.go:87）
         if (id <= 0 || !Long.toString(id, 10).equals(text)) {
             return 0L;
         }
@@ -424,7 +425,7 @@ public class FavoriteDeliveryValidator {
                 if (v2 == null || !"rtw.identity".equals(v2.issuer)) {
                     return new SubjectResult(null, false);
                 }
-                // Go: :118 —— 归一化成 v1 三元组
+                // Go: service/favorite/rpc/internal/model/favorite_authority.go:118 —— 归一化成 v1 三元组
                 authorityId = v2.issuer;
                 tenantId = "platform";
                 subjectId = v2.subjectId;
@@ -435,7 +436,7 @@ public class FavoriteDeliveryValidator {
             return new SubjectResult(null, false);
         }
 
-        // Go: :122-123 —— subject_id 必须是规范正整数
+        // Go: service/favorite/rpc/internal/model/favorite_authority.go:122-123 —— subject_id 必须是规范正整数
         if (subjectId == null || subjectId.isEmpty()) {
             return new SubjectResult(null, false);
         }
@@ -451,7 +452,9 @@ public class FavoriteDeliveryValidator {
         return new SubjectResult(new FavoriteAuthorityFact.SubjectRefV1(authorityId, tenantId, subjectId), true);
     }
 
-    /** 保留给权威读路径：把 {@code timestamptz} 列还原成 Go 侧的 UTC 时刻。 */
+    /** 保留给权威读路径：把 {@code timestamptz} 列还原成 Go 侧的 UTC 时刻
+     *     （Go 的 DSN 固定 {@code TimeZone=Asia/Shanghai}，
+     *     {@code service/favorite/rpc/internal/model/db.go:21}）。 */
     static Instant toUtcInstant(OffsetDateTime value) {
         return value == null ? null : value.toInstant();
     }

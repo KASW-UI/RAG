@@ -128,11 +128,11 @@ public class FavoriteArticleSnapshotResolver {
 
         GetArticleResponse resp;
         try {
-            // Go: :133-137（三个 L1 字段固化在 ArticleRpcClient#getPublicArticle）
+            // Go: service/favorite/rpc/internal/logic/helper.go:133-137（三个 L1 字段固化在 ArticleRpcClient#getPublicArticle）
             resp = articleRpcClient.getPublicArticle(normalizedTargetId);
         } catch (StatusRuntimeException e) {
             fail();
-            // Go: :142-146
+            // Go: service/favorite/rpc/internal/logic/helper.go:142-146
             if (e.getStatus().getCode() == Status.Code.NOT_FOUND) {
                 throw FavoriteExceptions.articleNotFound();
             }
@@ -141,7 +141,7 @@ public class FavoriteArticleSnapshotResolver {
             throw FavoriteExceptions.internalServerCommon();
         }
 
-        // Go: :148-151
+        // Go: service/favorite/rpc/internal/logic/helper.go:148-151
         if (resp == null || !resp.hasArticle()) {
             fail();
             throw FavoriteExceptions.articleNotFound();
@@ -149,7 +149,7 @@ public class FavoriteArticleSnapshotResolver {
 
         Article article = resp.getArticle();
 
-        // 🔴 Go: :153-156 —— 刻意用 Unavailable（不是 Internal）：
+        // 🔴 Go: service/favorite/rpc/internal/logic/helper.go:153-156 —— 刻意用 Unavailable（不是 Internal）：
         //   article.Id != normalizedTargetID  ⇒ 下游返回了不属于本次请求的文章（不可解释）
         //   article.Status != PUBLISHED      ⇒ 公开投影不该返回未发布内容（下游有 bug 或数据不一致）
         // 两种都表达「上游状态不对」⇒ 可重试。
@@ -164,7 +164,7 @@ public class FavoriteArticleSnapshotResolver {
         String revisionId = trimToEmpty(metadata.get(PUBLISHED_REVISION_ID));
 
         if (!revisionId.isEmpty()) {
-            // Go: :159-166
+            // Go: service/favorite/rpc/internal/logic/helper.go:159-166
             //   prefix := normalizedTargetID + ":r"
             //   number, parseErr := strconv.ParseUint(strings.TrimPrefix(revisionID, prefix), 10, 64)
             //   if !strings.HasPrefix(revisionID, prefix) || parseErr != nil || number == 0 ||
@@ -206,7 +206,7 @@ public class FavoriteArticleSnapshotResolver {
                 throw FavoriteExceptions.unavailableServerCommon();
             }
         } else {
-            // Go: :167-170 —— 无修订号时，唯一合法情形是明确标记为 legacy 空洞。
+            // Go: service/favorite/rpc/internal/logic/helper.go:167-170 —— 无修订号时，唯一合法情形是明确标记为 legacy 空洞。
             if (!GAP_LEGACY_REVISION_MISSING.equals(metadata.get(PUBLICATION_GAP))) {
                 fail();
                 LOG.warn("article has no revision and no legacy marker: id={} gap={}",
@@ -215,11 +215,11 @@ public class FavoriteArticleSnapshotResolver {
             }
         }
 
-        // Go: :172 —— metrics.ObserveOp("dependency", "article_get", resultSuccess)
+        // Go: service/favorite/rpc/internal/logic/helper.go:172 —— metrics.ObserveOp("dependency", "article_get", resultSuccess)
         metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
                 FavoriteRpcLabels.ACTION_ARTICLE_GET, FavoriteRpcLabels.RESULT_SUCCESS);
 
-        // Go: :173-177
+        // Go: service/favorite/rpc/internal/logic/helper.go:173-177
         return new ArticleSnapshot(trimToEmpty(article.getTitle()), articleCover(article), revisionId);
     }
 
@@ -258,12 +258,14 @@ public class FavoriteArticleSnapshotResolver {
         return "";
     }
 
-    /** Go 的 map 取值语义：缺失键得到 {@code ""}（不是 null）。 */
+    /** Go 的 map 取值语义：缺失键得到 {@code ""}（不是 null）
+     *     （{@code service/favorite/rpc/internal/logic/helper.go:157-158}）。 */
     private static String trimToEmpty(String value) {
         return value == null ? "" : value.trim();
     }
 
-    /** Go 的 {@code metrics.ObserveOp("dependency", "article_get", resultFail)}（:140,149,154,164,172）。 */
+    /** Go 的 {@code metrics.ObserveOp("dependency", "article_get", resultFail)}
+     *     （{@code service/favorite/rpc/internal/logic/helper.go:140,149,154,164,168,172}）。 */
     private void fail() {
         metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
                 FavoriteRpcLabels.ACTION_ARTICLE_GET, FavoriteRpcLabels.RESULT_FAIL);

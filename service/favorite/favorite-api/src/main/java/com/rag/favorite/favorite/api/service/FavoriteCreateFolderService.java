@@ -46,8 +46,10 @@ public class FavoriteCreateFolderService {
                 support.invokeRpc(() -> rpcClient.favoriteRpc().createFavoriteFolder(rpcReq), userId, null);
 
         // Go: create_favorite_folder_logic.go:57-62 —— rpcResp == nil ⇒ 5001
+        // ⚠️ Go 这一支【只判 nil】（响应消息里没有 success 字段）⇒ 用 nullResponse，
+        //    不是 nullOrUnsuccessfulResponse。
         if (rpcResp == null) {
-            throw support.nullOrUnsuccessfulResponse(userId, null);
+            throw support.nullResponse(userId, null);
         }
 
         support.logInfo(String.format("create favorite folder success, folder_id=%d", rpcResp.getFolderId()),

@@ -78,7 +78,7 @@ class FavoriteApiInputContractTest {
     @Test
     @DisplayName("POST /folder/create：{\"name\":123} → 拒绝（Go：type mismatch for field \"name\"）")
     void createFolderRejectsNumberForStringField() {
-        // Go: type mismatch for field "name", expect "string", actual "number"
+        // Go: type mismatch for field "name", expect "string", actual "number"（go-zero@v1.10.2/core/mapping/unmarshaler.go:1203）
         assertThrows(Exception.class,
                 () -> MAPPER.readValue("{\"name\":123}", CreateFavoriteFolderReq.class));
     }

@@ -25,13 +25,13 @@ public class FavoriteRpcProperties {
      * <p>Go 注释原文：{@code "Omitted is v1"} ⇒ <b>缺省必须是 false（v1）</b>。
      *
      * <p>🔴 它<b>只影响新建收藏</b>（{@code favorite_fact.go:286-289}），
-     * 且撤回永远继承建立时冻结的 schema（{@code favorite.go:16-18} 的注释）：
+     * 且撤回永远继承建立时冻结的 schema（{@code service/favorite/rpc/internal/model/favorite.go:16-18} 的注释）：
      * 「A retract always inherits the schema frozen in that favorite's assertion,
      * including after a process changes this option.」
      * ⇒ 这个开关可以在进程重启后翻转，**不会**破坏已存在的断言。
      *
      * <p>非 dev/test 环境下打开会被 {@code FavoriteSubjectRefGate} 拒绝启动
-     * （等价 Go {@code favorite.go:31-35} 的 {@code os.Exit(2)}）。
+     * （等价 Go {@code service/favorite/rpc/favorite.go:31-35} 的 {@code os.Exit(2)}）。
      */
     private boolean subjectRefV2Facts = false;
 
@@ -86,7 +86,7 @@ public class FavoriteRpcProperties {
         private String dcToken = "";
 
         /**
-         * Go {@code &http.Client{Timeout: 8 * time.Second}}（main.go:56）。
+         * Go {@code &http.Client{Timeout: 8 * time.Second}}（cmd/fact-dispatch/main.go:56）。
          *
          * <p>⚠️ 与 {@code Dispatcher} 的单次 10s deadline 是<b>两层</b>超时：
          * HTTP 8s 先到，Dispatcher 的 10s 后到。改这个值到 &gt;10s 会让 10s 那层
@@ -143,7 +143,7 @@ public class FavoriteRpcProperties {
         }
 
         /**
-         * 对应 Go {@code main.go:36-40} 的三值判定：
+         * 对应 Go {@code cmd/fact-dispatch/main.go:36-40} 的三值判定：
          * {@code dsn == "" || endpoint == "" || token == ""}。
          *
          * <p>⚠️ Go 还要求 {@code FAVORITE_DATABASE_URL}；Java 侧没有这个环境变量
@@ -196,7 +196,7 @@ public class FavoriteRpcProperties {
     /**
      * 对应 Go {@code cmd/fact-legacy-preflight/main.go}。
      *
-     * <p>Go 用<b>退出码</b>表达结论：0 = clear / 1 = 读取失败 / 2 = 未裁决（main.go:38,50,24）。
+     * <p>Go 用<b>退出码</b>表达结论：0 = clear / 1 = 读取失败 / 2 = 未裁决（cmd/fact-legacy-preflight/main.go:38,50,24）。
      * Spring 进程内没有退出码（{@code System.exit} 会连带杀掉 gRPC 进程），
      * ⇒ 改为结构化报表，由人工/CI 判读日志。判定逻辑 {@code Clear()} 本身 1:1 保留。
      */

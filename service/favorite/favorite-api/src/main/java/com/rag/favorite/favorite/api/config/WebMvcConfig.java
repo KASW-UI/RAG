@@ -47,7 +47,8 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
 
-    /** Go 侧路由前缀（{@code rest.WithPrefix("/favorite/v1")}）。 */
+    /** Go 侧路由前缀（{@code rest.WithPrefix("/favorite/v1")}，
+     *     {@code service/favorite/api/internal/handler/routes.go:58}）。 */
     private static final String FAVORITE_PREFIX = "/favorite/v1/**";
 
     private final FavoriteJwtAuthInterceptor favoriteJwtAuthInterceptor;
