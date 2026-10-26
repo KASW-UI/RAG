@@ -38,9 +38,9 @@
 | 等价确认 | **约 70 个判定点**（§4） |
 | 组件规模 | Go 3,620 行 / 33 文件 ⇒ RAG 7,455 行 / 40 类（**RAG 是 Go 的 2.06 倍**） |
 | 构建 | `mvn -o -q -pl service/comment/comment-rpc -am -DskipTests install` ⇒ **`EXIT=0`**（本轮实测） |
-| 测试 | `mvn -o -pl service/comment/comment-rpc,service/comment/comment-api,service/comment/comment-common -am test` ⇒ **BUILD SUCCESS**；**rpc 85 / api 45 / common 27，合计 157 / 0 failures / 0 errors / 0 skipped**（2026-10-24 实测；本轮新增守门网 31 例） |
+| 测试 | `mvn -o -pl service/comment/comment-rpc,service/comment/comment-api,service/comment/comment-common -am test` ⇒ **BUILD SUCCESS**；**rpc 87 / api 45 / common 27，合计 159 / 0 failures / 0 errors / 0 skipped**（**2026-10-26 复测**；⚠️ 原记「rpc 85 / 合计 157」是 **2026-10-24** 的数，已过期 —— 差的 2 例是 `CommentProtectionChainWiringTest`，由**别域**提交 `21e4124`（message 域「挖出 6 个 api 的同款产物不可执行」那轮）顺手加进 `comment-rpc` 的**跨域保护层接线守网**，**不是本域新增** ⇒ 本域语义判定不变） |
 | 本台账范围 | **仅 `comment-rpc`**。`comment-api` / `comment-common` 各自独立台账 |
-| **修复轮** | **2026-10-24**：§2 的 **7 条 MISMATCH 全部已修**。守门网 = `CommentRpcGoSemanticsGateTest`（**11 例，真 PG**）；**10 条变异全部变红**。⚠️ 计数以「测试」行的 **85 例**为准（后续又加了 EventTime 5 / RedisMetric 5 / Alias 6） |
+| **修复轮** | **2026-10-24**：§2 的 **7 条 MISMATCH 全部已修**。守门网 = `CommentRpcGoSemanticsGateTest`（**11 例，真 PG**）；**10 条变异全部变红**。⚠️ 计数以「测试」行的 **87 例**为准（EventTime 5 / RedisMetric 5 / Alias 6 + 别域加的 ProtectionChain 2；**2026-10-26 复测校准**） |
 | **对拍轮** | **2026-10-24**：**双侧活体对拍**已跑通（Go 真源 + RAG 四进程同跑，**23 步**矩阵，**复跑两轮一致**）。结果 **20 一致 / 8 差异**，差异**落在 3 个步骤**上：T07 / T08 根因在 **Go 侧**（SQL 必报错 + 缺 `report_record` 表）⇒ **已签字偏离**；**T20 是新增的一条**（保护层覆盖范围：未注册路径上 Go 从不返回 413 / RAG 返回 413）⇒ 登记为 D6 ⇒ **用户已签字** `SD-2026-10-24-CAND-08`（**接受 RAG 更严/更安全的一侧** ⇒ **代码零改动**）（[`api.md` §3.2](./api.md)）。对拍过程另发现并修掉 **4 个真实缺陷**（§4.6.2） |
 
 > 🟥 **最严重的 3 条（MISMATCH-01/02/03）都在「事实投递链路」上**，

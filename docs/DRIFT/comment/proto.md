@@ -18,7 +18,7 @@
 |---|---|
 | **总体判定** | ✅ **`SEMANTICALLY EQUIVALENT`**（消费方式层）—— ⚠️ **但跨栈路径前缀有差异**（见 §3.1 / §4） |
 | SEMANTIC MISMATCH | **0 条** |
-| OBSERVABLE DIFFERENCE | **0 条**（本轮新增） |
+| OBSERVABLE DIFFERENCE | **0 条待处置** —— ⚠️ 口径澄清（2026-10-26）：§3.1 的「跨栈路径前缀差异」**不算新增的待处置差异** ⇒ 它是**已签字** `SD-2026-10-23-04`（proto `package` 归一）的**表现**，处置方式是**只增不改**（新增 `PbCommentServiceAlias` 别名）⇒ **已闭环**（残留面见 U4 / `rpc.md` U12·U13） |
 | 已知签字偏离 | **1 条**：`SD-2026-10-23-04`（proto `package` 归一）—— **不是缺陷**，见 [`docs/Intentional_Deviations/comment/proto.md`](../../Intentional_Deviations/comment/proto.md) |
 | 复制忠实度 | ✅ **245 行 vs 245 行，剥掉 `option` 与 `package` 后逐字节完全一致** |
 | `optional` 字段 | **本 proto 零个 `optional`** ⇒ §3.4 效力边界第 1 条的「optional presence 语义」在本域**不适用** |

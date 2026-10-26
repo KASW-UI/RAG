@@ -26,7 +26,7 @@
 | OBSERVABLE DIFFERENCE | **5 条**（§3）—— ~~D1（**已撤销**）~~ / D2 / D3 / **D4（已修）** / **D5（已签字）** / **D6（已签字）** ⇒ **其中 4 条已闭环**（D1 撤销 / D4 修复 / D5 签字 / D6 签字），**剩余 D2 / D3 两条属 `service/common` 跨域** |
 | 等价确认 | **约 40 个判定点**（§4） |
 | 组件规模 | Go 1,045 行 / 22 文件 ⇒ RAG 2,838 行 / 33 类 |
-| 构建 + 测试 | `mvn -o -pl service/comment/comment-rpc,service/comment/comment-api,service/comment/comment-common -am test` ⇒ **BUILD SUCCESS**；**api 45 / rpc 85 / common 27，合计 157 / 0 failures / 0 errors / 0 skipped**（2026-10-24 实测；修复前 22 条） |
+| 构建 + 测试 | `mvn -o -pl service/comment/comment-rpc,service/comment/comment-api,service/comment/comment-common -am test` ⇒ **BUILD SUCCESS**；**api 45 / rpc 87 / common 27，合计 159 / 0 failures / 0 errors / 0 skipped**（**2026-10-26 复测**；⚠️ 原记「rpc 85 / 合计 157」已过期 —— 差的 2 例由别域提交 `21e4124` 加进 `comment-rpc`，**非本域新增**；api 侧 45 例不变；修复前 22 条） |
 | **对拍轮** | **2026-10-24**：**双侧活体对拍**跑通（Go 18888 ↔ RAG 58888，**23 步**矩阵，**复跑两轮一致**）⇒ **20 一致 / 8 差异**。差异**只落在 3 个步骤**上：T07 / T08 **已签字偏离**，**T20 新登记**（§3.2）⇒ 见 §4.6 |
 
 > 🟥 **MISMATCH-API-01 是「两个模块各自都对、拼起来就错」的典型**：
