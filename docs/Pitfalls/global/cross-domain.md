@@ -1796,3 +1796,38 @@ pgjdbc 的 `PgStatement.startTimer()` 是 `if (timeout == 0) { return; }` ⇒ **
 
 **出处**：2026-10-26 第三十五轮（`E56`）·
 同族 **PIT-GLOBAL-047**（定位通道要齐全）/ **PIT-GLOBAL-030**（**一个恒红的守门等于没有守门**）。
+
+## PIT-GLOBAL-051 🔴 **登记「某域把异常改写了」之前 ⇒ 必须逐条核 Go 侧 ⇒ 否则会让本来正确的域去改本来正确的代码**
+
+**现象（2026-10-26 第三十六轮）**：第三十三轮登记 **E47**「业务层把『SQL 被 deadline 取消』改写/吞掉」
+⇒ 依据**只是 RAG 侧扫出来的 catch 形态**（24 处宽 catch + 3 处静默降级）⇒ 🟡 **没有核 Go 侧的对应行号**。
+
+**第三十六轮逐条核 Go 侧 ⇒ 定性方向相反**：
+- 🔴 **改写型域（comment / like / follow / article）的 Go 侧同样改写** ⇒ ⇒ **那 21 处与 Go 一致 ⇒ 销案**
+  （Go 出处举例：`comment/rpc/internal/logic/report_comment_logic.go:79-92` · `delete_comment_logic.go:76-77` ·
+  `update_subject_state_logic.go:79-80` · `like/rpc/internal/logic/getlikecountlogic.go:103-107` ·
+  `follow/rpc/internal/logic/followlogic.go:51-52` · `article/rpc/internal/logic/create_article_logic.go:111-112`）
+- 🟡 **user-rpc / admin-rpc 方向相反** —— Go 改写成 `codes.Internal` + "DB查询失败"
+  （`user/user/rpc/internal/logic/getuserlogic.go:41` · `user/admin/rpc/internal/logic/getuserlogic.go:38` 等），
+  而 RAG **原样上抛 DEADLINE_EXCEEDED** ⇒ ⇒ **RAG 这一侧更准确** ⇒ 走**有意偏离候选**，**不是「RAG 错」**
+- 🔴 **message 域又相反** —— Go **原样返回 err**（`markconversationreadlogic.go:59-62`），
+  而 RAG 改写成 `INTERNAL + ERROR_DB_UPDATE` ⇒ ⇒ **RAG 这一侧更糊** ⇒ 才是要修的那一侧
+
+**为什么危险**：这类错误的杀伤力**不在台账**，而在**域 owner 照着台账去改代码** ⇒
+**把本来正确的 catch 改坏** ⇒ **制造新漂移** ⇒ 而且是在「守门已绿」的方向上制造 ⇒ **比不登记更坏**。
+
+**修法**：
+1. 🔴 **「某域把异常改写了」这种判断 ⇒ 必须逐条核 Go 侧对应行号**（不是核形态，是核**那一行**）；
+2. 🔴 **判「漂移方向」时必须问一句「Go 那边改的还是原样抛的」** ⇒ 两侧可能**都改**、**都原样**、或**各行不同**；
+3. 🟢 **best-effort 降级（catch 后返回缓存值 / 忽略写入）也要核** —— 本轮 3 处「静默降级」里 **2 处与 Go 同款**（销案），
+   1 处是**少传 error**（不是降级问题，是**错误信号丢了**）。
+
+### 纪律
+
+1. 🔴 **只读盘点的结论（"X 域有 N 处 Y"）⇒ 登记前必须抽核**（**至少每域抽 1~2 条到 Go 行号**）；
+2. 🔴 **「RAG 做了更严/更准的那一侧」⇒ 不是「RAG 错」** ⇒ 走**有意偏离候选**（🏷 候选，建议签），
+   **不得「顺手修正回旧行为」**（AGENTS.md §5.3b）；
+3. 🟢 **台账登记要写清「哪些已核、哪些待核」** ⇒ 别让「只读盘点」冒充「已对照」。
+
+**出处**：2026-10-26 第三十六轮（**E47 的全面订正** · 逐条核 Go 行号 ⇒ 21 处销案 / 3 处真漂移 / 2 处静默降级销案）·
+同族 **PIT-GLOBAL-045**（先复核前提再登记）/ **PIT-GLOBAL-038**（跑红先定性）/ **PIT-GLOBAL-031**（注释说的 ≠ 代码做的）。
