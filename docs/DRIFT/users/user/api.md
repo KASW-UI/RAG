@@ -1296,7 +1296,7 @@ Recommended Verification: `UserApiRedisDisconnectedFastFailTest`（2 条 · 真�
 > ⇒ 三形态（拒连 / 解析失败 / **挂起**=命令超时路径）× 双侧 **gRPC 直连**实测：
 > 两侧 gRPC **code 全部相同**（`Internal`/`Internal`；`Internal`/`Internal`；`DeadlineExceeded`/`DeadlineExceeded`）
 > ⇒ ⇒ **015 不存在于 user-rpc** ⇒ 修法**只需落在 api 侧**（与 §10 的跨域归属结论一致）。
-> ⚠️ 唯一的不一致是 description（`context deadline exceeded` vs `rpc timeout after 2000ms`）⇒ **正是 `DRIFT-USERRPC-V-007`（已销账，主干未合）**，**不是新漂移**。
+> ⚠️ 唯一的不一致是 description（`context deadline exceeded` vs `rpc timeout after 2000ms`）⇒ **正是 `DRIFT-USERRPC-V-007`（已销账 · 待合回 `do-my-own-gh`；📌 合回与否已拍板 2026-10-26：暂不合回 ⇒ 主干仍见旧串）**，**不是新漂移**。
 > ⇒ 同轮测出**另一条**观测面差异（RAG 业务日志说「Redis 写入异常」而客户端看到的是「超时」）⇒ 另立 **`DRIFT-USERRPC-V-012`**，在 [`user/rpc.md`](./rpc.md)。
 > ⇒ 逐形态数据与复现入口 ⇒ [`user/rpc.md` 的「2026-10-26 第十一轮」](./rpc.md)。
 
