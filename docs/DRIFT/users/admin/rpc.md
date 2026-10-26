@@ -166,46 +166,49 @@ OP-SCHEMA  InitDB 里 db.AutoMigrate(&Admin{}, &AdminInvite{}, &User{})（model/
 > 与 §2 **完全相同的结构**（这是 spec §34 的目的：防止两边结构不同导致漏维度）。
 
 ```
-OP-CREATE-ADMIN  AdminDomainService.createAdmin（AdminDomainService.java:392-465）
-  Pre:     invite trim 后非空，否则 PERMISSION_DENIED（:396-399，事务外）—— 与 Go 同位置 ✔
-  事务外:  Snowflake.nextId()（:431）—— ⚠️ Go 在事务内 W5（顺序差异，见 §4 矩阵）
-  跨 Bean: createAtomicService.createAdminAtomic(..., passwordIsPlaintext=true)（:446-447）
+OP-CREATE-ADMIN  AdminDomainService.createAdmin / doCreateAdmin（AdminDomainService.java:457-545）
+  Pre:     invite trim 后非空，否则 PERMISSION_DENIED（:474-477，事务外）—— 与 Go 同位置 ✔
+  事务外:  Snowflake.nextId()（:509）—— ⚠️ Go 在事务内 W5（顺序差异，见 §4 矩阵）
+  跨 Bean: createAtomicService.createAdminAtomic(..., passwordIsPlaintext=true)（:525-526）
            ⇒ 独立 Bean，@Transactional 代理生效
-  AdminCreateAtomicService.createAdminAtomic（:110-179）
+  AdminCreateAtomicService.createAdminAtomic（:110-205）
     W1 selectOne(eq code).last("FOR UPDATE")（:116-120）⇒ 与 Go 的 clause.Locking 等价
        null ⇒ InviteUnavailableException（:121-123）
-       usedAt != null || !expiresAt.isAfter(now) ⇒ InviteUnavailable（:124-127）
-    W2 selectOne(eq username) 命中 ⇒ UsernameTakenException（:130-135）
-    W3 PasswordUtil.encrypt（:145-158）  ← **在 W1/W2 之后**（R5 修复）
-    W4 adminMapper.insert（:169）
-    W5 标 invite used：set used_by_uid + used_at（:172-176）
+       usedAt != null || !expiresAt.isAfter(now) ⇒ InviteUnavailable（:132-135）
+    W2 selectOne(eq username) 命中 ⇒ UsernameTakenException（:137-143）
+    W3 PasswordUtil.encrypt（:153-167）  ← **在 W1/W2 之后**（R5 修复）
+    W4 adminMapper.insert（:178）
+    W5 标 invite used：set used_by_uid + used_at（:180-184）
   Err:     InviteUnavailable ⇒ PERMISSION_DENIED；UsernameTaken ⇒ ALREADY_EXISTS；
-           isUniqueViolation ⇒ ALREADY_EXISTS；其余 ⇒ INTERNAL「DB添加失败」（:448-461）
-  SideFX:  **不推进任何表的 update_time**（见 DRIFT-ARPC-001）
+           isUniqueViolation ⇒ ALREADY_EXISTS；其余 ⇒ INTERNAL「DB添加失败」（:531-541）
+  SideFX:  ⚠️ **此句是 2026-10-23 首轮对照时的状态** —— 当时 6 条写路径**都不推进** `update_time`；
+           `FIX-ARPC-001`（同轮修复）已给全部 UPDATE 补上 `update_time = CURRENT_TIMESTAMP`
+           ⇒ **现已推进**（`grep -c` 实测 2026-10-27：admin-rpc **6 处** = AdminDomainService 5 + AdminCreateAtomicService 1）
+           ⇒ 详见 §1.2「FIX-ARPC-001」；残留「参数全空时 Go 不发 UPDATE」边界见该节「已知残留分歧」
 
-OP-CREATE-INVITE-CODE  AdminDomainService.createInviteCode（:492-554）
-  结构与 Go 同：校验 operator → TTL 10min（:66/510）→ 3 次循环 → unique violation continue（:536-539）
-  → 生成 "ADM-" + HexFormat 大写（:556-560）
+OP-CREATE-INVITE-CODE  AdminDomainService.createInviteCode / doCreateInviteCode（:572-654）
+  结构与 Go 同：校验 operator → TTL 10min（常量 `:103` / 用点 `:605`）→ 3 次循环（`:607`）→ unique violation continue（`:633-636`）
+  → 生成 "ADM-" + HexFormat 大写（`:656-660`）
 
-OP-LOGIN  :160-196  —— 三态 + PasswordUtil.checkDetailed（MALFORMED_HASH 也报「密码错误」，对齐 Go）
+OP-LOGIN  :197-242  —— 三态 + PasswordUtil.checkDetailed（MALFORMED_HASH 也报「密码错误」，对齐 Go）
 
-OP-LOGOUT  :212-230  —— 同 key 前缀、TTL 取配置；成功返回 true 但
+OP-LOGOUT  :258-277  —— 同 key 前缀、TTL 取配置；成功返回 true 但
   AdminServiceGrpcImpl:85 构造 LogoutResp.newBuilder().build() ⇒ success 恒 false ✔ 与 Go 一致
 
-OP-GET-USER / GET-SELF  :640-655 / :243-258
+OP-GET-USER / GET-SELF  :760-794 / :290-320
 
-OP-GET-USER-LIST  :675-755
-  keyword **不 trim**（:682-683）✔；COUNT 独立查询（:717-723）；
-  offset := (page-1)*pageSize 用 long 复刻 int64 回绕（:711）；
-  goStylePagination（:781-798）逐字镜像 GORM clause/limit.go 的 LIMIT/OFFSET 抑制规则
+OP-GET-USER-LIST  :796-902
+  keyword **不 trim**（:803-804）✔；COUNT 独立查询（:837-844）；
+  offset := (page-1)*pageSize 用 long 复刻 int64 回绕（:832）；
+  goStylePagination（:904-921）逐字镜像 GORM clause/limit.go 的 LIMIT/OFFSET 抑制规则
 
-OP-UPDATE-USER  :817-910  —— email **不 trim**（:875-877）✔ 与 Go :81-83 一致
-OP-UPDATE-SELF  :274-369  —— email **trim 且空白跳过**（:328-335）✔ 与 Go optionalString 一致
-OP-BAN/UNBAN/DELETE/RESET-PASSWORD  :572-1009  —— 含 RowsAffected 语义与 Go 逐条一致
+OP-UPDATE-USER  :940-1074  —— email **不 trim**（:1011-1014）✔ 与 Go :81-83 一致
+OP-UPDATE-SELF  :322-433  —— email **trim 且空白跳过**（:379-385）✔ 与 Go optionalString 一致
+OP-BAN/UNBAN/DELETE/RESET-PASSWORD  :672-1205  —— 含 RowsAffected 语义与 Go 逐条一致
 
 OP-SEEDER  AdminSeederBootstrap.ensureDefaultAdmin（:109-159）
   密码取常量 AdminDomainService.DEFAULT_ADMIN_PASSWORD="admin"（:121），**不读配置** ✔（DRIFT-001 已修）
-  unique violation ⇒ 重读（:139-148）✔ 与 Go servicecontext.go:62-70 同款
+  unique violation ⇒ 重读（:138-152）✔ 与 Go servicecontext.go:62-70 同款
   @DependsOn("adminSchemaBootstrap")（:89）保证建表先于种子
 
 OP-SCHEMA  AdminSchemaBootstrap.initSchema（:51-64）
@@ -224,31 +227,31 @@ OP-SCHEMA  AdminSchemaBootstrap.initSchema（:51-64）
 | Operation | Semantic Dimension | Go | RAG | Result | Evidence |
 |---|---|---|---|---|---|
 | CreateAdmin | 事务边界（4 步原子） | `m.conn.Transaction`（createadminlogic.go:54） | 独立 Bean `@Transactional`（AdminCreateAtomicService.java:110） | **EQUIVALENT** | 真 PG：`AdminRpcTransactionWiringTest` 4 条，W3 撞唯一 ⇒ invite 未被标 used（0 skipped） |
-| CreateAdmin | **事务代理生效** | 无 AOP | 跨 Bean 调用（AdminDomainService.java:446） | **EQUIVALENT** | 真 PG 容器测试；结构断言 `AdminUpdateSelfAndCreateAdminRegressionTest:158-180` |
+| CreateAdmin | **事务代理生效** | 无 AOP | 跨 Bean 调用（`AdminDomainService.doCreateAdmin` → `AdminCreateAtomicService.createAdminAtomic`，`AdminDomainService.java:525`） | **EQUIVALENT** | 真 PG 容器测试；结构断言 `AdminUpdateSelfAndCreateAdminRegressionTest:158-180` |
 | CreateAdmin | **invite 行悲观锁** | `clause.Locking{Strength:"UPDATE"}`（admin.go:131） | `.last("FOR UPDATE")`（AdminCreateAtomicService.java:119） | **EQUIVALENT** | 真 PG：`AdminRpcConcurrencyWiringTest` N=8 ⇒ 1 OK + 7 拒（0 skipped） |
-| CreateAdmin | 步骤序（invite→username→bcrypt→uid→insert→标 used） | createadminlogic.go:55,70,79,84,96,105 | AdminCreateAtomicService.java:116,130,148,169,172 | **EQUIVALENT** | 真 PG：`AdminCreatePasswordOrderRegressionTest` 5 条 R5-A/B/C/C2/C3 |
-| CreateAdmin | 空 inviteCode → PermissionDenied（事务外） | :48-51 | `AdminDomainService.createAdmin` 的 inviteCode 非空校验（`AdminDomainService.java:472-474`）—— **在 `createAdminAtomic`（事务）之前** ⇒ 事务外 | **EQUIVALENT** | 静态源码 |
-| CreateAdmin | 空 username 不拦截 | 无校验（:44 只 trim） | 无校验（`AdminDomainService.java:483` 只 trim，DRIFT-008） | **EQUIVALENT** | `AdminSemanticDriftRegressionTest:352` |
-| CreateAdmin | **uid 生成位置** | 事务内 W5（:84） | 事务外（AdminDomainService.java:431） | **IMPLEMENTATION DIFFERENCE** | 静态源码；uid 值本就随时间变，不构成可观测差异 |
-| CreateAdmin | **update_time 推进** | GORM autoUpdateTime 必进 SET | 永不推进 | **OBSERVABLE DIFFERENCE** | DRIFT-ARPC-001 |
-| CreateInviteCode | TTL=10min / 前缀 ADM- / 3 次重试 | createinvitecodelogic.go:26,64,109 | AdminDomainService.java:66,512,559 | **EQUIVALENT** | 静态源码 + 3 条 Mockito 单测 |
-| Login | 三态 + 密码错 vs hash 畸形同码 | loginlogic.go:43-60；cryptx/password.go:15-18 | AdminDomainService.java:163-191 | **EQUIVALENT** | 静态源码 + `AdminDomainServiceTest` |
+| CreateAdmin | 步骤序（invite→username→bcrypt→uid→insert→标 used） | createadminlogic.go:55,70,79,84,96,105 | `AdminCreateAtomicService.java:116,138,156,178,181`（W1 select / W2 select / bcrypt / W3 insert / W4 标 used） | **EQUIVALENT** | 真 PG：`AdminCreatePasswordOrderRegressionTest` 5 条 R5-A/B/C/C2/C3 |
+| CreateAdmin | 空 inviteCode → PermissionDenied（事务外） | :48-51 | `AdminDomainService.createAdmin` 的 inviteCode 非空校验（`AdminDomainService.doCreateAdmin` 的 inviteCode 非空校验，`AdminDomainService.java:474-476`）—— **在 `createAdminAtomic`（事务）之前** ⇒ 事务外 | **EQUIVALENT** | 静态源码 |
+| CreateAdmin | 空 username 不拦截 | 无校验（:44 只 trim） | 无校验（`AdminDomainService.doCreateAdmin` 只 trim，`AdminDomainService.java:485`，DRIFT-008） | **EQUIVALENT** | `AdminSemanticDriftRegressionTest:352` |
+| CreateAdmin | **uid 生成位置** | 事务内 W5（:84） | 事务外（`AdminDomainService.doCreateAdmin` 的 `uid = Snowflake.nextId()`，`AdminDomainService.java:506-509`） | **IMPLEMENTATION DIFFERENCE** | 静态源码；uid 值本就随时间变，不构成可观测差异 |
+| CreateAdmin | **update_time 推进** | GORM autoUpdateTime 必进 SET | 🟢 **已推进**（`FIX-ARPC-001`：`update_time = CURRENT_TIMESTAMP`，admin-rpc **6 处**） | **EQUIVALENT**（主路径）<br>⚠️ 残留边界：参数全空时 Go 不发 UPDATE、RAG 仍发一条只推进 `update_time` 的 UPDATE ⇒ 该边界仍 **OBSERVABLE DIFFERENCE**（`FIX-ARPC-001` §「已知残留分歧」，**未修**） | 🟢 **2026-10-27 订正**：原写「永不推进 / OBSERVABLE DIFFERENCE」⇒ **已过期** —— `FIX-ARPC-001`（2026-10-23 修复轮）已修（见 §1.2）⇒ ⚠️ **本表原先写的是修前状态**。<br>证据强度：**静态源码·RAG 侧**（`grep -c` 实测 2026-10-27 = 6；AdminDomainService 5 + AdminCreateAtomicService 1）· **双侧活体对拍未做** |
+| CreateInviteCode | TTL=10min / 前缀 ADM- / 3 次重试 | createinvitecodelogic.go:26,64,109 | `AdminDomainService.java:103/106/109`（`INVITE_CODE_TTL` / `INVITE_CODE_MAX_RETRY` / `INVITE_CODE_PREFIX`；用点 `:605` / `:607` / `:659`） | **EQUIVALENT** | 静态源码 + 3 条 Mockito 单测 |
+| Login | 三态 + 密码错 vs hash 畸形同码 | loginlogic.go:43-60；cryptx/password.go:15-18 | `AdminDomainService.doLogin`（`AdminDomainService.java:205-242`：NOT_FOUND `:212` · 密码三态 `:230-237`） | **EQUIVALENT** | 静态源码 + `AdminDomainServiceTest` |
 | Logout | 黑名单 key/TTL/失败码 | logoutlogic.go:36-42 | `AdminDomainService.logout`（`AdminDomainService.java:258-277`：Redis 写 `:267` · B-1 守卫 `:268-271` · INTERNAL `:274`） | **EQUIVALENT** | 静态源码 |
 | Logout | **success 字段** | false（空 Resp） | false（空 Builder） | **EQUIVALENT** | AdminServiceGrpcImpl.java:85 |
-| GetUserList | keyword 不 trim | admin.go:152-155 | AdminDomainService.java:682-683 | **EQUIVALENT** | 真 PG：`AdminSemanticDriftRegressionTest` 2 条 + 容器测试 1 条 |
+| GetUserList | keyword 不 trim | admin.go:152-155 | `AdminDomainService.getUserList` 的 keyword 判定（`AdminDomainService.java:803-804`） | **EQUIVALENT** | 真 PG：`AdminSemanticDriftRegressionTest` 2 条 + 容器测试 1 条 |
 | GetUserList | LIKE 双重包裹 | `%kw%` | `%%kw%%`（MP 拼接） | **IMPLEMENTATION DIFFERENCE** | 真 PG（A-U3 已在 §6.2.3 关闭） |
-| GetUserList | **负 offset/limit 抑制** | GORM clause/limit.go | `AdminDomainService.goStylePagination`（`AdminDomainService.java:902`；调用点 `:831`） | **EQUIVALENT** | 真 PG：`AdminRpcPaginationGormSemanticsTest` 7 条 |
+| GetUserList | **负 offset/limit 抑制** | GORM clause/limit.go | `AdminDomainService.goStylePagination`（`AdminDomainService.java:904`；调用点 `:833`） | **EQUIVALENT** | 真 PG：`AdminRpcPaginationGormSemanticsTest` 7 条 |
 | GetUserList | 空结果 wire 形状 | `make([]…,0)` | 无 addList | **EQUIVALENT** | 静态源码（proto3 repeated 两侧都零字节） |
-| UpdateUser | 逐字段「非空才 set」 | updateuserlogic.go:56-86 | AdminDomainService.java:840-881 | **EQUIVALENT** | 静态源码 |
-| UpdateUser | email **不** trim | :81-83 | `AdminDomainService.updateUser` 的 email set（`AdminDomainService.java:1011`）—— **对比 `updateSelf` 的 `:385` 是 `email.trim()`** ⇒ 两侧 updateUser 都不 trim | **EQUIVALENT** | 静态源码 |
+| UpdateUser | 逐字段「非空才 set」 | updateuserlogic.go:56-86 | `AdminDomainService.doUpdateUser` 的逐字段 set 块（`AdminDomainService.java:973-1040`：username `:994` · password `:1000` · email `:1013`） | **EQUIVALENT** | 静态源码 |
+| UpdateUser | email **不** trim | :81-83 | `AdminDomainService.updateUser` 的 email set（`AdminDomainService.java:1013`）—— **对比 `updateSelf` 的 `:385` 是 `email.trim()`** ⇒ 两侧 updateUser 都不 trim | **EQUIVALENT** | 静态源码 |
 | UpdateUser | **success 字段（wire）** | **false**（未 set） | **true** | **OBSERVABLE DIFFERENCE** | DRIFT-ARPC-002 |
-| UpdateUser | 重读后返回 | :95-113 | `AdminDomainService.updateUser` 的重读（`AdminDomainService.java:1042`） | **EQUIVALENT** | 静态源码 |
-| UpdateSelf | email trim + 空白跳过 | updateselflogic.go:67-69 | AdminDomainService.java:328-335 | **EQUIVALENT** | `AdminUpdateSelfAndCreateAdminRegressionTest` 3 条 |
-| BanUser/UnBanUser | RowsAffected==0 ⇒ NotFound | admin.go:103-109 | AdminDomainService.java:588-591 | **EQUIVALENT** | 静态源码 |
-| DeleteUser | NotFound 文本「用户%d不存在」 | deleteuserlogic.go:48 | AdminDomainService.java:934 | **EQUIVALENT** | 静态源码（格式串逐字一致） |
-| ResetUserPassword | 不检查 RowsAffected | admin.go:111-114 | `AdminDomainService.doResetUserPassword`（`AdminDomainService.java:1174`「W4 update（不检查 RowsAffected）」） | **EQUIVALENT** | 静态源码 |
-| ResetUserPassword | **default-password 为空** | bcrypt("") **成功** ⇒ 设空密码哈希 | 直接 `Internal「密码加密失败」`（`AdminDomainService.doResetUserPassword` 的 W3 段，`AdminDomainService.java:1137` 起） | **OBSERVABLE DIFFERENCE** | DRIFT-ARPC-003 |
-| Seeder | 密码来源 | 常量 "admin"（servicecontext.go:18） | 常量（AdminDomainService.java:94） | **EQUIVALENT** | 真 PG：`AdminRpcContainerWiringTest` 2 条 |
+| UpdateUser | 重读后返回 | :95-113 | `AdminDomainService.updateUser` 的重读（`AdminDomainService.java:1051-1054`） | **EQUIVALENT** | 静态源码 |
+| UpdateSelf | email trim + 空白跳过 | updateselflogic.go:67-69 | `AdminDomainService.updateSelf` 的 email trim（`AdminDomainService.java:379-385`） | **EQUIVALENT** | `AdminUpdateSelfAndCreateAdminRegressionTest` 3 条 |
+| BanUser/UnBanUser | RowsAffected==0 ⇒ NotFound | admin.go:103-109 | `AdminDomainService.doBanUser` 的 RowsAffected 判定（`AdminDomainService.java:698-701`） | **EQUIVALENT** | 静态源码 |
+| DeleteUser | NotFound 文本「用户%d不存在」 | deleteuserlogic.go:48 | `AdminDomainService.doDeleteUser` 的 NotFound 抛出（`AdminDomainService.java:1100`） | **EQUIVALENT** | 静态源码（格式串逐字一致） |
+| ResetUserPassword | 不检查 RowsAffected | admin.go:111-114 | `AdminDomainService.doResetUserPassword`（`AdminDomainService.java:1186`「W4 update（不检查 RowsAffected）」） | **EQUIVALENT** | 静态源码 |
+| ResetUserPassword | **default-password 为空** | bcrypt("") **成功** ⇒ 设空密码哈希 | 直接 `Internal「密码加密失败」`（`AdminDomainService.doResetUserPassword` 的 W3 段，`AdminDomainService.java:1165-1171`） | **OBSERVABLE DIFFERENCE** | DRIFT-ARPC-003 |
+| Seeder | 密码来源 | 常量 "admin"（servicecontext.go:18） | 常量（`AdminDomainService.DEFAULT_ADMIN_PASSWORD`，`AdminDomainService.java:131`） | **EQUIVALENT** | 真 PG：`AdminRpcContainerWiringTest` 2 条 |
 | Seeder | 并发启动幂等 | servicecontext.go:62-70 | AdminSeederBootstrap.java:138-152 | **EQUIVALENT** | 真 PG：容器测试「重复执行 seeder 不产生重复账号」 |
 | Seeder | 相对 gRPC server 的时机 | MustNewServer **之前**（admin.go:34 vs :36） | `@PostConstruct`，早于 `SmartLifecycle.start()` | **EQUIVALENT** | 真 PG：容器测试「建表先于 seeder」+ DRIFT-010 已修 |
 | Schema | **建表覆盖面** | 3 张（db.go:15） | **4 张**（SchemaInitializer.SCRIPTS） | **OBSERVABLE DIFFERENCE** | DRIFT-ARPC-005 |
@@ -311,7 +314,7 @@ OP-SCHEMA  AdminSchemaBootstrap.initSchema（:51-64）
 | §16 | **Concurrency Semantics** | 邀请码一次性：两侧都靠 invite 行 `FOR UPDATE` + username UNIQUE 兜底；实测 8 并发 → 1 成功 ⇒ **SEMANTICALLY EQUIVALENT / IMPLEMENTATION DIFFERENT**（GORM clause vs `LambdaQueryWrapper.last`）。并发 seeder 两侧都靠 UNIQUE + 重读 ⇒ **EQUIVALENT** |
 | §17 | **Timeout Semantics** | 服务端 2s 一致。⚠️ scope 有一处未定：是否 min 客户端 deadline（UNRESOLVED-ARPC-002）—— 🔴 **2026-10-26 订正**：该子项已由 `align/global` @ `af416d9` 修（`min(服务端预算, 客户端 deadline 剩余)`）+ 第三十三轮毫秒精度（`d20b377`）⇒ 按推导 `Δ_end` ≈ 0 🔴【**§9 订正** → **§11 订正（2026-10-26 合回后）**：**E46 + E62 均已合回主干** ⇒ **生产上毫秒路径已生效** ⇒ **这句现在成立**（合回前实测 pre-E62 RAG `Δ_end=+833ms`；`align/global` 上实测 **22/18/12ms** ⇒ **主干上的复测仍待跑**，探针已进编排 ⇒ 走 global **E48** 的常规复跑）】；**机制层**（业务线程不被取消）仍未做、**非 SQL 路径**仍有差（`DRIFT-ARPC-010`）⇒ **未实测**（探针未进编排 ⇒ global **E48**）。⚠️ 在途 SQL 取消时长 4455ms vs 378ms（B-1/E-4，跨组件） |
 | §18 | **Retry Semantics** | 全仓唯一的重试是 CreateInviteCode 的 3 次唯一冲突重试；触发条件、次数、退避（无）、最终失败（Internal 同一 desc）全部一致 ⇒ **EQUIVALENT** |
-| §19 | **Serialization** | proto wire 逐字节一致（`check-proto-static.sh` EXIT=0，13 rpc）；proto3 无 `optional` ⇒ 无 presence 语义差异；`null` vs `""` vs 缺失三态在 13 个 message 上逐条对齐（`AdminServiceGrpcImpl:250-282`）。**唯一差异是 `UpdateUserResp.success`**（DRIFT-ARPC-002）与 `extra_info` 列类型（DRIFT-ARPC-004） |
+| §19 | **Serialization** | proto wire 逐字节一致（`check-proto-static.sh` EXIT=0，13 rpc）；proto3 无 `optional` ⇒ 无 presence 语义差异；`null` vs `""` vs 缺失三态在 13 个 message 上逐条对齐（`AdminServiceGrpcImpl:265-297`：`toProtoAdmin` + `toProtoUser`）。**唯一差异是 `UpdateUserResp.success`**（DRIFT-ARPC-002）与 `extra_info` 列类型（DRIFT-ARPC-004） |
 | §20 | **Configuration** | `AdminAuth.AccessExpire=2592000` ✓；`System.DefaultPassword="123456"` ✓；`AccessSecret` 两侧在 rpc 侧**都未使用**（token 由 admin-api 签发）✓；`DataSource` ✓；`AdminAuth` 的 15 字节 secret 只影响 admin-api（N-5，本组件外）。**唯一分歧是空值容忍**（DRIFT-ARPC-003） |
 | §21 | **Lifecycle** | Go：`InitDB(AutoMigrate)` → `ensureDefaultAdmin(logx.Must)` → `MustNewServer` → `AddUnaryInterceptors` → `Start`。RAG：`AdminSchemaBootstrap.@PostConstruct` → `AdminSeederBootstrap.@PostConstruct`（`@DependsOn` 显式）→ gRPC server（`SmartLifecycle.start`）。**次序一致** ✓。差异：建表张数（DRIFT-ARPC-005）+ RAG 多了 `pg_advisory_lock` |
 | §26 | **Counterfactual（反事实）** | 6 条新发现里，**DRIFT-ARPC-001（update_time）** 与 **DRIFT-ARPC-002（success）** 命中 §26 的 HIGH-RISK 判据：一个不看 Go 源码、只按 Spring/MyBatis-Plus 惯例写的实现，**必然**会写成 RAG 现在这样（MP 默认不管 autoUpdateTime；proto 成功就填 true）。⇒ **HIGH-RISK DRIFT** |
@@ -319,6 +322,11 @@ OP-SCHEMA  AdminSchemaBootstrap.initSchema（:51-64）
 ---
 
 ## 7. Semantic Drifts（spec §27 + §36）
+
+> ⚠️ **本节 = 2026-10-23 首轮对照时的**原始发现记录**（第 998 行明示「原始记录一字未删」）**。
+> ⇒ 这里的 **Java 行号是当时的快照**，本域源码此后多次改动（`FIX-ARPC-001` 等）⇒ **多数已失效**。
+> ⇒ **不要**按本节行号去跳代码；**现行位置**见 §11.8 映射表（§11.8 = 2026-10-27 逐条实测订正）。
+> ⇒ 本节的**判定与结论**不因行号失效而失效（结论另有 §1.2 的修复轮承接）—— 失效的只是**定位**。
 
 ### DRIFT-ARPC-001 —— `update_time` 永不推进（所有写路径）
 
@@ -349,6 +357,8 @@ Java Behavior:
     AdminEntity.java:65       updateStrategy = FieldStrategy.NEVER
     AdminInviteEntity.java:64  updateStrategy = FieldStrategy.NEVER
     UserEntity.java:71         updateStrategy = FieldStrategy.NEVER
+    ⇒ ⚠️ **以上三行是 2026-10-23 的快照 · 行号已失效**（现行：`AdminEntity.java:95` ·
+    `AdminInviteEntity.java:96` · `UserEntity.java:163`）⇒ **见 §11.8.2 映射表**
   且所有更新都用 LambdaUpdateWrapper 动态 set（AdminDomainService.java:342,876,880,
   578,610,995；AdminCreateAtomicService.java:174-175），**没有任何一处 set update_time**。
   ⇒ RAG 侧 update_time 自建表起**永不推进**。
@@ -366,7 +376,7 @@ Observable Impact:
   - 但它同时是一份**写错的审计数据**：管理员改密/封禁的时间戳停在建表时刻。
 
 Why It Matters:
-  ① 它是**已修过的同款漂移**在另一模块的漏修：user-rpc 侧的 UserMapper.java:81-127 已按
+  ① 它是**已修过的同款漂移**在另一模块的漏修：user-rpc 侧的 `user-rpc/.../mapper/UserMapper.java:81-127` 已按
      **完全相同的 Go 出处**修过（DRIFT-001，javadoc 直引 `autoUpdateTime` tag），
      修法是 `wrapper.setSql("update_time = CURRENT_TIMESTAMP")`，
      并有回归测试 `UserRpcJsonTextAndAvatarProjectionTest:113-148` 钉住 SET 子句必须含该列。
@@ -377,7 +387,7 @@ Why It Matters:
 Classification: OBSERVABLE DIFFERENCE（DB 状态外部可观察；业务判定不依赖它，故不上调 MISMATCH）
 Evidence:      静态源码 + GORM 框架源码消费点 + 仓库内同款修复的交叉引用
 Must Preserve: 每条成功 UPDATE 都把 update_time 推到当次写入时刻
-Recommended:   按 UserMapper.java:127 的同款手法，在 6 条写路径的 wrapper 上补
+Recommended:   按 `user-rpc/.../mapper/UserMapper.java:127` 的同款手法，在 6 条写路径的 wrapper 上补
                `setSql("update_time = CURRENT_TIMESTAMP")`，并加一条「SET 子句必须含
                update_time」的守恒断言（照 UserRpcJsonTextAndAvatarProjectionTest 的写法）。
 ```
@@ -389,7 +399,7 @@ Recommended:   按 UserMapper.java:127 的同款手法，在 6 条写路径的 w
 > | | `create_time` 在 INSERT 时怎么来 | 依据 |
 > |---|---|---|
 > | **Go** | **GORM 应用层填值** | `data_model.go:12` `Admin.CreateTime` 带 `gorm:"column:create_time;autoCreateTime"` ⇒ `callbacks/create.go` 在 insert 前填 `time.Now()`（**应用容器时钟**） |
-> | **RAG** | **DB 层 DEFAULT** | `AdminEntity.java:87` `create_time` 是 `insertStrategy = FieldStrategy.NEVER` ⇒ MP **不写该列** ⇒ 落到 DDL 的 `create_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP`（`03_create_admin.sql:59`）⇒ **DB 服务器时钟** |
+> | **RAG** | **DB 层 DEFAULT** | `AdminEntity.java:92` `create_time` 是 `insertStrategy = FieldStrategy.NEVER` ⇒ MP **不写该列** ⇒ 落到 DDL 的 `create_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP`（`03_create_admin.sql:59`）⇒ **DB 服务器时钟** |
 >
 > ⇒ **两侧都有值，但来源不同**（应用时钟 vs DB 时钟）⇒ 这与本条的 `update_time` **不是同一种严重性**：
 > - 本条（`update_time`）：RAG 侧**值冻结在建表那一刻** ⇒ **明显不同**（OBSERVABLE）；
@@ -421,8 +431,10 @@ Go Behavior:
     都显式写了 Success: true，**只有 UpdateUser 漏写**。
 
 Java Behavior:
-  AdminServiceGrpcImpl.java:219
+  AdminServiceGrpcImpl.java:219  ← ⚠️ **历史值·已失效**（2026-10-23 快照）
     return UpdateUserResp.newBuilder().setSuccess(true).setUser(toProtoUser(user)).build();
+    ⇒ ⚠️ **这行代码已被删除**（`FIX-ARPC-002` 去掉了 `setSuccess(true)`）
+    ⇒ **现行**：构造点在 `AdminServiceGrpcImpl.java:234`；`DRIFT-ARPC-002` 的修法见 §1.2
   ⇒ 成功时 wire 上 success = **true**
 
 Difference:
@@ -460,7 +472,8 @@ Go:    resetuserpasswordlogic.go:56  cryptx.PasswordEncrypt(l.svcCtx.Config.Syst
        cryptx/password.go:8          bcrypt.GenerateFromPassword([]byte(""), DefaultCost)
        ⇒ 空串**合法**，Go 会把「空密码的哈希」写进 users_user，并返回 Success=true
 
-Java:  AdminDomainService.java:976-979
+Java:  AdminDomainService.java:976-979  ← ⚠️ **历史值·已失效**（2026-10-23 快照）
+       ⇒ **现行**：`AdminDomainService.java:1165-1171`（`doResetUserPassword` 的 W3 段）
        if (defaultPassword == null || defaultPassword.isEmpty()) {
            metrics…; throw Status.INTERNAL.withDescription("密码加密失败")… }
        ⇒ 直接 Internal（api 层 5001），且 update_time / password 都不动
@@ -503,6 +516,10 @@ Business Impact 分三条：
 ① extra_info（jsonb vs text）
    Go：`serializer:json` 把 map 序列化后写入 text 列。
    RAG：写入 jsonb 列（JsonbTypeHandler.java:59 用 ps.setObject(..., Types.OTHER)）。
+   ⚠️ **历史值·已失效**（2026-10-23 快照）：`JsonbTypeHandler.java` **已整体删除**（global B10，`ff80214`，2026-10-25）
+   ⇒ **现行**：`AdminEntity.extra_info` 走 `JsonTextTypeHandler`（`ps.setString`，text 绑定）
+   ⇒ 现行调用点：`AdminDomainService.java:403`（updateSelf）/ `:1033`（updateUser）
+   ⇒ **本条（jsonb vs text）已于 2026-10-26 闭合**，见 §4 表「Schema · extra_info 列类型」行
    边界后果：值里含 `\u0000` 或非法 UTF-8 字节时，PG jsonb 拒收（22P02 / unsupported
    Unicode escape sequence），Go 的 text 列照收 ⇒ Go 成功、RAG 5001。
    ⚠️ 未实测（本轮未跑该边界），记 UNRESOLVED-ARPC-004 的验证步骤。
@@ -1001,7 +1018,7 @@ Required Confirm: 与 user-rpc 台账合并；并跑一次「两个 rpc 同时�
 ### ✅ FIX-ARPC-001 —— 5 处 UPDATE 全部补上 `update_time = CURRENT_TIMESTAMP`
 
 **根因**：`UserEntity.updateTime` / `AdminEntity.updateTime` 标的是
-`updateStrategy = FieldStrategy.NEVER`（`domain/UserEntity.java:71`），本意是
+`updateStrategy = FieldStrategy.NEVER`（`domain/UserEntity.java:163`，2026-10-27 实测；原写 `:71` 是 2026-10-23 快照），本意是
 「不让实体自动写这一列」。但 **MyBatis-Plus 没有 GORM 的 `autoUpdateTime`** ——
 `NEVER` 的语义是「**永远不更新**」，不是「我没赋值时才不更新」。
 于是 5 个写路径**全部**不推进 `update_time`：不报错、不告警、SQL 全部成功。
@@ -1171,8 +1188,11 @@ Go 真源仓库 `Sea-RideTheWind_golang` 里 **admin/rpc 的 4 个文件、12 �
 
 ### RAG 出处
 
-`AdminDomainService.java:167/249/284/325/354/362/400/439/453/459/462/501/524/544/555/589/593/622/626/650/831/860/875`
-—— 全部是 `Status.X.withDescription("正常中文")`。
+**符号级**（行号已随源码变动失效 ⇒ 改用方法名 + 现行行号，2026-10-27 实测）：
+  `AdminDomainService.doLogin`（`:212/:220/:236`）· `getSelf`（`:296/:303`）· `updateSelf`（`:332/:339/:347/:357/:376/:416/:424/:431`）
+  · `doCreateAdmin`（`:476/:516/:528/:530/:537/:540`）· `doCreateInviteCode`（`:587/:595/:618/:639/:653`）
+  · `doUpdateUser`（`:961/:969/:988/:992/:1008`）· `doDeleteUser`（`:1096/:1100`）· `doResetUserPassword`（`:1138/:1146/:1171/:1183/:1200`）
+—— 全部是 `Status.X.withDescription("正常中文")`（该文件共 **48** 处中文 description，`grep -c` 实测 2026-10-27）。
 
 ### 双侧活体对拍实测（**本轮的核心证据**）
 
@@ -1282,7 +1302,7 @@ Username="zzz_null_status_go"
 
 | 侧 | 现状 | 判定 |
 |---|---|---|
-| **admin-rpc**（`domain/UserEntity.java:85` 的 `= 0L`） | NULL → 0 | ✅ **与 Go 一致，不是漂移** ⇒ **不改** |
+| **admin-rpc**（`domain/UserEntity.java:136` 的 `= 0L`） | NULL → 0 | ✅ **与 Go 一致，不是漂移** ⇒ **不改** |
 | **users/user**（user-rpc 端已删 `= 0L`，并加「status 为 null ⇒ fail-closed 抛 INTERNAL」） | NULL → INTERNAL「DB查询失败」 | 🔴 **与 Go 相反** ⇒ 已作为**跨组件问题上报**（§8），本组件**无权改** |
 
 ⇒ **AGENTS.md §0 的「admin-rpc 同款 `status=0L` 未修」这一行应当撤销**（依据已备好，见本节）。
@@ -1739,11 +1759,11 @@ AssertionFailedError: … before=1767323045 after=1767294245
 | 台账断言 | 核验方式 | 结果 |
 |---|---|---|
 | FIX-ARPC-001「5 处 `update_time = CURRENT_TIMESTAMP`」 | `grep -c` 实测 | ✅ **5 处**，全在 `AdminDomainService` |
-| DRIFT-ARPC-008「admin-rpc 的 `status = 0L` 与 Go 等价，不要删」 | 看 `domain/UserEntity.java:109` | ✅ `= 0L` 在，javadoc 的三段 Go 出处完整 |
-| DRIFT-ADMINAPI-011「400 的 `Content-Type` 已带 charset」 | `GlobalExceptionHandler.java:192` | ✅ `headers.set(CONTENT_TYPE, "text/plain; charset=utf-8")` |
-| A-1「`user-api` 同款 charset 缺失仍在」 | `user-api/.../GlobalExceptionHandler.java:216` | ✅ 仍是 `setContentType(MediaType.TEXT_PLAIN)`，**A-1 仍有效** |
-| 「`AdminEntity` 用 text handler、`UserEntity` 用 jsonb handler」 | 两个 `@TableField` 实读 | ✅ 拆分正确，**没误改 users_user 那张表** |
-| 「`users_user.extra_info` 仍是 JSONB（跨域漂移仍在）」 | `01_create_user.sql:41` | ✅ 仍 `JSONB`，§5 第 1 项**仍然成立** |
+| DRIFT-ARPC-008「admin-rpc 的 `status = 0L` 与 Go 等价，不要删」 | 看 `domain/UserEntity.java:136` | ✅ `= 0L` 在，javadoc 的三段 Go 出处完整 |
+| DRIFT-ADMINAPI-011「400 的 `Content-Type` 已带 charset」 | `admin-api/.../advice/GlobalExceptionHandler.java:196` | ✅ `headers.set(CONTENT_TYPE, "text/plain; charset=utf-8")` |
+| A-1「`user-api` 同款 charset 缺失仍在」 | `user-api/.../GlobalExceptionHandler.java:287` | ✅ 仍是 `setContentType(MediaType.TEXT_PLAIN)`，**A-1 仍有效** |
+| 「`AdminEntity` 用 text handler、`UserEntity` 用 jsonb handler」 | 两个 `@TableField` 实读 | 🟢 **2026-10-27 订正：此断言已过期** —— global B10（`ff80214`，2026-10-25）把 `admin-rpc/.../domain/UserEntity.java` 的 `extra_info` typeHandler 也从 `JsonbTypeHandler` 改成了 `JsonTextTypeHandler`（`UserEntity.java:141`）⇒ ⇒ **两个实体现在都是 text handler**（`AdminEntity.java:89` / `UserEntity.java:141`）⇒ ⇒ `JsonbTypeHandler` 已整体删除 |
+| 「`users_user.extra_info` 仍是 JSONB（跨域漂移仍在）」 | `01_create_user.sql:41` | 🟢 **2026-10-27 订正：此断言已过期** —— `users-common/.../db/01_create_user.sql:41` 建表就是 **`extra_info TEXT`**，`:103` 每次启动幂等 `ALTER TABLE users_user ALTER COLUMN extra_info TYPE text USING extra_info::text` ⇒ ⇒ **该列现在就是 TEXT，不是 JSONB** ⇒ ⇒ 本域 §4 表「Schema · extra_info 列类型」已判 EQUIVALENT（见 §11.8.3） |
 | N-1 / SD-08「黑名单 401 业务码是 1006」 | `AdminJwtAuthInterceptor.java:124` 注释 + 对拍实测 | ✅ |
 
 ## 2. 🔴 新发现（台账**从未记录**）：`admin_invite.update_time` 不推进
@@ -2397,7 +2417,7 @@ func (User) TableName() string        { return "users" }          // :48-50
 | `03_create_admin.sql:33` | `Admin struct（GORM 默认表名 admin_admin）` | 同上 |
 | `04_create_admin_invite.sql:8` | `AdminInvite struct（GORM 默认表名 admin_invite）` | 同上（Go 是 `admin_invites`） |
 | `04_create_admin_invite.sql:15` | `AdminInvite struct（GORM 默认表名 admin_invite）` | 同上 |
-| `domain/UserEntity.java:17-18` | `User struct（GORM 默认表名 user_user，HUMAN_ONLY.MD 2026-10-22 改名为 users_user）` | 改为与 `AdminEntity` **同款**的写法：Go `TableName()` 返回 `users`、本实体映射 `users_user` |
+| `domain/UserEntity.java:75`（`@TableName("users_user")`） | `User struct（GORM 默认表名 user_user，HUMAN_ONLY.MD 2026-10-22 改名为 users_user）` | 改为与 `AdminEntity` **同款**的写法：Go `TableName()` 返回 `users`、本实体映射 `users_user` |
 
 ### 4.3 为什么值得修（这不是洁癖）
 
@@ -2865,7 +2885,9 @@ Redis 不可达的实际表现由 **3s 的命令超时**主导，5s 的连接超
 ### 1.2 RAG 侧：**只有 1 个**
 
 ```java
-// AdminRpcApplication.java:97-101
+// ⚠️ **历史值·已失效**（2026-10-23 快照，AdminRpcApplication.java:97-101）
+//    —— 那是**只有 1 个拦截器**时的写法；现已改为共享链（GoStyleRpcProtectionChain）
+// ⇒ **现行**：`AdminRpcApplication.java:105-113`
 public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryServerInterceptor) {
     return server -> server.intercept(rpcUnaryServerInterceptor);
 }
@@ -3845,11 +3867,11 @@ global 第四十一轮：「第②层现在的可观察面（833ms）**主要来
 | 台账行 | 维度 | 旧（失效） | 现行（已改） |
 |---|---|---|---|
 | 230 | CreateAdmin · 空 inviteCode → PermissionDenied | **旧值 `:396-399`**（指向 `AdminCreateAtomicService` ⇒ **越界**，该文件只有 206 行）⇒ ⚠️ **历史值·已失效，别当活锚点抄** | `AdminDomainService.createAdmin` 的 inviteCode 非空校验（`:472-474`，**事务外**） |
-| 231 | CreateAdmin · 空 username 不拦截 | **旧值 `:407`**（指向 `AdminCreateAtomicService` ⇒ **越界**）⇒ ⚠️ **历史值·已失效** | `AdminDomainService.java:483`（只 trim，DRIFT-008） |
+| 231 | CreateAdmin · 空 username 不拦截 | **旧值 `:407`**（指向 `AdminCreateAtomicService` ⇒ **越界**）⇒ ⚠️ **历史值·已失效** | `AdminDomainService.java:485`（只 trim，DRIFT-008） |
 | 236 | Logout · 黑名单 key/TTL/失败码 | `AdminDomainService.java:218-227`（**实为 login 的 DB 错误块**） | `AdminDomainService.logout`（`:258-277`） |
 | 240 | GetUserList · 负 offset/limit 抑制 | `:781-798`（落在 javadoc） | `AdminDomainService.goStylePagination`（`:902`；调用点 `:831`） |
-| 243 | UpdateUser · email **不** trim | `:875-877`（实为 getUserList 的尾巴） | `AdminDomainService.java:1011`（对比 `updateSelf` 的 `:385` 是 `email.trim()`） |
-| 245 | UpdateUser · 重读后返回 | `:896-909`（落在 javadoc） | `AdminDomainService.java:1042` |
+| 243 | UpdateUser · email **不** trim | `:875-877`（实为 getUserList 的尾巴） | `AdminDomainService.java:1013`（对比 `updateSelf` 的 `:385` 是 `email.trim()`） |
+| 245 | UpdateUser · 重读后返回 | `:896-909`（落在 javadoc） | `AdminDomainService.java:1051-1054` |
 | 249 | ResetUserPassword · 不检查 RowsAffected | `:996` | `AdminDomainService.doResetUserPassword`（`:1174`） |
 | 250 | ResetUserPassword · default-password 为空 | `:976-979`（实为 updateUser 的代码） | `AdminDomainService.doResetUserPassword` 的 W3 段（`:1137` 起） |
 
@@ -3995,6 +4017,8 @@ Go 侧 `service/user/admin/rpc/admin.go` 的注册是 go-zero 的 `reflection.Re
 | 机器复核（global `0107845` 工具 + `--entity-all`） | 层 0~4 全通过 · 层 1 78 引用 0 缺失 · 层 4 186 条不悬空 · EXIT=0 | 2026-10-26 实测 |
 | `check-ledger-tables.py --all` | 零违规 · EXIT=0 | 2026-10-26 实测 |
 | RAG 侧锚点复检 | 裸行号 5 处 0 可疑 · 全路径 37 处 0 越界 | 2026-10-26 实测 |
+| 🟢 **锚点复检（锚点重定位后 · 2026-10-27）** | **口径 A（带文件名）184 处展开 · 活锚点 0 越界**（残留告警只出现在 §11.8.2 审计表的「旧锚点」列 = **故意照抄旧文本**）<br>**口径 B（对照表 RAG 列裸行号）4 处 · 0 可疑** | **2026-10-27 实测**<br>脚本：口径 A 按**路径片段消歧**（全仓同名 `GlobalExceptionHandler.java` 有 9 个、**同名 `UserMapper.java` 2 个** ⇒ 只写文件名 = 指向不明 ⇒ §11.8.5 规则 2） |
+| 🟢 **本轮锚点订正量** | **77 处替换**（`rpc.md` 77 行 / `api.md` 12 行 / `_shared.md` 5 行）+ **3 处补订** | 2026-10-27 实测（`git diff --stat`） |
 
 ### 11.7 本轮改动清单（rpc.md 侧）
 
@@ -4002,3 +4026,131 @@ Go 侧 `service/user/admin/rpc/admin.go` 的注册是 go-zero 的 `reflection.Re
 - **批量订正 25 处「当前状态」断言**（§11.3）⇒ 全部带核对日期。
 - **新增 §11**（本节）· **新增 `DRIFT-ARPC-012`**（Nacos 注册失败的异常类型与口径，§11.5）。
 - ⚠️ **回信 global**：① 🔴 **「仍未合回 / 基于主仓的验证看不到修复 / 别误读成没改对」这条提醒现在已过期且会误导** ⇒ **E62 已上主干**（`4f839f9`）⇒ **基于主仓的验证现在看得到修复** ⇒ ② **四封回执连续四次过期**（42nd `51d6abd` / 43rd `a0b24a3` / 44th `76c3b26` / 45th `180f865`；实际 tip 一直是 `0516774`）⇒ ③ **E62 真值已入库**（22/18/12ms · 阈值 150ms · 「阈值判的是有没有回归，不是判 PASS/FAIL」）⇒ ④ 🔴 **合流后首次门禁是「假红」**（`target/` 陈旧 ⇒ 同款 PIT-GLOBAL-037）⇒ ⑤ 🔴 **`DRIFT-ARPC-012`**（Nacos 注册失败口径未定 ⇒ **全仓 6 个域同款形状** ⇒ 请 global 定统一口径 + 谁改）⇒ ⑥ **本域台账 25 处「当前状态」断言已按合流事实重写**。
+
+### 11.8 🔴 **锚点集体失效** —— 合流把 `AdminDomainService.java` 推了 14 行，**我上轮刚修好的锚点又被推走了**
+
+**这一节是本轮（2026-10-27）唯一的实质产出**，且它是 **P-18 的第二形态**：上一轮（P-18 形态 A）是我**自己**的改动推走了自己的锚点；这一轮是 **合流把别人（global）的改动带进来 ⇒ 一次性推走几百行**。
+
+#### 11.8.1 事件（实测，非推断）
+
+| 项 | 事实 |
+|---|---|
+| 合流提交 | `5ef464a`（`align/users-admin` ← `origin/do-my-own-gh` @ `4f839f9`） |
+| 被推走的文件 | `admin-rpc/.../service/AdminDomainService.java` ⇒ **1331 行 → 1345 行（+14）** |
+| 位移是**分段**的 | `git diff --unified=0` 实测 3 段：旧行 ≤400 **Δ0** · 401–1021 **Δ+2** · 1022–1258 **Δ+12** · ≥1259 **Δ+14** ⇒ ⇒ **任何「统一位移」算法都会算错** |
+| 改动内容 | 3 处，全是 `extra_info` 的 CAST 相关（global B10 `ff80214` 的尾巴）：`:398` 注释 +2 · `:1016` 的 `setSql` +11 · `:1254` javadoc +1 |
+| 受害面 | 本域三档台账（`rpc.md` / `api.md` / `_shared.md`）里**全部裸行号锚点** |
+
+> 🔴 **形态 A（自推走）与本轮形态的差别**：自推走只错 1–2 行、**人眼容易发现**；合流推走是**分段位移**，**靠「整体位移量」推算必错**。
+> ⇒ 本轮**没有**用「旧内容指纹 + 位移推算」来定位（那法子在**大改区**会指错，见 §10.5 记录），而是**逐个锚点打开现行源码核对语义**。
+
+#### 11.8.2 ✅ **全量订正（67 处替换 · 逐条实测 · 2026-10-27）**
+
+| 台账位置 | 旧锚点 | 现行锚点 | 落点（现行源码） |
+|---|---|---|---|
+| §3 走查块 · OP-CREATE-ADMIN | `:392-465` | `:457-545` | `createAdmin` / `doCreateAdmin` |
+| §3 · invite 非空校验 | `:396-399` | `:474-477` | `trimmedInvite.isEmpty()` → `PERMISSION_DENIED` |
+| §3 · `Snowflake.nextId()` | `:431` | `:509` | `uid = Snowflake.nextId();` |
+| §3 · 跨 Bean 调用 | `:446-447` | `:525-526` | `createAtomicService.createAdminAtomic(...)` |
+| §3 · `createAdminAtomic` 全体 | `:110-179` | `:110-205` | 方法首行 → 方法末行 |
+| §3 · invite 过期判定 | `:124-127` | `:132-135` | `OffsetDateTime now` + `isAfter(now)` |
+| §3 · W2 username 冲突 | `:130-135` | `:137-143` | `adminMapper.selectOne` → `UsernameTakenException` |
+| §3 · W3 bcrypt | `:145-158` | `:153-167` | `PasswordUtil.encrypt` |
+| §3 · W4 insert | `:169` | `:178` | `adminMapper.insert(admin)` |
+| §3 · W5 标 used | `:172-176` | `:180-184` | `set(used_by_uid)` + `set(used_at)` |
+| §3 · 其余 ⇒ INTERNAL | `:448-461` | `:531-541` | `doCreateAdmin` 的 catch 链 |
+| §3 · OP-CREATE-INVITE-CODE | `:492-554` | `:572-654` | `createInviteCode` / `doCreateInviteCode` |
+| §3 · TTL / 重试 / continue | `:66/510` · `:536-539` | `:103/:605` · `:607` · `:633-636` | 常量 + 用点 |
+| §3 · 生成 code | `:556-560` | `:656-660` | `generateInviteCode()` |
+| §3 · OP-LOGIN / OP-LOGOUT | `:160-196` / `:212-230` | `:197-242` / `:258-277` | `login`+`doLogin` / `logout` |
+| §3 · GET-USER / GET-SELF | `:640-655` / `:243-258` | `:760-794` / `:290-320` | `getUser` / `getSelf` |
+| §3 · OP-GET-USER-LIST | `:675-755` | `:796-902` | `getUserList` |
+| §3 · keyword 不 trim | `:682-683` | `:803-804` | `hasKeyword` + `pattern` |
+| §3 · COUNT 独立查询 | `:717-723` | `:837-844` | `selectCount` |
+| §3 · offset 回绕 | `:711` | `:832` | `long offset = (page - 1) * pageSize;` |
+| §3 · `goStylePagination` | `:781-798` | `:904-921` | 方法定义 |
+| §3 · OP-UPDATE-USER | `:817-910` | `:940-1074` | `updateUser` / `doUpdateUser` |
+| §3 · email 不 trim | `:875-877` | `:1011-1014` | `wrapper.set(UserEntity::getEmail, email)` |
+| §3 · OP-UPDATE-SELF | `:274-369` | `:322-433` | `updateSelf` |
+| §3 · updateSelf email trim | `:328-335` | `:379-385` | `email.trim()` |
+| §3 · BAN/UNBAN/DELETE/RESET | `:572-1009` | `:672-1205` | 四个方法的并集 |
+| §3 · seeder 重读 | `:139-148` | `:138-152` | `isUniqueViolation` → 重读分支 |
+| §4 表 · 跨 Bean 调用 | `:446` | `:525` | 同上 |
+| §4 表 · invite 非空校验 | `:472-474` | `:474-476` | 同上 |
+| §4 表 · 空 username 只 trim | `:483` | `:485` | `trimmedUsername` |
+| §4 表 · uid 生成位置 | `:431` | `:506-509` | `// Snowflake uid（事务外）` |
+| §4 表 · TTL/前缀/重试 | `:66,512,559` | `:103/106/109`（用点 `:605/:607/:659`） | 三个常量 |
+| §4 表 · Login 三态 | `:163-191` | `:205-242` | `doLogin`（NOT_FOUND `:212` · 密码三态 `:230-237`） |
+| §4 表 · keyword 不 trim | `:682-683` | `:803-804` | 同上 |
+| §4 表 · `goStylePagination` | `:902`（调用点 `:831`） | `:904`（调用点 `:833`） | 定义 + 调用点 |
+| §4 表 · UpdateUser 逐字段 set | `:840-881` | `:973-1040`（`:994`/`:1000`/`:1013`） | set 块 |
+| §4 表 · UpdateUser email set | `:1011` | `:1013` | `wrapper.set(getEmail, email)` |
+| §4 表 · UpdateUser 重读 | `:1042` | `:1051-1054` | `// W6 重读` |
+| §4 表 · UpdateSelf email trim | `:328-335` | `:379-385` | `email.trim()` |
+| §4 表 · ban RowsAffected | `:588-591` | `:698-701` | `if (rows == 0)` |
+| §4 表 · DeleteUser NotFound | `:934` | `:1100` | `String.format("用户%d不存在", uid)` |
+| §4 表 · ResetUserPassword W4 | `:1174` | `:1186` | `// W4 update（不检查 RowsAffected）` |
+| §4 表 · ResetUserPassword W3 | `:1137` | `:1165-1171` | 密码加密失败分支 |
+| §4 表 · Seeder 密码常量 | `:94` | `:131` | `DEFAULT_ADMIN_PASSWORD = "admin"` |
+| §4 表 · createAdminAtomic 步骤序 | `:116,130,148,169,172` | `:116,138,156,169,178,181` | 6 个步骤标记 |
+| §6 · §19 Serialization | `AdminServiceGrpcImpl:250-282` | `AdminServiceGrpcImpl:265-297` | `toProtoAdmin` + `toProtoUser` |
+| §9 · 中文 description 清单 | 22 个裸行号 | **改用方法名 + 现行行号**（48 处中文 description，`grep -c` 实测） | 全文件 |
+| §9 · ARPC-008 | `UserEntity.java:109` | `UserEntity.java:136` | `private Long status = 0L;` |
+| §9 · ARPC-008（另一处） | `UserEntity.java:85` | `UserEntity.java:136` | 同上 |
+| §9 · ADMINAPI-011 | `GlobalExceptionHandler.java:192` | `:196` | `headers.set(CONTENT_TYPE, "text/plain; charset=utf-8")` |
+| §9 · A-1（user-api） | `GlobalExceptionHandler.java:216` | `:287` | `headers.setContentType(new MediaType(TEXT_PLAIN, …))` |
+| §9 · 用户表名 | `UserEntity.java:17-18` | `UserEntity.java:75` | `@TableName("users_user")` |
+| §10.5 表 · 右列 | `:483` / `:1011` / `:1042` | `:485` / `:1013` / `:1051-1054` | 现行值列（**左列历史值不动**） |
+| `api.md` × 3 | `AdminRpcClient.java:25` | `AdminRpcClient.java:142` | `@GrpcClient("admin-rpc")` 注解行 |
+| `api.md` | `GlobalExceptionHandler.java:216` | `:287` | 同上（user-api） |
+| `_shared.md` | `GlobalExceptionHandler.java:216` | `:287` | 同上（user-api） |
+| `_shared.md` U-7 | `:635/676/969/1116` + `:1015` | `:688/730/1040/1192` + `:1088` | `userMapper.update(...)` / `userMapper.delete(...)` |
+
+#### 11.8.3 ⚠️ **历史快照一律只标注、不改数值**（否则就是篡改历史）
+
+§7 的 `DRIFT-ARPC-001~006` 是 **2026-10-23 首轮对照的原始发现记录**（第 998 行明示「原始记录一字未删」）⇒
+**那里的行号是当时的快照**，改写它们会**让历史记录看起来像是在描述今天的代码** ⇒ **本轮一律保留原值 + 加标注**：
+
+| 位置 | 处理 |
+|---|---|
+| §7 整节 | 加节级 banner：**行号是 2026-10-23 快照 · 已失效 · 现行位置见 §11.8** |
+| `DRIFT-ARPC-002`（`AdminServiceGrpcImpl.java:219`） | 标注 **历史值·已失效** + 指出现行构造点 `:234`（那行 `setSuccess(true)` **已被 `FIX-ARPC-002` 删除**） |
+| `DRIFT-ARPC-003`（`AdminDomainService.java:976-979`） | 标注 **历史值·已失效** + 补现行 `:1165-1171` |
+| `DRIFT-ARPC-004`（`JsonbTypeHandler.java:59`） | 标注 **历史值·已失效**（**该文件已被 global B10 整体删除**）+ 补现行调用点 `:403` / `:1033` |
+| §「拦截器链」代码块（`AdminRpcApplication.java:97-101`） | 标注 **历史值·已失效**（那是「只有 1 个拦截器」时的写法）+ 补现行 `:105-113` |
+| §3 走查块 `SideFX` 句 | 原写「**不推进** `update_time`」⇒ **该句是 2026-10-23 的状态**（`FIX-ARPC-001` 同轮已修）⇒ 已改为**带日期的现状陈述** |
+
+#### 11.8.4 🔴 **顺带订正的一处过期判定**（不是行号问题）
+
+§4 表「CreateAdmin · **update_time 推进**」那行原写 RAG 侧「**永不推进** / **OBSERVABLE DIFFERENCE**」⇒
+**已过期**：`FIX-ARPC-001`（2026-10-23 修复轮）已给 admin-rpc 全部 UPDATE 补上 `update_time = CURRENT_TIMESTAMP`
+⇒ **实测 6 处**（`grep -c` 2026-10-27：AdminDomainService **5** + AdminCreateAtomicService **1**）⇒
+主路径 **EQUIVALENT**；残留「**参数全空时 Go 不发 UPDATE、RAG 仍发**」边界仍是 **OBSERVABLE DIFFERENCE**
+（`FIX-ARPC-001` §「已知残留分歧」，**未修**，本轮不动）。
+⇒ ⚠️ **证据强度 = 静态源码·RAG 侧**（双侧活体对拍**未做**）⇒ 按 §3.3 口径**不得**写成「已闭环」。
+
+#### 11.8.5 ✅ **此后锚点的书写规则（AGENTS.md §3.1 + P-18 的落地）**
+
+1. **指向代码的锚点一律「符号名 + 行号」**，行号前带符号：`AdminDomainService.doCreateAdmin`（`:470-545`）⇒
+   **裸 `:NNN` 只允许出现在「同一段落的紧邻上下文已锁定同一文件」的情形**。
+2. **跨文件引用必须带完整路径 + 文件名**（`admin-api/.../advice/GlobalExceptionHandler.java:196`）⇒
+   全仓有 **9 个**同名 `GlobalExceptionHandler.java`、多个同名 `UserMapper.java` ⇒ 只写文件名 = 指向不明。
+3. **历史快照不改数值、只加标注**（见 §11.8.3）⇒ 台账要同时保住「当时看到什么」和「现在是什么」。
+4. **每次动本域源码 ⇒ 同一批次内重扫本域台账的行号锚点**（本轮实测：**67 处替换**来自一次合流 ⇒
+   「改 1 个文件 ⇒ 平均牵连数十个台账锚点」是**常态**，不是意外）。
+5. **跨域文件（`service/common`、users-common、user-rpc…）只引用不修改** ⇒ 引用它们的锚点**保质期不由本域控制**
+   ⇒ 见 P-18 形态 B。
+6. ⚠️ **§11.8.2 的「旧锚点」列故意照抄旧文本**（审计表要保真）⇒ ⇒ 扫描器扫到那里会报「越界 / 同名歧义」
+   ⇒ ⇒ **这是预期噪声，不是缺陷** ⇒ 扫描脚本须把 §11.8.2 整表排除（否则每次复扫都要人工解释一遍）。
+
+### 11.9 🟢 **2026-10-27 追加：锚点重定位（本轮第二轮，与 §11.8 同批）**
+
+- **§11.8**（锚点集体失效的元记录 + 全量映射表 + 书写规则）· **`P-19`**（合流推走锚点 · 位移是分段的 ⇒ 推算法必错）。
+- **77 处锚点替换 + 3 处补订**（`rpc.md` / `api.md` / `_shared.md`）⇒ 全部**逐条打开现行源码按语义核对**，
+  **不用位移推算**（合流的位移是**分段**的：Δ0 / +2 / +12 / +14 ⇒ 任何统一位移模型都会指错）。
+- **历史快照一律只标注、不改数值**（§7 的 `DRIFT-ARPC-001~006` 原始记录 + 第 998 行「原始记录一字未删」）。
+- **顺带订正 3 处过期活断言**（不是行号问题）：
+  ① §4 表「CreateAdmin · update_time 推进」原写「永不推进 / OBSERVABLE DIFFERENCE」⇒ **已过期**（`FIX-ARPC-001` 已修 · 实测 6 处）；
+  ② §「抽样复核」表「`UserEntity` 用 jsonb handler」⇒ **已过期**（global B10 已改 `JsonTextTypeHandler`）；
+  ③ 同表「`users_user.extra_info` 仍是 JSONB」⇒ **已过期**（`01_create_user.sql:41` 建表就是 TEXT）。
+- **零代码改动** ⇒ 本轮**未重跑门禁**（改的是台账文本，不是代码 ⇒ 门禁结论不变；下次动代码时再跑）。

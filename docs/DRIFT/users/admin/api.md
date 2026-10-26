@@ -111,7 +111,7 @@ Admin Center 的 **HTTP 网关**。它自身**不持有任何业务状态、不�
 
 | 断言 | 实测 | 证据 |
 |---|---|---|
-| AGENTS.md §4.2 Phase 4：「admin-api：13 Service + **2 client**（admin-rpc + user-rpc）」 | ❌ **只有 1 个 client** | Go 侧 `service/user/admin/api` 全树 grep `user/rpc` → **零命中**；RAG 侧 grep `@GrpcClient` → 只有 `AdminRpcClient.java:25` 的 `@GrpcClient("admin-rpc")` |
+| AGENTS.md §4.2 Phase 4：「admin-api：13 Service + **2 client**（admin-rpc + user-rpc）」 | ❌ **只有 1 个 client** | Go 侧 `service/user/admin/api` 全树 grep `user/rpc` → **零命中**；RAG 侧 grep `@GrpcClient` → 只有 `admin-api/.../client/AdminRpcClient.java:142` 的 `@GrpcClient("admin-rpc")` |
 | — | ⚠️ 残留资产 | `admin-api/src/main/resources/application.yml:70-75` 有一段**死的** `grpc.client.user-rpc`；`pom.xml:81-84` 的注释写着「连 admin-rpc + user-rpc」 |
 
 **影响**：本组件**没有**第二个 gRPC 依赖，因此**不存在**「admin-api → user-rpc」的跨组件行为耦合。
@@ -752,13 +752,13 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **Classification**：**OBSERVABLE DIFFERENCE（文档层）**　**Risk**：LOW（但会误导下游审查）
 - **事实**：`AGENTS.md` §4.2 Phase 4 记「13 Service + **2 client**（admin-rpc + user-rpc）」。
   实测：Go 侧 `service/user/admin/api` 全树 grep `user/rpc` **零命中**；
-  RAG 侧 `@GrpcClient` **只有 1 个**（`AdminRpcClient.java:25`）。
+  RAG 侧 `@GrpcClient` **只有 1 个**（`admin-api/.../client/AdminRpcClient.java:142`）。
   `application.yml:70-75` 留着一段**死的** `grpc.client.user-rpc`，`pom.xml:81-84` 注释也写着两个 client。
 - **Why It Matters**：这不是语义漂移，是**「台账里的计数本身需要 grep 复核」**的实例
   （与 §2.2 的 `HUMAN_ONLY.MD` 清单、`§3.3.3` 的「文件已写 ≠ 存在」同款）。
   本次任务简报即以该计数为前提布置了「2 个 client 都在被并行审查」的依赖前提。
 - **Recommended Verification**：`grep -rn '@GrpcClient' service/users/admin/admin-api/src/main`
-  ⇒ 只有 1 条（`AdminRpcClient.java:25`）。**已在本轮实跑。**
+  ⇒ 只有 1 条（`admin-api/.../client/AdminRpcClient.java:142`）。**已在本轮实跑。**
 - **Evidence strength**：`静态源码·双侧`（grep 双侧均执行）
 
 ---
@@ -1152,7 +1152,7 @@ RAG 是 `{"code":1006,"msg":"TOKEN已过期","data":null}`。
 
 | # | 问题 | 证据 | 建议 |
 |---|---|---|---|
-| **A-1** | 🔴 **`user-api` 有**同款 charset 缺失**：`user-api/.../advice/GlobalExceptionHandler.java:216` 也是 `headers.setContentType(MediaType.TEXT_PLAIN)` ⇒ 400 的 `Content-Type` 同样没有 charset | 与本文件 §1 同型（同一段 javadoc 都写着「Go 的 `net/http.Error` 设 `text/plain; charset=utf-8`」，但代码没做） | 归 users/user owner。⚠️ `tools/difftest/check-plaintext400-headers.sh` **只打 user-api** ⇒ 修 user-api 时顺手把该脚本的断言加严（断言 charset 存在）才是根治 |
+| **A-1** | 🔴 **`user-api` 有**同款 charset 缺失**：`user-api/.../advice/GlobalExceptionHandler.java:287` 也是 `headers.setContentType(new MediaType(MediaType.TEXT_PLAIN, …))` ⇒ 400 的 `Content-Type` 同样没有 charset | 与本文件 §1 同型（同一段 javadoc 都写着「Go 的 `net/http.Error` 设 `text/plain; charset=utf-8`」，但代码没做） | 归 users/user owner。⚠️ `tools/difftest/check-plaintext400-headers.sh` **只打 user-api** ⇒ 修 user-api 时顺手把该脚本的断言加严（断言 charset 存在）才是根治 |
 | **A-2** | ⚠️ **~~`docs/Intentional_Deviations/users/**` 下 6 个文件全是 0 字节（空占位）~~**<br>**2026-10-23 22:4x 复核订正：admin 域 3 个已补齐，`users/user` 域 3 个仍空** | `wc -c` 实测全为 0 | N-1 / N-4 / N-5 等「已签字」条目目前**只存在于 `docs/DRIFT/users/admin/_shared.md`**，没有进签字档 ⇒ 下一个 agent 按 `docs/Intentional_Deviations/_INDEX.md` 检索会查不到。**该目录不在本 worker 所有权内 ⇒ 只报告** |
 | **A-3** | ⚠️ **DRIFT-ADMINAPI-004（黑名单 401 的业务码 `401`→`1006`）在 `diff.py` 里被标成「N-1 已签字」**，但 N-1 只签了 body 形状 | §3 | 要么补一份正式签字，要么改 `diff.py` 的 assert 措辞（**`tools/` 是共享资产，不在本 worker 所有权内 ⇒ 只报告**） |
 | **A-4** | ⚠️ **§9 UNRESOLVED-002（admin-api 的 text/plain 400 没有真实 Tomcat 守门）** —— **本轮已部分关闭** | 本轮用 `curl -i` 直打真实 Tomcat 两侧栈，抓到了 `Content-Type` / `nosniff` / `Content-Length` / body 逐字节 | **仍缺一条可重复执行的脚本**：`tools/difftest/check-plaintext400-headers.sh` 的两个端口常量是 user-api 的（`RAG_USER=59900` / `GO_USER=18888`），**没有 admin 入口** ⇒ 补 admin 入口需要改共享脚本 ⇒ 归 `tools/` owner。⚠️ 但本轮已证明：**MockMvc 断言完整头值字符串是错的**（见 §1「测试方法论」）⇒ 补脚本时也要注意断言形状 |
@@ -1657,7 +1657,7 @@ RAG 的 admin-api 现在**必须在 admin-rpc ready 之后起**（fail-fast ⇒ 
 
 | 项 | 归属 | 本轮复核后的状态 |
 |---|---|---|
-| `users_user.extra_info` 的 `CAST(... AS jsonb)` 仍在 `AdminDomainService.java:962` | users 域 | 仍开放 |
+| `users_user.extra_info` 的 `CAST(... AS jsonb)` 仍在 `AdminDomainService.java:962` | users 域 | 🟢 **2026-10-27 订正：已关闭** —— 那句 CAST **已被删除**（global B10 `ff80214`，2026-10-25；`AdminDomainService.java:1033` 现为 `wrapper.setSql("extra_info = {0}", …)` ⇒ **text 绑定**）⇒ 本条**不再开放** |
 | user-api 的 400 仍用 `headers.setContentType(MediaType.TEXT_PLAIN)`（缺 charset） | users/user 域 | 仍开放 |
 | message-rpc 的 Flyway `baseline-on-migrate: true` 且无 `baseline-version` ⇒ V1 被 baseline 吞掉 | message 域 | 仍开放（修法：加 `baseline-version: 0`） |
 | `AGENTS.md §0` users 行三处出入（`update_time ×5`→**×6**、撤销「`status=0L` 未修」、`extra_info` 标注 users/user 域已改） | **共享文件** | 仍开放，合并时统一改 |
