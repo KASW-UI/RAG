@@ -144,13 +144,31 @@ grpc:
   # Java 端 devh grpc-client-spring-boot-starter + Nacos discovery：用 service discovery
   # 解析 "user-rpc" / "admin-rpc"，跟 Go etcd Key 寻址等价。
   client:
+    # 🔴 地址必须是**三斜杠**（`discovery:///user-rpc`），不是两斜杠。
+    #
+    # 判据出处（devh 3.1.0.RELEASE）：
+    #   net/devh/boot/grpc/client/nameresolver/DiscoveryClientResolverFactory.java
+    #   的 newNameResolver —— 它取 targetUri.getPath()，
+    #   要求**非 null、长度 > 1、以 "/" 开头**。
+    #   ⇒ `discovery://user-rpc` 解析出 path=""（长度 0）⇒ 不合格
+    #   ⇒ 抛 IllegalArgumentException: Incorrectly formatted target uri;
+    #      expected: 'discovery:[//]/<service-name>'
+    #   ⇒ **这个检查发生在任何网络调用之前** ⇒ 与 Nacos 在不在线无关
+    #   ⇒ grpcClientBeanPostProcessor 先炸 ⇒ **连 Flyway 都跑不到** ⇒ 真 fat jar 起不来。
+    #
+    # ⚠️ 三斜杠**不改变服务发现名**：devh 取 path.substring(1) = "user-rpc"
+    #    ⇒ 仍是 Nacos 上的服务名 `user-rpc`（与 spring.application.name 对应）。
+    #    ⚠️ 这不是「与 Go 对齐」—— 两侧注册中心本来就不同（Go 用 etcd key `user.rpc`，
+    #       那是**已签字的有意偏离**）；本条修的是「RAG 侧写法非法导致起不来」。
     user-rpc:
-      address: discovery://user-rpc
+      address: discovery:///user-rpc
       enable-keep-alive: true
       keep-alive-time: 30s
       negotiation-type: plaintext
     admin-rpc:
-      address: discovery://admin-rpc
+      # 🔴 同上：三斜杠。devh 取 path.substring(1) = "admin-rpc"
+      #    ⇒ 服务名不变（users 域确有 admin-rpc 这个独立进程）。
+      address: discovery:///admin-rpc
       enable-keep-alive: true
       keep-alive-time: 30s
       negotiation-type: plaintext
