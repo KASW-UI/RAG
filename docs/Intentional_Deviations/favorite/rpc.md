@@ -67,7 +67,7 @@
 
 | | 内容 |
 |---|---|
-| **Go 行为** | `metrics.go:22-27` 是 `prometheus.NewCounterVec(CounterOpts{Namespace:"", Subsystem:"favorite", Name:"request_seconds_counter"})` ⇒ Prometheus 渲染为 **`favorite_request_seconds_counter`**（`CounterVec` 的 `Name` 已是终名，**不**追加 `_total`）。 |
+| **Go 行为** | `service/favorite/rpc/internal/metrics/metrics.go:22-27` 是 `prometheus.NewCounterVec(CounterOpts{Namespace:"", Subsystem:"favorite", Name:"request_seconds_counter"})` ⇒ Prometheus 渲染为 **`favorite_request_seconds_counter`**（`CounterVec` 的 `Name` 已是终名，**不**追加 `_total`）。 |
 | **RAG 行为** | `FavoriteRpcMetrics.observeRpc` 用 Micrometer `Counter.builder("favorite_request_seconds_counter")` ⇒ Micrometer 的 Counter 在 Prometheus 侧**自动追加 `_total`** ⇒ 渲染为 **`favorite_request_seconds_counter_total`**。 |
 | **对齐的部分** | ✅ 其余三个指标名**完全一致**：`favorite_request_total` / `favorite_ops_total` / `favorite_db_error_total`（名字已以 `_total` 结尾 ⇒ Micrometer 不再追加）。 |
 | **为什么接受** | 改名的代价是**观测断档**（Prometheus 侧 `rate(favorite_request_seconds_counter[5m])` 立刻失效）；而 Go 的这个指标本身是**「累计秒数的计数器」**（`CounterVec.Add(time.Since(started).Seconds())`，不是 Histogram）⇒ 把它换成 Timer 会把语义从「累计」变成「分布」，那是**另一个指标**而不是同一个指标的修正。 |
@@ -119,13 +119,13 @@
 
 | | 内容 |
 |---|---|
-| **Go 行为** | 约束 / 索引的名字由 **GORM 的命名策略**与 **PostgreSQL 的自动命名**决定 ⇒ 与 RAG 侧**逐字不同**：<br>· GORM 未命名的 `uniqueIndex` ⇒ `idx_<table>_<column>`（`gorm.io/gorm@v1.31.1/schema/index.go:119-134` + `schema/naming.go:89-90`）；<br>· Go 的 `001`/`004` 里**内联**的 CHECK 没有名字 ⇒ **PG 自动生成** `<table>_<col>_check` / `<table>_check`；<br>· Go 的 `001` 里**内联**的 `UNIQUE (favorite_id, aggregate_version)` ⇒ PG 自动生成 `<table>_favorite_id_aggregate_version_key`。 |
+| **Go 行为** | 约束 / 索引的名字由 **GORM 的命名策略**与 **PostgreSQL 的自动命名**决定 ⇒ 与 RAG 侧**逐字不同**：<br>· GORM 未命名的 `uniqueIndex` ⇒ `idx_<table>_<column>`（`gorm.io/gorm@v1.31.1/schema/index.go:119-134` + `gorm.io/gorm@v1.31.1/schema/naming.go:89-90`）；<br>· Go 的 `001`/`004` 里**内联**的 CHECK 没有名字 ⇒ **PG 自动生成** `<table>_<col>_check` / `<table>_check`；<br>· Go 的 `001` 里**内联**的 `UNIQUE (favorite_id, aggregate_version)` ⇒ PG 自动生成 `<table>_favorite_id_aggregate_version_key`。 |
 | **RAG 行为** | 全部**显式命名**，且用 `uk_` / `_scope` / `_nonempty` / `_positive` 这类**可读**后缀。 |
 | **实测** | `tools/ddl-parity-probe/favorite/`（**双侧活体对拍**，EXIT=0）⇒ **12 处**命名差异，**语义逐条相同**（列集合、唯一性、约束定义全部一致）：<br>**索引 3 处**：`idx_favorite_folder_folder_id`↔`uk_favorite_folder_folder_id`；`idx_favorite_item_favorite_id`↔`uk_favorite_item_favorite_id`；`favorite_fact_outbox_favorite_id_aggregate_version_key`↔`uk_favorite_fact_version`。<br>**约束 9 处**：`favorite_fact_outbox_aggregate_version_check`↔`..._aggregate_version_range`；marker 表的 8 个 CHECK（`_approval_ref_check`↔`..._approval_ref_nonempty`、`_check`↔`..._revision_scope`、`_favorite_id_check`↔`..._favorite_id_positive`、`_folder_id_check`↔`..._folder_id_positive`、`_source_snapshot_sha256_check`↔`..._snapshot_hash_format`、`_target_id_check`↔`..._target_id_nonempty`、`_target_type_check`↔`..._target_type_nonempty`、`_user_id_check`↔`..._user_id_positive`）。<br>⇒ 逐条冻结在 `tools/ddl-parity-probe/favorite/expected.txt` 的 **OBS 段**（12 条）⇒ **差异消失或变样 ⇒ 探针 exit 1**。 |
 | **为什么接受** | ① **纯标识符差异** ⇒ 约束的**语义**（唯一性、列集合、冲突行为、CHECK 表达式）**完全相同**；<br>② RAG 侧按 **SQLSTATE 23505** 翻译错误码（`AlreadyExists/5302`、`AlreadyExists/5203`）⇒ **不看约束名** ⇒ 错误码**不受影响**；<br>③ RAG 的命名**更可读**（一眼看出是唯一索引 / 什么语义的 CHECK）⇒ 保留。 |
 | **什么时候会变成真差异** | ① **统一索引/约束名**（例如从 Go 库迁到 RAG 库、或反向）⇒ PG 目录里的标识符会变 ⇒ **任何按名字 DROP / 重建的运维脚本会失效** ⇒ 那时才是行为差异（**部署脚本层**，不是业务层）；<br>② 若将来有人按**约束名**做错误分类 ⇒ 名字不同 ⇒ 分类不同 ⇒ **必须先改成按 SQLSTATE 分类**（本域已经是 SQLSTATE ⇒ 当前无风险）。 |
 | **守门** | `tools/ddl-parity-probe/favorite/`（两侧）+ `FavoriteDdlParityTest`（RAG 侧，进 `mvn test`）⇒ 共用 `expected.txt` ⇒ **断言「这 12 条差异仍然存在且没变样」**。 |
-| **状态** | ✅ **已签字**（2026-10-25，用户 Jason：**保留现状，登记为签字偏离**）—— **不是缺陷**；改动需**重新征签**<br>⚠️ **签字附带的前置动作**：若统一索引 / 约束名（从 Go 库迁库或反向）⇒ PG 目录里的标识符会变 ⇒ **任何按名字 DROP / 重建的运维脚本会失效** ⇒ 那是**部署脚本层**的差异（不是业务层）⇒ 迁库时需同步改脚本。<br>⚠️ **前提已逐条核对**：Go 侧的名字**不是猜的** —— GORM 侧读 `gorm.io/gorm@v1.31.1/schema/index.go:119-134` + `schema/naming.go:89-90`，PG 自动名由 `001`/`004` 的**内联约束**产生（PG 命名规则），且**全部经真 PG 实测** ⇒ 前提成立。 |
+| **状态** | ✅ **已签字**（2026-10-25，用户 Jason：**保留现状，登记为签字偏离**）—— **不是缺陷**；改动需**重新征签**<br>⚠️ **签字附带的前置动作**：若统一索引 / 约束名（从 Go 库迁库或反向）⇒ PG 目录里的标识符会变 ⇒ **任何按名字 DROP / 重建的运维脚本会失效** ⇒ 那是**部署脚本层**的差异（不是业务层）⇒ 迁库时需同步改脚本。<br>⚠️ **前提已逐条核对**：Go 侧的名字**不是猜的** —— GORM 侧读 `gorm.io/gorm@v1.31.1/schema/index.go:119-134` + `gorm.io/gorm@v1.31.1/schema/naming.go:89-90`，PG 自动名由 `001`/`004` 的**内联约束**产生（PG 命名规则），且**全部经真 PG 实测** ⇒ 前提成立。 |
 
 ---
 

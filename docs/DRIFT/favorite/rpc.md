@@ -36,6 +36,7 @@
 | 第十六轮 | ✅ **U8 销账 —— create 成功路径双侧活体对拍**（§25）—— gRPC 契约探针加**第二轮**（上游**在场**：探针自带**最小 user-rpc/article-rpc 桩**当**两侧共同上游**）⇒ **15 case 全 SAME**（0 OBS / 0 SAME_CODE）⇒ `ensureUserExists` **五条分支**首次拿到活体证据 + **落库等价性**（`favorite_folder`/`favorite_item`/`favorite_fact_outbox` 三张表投影逐字段相同 ⇒ 「公开修订冻结」被实测执行到）<br>🔴 **1 条注释断言被实测证伪并修正**（`getStatus()!=0` 的后果是 **fail-open 放行**，不是原文写的「误判封禁 5005」）⇒ **产品代码行为零改动**<br>🆕 坑档 **PIT-FAV-RPC-023/024/025**（端口撞号 / 种子显式 id 毒化序列 / bash 3.2 引号）|
 | 第十四轮收尾 | 🔴 **探针健壮性加固**（§23）—— 消除「**环境红**」假红：4 个起 PG 的探针**统一**改成 **探 TCP + 180s + 重建重试 + 容器退出即放弃**；新增守门网 `tools/probe-gate/favorite/`（含变异验证）；**零行为改动**、**0 条新漂移** |
 | 第十七轮 | 🔴🔴 **生产启动形态**（§26）—— `global` 移交的「**生产 jar 起不来**」查清并修完：**3 个缺陷**（① gRPC client 地址**两斜杠** ⇒ 启动期抛 `IllegalArgumentException`；② `web-application-type` 缺失 ⇒ Boot 判定 SERVLET 而无容器 ⇒ **启动即死**；③ gRPC **reflection 暴露面**漏关）⇒ 新增 **3 个守门测试类 / 14 例**（全部读**生产文件**，不走 `@SpringBootTest` 覆盖）+ **变异验证 4 条**全转红 + 🆕 新探针 `tools/prod-startup-probe/favorite/`（**A/B/C** 真 fat jar 活体对拍 ⇒ EXIT=0）<br>🔴 **翻案**：第十四轮 §22.3 的「启动阻塞 #1 已修」是**半修**—— 修复只落在**探针启动参数**里，**生产 yaml 一行都没改** ⇒ 缺陷活到了发布那一刻 ⇒ 坑档 **PIT-FAV-RPC-026**<br>🔴 **新登记 U9**（部署形态类 · 待拍板）：Go 生产形态的 **16062** DevServer 那个面，RAG 侧没有 |
+| 第十八轮 | 🔴 **借 `global` 的新规则跑本域台账 ⇒ 当场抓出 3 处**（§27）—— 全程**只读**借 `global` 的跨域共享复核器（`tools/check-ledger-selfcheck.py`，**global 单写权**，拷到 `/tmp` 后只调它的 L1/L4 两层）⇒ 抓出 **1 处行号真错**（`core/service/serviceconf.go:83-90` ⇒ 该文件共 89 行 ⇒ 应为 `:83-89`）+ **2 处路径写法不够精确**（`schema/naming.go` / `metrics.go` ⇒ 机器按 basename 核不动）<br>⇒ **不登记候选等别人扩**：把这两层**搬进本域自己的门禁**（`tools/ledger-lint/favorite/check-ledger-selfcheck.py` 新增 **⑤ 仓内路径存在性** + **⑥ Go 侧 `file.go:NN` 可解析** + `--mutation-test`）⇒ **门禁级 0 条**<br>⚠️ **工具第一版的 8 条门禁里 5 条是工具自己的 bug**（缺 Go 标准库 / 缺 N5 去噪 / key 结构写错 …）⇒ 坑档 **PIT-FAV-RPC-027**（**借来的工具只能当探针，不能当门禁**）<br>⚠️ 残留 **57 条「跨库/同名歧义」**（提示级 · 已量化 · 本轮不批量改） |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -634,7 +635,7 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 |---|---|
 | **原登记** | 「`zrpc.RpcServerConf.Mode` 的取值域」不在本仓库 ⇒ **需 Go 侧提供清单** ⇒ 标「待外部输入」。 |
 | **🔴 实测：原登记的前提有偏差** | go-zero v1.10.2 的 `zrpc.RpcServerConf`（`zrpc/config.go:37-54`）**自己并没有 `Mode` 字段** ⇒ 它嵌的是 `service.ServiceConf`，`Mode` 在**那里**（`core/service/serviceconf.go`）：<br>`Mode string \`json:",default=pro,options=dev\|test\|rt\|pre\|pro"\`` ⇒ **取值域 = `dev` / `test` / `rt` / `pre` / `pro`（5 个），默认 `pro`**。 |
-| **消费点（全部）** | ① `core/service/serviceconf.go:83-90` `initMode()`：`dev\|test\|rt\|pre` ⇒ `load.Disable()`（关分布式追踪采样）+ `stat.SetReporter(nil)`（关指标上报）；`pro` ⇒ 全开。<br>② `service/favorite/rpc/favorite.go:31`：`SubjectRefV2Facts` 为 true 时，Mode **必须**是 `dev` 或 `test`，否则 `os.Exit(2)`（`LOCAL_CANDIDATE_ONLY`）⇒ **这是唯一会让进程起不来的 Mode 约束**。<br>③ `favorite.go:45`：`Mode == dev \|\| Mode == test` ⇒ 注册 gRPC **reflection**（生产不注册）。 |
+| **消费点（全部）** | ① `core/service/serviceconf.go:83-89` `initMode()`：`dev\|test\|rt\|pre` ⇒ `load.Disable()`（关分布式追踪采样）+ `stat.SetReporter(nil)`（关指标上报）；`pro` ⇒ 全开。<br>② `service/favorite/rpc/favorite.go:31`：`SubjectRefV2Facts` 为 true 时，Mode **必须**是 `dev` 或 `test`，否则 `os.Exit(2)`（`LOCAL_CANDIDATE_ONLY`）⇒ **这是唯一会让进程起不来的 Mode 约束**。<br>③ `favorite.go:45`：`Mode == dev \|\| Mode == test` ⇒ 注册 gRPC **reflection**（生产不注册）。 |
 | **⇒ favorite 域实际只需 3 组** | `dev\|test`（+ reflection + 允许 v2）/ `rt\|pre`（initMode 关 load+stat，但无 reflection、v2 被拒）/ `pro`（默认）。 |
 | **RAG 侧现状** | `FavoriteSubjectRefGate`（`DEV_TEST_PROFILES = ["dev","test"]`）⇒ 与 Go 的 `favorite.go:31` / `:45` **一致** ✅；`rt` / `pre` 在 favorite 域**无行为差异**（除 load/stat 上报，属框架层）。<br>⚠️ **默认值也一致**：Go 的 `Mode` 省略时是 `pro`；RAG 的 `getActiveProfiles()` 为空 ⇒ `devOrTest=false` ⇒ 等价于 `pro` ✅。 |
 | **结论** | ✅ **U3 闭合**（从「待外部输入」变成「已查清」）⇒ **不需要 Go 侧再给清单**。<br>⇒ 唯一残留是 `initMode` 的 **stat/load 上报差异**，但它**只影响非 pro 环境**且属**框架层**（go-zero 的 stat vs Micrometer）⇒ **不记入漂移条目**。 |
@@ -2217,3 +2218,110 @@ Nacos 故意指向 `127.0.0.1:1` ⇒ 顺便证明「**注册中心不在也能�
 | **台账自检** | ✅ `tools/ledger-lint/favorite/check-ledger-selfcheck.py` ⇒ **EXIT=0** |
 | **注释锚点审计** | ✅ `tools/assertion-audit/favorite/check-assertion-sources.py` ⇒ **EXIT=0** |
 | **共享面** | ✅ **零改动**（`docs/DRIFT/_INDEX.md` / `_MANIFEST.json` / `docs/Intentional_Deviations/_INDEX.md` / `docs/Pitfalls/_INDEX.md` / `AGENTS.md` / `docs/DRIFT/_cross/` / `docs/DRIFT/global/` / `service/common/**` 一律不碰） |
+
+## 27. 2026-10-26 第十八轮（`align/favorite` 工作树 · 承 `0a4d2a8`）—— 🔴 **借 `global` 的新规则跑本域台账 ⇒ 当场抓出 3 处**，并把这两层**搬进本域自己的门禁**
+
+> **来源**：`global` 收口域第三十二轮**共享工具**改动告知（`tools/check-ledger-selfcheck.py` 三处修复：
+> N8~N13 六条去噪规则 / `sorted(srcs)` 输出可复现 / `--mutation-test` 阳性对照分支修正）。
+> ⇒ **零 favorite 触碰、零 `service/common` 改动** ⇒ favorite 的可观察行为零变化。
+> ⇒ **但**：他们同时点出「共享工具**没有 favorite 域预设** ⇒ `--domain favorite` 会报找不到台账文件」
+> ⇒ 且**不会擅自扩**（要域内先登记候选）。
+
+### 27.1 决定性动作：**不是登记候选，而是把规则搬进本域自己的门禁**
+
+> 🔴 关键判断：**「共享工具没有我的域预设」的正确处置不是「等别人加」，
+> 而是「让本域的台账有一把**自己**的梳子」。**
+> ⇒ 否则本域的台账质量**取决于别的域什么时候有空** ⇒ 那是**外部依赖**，不是门禁。
+
+⇒ 做法（**全程只读地借** global 的工具，**零改动**他们的文件）：
+把 global 最新的 `tools/check-ledger-selfcheck.py` 拷到 `/tmp`，
+用 `importlib` 只调它的 **L1（仓内路径存在性）** 与 **L4（Go 侧 file:line 出处）** 两层，
+把本域 **12 份台账**喂进去 ⇒ **当场抓出 3 处**（见 §27.2）。
+
+### 27.2 🔴 抓出的 3 处（**内容没错，但机器核不动**）
+
+| # | 位置 | 原样 | 问题 | 改成 |
+|---|---|---|---|---|
+| 1 | `docs/Intentional_Deviations/favorite/rpc.md:122` / `:128` | `schema/naming.go:89-90` | 真源与全部第三方库里**按 basename 都找不到** ⇒ 机器判 MISSING | `gorm.io/gorm@v1.31.1/schema/naming.go:89-90`（**内容已核**：该处是 `IndexName()` ⇒ `formatName("idx", table, …)` ⇒ `idx_<table>_<column>` ✅） |
+| 2 | `docs/Intentional_Deviations/favorite/rpc.md:70` | `metrics.go:22-27` | **跨库同名歧义**（go-redis / go-zero / 真源 各有一个 `metrics.go`）⇒ 机器无法判归属 | `service/favorite/rpc/internal/metrics/metrics.go:22-27`（**内容已核**：正是 `FavoriteRequestSecondsCounterMetric` 的 `prometheus.NewCounterVec` 定义 ✅） |
+| 3 | `docs/DRIFT/favorite/rpc.md:637` | `core/service/serviceconf.go:83-90` | 🔴 **行号越界**（go-zero v1.10.2 该文件**共 89 行**）⇒ `initMode()` 的真实范围是 **83-89** | `core/service/serviceconf.go:83-89` |
+
+⇒ **第 3 条是唯一一处「数字真的错了」**（前两条是**写法不够精确**）。
+
+⚠️ **为什么第 1、2 条之前没人发现**：本域自检工具（`tools/ledger-lint/favorite/check-ledger-selfcheck.py`）
+**没有这两层** ⇒ 它只看「§ 小节指针 / 编号闭合 / Go 源文件是否落点 / 裸行号锚点」
+⇒ **路径写错 / 行号越界这两类，它压根看不见**。
+⇒ 而 `global` 的共享工具**能看见**，但**没有 favorite 预设** ⇒ 看不见。
+⇒ ⇒ **两头都看不见 ⇒ 这类缺陷就是活的** ⇒ 本轮补上。
+
+### 27.3 🆕 本域门禁新增两层（`tools/ledger-lint/favorite/check-ledger-selfcheck.py`）
+
+| 层 | 查什么 | 判据 |
+|---|---|---|
+| **⑤ 仓内路径存在性** | 台账里 `service/…` / `tools/…` / `docs/…` 路径存不存在 | **RAG 仓找不到 且 真源仓也找不到** 才算缺失（Go 真源也是 `service/` 布局 ⇒ 同一串路径在两个仓里都合法） |
+| **⑥ Go 侧 `file.go:NN` 可解析** | 出处能不能落到真实文件、行号在不在范围内 | 解析顺序 **从精确到模糊**：① `module@version/…` ⇒ module cache；② `service/…` ⇒ 真源仓；③ 其余 ⇒ **末尾段最长匹配**（索引含**真源 + Go 标准库 + 真源 go.mod 列出的全部第三方库**，共 138 个） |
+
+⚠️ **⑥ 层有三个「必须」**（都是本轮踩出来的）：
+
+1. **必须含 Go 标准库**（`<GOROOT>/src`）⇒ 少了它，`net/http/server.go:2458`、`src/net/url/url.go:1001`
+   这类引用会被判「文件找不到」⇒ **假阳性**。
+2. **必须有 N5「记述历史纠错」去噪** ⇒ 本域台账里有 17 处引用**是历史记述**
+   （例如「补成 `create_favorite_logic.go:280-282` ⇒ **越界**（该文件仅 170 行）」—— 记的是**当时**的错，不是现在的悬空引用）
+   ⇒ 不去噪 ⇒ **17 条假阳性**。
+   ⚠️ **判据必须行级局部**（引用所在行 ±1 行）——
+   共享工具那一版是「取来源文件**前 2000 字**」⇒ **极宽** ⇒ 实测它把 178 条里的 **173 条**都去噪了
+   ⇒ 那是**假阴性**（几乎什么都不查）⇒ **不能照抄**。
+3. **必须报「同名多候选」** ⇒ 真源仓里 `api/internal/handler/routes.go` 这类路径**各域同名**
+   （10 个域各有一份）⇒ 归属需人工确认 ⇒ 记**提示级**，不判死链。
+
+### 27.4 🔴 工具**自身**修掉的 4 个 bug（本轮第一版输出**不能直接当结论**）
+
+| # | bug | 症状 | 修法 |
+|---|---|---|---|
+| 1 | 省略写法的 dict key 结构写错 | `...` 的条目**漏进主循环** ⇒ 报「路径 `...` 不存在」 | 拆成 `exact` / `ellipsis` 两个字典 |
+| 2 | 索引**缺 Go 标准库** | `net/http/server.go:2458` 等被误判 MISSING | 索引加 `<GOROOT>/src`（自动探测 `GOROOT` / `~/sdk/go*` / `/usr/local/go`） |
+| 3 | **缺 N5 去噪** | 17 条「历史纠错」被误判死链 | 加行级局部 N5（正则见上） |
+| 4 | 同库多候选**不报** | `create_favorite_folder_logic.go` 在 api/rpc 两侧同名 ⇒ 机器默默挑一个 | 候选多于命中数 ⇒ 记**提示级**「同名多候选」 |
+
+⇒ **元教训**（⇒ 坑档 **PIT-FAV-RPC-027**）：
+> **工具的第一版输出**必须**逐条核证**才能当结论 ——
+> 本轮 8 条门禁里 **5 条是工具自己的 bug**、**2 条是台账在记述历史纠错**、**只有 1 条是真缺陷**。
+> ⇒ 比例 **5 : 2 : 1** ⇒ 若不逐条核，就会把工具的 bug 当成台账的缺陷去「修台账」。
+
+### 27.5 🆕 `--mutation-test`（工具自证）
+
+⇒ 故意往台账文本里注入两类缺陷（一个必不存在的仓内路径 + 一个行号越界的 Go 锚点），
+要求**必须被抓到**；再要求「**复原后 == 变异前**」。
+⇒ 实测 **EXIT=0** ⇒ ⑤⑥ 两层**不是恒真**。
+
+⚠️ 判据与 `global` 共享工具那边**同期**修的同型问题一致
+（他们的阳性对照分支在非 task 分支上恒红 ⇒ 改成「复原后 == 变异前」）
+⇒ **同一个教训，两处独立撞上** ⇒ 可信度高。
+
+### 27.6 ⚠️ 残留：**57 条「跨库/同名歧义」**（**提示级**，本轮**不批量改**）
+
+| basename | 条数 | 成因 |
+|---|---|---|
+| `helper.go` | 10 | favorite 的 api/rpc 两侧同名 |
+| `create_favorite_logic.go` | 7 | 同上 |
+| `errmsg.go` | 7 | favorite-common / api / rpc 三处同名 |
+| `create_favorite_folder_logic.go` | 3 | api/rpc 两侧同名 |
+| `delete_favorite_logic.go` | 3 | 同上 |
+| 其余 | 27 | 跨域同名（`routes.go` 等）与跨库同名（`authhandler.go` 在 go-zero / oauth2 都有） |
+
+⇒ **成因是「台账用裸 basename」** ⇒ 机器分不清是 api 侧还是 rpc 侧 / 是哪个域
+⇒ **修法**是把它们写成 `service/favorite/rpc/internal/logic/helper.go` 这种**完整路径**。
+⇒ ⚠️ **本轮不批量改的理由**：① 这是**提示级**不是门禁；② 逐条判定「当时指的到底是哪个文件」
+需要**逐行核**（57 处）⇒ **半改比不改更危险**（把错的路径写死）。
+⇒ **已量化 + 可枚举**（工具 `--json` 可导出）⇒ 留给下一轮或上线前统一收。
+
+### 27.7 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| **本域台账自检** | ✅ **EXIT=0** —— 门禁级 **0** 条；新增 ⑤ 仓内路径（解析成功 48 / 命中真源 1 / 省略写法 2）· ⑥ Go 锚点（可解析 104 / 跨库歧义 57 / N5 记述 17） |
+| **变异自证** | ✅ `--mutation-test` ⇒ **EXIT=0**（⑤⑥ 两层都能抓到注入的缺陷） |
+| **台账 vs 实际** | ✅ `tools/ledger-lint/favorite/check-ledger-vs-reality.py` ⇒ **EXIT=0** |
+| **注释锚点审计** | ✅ `tools/assertion-audit/favorite/check-assertion-sources.py` ⇒ **EXIT=0** |
+| **产品代码** | ✅ **零改动**（本轮只动台账 + 本域工具） |
+| **共享面** | ✅ **零改动**（`tools/check-ledger-selfcheck.py` 是 global 的文件 ⇒ **只读借用，未改**；`docs/DRIFT/global/` / `_INDEX.md` / `AGENTS.md` / `service/common/**` 一律不碰） |
