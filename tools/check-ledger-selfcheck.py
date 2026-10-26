@@ -1038,6 +1038,79 @@ def _stdlib_candidate(path, goroot):
     return os.path.join(goroot, 'src', base)
 
 
+# ── 标准库 **basename** 索引（懒建 + 进程内缓存）────────────────────────────
+_STDLIB_INDEX_CACHE = {}
+
+
+def _stdlib_index(goroot):
+    """`<GOROOT>/src` 下的「basename → 完整路径」索引。
+
+    🔴 **为什么需要这条通道（2026-10-26 第四十八轮实测带出）**：
+       `_stdlib_candidate` 只能解析**带包目录**的写法（`strconv/quote.go` ⇒
+       `<GOROOT>/src/strconv/quote.go`）⇒ 台账里写成**裸 basename**
+       （`quote.go:522-563` / `context.go:625`）时**必然解析不到**
+       ⇒ 落到「文件在真源与全部第三方库里都找不到」⇒ **假 FAIL**。
+       实测：article 域 `docs/DRIFT/article/api.md` 有 6 处裸 `quote.go:NNN`，
+             common 域 `docs/DRIFT/common/alignment-2026-10-23.md` 有 1 处裸 `context.go:625`
+             ⇒ 全部是**假 FAIL**（文件确实存在，只是没带包目录）。
+
+    ⚠️ **必须排除 `cmd/**`** —— 那是 Go **工具链自己的源码**（`cmd/go/internal/...`、
+       `cmd/vendor/...`），**不是用户代码能 import 的标准库** ⇒ 计进去会凭空造出
+       「同名文件跨库歧义」（实测 stdlib 里 `context.go` 有 7 个，排除 `cmd/**` 后剩 3 个：
+       `context/` · `go/types/` · `html/template/`）。
+    """
+    if not goroot:
+        return {}
+    if goroot in _STDLIB_INDEX_CACHE:
+        return _STDLIB_INDEX_CACHE[goroot]
+    idx = {}
+    src_root = os.path.join(goroot, 'src')
+    if os.path.isdir(src_root):
+        for dp, _, fns in os.walk(src_root):
+            rel_dir = os.path.relpath(dp, src_root)
+            if rel_dir == 'cmd' or rel_dir.startswith('cmd' + os.sep):
+                continue
+            for fn in fns:
+                if fn.endswith('.go'):
+                    idx.setdefault(fn, []).append(os.path.join(dp, fn))
+    _STDLIB_INDEX_CACHE[goroot] = idx
+    return idx
+
+
+def _file_line_count(path):
+    """文件行数（读不出来就当 0 行 ⇒ 行号必然越界）。"""
+    try:
+        with open(path, encoding='utf-8', errors='replace') as fh:
+            return sum(1 for _ in fh)
+    except Exception:
+        return 0
+
+
+def _external_anchor(path, go_root):
+    """这条锚点**不可能**属于 Go 真源 ⇒ 极可能指向**真源之外的另一个仓库**。
+
+    🔴 **为什么要有这条通道**（2026-10-26 第四十八轮实测带出）：
+       like 域台账里有一批 `service/async/rpc/...` 的锚点，而**冻结仓里根本没有
+       `service/async/` 这个目录** ⇒ 那些锚点指向的是**第三个仓库**
+       （like 域台账自己写明了：`Evidence（`Sea-BreakTheWaves` 侧 = 下游消费者）`）
+       ⇒ ⇒ 而 `Sea-BreakTheWaves` **本机不存在** ⇒ ⇒ **任何工具都无法核验它们**
+       ⇒ ⇒ 报成「文件在真源与全部第三方库里都找不到」= **假 FAIL**
+       ⇒ ⇒ 而**假 FAIL 比不报更坏**（别的域会以为自己的台账坏了，而那不是他们的责任）。
+
+    ⇒ **判据**：路径在 `service/` 下 ⇒ 取它的**首段目录名** ⇒ 该目录在真源里**不存在**
+      ⇒ ⇒ 它**不可能**是真源锚点 ⇒ ⇒ 归入「外部仓库锚点」桶（**不计 FAIL**，但**要列出**）。
+    ⇒ ⚠️ **边界**：只动**首段目录不存在**的情况 ⇒ 首段写错（`asnyc`）也会落进来
+      ⇒ ⇒ 所以这个桶**必须列出来**（提示级）⇒ 不能静默吞掉。
+    """
+    parts = path.split('/')
+    if len(parts) < 3 or parts[0] != 'service':
+        return False
+    first = parts[1]
+    if not first:
+        return False
+    return not os.path.isdir(os.path.join(go_root, 'service', first))
+
+
 def _source_context(root, hits, window=1):
     """拼接台账里**引用所在行 ±window** 的上下文（供第 4 层的 N5/N7 去噪判据用）。
 
@@ -1099,11 +1172,13 @@ _ENTITY_STOPWORDS = frozenset('''
     size count index idx key name path file line num total start end
 '''.split())
 
-# 「有辨识度的符号」：**必须含「小写段 → 大写」的边界**
-#   ⇒ `GetTaskHandler` ✔ · `appendAuthHandler` ✔
+# 「有辨识度的符号」：**必须含「小写段 → 大写」的边界，且小写段至少 2 个字母**
+#   ⇒ `GetTaskHandler` ✔ · `appendAuthHandler` ✔ · `completeLikeGT5` ✔
 #   ⇒ 全大写缩写（`HTTP` / `OTel`）✘（实测：它们在真源里也到处被声明
 #     ⇒ 放进候选 ⇒ 假阳性）
-_DISTINCTIVE_RE = re.compile(r'^[A-Za-z_][a-z0-9]*[A-Z][A-Za-z0-9]*$')
+#   ⚠️ 「至少 2 个小写字母」这一条是第三轮收紧补上的 ——
+#     只要求「有边界」的话，`HTTP` 会被拆成 `H` + `TTP` ⇒ 仍然匹配 ⇒ 假阳性。
+_DISTINCTIVE_RE = re.compile(r'^[A-Za-z_][a-z]{2,}[A-Z][A-Za-z0-9]*$')
 
 
 def _local_windows(root, hits, path, s, e, width=45):
@@ -1134,6 +1209,14 @@ def _local_windows(root, hits, path, s, e, width=45):
     return '\n'.join(out)
 
 
+# 「断言包含」的措辞标记 —— 🔴 **台账必须「断言这个符号在这个文件里」才参与判定**
+#   否则「一句话里同时出现多个锚点和多个符号、且它们分属不同文件」的**清单式写法**
+#   会持续假阳性（实测：「`a.go:95,99,103`；…；`completeLikeGT5` 的 `SetNX` 未命中早退」
+#   ⇒ `completeLikeGT5` 属于另一个文件，但那句话**没有**断言它在前一个锚点文件里）。
+_CONTAINMENT_MARK = re.compile(
+    r'(实现|处的|里的|中的|声明|定义|定义在|写在|位于)')
+
+
 def _entity_candidates(text):
     """从台账窗口里提取「断言提到的实体」候选（Go 符号名）。
 
@@ -1144,10 +1227,12 @@ def _entity_candidates(text):
       ⇒ 带点的那个**明确属于另一个包** ⇒ 它是**跨文件对照**，不是「锚点处的实体」
       ⇒ 取最后一段当候选 ⇒ **必假阳性**。
     ⇒ 片段里若含 `:` `/` `\\` ⇒ 是路径 / file:line / URL ⇒ 跳过
-    ⇒ 取**不带限定名**的最后一段（`DeleteFolderCascade`）
+    ⇒ ⚠️ **只保留「台账断言了包含关系」的候选**（见 `_CONTAINMENT_MARK`）
+      —— 窗口里出现一个符号 ≠ 台账说它在这个锚点文件里。
     """
     cands = []
-    for span in re.findall(r'`([^`]+)`', text):
+    for span_m in re.finditer(r'`([^`]+)`', text):
+        span = span_m.group(1)
         if ':' in span or '/' in span or '\\' in span:
             continue
         if '.' in span:
@@ -1163,9 +1248,19 @@ def _entity_candidates(text):
             #   第一版（只看「长度 ≥ 4」）⇒ 假阳性 ~90%：普通英文词
             #   （`enabled` / `offset`）只要在真源某处被声明过就会被判成「指错文件」。
             #   第二版（要求首字母大写）⇒ 漏掉 `appendAuthHandler` 这类**小写开头的 Go 函数名**。
-            # ⇒ 现在的口径：**必须含「小写段 → 大写」的边界**
-            #   （`GetTaskHandler` ✔ · `appendAuthHandler` ✔ · 全大写缩写 `HTTP` ✘）
+            #   第三版（要求有「小写段→大写」边界）⇒ 漏掉全大写缩写？⇒ 再收紧为
+            #   「小写段至少 2 个字母」⇒ `HTTP` / `OTel` 全部出局。
+            # ⇒ 现在的口径：**小写段 ≥2 字母 + 紧接一个大写字母**
+            #   （`GetTaskHandler` ✔ · `appendAuthHandler` ✔ · `completeLikeGT5` ✔ · `HTTP` ✘）
             if not _DISTINCTIVE_RE.match(seg):
+                continue
+            # ⚠️ **必须「台账断言了包含关系」** —— 符号前 24 字符里要有包含措辞
+            #   （「实现」「处的」「里的」「中的」「声明」「定义」…）
+            #   🔴 **必须用绝对位置** —— `m.start()` 是**片段内**偏移，
+            #      直接拿去切 `text` ⇒ 切到的是**窗口开头** ⇒ 判据恒不成立（实测踩过）
+            pos = span_m.start(1) + m.start()
+            pre = text[max(0, pos - 24):pos]
+            if not _CONTAINMENT_MARK.search(pre):
                 continue
             if seg not in cands:
                 cands.append(seg)
@@ -1284,6 +1379,10 @@ def layer4_golines(root, texts, go_root):
     # 🔴 **Go 标准库也要能定位**（favorite 域实测：`net/http/server.go:2458` 在
     #    `<GOROOT>/src` 里 ⇒ 索引不含标准库 ⇒ 假 FAIL）
     goroot = _detect_goroot()
+    # ⚠️ **标准库 basename 索引单独建，不并进 `idx`** ——
+    #    并进去 ⇒ 标准库同名文件会与真源/第三方库的同名文件**混在一个池子**里
+    #    ⇒ 「跨库歧义」的口径被污染（既有计数会变）⇒ 必须**独立成池**。
+    std_idx = _stdlib_index(goroot)
 
     refs = {}
     for f, t in texts.items():
@@ -1295,6 +1394,7 @@ def layer4_golines(root, texts, go_root):
             refs.setdefault(key, {}).setdefault(f, set()).add(ln)
 
     ok, problems, ambiguous, noises = 0, [], [], []
+    external = []          # ← 外部仓库锚点（真源 `service/` 下无该首段目录 ⇒ 不可核验）
     resolved = []   # ← 第 4 层补充判据用：(路径, 起行, 止行, [候选文件], [台账文件])
     for (path, s, e), hits in sorted(refs.items()):
         srcs = sorted(hits)
@@ -1339,23 +1439,40 @@ def layer4_golines(root, texts, go_root):
                 problems.append((path, s, e, '行号超出文件范围', srcs))
             continue
         cands = idx.get(os.path.basename(path), [])
-        if not cands:
-            if not noise_only:
-                problems.append((path, s, e, '文件在真源与全部第三方库里都找不到', sorted(srcs)))
-            continue
         matched = []
         matched_paths = []
         for lib, full in cands:
-            try:
-                n = sum(1 for _ in open(full, encoding='utf-8', errors='replace'))
-            except Exception:
-                continue
+            n = _file_line_count(full)
             if s <= n and e <= n:
                 matched.append(lib)
                 matched_paths.append(full)
+        # ── 标准库 basename 通道（第四十八轮）────────────────────────────
+        #   真源 / 第三方库里**没有同名文件**时，去 `<GOROOT>/src` 里按 basename 找
+        #   （台账常写裸 `quote.go:522-563` 而不是 `strconv/quote.go:522-563`）。
+        #   ⚠️ **只在「模块池没有命中」时启用** —— 否则会给「真源/第三方库已唯一命中」
+        #      的引用凭空加上标准库候选 ⇒ 凭空制造「跨库歧义」⇒ 改变既有计数口径。
+        std_cands = []
+        if not matched:
+            std_cands = std_idx.get(os.path.basename(path), [])
+            for full in std_cands:
+                n = _file_line_count(full)
+                if s <= n and e <= n:
+                    matched.append('标准库:' + os.path.relpath(full, goroot))
+                    matched_paths.append(full)
         if not matched:
             if not noise_only:
-                problems.append((path, s, e, '行号超出文件范围', sorted(srcs)))
+                if _external_anchor(path, go_root):
+                    # 🌐 **外部仓库锚点** ⇒ 不计 FAIL，但要**列出来**（提示级）
+                    external.append((path, s, e, sorted(srcs)))
+                else:
+                    why = '文件在真源与全部第三方库里都找不到'
+                    if std_cands:
+                        longest = max(_file_line_count(f) for f in std_cands)
+                        why = ('行号超出文件范围（标准库有 %d 个同名文件，最长 %d 行）'
+                               % (len(std_cands), longest))
+                    elif cands:
+                        why = '行号超出文件范围'
+                    problems.append((path, s, e, why, sorted(srcs)))
             continue
         resolved.append((path, s, e, matched_paths, srcs, hits))
         if not noise_only:
@@ -1378,6 +1495,13 @@ def layer4_golines(root, texts, go_root):
         print(f'  ⚠️ 同名文件跨库歧义（归属需人工确认）: {len(ambiguous)} 条')
         for path, s, e, libs in ambiguous:
             print(f'      {path}:{s}{"-" + str(e) if e != s else ""}  ∈ {libs}')
+    if external:
+        print(f'  🌐 外部仓库锚点（真源 `service/` 下无该首段目录 ⇒ **本机不可核验** · 不计 FAIL）: '
+              f'{len(external)} 条')
+        print('     ⇒ 这些锚点指向**真源之外的另一个仓库**（like 域 = `Sea-BreakTheWaves`，本机不存在）')
+        print('     ⇒ ⇒ **不是台账写错** ⇒ 但也**永远不可核验** ⇒ 需要该仓的 owner 说明它的出处')
+        for path, s, e, srcs in external:
+            print(f'      {path}:{s}{"-" + str(e) if e != s else ""}   ← {", ".join(srcs)}')
     # ── 第 4 层**补充判据**：锚点文件里找不到台账断言提到的那个实体 ──
     entity_hints = layer4_entity_check(root, resolved, go_root)
     if entity_hints:
@@ -2217,6 +2341,88 @@ def run_mutation_tests(root):
                       + f'（实际报出：{_ents}）')
                 bad += 1
 
+        # ── 标准库 basename 通道专用变异（第四十八轮）──────────────────────
+        #   变异 = **关掉通道**（`std_idx = _stdlib_index(goroot)` ⇒ `std_idx = {}`）
+        #   期望 = 台账里那 **13 条标准库裸 basename** 引用必须重新变红
+        #   ⚠️ **变异打在代码上**（工具源码），不是打在台账上（PIT-GLOBAL-040）
+        #   ⚠️ **绝不落盘改共享工具** —— 共享工具是**别的域**的守门
+        #      ⇒ 万一测试进程被杀，磁盘上的工具不能留半截状态
+        #      ⇒ 用 `exec` 在**内存**里跑一份变异后的工具（PIT-GLOBAL-041）
+        _stdlib_refs = ('quote.go:522-563', 'url.go:1001', 'context.go:625')
+        _tool_path = os.path.join(root, 'tools/check-ledger-selfcheck.py')
+        _tool_src = read(_tool_path)
+        _mut_src = _tool_src.replace('std_idx = _stdlib_index(goroot)', 'std_idx = {}')
+        if _mut_src == _tool_src:
+            print('  ❌ 变异「关掉标准库 basename 通道」⇒ **变异点找不到** ⇒ 该判据是假绿')
+            bad += 1
+        else:
+            _ns = {'__file__': _tool_path, '__name__': '_mutant_stdlib_channel'}
+            exec(compile(_mut_src, _tool_path, 'exec'), _ns)
+            _buf = io.StringIO()
+            with contextlib.redirect_stdout(_buf):
+                _ns['layer4_golines'](root, _ns['all_ledger_texts'](root),
+                                      DEFAULT_GO_ROOT)
+            _mut_out = _buf.getvalue()
+            _stayed_ok = [r for r in _stdlib_refs if r not in _mut_out]
+            if not _stayed_ok:
+                print('  ✅ 变异「关掉标准库 basename 通道」⇒ 13 条标准库引用**全部重新变红**'
+                      f'（抽样：{", ".join(_stdlib_refs)}）')
+            else:
+                print('  ❌ 变异「关掉标准库 basename 通道」**没被抓到** ⇒ 该判据是假绿'
+                      f'（仍不报：{_stayed_ok}）')
+                bad += 1
+            # 阴性对照：**未变异**时这 3 条必须**不**出现（否则是恒红）
+            _buf2 = io.StringIO()
+            with contextlib.redirect_stdout(_buf2):
+                layer4_golines(root, all_ledger_texts(root), DEFAULT_GO_ROOT)
+            _leak = [r for r in _stdlib_refs if r in _buf2.getvalue()]
+            if not _leak:
+                print('  ✅ 阴性对照：未变异时那 3 条标准库引用**不报**（判据不是恒红）')
+            else:
+                print(f'  ❌ 阴性对照：未变异时仍报出 {_leak} ⇒ 判据恒红')
+                bad += 1
+
+        # ── 外部仓库锚点通道专用变异（第四十八轮）──────────────────────
+        #   变异 = **让 `_external_anchor` 恒返回 False**（⇒ 外部仓库锚点不再被识别）
+        #   期望 = like 域那 3 条 `service/async/**` 锚点必须重新变成 FAIL
+        _ext_refs = ('service/async/rpc/cmd/worker/favorite.go:183-186',
+                     'service/async/rpc/internal/app/community_authority_binder.go:46-62')
+        _mut_ext_src = _tool_src.replace(
+            "    return not os.path.isdir(os.path.join(go_root, 'service', first))",
+            "    return False")
+        if _mut_ext_src == _tool_src:
+            print('  ❌ 变异「关掉外部仓库锚点通道」⇒ **变异点找不到** ⇒ 该判据是假绿')
+            bad += 1
+        else:
+            _ns2 = {'__file__': _tool_path, '__name__': '_mutant_external_anchor'}
+            exec(compile(_mut_ext_src, _tool_path, 'exec'), _ns2)
+            _buf3 = io.StringIO()
+            with contextlib.redirect_stdout(_buf3):
+                _ns2['layer4_golines'](root, _ns2['all_ledger_texts'](root),
+                                       DEFAULT_GO_ROOT)
+            _mut3 = _buf3.getvalue()
+            _still_ext = [r for r in _ext_refs if r not in _mut3]
+            if not _still_ext:
+                print('  ✅ 变异「关掉外部仓库锚点通道」⇒ like 域 3 条跨仓库锚点'
+                      '**全部重新变红**（抽样：service/async/…）')
+            else:
+                print('  ❌ 变异「关掉外部仓库锚点通道」**没被抓到** ⇒ 该判据是假绿'
+                      f'（仍不报：{_still_ext}）')
+                bad += 1
+            # 阴性对照：**未变异**时这 2 条必须**不**出现在 ❌ 清单里
+            _buf4 = io.StringIO()
+            with contextlib.redirect_stdout(_buf4):
+                layer4_golines(root, all_ledger_texts(root), DEFAULT_GO_ROOT)
+            _clean4 = _buf4.getvalue()
+            _leak4 = [r for r in _ext_refs
+                      if any(r in ln and ln.strip().startswith('❌')
+                             for ln in _clean4.split('\n'))]
+            if not _leak4:
+                print('  ✅ 阴性对照：未变异时那 2 条跨仓库锚点**不是 FAIL**（判据不是恒红）')
+            else:
+                print(f'  ❌ 阴性对照：未变异时仍报成 FAIL {_leak4} ⇒ 判据恒红')
+                bad += 1
+
         # ── 第 1 层专用变异（E61 · 2026-10-26 第三十七轮 · users/user 域实测带出）──
         #   变异 9/10/11：在 task 台账里**新增一条指向仓内不存在路径的引用**，
         #     ⇒ 「落地态 / 免责」措辞 ⇒ 第 1 层**必须去噪**（不得报 MISSING）
@@ -2294,6 +2500,82 @@ def run_mutation_tests(root):
 
 # ====================================================================
 
+def all_ledger_texts(root):
+    """**全仓**台账文本（`docs/**/*.md`）⇒ 供「全仓补充判据」用。
+
+    🔴 **为什么要扫全仓**（第四十七轮实测）：
+       `LEDGER_FILES` 只配了 task / users / users-admin 三个域
+       ⇒ ⇒ **global 自己写的台账（`docs/DRIFT/global/_README.md`）根本不在扫描范围里**
+       ⇒ ⇒ **我自己的 Go 锚点一直没被检查过**（真空缺）。
+       ⇒ ⇒ 而第 4+ 层是**提示级** ⇒ 扫全仓**不会**让任何域变红 ⇒ 安全。
+    """
+    out = {}
+    base = os.path.join(root, 'docs')
+    for dp, _, fns in os.walk(base):
+        for fn in fns:
+            if fn.endswith('.md'):
+                full = os.path.join(dp, fn)
+                rel = os.path.relpath(full, root)
+                out[rel] = read(full)
+    return out
+
+
+def layer4_entity_all(root, go_root):
+    """**全仓**跑第 4 层（只为拿到「补充判据」的命中 + 既有 L4 的 FAIL）⇒ 返回 (命中列表, FAIL 行, 外部锚点行)。
+
+    ⚠️ **只用于提示与转达** ⇒ 本函数**不改变**主流程的退出码
+       ⇒ 别的域的历史锚点问题**不会**让本工具变红（那不是 global 的写权范围）。
+    ⚠️ **命中数 ≠ 捕获行数** —— 捕获块里每条命中占 **2 行**
+       （命中行 + 「⇒ 该符号实际在 …」详情行），前面还有 1 行说明
+       ⇒ ⇒ **必须按「含『缺失实体:』的行」计数**（实测踩过：把行数当命中数 ⇒ 报成 3 条，实际 1 条）。
+    """
+    import contextlib
+    import io as _io
+    buf = _io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        layer4_golines(root, all_ledger_texts(root), go_root)
+    out = buf.getvalue().split('\n')
+    hits, fails, cur = [], [], None
+    externals = []
+    in_block = False
+    in_ext = False
+    for line in out:
+        if '锚点文件里**找不到**' in line:
+            in_block = True
+            continue
+        if in_block:
+            s = line.strip()
+            if not s:
+                continue
+            if s.startswith('⚠️'):
+                in_block = False
+                continue
+            if '缺失实体:' in s:
+                cur = [s]
+                hits.append(cur)
+            elif cur is not None:
+                cur.append(s)
+            continue
+        if line.strip().startswith('🌐'):
+            in_ext = True
+            continue
+        if in_ext:
+            s = line.strip()
+            if not s:
+                continue
+            if s.startswith('⚠️'):
+                in_ext = False
+                continue
+            # ⚠️ **只收「引用行」**（形如 `path.go:12-34`）—— 说明行以 `⇒` 开头 ⇒ 跳过
+            #    （否则说明行会被算进「条数」⇒ 报数与实数对不上 ⇒ 同 PIT-GLOBAL-066）
+            if re.match(r'^\S+:\d+', s):
+                externals.append(s)
+            continue
+        if line.strip().startswith('❌'):
+            fails.append(line.strip())
+    return hits, fails, externals
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--domain', default='task')
@@ -2301,6 +2583,8 @@ def main():
     ap.add_argument('--repo-root', default=None)
     ap.add_argument('--mutation-test', action='store_true',
                     help='只跑变异测试（故意破坏台账 ⇒ 必须被抓到）')
+    ap.add_argument('--entity-all', action='store_true',
+                    help='额外跑**全仓**补充判据（所有 docs/**/*.md · 提示级 · 不计入退出码）')
     args = ap.parse_args()
 
     root = args.repo_root or repo_root()
@@ -2329,6 +2613,32 @@ def main():
     bad += layer2_claims(root, args.domain)
     bad += layer3_numbers(root, texts, args.domain)
     bad += layer4_golines(root, texts, args.go_root)
+    if args.entity_all:
+        # ── 全仓补充判据（**提示级 · 不计入退出码**）──────────────────────
+        # 🔴 **为什么要单独扫全仓**：`LEDGER_FILES` 只配了三个域
+        #    ⇒ **global 自己写的台账根本不在扫描范围里** ⇒ 我自己的 Go 锚点一直没被检查过。
+        print()
+        print('=' * 78)
+        print('全仓补充判据（**所有** docs/**/*.md · 提示级 · 不计入退出码）')
+        print('=' * 78)
+        _ent, _fails, _ext = layer4_entity_all(root, args.go_root)
+        if _ent:
+            print(f'  ⚠️ 锚点文件里**找不到**断言提到的实体: {len(_ent)} 条')
+            for grp in _ent:
+                for l in grp:
+                    print('      ' + l)
+        else:
+            print('  ✅ 全仓 0 条命中')
+        if _fails:
+            print(f'  ⚠️ 另有 {len(_fails)} 条**既有第 4 层 FAIL**（跨域）⇒ '
+                  f'**不是 global 的写权范围** ⇒ 只记账 + 转达 owner')
+            for l in _fails:
+                print('      ' + l)
+        if _ext:
+            print(f'  🌐 另有 {len(_ext)} 条**外部仓库锚点**（真源 `service/` 下无该首段目录 ⇒ '
+                  f'本机不可核验 ⇒ **不是台账写错**）')
+            for l in _ext:
+                print('      ' + l)
     unmentioned = layer5_unmentioned(root, texts, args.domain)
     unmentioned_prod = layer6_unmentioned_production(root, texts, args.domain)
 
