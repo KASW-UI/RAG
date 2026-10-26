@@ -184,6 +184,55 @@
 | **落码影响面** | **纯 javadoc** ⇒ 零字节码变化 ⇒ 编译面不受影响；⚠️ 需在回执里说明「全量 2411 对纯 javadoc 改动无增量信息」的取舍，或按 C2 仍跑一次作为共享层复验窗口 |
 | **是否阻塞本波** | **否** ⇒ 进 G4 排期（等正式派单到达后落码） |
 
+### 4.4 来自 G3 的三条发现 · **G4 独立复核结果**（核对日期 2026-10-27）
+
+> **来源**：G3 实时轨。**G4 逐条独立复核，未采信对方结论**（复核纪律：读消费点，不读快照）。
+
+| # | G3 的发现 | 复核结论 | G4 的独立证据 |
+|---|---|---|---|
+| 1 | `article-rpc` / `favorite-rpc` 缺 `baseline-version: 0`；且 **AGENTS.md §6.3 问题 4 只点了 `favorite-rpc`，漏了 `article-rpc`** | ✅ **成立**（G3 主动更正了自己先前那条错报 —— 起因是把 `grep -c` 的**匹配行数**当成了**配置值**） | 全仓 **9 个** rpc 组件逐个实测：**已钉 0** = `comment-rpc:109` · `follow-rpc:76` · `like-rpc:78` · `message-rpc:102` · `task-rpc:76`（**5 个**）｜**有 flyway 段但缺** = **`article-rpc`** · **`favorite-rpc`**（**2 个** ⇒ 即真缺陷面）｜**N/A（无 flyway 段）** = `hot-rpc` · **`admin-rpc`**｜**`user-rpc` 用 `application.yaml`（非 `.yml`）且无 flyway 配置 ⇒ N/A**<br>⇒ ⚠️ G3 的表**漏了 `admin-rpc` 与 `user-rpc` 两行**（均为 N/A ⇒ **不影响结论**） |
+| 2 | favorite 的 `go-form-limit.mode` 缺失是**共享层的有意设计** ⇒ **勿提「共享层加一档」的派单** | ✅ **成立** | `service/common/.../http/GoStyleFormLimitMode.java:41-49`（默认 `OFF` 的理由：favorite 不在 global 写权范围 ⇒ **共享层对它必须零影响**；若默认 `RAW` ⇒ favorite 的 2049 场景会从「5003」变「400 原文」= 对别人的域的未授权改动；**其它 9 个域必须显式声明**）＋ `tools/difftest/check-tomcat-limits.py:156-158`（**零触碰守卫**：favorite-api **必须没有**这一项）<br>实测 mode：`article-api` **raw** · `comment-api` **envelope** · `hot-api` **envelope** · `task-api` **raw** · `user-api` **raw** · `admin-api` **raw** · **`favorite-api` 无声明 ⇒ OFF（刻意）** |
+| 3 | **A9 轴定义本身**（「span 属性 `audit.*`」）与两侧源码都不符 | ✅ **成立** —— ⚠️ 但 G3 给的按域分布我第一遍**在 RAG 侧查不到**（comment 的 `audit.*`、favorite 的 `biz.*` 均命中 0）⇒ 原因是**那些域特有属性在 Go 侧，不在 RAG 侧** | **共享层两侧都是 `sea.*`**：RAG `ObservabilityConstants.java:63+`（`sea.error.kind` / `sea.biz_code` / `sea.biz_msg` / `sea.timeout` / `sea.slow` / `sea.duration_ms`）＋ Go `service/common/observability/observability.go:24-29`（**同名同值**）<br>**域特有在 Go 侧**：comment = `audit.*`（`service/comment/rpc/internal/logic/update_subject_state_logic.go:53-56` · `create_comment_logic.go:56-59`）· favorite = `biz.*`（`service/favorite/api/internal/logic/favorite/delete_favorite_logic.go:43-44` 等 4 文件）· admin = `audit.*`（RAG 侧已落地 `AdminSpans.java:91-93`）<br>⇒ ⇒ **RAG 侧已落地的域特有属性只有 admin 一处** |
+
+#### 建议项 2：**A9 轴定义措辞缺陷**（落点 = `docs/DRIFT/_cross/domain-common-lanes.md` = 共享面 ⇒ 整合者订正）
+
+| 字段 | 内容 |
+|---|---|
+| 1 现象 | 总纲 A9 写「span 属性 `audit.*`」⇒ **既不完整也不准确**：① 共享层实际用 **`sea.*`**；② `audit.*` / `biz.*` 是**域特有**、且**按域不同**；③ RAG 侧目前**只落地 admin 一处** |
+| 2 Go 侧出处 | `service/common/observability/observability.go:24-29`（`sea.*` 六项）· `service/comment/rpc/internal/logic/update_subject_state_logic.go:53-56`（`audit.*`）· `service/favorite/api/internal/logic/favorite/delete_favorite_logic.go:43-44`（`biz.*`） |
+| 3 RAG 侧现状 | `service/common/.../observability/ObservabilityConstants.java:63+`（`sea.*`）· `service/users/admin/admin-rpc/.../observability/AdminSpans.java:91-93`（`audit.*`，**唯一已落地的域特有**） |
+| 4 证据强度 | **L1 源码对照**（两侧行号已逐条核实） |
+| 5 建议修法 | A9 轴改为**分层表述**：「**共享层通用属性 = `sea.*`（两侧一致）**」＋「**域特有属性按域各异**：comment = `audit.*`（Go 侧）· favorite = `biz.*`（Go 侧）· admin = `audit.*`（两侧）」⇒ 避免把**某一域的约定**写成全轴通则 |
+| 6 影响面 | A9 轴的 10 份域台账（各域据此判「A9 已对齐」）· 只影响**判定口径**，不影响运行时 |
+| 7 是否阻塞本波 | **否** ⇒ 登记待整合者订正 |
+
+#### 建议项 3：**AGENTS.md §6.3 问题 4 漏记 `article-rpc`**（落点 = `AGENTS.md` = 共享面 ⇒ 整合者订正）
+
+| 字段 | 内容 |
+|---|---|
+| 1 现象 | §6.3 问题 4 的「实施状态」只列了 **`favorite-rpc` 例外**（缺 `baseline-version: 0`）⇒ **漏了 `article-rpc`** ⇒ 共享面台账记载不完整 |
+| 2 Go 侧出处 | N/A（配置层缺陷，非行为漂移） |
+| 3 RAG 侧现状 | `service/article/article-rpc/src/main/resources/application.yml`（有 `flyway:` 段 + `baseline-on-migrate: true`，**无 `baseline-version`**）· `service/favorite/favorite-rpc/src/main/resources/application.yml`（同上） |
+| 4 证据强度 | **L3 静态实测**（9 个 rpc 组件逐个 `grep -n`） |
+| 5 建议修法 | §6.3 的例外清单补上 **`article-rpc`** ⇒ 两条（`article-rpc` + `favorite-rpc`）并列；⚠️ **这两条落点都在域内 yaml ⇒ 域侧自修**（G3 已认领 article 侧）⇒ **共享层只需订正「记载」，不需落码** |
+| 6 影响面 | `AGENTS.md` §6.3 一处文字 · 各域台账引用该处时会误以为只有 favorite 有缺口 |
+| 7 是否阻塞本波 | **否** ⇒ 登记待整合者订正 |
+
+#### 🔴 **拒单判据：favorite 零影响**（G4 侧的硬线）
+
+> **依据**：`GoStyleFormLimitMode.java:41-49` ＋ `check-tomcat-limits.py:156-158` ＋ AGENTS.md §5.3c。
+> ⇒ **G4 收到任何「要求共享层碰 favorite」的派单 ⇒ 一律退回**，并回指上面三处出处。
+> ⇒ favorite 域自己的问题（例：域特有 span 属性 `biz.*` 未落地）⇒ **favorite 域自修**，**共享层零改动**。
+
+#### 🟡 **跨域线索（A9 域特有属性在 RAG 侧未落地）—— 属域侧，共享层零改动**
+
+> **线索**：Go 侧 comment 埋 `audit.*`（`update_subject_state_logic.go:53-56`）· favorite 埋 `biz.*`（4 文件）；
+> **RAG 侧实测**：comment-rpc 的 span 写入点**只有共享层 `sea.*`**（其测试 `CommentRpcSlowThresholdGateTest:233-245` 断言的是 `ATTR_SLOW`/`ATTR_DURATION` = `sea.*`）⇒ `audit.*` **未埋**；
+> favorite 侧**无任何 `SetAttributes` 写入点** ⇒ `biz.*` **未埋**。
+> ⚠️ RAG 侧 comment **有** `UpdateSubjectState` 对应功能（`UpdateSubjectStateReq` / `UpdateSubjectStateService` / `CommentController`）⇒ 不是「功能不存在」导致的省略。
+> ⇒ **本会话不下「漂移」结论**（未验两侧 span 语义是否等价、也未查 `docs/Intentional_Deviations/` 是否有签字项）
+> ⇒ **登记为线索，交 comment / favorite 域侧自查**；**共享层零改动**。
+
 ## 5. 交付物清单
 
 - [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
