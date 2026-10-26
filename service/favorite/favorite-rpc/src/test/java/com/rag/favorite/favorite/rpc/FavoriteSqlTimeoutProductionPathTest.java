@@ -165,21 +165,34 @@ class FavoriteSqlTimeoutProductionPathTest {
     }
 
     @Test
-    @DisplayName("🔴 生产路径的有效超时是【秒级向上取整】（驱动内部毫秒是整秒，不是 R）")
+    @DisplayName("🔴 生产路径的有效超时是【秒级向上取整】（代理层看到的秒数）")
     void productionPathEffectiveTimeoutIsSecondLevelCeil() throws Exception {
         runWithDeadlineAndQuery();
 
-        Class<?> statementClass = PROBE.statementClass.get();
-        assertNotNull(statementClass, "探针必须抓到 statement");
+        assertNotNull(PROBE.statementClass.get(), "探针必须抓到 statement");
 
-        // 代理对外只暴露秒级接口；驱动内部的原始毫秒要 unwrap 下去才看得到。
+        // 代理对外只暴露秒级接口；驱动内部的原始毫秒在另一个测试里断言。
+        // 🔴 两条断言必须**分属两个测试方法**：同方法内第一条失败会**遮住**第二条
+        //    ⇒ 届时只知道「红了」，不知道「红在哪一条、实际值是多少」。
         assertEquals(2, PROBE.queryTimeoutSeconds.get(),
-                "R ≈ 1700ms ⇒ ceil(1700/1000) = 2 秒");
+                "R ≈ 1700ms ⇒ 秒级路径 = ceil(1700/1000) = 2 秒；"
+                        + "若共享层改成走毫秒路径，这里会变成 floor(1700/1000) = 1 ⇒ "
+                        + "本条会转红 —— 那是【台账该更新】的信号（见 docs/DRIFT/favorite/rpc.md §36），不是回归");
+    }
 
-        long rawMs = PROBE.queryTimeoutMs.get();
-        assertEquals(2000L, rawMs,
+    @Test
+    @DisplayName("🔴 生产路径的【驱动内部原始毫秒】是整秒（秒级路径的指纹）")
+    void productionPathDriverRawMillisIsWholeSecond() throws Exception {
+        runWithDeadlineAndQuery();
+
+        assertNotNull(PROBE.statementClass.get(), "探针必须抓到 statement");
+
+        // 这是**判别两条路径的量**：秒级路径写进去的是 ceil(R/1000)*1000（整秒）；
+        // 毫秒路径写进去的是**原样 R**（≈1700，非整秒）⇒ ⇒ 整秒 ⇔ 走的是秒级路径。
+        assertEquals(2000L, PROBE.queryTimeoutMs.get(),
                 "🔴 秒级路径 ⇒ 驱动内部毫秒 = ceil(R/1000)*1000 = 2000（整秒）；"
-                        + "若共享层改成走毫秒路径，这里会是 ≈1700 ⇒ 本断言会转红（那是【台账要更新】的信号，不是回归）");
+                        + "若共享层改成走毫秒路径，这里会是 ≈R（≈1700，非整秒）⇒ "
+                        + "本条会转红 —— 那是【台账该更新】的信号（见 docs/DRIFT/favorite/rpc.md §36），不是回归");
     }
 
     @Test
