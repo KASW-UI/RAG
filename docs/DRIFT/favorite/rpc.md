@@ -46,6 +46,7 @@
 | 第二十五轮 | 🔴 **核 `global` 第四十一轮 E62：毫秒精度在本域生产路径上到底生效没有**（§34）—— `global` 要求本域核对台账里凡写「毫秒精度已生效」的表述并加限定 ⇒ **先核事实，不直接采信**：① **静态**（`javap`）：pgjdbc 的毫秒 API **只挂在实现类**上（**42.6.2 / 42.7.13 都一样**）· HikariCP 的 `HikariProxyPreparedStatement`（**4.0.3 / 5.0.1 / 7.0.2 全查**）**只有秒级接口** ⇒ ⇒ 按运行期类反射找毫秒方法**必然失败** ⇒ **机制成立** ② 🔴 **本域运行时实测**（真 PG + 真 HikariCP + 真 MyBatis 插件链 + 真 mapper）：statement = `HikariProxyPreparedStatement` ⇒ 毫秒 API **不可达** ⇒ 有效超时 = **2 秒 / 驱动内部原始毫秒 2000（整秒）** ⇒ **秒级回退**（R ≈ 1700 ⇒ 毫秒路径会给 ≈1700 ⇒ 可区分）③ 🔴 **阴性对照**（同 PG 不走池）⇒ pgjdbc 实现类上毫秒 API **可达** ⇒ 且实测 `setQueryTimeoutMs(1700)` ⇒ 原始毫秒 = **1700** ⇒ ⇒ **判别器不是恒真**<br>⇒ 🔴🔴 **叠加 `global` 那版实现（含毫秒路径）复跑**：他们自己的 `DeadlineQueryTimeoutInjectorTest` **10 例全绿** + 本域 **4 例仍全绿** ⇒ ⇒ **带毫秒路径的实现与旧秒级实现在本域给出完全相同的有效值** ⇒ ⇒ **毫秒路径在本域生产路径上根本没走到** ⇒ ⇒ **E62 在本域以运行时证据成立**（不是转述）⇒ ⇒ **共享层这次改动对 favorite 的可观察影响 = 0**（生产上）<br>⇒ 🔴 **台账订正**：§28 引言 + §28.1 对比表（改成「代码意图 / 生产实际」**三列**）+ §28.1 结论句（**区分 (A) 旧↔新 = 0** 与 **(B) Go↔RAG = δ**）⇒ ⇒ 结论不变（**A 类仍 0**）但**理由换成纯算术依据** ⇒ **不再依赖未验证前提**<br>⇒ ✅ **本域零红、零需改动**；共享面**零改动**（overlay 后已还原）⇒ 🆕 坑档 **PIT-FAV-RPC-034** |
 | 第二十六轮 | 🟢 **接住 `global` 第四十四轮的结构层缺陷类 ⇒ 收窄成本域门禁**（§35）—— global 同步：本轮**无** `service/common/**` 行为改动 ⇒ 对 favorite **零影响**；并新增结构层守门 **`check-ledger-tables.py`**（global 域 · 在 `align/global` 分支的 `tools/` 目录下 ⇒ **本分支没有该文件**）（「**表格块内部不得出现无行首的内容行**」⇒ 否则 GFM 把它当上一行的 lazy continuation ⇒ **表格结构静默塌陷**：内容一个字没丢 ⇒ **肉眼扫不出**）<br>🔴 **但 global 的测量点过期了一轮**（他们在**我的第二十四轮 HEAD `a4a7ee0`** 上测 ⇒ 我的**第二十五轮**又改了台账）⇒ ⇒ 在**最新 `1111c8a`** 上复跑 `--all` ⇒ **我域 0 命中**（全仓 10 处全在 comment 域文件）⇒ ⇒ 逐条核证：是**真塌陷**（第 78 行是表格行、79/80 行**没有行首 `|`**）不是误报<br>🔴 **但 global 的原版不能直接当本域门禁**：① **默认范围不含本域** ⇒ 只能用 `--all` ⇒ 会因 **comment 域的文件**变红 ⇒ **别人的缺陷不该让我的门禁红** ② **`--mutation-test` 硬编码 global 自己的文件** ⇒ 在本分支上**「变异前置失败」** ⇒ 自证机制用不了<br>✅ ⇒ **收窄成本域版** `tools/ledger-lint/favorite/check-ledger-tables.py`（只扫**本 owner 写的 3 个 `rpc.md`**；显式排除 `api.md`（并发会话）/`common,proto`（别的组件）/`docs/FileTree/**`（用户维护）；变异靶子换成本域自己的 §0 时间线表）⇒ **EXIT=0** + **变异自证 M1/M2/M3 全过**（精确命中 `rpc.md:32`/`:33`）+ **真实数据交叉验证**（副本判据在 comment 域文件上**复现 10 处、行号逐条一致** ⇒ 判据没抄坏）⇒ ⇒ 坑档 **PIT-FAV-RPC-035** |
 | 第二十七轮 | 🔴 **global 第四十五轮：毫秒路径真的生效了**（§36）—— **真·共享层行为变更**（`DeadlineQueryTimeoutInjector` 的毫秒探测改成**先 unwrap 到驱动实现类** ⇒ 不再被 Hikari 代理类挡住）⇒ **favorite-rpc 在内** ⇒ 只读 overlay 实测：他们那版 `DeadlineQueryTimeoutInjectorTest` **13 例全绿** + 本域守门 **5 例中 2 条红**（`expected: <2> but was: <1>`、`expected: <2000> but was: <1691>`）⇒ ⇒ **第二十五轮埋的「转红 = 台账该更新、不是回归」信号兑现**<br>🔴🔴 **实测证伪他们 ④ 的量化口径**：他们写「毫秒路径把取消时刻收紧到『deadline + δ』⇒ 差 = δ」⇒ **错**：驱动收到的是**原样 R（1691ms）** ⇒ `R = deadline − t_exec` ⇒ ⇒ **`t_exec + R ≡ deadline`** ⇒ ⇒ **Go ↔ RAG 的取消时刻差 = 0**（不是 δ）⇒ ⇒ **与 deadline 的来源公式无关**（⇒ 连「两分支 R 公式不同」都不再重要）<br>🔴 **「结论不变的真正理由」再订正**：毫秒路径生效后「≤999ms 窗口」**本身不存在** ⇒ 「handler 不烧预算 + 快 SQL」**退化为冗余** ⇒ 它的正确角色是「**毫秒路径若再次失效时的唯一结构性兜底**」⇒ ⇒ 当前生效的主因 = 「毫秒精度直接生效」<br>🟢 本域**本来就在真池路径上**（`@SpringBootTest` ⇒ HikariCP）⇒ 不存在他们说的「守门绿、生产坏」那个洞<br>🔴 **合并动作清单已提前写好**（§36.5）：守门期望值 2→**1** / 2000→**≈R**、台账 §28.1/§34/§35 改口径、坑档补「已修」⇒ ⚠️ **本分支现在是「秒级」是对的**（global 未合回主仓）⇒ 别误读成「修法不对」<br>✅ **守门改进**：两条断言**拆成两个测试方法**（同方法内第一条失败会遮住第二条）⇒ 5 例全绿；**产品代码零改动**、共享面零改动 ⇒ ⇒ 坑档 **PIT-FAV-RPC-036** |
+| 第二十八轮 | 🔴 **核验 `global` 第四十六轮的 E65：favorite-rpc 的出向 gRPC 调用不继承请求 deadline**（§37）—— 本轮global **写权零**（无 favorite 代码/台账改动，**共享层也零行为变更**）⇒ 是**发现**变了不是**行为**变了 ⇒ ⇒ **核验成立**：① **Go 侧**：`service/favorite/rpc/internal/logic/helper.go:92-99` 与同文件 129-136 行的出向调用吃 otel span 的 `depCtx` ⇒ **父 ctx deadline 原样保留** ② **RAG 侧**：`GoStyleRequestDeadline.begin` 的**主代码调用点全仓只有 `HttpMiddleware.java:263` 一处**（HTTP 路径）⇒ gRPC 服务端路径**从未绑定** ⇒ `applyTo`（`:110-120`）读到 null ⇒ **原样返回 stub ⇒ 零期限** ③ favorite-rpc 的出向调用点**恰好两处**（`UserRpcClient.java:45-46` · `ArticleRpcClient.java:49-50`）**都走 `applyTo`** ⇒ **零裸 stub** ⇒ ⇒ **修法完全落在共享层 ⇒ favorite 零改动即受益**（global ③ 正确）<br>🔴 **本域自己的活体证据**（不是转述）：只读借用 global 的出向调用探针（**global 单写权** ⇒ 拷 `/tmp` ⇒ **唯一改动**是把 `RAG_ROOT` 指向**本分支工作树**）⇒ **EXIT=0** ⇒ 与 global 结论**逐键一致**（Go `failed_fast=true`/code=4 vs RAG `false`/0）⇒ 且 `sql_carrier` **两侧一致** ⇒ 漂移**只在出向调用载体上**（正合第二十七轮）<br>🔴 **本域具体后果**：出向调用无期限 ⇒ Go 死线到点**立刻失败不写** vs RAG **照跑会写**（客户端早已收到 DEADLINE_EXCEEDED）⇒ **两侧对「这次操作算不算成功」可能相反** ⇒ 但**概率小**（R = 整预算 − δ）· **后果轻**（两处出向调用都在**事务外**）⇒ ⇒ 一旦共享层绑上 ⇒ RAG 走 `internalServerCommon()` ⇒ **与 Go 逐条同款** ⇒ **行为一次性对齐**<br>🔴 **跟踪项**：该探针的 drift 键钉「**形态**」⇒ **漂移修好后会红** ⇒ **那不是回归** ⇒ 合并后本域 §37 / §24.1 的 C 类同步销账 ⇒ ⇒ 坑档 **PIT-FAV-RPC-036** |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -1786,7 +1787,7 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 |---|---|---|---|
 | **A · 已识别且可修的漂移** | **0 ⇒ 3 ⇒ 0**（🔴 第二十轮补上「SQL 语句层」后新增 3 处 ⇒ ✅ **第二十三轮全部修掉**） | 已修：rpc 6 处 L2 + 2 处真 bug；api 4 处（L2×2 + javadoc 假断言×2 + L1×1）；DDL 14 处 DEFAULT + 3 条索引（**性能非行为**）<br>已签字 **9** 条（API-001/002 · COMMON-001/002 · RPC-001/003/004/006/007）· 已撤销 2 条（RPC-002/005）· 🏷 候选 **0**<br>🔴 **第二十轮新增 3 处** ⇒ ✅ **第二十三轮全修**：① `favorite_folder` INSERT 不绑 `create_time`/`update_time` ② `favorite_item` INSERT 不绑 `create_time` ③ 改名不推进 `update_time`（+1 处低影响：outbox 两个投递列 `NULL` vs `''`）⇒ 修完**探针转绿**（语义差异 10 → 0 · L1 3 → 0）⇒ **§29 / §32** | §2 / §3 · `api.md` §2 · `docs/Intentional_Deviations/favorite/` · **§29 / §32** |
 | **B · 域内能补的证据缺口** | ~~**1 + 1**~~ ⇒ **0 + 1** | **B1 = U8**：create / create_item 的**成功路径**未双侧对拍（⇒ 见 §24.2）—— ✅ **已于第十六轮闭合**（15 case 全 SAME ⇒ **§25**）<br>**B2**：V7 上线前的 **6 条域外写入方人工确认**（**流程项，不是代码项** ⇒ **仍待办，但不是「未知项」**） | §24.2 · §25 · [`tools/outbox-writer-audit/favorite/CHECKLIST.md`](../../../../tools/outbox-writer-audit/favorite/CHECKLIST.md) |
-| **C · 跨域（本域只读）** | **5** | ① 容器层参数上限口径（与 hot 域 `DRIFT-HOTAPI-030` 同一格）② 405 多一个 `Content-Type`（落点 `service/common`，其 javadoc 被实测证伪）③ Go 多一个 `traceparent`（落点 `service/common` 的 `HttpMiddlewareFilter`）④ 🔴 **别域模块**运行时缺 `grpc-inprocess` ⇒ 可部署 jar 起不来 —— ⚠️ **本条数字已被同节 §24.4 归因翻案**：真缺 = **3 个可执行应用模块**（article-rpc / like-rpc / task-rpc）+ **4 个 `-common` 库**（不算可执行模块）；原写「13 个」**是错的**（详见 §24.4） ⑤ `like-api` 的熔断注释 | §22.3 / §22.4 · `api.md` §3 / §9.5 ⇒ **收口在 `global`** |
+| **C · 跨域（本域只读）** | **5 ⇒ 6** | ① 容器层参数上限口径（与 hot 域 `DRIFT-HOTAPI-030` 同一格）② 405 多一个 `Content-Type`（落点 `service/common`，其 javadoc 被实测证伪）③ Go 多一个 `traceparent`（落点 `service/common` 的 `HttpMiddlewareFilter`）④ 🔴 **别域模块**运行时缺 `grpc-inprocess` ⇒ 可部署 jar 起不来 —— ⚠️ **本条数字已被同节 §24.4 归因翻案**：真缺 = **3 个可执行应用模块**（article-rpc / like-rpc / task-rpc）+ **4 个 `-common` 库**（不算可执行模块）；原写「13 个」**是错的**（详见 §24.4） ⑤ `like-api` 的熔断注释 ⑥ 🔴 **E65（第二十八轮）**：**favorite-rpc 的出向 gRPC 调用不继承请求 deadline** —— Go 侧出向调用吃 otel span 的 `depCtx`（父 ctx deadline 原样保留）vs RAG 侧 `applyTo` 在 gRPC 服务端路径**从未绑定**（`begin` 主代码调用点只有 HTTP 一处）⇒ 出向调用**零期限** ⇒ 死线到点后 Go **立刻失败不写**、RAG **照跑会写** ⇒ 🔴 两侧对「这次操作算不算成功」可能**相反**；⇒ 但**概率小**（R = 整预算 − δ）· **后果轻**（两处出向调用都在**事务外**）⇒ ⇒ **修法完全在共享层 ⇒ favorite 零改动即受益**（**§37**） | §22.3 / §22.4 · `api.md` §3 / §9.5 · **§37** ⇒ **收口在 `global`** |
 | **D · 库级 / 不可观测（明确「不做」）** | **3** | ① gRPC **措辞**（grpc-go 区分未知方法/未知服务，grpc-java 共用一种）② gRPC **响应头 key 集合**（grpc-java 多 `grpc-accept-encoding` / `grpc-encoding`）③ percent-encoding 的 `~` 边界差 1 字节（L0 帧层；本域 24 条文案**无 `~`** ⇒ 客户端不可观测） | §20.4 / §20.5 ⇒ 两侧 `code` 语义一致 ⇒ **属库级，不是不一致** |
 
 ⇒ ~~**域内没有「已知但没改」的语义漂移了**~~；剩下的只有 **U8**（一条路径）+ **B2**（一条流程）+ 跨域与库级。
@@ -3307,3 +3308,95 @@ global 的改动**未合回主仓** ⇒ **本分支现在跑出来是「秒级�
    ⇒ 比「拿某个数值区间去论证」更稳 ⇒ ⇒ 也让「跨分支公式不同」这件事**不再重要**。
 4. 🔴 **「结论不变的真正理由」也是结论的一部分** ⇒ 机制变了，理由要跟着变
    ⇒ 否则台账会拿一个**冗余理由**继续挡着（且让人以为那条理由在起作用）。
+
+## 37. 2026-10-26 第二十八轮（`align/favorite` 工作树 · 承 `686a057`）—— 🔴 **核验 global 第四十六轮的 E65：favorite-rpc 的出向 gRPC 调用不继承请求 deadline**
+
+> **来源**：`global` 第四十六轮（`96d94db`，origin + upstream 已推）⇒ §5.3b 通知：
+> **新登记 E65**，**直接命中 favorite-rpc** ⇒ 落点 `service/common` ⇒ **global 单写权**。
+> 🔴 **本轮对 favorite 域的写权：零**（无 favorite 代码/台账改动，**共享层也零行为变更** ⇒ 是**发现**变了，不是**行为**变了）。
+> ⇒ 本轮我做三件事：**① 核验**（不直接采信）**② 摸清本域影响面** **③ 登记 + 跟踪**。
+
+### 37.1 ✅ 核验①：Go 侧取证**成立**
+
+`service/favorite/rpc/internal/logic/helper.go:92-99`（`ensureUserExists`）：
+
+```go
+depCtx, span := otel.Tracer("favorite-rpc").Start(ctx, "Dependency.User.GetUser")
+...
+resp, err := svcCtx.UserRpc.GetUser(depCtx, &userservice.GetUserReq{Uid: userID})
+```
+
+⇒ 出向调用吃 **`depCtx`**（otel span ctx）⇒ otel 的 `Start` **只包一层 value** ⇒ **父 ctx 的 deadline 原样保留**
+⇒ ⇒ **favorite-rpc 的出向调用继承请求 deadline** ⇒ deadline 到点 ⇒ 调用立刻中止 ✅
+（同款：`service/favorite/rpc/internal/logic/helper.go:129-136` 的 `resolveArticleSnapshot` ⇒ `svcCtx.ArticleRpc.GetArticle(depCtx, …)`）
+
+### 37.2 ✅ 核验②：RAG 侧**机制归因成立**（本分支实测）
+
+| 事实 | 本分支实测 | 结论 |
+|---|---|---|
+| `GoStyleRequestDeadline.begin(...)` 的**主代码**调用点 | **全仓只有 `service/common/.../HttpMiddleware.java:263` 一处**（**HTTP 路径**）⇒ gRPC 服务端路径**从未绑定** | ✅ 归因成立<br>⚠️ **行号与 global 侧不同**（他们侧 304 行 vs 本分支 263 行）⇒ 本分支 `service/common` 是旧版（未合第四十五轮） |
+| `applyTo` 的实现（`GoStyleRequestDeadline.java:110-120`） | `Long d = DEADLINE_NANOS.get(); if (d == null) { return stub; }` ⇒ **ThreadLocal 为 null ⇒ 原样返回 stub ⇒ 零期限** | ✅ |
+| favorite-rpc 的**出向调用点全集** | **恰好两处**：`UserRpcClient.java:45-46` · `ArticleRpcClient.java:49-50` ⇒ **两处都走 `applyTo`** ⇒ **零裸 stub 调用点** | ✅ ⇒ ⇒ **修法完全落在共享层 ⇒ favorite 侧零改动即可受益**（global ③ 正确） |
+
+### 37.3 🔴 本域【自己的活体证据】（不是转述）
+
+> **只读借用** global 的出向调用探针（`tools/semantic-probe/deadline-downstream/` ⇒ **global 单写权**）
+> ⇒ 拷到 `/tmp` ⇒ **唯一改动**：把 `RAG_ROOT` 指向**本分支工作树**（否则脚本会按自身位置解析仓库根）
+> ⇒ ⇒ 跑的是**本分支的** `service/common`（旧版）⇒ ⇒ 结论是**我自己的**，不是复读。
+
+```
+Go  | PROBE|downstream_deadline_failfast|failed_fast=true|code=4|outgoing_carrier=present_expired|sql_carrier=present_expired
+RAG | PROBE|downstream_deadline_failfast|failed_fast=false|code=0|outgoing_carrier=absent|sql_carrier=present_expired
+```
+
+⇒ **EXIT=0**（形态与已登记一致 ⇒ 漂移还在）⇒ 与 global 第四十六轮的结论**逐键一致** ✅
+⇒ ⇒ **`sql_carrier` 两侧一致** ⇒ **漂移只在「出向调用载体」上**，SQL 路径两侧同款
+⇒ ⇒ **正合我第二十七轮的结论**（SQL 路径经第四十五轮已对齐）。
+
+### 37.4 🔴 本域的具体后果（比 global 说的更具体一层）
+
+global 说「favorite 侧的实际影响仍然很小」⇒ **同意**（概率论上）⇒ 但**具体机制**值得写清：
+
+| 层 | Go 侧 | RAG 侧（当前） |
+|---|---|---|
+| **出向调用** | deadline 到点 ⇒ **立刻失败**（`DEADLINE_EXCEEDED`） | **无期限** ⇒ **照跑不误** |
+| **handler 的错误映射** | `service/favorite/rpc/internal/logic/helper.go:100-107` ⇒ 非 `NotFound` ⇒ **`GRPCError(codes.Internal, ErrorServerCommon)`** | 🔴 出向调用**不失败** ⇒ handler **继续往下走** |
+| **落库** | 失败 ⇒ **不写** | 🔴 若下游**最终成功** ⇒ **写入真的发生** ⇒ 而客户端**早已收到** `DEADLINE_EXCEEDED` |
+| ⇒ **两侧对「这次操作算不算成功」的答案** | **失败** | **成功（但客户端以为失败）** ⇒ 🔴 **相反** |
+
+🟡 **但严重程度被两件事压住**（⇒ 与 global 的「影响很小」一致）：
+1. ✅ **两处出向调用都在【事务外】**（Go `service/favorite/rpc/internal/logic/create_favorite_logic.go` 的 72 行与 106 行，写在 154 行）
+   ⇒ ⇒ **慢下游不会造成「事务已提交但客户端已放弃」** ⇒ 后果只是「**handler 线程被拖住**」；
+2. ✅ **favorite 的 R = 整预算 − δ**（服务端每次调用自绑 2s）⇒ 下游通常有 ~2s ⇒ 窗口里通常**没有慢下游**。
+
+⇒ ⇒ **且**：一旦共享层把 deadline 绑上 ⇒ 出向调用会抛 `DEADLINE_EXCEEDED`
+⇒ ⇒ RAG 侧会走 `FavoriteUserGuard.ensureExists` 的 **`internalServerCommon()`** 分支
+⇒ ⇒ **与 Go 的 `GRPCError(codes.Internal, ErrorServerCommon)` 逐条同款** ⇒ ⇒ **行为一次性对齐** ✅
+⇒ ⇒ **这进一步支持 global ③ 的修法方向**（共享层那一半 ⇒ favorite 不用改一行）。
+
+### 37.5 🔴 跟踪项：探针的「drift 键」设计 ⇒ **修好漂移会让它变红**
+
+global ④ 指出该探针的 drift 键钉的是「**形态**」而不是「不相等」⇒ **漂移被修好 ⇒ 门禁红**。
+⇒ ⇒ **本域提前记下**：共享层修好 E65 之后，
+· 该探针（合并后在主仓里可直接跑）会**转红** ⇒ ⇒ **那不是回归，是「漂移消失了」的信号** ⇒ ⇒ **要回来改台账**；
+· global 也说了会来改台账 ⇒ ⇒ **本域 §37 / §24.1 的 C 类同步销账**。
+
+### 37.6 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| **Go 侧取证** | ✅ 逐行读过 `service/favorite/rpc/internal/logic/helper.go:92-99` 与同文件 129-136 行 ⇒ `depCtx` 继承父 ctx deadline |
+| **RAG 侧机制** | ✅ `begin` 主代码调用点**只有 HTTP 一处** · `applyTo` null ⇒ 原样返回 · favorite-rpc 出向调用**恰好两处且都走 `applyTo`** |
+| **本域活体证据** | ✅ 只读借用探针（改 `RAG_ROOT` 指本分支）⇒ **EXIT=0** · 与 global 结论**逐键一致** · `sql_carrier` 两侧一致 |
+| **本域台账** | ✅ §37 新增 · §24.1 的 **C 类 5 ⇒ 6**（E65 归「跨域 · 本域只读」） |
+| **产品代码 / 共享面** | ✅ **零改动**（探针只读借用且只改了 `/tmp` 副本的 `RAG_ROOT`；共享层**本轮零行为变更**）⇒ ⇒ **无需复跑 maven 全量与探针**（改动零行 Java） |
+| **本域五个门禁** | ✅ 见 §37.7 |
+
+### 37.7 教训（同型坑档 **PIT-FAV-RPC-036**）
+
+1. 🔴 **借用别域的探针跑自己分支 ⇒ 必须把「仓库根解析」改到自己分支** ⇒
+   否则跑的是**别分支的共享层** ⇒ 结论会张冠李戴 ⇒ **改动只有路径解析 ⇒ 证据仍算本域的**。
+2. 🔴 **「drift 键钉形态」的守门 ⇒ 漂移被修好时它会红** ⇒ ⇒ **必须提前写明「红了不是回归」**
+   （否则合并那天会有人去「修」一个其实已经修好的东西）。
+3. 🔴 **「影响很小」要拆成【概率小】与【后果轻】两件事分别说** ——
+   本域：概率小（R = 整预算 − δ）· 后果轻（出向调用在**事务外**）⇒ **两件事都成立才叫「影响小」**。
