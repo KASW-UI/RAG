@@ -1027,3 +1027,68 @@ L9 只读分析（**未改 `service/common`**）：
 | 2026-10-25 | **第四轮（B2 / X-3 闭合）**：**「第三个仓库」已定位** —— 链路末端**不是仓库**，是**仓外 DC 平台**的 `POST /v1/events`（`DC_PLATFORM_EVENT_URL` + `DC_PLATFORM_SERVICE_TOKEN`，路径必须以 `/v1/events` 结尾、token ≥ 32，见 Go `service/common/communityfact/wire.go:83-91`）。仓内两侧**都有**：`service/common/communityfact` **4 文件 ↔ 4 类**；authority 端点路径 1:1；调度形状 **1s / 16 / 10s / 单条失败即 break** 四项逐条对齐；`like` / `comment` / `favorite` 三域**都接了线**。⚠️ **2026-10-25 第九轮订正**：本条末句「`like` / `comment` / `favorite` 三域**都接了线**」⇒ **实测不成立** —— `like` 域 RAG 侧对 `com.rag.common.communityfact` 是 **0 引用**（它**另起炉灶**实现了自己的 outbox+stream+scheduler）⇒ 准确表述：**`comment` 与 `favorite` 接了共享组件；`like` 域没有；`article` 多了一处 Go 侧没有的用法** ⇒ 详见 §二·十（X-4）。⇒ ⚠️ **X-3 本身（末端 = 仓外 DC 平台 / 共享组件契约）仍成立** —— 订正的只是「哪些域接了线」这一句。 唯一差异 = **部署形态**（Go 独立 `cmd/fact-dispatch` vs RAG 进程内 `@Scheduled`）⇒ 表达层差异，不修。⇒ **X-3 关闭**（不是漂移，是架构事实 + 仓外边界） |
 | 2026-10-25 | **第三轮（B3 / X-7 部分闭合）**：① 查出**已有的域预设本身已失效**（users 容器改名、message 容器+库+用户三重失效）⇒ 修好并给脚本加按域的 `pg_user` ② **扩到 4 个域**（新增 `comment`）⇒ **可跑的域 1 → 4** ③ 跑出**真结论**：task ✅ 11 列逐字相同、message ✅ 37 列逐字相同（+ DEFAULT 6 处=已知刻意保留）、users/comment 各有**环境缺口**（Go 侧对应表未被 AutoMigrate）④ 🔴 **新增 X-10**：`message` 域索引 `idx_notification_recipient_read` **两侧列不同**（Go 单列 `is_read` / RAG 复合 `recipient_id,is_read`）⇒ 根因是 Go 侧 `priority:1` 写到了另一个索引名 ⇒ **落在 message 域的迁移脚本 ⇒ global 只记账不改别域代码，等用户拍板** ⑤ 仍缺 5 个域（article/like/hot/follow/favorite）的**双侧库环境** ⇒ 缺 runner ⇒ 登记为待办 |
 | 2026-10-25 | **第二轮**：新增 **X-9** —— 「Go 是否读 body」判据存在 **3 份生产复制品**（favorite / hot / article）。T-1 修复前 RAG **内部自相矛盾**（闸门说不读 / 解析器说要读）⇒ T-1 修复后已一致。⚠️ **根治需各域自己收敛**（调用唯一真源），global 只记账不改别域代码 |
+
+---
+
+## 二·十六、🔴 **端到端对照实证**：真 fat jar 修前/修后 A/B（本轮最强的一条证据）
+
+> 这一条**不依赖任何 lane 的自证** —— 整合者亲自用**真 fat jar** 做了 A/B 对照。
+> ⇒ 用的是 **L13 修的 `message-rpc`**（缺陷形态与 L12 修的完全同款）。
+> ⚠️ **L12 的子进程全部正常完成**（与 L13/L14 的会话中断不同）⇒ 这一节是**补充**证据，不是补救。
+
+### 9.1 对照设计
+
+同一个 `message-rpc` 模块（**它是 L13 修的**，但缺陷形态与 L12 修的完全同款），
+**修前 / 修后**各打一次 fat jar，各起一次真进程：
+
+- 🔴 修前用 **2026-10-25 的旧产物**（生产 yaml 还是两斜杠）
+- 🟢 修后用 **2026-10-26 重新打包的产物**（yaml 已改三斜杠）
+- ⇒ **两次都不传任何 `--grpc.client.*.address` 覆盖** ⇒ 用**生产 yaml 原样**起
+
+### 9.2 修前（旧产物 · 两斜杠）
+
+```
+Caused by: java.lang.IllegalArgumentException: Incorrectly formatted target uri;
+  expected: 'discovery:[//]/<service-name>'; but was 'discovery://admin-rpc'
+```
+
+⇒ 炸在 **gRPC client bean 后处理**（`grpcClientBeanPostProcessor`）⇒
+**连 Flyway 都跑不到** ⇒ **与 Nacos 在不在线无关**（URI 校验发生在任何网络调用之前）。
+
+### 9.3 修后（新产物 · 三斜杠 + 真 PG）
+
+```
+2026-10-26T09:01:54.455+08:00  INFO [message-rpc] n.d.b.g.s.s.GrpcServerLifecycle :
+    gRPC Server started, listening on address: 0.0.0.0, port: 39519
+2026-10-26T09:01:54.465+08:00  INFO [message-rpc] c.r.m.message.rpc.MessageRpcApplication :
+    Started MessageRpcApplication in 4.469 seconds (process running for 5.678)
+
+$ lsof -nP -iTCP:39519 -sTCP:LISTEN
+java  7528  pr  45u  IPv6  ...  TCP *:39519 (LISTEN)
+```
+
+⇒ **真 fat jar 起来了** · **gRPC server 真在监听** · **用的是生产 yaml 原样**。
+
+### 9.4 中间态的额外发现（**这一步本身就是证据**）
+
+修后第一次起（**没给真 PG**，用默认 `POSTGRES_HOST:postgres`）时，日志变成：
+
+```
+Caused by: java.net.UnknownHostException: postgres
+  at ... Flyway ...
+```
+
+⇒ **失败点从「gRPC client bean 后处理」前移到了「Flyway 连 PG」**
+⇒ **这一步位移本身**就证明：**地址校验那一关已经过了**（否则还是 `IllegalArgumentException`）
+⇒ 补上真 PG（`ddl-message-pg` · `localhost:55569`）后 ⇒ 完全启动。
+
+### 9.5 结论
+
+| | 修前 | 修后 |
+|---|---|---|
+| 失败点 | `IllegalArgumentException`（gRPC client bean 后处理） | **无**（真 PG 齐 ⇒ 完整启动 · gRPC 监听） |
+| 能否连 Flyway | **不能**（炸在更早） | **能** |
+| gRPC server | **起不来** | **起来了**（TCP 监听实证） |
+
+⇒ **「测试全绿但进程起不来」的老形态已消除**（非 favorite 的 7 个 rpc 模块）。
+⚠️ **favorite 的 2 处仍会起不来**（零写权 ⇒ 只记账）。

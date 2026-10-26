@@ -352,3 +352,5 @@ $ git diff --stat -- service/favorite/ docs/DRIFT/favorite/ docs/Pitfalls/favori
 
 （⇒ **生产 yaml 原样、无任何地址绕开**；Nacos `127.0.0.1:1` / Kafka `127.0.0.1:9092` / Redis 不可达时
 **只记日志不中断启动** —— 与 Go 侧 etcd 注册失败只打日志同向。）
+
+> 📌 **端到端对照实证**（真 fat jar 修前/修后 A/B）⇒ 见 [`cross-domain.md`](../cross-domain.md) §二·十六。
