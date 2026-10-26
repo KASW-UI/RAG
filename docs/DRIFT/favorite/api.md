@@ -80,14 +80,15 @@ Go 侧 7 个 logic **完全同构**（`extractUserID` → 调 rpc → `codeFromR
 
 | 项 | Go | RAG | 结论 |
 |---|---|---|---|
-| Authorization 缺失 / 空 token | 401 | `FavoriteJwtAuthInterceptor:154-165` | ✅ |
-| 验签失败（签名错/过期/格式错，**Go 不区分原因**） | 401 | `:167-178`（catch `Throwable`） | ✅ |
-| claim `userId` 原样存入 ctx | `authhandler.go:71-79` | `request.setAttribute("userId", claims.get("userId"))` | ✅ |
-| 黑名单 key | `user:jwt_blacklist:<token>` | `BLACKLIST_KEY_PREFIX:110` | ✅ |
-| 黑名单 token 取法 | `TrimSpace(TrimPrefix(authHeader,"Bearer "))`（**大小写敏感** + TrimSpace） | `:197` `goTrimSpace(BearerTokenExtractor.trimBearerPrefix(authHeader))` | ✅（且验签用的大小写不敏感取法，两段不一致也原样保留） |
-| **Redis 故障** | `err == nil && exists` ⇒ **fail-open 放行** | `isBlacklisted:221-231` 吞异常 ⇒ 放行 | ✅ |
-| **执行顺序** | 先验签（JWT）→ 后黑名单 | `preHandle` 阶段 1 → 阶段 2 | ✅ |
-| **404 / 405 不经鉴权** | chain 只挂在匹配上的路由 | `handler instanceof HandlerMethod` | ✅ |
+| Authorization 缺失 / 空 token | 401 | `auth/FavoriteJwtSignatureVerifier.java:100-110`（**2026-10-27 起验签搬进验签器**） | ✅ |
+| 验签失败（签名错/过期/格式错，**Go 不区分原因**） | 401 | `auth/FavoriteJwtSignatureVerifier.java:120-123`（catch `Throwable`） | ✅ |
+| claim `userId` 原样存入 ctx | `authhandler.go:71-79` | `interceptor/FavoriteJwtAuthInterceptor.java:175` `request.setAttribute(CLAIM_ATTRIBUTE, result.claims().get(CLAIM_ATTRIBUTE))` | ✅ |
+| 黑名单 key | `user:jwt_blacklist:<token>` | `interceptor/FavoriteJwtAuthInterceptor.java:114` | ✅ |
+| 黑名单 token 取法 | `TrimSpace(TrimPrefix(authHeader,"Bearer "))`（**大小写敏感** + TrimSpace） | `auth/FavoriteJwtSignatureVerifier.java:128` `goTrimSpace(BearerTokenExtractor.trimBearerPrefix(authHeader))` | ✅（且验签用的大小写不敏感取法，两段不一致也原样保留） |
+| **Redis 故障** | `err == nil && exists` ⇒ **fail-open 放行** | `interceptor/FavoriteJwtAuthInterceptor.java:216-231` 吞异常 ⇒ 放行 | ✅ |
+| **执行顺序** | 先验签（JWT）→ 后黑名单 | `preHandle` 阶段 1（`:150-176`）→ 阶段 2（`:192-196`） | ✅ |
+| **404 / 405 不经鉴权** | chain 只挂在匹配上的路由 | `interceptor/FavoriteJwtAuthInterceptor.java:141` `handler instanceof HandlerMethod` | ✅ |
+| **3s 预算作用域（验签在预算之外）** | 计时器在 Authorize **之后**起算 ⇒ 验签**不计入**预算（`rest/engine.go:108` vs `:110-112`） | `auth/GoStyleJwtAuthFilter.java:95` `@Order(+6)` ⇒ 落在 `+7 HttpMiddlewareFilter`（3s 预算起算）**之外** | 🔴 → ✅ **本轮已修**（2026-10-27 · 见 §2-D5） |
 
 > ⚠️ **`extractUserID` 的类型分支**：Go 的 `case float64: return int64(v), nil`（**截断**）
 > 在 JWT 路径上**不可达**（go-zero 用 `jwt.NewParser(jwt.WithJSONNumber())` ⇒ 数字 claim 恒为 `json.Number`）。
@@ -171,6 +172,22 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 > 脚本头部写的「RAG 自己实现的 2048 判据在 GET query 上不可达」同源）。
 > ⇒ 它只有在容器层上限被放宽时才生效 ⇒ 见 §3 的跨域条目。
 
+### D5 · 🔴 **L1 语义漂移**：JWT 验签被计入 3s 预算（Go 的计时器在 Authorize **之后**起算 ⇒ 验签在预算**之外**）
+
+| | 内容 |
+|---|---|
+| **Go 行为** | `service/favorite/api/favorite.go:28-30`：`httpTimeout := observability.DisableNativeRestTimeout(&c.RestConf)` ＋ `server.Use(observability.NewHTTPMiddleware(...))` ⇒ **3s 预算只由 observability 提供**（native Timeout 已关）。<br>go-zero v1.10.2 `rest/engine.go:101-116` `bindRoute`：`chn = ng.appendAuthHandler(fr, chn, verifier)`（**JWT 验签**，`:108`）→ **再** `for _, mw := range ng.middlewares { chn = chn.Append(...) }`（`server.Use` 的 observability，`:110-112`）⇒ `chain.Append` = **更靠内** ⇒ ⇒ **执行序：原生中间件 → JWT 验签 → observability(3s 计时) → 黑名单 → handler** ⇒ ⇒ **3s 计时器在 Authorize 之后起算 ⇒ 验签耗时不计入预算**。<br>⚠️ `server.Use` 虽是**全局**中间件，但 go-zero 把它 append 在 Authorize **内侧** ⇒ **「全局」≠「最外层」**（**读源码才敢下这个结论**，不能凭注册方式推链序）。 |
+| **RAG 修复前** | 验签内联在 `FavoriteJwtAuthInterceptor.preHandle`（`HandlerInterceptor` ⇒ **DispatcherServlet 内**）⇒ 排在 `HttpMiddlewareFilter`（`@Order(+7)`，`service/common/.../spring/HttpMiddlewareFilter.java:37`，**3s 预算在此起算**）**之后** ⇒ ⇒ **验签被计入 3s 预算 ⇒ 与 Go 相反** |
+| **可观察差异** | 验签耗时（HMAC 验签 + claim 解析）被算进 3s 预算 ⇒ **Go 放行而 RAG 可能 503** 的窗口只存在于「验签耗时占掉预算」的那部分 ⇒ 属 **L1 级**（链序差异，非阈值差异） |
+| **修复** | 验签搬进**域内** `favorite-api/.../auth/GoStyleJwtAuthFilter`（`@Order(+6)` Servlet Filter ⇒ 落在 `+3 Traceparent` **之内**、`+7 HttpMiddlewareFilter` **之外**）⇒ 401 仍由 `FavoriteJwtAuthInterceptor` 抛（**失败原样重抛异常对象** ⇒ `@ExceptionHandler` 仍管得到 ⇒ **401 三字段信封逐字不变**）；**黑名单留在 interceptor**（Go 侧是 route 级中间件 ⇒ 在预算**之内** ⇒ 现状本就一致 ⇒ **没动**） |
+| **回归网** | `FavoriteApiJwtVerificationScopeTest`（**7 例** · 真 Spring 上下文 ＋ **容器装配层**断言 `ServletContextInitializerBeans` 的真实顺序 ＋ 行为层断言「interceptor 消费的是 Filter 的结果」） |
+| **变异证据** | **3/3 精确变红**（见 §2.3）⇒ 该测试**不是假绿** |
+
+> ⚠️ **三处本域特有差异已逐条保留（不「顺手统一」）**：
+> ① **401 body 仍是三字段信封**（已签字 `DEV-FAV-API-001` **不受影响**）；
+> ② **黑名单两套取法**（验签用大小写不敏感 strip / 黑名单用大小写敏感 `TrimPrefix` ＋ Go 语义 `TrimSpace`）**原样保留**；
+> ③ **未注册路径仍 404**（`handler instanceof HandlerMethod` 判据**原样保留** ⇒ 不被鉴权遮蔽）。
+
 ### 2.1 🧪 变异验证表（`FavoriteApiRealTomcatGateTest` 8 例 · 防假绿）
 
 > 目的：证明这 8 条断言**不是假绿** —— 每一行都是「把实现/配置改坏 ⇒ 对应断言必须转红」（§3.3）。
@@ -224,6 +241,20 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 > （`optional`），这一点只有**真的序列化一次**才看得见 ⇒ AGENTS.md §3.3「不能只靠声明推断」。
 
 ---
+
+### 2.3 🧪 变异验证表（`FavoriteApiJwtVerificationScopeTest` 7 例 · 2026-10-27 · 防假绿）
+
+> 目的：证明 §2-D5 的守门**不是假绿** —— 每一行都是「把实现改坏 ⇒ 对应断言必须转红」。
+> ⚠️ 全部变异都在本地临时施加、**立即还原**（已用 `git status` ＋ `grep` 复核**零残留**）。
+
+| # | 变异 | 预期转红 | 实测 |
+|---|---|---|---|
+| **MUT-F** | `GoStyleJwtAuthFilter` 的 `@Order(+6)` → `+8`（跑到 3s 预算之后） | 「容器装配出的链里，JWT Filter 排在 3s 预算 Filter **之前**」 | ✅ **1 例转红**（其余 6 例仍绿 ⇒ **精确命中**） |
+| **MUT-G** | 让 Filter 在验签失败时**自己写 401 并短路**（违反「绝不写响应」不变式） | 「413 压过 401」＋「401 信封形状不变」＋「未注册路径仍 404」 | ✅ **3 例转红** —— 实测 `413 ⇒ 401`、**无 `$.code`**、`404 ⇒ 401`（⇒ **「Filter 绝不写响应」这条不变式被守门真的咬住**） |
+| **MUT-H** | 摘掉 Filter 的 `@Component`（不进容器） | 「interceptor 消费的是 Filter 的结果（=filter）」 | ✅ **1 failure + 2 errors** —— 来源标记由 `filter` 变 **`inline`**（⇒ **兜底分支真会生效**，不是死代码）＋ bean 不存在 |
+
+> ⚠️ **MUT-G 是本轮最关键的一条**：它证明「Filter 绝不写响应」不是注释里的一句口号 ——
+> 一旦有人图省事让 Filter 直接写 401，**「413 压过 401」与「未注册路径仍 404」两条语义会当场变红**。
 
 ## 3. ⚠️ 未决 / 已签字偏离
 
@@ -309,20 +340,22 @@ RAG 侧 **500 + JSON envelope**（`{code:5001,…}`）。
 ## 5. 复现命令
 
 ```bash
-cd /Users/pr/Documents/java&golang/RAG.worktrees/favorite   # align/favorite 工作树
+cd /Users/pr/Documents/java&golang/RAG.worktrees/g3-article-comment-favorite-hot   # align/g3-article-comment-favorite-hot 工作树
 
-# 全组件编译 + 打包
+# 🔴 必须带 -am：不带会用 ~/.m2 里的旧共享层 jar 跑 ⇒ 可能假红（见 vs-common.md §5 的「本轮踩坑」）
 mvn -o -pl service/favorite/favorite-proto,service/favorite/favorite-common,\
 service/favorite/favorite-rpc,service/favorite/favorite-api -am install
 
-# 全量测试（favorite-api 97 例：33 输入契约 + 36 MVC 管线 + 6 装配 + 4 超时 + 8 真 Tomcat 门禁 + 5 响应字节对拍 + 1 探针（skip）+ 4 端口归属守门）
-mvn -o -pl service/favorite/favorite-api test
+# 全量测试（favorite-api 104 例 = 原 97 ＋ 本轮新增 7 例「3s 预算作用域」守门；
+#   97 = 33 输入契约 + 36 MVC 管线 + 6 装配 + 4 超时 + 8 真 Tomcat 门禁 + 5 响应字节对拍 + 1 探针（skip）+ 4 端口归属守门）
+mvn -o -pl service/favorite/favorite-api -am test
 
 # 单类
-mvn -o -pl service/favorite/favorite-api test -Dtest='FavoriteApiProtectionWiringTest'
-mvn -o -pl service/favorite/favorite-api test -Dtest='FavoriteRpcClientTimeoutTest'
-mvn -o -pl service/favorite/favorite-api test -Dtest='FavoriteApiRealTomcatGateTest'   # 真 Tomcat
-mvn -o -pl service/favorite/favorite-api test -Dtest='FavoriteApiEnvelopeParityTest'     # 响应字节对拍
+mvn -o -pl service/favorite/favorite-api -am test -Dtest='FavoriteApiProtectionWiringTest'
+mvn -o -pl service/favorite/favorite-api -am test -Dtest='FavoriteRpcClientTimeoutTest'
+mvn -o -pl service/favorite/favorite-api -am test -Dtest='FavoriteApiRealTomcatGateTest'   # 真 Tomcat
+mvn -o -pl service/favorite/favorite-api -am test -Dtest='FavoriteApiEnvelopeParityTest'     # 响应字节对拍
+mvn -o -pl service/favorite/favorite-api -am test -Dtest='FavoriteApiJwtVerificationScopeTest'  # §2-D5：3s 预算作用域（7 例）
 
 # 🔴 响应字节的双侧活体对拍（Go 真 go-zero 库 vs RAG 真 advice + 真 HTTP）
 bash tools/api-envelope-probe/favorite/run.sh
@@ -332,6 +365,11 @@ echo $?   # 0 = 10 组 CASE + 1 组 OBS 全部符合冻结期望
 > ⚠️ `FavoriteApiMvcPipelineTest` 走的是 **MockMvc** ⇒ **不覆盖 servlet filter 链**。
 > ⇒ filter 链与容器三旋钮由 `FavoriteApiRealTomcatGateTest`（`RANDOM_PORT`）负责，
 > **两者缺一不可**（§3.3：机制要验「生效」，不只是「配了」）。
+> ⚠️ **2026-10-27 补**：§2-D5 的守门 `FavoriteApiJwtVerificationScopeTest` 走 **MockMvc**
+> ⇒ **它自己也不覆盖真 Tomcat 的 filter 链** ⇒ 故它断言的是**容器装配结果**
+> （`ServletContextInitializerBeans` 的排序输出）＋**行为层**（interceptor 消费的是 Filter 的结果），
+> 而**真 Tomcat 的响应级语义**仍由 `FavoriteApiRealTomcatGateTest` 兜底（413 压过 401 等）
+> ⇒ **两道网职责不同，缺一不可**。
 
 ---
 
