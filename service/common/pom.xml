@@ -219,6 +219,12 @@
             这三个 jar **不会**出现在 16 个下游组件的 classpath 上 ⇒ 对消费者零影响。
             共享层只在「消费方自己已经带了这些库」时才会真正用到它们：
 
+            · spring-webmvc —— 为了在 **Filter 里**解析「注册期路由模板」
+              （org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping）。
+              只在 10 个 api（servlet 进程）上有；10 个 rpc 组件没有 ⇒ 那些组件里
+              引用到本模块的类会因 NoClassDefFoundError 而**不能加载** ⇒
+              ⇒ 所以引用方必须是 **@ConditionalOnClass 保护的自动配置**，
+              不能是 @Component（组件扫描会硬失败）。
             · lettuce-core + spring-boot-data-redis —— 为了给 Lettuce 客户端装
               「断连即拒单」（Go 的 fail-open 语义）。
               只有用 Redis 的组件才有这两个 jar ⇒ 同理必须 @ConditionalOnClass 保护。
@@ -227,6 +233,11 @@
             spring-webmvc / lettuce（其中 6 个 rpc 组件一个都不用）⇒ 违反
             「共享层不得把下游不需要的框架塞给下游」这条纪律。
         -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>io.lettuce</groupId>
             <artifactId>lettuce-core</artifactId>
