@@ -62,15 +62,27 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$HERE/../.."
-RUN_DIR=/tmp/difftest
+# ⚠️ **必须可覆盖**（E48 · 2026-10-26 第三十九轮）：多域并发时两个 harness 会撞同一个
+#    /tmp/difftest ⇒ 日志/构建产物互踩 ⇒ 与 run.sh 的 RUN_DIR / 端口偏移保持同一套约定。
+RUN_DIR="${RUN_DIR:-/tmp/difftest}"
 LOGS="$RUN_DIR/logs"
+# 🔴 **容器名必须跟 run.sh 的前缀走**（run.sh 用 DIFTEST_CONTAINER_PREFIX 隔离 compose project）
+#    ⇒ 写死 "difftest-postgres" 会在第二个实例里**锁错容器**（拿到别人的 PG ⇒ 实验偏）。
+PG_CONTAINER="${DIFTEST_CONTAINER_PREFIX:-difftest}-postgres"
 PG_U=admin
-GO_ADMIN_PORT="${GO_ADMIN_PORT:-18081}"
-RAG_ADMIN_PORT="${RAG_ADMIN_PORT:-58081}"
+# 🔴 **端口必须跟随 `DIFTEST_PORT_OFFSET`**（E48 · 第四十轮实测踩到）：
+#    `run.sh` 用偏移算端口（`GO_ADMIN_RPC_PORT = 18081 + OFFSET`），而探针默认仍是 18081
+#    ⇒ 多域并发时探针会**连到别人的栈** ⇒ 实验结论作废（且端口预检直接失败）。
+PORT_OFFSET="${DIFTEST_PORT_OFFSET:-0}"
+GO_ADMIN_PORT="${GO_ADMIN_PORT:-$((18081 + PORT_OFFSET))}"
+RAG_ADMIN_PORT="${RAG_ADMIN_PORT:-$((58081 + PORT_OFFSET))}"
 HOST=127.0.0.1
 
 # 客户端 deadline 档位：短档（< 服务端 2s）与长档（> 服务端 2s，作对照）
-DEADLINE_SHORT="${DEADLINE_SHORT:-1000}"
+# ⚠️ **短档默认 300ms**（E48 · 第三十九轮）：判定阈值是 1000ms ⇒
+#    若短档取 1000ms，「RAG 不继承」时的信号差恰好 ≈1000ms ⇒ **卡在阈值边上 ⇒ 假绿**；
+#    取 300ms ⇒ 信号 ≈1700ms ⇒ 与阈值差 700ms ⇒ 判定有余量。
+DEADLINE_SHORT="${DEADLINE_SHORT:-300}"
 DEADLINE_LONG="${DEADLINE_LONG:-5000}"
 
 # 锁的时长：要 > 观测窗口（最长跑 2 档 × 2 侧 ≈ 4s + 余量），
@@ -94,7 +106,7 @@ stamp()  { python3 -c 'import time;print(time.strftime("%H:%M:%S",time.localtime
 
 # 等锁查询的明细（pid:state:wait_event_type:query_start + query 片段）
 pg_lock_rows() {  # db
-  docker exec difftest-postgres psql -U "$PG_U" -d "$1" -qAt -c \
+  docker exec "$PG_CONTAINER" psql -U "$PG_U" -d "$1" -qAt -c \
     "SELECT coalesce(string_agg(pid||':'||state||':'||coalesce(wait_event_type,'-')||':'
        ||to_char(query_start,'HH24:MI:SS.MS')||':'||left(regexp_replace(query,E'[\n\r\t ]+',' ','g'),60)
        ,' + '),'(无等锁查询)')
@@ -102,7 +114,7 @@ pg_lock_rows() {  # db
     2>/dev/null | tr -d '[:space:]'
 }
 pg_lock_count() {  # db
-  docker exec difftest-postgres psql -U "$PG_U" -d "$1" -qAt -c \
+  docker exec "$PG_CONTAINER" psql -U "$PG_U" -d "$1" -qAt -c \
     "SELECT count(*) FROM pg_stat_activity WHERE datname='$1' AND wait_event_type='Lock'" \
     2>/dev/null | tr -d '[:space:]'
 }
@@ -115,11 +127,11 @@ pg_lock_count() {  # db
 #   · PG 的错误日志给出**取消的确切时刻 + 被取消的语句原文**，且
 #     「没有日志条目」本身就是强证据（= 那条查询根本没到 PG）。
 #   · ⚠️ PG 日志用 **UTC**，本机用 UTC+8 ⇒ 打印时统一换算，别混着比。
-pg_log_lines() { docker logs difftest-postgres 2>&1 | wc -l | tr -d ' '; }
+pg_log_lines() { docker logs "$PG_CONTAINER" 2>&1 | wc -l | tr -d ' '; }
 
 # 取 [from_line+1, ] 区间里与取消相关的行，并算相对 T0_UTC 的毫秒偏移
 pg_log_cancel_events() {  # from_line → 输出 "<pid> <cancel_epoch_ms> <stmt>"
-  docker logs difftest-postgres 2>&1 | tail -n "+$(( $1 + 1 ))" | python3 -c '
+  docker logs "$PG_CONTAINER" 2>&1 | tail -n "+$(( $1 + 1 ))" | python3 -c '
 import sys, re, datetime
 pend = None
 for raw in sys.stdin:
@@ -159,12 +171,22 @@ if [[ $BRING_UP -eq 1 ]]; then
   [[ "${EXP_NO_BUILD:-0}" == "1" ]] && SERVE_ARGS+=(--no-build)
   "$HERE/run.sh" "${SERVE_ARGS[@]}" >"$LOGS/exp-deadline-serve.log" 2>&1 &
   SERVE_PID=$!
+  READY=0
   for _ in $(seq 1 240); do
     g=$( (echo > /dev/tcp/$HOST/$GO_ADMIN_PORT) >/dev/null 2>&1 && echo up || echo "")
     r=$( (echo > /dev/tcp/$HOST/$RAG_ADMIN_PORT) >/dev/null 2>&1 && echo up || echo "")
-    [[ "$g" == "up" && "$r" == "up" ]] && break
+    if [[ "$g" == "up" && "$r" == "up" ]]; then READY=1; break; fi
     sleep 1
   done
+  # 🔴 **栈没起来 ⇒ 必须立刻失败**（第四十轮实测踩到）：旧写法**无条件**打印「✓ 就绪」，
+  #    端口预检失败后照样往下跑 ⇒ 观测全是无效值 ⇒ **假绿** ⇒ 必须 fail-fast。
+  if [[ $READY -ne 1 ]]; then
+    echo "    ❌ 两套 admin-rpc 未就绪（Go ${GO_ADMIN_PORT} / RAG ${RAG_ADMIN_PORT}）"
+    echo "       ⇒ 多半是**端口段被占**（另一个域在并发跑 difftest）⇒ 换端口重试："
+    echo "          DIFTEST_PORT_OFFSET=10000 ./$(basename "$0")"
+    echo "       ⇒ 起栈日志：$LOGS/exp-deadline-serve.log"
+    exit 3
+  fi
   echo "    ✓ 两套 admin-rpc 就绪（Go ${GO_ADMIN_PORT} / RAG ${RAG_ADMIN_PORT}）"
 else
   echo "==> [0/3] --stacks-up：假设栈已就绪"
@@ -177,17 +199,20 @@ if [[ ! -d "$PROTO_CP" ]]; then
   (cd "$ROOT" && mvn -q -o -pl service/users/admin/admin-proto -am -DskipTests compile) \
     || { echo "  FAIL proto 编译失败"; exit 1; }
 fi
-LIBCP_FILE="/tmp/difftest-grpc-admin-cp.txt"
-[[ -f "$LIBCP_FILE" ]] || (cd "$ROOT" && mvn -q -o -pl service/users/admin/admin-rpc \
+# ⚠️ **必须带 -am**（PIT-GLOBAL-019）：不带则 classpath 解析的是**本地仓库里的旧 service/common jar**
+#    ⇒ 若共享层改过，探针会编译/运行在**旧字节码**上 ⇒ 实验结论作废。
+LIBCP_FILE="$RUN_DIR/grpc-admin-cp.txt"
+[[ -f "$LIBCP_FILE" ]] || (cd "$ROOT" && mvn -q -o -pl service/users/admin/admin-rpc -am \
     dependency:build-classpath -Dmdep.outputFile="$LIBCP_FILE" >/dev/null 2>&1) \
   || { echo "  FAIL dependency:build-classpath 失败"; exit 1; }
 LIBCP="$(cat "$LIBCP_FILE")"
-rm -rf /tmp/deadline-probe-build && mkdir -p /tmp/deadline-probe-build
-javac -d /tmp/deadline-probe-build -cp "$PROTO_CP:$LIBCP" "$HERE/GrpcAdminDeadlineProbe.java" \
+BUILD_DIR="$RUN_DIR/deadline-probe-build"
+rm -rf "$BUILD_DIR" && mkdir -p "$BUILD_DIR"
+javac -d "$BUILD_DIR" -cp "$PROTO_CP:$LIBCP" "$HERE/GrpcAdminDeadlineProbe.java" \
   || { echo "  FAIL 探针编译失败"; exit 1; }
 
 run_probe() {  # side, deadline_ms
-  java -cp "/tmp/deadline-probe-build:$PROTO_CP:$LIBCP" \
+  java -cp "$BUILD_DIR:$PROTO_CP:$LIBCP" \
        -Dgo.host="$HOST" -Dgo.port="$GO_ADMIN_PORT" \
        -Drag.host="$HOST" -Drag.port="$RAG_ADMIN_PORT" \
        -Ddeadline.ms="$2" -Dsides="$1" \
@@ -202,7 +227,7 @@ one_side() {  # side, db, table, deadline_ms
   echo "---- [$side] 客户端 deadline=${dl}ms · 锁 $db.$tbl ----"
 
   # 校验表存在（表名映射写错时，LOCK 会报错、事务 abort，实验会「假通过」）
-  if ! docker exec difftest-postgres psql -U "$PG_U" -d "$db" -qAt \
+  if ! docker exec "$PG_CONTAINER" psql -U "$PG_U" -d "$db" -qAt \
        -c "SELECT to_regclass('public.$tbl') IS NOT NULL" 2>/dev/null | grep -q t; then
     echo "  ✗ $db.$tbl 不存在 —— 无法加锁（本次实验会偏）"; return 1
   fi
@@ -241,12 +266,16 @@ one_side() {  # side, db, table, deadline_ms
     echo "    ⚠️ **没有任何取消事件** ⇒ 这一侧**根本没向 PG 发出那条查询**"
     echo "       （不是「查询没被取消」，是「查询压根没到 PG」）"
     V_EV_GO_SHORT="(无)"; V_EV_RAG_SHORT="(无)"; V_EV_GO_LONG="(无)"; V_EV_RAG_LONG="(无)"
+    V_DST_GO_SHORT=""; V_DST_RAG_SHORT=""; V_DST_GO_LONG=""; V_DST_RAG_LONG=""
+    V_DEND_GO_SHORT=""; V_DEND_RAG_SHORT=""; V_DEND_GO_LONG=""; V_DEND_RAG_LONG=""
+    dst=""; dend=""
   else
     echo "$ev" | sed 's/^/    /'
     # 算两个决定性的差值（全部用 epoch ms，**不混 JVM 启动时间**）：
     #   Δ_start = 取消时刻 - RPC 发起时刻  ⇒ 「查询活了多久」
     #   Δ_end   = 取消时刻 - 客户端返回时刻  ⇒ 「客户端走了之后，查询还占着 PG 多久」
-    echo "$ev" | python3 -c '
+    local calc
+    calc=$(echo "$ev" | python3 -c '
 import sys
 rpc_start = float(sys.argv[1]); rpc_end = float(sys.argv[2])
 for line in sys.stdin:
@@ -256,7 +285,14 @@ for line in sys.stdin:
     stmt = parts[2].strip() if len(parts) > 2 else ""
     print("      ⇒ 查询存活 Δ_start=%+.0fms   客户端返回后仍占用 PG Δ_end=%+.0fms   pid=%s"
           % (cancel - rpc_start, cancel - rpc_end, pid))
-' "$rpc_start" "$rpc_end"
+' "$rpc_start" "$rpc_end")
+    echo "$calc"
+    # 🔴 **判定要用数**（E48 · 第三十九轮）：只打印不算 ⇒ 探针永远不会红。
+    #    同一侧可能有多条取消事件 ⇒ 取**最大** Δ_end（= 客户端走后仍占着 PG 最久的那条）。
+    local dst dend
+    dst=$(echo "$calc" | sed -n 's/.*Δ_start=\([+-][0-9]*\)ms.*/\1/p' | sort -n | tail -1)
+    dend=$(echo "$calc" | sed -n 's/.*Δ_end=\([+-][0-9]*\)ms.*/\1/p' | sort -n | tail -1)
+    echo "$calc" | grep -q 'Δ_end=' || { dst=""; dend=""; }
     local ev1; ev1=$(echo "$ev" | tr "\n" ";" )
     case "$side/$dl" in
       "go/$DEADLINE_SHORT")   V_EV_GO_SHORT="$ev1" ;;
@@ -276,6 +312,12 @@ for line in sys.stdin:
     "go/$DEADLINE_LONG")    V_GO_LONG="$ev_txt" ;;
     "rag/$DEADLINE_LONG")   V_RAG_LONG="$ev_txt" ;;
   esac
+  case "$side/$dl" in
+    "go/$DEADLINE_SHORT")   V_DST_GO_SHORT="$dst";  V_DEND_GO_SHORT="$dend" ;;
+    "rag/$DEADLINE_SHORT")  V_DST_RAG_SHORT="$dst"; V_DEND_RAG_SHORT="$dend" ;;
+    "go/$DEADLINE_LONG")    V_DST_GO_LONG="$dst";  V_DEND_GO_LONG="$dend" ;;
+    "rag/$DEADLINE_LONG")   V_DST_RAG_LONG="$dst"; V_DEND_RAG_LONG="$dend" ;;
+  esac
 
   kill "$lock_pid" 2>/dev/null || true
   wait "$lock_pid" 2>/dev/null || true
@@ -285,6 +327,8 @@ for line in sys.stdin:
 
 # 初始化（普通变量；bash 3.2 不支持 `declare -A`）
 V_EV_GO_SHORT="(未跑)"; V_EV_RAG_SHORT="(未跑)"; V_EV_GO_LONG="(未跑)"; V_EV_RAG_LONG="(未跑)"
+V_DST_GO_SHORT=""; V_DST_RAG_SHORT=""; V_DST_GO_LONG=""; V_DST_RAG_LONG=""
+V_DEND_GO_SHORT=""; V_DEND_RAG_SHORT=""; V_DEND_GO_LONG=""; V_DEND_RAG_LONG=""
 
 # ── 跑实验 ──────────────────────────────────────────────────────────────
 echo "==> [2/3] 跑实验"
@@ -328,4 +372,18 @@ echo "   · Δ_end ≫ 0   ⇒ **客户端已经放弃，服务端的查询还�
 echo "                 （RAG 不继承客户端 deadline，只认自己的 2s）"
 echo "   · 档位 B（客户端 deadline ${DEADLINE_LONG}ms > 服务端 2s）两侧都该 ≈0"
 echo "     ⇒ 证明差异**只**来自「是否继承客户端 deadline」，与 SQL 超时机制本身无关"
-exit 0
+echo
+echo "==> [3b/3] 判定器（🔴 E48 · 第三十九轮：判定从「注释里的承诺」变成「可执行的代码」）"
+echo "    判定器 = tools/difftest/verdict-grpc-admin-deadline.py"
+echo "    阈值   = ${DEADLINE_VERDICT_THRESHOLD_MS:-1000} ms"
+echo
+# 🔴 **必须真的用判定器的退出码** —— 旧写法是**无条件 exit 0** ⇒ 探针永远不会红
+#    ⇒ 就算接进 run.sh 也只是「假闸门」（同族 PIT-GLOBAL-048）。
+python3 "$HERE/verdict-grpc-admin-deadline.py" \
+  --go-short-dend  "${V_DEND_GO_SHORT:-}"  --rag-short-dend "${V_DEND_RAG_SHORT:-}" \
+  --go-long-dend   "${V_DEND_GO_LONG:-}"   --rag-long-dend  "${V_DEND_RAG_LONG:-}" \
+  --threshold-ms   "${DEADLINE_VERDICT_THRESHOLD_MS:-1000}"
+VERDICT_RC=$?
+echo
+echo "  ⇒ 判定退出码 = ${VERDICT_RC}（0=PASS / 1=FAIL / 2=INCONCLUSIVE）"
+exit $VERDICT_RC

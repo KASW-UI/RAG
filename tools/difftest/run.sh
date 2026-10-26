@@ -535,6 +535,26 @@ set +e
 python3 "$HERE/diff.py" "$@"
 RC=$?
 set -e
+
+# 🔴 [5b/5] 客户端 deadline 档探针（E48 · 2026-10-26 第三十九轮）
+#   · 为什么排在 diff.py **之后**：它会持 **ACCESS EXCLUSIVE 表锁**（两侧 admin 表）
+#     ⇒ 与 diff.py 的对拍并发 ⇒ 会把别人的查询挡住 ⇒ 实验偏。
+#   · 为什么必须在这里调：探针**之前只存在于「手工取证」形态** ⇒ 改坏了不会被自动抓到
+#     ⇒ E38 的运行期回归网缺这一环（真缺口不是「探针不存在」，而是「没被自动调」）。
+#   · 🔴 **退出码必须影响整体结论**：判定器返回 1（复现差异）⇒ 整套对拍判红。
+#   · ⚠️ **端口/目录/容器名前缀必须透传**：多域并发时第二份实例会拿到**别人的容器**
+#     ⇒ 探针锁错库 ⇒ 结论作废（E38 的实测数据不能串）。
+echo "==> [5b/5] 客户端 deadline 档探针（E38① 运行期回归网）"
+set +e
+GO_ADMIN_PORT="$GO_ADMIN_RPC_PORT" RAG_ADMIN_PORT="$RAG_ADMIN_RPC_PORT" \
+RUN_DIR="$RUN_DIR" DIFTEST_CONTAINER_PREFIX="$CONTAINER_PREFIX" \
+  "$HERE/run-deadline-gate.sh"
+DRC=$?
+set -e
+if [[ $DRC -ne 0 ]]; then
+  echo "==> ❌ deadline 档探针未通过（退出码 ${DRC}）⇒ 对拍整体判红"
+  [[ $RC -ne 0 ]] || RC=$DRC
+fi
 echo
 echo "日志：$LOGS"
 exit $RC
