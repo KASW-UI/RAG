@@ -98,6 +98,8 @@ DOMAIN_CFG = {
         'dev_md': 'docs/Intentional_Deviations/task/rpc.md',
         # surefire 实测模块（rpc 侧、api 侧）
         'modules': [('task-rpc', 'rpc'), ('task-api', 'api')],
+        # 该域的 Java 源码根（surefire 实测路径要用 ⇒ 不能写死 service/task）
+        'java_root': 'service/task',
         # 台账里的编号前缀
         'drift_prefix': 'DRIFT-TASK-RPC',
         'api_prefix': 'DRIFT-TASK-API',
@@ -112,6 +114,20 @@ DOMAIN_CFG = {
 #    明写 `gorm.io/gorm v1.31.1`（**直接依赖**）⇒ 而这张表**没有 gorm**
 #    ⇒ 凡引用 gorm 出处的台账**一律判「在真源与全部第三方库里都找不到」** ⇒ **假 FAIL**。
 #    （`gorm.io` 是**带斜杠的模块路径**，不是 `go-redis` 那种单段名 ⇒ 补表时须单独处理。）
+# 第 5/6 层要扫的**域内 Java 源码根**（与 `DOMAIN_CFG` **分开** ——
+#   后者还管第 2/3 层的**台账格式**（已修断言清单 + commit 清单表）⇒ 别的域的台账格式
+#   与 task 域没有共同点 ⇒ 不能靠加一条 `DOMAIN_CFG` 就把它们放进来）
+# 🔴 **第四十三轮实测（users/admin 域 owner 回执带出）**：第 5/6 层原来**写死 `service/task`**
+#    ⇒ 别的域跑它 ⇒ 输出的是 **task 域的类**（实测 `--domain users-admin` 打出 20 个测试类
+#    + 36 个生产类，**全是 task 的**）⇒ ⇒ 别的域 owner 会误读成「我们域的覆盖缺口」
+#    ⇒ ⇒ **必须按域取根**，且**未定义的域显式跳过**（口径与第 2/3 层一致：
+#    **「不适用」≠「通过」** —— 见第 2/3 层的注释与自检 ⑤′）
+JAVA_ROOTS = {
+    'task': ['service/task'],
+    'users': ['service/users/user'],
+    'users-admin': ['service/users/admin'],
+}
+
 THIRD_PARTY = {
     'goka': 'github.com/lovoo/goka@v1.1.16',
     'kafka-go': 'github.com/segmentio/kafka-go@v0.4.47',
@@ -211,8 +227,10 @@ def ledger_texts(root, domain):
     return out
 
 
-def surefire_counts(root, module):
-    d = os.path.join(root, 'service/task', module, 'target/surefire-reports')
+def surefire_counts(root, module, java_root='service/task'):
+    # ⚠️ **不能写死 `service/task`**（第四十三轮）：调用方（第 3 层）已按域取配置了 ⇒
+    #    这里再写死 ⇒ 一旦给别的域加 `DOMAIN_CFG` 条目 ⇒ 读的还是 task 的 surefire 报告。
+    d = os.path.join(root, java_root, module, 'target/surefire-reports')
     if not os.path.isdir(d):
         return None
     t = f = e = s = 0
@@ -793,8 +811,9 @@ def layer3_numbers(root, texts, domain):
         print(f'     ⇒ 已定义的域：{sorted(DOMAIN_CFG)}')
         return 0
     modules = cfg['modules']
-    rpc = surefire_counts(root, modules[0][0])
-    api = surefire_counts(root, modules[1][0])
+    java_root = cfg.get('java_root', 'service/task')
+    rpc = surefire_counts(root, modules[0][0], java_root)
+    api = surefire_counts(root, modules[1][0], java_root)
     txt = ''.join(texts.values())
     bad = 0
 
@@ -1225,15 +1244,24 @@ def _is_noise_ref(path, s, e, src_text):
     return False, ''
 
 
-def layer5_unmentioned(root, texts):
+def layer5_unmentioned(root, texts, domain):
     print('=' * 78)
     print('第 5 层 · 仓库里存在但台账从未点名的测试类（覆盖缺口）')
     print('=' * 78)
+    # 🔴 **必须按域取源码根**（第四十三轮）：原来**写死 `service/task`**
+    #    ⇒ 别的域跑这一层 ⇒ 输出的是 **task 域的类** ⇒ 别的域 owner 会误读成自己域的缺口
+    #    ⇒ 未定义的域 ⇒ **显式跳过**（口径与第 2/3 层一致：**「不适用」≠「通过」**）
+    roots = JAVA_ROOTS.get(domain)
+    if roots is None:
+        print(f'  ⏭ 本层的判据**尚未为 `{domain}` 域定义**（不知道该域的 Java 源码根）')
+        print(f'     ⇒ **{domain} 域本层不适用**（⚠️ 不是「通过」—— 是「没查」）')
+        print(f'     ⇒ 已定义的域：{sorted(JAVA_ROOTS)}')
+        return 0
     mentioned = set()
     for t in texts.values():
         for m in CLASS_RE.finditer(t):
             mentioned.add(m.group(1))
-    files = [f for f in repo_java_files(root, 'service/task')
+    files = [f for r in roots for f in repo_java_files(root, r)
              if f.endswith('.java') and '/src/test/' in f]
     unmentioned = []
     for f in files:
@@ -1246,7 +1274,7 @@ def layer5_unmentioned(root, texts):
                       r'(?:class|interface|enum|@interface)\s+([A-Z][A-Za-z0-9]*)', src, re.M)
         if m and m.group(1) not in mentioned:
             unmentioned.append((m.group(1), f))
-    print(f'  仓库内 task 域测试类 {len(files)} 个 ⇒ 台账未点名 {len(unmentioned)} 个')
+    print(f'  仓库内 {domain} 域测试类 {len(files)} 个 ⇒ 台账未点名 {len(unmentioned)} 个')
     for c, f in unmentioned:
         print(f'    ⚠️  {c}')
         print(f'         {f}')
@@ -1642,6 +1670,37 @@ def layer0_selfcheck(root):
         print('    ❌ 层 3 在别的域上**没有显式跳过** ⇒ 报的是别的域的结论')
         bad += 1
 
+    # ⑤‴ 层 5/6 的**域适配**（第四十三轮 · users/admin 域 owner 回执带出）：
+    #     这两层原来**写死 `service/task`** ⇒ 别的域跑它 ⇒ 打出的是 **task 域的类**
+    #     ⇒ 别的域 owner 会误读成「我们域有 N 个覆盖缺口」
+    #     ⇒ 必须：**按域取根** + **未定义的域显式跳过**
+    _buf5 = _io35.StringIO()
+    with _ctx35.redirect_stdout(_buf5):
+        layer5_unmentioned(root, ledger_texts(root, 'users'), 'users')
+    _o5 = _buf5.getvalue()
+    if 'service/users/user' in _o5 and 'service/task' not in _o5 and 'service/users/admin' not in _o5:
+        print('    ✅ 层 5 按域取源码根（users 域只扫 service/users/user，不碰 task / users-admin）')
+    else:
+        print('    ❌ 层 5 **没按域取源码根** ⇒ 别的域会拿到别的域的类 ⇒ 结论会被误读')
+        bad += 1
+    _buf6 = _io35.StringIO()
+    with _ctx35.redirect_stdout(_buf6):
+        layer6_unmentioned_production(root, ledger_texts(root, 'users-admin'), 'users-admin')
+    _o6 = _buf6.getvalue()
+    if 'service/users/admin' in _o6 and 'service/task' not in _o6 and 'service/users/user' not in _o6:
+        print('    ✅ 层 6 按域取源码根（users-admin 域只扫 service/users/admin，不碰 task / users）')
+    else:
+        print('    ❌ 层 6 **没按域取源码根** ⇒ 别的域会拿到别的域的类 ⇒ 结论会被误读')
+        bad += 1
+    _buf7 = _io35.StringIO()
+    with _ctx35.redirect_stdout(_buf7):
+        _b56 = layer5_unmentioned(root, {}, 'probe-undefined-domain')
+    if _b56 == 0 and '本层不适用' in _buf7.getvalue():
+        print('    ✅ 层 5 在**没有域配置**的域上显式跳过（不拿别的域的类去报）')
+    else:
+        print('    ❌ 层 5 在别的域上**没有显式跳过** ⇒ 报的是别的域的类')
+        bad += 1
+
     # ⑤″ 层 3 的**链判据必须能处理「不在当前分支上」的 commit**（第三十五轮 · E56）
     #     ⇒ 旧口径（与主干的公共祖先）正是栽在这一点上：**主干上窗口恒空** ⇒ 45 处假阳性
     _off = [h.strip() for h in git(root, 'rev-list', '--abbrev-commit',
@@ -1720,7 +1779,7 @@ def layer0_selfcheck(root):
     return bad
 
 
-def layer6_unmentioned_production(root, texts):
+def layer6_unmentioned_production(root, texts, domain):
     """台账是否点名了本域**生产类**（不只是测试类）。
 
     ⚠️ 上一轮只查了测试类 ⇒ **生产类一个都没点名**（`TaskKafkaTopics` 这种
@@ -1730,13 +1789,20 @@ def layer6_unmentioned_production(root, texts):
     print('=' * 78)
     print('第 6 层 · 台账从未点名的**生产类**（覆盖缺口）')
     print('=' * 78)
+    # 🔴 **同第 5 层**：原来**写死 `service/task`** ⇒ 别的域跑它 ⇒ 报的是 task 的类
+    roots = JAVA_ROOTS.get(domain)
+    if roots is None:
+        print(f'  ⏭ 本层的判据**尚未为 `{domain}` 域定义**（不知道该域的 Java 源码根）')
+        print(f'     ⇒ **{domain} 域本层不适用**（⚠️ 不是「通过」—— 是「没查」）')
+        print(f'     ⇒ 已定义的域：{sorted(JAVA_ROOTS)}')
+        return 0
     mentioned = set()
     for t in texts.values():
         # ⚠️ 两种登记形态都要认：① 纯类名 `TaskKafkaTopics`
         #    ② 带路径的形式 `bootstrap/NacosRegistration`（路径末段即类名）
         for m in re.findall(r'`([A-Za-z0-9_./-]+)`', t):
             mentioned.add(m.rsplit('/', 1)[-1].rsplit('.', 1)[-1])
-    files = [f for f in repo_java_files(root, 'service/task')
+    files = [f for r in roots for f in repo_java_files(root, r)
              if f.endswith('.java') and '/src/main/java/' in f]
     unmentioned = []
     for f in files:
@@ -1744,7 +1810,7 @@ def layer6_unmentioned_production(root, texts):
         m = re.search(r'^\s*(?:public\s+)?(?:final\s+)?class\s+([A-Z][A-Za-z0-9]*)', src, re.M)
         if m and m.group(1) not in mentioned:
             unmentioned.append((m.group(1), f))
-    print(f'  仓库内 task 域生产类 {len(files)} 个 ⇒ 台账未点名 {len(unmentioned)} 个')
+    print(f'  仓库内 {domain} 域生产类 {len(files)} 个 ⇒ 台账未点名 {len(unmentioned)} 个')
     for c, f in unmentioned:
         print(f'    ⚠️  {c}')
         print(f'         {f}')
@@ -1995,8 +2061,8 @@ def main():
     bad += layer2_claims(root, args.domain)
     bad += layer3_numbers(root, texts, args.domain)
     bad += layer4_golines(root, texts, args.go_root)
-    unmentioned = layer5_unmentioned(root, texts)
-    unmentioned_prod = layer6_unmentioned_production(root, texts)
+    unmentioned = layer5_unmentioned(root, texts, args.domain)
+    unmentioned_prod = layer6_unmentioned_production(root, texts, args.domain)
 
     print()
     print('=' * 78)
