@@ -43,6 +43,14 @@ import java.util.Map;
  * ⇒ ⇒ <b>本类只产出「Go 的原文」（{@link #goParseViolation}），
  * 拒绝成什么形状由各域自己的错误出口决定</b>。
  *
+ * <h3>🔴 本表管的是「拒成什么形状」，不是「开不开」</h3>
+ * <p>闸门的「<b>开不开</b>」由<b>语义可达性</b>决定（Go 侧该域是否真的解析 form/query）
+ * ⇒ 见 {@link GoStyleFormLimitMode#SEMANTIC_REACHABILITY} 的逐域取证表。
+ * <p>⇒ 两条轴<b>必须分开看</b>：本表里的「task」说的是
+ * 「若它拒绝，Go 的形状是 raw」（task 确实没注册 SetErrorHandler）
+ * ⇒ 但 task 的闸门<b>根本不开</b>（Go 侧不解析 form/query ⇒ 两道上限不可达）
+ * ⇒ ⇒ 两者不矛盾。
+ *
  * <h3>🔴 它与 Tomcat 容器上限的关系（本条最容易被忽略的一层）</h3>
  * <p>Tomcat 自己也有 {@code maxParameterCount}（{@code Connector.maxParameterCount}，
  * 读 {@code tomcat/util/http/Parameters.java:79} 的 javadoc：<b>{@code -1} = 不限</b>）。
@@ -241,7 +249,8 @@ public final class GoStyleFormValues {
 
     /**
      * Go 的 {@code net/http.Error} 形状 —— <b>只给「没注册 {@code SetErrorHandler}」的域用</b>
-     * （article / user / task / favorite）。
+     * （article / user / admin / favorite；task 也没注册，但它 Go 侧不解析 form/query
+     * ⇒ 闸门根本不开 ⇒ 用不到这个形状）。
      *
      * <p>Go 出处：{@code net/http/server.go} 的 {@code Error()}：
      * <pre>

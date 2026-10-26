@@ -74,6 +74,17 @@ import org.springframework.stereotype.Component;
  * <br>⚠️ **别只看 yaml 判断行为**（AGENTS.md §3.3.1）⇒ 真值以<b>运行期 connector</b> 为准
  * ⇒ 守门测试必须断言<b>运行期</b>的值。
  *
+ * <h3>🔴 「{@code OFF} ⇒ 不动容器上限」的判据是<b>语义可达性</b>，不是「写权范围」</h3>
+ * <p>本类在 {@link GoStyleFormLimitMode.Mode#OFF} 时<b>不动</b>容器上限
+ * ⇒ ⇒ 闸门的「开不开」与容器上限的「动不动」<b>始终同源</b>（同一个 {@code mode} 属性）。
+ * <p>⇒ 而这个 {@code mode} 的<b>判据</b>是「<b>Go 侧该域是否真的解析 form/query</b>」
+ * （见 {@link GoStyleFormLimitMode#SEMANTIC_REACHABILITY} 的逐域取证表）
+ * ⇒ ⇒ <b>不是</b>「该域在不在 global 的写权范围内」——
+ * 后者是一条与 Go 行为<b>无关</b>的理由 ⇒ ⇒ 用它当判据会让「下一个裸 decoder 域」照抄邻居。
+ * <p>⇒ favorite 之所以停在 {@code OFF}，是因为它<b>刻意保留</b>（零写权）
+ * ⇒ ⇒ 它已作为<b>已知偏离</b>登记在 {@link GoStyleFormLimitMode#REGISTERED_DEVIATIONS}
+ * ⇒ ⇒ <b>不是</b>「已对齐」，也不该被下一个 agent 顺手销账。
+ *
  * <h2>Go 出处（本类的取值依据）</h2>
  * <p>Go 侧<b>没有</b>「容器层参数上限」这个概念（{@code net/http} 不限参数个数）⇒
  * 本类的 10001 <b>不是</b>复刻 Go 的某个常量，而是<b>为了把「判定权」交还给应用层</b>
@@ -105,7 +116,8 @@ public class GoStyleTomcatParameterLimitCustomizer implements WebServerFactoryCu
     @Override
     public void customize(WebServerFactory factory) {
         // 🔴 OFF ⇒ **不动**容器上限 ⇒ 本域的容器行为与修之前逐字节一致
-        //    （favorite 域走这条 ⇒ global 对它零影响）。
+        //    （判据 = Go 侧该域是否真的解析 form/query，见 GoStyleFormLimitMode#SEMANTIC_REACHABILITY；
+        //      favorite 停在 OFF 是刻意保留的已知偏离，不是「已对齐」）。
         if (mode == GoStyleFormLimitMode.Mode.OFF) {
             return;
         }

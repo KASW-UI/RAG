@@ -6,6 +6,9 @@ import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
 import io.grpc.Metadata;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * <b>gRPC 服务端拦截器链的唯一顺序定义点</b>。
  *
@@ -46,10 +49,104 @@ import io.grpc.Metadata;
  *   return server -&gt; server.intercept(
  *           GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, props));
  * </pre>
+ *
+ * <h3>🟢 链构成的<b>只读</b>查询入口（G2 反馈单 FB-03）</h3>
+ * <p>链上有<b>两个条件分支</b>（降载要 {@code enabled && maxCpuPermille>0}、熔断要 {@code enabled}）
+ * ⇒ ⇒ 链的<b>构成</b>是<b>配置相关</b>的，不是固定的。
+ * <p>⇒ 域级守门若想分别断言「breaker 在链上」「shedding 在链上」，就需要一个<b>能看见构成</b>的入口；
+ * 否则只能靠「关掉降载 ⇒ 链变得确定」来间接判断 ⇒ ⇒ <b>断言被迫退化</b>
+ * （名义上写 breaker/shedding，实际只证明了 breaker）。
+ * <p>⇒ 本类提供两个<b>只读</b>入口，<b>零行为改动</b>：
+ * <ul>
+ *   <li>{@link #compose(GoStyleProtectionProperties)} —— 由配置推出的<b>构成</b>
+ *       （<b>唯一计算点</b>：{@link #build} 内部用的就是它 ⇒ 二者不可能不一致）；</li>
+ *   <li>{@link #layerNames(ServerInterceptor)} —— 对<b>已构造出的链</b>的观测
+ *       （靠 {@link Layered} 标记逐层读出层名）。</li>
+ * </ul>
  */
 public final class GoStyleRpcProtectionChain {
 
     private GoStyleRpcProtectionChain() {
+    }
+
+    /**
+     * 链上的一层：<b>可被只读查询入口观测</b>。
+     *
+     * <p>⚠️ 之所以让标记接口<b>继承</b> {@link ServerInterceptor}（而不是另立一个）
+     * ⇒ 是因为匿名类<b>不能</b>额外实现别的接口
+     * （{@code new ServerInterceptor() implements Xxx} 是<b>非法语法</b>）
+     * ⇒ ⇒ 只能「实例化这个接口」来同时拿到「是拦截器」+「带层名」。
+     */
+    public interface Layered extends ServerInterceptor {
+
+        /** 本层的名字（{@code recover} / {@code breaker} / {@code shedding}）。 */
+        String layerName();
+
+        /** 本层包裹的<b>内层</b>拦截器（供 {@link #layerNames(ServerInterceptor)} 逐层下行）。 */
+        ServerInterceptor inner();
+    }
+
+    /**
+     * 链的<b>构成</b>（只读值对象）。
+     *
+     * @param recover  是否装 recover 层（本仓恒为 {@code true}：Go 侧 {@code Middlewares.Recover} 默认 true）
+     * @param breaker  是否装 breaker 层
+     * @param shedding 是否装 shedding 层
+     */
+    public record Composition(boolean recover, boolean breaker, boolean shedding) {
+
+        /** 本构成对应的层名（由外到内）。 */
+        public List<String> layerNames() {
+            List<String> names = new ArrayList<>(3);
+            if (recover) {
+                names.add("recover");
+            }
+            if (breaker) {
+                names.add("breaker");
+            }
+            if (shedding) {
+                names.add("shedding");
+            }
+            return List.copyOf(names);
+        }
+    }
+
+    /**
+     * 由配置推出链的<b>构成</b>（<b>唯一计算点</b>）。
+     *
+     * <p>⚠️ {@link #build} 内部调用的就是本方法 ⇒ ⇒ 「配置推出的构成」与「实际构造出的链」
+     * <b>不可能不一致</b>（这是把判据放在共享层、而不是让每个域各抄一遍条件的原因）。
+     *
+     * <p>Go 出处（两个条件分支各自有出处）：
+     * <pre>
+     *   zrpc/server.go:157-159   Breaker  —— Middlewares.Breaker 默认 true
+     *   zrpc/server.go:160-163   Shedding —— CpuThreshold &gt; 0 才挂
+     * </pre>
+     */
+    public static Composition compose(GoStyleProtectionProperties props) {
+        boolean shedding = props.getCpuShedding().isEnabled() && props.maxCpuPermille() > 0;
+        boolean breaker = props.getBreaker().isEnabled();
+        return new Composition(true, breaker, shedding);
+    }
+
+    /**
+     * 观测<b>已构造出的链</b>的层名（由外到内）。
+     *
+     * <p>⚠️ 只读：<b>不改链、不改配置</b> ⇒ 零行为改动。
+     * <p>⇒ 域级守门可以据此<b>分别</b>断言 breaker 与 shedding 两层，
+     * 而不必「关掉降载来换取确定性」。
+     *
+     * @param chain {@link #build} 产出的链
+     * @return 层名列表（由外到内；最内的业务拦截器不是 {@link Layered} ⇒ 不在列表里）
+     */
+    public static List<String> layerNames(ServerInterceptor chain) {
+        List<String> names = new ArrayList<>(3);
+        ServerInterceptor current = chain;
+        while (current instanceof Layered layered) {
+            names.add(layered.layerName());
+            current = layered.inner();
+        }
+        return List.copyOf(names);
     }
 
     /**
@@ -59,17 +156,20 @@ public final class GoStyleRpcProtectionChain {
      * @param props    保护层配置（breaker / cpuShedding 的开关与阈值）
      */
     public static ServerInterceptor build(ServerInterceptor business, GoStyleProtectionProperties props) {
+        // ⚠️ 构成由 compose() **唯一计算** ⇒ 本方法与 compose() 不可能给出两套条件
+        Composition composition = compose(props);
+
         ServerInterceptor chain = business;
 
         // ③ Shedding（Go: zrpc/server.go:160-162，CpuThreshold > 0 才挂）
-        if (props.getCpuShedding().isEnabled() && props.maxCpuPermille() > 0) {
+        if (composition.shedding()) {
             GoStyleAdaptiveShedder shedder = new GoStyleAdaptiveShedder(
                     props.maxCpuPermille(), props.getCpuShedding().getCpuSource());
             chain = sheddingThen(chain, shedder);
         }
 
         // ② Breaker（Go: zrpc/server.go:157-159，Middlewares.Breaker 默认 true）
-        if (props.getBreaker().isEnabled()) {
+        if (composition.breaker()) {
             chain = breakerThen(chain);
         }
 
@@ -86,7 +186,17 @@ public final class GoStyleRpcProtectionChain {
      */
     public static ServerInterceptor recoverThen(ServerInterceptor inner) {
         final ServerInterceptor outer = new GoStyleRecoverInterceptor();
-        return new ServerInterceptor() {
+        return new Layered() {
+            @Override
+            public String layerName() {
+                return "recover";
+            }
+
+            @Override
+            public ServerInterceptor inner() {
+                return inner;
+            }
+
             @Override
             public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
                     ServerCall<ReqT, RespT> call,
@@ -119,7 +229,17 @@ public final class GoStyleRpcProtectionChain {
      * 而 {@link GoStyleRpcBreakerInterceptor#breakerFor(String)} 是包私有的 ⇒ 需要这条重载把实例暴露出来。
      */
     static ServerInterceptor breakerThen(GoStyleRpcBreakerInterceptor breaker, ServerInterceptor inner) {
-        return new ServerInterceptor() {
+        return new Layered() {
+            @Override
+            public String layerName() {
+                return "breaker";
+            }
+
+            @Override
+            public ServerInterceptor inner() {
+                return inner;
+            }
+
             @Override
             public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
                     ServerCall<ReqT, RespT> call,
@@ -150,7 +270,17 @@ public final class GoStyleRpcProtectionChain {
 
     /** 把指定的 {@code shedding} 串在 {@code inner} 的<b>外层</b>（测试注入用）。 */
     static ServerInterceptor sheddingThen(GoStyleRpcSheddingInterceptor shedding, ServerInterceptor inner) {
-        return new ServerInterceptor() {
+        return new Layered() {
+            @Override
+            public String layerName() {
+                return "shedding";
+            }
+
+            @Override
+            public ServerInterceptor inner() {
+                return inner;
+            }
+
             @Override
             public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
                     ServerCall<ReqT, RespT> call,
