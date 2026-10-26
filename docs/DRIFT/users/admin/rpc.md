@@ -369,7 +369,7 @@ Why It Matters:
   ① 它是**已修过的同款漂移**在另一模块的漏修：user-rpc 侧的 UserMapper.java:81-127 已按
      **完全相同的 Go 出处**修过（DRIFT-001，javadoc 直引 `autoUpdateTime` tag），
      修法是 `wrapper.setSql("update_time = CURRENT_TIMESTAMP")`，
-     并有回归测试 `UserRpcJsonbAndAvatarProjectionTest:113-148` 钉住 SET 子句必须含该列。
+     并有回归测试 `UserRpcJsonTextAndAvatarProjectionTest:113-148` 钉住 SET 子句必须含该列。
      **admin-rpc 没有同步修** —— 这正是「按组件粒度逐个审计」的漏网形态。
   ② DRIFT-001 当时的修法注释写的是「依赖 Postgres CURRENT_TIMESTAMP 在 row-level 触发」，
      那条注释已被证伪并改成显式 setSql。admin-rpc 若照抄会引入同一个错。
@@ -379,8 +379,31 @@ Evidence:      静态源码 + GORM 框架源码消费点 + 仓库内同款修复
 Must Preserve: 每条成功 UPDATE 都把 update_time 推到当次写入时刻
 Recommended:   按 UserMapper.java:127 的同款手法，在 6 条写路径的 wrapper 上补
                `setSql("update_time = CURRENT_TIMESTAMP")`，并加一条「SET 子句必须含
-               update_time」的守恒断言（照 UserRpcJsonbAndAvatarProjectionTest 的写法）。
+               update_time」的守恒断言（照 UserRpcJsonTextAndAvatarProjectionTest 的写法）。
 ```
+
+> #### ⚠️ 2026-10-26 范围补充：本条**只覆盖 UPDATE 路径**，`create_time` 在 **INSERT 路径**上**不在本条范围内**
+>
+> 本条的 6 条写路径**全是 UPDATE**。而 **INSERT 路径的时间列是另一回事**，两侧**机制不同**：
+>
+> | | `create_time` 在 INSERT 时怎么来 | 依据 |
+> |---|---|---|
+> | **Go** | **GORM 应用层填值** | `data_model.go:12` `Admin.CreateTime` 带 `gorm:"column:create_time;autoCreateTime"` ⇒ `callbacks/create.go` 在 insert 前填 `time.Now()`（**应用容器时钟**） |
+> | **RAG** | **DB 层 DEFAULT** | `AdminEntity.java:87` `create_time` 是 `insertStrategy = FieldStrategy.NEVER` ⇒ MP **不写该列** ⇒ 落到 DDL 的 `create_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP`（`03_create_admin.sql:59`）⇒ **DB 服务器时钟** |
+>
+> ⇒ **两侧都有值，但来源不同**（应用时钟 vs DB 时钟）⇒ 这与本条的 `update_time` **不是同一种严重性**：
+> - 本条（`update_time`）：RAG 侧**值冻结在建表那一刻** ⇒ **明显不同**（OBSERVABLE）；
+> - 本补充（`create_time`）：两侧都是「插入时自动填当前时间」⇒ 差异只剩**时钟源与时区**偏差
+>   ⇒ 同一台宿主机上的容器（应用与 PG 共用同一内核时钟）⇒ **实际不可观察**。
+>
+> ⚠️ **为什么必须单独写出来**：本条标题写的是「`update_time` 永不推进（**所有写路径**）」，
+> 而**所有写路径**这个措辞会让人以为 INSERT 路径也被覆盖了 ⇒ **实际没有**。
+> ⇒ 修本条时**不要**顺手把 `create_time` 的 INSERT 路径一起改（那是另一个判断），
+> **也别**因为本条被修了就认为 `create_time` 也被证明了。
+>
+> **关联**：`users_user` 侧（user 域）的 `create_time` 是**另一张表、另一套结论** ——
+> user 半边两侧都显式写该列 ⇒ 不可观察（见 `users/_shared.md` ADJ-04；
+> **admin 侧对 `users_user` 没有 INSERT** ⇒ 该结论对 admin 侧亦成立 ⇒ 已答，见 `admin/_shared.md` §5 U-7）。
 
 ### DRIFT-ARPC-002 —— `UpdateUserResp.success` 在 wire 上两侧相反
 
@@ -2860,6 +2883,53 @@ public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryS
 `RpcServerInterceptorFactory.java` / `RpcInterceptor.java` / `GlobalExceptionHandler.java`；
 grpc-java 侧读了 `grpc-core-1.63.0` 的 `io/grpc/internal/ServerImpl.java` 源码）
 ⚠️ **未做活体验证**（未构造 panic、未实测 5001 vs 1015）⇒ **待实测**。
+
+### 1.7 🔴 新增 DRIFT-ARPC-010 · `logout` 的 **Redis 写不绑 deadline** ⇒ 超时被记成「Redis 挂了」（**与 user 域 V-012 同型**）
+
+- **Component**：admin-rpc / OP `Logout`
+- **Category**：Error Mapping / Observability
+- **Classification**：OBSERVABLE DIFFERENCE（**观测面**；**wire 面两侧一致**）　**Risk**：LOW-MEDIUM
+- **来源**：**users/user 域 owner 2026-10-26 报**「同型新发现」`DRIFT-USERRPC-V-012` ⇒ **本域逐行复核后确认成立**（不是推测）
+- **与 E38② 的关系**：**同型**（都属「在途工作不随客户端 deadline 取消」）⇒ **修法口径要与 global / user 域一起定，别两边各修各的**
+
+#### 1.7.1 两侧行为逐行对照
+
+| | Go | RAG |
+|---|---|---|
+| **Redis 写** | `service/user/admin/rpc/internal/logic/logoutlogic.go:38`<br>`l.svcCtx.BizRedis.SetexCtx(l.ctx, blackListKey, "banned", int(expireTime))`<br>⇒ **`SetexCtx`（绑 ctx）** | `AdminDomainService.java:228`<br>`stringRedisTemplate.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds));`<br>⇒ **不绑 deadline** |
+| **超时时的表现** | ctx 到点 ⇒ `SetexCtx` **立即**返回 ctx 错误 | 无人取消 ⇒ **跑满自己的 3s command timeout** 才失败 |
+| **日志归因** | `logger.LogBusinessErr(ctx, errmsg.ErrorRedisUpdate, err)` ⇒ 与客户端**同时**发生 | `catch (Exception e)` ⇒ `log.error("admin logout Redis setex failed", e)` ⇒ **晚于**客户端 |
+| **对外 status** | `codes.Internal` + `"注销失败,Redis写入异常"` | `Status.INTERNAL` + `"注销失败,Redis写入异常"` ⇒ ✅ **逐字相同** |
+
+#### 1.7.2 差异本体（**只在观测面**）
+
+- **wire 面两侧一致**：`INTERNAL` + 同一句中文 description ⇒ 客户端**看不出**差别。
+- **观测面不一致**：
+  - 客户端在 **2s**（服务端 gRPC deadline）就收到 `DEADLINE_EXCEEDED`；
+  - 而服务端日志**再过 1s** 才记「**Redis 写入异常**」⇒ **日志说「Redis 挂了」，实际是超时**；
+  - ⇒ **排障会被指向错误方向**（去查 Redis 基础设施，而不是查超时预算）。
+- Go 侧因为 ctx 绑定 ⇒ Redis 写**立即**失败 ⇒ 日志与客户端**同时**发生 ⇒ 归因一致。
+
+#### 1.7.3 ⚠️ RAG 侧那个 `catch (StatusRuntimeException e) { throw e; }` 守卫**挡不住这条**
+
+`AdminDomainService.java:230-233` 有一条 **B-1 守卫**（`StatusRuntimeException` 上抛，不被改写成 INTERNAL）——
+但它**只挡得住 SQL 路径**：`SqlTimeoutStatusTranslator` 把 PG 的 `57014 query_canceled` 翻成
+`StatusRuntimeException(DEADLINE_EXCEEDED)`。
+⇒ **Redis 超时抛的是普通异常**（`RedisConnectionFailureException` / `QueryTimeoutException`）⇒ **不在守卫覆盖内**
+⇒ 落进 `catch (Exception e)` ⇒ 被记成 `INTERNAL`「注销失败,Redis写入异常」。
+⇒ ⚠️ **这是本条与 B-1 守卫的边界**：B-1 覆盖 SQL，**Redis 路径一直不在覆盖内**。
+
+#### 1.7.4 处置
+
+- **本轮不改代码**（修法口径未定 ⇒ 跨域统一决定）⇒ **只登记**。
+- ⇒ 归 **`global` 的 E38② 同型**（在途工作不随客户端 deadline 取消）；
+  `service/common` 单写权在 global ⇒ **本域无权改**。
+- ⚠️ **与 E38② 的差别**：E38② 说的是 **PG 查询**；本条是 **Redis 写**
+  ⇒ **两者是不同资源、不同路径**，但**根因同型**（业务层没有把 gRPC deadline 传到客户端调用）
+  ⇒ 修 E38② 时**顺带覆盖 Redis 路径**才是正解，否则会只修一半。
+
+- **Evidence strength**：`静态源码·双侧`（Go 侧 `logoutlogic.go:38`；RAG 侧 `AdminDomainService.java:220/228/230-234`）
+  ⚠️ **未做活体验证**（未构造 Redis 超时）⇒ **待实测**。
 
 ## 2. 本轮在 rpc.md 侧的其他结论
 

@@ -75,7 +75,7 @@ Go 侧每次 UPDATE 都会把它推到当次写入时刻。
 **它已经在同一个仓库里被修过一次了。**
 `service/users/user/user-rpc/.../mapper/UserMapper.java:81-127` 按**完全相同的 Go 出处**
 修过（注释里直引 `autoUpdateTime` tag），修法是 `wrapper.setSql("update_time = CURRENT_TIMESTAMP")`，
-并有回归测试 `UserRpcJsonbAndAvatarProjectionTest:113-148` 钉住「SET 子句必须含 update_time」。
+并有回归测试 `UserRpcJsonTextAndAvatarProjectionTest:113-148` 钉住「SET 子句必须含 update_time」。
 
 **admin-rpc 的审计没有发现它**，因为它长得跟「文档写的是对的」一模一样：
 三个 Entity 的 javadoc 明明白白列了 `create_time / update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP`
@@ -89,7 +89,7 @@ Go 侧每次 UPDATE 都会把它推到当次写入时刻。
 
 1. 遇到 `FieldStrategy.NEVER` 的列，**必须回答「谁在写它」**；答案是「没人」就是 bug。
 2. 加一条**守恒断言**（不是行为断言）：抓 mapper 生成的 SQL，断言 `setSql` 里出现了该列。
-   参考 `UserRpcJsonbAndAvatarProjectionTest` 的写法。
+   参考 `UserRpcJsonTextAndAvatarProjectionTest` 的写法。
 3. 审查时把「Go 的哪个 tag / 框架哪个字段」列成一张对照清单，逐项问「RAG 侧对应物在哪一行」。
 
 ---
