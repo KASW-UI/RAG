@@ -2936,7 +2936,7 @@ grpc-java 侧读了 `grpc-core-1.63.0` 的 `io/grpc/internal/ServerImpl.java` �
 
 | | Go | RAG |
 |---|---|---|
-| **Redis 写** | `service/user/admin/rpc/internal/logic/logoutlogic.go:38`<br>`l.svcCtx.BizRedis.SetexCtx(l.ctx, blackListKey, "banned", int(expireTime))`<br>⇒ **`SetexCtx`（绑 ctx）** | `AdminDomainService.java:228`<br>`stringRedisTemplate.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds));`<br>⇒ **不绑 deadline** |
+| **Redis 写** | `service/user/admin/rpc/internal/logic/logoutlogic.go:38`<br>`l.svcCtx.BizRedis.SetexCtx(l.ctx, blackListKey, "banned", int(expireTime))`<br>⇒ **`SetexCtx`（绑 ctx）** | `AdminDomainService.logout`（`AdminDomainService.java:267`）<br>`stringRedisTemplate.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds));`<br>⇒ **不绑 deadline** |
 | **超时时的表现** | ctx 到点 ⇒ `SetexCtx` **立即**返回 ctx 错误 | 无人取消 ⇒ **跑满自己的 3s command timeout** 才失败 |
 | **日志归因** | `logger.LogBusinessErr(ctx, errmsg.ErrorRedisUpdate, err)` ⇒ 与客户端**同时**发生 | `catch (Exception e)` ⇒ `log.error("admin logout Redis setex failed", e)` ⇒ **晚于**客户端 |
 | **对外 status** | `codes.Internal` + `"注销失败,Redis写入异常"` | `Status.INTERNAL` + `"注销失败,Redis写入异常"` ⇒ ✅ **逐字相同** |
@@ -2952,7 +2952,7 @@ grpc-java 侧读了 `grpc-core-1.63.0` 的 `io/grpc/internal/ServerImpl.java` �
 
 #### 1.7.3 ⚠️ RAG 侧那个 `catch (StatusRuntimeException e) { throw e; }` 守卫**挡不住这条**
 
-`AdminDomainService.java:230-233` 有一条 **B-1 守卫**（`StatusRuntimeException` 上抛，不被改写成 INTERNAL）——
+`AdminDomainService.logout`（`AdminDomainService.java:268-271`）有一条 **B-1 守卫**（`StatusRuntimeException` 上抛，不被改写成 INTERNAL）——
 但它**只挡得住 SQL 路径**：`SqlTimeoutStatusTranslator` 把 PG 的 `57014 query_canceled` 翻成
 `StatusRuntimeException(DEADLINE_EXCEEDED)`。
 ⇒ **Redis 超时抛的是普通异常**（`RedisConnectionFailureException` / `QueryTimeoutException`）⇒ **不在守卫覆盖内**
@@ -2967,9 +2967,17 @@ grpc-java 侧读了 `grpc-core-1.63.0` 的 `io/grpc/internal/ServerImpl.java` �
 - ⚠️ **与 E38② 的差别**：E38② 说的是 **PG 查询**；本条是 **Redis 写**
   ⇒ **两者是不同资源、不同路径**，但**根因同型**（业务层没有把 gRPC deadline 传到客户端调用）
   ⇒ 修 E38② 时**顺带覆盖 Redis 路径**才是正解，否则会只修一半。
+- 🔴 **2026-10-26 交叉引用（同一个漂移，两个编号）**：global 在**第四十六轮 `96d94db`** 把 E38② 窄化时，
+  已把**本条**单独登记成 **`E66`**（**「Redis 调用不感知 deadline ⇒ deadline 到点后缓存读写照跑不误（含写）」**）
+  ⇒ ⇒ **本条 ＝ global `E66`（同一件事）** ⇒ ⇒ **销账时不要当两条分别销**；
+  ⇒ **global 的 E66 证据是源码级**（`service/common` 无任何 Redis 期限载体 + 各域调用点扫描）⇒ **与本条同证据强度**（`静态源码·双侧`）⇒ **两侧都没做活体验证**。
+- 🟢 **同轮另一条对 admin-rpc 的适用性（本域独立实测）**：global 的 **E65**（出向 gRPC 不继承 deadline）**本域不命中**
+  ⇒ `grep -rn "Stub\|BlockingStub\|FutureStub\|GrpcClient" service/users/admin/admin-rpc/src/main/` ⇒ **零命中** ⇒ **admin-rpc 无出向 gRPC 调用**。
 
-- **Evidence strength**：`静态源码·双侧`（Go 侧 `logoutlogic.go:38`；RAG 侧 `AdminDomainService.java:220/228/230-234`）
+- **Evidence strength**：`静态源码·双侧`（Go 侧 `logoutlogic.go:38`；RAG 侧 `AdminDomainService.logout`：`AdminDomainService.java:259`（`checkDeadline()` 前置守卫）/ `:267`（Redis 写）/ `:268-275`（B-1 守卫 + `catch (Exception e)` + `log.error` + INTERNAL 抛出））
   ⚠️ **未做活体验证**（未构造 Redis 超时）⇒ **待实测**。
+  🔴 **2026-10-26 订正（锚点漂移）**：本段原先写的是 `AdminDomainService.java` 的 **三个行号锚点**（Redis 写 `:228` · B-1 守卫 `:230-233` · Evidence strength `:220/228/230-234`）⇒ **它们在写下时（`f314fdd`）完全正确**，但被**本域自己的 `bd70865`**（给该文件加类级 javadoc「B-1 放行分支」段 ⇒ **+94/−28 行**）**整体推了 +39 行** ⇒ ⇒ **同一轮里「我改了文件」与「我的锚点失效」同时发生，却没有任何机制提示**（文件还在、行号仍在范围内、机器复核第 1 层只查路径存在、第 4 层只查 **Go 侧** file:line）⇒ ⇒ **本轮已逐条重核本域 37 处 Java 行号锚点**（见 §8）⇒ **坑位 `P-18`**。
+  ⚠️ **写在这里的旧行号一律是「历史值、已失效」** ⇒ ⇒ **别把它们当活锚点抄走** ⇒ **现行锚点见本段上方（已改为带符号名 + 现行行号）**。
 
 ### 1.8 🟢 新增 DRIFT-ARPC-011 · **防回退留档**：29 处 catch 放行分支**不得**改回 Go 的 `codes.Internal`
 
@@ -3447,6 +3455,10 @@ global 那个守门类是**分支上新加的** ⇒ 主干没有 ⇒ **触发 MI
 
 # 2026-10-26 第四十一轮（global **E62**）—— 🔴 **再订正一次我自己的订正**：「毫秒精度已生效」在**生产上**是错的
 
+> 📌 **编号消歧**：外部那些「🔴【**§9 订正**：…】」标记里的「**§9**」指的是**本块整体**；
+> 而本块**内部**的子节编号是 1~9（`## 1.` … `## 9.`）⇒ **两者不是同一级**，读到子节 `## 9.` 时别误当成「整块 §9」。
+> ⇒ **本块的后两节（`## 8.` 锚点漂移 · `## 9.` 第四十二轮回执复核）是同一轮补的** ⇒ **一并以本块为准**。
+
 > **本轮性质**：**纯台账订正**（**零代码改动**）⇒ 不需要重跑测试门禁。
 > ⇒ **但本轮仍重跑了（2026-10-26 22:32 实跑）**：admin-rpc **105/0/0/0** · `skipped=0` · **BUILD SUCCESS**（`-pl service/users/admin/admin-rpc -am test`）
 > ⇒ 理由：**状态表纪律**（§6.3）——「已修/未修」断言必须带**核对日期** ⇒ 引用上一轮的数字时必须写明它是什么时候测的。
@@ -3477,18 +3489,27 @@ global 那个守门类是**分支上新加的** ⇒ 主干没有 ⇒ **触发 MI
 |---|---|---|---|---|
 | **主干（今天）** | **pre-E46** | 秒级向上取整（服务端预算的 ceil） | **+1111ms**（2026-10-24 实测） | **仍成立** |
 | `align/global` **pre-E62** | post-E46 | 秒级向上取整（`min(客户端,服务端)` 的 ceil） | **+833ms**（2026-10-26 global 实测） | **仍成立**（但**成因已变**：不再是「不继承客户端 deadline」，而是「**毫秒路径没生效**」） |
-| `align/global` **post-E62**（已修，**未合回**） | post-E46 + **unwrap 后再探测** | **毫秒级**（= `min(客户端,服务端)` 剩余） | 推导 ≈ 0 ⇒ **待复测** | **推导上失效，待实测** |
+| `align/global` **post-E62**（已修，**未合回**） | post-E46 + **unwrap 后再探测** | **毫秒级**（= `min(客户端,服务端)` 剩余） | ✅ **实测 22ms / 18ms / 12ms**（三次跑，global **第四十五轮 `180f865`** 探针复跑 ⇒ **PASS**）⇒ **不再是「推导」** | ✅ **实测已归零**（观察依据**确实失效**，但**只在 `align/global` 上**） |
 
 ⇒ ⇒ 🔴 **我 `1d79f56` 那轮写的「`Δ_end` ≈ 0」⇒ 只在「E46 合回」**且**「E62 修好并合回」两个条件同时满足后才成立**
 ⇒ ⇒ **今天的主干上、以及 pre-E62 的 global 分支上，都不成立**。
 
+🟢 **2026-10-26 更新：本轮拿到了真值** ⇒ 上表第 3 行的「推导 ≈ 0 ⇒ 待复测」**已换成实测**
+⇒ **真值**（global 第四十五轮 `180f865`）：短档两侧差 **22ms / 18ms / 12ms**（三次跑）⇒ **PASS**
+⇒ ⚠️ **顺带一个阈值坑（global 挖出来的，对本域同样成立）**：旧默认阈值 **1000ms > 实测的 E62 回归信号 833ms**
+⇒ ⇒ **E62 全坏掉时探针照样 PASS** ⇒ ⇒ global 已按**实测值重校准为 150ms**（对噪声 22ms 有 **6.8×** 余量 · 对回归信号 833ms 有 **5.5×** 余量）
+⇒ 📌 **判据**：**探针的阈值必须用实测值校准，不能用推算值**（第四十轮推算「短档 300ms ⇒ 信号 ≈1700ms」，第四十一轮实测只有 833ms —— 因为那个推算依赖「SQL 超时已继承客户端 deadline」这个**当时不成立**的前提 ⇒ **同款「前提错」，见 `P-17`**）。
+
 📌 **怎么判定「当前处在哪一格」（可复核的硬证据，2026-10-26 实测）**：
 
-| 判据 | 主干 / 本域分支 | `align/global` |
+⚠️ **本表的 `align/global` 一列 = 该分支在 `0516774`（第四十八轮收尾）时的状态** ——
+**核对 ref 写在表下**（**这正是 global 第四十二轮立的新纪律** ⇒ 见 §10）。
+
+| 判据 | 主干 / 本域分支 | `align/global` @ `0516774` |
 |---|---|---|
 | `DeadlineQueryTimeoutInjector` 里有 `applyMillisecondTimeout` / `unwrapDriverStatement` | ❌ **都没有** ⇒ **pre-E46** | ✅ **都有** ⇒ **post-E46 + E62** |
 | `DeadlineQueryTimeoutInjectorTest` 的 `@Test` 条数 | **7** | **13**（含 **3** 条 `🔴 E62`） |
-| 运行时日志 | 无 `WARN DeadlineQueryTimeoutInjector` | 🔴 **该 WARN 是 `align/global` 在 E62 修复「之前」跑出来的**（global 贴的那条：代理类不支持毫秒级 ⇒ 退回秒级）⇒ **它证明的是「pre-E62 形态」** ⇒ **E62 修好后再跑同一场景应当不再出现这条 WARN** ⇒ **可作为复测的判据**（**E48** 的第三步） |
+| 运行时日志 | 无 `WARN DeadlineQueryTimeoutInjector` | 🔴 **该 WARN 是 `align/global` 在 E62 修复「之前」跑出来的**（global 贴的那条：代理类不支持毫秒级 ⇒ 退回秒级）⇒ **它证明的是「pre-E62 形态」** ⇒ **E62 修好后再跑同一场景应当不再出现这条 WARN** ⇒ ✅ **已被 global 第四十五轮实测闭环**：修好后探针短档差 **22/18/12ms ⇒ PASS** |
 
 ## 3. 🔴 二次订正：**「原观察依据已失效」这个结论，在生产上也不成立**
 
@@ -3505,14 +3526,35 @@ global 那个守门类是**分支上新加的** ⇒ 主干没有 ⇒ **触发 MI
 ⇒ ⇒ 我当时核了「机制链」，**没核「这条代码路径在生产上是否真的被走到」** ⇒ ⇒ **同一个错误的第 N 次复发**：
 **「代码写了」≠「生产走的是这条」**（§3.3 的老坑，E62 是它的新变体）。
 
-## 4. E38② / 第②层定性 ⇒ 🟡 **标「待重估」**（global 的要求，本域执行）
+## 4. E38② / 第②层定性 ⇒ ✅ **已在 global 第四十六轮重估完毕**（原修法**否决** · 第③层窄化成 E65 / E66）
 
 global 第四十一轮：「第②层现在的可观察面（833ms）**主要来自秒级回退**，而不是「grpc-java 不取消业务线程」本身
 ⇒ 若注入器走到毫秒路径 ⇒ `Δ_end` ≈ 0 ⇒ ⇒ 「**架构级改造是闭环必要条件**」这个结论**可能不成立**」。
 
-⇒ 🟡 **本域的处置**：**两个方向都不断言** ——
-- 现在的可观察差异（833ms）**确实**主要来自秒级回退（global 实测 + 本域 javap 复核一致）⇒ **「架构级改造必要」目前没有活体证据支持**；
+⇒ 🟡 **本轮当时的处置**：**两个方向都不断言**（「待重估」）——
+- 现在的可观察差异（833ms）**确实**主要来自秒级回退（global 实测 + 本域 javap 复核一致）⇒ **「架构级改造必要」没有活体证据支持**；
 - 但**「架构级改造不必要」也没有活体证据支持**（E62 修好之后**还没复测**）⇒ ⇒ **一律标「待重估」**。
+
+⇒ 🟢 **2026-10-26 更新：`align/global` 已经把这一轮做完了** ⇒ **本域的「待重估」已有着落**：
+
+| 项 | global 第四十六轮 `96d94db` 的结论 | 本域的读法 |
+|---|---|---|
+| E38② 原修法（handler 挪受控 executor + 超时 interrupt） | 🔴 **原修法否决**（**可观察面已归零** ⇒ 「必须做架构级改造」**不再被观测支持**） | ✅ **本域台账的「架构级 · 影响 10 个 rpc 组件」那条描述已过期** ⇒ 见下方「本域要改的那句」 |
+| 第③层的真身 | 🔴 窄化成 **E65**（出向 gRPC 不继承 deadline）+ **E66**（Redis 调用不感知 deadline，**含写**） | ✅ **本域实测适用性**（下方逐条） |
+| 定性 | 🟡 **global 本轮不改定性**（须专门一轮重估 + 给 Jason 立项建议） | ➡️ **本域不代 global 改定性**；本域只把**我域台账里引用它的地方**订正到与实测一致 |
+
+📌 **本域实测：E65 / E66 对 admin-rpc 的适用性**（**2026-10-26 独立核实，不采信转述**）：
+
+| global 条目 | 落点 | **admin-rpc 实测** | 结论 |
+|---|---|---|---|
+| **E65**（出向 gRPC 不继承 deadline） | `RpcInterceptor.onHalfClose` 只绑 `DeadlineState`、**从不绑** `GoStyleRequestDeadline` ⇒ gRPC 路径 `applyTo` 是 **no-op** | 🔴 **不命中** —— `grep -rn "Stub\|BlockingStub\|FutureStub\|GrpcClient" service/users/admin/admin-rpc/src/main/` ⇒ **零命中** ⇒ **admin-rpc 无任何出向 gRPC 调用** | 🟢 **本域无 E65 残余**（落点是 `service/common`，**global 单写权**） |
+| **E66**（Redis 调用不感知 deadline，**含写**） | `service/common` 无任何 Redis 期限载体 + 各域 Redis 调用点 | 🔴 **命中** —— admin-rpc **唯一**一处 Redis 写：`AdminDomainService.logout` 里的 `stringRedisTemplate.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds))`<br>（key/value 与 Go `logoutlogic.go` 的 `SetexCtx(l.ctx, "admin:jwt_blacklist:"+token, "banned", expireTime)` **逐字同契约**）<br>⚠️ 该方法开头虽有 `checkDeadline()`，但那是**前置守卫**（`DeadlineState.isExpired()` 才拒进）⇒ **Redis 写本身仍不感知 deadline** | 🔴 **就是我域已登记的 `DRIFT-ARPC-010`** ⇒ ⇒ **同一件事、两个编号**（我域 `DRIFT-ARPC-010` ＝ global `E66`）⇒ **已交叉引用**（见 §6） |
+
+⇒ 📌 **本域要改的那句**（**别照搬旧描述**）：
+本域台账此前写第③层是「**架构级 · 影响 10 个 rpc 组件**」⇒ ⇒ **该描述已过期** ⇒
+**可观察面在 SQL 路径上已被 E62 归零** ⇒ 第③层剩下的**不是**「必须做架构级改造」，而是**两条更窄的**：
+**E65**（出向 gRPC · **本域不命中**）与 **E66**（Redis · **本域命中 = `DRIFT-ARPC-010`**）。
+⇒ ⚠️ **但定性仍不是本域能改的**（global 单写权 + global 自己标了「不改定性」）⇒ ⇒ **本域只订正自己台账里引用它的那句**。
 
 ## 5. 🔴 元发现：**我域那 4 条新守门，对 E62 这类缺陷是「瞎」的**
 
@@ -3527,10 +3569,22 @@ global 第四十一轮：「第②层现在的可观察面（833ms）**主要来
 他们的 E46 守门用 `DriverManagerDataSource`（**无池**）⇒ 反射成功 ⇒ **守门绿、生产坏**
 ⇒ ⇒ **我域的 4 条守门若再加一条，必须用「真 `HikariDataSource`」形态**（global 已在 `align/global` 上这么改了）。
 
+🟢 **2026-10-26 更新：global 第四十五轮 `180f865` 已经把这条守门补上了** ⇒ **本域无需再补**：
+· **守门形态**：真 **HikariCP 池** + 真 PG ⇒ **新增断言直接读驱动上的 `getQueryTimeoutMs()`**
+  （pgjdbc 的 `setQueryTimeout(int s)` 内部就是 `setQueryTimeoutMs(s * 1000L)` ⇒ **能精确区分毫秒路径与秒级路径**）
+· **自证断言**：必须真的走池化代理路径（`captured.getClass().getName()` 含 `Hikari`）⇒ **否则这条守门又会变成「守门绿、生产坏」**
+· **变异 3 条全精确命中**（脚本入仓 `mutate-deadline-precision.py`
+  —— **该脚本在 `align/global` 上 ⇒ 主干上查不到，路径悬空是预期状态，不是台账事实错误**）：
+  **M1** 生产代码不 unwrap ⇒ 红 4 条（**旧 E46 守门升级到真池后也红了** ⇒ 这就是「守门绿、生产坏」被闭上的证据）·
+  **M2** 把真 PG 守门**换回无池**（**E62 当初骗过自己的形态**）⇒ 红 ⇒ 证明「守门必须跑在生产形态上」这条自证**有牙** ·
+  **M3** 毫秒路径偷偷按秒级取整 ⇒ 红 ⇒ 证明守门**不是**「只要设了超时就算过」
+
 ⚠️ **本域为什么不自己补这条守门**：
 ① 它验的对象在 **`service/common`**（`DeadlineQueryTimeoutInjector`）⇒ **global 单写权** ⇒ **本域无权改**；
 ② **它现在会红**（主干的注入器是 pre-E46、**根本没有毫秒路径**）⇒ **红着的测试不能进仓**（违反 `skipped=0` 与 build 绿）;
 ⇒ ⇒ **本域只做：核 + 台账订正 + 报告**（§5.3）。
+⇒ 🟢 **且这条守门已经落在共享层了** ⇒ ⇒ **它对 admin-rpc 同样生效**（admin-rpc 也走同一个 `DeadlineQueryTimeoutInjector`）
+⇒ ⇒ **本域「无权补」的代价 = 0** —— **守门在共享层 ⇒ 10 个 rpc 组件一起受益**（含 admin-rpc）。
 
 ## 6. 跨域归属
 
@@ -3540,8 +3594,13 @@ global 第四十一轮：「第②层现在的可观察面（833ms）**主要来
   `article-rpc` · `comment-rpc` · `favorite-rpc` · `follow-rpc` · `hot-rpc` · `like-rpc` · `message-rpc` · `task-rpc` · **`admin-rpc`** · `user-rpc`
   —— 每个都在自己的 `*RpcApplication` 里 `@Import`）⇒
   ⇒ **本域受影响**（admin-rpc 的运行时日志就是 global 贴的那条 WARN）。
-- **global 已修好**（`align/global`：`unwrap` 后再探测 + 共享层 `DeadlineQueryTimeoutInjectorTest` 从 **7 条 → 13 条**（**2026-10-26 实测**：主干/本域分支 **7**、`align/global` **13**，净增 6，其中 **3 条**显式标 `🔴 E62`：池化代理藏方法 / unwrap 链终止 / unwrap 失败回退）+ comment-rpc 守门改真 `HikariDataSource`）
-  ⇒ ⇒ **本域等它合回 + 复测探针**（**E48** 仍是那三步）。
+- **global 已修好**（**核对 ref = `align/global` @ `0516774`**（第四十八轮收尾）⇒ **E62 落在第四十五轮 `180f865`**）：
+  `unwrap` 后再探测 + 共享层 `DeadlineQueryTimeoutInjectorTest` 从 **7 条 → 13 条**（**2026-10-26 实测**：主干/本域分支 **7**、`align/global` **13**，净增 6，其中 **3 条**显式标 `🔴 E62`：池化代理藏方法 / unwrap 链终止 / unwrap 失败回退）
+  + comment-rpc 守门改真 `HikariDataSource` + **真池真 PG 守门 + 3 条 E62 变异**
+  ⇒ ⇒ **探针已复跑取真值**（短档两侧差 **22/18/12ms ⇒ PASS**）⇒ ⇒ **「等它合回 + 复测探针」这一步已经走完一半**（复测已在 `align/global` 上做过 ⇒ **合回主干后本域主干上再跑一次即可**）。
+- 🔴 **同一个漂移、两个编号（跨域撞号）**：**我域 `DRIFT-ARPC-010`（admin `logout` 的 Redis 写不绑 deadline）＝ global `E66`**（Redis 调用不感知 deadline，含写）
+  ⇒ ⇒ **不是两条漂移，是一条** ⇒ ⇒ **本域台账已加交叉引用** ⇒ **别把它当两条分别销账**。
+- ⚠️ **E65**（出向 gRPC 不继承 deadline）**本域不命中**（admin-rpc 无出向 gRPC 调用 ⇒ 实测零命中）⇒ **本域无 E65 残余**。
 
 ## 7. 本轮改动清单（rpc.md 侧）
 
@@ -3564,3 +3623,96 @@ global 第四十一轮：「第②层现在的可观察面（833ms）**主要来
   ⑤ **E38② / 第②层 ⇒ 标「待重估」**（两个方向都不断言）⇒ 已落 §4。
 - 🆕 **坑位 `P-17`**（`docs/Pitfalls/users/admin/rpc.md`）：「**按机制推导**的结论，必须逐条核它在目标环境里的前提」⇒
   ⇒ **本轮 §3 那次二次订正的元教训，已固化成可复用判据**（本节 §3 里的「见 `P-17`」指针由此生效）。
+
+---
+
+## 8. 🔴 本轮新增：**我自己台账里的 3 处行号锚点，被我自己的上一个提交推走了**
+
+**发现时机**：为了给 `DRIFT-ARPC-010` 补 global `E66` 的交叉引用，逐条重核本域指向 Java 的行号锚点。
+
+### 8.1 现象
+
+`DRIFT-ARPC-010`（§1.7）的三个锚点：
+`AdminDomainService.java` 的**三个行号锚点**（`:228` = 声称的 Redis 写 · `:230-233` = 声称的 B-1 守卫 · `:220/228/230-234` = 声称的 Evidence strength）
+⇒ ⚠️ **下面这行里出现的行号都是「已失效的历史值」**（现行锚点见 §1.7 与本节 §8.3）⇒ **别当活锚点抄走**。
+
+⇒ **实测全部指到了 `login` 路径**（`:228` = `PasswordUtil.Outcome pwOutcome =`；`:230-233` = 密码匹配分支；`:220` = `throw Status.INTERNAL.withDescription("DB查询失败")`）
+⇒ ⇒ **与该段文字声称的内容完全不符**。
+
+### 8.2 根因：**它们写下时是对的，被「我自己这一轮」推走了**
+
+追 `AdminDomainService.java` 的历史：
+
+| 提交 | Redis 写所在行 | 说明 |
+|---|---|---|
+| `f314fdd`（**写下这三个锚点的那一版**） | **:228** | ✅ **锚点当时完全正确**（`:220` = `checkDeadline()`、`:230-234` = B-1 守卫 + `catch (Exception e)` + `log.error` + INTERNAL 抛出） |
+| `bd70865`（**本域上一轮**） | **:267** | 🔴 该提交给本文件**加类级 javadoc「B-1 放行分支」段** ⇒ **+94 / −28 行** ⇒ **全部锚点整体 +39** |
+
+⇒ ⇒ 🔴 **「我改了文件」与「我的锚点失效」发生在同一轮、同一提交里** ⇒ ⇒ **而没有任何机制提示**：
+- 文件还在 ⇒ 路径存在性检查（第 1 层）**照常通过**；
+- 行号仍在文件范围内 ⇒ **越界判定也照常通过**；
+- 机器复核第 4 层**只查 Go 侧 `file:line`** ⇒ **本域自己的 Java 锚点根本不在它的射程内**。
+
+⇒ ⇒ **本域的 Java 行号锚点是一块「机器不管、且会被自己改动打破」的空白区**。
+
+### 8.3 本轮处置
+
+- ✅ **逐条重核本域全部 37 处指向 Java 的行号锚点**（脚本把锚点处的实际源码打出来逐条比对）：
+  | 文件 | 锚点数 | 结果 |
+  |---|---|---|
+  | `AdminDomainService.java` | **20** | 🔴 **3 处失效**（均在 `DRIFT-ARPC-010` 段）⇒ **已修** |
+  | `AdminCreateAtomicService.java` | **7** | ✅ 全部对得上 |
+  | `AdminServiceGrpcImpl.java` | **2** | ✅ 全部对得上 |
+  | `AdminRpcApplication.java` | **3** | ✅ 全部对得上 |
+  ⇒ ⇒ **只有 `DRIFT-ARPC-010` 那 3 处是错的**（都源自 `bd70865` 的 +39 行位移）。
+- ✅ **修法不只是改数字**：三处锚点**同时补上符号名**（`AdminDomainService.logout`）⇒ ⇒ **即使将来再位移，符号名仍然可定位**。
+- 🆕 **坑位 `P-18`**：「**你这一轮改的文件，会让你自己写的行号锚点在同一轮里失效**」。
+
+---
+
+## 9. 🔴 收到 global 第四十二轮回执 —— 🔴 **它引的 ref 落后 6 轮**，且它计划的「下一轮」**早已做完**
+
+**收到**：global 第四十二轮回执（2026-10-26 22:3x 送达本域会话）⇒ 内容是答复我更早的一封回执。
+
+### 9.1 它引的 ref 已过期（**两处远端实测**）
+
+| 项 | global 回执里写的 | **本域实测（`git ls-remote`）** |
+|---|---|---|
+| `align/global` 当前 ref | **`51d6abd`**（并说「我这边此后已推了第四十一轮 `9404818`、第四十二轮 `51d6abd` ⇒ 请 re-fetch」） | 🔴 **origin 与 upstream 两处都是 `0516774`** ⇒ **`51d6abd` 是 `0516774` 的祖先**（落后 **6 轮**） |
+
+⇒ ⇒ **`0516774` 之后还有 6 个提交**，其中**两个直接是关于 users/admin 域的**：
+
+| 提交 | 轮次 | 内容 | 对本域的影响 |
+|---|---|---|---|
+| `a0b24a3` | 第四十三轮 | users/admin 域 owner 回执第二回 ⇒ **E63**（第 5/6 层写死 `service/task`）已修 | ✅ **就是我上轮回信报的那条** ⇒ **已闭合** |
+| `76c3b26` | 第四十四轮 | users/admin 域 owner 回执第三回 ⇒ 归因提请成立 ⇒ 订正 | ✅ 本域的提请**被采纳** |
+| **`180f865`** | **第四十五轮** | 🔴 **E62 落地**（unwrap 到驱动实现类）+ **探针复跑取真值** ⇒ **短档两侧差 22/18/12ms ⇒ PASS** | 🔴 **直接回答了本节 §2 的「待复测」** |
+| **`96d94db`** | **第四十六轮** | 🔴 **E38② 重估 ⇒ 原修法否决** + 第③层窄成 **E65 / E66** | 🔴 **直接回答了本节 §4 的「待重估」** |
+| `97a1fa8` | 第四十七轮 | favorite 回执 ⇒ **E68**（第 4 层补「行号合法但指错文件」判据） | 🟢 **本域已用新判据复跑 ⇒ 零命中**（见 §9.3） |
+| `0107845` / `0516774` | 第四十八轮 | 共享复核器（**E69** `--entity-all`）+ 收尾 | 🟢 **本轮用的正是这版工具** |
+
+### 9.2 它说的「下一轮：E62 落地」**已经做完了**
+
+回执末尾写：「**下一轮：E62 落地**（探测前先 unwrap 到驱动实现类，已用 `javap` 验证可行）· 守门**必须用真 HikariCP 池 + 真 PG**」
+⇒ ⇒ 🔴 **而 E62 正是在第四十五轮 `180f865` 落地的**，且守门**确实是**真池 + 真 PG（还多了 3 条 E62 变异）
+⇒ ⇒ **它列的「下一轮」在它自己的分支上已完成 2 轮**。
+
+### 9.3 本轮独立复核（不采信转述）
+
+| 核项 | 方法 | 结果 |
+|---|---|---|
+| `align/global` 的真实 tip | `git ls-remote origin/upstream align/global` | ✅ **两处均 `0516774`** ⇒ **回执里的 `51d6abd` 过期 6 轮** |
+| E62 修法落在哪个提交 | `git log --reverse 51d6abd..0516774 -- DeadlineQueryTimeoutInjector.java` | ✅ **`180f865`（第四十五轮）** ⇒ `unwrapDriverStatement` 在 `0516774` 里 **2 处**、在 `51d6abd`/`9404818` 里 **0 处** |
+| 本域 Go 锚点能否过 E68 的新判据 | 最新版工具 `--entity-all`（第四十八轮 `E69` 的全仓模式） | ✅ **对 admin 域零命中** ⇒ **本域锚点没有「行号合法但指错文件」** ⇒ 🟢 **这是 global 新判据给本域的一次正面确认** |
+| 本域当前处在状态矩阵哪一格 | `grep unwrapDriverStatement` + 单测条数 | ✅ **本域分支与主干都是 pre-E46** ⇒ **§2 第 1 行**；**`align/global` @ `0516774` 是第 3 行** |
+
+### 9.4 纪律（采纳 global 的，并加上本域的同款教训）
+
+🔴 **「回执方核的是哪一版 ref，必须在回执里标出来」** —— global 在这封回执里提的（`PIT-GLOBAL-053` 的**反向形态**：
+不是我们抄他们的行号，是我们**引用了他们的旧快照**）。
+⇒ ⇒ 📌 **本域的双向版本**：
+- **发出方**：回执里凡引用别域的 ref / 行号 / 计数 ⇒ **必须写明「核对的 ref = X（日期）」**；
+- **收到方**：收到回执 ⇒ **先 `ls-remote` 核那封回执引的 ref 是否还是当前 tip** ⇒ **不是 ⇒ 那封回执的「当前状态」类断言全部按「历史快照」读**。
+
+⇒ 🟢 **这与本轮 §8 是一对**：§8 是「**自己改文件 ⇒ 自己的锚点失效**」；§9 是「**别人推分支 ⇒ 别人的回执过期**」
+⇒ ⇒ **两者都是「锚点/引用的保质期不由引用者控制」** ⇒ ⇒ **同一个坑位 `P-18`**（见 `docs/Pitfalls/users/admin/rpc.md`）。
