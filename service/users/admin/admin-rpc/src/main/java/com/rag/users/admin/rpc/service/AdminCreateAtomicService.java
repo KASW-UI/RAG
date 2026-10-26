@@ -155,7 +155,8 @@ public class AdminCreateAtomicService {
             try {
                 effectiveHash = PasswordUtil.encrypt(password);
             } catch (StatusRuntimeException e) {
-                // B-1：DEADLINE_EXCEEDED 必须上抛，不能被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：DEADLINE_EXCEEDED 必须上抛，不能被改写成 INTERNAL。
+                //       （客户端可见值两侧都是 1015；**理由**见 AdminDomainService 类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
                 throw e;
             } catch (Exception e) {
                 // bcrypt 对 >72 字节抛 IllegalArgumentException。

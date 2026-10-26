@@ -2971,6 +2971,83 @@ grpc-java 侧读了 `grpc-core-1.63.0` 的 `io/grpc/internal/ServerImpl.java` �
 - **Evidence strength**：`静态源码·双侧`（Go 侧 `logoutlogic.go:38`；RAG 侧 `AdminDomainService.java:220/228/230-234`）
   ⚠️ **未做活体验证**（未构造 Redis 超时）⇒ **待实测**。
 
+### 1.8 🟢 新增 DRIFT-ARPC-011 · **防回退留档**：29 处 catch 放行分支**不得**改回 Go 的 `codes.Internal`
+
+- **Component**：admin-rpc（`AdminDomainService` 28 处 + `AdminCreateAtomicService` 1 处）
+- **Category**：Error Mapping
+- **Classification**：**留档（防回退）** —— **不是缺陷**：源码层形态两侧不同，**客户端可见面一致**
+- **来源**：global **第三十六轮**（`697f547`）订正 E47 ⇒ 说「RAG 保留了更精确的 `DEADLINE_EXCEEDED`」
+  ⇒ 并登记 **E58（有意偏离候选 🏷 建议签）** ⇒ **users/user 域**再复核 ⇒ 指出**「客户端可见」这一层不成立**
+  ⇒ ⇒ **本条是本域对两侧的独立复核结论**（见 1.8.1 / 1.8.2），**顺带把 global 的 Go 侧清单数纠正了**。
+
+#### 1.8.1 客户端可见面：**两侧都是 1015**（⇒ 不是 wire 级漂移 ⇒ 不需要签字）
+
+| 层 | Go | RAG |
+|---|---|---|
+| **logic / service 层** | 🔴 **每条 DB 错误都改写成** `status.Error(codes.Internal, "DB查询失败")` ⇒ **logic 层根本不返回 1015** | ✅ 保留 `DEADLINE_EXCEEDED`（`SqlTimeoutStatusTranslator` 把 PG 的 57014 翻的）⇒ 原样上抛 |
+| **interceptor 层** | `service/common/observability/rpc.go` 的 select：`case <-done:`（handler 先返回，**要** `lock.Lock()`）**vs** `case <-timeoutCtx.Done():`（**不需要锁**）⇒ **ctx 一取消超时分支立刻就绪** ⇒ select 几乎总走超时分支 ⇒ 客户端拿 `DEADLINE_EXCEEDED` | 同 ⇒ `RpcInterceptor` 的超时调度器在 deadline 时刻 close ⇒ `DEADLINE_EXCEEDED` |
+| **api 层渲染** | `codes.DeadlineExceeded` **不在** `mapRPCStatusToCode` 的任何分支 ⇒ 落 **default** ⇒ **`CODE_SERVER_BUSY` = 1015** | 同 ⇒ 落 default ⇒ **1015** |
+
+⇒ ⇒ **客户端可见的 HTTP 响应体两侧逐字一致** ⇒ ⇒ **不是 wire 级漂移**
+⇒ ⇒ 按 `docs/Intentional_Deviations/` 的三类（**有意偏离 / 框架限制 / 表述差异**）
+⇒ **归「表述差异」** ⇒ ⇒ **不需要用户签字**（⇒ 与 global 的 E58「有意偏离候选 🏷 建议签」**定性不同**，已回信）
+
+⚠️ **残留（不声称 100%）**：Go 那个 select 是**竞速** ⇒ 机制上存在「handler 先返回 ⇒ 客户端拿到 5001」的窗口；
+E-4 的 4 组采样全命中 1015，但那是 **4 次采样、不是概率刻画** ⇒ **不声称「Go 侧 100% 是 1015」**。
+
+#### 1.8.2 🔴 顺手纠正 global 的 Go 侧清单（**本域自己数的，别照抄**）
+
+global 第三十六轮列的 admin 域 Go 侧清单是 **12 处**、行号 `getuserlogic.go:38` · `banuserlogic.go:51` · …
+⇒ **本域逐一核过**：`grep -rn "codes.Internal" service/user/admin/rpc/internal/logic/`（去掉 `_test.go`）
+⇒ **共 26 处 `codes.Internal`**，其中：
+
+| 类别 | 处数 | 清单 |
+|---|---|---|
+| **DB 错误出口** | **20** | `loginlogic.go:53` · `getuserlogic.go:39` · `getuserlistlogic.go:35` · `getselflogic.go:40` · `banuserlogic.go:52` · `unbanuserlogic.go:53` · `deleteuserlogic.go:54` · `createadminlogic.go:119` · `createinvitecodelogic.go:60` / `:94` · `resetuserpasswordlogic.go:53` / `:68` · `updateselflogic.go:40` / `:51` / `:77` / `:86` · `updateuserlogic.go:53` / `:66` / `:92` / `:100` |
+| 非 DB 的 `codes.Internal` | 6 | 密码加密失败 ×3（`resetuserpasswordlogic.go:61` · `updateselflogic.go:63` · `updateuserlogic.go:77`）· 邀请码生成失败 ×2（`createinvitecodelogic.go:70` / `:101`）· **Redis 写入失败 ×1**（`logoutlogic.go:41`「注销失败,Redis写入异常」） |
+
+⇒ 🔴 **global 的清单漏了 8 处**（`updateselflogic` 4 处 + `updateuserlogic` 4 处），
+且 **它列的 12 处行号全部比实际小 1**（38↔39 · 51↔52 · 118↔119 · 59↔60 · 93↔94 · 53↔54 · 39↔40 · 34↔35 · 52↔53 · 52/67↔53/68 · 52↔53）
+⇒ ⇒ **12 + 8 = 20** ✅ 账对上。
+⇒ ⚠️ **那两个数根本不可比**：global 的「12」是 **Go 侧 DB 出口**，
+而它同时把 RAG 侧的「28」（`catch (Exception e)` 数）拿来对照 ⇒ **两把尺子**。
+
+#### 1.8.3 本域已做的动作（**行为零改动**）
+
+1. **29 处 catch 注释的「理由」订正**（结论不变）：
+   原文写「（**对齐 Go 的 1015**）」⇒ 让人以为**Go 的 logic 会返回 1015**，而**Go 侧没有任何 DB 路径返回 1015**
+   ⇒ 按 AGENTS.md §3.3 强制第 3 条「**先改/删错误断言，再改实现**」：
+   **只订正理由**，**生产行为一个字节都不改**。
+   ⇒ 完整论证写**一次**（`AdminDomainService` 的类级 javadoc「B-1 放行分支」段），
+   各站点只留一行指针 ⇒ **29 处注释都指向同一份论证**。
+2. **本条（`DRIFT-ARPC-011`）留档防回退**（对标 users/user 域的 `DRIFT-USERRPC-V-013`）。
+
+#### 1.8.4 与 `DRIFT-ARPC-010`（Redis 不绑 deadline）的分工
+
+🔴 **两个不同的面**（users/user 域 2026-10-26 提出的「面 A / 面 B」洞见，本域采用）：
+
+| | 面 A：**装配层** | 面 B：**异常类型** |
+|---|---|---|
+| 失效形态 | 翻译器/注入器**不在链里** | 异常**到了业务层但类型不对** |
+| 后果 | 57014 不翻译 ⇒ 落进 `catch(Exception)` ⇒ **被改写成 INTERNAL** | Lettuce / `QueryTimeout` 异常**不是** `StatusRuntimeException` ⇒ 放行分支**永不命中** |
+| 守网 | **插件链断言**（`AdminRpcContainerWiringTest` §5，2026-10-26 补） | **本条 + `DRIFT-ARPC-010`** |
+| 本域状态 | ✅ **已闭环**（+3 条守卫 + 4 次变异） | 🔴 **ARPC-010 仍开着**（Redis 路径） |
+
+⇒ ⇒ **两者表现都是「超时被当成 DB 故障」，但修法不同、守网不能互相替代** ⇒ **两边都补才算完整**。
+
+#### 1.8.5 V-012 / ARPC-010 的「补日志」口径 —— **本域已经符合，无需改代码**
+
+users/user 域的候选修法：「`catch (Exception e)` 里补一行记原始异常，**status/description 一个字不改**」
+⇒ 本域实测：**29 处 `log.error(...)` 全部带原始异常 `e`**
+⇒ **SQL 路径**（如 `log.error("admin banUser update DB error, uid={}", uid, e)`）
+**与 Redis 路径**（`log.error("admin logout Redis setex failed", e)`）**两条都已记** ✅
+⇒ ⇒ **本域无需改代码**；**wire 面本来就在两侧逐字一致**（两侧都是 INTERNAL + 同一句 desc）⇒ 不动它是**对的**。
+
+- **Evidence strength**：`静态源码·双侧`（Go 侧 20 处 DB 出口逐一核过 + `rpc.go` 的 select 逐行读过；
+  RAG 侧 29 处 catch + 29 处 `log.error` 逐处核过）
+  ⚠️ **未做活体验证**（本域没跑 E-4 那套双栈活体）⇒ **客户端可见面的一致性目前靠 users/user 域的 E-4 实测 + 本域的机制推导**
+  ⇒ **待本域复测**（探针在 `tools/difftest/exp-b1-timeout-cancel.sh`）。
+
 ## 2. 本轮在 rpc.md 侧的其他结论
 
 | 项 | 结论 |
@@ -3088,12 +3165,36 @@ global 的 E47 列出「24 处硬改写 + 3 处静默降级」，落点在 like 
 | `AdminDomainService.java` | `catch (Exception e)` **28** 处 ↔ `catch (StatusRuntimeException e) { throw e; }` **28** 处 ⇒ **1:1 全配对** |
 | `AdminCreateAtomicService.java` | 1 ↔ 1 ⇒ 配对 |
 | `AdminServiceGrpcImpl.java` | `catch (StatusRuntimeException e)` **在前**（`obs.onError(e)` 原样保留）· `catch (Throwable t)` **在后**（才转 INTERNAL）⇒ **不吞** |
-| 合计 | **30** 处 ⇒ 与 global 的「admin-rpc 30 处同款」**数字吻合** |
+| 合计 | **29** 处宽 catch 全配对 ⇒ 与 global 的「admin-rpc 30 处同款」**数字差 1**（global 第三十六轮已订正为 **28**，指的是 `AdminDomainService` 单类） |
 | 翻译器抛什么 | `SqlTimeoutStatusTranslator` ⇒ `Status.DEADLINE_EXCEEDED.withDescription(...).asRuntimeException()` ⇒ **`io.grpc.StatusRuntimeException`** ⇒ **正是被 rethrow 捕获的那一类** ⇒ 透传成立 |
 | **静默降级**（把超时当「计数为 0」而**接口返回成功**） | ❌ **无** —— `AdminDomainService` 里 5 处 `return true`（`:236` / `:650` / `:691` / `:1030` / `:1128`）**逐处查了上下文，全部在 catch 块之外的正常路径** ⇒ **admin-rpc 不命中 E47** |
 
 ⇒ 🟢 **E47 对本域无待办**。⚠️ **但这条结论只覆盖「catch 改写」这一形态** ——
 **`DRIFT-ARPC-010`（Redis 写不绑 deadline）是另一形态**（不是吞异常，是**根本没有 deadline 可吞**）⇒ **仍开着**。
+
+### 3.1 🔴 2026-10-26 global 第三十六轮（`697f547`）的订正 + 本域的再复核
+
+global 第三十六轮把 E47 的定性**反过来了**：
+「Go 侧**每一条 DB 错误都改写成** `codes.Internal` ⇒ **RAG 保留了更精确的 `DEADLINE_EXCEEDED`**
+⇒ 方向是「**RAG 做了更准确的那一侧**」⇒ 登记 **E58（有意偏离候选 🏷 建议签）** ⇒ **不要改回 Go 行为**。」
+
+⇒ ✅ **「不要改回 Go 行为」本域完全同意**（且已在 `DRIFT-ARPC-011` 留档防回退）。
+⇒ 🔴 **但「wire 上码值不同 ⇒ 客户端可见」这一层，本域复核后不成立** ——
+**客户端可见的 HTTP 业务码两侧都是 1015**（机制逐环见 `DRIFT-ARPC-011` §1.8.1：
+Go 侧 logic 返 INTERNAL，但 `rpc.go` 的 select 在 ctx 取消时走 `timeoutCtx.Done()` 分支
+—— **该分支不需要锁，而 `case <-done:` 要 `lock.Lock()`** ⇒ 超时分支先就绪
+⇒ 客户端拿 `DEADLINE_EXCEEDED` ⇒ admin-api 落 `mapRPCStatusToCode` 的 **default** ⇒ **1015**）。
+⇒ ⇒ **这是「源码层形态差异」，不是 wire 级漂移** ⇒ 归「**表述差异**」类 ⇒ **不需要用户签字**
+⇒ ⇒ 与 global 的 E58「有意偏离候选 🏷 建议签」**定性不同** ⇒ **已回信 global 请其复核**。
+⇒ ⚠️ **本域另外把 global 的 Go 侧清单数纠正了**（它列 12 处、行号全部小 1 ⇒ 实际 **20 处**）⇒ 详见 `DRIFT-ARPC-011` §1.8.2。
+
+### 3.2 🔴 顺带纠正 global 的另一处：E47 的**原始登记方向**错了
+
+E47 第三十三轮的原始登记是「**业务层把 SQL 被 deadline 取消改写/吞掉 ⇒ DEADLINE_EXCEEDED 被消灭**」，
+它是**只读盘点 RAG 侧 catch 形态**的产物 ⇒ **没核 Go 侧** ⇒ **方向错了**（真实情况见 §3.1）。
+⇒ 📌 **坑位**：global 已立 `PIT-GLOBAL-051`（「登记某域把异常改写了之前 ⇒ 必须逐条核 Go 侧」）
+⇒ **本域的对应教训**：**「跨域的定性也要自己核」**（P-15 的同一条纪律，这次用在**反方向**）——
+⇒ **两域对同一件事给出相反定性时，以「有活体实测 + 逐行源码」的那一侧为准**，并把冲突显式报回去。
 
 ## 4. E48（探针未进编排）—— 指针 + 本域视角
 
@@ -3134,39 +3235,53 @@ global 的 E47 列出「24 处硬改写 + 3 处静默降级」，落点在 like 
 ⇒ 🔴 **而且是静默的**：链里有它、其余测试也全绿（`AdminDeadlinePassthroughTest` 是 **mock** mapper
 直接抛 `StatusRuntimeException` ⇒ 它验的是「catch 分支放不放行」，**不验**「异常到达时是不是那一类」）。
 
-### 5.2 本轮的闭环（`AdminRpcContainerWiringTest` 加 2 条 · **真 PG + 真容器**）
+### 5.2 本轮的闭环（`AdminRpcContainerWiringTest` 加 **4 条** · **真 PG + 真容器**）
 
 | # | 断言 | 钉住什么 |
 |---|---|---|
 | 1 | `sqlSessionFactory.getConfiguration().getInterceptors()` 里**真的有**这两个拦截器 | **消费点**（不是「容器里有没有这个 Bean」） |
 | 2 | 翻译器的 `@Intercepts` 挂在 **`Executor`**（`query` + `update`）而**不是** `StatementHandler.prepare` | CancelRequest 引发的 `SQLException` 是**执行阶段**才抛的 ⇒ 挂 `prepare` 上就**永远翻译不到** |
+| 3 | **负控 NC-A**：一枚**故意挂在 `StatementHandler.prepare` 上**的变异体，跑**同一条判据**，**必须被拒绝** | 判据**不是恒绿**（判据写松 ⇒ 用例 2 恒绿 ⇒ 等于没守门） |
+| 4 | **负控 NC-B**：一枚「**一切正确 + 额外挂 `StatementHandler.prepare`**」的变异体 ⇒ **只有挂载点那条规则**能拒绝它 ⇒ 必须被拒绝、且**红在挂载点那条** | 判据**真的在看挂载点**（用例 3 只证明「不是恒绿」，证明不了「在看挂载点」） |
 
-⇒ **两条合起来 = 整条 SQL 超时翻译链的装配层闭环**：
+⇒ **① ② 两条合起来 = 整条 SQL 超时翻译链的装配层闭环**：
 ① 翻译器在链里（§5.2 表 1）→ ② 它挂在能看到执行期异常的位置（§5.2 表 2）→
 ③ 业务层放行分支在（`AdminDomainServiceCatchStructureTest`，字节码级 **28/28**）→
 ④ 翻译器本体行为对（`service/common` 的 `SqlTimeoutStatusTranslatorTest`）⇒ **四段都在，才算链通**。
 
-### 5.3 变异证明它**不是假绿**（M1）
+⇒ **③ ④ 两条负控 = 证明 ② 那条判据本身不是摆设**（**users/user 域 2026-10-26 指出本域缺这一层**，
+⇒ 他们说「你要抄的话**先自己跑一遍**，别照抄结论」⇒ **本域自己写了、自己跑了**，见 §5.3）。
 
-把 `@Import` 里的 `SqlTimeoutStatusTranslator.class` 摘掉 ⇒
-⇒ **只红 1 条**、红在**目标断言**（实际链 = `[DeadlineQueryTimeoutInjector]`），
-其余 8 条**仍绿**（含第 2 条 —— 它断言的是注解不是链）⇒ **精确命中**；
-⇒ 还原后 **sha256 一致**（`eb0afe29…`）、`git diff` 为空 ⇒ **完全还原**。
+### 5.3 变异证明它**不是假绿**（M1~M4）
+
+| 变异 | 做法 | 预期（谁该红） | 实测 |
+|---|---|---|---|
+| **M1** | 摘 `@Import` 的 `SqlTimeoutStatusTranslator.class` | ① 红，实际链 `[DeadlineQueryTimeoutInjector]` | ✅ **只红 1 条**，红在目标断言，其余**仍绿** ⇒ 精确命中 |
+| **M2** | 摘 `@Import` 的 `DeadlineQueryTimeoutInjector.class` | ① 红，实际链 `[SqlTimeoutStatusTranslator]` | ✅ **只红 1 条**，红在目标断言 ⇒ 精确命中 |
+| **M3** | 把挂载点判据**弱化到恒绿**（只剩 `assertNotNull`） | **③ 负控必须红**（`Expected AssertionError to be thrown, but nothing was thrown`） | ✅ **②③④ 红**（三条负控/正例一起红）⇒ 判据恒绿被抓住 |
+| **M4** | **只**去掉「不得挂 `StatementHandler`」那一条规则 | **只有 ④ 红、③ 仍绿** | ✅ **只红 1 条**（④）⇒ **证明 ④ 把挂载点规则单独隔离出来了** |
+
+⇒ 每次变异后**还原 + sha256 一致 + `git diff` 为空**（`AdminRpcApplication.java` = `eb0afe29…`）。
+⇒ ⚠️ **M3 的过程中本域踩到一次「过严的断言」并已改掉**：
+最初本域在负控里加了一条「**必须红在特定那句断言**」的消息检查 ⇒ M3 只弱化其中一条规则时，
+负控虽然红了，但**红的理由不是挂载点那条** ⇒ **那条消息检查把一次合法的部分弱化误报成失败**
+⇒ ⇒ **判据的内部顺序不该被负控绑住** ⇒ 已改为：**③ 只要求「被拒绝」**（不查理由），
+**④ 才查理由**（因为 ④ 的变异体**只违反一条规则** ⇒ 拒绝它的**只可能是**那条规则 ⇒ 查理由不会误报）。
+⇒ 📌 **元教训**：**负控的「必须红在目标断言」要按「变异体违反了几条规则」来定强度** ——
+**违反多条 ⇒ 不能查理由**（会误报）；**只违反一条 ⇒ 可以查理由**（且这才有隔离力）。
 
 ### 5.4 门禁结果（本轮实测 · **两口径一致**）
 
 | 模块 | tests | failures | errors | skipped |
 |---|---|---|---|---|
 | `service/common` | 174 | 0 | 0 | 0 |
-| **`service/users/admin/admin-rpc`** | **103** | **0** | **0** | **0** |
+| **`service/users/admin/admin-rpc`** | **105** | **0** | **0** | **0** |
 
-⚠️ **与上轮记录的「99 / 16 个测试类」的差要说明清楚**（**不是**本轮测试增加造成的）：
-本轮实测 **103 / 18 个测试类** ⇒ 差的 **2 个类**来自**别的域的提交**落进本模块测试目录
-（`21e4124 feat(message)` 往 admin-rpc 加了 `AdminProtectionChainWiringTest`，**2 条**）
-⇒ **账正好对上**：上轮记的 **99** + message 域那 **2** = **101** = **本轮基线**（HEAD 同口径实测）
-⇒ **本轮自身的净增 = +2 条**（`AdminRpcContainerWiringTest` 7 → 9）⇒ **101 → 103**。
-⇒ 📌 **这条记录本身说明了一件事**：**「全量条数」这个数字会被别的域的提交改动** ⇒
-**引用它时必须带核对日期与模块口径**，否则下一个人会像本轮一样先怀疑「我是不是多写了测试」。
+⇒ 105 = 上轮 103 + **2 条负控**（③ ④）⇒ 净增 **+2**（本轮两条负控各 1 条）。
+⚠️ **与更早记录的「99 / 16 个测试类」的差**：那 **+2** 来自 **message 域的 `21e4124`** 往 admin-rpc 加的
+`AdminProtectionChainWiringTest`（**2 条**）⇒ **99 + 2 = 101 = 本轮基线** ⇒ **账正好对上**。
+⇒ 📌 **「全量条数」这个数字会被别的域的提交改动** ⇒ **引用它时必须带核对日期与模块口径**，
+否则下一个人会先怀疑「我是不是多写了测试」（本轮就怀疑了 ⇒ 靠基线实测才排掉）。
 ⇒ **实测口径**：基线用「把本轮唯一的测试文件改动 `git checkout` 回 HEAD ⇒ 跑同一条 `mvn -o -pl service/users/admin/admin-rpc -am test`」取
 ⇒ **不用 stash**（AGENTS.md §5.3：`git stash` 是工作区级状态，不作隔离手段）。
 
@@ -3179,39 +3294,88 @@ global 第三十三轮已销案（`hot-rpc` **无 mapper / 无 MyBatis / 无 SQL
 
 ## 7. 本轮改动清单（rpc.md 侧）
 
-- **一处代码改动**（唯一的）：`AdminRpcContainerWiringTest` **新增 2 条**守卫
-  （MyBatis 插件链里有那两个拦截器 + 翻译器挂在 `Executor` 执行点）⇒ 详见 §5 ⇒ **门禁已重跑**：admin-rpc **103/0/0/0**、`service/common` **174/0/0/0**、`skipped=0`。
-- 台账订正 **6 处**过期断言（三层表第③层行 / 定性轮 / 销账补记 / 修法边界表 / §17 汇总表 / §1.4 结论）+ **新增本章节** + **新增 `P-16`** + **P-4 补一条当场闭环实例**。
-- **33 处路径引用**由 `...` 缩写式展开为完整路径 ⇒ 第 1 层 **33 → 0 MISSING**（见 §8）。
-- ⚠️ **回信 global**：把「`Δ_end` 不变」这条错误结论、以及它与 global 自己写的「`UNRESOLVED-ARPC-002` 的定性不变（E38② 未做）」之间的**冲突**报过去（**跨域定性也得自己核** —— P-15 的同一条纪律，这次用在反方向）。
-- ⚠️ **回信 users/user 域**：确认其 **B-1 守卫只挡 SQL 路径**的结论**在本域同样成立**（继承链实测），并报本域的对应面（**MyBatis 插件链装配层缺口 ⇒ 本轮已闭环**）与**本域 Redis 路径已符合他们提的统一口径**（保留 wire + `log.error` 记原始异常）。
+- **代码改动 2 处**：
+  ① `AdminRpcContainerWiringTest` **新增 4 条**守卫（插件链 / 挂载点 / **负控 NC-A** / **负控 NC-B**）⇒ 详见 §5
+  ② `AdminDomainService`（28 处）+ `AdminCreateAtomicService`（1 处）**只订正 catch 注释的「理由」**，
+  完整论证写进 `AdminDomainService` 类级 javadoc ⇒ **生产行为零改动** ⇒ 详见 `DRIFT-ARPC-011`
+- 台账订正 **6 处**过期断言 + **新增 `DRIFT-ARPC-011`**（防回退留档）+ **新增章节** + **新增 `P-16`** + **P-4 补一条当场闭环实例**。
+- **33 处路径引用**由 `...` 缩写式展开为完整路径 ⇒ 见 §8（含**根因判断的自我订正**）。
+- ⚠️ **回信 global**：① 「`Δ_end` 不变」这条错误结论 ② 与他们「`UNRESOLVED-ARPC-002` 的定性不变」的**冲突**
+  ③ **E47/E58 的「客户端可见」这层不成立**（两侧都是 1015 ⇒ 非 wire 漂移 ⇒ 不需签字）
+  ④ **他们 Go 侧 admin 清单漏了 8 处、行号全部小 1**（实际 **20** 处）⑤ E47 不命中 ⑥ E48 第三步判据 ⑦ hot-rpc 销案。
+- ⚠️ **回信 users/user 域**：① 确认其 B-1 结论在我域成立、**面 A / 面 B 的分离**（我域面 A 已闭环、面 B = ARPC-010 仍开着）
+  ② **负控已补**（M1~M4 全跑过，**自己写的没照抄**）③ **V-012/ARPC-010 口径我域已符合**（SQL + Redis 两条路径的 `log.error` 都带原始异常 ⇒ 无需改代码）
+  ④ **客户端可见面我域复核后支持他们的结论** ⑤ 合并提醒已收到 ⇒ 同步主干。
+- ⚠️ **合并提醒（users/user 域两次提）**：`align/users-admin` 从旧的 `do-my-own-gh` 分出 ⇒ **落后主干**
+  ⇒ ⇒ **本轮已先同步主干再合**（否则主干会把我域的文件显示成「删除」）。
 
-## 8. 🟢 附带修掉：第 1 层的 33 处**路径引用不可解析**（本域既有欠账，本轮清零）
+## 8. 🟢 附带修掉：第 1 层报 33 处 MISSING（**🔴 根因判断已被自己订正，见下**）
 
-**发现方式**：跑共享工具 `tools/check-ledger-selfcheck.py --domain users-admin`
-⇒ **第 1 层（「台账引用的仓库内路径是否存在」）报 33 处 MISSING**。
-⚠️ **本域此前认定「0/1 层可用」**（第 2/3 层硬编码 `DRIFT-TASK-*`、第 4 层 201 条全 N7 去噪 ⇒ 零信息量）
-⇒ **第 1 层既然对本域有效，这 33 处就是真欠账**，不能因为「一直在那儿」就当不存在。
+### 8.1 当时的发现
 
-**根因**：本域台账的路径引用大量使用 **`...` 省略中间包路径**的写法
-（如 `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`）
-⇒ 🔴 **缩写式路径对工具是「永久不可解析」的** ⇒ 第 1 层对它**永远瞎**
-⇒ ⇒ **路径写错、文件早就不存在了，也没有任何机制能发现** —— 这与 §3.3「不得凭…断定」直接冲突。
+跑共享工具 `tools/check-ledger-selfcheck.py --domain users-admin`
+⇒ **第 1 层（「台账引用的仓库内路径是否存在」）报 33 处 MISSING**（其中 api.md 7 处 / rpc.md 28 处 / 签字档 1 处 / 本节 3 处）。
 
-**修法**：**33 处全部展开为完整路径**（可被第 1 层校验）——
-`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` ⇒ `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`。
-⚠️ **为什么展开路径不违反「共享层引用要用符号名」那条**（P-15）：那条针对的是**行号**（会随别人的改动漂移），
+### 8.2 🔴 订正：**「缩写式对工具永久不可解析」这句，在新版工具下不成立**
+
+**当时的根因判断**（已作废）：本域路径引用大量用 `...` 省略中间包
+⇒ 「缩写式对工具是永久不可解析的 ⇒ 第 1 层对它永远瞎 ⇒ 路径写错也没有机制能发现」。
+
+**为什么作废**（2026-10-26 users/user 域提醒 ⇒ 本域复核确认）：
+global 的 **`35a7b8e`**（第三十四轮 · 域适配 + commit 清单口径）给第 1 层**加了简写去噪**：
+**N8**（省略写法）/ **N9**（裸文件名）/ **N10**（短路径）/ **N11**（Go 侧路径）/ **N12**（仓外引用）
+⇒ ⇒ **新版工具把简写正确识别为「简写」并放过，不再报成「缺失」**
+⇒ ⇒ **「缩写式 = 工具永远瞎」是旧版工具的口径问题，不是本域路径写错。**
+
+**⇒ 本轮 33 处**逐条解析**全部唯一命中真实文件**（`service/common/.../observability/RpcInterceptor.java`
+⇒ `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`，…）
+⇒ ⇒ **零「真缺失」** ⇒ **本域的路径引用本来就都指向真实存在的文件。**
+
+⇒ 📌 **本轮那条「真缺失 = 0」的结论是对的**（解析全部唯一命中），
+但**「因为缩写式不可校验所以要展开」的因果是错的** ⇒ 下面 §8.4 的理由已改写。
+
+### 8.3 仍然展开成完整路径（**但理由变了**）
+
+**新理由**（两条，都成立）：
+
+1. **工具能校验它** —— 展开后它进得了第 1 层的**存在性判定**；
+   缩写式则只能靠**去噪规则**放过（= 工具**不验证**它，只是不报错）⇒ **展开 = 从「不被检查」变成「被检查」**。
+2. **人和工具都能直达** —— 完整路径可直接 `open` / 可被 IDE 定位；缩写式要人自己拼。
+
+⚠️ **仍然不违反「共享层引用要用符号名」那条**（P-15）：那条针对**行号**（会随别人的改动漂移），
 **完整路径不会漂移**（只有文件搬家才会，而搬家必是显式动作 ⇒ 可被工具抓到）⇒ **两者不冲突**：
 **行号 → 符号名 / 路径 → 完整路径**，两类引用各自用各自稳定的锚点。
 
-**结果**（本轮实测）：
+### 8.4 新版工具复测结果（本轮实测 · **2026-10-26**）
 
-| 层 | 本域可用性 | 本轮结果 |
+⚠️ **必须用新版工具跑**（`35a7b8e`，在 `align/global` 上，**尚未进主干** ⇒ 主干那份还是旧版 `7a01b51`）：
+旧版对 users-admin 会给 60 条「不一致」，**拆开全是旧版误判** ⇒ 别把那个数字当本域问题。
+
+```
+python3 <新版 tools/check-ledger-selfcheck.py> \
+        --repo-root <本 worktree> --go-root <Go 真源> --domain users-admin
+```
+
+| 层 | 新版对本域的判定 | 备注 |
 |---|---|---|
-| 第 0 层 · 复核器自检 | ✅ 可用 | 全绿 |
-| **第 1 层 · 路径存在性** | ✅ **可用** | 🟢 **33 → 0 MISSING** |
-| 第 2/3 层 | ❌ task 域硬编码 | 判据不适用（已记档） |
-| 第 4 层 · Go 侧 file:line 悬空 | ⚠️ 零信息量（204 条全 N7 去噪） | 「引用不悬空 **0 条**」—— **不代表没有悬空引用** |
-| 第 5/6 层 | ❌ 扫的是 task 域的类 | 不适用 |
+| 第 0 层 · 复核器自检 | ✅ 全绿 | 含 40+ 条阳性对照 |
+| **第 1 层 · 路径存在性** | ✅ **「台账引用路径 73 个 ⇒ 缺失 0 个」** | 展开后它们**真的被校验了** |
+| 第 2 层 | ⏭ **「不适用」** —— 工具原话：**「不是『通过』，是『没查』」** | 该层的「已修断言」清单只覆盖 `task` 域 |
+| 第 3 层 | ⏭ **「不适用」** —— 工具原话：**「判据尚未为 `users-admin` 域定义」** | 编号前缀 / 章节结构 / commit 清单表都不一样 |
+| 第 4 层 · Go 侧 file:line 悬空 | ✅ **「引用不悬空: 168 条」**（去重 204 → 去噪 36） | 去噪口径比旧版精确（N5/N7 分开） |
+| 第 5/6 层 | ⚠️ 扫的仍是 `task` 域的类 ⇒ **不适用** | 工具自己标注「不算失败」 |
+
+⇒ **总判定：层 0~4 全部通过**。
+
+⚠️ **但「不适用」≠「通过」**（工具自己在输出里写了这句话）⇒
+⇒ **不得拿「工具全绿」当「本域台账已复核」** —— 层 2/3 对本域**根本没查**。
+
+### 8.5 本条自己踩到的元教训
+
+🔴 **这是本域第 3 次**「跨域销账通知要自己核」（P-15）——
+**users/user 域说「global 的工具缺陷已修」⇒ 我复核后发现：**
+**我上一轮基于旧版工具写的「根因」结论需要作废** ⇒
+⇒ **「别人的工具升级」会让我自己 previously 写下的「根因判断」过期** ⇒
+**凡是引用工具输出得出的结论，都必须写明「用哪个版本的工具」+ 核对日期**（§6.3 状态表纪律）。
 
 ⚠️ **本轮净变更**：33 处路径展开 + 6 处断言订正 + 1 个新坑位（`P-16`）+ **2 条守卫测试**（§5）+ 本章节。
