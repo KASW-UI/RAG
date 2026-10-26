@@ -33,8 +33,8 @@
 
 | 项 | 值 |
 |---|---|
-| **当前三值判定** | 🔴 **仍 `SEMANTICALLY NOT EQUIVALENT`** —— 但**理由已变**：首轮的 6 条 SEMANTIC MISMATCH 里 **5 条已修**，**只剩 015** 一条真的还没修 |
-| **未修的语义漂移** | **DRIFT-LIKEAPI-015**（`Content-Type` 大小写）—— 落点在 `service/common` 的 `GoStyleJsonBodyConverter`，**6 个域共用** ⇒ **须单域串行处理** |
+| **当前三值判定** | 🔴 **仍 `SEMANTICALLY NOT EQUIVALENT`** —— **2026-10-27 订正**：上一版写「首轮 6 条 SEMANTIC MISMATCH 里 **5 条已修**，**只剩 015**」⇒ **015 已由共享层 T-1 落码（2026-10-25）修复** ⇒ **首轮 6 条 SEMANTIC MISMATCH 现已全部修完**；剩余差异均为 **OBSERVABLE DIFFERENCE**（已登记 / 待签字候选） |
+| **未修的语义漂移** | ✅ **首轮 SEMANTIC MISMATCH 无遗留**（**2026-10-27 订正**）—— **DRIFT-LIKEAPI-015**（`Content-Type` 大小写）**已修**：落点 `service/common` 的 `GoStyleJsonBodyConverter`（6 个域共用），**2026-10-25 共享层 T-1 落码**；**2026-10-27 独立复核**：`GoStyleJsonBodyConverter.java:331` = `getFirst(HttpHeaders.CONTENT_TYPE)` = **原始头值** ⇒ `goReadsBody` 判大小写敏感 ⇒ 与 Go `go-zero@v1.10.2/rest/httpx/requests.go:153-154`（`strings.Contains`）同形；域侧守门 `LikeApiGoStyleBodyContentTypeTest.java` ⇒ **剩余项全部是 OBSERVABLE DIFFERENCE**（#32 超时取消语义 / #35 响应 Content-Type / #36 容量拒绝出口 等 ⇒ 待签字候选） |
 | **待签字** | **4 条 ⏳ 待签字候选**：021 / 022 / SD-2026-10-24-10（017 的毫秒粒度取整）/ **SD-2026-10-24-11**（网关层拒绝计数 —— Java 比 Go 多暴露一个指标）⇒ 见 [`../../Intentional_Deviations/like/api.md`](../../Intentional_Deviations/like/api.md) |
 | **跨仓未解** | 事实投递链路（003，rpc 侧）需独立进程 + 真 DC 接收服务不在任何仓 ⇒ `UNRESOLVED` |
 | **测试** | like-api **81 / 0 failures**；like-rpc **57 / 0 failures**（真 PG Testcontainers） |

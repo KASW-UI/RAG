@@ -684,7 +684,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 > 历史条目 **DRIFT-LIKE-001 ~ 012** 全部保留在文件首节（原样未改）。本节只列 **2026-10-23 新增**。
 
 ### DRIFT-LIKE-013 — gRPC 客户端寻址 URI 格式错误 ⇒ 上下文启动失败
-> 🔴 **状态：仍未修**（第四轮只修了 014/015/016 三条启动阻塞，013 **是唯一剩余的启动阻塞**）—— ⚠️ 生产配置 `application.yml:139` 仍是 `discovery://message-rpc`（**两斜杠**）；而测试用 `static://` 绕过 ⇒ **这个后果没有任何测试覆盖**。
+> ✅ **状态：已修**（**2026-10-27 订正** —— 上一版写「仍未修 / 第四轮只修了 014/015/016，013 是唯一剩余的启动阻塞」）⇒ 生产配置 `service/like/like-rpc/src/main/resources/application.yml:183` 已是 **`discovery:///message-rpc`**（**三斜杠**；2026-10-26 真启动实测修正，`:170-176` 留了形态说明注释：`discovery://message-rpc` ⇒ authority 非空 / path 为空 ⇒ 直接抛 `expected: 'discovery:[//]/<service-name>'`）⇒ 域侧守门 `LikeRpcProductionAddressTest.java:104-114` 覆盖 ⇒ **本条不再是启动阻塞**。
 
 | 项 | 内容 |
 |---|---|
