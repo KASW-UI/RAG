@@ -7,26 +7,19 @@
 > 踩坑与元教训在 [`docs/Pitfalls/`](docs/Pitfalls/_INDEX.md)，签字偏离在
 > [`docs/Intentional_Deviations/`](docs/Intentional_Deviations/_INDEX.md)。
 
-## 〇、当前状态（2026-10-23）
+## 〇、当前状态（2026-10-27）
 
 **权威索引：[`docs/DRIFT/_INDEX.md`](docs/DRIFT/_INDEX.md)** —— 按域列出全部台账、搬移账目、证据边界。本节只给结论。
 **AGENTS.md 只留结论 + 一行指针**（预算 32 KB，超预算 = 没走这条约定）。
 
-> 🔴 **下表是「首轮组件级对照」（2026-10-23）的结论，已过期**
-> ⇒ **当前状态一律回 [`docs/DRIFT/_INDEX.md`](docs/DRIFT/_INDEX.md)**（下表只给结论 + 指针）。
-> ⚠️ **2026-10-25 起新增第 11 个「域」= `global`（收口域，非微服务）**，见 §3.5。
-| 域 | 语义对照（Go ↔ RAG）| 台账（**逐条证据在此**） |
-|---|---|---|
-| `users` | 🔴 4 个组件全部 `NOT EQUIVALENT`；✅ 已修 `extra_info`/`is_current`、admin-rpc `update_time`、user-rpc `Login` fail-open、时间列 `⇒TIMESTAMPTZ` | [`users/`](docs/DRIFT/users/_shared.md) |
-| `message` | 🔴 api 5 MISMATCH + 1 OBS；rpc 1 MISMATCH + 5 OBS。✅ `broadcast:1` 误发全量、rpc 负 `offset`、`isRead` 字段名 | [`message/`](docs/DRIFT/message/rpc.md) |
-| `like` | 🔴 api **9 MISMATCH**（本轮最高，**62 条绿测试零覆盖**）；rpc 4+2。✅ rpc 6 条启动阻塞、DDL 对齐。事实链路**跨三仓库且末端不在任何仓** | [`like/`](docs/DRIFT/like/rpc.md) |
-| `common` | 🔴 **不是「已审计完成」** —— 5 个可比包 **3 个 `NOT EQUIVALENT`**。**27 条编号未修** ⇒ **共享层，其他域的尾巴挂在它身上** | [`common/`](docs/DRIFT/common/alignment-2026-10-23.md) |
-| `hot` | ✅ 三组件**全部拿到双侧活体对拍**、25/25 变异点被守门抓住；✅ `DRIFT-COMMON-004` + jar 可执行 + **Tomcat 三旋钮已修**。⚠️ 残余 `-031`（框架限制 ⇒ 候选 `SD-2026-10-25-CAND-10`）⇒ ✅ **2026-10-26 域内未闭合项已清空** | [`hot/`](docs/DRIFT/hot/rpc.md) |
-| `article` | 🔴 rpc 4 MISMATCH + 4 OBS；api 2 MISMATCH（**首次对照即 NOT EQUIVALENT**）。⚠️ `DRIFT-ARTICLE-RPC-004` 复核后**撤销** | [`article/`](docs/DRIFT/article/rpc.md) |
-| `comment`/`follow`/`task` | ✅ **2026-10-25 并发对齐后「零台账」已解除**，各域 4/4/3 组件全部完成首轮对照 | [`_cross/`](docs/DRIFT/_cross/component-coverage-matrix.md) |
-| `favorite` | ✅ **2026-10-26 核对**：favorite **第二十轮**补上 **SQL 语句层** ⇒ 抓出 **3 处** ⇒ 跨域 5 条归 `global` | [`favorite/`](docs/DRIFT/favorite/rpc.md) |
-| 🆕 **`global`** | **收口域**（非微服务，见 §3.5）—— 跨微服务 + `service/common` 影响的**搁置漂移**。已 **40 轮**（含 15 条 lane）⇒ **待办清单见 `_README.md` §七之二** · **lane 台账见 `global/lanes/`** | [`global/`](docs/DRIFT/global/_README.md) |
-| 其余 | ⚠️ 10 个 `*-proto` 语义层一致（**8 个无回归网** ⇒ §3.4）；5 个 `*-common` 本轮未单独审查 | 见 DRIFT 索引 |
+| 域 | 台账（**逐条证据在此**）| 域 | 台账（**逐条证据在此**） |
+|---|---|---|---|
+| `users` | [`users/`](docs/DRIFT/users/_shared.md) | `comment`/`follow`/`task` | [`_cross/`](docs/DRIFT/_cross/component-coverage-matrix.md) |
+| `message` | [`message/`](docs/DRIFT/message/rpc.md) | `favorite` | [`favorite/`](docs/DRIFT/favorite/rpc.md) |
+| `like` | [`like/`](docs/DRIFT/like/rpc.md) | 🆕 `global`（**收口域**，非微服务 ⇒ §3.5） | [`global/`](docs/DRIFT/global/_README.md) |
+| `common` | [`common/`](docs/DRIFT/common/alignment-2026-10-23.md) | 🆕 `<域>-common`（**10 条** lane，2026-10-27 建） | [`_cross/domain-common-lanes.md`](docs/DRIFT/_cross/domain-common-lanes.md) |
+| `hot` | [`hot/`](docs/DRIFT/hot/rpc.md) | `article` | [`article/`](docs/DRIFT/article/rpc.md) |
+| 其余（10 个 `*-proto` 语义层一致·**8 个无回归网** ⇒ §3.4） | 见 DRIFT 索引 | — | — |
 
 > ⚠️ **「已改」≠「已验证」；「源码级对照」≠「双侧活体对拍」** ⇒ 台账里的 ✅ 一律读作「**在该证据强度下一致**」，
 > 不是已闭环。**每条的证据强度以该域台账的「证据强度」列为准**（分层口径见 `docs/DRIFT/_INDEX.md` 末节）。
@@ -197,7 +190,7 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 | DDL 双侧活体逐列对照 | 其余 5 域（favorite 只建库） | ✅ **已做**（L3 ⇒ **9 域**；`article`/`follow` **0 差异**；`like`/`favorite` 差异全是「RAG 更严」⇒ 签字候选；`hot` = **N/A**） |
 
 **排序约束**：**rpc 必须先于 api**（Go 侧边界是 api→rpc；rpc 没验对就先验 api ⇒ 产出「RAG api 行为正确」的假结论——`message-rpc` 曾有 21 条全绿测试却一次没起过）。
-**跨域收口**：修法落在 `service/common` ⇒ **只有 `global` 能写**（别的域只读）⇒ 并发必排队 ⇒ **靠 lane 按「叶子文件」切**（§5.3c）。
+**跨域收口**：修法落在 `service/common` ⇒ **只有 `global` 能写**（`align/global` + `align/global-common`，别的域只读）⇒ 并发必排队 ⇒ **靠 lane 按「叶子文件」切**（§5.3c·§5.3d）。
 ## 四、当前重构（多 phase · 真理之源 = Go）
 
 ### 4.1 锁定的决策（来自用户问答，2026-10-18）
@@ -236,9 +229,18 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 3b. **三档台账：每域必读 + 必写**（2026-10-23 用户定）—— 开工前**必读** `docs/DRIFT/` + `docs/Intentional_Deviations/` +
    `docs/Pitfalls/` 的**本域子目录 + `_cross/`**；产出**必写回**同名的**本域子目录**。⚠️ **只写自己域，三个 `_INDEX.md` 合并后统一更新**。⇒ 细则 ⇒ [`docs/Worktree.md`](docs/Worktree.md) §二·五
 3c. **`global` 收口域（2026-10-25 用户定）** —— 跨微服务 + `service/common` 影响的搁置漂移**全部归它**
-   （§3.5）。⇒ **`service/common/**` 只有 `align/global` 能写**，别的域只读；
+   （§3.5）。⇒ **`service/common/**` 只有 `align/global` / `align/global-common` 能写**，别的域只读；
    修法同时涉及 `service/common` 与别的域代码时**必须同一次提交**（否则留下半截）。
    ⇒ 🆕 **一个域可开多棵 lane 树并行**（`global` 已拆 15 条 lane（**按模块零重叠** ⇒ 同模块两个 lane 会互踩 `target/`））⇒ 协议 ⇒ [`docs/DRIFT/global/lanes/_PROTOCOL.md`](docs/DRIFT/global/lanes/_PROTOCOL.md)
+3d. 🆕 **`<域>-common` lane（2026-10-27 用户定）** —— 语义 = 「**本域 ↔ `service/common`** 的跨层漂移」
+   （⚠️ **不是**「本域自己的 `-common` 库」⇒ 那是 `service/<域>/<域>-common`，台账见 `docs/DRIFT/<域>/common.md`）。
+   **10 条** = 9 个微服务域 + `global`；工作树 `../RAG.worktrees/<域>-common` + 分支 `align/<域>-common`（均从 `do-my-own-gh` 切，主干最后接合并）。
+   ⇒ **写权**：🔴 **`service/common/**` 只有 `align/global-common` 能写**，其余 9 条**只读 common 侧**；
+   **域侧能自修的域侧修**（本域的调用方式/配置/断言/装配），**common 侧缺陷一律转派 `global-common`**（登记「现象+证据+建议修法」，不甩单、不留半截）。
+   ⇒ **台账**：每条 lane 独占 `docs/DRIFT/<域>/vs-common.md`（**只写自己域的文件** ⇒ 10 路并发零冲突）；
+   **共享面（`AGENTS.md`/三个 `_INDEX.md`/`_MANIFEST.json`）合并后统一更新**。
+   ⇒ **交付物** = 9 条机制面轴（A1~A9）的**本域侧**逐轴结论（✅/🔴/🟡 + **证据强度** + **核对日期**）+ **两侧同时跑**的探针（§3.3）。
+   ⇒ 总纲 / 轴表 / 跨域未闭合项 ⇒ [`docs/DRIFT/_cross/domain-common-lanes.md`](docs/DRIFT/_cross/domain-common-lanes.md)
 4. **作用范围**：仅限 RAG 仓库。`Sea-RideTheWind_golang` 已冻结只读；其他非 Spring Boot 的 Java 实现不在范围内。
 5. **Go 是真理之源**（2026-10-20 第三次切换，全子模块适用）：proto 字段号、错误码、JWT claims、表结构、HTTP path、
    Kafka topic 等语义细节一律以 Go 对应子模块为准；差异**只允许出现在表达层**，出现行为差异时默认判 **RAG 错**。
@@ -300,6 +302,7 @@ RAG 不是从 Go「推测」行为，而是**逐字对照 Go 源码**（§3.1）
 | [`docs/Pitfalls/`](docs/Pitfalls/_INDEX.md) | **踩坑档**：「为什么会踩」 | 写测试 / 「配了却没生效」时 |
 | [`docs/Intentional_Deviations/`](docs/Intentional_Deviations/_INDEX.md) | **有意偏离档**：「明知与 Go 不同、**经签字批准**」。⚠️ **是决策不是缺陷：不重复质疑，不得「顺手修正回旧行为」** | 判断某条差异「要不要修」时 |
 | [`docs/FileTree/`](docs/FileTree/README.MD) · [`docs/HUMAN_ONLY/`](docs/HUMAN_ONLY/simple.md) · [`docs/MappingTable/`](docs/MappingTable/README.MD) · [`docs/Worktree.md`](docs/Worktree.md) | 理论文件树（15 份，⚠️ **迁移期脚手架**）· 阅读指南 · 名字映射 · **worktree 并发工作流**（§5.3） | 规划结构 / 跨服务对表 / 开并发对齐前 |
+| [`docs/DRIFT/_cross/domain-common-lanes.md`](docs/DRIFT/_cross/domain-common-lanes.md) | **10 条 `<域>-common` lane 总纲**（域 ↔ `service/common` 对账）：lane 清单 · 9 条机制面轴 A1~A9 · 写权边界 · 跨域未闭合项 · 执行协议 | 开 / 跑一条 `<域>-common` lane 前 |
 
 - ⚠️ **`docs/` 下两个 `common` 不是同一个组件**：`FileTree/common.md` = Go `service/common`（跨服务共享）；
   `FileTree/hot/common.md` = Go `service/hot/common`（**hot 专属，仅 1 个 `errmsg.go`**）。
