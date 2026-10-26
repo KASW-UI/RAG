@@ -48,6 +48,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.same;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -473,6 +474,40 @@ class UserDomainServiceTest {
 
         assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INTERNAL);
         assertThat(e.getStatus().getDescription()).isEqualTo("注销失败,Redis写入异常");
+    }
+
+    /**
+     * 🔴 DRIFT-USERRPC-V-012（2026-10-27 · G1 lane · 域侧自修）：<b>原始异常必须进日志</b>。
+     *
+     * <p><b>修前</b>：{@code logout} 的 Redis 写路径 {@code catch (Exception e)} 里只有
+     * {@code throw Status.INTERNAL...asRuntimeException()} ⇒ 造出的 {@code StatusRuntimeException}
+     * <b>cause=null</b> ⇒ 实测日志原文 {@code Status{code=INTERNAL, description=注销失败,Redis写入异常, cause=null}}
+     * ⇒ 底层 Lettuce 异常（超时 / 连接失败）<b>完全看不见</b>
+     * ⇒ 排障只看到「Redis 写入异常」，看不到「其实是超时」⇒ 被指向错误方向。
+     *
+     * <p><b>修法口径</b>：<b>只加日志，不改 status / description</b>
+     * （改了反而与 Go 不一致 ⇒ wire 面零影响）。
+     *
+     * <p><b>Go / admin 侧依据</b>：{@code service/user/user/rpc/internal/logic/logoutlogic.go}
+     * 的错误出口把原始 {@code err} 交给上层；
+     * admin 域 {@code AdminDomainService.logout} 已有
+     * {@code log.error("admin logout Redis setex failed", e)} ⇒ 原始异常进日志。
+     *
+     * <p><b>变异验证</b>：删掉 {@code UserDomainService.logout} 里那行
+     * {@code logger.logBusinessErr(...)} ⇒ 本条红。
+     */
+    @Test
+    void logout_redisError_logsOriginalCause_forAttribution() {
+        RuntimeException redisEx = new RuntimeException("redis command timed out");
+        doThrow(redisEx).when(valueOps)
+                .set(anyString(), anyString(), any(java.time.Duration.class));
+
+        assertThrows(StatusRuntimeException.class, () ->
+                service.logout(LogoutReq.newBuilder().setToken("any.jwt.token").build()));
+
+        // 原始异常必须**原样**进日志（不是它的 message 文本、不是一个新的异常）
+        verify(logger, times(1)).logBusinessErr(
+                any(), eq(ErrorCode.ERROR_DB_SELECT.getCode()), same(redisEx));
     }
 
     // ============== selectAvatar ==============

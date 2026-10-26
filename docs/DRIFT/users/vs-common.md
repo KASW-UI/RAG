@@ -58,7 +58,7 @@
 
 | 轴 | 机制 | 本域侧的落点 / 调用 | 结论 | 证据强度 | 核对日期 |
 |---|---|---|---|---|---|
-| **A1** | 超时 / deadline | ① `DRIFT-USERAPI-009②`（**3s 预算作用域**：Go 不覆盖 JWT 验签，RAG 覆盖验签+黑名单+handler）② `DRIFT-USERAPI-015`（Redis 主机名解析失败 ⇒ 200/503 摇摆，**已降级为「条件性成立·证据不足」**）③ `DRIFT-USERRPC-V-012`（超时业务日志归因 ⇒ **落点在本域 `UserDomainService.logout`**）④ `DRIFT-USERRPC-V-013`（DB 超时的源码层形态差异 ⇒ **非 wire 漂移，不得改回 Go 行为**） | 🔴 **4 条 OPEN**（其中 ②③ **域内可闭环**） | L1 源码 + L3 双侧活体（台账原有） | 2026-10-27 |
+| **A1** | 超时 / deadline | ① `DRIFT-USERAPI-009②`（**3s 预算作用域**：Go 不覆盖 JWT 验签，RAG 覆盖验签+黑名单+handler）**✅ 已修（2026-10-27 · G1 lane · 域内自闭环）** ② `DRIFT-USERAPI-015`（Redis 主机名解析失败 ⇒ 200/503 摇摆，**已降级为「条件性成立·证据不足」**）③ `DRIFT-USERRPC-V-012`（超时业务日志归因 ⇒ 落点在本域 `UserDomainService.logout`）**✅ 已修（2026-10-27 · G1 lane · 域内一行）** ④ `DRIFT-USERRPC-V-013`（DB 超时的源码层形态差异 ⇒ **非 wire 漂移，不得改回 Go 行为**） | 🔴 **2 条 OPEN**（①③ **已域内闭环**；② 证据不足 · ④ 非漂移）<br>⚠️ **2026-10-27 订正**：原状态写「4 条 OPEN（其中 **②③** 域内可闭环）」⇒ **编号错挂**（② 是 `USERAPI-015`、③ 是 `V-012`）⇒ 域内可闭环的是 **①③** | L1 源码 + **L2 运行时（新增）** + L3 双侧活体（台账原有） | 2026-10-27（**本轮订正**） |
 | **A2** | gRPC 拦截器链 | `DRIFT-USERAPI-011`（客户端熔断 handler）✅ · `DRIFT-USERRPC-V-007`（超时 description 逐字）✅ 已合回 `4f839f9` · ① 三拦截器链（recover/breaker/shedding）已全处置 | ✅ **一致**（在该证据强度下） | L3 双侧活体 | 2026-10-27 |
 | **A3** | HTTP 保护链 | ① 本域 `application.yml` 的 `rag.http.go-form-limit.mode` = **raw**（user-api ＋ admin-api 各一行）② `DRIFT-USERAPI-008`（过载保护「不存在」）**已证伪** ③ `DRIFT-USERAPI-012`（降载 RT 口径）✅ ④ `DRIFT-USERAPI-013`（**MaxConns 粒度 + breaker 键空间 + javadoc 矛盾**）🔴 ⑤ `009② 补充`（MaxBytes 相对 observability 的位置）**未签字** | 🔴 **1 条 G4** ＋ 🟡 **1 条待拍板** ＋ 🔴 **1 条域内**（009②） | L1 源码 + L2 运行时 | 2026-10-27 |
 | **A4** | 错误码 / envelope | `DRIFT-USERAPI-003/-006/-007/-010` ✅（后两条为**签字偏离** `SD-USERAPI-001` 与 N-1）· `UNRESOLVED-001/003/004` **全部已关**（`UNRESOLVED-001` = 真 Tomcat 双侧 + `check-plaintext400-headers.sh` EXIT=0） | ✅ **一致**（**4 条签字偏离**覆盖 ⇒ 审查见红先查签字档） | L3 真 Tomcat + 双侧活体 | 2026-10-27 |
@@ -66,7 +66,7 @@
 | **A6** | errmsg 契约 | code→msg 全表 **30 项 EQUIVALENT**（Go `errmsg.go:38-68` ↔ `users-common.ErrorCode`）· N-2（Go 侧 9 处 GBK 双重编码乱码）✅ 签字 · ⚠️ **但 `DRIFT-USERSCOMMON-001`（1017/1018 文案）属 A6 本体** ⇒ 域台账 [`common.md`](common.md) 判定 **`SEMANTICALLY NOT EQUIVALENT`**（1 条 SEMANTIC MISMATCH 已修 ＋ **3 条 OBSERVABLE DIFFERENCE** ＋ 5 条未决） | 🟡 **30 项等价 ＋ 1 条 A6 本体 OBSERVABLE DIFFERENCE**（`001`：**潜伏** —— users 域内三个调用点全是日志码，wire 观察不到 · ⏸️ 待与 admin 域合并裁决）⇒ ⚠️ **不能写「一致」** | **L4 双侧活体**（域台账核对日期 **2026-10-23** · 176 条逐条实测） | 2026-10-27（**本轮由「✅ 一致」订正为 🟡**） |
 | **A7** | proto 契约 | 两侧 `.proto` 剥离 option/注释/空行后**逐行 diff 零差异** ＋ 常驻守门 `check-proto-static.sh` ＋ `UserInfo.status` 的 `optional` 两侧同 | ✅ **一致** | L1 实测 diff | 2026-10-27 |
 | **A8** | DDL 时间列 / 类型 | ① `DRIFT-USERRPC-V-002`（`users_user.status` **可空性**）🔴 **被卡**（改动须与 admin 域同改 ⇒ 落点 `users-common` ⇒ **G4 写权**）② `DRIFT-USERRPC-V-011`（时间列 `DEFAULT CURRENT_TIMESTAMP`）⚠️ **未修**（8 处，刻意保留）③ `V-003`（`extra_info` text↔jsonb）✅ `V-004`（4 个时间列 timestamptz）✅ `V-006`（id 取值来源）✅ ④ 表名 `users`→`users_user` ✅ 签字 ⑤ 建表责任交叉 EQUIVALENT（**双侧对称并发启动 9 轮**） | 🔴 **2 条**（V-002 落 G4 ＋ V-011 待裁决） | L4 真 PG（并发 9 轮） | 2026-10-27 |
-| **A9** | trace / otel | ① `DRIFT-USERAPI-009①`（401 是否计入观测面）✅ 签字 `SD-USERAPI-002`（**只覆盖 ①**）② `DRIFT-USERRPC-V-012`（业务日志归因）🔴 ③ **`Traceparent` 传播：全 users 域零覆盖**（`grep -c "Traceparent" docs/DRIFT/users/` ⇒ **仅本文件命中** ⇒ 域台账零条目）④ **`audit.*` span 属性：admin 域已覆盖**（`DRIFT-ARPC-006` ✅ 已修 ＋ `admin/_shared.md` N-4 关联 ＋ 守门 `AdminSpanWiringTest`）⇒ **user 域（user-api / user-rpc）零覆盖** ⑤ 共享层本体（otel 装配 + 传播器）**已由 global lane L1 闭合**（`GoStyleOtelAutoConfiguration` 走 `AutoConfiguration.imports` ⇒ 不依赖组件扫描 ⇒ rpc 进程也装） | 🟡 **半轴空白**（`Traceparent` 全域零覆盖 ＋ `audit.*` 只 admin 域有 ⇒ **user 域是空白轴**；⚠️ 原写「本域台账无任何 `audit.*` 条目」**不成立** —— admin 域有大量条目） | L1 静态 ＋ 共享层台账（`common/audit.md` / `global/lanes/L1-delivery.md`） | 2026-10-27（**本轮订正**） |
+| **A9** | trace / otel | ① `DRIFT-USERAPI-009①`（401 是否计入观测面）✅ 签字 `SD-USERAPI-002`（**只覆盖 ①**）② `DRIFT-USERRPC-V-012`（业务日志归因）**✅ 已修（2026-10-27 · G1 lane · 域内一行）** —— 仅「原始异常被整个吞掉」闭环；②③ 架构级另立项 ⇒ 本条不销 ③ **`Traceparent` 传播：全 users 域零覆盖**（`grep -c "Traceparent" docs/DRIFT/users/` ⇒ **仅本文件命中** ⇒ 域台账零条目）④ **`audit.*` span 属性：admin 域已覆盖**（`DRIFT-ARPC-006` ✅ 已修 ＋ `admin/_shared.md` N-4 关联 ＋ 守门 `AdminSpanWiringTest`）⇒ **user 域（user-api / user-rpc）零覆盖** ⑤ 共享层本体（otel 装配 + 传播器）**已由 global lane L1 闭合**（`GoStyleOtelAutoConfiguration` 走 `AutoConfiguration.imports` ⇒ 不依赖组件扫描 ⇒ rpc 进程也装） | 🟡 **半轴空白**（`Traceparent` 全域零覆盖 ＋ `audit.*` 只 admin 域有 ⇒ **user 域是空白轴**；⚠️ 原写「本域台账无任何 `audit.*` 条目」**不成立** —— admin 域有大量条目） | L1 静态 ＋ 共享层台账（`common/audit.md` / `global/lanes/L1-delivery.md`） | 2026-10-27（**本轮订正**） |
 
 > **A3 已预填一条实测锚点（2026-10-27 核）** —— X-6（`DRIFT-HOTAPI-030`）共享层 6 个类已落码
 > （`GoStyleFormValues` / `GoStyleFormLimitMode` / `GoStyleFormLimitExceededException` /
@@ -408,6 +408,7 @@ G4 落码 ⇒ 共享层行为变 ⇒ **G1 这域的 A1~A9 结论要复核**（�
 | `UNRESOLVED-ARPC-002`（= **E38②**） | 超时是否 min 客户端 deadline | `service/common`（`RpcInterceptor` 的 `effectiveTimeoutMs`） | ✅ **① 已闭环**（2026-10-26 落地）· ⏸ **② 未做**（架构级，已另立项）⇒ **本轮不派落码** | ✅ ① 双侧活体一致（探针 `client_deadline_ctx`）· ⏸ ② 等立项 |
 | `UNRESOLVED-USERSCOMMON-003` | `GoStyleCoercion` 规则是否波及非 users 域 | 🟡 **拆两半**（见 §6.4.1） | 🟡 **域侧 + G4 各一半** | 🔴 未核 · **口径已订正**（2026-10-27） |
 | `DRIFT-ADMINAPI-007` | 503 响应 `Content-Type` charset 分号后空格残差 | `service/common` | 🔴 **G4** | 🟡 半修（`nosniff` 已落地 ⇒ 原条消失）⇒ **需重开一条** |
+| 🆕 **`DRIFT-USERAPI-009 §7 补充`** | **MaxBytes 相对 observability(3s) 的位置**：Go 在预算**之外**，RAG 在**之内** ⇒ 超限 413 **计入** access log/span/指标（Go 不计） | `service/common`（`GoStyleMaxBytesFilter` 的 `@Order`） | 🔴 **G4**（代码）· 🟡 **整合者**（签字档） | 🔴 **未签字**（台账建议**并入 `SD-USERAPI-002` 的范围说明** ⇒ 签字比改码便宜）⇒ ⚠️ **见 §6.4.2 的槽位联动警告** |
 
 > ⚠️ **状态带核对日期**（AGENTS.md §6）⇒ 复核后就地更新 + 改日期。
 
@@ -444,6 +445,34 @@ G4 落码 ⇒ 共享层行为变 ⇒ **G1 这域的 A1~A9 结论要复核**（�
 
 ⇒ ⚠️ **「验证跨域」的那部分**（各打一次带标量的请求矩阵）**G1 登记 + 协调 G2/G3**，
 但**别把它整条塞进派单** —— 矩阵是域侧行为，落点不在共享层。
+
+#### 6.4.2 🔴 **槽位联动警告**（给共享层写权方 · 2026-10-27）
+
+> **一句话**：本轮刚在 `user-api` 落了一个**依赖共享层 Filter 槽位**的机制
+> ⇒ **共享层若调整 Filter 的 `@Order`，各域必须被通知**，否则域侧白做。
+
+**机制背景**（`DRIFT-USERAPI-009②` 的修法，见 `docs/DRIFT/users/user/api.md` §9.y）：
+
+| `@Order` | Filter | 作用 |
+|---|---|---|
+| +3 | `GoStyleTraceparentFilter` | 起 SERVER span |
+| +4 | `GoStyleMaxConnsFilter` | 连接数闸门 |
+| +5 | `GoStyleBreakerFilter` | 熔断 |
+| +6 | `GoStyleCpuSheddingFilter` | CPU 降载 |
+| **+7** | **`HttpMiddlewareFilter`** | **3s 预算起算点** |
+| +8 | `GoStyleMaxBytesFilter` | 请求体上限 |
+
+⇒ 域侧的 `GoStyleJwtAuthFilter`（user-api）落在 **+6**，靠两条硬约束夹出来：
+**必须 < +7**（否则验签仍被 3s 预算覆盖 ⇒ `DRIFT-USERAPI-009②` 退回 OPEN）
+且 **必须 ≥ +3**（否则验签落到 traceparent 的 SERVER span **之外** ⇒ 观测面漂移）。
+
+🔴 **⇒ 两条硬约束：**
+1. **`HttpMiddlewareFilter` 的 `@Order` 不得下调到 +6 或更低**（+6 已被 CpuShedding 占；再下调就装不下 JWT 槽位）；
+2. **若共享层要给 MaxBytes 腾槽位**（把 §7 补充那条从「签字」改成「改码」）
+   ⇒ **必须同时通知各域复核 `GoStyleJwtAuthFilter` 的槽位**，否则 ② 静默退回 OPEN。
+
+⇒ ⚠️ **本条不是缺陷、是一张「先后手」清单** ⇒ **不需要 G4 落码**；
+但 G4 若动共享层 Filter 顺序，**请在回执里点名这一条**。
 
 ---
 
@@ -502,3 +531,60 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 ③ 域侧桥与共享层桥**并存无害** ⇒ 不删也不产生行为漂移 ⇒ **没有必须现在做的理由**。
 
 ---
+
+---
+
+## 11. 🆕 **域侧存量自闭环：两条 A 轴缺陷的落码**（2026-10-27 · G1 lane）
+
+> **本节记录**：本轮把 **A1 轴**上两条「域内可闭环」的缺陷**落码 + 守门 + 变异验证 + 回归**。
+> **元信息**：分支 `align/g1-users-follow`（基线 `a282012` = `do-my-own-gh`）· **全部落在 G1 写权内**
+> （`service/users/user/user-api/**` ＋ `service/users/user/user-rpc/**`）· **未碰 `service/common`、未碰 `users-common`**。
+
+### 11.1 两条缺陷的落点与口径
+
+| 编号 | 轴 | 落点 | 修法（一句话） | 守门 | 变异验证 |
+|---|---|---|---|---|---|
+| `DRIFT-USERAPI-009②` | **A1** | `user-api`（新 `auth/` 包 + 改 `interceptor/JwtAuthInterceptor`） | **验签搬进 `@Order(+6)` 的 Filter（3s 预算之外）**，401 仍由 interceptor 抛（信封不变），黑名单留在 interceptor | `UserApiJwtVerificationScopeTest`（**5 例**，新建） | **3 个**（顺序 / 自己写响应 / 摘 `@Component`） |
+| `DRIFT-USERRPC-V-012` | **A1 / A9** | `user-rpc`（`UserDomainService.logout`） | `catch (Exception e)` 里**补一行** `logBusinessErr(..., e)` ⇒ **status/description 一字不改** | `UserDomainServiceTest#logout_redisError_logsOriginalCause_forAttribution`（**新增 1 例**） | **1 个**（删掉那行 ⇒ 红） |
+
+⇒ **4 个变异全部实测变红**（明细见 `docs/DRIFT/users/user/api.md` §9.y 的变异表）
+⇒ **绿测试不是「错误答案的守卫」**。
+
+### 11.2 🔴 本轮**没有**做的事（诚实边界）
+
+| # | 没做 | 原因 |
+|---|---|---|
+| ① | **未跑双侧活体对拍** | 本轮是**纯域侧落码**，Go 侧进程未起 ⇒ 证据强度停在 **L2**（容器装配结果 + MockMvc 行为）+ **L1**（Go 链序逐行）⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」 |
+| ② | **未推广到另外 9 个 api 服务** | 改法 A 的推广是**逐服务**的（Go 侧每个 api 自己 `server.Use`）⇒ 配方已写进 `docs/DRIFT/users/user/api.md` §9.y §7；**admin-api / follow-api 属 G1 写权内但本轮指令未点**，留给后续（⚠️ admin 侧 `DRIFT-ADMINAPI-006` 原文写的是「不列为待办」） |
+| ③ | **未销 `SD-USERAPI-002`** | 落地的形态**刻意**让 401 仍由 interceptor 抛 ⇒ ①（401 计入观测面）**不变** ⇒ `SD-USERAPI-002` **继续有效** ⇒ **无需销号** ⇒ 也就不需要动**不在 G1 写权内**的签字档 |
+| ④ | **未动 `DRIFT-USERAPI-009 §7 补充`（MaxBytes 位置）** | 落点是 `service/common`（G4 写权）⇒ 已登记进 §6.4 ＋ **槽位联动警告** §6.4.2 |
+| ⑤ | **未动 V-012 的 ②③ 两条** | 架构级（Redis 抛的不是 gRPC 的 `StatusRuntimeException` ⇒ B-1 守卫永不命中；Redis 写不绑 gRPC deadline）⇒ 与 `global` 域 **E38 第②层**同型 ⇒ 按「**另立项**」口径 ⇒ **V-012 不销** |
+
+### 11.3 ⚠️ 本轮**引入**的新差异（如实登记）
+
+- **JWT 验签与过载保护的相对次序**：Go 的 Authorize 在 MaxConns / Breaker / Shedding **之后**
+  ⇒ 过载被拒的请求**不做**验签；RAG 的验签 Filter 与 `CpuShedding`(+6) **并列**
+  ⇒ 并列落在 Shedding 之前时**多做一次无用验签** ⇒ **不改变任何响应**（只多一次 HMAC 计算）
+  ⇒ **只在过载时可见 · 只影响 CPU · wire 面零影响**。
+- 完整推导与「为什么这个并列是安全的（Filter 绝不写响应 ⇒ 先后无关）」⇒ `docs/DRIFT/users/user/api.md` §9.y §6。
+
+
+### 11.4 ✅ 真启动 + 回归（2026-10-27 · 真 PG + 真 Redis + 真 Nacos + 真进程 + 真 Tomcat）
+
+| 环节 | 结果 |
+|---|---|
+| `user-rpc` / `user-api` 真启动 | ✅ 6.379s / 9.684s ⇒ **新增的 `GoStyleJwtAuthFilter` 没破坏容器装配** |
+| ① protected 无 token | **401 + 完整信封** `{"code":1006,...}` ⇒ **N-1 未破** |
+| ② protected 合法 token | **200** ⇒ 验签链通 |
+| ③ protected 坏签名 | **401 + 完整信封** |
+| ④ **超限 body + 无 token** | **413 + 空 body** ⇒ **「413 压过 401」在真 Tomcat 下仍成立**（响应头层只有真 Tomcat 测得到） |
+| ⑤ public 路径（login） | **200** ⇒ 不验签直接放行 |
+| 回归 | **6 组件 BUILD SUCCESS**（`user-api` 118 · `follow-api` 56 · `follow-rpc` 78 · `user-rpc` · `admin-api` · `admin-rpc` 全绿） |
+| 守门 | **5/5 EXIT=0**（`check-wave-lane-ownership` · `check-wave-role-model` · `check-wave-coupling` · `check-ledger-count` · `check-doc-links`） |
+
+⚠️ **端口**：本轮 `user-rpc` 用 **49211**（默认 49210 **被 Docker 容器占用**）
+⇒ **未改仓库任何配置文件**，只在启动脚本里 env 覆盖 ⇒ 零仓库影响。
+⚠️ **一处假失败（已排除，非产品缺陷）**：user-api 单模块回归曾报 `BUILD FAILURE`（118 例全绿），
+根因是**后台跑回归的同时又跑了 `mvn package`**（同一模块 `target/` 被并发写）⇒ 单独重跑 `BUILD SUCCESS`
+⇒ **同一模块不要并发跑两个 maven**（§5.3c「同模块两个 lane 会互踩 target/」在**同一 lane 自己身上**同样成立）。
+

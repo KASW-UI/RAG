@@ -1082,11 +1082,25 @@ Go Behavior:
     ② 3s 预算**不覆盖** JWT 验签
 
 Spring Boot Behavior:
-  HttpMiddlewareFilter.java:36-37  @Component @Order(HIGHEST_PRECEDENCE+5) ⇒ **Servlet Filter**
+  HttpMiddlewareFilter.java:37  @Component @Order(HIGHEST_PRECEDENCE+7) ⇒ **Servlet Filter**
   ⇒ Servlet 的**所有** Filter 都在 DispatcherServlet 外，HandlerInterceptor 在内
-  ⇒ 执行序：**MaxBytes → HttpMiddleware(3s)** → DispatcherServlet → **JwtAuthInterceptor** → Controller
+  ⇒ 执行序：**HttpMiddleware(3s) → MaxBytes** → DispatcherServlet → **JwtAuthInterceptor** → Controller
   ⇒ ① 401 **计入** markHTTPResult
     ② 3s 预算**覆盖**验签 + 黑名单 + handler
+
+  ⚠️ **2026-10-27 订正（本条正文原有两处错，已改）**：
+  (a) `@Order` 数值：本条原写 `HIGHEST_PRECEDENCE+5` ⇒ **过期**。
+      真实值 **+7** —— `service/common` 在 commit `d9062f8`（T-8 traceparent 落地）
+      把 `GoStyleTraceparentFilter` 插到 **+3**、并把 `HttpMiddlewareFilter` 从 +5 挪到 **+7**
+      ⇒ **共享层当前槽位（实测）**：Traceparent **+3** · MaxConns **+4** · Breaker **+5** ·
+      CpuShedding **+6** · **HttpMiddleware(3s) +7** · MaxBytes **+8**。
+      ⚠️ 同族错误也在 §7 补充（「MaxBytes `@Order(+6)`」⇒ 实为 **+8**）。
+  (b) 执行序方向：本条原写「**MaxBytes → HttpMiddleware(3s)**」⇒ **反了**。
+      「数值小的先执行」⇒ HttpMiddleware(+7) 在 MaxBytes(+8) **之前**
+      ⇒ 真实执行序是 **HttpMiddleware(3s) → MaxBytes**（即 MaxBytes 在 3s 预算**之内**）。
+      ⚠️ 这与 §7 补充的结论一致（MaxBytes 在预算之内），只是本条正文的箭头写反了。
+  ⚠️ 订正**不改变**本条的 ① / ② 结论：JwtAuthInterceptor 在两个 Filter **之内** ⇒
+  ① 401 计入 markHTTPResult、② 3s 预算覆盖验签 —— 两句仍成立。
 
 Difference:
   ① 可观测性：Go 的「JWT 验签失败」请求不出现在 access log / span / HTTP 指标里；RAG 会出现。
@@ -1094,6 +1108,11 @@ Difference:
   ② 超时作用域：见 §6.7 表。潜在后果见 UNRESOLVED-004（Redis 慢时 Go fail-open，RAG 可能 503）。
      ⚠️ **2026-10-24 更新**：第九轮实测「Redis 慢」时**两侧都是 503 "Request Timeout"**（Go 3.003s / RAG 3.018s）
      ⇒ 这条**具体后果**已被证伪；但「超时作用域」这个**差异本身**依然成立（属本条的 ②，未被签字覆盖）。
+     ✅ **2026-10-27 已修（G1 lane · 域侧自闭环）**：②「3s 预算覆盖 JWT 验签」**已对齐 Go**
+     ⇒ 验签搬进 `GoStyleJwtAuthFilter`（`@Order(+6)`，在 3s 预算的 `+7` **之外**）；
+     401 仍由 interceptor 抛 ⇒ ① **不变** ⇒ **`SD-USERAPI-002` 继续有效、无需销号**。
+     ⇒ 实现形态与守门证据 ⇒ **§9.x**（⚠️ 台账原写的「改法 A」**不能照抄**，两处硬约束见 §9.x 的
+     「❌ 改法 A 原文为什么不能直接落」）。
 Semantic Impact: OBSERVABLE DIFFERENCE（观测面）+ Timeout scope 差异（行为面，条件性）。
 Risk:         MEDIUM。① 是永远可见的差异；② 是「只有在 Redis 也慢时才可见」的差异。
 Evidence:     静态源码（Go: engine.go:101-113 + chain.go 的 Then 语义；
@@ -1187,9 +1206,16 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
 
 | | Go | RAG |
 |---|---|---|
-| MaxBytes 相对 observability(3s) | **在之外**（`rest/engine.go:164` 是 native middleware，而 observability 是 `server.Use` 的 user middleware ⇒ 后者更靠内） | **在之内**（`GoStyleMaxBytesFilter` `@Order(+6)` 晚于 `HttpMiddlewareFilter` `@Order(+5)` ⇒ 数值小的先执行 ⇒ HttpMiddleware 在外） |
+| MaxBytes 相对 observability(3s) | **在之外**（`rest/engine.go:164` 是 native middleware，而 observability 是 `server.Use` 的 user middleware ⇒ 后者更靠内） | **在之内**（`GoStyleMaxBytesFilter` `@Order(+8)` 晚于 `HttpMiddlewareFilter` `@Order(+7)` ⇒ 数值小的先执行 ⇒ HttpMiddleware 在外） |
 | 可观察后果 | 超限 413 **不计入** access log / span / HTTP 指标 | 超限 413 **计入** |
 | 证据强度 | **静态源码**（`engine.go:130-171` + `chain.go` 的 Append 语义） | **静态源码**（两个 `@Order` 数值） |
+
+⚠️ **2026-10-27 订正**：本表原写 MaxBytes `@Order(+6)` / HttpMiddleware `@Order(+5)`
+⇒ **两个数值都已过期**（共享层在 `d9062f8` 插入了 Traceparent(+3) 并整体后移）
+⇒ 实测值 **+8 / +7** ⇒ **本表结论（MaxBytes 在 3s 预算之内）不变**，只是数值过期。
+⚠️ 数值过期会**连累**「照抄 @Order 数字」的推论 ⇒ 本轮已把共享层槽位一次性列全
+（Traceparent +3 · MaxConns +4 · Breaker +5 · CpuShedding +6 · **HttpMiddleware +7** · MaxBytes +8）
+⇒ 见 **§9.x** 的「共享层槽位实测表」。
 
 ⚠️ **运行时不可观测**（如实声明）：3s 预算挂在 **worker 线程**的 ThreadLocal 上
 （`GoStyleRequestDeadline.begin(deadlineNanos)`，`HttpMiddleware.java:263`），
@@ -1203,6 +1229,169 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
 
 ⇒ **守网锚点**：`UserApiProtectionMvcTest#maxBytesIsOrderedInsideHttpMiddleware`
 （断言两个 Filter 的 `@Order` 相对大小，并**在 javadoc 里自陈这是结构证据而非运行时观测**）。
+
+---
+
+### 9.y `DRIFT-USERAPI-009 ②` 的**实施记录**（2026-10-27 · G1 lane · 域侧自闭环）
+
+> **元信息**：落码分支 `align/g1-users-follow`（基线 `a282012` = `do-my-own-gh`）·
+> **写权内**（全部落 `service/users/user/user-api/**` ＋ `service/users/user/user-rpc/**`）·
+> **证据强度**：**L2 运行时**（容器装配结果 + MockMvc 行为）+ **L1 静态**（Go 侧链序逐行）·
+> ⚠️ **未跑双侧活体对拍**（Go 侧进程未起）⇒ 按 AGENTS.md §0，读作「**在该证据强度下一致**」。
+>
+> ⚠️ **本节同时订正 §9.x 的「改法 A」** —— 那段推导**不能照抄落地**，它漏了两条硬约束。
+
+#### 1. ❌ 改法 A 原文为什么**不能**直接落（两条硬约束，本轮实测才发现）
+
+**约束 ①：Filter 一旦自己写 401，就会打破「413 压过 401」这条已被锁死的语义。**
+
+- `GoStyleMaxBytesFilter` 的类注释**明写**：MaxBytes 在鉴权之外**靠的是「它是 Filter」**，
+  而**不是** `@Order` 的数值 —— 因为 Servlet 的所有 Filter 都在 `DispatcherServlet` **外面**，
+  `HandlerInterceptor` 在**里面** ⇒ Filter 与 Interceptor 的先后由**容器结构**决定。
+- ⇒ 把验签搬进 Filter ⇒ 它就排在 `GoStyleMaxBytesFilter`(+8) **之前**
+  ⇒ 若它自己写 401 ⇒ **401 压过 413**；
+  而 Go 侧 MaxBytes 是 native middleware，排在 Authorize **之外**（更外层）⇒ **Go 是 413 压过 401**。
+- ⇒ 「413 压过 401」是 `UserApiProtectionMvcTest#oversizedBodyIsRejectedBeforeAuth` 锁死的语义
+  ⇒ **改法 A 原文（Filter 写响应）会把它变成新漂移**。
+
+**约束 ②：`[+3, +6]` 这个合法窗口里的四个槽位，全被共享层占满 ⇒ 只能「并列」，不能独占。**
+
+- 落点窗口由**两条**独立约束夹出来：
+  - **下界 +3**：`GoStyleTraceparentFilter`(+3) 会起一个 **SERVER span**
+    ⇒ Go 侧 TraceHandler 在链首、JWT 验签在 span **之内**
+    ⇒ 验签 Filter 必须排在 traceparent **之后**，否则验签落到 span 外 ⇒ **观测面差异**。
+  - **上界 +6**：`HttpMiddlewareFilter`(+7) 在 **submit worker 线程之前**起算 deadline
+    ⇒ 排在 +7 之后 = 验签仍在预算内 ⇒ **② 不闭环**。
+- ⇒ 合法窗口 `[+3, +6]`，四个槽位（+3/+4/+5/+6）分别被
+  Traceparent / MaxConns / Breaker / CpuShedding 占满 ⇒ **无空位**。
+
+#### 2. 共享层槽位实测表（2026-10-27 · `service/common`，**只读**）
+
+| `@Order` | Filter | 作用 |
+|---|---|---|
+| **+3** | `GoStyleTraceparentFilter` | 起 SERVER span（`GoStyleTraceparentFilter.java:190`） |
+| **+4** | `GoStyleMaxConnsFilter` | 连接数闸门（`:96`） |
+| **+5** | `GoStyleBreakerFilter` | 熔断（`:77`） |
+| **+6** | `GoStyleCpuSheddingFilter` | CPU 降载（`:63`） |
+| **+7** | `HttpMiddlewareFilter` | **3s 预算起算点**（`:37`） |
+| **+8** | `GoStyleMaxBytesFilter` | 请求体上限（`:83`） |
+
+⇒ ⚠️ **这张表就是「台账里 @Order 数值过期」的根因**：共享层在 `d9062f8`（T-8）插入了 Traceparent(+3)
+⇒ **任何照抄旧 @Order 数字的推论都必须重算**（本轮已踩：§9.x 与 §7 补充各一处）。
+
+#### 3. ✅ 实际落地的形态：**「Filter 只验签、interceptor 抛异常」**
+
+```
+[Traceparent +3] → [MaxConns +4] → [Breaker +5] → [CpuShedding +6] → [★ JWT 验签 +6] → [3s 预算 +7] → [MaxBytes +8]
+   → DispatcherServlet → [JwtAuthInterceptor：抛 401 + 黑名单] → Controller
+```
+
+| 新增/改动 | 落点 | 职责 |
+|---|---|---|
+| `auth/JwtAuthPaths.java` | user-api | public/protected 判据（**Filter 与 interceptor 共用同一份** ⇒ 两个缝隙同时消失） |
+| `auth/JwtVerificationResult.java` | user-api | 验签结果载体（**失败带「异常对象」而非标志位** ⇒ `@ExceptionHandler` 仍管得到 ⇒ 401 信封形状逐字不变） |
+| `auth/JwtSignatureVerifier.java` | user-api | 验签本体（**只验签，不写响应、不查 Redis**） |
+| `auth/GoStyleJwtAuthFilter.java` | user-api | `@Order(+6)`：**只验签、只写 request attribute、绝不写响应** |
+| `interceptor/JwtAuthInterceptor.java`（改） | user-api | 消费 Filter 的验签结果 → 失败**原样重抛** → 黑名单检查（**留在预算内**，与 Go 一致） |
+
+⇒ **② 闭环**：验签发生在 3s 预算**之外** ⇒ 与 Go 的「计时器在 Authorize 之后起算」一致。
+⇒ **① 不变**：401 仍由 interceptor 抛 ⇒ 仍在 `HttpMiddlewareFilter` **之内** ⇒ 仍计入 `markHTTPResult`
+⇒ ⚠️ ⇒ **`SD-USERAPI-002` 继续有效、无需销号**（签字档不在 G1 写权内，本轮刻意**不**制造销号需求）。
+⇒ **黑名单仍在预算之内** ⇒ 与 Go 一致（Go 的黑名单是 `WithMiddleware` 包在 `route.Handler` 上，最内层）。
+
+#### 4. 🔴 承重不变式：**`GoStyleJwtAuthFilter` 绝不写响应**
+
+- 401 **只能**由 interceptor 抛（`@ExceptionHandler` 仍管得到 ⇒ N-1 的信封形状不变），
+  且发生在**所有 Filter 之后** ⇒ MaxBytes 的 413 仍压过 401。
+- ⇒ ⚠️ **改本类时若要写响应，必须同时重做「413 压过 401」的语义论证。**
+
+#### 5. 守门 + 变异验证（**绿测试必须是错误答案的守卫**）
+
+守门：`UserApiJwtVerificationScopeTest`（**5 例**）——
+① Filter 已注册 · ② **容器装配出的链**里 JWT Filter 排在 `HttpMiddlewareFilter` **之前**
+（⚠️ 断言的是 `ServletContextInitializerBeans` 的**装配结果**，不是两个 `@Order` 数字）·
+③ interceptor 消费的是 Filter 的结果（`request().attribute(...)= "filter"`）· ④ 401 信封形状不变 · ⑤ 路径判据自检。
+
+| # | 变异 | 期望变红的守门 | 实测 |
+|---|---|---|---|
+| 1 | JWT Filter 的 `@Order` +6 → **+8** | ② 装配顺序 | ✅ 红（"JWT 验签 Filter 必须排在 3s 预算 Filter **之前**"） |
+| 2 | Filter **自己写 401** | `UserApiProtectionMvcTest#oversizedBodyIsRejectedBeforeAuth` | ✅ 红（`Status expected:<413> but was:<401>`）⇒ **实证「413 压过 401」被打破** |
+| 3 | 摘掉 Filter 的 `@Component` | ③ interceptor 消费 filter 结果 | ✅ 红（`expected:<filter> but was:<inline>`） |
+| 4 | 删掉 V-012 的 `logBusinessErr` | `UserDomainServiceTest#logout_redisError_logsOriginalCause_forAttribution` | ✅ 红（"Wanted but not invoked"） |
+
+#### 6. ⚠️ 残余差异（如实登记，**不冒充已对齐**）
+
+1. **JWT 验签与过载保护的相对次序**：Go 的 Authorize 排在 MaxConns / Breaker / Shedding **之后**
+   ⇒ 过载被拒的请求**不做**验签；RAG 的验签 Filter 与 `CpuShedding`(+6) **并列**
+   ⇒ 并列落在 Shedding 之前时**多做一次无用验签**。
+   ⇒ **不改变任何响应**（只多一次 HMAC 计算）⇒ **只在过载时可见、只影响 CPU、wire 面零影响**。
+   ⇒ 🔴 **这是本轮引入的新差异**，在此登记（§9.y 独占）。
+2. **`@Order` 并列的确定性**：+6 已被 `GoStyleCpuSheddingFilter` 占用 ⇒ Spring 对**同值**按
+   **bean 定义注册顺序**稳定排序（`ServletContextInitializerBeans` 的 `List.sort` 稳定）
+   ⇒ 本轮实测装配结果满足「JWT 在预算之前」（+6 **严格小于** +7 ⇒ 与并列者的先后**无关**）
+   ⇒ ⇒ **该并列在本语义下无害**（因为验签 Filter 不写响应）。
+3. **①（401 计入观测面）仍在** ⇒ `SD-USERAPI-002` 继续有效。
+
+#### 7. 🟡 跨服务推广（**本轮未做**，登记给整合者）
+
+- 改法 A 的推广是**逐服务**的（Go 侧每个 api 自己 `server.Use` ⇒ 每个服务链序各自决定）
+  ⇒ **同款差异在另外 9 个 api 服务上都成立**：
+  `admin-api`（`docs/DRIFT/users/admin/api.md:592` `DRIFT-ADMINAPI-006` 的 ② 部分）
+  · `follow-api` · `like-api` · `message-api` · `task-api` · `article-api` · `comment-api`
+  · `favorite-api` · `hot-api`。
+- ⚠️ **admin-api 与 follow-api 属 G1 写权内**（本轮**未做** ⇒ 因为本轮指令只点了 `DRIFT-USERAPI-009②`，
+  且 admin 侧 `DRIFT-ADMINAPI-006` 原文写的是「**不列为待办**，仅留档」）。
+- ⇒ **推广配方**（照 §3 抄即可）：
+  ① 验签搬到 `@Order(+6)` 的 Filter（**绝不写响应**）；② 401 仍由 interceptor 抛（信封不变）；
+  ③ 黑名单留在 interceptor；④ 守门抄 `UserApiJwtVerificationScopeTest`（② 断言**装配结果**，不是 @Order 数字）。
+- ⚠️ **推广前必查每个域自己的两个数**：该域 api 的 `WebMvcConfig` 注册的路径前缀
+  ⇒ 决定 `JwtAuthPaths` 的前缀常量；以及该域的 public 路径集合。
+
+#### 8. 🔴 与 §7 补充（MaxBytes 位置）的**槽位联动**（给共享层写权方）
+
+- §7 补充那条（MaxBytes 在 3s 预算**之内**，Go 在**之外**）的落点是 **`service/common`** ⇒ **不在 G1 写权内**。
+- ⚠️ **若共享层将来调整 Filter 的 `@Order`（例如把 MaxBytes 挪到预算之外）**，
+  **必须复核各域 `GoStyleJwtAuthFilter`(+6) 的槽位**：+6 与 CpuShedding 并列、
+  且**必须严格小于** `HttpMiddlewareFilter` ⇒ **一旦 HttpMiddleware 被下调到 +6 或更低，本轮的 ② 立刻退回 OPEN**。
+- ⇒ 这条联动已登记进 `docs/DRIFT/users/vs-common.md`（G1 ⇄ G4 配合范围）。
+
+#### 9. ✅ 真启动复验（2026-10-27 · **真 PG + 真 Redis + 真 Nacos + 真进程 + 真 Tomcat**）
+
+> ⚠️ **为什么要真启动**：AGENTS.md §0 第 3 条 —— 「**每个模块接手的第一件事仍是「先让它真的启动一次」**」
+> ⇒ 本轮给 user-api **加了一个 Filter** ⇒ 它会进容器装配链 ⇒ **必须证明它没把启动搞坏**。
+> ⚠️ **真 Tomcat ≠ MockMvc**：MockMvc 测不到响应头层 ⇒ 「413 压过 401」这种响应级语义
+> **只能在这里证**（仓库既有 `tools/difftest/check-plaintext400-headers.sh` 是同款理由）。
+
+| 环节 | 结果 |
+|---|---|
+| `user-rpc` 真启动 | ✅ `Started UserRpcApplication in 6.379 seconds` |
+| `user-api` 真启动 | ✅ `Started UserApiApplication in 9.684 seconds`（**新 Filter 没破坏容器装配**） |
+| ① protected 无 token | **HTTP 401** ＋ `{"code":1006,"msg":"TOKEN已过期","data":null}` ⇒ **完整信封**（N-1 未破） |
+| ② protected 合法 token | **HTTP 200**（`{"code":1003,...}` = 该 uid 不在用户库 ⇒ 业务层拒，**证明验签链通了**） |
+| ③ protected 坏签名 | **HTTP 401** ＋ 完整信封 |
+| ④ **超限 body + 无 token** | **HTTP 413** ＋ **空 body** ⇒ **「413 压过 401」在真 Tomcat 下仍成立**（Filter 写响应会破，见变异 2） |
+| ⑤ public 路径（login） | **HTTP 200**（`{"code":1002,...}`）⇒ **不验签直接放行**（public 判定未误伤） |
+
+⚠️ ④ 的响应**没有 Content-Type 头** ⇒ 与 Go 侧 `rest/handler/maxbyteshandler.go` 的
+`w.WriteHeader(http.StatusRequestEntityTooLarge)`（**裸 413、无 body、无 Content-Type**）一致 ✅。
+⚠️ **端口**：本轮 `user-rpc` 用了 **49211**（`grpc.server.port` 默认 49210 **被 Docker 容器占用**）
+⇒ **未改仓库任何配置文件**，只在启动脚本里用 env 覆盖 ⇒ **零仓库影响**。
+
+#### 10. 回归（2026-10-27）
+
+| 组件 | 用例 | 结果 |
+|---|---|---|
+| `user-api` | **118**（含新增 `UserApiJwtVerificationScopeTest` **5 例**） | ✅ 0 失败 |
+| `user-rpc` | 47（`UserDomainServiceTest` 46 + 其他） | ✅ 0 失败 |
+| `follow-api` | 56 | ✅ 0 失败 |
+| `follow-rpc` | 78 | ✅ 0 失败 |
+| `admin-api` / `admin-rpc` | 全量 | ✅ 0 失败 |
+| **6 组件合计** | — | ✅ **BUILD SUCCESS** |
+
+⚠️ **本轮踩到并已排除的一个假失败**：user-api 单模块回归曾报 `BUILD FAILURE`（118 例全绿），
+根因是**我在后台跑回归的同时又跑了 `mvn package`**（同一模块的 `target/` 被并发写）
+⇒ **不是产品缺陷**；单独重跑 ⇒ `BUILD SUCCESS`。
+⇒ **教训**：**同一模块不要并发跑两个 maven**（记忆教训「同模块两个 lane 会互踩 `target/`」在**同一 lane 自己身上同样成立**）。
 
 ### DRIFT-USERAPI-010 —— 黑名单 401 的 `Content-Type` 拼写错误，RAG 有意不复刻 —— ✅ **已签字（`SD-2026-10-23-01/02/03` 的 N-1）**
 

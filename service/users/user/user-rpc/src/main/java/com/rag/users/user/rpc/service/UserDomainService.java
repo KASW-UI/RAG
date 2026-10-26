@@ -914,6 +914,18 @@ public class UserDomainService {
                 //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
             throw e;
         } catch (Exception e) {
+            // 🔴 DRIFT-USERRPC-V-012（2026-10-27 · G1 lane · 域侧自修）：原始异常必须进日志。
+            //   修前：asRuntimeException() 造出的 StatusRuntimeException **cause=null**
+            //        ⇒ 实测日志原文 `Status{code=INTERNAL, description=注销失败,Redis写入异常, cause=null}`
+            //        ⇒ 底层 Lettuce 异常（超时 / 连接失败）**完全看不见** ⇒ 排障被指向错误方向。
+            //   Go 侧：service/user/user/rpc/internal/logic/logoutlogic.go 的错误出口把原始 err 交给上层
+            //        ⇒ 与 admin 域 AdminDomainService.logout 的
+            //        `log.error("admin logout Redis setex failed", e)` 同款（原始异常进日志）。
+            //   ⚠️ **status 与 description 一个字都不改**（仍与 Go 逐字一致）⇒ 纯增可观测性，wire 面零影响。
+            //   ⚠️ 上面那层 `catch (StatusRuntimeException e)` 守卫**挡不住**这里的异常：
+            //        Redis 侧抛的是 Spring Data 的普通异常（QueryTimeoutException / RedisConnectionFailureException），
+            //        **不是** io.grpc.StatusRuntimeException ⇒ 守卫永远不命中（实测继承链见台账）。
+            logger.logBusinessErr(Context.current(), ErrorCode.ERROR_DB_SELECT.getCode(), e);
             throw Status.INTERNAL.withDescription("注销失败,Redis写入异常").asRuntimeException();
         }
 
