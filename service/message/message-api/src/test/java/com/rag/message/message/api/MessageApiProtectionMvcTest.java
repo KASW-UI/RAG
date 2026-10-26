@@ -22,8 +22,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p><b>为什么 MockMvc 在这里够用（与 DRIFT-024 的区别要说清）</b>：
  * 本类只断言<b>状态码与短路归属</b>，不断言<b>响应头</b>。
  * 响应头那层 MockMvc 与真实 Tomcat 时序不同（DRIFT-024），由
- * {@link MessageApiProtectionRealTomcatTest}（{@code RANDOM_PORT} + JDK HttpClient
- * 读原始响应头）在真容器下守。
+ * {@link MessageApiProtectionRealTomcatTest}（{@code DEFINED_PORT} + 本域专用端口段
+ * + JDK HttpClient 读原始响应头）在真容器下守。
  * ⇒ 两层各自守自己守得住的部分，不互相冒充。
  *
  * <p>⚠️ <b>本段原先引用的是一个不存在的脚本</b>（{@code tools/difftest/check-protection-layer.sh}，
