@@ -65,8 +65,8 @@
 | # | 事项 | 落点 | 依据 / 修法 |
 |---|---|---|---|
 | **H-1** | 🔴 **补 proto 契约回归网**（A7 无守门） | `service/hot/hot-proto` ＋ `hot-rpc/src/test/**` | `check-proto-static.sh` 只覆盖 user/admin/task ⇒ hot 的 proto 无自动守门 ⇒ 域内加一条「逐字段/字段号/枚举值」契约测试（**域内文件，不改共享脚本**） |
-| **H-2** | 🟡 **A6 升 L4：复制 errmsg 探针骨架到 `hot/`** | `tools/errmsg-probe/{go,java}` → 复制出 `hot/` | 骨架已有（顶层 article ＋ `favorite/`）⇒ 复制一份到 `hot/` 即可拿错误码值/文案/未知码回落的**双侧逐字节**证据 |
-| **H-3** | 🟡 **A7 升 L4：proto wire 探针** | `tools/proto-wire-probe/` → 复制出 `hot/` | 同款骨架（favorite 已有）⇒ 拿 wire 字节级证据 |
+| **H-2** | 🟡 **A6 升 L4：复制 errmsg 探针骨架到 `hot/`** | `tools/errmsg-probe/{go,java}` → 复制出 `hot/` | 骨架已有（顶层 article ＋ `favorite/`）⇒ 复制一份到 `hot/` 即可拿错误码值/文案/未知码回落的**双侧逐字节**证据<br>⚠️ **落点修正（2026-10-27）**：`tools/**` 是**共享面**（不在 G3 写权面）⇒ 本项**不是「域侧自修」** ⇒ **登记给整合者/G4**，G3 只登记不落码（除非整合者把该探针目录划给某域） |
+| **H-3** | 🟡 **A7 升 L4：proto wire 探针** | `tools/proto-wire-probe/` → 复制出 `hot/` | 同款骨架（favorite 已有）⇒ 拿 wire 字节级证据<br>⚠️ **落点修正（2026-10-27）**：`tools/**` 是**共享面**（不在 G3 写权面）⇒ 本项**不是「域侧自修」** ⇒ **登记给整合者/G4**，G3 只登记不落码（除非整合者把该探针目录划给某域） |
 | **H-4** | 🟡 **部署侧**：`hot-rpc` 的 gRPC 端口未在 `Infrastructure.md §3` 预占 | 部署配置（**非本仓写权面**） | `hot-rpc/.../application.yml:83-85` 的注释自记「Infrastructure.md §3 目前只给 hot 预占了 18897(HTTP)，**gRPC 端口未分配**」⇒ **记录 + 上报**，非代码缺陷 |
 | **H-5** | ✅ A3/A4/A5/A9 —— **无需改** | — | 四轴实测一致（端口差异属已记录的部署口径；Go 侧 hot 无业务 span ⇒ 无需补埋点 ⇒ **补了反而是新增 Go 没有的行为**） |
 
