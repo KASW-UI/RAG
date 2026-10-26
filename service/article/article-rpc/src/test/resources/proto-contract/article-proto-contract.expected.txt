@@ -1,0 +1,20 @@
+# proto 契约基准 —— **由脚本从 Go 真源生成，勿手工编辑**
+# 生成脚本：同目录 generate.py（用法见脚本头部）
+# 真源：Sea-RideTheWind_golang/proto/article.proto
+# 真源 sha256：21596ee267ba9052c76fa4fcbbba7a6f7b5b1f947333b0e78b163985fbfd5a81
+package article
+enum|ArticleStatus|ARTICLE_STATUS_UNSPECIFIED=0|DRAFT=1|PUBLISHED=2|REVIEWING=3|REJECTED=4|DELETED=5
+message|Article|id=1:string|title=2:string|brief=3:string|markdown_content=4:string|cover_image_url=5:string|manual_type_tag=6:string|secondary_tags=7:repeated string|author_id=8:string|create_time=9:int64|update_time=10:int64|status=11:ArticleStatus|view_count=12:int32|like_count=13:int32|comment_count=14:int32|share_count=15:int32|ext_info=16:map<string, string>
+message|CreateArticleRequest|title=1:string|brief=2:optional string|markdown_content=3:string|cover_image_url=4:optional string|manual_type_tag=5:string|secondary_tags=6:repeated string|author_id=7:string
+message|CreateArticleResponse|article_id=1:string
+message|GetArticleRequest|article_id=1:string|incr_view=2:bool|public_only=3:bool|requester_id=4:string
+message|GetArticleResponse|article=1:Article
+message|UpdateArticleRequest|article_id=1:string|title=2:optional string|brief=3:optional string|markdown_content=4:optional string|cover_image_url=5:optional string|manual_type_tag=6:optional string|secondary_tags=7:repeated string|status=8:optional ArticleStatus
+message|UpdateArticleResponse|success=1:bool
+message|DeleteArticleRequest|article_id=1:string|operator_id=2:string
+message|DeleteArticleResponse|success=1:bool
+message|ListArticlesRequest|manual_type_tag=1:optional string|secondary_tag=2:optional string|related_game_id=3:optional string|author_id=4:optional string|page=5:int32|page_size=6:int32|sort_by=7:string|desc=8:bool|public_only=9:bool
+message|ListArticlesResponse|articles=1:repeated Article|total=2:int64|page=3:int32|page_size=4:int32
+message|UploadFileRequest|content=1:bytes|fileName=2:string
+message|UploadFileResponse|fileUrl=1:string
+service|ArticleService|CreateArticle(CreateArticleRequest)->CreateArticleResponse|GetArticle(GetArticleRequest)->GetArticleResponse|UpdateArticle(UpdateArticleRequest)->UpdateArticleResponse|DeleteArticle(DeleteArticleRequest)->DeleteArticleResponse|ListArticles(ListArticlesRequest)->ListArticlesResponse|UploadFile(UploadFileRequest)->UploadFileResponse

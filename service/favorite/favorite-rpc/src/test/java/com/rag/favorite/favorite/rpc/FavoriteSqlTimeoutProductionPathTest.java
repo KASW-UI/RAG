@@ -2,6 +2,7 @@ package com.rag.favorite.favorite.rpc;
 
 import com.rag.common.observability.RpcInterceptor.DeadlineState;
 import com.rag.favorite.favorite.rpc.mapper.FavoriteFolderMapper;
+import com.rag.favorite.favorite.rpc.support.RealGrpcPort;
 import org.apache.ibatis.executor.statement.StatementHandler;
 import org.apache.ibatis.plugin.Interceptor;
 import org.apache.ibatis.plugin.Intercepts;
@@ -103,7 +104,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         classes = FavoriteRpcApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "grpc.server.port=0",
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "grpc.client.user-rpc.address=static://127.0.0.1:1",
                 "grpc.client.article-rpc.address=static://127.0.0.1:1",
@@ -127,6 +127,11 @@ class FavoriteSqlTimeoutProductionPathTest {
         registry.add("favorite.fact.dispatch.enabled", () -> "false");
         registry.add("favorite.fact.authority.enabled", () -> "false");
         registry.add("favorite.fact.legacy-preflight.enabled", () -> "false");
+        // 🔴 gRPC server 端口走**本域专用段**（RealGrpcPort），**不用 `port=0`**：
+        //   `port=0` 让 OS 从临时端口段（macOS 49152–65535）里挑 ⇒ 那是 Docker 随机发布
+        //   容器端口用的同一段 ⇒ 别的会话的容器先占住 0.0.0.0:P ⇒ 我们再绑同一个端口
+        //   ⇒ EADDRINUSE ⇒ **整个测试类启动失败**（表现为「偶尔红、换个时间又绿」的抖动）。
+        registry.add("grpc.server.port", RealGrpcPort::pick);
     }
 
     /** 生产数据源（Spring Boot 默认 HikariCP；本域 {@code application.yml} 也显式配了 {@code spring.datasource.hikari.*}）。 */

@@ -413,12 +413,19 @@ public class FavoriteApiSupport {
      * <p><b>⇒ 本方法把「容器层的参数上限」与「应用层的参数上限」统一收敛到 Go 的出口</b>：
      * 无论是谁先发现「参数太多」，对外都只呈现 Go 的那一种形态（<b>200 + 5003</b>）。
      *
-     * <p><b>⚠️ 计数口径仍与 Go 差 1</b>（<b>未修，见 DRIFT-FAV-API-001</b>）：
+     * <p><b>⚠️ 计数口径仍与 Go 差 1</b>（<b>未修</b>）：
      * Tomcat 数的是<b>参数条目数</b>（key + value 合计），Go 的 {@code GetFormValues} 数的是
      * <b>非空值个数</b> ⇒ 同名 2048 个值时，Tomcat 拒、Go 放行。
      * ⇒ 修它要动 {@code server.tomcat.max-parameter-count}，而该值由<b>全仓</b>守门脚本
      * {@code tools/difftest/check-tomcat-limits.py} 统一期望为 2048 ⇒ 需跨域拍板，
      * <b>不</b>在 favorite 域单方面改。
+     * <p>⚠️ <b>登记位置（2026-10-27 订正）</b>：本项<b>没有</b> {@code DRIFT-FAV-API-xxx} 条目
+     * ⇒ 同一格已由 hot 域登记为 {@code DRIFT-HOTAPI-030}（AGENTS.md §3.5 把「Tomcat 三旋钮」
+     * 列为 {@code global/cross-domain}）⇒ 逐条论证见
+     * {@code docs/DRIFT/favorite/api.md} §3 的「残余窗口（精确）」。
+     * <br>⚠️ <b>此前本注释写的是「见 DRIFT-FAV-API-001」⇒ 那是一条不存在的编号（悬空引用）
+     * ⇒ 同一个域里的 {@code DEV-FAV-API-001} 是**另一个东西**（已签字的鉴权失败 body 形状差异）
+     * ⇒ 本次订正指向真实条目。</p>
      *
      * <p><b>⚠️ 为什么 catch 的是 {@link RuntimeException} 而不是 Tomcat 的类</b>：
      * 本方法<b>只包住 {@code getParameterMap()} 这一行</b>（范围极窄），

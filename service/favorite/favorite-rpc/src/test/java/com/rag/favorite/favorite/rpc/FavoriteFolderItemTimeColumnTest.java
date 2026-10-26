@@ -19,6 +19,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import com.rag.favorite.favorite.rpc.support.RealGrpcPort;
 
 /**
  * 🔴🔴 真 PG 上的 **folder / item 时间列**校验 —— 守住 2026-10-26 第二十三轮修的漂移。
@@ -64,7 +65,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         classes = FavoriteRpcApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "grpc.server.port=0",
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "grpc.client.user-rpc.address=static://127.0.0.1:1",
                 "grpc.client.article-rpc.address=static://127.0.0.1:1",
@@ -88,6 +88,11 @@ class FavoriteFolderItemTimeColumnTest {
         registry.add("favorite.fact.dispatch.enabled", () -> "false");
         registry.add("favorite.fact.authority.enabled", () -> "false");
         registry.add("favorite.fact.legacy-preflight.enabled", () -> "false");
+        // 🔴 gRPC server 端口走**本域专用段**（RealGrpcPort），**不用 `port=0`**：
+        //   `port=0` 让 OS 从临时端口段（macOS 49152–65535）里挑 ⇒ 那是 Docker 随机发布
+        //   容器端口用的同一段 ⇒ 别的会话的容器先占住 0.0.0.0:P ⇒ 我们再绑同一个端口
+        //   ⇒ EADDRINUSE ⇒ **整个测试类启动失败**（表现为「偶尔红、换个时间又绿」的抖动）。
+        registry.add("grpc.server.port", RealGrpcPort::pick);
     }
 
     @Autowired

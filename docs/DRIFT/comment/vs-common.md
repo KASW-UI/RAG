@@ -54,8 +54,8 @@
 
 | # | 事项 | 落点 | 依据 / 修法 |
 |---|---|---|---|
-| **C-1** | 🔴 **comment-rpc → article-rpc / message-rpc 出向加 deadline** | `comment-rpc/.../client/ArticleRpcClient.java:65-72` · `client/MessageRpcClient.java:63-83` | 照抄**同域现成实现** `comment-api/.../CommentRpcClient.java:96-102`（`min(2000ms, 剩余预算)`）⇒ **不发明第三种范式**（AGENTS.md §3.2；该写法在 `task-api`/`article-api` 亦有同款）。Go 出处 `zrpc/internal/client.go:115-117`。⚠️ 只解决「2s 封顶」这一半；「继承服务端 deadline」那一半落点在共享层 ⇒ §4-G4-3 |
-| **C-2** | 🔴 **`messaging.destination` 占位符未解析** | `comment-rpc/.../service/CommentAuditListener.java:96` | 改成**注入配置值**（`props.getKafka().getAuditTopic()`）或按 Go 的字面量 `"comment_audit"`。⚠️ **取值口径需先定**：Go 用的是 `"comment_audit"`（**不是真 topic 名** `comment-audit-topic`）⇒ 建议**照抄 Go 字面量**（遥测是契约）⇒ 需在同域台账登记该口径 |
+| **C-1** | ✅ **comment-rpc → article-rpc / message-rpc 出向加 deadline（2026-10-27 阶段 2 已落码）** | `comment-rpc/.../client/ArticleRpcClient.java`（新增 `articleRpc()`）· `client/MessageRpcClient.java`（新增 `messageRpc()`）＋ **新增** `comment-rpc/.../client/GoStyleClientCallTimeout.java`（域内 package-private 工具类） | **已落码**：两个出向出口都改成经 `GoStyleClientCallTimeout.withDeadline(stub)` 取 stub ⇒ **min(2000ms, 请求剩余预算)**，**无请求预算时硬套 2000ms**（`remainingMillis()` 返回 −1 ⇒ 取默认 2000）⇒ 与 Go 的「客户端超时是**拦截器级别**、与有没有 HTTP 超时中间件无关」一致（`zrpc/internal/client.go:113-117` ＋ `zrpc/internal/config.go:15` 的 `default=true` ＋ `zrpc/config.go:31` 的 `default=2000`；`service/comment/rpc/etc/comment.yaml` 未配 `Timeout` ⇒ 走默认值）。<br>⚠️ **落码前的前提已独立复核**：`GoStyleRequestDeadline.begin` 的**唯一主代码调用点**是 `service/common/.../observability/HttpMiddleware.java:304`（HTTP worker）⇒ **gRPC 服务端路径永不绑定** ⇒ `applyTo` 恒返回原 stub ⇒ 落码前**出向调用确实零期限**（真阳性）。<br>⚠️ **范式照抄同域现成实现**（`comment-api/.../CommentRpcClient.java:96-102`）⇒ **不发明第三种写法**；本域只是把它提到 rpc 侧的 package-private 工具类，供两个出口共用一处。<br>⚠️ **只解决「2s 封顶」这一半**；「继承服务端 deadline」那一半落点在共享层 ⇒ §4-G4-3（global `E65`，**不重复派**） |
+| **C-2** | ✅ **`messaging.destination` 占位符未解析（2026-10-27 阶段 2 已落码）** | `comment-rpc/.../service/CommentAuditListener.java`（新增常量 `AUDIT_SPAN_DESTINATION` ＋ `attrs.put(...)`） | **已落码**：取值改成 Go 的字面量 **`"comment_audit"`**（新增 `static final String AUDIT_SPAN_DESTINATION` ＋ 注释块给出 Go 出处）。<br>**取值口径（本轮定案并已登记）**：Go `service/comment/rpc/internal/mqs/audit_consumer.go:34` 传的是 `commentMessageAttrs("comment_audit", key)` ⇒ `:70-77` 的定义体把它写进 `messaging.destination` ⇒ **Go 的 span 属性值是 `"comment_audit"`，而 Go 的真 topic 是 `comment-audit-topic`（`etc/comment.yaml:26,32`）** ⇒ ⇒ **span 属性的取值属于可观察行为**（Jaeger 里的 span 结构）⇒ **逐字对齐 Go，不能「顺手改成更合理的真 topic 名」**（那会与 Go 分叉）。⚠️ **仓内已有同款先例**：task-rpc 的 `TaskTraceAttributes`（同样是「逻辑名 ≠ topic 名」）。<br>⚠️ **修前的形态（真漂移）**：原写法 `attrs.put("messaging.destination", "${comment.kafka.audit-topic}")` 是**普通 Java 字符串** ⇒ `${...}` 只在 `@Value` / yaml 绑定时才会被求值 ⇒ **放在这里永远不会被求值** ⇒ span 上真的带着这串占位符文本 ⇒ 既不是 Go 的 `"comment_audit"`、也不是真 topic 名 ⇒ **两侧遥测不可比**。⚠️ **注意与 `@KafkaListener(topics = "${comment.kafka.audit-topic}")` 的区别**：那处的占位符**由 Spring 解析**，是对的 ⇒ 不要把两处混为一谈 |
 | **C-3** | 🔴 **comment 域 6 个业务 span 整体缺失**（其中 5 个带 `audit.*`）| `comment-rpc/src/main/java/.../service/`（建同款 `CommentSpans`） | Go 清单（**本轮校准：原记「5 个」⇒ 实为 6 个**）：`create/delete/manage/report/update_subject_state_logic.go` 5 个带 `audit.*` 的 span（**9 个不同属性名 / 23 处写入**）**＋ `get_comment_logic.go:52-53` 的 `GetComment`（属性无前缀，`:70-75`）**；**仓内已有正确先例** `service/users/admin/admin-rpc/.../AdminSpans.java:91`（域内私有 `ATTR_*` 常量类）⇒ **域内文件，不动共享层**<br>✅ **G4 已独立复核并交叉确认**（2026-10-27）⇒ 与 G4 台账 §4.4 的「跨域线索」是**同一条** ⇒ **不派 G4**，本域自修 |
 | **C-4** | 🟡 **`:9091` metrics 暴露面** | `comment-rpc` 的部署形态 | Go `comment.go:38-41` 的独立 goroutine ⇒ RAG `web-application-type: none` ⇒ 无对应面 ⇒ 属**部署形态类**，与本域已登记的 U9 同款 ⇒ 需拍板（**不是代码缺陷**） |
 | **C-5** | 🟡 **A6/A7 升 L4 的探针** | `tools/errmsg-probe/{go,java}` → 复制出 `comment/` | 探针骨架已有（顶层 article ＋ `favorite/`）⇒ 复制一份到 `comment/` 即可拿 A6 的 L4 证据（A7 的 wire 探针同理）⇒ **域内可自建** |
@@ -82,12 +82,21 @@
 
 ## 5. 交付物清单
 
-- [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ⚠️ **本轮为阶段 1（只读），未起进程**；域内已有 `CommentRpcGrpcInterceptorWiringTest`（真 gRPC server）、`CommentFlywaySharedSchemaGateTest`（真 PG ＋ 真 Flyway）等资产，**待阶段 2 收口回归统一跑**
+- [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ✅ **2026-10-27 阶段 2 已完成**：`mvn -o -pl service/comment/comment-rpc,... -am test` ⇒ **comment-rpc 27 条 / 0 failures / 0 errors / 0 skipped**（含 `CommentRpcGrpcInterceptorWiringTest`（**真 gRPC server**）＋ `CommentFlywaySharedSchemaGateTest`（**真 PG ＋ 真 Flyway**）＋ `CommentSqlDeadlinePrecisionGateTest`（**真 PG ＋ 真 Hikari ＋ 真 MyBatis 插件链**）3/3 绿）。⚠️ **必须带 `-am`**（否则拿旧共享层跑，见文末「本轮踩坑」）。
 - [x] **9 条轴**逐轴填表（§2）：结论 ✅/🔴/🟡/N/A ＋ **证据强度** ＋ **核对日期**（**2026-10-27**）
 - [ ] **两侧同时跑**的探针（AGENTS.md §3.3）—— ⬜ **本域无现成域级探针**（`tools/*-probe/` 的域级实例只覆盖 favorite）⇒ 结论最高 **L3** ⇒ 已在 §3-C-5 登记「复制探针骨架」的自修项
 - [x] §1 的每一条**重新核对状态**并写回（带核对日期）
-- [ ] §3 的域侧修法**落码 + 守门**（含变异验证）—— **阶段 2 才做**
+- [ ] §3 的域侧修法**落码 + 守门**（含变异验证）—— 🟡 **阶段 2 落码部分已完成**（口径：`mvn -o -pl service/comment/comment-rpc,... -am test` ⇒ comment-rpc **27 / 0 failures**）：
+  - **C-1** ✅ 两个出向 client 补 2s 封顶（新增域内 package-private `client/GoStyleClientCallTimeout.withDeadline` ＋ `ArticleRpcClient.articleRpc()` / `MessageRpcClient.messageRpc()`）
+  - **C-2** ✅ `messaging.destination` 改成 Go 字面量 `"comment_audit"`（新增 `CommentAuditListener.AUDIT_SPAN_DESTINATION` ＋ Go 出处注释块）
+  - ⏳ **C-3**（6 个业务 span ＋ `audit.*` 9 属性）· **C-4**（`:9091` metrics 暴露面 · 部署形态类）· **C-5**（A6/A7 升 L4 的探针 · 骨架已有）＝ **本轮不落码**（C-3 待排期；C-4 需拍板；C-5 属「复制探针骨架」的自修项）
 - [x] §4 的派单**已走实时轨**（`session send` → `G4Common` ＋ 本表正式轨，两轨一致）：**单 1** ＝ 🔴 G4-1（MyBatis-Plus 自动收集 `Interceptor[]` Bean 无运行证据，**阻塞本波**）· **单 2** ＝ 🔴 G4-2（client breaker 在 rpc 侧无装配路径）—— 两条 7 项反馈单齐全（全域共性 ⇒ 请 G4 收口去重）
   - 🔴 G4-3（`E65`）＝ **不重复派**（已是 global 台账的 **OPEN** 项）⇒ G3 只在域台账**引用**，不另开单
   - 🔴 `docs/DRIFT/global/vs-common.md` ＋ `global/_README.md` §七之二属 **SHARED 面 ⇒ G3 不写**（AGENTS.md §5.3e）⇒ 由 G4 / 整合者落
 - [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
+
+> ⚠️🔴 **本轮踩坑（四域共用 · 已在 G4 同步）——「单模块跑法」会拿 `~/.m2` 里的旧共享层做测试**
+> 先用 `mvn -o -pl service/comment/comment-rpc test`（**不带 `-am`**）⇒ **本域 3 条红**（驱动收到 2000 而非原值毫秒 / 在途查询 1044ms / **过期后仍执行 SQL**）⇒ 症状像「SQL deadline 漂移」。
+> ⇒ **根因**：`~/.m2/repository/com/rag/common/0.0.1-SNAPSHOT/common-0.0.1-SNAPSHOT.jar`（安装于 **2026-10-25 21:24**）的 `DeadlineQueryTimeoutInjector` **不含 `unwrapDriverStatement`** ⇒ 是 **E62 修前**的版本 ⇒ 毫秒探测必然失败（退回秒级 `ceil`）＋「已过期」分支还是旧行为「设 1 秒」而非抛 57014 ⇒ 与三条红**逐条吻合**。
+> ⇒ **判定**：基线 commit `9f034e8` 的临时 worktree 跑 `-am` ⇒ **comment-rpc 3/3 绿** ⇒ **不是漂移、不派 G4**。⇒ **纪律：单模块跑域内测试一律加 `-am`**（或先 `mvn install` 共享层）。⚠️ **跑红也 ≠ 坏**（与「跑绿 ≠ 对」同族）。
+> ⇒ **全文与跨域影响面见** [`docs/DRIFT/article/vs-common.md`](../article/vs-common.md) §5 的「本轮踩坑」条（同一轮同一事实，四域共用）。

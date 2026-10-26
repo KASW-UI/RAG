@@ -7,6 +7,7 @@ import com.rag.favorite.favorite.rpc.domain.FavoriteFactOutboxEntity;
 import com.rag.favorite.favorite.rpc.domain.FavoriteItemEntity;
 import com.rag.favorite.favorite.rpc.service.FavoriteAuthorityLookupService;
 import com.rag.favorite.favorite.rpc.service.FavoriteFactEnvelopeFactory;
+import com.rag.favorite.favorite.rpc.support.RealGrpcPort;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -97,7 +98,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         classes = com.rag.favorite.favorite.rpc.FavoriteRpcApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "grpc.server.port=0",
                 // 绕过 Nacos：devh 的 @GrpcClient 在 Bean 初始化期就建 channel（不是懒建）。
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "grpc.client.user-rpc.address=static://127.0.0.1:1",
@@ -122,6 +122,11 @@ class FavoriteAuthorityV2ResponseShapeTest {
         registry.add("favorite.fact.dispatch.enabled", () -> "false");
         registry.add("favorite.fact.authority.enabled", () -> "false");
         registry.add("favorite.fact.legacy-preflight.enabled", () -> "false");
+        // 🔴 gRPC server 端口走**本域专用段**（RealGrpcPort），**不用 `port=0`**：
+        //   `port=0` 让 OS 从临时端口段（macOS 49152–65535）里挑 ⇒ 那是 Docker 随机发布
+        //   容器端口用的同一段 ⇒ 别的会话的容器先占住 0.0.0.0:P ⇒ 我们再绑同一个端口
+        //   ⇒ EADDRINUSE ⇒ **整个测试类启动失败**（表现为「偶尔红、换个时间又绿」的抖动）。
+        registry.add("grpc.server.port", RealGrpcPort::pick);
     }
 
     /** Go {@code http.go:28-30} 要求 token ≥ 32 字节。 */

@@ -1,0 +1,17 @@
+# proto 契约基准 —— **由脚本从 Go 真源生成，勿手工编辑**
+# 生成脚本：同目录 generate.py（用法见脚本头部）
+# 真源：Sea-RideTheWind_golang/proto/hot.proto
+# 真源 sha256：4ede71009039756b9df11d1e02251ef88199ec7447cf2764f4e8de540685d3b6
+package hot
+message|GetHotArticlesRequest|top_k=1:int32
+message|HotArticleItem|article_id=1:string|hot_score=2:uint32
+message|GetHotArticlesResponse|items=1:repeated HotArticleItem
+message|LikeArticleRequest|article_id=1:string|user_id=2:string
+message|LikeArticleResponse|success=1:bool
+message|CommentArticleRequest|article_id=1:string|user_id=2:string
+message|CommentArticleResponse|success=1:bool
+message|CoinArticleRequest|article_id=1:string|user_id=2:string|coin_count=3:int32
+message|CoinArticleResponse|success=1:bool
+message|ShareArticleRequest|article_id=1:string|user_id=2:string|channel=3:string
+message|ShareArticleResponse|success=1:bool
+service|HotService|GetHotArticles(GetHotArticlesRequest)->GetHotArticlesResponse|LikeArticle(LikeArticleRequest)->LikeArticleResponse|CommentArticle(CommentArticleRequest)->CommentArticleResponse|CoinArticle(CoinArticleRequest)->CoinArticleResponse|ShareArticle(ShareArticleRequest)->ShareArticleResponse

@@ -64,7 +64,7 @@
 
 | # | 事项 | 落点 | 依据 / 修法 |
 |---|---|---|---|
-| **H-1** | 🔴 **补 proto 契约回归网**（A7 无守门） | `service/hot/hot-proto` ＋ `hot-rpc/src/test/**` | `check-proto-static.sh` 只覆盖 user/admin/task ⇒ hot 的 proto 无自动守门 ⇒ 域内加一条「逐字段/字段号/枚举值」契约测试（**域内文件，不改共享脚本**） |
+| **H-1** | ✅ **补 proto 契约回归网（2026-10-27 阶段 2 已落码）** | **新增** `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/proto/HotProtoContractTest.java` ＋ `src/test/resources/proto-contract/{hot-proto-contract.expected.txt, generate.py}` | **已落码**（域内文件，**未改共享脚本**）：<br>① **基准由脚本从 Go 真源生成** —— `generate.py` 解析 `Sea-RideTheWind_golang/proto/hot.proto` ⇒ 冻结成 `hot-proto-contract.expected.txt`（真源 sha256 `4ede71009039756b…`）⇒ **期望值不是手抄的**；<br>② **比对「生成码的描述符」而不是「.proto 文本」**（读 `Descriptors.FileDescriptor` ⇒ 拿到真正参与 wire 编码的那份契约）；<br>③ 钉住：package · **11 个 message 的字段名/字段号/类型** · `repeated`（`items` / `articles`）· **5 个 rpc 的方法名与出入参**（`HotService`）。<br>⇒ **实测绿**：`mvn -o -pl service/hot/hot-rpc test -Dtest=HotProtoContractTest` ⇒ **EXIT=0**（1 条用例）。<br>⚠️ **覆盖边界**：不覆盖 gRPC 帧 / HTTP2 帧；**字节级**对拍另需 wire 探针（favorite 域有 `tools/proto-wire-probe/favorite/`，hot 域**没有** ⇒ 属 `tools/**` 共享面 ⇒ 已登记，见 §3-H-3）<br>⚠️ **放在 hot-rpc 而不是 hot-proto**：`hot-proto` 模块**一行 junit 依赖都没有** ⇒ 往那儿加测试要先改 pom（与 favorite/article 域同款理由） |
 | **H-2** | 🟡 **A6 升 L4：复制 errmsg 探针骨架到 `hot/`** | `tools/errmsg-probe/{go,java}` → 复制出 `hot/` | 骨架已有（顶层 article ＋ `favorite/`）⇒ 复制一份到 `hot/` 即可拿错误码值/文案/未知码回落的**双侧逐字节**证据<br>⚠️ **落点修正（2026-10-27）**：`tools/**` 是**共享面**（不在 G3 写权面）⇒ 本项**不是「域侧自修」** ⇒ **登记给整合者/G4**，G3 只登记不落码（除非整合者把该探针目录划给某域） |
 | **H-3** | 🟡 **A7 升 L4：proto wire 探针** | `tools/proto-wire-probe/` → 复制出 `hot/` | 同款骨架（favorite 已有）⇒ 拿 wire 字节级证据<br>⚠️ **落点修正（2026-10-27）**：`tools/**` 是**共享面**（不在 G3 写权面）⇒ 本项**不是「域侧自修」** ⇒ **登记给整合者/G4**，G3 只登记不落码（除非整合者把该探针目录划给某域） |
 | **H-4** | 🟡 **部署侧**：`hot-rpc` 的 gRPC 端口未在 `Infrastructure.md §3` 预占 | 部署配置（**非本仓写权面**） | `hot-rpc/.../application.yml:83-85` 的注释自记「Infrastructure.md §3 目前只给 hot 预占了 18897(HTTP)，**gRPC 端口未分配**」⇒ **记录 + 上报**，非代码缺陷 |
@@ -85,12 +85,21 @@
 
 ## 5. 交付物清单
 
-- [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ⚠️ **本轮为阶段 1（只读），未起进程**；域内已有 `HotGrpcInterceptorWiringTest`（真 gRPC server）、`HotRpcJarExecutableWiringTest`（产物可执行性）、`HotRpcSpringContextWiringTest` 等资产，**待阶段 2 收口回归统一跑**
+- [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ✅ **2026-10-27 阶段 2 已完成**：`mvn -o -pl service/hot/hot-rpc,... -am test` ⇒ **hot-rpc 96 条 / 0 failures / 0 errors / 0 skipped**（含 `HotRpcJarExecutableWiringTest`（**产物可执行性**）＋ `HotGrpcInterceptorWiringTest`（**真 gRPC server**）＋ `HotRpcSpringContextWiringTest`（**真 Spring 上下文**））。⚠️ **必须带 `-am`**（否则拿旧共享层跑，见文末「本轮踩坑」）。
 - [x] **9 条轴**逐轴填表（§2）：结论 ✅/🔴/🟡/N/A ＋ **证据强度** ＋ **核对日期**（**2026-10-27**）
 - [ ] **两侧同时跑**的探针（AGENTS.md §3.3）—— ⬜ **本域无现成域级探针**（`tools/*-probe/` 的域级实例只覆盖 favorite）⇒ 结论最高 **L3** ⇒ 已在 §3-H-2 / H-3 登记「复制探针骨架」的自修项
 - [x] §1 的每一条**重新核对状态**并写回（带核对日期）
-- [ ] §3 的域侧修法**落码 + 守门**（含变异验证）—— **阶段 2 才做**
+- [x] §3 的域侧修法**落码 + 守门**（含变异验证）—— 🟡 **阶段 2 落码部分已完成**（口径：`mvn -o -pl service/hot/hot-rpc,... -am test` ⇒ hot-rpc **96 / 0 failures**）：
+  - **H-1** ✅ proto 契约回归网（新增 `HotProtoContractTest` ＋ 域内 `generate.py` ＋ 冻结 `expected.txt`，**真源 sha256 `4ede71009039756b…`** ⇒ 1/1 绿）
+  - ⏳ **H-2**（A6 升 L4：复制 errmsg 探针骨架到 `hot/`）· **H-3**（A7 升 L4：proto wire 探针）＝ **落点在 `tools/**` 共享面 ⇒ G3 不写**，已登记给整合者/G4 · **H-4**（`Infrastructure.md §3` 未预占 `hot-rpc` gRPC 端口）＝ **非本仓写权** ⇒ 只登记
 - [x] §4 的派单**已走实时轨**（`session send` → `G4Common` ＋ 本表正式轨，两轨一致）：**单 2** ＝ ✅ G4-1（client breaker 在 rpc 侧无装配路径 —— **全域共性**，请 G4 收口去重；⚠️ **hot 域本身 = N/A**：无 gRPC 出向调用 ⇒ 缺口对 hot 不可观测）—— 7 项反馈单齐全
   - 🟡 G4-2（A9 轴措辞）/ G4-3（A8 = N/A 的登记口径）＝ **登记/转整合者项**，已随单 1 消息同批发给 G4（**非 7 项反馈单**）
   - 🔴 `docs/DRIFT/global/vs-common.md` ＋ `global/_README.md` §七之二属 **SHARED 面 ⇒ G3 不写**（AGENTS.md §5.3e）⇒ 由 G4 / 整合者落
 - [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
+
+> ⚠️🔴 **本轮踩坑（四域共用 · 已在 G4 同步）——「单模块跑法」会拿 `~/.m2` 里的旧共享层做测试**
+> `mvn -o -pl <模块> test`（**不带 `-am`**）⇒ 共享层从 **~/.m2** 取 ⇒ 本地那份 `service/common` jar 是 **E62 修前**旧版 ⇒ 域内 SQL deadline 守门会以「毫秒精度失效 ＋ 过期后仍执行 SQL」的形态**假红**（comment-rpc 3 条 / favorite-rpc 1 条）⇒ ⇒ **不是漂移**。
+> ⇒ **纪律：单模块跑域内测试一律加 `-am`**（或先 `mvn install` 共享层）⇒ **跑红也 ≠ 坏**（与「跑绿 ≠ 对」同族）。
+> ⇒ **全文与跨域影响面见** [`docs/DRIFT/article/vs-common.md`](../article/vs-common.md) §5 的「本轮踩坑」条。
+
+> ℹ️ **G4 回执核账（2026-10-27 · 编号澄清已对齐）**：G4 提示「`DRIFT-HOTRPC-004` 闭的是 **hot-api** 侧、不是 hot-rpc 侧；client breaker 那条的权威编号是 **`U4`**」⇒ **我方阶段 1 已就地订正**（§1 表第 ① 行已改为 `U4` ＋ 标注「该闭合指的是 hot-api 侧 ⇒ hot-rpc 侧仍缺」；`DRIFT-HOTRPC-004` 另列为「Redis 客户端重试」条并标「勿混」）⇒ **两边已一致，G4 无需处理**。
