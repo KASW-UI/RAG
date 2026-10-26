@@ -25,7 +25,7 @@
 | 项 | 值 |
 |---|---|
 | 落地 | **36 个 Java 文件 / 7,571 行 / 7 个迁移脚本**（V7 为第十轮前新增的时钟源对齐脚本）<br>⚠️ **核对 2026-10-25（第十轮）**：行数首轮记 7,057 ⇒ 现 **7,571**，增量 514 行**全部是各轮的纯注释增量**（可执行逻辑零改动）（本轮前：34 个文件全 0 字节、`pom.xml` 零依赖零插件、6 个 `.sql` 全 0 字节） |
-| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §26**（favorite-rpc：**19 个测试类 / 105 例**（含 3 skip）—— ⚠️ **第二十轮实测**：新增的 `FavoriteSqlStatementParityTest` 在**没有探针环境变量**时按设计 skip ⇒ skip 数 2 → 3；⚠️ **第二十三轮实测**：新增 `FavoriteFolderItemTimeColumnTest` **5 例**（真 PG）⇒ 100 → **105**） |
+| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §26**（favorite-rpc：**20 个测试类 / 109 例**（含 3 skip）—— ⚠️ **第二十轮实测**：新增的 `FavoriteSqlStatementParityTest` 在**没有探针环境变量**时按设计 skip ⇒ skip 数 2 → 3；⚠️ **第二十三轮实测**：新增 `FavoriteFolderItemTimeColumnTest` **5 例**（真 PG）⇒ 100 → **105**；⚠️ **第二十五轮实测**：新增 `FavoriteSqlTimeoutProductionPathTest` **4 例**（真 PG + 真 HikariCP + 真 MyBatis 链）⇒ 105 → **109**） |
 | 构建 | `mvn -o -pl service/favorite/favorite-rpc -am install` ⇒ **BUILD SUCCESS** |
 | 本轮发现并修复 | **6 处 L2 语义偏差**（§2）+ **2 处实现期真 bug**（§3） |
 | 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选已签字**（2026-10-25）：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK）⇒ **本域已无 🏷 候选**，见 §13.2<br>✅ **U8（第十五轮新增 · 域内可动的最后一条）已于第十六轮闭合**：create / create_item 的**成功路径** + `ensureUserExists` 五分支 + **落库等价性**全部拿到双侧活体证据（**15 case 全 SAME**）⇒ **§25**（盘点全表 ⇒ §24.1）⇒ ~~域内「未知项」归零~~（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认）<br>🔴🔴 **第二十轮翻案**：「域内『未知项』归零」是**提前收口** —— 当时**没查 SQL 语句层**（DDL / 错误码 / 事务语义三层闭了，**语句层是第四层，没做**）⇒ 第二十轮补上那一层 ⇒ **当场抓出 3 处 L1 可观察的漂移**（RAG 侧 INSERT / UPDATE **少绑时间列** ⇒ 落库 `NULL` ⇒ 对外时间戳 = **0**）⇒ **§29**<br>🔴 **U9（第十七轮新增 · 部署形态类 · 待拍板）**：Go 生产形态有 **16062** 那个 HTTP 面（`etc/favorite.yaml:23-30` 的 DevServer + `internal/devserver/server.go:79-82` 的 `if !c.Enabled { return }` ⇒ **与 mode 无关，生产也开**），RAG 侧 `web-application-type: none` ⇒ **没有** ⇒ 要么 RAG 侧也开（**部署形态变更**，需引 servlet 容器），要么**签字接受**⇒ **§26.8** |
@@ -37,12 +37,13 @@
 | 第十四轮收尾 | 🔴 **探针健壮性加固**（§23）—— 消除「**环境红**」假红：4 个起 PG 的探针**统一**改成 **探 TCP + 180s + 重建重试 + 容器退出即放弃**；新增守门网 `tools/probe-gate/favorite/`（含变异验证）；**零行为改动**、**0 条新漂移** |
 | 第十七轮 | 🔴🔴 **生产启动形态**（§26）—— `global` 移交的「**生产 jar 起不来**」查清并修完：**3 个缺陷**（① gRPC client 地址**两斜杠** ⇒ 启动期抛 `IllegalArgumentException`；② `web-application-type` 缺失 ⇒ Boot 判定 SERVLET 而无容器 ⇒ **启动即死**；③ gRPC **reflection 暴露面**漏关）⇒ 新增 **3 个守门测试类 / 14 例**（全部读**生产文件**，不走 `@SpringBootTest` 覆盖）+ **变异验证 4 条**全转红 + 🆕 新探针 `tools/prod-startup-probe/favorite/`（**A/B/C** 真 fat jar 活体对拍 ⇒ EXIT=0）<br>🔴 **翻案**：第十四轮 §22.3 的「启动阻塞 #1 已修」是**半修**—— 修复只落在**探针启动参数**里，**生产 yaml 一行都没改** ⇒ 缺陷活到了发布那一刻 ⇒ 坑档 **PIT-FAV-RPC-026**<br>🔴 **新登记 U9**（部署形态类 · 待拍板）：Go 生产形态的 **16062** DevServer 那个面，RAG 侧没有 |
 | 第十八轮 | 🔴 **借 `global` 的新规则跑本域台账 ⇒ 当场抓出 3 处**（§27）—— 全程**只读**借 `global` 的跨域共享复核器（`tools/check-ledger-selfcheck.py`，**global 单写权**，拷到 `/tmp` 后只调它的 L1/L4 两层）⇒ 抓出 **1 处行号真错**（`core/service/serviceconf.go` 的 **83-90 行** ⇒ 该文件共 89 行 ⇒ 应为 `:83-89`）+ **2 处路径写法不够精确**（`schema/naming.go` / `metrics.go` ⇒ 机器按 basename 核不动）<br>⇒ **不登记候选等别人扩**：把这两层**搬进本域自己的门禁**（`tools/ledger-lint/favorite/check-ledger-selfcheck.py` 新增 **⑤ 仓内路径存在性** + **⑥ Go 侧 `file.go:NN` 可解析** + `--mutation-test`）⇒ **门禁级 0 条**<br>⚠️ **工具第一版的 8 条门禁里 5 条是工具自己的 bug**（缺 Go 标准库 / 缺 N5 去噪 / key 结构写错 …）⇒ 坑档 **PIT-FAV-RPC-027**（**借来的工具只能当探针，不能当门禁**）<br>⚠️ 残留 **57 条「跨库/同名歧义」**（提示级 · 已量化 · 本轮不批量改）<br>🔴 **第二十一轮补正**：上面那句里的「83-90 行」是**当时写错的行号**（本轮订正）⇒ 写成「N 行」而**不是** `file:NN` ⇒ 否则任何 `file:NN` 扫描器都会把它当**活指针**判成悬空（`global` 第三十四轮修好行级去噪后，**它就会浮出来**）⇒ 同批修掉本域另外两处同源写法（`rpc.md` §27.2 表的**错误列** + `PIT-FAV-RPC-027` 的「真缺陷」行） |
-| 第十九轮 | 🔴 **共享层 `DeadlineQueryTimeoutInjector` 改动的跨域验证**（§28 · `global` 第三十三轮）—— 两处行为变化：① **毫秒精度**（`setQueryTimeoutMs`）② **deadline 已过 ⇒ 不执行 SQL**（抛 57014 ⇒ 事务回滚）<br>✅ **favorite 域零条依赖旧行为**（权威读面的 deadline 是**紧贴调用新绑**的 3s ⇒ 新分支走不到；毫秒精度 ⇒ 取消时刻**差 δ（毫秒级）** ⇒ 且 favorite **没有**「SQL 前先烧掉大部分预算」的 handler ⇒ 「最坏 ≈999ms」窗口**不成立**）⇒ 叠 global 实现跑：**全量 177/99/94/29 全绿** + **三个探针全 EXIT=0**（authority-live 21 case / api 32 case / grpc-contract 36+15 case，冻结值一条没动）⇒ **零红、零需改动**<br>🔴 **给 global 的落地提醒**：主文件与测试改动**必须同一次提交**（只提主文件 ⇒ `service/common` 自己的旧行为断言红 1 例 ⇒ 仓库是红的）⇒ 同型 **PIT-FAV-RPC-026**<br>🔴 **纠正一条过期事实**：「favorite 台账 0 字节 / 从未对照」**不成立**（12 份 ≈ 430 KB · 19 轮对照）⇒ 出处是 `AGENTS.md:32` 的 2026-10-23 首轮快照 ⇒ 但**「SQL 语句级」双侧对拍确实未做**（DDL / 错误码 / 事务语义三层已闭）⇒ 这条我**认** |
+| 第十九轮 | 🔴 **共享层 `DeadlineQueryTimeoutInjector` 改动的跨域验证**（§28 · `global` 第三十三轮）—— 两处行为变化：① **毫秒精度**（`setQueryTimeoutMs`）② **deadline 已过 ⇒ 不执行 SQL**（抛 57014 ⇒ 事务回滚）<br>✅ **favorite 域零条依赖旧行为**（权威读面的 deadline 是**紧贴调用新绑**的 3s ⇒ 新分支走不到；毫秒精度 ⇒ 取消时刻**差 δ（毫秒级）**（🔴 **第二十五轮订正**：这句描述的是**共享层那版代码的意图** ⇒ **生产路径上毫秒路径没走**（E62）⇒ 实际走**秒级回退** ⇒ 结论不变但**理由已换成纯算术依据** ⇒ 见 **§34**） ⇒ 且 favorite **没有**「SQL 前先烧掉大部分预算」的 handler ⇒ 「最坏 ≈999ms」窗口**不成立**）⇒ 叠 global 实现跑：**全量 177/99/94/29 全绿** + **三个探针全 EXIT=0**（authority-live 21 case / api 32 case / grpc-contract 36+15 case，冻结值一条没动）⇒ **零红、零需改动**<br>🔴 **给 global 的落地提醒**：主文件与测试改动**必须同一次提交**（只提主文件 ⇒ `service/common` 自己的旧行为断言红 1 例 ⇒ 仓库是红的）⇒ 同型 **PIT-FAV-RPC-026**<br>🔴 **纠正一条过期事实**：「favorite 台账 0 字节 / 从未对照」**不成立**（12 份 ≈ 430 KB · 19 轮对照）⇒ 出处是 `AGENTS.md:32` 的 2026-10-23 首轮快照 ⇒ 但**「SQL 语句级」双侧对拍确实未做**（DDL / 错误码 / 事务语义三层已闭）⇒ 这条我**认** |
 | 第二十轮 | 🔴🔴 **SQL 语句层**双侧活体对拍（§29）—— 补上 favorite 域**四层验证的最后一层**（DDL / 错误码契约 / 事务语义 **三层早已各自闭**，**语句层没做**）⇒ 🆕 探针 `tools/sql-statement-probe/favorite/`：**PG 服务端日志**（`log_statement=all`）**零侵入**取证（Go 侧 `PGAPPNAME=go_side` / RAG 侧 JDBC `ApplicationName=rag_side` / 驱动自己 `probe_marker`）+ **marker 协议**逐用例切片 + **语义签名**比对（不是比 SQL 文本）+ **变异自检 5/5**（含阴性对照）<br>🔴 **抓出 3 处 L1 可观察的漂移**：① `favorite_folder` INSERT **不绑** `create_time`/`update_time` ⇒ NULL ⇒ L1 时间戳 = **0**；② `favorite_item` INSERT **不绑** `create_time` ⇒ NULL ⇒ L1 = **0**；③ 改名**不推进** `update_time` ⇒ L1 `updated_at` 不变（+1 处低影响：`favorite_fact_outbox` 两个投递列 `NULL` vs `''`）⇒ **23 用例 · 20 个用例的语句类别序列两侧逐条一致**，差异**全部集中在「写集合」一维**<br>🔴 **翻案**：§0「域内『未知项』归零」是**提前收口** ⇒ 每一层的**排除项**都会变成下一层的缝隙 ⇒ 坑档 **PIT-FAV-RPC-028** |
 | 第二十一轮 | 🔴 **共享复核器改进后的跨域复跑**（§30）—— `global` 第三十四轮修好我提的 4 条工具缺陷（去噪**行级化** / `go.mod` 权威化 / 两条精确定位通道）⇒ 🔴 **去噪行级化后本域台账有 155 条此前被淹没的引用第一次真被检查** ⇒ 抓出 **1 条 FAIL**：`core/service/serviceconf.go` 的 83-90 行 —— **正是本域第十八轮「抓出并修好」的那一条**，但它在台账里出现 **3 次**、当时**只改了 1 次**（表格的修正列）⇒ **错误列 / 叙述行 / 坑档**三处漏改 ⇒ 本轮**一次改完**（改成「N 行」写法 ⇒ 记录不丢、也不再被任何 `file:NN` 扫描器当活指针）⇒ 改后 **L1 = 0 · L4 = 0** ✅<br>✅ 顺带确认**本域门禁不落后**（②③④ 三条通道本域第十八轮就自己实现了）；🆕 §29 新写的锚点**全部用 `module@version/...` 精确写法** ⇒ 在他们修好的工具里**不落进跨库歧义清单** ⇒ 精确写法应成为本域新标准（存量 62 条歧义仍为提示级，本轮不批量改）<br>🆕 坑档 **PIT-FAV-RPC-029**：「**修一处 ≠ 修完**」（同一处锚点在台账里有 N 个副本）|
 | 第二十二轮 | 🔴 **提交前把本域门禁全跑一遍 ⇒ 抓出第二十轮遗留的 2 处错锚点**（§31）—— 本来只是例行复跑 ⇒ `assertion-audit` **EXIT=1 · 门禁级 2 条**：`FavoriteSqlStatementParityTest.java:296/:324` 的 Go 锚点写成 **logic 层**的 `delete_favorite_folder_logic.go` 的 **336-378 行**，但该文件**只有 96 行** ⇒ 实际指的是 **model 层**的 `service/favorite/rpc/internal/model/favorite_fact.go:336-378`（`DeleteFolderCascade`）⇒ **断言语义对、锚点指错文件** ⇒ 「**证据是假的**」（比没写锚点更危险）<br>⇒ 顺手做**全量语义核对**（门禁只判「行号越界」，抓不到「指错文件但行号在范围内」）：该测试文件**全部 20 个 Go 锚点**逐条回真源核对 ⇒ **18 条正确** · **2 条错锚点已修** · **1 条 I1**（「Go: 同上」无法定位）已展开成真锚点<br>✅ 另核掉 2 条 favorite-rpc 的 I3 ⇒ **全是工具误报**（一个因 excerpt 未从锚点起始行对齐、一个因 excerpt 跨两段）⇒ 锚点本身逐行正确<br>🔴 **根因**：第二十轮**新写了带 20 个 Go 锚点的文件**却**没跑管它的那个门禁** ⇒ 漏检**跨了两轮** ⇒ 坑档 **PIT-FAV-RPC-030**<br>✅ **SQL 探针复跑基线完全一致**（记录 855 / 语句 594 / 语义差异 10 / L1 响应不同 3 例）⇒ `out/` 归一化后**逐字节一致** ⇒ 注释改动**零行为影响** |
 | 第二十三轮 | 🔴🔴 **修掉 SQL 层抓出的 4 处漂移 + 把对拍从「语句层」升级到「落库值层」⇒ 探针转绿**（§32）—— **产品侧 4 处全修**：① `favorite_folder` INSERT 补绑 `create_time`/`update_time`（**同一个** `now` ⇒ Go 的 `curTime` 整条 INSERT 只取一次）② `favorite_item` INSERT 补绑 `create_time` ③ 改名 UPDATE 补 `update_time`（GORM 的 map 形式 Update **自动追加** autoUpdateTime）④ outbox 的 `technical_receipt_id`/`technical_input_hash` 显式写 `''`（Go 是**非指针** string ⇒ 零值是 `''`）⇒ 全部用**应用进程时钟**（**不是** PG 的 `now()`）⇒ 与 Go 同源<br>⇒ 顺带订正 **2 处被实测证伪的 javadoc**（「由 PG 的 now() 生成」「Go 也只写 name」—— 两处**写错了事实**）<br>🔴 **对拍工具自身有 4 个缺陷**：① `PARAM_RE` 丢掉 NULL 参数（静默）② 值提取跑在 normalize **之后** ⇒ `$N` 已成 `?` ③ **只比列集不问 DDL** ⇒ 3 列误报 ④ **L1 精确相等 ⇒ 结构上恒红** ⇒ 判别不了「修没修」⇒ 全部修掉（**DDL 感知** + **L1 归一化**）<br>🟡 「多投影一列」不必然是行为差异 ⇒ 走**带出处的显式登记**（`equivalences.tsv`，**出处自动校验**，不过则作废）⇒ 根因：Go 的 struct **只有 8 个字段、无 `approved_at`** ⇒ 取回后在 struct 层就丢弃<br>✅ **探针转绿**：语义差异 **10 → 0** · L1 响应不同 **3 → 0** · EXIT=0 ⇒ **变异自检 6/6**（含**新增**阴性对照）+ **产品级变异 2/2 转红** ⇒ 绿是**有证据的绿**<br>⇒ 坑档 **PIT-FAV-RPC-031**：「**恒红的信号不携带信息**」 |
 | 第二十四轮 | 🔴 **跨分支论证订正**（§33）—— `global` 第三十八轮回执指出我第十九轮的一条**依据**用错了符号 ⇒ **核完确认：结论对、依据错** ⇒ 台账订正：<br>🔴 原写「favorite 的 client deadline **上界恒为 2s**（`FavoriteRpcClient.capByClientTimeout` 把 `min(ctx 剩余, 2s)` 压进去）」⇒ **错**：那是 **api 侧**的**客户端封顶**（决定 api→rpc 那次调用还剩多久），**不决定** rpc 内部 SQL 的 R；真正决定 R 的是 **rpc 侧 `RpcInterceptor`（`:170-172`）每次调用自己新绑 `now + 2s`** ⇒ ⇒ **本分支上正确的依据 = 「R = 新绑的整预算 − δ，δ 是 handler 前置耗时（毫秒级）」⇒ 与「客户端上界」无关**<br>⚠️ **跨分支提醒**：`global` 侧的 `service/common` 与本分支**不是同一版本**（他们 `:232-237` 的 `min(server, clientRemaining)` vs 本分支 `:170-172` 的服务端自绑）⇒ ⇒ 那边「躲开最坏窗口」的依据**只能是「handler 不烧预算」** ⇒ 结论一致、**依据不同**<br>⇒ 坑档 **PIT-FAV-RPC-033**：「**符号存在 ≠ 符号决定你要论证的那个量**」+「同名文件在不同分支上是两个实现」 |
+| 第二十五轮 | 🔴 **核 `global` 第四十一轮 E62：毫秒精度在本域生产路径上到底生效没有**（§34）—— `global` 要求本域核对台账里凡写「毫秒精度已生效」的表述并加限定 ⇒ **先核事实，不直接采信**：① **静态**（`javap`）：pgjdbc 的毫秒 API **只挂在实现类**上（**42.6.2 / 42.7.13 都一样**）· HikariCP 的 `HikariProxyPreparedStatement`（**4.0.3 / 5.0.1 / 7.0.2 全查**）**只有秒级接口** ⇒ ⇒ 按运行期类反射找毫秒方法**必然失败** ⇒ **机制成立** ② 🔴 **本域运行时实测**（真 PG + 真 HikariCP + 真 MyBatis 插件链 + 真 mapper）：statement = `HikariProxyPreparedStatement` ⇒ 毫秒 API **不可达** ⇒ 有效超时 = **2 秒 / 驱动内部原始毫秒 2000（整秒）** ⇒ **秒级回退**（R ≈ 1700 ⇒ 毫秒路径会给 ≈1700 ⇒ 可区分）③ 🔴 **阴性对照**（同 PG 不走池）⇒ pgjdbc 实现类上毫秒 API **可达** ⇒ 且实测 `setQueryTimeoutMs(1700)` ⇒ 原始毫秒 = **1700** ⇒ ⇒ **判别器不是恒真**<br>⇒ 🔴🔴 **叠加 `global` 那版实现（含毫秒路径）复跑**：他们自己的 `DeadlineQueryTimeoutInjectorTest` **10 例全绿** + 本域 **4 例仍全绿** ⇒ ⇒ **带毫秒路径的实现与旧秒级实现在本域给出完全相同的有效值** ⇒ ⇒ **毫秒路径在本域生产路径上根本没走到** ⇒ ⇒ **E62 在本域以运行时证据成立**（不是转述）⇒ ⇒ **共享层这次改动对 favorite 的可观察影响 = 0**（生产上）<br>⇒ 🔴 **台账订正**：§28 引言 + §28.1 对比表（改成「代码意图 / 生产实际」**三列**）+ §28.1 结论句（**区分 (A) 旧↔新 = 0** 与 **(B) Go↔RAG = δ**）⇒ ⇒ 结论不变（**A 类仍 0**）但**理由换成纯算术依据** ⇒ **不再依赖未验证前提**<br>⇒ ✅ **本域零红、零需改动**；共享面**零改动**（overlay 后已还原）⇒ 🆕 坑档 **PIT-FAV-RPC-034** |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -2345,6 +2346,17 @@ Nacos 故意指向 `127.0.0.1:1` ⇒ 顺便证明「**注册中心不在也能�
 > —— ② 是**行为收窄**（原先「过期后仍会写入」）。
 > ⇒ 他们问：**favorite 域若有任何测试/行为依赖「过期后 SQL 还能再跑最多 1 秒」这条旧行为 ⇒ 请回报。**
 
+> 🔴🔴 **2026-10-26 第二十五轮加限定（`global` 第四十一轮 E62 通知触发）** ——
+> 上面 ① 那句「**反射探测 ⇒ 取消时刻 == deadline 时刻**」是**共享层那版实现的描述**，
+> **不是 favorite 生产路径的事实**：
+> 🔴 探测用的是 `statement.getClass()`，而**生产路径上 statement 是 HikariCP 的代理类**
+> ⇒ `setQueryTimeoutMs` **在它自己的类上不可达** ⇒ **探测必然失败 ⇒ 实际退回秒级向上取整**
+> ⇒ ⇒ **「取消时刻 == deadline 时刻」在 favorite 的生产路径上不成立**。
+> ⇒ 本域**运行时实测**（真 PG + 真 HikariCP + 真 MyBatis 插件链 + 真 mapper）⇒ 证据见 **§34**。
+> ⇒ ⚠️ **本分支（`align/favorite`）的 `service/common` 里根本没有毫秒路径**
+> —— `DeadlineQueryTimeoutInjector` 仍是**旧的秒级实现** ⇒ ⇒ 下面 §28.1 的「新实现」一列
+> 指的都是**共享层那版**，不是本分支上跑着的代码。
+
 ### 28.1 ✅ 答案：**没有** —— favorite 域零条依赖那条旧行为
 
 | favorite 的路径 | deadline 怎么来 | 新分支（②）会不会走到 |
@@ -2354,13 +2366,22 @@ Nacos 故意指向 `127.0.0.1:1` ⇒ 顺便证明「**注册中心不在也能�
 | **Dispatcher**（`favorite.fact.dispatch.enabled` 默认**关**） | 单次 10s deadline | ❌ 域内**无测试**覆盖该路径 |
 | **启动期建表**（Flyway） | **无** deadline | ❌ 拦截器**完全不动**（`remaining == NO_DEADLINE` ⇒ 直接 return） |
 
-⚠️ **毫秒精度（①）对 favorite 的影响：取消时刻差 = δ（毫秒级）** —— ⚠️ **本条曾被我写成「完全相同」，那是措辞不精确，此处更正**（2026-10-26 第十九轮收尾自查）：
+⚠️ **毫秒精度（①）对 favorite 的影响** —— ⚠️ **本条曾被我写成「完全相同」，那是措辞不精确，此处更正**（2026-10-26 第十九轮收尾自查）；
+🔴🔴 **2026-10-26 第二十五轮再订正**：下表中间那一列描述的是**共享层那版代码的意图**，
+**不是 favorite 生产路径的事实** ⇒ 🔴 **生产实际走的是最右列（秒级回退）**（E62 ⇒ 证据见 **§34**）：
 
-| | 旧实现（秒级向上取整） | 新实现（原样传毫秒） |
-|---|---|---|
-| 给驱动什么 | `setQueryTimeout(ceil(R/1000))` ⇒ **整秒**，自**语句开始执行**起算 | `setQueryTimeoutMs(R)` ⇒ **剩余毫秒**，自**语句开始执行**起算 |
-| 取消时刻 | `t_exec + ceil(R/1000)*1000` | `t_exec + R` |
-| **取消时刻差** | **`ceil(R/1000)*1000 - R`** ∈ **[0, 999] ms**（R 刚过整秒时最坏 ≈ 999ms） | 0 |
+| | 旧实现（秒级向上取整） | 新实现·**代码意图**（原样传毫秒） | 新实现·**生产实际**（E62：探测失败 ⇒ 秒级回退） |
+|---|---|---|---|
+| 给驱动什么 | `setQueryTimeout(ceil(R/1000))` ⇒ **整秒**，自**语句开始执行**起算 | `setQueryTimeoutMs(R)` ⇒ **剩余毫秒**，自**语句开始执行**起算 | **同左列** —— 回退路径是 `max(1, ceil(R/1000))`，与旧实现**逐字一致** |
+| 取消时刻 | `t_exec + ceil(R/1000)*1000` | `t_exec + R` | `t_exec + ceil(R/1000)*1000` |
+| **取消时刻差**（相对真实 deadline） | **`ceil(R/1000)*1000 - R`** ∈ **[0, 999] ms**（R 刚过整秒时最坏 ≈ 999ms） | 0 | **`ceil(R/1000)*1000 - R`** ∈ **[0, 999] ms** |
+
+⇒ 🔴 **必须区分两个「差」**（这是本段最容易读错的地方）：
+
+| | 是谁跟谁比 | 值 | 依赖什么 |
+|---|---|---|---|
+| **(A)** | **旧实现 ↔ 新实现** | **0** | 🔴 生产上**根本没走毫秒路径** ⇒ 两者**逐字一致** ⇒ 共享层这次改动对 favorite 的**可观察影响 = 0** |
+| **(B)** | **Go 侧 ↔ RAG 侧** 的取消时刻差 | **`ceil(R/1000)*1000 - R`** ⇒ **favorite 恒等于 δ（毫秒级）** | ⇒ **纯算术**（见下）⇒ ⇒ **完全不依赖**毫秒路径是否生效 ✅ |
 
 ⇒ **R = 剩余毫秒数**。favorite 两条路径的 R：
 - **权威读 HTTP 面**：`bindToCurrent(now + 3_000)`（`FavoriteAuthorityEndpointConfig:275-276`）⇒ `R = 3000 − δ` ⇒ 差 = **δ**
@@ -2368,7 +2389,10 @@ Nacos 故意指向 `127.0.0.1:1` ⇒ 顺便证明「**注册中心不在也能�
 （δ = 从「绑定 deadline」到「语句开始执行」之间的毫秒数 ⇒ favorite 两条路径都只有**几毫秒**）
 
 ⇒ ⇒ **结论不变**（favorite 域零红、零需改动、三个探针冻结值一条没动），
-但**理由要写准**：**不是「完全相同」，而是「差 δ（毫秒级）」**。
+但**理由要写准 —— 而且理由变了**：
+🔴 **不是**「毫秒精度让两边一致」（那条在生产上**不成立**，见 E62）；
+✅ **是**「**favorite 的 R = 整预算 − δ ⇒ 秒级向上取整只多给 δ ⇒ 取消时刻差 = δ（毫秒级）**」
+⇒ ⇒ 这条理由**不依赖**毫秒路径是否生效 ⇒ ⇒ **比原来那条更稳**（原来那条隐含依赖一个**未验证**的前提）。
 ⇒ 且 **favorite 域没有任何 handler 会在执行 SQL 之前烧掉大部分预算** ⇒ 那个「最坏 ≈ 999ms」的窗口
 在 favorite 域**不成立** ⇒ 这才是「毫秒精度对 favorite 零影响」的**真正依据**（可推广的那条）。
 
@@ -3020,3 +3044,94 @@ vs 本分支 `:170-172` 的服务端自绑）⇒ ⇒ **同一路径在两个分�
 | **符号存在性核对** | ✅ `capByClientTimeout` 在**本分支**存在，但位于 **`favorite-api`**（`favorite-api/.../client/FavoriteRpcClient.java:156-168`）⇒ 与 rpc 侧 SQL 预算**无关** |
 | **本分支 R 的决定者** | ✅ `service/common/.../RpcInterceptor.java:170-172`（服务端每次调用新绑 `now + timeout`）+ `:281`（`bindToCurrent`）⇒ `rpc-timeout: 2s`（`application.yml:252`） |
 | **本轮性质** | ✅ **纯台账订正** ⇒ **产品代码零改动** · **共享面零改动** |
+
+## 34. 2026-10-26 第二十五轮（`align/favorite` 工作树 · 承 `a4a7ee0`）—— 🔴 **核 `global` 第四十一轮 E62：毫秒精度在本域生产路径上到底生效没有**
+
+> **来源**：`global` 第四十一轮登记 **E62**（`docs/DRIFT/global/_README.md`）⇒ 告知 favorite owner：
+> E46 的**毫秒精度**在**连接池代理**路径上**不生效** ⇒ SQL 超时退回**秒级向上取整**
+> ⇒ 要求 favorite 域**核对台账中凡写「毫秒精度已生效 / 已对齐」的表述并加限定**。
+>
+> 🔴 **本轮边界**：E62 的**修法**落点在 `service/common` ⇒ **global 单写权** ⇒ **favorite 不改共享层**。
+> ⇒ 本轮只做**三件事**：① **核事实**（不直接采信对方的结论）② **加限定**（订正本域台账表述）
+> ③ **留下守门**（钉住本域生产路径的当前有效行为）。
+
+### 34.1 🔴 先核事实：机制**成立**（静态）
+
+`global` 给的机制是：毫秒探测用 `statement.getClass()`，而生产路径上 statement 是 **HikariCP 代理类** ⇒ 探测必然失败。
+
+| 事实 | 核法 | 结果 |
+|---|---|---|
+| pgjdbc **有**毫秒 API，且只挂在**实现类**上 | `javap org.postgresql.PGStatement` / `org.postgresql.jdbc.PgStatement` | 接口**没有**；实现类**有** `setQueryTimeoutMs(long)` / `getQueryTimeoutMs()` ⇒ 与 `global` 的 javadoc **一致**（**42.6.2 与 42.7.13 都一样** ⇒ 与版本无关） |
+| HikariCP 代理类**不暴露**毫秒 API | `javap com.zaxxer.hikari.pool.HikariProxyPreparedStatement`（4.0.3 / 5.0.1 / 7.0.2 全查） | 只有 `getQueryTimeout()` / `setQueryTimeout(int)` ⇒ **没有** `setQueryTimeoutMs` ⇒ ⇒ `statement.getClass().getMethod("setQueryTimeoutMs", long.class)` **必然抛 `NoSuchMethodException`** |
+| 秒级路径写入的**原始毫秒**是整秒 | `javap -c org.postgresql.jdbc.PgStatement` | `setQueryTimeout(int)` 的字节码是 `i2l` → `lmul 1000` → `invokevirtual setQueryTimeoutMs` ⇒ ⇒ 驱动内部只有一个毫秒字段（`timeout`）⇒ 秒级路径写进去的是 **`ceil(R/1000)*1000`** |
+
+⇒ ⇒ **机制成立**：按运行期类反射找毫秒方法 ⇒ 在**池化**路径上**必然失败** ⇒ 静默回退到秒级。
+
+### 34.2 🔴 本域运行时实测（真 PG + 真 HikariCP + 真 MyBatis 插件链 + 真 mapper）
+
+> 守门类：`service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteSqlTimeoutProductionPathTest.java`
+> （**4 例**；`@SpringBootTest(classes = FavoriteRpcApplication.class)` ⇒ **生产那个注入器原样生效**；Testcontainers **真 PG 16**）
+
+| # | 断言 | 实测结果 |
+|---|---|---|
+| 1 | 注入器看到的 statement 是**代理类** | `com.zaxxer.hikari.pool.HikariProxyPreparedStatement` ✅ |
+| 2 | 该类上 `setQueryTimeoutMs` **不可达** | `NoSuchMethodException` ✅ |
+| 3 | **有效超时是秒级向上取整** | 代理层 `getQueryTimeout()` = **2** 秒；驱动内部**原始毫秒** = **2000**（**整秒**）—— R ≈ 1700 ⇒ 若是毫秒路径应为 ≈1700 ⇒ ✅ **判定为秒级回退** |
+| 4 | **阴性对照**：同一个 PG **不走连接池** | statement = `org.postgresql.jdbc.PgPreparedStatement` ⇒ 毫秒 API **可达** ⇒ ✅ 差别在**连接池代理**，不在驱动 |
+
+⇒ 🟢 **判别器为什么可靠**（这条最容易做成恒真，所以专门写了**阳性对照**）：
+代理层 `getQueryTimeout()`（int 秒）**分不开**两条路径 —— pgjdbc 的 `setQueryTimeout(int)` 内部就委托给
+`setQueryTimeoutMs(seconds*1000)` ⇒ 两条路径都被抬成整秒 ⇒ **只有驱动内部的原始毫秒能区分**。
+⇒ 而原始毫秒要 **unwrap 到驱动实现类**才读得到（代理类不暴露）⇒ 守门里就是这么做的。
+⇒ **阳性对照**：在**无池**那条连接上直接 `setQueryTimeoutMs(1700)` ⇒ 原始毫秒实测 = **1700**
+⇒ ⇒ 与生产路径上的 **2000** **明确不同** ⇒ ⇒ 这条断言**真的在区分两条路径**，**不是恒真**。
+
+⇒ 🟢 **没有 deadline 时注入器完全不动**（定时任务 / MQ 消费 / 启动期建表不受影响）—— 第 4 例钉住。
+
+### 34.3 🔴🔴 叠加 `global` 那版实现复跑 ⇒ **同一组断言仍然全绿** ⇒ 毫秒路径**没走**
+
+> **只读 overlay**：`global` 的 `DeadlineQueryTimeoutInjector.java`（**含毫秒路径**）+ 他们的
+> `DeadlineQueryTimeoutInjectorTest.java` 覆盖到本分支 ⇒ 跑完 `git checkout` **还原**
+> ⇒ **共享面零改动**（`git status` 已确认还原干净）。
+
+| 项 | 结果 |
+|---|---|
+| `service/common` 的 `DeadlineQueryTimeoutInjectorTest`（**他们那版**） | ✅ **10 例全绿** |
+| 本域 `FavoriteSqlTimeoutProductionPathTest` | ✅ **4 例仍全绿** ⇒ **有效超时仍是 2000（整秒）** |
+
+⇒ ⇒🔴 **决定性**：**带毫秒路径的实现**与**旧的秒级实现**在 favorite 的生产路径上
+**给出完全相同的有效值** ⇒ ⇒ **毫秒路径在本域生产路径上根本没被走到**
+⇒ ⇒ **E62 在 favorite 域以运行时证据成立**（不是转述，是本域自己跑出来的）
+⇒ ⇒ **共享层这次改动对 favorite 的可观察影响 = 0**（生产上）。
+
+### 34.4 🔴 台账订正清单（本轮改掉的每一句）
+
+| 位置 | 原写法 | 改后 |
+|---|---|---|
+| **§28 引言 ①** | 「毫秒精度（…反射探测 ⇒ 取消时刻 == deadline 时刻）」 | 加上限定：**这是共享层那版实现的描述，不是 favorite 生产路径的事实** ⇒ 生产实际是**秒级回退** |
+| **§28.1 对比表** | 两列（旧实现 / 新实现） | **三列**：旧实现 / 新实现·**代码意图** / 新实现·**生产实际** ⇒ 把「意图」与「事实」**分列** |
+| **§28.1 结论句** | 「不是『完全相同』，而是『差 δ（毫秒级）』」 | 🔴 **区分两个「差」**：**(A)** 旧↔新 = **0**（生产上两者逐字一致）；**(B)** Go↔RAG = **δ**（纯算术）⇒ ⇒ 真正的理由是 **(B)**，它**不依赖**毫秒路径是否生效 ⇒ **比原来那条更稳** |
+| **§0 第十九轮行** | 「毫秒精度 ⇒ 取消时刻差 δ（毫秒级）」 | 补第二十五轮订正指针 |
+
+⇒ 🟢 **结论本身没变**：favorite 域**零红、零需改动**、三个探针冻结值一条没动 ⇒ **§24.1 的 A 类仍是 0**。
+⇒ 🔴 **变的只是「理由」**：原理由隐含依赖「毫秒路径会生效」这个**未验证前提** ⇒ 现在换成**纯算术**依据。
+
+### 34.5 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| **本域守门（新增）** | ✅ `FavoriteSqlTimeoutProductionPathTest` **4 例全绿**（真 PG + 真 HikariCP + 真 MyBatis 链 + 真 mapper） |
+| **本域全量测试** | ✅ **BUILD SUCCESS** —— `mvn -o -pl service/favorite/favorite-{proto,common,rpc,api} -am test -Dsurefire.failIfNoSpecifiedTests=false`：favorite-rpc **109 例**（含 3 skip）· favorite-api **94 例** · favorite-common **29 例** ⇒ **0 失败 0 错误** |
+| **叠加 `global` 实现复跑** | ✅ `service/common` 10 例 + 本域 **4 例**全绿 ⇒ **有效值不变** ⇒ 毫秒路径**没走** |
+| **共享面** | ✅ **零改动**（overlay 后已 `git checkout` 还原，`git status` 干净） |
+| **产品代码** | ✅ **零改动**（本轮只加**测试** + 改**台账/坑档**） |
+| **本域四个门禁** | ✅ 全 **EXIT=0** —— `check-ledger-selfcheck.py`（**门禁级 0 条**）· `check-ledger-selfcheck.py --mutation-test`（**变异自证通过**）· `check-ledger-vs-reality.py` · `check-assertion-sources.py`（**无门禁级发现**）<br>⚠️ `check-ledger-vs-reality.py` **当场抓到**本轮新增测试类导致 §0 的「19 类 / 105 例」过期 ⇒ **已同步为 20 类 / 109 例** ⇒ 该门禁**确实在盯数字**（不是摆设） |
+| **四个探针复跑** | ✅ 全 **EXIT=0** —— `grpc-contract-probe`（**36 + 15 case**，冻结值一条没动）· `authority-live-probe`（**SAME 20 / OBS 0 / SKIP 1**）· `api-full-parity-probe`（**32 case**：SAME 24 / SAME_CODE 1 / SAME_BODY 2 / SAME_STATUS 4 / OBS 1）· `sql-statement-probe`（**语义差异 0 · L1 0 例**；记录 855 / 语句 594 / marker 46 ⇒ 与第二十轮基线**逐条一致**）<br>🟢 SQL 探针的 `out/` 两个文件**归一化后逐字节一致**（只差时间戳与雪花 ID ⇒ 非确定量）⇒ ⇒ **不提交这批噪音**（已 `git checkout` 还原）⇒ 与第二十二轮同款处理 |
+
+### 34.6 边界与后续
+
+- 🔴 **E62 的修法（先 unwrap 到驱动实现类再探测）由 `global` 做** ⇒ favorite **只读不动**。
+  ⇒ ⚠️ **一旦他们修好，本域第 3 条断言会转红**（原始毫秒会变成 ≈R 而非 2000）
+  ⇒ ⇒ 那**不是回归**，而是「**本域台账的秒级表述该更新了**」的信号 ⇒ 已在守门类 javadoc 里写明。
+- 🟡 **本域不做**「Go ↔ RAG 取消时刻是否逐字一致」的结论 —— 那是**共享层**的事，且当前**不成立**
+  （Go 到 deadline 精确取消；RAG 走秒级回退 ⇒ 最坏晚 ≤999ms ⇒ favorite 因 δ 毫秒级而**不可观察**）。
