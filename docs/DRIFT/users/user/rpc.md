@@ -36,7 +36,7 @@
   证据散落在 `users/_shared.md` 的 §6.2.5 与 §6.2.6。
 - ⚠️ `AvatarTransactionWiringTest`（5 条，含 2 条真触发 rollback）证明 `@Transactional` 真生效，
   但 §6.2.6 自己声明 **「无真实 PG，故不证明 jsonb `CAST` 等 PG 行为」**——该缺口后由
-  `UserRpcContainerWiringTest`（真 Testcontainers PG，12 条）关闭，详见 `users/_shared.md`。
+  `UserRpcContainerWiringTest`（真 Testcontainers PG，**16 条**，2026-10-26 实测）关闭，详见 `users/_shared.md`。
 - 本模块的 `HUMAN_ONLY.MD` **不存在**（全仓 4 个 HUMAN_ONLY.MD 全在 users 域，但不含 user-rpc 之外的域）。
 ---
 
@@ -55,7 +55,7 @@
 | RAG 侧 | `RAG/service/users/user/user-rpc` —— 通读 **16 个 main 源文件** + `pom.xml` + `application.yaml` + `AutoConfiguration.imports` + `users-common` 的 4 份 DDL 与 `SchemaInitializer` |
 | 外部依赖（**不属于本组件，但本组件消费**） | ① `service/user/common/{cryptx,jwt,errmsg}`（user 与 admin 两域共用）② `service/common/{snowflake,observability,logger}` ③ `service/common/*` ↔ RAG `com.rag.common.*` |
 | 编号命名空间 | 本轮新增 **`DRIFT-USERRPC-V-001` 起** / **`UNRESOLVED-USERRPC-001` 起**。users 域已占用的 `DRIFT-001..011/016/018/024`、`DRIFT-NEW-001/005/007/008/011/012/013/014/015/016/018`、`DRIFT-FRAMEWORK-001` **一条都不复用**。⚠️ **2026-10-26 第十一轮新增 `DRIFT-USERRPC-V-012`**（编号续在 V-011 之后）|
-| 本轮自跑证据 | ✅ **真 PG**：`mvn -o -pl service/users/user/user-rpc -am test`，**2026-10-24 实测 `Tests run: 125, Failures: 0, Errors: 0`**（其中含本轮新建的 `UserRpcGoErrorMessageParityTest` 3 条）。`UserRpcContainerWiringTest` **12 条**跑在 Testcontainers `postgres:16-alpine` 上（日志实证 `DockerClientFactory` + `Found Docker environment`），`AvatarTransactionWiringTest` 5 条跑在真实 Spring 容器装配上 |
+| 本轮自跑证据 | ✅ **真 PG**：`mvn -o -pl service/users/user/user-rpc -am test`，**2026-10-26 实测 `Tests run: 128, Failures: 0, Errors: 0, Skipped: 0`**（较 2026-10-24 基线 125 净增 +3 = 第十二轮新增的 3 条 B-1 装配层守网）。`UserRpcContainerWiringTest` **16 条**跑在 Testcontainers `postgres:16-alpine` 上（日志实证 `DockerClientFactory` + `Found Docker environment`），`AvatarTransactionWiringTest` 5 条跑在真实 Spring 容器装配上 |
 | ✅ **已**取得（2026-10-24 更新） | ✅ **双侧活体对拍** —— `tools/difftest/exp-difftest-grpc-user9.sh`：**43 场景**（9 个 RPC × 字段级响应 / `grpc-message` 逐字 / 边界输入），**真进程 + 真 PG + 真 Redis**，自带容器/库/端口 ⇒ **39 等价 / 4 处差异，4 处全是 N-2 已签字的 Go 源码乱码** ⇒ **无新漂移**。⇒ **§9.1**。<br>⚠️ 此前那句「`grpc-dual-port-runner.java` 只覆盖 4 档 status code」的**缺口描述已过期**（那是 2026-10-23 的状态） |
 | 最终判定 | **`SEMANTICALLY NOT EQUIVALENT`** —— **2 项 OBSERVABLE DIFFERENCE**（**V-002**，§7 · **V-012**，§「2026-10-26 第十一轮」—— 后者是**观测面**：超时时的业务日志错误归因）—— ⚠️ 原写「2 项（含 V-007）」，**V-007 已于 2026-10-26 由 `global` 域销账**（§7）+ 4 项 IMPLEMENTATION DIFFERENCE，**0 项 SEMANTIC MISMATCH**、**0 项 unresolved**（§9 的 7 条已于 2026-10-24 全部闭环）。⚠️ **此前写「1 项 SEMANTIC MISMATCH + 7 项 OBSERVABLE DIFFERENCE + 5 项 unresolved」是过期状态** —— V-001 已证伪并闭环（Go 的 GORM 把 `status IS NULL` 读成 0 ⇒ **两侧行为一致**） |
 
@@ -309,7 +309,7 @@ Result 只用 5 个枚举值。证据列的记号：
 | 原缺口陈述 | 本轮结论 |
 |---|---|
 | 「proto 逐字段对照无独立留档」 | **已闭合（本轮补齐）**：两侧 `.proto` 剥离 `option`/注释/空行后 `diff` **零差异**；另有常驻守门脚本 `tools/difftest/check-proto-static.sh`（`user`/`admin` 两个 proto 有网，见 AGENTS.md §3.4） |
-| 「`AvatarTransactionWiringTest` 无真实 PG，不证明 jsonb CAST」 | **已闭合且本轮升级复跑**：`UserRpcContainerWiringTest` 12 条跑在真 `postgres:16-alpine` 上，本轮 12/12 绿，覆盖 jsonb `Types.OTHER` 写入、`@Results` 读回 Map、`CAST(... AS jsonb)`、4/5 步**真实行回滚**、UNIQUE 约束 |
+| 「`AvatarTransactionWiringTest` 无真实 PG，不证明 jsonb CAST」 | **已闭合且本轮升级复跑**：`UserRpcContainerWiringTest` **16 条**跑在真 `postgres:16-alpine` 上，**2026-10-26 实测 16/16 绿**，覆盖 jsonb `Types.OTHER` 写入、`@Results` 读回 Map、`CAST(... AS jsonb)`、4/5 步**真实行回滚**、UNIQUE 约束，**外加第十二轮的 3 条 B-1 装配层守网**（插件链 / 挂载点 / 负控） |
 | 「本模块的 `HUMAN_ONLY.MD` 不存在」 | **原结论错误，予以修正**：`service/users/user/user-rpc/HUMAN_ONLY.MD` **确实存在**。本轮 `glob **/HUMAN_ONLY.MD` 实测 **4 份**（`user-rpc` / `user-api` / `admin-rpc` / `admin-api`），与 AGENTS.md §2 的计数一致 —— **错的只是「本模块没有」这一句，不是计数**。⚠️ 这类「文件已写 / 文件不存在」是同款需证据的断言（AGENTS.md §2 已自陈）：改清单前先跑 glob，别照抄上一版 |
 
 ---
@@ -822,6 +822,12 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 | CASE-38 | **`Logout` 时 Redis **主机名解析失败**（`redis`，**生产默认形态**）| `INTERNAL`「注销失败,Redis写入异常」/ ~1.8s | `INTERNAL`「注销失败,Redis写入异常」/ ~0.09~0.34s | ✅ **同形**（code + message 一致）| **YES** | 同上（`REDIS_HOST=redis`）|
 | CASE-39 | **`Logout` 时 Redis **连上但不回包**（⇒ 命令超时路径）| `DEADLINE_EXCEEDED`「context deadline exceeded」/ ~2.0s | `DEADLINE_EXCEEDED`「**rpc timeout after 2000ms**」/ ~2.0s | ⚠️ **code 同 / description 逐字不同** ⇒ **正是 V-007（已销账，主干未合）**；<br>🔴 **且业务日志归因不一致** ⇒ **V-012**（RAG 记「Redis 写入异常」，客户端收到「超时」；Go 一致）| **YES**（wire 侧，V-007 合后）/ **观测面 NO**（V-012） | 同上（`REDIS_MODE=hanging`）|
 
+> 🔴 **2026-10-26 第十二轮新增守网（**覆盖缺口闭环，不是新漂移**）** ——
+> **B-1 的两个 MyBatis 拦截器「真的被装进插件链」此前从未被断言** ⇒ 若被摘掉，
+> PG 的 `57014` 不会翻成 `DEADLINE_EXCEEDED` ⇒ 落进 `catch (Exception e)` ⇒ 被改写成 `INTERNAL`
+> ⇒ api 侧渲染 **5001** 而 Go 是 **1015** ⇒ **wire 级漂移，且静默**。
+> ⇒ 补 3 条（插件链 / 挂载点 / 负控），含 **M1·M2·M3** 三次变异验证 ⇒ 详见**第十二轮**。
+
 ---
 
 ## 9. Unresolved（spec §37，**此节不得为空**）
@@ -1154,10 +1160,18 @@ SEMANTICALLY EQUIVALENT（全部可达路径） + 7 项 OBSERVABLE DIFFERENCE
 ⇒ **V-001 与 V-002 必须一起判，单独判任一条都会得出错误结论。**
 
 **证据强度的诚实边界（AGENTS.md 硬约束 1~4）**：
-本轮 ✅ 真 PG（12 条容器测试，2026-10-23 02:08 实跑）、✅ 静态源码（含 gorm / gorm-postgres 的**消费点**行号）、
+本轮 ✅ 真 PG（**16 条**容器测试，**2026-10-26 实跑**）、✅ 静态源码（含 gorm / gorm-postgres 的**消费点**行号）、
 ❌ **双侧活体对拍 = 缺**。⇒ 本文件里任何 `EQUIVALENT` 结论的强度都是
 「**逐行读 Go 消费点得出**，RAG 单侧真 PG 测试只作旁证」，
 **不构成 spec §1 意义上的「双侧同时跑的探针」**。这一点不得在下游被读成「已闭环」。
+
+> **2026-10-26 第十二轮补记（守网侧，不改变上面任何判定）**：
+> 本轮闭环了 B-1 的**装配层覆盖缺口**（3 条断言 + M1/M2/M3 变异验证）⇒
+> 「B-1 缓解链真的装上了」这件事从「一次性端到端实测」升级为「**常驻断言**」。
+> ⚠️ **该结论只覆盖 user-rpc** —— `service/common` 的这两个拦截器被**其余 9 个 rpc 组件**共用，
+> 而**它们是否都注册了，本轮未盘点**（admin 域已独立核实 `hot-rpc` **未注册** ⇒ 前提不成立已销案
+> ⇒ **不是每条链都该有翻译器**，盘点时必须逐个看「该组件有没有 SQL 路径」，**不能一刀切**）
+> ⇒ 记为**跨域待办**，请 `global` 域收口时统一盘点。
 
 ---
 
@@ -1864,3 +1878,88 @@ cd tools/difftest
 REDIS_HOST=redis ./exp-difftest-redis-neverup-rpc.sh    # 解析失败（生产默认形态）
 REDIS_MODE=hanging ./exp-difftest-redis-neverup-rpc.sh  # 挂起 ⇒ 命令超时路径
 ```
+
+---
+
+<!-- @fix 2026-10-26 第十二轮：B-1 的**装配层**守网（user-rpc 侧）—— 覆盖缺口闭环（非新漂移） -->
+
+## 2026-10-26 第十二轮：B-1 的**装配层**守网（user-rpc 侧）—— ✅ **覆盖缺口闭环**（**非新漂移**）
+
+### 0. 定性先说清（免得被误读成「又发现一条漂移」）
+
+本轮**没有发现任何新的语义漂移**，**没有改动任何生产代码**（生产文件 `git diff` 为空）。
+本轮闭环的是一处**守网覆盖缺口**：
+**「B-1 的两个 MyBatis 拦截器真的被装进了插件链」这件事，此前从未被任何断言覆盖。**
+
+| 项 | 内容 |
+|---|---|
+| **触发** | `users/admin` 域在 `align/users-admin`（提交 `1d79f56`）自查发现同款缺口，回信点名本域 ⇒ 本域**独立复核**（不采信对方结论）后确认**同款成立** |
+| **缺口的准确性质** | **覆盖缺口**，**不是**当前生产缺陷 —— 端到端实测（2026-10-21 E-4）已证明 B-1 缓解**确实生效**（查询滞留 4303ms → **176ms**，与 Go 的 182ms 同量级）⇒ 拦截器**事实上是装上了的**。<br>⚠️ **但那条端到端证据是 2026-10-21 的一次性实测，不是常驻断言** ⇒ 谁在某个提交里摘掉 `@Import`，**测试全绿、线上才炸** |
+| **为什么它值钱** | 链断掉的后果是 **wire 级漂移**，而且**静默**：缺翻译器 ⇒ PG 的 `57014 query_canceled` 不翻成 `DEADLINE_EXCEEDED` ⇒ 落进业务层 `catch (Exception e)` ⇒ 被改写成 `INTERNAL`「DB查询失败」⇒ api 侧 `mapRPCStatusToCode`（`service/users/user/user-api/src/main/java/com/rag/users/user/api/advice/GlobalExceptionHandler.java:154-155`）渲染 **5001**，而 Go 是 **1015**（`service/user/common/errmsg/errmsg.go:6`） |
+| **与 V-012 的关系** | **两个独立的失效面**：V-012 是「**Redis 路径**压根到不了 SQL 翻译器」（继承链实测：Lettuce / QueryTimeout 异常**都不是** `StatusRuntimeException`）；本条是「**SQL 路径**的翻译器压根没装进链」⇒ 两者都要各自有守网，谁也替不了谁 |
+
+### 1. 缺口的确切位置（声明点 vs 消费点）
+
+| | 位置 | 本轮之前的状态 |
+|---|---|---|
+| **声明点** | `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/UserRpcApplication.java:47-68` 的 `@Import({… DeadlineQueryTimeoutInjector.class, SqlTimeoutStatusTranslator.class})` | ✅ 写着（**但这只是声明**） |
+| **消费点** | MyBatis-Plus 3.5.17 的 `MybatisPlusAutoConfiguration` 构造器收 `ObjectProvider<Interceptor[]>` → `sqlSessionFactory(DataSource)` 交给 `SqlSessionFactoryBean` ⇒ 最终形态 = `sqlSessionFactory.getConfiguration().getInterceptors()` | ❌ **无任何断言** |
+
+⚠️ **§3.3.1 的口径**：行号指向**消费点**而非**声明点**。
+⇒ 我方**没有**只读 `@Import` 那一行就下结论：先 `javap` 读出 MP 的构造器签名（确有 `ObjectProvider<Interceptor[]>`），
+再由**真容器里那个 `SqlSessionFactory` 实例**读出链的最终形态。
+
+**改动前实测事实**（主干全域 grep）：`getInterceptors` **零命中**
+⇒ 本仓 **10 个 rpc 组件没有任何一个**断言过这条链。
+（`DeadlinePassthroughTest` 是 mock mapper 直接抛 `StatusRuntimeException`
+⇒ 只验「catch 分支放不放行」，**不验「异常到达时是不是那一类」**。）
+
+### 2. 本轮补的 3 条断言（`UserRpcContainerWiringTest`，真 PG + 真容器）
+
+| # | 用例 | 断言什么 | 拦住的失效 |
+|---|---|---|---|
+| 1 | `sqlTimeoutInterceptorsAreReallyInThePluginChain` | `sqlSessionFactory.getConfiguration().getInterceptors()` 里**真的有** `SqlTimeoutStatusTranslator` 与 `DeadlineQueryTimeoutInjector` | 链里缺任一个（`@Import` 被摘 / Bean 装配失败 / MP 改版不收 `Interceptor[]`） |
+| 2 | `translatorInterceptsTheExecutionPoint` | 翻译器的 `@Intercepts` 挂在 **`Executor`**（`query` + `update`）而**不是** `StatementHandler.prepare` | 挂错点 ⇒ CancelRequest 引发的 `SQLException` 在**执行**阶段才抛，`prepare` 阶段根本看不到 ⇒ **永远翻译不到**，且**静默**（链里有它、测试也全绿） |
+| 3 | `translatorMountPointGuardRejectsWrongMountPoint`（**负控**） | 同一条判据喂一枚**故意挂错点**的变异体 ⇒ **必须拒绝** | 断言本身写坏 ⇒ 退化成恒绿的假守门 |
+
+⚠️ **第 3 条是 admin 域没有的一层**（他们只做了变异 M1）。
+负控的价值：用例 2 读的是**注解元数据**；若判据写错（例如只查「有没有 `@Intercepts`」而不查挂载点），
+它会**恒绿**，等于没有守门。负控用一枚**形状错误**的输入跑**同一条判据**，要求它必须拒绝。
+变异体是测试类里的**静态嵌套空壳**（未被 `@Import`、不在组件扫描路径上）⇒ **不参与任何生产装配**。
+
+### 3. 变异验证（§3.3：必须**能编译 + 测试变红**）
+
+| 变异 | 操作 | 预期 | 实测 |
+|---|---|---|---|
+| **M1** | 摘掉 `@Import` 里的 `SqlTimeoutStatusTranslator.class` | 只红 1 条，红在目标断言 | ✅ `Tests run: 16, Failures: 1` —— 失败信息带出实际链 `[com.rag.common.persistence.DeadlineQueryTimeoutInjector]` ⇒ **链是真的**（不是空链恒红） |
+| **M2** | 摘掉 `@Import` 里的 `DeadlineQueryTimeoutInjector.class` | 只红 1 条，红在目标断言 | ✅ `Tests run: 16, Failures: 1` —— 实际链 `[com.rag.common.persistence.SqlTimeoutStatusTranslator]` |
+| **M3（负控自检）** | 把「挂载点」判据弱化成空实现 | **负控必须变红**（它不再能识破变异体） | ✅ `Tests run: 16, Failures: 1` —— `Expected java.lang.AssertionError to be thrown, but nothing was thrown` |
+
+⚠️ **M1/M2 只红 1 条这件事本身就是结论**：其余 15 条（含用例 2、用例 3）**不受 `@Import` 影响** ——
+用例 2/3 读的是**类上的注解**（与容器无关）⇒ 它们的红绿边界是干净的。
+⚠️ **三次变异后均已还原**，`git diff` 只剩测试文件本身（**+161 行**），生产代码**一字未改**。
+
+### 4. 门禁
+
+| 命令 | 结果 |
+|---|---|
+| `mvn -o -pl service/users/user/user-rpc -am test -Dtest=UserRpcContainerWiringTest -Dsurefire.failIfNoSpecifiedTests=false` | `Tests run: 16, Failures: 0, Errors: 0, Skipped: 0` |
+| `mvn -o -pl service/users/user/user-rpc -am test`（全量） | `Tests run: 128, Failures: 0, Errors: 0, Skipped: 0` —— 较 2026-10-24 基线 **125** 净增 **+3**（= 本轮新增 3 条，账对得上） |
+
+### 5. 与相邻域的关系（避免各修各的）
+
+- **`users/admin` 域**：`align/users-admin` 的 `1d79f56` 已做**同款** 2 条（插件链 + 挂载点），**触发源正是本域此前的回信** ⇒ 两域口径一致。
+  ⚠️ **差异**：admin 只做了变异 M1；本域多了 **M2**（另一个拦截器）与 **M3 负控** ⇒ 若 admin 愿意，可把负控那条抄过去（**抄之前先自己跑一遍**，别照抄结论）。
+- **`global` 域**：`service/common` 的两个拦截器是**跨 10 个 rpc 组件**共享的。
+  ⚠️ **本轮实测边界**：我只核了 **user-rpc** 一条链；**其余 9 个 rpc 组件是否都注册了这两个拦截器，本轮未查** ⇒ 记为**跨域待办**，请 global 收口时统一盘点。
+  （admin 域已独立核实 `hot-rpc` **未注册** `SqlTimeoutStatusTranslator` ⇒ 前提不成立已销案 ⇒ **不是每条链都该有翻译器** ⇒ 盘点时必须逐个看「这个组件有没有 SQL 路径」，**不能一刀切**。）
+- **`service/common` 的单写权**：本轮**未改** `service/common` 任何一行（那是 global 域的）⇒ 断言落在**本域自己的**容器测试里。
+
+### 6. 诚实边界
+
+- 本轮**只证明「装配」**（链里有 + 挂载点对），**不证明**「链断了会怎样」—— 后者由另外两段守网覆盖：
+  ① 放行分支：`DeadlinePassthroughTest`（纯控制流，mock mapper）；
+  ② 翻译器本体：`service/common` 的 `SqlTimeoutStatusTranslatorTest`。
+  ⇒ **三段合起来才覆盖整条链，缺一段就有洞。**
+- **未做**：没有重跑 2026-10-21 那条端到端（`exp-b1-timeout-cancel.sh`）⇒ 本轮**不声称**「B-1 端到端仍成立」，只声称**新增了常驻守网**。
+- **未盘点其余 9 个 rpc 组件**（见 §5）⇒ 本轮**不声称**「全仓只有 user-rpc 缺这条守网」。

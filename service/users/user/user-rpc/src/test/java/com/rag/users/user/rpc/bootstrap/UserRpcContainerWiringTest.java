@@ -1,5 +1,7 @@
 package com.rag.users.user.rpc.bootstrap;
 
+import com.rag.common.persistence.DeadlineQueryTimeoutInjector;
+import com.rag.common.persistence.SqlTimeoutStatusTranslator;
 import com.rag.users.user.rpc.UserRpcApplication;
 import com.rag.users.user.rpc.domain.UserAvatarHistoryEntity;
 import com.rag.users.user.rpc.domain.UserEntity;
@@ -7,6 +9,11 @@ import com.rag.users.user.rpc.exception.UserExceptions.AvatarHistoryNotFoundExce
 import com.rag.users.user.rpc.exception.UserExceptions.NotFoundException;
 import com.rag.users.user.rpc.mapper.UserAvatarHistoryMapper;
 import com.rag.users.user.rpc.mapper.UserMapper;
+import org.apache.ibatis.executor.statement.StatementHandler;
+import org.apache.ibatis.plugin.Intercepts;
+import org.apache.ibatis.plugin.Interceptor;
+import org.apache.ibatis.plugin.Signature;
+import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,8 +26,11 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.sql.Connection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import java.util.Set;
@@ -62,6 +72,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       DRIFT-USERRPC-V-003 修复后新增）</li>
  *   <li>4/5 步事务<b>真的回滚行</b>，而不只是"调用过 rollback"（§3.3 缺口）</li>
  *   <li>UNIQUE 约束在真 PG 上确实拦得住重复 username —— 这是 Go 侧 {@code AlreadyExists} 的地基</li>
+ *   <li>B-1 的两个 MyBatis 拦截器<b>真的在插件链里</b>、翻译器<b>挂在 Executor 执行点</b>
+ *       ——§3.3 缺口：{@code @Import} 写了 ≠ MyBatis-Plus 收进了插件链（2026-10-26 补）</li>
  * </ul>
  *
  * ⚠️ <b>2026-10-23（DRIFT-USERRPC-V-003）本类整体换了一次前提</b>：
@@ -114,6 +126,16 @@ class UserRpcContainerWiringTest {
     private UserAvatarHistoryMapper avatarHistoryMapper;
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    /**
+     * B-1 装配层断言用：MyBatis-Plus 自动配置产出的 {@code SqlSessionFactory}
+     * ——它的 {@code Configuration} 里带的就是容器里收进来的全部 {@link Interceptor}。
+     *
+     * <p>⚠️ 断言链的内容必须读<b>这个 bean</b>，不能 new 一个
+     * {@code Configuration} 自己看 —— 那样验的是「注解写对了」，
+     * 而不是「本进程真的把它装上了」（§3.3）。
+     */
+    @Autowired
+    private SqlSessionFactory sqlSessionFactory;
 
     // ==================================================================
     // §3.3 缺口 1：extra_info 的列类型与建表脚本
@@ -528,6 +550,145 @@ class UserRpcContainerWiringTest {
         dupEmail.setEmail("dup-check@example.com");
         assertThrows(DataIntegrityViolationException.class, () -> userMapper.insert(dupEmail),
                 "email UNIQUE 未生效");
+    }
+
+    // ==================================================================
+    // B-1：SQL 超时翻译链的**装配层**断言（§3.3：注解存在 ≠ 机制生效）
+    // ==================================================================
+
+    /**
+     * <b>本方法证明 user-rpc 的 MyBatis 插件链里真的装着 B-1 那两个拦截器。</b>
+     *
+     * <p><b>为什么不能靠「{@code @Import} 写了」当证据</b>：
+     * {@code UserRpcApplication} 上确实写着
+     * {@code @Import({DeadlineQueryTimeoutInjector.class, SqlTimeoutStatusTranslator.class})}，
+     * 但那是<b>声明</b>；MyBatis-Plus 到底有没有把容器里的 {@code Interceptor} Bean
+     * 收进 {@code Configuration}，是<b>运行期</b>的事（§3.3）。
+     *
+     * <p><b>消费点在哪（§3.3.1：行号指向消费点而非声明点）</b>：
+     * MyBatis-Plus 3.5.17 的 {@code MybatisPlusAutoConfiguration}
+     * 构造器收 {@code ObjectProvider<Interceptor[]>}，
+     * 再在 {@code sqlSessionFactory(DataSource)} 里交给 {@code SqlSessionFactoryBean}；
+     * 链的最终形态就是 {@code sqlSessionFactory.getConfiguration().getInterceptors()}。
+     * <b>不读这一段就等于没验</b> —— 本仓已经吃过两次同款亏
+     * （P-4「{@code @Import} 只让 Bean 存在」· P-ADMINAPI-009「最小上下文 ≠ 生产装配」）。
+     *
+     * <p><b>这条链断了，本域的具体后果</b>（与 admin 域同型）：
+     * <ol>
+     *   <li>缺 {@link DeadlineQueryTimeoutInjector} ⇒ 每条 SQL 不带 {@code statement_timeout}
+     *       ⇒ 客户端 deadline 到点时<b>在途查询继续跑满</b>
+     *       ⇒ Go 侧 ctx 会同步取消（{@code service/common/observability/rpc.go:38,55}
+     *           把带 2000ms deadline 的 {@code timeoutCtx} 传进 handler）⇒ 两侧在
+     *           「客户端已放弃后 PG 还占着多久」上出现差值</li>
+     *   <li>缺 {@link SqlTimeoutStatusTranslator} ⇒ PG 的 57014 {@code query_canceled}
+     *       不会变成 {@code DEADLINE_EXCEEDED}
+     *       ⇒ 落进业务层的 {@code catch (Exception e)}
+     *       ⇒ <b>被改写成 INTERNAL</b> ⇒ api 侧 {@code mapRPCStatusToCode}
+     *           （{@code user-api/…/advice/GlobalExceptionHandler.java:154-155}）渲染 5001，
+     *           而 Go 是 1015（{@code service/user/common/errmsg/errmsg.go:6}）
+     *           ⇒ <b>wire 面就漂了</b></li>
+     * </ol>
+     *
+     * <p>⚠️ 本方法只证明<b>装配</b>（链里有这两个）。
+     * 「链断了会怎样」的两个后果本身各有各自的守门：
+     * 放行分支由 {@code DeadlinePassthroughTest} 守（纯控制流，mock mapper 直接抛
+     * {@code StatusRuntimeException}），
+     * 翻译器本体由 {@code service/common} 的 {@code SqlTimeoutStatusTranslatorTest} 守。
+     * ⇒ 三段合起来才覆盖整条链，缺一段就有洞。
+     */
+    @Test
+    @DisplayName("B-1：MyBatis 插件链里真的装着 DeadlineQueryTimeoutInjector + SqlTimeoutStatusTranslator")
+    void sqlTimeoutInterceptorsAreReallyInThePluginChain() {
+        List<Interceptor> chain = sqlSessionFactory.getConfiguration().getInterceptors();
+        List<String> names = chain.stream().map(i -> i.getClass().getName()).toList();
+
+        assertTrue(chain.stream().anyMatch(SqlTimeoutStatusTranslator.class::isInstance),
+                "MyBatis 插件链里没有 SqlTimeoutStatusTranslator ⇒ PG 的 57014 不会被翻成 "
+                        + "DEADLINE_EXCEEDED ⇒ 会落进 catch(Exception) 被改写成 INTERNAL"
+                        + "（5001 ≠ Go 的 1015）；实际链 = " + names);
+        assertTrue(chain.stream().anyMatch(DeadlineQueryTimeoutInjector.class::isInstance),
+                "MyBatis 插件链里没有 DeadlineQueryTimeoutInjector ⇒ 每条 SQL 不带 statement_timeout "
+                        + "⇒ 客户端 deadline 到点后在途查询继续跑满；实际链 = " + names);
+    }
+
+    /**
+     * 翻译器必须挂在<b>执行点</b>（{@code Executor.query} / {@code Executor.update}）——
+     * CancelRequest 引发的 {@code SQLException} 是在<b>执行</b>阶段抛出的，
+     * {@code StatementHandler.prepare} 阶段根本看不到它
+     * ⇒ 挂错点 = <b>永远翻译不到</b>（而且是静默的：链里有它、测试也全绿）。
+     *
+     * <p>本方法断言的是<b>注解声明的挂载目标</b>（{@code @Intercepts} 里的
+     * {@code @Signature}），与上面那条「链里有没有它」是<b>两个独立的失效面</b>：
+     * 前者管「在不在」，后者管「挂在哪儿」。两者都要绿，翻译链才成立。
+     */
+    @Test
+    @DisplayName("B-1：SqlTimeoutStatusTranslator 挂在 Executor 执行点（不是 StatementHandler.prepare）")
+    void translatorInterceptsTheExecutionPoint() {
+        assertTranslatorMountedOnExecutor(SqlTimeoutStatusTranslator.class);
+    }
+
+    /**
+     * <b>负控（变异验证）：同一条断言必须能识破「挂错点」的翻译器。</b>
+     *
+     * <p><b>为什么需要它</b>：上面那条断言读的是注解元数据。若断言本身写错了
+     * （比如只查「有没有 {@code @Intercepts}」而不查挂载点），
+     * 它会<b>恒绿</b>，等于没有守门。本方法用一枚<b>故意挂错点的变异体</b>
+     * 跑<b>同一条断言路径</b>，要求它<b>必须拒绝</b> ——
+     * 这才证明该断言有分辨力，而不是「恰好为真」。
+     *
+     * <p>⚠️ 变异体是本测试类里的一个空壳类型，<b>不参与任何生产装配</b>
+     * （它没有被 {@code @Import}，也不在 {@code com.rag.users.user.rpc} 的组件扫描路径上
+     * ——它是本测试类的<b>静态嵌套类</b>，Spring 不会把它当 Bean）。
+     * 它唯一的作用是给断言喂一个「形状错误」的输入。
+     */
+    @Test
+    @DisplayName("B-1 负控：同一断言必须识破「挂在 StatementHandler.prepare」的变异体")
+    void translatorMountPointGuardRejectsWrongMountPoint() {
+        assertThrows(AssertionError.class,
+                () -> assertTranslatorMountedOnExecutor(MutantTranslatorMountedOnStatementHandler.class),
+                "断言对「挂错点」的翻译器必须报错；它没报错 ⇒ 说明这条断言没有分辨力，"
+                        + "上面那条用例是恒绿的假守门");
+    }
+
+    /**
+     * 「翻译器挂在 {@code Executor} 执行点」这条断言的<b>唯一实现</b>，
+     * 正例与负控共用它 —— 共用才能保证负控验的就是正例在用的那条判据。
+     *
+     * @param translatorClass 待检查的翻译器类型
+     */
+    private static void assertTranslatorMountedOnExecutor(Class<?> translatorClass) {
+        Intercepts intercepts = translatorClass.getAnnotation(Intercepts.class);
+        assertNotNull(intercepts,
+                translatorClass.getSimpleName() + " 没有 @Intercepts ⇒ 根本不会被 MyBatis 收进插件链");
+
+        Set<String> types = new HashSet<>();
+        Set<String> methods = new HashSet<>();
+        for (Signature s : intercepts.value()) {
+            types.add(s.type().getSimpleName());
+            methods.add(s.method());
+        }
+
+        assertTrue(types.contains("Executor"),
+                "翻译器没有拦截 Executor ⇒ 执行阶段抛出的 57014 看不到；实际拦截类型 = " + types);
+        assertTrue(methods.contains("query") && methods.contains("update"),
+                "翻译器没有覆盖 query/update 两个执行方法；实际 = " + methods);
+        assertFalse(types.contains("StatementHandler"),
+                "翻译器若挂在 StatementHandler.prepare 上，CancelRequest 引发的 SQLException 永远翻译不到");
+    }
+
+    /**
+     * <b>变异体（只给负控用）</b>：把挂载点故意挂成
+     * {@code StatementHandler.prepare} —— 正是本仓历史上踩过的那个错位形状
+     * （{@code DeadlineQueryTimeoutInjector} 就挂在这里：它要在 prepare 之后
+     * 给 Statement 设超时，所以挂 prepare 是<b>对的</b>；
+     * 而翻译器要在<b>执行</b>阶段抓 SQLException，挂 prepare 就<b>永远抓不到</b>）。
+     */
+    @Intercepts(@Signature(
+            type = StatementHandler.class,
+            method = "prepare",
+            args = {Connection.class, Integer.class}))
+    static class MutantTranslatorMountedOnStatementHandler {
+        // 刻意为空：只需要它携带一枚「形状错误」的 @Intercepts 注解。
     }
 
     // ==================================================================

@@ -861,7 +861,7 @@ UserApiProtectionMvcTest.normalRequestReachesBusinessLogic
 | 层 | 条数 | **实测根因** | 处置 |
 |---|---|---|---|
 | 第 1 层 | **0** | ✅ **2026-10-26 归零**：原先那 1 条（`RpcInterceptorTimeoutDescriptionGateTest.java`，`global` 域守门类、主干未合时路径悬空）**被工具的 N13「状态叙述」正确去噪**。<br>⚠️ 但**不是一次就中的**：本条原先写作「主干上**查不到** ⇒ 路径**悬空**是**预期状态**」⇒ **这三个词都不在 N13 的叙述词表里** ⇒ 工具认不出 ⇒ 仍报缺失 ⇒ 改写成含「**不存在**」的措辞后才归零。⇒ **工具侧根因（词表缺词）已报 global** | ✅ 已归零（改写措辞）<br>⚠️ **改写不是「迎合工具」**：同一句话语义不变，只是把「查不到 / 悬空」换成工具词表里的「不存在」⇒ **读者可读性不变**，而机器复核**真的**少一条噪声 |
-| 第 3 层 | 45 | **双重硬编码**（详见下方「🔴 第 3 层的真实根因」）⇒ **该层在主分支上恒产出 45 条假阳性**，且那 45 条登记**属 task 域台账**、**不属我域** | 不改台账；已回信 global（附复现命令）<br>⇒ **2026-10-26 仍未修**（global 后续提交 `a4f3029` / `d52031e` 修的是第 1 层与第 4 层）|
+| 第 3 层 | 45 | **双重硬编码**（详见下方「🔴 第 3 层的真实根因」）⇒ **该层在主分支上恒产出 45 条假阳性**，且那 45 条登记**属 task 域台账**、**不属我域** | 不改台账；已回信 global（附复现命令）<br>⇒ ~~**2026-10-26 仍未修**（global 后续提交 `a4f3029` / `d52031e` 修的是第 1 层与第 4 层）~~ ⇒ 🔴 **2026-10-26 已由 `global` 的 `35a7b8e` 修掉**（详见下方「🔴 2026-10-26 更新」）|
 | 第 4 层 | **0** | ✅ **2026-10-26 归零**（`global` 的 **`d52031e`**「go.mod 权威化」）：第 4 层的第三方库清单改为**从真源 `go.mod` 动态解析**（含 `// indirect`）⇒ `gorm.io/gorm` 等不再被误判 | ✅ **两侧都成立**：工具侧已修（权威源从手写表换成真源 `go.mod`）<br>✅ 本域侧也已把 3 处引用补全为全路径（`gorm.io/gorm@v1.31.1/...`）—— 那是**消歧**（modcache 里 `migrator.go` ≥4 个同名）而非迎合工具；**行号全部核对无误**（`:124` = `HasTable` 判断、`:309` = `tx.Exec`、`:235-252` = AutoUpdateTime 那 18 行）|
 
 ### 🔴 第 3 层的真实根因：`--domain` **只作用于第 1 层**
@@ -893,6 +893,36 @@ UserApiProtectionMvcTest.normalRequestReachesBusinessLogic
    ⇒ 为什么 `global` 那边跑出来是「0 → 0」？因为 `global` 的 cwd/root 在 `align/global` 工作树 ⇒ `HEAD != do-my-own-gh` ⇒ 窗口非空 ⇒ 恰好不撞这个坑。
 
 ⇒ **结论：这 45 条是工具缺陷，不是台账缺陷，且不属 users 域。**
+
+### 🔴 2026-10-26 更新：**这个坑已被 `global` 填了**（`35a7b8e`）
+
+`global` 域的 **`35a7b8e`「共享复核工具两缺陷修复：域适配 + commit 清单口径」**已修掉上面两条根因：
+
+| 原根因 | 现在的行为 |
+|---|---|
+| 台账路径写死 `docs/DRIFT/task/_README.md` | 第 2/3 层**先看该域台账的格式**，再决定判据 ⇒ 对 `users` 域输出「**本层不适用**」而不是套用 task 域的判据 |
+| 窗口 `merge-base(HEAD, do-my-own-gh)..HEAD` 在主分支上恒空 | 同上（commit 清单口径改为**按域取**，不再拿 `do-my-own-gh` 当公共祖先）|
+
+⇒ 实测（用 global 工作树里的工具 + `--repo-root` 指回主仓）：
+**层 0~4 全部通过**；第 1 层 54⇒0；第 4 层 288 条去重 ⇒ **235 条不悬空** + 53 条去噪。
+
+⚠️ **两条纪律（这一节的真正收获）**：
+
+1. **「本层不适用」≠「通过」。** 工具自己明写「⚠️ 不是『通过』，是『没查』」
+   ⇒ 本域第 2/3 层的判据**至今仍缺**（本域台账的「commit 清单」根本不是 task 域那个格式）
+   ⇒ **不能拿「工具全绿」当「本域已复核」**。
+2. **本仓那份工具是旧版 ⇒ 别照着它的输出改台账。**
+   直接跑 `tools/check-ledger-selfcheck.py`（`7a01b51`）会得到 **60 条「不一致」**，
+   拆开是 **45（第 3 层）+ 12（第 1 层 N8/N9/N13 去噪前的）+ 3（第 4 层 go.mod 权威化前的）**
+   ⇒ **全是旧版误判**，新版同口径**全绿**。
+   ⇒ **复跑前先确认工具版本**：`git log --oneline -- tools/check-ledger-selfcheck.py`。
+   ⇒ 正确姿势（不改本仓那份、避免与其他会话抢同一文件）：
+   ```bash
+   python3 "<global worktree>/tools/check-ledger-selfcheck.py" \
+       --domain users --repo-root "/Users/pr/Documents/java&golang/RAG"
+   ```
+
+⇒ **逐层根因与复现命令 ⇒ 本节上文；本域台账侧的同步回写 ⇒ [`docs/DRIFT/users/_shared.md`](../../../DRIFT/users/_shared.md) 的「2026-10-26 复测」小节。**
 
 > ⚠️ **这里还有一个更普适的坑**：`merge-base(HEAD, do-my-own-gh)..HEAD` 这个窗口算法，
 > **只有在「HEAD 是一个从 do-my-own-gh 分出去的域工作树」时才有意义**；
@@ -990,3 +1020,92 @@ git log --oneline --all --diff-filter=A -- "tools/semantic-probe/rpc-timeout/*"
 - `PIT-USERS-SHARED-019` —— 「新版工具丢了规则」是我的归因错误（靠「我记得旧版有」下结论）
 
 ⇒ 归拢成一句：**「对方说的」和「我以为的」都不是证据；只有「我打开看过的那一行」是。**
+
+---
+
+## PIT-USERS-SHARED-021 🔴 装配层**覆盖缺口**：「声明点写着」不等于「消费点真装了」—— 而且**同一个机制往往有两个独立的失效面**
+
+> 2026-10-26 · `users/admin` 域回信指出本域 **B-1 的放行守卫只挡 SQL 路径**
+> （用 `javap` 读字节码得出 `QueryTimeoutException` / `RedisConnectionFailureException` 的继承链
+> **都不是** `io.grpc.StatusRuntimeException`）⇒ 本域自查发现**同源的另一处**。
+
+### 症状
+
+`UserRpcApplication.java:47-68` 上白纸黑字写着：
+
+```java
+@Import({
+    ...
+    DeadlineQueryTimeoutInjector.class,
+    SqlTimeoutStatusTranslator.class,
+})
+```
+
+⇒ 看上去「B-1 缓解已就位」。
+**但全仓 `grep getInterceptors` 零命中** ⇒ **没有任何测试断言这两个 Bean 真进了 MyBatis 的插件链**。
+
+### 实际
+
+**这不是缺陷，是覆盖缺口** —— 端到端实测（2026-10-21 E-4）已证明链**事实上是通的**
+（查询滞留 4303ms → **176ms**，与 Go 的 182ms 同量级）⇒ 拦截器**确实装上了**。
+
+⚠️ **但那条端到端证据是一次性实测，不是常驻断言** ⇒ 谁在某个提交里摘掉 `@Import`，
+**测试全绿、线上才炸**。链断掉的后果是 **wire 级漂移**：
+
+```
+缺翻译器 ⇒ PG 的 57014 不翻成 DEADLINE_EXCEEDED
+         ⇒ 落进业务层 catch (Exception e)
+         ⇒ 被改写成 INTERNAL「DB查询失败」
+         ⇒ api 侧 mapRPCStatusToCode 渲染 5001，而 Go 是 1015（errmsg.go:6）
+```
+
+### 为什么会错
+
+三层，每层都值得单独记住：
+
+**① 「声明点」被当成了「消费点」的证据。**
+`@Import` 只保证「Bean 存在」；「MyBatis-Plus 收没收到它」是**运行期**的事。
+⇒ 正确姿势是读**消费点**：MP 3.5.17 的 `MybatisPlusAutoConfiguration` 构造器收
+`ObjectProvider<Interceptor[]>` ⇒ 最终形态 = `sqlSessionFactory.getConfiguration().getInterceptors()`。
+⚠️ **也不能 new 一个 `Configuration` 自己看** —— 那样验的是「注解写对了」，不是「本进程真装上了」。
+
+**② 同一个机制有**两个独立的失效面**，而它们的表现完全一样。**
+B-1 这条链的失效面：
+- **面 A（本条）**：翻译器**不在链里** ⇒ 57014 不翻译；
+- **面 B（`DRIFT-USERRPC-V-012`）**：异常**到了业务层但类型不对** ⇒ Redis 路径抛的
+  `RedisConnectionFailureException` / `QueryTimeoutException` **压根不是** `StatusRuntimeException`
+  ⇒ `catch (StatusRuntimeException e) { throw e; }` 这个守卫**永远不命中**。
+
+⇒ 两者都表现为「超时被当成数据库故障、渲染 5001」，但**修法完全不同、守网也不能互相替代**：
+面 A 的守网是「插件链里有没有它」，面 B 的守网是「异常到达时是不是那一类」。
+
+**③ 断言本身可能恒绿。**
+读**注解元数据**的断言（挂载点）如果判据写松 —— 比如只查「有没有 `@Intercepts`」而不查挂在哪个方法上 ——
+它会**恒绿**，等于没有守门，而且**比没有测试更危险**（绿测试会让人以为守住了）。
+⇒ 必须配**负控**：造一枚**形状错误**的输入（故意挂在 `StatementHandler.prepare` 上的变异体），
+跑**同一条判据**，要求它**必须拒绝**。
+
+### 纪律
+
+1. **凡看到「X 已实施并端到端验证」，先把它隐含的前提挖出来。**
+   本例的前提是「拦截器真在链里」—— 这个前提**从未被断言过**，只有一次性端到端证据兜着。
+2. **装配层断言必须读消费点**：`sqlSessionFactory.getConfiguration().getInterceptors()`，
+   **不能**读 `@Import` 那行，**不能** new 一个 `Configuration` 自己看。
+3. **一个机制有几个独立的失效面，就要几条独立的守网**；
+   补了一条**不代表**另一条也被守住了（面 A ≠ 面 B）。
+4. **断言读元数据时必须配负控**，证明它有分辨力，而不是恰好为真。
+5. **别照抄对方的「已验」**：`users/admin` 域做了同款 2 条 + 变异 M1；
+   本域多做了 M2（另一个拦截器）与 M3（负控）⇒ 抄之前**自己跑一遍**。
+
+### 与既有踩坑的关系
+
+- `docs/Pitfalls/users/admin/rpc.md` 的 **P-4**（`@Import` 只让 Bean 存在）—— 本条是它
+  **在 MyBatis 插件链这个新消费点上的跨域实例**（跨到 `users/admin` 域同一个 `service/common` 机制上）。
+- `PIT-USERS-SHARED-017`（代码注释给了错误的安全保证）—— 本条同源：
+  「`@Import` 里写了」这句**代码事实**被读成了「**机制已生效**」这个**运行期结论**。
+- `PIT-USERS-SHARED-006`（变异验证脚本把「没跑」当成「红了」）—— 本条是它的正面版本：
+  变异必须**能编译 + 测试变红**，且**只红目标那条**才算精确命中。
+- `PIT-USERS-SHARED-019`（机器复核的误判）—— 同族的「证据分层」意识：
+  **一次性实测 ≠ 常驻断言**。
+
+⇒ 归拢成一句：**「声明点」是代码事实，「消费点」才是机制生效；两者之间隔着一个没人看过的接缝。**
