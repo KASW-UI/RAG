@@ -1449,7 +1449,7 @@ Date: Fri, 23 Oct 2026 22:20:22 GMT
 > ⇒ **差异面收敛为 4 条**（此前台账只记了 3 条）：
 > | # | 差异 | 归属 |
 > |---|---|---|
-> | 1 | **状态行缺 reason phrase** | `DRIFT-MSGAPI-011`（共享层） |
+> | 1 | **状态行缺 reason phrase** | `DRIFT-MSGAPI-011`（**容器层** · 框架限制 · 不可修 ⇒ 见下方 2026-10-27 订正） |
 > | 2 | **Content-Type 缺 charset**（200 档） | `DRIFT-MSGAPI-010`（共享层） |
 > | 3 | **Content-Type 分号后空格**（404 档） | `DRIFT-MSGAPI-012`（Tomcat 限制，**不可修**） |
 > | 4 | **缺 `Traceparent`** | `DRIFT-MSGAPI-013`（共享层） |
@@ -1478,6 +1478,24 @@ RAG ： HTTP/1.1 200    / 401             / 404            / 405
 ⇒ 归因在**共享层**（Tomcat + Spring Boot 4 + `HttpMiddleware` 的 response wrapper）
 ⇒ 本工作树**不改共享层**（会影响 20 个组件）⇒ 登记为**跨组件待办**。
 ⚠️ 归因尚未定位到具体一行 ⇒ 台账里写「待查」，不臆断。
+
+> ✅ **2026-10-27 订正（本轮 G2 阶段 2 · D-3）** —— 上面那句「归因在**共享层**」
+> 与「归因尚未定位到具体一行 ⇒ 待查」**两句都已过期**：归因**已定位**，
+> 且落点**既不在共享层、也不在本域**，而在**容器层**。
+>
+> | 项 | 事实 | 证据 |
+> |---|---|---|
+> | **Go 侧** | 状态行写 `code + 空格 + StatusText(code)`，reason phrase 由**标准库**补 | `go-zero@v1.10.2/rest/httpx/responses.go:183` → Go 标准库 `net/http/server.go:1596-1611`（`:1602-1605` 写 `StatusText(code)`）+ `net/http/status.go:81` |
+> | **RAG 侧（应用层）** | 只写码，**不带 reason** | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:907`（`public void setStatus(int sc)`）+ `:920`（`resp.setStatus(sc)`） |
+> | **RAG 侧（容器层 · 决定性事实）** | Tomcat 的 `Response` **已没有 `setStatus(int, String)`** ⇒ 应用层**无法**补 reason phrase | **实测 `javap`**：`tomcat-embed-core` **9.0.63** 有 `setStatus(int)` **+** `setStatus(int,String)`；**10.1.52** 与 **11.0.24** **只剩 `setStatus(int)`** ⇒ 本项目 **Boot 4.0.8 ⇒ `tomcat.version=11.0.24`**（`spring-boot-dependencies-4.0.8.pom`）⇒ **无路可走** |
+>
+> ⇒ **性质 = 框架限制（容器层）** ⇒ 共享层 `service/common` **够不着**
+> ⇒ 已在 [`Intentional_Deviations/global/common-tails.md`](../../Intentional_Deviations/global/common-tails.md)
+> 登记 **`SD-2026-10-25-CAND-14`**（🏷 待签字候选 · 性质「框架限制（容器层）」）。
+> ⚠️ `docs/Intentional_Deviations/**` **不在本 lane 写权内** ⇒ 本轮**只引用**、不改那份档
+> （合并后由整合者统一处理）。
+> ⚠️ **本条不影响 2026-10-24「保持登记，本轮不做」那个拍板** —— 结论不变，
+> 只是把「归因未定位」升级成「归因已定位且不可修」。
 
 #### 🆕 `DRIFT-MSGAPI-012` 🟡 **框架限制**：`Content-Type` 分号后的**空格**在 Tomcat 上不可达
 
