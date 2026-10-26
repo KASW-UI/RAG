@@ -801,8 +801,12 @@ go-zero@v1.10.2 rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Ha
 | `admin-api` | **G1** | ✅ **本轮已修**（见 [`users/admin/api.md` §12](../users/admin/api.md)） |
 | `follow-api` | **G1** | ✅ **本轮已修**（本节） |
 | `like-api` / `message-api` / `task-api` | **G2** | 🟡 待推广 |
-| `article-api` / `comment-api` / `favorite-api` / `hot-api` | **G3** | 🟡 待推广 |
+| `article-api` / `comment-api` / `favorite-api` | **G3** | 🟡 待推广 |
+| ~~`hot-api`~~ | ~~G3~~ | ❌ **N/A · 本条不适用**（**2026-10-27 由 G3 指出 · 本域已独立核实**）：Go 侧 `service/hot/api/internal/handler/routes.go` **零 `rest.WithJwt`**、单块 `AddRoutes`、唯一端点 `GET /hot/v1/articles`；RAG 侧 `service/hot/hot-api` **无 `WebMvcConfig`、无任何 `*Jwt*`/`*Auth*` 类** ⇒ **两侧都没有验签环节 ⇒ 不存在这条漂移**（热榜本就该匿名读） |
 
 ⇒ **推广前必查每个域自己的三个数**：路径前缀（⇒ `JwtAuthPaths` 常量）· public 路径集合 · **401 body 形状**（follow = 空 body；admin/user = 完整信封 —— **不要统一**）。
 ⇒ **配方全文** ⇒ [`users/user/api.md` §9.y §7](../users/user/api.md)。
+⇒ **🆕 G3 三域逐域注记（G3 回执 · 2026-10-27）**：`favorite-api` 401 = 三字段信封（已签字 `DEV-FAV-API-001`）＋ 有黑名单 ＋ 已有真 Tomcat 守门 ⇒ **验收成本最低**；
+`comment-api` 401 = 空 body ＋ 无黑名单 ＋ 全保护；`article-api` 401 = 空 body ＋ 无黑名单 ＋ 受保护路径 = `PROTECTED_ROUTES`(4 条，已 EQUIVALENT)；
+⇒ 后两域**无真 Tomcat 测试** ⇒ 「413 压过 401」这层**只能新写真 Tomcat 用例**才测得到。
 ⇒ **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）。

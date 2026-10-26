@@ -1983,10 +1983,17 @@ go-zero@v1.10.2 rest/server.go:222-233     WithMiddleware ⇒ middleware(route.H
 | `admin-api` | **G1** | ✅ **本轮已修** |
 | `follow-api` | **G1** | ✅ **本轮已修**（`DRIFT-FOLLOW-010`，见 [`follow/api.md`](../../follow/api.md)） |
 | `like-api` / `message-api` / `task-api` | **G2** | 🟡 待推广（配方见 [`user/api.md` §9.y §7](../user/api.md)） |
-| `article-api` / `comment-api` / `favorite-api` / `hot-api` | **G3** | 🟡 待推广（同上） |
+| `article-api` / `comment-api` / `favorite-api` | **G3** | 🟡 待推广（同上） |
+| ~~`hot-api`~~ | ~~G3~~ | ❌ **N/A · 本条不适用**（**2026-10-27 由 G3 指出 · 本域已独立核实成立**）—— Go 侧 `service/hot/api/internal/handler/routes.go` **零 `rest.WithJwt`**（实测 `grep -c WithJwt` = **0**，且只有 **1** 个 `AddRoutes` 块、唯一端点 `GET /hot/v1/articles`）⇒ Go 的 hot-api **根本没有验签环节**；RAG 侧 `service/hot/hot-api` **无 `WebMvcConfig`、无任何 `*Jwt*`/`*Auth*` 类**（`HotArticleController.java:31` 的 `rest.WithJwt` 只出现在**注释里**，说明 Go 侧刻意不加）⇒ **两侧都没有「验签」这个环节 ⇒ 不存在 3s 预算作用域漂移**。<br>⚠️ **别把「RAG 没有鉴权」当漂移** —— 热榜本就该匿名读。 |
 
 ⇒ **推广前必查每个域自己的两个数**：该域 api 的 `WebMvcConfig` 注册的路径前缀 ⇒ 决定 `JwtAuthPaths` 的前缀常量；
 以及该域的 **public 路径集合** 与 **401 body 形状**（admin/user = 完整信封；follow = 空 body —— **不要统一**）。
+⇒ **🆕 G3 三域的逐域注记（2026-10-27 G3 回执，本域已独立核过 Go 侧链序与 hot-api 的 N/A 结论）**：
+| 域 | 401 body | 黑名单 | 受保护路径判据 | 验收成本 |
+|---|---|---|---|---|
+| `favorite-api` | 三字段信封（已签字 `DEV-FAV-API-001`） | 有（Redis） | 全保护（Go 单块带 `WithJwt`） | 🟢 **最低**（已有真 Tomcat 守门 `FavoriteApiRealTomcatGateTest`） |
+| `comment-api` | **空 body** | 无 | 全保护 | 🟡 需新写真 Tomcat 用例（无真 Tomcat 测试 ⇒ 测不到「413 压过 401」这层） |
+| `article-api` | **空 body** | 无 | interceptor 内 `PROTECTED_ROUTES`（4 条，已 EQUIVALENT） | 🟡 同上（比 favorite 贵） |
 
 ### 12.9 🟡 **守门缺口**（非漂移）：admin-api 的 Redis 超时口径**本就对**，但**零守门**
 
