@@ -63,7 +63,7 @@ public class FavoriteCreateItemService {
 
         // Go: create_favorite_logic.go:64-69 —— rpcResp == nil ⇒ 5001
         if (rpcResp == null) {
-            throw support.nullOrUnsuccessfulResponse(userId, targetId);
+            throw support.nullResponse(userId, targetId);
         }
 
         support.logInfo(String.format("create favorite success, favorite_id=%d", rpcResp.getFavoriteId()),

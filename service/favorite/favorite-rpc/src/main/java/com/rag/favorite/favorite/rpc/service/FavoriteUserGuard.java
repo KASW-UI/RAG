@@ -76,7 +76,7 @@ public class FavoriteUserGuard {
             // Go: svcCtx.UserRpc.GetUser(depCtx, &userservice.GetUserReq{Uid: userID})  (helper.go:98)
             resp = userRpcClient.userRpc().getUser(GetUserReq.newBuilder().setUid(userId).build());
         } catch (StatusRuntimeException e) {
-            // Go: :100-107
+            // Go: service/favorite/rpc/internal/logic/helper.go:100-107
             if (e.getStatus().getCode() == Status.Code.NOT_FOUND) {
                 metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
                         FavoriteRpcLabels.ACTION_USER_GET, FavoriteRpcLabels.RESULT_FAIL);
@@ -89,7 +89,7 @@ public class FavoriteUserGuard {
             throw FavoriteExceptions.internalServerCommon();
         }
 
-        // Go: :109-112 —— resp == nil || !resp.Found || resp.User == nil
+        // Go: service/favorite/rpc/internal/logic/helper.go:109-112 —— resp == nil || !resp.Found || resp.User == nil
         if (resp == null || !resp.getFound() || !resp.hasUser()) {
             metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
                     FavoriteRpcLabels.ACTION_USER_GET, FavoriteRpcLabels.RESULT_FAIL);
@@ -98,7 +98,7 @@ public class FavoriteUserGuard {
 
         UserInfo user = resp.getUser();
 
-        // 🔴 Go: :113-116
+        // 🔴 Go: service/favorite/rpc/internal/logic/helper.go:113-116
         //   if resp.User.Uid != userID || resp.User.Status == nil {
         //       return favoritecommon.GRPCError(codes.Unavailable, favoritecommon.ErrorServerCommon)
         //   }
@@ -107,9 +107,14 @@ public class FavoriteUserGuard {
         //   ② Status == nil 是 **presence** 检查 —— users.proto:12 声明的是
         //      `optional int64 status = 6`，proto3 的 optional 允许「字段缺失」与「值为 0」区分开。
         //      ⚠️ Java 侧必须用 hasStatus()，不能用 getStatus() != 0 ——
-        //      后者会把「下游没给 status」误判成「用户被封禁」，于是 PermissionDenied/5005，
-        //      而 Go 给的是 Unavailable/5001。**方向相反的漂移**，
+        //      后者会把「下游没给 status」当成「status = 0（active）」⇒ **直接放行**，
+        //      而 Go 给的是 Unavailable/5001（helper.go:113-116）⇒ **方向相反的漂移**，
         //      与 AGENTS.md §0 users 域「Login 的 status IS NULL fail-open」是同型陷阱。
+        //      🔴 **实测锚点**（2026-10-25 第十六轮变异验证，不是推断）：
+        //        把上面那行改成 `user.getStatus() != 0L` ⇒ 双侧活体对拍的
+        //        `s05_create_folder_user_status_absent`（tools/grpc-contract-probe/favorite/
+        //        expected-success.txt）转红 —— Go 侧 `UNAVAILABLE｜系统内部错误`，
+        //        RAG 侧 **`code=OK` 并真的建出了收藏夹**（fail-open，不是 5005）。
         if (user.getUid() != userId || !user.hasStatus()) {
             metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
                     FavoriteRpcLabels.ACTION_USER_GET, FavoriteRpcLabels.RESULT_FAIL);
@@ -118,7 +123,7 @@ public class FavoriteUserGuard {
             throw FavoriteExceptions.unavailableServerCommon();
         }
 
-        // Go: :117-120 —— resp.User.GetStatus() != 0
+        // Go: service/favorite/rpc/internal/logic/helper.go:117-120 —— resp.User.GetStatus() != 0
         if (user.getStatus() != 0L) {
             metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
                     FavoriteRpcLabels.ACTION_USER_GET, FavoriteRpcLabels.RESULT_FAIL);
@@ -126,7 +131,7 @@ public class FavoriteUserGuard {
             throw FavoriteExceptions.forbidden();
         }
 
-        // Go: :122 —— metrics.ObserveOp("dependency", "user_get", resultSuccess)
+        // Go: service/favorite/rpc/internal/logic/helper.go:122 —— metrics.ObserveOp("dependency", "user_get", resultSuccess)
         metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
                 FavoriteRpcLabels.ACTION_USER_GET, FavoriteRpcLabels.RESULT_SUCCESS);
     }

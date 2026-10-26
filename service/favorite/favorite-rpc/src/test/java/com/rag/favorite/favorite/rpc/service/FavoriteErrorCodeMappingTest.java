@@ -112,7 +112,8 @@ class FavoriteErrorCodeMappingTest {
     @DisplayName("insert 撞 23505 ⇒ AlreadyExists/5203")
     void folderInsertUniqueViolationIsAlreadyExists() {
         when(folderMapper.findByUserIdAndName(anyLong(), anyString())).thenReturn(null);
-        doThrow(uniqueViolation()).when(folderMapper).insertFolder(anyLong(), anyLong(), anyString());
+        doThrow(uniqueViolation()).when(folderMapper)
+                .insertFolder(anyLong(), anyLong(), anyString(), any(), any());
 
         assertRpc(Status.Code.ALREADY_EXISTS, FavoriteErrorCode.ERROR_FAVORITE_FOLDER_NAME_EXISTS,
                 () -> service.createFavoriteFolder(
@@ -124,7 +125,7 @@ class FavoriteErrorCodeMappingTest {
     void folderInsertDbErrorIsDbUpdate() {
         when(folderMapper.findByUserIdAndName(anyLong(), anyString())).thenReturn(null);
         doThrow(new DataAccessResourceFailureException("boom"))
-                .when(folderMapper).insertFolder(anyLong(), anyLong(), anyString());
+                .when(folderMapper).insertFolder(anyLong(), anyLong(), anyString(), any(), any());
 
         assertRpc(Status.Code.INTERNAL, FavoriteErrorCode.ERROR_DB_UPDATE,
                 () -> service.createFavoriteFolder(

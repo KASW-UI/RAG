@@ -1,0 +1,82 @@
+# ============================================================================
+# create 成功路径 + ensureUserExists 五分支 + 落库等价性 · 双侧活体对拍 · favorite 域
+# ----------------------------------------------------------------------------
+# 生成方式：bash tools/grpc-contract-probe/favorite/run.sh（首次运行自动产出实测值）
+#
+# ⚠️ **本文件是「第二轮」的冻结期望**，对应台账
+#    docs/DRIFT/favorite/rpc.md §24.2 的 **U8**（create 成功路径从未被双侧对拍）
+#    ⇒ §25 销账。第一轮的期望在同目录的 expected.txt（36 个 case）。
+#
+# 格式：case_id \t kind \t value
+#   value = **Go 真源 server 被同一个 grpc-java 客户端观测到的完整值**
+#          ⇒ 它同时是「Go 真源变了探针立刻响」的哨兵 + 两侧比对的基准。
+#
+# kind 四档（与第一轮同一套判定模型，见 compare.py）：
+#   SAME      —— 两侧**逐字节相同**
+#   SAME_CODE —— 两侧 **status code 相同**（语义等价），description 措辞允许不同
+#   OBS       —— 两侧**必须不同**（已登记的框架/库层差异）⇒ 变成一样反而是回归
+#   SKIP      —— 显式跳过，理由必须写在本文件里
+#
+# 🔴 **本轮 15 个 case 全部 SAME —— 没有一条 OBS / SAME_CODE**：
+#    「下游在场」这条路径上，两侧在**码 / 文案 / 落库内容 / 事实 payload 形状**
+#    四层上都逐字一致 ⇒ 没有需要登记成 OBS 的库级差异。
+#
+# ============================================================================
+# 🔴 **桩的边界（读结论前必须先看这段）**
+# ----------------------------------------------------------------------------
+# 上游是探针自带的**最小桩**（Go 写的：
+#   tools/grpc-contract-probe/favorite/go/service/favorite/rpc/cmd/upstreamstub/main.go），
+#   **两侧共同打它** ⇒ 两边收到的字节相同 ⇒ 差出来的才是 favorite 自己的行为差异。
+#
+# ⇒ 本文件证明的是：**「favorite 域自己在这条路径上的行为，两侧一致」**。
+# ⇒ 本文件**不**证明：「favorite 与 user-rpc / article-rpc 之间的交互契约」
+#    （桩 ≠ 真 user-rpc / 真 article-rpc；桩返回的 published_revision_id 用了
+#      `<id>:r<N>` 这个 **favorite 侧写死的约定**，不构成 article 域的证据）。
+# ⇒ 期望值**不能**从真 user-rpc 取，只能由「Go 真源 favorite-rpc + 真 PG」产出。
+#
+# ============================================================================
+# 用例逐条对应（Go 出处行号）
+# ----------------------------------------------------------------------------
+#   s01  create_favorite_folder_logic.go:89-113  正常创建 ⇒ OK（雪花 ID > 0）
+#   s02  create_favorite_folder_logic.go:75-87   重名 ⇒ AlreadyExists/5203
+#   s03  helper.go:109-112   resp.found=false    ⇒ NotFound/5101
+#   s04  helper.go:103-106   RPC 返回 NotFound   ⇒ NotFound/5101
+#   s05  helper.go:113-116   status 字段**缺失** ⇒ Unavailable/5001
+#   s06  helper.go:113-116   uid 与请求不符      ⇒ Unavailable/5001
+#   s07  helper.go:117-120   status≠0            ⇒ PermissionDenied/5005
+#   s08  helper.go:107       RPC 其它错误        ⇒ Internal/5001
+#   s09  create_favorite_logic.go:102-134  target_type=post  ⇒ title/cover 用**请求里的值**
+#   s10  create_favorite_logic.go:105-120  target_type=article ⇒ title/cover/revision
+#                                                **只**来自公开投影（请求里的被无条件覆盖）
+#   s11  helper.go:180-202   articleCover 的**二级回退**（ext_info.cover）
+#   s12  create_favorite_logic.go:122-127  同一 folder+target ⇒ AlreadyExists/5302
+#   d01  落库：favorite_folder（只取名字；folder_id 是雪花 ID ⇒ 不进投影）
+#   d02  落库：favorite_item（target_id/target_type/target_revision/title/cover + 归属）
+#   d03  落库：favorite_fact_outbox（版本/事件类型/schema/producer/目标三元组/操作）
+#
+# 🔴 **d02 / d03 是「写下去的东西也一样」的直接证据**：
+#   s10/s11 的请求里 title/cover 写的是 `req-title-ignored*`，
+#   而落库里存的是 `probe-article-title` / `probe-article-cover*`
+#   ⇒ **「公开修订冻结」这条 favorite 最核心的规则，在两侧都被真正执行到了**。
+#   ⚠️ 这也意味着：若哪一侧哪天改成「用请求里的 title」，d02 会立刻转红。
+#
+# 🔴 **为什么 d0x 的投影里没有 id / 时间戳**：
+#   雪花 ID 与「本次运行的时刻」两侧必然不同 ⇒ 进投影就等于制造假红。
+#   ⇒ 只投影**契约形状**（哪些列、什么值语义）。
+# ============================================================================
+
+s01_create_folder_ok	SAME	code=OK|desc=-|body=shape:folder_id>0=true|rhdr=content-type=application/grpc|rtrl=-
+s02_create_folder_duplicate	SAME	code=ALREADY_EXISTS|desc=收藏夹名称已存在|body=-|rhdr=-|rtrl=content-type=application/grpc
+s03_create_folder_user_notfound_resp	SAME	code=NOT_FOUND|desc=用户不存在|body=-|rhdr=-|rtrl=content-type=application/grpc
+s04_create_folder_user_notfound_rpc	SAME	code=NOT_FOUND|desc=用户不存在|body=-|rhdr=-|rtrl=content-type=application/grpc
+s05_create_folder_user_status_absent	SAME	code=UNAVAILABLE|desc=系统内部错误|body=-|rhdr=-|rtrl=content-type=application/grpc
+s06_create_folder_user_uid_mismatch	SAME	code=UNAVAILABLE|desc=系统内部错误|body=-|rhdr=-|rtrl=content-type=application/grpc
+s07_create_folder_user_forbidden	SAME	code=PERMISSION_DENIED|desc=无权限操作|body=-|rhdr=-|rtrl=content-type=application/grpc
+s08_create_folder_user_rpc_internal	SAME	code=INTERNAL|desc=系统内部错误|body=-|rhdr=-|rtrl=content-type=application/grpc
+s09_create_item_ok_post	SAME	code=OK|desc=-|body=shape:favorite_id>0=true|rhdr=content-type=application/grpc|rtrl=-
+s10_create_item_ok_article	SAME	code=OK|desc=-|body=shape:favorite_id>0=true|rhdr=content-type=application/grpc|rtrl=-
+s11_create_item_ok_article_ext_cover	SAME	code=OK|desc=-|body=shape:favorite_id>0=true|rhdr=content-type=application/grpc|rtrl=-
+s12_create_item_duplicate	SAME	code=ALREADY_EXISTS|desc=该内容已收藏|body=-|rhdr=-|rtrl=content-type=application/grpc
+d01_db_folder_rows	SAME	rows=1;names=ParityFolder
+d02_db_item_rows	SAME	rows=3;items=art-1~article~art-1:r7~probe-article-title~probe-article-cover~owner=2001,art-2~article~art-2:r7~probe-article-title~probe-article-cover-from-ext~owner=2001,t-77~post~~req-title-post~req-cover-post~owner=2001
+d03_db_outbox_rows	SAME	rows=3;facts=1~0~rtw.favorite.assert~1~rtw.community.favorite~post~t-77~~assert,1~0~rtw.favorite.assert~1~rtw.community.favorite~article~art-1~art-1:r7~assert,1~0~rtw.favorite.assert~1~rtw.community.favorite~article~art-2~art-2:r7~assert

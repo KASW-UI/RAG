@@ -21,13 +21,13 @@ import java.util.List;
  * （Go 侧是 {@code model.ErrorNotFound} 哨兵在各 logic 分派）。
  *
  * <p>⚠️ <b>全部无 LIMIT</b>（Go 侧 {@code FindFavoritesByFolderId} 也没有分页，
- * favorite.go:82-92）⇒ 这里不加 {@code LIMIT}。
+ * internal/model/favorite.go:82-92）⇒ 这里不加 {@code LIMIT}。
  */
 @Mapper
 public interface FavoriteItemMapper {
 
     /**
-     * 对应 Go {@code FindFavoritesByFolderId}（favorite.go:82-92）：
+     * 对应 Go {@code FindFavoritesByFolderId}（internal/model/favorite.go:82-92）：
      * <pre>Where("folder_id = ?", folderId).Order("create_time desc")</pre>
      *
      * <p>🔴 {@code ORDER BY create_time DESC} 是 L2 语义（条目列表展示顺序）。
@@ -41,7 +41,7 @@ public interface FavoriteItemMapper {
             """)
     List<FavoriteItemEntity> findByFolderId(@Param("folderId") long folderId);
 
-    /** 对应 Go {@code FindFavoriteByFavoriteId}（favorite.go:94-104）。 */
+    /** 对应 Go {@code FindFavoriteByFavoriteId}（internal/model/favorite.go:94-104）。 */
     @Select("""
             SELECT id, favorite_id, folder_id, user_id, target_id, target_type,
                    target_revision, title, cover, create_time
@@ -52,7 +52,7 @@ public interface FavoriteItemMapper {
     FavoriteItemEntity findByFavoriteId(@Param("favoriteId") long favoriteId);
 
     /**
-     * 对应 Go {@code FindFavoriteByFolderTarget}（favorite.go:106-118）：
+     * 对应 Go {@code FindFavoriteByFolderTarget}（internal/model/favorite.go:106-118）：
      * {@code Where("folder_id = ? AND target_id = ? AND target_type = ?")}。
      *
      * <p>🔴 三个条件缺一不可：{@code target_type} 参与 {@code uk_folder_target}
@@ -79,12 +79,31 @@ public interface FavoriteItemMapper {
      *
      * <p>⚠️ 23505（唯一冲突）在此抛出，由 {@code FavoriteRpcSupport.isUniqueViolation}
      * 识别并翻译成 {@code AlreadyExists/5302}（create_favorite_logic.go:157-161）。
+     *
+     * <p>🔴 <b>2026-10-26 第二十三轮修</b>：本方法<b>原来不绑</b> {@code create_time}
+     * ⇒ DDL（{@code V2__create_favorite_item.sql:44}）该列<b>没有 DEFAULT</b> ⇒ 落库 <b>NULL</b>
+     * ⇒ 对外 {@code created_at} = {@code 0}（{@code FavoriteRpcSupport.unixMillis}：{@code null → 0L}）
+     * ⇒ <b>L1 可观察的漂移</b>。
+     *
+     * <p><b>Go 出处（消费点）</b>：struct tag {@code internal/model/data_model.go:30}
+     * （{@code create_time} 带 {@code autoCreateTime}）⇒ 赋值点
+     * {@code gorm.io/gorm@v1.31.1/callbacks/create.go:302-305}（零值时填 {@code curTime}）
+     * ⇒ <b>值来自 Go 进程时钟</b>。
+     *
+     * <p><b>语义等价论证</b>：本实现绑 <b>Java 进程时钟</b>（{@code Instant.now(clock)}）
+     * ⇒ 与 Go 同为「应用进程时钟」⇒ 同源；⚠️ 不用 PG 的 {@code DEFAULT now()}（另一个时钟源，
+     * 且该列<b>没有</b>这个 DEFAULT）。
+     *
+     * <p>⚠️ {@code favorite_item} <b>没有</b> {@code update_time}（Go 侧同样没有，
+     * {@code data_model.go:30} 只声明 {@code create_time}）⇒ 本方法<b>不写</b>该列。
      */
     @Insert("""
             INSERT INTO favorite_item
-                (favorite_id, folder_id, user_id, target_id, target_type, target_revision, title, cover)
+                (favorite_id, folder_id, user_id, target_id, target_type, target_revision, title, cover,
+                 create_time)
             VALUES (#{favoriteId}, #{folderId}, #{userId}, #{targetId}, #{targetType},
-                    #{targetRevision}, #{title}, #{cover})
+                    #{targetRevision}, #{title}, #{cover},
+                    #{createTime})
             """)
     int insertItem(@Param("favoriteId") long favoriteId,
                    @Param("folderId") long folderId,
@@ -93,7 +112,8 @@ public interface FavoriteItemMapper {
                    @Param("targetType") String targetType,
                    @Param("targetRevision") String targetRevision,
                    @Param("title") String title,
-                   @Param("cover") String cover);
+                   @Param("cover") String cover,
+                   @Param("createTime") java.time.OffsetDateTime createTime);
 
     /**
      * 对应 Go {@code DeleteFavoriteByFavoriteId} 事务内的

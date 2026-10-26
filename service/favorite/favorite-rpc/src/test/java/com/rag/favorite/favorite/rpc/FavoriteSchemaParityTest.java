@@ -126,9 +126,11 @@ class FavoriteSchemaParityTest {
     void outboxEnvelopeIsImmutable() {
         jdbcTemplate.update("""
                 INSERT INTO favorite_fact_outbox
-                    (event_id, favorite_id, aggregate_version, payload, status, retry_count)
+                    (event_id, favorite_id, aggregate_version, payload, status, retry_count,
+                     created_at, updated_at)
                 VALUES ('favorite.9001.v1', 9001, 1,
-                        '{"event_id":"favorite.9001.v1"}'::jsonb, 0, 0)
+                        '{"event_id":"favorite.9001.v1"}'::jsonb, 0, 0,
+                        '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
                 """);
 
         // ① 改投递元数据列 ⇒ 必须成功（dispatcher 每天都在做）
@@ -171,14 +173,18 @@ class FavoriteSchemaParityTest {
     void oneFrozenFactPerAggregateVersion() {
         jdbcTemplate.update("""
                 INSERT INTO favorite_fact_outbox
-                    (event_id, favorite_id, aggregate_version, payload, status, retry_count)
-                VALUES ('favorite.7001.v1', 7001, 1, '{"a":1}'::jsonb, 0, 0)
+                    (event_id, favorite_id, aggregate_version, payload, status, retry_count,
+                     created_at, updated_at)
+                VALUES ('favorite.7001.v1', 7001, 1, '{"a":1}'::jsonb, 0, 0,
+                        '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
                 """);
         // 🔴 23505 —— create_favorite_logic.go:157-161 依赖它翻译成 AlreadyExists/5302
         assertThrowsPg(() -> jdbcTemplate.update("""
                 INSERT INTO favorite_fact_outbox
-                    (event_id, favorite_id, aggregate_version, payload, status, retry_count)
-                VALUES ('favorite.7001.v1-dup', 7001, 1, '{"a":1}'::jsonb, 0, 0)
+                    (event_id, favorite_id, aggregate_version, payload, status, retry_count,
+                     created_at, updated_at)
+                VALUES ('favorite.7001.v1-dup', 7001, 1, '{"a":1}'::jsonb, 0, 0,
+                        '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
                 """));
     }
 
@@ -187,8 +193,10 @@ class FavoriteSchemaParityTest {
     void aggregateVersionIsConstrained() {
         assertThrowsPg(() -> jdbcTemplate.update("""
                 INSERT INTO favorite_fact_outbox
-                    (event_id, favorite_id, aggregate_version, payload, status, retry_count)
-                VALUES ('favorite.7002.v3', 7002, 3, '{"a":1}'::jsonb, 0, 0)
+                    (event_id, favorite_id, aggregate_version, payload, status, retry_count,
+                     created_at, updated_at)
+                VALUES ('favorite.7002.v3', 7002, 3, '{"a":1}'::jsonb, 0, 0,
+                        '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
                 """));
     }
 

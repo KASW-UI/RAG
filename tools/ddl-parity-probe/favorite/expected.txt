@@ -1,0 +1,19 @@
+# DDL 双侧活体对拍 · favorite 域 · 冻结期望
+# 生成方式：bash tools/ddl-parity-probe/favorite/run.sh（首次运行自动产出）
+# 判定基准：Go 侧 = sql-first（运维先跑 001..004，应用后起 ⇒ 真源文档指定的顺序）
+
+MAIN|fd69ec7e5854b1cc37734c706fcdebf8c39bcf45a1b9765384d6725b4e6854ab
+
+OBS	name	con	favorite_fact_outbox	c|CHECK ((aggregate_version = ANY (ARRAY[(1)::bigint, (2)::bigint])))	favorite_fact_outbox_aggregate_version_check	favorite_fact_outbox_aggregate_version_range
+OBS	name	con	favorite_fact_outbox	u|UNIQUE (favorite_id, aggregate_version)	favorite_fact_outbox_favorite_id_aggregate_version_key	uk_favorite_fact_version
+OBS	name	con	favorite_legacy_fact_marker	c|CHECK (((target_revision IS NULL) OR ((target_type = 'article'::text) AND ((target_revision)::text <> ''::text))))	favorite_legacy_fact_marker_check	favorite_legacy_marker_revision_scope
+OBS	name	con	favorite_legacy_fact_marker	c|CHECK ((approval_ref <> ''::text))	favorite_legacy_fact_marker_approval_ref_check	favorite_legacy_marker_approval_ref_nonempty
+OBS	name	con	favorite_legacy_fact_marker	c|CHECK ((favorite_id > 0))	favorite_legacy_fact_marker_favorite_id_check	favorite_legacy_marker_favorite_id_positive
+OBS	name	con	favorite_legacy_fact_marker	c|CHECK ((folder_id > 0))	favorite_legacy_fact_marker_folder_id_check	favorite_legacy_marker_folder_id_positive
+OBS	name	con	favorite_legacy_fact_marker	c|CHECK ((source_snapshot_sha256 ~ '^[a-f0-9]{64}$'::text))	favorite_legacy_fact_marker_source_snapshot_sha256_check	favorite_legacy_marker_snapshot_hash_format
+OBS	name	con	favorite_legacy_fact_marker	c|CHECK ((target_id <> ''::text))	favorite_legacy_fact_marker_target_id_check	favorite_legacy_marker_target_id_nonempty
+OBS	name	con	favorite_legacy_fact_marker	c|CHECK ((target_type <> ''::text))	favorite_legacy_fact_marker_target_type_check	favorite_legacy_marker_target_type_nonempty
+OBS	name	con	favorite_legacy_fact_marker	c|CHECK ((user_id > 0))	favorite_legacy_fact_marker_user_id_check	favorite_legacy_marker_user_id_positive
+OBS	name	idx	favorite_folder	CREATE UNIQUE INDEX <NAME> ON favorite_folder USING btree (folder_id)	idx_favorite_folder_folder_id	uk_favorite_folder_folder_id
+OBS	name	idx	favorite_item	CREATE UNIQUE INDEX <NAME> ON favorite_item USING btree (favorite_id)	idx_favorite_item_favorite_id	uk_favorite_item_favorite_id
+OBS	semantic	con	favorite_item	c|CHECK (((target_revision IS NULL) OR (((target_type)::text = 'article'::text) AND ((target_revision)::text <> ''::text))))

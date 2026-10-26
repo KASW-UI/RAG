@@ -28,7 +28,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -89,6 +92,19 @@ public class FavoriteDomainService {
     private final FavoriteArticleSnapshotResolver articleResolver;
     private final FavoriteRpcMetrics metrics;
     private final SnowflakeBean snowflake;
+    /**
+     * 🔴 2026-10-26 第二十三轮新增：应用层时钟。
+     *
+     * <p>Go 侧 GORM 的 {@code autoCreateTime} / {@code autoUpdateTime} 用
+     * {@code stmt.DB.NowFunc()}（= {@code time.Now()}）⇒ <b>Go 进程时钟</b>；
+     * 本实现要写同样的列 ⇒ 必须用<b>Java 进程时钟</b> ⇒ 不能用 PG 的 {@code DEFAULT now()}
+     * （另一个时钟源）。
+     *
+     * <p>与 {@code FavoriteFactWriteService} 同款：构造器里直接 {@code Clock.systemUTC()}
+     * （<b>不是</b> Spring bean 注入 ⇒ 不会动装配层 ⇒ 零 wiring 风险），用
+     * {@link Instant#now(Clock)} 取值（可测）。
+     */
+    private final Clock clock;
 
     public FavoriteDomainService(FavoriteFolderMapper folderMapper,
                                  FavoriteItemMapper itemMapper,
@@ -104,6 +120,7 @@ public class FavoriteDomainService {
         this.articleResolver = articleResolver;
         this.metrics = metrics;
         this.snowflake = snowflake;
+        this.clock = Clock.systemUTC();
     }
 
     // ══════════════════════════ 1. 新增收藏夹 ══════════════════════════
@@ -116,23 +133,23 @@ public class FavoriteDomainService {
         String result = FavoriteRpcLabels.RESULT_SUCCESS;
         try {
             long userId = request.getUserId();
-            // Go: :51-57 —— userId <= 0 ⇒ InvalidArgument/5003
+            // Go: service/favorite/rpc/internal/logic/create_favorite_folder_logic.go:51-57 —— userId <= 0 ⇒ InvalidArgument/5003
             if (userId <= 0) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 throw FavoriteExceptions.invalidParam();
             }
 
-            // Go: :59-66 —— normalizeFolderName(name) == "" ⇒ InvalidArgument/5202
+            // Go: service/favorite/rpc/internal/logic/create_favorite_folder_logic.go:59-66 —— normalizeFolderName(name) == "" ⇒ InvalidArgument/5202
             String name = FavoriteRpcSupport.normalizeFolderName(request.getName());
             if (name.isEmpty()) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 throw FavoriteExceptions.folderNameEmpty();
             }
 
-            // Go: :68-73
+            // Go: service/favorite/rpc/internal/logic/create_favorite_folder_logic.go:68-73
             userGuard.ensureExists(userId, FavoriteRpcSupport.userLogOption(userId));
 
-            // Go: :75-87 —— 重名预查：命中 ⇒ AlreadyExists/5203；其它 DB 错误 ⇒ Internal/5007
+            // Go: service/favorite/rpc/internal/logic/create_favorite_folder_logic.go:75-87 —— 重名预查：命中 ⇒ AlreadyExists/5203；其它 DB 错误 ⇒ Internal/5007
             // 🔴 必须包 try：Go 的 :82-87 有「查得到 ⇒ 5203 / 查不到 ⇒ 继续 /
             //    **DB 出错 ⇒ 5007**」三分支。漏掉 DB 出错这一支，异常会一路逃到
             //    gRPC 兜底，变成 5001 而不是 Go 的 5007（对外可观察的码变了）。
@@ -151,12 +168,16 @@ public class FavoriteDomainService {
                 throw FavoriteExceptions.dbSelect();
             }
 
-            // Go: :89-95 —— snowflake.GetID() 失败 ⇒ Internal/5009
+            // Go: service/favorite/rpc/internal/logic/create_favorite_folder_logic.go:89-95 —— snowflake.GetID() 失败 ⇒ Internal/5009
             long folderId = nextId();
 
-            // Go: :97-113 —— InsertFolder：23505 ⇒ 5203，否则 Internal/5008
+            // Go: service/favorite/rpc/internal/logic/create_favorite_folder_logic.go:97-113 —— InsertFolder：23505 ⇒ 5203，否则 Internal/5008
             try {
-                folderMapper.insertFolder(folderId, userId, name);
+                // 🔴 2026-10-26 第二十三轮修：显式绑定 create_time / update_time（Go 的 GORM
+                //   在 INSERT 时用**进程时钟**填这两个 auto-time 字段 ⇒ 不绑就是 NULL ⇒ L1 时间戳 = 0）。
+                //   Go 侧 gorm create.go:246 的 curTime 整条 INSERT 只取一次 ⇒ 两个字段同一时刻。
+                OffsetDateTime now = Instant.now(clock).atOffset(ZoneOffset.UTC);
+                folderMapper.insertFolder(folderId, userId, name, now, now);
             } catch (DataAccessException e) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 if (FavoriteRpcSupport.isUniqueViolation(e)) {
@@ -202,13 +223,13 @@ public class FavoriteDomainService {
         long userId = request.getUserId();
         LogOption userLog = FavoriteRpcSupport.userLogOption(userId);
         try {
-            // Go: :54-60
+            // Go: service/favorite/rpc/internal/logic/create_favorite_logic.go:54-60
             if (userId <= 0 || request.getFolderId() <= 0) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 throw FavoriteExceptions.invalidParam();
             }
 
-            // Go: :62-70 —— normalizeTargetType + TrimSpace
+            // Go: service/favorite/rpc/internal/logic/create_favorite_logic.go:62-70 —— normalizeTargetType + TrimSpace
             String targetType = FavoriteRpcSupport.normalizeTargetType(request.getTargetType());
             String targetId = request.getTargetId() == null ? "" : request.getTargetId().trim();
             if (targetId.isEmpty() || targetType.isEmpty()) {
@@ -216,10 +237,10 @@ public class FavoriteDomainService {
                 throw FavoriteExceptions.favoriteTargetEmpty();
             }
 
-            // Go: :72-77
+            // Go: service/favorite/rpc/internal/logic/create_favorite_logic.go:72-77
             userGuard.ensureExists(userId, userLog);
 
-            // Go: :79-93 —— 收藏夹存在性：NotFound ⇒ 5201；其它 DB 错误 ⇒ Internal/5007
+            // Go: service/favorite/rpc/internal/logic/create_favorite_logic.go:79-93 —— 收藏夹存在性：NotFound ⇒ 5201；其它 DB 错误 ⇒ Internal/5007
             FavoriteFolderEntity folder;
             try {
                 folder = folderMapper.findByFolderId(request.getFolderId());
@@ -234,13 +255,13 @@ public class FavoriteDomainService {
                 throw FavoriteExceptions.folderNotFound();
             }
 
-            // Go: :94-100 —— 归属：folder.UserId != userId ⇒ PermissionDenied/5005
+            // Go: service/favorite/rpc/internal/logic/create_favorite_logic.go:94-100 —— 归属：folder.UserId != userId ⇒ PermissionDenied/5005
             if (!folder.getUserId().equals(userId)) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 throw FavoriteExceptions.forbidden();
             }
 
-            // Go: :102-120 —— 文章快照：title/cover/revision 只来自公开投影
+            // Go: service/favorite/rpc/internal/logic/create_favorite_logic.go:102-120 —— 文章快照：title/cover/revision 只来自公开投影
             String title = request.getTitle() == null ? "" : request.getTitle().trim();
             String cover = request.getCover() == null ? "" : request.getCover().trim();
             String targetRevision = null;
@@ -248,17 +269,17 @@ public class FavoriteDomainService {
                 FavoriteArticleSnapshotResolver.ArticleSnapshot snapshot =
                         articleResolver.resolve(targetId, userLog,
                                 FavoriteRpcSupport.articleLogOption(targetId));
-                // Go: :115 —— title, cover = snapshot.Title, snapshot.Cover
+                // Go: service/favorite/rpc/internal/logic/create_favorite_logic.go:115 —— title, cover = snapshot.Title, snapshot.Cover
                 // 🔴 请求里的 title/cover 在此被**无条件覆盖**。
                 title = snapshot.title;
                 cover = snapshot.cover;
-                // Go: :116-119
+                // Go: service/favorite/rpc/internal/logic/create_favorite_logic.go:116-119
                 if (snapshot.hasRevision()) {
                     targetRevision = snapshot.revisionId;
                 }
             }
 
-            // Go: :122-134 —— 重查重名：命中 ⇒ AlreadyExists/5302；其它 DB 错误 ⇒ 5007
+            // Go: service/favorite/rpc/internal/logic/create_favorite_logic.go:122-134 —— 重查重名：命中 ⇒ AlreadyExists/5302；其它 DB 错误 ⇒ 5007
             try {
                 FavoriteItemEntity duplicate =
                         itemMapper.findByFolderTarget(request.getFolderId(), targetId, targetType);
@@ -275,10 +296,10 @@ public class FavoriteDomainService {
                 throw FavoriteExceptions.dbSelect();
             }
 
-            // Go: :136-142 —— 雪花 ID
+            // Go: service/favorite/rpc/internal/logic/create_favorite_logic.go:136-142 —— 雪花 ID
             long favoriteId = nextId();
 
-            // Go: :144-165 —— 组装并事务写
+            // Go: service/favorite/rpc/internal/logic/create_favorite_logic.go:144-165 —— 组装并事务写
             FavoriteItemEntity item = new FavoriteItemEntity();
             item.setFavoriteId(favoriteId);
             item.setFolderId(request.getFolderId());
@@ -292,7 +313,7 @@ public class FavoriteDomainService {
             try {
                 factWriteService.insertFavorite(item);
             } catch (FavoriteExceptions.OwnerMismatchException e) {
-                // Go: :280-282 ⇒ 普通 error ⇒ Internal/5008（**不是** PermissionDenied）
+                // Go: service/favorite/rpc/internal/model/favorite_fact.go:280-282 ⇒ 普通 error ⇒ Internal/5008（**不是** PermissionDenied）
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 metrics.observeDbError(FavoriteRpcLabels.MODULE_ITEM,
                         FavoriteRpcLabels.DB_ACTION_INSERT, FavoriteRpcLabels.DB_TYPE_DB);
@@ -309,13 +330,13 @@ public class FavoriteDomainService {
                 throw e;
             } catch (DataAccessException e) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
-                // Go: :157-161 —— 23505 ⇒ AlreadyExists/5302
+                // Go: service/favorite/rpc/internal/model/favorite_fact.go:157-161 —— 23505 ⇒ AlreadyExists/5302
                 if (FavoriteRpcSupport.isUniqueViolation(e)) {
                     metrics.observeDbError(FavoriteRpcLabels.MODULE_ITEM,
                             FavoriteRpcLabels.DB_ACTION_INSERT, FavoriteRpcLabels.DB_TYPE_DUPLICATE);
                     throw FavoriteExceptions.favoriteAlreadyExist();
                 }
-                // Go: :162-164
+                // Go: service/favorite/rpc/internal/model/favorite_fact.go:162-164
                 metrics.observeDbError(FavoriteRpcLabels.MODULE_ITEM,
                         FavoriteRpcLabels.DB_ACTION_INSERT, FavoriteRpcLabels.DB_TYPE_DB);
                 throw FavoriteExceptions.dbUpdate();
@@ -348,7 +369,7 @@ public class FavoriteDomainService {
         long folderId = request.getFolderId();
         LogOption userLog = FavoriteRpcSupport.userLogOption(userId);
         try {
-            // Go: :50-56
+            // Go: service/favorite/rpc/internal/logic/delete_favorite_folder_logic.go:50-56
             if (userId <= 0 || folderId <= 0) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 throw FavoriteExceptions.invalidParam();
@@ -364,11 +385,11 @@ public class FavoriteDomainService {
                 throw FavoriteExceptions.forbidden();
             }
 
-            // Go: :81-91 —— DeleteFolderCascade
+            // Go: service/favorite/rpc/internal/logic/delete_favorite_folder_logic.go:81-91 —— DeleteFolderCascade
             try {
                 factWriteService.deleteFolderCascade(folderId, userId);
             } catch (FavoriteExceptions.FactMigrationBlockedException e) {
-                // 🔴 Go: :84-87 —— FailedPrecondition/5304
+                // 🔴 Go: service/favorite/rpc/internal/logic/delete_favorite_folder_logic.go:84-87 —— FailedPrecondition/5304
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 throw FavoriteExceptions.historyBlocked();
             } catch (FavoriteExceptions.OwnerMismatchException e) {
@@ -419,13 +440,13 @@ public class FavoriteDomainService {
         long favoriteId = request.getFavoriteId();
         LogOption userLog = FavoriteRpcSupport.userLogOption(userId);
         try {
-            // Go: :50-56
+            // Go: service/favorite/rpc/internal/logic/delete_favorite_logic.go:50-56
             if (userId <= 0 || favoriteId <= 0) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 throw FavoriteExceptions.invalidParam();
             }
 
-            // Go: :58-79 —— 存在性（NotFound ⇒ 5301）+ 归属（5005）
+            // Go: service/favorite/rpc/internal/logic/delete_favorite_logic.go:58-79 —— 存在性（NotFound ⇒ 5301）+ 归属（5005）
             FavoriteItemEntity favorite;
             try {
                 favorite = itemMapper.findByFavoriteId(favoriteId);
@@ -444,11 +465,11 @@ public class FavoriteDomainService {
                 throw FavoriteExceptions.forbidden();
             }
 
-            // Go: :81-91
+            // Go: service/favorite/rpc/internal/logic/delete_favorite_logic.go:81-91
             try {
                 factWriteService.deleteFavoriteByFavoriteId(favoriteId, userId);
             } catch (FavoriteExceptions.FactMigrationBlockedException e) {
-                // 🔴 Go: :84-87 —— FailedPrecondition/5304
+                // 🔴 Go: service/favorite/rpc/internal/logic/delete_favorite_logic.go:84-87 —— FailedPrecondition/5304
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 throw FavoriteExceptions.historyBlocked();
             } catch (FavoriteExceptions.OwnerMismatchException e) {
@@ -496,19 +517,19 @@ public class FavoriteDomainService {
         long folderId = request.getFolderId();
         LogOption userLog = FavoriteRpcSupport.userLogOption(userId);
         try {
-            // Go: :51-57
+            // Go: service/favorite/rpc/internal/logic/update_favorite_folder_name_logic.go:51-57
             if (userId <= 0 || folderId <= 0) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 throw FavoriteExceptions.invalidParam();
             }
-            // Go: :59-66
+            // Go: service/favorite/rpc/internal/logic/update_favorite_folder_name_logic.go:59-66
             String name = FavoriteRpcSupport.normalizeFolderName(request.getName());
             if (name.isEmpty()) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 throw FavoriteExceptions.folderNameEmpty();
             }
 
-            // Go: :68-89 —— 存在性（5201）+ 归属（5005）
+            // Go: service/favorite/rpc/internal/logic/update_favorite_folder_name_logic.go:68-89 —— 存在性（5201）+ 归属（5005）
             FavoriteFolderEntity folder = requireOwnedFolder(userId, folderId);
             if (folder == null) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
@@ -519,7 +540,7 @@ public class FavoriteDomainService {
                 throw FavoriteExceptions.forbidden();
             }
 
-            // 🔴 Go: :91-95 —— 「新名字 == 旧名字」⇒ 直接返回成功，**不写库**
+            // 🔴 Go: service/favorite/rpc/internal/logic/update_favorite_folder_name_logic.go:91-95 —— 「新名字 == 旧名字」⇒ 直接返回成功，**不写库**
             // ⇒ updated_at 不会被推进。这是 L2 语义，不是优化。
             if (folder.getName().equals(name)) {
                 metrics.observeOp(FavoriteRpcLabels.MODULE_FOLDER, FavoriteRpcLabels.ACTION_UPDATE_NAME,
@@ -528,7 +549,7 @@ public class FavoriteDomainService {
                 return UpdateFavoriteFolderNameResp.newBuilder().setSuccess(true).build();
             }
 
-            // Go: :97-109 —— 换名冲突检查：只有 existing.FolderId != folderId 才算冲突
+            // Go: service/favorite/rpc/internal/logic/update_favorite_folder_name_logic.go:97-109 —— 换名冲突检查：只有 existing.FolderId != folderId 才算冲突
             try {
                 FavoriteFolderEntity clash = folderMapper.findByUserIdAndName(userId, name);
                 if (clash != null && !clash.getFolderId().equals(folderId)) {
@@ -544,9 +565,12 @@ public class FavoriteDomainService {
                 throw FavoriteExceptions.dbSelect();
             }
 
-            // Go: :111-122 —— Update：23505 ⇒ 5203，否则 Internal/5008
+            // Go: service/favorite/rpc/internal/logic/update_favorite_folder_name_logic.go:111-122 —— Update：23505 ⇒ 5203，否则 Internal/5008
             try {
-                folderMapper.updateNameByFolderId(folderId, name);
+                // 🔴 2026-10-26 第二十三轮修：Go 的 map 形式 Update 会**自动追加** update_time
+                //   （gorm update.go:236-254）⇒ 不绑就是「改了名字但 updated_at 不动」⇒ L1 可观察。
+                folderMapper.updateNameByFolderId(folderId, name,
+                        Instant.now(clock).atOffset(ZoneOffset.UTC));
             } catch (DataAccessException e) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 if (FavoriteRpcSupport.isUniqueViolation(e)) {
@@ -584,7 +608,7 @@ public class FavoriteDomainService {
         long userId = request.getUserId();
         LogOption userLog = FavoriteRpcSupport.userLogOption(userId);
         try {
-            // Go: :45-51 —— ⚠️ 注意：list 用例**不**调 ensureUserExists
+            // Go: service/favorite/rpc/internal/logic/get_favorite_folders_logic.go:45-51 —— ⚠️ 注意：list 用例**不**调 ensureUserExists
             if (userId <= 0) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 throw FavoriteExceptions.invalidParam();
@@ -600,7 +624,7 @@ public class FavoriteDomainService {
                 throw FavoriteExceptions.dbSelect();
             }
 
-            // Go: :62-65 —— make([]*FavoriteFolder, 0, len)：空集合是<b>空数组</b>不是 null
+            // Go: service/favorite/rpc/internal/logic/get_favorite_folders_logic.go:62-65 —— make([]*FavoriteFolder, 0, len)：空集合是<b>空数组</b>不是 null
             List<com.rag.favorite.favorite.proto.FavoriteFolder> pbFolders = new ArrayList<>(folders.size());
             for (FavoriteFolderEntity folder : folders) {
                 pbFolders.add(FavoriteRpcSupport.toProtoFolder(folder));
@@ -632,13 +656,13 @@ public class FavoriteDomainService {
         long folderId = request.getFolderId();
         LogOption userLog = FavoriteRpcSupport.userLogOption(userId);
         try {
-            // Go: :50-56
+            // Go: service/favorite/rpc/internal/logic/get_favorites_by_folder_logic.go:50-56
             if (userId <= 0 || folderId <= 0) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 throw FavoriteExceptions.invalidParam();
             }
 
-            // Go: :58-79 —— 存在性（5201）+ 归属（5005）
+            // Go: service/favorite/rpc/internal/logic/get_favorites_by_folder_logic.go:58-79 —— 存在性（5201）+ 归属（5005）
             FavoriteFolderEntity folder = requireOwnedFolder(userId, folderId);
             if (folder == null) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
@@ -688,7 +712,7 @@ public class FavoriteDomainService {
     /**
      * 读收藏夹；DB 异常按 Go 的 5007 路径处理（记 db_error 后抛）。
      *
-     * <p>⚠️ <b>调用方拿不到异常</b> —— Go 侧三处（delete_favorite_folder:58-72、
+     * <p>⚠️ <b>调用方拿不到异常</b> —— Go 侧三处（delete_favorite_folder_logic.go:58-72、
      * update_favorite_folder_name:68-82、get_favorites_by_folder:58-72）形状一致：
      * {@code if dbErr != nil { NotFound ? 5201 : 5007 }}。
      */

@@ -43,7 +43,7 @@ import java.util.List;
  *
  * <h2>⚠️ Go 的退出码语义在 Spring 进程内<b>没有对应物</b></h2>
  * <table border="1">
- *   <caption>Go 的退出码（main.go:24,30,38,50）</caption>
+ *   <caption>Go 的退出码（cmd/fact-legacy-preflight/main.go:24,30,38,50）</caption>
  *   <tr><th>码</th><th>含义</th><th>Java 侧</th></tr>
  *   <tr><td>0</td><td>clear</td><td>日志 {@code outcome=succeeded}</td></tr>
  *   <tr><td>1</td><td>读取失败</td><td>日志 {@code outcome=failed} + {@code error_code=PREFLIGHT_READ_FAILED}</td></tr>
@@ -98,7 +98,7 @@ public class FavoriteLegacyPreflightRunner {
     }
 
     /**
-     * Go {@code main()} 的执行入口（main.go:32-53）。
+     * Go {@code main()} 的执行入口（cmd/fact-legacy-preflight/main.go:32-53）。
      *
      * <p>对应 Go 的 {@code context.WithTimeout(ctx, 2min)}：单次预检最多 2 分钟。
      * ⚠️ 本实现**不设**该超时（Spring 进程内无法安全中断一个长事务）⇒ 已知差异。
@@ -135,7 +135,8 @@ public class FavoriteLegacyPreflightRunner {
                     """, report.isClear(), report.contract, report.missingAssert,
                     report.approvedLegacy, report.blocked, report.orphanRetracts);
         } catch (RuntimeException e) {
-            // Go: :38-44 —— 读取失败 ⇒ exit 1
+            // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:48-50（读取失败）
+            //     ⇒ cmd/fact-legacy-preflight/main.go:38 的 os.Exit(1)
             processLogger.atError()
                     .addKeyValue("event", "favorite.legacy_preflight")
                     .addKeyValue("outcome", "failed")
@@ -157,10 +158,10 @@ public class FavoriteLegacyPreflightRunner {
     public Report preflight() {
         Report report = new Report();
 
-        // Go: :40-47 —— 一条 LEFT JOIN 拉出「无 v1 断言」的行 + 它们的 marker
+        // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:40-47 —— 一条 LEFT JOIN 拉出「无 v1 断言」的行 + 它们的 marker
         List<FavoriteLegacyPreflightRow> rows = outboxMapper.selectRowsWithoutAssertion();
 
-        // Go: :50-78 —— 逐行比对 12 项，分 Blocked / ApprovedLegacy
+        // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:50-78 —— 逐行比对 12 项，分 Blocked / ApprovedLegacy
         for (FavoriteLegacyPreflightRow row : rows) {
             report.missingAssert++;
             if (!markerMatches(row)) {
@@ -170,7 +171,7 @@ public class FavoriteLegacyPreflightRunner {
             report.approvedLegacy++;
         }
 
-        // Go: :86-91 —— 孤儿撤回统计
+        // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:86-91 —— 孤儿撤回统计
         report.orphanRetracts = outboxMapper.countOrphanRetracts();
         return report;
     }
@@ -189,7 +190,7 @@ public class FavoriteLegacyPreflightRunner {
                 || row.markerSourceSnapshotSha256 == null || row.markerApprovalRef == null) {
             return false;
         }
-        // Go: :69-73 —— 逐字段相等
+        // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:69-73 —— 逐字段相等
         if (!row.markerFavoriteId.equals(row.favoriteId)
                 || !row.markerUserId.equals(row.userId)
                 || !row.markerFolderId.equals(row.folderId)
@@ -197,19 +198,20 @@ public class FavoriteLegacyPreflightRunner {
                 || !row.markerTargetId.equals(row.targetId)) {
             return false;
         }
-        // Go: :72 —— markerRevision.Valid != revision.Valid ⇒ 不匹配（null 与空串不可混）
+        // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:72 —— markerRevision.Valid != revision.Valid ⇒ 不匹配（null 与空串不可混）
         if (!FavoriteDeliveryValidator.sameFavoriteRevision(row.markerTargetRevision, row.targetRevision)) {
             return false;
         }
-        // Go: :70 —— markerApproval.String == "" ⇒ 不匹配
+        // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:71 —— markerApproval.String == "" ⇒ 不匹配
         if (row.markerApprovalRef.isEmpty()) {
             return false;
         }
-        // Go: :70 —— markerHash.String != hash ⇒ 不匹配（重新算一遍业务行快照）
+        // Go: service/favorite/rpc/internal/model/favorite_legacy_preflight.go:71 —— markerHash.String != hash ⇒ 不匹配（重新算一遍业务行快照）
         return row.markerSourceSnapshotSha256.equals(snapshotHash(row));
     }
 
-    /** 重算业务行的不可变快照哈希 —— 与 Go 的 {@code favoriteLegacySnapshotHash} 同一口径。 */
+    /** 重算业务行的不可变快照哈希 —— 与 Go 的 {@code favoriteLegacySnapshotHash}
+     *     （{@code service/favorite/rpc/internal/model/favorite_fact.go:44}）同一口径。 */
     private String snapshotHash(FavoriteLegacyPreflightRow row) {
         FavoriteItemEntity item = new FavoriteItemEntity();
         item.setFavoriteId(row.favoriteId);
@@ -221,7 +223,8 @@ public class FavoriteLegacyPreflightRunner {
         return new FavoriteFactEnvelopeFactory().legacySnapshotHash(item);
     }
 
-    /** 保留引用：预检的输出字段名必须与 Go 的 JSON tag 一致。 */
+    /** 保留引用：预检的输出字段名必须与 Go 的 JSON tag 一致
+     *     （{@code service/favorite/rpc/internal/model/favorite_legacy_preflight.go:15-19}）。 */
     @SuppressWarnings("unused")
     private static Class<?> mapper() {
         return FavoriteRpcSupport.class;

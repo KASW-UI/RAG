@@ -51,7 +51,8 @@ class FavoriteGrpcErrorRoundTripTest {
     private static ManagedChannel channel;
 
     /**
-     * Go favorite-rpc <b>真实发出</b>的「业务码 → gRPC 标准码」组合，逐条抄自 Go 调用点。
+     * Go favorite-rpc <b>真实发出</b>的「业务码 → gRPC 标准码」组合，逐条抄自 Go 调用点
+     * （{@code service/favorite/rpc/internal/logic/create_favorite_folder_logic.go:52,61,76}）。
      *
      * <p>⚠️ 这张表同时是「本域没有越界 grpc-status」的证据：全部 7 个值都是 grpc-java 认得的
      * 标准码（0-16），所以 Java 侧可以直接透传，不需要 like 域那套 trailer 兜底。
@@ -64,7 +65,7 @@ class FavoriteGrpcErrorRoundTripTest {
     static {
         // rpc/internal/logic/delete_favorite_logic.go:61 — 收藏记录不存在
         GO_CALL_SITES.put(FavoriteErrorCode.ERROR_FAVORITE_NOT_FOUND.getCode(), Status.Code.NOT_FOUND);
-        // rpc/internal/logic/delete_favorite_logic.go:71 — DB 查询失败
+        // service/favorite/rpc/internal/logic/delete_favorite_logic.go:71 — DB 查询失败
         GO_CALL_SITES.put(FavoriteErrorCode.ERROR_DB_SELECT.getCode(), Status.Code.INTERNAL);
         // rpc/internal/logic/delete_favorite_logic.go:74 — 收藏归属不符
         GO_CALL_SITES.put(FavoriteErrorCode.ERROR_FORBIDDEN.getCode(), Status.Code.PERMISSION_DENIED);
@@ -88,7 +89,7 @@ class FavoriteGrpcErrorRoundTripTest {
         // rpc/internal/logic/create_favorite_logic.go:123 — 重复收藏
         GO_CALL_SITES.put(FavoriteErrorCode.ERROR_FAVORITE_ALREADY_EXIST.getCode(),
                 Status.Code.ALREADY_EXISTS);
-        // rpc/internal/logic/helper.go:115 — 下游文章快照不可用
+        // service/favorite/rpc/internal/logic/helper.go:115 — 下游文章快照不可用
         GO_CALL_SITES.put(FavoriteErrorCode.ERROR_SERVER_COMMON.getCode(), Status.Code.UNAVAILABLE);
     }
 
@@ -118,7 +119,8 @@ class FavoriteGrpcErrorRoundTripTest {
                 .build();
     }
 
-    /** 请求体是业务码字符串；server 按 Go 真实调用点表选出 gRPC 码后走 {@code onError}。 */
+    /** 请求体是业务码字符串；server 按 Go 真实调用点表选出 gRPC 码后走 {@code onError}
+     *     （{@code service/favorite/rpc/internal/server/favorite_service_server.go:26}）。 */
     private static final MethodDescriptor<String, String> EMIT_METHOD = method("Emit");
     /** 请求体格式 {@code <grpcCodeName>|<description>}，用于构造文案不在反查表里的错误。 */
     private static final MethodDescriptor<String, String> RAW_METHOD = method("Raw");
@@ -250,12 +252,12 @@ class FavoriteGrpcErrorRoundTripTest {
         StatusRuntimeException internal =
                 emit(FavoriteErrorCode.ERROR_DB_SELECT.getCode());
         assertEquals(Status.Code.INTERNAL, internal.getStatus().getCode(),
-                "5007 必须仍以 INTERNAL 上线（Go: delete_favorite_logic.go:71）");
+                "5007 必须仍以 INTERNAL 上线（Go: service/favorite/rpc/internal/logic/delete_favorite_logic.go:71）");
 
         StatusRuntimeException unavailable =
                 emit(FavoriteErrorCode.ERROR_SERVER_COMMON.getCode());
         assertEquals(Status.Code.UNAVAILABLE, unavailable.getStatus().getCode(),
-                "5001 必须仍以 UNAVAILABLE 上线（Go: helper.go:115）");
+                "5001 必须仍以 UNAVAILABLE 上线（Go: service/favorite/rpc/internal/logic/helper.go:115）");
 
         // 同时确认业务码仍能还原（证明透传没有牺牲本组件的核心职责）。
         assertEquals(FavoriteErrorCode.ERROR_DB_SELECT.getCode(),

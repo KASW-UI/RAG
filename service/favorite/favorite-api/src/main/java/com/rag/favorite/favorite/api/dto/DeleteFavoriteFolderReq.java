@@ -42,7 +42,8 @@ public class DeleteFavoriteFolderReq implements GoStyleRequiredFields {
     }
 
     /**
-     * <b>入参必须是 {@code Object}</b> —— Go 的 {@code ,string} 是「字符串与数字都收」，
+     * <b>入参必须是 {@code Object}</b> —— Go 的 {@code ,string} 是「字符串与数字都收」
+     * （{@code service/favorite/api/internal/types/types.go:27}），
      * 只有不声明目标类型、让 Jackson 原样递出，才能同时表达「两种都收」。
      */
     public void setFolderId(Object raw) {

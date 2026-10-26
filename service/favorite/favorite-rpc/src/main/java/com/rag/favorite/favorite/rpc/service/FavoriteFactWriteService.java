@@ -17,6 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -96,7 +98,7 @@ public class FavoriteFactWriteService {
             isolation = Isolation.READ_COMMITTED,
             rollbackFor = Exception.class)
     public void insertFavorite(FavoriteItemEntity item) {
-        // Go: :276-277 —— SELECT folder FOR UPDATE
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:276-277 —— SELECT folder FOR UPDATE
         FavoriteFolderEntity folder = lockFolder(item.getFolderId());
         if (folder == null) {
             // Go: :277 —— tx.First 的 ErrRecordNotFound 原样返回
@@ -104,24 +106,28 @@ public class FavoriteFactWriteService {
             //  这里再失败只可能是并发删除 ⇒ 归一化为 NotFound 哨兵）
             throw new FavoriteExceptions.NotFoundException("favorite_folder");
         }
-        // Go: :280-282
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:280-282
         if (!folder.getUserId().equals(item.getUserId())) {
             throw new FavoriteExceptions.OwnerMismatchException();
         }
 
-        // Go: :283-285 —— 先写业务行：唯一键冲突必须发生在 outbox 之前
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:283-285 —— 先写业务行：唯一键冲突必须发生在 outbox 之前
+        // 🔴 2026-10-26 第二十三轮修：显式绑定 create_time（Go 的 GORM 用**进程时钟**填
+        //   autoCreateTime ⇒ 不绑就是 NULL ⇒ 对外 created_at = 0）。
+        //   ⚠️ 与下面的 outbox created_at 是**两次**取时（Go 侧同样是两次：item 由 GORM 填，
+        //   outbox 由 newFavoriteOutbox 的 now 参数填 —— favorite_fact.go:290）。
         itemMapper.insertItem(item.getFavoriteId(), item.getFolderId(), item.getUserId(),
                 item.getTargetId(), item.getTargetType(), item.getTargetRevision(),
-                item.getTitle(), item.getCover());
+                item.getTitle(), item.getCover(),
+                Instant.now(clock).atOffset(ZoneOffset.UTC));
 
-        // Go: :286-290 —— schema = m.subjectRefV2Facts ? 2 : 1
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:286-290 —— schema = m.subjectRefV2Facts ? 2 : 1
         int schema = properties.isSubjectRefV2Facts() ? 2 : 1;
         FavoriteFactOutboxEntity fact =
                 envelopeFactory.build(item, 1L, "assert", Instant.now(clock), schema);
 
-        // Go: :291-294
-        outboxMapper.insertFact(fact.getEventId(), fact.getFavoriteId(),
-                fact.getAggregateVersion(), fact.getPayload());
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:291-294
+        insertOutboxFact(fact);
     }
 
     /**
@@ -144,37 +150,36 @@ public class FavoriteFactWriteService {
             isolation = Isolation.READ_COMMITTED,
             rollbackFor = Exception.class)
     public void deleteFavoriteByFavoriteId(long favoriteId, long userId) {
-        // Go: :301-303 —— 参数校验（model 层内部校验）
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:301-303 —— 参数校验（model 层内部校验）
         if (favoriteId <= 0 || userId <= 0) {
             throw new IllegalArgumentException("invalid favorite delete");
         }
 
-        // Go: :306-312
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:306-312
         FavoriteItemEntity item = itemMapper.lockByFavoriteId(favoriteId);
         if (item == null) {
             throw new FavoriteExceptions.NotFoundException("favorite_item");
         }
-        // Go: :313-315
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:313-315
         if (!item.getUserId().equals(userId)) {
             throw new FavoriteExceptions.OwnerMismatchException();
         }
 
-        // Go: :316-318
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:316-318
         int schema = assertionResolver.resolve(item);
 
         if (schema == FavoriteAssertionSchemaResolver.SCHEMA_LEGACY) {
-            // Go: :320-322 —— legacy：只删业务行
+            // Go: service/favorite/rpc/internal/model/favorite_fact.go:320-322 —— legacy：只删业务行
             itemMapper.deleteByFavoriteId(favoriteId);
             return;
         }
 
-        // Go: :323-329 —— 继承冻结的 schema 造 v2 retract
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:323-329 —— 继承冻结的 schema 造 v2 retract
         FavoriteFactOutboxEntity fact =
                 envelopeFactory.build(item, 2L, "retract", Instant.now(clock), schema);
-        outboxMapper.insertFact(fact.getEventId(), fact.getFavoriteId(),
-                fact.getAggregateVersion(), fact.getPayload());
+        insertOutboxFact(fact);
 
-        // Go: :330
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:330
         itemMapper.deleteByFavoriteId(favoriteId);
     }
 
@@ -205,38 +210,37 @@ public class FavoriteFactWriteService {
             isolation = Isolation.READ_COMMITTED,
             rollbackFor = Exception.class)
     public void deleteFolderCascade(long folderId, long userId) {
-        // Go: :337-339
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:337-339
         if (folderId <= 0 || userId <= 0) {
             throw new IllegalArgumentException("invalid favorite folder delete");
         }
 
-        // Go: :342-348
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:342-348
         FavoriteFolderEntity folder = lockFolder(folderId);
         if (folder == null) {
             throw new FavoriteExceptions.NotFoundException("favorite_folder");
         }
-        // Go: :349-351
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:349-351
         if (!folder.getUserId().equals(userId)) {
             throw new FavoriteExceptions.OwnerMismatchException();
         }
 
-        // Go: :352-356 —— FOR UPDATE + ORDER BY favorite_id（确定性顺序）
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:352-356 —— FOR UPDATE + ORDER BY favorite_id（确定性顺序）
         List<FavoriteItemEntity> items = itemMapper.lockAllByFolderIdOrdered(folderId);
         for (FavoriteItemEntity item : items) {
             int schema = assertionResolver.resolve(item);
             if (schema == FavoriteAssertionSchemaResolver.SCHEMA_LEGACY) {
-                // Go: :362-364 —— legacy ⇒ continue，不产撤回事件
+                // Go: service/favorite/rpc/internal/model/favorite_fact.go:362-364 —— legacy ⇒ continue，不产撤回事件
                 continue;
             }
             FavoriteFactOutboxEntity fact =
                     envelopeFactory.build(item, 2L, "retract", Instant.now(clock), schema);
-            outboxMapper.insertFact(fact.getEventId(), fact.getFavoriteId(),
-                    fact.getAggregateVersion(), fact.getPayload());
+            insertOutboxFact(fact);
         }
 
-        // Go: :373-375
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:373-375
         itemMapper.deleteByFolderId(folderId);
-        // Go: :376
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:376
         folderMapper.deleteByFolderId(folderId);
 
         LOG.debug("favorite folder cascade deleted: folder_id={} items={}",
@@ -244,7 +248,35 @@ public class FavoriteFactWriteService {
     }
 
     /**
-     * 对应 Go 的 {@code tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("folder_id = ?").First()}。
+     * 对应 Go 的 {@code tx.Create(&fact)}（favorite_fact.go:291-294 / :323-329 / :366-369）。
+     *
+     * <p>🔴 <b>为什么必须显式绑 {@code created_at} / {@code updated_at}</b>（2026-10-25 第七轮修）：
+     * <ul>
+     *   <li><b>Go 出处</b>：{@code internal/model/favorite_fact.go:158-159} 的 struct 字面量
+     *       <b>没有</b>设这两个字段 ⇒ 靠 tag {@code gorm:"autoCreateTime;not null"} /
+     *       {@code gorm:"autoUpdateTime;not null"} ⇒ 由 <b>GORM 在应用层赋值</b>
+     *       （{@code gorm.io/gorm@v1.31.1/callbacks/create.go:302-306}）
+     *       ⇒ 值来自 <b>Go 进程时钟</b>。</li>
+     *   <li><b>修前</b>：INSERT <b>不绑</b>这两列 ⇒ 落到 DDL 的 {@code DEFAULT now()}
+     *       ⇒ 值来自 <b>PG 服务器时钟</b> ⇒ <b>时钟源不同</b>。</li>
+     *   <li><b>为什么算行为差异</b>：{@code created_at} 是取件查询的排序键
+     *       （{@code ORDER BY created_at, event_id}，favorite_delivery.go:141-147）
+     *       ⇒ 应用进程与数据库之间的时钟偏移会让<b>取件顺序</b>产生分歧。</li>
+     * </ul>
+     *
+     * <p>⚠️ 用 {@link Instant#now(Clock)}（可注入时钟）而不是 {@code Instant.now()} ⇒ 可测。
+     * <p>⚠️ 用 {@link ZoneOffset#UTC} 渲染：{@code timestamptz} 存的是绝对时刻 ⇒ 时区只影响显示，
+     * 不影响存储值 ⇒ 显式 UTC 是为了不依赖 JVM 默认时区。
+     */
+    private void insertOutboxFact(FavoriteFactOutboxEntity fact) {
+        OffsetDateTime now = Instant.now(clock).atOffset(ZoneOffset.UTC);
+        outboxMapper.insertFact(fact.getEventId(), fact.getFavoriteId(),
+                fact.getAggregateVersion(), fact.getPayload(), now, now);
+    }
+
+    /**
+     * 对应 Go 的 {@code tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("folder_id = ?").First()}
+     * （{@code service/favorite/rpc/internal/model/favorite_fact.go:214}）。
      *
      * <p>⚠️ <b>必须带 FOR UPDATE</b>：这是「并发删除同一收藏夹」时保证
      * 「一方看到全部 items、另一方看到空集」的锁点。缺它会让两个事务

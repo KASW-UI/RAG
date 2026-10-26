@@ -24,7 +24,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *
  * <p><b>时间戳单位</b>：{@code createdAt} / {@code updatedAt} 来自 favorite-rpc 的
  * {@code favorite.FavoriteFolder.created_at / updated_at}（Unix <b>毫秒</b>，
- * 见 favorite-rpc 侧 {@code helper.go:69,83} 的 {@code UnixMilli()}）。
+ * 见 favorite-rpc 侧 {@code service/favorite/rpc/internal/logic/helper.go:69,83} 的 {@code UnixMilli()}）。
  * 本层<b>原样透传</b>，不做任何单位换算。
  */
 public class FavoriteFolder {
@@ -51,7 +51,8 @@ public class FavoriteFolder {
         this.updatedAt = updatedAt;
     }
 
-    /** 出参为字符串（对齐 Go 的 {@code json:"folderId,string"}）。 */
+    /** 出参为字符串（对齐 Go 的 {@code json:"folderId,string"}，
+     *     {@code service/favorite/api/internal/types/types.go:43}）。 */
     public String getFolderId() {
         return folderId == null ? null : folderId.toString();
     }

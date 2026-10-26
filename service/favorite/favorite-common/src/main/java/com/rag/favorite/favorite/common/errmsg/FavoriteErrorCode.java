@@ -17,8 +17,8 @@ package com.rag.favorite.favorite.common.errmsg;
  *       业务码本身靠文案反查还原，见 {@link FavoriteGrpcError}；</li>
  *   <li>Go favorite-api 的 logic 直接把码当返回值抛出，例如
  *       {@code api/internal/logic/favorite/create_favorite_folder_logic.go:39}
- *       （未登录 → 5004）、{@code create_favorite_folder_logic.go:61}（RPC 失败 → 5001）、
- *       {@code create_favorite_folder_logic.go:65}（成功 → 200）；</li>
+ *       （未登录 → 5004）、{@code api/internal/logic/favorite/create_favorite_folder_logic.go:61}（RPC 失败 → 5001）、
+ *       {@code api/internal/logic/favorite/create_favorite_folder_logic.go:65}（成功 → 200）；</li>
  *   <li>Go favorite-api 的 handler 把码与文案原样写进 HTTP envelope 的 {@code code} / {@code msg} 字段，
  *       例如 {@code api/internal/handler/favorite/get_favorite_folders_handler.go:20-21} 与
  *       {@code api/internal/handler/favorite/get_favorite_folders_handler.go:31}。</li>

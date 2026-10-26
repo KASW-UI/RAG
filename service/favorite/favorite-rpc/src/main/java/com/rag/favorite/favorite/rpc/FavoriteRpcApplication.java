@@ -90,7 +90,7 @@ public class FavoriteRpcApplication {
     /**
      * 把 {@link ServerInterceptor} 真正挂到 gRPC server 上。
      *
-     * <p>对应 Go {@code favorite.go:49}：
+     * <p>对应 Go {@code service/favorite/rpc/favorite.go:49}：
      * {@code s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, observability.SlowThreshold()))}。
      *
      * <p><b>删掉这行后 {@code ctx.getBean(ServerInterceptor.class)} 断言照样是绿的</b>，

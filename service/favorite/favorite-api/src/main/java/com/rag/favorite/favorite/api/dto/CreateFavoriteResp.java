@@ -25,7 +25,8 @@ public class CreateFavoriteResp {
         this.favoriteId = favoriteId;
     }
 
-    /** 出参为字符串（对齐 Go 的 {@code json:"favoriteId,string"}）。 */
+    /** 出参为字符串（对齐 Go 的 {@code json:"favoriteId,string"}，
+     *     {@code service/favorite/api/internal/types/types.go:23}）。 */
     public String getFavoriteId() {
         return favoriteId == null ? null : favoriteId.toString();
     }

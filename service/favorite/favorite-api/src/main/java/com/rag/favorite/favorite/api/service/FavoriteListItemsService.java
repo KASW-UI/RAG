@@ -53,7 +53,7 @@ public class FavoriteListItemsService {
 
         // Go: get_favorites_by_folder_logic.go:57-62 —— rpcResp == nil ⇒ 5001
         if (rpcResp == null) {
-            throw support.nullOrUnsuccessfulResponse(userId, null);
+            throw support.nullResponse(userId, null);
         }
 
         List<FavoriteItem> favorites = new ArrayList<>(rpcResp.getFavoritesCount());

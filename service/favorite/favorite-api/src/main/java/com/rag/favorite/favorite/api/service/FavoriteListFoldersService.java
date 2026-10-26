@@ -49,8 +49,9 @@ public class FavoriteListFoldersService {
                 support.invokeRpc(() -> rpcClient.favoriteRpc().getFavoriteFolders(rpcReq), userId, null);
 
         // Go: get_favorite_folders_logic.go:51-56 —— rpcResp == nil ⇒ 5001
+        // ⚠️ Go 这一支【只判 nil】（响应消息里没有 success 字段）⇒ 用 nullResponse。
         if (rpcResp == null) {
-            throw support.nullOrUnsuccessfulResponse(userId, null);
+            throw support.nullResponse(userId, null);
         }
 
         List<FavoriteFolder> folders = new ArrayList<>(rpcResp.getFoldersCount());

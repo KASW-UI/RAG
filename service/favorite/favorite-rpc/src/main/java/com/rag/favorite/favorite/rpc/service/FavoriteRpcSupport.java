@@ -200,7 +200,7 @@ public final class FavoriteRpcSupport {
     }
 
     /**
-     * {@code time.Time.UnixMilli()} 的等价物。
+     * {@code time.Time.UnixMilli()} 的等价物（{@code time/time.go:1437}）。
      *
      * <p>⚠️ 列是 {@code timestamptz}，读出来带偏移 ⇒ {@code toInstant()} 得到绝对时刻。
      * 若误用 {@code OffsetDateTime.toLocalDateTime()} 或直接取 epoch 字段，

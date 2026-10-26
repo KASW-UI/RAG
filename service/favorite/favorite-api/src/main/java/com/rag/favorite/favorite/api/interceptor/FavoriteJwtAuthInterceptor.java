@@ -72,7 +72,7 @@ import javax.crypto.SecretKey;
  *   token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
  * </pre>
  * 即「大小写<b>敏感</b>的精确前缀 TrimPrefix」<b>再</b> TrimSpace。
- * 而 users/admin 域（{@code user/{user,admin}/api/internal/middleware/checkblacklistmiddleware.go:28}）
+ * 而 users/admin 域（{@code service/user/user/api/internal/middleware/checkblacklistmiddleware.go:28}）
  * 是 {@code strings.TrimPrefix(authHeader, "Bearer ")}，<b>没有</b> TrimSpace。
  * <p>⇒ 本实现刻意<b>不</b>直接复用 {@link BearerTokenExtractor#trimBearerPrefix}，
  * 而是在其结果上再补一次 Go 语义的 TrimSpace。
@@ -156,7 +156,7 @@ public class FavoriteJwtAuthInterceptor implements HandlerInterceptor {
             throw unauthorized();
         }
 
-        // Go: golang-jwt/v4 request/oauth2.go stripBearerPrefixFromTokenString
+        // Go: golang-jwt/v4 request/oauth2.go stripBearerPrefixFromTokenString（golang-jwt/jwt/v4@v4.5.2/request/oauth2.go:8）
         //     —— 大小写不敏感、不匹配时原样返回整串。三条规则都在 BearerTokenExtractor 里。
         String token = BearerTokenExtractor.tokenForSignatureVerification(authHeader);
         if (token.isEmpty()) {
@@ -213,7 +213,8 @@ public class FavoriteJwtAuthInterceptor implements HandlerInterceptor {
     /**
      * Redis 黑名单查询 —— fail-open 与 Go 逐条对齐。
      *
-     * <p>Go: {@code exists, err := m.Redis.ExistsCtx(...); if err == nil && exists { 401 }}。
+     * <p>Go: {@code exists, err := m.Redis.ExistsCtx(...); if err == nil && exists { 401 }}
+     * （{@code service/favorite/api/internal/middleware/checkblacklist_middleware.go:37}）。
      * Redis 故障时 {@code err != nil} ⇒ 条件为 false ⇒ <b>放行</b>，不阻塞业务。
      * 本实现把异常吞成 {@code null}，随后 {@code exists != null && exists} 同样为 false ⇒ 放行。
      */
@@ -284,9 +285,13 @@ public class FavoriteJwtAuthInterceptor implements HandlerInterceptor {
      * <p><b>body 形状</b>：Go 的 {@code unauthorized()}（{@code authhandler.go:106-122}）
      * 只调 {@code writer.WriteHeader(http.StatusUnauthorized)}，<b>不写任何字节</b>。
      * Go 的黑名单分支（{@code checkblacklist_middleware.go:39-45}）则写
-     * {@code {"code":5004,"msg":"未登录或登录已失效"}}。
-     * <p>本端统一成完整 envelope（{@code {code,msg,data}}）—— 与 users/admin 域同款，
-     * 属 AGENTS.md §3.4 已登记的表达层差异；<b>HTTP 状态码 401 与 code 5004 是对齐的</b>。
+     * {@code {"code":5004,"msg":"未登录或登录已失效"}}（<b>两字段，没有 {@code data}</b>）。
+     * <p>本端统一成完整 envelope（{@code {code,msg,data}}）—— 与 users/admin/comment 域同款。
+     * <p>⚠️ <b>两侧 body 的字段集合不同</b>（Go 空 body / 两字段；RAG 三字段），
+     * 但 <b>HTTP 状态码 401 与 code 5004 是对齐的</b> ⇒ 属表达层差异，<b>待签字</b>，
+     * 登记在 {@code docs/Intentional_Deviations/favorite/api.md}（DEV-FAV-API-001）。
+     * <p>⚠️ <b>不要</b>把「§3.4 已登记」当成依据：§3.4 是<b>proto 复制</b>那一节，
+     * 与本条无关（此前本类的注释误引了它）。
      */
     private static AuthenticationException unauthorized() {
         int code = FavoriteErrorCode.ERROR_UNAUTHORIZED.getCode();

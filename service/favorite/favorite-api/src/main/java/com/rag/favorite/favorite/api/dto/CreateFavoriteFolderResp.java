@@ -29,7 +29,8 @@ public class CreateFavoriteFolderResp {
         this.folderId = folderId;
     }
 
-    /** 出参为字符串（对齐 Go 的 {@code json:"folderId,string"}）。 */
+    /** 出参为字符串（对齐 Go 的 {@code json:"folderId,string"}，
+     *     {@code service/favorite/api/internal/types/types.go:11}）。 */
     public String getFolderId() {
         return folderId == null ? null : folderId.toString();
     }
