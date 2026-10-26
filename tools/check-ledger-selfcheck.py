@@ -15,6 +15,7 @@
 | 2 | 台账的「已修」断言 → 仓库里**能不能查到对应物** | 代码里能查到（**注释里的反面教材不算**） |
 | 3 | 台账的**数字断言**（测试数 / 条数 / 编号连续性） | 与 surefire 报告、git 实测一致 |
 | 4 | 台账的 **Go 侧 file:line 出处**是否悬空 | 文件存在 + 行号在范围内（真源仓库 + 第三方库，按真源 go.mod 的精确版本） |
+| 4+ | ④的**补充判据**：锚点文件里**找不到**台账断言的那个实体 | 「行号合法」≠「指对了文件」⇒ 提示级（**不计 FAIL**） |
 | 5 | 仓库里**存在但台账从未点名**的测试类 | 列出（覆盖缺口） |
 
 ## 边界（重要，别误用）
@@ -22,14 +23,19 @@
 - ⚠️ 第 2/4 层只保证「**引用不悬空**」与「**断言有对应物**」，
   **不保证「内容完全对得上」** ⇒ 关键断言仍需**人工抽验**。
 - ⚠️ 第 4 层里「同名文件在多个库都存在」的条目会单独列出 ⇒ 归属需人工确认。
+- ⚠️ **第 4+ 层（补充判据）是「提示级」**：它问的是
+  「台账说这个锚点处是符号 X；X 在真源里**唯一声明**过；但 X **不在**这个锚点文件里」
+  ⇒ 命中 ⇒ **锚点很可能指错了文件**（favorite 域实测的「证据是假的」那一类）
+  ⇒ 但判据靠**从自然语言里猜**台账在说哪个实体 ⇒ **只提示、不失败**。
+  ⇒ 已用**正例 + 阴性对照**两条变异证明它非空转（见 `--mutation-test`）。
 - ⚠️ 本脚本**只读**，不改任何文件。
 
 ## 用法
 
 ```bash
-python3 tools/difftest/check-ledger-selfcheck.py                 # 默认：task 域
-python3 tools/difftest/check-ledger-selfcheck.py --domain task
-python3 tools/difftest/check-ledger-selfcheck.py --go-root /path/to/Sea-RideTheWind_golang
+python3 tools/check-ledger-selfcheck.py                 # 默认：task 域
+python3 tools/check-ledger-selfcheck.py --domain task
+python3 tools/check-ledger-selfcheck.py --go-root /path/to/Sea-RideTheWind_golang
 ```
 
 退出码：0 = 全部通过；1 = 有不一致（**可当门禁用**）。
@@ -1065,6 +1071,176 @@ def _source_context(root, hits, window=1):
     return '\n'.join(out)
 
 
+# ── 第 4 层补充判据：锚点文件里「找不到」台账断言提到的那个实体 ──────────
+#
+# 🔴 **为什么要有这一层**（favorite 域第二十二轮实测带出 · 2026-10-26）：
+#   既有第 4 层只判「文件存在 + 行号在范围内」
+#   ⇒ ⇒ **「行号在范围内」≠「锚点指对了文件」**
+#   ⇒ ⇒ 一条指向**另一个文件**、但行号恰好合法的锚点 ⇒ **既有层判它「不悬空」⇒ 放过去**
+#   ⇒ ⇒ 而此时台账里那句话的**证据是假的** —— 比没写锚点更危险。
+#   favorite 域实测：20 个 Go 锚点逐条回真源核对 ⇒ 18 条正确 · **2 条错锚点**
+#   （其一：写成 logic 层的 `delete_favorite_folder_logic.go:336-378`，
+#     但该文件只有 96 行 ⇒ 实际指的是 model 层的 `favorite_fact.go:336-378`（`DeleteFolderCascade`）
+#     ⇒ 断言语义对、锚点指错文件）。
+#
+# ⚠️ **本层是「提示级」（不计 FAIL）**：判据要靠「从自然语言里猜台账说的是哪个实体」
+#   ⇒ 天然有假阳性 ⇒ 只提示、不失败。
+# ⚠️ **候选窗口必须窄**：global 的台账单元格里**一行可能有 10 KB**
+#   ⇒ 用「整行」做候选提取 ⇒ 引入大量无关符号 ⇒ 判据永远不触发（等于没有）。
+#   ⇒ 只取「引用位置 ±width 字符」。
+
+# 出现频率极高、不能当「实体指纹」的词（Go 关键字 / 通用局部变量名）
+_ENTITY_STOPWORDS = frozenset('''
+    ctx err nil func return error string int int64 int32 bool byte rune
+    true false new make len cap copy append panic recover defer go select
+    case default switch range var const type interface struct map chan
+    import package break continue else fallthrough goto package init
+    timeout cancel done chan errs req resp res data buf msg value result
+    size count index idx key name path file line num total start end
+'''.split())
+
+# 「有辨识度的符号」：**必须含「小写段 → 大写」的边界**
+#   ⇒ `GetTaskHandler` ✔ · `appendAuthHandler` ✔
+#   ⇒ 全大写缩写（`HTTP` / `OTel`）✘（实测：它们在真源里也到处被声明
+#     ⇒ 放进候选 ⇒ 假阳性）
+_DISTINCTIVE_RE = re.compile(r'^[A-Za-z_][a-z0-9]*[A-Z][A-Za-z0-9]*$')
+
+
+def _local_windows(root, hits, path, s, e, width=45):
+    """取「引用所在位置 ±width 字符」的文本窗口（同一引用的多个出现点合并）。
+
+    ⚠️ **不用整行** —— global 的台账单元格一行可达 10 KB
+    ⇒ 整行做候选提取会引入大量无关符号 ⇒ 判据永远不触发。
+    ⚠️ **窗口必须窄（45 字符，实测校准）** —— 台账里常出现
+       「`a.go:55` 的 X | Y | **消费点**：`Z(...)`」这种**一行多事实**的表格行
+    ⇒ 窗口宽 ⇒ 把**别处**的符号也算成「锚点处的实体」⇒ 假阳性。
+    """
+    pat = re.compile(re.escape(path) + r':(\d+)(?:-(\d+))?')
+    out = []
+    for sf in sorted(hits):
+        lines = read(os.path.join(root, sf)).splitlines()
+        for ln in sorted(hits[sf]):
+            if ln - 1 >= len(lines):
+                continue
+            line = lines[ln - 1]
+            for m in pat.finditer(line):
+                ms = int(m.group(1))
+                me = int(m.group(2)) if m.group(2) else ms
+                if (ms, me) != (s, e):
+                    continue
+                lo = max(0, m.start() - width)
+                hi = min(len(line), m.end() + width)
+                out.append(line[lo:hi])
+    return '\n'.join(out)
+
+
+def _entity_candidates(text):
+    """从台账窗口里提取「断言提到的实体」候选（Go 符号名）。
+
+    ⇒ 只认**反引号包裹**的片段（那是台账引用代码/符号的惯用写法）
+    ⇒ 🔴 **带点（`pkg.Symbol`）的片段一律跳过** ——
+      实测（users / users-admin 域）：台账常写
+      「`rest/engine.go:154-156` 的原生 `TimeoutHandler` 被 `observability.DisableNativeRestTimeout`」
+      ⇒ 带点的那个**明确属于另一个包** ⇒ 它是**跨文件对照**，不是「锚点处的实体」
+      ⇒ 取最后一段当候选 ⇒ **必假阳性**。
+    ⇒ 片段里若含 `:` `/` `\\` ⇒ 是路径 / file:line / URL ⇒ 跳过
+    ⇒ 取**不带限定名**的最后一段（`DeleteFolderCascade`）
+    """
+    cands = []
+    for span in re.findall(r'`([^`]+)`', text):
+        if ':' in span or '/' in span or '\\' in span:
+            continue
+        if '.' in span:
+            # ⚠️ **带点的限定名 ⇒ 跨文件/跨包引用** ⇒ 不作为「锚点处的实体」
+            continue
+        if span.endswith(('.go', '.java', '.md', '.json', '.yml', '.yaml', '.xml')):
+            continue
+        for m in re.finditer(r'[A-Za-z_][A-Za-z0-9_]*', span):
+            seg = m.group(0)
+            if len(seg) < 4 or seg in _ENTITY_STOPWORDS:
+                continue
+            # ⚠️ **必须是有辨识度的符号**（实测收紧过程）：
+            #   第一版（只看「长度 ≥ 4」）⇒ 假阳性 ~90%：普通英文词
+            #   （`enabled` / `offset`）只要在真源某处被声明过就会被判成「指错文件」。
+            #   第二版（要求首字母大写）⇒ 漏掉 `appendAuthHandler` 这类**小写开头的 Go 函数名**。
+            # ⇒ 现在的口径：**必须含「小写段 → 大写」的边界**
+            #   （`GetTaskHandler` ✔ · `appendAuthHandler` ✔ · 全大写缩写 `HTTP` ✘）
+            if not _DISTINCTIVE_RE.match(seg):
+                continue
+            if seg not in cands:
+                cands.append(seg)
+    return cands
+
+
+def _symbol_index(go_root, limit_dirs=('service',)):
+    """真源里的「声明符号 → 文件列表」索引（**懒建**：只有真的要用才建）。
+
+    ⇒ 只收**声明处**的符号（func / type / 单行 var / const），
+      不是全文所有标识符 ⇒ 索引小、且「这个符号在哪个文件声明过」才有意义。
+    """
+    idx = {}
+    decl = re.compile(
+        r'^\s*(?:func\s+(?:\([^)]*\)\s*)?|type\s+|var\s+|const\s+)([A-Za-z_][A-Za-z0-9_]*)',
+        re.M)
+    for sub in limit_dirs:
+        base = os.path.join(go_root, sub)
+        if not os.path.isdir(base):
+            continue
+        for dp, _, fns in os.walk(base):
+            for fn in fns:
+                if not fn.endswith('.go'):
+                    continue
+                full = os.path.join(dp, fn)
+                rel = os.path.relpath(full, go_root)
+                for m in decl.finditer(read(full)):
+                    idx.setdefault(m.group(1), set()).add(rel)
+    return idx
+
+
+def layer4_entity_check(root, resolved, go_root):
+    """第 4 层补充判据：锚点文件里**找不到**台账断言提到的那个实体。
+
+    🔴 **收紧后的判据（第一版太宽 ⇒ 假阳性 ~90% ⇒ 不可用）**：
+       只在**候选实体是 Go 真源里真实「声明过」的符号**时才参与判定。
+       ⇒ 于是这些**自动出局**（不是 Go 声明 ⇒ 不归这一层管）：
+         · **Java 类名**（`TaskDomainService` / `TaskController` / `TaskApiWiringTest`）——
+           交叉栈台账里「Go 侧 X ⇔ Java 侧 Y」的对照写法极常见；
+         · **非代码词**（`XADD` / `yaml` / `Java` / `Boot` / `OTel`）；
+         · **字段名 / 局部变量名**（`taskID` / `articleDoneTTL` 这类若只是被引用、
+           并非在本文件声明 ⇒ 不构成「指错文件」的证据）。
+       ⇒ 判据收紧成：**「台账说这个锚点处是符号 X；X 在真源里被声明过（且声明处唯一）；
+         但 X 不在这个锚点文件里」⇒ 锚点很可能指错了文件。**
+
+    @param resolved  [(路径, 起行, 止行, [候选文件路径], [台账文件], {台账文件: 行号集合})]
+    @return [(路径, 起行, 止行, 缺失候选, 实际所在文件列表, 台账文件列表)]
+    """
+    hints = []
+    sym_idx = None
+    for path, s, e, files, srcs, hits in resolved:
+        if not files:
+            continue
+        win = _local_windows(root, hits, path, s, e)
+        if not win:
+            continue
+        cands = _entity_candidates(win)
+        if not cands:
+            continue
+        if sym_idx is None:
+            sym_idx = _symbol_index(go_root)
+        # ── 只保留「真源里真实声明过、且声明处唯一」的候选 ──
+        strong = [c for c in cands if len(sym_idx.get(c, ())) == 1]
+        if not strong:
+            continue
+        blob = '\n'.join(read(f) for f in files)
+        missing = [c for c in strong if c not in blob]
+        # ⚠️ **必须「全部缺失」才提示** —— 只要有一个候选在文件里 ⇒ 锚点大概率是对的
+        if not missing or len(missing) != len(strong):
+            continue
+        where = ['%s（实际在 %s）' % (c, sorted(sym_idx[c])[0]) for c in missing]
+        hints.append((path, s, e, missing, where, srcs))
+    return hints
+
+
 def layer4_golines(root, texts, go_root):
     print('=' * 78)
     print('第 4 层 · Go 侧 file:line 出处是否悬空')
@@ -1119,6 +1295,7 @@ def layer4_golines(root, texts, go_root):
             refs.setdefault(key, {}).setdefault(f, set()).add(ln)
 
     ok, problems, ambiguous, noises = 0, [], [], []
+    resolved = []   # ← 第 4 层补充判据用：(路径, 起行, 止行, [候选文件], [台账文件])
     for (path, s, e), hits in sorted(refs.items()):
         srcs = sorted(hits)
         # ── 先过去噪规则（N1/N5/N6/N7）：已知噪声不计 FAIL
@@ -1138,7 +1315,14 @@ def layer4_golines(root, texts, go_root):
         is_noise, why = _is_noise_ref(path, s, e, src_text)
         if is_noise:
             noises.append((path, s, e, why, srcs))
-            continue
+            # ⚠️ **噪声引用也要继续解析文件** —— 第 4 层的**补充判据**问的是
+            #    「这条锚点指错了文件吗」，与「这条引用是否悬空」是**两个问题**
+            #    ⇒ 噪声只该影响「不悬空」那套计数，**不该让补充判据失去覆盖**
+            #    （实测：不这样改 ⇒ 注入在文件末尾的变异样本被相邻行的噪声词去噪
+            #      ⇒ 补充判据**根本没看到它** ⇒ 变异假绿）
+            noise_only = True
+        else:
+            noise_only = False
         # ── 精确定位通道 ①：`module@version/...` ⇒ 直接在 module cache 里找
         #    （basename 索引解析不到完整模块路径 ⇒ 假 FAIL；直接定位顺带消除同名歧义）
         direct = _direct_module_candidate(path, gomodcache)
@@ -1148,15 +1332,19 @@ def layer4_golines(root, texts, go_root):
         if direct is not None and os.path.isfile(direct):
             n = sum(1 for _ in open(direct, encoding='utf-8', errors='replace'))
             if s <= n and e <= n:
-                ok += 1
-            else:
+                resolved.append((path, s, e, [direct], srcs, hits))
+                if not noise_only:
+                    ok += 1
+            elif not noise_only:
                 problems.append((path, s, e, '行号超出文件范围', srcs))
             continue
         cands = idx.get(os.path.basename(path), [])
         if not cands:
-            problems.append((path, s, e, '文件在真源与全部第三方库里都找不到', sorted(srcs)))
+            if not noise_only:
+                problems.append((path, s, e, '文件在真源与全部第三方库里都找不到', sorted(srcs)))
             continue
         matched = []
+        matched_paths = []
         for lib, full in cands:
             try:
                 n = sum(1 for _ in open(full, encoding='utf-8', errors='replace'))
@@ -1164,12 +1352,19 @@ def layer4_golines(root, texts, go_root):
                 continue
             if s <= n and e <= n:
                 matched.append(lib)
+                matched_paths.append(full)
         if not matched:
-            problems.append((path, s, e, '行号超出文件范围', sorted(srcs)))
+            if not noise_only:
+                problems.append((path, s, e, '行号超出文件范围', sorted(srcs)))
             continue
-        ok += 1
-        if len(set(matched)) > 1:
-            ambiguous.append((path, s, e, sorted(set(matched))))
+        resolved.append((path, s, e, matched_paths, srcs, hits))
+        if not noise_only:
+            ok += 1
+            # ⚠️ **歧义清单只统计非噪声引用** —— 与改动前口径保持一致
+            #    （噪声引用仍会进 `resolved` ⇒ 补充判据照样覆盖它们
+            #      ⇒ 但**不改变**「不悬空 / 已去噪 / 跨库歧义」三个既有计数）
+            if len(set(matched)) > 1:
+                ambiguous.append((path, s, e, sorted(set(matched))))
 
     print(f'  台账里 file:line 引用（去重）{len(refs)} 条')
     print(f'  ✅ 引用不悬空: {ok} 条')
@@ -1183,6 +1378,15 @@ def layer4_golines(root, texts, go_root):
         print(f'  ⚠️ 同名文件跨库歧义（归属需人工确认）: {len(ambiguous)} 条')
         for path, s, e, libs in ambiguous:
             print(f'      {path}:{s}{"-" + str(e) if e != s else ""}  ∈ {libs}')
+    # ── 第 4 层**补充判据**：锚点文件里找不到台账断言提到的那个实体 ──
+    entity_hints = layer4_entity_check(root, resolved, go_root)
+    if entity_hints:
+        print(f'  ⚠️ 锚点文件里**找不到**断言提到的实体（提示级 · 不计 FAIL）: {len(entity_hints)} 条')
+        print('     ⇒ 「行号在范围内」≠「锚点指对了文件」⇒ 这类锚点的证据是假的（比没写锚点更危险）')
+        for path, s, e, missing, where, srcs in entity_hints:
+            print(f'      {path}:{s}{"-" + str(e) if e != s else ""}  缺失实体: {", ".join(missing)}   ← {", ".join(srcs)}')
+            for w in where:
+                print(f'         ⇒ 该符号实际在 {w}')
     print('  ⚠️ 「不悬空」≠「内容对得上」⇒ 关键断言仍需人工抽验。')
     return len(problems)
 
@@ -1885,6 +2089,29 @@ def run_mutation_tests(root):
                 ps.append(line.strip().lstrip('❌ ').strip())
         return ps
 
+    def layer4_entity_problems():
+        """跑第 4 层的**补充判据**（锚点文件里找不到断言实体）⇒ 返回提示行。
+
+        ⚠️ **只取「锚点文件里找不到」那一段** —— 其余输出（第 4 层本体）
+        与本判据无关 ⇒ 不能混进来（否则「变异没被抓到」会被别的行掩盖）。
+        """
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            layer4_golines(root, ledger_texts(root, 'task'), DEFAULT_GO_ROOT)
+        out = buf.getvalue().split('\n')
+        ps, in_block = [], False
+        for line in out:
+            if '锚点文件里**找不到**' in line:
+                in_block = True
+                continue
+            if in_block:
+                if line.strip().startswith('⚠️ 「不悬空」'):
+                    break
+                if line.strip().startswith('⚠️') or not line.strip():
+                    break
+                ps.append(line.strip())
+        return ps
+
     pits = os.path.join(root, 'docs/Pitfalls/task/rpc.md')
     orig_pits = read(pits)
 
@@ -1947,6 +2174,47 @@ def run_mutation_tests(root):
             else:
                 print(f'  ❌ 变异「{label}」**没被抓到** ⇒ 这一条判据是假绿'
                       f'（实际报出：{problems}）')
+                bad += 1
+
+        # ── 第 4 层**补充判据**专用变异（favorite 域第二十二轮实测带出 · 2026-10-26）──
+        #   正例：注入一个「**行号合法但指错文件**」的锚点
+        #     台账说 `service/task/api/task.go:10` 处是 `GetTaskHandler`
+        #     而 `GetTaskHandler` 在真源里**只声明在**
+        #     `service/task/api/internal/handler/task/gettaskhandler.go`（34 行）
+        #     ⇒ `service/task/api/task.go` 有 38 行 ⇒ **行号完全合法**
+        #     ⇒ **既有第 4 层判它「不悬空」⇒ 放过去**
+        #   ⇒ 只有**补充判据**能抓到 ⇒ 这正是 favorite 域报的「证据是假的」那一类
+        #   ⚠️ 注入的行**必须不被去噪规则吃掉**（N5/N7 词表）⇒ 措辞里避开
+        #     「删除 / 不存在 / 已登记 / 见 § / DRIFT-xxx」
+        #   ⚠️ 符号必须**在全真源里唯一声明**（否则「声明处唯一」这条判据会把它挡掉）
+        _ent_cases = [
+            ('锚点指错文件（行号合法 ⇒ 旧判据判它不悬空）',
+             '（变异样本：`service/task/api/task.go:10` 处的 `GetTaskHandler`）',
+             True),
+            # ── 阴性对照：同一符号指**正确的文件** ⇒ **必须不报** ──
+            ('阴性对照：同一符号指正确的文件 ⇒ 必须不报',
+             '（变异样本：`service/task/api/internal/handler/task/gettaskhandler.go:10` '
+             '处的 `GetTaskHandler`）',
+             False),
+        ]
+        for _label, _row, _must_report in _ent_cases:
+            try:
+                with open(rpc, 'w', encoding='utf-8') as f:
+                    f.write(orig_rpc.rstrip('\n') + '\n' + _row + '\n')
+                _ents = layer4_entity_problems()
+            finally:
+                with open(rpc, 'w', encoding='utf-8') as f:
+                    f.write(orig_rpc)
+                os.utime(rpc, None)   # PIT-GLOBAL-037：还原后必须 touch
+            _reported = any('GetTaskHandler' in m for m in _ents)
+            if _reported == _must_report:
+                print(f'  ✅ 变异「第 4 层补充判据 · {_label}」⇒ '
+                      + ('被精确抓到' if _must_report else '正确地不报'))
+            else:
+                print(f'  ❌ 变异「第 4 层补充判据 · {_label}」'
+                      + ('**没被抓到** ⇒ 这一条判据是假绿' if _must_report
+                         else '**误报了** ⇒ 判据太宽（假阳性）')
+                      + f'（实际报出：{_ents}）')
                 bad += 1
 
         # ── 第 1 层专用变异（E61 · 2026-10-26 第三十七轮 · users/user 域实测带出）──
