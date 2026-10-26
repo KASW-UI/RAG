@@ -85,9 +85,21 @@ import org.springframework.context.annotation.Configuration;
  * 活体对拍里 RAG 侧在 Redis 恢复后立刻拿到了 <b>401</b>（黑名单命中）
  * ⇒ 说明重连后命令照常下发，{@code REJECT_COMMANDS} <b>只</b>作用于「已断连」态。
  *
- * <p>⚠️ <b>跨域提示</b>：本类现在只装在 <b>user-api</b>。
- * {@code admin-api} 等其余 api 服务有<b>同款</b>黑名单中间件 ⇒ 大概率有同款漂移
- * ⇒ 建议<b>上移到 {@code service/common}</b>（跨域改动，需拍板后再动）。
+ * <p>⚠️ <b>跨域提示（2026-10-27 更新）</b>：本类原先<b>只</b>装在 user-api，
+ * {@code admin-api} / {@code follow-api} 有<b>同款</b>黑名单中间件 ⇒ <b>同款漂移</b>。
+ * <br>⇒ <b>已核实</b>（两侧逐行对照）：Go 侧
+ * {@code service/user/admin/api/internal/middleware/checkblacklistmiddleware.go:35-36}
+ * 与 {@code service/follow/api/internal/middleware/checkblacklistmiddleware.go:40-41}
+ * 都是 {@code if err == nil && exists} ⇒ <b>err != nil ⇒ 放行</b>（fail-open）；
+ * RAG 侧 {@code AdminJwtAuthInterceptor.isBlacklisted:197-203} 与
+ * {@code FollowBlacklistInterceptor.isBlacklisted:150-156} 都是 {@code catch (Throwable)}
+ * ⇒ 判据为 false ⇒ 放行 ⇒ <b>两侧目标形状一致（fail-open 200）</b>，
+ * 差别只在 RAG 会先被 3s HTTP 预算掐成 503。
+ * <br>⇒ <b>admin-api / follow-api 已各自落域内副本</b>（2026-10-27）：
+ * 修前实测断连后 {@code hasKey} 挂 <b>3013ms / 3012ms</b>，
+ * 修后 <b>1ms / 0ms</b> ⇒ 三域同形。
+ * <br>⇒ ⚠️ 三份<b>域内副本</b>是<b>过渡形态</b>：共享层收编（并成一个自动配置）已作为反馈单派给 G4
+ * ⇒ G4 落码时应当<b>删除这三份副本</b>，避免双份配置。
  */
 @Configuration
 public class RedisDisconnectedBehaviorConfig {

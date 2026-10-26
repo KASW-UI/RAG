@@ -496,6 +496,16 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **Recommended Verification**：取决于 admin-rpc 是否可能返回空 `Admin` 或 uid 不一致
   ⇒ 见 §9 UNRESOLVED-001。**在该点确定前不得改任一侧。**
 
+> 🟢 **2026-10-27 降级订正（§2 结论回填）**：UNRESOLVED-001 已由 admin-rpc 侧答复 ⇒
+> **「admin-rpc 会不会返回未 set 的 `Admin`」＝ 不会**（Go `getselflogic.go:44-51` 总是构造 `Admin: &pb.AdminInfo{…}`；
+> RAG `AdminServiceGrpcImpl.toProtoAdmin` 同样总是 set）⇒
+> ⇒ **本条的前提不可达 ⇒ 实际无可观察差异** ⇒
+> **降级为「实现差异（防御性加固）」**，**不改实现**（那两道校验留着 —— 它们是防御性的，只是前提已被证伪）。
+> ⇒ ⚠️ **分类字段保留原值 `SEMANTIC MISMATCH` 不改写**（本条正文是 2026-10-22 的原始判定，
+> 订正以本注记形式留痕）⇒ **读本条时以本注记为准**。
+> ⇒ 证据强度：前提不可达这一点有**双侧活体对拍**背书（gRPC 18 用例的 payload 归一化含 `hasUser` / `hasAdmin`）
+> ⇒ **不是静态推导**。
+
 ---
 
 ### DRIFT-ADMINAPI-003 · 签名有效但 `userId` claim 缺失/非数字：Go 200+1006，RAG 401+1006
@@ -601,6 +611,20 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **Evidence strength**：`静态源码·双侧`（`omitempty` 对 struct 无效这一条是 Go 语言层事实，
   **本轮未跑探针实证**，一并记入 §9 UNRESOLVED-003）
 - **触发条件依赖** admin-rpc 是否会返回未 set 的 `user` ⇒ §9 UNRESOLVED-001。
+
+> 🟢 **2026-10-27 降级订正（§2 结论回填）**：UNRESOLVED-001 已由 admin-rpc 侧答复 ⇒
+> **「`GetUser` / `UpdateUser` 会不会返回未 set 的 `user`」＝ 不会**
+> （Go `getuserlogic.go:42-50` / `updateuserlogic.go:106-113` 总是构造 `User: &pb.UserInfo{…}`；
+> RAG `toProtoUser` 同样总是 set）⇒
+> ⇒ **本条的前提不可达 ⇒ 实际无可观察差异** ⇒
+> **降级为「实现差异（防御性加固）」**，**不改实现**
+> （⚠️ **不要删** `if (rpcResp.hasUser())` 那个守卫 —— 它是防御性的，只是它的「前提」已被证伪）。
+> ⇒ ⚠️ **分类字段保留原值 `OBSERVABLE DIFFERENCE` 不改写**（本条正文是 2026-10-22 的原始判定，
+> 订正以本注记形式留痕）⇒ **读本条时以本注记为准**。
+> ⇒ 证据强度：前提不可达这一点有**双侧活体对拍**背书（gRPC 18 用例的 payload 归一化含 `hasUser` / `hasAdmin`）
+> ⇒ **不是静态推导**。
+> ⇒ 🟡 **连带**：`UNRESOLVED-003`（Go 的 `omitempty` 对 struct 无效这一条）已于 2026-10-24 **单独关闭**
+> ⇒ 那个语言层事实本身是**已证**的 ⇒ **本条不再是「前提待定」，而是「前提不可达」**。
 
 ---
 
@@ -750,6 +774,19 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 > ⇒ 完整证据链（含 Go 侧 7 个拦截器 vs RAG 侧 1 个的对照）⇒
 > [`DRIFT-ARPC-009`](./rpc.md)（在 `rpc.md` 的「2026-10-24 完整性复核轮」§1）。
 > ⚠️ `align/message` 分支已修（recover 精确复刻 Go 的 `INTERNAL + "panic: "`）⇒ **合并后自动消失**。
+
+> 🟢 **2026-10-27 降级订正（§2 结论回填）**：UNRESOLVED-001 已由 admin-rpc 侧答复 ⇒
+> **`GetSelf` 实际只会抛 `NOT_FOUND` 与 `INTERNAL`**
+> （Go `getselflogic.go:36-41` 只有这两个分支；RAG `AdminDomainService.getSelf:243-258` 同）
+> ⇒ ⇒ **那 4 种 code（`ALREADY_EXISTS` / `PERMISSION_DENIED` / `UNAUTHENTICATED` / `INVALID_ARGUMENT`）不可达**
+> ⇒ 通用表 `mapRPCStatusToCode` 的那 4 行**永远走不到**
+> ⇒ ⇒ **本条（4 种业务 code 那部分）的前提不可达 ⇒ 实际无可观察差异** ⇒
+> **降级为「实现差异（防御性加固）」**，**不改实现**
+> （⚠️ 通用表本身**不要动** —— 它被 12 个已对齐的端点共用）。
+> ⇒ ⚠️ **分类字段保留原值 `OBSERVABLE DIFFERENCE` 不改写**（本条正文是 2026-10-22 的原始判定，
+> 订正以本注记形式留痕）⇒ **读本条时以本注记为准**。
+> ⇒ 🔴 **但第 5 种 code（`UNKNOWN`，panic 路径）不在本次降级范围内** ——
+> 它**确实可达**，且是**另一条**（`DRIFT-ARPC-009`，在 `rpc.md`）⇒ **本降级不销它**。
 
 ---
 
@@ -2025,3 +2062,121 @@ go-zero@v1.10.2 rest/server.go:222-233     WithMiddleware ⇒ middleware(route.H
 ⇒ **变异验证 2/2 变红**：把 `connect-timeout` 改成 `3s` ⇒ 两条都红
 （`expected:<5s> but was:<3s>` / `expected:<PT5S> but was:<PT3S>`）。
 ⇒ **回归**：**6 组件 BUILD SUCCESS**（`admin-api` **137** = 135 + 本轮 2 例 · `admin-rpc` **115** · `user-api` **120** · `user-rpc` **137** · `follow-api` **65** · `follow-rpc` **78** ⇒ **652 条全绿**）。
+
+### 12.10 🟢 **socket 层那一截已收口**（2026-10-27 · G1 lane 续轮）
+
+> **本节把 §12.9 那句「仍不证明 socket 层」补上。**
+
+| 层 | 断言什么 | 守门 | 强度 |
+|---|---|---|---|
+| ① 文本层 | yml 里 `timeout: 3s` ＋ `connect-timeout: 5s` 逐字 | `AdminApiRedisTimeoutConfigTest` | L1 静态 |
+| ② 绑定层 | Spring 真实 `Binder` ⇒ `DataRedisProperties.getConnectTimeout()==5s` | 同上 | L2 |
+| ③ **消费层** | Lettuce 客户端 `ClientOptions.socketOptions.connectTimeout == 5s` ＋ **socket 层实测** | 🆕 **`AdminApiRedisConnectTimeoutSocketTest`** | **L3 真容器** |
+
+**③ 的做法**（照 user-api 同款）：
+- 把 `spring.data.redis.host` 指到 **黑洞 IP `192.0.2.1`**（RFC 5737 TEST-NET-1 ⇒ TCP SYN 永不回包）
+  ＋ **把 `timeout` 覆盖成 30s**（**为的是隔离出 connect 超时** —— Lettuce 的连接是**异步**的，
+  不覆盖的话**先到期的永远是 3s 的命令超时**，测出来的时长没有判别力）；
+- ⇒ **实测失败耗时 5169ms**（落在 `[4000ms, 9500ms)` —— 该区间**只**容得下 5s：
+  ≈10s = Lettuce 默认值 ⇒ 属性没生效 · ≈3s = 回落到 timeout · ≈75s = TCP 系统默认）。
+- ⚠️ **黑洞可用性是环境相关的** ⇒ 某些网络直接 `no route to host`（几毫秒就失败）
+  ⇒ 时长断言用 `assumeTrue(elapsedMs >= 1000, …)` 跳过，**但 ①（配置消费点）永远生效**。
+
+⇒ **变异验证 3/3 变红**（本轮）：admin 摘掉 `connect-timeout` ⇒ `expected:<PT5S> but was:<PT10S>`
+· user 改 `3s` ⇒ `expected:<PT5S> but was:<PT3S>` · follow 摘掉 ⇒ `expected:<PT5S> but was:<PT10S>`。
+
+---
+
+## 13. 🆕 `DRIFT-ADMINAPI-012` · Redis 断连 ⇒ 命令挂满 3s ⇒ **503**（Go 是 fail-open 200）—— **已修**（2026-10-27 · G1 lane）
+
+> **元信息**：落码分支 `align/g1-users-follow` · **写权内**（`service/users/admin/admin-api/**`）·
+> **证据强度**：🟡 **RAG 腿 = L3 真容器活体**（真 Redis 容器 ＋ **可控 TCP 代理制造 FIN**）
+> ＋ **L1 Go 侧源码**（⚠️ **不是 L4 双侧活体** —— Go 腿的活体对拍只在 **user-api 域**做过，见 `user/api.md` 的 `DRIFT-USERAPI-014`；
+> admin 域的 Go 腿是**源码逐行对照**，不是活体 ⇒ 按 AGENTS.md §0 记「在该证据强度下一致」，**不冒充 L4**）。
+
+### 13.1 前提核实（**两侧逐行，不是「同族大概」**）
+
+| 面 | Go（真源） | RAG | 结论 |
+|---|---|---|---|
+| 黑名单判据 | `service/user/admin/api/internal/middleware/checkblacklistmiddleware.go:35-36`<br>`exists, err := m.Redis.ExistsCtx(...)` → `if err == nil && exists { 401 }` | `AdminJwtAuthInterceptor.isBlacklisted:197-203`<br>`redisTemplate.hasKey(...)` → `catch (Throwable t)` | ⇒ **两侧都是「Redis 挂了 ⇒ err≠nil / 异常 ⇒ 判据为 false ⇒ 放行」**（fail-open）⇒ **目标形状一致** |
+| Redis 失败耗时 | go-zero `core/stores/redis/redisclientmanager.go:32-39` 建 `red.Options` **不传任何 timeout** ＋ `maxRetries = 3`（`:18`）⇒ 连接被拒/被关时**每次重试立即失败** ⇒ **快速失败** | Boot 4 `LettuceConnectionConfiguration:209-230` **从不设** `disconnectedBehavior` ⇒ Lettuce 默认 `DEFAULT`（`DefaultEndpoint:149` / `:837-852`：`DEFAULT + autoReconnect=true ⇒ 命令排队等重连`）⇒ 挂到 `commandTimeout` | ⇒ **唯一的差别是「失败要花多久」** |
+| HTTP 预算 | go-zero `rest/config.go:55` `Timeout int64 json:",default=3000"` | `application.yml` 的 `observability.http-timeout: 3s` | ⇒ **两侧同为 3s**（已对齐） |
+
+### 13.2 漂移形态与**修前实测**
+
+**故障形态必须是 FIN（优雅断开），不是 RST** —— 这是本条最贵的一课：
+`container.stop()` 让容器被**强杀** ⇒ 连接收到 **RST** ⇒ Lettuce 往 socket 写命令时**立刻失败**
+⇒ **根本走不到** `disconnectedBehavior` 分支 ⇒ 两种配置的耗时都是 1~13ms ⇒ **分不出**（2026-10-24 在 user-api 域实测踩出来）。
+⇒ 线上真实形态是 `docker stop` ⇒ Redis **优雅退出** ⇒ **FIN** ⇒ Lettuce 进入 DISCONNECTED（正在重连）⇒ **命令被排队**。
+⇒ 本轮用**可控 TCP 透传代理**精确复刻：**先关监听口**（重连被拒）＋ **再对已建立连接半关闭**（发 FIN）。
+
+**修前实测（admin-api 本域，L3 真容器）**：
+
+| 项 | 修前实测 | 修后实测 |
+|---|---|---|
+| Lettuce 断连策略 | `DEFAULT`（`expected: <REJECT_COMMANDS> but was: <DEFAULT>`） | `REJECT_COMMANDS` |
+| 断连后 `hasKey` 耗时 | **3039ms**（变异复测 **3013ms**）⇒ 挂到 `commandTimeout: 3s` | **1ms** |
+| 异常链 | `QueryTimeoutException: Redis command timed out` ← `RedisCommandTimeoutException: Command timed out after 3 second(s)` | `RedisException: Currently not connected. Commands are rejected.` |
+| **对外形状** | ⇒ 撞 `observability.http-timeout: 3s` ⇒ **503 `Request Timeout`** | ⇒ 远小于预算 ⇒ 进业务层 ⇒ **fail-open 200**（与 Go 同形） |
+
+### 13.3 修法：**域内副本**（🔴 **不写共享层**）
+
+新增 `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/config/RedisDisconnectedBehaviorConfig.java`
+—— 把 Lettuce 的断连行为设成 `ClientOptions.DisconnectedBehavior.REJECT_COMMANDS`。
+
+⚠️ **为什么是域内副本而不是共享层**：
+- 该类**本来就在 user-api 域内**（`service/users/user/user-api/.../config/`）⇒ **不是共享层文件**
+  ⇒ 复制到 admin-api **完全在 G1 写权内**（`service/users/{user,admin}/**`）
+  ⇒ **不需要等 G4、不阻塞本波**（AGENTS.md §5.3e「**域侧能自修的域侧修**」）；
+- **共享层收编**（三份副本并成一个自动配置）是**可选的后续收敛** ⇒ 已作为反馈单派给 G4
+  ⇒ **G4 落码时应当删除这三份域内副本**，避免双份配置。
+- ⚠️ **本类只改「断连」这一种故障，不改「连着但不回包」**：后者两侧**都是 503**
+  （Go 的 `ReadTimeout` 默认 3s ⇒ 同样撞预算；RAG 同样等满 `timeout: 3s`）
+  ⇒ **两类故障分别对齐**，没有把其中一类改成另一类。
+
+### 13.4 守门（**绿测试必须是错误答案的守卫**）
+
+| 守门 | 例数 | 断言面 |
+|---|---|---|
+| 🆕 `AdminApiRedisDisconnectedFastFailTest` | **2** | ① 断连策略真被装配（读**运行时真正在用**的那份 `ClientOptions`）＋ Redis 可达时 `hasKey` 真通 · ② **真故障注入**（FIN）⇒ 断连后 `hasKey` **<1500ms** 失败（预算落在修前 3039ms 与修后 1ms 之间，**两侧都判得开**） |
+| 🆕 `AdminApiRedisConnectTimeoutSocketTest` | **1** | 见 §12.10（socket 层 5s 连接超时） |
+
+⇒ **变异验证 5/5 变红**（本轮全部新增守门）：
+① admin 摘 `connect-timeout` ⇒ `expected:<PT5S> but was:<PT10S>`
+② user `connect-timeout` 改 `3s` ⇒ `expected:<PT5S> but was:<PT3S>`
+③ follow 摘 `connect-timeout` ⇒ `expected:<PT5S> but was:<PT10S>`
+④ admin `REJECT_COMMANDS` → `DEFAULT` ⇒ 两条红，耗时实测 **3013ms**
+⑤ follow `REJECT_COMMANDS` → `DEFAULT` ⇒ 两条红，耗时实测 **3019ms**
+⇒ ⚠️ **变异脚本改的是本域 yml / java 文件，改完用 md5 校验还原**（本轮踩过「备份命名撞车 ⇒ 还原错文件」的坑）。
+
+⇒ **回归（2026-10-27 本轮收口）**：**6 组件 BUILD SUCCESS**，逐模块取自 `target/surefire-reports/TEST-*.xml`（**按模块聚合，不是按行序 tail**）：
+
+| 组件 | 上轮 | 本轮 | 增量 |
+|---|---|---|---|
+| `user-api` | 120 | **121** | +1（`UserApiRedisConnectTimeoutSocketTest`） |
+| `user-rpc` | 137 | **137** | — |
+| `admin-api` | 137 | **140** | +3（socket 1 ＋ 断连 2） |
+| `admin-rpc` | 115 | **115** | — |
+| `follow-api` | 65 | **68** | +3（socket 1 ＋ 断连 2） |
+| `follow-rpc` | 78 | **78** | — |
+| **合计** | **652** | **659** | **+7** |
+
+⇒ **守门 5/5 EXIT=0**：`check-wave-lane-ownership` · `check-wave-role-model` · `check-wave-coupling`
+· `check-ledger-count` · `check-doc-links`。
+⇒ ⚠️ **本轮回归中的一次偶发（留痕，不掩盖）**：第一次 6 组件回归里
+`FollowApiStartupFailFastTest.startsWithGlobalClientInterceptor` **红过一次**
+（cause = devh `connectOnStartup` 的「Can't connect to channel follow-rpc」⇒ **本地 channel 3s 内没到 READY**），
+⇒ **该测试与本轮改动无耦合面**（它测的是 gRPC 拨号，本轮改的是 Redis）；
+⇒ 处置：① 单独重跑 follow-api **3 次全绿**（68/68 × 3）② 第二次 6 组件回归 **EXIT=0（659 全绿）**
+③ 仍给本轮新加的守门补了**收尾卫生**（三条 socket 守门加 `@DirtiesContext(AFTER_CLASS)` 关掉 Lettuce 客户端；
+两条断连守门加 `@AfterAll` 关闭 TCP 代理的线程池）⇒ **消掉本域唯一可能与后续测试抢资源的路径**。
+⇒ ⚠️ **诚实边界**：该偶发**未被 100% 归因**（未能在基线上复现同样现象）⇒ **记为「偶发 · 未归因」**，不写成「已修」。
+
+### 13.5 效力边界（如实登记，**不夸大**）
+
+1. **不是 L4**：Go 腿是**源码逐行对照**，不是本域活体对拍 ⇒ 记 **L3 + L1**；
+   （Go 腿的活体证据在 **user-api 域**有：2026-10-24 的 `200 / 1.72s` 对拍）
+2. **只覆盖「断连（FIN）」**：RST 形态（容器被强杀）**测不出**、也不构成漂移（那条路径两侧都快速失败）
+3. **只覆盖黑名单读路径**：admin-api 的 Redis **只有黑名单这一处用途**（`AdminJwtAuthInterceptor:201`）
+   ⇒ 本条覆盖了 admin-api 的**全部** Redis 故障面
+4. **域内副本是过渡形态**：G4 收编后要回来删副本（见 §13.3）

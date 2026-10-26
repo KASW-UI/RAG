@@ -45,8 +45,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  *
  * <p>① 第一条是<b>静态配置断言</b>：证明 yml 里写了这两个值，<b>不证明</b>「Boot 4 真的把它们
  * 绑定到了 Lettuce 客户端」；第二条用 Spring 真实的 {@code Binder} 走一遍 relaxed binding，
- * 证明「属性被绑定进 {@code DataRedisProperties}」，<b>仍不证明</b>「Lettuce 客户端在 socket 层
- * 真的按这个值超时」（后者需要指向黑洞地址实测失败耗时 ⇒ 该尾巴仍记 UNRESOLVED）。
+ * 证明「属性被绑定进 {@code DataRedisProperties}」。
+ *
+ * <p>② **socket 层那一截已由 {@link AdminApiRedisConnectTimeoutSocketTest} 收口**（2026-10-27）：
+ * 那个类断言 Lettuce 客户端的 {@code socketOptions.connectTimeout == 5s}，
+ * 并把连接指向黑洞 IP {@code 192.0.2.1} 实测失败耗时（实测 <b>5169ms</b>，落在 [4000ms, 9500ms)）
+ * ⇒ **本类（文本层 + 绑定层）＋ 那条（消费层）合起来才是完整的证据链**；
+ * 单看本类仍不能证明 socket 层。
  */
 class AdminApiRedisTimeoutConfigTest {
 

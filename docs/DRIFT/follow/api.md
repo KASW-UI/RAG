@@ -21,6 +21,7 @@
 | DRIFT-FOLLOW-009 | 下游挂死时：Go **2s ⇒ 200+1015**；RAG **3s ⇒ 503 "Request Timeout"** | **可观察（状态码 + 时刻）** | ✅ 已修 |
 | **DRIFT-FOLLOW-010** | **3s 预算的作用域**：Go 的计时器在 Authorize **之后**起算（**验签不计入**）/ RAG 的计时器在 Filter 外层（**验签计入**） | 可观察（**超时边界**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内推广 `DRIFT-USERAPI-009②`） |
 | **DRIFT-FOLLOW-011** | **Redis 超时口径**：`timeout: 2s` ≠ Go 的 `ReadTimeout` **3s**，且**缺 `connect-timeout: 5s`** | 可观察（**Redis 挂住形态**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内自闭环） |
+| **DRIFT-FOLLOW-012** | **Redis 断连行为**：Lettuce 默认 `DEFAULT` ⇒ 命令被**排队**挂到 `commandTimeout` 3s ⇒ 撞 HTTP 预算 ⇒ **503**；Go 快速失败 ⇒ **fail-open 200** | 可观察（**状态码 + 时刻**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内自闭环） |
 | ~~OPEN-001~~ | ~~Content-Type 不支持 ⇒ RAG 415 / Go 不报错~~ | 可观察 | ✅ **已关闭（415 分支实测不可达）**，见下 |
 
 > **2026-10-24 第二轮（未知项 U1–U8 收口）新增 3 条**，全部有**双侧活体对拍**证据：
@@ -331,8 +332,14 @@ U3 的突发测试里抓到过 **`HTTP 200` + body `Request Timeout`** ——
      本域修前 2s 就 fail-open ⇒ **200** ⇒ **与 Go 不一致**（也与自己域内 `user-api` / `admin-api` 的 3s 不一致 ⇒ **同族三域口径不一**）。
   2. **连接超时 2s vs Go 5s** ⇒ Redis「连不上且连接阶段挂住」时：Go 5s 放弃、本域 2s 放弃 ⇒ **本域更严**。
 - **修法**：`timeout: 2s` → **`3s`** ＋ 补 **`connect-timeout: 5s`** ＋ 把 Go 出处链写进 yml 注释。
-- **Evidence strength**：**L2**（Spring Boot 真实 `Binder` 绑定结果 ＋ yml 静态断言）
-  ⚠️ **未跑 socket 层活体**（指向黑洞 IP 实测失败耗时落在 5s 而非 3s）⇒ 该尾巴仍记 UNRESOLVED
+- **Evidence strength**：**L3**（Spring Boot 真实 `Binder` 绑定结果 ＋ yml 静态断言 ＋ **socket 层实测**）
+  ✅ **socket 层那一截已于 2026-10-27 收口**（`FollowApiRedisConnectTimeoutSocketTest`）：
+  把连接指向**黑洞 IP `192.0.2.1`** ＋ 把 `timeout` 覆盖成 30s（**为的是隔离出 connect 超时** ——
+  Lettuce 的连接是**异步**的，不覆盖的话**先到期的永远是 3s 的命令超时**）
+  ⇒ **实测失败耗时 5175ms**（落在 `[4000ms, 9500ms)` —— 该区间**只**容得下 5s：
+  ≈10s = Lettuce 默认值 ⇒ 属性没生效 · ≈3s = 回落到 timeout · ≈75s = TCP 系统默认）
+  ⇒ ⚠️ **黑洞可用性是环境相关的**（某些网络直接 `no route to host`）⇒ 时长断言用 `assumeTrue` 跳过，
+  **但「配置消费点」那条断言永远生效**。
   ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。
 - **守门**：`FollowApiRedisTimeoutConfigTest`（**2 例**，新建）—— ① yml 两值逐字断言 ·
   ② **用 Spring 真实的 `Binder`** 断言 `getConnectTimeout()==5s` / `getTimeout()==3s`。
@@ -342,6 +349,56 @@ U3 的突发测试里抓到过 **`HTTP 200` + body `Request Timeout`** ——
   各补一条同款守门 ⇒ **三个 api 域的 Redis 超时口径归一且被钉住**。
 - **回归**：**6 组件 BUILD SUCCESS**（`admin-api` **137** · `admin-rpc` **115** · `user-api` **120** · `user-rpc` **137** · `follow-api` **65** · `follow-rpc` **78**
   ⇒ **652 条全绿**；三个 api 各 +2 例新守门）。
+
+---
+
+## DRIFT-FOLLOW-012 ✅ follow-api 的 Redis **断连**行为与 Go 不符：命令被排队挂到 3s ⇒ **503**（Go 是 fail-open 200）🟡 **已修（2026-10-27 · G1 lane）**
+
+> 🆕 **本轮新立** ⇒ follow 域**首次**登记「Redis **断连**（≠ 挂住）」这一族差异。
+> ⚠️ 与 `DRIFT-FOLLOW-011`（超时**配置值**）**同族但不是同一条**：
+> 011 是「超时值没抄对（照抄题）」，本条是「**断连时 Lettuce 的行为**（取舍题）」——
+> 011 改 `application.yml` 两个数字即可，本条改的是 **Lettuce 的 `disconnectedBehavior`**。
+> ⚠️ 与 users 域的 `DRIFT-USERAPI-014`（user-api 同款）是**同一条**（三个 api 域的 Redis 都只服务黑名单这一处用途）。
+
+- **Component**：follow-api / 全部端点的黑名单 EXISTS（`FollowBlacklistInterceptor`）
+- **Category**：Failure Semantics / Timeout Semantics
+- **Classification**：OBSERVABLE DIFFERENCE（**条件性**：仅在「Redis 被优雅断开（FIN）」形态下可见）
+  **Risk**：MEDIUM（状态码 + 时刻都变）
+- **前提核实（两侧逐行，不是「同族大概」）**：
+  | 面 | Go（真源） | RAG | 结论 |
+  |---|---|---|---|
+  | 黑名单判据 | `service/follow/api/internal/middleware/checkblacklistmiddleware.go:40-41`<br>`exists, err := m.Redis.ExistsCtx(...)` → `if err == nil && exists { 401 }` | `FollowBlacklistInterceptor.isBlacklisted:150-156`<br>`redisTemplate.hasKey(...)` → `catch (Throwable t)` | ⇒ **两侧都是「Redis 挂了 ⇒ 判据为 false ⇒ 放行」**（fail-open）⇒ **目标形状一致** |
+  | Redis 失败耗时 | go-zero `core/stores/redis/redisclientmanager.go:32-39` 建 `red.Options` **不传任何 timeout** ＋ `maxRetries = 3`（`:18`）⇒ 连接被拒/被关时**每次重试立即失败** ⇒ **快速失败** | Boot 4 `LettuceConnectionConfiguration:209-230` **从不设** `disconnectedBehavior` ⇒ Lettuce 默认 `DEFAULT`（`DefaultEndpoint:149` / `:837-852`：`DEFAULT + autoReconnect=true ⇒ 命令排队等重连`）⇒ 挂到 `commandTimeout` | ⇒ **唯一的差别是「失败要花多久」** |
+  | HTTP 预算 | go-zero `rest/config.go:55` `Timeout int64 json:",default=3000"` | `application.yml` 的 `observability.http-timeout: 3s` | ⇒ **两侧同为 3s**（已对齐） |
+- **Difference**：Redis 被**优雅断开**时，本域的 `hasKey` 被**排队**等重连 ⇒ 挂到 `commandTimeout: 3s`
+  ⇒ **与 HTTP 预算同刻耗尽** ⇒ **503 `Request Timeout`**；
+  Go 侧快速失败（实测 ~1.7s，仍在预算内）⇒ 进业务层 ⇒ **fail-open 200** ⇒ **两侧对外形状不同**。
+- **修法**：新增**域内副本** `config/RedisDisconnectedBehaviorConfig`
+  ⇒ 把 Lettuce 的断连行为设成 `ClientOptions.DisconnectedBehavior.REJECT_COMMANDS`
+  ⇒ 断连时**立即拒命令** ⇒ 失败耗时 ≪ 3s ⇒ 进业务层 ⇒ **fail-open 200**（与 Go 同形）。
+  ⚠️ **本条只改「断连」，不改「连着但不回包」**：后者两侧**都是 503**
+  （Go 的 `ReadTimeout` 默认 3s ⇒ 同样撞预算）⇒ **两类故障分别对齐**。
+- **Evidence strength**：🟡 **L3**（**真 Redis 容器 ＋ 可控 TCP 代理制造 FIN** 的真故障注入）
+  ＋ **L1**（Go 侧源码逐行对照）
+  ⚠️ **不是 L4 双侧活体** —— Go 腿的活体对拍只在 **user-api 域**做过（2026-10-24 的 `200 / 1.72s`）
+  ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。
+- **守门**：`FollowApiRedisDisconnectedFastFailTest`（**2 例**，新建）——
+  ① 断连策略真被装配（读**运行时真正在用**的那份 `ClientOptions`）＋ Redis 可达时 `hasKey` 真通 ·
+  ② **真故障注入**（FIN）⇒ 断连后 `hasKey` **<1500ms** 失败
+  （预算 1500ms 落在修前 3012ms 与修后 0ms 之间，**两侧都判得开**）。
+  ⇒ 另加 `FollowApiRedisConnectTimeoutSocketTest`（**1 例**，socket 层 5s 连接超时，见 `DRIFT-FOLLOW-011`）。
+- **变异验证 2/2 变红**：把 `REJECT_COMMANDS` 改回 `DEFAULT` ⇒ 两条都红
+  （耗时实测 **3019ms** · 异常链 `QueryTimeoutException: Redis command timed out` ←
+  `RedisCommandTimeoutException: Command timed out after 3 second(s)`）。
+- **修前/修后实测**：修前 断连策略 = `DEFAULT` ＋ `hasKey` **3012ms** ⇒ 修后 `REJECT_COMMANDS` ＋ **0ms**。
+- ⚠️ **故障注入方式是这个测试的全部难点**：`container.stop()` 让容器被**强杀** ⇒ 连接收到 **RST**
+  ⇒ Lettuce 往 socket 写命令时**立刻失败** ⇒ **根本走不到** `disconnectedBehavior` 分支
+  ⇒ 两种配置的耗时都是 1~13ms ⇒ **分不出**（2026-10-24 在 user-api 域实测踩出来）。
+  ⇒ 线上真实形态是 `docker stop` ⇒ Redis **优雅退出** ⇒ **FIN** ⇒ 命令被排队。
+  ⇒ 本轮用**可控 TCP 透传代理**精确复刻：**先关监听口**（重连被拒）＋ **再对已建立连接半关闭**（发 FIN）。
+- **连带**：同批给 `admin-api` 落同款域内副本（落 `DRIFT-ADMINAPI-012`）
+  ⇒ **三个 api 域的 Redis 断连行为归一**（user-api 早有；admin-api / follow-api 本轮补）。
+  ⇒ ⚠️ **三份域内副本是过渡形态** ⇒ **共享层收编仍归 G4**（见 `users/vs-common.md` §6.4 的派单）。
 
 ---
 
@@ -537,7 +594,7 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 > 约 25 条 `file:line` 引用（Go 侧 / go-zero 侧 / RAG 侧）**逐条命中**；
 > 复核中发现 5 处表述偏差已当场订正（对拍条数、文件计数、指标数值对拍状态等）。
 
-## 逐文件对照索引（31 个 Java ↔ 24 个 Go，**全量无遗漏**）
+## 逐文件对照索引（32 个 Java ↔ 24 个 Go，**全量无遗漏**）
 
 > ⚠️ 2026-10-24 复核补录：此前台账只列了「承重」文件，
 > 「源码逐条对照（24 个 Go 文件 ↔ 27 个 Java 文件）」这条断言**无法从台账里核对**
@@ -577,6 +634,7 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 | 29 | `auth/FollowJwtSignatureVerifier.java` | `rest/handler/authhandler.go:45-84` + `rest/token/tokenparser.go:81-86` | 验签本体；claim 存**原始对象**（取值判定属业务层 `helper.go:13-33` ⇒ 5004 ⇒ HTTP 200）；Bearer 前缀大小写不敏感 | ✅ |
 | 30 | `auth/FollowJwtAuthPaths.java` | `internal/handler/routes.go:16-64` | **无 public 路径**（8 端点全 protected）；Filter 与 interceptor **共用同一份**判据 | ✅ |
 | 31 | `auth/FollowJwtVerificationResult.java` | （表达层载体） | 失败带**异常对象**而非标志位 ⇒ `@ExceptionHandler` 仍管得到 ⇒ 401 空 body 形状不变 | ✅ |
+| 32 | `config/RedisDisconnectedBehaviorConfig.java` | `core/stores/redis/redisclientmanager.go:27-46`（go-redis `MaxRetries=3` ⇒ 快速失败） | 🔴 **Redis 断连 ⇒ 命令被拒而不是排队**（`REJECT_COMMANDS`）⇒ 断连时 fail-open **200** 而非 503（DRIFT-FOLLOW-012）<br>⚠️ **域内副本**（user-api 早有同款）⇒ **共享层收编归 G4** | ✅ |
 
 ## 证据强度
 
@@ -814,3 +872,64 @@ go-zero@v1.10.2 rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Ha
 ⇒ **🆕 G2 两域逐域注记（G2 回执 · 2026-10-27）**：`like-api` / `message-api` **均无 public 路径**（Go 6 + 13 条路由 100% 带 `WithJwt`）⇒ Filter 的 protected 判据**就是前缀本身**；
 🔴 **`message-api` 有两把 key**（8 条 `/message/v1/**` 用 UserAuth secret、5 条 `/message/v1/admin/**` 用 AdminAuth secret）⇒ Filter **必须按路径分派 key** ⇒ 直接抄「一把 key」会验错。
 ⇒ **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）。
+
+---
+
+## 12. 🆕 `DRIFT-FOLLOW-012` 的**实施记录**（2026-10-27 · G1 lane · 域内自闭环）
+
+> **元信息**：落码分支 `align/g1-users-follow` · **写权内**（`service/follow/follow-api/**`）·
+> **证据强度**：🟡 **L3 真容器活体**（真 Redis 容器 ＋ **可控 TCP 代理制造 FIN**）＋ **L1 Go 侧源码**
+> ⚠️ **不是 L4 双侧活体**（Go 腿的活体对拍只在 user-api 域做过）⇒ 按 AGENTS.md §0 记「在该证据强度下一致」。
+
+### 12.1 落码清单（**全部在 G1 写权内**）
+
+| 文件 | 性质 | 说明 |
+|---|---|---|
+| `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/config/RedisDisconnectedBehaviorConfig.java` | 🆕 **新增**（主代码） | 把 Lettuce 的 `disconnectedBehavior` 设成 `REJECT_COMMANDS` |
+| `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiRedisDisconnectedFastFailTest.java` | 🆕 **新增**（守门 · 2 例） | 真故障注入（FIN）⇒ 断连后 `hasKey` <1500ms 失败 |
+| `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiRedisConnectTimeoutSocketTest.java` | 🆕 **新增**（守门 · 1 例） | socket 层 5s 连接超时（黑洞 IP ＋ `timeout` 覆盖成 30s） |
+| `service/follow/follow-api/pom.xml` | ✏️ **改** | 🆕 补 `org.testcontainers:testcontainers` ＋ `testcontainers-junit-jupiter`（**test 作用域**）—— 本域原先**没有** testcontainers（user-api / admin-api 有）⇒ 断连守门需要真 Redis 容器。版本由 `spring-boot-starter-parent` 管理，**不写 `<version>`** |
+| `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiRedisTimeoutConfigTest.java` | ✏️ **改**（仅 javadoc） | 把「socket 层那截仍记 UNRESOLVED」改成「已由 `FollowApiRedisConnectTimeoutSocketTest` 收口（实测 5175ms）」 |
+
+⚠️ **零改动**：本域 `application.yml` **一个字没动**（`timeout: 3s` / `connect-timeout: 5s` 上一轮已对齐）·
+`FollowBlacklistInterceptor` / `FollowJwtAuthInterceptor` / `auth/*` 全部不动（黑名单仍 fail-open、401 形状不变）。
+
+### 12.2 修前 → 修后（**实测数字**）
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| Lettuce 断连策略 | `DEFAULT`（`expected: <REJECT_COMMANDS> but was: <DEFAULT>`） | `REJECT_COMMANDS` |
+| 断连后 `hasKey` 耗时 | **3012ms**（挂到 `commandTimeout: 3s`）⇒ 撞 HTTP 3s 预算 ⇒ **503** | **0ms** ⇒ 进业务层 ⇒ **fail-open 200** |
+| 异常链 | `QueryTimeoutException: Redis command timed out` ← `RedisCommandTimeoutException: Command timed out after 3 second(s)` | `RedisException: Currently not connected. Commands are rejected.` |
+| socket 层连接超时 | — | 实测 **5175ms**（`connect-timeout: 5s` 真在 socket 层生效） |
+
+### 12.3 变异验证（**绿测试必须是错误答案的守卫**）
+
+| # | 变异 | 结果 |
+|---|---|---|
+| ① | `REJECT_COMMANDS` → `DEFAULT`（本域） | 🔴 **红** —— 两条都红，耗时实测 **3019ms** |
+| ② | 摘掉 `connect-timeout: 5s`（本域） | 🔴 **红** —— `expected:<PT5S> but was:<PT10S>`（Lettuce 默认值） |
+
+⇒ **同批在 admin-api / user-api 上各做一次同款变异**（4/4 全红）⇒ 见
+[`users/admin/api.md` §13.4](../users/admin/api.md) 的 5/5 汇总表。
+
+⇒ **回归（2026-10-27 本轮收口）**：**6 组件 BUILD SUCCESS**，逐模块取自 `target/surefire-reports/TEST-*.xml`（**按模块聚合，不是按行序 tail**）：
+`user-api` **121**（上轮 120 · +1）· `user-rpc` **137** · `admin-api` **140**（上轮 137 · +3）· `admin-rpc` **115**
+· `follow-api` **68**（上轮 65 · +3）· `follow-rpc` **78** ⇒ **合计 659**（上轮 652 · **+7**）⇒ **Failures 0 / Errors 0**。
+⇒ **守门 5/5 EXIT=0**（`check-wave-lane-ownership` · `check-wave-role-model` · `check-wave-coupling` · `check-ledger-count` · `check-doc-links`）。
+⇒ ⚠️ **本轮回归的一次偶发（留痕）**：第一次 6 组件回归里 `FollowApiStartupFailFastTest.startsWithGlobalClientInterceptor`
+红过一次（cause = devh `connectOnStartup` 的「Can't connect to channel follow-rpc」⇒ 本地 channel 3s 内没到 READY）；
+**该测试与本轮改动无耦合面**（它测 gRPC 拨号，本轮改 Redis）⇒ 处置：单独重跑 follow-api **3 次全绿** ＋
+第二次 6 组件回归 **EXIT=0** ＋ 给本轮新守门补**收尾卫生**（socket 守门 `@DirtiesContext(AFTER_CLASS)` 关 Lettuce 客户端；
+断连守门 `@AfterAll` 关 TCP 代理线程池）⇒ **记为「偶发 · 未归因」**，不写成「已修」。
+
+### 12.4 ⚠️ 效力边界（如实登记）
+
+1. **不是 L4**：Go 腿是**源码逐行对照**，不是本域活体对拍 ⇒ 记 **L3 + L1**
+2. **只覆盖「断连（FIN）」**：RST 形态（容器被强杀）**测不出**、也不构成漂移（那条路径两侧都快速失败）
+3. **只覆盖黑名单读路径**：follow-api 的 Redis **只有黑名单这一处用途**（`FollowBlacklistInterceptor:154`）
+   ⇒ 本条覆盖了 follow-api 的**全部** Redis 故障面
+4. **域内副本是过渡形态**：共享层收编仍归 G4 ⇒ G4 落码后要回来删这三份副本
+5. ⚠️ **follow 的黑名单 key 前缀是 `user:jwt_blacklist:`**（**不是** follow 自己的）
+   —— Go `checkblacklistmiddleware.go:39` 的原样 ⇒ 与 user-rpc 的登出写入端**共用一份**黑名单
+   ⇒ 本域的 Redis 依赖面**跨域**，改前缀会同时影响 user 域 ⇒ **未动**。
