@@ -384,7 +384,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标记见文件头。
 | 57 | 生命周期 | 启动顺序 / 关闭 | `usercenter.go:24-45` | `UserApiApplication.main` + `ObservabilityLifecycle:47` | **EQUIVALENT**（表达层） | 静态源码 |
 | 58 | 并发/事务 | user-rpc 的事务边界、`FOR UPDATE`、`extra_info` jsonb、`is_current` 陈旧 | — | — | **不在本组件判定权内**（非「未知」）⇒ 结论见 `user/rpc.md`：`extra_info` 列类型 ✅ 已修（V-003，`ec33159`）· `is_current` 派生 ✅ EQUIVALENT | `UNRESOLVED-005` **已关**（2026-10-24） |
 | 59 | 外部依赖 | Redis **断连**时的黑名单查询 | `checkblacklistmiddleware.go:36` `err == nil && exists` ⇒ **fail-open 放行**（实测 ~1.7s） | Lettuce 默认把断连期命令**排队** ⇒ 撞 3s HTTP 预算 ⇒ 503 | **OBSERVABLE DIFFERENCE**（已修：2026-10-24 第九轮，`REJECT_COMMANDS` ⇒ 两侧都 200） | **DRIFT-USERAPI-014** · 双侧活体对拍 |
-| 60 | 外部依赖 | Redis **主机名解析失败**时的黑名单查询 | 同上（5 次拨号快速失败 ⇒ ~1.8s ⇒ **恒 200**） | 失败耗时**贴着 3s commandTimeout** ⇒ 与 3s HTTP 预算竞速 ⇒ **200/503 摇摆**（实测 3.03/2.93/3.01s） | **OBSERVABLE DIFFERENCE**（🔴 待拍板，2026-10-24 第十轮） | **DRIFT-USERAPI-015** · 双侧活体对拍 |
+| 60 | 外部依赖 | Redis **主机名解析失败**时的黑名单查询 | 同上（5 次拨号快速失败 ⇒ ~1.8s ⇒ **恒 200**） | 失败耗时**贴着 3s commandTimeout** ⇒ 与 3s HTTP 预算竞速 ⇒ **200/503 摇摆**（实测 3.03/2.93/3.01s） | **OBSERVABLE DIFFERENCE**（🔴 待拍板，2026-10-24 第十轮）<br>⚠️ **2026-10-26 收窄**：**仅 api 侧** —— rpc 侧经三形态直连实测**无漂移**（code 全同） | **DRIFT-USERAPI-015** · 双侧活体对拍 |
 
 ---
 
@@ -1292,6 +1292,14 @@ Recommended Verification: `UserApiRedisDisconnectedFastFailTest`（2 条 · 真�
 
 ### DRIFT-USERAPI-015 —— Redis **主机名解析不出来**（生产默认形态）：Go 恒 200 fail-open，RAG 在 **200/503 之间摇摆** —— 🔴 **2026-10-24 第十轮新发现 · 待拍板**
 
+> ✅ **2026-10-26 第十一轮：影响面已收窄 —— 本条只存在于 **api 侧**，rpc 侧经实测**无漂移**。**
+> ⇒ 三形态（拒连 / 解析失败 / **挂起**=命令超时路径）× 双侧 **gRPC 直连**实测：
+> 两侧 gRPC **code 全部相同**（`Internal`/`Internal`；`Internal`/`Internal`；`DeadlineExceeded`/`DeadlineExceeded`）
+> ⇒ ⇒ **015 不存在于 user-rpc** ⇒ 修法**只需落在 api 侧**（与 §10 的跨域归属结论一致）。
+> ⚠️ 唯一的不一致是 description（`context deadline exceeded` vs `rpc timeout after 2000ms`）⇒ **正是 `DRIFT-USERRPC-V-007`（已销账，主干未合）**，**不是新漂移**。
+> ⇒ 同轮测出**另一条**观测面差异（RAG 业务日志说「Redis 写入异常」而客户端看到的是「超时」）⇒ 另立 **`DRIFT-USERRPC-V-012`**，在 [`user/rpc.md`](./rpc.md)。
+> ⇒ 逐形态数据与复现入口 ⇒ [`user/rpc.md` 的「2026-10-26 第十一轮」](./rpc.md)。
+
 ```text
 Component:    JwtAuthInterceptor（黑名单 EXISTS）/ Lettuce 的连接建立与超时设置
 Operation:    全部 protected 端点在「Redis 地址**解析不出来**」时的响应
@@ -1559,7 +1567,7 @@ Required Confirmation: 引用 `docs/DRIFT/users/user/rpc.md`（另一会话产�
 | 4 | NotFound / Empty / Null 是否一致 | ✅ | §4 #28,29；`list`→`[]`、`history` 不会 null、`data`→null 一致 |
 | 5 | Error meaning 是否一致 | ✅ | ~~DRIFT-USERAPI-003~~（**第四轮已修**）；§4 #7,8,13,14,15,25 |
 | 6 | Error propagation 是否一致 | ✅ | ~~DRIFT-USERAPI-001~~（**第三轮已修**：畸形 claim 走业务层 200+1006） |
-| 7 | External dependency failure 是否一致 | ❌ | **第九轮双侧活体实测**：Redis **断连** ⇒ 两侧都 200（fail-open 放行）；Redis **很慢** ⇒ 两侧都 503 "Request Timeout"。⇒ **DRIFT-USERAPI-014 已修**。⚠️ **第十轮补测**：Redis **从未连上·端口拒连** ⇒ 两侧都 200（014 修法已覆盖）；但 Redis **主机名解析失败**（**生产默认形态**）⇒ Go **恒 200** / RAG **200·503 摇摆** ⇒ **DRIFT-USERAPI-015（2026-10-24 第十轮新发现）** |
+| 7 | External dependency failure 是否一致 | ❌ | **第九轮双侧活体实测**：Redis **断连** ⇒ 两侧都 200（fail-open 放行）；Redis **很慢** ⇒ 两侧都 503 "Request Timeout"。⇒ **DRIFT-USERAPI-014 已修**。⚠️ **第十轮补测**：Redis **从未连上·端口拒连** ⇒ 两侧都 200（014 修法已覆盖）；但 Redis **主机名解析失败**（**生产默认形态**）⇒ Go **恒 200** / RAG **200·503 摇摆** ⇒ **DRIFT-USERAPI-015（2026-10-24 第十轮新发现）**<br>✅ **第十一轮收窄**：**rpc 侧**经三形态 × 双侧 gRPC 直连实测**无漂移**（code 全同）⇒ **015 只在 api 侧** |
 | 8 | Cache hit / miss 是否一致 | — | **N/A**：本组件无缓存 |
 | 9 | Transaction boundary 是否一致 | — | **N/A**：本组件无 DB；~~见 U-005~~（U-005 **已关**） |
 | 10 | State transition 是否一致 | ⚠️ | 本组件无状态（N/A 性质的等价）；user-rpc 侧 U-005 已关 |
@@ -1607,7 +1615,7 @@ SEMANTICALLY NOT EQUIVALENT
 | 条目 | 形态 | 归属 | 只改本域文件能否闭环 |
 |---|---|---|---|
 | `DRIFT-USERAPI-009②` | 3s 预算的作用域（Go 不含验签、RAG 含） | **改法 A 落在 `service/users/user/user-api`**（`service/common` 不动） | ✅ **能**（域内）<br>⚠️ 但「全仓一致」要 9 个域各改各的（Go 是逐服务 `server.Use`）⇒ **推广跨域，落地不跨域** |
-| `DRIFT-USERAPI-015` | Redis 主机名解析失败 ⇒ 200/503 摇摆 | 主修法 = 改 **user-api 自己的** `application.yml` | ✅ **能**（域内）<br>⚠️ 同款配置另见 `admin-api`（跨子域）与 `favorite-api`（跨域）|
+| `DRIFT-USERAPI-015` | Redis 主机名解析失败 ⇒ 200/503 摇摆 | 主修法 = 改 **user-api 自己的** `application.yml` | ✅ **能**（域内）<br>⚠️ 同款配置另见 `admin-api`（跨子域）与 `favorite-api`（跨域）<br>✅ **2026-10-26 第十一轮收窄**：**rpc 侧实测无漂移**（三形态 × 双侧 gRPC 直连，code 全同）⇒ **本条的修法只需落在 api 侧**，不必连带改 rpc |
 | `DRIFT-USERAPI-013` | 过载保护（breaker 键空间 + 注释与实现矛盾） | **`service/common`**（11 个 protection 类） | ❌ **不能** ⇒ **这才是唯一真正跨域的一条** |
 
 **⇒ 结论**：users/user 域**不是**「只剩跨域的活」。
