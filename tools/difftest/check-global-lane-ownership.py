@@ -51,6 +51,14 @@ REPO = Path(__file__).resolve().parents[2]
 ACTIVE: dict[str, list[str]] = {
     # ---- 第二十七轮（2026-10-26）：6 条新 lane，按**模块**零重叠 ----
     # ---- 第二十八轮（2026-10-26）：4 条 lane，按**模块**零重叠 ----
+}
+
+# ⚠️ **已合回**的 lane（CLOSED）：它们的写权已并入 `align/global` ⇒ 不是并发方
+#    ⇒ 与在跑的 lane 重叠**不算违规**（但仍要守「共享文件无人拥有」与「favorite 零写权」）。
+#    留档是为了让「声明」与「历史」可对照，不是为了参与重叠判定。
+CLOSED: dict[str, list[str]] = {
+    # ---- 第二十八轮（2026-10-26）：4 条 lane，**已全部合回** ⇒ 移入本档 ----
+    # ⚠️ 它们与在跑 lane 白名单**必然重叠**（同模块的 test 目录）⇒ 但**已合回的不是并发方**
     # ⚠️ 本轮修的是**生产启动阻塞**（不是守门）⇒ 白名单含 `src/main/resources` 与 `pom.xml`。
     # ⚠️ L12/L13/L14 各占互不相交的 **maven 模块**（按模块零重叠 ⇒ 不互踩 `target/`）。
     # ⚠️ L15 只碰 `tools/difftest/` 的**指定文件**（不是目录级）⇒ 不与任何 service lane 相撞。
@@ -84,12 +92,6 @@ ACTIVE: dict[str, list[str]] = {
         "tools/difftest/baselines/grpc-runtime-classpath.txt",
         "docs/DRIFT/global/lanes/L15-rpcboot-tools.md",
     ],
-}
-
-# ⚠️ **已合回**的 lane（CLOSED）：它们的写权已并入 `align/global` ⇒ 不是并发方
-#    ⇒ 与在跑的 lane 重叠**不算违规**（但仍要守「共享文件无人拥有」与「favorite 零写权」）。
-#    留档是为了让「声明」与「历史」可对照，不是为了参与重叠判定。
-CLOSED: dict[str, list[str]] = {
     # ---- 第二十七轮（2026-10-26）：6 条 lane，**已全部合回** ⇒ 移入本档 ----
     # ⚠️ 它们与第二十八轮在跑的 L12~L15 白名单**必然重叠**（同模块的 test 目录）
     #    ⇒ 但**已合回的不是并发方** ⇒ 重叠不算违规（与 L2~L5 同款）。

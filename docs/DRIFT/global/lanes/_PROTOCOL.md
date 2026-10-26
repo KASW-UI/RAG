@@ -38,26 +38,32 @@
 
 ## 三、lane 清单（2026-10-25 建 · 2026-10-26 扩到 15 条）
 
-### 3.1 在跑（第二十八轮 · 4 条）
+### 3.1 在跑（**当前无**）
+
+> ✅ 第二十七轮（L6~L11）与第二十八轮（L12~L15）**全部已合回** ⇒ 写权已并入 `align/global`。
+> ⇒ 下一轮开 lane 时：**① 在本节加「在跑」表**（含分支 / 工作树 / 议题 / 独占写权）
+> **② 同步在 `tools/difftest/check-global-lane-ownership.py` 的 `ACTIVE` 档登记**（否则守门看不到它）
+> **③ 机器守门 `EXIT=0` 才算合规**。
+
+### 3.2 已合回（第二十八轮 · 4 条）
 
 > ⚠️ **本轮修的是「生产启动阻塞」**（不是守门）⇒ 白名单含 `src/main/resources` 与 `pom.xml`。
 > ⚠️ **背景**：第 27 轮后盘点发现，各域台账里有一批「域外 ⇒ 交主会话派单」的条目从未被 global 收口
 > （2026-10-24 follow 域 `rpc.md:65-97` 已写明并点名 5 个模块）⇒ 本轮把它们真正修掉。
 
-| lane | 分支 | 工作树 | 议题 | 独占写权 |
-|---|---|---|---|---|
-| **L12** | `align/global-rpcboot-a` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-rpcboot-a` | **生产启动阻塞**（article-rpc / comment-rpc / like-rpc）：`discovery://` 两斜杠 ×5 + `grpc-inprocess` test scope ×2 | article-rpc · comment-rpc · like-rpc 的 `pom.xml` / `application.yml` / `src/test/**` |
-| **L13** | `align/global-rpcboot-b` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-rpcboot-b` | **生产启动阻塞**（message-rpc / task-rpc）：两斜杠 ×2 + `grpc-inprocess` test scope ×1 + **task-rpc 无 `Main-Class`** | message-rpc · task-rpc 的 `pom.xml` / `application.yml` / `src/test/**` |
-| **L14** | `align/global-rpcboot-hot` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-rpcboot-hot` | **hot-rpc 无 `Main-Class`**（L11 漏报的那一条） | hot-rpc 的 `pom.xml` / `src/test/**` |
-| **L15** | `align/global-rpcboot-tools` | `/Users/pr/Documents/java&golang/RAG.worktrees/global-rpcboot-tools` | **守门缺口**：`check-jar-executable.sh` 纳入 rpc + `check-grpc-runtime-classpath.py` 排除 `target/`（存量恒红缺陷） | `tools/difftest/` 的 3 个**指定文件**（不是目录级） |
+| lane | 分支 | 议题 | 状态 |
+|---|---|---|---|
+| **L12** | `align/global-rpcboot-a` | **生产启动阻塞**（article-rpc / comment-rpc / like-rpc）：`discovery://` 两斜杠 ×5 + `grpc-inprocess` test scope ×2 | ✅ 已合回 |
+| **L13** | `align/global-rpcboot-b` | **生产启动阻塞**（message-rpc / task-rpc）：两斜杠 ×2 + `grpc-inprocess` test scope ×1 + **task-rpc 无 `Main-Class`** | ✅ 已合回 |
+| **L14** | `align/global-rpcboot-hot` | **hot-rpc 无 `Main-Class`**（L11 漏报的那一条） | ✅ 已合回 |
+| **L15** | `align/global-rpcboot-tools` | **守门缺口**：`check-jar-executable.sh` 纳入 rpc + `check-grpc-runtime-classpath.py` 排除 `target/`（存量恒红缺陷） | ✅ 已合回 |
 
 ⇒ **4 条 lane 按 maven 模块零重叠**（L12: article/comment/like · L13: message/task · L14: hot · L15: 只碰 tools）
-⇒ **可同时开工**。
 
 ⚠️ **favorite 域全程零触碰**：`favorite-rpc` 的 2 处两斜杠 + 1 处 `grpc-inprocess` test scope
 **保留在 baseline 里**（L15 的 M3 变异专门验证这一点）⇒ **不修、不记账成「已修」**。
 
-### 3.2 已合回（第二十七轮 · 6 条）
+### 3.3 已合回（第二十七轮 · 6 条）
 
 > ✅ **6 条全部已合回** ⇒ 不再是并发方 ⇒ 其白名单与在跑的 L12~L15 的重叠**不算违规**。
 
@@ -70,7 +76,7 @@
 | **L10** | `align/global-ddldeep` | **DDL 盲区**：触发器函数体逐条核对 + task/message DDL runner 重建 | ✅ 已合回 |
 | **L11** | `align/global-flywaydeep` | **Flyway 三条边界**：真 rpc 形态 / 迁移失败与回滚 / 压力与随机延迟 | ✅ 已合回 |
 
-### 3.3 已合回（历史 lane，写权已并入 `align/global`）
+### 3.4 已合回（历史 lane，写权已并入 `align/global`）
 
 | lane | 分支 | 议题 | 状态 |
 |---|---|---|---|
@@ -84,7 +90,7 @@
 > **这不是违规** —— 它们**已合回**，不再是并发方 ⇒ 机器守门把「在跑」与「已合回」**分开断言**：
 > **重叠只在「在跑」的 lane 之间为违规**。
 
-### 3.3 ⚠️ 第二十七轮新增的两条拆分纪律
+### 3.5 ⚠️ 第二十七轮新增的两条拆分纪律
 
 1. **按模块零重叠**（不是纯按文件）—— L2 的教训：同模块两个 lane 会互踩 `target/`（同一模块并发 `mvn` ⇒ `target/` 竞争）
    ⇒ 6 条 lane 分配到 **9 个互不相交的 maven 模块**（admin/article/comment/like/user/message/hot/task/follow）
