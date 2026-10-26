@@ -299,3 +299,13 @@ installed_rank | version |      description       | success
 
 ⇒ 删除清单 + 落码后验证口径（真 Spring 上下文守门 ⇒ 删桥后 `SqlSessionFactory` 仍在 ＋
 `DeadlineQueryTimeoutInjector` 真在执行链上）⇒ 见 [`users/vs-common.md` §10](../users/vs-common.md)。
+
+### 10.1 🆕 **本域台账里的桥引用**（删文件时必须同批订正）
+
+| 台账位置 | 引用形态 | 动作 |
+|---|---|---|
+| `docs/DRIFT/follow/rpc.md:346` | **逐文件对照索引**的**第 5 行**（`rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java`） | 🔴 **必改** ⇒ 删行（或改指共享层的同一机制） |
+| `docs/DRIFT/follow/rpc.md:323` / `:337` | 「逐条对照此前无法核对」段里**列举的 10 个类名**之一 | 🟡 改（少一个类 ⇒「10 个类」要改成 9） |
+
+⚠️ 桥文件**自身 javadoc** 的「什么时候可以删」与那段**过期的「同款」列举**（写 5 个、实际 9 个）
+⇒ **随文件删除即消失** ⇒ 只需确认没有别的文件引用该文案（已 grep：`docs/DRIFT/{users,follow}/**` 内除上述 3 处外无其他引用）。

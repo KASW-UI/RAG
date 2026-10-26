@@ -480,6 +480,21 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 
 ⚠️ **不需要**跨树同一次提交（两座桥同向 ⇒ 并存等价）⇒ **G1 的删除可独立提交、独立验证**。
 
+### 10.3.1 🆕 **连带要改的：域台账里的桥引用**（本轮 grep 实测 · G3 那边只覆盖了他两个域）
+
+删文件 ⇒ **台账会指向不存在的文件** ⇒ 必须同批订正：
+
+| 台账位置 | 引用形态 | 动作 |
+|---|---|---|
+| `docs/DRIFT/follow/rpc.md:346` | **逐文件对照索引**的**第 5 行**（`rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java`） | 🔴 **必改** ⇒ 删行（或改指共享层的同一机制） |
+| `docs/DRIFT/follow/rpc.md:323` / `:337` | 「逐条对照此前无法核对」段里**列举的 10 个类名**之一 | 🟡 改（列举里少一个类 ⇒ 「10 个类」要改成 9） |
+| `docs/DRIFT/users/**`（`user/rpc.md` · `admin/rpc.md`） | — | ✅ **零命中** ⇒ **users 侧台账无需订正**（本轮已 grep 实证，不留悬念） |
+
+⚠️ 另：**桥文件自身的 javadoc** 里那条「什么时候可以删」（等 MP 用 Boot 4 新包名）与那段**过期的「同款」列举**
+⇒ 本域桥的 javadoc 写的是「与 message-rpc / like-rpc / admin-rpc / user-rpc / article-rpc 同款」= **只列 5 个，实际 9 个**
+⇒ **随文件删除即消失** ⇒ 只需确认没有**别的文件**引用这段文案（grep 已覆盖：`docs/DRIFT/{users,follow}/**` 里除上述 3 处外无其他引用）。
+
+
 ### 10.4 本轮**不动手**的理由
 
 ① G3 明确「本条只是预告」＋ 不要求回；
