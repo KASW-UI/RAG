@@ -36,14 +36,25 @@
 #
 # 【观测】
 #   ① 客户端返回时刻 + status（由 GrpcAdminDeadlineProbe 打）
-#   ② **PG 里那条阻塞查询的存活时长**（本脚本采样 pg_stat_activity）
+#   ② **PG 里那条阻塞查询的存活时长**（主仪器 = **PG 服务端日志里的取消时刻**；
+#      `pg_stat_activity` 采样只作诊断辅助 —— 见下面「为什么用日志而不是采样」）
 #   ③ 对照组：客户端 deadline = 5000ms（> 服务端 2s）⇒ 两侧都该 ≈2s
 #      ⇒ 这一档证明「差异确实来自客户端 deadline 是否被继承」，而不是别的什么。
 #
 # 【判定口径】
-#   exit 1 ⟺ 客户端 deadline(100ms) 档下，两侧 **PG 查询存活时长**差异 > 1s
-#             （即 Go ≈100ms 而 RAG ≈2s ⇒ CONFIRMED SEMANTIC MISMATCH 的运行期证据）
-#   exit 0 ⟺ 未观测到该差异（此时结论应改写为「未复现」）
+#   ⚠️ **本段在第四十轮之前是「注释里的承诺」** —— 脚本末尾原本是**无条件 exit 0**
+#      ⇒ 探针永远不会红 ⇒ 接进 run.sh 也只是「假闸门」（同族 PIT-GLOBAL-048）。
+#      ⇒ 第四十轮把判定抽成可执行的纯函数 `verdict-grpc-admin-deadline.py`，
+#        这里的口径改为**指向那个判定器**，不再自己实现一遍。
+#
+#   判定器口径（verdict-grpc-admin-deadline.py）：
+#     exit 0 = PASS          —— 短档两侧 Δ_end 一致（未复现差异）
+#     exit 1 = FAIL          —— 短档两侧 Δ_end 差 > 阈值（复现语义不一致）
+#     exit 2 = INCONCLUSIVE  —— 观测缺失 / 对照档也不一致（**不算通过**）
+#
+#   探针自身的前置失败（**不进判定器**，直接退出）：
+#     exit 3 = 栈未就绪（端口预检失败 ⇒ 换端口段重试）
+#     exit 4 = **实验前提未成立**（表不存在 / 锁没拿到 ⇒ 观测无效 ⇒ 第四十一轮新增）
 #
 # 【用法】
 #   ./exp-grpc-admin-deadline-probe.sh              # 自己起栈、跑实验、收摊
@@ -116,6 +127,20 @@ pg_lock_rows() {  # db
 pg_lock_count() {  # db
   docker exec "$PG_CONTAINER" psql -U "$PG_U" -d "$1" -qAt -c \
     "SELECT count(*) FROM pg_stat_activity WHERE datname='$1' AND wait_event_type='Lock'" \
+    2>/dev/null | tr -d '[:space:]'
+}
+# 🔴 **锁「有没有真的拿到」的自证**（第四十一轮实测踩到 ⇒ 必须有）：
+#   `pg_lock_count` 数的是**等锁的会话**（被阻塞者），**不是锁的持有者** ——
+#   ⇒ 「没有等锁者」既可能是「锁生效但查询没来」，也可能是「锁压根没生效」⇒ **不能用来判前提**。
+#   判前提要看 **pg_locks 里该表上有没有 granted 的 AccessExclusiveLock**（持有者视角）。
+#   ⚠️ pg_locks 是**集群级**视图 ⇒ 必须按 database 过滤，否则别的库的同名表会被算进来。
+pg_lock_granted() {  # db, table
+  docker exec "$PG_CONTAINER" psql -U "$PG_U" -d "$1" -qAt -c \
+    "SELECT count(*) FROM pg_locks l
+       JOIN pg_class c ON c.oid = l.relation
+       JOIN pg_database d ON d.oid = l.database
+      WHERE d.datname='$1' AND c.relname='$2'
+        AND l.mode='AccessExclusiveLock' AND l.granted" \
     2>/dev/null | tr -d '[:space:]'
 }
 
@@ -227,20 +252,52 @@ one_side() {  # side, db, table, deadline_ms
   echo "---- [$side] 客户端 deadline=${dl}ms · 锁 $db.$tbl ----"
 
   # 校验表存在（表名映射写错时，LOCK 会报错、事务 abort，实验会「假通过」）
+  # ⚠️ **退出码用 4（前提未成立）而不是 1**（第四十一轮）：1 在闸门语义里是「FAIL（语义不一致）」，
+  #    而「表不存在」是**环境问题** ⇒ 混用会把环境故障报成语义不一致 ⇒ 必须分开。
   if ! docker exec "$PG_CONTAINER" psql -U "$PG_U" -d "$db" -qAt \
        -c "SELECT to_regclass('public.$tbl') IS NOT NULL" 2>/dev/null | grep -q t; then
-    echo "  ✗ $db.$tbl 不存在 —— 无法加锁（本次实验会偏）"; return 1
+    echo "  ✗ $db.$tbl 不存在 —— 无法加锁（实验前提未成立）"; return 4
   fi
 
   # 起锁（独立 psql 进程：塞进同一个事务会让一张表的 LOCK 报错把整个事务 abort）
+  # 🔴🔴 **容器名必须跟随 `$PG_CONTAINER`**（第四十一轮实测踩到 ⇒ **根因就在这一行**）：
+  #   旧写法**写死 `difftest-postgres`**，而日志采样用的是 `$PG_CONTAINER` ⇒
+  #   带前缀跑（`DIFTEST_CONTAINER_PREFIX=difftest5k`）时 **观测侧指向新容器、
+  #   施加侧指向一个不存在的容器** ⇒ `docker exec` 立即失败（stderr 又被丢进 /dev/null）
+  #   ⇒ **锁从未生效** ⇒ 查询没被阻塞 ⇒ **自然不会有取消事件**
+  #   ⇒ 两侧都报「无取消事件」⇒ 判定器给 INCONCLUSIVE（**不假绿，但结论是误诊**）。
+  #   ⚠️ 脚本头部第 70 行**早就写对了这条警告**，只是代码没跟着改 ⇒
+  #   **注释里的警告 ≠ 代码里的约束**（同族 PIT-GLOBAL-054）。
+  local lock_err="$RUN_DIR/lock-${side}-${dl}.err"
   ( echo "BEGIN;"
     echo "LOCK TABLE $tbl IN ACCESS EXCLUSIVE MODE;"
     echo "SELECT pg_sleep($LOCK_SECONDS);"
     echo "ROLLBACK;" ) \
-    | docker exec -i difftest-postgres psql -U "$PG_U" -d "$db" -qAt >/dev/null 2>&1 &
+    | docker exec -i "$PG_CONTAINER" psql -U "$PG_U" -d "$db" -qAt >/dev/null 2>"$lock_err" &
   local lock_pid=$!
   LOCK_PIDS="${LOCK_PIDS:+$LOCK_PIDS }$lock_pid"
   sleep 2
+
+  # 🔴 **锁生效自证**（第四十一轮新增）：前提不成立 ⇒ **立刻失败**，不继续跑出假观测。
+  #   为什么必须自证：`docker exec` 失败是**静默**的（stderr 收进 $lock_err，进程照常退出 0
+  #   —— 因为管道右侧失败时 `&` 后台任务的退出码没人查）⇒ 不查 pg_locks 就永远不知道锁没拿到。
+  #   ⚠️ **不能用 `pg_lock_count` 判前提**：它数的是**等锁会话**（被阻塞者），
+  #      而「没有等锁者」既可能是「锁生效但查询还没来」，也可能是「锁压根没生效」⇒ 不可判定。
+  #      判前提必须看**持有者**视角：pg_locks 里该表上 granted 的 AccessExclusiveLock。
+  local granted; granted=$(pg_lock_granted "$db" "$tbl")
+  if [[ "${granted:-0}" -lt 1 ]]; then
+    echo "  ❌ **实验前提未成立**：$db.$tbl 上没有 granted 的 AccessExclusiveLock ⇒ 锁没拿到"
+    echo "     ⇒ 后续观测（无取消事件）**无效**，不能拿去判定语义 ⇒ 本轮直接失败"
+    echo "     ⇒ docker exec 的错误输出："
+    sed 's/^/       /' "$lock_err" 2>/dev/null | head -5
+    echo "     ⇒ 等锁会话（若有）：$(pg_lock_rows "$db")"
+    echo "     ⇒ 期望容器='$PG_CONTAINER'；当前 postgres 容器：$(docker ps --format '{{.Names}}' | grep postgres | tr '\n' ' ')"
+    kill "$lock_pid" 2>/dev/null || true
+    wait "$lock_pid" 2>/dev/null || true
+    LOCK_PIDS="${LOCK_PIDS/$lock_pid/}"
+    return 4
+  fi
+  echo "  ✓ 锁已生效（$db.$tbl 上 granted 的 AccessExclusiveLock × ${granted}）"
 
   # ── 主仪器：PG 服务端日志 ──
   # 记录「改动前」的日志行号（之后只取新增部分）
@@ -263,8 +320,10 @@ one_side() {  # side, db, table, deadline_ms
   echo "  ★ PG 服务端日志里的取消事件："
   local ev; ev=$(pg_log_cancel_events "$log_from")
   if [[ -z "$ev" ]]; then
-    echo "    ⚠️ **没有任何取消事件** ⇒ 这一侧**根本没向 PG 发出那条查询**"
-    echo "       （不是「查询没被取消」，是「查询压根没到 PG」）"
+    echo "    ⚠️ **没有任何取消事件**"
+    echo "       ⇒ 前提已自证成立（锁**确实生效**）⇒ 查询本该被阻塞 ⇒ **无取消事件是真实异常**，不是观测缺失"
+    echo "       ⇒ 两种可能：① 查询压根没发到这张表（查了别的表）② 查询到了但没被取消（超时没生效）"
+    echo "       ⇒ 定位手段：看该容器 PG 日志里同一时段的 SELECT 原文（本档锁的表是 ${db}.${tbl}）"
     V_EV_GO_SHORT="(无)"; V_EV_RAG_SHORT="(无)"; V_EV_GO_LONG="(无)"; V_EV_RAG_LONG="(无)"
     V_DST_GO_SHORT=""; V_DST_RAG_SHORT=""; V_DST_GO_LONG=""; V_DST_RAG_LONG=""
     V_DEND_GO_SHORT=""; V_DEND_RAG_SHORT=""; V_DEND_GO_LONG=""; V_DEND_RAG_LONG=""
@@ -333,13 +392,16 @@ V_DEND_GO_SHORT=""; V_DEND_RAG_SHORT=""; V_DEND_GO_LONG=""; V_DEND_RAG_LONG=""
 # ── 跑实验 ──────────────────────────────────────────────────────────────
 echo "==> [2/3] 跑实验"
 echo "    档位 A（短 deadline ${DEADLINE_SHORT}ms < 服务端 2s）：考察客户端 deadline 是否被继承"
-one_side go  go_db  admins       "$DEADLINE_SHORT"
-one_side rag rag_db admin_admin "$DEADLINE_SHORT"
+# 🔴 **必须检查 one_side 的返回值**（第四十一轮）：旧写法**忽略**了返回值 ⇒
+#    「表不存在」/「锁没生效」这两种**前提不成立**的情况会**继续往下跑**
+#    ⇒ 产出一整轮「无取消事件」的无效观测 ⇒ 结论是误诊。⇒ 一律 `|| exit $?`。
+one_side go  go_db  admins       "$DEADLINE_SHORT" || exit $?
+one_side rag rag_db admin_admin "$DEADLINE_SHORT" || exit $?
 
 echo
 echo "    档位 B（长 deadline ${DEADLINE_LONG}ms > 服务端 2s）：**对照组**，两侧都该 ≈2s"
-one_side go  go_db  admins       "$DEADLINE_LONG"
-one_side rag rag_db admin_admin "$DEADLINE_LONG"
+one_side go  go_db  admins       "$DEADLINE_LONG" || exit $?
+one_side rag rag_db admin_admin "$DEADLINE_LONG" || exit $?
 
 # ── 判定 ────────────────────────────────────────────────────────────────
 echo

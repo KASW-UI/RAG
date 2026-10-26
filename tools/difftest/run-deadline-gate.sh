@@ -7,8 +7,10 @@
 #   2. **它只做两件事**：把 run.sh 算好的端口/目录/容器名前缀传给探针 + **透传退出码**。
 #      任何判定逻辑都不在这里（判定在 tools/difftest/verdict-grpc-admin-deadline.py）。
 #
-# ═══ 退出码语义（与判定器一致）═══
-#   0 = PASS（未复现差异）· 1 = FAIL（复现了语义不一致）· 2 = INCONCLUSIVE（环境不可靠）
+# ═══ 退出码语义 ═══
+#   0 = PASS（未复现差异）· 1 = FAIL（复现了语义不一致）· 2 = INCONCLUSIVE（观测不可靠）
+#   3 = 栈未就绪 · 4 = **实验前提未成立**（锁没拿到 ⇒ 观测无效）
+#     —— 后两者是**探针自身的前置失败**，不进判定器，但对 run.sh 来说同样判红。
 #
 # 用法（run.sh 内部调用；也可手工跑）：
 #   GO_ADMIN_PORT=18081 RAG_ADMIN_PORT=58081 RUN_DIR=/tmp/difftest \
@@ -40,5 +42,5 @@ echo
 RC=$?
 
 echo
-echo "==> [deadline-gate] 探针退出码 = ${RC}（0=PASS / 1=FAIL / 2=INCONCLUSIVE）"
+echo "==> [deadline-gate] 探针退出码 = ${RC}（0=PASS / 1=FAIL / 2=INCONCLUSIVE / 3=栈未就绪 / 4=前提未成立）"
 exit $RC

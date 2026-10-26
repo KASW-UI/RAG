@@ -129,6 +129,17 @@ done
 #   ⇒ 起栈前逐个探；被占就报出**是谁**占的（容器名 / 进程名）。
 preflight_ports() {
   local p who busy=0
+  # 🔴🔴 **「自己的」占用不算冲突**（第四十一轮实测踩到 ⇒ 鸡生蛋 ⇒ 必须修）：
+  #   ① **容器**：`run.sh --keep` 留下的**同一个 compose project** 的容器仍持有 PG/Redis 端口
+  #      ⇒ 旧写法把它判成「别人先占了」⇒ 预检失败 ⇒ **同一个前缀永远跑不了第二次**
+  #      （实测：`DIFTEST_CONTAINER_PREFIX=difftest5k` 重跑 ⇒ 预检报「端口 60432 已被占用
+  #      （com.docke）」⇒ 而占用者就是**自己的** `difftest5k-postgres`）；
+  #   ② **进程**：上一轮残留的本 harness 栈进程（命令行含 `$RUN_DIR/`）也占着 app 端口。
+  #   ⇒ 判定口径：**占用者属于我们 ⇒ 复用，不算冲突**（compose 会接管容器，新栈会接管端口）。
+  #   ⚠️ 口径不能放宽成「端口被占就放过」—— 那正是原意（防别人踩我们）⇒ 只豁免「自己的」。
+  local own_container_ports pid cmd
+  own_container_ports="$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+                          --format '{{.Ports}}' 2>/dev/null || true)"
   for p in "$PG_PORT" "$REDIS_PORT" \
            "$GO_USER_RPC_PORT" "$GO_ADMIN_RPC_PORT" "$GO_MESSAGE_RPC_PORT" \
            "$GO_USER_API_PORT" "$GO_ADMIN_API_PORT" "$GO_MESSAGE_API_PORT" \
@@ -144,6 +155,19 @@ preflight_ports() {
     # ⇒ 这里用 `{ ...; } || true` 把整条管道的退出码兜成 0。
     who="$( { lsof -nP -iTCP:"$p" -sTCP:LISTEN 2>/dev/null | tail -n +2 | head -1 | awk '{print $1}'; } || true )"
     if [[ -n "$who" ]]; then
+      # ① 容器口径：占用者是**我们这个 compose project** 的容器 ⇒ 复用
+      if [[ -n "$own_container_ports" && "$own_container_ports" == *":${p}->"* ]]; then
+        echo "  端口 $p 由**自己的**容器占用（compose project=${COMPOSE_PROJECT}）⇒ 复用，不算冲突" >&2
+        continue
+      fi
+      # ② 进程口径：占用者是**本 harness 的栈进程**（命令行含 $RUN_DIR/）⇒ 复用
+      pid="$( { lsof -nP -iTCP:"$p" -sTCP:LISTEN -t 2>/dev/null | head -1; } || true )"
+      cmd=""
+      [[ -n "$pid" ]] && cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+      if [[ "$cmd" == *"$RUN_DIR/"* ]]; then
+        echo "  端口 $p 由**自己的**栈进程占用（${cmd}）⇒ 复用，不算冲突" >&2
+        continue
+      fi
       busy=1
       echo "  端口 $p 已被占用（${who}）" >&2
       { docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -E "[:.]${p}->" || true; } | sed 's/^/      容器：/' >&2

@@ -113,10 +113,79 @@ if 'PORT_OFFSET="${DIFTEST_PORT_OFFSET:-0}"' in probe_src and \
 else:
     ng("E48-23", "探针的端口**不跟随偏移** ⇒ 并发时探针会连到别人的栈 ⇒ 实验结论作废")
 
-if "exit 3" in probe_src and "READY" in probe_src:
+# ⚠️ **判据必须锚在「代码结构」上，不能锚在整个文件的字面量上**（PIT-GLOBAL-031）：
+#    第四十一轮在探针头部补了「exit 3 = 栈未就绪」的说明 ⇒ 整文件搜 `exit 3` 仍命中
+#    ⇒ E48-24 **变成恒真**（变异 M7 抓不到）⇒ 改为「READY 判定块里必须真的有 exit 3」。
+if re.search(r"READY\s*-ne\s*1[\s\S]{0,400}?exit 3", probe_src):
     ok("E48-24", "探针在**栈未就绪时 fail-fast**（不再无条件打印「✓ 就绪」）")
 else:
     ng("E48-24", "探针在栈未就绪时**不 fail-fast** ⇒ 会带着无效观测往下跑 ⇒ 假绿")
+
+# ── ②b 仪器的「施加侧」必须与「观测侧」同容器，且前提必须自证 ─────────
+# 🔴 **第四十一轮实测踩到**：探针的**施加侧**（加锁）写死了容器名 `difftest-postgres`，
+#    而**观测侧**（采样 PG 日志）用的是 `$PG_CONTAINER` ⇒ 带前缀跑时两者指向**不同容器**
+#    ⇒ 施加侧那个容器**根本不存在** ⇒ `docker exec` 立即失败（stderr 被丢进 /dev/null）
+#    ⇒ **锁从未生效** ⇒ 查询没被阻塞 ⇒ **自然没有取消事件**
+#    ⇒ 两侧都报「无取消事件」⇒ 判定器给 INCONCLUSIVE（不假绿，但**结论是误诊**）。
+#    ⚠️ 探针头部**早就写对了这条警告** ⇒ 「注释里的警告 ≠ 代码里的约束」。
+print("②b 施加侧（加锁）必须与观测侧同容器，且「锁生效」必须自证")
+lock_cmds = re.findall(r"docker exec -i\s+(.+?)\s+psql", probe_src)
+if lock_cmds and all("$PG_CONTAINER" in c for c in lock_cmds):
+    ok("E48-25", f"锁命令的容器名跟随 $PG_CONTAINER（{len(lock_cmds)} 处）⇒ 施加侧与观测侧同容器")
+else:
+    ng("E48-25", f"锁命令的容器名**不是** $PG_CONTAINER（发现 {[c for c in lock_cmds if '$PG_CONTAINER' not in c]}）"
+                 "⇒ 施加侧与观测侧指向不同容器 ⇒ 锁从未生效 ⇒ 观测全无效")
+
+# 自证必须看**持有者**视角：pg_locks 里该表上 granted 的 AccessExclusiveLock。
+# ⚠️ 不能用 pg_lock_count（它数的是**等锁会话**）⇒ 「没有等锁者」无法区分
+#    「锁生效但查询还没来」与「锁压根没生效」。
+has_granted_query = re.search(
+    r"mode\s*=\s*'AccessExclusiveLock'\s+AND\s+l\.granted", probe_src) is not None
+call_sites = re.findall(r"pg_lock_granted\s+\"", probe_src)
+if has_granted_query and call_sites:
+    ok("E48-26", f"探针对「锁生效」有**自证**（pg_locks 的 granted AccessExclusiveLock，调用点 {len(call_sites)} 处）")
+else:
+    ng("E48-26", "探针**没有**对「锁生效」自证（查 pg_locks 的 granted AccessExclusiveLock 并调用它）"
+                 "⇒ 仪器坏了也没人知道 ⇒ 结论是误诊")
+
+# 前提未成立 ⇒ **必须 fail-fast**：不能带着无效观测继续跑完四档再报 INCONCLUSIVE。
+# ⚠️ 计数时必须**排除函数定义行**（`one_side() {`）⇒ 否则 4 次调用会被数成 5。
+# ⚠️ **不能只搜「return 4」这个字面量**（第四十一轮实测踩到）：补完「表不存在」分支后，
+#    文件里**有两处** `return 4` ⇒ 变异打在第一处时字面量仍在 ⇒ **判据恒真 ⇒ 假绿**
+#    ⇒ 必须**锚到分支**：锁分支（granted 判定）与表分支各一处，且都必须是 4。
+one_side_calls = re.findall(r"^one_side\s+\S+\s+\S+\s+\S+\s+\S+", probe_src, re.M)
+guarded = [c for c in re.findall(r"^one_side[^\n]+", probe_src, re.M) if "|| exit $?" in c]
+lock_fail = re.search(r"granted:-0.*?-lt 1.*?then(.*?)\n  fi", probe_src, re.S)
+table_fail = re.search(r"无法加锁（实验前提未成立）\"; return (\d+)", probe_src)
+precond_ok = (bool(lock_fail and "return 4" in lock_fail.group(1))
+              and bool(table_fail and table_fail.group(1) == "4"))
+if precond_ok and len(guarded) == len(one_side_calls) and len(one_side_calls) >= 4:
+    ok("E48-27", f"前提未成立 ⇒ fail-fast（锁分支/表分支都 return 4；"
+                 f"{len(guarded)}/{len(one_side_calls)} 处 one_side 都检查了返回值）")
+else:
+    ng("E48-27", f"前提未成立**没有** fail-fast（锁分支={bool(lock_fail and 'return 4' in lock_fail.group(1))} "
+                 f"表分支={table_fail.group(1) if table_fail else None}；"
+                 f"one_side 检查返回值 {len(guarded)}/{len(one_side_calls)}）⇒ 会带着无效观测跑完 ⇒ 结论误诊")
+
+# 阴性观测的措辞：**「没观测到」有两种成因**（查询没到 PG / 查询到了但没被取消），
+#    前提未成立时第三种（仪器坏了）⇒ **断言**其中一种就是误诊。
+# ⚠️ **禁的是「断言式措辞」，不是「列举可能成因」** —— 正确写法是「① … ② …」这种列举，
+#    它仍然含有「查询压根没到 PG」这几个字 ⇒ 判据必须看**有没有断言**（是/⇒/就是 + 该短语）。
+# ⚠️ E48-28 只管**探针**、E48-29 只管**判定器** ⇒ 一条断言一个职责 ⇒ 变异能 1:1 归因。
+MISDIAGNOSIS = r"(?:是|就是|⇒)\s*[「\"]?\s*查询(?:压根)?没到\s*PG"
+old_misdiagnosis = re.findall(MISDIAGNOSIS, probe_src)
+verdict_src = open(VERDICT, encoding="utf-8").read()
+verdict_misdiagnosis = re.findall(MISDIAGNOSIS, verdict_src)
+if not old_misdiagnosis and "前提" in probe_src:
+    ok("E48-28", "探针的阴性观测措辞**区分了成因**（不再断言「查询压根没到 PG」⇒ 那是前提未成立时的误诊）")
+else:
+    ng("E48-28", f"探针的阴性观测仍在**断言**成因（{len(old_misdiagnosis)} 处）"
+                 "⇒ 前提未成立时是**误诊** ⇒ 结论会把「仪器坏了」说成「查询没到 PG」")
+
+if not verdict_misdiagnosis and "两种" in verdict_src and "没被取消" in verdict_src:
+    ok("E48-29", "判定器的 INCONCLUSIVE 文案**不越权下结论**（它只看观测值 ⇒ 只能区分『没观测到』）")
+else:
+    ng("E48-29", "判定器仍在断言成因（它只看观测值 ⇒ 无权区分『查询没到 PG』与『没被取消』）")
 
 # ── ③ 编排接线（静态）────────────────────────────────────────────────
 print("③ run.sh 必须在 diff.py 之后调闸门，并透传端口/目录/容器名前缀")
@@ -149,6 +218,26 @@ else:
             ok(cid, f"run.sh 向闸门透传了 {var.rstrip('=')}")
         else:
             ng(cid, f"run.sh 没向闸门透传 {var.rstrip('=')} ⇒ 并发实例会串")
+
+# 🔴 **端口预检必须豁免「自己的」占用**（第四十一轮实测踩到 ⇒ 鸡生蛋 ⇒ 直接阻断真跑）：
+#   `run.sh --keep` 留下的**同一个 compose project** 的容器仍持有 PG/Redis 端口
+#   ⇒ 旧写法把它判成「别人先占了」⇒ 预检失败 ⇒ **同一个前缀永远跑不了第二次**
+#   ⇒ 后果不是「报错」而是「**编排无法重复执行**」⇒ E48 闸门在 CI 上跑第二轮就挂。
+#   ⚠️ 豁免必须**窄**：只豁免「占用者属于我们」（同 compose project 的容器 /
+#      本 harness 的栈进程）⇒ 别人踩我们时照样拦。
+own_branch = re.search(
+    r'if \[\[ -n "\$own_container_ports".*?then(.*?)\n *fi', run_src, re.S)
+proc_branch = re.search(
+    r'if \[\[ "\$cmd" == \*"\$RUN_DIR/"\* \]\]; then(.*?)\n *fi', run_src, re.S)
+own_ok = bool(own_branch and "continue" in own_branch.group(1)
+              and "com.docker.compose.project=$COMPOSE_PROJECT" in run_src)
+proc_ok = bool(proc_branch and "continue" in proc_branch.group(1))
+if own_ok and proc_ok:
+    ok("E48-30", "run.sh 的端口预检**豁免自己的占用**（同 compose project 的容器 + 本 harness 的栈进程）")
+else:
+    ng("E48-30", "run.sh 的端口预检**不豁免自己的占用**"
+                 f"（容器口径={own_ok} 进程口径={proc_ok}）"
+                 "⇒ `--keep` 之后同前缀永远跑不了第二次 ⇒ 编排无法重复执行")
 
 # ── ④ 接线有效性（假探针变异）─────────────────────────────────────────
 print("④ 假探针：探针红 ⇒ 入口红（不需要起栈）")

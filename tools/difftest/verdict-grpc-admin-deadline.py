@@ -84,8 +84,11 @@ def decide(go_short, rag_short, go_long, rag_long, threshold_ms: float):
 
     missing = [k for k, v in obs.items() if v is None]
     if missing:
-        return (INCONCLUSIVE, "INCONCLUSIVE —— 观测缺失（该侧没有取消事件 ⇒ 查询压根没到 PG）",
-                detail + [f"    缺失：{', '.join(missing)} ⇒ 实验不可判，不算通过"])
+        return (INCONCLUSIVE, "INCONCLUSIVE —— 观测缺失（该侧没有取消事件）",
+                detail + [f"    缺失：{', '.join(missing)} ⇒ 实验不可判，不算通过",
+                          "    ⚠️ 观测缺失有**两种**成因，判定器**无法区分**（它只看观测值）：",
+                          "       ① 查询压根没到 PG  ② 查询到了但没被取消（超时没生效）",
+                          "    ⇒ 前提（锁是否真的生效）由**探针侧**自证 ⇒ 见 exp-grpc-admin-deadline-probe.sh"])
 
     short_diff = abs(rag_short - go_short)
     long_diff = abs(rag_long - go_long)
