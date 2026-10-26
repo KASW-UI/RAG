@@ -1224,3 +1224,117 @@ Expected service name: 'probe.Timeout'. Actual fully qualifed method name: '/pro
 3. 🔴 根治（建议④：共享层注入 `Tracer` 而非取全局）**横跨 10 个域且会碰 favorite**（global 零写权）⇒ 属架构级改造。
 
 **出处**：2026-10-26 第三十轮 T-15 ③（global 台账 `common-tails.md` T-15 第三十轮处置）。
+
+---
+
+## PIT-GLOBAL-037 —— 🔴 还原变异时用 `shutil.copy2` ⇒ **mtime 被保留** ⇒ Maven 跳过重编译 ⇒ 跑的是**旧字节码**
+
+> **一句话**：变异测试里「还原」这一步本身可能让**后续的验证跑的不是你还原后的代码** ⇒
+> 表现为「还原了却仍然红」或「还原了却仍然绿」⇒ **两个方向都会骗人**。
+
+### 实测（2026-10-26 第三十一轮，E38 的变异 MUT-E38）
+
+变异注入：
+
+```python
+shutil.copy2(src, bak)          # 备份（copy2 会连 mtime 一起复制）
+s = open(src, encoding='utf-8').read()
+s = s.replace(old, new, 1)       # 注入变异
+open(src, 'w', encoding='utf-8').write(s)
+```
+
+⇒ 跑测试 ⇒ **守门如期变红**（1 条，红在目标断言；探针也 EXIT=1）⇒ 变异有效 ✓
+
+还原：
+
+```python
+shutil.copy2(bak, src)          # ⚠️⚠️ 罪魁祸首：copy2 把备份的 mtime 一起写回
+os.unlink(bak)
+```
+
+⇒ `copy2` 是「复制**并保留**元数据（mtime / mode）」⇒ 还原后的源码 mtime
+= **变异前**的 mtime ⇒ 而 `target/classes` 里躺的是**变异后编译**的 class（mtime 更新）
+⇒ ⇒ **Maven 的增量编译判定「class 比 source 新」⇒ 跳过重编译**
+⇒ ⇒ 复跑守门时，跑的**仍然是变异后的字节码**。
+
+### 症状（极具迷惑性）
+
+还原后复跑 ⇒ **守门仍红**（实际值 299ms = 服务端预算 300ms ⇒ 正是变异的值）
+⇒ 第一反应是「还原失败 / 改动没写进去」⇒ 于是去查源码 ⇒ **源码是对的**
+⇒ 再查一次 ⇒ 更困惑。
+
+### 判据（怎么确认是「旧字节码」而不是「还原失败」）
+
+1. `grep` 源码 ⇒ **改对了**（这能排除「还原失败」）；
+2. 但**测试结果仍与变异时一致** ⇒ ⇒ **强烈指向「跑的不是这份源码」**；
+3. 删掉 `target/classes` 或 `touch` 源文件 ⇒ 复跑 ⇒ 结果立刻变 ⇒ **实锤**。
+
+### 纪律
+
+- 🔴 **还原后必须让 mtime 前进**：`touch` 源文件（或用 `shutil.copyfile` + `os.utime` 显式设当前时间）
+  ⇒ 才能让 Maven 判定「需要重编译」；
+- 🟢 **更稳的做法**：还原时用 `shutil.copyfile`（**不**保留 mtime）或直接 `open(...,'w').write(bak内容)`
+  ⇒ 写入动作天然把 mtime 推到当前；
+- 🔴 **同族**：**PIT-GLOBAL-019**（改上游模块资源却只跑下游 ⇒ 变异到不了运行代码）
+  —— 同一条主线（「跑的不是你改的那份」），但机制不同：
+  - 019 = **跨模块 reactor 范围**问题（改上游没把上游拉进同一个 reactor）；
+  - 037 = **同模块内**，还原操作破坏了增量编译的 **mtime 判定**。
+- ⇒ **推论**：「变异转红」只能证明**变异时**那份代码被跑了；**还原后必须再跑一次且结果翻转**，
+  否则不能声称「已还原」。
+
+**出处**：2026-10-26 第三十一轮 E38 ① 的变异 MUT-E38（还原后复跑仍红 ⇒ 差点误判成「还原失败」）。
+
+---
+
+## PIT-GLOBAL-038 🔴 **端口占用型假红**：`BindException` ⇒ 先查「谁占着那个端口」，再查「是不是随机端口」
+
+> **一句话**：回归里出现 `Failed to bind to address 0.0.0.0/0.0.0.0:<port>` ⇒
+> **不要**立刻怀疑自己的改动 ⇒ 先做三件事定性。
+
+### 实测（2026-10-26 第三十一轮，全仓回归）
+
+第 31 轮全仓回归 `mvn -o test -fae` ⇒ **BUILD FAILURE**，唯一失败：
+`UserRpcGrpcInterceptorWiringTest`（2 errors）⇒ cause 链末端是：
+
+```
+Caused by: java.io.IOException: Failed to bind to address 0.0.0.0/0.0.0.0:33060
+Caused by: java.net.BindException: Address already in use
+  at io.grpc.netty.shaded.io.grpc.netty.NettyServer.start(NettyServer.java:333)
+```
+
+### 三步定性（按这个顺序，别跳）
+
+| 步 | 做什么 | 本轮结论 |
+|---|---|---|
+| ① **单独复跑** | `mvn -o -pl <模块> -am test -Dtest='<类>' -Dsurefire.failIfNoSpecifiedTests=false` | 🟢 **×3 全绿** ⇒ ⇒ **假红**（**PIT-GLOBAL-032** 的「环境时序」那一类）⇒ 与本轮改动无关 |
+| ② **查端口被谁占** | `lsof -nP -iTCP:<port> -sTCP:LISTEN` | 本轮：**`mysqld`**（PID 58635，**已跑 148 天**）⇒ ⇒ **这个占用是长期事实**，不是「刚才谁起的」 |
+| ③ **抓「它实际绑了哪个端口」** | 跑测试时用 `netstat -an` 快照差集 | 本轮：实际绑 **62356 / 62412** ⇒ ⇒ **是随机端口**（macOS ephemeral 49152~65535）⇒ **`grpc.server.port=0` 生效** |
+
+### 🔴 第 ③ 步推出的**关键结论**（也是本条最有价值的地方）
+
+失败那次绑的是 **33060** ⇒ **33060 不在随机端口范围内**（49152~65535）
+⇒ ⇒ **那次 `grpc.server.port` 根本不是 0** ⇒ ⇒ **存在一个当时生效的、把端口改成 33060 的外部来源**。
+
+⇒ 而排查过：仓库配置（`*.yaml`/`*.yml`/`*.properties`/根 `pom.xml`）**全仓 0 命中 33060** ·
+环境变量（`env | grep -i grpc`）**无** · Nacos config（`localhost:8848` 在线）**配置列表为空** ·
+Nacos naming（`user-rpc` 注册实例 = **19210**）⇒ ⇒ **不是这四类来源**。
+
+### 🔴 真正的环境背景：本机**有别的域会话在跑东西**
+
+- Nacos naming 上 **`user-rpc` 有两个注册实例，端口 19210** ⇒ 查出出处：**follow 域对拍实验留下的常驻隔离 stub**
+  （`docs/DRIFT/follow/api.md:496` 记着「隔离 stub `/tmp/userstub`（`:19210`）」）⇒ **别的域会话留了常驻进程**；
+- ⇒ 这类常驻进程 + 别的会话**同时在跑 Maven 测试** ⇒ 就是「端口/环境时序」型假红的土壤。
+
+### 纪律
+
+1. 🔴 **看到 `BindException` 先按上面三步定性**，**不要**直接改代码；
+2. 🔴 **用「实际绑了哪个端口」反推 `port=0` 是否生效** ——
+   本轮若没做这一步，会误以为「port=0 ⇒ 随机端口 ⇒ 不可能撞 33060 ⇒ 是我的改动导致」；
+3. 🟡 **端口号本身能反推来源**：`33060` = MySQL **X Protocol** 默认端口（`mysqld` 监听）
+   ⇒ 看到 5 位端口先 `lsof` 看是不是系统服务 ⇒ 系统服务占着 ⇒ **任何想绑它的进程都会失败**；
+4. 🟢 **回归数字的统计口径**：`[ERROR] Tests run: …` 的模块汇总行**不匹配** `[INFO] Tests run: …`
+   ⇒ 只 grep `[INFO]` 会**漏掉失败模块的用例数** ⇒ 本轮模块口径 2176 vs XML 口径 2305（差 129 = 失败模块）⇒
+   **两个口径必须同时看**（差值本身就是失败模块的规模）。
+
+**出处**：2026-10-26 第三十一轮全仓回归（`UNRESOLVED-ARPC-002` 那条的 users/user 侧守门）·
+同族 **PIT-GLOBAL-032**（「跑红也可能是假红」）· 本条是它的**具体形态 + 三步定性法**。

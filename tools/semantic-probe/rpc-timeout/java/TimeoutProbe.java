@@ -25,6 +25,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 【global 域 · 第三十轮】E30 的 **RAG 半边活体探针**。
@@ -107,6 +108,62 @@ public final class TimeoutProbe {
             String bizMsg = span.getAttributes().get(AttributeKey.stringKey("sea.biz_msg"));
             System.out.printf("PROBE|timeout_telemetry|code=%d|msg=%s%n",
                     status.getCode().value(), bizMsg);
+        } finally {
+            channel.shutdownNow();
+            server.shutdownNow();
+        }
+
+        runClientDeadlineCase();
+    }
+
+    /**
+     * E38 的 RAG 半边事实采集 —— 「客户端 deadline 早于服务端 timeout」这一档。
+     *
+     * <p>🔴 观测点：<b>生产类 {@code RpcInterceptor}</b> 传给 handler 的
+     * {@code DeadlineState}（ThreadLocal）⇒ 它里面的 deadline 就是
+     * <b>本实现算出来的有效期限</b> ⇒ 直接可观测，不用猜。
+     *
+     * <p>⚠️ 只用「落在哪个区间」做判定，不打印绝对值 ⇒ 两侧可稳定比对。
+     */
+    private static void runClientDeadlineCase() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        AtomicLong observedRemainingMs = new AtomicLong(-1);
+        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        builder.intercept(RpcInterceptor.newUnaryServerInterceptor(TIMEOUT, SLOW_THRESHOLD));
+        ServerServiceDefinition svc = ServerServiceDefinition.builder(SERVICE_NAME)
+                .addMethod(HANG_METHOD, ServerCalls.asyncUnaryCall((req, obs) -> {
+                    entered.countDown();
+                    // ⚠️ handler 跑在 grpc 的线程上 ⇒ DeadlineState 绑定在**跑 handler 的线程**
+                    //    ⇒ 这里能读到生产拦截器算出来的有效期限
+                    long left = com.rag.common.observability.RpcInterceptor.DeadlineState.remainingMillis();
+                    observedRemainingMs.set(left);
+                }))
+                .build();
+        Server server = builder.addService(svc).build().start();
+        ManagedChannel channel = NettyChannelBuilder
+                .forTarget("dns:///127.0.0.1:" + server.getPort())
+                .usePlaintext()
+                .build();
+        try {
+            // 客户端 deadline = 1s（早于服务端 300ms？）—— ⚠️ 注意本探针的服务端 timeout 是 300ms
+            // ⇒ 要区分「继承客户端」必须让**客户端 deadline 早于服务端 timeout**
+            // ⇒ 这里用 100ms 的客户端 deadline（早于服务端 300ms）
+            io.grpc.CallOptions opts = io.grpc.CallOptions.DEFAULT.withDeadlineAfter(100, TimeUnit.MILLISECONDS);
+            try {
+                ClientCalls.blockingUnaryCall(channel, HANG_METHOD, opts, new byte[0]);
+            } catch (StatusRuntimeException ignored) {
+                // 客户端自己的 deadline 到点 ⇒ 预期
+            }
+            if (!entered.await(2, TimeUnit.SECONDS)) {
+                System.err.println("probe: client-deadline case handler never entered");
+                System.exit(2);
+            }
+            long left = observedRemainingMs.get();
+            // 分档：≤150ms ⇒ 继承的是**客户端**的 deadline；否则 ⇒ 用的服务端自己的 300ms
+            // ⚠️ bucket 名与 Go 半边**逐字一致**（脚本按 key 配对比对）
+            String bucket = left >= 0 && left <= 150 ? "client_100ms" : "server_own";
+            System.out.printf("PROBE|client_deadline_ctx|deadline_set=%b|bucket=%s%n",
+                    left >= 0, bucket);
         } finally {
             channel.shutdownNow();
             server.shutdownNow();

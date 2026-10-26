@@ -38,6 +38,12 @@
 > **034**（grpc-java 的 `fullMethodName` **不带前导斜杠** ⇒ `MethodDescriptor.extractFullServiceName` 用 `lastIndexOf('/')` ⇒ 带斜杠必然与 `ServerServiceDefinition` 的 serviceName 对不上 ⇒ grpc 直接抛「Method name should be prefixed with service name」）·
 > **035**（Go 的 `select` 有多个分支 ⇒ 探针的慢 handler **必须永不返回** ⇒ 否则 done 分支与 timeout 分支同时就绪 ⇒ Go 随机选 ⇒ 客户端拿到 `code=Unknown` ⇒ **探针变成随机**）·
 > **036**（Spring 的 **`@DynamicPropertySource` 不进** context cache key ⇒ 靠「`properties` 恰好不同」隔离上下文是**侥幸** ⇒ 一旦撞上就共享上下文 ⇒ 装不进本测试的 OTel SDK ⇒ 用例以「**找不到 span**」这种看不懂的形态变红 ⇒ 修法：给守门加**专属 property**（零生产改动）；⚠️ `ApplicationContextInitializer` **防不住**（缓存上下文不会重新 refresh））。
+
+> **2026-10-26 第三十一轮增量**（E38 ①：超时继承客户端 deadline）⇒ global 域再加 **1 条** ⇒ 合计 **36 条**：
+> **037**（还原变异时用 `shutil.copy2` ⇒ **mtime 被保留** ⇒ Maven 判定「class 比 source 新」⇒ **跳过重编译** ⇒ 复跑跑的**仍是变异后的字节码** ⇒ 症状 = 「还原了却仍红/仍绿」⇒ 判据：源码 grep 是对的但结果不变 ⇒ **还原后必须 `touch`**（或用 `copyfile` 不保留 mtime）⇒ 同族 **PIT-GLOBAL-019**，但机制不同（019 = 跨模块 reactor 范围 · 037 = 同模块内 mtime 判定））。
+
+> **2026-10-26 第三十一轮增量 · 二**（端口占用型假红）⇒ global 域再加 **1 条** ⇒ 合计 **37 条**：
+> **038**（回归里出现 `BindException` ⇒ **别先怀疑自己的改动** ⇒ 三步定性：① **单独复跑**（本轮 ×3 全绿 ⇒ 假红）② `lsof` 查**谁占**着那个端口（本轮 = `mysqld` 跑了 148 天 ⇒ 长期事实）③ **抓「它实际绑了哪个端口」**（本轮 = 62356/62412 ⇒ 随机端口 ⇒ `port=0` **生效**）⇒ 🔴 **第③步推出关键结论**：失败那次绑的 **33060 不在随机端口范围**（49152~65535）⇒ ⇒ **那次 `port` 不是 0** ⇒ 存在一个当时生效的外部来源 ⇒ 排查过仓库配置/环境变量/Nacos config/Nacos naming **四类都排除** ⇒ ⇒ 🟡 **端口号本身能反推来源**（33060 = MySQL X Protocol 默认端口）⇒ ⚠️ **统计口径**：失败模块的汇总行是 `[ERROR] Tests run:` ⇒ 只 grep `[INFO]` 会漏掉它（2176 vs 2305，差 129））。
 ## 计数（2026-10-25 机械扫描实测）
 
 > **口径**：一条 = 一个**二级/三级标题**的独立坑位条目（`## P-xxx` / `## PIT-xxx` / `## PF-xxx` / `## PITFALL-xxx` …）。
@@ -93,7 +99,7 @@
 | `comment` | 2 份 | 15 | `comment-rpc` 的 17 个类曾是空壳而全量编译 `EXIT=0` |
 | `follow` | 2 份 | 16 | —— |
 | `common` | 5 份 | 散文式 | 请求保护层四层：**recover → breaker → shedding → 业务观测**；链的定义点必须在共享模块，否则 10 个 rpc server 各写一遍 = 10 个可能写错的地方 |
-| 🆕 `global` | **3 份** | **35** | **跨微服务 + `service/common` 影响的搁置漂移**（§3.5）收口域。按议题分档：`common-tails` / `cross-domain` / `cycle-deps`。<br>主要坑：**查 Go 出处只在项目树里 grep 必落空**（真源在 `~/go/pkg/mod` 的 go-zero 源码里）· **「配置里没写」≠「没开」**· **变异两种假绿**（编译不过⇒读旧 XML / 红在更早断言上）· **改上游资源做变异而只跑下游⇒假阴性**· **用被测常量构造输入⇒恒绿**· **阻塞式启动器 + 句柄设在返回之后⇒句柄永远拿不到⇒调度器泄漏⇒守门失真**（024）· **MockMvc 与真 Tomcat 是两条观测路径⇒共享层改响应头会打红别的域的 MockMvc 守门**（025）· **守门期望值可能落在已登记偏离范围里⇒一条漂移要按维度拆开判（033）**· **`@DynamicPropertySource` 不进 context cache key⇒靠 properties 恰好不同隔离上下文是侥幸（036）** |
+| 🆕 `global` | **3 份** | **37** | **跨微服务 + `service/common` 影响的搁置漂移**（§3.5）收口域。按议题分档：`common-tails` / `cross-domain` / `cycle-deps`。<br>主要坑：**查 Go 出处只在项目树里 grep 必落空**（真源在 `~/go/pkg/mod` 的 go-zero 源码里）· **「配置里没写」≠「没开」**· **变异两种假绿**（编译不过⇒读旧 XML / 红在更早断言上）· **改上游资源做变异而只跑下游⇒假阴性**· **用被测常量构造输入⇒恒绿**· **阻塞式启动器 + 句柄设在返回之后⇒句柄永远拿不到⇒调度器泄漏⇒守门失真**（024）· **MockMvc 与真 Tomcat 是两条观测路径⇒共享层改响应头会打红别的域的 MockMvc 守门**（025）· **守门期望值可能落在已登记偏离范围里⇒一条漂移要按维度拆开判（033）**· **`@DynamicPropertySource` 不进 context cache key⇒靠 properties 恰好不同隔离上下文是侥幸（036）**· **还原变异用 `copy2` ⇒ mtime 被保留 ⇒ Maven 跳过重编译 ⇒ 跑的是旧字节码（037）**· **`BindException` ⇒ 先三步定性（单独复跑 / lsof 查占用 / 抓实际绑的端口）⇒ 端口号不在随机范围 ⇒ 那次 `port` 不是 0 ⇒ 有外部来源（038）** |
 | `_cross` | 4 份 | 散文式 | Flyway 账本撞号；框架机制静默失效实证；「跑绿 ≠ 对」的元教训；**陈旧 surefire 报告抬高测试计数** |
 
 ## 待填（空文件即坑位）

@@ -256,16 +256,35 @@ Go 真源 `rpc.go:59-72` 的 select 分支是 `done` / `panicChan` / `timeoutCtx
 ⇒ 客户端拿到 `code=Unknown` ⇒ **探针变成随机**。
 真实的慢 handler 就是一直不返回 ⇒ 这里照做（`time.Sleep(30s)`）。
 
-## 用例（2 条）
+## 用例（3 条）
 
 | 用例 | 测什么 | Go 出处 |
 |---|---|---|
 | `timeout_wire` | **客户端真正收到的** status：code + description | `service/common/observability/rpc.go:69` |
 | `timeout_telemetry` | 超时 span 的 `sea.biz_msg`（= `err.Error()`） | `service/common/observability/observability.go:108-112` |
+| `client_deadline_ctx` | **E38**：客户端 deadline 早于服务端 timeout 时，**有效期限**必须取客户端的那个 | `service/common/observability/rpc.go:38` |
 
 两侧参数一致（超时 300ms · slow 阈值 750ms），两侧都走**真传输层**：
 Go 侧 `grpc.NewServer` + 真 client；RAG 侧真 Netty server（`forPort(0)`）+
 真 channel（`dns:///127.0.0.1:<port>` 直连，绕开 Nacos 服务发现）。
+
+### 🔴 `client_deadline_ctx` 是本探针**第二个**挖出来的缺口（E38）
+
+Go 真源 `rpc.go:38` 的 `context.WithTimeout(ctx, timeout)` 里 **`ctx` 携带客户端 deadline**
+⇒ Go 标准库语义 ⇒ 有效期限 = **min(客户端 deadline, 服务端 timeout)**；
+而 RAG 旧实现只算 `now + timeout` ⇒ **客户端 deadline 完全不参与**。
+
+⇒ 探针实测（客户端 deadline 100ms / 服务端 300ms）：
+- Go 半边：`bucket=client_100ms`（handler 看到的 ctx 剩 ≈100ms ⇒ **继承了客户端的**）
+- RAG 半边（修前）：`bucket=server_own`（剩 ≈300ms ⇒ **只算服务端自己的**）
+⇒ ⇒ **漂移坐实**，探针 EXIT=1；修后两侧一致。
+
+⚠️ **档位设计的一条纪律**：客户端 deadline **必须早于**服务端 timeout ⇒ 否则 `min` 等于服务端值
+⇒ 两侧看不出差别 ⇒ 探针失效（本轮踩过一次：Go 半边最初把客户端设成 1000ms、服务端 300ms
+⇒ `min` = 300ms ⇒ 与「只算服务端」不可区分 ⇒ 改成客户端 100ms 才分得开）。
+
+⚠️ **只输出分档，不输出绝对毫秒**：剩余毫秒受传输耗时影响 ⇒ 两侧逐字比对会不稳定
+⇒ 只比对「落在客户端那一档还是服务端那一档」（bucket）⇒ 稳定可配对。
 
 ## 已知能力缺口（不计入失败，但**始终打印**）
 

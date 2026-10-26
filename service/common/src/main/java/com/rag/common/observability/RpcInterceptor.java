@@ -211,9 +211,30 @@ public final class RpcInterceptor {
                 Context otelCtx = Context.current().with(span);
                 // DRIFT-018 修复（Java 化）：用 ThreadLocal DeadlineState 暴露 deadline 时刻，
                 // 对应 Go 版 context.WithTimeout(ctx, timeout) 后 ctx.Done() 语义。
-                long deadlineEpochMs = (timeout != null && timeout.compareTo(Duration.ZERO) > 0)
-                        ? System.currentTimeMillis() + timeout.toMillis()
-                        : Long.MAX_VALUE;
+                //
+                // 🔴 E38：Go 的 `ctx` **携带客户端 deadline** ⇒ `context.WithTimeout(parent, d)` 的
+                //   有效期限 = **min(客户端 deadline, now+d)**（Go 标准库语义：WithDeadline 里
+                //   `if cur, ok := parent.Deadline(); ok && cur.Before(d) { return WithCancel(parent) }`
+                //   —— 父 deadline 更早时直接继承父的）
+                //   ⇒ 旧实现只算 `now + timeout` ⇒ **客户端 deadline 完全不参与** ⇒ 漂移。
+                //   运行期实证（users/admin 实测 · 客户端 deadline 1000ms 档）：
+                //   Go `Δ_start=+1005ms / Δ_end=+0ms`（随客户端一起死）
+                //   vs RAG `Δ_start=+2117ms / Δ_end=+1111ms`（客户端已放弃，PG 查询仍占着 1.1s）
+                //   ⇒ 可观察（抓取侧）⇒ global 台账 E38（落点在本类 ⇒ global 单写权）。
+                //
+                // ⚠️ 客户端 deadline 从 grpc-java 的 `io.grpc.Context.current().getDeadline()` 取
+                //   （2026-10-26 实测：在 `interceptCall` 里可用 ⇒ 服务端 ctx 由入向 grpc-timeout 派生；
+                //   实测客户端 1s ⇒ 服务端读到 932ms 剩余）
+                // ⚠️ `timeout<=0`（不启用服务端超时）时**保持旧行为**（不引入客户端 deadline）：
+                //   Go 侧 timeout<=0 直接 `handler(ctx, req)`，业务靠 ctx.Done() 感知；
+                //   RAG 侧此刻**不注册超时调度器** ⇒ 若把 DeadlineState 设成客户端 deadline，
+                //   会让业务在「服务端根本没超时」时误判为超时 ⇒ 超出本条修复范围。
+                long serverBudgetMs = (timeout != null && timeout.compareTo(Duration.ZERO) > 0)
+                        ? timeout.toMillis() : Long.MAX_VALUE;
+                long effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs());
+                long deadlineEpochMs = effectiveTimeoutMs == Long.MAX_VALUE
+                        ? Long.MAX_VALUE
+                        : System.currentTimeMillis() + effectiveTimeoutMs;
                 AtomicReference<Throwable> timeoutErrRef = new AtomicReference<>();
                 AtomicReference<Boolean> timedOutRef = new AtomicReference<>(Boolean.FALSE);
                 // M6 修复：close() 可能被调用两次 —— 超时调度线程先 close(DEADLINE_EXCEEDED)，
@@ -235,7 +256,11 @@ public final class RpcInterceptor {
                 // （timeout 极短时），退回 call 至少保证客户端仍能收到 DEADLINE_EXCEEDED。
                 final AtomicReference<ServerCall<ReqT, RespT>> wrappedCallRef = new AtomicReference<>();
                 if (timeout != null && timeout.compareTo(Duration.ZERO) > 0) {
-                    long timeoutMs = timeout.toMillis();
+                    // 🔴 E38：延时用 **effectiveTimeoutMs**（= min(客户端 deadline, 服务端预算)）
+                    //   而不再是「服务端自己的 timeout」⇒ 与 Go 的 context.WithTimeout(ctx, timeout) 同语义。
+                    //   ⚠️ 若客户端 deadline 已过期 ⇒ effective=0 ⇒ 调度器**立即** fire
+                    //      （Go 侧：timeoutCtx.Done() 已就绪 ⇒ select 立即走超时分支 ⇒ 同款）
+                    long timeoutMs = effectiveTimeoutMs;
                     timeoutFutureHolder[0] = TIMEOUT_SCHEDULER.schedule(() -> {
                         // Go 真源 rpc.go:69-71 —— 超时这一路有**两个**可观察面，本实现必须同时对齐：
                         //   ① wire：client 收到的 status description = timeoutCtx.Err().Error()
@@ -531,6 +556,51 @@ public final class RpcInterceptor {
     private static String goStyleStatusMessage(Code code, String description) {
         String desc = description != null ? description : "";
         return "rpc error: code = " + code.name() + " desc = " + desc;
+    }
+
+    /**
+     * 🔴 **E38** —— 取**客户端**的 deadline 剩余毫秒（grpc-java 服务端 ctx）。
+     *
+     * <p><b>Go 出处</b>：{@code service/common/observability/rpc.go:38}
+     * <pre>
+     * Go: timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+     * </pre>
+     * ⇒ {@code ctx} 是 gRPC 传进来的服务端 ctx，**携带客户端 deadline**
+     * ⇒ Go 标准库 {@code WithDeadline} 的语义：父 deadline 更早时**直接继承父的**
+     * ⇒ 有效期限 = {@code min(客户端 deadline, now+timeout)}。
+     *
+     * <p><b>grpc-java 侧的取值点</b>：{@code io.grpc.Context.current().getDeadline()}
+     * ⇒ 服务端 ctx 由**入向 {@code grpc-timeout} 头**派生
+     * ⇒ 2026-10-26 实测：在 {@code interceptCall} 里可用（客户端 deadline 1s
+     * ⇒ 服务端读到 <b>932ms</b> 剩余；headers 里也有 {@code grpc-timeout: 936027u}）。
+     *
+     * <p><b>返回值的三个约定</b>：
+     * <ul>
+     *   <li>客户端**没带** deadline ⇒ {@link Long#MAX_VALUE}（不参与 min）⇒ 退化成「只算服务端自己的」
+     *       —— 与 Go 侧「父 ctx 无 deadline」同款；</li>
+     *   <li>客户端 deadline **已过期** ⇒ 返回 {@code 0}（不是负数）
+     *       ⇒ min 后 effective=0 ⇒ 调度器立即 fire
+     *       —— 与 Go 侧「{@code timeoutCtx.Done()} 已就绪 ⇒ select 立即走超时分支」同款；</li>
+     *   <li>取值本身抛异常 ⇒ 返回 {@link Long#MAX_VALUE}（**不因取 deadline 失败而误杀请求**）。</li>
+     * </ul>
+     *
+     * <p>⚠️ 本方法只解决**期限的计算**；「客户端放弃后，服务端在途的 PG 查询随之取消」
+     * 是<b>另一层</b>（Go 靠 ctx cancel ⇒ GORM 取消查询；grpc-java 的
+     * {@code ServerCall#close()} <b>不取消业务线程</b> ⇒ 框架限制，与 T-14 同根）
+     * ⇒ **该层属 E38 的第 ② 层，Jason 2026-10-26 已拍板「另立项」** ⇒ 本轮不碰。
+     */
+    private static long clientDeadlineRemainingMs() {
+        try {
+            // ⚠️ 必须用全限定名：本类 import 的是 OTel 的 io.opentelemetry.context.Context
+            io.grpc.Deadline deadline = io.grpc.Context.current().getDeadline();
+            if (deadline == null) {
+                return Long.MAX_VALUE;
+            }
+            long remaining = deadline.timeRemaining(TimeUnit.MILLISECONDS);
+            return remaining > 0 ? remaining : 0L;
+        } catch (RuntimeException e) {
+            return Long.MAX_VALUE;
+        }
     }
 
     /**

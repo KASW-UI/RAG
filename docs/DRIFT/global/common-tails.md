@@ -591,6 +591,20 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 
 ⇒ **T-15 的失效形态（看不懂的「找不到 span」）已被 ① + ③ 双重封住** ⇒ 剩下 ② ④ 属「加固 / 架构改造」，已登记。
 
+### T-16 🟡→🟢 **第 ① 层已修（第三十一轮 · 2026-10-26）** —— 超时的**有效期限**未继承客户端 deadline
+
+| 项 | 内容 |
+|---|---|
+| **落点** | `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`（**本文件这类尾巴的典型落点** ⇒ global 单写权）⇒ 逐条 ⇒ `_README.md` §七之五 **E38** |
+| **来源** | **users/admin 域 owner 于 2026-10-26 主动提出**并附运行期实测 ⇒ **global 台账此前 0 命中 ⇒ 从未跟踪** |
+| **Go 侧** | `rpc.go:38` `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` ⇒ `ctx` **携带客户端 deadline** ⇒ Go 标准库语义（父 deadline 更早时直接继承父的）⇒ **有效期限 = min(客户端 deadline, now+timeout)** |
+| **RAG 侧（修前）** | `deadlineEpochMs = System.currentTimeMillis() + timeout.toMillis()` ⇒ **只算服务端自己的** ⇒ 客户端 deadline 完全不参与 |
+| **运行期实证** | 客户端 deadline 1000ms 档：Go `Δ_start=+1005ms / Δ_end=+0ms`（随客户端一起死）vs RAG `Δ_start=+2117ms / Δ_end=+1111ms`（客户端已放弃，PG 查询仍占着 1.1s）⇒ **可观察（抓取侧）** |
+| **修法（分两层）** | **① 期限计算**（✅ 本轮已做）：`effectiveTimeoutMs = min(服务端预算, 客户端 deadline 剩余)`，两处消费点（`deadlineEpochMs` + 超时调度器延时）都用它；取值点 `io.grpc.Context.current().getDeadline()`（**已实测在 `interceptCall` 里可用** ⇒ 客户端 1s ⇒ 服务端读到 932ms 剩余）<br>**② 在途查询随客户端放弃而取消**（⏸ **Jason 2026-10-26 拍板「另立项」**）：Go 靠 ctx cancel ⇒ GORM 取消查询；grpc-java 的 `ServerCall#close()` **不取消业务线程**（**与 T-14 同一根因**：框架限制）⇒ 真正对齐需「handler 挪受控 executor + 超时 interrupt」⇒ **架构级 · 影响 10 个 rpc 组件** |
+| **边界（别误读成已闭环）** | 🟢 本轮**只对齐了期限计算这一层** ⇒ ⚠️ **`UNRESOLVED-ARPC-002` 的「CONFIRMED SEMANTIC MISMATCH」定性不变** ⇒ 且该条是 **users/admin 域台账**的编号 ⇒ global **不写别域台账** ⇒ 已通知该域 owner（措辞：只销 desc 那一格，**本体不得判为已闭环**） |
+| **守门 / 探针 / 变异** | 守门 `RpcInterceptorClientDeadlineGateTest`（2 条：① 客户端 deadline 早于服务端预算 ⇒ 有效期限必须落在**客户端那一档** ② 客户端**没带** deadline ⇒ 仍是服务端预算 ⇒ 防「把无 deadline 错当成有 deadline」）· 探针 `client_deadline_ctx`（Go 半边**直接引用冻结仓真源** ⇒ 修前 `Go=client_100ms` vs `RAG=server_own` ⇒ **漂移坐实**；修后两侧一致）· 变异 1 条（退回 `serverBudgetMs` ⇒ 守门 1 条红且红在目标断言 + 探针 EXIT=1） |
+| **§5.3 共享层改动 ⇒ 影响面记账** | 🔴 本条改的是 **`service/common`** ⇒ **10 个 rpc 组件全部受影响**（含 favorite）⇒ 按 §5.3「共享层改动必须记账并告知 owner」逐条核过：<br>① **favorite 域：favorite owner 做了「叠上去跑」的跨域实测**（比 global 自己的回归更强）—— 把 global 的 `RpcInterceptor.java` **临时叠到 `align/favorite` 分支**上跑 ⇒ favorite 全量测试 **rpc 99 / api 94 / common 29 ⇒ 0 失败 0 错误**（与基线逐项一致）· `api-full-parity-probe` **EXIT=0**（32 case 冻结值一条没动）· `grpc-contract-probe` **EXIT=0**（36 case + 第二轮 15 case 全 SAME）⇒ ⇒ **零红**；叠完已 `git checkout` 还原 ⇒ favorite 分支 `service/common` **零改动**、工作树与 HEAD 完全一致<br>② **favorite 域自身已是 min 语义** ⇒ `favorite-api → favorite-rpc` 的 client deadline 由 `FavoriteRpcClient.capByClientTimeout` 压成 `min(ctx 预算, 2s)`，而服务端预算也是 `rpc-timeout: 2s` ⇒ `min(2s,2s)=2s` ⇒ **常见路径下本次改动对 favorite 幂等** ⇒ 只有 ctx 预算 **< 2s** 时才提前掐断（那正是 E38 要的 Go 同款行为）⇒ 且**全仓无跨域调用方**（`FavoriteServiceGrpc` / `favorite.proto` 除 favorite 域内部零命中）<br>③ **favorite 域唯一触及 `DEADLINE_EXCEEDED` 的守门** `FavoriteGrpcErrorRoundTripTest` 是把它当**业务码**做错误码往返（入参就写 `"DEADLINE_EXCEEDED\|文案已丢失"` ⇒ 不关心 description）⇒ **不碰超时路径**<br>④ ⇒ **favorite 域零改动**（`git status` + 写权门禁 `check-global-lane-ownership.py` 双证）⇒ 本条**未碰 favorite 的任何代码/配置/测试**<br>⑤ ⇒ **已直接通知 favorite 域会话**（`mvs_96b399362f7b4f05b433a2f1acdb1498`）⇒ favorite owner 已回执并**做了上面那轮「叠上去跑」的实测** |
+
 ## 二、本轮复核汇总表
 
 | # | 条目 | 复核前 | 复核后 | 本轮动了？ |
