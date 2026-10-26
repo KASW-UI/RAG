@@ -1,0 +1,1340 @@
+{
+  "schema": {
+    "favorite_fact_outbox": [
+      "event_id",
+      "technical_input_hash",
+      "technical_offset",
+      "technical_received_at",
+      "delivered_at",
+      "favorite_id",
+      "aggregate_version",
+      "payload",
+      "status",
+      "retry_count",
+      "created_at",
+      "updated_at",
+      "technical_receipt_id"
+    ],
+    "favorite_folder": [
+      "id",
+      "folder_id",
+      "user_id",
+      "name",
+      "create_time",
+      "update_time"
+    ],
+    "favorite_item": [
+      "id",
+      "create_time",
+      "favorite_id",
+      "folder_id",
+      "user_id",
+      "target_id",
+      "target_type",
+      "target_revision",
+      "title",
+      "cover"
+    ],
+    "favorite_legacy_fact_marker": [
+      "favorite_id",
+      "user_id",
+      "folder_id",
+      "target_type",
+      "target_id",
+      "target_revision",
+      "source_snapshot_sha256",
+      "approval_ref",
+      "approved_at"
+    ],
+    "flyway_schema_history_favorite": [
+      "installed_rank",
+      "success",
+      "version",
+      "description",
+      "type",
+      "script",
+      "checksum",
+      "installed_by",
+      "installed_on",
+      "execution_time"
+    ],
+    "__pk__": {
+      "favorite_fact_outbox": [
+        "event_id"
+      ],
+      "favorite_folder": [
+        "id"
+      ],
+      "favorite_item": [
+        "id"
+      ],
+      "favorite_legacy_fact_marker": [
+        "favorite_id"
+      ],
+      "flyway_schema_history_favorite": [
+        "installed_rank"
+      ]
+    },
+    "__uniq__": {
+      "favorite_fact_outbox": [
+        [
+          "favorite_id",
+          "aggregate_version",
+          "favorite_id",
+          "aggregate_version"
+        ]
+      ],
+      "favorite_folder": [
+        [
+          "folder_id"
+        ],
+        [
+          "user_id",
+          "name"
+        ]
+      ],
+      "favorite_item": [
+        [
+          "favorite_id"
+        ],
+        [
+          "folder_id",
+          "target_id",
+          "target_type"
+        ]
+      ]
+    }
+  },
+  "cases": {
+    "r01_list_folders_ok": {
+      "go": [
+        {
+          "sql": "-- ping",
+          "params": {}
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE user_id = $1 ORDER BY create_time desc",
+          "params": {
+            "1": "1001"
+          }
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE user_id = $1\n\tORDER BY create_time DESC",
+          "params": {
+            "1": "1001"
+          }
+        }
+      ]
+    },
+    "r02_list_folders_empty": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE user_id = $1 ORDER BY create_time desc",
+          "params": {
+            "1": "4242"
+          }
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE user_id = $1\n\tORDER BY create_time DESC",
+          "params": {
+            "1": "4242"
+          }
+        }
+      ]
+    },
+    "r03_list_items_ok": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
+          "params": {
+            "1": "9001",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_item\" WHERE folder_id = $1 ORDER BY create_time desc",
+          "params": {
+            "1": "9001"
+          }
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "9001"
+          }
+        },
+        {
+          "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE folder_id = $1\n\tORDER BY create_time DESC",
+          "params": {
+            "1": "9001"
+          }
+        }
+      ]
+    },
+    "r04_list_items_notfound": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
+          "params": {
+            "1": "9999",
+            "2": "1"
+          }
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "9999"
+          }
+        }
+      ]
+    },
+    "r05_list_items_forbidden": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
+          "params": {
+            "1": "9001",
+            "2": "1"
+          }
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "9001"
+          }
+        }
+      ]
+    },
+    "r06_delete_item_notfound": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_item\" WHERE favorite_id = $1 ORDER BY \"favorite_item\".\"id\" LIMIT $2",
+          "params": {
+            "1": "999999",
+            "2": "1"
+          }
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE favorite_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "999999"
+          }
+        }
+      ]
+    },
+    "r07_delete_item_forbidden": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_item\" WHERE favorite_id = $1 ORDER BY \"favorite_item\".\"id\" LIMIT $2",
+          "params": {
+            "1": "7001",
+            "2": "1"
+          }
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE favorite_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "7001"
+          }
+        }
+      ]
+    },
+    "r08_delete_folder_notfound": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
+          "params": {
+            "1": "999999",
+            "2": "1"
+          }
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "999999"
+          }
+        }
+      ]
+    },
+    "r09_delete_folder_forbidden": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
+          "params": {
+            "1": "9001",
+            "2": "1"
+          }
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "9001"
+          }
+        }
+      ]
+    },
+    "w01_create_folder_ok": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE user_id = $1 AND name = $2 ORDER BY \"favorite_folder\".\"id\" LIMIT $3",
+          "params": {
+            "1": "2001",
+            "2": "SqlProbeFolder",
+            "3": "1"
+          }
+        },
+        {
+          "sql": "begin",
+          "params": {}
+        },
+        {
+          "sql": "INSERT INTO \"favorite_folder\" (\"folder_id\",\"user_id\",\"name\",\"create_time\",\"update_time\") VALUES ($1,$2,$3,$4,$5) RETURNING \"id\"",
+          "params": {
+            "1": "2114634265264615424",
+            "2": "2001",
+            "3": "SqlProbeFolder",
+            "4": "2026-10-26 16:24:31.501309+08",
+            "5": "2026-10-26 16:24:31.501309+08"
+          }
+        },
+        {
+          "sql": "commit",
+          "params": {}
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE user_id = $1 AND name = $2\n\tLIMIT 1",
+          "params": {
+            "1": "2001",
+            "2": "SqlProbeFolder"
+          }
+        },
+        {
+          "sql": "INSERT INTO favorite_folder (folder_id, user_id, name)\n\tVALUES ($1, $2, $3)",
+          "params": {
+            "1": "2114634265377898496",
+            "2": "2001",
+            "3": "SqlProbeFolder"
+          }
+        }
+      ]
+    },
+    "w02_create_folder_duplicate": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE user_id = $1 AND name = $2 ORDER BY \"favorite_folder\".\"id\" LIMIT $3",
+          "params": {
+            "1": "2001",
+            "2": "SqlProbeFolder",
+            "3": "1"
+          }
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE user_id = $1 AND name = $2\n\tLIMIT 1",
+          "params": {
+            "1": "2001",
+            "2": "SqlProbeFolder"
+          }
+        }
+      ]
+    },
+    "w03_create_item_ok": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
+          "params": {
+            "1": "2114634265264615424",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_item\" WHERE folder_id = $1 AND target_id = $2 AND target_type = $3 ORDER BY \"favorite_item\".\"id\" LIMIT $4",
+          "params": {
+            "1": "2114634265264615424",
+            "2": "t-77",
+            "3": "post",
+            "4": "1"
+          }
+        },
+        {
+          "sql": "begin",
+          "params": {}
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2 FOR UPDATE",
+          "params": {
+            "1": "2114634265264615424",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "INSERT INTO \"favorite_item\" (\"favorite_id\",\"folder_id\",\"user_id\",\"target_id\",\"target_type\",\"target_revision\",\"title\",\"cover\",\"create_time\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING \"id\"",
+          "params": {
+            "1": "2114634265516273664",
+            "2": "2114634265264615424",
+            "3": "2001",
+            "4": "t-77",
+            "5": "post",
+            "7": "req-title",
+            "8": "req-cover",
+            "9": "2026-10-26 16:24:31.561691+08"
+          }
+        },
+        {
+          "sql": "INSERT INTO \"favorite_fact_outbox\" (\"event_id\",\"favorite_id\",\"aggregate_version\",\"payload\",\"status\",\"retry_count\",\"technical_receipt_id\",\"technical_input_hash\",\"technical_offset\",\"technical_received_at\",\"delivered_at\",\"created_at\",\"updated_at\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+          "params": {
+            "1": "favorite.2114634265516273664.v1",
+            "2": "2114634265516273664",
+            "3": "1",
+            "4": "{\"payload\": {\"event_id\": \"favorite.2114634265516273664.v1\", \"folder_id\": \"2114634265264615424\", \"operation\": \"assert\", \"target_id\": \"t-77\", \"event_time\": \"2026-10-26T08:24:31.562566Z\", \"source_ref\": \"rtw.favorite/2114634265516273664\", \"favorite_id\": \"2114634265516273664\", \"subject_ref\": {\"tenant_id\": \"platform\", \"subject_id\": \"2001\", \"authority_id\": \"rtw.identity\"}, \"target_type\": \"post\", \"available_at\": \"2026-10-26T08:24:31.562566Z\", \"schema_version\": 1, \"target_revision\": null}, \"event_id\": \"favorite.2114634265516273664.v1\", \"producer\": \"rtw.community.favorite\", \"event_type\": \"rtw.favorite.assert\", \"occurred_at\": \"2026-10-26T08:24:31.562566Z\", \"aggregate_id\": \"2114634265516273664\", \"operation_id\": \"favorite.2114634265516273664.v1\", \"schema_version\": 1, \"aggregate_version\": 1}",
+            "5": "0",
+            "6": "0",
+            "7": "",
+            "8": "",
+            "9": "0",
+            "12": "2026-10-26 16:24:31.562618+08",
+            "13": "2026-10-26 16:24:31.562618+08"
+          }
+        },
+        {
+          "sql": "commit",
+          "params": {}
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "2114634265377898496"
+          }
+        },
+        {
+          "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE folder_id = $1 AND target_id = $2 AND target_type = $3\n\tLIMIT 1",
+          "params": {
+            "1": "2114634265377898496",
+            "2": "t-77",
+            "3": "post"
+          }
+        },
+        {
+          "sql": "SHOW TRANSACTION ISOLATION LEVEL",
+          "params": {}
+        },
+        {
+          "sql": "BEGIN",
+          "params": {}
+        },
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1\n\tFOR UPDATE",
+          "params": {
+            "1": "2114634265377898496"
+          }
+        },
+        {
+          "sql": "INSERT INTO favorite_item\n\t    (favorite_id, folder_id, user_id, target_id, target_type, target_revision, title, cover)\n\tVALUES ($1, $2, $3, $4, $5,\n\t        $6, $7, $8)",
+          "params": {
+            "1": "2114634265612779520",
+            "2": "2114634265377898496",
+            "3": "2001",
+            "4": "t-77",
+            "5": "post",
+            "7": "req-title",
+            "8": "req-cover"
+          }
+        },
+        {
+          "sql": "INSERT INTO favorite_fact_outbox\n\t    (event_id, favorite_id, aggregate_version, payload, status, retry_count,\n\t     created_at, updated_at)\n\tVALUES ($1, $2, $3, $4::jsonb, 0, 0,\n\t        $5, $6)",
+          "params": {
+            "1": "favorite.2114634265612779520.v1",
+            "2": "2114634265612779520",
+            "3": "1",
+            "4": "{\"event_id\":\"favorite.2114634265612779520.v1\",\"event_type\":\"rtw.favorite.assert\",\"schema_version\":1,\"producer\":\"rtw.community.favorite\",\"aggregate_id\":\"2114634265612779520\",\"aggregate_version\":1,\"operation_id\":\"favorite.2114634265612779520.v1\",\"occurred_at\":\"2026-10-26T08:24:31.591702Z\",\"payload\":{\"schema_version\":1,\"event_id\":\"favorite.2114634265612779520.v1\",\"subject_ref\":{\"authority_id\":\"rtw.identity\",\"tenant_id\":\"platform\",\"subject_id\":\"2001\"},\"target_type\":\"post\",\"target_id\":\"t-77\",\"target_revision\":null,\"operation\":\"assert\",\"source_ref\":\"rtw.favorite/2114634265612779520\",\"event_time\":\"2026-10-26T08:24:31.591702Z\",\"available_at\":\"2026-10-26T08:24:31.591702Z\",\"favorite_id\":\"2114634265612779520\",\"folder_id\":\"2114634265377898496\"}}",
+            "5": "2026-10-26 16:24:31.594419+08",
+            "6": "2026-10-26 16:24:31.594419+08"
+          }
+        },
+        {
+          "sql": "COMMIT",
+          "params": {}
+        }
+      ]
+    },
+    "w04_create_item_2nd_ok": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
+          "params": {
+            "1": "2114634265264615424",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_item\" WHERE folder_id = $1 AND target_id = $2 AND target_type = $3 ORDER BY \"favorite_item\".\"id\" LIMIT $4",
+          "params": {
+            "1": "2114634265264615424",
+            "2": "t-78",
+            "3": "post",
+            "4": "1"
+          }
+        },
+        {
+          "sql": "begin",
+          "params": {}
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2 FOR UPDATE",
+          "params": {
+            "1": "2114634265264615424",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "INSERT INTO \"favorite_item\" (\"favorite_id\",\"folder_id\",\"user_id\",\"target_id\",\"target_type\",\"target_revision\",\"title\",\"cover\",\"create_time\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING \"id\"",
+          "params": {
+            "1": "2114634265725988864",
+            "2": "2114634265264615424",
+            "3": "2001",
+            "4": "t-78",
+            "5": "post",
+            "7": "req-title-2",
+            "8": "req-cover-2",
+            "9": "2026-10-26 16:24:31.610824+08"
+          }
+        },
+        {
+          "sql": "INSERT INTO \"favorite_fact_outbox\" (\"event_id\",\"favorite_id\",\"aggregate_version\",\"payload\",\"status\",\"retry_count\",\"technical_receipt_id\",\"technical_input_hash\",\"technical_offset\",\"technical_received_at\",\"delivered_at\",\"created_at\",\"updated_at\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+          "params": {
+            "1": "favorite.2114634265725988864.v1",
+            "2": "2114634265725988864",
+            "3": "1",
+            "4": "{\"payload\": {\"event_id\": \"favorite.2114634265725988864.v1\", \"folder_id\": \"2114634265264615424\", \"operation\": \"assert\", \"target_id\": \"t-78\", \"event_time\": \"2026-10-26T08:24:31.611216Z\", \"source_ref\": \"rtw.favorite/2114634265725988864\", \"favorite_id\": \"2114634265725988864\", \"subject_ref\": {\"tenant_id\": \"platform\", \"subject_id\": \"2001\", \"authority_id\": \"rtw.identity\"}, \"target_type\": \"post\", \"available_at\": \"2026-10-26T08:24:31.611216Z\", \"schema_version\": 1, \"target_revision\": null}, \"event_id\": \"favorite.2114634265725988864.v1\", \"producer\": \"rtw.community.favorite\", \"event_type\": \"rtw.favorite.assert\", \"occurred_at\": \"2026-10-26T08:24:31.611216Z\", \"aggregate_id\": \"2114634265725988864\", \"operation_id\": \"favorite.2114634265725988864.v1\", \"schema_version\": 1, \"aggregate_version\": 1}",
+            "5": "0",
+            "6": "0",
+            "7": "",
+            "8": "",
+            "9": "0",
+            "12": "2026-10-26 16:24:31.611237+08",
+            "13": "2026-10-26 16:24:31.611237+08"
+          }
+        },
+        {
+          "sql": "commit",
+          "params": {}
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "2114634265377898496"
+          }
+        },
+        {
+          "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE folder_id = $1 AND target_id = $2 AND target_type = $3\n\tLIMIT 1",
+          "params": {
+            "1": "2114634265377898496",
+            "2": "t-78",
+            "3": "post"
+          }
+        },
+        {
+          "sql": "SHOW TRANSACTION ISOLATION LEVEL",
+          "params": {}
+        },
+        {
+          "sql": "BEGIN",
+          "params": {}
+        },
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1\n\tFOR UPDATE",
+          "params": {
+            "1": "2114634265377898496"
+          }
+        },
+        {
+          "sql": "INSERT INTO favorite_item\n\t    (favorite_id, folder_id, user_id, target_id, target_type, target_revision, title, cover)\n\tVALUES ($1, $2, $3, $4, $5,\n\t        $6, $7, $8)",
+          "params": {
+            "1": "2114634265784745984",
+            "2": "2114634265377898496",
+            "3": "2001",
+            "4": "t-78",
+            "5": "post",
+            "7": "req-title-2",
+            "8": "req-cover-2"
+          }
+        },
+        {
+          "sql": "INSERT INTO favorite_fact_outbox\n\t    (event_id, favorite_id, aggregate_version, payload, status, retry_count,\n\t     created_at, updated_at)\n\tVALUES ($1, $2, $3, $4::jsonb, 0, 0,\n\t        $5, $6)",
+          "params": {
+            "1": "favorite.2114634265784745984.v1",
+            "2": "2114634265784745984",
+            "3": "1",
+            "4": "{\"event_id\":\"favorite.2114634265784745984.v1\",\"event_type\":\"rtw.favorite.assert\",\"schema_version\":1,\"producer\":\"rtw.community.favorite\",\"aggregate_id\":\"2114634265784745984\",\"aggregate_version\":1,\"operation_id\":\"favorite.2114634265784745984.v1\",\"occurred_at\":\"2026-10-26T08:24:31.627864Z\",\"payload\":{\"schema_version\":1,\"event_id\":\"favorite.2114634265784745984.v1\",\"subject_ref\":{\"authority_id\":\"rtw.identity\",\"tenant_id\":\"platform\",\"subject_id\":\"2001\"},\"target_type\":\"post\",\"target_id\":\"t-78\",\"target_revision\":null,\"operation\":\"assert\",\"source_ref\":\"rtw.favorite/2114634265784745984\",\"event_time\":\"2026-10-26T08:24:31.627864Z\",\"available_at\":\"2026-10-26T08:24:31.627864Z\",\"favorite_id\":\"2114634265784745984\",\"folder_id\":\"2114634265377898496\"}}",
+            "5": "2026-10-26 16:24:31.628139+08",
+            "6": "2026-10-26 16:24:31.628139+08"
+          }
+        },
+        {
+          "sql": "COMMIT",
+          "params": {}
+        }
+      ]
+    },
+    "w05_create_item_duplicate": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
+          "params": {
+            "1": "2114634265264615424",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_item\" WHERE folder_id = $1 AND target_id = $2 AND target_type = $3 ORDER BY \"favorite_item\".\"id\" LIMIT $4",
+          "params": {
+            "1": "2114634265264615424",
+            "2": "t-77",
+            "3": "post",
+            "4": "1"
+          }
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "2114634265377898496"
+          }
+        },
+        {
+          "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE folder_id = $1 AND target_id = $2 AND target_type = $3\n\tLIMIT 1",
+          "params": {
+            "1": "2114634265377898496",
+            "2": "t-77",
+            "3": "post"
+          }
+        }
+      ]
+    },
+    "w06_update_folder_ok": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
+          "params": {
+            "1": "9001",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE user_id = $1 AND name = $2 ORDER BY \"favorite_folder\".\"id\" LIMIT $3",
+          "params": {
+            "1": "1001",
+            "2": "Alpha2",
+            "3": "1"
+          }
+        },
+        {
+          "sql": "begin",
+          "params": {}
+        },
+        {
+          "sql": "UPDATE \"favorite_folder\" SET \"name\"=$1,\"update_time\"=$2 WHERE folder_id = $3",
+          "params": {
+            "1": "Alpha2",
+            "2": "2026-10-26 16:24:31.663202+08",
+            "3": "9001"
+          }
+        },
+        {
+          "sql": "commit",
+          "params": {}
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "9001"
+          }
+        },
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE user_id = $1 AND name = $2\n\tLIMIT 1",
+          "params": {
+            "1": "1001",
+            "2": "Alpha2"
+          }
+        },
+        {
+          "sql": "UPDATE favorite_folder\n\tSET name = $1\n\tWHERE folder_id = $2",
+          "params": {
+            "1": "Alpha2",
+            "2": "9001"
+          }
+        }
+      ]
+    },
+    "w07_delete_created_item_ok": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_item\" WHERE favorite_id = $1 ORDER BY \"favorite_item\".\"id\" LIMIT $2",
+          "params": {
+            "1": "2114634265516273664",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "begin",
+          "params": {}
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_item\" WHERE favorite_id = $1 ORDER BY \"favorite_item\".\"id\" LIMIT $2 FOR UPDATE",
+          "params": {
+            "1": "2114634265516273664",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_fact_outbox\" WHERE favorite_id = $1 AND aggregate_version = 1 LIMIT $2 FOR UPDATE",
+          "params": {
+            "1": "2114634265516273664",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "INSERT INTO \"favorite_fact_outbox\" (\"event_id\",\"favorite_id\",\"aggregate_version\",\"payload\",\"status\",\"retry_count\",\"technical_receipt_id\",\"technical_input_hash\",\"technical_offset\",\"technical_received_at\",\"delivered_at\",\"created_at\",\"updated_at\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+          "params": {
+            "1": "favorite.2114634265516273664.v2",
+            "2": "2114634265516273664",
+            "3": "2",
+            "4": "{\"payload\": {\"event_id\": \"favorite.2114634265516273664.v2\", \"folder_id\": \"2114634265264615424\", \"operation\": \"retract\", \"target_id\": \"t-77\", \"event_time\": \"2026-10-26T08:24:31.68637Z\", \"source_ref\": \"rtw.favorite/2114634265516273664\", \"favorite_id\": \"2114634265516273664\", \"subject_ref\": {\"tenant_id\": \"platform\", \"subject_id\": \"2001\", \"authority_id\": \"rtw.identity\"}, \"target_type\": \"post\", \"available_at\": \"2026-10-26T08:24:31.68637Z\", \"schema_version\": 1, \"target_revision\": null}, \"event_id\": \"favorite.2114634265516273664.v2\", \"producer\": \"rtw.community.favorite\", \"event_type\": \"rtw.favorite.retract\", \"occurred_at\": \"2026-10-26T08:24:31.68637Z\", \"aggregate_id\": \"2114634265516273664\", \"operation_id\": \"favorite.2114634265516273664.v2\", \"schema_version\": 1, \"aggregate_version\": 2}",
+            "5": "0",
+            "6": "0",
+            "7": "",
+            "8": "",
+            "9": "0",
+            "12": "2026-10-26 16:24:31.686383+08",
+            "13": "2026-10-26 16:24:31.686383+08"
+          }
+        },
+        {
+          "sql": "DELETE FROM \"favorite_item\" WHERE favorite_id = $1",
+          "params": {
+            "1": "2114634265516273664"
+          }
+        },
+        {
+          "sql": "commit",
+          "params": {}
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE favorite_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "2114634265612779520"
+          }
+        },
+        {
+          "sql": "SHOW TRANSACTION ISOLATION LEVEL",
+          "params": {}
+        },
+        {
+          "sql": "BEGIN",
+          "params": {}
+        },
+        {
+          "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE favorite_id = $1\n\tLIMIT 1\n\tFOR UPDATE",
+          "params": {
+            "1": "2114634265612779520"
+          }
+        },
+        {
+          "sql": "SELECT event_id, favorite_id, aggregate_version, payload, status, retry_count,\n\t       technical_receipt_id, technical_input_hash, technical_offset,\n\t       technical_received_at, delivered_at, created_at, updated_at\n\tFROM favorite_fact_outbox\n\tWHERE favorite_id = $1 AND aggregate_version = 1\n\tLIMIT 1\n\tFOR UPDATE",
+          "params": {
+            "1": "2114634265612779520"
+          }
+        },
+        {
+          "sql": "INSERT INTO favorite_fact_outbox\n\t    (event_id, favorite_id, aggregate_version, payload, status, retry_count,\n\t     created_at, updated_at)\n\tVALUES ($1, $2, $3, $4::jsonb, 0, 0,\n\t        $5, $6)",
+          "params": {
+            "1": "favorite.2114634265612779520.v2",
+            "2": "2114634265612779520",
+            "3": "2",
+            "4": "{\"event_id\":\"favorite.2114634265612779520.v2\",\"event_type\":\"rtw.favorite.retract\",\"schema_version\":1,\"producer\":\"rtw.community.favorite\",\"aggregate_id\":\"2114634265612779520\",\"aggregate_version\":2,\"operation_id\":\"favorite.2114634265612779520.v2\",\"occurred_at\":\"2026-10-26T08:24:31.71266Z\",\"payload\":{\"schema_version\":1,\"event_id\":\"favorite.2114634265612779520.v2\",\"subject_ref\":{\"authority_id\":\"rtw.identity\",\"tenant_id\":\"platform\",\"subject_id\":\"2001\"},\"target_type\":\"post\",\"target_id\":\"t-77\",\"target_revision\":null,\"operation\":\"retract\",\"source_ref\":\"rtw.favorite/2114634265612779520\",\"event_time\":\"2026-10-26T08:24:31.71266Z\",\"available_at\":\"2026-10-26T08:24:31.71266Z\",\"favorite_id\":\"2114634265612779520\",\"folder_id\":\"2114634265377898496\"}}",
+            "5": "2026-10-26 16:24:31.71283+08",
+            "6": "2026-10-26 16:24:31.71283+08"
+          }
+        },
+        {
+          "sql": "DELETE FROM favorite_item WHERE favorite_id = $1",
+          "params": {
+            "1": "2114634265612779520"
+          }
+        },
+        {
+          "sql": "COMMIT",
+          "params": {}
+        }
+      ]
+    },
+    "w08_delete_seed_item_ok": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_item\" WHERE favorite_id = $1 ORDER BY \"favorite_item\".\"id\" LIMIT $2",
+          "params": {
+            "1": "7001",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "begin",
+          "params": {}
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_item\" WHERE favorite_id = $1 ORDER BY \"favorite_item\".\"id\" LIMIT $2 FOR UPDATE",
+          "params": {
+            "1": "7001",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_fact_outbox\" WHERE favorite_id = $1 AND aggregate_version = 1 LIMIT $2 FOR UPDATE",
+          "params": {
+            "1": "7001",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_legacy_fact_marker\" WHERE favorite_id = $1 LIMIT $2 FOR UPDATE",
+          "params": {
+            "1": "7001",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "rollback",
+          "params": {}
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE favorite_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "7001"
+          }
+        },
+        {
+          "sql": "SHOW TRANSACTION ISOLATION LEVEL",
+          "params": {}
+        },
+        {
+          "sql": "BEGIN",
+          "params": {}
+        },
+        {
+          "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE favorite_id = $1\n\tLIMIT 1\n\tFOR UPDATE",
+          "params": {
+            "1": "7001"
+          }
+        },
+        {
+          "sql": "SELECT event_id, favorite_id, aggregate_version, payload, status, retry_count,\n\t       technical_receipt_id, technical_input_hash, technical_offset,\n\t       technical_received_at, delivered_at, created_at, updated_at\n\tFROM favorite_fact_outbox\n\tWHERE favorite_id = $1 AND aggregate_version = 1\n\tLIMIT 1\n\tFOR UPDATE",
+          "params": {
+            "1": "7001"
+          }
+        },
+        {
+          "sql": "SELECT favorite_id, user_id, folder_id, target_type, target_id, target_revision,\n\t       source_snapshot_sha256, approval_ref\n\tFROM favorite_legacy_fact_marker\n\tWHERE favorite_id = $1\n\tLIMIT 1\n\tFOR UPDATE",
+          "params": {
+            "1": "7001"
+          }
+        },
+        {
+          "sql": "ROLLBACK",
+          "params": {}
+        }
+      ]
+    },
+    "w09_delete_folder_empty_ok": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
+          "params": {
+            "1": "9002",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "begin",
+          "params": {}
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2 FOR UPDATE",
+          "params": {
+            "1": "9002",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_item\" WHERE folder_id = $1 ORDER BY favorite_id FOR UPDATE",
+          "params": {
+            "1": "9002"
+          }
+        },
+        {
+          "sql": "DELETE FROM \"favorite_item\" WHERE folder_id = $1",
+          "params": {
+            "1": "9002"
+          }
+        },
+        {
+          "sql": "DELETE FROM \"favorite_folder\" WHERE folder_id = $1",
+          "params": {
+            "1": "9002"
+          }
+        },
+        {
+          "sql": "commit",
+          "params": {}
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "9002"
+          }
+        },
+        {
+          "sql": "SHOW TRANSACTION ISOLATION LEVEL",
+          "params": {}
+        },
+        {
+          "sql": "BEGIN",
+          "params": {}
+        },
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1\n\tFOR UPDATE",
+          "params": {
+            "1": "9002"
+          }
+        },
+        {
+          "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE folder_id = $1\n\tORDER BY favorite_id\n\tFOR UPDATE",
+          "params": {
+            "1": "9002"
+          }
+        },
+        {
+          "sql": "DELETE FROM favorite_item WHERE folder_id = $1",
+          "params": {
+            "1": "9002"
+          }
+        },
+        {
+          "sql": "DELETE FROM favorite_folder WHERE folder_id = $1",
+          "params": {
+            "1": "9002"
+          }
+        },
+        {
+          "sql": "COMMIT",
+          "params": {}
+        }
+      ]
+    },
+    "w10_delete_folder_cascade_ok": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
+          "params": {
+            "1": "9003",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "begin",
+          "params": {}
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2 FOR UPDATE",
+          "params": {
+            "1": "9003",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_item\" WHERE folder_id = $1 ORDER BY favorite_id FOR UPDATE",
+          "params": {
+            "1": "9003"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_fact_outbox\" WHERE favorite_id = $1 AND aggregate_version = 1 LIMIT $2 FOR UPDATE",
+          "params": {
+            "1": "7003",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_legacy_fact_marker\" WHERE favorite_id = $1 LIMIT $2 FOR UPDATE",
+          "params": {
+            "1": "7003",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "rollback",
+          "params": {}
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "9003"
+          }
+        },
+        {
+          "sql": "SHOW TRANSACTION ISOLATION LEVEL",
+          "params": {}
+        },
+        {
+          "sql": "BEGIN",
+          "params": {}
+        },
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1\n\tFOR UPDATE",
+          "params": {
+            "1": "9003"
+          }
+        },
+        {
+          "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE folder_id = $1\n\tORDER BY favorite_id\n\tFOR UPDATE",
+          "params": {
+            "1": "9003"
+          }
+        },
+        {
+          "sql": "SELECT event_id, favorite_id, aggregate_version, payload, status, retry_count,\n\t       technical_receipt_id, technical_input_hash, technical_offset,\n\t       technical_received_at, delivered_at, created_at, updated_at\n\tFROM favorite_fact_outbox\n\tWHERE favorite_id = $1 AND aggregate_version = 1\n\tLIMIT 1\n\tFOR UPDATE",
+          "params": {
+            "1": "7003"
+          }
+        },
+        {
+          "sql": "SELECT favorite_id, user_id, folder_id, target_type, target_id, target_revision,\n\t       source_snapshot_sha256, approval_ref\n\tFROM favorite_legacy_fact_marker\n\tWHERE favorite_id = $1\n\tLIMIT 1\n\tFOR UPDATE",
+          "params": {
+            "1": "7003"
+          }
+        },
+        {
+          "sql": "ROLLBACK",
+          "params": {}
+        }
+      ]
+    },
+    "z01_list_folders_created": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE user_id = $1 ORDER BY create_time desc",
+          "params": {
+            "1": "2001"
+          }
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE user_id = $1\n\tORDER BY create_time DESC",
+          "params": {
+            "1": "2001"
+          }
+        }
+      ]
+    },
+    "z02_list_items_created": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
+          "params": {
+            "1": "2114634265264615424",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_item\" WHERE folder_id = $1 ORDER BY create_time desc",
+          "params": {
+            "1": "2114634265264615424"
+          }
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "2114634265377898496"
+          }
+        },
+        {
+          "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE folder_id = $1\n\tORDER BY create_time DESC",
+          "params": {
+            "1": "2114634265377898496"
+          }
+        }
+      ]
+    },
+    "z03_list_folders_user1001_after_rename": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE user_id = $1 ORDER BY create_time desc",
+          "params": {
+            "1": "1001"
+          }
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE user_id = $1\n\tORDER BY create_time DESC",
+          "params": {
+            "1": "1001"
+          }
+        }
+      ]
+    },
+    "w11_delete_created_folder_ok": {
+      "go": [
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
+          "params": {
+            "1": "2114634265264615424",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "begin",
+          "params": {}
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2 FOR UPDATE",
+          "params": {
+            "1": "2114634265264615424",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_item\" WHERE folder_id = $1 ORDER BY favorite_id FOR UPDATE",
+          "params": {
+            "1": "2114634265264615424"
+          }
+        },
+        {
+          "sql": "SELECT * FROM \"favorite_fact_outbox\" WHERE favorite_id = $1 AND aggregate_version = 1 LIMIT $2 FOR UPDATE",
+          "params": {
+            "1": "2114634265725988864",
+            "2": "1"
+          }
+        },
+        {
+          "sql": "INSERT INTO \"favorite_fact_outbox\" (\"event_id\",\"favorite_id\",\"aggregate_version\",\"payload\",\"status\",\"retry_count\",\"technical_receipt_id\",\"technical_input_hash\",\"technical_offset\",\"technical_received_at\",\"delivered_at\",\"created_at\",\"updated_at\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+          "params": {
+            "1": "favorite.2114634265725988864.v2",
+            "2": "2114634265725988864",
+            "3": "2",
+            "4": "{\"payload\": {\"event_id\": \"favorite.2114634265725988864.v2\", \"folder_id\": \"2114634265264615424\", \"operation\": \"retract\", \"target_id\": \"t-78\", \"event_time\": \"2026-10-26T08:24:31.863613Z\", \"source_ref\": \"rtw.favorite/2114634265725988864\", \"favorite_id\": \"2114634265725988864\", \"subject_ref\": {\"tenant_id\": \"platform\", \"subject_id\": \"2001\", \"authority_id\": \"rtw.identity\"}, \"target_type\": \"post\", \"available_at\": \"2026-10-26T08:24:31.863613Z\", \"schema_version\": 1, \"target_revision\": null}, \"event_id\": \"favorite.2114634265725988864.v2\", \"producer\": \"rtw.community.favorite\", \"event_type\": \"rtw.favorite.retract\", \"occurred_at\": \"2026-10-26T08:24:31.863613Z\", \"aggregate_id\": \"2114634265725988864\", \"operation_id\": \"favorite.2114634265725988864.v2\", \"schema_version\": 1, \"aggregate_version\": 2}",
+            "5": "0",
+            "6": "0",
+            "7": "",
+            "8": "",
+            "9": "0",
+            "12": "2026-10-26 16:24:31.863626+08",
+            "13": "2026-10-26 16:24:31.863626+08"
+          }
+        },
+        {
+          "sql": "DELETE FROM \"favorite_item\" WHERE folder_id = $1",
+          "params": {
+            "1": "2114634265264615424"
+          }
+        },
+        {
+          "sql": "DELETE FROM \"favorite_folder\" WHERE folder_id = $1",
+          "params": {
+            "1": "2114634265264615424"
+          }
+        },
+        {
+          "sql": "commit",
+          "params": {}
+        }
+      ],
+      "rag": [
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
+          "params": {
+            "1": "2114634265377898496"
+          }
+        },
+        {
+          "sql": "SHOW TRANSACTION ISOLATION LEVEL",
+          "params": {}
+        },
+        {
+          "sql": "BEGIN",
+          "params": {}
+        },
+        {
+          "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1\n\tFOR UPDATE",
+          "params": {
+            "1": "2114634265377898496"
+          }
+        },
+        {
+          "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE folder_id = $1\n\tORDER BY favorite_id\n\tFOR UPDATE",
+          "params": {
+            "1": "2114634265377898496"
+          }
+        },
+        {
+          "sql": "SELECT event_id, favorite_id, aggregate_version, payload, status, retry_count,\n\t       technical_receipt_id, technical_input_hash, technical_offset,\n\t       technical_received_at, delivered_at, created_at, updated_at\n\tFROM favorite_fact_outbox\n\tWHERE favorite_id = $1 AND aggregate_version = 1\n\tLIMIT 1\n\tFOR UPDATE",
+          "params": {
+            "1": "2114634265784745984"
+          }
+        },
+        {
+          "sql": "INSERT INTO favorite_fact_outbox\n\t    (event_id, favorite_id, aggregate_version, payload, status, retry_count,\n\t     created_at, updated_at)\n\tVALUES ($1, $2, $3, $4::jsonb, 0, 0,\n\t        $5, $6)",
+          "params": {
+            "1": "favorite.2114634265784745984.v2",
+            "2": "2114634265784745984",
+            "3": "2",
+            "4": "{\"event_id\":\"favorite.2114634265784745984.v2\",\"event_type\":\"rtw.favorite.retract\",\"schema_version\":1,\"producer\":\"rtw.community.favorite\",\"aggregate_id\":\"2114634265784745984\",\"aggregate_version\":2,\"operation_id\":\"favorite.2114634265784745984.v2\",\"occurred_at\":\"2026-10-26T08:24:31.877332Z\",\"payload\":{\"schema_version\":1,\"event_id\":\"favorite.2114634265784745984.v2\",\"subject_ref\":{\"authority_id\":\"rtw.identity\",\"tenant_id\":\"platform\",\"subject_id\":\"2001\"},\"target_type\":\"post\",\"target_id\":\"t-78\",\"target_revision\":null,\"operation\":\"retract\",\"source_ref\":\"rtw.favorite/2114634265784745984\",\"event_time\":\"2026-10-26T08:24:31.877332Z\",\"available_at\":\"2026-10-26T08:24:31.877332Z\",\"favorite_id\":\"2114634265784745984\",\"folder_id\":\"2114634265377898496\"}}",
+            "5": "2026-10-26 16:24:31.87751+08",
+            "6": "2026-10-26 16:24:31.87751+08"
+          }
+        },
+        {
+          "sql": "DELETE FROM favorite_item WHERE folder_id = $1",
+          "params": {
+            "1": "2114634265377898496"
+          }
+        },
+        {
+          "sql": "DELETE FROM favorite_folder WHERE folder_id = $1",
+          "params": {
+            "1": "2114634265377898496"
+          }
+        },
+        {
+          "sql": "COMMIT",
+          "params": {}
+        }
+      ]
+    }
+  },
+  "sides": {
+    "go": {
+      "db": "godb",
+      "app": "go_side",
+      "total_statements": 164,
+      "markers": [
+        "r01_list_folders_ok",
+        "r02_list_folders_empty",
+        "r03_list_items_ok",
+        "r04_list_items_notfound",
+        "r05_list_items_forbidden",
+        "r06_delete_item_notfound",
+        "r07_delete_item_forbidden",
+        "r08_delete_folder_notfound",
+        "r09_delete_folder_forbidden",
+        "w01_create_folder_ok",
+        "w02_create_folder_duplicate",
+        "w03_create_item_ok",
+        "w04_create_item_2nd_ok",
+        "w05_create_item_duplicate",
+        "w06_update_folder_ok",
+        "w07_delete_created_item_ok",
+        "w08_delete_seed_item_ok",
+        "w09_delete_folder_empty_ok",
+        "w10_delete_folder_cascade_ok",
+        "z01_list_folders_created",
+        "z02_list_items_created",
+        "z03_list_folders_user1001_after_rename",
+        "w11_delete_created_folder_ok"
+      ]
+    },
+    "rag": {
+      "db": "first_db",
+      "app": "rag_side",
+      "total_statements": 302,
+      "markers": [
+        "r01_list_folders_ok",
+        "r02_list_folders_empty",
+        "r03_list_items_ok",
+        "r04_list_items_notfound",
+        "r05_list_items_forbidden",
+        "r06_delete_item_notfound",
+        "r07_delete_item_forbidden",
+        "r08_delete_folder_notfound",
+        "r09_delete_folder_forbidden",
+        "w01_create_folder_ok",
+        "w02_create_folder_duplicate",
+        "w03_create_item_ok",
+        "w04_create_item_2nd_ok",
+        "w05_create_item_duplicate",
+        "w06_update_folder_ok",
+        "w07_delete_created_item_ok",
+        "w08_delete_seed_item_ok",
+        "w09_delete_folder_empty_ok",
+        "w10_delete_folder_cascade_ok",
+        "z01_list_folders_created",
+        "z02_list_items_created",
+        "z03_list_folders_user1001_after_rename",
+        "w11_delete_created_folder_ok"
+      ]
+    }
+  },
+  "stats": {
+    "log_lines": 1825,
+    "records": 855,
+    "statement_records": 594,
+    "detail_records": 246,
+    "other_records": 15,
+    "marker_statements": 46,
+    "parse_or_bind_records": 0
+  },
+  "leaks": [
+    {
+      "side": "go",
+      "db": "godb",
+      "expected_app": "go_side",
+      "count": 0,
+      "samples": []
+    },
+    {
+      "side": "rag",
+      "db": "first_db",
+      "expected_app": "rag_side",
+      "count": 0,
+      "samples": []
+    }
+  ]
+}
