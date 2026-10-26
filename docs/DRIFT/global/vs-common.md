@@ -410,6 +410,196 @@
 - ⚠️ **共存期间无风险**：两份桥是**同向**排序边 ⇒ 排序图多一个同向节点、**无环、功能等价** ⇒ ⇒ 不改变任何行为 ⇒ ⇒ **删除不是「必须立刻」**，是「合并后清理」。
 - ⚠️ **顺带发现（不在本层写权，也不在本单范围）**：`task-api` 的 pom 里**没有** MP（实测 `dependency:list`）⇒ ⇒ 它**本来就不需要**桥 ⇒ ⇒ 本单**没有**改变 task-api 的任何行为。
 
+### 4.9 🆕 G1 的 7 张派单（2026-10-27）—— **逐条独立复核 + 本层处置**
+
+> **来源**：G1 会话 `mvs_0aae96a903c14c8ea5f0fcc822f8df75`（2026-10-27 送单，声明「不需要额外确认回复，按 C2 自行排期落码 ⇒ 回执 4 项即可」）。
+> ⚠️ **本节所有「前提成立与否」的判断都是本层独立复核的结论**，不是采信派单快照（AGENTS.md §3.3.1）。
+> ⚠️ **MaxConns 那半边是已签字偏离** ⇒ 按 §5.3b **不重复质疑、也不「顺手修正回旧行为」**。
+
+#### 4.9.1 总表：7 单逐条定性
+
+| # | 派单条目 | 前提**成立**？ | 本层处置 | 落点（独立核准） |
+|---|---|---|---|---|
+| **1** | `DRIFT-USERAPI-013` / `DRIFT-FOLLOW-008` 同族：Go 每路由一个 latch + breaker 键用注册期模板（404 不得用 raw URI 兜底） | **半成立** | 🔴 **MaxConns 半边 = 已签字 `SD-2026-10-25-01` ⇒ 不修**；🟢 **breaker 键半边 = 真漂移 ⇒ 已落码** | `service/common/.../protection/GoStyleBreakerFilter.java` + 新增 `GoStyleRouteTemplateResolver` / `GoStyleRouteTemplateSource` / `GoStyleRouteResolution` / `GoStyleBreakerRouteTemplateAutoConfiguration` |
+| **2** | `DRIFT-ARPC-010`（= **E66**）：Redis 写不绑 deadline | **成立** | 🟡 **本轮不落码 ⇒ 转立项**（路线已探明，但有一处**硬约束**，见 §4.9.4） | 共享层机制可行（零域侧改动），但落点涉及 `service/common` 的 lettuce 依赖 + 各域调用点语义 |
+| **3** | `UNRESOLVED-ARPC-002`（= **E38②**）：有效期限 = min(客户端 deadline, 服务端 timeout) ⇒ `deadlineEpochMs` + 超时调度器延时两处都要改 | **❌ 前提已过期** | 🟢 **不落码**（① 第三十一轮已修；② 第四十六轮已否决原修法并窄化成 E65/E66） | 已在 `service/common/.../observability/RpcInterceptor.java`（`af416d9`） |
+| **4** | `DRIFT-ADMINAPI-007`：503 响应 `Content-Type` charset 分号后空格 | **成立**（残差） | 🟢 **本轮不做 + 登记在案**（兄弟条 `DRIFT-MSGAPI-010` 用户已拍板「保持登记，本轮不做」⇒ 同类同先例 ⇒ **不升级为拍板题**） | 属 `admin-api` 域（`DRIFT-ADMINAPI-007`）⇒ 不在本层写权 |
+| **5** | `UNRESOLVED-USERSCOMMON-003`：`GoStyleCoercion::applyTo` 的全局副作用 | **❌ 前提不成立** | 🟢 **不落码**（口径已过期；且已注册的 8 个 api **不会误伤**） | 台账口径订正属 **users 域台账写权** ⇒ 归 G1 |
+| **6** | `DRIFT-USERRPC-V-002`：`users_user.status` NOT NULL 两侧不同 | **成立** | 🔴 **不落码 ⇒ 跨 lane 协调**（放开可空会**立刻激活 admin-rpc 的同款缺陷** ⇒ 必须与 admin 侧同改 ⇒ 那半边在 **G1 写权面**） | DDL 落点 `service/users/users-common/src/main/resources/db/01_create_user.sql:39`（**本层写权**）· 配套 `service/users/admin/admin-rpc/.../domain/UserEntity.java:60`（**G1 写权**） |
+| **7** | `DRIFT-USERAPI-014` 跨域推广：Redis 断连 ⇒ fail-open（不排队等重连）⇒ 机制上移到 `service/common` | **成立** | 🟢 **已落码**（零域侧改动 ⇒ 覆盖所有用 Redis 的组件） | 新增 `service/common/.../redis/GoStyleRedisClientAutoConfiguration.java` |
+
+#### 4.9.2 🔴 #1 的 MaxConns 半边 = **已签字偏离 ⇒ 不修**（§5.3b）
+
+| 项 | 结论 |
+|---|---|
+| 派单说法 | 「Go 每路由一个 MaxConns latch」⇒ 落点 `service/common/.../protection/GoStyleMaxConnsFilter.java` |
+| **独立复核** | Go 侧确实每路由一个：`rest/engine.go:99-101`（`bindRoute` ⇒ `route` 是**逐路由参数**）→ `rest/engine.go:131-132`（`buildChainWithNativeMiddlewares` ⇒ 逐路由调 `handler.MaxConnsHandler`）→ `rest/handler/maxconnshandler.go:12-20`（每次 `syncx.NewLimit(n)`） |
+| **但** | 这条**已经签字**：`docs/Intentional_Deviations/global/common-tails.md:11-31` 的 **`SD-2026-10-25-01`**（2026-10-25 用户拍板，签字决定 = **保留 RAG 的全局闸门，不改成 per-route**）⇒ ⇒ **不修、不重复质疑、也不「顺手改回」** |
+| ⚠️ 台账口径冲突（**共享面，本层不回写**） | `docs/DRIFT/_cross/domain-common-lanes.md:125` 仍把 `DRIFT-FOLLOW-008` 列为「🔴 未修」⇒ **已过期**（签字后应从 DRIFT 侧移除）⇒ ⇒ **登记给整合者**（该文件属共享面 ⇒ 本 lane 不写） |
+
+#### 4.9.3 🟢 #1 的 breaker 键半边 = **真漂移 ⇒ 已落码**
+
+**Go 出处（消费点，逐条核过）**：
+
+| Go 事实 | 位置 | 对 RAG 的含义 |
+|---|---|---|
+| breaker 是**逐路由**建的 | `rest/engine.go:99-101` + `:131-132`（`handler.BreakerHandler(route.Method, route.Path, metrics)`） | 隔离单位 = 路由，不是具体 URI |
+| breaker 的**名字** = `METHOD://route.Path` | `rest/handler/breakerhandler.go:15`（`breakerSeparator = "://"`）+ `:19`（`breaker.WithName(strings.Join([]string{method, path}, breakerSeparator))`） | 键必须是**注册期模板** |
+| **404 不经过 breaker** | `rest/router/patrouter.go:59-78`（没匹配上 ⇒ `handleNotFound`）→ `rest/engine.go:244-268`（`notFoundHandler` 的链**只有 Trace + Log** ⇒ **没有 MaxConns / Breaker / Shedding**） | 未命中路由**不得**进 breaker |
+
+**RAG 侧修前状态**：`GoStyleBreakerFilter.routeKey` = `request.getMethod() + "://" + request.getRequestURI()` ⇒ ① 每个**具体 URI** 一个 breaker ⇒ ② 404 也进 breaker。
+
+**可观察面（按域实测，不是推断）**：
+
+| 组件 | 有无路径变量 | 后果 |
+|---|---|---|
+| **article-api** | **有** —— `ArticleController.java:137,152,167,181`（`/article/{id}`、`/me/article/{id}` 等 4 条）；Go 侧 `service/article/api/internal/handler/routes.go:28,33,38,51` 是模板 `/article/:id` | 🔴 **可观察**：Go 上 `/article/1` 持续 5xx 会把同模板的 `/article/2` 一起挡住，RAG 修前不会 |
+| 其余 9 个 api | **零**路径变量（`grep 'Mapping("[^"]*{'` 只命中 article-api 1 个文件） | ⇒ 模板 == 具体 URI ⇒ **修前修后无差别** ⇒ 爆炸半径变化**只发生在 article 域** |
+
+**本层落码**（4 个文件，全部在 `service/common/**`）：
+
+1. `protection/GoStyleRouteResolution.java`（新）—— 三态结果（`TEMPLATE` / `NOT_MATCHED` / `UNKNOWN`）。⚠️ **刻意不引用任何 Spring MVC 类型** ⇒ 因为它会被 Filter 引用 ⇒ 而**没有 spring-webmvc 的进程（10 个 rpc）加载不了 MVC 类型** ⇒ `NoClassDefFoundError`。
+2. `protection/GoStyleRouteTemplateSource.java`（新）—— 窄接口（同样零 MVC 类型）⇒ Filter 只依赖「能解析模板」这件事，**不依赖实现**。
+3. `protection/GoStyleRouteTemplateResolver.java`（新）—— 实现：用 **Spring 自己的** `HandlerMapping.getHandler(request)`（= DispatcherServlet 走的同一条匹配路径 ⇒ **不重新实现路由匹配**）⇒ 读 `HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE`。
+4. `protection/GoStyleBreakerRouteTemplateAutoConfiguration.java`（新）—— `@AutoConfiguration` + `@ConditionalOnClass(HandlerMapping.class)` + `@ConditionalOnWebApplication(SERVLET)`。
+
+**⚠️ 三个刻意的设计决定**：
+
+| 决定 | 为什么 |
+|---|---|
+| **三态返回**（`TEMPLATE` / `NOT_MATCHED` / `UNKNOWN`） | `UNKNOWN`（没有 HandlerMapping / 调用抛异常 / 属性缺失）⇒ 调用方**回落旧行为**（raw URI 分桶、照常进 breaker）⇒ ⇒ **绝不因为「解析失败」而悄悄关掉熔断保护** |
+| **不直接让 Filter 依赖 resolver 类型** | 无 MVC 的进程会在**注入点解析 Bean 类型**时加载那个类 ⇒ `NoClassDefFoundError` ⇒ **硬失败** ⇒ 故抽出零 MVC 类型的接口 |
+| **`@ConditionalOnMissingBean` 去重** | 本层两个 `@AutoConfiguration` 位于 `com.rag.common.**` ⇒ **10 个 api 的 `scanBasePackages` 含 `com.rag.common`** ⇒ 同一个类会**既被组件扫描、又被自动配置清单**各注册一次 ⇒ 而两者的 `@Bean` 方法名**相同** ⇒ 不同名冲突 ⇒ **启动直接失败**（Boot 默认不允许 bean 覆盖）⇒ ⇒ 必须在 `@Bean` 上加 `@ConditionalOnMissingBean`（与既有 `GoStylePathNormalizingAutoConfiguration` 同一套办法） |
+
+**依赖处置**：`service/common/pom.xml` 新增 **`spring-webmvc`（provided）** ⇒ **provided 不传递** ⇒ **16 个消费者的 classpath 零变化** ⇒ 只有本来就带 Spring MVC 的 api 进程会用上。
+
+#### 4.9.4 🟡 #2（E66）—— **本轮不落码 ⇒ 提请立项**（路线已探明 + 一处硬约束）
+
+**路线（已探明，可行）**：`io.lettuce.core.TimeoutOptions.TimeoutSource` 是**抽象类**，
+`public abstract long getTimeout(RedisCommand<?,?,?>)` ⇒ **逐命令动态求值** ⇒
+⇒ 共享层可以返回一个「当前请求的剩余 deadline」⇒ **Redis 命令被 deadline 约束** ⇒ **零域侧改动**。
+
+**🔴 但有一处硬约束（本轮实测字节码得出，**改法必须绕开它**）**：
+Boot 4 的 `LettuceConnectionConfiguration.createClientOptions` 里的**顺序**是：
+
+```
+offset 146: ClientOptions$Builder.timeoutOptions(TimeoutOptions)      ← 先写「命令超时」
+offset 151: ObjectProvider.orderedStream()                            ← 后应用 customizer
+```
+
+（`spring-boot-data-redis-4.0.8.jar` ⇒ `javap -c` 实测；timeout 来源 = `DataRedisProperties.getTimeout()`，
+即 `spring.data.redis.timeout`。）⇒ ⇒ **customizer 里再调一次 `timeoutOptions(...)` 会整体覆盖运维配的命令超时** ⇒ ⇒ **那是新漂移** ⇒ ⇒ 实现时必须**先读回 `spring.data.redis.timeout`** 再包一层 source（无 deadline 时回落到该值）⇒ ⇒ 需要一轮专门实现。
+
+**另两处待定（立项时要一起答）**：
+1. **载体不统一**：rpc 路径用 `RpcInterceptor.DeadlineState`（epoch 毫秒，静态 `remainingMillis()`）· api 路径用 `GoStyleRequestDeadline`（`nanoTime` 纳秒）⇒ ⇒ 要么统一，要么 source 两处都读。
+2. **无 deadline 时的回落值**：Go 侧无 ctx deadline 的 Redis 调用由 go-zero 自己的 `Timeout` 决定；RAG 侧今天靠 `spring.data.redis.timeout` ⇒ ⇒ 回落值必须**等于现状**，否则又是新漂移。
+
+**为什么本轮不硬落**：E66 在 global 台账里本来的定性就是「**落点跨域 ⇒ 只记账 + 提请立项，实施需各域 owner 参与**」
+（`docs/DRIFT/global/_README.md` §七之二十）⇒ ⇒ 且它还缺**双侧活体证据**（E66 现有证据强度 = 源码级，**未经双侧活体验证**）
+⇒ ⇒ 按 AGENTS.md §3.3「凡写『与 Go 一致』必须有两侧同时跑的探针」，**先把机制落了但没有双侧证据**＝ 半个闭环 ⇒ ⇒ 本轮**只提交机制可行性结论 + 硬约束**。
+
+#### 4.9.5 🟢 #3 = **前提已过期 ⇒ 不落码**（`af416d9` 已把两处都改好）
+
+| 项 | 证据 |
+|---|---|
+| 派单要求 | 「`deadlineEpochMs` 计算 + 超时调度器延时**两处都要改**」 |
+| **实际状态** | 🔴 **两处都已在共享层改好**（第三十一轮，`af416d9`）⇒ `git merge-base --is-ancestor af416d9 HEAD` ⇒ **YES**（是本分支祖先） |
+| 逐行位置 | `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:234`（`effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())`）· `:235-237`（`deadlineEpochMs`）· `:263`（超时调度器延时用 `effectiveTimeoutMs`）· `:592`/`:595`（`clientDeadlineRemainingMs()` 取 `io.grpc.Context.current().getDeadline()`） |
+| ② 架构级那半边 | 🔴 **第四十六轮已否决原修法**（「handler 挪受控 executor + 超时 interrupt」）并把第③层窄化成 **E65（出向 gRPC 不继承 deadline）** + **E66（Redis 不感知 deadline）** ⇒ ⇒ **不在本单范围** |
+| ⇒ 结论 | **不需要落码** ⇒ 回执里给出上面 5 个行号 + 提交号即可 |
+
+#### 4.9.6 🟢 #5 = **前提不成立 ⇒ 不落码**（口径已过期，且已注册的 8 个 api 不会误伤）
+
+**派单的前提**：「通用版 `GoStyleCoercion::applyTo` 被 user-api / admin-api / **favorite-api** 三域注册 ⇒ 全局副作用是否波及非 users 域」。
+
+**独立复核（实测）**：
+
+| 项 | 实测 |
+|---|---|
+| 派单说的「三域」 | ❌ **不成立** ⇒ 实测**已注册 8 个 api**：article / comment / favorite / follow / like / message ＋ users 的 user-api / admin-api |
+| 台账口径「通过 `JsonMapperBuilderCustomizer` **全局施加**」 | ❌ **已过期** ⇒ `GoStyleCoercion` 自身 javadoc `:96-103` 明写「**刻意不做 `@Configuration`**」（users-common 也被纯 gRPC 的 admin-rpc 用着）⇒ 改由**各 api 各自注册** |
+| **未注册**的两个 api 是否漏了 | 🟢 **都不是漏**：**hot-api** ⇒ **零 `@RequestBody`**（规则不适用）；**task-api** ⇒ 有 `@RequestBody GetTaskReq`，但 Go 侧该类型带**自定义 `UnmarshalJSON`** ⇒ Go 侧**也不走**标准 mapping 规则 ⇒ RAG 已在 DTO 层手写镜像（`GetTaskReq.setId(Object)` / `normalize` / `numberLiteral`，对应 `service/task/api/internal/types/types.go:16-36`）⇒ ⇒ **规则不适用** |
+| **会不会误伤**（真正的问点） | 🟢 **不会** ⇒ **Go 全仓只有 1 个自定义 `UnmarshalJSON`**（`service/task/api/internal/types/types.go:16`）⇒ ⇒ 凡注册了全局规则的 api，其 Go 侧请求类型**都走标准 mapping** ⇒ ⇒ 规则与 Go 逐条一致 |
+| ⇒ 结论 | **无漂移，不落码**；台账那条的**问法**（「全局副作用」）需订正 ⇒ **该文件属 users 域台账写权 ⇒ 归 G1 改** |
+
+#### 4.9.7 🔴 #6 = **真漂移，但本层不能单独改 ⇒ 跨 lane 协调**
+
+| 项 | 证据 |
+|---|---|
+| 漂移成立 | Go：`service/user/user/rpc/internal/model/data_model.go:11` = `Status int64 \`gorm:"column:status;default:0"\`` ⇒ GORM **未标 `not null`** ⇒ 建出**可空**列；RAG：`service/users/users-common/src/main/resources/db/01_create_user.sql:39` = `status BIGINT NOT NULL DEFAULT 0` ⇒ 🔴 **可空性不同**（真库实证见 `docs/DRIFT/users/user/rpc.md:1518`） |
+| **为什么不能单独改** | 🔴 `docs/DRIFT/users/user/rpc.md:1559` 明写：「**动它会立刻激活 admin-rpc 的同款缺陷**」—— `service/users/admin/admin-rpc/.../domain/UserEntity.java:60` 是 `private Long status = 0L;` ＋ MyBatis `callSettersOnNulls=false` ⇒ **NULL 读成 0** ⇒ admin 侧会把 NULL 当「活跃」⇒ ⇒ **必须与 admin 侧一起改** |
+| **写权归属** | DDL（`service/users/users-common/**`）= **本层写权**；`admin-rpc` 的 `UserEntity` = **G1 写权** ⇒ ⇒ **跨 lane** |
+| **可安全排序的两步方案**（建议给 G1） | **第 1 步（G1）**：先把 `admin-rpc` 的 `UserEntity.status` 改成能表达 NULL（此时 DDL 仍 NOT NULL ⇒ **不可能出现 NULL ⇒ 行为零变化**）→ **第 2 步（本层）**：放开 DDL 的 NOT NULL ⇒ ⇒ **中间态两侧都合法，不留半截** ⇒ ⇒ 可绕开「必须同一次提交」的物理约束 |
+| ⚠️ **另注（这才是裁决题）** | 即便放开可空，**Go 侧读到 NULL status 会扫描报错**（GORM 把 NULL 扫进**非指针** `int64` ⇒ `converting NULL to int64 is unsupported`）⇒ 而 RAG 读成 0 ⇒ ⇒ **NULL 行上两侧行为仍不同** ⇒ ⇒ **这是「保留 NOT NULL（并把 V-001 按不可达降级）」vs「放开可空（V-001 变成实打实的安全缺陷）」的裁决** ⇒ ⇒ **需 Jason 拍板** ⇒ 本层**不擅自落码** |
+
+#### 4.9.8 🟢 #4 = **本轮不做 + 登记在案**（不升级为拍板题）
+
+- 事实：`DRIFT-ADMINAPI-007` = 503 响应的 `Content-Type` 应为 `text/plain; charset=utf-8`（分号后**有**空格）；`nosniff` 那半边**已修**，**只剩 charset 空格残差**。
+- **先例**：兄弟条 `DRIFT-MSGAPI-010`（message-api 同款）用户已拍板「**保持登记，本轮不做**」⇒ ⇒ **同类同先例** ⇒ 本轮**不做 + 登记在案** ⇒ **不把登记类事项升级成「请你拍板」**（用户偏好）。
+- 落点：`admin-api` 域 ⇒ **不在本层写权** ⇒ 也不由本层代改。
+
+#### 4.9.9 🟢 #7 = **已落码**（零域侧改动 ⇒ 覆盖所有用 Redis 的组件）
+
+**Go 出处（消费点）**：
+
+| Go 事实 | 位置 |
+|---|---|
+| 黑名单查询失败 ⇒ **放行**（fail-open） | `service/user/user/api/internal/middleware/checkblacklistmiddleware.go:35-36`（`if err == nil && exists` ⇒ **err != nil 不拦截**）· 同款另见 `service/user/admin/api/internal/middleware/checkblacklistmiddleware.go` 与 `service/follow/api/internal/middleware/checkblacklistmiddleware.go`（⚠️ **三份文件 md5 各不相同**，但「err != nil ⇒ 放行」三条一致） |
+| Redis 客户端**快速失败** | `core/stores/redis/redisclientmanager.go:18`（`maxRetries = 3`）· `:27-46`（`red.NewClient(&red.Options{Addr, MaxRetries: maxRetries, MinIdleConns: idleConns})` ⇒ **未设** `DialTimeout`/`ReadTimeout` ⇒ 用 go-redis v9 默认值 ⇒ 连接被拒时**立即失败** ⇒ 实测 ~1.7s） |
+
+**本层落码**：新增 `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java`
+⇒ 注册 `LettuceClientOptionsBuilderCustomizer` ⇒ `builder.disconnectedBehavior(REJECT_COMMANDS)`
+⇒ **零域侧改动**即让**所有**用 Redis 的组件拿到 Go 的失败语义：
+
+| 组件 | 修前 | 修后 |
+|---|---|---|
+| user-api | ✅ 已有域内配置（2026-10-24 第九轮修 `DRIFT-USERAPI-014`） | 不变 |
+| **follow-api** | 🔴 断连 ⇒ 命令**挂起**等重连 ⇒ 撞超时预算 ⇒ **503**（Go 是 **200**） | ✅ 断连即拒单 ⇒ 快速失败 ⇒ fail-open |
+| **favorite-api** | 🔴 同上 | ✅ 同上 |
+| comment / like / hot / task 的 **rpc** | 🔴 缓存读写断连时挂起（Go 侧 `ExistsCtx`/`ZRevRangeWithScores`/`HGetAll` 全 ctx-aware ⇒ 快速失败） | ✅ 同上 |
+
+**⚠️ 两个刻意的决定**：
+
+1. **不碰 `timeoutOptions`** ⇒ 见 §4.9.4 的字节码证据 ⇒ 只改断连行为 ⇒ **运维配的 `spring.data.redis.timeout` 原样保留**。
+2. **与 users 域既有那份并存 = 幂等** ⇒ 两份都设 `REJECT_COMMANDS` ⇒ Boot 会依次应用所有 customizer ⇒ **后覆盖前、值相同 ⇒ 结果相同** ⇒ ⇒ users 域那份可**合并后单独删除**（纯删除、零行为变化）⇒ **删除前置 = 共享层这份先合进各域的树**。
+
+**依赖处置**：`service/common/pom.xml` 新增 **`lettuce-core` + `spring-boot-data-redis`（均 provided）** ⇒ **不传递** ⇒ 16 个消费者的 classpath 零变化 ⇒ 没有 Redis 的进程由 `@ConditionalOnClass` 挡住。
+
+#### 4.9.10 本波落码清单 + 验证（核对日期 2026-10-27 · 基线 `align/g4-service-common` @ `138b6ef`）
+
+| 工单 | 提交 | 落码文件（全部在 `service/common/**`） |
+|---|---|---|
+| **#7** | `1fb26b2` | `main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java`（新）· `src/test/java/com/rag/common/redis/GoStyleRedisClientOptionsGateTest.java`（新）· `pom.xml`（+`lettuce-core` / `spring-boot-data-redis`，均 provided）· `AutoConfiguration.imports`（+1 行） |
+| **#1** | `138b6ef` | `main/java/com/rag/common/protection/GoStyleRouteResolution.java`（新）· `GoStyleRouteTemplateSource.java`（新）· `GoStyleRouteTemplateResolver.java`（新）· `GoStyleBreakerRouteTemplateAutoConfiguration.java`（新）· `GoStyleBreakerFilter.java`（改）· `src/test/java/com/rag/common/protection/GoStyleBreakerRouteTemplateGateTest.java`（新）· `pom.xml`（+`spring-webmvc`，provided）· `AutoConfiguration.imports`（+1 行） |
+
+**守门（新增 6 条）+ 变异（3 条全精确命中）**：
+
+| 守门 | 断言 | 变异 | 变异结果 |
+|---|---|---|---|
+| `GoStyleBreakerRouteTemplateGateTest#sameTemplateSharesOneBreaker` | 同模板的两个具体 URI **共用一个** breaker（真 Tomcat + 真 Spring MVC + 真 `@GetMapping("/x/{id}")`） | 键退回 raw `getRequestURI()` | 🔴 **1 failures**，红在**目标断言 ①**（另两条仍绿 ⇒ 精确命中） |
+| `GoStyleBreakerRouteTemplateGateTest#unmatchedRouteDoesNotCreateBreaker` | 404 **不得**创建 breaker | 去掉「未命中跳过」分支 | 🔴 **1 failures**，红在**目标断言 ②** |
+| `GoStyleBreakerRouteTemplateGateTest#everyRegisteredRouteResolvesToTemplate` | **每条**已注册路由都必须能解析出模板（防「解析失败 ⇒ 静默失去熔断保护」） | —— | —— |
+| `GoStyleRedisClientOptionsGateTest#disconnectedBehaviorIsRejectCommands` | `ClientOptions.getDisconnectedBehavior() == REJECT_COMMANDS` | 退回 `DEFAULT` | 🔴 **1 failures**，红在**目标断言 ①** |
+| `GoStyleRedisClientOptionsGateTest#customizerIsRegisteredExactlyOnce` | customizer **有且只有一份**（单一来源） | —— | —— |
+| `GoStyleRedisClientOptionsGateTest#commandTimeoutIsNotClobbered` | `timeoutOptions` **未被**本层改动（运维配的 `spring.data.redis.timeout` 要保住） | —— | —— |
+
+**回归口径**：
+
+| 范围 | 结果 |
+|---|---|
+| `service/common` 模块 | **298 条 / 0 failures / 0 errors**（修前 292 ⇒ **净增 6**）· BUILD SUCCESS |
+| 三门禁 | `check-wave-lane-ownership` **EXIT=0** · `check-wave-role-model` **EXIT=0** · `check-wave-coupling` **EXIT=0** |
+| 全量 `mvn -B clean verify` | 见下方「全量回归口径」栏（基线 `138b6ef`） |
+| **写权零越权** | 本波改动文件**全部**在 `service/common/**` ＋ 本文件 ⇒ **未触碰** `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/DRIFT/global/_README.md` / `docs/Worktree.md` / `tools/difftest/**` |
+
+#### 4.9.11 🔴 **需回写给整合者 / G1 的共享面口径订正**（本 lane 不写那些文件）
+
+| 文件 | 需订正的内容 | 订正方向 |
+|---|---|---|
+| `docs/DRIFT/_cross/domain-common-lanes.md:125` | `DRIFT-FOLLOW-008` 仍列为「🔴 **未修**」 | ⬆️ **已过期** ⇒ 2026-10-25 用户签字（`SD-2026-10-25-01`）后应从 DRIFT 侧移除 |
+| `docs/DRIFT/users/common.md` §6 | `UNRESOLVED-USERSCOMMON-003` 的问法（「**全局副作用**是否波及非 users 域」） | ⬆️ **前提已过期**（不是全局施加，是各 api 各自注册）⇒ 且实测**已注册的 8 个 api 不会误伤** ⇒ 可直接结案（**该文件属 users 域台账写权 ⇒ 归 G1 改**） |
+| `docs/DRIFT/users/user/rpc.md` §`DRIFT-USERRPC-V-002` | 「🔴 仍成立，但被卡」 | 仍是**成立**的 ⇒ 但「卡点」的**形状**已可细化 ⇒ 见 §4.9.7 的两步方案 + ⚠️ 「Go 侧读 NULL 会扫描报错 ⇒ 两侧在 NULL 行上仍不同 ⇒ **需 Jason 拍板**」 |
+
 ## 5. 交付物清单
 
 - [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
@@ -417,5 +607,5 @@
 - [ ] **两侧同时跑**的探针（AGENTS.md §3.3）—— 只跑 RAG 的探针**不算数**
 - [ ] §1 的每一条**重新核对状态**并写回（带核对日期）
 - [ ] §3 的域侧修法**落码 + 守门**（含变异验证）
-- [x] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）—— ⚠️ **`_README.md` §七之二属共享面 ⇒ 本 lane 不写**（合并后由整合者统一更新）⇒ **G3 两张 + G2 三张共 5 张已登记在 §4.3~§4.7**
+- [x] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）—— ⚠️ **`_README.md` §七之二属共享面 ⇒ 本 lane 不写**（合并后由整合者统一更新）⇒ **G3 两张 + G2 三张 + G1 七张共 12 张已登记在 §4.3~§4.9**（G1 七张的逐条定性见 §4.9.1）
 - [ ] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
