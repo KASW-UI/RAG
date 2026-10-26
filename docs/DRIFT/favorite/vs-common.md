@@ -68,6 +68,7 @@
 | **L-5** | 🟡 **favorite-rpc 的测试端口未治理** | `favorite-rpc/src/test/**` | `RealTomcatPort`（专用段 21300–21399）**只存在于 favorite-api** ⇒ favorite-rpc 的 gRPC 测试用 `port=0`（OS 临时段）⇒ 暴露面未治理 ⇒ 域内补一个等价支撑类（**域内文件**） |
 | **L-6** | 🟡 **A7 proto 回归网**（本域**有**现成探针 `tools/proto-wire-probe/favorite/` ⇒ 已可跑） | `favorite-proto` ＋ `favorite-rpc/src/test/**` | 探针已存在 ⇒ **只需把它挂进收口回归的例行执行**（否则冻结值漂移无人发现）⇒ 域侧自修 |
 
+| **L-5** | 🔴 **删本域 rpc 组件的域侧排序桥**（桥下沉共享层后的冗余清理）| `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` ＋ `service/favorite/favorite-rpc/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`（删那一行注册） | **前置依赖**：① **G4 共享层桥先落码**（否则本域删了、共享层还没加 ⇒ MP 退避 ⇒ **启动失败**）② 阶段 2 放行 ⇒ **本项属阶段 2**。⚠️ **本域侧删除是纯删减、可独立验证**（域侧 `FavoriteSqlTimeoutProductionPathTest`（真 Spring 上下文）应仍绿 ⇒ 说明共享层桥已接管排序）⇒ **删完必须跑本域的真上下文守门**（证明共享层桥真的接管了排序）|
 ## 4. 需转派 **G4**（`align/g4-service-common`）的（**本域只登记：现象 + 证据 + 建议修法**）
 
 > 派单走**实时轨**（`session send` ＋ 反馈单 7 项）＋ **正式轨**（本表）⇒ 两轨内容须一致（AGENTS.md §5.3e）。

@@ -70,6 +70,7 @@
 | **H-4** | 🟡 **部署侧**：`hot-rpc` 的 gRPC 端口未在 `Infrastructure.md §3` 预占 | 部署配置（**非本仓写权面**） | `hot-rpc/.../application.yml:83-85` 的注释自记「Infrastructure.md §3 目前只给 hot 预占了 18897(HTTP)，**gRPC 端口未分配**」⇒ **记录 + 上报**，非代码缺陷 |
 | **H-5** | ✅ A3/A4/A5/A9 —— **无需改** | — | 四轴实测一致（端口差异属已记录的部署口径；Go 侧 hot 无业务 span ⇒ 无需补埋点 ⇒ **补了反而是新增 Go 没有的行为**） |
 
+| **H-6** | ✅ **本域不涉及排序桥下沉** | — | `hot-rpc` **本来就没有** `MybatisPlusOrderingBridgeAutoConfiguration`（实测：**无 flyway 段、无 MP 依赖 ⇒ 两侧都无库**）⇒ 共享层桥对 hot 域是 **N/A**（排序边因无 MP 被自动忽略 ⇒ 无害）⇒ **本域无落码项** |
 ## 4. 需转派 **G4**（`align/g4-service-common`）的（**本域只登记：现象 + 证据 + 建议修法**）
 
 > 派单走**实时轨**（`session send` ＋ 反馈单 7 项）＋ **正式轨**（本表）⇒ 两轨内容须一致（AGENTS.md §5.3e）。

@@ -62,6 +62,7 @@
 | **L-4** | ✅ A3 `rag.protection.*` 阈值 —— **无需改** | `article-api/.../application.yml:160-174` | 当前值与 go-zero `rest/config.go` 的 tag 默认逐条同值；任何调值都在域内 |
 | **L-5** | ✅ `audit.*` 埋点 —— **现在不该补** | — | Go 侧 article **没有** `audit.*` ⇒ 补了就是**新增 Go 没有的行为**（违反 AGENTS.md §3.1「差异只允许出现在表达层」） |
 
+| **L-6** | 🔴 **删本域 rpc 组件的域侧排序桥**（桥下沉共享层后的冗余清理）| `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` ＋ `service/article/article-rpc/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`（删那一行注册） | **前置依赖**：① **G4 共享层桥先落码**（否则本域删了、共享层还没加 ⇒ MP 退避 ⇒ **启动失败**）② 阶段 2 放行 ⇒ **本项属阶段 2**。⚠️ **本域侧删除是纯删减、可独立验证**（域侧 `ArticleSpringContextWiringTest` 应仍绿 ⇒ 说明共享层桥已接管）⇒ **删完必须跑本域的真上下文守门**（证明共享层桥真的接管了排序）|
 ## 4. 需转派 **G4**（`align/g4-service-common`）的（**本域只登记：现象 + 证据 + 建议修法**）
 
 > 派单走**实时轨**（`session send` ＋ 反馈单 7 项）＋ **正式轨**（本表）⇒ 两轨内容须一致（AGENTS.md §5.3e）。
@@ -85,6 +86,7 @@
 > - ⚠️ **⇒ 守门测试必须复刻那座桥**（否则测的是「没有桥的装配」⇒ **假阴性**：实测 G4 的探针在缺桥时 3/3 error，根因原文＝ `MybatisPlusAutoConfiguration: Did not match: @ConditionalOnSingleCandidate (types: javax.sql.DataSource) did not find any beans`）⇒ 修法 = 测试作用域放一座**等价**的空桥 **＋ 在测试资源的 `AutoConfiguration.imports` 里注册它**（**光有类不注册 ⇒ 排序边不建立**）。
 > - 🟡 **附带发现（已登记，未派单）**：桥在 **9 个域各写一份**（域侧重复），**共享层 `service/common` 没有**（其 `imports` 只有 `GoStyleOtelAutoConfiguration` ＋ `GoStyleJsonContentTypeAdvice`）⇒ 下沉共享层可消除重复，但**要改 9 个域的 `imports` 文件 ⇒ 域侧写权** ⇒ 跨写权变更（AGENTS.md §5.3c 须同一次提交）⇒ **需 Jason 排期，本轮不动**。
 
+| **G4-8** | 🔴 **单 4（正式派单）：排序桥下沉共享层**（Jason 2026-10-27 拍板「排序桥要下沉共享层（跨 9 个域写权）」）| **第 1 步（共享层 · G4 写权）** = `service/common/src/main/java/com/rag/common/persistence/`（新类）＋ `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`（加一行注册）｜**第 2 步（本域侧 · G3 写权）** = 删本域 rpc 组件的 `MybatisPlusOrderingBridgeAutoConfiguration.java` ＋ 删它自己 `imports` 里的注册行 | **① 技术方案（四个前提已实测）**：桥用 **`@AutoConfiguration(afterName = "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration", beforeName = "com.baomidou.mybatisplus.autoconfigure.MybatisPlusAutoConfiguration")`** ⇒ **必须用 Name 形式**：① Boot 4.0.8 的 `@AutoConfiguration` **仍有 `beforeName`/`afterName` 属性**（javap 实测）② `service/common` 编译期**只有 mybatis 本体**（3b 段明令禁 MP）⇒ 用类字面量就得加 MP 依赖 ⇒ **违反 3b 段**；用 Name 形式 ⇒ **零新依赖**③ **20 个模块**（10 api + 10 rpc）都依赖 `service/common` ⇒ 其 `imports` 会被 Spring 合并加载 ⇒ **共享层一处 ⇒ 全域生效**④ 共享层已有 `@AutoConfiguration` 先例（`GoStyleOtelAutoConfiguration`）⇒ 组件扫描重复注册的疑虑有仓内实证兜底<br>**② 规避 AGENTS.md §5.3c 的「同一次提交」约束（关键）**：**第 1 步与第 2 步可分离** —— 9 座域侧桥与共享层桥**同向**（都是 `after=DataSource, before=MP`）⇒ **并存时排序图多一个同向节点、无环、功能等价** ⇒ ⇒ **第 1 步单独合入即见效且可独立验证**（零域侧改动、零风险）⇒ **第 2 步各域纯删减、可各自独立提交** ⇒ **不需要跨树同一次提交** ⇒ **合并顺序：先 G4 共享层 ⇒ 再各域删**（任一中间态都可用）<br>**③ 影响面**：20 个组件全部拿到共享层桥（其中 10 个 api 无 MP ⇒ 排序边自动被忽略 ⇒ 无害）⇒ 9 座域侧桥随之成为冗余<br>**④ 是否阻塞本波**：**是**（它与单 1 同源 —— 单 1 的守门要证明「链真通」，而链的排序前提就是这座桥） |
 ## 5. 交付物清单
 
 - [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ⚠️ **本轮为阶段 1（只读），未起进程**；域内已有 `ArticleGrpcInterceptorWiringTest`（`@Testcontainers` 真 PG ＋ 真发 gRPC）等资产，**待阶段 2 收口回归统一跑**
