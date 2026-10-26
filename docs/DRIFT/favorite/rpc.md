@@ -37,6 +37,7 @@
 | 第十四轮收尾 | 🔴 **探针健壮性加固**（§23）—— 消除「**环境红**」假红：4 个起 PG 的探针**统一**改成 **探 TCP + 180s + 重建重试 + 容器退出即放弃**；新增守门网 `tools/probe-gate/favorite/`（含变异验证）；**零行为改动**、**0 条新漂移** |
 | 第十七轮 | 🔴🔴 **生产启动形态**（§26）—— `global` 移交的「**生产 jar 起不来**」查清并修完：**3 个缺陷**（① gRPC client 地址**两斜杠** ⇒ 启动期抛 `IllegalArgumentException`；② `web-application-type` 缺失 ⇒ Boot 判定 SERVLET 而无容器 ⇒ **启动即死**；③ gRPC **reflection 暴露面**漏关）⇒ 新增 **3 个守门测试类 / 14 例**（全部读**生产文件**，不走 `@SpringBootTest` 覆盖）+ **变异验证 4 条**全转红 + 🆕 新探针 `tools/prod-startup-probe/favorite/`（**A/B/C** 真 fat jar 活体对拍 ⇒ EXIT=0）<br>🔴 **翻案**：第十四轮 §22.3 的「启动阻塞 #1 已修」是**半修**—— 修复只落在**探针启动参数**里，**生产 yaml 一行都没改** ⇒ 缺陷活到了发布那一刻 ⇒ 坑档 **PIT-FAV-RPC-026**<br>🔴 **新登记 U9**（部署形态类 · 待拍板）：Go 生产形态的 **16062** DevServer 那个面，RAG 侧没有 |
 | 第十八轮 | 🔴 **借 `global` 的新规则跑本域台账 ⇒ 当场抓出 3 处**（§27）—— 全程**只读**借 `global` 的跨域共享复核器（`tools/check-ledger-selfcheck.py`，**global 单写权**，拷到 `/tmp` 后只调它的 L1/L4 两层）⇒ 抓出 **1 处行号真错**（`core/service/serviceconf.go:83-90` ⇒ 该文件共 89 行 ⇒ 应为 `:83-89`）+ **2 处路径写法不够精确**（`schema/naming.go` / `metrics.go` ⇒ 机器按 basename 核不动）<br>⇒ **不登记候选等别人扩**：把这两层**搬进本域自己的门禁**（`tools/ledger-lint/favorite/check-ledger-selfcheck.py` 新增 **⑤ 仓内路径存在性** + **⑥ Go 侧 `file.go:NN` 可解析** + `--mutation-test`）⇒ **门禁级 0 条**<br>⚠️ **工具第一版的 8 条门禁里 5 条是工具自己的 bug**（缺 Go 标准库 / 缺 N5 去噪 / key 结构写错 …）⇒ 坑档 **PIT-FAV-RPC-027**（**借来的工具只能当探针，不能当门禁**）<br>⚠️ 残留 **57 条「跨库/同名歧义」**（提示级 · 已量化 · 本轮不批量改） |
+| 第十九轮 | 🔴 **共享层 `DeadlineQueryTimeoutInjector` 改动的跨域验证**（§28 · `global` 第三十三轮）—— 两处行为变化：① **毫秒精度**（`setQueryTimeoutMs`）② **deadline 已过 ⇒ 不执行 SQL**（抛 57014 ⇒ 事务回滚）<br>✅ **favorite 域零条依赖旧行为**（权威读面的 deadline 是**紧贴调用新绑**的 3s ⇒ 新分支走不到；毫秒精度对整 3000ms **完全相同**）⇒ 叠 global 实现跑：**全量 177/99/94/29 全绿** + **三个探针全 EXIT=0**（authority-live 21 case / api 32 case / grpc-contract 36+15 case，冻结值一条没动）⇒ **零红、零需改动**<br>🔴 **给 global 的落地提醒**：主文件与测试改动**必须同一次提交**（只提主文件 ⇒ `service/common` 自己的旧行为断言红 1 例 ⇒ 仓库是红的）⇒ 同型 **PIT-FAV-RPC-026**<br>🔴 **纠正一条过期事实**：「favorite 台账 0 字节 / 从未对照」**不成立**（12 份 ≈ 430 KB · 19 轮对照）⇒ 出处是 `AGENTS.md:32` 的 2026-10-23 首轮快照 ⇒ 但**「SQL 语句级」双侧对拍确实未做**（DDL / 错误码 / 事务语义三层已闭）⇒ 这条我**认** |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -2325,3 +2326,85 @@ Nacos 故意指向 `127.0.0.1:1` ⇒ 顺便证明「**注册中心不在也能�
 | **注释锚点审计** | ✅ `tools/assertion-audit/favorite/check-assertion-sources.py` ⇒ **EXIT=0** |
 | **产品代码** | ✅ **零改动**（本轮只动台账 + 本域工具） |
 | **共享面** | ✅ **零改动**（`tools/check-ledger-selfcheck.py` 是 global 的文件 ⇒ **只读借用，未改**；`docs/DRIFT/global/` / `_INDEX.md` / `AGENTS.md` / `service/common/**` 一律不碰） |
+
+## 28. 2026-10-26 第十九轮（`align/favorite` 工作树 · 承 `dcf90d9`）—— 🔴 **共享层 `DeadlineQueryTimeoutInjector` 改动的跨域验证**（`global` 第三十三轮）
+
+> **来源**：`global` 收口域告知：改了 `service/common/src/main/java/com/rag/common/persistence/DeadlineQueryTimeoutInjector.java`
+> ⇒ 两处行为变化：
+> ① **毫秒精度**（pgjdbc ≥ 42.7 的 `setQueryTimeoutMs(long)`，反射探测 ⇒ 取消时刻 == deadline 时刻）；
+> ② **deadline 已过 ⇒ 不执行这条 SQL**（抛 `SQLTimeoutException` / SQLState 57014 ⇒ 翻成 `DEADLINE_EXCEEDED` ⇒ 事务回滚）
+> —— ② 是**行为收窄**（原先「过期后仍会写入」）。
+> ⇒ 他们问：**favorite 域若有任何测试/行为依赖「过期后 SQL 还能再跑最多 1 秒」这条旧行为 ⇒ 请回报。**
+
+### 28.1 ✅ 答案：**没有** —— favorite 域零条依赖那条旧行为
+
+| favorite 的路径 | deadline 怎么来 | 新分支（②）会不会走到 |
+|---|---|---|
+| **权威读 HTTP 面**（`FavoriteAuthorityEndpointConfig:275-276`） | 调用点**紧贴**绑定 `bindToCurrent(now + GO_LOOKUP_TIMEOUT_MILLIS)`，而 `GO_LOOKUP_TIMEOUT_MILLIS = 3_000L`（`:135`） | ❌ **走不到** —— deadline 是**新绑**的 ⇒ SQL 执行时**必然未过期** |
+| **gRPC 业务面** | `RpcInterceptor.onHalfClose` 绑的是**服务端自己的 2s 预算**（`rpc-timeout: 2s`） | ❌ favorite 的 handler 都是快 DB 操作，**没有**「SQL 跑在 2s 之后」的用例 |
+| **Dispatcher**（`favorite.fact.dispatch.enabled` 默认**关**） | 单次 10s deadline | ❌ 域内**无测试**覆盖该路径 |
+| **启动期建表**（Flyway） | **无** deadline | ❌ 拦截器**完全不动**（`remaining == NO_DEADLINE` ⇒ 直接 return） |
+
+⚠️ **毫秒精度（①）对 favorite 也是零影响**：
+authority 面的剩余是**整 3000ms** ⇒ 旧的「向上取整成秒」= **3s**，新的「原样传毫秒」= **3000ms** ⇒ **完全相同**
+⇒ `FavoriteAuthorityLookupTimeoutTest` 的 `[2500, 8000]` 窗口**两边都满足**。
+
+### 28.2 动态验证（两轮，叠 global 的实现跑）
+
+| 轮 | 叠了什么 | 结果 |
+|---|---|---|
+| **A** | **只**叠主文件 | 🔴 `service/common` 自己的 `DeadlineQueryTimeoutInjectorTest.expiredDeadlineStillInjectsOneSecond:118` **红**（它断言的正是旧行为）⇒ **174 例里只有这 1 例红**<br>⚠️ 因为 `-am` 在 `common` 模块就 BUILD FAILURE ⇒ **favorite 的模块根本没跑到** |
+| **B** | 主文件 + **他们改过的测试**一起叠 | ✅ **全绿**：`service/common` **177 例** · favorite-rpc **99 例** · favorite-api **94 例** · favorite-common **29 例** ⇒ **0 失败 0 错误** |
+
+⇒ 🔴 **给 `global` 的落地提醒**：**主文件与测试改动必须同一次提交落地** ——
+否则仓库是红的（守门没跟着改）⇒ 与 **PIT-FAV-RPC-026**（「改了被测物必须同时改守门」）同型。
+
+### 28.3 三个探针带 overlay 复跑（全部 EXIT=0，冻结值一条没动）
+
+| 探针 | 结果 |
+|---|---|
+| `tools/authority-live-probe/favorite/`（**正是 3s 预算那条路径**） | ✅ **EXIT=0** —— SAME 20 / OBS 0 / SKIP 1（共 21 case）⇒ 与基线**逐条一致** |
+| `tools/api-full-parity-probe/favorite/` | ✅ **EXIT=0** —— SAME 24 / SAME_CODE 1 / SAME_BODY 2 / SAME_STATUS 4 / OBS 1（共 32 case）⇒ **与基线逐条一致** |
+| `tools/grpc-contract-probe/favorite/` | ✅ **EXIT=0** —— 第一轮 36 case + 第二轮 15 case 全 SAME ⇒ **与基线逐条一致** |
+
+⇒ **favorite 域对这次共享层改动：零红、零行为变化、零需改动。**
+
+### 28.4 🔴 纠正一条**过期事实**：「favorite 域台账仍是 0 字节（从未被对照过）」
+
+⇒ **不成立**。favorite 域的 **12 份台账全部非零**，合计 **≈ 430 KB**：
+
+| 文件 | 字节 | 文件 | 字节 |
+|---|---|---|---|
+| `docs/DRIFT/favorite/rpc.md` | **213,799** | `docs/Pitfalls/favorite/rpc.md` | 65,762 |
+| `docs/DRIFT/favorite/api.md` | 48,810 | `docs/Intentional_Deviations/favorite/rpc.md` | 23,481 |
+| `docs/DRIFT/favorite/proto.md` | 15,216 | `docs/Pitfalls/favorite/api.md` | 20,608 |
+| `docs/DRIFT/favorite/common.md` | 10,340 | `docs/Intentional_Deviations/favorite/api.md` | 7,649 |
+| `docs/Intentional_Deviations/favorite/common.md` | 5,205 | `docs/Pitfalls/favorite/common.md` | 4,150 |
+| `docs/Pitfalls/favorite/proto.md` | 4,059 | `docs/Intentional_Deviations/favorite/proto.md` | 1,336 |
+
+⇒ **出处**：根 `AGENTS.md:32` 的域表 —— 那一行是 **2026-10-23 首轮**的快照
+（它自己还标着「⚠️ **2026-10-25 本轮未做**」）。
+⇒ 此后 favorite 域已做了 **19 轮**对照（台账 §0–§28）⇒ **不是「从未对照」**。
+
+⚠️ **但有一层确实没做**（这条我**认**）：
+⇒ 🔴 **「SQL 语句级」的双侧活体对拍**（同一条业务查询，Go 与 RAG 发出的 **SQL 文本 / 参数**是否逐条等价）
+—— 现有证据是**三块拼起来**的，**不是**这一块：
+| 层 | 状态 | 证据 |
+|---|---|---|
+| **DDL 层**（表结构 / 列类型 / 索引 / 约束） | ✅ **已双侧活体对拍** | `tools/ddl-parity-probe/favorite/` |
+| **错误码契约层** | ✅ **已双侧活体对拍** | `tools/errmsg-probe/favorite/`（108 行 sha256 一致） |
+| **事务语义层** | ✅ **已逐条源码对照** | §1 落地形态 + §2 的 D1–D6 + `FavoriteFactWriteService`（`@Transactional` self-invocation 静默失效那条）+ `TransactionTemplate` 显式 commit + `favorite_legacy_preflight.go` 逐行对齐（§16.3） |
+| **SQL 语句层**（语句文本 / 参数 / 锁语义） | 🔴 **未做** | ⇒ **域内可排，尚未排** |
+
+⇒ ⇒ 建议 `global` 把 E47 里那条改写成
+**「favorite 的 SQL 语句层未做双侧活体对拍（DDL 层 / 错误码层 / 事务语义层已闭）」**，
+而不是「favorite 台账 0 字节 / 从未对照」。
+
+### 28.5 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| **favorite 全量测试（带 overlay）** | ✅ **BUILD SUCCESS** —— service/common **177** · favorite-rpc **99**（含 2 skip）· favorite-api **94**（含 1 skip）· favorite-common **29** ⇒ **0 失败 0 错误** |
+| **三个探针（带 overlay）** | ✅ 全部 **EXIT=0**，冻结值**一条没动** |
+| **恢复后** | ✅ `git checkout` 已还原 ⇒ **共享面零改动**；产物已重新出包回到本分支状态 |
+| **产品代码** | ✅ **零改动**（本轮只动台账） |
