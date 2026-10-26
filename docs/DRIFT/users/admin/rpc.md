@@ -1836,6 +1836,13 @@ Required Confirm 是「跑 `exp-difftest-grpc-errors.sh`」。
 > **两侧的有效 deadline 不同：Go = min(客户端, 服务端配置)；RAG = 只有服务端配置。**
 > ⇒ 客户端给一个比服务端更短的 deadline 时，**Go 会在客户端那一刻中止服务端的工作，
 > RAG 不会** —— 它会一直干到自己的 2000ms。
+>
+> 🟢 **⚠️ 2026-10-26：上面这两句描述的是「修前」状态** —— E38 第①层已修
+> （`align/global` @ `d531abd`，已推双远端、待合回）⇒ **RAG 侧现在也是 `min(客户端, 服务端配置)`**
+> ⇒ 「RAG 不会在客户端那一刻停」**已不成立**。
+> ⚠️ **但「中止」与「取消在途工作」是两回事**（详见 §1.3 可观察后果表）：
+> 第①层只让**超时 close 的时刻**对齐（`Δ_start` 会变），
+> **在途 PG 查询随客户端放弃而被取消**那一层（第③层 / E38③ / E46）**仍未做**（`Δ_end` 不变）。
 
 ### 1.2 逐层证据链
 
@@ -1843,11 +1850,48 @@ Required Confirm 是「跑 `exp-difftest-grpc-errors.sh`」。
 |---|---|---|
 | 1 | Go `service/common/observability/rpc.go:38` | `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` —— **`ctx` 是 handler ctx**，gRPC 会把客户端的 `grpc-timeout` 传播进来 |
 | 2 | Go 语言语义 | `context.WithTimeout(parent, d)` 在 parent deadline 已更早时**等价于 parent** ⇒ 有效 deadline = **min(parent, now+d)** = **min(客户端, 服务端)** |
-| 3 | RAG `service/common/observability/RpcInterceptor` —— `deadlineEpochMs` 的计算 | `deadlineEpochMs = System.currentTimeMillis() + timeout.toMillis()` —— **从不读入站 `Context` 上的 deadline** ⇒ 有效 deadline = **只有服务端配置**<br>⚠️ 2026-10-26 起本行与第 4 行**不再写行号**（`service/common` 被 `align/global` 持续改动 ⇒ 行号会漂）⇒ 改引表达式 |
-| 4 | RAG `RpcInterceptor` —— `TIMEOUT_SCHEDULER.schedule(…, timeoutMs, …)` | 到点才 `close(DEADLINE_EXCEEDED)`，同样**不受客户端 deadline 影响** |
+| 3 | RAG `service/common/observability/RpcInterceptor` —— `deadlineEpochMs` 的计算 | **〔修前〕** `deadlineEpochMs = System.currentTimeMillis() + timeout.toMillis()` —— **从不读入站 `Context` 上的 deadline** ⇒ 有效 deadline = **只有服务端配置**<br>🟢 **〔2026-10-26 已变〕** 第①层落地后改为 `effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())` ⇒ **有效 deadline = min(客户端, 服务端)**，与 Go 侧第 1/2 行**同构**<br>⚠️ 本行与第 4 行**不再写行号**（`service/common` 被 `align/global` 持续改动 ⇒ 行号会漂）⇒ 改引表达式；现位置见下方「行号对照」 |
+| 4 | RAG `RpcInterceptor` —— `TIMEOUT_SCHEDULER.schedule(…, timeoutMs, …)` | **〔修前〕** 到点才 `close(DEADLINE_EXCEEDED)`，**不受客户端 deadline 影响**<br>🟢 **〔2026-10-26 已变〕** 调度器延时改用 `effectiveTimeoutMs` ⇒ **close 时刻也随客户端 deadline 前移** |
 | 5 | 配置值 | 两侧**配置相同**：Go 未配 `Timeout` ⇒ go-zero v1.10.2 `zrpc/config.go` 的 `Timeout int64 json:",default=2000"` = **2000ms**；RAG `application.yml:129` `rpc-timeout: 2s` = **2000ms** |
 
 ⇒ **差异不在配置值，在「是否继承」。** 这是本条最容易被误判成「两边都是 2s 所以一样」的地方。
+
+> #### 📌 行号对照（2026-10-26，global 域逐条实测提供 · 本域**只读不改**）
+>
+> `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`
+> 在 `align/global` 上现共 **792 行**。本域旧引用 → 现位置：
+>
+> | 本域旧引用 | 现应指向 | 现内容 |
+> |---|---|---|
+> | `RpcInterceptor.java:162-165`（`rpc.md:558`） | **`:160-166`** | 「超时两层模型」的 javadoc（含「**本拦截器（gRPC 路径）没有第②层**」） |
+> | `RpcInterceptor.java:170-172`（`rpc.md:652` / `:1820` / `:2511`） | **`:234-237`** | `effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())` + `deadlineEpochMs = …` |
+> | `RpcInterceptor.java:184-198`（`rpc.md:1821`） | **`:263-264`** | `long timeoutMs = effectiveTimeoutMs;` + `TIMEOUT_SCHEDULER.schedule(() -> {` |
+> | （E38 第①层新增的取值方法） | **`:592`** | `private static long clientDeadlineRemainingMs()`（从 `io.grpc.Context.current().getDeadline()` 取） |
+>
+> ⚠️ **本域已把这 4 处活引用改成符号名**（见各处的「原写 …，2026-10-26 改为符号名」留痕）
+> ⇒ 上表是**给后人的定位辅助**，不是本域的活引用 ⇒ **行号仍会随 `align/global` 后续提交漂移**
+> ⇒ **判据不变：共享层一律引符号名**（AGENTS.md §3.1：证据指向**消费点**）。
+>
+> #### 📌 精确 commit SHA（便于「合回后」逐条销账）
+>
+> | 条目 | commit | 状态 |
+> |---|---|---|
+> | **E30**（RPC 超时的 status description ⇒ Go 的 `context deadline exceeded`） | `49808ad` + `22a9111` | ✅ 已推 origin + upstream，**待合回** |
+> | **E38 第①层**（超时有效期限 ⇒ `min(客户端 deadline, 服务端 timeout)`） | `d531abd` | ✅ 已推 origin + upstream，**待合回** |
+> | **第三十二轮**（共享复核工具 `tools/check-ledger-selfcheck.py` 三处缺陷） | `bb680a3` | ✅ 已推 origin + upstream |
+
+> #### ⚠️ C-1：遥测侧的 **gRPC code 名表示**两侧不同（**已登记的表述差异，不要去「修」**）
+>
+> | | 码名 |
+> |---|---|
+> | Go | `codes.Code.String()` ⇒ **`DeadlineExceeded`**（CamelCase） |
+> | RAG | grpc-java 的 `Code.name()` ⇒ **`DEADLINE_EXCEEDED`**（全大写下划线） |
+>
+> - code 与 desc **均已保留**，**仅常量表示不同** ⇒ 已登记为 **C-1**
+>   （`docs/Intentional_Deviations/common/_signed-deviations.md` · C 类）⇒ 明确「**不做臆造映射**」。
+> - ⚠️ **不要为了对齐它去改 grpc-java 的命名** ⇒ 那是框架 API，改不了也不该改。
+> - ⇒ **本表上文所有 `DEADLINE_EXCEEDED` 字样都是 grpc-java 的码名**；
+>   与 Go 侧的 `DeadlineExceeded` 指**同一个 code** ⇒ **不是漂移**。
 
 ### 1.3 可观察后果
 
@@ -1856,8 +1900,8 @@ Required Confirm 是「跑 `exp-difftest-grpc-errors.sh`」。
 | | Go | RAG |
 |---|---|---|
 | **客户端看到** | `DEADLINE_EXCEEDED` @~100ms | `DEADLINE_EXCEEDED` @~100ms（**gRPC 库替客户端兜的，与本条无关**） |
-| **服务端 handler** | ctx 在 100ms 即 Done ⇒ **任何 ctx-aware 操作（SQL / 下游 RPC）中止**，在途查询被取消 | **继续跑到 2000ms** |
-| **副作用** | 100ms 之后的写**不发生** | 100ms 之后的写**照样落库** —— 客户端看到失败，数据却变了 |
+| **服务端 handler** | ctx 在 100ms 即 Done ⇒ **任何 ctx-aware 操作（SQL / 下游 RPC）中止**，在途查询被取消 | **〔修前〕继续跑到 2000ms**<br>🟢 **〔第①层已修〕超时 close 时刻 = min ⇒ 100ms 即 close**（`Δ_start` 会变）<br>🔴 **〔仍未修〕但 close ≠ 取消在途工作** —— `ServerCall.close()` **不取消业务线程** ⇒ **handler 线程仍跑完** |
+| **副作用** | 100ms 之后的写**不发生** | **〔修前〕100ms 之后的写照样落库**<br>🔴 **〔第①层后仍成立〕** 在途 PG 查询**仍会跑完** ⇒ 写**仍可能落库** —— 客户端看到失败，数据却变了<br>⇒ ⚠️ 修的是「**何时 close**」，不是「**在途工作会不会跑完**」 ⇒ **别把第①层当成这条销账** |
 
 ⇒ **分类：`SEMANTIC MISMATCH`，Risk MEDIUM**（属于「客户端已放弃但服务端仍提交副作用」，
 与本仓 B-1 那轮超时取消工作是同族问题）。
@@ -2828,6 +2872,36 @@ grpc-java 侧读了 `grpc-core-1.63.0` 的 `io/grpc/internal/ServerImpl.java` �
 | 8 条 ARPC + 3 条 H-* | ✅ 复核通过（H-2 的 `.last("FOR UPDATE")` 在 **119** 行，台账原文 `116-120` **范围正确**） |
 | 跨分支影响 | ⚠️ `align/message` 改了 `AdminRpcApplication.java`（本条）+ `HttpMiddleware.java`（见 `api.md` 的 ADMINAPI-007）；`align/users-user` 改了 `JwtUtil.java`（**N-5 的 padding 未变**，结论仍成立，但签名档引用的代码已变 ⇒ 合并后应复核一次） |
 
-## 3. 本轮改动清单（rpc.md 侧）
+## 3. 🔴 2026-10-26 补：共享复核工具 `tools/check-ledger-selfcheck.py` 对本域的效果（**只有第 1 层有效**）
+
+**核对日期**：2026-10-26　**工具版本**：`align/global` @ `bb680a3`（第三十二轮，N8~N13 六条去噪）
+（⚠️ 该工具改动**尚未合回主仓** ⇒ 主仓上的版本**无** N8~N13）
+
+### 3.1 第 1 层：缺失 **33 → 0**（✅ 属实，已独立对照验证）
+
+用 `--domain users-admin` 跑，本域三个台账文件（`api.md` / `rpc.md` / `_shared.md`）：
+
+| 工具版本 | 台账引用路径 | 缺失 | 说明 |
+|---|---|---|---|
+| 主仓版（无 N8~N13） | 75 个 | **33 个** | **全是误报** —— N8 省略写法（`...`）、N9 裸文件名、N10 短路径 |
+| `bb680a3` 版（N8~N13） | 75 个 | **0 个** | 33 条**全部去噪**（不计 FAIL） |
+
+⇒ global 说的「**第 1 层从 33 条缺失 → 0**」**属实** ✅（我做了新旧两版对照，不是只看新版的输出）。
+
+### 3.2 ⚠️ 但**第 2/3/4 层对非 `task` 域是误报或零信息量** ⇒ 不能当本域健康度结论
+
+| 层 | 对 `users-admin` 的输出 | 判定 |
+|---|---|---|
+| 第 2 层「已修断言 → 仓库里查得到对应物」 | 断言清单写的是 **`DRIFT-TASK-RPC-001/002/005/006`** 等 | ❌ **误报** —— 判据**硬编码 task 域的编号前缀**（`tools/check-ledger-selfcheck.py:86-95`）⇒ 与本域无关 |
+| 第 3 层「数字断言（实测 vs 台账）」 | 报「**commit 清单有 50 处缺陷**」 | ❌ **误报** —— 判据认的是 task 域的 `DRIFT-TASK-RPC-` / `PITFALL-TASK-RPC-` 编号与「commit 清单表」格式（`:624-658`）⇒ **本域台账是 append 式章节、根本没有那种表** |
+| 第 4 层「Go 侧 file:line 是否悬空」 | 「引用不悬空: **0 条**」+ 已去噪 **201 条** | ⚠️ **零信息量** —— 201 条全被 N7（「台账已自陈并记档」）去噪 ⇒ 这个「0」**不代表没有悬空引用** |
+
+⇒ ⚠️ **结论**：**该工具目前只对 `task` 域做了完整实现**；
+对 `users-admin` 域**只有第 0/1 层可用**（第 0 层是工具自检，第 1 层是路径存在性），
+**第 2/3/4 层跑出来的数字不要当本域台账的健康度结论** ——
+尤其别把「50 处缺陷」当成本域台账有 50 个问题（**全是工具的任务域判据套错了域**）。
+⇒ 工具在 `tools/`（**共享资产**），**不在本域写权内** ⇒ 本域**只报告、不改**。
+
+## 4. 本轮改动清单（rpc.md 侧）
 
 - **零代码改动** ⇒ 不需要重跑测试门禁（上次全量门禁：admin-rpc **99/0/0/0**、`skipped=0`）。
