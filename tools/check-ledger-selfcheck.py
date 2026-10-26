@@ -69,6 +69,16 @@ LEDGER_FILES = {
         'docs/DRIFT/users/admin/rpc.md',
         'docs/DRIFT/users/admin/_shared.md',
     ],
+    # ⚠️ comment 域**刻意不加**（2026-10-26 实测后决定，不加）：
+    #   ① global 域第四十八轮给本脚本加的 `--entity-all` 模式已扫 `docs/**/*.md`
+    #      ⇒ **本来就覆盖** `docs/FileTree/comment/*`（2026-10-26 那两条塌陷就是它扫出来的）
+    #      ⇒ 再登记进 LEDGER_FILES 是**重复覆盖**；
+    #   ② 本脚本**对 comment 域结构不适配**（实测 `--domain comment` ⇒ **64 处假阳性**）：
+    #      层 3 找 commit 清单依赖 `align/comment` 分支（该分支已合入并删除）⇒ 45 处；
+    #      层 1 按字面路径找，认不了台账里的省略路径（`...`）与简写路径 ⇒ 13 处；
+    #      层 2/5/6 硬编码 task 域 ⇒ 与本域无关。
+    #   ⇒ 加进去 = 把守门变成**假红噪音源**（§3.3「守门不能是错误答案的守卫」）。
+    #   ⇒ 需要扫本域时用：python3 tools/check-ledger-selfcheck.py --entity-all
 }
 
 # 第三方库：版本取自**真源 go.mod**（不是本地碰巧有的版本）
