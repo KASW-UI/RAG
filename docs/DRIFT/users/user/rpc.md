@@ -1489,7 +1489,7 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | **DRIFT-USERRPC-V-006** | `id` 的取值来源（Go `bigserial` 序列 vs RAG `IdType.ASSIGN_ID` 雪花） | ✅ **已关闭**（第四轮，真 PG 实证：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；**永不进 wire**） | ⚠️ 本行此前写「仍成立」，是**过期状态**（第四轮已关，第六轮复核才发现汇总表没同步） |
 | **DRIFT-USERRPC-V-007** | 超时的 gRPC `description` 不同（`service/common` 组件） | ✅ **已销账（2026-10-26）** | 由 **`global` 域**修完（落点 `service/common/.../RpcInterceptor.java` 的 `GO_DEADLINE_EXCEEDED_DESCRIPTION`；守门 `RpcInterceptorTimeoutDescriptionGateTest`；探针 `tools/semantic-probe/rpc-timeout/`）⇒ 两侧 description 逐字一致。⚠️ 修前状态保留在 §7 V-007 小节 |
 | **DRIFT-USERRPC-V-008** | 死代码 + **伪出处**（3 个异常类 + 2 个 mapper 方法） | ✅ **已修**（`fa2de52`） | 第四轮 §2 已删；且**伪出处是两个，不是一个**（`PasswordMismatchException` 声称的 `ALREADY_EXISTS` 在 Go 恰好相反）。⚠️ 本行此前仍写「仍成立」，属台账脱节，本轮复核更正 |
-| **DRIFT-USERRPC-V-012（新 · 2026-10-26）** | **超时时的业务日志错误归因**：RAG 记「Redis 写入异常」而客户端收到「超时」；Go 两侧一致 | 🔴 **新发现（观测面，非 wire 面）** | 三形态 × 双侧 gRPC 直连实测发现：**RAG 的 Redis 写没绑 gRPC deadline**（只在入口调 `checkDeadline()`）⇒ 在途写跑满自己的 3s command timeout ⇒ 记成 `INTERNAL`；而客户端早在 2s 就收到拦截器发的 `DEADLINE_EXCEEDED` ⇒ **日志与客户端所见不一致**（Go 的 `SetexCtx(l.ctx,…)` 绑了 ctx ⇒ 一致）。⚠️ **本轮不动**：修法要先定口径（ctx 取消 vs 补一次 deadline 检查），且与 `global` 域 **E38 第②层**（在途查询不随客户端放弃而取消）同型 ⇒ 宜与 global/admin 域一起定 |
+| **DRIFT-USERRPC-V-012（新 · 2026-10-26）** | **超时时的业务日志错误归因**：RAG 记「Redis 写入异常」而客户端收到「超时」；Go 两侧一致 | 🔴 **新发现（观测面，非 wire 面）** | 三形态 × 双侧 gRPC 直连实测发现（**wire 面两侧一致**：都是 `INTERNAL` + 同一句）：<br>① **RAG 把原始异常整个吞掉**（`catch (Exception e)` 里既没 log 也没挂 cause ⇒ 实测 `cause=null`）⇒ 底层 Lettuce 异常在日志里看不见；<br>② **B-1 守卫只挡 SQL 路径**（Redis 抛 `QueryTimeoutException` / `RedisConnectionFailureException`，**都不是** gRPC 的 `StatusRuntimeException` ⇒ 守卫永不命中）；<br>③ RAG 的 Redis 写**不绑** gRPC deadline ⇒ 在途写跑满 3s（客户端 2s 已收 `DEADLINE_EXCEEDED`）⇒ 解释「日志晚 1s」。<br>⚠️ **修法不能改 status/description**（会与 Go 不一致）⇒ 只能在 `catch (Exception e)` 里**补一行把原始异常记进日志**（与 admin 域写法对齐）⇒ 域内一行可闭环。<br>⚠️ 与 `global` 域 **E38 第②层**同型；**admin 域已独立确认并登记 `DRIFT-ARPC-010`** ⇒ **三域口径宜一起定** |
 | **UNRESOLVED-USERRPC-004 ②** | 启动期 Redis 不可用：Go `MustNewRedis` fail-fast vs RAG 懒连接 | ✅ **已闭环（2026-10-24，§9.3）** —— **原推断被活体实验证伪**：go-zero `RedisConf.NonBlock` 的 struct tag 默认 `true` ⇒ `MustNewRedis` **不做连接检查** ⇒ **两侧都启动成功** ⇒ **无差异** | 本轮做了「把两侧 Redis 都指到死端口再起进程」的注入实验（`tools/difftest/exp-difftest-redis-failfast.sh`） |
 | **UNRESOLVED-USERRPC-005** | `users_user` 建表责任交叉（user-rpc ↔ admin-rpc） | ✅ **已闭环（2026-10-24，§9.2）** —— 双侧对称并发启动实测：两侧都能起来、表都建齐、0 致命错误 | ⚠️ 本行此前写「仍 unresolved」，是**过期状态**（第六轮已关，第七轮复核才发现汇总表没同步）。⇒ **机制不同**（Go 靠 `HasTable` 的时序侥幸 / RAG 靠 advisory lock）**但可观察结果一致** |
 
@@ -1804,21 +1804,53 @@ api 侧有 3s HTTP 预算：RAG 的**黑名单查询**自己就要 ~3s ⇒ 请�
 | **业务日志的失败原因** | `business_error` · `error_reason = "context deadline exceeded"` · `file_line = logoutlogic.go:39` | `ERROR … logout RPC failed: Status{code=INTERNAL, description=注销失败,Redis写入异常}` |
 | 一致性 | ✅ **日志与客户端所见一致** | ❌ **日志说「Redis 写入异常」，客户端看到的却是「超时」** |
 
-**根因（已定位到行）**：
+**根因（已定位到行，并经异常继承链 + 实测日志双重核实）**：
 - Go：`SetexCtx(l.ctx, …)` —— **ctx 带 deadline** ⇒ go-redis **在 2s 取消在途命令** ⇒ handler 立刻返回 ctx 错误 ⇒ 日志与客户端一致。
-- RAG：`UserDomainService.logout` **只在入口**调 `checkDeadline()`（`UserDomainService.java:764`），**Redis 写本身没有被 deadline 绑定**
-  ⇒ `bizRedis.opsForValue().set(...)` 一路跑到自己的 **3s command timeout** 才失败
-  ⇒ 落进 `catch (Exception e)` ⇒ 记成 `INTERNAL`「注销失败,Redis写入异常」
-  ⇒ 而客户端早在 **2s** 就收到了拦截器发的 `DEADLINE_EXCEEDED`（`RpcInterceptor` 的超时调度器 `call.close(DEADLINE_EXCEEDED, …)`，业务线程**不中断**）。
-  ⇒ ⚠️ RAG 日志里那两行 `INTERNAL` 的时间戳（3s 处）**晚于**客户端收到 `DEADLINE_EXCEEDED`（2s 处）—— 实测日志已证实这一点。
+  ⚠️ 且 Go **把原始 err 记进了日志**：`logger.LogBusinessErr(l.ctx, errmsg.ErrorRedisUpdate, err)`（`logoutlogic.go:39`）
+  ⇒ 实测日志原文就是 `"error_reason":"context deadline exceeded"` ⇒ **「为什么是超时」这个信息被保留下来了**。
+- RAG：`UserDomainService.logout` 的 catch 链是
+  ```java
+  } catch (StatusRuntimeException e) {   // ← B-1 守卫：只挡 SQL 路径
+      throw e;
+  } catch (Exception e) {
+      throw Status.INTERNAL.withDescription("注销失败,Redis写入异常").asRuntimeException();
+      //                                     ↑ 原始异常 e 被整个吞掉：既没 log，也没挂成 cause
+  }
+  ```
+  ⇒ **三条并存的事实**：
+  1. **原始异常被丢弃** —— `asRuntimeException()` 造出的 `StatusRuntimeException` **cause=null**
+     ⇒ 实测日志原文就是 `Status{code=INTERNAL, description=注销失败,Redis写入异常, cause=null}`
+     ⇒ **底层 Lettuce 异常在日志里完全看不见** ⇒ 排障只看到「Redis 写入异常」，看不到「其实是超时」。
+     ⚠️ **与 admin 域写法不齐** —— admin 侧 `AdminDomainService.logout` 有 `log.error("admin logout Redis setex failed", e)` ⇒ **原始异常进了日志**。
+  2. **B-1 守卫只挡 SQL 路径** —— 守卫靠 `catch (StatusRuntimeException)`（**gRPC 的那个**）识别「已被翻译成 DEADLINE_EXCEEDED 的错误」，
+     而 **Redis 侧抛的是 Spring Data 的普通异常**，继承链实测（`javap` 读 class 文件）：
+     - 命令超时 ⇒ `org.springframework.dao.QueryTimeoutException` → `TransientDataAccessException` → `DataAccessException` → `RuntimeException`（`spring-tx-7.0.9`）
+     - 连接失败 ⇒ `org.springframework.data.redis.RedisConnectionFailureException` → `DataAccessResourceFailureException`（`spring-data-redis-4.0.7`）
+     ⇒ **两者都不是 `io.grpc.StatusRuntimeException`** ⇒ **守卫永远不命中** ⇒ Redis 路径**一直**落在 `catch (Exception)` 里被改写成 INTERNAL。
+     （SQL 路径之所以能命中：PG `57014` 经 `SqlTimeoutStatusTranslator` 翻成 gRPC 的 `StatusRuntimeException` ⇒ 守卫拦得住。）
+  3. **RAG 的 Redis 写不绑 gRPC deadline** —— `checkDeadline()` **只在入口**调（`UserDomainService.java:764`），
+     在途写一路跑到自己的 **3s command timeout** 才失败 ⇒ 而客户端早在 **2s** 就收到了拦截器发的 `DEADLINE_EXCEEDED`
+     （`RpcInterceptor` 的超时调度器 `call.close(DEADLINE_EXCEEDED, …)`，业务线程**不中断**）
+     ⇒ ⇒ 这解释了「**服务端日志比客户端晚 1s**」（实测日志里 RAG 那两行 `INTERNAL` 的时间戳在 3s 处）。
 
-- **Classification**: **OBSERVABLE DIFFERENCE**（**观测面**：应用日志 / 排障归因；**wire 面两侧一致**）
-- **Observable Impact**: 运维排障会被**指向错误方向**（日志说「Redis 写入异常」⇒ 去查 Redis；实际是**超时**）；日志告警口径也会把超时误计成业务写失败。
+- **Classification**: **OBSERVABLE DIFFERENCE**（**观测面**：应用日志的错误归因；**wire 面两侧完全一致** —— 都是 `INTERNAL` + 同一句「注销失败,Redis写入异常」）
+- **Observable Impact**: 运维排障会被**指向错误方向**（日志说「Redis 写入异常」⇒ 去查 Redis 基础设施；实际是**超时**）；日志告警口径也会把超时误计成业务写失败。
+  ⚠️ **wire 面无影响** ⇒ 修法**不能改 status / description**（改了反而与 Go 不一致）⇒ **只能加可观测性**。
 - **归属**：**本组件内**（user-rpc 的注销路径）⇒ 修法**可以只落在 user-rpc** ⇒ **不跨域**。
+- **🛠 候选修法（域内一行 · 不改 wire）**：在 `catch (Exception e)` 里把原始异常记进日志，与 admin 域写法对齐
+  ```java
+  } catch (Exception e) {
+      logger.logBusinessErr(otelCtx, ErrorCode.ERROR_DB_SELECT.getCode(), e);   // ← 补：原始异常进日志
+      throw Status.INTERNAL.withDescription("注销失败,Redis写入异常").asRuntimeException();
+  }
+  ```
+  ⇒ **status 与 description 一个字都不改**（仍与 Go 逐字一致）⇒ 纯增可观测性 ⇒ 排障时能看到「其实是超时」。
+  ⚠️ **本轮不动**（修法口径未定，且要与 admin 域写法对齐后再一起落）。
 - **与 E38 第②层的关系**：`global` 域的 **E38 第①层**（`d531abd`）做的是「服务端超时期限 = min(服务端预算, 客户端 deadline)」；
   **第②层（「在途查询随客户端放弃而取消」）global 明确未做**，且其 `UNRESOLVED-ARPC-002` 编号属 **users/admin 域**。
   ⇒ **本条是 E38 第②层在 Redis 写路径上的同型实例**（在途命令不随 deadline 取消）⇒ 记录此关联，供 global 与 admin 域对照。
-  ⇒ ⚠️ **本轮不动它**（修法涉及「让 Redis 写可取消」，需要先定口径：是用 ctx 取消，还是在 `checkDeadline()` 之后补一次检查）。
+  ⇒ ⚠️ **admin 域已于 2026-10-26 独立确认同型并登记为 `DRIFT-ARPC-010`**（提交 `c09fa45`，分支 `align/users-admin`）⇒ **三域口径应一起定**（global / users-user / users-admin），
+  ⇒ 且 admin 域已提醒：**「修 E38② 时顺带覆盖 Redis 路径才是正解，否则只修一半」**。
 
 ### 复现入口（本轮新增）
 

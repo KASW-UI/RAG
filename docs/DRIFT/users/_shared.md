@@ -919,21 +919,36 @@ RAG 曾用 `if (!any) return 0;` 把它挡掉了。修复后双侧实测：空 b
   这与 `users_user_avatar_history.create_time`（纯展示型）**风险等级不同**。
 - ⇒ **裁决点**：admin 侧需单独评估这两张表，本轮只登记。
 
-#### ADJ-03 ⚠️ `users_user` 建表责任交叉（`user-rpc` ↔ `admin-rpc`）仍未在当前代码上复跑
+#### ~~ADJ-03~~ ✅ **已闭环（2026-10-26 订正）** —— `users_user` 建表责任交叉（`user-rpc` ↔ `admin-rpc`）**已在当前代码上复跑过**
+
+> ⚠️ **本节原文（2026-10-24）写的是「仍未在当前代码上复跑 / 仍 unresolved」—— 那是过期状态。**
+> ⇒ 原文保留供追溯，订正见下。
 
 - `users_user` 由**两个组件共同建表**，共用 `users-common` 的同一份 DDL
   （两边各有 `UserSchemaBootstrap` / `AdminSchemaBootstrap` 幂等重放）。
-- 本轮验证的是「**各自单跑**能重放成功」；
-  **「两套栈并发跑同一张表」在本轮代码上没有复跑过** ⇒
-  AGENTS.md §6.3 问题 1 记录的「建表责任交叉」**仍 unresolved**。
-- ⇒ **裁决点**：需要一轮双栈并发验证，**归属跨界**，本轮不做。
+- **✅ 已复跑**：**2026-10-23 第五轮 §4** 做了**双侧对称并发启动实测**（两个 rpc 同时对同一个**空库**启动，共 **9 轮**），
+  **2026-10-24 独立复现**，结论逐条一致。
+  - 两侧**都能起来**、表**都建齐**、**0 致命错误** ⇒ **OBSERVABLE EQUIVALENT**（可观察结果一致）。
+  - ⚠️ **但机制不同，务必别读成「机制也等价」**：
+    **RAG 侧**靠 advisory lock **机制性**串行（同一把锁，两个进程严格错开）；
+    **Go 侧** GORM `AutoMigrate` 是 check-then-act ⇒ **机制上仍有竞态窗口** ⇒ **实测未撞 ≠ 机制保证**。
+  - ⇒ 证据：`docs/DRIFT/users/user/rpc.md` 的 **§9.2** 与 **§4「建表责任交叉」行**。
+- ⇒ **admin 域**（2026-10-26）已在 `docs/DRIFT/users/admin/_shared.md` §5 加 **U-8 只读指针**指向该结论
+  （admin 不写域级共享文件 ⇒ 由 users 域级 owner 落原文订正 ⇒ 即本节）。
+- ⚠️ **残留**：Go 侧那个**机制性**竞态窗口本身**未被消除**（只是当前不可观察）⇒ 若将来要消除，那是**另一个议题**（改 Go 侧建表机制 ⇒ 真源冻结 ⇒ 不可改 ⇒ 只能靠 RAG 侧锁 + 部署纪律）。
 
-#### ADJ-04 ⚠️ `users_user.status` 的 **V-011（DEFAULT `CURRENT_TIMESTAMP`）** 对 admin 写入路径的影响未评估
+#### ~~ADJ-04~~ ✅ **已答（2026-10-26，admin 域回信）** —— admin 侧**不存在**依赖 DEFAULT 的 INSERT
 
 - RAG 的 `users_user` 时间列有 `DEFAULT CURRENT_TIMESTAMP`，Go 无。
-- user 半边两侧都显式写该列 ⇒ **不可观察**；
-  但 **admin 侧的写入路径若依赖 DEFAULT**（例如只写部分列的 INSERT），差异就会显现。
-- ⇒ **裁决点**：需 admin 侧确认其 INSERT 是否总是显式带时间列；本轮只登记。
+- user 半边两侧都显式写该列 ⇒ **不可观察**。
+- **✅ admin 域已答**（证据在其 `admin/_shared.md` §5 的 **U-7**）：
+  **admin-rpc 对 `users_user` 零 INSERT** —— 只有 UPDATE / DELETE
+  （`userMapper.update(null, wrapper)` ×4 + `userMapper.delete(...)` ×1；全模块 `userMapper.insert` **零命中**）
+  ⇒ **不依赖 `users_user` 的 `DEFAULT CURRENT_TIMESTAMP`** ⇒ **该差异对 admin 侧不显现** ✅ ⇒ **本条关闭**。
+- ⚠️ **但同一机制在 admin 自己的两张表上成立** —— admin 域已顺带查出 **`DRIFT-ARPC-001` 有一个范围缺口**并自行登记：
+  该条标题写「`update_time` 永不推进（**所有写路径**）」，但那 6 条**全是 UPDATE**；
+  **INSERT 路径的 `create_time` 不在范围内**（Go 靠 GORM `autoCreateTime` 应用层填 / RAG 靠 DB 层 DEFAULT ⇒ 两侧都有值 ⇒ 实际不可观察）
+  ⇒ ⇒ **修 `DRIFT-ARPC-001` 时不要顺手改 INSERT 路径，也别以为该条被修就等于 `create_time` 也被证明了**。
 
 ### 6. 本轮**没有**做的事（诚实边界）
 
@@ -986,7 +1001,8 @@ AGENTS.md §9 / §8 / §0 三处都写着「**过期状态必须随实测同步�
 |---|---|---|---|
 | **1** | `docs/DRIFT/users/user/api.md` 第八轮 MaxBytes 表写「真容器由 `tools/difftest/check-protection-layer.sh` 守」—— **该脚本在仓内不存在** | 🔴 **台账事实错误** | ✅ 已更正（见下） |
 | **2** | `rpc.md:1282` / `rpc.md:1477` / `_shared.md:889` 引用的守门类 **`UserRpcJsonbAndAvatarProjectionTest`** —— 该类**已改名为 `UserRpcJsonTextAndAvatarProjectionTest`**（真源：`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/service/UserRpcJsonTextAndAvatarProjectionTest.java`） | 🔴 **守门清单指向不存在的类** | ✅ 三处已改新名 |
-| **3** | 同上改名**未同步到 admin 域**：`docs/DRIFT/users/admin/rpc.md:372,382` 仍用旧名 | ⚠️ **跨域** | ⏳ **本轮未改**（§5.3：只写自己域的文件）⇒ **提醒 admin 会话** |
+| **3** | 同上改名**未同步到 admin 域**：`docs/DRIFT/users/admin/rpc.md:372,382` 仍用旧名 | ⚠️ **跨域** | ✅ **admin 域已于 2026-10-26 改完**（提交 `c09fa45`，分支 `align/users-admin`：`admin/rpc.md:372,382` + `admin/rpc.md` 的 Pitfalls `:78,:92` 共 4 处）⇒ 本条关闭 |
+| **4** | ⚠️ **`.xml` 报告名**（`UserRpcJsonbAndAvatarProjectionTest.xml`）**不是类名引用**，是**历史 surefire 报告文件名**（Oct 23 的真实产物、已成孤儿） | ✅ **不是缺陷** | ✅ **保持原样，勿「顺手统一」** —— 改了反而失真（报告文件名就是当时那次的真实名字）。<br>本域的 2 处（`users/user/api.md` 的「Oct 23 的旧报告」+ `Pitfalls/users/_shared.md` 的「上一轮遗留旧报告」）**已确认为报告名、保留**；admin 域同样保留。<br>⇒ **约定**：**类名引用**改新名，**`.xml` 报告名**保留原样。 |
 
 **另新查出 1 个覆盖缺口**（复核的副产品）：
 
