@@ -37,6 +37,16 @@
 
 ## 2. 9 条机制面轴 · 本域侧逐轴结论（**lane 的交付主体** · 核对日期 **2026-10-27**）
 
+> 📌 **本轴的取证方式（与另三域不同，留痕备查）** —— hot 域的取证子任务**两次都因 TPM 限流失败**
+> （首次 `rate limit exceeded(TPM) (1039)`；重派后长时间零输出 ⇒ 已取消）⇒ **本表的 hot 结论全部由主会话逐条独立复核**，未采信任何子任务输出。
+> 复核命令与结果（核对日期 **2026-10-27**）：
+> | 断言 | 复核方式 | 结果 |
+> |---|---|---|
+> | **A7** proto 行为层零差异 | `diff <(Go 侧 hot.proto 过滤 option/package/注释/空行) <(RAG 侧同名过滤)` | ✅ **零差异**（diff 无输出） |
+> | **A9** Go 侧 hot 域无业务 span | `grep -rn "otel.Tracer" / "spanBuilder" $GO_REPO/service/hot` | ✅ **各 0 命中**（只有 `server.Start()` / `serviceGroup.Start()` 误匹配） |
+> | **A8** hot-rpc 无库 | `grep -n flyway hot-rpc/.../application.yml` ＋ `ls -d hot-rpc/src/main/resources/db/migration` | ✅ **flyway 行数 0** ＋ **迁移目录不存在** |
+> | **A2** hot-rpc 不扫 `com.rag.common` | `grep -n "@SpringBootApplication" HotRpcApplication.java` | ✅ **第 61 行是裸 `@SpringBootApplication`**（无 `scanBasePackages`） |
+
 | 轴 | 机制 | 本域侧的落点 / 调用 | 结论 | 证据强度 | 核对日期 |
 |---|---|---|---|---|---|
 | **A1** | 超时 / deadline | 服务端：`hot-rpc/.../application.yml:138` `observability.rpc-timeout: 2s` ＋ `HotRpcApplication.java:105-108`（`server.intercept(GoStyleRpcProtectionChain.build(...))`）；消费点 `service/common/.../spring/RpcServerInterceptorFactory.java:75-82`；api→rpc 出向：`hot-api/.../client/GoStyleGrpcCallDeadline.java:60-63`（`min(2000ms, 剩余预算)`）＋ `client/ArticleRpcClient.java` | ✅ **一致** —— Go `service/hot/rpc/etc/hot.yaml` **未配 `Timeout`** ⇒ 走 go-zero default **2000ms**（`zrpc/config.go:46`）⇒ 两侧同为 **2s**；Go 侧 `hot/rpc/hot.go:32` `DisableNativeRpcTimeout` ＋ `:42` `AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, observability.SlowThreshold()))` ⇒ **超时唯一执行者**，RAG 侧同构（`rpcInterceptorConfigurer` → `server.intercept(...)`）。<br>ℹ️ **出向 gRPC 口径**：Go `context.WithTimeout` 的「取父子较早者」语义 ≡ RAG 的 `min(2000ms, 剩余预算)`（`GoStyleGrpcCallDeadline.java:60-63`；⚠️ 预算耗尽时给 **1ms** 而非原样返回，对应 Go ctx 到期即失败）。<br>ℹ️ **`hot-rpc` 无出向 gRPC 调用**（import 面实测：`service/hot/hot-rpc/**` **无 client 类** ⇒ 该域只消费 Kafka ＋ 写 Redis）⇒ rpc 侧出向维度 **N/A** | **L3**（Go 侧 L1 逐行对照 ＋ RAG 侧装配面扫描；未起进程） | 2026-10-27 |
