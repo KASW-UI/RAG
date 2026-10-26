@@ -667,7 +667,7 @@ Required Confirm: 用 exp-difftest-grpc-errors.sh 对同一用例分别用 100ms
 >
 > | | 状态 |
 > |---|---|
-> | **档位 B 的 desc 文案**（Go `context deadline exceeded` vs RAG `rpc timeout after 2000ms`） | ✅ **已由 `align/global` 修掉**（`RpcInterceptor` 换用 `GO_DEADLINE_EXCEEDED_DESCRIPTION = "context deadline exceeded"`；配套真 Netty 守门 `RpcInterceptorTimeoutDescriptionGateTest` + `tools/semantic-probe/rpc-timeout/` 双侧活体探针）<br>**状态（2026-10-26 实查）**：修复**已提交**（`align/global` = `22a9111`，含 `49808ad` 主改动 + `22a9111` 台账订正），且**已推 `origin` + `upstream` 双远端**（三处 ref 指向一致，实查过）⇒ **不会再丢**。<br>⚠️ **但尚未合回 `do-my-own-gh`** ⇒ 本条在本域台账里**仍记「待合回」**，**合回后才改成「已销账」** |
+> | **档位 B 的 desc 文案**（Go `context deadline exceeded` vs RAG `rpc timeout after 2000ms`） | ✅ **已由 `align/global` 修掉**（`RpcInterceptor` 换用 `GO_DEADLINE_EXCEEDED_DESCRIPTION = "context deadline exceeded"`；配套真 Netty 守门 `RpcInterceptorTimeoutDescriptionGateTest` + `tools/semantic-probe/rpc-timeout/` 双侧活体探针）<br>**状态（2026-10-26 实查）**：修复**已提交**（`align/global` = `22a9111`，含 `49808ad` 主改动 + `22a9111` 台账订正），且**已推 `origin` + `upstream` 双远端**（三处 ref 指向一致，实查过）⇒ **不会再丢**。<br>⚠️ **但尚未合回 `do-my-own-gh`** ⇒ 本条在本域台账里**仍记「待合回」**，**合回后才改成「已销账」**。<br>📌 **合回与否已拍板（2026-10-26，用户 Jason）：暂不合回**（`align/global` 与 `align/favorite` 都暂不并入主仓）⇒ 维持「待合回」**不是「忘了合」** |
 > | **本条本体**（服务端 2s **不继承**客户端 deadline ⇒ 档位 A 的 `Δ_end = +1111ms` 资源占用） | ❌ **未销** —— `RpcInterceptor` 的 deadline 仍是 `System.currentTimeMillis() + timeout.toMillis()`（**服务端自己的 2s**），**没有**取 `min(客户端 deadline, 服务端 2s)` ⇒ **CONFIRMED SEMANTIC MISMATCH 定性不变**<br>⇒ 已由 global 登记为 **E38**（`docs/DRIFT/global/_README.md` §七之五，**A 类 backlog**，落点在 global 写权内 ⇒ 不需拍板） |
 >
 > ⇒ **修文案 ≠ 修继承**：改完后**档位 A 的 `Δ_end` 仍是 +1111ms**。
@@ -2517,7 +2517,10 @@ javadoc 里记了改名理由与 Go 出处）。
 >   ＋ 双侧活体探针 `tools/semantic-probe/rpc-timeout/`（Go 半边 `replace` 引用冻结仓真源，不改冻结仓一字节）。
 > - **状态（2026-10-26 实查）**：`align/global` = `22a9111`（含 `49808ad` 主改动 + `22a9111` 台账订正），
 >   `align/global` / `origin/align/global` / `upstream/align/global` **三处指向一致** ⇒ 修复**已提交、已推双远端**。
->   ⚠️ **尚未合回 `do-my-own-gh`**（待 Jason 拍板）⇒ **本表仍记「待合回」，合回后才改成「已销账」**。
+>   ⚠️ **尚未合回 `do-my-own-gh`** ⇒ **本表仍记「待合回」，合回后才改成「已销账」**。
+> - 📌 **合回与否已拍板（2026-10-26，用户 Jason）**：**暂不合回**（`align/global` 与 `align/favorite` **都暂不并入**主仓）
+>   ⇒ **本条维持「待合回」状态，不是「忘了合」** ⇒ 将来若合回，再把措辞改成「已销账」；
+>   在合回之前，**主仓代码仍是旧串**（`RpcInterceptor` 的超时 description 尚未生效）。
 > - ⚠️ **本条只销「档位 B 的 desc」这一格**，**不销 ARPC-002 的本体** —— 见下方「⚠️ 必须一起读」。
 >
 > **⚠️ 必须一起读：global 修的是「description 文案」，ARPC-002 的本体（不继承客户端 deadline）没被修。**
