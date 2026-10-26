@@ -37,7 +37,7 @@
 | 第十四轮收尾 | 🔴 **探针健壮性加固**（§23）—— 消除「**环境红**」假红：4 个起 PG 的探针**统一**改成 **探 TCP + 180s + 重建重试 + 容器退出即放弃**；新增守门网 `tools/probe-gate/favorite/`（含变异验证）；**零行为改动**、**0 条新漂移** |
 | 第十七轮 | 🔴🔴 **生产启动形态**（§26）—— `global` 移交的「**生产 jar 起不来**」查清并修完：**3 个缺陷**（① gRPC client 地址**两斜杠** ⇒ 启动期抛 `IllegalArgumentException`；② `web-application-type` 缺失 ⇒ Boot 判定 SERVLET 而无容器 ⇒ **启动即死**；③ gRPC **reflection 暴露面**漏关）⇒ 新增 **3 个守门测试类 / 14 例**（全部读**生产文件**，不走 `@SpringBootTest` 覆盖）+ **变异验证 4 条**全转红 + 🆕 新探针 `tools/prod-startup-probe/favorite/`（**A/B/C** 真 fat jar 活体对拍 ⇒ EXIT=0）<br>🔴 **翻案**：第十四轮 §22.3 的「启动阻塞 #1 已修」是**半修**—— 修复只落在**探针启动参数**里，**生产 yaml 一行都没改** ⇒ 缺陷活到了发布那一刻 ⇒ 坑档 **PIT-FAV-RPC-026**<br>🔴 **新登记 U9**（部署形态类 · 待拍板）：Go 生产形态的 **16062** DevServer 那个面，RAG 侧没有 |
 | 第十八轮 | 🔴 **借 `global` 的新规则跑本域台账 ⇒ 当场抓出 3 处**（§27）—— 全程**只读**借 `global` 的跨域共享复核器（`tools/check-ledger-selfcheck.py`，**global 单写权**，拷到 `/tmp` 后只调它的 L1/L4 两层）⇒ 抓出 **1 处行号真错**（`core/service/serviceconf.go:83-90` ⇒ 该文件共 89 行 ⇒ 应为 `:83-89`）+ **2 处路径写法不够精确**（`schema/naming.go` / `metrics.go` ⇒ 机器按 basename 核不动）<br>⇒ **不登记候选等别人扩**：把这两层**搬进本域自己的门禁**（`tools/ledger-lint/favorite/check-ledger-selfcheck.py` 新增 **⑤ 仓内路径存在性** + **⑥ Go 侧 `file.go:NN` 可解析** + `--mutation-test`）⇒ **门禁级 0 条**<br>⚠️ **工具第一版的 8 条门禁里 5 条是工具自己的 bug**（缺 Go 标准库 / 缺 N5 去噪 / key 结构写错 …）⇒ 坑档 **PIT-FAV-RPC-027**（**借来的工具只能当探针，不能当门禁**）<br>⚠️ 残留 **57 条「跨库/同名歧义」**（提示级 · 已量化 · 本轮不批量改） |
-| 第十九轮 | 🔴 **共享层 `DeadlineQueryTimeoutInjector` 改动的跨域验证**（§28 · `global` 第三十三轮）—— 两处行为变化：① **毫秒精度**（`setQueryTimeoutMs`）② **deadline 已过 ⇒ 不执行 SQL**（抛 57014 ⇒ 事务回滚）<br>✅ **favorite 域零条依赖旧行为**（权威读面的 deadline 是**紧贴调用新绑**的 3s ⇒ 新分支走不到；毫秒精度对整 3000ms **完全相同**）⇒ 叠 global 实现跑：**全量 177/99/94/29 全绿** + **三个探针全 EXIT=0**（authority-live 21 case / api 32 case / grpc-contract 36+15 case，冻结值一条没动）⇒ **零红、零需改动**<br>🔴 **给 global 的落地提醒**：主文件与测试改动**必须同一次提交**（只提主文件 ⇒ `service/common` 自己的旧行为断言红 1 例 ⇒ 仓库是红的）⇒ 同型 **PIT-FAV-RPC-026**<br>🔴 **纠正一条过期事实**：「favorite 台账 0 字节 / 从未对照」**不成立**（12 份 ≈ 430 KB · 19 轮对照）⇒ 出处是 `AGENTS.md:32` 的 2026-10-23 首轮快照 ⇒ 但**「SQL 语句级」双侧对拍确实未做**（DDL / 错误码 / 事务语义三层已闭）⇒ 这条我**认** |
+| 第十九轮 | 🔴 **共享层 `DeadlineQueryTimeoutInjector` 改动的跨域验证**（§28 · `global` 第三十三轮）—— 两处行为变化：① **毫秒精度**（`setQueryTimeoutMs`）② **deadline 已过 ⇒ 不执行 SQL**（抛 57014 ⇒ 事务回滚）<br>✅ **favorite 域零条依赖旧行为**（权威读面的 deadline 是**紧贴调用新绑**的 3s ⇒ 新分支走不到；毫秒精度 ⇒ 取消时刻**差 δ（毫秒级）** ⇒ 且 favorite **没有**「SQL 前先烧掉大部分预算」的 handler ⇒ 「最坏 ≈999ms」窗口**不成立**）⇒ 叠 global 实现跑：**全量 177/99/94/29 全绿** + **三个探针全 EXIT=0**（authority-live 21 case / api 32 case / grpc-contract 36+15 case，冻结值一条没动）⇒ **零红、零需改动**<br>🔴 **给 global 的落地提醒**：主文件与测试改动**必须同一次提交**（只提主文件 ⇒ `service/common` 自己的旧行为断言红 1 例 ⇒ 仓库是红的）⇒ 同型 **PIT-FAV-RPC-026**<br>🔴 **纠正一条过期事实**：「favorite 台账 0 字节 / 从未对照」**不成立**（12 份 ≈ 430 KB · 19 轮对照）⇒ 出处是 `AGENTS.md:32` 的 2026-10-23 首轮快照 ⇒ 但**「SQL 语句级」双侧对拍确实未做**（DDL / 错误码 / 事务语义三层已闭）⇒ 这条我**认** |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -2345,9 +2345,32 @@ Nacos 故意指向 `127.0.0.1:1` ⇒ 顺便证明「**注册中心不在也能�
 | **Dispatcher**（`favorite.fact.dispatch.enabled` 默认**关**） | 单次 10s deadline | ❌ 域内**无测试**覆盖该路径 |
 | **启动期建表**（Flyway） | **无** deadline | ❌ 拦截器**完全不动**（`remaining == NO_DEADLINE` ⇒ 直接 return） |
 
-⚠️ **毫秒精度（①）对 favorite 也是零影响**：
-authority 面的剩余是**整 3000ms** ⇒ 旧的「向上取整成秒」= **3s**，新的「原样传毫秒」= **3000ms** ⇒ **完全相同**
-⇒ `FavoriteAuthorityLookupTimeoutTest` 的 `[2500, 8000]` 窗口**两边都满足**。
+⚠️ **毫秒精度（①）对 favorite 的影响：取消时刻差 = δ（毫秒级）** —— ⚠️ **本条曾被我写成「完全相同」，那是措辞不精确，此处更正**（2026-10-26 第十九轮收尾自查）：
+
+| | 旧实现（秒级向上取整） | 新实现（原样传毫秒） |
+|---|---|---|
+| 给驱动什么 | `setQueryTimeout(ceil(R/1000))` ⇒ **整秒**，自**语句开始执行**起算 | `setQueryTimeoutMs(R)` ⇒ **剩余毫秒**，自**语句开始执行**起算 |
+| 取消时刻 | `t_exec + ceil(R/1000)*1000` | `t_exec + R` |
+| **取消时刻差** | **`ceil(R/1000)*1000 - R`** ∈ **[0, 999] ms**（R 刚过整秒时最坏 ≈ 999ms） | 0 |
+
+⇒ **R = 剩余毫秒数**。favorite 两条路径的 R：
+- **权威读 HTTP 面**：`bindToCurrent(now + 3_000)`（`FavoriteAuthorityEndpointConfig:275-276`）⇒ `R = 3000 − δ` ⇒ 差 = **δ**
+- **gRPC 业务面**：`interceptCall` 里 `deadlineEpochMs = now + 2_000`（`RpcInterceptor:170-172`，**每次调用**算）⇒ `R = 2000 − δ` ⇒ 差 = **δ**
+（δ = 从「绑定 deadline」到「语句开始执行」之间的毫秒数 ⇒ favorite 两条路径都只有**几毫秒**）
+
+⇒ ⇒ **结论不变**（favorite 域零红、零需改动、三个探针冻结值一条没动），
+但**理由要写准**：**不是「完全相同」，而是「差 δ（毫秒级）」**。
+⇒ 且 **favorite 域没有任何 handler 会在执行 SQL 之前烧掉大部分预算** ⇒ 那个「最坏 ≈ 999ms」的窗口
+在 favorite 域**不成立** ⇒ 这才是「毫秒精度对 favorite 零影响」的**真正依据**（可推广的那条）。
+
+⇒ ⚠️ **对照**：comment 域报的那条（E46）之所以能撞上「最坏 ≈ 1s」，
+是因为它的 per-call deadline = `min(2s, HTTP 剩余预算)` ⇒ **HTTP 剩余预算可能已经很小** ⇒ R 落在「刚过整秒」的区间。
+⇒ **favorite 域的结构性差异**：favorite-api 的 HTTP 预算是 **3s**（`http-timeout: 3s`）而 favorite-rpc 的服务端预算是 **2s**
+⇒ ⇒ favorite 的 client deadline **上界恒为 2s**（`FavoriteRpcClient.capByClientTimeout` 把 `min(ctx 剩余, 2s)` 压进去）
+⇒ ⇒ **但上界恒为 2s 不等于 R 恒为 2s** —— 若某个 handler 在 SQL 之前烧掉了大部分预算，R 照样会变小、照样可能落进最坏区间。
+⇒ ⇒ **真正让 favorite 躲开「最坏 ≈ 999ms」的那条是**：
+**favorite 域没有任何 handler 会在执行 SQL 之前烧掉大部分预算**（create/delete/list 都是「先查后写」的快操作）
+⇒ ⇒ **不要把「上界恒为 2s」当成「不会落进最坏区间」的依据** —— 那是**两条独立的理由**，别混用。
 
 ### 28.2 动态验证（两轮，叠 global 的实现跑）
 
