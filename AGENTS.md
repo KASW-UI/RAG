@@ -17,7 +17,7 @@
 > ⚠️ **2026-10-25 起新增第 11 个「域」= `global`（收口域，非微服务）**，见 §3.5。
 | 域 | 语义对照（Go ↔ RAG）| 台账（**逐条证据在此**） |
 |---|---|---|
-| `users` | 🔴 4 个组件全部 `NOT EQUIVALENT`；✅ 已修 `extra_info`/`is_current`、admin-rpc `update_time`、user-rpc `Login` fail-open、时间列 `⇒TIMESTAMPTZ`；⚠️ admin-rpc `status=0L` 未修 | [`users/`](docs/DRIFT/users/_shared.md) |
+| `users` | 🔴 4 个组件全部 `NOT EQUIVALENT`；✅ 已修 `extra_info`/`is_current`、admin-rpc `update_time`、user-rpc `Login` fail-open、时间列 `⇒TIMESTAMPTZ` | [`users/`](docs/DRIFT/users/_shared.md) |
 | `message` | 🔴 api 5 MISMATCH + 1 OBS；rpc 1 MISMATCH + 5 OBS。✅ `broadcast:1` 误发全量、rpc 负 `offset`、`isRead` 字段名 | [`message/`](docs/DRIFT/message/rpc.md) |
 | `like` | 🔴 api **9 MISMATCH**（本轮最高，**62 条绿测试零覆盖**）；rpc 4+2。✅ rpc 6 条启动阻塞、DDL 对齐。事实链路**跨三仓库且末端不在任何仓** | [`like/`](docs/DRIFT/like/rpc.md) |
 | `common` | 🔴 **不是「已审计完成」** —— 5 个可比包 **3 个 `NOT EQUIVALENT`**。**27 条编号未修** ⇒ **共享层，其他域的尾巴挂在它身上** | [`common/`](docs/DRIFT/common/alignment-2026-10-23.md) |
@@ -25,7 +25,7 @@
 | `article` | 🔴 rpc 4 MISMATCH + 4 OBS；api 2 MISMATCH（**首次对照即 NOT EQUIVALENT**）。⚠️ `DRIFT-ARTICLE-RPC-004` 复核后**撤销** | [`article/`](docs/DRIFT/article/rpc.md) |
 | `comment`/`follow`/`task` | ✅ **2026-10-25 并发对齐后「零台账」已解除**，各域 4/4/3 组件全部完成首轮对照 | [`_cross/`](docs/DRIFT/_cross/component-coverage-matrix.md) |
 | `favorite` | ✅ **2026-10-26 核对**：第十六轮已收口 ⇒ 域内可修漂移/未知项 **均 0** ⇒ 跨域 5 条归 `global` | [`favorite/`](docs/DRIFT/favorite/rpc.md) |
-| 🆕 **`global`** | **收口域**（非微服务，见 §3.5）—— 跨微服务 + `service/common` 影响的**搁置漂移**。已 **28 轮**（含 15 条 lane）⇒ **待办清单见 `_README.md` §七之二** · **lane 台账见 `global/lanes/`** | [`global/`](docs/DRIFT/global/_README.md) |
+| 🆕 **`global`** | **收口域**（非微服务，见 §3.5）—— 跨微服务 + `service/common` 影响的**搁置漂移**。已 **29 轮**（含 15 条 lane）⇒ **待办清单见 `_README.md` §七之二** · **lane 台账见 `global/lanes/`** | [`global/`](docs/DRIFT/global/_README.md) |
 | 其余 | ⚠️ 10 个 `*-proto` 语义层一致（**8 个无回归网** ⇒ §3.4）；5 个 `*-common` 本轮未单独审查 | 见 DRIFT 索引 |
 
 > ⚠️ **「已改」≠「已验证」；「源码级对照」≠「双侧活体对拍」** ⇒ 台账里的 ✅ 一律读作「**在该证据强度下一致**」，
