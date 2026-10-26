@@ -2731,3 +2731,18 @@ RAG: message_notification.created_at | timestamptz | 可空 | DEFAULT CURRENT_TI
 ### 状态
 
 🔴 **待 message 域 owner 接手**（本域无 owner 会话 ⇒ 主会话转达）⇒ **主会话不改代码、不下结论**，只留指针。
+
+---
+
+### 🟡 `DRIFT-MSG-V-032` 🟡 **登记（不改）**：`MessageRpcSlowThresholdGateTest` 在**全量并发回归**里偶发 `UNAVAILABLE: Network closed for unknown reason`
+
+| 字段 | 内容 |
+|---|---|
+| **Component** | message-rpc |
+| **Operation** | `MessageRpcSlowThresholdGateTest.slowCallMustBeMarkedSlow` |
+| **Category** | **测试稳定性**（非生产缺陷） |
+| **现象** | 2026-10-27 三域全量回归（`-am` 23 模块）里，该用例报 `StatusRuntime UNAVAILABLE: Network closed for unknown reason`（栈：`callAndGetSpan:349` → `warmUp:318`）⇒ 该模块 `Tests run: 84, Failures: 0, Errors: 1` ⇒ BUILD FAILURE（停在 `:message-rpc`，后续模块未跑到） |
+| **定性** | **flaky，不是回归**：① **单独复跑该类 2/2 全绿**（8.158 s）；② 该模块**不在**本轮改动范围（本轮只改 like-api / message-api 两个 **api** 组件 + 台账；**message-rpc 不依赖 message-api**）；③ 症状是 gRPC 客户端在服务端拆除/连接关闭时读到 `Network closed`，属**建连/拆除时序**，不是行为语义 |
+| **Evidence** | 全量日志 `/tmp/g2-full-reg2.log:15549-15552`；单独复跑 `Tests run: 2, Failures: 0, Errors: 0` |
+| **Difference** | 与 Go 无对应关系（Go 侧无此测试）⇒ **不是语义漂移**，是**测试自身的时序脆弱性** |
+| **Disposition** | **登记不改**（域侧无法单独消除：涉及其它模块的 gRPC 建连时序）；⚠️ **不因此判 message-rpc 回归**；⇒ 后续遇到同一症状，按「先单独复跑定性」处理，不直接当回归修 |

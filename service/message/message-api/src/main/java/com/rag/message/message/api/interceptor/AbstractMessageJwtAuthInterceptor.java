@@ -1,19 +1,15 @@
 package com.rag.message.message.api.interceptor;
 
 import com.rag.common.exception.AuthenticationException;
+import com.rag.message.message.api.auth.MessageJwtAuthFilter;
+import com.rag.message.message.api.auth.MessageJwtSignatureVerifier;
 import com.rag.message.message.common.errmsg.MessageErrorCode;
 import com.rag.message.message.common.errmsg.MessageErrorMessages;
-import com.rag.users.common.jwt.BearerTokenExtractor;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jws;
-import io.jsonwebtoken.Jwts;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.servlet.HandlerInterceptor;
-
-import javax.crypto.SecretKey;
 
 /**
  * message-api 的 JWT 鉴权逻辑基类 —— Go 端 {@code rest.WithJwt(secret)} 的等价物。
@@ -32,8 +28,8 @@ import javax.crypto.SecretKey;
  * <ol>
  *   <li>Authorization 头缺失 → {@link AuthenticationException} → <b>HTTP 401</b></li>
  *   <li>Bearer 前缀剥离失败 / token 为空 → 401
- *       （Go: {@code golang-jwt/jwt/v4/request/oauth2.go} 的
- *       {@code stripBearerPrefixFromTokenString}，规则见 {@link BearerTokenExtractor}）</li>
+ *       （Go: {@code golang-jwt/jwt/v4@v4.5.2/request/oauth2.go} 的
+ *       {@code stripBearerPrefixFromTokenString}，规则见 {@code BearerTokenExtractor}）</li>
  *   <li>签名错 / 过期 / 格式错 → 401</li>
  *   <li>验签成功后：把 claim {@code userId} 的<b>原始对象</b>写进 request attribute</li>
  * </ol>
@@ -48,6 +44,20 @@ import javax.crypto.SecretKey;
  *   <li>若在本层把它变成 401，Go 返回 200 + 5004 的场景在 RAG 上会变成 401 —— 状态码就错了。</li>
  * </ul>
  * 身份解析的落点见 {@code MessageApiSupport#userId(HttpServletRequest)}。
+ *
+ * <h3>🔴 DRIFT-MESSAGEAPI-009②：验签跑在<b>哪一层</b></h3>
+ * <p>Go 侧链序（真源）：原生中间件 → <b>Authorize(验签)</b> → <b>observability(3s 计时)</b> → handler
+ * ⇒ <b>验签耗时不计入 3s 预算</b>（详见 {@link MessageJwtAuthFilter} 的类注释，含 Go 行号）。
+ * <p>而 Servlet 的 {@code HandlerInterceptor} 在 {@code DispatcherServlet} <b>里面</b>，
+ * 而 3s 预算在 {@code HttpMiddlewareFilter}(+7) 起算、整条下游都在预算内
+ * ⇒ 若验签留在本类，就等于<b>验签耗时会吃掉 3s 预算</b> ⇒ 与 Go 不一致。
+ * <p>⇒ 验签已搬到 {@link MessageJwtAuthFilter}（{@code @Order(+6)}，在预算 Filter **之外**）；
+ * 本类只负责：
+ * <ul>
+ *   <li><b>消费</b> Filter 的验签结果（成功 ⇒ 落 claim；失败 ⇒ 抛 401）；</li>
+ *   <li>Filter <b>未生效</b>时（未被组件扫描 / 未注册）<b>兜底就地验签</b>
+ *       ⇒ 仍然 401（安全不倒退），但此时验签落在预算内 ⇒ 守门会红。</li>
+ * </ul>
  */
 public abstract class AbstractMessageJwtAuthInterceptor implements HandlerInterceptor {
 
@@ -59,17 +69,24 @@ public abstract class AbstractMessageJwtAuthInterceptor implements HandlerInterc
      */
     public static final String CLAIM_ATTRIBUTE = "userId";
 
-    private final String routeGroup;
-    private final SecretKey key;
+    /**
+     * 本拦截器守的路由组 —— 决定用<b>哪把 key</b>验签。
+     *
+     * <p>⚠️ 用<b>显式</b>组别而不是「按路径推断」：拦截器的组别由 Spring 的注册路径决定
+     * （{@code WebMvcConfig}），比字符串前缀推断更可靠；而 Filter 那一侧才需要按路径分派。
+     */
+    private final MessageJwtSignatureVerifier.RouteGroup routeGroup;
 
-    protected AbstractMessageJwtAuthInterceptor(String routeGroup, SecretKey key) {
+    private final MessageJwtSignatureVerifier verifier;
+
+    protected AbstractMessageJwtAuthInterceptor(MessageJwtSignatureVerifier.RouteGroup routeGroup,
+                                                MessageJwtSignatureVerifier verifier) {
         this.routeGroup = routeGroup;
-        this.key = key;
+        this.verifier = verifier;
     }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        String authHeader = request.getHeader("Authorization");
         // ── Go 的「路由匹配先于鉴权」：未注册路径**不经 auth** ──
         // 证据：rest/engine.go:104-118 的 bindRoute 只把 chain（native + auth + 用户中间件）
         //       挂到 router.Handle(method, path, handle) 上，即**只对匹配上的路由生效**；
@@ -88,39 +105,30 @@ public abstract class AbstractMessageJwtAuthInterceptor implements HandlerInterc
             return true;
         }
 
-        // Go: rest/token/tokenparser.go doParseToken → request.ParseFromRequest(r,
-        //     request.AuthorizationHeaderExtractor, ...)。头缺失时 extractor 返回 errNoAuthParam
-        //     → parser.ParseToken 返回 err → authhandler.go:100 unauthorized()。
-        if (authHeader == null || authHeader.isEmpty()) {
-            log.warn("{} path {} with missing Authorization header", routeGroup, request.getRequestURI());
-            throw unauthorized();
+        // ── 路径 1（正常）：消费 Filter 的验签结果（验签在 3s 预算**之外**）──
+        Object attr = request.getAttribute(MessageJwtAuthFilter.VERIFICATION_ATTRIBUTE);
+        if (attr instanceof MessageJwtSignatureVerifier.VerificationResult result) {
+            if (result.failed()) {
+                throw unauthorized();
+            }
+            request.setAttribute(CLAIM_ATTRIBUTE, result.claim());
+            return true;
         }
 
-        // Go: golang-jwt/v4 request/oauth2.go stripBearerPrefixFromTokenString
-        //     —— 大小写不敏感、不匹配时原样返回整串。三条规则都在 BearerTokenExtractor 里。
-        String token = BearerTokenExtractor.tokenForSignatureVerification(authHeader);
-        if (token.isEmpty()) {
-            log.warn("{} path {} with empty Bearer token", routeGroup, request.getRequestURI());
+        // ── 路径 2（兜底）：Filter 未生效 ⇒ 就地验签（验签在 3s 预算**之内**）──
+        // ⚠️ 这条分支**不是**正常路径：它意味着 DRIFT-MESSAGEAPI-009② 未闭环
+        //    （验签重新落回预算内）⇒ 守门 {@code MessageApiJwtVerificationScopeTest} 会红。
+        //    保留它是为了「Filter 万一没装配上也不至于变成放行所有请求」——
+        //    安全不倒退，只是漂移没修好。
+        MessageJwtSignatureVerifier.VerificationResult inline = verifier.verify(
+                routeGroup, request.getHeader("Authorization"), request.getRequestURI());
+        if (inline.failed()) {
             throw unauthorized();
         }
-
-        Claims claims;
-        try {
-            Jws<Claims> jws = Jwts.parser()
-                    .verifyWith(key)
-                    .build()
-                    .parseSignedClaims(token);
-            claims = jws.getPayload();
-        } catch (Throwable t) {
-            // 签名错 / 过期 / 格式错 —— Go 侧同样只走到 unauthorized()，不区分原因
-            log.warn("{} JWT verify failed on {} : {}", routeGroup, request.getRequestURI(), t.getMessage());
-            throw unauthorized();
-        }
-
-        // Go: authhandler.go:63-72 遍历 claims，把非标准 claim（aud/exp/jti/iat/iss/nbf/sub 除外）
-        //     逐个塞进 ctx。message api 侧只有 logic/shared/helper.go 的 UserIDFromContext 读
-        //     "userId"，其余 claim 无消费者，故这里只落这一个。
-        request.setAttribute(CLAIM_ATTRIBUTE, claims.get(CLAIM_ATTRIBUTE));
+        request.setAttribute(CLAIM_ATTRIBUTE, inline.claim());
+        request.setAttribute(MessageJwtAuthFilter.VERIFICATION_SOURCE_ATTRIBUTE,
+                MessageJwtAuthFilter.SOURCE_INLINE);
+        log.warn("{} JWT verification fell back to the interceptor (filter result absent)", routeGroup);
         return true;
     }
 

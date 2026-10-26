@@ -451,8 +451,8 @@ Input:  HTTP 请求 + Authorization 头
 Precondition: 无
 Trigger: 请求到达 DispatcherServlet
 Processing（语义顺序）：
-   1. Servlet Filter 链（见 §5.1），最外层是 HttpMiddlewareFilter（@Order = HIGHEST_PRECEDENCE+5）
-   2. HandlerInterceptor.preHandle：验签 → 只把 claim `userId` 的**原始对象**塞进 request attribute
+   1. Servlet Filter 链（见 §5.1）：验签在 `MessageJwtAuthFilter`（+6）完成；3s 预算在 `HttpMiddlewareFilter`（+7）起算 ⇒ **验签在预算之外**（= DRIFT-MSGAPI-014）
+   2. HandlerInterceptor.preHandle：**消费** Filter 的验签结果（不自己验签）→ 只把 claim `userId` 的**原始对象**塞进 request attribute
    3. @RequestBody(required=false) 反序列化（GoStyleJsonBodyConverter 判 Content-Type）
    4. GoStyleRequest.normalize(req, XxxReq::new)：空 body 归零值 → assertGoRequiredFields()
    5. AbstractMessageApiService#requireIdentity：MessageApiSupport#userId
@@ -593,7 +593,7 @@ Lifecycle:    Spring 上下文；@GrpcClient 由 devh starter 建连；@PreDestr
 | HTTP 熔断 503（裸） | `cw.Code < 500 ⇒ Accept` | 同 | EQUIVALENT | S |
 | **worker 池饱和 503（裸）** | **无此路径**（Go 是每请求 goroutine） | **有**：512 上限，`AbortPolicy` | **OBSERVABLE DIFFERENCE（RAG 新增准入控制）** | S |
 | 3s 超时 503 | `http.Error(w,"Request Timeout",503)` + `text/plain; charset=utf-8` + `\n` | `writeTimeoutResponse` 同形状 | EQUIVALENT（**但 503 分支无任何运行证据**） | S |
-| **超时作用域** | 中间件在 **auth 之后**，只覆盖「解析 + 业务」 | Filter 在 **最外层**，覆盖「鉴权 + 解析 + 业务」 | OBSERVABLE DIFFERENCE（范围更大，低影响） | S |
+| **超时作用域** | 中间件在 **auth 之后**，只覆盖「解析 + 业务」 | Filter 在 **budget 层之外**（验签已搬出），覆盖「解析 + 业务」 | ✅ EQUIVALENT（🔴 2026-10-27：原写「RAG 在最外层，覆盖鉴权」= **已消除**，`DRIFT-MSGAPI-014` 修复后两侧范围一致） | S + **L4 活体探针** |
 | 事务边界 | 无（api 不碰 DB） | 无（无 `@Transactional`） | EQUIVALENT | S |
 | 观测端点 | `:16066/metrics` + `/healthz` + pprof（`DevServer`） | `:8892/actuator/{health,info,prometheus}` | OBSERVABLE DIFFERENCE（运维面） | S |
 | 启动失败模式 | 无 etcd → `MustNewClient` **panic** | Nacos 不可达 → 启动期/首调失败 | OBSERVABLE DIFFERENCE | S |
@@ -620,18 +620,33 @@ Trace → Log → Prometheus → MaxConns(503) → Breaker(503) → Shedding(503
 
 ```
 Tomcat
- → HttpMiddlewareFilter（@Order HIGHEST_PRECEDENCE+5，3s 超时 + ThreadLocal deadline）
- → GoStyleProtectionFilter × 4（MaxBytes / MaxConns / CpuShedding / Breaker）
+ → GoStyleTraceparentFilter（@Order HIGHEST_PRECEDENCE+3，起 SERVER span）
+ → GoStyleMaxConnsFilter（+4）
+ → GoStyleBreakerFilter（+5）
+ → GoStyleCpuSheddingFilter（+6）
+ → MessageJwtAuthFilter（+6，**JWT 验签**；只写 request attribute、**绝不写响应**）
+ → HttpMiddlewareFilter（+7，3s 超时 + ThreadLocal deadline ＝ **3s 预算起算点**）
+ → GoStyleMaxBytesFilter（+8，413）
  → DispatcherServlet（404/405 在此产生）
- → HandlerInterceptor（JWT 401）
+ → HandlerInterceptor（**消费** Filter 的验签结果 → 401）
  → GoStyleJsonBodyConverter 解析
  → Service
 ```
 
+> 🔴 **2026-10-27 订正**：本链图的槽位数字此前写的是「HttpMiddlewareFilter ＝ `HIGHEST_PRECEDENCE+5`」，
+> **与实测不符**（实测 **+7**）⇒ 连带把「保护层 ×4 排在预算层之后」这个错误顺序也带进来了。
+> 现按 `service/common` 各 Filter 的 `@Order` **实测值**重排（+3/+4/+5/+6/+6/+7/+8）。
+> ⚠️ 槽位是**共享层**的事实，G4 写权；域侧只**引用**（实测自 `service/common` 源码）。
+>
+> ⚠️ 另注：`MessageJwtAuthFilter` 与 `GoStyleCpuSheddingFilter` **同为 +6**（并列）⇒
+> 两者先后由容器装配顺序决定；**这不影响任何响应**，因为 JWT Filter **绝不写响应**。
+
 **可观察后果（已逐条核对）**：
 1. **413 压过 401**：两侧一致 ✅（Go 靠 chain 顺序，RAG 靠 Filter 在 DispatcherServlet 之外）
 2. **404/405 不过 auth、不过保护层**：两侧一致 ✅
-3. ⚠️ **超时范围不同**：Go 的 3s 不含鉴权，RAG 的 3s 含鉴权（JWT 验签通常 <1ms，实际不可观测）
+3. ✅ **超时范围已一致**（2026-10-27 · **DRIFT-MSGAPI-014** 修复）：Go 的 3s **不含**鉴权（Authorize 在 observability(3s) 之外）；
+   RAG 此前把验签放在 `HandlerInterceptor`（DispatcherServlet 内）⇒ 3s **含**鉴权 ⇒ 现已把验签搬到
+   `MessageJwtAuthFilter`（+6，在预算 Filter +7 **之外**）⇒ **两侧的 3s 预算范围一致**（验签在预算之外）
 4. ⚠️ **worker 池饱和 503 只在 RAG 存在**（见 §4.5）
 
 ### 5.2 Error flow 逐条
@@ -664,7 +679,7 @@ Tomcat
 | 14 | **Auth/Authz** | ✅ EQUIVALENT | §4.3 全表；证据强度 `静态源码`（**无活体对拍**） |
 | 15 | **Transaction** | ✅ EQUIVALENT | 两侧都无事务边界（api 层不碰 DB） |
 | 16 | **Concurrency** | ⚠️ OBSERVABLE DIFFERENCE | ① worker 池 512 提前拒绝（RAG 新增准入）② MaxConns 全局 vs 每路由 ③ Go goroutine 无上界 vs RAG 线程池 |
-| 17 | **Timeout** | ⚠️ OBSERVABLE DIFFERENCE | 作用域不同（Go 在 auth 后 / RAG 在最外层）；**且 503 分支至今无运行证据**（§9 UNRESOLVED-004） |
+| 17 | **Timeout** | ✅ EQUIVALENT（🔴 2026-10-27 更新：原写「⚠️ OBSERVABLE DIFFERENCE · 作用域不同」，**已消除** —— `DRIFT-MSGAPI-014` 修复后验签搬出 3s 预算 ⇒ 两侧作用域一致（Go 在 auth 后 / RAG 同样在 auth 后））；503 分支运行证据见 `MessageApiTimeoutRealTomcatTest` 2 例 |
 | 18 | **Retry** | ✅ EQUIVALENT | 两侧都无；RAG 的「禁止加 retry」有 javadoc 留痕并指向 `zrpc/config.go` 无 `Retries` 字段 |
 | 19 | **Serialization** | ❌ **NOT EQUIVALENT** | `-005` ~ `-009` 五条 + 键序差异 + Content-Type charset（§7） |
 | 20 | **Configuration** | ⚠️ 部分 OBSERVABLE | yaml → `@ConfigurationProperties` 逐字段对齐（含**两侧都不读**的 `accessExpire`）；但 §3.3.1 的默认值全在框架 tag 里，本轮逐条核对了 MaxBytes/MaxConns/CpuThreshold/Breaker/Timeout 五处 ✅；启动失败模式不同（panic vs 延迟失败） |
@@ -1005,7 +1020,7 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
 | 7 | **worker 池饱和 503**（512 上限） | ❌ 未做 | RAG 新增路径，无 Go 对照，无运行证据 |
 | 8 | **端到端并发 / 过载行为** | ❌ 未做 | MaxConns、CPU 降载、HTTP 熔断都只有组件级单测 |
 | 9 | **gRPC 断连 / 超时 / 非 6 个 code 的 status** | ⚠️ 部分（只测 INTERNAL 恒返） | 断连（`UNAVAILABLE`）与 `DEADLINE_EXCEEDED` 未触发过 |
-| 10 | **超时作用域差异**（Go 在 auth 后 / RAG 在最外层） | 静态记录 | 无活体对拍 |
+| 10 | **超时作用域差异**（Go 在 auth 后 / RAG 在最外层） | ✅ **2026-10-27 已消除并补上活体证据**（`DRIFT-MSGAPI-014`：验签搬出 3s 预算 ⇒ 两侧范围一致；Go 腿 = 真源 observability 中间件的活体探针：观测点 A `deadline_set=false` / B `deadline_set=true remaining=3s`，**非法 token ⇒ 401 且三个观测点一个都没打印** ⇒ Authorize 在所有 user middleware 之前） | 无活体对拍 → **已补（L4）** |
 | 11 | **响应序列化里 map 键序**（Go 排序确定 vs RAG 不确定） | ⚠️ 静态记录（首轮已留档） | 无运行证据 |
 | 12 | **`AdminSendNotificationReq.extra` 元素级 null** | ✅ 本轮补齐 | — |
 | 13 | **`FAIL_ON_NULL_FOR_PRIMITIVES` 正交开关** | ✅ 本轮补齐（抓出 008） | — |
@@ -1100,7 +1115,7 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
 | 11 | Side effects 一致？ | ⚠️ | 业务副作用无差异；**准入控制有差异**（worker 池 503 为 RAG 新增） |
 | 12 | Ordering 一致？ | ✅ | 413 > 401 > 解析 > 身份 > 参数 > RPC 两侧逐条一致（含 404/405 不过 auth） |
 | 13 | Retry 一致？ | ✅ | 两侧都无 |
-| 14 | Timeout scope 一致？ | ⚠️ | **作用域不同**（Go 在 auth 后 / RAG 在最外层）<br>⚠️ **2026-10-24 第八轮更新**：503 分支的运行证据**已补**（`MessageApiTimeoutRealTomcatTest` 2 例，真 Tomcat）⇒ 只剩「作用域不同」这一条**结构性差异** |
+| 14 | Timeout scope 一致？ | ✅ | 🔴 **2026-10-27 更新**：原写「⚠️ 作用域不同（Go 在 auth 后 / RAG 在最外层）」—— **已消除**（`DRIFT-MSGAPI-014`：验签从 `HandlerInterceptor` 搬到 `MessageJwtAuthFilter`(+6) ⇒ RAG 也在 auth 后起算 ⇒ 两侧范围**一致**）<br>503 分支的运行证据见 `MessageApiTimeoutRealTomcatTest` 2 例（真 Tomcat） |
 | 15 | Concurrency semantics 一致？ | ⚠️ | MaxConns 作用域不同（每路由 vs 全局）+ worker 池上限为 RAG 新增 |
 | 16 | Auth / Authorization 一致？ | ✅ | 两把密钥、claim 判定、401 空 body 全部一致 |
 | 17 | Serialization semantics 一致？ | ✅ | `,string` 入参 ✅ / 出参 ❌（`affected` ⇒ **已签字**）+ 5 类解析分歧（**已修**）+ 键序（**仅字节级，语义等价**）+ Content-Type（**`MSGAPI-010`，用户拍板保持登记**） |
@@ -1133,10 +1148,12 @@ RAG 真实 DTO + 真实 coercion，两侧同时跑），足以支撑判定。
 | **`-010`** | 🟡 **仍 OPEN**（`Content-Type` 缺 charset）—— **用户 2026-10-24 拍板「保持登记，本轮不做」**（共享面影响全部 10 个 api）⇒ **不是签字**，是登记在册的待办 |
 | **`-011` / `-013`** | 🟡 **仍 OPEN**（状态行 reason phrase / 缺 `Traceparent`）—— 同上，**保持登记，后续修**（落点同为 `service/common`） |
 | **`-012`** | ⛔ **不可修**（Tomcat 序列化吃空格，实测无写法可达） |
-| **最终判定** | ⚠️ **仍写 `SEMANTICALLY NOT EQUIVALENT`，但支撑已换** ——<br>不再是「5 条解析漂移未修」，而是「**共享面三项响应头差异**（`-010`/`-011`/`-013`）+ **结构性差异**（超时作用域 / MaxConns 作用域 / worker 池）」<br>⇒ 组件内的**解析与序列化语义已全部对齐** |
+| **最终判定** | ⚠️ **仍写 `SEMANTICALLY NOT EQUIVALENT`，但支撑已换** ——<br>不再是「5 条解析漂移未修」，而是「**共享面三项响应头差异**（`-010`/`-011`/`-013`）+ **结构性差异**（MaxConns 作用域 / worker 池）」<br>🔴 2026-10-27：**「超时作用域」已从这份清单里划掉**（`DRIFT-MSGAPI-014` 修复后与 Go 一致）<br>⇒ 组件内的**解析与序列化语义已全部对齐** |
 | **本轮实测（2026-10-24 19:50）** | `message-api` **88 例，0 failures / 0 errors / 0 skipped**；`message-rpc` 76 / `message-common` 21 / `common` 168 ⇒ 合计 **353 例，BUILD SUCCESS** |
-**为什么不是 `SEMANTICALLY EQUIVALENT`**：第 3 / 4 / 17 项不通过，且其中一条
+**为什么不是 `SEMANTICALLY EQUIVALENT`**：第 3 / 4 项不通过，且其中一条
 （`broadcast=1` 被当成 `true`）在业务上会造成**误发全量通知**。
+🔴 **2026-10-27 更新**：原写「第 3 / 4 / **17** 项不通过」—— **17（Timeout 作用域）已通过**
+（`DRIFT-MSGAPI-014` 修复 ⇒ 两侧作用域一致）。
 
 **证据强度总表**：
 
@@ -1551,6 +1568,80 @@ RAG ： 无
 
 > ⚠️ **为什么本轮不做**：共享层改动 ⇒ 影响全部 10 个 api ⇒ 需与 `MSGAPI-010` / `MSGAPI-011` **合并成一次**共享面变更 ⇒ 需用户单独拍板。
 > ⚠️ **不得做的事**：不要只改 message 域（会造成新的不对称）；不要只写单测就宣布修好（真容器那一层必须也验）。
+
+### ✅ `DRIFT-MSGAPI-014` ✅ **已修（2026-10-27 · G2 域侧落码）**：3s 预算的作用域 —— RAG 把 JWT 验签算进了预算，Go 不算
+
+```
+Go  ： 3s 预算【不含】JWT 验签（Authorize 在 observability(3s) **之外** ⇒ 验签耗时不吃预算）
+RAG ： 3s 预算【含】JWT 验签（验签在 HandlerInterceptor ⇒ DispatcherServlet 内 ⇒ 预算 Filter 之下）
+```
+
+**① Go 侧依据（L1，逐行）** —— 真源 **10 个 api 全部**先关掉 go-zero 原生超时中间件：
+
+| 事实 | 证据 |
+|---|---|
+| **原生 `TimeoutHandler` 不在链上** | `service/common/observability/http.go:30-34` `DisableNativeRestTimeout` ⇒ `conf.Middlewares.Timeout = false`（真源 10 个 api 全部调它，如 `service/message/api/messagecenter.go:40`） |
+| **3s 预算实际由真源自己的中间件提供**，注册在 `server.Use` ⇒ 落在 `ng.middlewares` | `service/message/api/messagecenter.go:42` `server.Use(observability.NewHTTPMiddleware(...))` |
+| **计时器起点 = 该中间件自己的入口** | `service/common/observability/http.go:53` `ctx, cancel := context.WithTimeout(r.Context(), timeout)` |
+| **`ng.middlewares` 在 `Authorize` 之内** | `rest/engine.go:101-116` bindRoute：`:108` `appendAuthHandler`（JWT）**先**，`:110-112` `for _, mw := range ng.middlewares { chn = chn.Append(...) }` **后**<br>`rest/chain/chain.go:38-42` `Append` = 「加在请求流的**最后**」⇒ 越 Append 越靠内；`:86-88` `Then` 反向包裹 ⇒ 列表首位 = 最外层 |
+
+⇒ 执行序：**原生中间件 → Authorize(验签) → observability(3s 计时) → handler** ⇒ **验签在 3s 预算之外**。
+
+**② Go 侧活体探针（L4 · 2026-10-27）** —— 真源整仓复制到 `/tmp/goprobe`（**不动被冻结的真源**），
+探针 `import` **真源自己的** `sea-try-go/service/common/observability`，启动路径与真源 api 逐行同构；
+观测点 A 插在 observability 中间件**之前**、观测点 B 插在**之后**：
+
+```
+PROBE conf.Timeout=3000ms httpTimeout=3s nativeTimeoutMiddlewareEnabled=false
+腿① 有效 token /probe/fast ： PROBE-A(outer) deadline_set=false claim_userId=12345
+                              PROBE-B(inner) deadline_set=true remaining=3s claim_userId=12345  → HTTP 200
+腿② 有效 token /probe/slow（handler 睡 4s）→ HTTP 503 @ 3.003s，body `Request Timeout`
+腿③ 非法 token               → HTTP 401，body 空，且 A/B/HANDLER 三个观测点【一个都没打印】
+```
+
+> **腿③ 是决定性的**：若 `Authorize` 不是跑在所有 user middleware **之前**，观测点 A 必然会打印；
+> 它没打印 ⇒ `Authorize` 在最外层 ⇒ **验签在 3s 预算之外**。
+> 腿② 的 503 + `Request Timeout` 与 Go `http.go:88` `http.Error(w, httpTimeoutBody, 503)` 逐字一致。
+
+**③ RAG 侧漂移形态（修前）** —— `service/common/observability/HttpMiddleware.java:270/294/304/322`：
+预算在 submit worker **之前**起算（`deadlineNanos = startNanos + timeout`），`chain.doFilter` 整条下游
+（含 DispatcherServlet 与其中的 `HandlerInterceptor`）都在 worker 里跑 ⇒ **验签耗时会吃掉 3s 预算**。
+
+**④ 修法（域侧自修 · 2026-10-27）**
+
+| 项 | 内容 |
+|---|---|
+| **落点** | 新增 `service/message/message-api/src/main/java/com/rag/message/message/api/auth/MessageJwtAuthFilter.java`（`@Component` + `@Order(HIGHEST_PRECEDENCE + 6)`）与 `MessageJwtSignatureVerifier.java`（持两把 key，按路径分派） |
+| **只验签、只写 attribute、绝不写响应** | 验签失败也**放行** ⇒ `GoStyleMaxBytesFilter`(+8) 仍有机会写 **413** ⇒ 「413 压过 401」不变（Go 侧 MaxBytes 在 Authorize **之外**，也是 413 压过 401） |
+| **401 仍由 interceptor 抛** | `AbstractMessageJwtAuthInterceptor` 改为**消费** Filter 的结果；Filter 未生效时**兜底就地验签**（安全不倒退，但守门会红） |
+| **两把 key 按路径分派** | Go `routes.go:60-61` 用 UserAuth（8 条）、`:92-93` 用 AdminAuth（5 条）⇒ `verifyForPath` 按 `/message/v1/admin/**` 分派 |
+| **形状不变** | 401 + **空 body**（Go `authhandler.go:106-122` 只 `WriteHeader(401)` 不写字节） |
+
+**⑤ 守门 + 变异验证（`MessageApiJwtVerificationScopeTest`，7 条全绿）**
+
+| 变异 | 预期 | 实测 |
+|---|---|---|
+| ① `@Order` +6 → **+8**（跑到 3s 预算之后） | 「JWT 在预算之外」断言红 | ✅ 红（1 failure，红在目标断言） |
+| ② Filter **自己写 401** | 「413 压过 401」红 | ✅ 红（`MessageApiProtectionMvcTest` 报 413 ≠ 401） |
+| ③ 摘掉 Filter 的 `@Component` | 「interceptor 消费 filter 结果」红 | ✅ 红（`expected:<filter> but was:<inline>`） |
+
+> ⚠️ 守门断言的是**容器装配出的链**（`ServletContextInitializerBeans` 的排序输出），
+> **不是**两个 `@Order` 数字（注解只是排序的依据，装配结果才是运行时事实）。
+
+**⑥ 与 Go 的残余差异（如实登记）**：Go 的链只挂在**路由匹配**上 ⇒ 未注册路径（404）不验签；
+Servlet Filter 在路由匹配**之前** ⇒ 本 Filter 会对 `/message/v1/**` 下的未匹配路径**多算一次 HMAC**
+⇒ 但它**不写响应** ⇒ 最终仍是 **404**（与 Go 一致）⇒ **只影响 CPU，不影响任何响应**。
+
+**⑦ 本轮实测（2026-10-27 · G2）**：`message-api` **98 例**（原 91 + 本轮新守门 7）、`message-rpc` 84、
+`like-api` **89 例**（原 84 + 新守门 5）、`like-rpc` 107、`task-api` 97、`task-rpc` 111
+⇒ **三域六模块全量 `mvn test` ⇒ BUILD SUCCESS，0 failures / 0 errors / 0 skipped**
+（口径 = `mvn test`；`mvn verify` 口径另多 4 条只在 verify 阶段跑的 fat-jar 产物层用例）。
+⚠️ 另：`message-rpc` 的 `MessageRpcSlowThresholdGateTest` 在**全量并发**下偶发
+`UNAVAILABLE: Network closed for unknown reason` ⇒ **单独复跑 2/2 全绿** ⇒ 判为 **flaky（非回归）**
+⇒ 已登记 `docs/DRIFT/message/rpc.md` 的 `DRIFT-MSG-V-032`。
+
+> ⚠️ **本条与 `DRIFT-USERAPI-009②`（users 域）是同一条**：G1 已在 user/admin/follow 三域落码，
+> 本条是 message 域的对应项；两条的 Go 侧依据**同源**（`DisableNativeRestTimeout` + `engine.go` 链序）。
 
 ### 4. `DRIFT-MSGAPI-010` 的修法（已定位，**本轮未实施**）
 

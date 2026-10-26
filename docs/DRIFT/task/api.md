@@ -259,6 +259,21 @@ RAG 侧 Spring 会对 `form-urlencoded` 的 POST body **参数化重建**，对 
    ⚠️ **变异测试已做**：撤掉处理器替换 ⇒ 1 条红；把 multipart 开关改回 `true` ⇒ 2 条红 ⇒ **不是假绿**。
 5. ⚠️ 本轮**未重审** `service/common`（`HttpMiddlewareFilter` / breaker / maxConns 等），
    其结论沿用 `docs/DRIFT/common/audit.md`。
+6. ✅ **「3s 预算的作用域」对 task-api **不适用**（2026-10-27 登记，附依据）：
+   - Go 侧 `service/task/api/task.go:27-29` 与其它 9 个 api 同款：`DisableNativeRestTimeout` +
+     `server.Use(observability.NewHTTPMiddleware(...))` ⇒ **3s 预算由真源自己的中间件提供**，
+     且它注册在 `server.Use` ⇒ 链上在 `Authorize` **之内** ⇒ **验签不计入预算**。
+   - ⚠️ **task-api 根本没有鉴权**：Go 侧 `service/task/api/internal/handler/routes.go` 的路由表
+     **不带** `rest.WithJwt` ⇒ RAG 侧也没有 JWT 拦截器 ⇒ **没有「验签」这件事**
+     ⇒ users 域那条 `DRIFT-USERAPI-009②`（3s 预算作用域）对 task-api **天然不适用**。
+   - ⇒ 故 task 域**不需要**为 009② 做任何改动（不是「已修」，是「不适用」）。
+   - 证据：Go 侧 3s 预算作用域已由**活体探针**（L4）钉死 —— 真源整仓复制到 `/tmp/goprobe`，
+     探针 `import` 真源自己的 `sea-try-go/service/common/observability`：
+     观测点 A（observability 中间件之前）`deadline_set=false`、
+     观测点 B（之后）`deadline_set=true remaining=3s`；
+     **非法 token ⇒ 401 且三个观测点一个都没打印** ⇒ `Authorize` 在所有 user middleware 之前
+     ⇒ 验签在 3s 预算**之外**。详见 `docs/DRIFT/like/api.md` 的 `DRIFT-LIKEAPI-023`
+     与 `docs/DRIFT/message/api.md` 的 `DRIFT-MSGAPI-014`（同源依据）。
 
 ---
 

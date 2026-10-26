@@ -43,7 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * </ul>
  * 但本项目其余测试全部把 {@code MessageRpcClient} 用 {@code @MockitoBean} 顶掉，
  * ⇒ <b>熔断拦截器在那条路径上根本没被执行过</b>。
- * 本类把它们连起来：server 恒返回 {@code INTERNAL}，断言 HTTP 响应码先��� 5001、
+ * 本类把它们连起来：server 恒返回 {@code INTERNAL}，断言 HTTP 响应码先是 5001、
  * 后变<b>1015</b> —— 这个「5001 → 1015」的转变<b>只有在熔断真的生效时才会出现</b>。
  *
  * <p><b>为什么必须靠 1015 来判定</b>：

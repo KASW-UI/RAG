@@ -130,29 +130,35 @@
 ### 请求链（对应上表逐行）
 
 ```
-1. @Component HttpMiddlewareFilter @Order(HIGHEST_PRECEDENCE+5)
+1. @Component HttpMiddlewareFilter @Order(HIGHEST_PRECEDENCE+7)
    ← 由 scanBasePackages 含 "com.rag.common" 自动注册        LikeApiApplication.java:63-66
    → HttpMiddleware.newHttpMiddleware(...)                  HttpMiddlewareFilter.java:52-56
-2. WebMvcConfig.addInterceptors：/like/v1/** → LikeJwtAuthInterceptor
+   ⚠️ 🔴 2026-10-27 订正：本 Filter 此前被记成 `+5`（**过期**），**实测是 +7**
+   ⚠️ 它是 **3s 预算的起算点**（budget = startNanos + timeout，**在 submit worker 之前**起算）
+2. @Component LikeJwtAuthFilter @Order(HIGHEST_PRECEDENCE+6)   ← 🆕 2026-10-27 · DRIFT-LIKEAPI-023
+   → 只验签、只写 request attribute、**绝不写响应**
+   ⇒ 验签在 3s 预算**之外**（对齐 Go：Authorize 在 observability(3s) 之外）
+3. WebMvcConfig.addInterceptors：/like/v1/** → LikeJwtAuthInterceptor
    ⚠️ 无 excludePathPatterns（Go 侧没有 public 端点）
    ⚠️ preHandle 首行 `handler instanceof HandlerMethod` 守卫（DRIFT-011 修复）
-3. JwtUtil/BearerTokenExtractor + jjwt parseSignedClaims
+   ⚠️ 2026-10-27：interceptor **消费** Filter 的验签结果（Filter 未生效时才兜底就地验签）
+4. JwtUtil/BearerTokenExtractor + jjwt parseSignedClaims
    ⇒ claim 存**原始对象**（不转 long），解析身份在业务层 LikeApiSupport#userId
-4. 3s 超时（observability.http-timeout: 3s）→ worker 线程 + CountDownLatch.await(3s)
+5. 3s 超时（observability.http-timeout: 3s）→ worker 线程 + CountDownLatch.await(3s)
    ⚠️ 与 Go 的关键差异：Go 用 ctx 传播 + 独立 goroutine；Java 用 Future.cancel(true)
    ⇒ 取消产生的 status 是 CANCELLED，Go 是 DEADLINE_EXCEEDED
-5. @RequestBody(required=false) + GoStyleJsonBodyConverter
+6. @RequestBody(required=false) + GoStyleJsonBodyConverter
    goReadsBody(ct, len) = len > 0 && ct != null && ct.contains("application/json")
    ⚠️ ct 取自 `HttpHeaders.getContentType().toString()`（**已归一化为小写**）
       Go 取自 `r.Header.Get("Content-Type")`（**原始头，大小写敏感**）
    假 ⇒ 返回 null → GoStyleRequest.normalize 造零值 DTO → 必填校验
-6. Jackson 3（tools.jackson 3.1.5）+ LikeGoStyleCoercion
+7. Jackson 3（tools.jackson 3.1.5）+ LikeGoStyleCoercion
    规则1 LogicalType.Textual ← Integer/Float/Boolean = Fail
    规则2 LogicalType.Integer ← String = Fail；LogicalType.Float ← String = Fail
    规则3 ACCEPT_FLOAT_AS_INT = 关闭
    ⚠️ **Jackson 3 默认开启 FAIL_ON_TRAILING_TOKENS**（Jackson 2 默认关闭）
-7. LikeApiSupport#userId：只接受整型（Byte/Short/Integer/Long/BigInteger，bitLength<64）
-8. LikeRpcClient.likeRpc() → GoStyleRequestDeadline.applyTo(stub)
+8. LikeApiSupport#userId：只接受整型（Byte/Short/Integer/Long/BigInteger，bitLength<64）
+9. LikeRpcClient.likeRpc() → GoStyleRequestDeadline.applyTo(stub)
    ⇒ deadline = **HTTP 超时的剩余预算**（≤3s），不是 Go 的固定 2000ms
 ```
 
@@ -198,7 +204,7 @@
 | 28 | 2 个端点 | **鉴权不对称**：`getlikecount`/`gettargetlikerlist` 不读 uid | 全文无 `ctx.Value("userId")` | 不注入 `HttpServletRequest` | EQUIVALENT | E-Src + 现有绿测 |
 | 29 | all 6 | gRPC 错误二分：status→业务码+`st.Message()` 原文；非 status→**5001**（不是 1015） | `:41-47` ×6 | `LikeApiSupport:177-186` | EQUIVALENT | E-Src |
 | 30 | all 6 | **HTTP 超时 3s → 503 + `Request Timeout`** | `rest/config.go:55` + `http.go:88` | `application.yml:27-29` + `HttpMiddleware:208+` | EQUIVALENT（配置+装配层） | E-Go 源码链 + E-Cfg。⚠️ **运行期 503 出口本轮未在真 Tomcat 上复现** ⇒ 见 §9 |
-| 31 | all 6 | 超时**作用域** = 整个操作（含鉴权+解析+RPC） | `NewHTTPMiddleware` 包住 chain 全段 | `HttpMiddleware` 包住 `chain.doFilter` | EQUIVALENT | E-Src |
+| 31 | all 6 | 超时**作用域** = 解析 + RPC（🔴 **不含鉴权**） | `NewHTTPMiddleware` 包住 chain 中 **Authorize 之后**的那一段 | `HttpMiddleware` 包住 `chain.doFilter`（**验签已搬出预算**） | EQUIVALENT | E-Src + **E-Go 活体探针**（2026-10-27）⇒ `DRIFT-LIKEAPI-023` |
 | 32 | all 6 | 超时后的**取消语义** | ctx 到期 ⇒ `DEADLINE_EXCEEDED`（在 `codes.Acceptable` 失败名单内） | `Future.cancel(true)` ⇒ `CANCELLED`（**不在名单内**） | OBSERVABLE DIFFERENCE | E-Src（`GoStyleRequestDeadline` javadoc 已自陈） |
 | 33 | all 6 | **单次 RPC 超时** | **固定 2000ms**（`zrpc/config.go:31` → `zrpc/client.go:70-72`） | **HTTP 剩余预算**（≤3000ms），无独立 2s 上限 | **SEMANTIC MISMATCH** | E-Go(E-Go 源码链) + E-Src ⇒ **DRIFT-017** |
 | 34 | all 6 | gRPC **无 retry** | `RpcClientConf` 无 `Retries` | 无 retry | EQUIVALENT | E-Src |
@@ -296,7 +302,7 @@ Side Effect     : likeaction 会改 like-rpc 侧的数据（本组件无本地�
 | | Go | RAG | Result |
 |---|---|---|---|
 | **HTTP 超时来源** | `rest/config.go:55` `Timeout int64 json:",default=3000"`（yaml 未写 ⇒ 3000） | `observability.http-timeout: 3s`（显式写） | EQUIVALENT（值一致） |
-| **HTTP 超时作用域** | 整个请求（`NewHTTPMiddleware` 包 chain 全段） | 整个请求（`chain.doFilter`） | EQUIVALENT |
+| **HTTP 超时作用域** | 「解析 + 业务」（`NewHTTPMiddleware` 包住 chain 中 **Authorize 之后**的那一段 ⇒ **不含鉴权**） | 「解析 + 业务」（`chain.doFilter`；🔴 2026-10-27：验签已搬到 `LikeJwtAuthFilter`(+6)、在预算层之外 ⇒ **不再含鉴权**） | ✅ EQUIVALENT（🔴 原写「整个请求」= **两侧都错**，已按 `DRIFT-LIKEAPI-023` 订正） |
 | **HTTP 超时结果** | `503` + `http.Error` ⇒ text/plain + nosniff + 尾随换行 | `503` + `Request Timeout` | EQUIVALENT（字节级待真 Tomcat 复核） |
 | **单次 RPC 超时来源** | `RpcClientConf.Timeout` 默认 **2000**（yaml 未写） | 无独立项；取 HTTP 剩余预算 | **SEMANTIC MISMATCH** ⇒ DRIFT-017 |
 | **单次 RPC 超时作用域** | 单次调用 | 单次调用 | EQUIVALENT |
@@ -342,20 +348,20 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 
 ### 6.10 Lifecycle（§21）
 启动顺序：Go = 读配置 → 建 rpc client → 注册路由 → Start；RAG = Spring 上下文 → Filter/Interceptor/Controller 注册 → 就绪。
-⚠️ RAG 的 `HttpMiddlewareFilter` 是 `@Order(HIGHEST_PRECEDENCE+5)`，**包在 DispatcherServlet 外**，因此它在 Controller Bean 就绪前就已注册 —— 但它只在请求到达时用链上的 bean，**不存在**「worker 先于依赖就绪」的窗口。
+⚠️ RAG 的 `HttpMiddlewareFilter` 是 `@Order(HIGHEST_PRECEDENCE+7)`（🔴 2026-10-27 订正：原写 +5，**过期**），**包在 DispatcherServlet 外**，因此它在 Controller Bean 就绪前就已注册 —— 但它只在请求到达时用链上的 bean，**不存在**「worker 先于依赖就绪」的窗口。
 ⇒ **EQUIVALENT**。
 
 ---
 
 ## 7. Semantic Drifts
 
-> 编号连续：历史占用 `DRIFT-LIKEAPI-001` ~ `-011`；本轮新增从 **-012** 起。
+> 编号连续：历史占用 `DRIFT-LIKEAPI-001` ~ `-022`（🔴 2026-10-27 订正：原写「~ -011」**过期**，实际已用到 `-022`）；本轮新增从 **-023** 起。
 
 ### 7.1 历史条目状态（2026-10-23 复核，**原文保留**）
 
 | ID | 项 | 分类 | 状态 |
 |---|---|---|---|
-| **DRIFT-LIKEAPI-001** | HTTP 请求超时 | SEMANTIC MISMATCH | ✅ **2026-10-23 复核：已修**。`application.yml:27-29` 已配 `observability.http-timeout: 3s`；装配链完整：`HttpMiddlewareFilter`（`@Component` + `@Order(HIGHEST_PRECEDENCE+5)`）← `LikeApiApplication:75-78` 的 `scanBasePackages` 含 `com.rag.common`（🔴 2026-10-24 更正：原写 63-66，行号已随第四轮的 javadoc 修改位移） ⇒ 自动注册。⚠️ **按 §3.3 记「配置+装配已核对，运行期 503 出口未复现」**（本轮探针未起真 Tomcat 打超时路径） |
+| **DRIFT-LIKEAPI-001** | HTTP 请求超时 | SEMANTIC MISMATCH | ✅ **2026-10-23 复核：已修**。`application.yml:27-29` 已配 `observability.http-timeout: 3s`；装配链完整：`HttpMiddlewareFilter`（`@Component` + `@Order(HIGHEST_PRECEDENCE+7)`，🔴 2026-10-27 订正：原写 +5，**过期**）← `LikeApiApplication:75-78` 的 `scanBasePackages` 含 `com.rag.common`（🔴 2026-10-24 更正：原写 63-66，行号已随第四轮的 javadoc 修改位移） ⇒ 自动注册。⚠️ **按 §3.3 记「配置+装配已核对，运行期 503 出口未复现」**（本轮探针未起真 Tomcat 打超时路径） |
 | **DRIFT-LIKEAPI-002** | `target_ids` 必填性 | SEMANTIC MISMATCH | ✅ **2026-10-23 复核：已修且结论成立**。Go 活体探针 B02 复现：`type mismatch for field "target_ids"`；B03 `mustn't be nil`。RAG 侧 `GetLikeCountReq#assertGoRequiredFields` 抛 `GoRequiredFieldException` ⇒ 200+5001。⚠️ **但遗留 3 处未清理的旧断言**：`-018`（本文件外）与 `LikeReqGoStyleValidationTest` 类注释 ⇒ 见 **DRIFT-LIKEAPI-019** |
 | ~~DRIFT-LIKEAPI-003~~ | 请求保护层四层全缺 | — | ✅ 已关（2026-10-22）。本轮未复审 |
 | ~~DRIFT-LIKEAPI-004~~ | 超限请求优先级（413 而非 401） | — | ✅ 已关（2026-10-22）。本轮未复审 |
@@ -592,6 +598,88 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 
 ---
 
+### ✅ **DRIFT-LIKEAPI-023** ✅ **已修（2026-10-27 · G2 域侧落码）**：3s 预算的作用域 —— RAG 把 JWT 验签算进了预算，Go 不算
+
+```
+Go  ： 3s 预算【不含】JWT 验签（Authorize 在 observability(3s) **之外** ⇒ 验签耗时不吃预算）
+RAG ： 3s 预算【含】JWT 验签（验签在 HandlerInterceptor ⇒ DispatcherServlet 内 ⇒ 预算 Filter 之下）
+```
+
+**① Go 侧依据（L1，逐行）** —— 真源 **10 个 api 全部**先关掉 go-zero 原生超时中间件：
+
+| 事实 | 证据 |
+|---|---|
+| **原生 `TimeoutHandler` 不在链上** | `service/common/observability/http.go:30-34` `DisableNativeRestTimeout` ⇒ `conf.Middlewares.Timeout = false`（真源 10 个 api 全部调它，如 `service/like/api/likecenter.go:36`） |
+| **3s 预算实际由真源自己的中间件提供**，注册在 `server.Use` ⇒ 落在 `ng.middlewares` | `service/like/api/likecenter.go:38` `server.Use(observability.NewHTTPMiddleware(...))` |
+| **计时器起点 = 该中间件自己的入口** | `service/common/observability/http.go:53` `ctx, cancel := context.WithTimeout(r.Context(), timeout)` |
+| **`ng.middlewares` 在 `Authorize` 之内** | `rest/engine.go:101-116` bindRoute：`:108` `appendAuthHandler`（JWT）**先**，`:110-112` `for _, mw := range ng.middlewares { chn = chn.Append(...) }` **后**<br>`rest/chain/chain.go:38-42` `Append` = 「加在请求流的**最后**」⇒ 越 Append 越靠内；`:86-88` `Then` 反向包裹 ⇒ 列表首位 = 最外层 |
+
+⇒ 执行序：**原生中间件 → Authorize(验签) → observability(3s 计时) → handler** ⇒ **验签在 3s 预算之外**。
+
+> ⚠️ **踩坑留档（§3.1「不要拿现有代码当对照基准」的同款）**：
+> 我第一轮复核只读了 go-zero 框架链（`buildChainWithNativeMiddlewares` 里 Timeout 在 `:154-156`）
+> ⇒ 得出「预算在 Authorize 之外 ⇒ 含验签」的**反向**结论；
+> 真因是**漏读真源服务层那行 `DisableNativeRestTimeout`** ⇒ 原生 TimeoutHandler **根本不在链上**。
+> ⇒ **只读框架默认行为不够，必须读真源「消费点」**（§3.3.1）。
+
+**② Go 侧活体探针（L4 · 2026-10-27）** —— 真源整仓复制到 `/tmp/goprobe`（**不动被冻结的真源**），
+探针 `import` **真源自己的** `sea-try-go/service/common/observability`，启动路径与真源 api 逐行同构；
+观测点 A 插在 observability 中间件**之前**、观测点 B 插在**之后**：
+
+```
+PROBE conf.Timeout=3000ms httpTimeout=3s nativeTimeoutMiddlewareEnabled=false
+腿① 有效 token /probe/fast ： PROBE-A(outer) deadline_set=false claim_userId=12345
+                              PROBE-B(inner) deadline_set=true remaining=3s claim_userId=12345  → HTTP 200
+腿② 有效 token /probe/slow（handler 睡 4s）→ HTTP 503 @ 3.003s，body `Request Timeout`
+腿③ 非法 token               → HTTP 401，body 空，且 A/B/HANDLER 三个观测点【一个都没打印】
+```
+
+> **腿③ 是决定性的**：若 `Authorize` 不是跑在所有 user middleware **之前**，观测点 A 必然会打印；
+> 它没打印 ⇒ `Authorize` 在最外层 ⇒ **验签在 3s 预算之外**。
+> 腿② 的 503 + `Request Timeout` 与 Go `http.go:88` `http.Error(w, httpTimeoutBody, 503)` 逐字一致。
+
+**③ RAG 侧漂移形态（修前）** —— `service/common/observability/HttpMiddleware.java:270/294/304/322`：
+预算在 submit worker **之前**起算（`deadlineNanos = startNanos + timeout`），`chain.doFilter` 整条下游
+（含 DispatcherServlet 与其中的 `HandlerInterceptor`）都在 worker 里跑 ⇒ **验签耗时会吃掉 3s 预算**。
+
+**④ 修法（域侧自修 · 2026-10-27）**
+
+| 项 | 内容 |
+|---|---|
+| **落点** | 新增 `service/like/like-api/src/main/java/com/rag/like/like/api/auth/LikeJwtAuthFilter.java`（`@Component` + `@Order(HIGHEST_PRECEDENCE + 6)`）与 `LikeJwtSignatureVerifier.java`（持 key、只验签不写响应） |
+| **只验签、只写 attribute、绝不写响应** | 验签失败也**放行** ⇒ `GoStyleMaxBytesFilter`(+8) 仍有机会写 **413** ⇒ 「413 压过 401」不变（Go 侧 MaxBytes 在 Authorize **之外**，也是 413 压过 401） |
+| **401 仍由 interceptor 抛** | `LikeJwtAuthInterceptor` 改为**消费** Filter 的结果；Filter 未生效时**兜底就地验签**（安全不倒退，但守门会红） |
+| **形状不变** | 401 + **空 body**（Go `authhandler.go:106-122` 只 `WriteHeader(401)` 不写字节） |
+| **路径判据** | Go 侧 like api **6/6 全量** `WithJwt`、**无 public 路径** ⇒ 判据就是前缀 `/like/v1` |
+
+**⑤ 守门 + 变异验证（`LikeApiJwtVerificationScopeTest`，5 条全绿）**
+
+| 变异 | 预期 | 实测 |
+|---|---|---|
+| ① `@Order` +6 → **+8**（跑到 3s 预算之后） | 「JWT 在预算之外」断言红 | ✅ 红（**1 failure**，红在 `jwtFilterRunsBeforeTheThreeSecondBudgetFilter`） |
+| ② Filter **自己写 401** | 「413 压过 401」红 | ✅ 红（`LikeApiProtectionMvcTest`：`Status expected:<413> but was:<401>`） |
+| ③ 摘掉 Filter 的 `@Component` | 「interceptor 消费 filter 结果」红 | ✅ 红（`expected:<filter> but was:<inline>`） |
+
+> ⚠️ 守门断言的是**容器装配出的链**（`ServletContextInitializerBeans` 的排序输出），
+> **不是**两个 `@Order` 数字（注解只是排序的依据，装配结果才是运行时事实）。
+
+**⑥ 与 Go 的残余差异（如实登记）**：Go 的链只挂在**路由匹配**上 ⇒ 未注册路径（404）不验签；
+Servlet Filter 在路由匹配**之前** ⇒ 本 Filter 会对 `/like/v1/**` 下的未匹配路径**多算一次 HMAC**
+⇒ 但它**不写响应** ⇒ 最终仍是 **404**（与 Go 一致）⇒ **只影响 CPU，不影响任何响应**。
+
+**⑦ 本轮实测（2026-10-27 · G2）**：`like-api` **89 例**（原 84 + 本轮新守门 5）、`like-rpc` 107、
+`message-api` **98 例**（原 91 + 新守门 7）、`message-rpc` 84、`task-api` 97、`task-rpc` 111
+⇒ **三域六模块全量 `mvn test` ⇒ BUILD SUCCESS，0 failures / 0 errors / 0 skipped**
+（口径 = `mvn test`；`mvn verify` 口径另多 4 条只在 verify 阶段跑的 fat-jar 产物层用例）。
+⚠️ 另：`message-rpc` 的 `MessageRpcSlowThresholdGateTest` 在**全量并发**下偶发
+`UNAVAILABLE: Network closed for unknown reason` ⇒ **单独复跑 2/2 全绿** ⇒ 判为 **flaky（非回归）**
+⇒ 已登记 `docs/DRIFT/message/rpc.md` 的 `DRIFT-MSG-V-032`。
+
+> ⚠️ **本条与 `DRIFT-USERAPI-009②`（users 域）是同一条**：G1 已在 user/admin/follow 三域落码，
+> 本条是 like 域的对应项；两条的 Go 侧依据**同源**（`DisableNativeRestTimeout` + `engine.go` 链序）。
+
+---
+
 ## 8. Test Cases
 
 > **CASE-xxx** 按 §29/§30。本轮**只跑探针、不新增测试**（任务限定只改两个台账文件）。
@@ -701,7 +789,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | 11 | Side effects 是否一致？ | ❌ **否** | 012/013/016/017/022 **都会改变「是否发出 / 发出什么」下游调用** |
 | 12 | Ordering 是否一致？ | ✅ 是 | 单次同步调用，无排序 |
 | 13 | Retry 是否一致？ | ✅ 是 | 两侧都不重试 |
-| 14 | Timeout scope 是否一致？ | ⚠️ **部分** | HTTP 作用域一致；**单次 RPC 的来源与取值不一致**（017） |
+| 14 | Timeout scope 是否一致？ | ⚠️ **部分** | 🔴 **2026-10-27 更新**：HTTP 作用域原先不一致（Go 不含鉴权 / RAG 含鉴权）⇒ **已消除**（`DRIFT-LIKEAPI-023`：验签搬出 3s 预算 ⇒ 两侧都是「解析 + 业务」）；**单次 RPC 的来源与取值仍不一致**（017） |
 | 15 | Concurrency semantics 是否一致？ | ⚠️ **部分** | 饱和拒绝出口 RAG 独有（022）；取消语义不同（#32） |
 | 16 | Authentication / Authorization 是否一致？ | ✅ 是 | §6.3 逐条对齐；⚠️ **黑名单维度不适用（Go 侧零实现）** |
 | 17 | Serialization semantics 是否一致？ | ❌ **否** | 012（Slice 元素）/ 013（null 元素）/ 014（尾随 token）/ 016（浮点溢出） |

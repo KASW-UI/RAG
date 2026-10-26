@@ -93,7 +93,7 @@ class MessageRpcProductionAddressTest {
             EXPECTED_SERVICE_NAME_ADMIN, "discovery:///" + EXPECTED_SERVICE_NAME_ADMIN);
 
     @Test
-    @DisplayName("生产 application.yml 的两个 grpc client 地址都必须��� discovery:///（三斜杠）")
+    @DisplayName("生产 application.yml 的两个 grpc client 地址都必须是 discovery:///（三斜杠）")
     void productionAddressUsesThreeSlashes() throws IOException {
         for (Map.Entry<String, String> expected : EXPECTED_CLIENTS.entrySet()) {
             String client = expected.getKey();

@@ -1,11 +1,7 @@
 package com.rag.message.message.api.interceptor;
 
-import com.rag.message.message.api.config.MessageApiProperties;
-import com.rag.users.common.jwt.JwtUtil;
-import io.jsonwebtoken.security.Keys;
+import com.rag.message.message.api.auth.MessageJwtSignatureVerifier;
 import org.springframework.stereotype.Component;
-
-import javax.crypto.SecretKey;
 
 /**
  * 管理员侧 JWT 鉴权拦截器 —— 挂 {@code /message/v1/admin/**}。
@@ -30,16 +26,19 @@ import javax.crypto.SecretKey;
  *
  * <p><b>密钥补齐（N-5 留档）</b>：Go 的 admin secret 是 15 字节
  * （{@code yU-hCm)2*?NQmWG}），golang-jwt 不校验长度；jjwt 0.12 强制 ≥256 bit，
- * 故统一 {@link JwtUtil#padToHmacKeySize} zero-pad 到 32 字节。
+ * 故统一由 {@link MessageJwtSignatureVerifier} 用
+ * {@code JwtUtil.padToHmacKeySize} zero-pad 到 32 字节。
  * 代价是 <b>Go 签的 admin token 在 RAG 验不过，反之亦然</b>（两套部署各自闭环）。
  * 这是运行环境约束，不是行为差异 —— token 的 payload / claim / 过期语义完全一致。
+ *
+ * <p><b>🔴 DRIFT-MESSAGEAPI-009②</b>：本类现在只负责<b>消费</b>验签结果与抛 401；
+ * 验签本身在 {@link com.rag.message.message.api.auth.MessageJwtAuthFilter}
+ * （{@code @Order(+6)}）里完成 ⇒ 验签在 3s 预算**之外**。
  */
 @Component
 public class MessageAdminJwtAuthInterceptor extends AbstractMessageJwtAuthInterceptor {
 
-    public MessageAdminJwtAuthInterceptor(MessageApiProperties properties) {
-        super("admin",
-                Keys.hmacShaKeyFor(
-                        JwtUtil.padToHmacKeySize(properties.getAdminAuth().getAccessSecret())));
+    public MessageAdminJwtAuthInterceptor(MessageJwtSignatureVerifier verifier) {
+        super(MessageJwtSignatureVerifier.RouteGroup.ADMIN, verifier);
     }
 }

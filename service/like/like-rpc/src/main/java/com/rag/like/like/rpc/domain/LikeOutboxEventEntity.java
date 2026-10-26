@@ -14,7 +14,7 @@ import java.time.OffsetDateTime;
  *
  * <p><b>与 {@link LikeDomainFactOutboxEntity} 的区别</b>：本表只服务「首次点赞 → 热点排名系统」
  * 这条业务通道（Go: {@code internal/mqs/like_outbox_sender.go}，topic=article-hot-events），
- * 没有版本号、没有冻结信封、没有技术回执；事实流那张表才���。
+ * 没有版本号、没有冻结信封、没有技术回执；事实流那张表才有。
  *
  * <p>⚠️ payload 列是 {@code json}（不是 jsonb），见 DDL 注释。
  */
