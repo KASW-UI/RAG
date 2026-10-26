@@ -1904,3 +1904,37 @@ users/user 域当时唯一的出路是**把台账措辞改写成工具词表里�
 
 **出处**：2026-10-26 第三十七轮（**E61** · N13 拆三层 + 缺陷标记护栏 · 5 条层 0 对照 + 3 条端到端变异 · 前后 diff 零回归）·
 同族 **PIT-GLOBAL-040** 形态⑤（宽词表吃真缺陷）/ **PIT-GLOBAL-046**（判据的输入必须行级局部）/ **PIT-GLOBAL-048**（变异判据本身也会假阴性）。
+
+---
+
+## PIT-GLOBAL-053 🔴 **跨域回执里的「文件:行号」必须在**回执方自己的分支**上复核** —— 别处的同名文件可能是**另一个版本** ⇒ 照抄行号 = 没核
+
+**现象（2026-10-26 第三十八轮）**：favorite owner 回执订正「毫秒精度对 favorite 零影响」的**理由**（结论不变），
+并给了两处坐标：`FavoriteAuthorityEndpointConfig.java:135/276`（`GO_LOOKUP_TIMEOUT_MILLIS = 3_000` +
+`bindToCurrent(now + 3_000)`）与 `RpcInterceptor.java:170-172`（per-call deadline = `now + 2s`）。
+
+⇒ 🔴 **global 把它当「已核」写进了回信** ⇒ 但在**自己的分支** `align/global` 上核 ⇒
+**`FavoriteAuthorityEndpointConfig.java` 里根本没有 `GO_LOOKUP_TIMEOUT_MILLIS` / `bindToCurrent`**
+⇒ 那条 **authority 读面只存在于 favorite 分支** ⇒ ⇒ **同一个路径在两个分支上是两个不同的文件**。
+
+⇒ 📌 **更硬的一条证据**：`service/common` 在两个分支上也是**不同版本** ——
+per-call deadline 在 `align/global` 上是 `RpcInterceptor.java:232-237`
+（`effectiveTimeoutMs = min(serverBudgetMs, clientDeadlineRemainingMs())`），
+在 `align/favorite` 上是 `:170-172` ⇒ ⇒ **行号本身也会漂**。
+
+**为什么危险**：① 回信里的 `文件:行号` 是**最像证据的东西** ⇒ 读者默认你核过 ⇒
+② **照抄行号 = 把「对方分支的事实」写成「主干的事实」** ⇒ ⇒ **比不写更坏**（假证据比没证据更难拆穿）。
+
+**纪律**：
+1. 🔴 **跨域回执里出现的 `文件:行号` ⇒ 必须在**回执方自己的分支**上重新定位**
+   （他们给的是**他们分支**的坐标 ⇒ 你要的是**你分支**的坐标 ⇒ 两者都要）；
+2. 🔴 **本分支上不存在那个文件/符号 ⇒ 必须明确写「该结论只在对方分支成立」**
+   ⇒ 别把它写成全仓事实；
+3. 🟢 **引用别人分支的行号 ⇒ 必须标注分支名**（`align/favorite` 的 `X.java:135`）⇒ 不标注 = 读者会当成主干坐标；
+4. 🟢 **台账里写「某域做了什么」⇒ 顺手核一次「那个域自己的分支上是什么版本」**
+   ⇒ 本轮就是这么发现 **favorite 第二十轮把 SQL 语句层也做了**（`align/favorite` @ `d871647`），
+   而 global 台账里那句「favorite 的 SQL 语句层未做」**已过期**。
+
+**出处**：2026-10-26 第三十八轮（favorite owner 回执的**理由**订正 ⇒ global 独立复核 ⇒ 结论不变、理由写准 ·
+E46 / E47 单元格补记 + **AGENTS.md 的 favorite 行订正**）·
+同族 **PIT-GLOBAL-045**（跨域回执要自己核）/ **PIT-GLOBAL-051**（登记前必须核到行号）/ **PIT-GLOBAL-044**（快照 ≠ 磁盘）。
