@@ -600,6 +600,27 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | `docs/DRIFT/users/common.md` §6 | `UNRESOLVED-USERSCOMMON-003` 的问法（「**全局副作用**是否波及非 users 域」） | ⬆️ **前提已过期**（不是全局施加，是各 api 各自注册）⇒ 且实测**已注册的 8 个 api 不会误伤** ⇒ 可直接结案（**该文件属 users 域台账写权 ⇒ 归 G1 改**） |
 | `docs/DRIFT/users/user/rpc.md` §`DRIFT-USERRPC-V-002` | 「🔴 仍成立，但被卡」 | 仍是**成立**的 ⇒ 但「卡点」的**形状**已可细化 ⇒ 见 §4.9.7 的两步方案 + ⚠️ 「Go 侧读 NULL 会扫描报错 ⇒ 两侧在 NULL 行上仍不同 ⇒ **需 Jason 拍板**」 |
 
+#### 4.9.12 🟡 全量回归里撞到一条**既有**时序 flake（**不是本波引入** · 属 comment 域写权 ⇒ 已通知 G3）
+
+**现象**（第三次全量回归 · 基线 `138b6ef`）：**2448 条 / failures=1 / errors=0 / skipped=4** ⇒ 唯一失败：
+
+| 项 | 内容 |
+|---|---|
+| 用例 | `service/comment/comment-rpc/src/test/java/com/rag/comment/comment/rpc/CommentRpcRuntimeBootGateTest#realFatJarProcessBootsAndListens` |
+| 失败断言 | 「**日志里没有 devh 的『gRPC Server started』**」 |
+| 🔴 **同一用例的另一个断言已通过** | 「**真 fat jar 起不来（gRPC 端口没有在监听）**」⇒ **端口确实在监听** ⇒ 进程**真的起来了** |
+| 🔴 **classpath 也没问题** | 同用例第三条 `assertFalse(output.contains("NoClassDefFoundError"))` **通过** ⇒ ⇒ **本波新增的两个自动配置在「无 spring-webmvc 的进程」里没有炸**（这恰好是本次最该验的那条风险） |
+| 根因形态 | 该用例在**端口探活成功就立刻 `process.destroyForcibly()`**（源码 `:107-119`）⇒ 日志 drain 线程（`:103-105`）可能还没读到那行 ⇒ **断言与日志读取存在竞态** |
+| 单独复跑 | ✅ **通过**（实测：`mvn -o -pl service/comment/comment-rpc -am test -Dtest=CommentRpcRuntimeBootGateTest` ⇒ 1/1 绿） |
+| 前两次全量 | ✅ 同样用例在基线 `433eac3` 的两次全量（各 2442 条 / 0 failures）**都过** ⇒ ⇒ **不是本波引入** |
+| ⇒ 处置 | **该文件属 comment 域写权 ⇒ 本 lane 不代改** ⇒ 已按「共享层变更通知」把 flake 形态与建议修法发给 **G3**（不催、不代改）；本条登记在案 |
+
+⚠️ **为什么这条值得单列**：它同时是**一次意外收获** —— 本波给 `service/common` 的
+`AutoConfiguration.imports` 加了 2 行（其中 1 行引用 **只有 api 进程才有**的 `spring-webmvc` 类型）
+⇒ 而 comment-rpc 是**纯 gRPC 进程**（没有 spring-webmvc）⇒ ⇒ 「自动配置清单里出现一个
+本进程没有的类，会不会 `NoClassDefFoundError`」这个风险 ⇒ **由这条用例的真 fat jar 启动实测排除了**
+（`@ConditionalOnClass` 的 ASM 元数据判定在 Boot 4 上确实安全）。
+
 ## 5. 交付物清单
 
 - [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
