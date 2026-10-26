@@ -1236,10 +1236,36 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
 
 > **元信息**：落码分支 `align/g1-users-follow`（基线 `a282012` = `do-my-own-gh`）·
 > **写权内**（全部落 `service/users/user/user-api/**` ＋ `service/users/user/user-rpc/**`）·
-> **证据强度**：**L2 运行时**（容器装配结果 + MockMvc 行为）+ **L1 静态**（Go 侧链序逐行）·
-> ⚠️ **未跑双侧活体对拍**（Go 侧进程未起）⇒ 按 AGENTS.md §0，读作「**在该证据强度下一致**」。
+> **证据强度**：**L4 运行时双侧活体**（Go 腿 = G2 建的探针 `/tmp/goprobe/probejwt/main.go`，**本域已独立复跑**，三腿全中 —— 见 §9.y.0；RAG 腿 = 真 Tomcat 10 条探针）＋ **L2 装配层守门**
+> ⚠️ **两次独立运行**（Go 腿与 RAG 腿不在同一次编排里）⇒ 比的是**属性**（「验签是否计入 3s 预算」），**不是逐字节 diff**。
+> ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。
 >
 > ⚠️ **本节同时订正 §9.x 的「改法 A」** —— 那段推导**不能照抄落地**，它漏了两条硬约束。
+
+#### 9.y.0 🆕 **Go 腿活体探针**（G2 建 · 本域独立复跑 · 2026-10-27）
+
+> **为什么值得单列**：本条的 Go 侧结论原先只是 **L1（逐行读 `bindRoute`）** ⇒ 而「3s 预算到底含不含验签」
+> 是**框架级**问题（取决于 `DisableNativeRestTimeout` 有没有被调用）⇒ **读源码容易读反**。
+> ⇒ G2 把它做成了**运行时探针**，本域**独立复跑**一遍（三腿全中）⇒ Go 腿证据由 L1 升到 **L4**。
+
+- **探针工程**：真源整仓复制到 `/tmp/goprobe`（**不动被冻结的真源**）· 探针 `probejwt/main.go`
+  **import 真源自己的 `sea-try-go/service/common/observability`**（`:31`）⇒ 不是重写版。
+  ⚠️ 探针落在 `/tmp`（**易失**）⇒ **落仓 `tools/difftest/` 需整合者拍板**（`tools/` 不在 G1 写权内）⇒ 已登记待办。
+- **启动路径与真源 api 逐行同构**（`messagecenter.go:36-42` 同款）：
+  `DisableNativeRestTimeout` → `rest.MustNewServer` → `server.Use(observability.NewHTTPMiddleware(...))`
+  ⇒ 打印 `PROBE conf.Timeout=3000ms httpTimeout=3s nativeTimeoutMiddlewareEnabled=**false**`
+  ⇒ **原生 TimeoutHandler 不在链上**（`conf.Middlewares.Timeout = false`）⇒ 3s **只**由真源自己的中间件提供。
+- **三个观测点**：A = 注册在 observability 中间件**之前**（更外层）· B = **之后**（更内层）· HANDLER = 最内层。
+
+| 腿 | 输入 | 实测（**本域独立复跑**，端口 25790，与 G2 的 25789 同程序、不同实例） | 判读 |
+|---|---|---|---|
+| ① | 有效 token · `/probe/fast` | HTTP **200**；`PROBE-A(outer) deadline_set=**false** claim_userId=12345` · `PROBE-B(inner) deadline_set=**true** remaining=3s` · `PROBE-HANDLER deadline_set=true` | A 已看到 claim（Authorize 跑过）但**还没有 deadline** ⇒ 预算 ctx 由 observability 中间件自建 ⇒ 验签在预算外 |
+| ② | 有效 token · `/probe/slow`（handler 睡 4s） | **HTTP 503 @ 3.002s** | 与 Go `http.go:88` `http.Error(w, httpTimeoutBody, 503)` 逐字一致 ⇒ 预算**只**覆盖 observability 之后的部分 |
+| ③ | **非法 token** · `/probe/fast` | **HTTP 401 + 空 body（0 字节）**，且 **A / B / HANDLER 三个观测点一个都没打印** | 🔴 **决定性反证**：若 Authorize 不是跑在所有 user middleware 之前，观测点 A 必然会打印 ⇒ 它没打印 ⇒ Authorize 在最外层 ⇒ **验签在 3s 预算之外** |
+
+⚠️ **腿③ 才是判据**（腿①②只是正证）⇒ 这也是「**负证据**比正证据更硬」的典型。
+⚠️ **本轮 G2 自己先判反过一次**（把「3s 预算」当成了 go-zero 原生 `TimeoutHandler`，而真源把它关掉了）⇒
+**读注册方式推链序会判反** ⇒ 必须读到**消费点**（AGENTS.md §3.3.1）。
 
 #### 1. ❌ 改法 A 原文为什么**不能**直接落（两条硬约束，本轮实测才发现）
 

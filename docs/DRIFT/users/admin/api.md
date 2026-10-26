@@ -1846,8 +1846,9 @@ global **E47**（业务层把「SQL 被 deadline 取消」改写/吞掉 ⇒ 事�
 
 > **元信息**：落码分支 `align/g1-users-follow`（基线 `a282012` = `do-my-own-gh`）·
 > **写权内**（全部落 `service/users/admin/admin-api/**`）·
-> **证据强度**：**L3 活体**（真 PG + 真 Redis + 真 Nacos + **真 Tomcat**，非 MockMvc）＋ **L2 装配层守门** ＋ **L1**（Go 侧链序逐行）
-> ⚠️ **未跑双侧活体对拍**（Go 侧进程未起）⇒ 按 AGENTS.md §0，读作「**在该证据强度下一致**」。
+> **证据强度**：**L4 运行时双侧活体**（Go 腿 = G2 建的探针 `/tmp/goprobe/probejwt/main.go`，**本域已独立复跑**，三腿全中 ⇒ 见 `user/api.md` §9.y.0；RAG 腿 = **真 Tomcat**，10 条探针）＋ **L2 装配层守门**
+> ⚠️ **两次独立运行**（Go 腿与 RAG 腿不在同一次编排里）⇒ 比的是**属性**（「验签是否计入 3s 预算」），**不是逐字节 diff**。
+> ⚠️ **未跑「同一套请求矩阵逐字节对拍」** ⇒ 按 AGENTS.md §0，读作「**在该证据强度下一致**」。
 >
 > ⚠️ **本条不是新差异，是「推广」** —— 差异本体早已登记（`DRIFT-ADMINAPI-006` 的 ② 半），
 > 本轮把它**修掉**；① 半（遥测面）**未动**。
@@ -1982,7 +1983,8 @@ go-zero@v1.10.2 rest/server.go:222-233     WithMiddleware ⇒ middleware(route.H
 | `user-api` | **G1** | ✅ 已修（上一轮提交 `49c298e`） |
 | `admin-api` | **G1** | ✅ **本轮已修** |
 | `follow-api` | **G1** | ✅ **本轮已修**（`DRIFT-FOLLOW-010`，见 [`follow/api.md`](../../follow/api.md)） |
-| `like-api` / `message-api` / `task-api` | **G2** | 🟡 待推广（配方见 [`user/api.md` §9.y §7](../user/api.md)） |
+| `like-api` / `message-api` | **G2** | 🟡 待推广（配方见 [`user/api.md` §9.y §7](../user/api.md)） |
+| ~~`task-api`~~ | ~~G2~~ | ❌ **N/A · 本条不适用**（**2026-10-27 由 G2 指出 · 本域已独立核实成立**）—— Go 侧 `service/task/api/internal/handler/routes.go` **零 `rest.WithJwt`**（实测 `grep -c WithJwt` = **0**、**1** 个 `AddRoutes` 块、唯一端点 `POST /taskcenter/v1/task/get`）；RAG 侧 `service/task/task-api` **无 `WebMvcConfig`、无任何 `*Jwt*`/`*Auth*`/`*Interceptor*` 类**（`TaskController.java:35` 的 `WithJwt` 只出现在**注释**里，说明 Go 侧刻意不加）⇒ **两侧都没有验签环节 ⇒ 不存在 3s 预算作用域漂移** |
 | `article-api` / `comment-api` / `favorite-api` | **G3** | 🟡 待推广（同上） |
 | ~~`hot-api`~~ | ~~G3~~ | ❌ **N/A · 本条不适用**（**2026-10-27 由 G3 指出 · 本域已独立核实成立**）—— Go 侧 `service/hot/api/internal/handler/routes.go` **零 `rest.WithJwt`**（实测 `grep -c WithJwt` = **0**，且只有 **1** 个 `AddRoutes` 块、唯一端点 `GET /hot/v1/articles`）⇒ Go 的 hot-api **根本没有验签环节**；RAG 侧 `service/hot/hot-api` **无 `WebMvcConfig`、无任何 `*Jwt*`/`*Auth*` 类**（`HotArticleController.java:31` 的 `rest.WithJwt` 只出现在**注释里**，说明 Go 侧刻意不加）⇒ **两侧都没有「验签」这个环节 ⇒ 不存在 3s 预算作用域漂移**。<br>⚠️ **别把「RAG 没有鉴权」当漂移** —— 热榜本就该匿名读。 |
 
@@ -1994,6 +1996,12 @@ go-zero@v1.10.2 rest/server.go:222-233     WithMiddleware ⇒ middleware(route.H
 | `favorite-api` | 三字段信封（已签字 `DEV-FAV-API-001`） | 有（Redis） | 全保护（Go 单块带 `WithJwt`） | 🟢 **最低**（已有真 Tomcat 守门 `FavoriteApiRealTomcatGateTest`） |
 | `comment-api` | **空 body** | 无 | 全保护 | 🟡 需新写真 Tomcat 用例（无真 Tomcat 测试 ⇒ 测不到「413 压过 401」这层） |
 | `article-api` | **空 body** | 无 | interceptor 内 `PROTECTED_ROUTES`（4 条，已 EQUIVALENT） | 🟡 同上（比 favorite 贵） |
+
+⇒ **🆕 G2 两域的逐域注记（2026-10-27 G2 回执）** —— **抄配方前必须逐域自己核**：
+| 域 | 401 body | public 路径 | ⚠️ 配方要改的地方 |
+|---|---|---|---|
+| `like-api` | （G2 域内口径） | **无 public 路径**（Go 6 条路由 **100% 带 `WithJwt`**） | Filter 的「是否 protected」判据**就是前缀本身** ⇒ 不需要像 user 域那样拆 public/protected 两张表 |
+| `message-api` | （G2 域内口径） | **无 public 路径**（Go 13 条路由 100% 带 `WithJwt`） | 🔴 **有两把 key**：Go `routes.go` **两段** `AddRoutes` —— 8 条 `/message/v1/**` 用 **UserAuth** secret、5 条 `/message/v1/admin/**` 用 **AdminAuth** secret ⇒ Filter 里**必须按路径分派 key** ⇒ 直接抄「一把 key」的写法会**验错**（拿 admin token 打 user 端点 / 反之 ⇒ 两侧都 401） |
 
 ### 12.9 🟡 **守门缺口**（非漂移）：admin-api 的 Redis 超时口径**本就对**，但**零守门**
 

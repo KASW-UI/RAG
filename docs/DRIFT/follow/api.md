@@ -699,8 +699,9 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 
 > **元信息**：落码分支 `align/g1-users-follow`（基线 `a282012` = `do-my-own-gh`）·
 > **写权内**（全部落 `service/follow/follow-api/**`）·
-> **证据强度**：**L3 活体**（真 PG + 真 Redis + 真 Nacos + **真 Tomcat**，非 MockMvc）＋ **L2 装配层守门** ＋ **L1**（Go 侧链序逐行）
-> ⚠️ **未跑双侧活体对拍**（Go 侧进程未起）⇒ 按 AGENTS.md §0，读作「**在该证据强度下一致**」。
+> **证据强度**：**L4 运行时双侧活体**（Go 腿 = G2 建的探针 `/tmp/goprobe/probejwt/main.go`，**本域已独立复跑**，三腿全中 ⇒ 见 [`users/user/api.md` §9.y.0](../users/user/api.md)；RAG 腿 = **真 Tomcat**，10 条探针）＋ **L2 装配层守门**
+> ⚠️ **两次独立运行**（Go 腿与 RAG 腿不在同一次编排里）⇒ 比的是**属性**（「验签是否计入 3s 预算」），**不是逐字节 diff**。
+> ⚠️ **未跑「同一套请求矩阵逐字节对拍」** ⇒ 按 AGENTS.md §0，读作「**在该证据强度下一致**」。
 >
 > ⚠️ **本条是 follow 域首次登记这一族差异** —— 推广 user-api 的 `DRIFT-USERAPI-009②` 时**顺手查出**。
 > ⚠️ 与 user-api 那条**同族但不是同一条**（编号各自独立）。
@@ -800,7 +801,8 @@ go-zero@v1.10.2 rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Ha
 | `user-api` | **G1** | ✅ 已修（提交 `49c298e`） |
 | `admin-api` | **G1** | ✅ **本轮已修**（见 [`users/admin/api.md` §12](../users/admin/api.md)） |
 | `follow-api` | **G1** | ✅ **本轮已修**（本节） |
-| `like-api` / `message-api` / `task-api` | **G2** | 🟡 待推广 |
+| `like-api` / `message-api` | **G2** | 🟡 待推广 |
+| ~~`task-api`~~ | ~~G2~~ | ❌ **N/A · 本条不适用**（**2026-10-27 由 G2 指出 · 本域已独立核实**）：Go 侧 `service/task/api/internal/handler/routes.go` **零 `rest.WithJwt`**、单块 `AddRoutes`、唯一端点 `POST /taskcenter/v1/task/get`；RAG 侧 `service/task/task-api` **无 `WebMvcConfig`、无任何 `*Jwt*`/`*Auth*`/`*Interceptor*` 类** ⇒ **两侧都没有验签环节 ⇒ 不存在这条漂移** |
 | `article-api` / `comment-api` / `favorite-api` | **G3** | 🟡 待推广 |
 | ~~`hot-api`~~ | ~~G3~~ | ❌ **N/A · 本条不适用**（**2026-10-27 由 G3 指出 · 本域已独立核实**）：Go 侧 `service/hot/api/internal/handler/routes.go` **零 `rest.WithJwt`**、单块 `AddRoutes`、唯一端点 `GET /hot/v1/articles`；RAG 侧 `service/hot/hot-api` **无 `WebMvcConfig`、无任何 `*Jwt*`/`*Auth*` 类** ⇒ **两侧都没有验签环节 ⇒ 不存在这条漂移**（热榜本就该匿名读） |
 
@@ -809,4 +811,6 @@ go-zero@v1.10.2 rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Ha
 ⇒ **🆕 G3 三域逐域注记（G3 回执 · 2026-10-27）**：`favorite-api` 401 = 三字段信封（已签字 `DEV-FAV-API-001`）＋ 有黑名单 ＋ 已有真 Tomcat 守门 ⇒ **验收成本最低**；
 `comment-api` 401 = 空 body ＋ 无黑名单 ＋ 全保护；`article-api` 401 = 空 body ＋ 无黑名单 ＋ 受保护路径 = `PROTECTED_ROUTES`(4 条，已 EQUIVALENT)；
 ⇒ 后两域**无真 Tomcat 测试** ⇒ 「413 压过 401」这层**只能新写真 Tomcat 用例**才测得到。
+⇒ **🆕 G2 两域逐域注记（G2 回执 · 2026-10-27）**：`like-api` / `message-api` **均无 public 路径**（Go 6 + 13 条路由 100% 带 `WithJwt`）⇒ Filter 的 protected 判据**就是前缀本身**；
+🔴 **`message-api` 有两把 key**（8 条 `/message/v1/**` 用 UserAuth secret、5 条 `/message/v1/admin/**` 用 AdminAuth secret）⇒ Filter **必须按路径分派 key** ⇒ 直接抄「一把 key」会验错。
 ⇒ **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）。
