@@ -43,7 +43,7 @@ git worktree list
 - `do-my-own-gh` —— 基线。⚠️ 建之前它必须干净；主目录有未提交改动时切分支会被 Git 拦。
 - 目录名不能用斜杠（`users/user` 会被当路径分隔）⇒ 写作 `users-user`。
 
-建完之后：
+建完之后（**以下是 2026-10-23 那一轮的「一域一工作树」历史形态**）：
 
 ```
 RAG/                    ← 主工作区，停在 do-my-own-gh
@@ -55,6 +55,13 @@ RAG.worktrees/          ← 11 个工作树（在 RAG 外面，不进版本库�
 ├── users-user/         ← align/users-user
 └── users-admin/        ← align/users-admin
 ```
+
+> ⚠️ **这段是历史示例**：2026-10-27 起该形态**已全部拆掉**（含 `common/`、`users-user/`、`users-admin/`），
+> **现状 = 下方「lane 版」的 10 条 `<域>-common` 工作树**。
+> ⇒ 其中旧的 **`global` 全域工作树（`align/global`，覆盖除 favorite 外的所有域）已弃用** ——
+> **理由（Jason 2026-10-27 定）**：**一个工作树跨多个域 ⇒ 粒度与操作内容不可控** ⇒ 不再作为干活的地方。
+> ⇒ `global` 域的活现在**拆成两处**：**各域自己的 `<域>-common` lane**（域内待办归各域）
+> ＋ **`global-common` lane**（只管 `service/common/**` 这**一个**共享层，粒度是窄的）。
 
 ⚠️ `service/common` 被 **16 个组件**依赖（article/comment/favorite/follow/hot/like/message/task 各自的 api+rpc），
 它是请求保护层。它不依赖任何其他域 ⇒ 并发自由度最高，值得先跑。
@@ -178,7 +185,7 @@ docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：�
 
 | 规则 | 内容 |
 |---|---|
-| **单写权** | **`service/common/**` 只有 `align/global` / `align/global-common` 能写**，别的域只读 ⇒ 别人发现 common 的 bug，**记台账交给 global**，不自己动手 |
+| **单写权** | **`service/common/**` 只有 `align/global-common` 能写**（旧的 `align/global` 全域 lane **已弃用** ⇒ 见 §二），别的域只读 ⇒ 别人发现 common 的 bug，**记台账交给 `global-common`**，不自己动手 |
 | **同一次提交** | 修法同时涉及 `service/common` 与别的域代码（`service/users/**` 等）⇒ **必须同一次提交**。否则会留下「一半改完」的半截状态 |
 | **落点** | `docs/DRIFT/global/`（+ `Pitfalls/global/` + `Intentional_Deviations/global/`），按**议题**分档，不是按 api/rpc/proto |
 | **与 `common` 域的边界** | `common` 域问「common 自己对不对」；`global` 问「**别人**因 common 而对不对」 |
@@ -190,6 +197,9 @@ docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：�
 
 ### 1c. 🆕 `global` 域的**多 lane 并行**（2026-10-25）
 
+> ⚠️ **本节记录的是 2026-10-25~26 那一轮的做法，已结束**（那 15 条 L1~L15 lane **全部已合回**），
+> 且**载体 `align/global`（全域 mega 工作树）已于 2026-10-27 弃用**（Jason：粒度与操作内容不可控）⇒
+> **本节仅作历史留档**；**当前唯一在跑的 global 侧 lane = `global-common`**（见 §三·1d）。
 > ⚠️ **单写权 ≠ 单会话** —— `global` 的待办横跨 6 个微服务域 + `service/common` + `tools/` + 三档台账，
 > 一个会话串行扛不住 ⇒ **一个域可以开多棵 lane 树并行**。
 > **完整协议 ⇒ [`docs/DRIFT/global/lanes/_PROTOCOL.md`](DRIFT/global/lanes/_PROTOCOL.md)**（以它为准）。
@@ -331,7 +341,6 @@ git merge-base --is-ancestor align/task-common do-my-own-gh && echo "已合回"
 | 合回主干 | `git merge --no-ff align/<域>` |
 | 同步基线 | `git merge do-my-own-gh`（在工作树内） |
 | 撤 | `git worktree remove <路径>` + `git branch -d <分支>` |
-| 建 `global` 收口域 | `git worktree add "../RAG.worktrees/global" -b align/global do-my-own-gh` |
 
 > ⚠️ IDE 里也能做（Git 工具窗口 ⌘9 → 右键分支 → `Git > 新建工作树…`），
 > 但多建时终端循环更快、不易点错。**不要在主目录上点「签出」**——那会带走另一个会话的未提交改动。

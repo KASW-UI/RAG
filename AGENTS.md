@@ -190,7 +190,7 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 | DDL 双侧活体逐列对照 | 其余 5 域（favorite 只建库） | ✅ **已做**（L3 ⇒ **9 域**；`article`/`follow` **0 差异**；`like`/`favorite` 差异全是「RAG 更严」⇒ 签字候选；`hot` = **N/A**） |
 
 **排序约束**：**rpc 必须先于 api**（Go 侧边界是 api→rpc；rpc 没验对就先验 api ⇒ 产出「RAG api 行为正确」的假结论——`message-rpc` 曾有 21 条全绿测试却一次没起过）。
-**跨域收口**：修法落在 `service/common` ⇒ **只有 `global` 能写**（`align/global` + `align/global-common`，别的域只读）⇒ 并发必排队 ⇒ **靠 lane 按「叶子文件」切**（§5.3c·§5.3d）。
+**跨域收口**：修法落在 `service/common` ⇒ **只有 `align/global-common` 能写**（旧的 `align/global` 全域 lane 已弃用）⇒ 并发必排队 ⇒ **靠 lane 按「叶子文件」切**（§5.3c·§5.3d）。
 ## 四、当前重构（多 phase · 真理之源 = Go）
 
 ### 4.1 锁定的决策（来自用户问答，2026-10-18）
@@ -229,7 +229,7 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 3b. **三档台账：每域必读 + 必写**（2026-10-23 用户定）—— 开工前**必读** `docs/DRIFT/` + `docs/Intentional_Deviations/` +
    `docs/Pitfalls/` 的**本域子目录 + `_cross/`**；产出**必写回**同名的**本域子目录**。⚠️ **只写自己域，三个 `_INDEX.md` 合并后统一更新**。⇒ 细则 ⇒ [`docs/Worktree.md`](docs/Worktree.md) §二·五·**三·1d**
 3c. **`global` 收口域（2026-10-25 用户定）** —— 跨微服务 + `service/common` 影响的搁置漂移**全部归它**
-   （§3.5）。⇒ **`service/common/**` 只有 `align/global` / `align/global-common` 能写**，别的域只读；
+   （§3.5）。⇒ **`service/common/**` 只有 `align/global-common` 能写**，别的域只读；
    修法同时涉及 `service/common` 与别的域代码时**必须同一次提交**（否则留下半截）。
    ⇒ 🆕 **一个域可开多棵 lane 树并行**（`global` 已拆 15 条 lane（**按模块零重叠** ⇒ 同模块两个 lane 会互踩 `target/`））⇒ 协议 ⇒ [`docs/DRIFT/global/lanes/_PROTOCOL.md`](docs/DRIFT/global/lanes/_PROTOCOL.md)
 3d. 🆕 **`<域>-common` lane（2026-10-27 用户定）** —— 语义 = 「**本域 ↔ `service/common`** 的跨层漂移」

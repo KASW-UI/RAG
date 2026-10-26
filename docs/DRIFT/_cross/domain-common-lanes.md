@@ -23,6 +23,7 @@
 | 分支 | `align/<域>-common`（全部从 `do-my-own-gh` 切，主干最后接合并） |
 | 基点 | **`do-my-own-gh` @ 2026-10-27**（= lane 脚手架落地那次提交；此前已合并 25/25 分支 + 全量回归 BUILD SUCCESS）⇒ 主干再前进时 lane `merge` 一次即可（**文件级不重叠 ⇒ 零冲突**） |
 | `service/common/**` 写权 | 🔴 **只有 `align/global-common` 能写**（AGENTS.md §5.3c·§5.3d）；其余 9 条 lane **只读 common 侧** |
+| ⚠️ **不是旧的 `align/global`** | 旧的 `align/global` 是**全域 mega 工作树**（覆盖除 favorite 外所有域）⇒ **2026-10-27 弃用**（Jason：一个工作树跨多域 ⇒ **粒度与操作内容不可控**）⇒ 其工作树已拆、内容已 100% 合回主干。**`global-common` 的范围只有一个共享层**（`service/common/**`）⇒ 粒度是窄的 |
 | **每条 lane 的台账** | **`docs/DRIFT/<域>/vs-common.md`**（**每条 lane 独占一份** ⇒ 10 路并发零冲突） |
 | common 侧机制面台账 | [`docs/DRIFT/common/`](../common/)：`deadline.md` · `http.md` · `protection.md` · `audit.md` · `alignment-2026-10-23.md` |
 

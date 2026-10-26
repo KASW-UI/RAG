@@ -55,6 +55,11 @@
 ⇒ 机器网：`check-global-lane-ownership.py` 的 `ACTIVE` 档**已登记**本条（⇒ 将来再开 lane 撞 `service/common/**` 会红）。
 ⇒ 总纲 ⇒ [`../../_cross/domain-common-lanes.md`](../../_cross/domain-common-lanes.md)
 
+⚠️ **它不是旧的 `align/global`** —— 旧的 `align/global` 是**全域 mega 工作树**（覆盖除 favorite 外的所有域）
+⇒ **2026-10-27 已弃用**（Jason：一个工作树跨多域 ⇒ **粒度与操作内容不可控**）⇒ 其工作树已拆、内容已 100% 合回主干。
+⇒ **`global-common` 的范围只有一个：`service/common/**`（外加 `docs/DRIFT/global/vs-common.md`）** ⇒ 粒度是**窄**的。
+⇒ 各域**域内**的待办归**各域自己的 `<域>-common` lane** ⇒ 不再需要一个跨全域的 mega 工作树。
+
 ### 3.2 已合回（第二十八轮 · 4 条）
 
 > ⚠️ **本轮修的是「生产启动阻塞」**（不是守门）⇒ 白名单含 `src/main/resources` 与 `pom.xml`。

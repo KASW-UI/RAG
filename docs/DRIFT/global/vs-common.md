@@ -16,7 +16,7 @@
 | 基点 | **`do-my-own-gh` @ 2026-10-27**（= lane 脚手架落地那次提交；此前已合并 25/25 分支 + 全量回归 BUILD SUCCESS）⇒ 主干再前进时 lane `merge` 一次即可（**文件级不重叠 ⇒ 零冲突**） |
 | 本域模块 | `service/common/`（`com.rag.common` 共享层：`observability` / `protection` / `http` / `persistence` / `response` / `communityfact` / `exception` / `logger` / `snowflake` / `spring`） |
 | 域侧台账 | [`_README.md`](_README.md) · [`cross-domain.md`](cross-domain.md) · [`common-tails.md`](common-tails.md) · [`cycle-deps.md`](cycle-deps.md) · [`lanes/`](lanes/) |
-| **写权** | ✅ 可写**本域** `service/global/**` ＋ `docs/DRIFT/global/**`；🔴 **`service/common/**` 只读**（只有 `align/global-common` 能写） |
+| **写权** | 🔴 **`service/common/**` 的唯一写者**（`service/common/pom.xml` ＋ `service/common/src/**`）＋ 本 lane 台账 `docs/DRIFT/global/vs-common.md`；⚠️ **旧的 `align/global` 全域 lane 已弃用**（Jason：一个工作树跨多域 ⇒ 粒度与操作内容不可控）⇒ 本 lane 的范围**只有这一个共享层** |
 | common 侧机制面台账 | [`docs/DRIFT/common/`](../common/)：`deadline.md` · `http.md` · `protection.md` · `audit.md` · `alignment-2026-10-23.md` |
 
 ## 1. 本域侧已知的 common 相关条目（**2026-10-27 抽取**，逐条证据以域台账为准）
@@ -41,7 +41,7 @@
 |---|---|---|---|---|---|
 | **A1** | 超时 / deadline | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
 | **A2** | gRPC 拦截器链 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
-| **A3** | HTTP 保护链 | 本域 `application.yml` 的 `rag.http.go-form-limit.mode` = **—（**本 lane 就是共享层本身** ⇒ 10 个域的 yaml 由它核）** ＋ 共享层 6 个类 | ⬜ **待 lane 复核**（共享层已验 ⇒ 缺「本域真实请求」证据） | — | — |
+| **A3** | HTTP 保护链 | **本 lane 就是共享层本身** ⇒ 核「**10 个域**各自 yaml 的 `go-form-limit.mode` 与 Go 侧 `SetErrorHandler` 注册是否同向」＋ 6 个共享类 | ⬜ **待 lane 复核**（共享层已验 ⇒ 缺「10 域逐域真实请求」证据） | — | — |
 | **A4** | 错误码 / envelope | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
 | **A5** | 端口治理 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
 | **A6** | errmsg 契约 | ⬜ 待填 | ⬜ **待 lane 复核** | — | — |
@@ -52,10 +52,12 @@
 > **A3 已预填一条实测锚点（2026-10-27 核）** —— X-6（`DRIFT-HOTAPI-030`）共享层 6 个类已落码
 > （`GoStyleFormValues` / `GoStyleFormLimitMode` / `GoStyleFormLimitExceededException` /
 > `GoStyleFormValueLimitInterceptor` / `GoStyleFormLimitWebMvcConfig` / `GoStyleTomcatParameterLimitCustomizer`）；
-> 本域 `go-form-limit.mode` = **—（**本 lane 就是共享层本身** ⇒ 10 个域的 yaml 由它核）**；Go 侧：**共享层 owner** ⇒ 「Go 侧是否注册 `SetErrorHandler`」由本 lane 逐域核（已核：comment/follow/hot/like/message **5 域注册**；article/task/user/admin **4 域未注册**；favorite **未注册且 RAG 侧刻意 `off`** ⇒ 两侧同向 ✅）
-> ⇒ ⚠️ **共享层已验 ≠ 本域已验** ⇒ lane 仍须在本域**跑一次真实请求**确认拒绝形状。
+> **本 lane 就是共享层本身** ⇒ 「逐域 `go-form-limit.mode` ＋ Go 侧 `SetErrorHandler` 注册」的对照由本 lane 核：
+> comment/follow/hot/like/message **5 域注册 ⇒ envelope**；article/task/user/admin **4 域未注册 ⇒ raw**；
+> favorite **未注册 ＋ RAG 侧刻意 `off`** ⇒ 两侧都不过限 ⇒ 零触碰。
+> ⇒ ⚠️ **共享层已验 ≠ 各域已验** ⇒ 本 lane 仍须**逐域跑一次真实请求**确认拒绝形状。
 
-## 3. 域侧能自修的（**本 lane 直接修**，不要甩给 global）
+## 3. 共享层能自修的（**本 lane 直接修**；其余 9 条 lane 只登记 + 派单到这里）
 
 - 🔴 **`service/common/**` 的唯一写权 owner**（AGENTS.md §5.3c·§5.3d）⇒ 其余 9 条 lane 的派单**全部落到本 lane**
 - `GoStyleBreakerFilter` 注释订正 · `SqlTimeoutStatusTranslator` javadoc 归因 · `manifest_chain --no-merges` ⇒ 本 lane 自办
