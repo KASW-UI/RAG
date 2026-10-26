@@ -227,33 +227,33 @@ OP-SCHEMA  AdminSchemaBootstrap.initSchema（:51-64）
 | CreateAdmin | **事务代理生效** | 无 AOP | 跨 Bean 调用（AdminDomainService.java:446） | **EQUIVALENT** | 真 PG 容器测试；结构断言 `AdminUpdateSelfAndCreateAdminRegressionTest:158-180` |
 | CreateAdmin | **invite 行悲观锁** | `clause.Locking{Strength:"UPDATE"}`（admin.go:131） | `.last("FOR UPDATE")`（AdminCreateAtomicService.java:119） | **EQUIVALENT** | 真 PG：`AdminRpcConcurrencyWiringTest` N=8 ⇒ 1 OK + 7 拒（0 skipped） |
 | CreateAdmin | 步骤序（invite→username→bcrypt→uid→insert→标 used） | createadminlogic.go:55,70,79,84,96,105 | AdminCreateAtomicService.java:116,130,148,169,172 | **EQUIVALENT** | 真 PG：`AdminCreatePasswordOrderRegressionTest` 5 条 R5-A/B/C/C2/C3 |
-| CreateAdmin | 空 inviteCode → PermissionDenied（事务外） | :48-51 | :396-399 | **EQUIVALENT** | 静态源码 |
-| CreateAdmin | 空 username 不拦截 | 无校验（:44 只 trim） | 无校验（:407，DRIFT-008） | **EQUIVALENT** | `AdminSemanticDriftRegressionTest:352` |
+| CreateAdmin | 空 inviteCode → PermissionDenied（事务外） | :48-51 | `AdminDomainService.createAdmin` 的 inviteCode 非空校验（`AdminDomainService.java:472-474`）—— **在 `createAdminAtomic`（事务）之前** ⇒ 事务外 | **EQUIVALENT** | 静态源码 |
+| CreateAdmin | 空 username 不拦截 | 无校验（:44 只 trim） | 无校验（`AdminDomainService.java:483` 只 trim，DRIFT-008） | **EQUIVALENT** | `AdminSemanticDriftRegressionTest:352` |
 | CreateAdmin | **uid 生成位置** | 事务内 W5（:84） | 事务外（AdminDomainService.java:431） | **IMPLEMENTATION DIFFERENCE** | 静态源码；uid 值本就随时间变，不构成可观测差异 |
 | CreateAdmin | **update_time 推进** | GORM autoUpdateTime 必进 SET | 永不推进 | **OBSERVABLE DIFFERENCE** | DRIFT-ARPC-001 |
 | CreateInviteCode | TTL=10min / 前缀 ADM- / 3 次重试 | createinvitecodelogic.go:26,64,109 | AdminDomainService.java:66,512,559 | **EQUIVALENT** | 静态源码 + 3 条 Mockito 单测 |
 | Login | 三态 + 密码错 vs hash 畸形同码 | loginlogic.go:43-60；cryptx/password.go:15-18 | AdminDomainService.java:163-191 | **EQUIVALENT** | 静态源码 + `AdminDomainServiceTest` |
-| Logout | 黑名单 key/TTL/失败码 | logoutlogic.go:36-42 | AdminDomainService.java:218-227 | **EQUIVALENT** | 静态源码 |
+| Logout | 黑名单 key/TTL/失败码 | logoutlogic.go:36-42 | `AdminDomainService.logout`（`AdminDomainService.java:258-277`：Redis 写 `:267` · B-1 守卫 `:268-271` · INTERNAL `:274`） | **EQUIVALENT** | 静态源码 |
 | Logout | **success 字段** | false（空 Resp） | false（空 Builder） | **EQUIVALENT** | AdminServiceGrpcImpl.java:85 |
 | GetUserList | keyword 不 trim | admin.go:152-155 | AdminDomainService.java:682-683 | **EQUIVALENT** | 真 PG：`AdminSemanticDriftRegressionTest` 2 条 + 容器测试 1 条 |
 | GetUserList | LIKE 双重包裹 | `%kw%` | `%%kw%%`（MP 拼接） | **IMPLEMENTATION DIFFERENCE** | 真 PG（A-U3 已在 §6.2.3 关闭） |
-| GetUserList | **负 offset/limit 抑制** | GORM clause/limit.go | `goStylePagination`（:781-798） | **EQUIVALENT** | 真 PG：`AdminRpcPaginationGormSemanticsTest` 7 条 |
+| GetUserList | **负 offset/limit 抑制** | GORM clause/limit.go | `AdminDomainService.goStylePagination`（`AdminDomainService.java:902`；调用点 `:831`） | **EQUIVALENT** | 真 PG：`AdminRpcPaginationGormSemanticsTest` 7 条 |
 | GetUserList | 空结果 wire 形状 | `make([]…,0)` | 无 addList | **EQUIVALENT** | 静态源码（proto3 repeated 两侧都零字节） |
 | UpdateUser | 逐字段「非空才 set」 | updateuserlogic.go:56-86 | AdminDomainService.java:840-881 | **EQUIVALENT** | 静态源码 |
-| UpdateUser | email **不** trim | :81-83 | :875-877 | **EQUIVALENT** | 静态源码 |
+| UpdateUser | email **不** trim | :81-83 | `AdminDomainService.updateUser` 的 email set（`AdminDomainService.java:1011`）—— **对比 `updateSelf` 的 `:385` 是 `email.trim()`** ⇒ 两侧 updateUser 都不 trim | **EQUIVALENT** | 静态源码 |
 | UpdateUser | **success 字段（wire）** | **false**（未 set） | **true** | **OBSERVABLE DIFFERENCE** | DRIFT-ARPC-002 |
-| UpdateUser | 重读后返回 | :95-113 | :896-909 | **EQUIVALENT** | 静态源码 |
+| UpdateUser | 重读后返回 | :95-113 | `AdminDomainService.updateUser` 的重读（`AdminDomainService.java:1042`） | **EQUIVALENT** | 静态源码 |
 | UpdateSelf | email trim + 空白跳过 | updateselflogic.go:67-69 | AdminDomainService.java:328-335 | **EQUIVALENT** | `AdminUpdateSelfAndCreateAdminRegressionTest` 3 条 |
 | BanUser/UnBanUser | RowsAffected==0 ⇒ NotFound | admin.go:103-109 | AdminDomainService.java:588-591 | **EQUIVALENT** | 静态源码 |
 | DeleteUser | NotFound 文本「用户%d不存在」 | deleteuserlogic.go:48 | AdminDomainService.java:934 | **EQUIVALENT** | 静态源码（格式串逐字一致） |
-| ResetUserPassword | 不检查 RowsAffected | admin.go:111-114 | :996（不检查） | **EQUIVALENT** | 静态源码 |
-| ResetUserPassword | **default-password 为空** | bcrypt("") **成功** ⇒ 设空密码哈希 | 直接 `Internal「密码加密失败」`（:976-979） | **OBSERVABLE DIFFERENCE** | DRIFT-ARPC-003 |
+| ResetUserPassword | 不检查 RowsAffected | admin.go:111-114 | `AdminDomainService.doResetUserPassword`（`AdminDomainService.java:1174`「W4 update（不检查 RowsAffected）」） | **EQUIVALENT** | 静态源码 |
+| ResetUserPassword | **default-password 为空** | bcrypt("") **成功** ⇒ 设空密码哈希 | 直接 `Internal「密码加密失败」`（`AdminDomainService.doResetUserPassword` 的 W3 段，`AdminDomainService.java:1137` 起） | **OBSERVABLE DIFFERENCE** | DRIFT-ARPC-003 |
 | Seeder | 密码来源 | 常量 "admin"（servicecontext.go:18） | 常量（AdminDomainService.java:94） | **EQUIVALENT** | 真 PG：`AdminRpcContainerWiringTest` 2 条 |
 | Seeder | 并发启动幂等 | servicecontext.go:62-70 | AdminSeederBootstrap.java:138-152 | **EQUIVALENT** | 真 PG：容器测试「重复执行 seeder 不产生重复账号」 |
 | Seeder | 相对 gRPC server 的时机 | MustNewServer **之前**（admin.go:34 vs :36） | `@PostConstruct`，早于 `SmartLifecycle.start()` | **EQUIVALENT** | 真 PG：容器测试「建表先于 seeder」+ DRIFT-010 已修 |
 | Schema | **建表覆盖面** | 3 张（db.go:15） | **4 张**（SchemaInitializer.SCRIPTS） | **OBSERVABLE DIFFERENCE** | DRIFT-ARPC-005 |
-| Schema | **时间列类型** | `timestamptz` | `timestamp`（无时区） | **OBSERVABLE DIFFERENCE** | DRIFT-ARPC-004；真 PG schema 对照 |
-| Schema | extra_info 列类型 | `text`（存 JSON 串） | `jsonb` | **OBSERVABLE DIFFERENCE** | DRIFT-ARPC-004；真 PG schema 对照 |
+| Schema | **时间列类型** | `timestamptz` | `timestamptz` | **EQUIVALENT** | 🟢 **2026-10-26 订正**：原写 RAG 侧 `timestamp`（无时区）⇒ **已过期** —— RAG 侧 DDL 早就是 `TIMESTAMPTZ`（`03_create_admin.sql` / `04_create_admin_invite.sql`，且带 `ALTER … TYPE TIMESTAMPTZ USING … AT TIME ZONE 'UTC'` 幂等重放）⇒ 本域 §「DRIFT-ARPC-004 ①② 已修」已修（见 §1.2）⇒ ⚠️ **本表原先写的是修前状态** |
+| Schema | extra_info 列类型 | `text`（存 JSON 串） | `text` | **EQUIVALENT**（列类型）/ ⚠️ **写路径参数绑定见下一行** | 🟢 **2026-10-26 订正**：原写 RAG 侧 `jsonb` ⇒ **已过期** —— DDL 侧早已是 `TEXT`（`03_create_admin.sql:58`）⇒ **两侧列类型一致**。<br>⚠️ **但残留一格（不是列类型）**：`admin-rpc` 的 `UserEntity.extra_info`（**`users_user` 表**）在主干上仍走 `JsonbTypeHandler` ⇒ **参数按 jsonb 绑定**（`ps.setObject(…, Types.OTHER)`）⇒ ⇒ **global 的 B10（`ff80214`，在 `align/global` 上）已把它删掉**（`JsonbTypeHandler` 整体删除 + 改走 `JsonTextTypeHandler`）⇒ ⇒ **该格在 `align/global` 上已闭合，待合回主干**（⇒ 同时影响 users/**user** 域的 `DRIFT-USERRPC-V-003`：他们销的是 DDL 那一格，**代码那一格落在本域源码树里**） |
 | Schema | 建表并发保护 | 无（AutoMigrate 裸跑） | `pg_advisory_lock` | **IMPLEMENTATION DIFFERENCE**（增强） | SchemaInitializer.java:91,115 |
 | Flyway | 是否启用 | 不适用（Go 无 Flyway） | pom 无 flyway 三件套；`application.yml` 无 `spring.flyway.*` | **EQUIVALENT** | `check-flyway-ledger.py` EXIT=0 且不含 admin-rpc |
 | 鉴权 | 是否在本组件鉴权 | **不鉴权**，信任入参 uid/operator_id | 同 | **EQUIVALENT** | 全模块无 JWT/session 校验代码 |
@@ -3456,8 +3456,8 @@ global 那个守门类是**分支上新加的** ⇒ 主干没有 ⇒ **触发 MI
 # 2026-10-26 第四十一轮（global **E62**）—— 🔴 **再订正一次我自己的订正**：「毫秒精度已生效」在**生产上**是错的
 
 > 📌 **编号消歧**：外部那些「🔴【**§9 订正**：…】」标记里的「**§9**」指的是**本块整体**；
-> 而本块**内部**的子节编号是 1~9（`## 1.` … `## 9.`）⇒ **两者不是同一级**，读到子节 `## 9.` 时别误当成「整块 §9」。
-> ⇒ **本块的后两节（`## 8.` 锚点漂移 · `## 9.` 第四十二轮回执复核）是同一轮补的** ⇒ **一并以本块为准**。
+> 而本块**内部**的子节编号是 1~10（`## 1.` … `## 10.`）⇒ **两者不是同一级**，读到子节 `## 9.` / `## 10.` 时别误当成「整块 §9」。
+> ⇒ **本块的后三节（`## 8.` 锚点漂移 · `## 9.` 第四十二轮回执复核 · `## 10.` 第四十四轮回执消化）都是同一轮补的** ⇒ **一并以本块为准**。
 
 > **本轮性质**：**纯台账订正**（**零代码改动**）⇒ 不需要重跑测试门禁。
 > ⇒ **但本轮仍重跑了（2026-10-26 22:32 实跑）**：admin-rpc **105/0/0/0** · `skipped=0` · **BUILD SUCCESS**（`-pl service/users/admin/admin-rpc -am test`）
@@ -3716,3 +3716,138 @@ global 第四十一轮：「第②层现在的可观察面（833ms）**主要来
 
 ⇒ 🟢 **这与本轮 §8 是一对**：§8 是「**自己改文件 ⇒ 自己的锚点失效**」；§9 是「**别人推分支 ⇒ 别人的回执过期**」
 ⇒ ⇒ **两者都是「锚点/引用的保质期不由引用者控制」** ⇒ ⇒ **同一个坑位 `P-18`**（见 `docs/Pitfalls/users/admin/rpc.md`）。
+
+---
+
+## 10. 🔴 第四十四轮回执消化 —— **三封回执连续三次过期** ＋ **合回前必看：`align/global` 与主干在我域子树上的 delta**
+
+> **本节性质**：**纯台账订正**（零代码改动）⇒ 门禁沿用上一轮实测（admin-rpc **105/0/0/0** · `service/common` **174/0/0/0** · `skipped=0**，2026-10-26 22:32 实跑）。
+
+### 10.1 🔴 **三封回执，连续三次都过期**（⇒ 这不是意外，是模式）
+
+| # | 回执 | 它说 `align/global` 当前是 | **两处远端实测** | 落后 |
+|---|---|---|---|---|
+| 1 | 第四十二轮 | `51d6abd` | **`0516774`** | **6 轮** |
+| 2 | 第四十三轮 | `a0b24a3` | **`0516774`** | **7 轮** |
+| 3 | **第四十四轮**（本节） | `76c3b26` | **`0516774`** | **6 轮** |
+
+⇒ 🔴 **三封都过期，且都因为同一个机制**：对方会话在**按队列顺序回放历史消息** ⇒
+⇒ **它回你第 N 封消息时，用的是「处理第 N 封消息那一刻」的 ref** ⇒ ⇒ **ref 不会随队列前进而更新**。
+⇒ ⇒ 📌 **这解释了为什么回执越积越旧**：**回执的 ref 是「回执生成时」的快照，不是「送达时」的现状**。
+⇒ ⇒ 📌 **也解释了它为什么说「你们域分支 `1d79f56` 未合回」** ⇒ **也过期**：本域 `8a1f355` 已合回（2026-10-26 18:0x），现状 `f397319`。
+
+⇒ 🟢 **它的 ④ 里那句「下一轮：E62 落地」** ⇒ 🔴 **E62 已在第四十五轮 `180f865` 落地**（详见 §9.1）⇒ **它排的「下一轮」在它自己的分支上早已做完 2 轮**。
+
+⇒ 📌 **⇒ 本域的处置（已固化为 `P-18` 形态 B）**：
+- **发出方**：回执里凡引用别域的 **ref / 行号 / 计数** ⇒ **必须写明「核对的 ref = X（日期）」**；
+- **收到方**：收到回执 ⇒ **先 `git ls-remote` 核那封回执引的 ref 是否还是当前 tip** ⇒ **不是 ⇒ 那封回执的「当前状态」类断言全部按「历史快照」读**；
+- 🔴 **推论（本轮新增）**：**回执的「当前状态」类断言会随队列深度一起变旧** ⇒ ⇒ **队列越深，回执越不能当现状用** ⇒ ⇒ **别把「三封都对得上我之前那几封」误当成「它现在说的也对」**。
+
+### 10.2 ✅ **merge-tree 实测 ⇒ 我上一轮那个「4 条守门会丢」的担心，被推翻**（留痕，不删）
+
+🔴 我上一轮（P-18 形态 A 那节）担心：「`align/global` 合回主干时，`AdminRpcContainerWiringTest.java` 必然冲突 ⇒ global 的 8 条版会覆盖我那 4 条守门」。
+
+⇒ 🟢 **本轮用 `git merge-tree --write-tree` 干跑（`3cb52ad` + `0516774`）**：
+
+| 核项 | 实测 | 结论 |
+|---|---|---|
+| 合并是否有冲突 | **EXIT=0，产出合并树 `b0a6e1a`** | ✅ **无冲突**（两边改的是**不同区段**：global 改前面、我的 4 条追加在后面 ⇒ git 可自动合并） |
+| 合并树里 `AdminRpcContainerWiringTest` 的 `@Test` 数 | **12** | ✅ **我的 4 条 B-1 守门全在**（插件链 / 挂载点 / NC-A / NC-B）⇒ **守门不会丢** |
+| 合并树里 `AdminDomainService` 的「B-1 放行分支」类级 javadoc | **29 处命中** | ✅ **在** |
+| 合并树里 `JsonbTypeHandler` | **被删** | 🟢 **但所有引用已同步**（`UserEntity.extra_info` 的 typeHandler + `AdminEntity` / `JsonTextTypeHandler` / `AdminRpcColumnTypeParityTest` 的 javadoc 全部改写）⇒ ⇒ **不会编译失败** |
+
+⇒ ⇒ 📌 **教训**：**「文件两边都改过 ⇒ 一定冲突」是错的** —— 冲突取决于**改的区段是否重叠**。
+⇒ ⇒ **在报告「合回会出问题」之前，先跑一次 `merge-tree` 干跑**（零成本、不动工作树）⇒ **别把推测当结论报出去**（本域自己的 P-15）。
+
+### 10.3 🔴 **合回前本域必看：`align/global` 与主干在我域子树上的 13 个文件 delta**
+
+`git diff 3cb52ad 0516774 --stat -- service/users/admin` ⇒ **13 files changed, 912 insertions(+), 433 deletions(-)**
+
+| # | 文件 | delta | 本域视角 |
+|---|---|---|---|
+| 1 | `admin-rpc/.../service/AdminDomainService.java` | **160** | ✅ 合并后**我的类级 javadoc 在**、global 的改动也在 ⇒ 需 review |
+| 2 | `admin-rpc/src/test/.../bootstrap/AdminRpcContainerWiringTest.java` | **201** | ✅ 合并后 **12 条 @Test**（我的 4 条守门在） |
+| 3 | `admin-rpc/src/test/.../AdminRpcColumnTypeParityTest.java` | **129** | 🟡 与 B10 配套（列类型改 text） |
+| 4 | `admin-rpc/.../mapper/JsonbTypeHandler.java` | **−98（删除）** | 🟢 **global 的 B10**（`ff80214`）⇒ 见 §10.4 |
+| 5 | `admin-rpc/.../mapper/JsonTextTypeHandler.java` | +40 | 🟢 B10 配套（合并两个 handler） |
+| 6 | `admin-rpc/.../domain/AdminEntity.java` | 13 | 🟢 B10 配套（javadoc） |
+| 7 | `admin-rpc/.../domain/UserEntity.java` | 18 | 🔴 **B10 的落点**：`extra_info` 的 typeHandler 改 `JsonTextTypeHandler` ⇒ 见 §10.4 |
+| 8 | `admin-rpc/.../service/AdminCreateAtomicService.java` | 3 | 🟡 |
+| 9 | `admin-rpc/pom.xml` | 8 | 🟡 |
+| 10 | `admin-api/.../config/WebMvcConfig.java` | 2 | 🟡 |
+| 11 | `admin-api/src/main/resources/application.yml` | **+33** | 🟡 |
+| 12 | `admin-rpc/src/test/.../AdminRpcGrpcInterceptorWiringTest.java` | **+323（新增）** | 🔴 **global 写在我域目录下的守门**（`3e91b53` 第二十七轮 L6） |
+| 13 | `admin-rpc/src/test/.../AdminRpcSlowThresholdGateTest.java` | **+317（新增）** | 🔴 **global 写在我域目录下的守门**（`0e2efaf` 第二十三轮 L2） |
+
+⇒ ⇒ 📌 **三条本域须知**：
+1. 🟢 **我的 4 条守门在合并后仍在**（§10.2 实测）⇒ **不用抢跑**；
+2. 🔴 **本域台账里写死的测试条数会变**（`105` ⇒ 会加上 global 那 2 个守门类的条数）⇒ ⇒ **合回主干后本域台账的条数必须重数**（§6.3 状态表纪律）;
+3. 🔴 **本域台账里「RAG 侧 `extra_info` 是 jsonb」「RAG 侧时间列是 `timestamp`」那两行已过期** ⇒ 已订正（见 §10.4）。
+
+### 10.4 🟢 **global 的 B10 落在我域源码树里** ⇒ 连带两件事
+
+🔴 **事实**：`ff80214`（global 第十八轮 · B10）把 `admin-rpc/.../domain/UserEntity.java` 的 `extra_info` typeHandler
+从 `JsonbTypeHandler`（**jsonb 绑定**：`ps.setObject(…, Types.OTHER)`）改成 `JsonTextTypeHandler`（**text 绑定**），
+并**整体删除** `admin-rpc/.../mapper/JsonbTypeHandler.java` ⇒ **全部引用同步改写**（合并树实测无编译问题）。
+
+⇒ 📌 **为什么这落在我域**：`users_user` 表的实体与 mapper **在 admin-rpc 里**（`admin-rpc/.../domain/UserEntity.java`）
+⇒ ⇒ **users/**user** 域的 `DRIFT-USERRPC-V-003` 销掉的是 DDL 那一格（`01_create_user.sql`）**，
+⇒ ⇒ **代码那一格（写路径参数绑定）一直残留，且残留的文件在 admin 域的目录里** ⇒ ⇒ **global 在我域目录里把它修掉了**。
+
+⇒ 🔴 **⇒ 已通知 users/user 域**：他们台账 §431 / §1499 写「两侧都按 text 写」⇒ **DDL 侧确实**，但
+**「代码侧」在主干上当时不成立**（admin-rpc 的 `UserEntity.extra_info` 仍按 jsonb 绑定）⇒ **该格已由 global B10 修掉（待合回）**。
+
+⇒ 🟢 **本域台账的两处订正**（**组件级语义对照表 · Schema 两行**）：
+| 行 | 原写 | 订正 |
+|---|---|---|
+| 时间列类型 | RAG 侧 `timestamp`（无时区）⇒ **OBSERVABLE DIFFERENCE** | 🟢 **两侧都 `timestamptz`** ⇒ **EQUIVALENT**（我域 §「DRIFT-ARPC-004 ①② 已修」早已修好 ⇒ **本表原先写的是修前状态**） |
+| extra_info 列类型 | RAG 侧 `jsonb` ⇒ **OBSERVABLE DIFFERENCE** | 🟢 **DDL 两侧都 `text`** ⇒ **EQUIVALENT**；⚠️ **残留是「写路径参数绑定」那一格**（`UserEntity.extra_info` 走 jsonb 绑定）⇒ **global B10 在分支上已闭合，待合回** |
+
+### 10.5 🔴 **P-18 形态 A 的更深一层：这张表用「裸行号」，比全路径更脆** —— 本轮又抓出 **6 处失效**
+
+🔴 **上轮（§8）我只扫了「带文件名」的锚点（37 处）** ⇒ ⇒ **漏掉了本域对照表里 RAG 侧的**裸 `:NNN`****
+⇒ ⇒ **本轮补扫 ⇒ 7 处裸行号里 6 处已失效**：
+
+| 台账行 | 维度 | 旧（失效） | 现行（已改） |
+|---|---|---|---|
+| 230 | CreateAdmin · 空 inviteCode → PermissionDenied | **旧值 `:396-399`**（指向 `AdminCreateAtomicService` ⇒ **越界**，该文件只有 206 行）⇒ ⚠️ **历史值·已失效，别当活锚点抄** | `AdminDomainService.createAdmin` 的 inviteCode 非空校验（`:472-474`，**事务外**） |
+| 231 | CreateAdmin · 空 username 不拦截 | **旧值 `:407`**（指向 `AdminCreateAtomicService` ⇒ **越界**）⇒ ⚠️ **历史值·已失效** | `AdminDomainService.java:483`（只 trim，DRIFT-008） |
+| 236 | Logout · 黑名单 key/TTL/失败码 | `AdminDomainService.java:218-227`（**实为 login 的 DB 错误块**） | `AdminDomainService.logout`（`:258-277`） |
+| 240 | GetUserList · 负 offset/limit 抑制 | `:781-798`（落在 javadoc） | `AdminDomainService.goStylePagination`（`:902`；调用点 `:831`） |
+| 243 | UpdateUser · email **不** trim | `:875-877`（实为 getUserList 的尾巴） | `AdminDomainService.java:1011`（对比 `updateSelf` 的 `:385` 是 `email.trim()`） |
+| 245 | UpdateUser · 重读后返回 | `:896-909`（落在 javadoc） | `AdminDomainService.java:1042` |
+| 249 | ResetUserPassword · 不检查 RowsAffected | `:996` | `AdminDomainService.doResetUserPassword`（`:1174`） |
+| 250 | ResetUserPassword · default-password 为空 | `:976-979`（实为 updateUser 的代码） | `AdminDomainService.doResetUserPassword` 的 W3 段（`:1137` 起） |
+
+⇒ ⇒ 📌 **⇒ 8 处已全部改成「符号名 + 现行行号」** ⇒ ⇒ **复检：裸行号 5 处 0 可疑 · 全路径 37 处 0 越界**。
+
+🔴 **⇒ 为什么「裸行号」比「全路径」更脆**：
+| | 全路径（`Foo.java:123`） | **裸行号（`:123`）** |
+|---|---|---|
+| 机器能查吗 | 第 1 层只查**路径存在**（不查行号） | ❌ **连路径都没有 ⇒ 机器连「存在性」都无从查** |
+| 人能自己定位吗 | 知道去哪个文件找 | ❌ **依赖「上文最近一次点名的文件」⇒ 隔一行就可能认错文件** |
+| 失效时能自检吗 | ❌ 不能 | ❌ **更不能** |
+⇒ ⇒ 📌 **判据**：**裸行号是「台账里最不可查的锚点形式」** ⇒ ⇒ **凡是指向 RAG 侧代码的锚点，一律带文件/符号名**（AGENTS.md §3.1 对共享层的要求，本轮把它用到了**本域的对照表**上）。
+
+### 10.6 🟢 global 的新守门 `check-ledger-tables.py` ⇒ 对本域**零违规**，且**本域非空转**（已自证）
+
+🔴 **背景**（global 第四十四轮 ⑦）：它的落账脚本用「长文本 `replace`」插行 ⇒ **会静默吃掉上一行的行首**
+⇒ ⇒ **它自己台账有 6 处「表格结构塌陷」**（内容一个字没丢 ⇒ **肉眼扫不出、内容层守门查不出**）⇒ ⇒ 新增了结构层守门。
+
+⇒ ✅ **本域实测（2026-10-26）**：
+| 核项 | 结果 |
+|---|---|
+| `check-ledger-tables.py --root <本域 worktree> --all` | ✅ **「台账表格结构完好」** ⇒ **本域零违规**（⇒ global 那个坑**我没踩中**：本轮改台账用的是行级编辑 + 追加，不是长文本 `replace`） |
+| 退出码语义 | ✅ **干净态 0 / 变异态 1** ⇒ **参与退出码** ⇒ 可当门禁用 |
+| 🔴 **非空转自证（本域自己做）** | 把「无行首内容行」注入**本域对照表的真表格块**（`rpc.md` 的 Schema 行）⇒ 守门**精确命中** `docs/DRIFT/users/admin/rpc.md:258` ⇒ **退出码 1** ⇒ ⇒ **守门对本域有牙**（⇒ 已还原，`git diff` 为空） |
+| ⚠️ **该守门的 `--mutation-test` 对本域不适用** | ❌ 它是 **global 自家 `_README.md` 专用**（找不到「带日期行首」的时间线行 ⇒ 报「变异前置失败」）⇒ ⇒ **别的域要用它，得自己写一条本域的变异**（本域已做，如上） |
+
+⇒ 🟢 **顺带**：global 说的「用脚本改台账时，插行请用行级插入（按行号/锚点整行），别用长文本 `replace`」
+⇒ ⇒ **本域采纳**（本轮 §10.4/§10.5 的所有订正**都是行级替换** + 逐条复检）。
+
+### 10.7 本轮改动清单（rpc.md 侧）
+
+- **零代码改动** ⇒ 门禁沿用 2026-10-26 22:32 实测（admin-rpc **105/0/0/0** · `service/common` **174/0/0/0** · `skipped=0`）。
+- **组件级语义对照表**：**8 处失效的 RAG 侧锚点**全部改成「符号名 + 现行行号」；**Schema 两行（时间列 / extra_info）**从「修前状态」订正为现状。
+- **新增 §10**（本节）：三封回执连续三次过期 · merge-tree 实测推翻上轮担心 · 13 文件 delta · B10 落我域 · 裸行号盲区 · global 新守门对我域的结论。
+- ⚠️ **回信 global**：① **三封回执连续三次过期**（表）⇒ **回执的 ref 是「生成时」的快照，且会随队列深度一起变旧** ⇒ ② **merge-tree 干跑结论**：合回**无冲突**、我域 4 条守门**全在**、类级 javadoc **在**、`JsonbTypeHandler` 删除**引用全同步** ⇒ ⇒ **我上轮那个「守门会丢」的担心不成立** ⇒ ③ **13 文件 delta 表** + **B10 落我域**（⇒ 已通知 users/user 域）⇒ ④ **global 新守门对我域零违规 + 我域自证非空转**（注入真表格块 ⇒ 精确命中 `rpc.md:258` + 退出码 1）⇒ ⑤ **该守门的 `--mutation-test` 是 global 自家专用** ⇒ 别的域要自己写一条。
