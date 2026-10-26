@@ -63,18 +63,15 @@ REPO = Path(__file__).resolve().parents[2]
 # ⚠️ 与 docs/DRIFT/global/lanes/*.md 的「写权范围」一一对应；改这里必须同步改那里。
 # ⚠️ **在跑的 lane**（ACTIVE）：重叠只在这些之间算违规。
 ACTIVE: dict[str, list[str]] = {
-    # ---- 2026-10-27：`<域>-common` lane 体系（10 条）里的 **global 那一条** ----
-    # ⚠️ `global-common` = 「global ↔ `service/common`」这条**跨层**对账 lane
-    #    ⇒ 它是 `service/common/**` 的**唯一**写权 owner（AGENTS.md §5.3c·§5.3d）
-    #    ⇒ 登记它 ⇒ 守门能挡住「将来再开一条 lane 也声明 service/common/**」
-    # ⚠️ 白名单刻意写 `service/common/src/**` 而不是 `service/common/**`
-    #    ⇒ 避免把 `target/` 的**构建产物**算进写权集合（同源 PIT-GLOBAL-029）
-    # ⚠️ 另 9 条 `<域>-common` lane **只读** common 侧 ⇒ **不登记**（它们不是写权方）
-    "global-common": [
-        "service/common/pom.xml",
-        "service/common/src/**",
-        "docs/DRIFT/global/vs-common.md",
-    ],
+    # ⚠️ **2026-10-27 01:44 收口**：工作树重组为 **G1~G4 四棵波次工作树**
+    #    （`align/g1-users-follow` / `align/g2-message-like-task` /
+    #    `align/g3-article-comment-favorite-hot` / `align/g4-service-common`）
+    #    ⇒ 原 `global-common` 那条 lane **已随工作树一起删除**（分支也不再存在）。
+    # ⇒ **并发不变量的守门已迁到 `tools/difftest/check-wave-lane-ownership.py`**
+    #    （那个守门管 G1~G4 的写权 + 「白名单路径必须命中真实文件」+ 「分支必须真实存在」）。
+    # ⇒ **本守门退回为 `global` 域内历史 lane 的归档**（L1~L15 全部已合回）。
+    # ⚠️ **「已删分支仍登记在 ACTIVE」＝ 恒绿假绿**（2026-10-27 实测踩到）：
+    #    `global-common` 被删后本守门照样 EXIT=0 ⇒ 故新增的守门加了「分支必须真实存在」断言。
     # ---- 第二十七轮（2026-10-26）：6 条新 lane，按**模块**零重叠 ----
     # ---- 第二十八轮（2026-10-26）：4 条 lane，按**模块**零重叠 ----
 }
@@ -83,6 +80,15 @@ ACTIVE: dict[str, list[str]] = {
 #    ⇒ 与在跑的 lane 重叠**不算违规**（但仍要守「共享文件无人拥有」与「favorite 零写权」）。
 #    留档是为了让「声明」与「历史」可对照，不是为了参与重叠判定。
 CLOSED: dict[str, list[str]] = {
+    # ---- 2026-10-27：`global-common`（`<域>-common` lane 体系里的 global 那一条）----
+    # ⚠️ 它曾登记在 `ACTIVE`，2026-10-27 01:44 **随工作树重组一起删除**
+    #    （写权已迁到 `align/g4-service-common` ⇒ 见 `check-wave-lane-ownership.py`）。
+    # ⚠️ 移入本档是因为**它曾经真实存在过**（不是「登记了但分支不存在」）。
+    "global-common": [
+        "service/common/pom.xml",
+        "service/common/src/**",
+        "docs/DRIFT/global/vs-common.md",
+    ],
     # ---- 第二十八轮（2026-10-26）：4 条 lane，**已全部合回** ⇒ 移入本档 ----
     # ⚠️ 它们与在跑 lane 白名单**必然重叠**（同模块的 test 目录）⇒ 但**已合回的不是并发方**
     # ⚠️ 本轮修的是**生产启动阻塞**（不是守门）⇒ 白名单含 `src/main/resources` 与 `pom.xml`。
@@ -341,7 +347,11 @@ def main() -> int:
         return 1
 
     print("✅ PASS")
-    print(f"  · 在跑的 {len(ACTIVE)} 条 lane 写权范围两两不重叠")
+    if not ACTIVE:
+        print("  · ⚠️ **本守门当前没有在跑 lane** ⇒ 断言 1「两两不重叠」**空跑**")
+        print("    ⇒ 并发不变量的守门在 `tools/difftest/check-wave-lane-ownership.py`（G1~G4）")
+    else:
+        print(f"  · 在跑的 {len(ACTIVE)} 条 lane 写权范围两两不重叠")
     print(f"  · 已合回的 {len(CLOSED)} 条 lane 单列归档（不参与重叠判定）")
     print(f"  · {len(SHARED)} 个共享文件无人拥有（归整合者）")
     print("  · favorite 域零写权")

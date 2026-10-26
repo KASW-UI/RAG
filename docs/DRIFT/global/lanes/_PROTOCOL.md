@@ -38,32 +38,35 @@
 
 ## 三、lane 清单（2026-10-25 建 · 2026-10-26 扩到 15 条）
 
-### 3.1 在跑（**1 条**：`global-common`）
+### 3.1 在跑（**4 条**：G1~G4 波次工作树）
 
 > ✅ 第二十七轮（L6~L11）与第二十八轮（L12~L15）**全部已合回** ⇒ 写权已并入 `align/global`。
 > ⇒ 下一轮开 lane 时：**① 在本节加「在跑」表**（含分支 / 工作树 / 议题 / 独占写权）
-> **② 同步在 `tools/difftest/check-global-lane-ownership.py` 的 `ACTIVE` 档登记**（否则守门看不到它）
+> **② 同步在 `tools/difftest/check-wave-lane-ownership.py` 的 `ACTIVE` 档登记**（否则守门看不到它）
 > **③ 机器守门 `EXIT=0` 才算合规**。
 
 | lane | 分支 / 工作树 | 议题 | 独占写权 |
 |---|---|---|---|
-| **`global-common`** | `align/global-common` / `../RAG.worktrees/global-common` | 「**global ↔ `service/common`**」跨层对账 —— 10 条 `<域>-common` lane 体系里的 global 那一条 | `service/common/pom.xml` ＋ `service/common/src/**` ＋ [`../vs-common.md`](../vs-common.md) |
+| **G1** | `align/g1-users-follow` / `../RAG.worktrees/g1-users-follow` | `users`（**不含 `users-common`**）+ `follow` | `service/users/{user,admin}/**` ＋ `service/follow/**` ＋ `docs/DRIFT/{users,follow}/**` |
+| **G2** | `align/g2-message-like-task` / `../RAG.worktrees/g2-message-like-task` | `message` + `like` + `task` | `service/{message,like,task}/**` ＋ `docs/DRIFT/{message,like,task}/**` |
+| **G3** | `align/g3-article-comment-favorite-hot` / `../RAG.worktrees/g3-article-comment-favorite-hot` | `article` + `comment` + `favorite` + `hot` | `service/{article,comment,favorite,hot}/**` ＋ `docs/DRIFT/{article,comment,favorite,hot}/**` |
+| **G4** | `align/g4-service-common` / `../RAG.worktrees/g4-service-common` | **共享层波**：`service/common` + `service/users/users-common` | `service/common/pom.xml` ＋ `service/common/src/**` ＋ `service/users/users-common/**` ＋ [`../vs-common.md`](../vs-common.md) |
 
-⚠️ **它与 §3.2/§3.3/§3.4 那 15 条历史 lane 性质不同**：那 15 条是 `global` **域内**按议题切；
-本条是**跨域**的机制面对账 —— 其余 **9 条** `<域>-common` lane **只读** common 侧 ⇒ 它们的派单全部落到本条
-⇒ **写权是独占的**：别的 lane（无论域内还是跨域）都不得声明 `service/common/**`
-⇒ 机器网：`check-global-lane-ownership.py` 的 `ACTIVE` 档**已登记**本条（⇒ 将来再开 lane 撞 `service/common/**` 会红）。
-⇒ 总纲 ⇒ [`../../_cross/domain-common-lanes.md`](../../_cross/domain-common-lanes.md)
+⚠️ **2026-10-27 01:44 工作树重组**（Jason 定）：原先的 **10 条 `<域>-common` lane 工作树全部撤掉**
+⇒ 执行形态收敛为**这 4 棵** ⇒ 粒度 = 「一个波次 = 一棵工作树」，不再是「一个域 = 一棵」。
+⇒ 写权守门**随之迁移**：并发不变量的守门 = `tools/difftest/check-wave-lane-ownership.py`
+（管 G1~G4 的写权两两不重叠 + `favorite` 只归 G3 + 共享层只归 G4 + **白名单路径必须命中真实文件** + **分支必须真实存在**）；
+`tools/difftest/check-global-lane-ownership.py` 退回为 `global` 域内历史 lane（L1~L15）的**归档**。
 
-⚠️ **它不是旧的 `align/global`** —— 旧的 `align/global` 是**全域 mega 工作树**（覆盖除 favorite 外的所有域）
-⇒ **2026-10-27 已弃用**（Jason：一个工作树跨多域 ⇒ **粒度与操作内容不可控**）⇒ 其工作树已拆、内容已 100% 合回主干。
-⇒ **`global-common` 的范围只有一个：`service/common/**`（外加 `docs/DRIFT/global/vs-common.md`）** ⇒ 粒度是**窄**的。
+⚠️ **`favorite` 的排他性变了**：旧守门里「favorite 域对 global 零写权」——
+现在 **favorite 是 G3 的正当写权面** ⇒ 排他规则改成「**favorite 只归 G3**，其余 lane 不得声明」。
 
-⇒ 🆕 **落码窗口（2026-10-27）**：`global-common` 是**共享层波**的唯一 owner ⇒
-   **域波进行期间 `service/common/**` 只读、只登记反馈单**（7 项，AGENTS.md §5.3e）；
-   **共享层波激活时**才落码 ⇒ 域波中改共享层 ⇒ **该波测试结论作废**（编译绿 ≠ 行为对）。
+⚠️ **G4 的范围比旧 `global-common` 宽**：多了 `service/users/users-common/**`
+（§5.3f：`users-common` 跨 **6 个外域** ⇒ 它是**第二个共享层** ⇒ 写权归共享层波，**不归 G1**）。
+
+⇒ **落码窗口**：**G1~G3 期间 `service/common` + `users-common` 只读、只登记反馈单**（7 项，AGENTS.md §5.3e）；
+   **G4 激活时**才落码 ⇒ G1~G3 中改共享层 ⇒ **该波测试结论作废**（编译绿 ≠ 行为对）。
    ⇒ 波次表 / 依赖 DAG ⇒ [`../../../_cross/cross-domain-coupling.md`](../../../_cross/cross-domain-coupling.md) §二·§三。
-⇒ 各域**域内**的待办归**各域自己的 `<域>-common` lane** ⇒ 不再需要一个跨全域的 mega 工作树。
 
 ### 3.2 已合回（第二十八轮 · 4 条）
 

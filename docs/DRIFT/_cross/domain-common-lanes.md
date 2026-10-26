@@ -22,15 +22,33 @@
 | 工作树目录 | `/Users/pr/Documents/java&golang/RAG.worktrees/<域>-common` |
 | 分支 | `align/<域>-common`（全部从 `do-my-own-gh` 切，主干最后接合并） |
 | 基点 | **`do-my-own-gh` @ 2026-10-27**（= lane 脚手架落地那次提交；此前已合并 25/25 分支 + 全量回归 BUILD SUCCESS）⇒ 主干再前进时 lane `merge` 一次即可（**文件级不重叠 ⇒ 零冲突**） |
-| `service/common/**` 写权 | 🔴 **只有 `align/global-common` 能写**（AGENTS.md §5.3c·§5.3d·**§5.3e**）；其余 9 条 lane **只读 common 侧** |
-| 🆕 **阶段划分（2026-10-27）** | **两阶段，不并行**：<br>**阶段 1 = 只读对账**（10 条 lane 并行，逐轴出结论 + 填**反馈单**）⇒ **不落任何代码**；<br>**阶段 2 = 按波次落地**（域波 + **共享层波**，波次表见 [`cross-domain-coupling.md`](cross-domain-coupling.md) §二）⇒ **共享层统一在共享层波落**。<br>⚠️ **阶段 1 若落域侧代码，会与阶段 2 同域撞文件** ⇒ 阶段 1 **必须全只读** |
-| ⚠️ **不是旧的 `align/global`** | 旧的 `align/global` 是**全域 mega 工作树**（覆盖除 favorite 外所有域）⇒ **2026-10-27 弃用**（Jason：一个工作树跨多域 ⇒ **粒度与操作内容不可控**）⇒ 其工作树已拆、内容已 100% 合回主干。**`global-common` 的范围只有一个共享层**（`service/common/**`）⇒ 粒度是窄的 |
+| **`service/common` + `users-common` 写权** | 🔴 **只有 `align/g4-service-common` 能写**（AGENTS.md §5.3c·§5.3d·**§5.3e·§5.3f**）；G1~G3 **只读共享层侧** |
+| 🆕 **阶段划分（2026-10-27）** | **两阶段，不并行**：<br>**阶段 1 = 只读对账**（在 G1~G3 四棵工作树里做，逐轴出结论 + 填**反馈单**）⇒ **不落任何代码**；<br>**阶段 2 = 按波次落地**（G1→G2→G3→**G4 共享层波**，波次表见 [`cross-domain-coupling.md`](cross-domain-coupling.md) §二）⇒ **共享层统一在 G4 落**。<br>⚠️ **阶段 1 若落域侧代码，会与阶段 2 同域撞文件** ⇒ 阶段 1 **必须全只读** |
+| 🆕 **执行形态（2026-10-27 01:44 重整）** | 原 **10 条 `<域>-common` lane 工作树全部撤掉** ⇒ 收敛为 **4 棵波次工作树**：`align/g1-users-follow`（users 不含 users-common + follow）· `align/g2-message-like-task` · `align/g3-article-comment-favorite-hot` · `align/g4-service-common`（共享层）。⇒ **粒度 = 一个波次一棵**，不再是「一个域一棵」 |
+| ⚠️ **不是旧的 `align/global`** | 旧的 `align/global` 是**全域 mega 工作树**（覆盖除 favorite 外所有域）⇒ **2026-10-27 弃用**（Jason：一个工作树跨多域 ⇒ **粒度与操作内容不可控**）⇒ 其工作树已拆、内容已 100% 合回主干。<br>🆕 **也不是 10 条 `<域>-common` lane**（那 10 棵工作树 2026-10-27 01:44 一并撤掉）⇒ 执行形态 = **G1~G4 四棵**（一波次一棵） |
 | **每条 lane 的台账** | **`docs/DRIFT/<域>/vs-common.md`**（**每条 lane 独占一份** ⇒ 10 路并发零冲突） |
 | common 侧机制面台账 | [`docs/DRIFT/common/`](../common/)：`deadline.md` · `http.md` · `protection.md` · `audit.md` · `alignment-2026-10-23.md` |
 
 ---
 
-## 1. 10 条 lane 清单
+## 1. 10 条 lane 清单 → **4 棵波次工作树（G1~G4）**
+
+> ⚠️ **2026-10-27 01:44 重整（Jason 定）**：下表的 10 条 `<域>-common` lane **工作树已全部撤掉**
+> ⇒ 执行形态收敛为 **G1~G4 四棵工作树**（一波次一棵）。**下表保留**是因为：
+> ① **9 条机制面轴 A1~A9 的对账方法与逐域台账 `docs/DRIFT/<域>/vs-common.md` 仍然有效**（阶段 1 只读对账的载体）；
+> ② **各域与 common 相关的条目数**是阶段 1 的抽取快照（规模参考）。
+
+| 波次工作树 | 分支 / 工作树 | 承接的 `<域>-common` 对账（阶段 1） | 落码波次 |
+|---|---|---|---|
+| **G1** | `align/g1-users-follow` / `../RAG.worktrees/g1-users-follow` | `users-common`（**含 users 域**）+ `follow-common` ⇒ 台账 [`users/vs-common.md`](../users/vs-common.md) · [`follow/vs-common.md`](../follow/vs-common.md) | G1 |
+| **G2** | `align/g2-message-like-task` / `../RAG.worktrees/g2-message-like-task` | `message-common` + `like-common` + `task-common` ⇒ [`message/`](../message/vs-common.md) · [`like/`](../like/vs-common.md) · [`task/`](../task/vs-common.md) | G2 |
+| **G3** | `align/g3-article-comment-favorite-hot` / `../RAG.worktrees/g3-article-comment-favorite-hot` | `article-common` + `comment-common` + `favorite-common` + `hot-common` ⇒ [`article/`](../article/vs-common.md) · [`comment/`](../comment/vs-common.md) · [`favorite/`](../favorite/vs-common.md) · [`hot/`](../hot/vs-common.md) | G3 |
+| **G4** | `align/g4-service-common` / `../RAG.worktrees/g4-service-common` | 原 `global-common` lane（= `service/common` **本身**）＋ `users-common` 的**共享层侧** ⇒ [`global/vs-common.md`](../global/vs-common.md) | **G4（共享层波）** |
+
+⇒ ⚠️ **`users` 域被 G1 与 G4 切两半**：G1 拿 `service/users/{user,admin}/**`（用户/管理业务），
+G4 拿 `service/users/users-common/**`（**跨 6 个外域的共享层**）⇒ **文件级零重叠**（守门可证）。
+
+### 1.1 原 10 条 lane 清单（阶段 1 的对账来源，已撤工作树）
 
 | # | lane | 工作树 | 分支 | lane 台账（独占） | 域台账里与 common 相关的条目（实测抽取） |
 |---|---|---|---|---|---|
@@ -74,19 +92,22 @@
 
 | 面 | 谁可写 | 依据 |
 |---|---|---|
-| `service/common/**` | 🔴 **只有 `align/global-common`** | AGENTS.md §5.3c·§5.3d |
-| `service/users/users-common` 的 **8 个跨域类** | 🔴 **同 `align/global-common`**（物理位置不动，只改**写权归属**） | AGENTS.md §5.3f · [`cross-domain-coupling.md`](cross-domain-coupling.md) §四 |
+| `service/common/**` | 🔴 **只有 `align/g4-service-common`** | AGENTS.md §5.3c·§5.3d·§5.3e |
+| `service/users/users-common/**`（**整库**） | 🔴 **同 `align/g4-service-common`**（物理位置不动，只改**写权归属**） | AGENTS.md §5.3f · [`cross-domain-coupling.md`](cross-domain-coupling.md) §四 |
 | `service/users/users-common` 的 **3 个 users 专用类**（`ErrorCode`/`PasswordUtil`/`SchemaInitializer`） | ✅ **users 域 lane** | AGENTS.md §5.3f |
 | 本域的 `service/<域>/**` ＋ `docs/DRIFT/<域>/**` | ✅ 本域 lane | AGENTS.md §5.3b（只写自己域） |
 | `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` | 🔴 合并后统一更新 | AGENTS.md §5.3 |
 
 ⇒ **lane 发现 common 侧缺陷时**：① 域侧先把**现象 + 证据 + 建议修法**写进**本域台账**（`docs/DRIFT/<域>/vs-common.md`），
    **反馈单 7 项**（现象 / Go 侧 `文件:行号` / RAG 侧现状 / 证据强度 / 建议修法 / 影响面 / 是否阻塞本波；缺项不得进排期）；
-② 转派 `global-common`（`docs/DRIFT/global/_README.md` §七之二的跨域桶）；③ **不得**在域 lane 里改 `service/common`（§5.3d：否则留下半截）。
+② 转派 **G4**（`align/g4-service-common`；台账 [`global/vs-common.md`](../global/vs-common.md) + `docs/DRIFT/global/_README.md` §七之二的跨域桶）；
+③ **不得**在 G1~G3 里改 `service/common` 或 `users-common`（§5.3d·§5.3e：否则留下半截 + 该波结论作废）。
 ⇒ **域侧能自修的**（本域代码里的调用方式、配置、断言、装配）**一律本域修**，不要甩给 global。
-⇒ 🆕 **落码窗口**（AGENTS.md §5.3e）：**域波期间 `service/common` 只读、只登记**；**共享层波才激活写权**
-   ⇒ 域波进行中改共享层 ⇒ **该波测试结论作废**（编译绿 ≠ 行为对：全仓无 API 兼容门禁）。
-   ⇒ **例外升级**：某波「不改 common 就过不了」⇒ 该波**就地升级为全量回归波**（2411 条），等共享层改完再重跑。
+⇒ 🆕 **落码窗口**（AGENTS.md §5.3e）：**G1~G3 期间 `service/common` + `users-common` 只读、只登记**；**G4 才激活写权**
+   ⇒ G1~G3 进行中改共享层 ⇒ **该波测试结论作废**（编译绿 ≠ 行为对：全仓无 API 兼容门禁）。
+   ⇒ **例外升级**：某波「不改共享层就过不了」⇒ 该波**就地升级为全量回归波**（2411 条），等共享层改完再重跑。
+   ⇒ **机器守门**：`tools/difftest/check-wave-lane-ownership.py`（G1~G4 写权两两不重叠 + `favorite` 只归 G3
+   + 共享层只归 G4 + **白名单路径必须命中真实文件** + **分支必须真实存在**）。
 
 ---
 
@@ -119,7 +140,7 @@
 1. **先让它真的启动一次**（AGENTS.md §0 第 3 条）：「跑绿」≠「对」⇒ 本域组件的**真启动**是 lane 的第 0 步。
 2. **按 §2 的 9 条轴逐轴对账**：轴上**本域侧**的现状 ⇒ 结论写「✅/🔴/🟡 + 证据强度 + 核对日期」。
 3. **两侧同时跑**（AGENTS.md §3.3）：探针必须**两侧同时跑**（Go 侧调真源解析包，RAG 侧用**真实** mapper/容器）⇒ **只跑 RAG 的探针不算数**。
-4. **common 侧缺陷 ⇒ 转派 `global-common`**（本域只登记，不改 `service/common`）。
+4. **common 侧缺陷 ⇒ 转派 G4**（`align/g4-service-common`；本域只登记，不改 `service/common` / `users-common`）。
 5. **落账位置**：域侧条目写**本域台账**（`docs/DRIFT/<域>/vs-common.md` ＋ 既有域台账）；跨域项同时在**本文件 §4** 登记一行（便于多域对齐时看交汇点）。
 6. **收口判据**：本 lane 的 common 相关条目**要么 ✅（在该证据强度下一致），要么 🔴 已登记并转派**，且**每条都有核对日期**（§6 状态表纪律）。
 

@@ -147,32 +147,28 @@ task     →                            （Kafka ← like）
 | **R3** | **共享层改动单独成波** —— 域波进行中改共享层 ⇒ 域波行为基线变 ⇒ **域波测试结论作废** | §1.6 + §3 |
 | **R4** | 每波收口 = **本波全量** + **组外调用方的契约回归** | §1.2 |
 
-### 2.2 主方案（2026-10-27 Jason 定：3 组 + 1 共享层波）
+### 2.2 ✅ **最终方案（2026-10-27 Jason 定）= 4 棵波次工作树 G1~G4**
 
-| 波 | 域 | 组内拓扑子序（**回归序**） | 并发上限 | 组外调用方（必回归） |
+| 波 | 工作树 / 分支 | 域 | 组内拓扑子序（**回归序**） | 组外调用方（必回归） |
 |---|---|---|---|---|
-| **G1** | `users`(user+admin) · `follow` | `users` → `follow` | 1（行为层可 2） | `message` · `like` · `article` · `favorite` |
-| **G2** | `message` · `like` · `task` | `message` → `like` → `task` | 1 | `article` · `comment` · `hot` |
-| **G3** | `article` · `comment` · `favorite` · `hot` | `article` → {`comment`,`favorite`,`hot`} | 3 | `favorite` · `comment` · `hot`（域内互依） |
-| **G4** | **共享层波**：`service/common/**` + `users-common` 提级类（§四） | 按「跨域引用域数降序」排期 | 1（单写权） | **全部 9 域 ⇒ 全量 2411 条** |
+| **G1** | `RAG.worktrees/g1-users-follow` / `align/g1-users-follow` | `users`(user+admin，**不含 `users-common`**) · `follow` | `users` → `follow` | `message` · `like` · `article` · `favorite` |
+| **G2** | `RAG.worktrees/g2-message-like-task` / `align/g2-message-like-task` | `message` · `like` · `task` | `message` → `like` → `task` | `article` · `comment` · `hot` |
+| **G3** | `RAG.worktrees/g3-article-comment-favorite-hot` / `align/g3-article-comment-favorite-hot` | `article` · `comment` · `favorite` · `hot` | `article` → {`comment`,`favorite`,`hot`} | 域内互依 |
+| **G4** | `RAG.worktrees/g4-service-common` / `align/g4-service-common` | **共享层波**：`service/common/**` + `service/users/users-common/**` | 按「跨域引用域数降序」排期 | **全部 9 域 ⇒ 全量 2411 条** |
 
-⚠️ **G2 的 `task` 依赖 `like`（Kafka）**、**G3 的 `hot` 依赖 `article` + `like`** ⇒
-**跨组顺序不可乱**：G1 → G2 → G3 → G4。**G4 必须在 G3 之后**（否则 G1~G3 的结论全部作废，R3）。
+⚠️ **跨波顺序不可乱**：**G1 → G2 → G3 → G4**。
+**G4 必须在 G3 之后**（G1~G3 期间共享层只读 ⇒ 否则那三波的结论全部作废，R3）。
+⚠️ **G2 的 `task` 依赖 `like`（Kafka）**、**G3 的 `hot` 依赖 `article` + `like`** ⇒ 组内按拓扑序回归。
 
-### 2.3 备选：按层级拆 4 域波（并发峰值更高）
+⇒ **写权 = 一棵工作树一个面**（文件级零重叠）⇒ 机器可证：
+`tools/difftest/check-wave-lane-ownership.py` ⇒ `EXIT=0`。
+⇒ 旧的 **10 条 `<域>-common` lane 工作树已全部撤掉**（2026-10-27 01:44）⇒ 粒度从「一个域一棵」改成「**一个波次一棵**」。
 
-若要压总工期，按 §1.3 的层级重切：
+### 2.3 备选（**未采纳**）：按层级拆 5 波
 
-| 波 | 域 | 并发 | 组外调用方 |
-|---|---|---|---|
-| W1 | `users` | 1（user 轨 + admin 轨 = 2） | **5** |
-| W2 | `follow` · `message` | 2 | 3 |
-| W3 | `like` · `article` | 2 | 4 |
-| W4 | `task` · `comment` · `favorite` · `hot` | **4** | **0**（外溢为零） |
-| W5 | 共享层（`service/common` + `users-common` 提级类） | 1 | 全量 2411 |
-
-**取舍**：4 波方案 **并发峰值 4**（3 波方案 3）、**W4 外溢 0**（3 波方案 G3 仍有域内互依），
-代价是**波数多一轮**。**两方案共享同一套 §三 共享层规则**，可按工期压力二选一。
+若日后要压总工期，可按 §1.3 的层级再切（W1 `users` / W2 `follow`+`message` / W3 `like`+`article` /
+W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、**W4 外溢 0**，代价是**波次多一轮**。
+⇒ **两方案共享同一套 §三 共享层规则**；**当前按 G1~G4 执行**。
 
 ### 2.4 ⚠️ 一波收口 ≠ 「我这波绿了」
 
@@ -200,12 +196,12 @@ task     →                            （Kafka ← like）
 
 | # | 规则 | 落地 |
 |---|---|---|
-| **C1** | **共享层写权唯一**：`service/common/**` + `users-common` 提级类 ⇒ 只有共享层波的工作树能写 | `align/global-common`（分支保留，**角色改为「共享层波」**）；其余域 lane **只读** |
-| **C2** | **落码窗口**：共享层**只在 G4/W5 波激活** ⇒ 域波期间 common **只读、只登记** | 域波期间改 common ⇒ 该波结论作废（R3） |
-| **C3** | **域波遇到 common 缺陷** ⇒ **不甩单、不留半截** ⇒ 登记**反馈单**（§3.3），域侧**能自修的自修**（调用方式 / 配置 / 断言 / 装配） | `docs/DRIFT/<域>/vs-common.md` 的「需转派」段 |
-| **C4** | **例外升级**：某波卡在「不改 common 就过不了」 ⇒ **该波就地升级为全量回归波**（跑全部 2411 条），等共享层改完再重跑 | 波次记录里写明升级原因与重跑结果 |
-| **C5** | **共享层波内部排期**：按「跨域引用域数降序」（§1.4）⇒ 先动 10 域类、再 9 域类 ⇒ **每次改动后立刻跑全量** | 共享层波的工作日志 |
-| **C6** | **物理位置不变**：提级的是**写权与波次归属**，**不是目录搬迁** ⇒ `users-common` 的类**留在原目录**（避免大范围 import 改动 ⇒ 大爆炸半径） | 目录保持 `service/users/users-common/` |
+| **C1** | **共享层写权唯一**：`service/common/**` + `service/users/users-common/**` ⇒ 只有共享层波的工作树能写 | **`align/g4-service-common`**；G1~G3 **只读** |
+| **C2** | **落码窗口**：共享层**只在 G4 波激活** ⇒ G1~G3 期间共享层 **只读、只登记** | G1~G3 期间改共享层 ⇒ 该波结论作废（R3） |
+| **C3** | **域波遇到共享层缺陷** ⇒ **不甩单、不留半截** ⇒ 登记**反馈单**（§3.3），域侧**能自修的自修**（调用方式 / 配置 / 断言 / 装配） | `docs/DRIFT/<域>/vs-common.md` 的「需转派」段 ⇒ 转派 **G4** |
+| **C4** | **例外升级**：某波卡在「不改共享层就过不了」 ⇒ **该波就地升级为全量回归波**（跑全部 2411 条），等共享层改完再重跑 | 波次记录里写明升级原因与重跑结果 |
+| **C5** | **共享层波内部排期**：按「跨域引用域数降序」（§1.4）⇒ 先动 9 域类、再 8 域类 ⇒ **每次改动后立刻跑全量** | G4 的工作日志 |
+| **C6** | **物理位置不变**：提级的是**写权与波次归属**，**不是目录搬迁** ⇒ `users-common` 的类**留在原目录**（避免大范围 import 改动 ⇒ 大爆炸半径） | 目录保持 `service/users/users-common/`（**G4 独占写权**） |
 
 ### 3.3 反馈单格式（域波 → 共享层波，必填 7 项）
 
@@ -674,6 +670,7 @@ task     →                            （Kafka ← like）
 ```bash
 python3 tools/difftest/check-wave-coupling.py        # ⇒ EXIT=0；重算 DAG + 度数，与本文快照比对
 python3 tools/difftest/check-wave-coupling.py --print # 打印重算结果（用于更新本文快照）
+python3 tools/difftest/check-wave-lane-ownership.py  # ⇒ EXIT=0；G1~G4 写权两两不重叠 + 排他归属 + 路径落空 + 分支存在
 ```
 
 守门逻辑：从仓库**重算**（① `pom.xml` 依赖度数 ② `@GrpcClient` 边 ③ yaml 跨域 topic ④ `users-common` 逐类跨域引用 ⑤ `service/common` 逐类辐射度），

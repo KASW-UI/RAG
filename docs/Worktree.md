@@ -57,54 +57,72 @@ RAG.worktrees/          ← 11 个工作树（在 RAG 外面，不进版本库�
 ```
 
 > ⚠️ **这段是历史示例**：2026-10-27 起该形态**已全部拆掉**（含 `common/`、`users-user/`、`users-admin/`），
-> **现状 = 下方「lane 版」的 10 条 `<域>-common` 工作树**。
+> **现状 = 下方「波次版」的 G1~G4 四棵工作树**（2026-10-27 01:44 重整）。
 > ⇒ 其中旧的 **`global` 全域工作树（`align/global`，覆盖除 favorite 外的所有域）已弃用** ——
 > **理由（Jason 2026-10-27 定）**：**一个工作树跨多个域 ⇒ 粒度与操作内容不可控** ⇒ 不再作为干活的地方。
-> ⇒ `global` 域的活现在**拆成两处**：**各域自己的 `<域>-common` lane**（域内待办归各域）
+> ⇒ `global` 域的活现在**拆成两处**：**各域自己的 `<域>-common` 对账**（域内待办归各域，在 G1~G3 里做）
 > ＋ **`global-common` lane**（只管 `service/common/**` 这**一个**共享层，粒度是窄的）。
 
 ⚠️ `service/common` 被 **16 个组件**依赖（article/comment/favorite/follow/hot/like/message/task 各自的 api+rpc），
 它是请求保护层。它不依赖任何其他域 ⇒ 并发自由度最高，值得先跑。
 但反过来：**若 common 挖出新漂移，那 16 个组件的 api 全要复查。**
 
-### 🆕 lane 版：`align/<域>-common`（2026-10-27 用户定，当前在跑的那一套）
+### ✅ **波次版：G1~G4（2026-10-27 01:44 用户定，当前在跑的那一套）**
 
 ```bash
 cd "/Users/pr/Documents/java&golang/RAG"
 git fetch upstream
 
-for d in article comment favorite follow hot like message task users global; do
-  git worktree add "../RAG.worktrees/$d-common" -b "align/$d-common" do-my-own-gh
-done
+git worktree add "../RAG.worktrees/g1-users-follow"                  -b "align/g1-users-follow"                  do-my-own-gh
+git worktree add "../RAG.worktrees/g2-message-like-task"             -b "align/g2-message-like-task"             do-my-own-gh
+git worktree add "../RAG.worktrees/g3-article-comment-favorite-hot"  -b "align/g3-article-comment-favorite-hot"  do-my-own-gh
+git worktree add "../RAG.worktrees/g4-service-common"                -b "align/g4-service-common"                do-my-own-gh
 
 git worktree list
 ```
 
-⇒ **10 条** = 9 个微服务域 + `global` 收口域；语义 =「**本域 ↔ `service/common`**」的跨层对账
-（⚠️ **不是**「本域自己的 `-common` 库」）⇒ **总纲 ⇒ [`docs/DRIFT/_cross/domain-common-lanes.md`](DRIFT/_cross/domain-common-lanes.md)**。
+⇒ **4 棵** = **一个波次一棵**（不再是「一个域一棵」）。语义与写权：
+
+| 波 | 分支 / 工作树 | 覆盖 | 独占写权 |
+|---|---|---|---|
+| **G1** | `align/g1-users-follow` | `users`（**不含 `users-common`**）+ `follow` | `service/users/{user,admin}/**` ＋ `service/follow/**` ＋ `docs/DRIFT/{users,follow}/**` |
+| **G2** | `align/g2-message-like-task` | `message` + `like` + `task` | `service/{message,like,task}/**` ＋ `docs/DRIFT/{message,like,task}/**` |
+| **G3** | `align/g3-article-comment-favorite-hot` | `article` + `comment` + `favorite` + `hot` | `service/{article,comment,favorite,hot}/**` ＋ `docs/DRIFT/{article,comment,favorite,hot}/**` |
+| **G4** | `align/g4-service-common` | **共享层**：`service/common` + `service/users/users-common` | `service/common/**` ＋ `service/users/users-common/**` ＋ `docs/DRIFT/global/vs-common.md` |
 
 当前布局：
 
 ```
 RAG/                          ← 主工作区，停在 do-my-own-gh
-RAG.worktrees/                ← 10 个 lane 工作树
-├── article-common/           ← align/article-common
-├── comment-common/  favorite-common/  follow-common/
-├── hot-common/      like-common/      message-common/
-├── task-common/     users-common/      global-common/
+RAG.worktrees/                ← 4 个波次工作树
+├── g1-users-follow/                 ← align/g1-users-follow
+├── g2-message-like-task/            ← align/g2-message-like-task
+├── g3-article-comment-favorite-hot/ ← align/g3-article-comment-favorite-hot
+└── g4-service-common/               ← align/g4-service-common
 ```
 
-⚠️ **两套 lane 不可同域并行**：`align/<域>`（组件级对齐）与 `align/<域>-common`（跨层对账）
-虽然台账文件不重叠（`docs/DRIFT/<域>/<组件>.md` vs `docs/DRIFT/<域>/vs-common.md`），
-但**会同时改 `service/<域>/**` 的代码** ⇒ 合并时语义打架 ⇒ **同一域只开一套**。
+⚠️ **顺序不可乱**：**G1 → G2 → G3 → G4**。
+**G4（共享层）必须在 G3 之后** —— G1~G3 期间 `service/common` + `users-common` **只读、只登记反馈单**
+⇒ 期间改共享层 ⇒ **那三波的测试结论全部作废**（AGENTS.md §5.3e）。
+⇒ 波次表 / 依赖 DAG ⇒ [`docs/DRIFT/_cross/cross-domain-coupling.md`](DRIFT/_cross/cross-domain-coupling.md) §二·§三。
 
-⚠️ **建完 lane 立刻确认脚手架在位**（否则回并会撞 **add/add 冲突**）：
+⚠️ **写权机器守门**：`tools/difftest/check-wave-lane-ownership.py`
+⇒ 断言 **G1~G4 白名单两两不重叠** + **共享文件无人拥有** + **`favorite` 只归 G3** + **共享层只归 G4**
++ **白名单路径必须命中真实文件** + **分支必须真实存在** ⇒ `EXIT=0` 才算合规。
+
+⚠️ **建完立刻确认写权面**（否则回并会撞 **add/add 冲突** 或**半盲**）：
 
 ```bash
-ls ../RAG.worktrees/<域>-common/docs/DRIFT/<域>/vs-common.md
+ls ../RAG.worktrees/g4-service-common/docs/DRIFT/global/vs-common.md
+python3 tools/difftest/check-wave-lane-ownership.py     # ⇒ EXIT=0
 ```
 
 ⇒ 缺文件 = 基线早于脚手架落地那次提交 ⇒ 先 `git merge do-my-own-gh` 再开工。
+
+⚠️ **旧形态（已撤）**：~~10 条 `align/<域>-common` lane~~ —— 2026-10-27 01:44 **工作树全部撤掉**。
+其**方法与逐域台账**（9 条机制面轴 A1~A9 + `docs/DRIFT/<域>/vs-common.md`）**仍然有效**，
+但**改在 G1~G3 四棵工作树里做**（阶段 1 只读对账 ⇒ 不落码）。
+⇒ 总纲 ⇒ [`docs/DRIFT/_cross/domain-common-lanes.md`](DRIFT/_cross/domain-common-lanes.md)。
 
 ---
 
@@ -115,7 +133,7 @@ ls ../RAG.worktrees/<域>-common/docs/DRIFT/<域>/vs-common.md
 | 文件 | 谁写 |
 |---|---|
 | `docs/DRIFT/<域>/<组件>.md` | ✅ 该域工作树自己写 |
-| `docs/DRIFT/<域>/vs-common.md` | ✅ 该域的 `<域>-common` lane 自己写（**每条 lane 独占一份**） |
+| `docs/DRIFT/<域>/vs-common.md` | ✅ 该域自己写（**按域各一份**）⇒ G1~G3 各自只写自己那几个域的 |
 | `docs/DRIFT/_INDEX.md` | ❌ **所有工作树都不许碰**，合并后由主会话统一更新 |
 | `AGENTS.md` | ❌ 同上 |
 | `docs/DRIFT/_MANIFEST.json` | ❌ 同上 |
@@ -176,7 +194,7 @@ docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：�
 
 🆕 **2026-10-27**：`docs/DRIFT/<域>/vs-common.md` × **10** 已建齐
 （article / comment / favorite / follow / hot / like / message / task / users / global）
-⇒ 每条 `<域>-common` lane 的台账坑位**已就位** ⇒ lane agent **不用再建文件**，直接开工填 §2 的 9 轴表。
+⇒ 每域的 `<域>-common` 对账台账坑位**已就位** ⇒ 工作树 agent **不用再建文件**，直接开工填 §2 的 9 轴表。
 
 ### 1b. 🆕 `global` 收口域的**单写权**（2026-10-25 用户定）
 
@@ -185,7 +203,7 @@ docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：�
 
 | 规则 | 内容 |
 |---|---|
-| **单写权** | **`service/common/**` 只有 `align/global-common` 能写**（旧的 `align/global` 全域 lane **已弃用** ⇒ 见 §二），别的域只读 ⇒ 别人发现 common 的 bug，**记台账交给 `global-common`**，不自己动手 |
+| **单写权** | **`service/common/**` + `service/users/users-common/**` 只有 `align/g4-service-common` 能写**（旧的 `align/global` 全域 lane **已弃用** ⇒ 见 §二），G1~G3 只读 ⇒ 别人发现共享层的 bug，**记反馈单交给 G4**，不自己动手 |
 | **同一次提交** | 修法同时涉及 `service/common` 与别的域代码（`service/users/**` 等）⇒ **必须同一次提交**。否则会留下「一半改完」的半截状态 |
 | **落点** | `docs/DRIFT/global/`（+ `Pitfalls/global/` + `Intentional_Deviations/global/`），按**议题**分档，不是按 api/rpc/proto |
 | **与 `common` 域的边界** | `common` 域问「common 自己对不对」；`global` 问「**别人**因 common 而对不对」 |
@@ -218,29 +236,31 @@ docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：�
 ⇒ **单会话每轮都要重读一遍** ⇒ 单轮约 6~7 万 token 的纯台账
 ⇒ **瓶颈是上下文，不是写码速度** ⇒ 拆 lane 必须配「定向读」（任务书里给精确到段的指针）。
 
-### 1d. 🆕 `<域>-common` lane：**域 ↔ `service/common` 的跨层对账**（2026-10-27 用户定）
+### 1d. 🆕 **波次工作树 G1~G4**：一波次一棵（2026-10-27 01:44 用户定）
 
-> **语义**：lane 名 `<域>-common` = 「**本域 ↔ `service/common`**」这条**跨层**专项
-> —— ⚠️ **不是**「本域自己的 `-common` 库」（那是 `service/<域>/<域>-common`，台账见 `docs/DRIFT/<域>/common.md`）
-> **总纲 ⇒ [`docs/DRIFT/_cross/domain-common-lanes.md`](DRIFT/_cross/domain-common-lanes.md)**（以它为准）
+> **语义**：工作树 = **一个波次**（不是「一个域」）⇒ 粒度从「域」升到「波次」。
+> **总纲 ⇒ [`docs/DRIFT/_cross/domain-common-lanes.md`](DRIFT/_cross/domain-common-lanes.md)**
+> · **波次表 ⇒ [`docs/DRIFT/_cross/cross-domain-coupling.md`](DRIFT/_cross/cross-domain-coupling.md) §二**
 
 | 规则 | 内容 |
 |---|---|
-| **切法** | **10 条** = 9 个微服务域 + `global`；分支 `align/<域>-common` ＋ 目录 `../RAG.worktrees/<域>-common`（**与 §二 的 `align/<域>` 同族、不撞名**） |
-| **基线** | `do-my-own-gh` @ 2026-10-27（= lane 脚手架落地那次提交）⇒ 主干再前进就 `merge do-my-own-gh` 一次（**文件级不重叠 ⇒ 零冲突**） |
-| **写权** | ✅ 本域 `service/<域>/**` ＋ `docs/DRIFT/<域>/**`；🔴 **`service/common/**` 只读** —— 只有 `align/global-common` 能写 |
-| **lane 台账** | **`docs/DRIFT/<域>/vs-common.md`**（每条 lane **独占一份** ⇒ 10 路并发**文件级零重叠**，不必抢同一个大文件） |
-| **共享面** | lane ⛔ 不写 `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` ⇒ **整合者在合并后统一更新** |
+| **切法** | **4 棵** = G1（`users` 不含 `users-common` + `follow`）· G2（`message`+`like`+`task`）· G3（`article`+`comment`+`favorite`+`hot`）· G4（**共享层**）；分支 `align/g<N>-<slug>` ＋ 目录 `../RAG.worktrees/g<N>-<slug>` |
+| **基线** | `do-my-own-gh`（主干再前进就 `merge do-my-own-gh` 一次，**文件级不重叠 ⇒ 零冲突**） |
+| **写权** | ✅ 各自表里那个面；🔴 **`service/common/**` + `service/users/users-common/**` 只读** —— 只有 `align/g4-service-common` 能写 |
+| **顺序** | **G1 → G2 → G3 → G4**；**G4 必须最后**（G1~G3 期间共享层只读 ⇒ 期间改共享层 ⇒ 那三波结论作废） |
+| **lane 台账** | **`docs/DRIFT/<域>/vs-common.md`**（**按域各一份** ⇒ 跨树**文件级零重叠**，不必抢同一个大文件） |
+| **共享面** | 工作树 ⛔ 不写 `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/Worktree.md` ⇒ **整合者在合并后统一更新** |
 | **交付物** | **9 条机制面轴（A1~A9）**的**本域侧**逐轴结论（✅/🔴/🟡 ＋ **证据强度** ＋ **核对日期**）＋ **两侧同时跑**的探针（§3.3：只跑 RAG 的探针**不算数**） |
-| **派单** | 发现 common 侧缺陷 ⇒ 本域**只登记**（现象 + 证据 + 建议修法）⇒ **转派 `global-common`**；**域侧能自修的域侧修**（本域的调用方式/配置/断言/装配）⇒ 不甩单、不留半截 |
+| **派单** | 发现共享层缺陷 ⇒ 本域**只登记**（**反馈单 7 项**，§5.3e）⇒ **转派 G4**；**域侧能自修的域侧修** ⇒ 不甩单、不留半截 |
+| **机器守门** | `tools/difftest/check-wave-lane-ownership.py` ⇒ **EXIT=0** 才算合规（写权不重叠 + 排他归属 + 路径落空 + 分支存在） |
 
-📌 **为什么单列一套 lane**：§1c 的多 lane 是 `global` **一个域内**的拆分；
-本条是**跨域**的机制面对账 —— 10 个域**各自**负责「我看到的现象 ↔ common 侧的真实机制」这条对账线，
-而 common 侧**只由 `global-common` 一条 lane 改** ⇒ 9 条域 lane 并行看、1 条 lane 收口改。
+📌 **为什么从 10 条 lane 收敛到 4 棵工作树**：10 条 `<域>-common` lane 是「**一个域一棵**」，
+粒度太细 ⇒ 合并协调成本高，且**域与域之间有契约依赖**（`message`→`like`→`task`、`article`→`comment`/`favorite`/`hot`）
+⇒ 细粒度并发反而互相踩。改成「**一波次一棵**」⇒ 每棵内部顺序执行、跨波按拓扑序推进。
 
-⚠️ **建 lane 前必看**：lane 的基线必须**已经包含** `docs/DRIFT/<域>/vs-common.md` 这份脚手架
-⇒ 否则 lane 提交后回并会撞 **add/add 冲突**（主干加了同一个文件、lane 也加了）。
-⇒ **建完立刻确认**：`ls ../RAG.worktrees/<域>-common/docs/DRIFT/<域>/vs-common.md`
+⚠️ **建工作树前必看**：基线必须**已经包含** `docs/DRIFT/<域>/vs-common.md` 脚手架
+⇒ 否则提交后回并会撞 **add/add 冲突**。
+⇒ **建完立刻确认**：`ls ../RAG.worktrees/g4-service-common/docs/DRIFT/global/vs-common.md`
 
 ### 2. 域内顺序：`rpc → common → api → proto 消费`
 
@@ -296,9 +316,12 @@ HEAD 前进到 `61e6d7a`（`5977c64` / `0a5aa0e` / `61e6d7a` 三个 commit）。
 但反过来：**若 common 挖出新漂移，那 16 个组件的 api 全要复查。**
 
 🆕 **2026-10-27：这条「共享层」现在有了一个专门的并发协议** ——
-`align/global-common` 单写 `service/common/**`（**唯一**），其余 **9 条** `<域>-common` lane **只读** common 侧、
-各自负责对账自己那一域看到的现象（§三·1d）⇒
-**「谁都能发现、只有一个人能改」** 这个约束从口头约定变成了台账里的硬规则。
+`align/g4-service-common` 单写 `service/common/**` **+ `service/users/users-common/**`**（**唯一**），
+G1~G3 **只读**共享层侧、各自负责对账自己那一域看到的现象（§三·1d）⇒
+**「谁都能发现、只有一个人能改」** 这个约束从口头约定变成了台账里的硬规则 **+ 机器守门**。
+
+⚠️ **「共享层」不止 `service/common` 一个**：`service/users/users-common` 也被 **6 个外域 api** 依赖
+⇒ 它是**第二个共享层** ⇒ 写权同样归 G4（AGENTS.md §5.3f）⇒ **物理位置不搬**（避免大范围 import 改动）。
 
 ---
 
@@ -311,18 +334,22 @@ git branch -d align/task
 
 `remove` 前必须确认该目录无未提交改动，否则 Git 会拦（这是好事）。
 
-🆕 **拆 lane（`<域>-common`）**：
+🆕 **拆波次工作树（G1~G4）**：
 
 ```bash
-git worktree remove ../RAG.worktrees/task-common
-git branch -d align/task-common
+git worktree remove ../RAG.worktrees/g4-service-common
+git branch -d align/g4-service-common
 ```
 
 ⚠️ **先确认已合回**（与「删之前逐个确认未提交=0 且已合回」同款纪律）：
 
 ```bash
-git merge-base --is-ancestor align/task-common do-my-own-gh && echo "已合回"
+git merge-base --is-ancestor align/g4-service-common do-my-own-gh && echo "已合回"
 ```
+
+⚠️ **删之前先确认那棵树的写权面已清空**：若它曾声明过 `service/common/**`，
+⇒ 把它从 `tools/difftest/check-wave-lane-ownership.py` 的 `ACTIVE` 档**同步移走**
+⇒ 否则守门会**盯一个不存在的分支** ⇒ **恒绿假绿**（2026-10-27 实测踩到）。
 
 ⚠️ 历史上的 4 个 `row/*` 工作树已确认**真合并**（`git merge-base --is-ancestor` 逐个验过），
 `RAG.worktrees/` 下的目录可清理，与新建工作树不冲突（名字不撞）。
@@ -335,8 +362,9 @@ git merge-base --is-ancestor align/task-common do-my-own-gh && echo "已合回"
 |---|---|
 | 看挂了哪几个 | `git worktree list` |
 | 建（分支+目录一起） | `git worktree add "<路径>" -b "<分支>" do-my-own-gh` |
-| 建 `<域>-common` lane | `git worktree add "../RAG.worktrees/<域>-common" -b "align/<域>-common" do-my-own-gh` |
-| 确认 lane 脚手架在位 | `ls ../RAG.worktrees/<域>-common/docs/DRIFT/<域>/vs-common.md` |
+| 建波次工作树 | `git worktree add "../RAG.worktrees/g<N>-<slug>" -b "align/g<N>-<slug>" do-my-own-gh` |
+| 确认脚手架在位 | `ls ../RAG.worktrees/g4-service-common/docs/DRIFT/global/vs-common.md` |
+| **验写权（机器）** | `python3 tools/difftest/check-wave-lane-ownership.py` |
 | 推 feature 分支 | `git push -u upstream align/<域>` |
 | 合回主干 | `git merge --no-ff align/<域>` |
 | 同步基线 | `git merge do-my-own-gh`（在工作树内） |
