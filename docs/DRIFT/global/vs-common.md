@@ -233,6 +233,55 @@
 > ⇒ **本会话不下「漂移」结论**（未验两侧 span 语义是否等价、也未查 `docs/Intentional_Deviations/` 是否有签字项）
 > ⇒ **登记为线索，交 comment / favorite 域侧自查**；**共享层零改动**。
 
+### 4.5 G3 提供的 L4 证据的**独立复核** + 两个新的共享面建议项（核对日期 2026-10-27）
+
+> **背景**：G3 报「`check-ddl-static.py` 在 favorite 域报 `EXIT=1`（2 处 `now()` DEFAULT 差异）⇒ 是常驻容器旧快照 ⇒ **不是代码缺陷**，别照那条红去修」。
+> **G4 复核：✅ 结论成立，且定位比 G3 说的更准。**
+
+#### 复核：为什么那条红是**工作库滞后**（而不是代码缺陷）
+
+| 环节 | 实测 |
+|---|---|
+| **V7 脚本本身** | `service/favorite/favorite-rpc/src/main/resources/db/migration/V7__align_favorite_outbox_time_columns_with_go.sql` ⇒ 标题即「**对齐 … 去掉 DEFAULT now()**」⇒ **代码侧已落地** |
+| **活体工作库** | `ddl-favorite-pg / rag_favorite_db` 的 `favorite_fact_outbox.created_at` / `updated_at` **仍带 `now()`** ⇒ **停在 V7 之前** |
+| **它是谁建的** | `tools/difftest/check-ddl-static.py` 的工作库（库名 `rag_<域>_db` / `go_<域>_db`，容器 `ddl-<域>-pg`；见该脚本 `:140/:317` 等）⇒ **由迁移脚本直接 psql 重放**、**不走 Flyway** ⇒ ⇒ **工作库是否最新，取决于谁最后重放过** ⇒ **滞后就假红** |
+| **账本表** | 该库 **`flyway_schema_history%` 表 = 0 张** ⇒ 印证「不是 Flyway 建的」 |
+| **权威面** | `tools/ddl-parity-probe/favorite/run.sh`（`:180-187` **每次新建 `ragdb` 并重放 V1..V7 全量**）⇒ **EXIT=0 才是权威** ⇒ 与 G3 一致 |
+
+⇒ **判别式（写入台账，供下一个 reader 免走弯路）**：
+**「`check-ddl-static.py` 报红」时，先用 `tools/ddl-parity-probe/<域>/run.sh` 复核** ⇒ 探针绿 = **工作库滞后**（刷新工作库）｜探针红 = **真漂移**（改代码）。
+
+#### 🔴 **顺带实测：全部 `ddl-*` 容器的工作库都不是 Flyway 建的**
+
+⇒ 9 个容器 × 2 库 = **18 个库，`flyway_schema_history%` 账本表全部 = 0 张**
+⇒ ⇒ **「Flyway 账本隔离 / `baseline-version` / `baseline-on-migrate`」这一维度，在 DDL 对拍容器里从未被运行时验证**
+⇒ ⚠️ **但不是缺口**：`tools/difftest/check-flyway-concurrent.sh` + `flyway-concurrent-verify.py` **走真 Flyway 路径**
+（脚本 `:23-24` 自述校验「各域的表都建出来了、账本互不覆盖、**baseline 位置正确**」；`:238` 打印 `baseline=`）⇒ **该维度有独立的守门覆盖**。
+
+#### 建议项 4：**`check-ddl-static.py` 的工作库滞后 ⇒ 假红**（落点 = `tools/difftest/**` = 共享面 ⇒ 整合者 / 使用者）
+
+| 字段 | 内容 |
+|---|---|
+| 1 现象 | `check-ddl-static.py` 在 favorite 域报 `EXIT=1`（2 处 `now()` DEFAULT 差异）⇒ **看似代码缺陷，实为工作库滞后** ⇒ 任何域的工作库未刷新都会产生同类假红 |
+| 2 Go 侧出处 | Go 侧 `favorite_fact_outbox` 的 `created_at` / `updated_at` **无** `DEFAULT now()`（V7 的对齐目标） |
+| 3 RAG 侧现状 | V7 脚本**已落地**（`.../V7__align_favorite_outbox_time_columns_with_go.sql`）｜**工作库** `ddl-favorite-pg/rag_favorite_db` 仍带 `now()` ⇒ **落后于 V7**｜`tools/difftest/check-ddl-static.py:317`（`rag_favorite_db` 库名来源） |
+| 4 证据强度 | **L4 活体实测**（容器内 `information_schema.columns` 实查 ＋ 迁移脚本实读 ＋ 探针实跑 `EXIT=0`） |
+| 5 建议修法 | **刷新工作库**（重建 `rag_<域>_db` 并按该域 V1..Vn 全量重放）⇒ **不是改代码**；并把上面那条**判别式**写进 `check-ddl-static.py` 的输出（红时提示「先跑 `tools/ddl-parity-probe/<域>/run.sh` 复核」） |
+| 6 影响面 | `check-ddl-static.py` 全域输出可信度（**9 域**）· 任何按它的红去改代码的人都会被误导 |
+| 7 是否阻塞本波 | **否**（favorite 已由探针证一致） |
+
+#### 建议项 5：**`flyway-concurrent-verify.py` 的 `KNOWN_BLOCKED` 漏记 `article-rpc`**（落点 = `tools/difftest/**` = 共享面 ⇒ 整合者）
+
+| 字段 | 内容 |
+|---|---|
+| 1 现象 | 该脚本的 `KNOWN_BLOCKED`（`:48-51`）**只登记了 `favorite`**（「缺 `spring.flyway.baseline-version: 0` ⇒ 共享库里 V1 被 baseline 跳过」）⇒ **同形的 `article-rpc` 未登记** ⇒ 已知缺陷清单**不完整** |
+| 2 Go 侧出处 | N/A（配置层缺陷，非行为漂移） |
+| 3 RAG 侧现状 | `service/article/article-rpc/src/main/resources/application.yml`（有 `flyway:` 段 + `baseline-on-migrate: true` + `table:` + `schemas:`，**无 `baseline-version`**）｜`service/favorite/favorite-rpc/src/main/resources/application.yml`（同形）｜⚠️ 该脚本对**所有**模块都会算出 `baseline_version`（缺省 = `"1"`，`:93-100`）⇒ **它看得见 article 的 `baseline=1`**，只是**已知缺陷账里没登记** |
+| 4 证据强度 | **L3 静态实测**（9 个 rpc 组件逐个 `grep -n` ＋ 脚本 `:48-51` / `:93-100` 实读） |
+| 5 建议修法 | `KNOWN_BLOCKED` 增补 `article-rpc`（与 `favorite` 同形同因）⇒ **只补账，不改代码**（两个 yaml 的修法都在**域侧**，域侧自修）；⚠️ 顺带**统一消息**：两个 rpc 的 yaml 注释块都写着「2026-10-25 实测修掉的真缺陷 · global 收口域 X-1」⇒ 建议域侧照抄同一段 |
+| 6 影响面 | `check-flyway-concurrent.sh` 的已知缺陷账 ⇒ **AGENTS.md §6.3 问题 4 也只点了 favorite**（见建议项 3）⇒ 两处需同步订正 |
+| 7 是否阻塞本波 | **否** ⇒ 登记待整合者订正 |
+
 ## 5. 交付物清单
 
 - [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
