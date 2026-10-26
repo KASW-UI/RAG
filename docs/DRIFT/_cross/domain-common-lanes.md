@@ -1,6 +1,6 @@
 <!-- @new 2026-10-27 · 由主会话（Jason 指定）产出 · 基线 = `do-my-own-gh` @ 2026-10-27（main == do-my-own-gh） -->
 
-# 域 × `service/common` 漂移 lane 台账（10 条 lane 的总纲与清单）
+# 域 × 共享层 漂移对账总纲（**G1~G4 四棵波次工作树** · 原 10 条 lane 的方法与台账）
 
 > **建立时间**：2026-10-27（Jason 指定：合并所有工作树后，重建「域 ↔ `service/common`」专项 lane）
 > **命名含义**：lane 名 `<域>-common` = 「**本域 ↔ `service/common`**」这条**跨层**专项
@@ -18,15 +18,15 @@
 
 | 项 | 值 |
 |---|---|
-| lane 数 | **10**（9 个微服务域 + `global` 收口域） |
-| 工作树目录 | `/Users/pr/Documents/java&golang/RAG.worktrees/<域>-common` |
-| 分支 | `align/<域>-common`（全部从 `do-my-own-gh` 切，主干最后接合并） |
+| lane 数 | **10**（9 个微服务域 + `global` 收口域）⇒ 🆕 **2026-10-27 01:44 重整为 4 棵波次工作树**（§1） |
+| 工作树目录 | 🆕 **G1~G4 四棵**：`/Users/pr/Documents/java&golang/RAG.worktrees/{g1-users-follow,g2-message-like-task,g3-article-comment-favorite-hot,g4-service-common}` |
+| 分支 | 🆕 **G1~G4**：`align/{g1-users-follow,g2-message-like-task,g3-article-comment-favorite-hot,g4-service-common}`（全部从 `do-my-own-gh` 切，主干最后接合并） |
 | 基点 | **`do-my-own-gh` @ 2026-10-27**（= lane 脚手架落地那次提交；此前已合并 25/25 分支 + 全量回归 BUILD SUCCESS）⇒ 主干再前进时 lane `merge` 一次即可（**文件级不重叠 ⇒ 零冲突**） |
 | **`service/common` + `users-common` 写权** | 🔴 **只有 `align/g4-service-common` 能写**（AGENTS.md §5.3c·§5.3d·**§5.3e·§5.3f**）；G1~G3 **只读共享层侧** |
 | 🆕 **阶段划分（2026-10-27）** | **两阶段，不并行**：<br>**阶段 1 = 只读对账**（在 G1~G3 四棵工作树里做，逐轴出结论 + 填**反馈单**）⇒ **不落任何代码**；<br>**阶段 2 = 按波次落地**（G1→G2→G3→**G4 共享层波**，波次表见 [`cross-domain-coupling.md`](cross-domain-coupling.md) §二）⇒ **共享层统一在 G4 落**。<br>⚠️ **阶段 1 若落域侧代码，会与阶段 2 同域撞文件** ⇒ 阶段 1 **必须全只读** |
 | 🆕 **执行形态（2026-10-27 01:44 重整）** | 原 **10 条 `<域>-common` lane 工作树全部撤掉** ⇒ 收敛为 **4 棵波次工作树**：`align/g1-users-follow`（users 不含 users-common + follow）· `align/g2-message-like-task` · `align/g3-article-comment-favorite-hot` · `align/g4-service-common`（共享层）。⇒ **粒度 = 一个波次一棵**，不再是「一个域一棵」 |
 | ⚠️ **不是旧的 `align/global`** | 旧的 `align/global` 是**全域 mega 工作树**（覆盖除 favorite 外所有域）⇒ **2026-10-27 弃用**（Jason：一个工作树跨多域 ⇒ **粒度与操作内容不可控**）⇒ 其工作树已拆、内容已 100% 合回主干。<br>🆕 **也不是 10 条 `<域>-common` lane**（那 10 棵工作树 2026-10-27 01:44 一并撤掉）⇒ 执行形态 = **G1~G4 四棵**（一波次一棵） |
-| **每条 lane 的台账** | **`docs/DRIFT/<域>/vs-common.md`**（**每条 lane 独占一份** ⇒ 10 路并发零冲突） |
+| **每域的台账** | **`docs/DRIFT/<域>/vs-common.md`**（**按域各一份** ⇒ 跨工作树**文件级零重叠**，不必抢同一个大文件） |
 | common 侧机制面台账 | [`docs/DRIFT/common/`](../common/)：`deadline.md` · `http.md` · `protection.md` · `audit.md` · `alignment-2026-10-23.md` |
 
 ---

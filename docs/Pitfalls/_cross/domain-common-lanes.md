@@ -1,6 +1,7 @@
 # 🔴 Pitfall：`<域>-common` lane 的四个坑（域 ↔ `service/common` 跨层对账）
 
 > **归档时间**：2026-10-27 · **性质**：并发工作流坑（影响全部 10 条 lane）
+> 🆕 **2026-10-27 01:44 补充**：10 条 `<域>-common` lane **工作树已全部撤掉** ⇒ 执行形态改为 **G1~G4 四棵波次工作树**（`align/g1-users-follow` / `align/g2-message-like-task` / `align/g3-article-comment-favorite-hot` / `align/g4-service-common`）⇒ **本档的坑仍然成立**（写权唯一 / 基点 / 阶段划分都没变），只是**载体换了**；新增 **PIT-LANE-05/06**。
 > **决策记录**：AGENTS.md §5.3d · **总纲**：[`docs/DRIFT/_cross/domain-common-lanes.md`](../../DRIFT/_cross/domain-common-lanes.md)
 > **踩坑档记「为什么会踩」**，漂移条目本身在 [`docs/DRIFT/`](../../DRIFT/_INDEX.md)
 
@@ -192,10 +193,16 @@ Go 侧未注册 ⇒ 返回 **400 + Go 原文**。
 
 ---
 
-## 效力边界
+## 效力边界（2026-10-27 02:0x 更新）
 
-- PIT-LANE-01 的「建完确认脚手架」是**人工检查**（一条 `ls`）⇒ **没有机器守门**。
-  ⇒ 若要自动化，可在 `tools/difftest/` 加一条「10 条 lane 分支的基点必须含 `vs-common.md`」的静态检查 —— **目前未做**（登记为已知缺口）。
-- PIT-LANE-02 / 03 / 04 的约束靠**台账与 AGENTS.md**承载 ⇒
-  机器侧目前只有 `tools/difftest/check-global-lane-ownership.py`（global 域内 lane 的写权），
-  **尚未覆盖这 10 条 `<域>-common` lane** ⇒ 同样登记为已知缺口。
+- PIT-LANE-01 的「建完确认脚手架」仍是**人工检查**（一条 `ls`）⇒ **仍无机器守门**。
+  ⇒ 缺口**依然存在**（可加一条「波次分支的基点必须含 `vs-common.md`」的静态检查）。
+- ✅ **PIT-LANE-02 的「写权唯一」已机器化**（2026-10-27）：`tools/difftest/check-wave-lane-ownership.py`
+  断言 **G1~G4 白名单两两不重叠** ＋ **`favorite` 只归 G3** ＋ **共享层只归 G4**
+  ＋ **私有库无跨域引用** ⇒ **原来的「尚未覆盖」缺口已闭合**。
+- 🆕 **PIT-LANE-06 的两条新断言**（同一守门）：**白名单路径必须命中真实文件** ＋ **分支必须真实存在**
+  ⇒ 「守门登记了已不存在的 lane」「路径写错导致对某一面失明」这两类假绿**已被堵死**。
+- PIT-LANE-03（共享层已验 ≠ 本域已验）与 PIT-LANE-04（同域两套 lane 语义打架）
+  靠**台账与 AGENTS.md**承载 ⇒ **仍无机器守门** ⇒ 登记为已知缺口。
+  ⚠️ PIT-LANE-04 在新形态下**部分消解**：粒度已是「一波次一棵」，同域两套 lane 并存的空间小了
+  ⇒ 但 `align/<域>`（组件级对齐）与波次工作树**仍可能同域并存** ⇒ 坑位**仍然成立**。

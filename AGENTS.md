@@ -17,7 +17,7 @@
 | `users` | [`users/`](docs/DRIFT/users/_shared.md) | `comment`/`follow`/`task` | [`_cross/`](docs/DRIFT/_cross/component-coverage-matrix.md) |
 | `message` | [`message/`](docs/DRIFT/message/rpc.md) | `favorite` | [`favorite/`](docs/DRIFT/favorite/rpc.md) |
 | `like` | [`like/`](docs/DRIFT/like/rpc.md) | 🆕 `global`（**收口域**，非微服务 ⇒ §3.5） | [`global/`](docs/DRIFT/global/_README.md) |
-| `common` | [`common/`](docs/DRIFT/common/alignment-2026-10-23.md) | 🆕 `<域>-common`（**10 条** lane） | [`_cross/domain-common-lanes.md`](docs/DRIFT/_cross/domain-common-lanes.md) |
+| `common` | [`common/`](docs/DRIFT/common/alignment-2026-10-23.md) | 🆕 `<域>-common` 对账（**G1~G4 四棵**） | [`_cross/domain-common-lanes.md`](docs/DRIFT/_cross/domain-common-lanes.md) |
 | `hot` | [`hot/`](docs/DRIFT/hot/rpc.md) | `article` | [`article/`](docs/DRIFT/article/rpc.md) |
 
 > ⚠️ **「已改」≠「已验证」；「源码级对照」≠「双侧活体对拍」** ⇒ 台账里的 ✅ 一律读作「**在该证据强度下一致**」，
@@ -239,7 +239,7 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
    ⇒ **基线不可变**：G1~G3 进行中改共享层 ⇒ **那波测试结论作废**（编译绿 ≠ 行为对：**全仓无 API 兼容门禁** ⇒ 行为级破坏无网）。
    ⇒ 波次表 · 依赖 DAG · 逐类归属 ⇒ [`cross-domain-coupling.md`](docs/DRIFT/_cross/cross-domain-coupling.md)（守门 `check-wave-coupling.py`）
 3f. ⚠️ **共享判据 = 依赖度数，不是目录位置**（2026-10-27 实测）：`service/common`（20 模块依赖）与 `service/users/users-common`（**10** 模块 / **6 外域 api**）**都是共享层**（⇒ 写权归 G4）；
-   其余 7 个 `<域>-common` 只被本域 2 模块用 ⇒ **真私有**（⇒ 归各自域）。
+   其余 7 个 `<域>-common` 只被**本域**引用（pom / import / 扫描面 **三层实测**）⇒ **真私有**（⇒ 归各自域）。
    ⇒ `users-common` 是**混合体** ⇒ **按类判定**（8 个跨域类归共享层波 / 3 个 users 专用类留 users 域），**不按模块一刀切**、**不搬目录**。
 4. **作用范围**：仅限 RAG 仓库。`Sea-RideTheWind_golang` 已冻结只读；其他非 Spring Boot 的 Java 实现不在范围内。
 5. **Go 是真理之源**（2026-10-20 第三次切换，全子模块适用）：proto 字段号、错误码、JWT claims、表结构、HTTP path、

@@ -1,22 +1,22 @@
-<!-- @new 2026-10-27 · `users-common` lane 台账 · 主会话（Jason 指定）建 lane 时预填 · 基线 = `do-my-own-gh` @ 2026-10-27 -->
+<!-- @new 2026-10-27 · `users-common` lane 台账 · 主会话（Jason 指定）建 lane 时预填 · 基线 = `do-my-own-gh` @ 2026-10-27  · **2026-10-27 02:0x 改：归属 G1 波次工作树（`align/g1-users-follow`）** -->
 
 # `users-common` lane 台账 —— 「users ↔ `service/common`」跨层对账
 
 > **lane 语义**：本域与**共享机制层 `service/common`** 之间的漂移对账
 > —— ⚠️ **不是**「本域自己的 `-common` 库」（那是 `service/users/users-common`，台账见 [`common.md`](common.md)）
-> **总纲** ⇒ [`docs/DRIFT/_cross/domain-common-lanes.md`](../_cross/domain-common-lanes.md)（10 条 lane 清单 · 9 条机制面轴 · 写权边界 · 跨域未闭合项）
-> ⇒ **本文件由 `users-common` lane 独占**（10 路并发 ⇒ 文件级零重叠）；**共享面（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json`）合并后统一更新**（AGENTS.md §5.3d）
+> **总纲** ⇒ [`docs/DRIFT/_cross/domain-common-lanes.md`](../_cross/domain-common-lanes.md)（**G1~G4 波次映射** · 9 条机制面轴 · 写权边界 · 跨域未闭合项）
+> ⇒ **本文件由 `G1` 波次工作树独占**（**按域各一份** ⇒ 跨树文件级零重叠）；**共享面（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json`）合并后统一更新**（AGENTS.md §5.3d）
 
 ## 0. lane 身份
 
 | 项 | 值 |
 |---|---|
-| lane | `users-common`（第 9/10 条） |
-| 分支 / 工作树 | `align/users-common` / `/Users/pr/Documents/java&golang/RAG.worktrees/users-common` |
+| lane（历史名） | `users-common`（**原第 9/10 条**） |
+| **现分支 / 工作树** | **`align/g1-users-follow`** / `/Users/pr/Documents/java&golang/RAG.worktrees/g1-users-follow`<br>⚠️ 原 `align/users-common` 工作树已于 **2026-10-27 01:44 撤掉** ⇒ 粒度从「一个域一棵」改为「**一个波次一棵**」 |
 | 基点 | **`do-my-own-gh` @ 2026-10-27**（= lane 脚手架落地那次提交；此前已合并 25/25 分支 + 全量回归 BUILD SUCCESS）⇒ 主干再前进时 lane `merge` 一次即可（**文件级不重叠 ⇒ 零冲突**） |
 | 本域模块 | `service/users/{user/{user-api, user-rpc, user-proto}, admin/{admin-api, admin-rpc, admin-proto}, users-common}` |
 | 域侧台账 | [`_shared.md`](_shared.md) · [`user/api.md`](user/api.md) · [`user/rpc.md`](user/rpc.md) · [`admin/api.md`](admin/api.md) · [`admin/rpc.md`](admin/rpc.md) · [`admin/_shared.md`](admin/_shared.md) |
-| **写权** | ✅ 可写**本域** `service/users/**` ＋ `docs/DRIFT/users/**`；🔴 **`service/common/**` 只读**（只有 `align/global-common` 能写；⚠️ **旧的 `align/global` 全域 lane 已弃用**） |
+| **写权** | ✅ 可写**本域** `service/users/{user,admin}/**` ＋ `docs/DRIFT/users/**`；🔴 **`service/common/**` 只读**（只有 `align/g4-service-common` 能写）；🔴 **`service/users/users-common/**` 也归 G4**（跨 6 个外域 ⇒ 第二个共享层）；⚠️ 旧的 `align/global` 全域 lane **已弃用** |
 | common 侧机制面台账 | [`docs/DRIFT/common/`](../common/)：`deadline.md` · `http.md` · `protection.md` · `audit.md` · `alignment-2026-10-23.md` |
 
 ## 1. 本域侧已知的 common 相关条目（**2026-10-27 抽取**，逐条证据以域台账为准）
@@ -54,14 +54,14 @@
 > 本域 `go-form-limit.mode` = **raw（user-api ＋ admin-api 各一行）**；Go 侧：**未注册**（真源 `service/user/api/` 与 `service/admin/api/` 均无 `httpx.SetErrorHandler`）⇒ Go 侧 = **400 + Go 原文** ⇒ 与 RAG `mode=raw` 同向 ✅
 > ⇒ ⚠️ **共享层已验 ≠ 本域已验** ⇒ lane 仍须在本域**跑一次真实请求**确认拒绝形状。
 
-## 3. 域侧能自修的（**本 lane 直接修**，不要甩给 global）
+## 3. 域侧能自修的（**本域直接修**，不要甩给 G4）
 
 - `user-api` / `admin-api` 的 A3 接线复核：各一行 `mode=raw` ⇒ 拒绝形状 = **400 + Go 原文**
 - 本域**调用**共享层的方式（`operator_id` 传值 / `GoStyleCoercion` 的**调用点**）⇒ 域侧可自修的先域侧修
 
-## 4. 需转派 `global-common` 的（**本 lane 只登记：现象 + 证据 + 建议修法**）
+## 4. 需转派 **G4**（`align/g4-service-common`）的（**本域只登记：现象 + 证据 + 建议修法**）
 
-- 🔴 `DRIFT-ARPC-010`（E66）· `UNRESOLVED-ARPC-002`（E38②）· `DRIFT-USERAPI-013` ⇒ **全部落点 `service/common`** ⇒ **派单 `global-common`**；⚠️ `DRIFT-USERAPI-013` 与 **follow 域 `DRIFT-FOLLOW-008` 同族** ⇒ 两条一起对账
+- 🔴 `DRIFT-ARPC-010`（E66）· `UNRESOLVED-ARPC-002`（E38②）· `DRIFT-USERAPI-013` ⇒ **全部落点 `service/common`** ⇒ **派单 **G4****；⚠️ `DRIFT-USERAPI-013` 与 **follow 域 `DRIFT-FOLLOW-008` 同族** ⇒ 两条一起对账
 - 🔴 `UNRESOLVED-USERSCOMMON-003` ⇒ 落点 `service/common` ⇒ 派单；⚠️ 它的**验证**跨域（message/like/article 各打一次矩阵）⇒ 本 lane 登记 + 协调
 
 ## 5. 交付物清单
@@ -71,5 +71,5 @@
 - [ ] **两侧同时跑**的探针（AGENTS.md §3.3）—— 只跑 RAG 的探针**不算数**
 - [ ] §1 的每一条**重新核对状态**并写回（带核对日期）
 - [ ] §3 的域侧修法**落码 + 守门**（含变异验证）
-- [ ] §4 的派单**登记到 `global` 跨域桶**（`docs/DRIFT/global/_README.md` §七之二）
-- [ ] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` ⇒ 合并后由整合者统一更新）
+- [ ] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）
+- [ ] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）

@@ -1,22 +1,22 @@
-<!-- @new 2026-10-27 · `article-common` lane 台账 · 主会话（Jason 指定）建 lane 时预填 · 基线 = `do-my-own-gh` @ 2026-10-27 -->
+<!-- @new 2026-10-27 · `article-common` lane 台账 · 主会话（Jason 指定）建 lane 时预填 · 基线 = `do-my-own-gh` @ 2026-10-27  · **2026-10-27 02:0x 改：归属 G3 波次工作树（`align/g3-article-comment-favorite-hot`）** -->
 
 # `article-common` lane 台账 —— 「article ↔ `service/common`」跨层对账
 
 > **lane 语义**：本域与**共享机制层 `service/common`** 之间的漂移对账
 > —— ⚠️ **不是**「本域自己的 `-common` 库」（那是 `service/article/article-common`，台账见 [`common.md`](common.md)）
-> **总纲** ⇒ [`docs/DRIFT/_cross/domain-common-lanes.md`](../_cross/domain-common-lanes.md)（10 条 lane 清单 · 9 条机制面轴 · 写权边界 · 跨域未闭合项）
-> ⇒ **本文件由 `article-common` lane 独占**（10 路并发 ⇒ 文件级零重叠）；**共享面（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json`）合并后统一更新**（AGENTS.md §5.3d）
+> **总纲** ⇒ [`docs/DRIFT/_cross/domain-common-lanes.md`](../_cross/domain-common-lanes.md)（**G1~G4 波次映射** · 9 条机制面轴 · 写权边界 · 跨域未闭合项）
+> ⇒ **本文件由 `G3` 波次工作树独占**（**按域各一份** ⇒ 跨树文件级零重叠）；**共享面（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json`）合并后统一更新**（AGENTS.md §5.3d）
 
 ## 0. lane 身份
 
 | 项 | 值 |
 |---|---|
-| lane | `article-common`（第 1/10 条） |
-| 分支 / 工作树 | `align/article-common` / `/Users/pr/Documents/java&golang/RAG.worktrees/article-common` |
+| lane（历史名） | `article-common`（**原第 1/10 条**） |
+| **现分支 / 工作树** | **`align/g3-article-comment-favorite-hot`** / `/Users/pr/Documents/java&golang/RAG.worktrees/g3-article-comment-favorite-hot`<br>⚠️ 原 `align/article-common` 工作树已于 **2026-10-27 01:44 撤掉** ⇒ 粒度从「一个域一棵」改为「**一个波次一棵**」 |
 | 基点 | **`do-my-own-gh` @ 2026-10-27**（= lane 脚手架落地那次提交；此前已合并 25/25 分支 + 全量回归 BUILD SUCCESS）⇒ 主干再前进时 lane `merge` 一次即可（**文件级不重叠 ⇒ 零冲突**） |
 | 本域模块 | `service/article/{article-api, article-rpc, article-common, article-proto}` |
 | 域侧台账 | [`api.md`](api.md) · [`rpc.md`](rpc.md) · [`common.md`](common.md) · [`proto.md`](proto.md) |
-| **写权** | ✅ 可写**本域** `service/article/**` ＋ `docs/DRIFT/article/**`；🔴 **`service/common/**` 只读**（只有 `align/global-common` 能写；⚠️ **旧的 `align/global` 全域 lane 已弃用**） |
+| **写权** | ✅ 可写**本域** `service/article/**` ＋ `docs/DRIFT/article/**`；🔴 **`service/common/**` 只读**（只有 `align/g4-service-common` 能写）；⚠️ 旧的 `align/global` 全域 lane **已弃用** |
 | common 侧机制面台账 | [`docs/DRIFT/common/`](../common/)：`deadline.md` · `http.md` · `protection.md` · `audit.md` · `alignment-2026-10-23.md` |
 
 ## 1. 本域侧已知的 common 相关条目（**2026-10-27 抽取**，逐条证据以域台账为准）
@@ -51,15 +51,15 @@
 > 本域 `go-form-limit.mode` = **raw**；Go 侧：**未注册**（真源 `service/article/api/` 无 `httpx.SetErrorHandler`）⇒ Go 侧解析失败 = **400 + Go 原文** ⇒ 与 RAG `mode=raw` 同向 ✅
 > ⇒ ⚠️ **共享层已验 ≠ 本域已验** ⇒ lane 仍须在本域**跑一次真实请求**确认拒绝形状。
 
-## 3. 域侧能自修的（**本 lane 直接修**，不要甩给 global）
+## 3. 域侧能自修的（**本域直接修**，不要甩给 G4）
 
 - `article-rpc` 的 `baseline-version: 0`（**域侧 yaml ⇒ 本 lane 自修**；写法照抄 `message-rpc` / `like-rpc` 的既有注释块）
 - `article-api` 的 A3 接线复核：`rag.http.go-form-limit.mode: raw` ⇒ 拒绝形状 = **400 + Go 原文**
 
-## 4. 需转派 `global-common` 的（**本 lane 只登记：现象 + 证据 + 建议修法**）
+## 4. 需转派 **G4**（`align/g4-service-common`）的（**本域只登记：现象 + 证据 + 建议修法**）
 
-- `DRIFT-ARTICLE-API-006`（Go 必填字段校验）⇒ 落点 `service/common` 解析层 ⇒ **派单 `global-common`**
-- `S-6` 的 `SqlTimeoutStatusTranslator` javadoc 归因问题 ⇒ 同落点 ⇒ 随 `global-common` 一并订正
+- `DRIFT-ARTICLE-API-006`（Go 必填字段校验）⇒ 落点 `service/common` 解析层 ⇒ **派单 **G4****
+- `S-6` 的 `SqlTimeoutStatusTranslator` javadoc 归因问题 ⇒ 同落点 ⇒ 随 **G4** 一并订正
 
 ## 5. 交付物清单
 
@@ -68,5 +68,5 @@
 - [ ] **两侧同时跑**的探针（AGENTS.md §3.3）—— 只跑 RAG 的探针**不算数**
 - [ ] §1 的每一条**重新核对状态**并写回（带核对日期）
 - [ ] §3 的域侧修法**落码 + 守门**（含变异验证）
-- [ ] §4 的派单**登记到 `global` 跨域桶**（`docs/DRIFT/global/_README.md` §七之二）
-- [ ] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` ⇒ 合并后由整合者统一更新）
+- [ ] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）
+- [ ] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
