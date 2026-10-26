@@ -1776,6 +1776,13 @@ api 侧有 3s HTTP 预算：RAG 的**黑名单查询**自己就要 ~3s ⇒ 请�
 ⇒ ✅ **结论一：`DRIFT-USERAPI-015` 在 **rpc 侧不成立** —— 三种形态下两侧 gRPC **code 全部相同**。**
 ⇒ ⇒ **015 的影响面收窄为「仅 api 侧」**（api 侧的 3s HTTP 预算 vs Redis 3s command timeout 那一格）。
 
+> **📌 为什么 Go 侧是 ~1.7~1.8s 而不是 ~3s？（从 modcache 逐条核实）**
+> `go-redis@v9.20.0/options.go` 的 `Options.init()` 默认值：**`DialTimeout=5s` · `DialerRetries=5` · `DialerRetryTimeout=100ms` · `ReadTimeout=3s`**。
+> ⇒ Go 的失败延迟 = **5 次拨号尝试**（DNS 解析 + 100ms 重试间隔）⇒ **~1.7~1.8s** ⇒ 日志里的 `failed to dial after 5 attempts` 正是这条。
+> ⇒ 而 **RAG 侧只用了 ~0.005~0.34s**（同形态）⇒ **两侧的失败耗时差一个数量级**（**形状相同、耗时不同**）。
+> ⚠️ **这个差距本身不是漂移**（两侧 code 与 message 全同），但它解释了 §「消费方不对称」：Go 的 2s deadline 只剩 **~200~300ms 余量**，
+> ⇒ **一旦 DNS 解析慢过 2s，Go 侧就会从 `INTERNAL` 翻成 `DEADLINE_EXCEEDED`，而 RAG 侧仍是 `INTERNAL` ⇒ 分叉方向会反转** —— 属**潜在脆弱性**，本轮不立条目。
+
 ### 上一节「待审」三问的答案
 
 1. **「Redis 命令超时 3s」与「gRPC deadline」是否同刻？** ⇒ **不同刻，且 RAG 侧是 deadline 必然先到**：
