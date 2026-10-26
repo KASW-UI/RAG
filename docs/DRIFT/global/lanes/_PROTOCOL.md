@@ -38,12 +38,22 @@
 
 ## 三、lane 清单（2026-10-25 建 · 2026-10-26 扩到 15 条）
 
-### 3.1 在跑（**当前无**）
+### 3.1 在跑（**1 条**：`global-common`）
 
 > ✅ 第二十七轮（L6~L11）与第二十八轮（L12~L15）**全部已合回** ⇒ 写权已并入 `align/global`。
 > ⇒ 下一轮开 lane 时：**① 在本节加「在跑」表**（含分支 / 工作树 / 议题 / 独占写权）
 > **② 同步在 `tools/difftest/check-global-lane-ownership.py` 的 `ACTIVE` 档登记**（否则守门看不到它）
 > **③ 机器守门 `EXIT=0` 才算合规**。
+
+| lane | 分支 / 工作树 | 议题 | 独占写权 |
+|---|---|---|---|
+| **`global-common`** | `align/global-common` / `../RAG.worktrees/global-common` | 「**global ↔ `service/common`**」跨层对账 —— 10 条 `<域>-common` lane 体系里的 global 那一条 | `service/common/pom.xml` ＋ `service/common/src/**` ＋ [`../vs-common.md`](../vs-common.md) |
+
+⚠️ **它与 §3.2/§3.3/§3.4 那 15 条历史 lane 性质不同**：那 15 条是 `global` **域内**按议题切；
+本条是**跨域**的机制面对账 —— 其余 **9 条** `<域>-common` lane **只读** common 侧 ⇒ 它们的派单全部落到本条
+⇒ **写权是独占的**：别的 lane（无论域内还是跨域）都不得声明 `service/common/**`
+⇒ 机器网：`check-global-lane-ownership.py` 的 `ACTIVE` 档**已登记**本条（⇒ 将来再开 lane 撞 `service/common/**` 会红）。
+⇒ 总纲 ⇒ [`../../_cross/domain-common-lanes.md`](../../_cross/domain-common-lanes.md)
 
 ### 3.2 已合回（第二十八轮 · 4 条）
 

@@ -27,6 +27,20 @@ L2 曾拥有 `user-rpc/src/test/**`、L1 曾拥有 `like-rpc/**` / `comment-rpc/
    ⇒ 它们由**整合者**在合并后统一更新（§5.3 同款纪律）。
 3. **favorite 域零写权** —— `service/favorite/**` 与 `docs/*/favorite/` 不得出现在任何白名单。
 
+⚠️ **2026-10-27：`global-common` 登记 ⇒ 首次点亮「在跑」分支 ⇒ 抓出一条假绿**
+新登记的 `global-common`（`service/common/**` 的**唯一**写权 owner）让 `ACTIVE` 不再为空，
+于是断言 1 的两两比较**第一次被执行** ⇒ 变异测试当场抓到：
+`expand()` 的**目录分支返回绝对路径**、**直接文件分支返回相对路径** ⇒ 两边永不相交
+⇒ 断言 1 与断言 2 **一直是假绿**（详见 [`docs/Pitfalls/global/cross-domain.md`](../../docs/Pitfalls/global/cross-domain.md)
+的 `PIT-GLOBAL-067`）。
+⇒ 修法 = 新增 `_rel()`，所有分支统一返回「仓库相对 + POSIX 分隔符」；
+⇒ **改动后各 lane 的「白名单展开 N 个文件」计数一个都没变**（只改形态 ⇒ 无副作用）；
+⇒ 变异 A（第二条 lane 直接写目录内文件）⇒ `EXIT=1` 且精确点名；
+⇒ 变异 B（第二条 lane 用目录通配吃共享文件）⇒ `EXIT=1`（5 项违规）。
+
+⚠️ **「新增登记」必须配一次变异** —— 否则新登记的可能只是一道**假绿灯**
+（同源 `PIT-GLOBAL-046` / `PIT-GLOBAL-048`）。
+
 退出码
 ------
 0 = 全部通过；1 = 有重叠 / 有共享文件被占用 / 碰了 favorite。
@@ -49,6 +63,18 @@ REPO = Path(__file__).resolve().parents[2]
 # ⚠️ 与 docs/DRIFT/global/lanes/*.md 的「写权范围」一一对应；改这里必须同步改那里。
 # ⚠️ **在跑的 lane**（ACTIVE）：重叠只在这些之间算违规。
 ACTIVE: dict[str, list[str]] = {
+    # ---- 2026-10-27：`<域>-common` lane 体系（10 条）里的 **global 那一条** ----
+    # ⚠️ `global-common` = 「global ↔ `service/common`」这条**跨层**对账 lane
+    #    ⇒ 它是 `service/common/**` 的**唯一**写权 owner（AGENTS.md §5.3c·§5.3d）
+    #    ⇒ 登记它 ⇒ 守门能挡住「将来再开一条 lane 也声明 service/common/**」
+    # ⚠️ 白名单刻意写 `service/common/src/**` 而不是 `service/common/**`
+    #    ⇒ 避免把 `target/` 的**构建产物**算进写权集合（同源 PIT-GLOBAL-029）
+    # ⚠️ 另 9 条 `<域>-common` lane **只读** common 侧 ⇒ **不登记**（它们不是写权方）
+    "global-common": [
+        "service/common/pom.xml",
+        "service/common/src/**",
+        "docs/DRIFT/global/vs-common.md",
+    ],
     # ---- 第二十七轮（2026-10-26）：6 条新 lane，按**模块**零重叠 ----
     # ---- 第二十八轮（2026-10-26）：4 条 lane，按**模块**零重叠 ----
 }
@@ -196,37 +222,57 @@ FORBIDDEN = [
 ]
 
 
+def _rel(p: str) -> str:
+    """把路径**归一成「仓库相对 + POSIX 分隔符」**。
+
+    🔴 **为什么必须归一**（2026-10-27 实测缺陷）：
+    本函数原先对**目录通配**返回**绝对路径**、对**直接文件**返回**相对路径**
+    ⇒ 两边**永不相交** ⇒
+      ① 断言 1「在跑 lane 白名单两两不重叠」对「一个写目录、另一个写目录内文件」**恒不报**；
+      ② 断言 2「共享文件无人拥有」对**目录通配**的 lane **恒不报**。
+    ⇒ 两条断言**一直是假绿** —— 只因 `ACTIVE` 长期为空、这条代码路径**从未被执行过**
+    （2026-10-27 登记 `global-common` 才第一次点亮它 ⇒ 变异测试当场抓出）。
+    ⇒ 修法：**所有分支统一返回仓库相对路径**。
+    """
+    try:
+        return Path(p).resolve().relative_to(REPO).as_posix()
+    except ValueError:
+        # 不在仓库内（如 GOROOT 路径）⇒ 退回绝对路径的 POSIX 形态
+        return Path(p).as_posix()
+
+
 def expand(pattern: str) -> set[str]:
-    """把白名单条目展开成**实际存在的文件集合**。
+    """把白名单条目展开成**实际存在的文件集合**（**统一用仓库相对路径**）。
 
     ⚠️ 目录级写法（`a/b/**`）必须展开成文件集合才能比出重叠 ——
     「`tools/difftest/` 下新脚本」这种写法在 pattern 层面看不出跟谁撞。
+    ⚠️ **返回值一律是仓库相对路径**（`_rel`）⇒ 不同分支之间才可比（见 `_rel` 的说明）。
     """
     if pattern.endswith("/**"):
         # `a/b/**` ⇒ 该目录下的**全部文件**（含子目录）
         base = str(REPO / pattern[:-3])
         hits = set(glob.glob(base + "/**/*", recursive=True))
-        return {p for p in hits if os.path.isfile(p)}
+        return {_rel(p) for p in hits if os.path.isfile(p)}
 
     if "**" in pattern:
         hits = set(glob.glob(str(REPO / pattern), recursive=True))
-        return {p for p in hits if os.path.isfile(p)}
+        return {_rel(p) for p in hits if os.path.isfile(p)}
 
     direct = REPO / pattern
     if direct.is_file():
-        return {pattern}
+        return {_rel(str(direct))}
     # 尚不存在的新文件（lane 将来会创建的）⇒ 展开同名前缀的兄弟文件
     # ⚠️ 用 glob 而不是 pathlib.glob：pattern 本身可能自带 `*`（如 `ddl*`），
     #    再拼一个 `*` 会变成 `ddl**` ⇒ 非法 glob（`**` 只能独占一个路径段）。
     if direct.parent.is_dir():
         hits = set(glob.glob(str(direct)))
         rel = {
-            str(Path(p).relative_to(REPO))
+            _rel(p)
             for p in hits
             if os.path.isfile(p)
         }
-        return {pattern} | rel
-    return {pattern}
+        return {_rel(str(direct))} | rel
+    return {_rel(str(direct))}
 
 
 def main() -> int:
