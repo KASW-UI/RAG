@@ -106,7 +106,17 @@ public class GoStyleBreakerFilter implements Filter {
 
     /** 取（或懒建）某路由的 breaker。测试直接调它来观测状态。 */
     GoStyleBreaker breakerFor(HttpServletRequest request) {
-        return breakers.computeIfAbsent(routeKey(request), GoStyleBreaker::new);
+        return breakerFor(request, resolveRoute(request));
+    }
+
+    /**
+     * 取（或懒建）某路由的 breaker；<b>复用已解析出的结果</b>。
+     *
+     * <p>⚠️ <b>为什么要带 resolution 参数</b>：解析路由模板要走一遍 Spring 的路由匹配
+     * ⇒ 每请求解析<b>两次</b>就是白做一遍匹配 ⇒ ⇒ {@link #doFilter} 解析一次、这里复用。
+     */
+    private GoStyleBreaker breakerFor(HttpServletRequest request, GoStyleRouteResolution resolution) {
+        return breakers.computeIfAbsent(routeKey(request, resolution), GoStyleBreaker::new);
     }
 
     /**
@@ -118,7 +128,10 @@ public class GoStyleBreakerFilter implements Filter {
      * <p>⇒ 本方法优先用模板；<b>解析不出来时回落 raw URI</b>（= 旧行为，不是新语义）。
      */
     String routeKey(HttpServletRequest request) {
-        GoStyleRouteResolution resolution = resolveRoute(request);
+        return routeKey(request, resolveRoute(request));
+    }
+
+    private String routeKey(HttpServletRequest request, GoStyleRouteResolution resolution) {
         if (resolution.kind() == GoStyleRouteResolution.Kind.TEMPLATE) {
             return request.getMethod() + "://" + resolution.template();
         }
@@ -165,7 +178,7 @@ public class GoStyleBreakerFilter implements Filter {
             return;
         }
 
-        GoStyleBreaker breaker = breakerFor(request);
+        GoStyleBreaker breaker = breakerFor(request, resolution);
         if (!breaker.accept()) {
             // breakerhandler.go:25-32
             breaker.markDrop();
