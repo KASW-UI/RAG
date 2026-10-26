@@ -29,7 +29,7 @@
 | `DRIFT-MSG-V-026` | 熔断 / 降载链必须**真挂到** gRPC server | **拆两笔**：① **装配面 = 域侧**（`TaskRpcApplication` 是域内文件）② **链的可断言性 = 共享层**（`GoStyleRpcProtectionChain`） | 🟡 **部分修**（旧快照「守门已立」**掩盖了一个缺口**）—— ① `@Import GoStyleProtectionConfiguration` **属实**：`TaskRpcApplication.java:113` ＋ `@Bean GrpcServerConfigurer` `:130-139`（**唯一把 interceptor 挂上 server 的入口**）② 链上**确有** breaker：`GoStyleRpcProtectionChain.java:72` → `GoStyleRpcBreakerInterceptor.java:140-154` ③ 🔴 **shedding 未被守门证明** —— `TaskProtectionChainWiringTest.java:80-81` **主动 `props.getCpuShedding().setEnabled(false)`** ⇒ 该测试**只证明 breaker**，而 DisplayName 写的是「breaker/shedding」 | [`rpc.md`](rpc.md) |
 | `TaskRpcFatJarArtifactGateIT`（4 条） | 产物层守门 | 域侧构建 | ✅ **已立**（本轮只读源码，未跑构建 ⇒ 「已立」而非「已验证」） | `task-rpc/pom.xml:283-286`（`spring-boot-maven-plugin`，不写 `<mainClass>`⇒自动探测）+ `:207-211`（`grpc-inprocess` **scope=compile**，非 test）+ `:336-347`（surefire 第二 execution 绑 `verify`）；测试 `TaskRpcFatJarArtifactGateIT.java:74-143` | [`rpc.md`](rpc.md) |
 | `TaskRpcSlowThresholdGateTest`（2 条） | slow 轴守门 | `service/common`（配置读取） | ✅ **已立**（真 server + 真链 + 真 OTel SDK + 收集型 exporter） | `TaskRpcSlowThresholdGateTest.java:267-275`（取容器里的 `rpcInterceptorConfigurer` + `ServerBuilder.forPort(0)` 真起）+ `:305`/`:312`（判别式断言）· 消费点 `RpcServerInterceptorFactory.java:77-79`；⚠️ 它同样关掉了降载（`:148`） | [`rpc.md`](rpc.md) |
-| ✅ `DRIFT-HOTAPI-030` | Tomcat 参数个数口径 | `service/common`（X-6） | ✅ **已落地**；本域 `mode: raw` 与「Go 未注册 `SetErrorHandler` ⇒ 400 + 原文」**同向** ✅<br>🔴 **但 Go 侧本域根本走不到 form 解析** ⇒ 闸门拒绝了 Go 会接受的请求 ⇒ **见 §4 FB-02** | Go 侧证据：`service/task/api/**` 内 `httpx.Parse` / `ParseForm` / `GetFormValues` **命中数 = 0**（本轮实测）⇒ `gettaskhandler.go:19` 裸 `json.NewDecoder(r.Body)`；路由只有一条（`routes.go:16-25`：`POST /task/get`）⇒ Go 侧 `r.Form` 从不被求值 ⇒ `go-zero@v1.10.2/rest/httpx/util.go:15`（`maxFormParamCount = 2048`）与 `util.go:48-53` 的计数**均不可达** | [`api.md`](api.md) |
+| ✅ `DRIFT-HOTAPI-030` | Tomcat 参数个数口径 | `service/common`（X-6） | ✅ **已落地**；本域 `mode` **阶段 2 已由 `raw` 改为 `"off"`** ⇒ 与「Go 侧本域根本走不到 form 解析」**同向** ✅（守门 `TaskApiFormLimitReachabilityTest` 5/5 绿 + 变异 4 红）<br>⚠️ **改用 `off` 的判据不是「错误形状」而是「语义可达性」** ⇒ 原判据（按「Go 有没有注册 `SetErrorHandler`」决定 raw/envelope）**只回答「拒绝成什么形状」、没回答「该不该拒绝」** ⇒ 该缺口已作为 **FB-02** 派给共享层；🔴 **`off` 在 YAML 里必须加引号**（YAML 1.1 → 布尔 false ⇒ 上下文起不来）⇒ **FB-05** | Go 侧证据：`service/task/api/**` 内 `httpx.Parse` / `ParseForm` / `GetFormValues` **命中数 = 0**（本轮实测）⇒ `gettaskhandler.go:19` 裸 `json.NewDecoder(r.Body)`；路由只有一条（`routes.go:16-25`：`POST /task/get`）⇒ Go 侧 `r.Form` 从不被求值 ⇒ `go-zero@v1.10.2/rest/httpx/util.go:15`（`maxFormParamCount = 2048`）与 `util.go:48-53` 的计数**均不可达** | [`api.md`](api.md) |
 
 ⇒ **§1 四条 ⇒ 0 条「新派单」**（3 条已立/已落地 + 1 条拆两笔）⇒ 其中拆出的**共享层半笔**见 §4 **FB-03**。
 
@@ -39,7 +39,7 @@
 |---|---|---|---|---|---|
 | **A1** | 超时 / deadline | ① server：`task-rpc/application.yml:231` `rpc-timeout: 2s` → 消费点 `RpcServerInterceptorFactory.java:80-81` ② 链挂载 `TaskRpcApplication.java:138` ③ HTTP：`task-api/application.yml:127` `http-timeout: 3s` → `HttpMiddlewareFilter.java:52-57` ④ client deadline：`TaskRpcClient.java:105-111`（`min(2000ms, 剩余)`）⑤ SQL 取消 `TaskRpcApplication.java:92-93` | ✅ 一致（三个超时：rpc 2s / http 3s / client 2s，逐个对齐 Go 的 struct tag 默认值） | L1 | 2026-10-27 |
 | **A2** | gRPC 拦截器链 | ① `@Import`：`TaskRpcApplication.java:83-115`（`RpcServerInterceptorFactory`:87 / `ObservabilityProperties`:88 / `GoStyleProtectionConfiguration`:**113**）② `@Bean GrpcServerConfigurer` `:130-139` ③ 链定义 `GoStyleRpcProtectionChain.java:61-78`（`:65` shedding 分支 / `:72` breaker 分支）④ breaker 包装点 `GoStyleRpcBreakerInterceptor.java:140-154` | ✅ **一致**（相对序 recover→breaker→shedding→业务 与 Go `zrpc/server.go:144-167` 一致；本域 yaml 无 `rag.protection` 段 ⇒ 走默认 `enabled=true`/`900` ⇒ Go 的 `CpuThreshold>0` 等价成立）<br>🟡 **守门只覆盖 breaker**（`TaskProtectionChainWiringTest.java:80-81` 主动关降载）⇒ 域侧补守门（D-2）＋ **共享层补「链层构成」查询入口（FB-03）** | L1 | 2026-10-27 |
-| **A3** | HTTP 保护链 | ① 扫描面 `TaskApiApplication.java:78-91`（`basePackages` 含 `com.rag.common`，**排除** `GoStyleJsonBodyConverterConfig`:88-90）② maxConns `GoStyleMaxConnsFilter.java:95-97,128` ③ breaker `GoStyleBreakerFilter.java:76-78,116` ④ shedding `GoStyleCpuSheddingFilter.java:62-64,117` ⑤ maxBytes `GoStyleMaxBytesFilter.java:82-84,112` ⑥ form 闸门 `GoStyleFormValueLimitInterceptor.java:80-97` + 注册 `GoStyleFormLimitWebMvcConfig.java:41-43`；mode=**raw** ← `task-api/application.yml:176-178` ⑦ Tomcat 上限 `GoStyleTomcatParameterLimitCustomizer.java:95,106-118` ⑧ Content-Type 判据 `TaskApiJsonBodyConfig.java:83-97,117-119` ⑨ **路径归一缺** | 🟡 **OBS**（四道闸门 + 拒绝形状 503/503/503/413 与 Go 一致；🔴 **form 闸门在 Go 侧本域不可达 ⇒ 多出一条 Go 没有的拒绝** ⇒ §4 **FB-02**；🟡 **路径归一共享层缺位** ⇒ §4 **FB-01**） | L1 | 2026-10-27 |
+| **A3** | HTTP 保护链 | ① 扫描面 `TaskApiApplication.java:78-91`（`basePackages` 含 `com.rag.common`，**排除** `GoStyleJsonBodyConverterConfig`:88-90）② maxConns `GoStyleMaxConnsFilter.java:95-97,128` ③ breaker `GoStyleBreakerFilter.java:76-78,116` ④ shedding `GoStyleCpuSheddingFilter.java:62-64,117` ⑤ maxBytes `GoStyleMaxBytesFilter.java:82-84,112` ⑥ form 闸门 `GoStyleFormValueLimitInterceptor.java:80-97` + 注册 `GoStyleFormLimitWebMvcConfig.java:41-43`；mode=**"off"**（**阶段 2 已改**，原 `raw`）← `task-api/application.yml:213` ⑦ Tomcat 上限 `GoStyleTomcatParameterLimitCustomizer.java:95,106-118` ⑧ Content-Type 判据 `TaskApiJsonBodyConfig.java:83-97,117-119` ⑨ **路径归一缺** | 🟡 **OBS**（四道闸门 + 拒绝形状 503/503/503/413 与 Go 一致；🟢 **form 闸门已按「语义可达性」关掉** ⇒ 本域不再多出 Go 没有的拒绝（守门 `TaskApiFormLimitReachabilityTest` 5/5 绿 + 变异 4 红）；🟡 **路径归一共享层缺位** ⇒ §4 **FB-01**；🔴 **`off` 在 YAML 里必须加引号**（YAML 1.1 → 布尔 false）⇒ §4 **FB-05**） | L1（+ 域侧守门 L4） | 2026-10-27 |
 | **A4** | 错误码 / envelope | ① 无信封 `TaskController.java:87-90`（直接返回 `GetTaskResp`）② gRPC→HTTP `GlobalExceptionHandler.java:86-95,101-137`（17 码 + default 500）③ 兜底 = **400** `:290-294` ④ 裸响应体 `:305-311`（`text/plain; charset=utf-8` + `nosniff` + 尾 `\n`）⑤ 404/405 `:254-258,267-274` → `GoStyleRouterErrorResponses` | ✅ 一致（本域**未注册** `SetErrorHandler` ⇒ 形状 = 真状态码 + text/plain，**不是** 200 + 信封 ⇒ 与 like/message/hot 域刻意不同，与 Go 同） | L1 | 2026-10-27 |
 | **A5** | 端口治理 | ① api `task-api/application.yml:72` `port: ${TASK_API_PORT:18886}` ② rpc `task-rpc/application.yml:139` `grpc.server.port: 9005` ③ client 寻址 `task-api/application.yml:113` `127.0.0.1:9005`（`negotiation-type: plaintext`:114） | ✅ 一致（与 Go `task/api/etc/task.yaml:3` / `task/rpc/etc/task.yaml:2` / `:6` 逐条对齐；⚠️ 本域下游**不走服务发现**，与 Go 一致） | L1 | 2026-10-27 |
 | **A6** | errmsg 契约 | — | **N/A**（Go 的 task 域**无** errmsg 模块：`service/task/**` 全目录 `errmsg` 命中 0 ⇒ 错误文案只有两条字面量，已在 A4 内核） | L1 | 2026-10-27 |
@@ -53,7 +53,7 @@
 
 | # | 条目 | 现状（`文件:行号`） | 建议修法 |
 |---|---|---|---|
-| D-1 | **A3 form 闸门在本域的开关值** | `task-api/application.yml:176-178` `mode: raw` ⇒ 触发 `GoStyleFormValueLimitInterceptor.java:86,95` | 把本域 mode 改 **`off`**（与「Go 侧不解析 form ⇒ 该上限在 Go 不可达」同向）⇒ 与 §4 FB-02 的期望语义一致<br>⚠️ 改前须确认 `mode=off` 时 `GoStyleTomcatParameterLimitCustomizer.java:109-111` 不抬上限 ⇒ Tomcat 保留 yaml 的 2048（`task-api/.../application.yml:87`），但本域**从不调 `getParameter*`** ⇒ Tomcat 惰性解析 ⇒ **不可达 ⇒ 无影响**<br>⇒ 配域内守门：带 >2048 个非空 query 值 ⇒ 应 **200**；`?a=%zz` / `?a=1;b=2` ⇒ 应 **200** |
+| D-1 | **A3 form 闸门在本域的开关值** | 原 `task-api/application.yml:176-178` `mode: raw` ⇒ 触发 `GoStyleFormValueLimitInterceptor.java:86,95` | ✅ **阶段 2 已落码**：`mode: raw` ⇒ **`mode: "off"`**（`task-api/application.yml:213`）<br>⚠️ **必须加引号**：YAML 1.1（SnakeYAML）把**未加引号的** `off` 解析成**布尔 false** ⇒ `@Value` 拿到 "false" ⇒ 共享层 `parse` 判非法 ⇒ **上下文直接起不来**（实测报错 `非法的 rag.http.go-form-limit.mode 值：false`）⇒ ⇒ 共享层已派单 **FB-05**（`parse` 是否接受 `false`）<br>⚠️ **改前的前置已逐条核实**：① `GoStyleFormValueLimitInterceptor.preHandle` 的 OFF 分支直接 return；② `GoStyleTomcatParameterLimitCustomizer.customize` 的 OFF 分支**直接 return** ⇒ **不动**容器上限 ⇒ Tomcat 保留 yaml 的 2048；③ 本域**从不调 `getParameter*`**（控制器只有 `@RequestBody`，没有 `@RequestParam`）⇒ Tomcat 惰性解析 ⇒ **不可达 ⇒ 无影响**<br>✅ **域内守门** `TaskApiFormLimitReachabilityTest.java`（**真 Tomcat** + `HttpURLConnection`，5 条）：① 生效模式必须是 **OFF**（**直接**断言 `GoStyleFormValueLimitInterceptor#mode()` —— 光断言「返回 200」区分不了「关掉」与「根本没装」）；② >2048 个非空 query 值 ⇒ 200；③ `?a=%zz` ⇒ 200；④ `?a=1;b=2` ⇒ 200；⑤ 阳性对照（无 query ⇒ 200 + 正常 task 载荷）<br>✅ **变异验证**：把 yaml 改回 `mode: raw` ⇒ **4 条红**（含 400 + Go 原文 `too many form values, error: …`）⇒ 非假绿 |
 | D-2 | **`TaskProtectionChainWiringTest` 的覆盖面** | `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskProtectionChainWiringTest.java:80-81`（`props.getCpuShedding().setEnabled(false)`）+ `:116-119`（`isNotSameAs`）⇒ **只证明 breaker** | ① DisplayName / 注释改为「断言 **breaker** 在链上」② **补一条 shedding 断言**（不关降载，断言业务 interceptor 拿到的是**第二层**包装 call）③ 若共享层提供「链层构成」查询入口（FB-03），优先用它断言两层 |
 | D-3 | `baseline-version: 0` / 独立账本表名 | `task-rpc/application.yml:76,79` | **无动作**（已核，属实） |
 | D-4 | Kafka 跨域 topic `task.logs.filtered.*` | `task-rpc/application.yml:160-161` ＝ `like-rpc/application.yml:222,224` | **无动作**（字面量一致）；改动须 like/task **同批** |
@@ -98,6 +98,20 @@
 | **⑥ 影响面** | 共享层 `service/common/protection/*` ⇒ 被 **10 个 rpc 组件**依赖（`service/common` 依赖度数 20）⇒ 跨域引用域数 = **9**（全部 rpc 域） |
 | **⑦ 是否阻塞本波** | **否**（属守门能力缺口；task 域的 shedding 断言可先按 D-2 的最小版做） |
 
+### 🆕 FB-05 · A3 form 闸门开关值 `off` 在 YAML 里**写不出来**（YAML 1.1 把 `off` 解析成布尔 false）
+
+> ⚠️ **本单是我落 task 域 D-1 时踩出来的**，不是推演：**未加引号的 `mode: off` 让 task-api 的上下文直接起不来**。
+
+| 项 | 内容 |
+|---|---|
+| **① 现象** | 共享层 `GoStyleFormLimitMode.parse` 的合法取值是 `off` / `raw` / `envelope`（文档/注释/各域 yaml 说明都这么写）⇒ **但 YAML 1.1（SnakeYAML）把未加引号的 `off` 解析成布尔 `false`** ⇒ `@Value("${rag.http.go-form-limit.mode}")` 拿到字符串 **"false"** ⇒ `parse` 落 default ⇒ 抛 `IllegalArgumentException` ⇒ **构造期 BeanCreationException ⇒ 进程起不来** ⇒ ⇒ **文档里那个合法取值 `off`，在 YAML 里根本写不出来**（除非加引号） |
+| **② Go 侧出处** | Go 侧**没有这个开关**（`rest/config.go` 无 form-limit 旋钮；`maxFormParamCount = 2048` 是 `rest/httpx/util.go:15` 的常量）⇒ OFF 在 Go 侧的等价物就是「**什么都不做**」⇒ ⇒ **RAG 的 OFF 语义本身是对的，问题只在「配置值 → 代码」的传递** |
+| **③ RAG 侧现状** | `service/common/src/main/java/com/rag/common/http/GoStyleFormLimitMode.java:56`（`PROPERTY`）· `:82-98`（`parse`：只认 `off`/`raw`/`envelope`，其余抛）· `GoStyleFormValueLimitInterceptor.java:69-73`（构造期 `@Value` + `parse`）· `GoStyleTomcatParameterLimitCustomizer.java:99-104`（同一把尺子） |
+| **④ 证据强度** | **L4（真上下文启动失败实测 · 2026-10-27）**：`非法的 rag.http.go-form-limit.mode 值：false（只允许 off / raw / envelope）` ⇒ **值是 `false` 而不是 `off`** ⇒ YAML 1.1 布尔化的实证；加引号写 `mode: "off"` ⇒ 同一份代码、同一份上下文 ⇒ 正常启动（已实测） |
+| **⑤ 建议修法（两侧都应是 Y）** | **Y = 「域侧按文档写 `mode: off` 就能关闸门，且不会把进程搞挂」**。两条都建议做：① `parse` 额外接受 **`"false"`**（YAML 1.1 的 `off` ⇒ `false`）⚠️ **只加这一个别名**、不要放宽成「任意非法值都当 OFF」（那会重新引入「静默兜底 = 以为装上了其实没装」，`parse` 的 javadoc 明确反对）② 在 `PROPERTY` 的 javadoc / 类注释里注明「YAML 里必须加引号」 |
+| **⑥ 影响面** | 共享层 `GoStyleFormLimitMode` ⇒ 被 **10 个 api 全依赖**（两处消费）⇒ **当前受害域 = 0**（全仓 9 个域**无任何域**写字面量 `off` ⇒ favorite 域靠**「整段不写」**拿到 OFF ⇒ 行为零变化）⇒ **未来受害面 = 任何想关闸门的域** |
+| **⑦ 是否阻塞本波** | **否**（G2 的 task-api 已用 `mode: "off"` 绕开 ⇒ 本轮不依赖 G4 这次改动 ⇒ 可独立提交）；**但建议尽快修** —— 否则下一个「想关闸门」的域会直接撞上启动失败，且错误信息里的「值：false」极易被误读成「配置写错了值」 |
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次** —— 🟡 **本轮只做静态前置检查，未启动进程**（见 §6）⇒ 仍为待办
@@ -105,12 +119,12 @@
 - [ ] **两侧同时跑**的探针（AGENTS.md §3.3）—— 本轮**无 L4**，§6 列了 2 条待跑
 - [x] §1 的每一条**重新核对状态**并写回（带核对日期）—— **4 条全部重核，1 条「守门已立」被订正为「部分修」**
 - [ ] §3 的域侧修法**落码 + 守门**（阶段 2；D-1 / D-2）
-- [x] §4 的派单**登记**（本文件 §4 FB-01 / FB-02 / FB-03）＋ **实时轨已发** `session send` 给 `G4Common`
+- [x] §4 的派单**登记**（本文件 §4 **FB-01 / FB-02 / FB-03 / FB-05**）＋ **实时轨已发** `session send` 给 `G4Common`（FB-05 位 15）
 - [x] **共享面不回写**（合并后由整合者统一更新）
 
 ## 6. 未验证项（本轮明确留下的缺口，**不写成已闭环**）
 
-1. **FB-02 的 RAG 侧后果（400 vs 200）未跑双侧探针** ⇒ 建议用 `tools/difftest/` 补 3 条 query 变体用例（`?a=`×2049 / `?a=%zz` / `?a=1;b=2`）。
+1. ~~**FB-02 的 RAG 侧后果（400 vs 200）未跑**~~ ⇒ ✅ **阶段 2 已补 RAG 侧**：`TaskApiFormLimitReachabilityTest`（真 Tomcat）覆盖 3 条 query 变体（>2048 非空值 / `?a=%zz` / `?a=1;b=2`）⇒ 现状全部 **200**（= Go 侧语义，因 Go 侧从不解析 query）⇒ **域侧已闭环**。<br>⚠️ **仍缺 Go 侧活体** ⇒ 这 3 条变体在 Go 真源上的对应响应**未实测** ⇒ 按 §3.3「无双侧活体不得写 L4」⇒ A3 轴整体仍不得标 L4。
 2. **FB-01 的「RAG 对尾斜杠返 404」** —— 🟢 **Go 侧已由 G4Common 活体坐实**（go-zero 真 server，5 种路径变体全 200，2026-10-27）⇒ 剩下的是 **RAG 侧**的对应证据，**正在 G4 手里**（共享层归一器 + 真 Tomcat 守门）；article 域的等价断言见 `service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiRouteAuthBoundaryTest.java:221`。
 3. **A2 的 shedding 在链上**无任何守门证明（现存守门主动关掉降载）⇒ 这是本轮最实的一个「**跑绿 ≠ 对**」形态。
 4. **task-rpc 侧 `MqConsumer` / `TraceConsumer`** 是否在两个 sink 上都包了 —— 本轮只读源码未见对应调用点，**未排除也未证实** ⇒ 属 A9 的遗漏面。
