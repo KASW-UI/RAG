@@ -386,6 +386,7 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 
 > 🔴 **共享层改动 ⇒ 记账 + 告知（§5.3b）**：本轮改了 `service/common` 的 `DeadlineQueryTimeoutInjector` ⇒ **9 个有 SQL 的 rpc 组件全部受影响**（article / comment / **favorite** / follow / like / message / task / user / admin；**hot 无 SQL 不适用**）⇒ ⇒ **favorite owner 必须被告知**（favorite 域台账**非零** ⇒ 域内已审过 ⇒ **只能记账 + 告知，不能替它下结论**）。
 > ⚠️ **favorite 域零改动**：本轮**未碰 favorite 的任何代码/配置/测试/台账** ⇒ 写权门禁 `check-global-lane-ownership.py` 应仍 EXIT=0。
+> 🟢 **favorite owner 的反向提醒已被本轮回归实测覆盖**：他们提醒「E30 把超时 description 改成 `context deadline exceeded` ⇒ favorite 侧没红（用例把 description 整个丢弃、探针无 case 落在服务端超时路径）⇒ **别的域若断言 description 文案或遥测 `biz_msg` 文案，E30 会打到它们** ⇒ 建议全仓回归专门盯『文案类断言』这一档，别只盯码值」⇒ 🟢 **实测已闭合**：**E30 于第三十轮落地 ⇒ 第三十/三十一/三十二/三十三轮全仓回归四轮全绿**（2303 / 2305 / 2305 / **2310** 条，均 **0 failures / 0 errors / 0 skipped**）⇒ ⇒ **全仓没有任何域的文案类断言被打到** ⇒ 该提醒的结论 = 「E30 的文案改动在全仓是安全的」（若某域确有文案断言，它会在第三十轮就红）。
 > 🟢 **favorite owner 的跨域实测回执（第三十三轮）**：把 global 的 `DeadlineQueryTimeoutInjector.java` **叠到 `align/favorite` 上跑** ⇒ **零红、零需 favorite 改动** ⇒ `service/common` 177 / favorite-rpc 99 / favorite-api 94 / favorite-common 29 **全 0 失败**；三个探针（authority-live 21 case / api-full-parity 32 / grpc-contract 36+15）**全 EXIT=0、冻结值一条没动**。
 > 🔴 **该回执同时纠正了本轮台账里的一条错误事实**：本轮曾写「favorite 域台账 0 字节 ⇒ 从未被审过」⇒ **不成立** —— favorite 的 12 份台账全部非零、合计 ≈ **430 KB**（最大一份 `docs/DRIFT/favorite/rpc.md` **213,799 字节**），此后已做 **19 轮**对照 ⇒ **根因是本轮引用了「注入进上下文的 AGENTS.md 快照」而不是磁盘上的文件**（磁盘 `AGENTS.md` 的 favorite 行早已更新为「✅ 2026-10-26 核对：第十六轮已收口」）⇒ ⇒ 新坑 **PIT-GLOBAL-044**。
 
