@@ -1504,3 +1504,81 @@ is_noise, why = _is_noise_ref(path, s, e, src_text)   # ← 正则命中与否�
 同族 **PIT-GLOBAL-018**（变异三道闸）/ **PIT-GLOBAL-019**（变异作用域）/ **PIT-GLOBAL-020**（变异只准在隔离工作树跑）·
 **PIT-GLOBAL-021**（变异判定只认 surefire XML）· 本条补的是「**变异自身的有效性**」这一面。
 
+## PIT-GLOBAL-041 🔴 **断言「剩余时间原样传递」时，一次性初始化开销会把预算吃掉 ⇒ 测试恒红**
+
+**现象（2026-10-26 第三十三轮实测）**：给 `DeadlineQueryTimeoutInjector` 写「剩余毫秒数**原样**传给驱动」的断言，
+绑定 `deadline = now + 1234` ⇒ 断言「收到的毫秒数 ∈ (1000, 1234]」⇒ **实际收到 822** ⇒ 每次跑都一样 ⇒ **不是 flaky，是稳定偏差**。
+
+**根因**：**算 deadline 与调被测对象之间，隔着两笔一次性开销**：
+1. **Mockito 首次建 mock**（ByteBuddy 生成类）≈ **400ms**；
+2. **首次建动态代理类**（`Proxy.newProxyInstance`）≈ **数百 ms**。
+
+⇒ 两者都发生在「算 deadline → 调被测对象」之间 ⇒ **剩余预算被凭空吃掉 400ms 上下** ⇒ 断言必然红。
+⇒ ⚠️ 最阴的地方：**它看起来像「实现算错了」**（实现确实少传了 400ms！）⇒ 会把人引去改**生产代码**。
+
+**修法（测试侧）**：
+1. 🔴 **先建对象、后算 deadline** —— 把 mock / 代理 / 连接的创建全部排在 `deadline = now + X` **之前**；
+2. 🟢 **断言用区间而不是等值**（「∈ (X-200, X]」）⇒ 容忍正常的执行耗时；
+3. 🟢 **一次性的初始化开销要显式预热**，别指望测试顺序恰好对（测试顺序不保证）。
+
+### 纪律
+
+1. 🔴 **任何断言「剩余时间 / 剩余预算 / 剩余配额原样传递」的测试** ⇒ 必须先排除一次性开销（mock 生成 / 代理生成 / 类加载 / 连接池首建 / 容器首启）；
+2. 🔴 **看到「稳定偏差」先问「中间有没有一次性开销」** ⇒ 再去怀疑实现；
+3. 🟢 **判据**：把断言改成区间后仍红 ⇒ 那才是实现的锅。
+
+**出处**：2026-10-26 第三十三轮（`E46` 的 `service/common` 单测）·
+同族 **PIT-GLOBAL-038**（跑红先定性再改代码）。
+
+## PIT-GLOBAL-042 🔴 **驱动扩展 API 只挂在实现类上 ⇒ 反射探测；且「0」在超时语义里是「无上限」不是「立即」**
+
+**问题（2026-10-26 第三十三轮）**：要拿到**毫秒级**的 SQL 超时，pgjdbc 的 `setQueryTimeoutMs(long)` 挂在
+**实现类** `org.postgresql.jdbc.PgStatement` 上 ⇒ 而 **`org.postgresql.PGStatement` 这个接口没有它**（实测 `javap`：
+接口只有 `getLastOID` / `setUseServerPrepare` / `isUseServerPrepare` / `setPrepareThreshold` / `getPrepareThreshold` / `setAdaptiveFetch` / `getAdaptiveFetch`）。
+⇒ ⇒ **写 `((PGStatement) stmt).setQueryTimeoutMs(...)` 编译不过** ⇒ 而 `service/common` 是 10 个 api + 10 个 rpc 共享的库
+⇒ **不该把驱动实现类编进它的 API 面**。
+
+**修法**：**按方法名反射探测**（`stmt.getClass().getMethod("setQueryTimeoutMs", long.class)`）+ **按类缓存结果（含否定结果）**
+⇒ 探测不到 ⇒ **退回秒级**（`setQueryTimeout(int)`）+ **记一次 WARN**（不静默！）⇒ 共享库零新依赖、驱动无关。
+
+⚠️🔴 **同一条 API 里的第二个坑：`0` 的语义是「无上限」** ——
+pgjdbc 的 `PgStatement.startTimer()` 是 `if (timeout == 0) { return; }` ⇒ **`setQueryTimeoutMs(0)` = 永不超时**
+⇒ 而 `DeadlineState.remainingMillis()` 会把负值**夹到 0**（`Math.max(0L, d - now)`）⇒
+⇒ **「已过期」与「还剩 0ms」在数值上都是 0** ⇒ **若把 0 直接传给驱动 ⇒ 那条 SQL 会无限制跑**
+⇒ ⇒ 必须先把「≤ 0」单独分支处理（**本轮的处理 = 立即失败**，与 Go 的 `ctx.Err()` 语义同款）。
+
+### 纪律
+
+1. 🔴 **共享库要用驱动的扩展能力 ⇒ 反射 + 缓存 + 降级 + WARN**，不把驱动实现类写进 API 面；
+2. 🔴 **超时类 API 的「0」几乎都是「无上限」** ⇒ 传值前先把「≤ 0」单独分支，**绝不能把 0 直接传下去**；
+3. 🟢 **降级路径必须有守卫测试**（本轮：`driverWithoutMsSupportFallsBackToSeconds` + `hugeRemainingIsTreatedAsNoDeadline`）。
+
+**出处**：2026-10-26 第三十三轮（`E46` 的 `DeadlineQueryTimeoutInjector` 改写）·
+机制证据：pgjdbc `42.7.13` 源码 `PgStatement.java:1040-1047`（`startTimer` / `addTimerTask(cancelTask, timeout)`）
++ `PgStatement.java:616-646`（`setQueryTimeout` → `setQueryTimeoutMs`）· 版本由 Boot 4.0.8 的 `spring-boot-dependencies` 管理（`postgresql.version=42.7.13`）。
+
+## PIT-GLOBAL-043 🔴 **Spring 的异常翻译层会换掉异常链的形态 ⇒ 断言必须选对层**
+
+**现象（2026-10-26 第三十三轮实测）**：真 PG 守门里断言「SQL 被取消 ⇒ 状态码 = `DEADLINE_EXCEEDED`」⇒ 实际拿到
+**`org.springframework.dao.DataIntegrityViolationException`** ⇒ `Status.fromThrowable(...)` 返回 **UNKNOWN**。
+
+**根因（两层，都不是被测对象的错）**：
+1. **mybatis-spring 的 `MyBatisExceptionTranslator`** 会把 `PersistenceException` 翻译成 Spring 的 `DataAccessException`
+   （本次是 `DataIntegrityViolationException`）⇒ **异常链的形态被换掉**（`SQLState` 仍可在 cause 链里找到，但顶层类型变了）；
+2. **断言写在了「翻译之后」** ⇒ 而翻译之后看到的是 Spring 的异常类型 ⇒ ⇒ `Status.fromThrowable` 找不到 gRPC 状态。
+
+⇒ ⚠️ 最容易误判成「拦截器没生效」或「翻译器没生效」⇒ 实际是**断言选错了层**。
+
+**修法**：
+- 🔴 **要断言 wire 行为 ⇒ 断言 gRPC status**（`Status.fromThrowable(t).getCode()`）—— 这是**跨层稳定**的那个量；
+- 🟢 **要断言驱动层 ⇒ 就断言 SQLState**（`57014`），但要**在翻译之前**的层断言；
+- 🟢 **守门失败时打印整条 cause 链**（类名 + message + SQLState）⇒ 一次就能定位是「哪一层改的形态」。
+
+### 纪律
+
+1. 🔴 **断言前先问「这一层有没有异常翻译器」**（Spring `MyBatisExceptionTranslator` / MyBatis-Plus 的同类层）；
+2. 🔴 **跨层断言只认 wire 契约**（gRPC status / HTTP 码），不认中间层的异常类型；
+3. 🟢 **失败信息必须带整条 cause 链**（本轮 `describeChain`）⇒ 否则定位成本 = 重跑一次。
+
+**出处**：2026-10-26 第三十三轮（`E46` 的真 PG 守门 `CommentSqlDeadlinePrecisionGateTest`）·
+同族 **PIT-GLOBAL-031**（断言前先剥注释 / 断言别落在恒真处）· **PIT-GLOBAL-038**（跑红先定性）。

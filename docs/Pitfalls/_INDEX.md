@@ -39,6 +39,11 @@
 > **035**（Go 的 `select` 有多个分支 ⇒ 探针的慢 handler **必须永不返回** ⇒ 否则 done 分支与 timeout 分支同时就绪 ⇒ Go 随机选 ⇒ 客户端拿到 `code=Unknown` ⇒ **探针变成随机**）·
 > **036**（Spring 的 **`@DynamicPropertySource` 不进** context cache key ⇒ 靠「`properties` 恰好不同」隔离上下文是**侥幸** ⇒ 一旦撞上就共享上下文 ⇒ 装不进本测试的 OTel SDK ⇒ 用例以「**找不到 span**」这种看不懂的形态变红 ⇒ 修法：给守门加**专属 property**（零生产改动）；⚠️ `ApplicationContextInitializer` **防不住**（缓存上下文不会重新 refresh））。
 
+> **2026-10-26 第三十三轮增量**（E46 落地：SQL 取消时刻 == deadline 时刻）⇒ global 域再加 **3 条** ⇒ 合计 **42 条**：
+> **041**（**断言「剩余时间原样传递」时，一次性初始化开销会把预算吃掉 ⇒ 测试恒红** —— Mockito 首次建 mock ≈ **400ms**、首次建动态代理 ≈ **数百 ms** ⇒ 都发生在「算 deadline → 调被测对象」之间 ⇒ 实测断言值 **822**（应为 ~1234）⇒ **看起来像实现算错了**（实现确实少传了 400ms！）⇒ 会把人引去改**生产代码** ⇒ 修法：**先建对象、后算 deadline** + 断言用区间 + 显式预热）
+> **042**（**驱动扩展 API 只挂在实现类上 ⇒ 反射探测；且「0」在超时语义里是「无上限」不是「立即」** —— pgjdbc 的 `setQueryTimeoutMs(long)` 在实现类 `PgStatement` 上、**接口 `PGStatement` 没有它**（实测 `javap`）⇒ 共享库 `service/common` 不该把驱动实现类编进 API 面 ⇒ **按方法名反射 + 按类缓存（含否定结果）+ 降级 + WARN**；⚠️ pgjdbc `startTimer()` 是 `if (timeout == 0) return;` ⇒ **`setQueryTimeoutMs(0)` = 永不超时** ⇒ 而 `DeadlineState.remainingMillis()` 把负值夹到 0 ⇒ **「已过期」与「还剩 0ms」数值上都是 0** ⇒ 必须先把「≤ 0」单独分支）
+> **043**（**Spring 的异常翻译层会换掉异常链的形态 ⇒ 断言必须选对层** —— mybatis-spring 的 `MyBatisExceptionTranslator` 把 `PersistenceException` 翻译成 Spring 的 `DataAccessException`（实测 `DataIntegrityViolationException`）⇒ `Status.fromThrowable(...)` 返回 **UNKNOWN** ⇒ **看起来像「翻译器没生效」**（实际是断言写在了翻译之后）⇒ 修法：**跨层断言只认 wire 契约**（gRPC status / HTTP 码）+ 失败时打印整条 cause 链）
+
 > **2026-10-26 第三十一轮增量**（E38 ①：超时继承客户端 deadline）⇒ global 域再加 **1 条** ⇒ 合计 **36 条**：
 > **037**（还原变异时用 `shutil.copy2` ⇒ **mtime 被保留** ⇒ Maven 判定「class 比 source 新」⇒ **跳过重编译** ⇒ 复跑跑的**仍是变异后的字节码** ⇒ 症状 = 「还原了却仍红/仍绿」⇒ 判据：源码 grep 是对的但结果不变 ⇒ **还原后必须 `touch`**（或用 `copyfile` 不保留 mtime）⇒ 同族 **PIT-GLOBAL-019**，但机制不同（019 = 跨模块 reactor 范围 · 037 = 同模块内 mtime 判定））。
 
@@ -55,7 +60,7 @@
 
 | 项 | 值 |
 |---|---|
-| **全域坑位条目** | **306 条** / **32 份有内容的台账**（另 **15 份 0 字节**坑位，见「待填」）；另有 `common` 5 份 + `_cross` 4 份 + `hot/common` 1 份用**散文式**标题，不计入条数 |
+| **全域坑位条目** | **309 条** / **32 份有内容的台账**（另 **15 份 0 字节**坑位，见「待填」）；另有 `common` 5 份 + `_cross` 4 份 + `hot/common` 1 份用**散文式**标题，不计入条数 |
 | **编号前缀族** | **8 族 / 15 个具体前缀**：`P-`（article/users/like 四家共用裸号）· `PIT-` · `PF-` · `PITFALL-` · `P-ADMINAPI-` · `P-HOTAPI-` · `P-HOTRPC-` · `P-MSGAPI-` ·（+ `PIT-GLOBAL-` / `PIT-LIKEAPI-` / `PIT-USERSCOMMON-` / `PF-ARTICLE-` / `PITFALL-TASK-` / `PITFALL-MSG-` / `PITFALL-FOLLOW-` / `PIT-COMMENT-` / `PIT-LIKE-` / `PIT-USERS-`）|
 | **编号撞号** | **22 处** —— 见下方「编号撞号」 |
 
@@ -103,7 +108,7 @@
 | `comment` | 2 份 | 15 | `comment-rpc` 的 17 个类曾是空壳而全量编译 `EXIT=0` |
 | `follow` | 2 份 | 16 | —— |
 | `common` | 5 份 | 散文式 | 请求保护层四层：**recover → breaker → shedding → 业务观测**；链的定义点必须在共享模块，否则 10 个 rpc server 各写一遍 = 10 个可能写错的地方 |
-| 🆕 `global` | **3 份** | **39** | **跨微服务 + `service/common` 影响的搁置漂移**（§3.5）收口域。按议题分档：`common-tails` / `cross-domain` / `cycle-deps`。<br>主要坑：**查 Go 出处只在项目树里 grep 必落空**（真源在 `~/go/pkg/mod` 的 go-zero 源码里）· **「配置里没写」≠「没开」**· **变异两种假绿**（编译不过⇒读旧 XML / 红在更早断言上）· **改上游资源做变异而只跑下游⇒假阴性**· **用被测常量构造输入⇒恒绿**· **阻塞式启动器 + 句柄设在返回之后⇒句柄永远拿不到⇒调度器泄漏⇒守门失真**（024）· **MockMvc 与真 Tomcat 是两条观测路径⇒共享层改响应头会打红别的域的 MockMvc 守门**（025）· **守门期望值可能落在已登记偏离范围里⇒一条漂移要按维度拆开判（033）**· **`@DynamicPropertySource` 不进 context cache key⇒靠 properties 恰好不同隔离上下文是侥幸（036）**· **还原变异用 `copy2` ⇒ mtime 被保留 ⇒ Maven 跳过重编译 ⇒ 跑的是旧字节码（037）**· **`BindException` ⇒ 先三步定性（单独复跑 / lsof 查占用 / 抓实际绑的端口）⇒ 端口号不在随机范围 ⇒ 那次 `port` 不是 0 ⇒ 有外部来源（038）**· **遍历 `set` 做判定 ⇒ 门禁输出不可复现 ⇒ 同一条引用每次落进不同桶（039）** · **「变异后是红的」≠「变异有效」：规则被掩护 / 对照 flaky / 变异打错层 / 阳性对照依赖分支 / 台账引述错路径（040）** |
+| 🆕 `global` | **3 份** | **42** | **跨微服务 + `service/common` 影响的搁置漂移**（§3.5）收口域。按议题分档：`common-tails` / `cross-domain` / `cycle-deps`。<br>主要坑：**查 Go 出处只在项目树里 grep 必落空**（真源在 `~/go/pkg/mod` 的 go-zero 源码里）· **「配置里没写」≠「没开」**· **变异两种假绿**（编译不过⇒读旧 XML / 红在更早断言上）· **改上游资源做变异而只跑下游⇒假阴性**· **用被测常量构造输入⇒恒绿**· **阻塞式启动器 + 句柄设在返回之后⇒句柄永远拿不到⇒调度器泄漏⇒守门失真**（024）· **MockMvc 与真 Tomcat 是两条观测路径⇒共享层改响应头会打红别的域的 MockMvc 守门**（025）· **守门期望值可能落在已登记偏离范围里⇒一条漂移要按维度拆开判（033）**· **`@DynamicPropertySource` 不进 context cache key⇒靠 properties 恰好不同隔离上下文是侥幸（036）**· **还原变异用 `copy2` ⇒ mtime 被保留 ⇒ Maven 跳过重编译 ⇒ 跑的是旧字节码（037）**· **`BindException` ⇒ 先三步定性（单独复跑 / lsof 查占用 / 抓实际绑的端口）⇒ 端口号不在随机范围 ⇒ 那次 `port` 不是 0 ⇒ 有外部来源（038）**· **遍历 `set` 做判定 ⇒ 门禁输出不可复现 ⇒ 同一条引用每次落进不同桶（039）** · **「变异后是红的」≠「变异有效」：规则被掩护 / 对照 flaky / 变异打错层 / 阳性对照依赖分支 / 台账引述错路径（040）**· **断言「剩余时间原样传递」⇒ 一次性初始化开销（首次建 mock ≈400ms / 首次建代理）会把预算吃掉 ⇒ 稳定偏差看着像实现算错了（041）** · **驱动扩展 API 只在实现类上 ⇒ 反射探测；且超时 API 的「0」= 无上限（042）** · **Spring 异常翻译层换掉异常链形态 ⇒ 跨层断言只认 wire 契约（043）** |
 | `_cross` | 4 份 | 散文式 | Flyway 账本撞号；框架机制静默失效实证；「跑绿 ≠ 对」的元教训；**陈旧 surefire 报告抬高测试计数** |
 
 ## 待填（空文件即坑位）
