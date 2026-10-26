@@ -659,3 +659,67 @@ $ bash -c 'FOO=1; echo "${FOO}）"'    # 正常输出 1）
 
 `tools/difftest/exp-grpc-admin-deadline-probe.sh`：
 主仪器 = PG 服务端日志；指标 = `Δ_start`（查询存活）与 `Δ_end`（客户端返回后仍占 PG 多久）。
+
+---
+
+## P-15 · 🔴 跨域「销账通知」要**自己核**：①「已修」可能还没提交 ②**修文案 ≠ 修语义**
+
+**核对日期**：2026-10-26
+
+### 现象
+
+global 域发来销账通知：「Go 侧 `rpc.go:68-71` ⇒ `context deadline exceeded`，
+RAG 侧原为 `rpc timeout after 2000ms`，**已由 global 修完**，请 users/admin 回写销账」。
+
+按通知直接销账，会错两次：
+
+### 坑 ①：「已修完」可能**一行都还没提交**
+
+实查三个地方，全部对不上：
+
+| 查什么 | 结果 |
+|---|---|
+| `align/global` **分支**上的 `RpcInterceptor.java` | ❌ 仍是旧串 `"rpc timeout after " + timeoutMs + "ms"` |
+| 全仓 25 个分支逐个 `git show` | ❌ **没有任何分支**含新串，也**没有任何分支**含 `RpcInterceptorTimeoutDescriptionGateTest.java` |
+| `RAG.worktrees/global` 的**工作区** | ✅ 修复在这儿：`M service/common/.../RpcInterceptor.java`（**已改未提交**）＋ `?? RpcInterceptorTimeoutDescriptionGateTest.java`（**未跟踪**） |
+
+⇒ 通知说的「已在 `align/global` 分支修完」，**实际状态是「改在 worktree 工作区、尚未 commit、尚未合并」**。
+
+- **为什么难发现**：`git branch` 上的提交历史看起来完全正常（没有异常、没有冲突），
+  **只有 `git status` 看得见工作区的未提交改动**；
+- ⚠️ **风险是实的**：AGENTS.md §5.3 记过「共享文件的改动要尽早提交（**实测已被并发会话 `git checkout` 整体回滚过一次**）」，
+  而 `service/common` 正是共享文件 ⇒ 未提交 = 随时可能丢。
+- ⇒ **销账台账前固定三查**：
+  1. `git diff <基线>..<对方分支> -- <落点文件>` ⇒ 看**分支上**有没有；
+  2. `git branch -a --contains` / `git log --all -S"<新串>"` ⇒ 全 ref 搜一遍；
+  3. `cd <对方 worktree> && git status` ⇒ 看**工作区**有没有。
+  三处都没有 ⇒ 写「**尚未提交/未合并**」，不要写「已修完」。
+
+### 坑 ②：**修文案 ≠ 修语义** —— 差点把整条漂移误销
+
+| | 是什么 | global 本轮修了吗 |
+|---|---|---|
+| **文案** | 超时响应给客户端的 `status.description` 那一串 | ✅ 修了（`context deadline exceeded`） |
+| **语义** | 服务端 2s 预算**不继承客户端 deadline** ⇒ 客户端放弃后，PG 上的查询继续占 1.1s（`Δ_end = +1111ms`） | ❌ **没碰** —— deadline 仍是 `System.currentTimeMillis() + timeout.toMillis()`（服务端自己的 2s），**没取** `min(客户端 deadline, 服务端 2s)` |
+
+⇒ 「客户端看到的文案一致了」**不等于**「这条漂移的本体修好了」。
+⇒ **两者碰巧落在同一个文件、同一个方法里** ⇒ 只看 diff 会以为整条都修了。
+
+⇒ **销账前必做**：把这条漂移的**本体**（差异的**成因**）与**可观察形态**（差异的**表现**）分开列一张表，
+逐格标「修了/没修」。本轮正是靠这张表才发现「只销了一格」。
+
+### 附带一条：编号会歧义
+
+global 通知里说的那条，在我台账里是 **`UNRESOLVED-ARPC-002`**（超时是否 min 客户端 deadline）；
+而 **`DRIFT-ARPC-002`** 是另一条（`UpdateUserResp.success` 的 wire 差异，已修）。
+⇒ 同域内 `DRIFT-xxx` 与 `UNRESOLVED-xxx` **各有一套独立编号**，都带 `ARPC` 前缀 ⇒ 光说「ARPC-002」必然歧义。
+⇒ **跨域沟通一律带全前缀**（`UNRESOLVED-ARPC-002` / `DRIFT-ARPC-002`）。
+
+### 附带一条：行号引用会因**别人**的改动而失效
+
+global 提醒「`RpcInterceptor.java:192-194` 这类行号本轮改动后会漂移」⇒ 属实：
+该文件在 2026-10-26 已从 **170 行漂到 214 行**。
+⇒ 本域 4 处 `RpcInterceptor.java:NNN` 活引用已改成**符号名 / 表达式**
+（`deadlineEpochMs` 的计算、`TIMEOUT_SCHEDULER.schedule(...)`、`tracer.startSpan`）。
+⇒ **判据**：引用**共享层**代码时，行号的保质期取决于**别的域的合并节奏**，不由本域控制
+⇒ 共享层一律引**符号名**（AGENTS.md §3.1：证据要指向**消费点**）。
