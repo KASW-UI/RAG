@@ -32,9 +32,9 @@
 
 | 项 | 值 |
 |---|---|
-| **总体判定** | 🔴 **`SEMANTICALLY NOT EQUIVALENT`** —— ⚠️ **但这是首轮对照时的判定；7 条 MISMATCH 已全部修复**（见「修复轮」）⇒ **当前不再有「必须对齐」的分歧项** |
+| **总体判定** | 🔴 **`SEMANTICALLY NOT EQUIVALENT`** —— ⚠️ **首轮对照时的判定；7 条 SEMANTIC MISMATCH（§2）已全部修复**（见「修复轮」）⇒ **§2 不再有「必须对齐」的分歧项**；🔴 **但 §3 新增 2 条真漂移 D8 / D9**（2026-10-26，= global E65 / E66）⇒ **「必须对齐的分歧项」重新出现 2 条**，二者**完整闭环跨共享层**（`service/common` ⇒ global 单写权）⇒ **待修法拍板**（§3.5 / §3.6） |
 | SEMANTIC MISMATCH | **7 条**（§2）—— ✅ **全部已修**（各配真 PG 守门网 + 变异验证） |
-| OBSERVABLE DIFFERENCE | **7 条**（§3）—— **D1 撤销** / **D3 已修** / **D6 已修** / **D7 已修** / D2（时间精度）· D4（authority 部署形态）· D5（dispatch 部署形态）⇒ 后三条已归入签字候选 CAND-03 / CAND-09 |
+| OBSERVABLE DIFFERENCE | **9 条**（§3）—— **D1 撤销** / **D3 已修** / **D6 已修** / **D7 已修** / D2（时间精度）· D4（authority 部署形态）· D5（dispatch 部署形态）⇒ 后三条已归入签字候选 CAND-03 / CAND-09；🔴 **D8 / D9 为 2026-10-26 新增**（= global **E65 / E66**：出向 gRPC 不继承 deadline · Redis 不感知 deadline）⇒ **均已独立核实成立**，**待修法拍板 + 待共享层**（§3.5 / §3.6 / U15 / U16） |
 | 等价确认 | **约 70 个判定点**（§4） |
 | 组件规模 | Go 3,620 行 / 33 文件 ⇒ RAG 7,455 行 / 40 类（**RAG 是 Go 的 2.06 倍**） |
 | 构建 | `mvn -o -q -pl service/comment/comment-rpc -am -DskipTests install` ⇒ **`EXIT=0`**（本轮实测） |
@@ -152,7 +152,7 @@
 
 ---
 
-## 3. OBSERVABLE DIFFERENCE（6 条 —— 行为等价，但实现路径 / 部署形态不同）
+## 3. OBSERVABLE DIFFERENCE（**9 条** —— 行为等价，但实现路径 / 部署形态不同）
 
 | # | 判定点 | Go 侧事实 | RAG 侧现状 | 性质 |
 |---|---|---|---|---|
@@ -162,7 +162,9 @@
 | **D4** | authority 端点的部署形态 | `cmd/fact-authority/main.go:52/75-80` = **独立进程 + 独立监听端口**，默认就在跑 | `CommentAuthorityEndpointConfig.java:42` `@ConditionalOnProperty(comment.authority.enabled=true)`；`application.yml:196` 默认 `false`；且 pom 无 `spring-boot-starter-web` ⇒ 即使打开也起不来 | ⚠️ **建议登记为签字偏离**（见 `docs/Intentional_Deviations/comment/rpc.md`） |
 | **D5** | fact-dispatch 的部署形态 | `cmd/fact-dispatch/main.go:52-77` = 独立进程，缺配置即退出；默认就在投递 | `CommentFactDispatchScheduler.java:58-63` + `application.yml:178` `dispatch-enabled: false` ⇒ 默认整条投递链路**不参与运行** | ⚠️ **建议登记为签字偏离** |
 | **D6** | 缓存读穿失败时的 **Redis 指标 label** | `comment_subject_cache.go:31-35`：`GetSubjectWithCache` 返回 err 时打 `action="GetSubjectWithCache"`；同时 `GetSubjectCache` 内部对 **Redis 真异常**再打一次 `action="GetSubjectCache"` ⇒ **Redis 真异常时打两个指标** | `CommentCacheService.java:182` 把**所有**异常（含 JSON 解析失败）都记成 `action="GetSubjectCache"`；`getSubjectWithCache` 在 `readSubjectCache` 返回 null 时**不再打点** ⇒ **只打一个，且 label 名不同** | ✅ **已修**（2026-10-24，详见下方 §3.3） |
-| **D7** | **回填 Redis 失败**时的读路径 | `comment_subject_cache.go:59` `_ = c.SetSubjectCache(...)` ⇒ **显式忽略错误** ⇒ Redis 挂掉时读路径**照常返回 DB 回源的结果** | **修复前** `CommentCacheService` 的 `writeSubjectCache` 抛 `IllegalStateException` ⇒ 整个 `getSubjectWithCache` 失败 ⇒ **对外 500** | ✅ **已修**（2026-10-24，详见下方 §3.4） |
+| **D7** | **回填 Redis 失败**时的读路径 | `comment_subject_cache.go:59` `_ = c.SetSubjectCache(...)` ⇒ **显式忽略错误** ⇒ Redis 挂掉时读路径**照常返回 DB 回源的结果** | **修复前** `CommentCacheService` 的 `writeSubjectCache` 抛 `IllegalStateException` ⇒ 整个 `getSubjectWithCache` 失败 ⇒ **对外 500** |
+| **D8** | 🔴 **出向 gRPC 调用不继承请求 deadline**（= global **E65**，2026-10-26 新增） | `subject_fallback.go:17` `articleRPC.GetArticle(ctx, …)` ⇒ **吃 `ctx`** ⇒ deadline 到点**立刻中止** | `ArticleRpcClient.java:54/65` = **裸 stub** ⇒ **零期限** ⇒ deadline 到点**照跑不误** | 🔴 **待修法拍板 + 待共享层**（详见下方 **§3.5**） |
+| **D9** | 🔴 **Redis 调用不感知 deadline**（= global **E66**，2026-10-26 新增） | `internal/cache/*.go` **全部**带 `ctx`（`rdb.Get/Set/Scan`）⇒ deadline 到点缓存操作**立即中止** | `CommentCacheService.java` 全部 `redis.opsForValue()…`（**含写** `:279`/`:331`/`:433`/`:528` 的 `set`、`:619` 的 `delete`）**零 deadline 检查** ⇒ **照写不误** | 🔴 **待共享层**（详见下方 **§3.6**） | ✅ **已修**（2026-10-24，详见下方 §3.4） |
 
 ### 3.1 🟢 D1 撤销：Go 的 `default:` 标签会**吃掉** GORM 的 `autoCreateTime`
 
@@ -236,6 +238,41 @@
 | **✅ 已修** | **2026-10-24**。`getSubjectWithCache` 的回填包 try/catch，异常**记日志后忽略**（照 Go 的 `_ =`）。⚠️ `CommentDomainService:404-409` 的另一处回填**本来就**是 catch 后忽略 ⇒ 与 Go 一致，无需改 |
 | **🧪 守门网** | `CommentCacheRedisMetricGateTest#writeBackFailureDoesNotFailTheRead`（Redis 指向死端口 ⇒ 读与写都失败）⇒ 断言**仍返回 DB 回源的结果**、且 `SetSubjectCache`(set) 打点存在 |
 | **🧬 变异实测** | 去掉那个 try/catch（= 修复前）⇒ **2/5 变红**（`IllegalStateException: redis set subject cache failed` 抛到测试）⇒ 守门网不是假绿 |
+
+### 3.5 🔴 D8（= global **E65**）：出向 gRPC 调用**不继承请求 deadline** ⇒ `ArticleRpcClient` 是**裸 stub**
+
+> **归属**：global 域第四十六轮（`align/global` @ **`96d94db`**）在 `align/global` 台账登记为 **E65**（**E38② 重估后窄化出的第③层**）⇒ 命中 **comment 域代码** ⇒ **本域独立复核后落账**（§3.3「双侧同时跑的探针」纪律：Go 侧逐行取证 + RAG 侧读消费点）。
+> ⚠️ **落点横跨两层** ⇒ **共享层那半归 global**（`service/common` 单写权）· **本域那半在本域** ⇒ **本域只登记 + 指针，不改共享层**。
+
+| 项 | 值 |
+|---|---|
+| **Go 事实** | `service/comment/rpc/internal/logic/subject_fallback.go:17-20` `resp, err := articleRPC.GetArticle(ctx, &articleservice.GetArticleRequest{ArticleId: targetID, IncrView: false})` ⇒ **吃 `ctx`** ⇒ 继承请求 deadline ⇒ **deadline 到点 ⇒ 出向调用立刻中止** |
+| **RAG 现状** | `service/comment/comment-rpc/.../client/ArticleRpcClient.java:54` 持有 `ArticleServiceBlockingStub`，`:65` `stub.getArticle(...)` 是**裸 stub** ⇒ **零期限** |
+| **调用点** | `CommentDomainService.java:259` `return articleRpcClient.fetchAuthorId(targetId);` ⇒ **在 handler 路径上**（`resolveSubjectFallback`） |
+| **可观察后果** | deadline 到点后，Go 的 `GetArticle` **立刻失败**（⇒ 回落逻辑折叠成 `ErrorSubjectNotFound`），RAG 的**照跑不误** ⇒ 出向调用可能越过本应中止的时限继续占用下游 |
+| **根因（共享层）** | RAG 有**两个互不相通**的期限载体：① `DeadlineState`（`RpcInterceptor.java:281/372` 绑定 ⇒ **SQL 路径**在用，`DeadlineQueryTimeoutInjector.java:89` 消费）· ② `GoStyleRequestDeadline`（**只在 `HttpMiddleware.java:263` `begin()` / `:283` `clear()`** ⇒ **HTTP 路径**才有）。<br>⇒ **`GoStyleRequestDeadline.begin()` 全仓主代码只有 HTTP 一处** ⇒ **gRPC 服务端路径上从未绑定** ⇒ `GoStyleRequestDeadline.applyTo` 在 `GoStyleRequestDeadline.java:110-114` 判 `d == null` ⇒ **原样返回 stub（no-op）** |
+| **🟢 独立核实结论** | ✅ **成立**。主会话 2026-10-26 逐条复核 Go 侧（`subject_fallback.go:17` 吃 ctx）+ RAG 侧（`:65` 裸 stub）+ 载体分离事实（`begin()` 唯一调用点 = `HttpMiddleware.java:263`），**未照抄 global 的结论** |
+| **⚠️ 对 global 台账的一处订正** | global 转达写「`begin()` 全仓只有 `HttpMiddleware.java:304` 一个调用点」⇒ **行号有出入**：实际是 **`:263`**（`:283` 是配套的 `clear()`）⇒ **结论不变**（仍只有 HTTP 一处），但按 §3.3.1「行号指向**消费点**」应订正 |
+| **🔴 覆盖面比 global 转达更广（重要）** | global 转达说「comment / like / message 三处同款」⇒ **独立扫全仓 rpc 侧出向 stub，实际是 6 处裸 stub**：`comment-rpc/ArticleRpcClient.java:54` · `comment-rpc/MessageRpcClient.java:49` · `like-rpc/MessageRpcClient.java:53` · `follow-rpc/UserRpcClient.java:32` · `message-rpc/UserRpcClient.java:26` · `article-rpc/MessageRpcClient.java:54` |
+| **🔴🔴 另发现一处「看起来修了、其实没修」（最坏形态）** | `favorite-rpc/.../UserRpcClient.java:45` 与 `favorite-rpc/.../ArticleRpcClient.java:50` **已经写了** `GoStyleRequestDeadline.applyTo(stub)` ⇒ **看起来已对齐**；但 favorite-rpc 是 **gRPC 服务端** ⇒ 该载体在此**从未绑定** ⇒ **两处都是 no-op** ⇒ **同型缺陷仍存在**。<br>⇒ 这是 §3.3「**代码里写了 ≠ 机制生效**」的变体：**比裸 stub 更难发现**，因为它伪装成已修 ⇒ 已作为**只读指针**反馈给 global（favorite 域另有 owner 会话 ⇒ **本域不代改、不代下结论**） |
+| **证据强度** | 🟡 **源码级（两侧逐行取证）+ global 侧双侧活体探针实测**（Go `failed_fast=true` / `code=4` vs RAG `failed_fast=false` / `code=0`）⇒ **活体层证据由 global 提供，本域独立核实的是源码层** |
+| **⚠️ 本域那半的修法（**待 Jason 拍板，本轮未实施**）** | global 给的方向：共享层在 `RpcInterceptor.onHalfClose` 把有效期限也绑进 `GoStyleRequestDeadline` ⇒ 本域把裸 stub 改成 `GoStyleRequestDeadline.applyTo(stub)`（comment / like / message 等 6 处）。<br>💡 **主会话补充一条 global 方案里没提到的关键事实**：`DeadlineState` **在 gRPC 服务端路径上已经绑定了**（`RpcInterceptor.java:281/372`）⇒ ⇒ **本域那半其实不必等共享层**：可直接用 `DeadlineState.remainingMillis()` 构造 stub deadline（**同仓既有先例**：`users/admin/AdminDomainService.java:140` · `users/user/UserDomainService.java:145` 已用 `DeadlineState.isExpired()`）⇒ **现在就能真正闭环 E65**。<br>⚠️ **两条路各有代价**：走 `applyTo` ⇒ 共享层落地前是 **no-op**（行为不变、但也没修好）· 走 `DeadlineState` ⇒ **现在就能修好**，但**偏离 global 的统一载体方向**，且会**让 global 的门禁 `check-deadline-downstream.py` 变红**（drift 键 `outgoing_carrier` 钉的是 RAG=`absent`）⇒ **必须由 global 回写台账**（global 已明示「请回来找我，我回写台账」）。⇒ **本域不擅自选边，等拍板** |
+| **⚠️ 为什么本域现在不写守门网** | `applyTo` 在**共享层那半落地前是 no-op** ⇒ 写出来的守门网**测不出任何东西**（断言恒成立）⇒ 属 §3.3「**绿测试可能是错误答案的守卫**」⇒ **不写假绿网**；等共享层落地 / 修法拍板后，一并配**能真正触发载体**的守门网 |
+
+### 3.6 🔴 D9（= global **E66**）：Redis 调用**不感知 deadline** ⇒ 缓存读写**照写不误**
+
+> **归属**：global 域第四十六轮（`align/global` @ **`96d94db`**）登记为 **E66** ⇒ 命中 **comment 域代码** ⇒ **本域独立复核后落账**。
+
+| 项 | 值 |
+|---|---|
+| **Go 事实** | `service/comment/rpc/internal/cache/` **全部**带 `ctx`：`comment_subject_cache.go:76` `GetSubjectCache(ctx,…)` → `c.rdb.Get(ctx, SubjectKey(subjectID))` · `comment_subject_cache.go:103` `SetSubjectCache(ctx,…)` → `c.rdb.Set(ctx, key, b, ttl)` · `comment_invalidation_cache.go:10/37/56` `InvalidateTargetCaches` / `DeleteCommentIndexCache` / `deleteKeys` → `c.rdb.Scan(ctx, cursor, pattern, 100)` / `c.deleteKeys(ctx, …)` ⇒ **go-redis v9 的这些方法都吃 `ctx`** ⇒ **deadline 到点 ⇒ 缓存操作立即中止** |
+| **RAG 现状** | `service/comment/comment-rpc/.../service/CommentCacheService.java` 的**全部** `redis.opsForValue()…`（**含写路径**：`:279` 的 `set`、`:331` 的 `set`、`:433`/`:528` 的 `set`、`:619` 的 `delete`，以及 `:250`/`:341`/`:376`/`:479` 的读）**零 deadline 检查** ⇒ ⚠️ **全文件 grep `deadline` / `remaining` / `timeout` ⇒ 零命中** |
+| **可观察后果** | deadline 到点后，Go 的缓存读写**不再发生**；RAG 的**照写不误** ⇒ **写路径尤其值得注意**（`set` / `delete` 在 deadline 后仍落 Redis） |
+| **根因（共享层）** | `service/common` 里**没有任何 Redis 相关的期限载体** ⇒ `DeadlineState`（只覆盖 SQL）· `GoStyleRequestDeadline`（只覆盖 HTTP + 出向 stub）**都不覆盖 Redis** ⇒ **本域那半在共享层落地前无法实施** |
+| **🟢 独立核实结论** | ✅ **成立**。主会话 2026-10-26 核 Go 侧全部 cache 方法签名 + Redis 调用（`rdb.Get/Set/Scan` 均带 `ctx`）+ RAG 侧 `CommentCacheService.java` 零 deadline 检查 ⇒ **未照抄 global 的结论** |
+| **证据强度** | ⚠️ **源码级**（全量扫描）—— global 已如实标注「**未经双侧活体验证**」⇒ **本域也未做活体验证**（Redis 侧要复现「deadline 到点后写不再发生」，需要在真 Redis 上掐断连接/观察写计数） |
+| **修法方向（**待 Jason 拍板，本轮未实施**）** | global 的判断：**共同根因只有一个 —— RAG 没有 ctx 传播** ⇒ 共享层补一个**统一的「请求期限载体」**（现在两个互不相通的载体才是病根）⇒ Redis 调用点也能查到期限。<br>⇒ **本域那半**：Redis 调用点前查一次期限 ⇒ **依赖共享层先有 Redis 可查的载体** ⇒ **共享层未落地前，本域无法实施** ⇒ **本域不擅自加临时机制**（那会引入第三种载体，与「统一载体」方向相反） |
+| **⚠️ 本域现状登记** | 🟡 **未修** —— 与 D8 不同，本条**没有任何一侧能在本域单方面闭环** ⇒ 完整闭环**必须**等 global 的共享层那半 |
 
 ---
 
@@ -430,6 +467,7 @@
 
 ---
 
+## 5. 未决 / 待办
 
 | # | 事项 | 类型 |
 |---|---|---|
@@ -447,6 +485,8 @@
 | **U12** | ✅ **跨栈 gRPC 路径前缀**（未知项 #5）：Go `package pb;` ⇒ `/pb.CommentService/*`，RAG `package comment;` ⇒ `/comment.CommentService/*`。**新增 `PbCommentServiceAlias`**（`@GrpcService` + `BindableService`，用 `MethodDescriptor.toBuilder().setFullMethodName()` 改名 + 复用 `getServerCallHandler()`）⇒ **只增不改**（`comment.` 路径原样保留）⇒ **不推翻**已签字的 `SD-2026-10-23-04`。守门网 `PbCommentServiceAliasGateTest` 6 例（真 in-process server，两条路径都通、同一实现、方法集合对应、未注册方法仍 UNIMPLEMENTED） | ✅ 已闭环（**半修**，见 U13） |
 | **U13** | 🔴 **U12 的伴生阻塞（不可修）**：`io.grpc.Status` **只有 17 个常量** ⇒ grpc-java **发不出** `grpc-status: 1012` ⇒ RAG 的业务码在**自定义 trailer** 里 ⇒ **Go 侧读不到** ⇒ 跨栈错误码必然退化成 `UNKNOWN(2)`。⇒ **结论：混跑必须同栈配对，别名只是兜底** | 🔴 跨栈限制（**协议层**，非本域可修） |
 | **U14** | ~~T20 保护层覆盖范围差异~~ | ✅ **已闭环**（2026-10-24 活体实测 T20 ⇒ 登记为 D6 ⇒ **用户已签字** `SD-2026-10-24-CAND-08`：**接受 RAG 更严/更安全的一侧** ⇒ **代码零改动** ⇒ 共享面 `service/common/protection` **不动**） |
+| **U15** | 🔴 **D8（= global E65）出向 gRPC 调用不继承请求 deadline** —— `ArticleRpcClient.java:65` 是**裸 stub**（Go `subject_fallback.go:17` 吃 `ctx` ⇒ deadline 到点立刻中止，RAG 照跑不误）。**本域已独立核实成立**（2026-10-26）⇒ 详见 **§3.5**。<br>⚠️ **完整闭环跨共享层**：`GoStyleRequestDeadline.begin()` 只在 HTTP 路径（`HttpMiddleware.java:263`）绑定 ⇒ gRPC 服务端路径上 `applyTo` 是 **no-op** ⇒ **共享层那半归 global**（`service/common` 单写权）⇒ **本域那半待修法拍板后落地**。<br>💡 **本域那半其实不必等共享层**：`DeadlineState` 在 gRPC 路径**已绑定**（`RpcInterceptor.java:281/372`）⇒ 可用 `DeadlineState.remainingMillis()` 直接闭环（同仓先例：`users/admin/AdminDomainService.java:140`）⇒ **两条路各有代价（会让 global 的门禁 `check-deadline-downstream.py` 变红）** ⇒ **待 Jason 拍板，本域不擅自选边**。<br>⚠️ **本域现在不写守门网**：`applyTo` 在共享层落地前是 no-op ⇒ 守门网**测不出任何东西** ⇒ 属 §3.3「绿测试可能是错误答案的守卫」⇒ **不写假绿网** | 🔴 **待修法拍板 + 待共享层**（§3.5） |
+| **U16** | 🔴 **D9（= global E66）Redis 调用不感知 deadline** —— Go 侧 `service/comment/rpc/internal/cache/*.go` **全部**带 `ctx`（`rdb.Get/Set/Scan`）⇒ deadline 到点缓存操作立即中止；RAG 侧 `CommentCacheService.java` **全部** `redis.opsForValue()…`（**含写**：`:279`/`:331`/`:433`/`:528` 的 `set`、`:619` 的 `delete`）**零 deadline 检查**（全文件 grep `deadline`/`remaining`/`timeout` ⇒ 零命中）⇒ **写路径照写不误**。**本域已独立核实成立**（2026-10-26）⇒ 详见 **§3.6**。<br>🔴 **本域单方面无法闭环**：`service/common` **无任何 Redis 相关期限载体**（`DeadlineState` 只覆盖 SQL · `GoStyleRequestDeadline` 只覆盖 HTTP + 出向 stub）⇒ ⇒ **必须等 global 的共享层那半**（global 第四十六轮的判断：共同根因是「RAG 没有 ctx 传播」⇒ 共享层补**统一载体**比逐点打补丁更对味）⇒ **本域不擅自加临时机制**（那会引入第三种载体，与统一方向相反）<br>⚠️ **证据强度**：🟡 **源码级**（全量扫描）—— global 已如实标注「未经双侧活体验证」，**本域也未做活体验证** | 🔴 **待共享层**（§3.6） |
 
 ---
 
