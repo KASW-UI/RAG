@@ -61,6 +61,7 @@
 | D-1 | **过期 javadoc（断言与事实相反）** —— `MessageRpcClient` 仍写「本类没有任何 client 拦截器」「`DRIFT-MSGAPI-004` 已登记未修」 | `service/message/message-api/src/main/java/com/rag/message/message/api/client/MessageRpcClient.java:60-68` | 事实：客户端熔断由共享层 `GoStyleGrpcClientBreakerInterceptor.java:104-106`（`@Component` + `@GrpcGlobalClientInterceptor`）承担 ⇒ 被 `MessageApiApplication.java:63-66` 扫 `com.rag.common` 自动注册 ⇒ **`DRIFT-MSGAPI-004` 已修** ⇒ 改写 javadoc（**只改注释，不改行为**），Go 出处照抄 `zrpc/internal/client.go:112-113`；⚠️ §3.3.2：注释里的「Go: …」断言必须带真实行号 |
 | D-2 | **A5 测试端口段** —— 3 个真容器测试类用 `RANDOM_PORT` | `MessageApiProtectionRealTomcatTest.java:47` · `MessageApiTimeoutRealTomcatTest.java:55` · `GoStyleGrpcClientBreakerE2ETest.java:56` | 域侧自修：把 `service/favorite/favorite-api/src/test/.../support/RealTomcatPort.java` **复制**到 `message-api/src/test/.../support/`（**不改 favorite**）⇒ `DEFINED_PORT` + 专用端口段（避开 favorite 的 21300–21399、探针的 21400–21599、OS 临时段 49152–65535）+ 双绑定自检 |
 | D-3 | **台账落点订正** —— §1 把 `DRIFT-MSG-V-024` 落点写成 `service/common`、把 `DRIFT-MSGAPI-011` 落点写成 `service/common` | 本文件 §1（已就地订正）· 另需订正 [`api.md`](api.md) 的同款表述 | 本轮已改本文件；`api.md` 的订正在阶段 2 落码时一并做（**同域写权内**） |
+| D-4 | 🆕 **G3 预告（2026-10-27）· 删除本域的 MyBatis-Plus 排序桥** —— ⛔ **带闸门：必须等 G4 的共享层桥落码后才删** | 本域持有 `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java`（**全仓 9 份域侧桥之一**，本轮 `find` 实测；共享层 `service/common` 命中数 = **0**）＋ 注册行 `service/message/message-rpc/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:1`（类注释 `:46` 自带「**什么时候可以删**」条件） | ⛔ **闸门（硬）**：**必须 G4 的共享层桥落码之后才删** ⇒ 否则「域侧删了、共享层还没加」⇒ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 DataSource）⇒ **不产 `SqlSessionFactory` ⇒ 启动失败**<br>⇒ 删后跑本域真上下文守门 ⇒ 判据 = `SqlSessionFactory` 在 + `@Import` 的 `DeadlineQueryTimeoutInjector` **真在执行链上**<br>⇒ 两座桥同向（都是 `after=DataSource, before=MP`）⇒ 并存期功能等价、**不需要跨树同一次提交**<br>⚠️ 本条是 **G3 的预告（非派单）** ⇒ 等 G3 正式派单再动手；🔴 **G4 台账目前查不到「排序桥」条目** ⇒ 共享层那一半的落码状态**待证** |
 
 ## 4. 需转派 **G4**（`align/g4-service-common`）的（**本域只登记：现象 + 证据 + 建议修法**）
 
@@ -74,7 +75,7 @@
 | **① 现象** | Go 侧 router 对请求路径做 `path.Clean` ⇒ 尾斜杠 / 双斜杠 / `.` / `..` 变体**命中同一路由**；RAG 侧**只有 `article-api` 有**归一器（域内类）⇒ **其余 9 个 api（含 message / like / task）缺这一层** ⇒ 变体路径两侧行为可能分岔（Go 200 vs RAG 404）。⚠️ **「RAG 返 404」目前是推断**（Spring 默认 `useTrailingSlashMatch=false`）⇒ **需真容器探针确认**（本轮未跑） |
 | **② Go 侧出处** | `go-zero@v1.10.2/rest/router/patrouter.go:48`（`cleanPath := path.Clean(reqPath)`，注册侧）+ `:60`（`reqPath := path.Clean(r.URL.Path)`，匹配侧）⇒ **已实测两行真实存在**<br>⇒ 语义证据：article 域双侧对拍 `docs/DRIFT/article/api.md:849`（CASE-25 尾斜杠 `/v1/articles/` ⇒ **Go 200**）⇒ Go 侧确实有归一语义 |
 | **③ RAG 侧现状** | `service/common/src/main/**` 下 **`GoStylePathNormalizingFilter` 命中数 = 0**（本轮 `find` 实测）⇒ 全仓唯一实现 = `service/article/article-api/src/main/java/com/rag/article/article/api/config/GoStylePathNormalizingFilter.java`（**域内类**）⇒ 本域 `MessageApiApplication.java:63-66` 扫 `com.rag.common` 时**扫不到它** |
-| **④ 证据强度** | **L1**（Go 源码行号 + RAG 文件缺失，二者均可复算）；「RAG 对尾斜杠返 404」为**推断**，**未跑真容器探针** ⇒ 不得标 L4 |
+| **④ 证据强度** | **L1**（Go 源码行号 + RAG 文件缺失，二者均可复算）<br>🟢 **Go 侧已升级为 L4 活体**（2026-10-27 · G4Common 实测）：go-zero **真 server** + curl 探针 ⇒ `/v1/x` · `/v1/x/` · `/v1//x` · `/v1/x/../x` · `/v1/./x` **五种变体全部 200** ⇒ **Go 的 `path.Clean` 归一已活体坐实**<br>⚠️ **RAG 侧后果**仍待 G4 落码后的真 Tomcat 守门 ⇒ 本条整体**暂不标 L4** |
 | **⑤ 建议修法（两侧都应是 Y）** | **Y = 「所有 api 的请求路径都按 Go 的 `path.Clean` 归一后再匹配」** ⇒ 归一器应落在**共享层 `service/common/http/`**（A3 轴定义的落点即 `protection/* + http/*`）⇒ **不得**继续按域各写一份（article-api 那份是历史遗留的域内副本）<br>⇒ 归一语义 = Go `path/clean.go`（`//`→`/`、`.`/`..` 消解、去尾斜杠），且必须排在**读路径的 Filter 之前**（article 现取 `HIGHEST_PRECEDENCE+2`，须在 `GoStyleTraceparentFilter(+3)` 之前）<br>⇒ 连带：共享层 `GoStyleTraceparentFilter.java:173-176` 的注释把 `GoStylePathNormalizingFilter` 当**共享层**类讨论 ⇒ 归一器进共享层后该引用自动成立；否则须把注释改成「article-api 私有、共享层没有」 |
 | **⑥ 影响面** | 共享层 `service/common/http/*` ⇒ 被 **10 个 api 全依赖**；**实际缺口 9 个**（article 已有等价实现）⇒ 跨域引用域数 = **9** |
 | **⑦ 是否阻塞本波** | **否**（不阻塞本波台账；阻塞 A3 结案 —— A3 在归一层落位前只能记 🟡） |
@@ -94,7 +95,7 @@
 ## 6. 未验证项（本轮明确留下的缺口，**不写成已闭环**）
 
 1. **A3 缺本域真实请求证据**：① envelope 拒绝形状（>2048 参数 ⇒ 是否 `200 + {code:5001,msg:"internal server error"}`）② `..` 路径归一 ③ 保护层 413/503 裸响应形状 ⇒ 需真 Tomcat 探针。
-2. **FB-01 的「RAG 返 404」是推断**（Spring `useTrailingSlashMatch` 默认 false）⇒ 需真容器探针确认后才算 L4。
+2. **FB-01 的「RAG 返 404」** —— 🟢 **Go 侧已由 G4Common 活体坐实**（go-zero 真 server，5 种路径变体全 200，2026-10-27）⇒ 剩下的是 **RAG 侧**的对应证据，**正在 G4 手里**（共享层归一器 + 真 Tomcat 守门）⇒ 本域只需在收口回归时复核。
 3. **A1 / A2 缺双侧活体**：Go 侧 2000ms 超时 + `codes.Acceptable` 六码判据（`zrpc/internal/codes/accept.go:9-17`）与 RAG 熔断器的对齐只做了源码对照。
 4. **A9 的前提**：`GoStyleOtelAgent.java:133-137` 装配失败只记 ERROR 并继续启动 ⇒ 「响应带 `Traceparent`」不是无条件成立，需运行期确认。
 5. **A8 的 Flyway 运行时形态**：`baseline-version: 0` 在**非空 schema** 下是否真的执行 V1–V5，只有真 PG 双侧起进程能定论。
