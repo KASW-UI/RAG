@@ -27,7 +27,7 @@
 | 未修 | 0 条语义漂移（余 1 条**全域共性** DRIFT-TASK-API-004，按 §三·三 不在本域单独修） |
 | 证据强度 | ✅✅ **双侧活体对拍**（2026-10-24 重跑，44 条 MATCH 44/DIFF 0）· ✅✅ **真 Tomcat 守门**（`TaskApiContentTypeTest` 12 条 + 变异测试）· ✅✅ **Nacos 真注册中心**（2026-10-24，注册/注销实测，见 §四·六）· ✅ 真实 MVC 管线（MockMvc，20 条）· ⚠️ gRPC 边界在单测里是 mock |
 | 对拍结果 | **44 用例：MATCH 44 / DIFF 0**（判定口径：状态码 + **归一后**的 Content-Type 媒体类型 + nosniff + 响应体逐字节） |
-| 测试 | **90 tests / 0 failures / 0 errors / 0 skipped**（task-api；原 78 + 新增 12） |
+| 测试 | **97 tests / 0 failures / 0 errors / 0 skipped**（task-api；原 78 + 新增 12 ⇒ **2026-10-27 阶段 2**：新增 `TaskApiFormLimitReachabilityTest` **6** 条（form 闸门语义可达性 + 端口段）+ `TaskApiContentTypeTest` 的端口段守门 **1** 条 ⇒ 90 + 7 = **97**） |
 
 ### 〇·一、本组件的守门测试清单（2026-10-24 复核补登）
 
@@ -36,13 +36,20 @@
 
 | 测试类 | 条数 | 锁住的契约 | 类型 |
 |---|---|---|---|
-| `TaskApiContentTypeTest` | **12** | **DRIFT-TASK-API-003**：任何 Content-Type（含 `form-urlencoded` / `multipart`）的 JSON body 都应被收下（Go `gettaskhandler.go:19` 裸 decoder）＋ `spring.servlet.multipart.enabled` **真的**被解析成 false | 变异测试 |
+| `TaskApiContentTypeTest` | **13** | **DRIFT-TASK-API-003**：任何 Content-Type（含 `form-urlencoded` / `multipart`）的 JSON body 都应被收下（Go `gettaskhandler.go:19` 裸 decoder）＋ `spring.servlet.multipart.enabled` **真的**被解析成 false<br>🆕 **+1 条端口段守门** `bindsToDedicatedPortSegment`（2026-10-27 阶段 2 加） | 变异测试 |
 | `TaskApiMvcPipelineTest` | **20** | **真实 MVC 管线**（非 `standaloneSetup`）：请求体转换器插在 Boot 的 Jackson 转换器**之前** ＋ 共享的 `GoStyleJsonBodyConverterConfig` **真的被排除** ＋ 404 裸 `text/plain` / 405 裸状态码 | 装配 + 端点级 |
 | `TaskApiWiringTest` | **5** | **装配层**：HTTP 3s 超时中间件 + 四道请求保护闸门**真的在容器里**（Go `rest/config.go:12-23` tag 默认全开）＋ 端点映射在 `/taskcenter/v1/task/get` | 装配层 |
 | `GetTaskReqParsingTest` | **23** | **解析层**（用 Jackson 3 = Boot 4 MVC 边界同一个 mapper）：`{"id":"123"}` 接受 + `TrimSpace`（Go `types.go:24-25`） | 契约层 |
 | `GrpcStatusHttpMappingTest` | **23** | gRPC code → HTTP 状态码的映射（Go `responses.go:143-160`） | 契约层 |
 | `TaskGetServiceTest` | **7** | `GetTask` 的领域逻辑（合并任务定义、pack/unpack 进度） | 领域层 |
 | `TaskApiRawBodyConfig` / `GoStyleRawBodyArgumentProcessor` | — | （生产代码）请求体转换器本体 | — |
+| `TaskApiFormLimitReachabilityTest` | **6** | **form 值上限闸门在本域的语义可达性**（2026-10-27 阶段 2 新增）：Go 侧 handler 用**裸** `json.NewDecoder(r.Body)` ⇒ `r.Form` 从不被求值 ⇒ go-zero 的 `maxFormParamCount=2048`（`rest/httpx/util.go:15`）**在本域不可达** ⇒ 本域闸门必须 `mode: "off"`（`task-api/application.yml:213`）—— 断言 ① 生效模式必须是 OFF（**直接**断言 `GoStyleFormValueLimitInterceptor#mode()`）② >2048 个非空 query 值 ⇒ 200 ③ `?a=%zz`（畸形转义）⇒ 200 ④ `?a=1;b=2`（分号）⇒ 200 ⑤ 阳性对照（无 query ⇒ 200 + 正常 task 载荷）<br>🆕 **+1 条端口段守门** `bindsToDedicatedPortSegment`（2026-10-27 阶段 2 加） | 真 Tomcat + 变异测试（改回 `mode: raw` ⇒ 4 条红） |
+| `RealTomcatPort`（`…/task/api/support/RealTomcatPort.java`） | — | （**测试支撑类**，非用例）真 Tomcat 的**端口选取 + 双绑定自检**：本域专用段 **21800–21899** ⇒ 避开 favorite 的 21300–21399 / 探针的 21400–21599 / favorite 脚手架的 21950–21999 / **OS 临时段 49152–65535**（Docker 随机发布端口就在那一段）<br>⚠️ 复制自 favorite 域同款（`service/common` **不发布 test-jar** ⇒ 业务模块 test scope 拿不到共享层测试类 ⇒ 只能复制） | 支撑类 |
+
+> ⚠️ **本节新增的 `RealTomcatPort` 会被 `check-ledger-selfcheck.py` 第 5 层报成「台账未点名的测试类」—— 这是**工具口径**缺口，不是台账缺陷**：
+> 该层的 `CLASS_RE` 只认 `` `…Test` `` / `` `…ContractTest` `` / `` `…GateTest` `` / `` `…IT` ``（工具自己的注释见 `tools/check-ledger-selfcheck.py:204-207`：
+> 「**永远无法被判定为「已点名」** ⇒ 第 5 层把「台账已登记」误报成「覆盖缺口」」）⇒ **支撑类**（本仓三个域各一份的端口选取器）**永远**会被列进未点名清单。
+> ⇒ 本条只是**提示级**（层 5·6 **不算失败**、门禁 `EXIT=0`）⇒ **登记在此**，工具侧的判据修改归**共享工具**（不在本 lane 写权内 ⇒ 只登记、不改）。
 
 ⚠️ **「装配层」与「装配生效」是两条不同的断言**（`TaskApiWiringTest` 答「装上了吗」、
 `TaskApiMvcPipelineTest` 答「生效了吗」）⇒ 两条缺一不可，别只留一条。
