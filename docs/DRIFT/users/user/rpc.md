@@ -57,7 +57,7 @@
 | 编号命名空间 | 本轮新增 **`DRIFT-USERRPC-V-001` 起** / **`UNRESOLVED-USERRPC-001` 起**。users 域已占用的 `DRIFT-001..011/016/018/024`、`DRIFT-NEW-001/005/007/008/011/012/013/014/015/016/018`、`DRIFT-FRAMEWORK-001` **一条都不复用** |
 | 本轮自跑证据 | ✅ **真 PG**：`mvn -o -pl service/users/user/user-rpc -am test`，**2026-10-24 实测 `Tests run: 125, Failures: 0, Errors: 0`**（其中含本轮新建的 `UserRpcGoErrorMessageParityTest` 3 条）。`UserRpcContainerWiringTest` **12 条**跑在 Testcontainers `postgres:16-alpine` 上（日志实证 `DockerClientFactory` + `Found Docker environment`），`AvatarTransactionWiringTest` 5 条跑在真实 Spring 容器装配上 |
 | ✅ **已**取得（2026-10-24 更新） | ✅ **双侧活体对拍** —— `tools/difftest/exp-difftest-grpc-user9.sh`：**43 场景**（9 个 RPC × 字段级响应 / `grpc-message` 逐字 / 边界输入），**真进程 + 真 PG + 真 Redis**，自带容器/库/端口 ⇒ **39 等价 / 4 处差异，4 处全是 N-2 已签字的 Go 源码乱码** ⇒ **无新漂移**。⇒ **§9.1**。<br>⚠️ 此前那句「`grpc-dual-port-runner.java` 只覆盖 4 档 status code」的**缺口描述已过期**（那是 2026-10-23 的状态） |
-| 最终判定 | **`SEMANTICALLY NOT EQUIVALENT`** —— **2 项 OBSERVABLE DIFFERENCE**（V-002 / V-007，§7）+ 4 项 IMPLEMENTATION DIFFERENCE，**0 项 SEMANTIC MISMATCH**、**0 项 unresolved**（§9 的 7 条已于 2026-10-24 全部闭环）。⚠️ **此前写「1 项 SEMANTIC MISMATCH + 7 项 OBSERVABLE DIFFERENCE + 5 项 unresolved」是过期状态** —— V-001 已证伪并闭环（Go 的 GORM 把 `status IS NULL` 读成 0 ⇒ **两侧行为一致**） |
+| 最终判定 | **`SEMANTICALLY NOT EQUIVALENT`** —— **1 项 OBSERVABLE DIFFERENCE**（V-002，§7）—— ⚠️ 原写「2 项（含 V-007）」，**V-007 已于 2026-10-26 由 `global` 域销账**（§7）+ 4 项 IMPLEMENTATION DIFFERENCE，**0 项 SEMANTIC MISMATCH**、**0 项 unresolved**（§9 的 7 条已于 2026-10-24 全部闭环）。⚠️ **此前写「1 项 SEMANTIC MISMATCH + 7 项 OBSERVABLE DIFFERENCE + 5 项 unresolved」是过期状态** —— V-001 已证伪并闭环（Go 的 GORM 把 `status IS NULL` 读成 0 ⇒ **两侧行为一致**） |
 
 > ⚠️ **按 AGENTS.md §3.3 与本 spec 硬约束：91 条全绿不构成 `EQUIVALENT` 的证据。**
 > 本文件里每条 `EQUIVALENT` 的真实支撑是**逐行读 Go 消费点**，测试只是「RAG 侧写法确实如此」的旁证。
@@ -255,7 +255,7 @@ Result 只用 5 个枚举值。证据列的记号：
 | SelectAvatar | 事务 5 步原子性 | 真 PG 事务 | `@Transactional` 在 mapper `default` 上，经代理进入 | **EQUIVALENT** | `[PG]` `createAvatarHistoryRollsBackOnRealPg` / `selectAvatarHistoryMissingDoesNotClearCurrent` |
 | SelectAvatar | **是否有行锁** | 无 `FOR UPDATE` | 无 `FOR UPDATE` | **EQUIVALENT**（AGENTS §1.1 第 7 条在本组件**不成立**） | `[GO] model/user.go:134-169` `[RAG] UserAvatarHistoryMapper.java:175-211` |
 | SelectAvatar | history 查询带 uid 隔离 | 是 | 是 | **EQUIVALENT** | `[GO] :142` `[RAG] :55`；`[PG]` 负向用例 |
-| SelectAvatar | NotFound 两条分支的 gRPC code | 都是 `NOT_FOUND`（message 不同，见 V-007） | 同 | **EQUIVALENT**（code 层） | `[GO] :41-50` `[RAG] :585-595` |
+| SelectAvatar | NotFound 两条分支的 gRPC code | 都是 `NOT_FOUND`（message 不同，见 N-2：Go 源码乱码） | 同 | **EQUIVALENT**（code 层） | ⚠️ 原写「message 不同，见 V-007」—— **误引**：V-007 只讲**超时路径的 description**，与 `NOT_FOUND` 的 message 无关（那条是 Go 源码乱码，已由 **N-2 签字**）| `[GO] :41-50` `[RAG] :585-595` |
 | UploadAvatar | avatar_url trim 后为空 | `InvalidArgument` | 同 | **EQUIVALENT** | `[GO] uploadavatarlogic.go:34-37` `[RAG] :626-629` |
 | UploadAvatar | `history_id` 来源 | 服务端 snowflake 字符串 | 同 | **EQUIVALENT** | `[GO] :39,48` `[RAG] :634` |
 | UploadAvatar | `content_type` 默认值 | 空 ⇒ `image/png` | 同 | **EQUIVALENT** | `[GO] model/user.go:179-184` `[RAG] AvatarDomainService.java:90-93` `[T]` |
@@ -282,7 +282,7 @@ Result 只用 5 个枚举值。证据列的记号：
 |---|---|---|---|---|
 | 服务端超时时长 | struct tag default 2000ms（`zrpc/config.go:46`） | `observability.rpc-timeout: 2s` | **EQUIVALENT** | 本轮实读 `go-zero@v1.10.2/zrpc/config.go`，**行号指向消费该 tag 的 `conf.MustLoad`** |
 | 超时触发机制 | `context.WithTimeout` 真取消（ctx 到 PG） | `call.close(DEADLINE_EXCEEDED)` + `DeadlineState` + `setQueryTimeout` 补 | **IMPLEMENTATION DIFFERENCE**（B-1 已签字：JDBC 不响应 interrupt） | `_shared.md` §6.2.6 E-4 |
-| 超时的 gRPC **description** | `"context deadline exceeded"`（`rpc.go:69`） | `"rpc timeout after 2000ms"`（`RpcInterceptor.java:192-194`） | **OBSERVABLE DIFFERENCE** | **V-007**（跨组件 `service/common`） |
+| 超时的 gRPC **description** | `"context deadline exceeded"`（`rpc.go:69`） | **逐字相同**（`RpcInterceptor` 的超时描述常量，global 修后命名为 `GO_DEADLINE_EXCEEDED_DESCRIPTION`） | **EQUIVALENT** | ✅ **已修（2026-10-26，`global` 域）** —— 修前 RAG 为 `"rpc timeout after 2000ms"`；修前状态见 §7 V-007 |
 | 拦截器是否真挂上 server | `user.go:43` 显式 `AddUnaryInterceptors` | `@Bean GrpcServerConfigurer`（`UserRpcApplication.java:103-107`） | **EQUIVALENT** | `[T]` `GrpcInterceptorWiringTest`（含对照用例证明 starter 自身无此入口） |
 | 建表机制 | GORM `AutoMigrate`（无账本） | `SchemaInitializer` 幂等重放 + PG advisory lock | **IMPLEMENTATION DIFFERENCE**（RAG **更强**：见 `_shared.md` §6.2.5 并发实测） | `[PG]` `UserRpcSchemaTextColumnTest` + `schemaInitCreatedJsonbColumns` |
 | 建表失败 | `log.Fatalln` → 进程退出 | 抛 `IllegalStateException` → 启动失败 | **EQUIVALENT** | `[GO] db.go:33-36` `[RAG] UserSchemaBootstrap.java:52-56` |
@@ -298,7 +298,7 @@ Result 只用 5 个枚举值。证据列的记号：
 | 类别 | 数量 | 编号 |
 |---|---|---|
 | **SEMANTIC MISMATCH** | **0** | ~~V-001~~（**2026-10-24 已闭环**：Go 的 GORM 把 `status IS NULL` 读成 **0** 且不报错 ⇒ **两侧都是 `status=0` 登录成功** ⇒ 行为一致 ⇒ 该条已修） |
-| **OBSERVABLE DIFFERENCE** | **2** | **V-002**（`users_user.status` NOT NULL 差异，🔴 真库实证确认，**未修** · 需与 admin 域同改）· **V-007**（超时的 gRPC `description` 不同，归属 `service/common`）<br>⚠️ 已闭合的：**V-003**（jsonb⇒text，已修）· **V-004**（timestamptz，已修）· **V-005**（**判为不成立** —— protobuf3 空 map 在 wire 上不可表达）· **V-006**（雪花 id，永不进 wire）· **V-008**（死代码 + 伪出处，已修） |
+| **OBSERVABLE DIFFERENCE** | **1** | **V-002**（`users_user.status` NOT NULL 差异，🔴 真库实证确认，**未修** · 需与 admin 域同改）<br>✅ **已销账**：**V-007**（超时的 gRPC `description` 不同，归属 `service/common`）—— **2026-10-26 由 `global` 域修完**（见 §7）<br>⚠️ 已闭合的：**V-003**（jsonb⇒text，已修）· **V-004**（timestamptz，已修）· **V-005**（**判为不成立** —— protobuf3 空 map 在 wire 上不可表达）· **V-006**（雪花 id，永不进 wire）· **V-008**（死代码 + 伪出处，已修） |
 | IMPLEMENTATION DIFFERENCE | 4 | 表名 / 指标注册 / 建表机制 / 服务发现 |
 | 已签字偏离（引用不重开） | 2 | N-1、N-2（见 `./api.md`） |
 | **UNKNOWN / unresolved** | **0** | §9 的 **7 条（U-001 ~ U-007）已于 2026-10-24 全部闭环** ⇒ §9.1 / §9.2 / §9.3 |
@@ -343,7 +343,7 @@ Result 只用 5 个枚举值。证据列的记号：
 | Redis 故障 | Setex 失败 | 裸 err | `INTERNAL "注销失败,Redis写入异常"` | 同 | 同 | **YES** |
 | bcrypt 失败 | >72 字节 | `PasswordEncrypt` 返 err | `INTERNAL "密码生成失败"` | 同 | 同 | **YES** |
 | snowflake 失败 | init 失败 | `GetID` 返 err | `INTERNAL "uid生成失败"` / `"history_id生成失败"` | 同 | 同 | **YES** |
-| 超时 | 2000ms | interceptor select | `DEADLINE_EXCEEDED` + `"context deadline exceeded"` | `call.close` | `DEADLINE_EXCEEDED` + `"rpc timeout after 2000ms"` | **code YES / description NO**（V-007） |
+| 超时 | 2000ms | interceptor select | `DEADLINE_EXCEEDED` + `"context deadline exceeded"` | `call.close` | `DEADLINE_EXCEEDED` + `"context deadline exceeded"` | **YES**（code 与 description 两侧全等）—— ✅ 原为「code YES / description NO」（V-007，**2026-10-26 已销账**） |
 | SQL 被取消 | 57014 | ctx cancel ⇒ GORM 返 ctx err ⇒ **落到 `INTERNAL`** | `INTERNAL "DB查询失败"` | `SqlTimeoutStatusTranslator` 翻成 `DEADLINE_EXCEEDED` | `DEADLINE_EXCEEDED` | **NO** —— 但两侧都只在 2000ms 之后才发生，**外层 interceptor 已先返回**，内层结果被丢弃 ⇒ **客户端可见行为仍一致**。已由 `_shared.md` §6.2.6 E-4 实测闭环（Go 182ms / RAG 176ms 查询滞留） |
 | 未映射异常 | 任何 `Throwable` | Go 不会走到（每条都显式 `status.Error`） | — | `UserServiceGrpcImpl` 兜底 | `INTERNAL` + `"类名: 消息"` | **IMPLEMENTATION DIFFERENCE**（RAG 多一层兜底，Go 侧对应情形是 panic ⇒ gRPC `UNKNOWN`） |
 
@@ -411,7 +411,8 @@ Result 只用 5 个枚举值。证据列的记号：
   **两者对客户端的可见 scope 等价**（都在 2000ms 让调用方拿到 `DEADLINE_EXCEEDED`），
   但对**在途 IO 的影响不同** —— B-1 已签字（Java interrupt 到不了 JDBC），
   `DeadlineQueryTimeoutInjector` + `SqlTimeoutStatusTranslator` 是补丁，实测查询滞留已从 4657ms 降到 176ms。
-- **description**：**不等价** ⇒ V-007。
+- **description**：**两侧逐字一致**（`context deadline exceeded`）—— ⚠️ 原为「**不等价** ⇒ V-007」，
+  **V-007 已于 2026-10-26 由 `global` 域销账**（§7）。
 
 ### 6.7 Retry Semantic Equivalence
 **两侧都无 Retry**（N/A）。⚠️ 明确记录：Go 的 `mustNewRedis` 在启动期失败会 `log.Fatalln`，
@@ -664,20 +665,47 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
   `IdType.ASSIGN_ID` 与 `Jdbc3KeyGenerator` **谁最终胜出** ⇒ **V-006 已关闭**
   （真 PG：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；**永不进 wire**）⇒ `UNRESOLVED-USERRPC-004①` 已闭环。
 
-### DRIFT-USERRPC-V-007（跨组件 `service/common`）超时路径的 gRPC **status description** 不同 —— 🔴 **仍成立，但不在本组件判定权内**
+### DRIFT-USERRPC-V-007（跨组件 `service/common`）超时路径的 gRPC **status description** 不同 —— ✅ **已修（2026-10-26，由 `global` 域修完）**
+
+> ⚠️ **本条曾是「仍成立，但不在本组件判定权内」** —— 该归属判断是对的（判定权确实在
+> `service/common` 组件），而 **`global` 域已把 `service/common` 修完** ⇒ 本条销账。
+> **修前状态（保留供追溯）**：两侧 `code` 相同（`DEADLINE_EXCEEDED`），
+> 但 **description 逐字不同** ⇒ 客户端收到的 `grpc-message` trailer 不同。
 
 - **Category**: Error Identity
 - **Go**：`service/common/observability/rpc.go:69`
   `status.Error(codes.DeadlineExceeded, timeoutCtx.Err().Error())` ⇒ description = **`context deadline exceeded`**。
-- **RAG**：`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:192-194`
-  ⇒ description = **`rpc timeout after 2000ms`**。
+- **RAG（修前）**：`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`
+  的超时关闭分支 ⇒ description = **`rpc timeout after 2000ms`**。
+  ⚠️ **行号引用已改为符号名** —— `global` 域本轮改动使该文件行号漂移，
+  行号快照会变成新的过期事实（`global` 域明确要求改符号名）。
+- **RAG（修后）**：同一处改为常量 `GO_DEADLINE_EXCEEDED_DESCRIPTION`
+  = **`"context deadline exceeded"`** ⇒ 与 Go **逐字相同**。
+  落点文件：`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`
+  （`global` 域持 `service/common` 单写权 ⇒ 本域**只回写台账，不动代码**）。
 - **Difference**：`code` 相同（`DEADLINE_EXCEEDED`），**description 逐字不同**。
 - **Observable Impact**：`grpc-status-details-bin` / `grpc-message` trailer 不同。
   user-api 侧**只按 code 分支**，故不进 HTTP body（与 N-2 同款影响面）。
 - **Classification**: **OBSERVABLE DIFFERENCE**
-- **Evidence**: `[GO]` `rpc.go:69`；`[RAG]` `RpcInterceptor.java:192-194`。证据强度：**静态源码**。
+- **Evidence**: `[GO]` `rpc.go:69`；`[RAG]` `RpcInterceptor` 的超时描述常量（见上）。
+  证据强度：修前 **静态源码**；修后 **双侧活体**（`global` 域跑的，**本域未复跑**）。
 - **归属**：`service/common` 组件，不属 user-rpc 自身。**判定权在 common 组件的台账**，
   此处只登记 user-rpc 作为消费方的事实，避免同一问题被两个组件各判一次。
+- **✅ 销账依据（2026-10-26，`global` 域交付）**：
+  | 项 | 内容 |
+  |---|---|
+  | 修法 | `RpcInterceptor` 新增常量 `GO_DEADLINE_EXCEEDED_DESCRIPTION = "context deadline exceeded"`；**三处**旧串（超时 `TimeoutException` 文案、`call.close` 的 `withDescription`、另一处 `Status.DEADLINE_EXCEEDED.withDescription`）+ 遥测 `markTimeout` 的消息一并改掉 |
+  | 守门 | `service/common/src/test/java/com/rag/common/observability/RpcInterceptorTimeoutDescriptionGateTest.java`（真 Netty server + 真 channel + 真客户端 + 真 OTel SDK ⇒ 断言**网络上真正传过来的字节**）<br>⚠️ **该路径在 `global` 域工作区，`global` 提交并合入主干前，主干上查不到 ⇒ 路径悬空是预期状态，不是台账事实错误** |
+  | 探针 | `tools/semantic-probe/rpc-timeout/`（`go/` + `java/` + `run-rpc-timeout-parity.sh`）—— Go 半边 `replace` 引用**冻结仓真源**、RAG 半边跑**生产类** ⇒ `timeout_wire` 两侧逐字节一致 |
+  | 变异 | M1 改回旧串 ⇒ 守门 2/2 红 + 探针 EXIT=1；M2 只改遥测段 ⇒ 只红遥测那条、wire 那条仍绿 |
+  | 本域已核实 | ✅ **代码 diff 属实**（三处替换 + 常量）、✅ 守门类与探针目录**确实存在**、✅ 落点在 `service/common`（`global` 单写权域）<br>⚠️ **未复跑**守门/探针（跑在 `global` 的工作区，避免干扰其构建）|
+  | ⚠️ **合并状态** | `global` 的改动在本条记录时**仍在 `align/global` 的工作区（未提交、未合入主干）** ⇒ **主干上的代码在合并前仍是旧串** ⇒ 本条销账**以 `global` 的提交为准** |
+- **🔴 边界（`global` 域明确要求一并读）**：修完后剩下的 **code 名差异**是一条**已登记的表述偏离**，**本轮不动**：
+  Go（grpc-go）`codes.Code.String()` = CamelCase `DeadlineExceeded`；
+  RAG（grpc-java）`Code.name()` = `DEADLINE_EXCEEDED`
+  ⇒ 已登记在 `docs/Intentional_Deviations/common/_signed-deviations.md` 的 **C-1**，写明「**不做臆造映射**」。
+  ⇒ 守门**刻意把 C-1 的形态钉住**（断言 `code = DEADLINE_EXCEEDED`）⇒ 后人不会把它当新漂移顺手改掉。
+  ⇒ ⚠️ **请勿**为了让 code 名也一致而去改 grpc-java 的 code 命名。
 
 ### DRIFT-USERRPC-V-008 死代码 + **伪出处** —— ✅ **已修（2026-10-23 第四轮，commit `fa2de52`）**
 
@@ -742,7 +770,7 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 | CASE-28 | `Logout` 空 token | `INVALID_ARGUMENT "Token不能为空"` | 同 | 同 | YES | `[T]` |
 | CASE-29 | `Logout` 正常 token | `SETEX user:jwt_blacklist:<tok> 2592000 "banned"`；**`success=false`** | 同 | **两侧 success 都是 false** | YES | `[T]` `logout_writesRedisWithCorrectKeyAndTtl` |
 | CASE-30 | `Logout` token 含前后空格 | **不 trim**，整串作 key | 不 trim，整串作 key | 同 | YES | `[GO][RAG]` 静态 |
-| CASE-31 | 任一 RPC 执行超过 2000ms | `DEADLINE_EXCEEDED` + `"context deadline exceeded"` | `DEADLINE_EXCEEDED` + `"rpc timeout after 2000ms"` | code 等价 / description 不等价 | **PARTIAL** | **V-007** |
+| CASE-31 | 任一 RPC 执行超过 2000ms | `DEADLINE_EXCEEDED` + `"context deadline exceeded"` | `DEADLINE_EXCEEDED` + `"context deadline exceeded"` | **完全等价**（code 与 description 两侧全等）| **YES** | ✅ 原为 **PARTIAL**（description 不等价）—— **V-007 已于 2026-10-26 由 `global` 域销账** |
 | CASE-32 | PG 被 ACCESS EXCLUSIVE 锁住 12s | 客户端 2000ms 返回；PG 查询 203ms 后消失 | 客户端 2000ms 返回；PG 查询 176ms 后消失 | 同量级 | YES | `_shared.md` §6.2.6 E-4 **实测**（2026-10-21，本轮未重跑） |
 | CASE-33 | 同一 uid 并发 `UploadAvatar` ×2 | 可能两条 `is_current=true` | 同 | **共有缺陷，非漂移** | YES（缺陷等价） | `[GO][RAG]` 静态：两侧都无 `FOR UPDATE` |
 | CASE-34 | 同一 username 并发 `Register` ×2 | 恰好 1 成功 + 1 `INTERNAL`（撞 UNIQUE） | 同 | 同 | YES | `[PG]` `uniqueConstraintsAreEnforcedOnRealPg`（约束层）+ 静态 |
@@ -1044,7 +1072,7 @@ RAG `UserDomainService.logout:780` ⇒ 同样的 `INTERNAL "注销失败,Redis�
 | 2 | 正常路径是否一致？ | ✅ **一致** | 9 个 OP 的 happy path 逐条对照一致（§4.2） |
 | 3 | 边界输入是否一致？ | ⚠️ **不完全一致** | trim / clamp / 空串全部一致；**显式空 map 分支不一致**（V-005） |
 | 4 | NotFound / Empty / Null 是否一致？ | ⚠️ **不完全一致** | NotFound 一致（响应被丢弃）；Empty 一致；**NULL status 不一致**（V-001）；NULL extra_info 一致 |
-| 5 | Error meaning 是否一致？ | ⚠️ **code 一致 / message 部分不一致** | 全部 gRPC code 逐条一致；**4 处** message 因 Go 源码乱码不同（**N-2 已签字**，2026-10-24 双侧活体对拍实测）+ 1 处超时 description（V-007）。⚠️ 那 4 处的**状态码两侧完全相同**，差异只在 `grpc-message` 头的字节 |
+| 5 | Error meaning 是否一致？ | ⚠️ **code 一致 / message 部分不一致** | 全部 gRPC code 逐条一致；**4 处** message 因 Go 源码乱码不同（**N-2 已签字**，2026-10-24 双侧活体对拍实测）<br>⚠️ 原写「+ 1 处超时 description（V-007）」—— **V-007 已于 2026-10-26 由 `global` 域销账** ⇒ 超时 description **两侧逐字一致**。⚠️ 那 4 处的**状态码两侧完全相同**，差异只在 `grpc-message` 头的字节 |
 | 6 | Error propagation 是否一致？ | ✅ **一致** | Go 的「resp+err 双返」在 gRPC 层被丢弃 ⇒ 两侧客户端只见 status code |
 | 7 | External dependency failure 是否一致？ | ✅ **一致**（超时路径除外） | PG/Redis/bcrypt/snowflake 四类失败两侧同 code 同 message；57014 取消的内层差异被外层 interceptor 掩盖（E-4 已实测闭环） |
 | 8 | Cache hit / miss 是否一致？ | **N/A** | 本组件无缓存 |
@@ -1053,7 +1081,7 @@ RAG `UserDomainService.logout:780` ⇒ 同样的 `INTERNAL "注销失败,Redis�
 | 11 | Side effects 是否一致？ | ⚠️ **不一致（DB 层）** | extra_info 双写 / Redis SETEX 一致；`users_user.id` 取值来源不同（V-006）；孤儿 history 两侧一致 |
 | 12 | Ordering 是否一致？ | ✅ **一致** | `create_time DESC` 一致；头像 current 清理顺序一致 |
 | 13 | Retry 是否一致？ | **N/A**（两侧都无重试） | — |
-| 14 | Timeout scope 是否一致？ | ⚠️ **时长一致 / scope 机制不同 / description 不同** | 2000ms=2000ms（§6.6）；B-1 已签字；V-007 |
+| 14 | Timeout scope 是否一致？ | ⚠️ **时长一致 / scope 机制不同 / description 一致** | 2000ms=2000ms（§6.6）；B-1 已签字；✅ description 两侧逐字一致（**V-007 已于 2026-10-26 销账**）|
 | 15 | Concurrency semantics 是否一致？ | ✅ **一致**（含共有缺陷） | 两侧都无悲观锁 ⇒ TOCTOU 窗口集合相同 |
 | 16 | Authentication / Authorization 是否一致？ | **N/A**（本组件不做鉴权） | uid 是 `int64` 协议字段，无解析步骤 |
 | 17 | Serialization semantics 是否一致？ | ⚠️ **wire 一致 / 时间戳不一致** | proto 逐字节一致、jsonb 写入两侧都成功；`create_time` 时区标签不同（V-004） |
@@ -1414,7 +1442,7 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | **DRIFT-USERRPC-V-003** | `extra_info` `text` ↔ `jsonb` | ✅ **已修**（`ec33159`） | 你随后拍板「一起改成 text」。连带改 `JsonTextTypeHandler` + 去掉 2 处 CAST + 3 条守门（详见 §502）。跨域不对称随之消除 |
 | **DRIFT-USERRPC-V-011（新）** | 时间列 **DEFAULT `CURRENT_TIMESTAMP`**（Go 无 DEFAULT） | 🔴 新发现 | 两侧写入路径都**显式**写这两个列（Go 靠 GORM autoCreateTime；RAG 本轮起靠应用侧时钟）⇒ DEFAULT 只在「有人不写该列」时生效 ⇒ **当前不可观察**。⚠️ 改它要先确认 admin 域与 `users_user` 的写入路径 |
 | **DRIFT-USERRPC-V-006** | `id` 的取值来源（Go `bigserial` 序列 vs RAG `IdType.ASSIGN_ID` 雪花） | ✅ **已关闭**（第四轮，真 PG 实证：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；**永不进 wire**） | ⚠️ 本行此前写「仍成立」，是**过期状态**（第四轮已关，第六轮复核才发现汇总表没同步） |
-| **DRIFT-USERRPC-V-007** | 超时的 gRPC `description` 不同（`service/common` 组件） | 仍成立 | 归属 `service/common`，不在本组件判定权内 |
+| **DRIFT-USERRPC-V-007** | 超时的 gRPC `description` 不同（`service/common` 组件） | ✅ **已销账（2026-10-26）** | 由 **`global` 域**修完（落点 `service/common/.../RpcInterceptor.java` 的 `GO_DEADLINE_EXCEEDED_DESCRIPTION`；守门 `RpcInterceptorTimeoutDescriptionGateTest`；探针 `tools/semantic-probe/rpc-timeout/`）⇒ 两侧 description 逐字一致。⚠️ 修前状态保留在 §7 V-007 小节 |
 | **DRIFT-USERRPC-V-008** | 死代码 + **伪出处**（3 个异常类 + 2 个 mapper 方法） | ✅ **已修**（`fa2de52`） | 第四轮 §2 已删；且**伪出处是两个，不是一个**（`PasswordMismatchException` 声称的 `ALREADY_EXISTS` 在 Go 恰好相反）。⚠️ 本行此前仍写「仍成立」，属台账脱节，本轮复核更正 |
 | **UNRESOLVED-USERRPC-004 ②** | 启动期 Redis 不可用：Go `MustNewRedis` fail-fast vs RAG 懒连接 | ✅ **已闭环（2026-10-24，§9.3）** —— **原推断被活体实验证伪**：go-zero `RedisConf.NonBlock` 的 struct tag 默认 `true` ⇒ `MustNewRedis` **不做连接检查** ⇒ **两侧都启动成功** ⇒ **无差异** | 本轮做了「把两侧 Redis 都指到死端口再起进程」的注入实验（`tools/difftest/exp-difftest-redis-failfast.sh`） |
 | **UNRESOLVED-USERRPC-005** | `users_user` 建表责任交叉（user-rpc ↔ admin-rpc） | ✅ **已闭环（2026-10-24，§9.2）** —— 双侧对称并发启动实测：两侧都能起来、表都建齐、0 致命错误 | ⚠️ 本行此前写「仍 unresolved」，是**过期状态**（第六轮已关，第七轮复核才发现汇总表没同步）。⇒ **机制不同**（Go 靠 `HasTable` 的时序侥幸 / RAG 靠 advisory lock）**但可观察结果一致** |
