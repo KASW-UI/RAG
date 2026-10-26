@@ -1604,7 +1604,14 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 | **完全没声明** | ✅ **有**（devh starter 的 `grpc-inprocess` 是 **compile** ⇒ 传递下来就有） | 同上一行的 api 模块 |
 | **直接声明成 test 的 `-common` 库** | 🟡 **不是可执行模块** ⇒ **不影响 jar 启动**（运行时由应用模块提供）；但它们**自己**跑测试/作为客户端用时会缺 | `like/like-common` · `follow/follow-common` · `comment/comment-common` · `favorite/favorite-common` |
 
-⇒ **可执行应用模块真缺 = 3 个**（`article-rpc` / `like-rpc` / `task-rpc`）⇒ **它们的可部署 jar 起不来**。
+⇒ **可执行应用模块真缺 = 0 个**（`article-rpc` / `like-rpc` / `task-rpc` 三处**已由 `global` 修好** ⇒ 见下方 🔴 订正段）⇒ **当前没有可执行应用模块的 jar 起不来**。
+⇒ 🔴 **2026-10-27 订正（上表是 2026-10-25 的快照 ⇒ 「真缺」那一行的 3 个模块已被 `global` 修掉）** ——
+· 修法出处：`align/global` 的 **L12**（`5159759`：article / comment / like 的两斜杠 ×5 ＋ `grpc-inprocess` scope ×2）与 **L13**（`6818214`：message / task 的两斜杠 ×2 ＋ scope ×1）
+· ⇒ 两者随 **`4f839f9`（merge(global) → `do-my-own-gh`）合入主干**
+· ⇒ **2026-10-27 实测**：`article-rpc` / `like-rpc` / `task-rpc` 三个 `pom.xml` 里 `grpc-inprocess` 均为「**继承 compile**」⇒ **真缺 = 0**（⇒ 上表「真缺」那一行的模块清单已过时）
+· ⇒ 🟢 **`global` 侧已落账**：E21「`grpc-inprocess` 是 `test` scope ⇒ 运行时 classpath 上整个 artifact 消失」＝ **✅ 已修**（`docs/DRIFT/global/_README.md` §七之 E21 行）
+· ⇒ 仍为 **4 个 `-common` 库**声明成 test scope（`like-common` / `follow-common` / `comment-common` / `favorite-common`）⇒ **不是可执行模块** ⇒ 不影响 jar 启动（**这条不变**）
+· ⇒ ⚠️ **本域零写权**（AGENTS.md §5.3）⇒ 本段只是**把「当前状态」订正过来**，**没动别域任何文件**
 ⇒ ⚠️ **原表把「没声明」判成缺陷是方向性错误** —— 实测证明**没声明反而是对的**（传递 compile）；
 真正的病根是「**自己声明成 test scope，把传递来的 compile 顶掉了**」。
 ⇒ ⚠️ **本域第十四轮也有一次同样的误判**（把 favorite-api 的「没声明」当成第二个受害者）⇒
@@ -1665,7 +1672,7 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 | `docs/Pitfalls/_INDEX.md` | （第十四轮**收尾**追加）坑档再增 **1 条**：**PIT-FAV-RPC-020**（探针的「环境红」不是「被测代码红」—— 等待过短 / 探活探错目标 ⇒ 假红）⇒ **本域坑位 19 → 20 条** |
 | `docs/DRIFT/_INDEX.md` | （第十四轮**收尾**追加）本域探针清单加 `probe-gate`（**PG 就绪守门网**，新工具）⇒ §23 |
 | `docs/DRIFT/_INDEX.md` | （第十五轮追加）本域**台账复核工具**清单加 `ledger-lint/check-ledger-vs-reality`（新工具）⇒ §24.3 / §24.4 |
-| `docs/DRIFT/global/` | 🔴 **第十五轮复核的更正项（必须转交 `global`）** —— §22.3 那条**跨域清单已被实测推翻**：<br>· 原写「**13 个模块**的**可部署 jar** 都起不来」⇒ 🔴 **实际只有 3 个可执行应用模块真缺**：`article/article-rpc` · `like/like-rpc` · `task/task-rpc`（其余 api 模块实测都是 **compile**）<br>· 原把「**没声明** grpc-inprocess」判成缺陷 ⇒ 🔴 **方向性错误**：devh starter 的 inprocess 是 **compile** ⇒ **没声明反而有**；真病根是「**自己声明成 test scope 把传递来的 compile 顶掉**」<br>· 另有 **4 个 `-common` 库**声明成 test scope（**不是可执行模块** ⇒ 不影响 jar 启动，但它们自己跑测试/当客户端用时会缺）<br>⇒ 本域**只登记不动别域文件**（AGENTS.md §5.3）⇒ **收口在 `global`**；证据 = 全仓 `mvn -o dependency:tree -Dincludes=io.grpc:grpc-inprocess` |
+| `docs/DRIFT/global/` | ✅ **已闭合（2026-10-27）** —— §22.3 那条**跨域清单已被实测推翻并已修掉**：<br>· 原写「**13 个模块**的**可部署 jar** 都起不来」⇒ 🔴 **实际只有 3 个可执行应用模块真缺**：`article/article-rpc` · `like/like-rpc` · `task/task-rpc`（其余 api 模块实测都是 **compile**）<br>· 原把「**没声明** grpc-inprocess」判成缺陷 ⇒ 🔴 **方向性错误**：devh starter 的 inprocess 是 **compile** ⇒ **没声明反而有**；真病根是「**自己声明成 test scope 把传递来的 compile 顶掉**」<br>· 另有 **4 个 `-common` 库**声明成 test scope（**不是可执行模块** ⇒ 不影响 jar 启动，但它们自己跑测试/当客户端用时会缺）<br>· ⇒ 🟢 **那 3 个可执行模块已由 `global` 的 L12（`5159759`）/ L13（`6818214`）修好**，随 **`4f839f9` 合入主干** ⇒ **2026-10-27 实测真缺 = 0**（见 §22.3 的 🔴 订正段）⇒ **本条对 `global` 已结清**<br>⇒ 本域**只登记不动别域文件**（AGENTS.md §5.3）⇒ 修法落点始终在 `global`；证据 = 全仓 `mvn -o dependency:tree -Dincludes=io.grpc:grpc-inprocess` |
 
 > ⚠️ **本轮新增的 2 条跨域项**（§22.4）收口在 `global`：
 > ① **405 响应多一个 `Content-Type`**（落点 `service/common` 的 `GoStyleRouterErrorResponses` —— 它的 javadoc 说「容器不会补 Content-Type」，**实测被证伪**）；
@@ -1848,7 +1855,7 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 | # | 检查项 | 台账说 | 实际 | 判定 |
 |---|---|---|---|---|
 | ① | favorite-api **用例数** | 「89 例」 | surefire 求和 = **94** | 🔧 **工具抽取 bug** —— 正则匹配到了 **§6 第十二轮的旧口径**（「**89 例全绿**（6 个测试类）」）⇒ 已改成**锚定 §0 的「\| 测试 \|」行** |
-| ② | **grpc-inprocess 缺失模块数** | 「**13 个模块**…它们的可部署 jar 都起不来」 | **可执行应用模块真缺 = 3 个**（article-rpc / like-rpc / task-rpc） | 🔴 **台账真错（条数 + 方向都错）** ⇒ 已按 `dependency:tree` 全仓实测重写 ⇒ 见 §22.3 的更正表 |
+| ② | **grpc-inprocess 缺失模块数** | 「**13 个模块**…它们的可部署 jar 都起不来」 | **可执行应用模块真缺 = 0 个**（2026-10-27 实测：原 3 个 `article-rpc` / `like-rpc` / `task-rpc` **已由 `global` 的 L12（`5159759`）/ L13（`6818214`）修好** · 随 `4f839f9` 合入主干） | 🔴 **台账真错（条数 + 方向都错）** ⇒ 已按 `dependency:tree` 全仓实测重写 ⇒ 见 §22.3 的更正表；🆕 **2026-10-27 再订正**：条数由 3 → **0** ⇒ **跨域修法合入主干后，本域的「当前状态」类断言必须跟着改** |
 | ③ | 全仓 `RANDOM_PORT` 暴露面 | 「7 个域 / **14 个测试类**」 | **13 个测试类** | 🔴 **台账真错**（把两个**只在 javadoc 里提到**它的支撑类算进去了）⇒ 已改 13，并写明口径 |
 | ④ | 端口段（探针侧） | 探针侧 21400–21599 | 探针实际 21400–21599 | 🔧 **工具抽取 bug** —— 正则先匹配到了 Java 侧那句（「专用端口段」两处同形）⇒ 已改成锚定「同样改成\*\*专用端口段」 |
 

@@ -26,7 +26,7 @@
 | 证据强度 | ✅✅✅ **Kafka 端到端活体对拍**（2026-10-23 23:4x，真 Kafka + 真 Redis + 真 PG，两侧同批消息比最终态，见 §四·三）· ✅✅✅ **Kafka 畸形消息活体对拍**（2026-10-24，五个用例，见 §四·五·二）· ✅✅ **gRPC 双向跨语言对拍**（2026-10-24，Java 客户端 + **Go 客户端**各打两端，见 §四·五·一）· ✅ 真启动 + 真 PG 16 容器 |
 | DDL 对拍 | ✅ **GORM AutoMigrate 产物 vs Flyway 产物逐列一致**（本轮实测，见 §四·二） |
 | ⚠️ 仍未覆盖 | ⓿ **「Kafka 写入 → task-api 读到」这条跨域闭环**未做活体对拍 —— 但两侧的读写 Redis key **本来就不一致**（Go 侧也读不到自己写的缓存），⇒ **不是 RAG 的缺陷**，见 §五 第 7 条；① ⚠️ **goka 的「表 topic」config（`cleanup.policy` / `retention.ms`）未做逐项对照** —— 但已实测「compact 不按时间删」且 Go 侧**不创建** topic（§四·七）⇒ 两侧**都不管** topic 生命周期 ⇒ 一致；② ⚠️ **yaml 里查出了三类「死配置」**（`spring.mybatis-plus.*` / `otel.*` / `spring.jpa.*`，§四·九）—— **零行为影响**（三处逐一核过），但 `otel.*` **与 Go 存在观测差异**（Go 真导出 span，Java 侧 no-op）⇒ **全部是跨域共性**（8~20 个模块同款），本域不单方面修 |
-| 测试 | **106 tests / 0 failures / 0 errors / 0 skipped**（其中 15 条真 PG、**9 条真 Redis**、**2 条真 gRPC server**；task-api 另 90 条，合计 **196**） |
+| 测试 | **114 tests / 0 failures / 0 errors / 0 skipped**（其中 **17 条真 PG**（`TaskProgressUpsertParityTest` 15 + `TaskRpcSlowThresholdGateTest` 2 · Testcontainers）、**9 条真 Redis**、**4 条真 gRPC server**（`TaskGrpcInterceptorWiringTest` 2 + `TaskRpcSlowThresholdGateTest` 2）；另 2 条**装配层**（mock `ServerBuilder`）+ **4 条产物层**（解包真 fat jar ⇒ 只在 `mvn verify` 阶段跑，`mvn test` 阶段 jar 还没生成）；task-api 另 90 条，合计 **204**）<br>🆕 **2026-10-27 订正**：原写「106 / 真 PG 15 / 真 gRPC 2 / 合计 196」⇒ **过期 8 条** —— `align/global` 的 **L12 / L13 / L15** 三个 lane 随 `4f839f9` 合入主干时给 task-rpc 加了 **3 个守门类 / 8 条用例**（`TaskProtectionChainWiringTest` 2 + `TaskRpcFatJarArtifactGateIT` 4 + `TaskRpcSlowThresholdGateTest` 2）⇒ **106 + 8 = 114**<br>⇒ 证据：**surefire XML 实测 14 个测试类 / 114 条 / 0 failures / 0 errors / 0 skipped**（合并后全量 `mvn clean verify`，2026-10-26 23:29~23:51，52 模块 BUILD SUCCESS · 2411 条 / 0 failures / 0 errors / 4 skipped · 4 条 skip 全是 favorite 的对拍探针自动 skip） |
 
 ### 〇·一、本组件的守门测试清单（2026-10-24 复核补登）
 
@@ -48,6 +48,9 @@
 | `TaskDomainServiceTest`（19） | `GetTask` 的领域逻辑（合并任务定义、pack/unpack 进度） | mock 数据层 |
 | `TaskEventParsingTest`（21） | `LogEvent` 解析（`uid <= 0` / `total <= 0` 的拒绝语义） | 纯函数 |
 | `TaskSinkPropertiesBindingTest`（3） | **DRIFT-TASK-RPC-002**：`task.definitions.*` 的 TTL 键**真的绑得上**（`init-ttl` ↔ `initTtl`） | 加载**真实** `application.yml`（非测试专用 yml） |
+| `TaskProtectionChainWiringTest`（2）🆕 | **DRIFT-MSG-V-026**：task-rpc 的**熔断 / 降载链**必须真的挂到 gRPC server 上 —— ① `TaskRpcApplication` 必须 `@Import GoStyleProtectionConfiguration`（否则 properties Bean 根本不存在）② 链上**真的有** breaker / shedding 包装层（业务 interceptor 被调到，且拿到的是**包装过的** call） | **mock `ServerBuilder`**（不起真端口）⇒ 断言的是**装配层**（容器里有没有那层包装），**不是**「熔断真的生效」 |
+| `TaskRpcFatJarArtifactGateIT`（4）🆕 | **产物层**：解包**真实构建产物**（fat jar）断言它是**可执行的 Spring Boot fat jar**（`MANIFEST.MF` 有 `Main-Class` ＋ `BOOT-INF/lib/` 里有 `grpc-inprocess`）⇒ 挡住两类启动阻塞：打成**普通 library jar**（`java -jar` 报 no main manifest attribute）／`grpc-inprocess` 不在运行时 classpath 上 | ⚠️ **只在 `mvn verify` 阶段跑**（surefire 的**第二个 execution** `artifact-gate`，只挑 `**/*IT.java`；`*IT` 不匹配默认 include）⇒ `mvn test` 阶段 fat jar 还没生成 ⇒ **这条守门在 `test` 阶段等于不存在**（⇒ 复核测试数时必须按 `mvn verify` 口径） |
+| `TaskRpcSlowThresholdGateTest`（2）🆕 | **慢阈值**：在飞 400ms > 阈值 100ms 的调用**必须**被打上 `sea.slow=true`；快调用**必须不带** ⇒ 证明这条路径是**真比较出来的**（不是恒真标记） | **真 PG**（Testcontainers `postgres:16-alpine`）＋ **真 gRPC server**（`ServerBuilder.forPort(0)`） |
 
 ⚠️ **`TaskProgressUpsertParityTest` 的 15 条在无 Docker 环境下是 `skipped` 而非 `failed`**
 ⇒ 「全绿」可能意味着「一条没跑」⇒ 复核测试数字时**必须看 `skipped`**，不能只看 `failures=0`。
