@@ -727,20 +727,107 @@ def layer3_numbers(root, texts):
     return bad
 
 
-def _source_context(root, srcs):
-    """拼接台账**来源文件**的上下文（供第 4 层的 N5/N7 去噪判据用）。
+# ──────────────────────────────────────────────────────────────────────────
+# Go 侧出处的**精确定位**通道（2026-10-26 第三十四轮 · favorite 域实测带出）
+# ──────────────────────────────────────────────────────────────────────────
 
-    ⚠️ **必须按 `sorted(srcs)` 拼接** —— `srcs` 是 **set**，
-    Python 的字符串 hash **每进程随机化** ⇒ 同一组元素的 set 迭代顺序
-    **每次运行都不同** ⇒ 拼出的上下文顺序不同 ⇒ 正则命中与否不同
-    ⇒ **同一条 file:line 引用的分类每次都可能变**（实测：层 4 三个计数
-    连跑 3 次分别是 (20,105,3)/(13,112,2)/(14,111,1)）。
-    ⇒ 门禁工具的输出必须**可复现**，否则「红」无法被复现、「绿」无法被信任。
+def _modcache_escape(mod):
+    """Go module cache 的**路径转义**：大写字母 → `!` + 小写。
+
+    ⚠️ 不转义就找不到带大写字母的模块 —— 实测 `github.com/IBM/sarama` 的真实路径是
+    `github.com/!i!b!m/sarama` ⇒ ⇒ **手写表里带大写的条目从来没被索引到**（静默漏检）。
     """
-    out = ''
-    for sf in sorted(srcs):
-        out += read(os.path.join(root, sf))[:2000]
+    return re.sub(r'[A-Z]', lambda m: '!' + m.group(0).lower(), mod)
+
+
+def _go_mod_requires(go_root):
+    """从真源 `go.mod` 解析 (module, version) 列表。
+
+    ⚠️ **为什么权威必须是 `go.mod` 而不是手写表**：手写表只覆盖写表时想到的模块
+    ⇒ favorite 域实测：`gorm.io/gorm@v1.31.1/schema/naming.go` 与
+    `prometheus/client_golang` 都不在表里 ⇒ 被判「文件在真源与全部第三方库里都找不到」
+    ⇒ **假 FAIL** ⇒ ⇒ 权威取真源自己的 `go.mod`（`// indirect` 的也要）。
+    """
+    text = read(os.path.join(go_root, 'go.mod'))
+    out = []
+    for m in re.finditer(r'^\s*([a-zA-Z0-9._~/-]+\.[a-zA-Z0-9._~/-]+)\s+(v[^\s/]+)',
+                         text, re.M):
+        out.append((m.group(1), m.group(2)))
     return out
+
+
+def _detect_goroot():
+    """探测 Go **标准库**的 GOROOT。
+
+    ⚠️ favorite 域实测：`net/http/server.go:2458`、`src/net/url/url.go:1001` 这类引用
+    在 `<GOROOT>/src` 里 ⇒ 索引不含标准库 ⇒ **假 FAIL**。
+    """
+    cands = []
+    env = os.environ.get('GOROOT')
+    if env:
+        cands.append(env)
+    cands += sorted(glob.glob(os.path.expanduser('~/sdk/go*')), reverse=True)
+    cands += ['/usr/local/go', '/opt/homebrew/opt/go/libexec', '/usr/lib/go']
+    for c in cands:
+        if c and os.path.isdir(os.path.join(c, 'src')):
+            return c
+    return None
+
+
+def _direct_module_candidate(path, gomodcache):
+    """`module@version/...` 前缀 ⇒ **直接在 module cache 里找**（最精确）。
+
+    ⚠️ 为什么要这条通道：层 4 的索引**按 basename** 建（`idx[basename]`）
+    ⇒ 写成完整模块路径（`gorm.io/gorm@v1.31.1/schema/naming.go`）反而**解析不到**
+    （basename 是 `naming.go`，而索引里没有这个模块）⇒ 假 FAIL。
+    ⇒ 带版本前缀 ⇒ 路径**唯一** ⇒ 直接拼出来即可 ⇒ 顺带**消除跨库同名歧义**。
+    """
+    m = re.match(r'^([a-zA-Z0-9._~/-]+\.[a-zA-Z0-9._~/-]+)@(v[^\s/]+)/(.+)$', path)
+    if not m:
+        return None
+    mod, ver, rest = m.groups()
+    return os.path.join(gomodcache, _modcache_escape(mod) + '@' + ver, rest)
+
+
+def _stdlib_candidate(path, goroot):
+    """Go **标准库**的引用 ⇒ `<GOROOT>/src/<path>`（带 `src/` 前缀的写法也认）。"""
+    if not goroot:
+        return None
+    base = path[4:] if path.startswith('src/') else path
+    return os.path.join(goroot, 'src', base)
+
+
+def _source_context(root, hits, window=1):
+    """拼接台账里**引用所在行 ±window** 的上下文（供第 4 层的 N5/N7 去噪判据用）。
+
+    🔴 **必须是行级局部，不能用「整个文件的前 2000 字」** ——
+    favorite 域实测（2026-10-26 第三十四轮）：旧写法取来源文件的**前 2000 字**，
+    而 `_is_noise_ref` 拿它做**整文件共用**的判定
+    ⇒ **文件里任意一处**出现「见 §」「已登记」「DRIFT-xxx」「删除」等词，
+    ⇒ **该文件的所有引用都被判为噪声**
+    ⇒ 实测 favorite 12 份台账的 **181** 条引用里 **178 条被去噪**（只剩 3 条不悬空），
+    ⇒ 而那**唯一的一条真缺陷**（`serviceconf.go:83-90` 行号越界，该文件共 89 行）
+    ⇒ **被 N7 吃掉了**
+    ⇒ ⇒ **假阴性**：门禁最该抓的东西被噪声淹没。
+    ⇒ 改成**引用所在行 ±1** 后：真缺陷立刻暴露，
+    而「台账在记述历史纠错」（如「补成 `xxx.go:280-282` ⇒ **越界**」—— 记的是**当时**的错）
+    这类**紧邻**的记述仍被正确去噪。
+    ⇒ 实测（favorite 12 份 / 181 条）：**不悬空 3 → 158** · **已去噪 178 → 22**
+    ⇒ **FAIL 0 → 1**（多出来的 1 条 = 上面那条**真缺陷**，它终于浮出来了）。
+
+    ⚠️ **必须按 (文件, 行号) 排序拼接** —— 顺序敏感 ⇒ set/dict 迭代序随 hash 随机化漂移
+    （同族坑 **PIT-GLOBAL-039**：遍历 `set` 做判定 ⇒ 门禁输出不可复现）。
+
+    @param hits  {台账文件: {该文件里出现引用的行号集合}}
+    """
+    out = []
+    for sf in sorted(hits):
+        lines = read(os.path.join(root, sf)).splitlines()
+        for ln in sorted(hits[sf]):
+            lo = max(0, ln - 1 - window)
+            hi = min(len(lines), ln + window)
+            out.append('\n'.join(lines[lo:hi]))
+    return '\n'.join(out)
 
 
 def layer4_golines(root, texts, go_root):
@@ -753,7 +840,27 @@ def layer4_golines(root, texts, go_root):
 
     gomodcache = os.path.expanduser('~/go/pkg/mod')
     idx = {}
-    roots = [(lib, os.path.join(gomodcache, ver)) for lib, ver in THIRD_PARTY.items()]
+    # ⚠️ **权威 = 真源 `go.mod`**（第三十四轮 · favorite 域实测带出）：
+    #    手写表覆盖不到 `gorm.io/gorm` / `prometheus/client_golang` 等 ⇒ 假 FAIL
+    roots = []
+    seen_root_paths = set()
+    for mod, ver in _go_mod_requires(go_root):
+        base = os.path.join(gomodcache, _modcache_escape(mod) + '@' + ver)
+        if base in seen_root_paths:
+            continue
+        seen_root_paths.add(base)
+        roots.append((mod, base))
+    # 手写表只作**兜底**（go.mod 里没有的条目）
+    for lib, mv in THIRD_PARTY.items():
+        mod, ver = mv.split('@', 1)
+        base = os.path.join(gomodcache, _modcache_escape(mod) + '@' + ver)
+        if base in seen_root_paths:
+            # ⚠️ **必须去重** —— go.mod 与手写表指向**同一个**库时，
+            #    同一份文件会被登记两次 ⇒ 「同名文件跨库歧义」里同一个库出现两次
+            #    （实测：`core/service/serviceconf.go ∈ ['github.com/zeromicro/go-zero', 'go-zero']`）
+            continue
+        seen_root_paths.add(base)
+        roots.append((lib, base))
     roots.append(('真源', os.path.join(go_root, 'service')))
     for lib, base in roots:
         if not os.path.isdir(base):
@@ -763,28 +870,52 @@ def layer4_golines(root, texts, go_root):
                 if fn.endswith('.go'):
                     idx.setdefault(fn, []).append((lib, os.path.join(dp, fn)))
 
+    # 🔴 **Go 标准库也要能定位**（favorite 域实测：`net/http/server.go:2458` 在
+    #    `<GOROOT>/src` 里 ⇒ 索引不含标准库 ⇒ 假 FAIL）
+    goroot = _detect_goroot()
+
     refs = {}
     for f, t in texts.items():
         for m in REF_RE.finditer(t):
             key = (m.group(1), int(m.group(2)), int(m.group(3)) if m.group(3) else int(m.group(2)))
-            refs.setdefault(key, set()).add(f)
+            # ⚠️ **必须记住「引用出现在台账的第几行」** —— 第 4 层的 N5/N7 去噪
+            #    要按**行级局部**取上下文（否则文件里任意一处噪声词会吃掉全文件的引用）
+            ln = t.count('\n', 0, m.start()) + 1
+            refs.setdefault(key, {}).setdefault(f, set()).add(ln)
 
     ok, problems, ambiguous, noises = 0, [], [], []
-    for (path, s, e), srcs in sorted(refs.items()):
+    for (path, s, e), hits in sorted(refs.items()):
+        srcs = sorted(hits)
         # ── 先过去噪规则（N1/N5/N6/N7）：已知噪声不计 FAIL
-        # ⚠️ **`_source_context` 内部必须 `sorted(srcs)`** —— `srcs` 是 **set**
-        #    ⇒ 迭代顺序随 Python 的字符串 hash 随机化**每次进程都不同**
-        #    ⇒ 拼出的 `src_text` 顺序不同 ⇒ `_is_noise_ref` 的正则命中结果不同
+        # ⚠️ **上下文是「引用所在行 ±1」的行级局部**（第三十四轮改）
+        #    ⇒ 旧写法（来源文件的前 2000 字、整文件共用）会让「文件里任意一处噪声词」
+        #    把**该文件的所有引用**一起去噪 ⇒ 实测 favorite 域 12 份台账 181 条里
+        #    178 条被去噪（只剩 3 条不悬空）、唯一那条真缺陷被吃掉 ⇒ **假阴性**
+        # ⚠️ **`_source_context` 内部必须按 (文件, 行号) 排序** —— 顺序敏感 ⇒
+        #    迭代序随 Python 字符串 hash 随机化**每次进程都不同**
         #    ⇒ **同一条 file:line 引用每次运行落进不同分类桶**
         #      （N5 / N7 / 跨库歧义 / MISSING）。
         #    实测（2026-10-26）：同一份仓库状态连跑 3 次，层 4 的
         #    「引用不悬空 / 已去噪 / 跨库歧义」三个计数分别是
         #    (20,105,3) / (13,112,2) / (14,111,1) ⇒ **门禁输出不可复现**；
         #    `PYTHONHASHSEED=0` 连跑 3 次完全一致 ⇒ 坐实是 hash 随机化。
-        src_text = _source_context(root, srcs)
+        src_text = _source_context(root, hits)
         is_noise, why = _is_noise_ref(path, s, e, src_text)
         if is_noise:
-            noises.append((path, s, e, why, sorted(srcs)))
+            noises.append((path, s, e, why, srcs))
+            continue
+        # ── 精确定位通道 ①：`module@version/...` ⇒ 直接在 module cache 里找
+        #    （basename 索引解析不到完整模块路径 ⇒ 假 FAIL；直接定位顺带消除同名歧义）
+        direct = _direct_module_candidate(path, gomodcache)
+        # ── 精确定位通道 ②：Go **标准库** ⇒ `<GOROOT>/src/...`
+        if direct is None:
+            direct = _stdlib_candidate(path, goroot)
+        if direct is not None and os.path.isfile(direct):
+            n = sum(1 for _ in open(direct, encoding='utf-8', errors='replace'))
+            if s <= n and e <= n:
+                ok += 1
+            else:
+                problems.append((path, s, e, '行号超出文件范围', srcs))
             continue
         cands = idx.get(os.path.basename(path), [])
         if not cands:
@@ -844,6 +975,17 @@ TMP_PROBE = re.compile(r'(^|/)(tmp|temp|\.tmp)[/_-]')
 SELF_DOCUMENTED = re.compile(
     r'(该测试类在仓内不存在|仓内不存在|已记档|已登记|见 §|见 本节|DRIFT-[A-Z]+-\d+)')
 
+# N14（2026-10-26 第三十四轮 · favorite 域实测带出）：台账在记「**当时补的那个（错的）值**」
+#   ⇒ 那是**历史记述**，不是「现在还引用着一个不存在的出处」⇒ 不算 FAIL。
+#   ⚠️ **词表必须窄** —— favorite 域实测两种形态要分开：
+#     ① 「补成 `create_favorite_logic.go:280-282` ⇒ **越界**（该文件仅 170 行）」⇒ **历史记述** ⇒ 去噪
+#     ② 「抓出 **1 处行号真错**（`core/service/serviceconf.go:83-90` ⇒ 该文件共 89 行 ⇒ 应为 `:83-89`）」
+#        ⇒ **真缺陷**（虽然同行也给了正确值）⇒ **必须报出**
+#   ⇒ ⇒ 「越界」「行号」「应为」「该文件共/仅 N 行」等词**都不能进词表**（会把 ② 一起吃掉 ⇒ 假阴性）
+#   ⇒ ⇒ 只认**明确的更正动词**：「补成」「更正为」「改正为」「改正命名」「真源里是」
+CORRECTION_NARRATION = re.compile(
+    r'(补成|更正为|改正为|改正命名|真源里是|真实路径是)')
+
 
 def _is_noise_ref(path, s, e, src_text):
     """判断一条 file:line 引用是否属于「已知噪声」⇒ 不计 FAIL。返回 (是否噪声, 原因)"""
@@ -855,11 +997,15 @@ def _is_noise_ref(path, s, e, src_text):
     if TMP_PROBE.search(path):
         return True, 'N6 临时探针脚本，不在仓内'
     # N5 / N7：需要台账原文上下文，在调用侧判定（这里只做文本级快筛）
-    line_ctx = src_text[:2000]
-    if DELETED_NARRATION.search(line_ctx):
+    # ⚠️ **不再截断** —— 上下文已是**行级局部**（引用所在行 ±1）⇒ 截断会切掉邻行
+    #    （第三十四轮改；旧写法的文件级前缀是「假阴性」的根源）
+    if DELETED_NARRATION.search(src_text):
         return True, 'N5 台账记述「删除/不存在」，非悬空引用'
-    if SELF_DOCUMENTED.search(line_ctx):
+    if SELF_DOCUMENTED.search(src_text):
         return True, 'N7 台账已自陈并记档'
+    # N14：台账在记「当时补的那个（错的）值」⇒ 历史记述
+    if CORRECTION_NARRATION.search(src_text):
+        return True, 'N14 台账记述的是「当时补的那个值」，非当前悬空引用'
     return False, ''
 
 
@@ -1013,14 +1159,141 @@ def layer0_selfcheck(root):
     #    set 的迭代序在**同一进程内**也不保证等于 sorted 序（字符串 hash 随机化）
     #    ⇒ 原写法（拿 set 比 sorted 拼接）是 **flaky 对照**：有时红、有时绿
     #    ⇒ 变异「抽掉 sorted()」**有时抓不到** ⇒ 对照必须**确定性**地区分。
-    _srcs = ['docs/DRIFT/task/rpc.md', 'docs/DRIFT/task/api.md']   # 故意**不是**字典序
-    _expect_ctx = ''
-    for _sf in sorted(_srcs):
-        _expect_ctx += read(os.path.join(root, _sf))[:2000]
-    if _source_context(root, _srcs) == _expect_ctx:
-        print('    ✅ 层 4 的来源上下文按 srcs 排序拼接（输出可复现）')
+    # ⚠️ **第三十四轮起上下文是「行级局部」** ⇒ 白盒契约改成：
+    #    **同一组 (文件, 行号) ⇒ 无论 dict 的插入顺序如何，输出必须逐字节相同**
+    #    （旧契约是「按 sorted(srcs) 拼接整文件前 2000 字」）
+    _hits_a = {'docs/DRIFT/task/rpc.md': {10}, 'docs/DRIFT/task/api.md': {5}}
+    _hits_b = {'docs/DRIFT/task/api.md': {5}, 'docs/DRIFT/task/rpc.md': {10}}
+    _ctx_a = _source_context(root, _hits_a)
+    _ctx_b = _source_context(root, _hits_b)
+    if _ctx_a == _ctx_b and _ctx_a:
+        print('    ✅ 层 4 的来源上下文按 (文件, 行号) 排序拼接（输出可复现）')
     else:
-        print('    ❌ 层 4 的来源上下文未按 srcs 排序 ⇒ 输出随 hash 随机化漂移')
+        print('    ❌ 层 4 的来源上下文未按 (文件, 行号) 排序 ⇒ 输出随 hash 随机化漂移')
+        bad += 1
+
+    # ②‴ 层 4（2026-10-26 第三十四轮 · favorite 域实测带出）：**去噪必须是行级局部**
+    #     ⇒ 阳性：文件**别处**有噪声词 ⇒ 不得把远处的引用一起去噪
+    #            （否则「文件里任意一处噪声词吃掉全文件引用」⇒ 真缺陷被淹没 ⇒ 假阴性）
+    #     ⇒ 阴性：**同一行**的噪声词 ⇒ 必须去噪（否则台账的历史纠错记述变成假 FAIL）
+    #     ⚠️ 用**人造临时文件**做对照 ⇒ 与本仓实际内容无关 ⇒ 任何分支上都成立
+    import tempfile
+    with tempfile.TemporaryDirectory() as _td:
+        _far = os.path.join(_td, 'docs/DRIFT/x/far.md')
+        _near = os.path.join(_td, 'docs/DRIFT/x/near.md')
+        os.makedirs(os.path.dirname(_far))
+        with open(_far, 'w', encoding='utf-8') as f:
+            f.write('第 1 行：台账开头提到「见 §」\n'
+                    '第 2 行：中间内容\n'
+                    '第 3 行：中间内容\n'
+                    '第 4 行：中间内容\n'
+                    '第 5 行：中间内容\n'
+                    '第 6 行：中间内容\n'
+                    '第 7 行：中间内容\n'
+                    '第 8 行：中间内容\n'
+                    '第 9 行：中间内容\n'
+                    '第 10 行：引用 `a/b.go:12` 的正常引用\n')
+        with open(_near, 'w', encoding='utf-8') as f:
+            f.write('第 1 行：引用 `c/d.go:7`，该类**已删除**\n')
+        _far_ctx = _source_context(_td, {'docs/DRIFT/x/far.md': {10}})
+        _near_ctx = _source_context(_td, {'docs/DRIFT/x/near.md': {1}})
+    _n_far, _r_far = _is_noise_ref('a/b.go', 12, 12, _far_ctx)
+    _n_near, _r_near = _is_noise_ref('c/d.go', 7, 7, _near_ctx)
+    if not _n_far:
+        print('    ✅ 层 4 去噪是**行级局部**：别处的噪声词不会吃掉远处的引用')
+    else:
+        print(f'    ❌ 层 4 去噪是**文件级**：别处的噪声词把真缺陷一起吃掉了（{_r_far}）')
+        bad += 1
+    if _n_near:
+        print('    ✅ 层 4 去噪能吃到**同行**的历史记述（台账自陈已删除）')
+    else:
+        print('    ❌ 层 4 去噪吃不到同行的历史记述 ⇒ 历史纠错会变成假 FAIL')
+        bad += 1
+
+    # ②′ 层 4：**N14「更正记述」**必须两头都对
+    #     ⇒ 阳性：「补成 X ⇒ 越界」这类**历史记述**必须去噪（否则台账里全是噪声）
+    #     ⇒ 阴性：「抓出 1 处行号真错（X ⇒ 应为 Y）」这类**真缺陷**必须**仍被报出**
+    #        （⚠️ 若把「越界」「应为」「该文件共/仅 N 行」放进词表 ⇒ 这条会被吃掉 ⇒ 假阴性）
+    _n14_pos = '| **E-d** | 补成 `create_favorite_logic.go:280-282` ⇒ **越界**（该文件仅 170 行） |'
+    _n14_neg = ('| 第十八轮 | 抓出 **1 处行号真错**（`core/service/serviceconf.go:83-90` '
+                '⇒ 该文件共 89 行 ⇒ 应为 `:83-89`） |')
+    _n_pos, _r_pos = _is_noise_ref('create_favorite_logic.go', 280, 282, _n14_pos)
+    _n_neg, _r_neg = _is_noise_ref('core/service/serviceconf.go', 83, 90, _n14_neg)
+    if _n_pos:
+        print('    ✅ 层 4 的 N14 能吃到「补成 X ⇒ 越界」这类历史记述')
+    else:
+        print('    ❌ 层 4 的 N14 吃不到历史记述 ⇒ 台账噪声淹没信号')
+        bad += 1
+    if not _n_neg:
+        print('    ✅ 层 4 的 N14 不会吃掉「抓出 1 处行号真错」这类真缺陷')
+    else:
+        print(f'    ❌ 层 4 的 N14 把真缺陷一起吃掉了（{_r_neg}）⇒ 假阴性')
+        bad += 1
+
+    # ②⁗ 层 4：第三方库清单必须**从真源 go.mod 动态解析**（手写表覆盖不到 ⇒ 假 FAIL）
+    with tempfile.TemporaryDirectory() as _td:
+        with open(os.path.join(_td, 'go.mod'), 'w', encoding='utf-8') as f:
+            f.write('module sea-try-go\n\ngo 1.21\n\nrequire (\n\tgithub.com/zeromicro/go-zero v1.10.2\n\tgorm.io/gorm v1.31.1 // indirect\n)\n')
+        _mods = _go_mod_requires(_td)
+    if ('gorm.io/gorm', 'v1.31.1') in _mods and ('github.com/zeromicro/go-zero', 'v1.10.2') in _mods:
+        print('    ✅ 层 4 的第三方库清单能从 go.mod 动态解析（含 indirect）')
+    else:
+        print('    ❌ 层 4 的第三方库清单没解析 go.mod ⇒ 不在表里的模块一律假 FAIL')
+        bad += 1
+    if not any(_m == 'example.com/nope' for _m, _v in _mods):
+        print('    ✅ 层 4 的第三方库清单不会凭空造模块')
+    else:
+        print('    ❌ 层 4 的第三方库清单凭空造了模块')
+        bad += 1
+
+    # ②⁘ 层 4：`module@version/...` 必须能**直接定位**到 module cache 里的文件
+    #     ⇒ basename 索引解析不到完整模块路径 ⇒ 假 FAIL
+    with tempfile.TemporaryDirectory() as _td:
+        _cache = os.path.join(_td, 'pkg/mod')
+        _f = os.path.join(_cache, 'gorm.io/gorm@v1.31.1/schema/naming.go')
+        os.makedirs(os.path.dirname(_f))
+        with open(_f, 'w', encoding='utf-8') as fh:
+            fh.write('package schema\n')
+        _c = _direct_module_candidate('gorm.io/gorm@v1.31.1/schema/naming.go', _cache)
+        _c_none = _direct_module_candidate('schema/naming.go', _cache)
+        # ⚠️ **isfile 必须在这里查** —— `TemporaryDirectory` 退出后目录已被删 ⇒
+        #    跑到 `with` 外面再查 ⇒ 恒为 False ⇒ **对照自己写错**（本轮真踩到）
+        _c_hit = bool(_c) and os.path.isfile(_c)
+    if _c_hit:
+        print('    ✅ 层 4 能把 `module@version/...` 直接定位到 module cache 里的文件')
+    else:
+        print('    ❌ 层 4 解析不了 `module@version/...` ⇒ 假 FAIL')
+        bad += 1
+    if _c_none is None:
+        print('    ✅ 层 4 不会把普通路径硬拼成 module cache 路径')
+    else:
+        print('    ❌ 层 4 把普通路径硬拼成 module cache 路径了')
+        bad += 1
+    if _modcache_escape('github.com/IBM/sarama') == 'github.com/!i!b!m/sarama':
+        print('    ✅ 层 4 的 module cache 路径转义正确（大写字母 → !小写）')
+    else:
+        print('    ❌ 层 4 的 module cache 路径转义不对 ⇒ 带大写的模块永远找不到')
+        bad += 1
+
+    # ②⁙ 层 4：Go **标准库**的引用必须能定位（`<GOROOT>/src/...`）
+    with tempfile.TemporaryDirectory() as _td:
+        _goroot = os.path.join(_td, 'go')
+        _f = os.path.join(_goroot, 'src/net/http/server.go')
+        os.makedirs(os.path.dirname(_f))
+        with open(_f, 'w', encoding='utf-8') as fh:
+            fh.write('package http\n')
+        _c1 = _stdlib_candidate('net/http/server.go', _goroot)
+        _c2 = _stdlib_candidate('src/net/url/url.go', _goroot)
+        _c1_hit = bool(_c1) and os.path.isfile(_c1)
+    if _c1_hit:
+        print('    ✅ 层 4 能定位 Go 标准库引用（<GOROOT>/src/...）')
+    else:
+        print('    ❌ 层 4 定位不了 Go 标准库引用 ⇒ 假 FAIL')
+        bad += 1
+    if _c2 and _c2.endswith(os.path.join('src', 'net', 'url', 'url.go')):
+        print('    ✅ 层 4 能定位带 `src/` 前缀的标准库引用')
+    else:
+        print('    ❌ 层 4 定位不了带 `src/` 前缀的标准库引用')
         bad += 1
 
     # ③ 层 3：commit 覆盖检查必须能识别「未登记的 commit」（阳性对照）
