@@ -169,15 +169,30 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | `hot-rpc` | ✅ 双侧活体对拍逐字节一致（**第十一轮**：真 Kafka + 2×真 Redis + 真 gRPC，10 组 top_k 全同），86 条契约测试 | [`rpc.md`](rpc.md) |
 | **`hot-api`** | ✅ **端到端 HTTP 栈已对拍**（第五轮 29 条用例，24/29 + 修正配方 28/29）+ **解析层/分页层/wire 层双侧探针对拍**（15+25+3 组），87 条测试 | **本文件** |
 
-⇒ hot 域三组件**代码均已落地且全部拿到双侧活体对拍**；
-⚠️ 剩下的不是「hot-api 证据最弱」，而是**域外**的三条：跨域移交的 D14（nosniff）/ D25（499）/ D27（MaxConns）
-+ 全仓约定待拍板的 D21 / D22 / D23。
+⇒ hot 域三组件**代码均已落地且全部拿到双侧活体对拍**。
+
+🟥 **2026-10-26 第二十八轮订正**：下面这行**已过期**（写于 2026-10-24）——
+原文说「剩下的是**域外**的三条 D14（nosniff）/ D25（499）/ D27（MaxConns）+ 待拍板的 D21 / D22 / D23」。
+**逐条核对后，这 7 条现已全部闭合**（§6.3 状态表纪律：任何「未修」断言必须带核对日期）：
+
+| 条目 | 原状态 | **核对结果（2026-10-26）** | 证据 |
+|---|---|---|---|
+| **D14** nosniff | 🔁 跨域移交 common 域 | ✅ **已实现**（不是「待移交」） | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:692` `resp.setHeader("X-Content-Type-Options", "nosniff")` |
+| **D25** 499 | 🔁 跨域移交 common 域 | ✅ **已闭合**（与 T-13 一并解决） | `docs/DRIFT/global/cross-domain.md` §二·十（T-13 响应撕裂/状态码被抢） |
+| **D27** MaxConns 作用域 | 🔁 跨域移交 common 域 | 🏷 **已签字为有意偏离**（**不是待办**） | `SD-2026-10-25-01`（global 台账 T-2 / T-5）⇒ `docs/Intentional_Deviations/global/common-tails.md` |
+| **D21** relaxed-query-chars | ⏸ 待拍板 | ✅ **第十三轮已落地 10/10** | `server.tomcat.relaxed-query-chars: ["[", "]"]` |
+| **D22** max-parameter-count | ⏸ 待拍板 | ✅ **第十三轮已落地 10/10** | `server.tomcat.max-parameter-count: 2048` |
+| **D23** 请求行长 | ⏸ 待拍板 | ✅ **第十三轮已落地 10/10** | `server.max-http-request-header-size: 1028KB`（⚠️ 不是 1MB，见台账） |
+| **DRIFT-HOTAPI-024** Content-Type charset | — | ✅ **第二十五轮已修**（global T-6） | 共享层 `GoStyleJsonContentTypeAdvice` ⇒ 10 个 api 全生效 |
+
+⇒ **hot-api 域内已无可修的语义漂移**（`DRIFT-HOTAPI-014` 亦为跨域移交，且 nosniff 已实现）。
 
 ## 尚未处理
 
 - 本模块的 `HUMAN_ONLY.MD`
 - ~~D1（端到端双侧活体对拍）—— 这是 hot 域收口的最后一块实质工作~~ ⇒ ✅ **第五轮已闭合**（hot-api 侧）/ **第十一轮已闭合**（hot-rpc 侧）
-- 剩余未闭合项**全部**落在域外：跨域移交 **D14 / D25 / D27**（代码在 `service/common`）+ 全仓约定待拍板 **D21 / D22 / D23**（Tomcat 三旋钮，影响全部 10 个 api 模块）
+- ~~剩余未闭合项**全部**落在域外：跨域移交 **D14 / D25 / D27**（代码在 `service/common`）+ 全仓约定待拍板 **D21 / D22 / D23**~~ ⇒ ✅ **2026-10-26 订正：这 6 条现已全部闭合**（D27 转为**已签字的有意偏离**）⇒ **本模块的未闭合项清单为空**
+
 
 ---
 ---
