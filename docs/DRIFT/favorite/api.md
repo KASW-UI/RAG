@@ -22,7 +22,7 @@
 | 落地形态 | 31 个 main 文件 / **3,116 行** / **15 个 DTO** / 7 个 Service / 1 个 Controller<br>⚠️ **核对 2026-10-25（第十轮）**：行数比首轮台账记的 2,920 多 196 行 ⇒ **全部是各轮的纯注释增量**（可执行逻辑零改动）；DTO 数首轮记的 **13 是错的**（基线 `58e8314` 就是 15 个） |
 | 测试 | **8 个测试类 / 94 例全绿**（33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍** + **1 探针（自动 skip）** + **4 端口归属守门**）→ 第六轮 **+1 个测试类 / +5 例**；第十四轮收尾 **+1 个测试类 / +4 例**（`RealTomcatPortTest`） |
 | 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条已签字偏离** |
-| 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **2 条跨域待拍板**：① 容器层参数上限口径 ⇒ 收口在 `global`（与 hot 域 `DRIFT-HOTAPI-030` 同一格）；② **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，落点在 `service/common` ⇒ 同样收口在 `global`）<br>✅ **U8（第十五轮登记的唯一一条业务路径缺口）已于第十六轮闭合**：create 成功路径 + `ensureUserExists` 五分支 + 落库等价性全部拿到双侧活体证据（15 case 全 SAME）⇒ [`rpc.md`](./rpc.md) **§25**；盘点全表 ⇒ **§24.1** ⇒ **域内「未知项」归零**（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认） |
+| 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **2 条跨域待拍板**：① 容器层参数上限口径 ⇒ 收口在 `global`（与 hot 域 `DRIFT-HOTAPI-030` 同一格）；② **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，落点在 `service/common` ⇒ 同样收口在 `global`）<br>✅ **U8（第十五轮登记的唯一一条业务路径缺口）已于第十六轮闭合**：create 成功路径 + `ensureUserExists` 五分支 + 落库等价性全部拿到双侧活体证据（15 case 全 SAME）⇒ [`rpc.md`](./rpc.md) **§25**；盘点全表 ⇒ **§24.1** ⇒ **域内「未知项」归零**（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认）<br>🔴 **U9（第十七轮新增 · 部署形态类 · 待拍板）**：Go 生产形态有 **16062** 那个 HTTP 面，RAG 侧没有 ⇒ **§11** |
 | 本台账范围 | **仅 `favorite-api`**。`favorite-common` / `favorite-rpc` / `favorite-proto` 见同目录另三份台账 |
 
 ---
@@ -514,3 +514,16 @@ CheckBlacklistMiddleware: middleware.NewCheckBlacklistMiddleware(redisDB).Handle
 [`tools/ledger-lint/favorite/check-ledger-vs-reality.py`](../../../../tools/ledger-lint/favorite/check-ledger-vs-reality.py)
 （**从台账正文抽断言** ⇄ **独立从仓库算实际值** ⇒ 逐条比对）
 ⇒ 详见 [`rpc.md`](./rpc.md) §24.3。
+
+## 11. 2026-10-26 第十七轮 —— 📌 **生产启动形态**（本档只留指针）
+
+> 本轮全部内容在 [`rpc.md`](./rpc.md) **§26**（favorite-rpc 侧）。
+> **本档（favorite-api）只受影响一处指针**，不改任何 api 侧代码。
+
+| 项 | 内容 |
+|---|---|
+| **本轮做了什么** | 🔴 **3 个生产启动阻塞级缺陷已修**（全在 `favorite-rpc`）：① gRPC client 地址**两斜杠** ⇒ 启动期抛 `IllegalArgumentException`；② `web-application-type` 缺失 ⇒ Boot 判定 SERVLET 而无 servlet 容器 ⇒ **启动即死**；③ gRPC **reflection 暴露面**漏关 ⇒ 比真源多暴露一整个反射面 ⇒ **3 个守门测试类 / 14 例** + **变异验证 4 条** + 🆕 探针 `tools/prod-startup-probe/favorite/`（**A/B/C** ⇒ EXIT=0） |
+| **api 侧有没有受影响** | ✅ **没有** —— 本轮改动全部落在 `favorite-rpc` 的 `application.yml` / `pom.xml` 注释 + `favorite-rpc` 的 3 个新测试类<br>⇒ **api 的 94 例、rpc 的 99 例、common 的 29 例全绿不变**；`tools/api-full-parity-probe/favorite/run.sh` **复跑仍 EXIT=0** |
+| **新增域内未决项** | 🔴 **U9**（部署形态类 · 待拍板）—— Go 生产形态有 **16062** 那个 HTTP 面（`/metrics` `/healthz` pprof），RAG 侧 `web-application-type: none` ⇒ **没有** ⇒ 要么 RAG 侧也开（**部署形态变更**），要么**签字接受** ⇒ 详见 [`rpc.md`](./rpc.md) **§26.8** |
+| **跨域（只登记）** | 其余 **5 个** rpc 模块（`article-rpc` / `comment-rpc` / `follow-rpc` / `like-rpc` / `task-rpc`）**同样漏配** `grpc.server.reflection-service-enabled` ⇒ 收口在 `global` ⇒ 逐条 Go 侧判据见 [`rpc.md`](./rpc.md) **§26.4** |
+| **⚠️ 连带翻案** | 第十四轮 §22.3 的「启动阻塞 #1 已修」是**半修**（只改了**探针启动参数**，生产 yaml 一行没改）⇒ 坑档 **PIT-FAV-RPC-026** ⇒ 详见 [`rpc.md`](./rpc.md) **§26.5** |

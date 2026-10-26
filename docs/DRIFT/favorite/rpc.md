@@ -25,16 +25,17 @@
 | 项 | 值 |
 |---|---|
 | 落地 | **36 个 Java 文件 / 7,571 行 / 7 个迁移脚本**（V7 为第十轮前新增的时钟源对齐脚本）<br>⚠️ **核对 2026-10-25（第十轮）**：行数首轮记 7,057 ⇒ 现 **7,571**，增量 514 行**全部是各轮的纯注释增量**（可执行逻辑零改动）（本轮前：34 个文件全 0 字节、`pom.xml` 零依赖零插件、6 个 `.sql` 全 0 字节） |
-| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §25**（favorite-rpc：**14 个测试类 / 85 例**（含 2 skip）） |
+| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §26**（favorite-rpc：**17 个测试类 / 99 例**（含 2 skip）） |
 | 构建 | `mvn -o -pl service/favorite/favorite-rpc -am install` ⇒ **BUILD SUCCESS** |
 | 本轮发现并修复 | **6 处 L2 语义偏差**（§2）+ **2 处实现期真 bug**（§3） |
-| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选已签字**（2026-10-25）：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK）⇒ **本域已无 🏷 候选**，见 §13.2<br>✅ **U8（第十五轮新增 · 域内可动的最后一条）已于第十六轮闭合**：create / create_item 的**成功路径** + `ensureUserExists` 五分支 + **落库等价性**全部拿到双侧活体证据（**15 case 全 SAME**）⇒ **§25**（盘点全表 ⇒ §24.1）⇒ **域内「未知项」归零**（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认） |
+| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选已签字**（2026-10-25）：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK）⇒ **本域已无 🏷 候选**，见 §13.2<br>✅ **U8（第十五轮新增 · 域内可动的最后一条）已于第十六轮闭合**：create / create_item 的**成功路径** + `ensureUserExists` 五分支 + **落库等价性**全部拿到双侧活体证据（**15 case 全 SAME**）⇒ **§25**（盘点全表 ⇒ §24.1）⇒ **域内「未知项」归零**（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认）<br>🔴 **U9（第十七轮新增 · 部署形态类 · 待拍板）**：Go 生产形态有 **16062** 那个 HTTP 面（`etc/favorite.yaml:23-30` 的 DevServer + `internal/devserver/server.go:79-82` 的 `if !c.Enabled { return }` ⇒ **与 mode 无关，生产也开**），RAG 侧 `web-application-type: none` ⇒ **没有** ⇒ 要么 RAG 侧也开（**部署形态变更**，需引 servlet 容器），要么**签字接受**⇒ **§26.8** |
 | 第九轮 | 🆕 **注释可核验性审计**（§15）—— 抓出 **3 条「断言对、锚点指错行」的真缺陷**，门禁级发现 **67 → 0**；**零行为改动** |
 | 第十轮 | 🆕 **补完 §15.8 记下的 I1 欠账**（§16）—— **153 条**内联断言补上锚点，再抓 **5 条**（4 条行号指错 + 1 条把 Java 事实误记成 Go）；**台账体检**：2 条死指针 + 3 处过期数字 + 4 处裸行号 + **6 处 RAG 侧锚点位移**已修，**6 个 Go 源文件未落点**已补记 ⇒ 新工具 `tools/ledger-lint/favorite/check-ledger-selfcheck.py`（EXIT=0） |
 | 第十二轮 | 🆕 **可动项 A + B 落地**（§19）—— 🔴 **权威读 HTTP 面的双侧活体对拍做成了**（新工具 `tools/authority-live-probe/favorite/`，**21 个 case：20 个逐字节一致 + 1 个 SKIP**）⇒ **U7 的局部活体对拍 6 项 → 7 项**；并抓出并**已修 1 条真缺陷**（200 路径少一个尾部换行字节）<br>🆕 **域外写入方盘点机检**（新工具 `tools/outbox-writer-audit/favorite/`）⇒ 本仓 **0 个域外写入方**（EXIT=0）<br>| 第十一轮 | 🆕 **三条候选签字**（§17）—— DEV-FAV-API-002 / RPC-006 / RPC-007 ⇒ **本域已无 🏷 候选**；顺带改正 §0 头部一处**过期断言**（「未做变异验证」只适用 §0–§8）<br>📌 **域内「可动项」清单**（§18）—— 🔴 **权威读 HTTP 面的双侧活体对拍其实做得了**（不需要 etcd/Kafka/Redis/user-rpc/article-rpc）· 🟡 域外写入方盘点（V7 前置）· ⬜ 跨域项收口在 `global` |
 | 第十四轮 | 🆕 **api 整域双侧活体对拍**（§22）—— 新探针 `tools/api-full-parity-probe/favorite/`：**32 case · 24 SAME / 1 SAME_CODE / 2 SAME_BODY / 4 SAME_STATUS / 1 OBS ⇒ 0 条新缺陷**；两侧 = **Go 真源**（22 个逐字节复制件 + sha256 校验）与 **RAG 两个 `java -jar` 真进程** + **共用一个 Redis**<br>🔴 **B-1 闭合并推翻第十三轮结论**（grpc-go 未知方法/服务的措辞差异 = **探针自己把 `:path` 拼成双斜杠**）<br>🔴 **2 个 RAG 侧启动阻塞已修**（`favorite-rpc`/`favorite-api` **从未被验证能以真实进程启动**）<br>🆕 **域外写入方盘点机检扩面**（`tools/outbox-writer-audit/favorite/` + `CHECKLIST.md`） |
 | 第十六轮 | ✅ **U8 销账 —— create 成功路径双侧活体对拍**（§25）—— gRPC 契约探针加**第二轮**（上游**在场**：探针自带**最小 user-rpc/article-rpc 桩**当**两侧共同上游**）⇒ **15 case 全 SAME**（0 OBS / 0 SAME_CODE）⇒ `ensureUserExists` **五条分支**首次拿到活体证据 + **落库等价性**（`favorite_folder`/`favorite_item`/`favorite_fact_outbox` 三张表投影逐字段相同 ⇒ 「公开修订冻结」被实测执行到）<br>🔴 **1 条注释断言被实测证伪并修正**（`getStatus()!=0` 的后果是 **fail-open 放行**，不是原文写的「误判封禁 5005」）⇒ **产品代码行为零改动**<br>🆕 坑档 **PIT-FAV-RPC-023/024/025**（端口撞号 / 种子显式 id 毒化序列 / bash 3.2 引号）|
 | 第十四轮收尾 | 🔴 **探针健壮性加固**（§23）—— 消除「**环境红**」假红：4 个起 PG 的探针**统一**改成 **探 TCP + 180s + 重建重试 + 容器退出即放弃**；新增守门网 `tools/probe-gate/favorite/`（含变异验证）；**零行为改动**、**0 条新漂移** |
+| 第十七轮 | 🔴🔴 **生产启动形态**（§26）—— `global` 移交的「**生产 jar 起不来**」查清并修完：**3 个缺陷**（① gRPC client 地址**两斜杠** ⇒ 启动期抛 `IllegalArgumentException`；② `web-application-type` 缺失 ⇒ Boot 判定 SERVLET 而无容器 ⇒ **启动即死**；③ gRPC **reflection 暴露面**漏关）⇒ 新增 **3 个守门测试类 / 14 例**（全部读**生产文件**，不走 `@SpringBootTest` 覆盖）+ **变异验证 4 条**全转红 + 🆕 新探针 `tools/prod-startup-probe/favorite/`（**A/B/C** 真 fat jar 活体对拍 ⇒ EXIT=0）<br>🔴 **翻案**：第十四轮 §22.3 的「启动阻塞 #1 已修」是**半修**—— 修复只落在**探针启动参数**里，**生产 yaml 一行都没改** ⇒ 缺陷活到了发布那一刻 ⇒ 坑档 **PIT-FAV-RPC-026**<br>🔴 **新登记 U9**（部署形态类 · 待拍板）：Go 生产形态的 **16062** DevServer 那个面，RAG 侧没有 |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -1999,3 +2000,220 @@ presence 检查**变成永真** ⇒ 请求被**直接放行**（`code=OK`，**�
 | **台账自检** | ✅ `tools/ledger-lint/favorite/check-ledger-selfcheck.py` ⇒ **EXIT=0** |
 | **注释锚点审计** | ✅ `tools/assertion-audit/favorite/check-assertion-sources.py` ⇒ **EXIT=0** |
 | **共享面** | ✅ **零改动**（`docs/DRIFT/_INDEX.md` / `_MANIFEST.json` / `docs/Intentional_Deviations/_INDEX.md` / `docs/Pitfalls/_INDEX.md` / `AGENTS.md` / `docs/DRIFT/_cross/` / `service/common/**` 一律不碰） |
+
+## 26. 2026-10-26 第十七轮（`align/favorite` 工作树 · 承 `fbac7fc`）—— 🔴🔴 **生产启动形态**：两个启动阻塞 + 一个漏配，**并推翻第十四轮「已修」的半修**
+
+> **来源**：`global` 收口域移交过来的一条 —— 「本模块的 gRPC client 地址写法非法，**生产 jar 起不来**」。
+> ⇒ 本轮的目标只有一个：**让真 fat jar 用生产 yaml 原样能起来**，并把这件事变成**可复跑的证据**。
+> ⇒ 结论：**3 个缺陷**（2 个启动阻塞 + 1 个暴露面漏配）全部**已修**；
+> 🔴 **并翻案了第十四轮的一条「已修」**（那是**半修** ⇒ 缺陷活到了发布那一刻）。
+
+### 26.1 一句话结论
+
+| | |
+|---|---|
+| **本轮新发现并修复** | **3 条**：① gRPC client 地址**两斜杠** ⇒ 启动期抛 `IllegalArgumentException`；② `web-application-type` 缺失 ⇒ Boot 判定 SERVLET ⇒ **无 servlet 容器 ⇒ 启动即死**；③ gRPC **reflection 暴露面**漏关（比真源多暴露一整个反射面） |
+| **本轮翻案** | 🔴 **第十四轮 §22.3 的「启动阻塞 #1 已修」是半修** —— 那条修复只落在**探针启动参数**里，**生产 yaml 一行都没改** ⇒ 缺陷在产物里**原封不动** |
+| **产品代码改动** | **2 行配置 + 2 个地址值**（`application.yml`）⇒ **零 Java 逻辑改动**；另 **2 段 pom 注释**纠错（行为零改动） |
+| **新增守门** | **3 个测试类 / 14 例**（读**生产文件**、不走 `@SpringBootTest` 覆盖）⇒ **变异验证 4 条**全按预期转红 |
+| **新增探针** | `tools/prod-startup-probe/favorite/` ⇒ **A/B/C 三 case 活体对拍**（真 fat jar + 生产 yaml 原样 + 真 PG） |
+| **本轮新漂移** | **0 条**（3 条全是「RAG 侧本身的问题」，不是与 Go 的语义差） |
+| **域内「未知项」** | **U8 已闭**（第十六轮）⇒ 本轮新增 **U9**（部署形态类，待拍板）⇒ 剩下 **B2**（流程项） |
+
+### 26.2 🔴 缺陷 A：gRPC client 地址写成**两斜杠** ⇒ 启动期抛异常（`global` 移交的那条）
+
+**位置**：`service/favorite/favorite-rpc/src/main/resources/application.yml`（修前 `:88` / `:94`）
+⇒ `grpc.client.user-rpc.address: discovery://user-rpc` · `grpc.client.article-rpc.address: discovery://article-rpc`
+
+**现象**（真 fat jar + 生产 yaml 原样，2026-10-26 实测）：
+
+```
+Caused by: java.lang.IllegalArgumentException: Incorrectly formatted target uri;
+    expected: 'discovery:[//]/<service-name>'; but was 'discovery://article-rpc'
+    at net.devh.boot.grpc.client.nameresolver.DiscoveryClientResolverFactory
+        .newNameResolver(DiscoveryClientResolverFactory.java:82)
+    at io.grpc.internal.ManagedChannelImpl.getNameResolver(ManagedChannelImpl.java:760)
+```
+
+**判据（字节码实测，不是看文档猜的）** —— devh `grpc-client-spring-boot-starter` **3.1.0.RELEASE**：
+
+```java
+if ("discovery".equals(uri.getScheme())) {
+    String path = uri.getPath();
+    if (path == null || path.length() <= 1 || !path.startsWith("/")) {
+        throw new IllegalArgumentException("Incorrectly formatted target uri; ...");
+    }
+    return newNameResolver(path.substring(1), args);   // ← 服务名 = path 去掉首斜杠
+}
+```
+
+⇒ `discovery://user-rpc` 的 `path` = `""`（长度 0）⇒ **不合格** ⇒ 启动期抛异常。
+⇒ 三条推论（都是**实测**出来的，不是推断）：
+1. **与 Nacos 在不在线无关** —— 校验发生在**任何网络调用之前**；
+2. **炸点在 gRPC client bean 后处理** ⇒ **连 Flyway 都跑不到** ⇒ 真 jar 起不来；
+3. **三斜杠不改变服务发现名** —— `path.substring(1)` = `"user-rpc"` / `"article-rpc"`
+   ⇒ **Nacos 上的名字一个字没改**。
+
+**修法**：两处改三斜杠 `discovery:///user-rpc` / `discovery:///article-rpc`（+ 判据注释）。
+
+⚠️ **这不是「与 Go 对齐」类的语义漂移修复** ——
+两侧注册中心本来就不同（Go 用 etcd 键 `user.rpc` / `article.rpc`，
+见 `service/favorite/rpc/etc/favorite.yaml:37-41` / `:43-47`；
+那是**已签字的有意偏离**）⇒ 本条修的是「**RAG 侧写法非法导致起不来**」
+⇒ **不登记**为有意偏离，也**不**进 `docs/Intentional_Deviations/`。
+
+### 26.3 🔴 缺陷 B：`web-application-type` 缺失 ⇒ **无 servlet 容器却按 web 应用起** ⇒ 启动即死
+
+**现象**（与 A 同一轮 A/B，**但更靠前** —— 修了 A 之后才撞出来）：
+
+```
+APPLICATION FAILED TO START
+Description:
+  Web application could not be started as there was no
+  org.springframework.boot.web.server.servlet.ServletWebServerFactory bean defined in the context.
+```
+
+**根因**：classpath 上有 `jakarta.servlet`
+（pom 里为编译期引用 `jakarta.servlet.http.HttpServlet/Request/Response` 而显式声明了
+`jakarta.servlet:jakarta.servlet-api`）⇒ Spring Boot 的
+`WebApplicationType.deduceFromClasspath()` 判定本进程是 **SERVLET web 应用**
+⇒ 而本服务**没有** servlet 容器（不引 tomcat）⇒ 找不到 `ServletWebServerFactory`。
+
+**修法**：`application.yml` 加
+
+```yaml
+spring:
+  main:
+    web-application-type: none
+```
+
+⇒ **不新增任何对外 wire 面**（与既有设计意图「纯 gRPC 进程默认没有 HTTP 端口」一致）
+⇒ **可逆**（将来若要开 HTTP 面，改配置 + 加容器即可）。
+
+⚠️ **连带更正了 pom 里两句错的注释**（原文两处都把结论说反了）：
+- 「不引 `spring-boot-web-server` **不会**因此起 web 容器 —— 本服务无 WebApplicationType」
+  ⇒ **错的**：决定 web 应用类型的是 **classpath 上有没有 jakarta.servlet**，不是有没有引那个包；
+- 「`jakarta.servlet-api` 是纯 API jar，**加进运行时 classpath 不会启动任何容器**；
+  favorite-rpc 仍然是 `WebApplicationType.NONE` 的纯 gRPC 进程」
+  ⇒ **前半句错的**：**正因为它在 classpath 上**，Boot 才判定成 SERVLET；
+  ⇒ **后半句也错的**：判定成 SERVLET 之后，因为**没有**容器，所以**起不来**，而不是「仍是 NONE」。
+
+### 26.4 🔴 缺陷 C：gRPC **reflection 暴露面**漏关（比真源多暴露一整个反射面）
+
+> ⚠️ 这条是**本轮核对时顺手查出来的**，与 A/B 同型：**其它 4 个 rpc 域都配了，本域漏了**。
+
+| | 事实 |
+|---|---|
+| **Go 出处** | `service/favorite/rpc/favorite.go:45-47`：`if c.Mode == service.DevMode \|\| c.Mode == service.TestMode { reflection.Register(grpcServer) }` |
+| **消费点判定** | `c.Mode` 来自内嵌的 `zrpc.RpcServerConf → service.ServiceConf`，其 tag 是 `json:",default=pro,options=dev\|test\|rt\|pre\|pro"`（go-zero v1.10.2 `core/service/serviceconf.go:35`）；而 `service/favorite/rpc/etc/favorite.yaml` **没有配顶层 `Mode`** ⇒ 取默认值 **`"pro"`** ⇒ **分支不成立** ⇒ **真源生产形态不注册 reflection** |
+| **RAG 侧（修前）** | devh `GrpcServerProperties.reflectionServiceEnabled` **默认 `true`**；且 `GrpcReflectionServiceAutoConfiguration` 上是 `@ConditionalOnProperty(prefix="grpc.server", name="reflection-service-enabled", matchIfMissing=true)` ⇒ **不写这一行 = 开着** |
+| **后果** | RAG 侧 `grpcurl -plaintext <host>:8082 list` 能列出**全部**方法并下载 proto 描述符；Go 侧同一命令连不上 |
+| **修法** | `grpc.server.reflection-service-enabled: false`（与 `user-rpc` / `admin-rpc` / `message-rpc` / `hot-rpc` **同款显式关闭**） |
+| **归类** | ✅ **可修漂移**（真源更严、RAG 更松）⇒ **本域已修** ⇒ **不进** `docs/Intentional_Deviations/` |
+
+🔴 **推广面（跨域 ⇒ 本域只登记，收口在 `global`）** ——
+其余 **5 个** rpc 模块**同样漏配**（本轮逐个核对过 Go 侧前提，**不是猜的**）：
+
+| 模块 | RAG 侧 | Go 侧判据（已逐个核对） |
+|---|---|---|
+| `article-rpc` | ❌ 未配 | `service/article/rpc/article.go:47-48` 同一道 `Mode` 门；`etc/article.yaml` / `article.compose.yaml` **无顶层 `Mode`** ⇒ `pro` |
+| `comment-rpc` | ❌ 未配 | `service/comment/rpc/comment.go:50-51`；`etc/comment.yaml` 无顶层 `Mode` ⇒ `pro` |
+| `follow-rpc` | ❌ 未配 | `service/follow/rpc/follow.go:40-41`；`etc/follow.yaml` 无顶层 `Mode` ⇒ `pro` |
+| `like-rpc` | ❌ 未配 | `service/like/rpc/like.go:37-38`；`etc/like.yaml` 无顶层 `Mode` ⇒ `pro` |
+| `task-rpc` | ❌ 未配 | `service/task/rpc/task.go:40-41`；`etc/task.yaml` 无顶层 `Mode` ⇒ `pro` |
+
+⇒ 已配的 5 个（修后）：`favorite-rpc`（本轮）· `user-rpc` · `admin-rpc` · `message-rpc` · `hot-rpc`
+⇒ ⇒ **本域不碰别域文件**（AGENTS.md §5.3c）⇒ 收口在 `global`。
+
+### 26.5 🔴🔴 **翻案：第十四轮 §22.3 的「启动阻塞 #1 已修」是半修**
+
+| 原判（§22.3，第十四轮 `e76ea8e`） | 本轮实测 |
+|---|---|
+| 「启动加 `--spring.main.web-application-type=none`（对齐 Go 的『纯 gRPC、零 HTTP 端口』）」<br>落点写的是：「`pom.xml` 的依赖说明 + **探针启动参数**」 | 🔴 **那条参数只出现在 `tools/api-full-parity-probe/favorite/run.sh` 的 java 命令行里** ⇒ **`src/main/resources/application.yml` 里一行都没有** ⇒ **产物原封不动** |
+
+⇒ 第十四轮的**现象观察是对的**（当时确实撞到了这条报错），
+但**修法落在观测手段上，而不是被测物上** ⇒
+⇒ **探针绿、测试绿、`mvn package` 成功，而真 fat jar 用生产 yaml 原样启动照样死。**
+
+⚠️ **同一条修法在 §22.3 的 #2（`grpc-inprocess` scope）上是真修**（改了 pom）⇒
+⇒ **两个「启动阻塞」里有一个是半修**，而台账把两条一起写成「**已修**」⇒ **台账也一起是错的**。
+
+⇒ 元教训 ⇒ [`docs/Pitfalls/favorite/rpc.md`](../../Pitfalls/favorite/rpc.md) **PIT-FAV-RPC-026**：
+> **凡是靠「启动参数 / 环境变量 / `@SpringBootTest(properties=...)`」绕过去的缺陷，
+> 都必须回到被绕过的那份配置里修掉，并且让探针**不再传**那个参数。**
+> ⇒ **改了被测物**才算修；**只改了观测手段**不算。
+
+⚠️ **处置已落地（不只是记一条）**：
+`tools/api-full-parity-probe/favorite/run.sh` 里那行 `--spring.main.web-application-type=none`
+**已摘掉**（并把原来的注释改写成「**故意不再传**」+ 为什么）。
+⇒ 后果：**一旦有人把生产 yaml 里那一行删掉，这个探针会直接红**（进程起不来）⇒ 守门网成立。
+⇒ 这也意味着 §22.3 那条修法**在探针侧同步失效了** —— 探针不再替 yaml 兜底。
+
+### 26.6 守门网：**3 个测试类 / 14 例**（全部读**生产文件**，不走 `@SpringBootTest` 覆盖）
+
+| 测试类 | 例数 | 挡什么 |
+|---|---|---|
+| `FavoriteRpcProductionAddressTest` | **8** | 生产 yaml 的**全部** `grpc.client.*.address` 必须是三斜杠；**真调** devh 的 `newNameResolver`（生产不抛 + 两斜杠**必须**抛）；client 集合 == 守门清单（新增 client 漏守门立刻红）；`target/classes` 与源码树一致 |
+| `FavoriteRpcProductionStartupTest` | **2** | 生产 yaml 必须显式声明 `spring.main.web-application-type: none`；`target/classes` 与源码树一致 |
+| `FavoriteRpcReflectionExposureTest` | **4** | 生产 yaml 必须显式 `grpc.server.reflection-service-enabled: false`；devh **默认值是 `true`**（⇒ 那行是承重的）；那个键**真能绑到** devh 的配置对象上（键名写错 ⇒ 绑完仍 `true` ⇒ 转红）；`target/classes` 与源码树一致 |
+
+⇒ 三者都**不经过任何 `@SpringBootTest(properties=...)` 覆盖** ⇒ **生产配置第一次被真正跑过**。
+
+**变异验证（4 条 ⇒ 守门网不是假绿）**：
+
+| # | 注入 | 期望 | 实测 |
+|---|---|---|---|
+| **M1** | 生产 yaml 两处改回**两斜杠** | `FavoriteRpcProductionAddressTest` 转红 | ✅ **8 例 → 6 红**（报的是 `Incorrectly formatted target uri`） |
+| **M2** | 生产 yaml 删掉 `web-application-type: none` | `FavoriteRpcProductionStartupTest` 转红 | ✅ **2 例 → 2 红** |
+| **M3** | 生产 yaml `reflection-service-enabled` 改 `true` | `FavoriteRpcReflectionExposureTest` 转红 | ✅ **4 例 → 1 红** |
+| **M4** | 生产 yaml **整行删掉** `reflection-service-enabled` | `FavoriteRpcReflectionExposureTest` 转红 | ✅ **4 例 → 2 红** |
+
+### 26.7 新探针：`tools/prod-startup-probe/favorite/` —— **A/B/C** 三 case 活体对拍
+
+> **它验的是哪一层**：「**生产配置原样**能不能真起得来」 ——
+> 这是 `@SpringBootTest` **永远证明不了**的一层（§26.5 的半修就藏在这一层的缝里）。
+
+| case | 参数 | 期望 | 实测 |
+|---|---|---|---|
+| **A** | `--grpc.client.{user,article}-rpc.address=discovery://<name>`（**按字节复现修前值**） | 🔴 启动即炸（`Incorrectly formatted target uri`） | ✅ 炸，栈顶 `DiscoveryClientResolverFactory.newNameResolver(...:82)` |
+| **B** | **不传任何 `--grpc.client.*` 覆盖** | ✅ **真起来** | ✅ `gRPC Server started, listening on address: 0.0.0.0, port: 21300` + `Started FavoriteRpcApplication in 4.373 seconds` + `lsof` 核对端口 LISTEN |
+| **C** | `--spring.main.web-application-type=servlet`（复现「**没有那一行**」的效果） | 🔴 启动即炸（`no ... ServletWebServerFactory bean defined`） | ✅ 炸，报错逐字命中 |
+
+⇒ **三个 case 跑的是同一个 jar**，唯一变量是**那一个参数** ⇒ 差异**只能**来自该参数。
+⇒ **只覆盖「环境相关」的三项**（PG 连接 / Nacos 地址 / gRPC 监听端口）——
+Nacos 故意指向 `127.0.0.1:1` ⇒ 顺便证明「**注册中心不在也能起来**」。
+⇒ 退出码：`0` = A 炸(uri) 且 C 炸(servlet) 且 B 起来。
+
+⚠️ **本探针不证明什么**：下游 `user-rpc` / `article-rpc` 连不上（它们**根本不存在**）；
+「下游在场」那条分支由 [`tools/grpc-contract-probe/favorite/`](../../../../tools/grpc-contract-probe/favorite/) 第二轮负责（§25）。
+⚠️ 也不覆盖 Go 那个 **16062 的 DevServer 面** ⇒ 见 **U9**。
+
+### 26.8 🔴 **U9**（新登记 · 待拍板）：Go 生产形态有 **16062** 那个 HTTP 面，RAG 侧没有
+
+| | 事实（**完整锚点链**，本轮逐环核过） |
+|---|---|
+| **Go 配置** | `service/favorite/rpc/etc/favorite.yaml:23-30`：`DevServer: Enabled: true / Host: 0.0.0.0 / Port: 16062 / MetricsPath: /metrics / HealthPath: /healthz / EnableMetrics: true / EnablePprof: true` |
+| **Go 启动路径** | `zrpc/server.go:63` → `c.SetUp()` ⇒ `core/service/serviceconf.go:77` → `devserver.StartAgent(sc.DevServer)` ⇒ `internal/devserver/server.go:79-82` 的 `if !c.Enabled { return }` |
+| **🔴 关键一环** | **唯一的门控是 `Enabled`，不是 `Mode`** ⇒ 且 `Mode` 省略时取默认 **`pro`**（`core/service/serviceconf.go:35` 的 `json:",default=pro,..."`；`etc/favorite.yaml` 无顶层 `Mode`）⇒ ⇒ **生产形态也开着** |
+| **RAG 侧现状** | `spring.main.web-application-type: none` ⇒ **纯 gRPC 进程** ⇒ **没有** 16062 那个面 |
+| **性质** | **部署形态类偏离**（不是语义漂移）—— 那个面是 go-zero **自带**的 HTTP server，**不依赖 servlet 容器** ⇒ RAG 侧若要补，得**另加一个容器**（tomcat/jetty）⇒ **部署形态变更** |
+
+⇒ **待拍板**（两条路）：
+1. **RAG 侧也开** ⇒ 需引 servlet 容器 ⇒ **部署形态变更**；
+2. **接受并签字** ⇒ 把「纯 gRPC、零 HTTP 面」登记为**有意偏离**。
+
+⚠️ 本轮**不替用户选** ⇒ 归 **U9**，**不与 26.2/26.3 混谈**（那两条只解决「**能起来**」）。
+
+### 26.9 本轮验证（全部实测）
+
+| 项 | 结果 |
+|---|---|
+| **本域全量测试** | ✅ **BUILD SUCCESS** —— `mvn -o -pl service/favorite/favorite-{proto,common,rpc,api} -am test -Dsurefire.failIfNoSpecifiedTests=false`：<br>favorite-rpc **17 个测试类 / 99 例**（含 2 skip，**+3 类 / +14 例** = 本轮三个守门类）· favorite-api **8 类 / 94 例**（含 1 skip）· favorite-common **4 类 / 29 例** ⇒ **全绿，0 失败 0 错误** |
+| **生产启动探针（新建）** | ✅ `bash tools/prod-startup-probe/favorite/run.sh` ⇒ **EXIT=0**（A 炸(uri) · C 炸(servlet) · B 起来 + 端口 LISTEN） |
+| **变异验证** | ✅ **4 条**（M1/M2/M3/M4）⇒ 全部按预期转红 ⇒ **守门网不是假绿** |
+| **gRPC 契约探针（两轮）** | ✅ `bash tools/grpc-contract-probe/favorite/run.sh` ⇒ **EXIT=0**（第一轮 36 case；第二轮 15 case 全 SAME） |
+| **api 整域探针** | ✅ `bash tools/api-full-parity-probe/favorite/run.sh` ⇒ **EXIT=0** |
+| **台账 vs 实际** | ✅ `tools/ledger-lint/favorite/check-ledger-vs-reality.py` ⇒ **EXIT=0** |
+| **台账自检** | ✅ `tools/ledger-lint/favorite/check-ledger-selfcheck.py` ⇒ **EXIT=0** |
+| **注释锚点审计** | ✅ `tools/assertion-audit/favorite/check-assertion-sources.py` ⇒ **EXIT=0** |
+| **共享面** | ✅ **零改动**（`docs/DRIFT/_INDEX.md` / `_MANIFEST.json` / `docs/Intentional_Deviations/_INDEX.md` / `docs/Pitfalls/_INDEX.md` / `AGENTS.md` / `docs/DRIFT/_cross/` / `docs/DRIFT/global/` / `service/common/**` 一律不碰） |

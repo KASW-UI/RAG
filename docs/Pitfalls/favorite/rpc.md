@@ -1089,3 +1089,76 @@ GO_PORT="$(pick_free_port ${USED_PORTS[@]+"${USED_PORTS[@]}"}")"
 
 ⚠️ 顺带提醒：`bash -n` 是**免费的语法门禁** —— 改完 shell 脚本先 `bash -n` 一遍，
 比跑一遍探针（几分钟）便宜两个数量级。
+
+## PIT-FAV-RPC-026 · 🔴🔴 **「探针里用 CLI 参数绕过」≠「产物里修好了」**（半修 ⇒ 缺陷活到了发布那一刻）
+
+### 现象
+
+🔴 **第十七轮（2026-10-26）** 做「生产启动形态」活体对拍时，发现
+**第十四轮记为「已修」的启动阻塞 #1，在生产产物里根本没修**：
+
+```
+第十四轮（commit e76ea8e）记的修法：
+  「启动加 --spring.main.web-application-type=none（对齐 Go 的『纯 gRPC、零 HTTP 端口』）」
+  落点写的是：「favorite-rpc/pom.xml 的依赖说明 + **探针启动参数**」
+
+⇒ 也就是说：那条 `--spring.main.web-application-type=none` 只出现在
+  tools/api-full-parity-probe/favorite/run.sh 的 java 命令行里，
+  **src/main/resources/application.yml 里一行都没有**。
+
+⇒ 后果：**探针绿、测试绿、jar 打得出来，但真 fat jar 用生产 yaml 原样启动 ⇒ 照样死**：
+    APPLICATION FAILED TO START
+    Description:
+      Web application could not be started as there was no
+      org.springframework.boot.web.server.servlet.ServletWebServerFactory bean defined in the context.
+```
+
+### 为什么难查
+
+🔴 **症状在部署那一刻，证据在探针里，而探针是绿的**：
+
+| 证据 | 说的什么 | 真的说明了什么 |
+|---|---|---|
+| 探针 `EXIT=0` | 「服务起得来」 | 「**加了绕过参数**之后起得来」 |
+| 85 个测试全绿 | 「行为对」 | 「**测试上下文**里行为对」 |
+| `mvn package` 成功 | 「产物在」 | 「产物在，**不代表它能起**」 |
+
+⇒ 三份证据**都**指向「已修」，而**没有一份**问过：
+> **「这个 jar，不加任何额外参数，用它自己打包进去的那份 yaml，能起吗？」**
+
+⚠️ 更狠的一层：**绕过参数把缺陷变成了「探针的一部分」** ——
+后来的人读 `run.sh` 只会看到「这里传了个参数」，**不会意识到它在替 yaml 兜底**。
+⇒ 绕过参数**伪装成了配置**。
+
+### 怎么不再踩
+
+⇒ **判据**：
+> **凡是靠「启动参数 / 环境变量 / `@SpringBootTest(properties=...)`」绕过去的缺陷，
+> 都必须回到被绕过的那份配置里修掉，并且让探针**不再传**那个参数。**
+> ⇒ 否则探针是在**测一个修好的世界**，而不是**测你交付的那个世界**。
+
+⇒ 本域落地（第十七轮）：
+
+1. **修 yaml**：`service/favorite/favorite-rpc/src/main/resources/application.yml`
+   加 `spring.main.web-application-type: none`（+ 判据注释）；
+2. 🔴 **摘掉探针里的兜底参数**：`tools/api-full-parity-probe/favorite/run.sh` 里那行
+   `--spring.main.web-application-type=none` **已删除**（注释改成「**故意不再传**」+ 为什么）
+   ⇒ **一旦有人把生产 yaml 里那一行删掉，这个探针会直接红** ⇒ 守门网成立
+   ⇒ ⚠️ 顺带说明：**这条参数就是「半修」的本体** —— 它在探针里待了整个第十四轮，
+   **看起来像配置**，实际是**替 yaml 兜底** ⇒ 读脚本的人不会想到它在遮什么；
+3. **新探针** `tools/prod-startup-probe/favorite/run.sh`：
+   - **B case 不传任何 `--grpc.client.*` 覆盖** ⇒ client 地址就是生产值；
+   - **只**覆盖「环境相关」的三项：PG 连接 / Nacos 地址 / gRPC 监听端口；
+   - **C case** 反过来把 `web-application-type` 覆盖成 `servlet` ⇒ 必须炸
+     ⇒ 证明那一行是**承重**的；
+4. **守门测试** `FavoriteRpcProductionStartupTest` 直接读**生产 yaml**
+   （不经过任何 `@SpringBootTest` 覆盖）⇒ 少了那一行立刻红。
+
+⚠️ **同一个坑在本域还有第二例**（同源）：
+第十四轮的启动阻塞 #2（`grpc-inprocess` 被声明成 test scope）
+**是真修**（改了 pom 的 scope）⇒ 但 #1 走了 CLI 绕过 ⇒
+**两个「启动阻塞」里有一个是半修** ⇒ 台账 §22.3 把两条一起写成「**已修**」⇒ **台账也一起是错的**。
+
+⇒ 元教训：
+> **台账上写「已修」时，要能指出「修在哪一层」**：
+> **改了被测物**（配置 / 代码 / 依赖）才算修；**只改了观测手段**（探针参数）**不算**。

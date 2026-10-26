@@ -358,19 +358,22 @@ say "启动 RAG favorite-rpc / favorite-api"
 #     ⇒ api 直接 --spring.cloud.nacos.discovery.enabled=false（gRPC 走 static:// 直连）
 #
 # ⚠️ user-rpc / article-rpc 指向**死地址** ⇒ 走「下游不可用」这条契约分支（与 Go 侧同款）。
-# ⚠️ --spring.main.web-application-type=none：**必须**显式写。
-#    favorite-rpc 的 pom 只有 spring-boot-web-server + jakarta.servlet-api，
-#    **没有** spring-boot-starter-web（无内嵌 Tomcat）⇒ Boot 默认按 SERVLET 起
-#    ⇒ 找不到 ServletWebServerFactory ⇒ **进程起不来**：
-#      「Web application could not be started as there was no
-#       org.springframework.boot.web.server.servlet.ServletWebServerFactory bean defined」
-#    ⚠️ 这个坑一直被 `@SpringBootTest(webEnvironment = NONE)` 掩盖着
-#       （测试上下文强制 NONE ⇒ 永远走不到这条分支）
-#       ⇒ 与 Go 侧「纯 gRPC、零 HTTP 端口」的形态对齐（见 DEV-FAV-RPC-004）。
+#
+# 🔴 2026-10-26（第十七轮）：**这个探针原先在这里传 `--spring.main.web-application-type=none`**，
+#    而**生产 yaml 里当时并没有那一行** ⇒ 那条参数**一直在替 yaml 兜底** ⇒
+#    缺陷（Boot 按 SERVLET 起而没有 servlet 容器 ⇒ 进程起不来）在**产物里原封不动**，
+#    而探针是绿的 ⇒ 台账第十四轮把它记成了「已修」⇒ 那是**半修**。
+#    ⇒ 本轮已把那一行补进 favorite-rpc 的**生产 application.yml**
+#      （`spring.main.web-application-type: none`），并**摘掉了这里的参数**
+#      ⇒ 探针从此**不再遮蔽**这条回归。
+#    ⇒ 元教训 ⇒ docs/Pitfalls/favorite/rpc.md **PIT-FAV-RPC-026**。
+#    ⇒ 独立的行为级证据 ⇒ tools/prod-startup-probe/favorite/（A/B/C 三 case）。
+#
+# ⇒ 下面这行**故意不再传** `--spring.main.web-application-type`：
+#    那样一旦有人把生产 yaml 里那一行删掉，**这个探针会直接红**（进程起不来）⇒ 守门网成立。
 env POSTGRES_HOST=127.0.0.1 POSTGRES_PORT="${PG_PORT}" POSTGRES_USER=postgres \
     POSTGRES_PASSWORD=probe POSTGRES_DB=first_db \
   java -jar "${RAG_RPC_JAR}" \
-    --spring.main.web-application-type=none \
     --grpc.server.port="${RAG_RPC_PORT}" \
     --spring.cloud.nacos.discovery.server-addr=127.0.0.1:1 \
     --management.otlp.tracing.export.enabled=false \
