@@ -216,7 +216,7 @@
 | 项 | 出处 |
 |---|---|
 | 只读 API（`remainingMillis()`）⇒ **毫秒粒度** | `service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java` |
-| `applyTo` **没有「上界」概念** ⇒ **表达不了 `min(上限, 剩余)`** | `service/common/src/main/java/com/rag/common/observability/LikeRpcClient.java:108-121` |
+| `applyTo` **没有「上界」概念** ⇒ **表达不了 `min(上限, 剩余)`** | `service/like/like-api/src/main/java/com/rag/like/like/api/client/LikeRpcClient.java:108-121` |
 
 ### 10.3 📌 **补丁文本（交整合者 · 逐字替换）**
 
@@ -298,7 +298,7 @@
 | ② | **`docs/Intentional_Deviations/_INDEX.md` 同步** —— 计数表要加：**CAND 族 10 → 14 条**（新增 `CAND-14/15/16/17`）· **未签字候选合计 14 → 18 条**<br>⇒ 并在「已有内容」表加一行：`global/users-domain.md`（**2 条**）+ `global/common-tails.md`（**+2 条**）<br>⇒ ⚠️ 计数口径：**已签字 49 条不变**（本轮**零条**转正） | **三个 `_INDEX.md` 之一** ⇒ 协议 §二.3 |
 | ③ | **`docs/Intentional_Deviations/global/users-domain.md` 的归属裁决** —— 本档是 **global 代收**的临时落点（users 域档 `docs/Intentional_Deviations/users/_shared.md` 当前 **0 字节**，且**不在本 lane 白名单内**）⇒ **建议整合者把两条 fold 进 `users/_shared.md` 后删除本档**（§5.3b 硬边界 2：一条问题只在一个档落笔） | **目标文件不在白名单内** |
 | ④ | **`docs/Pitfalls/_INDEX.md` 同步** —— 新增 **PIT-GLOBAL-022**（抄来的先例指针也要复核）· **PIT-GLOBAL-023**（「出口层级」的结论要落到注册点） | **共享索引** |
-| ⑤ | **`docs/DRIFT/global/_INDEX.md` / `_MANIFEST.json`** 同步（新增 `docs/Intentional_Deviations/global/users-domain.md`） | **共享索引 / 清单** |
+| ⑤ | **`docs/DRIFT/_INDEX.md` / `_MANIFEST.json`** 同步（当时拟新增 `docs/Intentional_Deviations/global/users-domain.md` ⇒ **该临时档已于整合时迁回 `docs/Intentional_Deviations/users/_shared.md` 并删除** ⇒ 此处只同步索引与清单） | **共享索引 / 清单** |
 | ⑥ | **`AGENTS.md` §0 `global` 行** 更新（`global` 域的签字候选数 + 「C 类登记已补齐」） | **`AGENTS.md` 是共享文件** |
 | ⑦ | **`align/global-signoff` → `align/global` 的合并** | 由 Jason / 整合者决定时机 |
 

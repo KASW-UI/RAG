@@ -300,7 +300,7 @@ FILE: TEST-com.rag.comment.comment.rpc.CommentRpcSlowThresholdGateTest.xml
 |---|---|---|
 | ① | **`LikeRpcApplication.java:117-119` 的注释订正**（类名 `LikeGrpcInterceptorWiringTest` ⇒ `LikeRpcGrpcInterceptorWiringTest`；「目前没有」⇒「已有，2026-10-26 · global L7 lane」） | `service/*/src/main/**` ⇒ **生产代码零改动**（§四·1） |
 | ② | **`CommentFactDispatchScheduler` 无 `@EnableScheduling` ⇒ 定时方法不跑**（§九·③）是否属缺陷的**定性** | 超出本 lane 任务书范围（X-5 / slow 两轴）⇒ 需**单开一条 lane** 或交 `align/like` / `align/comment` |
-| ③ | **共享索引同步**（`docs/DRIFT/global/_INDEX.md` / `_MANIFEST.json` / `docs/Pitfalls/_INDEX.md`）—— 本 lane **未新增**共享文件 ⇒ **无需同步**（除整合者把本 lane 片段 fold 进规范台账） | 协议 §五·3：共享索引由整合者统一更新 |
+| ③ | **共享索引同步**（`docs/DRIFT/_INDEX.md` / `_MANIFEST.json` / `docs/Pitfalls/_INDEX.md`）—— 本 lane **未新增**共享文件 ⇒ **无需同步**（除整合者把本 lane 片段 fold 进规范台账） | 协议 §五·3：共享索引由整合者统一更新 |
 | ④ | **`align/global-slowgate` ⇒ `align/global` 的合并** | 由 Jason / 整合者决定时机（**本 lane 不 push、不 merge**） |
 
 ## 十二、变更记录

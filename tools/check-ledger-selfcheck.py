@@ -201,7 +201,177 @@ def repo_java_files(root, domain_dir):
     return out
 
 
-def layer1_paths(root, texts):
+def _repo_files(root):
+    """列出仓内**已跟踪 + 未跟踪**的文件（工作区视角，与第 5/6 层一致）。"""
+    tracked = git(root, 'ls-files').splitlines()
+    untracked = git(root, 'ls-files', '--others', '--exclude-standard').splitlines()
+    seen, out = set(), []
+    for f in tracked + untracked:
+        if f not in seen:
+            seen.add(f)
+            out.append(f)
+    return out
+
+
+def _go_service_files(go_root):
+    """列出 **Go 真源仓** `service/` 下的相对路径（用于识别「Go 侧路径引用」）。"""
+    out = set()
+    base = os.path.join(go_root, 'service')
+    if not os.path.isdir(base):
+        return out
+    for dp, _, fns in os.walk(base):
+        for fn in fns:
+            out.add(os.path.relpath(os.path.join(dp, fn), go_root))
+    return out
+
+
+def _mk_index(repo_files, go_files=()):
+    """建「路径可解析性」索引。
+
+    - `repo_files` : 本仓（已跟踪 + 未跟踪）文件
+    - `go_files`   : **Go 真源仓**里 `service/` 下的相对路径
+    - `top_dirs`   : 本仓 `service/` 下的**顶层目录**（`service/<X>/`）
+    """
+    top_dirs = set()
+    for f in repo_files:
+        segs = f.split('/')
+        if segs[0] == 'service' and len(segs) >= 2:
+            top_dirs.add(segs[1])
+    return {'repo_files': list(repo_files), 'go_files': set(go_files), 'top_dirs': top_dirs}
+
+
+# N13 · 台账里**对该文件的状态叙述**（已删除 / 不存在 / 0 字节占位 …）
+#     ⇒ 这类引用是**历史记述**，不是「指向一个缺失文件的悬空引用」
+N13_NARRATION = re.compile(
+    r'(删除|已删除|不存在|已移除|被删|不再存在|不建|未建|不创建|0\s*字节|错放|空文件|占位)')
+
+
+def _narration_in_lines(lines, ln, window=2):
+    """引用所在行**及邻行**（±window）里有没有「该文件的状态叙述」。
+
+    ⚠️ **为什么要邻行而不是同行**：台账常把叙述放在**上一行**再列路径，例如
+        `docs/DRIFT/_cross/human-only-status.md:16-18` ——
+        第 16 行写「以下 3 条**被登记为已存在、实际不存在**」，
+        第 17~18 行才列三个 `HUMAN_ONLY.MD` 路径 ⇒ 只看同行会漏判。
+
+    返回 (是否命中, 命中的行号（1-based）)。
+    """
+    if not lines:
+        return False, 0
+    for i in range(max(0, ln - window), min(len(lines), ln + window + 1)):
+        if N13_NARRATION.search(lines[i]):
+            return True, i + 1
+    return False, 0
+
+
+def _has_contiguous_subseq(hay, needle):
+    """`hay` 的段序列里是否**连续相邻**地包含 `needle` 段序列。"""
+    n = len(needle)
+    if n == 0:
+        return True
+    for i in range(len(hay) - n + 1):
+        if hay[i:i + n] == needle:
+            return True
+    return False
+
+
+def _is_simplified_path(p, idx):
+    """判断一条「仓内路径引用」是不是**台账里的简写** ⇒ 不该判 MISSING。
+
+    ⚠️ **第 1 层此前完全没有去噪**（其它层有 255+ 条去噪）
+    ⇒ 而台账里大量用**省略写法**指代文件 ⇒ 全被误判成「引用了不存在的文件」
+    ⇒ ⇒ 工具的信号被噪声淹没（users-user 域实测：60 处「不一致」里 59 处是这类）。
+
+    返回 **(是否去噪, 规则编号, 原因)**；不去噪则 (False, '', '')。
+    ⇒ **必须带规则编号** —— 否则两条规则**互相掩护**时，去掉其中一条**抓不到**
+      （本轮实测：N9 被 N12 掩护 ⇒ 「抽掉 N9」这个变异首跑是绿的 ⇒ 变异无效）。
+
+    **N8 · 省略写法** —— 路径里含 `...`（省略中间目录）：
+        `service/common/.../spring/HttpMiddlewareFilter.java`
+        `service/users/user/user-api/.../config/WebMvcConfig.java`
+      ⇒ 台账故意省略中间层级（读者按前缀也能定位）⇒ 不是精确路径引用
+      ⇒ ⚠️ `PATH_RE` 的字符类 `[A-Za-z0-9_./-]` **含 `.`** ⇒ `...` 会被完整匹配出来
+        ⇒ 不去噪就必然判 MISSING。
+
+    **N9 · 裸文件名** —— 只有 `service/<Name>.java` 两段（没有模块目录）：
+        `service/UserRegisterService.java`
+        `service/UserLoginService.java`
+      ⇒ 台账只写了「域根目录 + 文件名」⇒ 不是精确路径引用
+      ⇒ ⚠️ **只针对 `service/`**：真实路径至少是 `service/<域>/<模块>/…`
+        ⇒ 而 `docs/xxx.md` / `tools/x/y.sh` 的两段式是**真实路径** ⇒ 不去噪。
+
+    **N10 · 短路径** —— 省略了 `src/main/java/com/rag/<pkg>/` 之类中间前缀：
+        `service/common/observability/RpcInterceptor.java`
+          → 真实 `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`
+        `service/article/article-rpc/application.yml`
+          → 真实 `service/article/article-rpc/src/main/resources/application.yml`
+      ⇒ 判定方式**不看形状、只问「能不能落到某个真实文件上」**：
+        ① 取 p 的**中段**（第 3 段起、到倒数第 2 段止；两段式为空）；
+        ② 在仓内找**basename 相同**、且路径段序列**连续相邻**包含该中段的文件；
+        ③ 命中 ⇒ 判定为简写（并打印命中的真实文件，供人工复核）。
+      ⇒ **中段过滤是关键**：没有它，`service/users/users-common/HUMAN_ONLY.MD`
+        会因「仓内另有 4 份 HUMAN_ONLY.MD」而被误去噪 —— 而那 4 份**都不在
+        users-common 下** ⇒ 该文件**确实不存在** ⇒ 是真实悬空引用，必须报出来 ✓
+
+    **N11 · Go 侧路径** —— 该路径在 **Go 真源仓**里存在：
+        `service/comment/rpc/internal/model/test-community-postgres.sh`
+      ⇒ 这是**引用 Go 真源**（Go 的目录布局是 `service/<域>/rpc/internal/…`，
+        RAG 是 `service/<域>/<模块>/src/main/java/…` ⇒ 两者不撞）
+      ⇒ ⇒ 它**本来就不该**在本仓存在 ⇒ 不该判 MISSING。
+
+    **N12 · 顶层目录不在本仓** —— `service/<X>/` 这个**顶层目录在本仓压根不存在**：
+        `service/demo/demo-rpc/pom.xml`（`service/demo/` **从未进过版本库**，
+        那是 L15 lane 的**合成 fixture** `/tmp/l15-fixture` 里的假模块）
+      ⇒ **逻辑上它不可能是本仓任何形态的路径**（短路径 / 省略写法的顶层目录必须存在）
+      ⇒ ⇒ 它指向**仓外**（合成 fixture / 外部仓 / 历史快照）⇒ 不该判 MISSING。
+
+    ⚠️ **本规则不许把「真实缺失」也吃掉**（反例均已进第 0 层自检作阴性对照）：
+        ① `tools/difftest/check-protection-layer.sh` —— 脚本**在仓库历史里从未存在过**
+           ⇒ 非 `service/` 前缀 ⇒ 不匹配任何规则 ⇒ 仍然报 MISSING ✓
+        ② `docs/DRIFT/global/_INDEX.md` —— 真实路径是 `docs/DRIFT/_INDEX.md`
+           ⇒ 非 `service/` 前缀 ⇒ 仍报 MISSING ✓（这是台账写错目录，不是简写）
+        ③ `service/users/users-common/HUMAN_ONLY.MD` —— 中段 `users-common`
+           在任何 HUMAN_ONLY.MD 的路径里都**不出现** ⇒ 仍报 MISSING ✓
+        ④ `service/common/src/main/java/com/rag/common/observability/LikeRpcClient.java`
+           —— basename 相同的那份在 **like 域**，中段含 `observability` ⇒ 对不上
+           ⇒ 仍报 MISSING ✓（真·跨域错引）
+    """
+    if '...' in p:
+        return True, 'N8', 'N8 省略写法（`...` 省略中间目录），非精确路径引用'
+    if p.startswith('service/') and p.count('/') == 1 and p.endswith('.java'):
+        return True, 'N9', 'N9 裸文件名（只写了域根目录 + 文件名），非精确路径引用'
+
+    # N11 · Go 侧路径（存在性以 **Go 真源仓** 为准）
+    if p in idx['go_files']:
+        return True, 'N11', 'N11 Go 侧路径（在 Go 真源仓存在 ⇒ 本仓本就不该有）'
+
+    # N12 · 顶层目录不在本仓 ⇒ 必是仓外引用
+    if p.startswith('service/'):
+        segs = p.split('/')
+        if len(segs) >= 2 and segs[1] not in idx['top_dirs']:
+            return True, 'N12', (f'N12 仓外引用（本仓无 `service/{segs[1]}/` 这个顶层目录 ⇒ '
+                                 f'不可能是本仓任何形态的路径）')
+
+    # N10 · 短路径（只在 `service/` 下；`docs/` 与 `tools/` 的两段/三段式一律**不**去噪）
+    if p.startswith('service/') and p.count('/') >= 2:
+        segs = p.split('/')
+        middle = segs[2:-1]
+        base = segs[-1]
+        hits = []
+        for f in idx['repo_files']:
+            if os.path.basename(f) != base:
+                continue
+            if _has_contiguous_subseq(f.split('/'), middle):
+                hits.append(f)
+        if hits:
+            shown = ', '.join(sorted(hits)[:3])
+            more = f' 等 {len(hits)} 处' if len(hits) > 3 else ''
+            return True, 'N10', f'N10 短路径（省略中间层级）⇒ 落到 {shown}{more}'
+
+    return False, '', ''
+
+
+def layer1_paths(root, texts, go_root=DEFAULT_GO_ROOT):
     print('=' * 78)
     print('第 1 层 · 台账引用的仓库内路径是否存在')
     print('=' * 78)
@@ -209,9 +379,40 @@ def layer1_paths(root, texts):
     for f, t in texts.items():
         for m in PATH_RE.finditer(t):
             refs.setdefault(m.group(0), set()).add(f)
-    missing = [(p, sorted(srcs)) for p, srcs in refs.items()
-               if not os.path.exists(os.path.join(root, p))]
+    # 记下每个引用的**所在行**（N13 需要「邻行叙述」）
+    hits = {}
+    for f, t in texts.items():
+        for m in PATH_RE.finditer(t):
+            hits.setdefault(m.group(0), []).append((f, t.count('\n', 0, m.start())))
+    idx = _mk_index(_repo_files(root), _go_service_files(go_root))
+    missing, denoised = [], []
+    for p, srcs in refs.items():
+        if os.path.exists(os.path.join(root, p)):
+            continue
+        is_simple, _rule, why = _is_simplified_path(p, idx)
+        if not is_simple:
+            # N13 · 台账里对**该文件的状态叙述**（已删除 / 不存在 / 0 字节占位 …）
+            #      ⇒ 历史记述，不是悬空引用
+            narr_src, narr_line = '', 0
+            for sf, ln in hits.get(p, []):
+                lines = read(os.path.join(root, sf)).splitlines()
+                ok, at = _narration_in_lines(lines, ln)
+                if ok:
+                    narr_src, narr_line = sf, at
+                    break
+            if narr_src:
+                is_simple = True
+                why = (f'N13 历史记述（同行/邻行有「状态叙述」⇒ 已记录该文件的状态：'
+                       f'{narr_src}:{narr_line}）')
+        if is_simple:
+            denoised.append((p, sorted(srcs), why))
+        else:
+            missing.append((p, sorted(srcs)))
     print(f'  台账引用路径 {len(refs)} 个 ⇒ 缺失 {len(missing)} 个')
+    if denoised:
+        print(f'  🔇 已去噪（不计 FAIL）: {len(denoised)} 条')
+        for p, srcs, why in denoised:
+            print(f'     · {p}   ({why})')
     for p, srcs in missing:
         print(f'    ❌ MISSING  {p}   ← {", ".join(srcs)}')
     if not missing:
@@ -497,6 +698,22 @@ def layer3_numbers(root, texts):
     return bad
 
 
+def _source_context(root, srcs):
+    """拼接台账**来源文件**的上下文（供第 4 层的 N5/N7 去噪判据用）。
+
+    ⚠️ **必须按 `sorted(srcs)` 拼接** —— `srcs` 是 **set**，
+    Python 的字符串 hash **每进程随机化** ⇒ 同一组元素的 set 迭代顺序
+    **每次运行都不同** ⇒ 拼出的上下文顺序不同 ⇒ 正则命中与否不同
+    ⇒ **同一条 file:line 引用的分类每次都可能变**（实测：层 4 三个计数
+    连跑 3 次分别是 (20,105,3)/(13,112,2)/(14,111,1)）。
+    ⇒ 门禁工具的输出必须**可复现**，否则「红」无法被复现、「绿」无法被信任。
+    """
+    out = ''
+    for sf in sorted(srcs):
+        out += read(os.path.join(root, sf))[:2000]
+    return out
+
+
 def layer4_golines(root, texts, go_root):
     print('=' * 78)
     print('第 4 层 · Go 侧 file:line 出处是否悬空')
@@ -526,12 +743,16 @@ def layer4_golines(root, texts, go_root):
     ok, problems, ambiguous, noises = 0, [], [], []
     for (path, s, e), srcs in sorted(refs.items()):
         # ── 先过去噪规则（N1/N5/N6/N7）：已知噪声不计 FAIL
-        src_text = ''
-        for sf in srcs:
-            try:
-                src_text += open(os.path.join(root, sf), encoding='utf-8', errors='replace').read()[:2000]
-            except Exception:
-                pass
+        # ⚠️ **`_source_context` 内部必须 `sorted(srcs)`** —— `srcs` 是 **set**
+        #    ⇒ 迭代顺序随 Python 的字符串 hash 随机化**每次进程都不同**
+        #    ⇒ 拼出的 `src_text` 顺序不同 ⇒ `_is_noise_ref` 的正则命中结果不同
+        #    ⇒ **同一条 file:line 引用每次运行落进不同分类桶**
+        #      （N5 / N7 / 跨库歧义 / MISSING）。
+        #    实测（2026-10-26）：同一份仓库状态连跑 3 次，层 4 的
+        #    「引用不悬空 / 已去噪 / 跨库歧义」三个计数分别是
+        #    (20,105,3) / (13,112,2) / (14,111,1) ⇒ **门禁输出不可复现**；
+        #    `PYTHONHASHSEED=0` 连跑 3 次完全一致 ⇒ 坐实是 hash 随机化。
+        src_text = _source_context(root, srcs)
         is_noise, why = _is_noise_ref(path, s, e, src_text)
         if is_noise:
             noises.append((path, s, e, why, sorted(srcs)))
@@ -669,6 +890,87 @@ def layer0_selfcheck(root):
         print('    ✅ 层 1 存在性判定可用（自身文件命中）')
     else:
         print('    ❌ 层 1 存在性判定异常')
+        bad += 1
+
+    # ②′ 层 1（2026-10-26 新增）：**路径简写的去噪判据必须两头都对**
+    #     ⇒ 阳性：真·简写必须被去噪（否则台账噪声淹没信号 ⇒ 门禁形同虚设）
+    #     ⇒ 阴性：真·缺失必须**仍被报出**（否则门禁被吃掉 ⇒ 绿灯不可信）
+    #     ⚠️ 用**人造文件清单**做对照 ⇒ 与本仓实际内容无关 ⇒ 任何分支上都成立
+    _fake_files = [
+        'service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java',
+        'service/article/article-rpc/src/main/resources/application.yml',
+        'service/users/user/user-api/HUMAN_ONLY.MD',
+        # ⚠️ 必须有这一条 —— 否则 `service/comment/` 不在「顶层目录」表里 ⇒
+        #    **N12 会接手去噪** ⇒ 「抽掉 N11」这个变异就**抓不到**了
+        #    （本轮实测：M4 首跑未命中 ⇒ 变异无效 ⇒ 对照必须能单独锁住每条规则）
+        'service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentDomainService.java',
+    ]
+    _fake_go = ['service/comment/rpc/internal/model/test-community-postgres.sh']
+    _fake_idx = _mk_index(_fake_files, _fake_go)
+    # ⚠️ **必须断言「规则编号」而不只是「是否去噪」** ——
+    #    否则两条规则**互相掩护**时，去掉其中一条**抓不到**
+    #    （本轮实测：N9 被 N12 掩护 ⇒ 「抽掉 N9」这个变异首跑是绿的 ⇒ 变异无效）
+    _l1_cases = [
+        ('service/common/.../observability/RpcInterceptor.java', True, 'N8', 'N8 省略写法'),
+        ('service/UserRegisterService.java', True, 'N9', 'N9 裸文件名'),
+        ('service/common/observability/RpcInterceptor.java', True, 'N10', 'N10 短路径'),
+        ('service/article/article-rpc/application.yml', True, 'N10', 'N10 短路径'),
+        ('service/comment/rpc/internal/model/test-community-postgres.sh', True, 'N11', 'N11 Go 侧路径'),
+        ('service/demo/demo-rpc/pom.xml', True, 'N12', 'N12 仓外引用（顶层目录不在本仓）'),
+        ('service/common/src/main/java/com/rag/common/observability/LikeRpcClient.java',
+         False, '', '同名文件在别的域（like）⇒ 真·缺失'),
+        ('service/users/users-common/HUMAN_ONLY.MD', False, '', '该文件确实不存在'),
+        ('service/common/observability/NoSuchClass.java', False, '', '仓内无此文件'),
+        ('tools/difftest/check-protection-layer.sh', False, '', '非 service/ 前缀 ⇒ 一律不去噪'),
+        ('docs/DRIFT/global/_INDEX.md', False, '', '非 service/ 前缀 ⇒ 目录写错要报出来'),
+    ]
+    for _p, _want, _rule, _why in _l1_cases:
+        _got, _got_rule, _reason = _is_simplified_path(_p, _fake_idx)
+        if _got == _want and _got_rule == _rule:
+            print(f'    ✅ 层 1 简写判据正确（{"去噪 " + _got_rule if _want else "报缺"}）：{_why}')
+        else:
+            print(f'    ❌ 层 1 简写判据错判：{_p} —— 期望'
+                  f'{"去噪 " + _rule if _want else "报缺"}，实得'
+                  f'{"去噪 " + _got_rule if _got else "报缺"}（{_why}）')
+            bad += 1
+
+    # ②′′ 层 1（2026-10-26 新增）：**「状态叙述」邻行判定**必须两头都对
+    #     ⇒ 台账常把叙述写在**上一行**再列路径 ⇒ 邻行窗口 ±2
+    _nl = [
+        '以下 3 条**被登记为已存在、实际不存在**：',
+        '`service/users/users-common/HUMAN_ONLY.MD`、',
+        '`service/message/message-rpc/HUMAN_ONLY.MD`。',
+    ]
+    _n13_cases = [
+        (_nl, 1, True, '叙述在上一行'),
+        (_nl, 0, True, '叙述在同一行'),
+        (_nl, 2, True, '叙述在上上一行'),
+        (['一条正常引用 `service/common/Foo.java`'], 0, False, '无状态叙述'),
+        (['该脚本在仓内不存在 ⇒ 守门缺位', '`tools/x/y.sh` 需补'], 1, True, '叙述在上一行'),
+    ]
+    for _lines, _ln, _want, _why in _n13_cases:
+        _got, _at = _narration_in_lines(_lines, _ln)
+        if _got == _want:
+            print(f'    ✅ 层 1 状态叙述判定正确（{"命中" if _want else "不命中"}）：{_why}')
+        else:
+            print(f'    ❌ 层 1 状态叙述判定错判：期望{"命中" if _want else "不命中"}（{_why}）')
+            bad += 1
+
+    # ②″ 层 4（2026-10-26 新增）：来源上下文拼接必须**与 set 迭代顺序无关**
+    #     ⇒ 否则同一条 file:line 每次运行落进不同分类桶 ⇒ 门禁输出不可复现
+    #     ⚠️ 断言**白盒契约**：拼接结果 == 按 sorted(srcs) 逐个拼接
+    # ⚠️ **必须用「逆序 list」而不是 set** ——
+    #    set 的迭代序在**同一进程内**也不保证等于 sorted 序（字符串 hash 随机化）
+    #    ⇒ 原写法（拿 set 比 sorted 拼接）是 **flaky 对照**：有时红、有时绿
+    #    ⇒ 变异「抽掉 sorted()」**有时抓不到** ⇒ 对照必须**确定性**地区分。
+    _srcs = ['docs/DRIFT/task/rpc.md', 'docs/DRIFT/task/api.md']   # 故意**不是**字典序
+    _expect_ctx = ''
+    for _sf in sorted(_srcs):
+        _expect_ctx += read(os.path.join(root, _sf))[:2000]
+    if _source_context(root, _srcs) == _expect_ctx:
+        print('    ✅ 层 4 的来源上下文按 srcs 排序拼接（输出可复现）')
+    else:
+        print('    ❌ 层 4 的来源上下文未按 srcs 排序 ⇒ 输出随 hash 随机化漂移')
         bad += 1
 
     # ③ 层 3：commit 覆盖检查必须能识别「未登记的 commit」（阳性对照）
@@ -836,6 +1138,17 @@ def run_mutation_tests(root):
     orig_readme, orig_api = read(readme), read(api)
     bad = 0
 
+    # ⚠️ **阳性对照的基线必须在任何变异之前取** ——
+    #    口径 = **「复原后的计数 == 变异前的计数」**，**不是**「复原后必须 == 0」。
+    #    🔴 **为什么不能要求 == 0**：第 3 层含**分支相关**判据（commit 清单覆盖 =
+    #       本分支的 commit 数 vs 台账登记行数）⇒ 在**非 task 分支**上恒不为 0
+    #       ⇒ 本轮实测（`align/global`，89 个 commit）恒报 134 处 ⇒ **阳性对照恒红**
+    #       ⇒ ⇒ **整个 `--mutation-test` 在任何别的分支上都不可用**
+    #       ⇒ ⇒ 判据可逆性的正确口径是「**回到变异前**」，不是「== 0」。
+    buf0 = io.StringIO()
+    with contextlib.redirect_stdout(buf0):
+        baseline_layer3 = layer3_numbers(root, ledger_texts(root, 'task'))
+
     merge_base = git(root, 'merge-base', 'HEAD', 'do-my-own-gh')
     hashes = [h.strip() for h in git(root, 'rev-list', '--abbrev-commit',
                                       '--no-merges', f'{merge_base}..HEAD').splitlines() if h.strip()]
@@ -927,14 +1240,14 @@ def run_mutation_tests(root):
             with open(api, 'w', encoding='utf-8') as f:
                 f.write(orig_api)
 
-        # 阳性对照：复原后必须全绿
+        # 阳性对照：复原后必须**回到变异前**的计数（不是「== 0」—— 见上方口径说明）
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             n = layer3_numbers(root, ledger_texts(root, 'task'))
-        if n == 0:
-            print('  ✅ 复原后第 3 层通过（阳性对照：变异可逆、判据不误报）')
+        if n == baseline_layer3:
+            print(f'  ✅ 复原后第 3 层回到变异前的 {n} 处（阳性对照：变异可逆、判据不误报）')
         else:
-            print(f'  ❌ 复原后第 3 层仍报 {n} 处 ⇒ 变异没复原干净')
+            print(f'  ❌ 复原后第 3 层报 {n} 处 ≠ 变异前的 {baseline_layer3} 处 ⇒ 变异没复原干净')
             bad += 1
     finally:
         with open(readme, 'w', encoding='utf-8') as f:
@@ -980,7 +1293,7 @@ def main():
         return 1 if bad else 0
 
     bad += layer0_selfcheck(root)
-    bad += layer1_paths(root, texts)
+    bad += layer1_paths(root, texts, args.go_root)
     bad += layer2_claims(root)
     bad += layer3_numbers(root, texts)
     bad += layer4_golines(root, texts, args.go_root)
