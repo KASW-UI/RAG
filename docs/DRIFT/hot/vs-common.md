@@ -26,13 +26,14 @@
 |---|---|---|---|---|
 | `DRIFT-HOTAPI-024` | Content-Type charset（共享层 `GoStyleJsonContentTypeAdvice`） | `service/common` | ✅ **已修**（global T-6）⇒ 10 个 api 全生效 | [`api.md`](api.md) |
 | `DRIFT-HOTAPI-014` | 跨域移交 `service/common` 的条目 | `service/common` | 🟡 **跨域移交**（nosniff 已实现） | [`api.md`](api.md) |
-| `DRIFT-HOTRPC-004` | client breaker 是否真在链上并会因超时打开（`zrpc/internal/client.go:112-113` ＋ `breakerinterceptor.go:13-18`） | `service/common`（装配层） | ✅ **已闭合**（第十轮）—— ⚠️ **本轮复核：该闭合指的是 `hot-api` 侧**（域内有 `GoStyleGrpcClientBreakerWiringTest` ＋ `GoStyleGrpcClientBreakerE2ETest`，均在 `service/hot/hot-api/src/test/**`）⇒ **`hot-rpc`（纯 gRPC 进程）侧仍缺** ⇒ **不是同一件事**，见 §2 的 A2 与 §4-G4-2 | [`api.md`](api.md) · [`rpc.md`](rpc.md) |
+| ~~`DRIFT-HOTRPC-004`~~ ⇒ ✅ **订正为 `U4`** | client breaker 是否真在链上并会因超时打开（`zrpc/internal/client.go:112-113` ＋ `breakerinterceptor.go:13-18`） | `service/common`（装配层） | ⚠️ **本轮订正编号（2026-10-27）**：权威面里这条是 **`U4`**（`hot/api.md` §9 Unresolved 表的「`U4` \| client breaker 是否真在链上并会因超时打开？」行）⇒ **原记的 `DRIFT-HOTRPC-004` 是另一条**（`hot/rpc.md:350`：**Redis 客户端重试** —— go-redis `MaxRetries` 默认 **3** vs Lettuce **无重试**）⇒ **撞号** ⇒ 已改用 `U4`。<br>✅ **已闭合**（第十轮）—— ⚠️ **本轮复核：该闭合指的是 `hot-api` 侧**（域内有 `GoStyleGrpcClientBreakerWiringTest` ＋ `GoStyleGrpcClientBreakerE2ETest`，均在 `service/hot/hot-api/src/test/**`）⇒ **`hot-rpc`（纯 gRPC 进程）侧仍缺** ⇒ **不是同一件事**，见 §2 的 A2 与 §4-G4-1 | [`api.md`](api.md)（`U4`） |
+| `DRIFT-HOTRPC-004`（**另条，勿混**） | Redis 客户端**重试**差异：go-redis `MaxRetries` 默认 **3** vs Lettuce **无重试** | `service/hot/hot-rpc`（Redis 配置） | 🟡 **已登记**（`hot/rpc.md:350` 权威面）—— **本轮新补记**，只为标明「**与上面的 `U4` 是两件事**」⇒ 防止后续按错编号销账 | [`rpc.md`](rpc.md) |
 | `D14` / `D25` / `D27` | 三条**移交 `service/common`** 的条目 | `service/common` | ✅ **已全部闭合**（2026-10-26 域内未闭合项已清空） | [`api.md`](api.md) |
 | `DRIFT-HOTAPI-030` | Tomcat 参数个数口径 | `service/common`（X-6） | ✅ **已落地**（global 第十四轮）<br>✅ **本域侧已验**（核对日期 **2026-10-27**）：`hot-api/.../application.yml:141` = `mode: envelope` ⇒ **与 Go 同向**（Go 侧 `service/hot/api/hotcenter.go:53` **注册了** `httpx.SetErrorHandler` ⇒ 解析失败走业务信封 ⇒ **200 + `{code:5001}`**） | [`api.md`](api.md) |
 | （域侧 · 非编号） | `hot-rpc` 缺 `baseline-version: 0` | — | ✅ **N/A（不适用）**（核对日期 **2026-10-27** 实测）：`hot-rpc/.../application.yml` **无 `flyway:` 段** ⇒ hot 域**两侧都没有数据库**（Go 侧全域无 gorm，只有 Redis ＋ Kafka）⇒ **本维度无对象可比**，不是缺陷 | — |
 
 > ⚠️ **写死数字/状态的纪律**（AGENTS.md §6）：本表是**抽取快照**；每条**逐条证据**以「域台账」列指向的正文为准，
-> **状态必须带核对日期** ⇒ ✅ **2026-10-27 复核轮已就地订正/确认 6 条**（`DRIFT-HOTRPC-004` 的**范围澄清** ＋ `DRIFT-HOTAPI-030` 本域侧已验 ＋ `baseline-version` **判为 N/A**）。
+> **状态必须带核对日期** ⇒ ✅ **2026-10-27 复核轮已就地订正/确认 6 条**（**`U4` 的编号订正**（原误记 `DRIFT-HOTRPC-004` ⇒ 实为 Redis 重试条）＋ `U4` 的**范围澄清**（闭的是 `hot-api` 侧）＋ `DRIFT-HOTAPI-030` 本域侧已验 ＋ `baseline-version` **判为 N/A**）。
 > ⇒ **教训**：同一编号在 **api 侧与 rpc 侧是两条不同的东西** ⇒ 「已闭合」必须带**范围**，否则会掩盖另一侧的缺口。
 
 ## 2. 9 条机制面轴 · 本域侧逐轴结论（**lane 的交付主体** · 核对日期 **2026-10-27**）
