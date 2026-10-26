@@ -724,7 +724,7 @@ RAG `3047ms/4455ms`，量级一致、可复现，**但以复测值为准**：
 | # | 改了什么 | 文件 | 守门 |
 |---|---|---|---|
 | 1 | `CREATE TABLE` 里两列改 `TIMESTAMPTZ` + 幂等 `SET TIME ZONE 'UTC'` 包裹的 `ALTER … USING … AT TIME ZONE 'UTC'` + `RESET TIME ZONE` | `users-common/src/main/resources/db/01_create_user.sql:42-43` / `:101-106` | `UserRpcUsersUserTimestamptzParityTest` |
-| 2 | 两个实体 4 个字段 `LocalDateTime` ⇒ `OffsetDateTime` | `user-rpc/.../domain/UserEntity.java`、`admin-rpc/.../domain/UserEntity.java` | 同上（反射断言声明类型） |
+| 2 | 两个实体 4 个字段 `LocalDateTime` ⇒ `OffsetDateTime` | `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/domain/UserEntity.java`、`service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/UserEntity.java` | 同上（反射断言声明类型） |
 
 **测试**：admin-rpc **84/0**、user-rpc **102/0**（新增 6 条真 PG 用例）。
 **变异测试已做**：删掉 DDL 里的 `SET TIME ZONE 'UTC'` ⇒
@@ -999,7 +999,7 @@ AGENTS.md §9 / §8 / §0 三处都写着「**过期状态必须随实测同步�
 
 | # | 发现 | 类型 | 处置 |
 |---|---|---|---|
-| **1** | `docs/DRIFT/users/user/api.md` 第八轮 MaxBytes 表写「真容器由 `tools/difftest/check-protection-layer.sh` 守」—— **该脚本在仓内不存在** | 🔴 **台账事实错误** | ✅ 已更正（见下） |
+| **1** | `docs/DRIFT/users/user/api.md` 第八轮 MaxBytes 表写「真容器由 `check-protection-layer.sh` 守」—— **该脚本在仓内不存在** | 🔴 **台账事实错误** | ✅ 已更正（见下） |
 | **2** | `rpc.md:1282` / `rpc.md:1477` / `_shared.md:889` 引用的守门类 **`UserRpcJsonbAndAvatarProjectionTest`** —— 该类**已改名为 `UserRpcJsonTextAndAvatarProjectionTest`**（真源：`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/service/UserRpcJsonTextAndAvatarProjectionTest.java`） | 🔴 **守门清单指向不存在的类** | ✅ 三处已改新名 |
 | **3** | 同上改名**未同步到 admin 域**：`docs/DRIFT/users/admin/rpc.md:372,382` 仍用旧名 | ⚠️ **跨域** | ✅ **admin 域已于 2026-10-26 改完**（提交 `c09fa45`，分支 `align/users-admin`：`admin/rpc.md:372,382` + `admin/rpc.md` 的 Pitfalls `:78,:92` 共 4 处）⇒ 本条关闭 |
 | **4** | ⚠️ **`.xml` 报告名**（`UserRpcJsonbAndAvatarProjectionTest.xml`）**不是类名引用**，是**历史 surefire 报告文件名**（Oct 23 的真实产物、已成孤儿） | ✅ **不是缺陷** | ✅ **保持原样，勿「顺手统一」** —— 改了反而失真（报告文件名就是当时那次的真实名字）。<br>本域的 2 处（`users/user/api.md` 的「Oct 23 的旧报告」+ `Pitfalls/users/_shared.md` 的「上一轮遗留旧报告」）**已确认为报告名、保留**；admin 域同样保留。<br>⇒ **约定**：**类名引用**改新名，**`.xml` 报告名**保留原样。 |
@@ -1017,7 +1017,7 @@ AGENTS.md §9 / §8 / §0 三处都写着「**过期状态必须随实测同步�
 **发现 1 的更正后表述**（`api.md` 第八轮 MaxBytes 表）：
 
 > | 运行时证据 | ⚠️ 静态 | ⚠️ 静态 —— ⚠️ **2026-10-24 复核更正**：本行原写「真容器由
-> `tools/difftest/check-protection-layer.sh` 守」，**该脚本在仓内不存在** ⇒ **MaxBytes 在
+> `check-protection-layer.sh` 守」，**该脚本在仓内不存在** ⇒ **MaxBytes 在
 > `service/common` 没有专用测试类**；仅被 5 个**别的域**的 MVC 测试间接断言 413
 > ⇒ **user-api 侧自身零守网** | ⚠️ |
 
@@ -1063,7 +1063,7 @@ python3 tools/check-ledger-selfcheck.py --mutation-test       # 跑变异自检
 
 | 层 | 结果 |
 |---|---|
-| 第 1 层 | ✅ **54 引用 ⇒ 缺失 0** —— ✅ **2026-10-26 已归零**：原先那 1 条 `RpcInterceptorTimeoutDescriptionGateTest.java`（`global` 域的守门类，主干未合时路径悬空）**已被工具的 N13「状态叙述」正确去噪**。<br>⚠️ **为去噪能做而做的改写**：本条原先写作「主干上**查不到** ⇒ 路径**悬空**是**预期状态**」⇒ 这三个词**都不在** N13 的叙述词表里 ⇒ 工具认不出 ⇒ 仍报缺失。<br>⇒ 改成「该文件在 `global` 提交并合入主干前，主干上**不存在**（路径悬空是预期状态…）」⇒ 命中「不存在」⇒ **缺失归零**。<br>⇒ ⚠️ **工具侧的根因已报 global**：N13 词表（`删除\|已删除\|不存在\|已移除\|被删\|不再存在\|不建\|未建\|不创建\|0 字节\|错放\|空文件\|占位`）**缺「悬空 / 查不到 / 预期状态 / 尚未存在」等常见措辞** ⇒ 其他域会踩同款 |
+| 第 1 层 | ✅ **54 引用 ⇒ 缺失 0** —— ✅ **2026-10-26 已归零**：原先那 1 条 `RpcInterceptorTimeoutDescriptionGateTest.java`（`global` 域的守门类，主干未合时路径悬空）**已被工具的 N13「状态叙述」正确去噪**。<br>⚠️ **为去噪能做而做的改写**：本条原先写作「主干上**查不到** ⇒ 路径**悬空**是**预期状态**」⇒ 这三个词**都不在** N13 的叙述词表里 ⇒ 工具认不出 ⇒ 仍报缺失。<br>⇒ 改成「该文件在 `global` 提交并合入主干前，主干上**不存在**（路径悬空是预期状态…）」⇒ 命中「不存在」⇒ **缺失归零**。<br>⇒ ⚠️ **工具侧的根因已报 global**：N13 词表（`删除\|已删除\|不存在\|已移除\|被删\|不再存在\|不建\|未建\|不创建\|0 字节\|错放\|空文件\|占位`）**缺「悬空 / 查不到 / 预期状态 / 尚未存在」等常见措辞** ⇒ 其他域会踩同款<br>🔴 **2026-10-26 晚：工具侧已修（global `45067ce`，E61）** —— N13 **拆三层**（A 存在性 / B 落地态 `待合入`·`尚未存在`… / C 免责 `是预期状态`·`不是台账事实错误`…）+ **一道护栏**（行里出现「路径写错 / 笔误 / 应为」⇒ B/C 层一律不生效）⇒ **「查不到 / 悬空」只靠 C 层免责半句生效**（裸词进表 = 假阴性，真缺陷恰恰这么写）。<br>⇒ ✅ **本域已把权宜措辞改回自然措辞**（「主干上查不到」+「是预期状态」）—— **语义更准**（文件在 global 的提交里**存在**，只是在主干上查不到；「不存在」反而失真）⇒ **两种写法现在都认**，改与不改都不影响机器判定 |
 | 第 2 层 | ⚠️ **10/10 OK，但断言全是 task 域的** ⇒ 该层**没按域筛选**<br>🔴 **2026-10-26 已被 `global` 的 `35a7b8e` 修掉**（见下方「工具已修」一节）⇒ 现在对本域输出 **「本层对 users 域不适用（⚠️ 不是『通过』，是『没查』）」** |
 | 第 3 层 | ❌ **45 处「commit 清单缺陷」** ⇒ **全是工具假阳性**：① 台账路径**写死** `docs/DRIFT/task/_README.md`（那 45 条登记**属 task 域**）；② 窗口算法 `merge-base(HEAD, do-my-own-gh)..HEAD` **在主分支上恒空** ⇒ 44 条哈希被误判「不在本分支上」（实测它们**都在**本地 `do-my-own-gh` 上）+ 1 条行数不守恒<br>⇒ ~~**仍未修**（属工具 owner 域 ⇒ 已回信 global）~~ ⇒ 🔴 **2026-10-26 已被 `global` 的 `35a7b8e`「域适配 + commit 清单口径」修掉** ⇒ 现在对本域输出 **「本层对 users 域不适用（⚠️ 不是『通过』，是『没查』）」** ⇒ **45 条假阳性消失**（⚠️ **不是「本域台账变干净了」，是「工具不再拿 task 域的判据来审 users 域」）|
 | 第 4 层 | ✅ **0 条** —— ✅ **2026-10-26 已归零**（`global` 的 **`d52031e`**「go.mod 权威化」）：第 4 层的第三方库清单改为**从真源 `go.mod` 动态解析**（含 `// indirect`），手写表只作兜底 ⇒ `gorm.io/gorm` 等**不再被误判**。<br>⚠️ 本域侧此前也已把 3 处引用补全为全路径（`gorm.io/gorm@v1.31.1/...`）—— 那是**消歧**（modcache 里 `migrator.go` ≥4 个同名），**行号全部核对无误**（`:124` = `HasTable` 判断、`:309` = `tx.Exec`、`:235-252` = AutoUpdateTime 那 18 行）⇒ 工具修好后两条都成立 |

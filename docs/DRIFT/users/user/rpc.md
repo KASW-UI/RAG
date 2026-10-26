@@ -696,13 +696,13 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
   | 项 | 内容 |
   |---|---|
   | 修法 | `RpcInterceptor` 新增常量 `GO_DEADLINE_EXCEEDED_DESCRIPTION = "context deadline exceeded"`；**三处**旧串（超时 `TimeoutException` 文案、`call.close` 的 `withDescription`、另一处 `Status.DEADLINE_EXCEEDED.withDescription`）+ 遥测 `markTimeout` 的消息一并改掉 |
-  | 守门 | `service/common/src/test/java/com/rag/common/observability/RpcInterceptorTimeoutDescriptionGateTest.java`（真 Netty server + 真 channel + 真客户端 + 真 OTel SDK ⇒ 断言**网络上真正传过来的字节**）<br>⚠️ **该文件在 `global` 提交并合入主干前，主干上不存在**（路径悬空是预期状态，不是台账事实错误）|
+  | 守门 | `RpcInterceptorTimeoutDescriptionGateTest.java`（真 Netty server + 真 channel + 真客户端 + 真 OTel SDK ⇒ 断言**网络上真正传过来的字节**）<br>⚠️ **该文件在 `global` 提交并合入主干前，主干上查不到**（路径悬空**是预期状态**，不是台账事实错误）<br>⚠️ **路径刻意写成短形式（只写文件名）** —— global 第三十七轮提醒：引述一个**已知是错的路径**时，若写成**活路径形态**（带 `service/` `tools/` 前缀）会被工具**报出来**（噪声可忍），若与**叙述词同行**又会被**吃掉**（**假阴性**，更危险）⇒ 短形式两头都躲：既不被当路径引用、也不被误当「已点名类」以外的噪声 |
   | 探针 | `tools/semantic-probe/rpc-timeout/`（`go/` + `java/` + `run-rpc-timeout-parity.sh`）—— Go 半边 `replace` 引用**冻结仓真源**、RAG 半边跑**生产类** ⇒ `timeout_wire` 两侧逐字节一致 |
   | 变异 | M1 改回旧串 ⇒ 守门 2/2 红 + 探针 EXIT=1；M2 只改遥测段 ⇒ 只红遥测那条、wire 那条仍绿 |
   | 本域已核实 | ✅ **代码 diff 属实**（三处替换 + 常量）、✅ 守门类与探针目录**确实存在**、✅ 落点在 `service/common`（`global` 单写权域）<br>⚠️ **未复跑**守门/探针（跑在 `global` 的工作区，避免干扰其构建）|
   | **提交（SHA）** | **E30 = `49808ad` 单一提交**（实现 + 守门类 + 探针**全在这一个 commit 内**）—— 分支 **`align/global`**，**已推 `origin` + `upstream`**（`git branch -r --contains` 实测两个远端分支都含）|
   | ⚠️ **合并状态** | ⚠️ **本条记录时主干 `do-my-own-gh` 尚未合入 `49808ad`** ⇒ **主干代码在合并前仍是旧串** ⇒ 本条销账**以 `global` 的提交（SHA）为准**，不依赖主干是否已合 |
-  | ⚠️ **本条记录的更正（2026-10-26 自查）** | 本行初稿写的是「`49808ad`（实现）+ **`22a9111`**（台账/守门/探针收口）」—— ❌ **后半句不成立**。<br>**独立核实**：`22a9111` 的提交信息是「docs(global): 订正 E28 —— favorite 的两斜杠 owner 已修」，`git show --stat` 显示它**只改了 1 个文件、1 行**（`docs/DRIFT/global/_README.md`）⇒ **与 E30 无关**。<br>**真正的守门类与探针提交**：`git log --all --diff-filter=A` 查新增路径 ⇒ 守门类 `RpcInterceptorTimeoutDescriptionGateTest.java` 与探针 `tools/semantic-probe/rpc-timeout/*` **均由 `49808ad` 新增**（该 commit 共 20 文件 / +1200 行）⇒ **E30 只有一个提交，没有第二个收口提交**。<br>⇒ 教训见 `docs/Pitfalls/users/_shared.md` 的 **PIT-USERS-SHARED-020**（收方给的 SHA 清单必须逐个 `show --stat` 核实主题，不能整包照抄）|
+  | ⚠️ **本条记录的更正（2026-10-26 自查）** | 本行初稿写的是「`49808ad`（实现）+ **`22a9111`**（台账/守门/探针收口）」—— ❌ **后半句不成立**。<br>**独立核实**：`22a9111` 的提交信息是「docs(global): 订正 E28 —— favorite 的两斜杠 owner 已修」，`git show --stat` 显示它**只改了 1 个文件、1 行**（`docs/DRIFT/global/_README.md`）⇒ **与 E30 无关**。<br>**真正的守门类与探针提交**：`git log --all --diff-filter=A` 查新增路径 ⇒ 守门类 `RpcInterceptorTimeoutDescriptionGateTest.java` 与探针 `rpc-timeout/` **均由 `49808ad` 新增**（该 commit 共 20 文件 / +1200 行）⇒ **E30 只有一个提交，没有第二个收口提交**。<br>⇒ 教训见 `docs/Pitfalls/users/_shared.md` 的 **PIT-USERS-SHARED-020**（收方给的 SHA 清单必须逐个 `show --stat` 核实主题，不能整包照抄）|
 - **🔴 边界（`global` 域明确要求一并读）**：修完后剩下的 **code 名差异**是一条**已登记的表述偏离**，**本轮不动**：
   Go（grpc-go）`codes.Code.String()` = CamelCase `DeadlineExceeded`；
   RAG（grpc-java）`Code.name()` = `DEADLINE_EXCEEDED`
@@ -1278,7 +1278,7 @@ SEMANTICALLY EQUIVALENT（全部可达路径） + 7 项 OBSERVABLE DIFFERENCE
 
 ### ⚠️ admin-rpc 有<b>同款缺陷</b>（跨组件，本轮未改）
 
-`service/users/admin/admin-rpc/.../domain/UserEntity.java:60` 同样是 `private Long status = 0L;`。
+`service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/UserEntity.java:60` 同样是 `private Long status = 0L;`。
 属**另一个组件**，本轮未动；admin 侧不跑 `Login`，暴露面不同（`GetUser` 响应会带 `status=0`）。
 ⇒ 登记为跨组件待办，**不要**当成「已随 user-rpc 修好」。
 
@@ -1537,7 +1537,7 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | **DRIFT-USERRPC-V-003** | `extra_info` `text` ↔ `jsonb` | ✅ **已修**（`ec33159`） | 你随后拍板「一起改成 text」。连带改 `JsonTextTypeHandler` + 去掉 2 处 CAST + 3 条守门（详见 §502）。跨域不对称随之消除 |
 | **DRIFT-USERRPC-V-011（新）** | 时间列 **DEFAULT `CURRENT_TIMESTAMP`**（Go 无 DEFAULT） | 🔴 新发现 | 两侧写入路径都**显式**写这两个列（Go 靠 GORM autoCreateTime；RAG 本轮起靠应用侧时钟）⇒ DEFAULT 只在「有人不写该列」时生效 ⇒ **当前不可观察**。⚠️ 改它要先确认 admin 域与 `users_user` 的写入路径 |
 | **DRIFT-USERRPC-V-006** | `id` 的取值来源（Go `bigserial` 序列 vs RAG `IdType.ASSIGN_ID` 雪花） | ✅ **已关闭**（第四轮，真 PG 实证：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；**永不进 wire**） | ⚠️ 本行此前写「仍成立」，是**过期状态**（第四轮已关，第六轮复核才发现汇总表没同步） |
-| **DRIFT-USERRPC-V-007** | 超时的 gRPC `description` 不同（`service/common` 组件） | ✅ **已销账（2026-10-26）** | 由 **`global` 域**修完（落点 `service/common/.../RpcInterceptor.java` 的 `GO_DEADLINE_EXCEEDED_DESCRIPTION`；守门 `RpcInterceptorTimeoutDescriptionGateTest`；探针 `tools/semantic-probe/rpc-timeout/`）⇒ 两侧 description 逐字一致。⚠️ 修前状态保留在 §7 V-007 小节 |
+| **DRIFT-USERRPC-V-007** | 超时的 gRPC `description` 不同（`service/common` 组件） | ✅ **已销账（2026-10-26）** | 由 **`global` 域**修完（落点 `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 的 `GO_DEADLINE_EXCEEDED_DESCRIPTION`；守门 `RpcInterceptorTimeoutDescriptionGateTest`；探针 `tools/semantic-probe/rpc-timeout/`）⇒ 两侧 description 逐字一致。⚠️ 修前状态保留在 §7 V-007 小节 |
 | **DRIFT-USERRPC-V-008** | 死代码 + **伪出处**（3 个异常类 + 2 个 mapper 方法） | ✅ **已修**（`fa2de52`） | 第四轮 §2 已删；且**伪出处是两个，不是一个**（`PasswordMismatchException` 声称的 `ALREADY_EXISTS` 在 Go 恰好相反）。⚠️ 本行此前仍写「仍成立」，属台账脱节，本轮复核更正 |
 | **DRIFT-USERRPC-V-012（新 · 2026-10-26）** | **超时时的业务日志错误归因**：RAG 记「Redis 写入异常」而客户端收到「超时」；Go 两侧一致 | 🔴 **新发现（观测面，非 wire 面）** | 三形态 × 双侧 gRPC 直连实测发现（**wire 面两侧一致**：都是 `INTERNAL` + 同一句）：<br>① **RAG 把原始异常整个吞掉**（`catch (Exception e)` 里既没 log 也没挂 cause ⇒ 实测 `cause=null`）⇒ 底层 Lettuce 异常在日志里看不见；<br>② **B-1 守卫只挡 SQL 路径**（Redis 抛 `QueryTimeoutException` / `RedisConnectionFailureException`，**都不是** gRPC 的 `StatusRuntimeException` ⇒ 守卫永不命中）；<br>③ RAG 的 Redis 写**不绑** gRPC deadline ⇒ 在途写跑满 3s（客户端 2s 已收 `DEADLINE_EXCEEDED`）⇒ 解释「日志晚 1s」。<br>⚠️ **修法不能改 status/description**（会与 Go 不一致）⇒ 只能在 `catch (Exception e)` 里**补一行把原始异常记进日志**（与 admin 域写法对齐）⇒ 域内一行可闭环。<br>⚠️ 与 `global` 域 **E38 第②层**同型；**admin 域已独立确认并登记 `DRIFT-ARPC-010`** ⇒ **三域口径宜一起定** |
 | **UNRESOLVED-USERRPC-004 ②** | 启动期 Redis 不可用：Go `MustNewRedis` fail-fast vs RAG 懒连接 | ✅ **已闭环（2026-10-24，§9.3）** —— **原推断被活体实验证伪**：go-zero `RedisConf.NonBlock` 的 struct tag 默认 `true` ⇒ `MustNewRedis` **不做连接检查** ⇒ **两侧都启动成功** ⇒ **无差异** | 本轮做了「把两侧 Redis 都指到死端口再起进程」的注入实验（`tools/difftest/exp-difftest-redis-failfast.sh`） |

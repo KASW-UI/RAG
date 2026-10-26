@@ -2637,7 +2637,7 @@ users-common **33** · user-rpc **122** · user-api **99**（+3：2 条接线 + 
 | `<=0` 语义 | no-op | no-op | ✅ |
 | 拒绝形状 | `w.WriteHeader(413)` ⇒ **413 空 body** | `setStatus(413)` ⇒ 同 | ✅ |
 | 相对鉴权的次序 | native middleware ⇒ **在 JWT 之外**（413 压过 401） | Filter ⊃ Interceptor ⇒ 同 | ✅ |
-| 运行时证据 | ⚠️ 静态 | ⚠️ 静态 —— ⚠️ **2026-10-24 复核更正**：本行原写「真容器由 `tools/difftest/check-protection-layer.sh` 守」，**该脚本在仓内不存在**（复核脚本实测）⇒ **MaxBytes 在 `service/common` 没有专用测试类**（`GoStyleMaxBytesFilterTest` 不存在）；仅被 5 个**别的域**的 MVC 测试间接断言 413（`MessageApiProtectionMvcTest` / `MessageApiProtectionRealTomcatTest` / `LikeApiProtectionMvcTest` / `ArticleApiRouteAuthBoundaryTest` / `TaskApiWiringTest`）。⚠️ **user-api 侧自身零守网** | ⚠️ |
+| 运行时证据 | ⚠️ 静态 | ⚠️ 静态 —— ⚠️ **2026-10-24 复核更正**：本行原写「真容器由 `check-protection-layer.sh` 守」，**该脚本在仓内不存在**（复核脚本实测）⇒ **MaxBytes 在 `service/common` 没有专用测试类**（`GoStyleMaxBytesFilterTest` 不存在）；仅被 5 个**别的域**的 MVC 测试间接断言 413（`MessageApiProtectionMvcTest` / `MessageApiProtectionRealTomcatTest` / `LikeApiProtectionMvcTest` / `ArticleApiRouteAuthBoundaryTest` / `TaskApiWiringTest`）。⚠️ **user-api 侧自身零守网** | ⚠️ |
 
 ### 4. 逐条对照 · Breaker（入口）
 
