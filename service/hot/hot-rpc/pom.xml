@@ -202,6 +202,31 @@
     <build>
         <plugins>
             <!--
+                ⚠️ 必须声明 spring-boot-maven-plugin —— 缺了它就没有 repackage goal
+                   ⇒ 打出来的是**普通 library jar** ⇒ `java -jar hot-rpc.jar` 直接报
+                   「中没有主清单属性」（no main manifest attribute）⇒ 该模块从来没有被打成过
+                   可部署产物。
+
+                修前实测（本工作树，2026-10-26）：
+                  service/hot/hot-rpc/target/hot-rpc-0.0.1-SNAPSHOT.jar = 58,873 B
+                  MANIFEST.MF 里**零个** Main-Class / Start-Class
+                  （对照 article-rpc：104,264,894 B +
+                    Main-Class: org.springframework.boot.loader.launch.JarLauncher）
+
+                ⚠️ **不写 <mainClass>** —— 让插件自动探测主类
+                   （本模块唯一 main：HotRpcApplication.main，
+                    service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/HotRpcApplication.java:111）
+                   ⇒ 产物里 Start-Class 会被写成 com.rag.hot.hot.rpc.HotRpcApplication。
+
+                ⚠️ 本插件只对**本模块**生效：service/common 是 library 模块（被 10 个微服务依赖），
+                   给它 repackage 会污染下游依赖 ⇒ 不在本模块的修法范围内。
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
                 ⚠️ 显式关掉 Testcontainers 的 Ryuk 资源回收器。
 
                 理由（实测 2026-10-23）：
@@ -232,7 +257,7 @@
                         Testcontainers 2.0.5 的 ResourceReaper.instance() 只读
                             System.getenv("TESTCONTAINERS_RYUK_DISABLED")
                         （字节码取证：ResourceReaper.class 的 instance() 方法，
-                          ldc "TESTCONTAINERS_RYUK_DISABLED" → System.getenv → Boolean.parseBoolean）
+                          ldc "TESTCONTAINERS_RYUK_DISABLED" → System.getenv → Boolean.parseBoolean)
                         ⇒ 写成 <ryuk.disabled>true</ryuk.disabled> 这种 system property
                           **完全无效**（实测：仍然去拉 ryuk 并挂 4.5 分钟后失败）。
                     -->
@@ -240,6 +265,42 @@
                         <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
                     </environmentVariables>
                 </configuration>
+                <executions>
+                    <!--
+                        🔴 产物层守门（DRIFT-HOTRPC-BOOT-001）：绑在 **verify** 阶段。
+
+                        为什么必须是 verify 而不是默认的 test 阶段：
+                          · surefire 的默认执行绑在 **test** 阶段，而 **test 阶段跑在 package 之前**
+                            ⇒ 那一刻 jar **还不存在** ⇒ 「解包真实产物」这件事在 test 阶段**做不了**。
+                          · verify 阶段在 package **之后** ⇒ target/*.jar 已经是 repackage 后的 fat jar
+                            ⇒ 才解得出真实的 Main-Class / Start-Class。
+
+                        为什么用 surefire 而不是 maven-failsafe-plugin：
+                          · 报告落在 target/surefire-reports/ ⇒ 与本仓其它模块的判定口径一致
+                            （PIT-GLOBAL-021：判定只认机器生成的 XML，不认 stdout 的 "in" 行）。
+
+                        ⚠️ 类名带 IT 后缀 ⇒ surefire **默认** includes（**/*Test.java 等）**不匹配**
+                          ⇒ 默认执行不会在 test 阶段误捞它（那时它只会 skip）。
+
+                        ⚠️ hot.rpc.gate.phase=verify 让用例知道「本轮 jar 必须存在」
+                          ⇒ 找不到 jar 时是**硬失败**而不是 skip（绝不允许假绿）。
+                    -->
+                    <execution>
+                        <id>artifact-gate</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>test</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>**/HotRpcFatJarArtifactGateIT.java</include>
+                            </includes>
+                            <systemPropertyVariables>
+                                <hot.rpc.gate.phase>verify</hot.rpc.gate.phase>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

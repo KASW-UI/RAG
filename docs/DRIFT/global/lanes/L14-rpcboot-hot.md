@@ -128,3 +128,95 @@ ls -d service/*/*-api service/users/*/*-api 2>/dev/null | sort
 
 - **不要 `git add -A`** ⇒ 逐个 `git add` 白名单里的文件。
 - ⚠️ **PIT-GLOBAL-019**：改了上游 ⇒ 拉进同一 reactor（`-am`）。
+
+---
+
+## 八、✅ 完成态（2026-10-26 · 由整合者收尾）
+
+> ⚠️ **本 lane 的子进程在收尾阶段会话中断**（报「database connection is not open」）⇒
+> **生产改动与两个守门类已完整落地**（未提交）⇒ **由整合者接手**：跑守门 + 做 M1 变异 + 补写本节 + 提交。
+> ⇒ 这本身又是一次「子进程结论是证据不是结论」的印证（整合者亲自复核了每一条）。
+
+### 8.1 缺陷与修法
+
+| # | 缺陷 | 修法 | 证据 |
+|---|---|---|---|
+| ① | 🔴 `hot-rpc` 的 pom `<build>` 段**只有** `maven-surefire-plugin`（Ryuk 关闭配置），**没有** `spring-boot-maven-plugin` ⇒ 没有 `repackage` goal ⇒ 产物是**普通 library jar** ⇒ `java -jar` 报「中没有主清单属性」 | 在 `<build><plugins>` 里加 `spring-boot-maven-plugin`（**不写 `<mainClass>`** ⇒ 自动探测 `HotRpcApplication`），**保留** surefire 段与那段长注释 | `service/hot/hot-rpc/pom.xml` |
+
+**修前 / 修后实测（独立复核）**：
+
+```
+修前：service/hot/hot-rpc/target/hot-rpc-0.0.1-SNAPSHOT.jar = 58,873 B
+      MANIFEST.MF 里零个 Main-Class / Start-Class
+修后：98,669,543 B
+      Main-Class: org.springframework.boot.loader.launch.JarLauncher
+      Start-Class: com.rag.hot.hot.rpc.HotRpcApplication
+```
+
+⚠️ **Boot 4 的 loader 类名是 `org.springframework.boot.loader.launch.JarLauncher`**（**`.launch.` 子包**）
+⇒ **不是** Boot 2/3 的 `org.springframework.boot.loader.JarLauncher` ⇒ 守门断言必须用前者，否则**假红**。
+
+### 8.2 🔴 守门（2 个类 · 6 条用例）
+
+| 类 | 阶段 | 断言 |
+|---|---|---|
+| `HotRpcJarExecutableWiringTest`（4 条） | **test**（任何 `mvn test` 都跑） | ① `<build>` 段存在 ② `spring-boot-maven-plugin` 声明存在 ③ 它挂在 `<build><plugins>` 下（**只在 `pluginManagement` 里等于没生效**）④ 不得写死 `<mainClass>` ⑤ surefire 的 Ryuk 段 + `TESTCONTAINERS_RYUK_DISABLED` 必须保留 |
+| `HotRpcFatJarArtifactGateIT`（2 条） | **verify**（package 之后） | ① 真产物的 `Main-Class` == `org.springframework.boot.loader.launch.JarLauncher` **且** `Start-Class` == `com.rag.hot.hot.rpc.HotRpcApplication` ② 是 fat jar 结构（`BOOT-INF/lib/` 存在 + lib 数量 + 体积 ≫ library jar） |
+
+**分层是刻意的**：`test` 阶段跑在 `package` **之前** ⇒ 那一刻 jar 还不存在 ⇒ 「解包真实产物」只能落在 `verify`。
+⇒ 产物层守门**找不到 jar 时硬失败而非 skip**（绝不允许假绿）。
+
+### 8.3 🔴 变异（M1）
+
+| 变异 | 预期 | 实际 |
+|---|---|---|
+| **M1** 删掉 pom 里的 `spring-boot-maven-plugin` 块 | 守门红在「plugin 声明」那条 | ✅ **红**（`pluginMustBeUnderBuildPlugins` + `pomMustDeclareSpringBootMavenPlugin`）· maven EXIT=1 |
+
+#### 8.3.1 🟥 **整合者修的一处守门缺陷（自曝）**
+
+**第一版 M1 变异时，`pomMustDeclareSpringBootMavenPlugin` 那条居然是绿的** ⇒
+根因：它**没有剥 XML 注释** ⇒ 而本 pom 的**说明性注释里就写着**「spring-boot-maven-plugin」这个字符串
+⇒ **删掉真正的 plugin 声明，注释里的字面量照样让它通过** ⇒ **那条守门是恒真的**。
+
+⚠️ 该类自己的 javadoc 里**已经预警过**这件事（「注释里的字面量会打败结构断言」），
+但**只对两条断言做了剥注释**，漏了这条 ⇒ **预警写对了，执行没做全**。
+
+**修法**：三条涉及字面量的断言**全部**先 `stripXmlComments()` 再断言
+⇒ 复跑 M1：`pomMustDeclareSpringBootMavenPlugin` **也红了** ⇒ 守门不再恒真。
+⇒ 还原后 **4/4 全绿**（`maven EXIT=0`）。
+
+**教训**（⇒ 归 `docs/Pitfalls/global/`）：**「字符串包含」类断言面对「同名字符串也出现在注释里」的文件时，必须先剥注释**。
+
+### 8.4 「N8 实际是 2 个模块，L11 漏报了 hot-rpc」
+
+逐个解包 10 个 rpc 模块的产物（修前实测）：
+
+```
+article-rpc   | 104,264,894 B | Main-Class: ...JarLauncher
+comment-rpc   | 104,066,957 B | Main-Class: ...JarLauncher
+favorite-rpc  |  66,468,716 B | Main-Class: ...JarLauncher
+follow-rpc    |  63,967,449 B | Main-Class: ...JarLauncher
+hot-rpc       |      58,873 B | <<无 Main-Class>>      ← L11 没报
+like-rpc      |  99,855,826 B | Main-Class: ...JarLauncher
+message-rpc   |  69,793,492 B | Main-Class: ...JarLauncher
+task-rpc      |      83,827 B | <<无 Main-Class>>      ← L11 报了
+admin-rpc     |  83,175,778 B | Main-Class: ...JarLauncher
+user-rpc      |  83,147,447 B | Main-Class: ...JarLauncher
+```
+
+**漏报根因 = 守门缺口**：`check-jar-executable.sh` 的枚举只扫 `service/*/*-api`
+⇒ **10 个 rpc 模块的产物可执行性从来没被任何守门查过**
+⇒ L11 只能**手工**逐个看 pom ⇒ **手工必漏**（漏了 hot-rpc）
+⇒ 修法 = **L15 把 rpc 纳入枚举**（一次覆盖 20 个模块 ⇒ 立刻精确报出 hot-rpc / task-rpc）
+⇒ 教训 **PIT-GLOBAL-030**。
+
+### 8.5 favorite 零改动
+
+`git diff --name-only` **零个** `favorite` 路径 ⇒ `service/favorite/**` 与 `docs/*/favorite/` **零改动**。
+⚠️ `favorite-rpc` 的 2 处两斜杠 + 1 处 `grpc-inprocess` test scope **按协议保留**（L15 的 M3 变异专门验证这一点）。
+
+### 8.6 交整合者
+
+1. ✅ `check-jar-executable.sh` 纳入 rpc —— **L15 已做**（合回 `ae53f56`）⇒ 本 lane 修完后该脚本对 hot-rpc 转绿。
+2. ✅ baseline 里的 10 条清理 —— **待整合者做**（依赖 L12/L13 合回）。
+3. ⚠️ `HotRpcFatJarArtifactGateIT` 绑在 `verify` 阶段 ⇒ **只跑 `mvn test` 的 CI 不会执行它** ⇒ 需在 CI 里跑 `verify`。
