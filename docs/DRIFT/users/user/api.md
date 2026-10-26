@@ -981,7 +981,7 @@ Recommended Verification: 双侧各制造一次 panic（临时端点或测试钩
 |---|---|---|---|---|
 | MaxConns | `MaxConns int json:",default=10000"` | `GoStyleMaxConnsFilter` | **10000** | ✅ **已实测**：`--rag.protection.max-conns=1` + 并发 ⇒ 第 2 个请求 **503** |
 | MaxBytes | `MaxBytes int64 json:",default=1048576"` | `GoStyleMaxBytesFilter` | **1048576** | ✅ 真实请求栈里在链上 |
-| Breaker | `Middlewares.Breaker default=true` | `GoStyleBreakerFilter` + `GoStyleBreaker` | Go 默认阈值 | ✅ **算法逐行对照一致**（`googlebreaker.go:53-80`）；⚠️ **键空间无界**（`DRIFT-USERAPI-013 ②`） |
+| Breaker | `Middlewares.Breaker default=true` | `GoStyleBreakerFilter` + `GoStyleBreaker` | Go 默认阈值 | ✅ **算法逐行对照一致**（`googlebreaker.go:53-80`）；⚠️ **键空间无界**（`DRIFT-USERAPI-013 ②`）· 🔴 **2026-10-26 只读复核**：Go 的 key = **注册期 `route.Path` 模板**（基数=路由数）· RAG = **raw `getRequestURI()`**（基数=参数取值数）⇒ 且 **user-api 零路径变量 ⇒ 本组件不可观察** ⇒ 详见 §7「7.x-2」 |
 | Shedding | `CpuThreshold json:",default=900"` | `GoStyleCpuSheddingFilter` + `GoStyleAdaptiveShedder` | **900** | ✅ **已实测**（2026-10-24 第八轮：`GoStyleCpuSheddingFilterTest` 过载 ⇒ **503 空 body** + 不触达下游）；⚠️ **RT 统计口径已修**（`DRIFT-USERAPI-012`） |
 | Timeout | `Timeout json:",default=3000"` | `HttpMiddleware`（+5） | **3s** | ✅ 已在 `application.yml` 显式钉住 |
 | gRPC client 熔断 | Go 无对应物（Go 侧只熔 HTTP 入口） | `GoStyleGrpcClientBreakerInterceptor` | — | ❌ **user-api 无接线测试**（follow-api / message-api 有） |
@@ -1710,7 +1710,7 @@ SEMANTICALLY NOT EQUIVALENT
 |---|---|---|---|
 | `DRIFT-USERAPI-009②` | 3s 预算的作用域（Go 不含验签、RAG 含） | **改法 A 落在 `service/users/user/user-api`**（`service/common` 不动） | ✅ **能**（域内）<br>⚠️ 但「全仓一致」要 9 个域各改各的（Go 是逐服务 `server.Use`）⇒ **推广跨域，落地不跨域** |
 | `DRIFT-USERAPI-015` | Redis 主机名解析失败 ⇒ 200/503 摇摆 | 主修法 = 改 **user-api 自己的** `application.yml` | ✅ **能**（域内）<br>⚠️ 同款配置另见 `admin-api`（跨子域）与 `favorite-api`（跨域）<br>✅ **2026-10-26 第十一轮收窄**：**rpc 侧实测无漂移**（三形态 × 双侧 gRPC 直连，code 全同）⇒ **本条的修法只需落在 api 侧**，不必连带改 rpc<br>🔴 **2026-10-26 第十二轮**：**原始观测复现不出来**（dns 24 次探测两侧都 200；blackhole 两侧都 503）⇒ **定性降级为「条件性成立 · 证据不足」**；**候选②实测制造反向差异**（RAG 200 vs Go 503）⇒ **建议否决** ⇒ **本条已不是「跨域归属」问题，是「要不要让 RAG 更 fail-open」的取舍题**（若要 ⇒ 走签字档） |
-| `DRIFT-USERAPI-013` | 过载保护（breaker 键空间 + 注释与实现矛盾） | **`service/common`**（11 个 protection 类） | ❌ **不能** ⇒ **这才是唯一真正跨域的一条** |
+| `DRIFT-USERAPI-013` | 过载保护（breaker 键空间 + 注释与实现矛盾） | **`service/common`**（11 个 protection 类） | ❌ **不能** ⇒ **这才是唯一真正跨域的一条**<br>✅ **2026-10-26 只读复核已完成**（§7 的「7.x-2」）：两侧 key 的**逐字**来源已钉死（Go = 注册期 `route.Path` 模板 / RAG = raw `getRequestURI()`）· RAG 那条「无界风险为零」的 javadoc **是错误的安全保证** · **可观察面在 `article-api`**（user-api 的 9 条路由零路径变量 ⇒ 本组件不可观察）· 方案 B 的**硬约束**（404 取不到模板 ⇒ 不得用 raw URI 兜底）⇒ **落点确认在 global 写权内 ⇒ 本域只报告** |
 | **`DRIFT-USERRPC-V-012`**（2026-10-26 第十一轮新增） | 超时时的**业务日志错误归因**：RAG 记「Redis 写入异常」而客户端收到「超时」（Go 一致） | 落点在 **user-rpc 自己的** `UserDomainService.logout`（Redis 写没绑 gRPC deadline） | ✅ **能**（域内）<br>⚠️ 但**修法口径**与 `global` 域 **E38 第②层**（在途命令不随客户端 deadline 取消）**同型** ⇒ 宜与 global / admin 域**一起定**，别各修各的 |
 
 **⇒ 结论**：users/user 域**不是**「只剩跨域的活」。
@@ -2810,6 +2810,51 @@ Go 侧 `breaker.NewBreaker` 在**路由注册时**调用 ⇒ **有界**。
 | **C. 两条都签成有意偏离** | 承认「RAG 的过载闸门比 Go 更严」并签字 | 需要用户签字；且**键空间无界**这一条**不宜签字**（它是健壮性问题，不是口径分歧） |
 
 ⇒ **建议：A（键空间有界化）+ MaxConns 改 per-route**，但这是**共享层（影响全部 10 个 api 服务）**的设计变更 ⇒ 交由用户拍板。
+
+#### 7.x-2 2026-10-26 只读复核：**键语义钉死** + **可观察面收窄**（本轮不实施）
+
+> **触发**：Jason 指示「继续」⇒ 把本域**最后一条真正跨域**的 `DRIFT-USERAPI-013` 也做一次只读复核，
+> 好让它的拍板同样有**逐字证据**。**结论：本条的前提全部成立，且比原记录更精确；修法落点确认在 `service/common`（global 单写权）⇒ 本域只报告不动代码。**
+
+**① 两侧的 key 到底由什么拼成（逐字）**
+
+| | key 的拼法 | 语义 | 基数 |
+|---|---|---|---|
+| **Go** | `rest/engine.go:149` → `handler.BreakerHandler(route.Method, route.Path, metrics)` ⇒ `rest/handler/breakerhandler.go:19` `breaker.NewBreaker(breaker.WithName(strings.Join([]string{method, path}, breakerSeparator)))`，`breakerSeparator = "://"`（`:15`） | `route.Path` = **注册期路由模板**（如 `/user/avatar/history/:id`）⇒ **同一路由的所有请求共用一个 breaker** | **= 路由数**（有界）|
+| **RAG** | `GoStyleBreakerFilter.routeKey` → `request.getMethod() + "://" + request.getRequestURI()` | `getRequestURI()` = **原始请求 URI（含具体参数值）** ⇒ **每个不同的取值一个 breaker** | **= 参数取值数**（无界）|
+
+⇒ **分隔符两侧一致（都是 `://`）**；**差别只在「path 那一段是模板还是原值」**。
+⇒ ⚠️ 台账原写「Go 侧 `breaker.NewBreaker` 在**路由注册时**调用 ⇒ **有界**」—— 方向正确，**但没写清「注册时传的是 route.Path（模板）」** ⇒ 这才是两侧的真正语义差。
+
+**② RAG 侧那条 javadoc 是**错误的安全保证**（PIT-USERS-SHARED-017 形态）**
+
+`GoStyleBreakerFilter` 的类注释原文写着：
+> 「**为什么 breaker 实例不做无界缓存**：key 由 method+path 构成，基数等于路由数（本模块 13 条，含未匹配路径不会建 key），**无界增长的现实风险为零**」
+
+⇒ **三处都与实现矛盾**：① key 里的 path 是 **raw URI**、不是路由模板 ⇒ 基数 ≠ 路由数；
+② 「未匹配路径不会建 key」**错** —— Filter 跑在 `DispatcherServlet` **外面**，此时还不知道路由匹不匹配 ⇒ **未匹配路径照样建 key**；
+③ 「风险为零」因此**不成立**。
+⇒ 🔴 ⇒ 修法落地时**必须一并改掉这条注释**（否则下一个读代码的人会拿它当依据）—— 它在 `service/common` ⇒ **global 域一并改**。
+
+**③ 可观察面收窄（这条的「跨域」形态比原记录更精确）**
+
+- **user-api 的 9 条路由**（`UserController.java`：`/register` `/login` `/logout` `/get` `/update` `/delete` `/avatar/select` `/avatar` `/avatar/history`）⇒ **全是固定路径，零路径变量**
+  ⇒ ⇒ 在 user-api 上 **raw URI ≡ route pattern** ⇒ ⇒ **013② 在本组件上根本不可观察**（这也解释了它为何一直只是「登记」而非「实测」）；
+- 全仓 10 个 api 服务里**只有 `article-api` 有路径变量**（4 处，如 `@GetMapping("/article/{id}")`）
+  ⇒ ⇒ **013② 的可观察面在 article 域**，而**修法落点在共享层 `service/common`**（影响全部 10 个 api）
+  ⇒ ⇒ **三重跨域**：跨域（users → article）· 跨微服务（落点 `service/common`）· **共享层单写权（只有 global 能写）**。
+
+**④ gRPC 客户端熔断那一侧：两侧是对齐的**（别把它混进来）
+
+RAG `GoStyleGrpcClientBreakerInterceptor` 的键 = **fullMethodName**（`breakers.computeIfAbsent(fullMethodName, …)`）；
+Go 侧 `zrpc/internal/clientinterceptors/breakerinterceptor.go` 的键 = `path.Join(cc.Target(), method)` ⇒ **同样是「per 目标 + per 方法」**。
+⇒ ⇒ **013② 的问题只在 HTTP 层**（§8「第八轮」表里那行「Go 侧无对应物」说的是**Go 的 user-api 没有客户端熔断**，是另一件事，别混谈）。
+
+**⑤ 修法边界（给 global 落地时的一条硬约束）**
+
+若采纳方案 B（用路由模板当键）：**未匹配任何 handler 的请求（404）拿不到路由模板** ⇒
+⇒ Go 侧此时**根本不会进 `BreakerHandler`**（未注册路由没有 breaker）⇒ ⇒ **RAG 侧也不应建 breaker**（或归并到一个固定键）
+⇒ ⇒ **不能用 raw URI 兜底**，否则 **404 扫描器照样能把 map 撑爆** ⇒ **方案 B 必须同时处理「取不到模板」这条路径**。
 
 #### 7.x 归属澄清与 4 处补充（2026-10-24 · 用户提问触发的复核）
 
