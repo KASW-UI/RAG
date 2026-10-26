@@ -589,7 +589,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 |---|---|
 | `service/common` 模块 | **298 条 / 0 failures / 0 errors**（修前 292 ⇒ **净增 6**）· BUILD SUCCESS |
 | 三门禁 | `check-wave-lane-ownership` **EXIT=0** · `check-wave-role-model` **EXIT=0** · `check-wave-coupling` **EXIT=0** |
-| 全量 `mvn -B clean verify` | 见下方「全量回归口径」栏（基线 `138b6ef`） |
+| **全量 `mvn -B clean verify`** | ✅ **BUILD SUCCESS / EXIT=0** · **52 个模块** · **2448 条**（基线 2442 + 本波新增 6）· **failures 0 / errors 0 / skipped 4** · **23:04 min** · 基线 `align/g4-service-common` @ `fc783fb`（代码态 `63079ed`）<br>⚠️ **中间跑过 3 次非绿，原因逐条查清并登记**：① 第三次（`138bac3`）= comment-rpc 一条**既有时序 flake**（见 §4.9.12）⇒ 单独复跑通过；② 第四次 = **EXIT=137（被系统 SIGKILL）** ⇒ 根因是**另一个 lane 同时跑 maven** ⇒ **不是代码问题**（见 §4.9.13）⇒ ⇒ 第五次独占重跑 ⇒ **全绿** |
 | **写权零越权** | 本波改动文件**全部**在 `service/common/**` ＋ 本文件 ⇒ **未触碰** `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/DRIFT/global/_README.md` / `docs/Worktree.md` / `tools/difftest/**` |
 
 #### 4.9.11 🔴 **需回写给整合者 / G1 的共享面口径订正**（本 lane 不写那些文件）
@@ -620,6 +620,17 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 ⇒ 而 comment-rpc 是**纯 gRPC 进程**（没有 spring-webmvc）⇒ ⇒ 「自动配置清单里出现一个
 本进程没有的类，会不会 `NoClassDefFoundError`」这个风险 ⇒ **由这条用例的真 fat jar 启动实测排除了**
 （`@ConditionalOnClass` 的 ASM 元数据判定在 Boot 4 上确实安全）。
+
+#### 4.9.13 🟡 **大回归错峰不是形式主义**：并发跑全量会被系统 **OOM-kill**（实测 EXIT=137）
+
+| 项 | 实测 |
+|---|---|
+| 现象 | 第四次全量回归 **EXIT=137**（SIGKILL）⇒ 死在 **article-rpc** 的测试阶段 ⇒ **失败前 0 条断言失败** |
+| 🔴 **根因** | **另一个 lane 同时在跑 maven**（G1 的 `g1-users-follow` 工作树，05:23 起跑 `*RedisConnectTimeoutSocketTest`）⇒ 两个回归同时抢 CPU/内存 ⇒ **article-rpc 的测试 JVM 被 macOS OOM-kill** |
+| 排除「是我的代码」 | ① article-rpc 在**前三次**全量里都过（2442/2442/2448 条）；② 本波改动与 article-rpc **无交集**（它不扫 `com.rag.common`、无 Redis、无 spring-webmvc ⇒ 我的两个自动配置对它全部惰性）；③ 失败前 **0 条断言失败**；④ 该模块单独复跑通过 |
+| 环境证据 | 机器 24 GB；`docker stats` 显示多个常驻栈（kafka ~980 MiB / nacos ~964 MiB / …）⇒ 基线占用已经不低 ⇒ 再叠两个并发回归就过线 |
+| ⇒ 处置 | 等对方跑完再重跑（**第五次全量 ⇒ 见下表**）⇒ 并已按 AGENTS.md §4.1「**大回归错峰：开始前 session send 知会对方**」**知会 G1/G2/G3** |
+| ⇒ 教训 | 「大回归错峰」这条约定**有真实的失败形态**（不是「慢一点」，是**被杀**）⇒ ⇒ **并发跑全量会被 SIGKILL，而不是报错** ⇒ ⇒ 排查全量回归红/中断时，**第一件事是看是不是被别人挤死的**（`EXIT=137` / `EXIT=143`），而不是先怀疑代码 |
 
 ## 5. 交付物清单
 
