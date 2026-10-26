@@ -1084,3 +1084,44 @@ private static String stripXmlComments(String xml) {
 - 2026-10-26 第二十八轮 L14（整合者修）+ L13（子进程自己发现并修了同族问题）；
 - 关联：`docs/DRIFT/global/lanes/L14-rpcboot-hot.md` §8.3.1 · [`L13-rpcboot-message-task.md`](../../DRIFT/global/lanes/L13-rpcboot-message-task.md) §7.5；
 - 同族：**PIT-GLOBAL-026**（断言 `get() == sdk` 恒红）、**PIT-GLOBAL-030**（守门覆盖不全 ⇒ 手工盘点必漏）。
+
+---
+
+## PIT-GLOBAL-032 🔴 **「跑红」也可能是假红**：两类非代码原因（构建竞态 / 环境时序）—— 必须单独复跑定性
+
+**症状**：第二十八轮全仓回归 `BUILD FAILURE`：
+- `user-rpc` **9 个测试类 · 51 个 error** ⇒ 全部 `Failed to load ApplicationContext`
+  ⇒ 最深层 `Caused by: java.lang.NoClassDefFoundError: com/rag/users/user/proto/UserServiceGrpc`
+- `CommentRpcRuntimeBootGateTest` **1 个 failure** ⇒ 「日志里没有 devh 的『gRPC Server started』」
+
+**两类根因（都不是代码缺陷）**：
+
+| # | 根因 | 判据 | 复跑结果 |
+|---|---|---|---|
+| ① | **构建竞态**（PIT-GLOBAL-019 的老形态） | 回归跑到 `user-proto`（10/52）时**重新编译了 1 个 proto 文件**；而**同一时刻**整合者正在另一个工作树跑 `mvn -o package`（重建 message-rpc）⇒ **两个 Maven 进程同时写 `user-proto/target/`** ⇒ `user-rpc` 编译时拿到的是**半成品**的 classes ⇒ 运行时 `NoClassDefFoundError` | 单独跑 user-rpc ⇒ **6/6 全绿** |
+| ② | **环境时序** | `CommentRpcRuntimeBootGateTest` 要真 Kafka + 真 PG；回归那一刻 broker 不可用（日志停在 Kafka consumer 配置阶段） | 单独跑 ⇒ **1/1 全绿** |
+
+⚠️ **根因 ① 的元教训**：
+**「回归跑着的时候，不要在别的进程里跑同一个 reactor 的构建」** ——
+两个 Maven 进程会同时写 `target/` ⇒ 产物可能半成品 ⇒ 报出来的错误**指向完全无关的模块**。
+⇒ **回归期间只做文档工作**，任何构建都等回归结束。
+
+⚠️ **根因 ② 的元教训**：
+**依赖真 broker / 真 DB 的守门，其失败可能是环境而非缺陷** ⇒
+**必须单独复跑**才能定性 ⇒ **「跑红」不等于「坏」**（与「跑绿 ≠ 对」是对称的纪律）。
+
+### 纪律
+
+**全仓回归红了，先做三件事，顺序不能颠倒**：
+1. **看根因的最深层 `Caused by`** —— 不要看最外层的 `Failed to load ApplicationContext`（那只是**症状**）
+2. **单独复跑那个模块/那个类** —— 绿 ⇒ 环境/竞态；红 ⇒ 才是真缺陷
+3. **查这个模块本轮是否被改过** —— 没改 + 单独跑绿 ⇒ **几乎必然是环境**（本轮 user 域零改动）
+
+⇒ **不要**因为「回归红了」就立刻去改代码 —— 那会把**环境问题修成代码改动**，
+而真缺陷还留在原地。
+
+### 出处
+
+- 2026-10-26 第二十八轮全仓回归（第一次：`regression-full8.log` · `BUILD FAILURE`）
+  ⇒ 第二次（干净的 `regression-full9.log`）用于坐实；
+- 同族：**PIT-GLOBAL-019**（构建进行中改源码 ⇒ 绿的是旧字节码）、**PIT-GLOBAL-027**（守门的绿必须问「绿得独立吗」）。
