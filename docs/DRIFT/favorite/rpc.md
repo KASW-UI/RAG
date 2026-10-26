@@ -42,6 +42,7 @@
 | 第二十一轮 | 🔴 **共享复核器改进后的跨域复跑**（§30）—— `global` 第三十四轮修好我提的 4 条工具缺陷（去噪**行级化** / `go.mod` 权威化 / 两条精确定位通道）⇒ 🔴 **去噪行级化后本域台账有 155 条此前被淹没的引用第一次真被检查** ⇒ 抓出 **1 条 FAIL**：`core/service/serviceconf.go` 的 83-90 行 —— **正是本域第十八轮「抓出并修好」的那一条**，但它在台账里出现 **3 次**、当时**只改了 1 次**（表格的修正列）⇒ **错误列 / 叙述行 / 坑档**三处漏改 ⇒ 本轮**一次改完**（改成「N 行」写法 ⇒ 记录不丢、也不再被任何 `file:NN` 扫描器当活指针）⇒ 改后 **L1 = 0 · L4 = 0** ✅<br>✅ 顺带确认**本域门禁不落后**（②③④ 三条通道本域第十八轮就自己实现了）；🆕 §29 新写的锚点**全部用 `module@version/...` 精确写法** ⇒ 在他们修好的工具里**不落进跨库歧义清单** ⇒ 精确写法应成为本域新标准（存量 62 条歧义仍为提示级，本轮不批量改）<br>🆕 坑档 **PIT-FAV-RPC-029**：「**修一处 ≠ 修完**」（同一处锚点在台账里有 N 个副本）|
 | 第二十二轮 | 🔴 **提交前把本域门禁全跑一遍 ⇒ 抓出第二十轮遗留的 2 处错锚点**（§31）—— 本来只是例行复跑 ⇒ `assertion-audit` **EXIT=1 · 门禁级 2 条**：`FavoriteSqlStatementParityTest.java:296/:324` 的 Go 锚点写成 **logic 层**的 `delete_favorite_folder_logic.go` 的 **336-378 行**，但该文件**只有 96 行** ⇒ 实际指的是 **model 层**的 `service/favorite/rpc/internal/model/favorite_fact.go:336-378`（`DeleteFolderCascade`）⇒ **断言语义对、锚点指错文件** ⇒ 「**证据是假的**」（比没写锚点更危险）<br>⇒ 顺手做**全量语义核对**（门禁只判「行号越界」，抓不到「指错文件但行号在范围内」）：该测试文件**全部 20 个 Go 锚点**逐条回真源核对 ⇒ **18 条正确** · **2 条错锚点已修** · **1 条 I1**（「Go: 同上」无法定位）已展开成真锚点<br>✅ 另核掉 2 条 favorite-rpc 的 I3 ⇒ **全是工具误报**（一个因 excerpt 未从锚点起始行对齐、一个因 excerpt 跨两段）⇒ 锚点本身逐行正确<br>🔴 **根因**：第二十轮**新写了带 20 个 Go 锚点的文件**却**没跑管它的那个门禁** ⇒ 漏检**跨了两轮** ⇒ 坑档 **PIT-FAV-RPC-030**<br>✅ **SQL 探针复跑基线完全一致**（记录 855 / 语句 594 / 语义差异 10 / L1 响应不同 3 例）⇒ `out/` 归一化后**逐字节一致** ⇒ 注释改动**零行为影响** |
 | 第二十三轮 | 🔴🔴 **修掉 SQL 层抓出的 4 处漂移 + 把对拍从「语句层」升级到「落库值层」⇒ 探针转绿**（§32）—— **产品侧 4 处全修**：① `favorite_folder` INSERT 补绑 `create_time`/`update_time`（**同一个** `now` ⇒ Go 的 `curTime` 整条 INSERT 只取一次）② `favorite_item` INSERT 补绑 `create_time` ③ 改名 UPDATE 补 `update_time`（GORM 的 map 形式 Update **自动追加** autoUpdateTime）④ outbox 的 `technical_receipt_id`/`technical_input_hash` 显式写 `''`（Go 是**非指针** string ⇒ 零值是 `''`）⇒ 全部用**应用进程时钟**（**不是** PG 的 `now()`）⇒ 与 Go 同源<br>⇒ 顺带订正 **2 处被实测证伪的 javadoc**（「由 PG 的 now() 生成」「Go 也只写 name」—— 两处**写错了事实**）<br>🔴 **对拍工具自身有 4 个缺陷**：① `PARAM_RE` 丢掉 NULL 参数（静默）② 值提取跑在 normalize **之后** ⇒ `$N` 已成 `?` ③ **只比列集不问 DDL** ⇒ 3 列误报 ④ **L1 精确相等 ⇒ 结构上恒红** ⇒ 判别不了「修没修」⇒ 全部修掉（**DDL 感知** + **L1 归一化**）<br>🟡 「多投影一列」不必然是行为差异 ⇒ 走**带出处的显式登记**（`equivalences.tsv`，**出处自动校验**，不过则作废）⇒ 根因：Go 的 struct **只有 8 个字段、无 `approved_at`** ⇒ 取回后在 struct 层就丢弃<br>✅ **探针转绿**：语义差异 **10 → 0** · L1 响应不同 **3 → 0** · EXIT=0 ⇒ **变异自检 6/6**（含**新增**阴性对照）+ **产品级变异 2/2 转红** ⇒ 绿是**有证据的绿**<br>⇒ 坑档 **PIT-FAV-RPC-031**：「**恒红的信号不携带信息**」 |
+| 第二十四轮 | 🔴 **跨分支论证订正**（§33）—— `global` 第三十八轮回执指出我第十九轮的一条**依据**用错了符号 ⇒ **核完确认：结论对、依据错** ⇒ 台账订正：<br>🔴 原写「favorite 的 client deadline **上界恒为 2s**（`FavoriteRpcClient.capByClientTimeout` 把 `min(ctx 剩余, 2s)` 压进去）」⇒ **错**：那是 **api 侧**的**客户端封顶**（决定 api→rpc 那次调用还剩多久），**不决定** rpc 内部 SQL 的 R；真正决定 R 的是 **rpc 侧 `RpcInterceptor`（`:170-172`）每次调用自己新绑 `now + 2s`** ⇒ ⇒ **本分支上正确的依据 = 「R = 新绑的整预算 − δ，δ 是 handler 前置耗时（毫秒级）」⇒ 与「客户端上界」无关**<br>⚠️ **跨分支提醒**：`global` 侧的 `service/common` 与本分支**不是同一版本**（他们 `:232-237` 的 `min(server, clientRemaining)` vs 本分支 `:170-172` 的服务端自绑）⇒ ⇒ 那边「躲开最坏窗口」的依据**只能是「handler 不烧预算」** ⇒ 结论一致、**依据不同**<br>⇒ 坑档 **PIT-FAV-RPC-033**：「**符号存在 ≠ 符号决定你要论证的那个量**」+「同名文件在不同分支上是两个实现」 |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -2372,13 +2373,28 @@ Nacos 故意指向 `127.0.0.1:1` ⇒ 顺便证明「**注册中心不在也能�
 在 favorite 域**不成立** ⇒ 这才是「毫秒精度对 favorite 零影响」的**真正依据**（可推广的那条）。
 
 ⇒ ⚠️ **对照**：comment 域报的那条（E46）之所以能撞上「最坏 ≈ 1s」，
-是因为它的 per-call deadline = `min(2s, HTTP 剩余预算)` ⇒ **HTTP 剩余预算可能已经很小** ⇒ R 落在「刚过整秒」的区间。
-⇒ **favorite 域的结构性差异**：favorite-api 的 HTTP 预算是 **3s**（`http-timeout: 3s`）而 favorite-rpc 的服务端预算是 **2s**
-⇒ ⇒ favorite 的 client deadline **上界恒为 2s**（`FavoriteRpcClient.capByClientTimeout` 把 `min(ctx 剩余, 2s)` 压进去）
-⇒ ⇒ **但上界恒为 2s 不等于 R 恒为 2s** —— 若某个 handler 在 SQL 之前烧掉了大部分预算，R 照样会变小、照样可能落进最坏区间。
-⇒ ⇒ **真正让 favorite 躲开「最坏 ≈ 999ms」的那条是**：
-**favorite 域没有任何 handler 会在执行 SQL 之前烧掉大部分预算**（create/delete/list 都是「先查后写」的快操作）
-⇒ ⇒ **不要把「上界恒为 2s」当成「不会落进最坏区间」的依据** —— 那是**两条独立的理由**，别混用。
+是因为它的 per-call deadline 会随**上游剩余预算**变小 ⇒ R 可能落进「刚过整秒」的区间。
+
+⇒ 🔴🔴 **2026-10-26 第二十四轮订正**：本段原先写「favorite 的 client deadline **上界恒为 2s**
+（`FavoriteRpcClient.capByClientTimeout` 把 `min(ctx 剩余, 2s)` 压进去）」⇒ **这条依据是错的** ——
+它把 **api 侧**的**客户端封顶**当成了 **rpc 侧 SQL 预算**的决定因素。**两者不是一回事**：
+
+| | 是什么 | 决定谁 |
+|---|---|---|
+| `favorite-api` 的 `FavoriteRpcClient.capByClientTimeout`（`favorite-api/.../client/FavoriteRpcClient.java:156-168`） | **api → rpc** 那次 gRPC 调用的客户端 deadline = `min(ctx 剩余, 2s)` | **客户端超时语义**（这次调用还剩多久）⇒ **不决定** rpc 内部 SQL 的 R |
+| `favorite-rpc` 的 `RpcInterceptor`（`service/common/.../RpcInterceptor.java:170-172`） | **服务端**在**每次调用**上自己新绑 `deadlineEpochMs = now + timeout`（`rpc-timeout: 2s` ⇒ `application.yml:252`） | **SQL 注入器看到的 R** ⇒ `DeadlineState.bindToCurrent(deadlineEpochMs)`（同文件 `:281`） |
+
+⇒ ⇒ **本分支（`align/favorite`）上正确的依据**：
+**R = 服务端每次调用新绑的整预算 − δ**（业务面 2s / 权威读面 3s）⇒ δ 只是 handler 的前置耗时（毫秒级）
+⇒ ⇒ 要落进「刚过整秒」的区间，需要 **δ ≈ 1s** ⇒ ⇒ favorite 的 handler 都是「先查后写」的快操作
+⇒ ⇒ **δ 毫秒级** ⇒ ⇒ **窗口不成立** ⇒ ⇒ **与「客户端 deadline 上界」无关** ⇒ ⇒ 上界那条**别再当依据用**。
+
+⇒ ⚠️ **跨分支提醒（`global` 第三十八轮回执触发）**：`global` 侧的 `service/common` 与**本分支不是同一版本**
+—— 他们的 `RpcInterceptor` 用 `effectiveTimeoutMs = min(serverBudgetMs, clientDeadlineRemainingMs())`
+⇒ **在他们的分支上，客户端剩余预算会压进服务端预算** ⇒ ⇒ 那边「favorite 躲开最坏窗口」的依据
+**只能是「handler 不烧预算」**（与预算数值无关的那条）⇒ ⇒ 结论一致、**依据不同** ⇒
+⇒ 🔴 **引用别域/别分支的 `文件:行号` 前，必须先确认该符号在**本分支**存在且语义相同**
+（同名文件在不同分支上可能是两个不同实现 ⇒ 本域台账的全部行号一律指**本分支 `align/favorite`**）。
 
 ### 28.2 动态验证（两轮，叠 global 的实现跑）
 
@@ -2950,3 +2966,57 @@ M2（改名不推进 `update_time`）里 **L1 差异 = 0**，只有 **write_cols
 | **全量测试** | ✅ **105 例 / 0 失败 / 0 错误 / 3 skip · BUILD SUCCESS**（100 + 新增 5）<br>⚠️ 期间**踩到一次假红**（34 例红在 `favorite-api`）⇒ 确诊是**同工作树并发跑 maven**（探针自己会 `mvn package` + `mvn test` ⇒ 两次 maven 同写一个 `target/`）⇒ **单独重跑全绿** ⇒ 坑档 **PIT-FAV-RPC-032** |
 | **另外三个探针** | ✅ grpc-contract EXIT=0 · authority-live EXIT=0 · api-full-parity EXIT=0（32 case：SAME 24 / SAME_CODE 1 / SAME_BODY 2 / SAME_STATUS 4 / OBS 1）|
 | **共享面** | ✅ **零改动**（`service/common/**` · `docs/DRIFT/_INDEX.md` · `docs/DRIFT/global/**` · `tools/check-ledger-selfcheck.py` 全未碰） |
+
+---
+
+## 33. 2026-10-26 第二十四轮（`align/favorite` 工作树 · 承 `4a875d0`）—— 🔴 **跨分支论证订正**：结论对、依据错
+
+### 33.1 触发
+
+`global` 第三十八轮回执指出：我在第十九轮回执里的 **§4** 用「**client deadline 上界恒为 2s**」
+当「favorite 结构上更难撞上最坏窗口」的依据 ⇒ 🔴 **上界 ≠ 贴近** ⇒ 那条不是结构性论据。
+
+⇒ ⇒ 他们的建议是：§4 的落点应落在**理由 2**（**handler 不烧预算 + SQL 是快操作**）—— 那条与预算数值无关，才是可推广的。
+
+### 33.2 🔴 先核自己的台账，**不要直接认领**
+
+⇒ ✅ 台账第十九轮 §28.1 **早已写对过**（该段末尾明写：
+「**不要把『上界恒为 2s』当成『不会落进最坏区间』的依据** —— 那是**两条独立的理由**，别混用」）
+⇒ ⇒ **真正要改的是那段「对照」写法**（它把 2s 上界摆在了结论附近，容易被读成依据）。
+
+### 33.3 🔴 核完发现：**依据确实错了，而且比对方指出的还更具体**
+
+`global` 说的是「公式两侧同款、favorite 没有结构性差异」。⇒ 我去核**本分支**的实现 ⇒ **本分支的公式与他们不同**：
+
+| | 是什么 | 决定谁 |
+|---|---|---|
+| `favorite-api` 的 `FavoriteRpcClient.capByClientTimeout`（`favorite-api/.../client/FavoriteRpcClient.java:156-168`） | **api → rpc** 那次 gRPC 调用的**客户端** deadline = `min(ctx 剩余, 2s)` | **客户端超时语义** ⇒ **不决定** rpc 内部 SQL 的 R |
+| `favorite-rpc` 的 `RpcInterceptor`（`service/common/.../RpcInterceptor.java:170-172`） | **服务端每次调用自己新绑** `deadlineEpochMs = now + timeout`（`rpc-timeout: 2s` ⇒ `favorite-rpc/src/main/resources/application.yml:252`）⇒ 再由 `:281` 的 `DeadlineState.bindToCurrent(deadlineEpochMs)` 交给 SQL 注入器 | **SQL 预算 R** ✅ |
+
+⇒ ⇒ **本分支上正确的依据**：
+**R = 服务端每次调用新绑的整预算 − δ**（业务面 2s / 权威读面 3s）
+⇒ δ = handler 的前置耗时（favorite 都是「先查后写」的快操作 ⇒ **毫秒级**）
+⇒ ⇒ 要落进「刚过整秒」的区间，需要 **δ ≈ 1s** ⇒ ⇒ **窗口不成立**
+⇒ ⇒ **与「客户端 deadline 上界」完全无关** ⇒ ⇒ 那条**彻底不作为依据**。
+
+⇒ ⇒ 顺带：**`global` 侧的 `service/common` 与本分支不是同一版本**
+（他们 `:232-237` 的 `effectiveTimeoutMs = min(serverBudgetMs, clientDeadlineRemainingMs())`
+vs 本分支 `:170-172` 的服务端自绑）⇒ ⇒ **同一路径在两个分支上是两个不同的文件/实现**
+⇒ ⇒ 在**他们**的分支上，「favorite 躲开最坏窗口」的依据**只能是「handler 不烧预算」**（与预算数值无关那条）
+⇒ ⇒ **两边结论一致、依据不同** ⇒ ⇒ 各写各的，**不要跨分支搬行号**。
+
+### 33.4 教训（同型坑档 **PIT-FAV-RPC-033**）
+
+1. 🔴 **符号存在 ≠ 符号决定你要论证的那个量** ⇒ 「上界恒为 2s」听起来合理，但控制的是**另一个量**。
+2. 🔴 **同名文件在不同分支上可能是两个不同实现** ⇒ 跨域/跨分支引用 `文件:行号` 前，
+   **必须确认该符号在本分支存在且语义相同** ⇒ 本域台账的全部行号一律指**本分支 `align/favorite`**。
+3. ⇒ **被别域指出时先核自己的台账** —— 这次核完发现**台账别处早已写对**，要改的是**对照段的写法**，
+   而不是整段推翻 ⇒ **认领要认到「具体哪一句错」，不是「我错了」**。
+
+### 33.5 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| **符号存在性核对** | ✅ `capByClientTimeout` 在**本分支**存在，但位于 **`favorite-api`**（`favorite-api/.../client/FavoriteRpcClient.java:156-168`）⇒ 与 rpc 侧 SQL 预算**无关** |
+| **本分支 R 的决定者** | ✅ `service/common/.../RpcInterceptor.java:170-172`（服务端每次调用新绑 `now + timeout`）+ `:281`（`bindToCurrent`）⇒ `rpc-timeout: 2s`（`application.yml:252`） |
+| **本轮性质** | ✅ **纯台账订正** ⇒ **产品代码零改动** · **共享面零改动** |
