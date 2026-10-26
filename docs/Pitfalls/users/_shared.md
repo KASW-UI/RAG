@@ -922,7 +922,7 @@ UserApiProtectionMvcTest.normalRequestReachesBusinessLogic
        --domain users --repo-root "/Users/pr/Documents/java&golang/RAG"
    ```
 
-⇒ **逐层根因与复现命令 ⇒ 本节上文；本域台账侧的同步回写 ⇒ [`docs/DRIFT/users/_shared.md`](../../../DRIFT/users/_shared.md) 的「2026-10-26 复测」小节。**
+⇒ **逐层根因与复现命令 ⇒ 本节上文；本域台账侧的同步回写 ⇒ [`docs/DRIFT/users/_shared.md`](../../DRIFT/users/_shared.md) 的「2026-10-26 复测」小节。**
 
 > ⚠️ **这里还有一个更普适的坑**：`merge-base(HEAD, do-my-own-gh)..HEAD` 这个窗口算法，
 > **只有在「HEAD 是一个从 do-my-own-gh 分出去的域工作树」时才有意义**；

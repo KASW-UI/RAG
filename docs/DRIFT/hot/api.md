@@ -1689,7 +1689,7 @@ RAG：`--rag.protection.max-conns=8`），16 个请求**完全重叠**（两侧�
 > **发现轮次**：2026-10-24 第八轮
 > **状态**：✅ **已闭合（第十一轮，2026-10-24）** —— 根因 = **候选 ②（剩余预算的取样时刻）**，
 > 已修（**DRIFT-HOTAPI-029**）；修后两侧**逐波完全一致**。以下是原始记录（保留供追溯）。
-> **⇒ 隔离实验与判决过程 ⇒ [DRIFT-HOTAPI-029](#drift-hotapi-029--已修--semantic-mismatch--medium)**
+> **⇒ 隔离实验与判决过程 ⇒ [DRIFT-HOTAPI-029](#drift-hotapi-029-✅-已修--semantic-mismatch--medium)**
 
 ### 现象
 

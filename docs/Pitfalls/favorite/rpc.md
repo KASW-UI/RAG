@@ -947,7 +947,7 @@ RAG 侧两个模块**都是 `java -jar` 真起的** ⇒ ① ② 这类问题**�
 > ⇒ 凡是**可枚举、可数出来**的断言，都要有一条**能复跑的机检**。
 
 ⇒ 本域落地：新增
-[`tools/ledger-lint/favorite/check-ledger-vs-reality.py`](../../../../tools/ledger-lint/favorite/check-ledger-vs-reality.py)
+[`tools/ledger-lint/favorite/check-ledger-vs-reality.py`](../../../tools/ledger-lint/favorite/check-ledger-vs-reality.py)
 —— **从台账正文抽断言**（不把真相写死在工具里）⇒ **独立**从仓库算实际值 ⇒ 逐条比对。
 
 ⚠️ **工具自身也要分级**：

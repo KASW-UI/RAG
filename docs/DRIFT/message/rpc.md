@@ -714,8 +714,8 @@ Go 侧同一命令连不上。**同时**：注释给了错误的安全感（§3.
 > 新增 `GoStyleRpcBreakerInterceptor` / `GoStyleRpcSheddingInterceptor` / `GoStyleRpcFailurePolicy` /
 > `GoStyleRpcProtectionChain`（**全在共享模块 `service/common`**），链序 `recover → breaker → shedding → business`。
 > ⇒ **本条三个拦截器已全部落地**，不再是 OPEN。
-> ⚠️ **但带出两条新的尾巴**：见 [`DRIFT-MSG-V-024`](#drift-msg-v-024)（DB 异常两侧 status 不同 ⇒ 熔断判定分岔）
-> 与 [`DRIFT-MSG-V-026`](#drift-msg-v-026)（**截至 2026-10-24 第九轮，其余 8 个带 gRPC server 的 rpc 组件已全部接入**本链；
+> ⚠️ **但带出两条新的尾巴**：见 [`DRIFT-MSG-V-024`](#3-✅-drift-msg-v-024已修db--未知异常走-unknown与-go-的熔断判据对齐)（DB 异常两侧 status 不同 ⇒ 熔断判定分岔）
+> 与 [`DRIFT-MSG-V-026`](#3-✅-drift-msg-v-026-已修8-个-rpc-组件全部接入熔断--降载链)（**截至 2026-10-24 第九轮，其余 8 个带 gRPC server 的 rpc 组件已全部接入**本链；
 > 当时只有 `message-rpc` 接入 ⇒ 跨组件不变量未闭合 ⇒ 已在第九轮闭合）。
 >
 > ⚠️ **2026-10-24 更正**：本节上一版把「其余 9 个 rpc 组件未接入」写成了 `SD-2026-10-23-10` ——
@@ -2097,7 +2097,7 @@ breaker-probe  ：A 组 17 条逐条一致 / B 组 prefix=AAAAA / C 组 go=0.25 
 > ⚠️ **跨域影响（不在本轮范围）**：同一套写法（独立账本 + `baseline-on-migrate=true` + 共享 schema）
 > 在 **`like-rpc`** 上**同样成立** ⇒ 它的迁移从 V1 起步 ⇒ V1 会被顶掉 ⇒ `like_record` 建不出来。
 > ⚠️ **`article-rpc` 经实测不受影响**（迁移从 V8 起步，没有 V1 可跳）⇒ 已从本条剔除。
-> ⇒ 登记为跨组件待办，见 [`DRIFT-MSG-V-029`](#drift-msg-v-029-跨组件待办)。
+> ⇒ 登记为跨组件待办，见 [`DRIFT-MSG-V-029`](#drift-msg-v-029-🆕-跨组件待办like-rpc-有与-v-027-同款的-flyway-baseline-缺陷article-rpc-经核实不受影响已从本条剔除)。
 
 ---
 

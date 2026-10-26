@@ -1485,7 +1485,7 @@ Must Preserve: 「Redis 不可用 ⇒ **fail-open 放行**」（Go 的 `err == n
 > ⇒ 机器复核工具的「登记的哈希必须存在 / 必须在祖先链上」这类判据**对本域无从下手**。
 > ⇒ 本表把「**条目 ↔ 销账方式 ↔ 销账提交**」变成可解析的结构，
 > 供 `global` 域的 `DOMAIN_CFG['users']` 直接消费
-> （判据规格 ⇒ [`users/_shared.md`](../../_shared.md) 的「**可机检不变量**」一节；
+> （判据规格 ⇒ [`users/_shared.md`](../_shared.md) 的「**可机检不变量**」一节；
 > 同构的 rpc 侧表 ⇒ [`user/rpc.md` §8.1](./rpc.md)）。
 >
 > ⚠️ **每个 SHA 都逐个 `git show --stat` 核过主题与文件面**（PIT-USERS-SHARED-020），**不靠标题推断**。
@@ -2345,7 +2345,7 @@ RAG 侧 `GlobalExceptionHandler#handleAny:262-272` ⇒ **HTTP 500 + 完整 envel
 | 3 | `rest/engine.go:101-113` `bindRoute` | 顺序：① `buildChainWithNativeMiddlewares` ② `appendAuthHandler` ③ `for _, mw := range ng.middlewares { chn = chn.Append(...) }` |
 | 4 | `rest/engine.go:70-84` `appendAuthHandler` | `chn = chn.Append(handler.Authorize(...))` ⇒ **JWT 用 Append，不是 Prepend** |
 | 5 | `user/api/usercenter.go:37` | `server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, ...))` ⇒ observability 进 `ng.middlewares` |
-| 6 | `rest/chain/chain.go:81-91` `Then` | `for i := range { h = c.middlewares[len-1-i](h) }` ⇒ **索引 0 最外层、先执行** |
+| 6 | `rest/chain/chain.go:81-91` `Then` | `for i := range { h = c.middlewares`len-1-i` }` ⇒ **索引 0 最外层、先执行** |
 
 **⇒ Go 的最终执行序（本轮逐环推出）**：
 

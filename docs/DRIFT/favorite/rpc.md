@@ -1026,7 +1026,7 @@ breakerName := path.Join(cc.Target(), method)
 ### 16.7 🆕 机器化体检：Go 侧源文件**覆盖闭合**
 
 **问题**：「台账是不是**全**的」以前只能靠人肉翻 50 个 Go 文件。
-**解法**：新工具 [`tools/ledger-lint/favorite/check-ledger-selfcheck.py`](../../../../tools/ledger-lint/favorite/check-ledger-selfcheck.py)
+**解法**：新工具 [`tools/ledger-lint/favorite/check-ledger-selfcheck.py`](../../../tools/ledger-lint/favorite/check-ledger-selfcheck.py)
 （域内文件，**不碰共享面**）⇒ 机检三件事：**章节指针** / **编号闭合** / **Go 源文件覆盖**。
 
 #### 16.7.1 机检结果（核对 2026-10-25）
@@ -1057,7 +1057,7 @@ breakerName := path.Join(cc.Target(), method)
 
 | 误报类 | 处理 |
 |---|---|
-| 正文里裸写的路径（如 ``DRIFT/favorite/rpc.md`` §5-U1``）被判死链 | ⇒ 只有 **markdown 链接** ``[..](path.md) §x.y`` 才做文件级解析；裸路径是「位置描述」，不判 |
+| 正文里裸写的路径（如 ``DRIFT/favorite/rpc.md`` §5-U1``）被判死链 | ⇒ 只有 **markdown 链接** ```path.md`（**占位待补**） §x.y`` 才做文件级解析；裸路径是「位置描述」，不判 |
 | 指向根 `AGENTS.md` / 共享 `_INDEX.md` 的引用被判死节 | ⇒ 把这 4 个外部目标纳入索引，按**真实标题**判定 |
 | RAG 侧 `target/` 下的 protoc 产物被算成源文件 | ⇒ 生成代码不计入覆盖检查 |
 | 表格里**有语境列**的裸行号（`:129`，列头已写「RAG（`FavoriteController`）」）被判问题 | ⇒ 裸行号降级为**提示级**；无语境才需人工修 |
@@ -1208,7 +1208,7 @@ breakerName := path.Join(cc.Target(), method)
 
 ### 19.1 ✅ 可动项 A：**权威读 HTTP 面的双侧活体对拍**
 
-**新工具**：[`tools/authority-live-probe/favorite/`](../../../../tools/authority-live-probe/favorite/README.md)
+**新工具**：[`tools/authority-live-probe/favorite/`](../../../tools/authority-live-probe/favorite/README.md)
 （`run.sh` + `expected.txt` + `seed.sql` + 13 个真源逐字节复制件 + Go 侧探针）
 **Java 侧**：`FavoriteAuthorityLiveParityTest`（真 PG Testcontainers + 真 Flyway + 真 MyBatis + 真 servlet）
 
@@ -1224,7 +1224,7 @@ breakerName := path.Join(cc.Target(), method)
 
 ### 19.2 ✅ 可动项 B：**域外写入方盘点机检**
 
-**新工具**：[`tools/outbox-writer-audit/favorite/check-outbox-writers.py`](../../../../tools/outbox-writer-audit/favorite/README.md)
+**新工具**：[`tools/outbox-writer-audit/favorite/check-outbox-writers.py`](../../../tools/outbox-writer-audit/favorite/README.md)
 
 | 项 | 结果 |
 |---|---|
@@ -1715,7 +1715,7 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 
 ### 23.3 修法：4 个起 PG 的探针**统一**加固
 
-新工具：[`tools/probe-gate/favorite/`](../../../../tools/probe-gate/favorite/README.md)
+新工具：[`tools/probe-gate/favorite/`](../../../tools/probe-gate/favorite/README.md)
 
 | 探针 | 原等待 | 改后 |
 |---|---|---|
@@ -1795,7 +1795,7 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 | 类别 | 条数 | 内容 | 落点 |
 |---|---|---|---|
 | **A · 已识别且可修的漂移** | **0 ⇒ 3 ⇒ 0**（🔴 第二十轮补上「SQL 语句层」后新增 3 处 ⇒ ✅ **第二十三轮全部修掉**） | 已修：rpc 6 处 L2 + 2 处真 bug；api 4 处（L2×2 + javadoc 假断言×2 + L1×1）；DDL 14 处 DEFAULT + 3 条索引（**性能非行为**）<br>已签字 **9** 条（API-001/002 · COMMON-001/002 · RPC-001/003/004/006/007）· 已撤销 2 条（RPC-002/005）· 🏷 候选 **0**<br>🔴 **第二十轮新增 3 处** ⇒ ✅ **第二十三轮全修**：① `favorite_folder` INSERT 不绑 `create_time`/`update_time` ② `favorite_item` INSERT 不绑 `create_time` ③ 改名不推进 `update_time`（+1 处低影响：outbox 两个投递列 `NULL` vs `''`）⇒ 修完**探针转绿**（语义差异 10 → 0 · L1 3 → 0）⇒ **§29 / §32** | §2 / §3 · `api.md` §2 · `docs/Intentional_Deviations/favorite/` · **§29 / §32** |
-| **B · 域内能补的证据缺口** | ~~**1 + 1**~~ ⇒ **0 + 1** | **B1 = U8**：create / create_item 的**成功路径**未双侧对拍（⇒ 见 §24.2）—— ✅ **已于第十六轮闭合**（15 case 全 SAME ⇒ **§25**）<br>**B2**：V7 上线前的 **6 条域外写入方人工确认**（**流程项，不是代码项** ⇒ **仍待办，但不是「未知项」**） | §24.2 · §25 · [`tools/outbox-writer-audit/favorite/CHECKLIST.md`](../../../../tools/outbox-writer-audit/favorite/CHECKLIST.md) |
+| **B · 域内能补的证据缺口** | ~~**1 + 1**~~ ⇒ **0 + 1** | **B1 = U8**：create / create_item 的**成功路径**未双侧对拍（⇒ 见 §24.2）—— ✅ **已于第十六轮闭合**（15 case 全 SAME ⇒ **§25**）<br>**B2**：V7 上线前的 **6 条域外写入方人工确认**（**流程项，不是代码项** ⇒ **仍待办，但不是「未知项」**） | §24.2 · §25 · [`tools/outbox-writer-audit/favorite/CHECKLIST.md`](../../../tools/outbox-writer-audit/favorite/CHECKLIST.md) |
 | **C · 跨域（本域只读）** | **5 ⇒ 6** | ① 容器层参数上限口径（与 hot 域 `DRIFT-HOTAPI-030` 同一格）② 405 多一个 `Content-Type`（落点 `service/common`，其 javadoc 被实测证伪）③ Go 多一个 `traceparent`（落点 `service/common` 的 `HttpMiddlewareFilter`）④ 🔴 **别域模块**运行时缺 `grpc-inprocess` ⇒ 可部署 jar 起不来 —— ⚠️ **本条数字已被同节 §24.4 归因翻案**：真缺 = **3 个可执行应用模块**（article-rpc / like-rpc / task-rpc）+ **4 个 `-common` 库**（不算可执行模块）；原写「13 个」**是错的**（详见 §24.4） ⑤ `like-api` 的熔断注释 ⑥ 🔴 **E65（第二十八轮）**：**favorite-rpc 的出向 gRPC 调用不继承请求 deadline** —— Go 侧出向调用吃 otel span 的 `depCtx`（父 ctx deadline 原样保留）vs RAG 侧 `applyTo` 在 gRPC 服务端路径**从未绑定**（`begin` 主代码调用点只有 HTTP 一处）⇒ 出向调用**零期限** ⇒ 死线到点后 Go **立刻失败不写**、RAG **照跑会写** ⇒ 🔴 两侧对「这次操作算不算成功」可能**相反**；⇒ 但**概率小**（R = 整预算 − δ）· **后果轻**（两处出向调用都在**事务外**）⇒ ⇒ **修法完全在共享层 ⇒ favorite 零改动即受益**（**§37**） | §22.3 / §22.4 · `api.md` §3 / §9.5 · **§37** ⇒ **收口在 `global`** |
 | **D · 库级 / 不可观测（明确「不做」）** | **3** | ① gRPC **措辞**（grpc-go 区分未知方法/未知服务，grpc-java 共用一种）② gRPC **响应头 key 集合**（grpc-java 多 `grpc-accept-encoding` / `grpc-encoding`）③ percent-encoding 的 `~` 边界差 1 字节（L0 帧层；本域 24 条文案**无 `~`** ⇒ 客户端不可观测） | §20.4 / §20.5 ⇒ 两侧 `code` 语义一致 ⇒ **属库级，不是不一致** |
 
@@ -1838,7 +1838,7 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 
 | 项 | 值 |
 |---|---|
-| **新工具** | [`tools/ledger-lint/favorite/check-ledger-vs-reality.py`](../../../../tools/ledger-lint/favorite/check-ledger-vs-reality.py) |
+| **新工具** | [`tools/ledger-lint/favorite/check-ledger-vs-reality.py`](../../../tools/ledger-lint/favorite/check-ledger-vs-reality.py) |
 | **它管什么** | 现有 `check-ledger-selfcheck.py` 管的是「**台账之间**」（指针 / 编号 / Go 源文件落点）⇒ **不管「台账说的」vs「仓库实际的」** ⇒ 本工具补这一层 |
 | **做法** | **从台账正文里抽断言**（不把「真相」写死在工具里）⇒ 再**独立**从仓库算实际值 ⇒ 逐条比对 ⇒ 不一致即红 |
 | **覆盖的断言类型** | 测试计数 · 已签字条数 · 🏷 候选数 · 跨域清单的条数 · 探针清单 · 端口段声明 · 「零产品代码改动」声明 · Go 源文件覆盖 |
@@ -1846,7 +1846,7 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 
 ### 24.4 🔁 本轮「台账 vs 实际」复核的**结果**（工具 + 人工双向独立）
 
-> 工具：[`tools/ledger-lint/favorite/check-ledger-vs-reality.py`](../../../../tools/ledger-lint/favorite/check-ledger-vs-reality.py)
+> 工具：[`tools/ledger-lint/favorite/check-ledger-vs-reality.py`](../../../tools/ledger-lint/favorite/check-ledger-vs-reality.py)
 > 口径：**断言从台账正文里抽** ⇒ **独立**从仓库算实际值 ⇒ 逐条比对。
 > ⇒ 工具与人工**各算一遍**，结论必须一致（§7「工具第一版输出不能直接当结论用」）。
 
@@ -1920,7 +1920,7 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 
 | 项 | 值 |
 |---|---|
-| **实现** | [`tools/grpc-contract-probe/favorite/go/service/favorite/rpc/cmd/upstreamstub/main.go`](../../../../tools/grpc-contract-probe/favorite/go/service/favorite/rpc/cmd/upstreamstub/main.go)（**Go**，~200 行） |
+| **实现** | [`tools/grpc-contract-probe/favorite/go/service/favorite/rpc/cmd/upstreamstub/main.go`](../../../tools/grpc-contract-probe/favorite/go/service/favorite/rpc/cmd/upstreamstub/main.go)（**Go**，~200 行） |
 | **它是什么** | `UserService.GetUser` + `ArticleService.GetArticle` 的**最小实现**，按 **uid / article_id** 查一张写死的表 |
 | **它不是什么** | ⚠️ **不是 user-rpc / article-rpc 的实现** ⇒ **不在** `go/filelist.txt` 的 sha256 复制件清单里（与 `cmd/schemaprep` 同款） |
 | **两侧怎么用** | **两侧共同打它** ⇒ 两边收到的**字节相同** ⇒ 差出来的才是 favorite 自己的行为差异，不是「两个桩的差异」 |
@@ -2020,7 +2020,7 @@ presence 检查**变成永真** ⇒ 请求被**直接放行**（`code=OK`，**�
 | **本轮新漂移** | **0 条** |
 | **本轮改动** | 探针（`tools/grpc-contract-probe/favorite/`）+ 1 个新测试类（`favorite-rpc`，**只读断言**）+ 1 条**注释**纠错（`favorite-rpc`）⇒ **产品代码行为零改动** |
 | **域内「可修漂移」** | **仍是 0 条**（§24.1 的盘点结论不变） |
-| **域内「未知项」** | **U8 已销账 ⇒ 归零**；剩下的只有 **B2**（V7 上线前的 6 条域外写入方人工确认 · **流程项**）⇒ 见 [`tools/outbox-writer-audit/favorite/CHECKLIST.md`](../../../../tools/outbox-writer-audit/favorite/CHECKLIST.md) |
+| **域内「未知项」** | **U8 已销账 ⇒ 归零**；剩下的只有 **B2**（V7 上线前的 6 条域外写入方人工确认 · **流程项**）⇒ 见 [`tools/outbox-writer-audit/favorite/CHECKLIST.md`](../../../tools/outbox-writer-audit/favorite/CHECKLIST.md) |
 | **跨域** | 仍是 §24.1-C 的 5 条 + §3.5 的 `global` 收口项 ⇒ **本域只读**，不归本轮 |
 
 ### 25.9 本轮全量验证（全部实测）
@@ -2219,7 +2219,7 @@ Nacos 故意指向 `127.0.0.1:1` ⇒ 顺便证明「**注册中心不在也能�
 ⇒ 退出码：`0` = A 炸(uri) 且 C 炸(servlet) 且 B 起来。
 
 ⚠️ **本探针不证明什么**：下游 `user-rpc` / `article-rpc` 连不上（它们**根本不存在**）；
-「下游在场」那条分支由 [`tools/grpc-contract-probe/favorite/`](../../../../tools/grpc-contract-probe/favorite/) 第二轮负责（§25）。
+「下游在场」那条分支由 [`tools/grpc-contract-probe/favorite/`](../../../tools/grpc-contract-probe/favorite/) 第二轮负责（§25）。
 ⚠️ 也不覆盖 Go 那个 **16062 的 DevServer 面** ⇒ 见 **U9**。
 
 ### 26.8 🔴 **U9**（新登记 · 待拍板）：Go 生产形态有 **16062** 那个 HTTP 面，RAG 侧没有

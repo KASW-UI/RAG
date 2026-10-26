@@ -66,7 +66,7 @@
 
 ⇒ **落码窗口**：**G1~G3 期间 `service/common` + `users-common` 只读、只登记反馈单**（7 项，AGENTS.md §5.3e）；
    **G4 激活时**才落码 ⇒ G1~G3 中改共享层 ⇒ **该波测试结论作废**（编译绿 ≠ 行为对）。
-   ⇒ 波次表 / 依赖 DAG ⇒ [`../../../_cross/cross-domain-coupling.md`](../../../_cross/cross-domain-coupling.md) §二·§三。
+   ⇒ 波次表 / 依赖 DAG ⇒ [`../../_cross/cross-domain-coupling.md`](../../_cross/cross-domain-coupling.md) §二·§三。
 
 ### 3.2 已合回（第二十八轮 · 4 条）
 

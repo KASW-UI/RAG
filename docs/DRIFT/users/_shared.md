@@ -77,7 +77,7 @@ expected: <field "username" is not set
 | **覆盖情况（2026-10-21 实测）** | `UserDomainService` **11 处**（login/register/update/selectavatar/uploadavatar 等主路径）；`AdminDomainService` 此前 **0 处**，本轮已补到 **13 处**（admin-api 对 admin-rpc 的全部业务调用） |
 | **⚠️⚠️ 此前从未真正生效** | **这 24 处守卫在 gRPC server 路径上一直是通过死代码在跑**：`onHalfClose()` 从未被调用（gRPC `ServerInterceptor` 压根没挂到 server 上，根因见 §6.4 的 H2 勘误），handler 线程上 `DeadlineState` 恒未设置 ⇒ `checkDeadline()` 的条件恒为 false，**一次都没有拦下过任何请求**。2026-10-21 补 `@Bean GrpcServerConfigurer` 后才第一次真正可达 |
 | **回归网** | `AdminDomainServiceDeadlineTest`（2 条，13 方法逐个拦 + 反向放行）。**但它只能证明「分支逻辑对」，不能证明「生产路径会走到」** —— 这一点已被本轮实测打脸：守卫全绿，而 `onHalfClose` 从未执行。见下 |
-| **⚠️ 它不能做什么** | **不能取消在途 IO**。JDBC 驱动不响应线程 interrupt，这是 Java 侧的结构性限制，属 §3.4.1 B-1，**不是 DRIFT-018 能修的**。B-1 由 `DeadlineQueryTimeoutInjector` 的 `setQueryTimeout` 关闭（已实施并端到端验证：查询滞留 4303ms → **176ms**，与 Go 的 182ms 同量级）<br>🔴 **2026-10-26 补记（装配层前提）**：上面那句「已实施并端到端验证」**隐含一个从未被断言过的前提** —— 那两个拦截器**真的进了 MyBatis 的插件链**（`@Import` 只是**声明点**，收不收进链是**消费点**上的运行期事实）。端到端实测证明它**事实上是通的**，但那是**一次性证据、不是常驻断言** ⇒ 谁摘掉 `@Import`，测试全绿、线上才炸（缺翻译器 ⇒ 57014 不翻译 ⇒ 落进 `catch (Exception e)` ⇒ 被改写成 `INTERNAL` ⇒ api 渲染 **5001** 而 Go 是 **1015**）。<br>⇒ **已补常驻守网**：`users/user` 域 `UserRpcContainerWiringTest` +3 条（插件链 / 挂载点 / 负控，含 M1·M2·M3 三次变异验证）、`users/admin` 域 `AdminRpcContainerWiringTest` +2 条 ⇒ 详见 [`users/user/rpc.md`](users/user/rpc.md) **第十二轮**（**覆盖缺口闭环，不是新漂移**）<br>🔴 **2026-10-26 晚补记 · 全仓 10 个 rpc 组件的 B-1 插件链盘点（只读，跨域）** —— 我域先前报给 global 的待办「其余 9 个 rpc 组件是否注册 B-1 两个拦截器」**已实测结掉**：<br>**判据必须逐个看「有无 SQL 路径」**，不能一刀切（SQL 路径 = 有 `*Mapper.java` 或 `@Select/@Insert/BaseMapper/DataSource/JdbcTemplate`）：
+| **⚠️ 它不能做什么** | **不能取消在途 IO**。JDBC 驱动不响应线程 interrupt，这是 Java 侧的结构性限制，属 §3.4.1 B-1，**不是 DRIFT-018 能修的**。B-1 由 `DeadlineQueryTimeoutInjector` 的 `setQueryTimeout` 关闭（已实施并端到端验证：查询滞留 4303ms → **176ms**，与 Go 的 182ms 同量级）<br>🔴 **2026-10-26 补记（装配层前提）**：上面那句「已实施并端到端验证」**隐含一个从未被断言过的前提** —— 那两个拦截器**真的进了 MyBatis 的插件链**（`@Import` 只是**声明点**，收不收进链是**消费点**上的运行期事实）。端到端实测证明它**事实上是通的**，但那是**一次性证据、不是常驻断言** ⇒ 谁摘掉 `@Import`，测试全绿、线上才炸（缺翻译器 ⇒ 57014 不翻译 ⇒ 落进 `catch (Exception e)` ⇒ 被改写成 `INTERNAL` ⇒ api 渲染 **5001** 而 Go 是 **1015**）。<br>⇒ **已补常驻守网**：`users/user` 域 `UserRpcContainerWiringTest` +3 条（插件链 / 挂载点 / 负控，含 M1·M2·M3 三次变异验证）、`users/admin` 域 `AdminRpcContainerWiringTest` +2 条 ⇒ 详见 [`users/user/rpc.md`](user/rpc.md) **第十二轮**（**覆盖缺口闭环，不是新漂移**）<br>🔴 **2026-10-26 晚补记 · 全仓 10 个 rpc 组件的 B-1 插件链盘点（只读，跨域）** —— 我域先前报给 global 的待办「其余 9 个 rpc 组件是否注册 B-1 两个拦截器」**已实测结掉**：<br>**判据必须逐个看「有无 SQL 路径」**，不能一刀切（SQL 路径 = 有 `*Mapper.java` 或 `@Select/@Insert/BaseMapper/DataSource/JdbcTemplate`）：
 
 | rpc 组件 | `SqlTimeoutStatusTranslator` 注册点 | `DeadlineQueryTimeoutInjector` 注册点 | `*Mapper.java` | 判定 |
 |---|---|---|---|---|
@@ -1101,7 +1101,7 @@ python3 "<global worktree>/tools/check-ledger-selfcheck.py" \
 （45 第 3 层 + 12 第 1 层 + 3 第 4 层，**全是旧版误判**）⇒ ⇒ **别照着旧版输出改台账**。
 🔴 **2026-10-26 23:1x 已过期**：`align/global` 已合回（`4f839f9`）⇒ **本仓那份工具已随合回更新**（另含 comment 域**刻意不登记**的理由说明）⇒
 **现在直接跑 `python3 tools/check-ledger-selfcheck.py --domain users --repo-root .` ⇒ 层 0~4 全部通过** ⇒ **不必再绕道 worktree 版**（2026-10-26 23:30 实测）。
-⇒ 逐层根因与复现命令 ⇒ [`docs/Pitfalls/users/_shared.md` 的 PIT-USERS-SHARED-019](../../../Pitfalls/users/_shared.md)。
+⇒ 逐层根因与复现命令 ⇒ [`docs/Pitfalls/users/_shared.md` 的 PIT-USERS-SHARED-019](../../Pitfalls/users/_shared.md)。
 
 ### 📐 可机检不变量（给 `global` 域的 `DOMAIN_CFG['users']`）—— 2026-10-26
 
@@ -1114,7 +1114,7 @@ python3 "<global worktree>/tools/check-ledger-selfcheck.py" \
 | # | 不变量 | 判据（可机器实现） | 需要新数据吗 | 本域现状（2026-10-26） |
 |---|---|---|---|---|
 | **I1** | **分类计数守恒** | `rpc.md §4.4` 的每类计数 ↔ `§7` 里 `### DRIFT-USERRPC-V-NNN` 标题的**状态标记**（✅已修 / ✅已销账 / ✅判为不成立 / 🔴未修）**一一对应**：每条目**恰好**被计入一类，且被计入的类计数与表里写的数字相等。`api.md` 同理（`§4` 矩阵 ↔ `§7` 的 `DRIFT-USERAPI-NNN`） | ❌ **不需要** | 手工核对过：rpc 侧 §4.4 的「OBSERVABLE DIFFERENCE = 2」= V-002 + V-012；其余 7 条分属「已修/已销账/判为不成立/不可观察」四类 |
-| **I2** | **销账提交存在性 + 祖先链** | 每个「已修 / 已关闭 / 已签字」条目**必须登记至少一个 SHA**；该 SHA 必须存在于仓库，且在 `do-my-own-gh` 的祖先链上 | ⚠️ **需要** —— 但**本域已补好**：[`users/user/rpc.md §8.1`](users/user/rpc.md) 与 [`users/user/api.md §8.2`](users/user/api.md) 两张**结构化销账提交清单**（含「销账方式」列：代码修复 / 证伪关闭 / 销账回写 / 签字保留 / 未修） | ✅ 已补（2026-10-26）⇒ **原先 12 个条目里只有 D-004 带 SHA**，现已逐条补全并逐个 `git show --stat` 核过 |
+| **I2** | **销账提交存在性 + 祖先链** | 每个「已修 / 已关闭 / 已签字」条目**必须登记至少一个 SHA**；该 SHA 必须存在于仓库，且在 `do-my-own-gh` 的祖先链上 | ⚠️ **需要** —— 但**本域已补好**：[`users/user/rpc.md §8.1`](user/rpc.md) 与 [`users/user/api.md §8.2`](user/api.md) 两张**结构化销账提交清单**（含「销账方式」列：代码修复 / 证伪关闭 / 销账回写 / 签字保留 / 未修） | ✅ 已补（2026-10-26）⇒ **原先 12 个条目里只有 D-004 带 SHA**，现已逐条补全并逐个 `git show --stat` 核过 |
 | **I3** | **台账写死的测试条数 ↔ 实测条数** | 台账里「`XxxTest` **N** 条」「user-rpc 全量 **N** 条」这类**写死的数字** ↔ surefire 实测条数 | ❌ **不需要** | ⚠️ **这类数字会漂** —— 2026-10-26 本域就因新增 3 条守网而必须把 `12 条 → 16 条`、`125 → 128` 全部同步（`global` 在 task 域抓到过同类：台账 106 vs 实测 108）⇒ **最该交给机器的一条** |
 | **I4** | **CASE 编号守恒** | `rpc.md §8` 的 `CASE-NN` 与 `api.md §8` 的 `CASE-NN`（含 `5b/5c/5e/5f` 子编号）：**不得重号、不得跳号**；且 `§4.2 逐 OP` 的行数 ↔ `§8` 的 CASE 覆盖不得有缺口 | ❌ **不需要** | 手工核对过：rpc 侧 CASE-01..39 + 子编号，api 侧 CASE-01..60 + 子编号，无重号 |
 | **I5** | **「已修」断言 ↔ 代码里真有对应物** | 第 2 层的 users 版：每条「已修」要指向一个**可机检的锚点**（文件 + 符号/正则），例如 V-003 ⇒ `01_create_user.sql` 里 `extra_info` 必须是 `text`；V-008 ⇒ 那段死代码必须**不存在** | 🔴 **需要** —— 本域要补一张「条目 → 锚点」表 | ❌ **尚未做**（本域不编造判据 ⇒ 本条待办） |

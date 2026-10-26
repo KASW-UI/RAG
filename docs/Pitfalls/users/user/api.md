@@ -76,7 +76,7 @@ static { DEFAULT_CHARSET = StandardCharsets.ISO_8859_1; }
 **下次怎么防**
 
 1. **响应头一律用真容器验**。真 Tomcat + `curl -i` 抓原始响应行，是唯一能验响应头的手段。
-   已登记为 [`DRIFT` 台账 UNRESOLVED-001](../../../DRIFT/users/user/api.md#unresolved-001)。
+   已登记为 [`DRIFT` 台账 UNRESOLVED-001](../../../DRIFT/users/user/api.md#unresolved-001--真-tomcat-下-400-响应的精确-content-type-与-body-字节--✅-第六轮已关2026-10-24)。
 2. MockMvc 只用来断言**状态码 + body**；body 里若可能含非 ASCII，
    额外断言 `getContentType()` 或用 UTF-8 显式设置，避免编码问题被 body 断言掩盖。
 3. 凡是**照抄 Go 的响应头**（`http.Error` 的四件事：

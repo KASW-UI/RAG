@@ -235,7 +235,7 @@ RAG 侧 Spring 会对 `form-urlencoded` 的 POST body **参数化重建**，对 
    ⚠️ 但覆盖面**只到 HTTP wire 层**：经由 `GetTask` 这条链路验证了
    **Redis HGETALL → PG 回源 → packProgress/unpackProgress → 任务定义合并 → gRPC 序列化 → HTTP 响应**。
    **Kafka 消息链路不在 HTTP 对拍面内**（那条链路由
-   [`rpc.md` §四·三](./rpc.md#四三kafka-端到端对拍两侧灌同一批-raw-日志比最终态2026-10-23-234x-实测) 单独对拍）。
+   [`rpc.md` §四·三](rpc.md#四三kafka-端到端对拍两侧灌同一批-raw-日志比最终态2026-10-23-234x-实测) 单独对拍）。
    ⚠️ **本轮新增了一键编排** [`tools/difftest/run-task-http-parity.sh`](../../../tools/difftest/run-task-http-parity.sh)
    （原先只有手工步骤，Kafka 侧有一键脚本而 HTTP 侧没有）。
 2. ⚠️ **gRPC 边界在单测里是 mock**：`TaskGetServiceTest` / `GrpcStatusHttpMappingTest` 用 stub，
