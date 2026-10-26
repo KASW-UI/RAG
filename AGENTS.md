@@ -308,17 +308,18 @@ RAG 不是从 Go「推测」行为，而是**逐字对照 Go 源码**（§3.1）
 
 | 工具 | 作用 | 复现 |
 |---|---|---|
-| `tools/semantic-probe/` | **双侧语义探针 ×3**（§3.3；解析 / trace 链路 / gRPC 超时） | `bash tools/semantic-probe/{run-parity,trace/run-trace-parity,rpc-timeout/run-rpc-timeout-parity}.sh` |
+| `tools/semantic-probe/` | **双侧语义探针 ×3**（§3.3；解析 / trace 链路 / gRPC 超时） | `bash tools/semantic-probe/run-parity.sh`（另 2 个变体见该目录 README） |
 | `tools/errmsg-probe/` | 错误码契约逐字节对拍（码值/文案/未知码） | `bash tools/errmsg-probe/run-parity.sh` |
 | `tools/difftest/` | 双端运行时对拍（两套栈 + 请求矩阵） | `bash tools/difftest/run.sh` |
 | `tools/difftest/check-ddl-static.py` | **DDL 列级对照**（类型/长度 + 可空性 + DEFAULT + `--indexes` 索引/约束/触发器 + **触发器函数体的结构化语义属性**）。**9 域**；`hot` = **N/A**（两侧无库）。类型 **0 差异** | `python3 … [--domain <域>] [--indexes]` |
-| `tools/difftest/check-proto-static.sh` | proto 契约对照（字段号 / message 名 / RPC 签名） | `bash tools/difftest/check-proto-static.sh` |
+| `tools/difftest/check-proto-static.sh` | proto 契约对照（字段号 / message 名 / RPC 签名） | `bash …` |
 | `tools/difftest/check-plaintext400-headers.sh` | 真 Tomcat 下 400 的 `Content-Type`/`nosniff`（**MockMvc 测不到**） | `bash …` |
 | `tools/difftest/check-flyway-ledger.py` | Flyway 账本隔离（按库+schema 断言表名两两不同）⇒ `EXIT=0`；**运行时**同库共存 ⇒ `check-flyway-concurrent.sh`（§6.3 问题 4） | `python3 …` |
-| `tools/difftest/check-grpc-runtime-classpath.py` | devh client 的**运行时 classpath + 服务发现地址**门禁：`grpc-inprocess` 不得是 `test` scope · `discovery:` 必须三斜杠 ⇒ **baseline 机制**（已知未修项只打印、不失败） | `python3 tools/difftest/check-grpc-runtime-classpath.py` |
+| `tools/difftest/check-grpc-runtime-classpath.py` | devh client 的**运行时 classpath + 服务发现地址**门禁：`grpc-inprocess` 不得是 `test` scope · `discovery:` 必须三斜杠 ⇒ **baseline 机制**（已知未修项只打印、不失败） | `python3 …` |
 | `tools/difftest/check-{grpc-interceptor-wiring,tomcat-limits,global-lane-ownership}.py` | **三个装配/写权守门**：① 每个 rpc 进程的拦截器接线（`@Import` 齐 **且** 挂上 `server.intercept`）② 10 个 api 的容器输入上限三旋钮 ③ **多 lane 写权**（白名单两两不重叠 · 共享文件无人拥有 · favorite 零写权 ⇒ `EXIT=0` 才算合规） | `python3 tools/difftest/check-*.py` |
-| `tools/difftest/check-jar-executable.sh` | **产物可执行性**：`MANIFEST.MF` 有 `Main-Class`（**api + rpc 共 20 个模块** ⇒ 漏配 1 个即「有的域 200、有的域 400」） | `bash tools/difftest/check-jar-executable.sh` |
-| `tools/drift-move.py` | AGENTS.md ↔ docs/ 搬移工具（`extract`/`verify`/`delete` 幂等）。台账 `docs/DRIFT/_MANIFEST.json` | `python3 tools/drift-move.py verify` |
+| `tools/difftest/check-jar-executable.sh` | **产物可执行性**：`MANIFEST.MF` 有 `Main-Class`（**api + rpc 共 20 个模块** ⇒ 漏配 1 个即「有的域 200、有的域 400」） | `bash …` |
+| `tools/drift-move.py` | AGENTS.md ↔ docs/ 搬移工具（`extract`/`verify`/`delete` 幂等）。台账 `docs/DRIFT/_MANIFEST.json` | `python3 … verify` |
+| `tools/check-ledger-tables.py` | **台账结构层守门**（表格块内不得有「无行首的内容行」）⇒ 静默塌陷 | `python3 …` |
 
 > ⚠️ `tools/difftest/exp-*.sh` 是**被证伪方案的实证记录**（脚本头部已写明），**不要当修复用**。
 

@@ -268,6 +268,60 @@ with tempfile.TemporaryDirectory() as td:
     else:
         ng("E48-18", f"假探针 exit 1 ⇒ 闸门 exit {p.returncode} ⇒ **退出码没透传 ⇒ 假闸门**")
 
+# ── ④b 第三步判据：探针「声称 PASS」必须交出观测证据 ──────────────────
+# 🔴 **第四十四轮 · users/admin 域 owner 建议**（出处：AGENTS.md §3.3 2026-10-21 补
+#    「判断有没有真生效不能看启动日志，唯一可靠的判据是**运行时证据**」）：
+#    **「退出码 0」不等于「探针真跑过」** —— 脚本什么都没干就退 0 也是 0 ⇒ **假闸门**
+#    ⇒ 闸门必须**在探针声称 PASS 时**要求它交出**两个 Δ 值**当证据。
+print("④b 第三步判据：探针声称 PASS ⇒ 必须交出 Δ 证据（否则就是假闸门）")
+gate_src = open(GATE, encoding="utf-8").read()
+has_evidence_check = ("Δ_start=" in gate_src and "Δ_end=" in gate_src
+                      and re.search(r"if \[\[ \$RC -eq 0 \]", gate_src) is not None)
+if has_evidence_check:
+    ok("E48-31", "闸门在探针**声称 PASS** 时要求 Δ 证据（静态：判据在 + 只在 RC=0 时生效）")
+else:
+    ng("E48-31", "闸门**没有**「探针声称 PASS ⇒ 必须交出 Δ 证据」的判据"
+                 "⇒ 脚本什么都没干就退 0 也是 0 ⇒ **假闸门**")
+
+with tempfile.TemporaryDirectory() as td:
+    # 假探针①：退出码 0，但**不输出任何 Δ** ⇒ 闸门必须**判红**（证明第三步判据有牙）
+    stub_no_ev = os.path.join(td, "stub-no-evidence.sh")
+    with open(stub_no_ev, "w", encoding="utf-8") as f:
+        f.write("#!/usr/bin/env bash\n"
+                "echo '  (假探针) 什么都没干就退 0'\n"
+                "exit 0\n")
+    os.chmod(stub_no_ev, 0o755)
+    # 假探针②：退出码 0，且**输出了 Δ** ⇒ 闸门必须**放行**（证明不误杀正常路径）
+    stub_ok = os.path.join(td, "stub-with-evidence.sh")
+    with open(stub_ok, "w", encoding="utf-8") as f:
+        f.write("#!/usr/bin/env bash\n"
+                "echo '  ⇒ 查询存活 Δ_start=+306ms   客户端返回后仍占用 PG Δ_end=+0ms   pid=218'\n"
+                "exit 0\n")
+    os.chmod(stub_ok, 0o755)
+    base_env = dict(os.environ)
+    base_env["GO_ADMIN_PORT"] = "18081"
+    base_env["RAG_ADMIN_PORT"] = "58081"
+    base_env["RUN_DIR"] = td
+    base_env["DIFTEST_CONTAINER_PREFIX"] = "difftest"
+
+    e1 = dict(base_env); e1["EXP_PROBE_STUB"] = stub_no_ev
+    p1 = subprocess.run(["bash", GATE], capture_output=True, env=e1, cwd=ROOT)
+    o1 = p1.stdout.decode("utf-8", errors="replace")
+    if p1.returncode != 0 and "假闸门" in o1:
+        ok("E48-32", "假探针 exit 0 但**无 Δ 证据** ⇒ 闸门**判红**（第三步判据有牙，不是摆设）")
+    else:
+        ng("E48-32", f"假探针 exit 0 且无 Δ 证据 ⇒ 闸门 exit {p1.returncode}（应非 0）"
+                     "⇒ 「退出码 0」被当成了「探针真跑过」⇒ **假闸门**")
+
+    e2 = dict(base_env); e2["EXP_PROBE_STUB"] = stub_ok
+    p2 = subprocess.run(["bash", GATE], capture_output=True, env=e2, cwd=ROOT)
+    o2 = p2.stdout.decode("utf-8", errors="replace")
+    if p2.returncode == 0 and "交出了观测证据" in o2:
+        ok("E48-33", "假探针 exit 0 且**有 Δ 证据** ⇒ 闸门**放行**（第三步判据不误杀正常路径）")
+    else:
+        ng("E48-33", f"假探针 exit 0 且有 Δ 证据 ⇒ 闸门 exit {p2.returncode}（应 0）"
+                     "⇒ 第三步判据**误杀**了正常路径")
+
 # ── ⑤ bash 陷阱 lint：$VAR 后面紧跟非 ASCII 字符 ─────────────────────
 # 🔴 **本轮实测踩到**：wrapper 里写了 `$RC（0=PASS …）` ⇒ bash 把 `（` 并进变量名
 #    ⇒ 变量名变成 `RC（` ⇒ `set -u` 下 **unbound variable** ⇒ 脚本**提前退出 1**
