@@ -303,6 +303,7 @@ Result 只用 5 个枚举值。证据列的记号：
 | 已签字偏离（引用不重开） | 2 | N-1、N-2（见 `./api.md`） |
 | **UNKNOWN / unresolved** | **0** | §9 的 **7 条（U-001 ~ U-007）已于 2026-10-24 全部闭环** ⇒ §9.1 / §9.2 / §9.3 |
 | ⚠️ **新发现但当前不可观察** | 1 | **V-011**（时间列 DEFAULT `CURRENT_TIMESTAMP`，Go 无 DEFAULT）⇒ 两侧写入路径都显式写该列 ⇒ **当前不可观察** |
+| ⚠️ **源码层形态差异（客户端不可见 ⇒ 不计入 OBSERVABLE DIFFERENCE）** | 1 | **V-013**（2026-10-26 第十三轮）—— DB 超时的**源码层**形态两侧不同（Go 一律糊成 `codes.Internal` / RAG 保留 `DEADLINE_EXCEEDED`），但**客户端可见面两侧逐字一致**（E-4 四组 Go 采样全是 `{"code":1015}`）⇒ **不是 wire 漂移**。⚠️ **反向风险**：照「Go 是 INTERNAL」把 18 处 catch 改回去 ⇒ RAG 渲染 5001 ⇒ **离 Go 更远** ⇒ **不得改回 Go 行为** |
 
 ### 4.5 复核历史导航页 L34–41 的三条「缺口」
 
@@ -828,6 +829,40 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 > ⇒ api 侧渲染 **5001** 而 Go 是 **1015** ⇒ **wire 级漂移，且静默**。
 > ⇒ 补 3 条（插件链 / 挂载点 / 负控），含 **M1·M2·M3** 三次变异验证 ⇒ 详见**第十二轮**。
 
+### 8.1 本组件（`user-rpc`）的**销账提交清单**（结构化 · 2026-10-26 补）
+
+> **为什么要补这张表**：本域此前的销账提交**散落在条目标题里**，没有结构化登记
+> （`api.md` 的 12 个条目里**只有 D-004 带 SHA**）⇒ 机器复核工具的
+> 「登记的哈希必须存在 / 必须在祖先链上」这类判据**对本域无从下手**。
+> ⇒ 本表把「**条目 ↔ 销账方式 ↔ 销账提交**」变成可解析的结构，
+> 供 `global` 域的 `DOMAIN_CFG['users']` 直接消费
+> （判据规格 ⇒ [`users/_shared.md`](../../_shared.md) 的「**可机检不变量**」一节）。
+>
+> ⚠️ **两条纪律**：
+> 1. **每个 SHA 都逐个 `git show --stat` 核过主题与文件面**（PIT-USERS-SHARED-020）——
+>    **不靠提交标题推断**；
+> 2. 2026-10-23 有 **3 个主题为「`add sth` / `add shit`」的批量导入提交**
+>    （`4a63342` / `e993ff0` / `69e3262`），它们**混合了多条漂移的修复** ⇒
+>    **不能作条目级锚点** ⇒ 相关条目在表里标「**未具名**」并写明理由，**不猜**。
+
+| 条目 | 销账方式 | 销账提交（SHA） | 提交主题（逐字） | 备注 |
+|---|---|---|---|---|
+| **V-001** | 证伪关闭（**无代码修复**）| `9ae121d` | `fix(users/user): 撤销 V-001 反向判定 —— Go 侧 NULL status 是 fail-open 而非 fail-closed` | 原判「Go 拒 / RAG 放」被真 PG 端到端**证伪**（两侧都是 `status=0` 登录成功）⇒ 关闭靠的是**证据**，不是改代码。⚠️ 同一 commit 另含 D-001 / D-002 的实现（⇒ 见 [`api.md` §8.2](./api.md)） |
+| **V-002** | 🔴 **未修**（被卡）| — | — | 改动**必须与 admin 域同一次提交**走完（`users_user.status` 可空性）⇒ 落点 `service/users/users-common` |
+| **V-003** | 代码修复 | `ec33159` | `align(users/user): 修 DRIFT-USERRPC-V-003（users_user.extra_info jsonb⇒text，与 Go 一致）` | 落点 `service/users/users-common/src/main/resources/db/01_create_user.sql` |
+| **V-004** | 代码修复 | ⚠️ **未具名** | — | 实际落在 2026-10-23 的批量导入提交 `4a63342`（主题「`add sth`」，**混合多条漂移**）⇒ 不可作条目级锚点 |
+| **V-005** | 证伪关闭（protobuf3 空 map 在 wire 上不可表达）| ⚠️ **未具名** | — | 同上；关闭依据是**协议层事实**，非代码改动 |
+| **V-006** | 证伪关闭（真 PG 实证：雪花 id 永不进 wire）| `fa2de52` | `align(users/user): user-rpc 关闭 V-006、修 V-008（并揭出第二个伪出处）` | 同 commit 兼销 V-008 ⇒ **一条 commit 销两条**（工具若按「一 commit 一行」判会漏） |
+| **V-007** | 销账回写（**实现在 `global` 域**）| 实现 `49808ad` + 本域回写 `fc1c4a7` | 实现：`第三十轮：A 类 3 条落地 —— E30（RPC 超时文案）· T-14 · T-15③` | ⚠️ `49808ad` **未合主干** ⇒ 合并前主干代码仍是旧串；本条销账**以 SHA 为准**，不依赖主干是否已合 |
+| **V-008** | 代码修复（删死代码 + 揭出**两个**伪出处）| `fa2de52` | 同 V-006 | 同上 |
+| **V-011** | ⚠️ **未修**（当前不可观察）| — | — | 时间列 `DEFAULT CURRENT_TIMESTAMP`（Go 无 DEFAULT）⇒ 两侧写入路径都显式写该列 ⇒ 当前不可观察 |
+| **V-012** | 🔴 **未修**（观测面 · 新立）| — | — | 候选修法**待拍板**；与 `global` E38② / `users/admin` ARPC-010 同型 |
+| **B-1 装配层守网** | 守网补强（**非漂移**）| `bcfdaf7` | `test(users/user): B-1 的装配层守网（插件链 + 挂载点 + 负控）⇒ 覆盖缺口闭环（非新漂移）` | 生产代码**一字未改**；M1·M2·M3 三次变异验证 ⇒ 详见**第十二轮** |
+
+⚠️ **为什么「销账方式」这一列不能省**：本域的销账**不是一种形态**——
+「代码修复」（V-003/V-008）·「证伪关闭」（V-001/V-005/V-006）·「销账回写」（V-007，落点在他域）·
+「签字保留」·「未修」⇒ **只有区分开，机器才能把 §4.4 的分类计数与条目逐条对账**（不变量 I1）。
+
 ---
 
 ## 9. Unresolved（spec §37，**此节不得为空**）
@@ -1125,7 +1160,7 @@ RAG `UserDomainService.logout:780` ⇒ 同样的 `INTERNAL "注销失败,Redis�
 | 4 | NotFound / Empty / Null 是否一致？ | ⚠️ **不完全一致** | NotFound 一致（响应被丢弃）；Empty 一致；**NULL status 不一致**（V-001）；NULL extra_info 一致 |
 | 5 | Error meaning 是否一致？ | ⚠️ **code 一致 / message 部分不一致** | 全部 gRPC code 逐条一致；**4 处** message 因 Go 源码乱码不同（**N-2 已签字**，2026-10-24 双侧活体对拍实测）<br>⚠️ 原写「+ 1 处超时 description（V-007）」—— **V-007 已于 2026-10-26 由 `global` 域销账** ⇒ 超时 description **两侧逐字一致**。⚠️ 那 4 处的**状态码两侧完全相同**，差异只在 `grpc-message` 头的字节<br>🔴 **2026-10-26 第十一轮新增（V-012）**：**wire 面两侧一致，但「超时」这一情形下的**业务日志归因**不一致** —— RAG 记「Redis 写入异常」，客户端收到的是「超时」；Go 两侧一致（**观测面**差异，不改 wire） |
 | 6 | Error propagation 是否一致？ | ✅ **一致** | Go 的「resp+err 双返」在 gRPC 层被丢弃 ⇒ 两侧客户端只见 status code |
-| 7 | External dependency failure 是否一致？ | ✅ **一致**（超时路径除外） | PG/Redis/bcrypt/snowflake 四类失败两侧同 code 同 message；57014 取消的内层差异被外层 interceptor 掩盖（E-4 已实测闭环） |
+| 7 | External dependency failure 是否一致？ | ✅ **一致**（超时路径除外） | PG/Redis/bcrypt/snowflake 四类失败两侧同 code 同 message；57014 取消的内层差异被外层 interceptor 掩盖（E-4 已实测闭环）<br>🔴 **2026-10-26 第十三轮（V-013）**：那句「被外层 interceptor 掩盖」**已逐条核到机制** —— Go 的 `service/common/observability/rpc.go:59-72` 在 ctx 取消那一刻就 ready，`select` 几乎总选超时分支 ⇒ **客户端拿到 DEADLINE_EXCEEDED ⇒ 1015**；Go 侧 4 组采样（基线 / 同场对照 / user / admin）响应体**全是** `{"code":1015,"msg":"服务繁忙"}` ⇒ **与 RAG 逐字一致**。⇒ 本域 18 处 `catch (StatusRuntimeException)` 放行分支**不得改回 Go 的 INTERNAL** |
 | 8 | Cache hit / miss 是否一致？ | **N/A** | 本组件无缓存 |
 | 9 | Transaction boundary 是否一致？ | ✅ **一致** | 4/5 步原子性两侧相同；`[PG]` 真回滚实证；**无 self-invocation** |
 | 10 | State transition 是否一致？ | ⚠️ **基本一致，一处相反** | 头像 current 状态机一致、登录三态一致；**`status==NULL` 的 login 分支相反**（V-001） |
@@ -1963,3 +1998,145 @@ REDIS_MODE=hanging ./exp-difftest-redis-neverup-rpc.sh  # 挂起 ⇒ 命令超�
   ⇒ **三段合起来才覆盖整条链，缺一段就有洞。**
 - **未做**：没有重跑 2026-10-21 那条端到端（`exp-b1-timeout-cancel.sh`）⇒ 本轮**不声称**「B-1 端到端仍成立」，只声称**新增了常驻守网**。
 - **未盘点其余 9 个 rpc 组件**（见 §5）⇒ 本轮**不声称**「全仓只有 user-rpc 缺这条守网」。
+
+---
+
+<!-- @fix 2026-10-26 第十三轮：`global` E58 的客户端可见面复核 ⇒ 订正 17 处注释的**理由** + 新立 V-013 -->
+
+## 2026-10-26 第十三轮：`global` E58 的**客户端可见面**复核 —— 源码层差异成立 · **客户端面两侧一致** ⇒ **不得改回 Go 行为**
+
+### DRIFT-USERRPC-V-013 —— DB 超时的**源码层形态**两侧不同，但**客户端可见面逐字一致** ⇒ **不是 wire 漂移** · **不得改回 Go 行为**
+
+> **触发**：`global` 域第三十六轮（`697f547`）把 **E47** 全面订正：原判「业务层把『SQL 被 deadline 取消』改写/吞掉」**方向相反**，
+> 重新定性为「Go 侧把 DB 错误一律改写成 `codes.Internal`，RAG 侧保留 `DEADLINE_EXCEEDED`」
+> ⇒ 两侧**确实不同**，但方向是「**RAG 做了更准确的那一侧**」⇒ 登记为有意偏离候选 **E58（🏷 建议签）**
+> ⇒ 明确要求：**请不要改回 Go 行为**。
+>
+> ⇒ 本域**独立复核**（不采信转述）：**源码层成立 ✅ · 客户端可见面不成立 🔴**。
+
+#### §1 源码层：global 的事实成立，但**条数与行号要订正**
+
+**Go 侧** —— `service/user/user/rpc/internal/logic/` 里 **DB 错误出口共 10 处**，全部 `codes.Internal`：
+
+| 文件 | 行号 | 文案 |
+|---|---|---|
+| `loginlogic.go` | `:56` | `status.Error(codes.Internal, "DB查询失败")` |
+| `getuserlogic.go` | `:44` | 同上 |
+| `deleteuserlogic.go` | `:52` / `:60` | `"DB查询失败"` / `"DB更新失败"` |
+| `registerlogic.go` | `:54` / `:86` | `"DB查询失败"` / `"DB更新失败"` |
+| `updateuserlogic.go` | `:43` / `:66` / `:77` | `"DB查询失败"` / `"DB更新失败"` / `"DB查询失败"` |
+
+⚠️ **订正 global 的两处**（PIT-USERS-SHARED-020：对方给的行号要自己核）：
+1. **条数**：global 报「7 处」⇒ **实测 10 处** —— global 的清单**漏了 `updateuserlogic.go` 的 3 处**（`:43` / `:66` / `:77`）；
+2. **行号**：global 报 `getuserlogic.go:41` · `loginlogic.go:55` · `deleteuserlogic.go:49,57`
+   ⇒ 实测 `:44` · `:56` · `:52`（+ `:60`）⇒ **差 1~3 行** ⇒ 照 global 的行号去改会改错位置。
+
+⚠️ **另：Go 侧另有 9 处 `codes.Internal` 但不是 DB 错误**
+（`getavatarhistorylogic.go:38,44` · `logoutlogic.go:40` · `registerlogic.go:61,70` ·
+`selectavatarlogic.go:49` · `uploadavatarlogic.go:42,60`），其中 4 处文案是 **N-2 已签字的 Go 源码乱码**
+⇒ 本条**只管 DB 错误出口那 10 处**。
+
+**RAG 侧** —— `UserDomainService` 的 **18 处** `catch (StatusRuntimeException e) { throw e; }`
+（订正后行号：`200 / 295 / 312 / 333 / 365 / 417 / 494 / 523 / 554 / 577 / 638 / 657 / 714 / 759 / 789 / 831 / 850 / 897`）
+⇒ DEADLINE_EXCEEDED 原样上抛 ✅（与 global 说的 18 处一致）。
+
+#### §2 🔴 客户端可见面：**两侧逐字一致** —— 与 global 的 E58 定性冲突
+
+global 写「两侧确实不同（wire 上码值不同 ⇒ **客户端可见**）」。
+⇒ 本域查了 **2026-10-21 的 E-4 双栈活体实测**（真进程 + 真 PG，用 ACCESS EXCLUSIVE 锁把 login 的 SELECT 挡住）：
+
+| | 客户端返回耗时 | 响应体 | PG 查询存活 |
+|---|---|---|---|
+| **Go**（基线） | 2190ms | `200 + {"code":1015,"msg":"服务繁忙"}` | 203ms |
+| **Go**（同场对照） | 2208ms | `{"code":1015,"msg":"服务繁忙"}` | 182ms |
+| **Go / user** | 2236ms | `{"code":1015,"msg":"服务繁忙"}` | 161ms |
+| **Go / admin** | 2181ms | `{"code":1015,"msg":"服务繁忙"}` | 176ms |
+| **RAG**（生产方案实施后） | 2223ms | `{"code":1015,"msg":"服务繁忙"}` | 176ms |
+
+⇒ **Go 侧 4 组独立采样，客户端可见响应体全部是 `{"code":1015}`** ⇒ **两侧逐字一致**。
+
+**机制（为什么 Go 的 `codes.Internal` 客户端看不见）** —— Go 的外层 interceptor 会抢先返回：
+
+```go
+// service/common/observability/rpc.go:59-72
+select {
+case <-done:                       // handler 先返回（logic 的 INTERNAL）
+    return resp, err
+case <-timeoutCtx.Done():          // ← ctx 一取消就 ready
+    err := status.Error(codes.DeadlineExceeded, timeoutCtx.Err().Error())
+    return nil, err                // ← 客户端拿到 DEADLINE_EXCEEDED
+}
+```
+
+⇒ ctx 取消 ⇒ pgx 查询报错 ⇒ logic 返回 INTERNAL，这需要**再花时间**（网络往返 + 解栈 + 组装 status）；
+而 `timeoutCtx.Done()` **在 ctx 取消那一刻就已经 ready** ⇒ select 几乎总是选超时分支
+⇒ **客户端拿到 DEADLINE_EXCEEDED** ⇒ api 的 `default` 分支 ⇒ **1015**（`errmsg.CodeServerBusy`）。
+⇒ Go 侧 api 的 per-Logic switch（`service/user/user/api/internal/logic/user/loginlogic.go:50-54`）
+只对 `codes.Internal` 给 5001、对 `DEADLINE_EXCEEDED` 走 `default` 给 1015 ⇒ **两侧落到同一个分支**。
+
+⚠️ **这正是本文件 §10 第 7 项早就写下的那句话**：「**57014 取消的内层差异被外层 interceptor 掩盖（E-4 已实测闭环）**」
+⇒ global 的 E58 把**源码层**的差异直接当成了**客户端可见**的差异，**跳过了这一层掩盖**。
+
+#### §3 处置：订正 17 处注释的**理由**（结论保留 · 行为不动）
+
+本域 17 处 catch 注释原文写着「…（**对齐 Go 的 1015**）」。
+⇒ **结论是对的**（客户端可见值两侧都是 1015），**理由是错的/不完整的** ——
+它让人以为「Go 的 logic 层会返回 1015」，而 **Go 侧根本没有任何 DB 路径返回 1015**。
+⇒ 按 AGENTS.md §3.3 强制第 3 条「**先改/删错误断言，再改实现**」：先订正断言，**不动实现**。
+
+订正后的注释（17 处同款）：
+
+```java
+// B-1：...必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+//       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+//       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+//       （…共 10 处出口），那一层**被外层 interceptor 掩盖**：
+//       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+//       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+```
+
+并在**类级 javadoc** 写一次完整论证（18 处 catch 的共同依据 + E-4 五行实测数据 + Go 侧机制）。
+⇒ **生产行为零改动**（本轮只改注释）。
+
+#### §4 🔴 残留风险（诚实边界）
+
+Go 侧那个 `select` 是**竞速**：`done` 与 `timeoutCtx.Done()` 同时 ready 时 Go **随机选**
+⇒ 机制上存在「handler 先返回 ⇒ 客户端拿到 5001」的窗口。
+⇒ **E-4 的 4 组 Go 采样全部是 1015，但那是 4 次采样、不是概率刻画**
+⇒ 本域**不声称「Go 侧 100% 是 1015」**。
+⇒ 若要闭合这一格，需在同一条件下跑 N 轮并统计分布（**本轮未做**）。
+
+#### §5 与 `global` E58 的关系（已回信）
+
+- **本域不把这条登记为「有意偏离」** —— 因为**客户端可见面两侧一致**
+  ⇒ 按 AGENTS.md「差异只允许出现在表达层」，它**不构成 wire 漂移**，也**不需要**用户签字。
+  ⇒ 但**必须留档** —— 否则下一个人会照着「Go 是 INTERNAL」把 18 处 catch 改回去
+  ⇒ RAG 渲染 5001 ⇒ **离 Go 更远**（2026-10-21 B-1 缓解实验第三行踩过的坑）。
+- 🔴 **需 `global` 侧处理的两处**（**`service/common` 是 global 域单写权 ⇒ 本域只报告、不动手**）：
+  1. `service/common/src/main/java/com/rag/common/persistence/SqlTimeoutStatusTranslator.java:29-38` 的 javadoc 写着
+     「Go 侧 ctx 到点后，查询返回 `context.DeadlineExceeded`，**经 go-zero 的错误映射成为「服务繁忙」1015**」
+     ⇒ **理由不准**：1015 来自 **api 层的 default 分支** + **interceptor 的超时分支**，不是 go-zero 的错误映射；
+     且同段「Go 侧这两者本来就不同（超时 1015 / 数据库错 5001）」**只在客户端面成立**（源码层 Go 两处都是 INTERNAL）。
+  2. **E58 的定性**：建议从「wire 级差异 ⇒ 客户端可见」改为
+     「**源码层形态差异 · 客户端可见面一致（E-4 四组实测）**」
+     ⇒ 否则别的域会照着「RAG 更准确 ⇒ 保留」去保留**那些确实客户端可见的改写**
+     （message 域 E59 / like 域 E60 恰好就是那种）。
+
+#### §6 复现入口
+
+```bash
+# E-4 双栈实测（Go 18888 / RAG 59900）；客户端可见响应体就在脚本输出里
+bash tools/difftest/exp-b1-timeout-cancel.sh
+# ⚠️ 该脚本 2026-10-21 的判读段原文就写着：
+#    「user 与 admin 两侧都应当是 {"code":1015,"msg":"服务繁忙"}」—— 本条的依据就是这句。
+```
+
+### V-013 的分类与统计影响
+
+| 项 | 内容 |
+|---|---|
+| **Classification** | **NOT A WIRE DRIFT**（源码层形态差异 · **客户端可见面两侧逐字一致** · E-4 四组 Go 采样 + RAG 生产方案同场对照）⇒ **不计入 §4.4 的 OBSERVABLE DIFFERENCE** |
+| **Observable Impact** | **无**（客户端可见的 code 与 msg 两侧完全相同） |
+| **Risk** | 🔴 **反向风险**：若按「Go 是 INTERNAL」把 18 处 catch 改回去 ⇒ RAG 渲染 **5001**（`ErrorServerCommon`，在 Go 侧表示「数据库故障」而非「超时」）⇒ **离 Go 更远** |
+| **处置** | ✅ **已处置**（2026-10-26）：17 处注释的**理由**已订正 + 类级 javadoc 完整论证；**生产行为零改动** |
+| **归属** | **本组件内**（`service/users/user/user-rpc`）⇒ 修法只落本域 ⇒ **不跨域**（但 `service/common` 的同款 javadoc 问题须由 `global` 域处理） |

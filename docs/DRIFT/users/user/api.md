@@ -1423,6 +1423,40 @@ Must Preserve: 「Redis 不可用 ⇒ **fail-open 放行**」（Go 的 `err == n
 ⚠️ **本类第一次写成时是红的，且红得极具误导性**（"user RPC is nil"）⇒ 根因是**测试环境没有 Redis**，
 不是 mock 失效 ⇒ 详见 `docs/Pitfalls/users/_shared.md` 的 **PIT-USERS-SHARED-018**。
 
+### 8.2 本组件（`user-api`）的**销账提交清单**（结构化 · 2026-10-26 补）
+
+> **为什么要补这张表**：本域此前的销账提交**散落在条目标题里**，没有结构化登记
+> —— **12 个条目里只有 D-004 带 SHA**，其余 11 个「已修 / 已关闭 / 已签字」条目都**没有**，
+> 签字档（`SD-USERAPI-001/002/003`）**也一个 SHA 都没有**
+> ⇒ 机器复核工具的「登记的哈希必须存在 / 必须在祖先链上」这类判据**对本域无从下手**。
+> ⇒ 本表把「**条目 ↔ 销账方式 ↔ 销账提交**」变成可解析的结构，
+> 供 `global` 域的 `DOMAIN_CFG['users']` 直接消费
+> （判据规格 ⇒ [`users/_shared.md`](../../_shared.md) 的「**可机检不变量**」一节；
+> 同构的 rpc 侧表 ⇒ [`user/rpc.md` §8.1](./rpc.md)）。
+>
+> ⚠️ **每个 SHA 都逐个 `git show --stat` 核过主题与文件面**（PIT-USERS-SHARED-020），**不靠标题推断**。
+
+| 条目 | 销账方式 | 销账提交（SHA） | 提交主题（逐字） | 备注 |
+|---|---|---|---|---|
+| **D-001** | 代码修复 | `9ae121d` | `fix(users/user): 撤销 V-001 反向判定 —— Go 侧 NULL status 是 fail-open 而非 fail-closed` | 同 commit 新增 `IdentityResolver.java`、改 `JwtAuthInterceptor.java` ⇒ **一条 commit 兼销 V-001 + D-001 + D-002**（工具若按「一 commit 一行」判会漏） |
+| **D-002** | 代码修复 | `9ae121d` | 同上 | 同 commit 改 `UserDeleteService.java` / `UserUpdateService.java`（`uid <= 0` 合法域） |
+| **D-003** | 代码修复 | `bfb55ad` | `align(users/user): user-api 关闭 UNRESOLVED-002、定性并修 DRIFT-003` | gRPC 错误码通用映射收窄 |
+| **D-004** | 证伪关闭（**无代码修复**）| `330bafb` | `test(users/user): 锁死「user-api 绑定面只有 JSON body」——DRIFT-USERAPI-004 证伪后的守门` | 关闭靠**实测证伪** + 守门测试 |
+| **D-005** | 代码修复 | `98fbd13` | `align(users/user): user-api 修 DRIFT-005（avatar/history 不读 body）` | 去掉 `@RequestBody` |
+| **D-006** | 代码修复 | `c79d113` | `align(users/user): 修 DRIFT-USERAPI-006（400 响应 Content-Type 补 charset，body 按 UTF-8 写出）` | — |
+| **D-007** | ✅ **签字保留**（非缺陷）| `97585cb` | `align(users/user): DRIFT-007 用户签字 ⇒ 收编为 SD-USERAPI-001` | 签字档 `docs/Intentional_Deviations/users/user/api.md` 的 `SD-USERAPI-001`（**该节原先无 SHA ⇒ 本表补上**） |
+| **D-008** | 证伪关闭（原断言被推翻）| `c69d735` | `docs(users/user): API-008 原断言「RAG 侧没有任何对应物」证伪（漏 grep service/common）` | 原断言错在**只 grep 了本域**，漏 `service/common` |
+| **D-009** | ✅ **① 签字**（② 仍成立）| `e4b9f7c` | `docs(users): API-004 证伪关闭 + API-009/COMMON-005 签字落档（SD-USERAPI-002 / SD-USERSCOMMON-001）` | 签字档 `SD-USERAPI-002`（**原先无 SHA ⇒ 本表补上**）；⚠️ 签字**只覆盖 ①** |
+| **D-010** | ✅ **签字保留** | `e4b9f7c` | 同上 | 归 `SD-2026-10-23-01/02/03` 的 **N-1**（401 统一 envelope）⇒ 签字档 `SD-USERAPI-001` + `SD-USERAPI-003` |
+| **D-011** | 代码修复 | `9e009e5` | `修 DRIFT-USERAPI-011：user-api 缺熔断异常映射 ⇒ 500+5001（Go 应为 200+1015）` | — |
+| **D-012** | 代码修复 | `2178fb4` | `修 DRIFT-USERAPI-012：降载 RT 统计口径（Go 是浮点毫秒+ceil，RAG 是整型截断+至少记 1）` | — |
+| **D-014** | 代码修复 | `ea8f01e` | `fix(users/user): 修 DRIFT-USERAPI-014（Redis 断连时 Lettuce 排队 ⇒ 撞 HTTP 3s 预算 ⇒ 503）⇒ 闭环 UNRESOLVED-004` | 顺带闭环 `UNRESOLVED-004` |
+| **D-015** | 🔴 **未修** | — | — | 待拍板（**仅 api 侧**；rpc 侧经三形态直连实测无漂移 ⇒ 见 [`user/rpc.md` 第十一轮](./rpc.md)） |
+
+⚠️ **「销账方式」这一列不能省**：本域的销账**不是一种形态** —— 「代码修复」（D-001/D-002/D-003/D-005/D-006/D-011/D-012/D-014）
+· 「证伪关闭」（D-004/D-008）· 「签字保留」（D-007/D-009①/D-010）· 「未修」（D-015）
+⇒ **只有区分开，机器才能把 §4 矩阵的分类计数与条目逐条对账**（不变量 I1）。
+
 ---
 
 ## 9. Unresolved（§37）—— **本节已于 2026-10-24 第九轮清空**（001~005 全部闭环）
