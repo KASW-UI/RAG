@@ -2700,3 +2700,34 @@ RAG: message_notification.created_at | timestamptz | 可空 | DEFAULT CURRENT_TI
 ⚠️ **关闭口径**：关闭的是「**这 6 个模块的产物不可执行**」这一条待办。
 **本条没有验证「产物真能启动」** —— 启动会撞 Nacos / Redis / Kafka / gRPC 依赖，
 「起不来」与「产物不可执行」是两件事 ⇒ 如需这一层证据，另做启动探针。
+
+---
+
+## 2026-10-26 主会话转达：global 域 **E59** —— deadline 的原始错误被**改写**成 `INTERNAL` + `ERROR_DB_UPDATE`（🔴 真漂移，待 message 域 owner 接手）
+
+> **转达方式**：global 域（`align/global`）第三十六轮 **E47 全面订正**时逐条核到 Go 侧，发现本域有 **3 处真漂移**。
+> 落点在 message 域 ⇒ **无 message owner 会话** ⇒ **经主会话转达** ⇒ 本节只是**交接指针**，**不代替 message 域下结论**。
+
+| 项 | 值 |
+|---|---|
+| 出处 | global 台账 **E59**（`docs/DRIFT/global/_README.md`，**按编号指**） |
+| 落点 | `service/message/message-rpc/.../MessageDomainService.java:755`（mark conversation read）· `:873`（mark notification read）· `:921`（mark all read） |
+| 行为层 | **gRPC status code + 业务码**（wire 可见） |
+| 证据强度 | ✅ **主会话已独立复核 Go 侧**（2026-10-26）—— 不是照抄 global 的结论 |
+
+### 两侧事实
+
+| 侧 | 事实 | 出处 |
+|---|---|---|
+| **Go** | `if err = l.svcCtx.MessageModel.MarkConversationRead(...); err != nil { metrics.ObserveDBError("conversation", "mark_read"); return nil, err }` ⇒ **原样返回 err** —— **不糊成业务码**，deadline 的原始错误因此**能透到 wire 上** | `service/message/rpc/internal/logic/markconversationreadlogic.go:59-62`（同款：`markallnotificationsreadlogic.go:42-45`） |
+| **RAG** | `catch (RuntimeException e) { metrics.observeDbError("notification", "mark_read"); throw MessageRpcSupport.grpcRuntimeError(Status.Code.INTERNAL, MessageErrorCode.ERROR_DB_UPDATE.getCode()); }` ⇒ **改写成 `INTERNAL` + `ERROR_DB_UPDATE`** ⇒ **RAG 这一侧比 Go 更糊** | `MessageDomainService.java:757-760` / `:875-878` / `:923-926` |
+
+### 方向判断
+
+🔴 **这一侧是 RAG 错**（与 E47 原记述相反的**另一种**错）⇒ 按 AGENTS.md §3「差异默认判 RAG 错」⇒ **属需对齐的差异**。
+⇒ ⚠️ **与 comment / like / follow / article 四个域相反**：那四域的 Go 侧**也**改写 ⇒ 与 Go 一致 ⇒ 销案 ⇒ 不要改。
+⇒ **全仓现在「两种口径各占一半」** ⇒ **必须按域逐条看，不能一刀切**。
+
+### 状态
+
+🔴 **待 message 域 owner 接手**（本域无 owner 会话 ⇒ 主会话转达）⇒ **主会话不改代码、不下结论**，只留指针。
