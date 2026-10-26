@@ -1764,7 +1764,7 @@ AssertionFailedError: … before=1767323045 after=1767294245
 | A-1「`user-api` 同款 charset 缺失仍在」 | `user-api/.../GlobalExceptionHandler.java:287` | ✅ 仍是 `setContentType(MediaType.TEXT_PLAIN)`，**A-1 仍有效** |
 | 「`AdminEntity` 用 text handler、`UserEntity` 用 jsonb handler」 | 两个 `@TableField` 实读 | 🟢 **2026-10-27 订正：此断言已过期** —— global B10（`ff80214`，2026-10-25）把 `admin-rpc/.../domain/UserEntity.java` 的 `extra_info` typeHandler 也从 `JsonbTypeHandler` 改成了 `JsonTextTypeHandler`（`UserEntity.java:141`）⇒ ⇒ **两个实体现在都是 text handler**（`AdminEntity.java:89` / `UserEntity.java:141`）⇒ ⇒ `JsonbTypeHandler` 已整体删除 |
 | 「`users_user.extra_info` 仍是 JSONB（跨域漂移仍在）」 | `01_create_user.sql:41` | 🟢 **2026-10-27 订正：此断言已过期** —— `users-common/.../db/01_create_user.sql:41` 建表就是 **`extra_info TEXT`**，`:103` 每次启动幂等 `ALTER TABLE users_user ALTER COLUMN extra_info TYPE text USING extra_info::text` ⇒ ⇒ **该列现在就是 TEXT，不是 JSONB** ⇒ ⇒ 本域 §4 表「Schema · extra_info 列类型」已判 EQUIVALENT（见 §11.8.3） |
-| N-1 / SD-08「黑名单 401 业务码是 1006」 | `AdminJwtAuthInterceptor.java:124` 注释 + 对拍实测 | ✅ |
+| N-1 / SD-08「黑名单 401 业务码是 1006」 | `AdminJwtAuthInterceptor.java:127` 注释 + 对拍实测（⚠️ 2026-10-27：该行号随验签搬进 `auth/` 包而位移，原 `:124`） | ✅ |
 
 ## 2. 🔴 新发现（台账**从未记录**）：`admin_invite.update_time` 不推进
 

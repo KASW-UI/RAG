@@ -249,9 +249,12 @@ ParseJsonBody: ContentLength > 0 && ContentType 含 "application/json"  ⇒  Unm
 ### 3.1 请求管线
 
 ```
-[HttpMiddlewareFilter]   ← @Order(HIGHEST_PRECEDENCE+5) servlet Filter，包住整个 DispatcherServlet
+[GoStyleTraceparentFilter(+3)] → [GoStyleMaxConnsFilter(+4)] → [GoStyleBreakerFilter(+5)]
+        → [GoStyleCpuSheddingFilter(+6)] → [GoStyleJwtAuthFilter(+6) · admin-api 域内]
+        → [HttpMiddlewareFilter(+7) · 3s 预算起算] → [GoStyleMaxBytesFilter(+8)]
+        → DispatcherServlet
         ↓
-[AdminJwtAuthInterceptor.preHandle]  ← WebMvcConfig:60-63 注册到 /admin/v1/**
+[AdminJwtAuthInterceptor.preHandle]  ← WebMvcConfig:60-62 注册到 /admin/v1/**
         ↓
 [AdminController 方法]（GoStyleRequest.normalize）
         ↓
@@ -260,19 +263,30 @@ ParseJsonBody: ContentLength > 0 && ContentType 含 "application/json"  ⇒  Unm
 [异常时：GlobalExceptionHandler] → [正常时：GlobalResponseAdvice 包 envelope]
 ```
 
-⚠️ **与 Go 的顺序差异是结构性的**：Go 的 observability 中间件在 **JWT 内层**，
-RAG 的 Filter 在 **JWT 外层**。见 DRIFT-ADMINAPI-006。
+⚠️ **共享层槽位实测值（2026-10-27 重算，勿信旧行号）**：
+`+3 Traceparent` · `+4 MaxConns` · `+5 Breaker` · `+6 CpuShedding` · **`+7 HttpMiddleware（3s 预算起算）`** · `+8 MaxBytes`
+⇒ 域内 Filter 的可用窗口是 **`[+4,+6]`**（须 ≥ +3 才在 SERVER span 内、须 ≤ +6 才出 3s 预算）
+⇒ 落 **`+6`**（与 `GoStyleCpuSheddingFilter` **并列**；两者都不写响应 ⇒ 先后不改变可观察面）。
+⚠️ `HttpMiddlewareFilter` **不是**最外层（`+3/+4/+5/+6` 在它外面），但那几个**不计时**。
 
-### 3.2 鉴权（`AdminJwtAuthInterceptor`）
+⚠️ **与 Go 的顺序差异只剩「遥测面」一半**：Go 的 observability(3s) 在 **JWT 内层** ⇒ 验签**不**计入 3s 预算；
+RAG 侧验签已搬进 `GoStyleJwtAuthFilter(+6)` ⇒ 同样**在预算之外** ⇒ **② 超时范围已闭环**；
+但 **① 遥测面**（401 请求仍产生观测数据）**未闭环**。见 DRIFT-ADMINAPI-006。
+
+### 3.2 鉴权（`GoStyleJwtAuthFilter` + `AdminJwtAuthInterceptor`）
 
 | 阶段 | 行为 | 与 Go |
 |---|---|---|
-| public 路径 | `PUBLIC_PATHS.contains(request.getRequestURI())` ⇒ 直接 return（`:98-100`） | ✅ 一致（集合逐条相同） |
-| 阶段 1 验签 | 缺 `Authorization` ⇒ 401；`tokenForSignatureVerification` 剥前缀（大小写不敏感）；jjwt 验签；`userId` claim **必须是 Number**，否则 401（`:133-183`） | ⚠️ 比 Go **多一道** claim 存在性/类型检查（DRIFT-ADMINAPI-003）⇒ **已签字偏离 SD-2026-10-23-01，属预期差异** |
-| 阶段 2 黑名单 | `trimBearerPrefix`（大小写敏感）；`hasKey(prefix+token)`；异常吞成 `null` ⇒ **fail-open**（`:196-231`） | ✅ 一致（含「两段取法不同」这个 Go 自身的不一致） |
-| attribute 写入 | 成功时写 `userId`（Long）与 `jwt_token`（String） | ✅ 一致 |
+| public 路径 | `AdminJwtAuthPaths.isPublic(uri)` ⇒ 直接 return（`AdminJwtAuthInterceptor:101-103`；集合定义 `AdminJwtAuthPaths:44-47`） | ✅ 一致（集合逐条相同） |
+| 阶段 1 验签 | 缺 `Authorization` ⇒ 401；`tokenForSignatureVerification` 剥前缀（大小写不敏感）；jjwt 验签；`userId` claim **必须是 Number**，否则 401（`AdminJwtSignatureVerifier:73-129`，claim 判定 `:101-113`） | ⚠️ 比 Go **多一道** claim 存在性/类型检查（DRIFT-ADMINAPI-003）⇒ **已签字偏离 SD-2026-10-23-01，属预期差异** |
+| 阶段 1 的**执行位置** | 验签在 **`GoStyleJwtAuthFilter`（`@Order(+6)`）** 里 ⇒ 在 `HttpMiddlewareFilter(+7)` 的 3s 预算**之外** | ✅ **已闭环**（2026-10-27）——原 DRIFT-ADMINAPI-006 的 ② 半，见下条 |
+| 阶段 2 黑名单 | `trimBearerPrefix`（大小写敏感）；`hasKey(prefix+token)`；异常吞成 `null` ⇒ **fail-open**（`AdminJwtAuthInterceptor:172-178` + `:197-207`） | ✅ 一致（含「两段取法不同」这个 Go 自身的不一致）；**仍在预算之内** ⇒ 与 Go 一致（Go 的黑名单是 route 级中间件 ⇒ 最内层） |
+| attribute 写入 | 成功时写 `userId`（Long，`:159`）与 `jwt_token`（String，`:182`） | ✅ 一致 |
 
 ⚠️ **Go 从不写 `uid` attribute，RAG 也没有** —— 但两端的**读取方**不同，见 §4 矩阵。
+
+⚠️ **异常对象由 Filter 产出、interceptor 原样重抛**（`AdminJwtAuthInterceptor:152-153`）
+⇒ `GlobalExceptionHandler` 的 `@ExceptionHandler` 仍管得到 ⇒ **401 + 完整信封的形状逐字不变**（M-05 不受影响）。
 
 ### 3.3 逐 OP 语义（只写与 Go 的差异点）
 
@@ -315,7 +329,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | M-05 | 鉴权 | 验签失败 / 缺头的 401 **body** | **空 body** | 完整 envelope `{code:1006}` | OBSERVABLE DIFFERENCE | 已在 `AuthenticationException:20-39` 与 `_shared.md` N-1 留档（**已签字**） |
 | M-06 | 鉴权 | 黑名单 401 的**业务码** | **`code:401`** + `msg:"登录已失效,请重新登陆"` + `Content-Type: appliaction/json`（Go 拼写错误） | **`code:1006`** + `msg:"TOKEN已过期"` + `application/json` | **OBSERVABLE DIFFERENCE** | → **DRIFT-ADMINAPI-004** |
 | M-07 | 鉴权 | 签名有效但 `userId` claim 缺失/非数字 | **200 + `{code:1006}`** | **401 + `{code:1006}`** | **OBSERVABLE DIFFERENCE（已签字 SD-01）** | → **DRIFT-ADMINAPI-003** ⇒ **预期差异，对拍必红，不是回归** |
-| M-08 | 鉴权 | public 路径集合 | `{create, login}` | `{create, login}` | EQUIVALENT | `routes.go:16-30` vs `AdminJwtAuthInterceptor:70-72` |
+| M-08 | 鉴权 | public 路径集合 | `{create, login}` | `{create, login}` | EQUIVALENT | `routes.go:16-30` vs `AdminJwtAuthPaths:44-47` |
 | M-09 | 鉴权 | 中间件顺序（验签 → 黑名单） | Authorize → observability → CheckBlacklist | CheckBlacklist 在 JWT **之后** | EQUIVALENT | 三段取证见 §2.1；`AdminApiMvcPipelineTest` 有 4 条断言（非本轮） |
 | M-10 | 鉴权 | 黑名单 fail-open | `err != nil` ⇒ 放行 | catch ⇒ `exists=null` ⇒ 放行 | EQUIVALENT | `checkblacklistmiddleware.go:35-36` vs `isBlacklisted:221-231` |
 | M-11 | 鉴权 | Bearer 前缀两段取法 | 验签大小写不敏感 / 黑名单大小写敏感 | `BearerTokenExtractor` 两个方法 | EQUIVALENT | `oauth2.go:7-12` + `TrimPrefix` vs `BearerTokenExtractor:74-99` |
@@ -344,9 +358,9 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | M-34 | ALL | 序列化：显式 `null` vs 缺席（map 字段） | `null⇒400 mustn't be nil` / 缺席⇒通过 | 同（`extraInfoPresent` 标志） | EQUIVALENT | R2 已修；`GoStyleRequired.explicitNull:67-71` |
 | M-35 | ALL | 标量强转 / 浮点截断 | number/bool→String **拒**；float→int **拒**（含 `1.0`） | 同（`GoStyleCoercion` 全局生效） | EQUIVALENT | R1 已修；⚠️ Jackson 3 类级 coercion 实测无效 ⇒ 只能全局（`GoStyleCoercion` 类注释「第三个坑」） |
 | M-36 | ALL | 超时时长 | **3000ms**（yaml 未写，来自 `rest/config.go:55` 的 `json:",default=3000"`） | `observability.http-timeout: 3s` | EQUIVALENT | **消费点**：`TimeoutFromMillis(conf.Timeout)`；`application.yml:131-132` |
-| M-37 | ALL | 超时的**包含范围** | 计时器在 Authorize **之后**起算 ⇒ **JWT 验签不计入** | 计时器在 `HttpMiddlewareFilter`(+5) 起算，位于 JWT 拦截器**外层** ⇒ **验签计入** | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-006（**2026-10-24 复核：差异成立**；差异**仅**在 JWT 验签这一段 —— 黑名单 Redis 两侧都计入） |
+| M-37 | ALL | 超时的**包含范围** | 计时器在 Authorize **之后**起算 ⇒ **JWT 验签不计入** | 计时器在 `HttpMiddlewareFilter`(**+7**) 起算；验签在 `GoStyleJwtAuthFilter`(**+6**) ⇒ 同样**不计入** | **EQUIVALENT**（**2026-10-27 已闭环**） | → DRIFT-ADMINAPI-006 的 **② 半已修**：验签搬出预算 ⇒ 见 §12.2。黑名单 Redis 两侧都在预算**之内**（Go = route 级中间件最内层；RAG = interceptor 段）⇒ 本行**整体**等价 |
 | M-38 | ALL | 超时响应 | `503` + `text/plain; charset=utf-8` + `nosniff` + 尾换行 | `503` + `text/plain; charset=utf-8` + 尾换行，**无 nosniff** | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-007（**代码在 `service/common`，非本组件文件**）<br>〔**2026-10-24 完整性复核补记 ①**：上表两边写的都是**源码字面量**；**线上字节** Tomcat 会把 `Content-Type` 重渲染成 `text/plain;charset=utf-8`（**分号后无空格**）⇒ 与 Go 的 `text/plain; charset=utf-8`（**有空格**）**逐字节不同**（归一化后相同）。**499/503 都走这条**；400 的同款残差已记在 §UNRESOLVED-002<br>〔**2026-10-24 完整性复核补记 ②**：**nosniff 已被 `align/message` 分支跨域修掉**（`HttpMiddleware.writeTimeoutResponse` 加了 `setHeader("X-Content-Type-Options","nosniff")`）⇒ **未合并前本条仍成立，合并后本条自动消失** —— 见 ADMINAPI-007 的处置栏〕 |
-| M-39 | ALL | 中间件外层顺序 / 遥测面 | 签名无效的请求：**Sea 侧 `markHTTPResult` 观测数据不产生**（`Authorize` 短路 ⇒ 内层中间件不执行）；但 go-zero native `TraceHandler` 在**链首**，**仍产生 OTel server span** | 会产生（401 的观测数据与 span 都产生） | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-006（**2026-10-24 复核：原写「完全不产生 observability span」口径过宽**） |
+| M-39 | ALL | 中间件外层顺序 / 遥测面 | 签名无效的请求：**Sea 侧 `markHTTPResult` 观测数据不产生**（`Authorize` 短路 ⇒ 内层中间件不执行）；但 go-zero native `TraceHandler` 在**链首**，**仍产生 OTel server span** | 会产生（401 的观测数据与 span 都产生） | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-006 的 **① 半**（**2026-10-27 复核：原写「完全不产生 observability span」口径过宽；验签搬到 +6 后 **span 侧仍等价**（`Traceparent(+3)` 在其外层），但**观测数据侧仍不等价**）） |
 | M-40 | 全部外部调用 | Retry | **无** | **无** | EQUIVALENT | 两侧 `application.yml` / `admincenter.yaml` 均无重试配置 |
 | M-41 | 启动 | 下游依赖不可达 | `zrpc.MustNewClient` **启动即失败**（进程不启动） | Nacos + devh 懒连接，**进程能起**、每请求失败 | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-009 |
 | M-42 | 全部 | 并发语义 | 无状态，goroutine-per-request | 无状态，**但**多一个 worker-pool 饱和 → `setStatus(503)` 无 body 分支 | UNKNOWN | Go 侧无对应分支；见 UNRESOLVED-004 |
@@ -402,7 +416,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | **Auth**（§14） | **NOT EQUIVALENT** | DRIFT-ADMINAPI-001/002/003/004 |
 | **Transaction**（§15） | N/A（api 层无事务） | M-44 |
 | **Concurrency**（§16） | 基本等价 + 1 个 RAG 独有分支 | M-42 / UNRESOLVED-004 |
-| **Timeout**（§17） | 时长等价、**范围不等价** | M-36 / M-37 / DRIFT-ADMINAPI-006 |
+| **Timeout**（§17） | 时长等价、**范围已等价**（2026-10-27：验签移出 3s 预算） | M-36 / M-37 / DRIFT-ADMINAPI-006 |
 | **Retry**（§18） | EQUIVALENT（两侧都无） | M-40 |
 | **Serialization**（§19） | 大部分等价，2 处 OBSERVABLE | M-30~M-35 / DRIFT-ADMINAPI-005 / M-20 |
 | **Config**（§20） | EQUIVALENT | secret/expire/port 逐项对齐 `application.yml:80-83,46-52` |
@@ -520,7 +534,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
   **不检查任何 claim 的存在性或取值** ⇒ 一个「签名有效但无 `userId`」的 token 能穿过鉴权，
   然后由 Logic 自己发现：`getselflogic.go:36-40` / `updatelogic.go:36-40` / `createinvitelogic.go:35-40`
   返回 `nil, errmsg.ErrorTokenRuntime` ⇒ `httpx.OkJson` ⇒ **HTTP 200 + `{code:1006}`**。
-- **RAG Behavior**：`AdminJwtAuthInterceptor:165-175` 在**鉴权层**就判 `userId` claim：
+- **RAG Behavior**：`AdminJwtSignatureVerifier:101-113`（**2026-10-27 起**该判据随验签搬进 `auth/` 包；
+  修前位置为 `AdminJwtAuthInterceptor:165-175`）在**鉴权层**就判 `userId` claim：
   ```java
   Object claim = jws.getPayload().get("userId");
   if (claim instanceof Number) { ... } else { throw new AuthenticationException(1006, ...); }
@@ -591,26 +606,35 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 
 ### DRIFT-ADMINAPI-006 · 中间件外层顺序不同 ⇒ 401 请求的遥测面与 3s 预算包含范围都不同
 
+> **状态（2026-10-27）**：本条含**两个可分离的子项** ——
+> **②「超时范围」已修**（验签搬进 `GoStyleJwtAuthFilter(+6)` ⇒ 移出 3s 预算 ⇒ 与 Go 一致）；
+> **①「遥测面」仍开放**（401 请求仍产生 Sea 侧不产生的观测数据）。
+> ⇒ **不要按「整条已修/整条未修」读本条** ⇒ 逐半读 M-37 / M-39。
+
 - **Component**：admin-api / 全部端点
 - **Category**：Lifecycle / Timeout Scope / Observability
-- **Classification**：OBSERVABLE DIFFERENCE　**Risk**：LOW-MEDIUM
+- **Classification**：OBSERVABLE DIFFERENCE（**① 仍成立**）　**Risk**：LOW-MEDIUM
 - **Go Behavior**：`admincenter.go:34` `httpTimeout := observability.DisableNativeRestTimeout(&c.RestConf)`
   → `admincenter.go:36` `server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, ...))`
   ⇒ 进入 `ng.middlewares`，在 `engine.go:110-112` 里**排在 `appendAuthHandler` 之后** append
   ⇒ 位置在 **JWT 内层**、黑名单外层。
-- **RAG Behavior**：`HttpMiddlewareFilter:37` `@Order(Ordered.HIGHEST_PRECEDENCE + 5)` 是 **servlet Filter**，
-  包住整个 `DispatcherServlet` ⇒ 在 `AdminJwtAuthInterceptor`（`WebMvcConfig:60-63`）**外层**。
+- **RAG Behavior（2026-10-27 起）**：`HttpMiddlewareFilter:37` `@Order(Ordered.HIGHEST_PRECEDENCE + **7**)` 是 **servlet Filter**，
+  包住整个 `DispatcherServlet` ⇒ 在 `AdminJwtAuthInterceptor`（`WebMvcConfig:60-62`）**外层**；
+  **验签已搬进域内 `auth/GoStyleJwtAuthFilter.java:89` `@Order(+6)`** ⇒ **在 3s 预算之外**。
+  ⚠️ 共享层槽位实测值见 §3.1（注：`HttpMiddlewareFilter` 的 `@Order` 原写 `+5`，**已过期** ⇒ 实测为 `+7`）。
 - **Difference**：
-  1. **遥测面**：一个签名无效的请求，Go 在 `Authorize` 就短路 ⇒ **Sea 侧 `markHTTPResult` 的观测数据不产生**
+  1. **遥测面（仍成立）**：一个签名无效的请求，Go 在 `Authorize` 就短路 ⇒ **Sea 侧 `markHTTPResult` 的观测数据不产生**
      （`observability/http.go:48`/`:78` 都不执行）；但 go-zero native `TraceHandler`（`rest/handler/tracehandler.go:26-60`）
      在**链首**、用 `tracer.Start` 真实创建 **OTel server span** ⇒ **401 也会产生 span**。
-     RAG 侧 `HttpMiddlewareFilter` 在**所有 JWT 相关组件外层** ⇒ 401 的观测数据与 span **都产生**。
-  2. **超时范围**：Go 的 3s 计时器在 Authorize **之后**起算（JWT 验签耗时**不计入**）；
-     RAG 的 3s 在 JWT 拦截器**外层**起算 ⇒ **验签计入**预算。
+     RAG 侧 `HttpMiddlewareFilter(+7)` 在**验签 Filter(+6) 之后**执行 ⇒ 401 的观测数据**仍产生**；
+     ⚠️ **span 侧已等价**（`GoStyleTraceparentFilter(+3)` 在验签 Filter 之外 ⇒ 401 同样产生 SERVER span）。
+  2. **超时范围（✅ 已修，2026-10-27）**：Go 的 3s 计时器在 Authorize **之后**起算（JWT 验签耗时**不计入**）；
+     RAG 修前 3s 在 JWT 拦截器**外层**起算 ⇒ 验签计入预算。
+     **修后**验签在 `GoStyleJwtAuthFilter(+6)`、`HttpMiddlewareFilter(+7)` 在其**内层** ⇒ **验签不计入**预算 ⇒ 与 Go 一致。
      ⚠️ **黑名单 Redis EXISTS 两侧都计入**（Go 侧黑名单被 `WithMiddleware` 直接包在 `route.Handler` 上、
-     在计时器**内层**；RAG 侧在拦截器阶段 2、也在计时器内层）⇒ **差异仅在 JWT 验签这一段**。
-- **Evidence strength**：`静态源码·双侧`（`engine.go:110-112` 与 `@Order` 行号均已核对）
-- **Note**：不影响任何业务判定，只影响遥测与极端超时边界。**不列为待办**，仅留档。
+     在计时器**内层**；RAG 侧在拦截器阶段 2、也在计时器内层）⇒ **差异原本就仅在 JWT 验签这一段**。
+- **Evidence strength**：`静态源码·双侧`（`engine.go:110-112` 与 `@Order` 行号均已核对）⇒ **② 已升到 L3（真启动）**，见 §12.2
+- **Note**：不影响任何业务判定，只影响遥测与极端超时边界。**① 不列为待办**，仅留档。
 
 > #### ⚠️ 2026-10-24 复核补记：**「Go 的 3s 从哪起算」有个必须绕开的陷阱**
 >
@@ -627,11 +651,12 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 >
 > ⇒ **最终 Go 链（外→内）**：Trace → Log → Prometheus → MaxConns → Breaker → Shedding → Recover → Metrics →
 > **Authorize(JWT)** → **observability(3s 计时)** → **黑名单** → handler
-> ⇒ **RAG 链（外→内）**：MaxConns(+1) → Breaker(+2) → CpuShedding(+3) → **observability/3s(+5)** → MaxBytes(+6) →
-> DispatcherServlet → **Authorize(JWT)** → 黑名单 → controller
+> ⇒ **RAG 链（外→内，实测 2026-10-27）**：Traceparent(+3) → MaxConns(+4) → Breaker(+5) → CpuShedding(+6) →
+> **验签 Filter(+6)** → **observability/3s(+7)** → MaxBytes(+8) →
+> DispatcherServlet → **Authorize 结果消费 + 黑名单** → controller
 >
-> ⚠️ RAG 侧的 `HttpMiddlewareFilter` **不是**最外层（+1/+2/+3 在它外面），但那三个**不计时** ⇒ 预算范围结论不变。
-> **结论：差异成立，且只在 JWT 验签这一段。**
+> ⚠️ RAG 侧的 `HttpMiddlewareFilter` **不是**最外层（**+3/+4/+5/+6** 在它外面），但那些**不计时** ⇒ 预算范围结论不变。
+> **结论（2026-10-27 更新）：② 超时范围已修（验签搬到 +6 ⇒ 出预算）；① 遥测面仍成立。**
 >
 > **方法论**：`*WithNative*` / `Disable*` 这类**关掉框架自带机制**的调用，
 > 是「读框架源码推中间件顺序」时最容易漏掉的一环 ——
@@ -893,9 +918,9 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | 9 | Transaction boundary 是否一致 | ✅ 是 | api 层两侧皆无事务（M-44） |
 | 10 | State transition 是否一致 | ✅ 是 | api 层无状态机 |
 | 11 | Side effects 是否一致 | ⚠️ 部分 | Redis / metrics / gRPC 一致；**operatorId 值不同**（DRIFT-ADMINAPI-001） |
-| 12 | Ordering 是否一致 | ⚠️ 部分 | **鉴权内部顺序一致**（M-09，三段取证）；**中间件外层顺序不一致**（M-39 / DRIFT-ADMINAPI-006） |
+| 12 | Ordering 是否一致 | ⚠️ 部分 | **鉴权内部顺序一致**（M-09，三段取证）；**中间件外层顺序不一致**（M-39 / DRIFT-ADMINAPI-006 的 **① 遥测面**；**② 超时范围已修**，见 M-37） |
 | 13 | Retry 是否一致 | ✅ 是 | 两侧皆无（M-40） |
-| 14 | Timeout scope 是否一致 | ❌ 否 | 时长一致（M-36）；**包含范围不同**（M-37 / DRIFT-ADMINAPI-006） |
+| 14 | Timeout scope 是否一致 | ✅ 是（**2026-10-27 更新**） | 时长一致（M-36）；**包含范围已一致**（M-37 —— 验签搬进 `GoStyleJwtAuthFilter(+6)` ⇒ 出 3s 预算） |
 | 15 | Concurrency semantics 是否一致 | ⚠️ UNKNOWN | 无状态部分一致；RAG 多一个 worker-pool 分支（UNRESOLVED-004） |
 | 16 | Authentication / Authorization 是否一致 | ❌ **否** | **DRIFT-ADMINAPI-001 / 002 / 003 / 004** —— 本组件最严重的一组 |
 | 17 | Serialization semantics 是否一致 | ⚠️ 部分 | `uid` 字符串化 / `extra_info` / `email` omitempty / 显式 null 一致（M-30~M-35）；**user 缺失形态不一致**（DRIFT-ADMINAPI-005）、503 缺 nosniff（DRIFT-ADMINAPI-007） |
@@ -920,7 +945,7 @@ SEMANTICALLY NOT EQUIVALENT
 | **HTTP 状态码语义变更** | ⚠️ **修正为：主体已修，但两处遗留未闭合** | 业务族恒 200 ✅（`GlobalExceptionHandler:231-233` `decideStatus` 无条件 `OK`，对应 Go 的 `httpx.OkJson`）；鉴权族 401 ✅（`handleAuthentication:66-68`，对应 Go `authhandler.go:121`）。**遗留**：黑名单 401 的业务码 401→1006（DRIFT-ADMINAPI-004）；claim 无效时 200→401（DRIFT-ADMINAPI-003）—— ⚠️ **2026-10-24 订正：这两处其实都已签字**（SD-2026-10-23-08 / SD-2026-10-23-01）⇒ **本行「遗留未闭合」的表述作废**，两者都是预期差异 |
 | **`@ResponseBodyAdvice` 二次包裹** | ✅ **已修，当前源码成立**（成功 + 异常 + 400 三类路径均覆盖） | 两道守卫：`GlobalResponseAdvice:39-41`（`body == null \|\| body instanceof Response`）与 `:52-55`（非 JSON 原样透传）。`handleBusiness` / `handleRPC` / `handleAuthentication` / 三个 IdentityResolver 分支全部返回 `ResponseEntity<Response>` ⇒ G1 短路；`goStylePlainTextBadRequest` 返回 `ResponseEntity<String>` + text/plain ⇒ G2 短路。⚠️ **残余缺口**：`body == null` 这一支（405/415/actuator）无任何断言；且 `AdminResponseEnvelopeAdviceTest` 用的是 `standaloneSetup`，**不加载 `HttpMiddlewareFilter`** ⇒ 与 DRIFT-FRAMEWORK-001 相关的容器时序不在其覆盖内。**按 AGENTS.md 硬约束 2，绿测试本身不作为「已闭环」证据** |
 | **`SelectAvatar` 响应 `is_current` 陈旧** | 🚫 **不适用**；但**同型的 `found` 已修且当前成立** | admin 域**无 avatar 端点**：`service/user/admin/api` 33 个源文件逐条核对，无任何 avatar 字样；`admin.proto` 的 `AdminInfo` 无头像字段。同型问题在 `getuser`：Go 的 `true` 写在 **api 层**（`getuserlogic.go:59`），RAG 显式 `setFound(true)`（`AdminGetUserService:67`），并有 `AdminApiMvcPipelineTest` + `AdminSemanticDriftApiRegressionTest` 两处断言（**非本轮**） |
-| **`JwtUtil` 密钥补齐被删** | ✅ **已修且当前成立**（但其后果 N-5 已签字） | `JwtUtil.padToHmacKeySize:44-53` 存在，且被**签发端与验签端共用**：签发 `JwtUtil.getToken:16`、验签 `AdminJwtAuthInterceptor:90` ⇒ 不存在「一处补一处没补」的撕裂。⚠️ 后果：Go 用 15 字节原串、RAG 用 32 字节 zero-pad ⇒ **两侧签发的 token 互不认**（N-5，已签字，`admin/_shared.md`） |
+| **`JwtUtil` 密钥补齐被删** | ✅ **已修且当前成立**（但其后果 N-5 已签字） | `JwtUtil.padToHmacKeySize:76-85` 存在，且被**签发端与验签端共用**：签发 `JwtUtil.getToken:13`（调用点 `:22`）、验签 `AdminJwtSignatureVerifier:64`（**2026-10-27 起**随验签搬进 `auth/` 包；修前在 `AdminJwtAuthInterceptor`）⇒ 不存在「一处补一处没补」的撕裂。⚠️ 后果：Go 用 15 字节原串、RAG 用 32 字节 zero-pad ⇒ **两侧签发的 token 互不认**（N-5，已签字，`admin/_shared.md`） |
 
 ### 10.4 效力边界（本节的自我限制）
 
@@ -1814,3 +1839,151 @@ global **E47**（业务层把「SQL 被 deadline 取消」改写/吞掉 ⇒ 事�
 | `docs/Pitfalls/users/admin/rpc.md` | 追加 **P-16**（仪器口径 ≠ 归因） | 踩坑档 |
 
 **零代码改动** ⇒ 不需要重跑测试门禁。
+
+---
+
+## 12. 🆕 `DRIFT-ADMINAPI-006 ②` 的**实施记录**（2026-10-27 · G1 lane · 跨服务推广）
+
+> **元信息**：落码分支 `align/g1-users-follow`（基线 `a282012` = `do-my-own-gh`）·
+> **写权内**（全部落 `service/users/admin/admin-api/**`）·
+> **证据强度**：**L3 活体**（真 PG + 真 Redis + 真 Nacos + **真 Tomcat**，非 MockMvc）＋ **L2 装配层守门** ＋ **L1**（Go 侧链序逐行）
+> ⚠️ **未跑双侧活体对拍**（Go 侧进程未起）⇒ 按 AGENTS.md §0，读作「**在该证据强度下一致**」。
+>
+> ⚠️ **本条不是新差异，是「推广」** —— 差异本体早已登记（`DRIFT-ADMINAPI-006` 的 ② 半），
+> 本轮把它**修掉**；① 半（遥测面）**未动**。
+
+### 12.1 Go 侧链序（逐行核实 · 真源 `service/user/admin/api/`）
+
+```
+service/user/admin/api/admincenter.go:34  httpTimeout := observability.DisableNativeRestTimeout(&c.RestConf)
+service/user/admin/api/admincenter.go:36  server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, ...))
+                                          ⇒ observability 是**唯一**的 user middleware
+go-zero@v1.10.2 rest/engine.go:101-113     bindRoute：
+                                            chn = buildChainWithNativeMiddlewares(...)   // 原生中间件（索引 0 = 最外层）
+                                            chn = appendAuthHandler(fr, chn, verifier)   // ← JWT 验签
+                                            for _, mw := range ng.middlewares { ... }    // ← observability(3s) 在 JWT **之内**
+                                            handle = chn.ThenFunc(route.Handler)
+go-zero@v1.10.2 rest/chain/chain.go:38-43  Append = 「加在请求流的最后」⇒ 越 Append 越靠内
+go-zero@v1.10.2 rest/server.go:222-233     WithMiddleware ⇒ middleware(route.Handler) ⇒ 黑名单最内层
+⇒ 执行序：原生中间件 → **Authorize(JWT)** → **observability(3s 计时)** → **黑名单** → handler
+⇒ 3s 计时器在 Authorize **之后**起算 ⇒ **JWT 验签耗时不计入 3s 预算**
+```
+
+⚠️ **前提不能漏**：Go 的 native `TimeoutHandler` 被 `DisableNativeRestTimeout` 关掉了 ⇒ 3s **只**由 observability 提供
+⇒ 「验签在预算之外」才有意义（否则 native 那条链会让计时器回到 Authorize 外层）。
+⇒ Go 侧 `admin/api/internal/handler/routes.go:32-34,93` 的第二段 AddRoutes 与 user / follow **完全同构**。
+
+### 12.2 落点窗口与共享层槽位（`service/common` **只读** · 2026-10-27 重算）
+
+| `@Order` | Filter | 作用 | 出处 |
+|---|---|---|---|
+| **+3** | `GoStyleTraceparentFilter` | 起 SERVER span | `GoStyleTraceparentFilter.java:190` |
+| **+4** | `GoStyleMaxConnsFilter` | 连接数闸门 | `GoStyleMaxConnsFilter.java:96` |
+| **+5** | `GoStyleBreakerFilter` | 熔断 | `GoStyleBreakerFilter.java:77` |
+| **+6** | `GoStyleCpuSheddingFilter` | CPU 降载 | `GoStyleCpuSheddingFilter.java:63` |
+| **+7** | `HttpMiddlewareFilter` | **3s 预算起算点** | `HttpMiddlewareFilter.java:37` |
+| **+8** | `GoStyleMaxBytesFilter` | 请求体上限 | `GoStyleMaxBytesFilter.java:83` |
+
+⇒ **合法窗口 `[+3,+6]`**（≥+3 才在 SERVER span 内；≤+6 才出 3s 预算）—— 四个槽位（+3/+4/+5/+6）**全被共享层占满**
+⇒ 只能**并列** ⇒ 落 **+6**（与 `GoStyleCpuSheddingFilter` 并列）。
+⇒ **并列无害**：本 Filter **绝不写响应** ⇒ 与并列者的先后**不改变任何响应**。
+
+> ⚠️ **本轮又踩了一次「台账里的 @Order 过期」** —— 本文件 §7 的 006 条原文写 `HttpMiddlewareFilter` 是 `+5`，
+> **实测是 `+7`** ⇒ 照抄旧数字会把「验签该落在哪一档」算错。
+> ⇒ 已订正（§3.1 / §7 的 006 条 / 本节）。
+
+### 12.3 ✅ 实际落地的形态：**「Filter 只验签、interceptor 抛异常」**
+
+```
+[Traceparent +3] → [MaxConns +4] → [Breaker +5] → [CpuShedding +6] → [★ JWT 验签 +6]
+   → [3s 预算 +7] → [MaxBytes +8] → DispatcherServlet → [AdminJwtAuthInterceptor：抛 401 + 黑名单] → Controller
+```
+
+| 新增/改动 | 落点 | 职责 |
+|---|---|---|
+| `auth/AdminJwtAuthPaths.java` | admin-api | public/protected 判据（**Filter 与 interceptor 共用同一份** ⇒ 两个缝隙同时消失） |
+| `auth/AdminJwtVerificationResult.java` | admin-api | 验签结果载体（**失败带「异常对象」而非标志位** ⇒ `@ExceptionHandler` 仍管得到 ⇒ 401 信封形状逐字不变） |
+| `auth/AdminJwtSignatureVerifier.java` | admin-api | 验签本体（**只验签，不写响应、不查 Redis**；密钥构造 `JwtUtil.padToHmacKeySize` 也一并搬进来） |
+| `auth/GoStyleJwtAuthFilter.java` | admin-api | `@Order(+6)`：**只验签、只写 request attribute、绝不写响应** |
+| `interceptor/AdminJwtAuthInterceptor.java`（改） | admin-api | 消费 Filter 的验签结果 → 失败**原样重抛** → 黑名单检查（**留在预算内**，与 Go 一致） |
+
+⇒ **② 闭环**：验签发生在 3s 预算**之外** ⇒ 与 Go 的「计时器在 Authorize 之后起算」一致 ⇒ **M-37 由 OBSERVABLE DIFFERENCE 改判 EQUIVALENT**。
+⇒ **① 不变**：401 仍由 interceptor 抛 ⇒ 仍在 `HttpMiddlewareFilter` **之内** ⇒ 仍计入观测数据 ⇒ **M-39 仍为 OBSERVABLE DIFFERENCE**。
+⇒ ⚠️ ⇒ **本域签字档不受影响**（`SD-2026-10-23-08` / `SD-2026-10-23-01` 继续有效；本轮**刻意不**制造销号需求 —— 签字档不在 G1 写权内）。
+
+### 12.4 🔴 承重不变式：**`GoStyleJwtAuthFilter` 绝不写响应**
+
+- 401 **只能**由 interceptor 抛（`@ExceptionHandler` 仍管得到 ⇒ N-1 / M-05 的信封形状不变），
+  且发生在**所有 Filter 之后** ⇒ MaxBytes 的 **413 仍压过 401**（Go 侧 MaxBytes 是 native middleware、排在 Authorize **之外** ⇒ Go 也是 413 压过 401）。
+- ⇒ ⚠️ **改本类时若要写响应，必须同时重做「413 压过 401」的语义论证。**
+
+### 12.5 守门 + 变异验证（**绿测试必须是错误答案的守卫**）
+
+守门：`AdminApiJwtVerificationScopeTest`（**6 例**，新建）——
+① Filter 已注册 · ② **容器装配出的链**里 JWT Filter 排在 3s 预算 Filter **之前**
+（断言的是 `ServletContextInitializerBeans` 的**装配结果**，不是两个 `@Order` 数字）·
+③ interceptor 消费的是 Filter 的结果（`request().attribute(...) = "filter"`）· ④ **401 信封形状不变** ·
+⑤ **超限 body ⇒ 413**（压过 401）· ⑥ 路径判据自检（login / create 是 public，其余受保护）。
+
+| # | 变异 | 期望变红的守门 | 实测 |
+|---|---|---|---|
+| 1 | JWT Filter 的 `@Order` +6 → **+8** | ② 装配顺序 | ✅ 红 |
+| 2 | Filter **自己写 401** | ⑤ 超限 body | ✅ 红（`expected:<413> but was:<401>`）⇒ **实证「413 压过 401」被打破** |
+| 3 | 摘掉 Filter 的 `@Component` | ③ interceptor 消费 filter 结果 | ✅ 红（`expected:<filter> but was:<inline>`） |
+
+⇒ **3/3 变红** ⇒ 守门**不是假绿**。
+⇒ ⚠️ 连带项：`AdminSemanticDriftApiRegressionTest` 有 **8 处** `new AdminJwtAuthInterceptor(properties, redis)`
+⇒ 已改为 `new AdminJwtAuthInterceptor(new AdminJwtSignatureVerifier(properties), redis)`（走**兜底 inline 分支**，与修前**逐字一致**）
+⇒ 该类已在 javadoc 注明「本类现走兜底分支、生产路径由新守门覆盖」。
+
+### 12.6 ✅ 真启动复验（**真 Tomcat** · 2026-10-27 · L3 活体）
+
+环境：真 PG `127.0.0.1:56432/g1probe` + 真 Redis `57379` + 真 Nacos `8848`（`G1_GROUP`）+
+`user-rpc`/`admin-rpc`/`follow-rpc`/`admin-api`/`follow-api` **五个进程全部真起**（admin-api 7.275s · follow-api 6.998s）。
+
+| # | 探针 | 实测 | 判定 |
+|---|---|---|---|
+| 1 | admin 无 token（`/admin/v1/getself`） | **HTTP 401** + `{"code":1006,"msg":"TOKEN已过期","data":null}` | ✅ admin 侧 401 = **完整信封**（不是空 body） |
+| 2 | admin 合法 token | **HTTP 200** + `{"code":1003,"msg":"用户不存在"}` | ✅ **不是 401** ⇒ 验签通过、进到业务层 |
+| 3 | admin 坏签名 | **HTTP 401** + 同一信封 | ✅ |
+| 4 | admin 超限 body + 无 token | **HTTP 413** + **空 body** | ✅ **413 压过 401**（响应头层，MockMvc 测不到） |
+| 5 | admin public（`/admin/v1/login`） | **HTTP 200** | ✅ public 放行 |
+| 6 | follow 无 token（`/follow/v1/follow/list`） | **HTTP 401** + **空 body** | ✅ follow 域特有的 **401 空 body** 形状逐字不变 |
+| 7 | follow 合法 token | **HTTP 200** + `{"code":5101,"msg":"user not found"}` | ✅ **不是 401** ⇒ 验签通过、进到业务层 |
+| 8 | follow 坏签名 | **HTTP 401** + 空 body | ✅ |
+| 9 | follow 超限 body + 无 token | **HTTP 413** + 空 body | ✅ 同上不变式 |
+| 10 | follow 未注册路径 | **HTTP 404** + `text/plain` `404 page not found` | ✅ **不被鉴权遮蔽** ⇒ `handler instanceof HandlerMethod` 判据保留 |
+
+⇒ **10/10 符合预期**；日志里除**预期内**的 `AuthenticationException`（admin 1006 / follow 5004）与业务错误码外无异常。
+
+⇒ **6 组件回归**：`admin-api` **135** · `admin-rpc` **115** · `user-api` **118** · `user-rpc` **137** · `follow-api` **63** · `follow-rpc` **78`
+⇒ **646 条全绿**（`BUILD SUCCESS`，5:48）。
+⚠️ **上一轮那次「回归」不算数** —— 当时命令末尾接了 `| head -40`，`head` 先退出 ⇒ maven 收到 **SIGPIPE 被掐断**
+⇒ 退出码取到的是 `head` 的 0（**管道退出码取的是最后一个命令**）⇒ 看着像绿，实际 user-rpc 有一条
+`UserRpcGrpcInterceptorWiringTest` 报 `UNAVAILABLE`（掐断的残留）⇒ **重跑（写文件、不接管道）后 137/0/0 全绿**。
+
+### 12.7 ⚠️ 残余差异（如实登记，**不冒充已对齐**）
+
+1. **JWT 验签与过载保护的相对次序**：Go 的 Authorize 排在 MaxConns / Breaker / Shedding **之后**
+   ⇒ 过载被拒的请求**不做**验签；RAG 的验签 Filter 与 `CpuShedding`(+6) **并列**
+   ⇒ 并列落在 Shedding 之前时**多做一次无用验签**。
+   ⇒ **不改变任何响应**（只多一次 HMAC 计算）⇒ **只在过载时可见、只影响 CPU、wire 面零影响**。
+2. **`@Order` 并列的确定性**：+6 已被 `GoStyleCpuSheddingFilter` 占用 ⇒ Spring 对**同值**按 bean 定义注册顺序稳定排序
+   ⇒ 本轮实测装配结果满足「JWT 在预算之前」（+6 **严格小于** +7 ⇒ 与并列者的先后**无关**）
+   ⇒ ⇒ **该并列在本语义下无害**（因为验签 Filter 不写响应）。
+3. **①（401 计入观测面）仍在** ⇒ M-39 仍为 OBSERVABLE DIFFERENCE ⇒ 本条**不销号**。
+4. **admin 侧畸形 claim 仍是 401**（`AdminJwtSignatureVerifier:101-113`），而 user 侧按 `DRIFT-USERAPI-001` 改成「不拒绝、交给 identity 层」
+   ⇒ ⚠️ **两域刻意不统一**（本轮**不**趁机跨域「修好」）。
+
+### 12.8 🟡 跨服务推广状态（2026-10-27）
+
+| 服务 | 属哪个 lane | 本轮状态 |
+|---|---|---|
+| `user-api` | **G1** | ✅ 已修（上一轮提交 `49c298e`） |
+| `admin-api` | **G1** | ✅ **本轮已修** |
+| `follow-api` | **G1** | ✅ **本轮已修**（`DRIFT-FOLLOW-010`，见 [`follow/api.md`](../../follow/api.md)） |
+| `like-api` / `message-api` / `task-api` | **G2** | 🟡 待推广（配方见 [`user/api.md` §9.y §7](../user/api.md)） |
+| `article-api` / `comment-api` / `favorite-api` / `hot-api` | **G3** | 🟡 待推广（同上） |
+
+⇒ **推广前必查每个域自己的两个数**：该域 api 的 `WebMvcConfig` 注册的路径前缀 ⇒ 决定 `JwtAuthPaths` 的前缀常量；
+以及该域的 **public 路径集合** 与 **401 body 形状**（admin/user = 完整信封；follow = 空 body —— **不要统一**）。

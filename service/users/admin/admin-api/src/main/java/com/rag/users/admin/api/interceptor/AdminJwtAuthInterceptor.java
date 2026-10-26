@@ -1,15 +1,11 @@
 package com.rag.users.admin.api.interceptor;
 
 import com.rag.common.exception.AuthenticationException;
-import com.rag.common.exception.BusinessException;
-import com.rag.users.admin.api.config.AdminApiProperties;
+import com.rag.users.admin.api.auth.AdminJwtAuthPaths;
+import com.rag.users.admin.api.auth.AdminJwtSignatureVerifier;
+import com.rag.users.admin.api.auth.AdminJwtVerificationResult;
+import com.rag.users.admin.api.auth.GoStyleJwtAuthFilter;
 import com.rag.users.common.errmsg.ErrorCode;
-import com.rag.users.common.jwt.BearerTokenExtractor;
-import com.rag.users.common.jwt.JwtUtil;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jws;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -18,20 +14,39 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import javax.crypto.SecretKey;
-import java.util.Set;
-
 /**
- * Admin JWT 鉴权拦截器 —— 合并 Go 端 {@code rest.WithJwt} + {@code CheckBlacklistMiddleware} 两段中间件的职责。
+ * Admin JWT 鉴权拦截器 —— 承担 Go 端 {@code rest.WithJwt}（<b>验签结果消费</b>）+
+ * {@code CheckBlacklistMiddleware}（<b>黑名单</b>）两段中间件的后半程。
  *
- * 对应 Go: {@code service/user/admin/api/internal/handler/routes.go} 的第二段 AddRoutes
+ * 对应 Go: service/user/admin/api/internal/handler/routes.go 的第二段 AddRoutes
  * （{@code rest.WithMiddlewares([CheckBlacklistMiddleware], ...) + rest.WithJwt(secret)}）。
+ *
+ * <h2>🔴 DRIFT-USERAPI-009②：验签已搬进 {@link GoStyleJwtAuthFilter}</h2>
+ *
+ * <p>Go 侧链序：<b>原生中间件 → JWT 验签 → observability(3s 计时) → 黑名单 → handler</b>
+ * （{@code rest/engine.go:101-113} + {@code rest/chain/chain.go:38-43} 的 Append 语义）
+ * ⇒ <b>3s 预算不覆盖 JWT 验签</b>。
+ * <p>Servlet 侧所有 {@code Filter} 都在 {@code DispatcherServlet} 外面、
+ * {@code HandlerInterceptor} 在里面 ⇒ 验签要出预算，必须搬进 Filter
+ * ⇒ 验签搬到 {@link GoStyleJwtAuthFilter}（{@code @Order(+6)}，在 3s 预算的 {@code +7} 之外）。
+ *
+ * <p><b>本类现在只做三件事</b>：
+ * <ol>
+ *   <li>消费 Filter 放进 request attribute 的<b>验签结果</b>；</li>
+ *   <li>把验签失败<b>原样重抛</b>（异常对象由 Filter 产出 ⇒
+ *       {@code GlobalExceptionHandler} 的 {@code @ExceptionHandler} 仍管得到
+ *       ⇒ <b>401 + 完整信封</b>的形状逐字不变）；</li>
+ *   <li><b>黑名单检查</b>（仍在预算<b>之内</b> ⇒ 与 Go 一致
+ *       —— Go 的黑名单是 route 级中间件 {@code rest.WithMiddlewares} ⇒
+ *       {@code rest/server.go:222-233 WithMiddleware} 把 {@code middleware(route.Handler)}
+ *       包在 handler 外 ⇒ 比 chain 任何元素都内层 ⇒ 在 observability(3s) <b>之内</b>）。</li>
+ * </ol>
  *
  * <p><b>L1 行为冻结（与 Go 端 1:1）</b>：
  * <ol>
  *   <li>public 路径（{@code /admin/v1/login}、{@code /admin/v1/create}）：<b>直接放行</b>，不校验 token</li>
- *   <li>protected 路径（其余 11 个）—— <b>严格按 Go 的两段顺序：先验签、后黑名单</b>
- *     （三段取证见 {@link #preHandle} 内的注释），失败一律 <b>HTTP 401</b>
+ *   <li>protected 路径（其余 13 个）—— 验签由 {@link GoStyleJwtAuthFilter} 完成，
+ *     本类消费结果，失败一律 <b>HTTP 401</b>
  *     （抛 {@code AuthenticationException}，与 user-api 同款，见 DRIFT-004）：
  *     <ul>
  *       <li>Authorization 头缺失 / 为空 → 401（验签阶段）</li>
@@ -58,7 +73,7 @@ import java.util.Set;
  *       对 {@code "XXBearer eyJ..."} 会取出 {@code "eyJ..."} 去验签，
  *       而 Go 的 {@code stripBearerPrefixFromTokenString} 在前缀不匹配时<b>原样返回整串</b>
  *       （必然验签失败）。叠加黑名单用整串 {@code TrimPrefix} 查不到，
- *       构成<b>注销绕过</b>。已按 Go 逐条重写为 {@link #tokenForSignatureVerification}。</li>
+ *       构成<b>注销绕过</b>。已按 Go 逐条重写为 {@code BearerTokenExtractor} 的两个方法。</li>
  * </ul>
  */
 @Component
@@ -66,28 +81,16 @@ public class AdminJwtAuthInterceptor implements HandlerInterceptor {
 
     private static final Logger log = LoggerFactory.getLogger(AdminJwtAuthInterceptor.class);
 
-    /** public 路径前缀（HUMAN_ONLY.MD 决策：login / create 不挂 JWT）。 */
-    private static final Set<String> PUBLIC_PATHS = Set.of(
-            "/admin/v1/login", "/admin/v1/create"
-    );
-
     /** Redis blacklist key 前缀（与 Go 端 1:1：admin:jwt_blacklist:）。 */
     private static final String BLACKLIST_KEY_PREFIX = "admin:jwt_blacklist:";
 
-    private final SecretKey key;
+    private final AdminJwtSignatureVerifier verifier;
     private final StringRedisTemplate redisTemplate;
 
-    public AdminJwtAuthInterceptor(AdminApiProperties properties, StringRedisTemplate redisTemplate) {
-        // L4 idiomatization（强制留痕 + Go ↔ RAG 对照）：
-        //   Go 出处：service/user/common/jwt/jwt.go 的 `token.SignedString([]byte(secretKey))`
-        //     —— Go 端 golang-jwt 不校验 key 长度，15 字节 admin secret 能直接签。
-        //   Java 表达差异：jjwt 0.12 强制 ≥32 字节（HS256 / RFC 7518），故拦截器构造器
-        //     调 Keys.hmacShaKeyFor 时必须先补齐；本构造器与 JwtUtil.getToken 共用
-        //     JwtUtil.padToHmacKeySize，强制签发与验签落在同一份 32 字节 key 上，
-        //     否则 admin-api 在默认 15 字节密钥下 Bean 创建即抛 WeakKeyException。
-        //   语义等价论证：padding 是 zero-fill，落到 HS256 上字节一致 → token 形状、
-        //     claim、exp 全一致；Go ↔ RAG 仅在 key 长度这一非行为字段上收敛。
-        this.key = Keys.hmacShaKeyFor(JwtUtil.padToHmacKeySize(properties.getAdminAuth().getAccessSecret()));
+    public AdminJwtAuthInterceptor(AdminJwtSignatureVerifier verifier, StringRedisTemplate redisTemplate) {
+        // ⚠️ 密钥构造已移入 {@link AdminJwtSignatureVerifier}（验签搬进 Filter 后的归属）；
+        //   L4 idiomatization 的 Go ↔ RAG 等价性论证见该类的构造器注释（内容未变）。
+        this.verifier = verifier;
         this.redisTemplate = redisTemplate;
     }
 
@@ -95,12 +98,12 @@ public class AdminJwtAuthInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         String uri = request.getRequestURI();
 
-        if (PUBLIC_PATHS.contains(uri)) {
+        if (AdminJwtAuthPaths.isPublic(uri)) {
             return true;
         }
 
         // ==================================================================
-        // 阶段 1：JWT 验签（对应 go-zero rest.WithJwt → rest/handler/authhandler.go Authorize）
+        // 阶段 1：JWT 验签（结果由 GoStyleJwtAuthFilter 在 3s 预算之外产出）
         //
         // Go 出处（三段，缺一不可，顺序是结论的关键）：
         //   1. rest/engine.go:101-113 bindRoute：先 appendAuthHandler(JWT)，再 ng.middlewares，
@@ -130,57 +133,30 @@ public class AdminJwtAuthInterceptor implements HandlerInterceptor {
         // IdentityResolver.claimedUID。此处一并移出，消除两模块的层次不对称。
         // ==================================================================
 
-        String authHeader = request.getHeader("Authorization");
-        // Go: rest/token/tokenparser.go doParseToken → request.ParseFromRequest(r,
-        //        request.AuthorizationHeaderExtractor, ...)
-        // AuthorizationHeaderExtractor 定义在 golang-jwt/jwt/v4@v4.5.2/request/oauth2.go:7-12：
-        //   if len(tok) > 6 && strings.ToUpper(tok[0:7]) == "BEARER " { return tok[7:], nil }
-        //   return tok, nil        ← 【无 "Bearer " 前缀时原样返回整串，不报错】
-        // 即前缀【大小写不敏感】，且缺失前缀【不是直接 401，而是把整串拿去验签】。
-        //
-        // 本类此前用 split(" ", 2) 取 parts[1]，对 "XXBearer eyJ..." 会取出 "eyJ..." 去验签——
-        // 与 Go **相反**：Go 验的是整串（必然验签失败 → 401），RAG 却可能验签通过；
-        // 再叠加阶段 2 用整串 TrimPrefix 查黑名单必然查不到，构成**注销绕过**：
-        // 已注销的管理员 token 只要前缀加 "XXBearer " 即可继续调用 admin-api。
-        // 现按 Go 的 stripBearerPrefixFromTokenString 逐条对齐。
-        if (authHeader == null || authHeader.isEmpty()) {
-            log.warn("protected admin path {} without Authorization header", uri);
-            throw new AuthenticationException(
-                    ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
-                    ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
-        }
-        String token = BearerTokenExtractor.tokenForSignatureVerification(authHeader);
-        if (token.isEmpty()) {
-            log.warn("protected admin path {} with empty Bearer token", uri);
-            throw new AuthenticationException(
-                    ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
-                    ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
+        AdminJwtVerificationResult result = (AdminJwtVerificationResult) request.getAttribute(
+                GoStyleJwtAuthFilter.VERIFICATION_ATTRIBUTE);
+        if (result == null) {
+            // 🔴 兜底：Filter 未命中（路径判据不一致 / Filter 未被注册）⇒ 就地验签。
+            //   行为与 DRIFT-USERAPI-009② 修复前完全一致（401 照常）⇒ **不会造成鉴权绕过**；
+            //   但验签落回 3s 预算**之内** ⇒ 该路径上 ② 未闭环 ⇒ 必须大声记日志。
+            log.warn("admin JWT 验签未命中 filter 缓存 ⇒ 就地验签（DRIFT-USERAPI-009② 在此路径未闭环）: {}", uri);
+            request.setAttribute(GoStyleJwtAuthFilter.VERIFICATION_SOURCE_ATTRIBUTE,
+                    GoStyleJwtAuthFilter.SOURCE_INLINE);
+            result = verifier.verify(request.getHeader("Authorization"), uri);
+        } else {
+            request.setAttribute(GoStyleJwtAuthFilter.VERIFICATION_SOURCE_ATTRIBUTE,
+                    GoStyleJwtAuthFilter.SOURCE_FILTER);
         }
 
-        try {
-            Jws<Claims> jws = Jwts.parser()
-                    .verifyWith(key)
-                    .build()
-                    .parseSignedClaims(token);
-            Object claim = jws.getPayload().get("userId");
-            if (claim instanceof Number) {
-                long uid = ((Number) claim).longValue();
-                request.setAttribute("userId", Long.valueOf(uid));
-            } else {
-                log.warn("admin JWT claim userId missing or wrong type : {}",
-                        claim == null ? "null" : claim.getClass());
-                throw new AuthenticationException(
-                        ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
-                        ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
-            }
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Throwable t) {
-            log.warn("admin JWT verify failed : {}", t.getMessage());
-            throw new AuthenticationException(
-                    ErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
-                    ErrorCode.ERROR_TOKEN_RUNTIME.getMsg());
+        // 验签失败 ⇒ 原样重抛（异常对象由 Filter 产出 ⇒ @ExceptionHandler 仍管得到 ⇒ 401 信封形状不变）
+        if (result.failed()) {
+            throw result.failure();
         }
+
+        // claim 可用才写 userId attribute
+        // ⚠️ admin 侧与 user 侧**刻意不同**：畸形 claim 在 admin 侧是 **401**（由 verifier 产出 failure），
+        //   而 user 侧按 DRIFT-USERAPI-001 改成「不拒绝、交给 identity 层」⇒ **不在此统一两域**。
+        request.setAttribute("userId", Long.valueOf(result.uid()));
 
         // ---------- 阶段 2：黑名单检查（对应 Go CheckBlacklistMiddleware.Handle）----------
         // Go checkblacklistmiddleware.go:22-44：
@@ -193,7 +169,7 @@ public class AdminJwtAuthInterceptor implements HandlerInterceptor {
         // 注意 Go 内部【两段取法本就不同】：Authorize 用大小写不敏感的 strip，
         // 这里用大小写敏感的 TrimPrefix。故 "bearer <token>" 在 Go 里
         // 验签用 "<token>"、黑名单查 "bearer <token>"。这是 Go 自身的不一致，本实现原样保留。
-        String jwtToken = BearerTokenExtractor.trimBearerPrefix(authHeader);
+        String jwtToken = result.trimmedToken();
         if (!jwtToken.isEmpty() && isBlacklisted(jwtToken)) {
             log.warn("admin token in blacklist, uri={}", uri);
             throw new AuthenticationException(
@@ -204,7 +180,7 @@ public class AdminJwtAuthInterceptor implements HandlerInterceptor {
         // Go 只有在 header 非空且 TrimPrefix 结果非空时才写 jwt_token；
         // 上面已排除两种为空的分支，此处必然写入。
         request.setAttribute("jwt_token", jwtToken);
-        if (!jwtToken.equals(token)) {
+        if (!jwtToken.equals(result.signatureToken())) {
             // 与 Go 一致的不一致：非 "Bearer " 规范写法下两段取法不同。保留 warn 便于排查。
             log.warn("admin blacklist token != jwt token (auth header is not 'Bearer <token>')");
         }
