@@ -246,20 +246,49 @@ N13_NARRATION = re.compile(
     r'(删除|已删除|不存在|已移除|被删|不再存在|不建|未建|不创建|0\s*字节|错放|空文件|占位)')
 
 
-def _narration_in_lines(lines, ln, window=2):
-    """引用所在行**及邻行**（±window）里有没有「该文件的状态叙述」。
+def _narration_in_lines(lines, ln, window=2, path=None):
+    """引用所在行**及邻行**（±window）里有没有「**该文件**的状态叙述」。
 
     ⚠️ **为什么要邻行而不是同行**：台账常把叙述放在**上一行**再列路径，例如
         `docs/DRIFT/_cross/human-only-status.md:16-18` ——
         第 16 行写「以下 3 条**被登记为已存在、实际不存在**」，
         第 17~18 行才列三个 `HUMAN_ONLY.MD` 路径 ⇒ 只看同行会漏判。
 
-    返回 (是否命中, 命中的行号（1-based）)。
+    🔴 **但邻行窗口会「张冠李戴」**（本轮实测踩到）：邻行里若有一条**别的**叙述
+    （比如上一行在讲「某个文件已删除」），就会被误当成**本引用**的叙述
+    ⇒ ⇒ **把真实缺陷吃掉**。实测：global 台账 E43 行引用
+    `tools/check-ddl-static.py`（真实缺陷），而**上一行 E42** 含「删除」二字
+    ⇒ 该真实缺陷被静默 ⇒ ⇒ **必须要求「叙述指向同一个文件」**。
+
+    ⇒ **归属判定**（本轮实测踩出来的，见下）：
+      **A · 同行**：叙述词与本路径在**同一行**，且**该行的第一个路径引用就是本路径**
+        ⇒ 命中。⚠️ 「必须是第一个」是本轮实测逼出来的：台账的**汇总行**会把
+        **多个互不相干的事实**挤进一行（例如 global 时间线行里既有
+        「users-domain.md 临时档已删除」又有「like 域的 check-ddl-static.py 路径写错」）
+        ⇒ 若只判「同行含该路径」，那条**真实缺陷**会被别人的「删除」二字吃掉。
+      **B · 邻行**：窗口内存在一行**完全不含任何路径引用**的**纯叙述行**
+        ⇒ 命中（台账常写「以下 3 条实际不存在：」再在下一行列路径）。
+
+    `path=None` 时退化为「只看有没有叙述词」（供不需要区分归属的场合使用）。
+
+    返回 (是否命中, 命中的行号（1-based））。
     """
     if not lines:
         return False, 0
     for i in range(max(0, ln - window), min(len(lines), ln + window + 1)):
-        if N13_NARRATION.search(lines[i]):
+        line = lines[i]
+        if not N13_NARRATION.search(line):
+            continue
+        if path is None:
+            return True, i + 1
+        if i == ln:
+            # A · 同行 ⇒ 该行的**第一个**路径引用必须就是本路径
+            others = PATH_RE.findall(line)
+            if others and others[0] == path:
+                return True, i + 1
+            continue
+        # B · 邻行 ⇒ 必须是**不含任何路径**的纯叙述行
+        if not PATH_RE.findall(line):
             return True, i + 1
     return False, 0
 
@@ -396,7 +425,7 @@ def layer1_paths(root, texts, go_root=DEFAULT_GO_ROOT):
             narr_src, narr_line = '', 0
             for sf, ln in hits.get(p, []):
                 lines = read(os.path.join(root, sf)).splitlines()
-                ok, at = _narration_in_lines(lines, ln)
+                ok, at = _narration_in_lines(lines, ln, path=p)
                 if ok:
                     narr_src, narr_line = sf, at
                     break
@@ -941,15 +970,36 @@ def layer0_selfcheck(root):
         '`service/users/users-common/HUMAN_ONLY.MD`、',
         '`service/message/message-rpc/HUMAN_ONLY.MD`。',
     ]
-    _n13_cases = [
-        (_nl, 1, True, '叙述在上一行'),
-        (_nl, 0, True, '叙述在同一行'),
-        (_nl, 2, True, '叙述在上上一行'),
-        (['一条正常引用 `service/common/Foo.java`'], 0, False, '无状态叙述'),
-        (['该脚本在仓内不存在 ⇒ 守门缺位', '`tools/x/y.sh` 需补'], 1, True, '叙述在上一行'),
+    # ⚠️ **必须覆盖「张冠李戴」这个阴性对照**（本轮实测踩到）：
+    #    邻行里若讲的是**别的**文件的状态，不能当成本引用的叙述
+    #    ⇒ 否则**真实缺陷被静默**（实测：global 台账 E43 行引用的真实缺陷
+    #    被上一行 E42 的「删除」二字吃掉）。
+    _wrong = [
+        '| **E42** | ✅ 已修 —— ① `docs/DRIFT/global/_INDEX.md` ×2 ⇒ **已删除** |',
+        '| **E43** | 引用 `tools/check-ddl-static.py` ⇒ 真实是 `tools/difftest/check-ddl-static.py` |',
     ]
-    for _lines, _ln, _want, _why in _n13_cases:
-        _got, _at = _narration_in_lines(_lines, _ln)
+    # 🔴 **密集行**：一行挤了**多个互不相干的事实** ⇒ 叙述词必须归属**第一个**路径
+    _dense = [
+        '| **E42** | ✅ `docs/DRIFT/global/_INDEX.md` 已修 |',
+        '| **E43** | ④ `docs/Intentional_Deviations/users/_shared.md` 临时落点已迁回并**删除** '
+        '⑤ like 域的 `tools/check-ddl-static.py` 路径写错 |',
+    ]
+    _n13_cases = [
+        # 邻行纯叙述行（不含任何路径）⇒ 命中
+        (_nl, 1, True, '邻行是纯叙述行 ⇒ 命中', 'service/users/users-common/HUMAN_ONLY.MD'),
+        (_nl, 2, True, '邻行是纯叙述行 ⇒ 命中', 'service/message/message-api/HUMAN_ONLY.MD'),
+        # 同行 + 本路径是该行**第一个**路径 ⇒ 命中
+        (['`tools/difftest/check-protection-layer.sh` 在真容器下守 —— 该脚本**不存在**'], 0, True,
+         '同行 + 本路径是首个路径 ⇒ 命中', 'tools/difftest/check-protection-layer.sh'),
+        # 同行 + 本路径**不是**第一个 ⇒ 不命中（密集行里的别人的叙述）
+        (_dense, 1, False, '同行但本路径不是第一个 ⇒ 不得命中', 'tools/check-ddl-static.py'),
+        # 邻行讲的是**别的**文件（该行含别的路径）⇒ 不命中
+        (_wrong, 1, False, '邻行讲的是别的文件 ⇒ 不得命中', 'tools/check-ddl-static.py'),
+        # 无叙述 ⇒ 不命中
+        (['一条正常引用 `service/common/Foo.java`'], 0, False, '无状态叙述', 'service/common/Foo.java'),
+    ]
+    for _lines, _ln, _want, _why, _p in _n13_cases:
+        _got, _at = _narration_in_lines(_lines, _ln, path=_p)
         if _got == _want:
             print(f'    ✅ 层 1 状态叙述判定正确（{"命中" if _want else "不命中"}）：{_why}')
         else:
