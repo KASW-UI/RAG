@@ -1,4 +1,4 @@
-<!-- @new 2026-10-27 · `users-common` lane 台账 · 主会话（Jason 指定）建 lane 时预填 · 基线 commit e519073 -->
+<!-- @new 2026-10-27 · `users-common` lane 台账 · 主会话（Jason 指定）建 lane 时预填 · 基线 = `do-my-own-gh` @ 2026-10-27 -->
 
 # `users-common` lane 台账 —— 「users ↔ `service/common`」跨层对账
 
@@ -13,7 +13,7 @@
 |---|---|
 | lane | `users-common`（第 9/10 条） |
 | 分支 / 工作树 | `align/users-common` / `/Users/pr/Documents/java&golang/RAG.worktrees/users-common` |
-| 基点 | `e519073`（2026-10-27 · 合并 25/25 分支 + 全量回归 BUILD SUCCESS 之后） |
+| 基点 | **`do-my-own-gh` @ 2026-10-27**（= lane 脚手架落地那次提交；此前已合并 25/25 分支 + 全量回归 BUILD SUCCESS）⇒ 主干再前进时 lane `merge` 一次即可（**文件级不重叠 ⇒ 零冲突**） |
 | 本域模块 | `service/users/{user/{user-api, user-rpc, user-proto}, admin/{admin-api, admin-rpc, admin-proto}, users-common}` |
 | 域侧台账 | [`_shared.md`](_shared.md) · [`user/api.md`](user/api.md) · [`user/rpc.md`](user/rpc.md) · [`admin/api.md`](admin/api.md) · [`admin/rpc.md`](admin/rpc.md) · [`admin/_shared.md`](admin/_shared.md) |
 | **写权** | ✅ 可写**本域** `service/users/**` ＋ `docs/DRIFT/users/**`；🔴 **`service/common/**` 只读**（只有 `align/global-common` 能写） |

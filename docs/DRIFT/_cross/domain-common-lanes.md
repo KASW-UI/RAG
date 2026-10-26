@@ -1,4 +1,4 @@
-<!-- @new 2026-10-27 · 由主会话（Jason 指定）产出 · 基线 commit e519073（main == do-my-own-gh） -->
+<!-- @new 2026-10-27 · 由主会话（Jason 指定）产出 · 基线 = `do-my-own-gh` @ 2026-10-27（main == do-my-own-gh） -->
 
 # 域 × `service/common` 漂移 lane 台账（10 条 lane 的总纲与清单）
 
@@ -21,7 +21,7 @@
 | lane 数 | **10**（9 个微服务域 + `global` 收口域） |
 | 工作树目录 | `/Users/pr/Documents/java&golang/RAG.worktrees/<域>-common` |
 | 分支 | `align/<域>-common`（全部从 `do-my-own-gh` 切，主干最后接合并） |
-| 基点 | `e519073`（2026-10-27 · 合并 25/25 分支 + 全量回归 BUILD SUCCESS 之后） |
+| 基点 | **`do-my-own-gh` @ 2026-10-27**（= lane 脚手架落地那次提交；此前已合并 25/25 分支 + 全量回归 BUILD SUCCESS）⇒ 主干再前进时 lane `merge` 一次即可（**文件级不重叠 ⇒ 零冲突**） |
 | `service/common/**` 写权 | 🔴 **只有 `align/global-common` 能写**（AGENTS.md §5.3c·§5.3d）；其余 9 条 lane **只读 common 侧** |
 | **每条 lane 的台账** | **`docs/DRIFT/<域>/vs-common.md`**（**每条 lane 独占一份** ⇒ 10 路并发零冲突） |
 | common 侧机制面台账 | [`docs/DRIFT/common/`](../common/)：`deadline.md` · `http.md` · `protection.md` · `audit.md` · `alignment-2026-10-23.md` |
