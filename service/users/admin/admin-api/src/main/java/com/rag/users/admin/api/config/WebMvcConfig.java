@@ -40,7 +40,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
      * </ul>
      *
      * <p><b>只动 MVC 这一个 mapper</b>：gRPC 用 protobuf marshaller、
-     * MyBatis 与 {@code JsonbTypeHandler} 各持自己的 Jackson 2 mapper，
+     * MyBatis 与 {@code JsonTextTypeHandler} 各持自己的 Jackson 2 mapper，
      * 都与 go-zero 的 http 解析层无关，不该被这两条规则波及。
      */
     @Bean

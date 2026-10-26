@@ -129,9 +129,208 @@ go-zero 的必填校验在 `UnmarshalJsonReader` **内部**一次完成；RAG �
 - 本探针只断言 **ACCEPTED / REJECTED**，不比对解析出来的**值**是否相同。
   两侧都接受同一输入但解析出不同数值（例如精度截断）本探针查不出来。
 
+## 通用档位设计规则（**探针能不能验到修法**的前提，不是可选参数）
+
+> 🔴 **第四十二轮补记**（users/admin 域 owner 提出 ⇒ global 采纳并推广）：
+> 这条**不只属于 `rpc-timeout/`** —— 凡探针要验「两侧是否都做了 `min(客户端, 服务端)`」这类语义，
+> **档位选错 ⇒ 探针恒绿 ⇒ 修没修都看不出来**。
+
+**规则**：验「`min(客户端, 服务端)` 是否被继承」时，**客户端 deadline 必须严格早于服务端 timeout**。
+
+- 若客户端 deadline **晚于**服务端 timeout ⇒ `min` 的结果**恒等于服务端值** ⇒
+  **两侧算出来的 deadline 完全一样** ⇒ ⇒ 探针**分不出差别** ⇒ ⇒ **探针恒绿**（假绿）。
+- ⇒ 探针**必须**成对给两档：
+  - **短档**：客户端 deadline **<** 服务端 timeout
+    （⇒ 两侧若都继承 `min`，短档两侧应当**一致**，且都 ≈ 客户端那一档）；
+  - **长档（对照组）**：客户端 deadline **>** 服务端 timeout
+    （⇒ 两侧都 ≈ 服务端预算 ⇒ ⇒ **证明差异只来自「是否继承」**，而不是别的什么）。
+- ⇒ **短档与长档必须成对** ⇒ 只给短档 ⇒ 无法区分「差异来自继承」与「环境不可靠」。
+
+⚠️ **反例（本仓真实踩过两次）**：`tools/difftest/exp-grpc-admin-deadline-probe.sh`
+- 第四十轮：短档默认曾是 **1000ms**，而判定阈值也是 **1000ms** ⇒ 「RAG 不继承」时的信号差**恰好 ≈1000ms**
+  ⇒ **卡在阈值边上** ⇒ **假绿** ⇒ 改 300ms；
+- 第四十一轮（**实测校准**）：改成 300ms 后**实测信号只有 833ms**（不是推算的 1700ms）
+  ⇒ ⇒ **档位/阈值的选择必须用实测值校准，不能用推算值** ——
+  推算值依赖「SQL 超时是否已继承客户端 deadline」这个**尚未验证**的前提（当时它**不成立**：走的是秒级回退 ⇒ 见 E62）。
+
 ## 改动本工具时的守则
 
 - 两侧的**用例名必须逐字一致**（含空格与引号）—— 脚本按 `|` 之前的文本配对。
   少一侧的用例会被报成 `<<缺失>>` 并 exit 1（这条分支也做过验证）。
 - Go struct 必须逐字段对齐真源 `types.go`，新增字段就要新增用例。
 - **不要**在本文件里写「与 Go 一致」却只跑 RAG 侧 —— 那正是 AGENTS.md §3.3 要防的事。
+---
+
+# 第二个探针：`trace/`（Go ↔ RAG 的 **trace 链路**活体对拍）
+
+> 位置：`tools/semantic-probe/trace/` · 跑法：`bash tools/semantic-probe/trace/run-trace-parity.sh`
+> 退出码：`0` = 两侧一致 · `1` = 有漂移 · `2` = 环境不满足
+
+## 为什么要有它（AGENTS.md §3.3 规则 2 的**第二个**落地）
+
+T-11（全局 OpenTelemetry）落地后，RAG 侧有守门（`GoStyleOtelSamplerProtocolGateTest` 等），
+但 Go 侧**只有「逐行读源码」** ⇒ 而 §3.3 明确要求：
+
+> 凡写「与 Go 一致」，必须有**两侧同时跑的探针**（不是只跑 RAG）。
+
+⇒ 本探针把 **go-zero 的真源跑起来**，与 RAG 侧的**生产类**逐条对拍。
+
+## 结构
+
+| 文件 | 角色 |
+|---|---|
+| `trace/go/liveprobe_test.go` | **Go 半边**：**包内**测试（`package trace`）⇒ 能调未导出的 `createExporter` / `startAgent` |
+| `trace/java/TraceProbe.java` | **RAG 半边**：只调**生产类** `GoStyleOtelAgent` / `GoStyleOtelConfig`（不复制装配逻辑） |
+| `trace/run-trace-parity.sh` | 跑两侧 → 按用例名配对 → 打印对比表 → 不一致则 exit 1 |
+
+## 三条纪律（都是踩出来的）
+
+**① Go 半边必须进包内（`package trace`）。**
+`createExporter` / `startAgent` 是**未导出**的 ⇒ 外部包调不到 ⇒
+「unknown exporter」「端点为空不校验」「四种 exporter 都能构造」这三条**只能**靠包内测试活体证。
+
+**② 模块缓存是只读的，且 `go -overlay` 不允许替换 `GOMODCACHE` 下的文件。**
+实测报错：`Files beneath GOMODCACHE must not be replaced`
+⇒ 做法：把缓存里的 go-zero **整份拷到临时目录** → 放入包内探针 → `go test ./core/trace/`。
+⇒ **拷完必须逐字节校验**（`diff -r -x liveprobe_test.go`）⇒ 确认「跑的就是缓存里那份真源」。
+
+**③ 「只输出稳定值」。**
+trace-id 是**随机**的 ⇒ 探针只输出布尔 / 枚举（`parent_trace_id_inherited=true`），
+**不输出原始 id** ⇒ 否则两侧永远对不上。
+
+## 用例（11 条）
+
+| 用例 | 测什么 | Go 出处 |
+|---|---|---|
+| `G1_startAgent_failure` | 装配失败 ⇒ 只记 ERROR、**不 panic**、全局仍是 no-op | `core/trace/agent.go:43-52` |
+| `G2_unknown_exporter` | 非法 batcher + 端点非空 ⇒ 抛 `unknown exporter` | `core/trace/agent.go:100-101` |
+| `G3_empty_endpoint` | 非法 batcher + **端点为空** ⇒ **不报错** | `core/trace/agent.go:115-124` |
+| `G4_ratio_zero` | `Sampler=0.0` ⇒ 不 recording / 不 sampled，但 **SpanContext 仍有效** | `core/trace/agent.go:110` + `config.go:10` |
+| `G5_parentbased_sampled_parent` | `Sampler=0.0` + 入向 **sampled** parent ⇒ 子 span 仍采样 | `core/trace/agent.go:110` 的 ParentBased |
+| `G6_parentbased_unsampled_parent` | `Sampler=1.0` + 入向 **未采样** parent ⇒ 子 span **不**采样 | 同上（`remoteParentNotSampled ⇒ AlwaysOff`） |
+| `G7_exporter_{otlpgrpc,otlphttp,zipkin,file}` | Go 的**四种** batcher 都能构造 | `core/trace/agent.go:60-103` |
+| `G8_propagation` | 全局传播器 = Composite(TraceContext, Baggage) | `core/trace/propagation.go:8-11` |
+
+### 🔴 G6 是本探针**挖出来的缺口**
+
+RAG 侧的 `GoStyleTraceparentFilter` 类注释里写着「入向 parent 不采样时子 span 也不采样」，
+但**此前没有任何守门** ⇒ 那是一条**写在注释里、没有运行期证据**的断言（AGENTS.md §3.3.2）。
+⇒ 本探针用 Go 真源活体确认了这条语义 ⇒ 随后在 RAG 侧补了对应的 JUnit 守门
+（`GoStyleOtelSamplerProtocolGateTest#remoteParentNotSampledDropsChildSpanEvenWhenRatioIsOne`）。
+
+## 已知能力缺口（不计入失败，但**始终打印**）
+
+RAG 只实现了 `otlpgrpc`；Go 还支持 `otlphttp` / `zipkin` / `file`
+⇒ 这三行**必然**不一致 ⇒ 放在脚本里的 `KNOWN_GAP` 白名单
+⇒ 标成「预期差异」，**不计入失败**，但**始终打印出来**，让人看得见它还在那儿。
+
+> ⚠️ 加白名单是**有后果的动作**：它等于承认「这条差异不修」。
+> ⇒ 每条都必须能在 global 台账里找到出处；没有出处的**不许**进来。
+
+## 已知边界
+
+- **不是完整进程**：Go 半边只跑 `core/trace` 这个包 ⇒ 不起 HTTP server、不起 Kafka/Nacos。
+- **不比对 span 的导出字节**：只比对**采样决策 / 装配结果 / 传播器字段**；
+  「OTLP 字节真的出了机器」由 RAG 侧的 `FakeOtlpCollector` 守门负责（真 gRPC 接收端）。
+- **不覆盖 Go 侧的 `rest/handler/tracehandler.go`**（HTTP 层的 span 命名 / 属性）——
+  那属于响应头层，RAG 侧由 `GoStyleTraceparentFilter*` 系列守门负责。
+- **Go 侧 OTel SDK 是 1.40.0，RAG 侧是 1.44.0** ⇒ 版本不同 ⇒ 探针证的是**语义**，
+  不是「逐字节同版本」。
+
+---
+
+# 第三个探针：`rpc-timeout/`（Go ↔ RAG 的 **gRPC 超时路径**活体对拍）
+
+> 位置：`tools/semantic-probe/rpc-timeout/` · 跑法：`bash tools/semantic-probe/rpc-timeout/run-rpc-timeout-parity.sh`
+> 退出码：`0` = 两侧一致 · `1` = 有漂移 · `2` = 环境不满足
+
+## 为什么要有它（AGENTS.md §3.3 规则 2 的**第三个**落地）
+
+E30：Go 真源 `service/common/observability/rpc.go:69` 在服务端超时时给客户端的
+status description 是 **`context deadline exceeded`**；
+RAG 旧实现写的是 `rpc timeout after 2000ms`
+⇒ **客户端拿到的错误文案与 Go 不一致**（wire 面差异，客户可见）。
+
+前两个探针证的是「解析」与「装配」；本探针证的是**超时语义在真实网络栈上的落地**。
+
+## 结构
+
+| 文件 | 角色 |
+|---|---|
+| `rpc-timeout/go/main.go` | **Go 半边**：真 gRPC server（grpc-go）+ 冻结仓**真实生成**的 `pb.LikeService` + 真 client stub ⇒ 走真实网络栈 |
+| `rpc-timeout/java/TimeoutProbe.java` | **RAG 半边**：只调**生产类** `RpcInterceptor`（真 Netty server + 真 channel） |
+| `rpc-timeout/run-rpc-timeout-parity.sh` | 跑两侧 → 按用例名配对 → 逐键比对 → 不一致则 exit 1 |
+
+## 三条纪律（都是踩出来的）
+
+**① Go 半边用 `replace` 直接引用冻结仓，不复制、不改写。**
+冻结仓只读 ⇒ 探针不能往里写文件 ⇒ 用独立 module + `replace sea-try-go => <冻结仓>`
+直接**引用**它 ⇒ 跑的就是冻结仓那份源码。
+⚠️ 冻结仓路径是**机器相关**的 ⇒ `go.mod` 由脚本**运行时生成**，仓库里只放 `main.go`
+（**不提交任何绝对路径**；可用环境变量 `GO_TRUTH_REPO` 覆盖默认路径）。
+
+**② `CGO_ENABLED=0`。**
+本机没有 Xcode 头文件 ⇒ cgo 会报 `'stdlib.h' file not found` ⇒ 与探针无关的失败。
+另外 `GOPROXY=off` / `GOSUMDB=off` / `GOPRIVATE='*'` ⇒ 缺依赖直接报错，不悄悄联网。
+
+**③ Go 的 select 有三个分支 ⇒ 慢 handler 必须**永不返回**。**
+Go 真源 `rpc.go:59-72` 的 select 分支是 `done` / `panicChan` / `timeoutCtx.Done()`。
+若 handler 在 ctx.Done() 时就返回，则 `done` 分支与超时分支**同时就绪**
+⇒ Go 的 select **随机选** ⇒ 可能返回 `context.DeadlineExceeded`（**非 status error**）
+⇒ 客户端拿到 `code=Unknown` ⇒ **探针变成随机**。
+真实的慢 handler 就是一直不返回 ⇒ 这里照做（`time.Sleep(30s)`）。
+
+## 用例（3 条）
+
+| 用例 | 测什么 | Go 出处 |
+|---|---|---|
+| `timeout_wire` | **客户端真正收到的** status：code + description | `service/common/observability/rpc.go:69` |
+| `timeout_telemetry` | 超时 span 的 `sea.biz_msg`（= `err.Error()`） | `service/common/observability/observability.go:108-112` |
+| `client_deadline_ctx` | **E38**：客户端 deadline 早于服务端 timeout 时，**有效期限**必须取客户端的那个 | `service/common/observability/rpc.go:38` |
+
+两侧参数一致（超时 300ms · slow 阈值 750ms），两侧都走**真传输层**：
+Go 侧 `grpc.NewServer` + 真 client；RAG 侧真 Netty server（`forPort(0)`）+
+真 channel（`dns:///127.0.0.1:<port>` 直连，绕开 Nacos 服务发现）。
+
+### 🔴 `client_deadline_ctx` 是本探针**第二个**挖出来的缺口（E38）
+
+Go 真源 `rpc.go:38` 的 `context.WithTimeout(ctx, timeout)` 里 **`ctx` 携带客户端 deadline**
+⇒ Go 标准库语义 ⇒ 有效期限 = **min(客户端 deadline, 服务端 timeout)**；
+而 RAG 旧实现只算 `now + timeout` ⇒ **客户端 deadline 完全不参与**。
+
+⇒ 探针实测（客户端 deadline 100ms / 服务端 300ms）：
+- Go 半边：`bucket=client_100ms`（handler 看到的 ctx 剩 ≈100ms ⇒ **继承了客户端的**）
+- RAG 半边（修前）：`bucket=server_own`（剩 ≈300ms ⇒ **只算服务端自己的**）
+⇒ ⇒ **漂移坐实**，探针 EXIT=1；修后两侧一致。
+
+⚠️ **档位设计的一条纪律**：客户端 deadline **必须早于**服务端 timeout ⇒ 否则 `min` 等于服务端值
+⇒ 两侧看不出差别 ⇒ 探针失效（本轮踩过一次：Go 半边最初把客户端设成 1000ms、服务端 300ms
+⇒ `min` = 300ms ⇒ 与「只算服务端」不可区分 ⇒ 改成客户端 100ms 才分得开）。
+
+⚠️ **只输出分档，不输出绝对毫秒**：剩余毫秒受传输耗时影响 ⇒ 两侧逐字比对会不稳定
+⇒ 只比对「落在客户端那一档还是服务端那一档」（bucket）⇒ 稳定可配对。
+
+## 已知能力缺口（不计入失败，但**始终打印**）
+
+`timeout_telemetry` 的 **code 段**：Go 是 grpc-go 的 `codes.Code.String()`（CamelCase
+`DeadlineExceeded`，`codes/code_string.go:31-59`），RAG 是 grpc-java 的 `Code.name()`
+（`DEADLINE_EXCEEDED`）⇒ **这一半已登记为「表述差异 C-1」**
+（`docs/Intentional_Deviations/common/_signed-deviations.md` C 类 C-1，写明「不做臆造映射」）
+⇒ 进脚本的 `KNOWN_GAP`。
+
+> ⚠️ 加白名单是**有后果的动作**：它等于承认「这条差异不修」。
+> ⇒ 每条都必须能在 global 台账里找到出处；没有出处的**不许**进来。
+> ⇒ 且 RAG 侧的 JUnit 守门 `RpcInterceptorTimeoutDescriptionGateTest`
+> **把 C-1 的形态钉住**（断言 `code = DEADLINE_EXCEEDED`）⇒ 后人不会把它当新漂移「顺手修掉」。
+
+## 已知边界
+
+- **只覆盖服务端超时这一条路径**：不覆盖客户端侧 deadline（`ctx` 超时）、不覆盖重试、
+  不覆盖 `panicChan` 分支、不覆盖 stream（只测 unary）。
+- **不比对超时时长**：只比对超时**之后**客户端拿到的 code / 文案。
+- **Go 侧用 `pb.LikeService`（`service/like/rpc/pb`）**：因为它是冻结仓里**真实生成**的
+  ⇒ 避免手搓 `ServiceDesc` 引入偏差；RAG 侧用手搓的最小 `MethodDescriptor`
+  ⇒ **两侧服务/方法名不同**（Go `/like.LikeService/GetLikeCount` vs RAG `probe.Timeout/Hang`）
+  ⇒ 探针**不比对方法名**。
+- **grpc-java 的 `fullMethodName` 不带前导斜杠**，grpc-go 用 `"/service/method"`
+  ⇒ 两侧探针各写各的，**不要**互相「对齐」成同一个字符串。

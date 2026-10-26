@@ -46,7 +46,9 @@ import java.time.ZoneOffset;
  * <p>🔴 <b>本轮修复的正是这个缺陷</b>：修复前本类用 {@code @Transactional}，
  * 于是「blocked / failed 永不落盘」—— 该行永远停在 {@code delivery_status=0}，
  * 调度器每秒重新领到它 ⇒ <b>无限重领活锁</b>。
- * 同仓正确范式见 {@code like-rpc} 的 {@code LikeFactDispatchService}（同款结构）。
+ * 🔴 <b>2026-10-25（第二十轮）订正一处假引用</b>：本行原文写「同仓正确范式见 {@code like-rpc} 的
+ * {@code LikeFactDispatchService}（同款结构）」⇒ <b>那是一个 4 行的未实现骨架</b>（当时不存在可参照的范式）。
+ * ⇒ 现 like 域已按同款结构补齐（{@code service/like/.../LikeFactDispatchService.java}）⇒ 本行改为指向它。
  *
  * <h2>⚠️ 本方法<b>在一个事务里做网络 IO</b>，这是 Go 的刻意选择</h2>
  * <p>Go 的 {@code DispatchFactOnce} 手工 {@code Begin()} → 取件（{@code FOR UPDATE SKIP LOCKED}）

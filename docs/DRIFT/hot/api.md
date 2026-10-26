@@ -169,15 +169,30 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | `hot-rpc` | ✅ 双侧活体对拍逐字节一致（**第十一轮**：真 Kafka + 2×真 Redis + 真 gRPC，10 组 top_k 全同），86 条契约测试 | [`rpc.md`](rpc.md) |
 | **`hot-api`** | ✅ **端到端 HTTP 栈已对拍**（第五轮 29 条用例，24/29 + 修正配方 28/29）+ **解析层/分页层/wire 层双侧探针对拍**（15+25+3 组），87 条测试 | **本文件** |
 
-⇒ hot 域三组件**代码均已落地且全部拿到双侧活体对拍**；
-⚠️ 剩下的不是「hot-api 证据最弱」，而是**域外**的三条：跨域移交的 D14（nosniff）/ D25（499）/ D27（MaxConns）
-+ 全仓约定待拍板的 D21 / D22 / D23。
+⇒ hot 域三组件**代码均已落地且全部拿到双侧活体对拍**。
+
+🟥 **2026-10-26 第二十八轮订正**：下面这行**已过期**（写于 2026-10-24）——
+原文说「剩下的是**域外**的三条 D14（nosniff）/ D25（499）/ D27（MaxConns）+ 待拍板的 D21 / D22 / D23」。
+**逐条核对后，这 7 条现已全部闭合**（§6.3 状态表纪律：任何「未修」断言必须带核对日期）：
+
+| 条目 | 原状态 | **核对结果（2026-10-26）** | 证据 |
+|---|---|---|---|
+| **D14** nosniff | 🔁 跨域移交 common 域 | ✅ **已实现**（不是「待移交」） | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:692` `resp.setHeader("X-Content-Type-Options", "nosniff")` |
+| **D25** 499 | 🔁 跨域移交 common 域 | ✅ **已闭合**（与 T-13 一并解决） | `docs/DRIFT/global/cross-domain.md` §二·十（T-13 响应撕裂/状态码被抢） |
+| **D27** MaxConns 作用域 | 🔁 跨域移交 common 域 | 🏷 **已签字为有意偏离**（**不是待办**） | `SD-2026-10-25-01`（global 台账 T-2 / T-5）⇒ `docs/Intentional_Deviations/global/common-tails.md` |
+| **D21** relaxed-query-chars | ⏸ 待拍板 | ✅ **第十三轮已落地 10/10** | `server.tomcat.relaxed-query-chars: ["[", "]"]` |
+| **D22** max-parameter-count | ⏸ 待拍板 | ✅ **第十三轮已落地 10/10** | `server.tomcat.max-parameter-count: 2048` |
+| **D23** 请求行长 | ⏸ 待拍板 | ✅ **第十三轮已落地 10/10** | `server.max-http-request-header-size: 1028KB`（⚠️ 不是 1MB，见台账） |
+| **DRIFT-HOTAPI-024** Content-Type charset | — | ✅ **第二十五轮已修**（global T-6） | 共享层 `GoStyleJsonContentTypeAdvice` ⇒ 10 个 api 全生效 |
+
+⇒ **hot-api 域内已无可修的语义漂移**（`DRIFT-HOTAPI-014` 亦为跨域移交，且 nosniff 已实现）。
 
 ## 尚未处理
 
 - 本模块的 `HUMAN_ONLY.MD`
 - ~~D1（端到端双侧活体对拍）—— 这是 hot 域收口的最后一块实质工作~~ ⇒ ✅ **第五轮已闭合**（hot-api 侧）/ **第十一轮已闭合**（hot-rpc 侧）
-- 剩余未闭合项**全部**落在域外：跨域移交 **D14 / D25 / D27**（代码在 `service/common`）+ 全仓约定待拍板 **D21 / D22 / D23**（Tomcat 三旋钮，影响全部 10 个 api 模块）
+- ~~剩余未闭合项**全部**落在域外：跨域移交 **D14 / D25 / D27**（代码在 `service/common`）+ 全仓约定待拍板 **D21 / D22 / D23**~~ ⇒ ✅ **2026-10-26 订正：这 6 条现已全部闭合**（D27 转为**已签字的有意偏离**）⇒ **本模块的未闭合项清单为空**
+
 
 ---
 ---
@@ -802,7 +817,7 @@ SEMANTICALLY NOT EQUIVALENT
 > | `DRIFT-HOTAPI-021` | `?page[]=5` → Go 200 / RAG **400 + Tomcat HTML 错误页** | ✅ `server.tomcat.relaxed-query-chars: ["[", "]"]`（**第十三轮已落地 10/10**） | 跨域 |
 > | `DRIFT-HOTAPI-022` | 值个数上限 Go **2048** / RAG **1000** | ✅ `server.tomcat.max-parameter-count: 2048`（**第十三轮已落地 10/10**） | 跨域 |
 > | `DRIFT-HOTAPI-023` | 请求行长 Go **1 MiB** / RAG **8 KiB** | ✅ `server.max-http-request-header-size: **1028KB**`（**第十三轮已落地 10/10**；⚠️ **不是 1MB**，见下） | 跨域 |
-> | `DRIFT-HOTAPI-024` | `Content-Type` 的 charset 参数 | **建议不复刻**（Spring 侧不可逐字节复刻） | 待签字 |
+> | `DRIFT-HOTAPI-024` | `Content-Type` 的 charset 参数 | ✅ **已修**（**第二十五轮 global T-6**：共享层加 charset ⇒ 10 个 api 全部生效）⇒ ⚠️ 「不可逐字节复刻」**仍成立**（Tomcat 归一化）⇒ 残余只差一个 OWS | ✅ 已修 |
 >
 > ⇒ 三条容器类差异**同时打开后**：对拍矩阵 **24/29 → 28/29**，输入上限阈值与 Go **完全一致**
 > （实测首个翻转 n 两侧都是 **2049**）⇒ **配方已被证实**，只剩 D14（`nosniff`，common 域）。
@@ -1392,7 +1407,26 @@ RAG 直接 **400 + HTML 错误页** ⇒ 响应**形状**都不同（不是业务
 > ⚠️ **残余差异（新编号）**：超限后的**状态码与错误体形状**仍不同
 > （Go 431 + `text/plain` vs RAG 400 + Tomcat HTML）⇒ 见 **`DRIFT-HOTAPI-031`**（框架限制）。
 
-### DRIFT-HOTAPI-024 —— `Content-Type` 的 charset 参数 ✅ 已签字（不复刻）
+### DRIFT-HOTAPI-024 —— `Content-Type` 的 charset 参数 ✅ **已修**（第二十五轮 · global T-6）
+
+> 🟥 **2026-10-25 订正 + 落地**（本条原先的状态是「✅ 已签字（不复刻）」⇒ **该签字已被用户撤销**）：
+> ① `SD-HOT-API-006` **已撤销**（用户拍板）⇒ 被它签字描述的行为（「RAG 的 JSON 响应不带 charset」）**已不存在**；
+> ② 修法 = **共享层** `service/common` 新增 `GoStyleJsonContentTypeAdvice`
+>    （`@AutoConfiguration` ⇒ **10 个 api 全部生效** ⇒ **零 api 代码改动** ⇒ 含 favorite）；
+> ③ ⚠️ **「不可逐字节复刻」这个结论**（本节原文写的「Spring 的 `MediaType.toString()` 少个空格」）
+>    **仍然成立，而且理由更强**：真 Tomcat 11 把 Content-Type 拆成 (type/subtype, charset) 重新拼
+>    ⇒ 线上恒为 `application/json;charset=utf-8` ⇒ **写原始字符串也拿不到那个空格**；
+> ④ ⇒ 修后残余 = **只差一个 OWS**（RFC 9110 OWS 不显著 ⇒ 语义相同）
+>    ⇒ 与 404 路径同属**仓库早已接受**的类别（`LikeApiRouterErrorRealTomcatTest` 解析后比对）。
+> ⑤ 守门 = `service/common` 的 `GoStyleJsonContentTypeCharsetTomcatTest`（真 Tomcat + 裸 socket，3 条）
+>    + 变异 2/2 全红。**逐条证据 ⇒ global 台账 `docs/DRIFT/global/lanes/L1-delivery.md` §十三。**
+
+<details><summary>（以下为 2026-10-24 的原始记录，留档）</summary>
+
+**原始状态**：✅ 已签字（不复刻）—— 当时结论是「即使 RAG 侧显式补 charset，Spring 的 `MediaType.toString()`
+产出的是 `application/json;charset=utf-8`（**分号后无空格**）⇒ 与 Go **仍不逐字节相同**」。
+
+</details>
 
 | | 响应头 |
 |---|---|

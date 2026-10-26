@@ -395,9 +395,11 @@ public class AdminDomainService {
             //   admin_admin.extra_info 已由 jsonb 改为 **text**（对齐 Go 的 serializer:json），
             //   显式 CAST 成 jsonb 会把 text 强制转回 jsonb、重新引入 jsonb 那套校验 ——
             //   而 Go 侧根本没有这层校验（实测：含 U+0000 的 extra_info，
-            //   Go 落库成功 / RAG 被 jsonb 以 22P02 拒收）。
-            //   ⚠️ 同文件 updateUser 里的 CAST 必须保留：那列是 **users_user.extra_info**，
-            //   仍是 jsonb（DDL 归属 users/user 域，01_create_user.sql:41）。两张表不能一起改。
+            //   Go 落库成功 / RAG 被 jsonb 以 22P05 拒收 —— ⚠️ 是 22P05
+            //   （json_bad_unicode_escape），**不是** 22P02；2026-10-25 真 PG 16 实测订正）。
+            //   ⚠️ 2026-10-25 订正：同文件 updateUser 里那句「CAST 必须保留」**也已作废** ——
+            //   users_user.extra_info **同样是 text**（01_create_user.sql:41 + :103）
+            //   ⇒ 现在**两个调用点都没有 CAST**。
             wrapper.setSql("extra_info = {0}", toJson(extraInfo));
         }
         // DRIFT-ADMIN-RPC-003：对齐 GORM autoUpdateTime（见本类末尾 updateTimeAdvance 注释块）
@@ -1013,12 +1015,22 @@ public class AdminDomainService {
         if (extraInfo != null && !extraInfo.isEmpty()) {
             // 同 updateSelf 的 setSql + 参数绑定（不能用 wrapper.set，走 Object 猜 handler 不可控）。
             //
-            // ⚠️ **这里的 CAST 必须保留**（与上面 updateSelf 的一处不同）：
-            //   本方法写的是 **users_user.extra_info**，该列**仍是 jsonb**
-            //   （DDL 归属 users/user 域：users-common/.../01_create_user.sql:41）。
-            //   admin_admin.extra_info 已在 2026-10-23 改成 text（DRIFT-ARPC-004①），
-            //   但这一列没改、也不在本 worker 所有权内 ⇒ **两张表不可一并去 CAST**。
-            wrapper.setSql("extra_info = CAST({0} AS jsonb)", toJson(extraInfo));
+            // 🔴 2026-10-25（第十八轮 · global B10）：**去掉了 CAST(... AS jsonb)**。
+            //   原注释写「users_user.extra_info 这一列仍是 jsonb，CAST 必须保留」——
+            //   **那个前提早已失效**：
+            //     users-common/.../db/01_create_user.sql:41  建表就是 extra_info TEXT
+            //     users-common/.../db/01_create_user.sql:103 ALTER ... TYPE text USING extra_info::text
+            //       （SchemaInitializer 每次启动原样重放 ⇒ 幂等自愈 ⇒ 这一列不可能是 jsonb）
+            //   ⇒ 留着 CAST 等于**强行把 text 转回 jsonb**，重新引入 jsonb 那层校验 ——
+            //     而 Go 侧根本没有这层校验（Go 出处：service/user/admin/rpc/internal/model/data_model.go:43
+            //     的 `serializer:json` ⇒ 产出字符串 ⇒ 落进 text 列）。
+            //   ⇒ 真 PG 16 实测差异（同一份含 U+0000 的 payload）：
+            //       Go  → 落库成功，存下 14 字节的 {"k":"\u0000"}
+            //       RAG → PG 拒收：ERROR: unsupported Unicode escape sequence
+            //              DETAIL: \u0000 cannot be converted to text.  SQLSTATE = 22P05
+            //   ⇒ 且 jsonb 会**规范化** JSON（键序 + 冒号后加空格）⇒ 落库字节与 Go 不同。
+            //   ⇒ 守护见 AdminRpcColumnTypeParityTest 的两条新用例。
+            wrapper.setSql("extra_info = {0}", toJson(extraInfo));
         }
         // DRIFT-ADMIN-RPC-003：对齐 GORM autoUpdateTime
         wrapper.setSql("update_time = CURRENT_TIMESTAMP");
@@ -1251,11 +1263,13 @@ public class AdminDomainService {
 
     /**
      * Map → JSON 文本，供两处 {@code wrapper.setSql("extra_info = …", …)} 使用。
-     * <p><b>两处调用点的列类型不同，2026-10-23 起不再一致</b>：
+     * <p><b>两个调用点的列类型<b>相同</b>（都是 text）⇒ 两处都不再 CAST</b>：
      * <ul>
-     *   <li>{@code updateSelf} → {@code admin_admin.extra_info}（<b>text</b>，不再 CAST）</li>
-     *   <li>{@code updateUser}  → {@code users_user.extra_info}（<b>jsonb</b>，仍 CAST）</li>
+     *   <li>{@code updateSelf} → {@code admin_admin.extra_info}（text，2026-10-23 起不再 CAST）</li>
+     *   <li>{@code updateUser}  → {@code users_user.extra_info}（text，2026-10-25 起也不再 CAST）</li>
      * </ul>
+     * ⚠️ 2026-10-23 当时写的是「两处列类型不同 ⇒ 只有 admin_admin 能去 CAST」——
+     * <b>那个前提是错的</b>（users_user.extra_info 建表就是 TEXT）⇒ 第十八轮一并去掉。
      * 序列化失败按内部错误处理——extraInfo 是 Map&lt;String,String&gt;，正常不会失败。
      */
     private static String toJson(Map<String, String> map) {

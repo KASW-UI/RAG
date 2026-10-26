@@ -90,11 +90,25 @@
         <!--
             对应 Go 版 observability/*.go + communityfact/{logging,authority_http}.go 中
             go.opentelemetry.io/otel/* 的 Span / TracerProvider / TextMapPropagator 用法
+
+            🔴 2026-10-25（第十九轮 · global T-8）：**opentelemetry-api 原来手写了 1.62.0**，
+            而同模块的 opentelemetry-context / opentelemetry-sdk / opentelemetry-sdk-testing
+            都由上面的 opentelemetry-bom（1.44.0）管 ⇒ **本模块自己 classpath 上版本错配**。
+            ⇒ 实测后果（真跑，不是推断）：api 1.62.0 的 W3CBaggagePropagator 会调用
+               `TextMapGetter.getAll(carrier, key)`，而 context 1.44.0 的 TextMapGetter
+               **没有这个方法**（1.55.0 才加）⇒ 运行时
+               `NoSuchMethodError: io.opentelemetry.context.propagation.TextMapGetter.getAll`
+               ⇒ 凡是走 baggage propagator 的 extract 路径都会炸。
+            ⇒ 修法：**不写版本号**，统一由 BOM（${opentelemetry.version} = 1.44.0）管
+               —— 这本来就是本段注释写着的意图（「统一管理 OpenTelemetry 各模块版本，
+               避免子模块手写版本号」）。
+            ⚠️ **对 10 个 api 模块零影响**：它们的 otel 版本由**根 pom 的 Spring Boot BOM**
+               （1.55.0）管 ⇒ 实测 hot-api 的 otel 全家是 1.55.0（api/context/sdk 同版本）
+               ⇒ 本模块改版本**不会**改变 api 进程实际跑的版本。
         -->
         <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-api</artifactId>
-            <version>1.62.0</version>
         </dependency>
         <dependency>
             <groupId>io.opentelemetry</groupId>
@@ -103,6 +117,24 @@
         <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-context</artifactId>
+        </dependency>
+
+        <!--
+            🔴 2026-10-25（第二十一轮 · global T-11）：**OTLP exporter** ——
+            对应 Go 侧 core/trace/agent.go:114-121（if len(c.Endpoint) > 0 才装 batcher）
+            与各服务 etc/*.yaml 的 `Telemetry: { Endpoint: jaeger:4317, Batcher: otlpgrpc }`。
+
+            为什么必须是 **compile（非 optional）**：装配点在本包内的
+            GoStyleOtelAutoConfiguration ⇒ **凡依赖 service/common 的进程都会加载它**
+            ⇒ exporter 的类必须对所有下游可见 ⇒ optional=true 会让运行时 NoClassDefFoundError。
+            （对比：grpc-client-spring-boot-starter 用 optional=true，是因为只有本包自己用。）
+
+            ⚠️ 版本**不写**：由上面的 opentelemetry-bom（${opentelemetry.version} = 1.44.0）管
+            ⇒ 与同模块的 api / sdk / context 同版本 ⇒ 不会出现「api 1.62 + sdk 1.44」那种错配。
+        -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
         </dependency>
 
         <!-- ============ 3. gRPC server interceptor（替代 go-zero zrpc） ============ -->
@@ -217,6 +249,88 @@
             H1/H2 恰恰就是这两类。
             @SpringBootTest + @EnableConfigurationProperties 才能真正走一遍 binder + Bean 生命周期。
         -->
+        <!--
+            tomcat-embed-core：**仅测试**（2026-10-25，T-4 / DRIFT-HOTAPI-025 的守门）。
+
+            为什么必须是**真 Tomcat**：本模块要守的机制是「**往 socket 写响应失败**」
+            （客户端断连 ⇒ Tomcat 抛 ClientAbortException）。
+            MockHttpServletResponse / MockMvc 的 write() **永远不失败**
+            ⇒ 断连分支**根本触发不了** ⇒ 那种测试是「错误答案的守卫」（§3.3）。
+
+            ⚠️ **刻意不写 version**：交给 spring-boot-dependencies 管 ⇒ 与各 api 模块运行时
+            用的 Tomcat 是**同一个版本**（写死版本号 = 在同一条 classpath 上塞第二个 Tomcat）。
+            ⚠️ 排除 tomcat-annotations-api：与 spring-boot-starter-tomcat-runtime 的做法一致
+            （Boot 用 jakarta.annotation:jakarta.annotation-api 顶替它）⇒ 离线仓库里
+            没有 tomcat-annotations-api，不排除会直接解析失败。
+            ⚠️ tomcat-embed-core **自带 jakarta.servlet API**（与本模块 provided 的
+            jakarta.servlet-api 同为 Servlet 6.1 规格）⇒ 测试期两份共存，
+            取 classpath 上先命中的那份即可，不影响判定（真 Tomcat 用的就是它自己那份）。
+        -->
+        <!--
+            tomcat-embed-core（**optional 编译期**）：
+            GoStyleTomcatParameterLimitCustomizer 的 lambda 参数类型就是
+            org.apache.catalina.connector.Connector ⇒ javac 必须在**编译期**看到它。
+
+            ⚠️ 为什么是 optional（而不是 compile / test）：
+              · optional 依赖**不传递** ⇒ 只有 service/common 自己能看到它；
+                运行时「有没有 Tomcat」取决于宿主应用：
+                  · api 模块 ⇒ spring-boot-starter-web ⇒ starter-tomcat ⇒ tomcat-embed-core ✅
+                  · rpc 模块 ⇒ 没有 ⇒ 该 Bean 由 @ConditionalOnClass(name=...) 挡掉 ✅
+              · 若写成非 optional ⇒ 10 个 rpc 模块的 classpath 上会平白多一个 Tomcat 运行时。
+            ⚠️ 历史上这里是 test 作用域；2026-10-25 因上面那条共享层修复而升到 optional 编译期。
+        -->
+        <dependency>
+            <groupId>org.apache.tomcat.embed</groupId>
+            <artifactId>tomcat-embed-core</artifactId>
+            <optional>true</optional>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.tomcat</groupId>
+                    <artifactId>tomcat-annotations-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!--
+            spring-boot-tomcat（optional 编译期）：
+            GoStyleTomcatParameterLimitCustomizer 需要引用
+            org.springframework.boot.tomcat.ConfigurableTomcatWebServerFactory
+            （Boot 4 把 Tomcat 支持从 spring-boot-autoconfigure 拆到了独立模块）。
+
+            ⚠️ 为什么是 optional：
+              optional 依赖**不传递** ⇒ 只有 service/common 自己能在编译期看到它；
+              运行时「有没有它」取决于宿主应用：
+                · api 模块 ⇒ spring-boot-starter-web ⇒ spring-boot-starter-tomcat ⇒ spring-boot-tomcat ✅
+                · rpc 模块 ⇒ 没有 ⇒ 该 Bean 由 @ConditionalOnClass(name=...) 挡掉 ✅
+            ⇒ 绝不能让它变成非 optional ⇒ 否则 10 个 rpc 模块的 classpath 上会多一个 Tomcat 运行时。
+
+            ⚠️ 不写 version：交给 spring-boot-dependencies BOM 管 ⇒ 与各 api 模块用的是同一个版本。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-tomcat</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!--
+            spring-boot-starter-web（**仅测试**）：
+            守门测试需要跑一个**真 Spring Boot 容器**（@SpringBootTest + RANDOM_PORT），
+            才能证明「GoStyleTomcatParameterLimitCustomizer 这个 Bean 真的被 Boot 应用到了 connector 上」
+            —— AGENTS.md §3.3：「注解存在 / Bean 存在」≠「机制生效」。
+
+            ⚠️ test 作用域 ⇒ 不会传递给任何下游模块。
+            ⚠️ 它顺带带来 spring-boot-starter-tomcat ⇒ 与上面那条 optional 编译依赖**同版本**（BOM 管）。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            ⚠️ jakarta.annotation-api **不在这里声明**：它已经由 spring-boot-starter（compile 作用域）
+            传递进来（ObservabilityLifecycle 的 @PreDestroy 就用它）。
+            ⚠️ 本轮曾把它显式声明成 test 作用域 ⇒ Maven「最近者优先」把它顶掉了
+            ⇒ **compile classpath 上 jakarta.annotation 消失** ⇒ ObservabilityLifecycle 编译失败
+            （教训：加 test 作用域依赖前先确认它没有以更近的路径提供同名 artifact）。
+        -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
@@ -248,10 +362,36 @@
             <artifactId>grpc-core</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+            🔴 2026-10-25（第二十一轮 · global T-11）：grpc-netty-shaded —— **仅测试**。
+            用途：守门要起一个**真的** OTLP/gRPC 接收端（假 jaeger），证明
+            「span 真的被导出到网络上」而不是「exporter 被配上了」（§3.3：注解/配置存在 ≠ 机制生效）。
+            为什么是 netty-shaded：OTLP/gRPC 的 **客户端**由 opentelemetry-exporter-otlp
+            内部的 OkHttp 传输承担，服务端用 grpc-netty-shaded 起 ⇒ 两侧都是 HTTP/2 + gRPC 帧。
+            ⚠️ 版本**不写**：由根 pom 的 grpc-bom（${grpc.version} = 1.63.0）管。
+            scope=test ⇒ 不会传递给任何下游模块。
+        -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-netty-shaded</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-test</artifactId>
-            <version>7.0.0</version>
+            <!--
+                ⚠️ **刻意不写 version**，交给 spring-boot-dependencies 管理（= 7.0.9）。
+                2026-10-25 订正：本条原先写死 7.0.0，是**既有技术债**，本次一并修掉。
+                起因：spring-test 7.0.0 与同 classpath 上的 spring-webmvc 7.0.9 组合 ⇒
+                  ObservabilityWiringTest 加载时 NoClassDefFoundError:
+                  org/springframework/web/accept/ApiVersionHolder
+                  （该类 7.0.0 里没有、7.0.9 才有；spring-webmvc 7.0.9 依赖它）。
+                ⚠️ 为什么必须是「同一个 Spring Framework 版本」：
+                  写死版本 = 在同一条 classpath 上塞第二个 Spring Framework 版本 ⇒
+                  同名不同类 ⇒ @ConditionalOnWebApplication / WebMvcConfigurer 等类型
+                  出现「同名不同类」，装配结果不可预测（§3.3 同款：不报错的失效）。
+                本条是 test 作用域 ⇒ 不传递给任何下游模块 ⇒ 改动影响面仅限 service/common 自身。
+            -->
             <scope>test</scope>
         </dependency>
         <!--
@@ -271,7 +411,18 @@
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-web</artifactId>
-            <version>7.0.0</version>
+            <!--
+                ⚠️ **刻意不写 version**，交给 spring-boot-dependencies 管理（= 7.0.9）。
+                2026-10-25 订正：本条原先写死 7.0.0，是**既有技术债**，本次一并修掉。
+                起因：直接声明优先 ⇒ classpath 上 spring-web 7.0.0 压过 starter-web 带来的 7.0.9，
+                  而 spring-webmvc 7.0.9 需要 spring-web 7.0.9 的
+                  org.springframework.web.accept.ApiVersionHolder（7.0.0 里没有）
+                  ⇒ NoClassDefFoundError。
+                ⚠️ 为什么必须与 spring-webmvc / spring-test 同版本：
+                  写死版本 = 同一条 classpath 上两个 Spring Framework 版本 ⇒
+                  同名不同类 ⇒ 装配结果不可预测（§3.3 同款：不报错的失效）。
+                ⚠️ 影响面：optional=true ⇒ 不传递给下游 ⇒ 仅 service/common 自身 classpath 变化。
+            -->
             <optional>true</optional>
         </dependency>
         <!--
@@ -293,8 +444,9 @@
                 更要命的是写死版本等于**在同一个 classpath 上引入第二个 Spring Framework 版本** ——
                 那会让 @ConditionalOnWebApplication、WebMvcConfigurer 等类型出现「同名不同类」，
                 装配结果不可预测（§3.3 同款：不报错的失效）。
-                （旁边那条 spring-web 7.0.0 的硬编码是**既有**技术债，本次不动它，
-                  但绝不能照抄 —— 那正是它想避免的问题。）
+                （旁边那条 spring-web 也已于 2026-10-25 一并去掉硬编码 —— 它原先写死 7.0.0，
+                  会压过 starter-web 带来的 7.0.9 ⇒ spring-webmvc 7.0.9 找不到
+                  ApiVersionHolder ⇒ NoClassDefFoundError。三条现在统一由 BOM 管。）
             -->
             <optional>true</optional>
         </dependency>

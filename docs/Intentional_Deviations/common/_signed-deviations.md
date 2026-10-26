@@ -123,7 +123,7 @@ ACCESS EXCLUSIVE 表锁持 10s，三组对照：
 
 | # | 位置 | 差异 |
 |---|---|---|
-| C-1 | `RpcInterceptor.goStyleStatusMessage` | gRPC Java 的 `Code.name()` 返回 `NOT_FOUND`，Go 的 `codes.Code.String()` 返回 `NotFound`。code 与 desc 均已保留（Go 出处 `rpc.go:95`），仅常量表示不同，不做臆造映射 |
+| C-1 | `RpcInterceptor.goStyleStatusMessage` | gRPC Java 的 `Code.name()` 返回 `NOT_FOUND`，Go 的 `codes.Code.String()` 返回 `NotFound`。code 与 desc 均已保留（Go 出处 `rpc.go:95`），仅常量表示不同，不做臆造映射<br>**第四十三轮补全（users/admin 域 owner 回执带出 deadline 同款）**：deadline 场景**同款** —— gRPC Java `Code.name()` = **`DEADLINE_EXCEEDED`**（`RpcInterceptor.java:274` / `:486` 调 `goStyleStatusMessage(Code.DEADLINE_EXCEEDED, …)`）vs Go `codes.Code.String()` = **`DeadlineExceeded`**（Go 出处 `rpc.go:68`：`status.Error(codes.DeadlineExceeded, timeoutCtx.Err().Error())`⇒ `err.Error()` = `"rpc error: code = DeadlineExceeded desc = context deadline exceeded"`）⇒ ⇒ **两侧的 `sea.biz_msg` 只差这一个字符串的大小写风格**（Go 驼峰 · Java 全大写）<br>⚠️ **已核：差异只在「文本」，不在「码值」，也不在 wire** —— ① **wire 不含码名**（gRPC 只编码**数字 code + message**）② **两侧的遥测属性都存数字 code**（Go `rpc.go:116-121` `attribute.Int("rpc.grpc.status_code", int(code))`；RAG `RpcInterceptor.java:307` / `:384` / `:636` 全部用 `code.value()`）⇒ ⇒ **不是行为差异 ⇒ 属 ③ 表述差异（无需签字）** ⇒ **不做臆造映射、不为对齐它去改 grpc-java 的命名** |
 
 ##### D. UNRESOLVED（证据不足，**不得**按「已对齐」处理）
 

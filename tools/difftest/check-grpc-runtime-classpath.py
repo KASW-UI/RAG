@@ -46,6 +46,8 @@ check-grpc-runtime-classpath.py —— **devh gRPC client 的运行时 classpath
     那一条由真启动（`java -jar`）负责 —— 静态检查证明不了「artifact 真的在」，
     只证明「没人把它降级成 test scope」。
   · **不检查 address 是否指向一个真实存在的服务**（那是部署期的事）。
+  · **不扫 `target/`（构建产物）** —— 见 `_skip_target()` 的 docstring：
+    构建产物**滞后于源码**，扫它等于拿旧字节判当前代码。
 
 ════════════════════════════════════════════════════════════════════════════════
 【baseline 机制 —— 为什么不是「有问题就红」】
@@ -102,9 +104,28 @@ RE_ADDRESS = re.compile(r'^\s*address:\s*["\']?([^"\'\s#]+)["\']?\s*(#.*)?$')
 RE_PLACEHOLDER = re.compile(r'^\$\{[^:}]*:(.*)\}$')
 
 
+def _skip_target(dirpath: str) -> bool:
+    """构建产物目录（`target/`）必须排除。
+
+    ⚠️ **为什么要排**（2026-10-26 L15 实测的**存量缺陷**）：
+    `target/classes/` 里躺的是**上一次构建留下的旧副本** ⇒ 它**滞后于源码** ⇒
+    源码改了、产物没重建 ⇒ 门禁会拿**旧字节**判当前代码 ⇒ 结论不可信
+    （与 PIT-GLOBAL-019「构建进行中改源码 ⇒ 绿的是旧字节码」同源）。
+
+    ⚠️ **实测危害**：排除前，同一处两斜杠违规在 `src/main/resources/` 与
+    `target/classes/` 各被数一次 ⇒ 键（`<路径>|yml|<值>`）不同 ⇒ 后者**不在 baseline 里**
+    ⇒ 门禁**恒红**（实测 `EXIT=1`，报 9 处「未登记违规」，而源码树里其实只有 13 处已知违规）。
+
+    ⚠️ 用**路径分段**判定而不是子串匹配 ⇒ `mytarget/` 这类同前缀目录不会被误伤。
+    """
+    return "target" in os.path.normpath(dirpath).split(os.sep)
+
+
 def iter_poms(root):
     service_dir = os.path.join(root, "service")
     for dirpath, _dirnames, filenames in os.walk(service_dir):
+        if _skip_target(dirpath):
+            continue
         for fn in filenames:
             if fn == "pom.xml":
                 yield os.path.join(dirpath, fn)
@@ -113,6 +134,8 @@ def iter_poms(root):
 def iter_ymls(root):
     service_dir = os.path.join(root, "service")
     for dirpath, _dirnames, filenames in os.walk(service_dir):
+        if _skip_target(dirpath):
+            continue
         for fn in filenames:
             if fn in ("application.yml", "application.yaml"):
                 yield os.path.join(dirpath, fn)

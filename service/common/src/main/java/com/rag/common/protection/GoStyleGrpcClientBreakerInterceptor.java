@@ -164,12 +164,73 @@ public class GoStyleGrpcClientBreakerInterceptor implements ClientInterceptor {
                 name -> new GoStyleBreaker(name, this::currentRandom));
     }
 
+    /**
+     * Go 侧的「channel 身份」= {@code cc.Target()}。
+     *
+     * <p>⚠️ <b>是 dial 时传入的 target 字符串，不是解析后的 IP:Port</b> ——
+     * grpc-java 的 {@code cc.Target()} 也是原始 target（{@code ManagedChannelImpl} 保留它）。
+     * ⇒ 对本项目（devh + {@code discovery:///xxx}）= **服务名**。
+     *
+     * <p>⚠️ 取不到时返回空串 ⇒ breaker 退化为「仅按方法名」⇒ 至少不会崩，
+     * 但会退回修复前那种「跨服务共用」的行为 ⇒ 已记进台账的残余面。
+     */
+    static String targetOf(Channel channel) {
+        if (channel == null) {
+            return "";
+        }
+        String authority = channel.authority();
+        return authority == null ? "" : authority;
+    }
+
+    /**
+     * Go: {@code path.Join(cc.Target(), method)}。
+     *
+     * <p>⚠️ <b>字符串形式与 Go 不会逐字节相同</b>（表达层差异，不影响行为）：
+     * <ul>
+     *   <li>Go 的 target 是 {@code etcd:///etcd:2379?key=message.rpc}（含发现协议与 etcd 地址），
+     *       RAG 的是服务名（{@code message-rpc}）⇒ <b>本身就不是同一个字符串</b>；</li>
+     *   <li>Go 的 {@code path.Join} 会把 {@code ///} 折叠成 {@code /}
+     *       （⇒ {@code etcd:/etcd:2379?key=message.rpc/foo.Bar/Baz}）
+     *       ⇒ 本实现做<b>同样的最小折叠</b>（连续斜杠合并）。</li>
+     * </ul>
+     * ⇒ <b>可观察的语义完全一致</b>：breaker 按「<b>哪个下游服务</b> + 哪个方法」分组。
+     * ⇒ breaker 名会出现在日志与熔断统计里（Go 侧同样会）⇒ 属**表达层差异**。
+     *
+     * <p>⚠️ <b>不</b>实现 {@code path.Clean} 的 {@code "." / ".."} 处理：
+     * authority 与 gRPC 方法名里都不可能出现这两者。
+     */
+    static String goBreakerName(String target, String fullMethodName) {
+        if (target == null || target.isEmpty()) {
+            return fullMethodName;
+        }
+        String raw = target + "/" + fullMethodName;
+        StringBuilder sb = new StringBuilder(raw.length());
+        boolean prevSlash = false;
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c == '/') {
+                if (prevSlash) {
+                    continue;
+                }
+                prevSlash = true;
+            } else {
+                prevSlash = false;
+            }
+            sb.append(c);
+        }
+        return sb.toString();
+    }
+
     private double currentRandom() {
         return this.randomSource.getAsDouble();
     }
 
     /**
-     * <b>测试接缝</b>：已建的 breaker 数（= 有流量过的 RPC 方法数）。
+     * <b>测试接缝</b>：已建的 breaker 数。
+     *
+     * <p>⚠️ <b>语义在 T-9 修复后变了</b>：键从「方法名」变成「<b>服务 + 方法</b>」
+     * ⇒ 这个数现在是「<b>(下游服务, 方法) 对</b>数」，不是「方法数」。
+     * ⇒ 端到端用例断言它时，<b>必须同时固定住服务身份</b>，否则断言会失真。
      *
      * <p>端到端用例用它断言「熔断打开后不再为新方法建 breaker」，
      * 即<b>熔断确实生效、且短路真的不触达下游</b>。
@@ -179,9 +240,19 @@ public class GoStyleGrpcClientBreakerInterceptor implements ClientInterceptor {
         return breakers.size();
     }
 
-    /** 测试用：取某方法的 breaker。 */
+    /** 测试用：取某方法的 breaker（**按方法名**，不含服务前缀 ⇒ 只在单服务场景下有意义）。 */
     GoStyleBreaker breakerFor(String fullMethodName) {
         return breakerOf(fullMethodName);
+    }
+
+    /**
+     * 测试用：按<b>完整 breaker 名</b>取（服务 + 方法）。
+     *
+     * <p>⚠️ 跨服务场景下必须用这个 —— 否则拿到的是「没有服务前缀」的那一份，
+     * 断言会假绿（§3.3.3：绿测试可能是错误答案的守卫）。
+     */
+    GoStyleBreaker breakerForName(String breakerName) {
+        return breakerOf(breakerName);
     }
 
     @Override
@@ -191,16 +262,39 @@ public class GoStyleGrpcClientBreakerInterceptor implements ClientInterceptor {
             Channel next) {
 
         String fullMethodName = method.getFullMethodName();
+        // ⚠️ 2026-10-25（T-9 修复）：breaker 的键必须**带 channel 身份**。
+        //
+        //   Go: breakerName := path.Join(cc.Target(), method)
+        //       `cc.Target()` = gRPC **dial 时传入的 target 字符串**（不是解析后的 IP:Port）
+        //       ⇒ 对本项目 = `resolver.BuildDiscovTarget(etcdHosts, key)` 的产物
+        //         （`zrpc/resolver/target.go:20` ⇒ `etcd:///etcd:2379?key=message.rpc`）
+        //       ⇒ 键里**含服务标识** ⇒ **每个下游服务一份独立熔断器**。
+        //
+        //   修复前本类只用 `method.getFullMethodName()`（**无 target 前缀**）
+        //       ⇒ 两个不同下游服务调用**同名方法**时**共用一份熔断器**
+        //       ⇒ A 服务的失败会把 B 服务的熔断器也拖开（跨服务污染）。
+        //
+        //   RAG 侧的对应物 = `Channel#authority()`：
+        //       · `discovery:///message-rpc` ⇒ devh 的 `DiscoveryClientNameResolver`
+        //         用**服务名**作 authority ⇒ "message-rpc"（与 Go 的 `key=message.rpc` 同义）
+        //       · 直连地址 ⇒ "host:port"
+        //   ⇒ **两者都标识「哪个服务」** ⇒ 语义与 Go 同形。
+        //
+        //   ⚠️ 第三个实参 `next` 确实是**底层 channel**（不是包装层）：
+        //   grpc-java 的 `ClientInterceptors$InterceptorChannel.interceptCall`
+        //   传的是 `this.channel` 字段（javap 实测）⇒ `next.authority()` 取得到。
+        String breakerName = goBreakerName(targetOf(next), fullMethodName);
 
         if (!enabled) {
             return next.newCall(method, callOptions);
         }
 
-        GoStyleBreaker breaker = breakerOf(fullMethodName);
+        GoStyleBreaker breaker = breakerOf(breakerName);
         if (!breaker.accept()) {
             // googlebreaker.go:65-67：allow() 在拒绝前会 markDrop()
             breaker.markDrop();
-            log.error("[grpc-breaker] dropped, circuit open, method={}", fullMethodName);
+            log.error("[grpc-breaker] dropped, circuit open, method={}, breaker={}",
+                    fullMethodName, breakerName);
             // ⚠️ 抛普通异常而非 StatusRuntimeException —— 理由见 GoStyleCircuitOpenException 的类注释
             throw new GoStyleCircuitOpenException("circuit breaker is open");
         }

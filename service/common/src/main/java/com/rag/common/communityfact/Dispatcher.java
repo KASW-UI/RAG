@@ -85,6 +85,82 @@ public final class Dispatcher {
      */
     public static DispatcherHandle run(Context ctx, DispatcherImpl dispatcher, Wire.Sender sender,
                                        Logger logger, boolean once, boolean registerShutdownHook) {
+        return run(ctx, dispatcher, sender, logger, once, registerShutdownHook, null);
+    }
+
+    /**
+     * 🔴🔴 Spring 化路径必须用这个：<b>非阻塞</b>启动投递循环。
+     *
+     * <p><b>为什么不能直接用 {@link #run}</b>：
+     * {@code run} 是<b>阻塞式</b>的 —— 它在<b>调用线程</b>上跑整个 {@code while} 循环，
+     * 直到 {@link DispatcherHandle#stop()} 被调用才返回。
+     * 而业务域的调用点都在<b>生命周期回调</b>里：
+     * <ul>
+     *   <li>{@code @PostConstruct start()} ⇒ 阻塞的是 <b>Spring 上下文刷新线程</b>
+     *       ⇒ 上下文永远刷新不完 ⇒ <b>整个服务起不来</b>；</li>
+     *   <li>{@code @EventListener(ApplicationReadyEvent.class)} ⇒ 阻塞的是
+     *       <b>{@code SpringApplication.run()} 的主线程</b> ⇒ 进程启动后主线程永久占用。</li>
+     * </ul>
+     * ⇒ 这不是「配置没开就没事」的问题：只要把开关打开，症状就是「服务起不来」，
+     * 而这类缺陷<b>默认关闭时测不出来</b>（绿测试 + 起不来）。
+     *
+     * <p><b>本方法的行为</b>：
+     * <ul>
+     *   <li>循环跑在一条<b>守护线程</b>（{@code communityfact-dispatcher}）上；</li>
+     *   <li><b>立即</b>返回 {@link DispatcherHandle}（句柄在进入循环<b>之前</b>就发布，
+     *       所以调用方能立刻拿到它去 {@code stop()}）；</li>
+     *   <li>{@code once = true} 时，那一轮也在后台跑完（Go 的 {@code -once} 是进程级一次性，
+     *       单 JVM 里没有「进程退出」这个自然终点 ⇒ 以日志为准）。</li>
+     * </ul>
+     *
+     * <p>⚠️ <b>{@link #run} 的阻塞语义刻意保持不变</b>：
+     * 它对应 Go 的独立进程形态（进程主循环就是阻塞的），
+     * 改它会波及所有仍在用 {@code run} 的调用方 ⇒ 语义差异由本方法承担。
+     *
+     * @throws IllegalStateException 循环线程启动失败（配置错误 / 启动超时）
+     */
+    public static DispatcherHandle runAsync(Context ctx, DispatcherImpl dispatcher, Wire.Sender sender,
+                                            Logger logger, boolean once, boolean registerShutdownHook) {
+        CompletableFuture<DispatcherHandle> handleFuture = new CompletableFuture<>();
+        Thread runner = new Thread(() -> {
+            try {
+                run(ctx, dispatcher, sender, logger, once, registerShutdownHook, handleFuture::complete);
+            } catch (Throwable t) {
+                // ⚠️ once 模式下 run 会把投递错误抛出来（Go 的 -once 非零退出）。
+                //    单 JVM 里没有退出码 ⇒ 以日志为准（否则错误会被静默吞掉）。
+                logger.atError()
+                        .addKeyValue("event", "community.fact_delivery.failed")
+                        .setCause(t)
+                        .log("community fact dispatcher stopped with error");
+                handleFuture.completeExceptionally(t);
+            }
+        }, "communityfact-dispatcher");
+        runner.setDaemon(true);
+        runner.start();
+        try {
+            return handleFuture.get(10, TimeUnit.SECONDS);
+        } catch (ExecutionException e) {
+            runner.interrupt();
+            throw new IllegalStateException("community fact dispatcher failed to start", e.getCause());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            runner.interrupt();
+            throw new IllegalStateException("community fact dispatcher interrupted while starting", e);
+        } catch (TimeoutException e) {
+            runner.interrupt();
+            throw new IllegalStateException("community fact dispatcher did not start within 10s", e);
+        }
+    }
+
+    /**
+     * 内部实现：{@code handlePublisher} 在<b>句柄建好之后、进入循环之前</b>被调用一次。
+     *
+     * <p>有了它，{@link #runAsync} 才能在循环开始跑之前就把句柄交出去 ——
+     * 否则调用方拿到句柄时循环早就跑完了，「立刻能 stop」就做不到。
+     */
+    private static DispatcherHandle run(Context ctx, DispatcherImpl dispatcher, Wire.Sender sender,
+                                        Logger logger, boolean once, boolean registerShutdownHook,
+                                        java.util.function.Consumer<DispatcherHandle> handlePublisher) {
         long started = System.nanoTime();
         if (dispatcher == null || sender == null || logger == null) {
             throw new IllegalArgumentException("community fact dispatcher process is not configured");
@@ -144,6 +220,10 @@ public final class Dispatcher {
         // DRIFT-015 修复：用 stopSignal（CompletableFuture）替代 JVM shutdown hook，让调用方可以主动 stop
         CompletableFuture<Void> stopSignal = new CompletableFuture<>();
         DispatcherHandle handle = new DispatcherHandle(stopSignal, dispatchExecutor, runnerThread);
+        // 句柄一建好就发布（进入循环之前）⇒ runAsync 的调用方能立刻拿到它去 stop()
+        if (handlePublisher != null) {
+            handlePublisher.accept(handle);
+        }
 
         Thread shutdownHook = new Thread(() -> {
             running.set(false);

@@ -1,16 +1,6 @@
-package com.rag.article.article.api.config;
+package com.rag.common.http;
 
-import jakarta.servlet.Filter;
-import jakarta.servlet.FilterChain;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.ServletRequest;
-import jakarta.servlet.ServletResponse;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
-import org.springframework.core.Ordered;
-import org.springframework.core.annotation.Order;
-import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -21,7 +11,54 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 🔴 query 解析与参数总数上限 —— 对应 go-zero {@code rest/httpx} 的 {@code GetFormValues}。
+ * 🔴 <b>Go 风格的 query 解析与 form 值上限判据</b> —— 对应 go-zero {@code rest/httpx} 的
+ * {@code GetFormValues} ＋ Go 标准库 {@code net/url} 的 {@code parseQuery}。
+ *
+ * <p><b>本类是「判据」，不是「闸门」</b>：它只回答一个问题 ——
+ * 「这个 query 按 Go 的语义<b>该不该被拒</b>、被拒时的 Go 原文是什么」，
+ * <b>由谁把这个结论变成 wire 上的响应，由各域自己决定</b>（见下方「🔴 两种拒绝形状」）。
+ *
+ * <h2>🆕 为什么它住在 {@code service/common}（2026-10-25 第十四轮，从 article-api 迁上来）</h2>
+ * <p>原先它是 {@code article-api} 自己的 {@code @Component}（当时是<b>刻意不抽到共享层</b>的：
+ * 「{@code service/common} 被 16 个组件依赖，与其它域的工作树并发修改会冲突（AGENTS.md §5.3）」）。
+ * <br>⇒ 但 §5.3 的<b>单写权</b>规则后来改成了「<b>{@code service/common/**} 只有 {@code align/global} 能写</b>」
+ * ⇒ 共享层反而成了这条规则的<b>唯一合法落点</b>。
+ * <br>⇒ 迁移的<b>直接动因</b>：<b>{@code DRIFT-HOTAPI-030}</b> / <b>X-6</b>
+ * （这条闸门只在 article 一家生效，<b>其余 9 个 api 模块没有</b>
+ * ⇒ 同一个请求在 10 个域里 10 种行为）。
+ *
+ * <h2>🔴🔴 两种拒绝形状 —— <b>按域而异</b>，不是按实现随意选（2026-10-25 取证结论）</h2>
+ * <p>Go 的 {@code httpx.Parse} 失败后经 {@code httpx.ErrorCtx} → {@code httpx.SetErrorHandler} 出口，
+ * 而<b>「该 api 有没有注册 {@code SetErrorHandler}」决定了 wire 形状</b>：
+ * <table border="1">
+ *   <caption>Go 侧逐域取证（{@code service/…/api/…center.go} / {@code commentservice.go}）</caption>
+ *   <tr><th>域</th><th>Go 侧</th><th>wire 形状</th></tr>
+ *   <tr><td>hot / follow / like / message / comment</td><td><b>注册了</b> {@code SetErrorHandler}</td>
+ *       <td><b>HTTP 200</b> + {@code {"code":5001,"msg":"&lt;该域文案&gt;","data":null}}</td></tr>
+ *   <tr><td>article / user / task / favorite</td><td><b>没注册</b></td>
+ *       <td><b>HTTP 400</b> + {@code text/plain} + {@code nosniff} + Go 的原文 body</td></tr>
+ * </table>
+ * <br>⚠️ <b>各域 5001 的文案还不一样</b>：hot / follow / message = {@code "internal server error"}；
+ * like / comment = {@code "系统内部错误"} ⇒ <b>共享层不得硬编码这条文案</b>
+ * ⇒ ⇒ <b>本类只产出「Go 的原文」（{@link #goParseViolation}），
+ * 拒绝成什么形状由各域自己的错误出口决定</b>。
+ *
+ * <h3>🔴 它与 Tomcat 容器上限的关系（本条最容易被忽略的一层）</h3>
+ * <p>Tomcat 自己也有 {@code maxParameterCount}（{@code Connector.maxParameterCount}，
+ * 读 {@code tomcat/util/http/Parameters.java:79} 的 javadoc：<b>{@code -1} = 不限</b>）。
+ * <br>⚠️ <b>关键：Tomcat 只在应用真的调用 {@code getParameter*} 时才解析 query 并计数</b>
+ * （{@code Parameters.processParameters} 是<b>惰性</b>的）⇒
+ * <b>没读参数的端点，Tomcat 的上限根本不会触发</b> ⇒ 这就是「同一个请求在不同域表现不同」的第二层原因。
+ * <br>⚠️ <b>两条上限的语义不同</b>：
+ * <table>
+ *   <tr><td></td><td>Go（{@code httpx/util.go}）</td><td>Tomcat（{@code Parameters.addParameter}）</td></tr>
+ *   <tr><td>数什么</td><td><b>非空值</b>（{@code util.go:44-45} 空值 {@code continue}）</td><td><b>参数总数</b>（含空值）</td></tr>
+ *   <tr><td>上限</td><td>2048</td><td>容器配置</td></tr>
+ * </table>
+ * ⇒ 所以 {@code service/common} 里还配了一个
+ * {@link GoStyleTomcatParameterLimitCustomizer}，把容器上限抬到 <b>10001</b>
+ * （= Go 的 {@code net/url} 段数上限 10000 <b>+1</b>）⇒ <b>让应用层有机会先按 Go 的语义判定</b>
+ * ⇒ 详见该类的 javadoc。
  *
  * <h2>为什么叫这个名字</h2>
  * Go 侧这些行为<b>全在同一个函数里</b>（{@code rest/httpx/util.go:22-65} 的 {@code GetFormValues}）：
@@ -29,7 +66,7 @@ import java.util.Map;
  *   <li>{@code r.ParseForm()} ⇒ 触发 Go 标准库 {@code net/url} 的解析（<b>含它的三条错误</b>）；</li>
  *   <li>然后才是 go-zero 自己的 {@code maxFormParamCount = 2048} 计数。</li>
  * </ol>
- * ⇒ 本 filter 按<b>同样的顺序</b>复刻这两步 —— 顺序本身就是<b>可观察</b>的。
+ * ⇒ 本类按<b>同样的顺序</b>复刻这两步 —— 顺序本身就是<b>可观察</b>的。
  *
  * <h2>Go 出处（逐行，消费点）</h2>
  * <pre>
@@ -69,9 +106,9 @@ import java.util.Map;
  * <h2>🔴 真容器实测：默认配置下这条闸门<b>不可达</b>（2026-10-24）</h2>
  * Tomcat 自己有请求行/请求头上限（Boot 4 的 {@code server.max-http-request-header-size}，默认 <b>8 KB</b>），
  * 而 2049 个<b>最短</b>的非空 query 值（{@code a=1&} × 2049 ≈ 8196 字节）<b>本身就超了</b>
- * ⇒ Tomcat 在<b>连接器层</b>就以 <b>400</b> 拒掉，请求<b>根本到不了</b>本 filter
+ * ⇒ Tomcat 在<b>连接器层</b>就以 <b>400</b> 拒掉，请求<b>根本到不了</b>应用层
  * （实测 body 是 Tomcat 的 <b>HTML 错误页</b>，不是 Go 的 text/plain）。
- * <br>⇒ 所以本 filter 的价值是：<b>让上限不依赖容器配置</b> ——
+ * <br>⇒ 所以这条闸门的价值是：<b>让上限不依赖容器配置</b> ——
  * 部署把 {@code server.max-http-request-header-size} 调高（长 header 场景常见）时，
  * RAG 仍然按 Go 的 2048 判据拒绝，<b>且给出 Go 逐字相同的 body</b>（实测已验证）。
  * <br>⚠️ Boot 4 里属性名是 {@code server.max-http-request-header-size}；
@@ -79,18 +116,29 @@ import java.util.Map;
  * （实测踩过：写了它，请求仍被 Tomcat 以 400 拒掉，闸门根本没执行）。
  *
  * <h2>⚠️ 为什么只统计 <b>query string</b>，不碰 body</h2>
- * Go 侧 {@code r.Form} 是「query + body（仅 urlencoded / multipart 字段）」的合并结果。
- * 本模块的端点逐个核对下来：
+ * Go 侧 {@code r.Form} 是「query + body（仅 urlencoded / multipart 字段）」的合并结果
+ * （{@code httpx/util.go:23-31}：{@code r.ParseForm()} ＋ {@code r.ParseMultipartForm(maxMemory)}）。
+ * <br>⇒ 本判据只数 query，<b>理论上</b>会漏掉 body 里的表单字段。实测这条漏口<b>不可达</b>：
  * <ul>
- *   <li>GET 端点（{@code /v1/article/{id}}、{@code /v1/articles}）⇒ Go 的 {@code r.Form} 就是 query；</li>
- *   <li>POST/PUT 端点用 {@code application/json} ⇒ Go 的 {@code r.PostForm} 为空 ⇒ 只有 query；</li>
- *   <li>唯一 multipart 端点（{@code /v1/upload}）只有一个文件 part ⇒ 没有表单字段 ⇒ 只有 query。</li>
+ *   <li><b>multipart</b>：Tomcat 的 {@code Connector.maxPartCount} 默认 <b>50</b>
+ *       （{@code catalina/connector/Connector.java:253}）⇒ multipart 表单字段 <b>≤ 50</b>
+ *       ⇒ 远低于 2048 ⇒ <b>数不数都一样</b>；</li>
+ *   <li><b>urlencoded</b>：全仓 <b>没有任何 api 端点</b>接受 {@code application/x-www-form-urlencoded}
+ *       请求体（实测：{@code grep} 只命中 content-type 协商类测试与 {@code task-api} 的
+ *       {@code GoStyleRawBodyArgumentProcessor}，后者处理的是「Spring 把 form body 解析成参数」
+ *       这条<b>读 body</b>的路径，不是 form 值计数）；</li>
  * </ul>
- * ⇒ <b>本模块内「统计 query string」与 Go 等价</b>。
- * <br>⚠️ 而且<b>不能</b>用 {@code request.getParameterMap()}：它会让容器提前解析
- * multipart body（{@code parseParts}），改变 body 的消费时机 ⇒ 走 query string 更安全。
+ * ⇒ 且<b>不能</b>用 {@code request.getParameterMap()} 来补齐 body：
+ * 它会让容器提前解析 multipart body（{@code parseParts}），<b>改变 body 的消费时机</b>
+ * ⇒ 会打断 {@code task-api} 的 {@code GoStyleRawBodyArgumentProcessor}（它要读<b>原始</b> body）
+ * ⇒ ⇒ 走 query string 更安全，且上面的证据说明这不丢任何实际语义。
  *
- * <h2>⚠️ Go 标准库 {@code net/url} 的三条行为 —— 本 filter <b>已覆盖</b>（2026-10-24）</h2>
+ * <h2>⚠️ 它和「容器上限」必须<b>配合</b>才有意义</h2>
+ * 单靠本判据不够：<b>Tomcat 的上限会先于它触发</b>（只要应用读了 query 参数）
+ * ⇒ Tomcat 拒的是 <b>400 + HTML</b>，而 Go 拒的是 <b>400 + {@code text/plain} 的原文 body</b>
+ * ⇒ ⇒ 必须同时把容器上限抬起来 ⇒ {@link GoStyleTomcatParameterLimitCustomizer}（同包）。
+ *
+ * <h2>⚠️ Go 标准库 {@code net/url} 的三条行为 —— 本类 <b>已覆盖</b>（2026-10-24）</h2>
  * <pre>
  * Go 1.25 标准库 net/url/url.go:1019-1054  parseQuery
  *   if !urlParamsWithinMax(strings.Count(query, "&amp;") + 1) {
@@ -123,23 +171,22 @@ import java.util.Map;
  *   <tr><td>10001 段</td><td>400 + 段数文案</td><td>🟡 400，但 body 是 <b>2048</b> 那条（顺序反了）</td></tr>
  * </table>
  *
- * <h2>{@code @Order} 为什么取 {@code HIGHEST_PRECEDENCE + 8}</h2>
- * Go 侧这个上限在<b>路由 handler 内</b>（{@code httpx.Parse}），
- * 即<b>所有中间件之后</b> ⇒ Java 侧要放在等价于中间件的 filter <b>之后</b>。
- * <br>现有 filter 序（已实测钉住）：CORS(0) → path.Clean(0) → MaxConns(+1) → Breaker(+2)
- * → CpuShedding(+3) → observability(+5) → MaxBytes(+6) → JsonBody(+7)。
- * ⇒ 本 filter 取 <b>+8</b>，紧贴 controller 之前，是最接近 Go 位置的一档。
+ * <h2>🔴 本类只出「判据」，不出「响应」</h2>
+ * <p>拒绝成什么形状（400 原文 / 200 信封）由<b>各域自己</b>决定（见类 javadoc 的「两种拒绝形状」）⇒
+ * 本类只暴露两个公开入口：
+ * <ul>
+ *   <li>{@link #goParseViolation(String)} —— 「按 Go 的语义该不该拒、原文是什么」；</li>
+ *   <li>{@link #writeGoStyleBadRequest(HttpServletResponse, String)} —— Go 的
+ *       {@code http.Error} 形状（<b>只有「没注册 SetErrorHandler」的域</b>用）。</li>
+ * </ul>
  */
-@Component
-@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-@Order(Ordered.HIGHEST_PRECEDENCE + 8)
-public class GoStyleGetFormValuesFilter implements Filter {
+public final class GoStyleFormValues {
 
     /**
      * Go {@code rest/httpx/util.go:15} 的 {@code maxFormParamCount}，<b>不可配置</b>
      * （Go 侧它是常量 ⇒ 做成 property 等于凭空多出 Go 没有的开关）。
      */
-    private static final int MAX_FORM_PARAM_COUNT = 2048;
+    public static final int MAX_FORM_PARAM_COUNT = 2048;
 
     /**
      * Go 标准库 {@code net/url/url.go:1001} 的 {@code defaultMaxParams = 10000}。
@@ -147,40 +194,69 @@ public class GoStyleGetFormValuesFilter implements Filter {
      * <p>⚠️ 它数的是 <b>{@code &} 分隔的段数</b>（{@code strings.Count(query, "&") + 1}），
      * <b>不是</b> distinct key 数 —— 10001 个 {@code a=1} 也是 10001 段 ⇒ 超限。
      */
-    private static final int MAX_URL_QUERY_PARAMS = 10000;
+    public static final int MAX_URL_QUERY_PARAMS = 10000;
 
     /** Go {@code url.go} 的 {@code upperhex}（大写十六进制）。 */
     private static final char[] HEX = "0123456789ABCDEF".toCharArray();
 
-    @Override
-    public void doFilter(ServletRequest req, ServletResponse resp, FilterChain chain)
-            throws IOException, ServletException {
-        HttpServletRequest request = (HttpServletRequest) req;
-        HttpServletResponse response = (HttpServletResponse) resp;
+    private GoStyleFormValues() {
+    }
 
-        String query = request.getQueryString();
-        if (query != null && !query.isEmpty()) {
-            // ① Go 的 net/url **先**做段数上限（url.go:1020-1022）—— 它在解析**之前**就 return
-            if (countQuerySegments(query) > MAX_URL_QUERY_PARAMS) {
-                writeGoStyleBadRequest(response, "number of URL query parameters exceeded limit");
-                return;
-            }
-            // ② 再按 Go 的分段规则解析（url.go:1023-1054）；错误**要上报**
-            //    （Go 的 ParseForm 把 net/url 的 error 返回，util.go:23-25 原样往上抛）
-            GoQueryParse parsed = parseGoQuery(query);
-            if (parsed.error != null) {
-                writeGoStyleBadRequest(response, parsed.error);
-                return;
-            }
-            // ③ 最后才做 go-zero 的 2048 计数（util.go:44-53）
-            int nonEmpty = countNonEmptyValues(parsed.form);
-            if (nonEmpty > MAX_FORM_PARAM_COUNT) {
-                writeGoStyleBadRequest(response,
-                        "too many form values, error: " + encodeGoValues(parsed.form));
-                return;
-            }
+    /**
+     * 按 Go 的语义判定「这个 query 该不该被拒」，并给出<b>Go 的原文</b>。
+     *
+     * <p>判定顺序与 Go 完全一致（<b>顺序本身是可观察的</b>）：
+     * <ol>
+     *   <li>{@code net/url} 的<b>段数上限</b>（{@code url.go:1020-1022}）—— 它在<b>解析之前</b>就 return；</li>
+     *   <li>{@code net/url} 的<b>分段解析错误</b>（{@code url.go:1023-1054}）——
+     *       Go 的 {@code ParseForm} 把 error 原样往上抛（{@code httpx/util.go:23-25}）；</li>
+     *   <li>go-zero 的 <b>2048 非空值计数</b>（{@code httpx/util.go:44-53}）。</li>
+     * </ol>
+     *
+     * @param query 原始 query string（{@code request.getQueryString()}）；{@code null} / 空串 ⇒ 不拒绝
+     * @return {@code null} = 按 Go 的语义<b>应当放行</b>；
+     *         否则 = Go 的原文（{@code http.Error} 的 body 内容，<b>不含</b>尾随换行）
+     */
+    public static String goParseViolation(String query) {
+        if (query == null || query.isEmpty()) {
+            return null;
         }
-        chain.doFilter(request, response);
+        // ① Go 的 net/url **先**做段数上限（url.go:1020-1022）—— 它在解析**之前**就 return
+        if (countQuerySegments(query) > MAX_URL_QUERY_PARAMS) {
+            return "number of URL query parameters exceeded limit";
+        }
+        // ② 再按 Go 的分段规则解析（url.go:1023-1054）；错误**要上报**
+        //    （Go 的 ParseForm 把 net/url 的 error 返回，util.go:23-25 原样往上抛）
+        GoQueryParse parsed = parseGoQuery(query);
+        if (parsed.error != null) {
+            return parsed.error;
+        }
+        // ③ 最后才做 go-zero 的 2048 计数（util.go:44-53）
+        int nonEmpty = countNonEmptyValues(parsed.form);
+        if (nonEmpty > MAX_FORM_PARAM_COUNT) {
+            return "too many form values, error: " + encodeGoValues(parsed.form);
+        }
+        return null;
+    }
+
+    /**
+     * Go 的 {@code net/http.Error} 形状 —— <b>只给「没注册 {@code SetErrorHandler}」的域用</b>
+     * （article / user / task / favorite）。
+     *
+     * <p>Go 出处：{@code net/http/server.go} 的 {@code Error()}：
+     * <pre>
+     *   h.Del("Content-Length")
+     *   h.Set("Content-Type", "text/plain; charset=utf-8")
+     *   h.Set("X-Content-Type-Options", "nosniff")
+     *   w.WriteHeader(code); fmt.Fprintln(w, error)     // ⇒ body 带一个 \n
+     * </pre>
+     */
+    public static void writeGoStyleBadRequest(HttpServletResponse response, String message)
+            throws IOException {
+        response.setHeader("Content-Type", "text/plain; charset=utf-8");
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+        response.getOutputStream().write((message + "\n").getBytes(StandardCharsets.UTF_8));
     }
 
     /**
@@ -291,7 +367,7 @@ public class GoStyleGetFormValuesFilter implements Filter {
      */
     private static String encodeGoValues(Map<String, List<String>> form) {
         List<String> keys = new ArrayList<>(form.keySet());
-        keys.sort(GoStyleGetFormValuesFilter::compareByCodePoint);
+        keys.sort(GoStyleFormValues::compareByCodePoint);
         StringBuilder buf = new StringBuilder();
         for (String k : keys) {
             String keyEscaped = queryEscape(k);
@@ -629,18 +705,7 @@ public class GoStyleGetFormValuesFilter implements Filter {
         return Integer.compare(a.length() - i, b.length() - j);
     }
 
-    /**
-     * 直接写 Go {@code http.Error} 的形状（{@code net/http/server.go}）。
-     *
-     * <p>⚠️ 与 {@code GoStyleJsonBodyLimitFilter} 里那份是<b>同一个形状</b>，
-     * 但<b>刻意不抽到共享层</b>：{@code service/common} 被 16 个组件依赖，
-     * 与其它域的工作树并发修改会冲突（AGENTS.md §5.3）。
-     */
-    private static void writeGoStyleBadRequest(HttpServletResponse response, String message)
-            throws IOException {
-        response.setHeader("Content-Type", "text/plain; charset=utf-8");
-        response.setHeader("X-Content-Type-Options", "nosniff");
-        response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-        response.getOutputStream().write((message + "\n").getBytes(StandardCharsets.UTF_8));
-    }
+    // ⚠️ 刻意<b>不</b>再保留第二份 {@code http.Error} 形状的实现：
+    // 两份实现一旦漂移，就会出现「有的域返 Go 的 body、有的域返别的」
+    // ⇒ 与本条要消除的「同一个请求 10 个域 10 种行为」同源。
 }

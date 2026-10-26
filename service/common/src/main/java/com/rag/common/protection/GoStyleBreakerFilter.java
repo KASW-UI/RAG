@@ -64,14 +64,17 @@ import java.util.concurrent.ConcurrentHashMap;
  * </ol>
  *
  * <p><b>链上位置</b>：Go {@code engine.go:148-150} 的 Breaker 在 MaxConns 之后、
- * Shedding 之前 ⇒ 本类注册在 {@link Ordered#HIGHEST_PRECEDENCE} + 2。
+ * Shedding 之前 ⇒ 本类注册在 {@link Ordered#HIGHEST_PRECEDENCE} + 5。
+ *
+ * <p>⚠️ <b>2026-10-25（第十九轮 · global T-8）：由 +2 改为 +5</b>（给 traceparent filter 让出位置，
+ * 相对顺序不变 —— 见 {@code GoStyleMaxConnsFilter} 的同款说明）。
  *
  * <p><b>为什么 breaker 实例不做无界缓存</b>：key 由 method+path 构成，基数等于路由数
  * （本模块 13 条，含未匹配路径不会建 key），无界增长的现实风险为零。
  */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 2)
+@Order(Ordered.HIGHEST_PRECEDENCE + 5)
 public class GoStyleBreakerFilter implements Filter {
 
     private final boolean enabled;

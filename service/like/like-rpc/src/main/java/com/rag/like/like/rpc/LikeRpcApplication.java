@@ -114,9 +114,17 @@ public class LikeRpcApplication {
      * <p><b>删掉这行后 {@code ctx.getBean(ServerInterceptor.class)} 断言照样是绿的</b>，
      * 但 {@code interceptCall} / {@code onHalfClose} 一次都不执行 ⇒
      * 超时、deadline 传播、gRPC span 全部静默消失。
-     * 锁死用例：⚠️ <b>目前没有</b>（错误断言 F：原文此处写
-     * {@code LikeGrpcInterceptorWiringTest}，该测试类<b>全仓不存在</b>）。
-     * {@code LikeRpcSpringContextWiringTest} 只断言 Bean 存在，抓不到「Bean 在但没挂进调用链」。
+     * 锁死用例：✅ <b>已补齐</b>（第二十七轮 L7 · `align/global-slowgate`）——
+     * <ul>
+     *   <li>{@code LikeRpcGrpcInterceptorWiringTest} —— X-5 轴（真 server + 真链）：
+     *       断言「服务端超时真的打断了在飞处理」+「取消时 handler 仍在跑」+「deadline 传到 handler 线程」</li>
+     *   <li>{@code LikeRpcSlowThresholdGateTest} —— slow 阈值轴（真 OTel SDK + 收集型 exporter）：
+     *       断言「慢调用被打 sea.slow=true」+「快调用**没有** sea.slow」</li>
+     * </ul>
+     * ⚠️ 原文此处写「目前没有」并提到一个<b>全仓不存在</b>的类名 {@code LikeGrpcInterceptorWiringTest}
+     * ⇒ 该过期断言由第二十七轮 L7 订正（类名实际是 {@code LikeRpcGrpcInterceptorWiringTest}）。
+     * {@code LikeRpcSpringContextWiringTest} 仍只断言 Bean 存在 ⇒ 抓不到「Bean 在但没挂进调用链」，
+     * 真正抓得到的是上面那条 X-5 轴守门。
      */
     @Bean
     public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryServerInterceptor,

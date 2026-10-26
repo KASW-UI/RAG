@@ -34,7 +34,7 @@ import java.time.Duration;
  * {@code observability.http-timeout: 3s} 承载。
  */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 5)
+@Order(Ordered.HIGHEST_PRECEDENCE + 7)
 public class HttpMiddlewareFilter implements Filter {
 
     private final Filter delegate;

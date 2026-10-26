@@ -76,7 +76,7 @@
 - 删掉默认对**不可观测的维度**冒险（有人在某条裸 SQL 路径上依赖了默认）**不划算**。
 - message 域已签字残留 ⇒ `DRIFT-MSG-V-020`（见 [`docs/DRIFT/message/rpc.md`](../message/rpc.md)）。
 
-> ⚠️ **未签字的部分**：`users` 域那 **8 处**（4 张表 × 2 列）目前**没有**对应的签字条目或 `V-xxx` 编号 —— 与 message 域那 6 处**不同源**。⇒ 登记为**待裁决**，见 [`docs/DRIFT/_cross/open-items.md`](open-items.md)。
+> ⚠️ **未签字的部分**：`users` 域那 **8 处**（4 张表 × 2 列）⇒ ✅ **已登记 `SD-2026-10-25-CAND-16`**（**未签字**，第二十六轮 L5 · `docs/Intentional_Deviations/global/users-domain.md`）；**DRIFT 侧编号 = `DRIFT-USERRPC-V-011`**（真 PG 对照，见 [`docs/DRIFT/users/user/rpc.md`](../users/user/rpc.md)）。<br>⚠️ **同型的另两族**（L3 实测）：`message` 域 **6 处**（已签 `SD-2026-10-24-04`）· `favorite` 域 **2 处**（`favorite_fact_outbox.created_at` / `updated_at` ⇒ 与 users/message **同型** ⇒ 归入同一条待裁决）。<br>⇒ 登记为**待裁决**，见 [`docs/DRIFT/_cross/open-items.md`](open-items.md)。
 
 ### 2.3 🟡 索引差异
 

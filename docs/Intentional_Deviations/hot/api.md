@@ -19,7 +19,7 @@
 | **SD-HOT-API-003** | Go panic 时指标被误记为 `success`；RAG 按客户端实际看到的结果记 `fail` | RAG 更准 | ✅ 已留痕（2026-10-23，第二轮；该路径无代码可达） |
 | **SD-HOT-API-004** | 5 个 `hot_api_*` 指标**真的被暴露**（Go 注册了但无端点暴露） | RAG 单向增强 | ✅ 已留痕（2026-10-23，第二轮） |
 | **SD-HOT-API-005** | 下游 gRPC 失败时，日志 `error_reason` 用 **grpc-java** 的形态（`"UNAVAILABLE: …"`）而非 grpc-go 的（`"rpc error: code = Unavailable desc = …"`） | 库层形态差异 | ✅ **已签字**（2026-10-24 第六轮，用户拍板「不复刻」） |
-| **SD-HOT-API-006** | 成功路径 `Content-Type` **不带** `charset=utf-8` 参数（Go 带） | 库/框架形态差异 | ✅ **已签字**（2026-10-24 第六轮，用户拍板「不复刻」） |
+| **SD-HOT-API-006** | 成功路径 `Content-Type` **不带** `charset=utf-8` 参数（Go 带） | 库/框架形态差异 | ⛔ **已撤销**（2026-10-25，用户拍板撤销）⇒ **被签字描述的那个行为已不存在**（第二十五轮 global T-6 已修：RAG 侧现在带 `charset=utf-8`） |
 | **SD-HOT-API-007** | Prometheus 指标带全局标签 `application="hot-api"`（Go 的默认 registry 无此标签） | 全仓约定 | ✅ **已签字**（2026-10-24 第六轮，用户拍板「保持」） |
 | **SD-HOT-API-008** | hot-api **注册到 Nacos**（Go 侧 hot-api 完全不注册） | 部署面 | ✅ **已签字**（2026-10-24 第六轮，用户拍板「保持」） |
 | **SD-HOT-API-009** | hot-api 的 HTTP 端口取 **18897**（Go 是 8893） | 部署参数 | ✅ **已签字**（2026-10-24 第六轮，用户拍板「保持」） |
@@ -119,7 +119,62 @@
 
 ---
 
-## SD-HOT-API-006 ✅ 已签字 · `Content-Type` 不带 `charset=utf-8` 参数
+## SD-HOT-API-006 ⛔ 已撤销（2026-10-25）· `Content-Type` 的 `charset=utf-8` 参数
+
+### 撤销记录（2026-10-25 · 第二十五轮 · global T-6）
+
+| 项 | 内容 |
+|---|---|
+| **撤销人** | 用户（**签字权在用户**；AGENTS.md §5.3b） |
+| **撤销依据** | 用户拍板：「撤销 SD-HOT-API-006，修 T-6」⇒ 理由是**向 Go 靠拢**（Go 的 JSON 响应带 `charset=utf-8`） |
+| **实施** | `service/common` 新增 `GoStyleJsonContentTypeAdvice`（`@AutoConfiguration` ⇒ **10 个 api 全部生效**，零 api 代码改动）<br>⇒ RAG 侧 JSON 响应头现在带 `charset=utf-8` ⇒ **被本条签字描述的那个行为（「不带 charset」）已不存在** ⇒ 本条签字**自动失效** |
+| **守门** | `service/common` 的 `GoStyleJsonContentTypeCharsetTomcatTest`（**真 Tomcat + 裸 socket**，3 条）<br>⇒ 变异 2/2 全红（M8 不写头 ⇒ 两个 JSON 门红；M9 无条件写 ⇒ 「不误伤」门红） |
+
+#### 🔴 顺带**订正**一处此前的「理由已被证伪」判断（global 台账写错了）
+
+global 台账（`common-tails.md` §一·T-6）原写：
+
+> ⚠️ **该理由已被本仓自己证伪**：`GoStyleRouterErrorResponses.java:81-88` 对 `text/plain; charset=utf-8`
+> 就是**直接写原始字符串** ⇒ **同一手法用在 `application/json; charset=utf-8` 上即可**
+> ⇒ ⇒ **要修 T-6，就必须先撤销 `SD-HOT-API-006`**
+
+⇒ ⇒ **这个判断不成立**（2026-10-25 第二十五轮实测订正）：**写原始字符串并不管用** ——
+真 Tomcat 11 会把 Content-Type **拆成 (type/subtype, charset) 两份存**、写出去时**重新拼**：
+
+```
+org/apache/catalina/connector/Response.java（11.0.24）setContentType(String)
+    String[] parsedType = MediaTypeCache.parse(type);
+    if (parsedType[1] == null) { coyoteResponse.setContentTypeNoCharset(parsedType[0]); }
+    else {                                   // 有 charset ⇒ **拆开存**
+        coyoteResponse.setContentTypeNoCharset(parsedType[0]);
+        coyoteResponse.setCharsetHolder(CharsetHolder.getInstance(parsedType[1]));
+    }
+org/apache/coyote/Http11OutputBuffer.writeHeaders()
+    headerBuffer.put(contentType); headerBuffer.put(SEMICOLON); headerBuffer.put(CHARSET);
+    ⇒ 线上恒为 type/subtype;charset=xxx（**分号后没有空格**）
+```
+
+⇒ ⇒ **本条签字的原始理由「不可逐字节复刻」是成立的，而且比当初写的更强** ——
+不是「Spring 的 `MediaType.toString()` 少个空格」，而是「**应用层根本拿不到那个空格**」
+（`setContentType` / `setHeader` / `addHeader` 三条路都汇到同一处归一化）。
+⇒ ⇒ ⇒ **撤销的性质因此变了**：**不是**「技术上变得可行了」，而是
+**「技术上仍然不可逐字节复刻，但我们选择向 Go 靠拢（加上 charset 参数）」** ⇒ 纯**用户决策**。
+
+#### 残余：那个空格（**已接受，不新签**）
+
+| | 实际响应头 |
+|---|---|
+| Go | `application/json; charset=utf-8`（**分号后有空格**） |
+| RAG（修后） | `application/json;charset=utf-8`（**分号后无空格**，Tomcat 归一化） |
+
+⇒ 按 RFC 9110，参数分隔符两旁的 **OWS 不显著** ⇒ 两者**语义相同**
+⇒ ⇒ **与 404 路径是同一类、仓库早已接受的做法**：
+`LikeApiRouterErrorRealTomcatTest` 对 404 的 `text/plain; charset=utf-8`
+就是**刻意解析后比对**（去空格），注释明写「比原始字符串会得到一个『必然红、且红了也不代表有错』的断言（已实测）」。
+⇒ ⇒ 本条**不需要新登记**（不是新的差异类别）。
+
+### 以下为 2026-10-24 的**原始签字记录**（留档，不删）
+
 
 - **Component**：hot-api 成功路径响应头 `Content-Type`
 - **Go 出处**：
@@ -280,6 +335,7 @@
 |---|---|
 | 状态 | 🟡 **待签字候选（未签字）** —— 属**框架限制**，不是「RAG 偷懒」 |
 | 组件 | `service/hot/hot-api`（**性质是 Tomcat 全体** ⇒ 10 个 api 模块都适用） |
+| **Go 出处** | **Go 标准库 `net/http/server.go`**（⚠️ **不在 `Sea-RideTheWind_golang` 项目树里** ⇒ 见 **PIT-GLOBAL-001** / **PIT-GLOBAL-006**）：<br>· **`:931`** `const DefaultMaxHeaderBytes = 1 << 20 // 1 MB` ⇒ **上限基数 = 1 MiB**；<br>· **`:941`** `return int64(s.maxHeaderBytes()) + 4096 // bufio slop` ⇒ **真实阈值 = 1 MiB + 4096**（**RAG 侧的 `1028KB` 就是照这条配的**）；<br>· **`:2040`** `const errorHeaders = "\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n"` ⇒ **`Content-Type` 是 `text/plain; charset=utf-8`**；<br>· **`:2049-2050`** `const publicErr = "431 Request Header Fields Too Large"` + `fmt.Fprintf(c.rwc, "HTTP/1.1 "+publicErr+errorHeaders+publicErr)` ⇒ **状态码 431 + body 就是这行字**。<br>**RAG 侧** Tomcat `org/apache/coyote/http11/Http11InputBuffer.java:768`（`fill`）抛 `IllegalArgumentException: Request header is too large` ⇒ 请求**没进 Servlet** ⇒ 状态码与错误体由 Tomcat 决定（`Constants.java` 无 431 预置常量 ⇒ 走 `Http11OutputBuffer` 的默认分支）。<br>⚠️ **阈值本身两侧已对齐**（翻转点**都是 1052536 字节，差 0**）⇒ 差异**只在拒绝时的呈现形态**（状态码 + `Content-Type` + body） |
 | 行为层 | **HTTP 状态码 + 错误响应体形状**（客户端可见）—— 仅限「请求行 > 1 MiB + 4 KiB」 |
 | 证据强度 | ✅ **双侧活体实测**（2026-10-25，二分出两侧翻转点） |
 

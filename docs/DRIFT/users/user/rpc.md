@@ -428,7 +428,7 @@ RAG 侧无对应物。记为 V-008 的姊妹项，见 §9 UNRESOLVED-USERRPC-004
 | 维度 | Go | Spring Boot | 结果 |
 |---|---|---|---|
 | wire 契约 | proto3 | 同（逐字节核对） | **EQUIVALENT** |
-| extra_info 参数绑定 | 驱动按 `text` 列写 | `ps.setString`（原 `ps.setObject(..., Types.OTHER)`） | ✅ **列类型已一致（V-003 已修，`ec33159`）**，两侧都按 text 写 |
+| extra_info 参数绑定 | 驱动按 `text` 列写 | `ps.setString`（原 `ps.setObject(..., Types.OTHER)`） | ✅ **列类型已一致（V-003 已修，`ec33159`）**，两侧都按 text 写<br>🔴 **2026-10-26 主干实测补记**：`user-rpc` 与 **`admin-rpc`（`c10f639`）两侧都已是 `JsonTextTypeHandler` ⇒ `ps.setString`** ⇒ **这一格在主干上成立**（`admin-rpc` 侧是 `users/admin` 域自己修的，**不是** global B10 `ff80214`）⇒ 详见 §7 V-003 的「2026-10-26 补记」 |
 | json 序列化 key 序 | `encoding/json` 对 `map[string]string` **按键排序** | Jackson `LinkedHashMap` **保持插入序**，再被 jsonb 按 (长度,字节) 重排 | **两端都不透传 key 序**（proto 是 map）⇒ wire 不可见 |
 | `create_time` 格式 | RFC3339 秒精度 | 同（`[T]` 3 条用例锁死） | **EQUIVALENT** |
 | `create_time` 时区标签 | 带偏移 | 恒 `Z` | **OBSERVABLE DIFFERENCE**（V-004） |
@@ -566,6 +566,26 @@ RAG 多一层 properties。**该条不重开。**
 **⚠️ 两处 CAST 是本次最容易漏的**：它们在 text 列上**能跑通**
 （`jsonb→text` 是 assignment cast），语句不报错、端到端用例**照样全绿**，
 但 PG 会顺手规范化一次 ⇒ **「能跑但语义错」，比编译不过更难发现**。
+
+#### 🔴 2026-10-26 补记：**代码侧（写路径参数绑定）的跨组件那一格 —— 主干上已成立**
+
+> **触发**：`users/admin` 域 owner 来信，说「主干上 `admin-rpc` 的 `extra_info` 仍按 jsonb 绑定（`JsonbTypeHandler` → `ps.setObject(…, Types.OTHER)`）⇒ DDL 是 text、绑定是 jsonb ⇒ 代码侧那一格不成立 ⇒ 建议我域加限定」。
+> ⇒ **本域独立核实后结论相反**：**主干上那一格已经成立**，且**不是** global 的 B10 带来的。
+
+| 事实 | 证据（2026-10-26 在主干上实测） |
+|---|---|
+| `admin-rpc` 的 `extra_info` 已是 **`JsonTextTypeHandler`** | `service/users/admin/admin-rpc/.../domain/UserEntity.java:141` `@TableField(value = "extra_info", typeHandler = …JsonTextTypeHandler.class)` |
+| 该 handler 走 **`ps.setString`**（text 的原生绑定） | `admin-rpc/.../mapper/JsonTextTypeHandler.java:86` `ps.setString(i, toJson(parameter))`（`:22` 的 javadoc 专门写了「不能用 jsonb 味的 `setObject(…, Types.OTHER)`」） |
+| `admin-rpc` 里 **`JsonbTypeHandler.java` 已不存在** | 该目录下只有 `JsonTextTypeHandler.java` ⇒ 全主干 grep `JsonbTypeHandler` 在 admin-rpc / user-rpc **零命中**（like-rpc / comment-rpc 里的同名类是**它们自己域的 jsonb 列**，与本条无关） |
+| 落地提交 = **`users/admin` 域自己的 `c10f639`** | `fix(users/admin): DDL 列类型对齐 Go + ARPC-002 wire 对齐 + 签字档补录`；`git merge-base --is-ancestor c10f639 do-my-own-gh` ⇒ **在主干** ✅ |
+| global 的 B10 `ff80214` | 在 **`align/global`**（`git merge-base --is-ancestor ff80214 do-my-own-gh` ⇒ **不在主干** ❌）；它对 admin-rpc 做的正是**同一件事**（typeHandler ⇒ `JsonTextTypeHandler` + 删 `JsonbTypeHandler.java`）⇒ ⇒ **对主干而言它已是冗余** |
+
+⇒ **结论**：**「两侧都按 text 写」在主干上成立** —— DDL 侧 `ec33159` + 代码侧（`user-rpc` 与 `admin-rpc` 各一）均已是 text 绑定。
+⇒ ⇒ **本条不需要加「待 global B10 合回」的限定**（加了反而是把一个**不成立**的 caveat 写进台账）。
+⇒ ⚠️ **合回安全性**（`align/global` 将来合回时）：admin 域已用 `git merge-tree --write-tree` 干跑 `3cb52ad` + `0516774` ⇒ **无冲突**，且合并树里引用已同步 ⇒ **不会编译失败**。
+⇒ 💡 **方法论（跨域回执纪律）**：「主干上不成立」这类断言**必须在主干上实测**才能写进台账 ——
+　本次若直接照抄，会把一条**已经闭环**的条目重新标成「未闭环」⇒ **比漏记更坏**（它会让人去重做一遍已完成的修复）。
+　⇒ 对照 **PIT-USERS-SHARED-020**（收方给的清单要逐个核实）与 global 侧的 **PIT-GLOBAL-045**（跨域回执要自己核）。
 
 #### 守门网（3 条，全部经变异验证）
 
@@ -852,7 +872,7 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 |---|---|---|---|---|
 | **V-001** | 证伪关闭（**无代码修复**）| `9ae121d` | `fix(users/user): 撤销 V-001 反向判定 —— Go 侧 NULL status 是 fail-open 而非 fail-closed` | 原判「Go 拒 / RAG 放」被真 PG 端到端**证伪**（两侧都是 `status=0` 登录成功）⇒ 关闭靠的是**证据**，不是改代码。⚠️ 同一 commit 另含 D-001 / D-002 的实现（⇒ 见 [`api.md` §8.2](./api.md)） |
 | **V-002** | 🔴 **未修**（被卡）| — | — | 改动**必须与 admin 域同一次提交**走完（`users_user.status` 可空性）⇒ 落点 `service/users/users-common` |
-| **V-003** | 代码修复 | `ec33159` | `align(users/user): 修 DRIFT-USERRPC-V-003（users_user.extra_info jsonb⇒text，与 Go 一致）` | 落点 `service/users/users-common/src/main/resources/db/01_create_user.sql` |
+| **V-003** | 代码修复 | `ec33159`（DDL + `user-rpc` 侧）<br>`c10f639`（**`admin-rpc` 侧**） | `align(users/user): 修 DRIFT-USERRPC-V-003（users_user.extra_info jsonb⇒text，与 Go 一致）`<br>`fix(users/admin): DDL 列类型对齐 Go + ARPC-002 wire 对齐 + 签字档补录` | 落点 `service/users/users-common/src/main/resources/db/01_create_user.sql`（DDL）+ 两个 rpc 的实体 typeHandler<br>⚠️ **2026-10-26 核实**：写路径绑定侧**跨组件那一格（`admin-rpc`）也已在主干上闭合**（`c10f639`，**`users/admin` 域自己的提交**）⇒ **不是** global 的 B10 `ff80214`（那个仍在 `align/global`、对主干已冗余）⇒ 详见 §7 V-003 的「2026-10-26 补记」 |
 | **V-004** | 代码修复 | ⚠️ **未具名** | — | 实际落在 2026-10-23 的批量导入提交 `4a63342`（主题「`add sth`」，**混合多条漂移**）⇒ 不可作条目级锚点 |
 | **V-005** | 证伪关闭（protobuf3 空 map 在 wire 上不可表达）| ⚠️ **未具名** | — | 同上；关闭依据是**协议层事实**，非代码改动 |
 | **V-006** | 证伪关闭（真 PG 实证：雪花 id 永不进 wire）| `fa2de52` | `align(users/user): user-rpc 关闭 V-006、修 V-008（并揭出第二个伪出处）` | 同 commit 兼销 V-008 ⇒ **一条 commit 销两条**（工具若按「一 commit 一行」判会漏） |
