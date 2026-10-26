@@ -180,14 +180,26 @@ grpc:
     # Java 侧 devh starter 默认即开启 reflection，此处不额外配置。
   client:
     # 对应 Go MessageRpc.Etcd.Key: message.rpc → 服务发现名 message-rpc
+    # ⚠️ **下面两个地址必须是三斜杠 `discovery:///<service-name>`**（2026-10-26 真启动实测修正）。
+    #    devh 的 `net.devh.boot.grpc.client.nameresolver.DiscoveryClientResolverFactory#newNameResolver`
+    #    判定的是 `uri.getPath()`：**必须非空、长度 > 1、且以 "/" 开头**。
+    #      discovery:///message-rpc → authority="" 、path="/message-rpc"  ✅
+    #      discovery://message-rpc  → authority="message-rpc"、path=""     ❌ 长度 0，直接抛
+    #        IllegalArgumentException: Incorrectly formatted target uri;
+    #        expected: 'discovery:[//]/<service-name>'; but was 'discovery://message-rpc'
+    #    ⇒ 校验发生在任何网络调用之前 ⇒ **与 Nacos 在不在线无关**
+    #    ⇒ `grpcClientBeanPostProcessor` 先炸 ⇒ **连 Flyway 都跑不到** ⇒ 真 fat jar 起不来。
+    #    ⚠️ 之所以没人发现：**测试把地址覆盖成了 static://127.0.0.1:1**，
+    #    生产地址从未被任何测试跑过 ⇒「跑绿」与「能启动」无关。
+    #    守门：CommentRpcProductionAddressTest（直接调 devh 真正的消费点）。
     message-rpc:
-      address: discovery://message-rpc
+      address: discovery:///message-rpc
       enable-keep-alive: true
       keep-alive-time: 30s
       negotiation-type: plaintext
     # 对应 Go ArticleRpc.Etcd.Key: article.rpc
     article-rpc:
-      address: discovery://article-rpc
+      address: discovery:///article-rpc
       enable-keep-alive: true
       keep-alive-time: 30s
       negotiation-type: plaintext

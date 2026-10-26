@@ -141,3 +141,84 @@ service/message/message-rpc/target/message-rpc-0.0.1-SNAPSHOT.jar | 69,793,492 B
 - **§3.3.2**：断言里若出现「Go: …」措辞，**必须**带 `文件:行号`；否则改成中性描述。
 - **不要 `git add -A`** ⇒ 逐个 `git add` 白名单里的文件。
 - ⚠️ **PIT-GLOBAL-019**：改了上游模块的源码 ⇒ 必须把上游**拉进同一 reactor**（`-am`）。
+
+---
+
+## 七、✅ 完成态（2026-10-26 · 由整合者收尾）
+
+> ⚠️ **本 lane 的子进程在收尾阶段被取消**（`runtime-shutdown`）⇒
+> **生产改动与两个守门类已完整落地**（未提交）⇒ **由整合者接手**：跑守门 + 做 M1/M2/M3 三条变异 + 补写本节 + 提交。
+
+### 7.1 缺陷与修法
+
+| # | 缺陷 | 修法 | 证据 |
+|---|---|---|---|
+| ① | 🔴 `message-rpc` 的 2 处 `discovery://user-rpc` / `discovery://admin-rpc` **两斜杠** | → `discovery:///user-rpc` / `discovery:///admin-rpc`（**服务名一个字没改**） | `service/message/message-rpc/src/main/resources/application.yml:164,171` |
+| ② | 🔴 `task-rpc` 的 `io.grpc:grpc-inprocess` 是 `<scope>test</scope>` ⇒ 运行时 classpath 上整个消失 | 去掉 `<scope>test</scope>`（**保留** `<version>${grpc.version}</version>`） | `service/task/task-rpc/pom.xml` |
+| ③ | 🔴 `task-rpc` 的 jar **没有 `Main-Class`** ⇒ `java -jar` 起不了 | `<build><plugins>` 里加 `spring-boot-maven-plugin`（**不写 `<mainClass>`** ⇒ 自动探测 `TaskRpcApplication`），**保留** surefire 段 | `service/task/task-rpc/pom.xml` |
+
+**修前 / 修后实测（整合者独立复核）**：
+
+```
+task-rpc 修前： 83,827 B · 零个 Main-Class
+task-rpc 修后：100,871,012 B
+        Main-Class: org.springframework.boot.loader.launch.JarLauncher
+        Start-Class: com.rag.task.task.rpc.TaskRpcApplication
+        BOOT-INF/lib/grpc-inprocess-1.63.0.jar   ← 修前不在
+```
+
+### 7.2 🟢 一个**关键区分**（L13 子进程自己查出来的，比任务书的假设更准）
+
+任务书假设 `task-rpc` 与 `article-rpc`/`like-rpc` 是**同款**缺陷（client 侧 `InProcessChannelFactory` 链接失败）。
+**L13 实测发现两者消费点不同**：
+
+- `article-rpc` / `like-rpc` ⇒ 有 **client** starter ⇒ 消费点是 devh client 的
+  `InProcessChannelFactory` ⇒ 硬引用 `io.grpc.inprocess.InProcessChannelBuilder`
+  ⇒ 报 `NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder`
+- `task-rpc` ⇒ **只有 server starter，没有 client starter** ⇒ 消费点是
+  `GrpcServerFactoryAutoConfiguration` 的 `InProcessGrpcServerFactory`
+  ⇒ 硬引用 `io.grpc.inprocess.InProcessServerBuilder`（`javap` 实测 4 处引用）
+  ⇒ 报 `NoClassDefFoundError: io/grpc/inprocess/InProcessServerBuilder`
+
+⇒ **根因相同（Maven「最近者优先」），但报的类名与消费点不同** ⇒ 台账与注释必须分开写，
+**不能照抄 client 侧的类名**。⇒ L12 与 L13 的 pom 注释各自独立取证，**没有互相照抄**。
+
+### 7.3 🔴 守门（2 个类 / 8 条用例）
+
+| 类 | 阶段 | 断言 |
+|---|---|---|
+| `MessageRpcProductionAddressTest`（4 条） | **test** | ① `grpc.client.user-rpc.address` 必须是 `discovery:///user-rpc` ② `grpc.client.admin-rpc.address` 必须是 `discovery:///admin-rpc` ③ 服务名 == `path.substring(1)` ④ **真的调 devh 的 `newNameResolver`**：生产地址不抛 + 两斜杠**必须**抛 `IllegalArgumentException`（⇒ 证明守门非恒真）⑤ 🟢 **额外一条** `noTwoSlashDiscoveryAddressRemains` —— 扫全树防**新增**两斜杠 |
+| `TaskRpcFatJarArtifactGateIT`（4 条） | **verify**（package 之后） | ① `Main-Class` == `org.springframework.boot.loader.launch.JarLauncher` ② `Start-Class` == `com.rag.task.task.rpc.TaskRpcApplication` ③ `BOOT-INF/lib/` 里有 `grpc-inprocess` ④ 体积 ≫ library jar |
+
+⚠️ **产物层守门绑在 `verify`**：surefire 的 `test` 阶段跑在 `package` **之前** ⇒ 那一刻 jar 还不存在。
+⇒ pom 里加**第二个 surefire execution**（`<id>artifact-gate</id>` · `<phase>verify</phase>`）
+⇒ 报告仍落在 `target/surefire-reports/`（与本仓判定口径一致，PIT-GLOBAL-021）。
+⚠️ **failsafe 3.5.6 不在本地 m2**（只有 3.5.4）⇒ **离线不可用** ⇒ 改用第二个 surefire execution。
+
+### 7.4 🔴 变异（3 条，全部红在目标断言上 · 整合者亲跑）
+
+| 变异 | 预期 | 实际 |
+|---|---|---|
+| **M1** message-rpc 的 `user-rpc` 地址改回两斜杠 | `MessageRpcProductionAddressTest` 红 | ✅ **4/4 全红**（含 `noTwoSlashDiscoveryAddressRemains`）· maven EXIT=1 |
+| **M2** task-rpc 的 `grpc-inprocess` 加回 `<scope>test</scope>` | 产物守门的「`BOOT-INF/lib/` 有 grpc-inprocess」红 | ✅ **红在目标断言**（其余 3 条绿）· maven EXIT=1 ⇒ 独立确认：变异态产物里 `grpc-inprocess` **确实从 `BOOT-INF/lib/` 消失** |
+| **M3** task-rpc 的 pom 去掉 `spring-boot-maven-plugin` | 产物守门的「`Main-Class`」红 | ✅ **4/4 全红**（`Main-Class` / `Start-Class` / 体积 / grpc-inprocess 四条一起红）· maven EXIT=1 ⇒ 独立确认：产物 85,903 B 且**无 `Main-Class`** |
+
+⇒ **还原后**：message-rpc 守门 4/4 绿 · task-rpc 守门 4/4 绿 · 产物 100,871,012 B。
+
+### 7.5 🟥 整合者发现并修的一处**守门自身**的隐患（与 L14 同族）
+
+L13 子进程在写的过程中**自己发现**了这个问题并修了（值得记录）：
+**守门里断言的字符串，可能同时出现在被测文件的注释里** ⇒ 断言会**恒真**。
+⇒ 它的 `noTwoSlashDiscoveryAddressRemains` 因此改成了**先剥 YAML 注释**再扫。
+
+⚠️ **同类隐患在 L14 也真实发生了**（`pomMustDeclareSpringBootMavenPlugin` 没剥 XML 注释
+⇒ M1 变异时它**居然是绿的**）⇒ **整合者在 L14 修掉了**（见 `L14-rpcboot-hot.md` §8.3.1）。
+⇒ 教训 ⇒ `docs/Pitfalls/global/`（**PIT-GLOBAL-031**）。
+
+### 7.6 交整合者
+
+1. ✅ `check-jar-executable.sh` 纳入 rpc —— **L15 已做**（合回 `ae53f56`）⇒ 本 lane 修完后该脚本对 task-rpc 转绿。
+2. ✅ baseline 里的 10 条清理 —— **待整合者做**（依赖 L12/L13 合回）。
+3. ⚠️ `TaskRpcFatJarArtifactGateIT` 绑在 `verify` 阶段 ⇒ **只跑 `mvn test` 的 CI 不会执行它** ⇒ CI 需跑 `verify`。
+4. ⚠️ **进程级真启动守门未做**（按整合者的收敛指令放弃）⇒ L13 子进程**已实测过**修好的 task-rpc fat jar
+   **能起来**（Kafka group 已加入 ⇒ 上下文真的启动了）⇒ 该形态**已被人工实测覆盖**，但**没有自动守门** ⇒ 登记为缺口。

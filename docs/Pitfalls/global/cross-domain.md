@@ -1036,3 +1036,51 @@ task-rpc   |  83,827 B | <<无 Main-Class>>   ← L11 报了
 - 2026-10-26 第二十八轮 L14（发现 hot-rpc 同款缺陷）+ L15（补上守门缺口）；
 - 关联：`docs/DRIFT/global/lanes/L14-rpcboot-hot.md` §二 · [`L15-rpcboot-tools.md`](../../DRIFT/global/lanes/L15-rpcboot-tools.md) §二；
 - 同族：**PIT-GLOBAL-029**（守门自身的缺陷 ⇒ 恒红 / 覆盖不全）。
+
+---
+
+## PIT-GLOBAL-031 🔴 **守门断言的字符串可能同时出现在被测文件的注释里 ⇒ 断言恒真 ⇒ 变异测不出来**
+
+**症状**（L14）：`HotRpcJarExecutableWiringTest.pomMustDeclareSpringBootMavenPlugin`
+断言 pom 里有 `spring-boot-maven-plugin`。
+**M1 变异把真正的 plugin 块删掉后，这条断言居然是绿的。**
+
+**根因**：该 pom 的**说明性注释里就写着**「spring-boot-maven-plugin」这个字符串
+⇒ 删掉真声明，**注释里的字面量照样让 `contains()` 通过** ⇒ 这条守门**恒真**。
+
+⚠️ **最讽刺的地方**：该测试类自己的 javadoc 里**已经预警过**这件事
+（「注释里的字面量会打败结构断言」）⇒ **预警写对了，执行没做全** ——
+只有**两条**断言做了剥注释，**漏了**这条。
+
+**另一个同族实例**（L13）：`noTwoSlashDiscoveryAddressRemains` 要扫 yaml 找两斜杠地址，
+而**修法注释里**恰好写着 `discovery://user-rpc` 这个字面量 ⇒ 同样会误报/恒真
+⇒ 改法：**先剥 YAML 注释**再扫。
+
+### 修法
+
+```java
+private static String stripXmlComments(String xml) {
+    return xml.replaceAll("(?s)<!--.*?-->", "");   // XML
+}
+// YAML：逐行剥掉 # 之后的内容（注意别误伤 URL 里的 # 与引号内的 #）
+```
+
+⇒ 复跑 M1：那条断言**也红了** ⇒ 守门不再恒真；还原后全绿。
+
+### 教训
+
+**「字符串包含」类断言面对「同一字符串也出现在注释里」的文件时，必须先剥注释。**
+⇒ 更一般的说法：**守门的判据必须与被测对象「不是同一层的东西」** ——
+判据在**结构**上，噪声在**文本**上 ⇒ 拿文本判结构 ⇒ 必然被文本里的同名字符串欺骗。
+
+⚠️ **推论**：凡守门断言的字符串**恰好也是修复说明里会写的东西**（类名、配置项名、错误消息）⇒
+**必须假定它会出现在注释里** ⇒ 剥注释不是「加固」，是**必要前置**。
+
+⇒ 另一条同源纪律：**变异测试是发现「恒真」的唯一手段** ——
+本条缺陷在守门全绿时**完全看不出来**（绿得毫无破绽），只有把它变坏才知道它根本没在守。
+
+### 出处
+
+- 2026-10-26 第二十八轮 L14（整合者修）+ L13（子进程自己发现并修了同族问题）；
+- 关联：`docs/DRIFT/global/lanes/L14-rpcboot-hot.md` §8.3.1 · [`L13-rpcboot-message-task.md`](../../DRIFT/global/lanes/L13-rpcboot-message-task.md) §7.5；
+- 同族：**PIT-GLOBAL-026**（断言 `get() == sdk` 恒红）、**PIT-GLOBAL-030**（守门覆盖不全 ⇒ 手工盘点必漏）。

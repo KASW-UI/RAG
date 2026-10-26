@@ -105,15 +105,28 @@ grpc:
   # ============== gRPC client ==============
   # 对应 Go SecurityConf.Etcd.Key: security.rpc / MessageRpc.Etcd.Key: message.rpc
   # Java 端用 service discovery 解析，与 Go 等价寻址。
+  # ⚠️ **下面两个地址必须是三斜杠 `discovery:///<service-name>`**（2026-10-26 真启动实测修正）。
+  #    devh 的 `net.devh.boot.grpc.client.nameresolver.DiscoveryClientResolverFactory#newNameResolver`
+  #    判定的是 `uri.getPath()`：**必须非空、长度 > 1、且以 "/" 开头**。
+  #      discovery:///security-rpc → authority="" 、path="/security-rpc"  ✅
+  #      discovery://security-rpc  → authority="security-rpc"、path=""     ❌ 长度 0，直接抛
+  #        IllegalArgumentException: Incorrectly formatted target uri;
+  #        expected: 'discovery:[//]/<service-name>'; but was 'discovery://security-rpc'
+  #    ⇒ 两斜杠写法**不是「少写一个斜杠」**，它把服务名解析成了 authority、path 留空
+  #    ⇒ 校验发生在任何网络调用之前 ⇒ **与 Nacos 在不在线无关**
+  #    ⇒ `grpcClientBeanPostProcessor` 先炸 ⇒ **连 Flyway 都跑不到** ⇒ 真 fat jar 起不来。
+  #    ⚠️ 之所以没人发现：**测试把地址覆盖成了 static://127.0.0.1:1**，
+  #    生产地址从未被任何测试跑过 ⇒「跑绿」与「能启动」无关。
+  #    守门：ArticleRpcProductionAddressTest（直接调 devh 真正的消费点）。
   client:
     security-rpc:
-      address: discovery://security-rpc
+      address: discovery:///security-rpc
       enable-keep-alive: true
       keep-alive-time: 30s
       # ⚠️ 对应 Go SecurityConf.Timeout: 10000（yaml 里显式配了，不是框架默认值）
       deadline: 10s
     message-rpc:
-      address: discovery://message-rpc
+      address: discovery:///message-rpc
       enable-keep-alive: true
       keep-alive-time: 30s
       # ⚠️ Go 的 MessageRpc **没有**配 Timeout ⇒ 走 go-zero 的默认值 **2000ms（2s）**。
