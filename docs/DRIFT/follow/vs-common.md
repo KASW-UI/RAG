@@ -70,7 +70,18 @@
 
 ## 4. 需转派 **G4**（`align/g4-service-common`）的（**本域只登记：现象 + 证据 + 建议修法**）
 
-- 🔴 `DRIFT-FOLLOW-008` ⇒ 落点 `service/common` ⇒ **派单 **G4****；⚠️ **与 users 域 `DRIFT-USERAPI-013` 同族** ⇒ 两条**一起**对账，别各修各的
+> ⚠️ **本节 = 正式轨（派单单据）**。**实时轨 = `session send` 给 G4 会话**（两棵工作树合并前互相看不见对方的文件 ⇒ **两轨都要有**）。
+> ⚠️ **派单前置（2026-10-27 已完成）**：Go 侧 `文件:行号` **已回冻结真源核过存在性**（不是台账快照）。
+
+| # | 编号 | 现象 | Go 侧 `文件:行号`（**已核 ✅**） | RAG 侧现状 | 证据强度 | 建议修法（**两侧都应是 Y**） | 影响面 | 阻塞本波？ |
+|---|---|---|---|---|---|---|---|---|
+| **1** | `DRIFT-FOLLOW-008`（**与 users 侧 `DRIFT-USERAPI-013` 同族 ⇒ 两条一起对账，别各修各的**） | **MaxConns 闸门**：Go **每路由一个** latch（按 `route.Path` 建闸）vs RAG **全局一个** | `rest/handler/maxconnshandler.go:12` —— **已核 ✅**：逐字 = `func MaxConnsHandler(n int) func(http.Handler) http.Handler` | `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java`（**全局单闸门**） | **L1 源码逐行对照**（域台账原文）＋ 共享层台账 `alignment-2026-10-23.md` §十二·二 **T-2 / T-5**（两条指同一处） | 两侧都应是 **Y** = 「**每路由一个 latch**（按注册期 `route.Path` 模板建闸）」⇒ ⚠️ **404 取不到模板 ⇒ 不得用 raw URI 兜底** | `service/common/protection/` ⇒ 编译面 16 组件 | 🟡 **不阻塞**（与 users 侧 `DRIFT-USERAPI-013` 同批） |
+
+> ⚠️ **派单纪律**：① **缺项不进排期** ② **编号必须带全前缀** ③ **同族 ≠ 同一条**（本条与 users 侧那条编号不同）
+> ④ **回执要求 4 项**：`git rev-parse HEAD` + 改动文件清单（逐个 `文件:行号`）+ 触及哪几条 A 轴 ＋ 对应 Go 出处 + 回归口径与结果
+> ⇒ **只给 hash ⇒ G1 只能盲 merge**。
+>
+> 📌 **本域的两条新缺陷不派 G4**：`DRIFT-G1-001`（`follow-rpc` 的 group 写死）· `DRIFT-G1-002`（`follow-api` 缺 `immediate-connect-timeout`）⇒ 落点全在 `service/follow/**` = G1 写权 ⇒ **域侧自修**（见 §7）。
 
 ## 5. 交付物清单
 
