@@ -218,7 +218,7 @@ class FavoriteSqlStatementParityTest {
         // Go: get_favorite_folders_logic.go:45-60 ⇒ SELECT favorite_folder WHERE user_id ORDER BY create_time DESC
         cs.add(new SqlCase("r01_list_folders_ok",
                 (ids, s) -> s.getFavoriteFolders(GetFavoriteFoldersReq.newBuilder().setUserId(1001).build())));
-        // Go: 同上 ⇒ 用户不存在 ⇒ 空集（仍是一次 SELECT）
+        // Go: service/favorite/rpc/internal/logic/get_favorite_folders_logic.go:45-60 ⇒ 用户不存在 ⇒ 空集（仍是一次 SELECT）
         cs.add(new SqlCase("r02_list_folders_empty",
                 (ids, s) -> s.getFavoriteFolders(GetFavoriteFoldersReq.newBuilder().setUserId(4242).build())));
         // Go: get_favorites_by_folder_logic.go:60-88 ⇒ SELECT favorite_item WHERE folder_id ORDER BY create_time DESC
@@ -293,7 +293,7 @@ class FavoriteSqlStatementParityTest {
         cs.add(new SqlCase("w09_delete_folder_empty_ok",
                 (ids, s) -> s.deleteFavoriteFolder(DeleteFavoriteFolderReq.newBuilder()
                         .setUserId(1001).setFolderId(9002).build())));
-        // Go: delete_favorite_folder_logic.go:336-378 ⇒ 种子行的级联（legacy ⇒ 不产事件）
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:336-378 ⇒ 种子行的级联（legacy ⇒ 不产事件）
         cs.add(new SqlCase("w10_delete_folder_cascade_ok",
                 (ids, s) -> s.deleteFavoriteFolder(DeleteFavoriteFolderReq.newBuilder()
                         .setUserId(2002).setFolderId(9003).build())));
@@ -321,7 +321,7 @@ class FavoriteSqlStatementParityTest {
                         .setUserId(1001).build()),
                 FavoriteSqlStatementParityTest::renderFolderList));
 
-        // Go: delete_favorite_folder_logic.go:336-378 ⇒ 本次建的夹 ⇒ 里面还剩一条**带事实**的条目
+        // Go: service/favorite/rpc/internal/model/favorite_fact.go:336-378 ⇒ 本次建的夹 ⇒ 里面还剩一条**带事实**的条目
         //   ⇒ 逐条 retract（INSERT outbox）→ DELETE items → DELETE folder 的**完整**路径
         cs.add(new SqlCase("w11_delete_created_folder_ok",
                 (ids, s) -> s.deleteFavoriteFolder(DeleteFavoriteFolderReq.newBuilder()

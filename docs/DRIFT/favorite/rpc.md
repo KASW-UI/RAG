@@ -36,9 +36,11 @@
 | 第十六轮 | ✅ **U8 销账 —— create 成功路径双侧活体对拍**（§25）—— gRPC 契约探针加**第二轮**（上游**在场**：探针自带**最小 user-rpc/article-rpc 桩**当**两侧共同上游**）⇒ **15 case 全 SAME**（0 OBS / 0 SAME_CODE）⇒ `ensureUserExists` **五条分支**首次拿到活体证据 + **落库等价性**（`favorite_folder`/`favorite_item`/`favorite_fact_outbox` 三张表投影逐字段相同 ⇒ 「公开修订冻结」被实测执行到）<br>🔴 **1 条注释断言被实测证伪并修正**（`getStatus()!=0` 的后果是 **fail-open 放行**，不是原文写的「误判封禁 5005」）⇒ **产品代码行为零改动**<br>🆕 坑档 **PIT-FAV-RPC-023/024/025**（端口撞号 / 种子显式 id 毒化序列 / bash 3.2 引号）|
 | 第十四轮收尾 | 🔴 **探针健壮性加固**（§23）—— 消除「**环境红**」假红：4 个起 PG 的探针**统一**改成 **探 TCP + 180s + 重建重试 + 容器退出即放弃**；新增守门网 `tools/probe-gate/favorite/`（含变异验证）；**零行为改动**、**0 条新漂移** |
 | 第十七轮 | 🔴🔴 **生产启动形态**（§26）—— `global` 移交的「**生产 jar 起不来**」查清并修完：**3 个缺陷**（① gRPC client 地址**两斜杠** ⇒ 启动期抛 `IllegalArgumentException`；② `web-application-type` 缺失 ⇒ Boot 判定 SERVLET 而无容器 ⇒ **启动即死**；③ gRPC **reflection 暴露面**漏关）⇒ 新增 **3 个守门测试类 / 14 例**（全部读**生产文件**，不走 `@SpringBootTest` 覆盖）+ **变异验证 4 条**全转红 + 🆕 新探针 `tools/prod-startup-probe/favorite/`（**A/B/C** 真 fat jar 活体对拍 ⇒ EXIT=0）<br>🔴 **翻案**：第十四轮 §22.3 的「启动阻塞 #1 已修」是**半修**—— 修复只落在**探针启动参数**里，**生产 yaml 一行都没改** ⇒ 缺陷活到了发布那一刻 ⇒ 坑档 **PIT-FAV-RPC-026**<br>🔴 **新登记 U9**（部署形态类 · 待拍板）：Go 生产形态的 **16062** DevServer 那个面，RAG 侧没有 |
-| 第十八轮 | 🔴 **借 `global` 的新规则跑本域台账 ⇒ 当场抓出 3 处**（§27）—— 全程**只读**借 `global` 的跨域共享复核器（`tools/check-ledger-selfcheck.py`，**global 单写权**，拷到 `/tmp` 后只调它的 L1/L4 两层）⇒ 抓出 **1 处行号真错**（`core/service/serviceconf.go:83-90` ⇒ 该文件共 89 行 ⇒ 应为 `:83-89`）+ **2 处路径写法不够精确**（`schema/naming.go` / `metrics.go` ⇒ 机器按 basename 核不动）<br>⇒ **不登记候选等别人扩**：把这两层**搬进本域自己的门禁**（`tools/ledger-lint/favorite/check-ledger-selfcheck.py` 新增 **⑤ 仓内路径存在性** + **⑥ Go 侧 `file.go:NN` 可解析** + `--mutation-test`）⇒ **门禁级 0 条**<br>⚠️ **工具第一版的 8 条门禁里 5 条是工具自己的 bug**（缺 Go 标准库 / 缺 N5 去噪 / key 结构写错 …）⇒ 坑档 **PIT-FAV-RPC-027**（**借来的工具只能当探针，不能当门禁**）<br>⚠️ 残留 **57 条「跨库/同名歧义」**（提示级 · 已量化 · 本轮不批量改） |
+| 第十八轮 | 🔴 **借 `global` 的新规则跑本域台账 ⇒ 当场抓出 3 处**（§27）—— 全程**只读**借 `global` 的跨域共享复核器（`tools/check-ledger-selfcheck.py`，**global 单写权**，拷到 `/tmp` 后只调它的 L1/L4 两层）⇒ 抓出 **1 处行号真错**（`core/service/serviceconf.go` 的 **83-90 行** ⇒ 该文件共 89 行 ⇒ 应为 `:83-89`）+ **2 处路径写法不够精确**（`schema/naming.go` / `metrics.go` ⇒ 机器按 basename 核不动）<br>⇒ **不登记候选等别人扩**：把这两层**搬进本域自己的门禁**（`tools/ledger-lint/favorite/check-ledger-selfcheck.py` 新增 **⑤ 仓内路径存在性** + **⑥ Go 侧 `file.go:NN` 可解析** + `--mutation-test`）⇒ **门禁级 0 条**<br>⚠️ **工具第一版的 8 条门禁里 5 条是工具自己的 bug**（缺 Go 标准库 / 缺 N5 去噪 / key 结构写错 …）⇒ 坑档 **PIT-FAV-RPC-027**（**借来的工具只能当探针，不能当门禁**）<br>⚠️ 残留 **57 条「跨库/同名歧义」**（提示级 · 已量化 · 本轮不批量改）<br>🔴 **第二十一轮补正**：上面那句里的「83-90 行」是**当时写错的行号**（本轮订正）⇒ 写成「N 行」而**不是** `file:NN` ⇒ 否则任何 `file:NN` 扫描器都会把它当**活指针**判成悬空（`global` 第三十四轮修好行级去噪后，**它就会浮出来**）⇒ 同批修掉本域另外两处同源写法（`rpc.md` §27.2 表的**错误列** + `PIT-FAV-RPC-027` 的「真缺陷」行） |
 | 第十九轮 | 🔴 **共享层 `DeadlineQueryTimeoutInjector` 改动的跨域验证**（§28 · `global` 第三十三轮）—— 两处行为变化：① **毫秒精度**（`setQueryTimeoutMs`）② **deadline 已过 ⇒ 不执行 SQL**（抛 57014 ⇒ 事务回滚）<br>✅ **favorite 域零条依赖旧行为**（权威读面的 deadline 是**紧贴调用新绑**的 3s ⇒ 新分支走不到；毫秒精度 ⇒ 取消时刻**差 δ（毫秒级）** ⇒ 且 favorite **没有**「SQL 前先烧掉大部分预算」的 handler ⇒ 「最坏 ≈999ms」窗口**不成立**）⇒ 叠 global 实现跑：**全量 177/99/94/29 全绿** + **三个探针全 EXIT=0**（authority-live 21 case / api 32 case / grpc-contract 36+15 case，冻结值一条没动）⇒ **零红、零需改动**<br>🔴 **给 global 的落地提醒**：主文件与测试改动**必须同一次提交**（只提主文件 ⇒ `service/common` 自己的旧行为断言红 1 例 ⇒ 仓库是红的）⇒ 同型 **PIT-FAV-RPC-026**<br>🔴 **纠正一条过期事实**：「favorite 台账 0 字节 / 从未对照」**不成立**（12 份 ≈ 430 KB · 19 轮对照）⇒ 出处是 `AGENTS.md:32` 的 2026-10-23 首轮快照 ⇒ 但**「SQL 语句级」双侧对拍确实未做**（DDL / 错误码 / 事务语义三层已闭）⇒ 这条我**认** |
 | 第二十轮 | 🔴🔴 **SQL 语句层**双侧活体对拍（§29）—— 补上 favorite 域**四层验证的最后一层**（DDL / 错误码契约 / 事务语义 **三层早已各自闭**，**语句层没做**）⇒ 🆕 探针 `tools/sql-statement-probe/favorite/`：**PG 服务端日志**（`log_statement=all`）**零侵入**取证（Go 侧 `PGAPPNAME=go_side` / RAG 侧 JDBC `ApplicationName=rag_side` / 驱动自己 `probe_marker`）+ **marker 协议**逐用例切片 + **语义签名**比对（不是比 SQL 文本）+ **变异自检 5/5**（含阴性对照）<br>🔴 **抓出 3 处 L1 可观察的漂移**：① `favorite_folder` INSERT **不绑** `create_time`/`update_time` ⇒ NULL ⇒ L1 时间戳 = **0**；② `favorite_item` INSERT **不绑** `create_time` ⇒ NULL ⇒ L1 = **0**；③ 改名**不推进** `update_time` ⇒ L1 `updated_at` 不变（+1 处低影响：`favorite_fact_outbox` 两个投递列 `NULL` vs `''`）⇒ **23 用例 · 20 个用例的语句类别序列两侧逐条一致**，差异**全部集中在「写集合」一维**<br>🔴 **翻案**：§0「域内『未知项』归零」是**提前收口** ⇒ 每一层的**排除项**都会变成下一层的缝隙 ⇒ 坑档 **PIT-FAV-RPC-028** |
+| 第二十一轮 | 🔴 **共享复核器改进后的跨域复跑**（§30）—— `global` 第三十四轮修好我提的 4 条工具缺陷（去噪**行级化** / `go.mod` 权威化 / 两条精确定位通道）⇒ 🔴 **去噪行级化后本域台账有 155 条此前被淹没的引用第一次真被检查** ⇒ 抓出 **1 条 FAIL**：`core/service/serviceconf.go` 的 83-90 行 —— **正是本域第十八轮「抓出并修好」的那一条**，但它在台账里出现 **3 次**、当时**只改了 1 次**（表格的修正列）⇒ **错误列 / 叙述行 / 坑档**三处漏改 ⇒ 本轮**一次改完**（改成「N 行」写法 ⇒ 记录不丢、也不再被任何 `file:NN` 扫描器当活指针）⇒ 改后 **L1 = 0 · L4 = 0** ✅<br>✅ 顺带确认**本域门禁不落后**（②③④ 三条通道本域第十八轮就自己实现了）；🆕 §29 新写的锚点**全部用 `module@version/...` 精确写法** ⇒ 在他们修好的工具里**不落进跨库歧义清单** ⇒ 精确写法应成为本域新标准（存量 62 条歧义仍为提示级，本轮不批量改）<br>🆕 坑档 **PIT-FAV-RPC-029**：「**修一处 ≠ 修完**」（同一处锚点在台账里有 N 个副本）|
+| 第二十二轮 | 🔴 **提交前把本域门禁全跑一遍 ⇒ 抓出第二十轮遗留的 2 处错锚点**（§31）—— 本来只是例行复跑 ⇒ `assertion-audit` **EXIT=1 · 门禁级 2 条**：`FavoriteSqlStatementParityTest.java:296/:324` 的 Go 锚点写成 **logic 层**的 `delete_favorite_folder_logic.go` 的 **336-378 行**，但该文件**只有 96 行** ⇒ 实际指的是 **model 层**的 `service/favorite/rpc/internal/model/favorite_fact.go:336-378`（`DeleteFolderCascade`）⇒ **断言语义对、锚点指错文件** ⇒ 「**证据是假的**」（比没写锚点更危险）<br>⇒ 顺手做**全量语义核对**（门禁只判「行号越界」，抓不到「指错文件但行号在范围内」）：该测试文件**全部 20 个 Go 锚点**逐条回真源核对 ⇒ **18 条正确** · **2 条错锚点已修** · **1 条 I1**（「Go: 同上」无法定位）已展开成真锚点<br>✅ 另核掉 2 条 favorite-rpc 的 I3 ⇒ **全是工具误报**（一个因 excerpt 未从锚点起始行对齐、一个因 excerpt 跨两段）⇒ 锚点本身逐行正确<br>🔴 **根因**：第二十轮**新写了带 20 个 Go 锚点的文件**却**没跑管它的那个门禁** ⇒ 漏检**跨了两轮** ⇒ 坑档 **PIT-FAV-RPC-030**<br>✅ **SQL 探针复跑基线完全一致**（记录 855 / 语句 594 / 语义差异 10 / L1 响应不同 3 例）⇒ `out/` 归一化后**逐字节一致** ⇒ 注释改动**零行为影响** |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -2250,7 +2252,7 @@ Nacos 故意指向 `127.0.0.1:1` ⇒ 顺便证明「**注册中心不在也能�
 |---|---|---|---|---|
 | 1 | `docs/Intentional_Deviations/favorite/rpc.md:122` / `:128` | `schema/naming.go:89-90` | 真源与全部第三方库里**按 basename 都找不到** ⇒ 机器判 MISSING | `gorm.io/gorm@v1.31.1/schema/naming.go:89-90`（**内容已核**：该处是 `IndexName()` ⇒ `formatName("idx", table, …)` ⇒ `idx_<table>_<column>` ✅） |
 | 2 | `docs/Intentional_Deviations/favorite/rpc.md:70` | `metrics.go:22-27` | **跨库同名歧义**（go-redis / go-zero / 真源 各有一个 `metrics.go`）⇒ 机器无法判归属 | `service/favorite/rpc/internal/metrics/metrics.go:22-27`（**内容已核**：正是 `FavoriteRequestSecondsCounterMetric` 的 `prometheus.NewCounterVec` 定义 ✅） |
-| 3 | `docs/DRIFT/favorite/rpc.md:637` | `core/service/serviceconf.go:83-90` | 🔴 **行号越界**（go-zero v1.10.2 该文件**共 89 行**）⇒ `initMode()` 的真实范围是 **83-89** | `core/service/serviceconf.go:83-89` |
+| 3 | `docs/DRIFT/favorite/rpc.md:637` | `core/service/serviceconf.go` 的 **83-90 行**（🔴 行号越界） | go-zero v1.10.2 该文件**共 89 行** ⇒ `initMode()` 的真实范围是 **83-89** | `core/service/serviceconf.go:83-89` |
 
 ⇒ **第 3 条是唯一一处「数字真的错了」**（前两条是**写法不够精确**）。
 
@@ -2702,3 +2704,156 @@ payload, status, retry_count, created_at, updated_at) VALUES ($1,…,$6)` ⇒ �
 > ⇒ 分阶段重跑（先 11 个不依赖容器的测试类，再 7 个依赖容器的）⇒ **两段全绿**；
 > 之后一次干净整模块跑 **100 例全绿**。⇒ **不是代码问题**，但记在这里以免下次误判。
 
+
+---
+
+## 30. 2026-10-26 第二十一轮（`align/favorite` 工作树 · 承 `d871647`）—— 🔴 **共享复核器改进后的跨域复跑 ⇒ 抓出本域「修一处 ≠ 修完」的漏改**
+
+### 30.1 触发：`global` 第三十四轮修好了我上一轮提的 4 条工具缺陷
+
+`global` 复核我回执里的 4 条反馈 ⇒ **4 条全部成立**并已修完（`d52031e` + `fbfbdd9`）：
+① **N7 去噪从「文件级」改成「引用行 ±1」** ② **第三方库清单改用真源 `go.mod` 权威**
+③ **新增 `module@version/...` 精确定位通道** ④ **新增 Go 标准库通道**。
+
+🔴 **① 对本域影响最大**：去噪改成行级后，`global` 那边的台账引用从「favorite 12 份 不悬空 3 条」
+变成 **158 条** ⇒ **本域台账里 155 条此前被文件级去噪淹没的引用，第一次真被检查了**。
+
+⇒ 我**只读**借他们修好的工具（拷 `/tmp` + `importlib` 调 L1/L4，原文件零改动）跑本域 12 份台账。
+
+### 30.2 🔴 抓出：**同一处错误在台账里出现 3 次，我第十八轮只改了 1 次**
+
+| 层 | 结果 |
+|---|---|
+| L1（仓内路径） | ✅ 58 个引用，**缺失 0 个**（2 条去噪 = 别域的省略写法，不算 FAIL） |
+| L4（Go 侧 `file:line`） | ❌ **1 条 FAIL**：`core/service/serviceconf.go` 的 **83-90 行**（**行号超出文件范围**，该文件共 89 行） |
+
+⇒ **这条正是我第十八轮抓出并「修好」的那一条**（§27.2）⇒ 但**它在本域台账里出现 3 次**：
+
+| 位置 | 性质 | 第十八轮是否改 |
+|---|---|---|
+| `rpc.md` §27.2 表的**修正列** | 活指针（应指向真实范围） | ✅ 改成 `:83-89` |
+| `rpc.md` §27.2 表的**错误列** | 引的是**当时写错的行号** | ❌ 漏改 |
+| `rpc.md` §0 第十八轮**叙述行** | 同上 | ❌ 漏改 |
+| `PIT-FAV-RPC-027` 的「真缺陷」行 | 同上 | ❌ 漏改 |
+
+⇒ 本轮**三处同源写法全部改成「N 行」**（`core/service/serviceconf.go` 的 **83-90 行**）而**不是** `file:NN`
+⇒ 记录**一字未丢**，但**不再被任何 `file:NN` 扫描器当成活指针**。
+⇒ 改完重跑：`L1 = 0` · `L4 = 0` ✅。
+
+### 30.3 顺带的确认：我的门禁**不落后**于共享工具
+
+`global` 这轮修的 ②③④ 三条，**我本域工具第十八轮就自己实现了**（`tools/ledger-lint/favorite/check-ledger-selfcheck.py`：
+`module@version/...` 精确定位通道 · 真源 `go.mod` 解析第三方库 · `<GOROOT>/src` 标准库通道）⇒
+**本域门禁与共享工具同代**，不存在「等别人补」的缺口。
+
+🆕 而且 §29 新写的锚点**全部用 `module@version/...` 精确写法**
+（如 `gorm.io/gorm@v1.31.1/callbacks/create.go:302-305`）⇒ 在 `global` 修好的工具里
+**不落进「同名文件跨库歧义」清单**（歧义清单里只有**旧写法** `v1.31.1/callbacks/update.go:235-254`）
+⇒ **精确写法应当成为本域的新标准**（存量 62 条跨库歧义仍为提示级，**本轮不批量改**）。
+
+### 30.4 教训：「修一处」≠「修完」
+
+同一处错误在台账里出现 **N 次**时，只改其中 1 次 ⇒ **门禁仍然红**，而**本域自己的门禁看不见**
+（我第十八轮的工具把它判成「N5 台账记述『删除/不存在』」⇒ 去噪 ⇒ 0 条）
+⇒ **是靠「别的域把共享工具改好」才浮出来的**。
+
+⇒ 判据：
+> **修一个锚点前，先 `grep` 出它在**本域所有台账文件**里的**全部副本** ⇒ 一次改完。
+> ⇒ 「表里有 N 行同款写法」时，**N 行都要改**（含叙述行与坑档）。
+
+### 30.5 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| **`global` 修好的工具跑本域台账**（只读借，拷 `/tmp` + importlib 调 L1/L4） | ✅ 改前 **L4 = 1 FAIL** ⇒ 改后 **L1 = 0 · L4 = 0** |
+| **本域门禁** | ✅ `tools/ledger-lint/favorite/check-ledger-selfcheck.py` ⇒ **门禁级 0 条** + `--mutation-test` 通过 |
+| **产品代码** | ✅ **零改动**（本轮只动台账） |
+| **共享面** | ✅ **零改动**（`global` 的工作树与 `tools/check-ledger-selfcheck.py` 只读借用 ⇒ 跑完即弃） |
+
+---
+
+## 31. 2026-10-26 第二十二轮（`align/favorite` 工作树 · 承第二十一轮）—— 🔴 **提交前把本域门禁全跑一遍 ⇒ 抓出第二十轮遗留的 2 处错锚点**
+
+### 31.1 触发：本来只是「提交前例行复跑」，结果门禁是**红的**
+
+第二十一轮只动了台账，提交前例行复跑本域门禁 ⇒
+`tools/assertion-audit/favorite/check-assertion-sources.py` **退出码 1** · **门禁级 2 条**：
+
+```
+[F3] .../sql/FavoriteSqlStatementParityTest.java:296  行号越界：`delete_favorite_folder_logic.go` 的 **336-378 行**，但该文件只有 96 行
+[F3] .../sql/FavoriteSqlStatementParityTest.java:324  行号越界：同上
+```
+
+> ⚠️ 门禁原文里是「文件名:336-378」那种形式 ⇒ 此处按 §30 / PIT-FAV-RPC-029 的惯例改写成「**N 行**」
+> ⇒ **记录一字不丢**，但**不再被任何 `file:NN` 扫描器当成活指针**（否则别的域的复核器会把它判成悬空/越界 ⇒ 假阳性）。
+
+🔴 **这两处是第二十轮我自己写的文件**（SQL 语句层对拍测试类）⇒ **第二轮才被抓到**。
+
+### 31.2 确诊：不是「行号越界」，是**锚点指错了文件**
+
+| | |
+|---|---|
+| 写的 | `delete_favorite_folder_logic.go` 的 **336-378 行**（**logic 层**） |
+| 实际应该是 | `service/favorite/rpc/internal/model/favorite_fact.go:336-378`（**model 层**）—— `DeleteFolderCascade` 在这里 |
+
+⇒ 真源 `service/favorite/rpc/internal/logic/delete_favorite_folder_logic.go` **共 96 行** ⇒ 336-378 根本不在该文件；
+`service/favorite/rpc/internal/model/favorite_fact.go` **共 378 行** ⇒ `:336` 正是 `DeleteFolderCascade` 的函数头。
+
+⇒ **断言的语义是对的**（那两例确实走级联删除），**只是锚点指到了另一个文件** ⇒
+§3.3.1「证据要带 `文件:行号`」的**形式**被满足、**内容**是错的 ⇒ **这类错误比「没写锚点」更危险**：
+它让人以为这条证据已被核过。
+
+### 31.3 顺手做了**全量语义核对**（不只修门禁抓到的那两条）
+
+门禁只能判「行号越界」⇒ **指错文件但行号恰好在范围内**的锚点它**看不见**。
+⇒ 我把该测试文件里**全部 20 个 Go 锚点**逐条解析到真源、打印对应行段、**人工核对语义**：
+
+| 结论 | 数量 | 说明 |
+|---|---|---|
+| ✅ 语义正确 | **18** | 取证/基础设施 2（`db.go` DSN · `pgconn` PGAPPNAME）· 事实判定 1（`favorite_fact.go`）· 读路径 8 · 建路径 4 · 改/删路径 3 |
+| 🔴 **指错文件** | **2** | `:296` / `:324`（本轮修） |
+| 🟡 **I1：块内无锚点** | **1**（第 21 处 Go 出处注释） | `:221` 写「Go: 同上」⇒ 不是 `file:NN` 形式 ⇒ 无法唯一定位（本轮修） |
+
+⇒ 18 条正确的**逐条**核对过 ⇒ 不是「抽查」。
+
+### 31.4 另修了 1 条 I1：`Go: 同上` ⇒ 展开成真锚点
+
+`:221` 的注释写 `// Go: 同上 ⇒ 用户不存在 ⇒ 空集（仍是一次 SELECT）`
+⇒ 「同上」依赖阅读顺序，**机器定位不到**（§3.3.1 要求锚点可指到具体行）
+⇒ 改成 `// Go: service/favorite/rpc/internal/logic/get_favorite_folders_logic.go:45-60 ⇒ …`。
+
+### 31.5 🔴 顺带核掉 2 条 I3（**都是工具误报**，不是缺陷）
+
+`assertion-audit` 另有 2 条 favorite-rpc 的 I3（「块内 `<pre>` 引用的 Go 源码在锚点文件里找不到」）⇒ 逐条回真源核对：
+
+| I3 | 真源实况 | 判定 |
+|---|---|---|
+| `FavoriteRpcSupport.java:38` | `favorite_authority.go:60-70` **正是** `strictFavoriteJSON` 的真实范围（excerpt 落在 61-68 行） | ✅ **锚点正确** ⇒ 工具按「excerpt 必须从锚点**起始行**逐行对齐」判定 ⇒ **误报** |
+| `FavoriteAuthorityLookupTimeoutTest.java:27` | `service/favorite/rpc/internal/authority/http.go:44` = `context.WithTimeout(..., 3*time.Second)` ✅；同文件 **80 行** = v2 变体 ✅ | ✅ **锚点正确** ⇒ excerpt **跨两段**，单锚点匹配器处理不了 ⇒ **误报** |
+
+⇒ 记在这里，是为了下次有人看到 I3 时**不必重新查一遍**，也为了不让「I3 = 有问题」变成默认假设。
+
+### 31.6 🔴 根因：**只跑了「本轮改动相关的那几个门禁」**
+
+| 轮次 | 新写了带 Go 锚点的 Java 文件？ | 跑了 `assertion-audit`？ | 漏检 |
+|---|---|---|---|
+| 第二十轮 | ✅ 新增 `FavoriteSqlStatementParityTest.java`（**20 个 Go 锚点**） | ❌ **没跑** | 🔴 2 处错锚点入库 |
+| 第二十一轮 | ❌ 只改台账 | ❌ **没跑**（只跑了 ledger-lint + 借 global 的工具） | 🔴 继续漏 |
+| **第二十二轮** | ❌ | ✅ **跑了** | ✅ **抓到** |
+
+⇒ **本域门禁不是「一劳永逸」的** ⇒ **每轮提交前要把本域门禁**全量**跑一遍**，
+而不是「跑跟本轮改动有关的那几个」⇒ **本轮改动引入新文件 ⇒ 必跑管它的那个门禁**。
+
+⇒ 坑档 **PIT-FAV-RPC-030**（新写文件 ⇒ 必跑管它的那个门禁；门禁只看「形式」抓不到「指错文件」⇒ 还得**全量语义核对**）。
+
+### 31.7 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| **`assertion-audit`**（本域门禁） | ✅ 改前 **门禁级 2 条 · EXIT=1** ⇒ 改后 **悬空 0 · 行号越界 0 · 门禁级 0 条 · EXIT=0** |
+| **20 个 Go 锚点全量语义核对** | ✅ 18 条正确（逐条回真源核对）· 2 条错锚点已修 · 1 条 I1 已修 |
+| **`ledger-lint`（本域门禁）** | ✅ **门禁级 0 条** + `--mutation-test` 通过 |
+| **`ledger-vs-reality`（本域门禁）** | ✅ **门禁级 0 条不一致** |
+| **SQL 语句层探针复跑** | ✅ **基线复现**：记录 855 / 语句 594 / marker 46 / parse+bind 0 · go 164 条 · rag 302 条 · **语义差异 10 · ORM 噪声 43 · L1 响应不同 3 例**（与第二十轮**完全一致**）<br>✅ `out/report.md` 与 `out/extracted.json` **归一化（时间戳/雪花 ID）后逐字节一致** ⇒ 注释改动**零行为影响** ⇒ 已 `git checkout` 还原基线（不提交时间戳噪声） |
+| **产品代码** | ✅ **零改动**（本轮只改**测试文件里的注释**） |
+| **共享面** | ✅ **零改动** |
