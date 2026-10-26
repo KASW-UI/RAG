@@ -20,7 +20,7 @@
 | 项 | 值 |
 |---|---|
 | 落地形态 | 31 个 main 文件 / **3,116 行** / **15 个 DTO** / 7 个 Service / 1 个 Controller<br>⚠️ **核对 2026-10-25（第十轮）**：行数比首轮台账记的 2,920 多 196 行 ⇒ **全部是各轮的纯注释增量**（可执行逻辑零改动）；DTO 数首轮记的 **13 是错的**（基线 `58e8314` 就是 15 个） |
-| 测试 | **8 个测试类 / 94 例全绿**（33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍** + **1 探针（自动 skip）** + **4 端口归属守门**）→ 第六轮 **+1 个测试类 / +5 例**；第十四轮收尾 **+1 个测试类 / +4 例**（`RealTomcatPortTest`） |
+| 测试 | **8 个测试类 / 97 例全绿**（33 输入契约 + 36 MVC 管线 + **6 装配** + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍** + **1 探针（自动 skip）** + **4 端口归属守门**）→ 第六轮 **+1 个测试类 / +5 例**；第十四轮收尾 **+1 个测试类 / +4 例**（`RealTomcatPortTest`）；**2026-10-26 合并当天**：防护链类 3 ⇒ **6 例**（绝对 `@Order` ⇒ Go 相对链序，**§12**） |
 | 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条已签字偏离** |
 | 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **2 条跨域待拍板**：① 容器层参数上限口径 ⇒ 收口在 `global`（与 hot 域 `DRIFT-HOTAPI-030` 同一格）；② **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，落点在 `service/common` ⇒ 同样收口在 `global`）<br>✅ **U8（第十五轮登记的唯一一条业务路径缺口）已于第十六轮闭合**：create 成功路径 + `ensureUserExists` 五分支 + 落库等价性全部拿到双侧活体证据（15 case 全 SAME）⇒ [`rpc.md`](./rpc.md) **§25**；盘点全表 ⇒ **§24.1** ⇒ **域内「未知项」归零**（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认）<br>🔴 **U9（第十七轮新增 · 部署形态类 · 待拍板）**：Go 生产形态有 **16062** 那个 HTTP 面，RAG 侧没有 ⇒ **§11** |
 | 本台账范围 | **仅 `favorite-api`**。`favorite-common` / `favorite-rpc` / `favorite-proto` 见同目录另三份台账 |
@@ -149,7 +149,7 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 | **原断言** | `FavoriteRpcClient` 的类注释写「⚠️ **client 熔断：Go 侧有且默认开，Java 侧尚未接入（已登记的已知偏离）**」，并给出一段「为什么现在不补」的论证 |
 | **实测** | **两处皆假**：① **熔断早已生效** —— `GoStyleGrpcClientBreakerInterceptor` 带 `@GrpcGlobalClientInterceptor`，被 `FavoriteApiApplication` 的 `scanBasePackages`（含 `com.rag.common`）扫到即自动注册；② 「已登记」是假 —— `docs/Intentional_Deviations/favorite/` 三个文件**至今 0 字节** |
 | **修复** | 改正断言 + 补「装配证据」一节（指向运行证据） |
-| **回归网** | `FavoriteApiProtectionWiringTest`（3 例）：读 starter 的 `GlobalClientInterceptorRegistry` 断言拦截器**真的在里面**（只断言「Bean 存在」不够 —— 证明不了 channel factory 会不会消费它，§3.3）；断言保护层默认值 == Go 默认值；断言 4 个 filter 的 `@Order` 与 Go 链序一致 |
+| **回归网** | `FavoriteApiProtectionWiringTest`（**6 例**）：读 starter 的 `GlobalClientInterceptorRegistry` 断言拦截器**真的在里面**（只断言「Bean 存在」不够 —— 证明不了 channel factory 会不会消费它，§3.3）；断言保护层默认值 == Go 默认值；断言 4 个 filter 的**相对** `@Order` 与 Go 链序一致（🔴 **2026-10-26 合并当天**：原先断言的是**绝对**值 `+1/+2/+3/+6` ⇒ 被 `global` 第十九轮的合法后移打断 ⇒ 改为 Go 真源承载语义的相对链序 ⇒ **§12**） |
 
 > ⚠️ **「已接入」不等于「已验证」**：本轮正是用**运行证据**（而不是读注解）把它从「假断言」变成「已验证」。
 
@@ -315,7 +315,7 @@ cd /Users/pr/Documents/java&golang/RAG.worktrees/favorite   # align/favorite 工
 mvn -o -pl service/favorite/favorite-proto,service/favorite/favorite-common,\
 service/favorite/favorite-rpc,service/favorite/favorite-api -am install
 
-# 全量测试（favorite-api 94 例：33 输入契约 + 36 MVC 管线 + 3 装配 + 4 超时 + 8 真 Tomcat 门禁 + 5 响应字节对拍 + 1 探针（skip）+ 4 端口归属守门）
+# 全量测试（favorite-api 97 例：33 输入契约 + 36 MVC 管线 + 6 装配 + 4 超时 + 8 真 Tomcat 门禁 + 5 响应字节对拍 + 1 探针（skip）+ 4 端口归属守门）
 mvn -o -pl service/favorite/favorite-api test
 
 # 单类
@@ -538,3 +538,58 @@ CheckBlacklistMiddleware: middleware.NewCheckBlacklistMiddleware(redisDB).Handle
 | **新增域内未决项** | 🔴 **U9**（部署形态类 · 待拍板）—— Go 生产形态有 **16062** 那个 HTTP 面（`/metrics` `/healthz` pprof），RAG 侧 `web-application-type: none` ⇒ **没有** ⇒ 要么 RAG 侧也开（**部署形态变更**），要么**签字接受** ⇒ 详见 [`rpc.md`](./rpc.md) **§26.8** |
 | **跨域（只登记）** | 其余 **5 个** rpc 模块（`article-rpc` / `comment-rpc` / `follow-rpc` / `like-rpc` / `task-rpc`）**同样漏配** `grpc.server.reflection-service-enabled` ⇒ 收口在 `global` ⇒ 逐条 Go 侧判据见 [`rpc.md`](./rpc.md) **§26.4** |
 | **⚠️ 连带翻案** | 第十四轮 §22.3 的「启动阻塞 #1 已修」是**半修**（只改了**探针启动参数**，生产 yaml 一行没改）⇒ 坑档 **PIT-FAV-RPC-026** ⇒ 详见 [`rpc.md`](./rpc.md) **§26.5** |
+
+---
+
+## 12. 2026-10-26 合并当天（第三十一轮）—— 🔴 **本域守门网被「合法改动」打断** ⇒ 断言口径从「绝对 `@Order`」改成「Go 相对链序」
+
+> **触发**：2026-10-26 把 `align/favorite` 合进 `do-my-own-gh`（`global` 的合并 `4f839f9` **已先落地**）
+> ⇒ 合并树全量 `mvn test` 在 **`favorite-api`** 红：
+> ```
+> FavoriteApiProtectionWiringTest.serverSideProtectionFiltersAreBeansInGoChainOrder:128
+>   MaxConns 应最先 ==> expected: <-2147483647> but was: <-2147483644>
+> ```
+> ⇒ `-2147483647 = Ordered.HIGHEST_PRECEDENCE + 1`（旧值）· `-2147483644 = + 4`（新值）。
+>
+> ⚠️ **本条是「合并」这一步本身的产出** —— 本分支（`align/favorite`）自始至终全绿，
+> **只有把 global 的合并拿进来才红** ⇒ 这正是「**跑绿 ≠ 对**」的又一次实证（AGENTS.md §0）。
+
+### 12.1 核证结论：🔴 **不是行为回归，是本域测试的跨域耦合**
+
+| 项 | 事实 | 证据 |
+|---|---|---|
+| **谁改的** | `global` 第十九轮（T-8）把**保护层四件套整体后移**：`@Order` `+1..+6` ⇒ `+4..+8` | 🔴 **共享层（`service/common`）的写权在 `global` 域** ⇒ 本域**只记 `@Order` 的值**，不写行号（行号随分支不同）：`GoStyleMaxConnsFilter` = `+4` · `GoStyleBreakerFilter` = `+5` · `GoStyleCpuSheddingFilter` = `+6` · `GoStyleMaxBytesFilter` = `+8`（**主干 `4f839f9` 的值**） |
+| **为什么合法** | 为了把 `GoStyleTraceparentFilter` 放到「CORS 之后、MaxConns 之前」（Go 侧 Trace 是**链内第一个**）⇒ 被 MaxConns 拒成 503 的响应**也带** traceparent | 同上（**共享层，`global` 域**）：`GoStyleTraceparentFilter` = `+3`（主干 `4f839f9` 的值）· Go 真源：go-zero v1.10.2 `rest/engine.go:135`（`chn.Append(handler.TraceHandler(...`）<br>⚠️ **该类在本分支（`align/favorite`）尚不存在** ⇒ 故**不写仓内路径**（AGENTS.md 域内纪律：跨分支的文件不写成仓内路径） |
+| **相对顺序变了吗** | ✅ **没变** —— MaxConns → Breaker → Shedding → MaxBytes 原样保留 | 主干 `4f839f9` 四个值 `+4/+5/+6/+8` 严格递增 |
+| **Go 语义一致吗** | ✅ **一致** —— Go 真源的四个保护中间件相对次序就是 MaxConns → Breaker → Shedding → MaxBytes | go-zero v1.10.2 `rest/engine.go:130-168`（`buildChainWithNativeMiddlewares`）：`MaxConns` `:146` → `Breaker` `:149` → `Shedding` `:152` → `MaxBytes` `:164` |
+| **那为什么红** | 🔴 **我的测试断言的是「绝对数值」**（`+1/+2/+3/+6`）⇒ 共享层合法调整**排版** ⇒ 本域守门网**假红** | 改前断言在 `service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/FavoriteApiProtectionWiringTest.java` 的 `serverSideProtectionFiltersAreBeansInGoChainOrder` 方法内（**本分支 `align/favorite` 的 `:128-131`**） |
+
+> 🟢 **结论**：两侧的 Go 语义**完全一致**，**没有新漂移** ⇒ 本轮**零行为改动**。
+
+### 12.2 判据归属（本域 vs `global`）
+
+| 不变量 | 归属 | 理由 |
+|---|---|---|
+| 四个保护 filter 的**相对**次序 == Go 的链序 | ✅ **本域（`favorite-api`）** | 它决定 favorite 请求「**先被谁拒**」（MaxConns 503 / Breaker 500 / Shedding 503 / MaxBytes 413）⇒ **本域可观察** ⇒ 本域守门网应当锁它 |
+| 四个 filter 整块相对 Trace / Log / Prometheus / 共享中间件（`HttpMiddlewareFilter`）的**绝对位置** | 🔴 **`global`（共享层）** | 改法落在 `service/common` ⇒ AGENTS.md §3.5「**修法落在共享层 ⇒ 收口域 = `global`**」⇒ **已回执 `global` 域**，请其在**所有者**侧加门禁 |
+
+### 12.3 修法：**只锁 Go 真源承载语义的那部分**
+
+| 项 | 改前 | 改后 |
+|---|---|---|
+| 断言口径 | `assertEquals(HIGHEST_PRECEDENCE + 1/2/3/6, …)` —— **绝对值** | `assertTrue(orderOf(a) < orderOf(b), …)` —— **相对链序**（3 个独立测试方法，**一条断言一个方法**，PIT-FAV-RPC-036） |
+| 锚点 | 无 Go 出处（只写「Go 的中间件顺序」四个字） | 每条断言带 go-zero **消费点**行号：`engine.go:146/149/152/164`（§3.3.1 要求「行号指向消费点而非声明点」⇒ 引用的是 `chn.Append(...)` 那几行，**不是**上面的 `if` 行） |
+| 失败信息 | 只说「MaxConns 应最先」，**不携带实际值** | 带**实际值 + Go 出处**：例如「实际 MaxConns=-2147483646 Breaker=-2147483647」 |
+| 用例数 | 3 例 | **6 例**（`serverSideProtectionFiltersAreBeans` + 3 条链序） |
+
+### 12.4 变异自证（**证明新守门不是假绿**）
+
+| 步骤 | 结果 |
+|---|---|
+| 本分支（旧共享层 `+1/+2/+3/+6`）跑守门 | ✅ **6/6 绿** |
+| **变异**：把共享层 MaxConns / Breaker 的 `@Order` 对调（`+1` ⇄ `+2`） | 🔴 **精确转红**：**只有** `maxConnsRunsBeforeBreaker` 一条红，报「实际 MaxConns=-2147483646 Breaker=-2147483647」⇒ **不是恒绿** |
+| 还原共享层（`git checkout -- service/common/`） | ✅ **6/6 绿** · `git status` 只剩本域 1 个测试文件 |
+| 合并树（global 的毫秒版共享层 + `+4/+5/+6/+8`） | ✅ **6/6 绿**（⇒ 新断言在**两侧**都成立） |
+
+⇒ 🟢 **教训已入坑档** ⇒ [`docs/Pitfalls/favorite/api.md`](../../Pitfalls/favorite/api.md) **PIT-FAV-API-009**。
+
