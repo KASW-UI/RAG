@@ -43,12 +43,40 @@ public interface FavoriteFactOutboxMapper {
      * <p><b>为什么这是行为差异</b>：{@code created_at} 是取件查询的排序键
      * （{@code ORDER BY created_at, event_id}）⇒ 两个时钟偏移会让<b>取件顺序</b>产生分歧。
      * <p><b>修法</b>：显式绑定应用层时钟 ⇒ 与 Go 的 GORM 同源。
+     *
+     * <p>🔴 <b>2026-10-26 第二十三轮修</b>：本方法<b>原来不绑</b>
+     * {@code technical_receipt_id} / {@code technical_input_hash} ⇒ 落库 <b>NULL</b>；
+     * 而 Go 侧这两个字段是<b>非指针</b>（{@code internal/model/favorite_fact.go:67-68}）
+     * ⇒ GORM 把零值 {@code ""} <b>原样写进 INSERT</b> ⇒ Go 落库 <b>空串</b>、RAG 落库 <b>NULL</b>
+     * ⇒ <b>值不同</b>（不是「语句不同」而是「落库值不同」）。
+     * <p><b>Go 出处（声明点 + 落库效果）</b>：{@code internal/model/favorite_fact.go:67-68}
+     * —— {@code TechnicalReceiptID string} / {@code TechnicalInputHash string}
+     * （<b>没有</b> {@code *time.Time} 那种指针 ⇒ 零值是 {@code ""} 而<b>不是</b> NULL）
+     * ⇒ GORM 的 INSERT 走 {@code create.go:285-305}：非零字段按原值写、零值字段若带
+     * {@code default} tag 才交给 DB 默认 ⇒ 这两列<b>没有</b> {@code default} tag
+     * ⇒ <b>空串被显式写入</b>。
+     * <p><b>语义等价论证</b>：本方法显式写 {@code ''} ⇒ 与 Go 的 {@code ""} <b>落库值一致</b>。
+     * <p>⚠️ <b>不能留 NULL</b>：真源的 {@code TechnicalInputHash} 是 {@code string} 非指针
+     * ⇒ pgx 扫 NULL 会报错 ⇒ 且 {@code technical_input_hash} 在权威读面
+     * （{@code favorite_authority.go:131-133}）要与 DC 回执逐字节比对
+     * ⇒ NULL 与 {@code ""} 不是一回事。
+     *
+     * <p>🟡 <b>刻意不写</b>的三列（与 Go 的列集不同，但<b>落库值相同</b> ⇒ 不是漂移）：
+     * <ul>
+     *   <li>{@code technical_offset} —— Go 显式写 {@code 0}；RAG 省 ⇒ DDL
+     *       {@code technical_offset bigint NOT NULL DEFAULT 0}（{@code V5}:15）⇒ 落库同样是 {@code 0} ✅</li>
+     *   <li>{@code technical_received_at} / {@code delivered_at} —— Go 是<b>指针</b>
+     *       （{@code favorite_fact.go:70-71}）⇒ 写 {@code NULL}；RAG 省略 ⇒ 同样是 {@code NULL} ✅
+     *       （这两列<b>可空且无 DEFAULT</b>）</li>
+     * </ul>
      */
     @Insert("""
             INSERT INTO favorite_fact_outbox
                 (event_id, favorite_id, aggregate_version, payload, status, retry_count,
+                 technical_receipt_id, technical_input_hash,
                  created_at, updated_at)
             VALUES (#{eventId}, #{favoriteId}, #{aggregateVersion}, #{payload}::jsonb, 0, 0,
+                    '', '',
                     #{createdAt}, #{updatedAt})
             """)
     int insertFact(@Param("eventId") String eventId,

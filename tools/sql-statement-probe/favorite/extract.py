@@ -50,7 +50,11 @@ MARKER_RE = re.compile(r"SQLMARK::(?P<side>[a-z]+)::(?P<case>[A-Za-z0-9_\-]+)::(
 # ── 扩展协议的 DETAIL 行：parameters: $1 = '9001', $2 = '1' ──
 # ⚠️ PG 的 DETAIL 行是**独立记录**（有自己的前缀），不是上一行的续行。
 #    值里的单引号用 '' 转义 ⇒ 捕获组是 (?:[^']|'')*。
-PARAM_RE = re.compile(r"\$(\d+) = '((?:[^']|'')*)'")
+# 🔴 **2026-10-26 第二十三轮修**：原正则只匹配**带引号**的值 ⇒ PG 对 NULL 参数印的是
+#    **不带引号的** `NULL`（`parameters: $10 = NULL`）⇒ **整条参数被丢掉** ⇒
+#    探针**分不清「绑了 NULL」与「根本没提到这个参数」** ⇒ 静默的假阴性。
+#    ⇒ 现在 NULL 也捕获（存成 Python 的 None）。
+PARAM_RE = re.compile(r"\$(\d+) = (NULL|'(?:[^']|'')*')")
 
 GO_SIDE = {"name": "go", "db": "godb", "app": "go_side"}
 RAG_SIDE = {"name": "rag", "db": "first_db", "app": "rag_side"}
@@ -117,7 +121,11 @@ def classify(records):
             if stmts and "parameters:" in msg:
                 tail = msg.split("parameters:", 1)[1]
                 for pnum, pval in PARAM_RE.findall(tail):
-                    stmts[-1]["params"][pnum] = pval.replace("''", "'")
+                    if pval == "NULL":
+                        # 🔴 NULL 是**真值**（不是「没提到」）⇒ 必须显式记 None
+                        stmts[-1]["params"][pnum] = None
+                    else:
+                        stmts[-1]["params"][pnum] = pval[1:-1].replace("''", "'")
         else:
             others.append(r)
     return stmts, details, others
@@ -142,11 +150,20 @@ def load_schema(path):
     返回：
         { "<table>": [col, …],          ← 列清单（按 pos）
           "__pk__":  { "<table>": [col, …] },
-          "__uniq__": { "<table>": [[col, …], …] } }
+          "__uniq__": { "<table>": [[col, …], …] },
+          "__meta__": { "<table>": { "<col>": {"default": …, "nullable": "YES"/"NO"} } } }
+
+    🔴 **2026-10-26 第二十三轮新增 `__meta__`**（DEFAULT / NOT NULL）：
+    「写列集不同」**不等于**「落库值不同」—— 少写一列时，DB 会用该列的 DEFAULT 补上
+    （没有 DEFAULT 才是 NULL）⇒ 只比列集会把「值相同」误报成语义差异
+    （实测三例：technical_offset 的 DEFAULT 0 与 Go 显式写的 0 相同；
+      technical_received_at / delivered_at 两侧都是 NULL）。
+    ⇒ 判定落库值是否真的不同，**必须**知道 DDL 的 DEFAULT。
     """
     schema = {}
     pk = {}
     uniq = OrderedDict()
+    meta = OrderedDict()
     with open(path, "r", encoding="utf-8") as fh:
         for line in fh:
             line = line.rstrip("\n")
@@ -158,6 +175,14 @@ def load_schema(path):
             kind, table, pos, cname, ctype, col = parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]
             if kind == "COL":
                 schema.setdefault(table, []).append(col)
+                # 🔴 第 4/5 槽在第二十三轮起携带 DDL 元信息（此前是空串）：
+                #    第 4 槽 = column_default（无 DEFAULT 时是 <NODEFAULT>）
+                #    第 5 槽 = is_nullable（YES / NO）
+                default = None if cname in ("", "<NODEFAULT>") else cname
+                meta.setdefault(table, OrderedDict())[col] = {
+                    "default": default,
+                    "nullable": ctype or "YES",
+                }
             elif kind == "UC":
                 if ctype == "PRIMARY KEY":
                     pk.setdefault(table, []).append(col)
@@ -169,6 +194,7 @@ def load_schema(path):
                 uniq.setdefault(table, OrderedDict()).setdefault(cname, []).append(col)
     schema["__pk__"] = pk
     schema["__uniq__"] = {t: list(d.values()) for t, d in uniq.items()}
+    schema["__meta__"] = meta
     return schema
 
 

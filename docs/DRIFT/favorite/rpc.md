@@ -25,7 +25,7 @@
 | 项 | 值 |
 |---|---|
 | 落地 | **36 个 Java 文件 / 7,571 行 / 7 个迁移脚本**（V7 为第十轮前新增的时钟源对齐脚本）<br>⚠️ **核对 2026-10-25（第十轮）**：行数首轮记 7,057 ⇒ 现 **7,571**，增量 514 行**全部是各轮的纯注释增量**（可执行逻辑零改动）（本轮前：34 个文件全 0 字节、`pom.xml` 零依赖零插件、6 个 `.sql` 全 0 字节） |
-| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §26**（favorite-rpc：**18 个测试类 / 100 例**（含 3 skip）—— ⚠️ **第二十轮实测**：新增的 `FavoriteSqlStatementParityTest` 在**没有探针环境变量**时按设计 skip ⇒ skip 数 2 → 3） |
+| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §26**（favorite-rpc：**19 个测试类 / 105 例**（含 3 skip）—— ⚠️ **第二十轮实测**：新增的 `FavoriteSqlStatementParityTest` 在**没有探针环境变量**时按设计 skip ⇒ skip 数 2 → 3；⚠️ **第二十三轮实测**：新增 `FavoriteFolderItemTimeColumnTest` **5 例**（真 PG）⇒ 100 → **105**） |
 | 构建 | `mvn -o -pl service/favorite/favorite-rpc -am install` ⇒ **BUILD SUCCESS** |
 | 本轮发现并修复 | **6 处 L2 语义偏差**（§2）+ **2 处实现期真 bug**（§3） |
 | 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选已签字**（2026-10-25）：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK）⇒ **本域已无 🏷 候选**，见 §13.2<br>✅ **U8（第十五轮新增 · 域内可动的最后一条）已于第十六轮闭合**：create / create_item 的**成功路径** + `ensureUserExists` 五分支 + **落库等价性**全部拿到双侧活体证据（**15 case 全 SAME**）⇒ **§25**（盘点全表 ⇒ §24.1）⇒ ~~域内「未知项」归零~~（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认）<br>🔴🔴 **第二十轮翻案**：「域内『未知项』归零」是**提前收口** —— 当时**没查 SQL 语句层**（DDL / 错误码 / 事务语义三层闭了，**语句层是第四层，没做**）⇒ 第二十轮补上那一层 ⇒ **当场抓出 3 处 L1 可观察的漂移**（RAG 侧 INSERT / UPDATE **少绑时间列** ⇒ 落库 `NULL` ⇒ 对外时间戳 = **0**）⇒ **§29**<br>🔴 **U9（第十七轮新增 · 部署形态类 · 待拍板）**：Go 生产形态有 **16062** 那个 HTTP 面（`etc/favorite.yaml:23-30` 的 DevServer + `internal/devserver/server.go:79-82` 的 `if !c.Enabled { return }` ⇒ **与 mode 无关，生产也开**），RAG 侧 `web-application-type: none` ⇒ **没有** ⇒ 要么 RAG 侧也开（**部署形态变更**，需引 servlet 容器），要么**签字接受**⇒ **§26.8** |
@@ -41,6 +41,7 @@
 | 第二十轮 | 🔴🔴 **SQL 语句层**双侧活体对拍（§29）—— 补上 favorite 域**四层验证的最后一层**（DDL / 错误码契约 / 事务语义 **三层早已各自闭**，**语句层没做**）⇒ 🆕 探针 `tools/sql-statement-probe/favorite/`：**PG 服务端日志**（`log_statement=all`）**零侵入**取证（Go 侧 `PGAPPNAME=go_side` / RAG 侧 JDBC `ApplicationName=rag_side` / 驱动自己 `probe_marker`）+ **marker 协议**逐用例切片 + **语义签名**比对（不是比 SQL 文本）+ **变异自检 5/5**（含阴性对照）<br>🔴 **抓出 3 处 L1 可观察的漂移**：① `favorite_folder` INSERT **不绑** `create_time`/`update_time` ⇒ NULL ⇒ L1 时间戳 = **0**；② `favorite_item` INSERT **不绑** `create_time` ⇒ NULL ⇒ L1 = **0**；③ 改名**不推进** `update_time` ⇒ L1 `updated_at` 不变（+1 处低影响：`favorite_fact_outbox` 两个投递列 `NULL` vs `''`）⇒ **23 用例 · 20 个用例的语句类别序列两侧逐条一致**，差异**全部集中在「写集合」一维**<br>🔴 **翻案**：§0「域内『未知项』归零」是**提前收口** ⇒ 每一层的**排除项**都会变成下一层的缝隙 ⇒ 坑档 **PIT-FAV-RPC-028** |
 | 第二十一轮 | 🔴 **共享复核器改进后的跨域复跑**（§30）—— `global` 第三十四轮修好我提的 4 条工具缺陷（去噪**行级化** / `go.mod` 权威化 / 两条精确定位通道）⇒ 🔴 **去噪行级化后本域台账有 155 条此前被淹没的引用第一次真被检查** ⇒ 抓出 **1 条 FAIL**：`core/service/serviceconf.go` 的 83-90 行 —— **正是本域第十八轮「抓出并修好」的那一条**，但它在台账里出现 **3 次**、当时**只改了 1 次**（表格的修正列）⇒ **错误列 / 叙述行 / 坑档**三处漏改 ⇒ 本轮**一次改完**（改成「N 行」写法 ⇒ 记录不丢、也不再被任何 `file:NN` 扫描器当活指针）⇒ 改后 **L1 = 0 · L4 = 0** ✅<br>✅ 顺带确认**本域门禁不落后**（②③④ 三条通道本域第十八轮就自己实现了）；🆕 §29 新写的锚点**全部用 `module@version/...` 精确写法** ⇒ 在他们修好的工具里**不落进跨库歧义清单** ⇒ 精确写法应成为本域新标准（存量 62 条歧义仍为提示级，本轮不批量改）<br>🆕 坑档 **PIT-FAV-RPC-029**：「**修一处 ≠ 修完**」（同一处锚点在台账里有 N 个副本）|
 | 第二十二轮 | 🔴 **提交前把本域门禁全跑一遍 ⇒ 抓出第二十轮遗留的 2 处错锚点**（§31）—— 本来只是例行复跑 ⇒ `assertion-audit` **EXIT=1 · 门禁级 2 条**：`FavoriteSqlStatementParityTest.java:296/:324` 的 Go 锚点写成 **logic 层**的 `delete_favorite_folder_logic.go` 的 **336-378 行**，但该文件**只有 96 行** ⇒ 实际指的是 **model 层**的 `service/favorite/rpc/internal/model/favorite_fact.go:336-378`（`DeleteFolderCascade`）⇒ **断言语义对、锚点指错文件** ⇒ 「**证据是假的**」（比没写锚点更危险）<br>⇒ 顺手做**全量语义核对**（门禁只判「行号越界」，抓不到「指错文件但行号在范围内」）：该测试文件**全部 20 个 Go 锚点**逐条回真源核对 ⇒ **18 条正确** · **2 条错锚点已修** · **1 条 I1**（「Go: 同上」无法定位）已展开成真锚点<br>✅ 另核掉 2 条 favorite-rpc 的 I3 ⇒ **全是工具误报**（一个因 excerpt 未从锚点起始行对齐、一个因 excerpt 跨两段）⇒ 锚点本身逐行正确<br>🔴 **根因**：第二十轮**新写了带 20 个 Go 锚点的文件**却**没跑管它的那个门禁** ⇒ 漏检**跨了两轮** ⇒ 坑档 **PIT-FAV-RPC-030**<br>✅ **SQL 探针复跑基线完全一致**（记录 855 / 语句 594 / 语义差异 10 / L1 响应不同 3 例）⇒ `out/` 归一化后**逐字节一致** ⇒ 注释改动**零行为影响** |
+| 第二十三轮 | 🔴🔴 **修掉 SQL 层抓出的 4 处漂移 + 把对拍从「语句层」升级到「落库值层」⇒ 探针转绿**（§32）—— **产品侧 4 处全修**：① `favorite_folder` INSERT 补绑 `create_time`/`update_time`（**同一个** `now` ⇒ Go 的 `curTime` 整条 INSERT 只取一次）② `favorite_item` INSERT 补绑 `create_time` ③ 改名 UPDATE 补 `update_time`（GORM 的 map 形式 Update **自动追加** autoUpdateTime）④ outbox 的 `technical_receipt_id`/`technical_input_hash` 显式写 `''`（Go 是**非指针** string ⇒ 零值是 `''`）⇒ 全部用**应用进程时钟**（**不是** PG 的 `now()`）⇒ 与 Go 同源<br>⇒ 顺带订正 **2 处被实测证伪的 javadoc**（「由 PG 的 now() 生成」「Go 也只写 name」—— 两处**写错了事实**）<br>🔴 **对拍工具自身有 4 个缺陷**：① `PARAM_RE` 丢掉 NULL 参数（静默）② 值提取跑在 normalize **之后** ⇒ `$N` 已成 `?` ③ **只比列集不问 DDL** ⇒ 3 列误报 ④ **L1 精确相等 ⇒ 结构上恒红** ⇒ 判别不了「修没修」⇒ 全部修掉（**DDL 感知** + **L1 归一化**）<br>🟡 「多投影一列」不必然是行为差异 ⇒ 走**带出处的显式登记**（`equivalences.tsv`，**出处自动校验**，不过则作废）⇒ 根因：Go 的 struct **只有 8 个字段、无 `approved_at`** ⇒ 取回后在 struct 层就丢弃<br>✅ **探针转绿**：语义差异 **10 → 0** · L1 响应不同 **3 → 0** · EXIT=0 ⇒ **变异自检 6/6**（含**新增**阴性对照）+ **产品级变异 2/2 转红** ⇒ 绿是**有证据的绿**<br>⇒ 坑档 **PIT-FAV-RPC-031**：「**恒红的信号不携带信息**」 |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -1779,7 +1780,7 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 
 | 类别 | 条数 | 内容 | 落点 |
 |---|---|---|---|
-| **A · 已识别且可修的漂移** | **0 ⇒ 3**（🔴 第二十轮补上「SQL 语句层」后新增） | 已修：rpc 6 处 L2 + 2 处真 bug；api 4 处（L2×2 + javadoc 假断言×2 + L1×1）；DDL 14 处 DEFAULT + 3 条索引（**性能非行为**）<br>已签字 **9** 条（API-001/002 · COMMON-001/002 · RPC-001/003/004/006/007）· 已撤销 2 条（RPC-002/005）· 🏷 候选 **0**<br>🔴 **第二十轮新增 3 处**：① `favorite_folder` INSERT 不绑 `create_time`/`update_time` ② `favorite_item` INSERT 不绑 `create_time` ③ 改名不推进 `update_time`（+1 处低影响：outbox 两个投递列 `NULL` vs `''`）⇒ **§29** | §2 / §3 · `api.md` §2 · `docs/Intentional_Deviations/favorite/` · **§29** |
+| **A · 已识别且可修的漂移** | **0 ⇒ 3 ⇒ 0**（🔴 第二十轮补上「SQL 语句层」后新增 3 处 ⇒ ✅ **第二十三轮全部修掉**） | 已修：rpc 6 处 L2 + 2 处真 bug；api 4 处（L2×2 + javadoc 假断言×2 + L1×1）；DDL 14 处 DEFAULT + 3 条索引（**性能非行为**）<br>已签字 **9** 条（API-001/002 · COMMON-001/002 · RPC-001/003/004/006/007）· 已撤销 2 条（RPC-002/005）· 🏷 候选 **0**<br>🔴 **第二十轮新增 3 处** ⇒ ✅ **第二十三轮全修**：① `favorite_folder` INSERT 不绑 `create_time`/`update_time` ② `favorite_item` INSERT 不绑 `create_time` ③ 改名不推进 `update_time`（+1 处低影响：outbox 两个投递列 `NULL` vs `''`）⇒ 修完**探针转绿**（语义差异 10 → 0 · L1 3 → 0）⇒ **§29 / §32** | §2 / §3 · `api.md` §2 · `docs/Intentional_Deviations/favorite/` · **§29 / §32** |
 | **B · 域内能补的证据缺口** | ~~**1 + 1**~~ ⇒ **0 + 1** | **B1 = U8**：create / create_item 的**成功路径**未双侧对拍（⇒ 见 §24.2）—— ✅ **已于第十六轮闭合**（15 case 全 SAME ⇒ **§25**）<br>**B2**：V7 上线前的 **6 条域外写入方人工确认**（**流程项，不是代码项** ⇒ **仍待办，但不是「未知项」**） | §24.2 · §25 · [`tools/outbox-writer-audit/favorite/CHECKLIST.md`](../../../../tools/outbox-writer-audit/favorite/CHECKLIST.md) |
 | **C · 跨域（本域只读）** | **5** | ① 容器层参数上限口径（与 hot 域 `DRIFT-HOTAPI-030` 同一格）② 405 多一个 `Content-Type`（落点 `service/common`，其 javadoc 被实测证伪）③ Go 多一个 `traceparent`（落点 `service/common` 的 `HttpMiddlewareFilter`）④ 🔴 **别域模块**运行时缺 `grpc-inprocess` ⇒ 可部署 jar 起不来 —— ⚠️ **本条数字已被同节 §24.4 归因翻案**：真缺 = **3 个可执行应用模块**（article-rpc / like-rpc / task-rpc）+ **4 个 `-common` 库**（不算可执行模块）；原写「13 个」**是错的**（详见 §24.4） ⑤ `like-api` 的熔断注释 | §22.3 / §22.4 · `api.md` §3 / §9.5 ⇒ **收口在 `global`** |
 | **D · 库级 / 不可观测（明确「不做」）** | **3** | ① gRPC **措辞**（grpc-go 区分未知方法/未知服务，grpc-java 共用一种）② gRPC **响应头 key 集合**（grpc-java 多 `grpc-accept-encoding` / `grpc-encoding`）③ percent-encoding 的 `~` 边界差 1 字节（L0 帧层；本域 24 条文案**无 `~`** ⇒ 客户端不可观测） | §20.4 / §20.5 ⇒ 两侧 `code` 语义一致 ⇒ **属库级，不是不一致** |
@@ -2857,3 +2858,95 @@ payload, status, retry_count, created_at, updated_at) VALUES ($1,…,$6)` ⇒ �
 | **SQL 语句层探针复跑** | ✅ **基线复现**：记录 855 / 语句 594 / marker 46 / parse+bind 0 · go 164 条 · rag 302 条 · **语义差异 10 · ORM 噪声 43 · L1 响应不同 3 例**（与第二十轮**完全一致**）<br>✅ `out/report.md` 与 `out/extracted.json` **归一化（时间戳/雪花 ID）后逐字节一致** ⇒ 注释改动**零行为影响** ⇒ 已 `git checkout` 还原基线（不提交时间戳噪声） |
 | **产品代码** | ✅ **零改动**（本轮只改**测试文件里的注释**） |
 | **共享面** | ✅ **零改动** |
+
+---
+
+## 32. 2026-10-26 第二十三轮（`align/favorite` 工作树 · 承 `2875358`）—— 🔴 **修掉 SQL 层抓出的 4 处漂移 + 把对拍从「语句层」升级到「落库值层」⇒ 探针转绿**
+
+### 32.1 起点：第二十轮抓出的 4 处漂移，本轮**全部修掉**
+
+| # | 缺陷 | 修法 | Go 出处（消费点） |
+|---|---|---|---|
+| 1 | `favorite_folder` INSERT **不绑** `create_time`/`update_time` ⇒ 落库 NULL ⇒ L1 `created_at`/`updated_at` = **0** | 显式绑**应用层时钟**（`Instant.now(clock)`），两列绑**同一个** `now` | struct tag `internal/model/data_model.go:10-11` ＋ 赋值点 `gorm@v1.31.1/callbacks/create.go:246`（`curTime` **整条 INSERT 只取一次**）＋ `create.go:302-305` |
+| 2 | `favorite_item` INSERT **不绑** `create_time` ⇒ 同上 | 显式绑应用层时钟 | `data_model.go:30` ＋ `create.go:302-305` |
+| 3 | 改名 **不推进** `update_time` ⇒ L1 `updated_at` 不变 | UPDATE 的 SET 补 `update_time` | `gorm@v1.31.1/callbacks/update.go:236-254`（map 形式 Update **自动追加** `AutoUpdateTime` 字段） |
+| 4 | `favorite_fact_outbox` 的 `technical_receipt_id`/`technical_input_hash` ⇒ Go 写 `''`、RAG 写 NULL | INSERT 显式写 `''` | `internal/model/favorite_fact.go:67-68`（**非指针** `string` ⇒ 零值是 `''` 而**不是** NULL）＋ `create.go:285-305`（无 `default` tag ⇒ 零值也**原样写入**） |
+
+⇒ **顺带订正两处被实测证伪的 javadoc**（它们**写错了事实**，比没写更危险）：
+① `FavoriteFolderMapper.insertFolder` 原写「`create_time`/`update_time` **由 PG 的 `now()` 生成**」
+   ⇒ 🔴 **假**：DDL（`V1__create_favorite_folder.sql:24-26`）这两列**没有 DEFAULT** ⇒ 省略即 **NULL**。
+② `FavoriteFolderMapper.updateNameByFolderId` 原写「Go 的 `Update("name", name)` **也只写 name**」
+   ⇒ 🔴 **假且自相矛盾**（后半句自己又说「GORM 的 Update 会追加 autoUpdateTime」）⇒ 真实行为是**写两列**。
+
+### 32.2 🔴 时钟源：必须用**应用进程时钟**，不能用 PG 的 `now()`
+
+Go 的 auto-time 字段由 `stmt.DB.NowFunc()`（= `time.Now()`）在**应用层**赋值 ⇒ 值来自 **Go 进程时钟**。
+⇒ 本实现绑 **Java 进程时钟**（`Instant.now(clock)`，用可注入的 `Clock` ⇒ 可测）
+⇒ **时钟源同侧**（应用进程 vs 应用进程），**不是**数据库侧。
+⇒ ⚠️ 用 DDL 的 `DEFAULT now()` 会引入**另一个时钟源**（PG 服务器）⇒ 且 DDL 根本**没有**这个 DEFAULT。
+
+### 32.3 🔴 对拍工具本身有 4 个缺陷 ⇒ 本轮一并修（否则「转绿」是假的）
+
+| # | 工具缺陷 | 后果 | 修法 |
+|---|---|---|---|
+| ① | `PARAM_RE` 只匹配**带引号**的 ⇒ PG 对 NULL 参数印的是**不带引号的** `NULL` ⇒ **整条参数被丢掉** | **静默**：分不清「绑了 NULL」与「根本没提到这个参数」 | 正则改为 `(NULL\|'…')`，NULL 存成 `None` |
+| ② | `normalize()` 把 `$N` 改写成 `?` ⇒ 值提取跑在**归一化后**的 SQL 上 | Go 侧每个值都成了 `?` ⇒ 值比较全废 | 值提取改跑**原始** SQL |
+| ③ | 比对器**只比列集**，不问 DDL | 把「值其实相同」误报成语义差异（实测 **3 列**：technical_offset / technical_received_at / delivered_at） | 引入 **DDL 感知**：`schema.__meta__` 带 `column_default` + `is_nullable` ⇒ 少写一列 ⇒ 取 DEFAULT（无则 NULL）⇒ 比**有效值** |
+| ④ | **L1 响应比对是精确字符串相等**，而两侧是**两个独立进程** | 时间戳毫秒值**必然不同** ⇒ 该信号**结构上恒红** ⇒ 判别不了「修没修」 | 归一化：`c=`/`u=` 后是 **≥2 位数字** ⇒ `<ts>`；`0` 保持 `0`（= 没有值） |
+
+### 32.4 🟡 「多投影一列」**不必然**是行为差异 ⇒ 走**带出处的显式登记**
+
+Go 的 legacy 判定查 marker 用 `SELECT *`（GORM 的 `Take(&marker)`）⇒ 取回整表 **9 列**；
+RAG 显式写 **8 列** ⇒ 探针报「投影列集不同」。
+
+⇒ 🔴 **核到根因**：Go 的 struct `FavoriteLegacyFactMarker`（`internal/model/favorite_fact.go:28-37`）
+**只有 8 个字段、没有 `approved_at`** ⇒ Go 把这一列取回来后**在 struct 映射层就丢弃**
+⇒ 判定条件（`favorite_fact.go:228-232`）也从不引用它 ⇒ **行为等价**。
+
+⇒ 探针**机械判不了**「下游用不用这一列」⇒ 不许它自己猜 ⇒ 走
+**`tools/sql-statement-probe/favorite/equivalences.tsv`**：每条都要指到 Go 真源具体行，
+且**出处会被自动校验**（文件不存在 / 行号越界 ⇒ **该条作废** ⇒ 差异照旧报成 SEMANTIC）
+⇒ 「把红改成绿」必须**拿出能被验证的证据**，不能靠改开关。
+
+### 32.5 🔴 变异验证（防假绿）：**探针自身 6 条 + 产品级 2 条**
+
+| 层 | 变异 | 期望 | 实测 |
+|---|---|---|---|
+| 探针 | `drop_lock` | 抓到 lock 维度 | ✅ |
+| 探针 | `drop_write_col`（**保对齐**地删末列 + 末值） | 抓到 write_cols 维度 | ✅ |
+| 探针 | `extra_stmt` | 抓到 statement_count | ✅ |
+| 探针 | `where_col` | 抓到 where_cols | ✅ |
+| 探针 | `noop_projection`（阴性对照） | **不得**报语义差异 | ✅ |
+| 探针 | `drop_write_col_with_default`（**新增**阴性对照：删掉 `technical_offset` 这个 **DEFAULT 0** 的列） | **不得**报语义差异 | ✅ ⇒ 证明 **DDL 感知判定真在工作**，不是「把差异全吃掉」 |
+| **产品** | 🔴 改坏 `insertFolder`（不绑时间列） | 探针**转红** | ✅ **语义差异 1 · L1 响应不同 1 · EXIT=1** |
+| **产品** | 🔴 改坏 `updateNameByFolderId`（不推 `update_time`） | 探针**转红** | ✅ **语义差异 1 · EXIT=1** |
+
+⇒ ⚠️ **变异脚本本身踩过的坑**（已在代码注释里）：旧变异只删列不删值 ⇒ 列/值**错位**
+⇒ 新版比对器判成「不可判定」⇒ **抓不到** ⇒ **假绿** ⇒ 必须**保对齐**地删列 + 删值。
+
+### 32.6 ⚠️ 两层信号**各管一类**，缺一不可（产品级变异 M2 暴露的）
+
+M2（改名不推进 `update_time`）里 **L1 差异 = 0**，只有 **write_cols 维度**报了差异。
+⇒ 原因：归一化把「推进 / 不推进」抹平成「有值 / 无值」⇒ L1 那层管不了「值变了」。
+
+⇒ ⇒ **两层互补**：
+| 层 | 管的类 | 抓不到 |
+|---|---|---|
+| **L1 归一化** | 「**有没有值**」（NULL→0 vs 真实毫秒） | 「值变了但都非零」 |
+| **write_cols（有效值）** | 「**列写没写 / 写的值同不同**」 | 「两侧都写了同一列但值不同」（**跨进程本就不可比**，不判） |
+
+⇒ ⇒ 对本域，这两类**恰好覆盖全部 4 处漂移** ⇒ 组合起来是完整的。
+
+### 32.7 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| **SQL 语句层探针** | ✅ **语义差异 0 · L1 响应不同 0 · EXIT=0**（第二十轮是 10 / 3 / 1）⇒ **两侧语句层语义一致** |
+| **探针变异自检** | ✅ **6/6 全通过**（4 阳性 + 2 阴性对照） |
+| **产品级变异** | ✅ **2/2 转红**（M1 语义差异 1 + L1 差异 1；M2 语义差异 1）⇒ 绿是**有证据的绿** |
+| **基线可复现** | ✅ 三次独立运行（干净 / M1 / M2 / 干净）采集统计一致（记录 855 / 语句 594 / marker 46 / go 164 / rag 302） |
+| **产品代码** | ✅ 4 处漂移已修（3 处 mapper + 2 处 javadoc 订正）· **新增 1 个 `Clock` 字段**（`FavoriteDomainService`） |
+| **新增守门测试** | ✅ `FavoriteFolderItemTimeColumnTest`（**5 例** · **真 PG** + 真 Flyway + 真 mapper）⇒ 断言 folder/item 的时间列是**应用层传入值**、改名**推进** `update_time`、三列**无 DEFAULT**、outbox 两个投递列是**空串非 NULL**<br>✅ **变异验证**：改坏 `insertFolder` ⇒ **2 例转红 · EXIT=1** ⇒ 绿是**有证据的绿** |
+| **全量测试** | ✅ **105 例 / 0 失败 / 0 错误 / 3 skip · BUILD SUCCESS**（100 + 新增 5）<br>⚠️ 期间**踩到一次假红**（34 例红在 `favorite-api`）⇒ 确诊是**同工作树并发跑 maven**（探针自己会 `mvn package` + `mvn test` ⇒ 两次 maven 同写一个 `target/`）⇒ **单独重跑全绿** ⇒ 坑档 **PIT-FAV-RPC-032** |
+| **另外三个探针** | ✅ grpc-contract EXIT=0 · authority-live EXIT=0 · api-full-parity EXIT=0（32 case：SAME 24 / SAME_CODE 1 / SAME_BODY 2 / SAME_STATUS 4 / OBS 1）|
+| **共享面** | ✅ **零改动**（`service/common/**` · `docs/DRIFT/_INDEX.md` · `docs/DRIFT/global/**` · `tools/check-ledger-selfcheck.py` 全未碰） |

@@ -22,6 +22,7 @@ SQL 语句层对拍 · **比对器** —— 比「两侧的语义签名」，不
 """
 
 import json
+import os
 import re
 import sys
 from collections import OrderedDict
@@ -30,6 +31,13 @@ from collections import OrderedDict
 SEMANTIC = "SEMANTIC"
 ORM_GENERIC = "ORM-GENERIC"
 EQUIVALENT = "EQUIVALENT"
+# 🔴 第二十三轮：**落库值不可判定**（有列集差异，但机械判不出值是否相同）
+#   —— 不是「已证明的差异」，也不是「已证明的等价」⇒ **单独一档，不误判为失败**。
+UNDECIDABLE_CLS = "UNDECIDABLE"
+
+# 🔴 第二十三轮：人工判定的等价台账（全局，由 main() 装载）
+#   (case_id, dim, table, column) → {anchor, reason, ok, why}
+ADJ = OrderedDict()
 
 # ════════════════════════════════════════════════════════════════════════════════
 # 归一化
@@ -162,6 +170,250 @@ def resolve_count(sql, params, keyword):
     return None
 
 
+# ════════════════════════════════════════════════════════════════════════════════
+# 🔴 2026-10-26 第二十三轮：**写入值**（写列集 ≠ 落库值）
+#
+# 「写列集不同」**不等于**「落库值不同」：少写一列时 DB 会用该列的 DEFAULT 补上
+# （没有 DEFAULT 才是 NULL）⇒ 只比列集会把「值其实相同」误报成语义差异。
+# 实测三例：technical_offset（DDL DEFAULT 0 ≡ Go 显式写的 0）·
+#          technical_received_at / delivered_at（两侧都是 NULL）。
+# ⇒ 判定必须落到**有效值**上：写了 ⇒ 取绑定的值；没写 ⇒ 取 DDL 的 DEFAULT / NULL。
+# ════════════════════════════════════════════════════════════════════════════════
+
+NULL_TOKEN = "<NULL>"
+UNDECIDABLE = "<UNDECIDABLE>"
+NOTNULL_MISSING = "<NOTNULL-MISSING>"
+
+# 非确定性 DEFAULT ⇒ 两侧的值天然不同（但语义等价）⇒ **不可机械判定**
+NONDET_DEFAULT_RE = re.compile(
+    r"(?i)\b(now\(\)|clock_timestamp\(\)|nextval\(|random\(\)|gen_random_uuid\(\)"
+    r"|uuid_generate_v4\(\)|current_timestamp|current_time|localtime|timeofday)")
+
+
+def _paren_content(text, start):
+    """start 指向 '(' ⇒ 返回 (括号内文本, 结束下标)。"""
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[start + 1:i], i + 1
+    return None, len(text)
+
+
+def _norm_value(v):
+    """参数值 → 可比较的 token。"""
+    if v is None:
+        return NULL_TOKEN
+    s = str(v)
+    return "''" if s == "" else s
+
+
+def _literal_token(expr):
+    """SQL 字面量 / DEFAULT 表达式 → token。"""
+    t = expr.strip()
+    if t.upper() == "NULL":
+        return NULL_TOKEN
+    if t in ("''", '""'):
+        return "''"
+    # 去掉类型转换后缀（$4::jsonb / 'x'::text 之类）
+    t = re.sub(r"::[\w\.\[\]\" ]+$", "", t).strip()
+    return t
+
+
+def _expr_token(expr, params):
+    """一个 VALUES / SET 项 → token。"""
+    e = expr.strip()
+    m = re.match(r"^\$(\d+)(?:\s*::[\w\.\[\]\" ]+)?$", e)
+    if m:
+        pnum = m.group(1)
+        if pnum not in params:
+            return "<UNBOUND:%s>" % pnum
+        return _norm_value(params[pnum])
+    return _literal_token(e)
+
+
+def _values_map(sql, cols, params):
+    """INSERT 的 VALUES 列表 → {列: token}（按位置对应）。
+
+    ⚠️ **必须传原始 SQL**：normalize() 会把 `$N` 改写成 `?`、把字符串字面量也改成 `?`
+       ⇒ 在归一化后的 SQL 上做位置映射 ⇒ 参数**全丢**（实测：Go 侧每个值都成了 `?`）。
+    ⚠️ 项数与列数不符 ⇒ **不猜**（返回空 ⇒ 上层判「不可判定」而不是「值不同」）。
+    """
+    m = re.search(r"(?i)\bvalues\s*", sql)
+    if not m:
+        return {}
+    p = sql.find("(", m.end())
+    if p < 0:
+        return {}
+    body, _ = _paren_content(sql, p)
+    if body is None:
+        return {}
+    items = split_top_level(body, seps=(",",))
+    if len(items) != len(cols):
+        return {}
+    out = {}
+    for i, col in enumerate(cols):
+        out[col] = _expr_token(items[i], params)
+    return out
+
+
+def _set_map(sql, params):
+    """UPDATE 的 SET 段 → {列: token}（同样要传**原始** SQL）。"""
+    m = re.search(r"(?i)\bset\s+(.*?)(\bwhere\b|\breturning\b|\border by\b|\blimit\b|$)",
+                  sql, re.S)
+    if not m:
+        return {}
+    out = {}
+    for assign in split_top_level(m.group(1), seps=(",",)):
+        mm = re.match(r"^([\w\.\"]+)\s*=\s*(.+)$", assign, re.S)
+        if mm:
+            col = mm.group(1).split(".")[-1].strip('"')
+            out[col] = _expr_token(mm.group(2), params)
+    return out
+
+
+def default_token(col, table, schema_meta):
+    """该列**没被写**时的有效值：DDL 的 DEFAULT / NULL / 「NOT NULL 且无 DEFAULT ⇒ 写不进去」。"""
+    meta = (schema_meta.get(table) or {}).get(col) or {}
+    d = meta.get("default")
+    if d is None:
+        if str(meta.get("nullable", "YES")).upper() == "NO":
+            # NOT NULL 且无 DEFAULT ⇒ 省略这一列 ⇒ INSERT 会**报错**，不是「写成 NULL」
+            return NOTNULL_MISSING
+        return NULL_TOKEN
+    if NONDET_DEFAULT_RE.search(d):
+        return UNDECIDABLE
+    return _literal_token(d)
+
+
+def analyze_write_cols(g, r, schema_meta):
+    """写列集差异 ⇒ 逐列判定「落库值是否真的不同」。
+
+    返回 (equal, diff, undecidable)；每项 = (列, Go 值, RAG 值)。
+    """
+    gv = g.get("write_vals") or {}
+    rv = r.get("write_vals") or {}
+    g_cols = g.get("write_cols", [])
+    r_cols = r.get("write_cols", [])
+    only_go = [c for c in g_cols if c not in r_cols]
+    only_rag = [c for c in r_cols if c not in g_cols]
+    equal, diff, undec = [], [], []
+    for col in only_go + only_rag:
+        g_tok = gv.get(col)
+        if g_tok is None:
+            g_tok = default_token(col, g.get("table"), schema_meta)
+        r_tok = rv.get(col)
+        if r_tok is None:
+            r_tok = default_token(col, r.get("table"), schema_meta)
+        # 🔴 **不可判定**的情形：某侧有写列但**值没解出来**（如 VALUES 项数与列数不符）
+        #   ⇒ 绝不能当成「值不同」（那是**猜**）⇒ 归入 undecidable（报出来让人看）。
+        if (g.get("write_cols") and not gv) or (r.get("write_cols") and not rv):
+            undec.append((col, g_tok, r_tok))
+        elif UNDECIDABLE in (g_tok, r_tok):
+            undec.append((col, g_tok, r_tok))
+        elif g_tok == r_tok:
+            equal.append((col, g_tok, r_tok))
+        else:
+            diff.append((col, g_tok, r_tok))
+    return equal, diff, undec
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# 🔴 2026-10-26 第二十三轮：L1 响应形状的**归一化**
+# ════════════════════════════════════════════════════════════════════════════════
+
+# `c=` / `u=` 后是 **≥2 位**的数字 ⇒ 当作时间戳
+L1_TS_RE = re.compile(r"([cu])=(\d{2,})")
+
+
+def normalize_l1(text):
+    """L1 形状里的时间戳按「**有值 / 无值**」分类。
+
+    🔴 **为什么必须分类**：两侧是**两个独立进程** ⇒ 同一时刻的毫秒值**必然不同**
+    ⇒ 精确相等**永远不成立** ⇒ 这个信号**恒红** ⇒ 判别不了「修没修」
+    ⇒ 第二十轮起它就一直红着（3 例），但那 3 例里**真漂移与非漂移长得一样**。
+
+    ⇒ 真正有语义差别的是「**有没有值**」：
+      · Go 侧 GORM 的 autoCreateTime ⇒ 真实毫秒
+      · RAG 侧若漏绑 ⇒ NULL ⇒ {@code unixMillis(null)} ⇒ 0
+    ⇒ 规则：`c=` / `u=` 后是 **≥2 位的数字** ⇒ `<ts>`；是 `0` ⇒ 保持 `0`（= 没有值）。
+    ⚠️ `n=1` 这类计数**不受影响**（正则要求 `c=` / `u=` 前缀）。
+    """
+    return L1_TS_RE.sub(lambda m: "%s=<ts>" % m.group(1), text)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# 🔴 2026-10-26 第二十三轮：**人工判定的等价台账**（投影差异）
+#
+# 「Go 多投影了一列」**不必然**是行为差异 —— 取决于**下游用不用这一列**。
+# 这件事**探针机械判不了**（它看不到应用代码）⇒ 不能让探针自己猜。
+# ⇒ 走**带出处的显式登记**：每条都要指到 Go 真源的具体行，且**出处会被校验**
+#    （文件不存在 / 行号越界 ⇒ 该条**作废** ⇒ 差异照旧报成 SEMANTIC）。
+# ⇒ 这样「把红改成绿」必须**拿出证据**，而不是改个开关。
+# ════════════════════════════════════════════════════════════════════════════════
+
+EQUIV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "equivalences.tsv")
+
+
+def load_equivalences(path=None, go_root=None):
+    """读等价台账 ⇒ {(case_id, dim, table, column): {anchor, reason, ok, why}}。"""
+    p = path or EQUIV_FILE
+    go_root = go_root or os.environ.get("GO_REPO", "")
+    out = OrderedDict()
+    if not os.path.exists(p):
+        return out
+    with open(p, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.rstrip("\n")
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 6:
+                parts = line.split("|")
+            if len(parts) < 6:
+                continue
+            cid, dim, table, column, anchor, reason = [x.strip() for x in parts[:6]]
+            ok, why = verify_anchor(go_root, anchor)
+            out[(cid, dim, table, column)] = {
+                "anchor": anchor, "reason": reason, "ok": ok, "why": why,
+            }
+    return out
+
+
+def adj_lookup(case_id, dim, table, column):
+    """查等价台账 ⇒ 先精确匹配用例，再退到 `*`（与用例无关的判定）。"""
+    e = ADJ.get((case_id, dim, table, column))
+    if e is None:
+        e = ADJ.get(("*", dim, table, column))
+    return e
+
+
+def verify_anchor(go_root, anchor):
+    """校验 Go 出处：文件存在 + 行号在范围内 ⇒ (ok, why)。"""
+    if not anchor or ":" not in anchor:
+        return False, "出处格式不对（要 <file>.go:<行号或行号区间>）"
+    rel, _, rng = anchor.rpartition(":")
+    if not rel.endswith(".go"):
+        return False, "出处不是 .go 文件"
+    if not go_root:
+        return False, "未提供 Go 真源根目录（GO_REPO）⇒ 无法校验出处"
+    path = os.path.join(go_root, rel)
+    if not os.path.exists(path):
+        return False, "出处文件不存在：%s" % rel
+    n = sum(1 for _ in open(path, "r", encoding="utf-8", errors="replace"))
+    lo = rng.split("-")[0].strip()
+    try:
+        lo_i = int(lo)
+    except ValueError:
+        return False, "出处行号不可解析：%s" % rng
+    if lo_i < 1 or lo_i > n:
+        return False, "出处行号越界（%s 共 %d 行）" % (lo, n)
+    return True, "出处已校验（%s，共 %d 行）" % (rel, n)
+
+
 def signature(sql, schema, params=None):
     """把一条 SQL 变成语义签名（dict）。"""
     s = normalize(sql)
@@ -170,6 +422,7 @@ def signature(sql, schema, params=None):
         "kind": "OTHER",
         "table": None,
         "write_cols": [],
+        "write_vals": {},
         "where_cols": [],
         "lock": None,
         "order_by": [],
@@ -237,6 +490,9 @@ def signature(sql, schema, params=None):
         m = re.match(r"^insert into\s+[\w.]+\s*\(([^)]*)\)", s, re.S)
         if m:
             sig["write_cols"] = [c.strip() for c in m.group(1).split(",") if c.strip()]
+            # 🔴 第二十三轮：同时抓**写入值**（否则只能比列集 ⇒ 分不清「值相同」）
+            #   ⚠️ 传**原始** sql（normalize 把 $N 改成了 ?）
+            sig["write_vals"] = _values_map(sql, sig["write_cols"], params or {})
     elif sig["kind"] == "UPDATE":
         m = re.search(r"\bset\s+(.*?)(\bwhere\b|$)", s, re.S)
         if m:
@@ -247,6 +503,8 @@ def signature(sql, schema, params=None):
                 if mm:
                     cols.append(mm.group(1).split(".")[-1])
             sig["write_cols"] = cols
+            # ⚠️ 传**原始** sql（normalize 把 $N 改成了 ?）
+            sig["write_vals"] = _set_map(sql, params or {})
 
     # ── WHERE ──
     m = re.search(r"\bwhere\b(.*?)(\border by\b|\blimit\b|\boffset\b|\bfor update\b|\bfor share\b|$)",
@@ -454,6 +712,49 @@ def compare_case(case_id, go_sqls, rag_sqls, schema):
             if sorted(g[dim]) != sorted(r[dim]):
                 only_go = sorted(set(g[dim]) - set(r[dim]))
                 only_rag = sorted(set(r[dim]) - set(g[dim]))
+                if dim == "write_cols":
+                    # 🔴 第二十三轮：列集不同**不等于**落库值不同 ⇒ 逐列算**有效值**
+                    #   （写了 ⇒ 取绑定的值；没写 ⇒ 取 DDL 的 DEFAULT / NULL）
+                    eq, df, un = analyze_write_cols(g, r, schema.get("__meta__", {}))
+                    if df:
+                        items = ["%s（Go=%s ｜ RAG=%s）" % (c, gt, rt) for c, gt, rt in df]
+                        diffs.append({
+                            "dim": dim,
+                            "idx": i,
+                            "go": ",".join(sorted(g[dim])) or "-",
+                            "rag": ",".join(sorted(r[dim])) or "-",
+                            "cls": SEMANTIC,
+                            "note": "写入列集不同（仅 Go: %s ｜ 仅 RAG: %s）⇒ **落库值真的不同**：%s"
+                                    % (",".join(only_go) or "无", ",".join(only_rag) or "无",
+                                       "；".join(items)),
+                        })
+                    if un:
+                        items = ["%s（Go=%s ｜ RAG=%s）" % (c, gt, rt) for c, gt, rt in un]
+                        diffs.append({
+                            "dim": dim,
+                            "idx": i,
+                            "go": ",".join(sorted(g[dim])) or "-",
+                            "rag": ",".join(sorted(r[dim])) or "-",
+                            "cls": UNDECIDABLE_CLS,
+                            "note": "写入列集不同（仅 Go: %s ｜ 仅 RAG: %s）⇒ **落库值不可判定**"
+                                    "（需人工核）：%s"
+                                    % (",".join(only_go) or "无", ",".join(only_rag) or "无",
+                                       "；".join(items)),
+                        })
+                    if not df and not un:
+                        items = ["%s=%s" % (c, gt) for c, gt, rt in eq]
+                        diffs.append({
+                            "dim": dim,
+                            "idx": i,
+                            "go": ",".join(sorted(g[dim])) or "-",
+                            "rag": ",".join(sorted(r[dim])) or "-",
+                            "cls": EQUIVALENT,
+                            "note": "写入列集不同（仅 Go: %s ｜ 仅 RAG: %s）⇒ **落库值逐列相同**"
+                                    "（%s）⇒ 等价"
+                                    % (",".join(only_go) or "无", ",".join(only_rag) or "无",
+                                       "；".join(items) or "无差异列"),
+                        })
+                    continue
                 diffs.append({
                     "dim": dim,
                     "idx": i,
@@ -461,9 +762,6 @@ def compare_case(case_id, go_sqls, rag_sqls, schema):
                     "rag": ",".join(sorted(r[dim])) or "-",
                     "cls": SEMANTIC,
                     "note": {
-                        "write_cols": "写入列集不同（仅 Go: %s ｜ 仅 RAG: %s）"
-                                      "⇒ **落库值不同**（NULL / 零值 / 默认值）"
-                                      % (",".join(only_go) or "无", ",".join(only_rag) or "无"),
                         "where_cols": "过滤列集不同（仅 Go: %s ｜ 仅 RAG: %s）"
                                       % (",".join(only_go) or "无", ",".join(only_rag) or "无"),
                         "joins": "JOIN 的表集不同",
@@ -497,15 +795,39 @@ def compare_case(case_id, go_sqls, rag_sqls, schema):
             if sorted(gp) != sorted(rp):
                 only_go = sorted(set(gp) - set(rp))
                 only_rag = sorted(set(rp) - set(gp))
-                diffs.append({
-                    "dim": "projection",
-                    "idx": i,
-                    "go": ",".join(gp),
-                    "rag": ",".join(rp),
-                    "cls": SEMANTIC,
-                    "note": "投影列集不同（仅 Go: %s ｜ 仅 RAG: %s）"
-                            % (",".join(only_go) or "无", ",".join(only_rag) or "无"),
-                })
+                # 🔴 第二十三轮：多投影一列**不必然**是行为差异（取决于下游用不用）
+                #   ⇒ 走**带出处的显式登记**；出处校验不过 ⇒ 登记作废 ⇒ 仍报 SEMANTIC。
+                adj_go = [(c, adj_lookup(case_id, "projection", g["table"], c))
+                          for c in only_go]
+                adj_rag = [(c, adj_lookup(case_id, "projection", r["table"], c))
+                           for c in only_rag]
+                all_adj = all(e and e.get("ok") for _c, e in adj_go + adj_rag)
+                if all_adj and (adj_go or adj_rag):
+                    why = "；".join("%s ⇒ %s（Go 出处 %s）"
+                                    % (c, e["reason"], e["anchor"])
+                                    for c, e in adj_go + adj_rag if e)
+                    diffs.append({
+                        "dim": "projection",
+                        "idx": i,
+                        "go": ",".join(gp),
+                        "rag": ",".join(rp),
+                        "cls": EQUIVALENT,
+                        "note": "投影列集不同（仅 Go: %s ｜ 仅 RAG: %s）⇒ **已人工判定等价**：%s"
+                                % (",".join(only_go) or "无", ",".join(only_rag) or "无", why),
+                    })
+                else:
+                    bad = ["%s（%s）" % (c, e["why"] if e else "无登记")
+                           for c, e in adj_go + adj_rag if not (e and e.get("ok"))]
+                    diffs.append({
+                        "dim": "projection",
+                        "idx": i,
+                        "go": ",".join(gp),
+                        "rag": ",".join(rp),
+                        "cls": SEMANTIC,
+                        "note": "投影列集不同（仅 Go: %s ｜ 仅 RAG: %s）%s"
+                                % (",".join(only_go) or "无", ",".join(only_rag) or "无",
+                                   ("⇒ 未判定等价的列：%s" % "；".join(bad)) if bad else ""),
+                    })
         # RETURNING
         if g["returning"] != r["returning"]:
             diffs.append({
@@ -585,16 +907,24 @@ def render_report(data, cases_tsv, out_md):
             A("| `%s` | %s | %s%s |" % (cid, g, r, flag))
         A("")
     if l1_rows:
-        A("## 1b. L1 响应形状（**屏蔽雪花 ID，保留时间戳** ⇒ SQL 差异的对外后果）")
+        A("## 1b. L1 响应形状（**屏蔽雪花 ID**；时间戳按「**有值 / 无值**」分类 ⇒ 跨进程可比）")
+        A("")
+        A("> 🔴 **为什么时间戳要分类**（第二十三轮改）：两侧是**两个独立进程** ⇒ 同一时刻的毫秒值")
+        A("> **必然不同** ⇒ 精确相等**永远不成立** ⇒ 这个信号**恒红** ⇒ 判别不了「修没修」")
+        A("> ⇒ 真正有语义差别的是「**有没有值**」：Go 侧 GORM 的 autoCreateTime 给真实毫秒；")
+        A("> RAG 侧若漏绑 ⇒ NULL ⇒ `unixMillis(null)` ⇒ **0**。")
+        A("> ⇒ 规则：`c=` / `u=` 后是 **≥2 位的数字** ⇒ `<ts>`；是 `0` ⇒ 保持 `0`（= 没有值）。")
         A("")
         A("| 用例 | Go | RAG | 一致 |")
         A("|---|---|---|---|")
         l1_diff = 0
         for cid, g, r in l1_rows:
-            same = (g == r)
+            ng, nr = normalize_l1(g), normalize_l1(r)
+            same = (ng == nr)
             if not same:
                 l1_diff += 1
-            A("| `%s` | %s | %s | %s |" % (cid, g, r, "✅" if same else "🔴 **不同**"))
+            verdict = "✅" if same else "🔴 **不同**（归一化：Go `%s` vs RAG `%s`）" % (ng, nr)
+            A("| `%s` | %s | %s | %s |" % (cid, g, r, verdict))
         A("")
         A("⇒ **L1 响应不同：%d 例**（这是「SQL 层差异」对外可观察的直接证据）" % l1_diff)
         A("")
@@ -612,6 +942,7 @@ def render_report(data, cases_tsv, out_md):
         per_case_diffs[cid] = d
         sem = len([x for x in d if x["cls"] == SEMANTIC])
         og = len([x for x in d if x["cls"] == ORM_GENERIC])
+        und = len([x for x in d if x["cls"] == UNDECIDABLE_CLS])
         # 表里显示的是**剥离噪声后**的条数 ⇒ 与差异明细的口径一致
         go_clean, _ = strip_noise(go_sqls)
         rag_clean, _ = strip_noise(rag_sqls)
@@ -622,6 +953,8 @@ def render_report(data, cases_tsv, out_md):
         mark = ""
         if sem:
             mark = "🔴 **%d 处语义差异**" % sem
+        elif und:
+            mark = "🟠 %d 处**落库值不可判定**（需人工核）" % und
         elif og:
             mark = "🟡 %d 处 ORM 噪声" % og
         else:
@@ -634,6 +967,7 @@ def render_report(data, cases_tsv, out_md):
     A("")
     total_sem = 0
     total_og = 0
+    total_und = 0
     for cid, d in per_case_diffs.items():
         if not d:
             continue
@@ -648,23 +982,29 @@ def render_report(data, cases_tsv, out_md):
               % (idxs, x["dim"], x["go"], x["rag"], x["cls"], x["note"]))
             if x["cls"] == SEMANTIC:
                 total_sem += 1
+            elif x["cls"] == UNDECIDABLE_CLS:
+                total_und += 1
             else:
                 total_og += 1
         A("")
-    if total_sem == 0 and total_og == 0:
+    if total_sem == 0 and total_og == 0 and total_und == 0:
         A("（无差异）")
         A("")
 
     A("## 4. 结论")
     A("")
     A("- **语义差异（SEMANTIC）：%d 处**" % total_sem)
-    A("- **ORM 生成噪声（ORM-GENERIC）：%d 处**" % total_og)
+    A("- **落库值不可判定（UNDECIDABLE）：%d 处**" % total_und)
+    A("- **ORM 生成噪声 / 已证明等价（ORM-GENERIC / EQUIVALENT）：%d 处**" % total_og)
     A("- **L1 响应不同：%d 例**" % l1_diff)
     A("")
     if total_sem:
         A("🔴 存在语义差异 ⇒ **必须逐条人工核证**（可能是真缺陷，也可能需要登记为有意偏离）。")
     else:
         A("✅ 两侧在**语句层**的语义签名一致（锁 / 事务边界 / WHERE / 写集合 / 投影 / 排序）。")
+    if total_und:
+        A("")
+        A("🟠 有 **%d 处「落库值不可判定」** ⇒ 不是「已证明等价」，是**机械判不了** ⇒ 需人工核。" % total_und)
     if l1_diff:
         A("")
         A("🔴 **L1 响应已经不同** ⇒ 上面的 SQL 差异**对外可观察**，不是「内部实现细节」。")
@@ -699,6 +1039,27 @@ def render_report(data, cases_tsv, out_md):
 # 变异自检（防假绿）
 # ════════════════════════════════════════════════════════════════════════════════
 
+def _split_insert(sql):
+    """INSERT 语句拆成部件（用于**保对齐**地删列/删值）。
+
+    返回 (head, cols_text, mid, vals_text, tail) 或 None。
+    ⚠️ 必须在**原串**上算好所有偏移再重组 ⇒ 否则两次替换的偏移会互相错位
+       （实测踩过：拼出了 `...("create_time")) VALUES ($1,$2,$3,$$1, $2, $3, $4)G "id"`）。
+    """
+    m = re.match(r"(?is)^(?P<head>insert into\s+[\w.\"]+\s*\()"
+                 r"(?P<cols>[^)]*)(?P<cmid>\)\s*values\s*\()"
+                 r"(?P<vals>[^)]*)(?P<tail>\).*)$", sql)
+    if not m:
+        return None
+    return (m.group("head"), m.group("cols"), m.group("cmid"),
+            m.group("vals"), m.group("tail"))
+
+
+def _rebuild_insert(parts, new_cols, new_items):
+    head, _cols, cmid, _vals, tail = parts
+    return (head + ", ".join(new_cols) + cmid + ", ".join(new_items) + tail)
+
+
 def mutate(data, kind):
     """对抽取结果做**定向变异** ⇒ 期望比对器必须抓到（否则比对器是假绿）。
 
@@ -718,11 +1079,36 @@ def mutate(data, kind):
                     rec["sql"] = re.sub(r"(?i)\s*FOR UPDATE", "", rec["sql"])
                     return d, "lock", cid
         elif kind == "drop_write_col":
+            # 🔴 **2026-10-26 第二十三轮改**：变异必须**保持对齐**。
+            #   旧变异只删「列清单」的第一项、不删 VALUES ⇒ 列数与值数**错位**
+            #   ⇒ 新版比对器（按**有效值**判定）会判成「不可判定」⇒ **抓不到** ⇒ 假绿。
+            #   ⇒ 现在删**最后一列 + 它的值**（位置对应 ⇒ 剩余仍对齐）
+            #   ⇒ 并且**挑一个「可空且无 DEFAULT」的末列**（⇒ 该列的有效值 = NULL，
+            #      与对侧的真实值**必然不同** ⇒ 比对器必须报 SEMANTIC）。
+            meta = d["schema"].get("__meta__", {})
             for i, rec in enumerate(go_list):
-                if rec["sql"].strip().lower().startswith("insert into"):
-                    rec["sql"] = re.sub(r"(?i)(insert into\s+[\w.]+\s*\()([^,]+),\s*", r"\1",
-                                        rec["sql"], count=1)
-                    return d, "write_cols", cid
+                sql = rec["sql"]
+                if not sql.strip().lower().startswith("insert into"):
+                    continue
+                parts = _split_insert(sql)
+                if not parts:
+                    continue
+                # ⚠️ Go 的列名带双引号（"technical_offset"）⇒ 查 DDL 元信息前要剥掉
+                cols = [c.strip().strip('"') for c in parts[1].split(",") if c.strip()]
+                items = [x for x in split_top_level(parts[3], seps=(",",)) if x.strip()]
+                if len(cols) < 2 or len(items) != len(cols):
+                    continue
+                last = cols[-1]
+                table_m = re.match(r"(?i)insert into\s+([\w.\"]+)", sql)
+                table = table_m.group(1).split(".")[-1].strip('"') if table_m else ""
+                col_meta = (meta.get(table) or {}).get(last) or {}
+                if col_meta.get("default") is not None:
+                    continue
+                if str(col_meta.get("nullable", "YES")).upper() != "YES":
+                    continue
+                # 删末列 + 删末值（**保对齐** ⇒ 用整条重组，别做偏移手术）
+                rec["sql"] = _rebuild_insert(parts, cols[:-1], items[:-1])
+                return d, "write_cols", cid
         elif kind == "extra_stmt":
             go_list.append({"sql": "SELECT 1", "params": {}})
             return d, "statement_count", cid
@@ -747,6 +1133,41 @@ def mutate(data, kind):
                 rec["sql"] = re.sub(r"(?i)^(\s*)select\s+\*", r"\1SELECT " + ", ".join(cols),
                                     rec["sql"], count=1)
                 return d, None, cid
+        elif kind == "drop_write_col_with_default":
+            # 🔴 **2026-10-26 第二十三轮新增的阴性对照**：
+            #   删掉一个「**有确定性 DEFAULT**」的列（如 technical_offset 的 DEFAULT 0）
+            #   ⇒ 该列在两侧的**有效值相同**（一侧显式写 0、另一侧由 DEFAULT 补 0）
+            #   ⇒ 比对器**不得**报语义差异。
+            #   ⇒ 它证明的是：「DDL 感知的等价判定**真的在工作**」，
+            #      而不是「把差异全吃掉」（否则前面的阳性变异就毫无意义）。
+            meta = d["schema"].get("__meta__", {})
+            for i, rec in enumerate(go_list):
+                sql = rec["sql"]
+                if not sql.strip().lower().startswith("insert into"):
+                    continue
+                parts = _split_insert(sql)
+                if not parts:
+                    continue
+                # ⚠️ Go 的列名带双引号（"technical_offset"）⇒ 查 DDL 元信息前要剥掉
+                cols = [c.strip().strip('"') for c in parts[1].split(",") if c.strip()]
+                table_m = re.match(r"(?i)insert into\s+([\w.\"]+)", sql)
+                table = table_m.group(1).split(".")[-1].strip('"') if table_m else ""
+                items = [x for x in split_top_level(parts[3], seps=(",",)) if x.strip()]
+                if len(items) != len(cols):
+                    continue
+                hit = -1
+                for idx, c in enumerate(cols):
+                    cmeta = (meta.get(table) or {}).get(c) or {}
+                    dflt = cmeta.get("default")
+                    if dflt and not NONDET_DEFAULT_RE.search(str(dflt)):
+                        hit = idx
+                        break
+                if hit < 0:
+                    continue
+                new_cols = cols[:hit] + cols[hit + 1:]
+                new_items = items[:hit] + items[hit + 1:]
+                rec["sql"] = _rebuild_insert(parts, new_cols, new_items)
+                return d, None, cid
     return None, None, None
 
 
@@ -757,7 +1178,8 @@ def run_mutation_test(data, schema):
                          ("drop_write_col", "write_cols"),
                          ("extra_stmt", "statement_count"),
                          ("where_col", "where_cols"),
-                         ("noop_projection", None)):
+                         ("noop_projection", None),
+                         ("drop_write_col_with_default", None)):
         mutated, expect_dim, cid = mutate(data, kind)
         if mutated is None:
             print("  ⚠️ %-16s ⇒ 全部用例里都找不到可变异的语句（**自检没跑起来**）" % kind)
@@ -788,6 +1210,7 @@ def run_mutation_test(data, schema):
 # ════════════════════════════════════════════════════════════════════════════════
 
 def main():
+    global ADJ
     args = sys.argv[1:]
     if args and args[0] == "--mutation-test":
         if len(args) < 2:
@@ -795,6 +1218,7 @@ def main():
             return 2
         with open(args[1], "r", encoding="utf-8") as fh:
             data = json.load(fh)
+        ADJ = load_equivalences()
         failures = run_mutation_test(data, data["schema"])
         if failures:
             print("[mutation-test] ❌ %d 项失败" % len(failures))
@@ -807,11 +1231,14 @@ def main():
         return 2
     with open(args[0], "r", encoding="utf-8") as fh:
         data = json.load(fh)
+    ADJ = load_equivalences()
     cases_tsv = args[1] if len(args) > 1 and args[1] else None
     out_md = args[2] if len(args) > 2 else "report.md"
 
     sem, og, l1 = render_report(data, cases_tsv, out_md)
-    print("[compare] 语义差异 %d 处 / ORM 噪声 %d 处 / L1 响应不同 %d 例 ⇒ %s" % (sem, og, l1, out_md))
+    print("[compare] 语义差异 %d 处 / ORM 噪声与已证明等价 %d 处 / L1 响应不同 %d 例 ⇒ %s"
+          % (sem, og, l1, out_md))
+    # 🔴 第二十三轮：**UNDECIDABLE 不算失败**（不是「已证明的差异」）⇒ 但报告里显著列出
     return 1 if (sem or l1) else 0
 
 

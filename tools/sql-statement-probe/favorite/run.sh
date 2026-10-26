@@ -342,8 +342,13 @@ ok "PG 日志 ${#TMP} 字节级位置：$(wc -l < "${TMP}/pg.log" | tr -d ' ') �
 # 🔴 **必须导全部表**（不能只导业务三张）：Go 侧的 `SELECT *` 会打到
 #    `favorite_legacy_fact_marker`（favoriteAssertionSchema 的 legacy 判定）
 #    ⇒ 快照漏了它 ⇒ `SELECT *` 展开成空集 ⇒ 投影被误报成「Go 少投影了 8 列」。
+# 🔴 **2026-10-26 第二十三轮**：COL 行的第 4/5 槽改带 **DDL 元信息**
+#    （第 4 槽 = column_default，无 DEFAULT 时 <NODEFAULT>；第 5 槽 = is_nullable）
+#    ⇒ 比对器才能判「少写一列 ⇒ DB 用 DEFAULT 补 ⇒ 落库值其实相同」
+#    （此前只知道列名 ⇒ 把 technical_offset（DEFAULT 0）误报成「落库值不同」）。
 docker exec "${PG_CONTAINER}" psql -U postgres -h 127.0.0.1 -d first_db -At -F $'\t' \
-  -c "SELECT 'COL', c.table_name, c.ordinal_position::text, '', '', c.column_name
+  -c "SELECT 'COL', c.table_name, c.ordinal_position::text,
+             coalesce(c.column_default, '<NODEFAULT>'), c.is_nullable, c.column_name
         FROM information_schema.columns c
        WHERE c.table_schema='public'
       UNION ALL
@@ -371,6 +376,9 @@ python3 "${HERE}/extract.py" "${TMP}/pg.log" "${TMP}/schema.tsv" "${TMP}/extract
   || { bad "抽取失败"; exit 2; }
 
 say "比对两侧语义签名"
+# 🔴 第二十三轮：导出 GO_REPO ⇒ 比对器能**校验等价台账里的 Go 出处**
+#    （文件不存在 / 行号越界 ⇒ 该条登记作废 ⇒ 差异照旧报成 SEMANTIC）
+export GO_REPO
 python3 "${HERE}/compare.py" "${TMP}/extracted.json" "${TMP}/cases.tsv" "${TMP}/report.md"
 RC=$?
 say "报告已写入 ${TMP}/report.md（KEEP_TMP=1 可保留）"

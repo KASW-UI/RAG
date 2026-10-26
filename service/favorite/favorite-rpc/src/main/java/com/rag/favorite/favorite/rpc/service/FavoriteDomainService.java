@@ -28,7 +28,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -89,6 +92,19 @@ public class FavoriteDomainService {
     private final FavoriteArticleSnapshotResolver articleResolver;
     private final FavoriteRpcMetrics metrics;
     private final SnowflakeBean snowflake;
+    /**
+     * 🔴 2026-10-26 第二十三轮新增：应用层时钟。
+     *
+     * <p>Go 侧 GORM 的 {@code autoCreateTime} / {@code autoUpdateTime} 用
+     * {@code stmt.DB.NowFunc()}（= {@code time.Now()}）⇒ <b>Go 进程时钟</b>；
+     * 本实现要写同样的列 ⇒ 必须用<b>Java 进程时钟</b> ⇒ 不能用 PG 的 {@code DEFAULT now()}
+     * （另一个时钟源）。
+     *
+     * <p>与 {@code FavoriteFactWriteService} 同款：构造器里直接 {@code Clock.systemUTC()}
+     * （<b>不是</b> Spring bean 注入 ⇒ 不会动装配层 ⇒ 零 wiring 风险），用
+     * {@link Instant#now(Clock)} 取值（可测）。
+     */
+    private final Clock clock;
 
     public FavoriteDomainService(FavoriteFolderMapper folderMapper,
                                  FavoriteItemMapper itemMapper,
@@ -104,6 +120,7 @@ public class FavoriteDomainService {
         this.articleResolver = articleResolver;
         this.metrics = metrics;
         this.snowflake = snowflake;
+        this.clock = Clock.systemUTC();
     }
 
     // ══════════════════════════ 1. 新增收藏夹 ══════════════════════════
@@ -156,7 +173,11 @@ public class FavoriteDomainService {
 
             // Go: service/favorite/rpc/internal/logic/create_favorite_folder_logic.go:97-113 —— InsertFolder：23505 ⇒ 5203，否则 Internal/5008
             try {
-                folderMapper.insertFolder(folderId, userId, name);
+                // 🔴 2026-10-26 第二十三轮修：显式绑定 create_time / update_time（Go 的 GORM
+                //   在 INSERT 时用**进程时钟**填这两个 auto-time 字段 ⇒ 不绑就是 NULL ⇒ L1 时间戳 = 0）。
+                //   Go 侧 gorm create.go:246 的 curTime 整条 INSERT 只取一次 ⇒ 两个字段同一时刻。
+                OffsetDateTime now = Instant.now(clock).atOffset(ZoneOffset.UTC);
+                folderMapper.insertFolder(folderId, userId, name, now, now);
             } catch (DataAccessException e) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 if (FavoriteRpcSupport.isUniqueViolation(e)) {
@@ -546,7 +567,10 @@ public class FavoriteDomainService {
 
             // Go: service/favorite/rpc/internal/logic/update_favorite_folder_name_logic.go:111-122 —— Update：23505 ⇒ 5203，否则 Internal/5008
             try {
-                folderMapper.updateNameByFolderId(folderId, name);
+                // 🔴 2026-10-26 第二十三轮修：Go 的 map 形式 Update 会**自动追加** update_time
+                //   （gorm update.go:236-254）⇒ 不绑就是「改了名字但 updated_at 不动」⇒ L1 可观察。
+                folderMapper.updateNameByFolderId(folderId, name,
+                        Instant.now(clock).atOffset(ZoneOffset.UTC));
             } catch (DataAccessException e) {
                 result = FavoriteRpcLabels.RESULT_FAIL;
                 if (FavoriteRpcSupport.isUniqueViolation(e)) {

@@ -1,0 +1,28 @@
+# SQL 语句层对拍 · **人工判定的等价台账**
+#
+# ════════════════════════════════════════════════════════════════════════════════
+# 这个文件解决的是一个**探针机械判不了**的问题：
+#   「Go 多投影了一列」**不必然**是行为差异 —— 取决于**下游用不用这一列**。
+#   探针只看到 SQL，看不到应用代码 ⇒ 它**不许自己猜**。
+#
+# ⇒ 每条登记都必须：
+#   ① 指到 Go 真源的**具体行**（`file.go:行号` 或 `file.go:起-止`）
+#   ② 出处会被**自动校验**：文件不存在 / 行号越界 ⇒ **该条作废**
+#      ⇒ 差异照旧报成 SEMANTIC ⇒ 「把红改成绿」必须拿出**能被验证的证据**，
+#      不能靠改开关。
+#
+# 格式（制表符分隔）：
+#   <用例ID或*>  <维度>  <表名>  <列名>  <Go出处>  <理由>
+# ════════════════════════════════════════════════════════════════════════════════
+#
+# ── 1. favorite_legacy_fact_marker 的 approved_at ──────────────────────────
+#    现象：Go 的 legacy 判定查 marker 时是 `SELECT *`（GORM 的 Take(&marker)）
+#          ⇒ 取回**整表 9 列**；RAG 显式写 8 列 ⇒ 探针报「投影列集不同（仅 Go: approved_at）」。
+#    判定：**等价**。
+#    依据：Go 的 struct `FavoriteLegacyFactMarker` 只有 **8 个字段**，
+#          **没有** approved_at ⇒ Go 把这一列取回来了，但**在 struct 映射层就丢弃**，
+#          后续判定条件（ApprovalRef / SourceSnapshotSHA256 / …）也从不引用它
+#          ⇒ 读不读这一列，对行为**没有任何影响**。
+#    出处：service/favorite/rpc/internal/model/favorite_fact.go:28-37（struct 定义，8 个字段）
+#    用例：*（这条判定与用例无关 —— 任何一次 marker 查询都同样丢弃该列）
+*	projection	favorite_legacy_fact_marker	approved_at	service/favorite/rpc/internal/model/favorite_fact.go:28-37	Go 的 struct 只有 8 个字段、无 approved_at ⇒ Go 的 SELECT * 取回后**在 struct 映射层就丢弃** ⇒ 判定条件从不引用它 ⇒ 行为等价

@@ -112,9 +112,14 @@ public class FavoriteFactWriteService {
         }
 
         // Go: service/favorite/rpc/internal/model/favorite_fact.go:283-285 —— 先写业务行：唯一键冲突必须发生在 outbox 之前
+        // 🔴 2026-10-26 第二十三轮修：显式绑定 create_time（Go 的 GORM 用**进程时钟**填
+        //   autoCreateTime ⇒ 不绑就是 NULL ⇒ 对外 created_at = 0）。
+        //   ⚠️ 与下面的 outbox created_at 是**两次**取时（Go 侧同样是两次：item 由 GORM 填，
+        //   outbox 由 newFavoriteOutbox 的 now 参数填 —— favorite_fact.go:290）。
         itemMapper.insertItem(item.getFavoriteId(), item.getFolderId(), item.getUserId(),
                 item.getTargetId(), item.getTargetType(), item.getTargetRevision(),
-                item.getTitle(), item.getCover());
+                item.getTitle(), item.getCover(),
+                Instant.now(clock).atOffset(ZoneOffset.UTC));
 
         // Go: service/favorite/rpc/internal/model/favorite_fact.go:286-290 —— schema = m.subjectRefV2Facts ? 2 : 1
         int schema = properties.isSubjectRefV2Facts() ? 2 : 1;
