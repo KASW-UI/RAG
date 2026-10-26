@@ -1,8 +1,14 @@
 package com.rag.follow.follow.api.client;
 
 import com.rag.follow.follow.proto.FollowServiceGrpc;
+import net.devh.boot.grpc.client.config.GrpcChannelsProperties;
 import net.devh.boot.grpc.client.inject.GrpcClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.stereotype.Component;
+
+import java.time.Duration;
 
 /**
  * follow-rpc gRPC client —— 持有 {@code FollowServiceBlockingStub}。
@@ -67,9 +73,81 @@ import org.springframework.stereotype.Component;
  * ErrorServerCommon}），按 Go 的判据它们<b>会</b>计入熔断统计 ——
  * 这正是 Go 的行为，RAG 侧必须同样计，否则「下游频繁返回业务错误时的熔断阈值」
  * 就与 Go 不同。共享实现的 {@code isAcceptable} 已逐条对齐那六个 code。
+ *
+ * <h2>🔴 DRIFT-G1-002：启动期必须能连上 follow-rpc，否则进程起不来</h2>
+ *
+ * <p><b>Go 出处（逐层到消费点）</b>：
+ * <pre>
+ *   service/follow/api/internal/svc/servicecontext.go:27
+ *       FollowRpc: followservice.NewFollowService(zrpc.MustNewClient(c.FollowRpc)),
+ *   go-zero v1.10.2 zrpc/client.go:50-54
+ *       func MustNewClient(c RpcClientConf, ...) Client {
+ *           cli, err := NewClient(c, options...)
+ *           logx.Must(err)          ← 失败即 panic
+ *           return cli
+ *       }
+ *   go-zero v1.10.2 zrpc/internal/client.go:122-142（消费点）
+ *       timeCtx, cancel := context.WithTimeout(context.Background(), dialTimeout)   // dialTimeout = 3s（:18）
+ *       conn, err := grpc.DialContext(timeCtx, server, options...)                 // options 含 WithBlock()
+ *       if err != nil { return fmt.Errorf("rpc dial: %s, ... make sure rpc service %q is already started", ...) }
+ * </pre>
+ *
+ * <p>⇒ Go 侧启动时<b>阻塞拨号 3s</b>，连不上就 panic ⇒ <b>进程根本起不来</b>。
+ * ⇒ 修之前 RAG 侧是懒连接 ⇒ 表现为「<b>Pod Ready 但 100% 请求失败</b>」——
+ * <b>就绪探针语义不同</b>，K8s 里排障方向完全不一样。
+ *
+ * <h3>实现方式：用 devh 的<b>原生</b> {@code immediate-connect-timeout}，不自己写拨号检查</h3>
+ *
+ * <p>devh grpc-client-spring-boot-starter 3.1.0 的
+ * {@code AbstractChannelFactory.newManagedChannel(name)} 里已经有这套机制：
+ * <pre>
+ *   final Duration timeout = this.properties.getChannel(name).getImmediateConnectTimeout();
+ *   if (!timeout.isZero()) { connectOnStartup(name, channel, timeout); }
+ *   ...
+ *   if (!readyLatch.await(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+ *       throw new IllegalStateException("Can't connect to channel " + name);   // ← 启动直接失败
+ *   }
+ * </pre>
+ * ⇒ <b>与 Go 的 {@code zrpc.MustNewClient} 逐条同型</b>：都是「连不上 ⇒ 进程起不来」，
+ * 而不是「起来但请求全失败」。
+ *
+ * <p>本模块在 {@code application.yml} 里<b>只对 follow-rpc 这一个 channel</b> 打开它
+ * （{@code grpc.client.follow-rpc.immediate-connect-timeout: 3s}），<b>不设全局</b> ⇒ 理由：
+ * Go 侧 follow-api 的 {@code ServiceContext} 里<b>只有</b> {@code FollowRpc} 一个下游依赖
+ * （{@code service/follow/api/internal/svc/servicecontext.go:16-30}）
+ * ⇒ 若把超时设成全局，就会凭空多出一条 Go 侧不存在的启动期硬依赖。
+ *
+ * <h3>🔴 踩坑：<b>不能</b>用 {@code stub.getChannel()} 自己读连通性状态</h3>
+ *
+ * <p>生产里 channel 会被 {@code ClientInterceptors.interceptForward} 包成
+ * {@code io.grpc.ClientInterceptors$InterceptorChannel}，它<b>不暴露</b> {@code getState}
+ * （{@code getState} 只存在于 {@code io.grpc.ManagedChannel}）⇒ 手写检查在生产<b>永远为 false</b>
+ * ⇒ <b>follow-api 在任何环境下都起不来</b>。
+ * ⇒ 结论：用 devh 的 {@code immediate-connect-timeout}，不要自己摸 channel。
+ * （完整经过见 admin-api 的 {@code AdminRpcClient} 同款注释。）
+ *
+ * <h3>为什么还要留 {@link #afterPropertiesSet()} 这一道自检</h3>
+ *
+ * <p>{@code immediate-connect-timeout} 的<b>默认值是 {@code Duration.ZERO}（= 关闭）</b>
+ * ⇒ <b>「yml 里没写」就等于「机制没武装」</b>。
+ * 若有人删掉那一行，启动期硬失败会<b>静默消失</b>，而现象是
+ * 「Pod Ready 但 100% 请求失败」——<b>与 Go 的差异又回来了，而且没人会发现</b>。
+ * ⇒ 本方法在上下文启动的最后一刻断言<b>机制确实已武装</b>，否则直接让启动失败。
  */
 @Component
-public class FollowRpcClient {
+public class FollowRpcClient implements InitializingBean {
+
+    /** devh 里的 channel 名 = {@code @GrpcClient("follow-rpc")} 的值。 */
+    private static final String CHANNEL_NAME = "follow-rpc";
+
+    /**
+     * 拨号预算 —— 对齐 go-zero {@code zrpc/internal/client.go:18} 的 {@code dialTimeout = time.Second * 3}。
+     *
+     * <p>⚠️ 这个值<b>不</b>由本类持有，而是由 {@code application.yml} 的
+     * {@code grpc.client.follow-rpc.immediate-connect-timeout} 持有 ⇒
+     * 本常量只是<b>断言用</b>的期望值（{@code FollowApiStartupFailFastTest} 会核对 yml 里的真实值）。
+     */
+    public static final Duration DIAL_TIMEOUT = Duration.ofSeconds(3);
 
     /**
      * gRPC <b>客户端</b>超时（毫秒）—— 对应 Go {@code zrpc/config.go:34} 的
@@ -87,6 +165,36 @@ public class FollowRpcClient {
 
     @GrpcClient("follow-rpc")
     private FollowServiceGrpc.FollowServiceBlockingStub followServiceBlockingStub;
+
+    /**
+     * 仅为「拿到 channel 名对应的有效配置」而存在 —— 用来断言
+     * {@code immediate-connect-timeout} 确实已武装（见类注释末段）。
+     */
+    private final GrpcChannelsProperties channelProperties;
+
+    private static final Logger LOG = LoggerFactory.getLogger(FollowRpcClient.class);
+
+    public FollowRpcClient(GrpcChannelsProperties channelProperties) {
+        this.channelProperties = channelProperties;
+    }
+
+    @Override
+    public void afterPropertiesSet() {
+        Duration timeout = channelProperties.getChannel(CHANNEL_NAME).getImmediateConnectTimeout();
+        if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+            throw new IllegalStateException(String.format(
+                    "follow-rpc 的启动期拨号检查**未武装**：grpc.client.%s.immediate-connect-timeout=%s。"
+                            + "对齐 Go service/follow/api/internal/svc/servicecontext.go:27 的 "
+                            + "zrpc.MustNewClient（连不上 ⇒ 进程起不来）需要它为正数；"
+                            + "devh 的默认值是 0（= 关闭），"
+                            + "机制一旦被静默关掉，现象会退化成「Pod Ready 但 100%% 请求失败」。"
+                            + "请在 service/follow/follow-api/src/main/resources/application.yml 的 "
+                            + "grpc.client.%s.immediate-connect-timeout 处显式写 %dms。",
+                    CHANNEL_NAME, timeout, CHANNEL_NAME, DIAL_TIMEOUT.toMillis()));
+        }
+        LOG.info("follow-rpc 启动期拨号检查已武装：immediate-connect-timeout={}ms"
+                + "（对齐 go-zero zrpc/internal/client.go:18 dialTimeout=3s）", timeout.toMillis());
+    }
 
     /**
      * 返回<b>已套上请求级 deadline</b> 的 stub。

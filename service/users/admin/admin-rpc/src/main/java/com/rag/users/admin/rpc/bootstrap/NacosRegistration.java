@@ -8,6 +8,7 @@ import jakarta.annotation.PreDestroy;
 import net.devh.boot.grpc.server.config.GrpcServerProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
@@ -46,20 +47,45 @@ public class NacosRegistration {
     private final NacosServiceManager nacosServiceManager;
     private final GrpcServerProperties grpcServerProperties;
 
+    /**
+     * 🆕 DRIFT-G1-001（2026-10-27 · G1 lane · 真启动 A/B 实测）：**注册用的 group 必须读配置**。
+     *
+     * <p><b>Go 出处</b>：{@code service/user/admin/rpc/etc/admin.yaml} 的 {@code Etcd.Key}
+     * —— Go 侧的服务发现键是<b>配置项</b>，部署时改 yaml 就换命名空间。
+     *
+     * <p><b>修前</b>：本类把 group <b>写死</b>成 {@code "USER_GROUP"}
+     * ⇒ {@code NACOS_GROUP} 对 admin-rpc <b>完全无效</b>；
+     * 而 admin-api 的 yml 写的是 {@code group: ${NACOS_GROUP:USER_GROUP}}（<b>读配置</b>）
+     * ⇒ ⇒ 一旦部署设了不同的 {@code NACOS_GROUP} ⇒ <b>rpc 注册到 A 组、api 去 B 组找</b>
+     * ⇒ ⇒ <b>admin-api 直接进程退出</b>（实测：{@code No servers found for admin-rpc}）。
+     *
+     * <p><b>修后</b>：group 从 {@code spring.cloud.nacos.discovery.group} 读
+     * （= 同一份 yml 里已有的那一行，<b>不需要新增配置项</b>）。
+     * ⇒ <b>默认值零变化</b>：yml 里写的就是 {@code ${NACOS_GROUP:USER_GROUP}}
+     * ⇒ 不设环境变量时解析结果与修前<b>逐字相同</b>。
+     *
+     * <p>⚠️ 同 user-rpc：<b>配置项早就存在（{@code application.yml:75}）只是代码不消费</b>
+     * ⇒ 「配置项存在」≠「配置项被消费」。
+     */
+    private final String groupName;
+
     private Instance registeredInstance;
     private String registeredServiceName;
     private String registeredGroupName;
 
     public NacosRegistration(NacosServiceManager nacosServiceManager,
-                             GrpcServerProperties grpcServerProperties) {
+                             GrpcServerProperties grpcServerProperties,
+                             @Value("${spring.cloud.nacos.discovery.group:USER_GROUP}")
+                             String groupName) {
         this.nacosServiceManager = nacosServiceManager;
         this.grpcServerProperties = grpcServerProperties;
+        this.groupName = groupName;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     public void register() {
         String serviceName = "admin-rpc";
-        String groupName = "USER_GROUP";
+        String groupName = this.groupName;
         int port = grpcServerProperties.getPort();
 
         try {

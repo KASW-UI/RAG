@@ -47,7 +47,7 @@
 
 | 轴 | 机制 | 本域侧的落点 / 调用 | 结论 | 证据强度 | 核对日期 |
 |---|---|---|---|---|---|
-| **A1** | 超时 / deadline | ① `DRIFT-FOLLOW-009`（下游挂死：Go **2s ⇒ 200+1015** / RAG **3s ⇒ 503**）✅ 已修 ② 🆕 `DRIFT-G1-002`（**`follow-api` 缺 `immediate-connect-timeout`** ⇒ 与 Go `zrpc.MustNewClient` 的 panic 语义不一致）🔴 ③ 🟡 **follow-api 的 Redis 命令超时 2s ≠ go-redis `ReadTimeout` 默认 3s**（`DRIFT-USERAPI-015 附带` 登记的待办 · **本波未审**） | 🔴 **1 条域内新** ＋ 🟡 **1 条待审** | L3 双侧活体（台账原有）＋ 本轮真启动活体 | 2026-10-27 |
+| **A1** | 超时 / deadline | ① `DRIFT-FOLLOW-009`（下游挂死：Go **2s ⇒ 200+1015** / RAG **3s ⇒ 503**）✅ 已修 ② ✅ **`DRIFT-G1-002` 已修**（**阶段 2 · 2026-10-27**：`follow-api` 补 `immediate-connect-timeout: 3s` + `FollowRpcClient.afterPropertiesSet()` 自检 ⇒ 真启动 C 组实测**进程退出**，对齐 Go `zrpc.MustNewClient` 的 panic 语义 ⇒ 证据见 §7.5）③ 🟡 **follow-api 的 Redis 命令超时 2s ≠ go-redis `ReadTimeout` 默认 3s**（`DRIFT-USERAPI-015 附带` 登记的待办 · **本波未审**） | ✅ **1 条已修** ＋ 🟡 **1 条待审** | L3 双侧活体（台账原有）＋ **本轮真启动活体（A/B/C 三组）** | 2026-10-27 |
 | **A2** | gRPC 拦截器链 | ① `DRIFT-FOLLOW-002`（运行时 classpath 缺 `grpc-inprocess` ⇒ `NoClassDefFoundError` ⇒ 启动失败）✅ 已修 ② `DRIFT-FOLLOW-003`（`discovery://user-rpc` 两斜杠被 devh 拒绝 ⇒ 启动失败）✅ 已修 ③ **服务端拦截器链**：`FollowRpcApplication.java:118` 挂 `GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, protectionProps)`（recover→breaker→shedding→业务观测）⇒ 有**组件级守门网** `FollowProtectionChainWiringTest`（断言 `@Import` 含 `GoStyleProtectionConfiguration` ＋ 链**真包住**业务 interceptor ⇒ 能区分「在链里」与「链没挂上」） | ✅ **一致**（①② = 启动阻塞型硬失败，已修）＋ ✅ **③ 链已挂且有装配层守门** | L1 + 真启动复验（①②）＋ **L2 装配层守门**（③） | 2026-10-27 |
 | **A3** | HTTP 保护链 | ① `follow-api` 的 `rag.http.go-form-limit.mode` = **envelope**（`application.yml:159`）② `DRIFT-FOLLOW-008`（**MaxConns 闸门：Go 每路由一个 vs RAG 全局一个**）🔴 ③ `OPEN-001`（Content-Type 不支持 ⇒ RAG 415 分支）✅ **已关闭（实测不可达）** ④ ⚠️ **`follow-rpc` 无 `rag:` 块** ⇒ 纯 gRPC 进程，表单限闸门**不适用**（N/A） | 🔴 **1 条 G4** ＋ ✅ 2 条 ＋ **N/A 1 条** | L1 源码 + L2 | 2026-10-27 |
 | **A4** | 错误码 / envelope | ① `DRIFT-FOLLOW-001`（**A7/A4 邻接**：wire 级出参 Go `"user_ids":null` / RAG `"user_ids":[]`）✅ 已修 ② `DRIFT-FOLLOW-009` ✅ ③ A3 锚点：Go 侧**已注册**（真源 `service/follow/api/followcenter.go:53` `httpx.SetErrorHandler`）⇒ Go = **200 + 业务信封** ⇒ 与 RAG `mode=envelope` 同向 ✅ | ✅ **一致** | L1 + 活体对拍（台账原有） | 2026-10-27 |
@@ -148,6 +148,8 @@
 
 ### 7.1 `DRIFT-G1-001` — 🔴 `NACOS_GROUP` 对 `follow-rpc` **完全无效**（配置项形同虚设）
 
+> ✅ **状态：阶段 2 已修（2026-10-27）** ⇒ 修法与 A/B/C 真启动证据见 §7.5。**本节保留修前的原始取证。**
+
 | 侧 | 位置 | 值 | 读配置？ |
 |---|---|---|---|
 | `follow-rpc`（注册方） | `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/bootstrap/NacosRegistration.java:113` | `.registerInstance(SERVICE_NAME, DEFAULT_GROUP, instance)` | ❌ **写死** |
@@ -167,6 +169,8 @@
 ⇒ **同域、同族、漏审一维** ⇒ 见 users 侧 §7.4 的元教训（「配置项存在」≠「配置项被消费」）。
 
 ### 7.2 `DRIFT-G1-002` — 🔴 `follow-api` 缺 `immediate-connect-timeout` ⇒ 与 Go 的 `MustNewClient` panic 语义不一致
+
+> ✅ **状态：阶段 2 已修（2026-10-27）** ⇒ 修法与 A/B/C 真启动证据见 §7.5。**本节保留修前的原始取证。**
 
 - **Go**：`service/follow/api/internal/svc/servicecontext.go:27` ⇒ `followservice.NewFollowService(zrpc.MustNewClient(c.FollowRpc))`
   ⇒ go-zero v1.10.2 `zrpc/client.go:50-54` `logx.Must(err)` ⇒ **失败即 panic ⇒ 进程起不来**；`zrpc/internal/client.go:18` `dialTimeout = 3s`
@@ -205,6 +209,19 @@ installed_rank | version |      description       | success
 | A 组（不设 `NACOS_GROUP`） | ✅ **6/6 组件真启动** · **0 解析失败** |
 | B 组（设 `NACOS_GROUP=G1_GROUP`） | ⚠️ 3 rpc 注册到写死 group · `admin-api` 进程退出 · `user-api`/`follow-api` 起得来但运行时解析不到 |
 | 证据强度 | **RAG 侧 = L3 活体**（真容器 + 真 Nacos + 真 PG + 真 Redis + 真 HTTP 请求）· **Go 侧 = L1 源码行号** ⇒ **两侧未同时活体对拍 ⇒ 不是 L4** |
+
+### 7.5 ✅ **阶段 2 落码后的真启动 A/B/C 对照**（follow 侧，2026-10-27）
+
+> 同一套隔离环境、同一批进程、唯一变量 = `NACOS_GROUP` 与「下游是否在跑」。
+
+| 组 | 变量 | follow-rpc | follow-api | 结论 |
+|---|---|---|---|---|
+| **A** | 不设 `NACOS_GROUP` | 5.619s<br>`DEFAULT_GROUP` | 6.794s | ✅ **起得来 · 0 解析失败** ⇒ **默认行为零变化**（注册 group 与修前写死值逐字相同） |
+| **B** | `NACOS_GROUP=G1_GROUP`（rpc＋api 全跑） | 6.176s<br>**`G1_GROUP`** | 6.556s | ✅ **起得来 · 0 解析失败** ⇒ 🔴 **`DRIFT-G1-001` 已修**（修前：follow-api 运行时解析不到 ⇒ 业务码塌成 **1015**） |
+| **C** | `NACOS_GROUP=G1_GROUP` ＋ **rpc 不起** | — | ❌ **未启动（进程退出）** | 🔴 **`DRIFT-G1-002` 已修**：`Caused by: java.lang.IllegalStateException: Can't connect to channel follow-rpc` ⇒ 对齐 Go 的 `zrpc.MustNewClient` ⇒ panic ⇒ 起不来 |
+
+⇒ 完整 6 组件的 A/B/C 表 + 守门网 + 变异验证 ⇒ 见 [`users/vs-common.md` §7.6~§7.8](../users/vs-common.md)。
+⇒ 本域侧的守门类：`FollowRpcNacosGroupTest`（4 例）· `FollowApiStartupFailFastTest`（6 例）。
 
 ---
 

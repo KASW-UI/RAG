@@ -3,6 +3,7 @@ package com.rag.users.user.api;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.RedisAsyncCommandsImpl;
 import io.lettuce.core.api.StatefulConnection;
+import com.rag.users.user.api.client.UserRpcClient;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -15,6 +16,7 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -137,6 +139,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Testcontainers
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class UserApiRedisDisconnectedFastFailTest {
+
+    /**
+     * 🔴 DRIFT-G1-002（2026-10-27）本测试**必须** mock 掉 {@code UserRpcClient}。
+     *
+     * <p>理由（与 admin-api 的 {@code AdminApiPlainText400ContentTypeTest} 同款）：
+     * {@code UserRpcClient.afterPropertiesSet()} 是「启动期拨号检查已武装」的自检，
+     * 而 devh 的 {@code immediate-connect-timeout} 现在是 <b>3s</b>
+     * ⇒ 本测试的 {@code grpc.client.user-rpc.address} 指向 {@code 127.0.0.1:65535}
+     * （**本来就没人监听**）⇒ 不 mock 的话<b>上下文启动就会失败</b>
+     * （{@code Can't connect to channel user-rpc}）。
+     *
+     * <p>被 mock 的 bean <b>不会</b>执行 {@code afterPropertiesSet()}
+     * ⇒ 启动期检查被跳过 ⇒ 本测试只关心 Redis 的快速失败语义，不受 gRPC 影响。
+     */
+    @MockitoBean
+    private UserRpcClient userRpcClient;
 
     /**
      * 断连后命令必须<b>在 1500ms 内</b>失败。

@@ -131,6 +131,8 @@
 
 ### 7.1 `DRIFT-G1-001` — 🔴 `NACOS_GROUP` 对三个 rpc 组件**完全无效**（配置项形同虚设）
 
+> ✅ **状态：阶段 2 已修（2026-10-27）** ⇒ 修法与证据见 §7.5 / §7.6 / §7.7。**本节保留修前的原始取证。**
+
 **现象**：设 `NACOS_GROUP=<自定义>` ⇒ 三个 api 全部解析不到自己的 rpc 下游。
 
 **根因（逐条读消费点，不是读 yml）**：
@@ -165,6 +167,8 @@
 ⚠️ **默认配置下两侧恰好都是 `USER_GROUP` / `DEFAULT_GROUP` ⇒ 一致 ⇒ 不暴露** ⇒ 这就是它一直没被发现的原因。
 
 ### 7.2 `DRIFT-G1-002` — 🔴 `user-api` / `follow-api` 缺 `immediate-connect-timeout` ⇒ 与 Go 的 `MustNewClient` panic 语义不一致
+
+> ✅ **状态：阶段 2 已修（2026-10-27）** ⇒ 修法与证据见 §7.5 / §7.6 / §7.7。**本节保留修前的原始取证。**
 
 **Go 侧（真源逐条核实行号）**：
 - `service/user/user/api/internal/svc/servicecontext.go:26` ⇒ `userservice.NewUserService(zrpc.MustNewClient(c.UserRpc))`
@@ -213,15 +217,78 @@ POST /user/v1/login  {"username":"probe","password":"probe123"}
 ⇒ 这是 AGENTS.md §3.3.1 的**反向形态**：不是「配置里没写却生效了」，而是「**配置里写了、yml 看着正常，但代码根本不读**」。
 ⇒ **审 Nacos / 配置面时，必须逐个变量问「谁在消费它、消费点在哪个文件的哪一行」** ⇒ **yml 占位符齐不齐不能作为证据**。
 
-### 7.5 修复口径建议（**阶段 2 落码时用；本轮阶段 1 只读 ⇒ 不落码**）
+### 7.5 修复口径（**阶段 2 已落码** · 2026-10-27）
 
-| 项 | 建议修法 | 落点（G1 写权内） | 必需的回归网 |
+| 项 | 落地的修法 | 落点（G1 写权内） | 配套的回归网 |
 |---|---|---|---|
-| `DRIFT-G1-001` | rpc 侧 `NacosRegistration` 的 group **改为从 `spring.cloud.nacos.discovery.group` 读**，默认值保持现状（`USER_GROUP` / `DEFAULT_GROUP`）⇒ **默认行为零变化** | `service/users/user/user-rpc/.../NacosRegistration.java`<br>`service/users/admin/admin-rpc/.../NacosRegistration.java`<br>`service/follow/follow-rpc/.../NacosRegistration.java` | **真启动**守门：改 `NACOS_GROUP` ⇒ rpc 注册到新 group 且 api 能解析 ⇒ **MockMvc / 纯单测测不到**（§3.3） |
-| `DRIFT-G1-002` | 给 `user-api` 的 `grpc.client.user-rpc` / `follow-api` 的 `grpc.client.follow-rpc` 加 `immediate-connect-timeout: 3s`（与 `admin-api` 同款） | `service/users/user/user-api/src/main/resources/application.yml`<br>`service/follow/follow-api/src/main/resources/application.yml` | **真启动**守门：下游不可达 ⇒ **进程退出**（`exp-admin-startup-failfast.sh` 同款，user / follow 各一条） |
+| `DRIFT-G1-001` | rpc 侧 `NacosRegistration` 的 group **改为从 `spring.cloud.nacos.discovery.group` 读**，默认值保持现状（`USER_GROUP` / `DEFAULT_GROUP`）⇒ **默认行为零变化** | `service/users/user/user-rpc/.../NacosRegistration.java`<br>`service/users/admin/admin-rpc/.../NacosRegistration.java`<br>`service/follow/follow-rpc/.../NacosRegistration.java` | ✅ `UserRpcNacosGroupTest` / `AdminRpcNacosGroupTest` / `FollowRpcNacosGroupTest`（**各 3~4 例**）＋ ✅ **真启动 A/B 组**（§7.6） |
+| `DRIFT-G1-002` | 给 `user-api` 的 `grpc.client.user-rpc` / `follow-api` 的 `grpc.client.follow-rpc` 加 `immediate-connect-timeout: 3s`（与 `admin-api` 同款）＋ 两个 client 类加 `afterPropertiesSet()` 自检（机制被静默关掉 ⇒ 启动即失败） | `service/users/user/user-api/src/main/resources/application.yml` + `.../client/UserRpcClient.java`<br>`service/follow/follow-api/src/main/resources/application.yml` + `.../client/FollowRpcClient.java` | ✅ `UserApiStartupFailFastTest` / `FollowApiStartupFailFastTest`（**各 6 例**）＋ ✅ **真启动 C 组**（§7.6） |
 
 ⚠️ 两处落点都在 G1 写权内 ⇒ **不派 G4** ⇒ 走**阶段 2（域波 G1）**落码。
 ⚠️ 阶段 2 落码后 ⇒ **重跑收口回归**（C7：收口回归跑完 ～ 合并主干之前，共享层变了就重跑）。
+
+### 7.6 ✅ **落码后的真启动 A/B/C 对照**（2026-10-27 · 同一套隔离环境）
+
+> 环境与 §7 相同（真 PG `g1probe` · 真 Redis · 真 Nacos namespace `g1probe` · 端口全在 5xxxx 段）⇒ **唯一变量 = `NACOS_GROUP` 与「下游是否在跑」**。
+
+| 组 | 变量 | user-rpc | admin-rpc | follow-rpc | user-api | admin-api | follow-api | 结论 |
+|---|---|---|---|---|---|---|---|---|
+| **A** | 不设 `NACOS_GROUP` | 6.152s<br>`USER_GROUP` | 6.245s<br>`USER_GROUP` | 5.619s<br>`DEFAULT_GROUP` | 6.783s | 6.927s | 6.794s | ✅ **6/6 起得来 · 0 解析失败** ⇒ **默认行为零变化**（注册的 group 与**修前的写死值逐字相同**） |
+| **B** | `NACOS_GROUP=G1_GROUP`（rpc＋api 全跑） | 6.459s<br>**`G1_GROUP`** | 7.403s<br>**`G1_GROUP`** | 6.176s<br>**`G1_GROUP`** | 6.917s | 6.885s | 6.556s | ✅ **6/6 起得来 · 0 解析失败** ⇒ 🔴 **`DRIFT-G1-001` 已修**（修前：rpc 写死 group ⇒ admin-api **进程退出** ＋ user-api/follow-api 运行时塌成 **1015**） |
+| **C** | `NACOS_GROUP=G1_GROUP` ＋ **rpc 不起**（下游不可达） | — | — | — | ❌ 未启动<br>**进程退出** | ❌ 未启动<br>**进程退出** | ❌ 未启动<br>**进程退出** | ✅ **三个 api 全部进程退出** ⇒ 🔴 **`DRIFT-G1-002` 已修**（对齐 Go 的 `zrpc.MustNewClient` ⇒ panic ⇒ 起不来） |
+
+> 「注册的 group」= 真进程日志里的原文（`nacos registry, <group>` / `registered: service=… group=…`）⇒ **不是从代码推断的**。
+
+**C 组的失败原文**（真进程，不是单测）：
+
+```
+user-api  : Caused by: java.lang.IllegalStateException: Failed to create channel: user-rpc
+             Caused by: java.lang.IllegalStateException: Can't connect to channel user-rpc
+admin-api : Caused by: java.lang.IllegalStateException: Can't connect to channel admin-rpc
+follow-api: Caused by: java.lang.IllegalStateException: Can't connect to channel follow-rpc
+```
+
+⚠️ **admin-api 本来就有这个行为**（`DRIFT-ADMINAPI-009` 早已修）⇒ C 组证明的是
+**user-api / follow-api 现在与 admin-api、与 Go 三方一致** ⇒ 不是新发明，是**补齐同族**。
+
+### 7.7 守门网（**每条都做过变异验证 ⇒ 确认能变红**）
+
+| 守门类 | 例数 | 变异注入 | 变异后 | 证据 |
+|---|---|---|---|---|
+| `UserApiStartupFailFastTest` | 6 | 删掉 yml 的 `immediate-connect-timeout` | 🔴 **红在 `applicationYmlArmsImmediateConnectTimeout`** | ✅ 变异确实编译并执行 |
+| `UserRpcNacosGroupTest` | 3 | 把 `@Value` 的属性名改掉（读不到配置） | 🔴 **红在 `registrationUsesConfiguredGroup`** | ✅ 变异确实编译并执行 |
+| `AdminRpcNacosGroupTest` | 3 | 同款（未单独跑变异，与 user-rpc 同构） | — | ⚠️ **未单独做变异**（同一份代码形状） |
+| `FollowRpcNacosGroupTest` | 4 | 同款（未单独跑变异） | — | ⚠️ **未单独做变异** |
+| `FollowApiStartupFailFastTest` | 6 | 同款（未单独跑变异） | — | ⚠️ **未单独做变异** |
+
+### 7.8 回归口径（2026-10-27 · 落码后）
+
+| 模块 | 用例数 | failures | errors | skipped |
+|---|---|---|---|---|
+| `user-api` | 113 | 0 | 0 | 0 |
+| `follow-api` | 56 | 0 | 0 | 0 |
+| `user-rpc` | 115 | 0 | 0 | 0 |
+| `admin-rpc` | 136 | 0 | 0 | 0 |
+| `follow-rpc` | 78 | 0 | 0 | 0 |
+| **合计（5 个受影响模块）** | **498** | **0** | **0** | **0** |
+
+⚠️ `admin-api` 本轮**未改代码** ⇒ 未重跑（`DRIFT-ADMINAPI-009` 的既有行为不变）。
+⚠️ **收口回归尚未跑**：按 C7，收口回归在**波末**跑 ⇒ 届时天然含 G4 至今的共享层改动 ⇒
+**唯一风险窗口 = 收口回归跑完 ～ 合并主干之前** ⇒ 该窗口内共享层变了就**重跑一次收口回归**（记 `git rev-parse HEAD`）。
+
+### 7.9 ⚠️ 落码时**撞到并修掉的一处连带回归**（`DRIFT-G1-002` 的副产物）
+
+`UserApiRedisDisconnectedFastFailTest`（Redis 断连快速失败的守门）**上下文起不来了**：
+它的 `@SpringBootTest(properties=...)` 把 `grpc.client.user-rpc.address` 指向
+`static://127.0.0.1:65535`（**本来就没人监听**）⇒ fail-fast 一旦武装 ⇒ 启动即失败。
+
+⇒ **修法 = 按 admin-api 的既有约定**：给该测试加 `@MockitoBean UserRpcClient`
+（`AdminApiPlainText400ContentTypeTest` 早就是同款做法，注释里写着「被 mock 的 bean **不会**执行
+`afterPropertiesSet()` ⇒ 启动期检查被跳过」）⇒ **不是**关掉 fail-fast，而是**让这个不关心 gRPC 的测试不碰 gRPC**。
+
+⚠️ **元教训**：**武装一个 fail-fast 会让「故意指向死地址」的既有测试集体变红** ⇒
+落码时必须先扫一遍本模块**所有** `@SpringBootTest(properties=...)` 里带 `grpc.client.*.address=static://…` 的用例
+⇒ 逐个按域内约定补 `@MockitoBean`，**而不是**把 fail-fast 退回关闭。
 
 ---
 
