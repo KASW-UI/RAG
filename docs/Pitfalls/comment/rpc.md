@@ -560,6 +560,57 @@ def to_int(v):                            # PG 存的是有符号 int32
 
 ---
 
+## PIT-COMMENT-RPC-13 🔴 · 「某域把异常改写了」这类登记，**必须逐条核 Go 侧** —— 否则会让**本来正确的代码去改本来正确的代码**
+
+### 一句话
+
+**看到 RAG 侧有一堆 `catch → 改写成业务码`，不等于 RAG 写错了 ——
+必须回到 Go 侧看它自己的 catch-all 有没有同样改写；Go 也改写 ⇒ 两侧一致 ⇒ 不是漂移。**
+
+### 形态（2026-10-26 实测）
+
+global 域第三十三轮登记 **E47**：「业务层把『SQL 被 deadline 取消』改写/吞掉」⇒ 记成
+「RAG 把 DEADLINE_EXCEEDED 改写/吞掉 ⇒ 24 处硬改写 + 3 处静默降级」
+⇒ **数目对了，定性方向反了**：它**只看了 RAG 侧的 catch 形态，没核 Go 侧**。
+
+第三十六轮逐条核到 Go 行号后 ⇒ **改写型域（comment / like / follow / article）的 Go 侧同样改写**
+⇒ 那 21 处**与 Go 一致 ⇒ 销案**；真正的漂移在别处（`user-rpc`/`admin-rpc` 是**反向**：Go 改写成
+`codes.Internal`，RAG 却原样重抛 DEADLINE_EXCEEDED ⇒ **RAG 这一侧更准确**）。
+
+### 本域的具体形态（comment 域 10 处）
+
+Go 侧**每一条 DB 错误路径都改写成业务码**，**不区分 deadline**：
+
+| Go 位置 | 改写成的业务码 |
+|---|---|
+| `report_comment_logic.go:79-92` | `errmsg.NewGrpcErr(errmsg.ErrorDbInsert, "DB插入失败")` |
+| `delete_comment_logic.go:76-77` | `errmsg.NewGrpcErr(errmsg.ErrorDbSelect, "DB查询失败")` |
+| `update_subject_state_logic.go:79-80` | `errmsg.NewGrpcErr(errmsg.ErrorDbSelect, "DB查询失败")` |
+| `like_comment_logic.go:62-63` | `errmsg.NewGrpcErr(errmsg.ErrorInputWrong, "DB更新失败")` |
+
+⇒ RAG 侧对应 10 处（`CommentDomainService.java:161/434/447/474/523/541/590/651/690/710`）
+**全部是** `catch (RuntimeException e) { result = "sys_fail"; … throw CommentExceptions.dbXxx(); }`
+⇒ **与 Go 的 catch-all 逐字同款** ⇒ ✅ **一致，不是漂移 ⇒ 销案 ⇒ 代码零改动**。
+
+### 可复用的判据
+
+> **判据 1：登记「某域把异常改写了」之前，先去 Go 侧看它自己的 catch-all 是不是也改写。**
+> 「RAG 有 N 处 catch」**不是**漂移的证据 —— 要看**两侧同一条路径**的**最终可观察输出**。
+>
+> **判据 2：catch 的「宽窄」不是判据，「改写后的码」才是。**
+> Go 的 `if err != nil { NewGrpcErr(ErrorDbSelect, …) }` 与 RAG 的
+> `catch (RuntimeException e) { throw CommentExceptions.dbSelect…(); }` **宽窄不同、行为同款** ⇒ 一致。
+>
+> **判据 3：全仓现在「两种口径各占一半」** —— comment/like/follow/article 与 Go 一致（改写）·
+> user/admin/message 保留 DEADLINE_EXCEEDED ⇒ ⇒ **签字与修复必须按域逐条看，不能一刀切。**
+
+### 对应本轮的漂移
+
+无（本域**销案**）。已在 [`../../DRIFT/comment/rpc.md`](../../DRIFT/comment/rpc.md) §4.6.6 记为
+**只读指针**（归属 global 的 **E47**）⇒ **本条是「差点改错」的记录，不是缺陷**。
+
+---
+
 ## 与既有台账的关系
 
 | 文件 | 关系 |

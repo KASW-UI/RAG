@@ -1447,3 +1447,41 @@ Java 侧 `DefaultErrorHandler(recoverer, new FixedBackOff(0, 0))` ⇒ 失败**�
 | 改 `service/common` 的 `RpcServerInterceptorFactory` javadoc | **共享模块** ⇒ §5.3 跨域并发约束 ⇒ 留档（见 §3.1），列入下一个共享组件串行窗口 |
 | 补 `rpcInterceptorConfigurer` 的守门测试 | §3.2 已把**路径**钉死（发慢请求看 `DEADLINE_EXCEEDED`）⇒ 但这是**新增一条行为级测试**，超出「核对台账」的范围 ⇒ **等你确认后再做** |
 | 事实投递链路（003）/ `L-U9`（真 Kafka）/ `L-U10`（有意不修） | 与前几轮结论一致，**状态未变** |
+
+---
+
+## 2026-10-26 主会话转达：global 域 **E60** —— `currentUserLikeTotal` 双失败时**少传 error**（🔴 真漂移，待 like 域 owner 接手）
+
+> **转达方式**：global 域（`align/global`）第三十六轮 **E47 全面订正**时逐条核到 Go 侧，发现本域有一条**真漂移**。
+> 落点在 like 域 ⇒ **无 like owner 会话** ⇒ **经主会话转达** ⇒ 本节只是**交接指针**，**不代替 like 域下结论**。
+
+| 项 | 值 |
+|---|---|
+| 出处 | global 台账 **E60**（`docs/DRIFT/global/_README.md`，**按编号指**） |
+| 落点 | `service/like/like-rpc/.../LikeDomainService.java:765-771`（`currentUserLikeTotal`） |
+| 行为层 | **RPC 返回值**（error 是否被吞掉） |
+| 证据强度 | ✅ **主会话已独立复核 Go 侧**（2026-10-26）—— 不是照抄 global 的结论 |
+
+### 两侧事实
+
+| 侧 | 事实 | 出处 |
+|---|---|---|
+| **Go** | `dbTotal, dbErr := GetUserActiveLikeCount(...)`；`if dbErr != nil { if err == nil { return int64(total), nil }; return 0, dbErr }` ⇒ **Redis 与 DB 双失败时返回 `(0, dbErr)`** —— **error 被传出去** | `service/like/rpc/internal/logic/likeactionlogic.go:346-364` |
+| **RAG** | `catch (Exception e) { if (redisOk) { return total; } LOG.warn("both redis and db failed …"); return 0L; }` ⇒ **双失败时只 `return 0L`** ⇒ **error 被吞掉** | `LikeDomainService.java:762-771` |
+
+### 🔴 附带一条：**javadoc 与实现不符**
+
+`LikeDomainService.java:747-748` 的 javadoc 明写：
+
+> 「即：Redis 与 DB **同时**失败才算失败，且此时返回 `0` + error。调用方 `syncTaskProgress` 只在出错时记日志，不影响点赞结果。」
+
+⇒ 但实现只 `return 0L`（**没有**返回 error）⇒ **注释说的与代码做的不一致**。
+
+### ⚠️ 边界：只有这 **1 处** 是真漂移，**别的不要改**
+
+global 第三十三轮的 **E47 原定性已被第三十六轮全面订正**：**like 域的 5 处 catch 与 Go 一样改写 ⇒ 与 Go 一致 ⇒ 销案 ⇒ 不要改**。
+⇒ **本域只有 E60 这 1 处需要处理** ⇒ **不要按 E47 的原定性去动那 5 处**。
+
+### 状态
+
+🟡 **待 like 域 owner 接手**（本域无 owner 会话 ⇒ 主会话转达）⇒ **主会话不改代码、不下结论**，只留指针。

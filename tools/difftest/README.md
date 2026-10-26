@@ -189,6 +189,7 @@ ERROR: duplicate key value violates unique constraint "pg_type_typname_nsp_index
 | `exp-difftest-redis-blacklist.sh` | user-api 侧 `U-004` 的**真 Redis 故障注入**（正常 / 断连 / 很慢 三形态 × 双侧并行探测 + 「被拉黑 token」对照组）|
 | `exp-difftest-redis-failfast.sh` | `UNRESOLVED-USERRPC-004②` 的真故障注入实验（启动期 Redis 不可用）|
 | **`exp-difftest-redis-neverup.sh`** | **「Redis 从未连上过」的双侧对拍**：两种「连不上」的形态（`REDIS_HOST=127.0.0.1` 端口拒连 / `REDIS_HOST=redis` 主机名解析失败 = 生产默认值）× 3 轮（首个请求 ≠ 稳态）|
+| **`exp-difftest-redis-neverup-rpc.sh`** | **「Redis 从未连上过」的 rpc 侧对拍**（`DRIFT-USERAPI-015` 的 rpc 侧对应面 ⇒ **实测无漂移**）：**直连 gRPC** 打 `Logout`（经 api 会被 3s HTTP 预算遮蔽）× **三形态**（`REDIS_HOST=127.0.0.1` 拒连 / `REDIS_HOST=redis` 解析失败 / `REDIS_MODE=hanging` **连上不回包 ⇒ 命令超时路径**）。客户端 = `tools/difftest/redis-logout-rpc/go`（`replace` 引真源 ⇒ 用**真源真实 stub**）|
 | `exp-drift015-flyway-flags.sh` | 🔴 **被证伪方案**的实证记录，**不要当修复用** |
 | `exp-go-concurrent-automigrate.sh` | Go 侧并发 `AutoMigrate` 的行为 |
 

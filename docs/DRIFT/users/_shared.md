@@ -77,7 +77,7 @@ expected: <field "username" is not set
 | **覆盖情况（2026-10-21 实测）** | `UserDomainService` **11 处**（login/register/update/selectavatar/uploadavatar 等主路径）；`AdminDomainService` 此前 **0 处**，本轮已补到 **13 处**（admin-api 对 admin-rpc 的全部业务调用） |
 | **⚠️⚠️ 此前从未真正生效** | **这 24 处守卫在 gRPC server 路径上一直是通过死代码在跑**：`onHalfClose()` 从未被调用（gRPC `ServerInterceptor` 压根没挂到 server 上，根因见 §6.4 的 H2 勘误），handler 线程上 `DeadlineState` 恒未设置 ⇒ `checkDeadline()` 的条件恒为 false，**一次都没有拦下过任何请求**。2026-10-21 补 `@Bean GrpcServerConfigurer` 后才第一次真正可达 |
 | **回归网** | `AdminDomainServiceDeadlineTest`（2 条，13 方法逐个拦 + 反向放行）。**但它只能证明「分支逻辑对」，不能证明「生产路径会走到」** —— 这一点已被本轮实测打脸：守卫全绿，而 `onHalfClose` 从未执行。见下 |
-| **⚠️ 它不能做什么** | **不能取消在途 IO**。JDBC 驱动不响应线程 interrupt，这是 Java 侧的结构性限制，属 §3.4.1 B-1，**不是 DRIFT-018 能修的**。B-1 由 `DeadlineQueryTimeoutInjector` 的 `setQueryTimeout` 关闭（已实施并端到端验证：查询滞留 4303ms → **176ms**，与 Go 的 182ms 同量级） |
+| **⚠️ 它不能做什么** | **不能取消在途 IO**。JDBC 驱动不响应线程 interrupt，这是 Java 侧的结构性限制，属 §3.4.1 B-1，**不是 DRIFT-018 能修的**。B-1 由 `DeadlineQueryTimeoutInjector` 的 `setQueryTimeout` 关闭（已实施并端到端验证：查询滞留 4303ms → **176ms**，与 Go 的 182ms 同量级）<br>🔴 **2026-10-26 补记（装配层前提）**：上面那句「已实施并端到端验证」**隐含一个从未被断言过的前提** —— 那两个拦截器**真的进了 MyBatis 的插件链**（`@Import` 只是**声明点**，收不收进链是**消费点**上的运行期事实）。端到端实测证明它**事实上是通的**，但那是**一次性证据、不是常驻断言** ⇒ 谁摘掉 `@Import`，测试全绿、线上才炸（缺翻译器 ⇒ 57014 不翻译 ⇒ 落进 `catch (Exception e)` ⇒ 被改写成 `INTERNAL` ⇒ api 渲染 **5001** 而 Go 是 **1015**）。<br>⇒ **已补常驻守网**：`users/user` 域 `UserRpcContainerWiringTest` +3 条（插件链 / 挂载点 / 负控，含 M1·M2·M3 三次变异验证）、`users/admin` 域 `AdminRpcContainerWiringTest` +2 条 ⇒ 详见 [`users/user/rpc.md`](users/user/rpc.md) **第十二轮**（**覆盖缺口闭环，不是新漂移**） |
 
 > **为什么单独记这一条**：它说明了 §6.2.6 E-4 那类缺口的典型形态 ——
 > **「框架限制」与「业务侧主动响应」是两件不同的事**，前者改不了，后者能做但容易漏做。
@@ -478,7 +478,7 @@ Caused by: org.postgresql.util.PSQLException:
 | 问题 | Go 有没有 | 依据 |
 |---|---|---|
 | **① 账本撞车（Flyway 特有）** | **结构性没有** | GORM `AutoMigrate` 无状态：没有版本号、没有 `flyway_schema_history`、没有 checksum、没有 `baseline`。DRIFT-NEW-015 是**本仓库自己引入的复杂度造成的**，不是 PG 或 Go 的固有问题 |
-| **② PG 的 DDL 并发竞态** | **有，只是窗口窄得多** | GORM 的建表 SQL **没有** `IF NOT EXISTS`（`migrator.go:309` 就是 `tx.Exec("CREATE TABLE ? (...")`），保护只来自 `HasTable` 先查（`migrator.go:124` 的 check-then-act）。并发失败形态会是 `relation already exists`，与 RAG 的 `pg_type_typname_nsp_index` 不同 |
+| **② PG 的 DDL 并发竞态** | **有，只是窗口窄得多** | GORM 的建表 SQL **没有** `IF NOT EXISTS`（`gorm.io/gorm@v1.31.1/migrator/migrator.go:309` 就是 `tx.Exec(createTableSQL, values...).Error`，而 `createTableSQL = "CREATE TABLE ? ("` 定义在同文件 `:225`），保护只来自 `HasTable` 先查（`gorm.io/gorm@v1.31.1/migrator/migrator.go:124` 的 `if !queryTx.Migrator().HasTable(value)` check-then-act，`HasTable` 本体在 `:333`）。并发失败形态会是 `relation already exists`，与 RAG 的 `pg_type_typname_nsp_index` 不同<br>⚠️ **2026-10-26 更正引用路径**：本行初稿把这两处写成「`gorm@v1.31.1` 下的**根** `migrator.go`」与「**裸** `migrator.go`」—— **行号全对**（已逐行核对：`:124` 就是那行 `HasTable` 判断、`:309` 就是那句 `tx.Exec`），**但路径少了 `migrator/` 子目录**：gorm 包里 `migrator.go`（根，111 行）与 `migrator/migrator.go`（1038 行）是**两个不同文件**，且 modcache 内同名文件不止一处（`v1.31.1` / `v1.31.2` 各一份）⇒ 短路径**有歧义** ⇒ 已按 `docs/DRIFT/users/user/rpc.md:1332` 的同款写法补全 |
 | **③ 真实部署里两个服务同时对空库启动** | **两边都不发生** | Go 与 RAG 的 `docker-compose` **都只有基建、没有应用服务**（Go 侧连 user-rpc / admin-rpc 都没有）。首次初始化通常由单个服务完成 |
 
 **② 的实测**：把 Go 的 user-rpc 与 admin-rpc **同时**对着一个全新空库启动（刻意不 sleep 错开），
@@ -724,7 +724,7 @@ RAG `3047ms/4455ms`，量级一致、可复现，**但以复测值为准**：
 | # | 改了什么 | 文件 | 守门 |
 |---|---|---|---|
 | 1 | `CREATE TABLE` 里两列改 `TIMESTAMPTZ` + 幂等 `SET TIME ZONE 'UTC'` 包裹的 `ALTER … USING … AT TIME ZONE 'UTC'` + `RESET TIME ZONE` | `users-common/src/main/resources/db/01_create_user.sql:42-43` / `:101-106` | `UserRpcUsersUserTimestamptzParityTest` |
-| 2 | 两个实体 4 个字段 `LocalDateTime` ⇒ `OffsetDateTime` | `user-rpc/.../domain/UserEntity.java`、`admin-rpc/.../domain/UserEntity.java` | 同上（反射断言声明类型） |
+| 2 | 两个实体 4 个字段 `LocalDateTime` ⇒ `OffsetDateTime` | `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/domain/UserEntity.java`、`service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/UserEntity.java` | 同上（反射断言声明类型） |
 
 **测试**：admin-rpc **84/0**、user-rpc **102/0**（新增 6 条真 PG 用例）。
 **变异测试已做**：删掉 DDL 里的 `SET TIME ZONE 'UTC'` ⇒
@@ -873,7 +873,7 @@ RAG `3047ms/4455ms`，量级一致、可复现，**但以复测值为准**：
 ⚠️ 这是本轮**第二次**推翻自己（第一次是 V-004 的归因）⇒ 与 `docs/Pitfalls/_cross/testing-pitfalls.md`
 的「绿测试可能是错误答案的守卫」同源：**结论错，比没结论更贵。**
 真正残留的差异是 **`V-010`（`update_time` 推进）**，已修：GORM 的
-`gorm@v1.31.1/callbacks/update.go:235-252` 会**无条件**把 `UpdateTime`（autoUpdateTime）放进 SET，
+`gorm.io/gorm@v1.31.1/callbacks/update.go:235-252` 会**无条件**把 `UpdateTime`（autoUpdateTime）放进 SET，
 RAG 曾用 `if (!any) return 0;` 把它挡掉了。修复后双侧实测：空 body / `extra_info={}` / 改 email
 **三种情况两侧 `update_time` 都推进**。
 
@@ -883,7 +883,7 @@ RAG 曾用 `if (!any) return 0;` 把它挡掉了。修复后双侧实测：空 b
 |---|---|---|
 | `DRIFT-USERRPC-V-004`（可观察半边） | `users_user_avatar_history` 时间列 `TIMESTAMP⇒TIMESTAMPTZ` + 渲染换算到进程本地时区 | user 半边 ✅ |
 | `DRIFT-USERRPC-V-009`（新） | `insertHistory` 由 DB 的 `CURRENT_TIMESTAMP` 改绑**应用侧时钟**（对齐 GORM autoCreateTime/autoUpdateTime 同源） | user 半边 ✅ |
-| `DRIFT-USERRPC-V-010`（新） | `update_time` 无条件进 SET（Go 依据 `gorm@v1.31.1/callbacks/update.go:235-252`） | user 半边 ✅ |
+| `DRIFT-USERRPC-V-010`（新） | `update_time` 无条件进 SET（Go 依据 `gorm.io/gorm@v1.31.1/callbacks/update.go:235-252`） | user 半边 ✅ |
 | `DRIFT-USERAPI-001` | 畸形 claim 走业务层 200+1006，**不是**鉴权层 401 | user 半边 ✅ |
 | `DRIFT-USERAPI-002` | delete / update 的 `uid<=0` 透传（Go 的两套 uid 语义不抹平） | user 半边 ✅ |
 | `DRIFT-USERRPC-V-005` | **关闭**（结论被证伪，非修复） | user 半边 ✅ |
@@ -919,21 +919,36 @@ RAG 曾用 `if (!any) return 0;` 把它挡掉了。修复后双侧实测：空 b
   这与 `users_user_avatar_history.create_time`（纯展示型）**风险等级不同**。
 - ⇒ **裁决点**：admin 侧需单独评估这两张表，本轮只登记。
 
-#### ADJ-03 ⚠️ `users_user` 建表责任交叉（`user-rpc` ↔ `admin-rpc`）仍未在当前代码上复跑
+#### ~~ADJ-03~~ ✅ **已闭环（2026-10-26 订正）** —— `users_user` 建表责任交叉（`user-rpc` ↔ `admin-rpc`）**已在当前代码上复跑过**
+
+> ⚠️ **本节原文（2026-10-24）写的是「仍未在当前代码上复跑 / 仍 unresolved」—— 那是过期状态。**
+> ⇒ 原文保留供追溯，订正见下。
 
 - `users_user` 由**两个组件共同建表**，共用 `users-common` 的同一份 DDL
   （两边各有 `UserSchemaBootstrap` / `AdminSchemaBootstrap` 幂等重放）。
-- 本轮验证的是「**各自单跑**能重放成功」；
-  **「两套栈并发跑同一张表」在本轮代码上没有复跑过** ⇒
-  AGENTS.md §6.3 问题 1 记录的「建表责任交叉」**仍 unresolved**。
-- ⇒ **裁决点**：需要一轮双栈并发验证，**归属跨界**，本轮不做。
+- **✅ 已复跑**：**2026-10-23 第五轮 §4** 做了**双侧对称并发启动实测**（两个 rpc 同时对同一个**空库**启动，共 **9 轮**），
+  **2026-10-24 独立复现**，结论逐条一致。
+  - 两侧**都能起来**、表**都建齐**、**0 致命错误** ⇒ **OBSERVABLE EQUIVALENT**（可观察结果一致）。
+  - ⚠️ **但机制不同，务必别读成「机制也等价」**：
+    **RAG 侧**靠 advisory lock **机制性**串行（同一把锁，两个进程严格错开）；
+    **Go 侧** GORM `AutoMigrate` 是 check-then-act ⇒ **机制上仍有竞态窗口** ⇒ **实测未撞 ≠ 机制保证**。
+  - ⇒ 证据：`docs/DRIFT/users/user/rpc.md` 的 **§9.2** 与 **§4「建表责任交叉」行**。
+- ⇒ **admin 域**（2026-10-26）已在 `docs/DRIFT/users/admin/_shared.md` §5 加 **U-8 只读指针**指向该结论
+  （admin 不写域级共享文件 ⇒ 由 users 域级 owner 落原文订正 ⇒ 即本节）。
+- ⚠️ **残留**：Go 侧那个**机制性**竞态窗口本身**未被消除**（只是当前不可观察）⇒ 若将来要消除，那是**另一个议题**（改 Go 侧建表机制 ⇒ 真源冻结 ⇒ 不可改 ⇒ 只能靠 RAG 侧锁 + 部署纪律）。
 
-#### ADJ-04 ⚠️ `users_user.status` 的 **V-011（DEFAULT `CURRENT_TIMESTAMP`）** 对 admin 写入路径的影响未评估
+#### ~~ADJ-04~~ ✅ **已答（2026-10-26，admin 域回信）** —— admin 侧**不存在**依赖 DEFAULT 的 INSERT
 
 - RAG 的 `users_user` 时间列有 `DEFAULT CURRENT_TIMESTAMP`，Go 无。
-- user 半边两侧都显式写该列 ⇒ **不可观察**；
-  但 **admin 侧的写入路径若依赖 DEFAULT**（例如只写部分列的 INSERT），差异就会显现。
-- ⇒ **裁决点**：需 admin 侧确认其 INSERT 是否总是显式带时间列；本轮只登记。
+- user 半边两侧都显式写该列 ⇒ **不可观察**。
+- **✅ admin 域已答**（证据在其 `admin/_shared.md` §5 的 **U-7**）：
+  **admin-rpc 对 `users_user` 零 INSERT** —— 只有 UPDATE / DELETE
+  （`userMapper.update(null, wrapper)` ×4 + `userMapper.delete(...)` ×1；全模块 `userMapper.insert` **零命中**）
+  ⇒ **不依赖 `users_user` 的 `DEFAULT CURRENT_TIMESTAMP`** ⇒ **该差异对 admin 侧不显现** ✅ ⇒ **本条关闭**。
+- ⚠️ **但同一机制在 admin 自己的两张表上成立** —— admin 域已顺带查出 **`DRIFT-ARPC-001` 有一个范围缺口**并自行登记：
+  该条标题写「`update_time` 永不推进（**所有写路径**）」，但那 6 条**全是 UPDATE**；
+  **INSERT 路径的 `create_time` 不在范围内**（Go 靠 GORM `autoCreateTime` 应用层填 / RAG 靠 DB 层 DEFAULT ⇒ 两侧都有值 ⇒ 实际不可观察）
+  ⇒ ⇒ **修 `DRIFT-ARPC-001` 时不要顺手改 INSERT 路径，也别以为该条被修就等于 `create_time` 也被证明了**。
 
 ### 6. 本轮**没有**做的事（诚实边界）
 
@@ -984,9 +999,10 @@ AGENTS.md §9 / §8 / §0 三处都写着「**过期状态必须随实测同步�
 
 | # | 发现 | 类型 | 处置 |
 |---|---|---|---|
-| **1** | `docs/DRIFT/users/user/api.md` 第八轮 MaxBytes 表写「真容器由 `tools/difftest/check-protection-layer.sh` 守」—— **该脚本在仓内不存在** | 🔴 **台账事实错误** | ✅ 已更正（见下） |
+| **1** | `docs/DRIFT/users/user/api.md` 第八轮 MaxBytes 表写「真容器由 `check-protection-layer.sh` 守」—— **该脚本在仓内不存在** | 🔴 **台账事实错误** | ✅ 已更正（见下） |
 | **2** | `rpc.md:1282` / `rpc.md:1477` / `_shared.md:889` 引用的守门类 **`UserRpcJsonbAndAvatarProjectionTest`** —— 该类**已改名为 `UserRpcJsonTextAndAvatarProjectionTest`**（真源：`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/service/UserRpcJsonTextAndAvatarProjectionTest.java`） | 🔴 **守门清单指向不存在的类** | ✅ 三处已改新名 |
-| **3** | 同上改名**未同步到 admin 域**：`docs/DRIFT/users/admin/rpc.md:372,382` 仍用旧名 | ⚠️ **跨域** | ⏳ **本轮未改**（§5.3：只写自己域的文件）⇒ **提醒 admin 会话** |
+| **3** | 同上改名**未同步到 admin 域**：`docs/DRIFT/users/admin/rpc.md:372,382` 仍用旧名 | ⚠️ **跨域** | ✅ **admin 域已于 2026-10-26 改完**（提交 `c09fa45`，分支 `align/users-admin`：`admin/rpc.md:372,382` + `admin/rpc.md` 的 Pitfalls `:78,:92` 共 4 处）⇒ 本条关闭 |
+| **4** | ⚠️ **`.xml` 报告名**（`UserRpcJsonbAndAvatarProjectionTest.xml`）**不是类名引用**，是**历史 surefire 报告文件名**（Oct 23 的真实产物、已成孤儿） | ✅ **不是缺陷** | ✅ **保持原样，勿「顺手统一」** —— 改了反而失真（报告文件名就是当时那次的真实名字）。<br>本域的 2 处（`users/user/api.md` 的「Oct 23 的旧报告」+ `Pitfalls/users/_shared.md` 的「上一轮遗留旧报告」）**已确认为报告名、保留**；admin 域同样保留。<br>⇒ **约定**：**类名引用**改新名，**`.xml` 报告名**保留原样。 |
 
 **另新查出 1 个覆盖缺口**（复核的副产品）：
 
@@ -1001,7 +1017,7 @@ AGENTS.md §9 / §8 / §0 三处都写着「**过期状态必须随实测同步�
 **发现 1 的更正后表述**（`api.md` 第八轮 MaxBytes 表）：
 
 > | 运行时证据 | ⚠️ 静态 | ⚠️ 静态 —— ⚠️ **2026-10-24 复核更正**：本行原写「真容器由
-> `tools/difftest/check-protection-layer.sh` 守」，**该脚本在仓内不存在** ⇒ **MaxBytes 在
+> `check-protection-layer.sh` 守」，**该脚本在仓内不存在** ⇒ **MaxBytes 在
 > `service/common` 没有专用测试类**；仅被 5 个**别的域**的 MVC 测试间接断言 413
 > ⇒ **user-api 侧自身零守网** | ⚠️ |
 
@@ -1028,9 +1044,82 @@ AGENTS.md §9 / §8 / §0 三处都写着「**过期状态必须随实测同步�
 ### 5. 复跑方式
 
 ```bash
-python3 tools/check-ledger-selfcheck.py            # 复核 users/user 域 6 份台账
-python3 tools/check-ledger-selfcheck.py --strict   # 有 FAIL 时退出码非 0（可进 CI）
-python3 tools/check-ledger-selfcheck.py --ledger <file> ...   # 指定台账
+python3 tools/check-ledger-selfcheck.py                       # 复核 task 域（工具的默认域）
+python3 tools/check-ledger-selfcheck.py --domain users        # 复核 users 域（本域）
+python3 tools/check-ledger-selfcheck.py --mutation-test       # 跑变异自检
 ```
 
+⚠️ **2026-10-26 更正（下方原句是 2026-10-24 时的状态，已过期）**：
+原写「`--strict`（有 FAIL 时退出码非 0）/ `--ledger <file>`（指定台账）」——
+**这两个 flag 工具实际不支持**（现有 flag 只有 `--domain` / `--go-root` / `--repo-root` / `--mutation-test`）。
+且 **`--strict` 本来就是多余的**：有 FAIL 时工具**本就退出 1** ⇒ 直接看退出码即可。
+
 ⚠️ 本轮复核后： **FAIL 3 → 0**（发现 1、2 已修；发现 3 属 admin 域，本轮不动 ⇒ 仍为 WARN 级）。
+
+### ⚠️ 2026-10-26 复测（**已随 global 的工具修复而更新**）
+
+> 用 `global` 域 **2026-10-26 最新**的 `tools/check-ledger-selfcheck.py`（`bb680a3` → `a4f3029` → `d52031e`）
+> 对**本域台账**复跑（`--domain users --repo-root <主仓>`）：
+
+| 层 | 结果 |
+|---|---|
+| 第 1 层 | ✅ **54 引用 ⇒ 缺失 0** —— ✅ **2026-10-26 已归零**：原先那 1 条 `RpcInterceptorTimeoutDescriptionGateTest.java`（`global` 域的守门类，主干未合时路径悬空）**已被工具的 N13「状态叙述」正确去噪**。<br>⚠️ **为去噪能做而做的改写**：本条原先写作「主干上**查不到** ⇒ 路径**悬空**是**预期状态**」⇒ 这三个词**都不在** N13 的叙述词表里 ⇒ 工具认不出 ⇒ 仍报缺失。<br>⇒ 改成「该文件在 `global` 提交并合入主干前，主干上**不存在**（路径悬空是预期状态…）」⇒ 命中「不存在」⇒ **缺失归零**。<br>⇒ ⚠️ **工具侧的根因已报 global**：N13 词表（`删除\|已删除\|不存在\|已移除\|被删\|不再存在\|不建\|未建\|不创建\|0 字节\|错放\|空文件\|占位`）**缺「悬空 / 查不到 / 预期状态 / 尚未存在」等常见措辞** ⇒ 其他域会踩同款<br>🔴 **2026-10-26 晚：工具侧已修（global `45067ce`，E61）** —— N13 **拆三层**（A 存在性 / B 落地态 `待合入`·`尚未存在`… / C 免责 `是预期状态`·`不是台账事实错误`…）+ **一道护栏**（行里出现「路径写错 / 笔误 / 应为」⇒ B/C 层一律不生效）⇒ **「查不到 / 悬空」只靠 C 层免责半句生效**（裸词进表 = 假阴性，真缺陷恰恰这么写）。<br>⇒ ✅ **本域已把权宜措辞改回自然措辞**（「主干上查不到」+「是预期状态」）—— **语义更准**（文件在 global 的提交里**存在**，只是在主干上查不到；「不存在」反而失真）⇒ **两种写法现在都认**，改与不改都不影响机器判定 |
+| 第 2 层 | ⚠️ **10/10 OK，但断言全是 task 域的** ⇒ 该层**没按域筛选**<br>🔴 **2026-10-26 已被 `global` 的 `35a7b8e` 修掉**（见下方「工具已修」一节）⇒ 现在对本域输出 **「本层对 users 域不适用（⚠️ 不是『通过』，是『没查』）」** |
+| 第 3 层 | ❌ **45 处「commit 清单缺陷」** ⇒ **全是工具假阳性**：① 台账路径**写死** `docs/DRIFT/task/_README.md`（那 45 条登记**属 task 域**）；② 窗口算法 `merge-base(HEAD, do-my-own-gh)..HEAD` **在主分支上恒空** ⇒ 44 条哈希被误判「不在本分支上」（实测它们**都在**本地 `do-my-own-gh` 上）+ 1 条行数不守恒<br>⇒ ~~**仍未修**（属工具 owner 域 ⇒ 已回信 global）~~ ⇒ 🔴 **2026-10-26 已被 `global` 的 `35a7b8e`「域适配 + commit 清单口径」修掉** ⇒ 现在对本域输出 **「本层对 users 域不适用（⚠️ 不是『通过』，是『没查』）」** ⇒ **45 条假阳性消失**（⚠️ **不是「本域台账变干净了」，是「工具不再拿 task 域的判据来审 users 域」）|
+| 第 4 层 | ✅ **0 条** —— ✅ **2026-10-26 已归零**（`global` 的 **`d52031e`**「go.mod 权威化」）：第 4 层的第三方库清单改为**从真源 `go.mod` 动态解析**（含 `// indirect`），手写表只作兜底 ⇒ `gorm.io/gorm` 等**不再被误判**。<br>⚠️ 本域侧此前也已把 3 处引用补全为全路径（`gorm.io/gorm@v1.31.1/...`）—— 那是**消歧**（modcache 里 `migrator.go` ≥4 个同名），**行号全部核对无误**（`:124` = `HasTable` 判断、`:309` = `tx.Exec`、`:235-252` = AutoUpdateTime 那 18 行）⇒ 工具修好后两条都成立 |
+
+⇒ **「FAIL 3 → 0」那句是 2026-10-24 的旧结论**；当前实况（**2026-10-26 复测**）：
+**第 1 层 0 · 第 2 层「本域不适用」· 第 3 层「本域不适用」（45 条假阳性已由工具侧消除）· 第 4 层 0**
+⇒ 工具侧输出 **「✅ 层 0~4 全部通过」**。
+⚠️ **但「第 2/3 层不适用」不等于「本域这两层已核过」** —— 工具明写「**不是『通过』，是『没查』**」
+⇒ 本域第 2/3 层的判据**至今仍缺**（第 3 层的「commit 清单」在本域台账里根本不是那个格式），
+⇒ **本域不因此宣称「已复核」**；真要覆盖，得由工具 owner 给 users 域补判据。
+
+### 🔴 工具已修（`global` 域 `35a7b8e`，2026-10-26）—— 本域报的第 3 层缺陷**已闭环**
+
+本域于 2026-10-26 向 `global` 报的三处工具缺陷，第 3 层那两处（域筛选只到第 1 层 · 台账路径写死 task 域）已由
+`global` 的 **`35a7b8e`「共享复核工具两缺陷修复：域适配 + commit 清单口径」**修掉：
+第 2/3 层现在**先看该域的台账格式**再决定判据 ⇒ 对 `users` 域输出「**不适用**」而不是套用 task 域的判据。
+
+⇒ **本域先前记的「第 3 层 45 条未修」已过期**（**核对日期 2026-10-26**），保留原文仅为留痕。
+⚠️ **复跑方式**（用 `global` 工作树里的工具 + `--repo-root` 指回主仓，**不要**用本仓那份旧版）：
+```bash
+python3 "<global worktree>/tools/check-ledger-selfcheck.py" \
+    --domain users --repo-root "/Users/pr/Documents/java&golang/RAG"
+```
+⇒ 实测：**层 0~4 全部通过**；第 1 层 54⇒0；第 4 层 288 条去重 ⇒ **235 条不悬空** + 53 条去噪（N5/N7 台账已自陈）。
+⚠️ **层 5/6 仍报「17 个测试类 + 35 个生产类台账未点名」** ⇒ 那是**覆盖缺口提示**、**不算失败**，
+⇒ 但它确实指出本域台账**没有逐个点名**本域的生产类 ⇒ 后续补台账时按它给清单来。
+⚠️ **另注**：本仓 `tools/check-ledger-selfcheck.py` 仍是旧版（`7a01b51`）⇒ **直接跑它会得到 60 条「不一致」**，
+其中 **45 条第 3 层 + 12 条第 1 层 + 3 条第 4 层**全是**旧版的误判**（新版同口径全绿）⇒ **别照着旧版输出改台账**。
+⇒ 逐层根因与复现命令 ⇒ [`docs/Pitfalls/users/_shared.md` 的 PIT-USERS-SHARED-019](../../../Pitfalls/users/_shared.md)。
+
+### 📐 可机检不变量（给 `global` 域的 `DOMAIN_CFG['users']`）—— 2026-10-26
+
+> `global` 第三十五轮问：「**要不要给 users 域定义它自己的配置，取决于你们想查哪几条不变量**
+> —— 你们给不变量清单，global 可以把 `DOMAIN_CFG['users']` 补上。」
+> ⇒ 本节就是那份清单。**前三条不需要任何新数据**（台账现有结构即可支撑）⇒ 可以直接实现。
+> ⚠️ **「不适用」≠「通过」**：下面这些是 users 域**真正想被机器盯住**的不变量，
+> 若工具对本域仍输出「不适用」，本域就**没有在受监督**（不是「已通过」）。
+
+| # | 不变量 | 判据（可机器实现） | 需要新数据吗 | 本域现状（2026-10-26） |
+|---|---|---|---|---|
+| **I1** | **分类计数守恒** | `rpc.md §4.4` 的每类计数 ↔ `§7` 里 `### DRIFT-USERRPC-V-NNN` 标题的**状态标记**（✅已修 / ✅已销账 / ✅判为不成立 / 🔴未修）**一一对应**：每条目**恰好**被计入一类，且被计入的类计数与表里写的数字相等。`api.md` 同理（`§4` 矩阵 ↔ `§7` 的 `DRIFT-USERAPI-NNN`） | ❌ **不需要** | 手工核对过：rpc 侧 §4.4 的「OBSERVABLE DIFFERENCE = 2」= V-002 + V-012；其余 7 条分属「已修/已销账/判为不成立/不可观察」四类 |
+| **I2** | **销账提交存在性 + 祖先链** | 每个「已修 / 已关闭 / 已签字」条目**必须登记至少一个 SHA**；该 SHA 必须存在于仓库，且在 `do-my-own-gh` 的祖先链上 | ⚠️ **需要** —— 但**本域已补好**：[`users/user/rpc.md §8.1`](users/user/rpc.md) 与 [`users/user/api.md §8.2`](users/user/api.md) 两张**结构化销账提交清单**（含「销账方式」列：代码修复 / 证伪关闭 / 销账回写 / 签字保留 / 未修） | ✅ 已补（2026-10-26）⇒ **原先 12 个条目里只有 D-004 带 SHA**，现已逐条补全并逐个 `git show --stat` 核过 |
+| **I3** | **台账写死的测试条数 ↔ 实测条数** | 台账里「`XxxTest` **N** 条」「user-rpc 全量 **N** 条」这类**写死的数字** ↔ surefire 实测条数 | ❌ **不需要** | ⚠️ **这类数字会漂** —— 2026-10-26 本域就因新增 3 条守网而必须把 `12 条 → 16 条`、`125 → 128` 全部同步（`global` 在 task 域抓到过同类：台账 106 vs 实测 108）⇒ **最该交给机器的一条** |
+| **I4** | **CASE 编号守恒** | `rpc.md §8` 的 `CASE-NN` 与 `api.md §8` 的 `CASE-NN`（含 `5b/5c/5e/5f` 子编号）：**不得重号、不得跳号**；且 `§4.2 逐 OP` 的行数 ↔ `§8` 的 CASE 覆盖不得有缺口 | ❌ **不需要** | 手工核对过：rpc 侧 CASE-01..39 + 子编号，api 侧 CASE-01..60 + 子编号，无重号 |
+| **I5** | **「已修」断言 ↔ 代码里真有对应物** | 第 2 层的 users 版：每条「已修」要指向一个**可机检的锚点**（文件 + 符号/正则），例如 V-003 ⇒ `01_create_user.sql` 里 `extra_info` 必须是 `text`；V-008 ⇒ 那段死代码必须**不存在** | 🔴 **需要** —— 本域要补一张「条目 → 锚点」表 | ❌ **尚未做**（本域不编造判据 ⇒ 本条待办） |
+
+⚠️ **一条必须提醒 `global` 的口径差异**：
+`global` 第三十五轮新加的「**登记的哈希必须构成连续祖先链**」这条判据，
+**对 users 域结构性不适用** ——
+users 域与其它 9 个域**共用 `do-my-own-gh` 这条共享主干** ⇒ 各域的提交**必然交错**
+⇒ 本域登记的 SHA 在链上**不连续** ⇒ 建议对 `users` 域**降级**为
+「**存在 + 在 `do-my-own-gh` 祖先链上（不要求连续）**」。
+（task 域能成立是因为它有**专属分支** `align/task` + 专属清单表。）
+
+⚠️ **另两条本域的机器可检项（global 若有余力可一并做）**：
+① **N8「`...` 省略中间目录」的写法**会让路径**永久不可解析** ⇒ 路径写错也**没有机制能发现**
+（`admin` 域已把 33 处展开为完整路径；本域新增引用也一律写全路径）；
+② **Go 侧 `file:line` 的行号正确性**（不只是「悬空」）—— 第 4 层只查「该行是否存在」，
+**不查「该行的内容是不是台账说的那件事」** ⇒ 这是 §3.3.1 的残余缺口，本域目前靠人工核。

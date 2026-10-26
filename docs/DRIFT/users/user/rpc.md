@@ -36,7 +36,7 @@
   证据散落在 `users/_shared.md` 的 §6.2.5 与 §6.2.6。
 - ⚠️ `AvatarTransactionWiringTest`（5 条，含 2 条真触发 rollback）证明 `@Transactional` 真生效，
   但 §6.2.6 自己声明 **「无真实 PG，故不证明 jsonb `CAST` 等 PG 行为」**——该缺口后由
-  `UserRpcContainerWiringTest`（真 Testcontainers PG，12 条）关闭，详见 `users/_shared.md`。
+  `UserRpcContainerWiringTest`（真 Testcontainers PG，**16 条**，2026-10-26 实测）关闭，详见 `users/_shared.md`。
 - 本模块的 `HUMAN_ONLY.MD` **不存在**（全仓 4 个 HUMAN_ONLY.MD 全在 users 域，但不含 user-rpc 之外的域）。
 ---
 
@@ -54,10 +54,10 @@
 | Go 侧 | `Sea-RideTheWind_golang/service/user/user/rpc` —— 通读 **18 个源文件**（排除 `pb/*.pb.go`）。⚠️ **不含** `service/user/rpc/internal/logic/` 的 **7 个孤儿 `_test.go`**（全仓零引用，既不属本组件也不属 admin-rpc） |
 | RAG 侧 | `RAG/service/users/user/user-rpc` —— 通读 **16 个 main 源文件** + `pom.xml` + `application.yaml` + `AutoConfiguration.imports` + `users-common` 的 4 份 DDL 与 `SchemaInitializer` |
 | 外部依赖（**不属于本组件，但本组件消费**） | ① `service/user/common/{cryptx,jwt,errmsg}`（user 与 admin 两域共用）② `service/common/{snowflake,observability,logger}` ③ `service/common/*` ↔ RAG `com.rag.common.*` |
-| 编号命名空间 | 本轮新增 **`DRIFT-USERRPC-V-001` 起** / **`UNRESOLVED-USERRPC-001` 起**。users 域已占用的 `DRIFT-001..011/016/018/024`、`DRIFT-NEW-001/005/007/008/011/012/013/014/015/016/018`、`DRIFT-FRAMEWORK-001` **一条都不复用** |
-| 本轮自跑证据 | ✅ **真 PG**：`mvn -o -pl service/users/user/user-rpc -am test`，**2026-10-24 实测 `Tests run: 125, Failures: 0, Errors: 0`**（其中含本轮新建的 `UserRpcGoErrorMessageParityTest` 3 条）。`UserRpcContainerWiringTest` **12 条**跑在 Testcontainers `postgres:16-alpine` 上（日志实证 `DockerClientFactory` + `Found Docker environment`），`AvatarTransactionWiringTest` 5 条跑在真实 Spring 容器装配上 |
+| 编号命名空间 | 本轮新增 **`DRIFT-USERRPC-V-001` 起** / **`UNRESOLVED-USERRPC-001` 起**。users 域已占用的 `DRIFT-001..011/016/018/024`、`DRIFT-NEW-001/005/007/008/011/012/013/014/015/016/018`、`DRIFT-FRAMEWORK-001` **一条都不复用**。⚠️ **2026-10-26 第十一轮新增 `DRIFT-USERRPC-V-012`**（编号续在 V-011 之后）|
+| 本轮自跑证据 | ✅ **真 PG**：`mvn -o -pl service/users/user/user-rpc -am test`，**2026-10-26 实测 `Tests run: 128, Failures: 0, Errors: 0, Skipped: 0`**（较 2026-10-24 基线 125 净增 +3 = 第十二轮新增的 3 条 B-1 装配层守网）。`UserRpcContainerWiringTest` **16 条**跑在 Testcontainers `postgres:16-alpine` 上（日志实证 `DockerClientFactory` + `Found Docker environment`），`AvatarTransactionWiringTest` 5 条跑在真实 Spring 容器装配上 |
 | ✅ **已**取得（2026-10-24 更新） | ✅ **双侧活体对拍** —— `tools/difftest/exp-difftest-grpc-user9.sh`：**43 场景**（9 个 RPC × 字段级响应 / `grpc-message` 逐字 / 边界输入），**真进程 + 真 PG + 真 Redis**，自带容器/库/端口 ⇒ **39 等价 / 4 处差异，4 处全是 N-2 已签字的 Go 源码乱码** ⇒ **无新漂移**。⇒ **§9.1**。<br>⚠️ 此前那句「`grpc-dual-port-runner.java` 只覆盖 4 档 status code」的**缺口描述已过期**（那是 2026-10-23 的状态） |
-| 最终判定 | **`SEMANTICALLY NOT EQUIVALENT`** —— **2 项 OBSERVABLE DIFFERENCE**（V-002 / V-007，§7）+ 4 项 IMPLEMENTATION DIFFERENCE，**0 项 SEMANTIC MISMATCH**、**0 项 unresolved**（§9 的 7 条已于 2026-10-24 全部闭环）。⚠️ **此前写「1 项 SEMANTIC MISMATCH + 7 项 OBSERVABLE DIFFERENCE + 5 项 unresolved」是过期状态** —— V-001 已证伪并闭环（Go 的 GORM 把 `status IS NULL` 读成 0 ⇒ **两侧行为一致**） |
+| 最终判定 | **`SEMANTICALLY NOT EQUIVALENT`** —— **2 项 OBSERVABLE DIFFERENCE**（**V-002**，§7 · **V-012**，§「2026-10-26 第十一轮」—— 后者是**观测面**：超时时的业务日志错误归因）—— ⚠️ 原写「2 项（含 V-007）」，**V-007 已于 2026-10-26 由 `global` 域销账**（§7）+ 4 项 IMPLEMENTATION DIFFERENCE，**0 项 SEMANTIC MISMATCH**、**0 项 unresolved**（§9 的 7 条已于 2026-10-24 全部闭环）。⚠️ **此前写「1 项 SEMANTIC MISMATCH + 7 项 OBSERVABLE DIFFERENCE + 5 项 unresolved」是过期状态** —— V-001 已证伪并闭环（Go 的 GORM 把 `status IS NULL` 读成 0 ⇒ **两侧行为一致**） |
 
 > ⚠️ **按 AGENTS.md §3.3 与本 spec 硬约束：91 条全绿不构成 `EQUIVALENT` 的证据。**
 > 本文件里每条 `EQUIVALENT` 的真实支撑是**逐行读 Go 消费点**，测试只是「RAG 侧写法确实如此」的旁证。
@@ -255,7 +255,7 @@ Result 只用 5 个枚举值。证据列的记号：
 | SelectAvatar | 事务 5 步原子性 | 真 PG 事务 | `@Transactional` 在 mapper `default` 上，经代理进入 | **EQUIVALENT** | `[PG]` `createAvatarHistoryRollsBackOnRealPg` / `selectAvatarHistoryMissingDoesNotClearCurrent` |
 | SelectAvatar | **是否有行锁** | 无 `FOR UPDATE` | 无 `FOR UPDATE` | **EQUIVALENT**（AGENTS §1.1 第 7 条在本组件**不成立**） | `[GO] model/user.go:134-169` `[RAG] UserAvatarHistoryMapper.java:175-211` |
 | SelectAvatar | history 查询带 uid 隔离 | 是 | 是 | **EQUIVALENT** | `[GO] :142` `[RAG] :55`；`[PG]` 负向用例 |
-| SelectAvatar | NotFound 两条分支的 gRPC code | 都是 `NOT_FOUND`（message 不同，见 V-007） | 同 | **EQUIVALENT**（code 层） | `[GO] :41-50` `[RAG] :585-595` |
+| SelectAvatar | NotFound 两条分支的 gRPC code | 都是 `NOT_FOUND`（message 不同，见 N-2：Go 源码乱码） | 同 | **EQUIVALENT**（code 层） | ⚠️ 原写「message 不同，见 V-007」—— **误引**：V-007 只讲**超时路径的 description**，与 `NOT_FOUND` 的 message 无关（那条是 Go 源码乱码，已由 **N-2 签字**）| `[GO] :41-50` `[RAG] :585-595` |
 | UploadAvatar | avatar_url trim 后为空 | `InvalidArgument` | 同 | **EQUIVALENT** | `[GO] uploadavatarlogic.go:34-37` `[RAG] :626-629` |
 | UploadAvatar | `history_id` 来源 | 服务端 snowflake 字符串 | 同 | **EQUIVALENT** | `[GO] :39,48` `[RAG] :634` |
 | UploadAvatar | `content_type` 默认值 | 空 ⇒ `image/png` | 同 | **EQUIVALENT** | `[GO] model/user.go:179-184` `[RAG] AvatarDomainService.java:90-93` `[T]` |
@@ -282,7 +282,7 @@ Result 只用 5 个枚举值。证据列的记号：
 |---|---|---|---|---|
 | 服务端超时时长 | struct tag default 2000ms（`zrpc/config.go:46`） | `observability.rpc-timeout: 2s` | **EQUIVALENT** | 本轮实读 `go-zero@v1.10.2/zrpc/config.go`，**行号指向消费该 tag 的 `conf.MustLoad`** |
 | 超时触发机制 | `context.WithTimeout` 真取消（ctx 到 PG） | `call.close(DEADLINE_EXCEEDED)` + `DeadlineState` + `setQueryTimeout` 补 | **IMPLEMENTATION DIFFERENCE**（B-1 已签字：JDBC 不响应 interrupt） | `_shared.md` §6.2.6 E-4 |
-| 超时的 gRPC **description** | `"context deadline exceeded"`（`rpc.go:69`） | `"rpc timeout after 2000ms"`（`RpcInterceptor.java:192-194`） | **OBSERVABLE DIFFERENCE** | **V-007**（跨组件 `service/common`） |
+| 超时的 gRPC **description** | `"context deadline exceeded"`（`rpc.go:69`） | **逐字相同**（`RpcInterceptor` 的超时描述常量，global 修后命名为 `GO_DEADLINE_EXCEEDED_DESCRIPTION`） | **EQUIVALENT** | ✅ **已修（2026-10-26，`global` 域）** —— 修前 RAG 为 `"rpc timeout after 2000ms"`；修前状态见 §7 V-007 |
 | 拦截器是否真挂上 server | `user.go:43` 显式 `AddUnaryInterceptors` | `@Bean GrpcServerConfigurer`（`UserRpcApplication.java:103-107`） | **EQUIVALENT** | `[T]` `GrpcInterceptorWiringTest`（含对照用例证明 starter 自身无此入口） |
 | 建表机制 | GORM `AutoMigrate`（无账本） | `SchemaInitializer` 幂等重放 + PG advisory lock | **IMPLEMENTATION DIFFERENCE**（RAG **更强**：见 `_shared.md` §6.2.5 并发实测） | `[PG]` `UserRpcSchemaTextColumnTest` + `schemaInitCreatedJsonbColumns` |
 | 建表失败 | `log.Fatalln` → 进程退出 | 抛 `IllegalStateException` → 启动失败 | **EQUIVALENT** | `[GO] db.go:33-36` `[RAG] UserSchemaBootstrap.java:52-56` |
@@ -298,18 +298,19 @@ Result 只用 5 个枚举值。证据列的记号：
 | 类别 | 数量 | 编号 |
 |---|---|---|
 | **SEMANTIC MISMATCH** | **0** | ~~V-001~~（**2026-10-24 已闭环**：Go 的 GORM 把 `status IS NULL` 读成 **0** 且不报错 ⇒ **两侧都是 `status=0` 登录成功** ⇒ 行为一致 ⇒ 该条已修） |
-| **OBSERVABLE DIFFERENCE** | **2** | **V-002**（`users_user.status` NOT NULL 差异，🔴 真库实证确认，**未修** · 需与 admin 域同改）· **V-007**（超时的 gRPC `description` 不同，归属 `service/common`）<br>⚠️ 已闭合的：**V-003**（jsonb⇒text，已修）· **V-004**（timestamptz，已修）· **V-005**（**判为不成立** —— protobuf3 空 map 在 wire 上不可表达）· **V-006**（雪花 id，永不进 wire）· **V-008**（死代码 + 伪出处，已修） |
+| **OBSERVABLE DIFFERENCE** | **2** | **V-002**（`users_user.status` NOT NULL 差异，🔴 真库实证确认，**未修** · 需与 admin 域同改）<br>✅ **已销账**：**V-007**（超时的 gRPC `description` 不同，归属 `service/common`）—— **2026-10-26 由 `global` 域修完**（见 §7）<br>🔴 **V-012（新 · 2026-10-26 第十一轮）**：**超时时的业务日志错误归因** —— RAG 记「Redis 写入异常」而客户端收到的是「超时」，Go 两侧一致（**观测面**，非 wire 面）<br>⚠️ 已闭合的：**V-003**（jsonb⇒text，已修）· **V-004**（timestamptz，已修）· **V-005**（**判为不成立** —— protobuf3 空 map 在 wire 上不可表达）· **V-006**（雪花 id，永不进 wire）· **V-008**（死代码 + 伪出处，已修） |
 | IMPLEMENTATION DIFFERENCE | 4 | 表名 / 指标注册 / 建表机制 / 服务发现 |
 | 已签字偏离（引用不重开） | 2 | N-1、N-2（见 `./api.md`） |
 | **UNKNOWN / unresolved** | **0** | §9 的 **7 条（U-001 ~ U-007）已于 2026-10-24 全部闭环** ⇒ §9.1 / §9.2 / §9.3 |
 | ⚠️ **新发现但当前不可观察** | 1 | **V-011**（时间列 DEFAULT `CURRENT_TIMESTAMP`，Go 无 DEFAULT）⇒ 两侧写入路径都显式写该列 ⇒ **当前不可观察** |
+| ⚠️ **源码层形态差异（客户端不可见 ⇒ 不计入 OBSERVABLE DIFFERENCE）** | 1 | **V-013**（2026-10-26 第十三轮）—— DB 超时的**源码层**形态两侧不同（Go 一律糊成 `codes.Internal` / RAG 保留 `DEADLINE_EXCEEDED`），但**客户端可见面两侧逐字一致**（E-4 四组 Go 采样全是 `{"code":1015}`）⇒ **不是 wire 漂移**。⚠️ **反向风险**：照「Go 是 INTERNAL」把 18 处 catch 改回去 ⇒ RAG 渲染 5001 ⇒ **离 Go 更远** ⇒ **不得改回 Go 行为** |
 
 ### 4.5 复核历史导航页 L34–41 的三条「缺口」
 
 | 原缺口陈述 | 本轮结论 |
 |---|---|
 | 「proto 逐字段对照无独立留档」 | **已闭合（本轮补齐）**：两侧 `.proto` 剥离 `option`/注释/空行后 `diff` **零差异**；另有常驻守门脚本 `tools/difftest/check-proto-static.sh`（`user`/`admin` 两个 proto 有网，见 AGENTS.md §3.4） |
-| 「`AvatarTransactionWiringTest` 无真实 PG，不证明 jsonb CAST」 | **已闭合且本轮升级复跑**：`UserRpcContainerWiringTest` 12 条跑在真 `postgres:16-alpine` 上，本轮 12/12 绿，覆盖 jsonb `Types.OTHER` 写入、`@Results` 读回 Map、`CAST(... AS jsonb)`、4/5 步**真实行回滚**、UNIQUE 约束 |
+| 「`AvatarTransactionWiringTest` 无真实 PG，不证明 jsonb CAST」 | **已闭合且本轮升级复跑**：`UserRpcContainerWiringTest` **16 条**跑在真 `postgres:16-alpine` 上，**2026-10-26 实测 16/16 绿**，覆盖 jsonb `Types.OTHER` 写入、`@Results` 读回 Map、`CAST(... AS jsonb)`、4/5 步**真实行回滚**、UNIQUE 约束，**外加第十二轮的 3 条 B-1 装配层守网**（插件链 / 挂载点 / 负控） |
 | 「本模块的 `HUMAN_ONLY.MD` 不存在」 | **原结论错误，予以修正**：`service/users/user/user-rpc/HUMAN_ONLY.MD` **确实存在**。本轮 `glob **/HUMAN_ONLY.MD` 实测 **4 份**（`user-rpc` / `user-api` / `admin-rpc` / `admin-api`），与 AGENTS.md §2 的计数一致 —— **错的只是「本模块没有」这一句，不是计数**。⚠️ 这类「文件已写 / 文件不存在」是同款需证据的断言（AGENTS.md §2 已自陈）：改清单前先跑 glob，别照抄上一版 |
 
 ---
@@ -343,7 +344,7 @@ Result 只用 5 个枚举值。证据列的记号：
 | Redis 故障 | Setex 失败 | 裸 err | `INTERNAL "注销失败,Redis写入异常"` | 同 | 同 | **YES** |
 | bcrypt 失败 | >72 字节 | `PasswordEncrypt` 返 err | `INTERNAL "密码生成失败"` | 同 | 同 | **YES** |
 | snowflake 失败 | init 失败 | `GetID` 返 err | `INTERNAL "uid生成失败"` / `"history_id生成失败"` | 同 | 同 | **YES** |
-| 超时 | 2000ms | interceptor select | `DEADLINE_EXCEEDED` + `"context deadline exceeded"` | `call.close` | `DEADLINE_EXCEEDED` + `"rpc timeout after 2000ms"` | **code YES / description NO**（V-007） |
+| 超时 | 2000ms | interceptor select | `DEADLINE_EXCEEDED` + `"context deadline exceeded"` | `call.close` | `DEADLINE_EXCEEDED` + `"context deadline exceeded"` | **YES**（code 与 description 两侧全等）—— ✅ 原为「code YES / description NO」（V-007，**2026-10-26 已销账**） |
 | SQL 被取消 | 57014 | ctx cancel ⇒ GORM 返 ctx err ⇒ **落到 `INTERNAL`** | `INTERNAL "DB查询失败"` | `SqlTimeoutStatusTranslator` 翻成 `DEADLINE_EXCEEDED` | `DEADLINE_EXCEEDED` | **NO** —— 但两侧都只在 2000ms 之后才发生，**外层 interceptor 已先返回**，内层结果被丢弃 ⇒ **客户端可见行为仍一致**。已由 `_shared.md` §6.2.6 E-4 实测闭环（Go 182ms / RAG 176ms 查询滞留） |
 | 未映射异常 | 任何 `Throwable` | Go 不会走到（每条都显式 `status.Error`） | — | `UserServiceGrpcImpl` 兜底 | `INTERNAL` + `"类名: 消息"` | **IMPLEMENTATION DIFFERENCE**（RAG 多一层兜底，Go 侧对应情形是 panic ⇒ gRPC `UNKNOWN`） |
 
@@ -411,7 +412,8 @@ Result 只用 5 个枚举值。证据列的记号：
   **两者对客户端的可见 scope 等价**（都在 2000ms 让调用方拿到 `DEADLINE_EXCEEDED`），
   但对**在途 IO 的影响不同** —— B-1 已签字（Java interrupt 到不了 JDBC），
   `DeadlineQueryTimeoutInjector` + `SqlTimeoutStatusTranslator` 是补丁，实测查询滞留已从 4657ms 降到 176ms。
-- **description**：**不等价** ⇒ V-007。
+- **description**：**两侧逐字一致**（`context deadline exceeded`）—— ⚠️ 原为「**不等价** ⇒ V-007」，
+  **V-007 已于 2026-10-26 由 `global` 域销账**（§7）。
 
 ### 6.7 Retry Semantic Equivalence
 **两侧都无 Retry**（N/A）。⚠️ 明确记录：Go 的 `mustNewRedis` 在启动期失败会 `log.Fatalln`，
@@ -470,7 +472,7 @@ RAG 多一层 properties。**该条不重开。**
 - 🔴 **2026-10-24 更正（下方「Go Behavior」那句已被证伪，保留原文供追溯）**：
   真源侧活体实测 + admin 域的机制追查（`admin/rpc.md` §2）证明
   **Go 的 GORM 把 `status IS NULL` 读成 `0` 且不报错**
-  （`gorm@v1.31.1` 的 `prepareValues` 对 `int64` 造的是 `**int64` ⇒ `database/sql` 的
+  （`gorm.io/gorm@v1.31.1` 的 `prepareValues` 对 `int64` 造的是 `**int64` ⇒ `database/sql` 的
   `convertAssign` 走 `case reflect.Pointer: if src == nil { dv.SetZero(); return nil }`
   ⇒ 不报错，字段保持零值 0）⇒ **Go 也是 `status=0` 登录成功**，不是 `INTERNAL`。
   ⇒ 本条 V-001 的实质是「**RAG 的写法与 Go 的写法长得不一样**，但行为相同」⇒ **已修（两侧行为一致）**。
@@ -664,20 +666,89 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
   `IdType.ASSIGN_ID` 与 `Jdbc3KeyGenerator` **谁最终胜出** ⇒ **V-006 已关闭**
   （真 PG：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；**永不进 wire**）⇒ `UNRESOLVED-USERRPC-004①` 已闭环。
 
-### DRIFT-USERRPC-V-007（跨组件 `service/common`）超时路径的 gRPC **status description** 不同 —— 🔴 **仍成立，但不在本组件判定权内**
+### DRIFT-USERRPC-V-007（跨组件 `service/common`）超时路径的 gRPC **status description** 不同 —— ✅ **已修（2026-10-26，由 `global` 域修完）**
+
+> ⚠️ **本条曾是「仍成立，但不在本组件判定权内」** —— 该归属判断是对的（判定权确实在
+> `service/common` 组件），而 **`global` 域已把 `service/common` 修完** ⇒ 本条销账。
+> **修前状态（保留供追溯）**：两侧 `code` 相同（`DEADLINE_EXCEEDED`），
+> 但 **description 逐字不同** ⇒ 客户端收到的 `grpc-message` trailer 不同。
 
 - **Category**: Error Identity
 - **Go**：`service/common/observability/rpc.go:69`
   `status.Error(codes.DeadlineExceeded, timeoutCtx.Err().Error())` ⇒ description = **`context deadline exceeded`**。
-- **RAG**：`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:192-194`
-  ⇒ description = **`rpc timeout after 2000ms`**。
+- **RAG（修前）**：`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`
+  的超时关闭分支 ⇒ description = **`rpc timeout after 2000ms`**。
+  ⚠️ **行号引用已改为符号名** —— `global` 域本轮改动使该文件行号漂移，
+  行号快照会变成新的过期事实（`global` 域明确要求改符号名）。
+- **RAG（修后）**：同一处改为常量 `GO_DEADLINE_EXCEEDED_DESCRIPTION`
+  = **`"context deadline exceeded"`** ⇒ 与 Go **逐字相同**。
+  落点文件：`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`
+  （`global` 域持 `service/common` 单写权 ⇒ 本域**只回写台账，不动代码**）。
 - **Difference**：`code` 相同（`DEADLINE_EXCEEDED`），**description 逐字不同**。
 - **Observable Impact**：`grpc-status-details-bin` / `grpc-message` trailer 不同。
   user-api 侧**只按 code 分支**，故不进 HTTP body（与 N-2 同款影响面）。
 - **Classification**: **OBSERVABLE DIFFERENCE**
-- **Evidence**: `[GO]` `rpc.go:69`；`[RAG]` `RpcInterceptor.java:192-194`。证据强度：**静态源码**。
+- **Evidence**: `[GO]` `rpc.go:69`；`[RAG]` `RpcInterceptor` 的超时描述常量（见上）。
+  证据强度：修前 **静态源码**；修后 **双侧活体**（`global` 域跑的，**本域未复跑**）。
 - **归属**：`service/common` 组件，不属 user-rpc 自身。**判定权在 common 组件的台账**，
   此处只登记 user-rpc 作为消费方的事实，避免同一问题被两个组件各判一次。
+- **✅ 销账依据（2026-10-26，`global` 域交付）**：
+  | 项 | 内容 |
+  |---|---|
+  | 修法 | `RpcInterceptor` 新增常量 `GO_DEADLINE_EXCEEDED_DESCRIPTION = "context deadline exceeded"`；**三处**旧串（超时 `TimeoutException` 文案、`call.close` 的 `withDescription`、另一处 `Status.DEADLINE_EXCEEDED.withDescription`）+ 遥测 `markTimeout` 的消息一并改掉 |
+  | 守门 | `RpcInterceptorTimeoutDescriptionGateTest.java`（真 Netty server + 真 channel + 真客户端 + 真 OTel SDK ⇒ 断言**网络上真正传过来的字节**）<br>⚠️ **该文件在 `global` 提交并合入主干前，主干上查不到**（路径悬空**是预期状态**，不是台账事实错误）<br>⚠️ **路径刻意写成短形式（只写文件名）** —— global 第三十七轮提醒：引述一个**已知是错的路径**时，若写成**活路径形态**（带 `service/` `tools/` 前缀）会被工具**报出来**（噪声可忍），若与**叙述词同行**又会被**吃掉**（**假阴性**，更危险）⇒ 短形式两头都躲：既不被当路径引用、也不被误当「已点名类」以外的噪声 |
+  | 探针 | `tools/semantic-probe/rpc-timeout/`（`go/` + `java/` + `run-rpc-timeout-parity.sh`）—— Go 半边 `replace` 引用**冻结仓真源**、RAG 半边跑**生产类** ⇒ `timeout_wire` 两侧逐字节一致 |
+  | 变异 | M1 改回旧串 ⇒ 守门 2/2 红 + 探针 EXIT=1；M2 只改遥测段 ⇒ 只红遥测那条、wire 那条仍绿 |
+  | 本域已核实 | ✅ **代码 diff 属实**（三处替换 + 常量）、✅ 守门类与探针目录**确实存在**、✅ 落点在 `service/common`（`global` 单写权域）<br>⚠️ **未复跑**守门/探针（跑在 `global` 的工作区，避免干扰其构建）|
+  | **提交（SHA）** | **E30 = `49808ad` 单一提交**（实现 + 守门类 + 探针**全在这一个 commit 内**）—— 分支 **`align/global`**，**已推 `origin` + `upstream`**（`git branch -r --contains` 实测两个远端分支都含）|
+  | ⚠️ **合并状态** | ⚠️ **本条记录时主干 `do-my-own-gh` 尚未合入 `49808ad`** ⇒ **主干代码在合并前仍是旧串** ⇒ 本条销账**以 `global` 的提交（SHA）为准**，不依赖主干是否已合 |
+  | ⚠️ **本条记录的更正（2026-10-26 自查）** | 本行初稿写的是「`49808ad`（实现）+ **`22a9111`**（台账/守门/探针收口）」—— ❌ **后半句不成立**。<br>**独立核实**：`22a9111` 的提交信息是「docs(global): 订正 E28 —— favorite 的两斜杠 owner 已修」，`git show --stat` 显示它**只改了 1 个文件、1 行**（`docs/DRIFT/global/_README.md`）⇒ **与 E30 无关**。<br>**真正的守门类与探针提交**：`git log --all --diff-filter=A` 查新增路径 ⇒ 守门类 `RpcInterceptorTimeoutDescriptionGateTest.java` 与探针 `rpc-timeout/` **均由 `49808ad` 新增**（该 commit 共 20 文件 / +1200 行）⇒ **E30 只有一个提交，没有第二个收口提交**。<br>⇒ 教训见 `docs/Pitfalls/users/_shared.md` 的 **PIT-USERS-SHARED-020**（收方给的 SHA 清单必须逐个 `show --stat` 核实主题，不能整包照抄）|
+- **🔴 边界（`global` 域明确要求一并读）**：修完后剩下的 **code 名差异**是一条**已登记的表述偏离**，**本轮不动**：
+  Go（grpc-go）`codes.Code.String()` = CamelCase `DeadlineExceeded`；
+  RAG（grpc-java）`Code.name()` = `DEADLINE_EXCEEDED`
+  ⇒ 已登记在 `docs/Intentional_Deviations/common/_signed-deviations.md` 的 **C-1**，写明「**不做臆造映射**」。
+  ⇒ 守门**刻意把 C-1 的形态钉住**（断言 `code = DEADLINE_EXCEEDED`）⇒ 后人不会把它当新漂移顺手改掉。
+  ⇒ ⚠️ **请勿**为了让 code 名也一致而去改 grpc-java 的 code 命名。
+
+### 🆕 共享层改动影响面记账 —— `global` 域 **E38 第①层**（`d531abd`）：超时期限继承客户端 deadline
+
+> §5.3：共享层（`service/common`）改动 ⇒ **逐个消费方记账**。本节是 **user-rpc 的记账**。
+
+| 项 | 事实 | 出处 |
+|---|---|---|
+| Go 侧（**客户端**） | `RpcClientConf.Timeout int64 json:",default=2000"` ⇒ **zrpc 客户端默认带 2000ms deadline** | `go-zero@v1.10.2/zrpc/config.go:31`（`RpcClientConf` 结构体，line 24 起）+ `zrpc/client.go:71`（`opts = append(opts, WithTimeout(...))`）|
+| Go 侧（**服务端**） | `RpcServerConf.Timeout int64 json:",default=2000"`（注释原文：`setting 0 means no timeout`）⇒ **user-rpc 服务端预算 2000ms** | `go-zero@v1.10.2/zrpc/config.go:46` |
+| Go 侧是否覆盖 | `service/user/user/rpc/etc/user.yaml` **通篇没有 `Timeout`** ⇒ 客户端与服务端**双双走默认 2000ms**；`service/user/user/api/etc/usercenter.yaml` 的 `UserRpc:` 只配了 `Etcd` ⇒ 客户端 Timeout 也走默认 | `service/user/user/rpc/etc/user.yaml`（全文实测）· `service/user/user/api/etc/usercenter.yaml:37-41` |
+| RAG 侧（**服务端**） | `observability.rpc-timeout: 2s` ⇒ **user-rpc 服务端预算 2000ms** | `service/users/user/user-rpc/src/main/resources/application.yaml:155-156`（注释自述对齐 `zrpc/config.go:46` 的 2000ms）|
+| RAG 侧（**客户端**） | **不带 call deadline** ⇒ 有效期限只剩服务端预算 | ✅ **字节码级证据**（非「配置里没写」）：devh `grpc-client-spring-boot-starter` **3.1.0.RELEASE** 的 `net.devh.boot.grpc.client.config.GrpcChannelProperties` **字段清单里根本没有 `deadline`**（只有 `immediateConnectTimeout` = 连接超时，非调用 deadline）⇒ 该 starter **无处可配 call deadline** ⇒ 不配即无<br>另：`service/users/user/user-api/src/main/resources/application.yml:90-97` 的 `grpc.client.user-rpc` 也确实没有 deadline 项 |
+| E38 修法 | `deadlineEpochMs` 由 `now + timeout` 改为 **min(服务端预算, 客户端 deadline 剩余)**；超时调度器延时同用 `effectiveTimeoutMs` | `align/global` commit **`d531abd`**，落点 `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`（已读 diff 原文核实：`effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())`）|
+
+⇒ **本组件结论：无变化、无可观察差异。**
+- Go 侧有效期限 = min(客户端 2000ms, 服务端 2000ms) = **2000ms**
+- RAG 侧有效期限 = min(**无客户端 deadline** ⇒ 服务端 2000ms) = **2000ms**（E38 修前也是 2000ms）
+⇒ 两侧**同形** ⇒ `DRIFT-USERRPC-V-007` 之外**不新增任何条目**，§10 的计数**不变**。
+
+> ⚠️ **但两侧的「2000ms 从哪一刻起算」不同**（**毫秒级，不构成可观察漂移**，故不立条目，只记事实）：
+> Go 的客户端 deadline **在客户端发出时起算** ⇒ 服务端收到时**已消耗一段传输时间** ⇒ 服务端 ctx 的剩余期限是「2000ms − 传输耗时」；
+> RAG 的服务端预算 `rpc-timeout: 2s` **在服务端收到时起算** ⇒ 恒为满额 2000ms。
+> ⇒ **RAG 的绝对截止点比 Go 晚约一个传输耗时**（本机直连为亚毫秒级）。
+> ⇒ 之所以不立条目：**可观察面在秒级抖动之内**，且 E38 的修法方向正是「向 Go 靠」（一旦 RAG 客户端带上 deadline，服务端就会像 Go 一样继承并被传输时间扣减）。
+
+> ⚠️ **顺带记一条「消费方不对称」**（**本组件内**，不是漂移）：
+> **Go 的 user-api 给 user-rpc 传 2000ms deadline，RAG 的 user-api 不传。**
+> ⇒ 当前**数值相同 ⇒ 行为同形**。
+> ⇒ ⚠️ **但 E38 落地后，这条注记的「分叉方向」变了**（原文写的是「RAG 不会跟着客户端提前死」——
+> **在 E38 修前确实如此，修后不再如此**）：
+> **E38 修法落地后，RAG 的服务端会 `min(服务端预算, 客户端 deadline 剩余)`**
+> ⇒ **只要 RAG 侧一旦给 user-rpc 配上 deadline，服务端就会像 Go 一样跟着客户端提前死**。
+> ⇒ 也就是说，**两侧「跟着客户端死」这个行为已经是同形的**；
+> 当前剩下的**唯一**不对称是「**RAG 客户端没配 deadline**」这一个配置事实（以及由它带来的毫秒级起算点差异，见上）。
+> ⇒ 故记此条，**供将来调参时对照**：若有人给 RAG 的 `grpc.client.user-rpc` 加了 deadline，
+> **两侧会同时变同形，不需要额外的服务端改动**；若有人只调 RAG 的 `rpc-timeout`，两侧就会分叉。
+> ⚠️ 另注：`global` 域已明确
+> 「`UNRESOLVED-ARPC-002` 的 CONFIRMED SEMANTIC MISMATCH 定性不变」⇒ 那是 **users/admin 域**的编号，**不在本域**。
+
+---
 
 ### DRIFT-USERRPC-V-008 死代码 + **伪出处** —— ✅ **已修（2026-10-23 第四轮，commit `fa2de52`）**
 
@@ -742,12 +813,56 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 | CASE-28 | `Logout` 空 token | `INVALID_ARGUMENT "Token不能为空"` | 同 | 同 | YES | `[T]` |
 | CASE-29 | `Logout` 正常 token | `SETEX user:jwt_blacklist:<tok> 2592000 "banned"`；**`success=false`** | 同 | **两侧 success 都是 false** | YES | `[T]` `logout_writesRedisWithCorrectKeyAndTtl` |
 | CASE-30 | `Logout` token 含前后空格 | **不 trim**，整串作 key | 不 trim，整串作 key | 同 | YES | `[GO][RAG]` 静态 |
-| CASE-31 | 任一 RPC 执行超过 2000ms | `DEADLINE_EXCEEDED` + `"context deadline exceeded"` | `DEADLINE_EXCEEDED` + `"rpc timeout after 2000ms"` | code 等价 / description 不等价 | **PARTIAL** | **V-007** |
+| CASE-31 | 任一 RPC 执行超过 2000ms | `DEADLINE_EXCEEDED` + `"context deadline exceeded"` | `DEADLINE_EXCEEDED` + `"context deadline exceeded"` | **完全等价**（code 与 description 两侧全等）| **YES** | ✅ 原为 **PARTIAL**（description 不等价）—— **V-007 已于 2026-10-26 由 `global` 域销账** |
 | CASE-32 | PG 被 ACCESS EXCLUSIVE 锁住 12s | 客户端 2000ms 返回；PG 查询 203ms 后消失 | 客户端 2000ms 返回；PG 查询 176ms 后消失 | 同量级 | YES | `_shared.md` §6.2.6 E-4 **实测**（2026-10-21，本轮未重跑） |
 | CASE-33 | 同一 uid 并发 `UploadAvatar` ×2 | 可能两条 `is_current=true` | 同 | **共有缺陷，非漂移** | YES（缺陷等价） | `[GO][RAG]` 静态：两侧都无 `FOR UPDATE` |
 | CASE-34 | 同一 username 并发 `Register` ×2 | 恰好 1 成功 + 1 `INTERNAL`（撞 UNIQUE） | 同 | 同 | YES | `[PG]` `uniqueConstraintsAreEnforcedOnRealPg`（约束层）+ 静态 |
 | CASE-35 | 进程启动时 Redis 不可用 | **启动成功**（`NonBlock` 默认 `true` ⇒ `MustNewRedis` **不做连接检查**） | 启动成功（懒连接） | ✅ **一致**（原记 **NO**，**2026-10-24 活体实验证伪**） | **§9.3** |
 | CASE-36 | 进程启动时 `status` DDL 已存在但列宽是 varchar(255) | — | 幂等 `ALTER ... TYPE text` 自愈 | RAG 单侧特性 | N/A | `[PG]` `UserRpcSchemaTextColumnTest#alterSelfHealsAnExistingVarcharColumn` |
+| CASE-37 | **`Logout` 时 Redis **拒连**（没人监听）** | `INTERNAL`「注销失败,Redis写入异常」/ ~1.7s | `INTERNAL`「注销失败,Redis写入异常」/ ~0.005~0.2s | ✅ **同形**（code + message 一致；**耗时差一个数量级**）| **YES** | `[GO][RAG]` **双侧活体直连 gRPC**（2026-10-26 第十一轮）：`tools/difftest/exp-difftest-redis-neverup-rpc.sh` |
+| CASE-38 | **`Logout` 时 Redis **主机名解析失败**（`redis`，**生产默认形态**）| `INTERNAL`「注销失败,Redis写入异常」/ ~1.8s | `INTERNAL`「注销失败,Redis写入异常」/ ~0.09~0.34s | ✅ **同形**（code + message 一致）| **YES** | 同上（`REDIS_HOST=redis`）|
+| CASE-39 | **`Logout` 时 Redis **连上但不回包**（⇒ 命令超时路径）| `DEADLINE_EXCEEDED`「context deadline exceeded」/ ~2.0s | `DEADLINE_EXCEEDED`「**rpc timeout after 2000ms**」/ ~2.0s | ⚠️ **code 同 / description 逐字不同** ⇒ **正是 V-007（已销账，主干未合）**；<br>🔴 **且业务日志归因不一致** ⇒ **V-012**（RAG 记「Redis 写入异常」，客户端收到「超时」；Go 一致）| **YES**（wire 侧，V-007 合后）/ **观测面 NO**（V-012） | 同上（`REDIS_MODE=hanging`）|
+
+> 🔴 **2026-10-26 第十二轮新增守网（**覆盖缺口闭环，不是新漂移**）** ——
+> **B-1 的两个 MyBatis 拦截器「真的被装进插件链」此前从未被断言** ⇒ 若被摘掉，
+> PG 的 `57014` 不会翻成 `DEADLINE_EXCEEDED` ⇒ 落进 `catch (Exception e)` ⇒ 被改写成 `INTERNAL`
+> ⇒ api 侧渲染 **5001** 而 Go 是 **1015** ⇒ **wire 级漂移，且静默**。
+> ⇒ 补 3 条（插件链 / 挂载点 / 负控），含 **M1·M2·M3** 三次变异验证 ⇒ 详见**第十二轮**。
+
+### 8.1 本组件（`user-rpc`）的**销账提交清单**（结构化 · 2026-10-26 补）
+
+> **为什么要补这张表**：本域此前的销账提交**散落在条目标题里**，没有结构化登记
+> （`api.md` 的 12 个条目里**只有 D-004 带 SHA**）⇒ 机器复核工具的
+> 「登记的哈希必须存在 / 必须在祖先链上」这类判据**对本域无从下手**。
+> ⇒ 本表把「**条目 ↔ 销账方式 ↔ 销账提交**」变成可解析的结构，
+> 供 `global` 域的 `DOMAIN_CFG['users']` 直接消费
+> （判据规格 ⇒ [`users/_shared.md`](../../_shared.md) 的「**可机检不变量**」一节）。
+>
+> ⚠️ **两条纪律**：
+> 1. **每个 SHA 都逐个 `git show --stat` 核过主题与文件面**（PIT-USERS-SHARED-020）——
+>    **不靠提交标题推断**；
+> 2. 2026-10-23 有 **3 个主题为「`add sth` / `add shit`」的批量导入提交**
+>    （`4a63342` / `e993ff0` / `69e3262`），它们**混合了多条漂移的修复** ⇒
+>    **不能作条目级锚点** ⇒ 相关条目在表里标「**未具名**」并写明理由，**不猜**。
+
+| 条目 | 销账方式 | 销账提交（SHA） | 提交主题（逐字） | 备注 |
+|---|---|---|---|---|
+| **V-001** | 证伪关闭（**无代码修复**）| `9ae121d` | `fix(users/user): 撤销 V-001 反向判定 —— Go 侧 NULL status 是 fail-open 而非 fail-closed` | 原判「Go 拒 / RAG 放」被真 PG 端到端**证伪**（两侧都是 `status=0` 登录成功）⇒ 关闭靠的是**证据**，不是改代码。⚠️ 同一 commit 另含 D-001 / D-002 的实现（⇒ 见 [`api.md` §8.2](./api.md)） |
+| **V-002** | 🔴 **未修**（被卡）| — | — | 改动**必须与 admin 域同一次提交**走完（`users_user.status` 可空性）⇒ 落点 `service/users/users-common` |
+| **V-003** | 代码修复 | `ec33159` | `align(users/user): 修 DRIFT-USERRPC-V-003（users_user.extra_info jsonb⇒text，与 Go 一致）` | 落点 `service/users/users-common/src/main/resources/db/01_create_user.sql` |
+| **V-004** | 代码修复 | ⚠️ **未具名** | — | 实际落在 2026-10-23 的批量导入提交 `4a63342`（主题「`add sth`」，**混合多条漂移**）⇒ 不可作条目级锚点 |
+| **V-005** | 证伪关闭（protobuf3 空 map 在 wire 上不可表达）| ⚠️ **未具名** | — | 同上；关闭依据是**协议层事实**，非代码改动 |
+| **V-006** | 证伪关闭（真 PG 实证：雪花 id 永不进 wire）| `fa2de52` | `align(users/user): user-rpc 关闭 V-006、修 V-008（并揭出第二个伪出处）` | 同 commit 兼销 V-008 ⇒ **一条 commit 销两条**（工具若按「一 commit 一行」判会漏） |
+| **V-007** | 销账回写（**实现在 `global` 域**）| 实现 `49808ad` + 本域回写 `fc1c4a7` | 实现：`第三十轮：A 类 3 条落地 —— E30（RPC 超时文案）· T-14 · T-15③` | ⚠️ `49808ad` **未合主干** ⇒ 合并前主干代码仍是旧串；本条销账**以 SHA 为准**，不依赖主干是否已合 |
+| **V-008** | 代码修复（删死代码 + 揭出**两个**伪出处）| `fa2de52` | 同 V-006 | 同上 |
+| **V-011** | ⚠️ **未修**（当前不可观察）| — | — | 时间列 `DEFAULT CURRENT_TIMESTAMP`（Go 无 DEFAULT）⇒ 两侧写入路径都显式写该列 ⇒ 当前不可观察 |
+| **V-012** | 🔴 **未修**（观测面 · 新立）| — | — | 候选修法**待拍板**；与 `global` E38② / `users/admin` ARPC-010 同型 |
+| **B-1 装配层守网** | 守网补强（**非漂移**）| `bcfdaf7` | `test(users/user): B-1 的装配层守网（插件链 + 挂载点 + 负控）⇒ 覆盖缺口闭环（非新漂移）` | 生产代码**一字未改**；M1·M2·M3 三次变异验证 ⇒ 详见**第十二轮** |
+| **V-013** | 已核实的形态差异（**非 wire 漂移**）+ 断言订正 | `a5a2e6c` | `docs+test(users/user): E58 的客户端可见面复核 ⇒ 源码层成立 / 客户端面两侧一致 ⇒ 订正 17 处注释的**理由** + 新立 V-013` | **行为零改动**（只订正 17 处注释的**理由** + 类级 javadoc 论证）⇒ 详见**第十三轮** |
+
+⚠️ **为什么「销账方式」这一列不能省**：本域的销账**不是一种形态**——
+「代码修复」（V-003/V-008）·「证伪关闭」（V-001/V-005/V-006）·「销账回写」（V-007，落点在他域）·
+「签字保留」·「未修」⇒ **只有区分开，机器才能把 §4.4 的分类计数与条目逐条对账**（不变量 I1）。
 
 ---
 
@@ -1044,16 +1159,16 @@ RAG `UserDomainService.logout:780` ⇒ 同样的 `INTERNAL "注销失败,Redis�
 | 2 | 正常路径是否一致？ | ✅ **一致** | 9 个 OP 的 happy path 逐条对照一致（§4.2） |
 | 3 | 边界输入是否一致？ | ⚠️ **不完全一致** | trim / clamp / 空串全部一致；**显式空 map 分支不一致**（V-005） |
 | 4 | NotFound / Empty / Null 是否一致？ | ⚠️ **不完全一致** | NotFound 一致（响应被丢弃）；Empty 一致；**NULL status 不一致**（V-001）；NULL extra_info 一致 |
-| 5 | Error meaning 是否一致？ | ⚠️ **code 一致 / message 部分不一致** | 全部 gRPC code 逐条一致；**4 处** message 因 Go 源码乱码不同（**N-2 已签字**，2026-10-24 双侧活体对拍实测）+ 1 处超时 description（V-007）。⚠️ 那 4 处的**状态码两侧完全相同**，差异只在 `grpc-message` 头的字节 |
+| 5 | Error meaning 是否一致？ | ⚠️ **code 一致 / message 部分不一致** | 全部 gRPC code 逐条一致；**4 处** message 因 Go 源码乱码不同（**N-2 已签字**，2026-10-24 双侧活体对拍实测）<br>⚠️ 原写「+ 1 处超时 description（V-007）」—— **V-007 已于 2026-10-26 由 `global` 域销账** ⇒ 超时 description **两侧逐字一致**。⚠️ 那 4 处的**状态码两侧完全相同**，差异只在 `grpc-message` 头的字节<br>🔴 **2026-10-26 第十一轮新增（V-012）**：**wire 面两侧一致，但「超时」这一情形下的**业务日志归因**不一致** —— RAG 记「Redis 写入异常」，客户端收到的是「超时」；Go 两侧一致（**观测面**差异，不改 wire） |
 | 6 | Error propagation 是否一致？ | ✅ **一致** | Go 的「resp+err 双返」在 gRPC 层被丢弃 ⇒ 两侧客户端只见 status code |
-| 7 | External dependency failure 是否一致？ | ✅ **一致**（超时路径除外） | PG/Redis/bcrypt/snowflake 四类失败两侧同 code 同 message；57014 取消的内层差异被外层 interceptor 掩盖（E-4 已实测闭环） |
+| 7 | External dependency failure 是否一致？ | ✅ **一致**（超时路径除外） | PG/Redis/bcrypt/snowflake 四类失败两侧同 code 同 message；57014 取消的内层差异被外层 interceptor 掩盖（E-4 已实测闭环）<br>🔴 **2026-10-26 第十三轮（V-013）**：那句「被外层 interceptor 掩盖」**已逐条核到机制** —— Go 的 `service/common/observability/rpc.go:59-72` 在 ctx 取消那一刻就 ready，`select` 几乎总选超时分支 ⇒ **客户端拿到 DEADLINE_EXCEEDED ⇒ 1015**；Go 侧 4 组采样（基线 / 同场对照 / user / admin）响应体**全是** `{"code":1015,"msg":"服务繁忙"}` ⇒ **与 RAG 逐字一致**。⇒ 本域 18 处 `catch (StatusRuntimeException)` 放行分支**不得改回 Go 的 INTERNAL** |
 | 8 | Cache hit / miss 是否一致？ | **N/A** | 本组件无缓存 |
 | 9 | Transaction boundary 是否一致？ | ✅ **一致** | 4/5 步原子性两侧相同；`[PG]` 真回滚实证；**无 self-invocation** |
 | 10 | State transition 是否一致？ | ⚠️ **基本一致，一处相反** | 头像 current 状态机一致、登录三态一致；**`status==NULL` 的 login 分支相反**（V-001） |
 | 11 | Side effects 是否一致？ | ⚠️ **不一致（DB 层）** | extra_info 双写 / Redis SETEX 一致；`users_user.id` 取值来源不同（V-006）；孤儿 history 两侧一致 |
 | 12 | Ordering 是否一致？ | ✅ **一致** | `create_time DESC` 一致；头像 current 清理顺序一致 |
 | 13 | Retry 是否一致？ | **N/A**（两侧都无重试） | — |
-| 14 | Timeout scope 是否一致？ | ⚠️ **时长一致 / scope 机制不同 / description 不同** | 2000ms=2000ms（§6.6）；B-1 已签字；V-007 |
+| 14 | Timeout scope 是否一致？ | ⚠️ **时长一致 / scope 机制不同 / description 一致** | 2000ms=2000ms（§6.6）；B-1 已签字；✅ description 两侧逐字一致（**V-007 已于 2026-10-26 销账**）|
 | 15 | Concurrency semantics 是否一致？ | ✅ **一致**（含共有缺陷） | 两侧都无悲观锁 ⇒ TOCTOU 窗口集合相同 |
 | 16 | Authentication / Authorization 是否一致？ | **N/A**（本组件不做鉴权） | uid 是 `int64` 协议字段，无解析步骤 |
 | 17 | Serialization semantics 是否一致？ | ⚠️ **wire 一致 / 时间戳不一致** | proto 逐字节一致、jsonb 写入两侧都成功；`create_time` 时区标签不同（V-004） |
@@ -1081,10 +1196,18 @@ SEMANTICALLY EQUIVALENT（全部可达路径） + 7 项 OBSERVABLE DIFFERENCE
 ⇒ **V-001 与 V-002 必须一起判，单独判任一条都会得出错误结论。**
 
 **证据强度的诚实边界（AGENTS.md 硬约束 1~4）**：
-本轮 ✅ 真 PG（12 条容器测试，2026-10-23 02:08 实跑）、✅ 静态源码（含 gorm / gorm-postgres 的**消费点**行号）、
+本轮 ✅ 真 PG（**16 条**容器测试，**2026-10-26 实跑**）、✅ 静态源码（含 gorm / gorm-postgres 的**消费点**行号）、
 ❌ **双侧活体对拍 = 缺**。⇒ 本文件里任何 `EQUIVALENT` 结论的强度都是
 「**逐行读 Go 消费点得出**，RAG 单侧真 PG 测试只作旁证」，
 **不构成 spec §1 意义上的「双侧同时跑的探针」**。这一点不得在下游被读成「已闭环」。
+
+> **2026-10-26 第十二轮补记（守网侧，不改变上面任何判定）**：
+> 本轮闭环了 B-1 的**装配层覆盖缺口**（3 条断言 + M1/M2/M3 变异验证）⇒
+> 「B-1 缓解链真的装上了」这件事从「一次性端到端实测」升级为「**常驻断言**」。
+> ⚠️ **该结论只覆盖 user-rpc** —— `service/common` 的这两个拦截器被**其余 9 个 rpc 组件**共用，
+> 而**它们是否都注册了，本轮未盘点**（admin 域已独立核实 `hot-rpc` **未注册** ⇒ 前提不成立已销案
+> ⇒ **不是每条链都该有翻译器**，盘点时必须逐个看「该组件有没有 SQL 路径」，**不能一刀切**）
+> ⇒ 记为**跨域待办**，请 `global` 域收口时统一盘点。
 
 ---
 
@@ -1155,7 +1278,7 @@ SEMANTICALLY EQUIVALENT（全部可达路径） + 7 项 OBSERVABLE DIFFERENCE
 
 ### ⚠️ admin-rpc 有<b>同款缺陷</b>（跨组件，本轮未改）
 
-`service/users/admin/admin-rpc/.../domain/UserEntity.java:60` 同样是 `private Long status = 0L;`。
+`service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/UserEntity.java:60` 同样是 `private Long status = 0L;`。
 属**另一个组件**，本轮未动；admin 侧不跑 `Login`，暴露面不同（`GetUser` 响应会带 `status=0`）。
 ⇒ 登记为跨组件待办，**不要**当成「已随 user-rpc 修好」。
 
@@ -1414,8 +1537,9 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | **DRIFT-USERRPC-V-003** | `extra_info` `text` ↔ `jsonb` | ✅ **已修**（`ec33159`） | 你随后拍板「一起改成 text」。连带改 `JsonTextTypeHandler` + 去掉 2 处 CAST + 3 条守门（详见 §502）。跨域不对称随之消除 |
 | **DRIFT-USERRPC-V-011（新）** | 时间列 **DEFAULT `CURRENT_TIMESTAMP`**（Go 无 DEFAULT） | 🔴 新发现 | 两侧写入路径都**显式**写这两个列（Go 靠 GORM autoCreateTime；RAG 本轮起靠应用侧时钟）⇒ DEFAULT 只在「有人不写该列」时生效 ⇒ **当前不可观察**。⚠️ 改它要先确认 admin 域与 `users_user` 的写入路径 |
 | **DRIFT-USERRPC-V-006** | `id` 的取值来源（Go `bigserial` 序列 vs RAG `IdType.ASSIGN_ID` 雪花） | ✅ **已关闭**（第四轮，真 PG 实证：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；**永不进 wire**） | ⚠️ 本行此前写「仍成立」，是**过期状态**（第四轮已关，第六轮复核才发现汇总表没同步） |
-| **DRIFT-USERRPC-V-007** | 超时的 gRPC `description` 不同（`service/common` 组件） | 仍成立 | 归属 `service/common`，不在本组件判定权内 |
+| **DRIFT-USERRPC-V-007** | 超时的 gRPC `description` 不同（`service/common` 组件） | ✅ **已销账（2026-10-26）** | 由 **`global` 域**修完（落点 `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 的 `GO_DEADLINE_EXCEEDED_DESCRIPTION`；守门 `RpcInterceptorTimeoutDescriptionGateTest`；探针 `tools/semantic-probe/rpc-timeout/`）⇒ 两侧 description 逐字一致。⚠️ 修前状态保留在 §7 V-007 小节 |
 | **DRIFT-USERRPC-V-008** | 死代码 + **伪出处**（3 个异常类 + 2 个 mapper 方法） | ✅ **已修**（`fa2de52`） | 第四轮 §2 已删；且**伪出处是两个，不是一个**（`PasswordMismatchException` 声称的 `ALREADY_EXISTS` 在 Go 恰好相反）。⚠️ 本行此前仍写「仍成立」，属台账脱节，本轮复核更正 |
+| **DRIFT-USERRPC-V-012（新 · 2026-10-26）** | **超时时的业务日志错误归因**：RAG 记「Redis 写入异常」而客户端收到「超时」；Go 两侧一致 | 🔴 **新发现（观测面，非 wire 面）** | 三形态 × 双侧 gRPC 直连实测发现（**wire 面两侧一致**：都是 `INTERNAL` + 同一句）：<br>① **RAG 把原始异常整个吞掉**（`catch (Exception e)` 里既没 log 也没挂 cause ⇒ 实测 `cause=null`）⇒ 底层 Lettuce 异常在日志里看不见；<br>② **B-1 守卫只挡 SQL 路径**（Redis 抛 `QueryTimeoutException` / `RedisConnectionFailureException`，**都不是** gRPC 的 `StatusRuntimeException` ⇒ 守卫永不命中）；<br>③ RAG 的 Redis 写**不绑** gRPC deadline ⇒ 在途写跑满 3s（客户端 2s 已收 `DEADLINE_EXCEEDED`）⇒ 解释「日志晚 1s」。<br>⚠️ **修法不能改 status/description**（会与 Go 不一致）⇒ 只能在 `catch (Exception e)` 里**补一行把原始异常记进日志**（与 admin 域写法对齐）⇒ 域内一行可闭环。<br>⚠️ 与 `global` 域 **E38 第②层**同型；**admin 域已独立确认并登记 `DRIFT-ARPC-010`** ⇒ **三域口径宜一起定** |
 | **UNRESOLVED-USERRPC-004 ②** | 启动期 Redis 不可用：Go `MustNewRedis` fail-fast vs RAG 懒连接 | ✅ **已闭环（2026-10-24，§9.3）** —— **原推断被活体实验证伪**：go-zero `RedisConf.NonBlock` 的 struct tag 默认 `true` ⇒ `MustNewRedis` **不做连接检查** ⇒ **两侧都启动成功** ⇒ **无差异** | 本轮做了「把两侧 Redis 都指到死端口再起进程」的注入实验（`tools/difftest/exp-difftest-redis-failfast.sh`） |
 | **UNRESOLVED-USERRPC-005** | `users_user` 建表责任交叉（user-rpc ↔ admin-rpc） | ✅ **已闭环（2026-10-24，§9.2）** —— 双侧对称并发启动实测：两侧都能起来、表都建齐、0 致命错误 | ⚠️ 本行此前写「仍 unresolved」，是**过期状态**（第六轮已关，第七轮复核才发现汇总表没同步）。⇒ **机制不同**（Go 靠 `HasTable` 的时序侥幸 / RAG 靠 advisory lock）**但可观察结果一致** |
 
@@ -1634,6 +1758,11 @@ admin 域拥有 `03_create_admin.sql` / `04_create_admin_invite.sql`，**四个�
 
 ## 2026-10-24 第十轮：跨组件面登记 —— 「Redis **主机名解析失败**」在 **user-rpc 侧**（**本轮未测 ⇒ 不下结论**）
 
+> ⚠️ **本节已被 2026-10-26 的实测取代** —— 原文保留供追溯。
+> ⇒ **实测结论见下一节「第十一轮」**（三形态 × 双侧 rpc 直连）。
+> ⇒ 一句话预告：**015 在 rpc 侧不成立**（两侧 gRPC code 全同）；
+> 但**测出了另一条东西** —— RAG 的**业务日志错误归因与客户端所见不一致**（Go 一致）⇒ 立 **`DRIFT-USERRPC-V-012`**。
+
 > 触发：本轮在 **user-api** 侧立了 `DRIFT-USERAPI-015`（见 [`user/api.md`](./api.md)）——
 > 双侧活体实测发现「Redis 主机名**解析不出来**」时 **RAG 的失败耗时贴着 3s 预算** ⇒ 200/503 摇摆。
 > ⇒ 本节只登记**同一故障形态在 user-rpc 侧的面** —— **本轮未测，故不下结论**。
@@ -1667,3 +1796,348 @@ admin 域拥有 `03_create_admin.sql` / `04_create_admin_invite.sql`，**四个�
 `tools/difftest/exp-difftest-redis-neverup.sh`（`REDIS_HOST=redis`）——
 该脚本目前**只探测 api 侧** ⇒ rpc 侧的对应面**需要另加一个探测点**
 （logout 的响应形状 + 耗时），本轮**未加**。
+
+---
+
+## 2026-10-26 第十一轮：015 的 **rpc 侧对应面** —— ✅ **实测完毕**（三形态 × 双侧 rpc 直连）
+
+> 上一节的三条「待审」全部有答案了。**015 的影响面由此收窄到 api 侧**。
+> ⚠️ 本轮**未改动任何实现**，只加了两个**只读探针/脚本** + 回写台账。
+
+### 测法（为什么必须直连 gRPC）
+
+api 侧有 3s HTTP 预算：RAG 的**黑名单查询**自己就要 ~3s ⇒ 请求**根本走不到** logout 的 rpc 调用
+⇒ 经 api 观测 rpc 侧会被 api 侧预算**遮蔽** ⇒ **只能直连 gRPC**。
+
+| 构件 | 说明 |
+|---|---|
+| 客户端 | `tools/difftest/redis-logout-rpc/go` —— go.mod 里 `replace sea-try-go => <冻结仓>`，直接 import **真源生成的 grpc stub**（`sea-try-go/service/user/user/rpc/pb`，不在 `internal/` 下）⇒ **两侧用同一份客户端代码** ⇒ wire 契约一致 ⇒ 结果可直接比 |
+| 构建设置 | **CGO_ENABLED=0**（与真源二进制一致 —— `go version -m /tmp/difftest/bin/go-user-rpc` 实测为 `CGO_ENABLED=0`）⇒ 纯 Go 解析器 ⇒ DNS 形态的耗时可比 |
+| 编排脚本 | `tools/difftest/exp-difftest-redis-neverup-rpc.sh`（起两侧 user-rpc + 直连 Logout ×3 轮）|
+
+### 三形态 × 双侧结果（**本机实测**，2026-10-26）
+
+| 形态 | 探针看到的 Go | 探针看到的 RAG | code 是否同形 |
+|---|---|---|---|
+| **拒连**（`127.0.0.1:56391` 没人监听） | `Internal` / `注销失败,Redis写入异常` / **1729·1714·1758ms** | `Internal` / `注销失败,Redis写入异常` / **210·5·4ms** | ✅ **同** |
+| **解析失败**（`redis:56391`，生产默认形态） | `Internal` / `注销失败,Redis写入异常` / **1836·1804·1749ms** | `Internal` / `注销失败,Redis写入异常` / **336·103·88ms** | ✅ **同** |
+| **挂起**（TCP 连上但**永不回包** ⇒ 命令超时路径） | `DeadlineExceeded` / `context deadline exceeded` / **2018·2002·2006ms** | `DeadlineExceeded` / **`rpc timeout after 2000ms`** / **2094·2014·2014ms** | ✅ **code 同**；⚠️ **description 逐字不同** ⇒ **正是 `DRIFT-USERRPC-V-007`（已销账，主干未合 ⇒ 仍见旧串）** |
+
+⇒ ✅ **结论一：`DRIFT-USERAPI-015` 在 **rpc 侧不成立** —— 三种形态下两侧 gRPC **code 全部相同**。**
+⇒ ⇒ **015 的影响面收窄为「仅 api 侧」**（api 侧的 3s HTTP 预算 vs Redis 3s command timeout 那一格）。
+
+> **📌 为什么 Go 侧是 ~1.7~1.8s 而不是 ~3s？（从 modcache 逐条核实）**
+> `go-redis@v9.20.0/options.go` 的 `Options.init()` 默认值：**`DialTimeout=5s` · `DialerRetries=5` · `DialerRetryTimeout=100ms` · `ReadTimeout=3s`**。
+> ⇒ Go 的失败延迟 = **5 次拨号尝试**（DNS 解析 + 100ms 重试间隔）⇒ **~1.7~1.8s** ⇒ 日志里的 `failed to dial after 5 attempts` 正是这条。
+> ⇒ 而 **RAG 侧只用了 ~0.005~0.34s**（同形态）⇒ **两侧的失败耗时差一个数量级**（**形状相同、耗时不同**）。
+> ⚠️ **这个差距本身不是漂移**（两侧 code 与 message 全同），但它解释了 §「消费方不对称」：Go 的 2s deadline 只剩 **~200~300ms 余量**，
+> ⇒ **一旦 DNS 解析慢过 2s，Go 侧就会从 `INTERNAL` 翻成 `DEADLINE_EXCEEDED`，而 RAG 侧仍是 `INTERNAL` ⇒ 分叉方向会反转** —— 属**潜在脆弱性**，本轮不立条目。
+
+### 上一节「待审」三问的答案
+
+1. **「Redis 命令超时 3s」与「gRPC deadline」是否同刻？** ⇒ **不同刻，且 RAG 侧是 deadline 必然先到**：
+   - Go：`SetexCtx(l.ctx, ...)` **绑了** handler ctx 的 2000ms deadline（`rpc.go:38,55`）⇒ 命令在 **2s** 被 ctx 掐断 ⇒ **< 3s** ⇒ handler 返回 `INTERNAL`（拒连/解析失败形态）或与拦截器同刻（挂起形态）。
+   - RAG：Redis 写**只受 `spring.data.redis.timeout: 3s` 约束、不受 gRPC deadline 约束** ⇒ **拦截器的 2s 必然先到** ⇒ 客户端拿到 `DEADLINE_EXCEEDED`。
+   ⇒ **形状不摇摆**（上一节的担心不成立）—— 因为两侧的「谁先到」是**各自确定**的。
+2. **「写失败 ⇒ 黑名单没写进去 ⇒ token 仍有效；api 侧读取也 fail-open ⇒ 两侧一起失效」是不是 Go 同款？**
+   ⇒ ✅ **是同款**：Go 的 `logoutlogic.go:37-41` 写失败也返回 `INTERNAL`「注销失败,Redis写入异常」，也**没写进黑名单**；
+   Go 的 api 侧黑名单查询失败也 **fail-open**（`checkblacklistmiddleware.go:35-36`：`err == nil && exists` 才拦）⇒ **两侧一起「失效」** ⇒ **同形，无漂移**。
+3. **「不要拿另一域/另一面的结论当基准」** ⇒ ✅ 本轮**两侧都实测**了，结论只对这一面成立（api 面仍由 `DRIFT-USERAPI-015` 独立持有）。
+
+### 🆕 测出的**另一条**东西 ⇒ `DRIFT-USERRPC-V-012`（观测面差异 · 业务日志的错误归因）
+
+**在「挂起」形态下，两侧**业务日志**说的失败原因不一样**：
+
+| | Go | RAG |
+|---|---|---|
+| 客户端收到 | `DEADLINE_EXCEEDED` / `context deadline exceeded` | `DEADLINE_EXCEEDED` / `rpc timeout after 2000ms`（V-007 合后同）|
+| **业务日志的失败原因** | `business_error` · `error_reason = "context deadline exceeded"` · `file_line = logoutlogic.go:39` | `ERROR … logout RPC failed: Status{code=INTERNAL, description=注销失败,Redis写入异常}` |
+| 一致性 | ✅ **日志与客户端所见一致** | ❌ **日志说「Redis 写入异常」，客户端看到的却是「超时」** |
+
+**根因（已定位到行，并经异常继承链 + 实测日志双重核实）**：
+- Go：`SetexCtx(l.ctx, …)` —— **ctx 带 deadline** ⇒ go-redis **在 2s 取消在途命令** ⇒ handler 立刻返回 ctx 错误 ⇒ 日志与客户端一致。
+  ⚠️ 且 Go **把原始 err 记进了日志**：`logger.LogBusinessErr(l.ctx, errmsg.ErrorRedisUpdate, err)`（`logoutlogic.go:39`）
+  ⇒ 实测日志原文就是 `"error_reason":"context deadline exceeded"` ⇒ **「为什么是超时」这个信息被保留下来了**。
+- RAG：`UserDomainService.logout` 的 catch 链是
+  ```java
+  } catch (StatusRuntimeException e) {   // ← B-1 守卫：只挡 SQL 路径
+      throw e;
+  } catch (Exception e) {
+      throw Status.INTERNAL.withDescription("注销失败,Redis写入异常").asRuntimeException();
+      //                                     ↑ 原始异常 e 被整个吞掉：既没 log，也没挂成 cause
+  }
+  ```
+  ⇒ **三条并存的事实**：
+  1. **原始异常被丢弃** —— `asRuntimeException()` 造出的 `StatusRuntimeException` **cause=null**
+     ⇒ 实测日志原文就是 `Status{code=INTERNAL, description=注销失败,Redis写入异常, cause=null}`
+     ⇒ **底层 Lettuce 异常在日志里完全看不见** ⇒ 排障只看到「Redis 写入异常」，看不到「其实是超时」。
+     ⚠️ **与 admin 域写法不齐** —— admin 侧 `AdminDomainService.logout` 有 `log.error("admin logout Redis setex failed", e)` ⇒ **原始异常进了日志**。
+  2. **B-1 守卫只挡 SQL 路径** —— 守卫靠 `catch (StatusRuntimeException)`（**gRPC 的那个**）识别「已被翻译成 DEADLINE_EXCEEDED 的错误」，
+     而 **Redis 侧抛的是 Spring Data 的普通异常**，继承链实测（`javap` 读 class 文件）：
+     - 命令超时 ⇒ `org.springframework.dao.QueryTimeoutException` → `TransientDataAccessException` → `DataAccessException` → `RuntimeException`（`spring-tx-7.0.9`）
+     - 连接失败 ⇒ `org.springframework.data.redis.RedisConnectionFailureException` → `DataAccessResourceFailureException`（`spring-data-redis-4.0.7`）
+     ⇒ **两者都不是 `io.grpc.StatusRuntimeException`** ⇒ **守卫永远不命中** ⇒ Redis 路径**一直**落在 `catch (Exception)` 里被改写成 INTERNAL。
+     （SQL 路径之所以能命中：PG `57014` 经 `SqlTimeoutStatusTranslator` 翻成 gRPC 的 `StatusRuntimeException` ⇒ 守卫拦得住。）
+  3. **RAG 的 Redis 写不绑 gRPC deadline** —— `checkDeadline()` **只在入口**调（`UserDomainService.java:764`），
+     在途写一路跑到自己的 **3s command timeout** 才失败 ⇒ 而客户端早在 **2s** 就收到了拦截器发的 `DEADLINE_EXCEEDED`
+     （`RpcInterceptor` 的超时调度器 `call.close(DEADLINE_EXCEEDED, …)`，业务线程**不中断**）
+     ⇒ ⇒ 这解释了「**服务端日志比客户端晚 1s**」（实测日志里 RAG 那两行 `INTERNAL` 的时间戳在 3s 处）。
+
+- **Classification**: **OBSERVABLE DIFFERENCE**（**观测面**：应用日志的错误归因；**wire 面两侧完全一致** —— 都是 `INTERNAL` + 同一句「注销失败,Redis写入异常」）
+- **Observable Impact**: 运维排障会被**指向错误方向**（日志说「Redis 写入异常」⇒ 去查 Redis 基础设施；实际是**超时**）；日志告警口径也会把超时误计成业务写失败。
+  ⚠️ **wire 面无影响** ⇒ 修法**不能改 status / description**（改了反而与 Go 不一致）⇒ **只能加可观测性**。
+- **归属**：**本组件内**（user-rpc 的注销路径）⇒ 修法**可以只落在 user-rpc** ⇒ **不跨域**。
+- **🛠 候选修法（域内一行 · 不改 wire）**：在 `catch (Exception e)` 里把原始异常记进日志，与 admin 域写法对齐
+  ```java
+  } catch (Exception e) {
+      logger.logBusinessErr(otelCtx, ErrorCode.ERROR_DB_SELECT.getCode(), e);   // ← 补：原始异常进日志
+      throw Status.INTERNAL.withDescription("注销失败,Redis写入异常").asRuntimeException();
+  }
+  ```
+  ⇒ **status 与 description 一个字都不改**（仍与 Go 逐字一致）⇒ 纯增可观测性 ⇒ 排障时能看到「其实是超时」。
+  ⚠️ **本轮不动**（修法口径未定，且要与 admin 域写法对齐后再一起落）。
+- **与 E38 第②层的关系**：`global` 域的 **E38 第①层**（`d531abd`）做的是「服务端超时期限 = min(服务端预算, 客户端 deadline)」；
+  **第②层（「在途查询随客户端放弃而取消」）global 明确未做**，且其 `UNRESOLVED-ARPC-002` 编号属 **users/admin 域**。
+  ⇒ **本条是 E38 第②层在 Redis 写路径上的同型实例**（在途命令不随 deadline 取消）⇒ 记录此关联，供 global 与 admin 域对照。
+  ⇒ ⚠️ **admin 域已于 2026-10-26 独立确认同型并登记为 `DRIFT-ARPC-010`**（提交 `c09fa45`，分支 `align/users-admin`）⇒ **三域口径应一起定**（global / users-user / users-admin），
+  ⇒ 且 admin 域已提醒：**「修 E38② 时顺带覆盖 Redis 路径才是正解，否则只修一半」**。
+
+### 复现入口（本轮新增）
+
+```bash
+# 三形态各跑一次；先构建探针（一次即可）
+cd tools/difftest/redis-logout-rpc/go
+CGO_ENABLED=0 GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off go build -o /tmp/redis-logout-rpc .
+
+cd tools/difftest
+./exp-difftest-redis-neverup-rpc.sh                     # 拒连
+REDIS_HOST=redis ./exp-difftest-redis-neverup-rpc.sh    # 解析失败（生产默认形态）
+REDIS_MODE=hanging ./exp-difftest-redis-neverup-rpc.sh  # 挂起 ⇒ 命令超时路径
+```
+
+---
+
+<!-- @fix 2026-10-26 第十二轮：B-1 的**装配层**守网（user-rpc 侧）—— 覆盖缺口闭环（非新漂移） -->
+
+## 2026-10-26 第十二轮：B-1 的**装配层**守网（user-rpc 侧）—— ✅ **覆盖缺口闭环**（**非新漂移**）
+
+### 0. 定性先说清（免得被误读成「又发现一条漂移」）
+
+本轮**没有发现任何新的语义漂移**，**没有改动任何生产代码**（生产文件 `git diff` 为空）。
+本轮闭环的是一处**守网覆盖缺口**：
+**「B-1 的两个 MyBatis 拦截器真的被装进了插件链」这件事，此前从未被任何断言覆盖。**
+
+| 项 | 内容 |
+|---|---|
+| **触发** | `users/admin` 域在 `align/users-admin`（提交 `1d79f56`）自查发现同款缺口，回信点名本域 ⇒ 本域**独立复核**（不采信对方结论）后确认**同款成立** |
+| **缺口的准确性质** | **覆盖缺口**，**不是**当前生产缺陷 —— 端到端实测（2026-10-21 E-4）已证明 B-1 缓解**确实生效**（查询滞留 4303ms → **176ms**，与 Go 的 182ms 同量级）⇒ 拦截器**事实上是装上了的**。<br>⚠️ **但那条端到端证据是 2026-10-21 的一次性实测，不是常驻断言** ⇒ 谁在某个提交里摘掉 `@Import`，**测试全绿、线上才炸** |
+| **为什么它值钱** | 链断掉的后果是 **wire 级漂移**，而且**静默**：缺翻译器 ⇒ PG 的 `57014 query_canceled` 不翻成 `DEADLINE_EXCEEDED` ⇒ 落进业务层 `catch (Exception e)` ⇒ 被改写成 `INTERNAL`「DB查询失败」⇒ api 侧 `mapRPCStatusToCode`（`service/users/user/user-api/src/main/java/com/rag/users/user/api/advice/GlobalExceptionHandler.java:154-155`）渲染 **5001**，而 Go 是 **1015**（`service/user/common/errmsg/errmsg.go:6`） |
+| **与 V-012 的关系** | **两个独立的失效面**：V-012 是「**Redis 路径**压根到不了 SQL 翻译器」（继承链实测：Lettuce / QueryTimeout 异常**都不是** `StatusRuntimeException`）；本条是「**SQL 路径**的翻译器压根没装进链」⇒ 两者都要各自有守网，谁也替不了谁 |
+
+### 1. 缺口的确切位置（声明点 vs 消费点）
+
+| | 位置 | 本轮之前的状态 |
+|---|---|---|
+| **声明点** | `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/UserRpcApplication.java:47-68` 的 `@Import({… DeadlineQueryTimeoutInjector.class, SqlTimeoutStatusTranslator.class})` | ✅ 写着（**但这只是声明**） |
+| **消费点** | MyBatis-Plus 3.5.17 的 `MybatisPlusAutoConfiguration` 构造器收 `ObjectProvider<Interceptor[]>` → `sqlSessionFactory(DataSource)` 交给 `SqlSessionFactoryBean` ⇒ 最终形态 = `sqlSessionFactory.getConfiguration().getInterceptors()` | ❌ **无任何断言** |
+
+⚠️ **§3.3.1 的口径**：行号指向**消费点**而非**声明点**。
+⇒ 我方**没有**只读 `@Import` 那一行就下结论：先 `javap` 读出 MP 的构造器签名（确有 `ObjectProvider<Interceptor[]>`），
+再由**真容器里那个 `SqlSessionFactory` 实例**读出链的最终形态。
+
+**改动前实测事实**（主干全域 grep）：`getInterceptors` **零命中**
+⇒ 本仓 **10 个 rpc 组件没有任何一个**断言过这条链。
+（`DeadlinePassthroughTest` 是 mock mapper 直接抛 `StatusRuntimeException`
+⇒ 只验「catch 分支放不放行」，**不验「异常到达时是不是那一类」**。）
+
+### 2. 本轮补的 3 条断言（`UserRpcContainerWiringTest`，真 PG + 真容器）
+
+| # | 用例 | 断言什么 | 拦住的失效 |
+|---|---|---|---|
+| 1 | `sqlTimeoutInterceptorsAreReallyInThePluginChain` | `sqlSessionFactory.getConfiguration().getInterceptors()` 里**真的有** `SqlTimeoutStatusTranslator` 与 `DeadlineQueryTimeoutInjector` | 链里缺任一个（`@Import` 被摘 / Bean 装配失败 / MP 改版不收 `Interceptor[]`） |
+| 2 | `translatorInterceptsTheExecutionPoint` | 翻译器的 `@Intercepts` 挂在 **`Executor`**（`query` + `update`）而**不是** `StatementHandler.prepare` | 挂错点 ⇒ CancelRequest 引发的 `SQLException` 在**执行**阶段才抛，`prepare` 阶段根本看不到 ⇒ **永远翻译不到**，且**静默**（链里有它、测试也全绿） |
+| 3 | `translatorMountPointGuardRejectsWrongMountPoint`（**负控**） | 同一条判据喂一枚**故意挂错点**的变异体 ⇒ **必须拒绝** | 断言本身写坏 ⇒ 退化成恒绿的假守门 |
+
+⚠️ **第 3 条是 admin 域没有的一层**（他们只做了变异 M1）。
+负控的价值：用例 2 读的是**注解元数据**；若判据写错（例如只查「有没有 `@Intercepts`」而不查挂载点），
+它会**恒绿**，等于没有守门。负控用一枚**形状错误**的输入跑**同一条判据**，要求它必须拒绝。
+变异体是测试类里的**静态嵌套空壳**（未被 `@Import`、不在组件扫描路径上）⇒ **不参与任何生产装配**。
+
+### 3. 变异验证（§3.3：必须**能编译 + 测试变红**）
+
+| 变异 | 操作 | 预期 | 实测 |
+|---|---|---|---|
+| **M1** | 摘掉 `@Import` 里的 `SqlTimeoutStatusTranslator.class` | 只红 1 条，红在目标断言 | ✅ `Tests run: 16, Failures: 1` —— 失败信息带出实际链 `[com.rag.common.persistence.DeadlineQueryTimeoutInjector]` ⇒ **链是真的**（不是空链恒红） |
+| **M2** | 摘掉 `@Import` 里的 `DeadlineQueryTimeoutInjector.class` | 只红 1 条，红在目标断言 | ✅ `Tests run: 16, Failures: 1` —— 实际链 `[com.rag.common.persistence.SqlTimeoutStatusTranslator]` |
+| **M3（负控自检）** | 把「挂载点」判据弱化成空实现 | **负控必须变红**（它不再能识破变异体） | ✅ `Tests run: 16, Failures: 1` —— `Expected java.lang.AssertionError to be thrown, but nothing was thrown` |
+
+⚠️ **M1/M2 只红 1 条这件事本身就是结论**：其余 15 条（含用例 2、用例 3）**不受 `@Import` 影响** ——
+用例 2/3 读的是**类上的注解**（与容器无关）⇒ 它们的红绿边界是干净的。
+⚠️ **三次变异后均已还原**，`git diff` 只剩测试文件本身（**+161 行**），生产代码**一字未改**。
+
+### 4. 门禁
+
+| 命令 | 结果 |
+|---|---|
+| `mvn -o -pl service/users/user/user-rpc -am test -Dtest=UserRpcContainerWiringTest -Dsurefire.failIfNoSpecifiedTests=false` | `Tests run: 16, Failures: 0, Errors: 0, Skipped: 0` |
+| `mvn -o -pl service/users/user/user-rpc -am test`（全量） | `Tests run: 128, Failures: 0, Errors: 0, Skipped: 0` —— 较 2026-10-24 基线 **125** 净增 **+3**（= 本轮新增 3 条，账对得上） |
+
+### 5. 与相邻域的关系（避免各修各的）
+
+- **`users/admin` 域**：`align/users-admin` 的 `1d79f56` 已做**同款** 2 条（插件链 + 挂载点），**触发源正是本域此前的回信** ⇒ 两域口径一致。
+  ⚠️ **差异**：admin 只做了变异 M1；本域多了 **M2**（另一个拦截器）与 **M3 负控** ⇒ 若 admin 愿意，可把负控那条抄过去（**抄之前先自己跑一遍**，别照抄结论）。
+- **`global` 域**：`service/common` 的两个拦截器是**跨 10 个 rpc 组件**共享的。
+  ⚠️ **本轮实测边界**：我只核了 **user-rpc** 一条链；**其余 9 个 rpc 组件是否都注册了这两个拦截器，本轮未查** ⇒ 记为**跨域待办**，请 global 收口时统一盘点。
+  （admin 域已独立核实 `hot-rpc` **未注册** `SqlTimeoutStatusTranslator` ⇒ 前提不成立已销案 ⇒ **不是每条链都该有翻译器** ⇒ 盘点时必须逐个看「这个组件有没有 SQL 路径」，**不能一刀切**。）
+- **`service/common` 的单写权**：本轮**未改** `service/common` 任何一行（那是 global 域的）⇒ 断言落在**本域自己的**容器测试里。
+
+### 6. 诚实边界
+
+- 本轮**只证明「装配」**（链里有 + 挂载点对），**不证明**「链断了会怎样」—— 后者由另外两段守网覆盖：
+  ① 放行分支：`DeadlinePassthroughTest`（纯控制流，mock mapper）；
+  ② 翻译器本体：`service/common` 的 `SqlTimeoutStatusTranslatorTest`。
+  ⇒ **三段合起来才覆盖整条链，缺一段就有洞。**
+- **未做**：没有重跑 2026-10-21 那条端到端（`exp-b1-timeout-cancel.sh`）⇒ 本轮**不声称**「B-1 端到端仍成立」，只声称**新增了常驻守网**。
+- **未盘点其余 9 个 rpc 组件**（见 §5）⇒ 本轮**不声称**「全仓只有 user-rpc 缺这条守网」。
+
+---
+
+<!-- @fix 2026-10-26 第十三轮：`global` E58 的客户端可见面复核 ⇒ 订正 17 处注释的**理由** + 新立 V-013 -->
+
+## 2026-10-26 第十三轮：`global` E58 的**客户端可见面**复核 —— 源码层差异成立 · **客户端面两侧一致** ⇒ **不得改回 Go 行为**
+
+### DRIFT-USERRPC-V-013 —— DB 超时的**源码层形态**两侧不同，但**客户端可见面逐字一致** ⇒ **不是 wire 漂移** · **不得改回 Go 行为**
+
+> **触发**：`global` 域第三十六轮（`697f547`）把 **E47** 全面订正：原判「业务层把『SQL 被 deadline 取消』改写/吞掉」**方向相反**，
+> 重新定性为「Go 侧把 DB 错误一律改写成 `codes.Internal`，RAG 侧保留 `DEADLINE_EXCEEDED`」
+> ⇒ 两侧**确实不同**，但方向是「**RAG 做了更准确的那一侧**」⇒ 登记为有意偏离候选 **E58（🏷 建议签）**
+> ⇒ 明确要求：**请不要改回 Go 行为**。
+>
+> ⇒ 本域**独立复核**（不采信转述）：**源码层成立 ✅ · 客户端可见面不成立 🔴**。
+
+#### §1 源码层：global 的事实成立，但**条数与行号要订正**
+
+**Go 侧** —— `service/user/user/rpc/internal/logic/` 里 **DB 错误出口共 10 处**，全部 `codes.Internal`：
+
+| 文件 | 行号 | 文案 |
+|---|---|---|
+| `loginlogic.go` | `:56` | `status.Error(codes.Internal, "DB查询失败")` |
+| `getuserlogic.go` | `:44` | 同上 |
+| `deleteuserlogic.go` | `:52` / `:60` | `"DB查询失败"` / `"DB更新失败"` |
+| `registerlogic.go` | `:54` / `:86` | `"DB查询失败"` / `"DB更新失败"` |
+| `updateuserlogic.go` | `:43` / `:66` / `:77` | `"DB查询失败"` / `"DB更新失败"` / `"DB查询失败"` |
+
+⚠️ **订正 global 的两处**（PIT-USERS-SHARED-020：对方给的行号要自己核）：
+1. **条数**：global 报「7 处」⇒ **实测 10 处** —— global 的清单**漏了 `updateuserlogic.go` 的 3 处**（`:43` / `:66` / `:77`）；
+2. **行号**：global 报 `getuserlogic.go:41` · `loginlogic.go:55` · `deleteuserlogic.go:49,57`
+   ⇒ 实测 `:44` · `:56` · `:52`（+ `:60`）⇒ **差 1~3 行** ⇒ 照 global 的行号去改会改错位置。
+
+⚠️ **另：Go 侧另有 9 处 `codes.Internal` 但不是 DB 错误**
+（`getavatarhistorylogic.go:38,44` · `logoutlogic.go:40` · `registerlogic.go:61,70` ·
+`selectavatarlogic.go:49` · `uploadavatarlogic.go:42,60`），其中 4 处文案是 **N-2 已签字的 Go 源码乱码**
+⇒ 本条**只管 DB 错误出口那 10 处**。
+
+**RAG 侧** —— `UserDomainService` 的 **18 处** `catch (StatusRuntimeException e) { throw e; }`
+（订正后行号：`200 / 295 / 312 / 333 / 365 / 417 / 494 / 523 / 554 / 577 / 638 / 657 / 714 / 759 / 789 / 831 / 850 / 897`）
+⇒ DEADLINE_EXCEEDED 原样上抛 ✅（与 global 说的 18 处一致）。
+
+#### §2 🔴 客户端可见面：**两侧逐字一致** —— 与 global 的 E58 定性冲突
+
+global 写「两侧确实不同（wire 上码值不同 ⇒ **客户端可见**）」。
+⇒ 本域查了 **2026-10-21 的 E-4 双栈活体实测**（真进程 + 真 PG，用 ACCESS EXCLUSIVE 锁把 login 的 SELECT 挡住）：
+
+| | 客户端返回耗时 | 响应体 | PG 查询存活 |
+|---|---|---|---|
+| **Go**（基线） | 2190ms | `200 + {"code":1015,"msg":"服务繁忙"}` | 203ms |
+| **Go**（同场对照） | 2208ms | `{"code":1015,"msg":"服务繁忙"}` | 182ms |
+| **Go / user** | 2236ms | `{"code":1015,"msg":"服务繁忙"}` | 161ms |
+| **Go / admin** | 2181ms | `{"code":1015,"msg":"服务繁忙"}` | 176ms |
+| **RAG**（生产方案实施后） | 2223ms | `{"code":1015,"msg":"服务繁忙"}` | 176ms |
+
+⇒ **Go 侧 4 组独立采样，客户端可见响应体全部是 `{"code":1015}`** ⇒ **两侧逐字一致**。
+
+**机制（为什么 Go 的 `codes.Internal` 客户端看不见）** —— Go 的外层 interceptor 会抢先返回：
+
+```go
+// service/common/observability/rpc.go:59-72
+select {
+case <-done:                       // handler 先返回（logic 的 INTERNAL）
+    return resp, err
+case <-timeoutCtx.Done():          // ← ctx 一取消就 ready
+    err := status.Error(codes.DeadlineExceeded, timeoutCtx.Err().Error())
+    return nil, err                // ← 客户端拿到 DEADLINE_EXCEEDED
+}
+```
+
+⇒ ctx 取消 ⇒ pgx 查询报错 ⇒ logic 返回 INTERNAL，这需要**再花时间**（网络往返 + 解栈 + 组装 status）；
+而 `timeoutCtx.Done()` **在 ctx 取消那一刻就已经 ready** ⇒ select 几乎总是选超时分支
+⇒ **客户端拿到 DEADLINE_EXCEEDED** ⇒ api 的 `default` 分支 ⇒ **1015**（`errmsg.CodeServerBusy`）。
+⇒ Go 侧 api 的 per-Logic switch（`service/user/user/api/internal/logic/user/loginlogic.go:50-54`）
+只对 `codes.Internal` 给 5001、对 `DEADLINE_EXCEEDED` 走 `default` 给 1015 ⇒ **两侧落到同一个分支**。
+
+⚠️ **这正是本文件 §10 第 7 项早就写下的那句话**：「**57014 取消的内层差异被外层 interceptor 掩盖（E-4 已实测闭环）**」
+⇒ global 的 E58 把**源码层**的差异直接当成了**客户端可见**的差异，**跳过了这一层掩盖**。
+
+#### §3 处置：订正 17 处注释的**理由**（结论保留 · 行为不动）
+
+本域 17 处 catch 注释原文写着「…（**对齐 Go 的 1015**）」。
+⇒ **结论是对的**（客户端可见值两侧都是 1015），**理由是错的/不完整的** ——
+它让人以为「Go 的 logic 层会返回 1015」，而 **Go 侧根本没有任何 DB 路径返回 1015**。
+⇒ 按 AGENTS.md §3.3 强制第 3 条「**先改/删错误断言，再改实现**」：先订正断言，**不动实现**。
+
+订正后的注释（17 处同款）：
+
+```java
+// B-1：...必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+//       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+//       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+//       （…共 10 处出口），那一层**被外层 interceptor 掩盖**：
+//       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+//       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+```
+
+并在**类级 javadoc** 写一次完整论证（18 处 catch 的共同依据 + E-4 五行实测数据 + Go 侧机制）。
+⇒ **生产行为零改动**（本轮只改注释）。
+
+#### §4 🔴 残留风险（诚实边界）
+
+Go 侧那个 `select` 是**竞速**：`done` 与 `timeoutCtx.Done()` 同时 ready 时 Go **随机选**
+⇒ 机制上存在「handler 先返回 ⇒ 客户端拿到 5001」的窗口。
+⇒ **E-4 的 4 组 Go 采样全部是 1015，但那是 4 次采样、不是概率刻画**
+⇒ 本域**不声称「Go 侧 100% 是 1015」**。
+⇒ 若要闭合这一格，需在同一条件下跑 N 轮并统计分布（**本轮未做**）。
+
+#### §5 与 `global` E58 的关系（已回信）
+
+- **本域不把这条登记为「有意偏离」** —— 因为**客户端可见面两侧一致**
+  ⇒ 按 AGENTS.md「差异只允许出现在表达层」，它**不构成 wire 漂移**，也**不需要**用户签字。
+  ⇒ 但**必须留档** —— 否则下一个人会照着「Go 是 INTERNAL」把 18 处 catch 改回去
+  ⇒ RAG 渲染 5001 ⇒ **离 Go 更远**（2026-10-21 B-1 缓解实验第三行踩过的坑）。
+- 🔴 **需 `global` 侧处理的两处**（**`service/common` 是 global 域单写权 ⇒ 本域只报告、不动手**）：
+  1. `service/common/src/main/java/com/rag/common/persistence/SqlTimeoutStatusTranslator.java:29-38` 的 javadoc 写着
+     「Go 侧 ctx 到点后，查询返回 `context.DeadlineExceeded`，**经 go-zero 的错误映射成为「服务繁忙」1015**」
+     ⇒ **理由不准**：1015 来自 **api 层的 default 分支** + **interceptor 的超时分支**，不是 go-zero 的错误映射；
+     且同段「Go 侧这两者本来就不同（超时 1015 / 数据库错 5001）」**只在客户端面成立**（源码层 Go 两处都是 INTERNAL）。
+  2. **E58 的定性**：建议从「wire 级差异 ⇒ 客户端可见」改为
+     「**源码层形态差异 · 客户端可见面一致（E-4 四组实测）**」
+     ⇒ 否则别的域会照着「RAG 更准确 ⇒ 保留」去保留**那些确实客户端可见的改写**
+     （message 域 E59 / like 域 E60 恰好就是那种）。
+
+#### §6 复现入口
+
+```bash
+# E-4 双栈实测（Go 18888 / RAG 59900）；客户端可见响应体就在脚本输出里
+bash tools/difftest/exp-b1-timeout-cancel.sh
+# ⚠️ 该脚本 2026-10-21 的判读段原文就写着：
+#    「user 与 admin 两侧都应当是 {"code":1015,"msg":"服务繁忙"}」—— 本条的依据就是这句。
+```
+
+### V-013 的分类与统计影响
+
+| 项 | 内容 |
+|---|---|
+| **Classification** | **NOT A WIRE DRIFT**（源码层形态差异 · **客户端可见面两侧逐字一致** · E-4 四组 Go 采样 + RAG 生产方案同场对照）⇒ **不计入 §4.4 的 OBSERVABLE DIFFERENCE** |
+| **Observable Impact** | **无**（客户端可见的 code 与 msg 两侧完全相同） |
+| **Risk** | 🔴 **反向风险**：若按「Go 是 INTERNAL」把 18 处 catch 改回去 ⇒ RAG 渲染 **5001**（`ErrorServerCommon`，在 Go 侧表示「数据库故障」而非「超时」）⇒ **离 Go 更远** |
+| **处置** | ✅ **已处置**（2026-10-26）：17 处注释的**理由**已订正 + 类级 javadoc 完整论证；**生产行为零改动** |
+| **归属** | **本组件内**（`service/users/user/user-rpc`）⇒ 修法只落本域 ⇒ **不跨域**（但 `service/common` 的同款 javadoc 问题须由 `global` 域处理） |

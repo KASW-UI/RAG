@@ -74,6 +74,31 @@ import java.util.Map;
  *   D-016：metrics 只在 login/register 埋点（最小覆盖）
  *   D-017：updateUserById 只更新 4 列
  *   D-018：每次业务步骤前 checkDeadline，超时立即抛 DEADLINE_EXCEEDED
+ *
+ * <p><b>🔴 B-1 放行分支的语义论证</b>（2026-10-26 订正；本类 <b>18 处</b>同款 catch 注释的共同依据）——：
+ * <pre>
+ *   RAG 本类   ：catch (StatusRuntimeException e) { throw e; }  ⇒ DEADLINE_EXCEEDED 原样上抛
+ *   Go  logic  ：DB 错误一律 status.Error(codes.Internal, "DB查询失败")
+ *                （service/user/user/rpc/internal/logic/ 共 10 处出口，见 V-013 的清单）
+ *   Go 拦截器  ：service/common/observability/rpc.go:59-72 的 select
+ *                case &lt;-timeoutCtx.Done(): ⇒ status.Error(codes.DeadlineExceeded, ...)
+ * </pre>
+ * ⇒ <b>源码层</b>：两侧确实不同 —— RAG 保留了「超时」与「DB 真失败」的区分，Go 把它糊掉了。
+ * ⇒ <b>客户端可见面：两侧一致</b> —— E-4 双栈活体实测（2026-10-21 21:03，真进程 + 真 PG，
+ * 用 ACCESS EXCLUSIVE 锁把 login 的 SELECT 挡住）：
+ * <pre>
+ *   Go（基线）     2190ms   200 + {"code":1015,"msg":"服务繁忙"}   查询存活 203ms
+ *   Go（同场对照） 2208ms       {"code":1015,"msg":"服务繁忙"}   查询存活 182ms
+ *   Go / user      2236ms       {"code":1015,"msg":"服务繁忙"}   查询存活 161ms
+ *   Go / admin     2181ms       {"code":1015,"msg":"服务繁忙"}   查询存活 176ms
+ *   RAG（生产方案） 2223ms       {"code":1015,"msg":"服务繁忙"}   查询存活 176ms
+ * </pre>
+ *   ⇒ Go 的 {@code codes.Internal} <b>被外层 interceptor 的超时分支掩盖</b> ⇒ 客户端经 api 的
+ *     default 分支拿到 1015（{@code errmsg.CodeServerBusy}）⇒ <b>与 RAG 逐字一致</b>。
+ * ⇒ <b>所以这 18 处 catch 不得改回 Go 行为</b>：改回去 ⇒ RAG 渲染 5001（{@code ErrorServerCommon}），
+ *   而 5001 在 Go 侧表示「**数据库故障**」不表示「超时」⇒ <b>离 Go 更远</b>
+ *   —— 这正是 2026-10-21 B-1 缓解实验第三行踩过的坑（注入组 ⇒ 5001）。
+ * ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ {@code docs/DRIFT/users/user/rpc.md} §7 {@code DRIFT-USERRPC-V-013}。
  */
 @Service
 public class UserDomainService {
@@ -173,7 +198,13 @@ public class UserDomainService {
                 logger.logInfo(otelCtx, "login failed : user not found,username : " + req.getUsername());
                 return LoginResp.newBuilder().setStatus(1L).build();
             } catch (StatusRuntimeException e) {
-                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
                 throw e;
             } catch (Exception e) {
                 metrics.getLoginDbError().increment();
@@ -279,7 +310,13 @@ public class UserDomainService {
             try {
                 hash = PasswordUtil.encrypt(req.getPassword());
             } catch (StatusRuntimeException e) {
-                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
                 throw e;
             } catch (Exception e) {
                 metrics.getRegisterInternalError().increment();
@@ -294,7 +331,13 @@ public class UserDomainService {
             try {
                 uid = Snowflake.nextId();
             } catch (StatusRuntimeException e) {
-                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
                 throw e;
             } catch (Exception e) {
                 metrics.getRegisterInternalError().increment();
@@ -320,7 +363,13 @@ public class UserDomainService {
             try {
                 userMapper.insert(u);
             } catch (StatusRuntimeException e) {
-                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
                 throw e;
             } catch (Exception e) {
                 metrics.getRegisterDbError().increment();
@@ -366,7 +415,13 @@ public class UserDomainService {
             logger.logBusinessErr(otelCtx, ErrorCode.ERROR_USER_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
             throw e;
         } catch (Exception e) {
             logger.logBusinessErr(otelCtx, ErrorCode.ERROR_DB_SELECT.getCode(), e);
@@ -437,7 +492,13 @@ public class UserDomainService {
             } catch (NotFoundException e) {
                 existing = null;
             } catch (StatusRuntimeException e) {
-                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
                 throw e;
             } catch (Exception e) {
                 // DRIFT-009：Go 出处 updateuserlogic.go:41-44 —— 查库故障单独成一支
@@ -460,7 +521,13 @@ public class UserDomainService {
             try {
                 toUpdate.setPassword(PasswordUtil.encrypt(req.getPassword()));
             } catch (StatusRuntimeException e) {
-                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
                 throw e;
             } catch (Exception e) {
                 // Go 出处 updateuserlogic.go:50
@@ -485,7 +552,13 @@ public class UserDomainService {
         try {
             userMapper.updateUserById(req.getUid(), toUpdate);
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
             throw e;
         } catch (Exception e) {
             // Go 出处 updateuserlogic.go:65
@@ -502,7 +575,13 @@ public class UserDomainService {
             logger.logBusinessErr(Context.current(), ErrorCode.ERROR_USER_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
             throw e;
         } catch (Exception e) {
             // Go 出处 updateuserlogic.go:76
@@ -557,7 +636,13 @@ public class UserDomainService {
                 logger.logBusinessErr(otelCtx, ErrorCode.ERROR_USER_NOT_EXIST.getCode(), e);
                 throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
             } catch (StatusRuntimeException e) {
-                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
                 throw e;
             } catch (Exception e) {
                 // Go 出处 deleteuserlogic.go:48-49（span.RecordError + ErrorDbSelect）
@@ -570,7 +655,13 @@ public class UserDomainService {
             try {
                 userMapper.deleteUserByUid(req.getUid());
             } catch (StatusRuntimeException e) {
-                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+                // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
                 throw e;
             } catch (Exception e) {
                 // Go 出处 deleteuserlogic.go:57
@@ -621,7 +712,13 @@ public class UserDomainService {
                     ErrorCode.ERROR_AVATAR_HISTORY_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("头像历史不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
             throw e;
         } catch (Exception e) {
             // Go 出处 selectavatarlogic.go:48（ErrorDbUpdate）
@@ -660,7 +757,13 @@ public class UserDomainService {
         try {
             historyId = String.valueOf(Snowflake.nextId());
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
             throw e;
         } catch (Exception e) {
             // Go 出处 uploadavatarlogic.go:41（ErrorSnowflakeID）
@@ -684,7 +787,13 @@ public class UserDomainService {
                     ErrorCode.ERROR_AVATAR_HISTORY_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("头像历史不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
             throw e;
         } catch (Exception e) {
             // Go 出处 uploadavatarlogic.go:59（ErrorDbInsert）
@@ -720,7 +829,13 @@ public class UserDomainService {
             logger.logBusinessErr(Context.current(), ErrorCode.ERROR_USER_NOT_EXIST.getCode(), e);
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
             throw e;
         } catch (Exception e) {
             // Go 出处 getavatarhistorylogic.go:37（ErrorDbSelect）
@@ -733,7 +848,13 @@ public class UserDomainService {
         try {
             histories = avatarHistoryMapper.listAvatarHistory(req.getUid(), req.getLimit());
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
             throw e;
         } catch (Exception e) {
             // Go 出处 getavatarhistorylogic.go:43（ErrorDbSelect）
@@ -774,7 +895,13 @@ public class UserDomainService {
         try {
             bizRedis.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds));
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL（对齐 Go 的 1015）
+            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
+                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
+                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
+                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
+                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
+                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
             throw e;
         } catch (Exception e) {
             throw Status.INTERNAL.withDescription("注销失败,Redis写入异常").asRuntimeException();
