@@ -47,6 +47,7 @@
 | 第二十六轮 | 🟢 **接住 `global` 第四十四轮的结构层缺陷类 ⇒ 收窄成本域门禁**（§35）—— global 同步：本轮**无** `service/common/**` 行为改动 ⇒ 对 favorite **零影响**；并新增结构层守门 **`check-ledger-tables.py`**（global 域 · 在 `align/global` 分支的 `tools/` 目录下 ⇒ **本分支没有该文件**）（「**表格块内部不得出现无行首的内容行**」⇒ 否则 GFM 把它当上一行的 lazy continuation ⇒ **表格结构静默塌陷**：内容一个字没丢 ⇒ **肉眼扫不出**）<br>🔴 **但 global 的测量点过期了一轮**（他们在**我的第二十四轮 HEAD `a4a7ee0`** 上测 ⇒ 我的**第二十五轮**又改了台账）⇒ ⇒ 在**最新 `1111c8a`** 上复跑 `--all` ⇒ **我域 0 命中**（全仓 10 处全在 comment 域文件）⇒ ⇒ 逐条核证：是**真塌陷**（第 78 行是表格行、79/80 行**没有行首 `|`**）不是误报<br>🔴 **但 global 的原版不能直接当本域门禁**：① **默认范围不含本域** ⇒ 只能用 `--all` ⇒ 会因 **comment 域的文件**变红 ⇒ **别人的缺陷不该让我的门禁红** ② **`--mutation-test` 硬编码 global 自己的文件** ⇒ 在本分支上**「变异前置失败」** ⇒ 自证机制用不了<br>✅ ⇒ **收窄成本域版** `tools/ledger-lint/favorite/check-ledger-tables.py`（只扫**本 owner 写的 3 个 `rpc.md`**；显式排除 `api.md`（并发会话）/`common,proto`（别的组件）/`docs/FileTree/**`（用户维护）；变异靶子换成本域自己的 §0 时间线表）⇒ **EXIT=0** + **变异自证 M1/M2/M3 全过**（精确命中 `rpc.md:32`/`:33`）+ **真实数据交叉验证**（副本判据在 comment 域文件上**复现 10 处、行号逐条一致** ⇒ 判据没抄坏）⇒ ⇒ 坑档 **PIT-FAV-RPC-035** |
 | 第二十七轮 | 🔴 **global 第四十五轮：毫秒路径真的生效了**（§36）—— **真·共享层行为变更**（`DeadlineQueryTimeoutInjector` 的毫秒探测改成**先 unwrap 到驱动实现类** ⇒ 不再被 Hikari 代理类挡住）⇒ **favorite-rpc 在内** ⇒ 只读 overlay 实测：他们那版 `DeadlineQueryTimeoutInjectorTest` **13 例全绿** + 本域守门 **5 例中 2 条红**（`expected: <2> but was: <1>`、`expected: <2000> but was: <1691>`）⇒ ⇒ **第二十五轮埋的「转红 = 台账该更新、不是回归」信号兑现**<br>🔴🔴 **实测证伪他们 ④ 的量化口径**：他们写「毫秒路径把取消时刻收紧到『deadline + δ』⇒ 差 = δ」⇒ **错**：驱动收到的是**原样 R（1691ms）** ⇒ `R = deadline − t_exec` ⇒ ⇒ **`t_exec + R ≡ deadline`** ⇒ ⇒ **Go ↔ RAG 的取消时刻差 = 0**（不是 δ）⇒ ⇒ **与 deadline 的来源公式无关**（⇒ 连「两分支 R 公式不同」都不再重要）<br>🔴 **「结论不变的真正理由」再订正**：毫秒路径生效后「≤999ms 窗口」**本身不存在** ⇒ 「handler 不烧预算 + 快 SQL」**退化为冗余** ⇒ 它的正确角色是「**毫秒路径若再次失效时的唯一结构性兜底**」⇒ ⇒ 当前生效的主因 = 「毫秒精度直接生效」<br>🟢 本域**本来就在真池路径上**（`@SpringBootTest` ⇒ HikariCP）⇒ 不存在他们说的「守门绿、生产坏」那个洞<br>🔴 **合并动作清单已提前写好**（§36.5）：守门期望值 2→**1** / 2000→**≈R**、台账 §28.1/§34/§35 改口径、坑档补「已修」⇒ ⚠️ **本分支现在是「秒级」是对的**（global 未合回主仓）⇒ 别误读成「修法不对」<br>✅ **守门改进**：两条断言**拆成两个测试方法**（同方法内第一条失败会遮住第二条）⇒ 5 例全绿；**产品代码零改动**、共享面零改动 ⇒ ⇒ 坑档 **PIT-FAV-RPC-036** |
 | 第二十八轮 | 🔴 **核验 `global` 第四十六轮的 E65：favorite-rpc 的出向 gRPC 调用不继承请求 deadline**（§37）—— 本轮global **写权零**（无 favorite 代码/台账改动，**共享层也零行为变更**）⇒ 是**发现**变了不是**行为**变了 ⇒ ⇒ **核验成立**：① **Go 侧**：`service/favorite/rpc/internal/logic/helper.go:92-99` 与同文件 129-136 行的出向调用吃 otel span 的 `depCtx` ⇒ **父 ctx deadline 原样保留** ② **RAG 侧**：`GoStyleRequestDeadline.begin` 的**主代码调用点全仓只有 `HttpMiddleware.java:263` 一处**（HTTP 路径）⇒ gRPC 服务端路径**从未绑定** ⇒ `applyTo`（`:110-120`）读到 null ⇒ **原样返回 stub ⇒ 零期限** ③ favorite-rpc 的出向调用点**恰好两处**（`UserRpcClient.java:45-46` · `ArticleRpcClient.java:49-50`）**都走 `applyTo`** ⇒ **零裸 stub** ⇒ ⇒ **修法完全落在共享层 ⇒ favorite 零改动即受益**（global ③ 正确）<br>🔴 **本域自己的活体证据**（不是转述）：只读借用 global 的出向调用探针（**global 单写权** ⇒ 拷 `/tmp` ⇒ **唯一改动**是把 `RAG_ROOT` 指向**本分支工作树**）⇒ **EXIT=0** ⇒ 与 global 结论**逐键一致**（Go `failed_fast=true`/code=4 vs RAG `false`/0）⇒ 且 `sql_carrier` **两侧一致** ⇒ 漂移**只在出向调用载体上**（正合第二十七轮）<br>🔴 **本域具体后果**：出向调用无期限 ⇒ Go 死线到点**立刻失败不写** vs RAG **照跑会写**（客户端早已收到 DEADLINE_EXCEEDED）⇒ **两侧对「这次操作算不算成功」可能相反** ⇒ 但**概率小**（R = 整预算 − δ）· **后果轻**（两处出向调用都在**事务外**）⇒ ⇒ 一旦共享层绑上 ⇒ RAG 走 `internalServerCommon()` ⇒ **与 Go 逐条同款** ⇒ **行为一次性对齐**<br>🔴 **跟踪项**：该探针的 drift 键钉「**形态**」⇒ **漂移修好后会红** ⇒ **那不是回归** ⇒ 合并后本域 §37 / §24.1 的 C 类同步销账 ⇒ ⇒ 坑档 **PIT-FAV-RPC-036** |
+| 第二十九轮 | 🟢 **接住 `global` 的「实体归属」判据（E68 落成于 `97a1fa8`，第四十八轮 `0107845`）⇒ 抓出本域文档里一条「锚点对、断言错」的套错类型**（§38）—— 只读借用他们的新工具跑 `--entity-all` ⇒ **全仓只有 1 条命中在 favorite 域**（另 9 条 FAIL 在 hot/comment/knowledge 域、3 条外部锚点在 like 域 ⇒ **均非本域写权**）<br>🔴 **核证后结论与工具输出不同**：工具说「`AuthorityLookup` 实际在 `service/common/communityfact/authority_http.go`」⇒ 暗示改锚点；**但真相是锚点完全正确**（`favorite_authority.go` 共 282 行，`:74` `parseAuthorityID` … `:206-282` `authoritativeFavoriteFact`）⇒ **错的是那句断言**（`FavoriteAuthorityLookupService` **套了 like / comment 的类型**）⇒ **Go 侧 `service/favorite/` 对 `AuthorityLookup`/`NewAuthorityHandler` 零引用**（favorite 自持 `Reader`/`ReaderV2`，`internal/authority/http.go:17,21`）⇒ ⇒ **产品代码零问题，是文档错了** ⇒ ⇒ **正解既不是改锚点也不是删断言，而是改断言 + 说清为什么不复用共享层**<br>✅ **修 `docs/FileTree/favorite/rpc.md` 8 处**（3 处套错类型/暗示 + 2 处过期陈述「`ServletRegistrationBean` 零命中」「从未真正装配过 authority 端点」⇒ 实测 favorite 7 处 + comment 2 处 + favorite 已落地自持 path 参数端点 + 1 条不通过项从「UNKNOWN 待拍板」改成「✅ 已按选项 ② 落地」）+ **5 处悬空跨域路径补全**（**修前** `like-rpc/service/Xxx.java` ⇒ 仓内全路径）⇒ **只改 `rpc.md`**（`api.md` 属并发会话 ⇒ 不碰）<br>🔴 **把第 ⑦ 层搬进本域门禁**（`global` 那份是**共享面 · global 单写权** ⇒ 不能改；`LEDGER_FILES` 只配了三域 ⇒ favorite 进不去）⇒ 本域 `tools/ledger-lint/favorite/check-ledger-selfcheck.py` 新增 **⑦ 实体归属层** + `EXTRA_SCOPED_FILES` 纳入 `docs/FileTree/favorite/rpc.md`（**只对 ⑤⑥⑦ 生效**）⇒ **并把 `global` 的「写盘→跑→还原」变异改成纯内存**（零副作用）+ **加一条阴性对照**（符号**确实在**锚点文件里 ⇒ 必须正确地不报）⇒ 🔴 **本域升为门禁级**（`global` 保持提示级 ⇒ 理由：唯一命中是**真缺陷** + 修完全域 0 条 + 变异双向通过 + **惰性自检**：一个候选都提取不到 ⇒ 出提示级信号「别把它当已对齐的证据」）<br>✅ **反证门禁有牙**：把 `FileTree/favorite/rpc.md` **临时还原到修复前** ⇒ 门禁**当场报出**第 ⑦ 层那条（定位到 `rpc.md:614`）+ 第 ⑤ 层 5 条悬空路径 ⇒ **门禁级 6 条** ⇒ 随即复原<br>🔴🔴 **但第一次跑只报出 5 条路径、第 ⑦ 层那条没报** ⇒ ⇒ **当场查出 3 个坑并全部修掉**（§38.5.1）：① **N5 跨位置误杀**（同一锚点在台账里是「历史记述」、在文档里是「活的错断言」⇒ 旧写法「任一位置被叙述 ⇒ 整条跳过」⇒ 第 ⑦ 层**根本看不到它** ⇒ 改为**按位置拆开**）② **跨出现点窗口并集**（「全部缺失才报」在窗口拼起来时会被**别处的正确候选**顶掉 ⇒ 改为**按出现点独立判定**）③ **变异注入被自己吞掉**（第 ⑤ 层新增的 N5 同型去噪会把紧挨叙述词的注入行去噪 ⇒ 变异自证**恒红**（假的自证）⇒ 注入**隔两个空行**）⇒ ⇒ **教训：「跑绿」不等于「判据活着」⇒ 必须把真实缺陷放回去看它抓不抓得到**<br>🟢 **零行为改动** ⇒ §24.1 的 A/B/C/D **四类计数全部不变**（0 / 0+B2 / 6 / 3）<br>✅ **补跑本域全量测试**（**分支尖端第一次**）：**BUILD SUCCESS** —— favorite-rpc **110 例**（含 3 skip）· favorite-api **94 例**（含 1 skip）· favorite-common **29 例** · service/common **174 例** · users-common **33 例** ⇒ **0 失败 0 错误**（🔴 **为什么补**：第二十七轮把守门的一条断言**拆成两个测试方法**（109 → **110** 例）⇒ 当时只跑过那个测试类 ⇒ ⇒ **分支尖端从未有过一次全量 `mvn test`** ⇒ 本轮收口这个缺口）⇒ **但「盘点结论的效力边界」要补一条**：台账口径外**还有一层「域内文档」从未被任何机检覆盖** ⇒ 一覆盖就抓出 8 处 ⇒ ⇒ 「域内已知但没改的漂移 = 0」在补上这一层之前**不成立** ⇒ ⇒ 坑档 **PIT-FAV-RPC-037** |
 | 本台账范围 | **仅 `favorite-rpc`**。`favorite-api` / `favorite-common` 由并发会话负责，不在本表结论内 |
 
 ---
@@ -1799,6 +1800,16 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 > ✅ **2026-10-25 第十六轮更新**：**U8 已闭合**（⇒ §25）⇒ **B 类归零**；
 > **A 类仍是 0 条**、**C 类仍是 5 条**（本域只读 ⇒ 收口在 `global`）、**D 类仍是 3 条**（库级 / 明确不做）⇒
 > ⇒ **域内「可修漂移 = 0 条」「未知项 = 0 条」**（只剩 **B2** 这一条**流程项**）。
+>
+> 🔴🔴 **2026-10-26 第二十九轮更新（§38.8）** —— **四类计数全部不变**（**0 / 0+B2 / 6 / 3**），
+> **但「盘点结论的效力边界」要再补一条**（同第二十轮那条教训的同型）：
+> 上面那句「**域内「可修漂移 = 0 条」「未知项 = 0 条」**」**覆盖的是「台账口径」** ——
+> 而台账口径之外**还有一层「域内文档」**（`docs/FileTree/favorite/rpc.md`）**从未被任何机检覆盖**
+> ⇒ ⇒ **一覆盖就抓出 8 处**（1 条**套错类型** + 2 条**过期陈述** + 5 条**悬空路径**）
+> ⇒ ⇒ 那句话在补上这一层之前**是不成立的**
+> ⇒ ⇒ **该层已进本域门禁第 ⑤⑥⑦ 层**（`tools/ledger-lint/favorite/check-ledger-selfcheck.py`
+> 的 `EXTRA_SCOPED_FILES`）⇒ 今后这类缺陷会被**自动挡住**。
+> ⚠️ **本轮零行为改动** ⇒ 那 8 处全是**文档层**缺陷 ⇒ **不计入 A/B/C/D**（A 类是 Go ↔ RAG 的**行为**漂移）。
 
 ### 24.2 🆕 **U8** · 🔴 `create_folder` / `create_item` 的**成功路径**从未被双侧对拍
 
@@ -3400,3 +3411,139 @@ global ④ 指出该探针的 drift 键钉的是「**形态**」而不是「不�
    （否则合并那天会有人去「修」一个其实已经修好的东西）。
 3. 🔴 **「影响很小」要拆成【概率小】与【后果轻】两件事分别说** ——
    本域：概率小（R = 整预算 − δ）· 后果轻（出向调用在**事务外**）⇒ **两件事都成立才叫「影响小」**。
+
+---
+
+## 38. 2026-10-26 第二十九轮（`align/favorite` 工作树 · 承 `a1ffdb6`）—— 🔴 **接住 `global` 的「实体归属」判据 ⇒ 抓出本域文档里一条「锚点对、断言错」的套错类型**
+
+### 38.1 本轮收到的三件事（`global` 侧）
+
+| # | 事项 | 出处 | 本域要做什么 |
+|---|---|---|---|
+| 1 | **E68 的判据已落成**（`tools/check-ledger-selfcheck.py` 新增第 4 层补充判据 + `--entity-all`） | `97a1fa8`（第四十七轮） | **自己跑一遍**，看本域有没有命中 ⇒ **不能只读结论** |
+| 2 | 第四十八轮 `0107845` 推双远端 | `0107845` | 作为第 1 项的**最新版本**（第四十七轮之后又有改动 ⇒ 测量点要取最新） |
+| 3 | 「`LEDGER_FILES` 配置 + 错锚点自查」两件要**域 owner 自己动手** | 回信正文 | `LEDGER_FILES` 在 `tools/check-ledger-selfcheck.py`（**共享面 · global 单写权**）⇒ 本域**不能改** ⇒ ⇒ **域内替代方案**（见 §38.6） |
+
+### 38.2 🔴 只读借用 `global` 的新判据 ⇒ **全仓只有 1 条命中在 favorite 域**
+
+```bash
+# 只读借用：拷到 /tmp，**不改仓库、不改共享面**
+python3 /tmp/global-selfcheck.py --entity-all \
+  --go-root "/Users/pr/Documents/java&golang/Sea-RideTheWind_golang" --repo-root .
+```
+
+| 类别 | 条数 | 归属 |
+|---|---|---|
+| **实体归属判据命中** | **1** | ✅ **favorite 域**（`docs/FileTree/favorite/rpc.md`）⇒ **本域要动手** |
+| 第 4 层既有 FAIL（悬空 `file:line`） | 9 | ❌ **hot / comment / knowledge 域** ⇒ **不是本域写权** |
+| 外部仓库锚点（真源 `service/` 下无该首段目录 ⇒ 本机不可核验） | 3 | ❌ **like 域** ⇒ **不是本域写权** |
+
+**命中详情**：`favorite_authority.go:74-282` —— 锚点文件里**找不到**台账断言的实体 `AuthorityLookup`（该符号实际在 `service/common/communityfact/authority_http.go`）。
+
+### 38.3 🔴 核证：**锚点是对的，错的是「断言」**（`global` 给的两个选项都不是正解）
+
+> 🔴 **工具的第一版输出不能直接当结论**（本域既有纪律：借来的工具只能当探针）⇒ 逐条核证结果如下。
+
+| 核证项 | 证据 | 结论 |
+|---|---|---|
+| `AuthorityLookup` 声明在哪 | `service/common/communityfact/authority_http.go:18` `type AuthorityLookup func(context.Context, string, string) (AuthorityFact, error)`；`:23` `NewAuthorityHandler` | 它在**共享层**（`service/common`） |
+| **Go 侧 favorite 用不用它** | `grep -rn "AuthorityLookup\|NewAuthorityHandler" service/favorite/` ⇒ **零命中** | ⇒ **favorite 根本不用这个类型** |
+| 那 favorite 用的是什么 | `service/favorite/rpc/internal/authority/http.go:17` `Reader` · `:21` `ReaderV2` · `:27` `NewHandler` · `:32` v1 路径 · `:44` 3s · `:63` v2 路径 · `:80` 3s | ⇒ **favorite 自持一套**（path 参数版） |
+| 谁在用共享层的 `AuthorityLookup` | `service/like/rpc/cmd/fact-authority/main.go:71` · `service/comment/rpc/cmd/fact-authority/main.go:71` | ⇒ **like / comment 域**在用 |
+| RAG 侧 favorite 有没有实现它 | `FavoriteAuthorityLookupService.java:44` `public class FavoriteAuthorityLookupService`（**不 implements 任何接口**）· `:84` `authoritativeFactV1` · `:100` `authoritativeFactV2` | ⇒ **没有** ⇒ 与 Go 侧一致 ✅ |
+| 那 `favorite_authority.go:74-282` 这个锚点对不对 | Go 侧 `service/favorite/rpc/internal/model/favorite_authority.go` 共 **282 行**；`:74` `parseAuthorityID` … `:206-282` `authoritativeFavoriteFact` | ⇒ **锚点完全正确** ✅ |
+
+⇒ 🔴🔴 **结论**：**错的不是锚点，是那句断言「`FavoriteAuthorityLookupService` 实现 `AuthorityLookup`」** ——
+它**套了别的域的类型** ⇒ ⇒ **正解既不是「改锚点指向 `authority_http.go`」（`global` 的输出暗示的方向），也不是「删掉断言」**，而是
+**把断言改成 favorite 真实的契约（Go `Reader` / `ReaderV2`）并说明为什么不复用共享层**。
+⇒ ⇒ **产品代码零问题**：RAG 的 `FavoriteAuthorityEndpointConfig` 与 Go 的 `Reader`/`ReaderV2` 契约**逐条一致**（v1/v2 两入口 · path 参数 · Bearer 校验）⇒ **是文档错了，不是代码错了**。
+
+### 38.4 ✅ 修 `docs/FileTree/favorite/rpc.md`（**8 处**）
+
+| # | 位置（修前） | 缺陷 | 修法 |
+|---|---|---|---|
+| 1 | `:50` `AuthorityHandler.java:48-50,…` 行 | 判词「**部分 REUSE**」⇒ 暗示 favorite 用共享 handler | 改成 **❌ favorite 不 REUSE** + 写明 Go 侧 `service/favorite/` 零引用 |
+| 2 | `:51` `AuthorityHandlerFactory.java:30,39-49` 行 | 判词「见下方冲突」⇒ 同样暗示会走它 | 改成 **❌ favorite 不采用**（query 形态是 like / comment 的契约） |
+| 3 | `:59` 小节标题 | 「🔴 wire 形态冲突：authority 端点（**必须拍板**）」 | 改成「✅ …（favorite 已按 Go 原样落地，见 §12.7 不通过项 #1）」 |
+| 4 | `:76-77` | 「`ServletRegistrationBean` **零命中**」「**RAG 侧从未真正装配过任何一个 authority 端点**」⇒ **两条都已过期**（favorite-rpc **7 处** + comment-rpc **2 处**；favorite 已落地自持端点） | 就地订正 + 标注订正日期 + 保留**仍为真**的那一条（`like-rpc/mq/LikeAuthorityEndpointConfig.java` 仍是 4 行骨架） |
+| 5 | `:479` | 「`FavoriteAuthorityLookupService`（**`implements AuthorityLookup`**）」 | 改成「对应 Go `internal/authority/http.go:17` `Reader` / `:21` `ReaderV2`」+ 明写**不实现**共享层的 `AuthorityLookup` |
+| 6 | `:614` | 「**实现 `AuthorityLookup`**」（锚点 `favorite_authority.go:74-282`） | 同上 + 写明「锚点文件里本来就没有这个符号」 |
+| 7 | `:745` 自检表 | 「`ServletRegistrationBean` 全仓零使用」被列进「如实写出」 | 标注**当时为真、现已过期、已就地订正** |
+| 8 | `:752` 不通过项 #1 | 整条判为「**UNKNOWN**，三选一需用户拍板」 | 改成「✅ **已按选项 ② 落地**」+ 🔴 剩下的只有「要不要开 web connector」这一项**部署形态变更**（台账 §5-U1） |
+
+**另外 5 处悬空路径**（本域门禁第 ⑤ 层抓出，全部是**跨域先例引用**写成了不可解析的省略形式）：
+
+| 位置（修前） | 修后 |
+|---|---|
+| `:32` **修前** `service/impl/LikeServiceGrpcImpl.java:46-56` | `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/impl/LikeServiceGrpcImpl.java:46-56`（本行唯一写成全路径的一项 —— 同格其余条目是相对 `com/rag/like/like/rpc/` 包根的简写，而 `service/...` 开头会与**仓根相对路径**撞形） |
+| `:450` **修前** `like-rpc/service/LikeDomainService.java` | `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeDomainService.java` |
+| `:458` **修前** `like-rpc/service/LikeMessageIngestService.java` | `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeMessageIngestService.java` |
+| `:459` **修前** `like-rpc/service/LikeDeliveryValidator.java` | `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeDeliveryValidator.java` |
+| `:466` **修前** `like-rpc/service/LikeFactDispatchService.java` | `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeFactDispatchService.java` |
+
+> ⚠️ **只改 `rpc.md`** —— `docs/FileTree/favorite/api.md` 也有 1 处同类问题（**修前** `service/IdentityResolver.java`），但**属并发会话** ⇒ **不碰**。
+
+### 38.5 ✅ 把第 ⑦ 层（实体归属判据）搬进**本域门禁**
+
+> 🔴 **为什么必须搬而不是直接用 `global` 那份**：`tools/check-ledger-selfcheck.py` 是**共享面 · global 单写权** ⇒ 本域**不能改它**；而且它的 `LEDGER_FILES` 只配了 task / users / users-admin 三域 ⇒ favorite **既不在范围里、也没法让它进来** ⇒ ⇒ **域内替代方案**。
+
+| 搬运项 | `global` 原版 | 本域版（`tools/ledger-lint/favorite/check-ledger-selfcheck.py`） |
+|---|---|---|
+| 第 ⑦ 层判据本体 | `_local_windows` / `_entity_candidates` / `_symbol_index` / `layer4_entity_check` | **照搬判据**（收紧口径：真源里**声明过且声明处唯一**的候选才参与判定 ⇒ Java 类名 / 非代码词 / 字段名自动出局） |
+| **扫描范围** | `LEDGER_FILES`（共享配置 ⇒ favorite 进不去） | 🔴 **`EXTRA_SCOPED_FILES` = `docs/FileTree/favorite/rpc.md`** ⇒ **只加 `rpc.md`**（`api.md` 属并发会话 ⇒ 不加）<br>⚠️ **只对 ⑤⑥⑦ 三层生效** —— ①~④（章节指针 / 编号闭合 / Go 源文件覆盖 / 裸行号）是**台账专属口径**，拿它们扫文件树文档只会产噪音 |
+| **变异自证** | 「**写盘 → 跑 → 还原**」⇒ 中途崩了会留下变异过的台账 | 🔴 **改成纯内存**（`_local_windows` 从 `texts` 取，不再读盘）⇒ 零副作用 |
+| **阴性对照** | 有 | ✅ **加了一条**：符号**确实在**锚点文件里（`parseAuthorityID`）⇒ **必须正确地不报** ⇒ 钉住「判据不是太宽」 |
+| **严重级** | 提示级（`--entity-all` 不改退出码） | 🔴 **本域升为门禁级** —— 理由见下 |
+
+**为什么本域敢升为门禁级**（`global` 保持提示级）：
+① **实测唯一命中就是真缺陷**（§38.3）⇒ 不是假阳性；
+② **修完之后全域 0 条**（12 份台账 + FileTree 文档，362 个锚点）⇒ **零已知误报**；
+③ **变异自证双向通过**（阳性必须报 + 阴性必须不报）；
+④ 🔴 **本域加了一条「惰性自检」**：若某一轮**一个候选都提取不到** ⇒ 出提示级信号
+（「这一层在本域几乎是惰性的，**别把它当『已对齐』的证据**」）⇒ ⇒ **防的是「门禁因为口径不匹配而悄悄失效」**。
+
+### 38.5.1 🔴🔴 「牙齿检查」当场抓出**搬来判据时踩的 3 个坑**（全部已修 + 各配一条变异自证）
+
+> 🔴 **方法**：把 `docs/FileTree/favorite/rpc.md` **临时还原到修复前**（`git checkout HEAD --`）⇒ 门禁**应当**报出那条 `AuthorityLookup` ⇒ 跑完 `cp` 复原。
+> ⇒ **第一次跑：门禁只报出 5 条路径问题，第 ⑦ 层那一条没报** ⇒ ⇒ **判据在我自己的台账上被误杀了**（假阴性）⇒ 连查三轮才定位。
+
+| # | 坑 | 现象 | 修法 |
+|---|---|---|---|
+| **1** | 🔴 **第 ⑥ 层的 N5 去噪把第 ⑦ 层**误杀**了** | 同一个锚点 `favorite_authority.go:74-282` **在台账里**是我写 §38 时引用的「历史记述」（含叙述词 ⇒ 被 N5 去噪）· **在 FileTree 文档里**是**活的错断言** ⇒ 旧写法「**任一位置被叙述 ⇒ 整条跳过**」⇒ 第 ⑦ 层**根本看不到它** | **按位置拆开**：叙述的位置判提示级（`go-ref-narrated`）· **活的位置照常进 `resolved`** ⇒ （与 `global` 那边「噪声引用也要继续解析文件」同一条原则）⇒ **并加变异 ⑤ 钉住这个交互** |
+| **2** | 🔴 第 ⑦ 层「**全部缺失才报**」在**跨出现点**时会被顶掉 | 同一个锚点的**多个出现点**的窗口被**拼在一起** ⇒ 候选集变成**并集** ⇒ 「别处的正确候选」（如 `parseAuthorityID`）⇒ **把这一行真正的错候选顶掉** ⇒ ⇒ 真缺陷被吞 | 🔴 **改为「按出现点独立判定」**（新增 `_local_window_at`）：**每一行自己断言的符号**不在锚点文件里 ⇒ **那行单独报** ⇒ 不受别处影响 |
+| **3** | 🔴 第 ⑤ 层新增的「N5 同型去噪」会**把变异注入自己吞掉** | 台账会**引用自己修之前的写法**当证据 ⇒ 那条路径是**历史记述**不是**活指针** ⇒ 判提示级（`repo-path-narrated`）⇒ **但变异注入的行紧挨着台账最后一行** ⇒ 若最后一行含叙述词 ⇒ **注入被去噪** ⇒ 变异自证**恒红**（**假的自证**） | 变异注入**隔两个空行**（`"\n\n\n"`）⇒ 注入行 ±1 行内**没有叙述词** ⇒ ⇒ 同时在**真实数据**上验证（还原 FileTree ⇒ 门禁**当场报出 6 条** ⇒ 复原 ⇒ 归零） |
+
+⇒ 🟢 **教训**：**「搬来的判据」和「我自己的判据」一样，都得先做「牙齿检查」** ——
+把**真实缺陷**放回去，看门禁**抓不抓得到** ⇒ 抓不到 ⇒ 是判据被误杀（本轮 3 次）⇒ **光看「跑绿」不够**。
+
+### 38.6 🟢 替代 `global` 那条「给 favorite 加 `LEDGER_FILES` 配置」
+
+| `global` 的要求 | 本域的替代做法 |
+|---|---|
+| 在共享 `tools/check-ledger-selfcheck.py` 的 `LEDGER_FILES` 里加 favorite | ✅ **不改共享面** ⇒ 本域门禁用 `EXTRA_SCOPED_FILES` 把 `docs/FileTree/favorite/rpc.md` 纳入**本域自己的**扫描范围 ⇒ **效果等价、零共享面改动** |
+
+⇒ ⇒ **本轮对 `global` 零写入请求**（他们那两条都能由本域自行闭环）⇒ **回执内容见 §38.7**。
+
+### 38.7 本轮验证
+
+| 项 | 结果 |
+|---|---|
+| **只读借用 `global` 判据** | ✅ 修完再跑 `--entity-all` ⇒ **全仓 0 条命中**（favorite 那条已消）；余下 9 条 FAIL（hot/comment/knowledge）+ 3 条外部锚点（like）**均非本域写权** |
+| **门禁「抓得住真缺陷」的反证** | ✅ 把 `docs/FileTree/favorite/rpc.md` **临时还原到 HEAD（修复前）** ⇒ 本域门禁**当场报出**：第 ⑦ 层 `favorite_authority.go:74-282 —— 锚点文件里**找不到**该行断言的实体：AuthorityLookup（实际在 service/common/communityfact/authority_http.go）`（定位到 `docs/FileTree/favorite/rpc.md:614`）+ 第 ⑤ 层 **5 条**悬空仓内路径 ⇒ **门禁级 6 条** ⇒ ⇒ **门禁有牙**（不是恒绿）⇒ 随即 `cp` 复原<br>🔴 **但第一次跑只报出 5 条路径、第 ⑦ 层那条没报** ⇒ ⇒ **当场查出 3 个坑并全部修掉**（**§38.5.1**：N5 跨位置误杀 / 跨出现点窗口并集 / 变异注入被自己吞掉）⇒ 修完再跑 ⇒ **6 条**（含第 ⑦ 层那一条）⇒ ⇒ **「跑绿」不等于「判据活着」** |
+| **本域门禁（5 个 + 1 个变异自证）** | ✅ `check-ledger-selfcheck.py` **EXIT=0**（门禁级 0 条；第 ⑦ 层：覆盖锚点 362 / 取到窗口 362 / 取到候选 0 ⇒ **惰性提示如实打出**）<br>✅ `check-ledger-selfcheck.py --mutation-test` **EXIT=0**（⑤⑥⑦ 三层都能抓到注入的缺陷，且 ⑦ 层阴性对照**正确地不报**）<br>✅ `check-ledger-vs-reality.py` / `check-assertion-sources.py` / `check-ledger-tables.py`（+ `--mutation-test`）**全 EXIT=0** |
+| **产品代码 / 共享面** | ✅ **零改动**（本轮只改**本域文档** + **本域门禁脚本**）⇒ ⇒ 四个探针**无需复跑**（改动零行产品代码 ⇒ 第二十五轮那次的 EXIT=0 仍然有效）<br>✅ **但补跑了本域全量测试**（**分支尖端第一次**）：`mvn -o -pl service/favorite/favorite-{proto,common,rpc,api} -am test -Dsurefire.failIfNoSpecifiedTests=false` ⇒ **BUILD SUCCESS** —— favorite-rpc **110 例**（含 3 skip）· favorite-api **94 例**（含 1 skip）· favorite-common **29 例** · service/common **174 例** · users-common **33 例** ⇒ **0 失败 0 错误**<br>🔴 **为什么补跑**：**第二十七轮**把守门的一条断言**拆成两个测试方法**（109 → **110** 例）⇒ 但当时只跑过那个测试类 ⇒ ⇒ **分支尖端从未有过一次全量 `mvn test`** ⇒ 本轮补上（与「零 Java 改动 ⇒ 无需复跑」不冲突：**不是必需，是收口一个未验证的缺口**） |
+| **共享面写入** | ✅ **零** —— `service/common/**` / `docs/DRIFT/_INDEX.md` / `docs/DRIFT/_MANIFEST.json` / `docs/Intentional_Deviations/_INDEX.md` / `docs/Pitfalls/_INDEX.md` / `AGENTS.md` / `docs/DRIFT/_cross/` / `docs/DRIFT/global/` / `tools/check-ledger-selfcheck.py` **一行未碰** |
+
+### 38.8 🟢 本轮对 §24.1 盘点结论的影响：**四类计数全部不变**
+
+| 类别 | 变化 | 理由 |
+|---|---|---|
+| **A · 可修漂移** | **0 ⇒ 0** | 本轮**零行为改动** ⇒ 抓出的是**文档断言错**，不是 Go ↔ RAG 的行为漂移 |
+| **B · 域内证据缺口** | **0 + B2 ⇒ 0 + B2** | 不变 |
+| **C · 跨域（本域只读）** | **6 ⇒ 6** | 不变（E65 仍待 `global` 收口） |
+| **D · 库级** | **3 ⇒ 3** | 不变 |
+
+🔴 **但盘点结论的「效力边界」要补一条**（同第二十轮那条教训的同型）：
+**第二十九轮实测**：台账口径之外**还有一层「域内文档」**（`docs/FileTree/favorite/rpc.md`）**从未被任何机检覆盖** ⇒
+一覆盖就抓出 **1 条套错类型 + 2 条过期陈述 + 5 条悬空路径** ⇒ ⇒ **「域内已知但没改的漂移 = 0」这句话，在补上这一层之前是不成立的** ⇒
+⇒ **本层已进本域门禁第 ⑤⑥⑦ 层**（⇒ 今后这类缺陷会被自动挡住）。

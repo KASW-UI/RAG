@@ -29,7 +29,7 @@
 
 | 参照模块 | 提供的一致性依据 |
 |---|---|
-| `service/like/like-rpc`（31 个 Java 文件） | `LikeRpcApplication.java:58-97`（`@SpringBootApplication` + `@ConfigurationPropertiesScan` + `@MapperScan` + `@EnableScheduling` + `@Import` 七件套 + **`GrpcServerConfigurer` 显式 `intercept()`**）；`bootstrap/{NacosRegistration,LikeSchemaGate,LikeFactProcessLogging}.java`；`domain/*Entity`；`mapper/*Mapper`（`@Select` 注解式原生 SQL，全仓**零 XML mapper**）；`mapper/JsonbTypeHandler.java:29-40`；`client/MessageRpcClient.java`；`exception/LikeExceptions.java`；`metrics/LikeRpcMetrics.java`；`service/impl/LikeServiceGrpcImpl.java:46-56`；`mq/{LikeHotEventOutboxRelay,LikeFactDispatchScheduler,LikeAuthorityEndpointConfig}.java` |
+| `service/like/like-rpc`（31 个 Java 文件） | `LikeRpcApplication.java:58-97`（`@SpringBootApplication` + `@ConfigurationPropertiesScan` + `@MapperScan` + `@EnableScheduling` + `@Import` 七件套 + **`GrpcServerConfigurer` 显式 `intercept()`**）；`bootstrap/{NacosRegistration,LikeSchemaGate,LikeFactProcessLogging}.java`；`domain/*Entity`；`mapper/*Mapper`（`@Select` 注解式原生 SQL，全仓**零 XML mapper**）；`mapper/JsonbTypeHandler.java:29-40`；`client/MessageRpcClient.java`；`exception/LikeExceptions.java`；`metrics/LikeRpcMetrics.java`；`service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/impl/LikeServiceGrpcImpl.java:46-56`（**本行唯一写成全路径的一项** —— 其余同格条目是相对 `com/rag/like/like/rpc/` 包根的简写，而 `service/...` 开头会与**仓根相对路径**撞形 ⇒ 写成全路径才可被机检解析）；`mq/{LikeHotEventOutboxRelay,LikeFactDispatchScheduler,LikeAuthorityEndpointConfig}.java` |
 | `service/message/message-rpc` | `MessageExceptions.java:16-30`（rpc 侧异常聚合形态）；`client/UserRpcClient.java:21-30`（rpc 侧 `@GrpcClient` 构造器注入）；`MessageRpcApplication` 的 `@Import` 清单与 `GrpcServerConfigurer` 缺失史（`:20-59` 的 javadoc 是本仓最完整的「五个静默失效点」清单） |
 | `service/users/user/user-rpc` / `admin/admin-rpc` | `mapper/JsonbTypeHandler`；`map-underscore-to-camel-case` + `id-type: ASSIGN_ID`；多步事务抽独立 Bean 的形态 |
 | `service/common` | `communityfact/{Wire,Dispatcher,AuthorityHandler,ProcessLogger}.java`；`spring/{AuthorityHandlerFactory,RpcServerInterceptorFactory,SnowflakeBean,HttpMiddlewareFilter}.java`；`observability/RpcInterceptor`；`persistence/{DeadlineQueryTimeoutInjector,SqlTimeoutStatusTranslator}`；`logger/{FatalError,Logger,WithUserID,WithArticleID}`；`snowflake/Snowflake` |
@@ -47,8 +47,8 @@
 | `Wire.java:175-292` `DCEventSender` | `create()` 校验 endpoint scheme/host/path=`/v1/events` + token≥32；`send()` 只发 `Idempotency-Key: event_id` + `Authorization: Bearer`；非 200/201 抛 `DataCenterAcceptanceRejectedException`；读 body 上限 64KB —— 与 Go `favorite_delivery.go:54-92` 一致 | **REUSE** |
 | `Wire.java:74-92` `FrozenEnvelopeBlockedException` + `ERR_FROZEN_ENVELOPE_BLOCKED` | 对应 Go `favorite_delivery.go:22` `ErrFavoriteFactBlocked`（类型识别，非文案识别） | **REUSE** |
 | `Dispatcher.java:36-44,64-67,228-271` | 批次 **16**、节奏 **1s**、单次 **10s deadline**、`once` 分支、`DispatcherHandle.stop()` —— 与 Go `cmd/fact-dispatch/main.go:57-89` 逐条对齐（`:67` ticker 1s、`:70` `for i := 0; i < 16; i++`、`:71` `WithTimeout(10s)`） | **REUSE** |
-| `AuthorityHandler.java:48-50,96-108,131-175` | `AuthorityLookup` 函数式接口 + `create(producer, token≥32, lookup)` + 恒定时间比较 + 重复 header 拒绝 | ⚠️ **部分 REUSE，见下方「wire 形态冲突」** |
-| `spring/AuthorityHandlerFactory.java:30,39-49` | 固定路径 `/internal/v1/community/facts`（`:30` `AUTHORITY_PATH`），query 取参 | ⚠️ **见下方冲突** |
+| `AuthorityHandler.java:48-50,96-108,131-175` | `AuthorityLookup` 函数式接口 + `create(producer, token≥32, lookup)` + 恒定时间比较 + 重复 header 拒绝 | ❌ **favorite 不 REUSE** —— 共享层的 `AuthorityLookup` 对应 Go `service/common/communityfact/authority_http.go:18` 的函数类型（`:23` `NewAuthorityHandler`）；Go 侧**只有 like / comment 在用**（`service/like/rpc/cmd/fact-authority/main.go:71` · `service/comment/rpc/cmd/fact-authority/main.go:71`），**`service/favorite/` 对 `AuthorityLookup` / `NewAuthorityHandler` 零引用** ⇒ favorite 走**自持 path 参数 servlet**（见下方「wire 形态冲突」） |
+| `spring/AuthorityHandlerFactory.java:30,39-49` | 固定路径 `/internal/v1/community/facts`（`:30` `AUTHORITY_PATH`），query 取参 | ❌ **favorite 不采用**（该 query 形态是 like / comment 的契约）⇒ 走下方自持 path 形态；**见下方冲突** |
 | `communityfact/ProcessLogger.java` | 进程级 OBS-r3 JSON 日志 + 本地 OTel；logger 名由 `service.env.component` 拼，同 JVM 可多份 | **REUSE** |
 | `spring/SnowflakeBean.java:28-31,52` + `snowflake/Snowflake.java:182` | 对应 Go `snowflake.GetID()`（`create_favorite_folder_logic.go:89`、`create_favorite_logic.go:136`） | **REUSE**（只用于 folder/favorite ID，**不用于游标** —— favorite 无游标） |
 | `logger/WithUserID.java:21-41` / `WithArticleID.java:14-35` | 对应 Go `logic/helper.go:48-54` | **REUSE** |
@@ -56,7 +56,7 @@
 | `spring/RpcServerInterceptorFactory.java` + `observability/RpcInterceptor.java` | 对应 Go `favorite.go:49` `AddUnaryInterceptors(observability.NewUnaryServerInterceptor(...))` | **ADAPT** —— devh starter **不自动注册**，必须配 `GrpcServerConfigurer`（`LikeRpcApplication.java:94-97` 的注释） |
 | `persistence/{DeadlineQueryTimeoutInjector,SqlTimeoutStatusTranslator}` | SQL 超时取消 + `57014` → `DEADLINE_EXCEEDED` | **REUSE** |
 
-#### 🔴 wire 形态冲突：authority 端点（必须拍板）
+#### ✅ wire 形态冲突：authority 端点（favorite 已按 Go 原样落地，见 §12.7 不通过项 #1）
 
 Go favorite 有**自己的** authority handler（`internal/authority/http.go`），形态是 **path 参数**：
 
@@ -73,8 +73,11 @@ GET /internal/v1/community/facts?producer=…&event_id=…   (AuthorityHandlerFa
 
 核对依据：Go 侧的通用 handler 在 `service/common/communityfact/authority_http.go:28,50`（`mux.HandleFunc("GET /internal/v1/community/facts"…)` + `r.URL.Query()["producer"]`），favorite **没有**用它，而是自己写了 path 参数版。
 
-⚠️ 实证：`grep -rn "ServletRegistrationBean" --include=*.java service/`（排除 `service/common`）**零命中**；`like-rpc/mq/LikeAuthorityEndpointConfig.java` 至今是一个 4 行的 `[骨架占位 · 未实现]` 文件，第 3 行写着「⚠️ 监听地址与端口 UNKNOWN，需给 like-rpc 新增 HTTP connector（wire 面变更，待拍板）」。
-⇒ **RAG 侧从未真正装配过任何一个 authority 端点。favorite 是第一个必须面对这个决策的域。** 见 §12.7 不通过项 #1。
+⚠️ 实证（**2026-10-26 复核：原写两条均已过期**）：原写「`grep -rn "ServletRegistrationBean" --include=*.java service/`（排除 `service/common`）**零命中**」与「**RAG 侧从未真正装配过任何一个 authority 端点**」——
+① `ServletRegistrationBean` 现有命中 **favorite-rpc 7 处**（`fact/FavoriteAuthorityEndpointConfig.java`：`:15` import + `:160` / `:166` / `:170` / `:176` / `:179` / `:183`）+ **comment-rpc 2 处**（`bootstrap/CommentAuthorityEndpointConfig.java`）；
+② **favorite 已落地自己的端点**：`service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/fact/FavoriteAuthorityEndpointConfig.java`（585 行）按 Go 原样写 path 参数 v1/v2 servlet（`V1_PREFIX` :124 / `V2_PREFIX` :125 / `FavoriteAuthorityServlet` :188），整类 `@ConditionalOnProperty(prefix = "favorite.fact.authority", name = "enabled", havingValue = "true")`（:118）⇒ **默认关**（`service/favorite/favorite-rpc/src/main/resources/application.yml:200` `enabled: false`）⇒ 默认仍不新增任何 HTTP 端口。
+✅ **仍然为真的那一条**：`like-rpc/mq/LikeAuthorityEndpointConfig.java` 至今是一个 4 行的 `[骨架占位 · 未实现]` 文件，第 3 行写着「⚠️ 监听地址与端口 UNKNOWN，需给 like-rpc 新增 HTTP connector（wire 面变更，待拍板）」。
+⇒ **favorite 的决策已落地（= 选项 ② 自持 servlet）**；剩下的只有「要不要给纯 gRPC 进程开 web connector」这一项**部署形态变更**（台账 §5-U1）。见 §12.7 不通过项 #1。
 
 #### 🔴 `Wire.AuthorityFact` 的 `subject_ref` 是 **v2 形状**
 
@@ -447,7 +450,7 @@ goctl 生成的**客户端** stub：`FavoriteService` 接口 7 方法（`:34-42`
 | `logic/helper.go:87-90` `isUniqueViolation` | `service/FavoriteRpcSupport.isUniqueViolation(SQLException)` | ADAPT | Go 认 PG SQLSTATE `23505`；Java 侧读 `SQLException.getSQLState()`，**不能**用 `SQLIntegrityConstraintViolationException`（会把 23503/23514 也吞进来） |
 | 🔴 `logic/helper.go:92-124` `ensureUserExists` | `service/FavoriteUserGuard.ensureExists(userId)` | NEW | 跨域身份校验，5 条分支各自独立 gRPC code；被 2 个 logic 调用但**与业务逻辑无关**，独立才能独立测 |
 | 🔴 `logic/helper.go:126-178` `resolveArticleSnapshot` + `:180-202` `articleCover` | `service/FavoriteArticleSnapshotResolver.resolve(targetId)` | NEW | 公开修订冻结是 favorite 最核心的业务规则（12 条判定）；`articleCover` 只服务它 ⇒ 同类合并 |
-| 7 个 logic 的参数校验 / 归属校验 / 业务码 | `service/FavoriteDomainService`（7 个方法） | MERGE | 与 users 域 `UserDomainService` 形态一致（AGENTS.md §4.1 已锁定的决策）；`like-rpc/service/LikeDomainService.java` 亦同 |
+| 7 个 logic 的参数校验 / 归属校验 / 业务码 | `service/FavoriteDomainService`（7 个方法） | MERGE | 与 users 域 `UserDomainService` 形态一致（AGENTS.md §4.1 已锁定的决策）；`service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeDomainService.java` 亦同 |
 | 7 个 logic 的 `metrics.ObserveOp` | 各 logic 内联 `FavoriteRpcMetrics.observeOp(...)` | KEEP | label 常量已单点定义（上一行），调用点保留在原位 |
 | 🔴 `model/favorite.go:33-118` 8 个只读/单写方法 | `mapper/FavoriteFolderMapper` + `mapper/FavoriteItemMapper` | SPLIT | AGENTS.md §4.1 已锁定「删除 DataModel，按实体拆成多个 Mapper」；`InsertFolder` 归 `FavoriteFolderMapper` |
 | `model/vars.go:5-7` `ErrorNotFound` | `exception/FavoriteExceptions.NotFoundException` + Mapper 层归一化 | ADAPT | GORM `ErrRecordNotFound` 的归一化哨兵；Java 侧需在每个 `@Select` 的取不到分支显式抛（先例 `MessageExceptions.java:26-28`） |
@@ -455,15 +458,15 @@ goctl 生成的**客户端** stub：`FavoriteService` 接口 7 方法（`:34-42`
 | `model/data_model.go:18-35` `FavoriteItem` | `domain/FavoriteItemEntity` | ADAPT | 🔴 **`target_revision` 必须可空**（`String` 包装或 `@TableField` + null 处理）；**无 `update_time`** |
 | `model/favorite_fact.go:60-76` `FavoriteFactOutbox` | `domain/FavoriteFactOutboxEntity` | ADAPT | 13 列；`payload` 是 **jsonb** ⇒ 挂 `JsonbTypeHandler` + `@TableName(autoResultMap=true)`；🔴 **刻意保持 String 不映射 POJO**（先例 `LikeDomainFactOutboxEntity.java:38-48` 的同款论证：冻结信封要按原始字节做 JCS hash 比对） |
 | `model/favorite_fact.go:28-39` `FavoriteLegacyFactMarker` | `domain/FavoriteLegacyFactMarkerEntity` | ADAPT | 可空 `target_revision`；🔴 该表只由 004 建（见 §12.3） |
-| 🔴 `model/favorite_fact.go:270-296/300-332/336-378` 三个事务写 | `service/FavoriteFactWriteService`（**独立 `@Service` Bean**） | SPLIT | §3.3：**自调用会让 `@Transactional` 静默失效**。必须从 `FavoriteDomainService` 外部调用；先例 `like-rpc/service/LikeMessageIngestService.java` |
-| `model/favorite_fact.go:212-265` `favoriteAssertionSchema` | `service/FavoriteAssertionSchemaResolver.resolve(tx, item)` | NEW | 54 行、两个分支（legacy / 冻结事件）、8 项 marker 比对 + 12 项事件比对。**必须独立**：它被 2 个事务路径共用，抽出来才能保证「两处校验不会漂移」（`like-rpc/service/LikeDeliveryValidator.java` 的同款判据） |
+| 🔴 `model/favorite_fact.go:270-296/300-332/336-378` 三个事务写 | `service/FavoriteFactWriteService`（**独立 `@Service` Bean**） | SPLIT | §3.3：**自调用会让 `@Transactional` 静默失效**。必须从 `FavoriteDomainService` 外部调用；先例 `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeMessageIngestService.java` |
+| `model/favorite_fact.go:212-265` `favoriteAssertionSchema` | `service/FavoriteAssertionSchemaResolver.resolve(tx, item)` | NEW | 54 行、两个分支（legacy / 冻结事件）、8 项 marker 比对 + 12 项事件比对。**必须独立**：它被 2 个事务路径共用，抽出来才能保证「两处校验不会漂移」（`service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeDeliveryValidator.java` 的同款判据） |
 | `model/favorite_fact.go:135-198` 两个 outbox 构造器 + `:200-210` 分派 | `service/FavoriteFactEnvelopeFactory.build(item, version, operation, schema)` | NEW | 🔴 **v1 与 v2 的 payload 只有 `subject_ref` 不同**，其余 11 字段逐字相同 ⇒ 必须单点构造，不能在两个事务里各写一遍 |
 | `model/favorite_fact.go:44-58` `favoriteLegacySnapshotHash` | `service/FavoriteFactEnvelopeFactory.legacySnapshotHash(item)` | MERGE | 与上面同类（JSON 构造 + JCS hash），共用 `Wire.canonicalHash` |
 | `model/favorite_delivery.go:26-46` `FavoriteWireEvent` / `TechnicalReceipt` | `communityfact/Wire.Event` / `Wire.TechnicalReceipt` | REUSE | §12.1 已逐字段核对 |
 | `model/favorite_delivery.go:54-92` `FavoriteDCEventSender` | `communityfact/Wire.DCEventSender` | REUSE | §12.1 已逐条核对（含 64KB 上限与 200/201 白名单） |
 | `model/favorite_delivery.go:94-116` `validFavoriteDelivery` | `service/FavoriteDeliveryValidator.validDelivery(row, event)` | NEW | 12 条交叉校验，**投递路径与权威读路径共用** ⇒ 独立才不漂移 |
 | `model/favorite_delivery.go:118-126` `validFavoriteReceipt` | `communityfact/Wire.validateReceipt` | REUSE | §12.1 已核对 |
-| 🔴 `model/favorite_delivery.go:131-202` `DispatchFavoriteFactOnce` | `service/FavoriteFactDispatchService.dispatchOnce(sender)`（**独立 `@Service` Bean**） | NEW | 事务跨 HTTP I/O；先例 `like-rpc/service/LikeFactDispatchService.java` |
+| 🔴 `model/favorite_delivery.go:131-202` `DispatchFavoriteFactOnce` | `service/FavoriteFactDispatchService.dispatchOnce(sender)`（**独立 `@Service` Bean**） | NEW | 事务跨 HTTP I/O；先例 `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeFactDispatchService.java` |
 | `model/favorite_delivery.go:20` hash 正则 | `communityfact/Wire.validHash` | REUSE | §12.1 已核对 |
 | `model/favorite_delivery.go:22` `ErrFavoriteFactBlocked` | `Wire.ERR_FROZEN_ENVELOPE_BLOCKED` | REUSE | 按类型识别（`Wire.java:63-73` 记录了 M16 修复的教训：不看文案） |
 | `cmd/fact-dispatch/main.go:57-89` dispatcher 循环 | `fact/FavoriteFactDispatchScheduler` + `Dispatcher.run(...)` | REUSE | §12.1 已核对（批次 16 / 1s / 10s / once）；外层调度编排 NEW |
@@ -476,7 +479,7 @@ goctl 生成的**客户端** stub：`FavoriteService` 接口 7 方法（`:34-42`
 | `model/favorite_authority.go:74-94` `parseAuthorityID` | `service/FavoriteAuthorityLookupService.parseAuthorityId(JsonNode)` | NEW | 🔴 **不能用 `Wire.parseRTWSubject`** —— 后者只接受 `"rtw.identity/platform/{uid}"` 字符串形态，而 favorite 要处理**裸 JSON 数字**且要拒绝非规范十进制与 >2^53 的裸数字 |
 | `model/favorite_authority.go:105-124` `favoriteSubjectV1` | `FavoriteAuthorityLookupService.subjectV1(schema, node)` | NEW | v1 三字段 / v2 两字段的归一化，**必须自持** |
 | `model/favorite_authority.go:126-177` `authoritativeFavoriteRow` | `service/FavoriteAuthorityLookupService.authoritativeRow(row)` | NEW | 17 道校验 |
-| `model/favorite_authority.go:191-204` 两个公开入口 | `FavoriteAuthorityLookupService`（`implements AuthorityLookup`） | NEW | 供 `AuthorityHandler` 调用 |
+| `model/favorite_authority.go:191-204` 两个公开入口 | `FavoriteAuthorityLookupService`（对应 Go `internal/authority/http.go:17` `Reader` / `:21` `ReaderV2`） | NEW | 供 favorite **自持 servlet**（`fact/FavoriteAuthorityEndpointConfig.FavoriteAuthorityServlet` :188）调用 ⇒ 🔴 **不实现** `communityfact/AuthorityHandler.java:48` 的 `AuthorityLookup`（那是 like / comment 的契约） |
 | 🔴 `model/favorite_authority.go:27-43` `FavoriteAuthorityFact` / `V2` | `domain/FavoriteAuthorityFact`（**v1 三字段 `subject_ref`**）+ 复用 `Wire.AuthorityFact`（v2） | NEW + REUSE | §12.1「`Wire.AuthorityFact` 是 v2 形状」的直接后果 |
 | `internal/authority/http.go:32-98` | `fact/FavoriteAuthorityEndpointConfig` 或 favorite 自持 servlet | UNKNOWN | 同上 |
 | 4 个 `.sql` | `resources/db/migration/V1..V4` | ADAPT | ⚠️ **必须一次性建全 5 项非-struct-tag 资产**（`CHECK` ×6、部分索引 ×1、不可变触发器 ×2、legacy 表），否则静默降级（§12.3 三条硬结论） |
@@ -611,7 +614,7 @@ service/favorite/favorite-rpc/src/main/resources/
 | `service/FavoriteAssertionSchemaResolver` | 双分支断言解析（54 行） | `favorite_fact.go:212-265` | 被 2 个事务路径共用，独立才不漂移 |
 | `service/FavoriteDeliveryValidator` | 12 条交叉校验 | `favorite_delivery.go:94-116` | 投递与权威读共用 |
 | 🔴 `service/FavoriteFactDispatchService` | `dispatchOnce`：`SKIP LOCKED` 取件 → 校验 → 发送 → 结算 | `favorite_delivery.go:131-202` | **独立 `@Service` Bean**：事务跨 HTTP I/O |
-| `service/FavoriteAuthorityLookupService` | `parseAuthorityId` + `subjectV1` + `authoritativeRow` + 两个公开入口 | `favorite_authority.go:74-282` | 实现 `AuthorityLookup`；是 authority 端点的全部业务 |
+| `service/FavoriteAuthorityLookupService` | `parseAuthorityId` + `subjectV1` + `authoritativeRow` + 两个公开入口 | `favorite_authority.go:74-282` | 对应 Go `internal/authority/http.go:17,21` 的 `Reader` / `ReaderV2` 契约；是 authority 端点的全部业务。<br>🔴 **不实现** `communityfact/AuthorityHandler.java:48` 的 `AuthorityLookup` —— Go 侧 `AuthorityLookup` 声明在 `service/common/communityfact/authority_http.go:18`（`:23` `NewAuthorityHandler`），**`service/favorite/` 零引用**（like / comment 在用）⇒ 锚点文件 `favorite_authority.go` 里本来就没有这个符号 |
 | `service/impl/FavoriteServiceGrpcImpl` | `@GrpcService`，7 override；异常 → `FavoriteGrpcError.grpcError(code,msg)`；兜底 5001 | `server/favorite_service_server.go:26-59` | gRPC 契约边界 + **唯一错误出口**（`LikeServiceGrpcImpl.java:38-45`） |
 | `resources/application.yml` | `spring.application.name: favorite-rpc`；`spring.datasource.*`；`spring.flyway.table: flyway_schema_history_favorite`；`grpc.server.port: 8082`；`grpc.client.{user-rpc,article-rpc}.address: discovery://…`；`management.endpoints.*`；`otel.service.name: favorite-rpc`；`observability.rpc-timeout: 2s` | `etc/favorite.yaml` 全部**活跃段** | 配置替代 |
 
@@ -742,14 +745,14 @@ service/favorite/favorite-rpc/src/main/resources/
 | 合并有组织依据 | ✅ `helper.go` 202 行按 6 类职责拆成 5 个 Java 组件（每类都有独立的复用面或变化原因）；3 个 `cmd/*` 合并进单 JVM（4 条代码级依据已列） |
 | 拆分可解释 | ✅ `model/` 的 8 个 Go 文件 → 4 Entity + 4 Mapper（AGENTS.md §4.1 已锁定）；Go 的 `favorite.go` model → Mapper + Support |
 | 无"为对应 Go 文件而建"的文件 | ✅ 未创建 `Model.java` / `Repository.java` / `ServiceContext.java` / `Logic.java` / `Server.java`；`ServiceContext` 由 Bean 图吸收；`InitMetrics` 的注销 collector 行为不迁 |
-| 未把未实现能力说成现有机制 | ✅ `favorite-rpc` 空壳 + 空依赖已在 §12.1 声明；**`AuthorityHandlerFactory` 的 wire 形态冲突、`ServletRegistrationBean` 全仓零使用、`LikeAuthorityEndpointConfig` 仍是骨架**三点都如实写出 |
+| 未把未实现能力说成现有机制 | ✅ `favorite-rpc` 空壳 + 空依赖已在 §12.1 声明；**`AuthorityHandlerFactory` 的 wire 形态冲突**如实写出；⚠️ **`ServletRegistrationBean` 全仓零使用** 与 **「RAG 侧从未真正装配过任何一个 authority 端点」** 两条**当时为真、2026-10-26 起已过期**（favorite 7 处 + comment 2 处；favorite 已落地自持 path 参数端点）⇒ 已就地订正；**`LikeAuthorityEndpointConfig` 仍是骨架**仍为真 |
 | 不为"完整"建空组件 | ✅ `metrics/InitMetrics` 不建；`favorite_rpc` 无 Kafka ⇒ 不引 Kafka 依赖 |
 
 ### 不通过项
 
 | # | 问题 | 详情 | 状态 |
 |---|---|---|---|
-| **1** | 🔴 **authority 端点的 wire 形态三方冲突，必须拍板** | Go favorite 自持 path 参数版 `/internal/v1\|v2/favorite/facts/{producer}/{event_id}`（`internal/authority/http.go:32,63`，且 v2 要求 `reader` 实现 `ReaderV2`，`:75-79`）；RAG 全仓唯一实现是 `AuthorityHandlerFactory` 的 `/internal/v1/community/facts?producer=&event_id=`（`AuthorityHandlerFactory.java:30`）。⚠️ **实测全仓 `ServletRegistrationBean` 零使用**（排除 `service/common`），`like-rpc/mq/LikeAuthorityEndpointConfig.java` 至今是 4 行骨架，注释明写「监听地址与端口 UNKNOWN，需给 like-rpc 新增 HTTP connector（wire 面变更，待拍板）」⇒ **RAG 侧从未真正装配过任何一个 authority 端点** | **UNKNOWN**，三选一需用户拍板：① 用通用 handler（path+query 偏离，须登记 Intentional_Deviation）；② favorite 自持 servlet（保住 wire，但纯 gRPC 进程要加 web connector）；③ 不实现（P3 不迁，**须签字**） |
+| **1** | 🔴 **authority 端点的 wire 形态三方冲突，必须拍板** | Go favorite 自持 path 参数版 `/internal/v1\|v2/favorite/facts/{producer}/{event_id}`（`internal/authority/http.go:32,63`，且 v2 要求 `reader` 实现 `ReaderV2`，`:75-79`）；RAG 侧的通用实现是 `AuthorityHandlerFactory` 的 `/internal/v1/community/facts?producer=&event_id=`（`AuthorityHandlerFactory.java:30`）。⚠️ 原写「实测全仓 `ServletRegistrationBean` 零使用（排除 `service/common`）」「**RAG 侧从未真正装配过任何一个 authority 端点**」—— **2026-10-26 复核已过期**（favorite 7 处 + comment 2 处）；`like-rpc/mq/LikeAuthorityEndpointConfig.java` 仍是 4 行骨架，注释明写「监听地址与端口 UNKNOWN，需给 like-rpc 新增 HTTP connector（wire 面变更，待拍板）」⇒ **这一句仍为真** | ✅ **已按选项 ② 落地**（2026-10-26 复核）：favorite 自持 path 参数 servlet（`service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/fact/FavoriteAuthorityEndpointConfig.java`，`@ConditionalOnProperty` 默认关 ⇒ 默认不新增 HTTP 端口）⇒ **wire 形态冲突已消**。<br>🔴 **剩下的只有「要不要给纯 gRPC 进程开 web connector」这一项部署形态变更**（台账 §5-U1，未拍板）—— 它决定的是**端点开不开**，不是**形态对不对** |
 | **2** | 🔴 **`favorite-rpc/pom.xml` 零依赖** | 无 `favorite-proto`、`favorite-common`、`user-proto`、`article-proto`、`common`、`grpc-server`、`mybatis-plus`、`postgresql`、**`spring-boot-flyway`**、`nacos`、testcontainers。⚠️ 缺 `spring-boot-flyway` 是**静默失效**（`like-rpc/pom.xml:217-227`：启动日志里连一行 Flyway 都没有 ⇒ 4 张表永不创建 ⇒ 第一次真执行 SQL 才炸） | ⏸ §12.4 末行已列完整清单 |
 | **3** | 🔴 **Go 侧 DDL 有两处事实源，RAG 迁移极易漏** | `AutoMigrate`（`db.go:33`）只覆盖 3 个实体；`CHECK (aggregate_version IN (1,2))`（`001:6`）、部分索引（`001:14-15`）、**2 个不可变触发器**（`002:22-25`、`004:24-27`）、`favorite_legacy_fact_marker` 表 + 5 个 `CHECK`（`004:5-16`）**全部只能靠手写 SQL**。⇒ 漏掉的后果分两类：① 触发器/CHECK 缺失 ⇒ **静默降级**（冻结信封可写）；② legacy 表缺失 ⇒ `DeleteFavorite` 在 legacy 行上返回 `5008` 而非设计的 `5304`（推理链见 §12.3 硬结论 1） | ⏸ 已在 §12.5 用 `FavoriteSchemaGate` + `V6` + `FavoriteSchemaParityTest` 三重覆盖 |
 | **4** | ⚠️ **`fact/` vs `mq/` 的包名口径** | `like-rpc` 用 `mq/`（其 Go 侧确有 `internal/mq/internal/mqs/likemq.go`）；**favorite 零 Kafka**，建 `mq/` 会误导。本文件建议 `fact/`，代价是与 like 口径不一致 | **UNKNOWN**，需拍板 |
