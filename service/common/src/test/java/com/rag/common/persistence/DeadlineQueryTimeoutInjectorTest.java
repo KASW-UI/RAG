@@ -285,4 +285,112 @@ class DeadlineQueryTimeoutInjectorTest {
         verify(statement, never()).setQueryTimeout(anyInt());
         assertInstanceOf(Statement.class, statement);
     }
+
+    // ====================================================================================
+    // 以下是 E62（池化代理把毫秒级方法藏起来了 ⇒ 探测必失败 ⇒ 退回秒级）新增的用例
+    // ====================================================================================
+
+    /**
+     * 造一个「<b>池的代理</b>」：只实现 {@link Statement}（<b>没有</b> {@code setQueryTimeoutMs}），
+     * 只有 {@code unwrap(Statement.class)} 才给出驱动自己的实现。
+     *
+     * <p><b>这是在纯单测里复刻 HikariCP 的形态</b>（实测：{@code HikariProxyPreparedStatement}
+     * 是 Javassist 运行时生成的 {@code final} 类，<b>只实现 {@code java.sql.Statement}</b>
+     * ⇒ 驱动私有的毫秒级方法<b>不在代理的接口面上</b>）。
+     */
+    private static Statement pooledProxyHidingMsMethod(Statement delegate, StatementSpy proxySpy) {
+        return (Statement) Proxy.newProxyInstance(
+                StatementSpy.class.getClassLoader(),
+                new Class<?>[]{Statement.class},
+                (proxy, method, args) -> {
+                    // 🔴 只有 unwrap 才给出驱动实现 —— 与 Hikari ProxyStatement.unwrap 的行为一致
+                    //    （实测源码 247-257 行：iface.isInstance(delegate) ⇒ return delegate）。
+                    if ("unwrap".equals(method.getName()) && args != null && args.length == 1) {
+                        return delegate;
+                    }
+                    return proxySpy.invoke(proxy, method, args);
+                });
+    }
+
+    @Test
+    @DisplayName("🔴 E62：池化代理把毫秒级方法藏起来了 ⇒ 注入器必须先 unwrap 到驱动实现类再探测")
+    void pooledProxyIsUnwrappedBeforeMillisecondProbe() throws Throwable {
+        StatementSpy delegateSpy = new StatementSpy();
+        Statement delegate = spyWithMsSupport(delegateSpy);
+        StatementSpy proxySpy = new StatementSpy();
+        Statement pooled = pooledProxyHidingMsMethod(delegate, proxySpy);
+
+        // 🔴 前置断言：这个代理**自己**确实没有毫秒级方法（否则本用例就是空转）
+        assertThrows(NoSuchMethodException.class,
+                () -> pooled.getClass().getMethod("setQueryTimeoutMs", long.class),
+                "池化代理自己不该有毫秒级方法 —— 否则这个用例证明不了任何东西");
+
+        // ⚠️ **造 Invocation 必须在算 deadline 之前**（Mockito 首次建 mock ≈ 400ms
+        //    ⇒ 放在后面会把「剩余毫秒数」凭空吃掉一大截 —— 同本类既有用例的注释）。
+        Invocation invocation = prepareInvocationReturning(pooled);
+        long deadline = System.currentTimeMillis() + 1_234;
+        try (DeadlineState.Scope ignored = DeadlineState.bindToCurrent(deadline)) {
+            injector.intercept(invocation);
+        }
+
+        // 🔴 关键断言：毫秒值落到**驱动实现**上（代理只是壳）
+        assertTrue(delegateSpy.millis > 1_000 && delegateSpy.millis <= 1_234,
+                "毫秒数应原样落到驱动实现上，实际=" + delegateSpy.millis);
+        assertEquals(-1, delegateSpy.seconds, "秒级路径不该被走（否则取消时刻最晚比 deadline 晚 999ms）");
+
+        // 🔴 反向断言：代理层**什么都没收到** ⇒ 证明不是「在代理上试了一次失败再在驱动上试」
+        assertEquals(-1L, proxySpy.millis, "代理不该收到毫秒级调用");
+        assertEquals(-1, proxySpy.seconds, "代理不该收到秒级调用（否则说明没剥代理就退回了秒级）");
+    }
+
+    @Test
+    @DisplayName("🔴 E62：unwrap 链会终止（驱动 unwrap 返回自己 ⇒ 不能死循环）")
+    void unwrapChainTerminatesWhenDelegateReturnsItself() throws Throwable {
+        StatementSpy spy = new StatementSpy();
+        // delegate 的 unwrap 返回自己（pgjdbc 的 PgStatement.unwrap 源码 1224-1229 行：return this）
+        Statement delegate = (Statement) Proxy.newProxyInstance(
+                StatementSpy.class.getClassLoader(),
+                new Class<?>[]{Statement.class, MsTimeoutCapable.class},
+                (proxy, method, args) -> {
+                    if ("unwrap".equals(method.getName()) && args != null && args.length == 1) {
+                        return proxy;   // ← 自己
+                    }
+                    return spy.invoke(proxy, method, args);
+                });
+        Statement pooled = pooledProxyHidingMsMethod(delegate, new StatementSpy());
+
+        Invocation invocation = prepareInvocationReturning(pooled);
+        long deadline = System.currentTimeMillis() + 1_234;
+        try (DeadlineState.Scope ignored = DeadlineState.bindToCurrent(deadline)) {
+            injector.intercept(invocation);
+        }
+
+        assertTrue(spy.millis > 1_000 && spy.millis <= 1_234,
+                "应当停在 delegate 上并设好毫秒级超时，实际=" + spy.millis);
+    }
+
+    @Test
+    @DisplayName("🔴 E62：unwrap 失败（驱动抛异常）⇒ 退回秒级，且不吞掉原异常")
+    void unwrapFailureFallsBackToSeconds() throws Throwable {
+        StatementSpy proxySpy = new StatementSpy();
+        Statement pooled = (Statement) Proxy.newProxyInstance(
+                StatementSpy.class.getClassLoader(),
+                new Class<?>[]{Statement.class},
+                (proxy, method, args) -> {
+                    if ("unwrap".equals(method.getName()) && args != null && args.length == 1) {
+                        throw new SQLException("unwrap not supported");
+                    }
+                    return proxySpy.invoke(proxy, method, args);
+                });
+
+        Invocation invocation = prepareInvocationReturning(pooled);
+        long deadline = System.currentTimeMillis() + 1_500;
+        try (DeadlineState.Scope ignored = DeadlineState.bindToCurrent(deadline)) {
+            injector.intercept(invocation);
+        }
+
+        // 剥不动 ⇒ 代理自己也没有毫秒级方法 ⇒ 退回秒级（向上取整 1.5s ⇒ 2s）
+        assertEquals(2, proxySpy.seconds, "剥不动时应退回秒级向上取整");
+        assertEquals(-1L, proxySpy.millis, "剥不动时不该有毫秒级调用");
+    }
 }

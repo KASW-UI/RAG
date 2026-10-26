@@ -16,6 +16,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.SQLTimeoutException;
 import java.sql.Statement;
+import java.sql.Wrapper;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
@@ -62,6 +63,22 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 而 {@code service/common} 是被 10 个 api + 10 个 rpc 共享的库，<b>不该把驱动实现类编进它的 API 面</b>
  * ⇒ 用反射按方法名探测，<b>探测不到就退回秒精度</b>（并记 WARN，不静默）。
  *
+ * <p><b>🔴 为什么反射探测前必须先把「池的代理」剥掉（E62 · 2026-10-26 第四十一轮实测带出）</b>：
+ * <ul>
+ *   <li><b>实测事实</b>：生产链路走 <b>HikariCP</b> ⇒ {@code Connection.prepareStatement(...)} 返回的是
+ *       {@code com.zaxxer.hikari.pool.HikariProxyPreparedStatement}（<b>{@code final} 类</b>，
+ *       由 Javassist 在运行时生成）⇒ 而它<b>只实现 {@code java.sql.Statement}</b>
+ *       ⇒ <b>代理类上根本没有 {@code setQueryTimeoutMs} 这个方法</b>
+ *       ⇒ 按代理类探测 ⇒ <b>必然失败</b> ⇒ 退回秒级向上取整 ⇒ 取消时刻最晚比 deadline 晚 999ms。</li>
+ *   <li><b>为什么之前没人发现</b>：当时的守门用 {@code DriverManagerDataSource}
+ *       （<b>没有池</b>）⇒ 拿到的就是 pgjdbc 的实现类 ⇒ 反射成功 ⇒ <b>守门绿、生产坏</b>。</li>
+ *   <li><b>修法</b>：探测与调用前先 <b>{@code unwrap}</b> 到驱动自己的实现类
+ *       （{@link Wrapper#unwrap(Class)} 是 JDK 标准接口 ⇒ <b>不把驱动类编进共享库的 API 面</b>）。
+ *       实测 Hikari {@code ProxyStatement.unwrap}（源码 247-257 行）：
+ *       {@code if (iface.isInstance(delegate)) return delegate;} ⇒ <b>一跳</b>就拿到 pgjdbc 的 delegate；
+ *       pgjdbc {@code PgStatement.unwrap}（源码 1224-1229 行）{@code return this} ⇒ <b>链自然终止</b>。</li>
+ * </ul>
+ *
  * <p><b>Java 侧为什么缺这一环</b>：Java 只有 {@code Future.cancel(true)} → {@code Thread.interrupt()}，
  * 而 pgjdbc <b>不响应线程中断</b>。2026-10-21 的行为级实测（{@code tools/difftest/probe-jdbc-cancel.java}）：
  * 对一条等锁查询在第 1000ms 调 {@code interrupt()}，查询<b>照常正常返回</b>，耗时 11014ms
@@ -106,6 +123,14 @@ public class DeadlineQueryTimeoutInjector implements Interceptor {
 
     /** 每个 Statement 实现类探测一次「有没有毫秒级方法」；探测结果缓存（含否定结果）。 */
     private static final ConcurrentHashMap<Class<?>, Optional<Method>> MS_TIMEOUT_METHOD = new ConcurrentHashMap<>();
+
+    /**
+     * 剥池代理的最大跳数（防病态实现死循环）。
+     *
+     * <p>实测链路只要 <b>1 跳</b>（Hikari ⇒ pgjdbc delegate）；pgjdbc 自己 {@code unwrap} 返回 {@code this}
+     * ⇒ 链自然终止 ⇒ 这里只是兜底。
+     */
+    private static final int MAX_UNWRAP_HOPS = 5;
 
     /** 「驱动不支持毫秒级」这条 WARN 只打一次（否则每条 SQL 都打一行，日志会被刷爆）。 */
     private static final AtomicBoolean MS_UNSUPPORTED_WARNED = new AtomicBoolean(false);
@@ -172,20 +197,27 @@ public class DeadlineQueryTimeoutInjector implements Interceptor {
     /**
      * 毫秒精度超时（pgjdbc ≥ 42.7 的 {@code setQueryTimeoutMs(long)}）。
      *
+     * <p><b>🔴 关键：探测与调用都在「剥掉池代理之后」的那个对象上做</b>（E62）——
+     * 生产链路的 {@code Statement} 是 HikariCP 的 {@code HikariProxyPreparedStatement}
+     * ⇒ 代理类上**没有** {@code setQueryTimeoutMs} ⇒ 直接按代理类探测**必然失败**
+     * ⇒ 退回秒级向上取整 ⇒ 取消时刻最晚比 deadline 晚 999ms（第四十一轮实测 RAG 侧 {@code Δ_end=+833ms}）。
+     *
      * @return {@code true} 表示已按毫秒精度设好；{@code false} 表示驱动不支持，调用方应退回秒级。
      */
     private boolean applyMillisecondTimeout(Statement statement, long millis) {
-        Optional<Method> method = millisecondTimeoutMethod(statement.getClass());
+        // 🔴 E62：先剥池代理 ⇒ 拿到驱动自己的实现类（pgjdbc 的 PgPreparedStatement）⇒ 那里才有毫秒级方法。
+        Statement target = unwrapDriverStatement(statement);
+        Optional<Method> method = millisecondTimeoutMethod(target.getClass());
         if (method.isEmpty()) {
             if (MS_UNSUPPORTED_WARNED.compareAndSet(false, true)) {
                 LOG.warn("JDBC 驱动 {} 不支持毫秒级 queryTimeout ⇒ 退回秒级向上取整 ⇒ "
                                 + "SQL 取消时刻最晚比 deadline 晚 999ms",
-                        statement.getClass().getName());
+                        target.getClass().getName());
             }
             return false;
         }
         try {
-            method.get().invoke(statement, millis);
+            method.get().invoke(target, millis);
             return true;
         } catch (InvocationTargetException e) {
             LOG.warn("驱动拒绝毫秒级 queryTimeout({}ms)，退回秒级: {}", millis, e.getTargetException().toString());
@@ -194,6 +226,52 @@ public class DeadlineQueryTimeoutInjector implements Interceptor {
             LOG.warn("毫秒级 queryTimeout 反射调用失败，退回秒级: {}", e.toString());
             return false;
         }
+    }
+
+    /**
+     * 把「池的代理」剥到驱动自己的 {@link Statement} 实现类。
+     *
+     * <p><b>为什么必须剥</b>（E62）：HikariCP 的 {@code HikariProxyPreparedStatement} 是
+     * <b>运行时由 Javassist 生成</b>的 {@code final} 类，只实现 {@code java.sql.Statement}
+     * ⇒ 驱动私有的毫秒级方法（如 pgjdbc 的 {@code setQueryTimeoutMs(long)}）<b>不在代理的接口面上</b>
+     * ⇒ 按代理类反射探测<b>必然失败</b>。
+     *
+     * <p><b>为什么剥了不会破坏池的记账</b>：Hikari 的代理类<b>没有</b>任何 queryTimeout 相关的状态
+     * （实测其源码：{@code ProxyStatement} / {@code ProxyPreparedStatement} 里<b>完全没有</b>
+     * {@code setQueryTimeout} / {@code setQueryTimeoutMs} ⇒ 这些方法由 Javassist 生成的代理
+     * <b>直接委派</b>给 delegate）⇒ ⇒ **在 delegate 上调 {@code setQueryTimeoutMs}
+     * 与在代理上调 {@code setQueryTimeout} 对驱动是同一件事**。
+     *
+     * <p><b>为什么用 JDK 的 {@link Wrapper} 而不是写死驱动类</b>：
+     * {@code java.sql.Statement} 本身就 {@code extends java.sql.Wrapper}
+     * ⇒ {@code unwrap(Class)} 是<b>标准接口</b> ⇒ <b>不需要把 pgjdbc 的类编进共享库的 API 面</b>
+     * ⇒ 与本类「不把驱动实现类编进 API 面」的既定约束一致。
+     *
+     * <p><b>链怎么终止</b>：Hikari 的 {@code ProxyStatement.unwrap}（源码 247-257 行）
+     * {@code if (iface.isInstance(delegate)) return delegate;} ⇒ <b>一跳</b>就到 pgjdbc 的 delegate；
+     * pgjdbc 的 {@code PgStatement.unwrap}（源码 1224-1229 行）{@code return this}
+     * ⇒ 「剥到自己」⇒ <b>链自然终止</b>（另加 {@link #MAX_UNWRAP_HOPS} 兜底，防病态实现死循环）。
+     */
+    private static Statement unwrapDriverStatement(Statement statement) {
+        Statement current = statement;
+        for (int hop = 0; hop < MAX_UNWRAP_HOPS; hop++) {
+            if (!(current instanceof Wrapper wrapper)) {
+                return current;
+            }
+            Statement next;
+            try {
+                next = wrapper.unwrap(Statement.class);
+            } catch (SQLException | RuntimeException e) {
+                // 剥不动就停在当前这一层：下面的探测会告诉我们这一层有没有毫秒级方法。
+                LOG.debug("unwrap 到驱动 Statement 失败（停在 {}）: {}", current.getClass().getName(), e.toString());
+                return current;
+            }
+            if (next == null || next == current) {
+                return current;
+            }
+            current = next;
+        }
+        return current;
     }
 
     /**

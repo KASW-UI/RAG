@@ -194,6 +194,26 @@ if [[ $BRING_UP -eq 1 ]]; then
   #   带 --keep 后：容器与栈进程都留着，脚本自己负责在最后收摊。
   SERVE_ARGS=(--serve-only --keep)
   [[ "${EXP_NO_BUILD:-0}" == "1" ]] && SERVE_ARGS+=(--no-build)
+  # 🔴🔴 **必须先杀掉「上一轮遗留的栈进程」**（第四十五轮实测带出 ⇒ 修一个系统性缺陷）：
+  #   ① 本脚本的 cleanup 只杀 `SERVE_PID`（= run.sh）⇒ 而 run.sh 带 `--keep` 时它的 trap **不收摊**
+  #      ⇒ ⇒ **栈进程永远残留**；
+  #   ② 本脚本的「就绪」判据是**端口在监听** ⇒ **残留的旧栈也能满足它**
+  #      ⇒ ⇒ 探针以为就绪、立刻开跑；
+  #   ③ 而 `run.sh` 的第一步是 `docker compose down -v` + `up -d`（**删卷重建 PG**）
+  #      ⇒ ⇒ 实验在**环境重建中途**开跑 ⇒ 加锁的 psql 后端被换掉
+  #      ⇒ 实测症状：`FATAL: terminating connection due to administrator command`
+  #      ⇒ 探针报 exit 4（前提未成立）⇒ **不假绿，但白跑一轮**。
+  # ⇒ 修法：按**本 harness 的 bin 目录**精确清掉残留栈（不碰别的域的栈 ⇒ 路径限定在 $RUN_DIR/bin）。
+  STALE_PIDS="$(pgrep -f "$RUN_DIR/bin/" 2>/dev/null || true)"
+  if [[ -n "$STALE_PIDS" ]]; then
+    echo "    ⚠️ 发现上一轮遗留的栈进程 ⇒ 先清掉（否则就绪判定会被旧栈满足）：$(echo "$STALE_PIDS" | tr '\n' ' ')"
+    # shellcheck disable=SC2086
+    kill $STALE_PIDS 2>/dev/null || true
+    sleep 2
+    # shellcheck disable=SC2086
+    kill -9 $STALE_PIDS 2>/dev/null || true
+    sleep 1
+  fi
   "$HERE/run.sh" "${SERVE_ARGS[@]}" >"$LOGS/exp-deadline-serve.log" 2>&1 &
   SERVE_PID=$!
   READY=0
@@ -437,14 +457,14 @@ echo "     ⇒ 证明差异**只**来自「是否继承客户端 deadline」，�
 echo
 echo "==> [3b/3] 判定器（🔴 E48 · 第三十九轮：判定从「注释里的承诺」变成「可执行的代码」）"
 echo "    判定器 = tools/difftest/verdict-grpc-admin-deadline.py"
-echo "    阈值   = ${DEADLINE_VERDICT_THRESHOLD_MS:-1000} ms"
+echo "    阈值   = ${DEADLINE_VERDICT_THRESHOLD_MS:-150} ms"
 echo
 # 🔴 **必须真的用判定器的退出码** —— 旧写法是**无条件 exit 0** ⇒ 探针永远不会红
 #    ⇒ 就算接进 run.sh 也只是「假闸门」（同族 PIT-GLOBAL-048）。
 python3 "$HERE/verdict-grpc-admin-deadline.py" \
   --go-short-dend  "${V_DEND_GO_SHORT:-}"  --rag-short-dend "${V_DEND_RAG_SHORT:-}" \
   --go-long-dend   "${V_DEND_GO_LONG:-}"   --rag-long-dend  "${V_DEND_RAG_LONG:-}" \
-  --threshold-ms   "${DEADLINE_VERDICT_THRESHOLD_MS:-1000}"
+  --threshold-ms   "${DEADLINE_VERDICT_THRESHOLD_MS:-150}"
 VERDICT_RC=$?
 echo
 echo "  ⇒ 判定退出码 = ${VERDICT_RC}（0=PASS / 1=FAIL / 2=INCONCLUSIVE）"

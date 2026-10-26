@@ -117,7 +117,14 @@ def main(argv=None) -> int:
     ap.add_argument("--rag-short-dend", default=None, help="RAG 侧短档的 Δ_end（ms）")
     ap.add_argument("--go-long-dend", default=None, help="Go 侧长档的 Δ_end（ms）")
     ap.add_argument("--rag-long-dend", default=None, help="RAG 侧长档的 Δ_end（ms）")
-    ap.add_argument("--threshold-ms", type=float, default=1000.0, help="判定阈值（默认 1000）")
+    # 🔴 **默认阈值 = 150ms（第四十五轮按实测值重校准）**：
+    #   · 下界（噪声上界）：第四十五轮实测短档两侧差 **22ms** / 长档 **1ms** ⇒ 取 25ms 为噪声上界；
+    #   · 上界（E62 回归信号）：第四十一轮实测（E62 未修）RAG 短档 Δ_end=**+833ms** ⇒ 差 833ms；
+    #   ⇒ **旧默认 1000ms > 833 ⇒ 探针根本抓不住 E62 回归**（833 < 1000 ⇒ 照样判 PASS）
+    #     ⇒ 也就是说：**阈值不是「判 PASS/FAIL」的，是「判『有没有回归』的」** ⇒ 必须小于回归信号。
+    #   ⇒ 取 150ms：对实测噪声 22ms 有 **6.8×** 余量，对 E62 回归信号 833ms 有 **5.5×** 余量。
+    #   ⇒ 纪律：**阈值必须用实测值校准，不能用推算值**（同 PIT-GLOBAL-054 纪律第 8 条）。
+    ap.add_argument("--threshold-ms", type=float, default=150.0, help="判定阈值（默认 150 · 第四十五轮实测校准）")
     args = ap.parse_args(argv)
 
     code, title, detail = decide(

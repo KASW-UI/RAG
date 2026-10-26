@@ -59,29 +59,81 @@ ok("E48-01", "两侧一致 ⇒ PASS（退出码 0）") if rc == 0 else ng(
     "E48-01", f"两侧一致却退出 {rc}（应 0）")
 
 rc = run_verdict(["--go-short-dend", "0", "--rag-short-dend", "1700",
-                  "--go-long-dend", "0", "--rag-long-dend", "0"])
+                  "--go-long-dend", "0", "--rag-long-dend", "0",
+                  "--threshold-ms", "1000"])
 ok("E48-02", "短档复现差异 ⇒ FAIL（退出码 1）") if rc == 1 else ng(
     "E48-02", f"短档复现差异却退出 {rc}（应 1）⇒ **假绿**")
 
 # ⚠️ 这里**故意钉死**当前口径（严格大于）：差值正好等于阈值 ⇒ 不算差异 ⇒ PASS
 rc = run_verdict(["--go-short-dend", "0", "--rag-short-dend", "1000",
-                  "--go-long-dend", "0", "--rag-long-dend", "0"])
+                  "--go-long-dend", "0", "--rag-long-dend", "0",
+                  "--threshold-ms", "1000"])
 ok("E48-03", "差值正好等于阈值 ⇒ PASS（当前口径是「严格大于」）") if rc == 0 else ng(
     "E48-03", f"等于阈值的口径变了（退出 {rc}）⇒ 判定语义被改，须同步改台账")
 
 rc = run_verdict(["--go-short-dend", "0", "--rag-short-dend", "10",
-                  "--go-long-dend", "0", "--rag-long-dend", "1800"])
+                  "--go-long-dend", "0", "--rag-long-dend", "1800",
+                  "--threshold-ms", "1000"])
 ok("E48-04", "对照组也不一致 ⇒ INCONCLUSIVE（退出码 2）") if rc == 2 else ng(
     "E48-04", f"对照组不一致却退出 {rc}（应 2）")
 
 rc = run_verdict(["--go-short-dend", "", "--rag-short-dend", "10",
-                  "--go-long-dend", "0", "--rag-long-dend", "0"])
+                  "--go-long-dend", "0", "--rag-long-dend", "0",
+                  "--threshold-ms", "1000"])
 ok("E48-05", "观测缺失 ⇒ INCONCLUSIVE（退出码 2）") if rc == 2 else ng(
     "E48-05", f"观测缺失却退出 {rc}（应 2）⇒ **假绿**")
+
+# ── ①b 默认阈值的校准守卫（E48-34 · 第四十五轮）──────────────────────────
+# 🔴 **阈值不是「判 PASS/FAIL」的，是「判『有没有回归』的」**：
+#   旧默认 1000ms **大于** E62 回归信号（第四十一轮实测差 833ms）⇒ 833 < 1000
+#   ⇒ ⇒ **E62 全坏了，探针照样判 PASS** ⇒ 阈值形同虚设。
+# ⇒ 第四十五轮把默认按**实测值**重校准为 150ms ⇒ 并用**实测值**把它钉住：
+#   · 噪声上界（第四十五轮实测短档两侧差 22ms）⇒ 必须判 PASS
+#   · E62 回归信号（第四十一轮实测差 833ms）      ⇒ 必须判 FAIL
+print("①b 默认阈值必须落在「实测噪声」与「实测 E62 回归信号」之间")
+rc = run_verdict(["--go-short-dend", "0", "--rag-short-dend", "22",
+                  "--go-long-dend", "-9", "--rag-long-dend", "-8"])
+ok("E48-34", "默认阈值：实测噪声 22ms ⇒ PASS（退出码 0）") if rc == 0 else ng(
+    "E48-34", f"默认阈值把实测噪声 22ms 判成差异（退出 {rc}）⇒ 阈值过紧 ⇒ 探针会误报")
+
+rc = run_verdict(["--go-short-dend", "0", "--rag-short-dend", "833",
+                  "--go-long-dend", "-9", "--rag-long-dend", "-8"])
+ok("E48-35", "默认阈值：实测 E62 回归信号 833ms ⇒ FAIL（退出码 1）⇒ 探针抓得住 E62 回归") if rc == 1 else ng(
+    "E48-35", f"默认阈值把实测 E62 回归信号 833ms 判成 PASS（退出 {rc}）⇒ **探针抓不住 E62 回归** ⇒ 阈值形同虚设")
 
 # ── ② 探针接线 ────────────────────────────────────────────────────────
 print("② 探针必须调用判定器并透传退出码（不得再有无条件 exit 0）")
 probe_src = open(PROBE, encoding="utf-8").read()
+
+# ⚠️ **E48-36：探针侧传的阈值也必须落在同一区间** ——
+#   只守判定器的默认值是不够的：探针**显式**把阈值传给判定器
+#   ⇒ 探针的默认值才是真正生效的那个 ⇒ 它松了，E48-35 照样绿。
+
+# ⚠️ **E48-37：起栈前必须先清掉「上一轮遗留的栈进程」**（第四十五轮实测带出）
+#   第四十五轮第二次跑探针时 exit 4（前提未成立）⇒ 症状是加锁时 PG 后端被换掉：
+#     ① 探针的 cleanup 只杀 run.sh ⇒ 而 run.sh 带 --keep 时它的 trap **不收摊** ⇒ 栈永远残留；
+#     ② 探针的「就绪」判据是**端口在监听** ⇒ **残留的旧栈也能满足**；
+#     ③ 而 run.sh 第一步是 down -v + up -d（删卷重建 PG）⇒ 实验在环境重建中途开跑。
+#   ⇒ 修法 = 起栈前按 **$RUN_DIR/bin/** 精确清掉残留栈 ⇒ 且**必须在起栈之前**（顺序也要钉）。
+print("②b 探针起栈前必须清掉上一轮遗留的栈进程（否则就绪判定会被旧栈满足）")
+_stale_pos = probe_src.find('pgrep -f "$RUN_DIR/bin/"')
+_runsh_pos = probe_src.find('"$HERE/run.sh"')
+if _stale_pos > 0 and _runsh_pos > 0 and _stale_pos < _runsh_pos:
+    ok("E48-37", "探针在起栈**之前**清掉了上一轮遗留的栈进程（就绪判定不会再被旧栈满足）")
+else:
+    ng("E48-37", f"探针没有在起栈前清掉遗留栈进程（清理位置 {_stale_pos} / 起栈位置 {_runsh_pos}）"
+                 f"⇒ 就绪判定会被旧栈满足 ⇒ 实验可能在环境重建中途开跑")
+print("①c 探针传给判定器的阈值必须与判定器默认值一致，且同样落在实测校准区间")
+_verdict_src = open(VERDICT, encoding="utf-8").read()
+_m = re.search(r'--threshold-ms"[^\n]*?default=([0-9.]+)', _verdict_src)
+_v_default = float(_m.group(1)) if _m else -1.0
+_m2 = re.search(r'DEADLINE_VERDICT_THRESHOLD_MS:-([0-9]+)', probe_src)
+_p_default = int(_m2.group(1)) if _m2 else -1
+if 25 < _v_default < 833 and 25 < _p_default < 833 and _v_default == _p_default:
+    ok("E48-36", f"探针与判定器的默认阈值一致且在实测校准区间内（均为 {_v_default:.0f}ms）")
+else:
+    ng("E48-36", f"阈值不一致或越界：判定器默认 {_v_default:.0f}ms · 探针默认 {_p_default}ms"
+                 f"（须都在 (25, 833) 内且相等 ⇒ 否则探针抓不住 E62 回归）")
 if "verdict-grpc-admin-deadline.py" in probe_src:
     ok("E48-06", "探针调用了判定器")
 else:

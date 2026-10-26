@@ -2148,3 +2148,99 @@ E46 / E47 单元格补记 + **AGENTS.md 的 favorite 行订正**）·
 ⇒ 同族 **PIT-GLOBAL-054**（守门本身的假绿形态）/ **PIT-GLOBAL-040**（变异必须打在代码上）/ **PIT-GLOBAL-031**（判据不能恒真）。
 
 **出处**：2026-10-26 第四十四轮（global 域自查 ⇒ 发现 6 处 ⇒ 还原 + 新增结构层守门 + 内建 3 条变异）。
+
+## PIT-GLOBAL-056 🔴 **守门用的中间件形态必须与生产一致** —— 「真 PG」≠「真生产路径」：**无池的 DataSource** 让反射探测成功 ⇒ **守门绿、生产坏**
+
+**现象（2026-10-26 第四十一轮发现 · 第四十五轮定位并修）**：**E62** ——
+RAG 侧明明实现了「毫秒级 SQL 超时」（pgjdbc 的 `setQueryTimeoutMs`），
+**生产日志**却打出：`JDBC 驱动 com.zaxxer.hikari.pool.HikariProxyPreparedStatement 不支持毫秒级 queryTimeout ⇒ 退回秒级向上取整`
+⇒ ⇒ **生产路径上根本没走毫秒级** ⇒ 取消时刻最晚比 deadline 晚 999ms。
+
+**根因（两段，第二段才是关键）**：
+- ① **探测目标错**：按 `statement.getClass()` 探测 ⇒ 生产拿到的是 **HikariCP 的代理类**
+  ⇒ 代理类**只实现 `java.sql.Statement`** ⇒ **驱动私有的毫秒级方法不在代理的接口面上** ⇒ 探测**必然失败**
+  （这条是 E62 的主体，单独记为 **PIT-GLOBAL-057**）。
+- ② 🔴 **守门测的不是生产路径**：当时的守门用 `DriverManagerDataSource` ⇒ **没有池**
+  ⇒ 拿到的**就是** pgjdbc 的实现类 ⇒ 反射**成功** ⇒ ⇒ **守门绿、生产坏**。
+
+**为什么第②点特别值得单开一条**：
+> **「真 PG」不等于「真生产路径」。**
+> 守门跑在**真数据库**上，只证明了「驱动与数据库之间的时序对」；
+> **它没有证明「生产拿到的那个对象」长什么样**。
+> ⇒ 而这一层（**连接池代理**）恰恰是**生产的默认形态**（Spring Boot 默认 HikariCP），
+> ⇒ 而守门为了「简单」往往就用无池的 `DriverManagerDataSource` ⇒ ⇒ **守门与生产分道扬镳**。
+
+**修法**：
+1. ✅ **守门必须跑在生产的中间件形态上**：把 `DriverManagerDataSource` 换成 **真 `HikariDataSource`**（真池）
+   ⇒ ⇒ 「E46 守门第一次跑在生产形态上」；
+2. ✅ **加一条自证断言**：守门里断言「我拿到的 Statement **确实是池代理**」
+   （`captured.getClass().getName()` 含 `Hikari`）⇒ ⇒ **一旦有人把 DataSource 换回无池，守门立刻红**
+   ⇒ ⇒ 守门**自己**不再能被自己改坏（否则下次又会退回去）；
+3. ✅ **变异证明**：**M2 专门把守门换回无池** ⇒ 必须红 ⇒ ⇒ 证明这条自证**有牙**。
+
+**边界（别过度推广）**：⚠️ 「守门要用真池」**不是**「所有守门都要真池」
+⇒ 判据是：**守门断言的那个性质，会不会因为「生产多了一层中间件」而变** ⇒ 会 ⇒ 就必须用生产形态。
+（纯逻辑断言（字符串解析、错误码）用无池 DataSource 完全没问题。）
+
+**教训**：⇒ **「用了真 PG / 真容器」只是必要条件，不是充分条件** ⇒
+⇒ **要问的是「生产拿到的东西，和守门拿到的东西，是同一个东西吗」** ⇒
+⇒ 同族 **PIT-GLOBAL-040**（「变异后是红的」≠「变异有效」）/ **PIT-GLOBAL-048**（变异判据本身也会假阴性）/ **PIT-GLOBAL-057**（代理类把驱动方法藏起来了）
+
+**出处**：2026-10-26 第四十一~四十五轮（**E62** · 第四十一轮发现 · 第四十五轮定位根因② + 修 + 变异）。
+
+## PIT-GLOBAL-057 🔴 **按 `getClass()` 反射探测 ⇒ 拿到的可能是「池的代理」⇒ 探测必然失败** ⇒ 能力探测必须**先 unwrap 到驱动实现类**
+
+**现象**：**E62** 的主体 —— 明明驱动**支持**某个能力（pgjdbc ≥ 42.7 的 `setQueryTimeoutMs(long)`），
+按 `obj.getClass().getMethod(...)` 探测却**永远失败** ⇒ 静默退回降级路径 ⇒ **行为降级、但没有任何报错**。
+
+**为什么必然失败（实测 API 面）**：
+- `org.postgresql.PGStatement`（**接口**）⇒ **没有** `setQueryTimeoutMs`（`javap` 实测）
+- `org.postgresql.jdbc.PgStatement`（**实现类**，public）⇒ **有** `public void setQueryTimeoutMs(long)`
+- 生产拿到的 `Statement` ⇒ `com.zaxxer.hikari.pool.HikariProxyPreparedStatement`
+  （**Javassist 运行时生成的 final 类**）⇒ **只实现 `java.sql.Statement`** ⇒ **代理类上根本没有那个方法**
+  ⇒ ⇒ 按代理类探测 ⇒ **必然失败**（而且是**静默**的：只是「探测不到 ⇒ 走降级」）。
+
+**修法（不把驱动类编进共享库的 API 面）**：
+1. ✅ **先 unwrap**：`java.sql.Statement` 本身就 `extends java.sql.Wrapper`
+   ⇒ 用 **JDK 标准接口** `unwrap(Statement.class)` 剥到驱动实现类
+   ⇒ ⇒ **不需要**把 pgjdbc 的类写进 `service/common` 的 API 面（这正是原设计约束）；
+2. ✅ **实测链怎么走**：Hikari `ProxyStatement.unwrap`（源码 247-257 行）`if (iface.isInstance(delegate)) return delegate;`
+   ⇒ **一跳**就到 delegate；pgjdbc `PgStatement.unwrap`（源码 1224-1229 行）`return this` ⇒ **链自然终止**
+   ⇒ ⇒ 另加**跳数上限**兜底（防病态实现死循环）；
+3. ✅ **剥了不会破坏池的记账**（这一条要**实测**才能下结论）：Hikari 的 `ProxyStatement` / `ProxyPreparedStatement`
+   里**完全没有** `setQueryTimeout` / `setQueryTimeoutMs` ⇒ 这些方法由 Javassist 生成的代理**直接委派**给 delegate
+   ⇒ ⇒ **在 delegate 上调 `setQueryTimeoutMs` 与在代理上调 `setQueryTimeout` 对驱动是同一件事**。
+
+**配套的断言技巧（可复用）**：💡 pgjdbc 的 `setQueryTimeout(int s)` 内部就是 `setQueryTimeoutMs(s * 1000L)`（源码 616-618 行）
+⇒ ⇒ **`getQueryTimeoutMs()` 能精确区分「毫秒路径」与「秒级路径」**
+⇒ ⇒ 守门可以**直接读驱动语句上的超时值**来断言「毫秒数真的送到了驱动」，而不是靠时序间接推断。
+
+**教训**：⇒ **「运行时类型」不等于「能力的承载者」** ⇒
+⇒ 任何「按类型找能力」的探测（反射 / 接口断言 / SPI 查找）都要先问一句：
+**「生产拿到的这个对象，是能力真正的承载者吗？」（代理 / 装饰器 / 动态代理 都可能不是）**
+
+**出处**：2026-10-26 第四十一~四十五轮（**E62**）。
+
+## PIT-GLOBAL-058 🔴 **「就绪判定 = 端口在监听」会被上一轮遗留的进程满足** ⇒ 实验在**环境重建中途**开跑 ⇒ 观测无效
+
+**现象（2026-10-26 第四十五轮实测）**：探针**第二次**跑时 ⇒ **exit 4（前提未成立）**
+⇒ 症状 `FATAL: terminating connection due to administrator command / server closed the connection unexpectedly`
+⇒ 探针**不假绿**（fail-fast 生效 ⇒ 没产出假结论）但**白跑一轮**。
+
+**根因三段（每段都得凑齐才出这个症状）**：
+1. **残留**：探针的 cleanup 只杀 `SERVE_PID`（= 起栈脚本）⇒ 而起栈脚本带 `--keep` 时它的 trap **不收摊**
+   ⇒ ⇒ **栈进程永远残留**；
+2. **就绪判据太弱**：探针的「就绪」判据是**端口在监听** ⇒ **残留的旧栈也能满足它** ⇒ 探针以为就绪、立刻开跑；
+3. **环境正在被换**：起栈脚本的第一步是 `docker compose down -v` + `up -d`（**删卷重建数据库**）
+   ⇒ ⇒ 实验在**环境重建中途**开跑 ⇒ 加锁那条 SQL 的后端被换掉 ⇒ **前提不成立**。
+
+**修法**：⇒ 起栈**之前**先按 **本 harness 自己的产物目录**（`$RUN_DIR/bin/`）**精确清掉残留栈**
+⇒ ⇒ 路径限定 ⇒ **不碰别的域的栈**（多域并发时安全）⇒ ⇒ 之后「端口在监听」才真的代表「**本轮**的栈」。
+
+**守门**：**顺序也要钉**（静态断言：清理动作必须在起栈**之前**）+ **变异**（把清理改成空操作 ⇒ 必须红）。
+
+**教训**：⇒ **「就绪」的定义必须是「**本轮**要用的那个东西就绪」，不是「某个端口在监听」** ⇒
+⇒ ⇒ 凡是要**重跑**的实验工具，**每次开跑前必须先把上一轮的东西清干净** ⇒
+⇒ 同族 **PIT-GLOBAL-054**（守门自身的假绿形态）/ **PIT-GLOBAL-019**（同 reactor 纪律）
+
+**出处**：2026-10-26 第四十五轮（**E64**）。
