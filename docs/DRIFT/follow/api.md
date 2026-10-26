@@ -20,6 +20,7 @@
 | DRIFT-FOLLOW-008 | MaxConns 闸门：**每路由一个**（Go）vs **全局一个**（RAG） | 可观察（并发行为） | 🔴 **未修**（`service/common` 共享模块 ⇒ 派单） |
 | DRIFT-FOLLOW-009 | 下游挂死时：Go **2s ⇒ 200+1015**；RAG **3s ⇒ 503 "Request Timeout"** | **可观察（状态码 + 时刻）** | ✅ 已修 |
 | **DRIFT-FOLLOW-010** | **3s 预算的作用域**：Go 的计时器在 Authorize **之后**起算（**验签不计入**）/ RAG 的计时器在 Filter 外层（**验签计入**） | 可观察（**超时边界**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内推广 `DRIFT-USERAPI-009②`） |
+| **DRIFT-FOLLOW-011** | **Redis 超时口径**：`timeout: 2s` ≠ Go 的 `ReadTimeout` **3s**，且**缺 `connect-timeout: 5s`** | 可观察（**Redis 挂住形态**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内自闭环） |
 | ~~OPEN-001~~ | ~~Content-Type 不支持 ⇒ RAG 415 / Go 不报错~~ | 可观察 | ✅ **已关闭（415 分支实测不可达）**，见下 |
 
 > **2026-10-24 第二轮（未知项 U1–U8 收口）新增 3 条**，全部有**双侧活体对拍**证据：
@@ -296,6 +297,53 @@ U3 的突发测试里抓到过 **`HTTP 200` + body `Request Timeout`** ——
 - ⚠️ **残余差异（如实登记）**：Filter 在路由匹配**之前**运行 ⇒ 未注册路径（404）**也会**做一次验签
   ⇒ 但 Filter **不写响应** ⇒ 最终仍是 404 ⇒ **只是多一次 HMAC 计算，不影响任何响应**。
 - **真启动复验（L3 · 真 Tomcat）**：见 §11.4（10 条探针，**follow 侧 5 条全绿**）。
+
+## DRIFT-FOLLOW-011 ✅ follow-api 的 Redis 超时口径与 Go 不符（`timeout: 2s` ≠ Go 的 `ReadTimeout` 3s · 且缺 `connect-timeout`）🟡 **已修（2026-10-27 · G1 lane）**
+
+> 🆕 **本轮新立**（给 users 域对齐 Redis 超时时**顺手查出**）⇒ follow 域**首次**登记这一族（Redis 超时配置值）差异。
+> ⚠️ 与 `DRIFT-FOLLOW-010`（3s 预算作用域）**同族但不是同一条**：010 是「验签算不算进预算」，本条是「Redis 命令/连接超时值本身」。
+> ⚠️ 与 `DRIFT-USERAPI-015`（users 域）**同族但不是同一条**：015 是「**DNS 解析失败**时 Go/RAG 的 200/503 摇摆」，
+> **本条是「超时**配置值**没抄对」** ⇒ 后者是照抄题（**不是取舍题**）。
+
+- **Component**：follow-api / 全部端点的黑名单 EXISTS（`FollowBlacklistInterceptor`）
+- **Category**：Config / Timeout Semantics
+- **Classification**：OBSERVABLE DIFFERENCE（**条件性**：仅在「Redis 连不上（连接阶段挂住）」形态下可见）
+  **Risk**：LOW-MEDIUM
+- **Go Behavior**（取值出处链，逐层到消费点）：
+  ```
+  Go service/follow/api/etc/followcenter.yaml
+      BizRedis { Host=redis:6379 / Type=node / Pass="" } —— **没有任何 timeout 字段**
+    → go-zero v1.10.2 core/stores/redis/redisclientmanager.go:32-39
+      建 red.Options 时不传任何 timeout
+    → github.com/redis/go-redis/v9 options.go 的 init()
+        DialTimeout = 5s                                   （:329-330）
+        ReadTimeout = 3 * time.Second                       （switch opt.ReadTimeout { case 0: … }）
+  ⇒ Go 的**读命令超时 3s**、**连接超时 5s**
+  ```
+  ⚠️ **红鲱鱼**：go-zero `core/stores/redis/redis.go:27` 的 `readWriteTimeout = 2 * time.Second`
+  ⇒ **全文件只有 :293/:315 的 `BLPOP` 用它** ⇒ 对 `ExistsCtx` 是**死常量**
+  ⇒ ⛔ **不能拿它当依据**（而本域原先那个 `2s` **看起来正是从它来的** ⇒ 典型的「照抄死常量」）。
+- **RAG Behavior（修前）**：`application.yml` 写的是 `spring.data.redis.timeout: **2s**`
+  ⇒ **无出处、无人审过**（台账里只登记成「待审」的 `DRIFT-USERAPI-015 附带`）
+  ⇒ 且**没配 `connect-timeout`** ⇒ Lettuce 回落到 timeout ⇒ 连接超时也变成 **2s**。
+- **Difference**：
+  1. **读命令超时 2s vs Go 3s** ⇒ Redis「**连上但挂住**」时：Go 的 EXISTS 挂到 3s ⇒ 与 HTTP 预算（`observability.http-timeout: 3s`）**同刻耗尽** ⇒ **503**；
+     本域修前 2s 就 fail-open ⇒ **200** ⇒ **与 Go 不一致**（也与自己域内 `user-api` / `admin-api` 的 3s 不一致 ⇒ **同族三域口径不一**）。
+  2. **连接超时 2s vs Go 5s** ⇒ Redis「连不上且连接阶段挂住」时：Go 5s 放弃、本域 2s 放弃 ⇒ **本域更严**。
+- **修法**：`timeout: 2s` → **`3s`** ＋ 补 **`connect-timeout: 5s`** ＋ 把 Go 出处链写进 yml 注释。
+- **Evidence strength**：**L2**（Spring Boot 真实 `Binder` 绑定结果 ＋ yml 静态断言）
+  ⚠️ **未跑 socket 层活体**（指向黑洞 IP 实测失败耗时落在 5s 而非 3s）⇒ 该尾巴仍记 UNRESOLVED
+  ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。
+- **守门**：`FollowApiRedisTimeoutConfigTest`（**2 例**，新建）—— ① yml 两值逐字断言 ·
+  ② **用 Spring 真实的 `Binder`** 断言 `getConnectTimeout()==5s` / `getTimeout()==3s`。
+- **变异验证 2/2 变红**：把 `timeout` 改回 `2s` ⇒ 两条都红
+  （`expected:<3s> but was:<2s>` / `expected:<PT3S> but was:<PT2S>`）。
+- **连带**：同批给 `user-api`（缺 `connect-timeout` ⇒ 落 `DRIFT-USERAPI-016`）与 `admin-api`（值本就对、**零守门** ⇒ 补守门、不改 yml）
+  各补一条同款守门 ⇒ **三个 api 域的 Redis 超时口径归一且被钉住**。
+- **回归**：**6 组件 BUILD SUCCESS**（`admin-api` **137** · `admin-rpc` **115** · `user-api` **120** · `user-rpc` **137** · `follow-api` **65** · `follow-rpc` **78**
+  ⇒ **652 条全绿**；三个 api 各 +2 例新守门）。
+
+---
 
 ## U3 受控重测：客户端熔断 ✅ **等价**（首轮结论已撤回）
 
@@ -599,10 +647,12 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
    转「**全仓 rpc 层统一方案**」交主会话拍板（调查结论见 `docs/DRIFT/follow/rpc.md`）。
 5. 🔴 **共享索引已过时 ⇒ 交主会话更新**（`AGENTS.md:32` 与 `docs/DRIFT/_INDEX.md:32,85`
    仍写 follow「零台账 / 仅 proto 层」）—— 详见 [`rpc.md` 的待办 6](./rpc.md)。
-6. `follow-api` **没有 `spring-boot-maven-plugin`** ⇒ 打不出可执行 fat jar，
-   只能用 `java -cp <runtime classpath> <MainClass>` 启动。
-   与 `article-api` / `comment-api` / `hot-api` / `like-api` / `message-api` / `task-api` 同款
-   （只有 `favorite-api` 有）⇒ 属**打包形态**问题，不是 Go↔RAG 语义漂移，**未改动**。
+6. ~~`follow-api` **没有 `spring-boot-maven-plugin`** ⇒ 打不出可执行 fat jar~~
+   —— ✅ **已修**（2026-10-25 · 见本文件末尾「2026-10-25 补记」节：`DRIFT-MSG-V-030` 的**域内部分**）：
+   `service/follow/follow-api/pom.xml:173-178` **已有 `<build>` 段 ＋ `spring-boot-maven-plugin`**
+   ⇒ 本模块产物**已是可执行 fat jar** ⇒ **本条为过期待办**，保留原文供追溯
+   （当时其余 6 个 api 模块仍缺，是 `article-api` / `comment-api` / `hot-api` / `like-api` /
+   `message-api` / `task-api` 的同款缺口 ⇒ **属他域，G1 不动**）。
 7. ⚠️ **故障注入装置应从 `/tmp` 提升为仓库资产** —— 本轮 U3/U4 的结论**反转了两次**，
    根因都是**装置不对**（黑洞不完成 HTTP/2 握手 / etcd 前缀下多个键 / 探针固定 `-o` 文件）。
    ⇒ 建议把下面三个脚本固化进 `tools/difftest/fault-harness/`（**本轮未做**，

@@ -15,7 +15,19 @@ spring:
       host: ${REDIS_ADDR:redis}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
+      # ⚠️ 取值出处（2026-10-27 复核补记，此前只有数值没有出处）：
+      #   Go 的 user.yaml 完全没配 BizRedis 超时
+      #     → go-zero v1.10.2 redisclientmanager.go:32-39 建 red.Options 时不传任何 timeout
+      #     → go-redis/v9 options.go init() 默认：ReadTimeout = 3s、DialTimeout = 5s
+      #   ⇒ 读命令超时 3s、连接超时 5s，与 go-redis 默认逐字相同。
+      #   🔴 go-zero redis.go:27 的 `readWriteTimeout = 2s` 是**死常量**（全文件只在 :293/:315 的
+      #      BLPop 用到，ExistsCtx 不用它）⇒ 别被它误导。
       timeout: 3s
+      # 连接超时：Go 的 go-redis DialTimeout 默认 **5s**。
+      # ⚠️ **本行原缺**（2026-10-27 补）⇒ Lettuce 在 connect-timeout 未设时**回落到 timeout**
+      #   ⇒ 连接超时跟着变成 3s，与 Go 的 5s 不一致 ⇒ admin-api 早已补上，本模块是遗漏。
+      # Boot 4 里这是独立属性（DataRedisProperties.connectTimeout，模块 spring-boot-data-redis）。
+      connect-timeout: 5s
 
   # ===== 2. Jackson 全局时间戳策略：对齐 Go 版 encoding/json 默认 =====
   # Jackson 3.x（Spring Boot 4）默认写 ISO 8601 字符串，移除了 WRITE_DATES_AS_TIMESTAMPS 选项。

@@ -1606,6 +1606,61 @@ Must Preserve: 「Redis 不可用 ⇒ **fail-open 放行**」（Go 的 `err == n
 
 ---
 
+### DRIFT-USERAPI-016 —— user-api 缺 `connect-timeout` ⇒ Lettuce 回落到 3s，与 Go 的 `DialTimeout` 5s 不一致 —— ✅ **已修（2026-10-27 · G1 lane）**
+
+> 🆕 **2026-10-27 复核新立**（在给 `follow-api` 对齐 Redis 超时时**顺手查出**）。
+> ⚠️ **与 `DRIFT-USERAPI-015` 同族但不是同一条**：015 是「**DNS 解析失败**时 Go/RAG 的 200/503 摇摆」；
+> **本条是「超时**配置值**本身与 Go 不符」** ⇒ 两件事的判据、影响面、修法都不同。
+
+- **Component**：user-api / 全部 protected 端点的黑名单 EXISTS（`JwtAuthInterceptor` 阶段 2）
+- **Category**：Config / Timeout Semantics
+- **Classification**：OBSERVABLE DIFFERENCE（**条件性**：仅在「Redis 连不上（连接阶段挂住）」形态下可见）
+  **Risk**：LOW-MEDIUM
+- **Go Behavior**（取值出处链，逐层到消费点）：
+  ```
+  Go service/user/user/api/etc/*.yaml
+      BizRedis 段**没有任何** timeout 字段
+    → go-zero v1.10.2 core/stores/redis/redisclientmanager.go:32-39
+      建 red.Options 时只传 Addr/User/Pass/DB/MaxRetries/MinIdleConns/TLSConfig
+      ——**三个 timeout 一个都没传**
+    → github.com/redis/go-redis/v9 options.go 的 init()
+        DialTimeout = 5s                                   （:329-330）
+        ReadTimeout = 3 * time.Second                       （switch opt.ReadTimeout { case 0: … }）
+  ⇒ Go 的**读命令超时 3s**、**连接超时 5s**
+  ```
+  ⚠️ **红鲱鱼（必须绕开）**：go-zero `core/stores/redis/redis.go:27` 写着 `readWriteTimeout = 2 * time.Second`
+  ⇒ **全文件只有 :293/:315 的 `BLPOP` 用它** ⇒ 对 `ExistsCtx`（黑名单查询）它是**死常量**
+  ⇒ 只看这一行会得出「Go 的 Redis 超时是 2s」的**错误结论**
+  ⇒ 这是 AGENTS.md §3.3.1「必须读到消费点，只贴声明行不算证据」的原型案例。
+- **RAG Behavior（修前）**：`application.yml` 的 redis 段**只配了** `timeout: 3s`
+  ⇒ **没配 `connect-timeout`** ⇒ Lettuce 在 `connect-timeout` 未设时**回落到 timeout**
+  ⇒ 连接超时跟着变成 **3s**，与 Go 的 **5s** 不一致。
+  ⇒ ⚠️ `admin-api` **早已配对**（`timeout: 3s` ＋ `connect-timeout: 5s`，2026-10-23 补记时写的）
+  ⇒ ⇒ **本模块是「遗漏」而非「决策」**（两侧同族的 admin-api 当时就按 Go 配齐了）。
+- **Difference**：仅在「Redis 地址**连不上且连接阶段挂住**」（不是拒连、不是 DNS 立刻失败）时可见
+  ⇒ Go 在 **5s** 放弃连接、RAG 在 **3s** 放弃 ⇒ **RAG 反而更严（更早放弃）**
+  ⇒ ⚠️ 与 015 的取舍题**方向相反**：015 讨论的是「要不要比 Go 更 fail-open」（建议**不改**），
+  **本条是「配置值没抄对」**（照抄即可，**不是取舍题**）⇒ 按 AGENTS.md §1.1「差异只允许出现在表达层」⇒ **对齐**。
+- **修法**：补 `spring.data.redis.connect-timeout: 5s`（Boot 4 的**独立字段**
+  `DataRedisProperties.connectTimeout`，模块 `spring-boot-data-redis`）+ 把 Go 出处链写进 yml 注释。
+- **Evidence strength**：**L2**（Spring Boot 真实 `Binder` 绑定结果 ＋ yml 静态断言）
+  ⚠️ **未跑 socket 层的活体**（把连接指向黑洞 IP 实测失败耗时落在 5s 而非 3s）⇒ 该尾巴仍记 UNRESOLVED
+  ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。
+- **守门**：`UserApiRedisTimeoutConfigTest`（**2 例**，新建）——
+  ① yml 里 `timeout=3s` ＋ `connect-timeout=5s` 逐字断言 ·
+  ② **用 Spring 真实的 `Binder` 走一遍 relaxed binding**，断言 `DataRedisProperties.getConnectTimeout()==5s`
+  与 `getTimeout()==3s`（⇒ 证明属性名写错时 Spring **静默用默认值**，那正是本用例要挡的静默失效）。
+  ⚠️ **同款守门在 admin-rpc 侧早已有**（`AdminRedisTimeoutConfigTest`）⇒ **本条是把它补到 api 侧**。
+- **变异验证 2/2 变红**：摘掉 `connect-timeout: 5s` ⇒ 两条都红
+  （`expected:<5s> but was:<null>` / `expected:<PT5S> but was:<null>`）。
+- **连带**：同批给 `admin-api`（值本就对，**零守门** ⇒ 补 `AdminApiRedisTimeoutConfigTest`，**不改 yml**）
+  与 `follow-api`（`timeout: 2s` ＋ 缺 connect-timeout ⇒ 落 `DRIFT-FOLLOW-011`）各补一条同款守门
+  ⇒ **三个 api 域的 Redis 超时口径就此归一**，且都被钉住。
+- **回归**：**6 组件 BUILD SUCCESS**（`admin-api` **137** · `admin-rpc` **115** · `user-api` **120** · `user-rpc` **137** · `follow-api` **65** · `follow-rpc` **78**
+  ⇒ **652 条全绿**；三个 api 各 +2 例新守门）。
+
+---
+
 ## 8. Test Cases（§29 + §30）
 
 ⚠️ **本节的 CASE 是「应当成立的语义对」，不是「已跑过的测试」。**

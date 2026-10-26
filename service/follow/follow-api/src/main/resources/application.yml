@@ -27,7 +27,21 @@ spring:
       host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
-      timeout: 2s
+      # ⚠️ 取值出处（2026-10-27 复核补记，此前只有数值没有出处）：
+      #   Go 的 followcenter.yaml 完全没配 BizRedis 超时
+      #     → go-zero v1.10.2 redisclientmanager.go:32-39 建 red.Options 时不传任何 timeout
+      #     → go-redis/v9 options.go init() 默认：ReadTimeout = 3s、DialTimeout = 5s
+      #   ⇒ 读命令超时 3s、连接超时 5s，与 go-redis 默认逐字相同。
+      #   🔴 go-zero redis.go:27 的 `readWriteTimeout = 2s` 是**死常量**（全文件只在 :293/:315 的
+      #      BLPop 用到，ExistsCtx 不用它）⇒ 别被它误导。
+      # ⚠️ **本行原为 2s**（无出处、无人审过）⇒ 与 Go 的 3s 不一致 ⇒ 2026-10-27 对齐成 3s。
+      #   可观察后果：Redis「连上但挂住」时，黑名单 EXISTS 会挂到 3s ⇒ 与 HTTP 预算(3s) 同刻耗尽
+      #   ⇒ **503**，与 Go / user-api 同形（Go 的 CLIENT PAUSE 实测 3.003s）。
+      timeout: 3s
+      # 连接超时：Go 的 go-redis DialTimeout 默认 **5s**。
+      # Lettuce 在 connect-timeout 未设时回落到 timeout ⇒ 不配这行会跟着变成 3s。
+      # Boot 4 里这是独立属性（DataRedisProperties.connectTimeout，模块 spring-boot-data-redis）。
+      connect-timeout: 5s
 
   # ============== 2. Nacos 服务发现（用于解析 discovery:///follow-rpc）==============
   # Go 端是 etcd flat key "follow.rpc"（无 namespace / group 分层）。

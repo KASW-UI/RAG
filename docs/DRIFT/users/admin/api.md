@@ -1987,3 +1987,26 @@ go-zero@v1.10.2 rest/server.go:222-233     WithMiddleware ⇒ middleware(route.H
 
 ⇒ **推广前必查每个域自己的两个数**：该域 api 的 `WebMvcConfig` 注册的路径前缀 ⇒ 决定 `JwtAuthPaths` 的前缀常量；
 以及该域的 **public 路径集合** 与 **401 body 形状**（admin/user = 完整信封；follow = 空 body —— **不要统一**）。
+
+### 12.9 🟡 **守门缺口**（非漂移）：admin-api 的 Redis 超时口径**本就对**，但**零守门**
+
+> 🆕 **2026-10-27 复核**（给 follow / user 两个 api 对齐 Redis 超时时顺手查出）。
+> ⚠️ **本条不是 DRIFT** —— admin-api 的两个值**本来就与 Go 逐字一致** ⇒ **不占 DRIFT 编号**。
+
+| 项 | 值 | Go 侧对应 | 状态 |
+|---|---|---|---|
+| `spring.data.redis.timeout` | **3s** | go-redis v9 `options.go` init() 的 `ReadTimeout = 3s` | ✅ 已对 |
+| `spring.data.redis.connect-timeout` | **5s** | go-redis v9 `options.go` init() 的 `DialTimeout = 5s` | ✅ 已对 |
+
+⚠️ **但零守门** ⇒ 任何人改 `application.yml` 都不会被发现 ⇒ 同族三域（user / admin / follow）
+当时是**三种口径**（user = 3s 但缺 connect-timeout · admin = 3s+5s · follow = 2s 且缺 connect-timeout）⇒ **正是「无守门」的代价**。
+
+⇒ **本轮补**：`AdminApiRedisTimeoutConfigTest`（**2 例**，新建）——
+① yml 里 `timeout=3s` ＋ `connect-timeout=5s` 逐字断言 ·
+② **用 Spring 真实的 `Binder` 走一遍 relaxed binding**，断言 `DataRedisProperties.getConnectTimeout()==5s`
+与 `getTimeout()==3s`（⇒ 证明属性名写错时 Spring **静默用默认值**，那正是要挡的静默失效）。
+⇒ ⚠️ **admin-api 的 `application.yml` 本轮零改动**（值本就对）⇒ 本条**只加守门**。
+⇒ **同款守门在 admin-rpc 侧早已有**（`AdminRedisTimeoutConfigTest`）⇒ 本条是把它**补到 api 侧**。
+⇒ **变异验证 2/2 变红**：把 `connect-timeout` 改成 `3s` ⇒ 两条都红
+（`expected:<5s> but was:<3s>` / `expected:<PT5S> but was:<PT3S>`）。
+⇒ **回归**：**6 组件 BUILD SUCCESS**（`admin-api` **137** = 135 + 本轮 2 例 · `admin-rpc` **115** · `user-api` **120** · `user-rpc` **137** · `follow-api` **65** · `follow-rpc` **78** ⇒ **652 条全绿**）。
