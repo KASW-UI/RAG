@@ -34,6 +34,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 
 /**
@@ -58,12 +59,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  *       ⇒ <b>Go 侧取消时刻 == deadline 时刻</b>（毫秒级误差来自网络传播，不来自取整）</li>
  * </ul>
  *
- * <h2>本类断言的四件事</h2>
+ * <h2>本类断言的五件事</h2>
  * <ol>
  *   <li>🔴 <b>生产路径的 statement 是 HikariCP 代理类</b>
- *       ⇒ 毫秒 API 在<b>它自己的类上</b>不可达（不是「驱动没这个方法」）</li>
- *   <li>🔴 <b>有效超时值是秒级向上取整</b>：给驱动的是 {@code ceil(R/1000)} 秒
- *       ⇒ 驱动内部的<b>原始毫秒</b>是整秒，不是 R</li>
+ *       ⇒ 毫秒 API 在<b>它自己的类上</b>不可达（不是「驱动没这个方法」）
+ *       ⇒ ⇒ 共享层<b>必须先 unwrap 到驱动实现类</b>才能用上毫秒精度</li>
+ *   <li>🔴 <b>驱动内部原始毫秒 = 原样 R</b>（<b>不是</b> {@code ceil(R/1000)*1000}）
+ *       ⇒ ⇒ <b>毫秒路径在本域生产路径上真的生效了</b></li>
+ *   <li>🔴 <b>代理层看到的秒数 = floor(驱动原始毫秒 / 1000)</b>（<b>下取整</b>；
+ *       秒级路径则是上取整）⇒ 与第 ② 条互为印证</li>
  *   <li>🔴 <b>阴性对照</b>：同一个 PG、<b>不走连接池</b>时，statement 是 pgjdbc 实现类
  *       ⇒ 毫秒 API <b>可达</b> ⇒ ⇒ 证明「差别来自<b>连接池代理</b>，不是驱动缺方法」</li>
  *   <li>🟢 <b>没有 deadline 时注入器完全不动</b>（定时任务 / MQ 消费 / 启动期建表不受影响）</li>
@@ -73,17 +77,22 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * <p>pgjdbc 的 {@code setQueryTimeout(int)} <b>内部委托给</b> {@code setQueryTimeoutMs(seconds * 1000L)}
  * （{@code javap -c org.postgresql.jdbc.PgStatement} 实测）⇒ 驱动内部只有一个毫秒字段 {@code timeout}
  * ⇒ {@code getQueryTimeoutMs()} 读的就是它 ⇒
- * <b>秒级路径</b> ⇒ 该字段 = {@code ceil(R/1000)*1000}（<b>整秒</b>）；
- * <b>毫秒路径</b> ⇒ 该字段 = <b>原样 R</b>（非整秒）。
+ * <b>秒级路径</b> ⇒ 该字段 = {@code ceil(R/1000)*1000}（<b>比 R 大</b>）；
+ * <b>毫秒路径</b> ⇒ 该字段 = <b>原样 R</b>。
  * <p>⇒ 本类把 R 故意取成 <b>约 1700ms</b>（绑 2000ms 后先睡 300ms）⇒ 两种路径给出<b>不同</b>的值
  * ⇒ ⇒ 断言能真正区分，而不是「碰巧都绿」。
+ * <p>🔴 <b>断言不硬编码 1700 / 2000</b> —— 那些数会随时序漂移 ⇒ 改成
+ * <b>用「R 的取值窗口」判定</b>（见 {@link DeadlineWindow}）⇒ <b>确定性</b>，且秒级路径必然落不进那个窗口。
  *
  * <h2>⚠️ 与 Go 侧的语义关系（不要误读）</h2>
- * <p>本类<b>不</b>断言「RAG 与 Go 的取消时刻相同」—— 那是<b>共享层</b>的事，且当前<b>不成立</b>
- * （Go 到 deadline 精确取消，RAG 走秒级回退 ⇒ 最坏晚 ≤999ms）。
- * <p>本类只钉住<b>本域生产路径的当前事实</b>：<b>秒级回退</b>。
- * <p>⇒ <b>一旦共享层修好「探测目标」（改成先 unwrap 到驱动实现类）</b>，本类会<b>转红</b>
- * ⇒ 那正是要更新本域台账的信号（<b>不是回归</b>）。
+ * <p>本类<b>不</b>断言「RAG 与 Go 的取消时刻相同」—— 那是<b>共享层</b>的事。
+ * <p>本类只钉住<b>本域生产路径的当前事实</b>：<b>毫秒路径生效 ⇒ 驱动收到原样 R</b>
+ * ⇒ ⇒ 配合恒等式 {@code t_exec + R ≡ deadline} ⇒ <b>Go ↔ RAG 的取消时刻差 = 0</b>
+ * （Go 到 deadline 精确取消；RAG 现在也是把「剩余预算原样」交给驱动 ⇒ 同一个 deadline）。
+ * <p>🔴 <b>历史</b>：本类最初断言的是「<b>秒级回退</b>」（驱动收到 2000 整秒）——
+ * 那是 {@code global} 第四十一轮 E62 的结论在本域的落地形态（毫秒探测被 Hikari 代理类挡住）。
+ * <b>{@code global} 第四十五轮把探测改成「先 unwrap 到驱动实现类」</b> ⇒ 毫秒路径真的生效
+ * ⇒ ⇒ 本类在合并当天<b>按设计转红</b>（red = 台账该更新，不是回归）⇒ 本版已改成钉「毫秒路径生效」的新事实。
  *
  * <p>⚠️ 与 {@code FavoriteFolderItemTimeColumnTest} 同款纪律：<b>真 PG</b>、<b>真 HikariCP</b>、
  * <b>真 MyBatis 插件链</b>（生产注册的那个注入器原样生效）、<b>真 mapper</b>；不用 H2。
@@ -154,45 +163,58 @@ class FavoriteSqlTimeoutProductionPathTest {
     }
 
     @Test
-    @DisplayName("🔴 生产路径：注入器看到的 statement 是 HikariCP 代理类 ⇒ 毫秒 API 在它自己类上不可达")
+    @DisplayName("🔴 生产路径：注入器看到的 statement 是 HikariCP 代理类 ⇒ 毫秒 API 在它自己类上不可达 ⇒ 共享层必须先 unwrap 到驱动实现类")
     void productionPathStatementIsPoolProxyWithoutMillisecondApi() {
         assertEquals("com.zaxxer.hikari.pool.HikariProxyPreparedStatement", probePath().getName(),
                 "favorite-rpc 的生产数据源必须是 HikariCP（Spring Boot 默认 + 本域 application.yml 显式配了 spring.datasource.hikari）");
 
         assertThrows(NoSuchMethodException.class,
                 () -> probePath().getMethod("setQueryTimeoutMs", long.class),
-                "🔴 Hikari 代理类上不该有毫秒 API ⇒ 任何「按 statement.getClass() 找毫秒方法」的探测都必然失败");
+                "🔴 Hikari 代理类上不该有毫秒 API ⇒ 任何「按 statement.getClass() 找毫秒方法」的探测都必然失败"
+                        + " ⇒ 这正是共享层必须**先 unwrap 到驱动实现类**的原因（global 第四十五轮已修）");
     }
 
     @Test
-    @DisplayName("🔴 生产路径的有效超时是【秒级向上取整】（代理层看到的秒数）")
-    void productionPathEffectiveTimeoutIsSecondLevelCeil() throws Exception {
-        runWithDeadlineAndQuery();
+    @DisplayName("🔴 生产路径的有效超时是【毫秒路径的下取整】（代理层看到的秒数）")
+    void productionPathEffectiveTimeoutIsMillisecondFloor() throws Exception {
+        DeadlineWindow win = runWithDeadlineAndQuery();
 
         assertNotNull(PROBE.statementClass.get(), "探针必须抓到 statement");
 
-        // 代理对外只暴露秒级接口；驱动内部的原始毫秒在另一个测试里断言。
         // 🔴 两条断言必须**分属两个测试方法**：同方法内第一条失败会**遮住**第二条
-        //    ⇒ 届时只知道「红了」，不知道「红在哪一条、实际值是多少」。
-        assertEquals(2, PROBE.queryTimeoutSeconds.get(),
-                "R ≈ 1700ms ⇒ 秒级路径 = ceil(1700/1000) = 2 秒；"
-                        + "若共享层改成走毫秒路径，这里会变成 floor(1700/1000) = 1 ⇒ "
-                        + "本条会转红 —— 那是【台账该更新】的信号（见 docs/DRIFT/favorite/rpc.md §36），不是回归");
+        //    ⇒ 届时只知道「红了」，不知道「红在哪一条、实际值多少」。
+        long raw = PROBE.queryTimeoutMs.get();
+        long seconds = PROBE.queryTimeoutSeconds.get();
+        assertEquals(raw / 1000L, seconds,
+                "毫秒路径 ⇒ 代理层秒数 = floor(驱动原始毫秒 / 1000)（**下取整**）；"
+                        + "秒级路径则是 ceil(R/1000)（**上取整**）⇒ 实测 驱动原始毫秒=" + raw + " 秒=" + seconds);
     }
 
     @Test
-    @DisplayName("🔴 生产路径的【驱动内部原始毫秒】是整秒（秒级路径的指纹）")
-    void productionPathDriverRawMillisIsWholeSecond() throws Exception {
-        runWithDeadlineAndQuery();
+    @DisplayName("🔴 生产路径的【驱动内部原始毫秒】= 原样 R（毫秒路径的指纹，非上取整）")
+    void productionPathDriverRawMillisIsOriginalRemaining() throws Exception {
+        DeadlineWindow win = runWithDeadlineAndQuery();
 
         assertNotNull(PROBE.statementClass.get(), "探针必须抓到 statement");
 
-        // 这是**判别两条路径的量**：秒级路径写进去的是 ceil(R/1000)*1000（整秒）；
-        // 毫秒路径写进去的是**原样 R**（≈1700，非整秒）⇒ ⇒ 整秒 ⇔ 走的是秒级路径。
-        assertEquals(2000L, PROBE.queryTimeoutMs.get(),
-                "🔴 秒级路径 ⇒ 驱动内部毫秒 = ceil(R/1000)*1000 = 2000（整秒）；"
-                        + "若共享层改成走毫秒路径，这里会是 ≈R（≈1700，非整秒）⇒ "
-                        + "本条会转红 —— 那是【台账该更新】的信号（见 docs/DRIFT/favorite/rpc.md §36），不是回归");
+        // 这是**判别两条路径的量**：
+        //   秒级路径写进去的是 ceil(R/1000)*1000（**上取整**，比 R 大）；
+        //   毫秒路径写进去的是**原样 R**。
+        // 🔴 **不硬编码 2000 / 1700** —— 改成**用「R 的取值窗口」判定**：
+        //    R = deadline − 注入时刻，而注入时刻落在 [查询前, 查询后] ⇒
+        //    ⇒ R ∈ [deadline−查询后, deadline−查询前] ⇒ 断言 raw 落在该窗口内
+        //    ⇒ ⇒ **确定性**（不依赖时序抖动），且**秒级路径必然落不进这个窗口**
+        //    （上取整值比 R 大 ⇒ 除非 R 恰好是 1000 的整数倍）。
+        long raw = PROBE.queryTimeoutMs.get();
+        long lo = win.rMinMillis();
+        long hi = win.rMaxMillis();
+        assertTrue(raw >= lo - 1L && raw <= hi + 1L,
+                "🔴 毫秒路径 ⇒ 驱动收到的是【原样 R】（deadline − 注入时刻）⇒ 实测 " + raw
+                        + " 必须落在 R 的窗口 [" + lo + ", " + hi + "] 内；"
+                        + "秒级路径写进去的是 ceil(R/1000)*1000（**上取整**）⇒ 落不进这个窗口");
+        assertTrue(raw < 2000L || raw % 1000L != 0L,
+                "🔴 判别器：毫秒路径写进去的是【原样 R】⇒ R 不是 1000 的整数倍；"
+                        + "秒级路径写进去的**必然是** 1000 的整数倍 ⇒ 实测 " + raw);
     }
 
     @Test
@@ -211,14 +233,14 @@ class FavoriteSqlTimeoutProductionPathTest {
             assertNotNull(ms);
 
             // 🔴 阳性对照（变异自证）：毫秒路径**真的能用**时，驱动内部毫秒就是**原值**（1700）
-            // ⇒ ⇒ 生产路径上读到的 2000（整秒）**不可能**是「读不出来 / 读错了」
-            // ⇒ ⇒ 只能解释成「确实走的是秒级回退」⇒ ⇒ 这条断言**真的在区分两条路径**，不是恒真。
+            // ⇒ ⇒ 生产路径上读到的那个值**不可能**是「读不出来 / 读错了」
+            // ⇒ ⇒ 它要么是「秒级回退的上取整值」、要么是「毫秒路径的原样 R」⇒ 由另一条测试判定
             ms.invoke(ps, 1700L);
             Object raw = driverClass.getMethod("getQueryTimeoutMs").invoke(ps);
             assertNotNull(raw);
             assertEquals(1700L, ((Long) raw).longValue(),
-                    "🔴 毫秒路径会把原值原样写进去 ⇒ 与生产路径上的 2000（整秒）**明确不同** "
-                            + "⇒ 证明生产路径确实走的是秒级回退");
+                    "🔴 毫秒路径会把原值原样写进去 ⇒ 证明「驱动内部毫秒」这个读数本身是**准的** "
+                            + "⇒ 生产路径上读到的是上取整值还是原样 R，由生产路径那条测试判定");
         }
     }
 
@@ -234,13 +256,40 @@ class FavoriteSqlTimeoutProductionPathTest {
         assertEquals(0L, PROBE.queryTimeoutMs.get(), "没有 deadline ⇒ 驱动内部毫秒保持 0");
     }
 
-    /** 绑一个 2000ms 的 deadline，先睡 300ms 让 R 落到 ≈1700ms，再跑一次真实读。 */
-    private void runWithDeadlineAndQuery() throws InterruptedException {
+    /**
+     * 绑一个 2000ms 的 deadline，先睡 300ms 让 R 落到 ≈1700ms，再跑一次真实读。
+     *
+     * @return {@link DeadlineWindow} —— 「R 的取值窗口」，用来把断言做成**确定性**的
+     */
+    private DeadlineWindow runWithDeadlineAndQuery() throws InterruptedException {
         PROBE.reset();
         long deadline = System.currentTimeMillis() + 2000L;
+        long beforeQuery = System.currentTimeMillis();
         try (DeadlineState.Scope ignored = DeadlineState.bindToCurrent(deadline)) {
             Thread.sleep(300L);
+            beforeQuery = System.currentTimeMillis();
             folderMapper.findByUserId(4242L);
+        }
+        long afterQuery = System.currentTimeMillis();
+        return new DeadlineWindow(deadline, beforeQuery, afterQuery);
+    }
+
+    /**
+     * 「R 的取值窗口」。
+     *
+     * <p>注入器算的是 {@code R = deadline − 注入时刻}；注入发生在 {@code prepare} 期间
+     * ⇒ 注入时刻 ∈ [查询前, 查询后] ⇒ ⇒ {@code R ∈ [deadline−查询后, deadline−查询前]}。
+     *
+     * <p>⇒ 用它断言「驱动收到的是**原样 R**」时，<b>不依赖任何时序抖动</b>
+     * （不用硬编码 1700 / 2000 这类会漂的数）。
+     */
+    record DeadlineWindow(long deadline, long beforeQueryMillis, long afterQueryMillis) {
+        long rMinMillis() {
+            return deadline - afterQueryMillis;
+        }
+
+        long rMaxMillis() {
+            return deadline - beforeQueryMillis;
         }
     }
 

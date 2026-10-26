@@ -481,7 +481,17 @@ CheckBlacklistMiddleware: middleware.NewCheckBlacklistMiddleware(redisDB).Handle
 **2026-10-25 第十五轮复核后的实测口径**（只算**真用**的 ⇒ **剥掉注释**再数 ——
 本域那两个只在 javadoc 里提到它的**支撑类**因此不计）：
 
-⇒ **修完之后**：**6 个域 / 10 个测试类**还在用 `RANDOM_PORT`（**favorite 域已归零** ⇒ 本轮已修）。
+⇒ **修完之后**：**7 个域 / 14 个测试类**还在用 `RANDOM_PORT`（**favorite 域已归零** ⇒ 本轮已修）。
+
+> 🔴🔴 **2026-10-26 合并当天订正（第三十轮）**：本行原写「**6 个域 / 10 个测试类**」
+> ⇒ **合并 `global` 的成果后变成 7 个域 / 14 个测试类** ——
+> 🔴 **新增的那个域是 `common`（共享层本身）**，4 个测试类全部来自 `global` 的共享层改动
+> （`GoStyleFormLimitEnvelopeGateTest` / `GoStyleJsonBodyRawHeaderTomcatTest` /
+> `GoStyleJsonContentTypeCharsetTomcatTest` / `GoStyleParamLimitGateTest`）
+> ⇒ ⇒ **不是本域的改动** ⇒ ⇒ 这条计数**是全仓事实**，**别的域一合并就会变**
+> ⇒ ⇒ `tools/ledger-lint/favorite/check-ledger-vs-reality.py` 会**自动**把它抓出来（它每次都按**当前仓库**重算）⇒ ⇒ **不用靠人记得改**。
+> ⇒ ⇒ 顺带一条观察：那 4 个在**共享层**里 ⇒ ⇒ 「需要一份**共享**的端口选取实现」这个选项
+> ⇒ 对它们**已经是既成事实**（共享层自己就在用 `RANDOM_PORT`）⇒ ⇒ 落点二选一的问题**缩小到其余各域**。
 
 | 域 | 个数 | 文件 |
 |---|---|---|
@@ -492,6 +502,7 @@ CheckBlacklistMiddleware: middleware.NewCheckBlacklistMiddleware(redisDB).Handle
 | `users/user` | 1 | `GoStyleGrpcClientBreakerE2ETest` |
 | `task` | 1 | `TaskApiContentTypeTest` |
 | `like` | 1 | `LikeApiRouterErrorRealTomcatTest` |
+| **`common`（共享层本身）** | **4** | 🆕 **合并当天新增**（`global` 的共享层改动）—— `GoStyleFormLimitEnvelopeGateTest` / `GoStyleJsonBodyRawHeaderTomcatTest` / `GoStyleJsonContentTypeCharsetTomcatTest` / `GoStyleParamLimitGateTest` |
 
 ⇒ **同款暴露面全仓都在** ⇒ 需要一份**共享**的端口选取实现
 ⇒ 落点二选一（**本域不拍板**）：`service/common` 的 test-jar，**或**各域各自复制本域这份
