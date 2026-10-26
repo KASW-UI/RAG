@@ -9,10 +9,16 @@ import com.rag.users.user.rpc.exception.UserExceptions.AvatarHistoryNotFoundExce
 import com.rag.users.user.rpc.exception.UserExceptions.NotFoundException;
 import com.rag.users.user.rpc.mapper.UserAvatarHistoryMapper;
 import com.rag.users.user.rpc.mapper.UserMapper;
+import org.apache.ibatis.cache.CacheKey;
+import org.apache.ibatis.executor.Executor;
 import org.apache.ibatis.executor.statement.StatementHandler;
+import org.apache.ibatis.mapping.BoundSql;
+import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.plugin.Intercepts;
 import org.apache.ibatis.plugin.Interceptor;
 import org.apache.ibatis.plugin.Signature;
+import org.apache.ibatis.session.ResultHandler;
+import org.apache.ibatis.session.RowBounds;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -628,7 +634,7 @@ class UserRpcContainerWiringTest {
     }
 
     /**
-     * <b>负控（变异验证）：同一条断言必须能识破「挂错点」的翻译器。</b>
+     * <b>负控 NC-A（恒绿检查）：同一条断言必须能识破「挂错点」的翻译器。</b>
      *
      * <p><b>为什么需要它</b>：上面那条断言读的是注解元数据。若断言本身写错了
      * （比如只查「有没有 {@code @Intercepts}」而不查挂载点），
@@ -640,14 +646,47 @@ class UserRpcContainerWiringTest {
      * （它没有被 {@code @Import}，也不在 {@code com.rag.users.user.rpc} 的组件扫描路径上
      * ——它是本测试类的<b>静态嵌套类</b>，Spring 不会把它当 Bean）。
      * 它唯一的作用是给断言喂一个「形状错误」的输入。
+     *
+     * <p>⚠️ <b>本条只证明「判据不是恒绿」，不证明「判据真在看挂载点」</b> ——
+     * 因为本变异体<b>同时违反三条规则</b>（无 Executor · 没覆盖 query+update · 挂了 StatementHandler）
+     * ⇒ 判据只要有<b>任意一条</b>别的规则在拦，它就会绿
+     * ⇒ ⇒ 隔离性由 {@link #translatorMountPointGuardRejectsExtraStatementHandlerSignature}（NC-B）负责。
      */
     @Test
-    @DisplayName("B-1 负控：同一断言必须识破「挂在 StatementHandler.prepare」的变异体")
+    @DisplayName("B-1 负控 NC-A：同一断言必须识破「挂在 StatementHandler.prepare」的变异体")
     void translatorMountPointGuardRejectsWrongMountPoint() {
         assertThrows(AssertionError.class,
                 () -> assertTranslatorMountedOnExecutor(MutantTranslatorMountedOnStatementHandler.class),
                 "断言对「挂错点」的翻译器必须报错；它没报错 ⇒ 说明这条断言没有分辨力，"
                         + "上面那条用例是恒绿的假守门");
+    }
+
+    /**
+     * <b>负控 NC-B（隔离性检查）：「一切正确 + 多挂一个 {@code StatementHandler.prepare}」也必须被拒绝。</b>
+     *
+     * <p><b>为什么 NC-A 不够</b> —— 这条是 <code>users/admin</code> 域回信指出的元教训
+     * （他们踩过：NC-A 的变异体同时违反三条规则 ⇒ 判据只要有任意一条别的规则在拦，它就会绿
+     * ⇒ <b>NC-A 只证明「判据不是恒绿」，证明不了「判据真的在看挂载点」</b>）。
+     *
+     * <p><b>NC-B 的变异体只违反一条规则</b>：{@code Executor.query}×2 + {@code Executor.update}
+     * <b>全都正确</b>，<b>只多挂一条</b> {@code StatementHandler.prepare}
+     * ⇒ 拒绝它的<b>只可能是</b>「不得挂 StatementHandler」那一条 ⇒ ⇒ 隔离性成立。
+     *
+     * <p>⚠️ <b>元教训：负控的「必须红在目标断言」要按「变异体违反了几条规则」定强度</b> ——
+     * 违反多条 ⇒ <b>不能查理由</b>（会把一次合法的部分弱化误报成失败，
+     * <code>users/admin</code> 域第一版就因此误报过）⇒ NC-A <b>只要求「被拒绝」（不查理由）</b>；
+     * 只违反一条 ⇒ <b>可以查</b>（且这才有隔离力）⇒ <b>NC-B 才查理由</b>。
+     */
+    @Test
+    @DisplayName("B-1 负控 NC-B：只违反「不得挂 StatementHandler」一条规则的变异体也必须被拒绝")
+    void translatorMountPointGuardRejectsExtraStatementHandlerSignature() {
+        AssertionError thrown = assertThrows(AssertionError.class,
+                () -> assertTranslatorMountedOnExecutor(
+                        MutantTranslatorWithExtraStatementHandlerSignature.class),
+                "「一切正确 + 多挂一条 StatementHandler.prepare」的变异体必须被拒绝；"
+                        + "它没报错 ⇒ 说明「不得挂 StatementHandler」那条规则根本没在看挂载点");
+        assertTrue(thrown.getMessage() != null && thrown.getMessage().contains("StatementHandler"),
+                "NC-B 变异体只违反一条规则 ⇒ 拒绝它的应当就是那条；实际拒绝理由 = " + thrown.getMessage());
     }
 
     /**
@@ -689,6 +728,34 @@ class UserRpcContainerWiringTest {
             args = {Connection.class, Integer.class}))
     static class MutantTranslatorMountedOnStatementHandler {
         // 刻意为空：只需要它携带一枚「形状错误」的 @Intercepts 注解。
+        // ⚠️ 本变异体**同时违反三条规则**（无 Executor · 没覆盖 query+update · 挂了 StatementHandler）
+        // ⇒ 只配 NC-A 用；隔离性由 NC-B 负责。
+    }
+
+    /**
+     * <b>变异体 NC-B（只给隔离性负控用）</b>：
+     * {@code Executor.query}×2 + {@code Executor.update} <b>全部正确</b>
+     *（与生产 {@code SqlTimeoutStatusTranslator} 的三个 signature 逐条同形），
+     * <b>只多挂一条</b> {@code StatementHandler.prepare}
+     * ⇒ <b>只违反「不得挂 StatementHandler」这一条规则</b>
+     * ⇒ 拒绝它的只可能是那一条 ⇒ 隔离性成立。
+     *
+     * <p>⚠️ 与 NC-A 的变异体**形状相反**：NC-A 是「只剩错的那条」，NC-B 是「全对 + 多一条错」。
+     * 两者缺一不可 —— 只有 NC-A 时，判据可能被别的规则「代劳」而误绿。
+     */
+    @Intercepts({
+            @Signature(type = Executor.class, method = "query",
+                    args = {MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class}),
+            @Signature(type = Executor.class, method = "query",
+                    args = {MappedStatement.class, Object.class, RowBounds.class,
+                            ResultHandler.class, CacheKey.class, BoundSql.class}),
+            @Signature(type = Executor.class, method = "update",
+                    args = {MappedStatement.class, Object.class}),
+            @Signature(type = StatementHandler.class, method = "prepare",
+                    args = {Connection.class, Integer.class})
+    })
+    static class MutantTranslatorWithExtraStatementHandlerSignature {
+        // 刻意为空：只需要它携带一枚「只违反一条规则」的 @Intercepts 注解。
     }
 
     // ==================================================================
