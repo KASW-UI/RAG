@@ -1,3 +1,4 @@
 com.rag.common.observability.GoStyleOtelAutoConfiguration
 com.rag.common.http.GoStyleJsonContentTypeAdvice
 com.rag.common.http.GoStylePathNormalizingAutoConfiguration
+com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration
