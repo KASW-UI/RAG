@@ -76,10 +76,13 @@
 
 ## 5. 交付物清单
 
-- [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
-- [ ] **9 条轴**逐轴填表（§2）：结论 ✅/🔴/🟡/N/A ＋ **证据强度** ＋ **核对日期**
-- [ ] **两侧同时跑**的探针（AGENTS.md §3.3）—— 只跑 RAG 的探针**不算数**
-- [ ] §1 的每一条**重新核对状态**并写回（带核对日期）
-- [ ] §3 的域侧修法**落码 + 守门**（含变异验证）
-- [ ] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）
-- [ ] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
+- [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ⚠️ **本轮为阶段 1（只读），未起进程**；域内已有 `ArticleGrpcInterceptorWiringTest`（`@Testcontainers` 真 PG ＋ 真发 gRPC）等资产，**待阶段 2 收口回归统一跑**
+  - ⚠️ **别把 DDL 对照当启动证据**：`tools/difftest/check-ddl-static.py --domain article` 是**静态**逐列比对 SQL 文件 ⇒ 它给 A8 的 **DDL 列级一致性**提供 L4 级**双侧**证据，但**不启任何进程** ⇒ 第 0 步仍**未完成**。
+- [x] **9 条轴**逐轴填表（§2）：结论 ✅/🔴/🟡/N/A ＋ **证据强度** ＋ **核对日期**（**2026-10-27**）
+- [x] **两侧同时跑**的探针（AGENTS.md §3.3）—— ✅ `tools/errmsg-probe/run-parity.sh` **EXIT=0**（A4 错误响应 ＋ A6 错误码契约 ⇒ **L4**）：Go 侧 sha256 == Java 侧 sha256 == `cad5cb4f…d1134`，**49 行**（CONST 15 ＋ TABLE 15 ＋ FALLBACK 19），真源 sha256 校验通过 ⇒ 只跑 RAG 的探针**不算数**这一条**已满足**
+- [x] §1 的每一条**重新核对状态**并写回（带核对日期）—— ✅ 订正 3 条：`DRIFT-ARTICLE-API-006`（**落点** `service/common` → `service/users/users-common` ＋ **状态**「🔴 未修」→「已自实现」）· `S-6`（**本域不成立**：`catch (StatusRuntimeException)` 在前）· `baseline-version`（**实测确实缺**）
+- [ ] §3 的域侧修法**落码 + 守门**（含变异验证）—— **阶段 2 才做**（L-1 补 `baseline-version: 0` · L-2 补 `DeadlineQueryTimeoutInjector` 的 `@Import` ＋ 真装配测试 · L-3 补 proto 契约回归网）
+- [x] §4 的派单**已正式登记**：🔴 **G4-2**（MyBatis-Plus 自动收集 `Interceptor[]` Bean 无运行证据）已按**反馈单 7 项**走**实时轨**（`session send` → `G4Common`）＋ 本表**正式轨**，两轨一致；G4-1 / G4-3 / G4-4 / G4-5 在本表登记，其中 G4-4（A9 轴措辞）/ G4-5（`AGENTS.md` §6.3 漏 `article-rpc`）另附「登记/转整合者」项同批发给 G4
+  - ⚠️ **G4-1 / G4-3 未单独走 7 项反馈单** ⇒ 它们是**登记项**（其中 G4-1 的剩余项已缩小为「共享 helper 文案口径」），**等 G4 回执时逐条核账**
+  - ⚠️ `docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二属 **SHARED 面 ⇒ G3 不写**（AGENTS.md §5.3e）⇒ 由 G4 / 整合者落
+- [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）—— ✅ 本轮实测：台账结构守门 `check-ledger-tables` / `check-ledger-selfcheck` / `check-ledger-count` **三项 EXIT=0**；`_MANIFEST.json` **不收录** `vs-common.md`（`grep -c` = 0）⇒ 无需改共享面

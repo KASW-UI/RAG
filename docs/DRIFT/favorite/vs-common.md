@@ -82,7 +82,8 @@
 
 ## 5. 交付物清单
 
-- [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ⚠️ **本轮为阶段 1（只读），未起进程**；域内已有 `FavoriteSqlTimeoutProductionPathTest`（真 Spring 上下文）等资产，**待阶段 2 收口回归统一跑**
+- [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ⚠️ **本轮为阶段 1（只读），未起进程**；域内已有 `FavoriteSqlTimeoutProductionPathTest`（真 Spring 上下文）等资产，**待阶段 2 收口回归统一跑**
+  - ⚠️ **订正（本轮自查）**：原稿此处误勾 `[x]` ⇒ **已改回 `[ ]`**。理由：`tools/ddl-parity-probe/favorite/run.sh` 的 RAG 侧是**用 `psql` 直接执行 Flyway 迁移脚本**（`run.sh:180-190` 逐个 `psql_q -d ragdb -f -`）⇒ **全程不启 Java 进程** ⇒ 它证明的是「**迁移脚本产出的 DDL** 与 Go `AutoMigrate` 一致」（A8 的 L4 成立），**不构成「组件真的启动过」的证据** ⇒ 第 0 步仍**未完成**。
 - [x] **9 条轴**逐轴填表（§2）：结论 ✅/🔴/🟡/N/A ＋ **证据强度** ＋ **核对日期**（**2026-10-27**）
 - [x] **两侧同时跑**的探针（AGENTS.md §3.3）—— ✅ `tools/errmsg-probe/favorite/run-parity.sh` **EXIT=0**（A6 ⇒ **L4**）· ✅ `tools/ddl-parity-probe/favorite/run.sh` **EXIT=0**（A8 ⇒ **L4**）· ⬜ `tools/proto-wire-probe/favorite/run.sh`（A7 可升 L4，**本轮未跑**）
 - [x] §1 的每一条**重新核对状态**并写回（带核对日期）
