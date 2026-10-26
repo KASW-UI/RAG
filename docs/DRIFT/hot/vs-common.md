@@ -71,6 +71,7 @@
 | **H-5** | ✅ A3/A4/A5/A9 —— **无需改** | — | 四轴实测一致（端口差异属已记录的部署口径；Go 侧 hot 无业务 span ⇒ 无需补埋点 ⇒ **补了反而是新增 Go 没有的行为**） |
 
 | **H-6** | ✅ **本域不涉及排序桥下沉** | — | `hot-rpc` **本来就没有** `MybatisPlusOrderingBridgeAutoConfiguration`（实测：**无 flyway 段、无 MP 依赖 ⇒ 两侧都无库**）⇒ 共享层桥对 hot 域是 **N/A**（排序边因无 MP 被自动忽略 ⇒ 无害）⇒ **本域无落码项** |
+| **H-7** | ✅ **N/A —— hot-api 两侧都没有鉴权 ⇒ 无「验签被计入 3s 预算」这条漂移**（**不落码**，登记以防后人误派） | — | **本轮随 G1 的跨域推广同步一并核**：① **Go 侧**：`service/hot/api/internal/handler/routes.go` **只有一个** `AddRoutes` 块且**不带** `rest.WithJwt`（实测块1 `WithJwt=False`，路径 `/articles`，前缀 `/hot/v1`）⇒ **Go 的 hot-api 公开可读**；② **RAG 侧**：`service/hot/hot-api` **没有 `WebMvcConfig`、没有 JWT 拦截器**（实测：全模块无 `jwt`/`blacklist` 相关类；其 `HotArticleController` 的 javadoc 明写「引入 `JwtAuthInterceptor` 会让『匿名可拉热榜』变成『必须带 token』」⇒ **刻意保持匿名**）⇒ ⇒ **两侧一致 ⇒ 不存在「验签」这个环节 ⇒ 本条 N/A**。⚠️ **别把「RAG 没有鉴权」当成漂移**：热榜本就该匿名读（Go 侧同样不挂 `rest.WithJwt`）⇒ **G1 的推广清单里含 `hot-api`，但对 hot 域不适用** ⇒ 已在同批回复 G1 说明 ⇒ **本域不落码** |
 ## 4. 需转派 **G4**（`align/g4-service-common`）的（**本域只登记：现象 + 证据 + 建议修法**）
 
 > 派单走**实时轨**（`session send` ＋ 反馈单 7 项）＋ **正式轨**（本表）⇒ 两轨内容须一致（AGENTS.md §5.3e）。
