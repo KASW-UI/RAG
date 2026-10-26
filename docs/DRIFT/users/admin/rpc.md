@@ -668,11 +668,22 @@ Required Confirm: 用 exp-difftest-grpc-errors.sh 对同一用例分别用 100ms
 > | | 状态 |
 > |---|---|
 > | **档位 B 的 desc 文案**（Go `context deadline exceeded` vs RAG `rpc timeout after 2000ms`） | ✅ **已由 `align/global` 修掉**（`RpcInterceptor` 换用 `GO_DEADLINE_EXCEEDED_DESCRIPTION = "context deadline exceeded"`；配套真 Netty 守门 `RpcInterceptorTimeoutDescriptionGateTest` + `tools/semantic-probe/rpc-timeout/` 双侧活体探针）<br>**状态（2026-10-26 实查）**：修复**已提交**（`align/global` = `22a9111`，含 `49808ad` 主改动 + `22a9111` 台账订正），且**已推 `origin` + `upstream` 双远端**（三处 ref 指向一致，实查过）⇒ **不会再丢**。<br>⚠️ **但尚未合回 `do-my-own-gh`** ⇒ 本条在本域台账里**仍记「待合回」**，**合回后才改成「已销账」**。<br>📌 **合回与否已拍板（2026-10-26，用户 Jason）：暂不合回**（`align/global` 与 `align/favorite` 都暂不并入主仓）⇒ 维持「待合回」**不是「忘了合」** |
-> | **本条本体**（服务端 2s **不继承**客户端 deadline ⇒ 档位 A 的 `Δ_end = +1111ms` 资源占用） | ❌ **未销** —— `RpcInterceptor` 的 deadline 仍是 `System.currentTimeMillis() + timeout.toMillis()`（**服务端自己的 2s**），**没有**取 `min(客户端 deadline, 服务端 2s)` ⇒ **CONFIRMED SEMANTIC MISMATCH 定性不变**<br>⇒ 已由 global 登记为 **E38**（`docs/DRIFT/global/_README.md` §七之五，**A 类 backlog**，落点在 global 写权内 ⇒ 不需拍板） |
+> | **本条本体**（服务端 2s **不继承**客户端 deadline） | 🟡 **拆成两层，第 ② 层已修、第 ③ 层未修**（详见下方「三层拆分」与 §1.3 的销账补记）⇒ **整条定性不变：CONFIRMED SEMANTIC MISMATCH 仍成立**（可观察差距 `Δ_end = +1111ms` 来自未修的第 ③ 层）<br>⇒ 已由 global 登记为 **E38**（`docs/DRIFT/global/_README.md` §七之五，**A 类 backlog**，落点在 global 写权内 ⇒ 不需拍板） |
 >
 > ⇒ **修文案 ≠ 修继承**：改完后**档位 A 的 `Δ_end` 仍是 +1111ms**。
 > ⇒ ⚠️ **不得以「desc 对齐了」把本条判为已闭环** —— 修法落点仍是 `service/common` 的 `RpcInterceptor`
 > （`service/common` 单写权归 `align/global`，本域无权改）。
+>
+> > #### 🟡 2026-10-26 更新：**本条已拆成三层，第 ② 层（期限计算）也修了**
+> >
+> > | 层 | 内容 | 状态 |
+> > |---|---|---|
+> > | ① | 超时响应的 **description 文案** | ✅ 已修（`22a9111`，待合回） |
+> > | ② | **期限计算**（本条原问题本体：服务端预算 min 客户端 deadline） | ✅ **已修**（`af416d9`，待合回）—— `effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())`，两处消费点都用它；取值点 `io.grpc.Context.current().getDeadline()` 服务端**实测可用**（客户端 1s ⇒ 读到 932ms 剩余） |
+> > | ③ | **资源取消**（客户端放弃后 PG 查询仍在跑 ⇒ `Δ_end = +1111ms`） | ❌ **未修** —— grpc-java 的 `ServerCall.close()` **不取消业务线程**（与 T-14 同根因）⇒ 真正对齐需「handler 挪受控 executor + 超时 interrupt」⇒ **架构级 · 影响 10 个 rpc 组件**<br>⇒ **Jason 2026-10-26 已拍板（经 global 域转述）：① 本轮做，② 另立项** |
+> >
+> > ⇒ **整条定性不变**（第 ③ 层未修 ⇒ 可观察差距仍在），
+> > **但子项「是否 min 客户端 deadline」已答「是」且已修** ⇒ 档位 A 的 `Δ_start` 那一格修后会变、`Δ_end` 那格不变。
 
 > ✅ **2026-10-24 验证轮续 §1：本条从「静态推断」升级为「运行期实证」**（结论**未变**，证据强度**变了**）。
 >
@@ -1517,7 +1528,7 @@ users 域 DDL，多建 `users_user_avatar_history`。
 |---|---|---|---|
 | 1 | 🔴 **`users_user.extra_info` 也是 jsonb，而 Go 是 text**（`serializer:json`） | **跨域 · 未修** | DDL 归 users/user 域（`01_create_user.sql:41`），本 worker 无权改。**与本轮 ① 完全同型**：Go 落库成功 / RAG 被 jsonb 以 22P02 拒收。⇒ 建议 users-user 域照本节 §1.1 的三处同提交改法处理。**注意 `admin-rpc` 的 `updateUser` 也要跟着去掉那处 CAST**，否则跨域合并时会产生行为分叉 |
 | 2 | 🟡 **DRIFT-ARPC-006**（RAG 侧零手写 span，Go 逐 Logic 打 `audit.*` 属性） | ~~未修~~ **✅ 实施轮 §2 已修（8 处 span）** | | ⚠️ **本条原先的判断「需动 `service/common`、不在本域」已被推翻** —— `admin-rpc` 自己的 `pom.xml` 已引 `opentelemetry-bom`，`GlobalOpenTelemetry.getTracer` 与 Go `otel.Tracer` 是同一套 API ⇒ 在 admin-rpc 内即可补齐，不动 `service/common`。另**订正计数**：Go 是 **8 个 logic** 有 span，不是 13（13 是 attribute 条数）⇒ 刻意不给 getself/getuser/getuserlist/logout/updateself 加 span，用负向断言钉死 |
-| 3 | 🟡 **UNRESOLVED-ARPC-002**（超时是否 min 客户端 deadline） | ~~仍未定~~ **✅ 定性轮 §1 定性 → 验证轮续 §1 拿到运行期实证** | | **CONFIRMED SEMANTIC MISMATCH**（结论未变，证据强度变了：静态推断 → 实测）。实测：客户端 deadline 1000ms 时，Go 的查询随客户端一起死（Δ_end=0ms），**RAG 的查询在客户端返回后仍占着 PG 1111ms**。修法落在 `service/common` 的 `RpcInterceptor`（不继承入站 deadline），**不在本域**，故本 worker 无权改。⚠️ 现有 HTTP 对拍工具在结构上抓不到这条（见定性轮 §1.4）⇒ 不得以「对拍全绿」当它已闭环。<br>**2026-10-26 更新**：`align/global` 已修**档位 B 的 desc 文案**（`rpc timeout after 2000ms` → `context deadline exceeded`）⇒ **只销那一格**；**本条本体（不继承客户端 deadline）未修**，定性**不变**。该修复**已提交并推双远端**（`22a9111`，三处 ref 一致），**待合回 `do-my-own-gh`**。本条本体已由 global 登记为 **E38**（A 类 backlog）；其**修法分两层**（① 纯 deadline 计算可做 · ② 「handler 挪受控 executor + 超时 interrupt」是架构级、影响 10 个 rpc 组件）⇒ **只做 ① 只能修一半** |
+| 3 | 🟡 **UNRESOLVED-ARPC-002**（超时是否 min 客户端 deadline） | ~~仍未定~~ **✅ 定性轮 §1 定性 → 验证轮续 §1 拿到运行期实证** | | **CONFIRMED SEMANTIC MISMATCH**（结论未变，证据强度变了：静态推断 → 实测）。实测：客户端 deadline 1000ms 时，Go 的查询随客户端一起死（Δ_end=0ms），**RAG 的查询在客户端返回后仍占着 PG 1111ms**。修法落在 `service/common` 的 `RpcInterceptor`（不继承入站 deadline），**不在本域**，故本 worker 无权改。⚠️ 现有 HTTP 对拍工具在结构上抓不到这条（见定性轮 §1.4）⇒ 不得以「对拍全绿」当它已闭环。<br>**2026-10-26 更新**：`align/global` 已修**档位 B 的 desc 文案**（`rpc timeout after 2000ms` → `context deadline exceeded`）⇒ **只销那一格**；**本条本体（不继承客户端 deadline）未修**，定性**不变**。该修复**已提交并推双远端**（`22a9111`，三处 ref 一致），**待合回 `do-my-own-gh`**。<br>**2026-10-26 再更新**：本条已拆成三层 —— ① desc 文案 ✅已修（`22a9111`）· ② **期限计算 ✅已修**（`af416d9`，`effectiveTimeoutMs = min(服务端预算, 客户端 deadline 剩余)`，待合回）· ③ **资源取消 ❌未修**（grpc-java `ServerCall.close()` 不取消业务线程 ⇒ `Δ_end = +1111ms` 仍在）⇒ **整条定性不变**（第③层未修），**但子项「是否 min 客户端 deadline」已答「是」且已修** ⇒ 档位 A 的 `Δ_start` 修后会变、`Δ_end` 不变。本条已由 global 登记为 **E38**（A 类 backlog）；第③层已另立项 |
 | 4 | 🟡 **UNRESOLVED-ARPC-003**（Redis 客户端超时配置） | ~~仍未定~~ **✅ 定性轮 §2 + 实施轮 §1 + 验证轮 §2 + 验证轮续 §2 ⇒ **已关闭**（含 socket 层实证）** | | 读超时 3s 两侧一致（但**一致是巧合**，无出处无回归网）；连接超时已补 `connect-timeout: 5s`，**socket 层已用黑洞 IP 实测**（失败耗时落在 [4000,9500)ms ⇒ 只有 5s 落得进去）。⚠️ 但要记住：**Lettuce 的连接是异步的** ⇒ 故障时**先到期的往往是 3s 的命令超时**，5s 的连接超时通常不决定用户可见时延 |
 | 5 | 🟡 **UNRESOLVED-ARPC-005**（`users_user` 建表责任交叉） | ~~跨组件~~ **✅ 验证轮 §1 已关闭（双侧并发实测）** | | RAG 侧 advisory lock **机制性**串行（同一把锁 8675309，两进程严格错开）；Go 侧 GORM AutoMigrate 是 check-then-act，**机制上仍有竞态窗口**，实测未撞≠机制保证 ⇒ 两侧性质不同，不可混谈 |
 | 6 | 🟡 **DDL 的 `SET TIME ZONE` 副作用** | ~~已记录未验证~~ **✅ 修复轮 §8 已闭环（变异实测偏移 28800 秒）** | | 本轮新增的 `SET/RESET TIME ZONE` 与 `01`/`02` 同款；`SchemaInitializer` 四份脚本共用**一条连接**依次执行 ⇒ `03`/`04` 的 `SET` 只影响其自身语句区间，随后 `RESET` 还原。**未做「多实例并发建表 + 非 UTC 会话时区」的运行时验证** |
@@ -2499,7 +2510,7 @@ javadoc 里记了改名理由与 Go 出处）。
 | 档位 | 侧 | `Δ_start` 查询存活 | `Δ_end` 客户端返回后仍占 PG | 客户端看到的 desc |
 |---|---|---|---|---|
 | **A** 客户端 deadline **1000ms** | **Go** | **+1005ms** | **+0ms** | `CallOptions deadline exceeded`（客户端自己的） |
-| **A** 客户端 deadline **1000ms** | **RAG** | **+2117ms** | **+1111ms** | `CallOptions deadline exceeded`（客户端自己的） |
+| **A** 客户端 deadline **1000ms** | **RAG** | **+2117ms**　**〔修前实测值〕** | **+1111ms**　**〔修前实测值〕** | `CallOptions deadline exceeded`（客户端自己的） |
 | **B** 客户端 deadline **5000ms**（对照） | **Go** | +2113ms | −3ms | `context deadline exceeded` |
 | **B** 客户端 deadline **5000ms**（对照） | **RAG** | +2124ms | +3ms | `rpc timeout after 2000ms`　**〔2026-10-24 修前实测值，见下方销账补记〕** |
 
@@ -2523,15 +2534,22 @@ javadoc 里记了改名理由与 Go 出处）。
 >   在合回之前，**主仓代码仍是旧串**（`RpcInterceptor` 的超时 description 尚未生效）。
 > - ⚠️ **本条只销「档位 B 的 desc」这一格**，**不销 ARPC-002 的本体** —— 见下方「⚠️ 必须一起读」。
 >
-> **⚠️ 必须一起读：global 修的是「description 文案」，ARPC-002 的本体（不继承客户端 deadline）没被修。**
+> **⚠️ 必须一起读：这条差异分三层，global 已修两层，剩一层。**
 >
-> | | ARPC-002 的**本体** | global 本轮修的 |
+> | 层 | 内容 | 状态（2026-10-26 实查） |
 > |---|---|---|
-> | 内容 | 服务端 2s 预算**不继承客户端 deadline** ⇒ 客户端放弃后，PG 上的查询**继续占用** 1.1s（**档位 A** 的 `Δ_end = +1111ms`） | 超时响应的 **description 文案**（**档位 B** 的那一格） |
-> | 修了吗 | ❌ **没修** —— `RpcInterceptor` 的 deadline 仍是 `System.currentTimeMillis() + timeout.toMillis()`（**服务端自己的 2s**），**没有**取 `min(客户端 deadline, 服务端 2s)` | ✅ 已修 |
+> | **① description 文案** | 超时响应给客户端的 `status.description`（**档位 B** 那一格） | ✅ **已修** —— `RpcInterceptor` 换用 `GO_DEADLINE_EXCEEDED_DESCRIPTION = "context deadline exceeded"`（`align/global` @ `22a9111`，**已推双远端，待合回**） |
+> | **② 期限计算**（**本条原问题本体**） | 服务端预算**不 min 客户端 deadline** ⇒ 服务端干等满自己的 2s（**档位 A** 的 `Δ_start = +2117ms`） | ✅ **已修** —— `effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())`，两处消费点（`deadlineEpochMs` + 超时调度器延时）都用它（`align/global` @ `af416d9`，**已推双远端，待合回**）<br>⇒ 取值点 `io.grpc.Context.current().getDeadline()`（grpc-java 服务端**实测可用**：客户端 1s ⇒ 服务端读到 **932ms** 剩余） |
+> | **③ 资源取消** | 客户端放弃后，**PG 上的查询仍在跑**（**档位 A** 的 `Δ_end = +1111ms`） | ❌ **未修** —— Go 侧 ctx 一取消 ⇒ GORM **同步取消** PG 查询；grpc-java 的 `ServerCall.close()` **不取消业务线程**（**与 T-14 同根因**：框架限制）⇒ 即便期限算对了，**在途查询仍会跑满**<br>⇒ 真正对齐要「handler 挪到受控 executor + 超时 interrupt」⇒ **架构级 · 影响 10 个 rpc 组件**<br>⇒ **Jason 2026-10-26 已拍板（经 global 域转述）：① 本轮做，② 另立项** |
 >
-> ⇒ **ARPC-002 仍是 CONFIRMED SEMANTIC MISMATCH，资源占用差异依然存在。**
-> ⇒ ⚠️ 修完后**档位 A 的 `Δ_end` 仍然是 +1111ms** ⇒ 别把「desc 对齐了」读成「ARPC-002 销账了」。
+> ⇒ **本条（`UNRESOLVED-ARPC-002`）作为「整条」的定性不变：CONFIRMED SEMANTIC MISMATCH 仍成立**
+> —— 因为**可观察的差距（`Δ_end = +1111ms`）来自第 ③ 层，而第 ③ 层未修**。
+> ⇒ **但子项已变**：「服务端是否 min 客户端 deadline」这个**具体问题已答「是」且已修**（第 ② 层）⇒
+> **档位 A 的 `Δ_start` 那一格修后会变**（服务端不再等满自己的 2s，查询提前到客户端 deadline 附近消失）；
+> **档位 A 的 `Δ_end` 那一格修后不变**（第 ③ 层未做）。
+> ⚠️ ⇒ 上表两格都标了「修前实测值」——**它们是 2026-10-24 的活体测量，价值正在于它是「修前」的原始快照**；
+> 修后的值**待第 ③ 层落地后重测**（探针已就位，见 §1.4 的边界块）。
+> ⚠️ **别把「desc 对齐了」或「期限算对了」读成「ARPC-002 销账了」** —— 整条销账要等第 ③ 层。
 
 ### 1.4 结论
 
@@ -2570,6 +2588,21 @@ javadoc 里记了改名理由与 Go 出处）。
 >   **不在每轮门禁里** ⇒ 回归网缺这一环（改坏了不会被自动抓到）。
 >   ⇒ 补法是把**已有**探针接进 `run.sh`（**落点：`tools/difftest/` 共享资产**）
 >   + 它要用的 `service/common` 改动（**global 写权**）⇒ 属 global **E38** 的范围（**A 类 backlog，不需拍板**）。
+>
+> #### 🔴 2026-10-26 补记：**探针的档位设计有一个必须先满足的前提**（global 实测踩出来的）
+>
+> ⚠️ **客户端 deadline 必须早于服务端 timeout**，否则
+> `effectiveTimeoutMs = min(服务端预算, 客户端 deadline 剩余)` **算出来就等于服务端值**
+> ⇒ **两侧分不出差别** ⇒ **探针失效（会假绿）**。
+> ⇒ 探针必须开一档**客户端 deadline < 服务端 2s** 的用例（如客户端 100ms）
+> ＋ 一档**客户端 deadline > 服务端 2s** 的对照组（如 5000ms）。
+> ⇒ **这条是「探针能不能验到修法」的前提，不是可选参数** ——
+> 档位选错 ⇒ 探针恒绿 ⇒ **第 ② 层修没修都看不出来**。
+> ⇒ global 已据此在 `tools/semantic-probe/rpc-timeout/` 的 Go 半边加 `client_deadline_ctx` 用例
+> （**修前** Go=`client_100ms` vs RAG=`server_own` ⇒ **漂移坐实，EXIT=1**；**修后**两侧一致 ⇒ EXIT=0）
+> ＋ 守门 `RpcInterceptorClientDeadlineGateTest` 2 条
+> （① 客户端 deadline 早于服务端 ⇒ 有效期限必须落在客户端那档；
+> ② 客户端**没带** deadline ⇒ 仍是服务端预算，防「把无 deadline 错当成有 deadline」）。
 
 ### 1.5 ⚠️ 效力边界（必须一起记，否则会被过度解读）
 
@@ -2580,7 +2613,7 @@ javadoc 里记了改名理由与 Go 出处）。
 | **修法归属** | 仍在 `service/common` 的 `RpcInterceptor` —— **只算服务端自己的 2s**（`RpcInterceptor` 里 `deadlineEpochMs` 的计算：`System.currentTimeMillis() + timeout.toMillis()`，**没有**取 `min(客户端 deadline, 服务端 2s)`）⇒ **不在本域**，本 worker 无权改。<br>⚠️ **本行原先写的是行号 `RpcInterceptor.java:170-172`，已改为符号名** —— `service/common` 正被 `align/global` 持续改动（该文件在 2026-10-26 已从 170 行漂到 214 行），**行号会随别人改动而失效** ⇒ 行号引用一律换成**符号名 / 表达式**（AGENTS.md §3.1：证据要指向**消费点**） |
 | **未覆盖** | 只测了 `Login` 一个 RPC。机制在 `RpcInterceptor` 里 ⇒ **对全部 13 个 RPC 生效**，但**逐个 RPC 的实测**未做。 |
 | **🔴 本体未销** | **2026-10-26 的销账只覆盖「档位 B 的 desc 文案」**（global 修，已提交并推双远端 `22a9111`，**待合回**）⇒ **ARPC-002 的本体（服务端 2s 不继承客户端 deadline）未被修，条目的 CONFIRMED SEMANTIC MISMATCH 定性不变**。修法落点仍是 `service/common` 的 `RpcInterceptor`（`service/common` 单写权归 `align/global`）⇒ 已登记为 global **E38** |
-| **⚠️ 本体的修法分两层（不可只做一半）** | **global 2026-10-26 补充的边界**（本表原先没有）：<br>**① 纯 deadline 计算**（可做）：`deadlineEpochMs` 与超时调度器延时改成 `min(客户端 deadline, now+timeout)` —— grpc-java 服务端 `Context.current().getDeadline()` **拿得到**客户端 deadline ⇒ `DeadlineState` 感知时刻与超时 close 时刻都正确。<br>⚠️ **② 但 PG 查询仍会跑满**：Go 的 ctx 一取消 ⇒ GORM **同步取消** PG 查询；grpc-java 的 `ServerCall.close()` **不取消业务线程**（**与 T-14 同一根因**：框架限制）⇒ 真正对齐要「handler 挪到受控 executor + 超时 interrupt」⇒ **架构级改动，影响 10 个 rpc 组件**。<br>⇒ **只做 ① 只能修一半 ⇒ 修 ① 必须同时评估 ②** ⇒ **「desc 对齐了」更不等于「本体闭环了」** |
+| **⚠️ 本体的修法分两层（不可只做一半）** | **global 2026-10-26 补充的边界**（本表原先没有）：<br>**① 纯 deadline 计算**（可做）：`deadlineEpochMs` 与超时调度器延时改成 `min(客户端 deadline, now+timeout)` —— grpc-java 服务端 `Context.current().getDeadline()` **拿得到**客户端 deadline ⇒ `DeadlineState` 感知时刻与超时 close 时刻都正确。　🟢 **2026-10-26 已修**（`align/global` @ `af416d9`，待合回）<br>⚠️ **② 但 PG 查询仍会跑满**：Go 的 ctx 一取消 ⇒ GORM **同步取消** PG 查询；grpc-java 的 `ServerCall.close()` **不取消业务线程**（**与 T-14 同一根因**：框架限制）⇒ 真正对齐要「handler 挪到受控 executor + 超时 interrupt」⇒ **架构级改动，影响 10 个 rpc 组件**。　🔴 **未修**，已另立项<br>⇒ **只做 ① 只能修一半 ⇒ 修 ① 必须同时评估 ②** ⇒ **「desc 对齐了」更不等于「本体闭环了」** |
 
 ## 2. ✅ Lettuce socket 层 —— connect-timeout 5s 已证（第 3、4 层）
 
