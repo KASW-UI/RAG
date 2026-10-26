@@ -75,16 +75,11 @@ RAG `service/comment/comment-common/`：
 
 | 项 | 状态 |
 |---|---|
-| **27 个常量全留还是只留可达的 14 个** | ✅ **全留**（推导建议，依据：`errmsg.go:67-95` 的 `codeMsg` 是**字面量表**，
-`GetErrMsg` 的未知码回退（`:97-103`）依赖 `codeMsg[Error]` 存在；
-且这 27 个数值是**跨服务契约**，删项等于改契约。13 个零引用常量（§12.3）**保留但不视为已对齐**） |
+| **27 个常量全留还是只留可达的 14 个** | ✅ **全留**（推导建议，依据：`errmsg.go:67-95` 的 `codeMsg` 是**字面量表**， `GetErrMsg` 的未知码回退（`:97-103`）依赖 `codeMsg[Error]` 存在； 且这 27 个数值是**跨服务契约**，删项等于改契约。13 个零引用常量（§12.3）**保留但不视为已对齐**） |
 | **13 个零引用常量算不算「已对齐」** | ⚠️ 按 AGENTS.md §0 的判读纪律，只能说「**码表完整**」，不能说「这些码在用」 |
 | **`CommentGrpcError` 的 trailer key 名** | 🟡 推导建议 `rag-comment-biz-code`（与 `LikeGrpcError.BIZ_CODE_TRAILER_KEY = "rag-like-biz-code"`（`:78`）同款命名法：`rag-` 前缀 + 域名 + 语义）。**本文件未拍板** |
-| **`mapToGrpcCode` 的标准码选择** | 🔴 **必须避开熔断失败名单**（`DeadlineExceeded`/`Internal`/`Unavailable`/`DataLoss`/`Unimplemented`/`ResourceExhausted`），
-否则每次业务错误都会被计成依赖故障、熔断误开。`LikeGrpcError.java:110-115` 已给出「`ERROR_INPUT_WRONG → INVALID_ARGUMENT`、其余 → `UNKNOWN`」的选择，
-**comment 侧是否照抄需拍板**（comment 域的 `ERROR_INPUT_WRONG=2001` 与 like 同值，见 §12.3） |
-| **`com.rag.common` 反向依赖** | ⚠️ `BusinessException` 在 `common` 模块，`comment-common` 要引它；`common` 是下层，不会反向引 `comment-common`
-⇒ 无循环依赖（与 `users-common/errmsg/ErrorCode` 的 javadoc 记录的同一约束一致） |
+| **`mapToGrpcCode` 的标准码选择** | 🔴 **必须避开熔断失败名单**（`DeadlineExceeded`/`Internal`/`Unavailable`/`DataLoss`/`Unimplemented`/`ResourceExhausted`）， 否则每次业务错误都会被计成依赖故障、熔断误开。`LikeGrpcError.java:110-115` 已给出「`ERROR_INPUT_WRONG → INVALID_ARGUMENT`、其余 → `UNKNOWN`」的选择， **comment 侧是否照抄需拍板**（comment 域的 `ERROR_INPUT_WRONG=2001` 与 like 同值，见 §12.3） |
+| **`com.rag.common` 反向依赖** | ⚠️ `BusinessException` 在 `common` 模块，`comment-common` 要引它；`common` 是下层，不会反向引 `comment-common` ⇒ 无循环依赖（与 `users-common/errmsg/ErrorCode` 的 javadoc 记录的同一约束一致） |
 
 ---
 
@@ -345,37 +340,22 @@ comment-rpc 的 `CommentServiceGrpcImpl` 也必须遵守同一条，否则 trail
 
 | # | 问题 | 详情 |
 |---|---|---|
-| 1 | **业务码无法在线路上表达（平台级）** | Go 把 27 个码里的越界值（1001~2001、5001~5010、1012、1013）直接塞进 `grpc-status`；
-grpc-go 的 `codes.Code` 是 `int32` 不校验；**grpc-java 发不出**（`LikeGrpcError.java:36-48` 实测：
-`fromCodeValue(5003)` → `UNKNOWN / value=2 / desc="Unknown code 5003"`，**连 description 都被覆盖**）。
-⇒ 净差异 = `grpc-status` 字段数值不可复原；业务码、文案、错误类别三者仍无损。**实现前阻塞项** |
-| 2 | **13 个零引用常量** | `CodeServerBusy`(1015)、`ErrorDbTransaction`(5005)、`ErrorJsonUnmarshal`(5008)、`ErrorDelayMsg`(5010)、
-`ErrorUserExist`(1001)、`ErrorLoginWrong`(1002)、`ErrorUserNotExist`(1003)、`ErrorTokenNotExist`(1004)、
-`ErrorTokenTypeWrong`(1005)、`ErrorTokenRefresh`(1007)、`ErrorUserNoLogin`(1009)、`ErrorUserLogined`(1010)、`ErrorUserBanned`(1011) —— 全域零引用。本文件**保留**（码表完整性 + 跨服务契约），但按 AGENTS.md 的判读纪律，**只能说「码表完整」，不能说「这些码在用」** |
+| 1 | **业务码无法在线路上表达（平台级）** | Go 把 27 个码里的越界值（1001~2001、5001~5010、1012、1013）直接塞进 `grpc-status`； grpc-go 的 `codes.Code` 是 `int32` 不校验；**grpc-java 发不出**（`LikeGrpcError.java:36-48` 实测： `fromCodeValue(5003)` → `UNKNOWN / value=2 / desc="Unknown code 5003"`，**连 description 都被覆盖**）。 ⇒ 净差异 = `grpc-status` 字段数值不可复原；业务码、文案、错误类别三者仍无损。**实现前阻塞项** |
+| 2 | **13 个零引用常量** | `CodeServerBusy`(1015)、`ErrorDbTransaction`(5005)、`ErrorJsonUnmarshal`(5008)、`ErrorDelayMsg`(5010)、 `ErrorUserExist`(1001)、`ErrorLoginWrong`(1002)、`ErrorUserNotExist`(1003)、`ErrorTokenNotExist`(1004)、 `ErrorTokenTypeWrong`(1005)、`ErrorTokenRefresh`(1007)、`ErrorUserNoLogin`(1009)、`ErrorUserLogined`(1010)、`ErrorUserBanned`(1011) —— 全域零引用。本文件**保留**（码表完整性 + 跨服务契约），但按 AGENTS.md 的判读纪律，**只能说「码表完整」，不能说「这些码在用」** |
 | 3 | **码表与 hot / users / article 三方冲突** | 5002/5003/5004 在 comment / hot / users 三个域语义**两两不同**（§12.3 末）。禁止 REUSE 任何既有 `ErrorCode`。**这是硬约束，不受任何拍板结果影响** |
-| 4 | **`likecommentlogic.go:62-63` 的「日志码 ≠ 发出码」** | 日志记 `ErrorDbInsert`(5004)、线路发 `ErrorInputWrong`(2001)。Go 侧显式不一致，**迁移时不得顺手修好** |
-| 5 | **线路文案与码表文案是两套东西** | 18 处 `NewGrpcErr` 的第二个参数是手写中文串（如 `create:73` 的 `"评论内容不能为空"`），
-而码表 2001 的文案是 `"输入有误"`。Java 侧**不能让 `grpcError(bizCode)` 查表填 description** —— 必须让调用方传原文案 |
-| 6 | **`api/commentservice.go:48-49` 的 5001 兜底同时覆盖两类错误** | 「非 `CodeError` 的错误」里既包含 api 自己的解析失败，也包含 `getcommentlogic.go:74` 的裸 rpc 错误。
-Java 侧兜底分支必须**同时**覆盖这两类，且都产出 `{code:5001, msg:"系统内部错误"}` |
+| 4 | **`rpc/internal/logic/like_comment_logic.go:62-63`（**rpc 层**）的「日志码 ≠ 发出码」** | 日志记 `ErrorDbInsert`(5004)、线路发 `ErrorInputWrong`(2001)。Go 侧显式不一致，**迁移时不得顺手修好**。⚠️ **原写成了 api 层的 `likecommentlogic.go`（文件名张冠李戴，2026-10-26 订正）** —— api 层那个文件**只有 62 行**，且它的日志码与线路码**同码**（都是 `ErrorServerCommon`=5001）⇒ **不一致的是 rpc 层** |
+| 5 | **线路文案与码表文案是两套东西** | 18 处 `NewGrpcErr` 的第二个参数是手写中文串（如 `create:73` 的 `"评论内容不能为空"`）， 而码表 2001 的文案是 `"输入有误"`。Java 侧**不能让 `grpcError(bizCode)` 查表填 description** —— 必须让调用方传原文案 |
+| 6 | **`api/commentservice.go:48-49` 的 5001 兜底同时覆盖两类错误** | 「非 `CodeError` 的错误」里既包含 api 自己的解析失败，也包含 `getcommentlogic.go:74` 的裸 rpc 错误。 Java 侧兜底分支必须**同时**覆盖这两类，且都产出 `{code:5001, msg:"系统内部错误"}` |
 | 7 | **`comment-common/pom.xml` 无任何依赖** | 缺 `grpc-stub`（compile）与 3 个 test scope 依赖。**实现前必须先补** |
-| 8 | **与 like-common 的类数差异需要签字** | 本文件推导 **3 类**，like 落地的是 **4 类**（多一个 `CodeError`）。虽然 §12.5 给了逐条论证，
-但这毕竟偏离了最近的一个先例，**应作为一次显式决定记录下来**，而不是当作"显然是 3 类" |
+| 8 | **与 like-common 的类数差异需要签字** | 本文件推导 **3 类**，like 落地的是 **4 类**（多一个 `CodeError`）。虽然 §12.5 给了逐条论证，但这毕竟偏离了最近的一个先例，**应作为一次显式决定记录下来**，而不是当作"显然是 3 类" |
 
 ### UNKNOWN 清单
 
 | 项 | 说明 |
 |---|---|
 | **trailer key 的最终命名** | 推导建议 `rag-comment-biz-code`（`LikeGrpcError.BIZ_CODE_TRAILER_KEY = "rag-like-biz-code"`，`LikeGrpcError.java:78`）。名字会出现在 wire 的 metadata 里，属**跨语言契约**（Go 侧若将来要读 RAG 发出的错误就需要它）。**未拍板** |
-| **`mapToGrpcCode` 的标准码选择** | 必须避开 6 个熔断失败码。候选是 `ERROR_INPUT_WRONG(2001) → INVALID_ARGUMENT`、其余 → `UNKNOWN`（照 `LikeGrpcError.java:110-115`）。
-⚠️ comment 域的 `ERROR_INPUT_WRONG` 值与 like 相同（都是 2001），照抄不会串码；但 comment 域**多出** 1012/1013 两个业务码，
-它们在 like 的映射里没有先例（`UNKNOWN` 是安全默认）。**未拍板** |
-| **`bizCodeFromError` 读不到 trailer 时的回退顺序** | Go 的回退是「非 status error → `NewErrCode(ErrorServerCommon)` = 5001」（`api/commentservice.go:48-49`）。
-但 Java 侧还多一种 Go 侧不存在的情况：**status 存在但 trailer 缺失**（例如对端是别的实现）。
-这种情况该回 5001 还是回 `Status.Code.value()`？**未定** |
-| **`comment` 是否真的需要 `bizCodeFromError` 的完整形态** | Go 的反向映射是**隐式**的（读 `st.Code()`），没有 `BizCodeFromError` 这个函数。
-本文件推导的是一个 Java 侧**显式**的读取器，形态参照 `MessageGrpcError.bizCodeFromError`（`:195-214`）。
-但 message 域的 Go 源里本来就有这个函数，**形态不完全同源** ⇒ 是否需要额外支持 `StatusException`（checked）分支，需拍板 |
-| api 侧是否有路径会让业务码**同时**出现在 trailer 和 `grpc-status`（标准码）上 | 若将来做双侧对拍，Go 侧读 `st.Code()` 会读到 `INVALID_ARGUMENT`(3) 或 `UNKNOWN`(2) 而不是 2001。
-**双侧对拍必然失败**——与 `SD-2026-10-23-04` 的方法路径前缀问题是**两个独立的对拍阻塞点**，需一并拍板对拍方案 |
+| **`mapToGrpcCode` 的标准码选择** | 必须避开 6 个熔断失败码。候选是 `ERROR_INPUT_WRONG(2001) → INVALID_ARGUMENT`、其余 → `UNKNOWN`（照 `LikeGrpcError.java:110-115`）。 ⚠️ comment 域的 `ERROR_INPUT_WRONG` 值与 like 相同（都是 2001），照抄不会串码；但 comment 域**多出** 1012/1013 两个业务码， 它们在 like 的映射里没有先例（`UNKNOWN` 是安全默认）。**未拍板** |
+| **`bizCodeFromError` 读不到 trailer 时的回退顺序** | Go 的回退是「非 status error → `NewErrCode(ErrorServerCommon)` = 5001」（`api/commentservice.go:48-49`）。 但 Java 侧还多一种 Go 侧不存在的情况：**status 存在但 trailer 缺失**（例如对端是别的实现）。 这种情况该回 5001 还是回 `Status.Code.value()`？**未定** |
+| **`comment` 是否真的需要 `bizCodeFromError` 的完整形态** | Go 的反向映射是**隐式**的（读 `st.Code()`），没有 `BizCodeFromError` 这个函数。 本文件推导的是一个 Java 侧**显式**的读取器，形态参照 `MessageGrpcError.bizCodeFromError`（`:195-214`）。 但 message 域的 Go 源里本来就有这个函数，**形态不完全同源** ⇒ 是否需要额外支持 `StatusException`（checked）分支，需拍板 |
+| api 侧是否有路径会让业务码**同时**出现在 trailer 和 `grpc-status`（标准码）上 | 若将来做双侧对拍，Go 侧读 `st.Code()` 会读到 `INVALID_ARGUMENT`(3) 或 `UNKNOWN`(2) 而不是 2001。 **双侧对拍必然失败**——与 `SD-2026-10-23-04` 的方法路径前缀问题是**两个独立的对拍阻塞点**，需一并拍板对拍方案 |
 | `COMMENT_FACTS_ACCEPTANCE.md` 里是否有本文件未覆盖的验收约束 | 该文件在 Go 侧 `rpc/` 下（实测存在），本任务未读其内容（属 rpc 侧文档，不在 api/common 的 Go 源范围）。**未覆盖，需 rpc 侧文档补读** |
