@@ -39,11 +39,13 @@
    （AGENTS.md §5.3e·§5.3f：共享层写权唯一 + 域波期间只读）。
 5. **每条白名单 pattern 必须命中真实文件** —— 路径写错（如 `service/users/user/src/**`，
    而该目录下其实是 `user-api`/`user-rpc`/`user-proto`）⇒ 展开 0 个文件 ⇒ **守门对这一面完全失明**。
-6. **每条 ACTIVE lane 的分支必须真实存在** —— 防「守门盯着已删分支」这种假绿。
+6. **7 个真私有 `<域>-common` 无跨域引用** —— 别的域 import 了它 ⇒ 改那个库会炸掉工作树外的模块
+   ⇒ 真私有必须真私有（不私有就该提级为共享层、归 G4）。
+7. **每条 ACTIVE lane 的分支必须真实存在** —— 防「守门盯着已删分支」这种假绿。
 
 退出码
 ------
-0 = 全部通过；1 = 有重叠 / 共享文件被占用 / 越权 / 白名单路径落空 / lane 分支不存在。
+0 = 全部通过；1 = 有重叠 / 共享文件被占用 / 越权 / 白名单路径落空 / 私有库被跨域引用 / lane 分支不存在。
 
 复现
 ----
@@ -54,6 +56,7 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -184,6 +187,47 @@ EXCLUSIVE: list[tuple[str, list[str], str]] = [
 ]
 
 
+# ---------------------------------------------------------------- 跨域引用扫描
+def scan_private_common_cross_refs() -> list[tuple[str, str, str]]:
+    """扫描「**别的域**引用了本域 `<域>-common` 的类」⇒ 跨工作树撞车的编译期耦合。
+
+    🔴 **必须用 import 判定**（同源 `PIT-LANE-05`）：
+    全文正则会把 javadoc 里的 `{@code com.rag.xxx.common.Yyy}` 当成真引用。
+    ⇒ 只认 `^import\s+(?:static\s+)?([\w.]+)\s*;`。
+
+    ⚠️ 只扫 **7 个真私有** `<域>-common`（排除 `service/common` 与 `users-common`
+    —— 这两个**本来就是共享层**，跨域引用是设计意图）。
+    """
+    hits: set[tuple[str, str, str]] = set()
+    for mod in sorted(glob.glob(str(REPO / "service/*/*-common"))):
+        if not Path(mod, "pom.xml").is_file():
+            continue
+        if mod.endswith("/users-common"):
+            continue
+        owner = Path(mod).resolve().relative_to(REPO).as_posix().split("/")[1]
+        fqns: set[str] = set()
+        for f in glob.glob(str(Path(mod) / "src/main/java/**/*.java"), recursive=True):
+            text = Path(f).read_text(encoding="utf-8", errors="ignore")
+            m = re.search(r"^package\s+([\w.]+);", text, re.M)
+            if m:
+                fqns.add(f"{m.group(1)}.{Path(f).stem}")
+        if not fqns:
+            continue
+        for f in glob.glob(str(REPO / "service/**/src/**/*.java"), recursive=True):
+            rp = _rel(f)
+            if rp.startswith(Path(mod).resolve().relative_to(REPO).as_posix() + "/"):
+                continue
+            src_mod = rp.split("/src/")[0]
+            src_dom = src_mod.split("/")[1]
+            if src_dom == owner:
+                continue
+            text = Path(f).read_text(encoding="utf-8", errors="ignore")
+            imports = set(re.findall(r"^import\s+(?:static\s+)?([\w.]+)\s*;", text, re.M))
+            for full in imports & fqns:
+                hits.add((owner, src_mod, full))
+    return sorted(hits)
+
+
 def _rel(p: str) -> str:
     """把路径**归一成「仓库相对 + POSIX 分隔符」**。
 
@@ -286,7 +330,15 @@ def main() -> int:
                     " —— `service/users/user/` 下根本没有 `src/`，它是 `user-api`/`user-rpc`/`user-proto`）"
                 )
 
-    # ---- 6. 每条 ACTIVE lane 的分支必须真实存在 -------------------------
+    # ---- 6. 7 个真私有 `<域>-common` 无跨域引用 -------------------------
+    for owner, src_mod, full in scan_private_common_cross_refs():
+        failures.append(
+            f"🔴 跨域引用私有库：`{owner}-common` 的 `{full}` 被 **`{src_mod}`** import"
+            " ⇒ 该模块不属于该域的工作树 ⇒ 改那个 `<域>-common` 会**炸掉工作树外的模块**"
+            " ⇒ 私有库必须真私有（否则应提级为共享层，归 G4）"
+        )
+
+    # ---- 7. 每条 ACTIVE lane 的分支必须真实存在 -------------------------
     for lane in names:
         branch = f"align/{lane}"
         if not branch_exists(branch):
@@ -316,6 +368,7 @@ def main() -> int:
     print(f"  · {len(SHARED)} 个共享文件无人拥有（归整合者）")
     print("  · favorite 只归 G3")
     print("  · 共享层只归 G4")
+    print("  · 7 个真私有 `<域>-common` 无跨域引用")
     print("  · 每条 lane 的白名单路径都命中真实文件")
     print("  · 每条 lane 的分支都真实存在")
     return 0

@@ -24,6 +24,27 @@
 ⇒ **共享判据不是「目录位置」而是「依赖度数」**：`service/common` 与各微服务**平级**、`users-common` 埋在域目录里，
 但两者都是**跨域共享层**；其余 7 个 `<域>-common` 是真私有库（判据来自 §1.3 的逐类度数，不只看 `pom.xml`）。
 
+#### 1.1.1 那 7 个 `<域>-common` 真的**零跨工作树引用**吗？—— 三层实测（2026-10-27）
+
+| 层 | 查什么 | 结论 |
+|---|---|---|
+| **① 编译边** | `pom.xml` 里谁声明了 `<域>-common` | 每个都**只被本域** api/rpc 依赖（`hot-common` 只被 `hot-api`）；**7 个都不被外域声明** |
+| **② import 边** | 全仓 `import` 扫描（**全限定名**，`PIT-LANE-05`） | 每个 `<域>-common` 的类**只被本域**引用 ⇒ **零外域** |
+| **③ 运行期** | `@ComponentScan` / `scanBasePackages` · SPI · `AutoConfiguration.imports` | 各域只扫 `com.rag.<域>.<域>.{api,rpc}` + `com.rag.common` ⇒ **`<域>-common` 的包不在任何扫描面里**；`<域>-common` 里**无 Spring 注解**（纯 POJO / 静态工具）⇒ 不存在「顺带扫到」 |
+
+⇒ **结论**：除 `service/common`（20 模块）与 `service/users/users-common`（10 模块 / **6 外域 api**）外，
+**其余 7 个 `<域>-common` 没有任何工作树外的消费者** ⇒
+**G1/G2/G3 各自改自己域的 `-common` 库，不会炸到别的域** ⇒
+**「真私有」这个判据在三层上都成立**，不是只看 `pom.xml` 猜的。
+
+⇒ ⚠️ **唯一真正横跨所有域的运行期耦合**：`service/common` 在**每个** api 的 `scanBasePackages` 里
+（`{"com.rag.<域>.<域>.api", "com.rag.common"}`）⇒ **G4 改共享层会改变每个域的运行期装配**
+⇒ 这正是「**G4 必须最后 + 必须全量 2411 条回归**」的机制层原因（§三 C5）。
+
+⇒ **机器守门**：`check-wave-lane-ownership.py` 的断言 ⑥
+「**7 个真私有 `<域>-common` 无跨域引用**」⇒ 将来有人从外域 import 它 ⇒ **直接转红**
+（变异验证：伪造 `task-api` import `like-common` ⇒ `EXIT=1` 且点名）。
+
 ### 1.2 跨域契约依赖 DAG
 
 ⚠️ **必须区分两类边**，它们决定的东西不一样：
