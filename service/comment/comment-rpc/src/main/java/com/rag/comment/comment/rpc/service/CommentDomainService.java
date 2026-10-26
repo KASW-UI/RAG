@@ -135,6 +135,25 @@ public class CommentDomainService {
      * 这就是「评论创建走 Kafka 而非同步写」的架构，Java 侧照搬。
      */
     public CreateCommentResp createComment(CreateCommentReq req) {
+        // 🔴 Go 侧 create_comment_logic.go:41-42 的手写 span（tracer "comment-rpc"）
+        //    ＋ :56-60 的 5 个 audit.* 属性 ⇒ 逐字对齐，见 CommentSpans 的 Go 出处表。
+        return CommentSpans.traced(CommentSpans.TRACER_NAME, CommentSpans.CREATE, span -> {
+            span.setAttribute(CommentSpans.ATTR_OPERATOR_ID, req.getUserId());
+            span.setAttribute(CommentSpans.ATTR_TARGET_TYPE, req.getTargetType());
+            span.setAttribute(CommentSpans.ATTR_TARGET_ID, req.getTargetId());
+            span.setAttribute(CommentSpans.ATTR_ROOT_ID, req.getRootId());
+            span.setAttribute(CommentSpans.ATTR_PARENT_ID, req.getParentId());
+        }, () -> doCreateComment(req));
+    }
+
+    /**
+     * {@link #createComment} 的业务体（Go {@code create_comment_logic.go:37-157}）。
+     *
+     * <p>⚠️ <b>为什么拆成两个方法</b>：Go 的 span 是<b>包住整个 logic 体</b>的
+     * （{@code defer span.End()} 在 logic 末尾）⇒ Java 侧必须让 span 的生命周期覆盖业务体
+     * ⇒ 业务体单独成一个私有方法，公开方法只负责「开 span → 设属性 → 跑业务体」。
+     */
+    private CreateCommentResp doCreateComment(CreateCommentReq req) {
         long start = System.nanoTime();
         String result = "ok";
         try {
@@ -289,6 +308,27 @@ public class CommentDomainService {
      * <b>不修正</b>：修正会改变已有部署的可观察输出，且这属于数据一致性问题而非 RPC 语义问题。
      */
     public GetCommentResp getComment(GetCommentReq req) {
+        // 🔴 Go 侧 get_comment_logic.go:52-53 的手写 span —— 🔴 **tracer 名带点**（"comment.rpc"）
+        //    ＋ :70-75 的 6 个**无前缀**属性（target_id / root_id / page / page_size / target_type / sort_type）。
+        //    ⚠️ page / page_size 记的是**原始入参**（Go :72-73 用 in.Page / in.PageSize，不是归一后的值）⇒ 此处照搬。
+        //    ⚠️ Go 的这 4 个错误分支**额外**显式 SetStatus(Error) ⇒ 用 tracedWithErrorStatus。
+        return CommentSpans.tracedWithErrorStatus(CommentSpans.TRACER_NAME_LIST,
+                CommentSpans.GET_COMMENT, span -> {
+                    span.setAttribute(CommentSpans.ATTR_LIST_TARGET_ID, req.getTargetId());
+                    span.setAttribute(CommentSpans.ATTR_LIST_ROOT_ID, req.getRootId());
+                    span.setAttribute(CommentSpans.ATTR_LIST_PAGE, req.getPage());
+                    span.setAttribute(CommentSpans.ATTR_LIST_PAGE_SIZE, req.getPageSize());
+                    span.setAttribute(CommentSpans.ATTR_LIST_TARGET_TYPE, req.getTargetType());
+                    span.setAttribute(CommentSpans.ATTR_LIST_SORT_TYPE, req.getSortType());
+                }, () -> doGetComment(req));
+    }
+
+    /**
+     * {@link #getComment} 的业务体（Go {@code get_comment_logic.go:32-178}）。
+     *
+     * <p>⚠️ <b>为什么拆成两个方法</b>：见 {@link #doCreateComment} 的同名说明（span 必须包住整个 logic 体）。
+     */
+    private GetCommentResp doGetComment(GetCommentReq req) {
         long start = System.nanoTime();
         String result = "ok";
         try {
@@ -417,6 +457,22 @@ public class CommentDomainService {
 
     /** 对应 Go {@code DeleteComment}：事务外预检 + 事务内删除 + 缓存失效。 */
     public DeleteCommentResp deleteComment(DeleteCommentReq req) {
+        // 🔴 Go 侧 delete_comment_logic.go:37-38 的手写 span（tracer "comment-rpc"）
+        //    ＋ :52-55 的 4 个 audit.* 属性 ⇒ 逐字对齐，见 CommentSpans 的 Go 出处表。
+        return CommentSpans.traced(CommentSpans.TRACER_NAME, CommentSpans.DELETE, span -> {
+            span.setAttribute(CommentSpans.ATTR_OPERATOR_ID, req.getUserId());
+            span.setAttribute(CommentSpans.ATTR_COMMENT_ID, req.getCommentId());
+            span.setAttribute(CommentSpans.ATTR_TARGET_TYPE, req.getTargetType());
+            span.setAttribute(CommentSpans.ATTR_TARGET_ID, req.getTargetId());
+        }, () -> doDeleteComment(req));
+    }
+
+    /**
+     * {@link #deleteComment} 的业务体（Go {@code delete_comment_logic.go:33-136}）。
+     *
+     * <p>⚠️ <b>为什么拆成两个方法</b>：见 {@link #doCreateComment} 的同名说明（span 必须包住整个 logic 体）。
+     */
+    private DeleteCommentResp doDeleteComment(DeleteCommentReq req) {
         long start = System.nanoTime();
         String result = "ok";
         try {
@@ -503,7 +559,15 @@ public class CommentDomainService {
     // ④ LikeComment —— Go like_comment_logic.go:31-98
     // ====================================================================================
 
-    /** 对应 Go {@code LikeComment}。 */
+    /**
+     * 对应 Go {@code LikeComment}。
+     *
+     * <p>🔴 <b>刻意不加 span</b>：Go 的 {@code like_comment_logic.go} <b>没有任何 otel / span 代码</b>
+     * （实测 {@code tracer.Start} 命中数 = 0）⇒ 本方法<b>不</b>套 {@link CommentSpans}。
+     * <b>这不是遗漏，是对齐</b>：Go 没有的，RAG 也不该凭空加
+     * ⇒ 否则 trace 里的 comment span 数会从 6 变 7，与真源不符。
+     * 该「6 而非 7」的事实由 {@code CommentSpanWiringTest} 双向钉死。
+     */
     public LikeCommentResp likeComment(LikeCommentReq req) {
         long start = System.nanoTime();
         String result = "ok";
@@ -570,6 +634,26 @@ public class CommentDomainService {
      * 接口照样回 {@code success = true}（Go :97-99）。这是 Go 的现状。
      */
     public ReportCommentResp reportComment(ReportCommentReq req) {
+        // 🔴 Go 侧 report_comment_logic.go:37-38 的手写 span（tracer "comment-rpc"）
+        //    ＋ :53-57 的 5 个 audit.* 属性 ⇒ 逐字对齐，见 CommentSpans 的 Go 出处表。
+        //    ⚠️ audit.reason 记的是**枚举的 proto 值名**（Go :57 in.Reason.String()）⇒ 用 enumName 对齐
+        //    （proto3 未知枚举值在 Go 侧会写成数字字符串，Java 的 name() 会写成 UNRECOGNIZED）。
+        return CommentSpans.traced(CommentSpans.TRACER_NAME, CommentSpans.REPORT, span -> {
+            span.setAttribute(CommentSpans.ATTR_OPERATOR_ID, req.getUserId());
+            span.setAttribute(CommentSpans.ATTR_COMMENT_ID, req.getCommentId());
+            span.setAttribute(CommentSpans.ATTR_TARGET_TYPE, req.getTargetType());
+            span.setAttribute(CommentSpans.ATTR_TARGET_ID, req.getTargetId());
+            span.setAttribute(CommentSpans.ATTR_REASON,
+                    CommentSpans.enumName(req.getReason(), req.getReasonValue()));
+        }, () -> doReportComment(req));
+    }
+
+    /**
+     * {@link #reportComment} 的业务体（Go {@code report_comment_logic.go:33-101}）。
+     *
+     * <p>⚠️ <b>为什么拆成两个方法</b>：见 {@link #doCreateComment} 的同名说明（span 必须包住整个 logic 体）。
+     */
+    private ReportCommentResp doReportComment(ReportCommentReq req) {
         long start = System.nanoTime();
         String result = "ok";
         try {
@@ -611,6 +695,25 @@ public class CommentDomainService {
      * <b>照搬</b>，不补鉴权 —— 补上会改变可观察行为（原本能成功的调用会变成 1008）。
      */
     public ManageCommentResp manageComment(ManageCommentReq req) {
+        // 🔴 Go 侧 manage_comment_logic.go:37-38 的手写 span（tracer "comment-rpc"）
+        //    ＋ :52-56 的 5 个 audit.* 属性 ⇒ 逐字对齐，见 CommentSpans 的 Go 出处表。
+        //    ⚠️ audit.action_type 记的是**枚举的 proto 值名**（Go :54 in.ActionType.String()）⇒ 用 enumName 对齐。
+        return CommentSpans.traced(CommentSpans.TRACER_NAME, CommentSpans.MANAGE, span -> {
+            span.setAttribute(CommentSpans.ATTR_OPERATOR_ID, req.getUserId());
+            span.setAttribute(CommentSpans.ATTR_COMMENT_ID, req.getCommentId());
+            span.setAttribute(CommentSpans.ATTR_ACTION_TYPE,
+                    CommentSpans.enumName(req.getActionType(), req.getActionTypeValue()));
+            span.setAttribute(CommentSpans.ATTR_TARGET_TYPE, req.getTargetType());
+            span.setAttribute(CommentSpans.ATTR_TARGET_ID, req.getTargetId());
+        }, () -> doManageComment(req));
+    }
+
+    /**
+     * {@link #manageComment} 的业务体（Go {@code manage_comment_logic.go:33-109}）。
+     *
+     * <p>⚠️ <b>为什么拆成两个方法</b>：见 {@link #doCreateComment} 的同名说明（span 必须包住整个 logic 体）。
+     */
+    private ManageCommentResp doManageComment(ManageCommentReq req) {
         long start = System.nanoTime();
         String result = "ok";
         try {
@@ -675,6 +778,23 @@ public class CommentDomainService {
      * <b>注释与实现不一致，照实现</b>。
      */
     public UpdateSubjectStateResp updateSubjectState(UpdateSubjectStateReq req) {
+        // 🔴 Go 侧 update_subject_state_logic.go:37-38 的手写 span（tracer "comment-rpc"）
+        //    ＋ :53-56 的 4 个 audit.* 属性 ⇒ 逐字对齐，见 CommentSpans 的 Go 出处表。
+        //    ⚠️ audit.target_state 记的是**枚举的编号**（Go :56 int64(in.State)）⇒ 用 getStateValue()（不是名字）。
+        return CommentSpans.traced(CommentSpans.TRACER_NAME, CommentSpans.UPDATE_SUBJECT_STATE, span -> {
+            span.setAttribute(CommentSpans.ATTR_OPERATOR_ID, req.getUserId());
+            span.setAttribute(CommentSpans.ATTR_TARGET_TYPE, req.getTargetType());
+            span.setAttribute(CommentSpans.ATTR_TARGET_ID, req.getTargetId());
+            span.setAttribute(CommentSpans.ATTR_TARGET_STATE, (long) req.getStateValue());
+        }, () -> doUpdateSubjectState(req));
+    }
+
+    /**
+     * {@link #updateSubjectState} 的业务体（Go {@code update_subject_state_logic.go:33-115}）。
+     *
+     * <p>⚠️ <b>为什么拆成两个方法</b>：见 {@link #doCreateComment} 的同名说明（span 必须包住整个 logic 体）。
+     */
+    private UpdateSubjectStateResp doUpdateSubjectState(UpdateSubjectStateReq req) {
         long start = System.nanoTime();
         String result = "ok";
         try {
