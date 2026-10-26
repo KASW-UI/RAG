@@ -89,7 +89,7 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 
 ⇒ 两斜杠写法把服务名解析成了 **authority**，path 留空。
 
-**修法**：`service/follow/follow-rpc/src/main/resources/application.yml:81`
+**修法**：`service/follow/follow-rpc/src/main/resources/application.yml:123`
 `discovery://user-rpc` → `discovery:///user-rpc`。
 
 > ⚠️ **同款缺陷仍在域外**：`article-rpc` / `comment-rpc` / `favorite-rpc` / `like-rpc` /
@@ -132,7 +132,7 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 **rpc 连的是 `host:8848`、api 连的是 `host:port`** ⇒ 两个组件连**两台 Nacos**
 ⇒ rpc 注册在 A、api 在 B 找它 ⇒ 恒 "No servers found" ⇒ 所有业务码塌成 1015。
 
-**修法**：`follow-rpc/src/main/resources/application.yml:65` 改为
+**修法**：`follow-rpc/src/main/resources/application.yml:95` 改为
 `${NACOS_ADDR:nacos}:${NACOS_PORT:8848}`，与 follow-api 同一套变量语义。
 
 > ⚠️ 这个缺陷**两个 yaml 各自看都"对"**，只有放在一起才冲突 —— 属于 §3.3「配置里没写 ≠ 没开」的变体。
@@ -173,7 +173,7 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 
 ### Flyway 账本隔离（§6.3 问题 4）
 
-`follow-rpc/src/main/resources/application.yml:59`
+`follow-rpc/src/main/resources/application.yml:79`
 `spring.flyway.table: flyway_schema_history_follow` ✅ 已隔离。
 真启动日志实测：`Creating Schema History table "public"."flyway_schema_history_follow"`，
 `first_db` 里最终只有 `block_relation` / `follow_relation` / `flyway_schema_history_follow` 三张表

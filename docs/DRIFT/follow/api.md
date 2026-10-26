@@ -348,7 +348,10 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 
 - Go 侧出口：`go-zero` 的 **DevServer**（`internal/devserver/server.go:79` `StartAgent`，
   由 `zrpc/server.go:63` 的 `c.SetUp()` ⇒ `core/service/serviceconf.go:77` 触发）
-  ⇒ `http://<host>:16065/metrics`。
+  ⇒ `http://<host>:16064/metrics`（**api 侧 = 16064**；**rpc 侧才是 16065** —— 见 [`rpc.md`](rpc.md) 的 `DRIFT-FOLLOW-006`）。
+  ⚠️ **2026-10-27 订正**：本行原写 `16065`，那是 **follow-rpc** 的 DevServer 端口
+  （真源 `service/follow/rpc/etc/follow.yaml:23`）；**api 侧的真源是
+  `service/follow/api/etc/followcenter.yaml:28` `Port: 16064`**。
 - RAG 侧出口：`/actuator/prometheus`（`management.endpoints.web.exposure.include`）。
 
 **修前的三处差异**
