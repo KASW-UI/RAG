@@ -174,8 +174,43 @@ rag:
     #    既不改它的容器上限、也不装闸门 ⇒ 行为逐字节不变。
     #    （favorite 不在 global 的写权范围内，AGENTS.md §5.3c）
     go-form-limit:
-      # Go 侧 task/api **没有** httpx.SetErrorHandler ⇒ 同 article ⇒ **400 + Go 原文** ⇒ mode: raw
-      mode: raw
+      # 🔴 2026-10-27 订正（阶段 2 · D-1）：本域改 **off**，理由**不是**「错误形状」，
+      #    而是**语义可达性** —— Go 侧这个上限在本域**根本走不到**：
+      #
+      #    Go 出处：service/task/api/internal/handler/task/gettaskhandler.go:19
+      #        decoder := json.NewDecoder(r.Body)      ← **裸 JSON 解码器**
+      #    ⇒ 它**从不调 httpx.Parse / ParseForm / GetFormValues**
+      #      （全仓 grep：task 域的 httpx.Parse/ParseForm/GetFormValues 命中数 = **0**）
+      #    ⇒ **query / form 从不被解析** ⇒ go-zero 的 maxFormParamCount=2048
+      #      （rest/httpx/util.go:15）在本域**不可达**
+      #    ⇒ Go 侧：带 3000 个 query 参数的请求**正常处理（200）**
+      #
+      #    ⇒ RAG 侧若开闸门 ⇒ 会多出一道 Go 没有的拒绝 ⇒ **行为漂移** ⇒ 必须 off。
+      #
+      # ⚠️ off 的两个前提（已逐条核实）：
+      #    ① GoStyleFormValueLimitInterceptor.preHandle 的 OFF 分支**直接 return true**
+      #       （不判定、不拒绝）
+      #    ② GoStyleTomcatParameterLimitCustomizer.customize 的 OFF 分支**直接 return**
+      #       ⇒ **不动**容器上限 ⇒ Tomcat 保留 yaml 的 2048
+      #    ⇒ 但本域**从不调 getParameter***（控制器只有 @RequestBody，没有 @RequestParam）
+      #    ⇒ Tomcat 的参数解析是**惰性**的 ⇒ **不可达 ⇒ 无影响**
+      #
+      # ⇒ 守门：service/task/task-api/src/test/java/com/rag/task/task/api/
+      #        TaskApiFormLimitReachabilityTest.java（真 Tomcat）
+      #        ① >2048 个非空 query 值 ⇒ 200
+      #        ② ?a=%zz（畸形转义）⇒ 200
+      #        ③ ?a=1;b=2（分号）⇒ 200
+      # ⚠️⚠️ **必须加引号**：YAML 1.1（SnakeYAML）把**未加引号的** `off` 解析成
+      #    **布尔 false** ⇒ `@Value("${rag.http.go-form-limit.mode}")` 拿到的是
+      #    字符串 **"false"** ⇒ 共享层 `GoStyleFormLimitMode.parse` 判「非法值」
+      #    ⇒ **启动期 BeanCreationException（进程起不来）**。
+      #    （2026-10-27 实测：未加引号时 task-api 上下文直接起不来，
+      #      报错 `非法的 rag.http.go-form-limit.mode 值：false`。）
+      #    ⇒ 域内写法的正确形式是 `mode: "off"`（带引号 ⇒ 保持字符串）。
+      #    ⚠️ 全仓此前**没有任何域**写字面量 `off` ⇒ favorite 域是靠
+      #    **「整段不写」** 拿到 OFF（`@Value` 默认值 `:off`）⇒ 别把它的注释
+      #    「故意没有这一项（= off）」误读成「写 off 也行」。
+      mode: "off"
   protection:
     max-conns: 10000
     max-bytes: 1048576
