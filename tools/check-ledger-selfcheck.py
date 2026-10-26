@@ -290,10 +290,53 @@ def _mk_index(repo_files, go_files=()):
     return {'repo_files': list(repo_files), 'go_files': set(go_files), 'top_dirs': top_dirs}
 
 
+# ====================================================================
 # N13 · 台账里**对该文件的状态叙述**（已删除 / 不存在 / 0 字节占位 …）
 #     ⇒ 这类引用是**历史记述**，不是「指向一个缺失文件的悬空引用」
+# ====================================================================
+# 🔴 **词表必须窄**（PIT-GLOBAL-040 形态⑤ 的同族教训）：
+#    **宽词表会把真缺陷一起吃掉** ⇒ 假阴性比假阳性危险得多。
+#    ⇒ 下面**分三层**，每层都必须**自带「这确实是状态叙述」的语义**，不靠上下文猜。
+#
+# ── A 层：存在性词 —— 已删除 / 不存在 / 0 字节占位 … ──
+#    （19 轮台账实战验证过，**本轮不动**）
 N13_NARRATION = re.compile(
     r'(删除|已删除|不存在|已移除|被删|不再存在|不建|未建|不创建|0\s*字节|错放|空文件|占位)')
+
+# ── B 层：「落地态」措辞 —— 自带语义：**这个文件还没落到主干 / 还没合入** ──
+#    ⇒ 真缺陷（路径写错 / 笔误）**不会**这样描述 ⇒ 可以安全进表。
+N13_LANDING = re.compile(
+    r'(待合入|未合入|尚未合入|还没合入|待合回|未合回|尚未合回'
+    r'|主干未合|主仓未合|尚未存在|还没存在|尚未落地)')
+
+# ── C 层：「免责」措辞 —— 自带语义：**作者明说这不是错误** ──
+#    ⇒ 这是 users/user 域 2026-10-26 报的「悬空 / 查不到 / 预期状态」**唯一安全的写法**：
+#       裸词「查不到 / 悬空」**单独出现不算**（真缺陷恰恰这么写），
+#       必须带上「是预期状态 / 不是台账事实错误」这类**免责半句**才算。
+N13_DISCLAIM = re.compile(
+    r'(是预期状态|属预期状态|符合预期'
+    r'|不是(?:台账)?(?:事实)?(?:错误|缺陷)|非(?:台账)?事实错误'
+    r'|属正常(?:状态|现象))')
+
+# 🔴 **护栏**：行里出现这些 ⇒ 作者在讲「**引用本身错了**」⇒ **B/C 层一律不生效**。
+#    （否则「`X.java` 路径写错 ⇒ 待合入主干」这种混合行会把真缺陷吃掉 ⇒ 假阴性。）
+#    ⚠️ 护栏**只挡 B/C 层**，**不挡 A 层** —— A 层是既有的、已验证的行为，不在本轮改动范围。
+N13_DEFECT_MARK = re.compile(
+    r'(路径(?:写错|错了|错误)|拼错|笔误|行号真错|应为|应当是)')
+
+
+def _is_n13_narration(line):
+    """一行文本是不是「**对该文件的状态叙述**」。
+
+    - **A 层**（存在性词）直接判定；
+    - **B / C 层**（落地态 / 免责）**先过护栏** —— 行里带「路径写错」这类
+      **缺陷标记**时一律不算（宁可报缺，也不吃真缺陷）。
+    """
+    if N13_NARRATION.search(line):
+        return True
+    if N13_DEFECT_MARK.search(line):
+        return False
+    return bool(N13_LANDING.search(line) or N13_DISCLAIM.search(line))
 
 
 def _narration_in_lines(lines, ln, window=2, path=None):
@@ -321,13 +364,17 @@ def _narration_in_lines(lines, ln, window=2, path=None):
 
     `path=None` 时退化为「只看有没有叙述词」（供不需要区分归属的场合使用）。
 
-    返回 (是否命中, 命中的行号（1-based））。
+    ⚠️ **叙述词本身分三层**（见 `_is_n13_narration`）：A 层（存在性词）直接判定；
+    B 层（落地态）/ C 层（免责）**先过缺陷标记护栏** —— 行里出现「路径写错」这类
+    **缺陷标记**时，B/C 层**一律不生效**（宁可报缺，也不吃真缺陷）。
+
+    返回 (是否命中, 命中的行号（1-based）)。
     """
     if not lines:
         return False, 0
     for i in range(max(0, ln - window), min(len(lines), ln + window + 1)):
         line = lines[i]
-        if not N13_NARRATION.search(line):
+        if not _is_n13_narration(line):
             continue
         if path is None:
             return True, i + 1
@@ -1321,6 +1368,43 @@ def layer0_selfcheck(root):
             print(f'    ❌ 层 1 状态叙述判定错判：期望{"命中" if _want else "不命中"}（{_why}）')
             bad += 1
 
+    # ②⁻ 层 1（2026-10-26 第三十七轮 · E61 · users/user 域实测带出）：N13 **新增 B/C 层**
+    #     必须**两头都对** ——
+    #     阳性①「待合入主干」：**落地态**措辞 ⇒ 命中
+    #           （users/user 域报的「词表缺词」根因就在这一类 —— 作者写「还没合进主干」
+    #            工具认不出 ⇒ 正常中文措辞写状态叙述仍被误报成悬空引用）
+    #     阳性②「路径悬空是预期状态，不是台账事实错误」⇒ **免责**措辞 ⇒ 命中
+    #           （⚠️ 这正是 users/user 域那条 `RpcInterceptorTimeoutDescriptionGateTest.java`
+    #            被误报的**原文措辞** ⇒ 修完这行不再需要改写台账）
+    #     阴性① 裸「查不到 / 悬空」**单独出现** ⇒ **不得**命中
+    #           （⚠️ 真缺陷（路径写错）恰恰就是这么写的 ⇒ 裸词进表 = 假阴性）
+    #     阴性② 行里带「路径写错」标记 ⇒ **B/C 层一律不生效**（护栏有牙）
+    #     阴性③ C 层措辞出现在**密集行**里、但本路径不是该行第一个路径 ⇒ 不得命中
+    _p13 = 'service/common/src/test/java/com/rag/common/observability/E61GateTest.java'
+    _n13b_cases = [
+        ([f'| 守门 | `{_p13}`（真 Netty server）<br>⚠️ 该文件**待合入主干** |'], 0, True,
+         'B 层「待合入主干」⇒ 落地态措辞命中', _p13),
+        ([f'| 守门 | `{_p13}`<br>⚠️ 主干上**查不到** ⇒ 路径**悬空**是**预期状态**，'
+          f'不是台账事实错误 |'], 0, True,
+         'C 层「是预期状态 / 不是台账事实错误」⇒ 免责措辞命中', _p13),
+        (['| **E-d** | `tools/difftest/check-protection-layer.sh` 主干上查不到 |'], 0, False,
+         '裸「查不到」单独出现 ⇒ 不得命中（真缺陷正是这么写的）',
+         'tools/difftest/check-protection-layer.sh'),
+        (['| **E-d** | `tools/difftest/check-protection-layer.sh` 路径写错 ⇒ 待合入主干 |'], 0, False,
+         '带「路径写错」标记 ⇒ B/C 层不生效（护栏有牙）',
+         'tools/difftest/check-protection-layer.sh'),
+        ([f'| **E42** | ✅ `docs/DRIFT/global/_INDEX.md` 已修 | ④ `{_p13}` 路径写错 '
+          f'⇒ 悬空是预期状态 |'], 1, False,
+         'C 层措辞在密集行里、但本路径不是该行第一个路径 ⇒ 不得命中', _p13),
+    ]
+    for _lines, _ln, _want, _why, _p in _n13b_cases:
+        _got, _at = _narration_in_lines(_lines, _ln, path=_p)
+        if _got == _want:
+            print(f'    ✅ 层 1 新增 B/C 层判定正确（{"命中" if _want else "不命中"}）：{_why}')
+        else:
+            print(f'    ❌ 层 1 新增 B/C 层判定错判：期望{"命中" if _want else "不命中"}（{_why}）')
+            bad += 1
+
     # ②″ 层 4（2026-10-26 新增）：来源上下文拼接必须**与 set 迭代顺序无关**
     #     ⇒ 否则同一条 file:line 每次运行落进不同分类桶 ⇒ 门禁输出不可复现
     #     ⚠️ 断言**白盒契约**：拼接结果 == 按 sorted(srcs) 逐个拼接
@@ -1738,6 +1822,16 @@ def run_mutation_tests(root):
     pits = os.path.join(root, 'docs/Pitfalls/task/rpc.md')
     orig_pits = read(pits)
 
+    rpc = os.path.join(root, 'docs/DRIFT/task/rpc.md')
+    orig_rpc = read(rpc)
+
+    def layer1_missing_paths():
+        """跑第 1 层，返回 **MISSING 行**（用于第 1 层专用变异）。"""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            layer1_paths(root, ledger_texts(root, 'task'))
+        return [ln for ln in buf.getvalue().split('\n') if '❌ MISSING' in ln]
+
     # ⚠️ 每个用例**显式指定**用哪条判据 —— 「改哪个文件」与「查哪条判据」是**两件事**：
     #    上一版按文件自动选判据 ⇒ 「改 `_README.md` 却跑清单判据」⇒ 变异**根本没被查**
     #    ⇒ 判据被误判成假绿（这正是本轮要根治的那类错误）。
@@ -1789,7 +1883,46 @@ def run_mutation_tests(root):
                       f'（实际报出：{problems}）')
                 bad += 1
 
+        # ── 第 1 层专用变异（E61 · 2026-10-26 第三十七轮 · users/user 域实测带出）──
+        #   变异 9/10/11：在 task 台账里**新增一条指向仓内不存在路径的引用**，
+        #     ⇒ 「落地态 / 免责」措辞 ⇒ 第 1 层**必须去噪**（不得报 MISSING）
+        #     ⇒ 同一行改成「路径写错」⇒ 第 1 层**必须报出来**（证明护栏有牙）
+        #   ⚠️ **为什么必须做这一组**：层 0 的对照只验**判定函数**；
+        #     这一组验**端到端**（真的插进台账 → 真的跑第 1 层 → 真的看报不报）。
+        #   ⚠️ **对照口径**：阳性看「**有没有报**」，不是「报了几条」⇒
+        #     否则别的路径变化会掩盖这条判据的失效。
+        _sent = ('service/task/task-rpc/src/test/java/com/rag/task/task/rpc/'
+                 'E61NoSuchGateTest.java')
+        _narr_cases = [
+            ('落地态措辞 ⇒ 必须去噪',
+             f'| **变异样本（E61-a）** | `{_sent}` 待合入主干 |', False),
+            ('免责措辞（users/user 域原文）⇒ 必须去噪',
+             f'| **变异样本（E61-b）** | `{_sent}`<br>⚠️ 主干上**查不到** ⇒ '
+             f'路径**悬空**是**预期状态**，不是台账事实错误 |', False),
+            ('带「路径写错」标记 ⇒ 必须报出来（护栏有牙）',
+             f'| **变异样本（E61-c）** | `{_sent}` 路径写错 ⇒ 待合入主干 |', True),
+        ]
+        for _label, _row, _must_report in _narr_cases:
+            try:
+                with open(rpc, 'w', encoding='utf-8') as f:
+                    f.write(orig_rpc.rstrip('\n') + '\n' + _row + '\n')
+                _miss = layer1_missing_paths()
+            finally:
+                with open(rpc, 'w', encoding='utf-8') as f:
+                    f.write(orig_rpc)
+                os.utime(rpc, None)   # PIT-GLOBAL-037：还原后必须 touch（避免 mtime 陈旧）
+            _reported = any(_sent in m for m in _miss)
+            if _reported == _must_report:
+                print(f'  ✅ 变异「第 1 层 N13 · {_label}」⇒ '
+                      f'{"被精确抓到" if _must_report else "被正确去噪"}')
+            else:
+                print(f'  ❌ 变异「第 1 层 N13 · {_label}」**判错**'
+                      f'（期望{"必须报出" if _must_report else "必须去噪"}，'
+                      f'实际{"报了" if _reported else "没报"}）⇒ 该判据是假绿')
+                bad += 1
+
         # 回归：第 3 层的 api 域断言（改标题条数 ⇒ 必须红）
+
         try:
             with open(api, 'w', encoding='utf-8') as f:
                 f.write(re.sub(r'^## 一、([^\n（]*)（\d+ 条', r'## 一、\1（2 条',
@@ -1816,12 +1949,11 @@ def run_mutation_tests(root):
             print(f'  ❌ 复原后第 3 层报 {n} 处 ≠ 变异前的 {baseline_layer3} 处 ⇒ 变异没复原干净')
             bad += 1
     finally:
-        with open(readme, 'w', encoding='utf-8') as f:
-            f.write(orig_readme)
-        with open(api, 'w', encoding='utf-8') as f:
-            f.write(orig_api)
-        with open(pits, 'w', encoding='utf-8') as f:
-            f.write(orig_pits)
+        for _p, _t in ((readme, orig_readme), (api, orig_api),
+                       (pits, orig_pits), (rpc, orig_rpc)):
+            with open(_p, 'w', encoding='utf-8') as f:
+                f.write(_t)
+            os.utime(_p, None)      # PIT-GLOBAL-037：还原后必须 touch
     print(f'  ⇒ 变异测试{"全部精确命中" if not bad else f"有 {bad} 处没命中"}')
     return bad
 
