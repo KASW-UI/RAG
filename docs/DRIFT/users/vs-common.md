@@ -444,3 +444,46 @@ G4 落码 ⇒ 共享层行为变 ⇒ **G1 这域的 A1~A9 结论要复核**（�
 
 ⇒ ⚠️ **「验证跨域」的那部分**（各打一次带标量的请求矩阵）**G1 登记 + 协调 G2/G3**，
 但**别把它整条塞进派单** —— 矩阵是域侧行为，落点不在共享层。
+
+---
+
+## 10. 🆕 **待办依赖：MP 排序桥下沉共享层**（2026-10-27 收到 G3 预告 · **已独立核实**）
+
+> ⚠️ **本节是「登记」，不是派单、也不是动作** ⇒ G3 明确说「只是预告」⇒ 本域**不动手**。
+
+### 10.1 独立核实的结论（G3 的说法逐条成立）
+
+| G3 的说法 | 本域实测 | 结论 |
+|---|---|---|
+| 域侧排序桥**全仓 9 份** | `find service -name "MybatisPlusOrderingBridgeAutoConfiguration.java"` ⇒ **9 份**（article / comment / favorite / follow / like / message / task / users-user / users-admin 各一） | ✅ **数字与名单都对** |
+| **G1 的 3 个**在 G1 写权内 | `service/users/user/user-rpc` · `service/users/admin/admin-rpc` · `service/follow/follow-rpc` —— 三份文件 + 三份 `META-INF/spring/…AutoConfiguration.imports` 各 1 行注册 | ✅ **落点确认** |
+| 共享层**没有**桥 | `find service/common -name "MybatisPlusOrderingBridge*"` ⇒ **零命中** | ✅ 属实 ⇒ 桥是**全域共性却落在域侧**（§5.3f：判据 = 依赖度数，不是目录位置） |
+| 两座桥**同向** ⇒ 并存等价 | 域侧桥：`@AutoConfiguration(after = DataSourceAutoConfiguration.class, before = MybatisPlusAutoConfiguration.class)`（`DataSourceAutoConfiguration` 取 **Boot 4 新包名** `org.springframework.boot.jdbc.autoconfigure.*`）⇒ 与共享层将要声明的边**同向** | ✅ **无环、功能等价** ⇒ 拆「先共享层加 ⇒ 再各域删」两步**不违反** §5.3c |
+
+### 10.2 🔴 **前置依赖（别先删）**
+
+**必须等 G4 的共享层桥落码之后，才能删域侧桥。** 否则「域侧删了、共享层还没加」⇒
+MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 DataSource）⇒ **不产 `SqlSessionFactory`** ⇒ **启动失败**。
+
+⇒ 合并顺序：**先 G4 共享层 ⇒ 再各域删**（G3 派单 4 = G4 侧那一步）。
+
+### 10.3 本域的**删除清单**（等 G3 正式派单后执行 · 纯删减 · 可独立提交）
+
+| 组件 | 要删的类 | 要删的注册行 |
+|---|---|---|
+| `users/user/user-rpc` | `config/MybatisPlusOrderingBridgeAutoConfiguration.java` | `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 里的 `…users.user.rpc.config.MybatisPlusOrderingBridgeAutoConfiguration` |
+| `users/admin/admin-rpc` | `config/MybatisPlusOrderingBridgeAutoConfiguration.java` | 同上（`…users.admin.rpc.config.…`） |
+| `follow/follow-rpc` | `config/MybatisPlusOrderingBridgeAutoConfiguration.java` | 同上（`…follow.follow.rpc.config.…`） |
+
+**落码后必跑的验证口径**：各自组件的**真 Spring 上下文**守门 ⇒ 判据 = **删掉域侧桥后 MP 仍生效**
+（`SqlSessionFactory` 在 ＋ `@Import` 的 `DeadlineQueryTimeoutInjector` 真在执行链上）⇒ 绿 ⇒ 证明**共享层桥已接管排序**。
+
+⚠️ **不需要**跨树同一次提交（两座桥同向 ⇒ 并存等价）⇒ **G1 的删除可独立提交、独立验证**。
+
+### 10.4 本轮**不动手**的理由
+
+① G3 明确「本条只是预告」＋ 不要求回；
+② **前置依赖未满足**（G4 的共享层桥未落）⇒ 现在删 = **制造启动失败**；
+③ 域侧桥与共享层桥**并存无害** ⇒ 不删也不产生行为漂移 ⇒ **没有必须现在做的理由**。
+
+---

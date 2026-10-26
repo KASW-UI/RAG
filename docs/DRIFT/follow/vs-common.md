@@ -280,3 +280,22 @@ installed_rank | version |      description       | success
 ⇒ **我判 UNKNOWN 的依据（文件小/内容少）本身是错的** ⇒ **读之前先看大小和结论段**，
 ⇒ **否则会把「已对齐」误记成「未知」，凭空多出一条假待办**。
 （同族：users 侧 §8.3「状态的校准器是探针，不是台账」⇒ 本条是**结论强度的校准器也是台账本身**。）
+
+---
+
+## 10. 🆕 **待办依赖：MP 排序桥下沉共享层**（2026-10-27 收到 G3 预告 · **已独立核实**）
+
+> ⚠️ **本节是「登记」，不是派单、也不是动作** ⇒ G3 明确说「只是预告」⇒ 本域**不动手**。
+
+| 项 | 本域实测 | 结论 |
+|---|---|---|
+| `follow-rpc` 的域侧排序桥 | `service/follow/follow-rpc/.../config/MybatisPlusOrderingBridgeAutoConfiguration.java` ＋ `META-INF/spring/…AutoConfiguration.imports` 1 行注册 | ✅ 存在，**落点在 G1 写权内** |
+| 全仓份数 | `find service -name "MybatisPlusOrderingBridgeAutoConfiguration.java"` ⇒ **9 份** | ✅ 与 G3 的数字一致 |
+| 共享层 | 零命中 ⇒ **没有**桥 | ✅ 属实 ⇒ 桥是全域共性却落在域侧（§5.3f：判据 = 依赖度数） |
+| 排序边方向 | 域侧桥 = `after=DataSourceAutoConfiguration.class`（**Boot 4 新包名** `org.springframework.boot.jdbc.autoconfigure.*`）`before=MybatisPlusAutoConfiguration.class` | ✅ 与共享层将要声明的边**同向** ⇒ 并存等价、无环 ⇒ **不需要跨树同一次提交** |
+
+🔴 **前置依赖**：**必须等 G4 的共享层桥落码之后才能删** ⇒ 否则 MP 自动配置退避
+⇒ 不产 `SqlSessionFactory` ⇒ **启动失败** ⇒ 合并顺序：**先 G4 共享层 ⇒ 再各域删**。
+
+⇒ 删除清单 + 落码后验证口径（真 Spring 上下文守门 ⇒ 删桥后 `SqlSessionFactory` 仍在 ＋
+`DeadlineQueryTimeoutInjector` 真在执行链上）⇒ 见 [`users/vs-common.md` §10](../users/vs-common.md)。
