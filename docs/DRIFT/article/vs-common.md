@@ -65,6 +65,7 @@
 ## 4. 需转派 **G4**（`align/g4-service-common`）的（**本域只登记：现象 + 证据 + 建议修法**）
 
 > 派单走**实时轨**（`session send` ＋ 反馈单 7 项）＋ **正式轨**（本表）⇒ 两轨内容须一致（AGENTS.md §5.3e）。
+> **回执规格（2026-10-27 双方议定 · G4 已写入 `docs/DRIFT/global/vs-common.md` §4.1，commit `6e3e612`）**：回执 **第 4 项 = 「字段本身写全」** ⇒ ① 跑没跑 ② **未跑时把理由写进第 4 项字段本身**（不写在正文里）③ 跑了则给 **模块数 / 用例数 / failures / errors / skipped / 耗时** ④ **三门禁结果**。> ⚠️ 另外三项不变：**① commit 号 ② 逐个 `文件:行号` 改动清单 ③ 触及的 A1~A9 轴 + Go 出处**。
 
 | # | 事项 | 落点 | 建议修法（**两侧都应是 Y**） |
 |---|---|---|---|
@@ -83,7 +84,12 @@
 - [x] **两侧同时跑**的探针（AGENTS.md §3.3）—— ✅ `tools/errmsg-probe/run-parity.sh` **EXIT=0**（A4 错误响应 ＋ A6 错误码契约 ⇒ **L4**）：Go 侧 sha256 == Java 侧 sha256 == `cad5cb4f…d1134`，**49 行**（CONST 15 ＋ TABLE 15 ＋ FALLBACK 19），真源 sha256 校验通过 ⇒ 只跑 RAG 的探针**不算数**这一条**已满足**
 - [x] §1 的每一条**重新核对状态**并写回（带核对日期）—— ✅ 订正 3 条：**必填字段校验**（**编号撤下**：原挂 `DRIFT-ARTICLE-API-006` ＝ 权威面另一条「8–10 MiB body 文案·已签字不修」⇒ **撞号**；**落点** `service/common` → `service/users/users-common`；**状态**「🔴 未修」→「两侧 **EQUIVALENT**·无缺口·**不派单**」）· `S-6`（**本域不成立**：`catch (StatusRuntimeException)` 在前）· `baseline-version`（**实测确实缺**）
 - [ ] §3 的域侧修法**落码 + 守门**（含变异验证）—— **阶段 2 才做**（L-1 补 `baseline-version: 0` · L-2 补 `DeadlineQueryTimeoutInjector` 的 `@Import` ＋ 真装配测试 · L-3 补 proto 契约回归网）
-- [x] §4 的派单**已正式登记**：🔴 **G4-2**（MyBatis-Plus 自动收集 `Interceptor[]` Bean 无运行证据）已按**反馈单 7 项**走**实时轨**（`session send` → `G4Common`）＋ 本表**正式轨**，两轨一致；G4-1 / G4-3 / G4-4 / G4-5 在本表登记，其中 G4-4（A9 轴措辞）/ G4-5（`AGENTS.md` §6.3 漏 `article-rpc`）另附「登记/转整合者」项同批发给 G4
-  - ⚠️ **G4-1 / G4-3 未单独走 7 项反馈单** ⇒ 它们是**登记项**（其中 G4-1 的剩余项已缩小为「共享 helper 文案口径」），**等 G4 回执时逐条核账**
+- [x] §4 的派单**已全部走完**（实时轨 `session send` → `G4Common` ＋ 本表正式轨，两轨一致）：
+  - **单 1** ＝ 🔴 G4-2（MyBatis-Plus 自动收集 `Interceptor[]` Bean 无运行证据，**阻塞本波**）—— 7 项反馈单齐全
+  - **单 2** ＝ 🔴 G4-6（client breaker 在 rpc 侧无装配路径）—— 7 项反馈单齐全（全域共性 ⇒ 请 G4 收口去重）
+  - **单 3** ＝ 🟡 G4-3（`S-6` 的 `SqlTimeoutStatusTranslator` javadoc「Go 出处」段**归因错误**）—— 7 项反馈单齐全（Go 4 处 + RAG 3 处行号**已逐条核实真实存在**）
+  - ⛔ **G4-1 已撤销**（原「必填字段校验的共享层剩余项」）⇒ **不派**（编号撞 `DRIFT-ARTICLE-API-006` ＝ 已签字不修条目；且该主题 `api.md:407/460` 判 **EQUIVALENT** ⇒ 无编号、无缺口）
+  - 🟡 G4-4（A9 轴措辞）/ G4-5（`AGENTS.md` §6.3 漏 `article-rpc`）＝ **登记/转整合者项**，已随单 1 消息同批发给 G4（**非 7 项反馈单**）
+  - ⚠️ **等 G4 回执时逐条核账**（回执规格见 §4 表头）
   - ⚠️ `docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二属 **SHARED 面 ⇒ G3 不写**（AGENTS.md §5.3e）⇒ 由 G4 / 整合者落
 - [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）—— ✅ 本轮实测：台账结构守门 `check-ledger-tables` / `check-ledger-selfcheck` / `check-ledger-count` **三项 EXIT=0**；`_MANIFEST.json` **不收录** `vs-common.md`（`grep -c` = 0）⇒ 无需改共享面

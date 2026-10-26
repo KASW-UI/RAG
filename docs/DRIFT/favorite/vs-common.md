@@ -71,6 +71,7 @@
 ## 4. 需转派 **G4**（`align/g4-service-common`）的（**本域只登记：现象 + 证据 + 建议修法**）
 
 > 派单走**实时轨**（`session send` ＋ 反馈单 7 项）＋ **正式轨**（本表）⇒ 两轨内容须一致（AGENTS.md §5.3e）。
+> **回执规格（2026-10-27 双方议定 · G4 已写入 `docs/DRIFT/global/vs-common.md` §4.1，commit `6e3e612`）**：回执 **第 4 项 = 「字段本身写全」** ⇒ ① 跑没跑 ② **未跑时把理由写进第 4 项字段本身**（不写在正文里）③ 跑了则给 **模块数 / 用例数 / failures / errors / skipped / 耗时** ④ **三门禁结果**。> ⚠️ 另外三项不变：**① commit 号 ② 逐个 `文件:行号` 改动清单 ③ 触及的 A1~A9 轴 + Go 出处**。
 > ⚠️ **落点必须独立核准**（不要照抄台账快照）—— 本轮已实测两处落点与快照不同。
 
 | # | 事项 | 落点 | 建议修法（**两侧都应是 Y**） |
@@ -89,5 +90,8 @@
 - [x] **两侧同时跑**的探针（AGENTS.md §3.3）—— ✅ `tools/errmsg-probe/favorite/run-parity.sh` **EXIT=0**（A6 ⇒ **L4**）· ✅ `tools/ddl-parity-probe/favorite/run.sh` **EXIT=0**（A8 ⇒ **L4**）· ⬜ `tools/proto-wire-probe/favorite/run.sh`（A7 可升 L4，**本轮未跑**）
 - [x] §1 的每一条**重新核对状态**并写回（带核对日期）
 - [ ] §3 的域侧修法**落码 + 守门**（含变异验证）—— **阶段 2 才做**
-- [ ] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）—— 🔴 **`_README.md` 属 SHARED 面 ⇒ G3 不写**（AGENTS.md §5.3e）⇒ 派单走**实时轨**（`session send`），`_README.md` 由整合者合并后统一更新
+- [x] §4 的派单**已走实时轨**（`session send` → `G4Common` ＋ 本表正式轨，两轨一致）：**单 1** ＝ 🔴 G4-2（MyBatis-Plus 自动收集 `Interceptor[]` Bean 无运行证据，**阻塞本波**）· **单 2** ＝ 🔴 G4-5（client breaker 在 rpc 侧无装配路径）—— 两条 7 项反馈单齐全（全域共性 ⇒ 请 G4 收口去重）
+  - 🔴 G4-1（`E65`）＝ **不重复派**（已是 global 台账的 **OPEN** 项）⇒ G3 只在域台账**引用**
+  - 🟡 G4-3（A9 轴措辞）/ G4-4（`GoStyleFormLimitMode` 档位）＝ **登记/转整合者项**，已随单 1 消息同批发给 G4（**非 7 项反馈单**）
+  - 🔴 `docs/DRIFT/global/vs-common.md` ＋ `global/_README.md` §七之二属 **SHARED 面 ⇒ G3 不写**（AGENTS.md §5.3e）⇒ 由 G4 / 整合者落
 - [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
