@@ -117,6 +117,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         classes = TaskRpcApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
+                // 🔴 T-15 ③：**专属上下文缓存键**（global 域 · 第三十轮加）
+                //    Spring 的 context cache key **包含** properties，但
+                //    **@DynamicPropertySource 的值不进 key** ⇒ 若本类的 properties
+                //    与同模块另一个 @SpringBootTest **恰好相同** ⇒ 两者**共享同一个
+                //    Spring 上下文** ⇒ 本类 @BeforeAll 装的那套 OTel SDK 装不进那个
+                //    **已存在**的上下文 ⇒ 上下文创建时拦截器取走的是**别的测试**的
+                //    Tracer ⇒ 本类 exporter 收不到 span ⇒ 用例以「**找不到 span**」
+                //    这种看不懂的形态变红（而不是「前提不成立」）。
+                //    ⇒ 加一个**本类专属、别的类不可能撞上**的 key ⇒ 上下文必然独立。
+                //    ⚠️ 这不是「保险」而是**修掉一个侥幸**：今天的隔离靠的是
+                //    「各类的 properties 恰好不同」—— 谁改一下 properties 就可能撞上。
+                "rag.test.gate.context-key=task-slow-threshold",
+
                 "grpc.server.port=0",
                 // 绕过 Nacos：注册在 ApplicationReadyEvent 且已 try/catch，但 devh 的发现配置仍会连
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",

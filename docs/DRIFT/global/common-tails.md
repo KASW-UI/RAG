@@ -558,7 +558,7 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 
 > 详见 [`lanes/L1-delivery.md`](lanes/L1-delivery.md) §十。
 
-### T-14 🟡 **新登记（第二十七轮 · L9 N1）** —— `RpcInterceptor` 的 javadoc 把「两层补救」**并列**陈述，但第 ② 层只在 `handle()` 路径
+### T-14 ✅ **已修（第三十轮 · 2026-10-26）** —— `RpcInterceptor` 的 javadoc 把「两层补救」**并列**陈述，但第 ② 层只在 `handle()` 路径
 
 | 项 | 内容 |
 |---|---|
@@ -567,17 +567,29 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 | **为什么是缺陷** | §3.3.2 明确禁止「用 javadoc 的措辞断言没验证过的事实」⇒ 这条 javadoc 会让后续读者以为「gRPC 侧也有中断补偿」⇒ **可能写出永不触发的处理分支** |
 | **证据** | L9 只读取证：`RpcInterceptor.java:396/:406`（唯一的 interrupt 在 `handle(...)` 路径）· `:196-210`（超时只 `close`）· `:287-314`（`onCancel` 不打断） |
 | **修法** | 把 javadoc 改成「第 ② 层**仅**适用于 `handle(...)` 入口；gRPC 路径**没有**中断补偿（框架限制，见 cross-domain §二·十五·④）」 |
-| **处置** | 🟡 **只登记**（本轮 L9 无 `service/common` 写权）⇒ 归 `global/common-tails` ⇒ **下轮可修**（共享层只有 `align/global` 能写） |
+| **处置** | ✅ **第三十轮已修**（`align/global` 有 `service/common` 单写权）⇒ javadoc 改写为「**两条互不覆盖的路径**」：① **gRPC 路径**（本方法返回的拦截器）**只有第 ① 层**（`DeadlineState` 感知，**不是打断**）；② **第 ② 层（interrupt）仅适用 `handle(...)` 这个非 gRPC 入口** ⇒ 另加「逐行取证」小节（`workerFuture.cancel(true)` 全文**仅两处**且都在 `handle(...)` 内；gRPC 的 `onCancel` 里那个 `cancel(false)` 取消的是**超时调度任务**、**不是**业务线程）⇒ 并把「业务 handler 必须实现的四种机制」逐条标注**适用路径**（其中 ③④ 明写「仅 `handle(...)` 路径」）⇒ **零行为改动** |
 
-### T-15 🟡 **新登记（第二十七轮 · L6 缺口④）** —— 「全局 OTel 由测试预置」这个前提是**侥幸成立**的
+### T-15 🟡→✅ **部分闭合（第三十轮）** —— 「全局 OTel 由测试预置」这个前提是**侥幸成立**的
 
 | 项 | 内容 |
 |---|---|
 | **问题** | 8 份 slow 轴守门都依赖「`GlobalOpenTelemetry` 在 Spring 上下文 refresh **之前**被换成本测试的 SDK」⇒ 但 `GoStyleOtelAgent`（`service/common`）有一条「**已 set 就放弃**」分支（`:121-123`）⇒ 这个前提**靠「没人先 set」成立**，**不是时序保证** |
 | **失效形态** | 将来有人先装了别的全局 SDK ⇒ 守门的 exporter 收不到 span ⇒ 用例以「**找不到 span**」这种**看不懂的形态**变红 |
 | **本轮已做的** | ✅ **整合者已把前提显式断言**（比 `getTracerProvider()`，见 cross-domain §二·十五·③b）⇒ 前提不成立时直接说「前提不成立」⇒ **7 份守门已加固** |
-| **剩余的加固建议**（L6 §7.3 ②，**共享层**，下轮做） | ① 前提变断言（✅ 本轮已在**测试侧**做了）② 装 SDK 改用 `ApplicationContextInitializer`（早于所有 BFPP）③ 专属上下文缓存键 ④ 根治需改 `service/common`（注入 Tracer 而非取全局） |
+| **剩余的加固建议**（L6 §7.3 ②，**共享层**） | ① 前提变断言（✅ **第二十七轮已在测试侧做了**）② 装 SDK 改用 `ApplicationContextInitializer`（早于所有 BFPP）③ 专属上下文缓存键 ④ 根治需改 `service/common`（注入 Tracer 而非取全局） |
 | **Boot 侧的事实**（L6 §7.3 ①） | `opentelemetry-sdk-extension-autoconfigure` **全仓 pom 零命中** · m2 里连 jar 都没有 · `AutoConfiguredOpenTelemetrySdk` 全 m2 零命中 · `spring-boot-autoconfigure-4.0.8.jar` 里零个 `*OpenTelemetry*` 类 ⇒ classpath 上只有 `…-autoconfigure-spi`（只有 SPI 接口、无实现）⇒ 本仓 OTel 装配是**自研**的 `GoStyleOtelAutoConfiguration` ⇒ **今天接不上 Boot 自动配置** ⇒ 前提暂时安全，但**不是设计出来的** |
+
+
+#### T-15 第三十轮处置（2026-10-26 · `align/global`）
+
+| 建议 | 处置 | 理由（**实测**，不是推断） |
+|---|---|---|
+| ① 前提变断言 | ✅ **第二十七轮已做**（7 份守门） | — |
+| ③ **专属上下文缓存键** | ✅ **第三十轮已做**（7 份 slow 轴守门各加一行 `rag.test.gate.context-key=<域>-slow-threshold`） | 🔴 **实测出真实脆弱点**：Spring 的 context cache key **包含 `properties`**，但 **`@DynamicPropertySource` 的值不进 key** ⇒ 只要本类与同模块另一个 `@SpringBootTest` 的 `properties` **恰好相同**，两者就**共享同一个 Spring 上下文** ⇒ 本类 `@BeforeAll` 装的那套 OTel SDK **装不进那个已存在的上下文** ⇒ 上下文创建时拦截器取走的是**别的测试**的 `Tracer` ⇒ 本类 exporter 收不到 span ⇒ 用例以「**找不到 span**」这种**看不懂的形态**变红。<br>⇒ **今天没真的共享**（实测 7 个模块内各 `@SpringBootTest` 的 `classes` 相同但 `properties` 行数各不相同 ⇒ 键必不同）⇒ 这正是「**侥幸成立**」⇒ ③ 把侥幸变成**结构保证**。**零生产代码改动**。 |
+| ② 装 SDK 改用 `ApplicationContextInitializer` | ⏸ **不做**（本轮） | 🟡 **它防不住目标失效形态**：Spring 的**缓存上下文不会重新 refresh** ⇒ initializer 不会重跑 ⇒ 若上下文是**复用**来的，SDK 仍然装不进去 ⇒ 真正的防线是 **③**（让上下文必然独立）。② 只把安装点提前，收益边际。 |
+| ④ 根治：改 `service/common` 注入 `Tracer` 而非取全局 | ⏸ **不做**（本轮） | 🔴 **越界**：生产侧取全局的站点横跨 **10 个域**（`RpcInterceptor` / `GoStyleTraceparentFilter` / `GoStyleOtelAgent` / `favorite-rpc` 的 `FavoriteFactDispatchScheduler` 等）⇒ 改法要动**每个域的 Application 装配** ⇒ **会碰 favorite（global 零写权）** ⇒ 属**架构级改造**，须专门一轮 + 明确授权。 |
+
+⇒ **T-15 的失效形态（看不懂的「找不到 span」）已被 ① + ③ 双重封住** ⇒ 剩下 ② ④ 属「加固 / 架构改造」，已登记。
 
 ## 二、本轮复核汇总表
 

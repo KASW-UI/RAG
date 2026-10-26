@@ -212,3 +212,82 @@ RAG 只实现了 `otlpgrpc`；Go 还支持 `otlphttp` / `zipkin` / `file`
   那属于响应头层，RAG 侧由 `GoStyleTraceparentFilter*` 系列守门负责。
 - **Go 侧 OTel SDK 是 1.40.0，RAG 侧是 1.44.0** ⇒ 版本不同 ⇒ 探针证的是**语义**，
   不是「逐字节同版本」。
+
+---
+
+# 第三个探针：`rpc-timeout/`（Go ↔ RAG 的 **gRPC 超时路径**活体对拍）
+
+> 位置：`tools/semantic-probe/rpc-timeout/` · 跑法：`bash tools/semantic-probe/rpc-timeout/run-rpc-timeout-parity.sh`
+> 退出码：`0` = 两侧一致 · `1` = 有漂移 · `2` = 环境不满足
+
+## 为什么要有它（AGENTS.md §3.3 规则 2 的**第三个**落地）
+
+E30：Go 真源 `service/common/observability/rpc.go:69` 在服务端超时时给客户端的
+status description 是 **`context deadline exceeded`**；
+RAG 旧实现写的是 `rpc timeout after 2000ms`
+⇒ **客户端拿到的错误文案与 Go 不一致**（wire 面差异，客户可见）。
+
+前两个探针证的是「解析」与「装配」；本探针证的是**超时语义在真实网络栈上的落地**。
+
+## 结构
+
+| 文件 | 角色 |
+|---|---|
+| `rpc-timeout/go/main.go` | **Go 半边**：真 gRPC server（grpc-go）+ 冻结仓**真实生成**的 `pb.LikeService` + 真 client stub ⇒ 走真实网络栈 |
+| `rpc-timeout/java/TimeoutProbe.java` | **RAG 半边**：只调**生产类** `RpcInterceptor`（真 Netty server + 真 channel） |
+| `rpc-timeout/run-rpc-timeout-parity.sh` | 跑两侧 → 按用例名配对 → 逐键比对 → 不一致则 exit 1 |
+
+## 三条纪律（都是踩出来的）
+
+**① Go 半边用 `replace` 直接引用冻结仓，不复制、不改写。**
+冻结仓只读 ⇒ 探针不能往里写文件 ⇒ 用独立 module + `replace sea-try-go => <冻结仓>`
+直接**引用**它 ⇒ 跑的就是冻结仓那份源码。
+⚠️ 冻结仓路径是**机器相关**的 ⇒ `go.mod` 由脚本**运行时生成**，仓库里只放 `main.go`
+（**不提交任何绝对路径**；可用环境变量 `GO_TRUTH_REPO` 覆盖默认路径）。
+
+**② `CGO_ENABLED=0`。**
+本机没有 Xcode 头文件 ⇒ cgo 会报 `'stdlib.h' file not found` ⇒ 与探针无关的失败。
+另外 `GOPROXY=off` / `GOSUMDB=off` / `GOPRIVATE='*'` ⇒ 缺依赖直接报错，不悄悄联网。
+
+**③ Go 的 select 有三个分支 ⇒ 慢 handler 必须**永不返回**。**
+Go 真源 `rpc.go:59-72` 的 select 分支是 `done` / `panicChan` / `timeoutCtx.Done()`。
+若 handler 在 ctx.Done() 时就返回，则 `done` 分支与超时分支**同时就绪**
+⇒ Go 的 select **随机选** ⇒ 可能返回 `context.DeadlineExceeded`（**非 status error**）
+⇒ 客户端拿到 `code=Unknown` ⇒ **探针变成随机**。
+真实的慢 handler 就是一直不返回 ⇒ 这里照做（`time.Sleep(30s)`）。
+
+## 用例（2 条）
+
+| 用例 | 测什么 | Go 出处 |
+|---|---|---|
+| `timeout_wire` | **客户端真正收到的** status：code + description | `service/common/observability/rpc.go:69` |
+| `timeout_telemetry` | 超时 span 的 `sea.biz_msg`（= `err.Error()`） | `service/common/observability/observability.go:108-112` |
+
+两侧参数一致（超时 300ms · slow 阈值 750ms），两侧都走**真传输层**：
+Go 侧 `grpc.NewServer` + 真 client；RAG 侧真 Netty server（`forPort(0)`）+
+真 channel（`dns:///127.0.0.1:<port>` 直连，绕开 Nacos 服务发现）。
+
+## 已知能力缺口（不计入失败，但**始终打印**）
+
+`timeout_telemetry` 的 **code 段**：Go 是 grpc-go 的 `codes.Code.String()`（CamelCase
+`DeadlineExceeded`，`codes/code_string.go:31-59`），RAG 是 grpc-java 的 `Code.name()`
+（`DEADLINE_EXCEEDED`）⇒ **这一半已登记为「表述差异 C-1」**
+（`docs/Intentional_Deviations/common/_signed-deviations.md` C 类 C-1，写明「不做臆造映射」）
+⇒ 进脚本的 `KNOWN_GAP`。
+
+> ⚠️ 加白名单是**有后果的动作**：它等于承认「这条差异不修」。
+> ⇒ 每条都必须能在 global 台账里找到出处；没有出处的**不许**进来。
+> ⇒ 且 RAG 侧的 JUnit 守门 `RpcInterceptorTimeoutDescriptionGateTest`
+> **把 C-1 的形态钉住**（断言 `code = DEADLINE_EXCEEDED`）⇒ 后人不会把它当新漂移「顺手修掉」。
+
+## 已知边界
+
+- **只覆盖服务端超时这一条路径**：不覆盖客户端侧 deadline（`ctx` 超时）、不覆盖重试、
+  不覆盖 `panicChan` 分支、不覆盖 stream（只测 unary）。
+- **不比对超时时长**：只比对超时**之后**客户端拿到的 code / 文案。
+- **Go 侧用 `pb.LikeService`（`service/like/rpc/pb`）**：因为它是冻结仓里**真实生成**的
+  ⇒ 避免手搓 `ServiceDesc` 引入偏差；RAG 侧用手搓的最小 `MethodDescriptor`
+  ⇒ **两侧服务/方法名不同**（Go `/like.LikeService/GetLikeCount` vs RAG `probe.Timeout/Hang`）
+  ⇒ 探针**不比对方法名**。
+- **grpc-java 的 `fullMethodName` 不带前导斜杠**，grpc-go 用 `"/service/method"`
+  ⇒ 两侧探针各写各的，**不要**互相「对齐」成同一个字符串。

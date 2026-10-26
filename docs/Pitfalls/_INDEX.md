@@ -33,6 +33,11 @@
 > **031**（守门断言的字符串可能**也出现在被测文件的注释里** ⇒ `contains()` 恒真 ⇒ **变异测不出来** ⇒ 断言前必须先剥 XML/YAML 注释 —— L14 实测：M1 变异删掉真声明，那条断言**居然是绿的**）·
 > **032**（**「跑红」也可能是假红** ⇒ 两类非代码原因：**构建竞态**（两个 Maven 进程同时写同一 `target/` ⇒ 报出的错误指向**完全无关的模块**）· **环境时序**（依赖真 Kafka/PG 的守门）⇒ 必须**单独复跑**定性 ⇒ 与「跑绿 ≠ 对」对称 ⇒ **回归跑着时不要在别的进程里构建同一个 reactor**）。
 
+> **2026-10-26 第三十轮增量**（A 类 3 条落地：E30 / T-14 / T-15）⇒ global 域再加 **4 条** ⇒ 合计 **35 条**：
+> **033**（守门的**期望值**可能就落在**已登记的偏离范围**里 ⇒ 一条漂移常横跨两个维度（description / code 名）⇒ **只有一个维度被登记过** ⇒ 只看代码差异看不出「哪一半能动」⇒ 修前必须 `grep docs/Intentional_Deviations/`（**按文件名+方法名**搜）⇒ **只动未登记的那一半**，且**把已登记的那一半钉进守门** ⇒ 否则后人会把整条当新漂移改掉）·
+> **034**（grpc-java 的 `fullMethodName` **不带前导斜杠** ⇒ `MethodDescriptor.extractFullServiceName` 用 `lastIndexOf('/')` ⇒ 带斜杠必然与 `ServerServiceDefinition` 的 serviceName 对不上 ⇒ grpc 直接抛「Method name should be prefixed with service name」）·
+> **035**（Go 的 `select` 有多个分支 ⇒ 探针的慢 handler **必须永不返回** ⇒ 否则 done 分支与 timeout 分支同时就绪 ⇒ Go 随机选 ⇒ 客户端拿到 `code=Unknown` ⇒ **探针变成随机**）·
+> **036**（Spring 的 **`@DynamicPropertySource` 不进** context cache key ⇒ 靠「`properties` 恰好不同」隔离上下文是**侥幸** ⇒ 一旦撞上就共享上下文 ⇒ 装不进本测试的 OTel SDK ⇒ 用例以「**找不到 span**」这种看不懂的形态变红 ⇒ 修法：给守门加**专属 property**（零生产改动）；⚠️ `ApplicationContextInitializer` **防不住**（缓存上下文不会重新 refresh））。
 ## 计数（2026-10-25 机械扫描实测）
 
 > **口径**：一条 = 一个**二级/三级标题**的独立坑位条目（`## P-xxx` / `## PIT-xxx` / `## PF-xxx` / `## PITFALL-xxx` …）。
@@ -88,7 +93,7 @@
 | `comment` | 2 份 | 15 | `comment-rpc` 的 17 个类曾是空壳而全量编译 `EXIT=0` |
 | `follow` | 2 份 | 16 | —— |
 | `common` | 5 份 | 散文式 | 请求保护层四层：**recover → breaker → shedding → 业务观测**；链的定义点必须在共享模块，否则 10 个 rpc server 各写一遍 = 10 个可能写错的地方 |
-| 🆕 `global` | **3 份** | **24** | **跨微服务 + `service/common` 影响的搁置漂移**（§3.5）收口域。按议题分档：`common-tails` / `cross-domain` / `cycle-deps`。<br>主要坑：**查 Go 出处只在项目树里 grep 必落空**（真源在 `~/go/pkg/mod` 的 go-zero 源码里）· **「配置里没写」≠「没开」**· **变异两种假绿**（编译不过⇒读旧 XML / 红在更早断言上）· **改上游资源做变异而只跑下游⇒假阴性**· **用被测常量构造输入⇒恒绿**· **阻塞式启动器 + 句柄设在返回之后⇒句柄永远拿不到⇒调度器泄漏⇒守门失真**（024）· **MockMvc 与真 Tomcat 是两条观测路径⇒共享层改响应头会打红别的域的 MockMvc 守门**（025） |
+| 🆕 `global` | **3 份** | **35** | **跨微服务 + `service/common` 影响的搁置漂移**（§3.5）收口域。按议题分档：`common-tails` / `cross-domain` / `cycle-deps`。<br>主要坑：**查 Go 出处只在项目树里 grep 必落空**（真源在 `~/go/pkg/mod` 的 go-zero 源码里）· **「配置里没写」≠「没开」**· **变异两种假绿**（编译不过⇒读旧 XML / 红在更早断言上）· **改上游资源做变异而只跑下游⇒假阴性**· **用被测常量构造输入⇒恒绿**· **阻塞式启动器 + 句柄设在返回之后⇒句柄永远拿不到⇒调度器泄漏⇒守门失真**（024）· **MockMvc 与真 Tomcat 是两条观测路径⇒共享层改响应头会打红别的域的 MockMvc 守门**（025）· **守门期望值可能落在已登记偏离范围里⇒一条漂移要按维度拆开判（033）**· **`@DynamicPropertySource` 不进 context cache key⇒靠 properties 恰好不同隔离上下文是侥幸（036）** |
 | `_cross` | 4 份 | 散文式 | Flyway 账本撞号；框架机制静默失效实证；「跑绿 ≠ 对」的元教训；**陈旧 surefire 报告抬高测试计数** |
 
 ## 待填（空文件即坑位）

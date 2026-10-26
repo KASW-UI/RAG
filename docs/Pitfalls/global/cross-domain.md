@@ -1125,3 +1125,102 @@ private static String stripXmlComments(String xml) {
 - 2026-10-26 第二十八轮全仓回归（第一次：`regression-full8.log` · `BUILD FAILURE`）
   ⇒ 第二次（干净的 `regression-full9.log`）用于坐实；
 - 同族：**PIT-GLOBAL-019**（构建进行中改源码 ⇒ 绿的是旧字节码）、**PIT-GLOBAL-027**（守门的绿必须问「绿得独立吗」）。
+
+---
+
+## PIT-GLOBAL-033 —— 守门的**期望值**可能就落在**已登记的偏离范围**里 ⇒ 修一半 = 把「表述差异」混进「行为漂移」
+
+**症状**：修 E30 时，**守门先绿了 wire 面**（description 对齐 ✅），但**遥测面红了**：
+
+```
+expected: "rpc error: code = DeadlineExceeded desc = context deadline exceeded"
+ but was: "rpc error: code = DEADLINE_EXCEEDED desc = context deadline exceeded"
+```
+
+⇒ 看起来像「还没修完」⇒ 很想把 `Code.name()` 改成 CamelCase。
+
+**真相**：`docs/Intentional_Deviations/common/_signed-deviations.md` **C 类 C-1** 早就登记了这件事：
+「gRPC Java 的 `Code.name()` 返回 `NOT_FOUND`，Go 的 `codes.Code.String()` 返回 `NotFound`
+…… 仅常量表示不同，**不做臆造映射**」⇒ **已登记 ⇒ 不得顺手改**（AGENTS.md §0：「先确认是不是签字项，不要当新回归去『修』」）。
+
+**根因**：一条漂移往往**横跨两个维度**（这里是 **description** 与 **code 名**），
+而**只有一个维度被登记过** ⇒ 只看代码差异看不出「哪一半能动」。
+
+**纪律**：
+1. 🔴 **动手改共享层之前，先 `grep` 一次 `docs/Intentional_Deviations/`** —— 按**文件名 + 方法名**搜，不只搜关键词
+   （本例搜的是 `goStyleStatusMessage`，命中 `common/_signed-deviations.md` 的 C-1）；
+2. 把漂移**按维度拆开**，逐维度判定「已登记 / 未登记」⇒ **只动未登记的那一半**；
+3. 🔴 **守门要把「已登记的那一半」钉住**（断言 code 段 = `DEADLINE_EXCEEDED`）⇒
+   **否则后人会把整条当成新漂移改掉** ⇒ 那就违反了「已登记偏离不得顺手修正回旧行为」。
+
+⇒ **本轮的最终形态**：E30 修完后，**剩下的差异恰好等于 C-1** ⇒ 边界干净、可核对。
+
+**出处**：2026-10-26 第三十轮 E30（守门实测抓出，不是推测）。
+
+---
+
+## PIT-GLOBAL-034 —— grpc-java 的 `fullMethodName` **不带前导斜杠**（手搓服务时踩）
+
+**症状**：自建 `ServerServiceDefinition` 时，grpc 直接抛：
+
+```
+Method name should be prefixed with service name and separated with '/'.
+Expected service name: 'probe.Timeout'. Actual fully qualifed method name: '/probe.Timeout/Hang'
+```
+
+**根因**（`javap` 读 `grpc-api-1.63.0.jar`）：
+- `MethodDescriptor.extractFullServiceName` 用的是 **`lastIndexOf('/')`** 再 `substring(0, idx)`
+  ⇒ 对 `"/probe.Timeout/Hang"` 会截出 **`"/probe.Timeout"`（带斜杠）**
+  ⇒ 与 `ServerServiceDefinition.Builder.addMethod` 里的 `serviceName.equals(method.getServiceName())` 比对**必然不等**；
+- 而 grpc-java **自己生成的** proto 代码是 `SERVICE_NAME + '/' + methodName`
+  （`ArticleServiceGrpc` 里 `generateFullMethodName`）⇒ **`"article.ArticleService/GetArticle"`，不带前导斜杠**。
+
+**纪律**：手搓 gRPC 服务时，`fullMethodName` = **`服务名 + '/' + 方法名`（无前导斜杠）**。
+⇒ 与 Go 侧不同（grpc-go 用 `"/service/method"`，且 gRPC 的 HTTP/2 path 规范**带**斜杠）⇒ **两侧探针里各写各的，别互相抄**。
+
+**出处**：2026-10-26 第三十轮 E30 探针（`tools/semantic-probe/rpc-timeout/`）开发期踩到。
+
+---
+
+## PIT-GLOBAL-035 —— Go 的 `select` 有多个分支 ⇒ 探针的 handler **必须永不返回**，否则**探针是随机的**
+
+**症状**：Go 半边探针第一次跑，客户端拿到 **`code=OK`** 且**立即返回**（2ms）⇒ 看起来「RPC 根本没进服务端」。
+
+**根因**：Go 真源 `rpc.go:59-72` 的 `select` 有**三个**分支（`done` / `panicChan` / `timeoutCtx.Done()`）。
+若探针的 handler 写成「等 `ctx.Done()` 就返回 `ctx.Err()`」⇒
+**timeout 到点时 `done` 与 `timeoutCtx.Done()` 同时就绪** ⇒ **Go 的 select 随机选**
+⇒ 走 `done` 分支时返回的是 `context.DeadlineExceeded`（**不是 status error**）
+⇒ 客户端拿到 **`code=Unknown`**（而不是 `DEADLINE_EXCEEDED`）⇒ **探针变成随机**。
+
+**纪律**：探针的「慢 handler」要**模拟真实的慢业务** ⇒ **一直不返回**（不是「到点就返回错误」）。
+⇒ 这样只有 timeout 分支就绪 ⇒ **确定性**。
+
+**出处**：2026-10-26 第三十轮 E30 探针（已写进 `tools/semantic-probe/rpc-timeout/go/main.go` 的注释里）。
+
+---
+
+## PIT-GLOBAL-036 —— Spring 的 `@DynamicPropertySource` **不进** context cache key ⇒ 靠「properties 恰好不同」隔离上下文是**侥幸**
+
+**问题**：8 份 slow 轴守门都依赖「`GlobalOpenTelemetry` 在 Spring 上下文 refresh **之前**被换成本测试的 SDK」。
+⇒ 而这个前提**只靠「没人先 set」成立**（`GoStyleOtelAgent` 有「已 set 就放弃」分支）。
+
+**根因（实测）**：
+- Spring 的 **context cache key 包含 `properties`**（`@SpringBootTest(properties=...)`）⇒ 两类只要 `properties` 不同就**不共享**；
+- 但 **`@DynamicPropertySource` 提供的值不进 key** ⇒ 它的值**对上下文隔离毫无贡献**；
+- ⇒ **只要某个慢守门的 `properties` 与同模块另一个 `@SpringBootTest` 恰好相同** ⇒ 两者**共享同一个 Spring 上下文**
+  ⇒ 本类 `@BeforeAll` 装的那套 OTel SDK **装不进那个已存在的上下文**
+  ⇒ 上下文创建时拦截器取走的是**别的测试**的 `Tracer`
+  ⇒ 本类 exporter 收不到 span ⇒ 用例以「**找不到 span**」这种**看不懂的形态**变红。
+
+**实测结论**：**今天没真的共享** —— 7 个模块内各 `@SpringBootTest` 的 `classes` 相同，但 `properties` 行数各不相同（8~113 行）⇒ 键必不同。
+⇒ **这正是「侥幸成立」**：谁改一下 properties 就可能撞上。
+
+**纪律**：
+1. 🟢 **给守门加一个本类专属、别的类不可能撞上的 property**（本轮：`rag.test.gate.context-key=<域>-slow-threshold`）
+   ⇒ 把「侥幸」变成**结构保证**（零生产代码改动）；
+2. 🟡 **`ApplicationContextInitializer` 装 SDK（建议②）防不住这个失效形态** ——
+   **缓存的上下文不会重新 refresh** ⇒ initializer 不会重跑 ⇒ SDK 仍然装不进去
+   ⇒ 真正的防线是 **①（专属键）**；
+3. 🔴 根治（建议④：共享层注入 `Tracer` 而非取全局）**横跨 10 个域且会碰 favorite**（global 零写权）⇒ 属架构级改造。
+
+**出处**：2026-10-26 第三十轮 T-15 ③（global 台账 `common-tails.md` T-15 第三十轮处置）。

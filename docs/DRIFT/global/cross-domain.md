@@ -980,6 +980,7 @@ L9 只读分析（**未改 `service/common`**）：
 | **N8** | `task-rpc` 的 jar **没有 `Main-Class`**（没接 `spring-boot-maven-plugin`）⇒ `java -jar` 起不了 | `service/task/task-rpc/pom.xml` | ✅ **第二十八轮已修**（L13 修 task-rpc + **L14 修 hot-rpc**）⇒ 🔴 **本条 L11 漏报了一个模块**：逐个解包 10 个 rpc 模块的产物 ⇒ 实际是 **2 个**（`hot-rpc` 58,873 B + `task-rpc` 83,827 B）⇒ **漏报根因 = 守门缺口**：`check-jar-executable.sh` 只扫 `*-api` ⇒ **10 个 rpc 模块的产物可执行性从来没被任何守门查过** ⇒ L11 只能手工盘点 ⇒ **手工必漏** ⇒ ✅ **L15 已把 rpc 纳入枚举**（20 个模块）⇒ 教训 **PIT-GLOBAL-030** |
 | **N9** | 共享库并发启动时，**后启动者**账本会多一条 `BASELINE(0)`（**不跳迁移**，但会让「行数 == 迁移条数」这条断言**误红**） | 判定器口径 | ✅ **已记进台账**（判定器已按此调整口径） |
 | **N10** | postgres 镜像**初始化期**的临时 server 会**吞掉刚建的库**（⇒ 容器刚起时连不上，是镜像行为不是缺陷） | 测试基建 | ✅ **已记进台账** |
+| **N11** | 🔴 **RPC 超时的 `status.description` 两侧不同**（Go `context deadline exceeded` vs RAG `rpc timeout after 2000ms`）⇒ **code 都是 4，但客户端收到的文案不同** ⇒ 落点 `service/common` ⇒ **8 个 rpc 模块的 `rpc-timeout: 2s` ⇒ 线上真实生效** | `service/common/.../observability/RpcInterceptor.java` | ✅ **第三十轮已修**（`align/global` 持 `service/common` 单写权）⇒ 🔴 **三个域各自独立记过同一条**：`comment/rpc.md` U10 · `users/user/rpc.md` **V-007**（「仍成立，但不在本组件判定权内」）· `users/admin/rpc.md` 的**活体测量** ⇒ 🟢 **守门 2 条**（**真 Netty server + 真 channel + 真客户端 + 真 OTel exporter** ⇒ 断言**网络上真正传过来的字节**）⇒ 🟢 **双侧活体探针** `tools/semantic-probe/rpc-timeout/`（Go 半边**直接引用冻结仓真源**）⇒ **PASS** ⇒ 🟢 **变异 2 条全红**（M1 ⇒ 守门 2/2 红 + **探针 EXIT=1**；M2 ⇒ **只红遥测那条**）⇒ 🔴 **边界：剩下的差异恰好 = 「表述差异 C-1」**（code 名大小写 · 已登记 ⇒ 不动）⇒ 逐条 ⇒ `_README.md` §七之五 **E30 / E35 / E36** |
 
 ## 三、其余 7 条的状态说明（2026-10-25）
 

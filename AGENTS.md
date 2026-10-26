@@ -21,11 +21,11 @@
 | `message` | 🔴 api 5 MISMATCH + 1 OBS；rpc 1 MISMATCH + 5 OBS。✅ `broadcast:1` 误发全量、rpc 负 `offset`、`isRead` 字段名 | [`message/`](docs/DRIFT/message/rpc.md) |
 | `like` | 🔴 api **9 MISMATCH**（本轮最高，**62 条绿测试零覆盖**）；rpc 4+2。✅ rpc 6 条启动阻塞、DDL 对齐。事实链路**跨三仓库且末端不在任何仓** | [`like/`](docs/DRIFT/like/rpc.md) |
 | `common` | 🔴 **不是「已审计完成」** —— 5 个可比包 **3 个 `NOT EQUIVALENT`**。**27 条编号未修** ⇒ **共享层，其他域的尾巴挂在它身上** | [`common/`](docs/DRIFT/common/alignment-2026-10-23.md) |
-| `hot` | ✅ 三组件**全部拿到双侧活体对拍**、25/25 变异点被守门抓住；✅ `DRIFT-COMMON-004` + jar 可执行 + **Tomcat 三旋钮已修** + `-030` 已落地。⚠️ 残余 `-031`（框架限制 ⇒ 候选 `SD-2026-10-25-CAND-10`）⇒ ✅ **2026-10-26 域内未闭合项已清空** | [`hot/`](docs/DRIFT/hot/rpc.md) |
+| `hot` | ✅ 三组件**全部拿到双侧活体对拍**、25/25 变异点被守门抓住；✅ `DRIFT-COMMON-004` + jar 可执行 + **Tomcat 三旋钮已修**。⚠️ 残余 `-031`（框架限制 ⇒ 候选 `SD-2026-10-25-CAND-10`）⇒ ✅ **2026-10-26 域内未闭合项已清空** | [`hot/`](docs/DRIFT/hot/rpc.md) |
 | `article` | 🔴 rpc 4 MISMATCH + 4 OBS；api 2 MISMATCH（**首次对照即 NOT EQUIVALENT**）。⚠️ `DRIFT-ARTICLE-RPC-004` 复核后**撤销** | [`article/`](docs/DRIFT/article/rpc.md) |
 | `comment`/`follow`/`task` | ✅ **2026-10-25 并发对齐后「零台账」已解除**，各域 4/4/3 组件全部完成首轮对照 | [`_cross/`](docs/DRIFT/_cross/component-coverage-matrix.md) |
 | `favorite` | ✅ **2026-10-26 核对**：第十六轮已收口 ⇒ 域内可修漂移/未知项 **均 0** ⇒ 跨域 5 条归 `global` | [`favorite/`](docs/DRIFT/favorite/rpc.md) |
-| 🆕 **`global`** | **收口域**（非微服务，见 §3.5）—— 跨微服务 + `service/common` 影响的**搁置漂移**。已 **29 轮**（含 15 条 lane）⇒ **待办清单见 `_README.md` §七之二** · **lane 台账见 `global/lanes/`** | [`global/`](docs/DRIFT/global/_README.md) |
+| 🆕 **`global`** | **收口域**（非微服务，见 §3.5）—— 跨微服务 + `service/common` 影响的**搁置漂移**。已 **30 轮**（含 15 条 lane）⇒ **待办清单见 `_README.md` §七之二** · **lane 台账见 `global/lanes/`** | [`global/`](docs/DRIFT/global/_README.md) |
 | 其余 | ⚠️ 10 个 `*-proto` 语义层一致（**8 个无回归网** ⇒ §3.4）；5 个 `*-common` 本轮未单独审查 | 见 DRIFT 索引 |
 
 > ⚠️ **「已改」≠「已验证」；「源码级对照」≠「双侧活体对拍」** ⇒ 台账里的 ✅ 一律读作「**在该证据强度下一致**」，
@@ -308,7 +308,7 @@ RAG 不是从 Go「推测」行为，而是**逐字对照 Go 源码**（§3.1）
 
 | 工具 | 作用 | 复现 |
 |---|---|---|
-| `tools/semantic-probe/` | **双侧语义探针**（§3.3「两侧同时跑的探针」首个落地） | `bash tools/semantic-probe/run-parity.sh` |
+| `tools/semantic-probe/` | **双侧语义探针 ×3**（§3.3；解析 / trace 链路 / gRPC 超时） | `bash tools/semantic-probe/{run-parity,trace/run-trace-parity,rpc-timeout/run-rpc-timeout-parity}.sh` |
 | `tools/errmsg-probe/` | 错误码契约逐字节对拍（码值/文案/未知码） | `bash tools/errmsg-probe/run-parity.sh` |
 | `tools/difftest/` | 双端运行时对拍（两套栈 + 请求矩阵） | `bash tools/difftest/run.sh` |
 | `tools/difftest/check-ddl-static.py` | **DDL 列级对照**（类型/长度 + 可空性 + DEFAULT + `--indexes` 索引/约束/触发器 + **触发器函数体的结构化语义属性**）。**9 域**；`hot` = **N/A**（两侧无库）。类型 **0 差异** | `python3 … [--domain <域>] [--indexes]` |
