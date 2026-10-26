@@ -471,7 +471,7 @@ RAG 多一层 properties。**该条不重开。**
 - 🔴 **2026-10-24 更正（下方「Go Behavior」那句已被证伪，保留原文供追溯）**：
   真源侧活体实测 + admin 域的机制追查（`admin/rpc.md` §2）证明
   **Go 的 GORM 把 `status IS NULL` 读成 `0` 且不报错**
-  （`gorm@v1.31.1` 的 `prepareValues` 对 `int64` 造的是 `**int64` ⇒ `database/sql` 的
+  （`gorm.io/gorm@v1.31.1` 的 `prepareValues` 对 `int64` 造的是 `**int64` ⇒ `database/sql` 的
   `convertAssign` 走 `case reflect.Pointer: if src == nil { dv.SetZero(); return nil }`
   ⇒ 不报错，字段保持零值 0）⇒ **Go 也是 `status=0` 登录成功**，不是 `INTERNAL`。
   ⇒ 本条 V-001 的实质是「**RAG 的写法与 Go 的写法长得不一样**，但行为相同」⇒ **已修（两侧行为一致）**。
@@ -699,13 +699,55 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
   | 探针 | `tools/semantic-probe/rpc-timeout/`（`go/` + `java/` + `run-rpc-timeout-parity.sh`）—— Go 半边 `replace` 引用**冻结仓真源**、RAG 半边跑**生产类** ⇒ `timeout_wire` 两侧逐字节一致 |
   | 变异 | M1 改回旧串 ⇒ 守门 2/2 红 + 探针 EXIT=1；M2 只改遥测段 ⇒ 只红遥测那条、wire 那条仍绿 |
   | 本域已核实 | ✅ **代码 diff 属实**（三处替换 + 常量）、✅ 守门类与探针目录**确实存在**、✅ 落点在 `service/common`（`global` 单写权域）<br>⚠️ **未复跑**守门/探针（跑在 `global` 的工作区，避免干扰其构建）|
-  | ⚠️ **合并状态** | `global` 的改动在本条记录时**仍在 `align/global` 的工作区（未提交、未合入主干）** ⇒ **主干上的代码在合并前仍是旧串** ⇒ 本条销账**以 `global` 的提交为准** |
+  | **提交（SHA）** | **E30 = `49808ad` 单一提交**（实现 + 守门类 + 探针**全在这一个 commit 内**）—— 分支 **`align/global`**，**已推 `origin` + `upstream`**（`git branch -r --contains` 实测两个远端分支都含）|
+  | ⚠️ **合并状态** | ⚠️ **本条记录时主干 `do-my-own-gh` 尚未合入 `49808ad`** ⇒ **主干代码在合并前仍是旧串** ⇒ 本条销账**以 `global` 的提交（SHA）为准**，不依赖主干是否已合 |
+  | ⚠️ **本条记录的更正（2026-10-26 自查）** | 本行初稿写的是「`49808ad`（实现）+ **`22a9111`**（台账/守门/探针收口）」—— ❌ **后半句不成立**。<br>**独立核实**：`22a9111` 的提交信息是「docs(global): 订正 E28 —— favorite 的两斜杠 owner 已修」，`git show --stat` 显示它**只改了 1 个文件、1 行**（`docs/DRIFT/global/_README.md`）⇒ **与 E30 无关**。<br>**真正的守门类与探针提交**：`git log --all --diff-filter=A` 查新增路径 ⇒ 守门类 `RpcInterceptorTimeoutDescriptionGateTest.java` 与探针 `tools/semantic-probe/rpc-timeout/*` **均由 `49808ad` 新增**（该 commit 共 20 文件 / +1200 行）⇒ **E30 只有一个提交，没有第二个收口提交**。<br>⇒ 教训见 `docs/Pitfalls/users/_shared.md` 的 **PIT-USERS-SHARED-020**（收方给的 SHA 清单必须逐个 `show --stat` 核实主题，不能整包照抄）|
 - **🔴 边界（`global` 域明确要求一并读）**：修完后剩下的 **code 名差异**是一条**已登记的表述偏离**，**本轮不动**：
   Go（grpc-go）`codes.Code.String()` = CamelCase `DeadlineExceeded`；
   RAG（grpc-java）`Code.name()` = `DEADLINE_EXCEEDED`
   ⇒ 已登记在 `docs/Intentional_Deviations/common/_signed-deviations.md` 的 **C-1**，写明「**不做臆造映射**」。
   ⇒ 守门**刻意把 C-1 的形态钉住**（断言 `code = DEADLINE_EXCEEDED`）⇒ 后人不会把它当新漂移顺手改掉。
   ⇒ ⚠️ **请勿**为了让 code 名也一致而去改 grpc-java 的 code 命名。
+
+### 🆕 共享层改动影响面记账 —— `global` 域 **E38 第①层**（`d531abd`）：超时期限继承客户端 deadline
+
+> §5.3：共享层（`service/common`）改动 ⇒ **逐个消费方记账**。本节是 **user-rpc 的记账**。
+
+| 项 | 事实 | 出处 |
+|---|---|---|
+| Go 侧（**客户端**） | `RpcClientConf.Timeout int64 json:",default=2000"` ⇒ **zrpc 客户端默认带 2000ms deadline** | `go-zero@v1.10.2/zrpc/config.go:31`（`RpcClientConf` 结构体，line 24 起）+ `zrpc/client.go:71`（`opts = append(opts, WithTimeout(...))`）|
+| Go 侧（**服务端**） | `RpcServerConf.Timeout int64 json:",default=2000"`（注释原文：`setting 0 means no timeout`）⇒ **user-rpc 服务端预算 2000ms** | `go-zero@v1.10.2/zrpc/config.go:46` |
+| Go 侧是否覆盖 | `service/user/user/rpc/etc/user.yaml` **通篇没有 `Timeout`** ⇒ 客户端与服务端**双双走默认 2000ms**；`service/user/user/api/etc/usercenter.yaml` 的 `UserRpc:` 只配了 `Etcd` ⇒ 客户端 Timeout 也走默认 | `service/user/user/rpc/etc/user.yaml`（全文实测）· `service/user/user/api/etc/usercenter.yaml:37-41` |
+| RAG 侧（**服务端**） | `observability.rpc-timeout: 2s` ⇒ **user-rpc 服务端预算 2000ms** | `service/users/user/user-rpc/src/main/resources/application.yaml:155-156`（注释自述对齐 `zrpc/config.go:46` 的 2000ms）|
+| RAG 侧（**客户端**） | **不带 call deadline** ⇒ 有效期限只剩服务端预算 | ✅ **字节码级证据**（非「配置里没写」）：devh `grpc-client-spring-boot-starter` **3.1.0.RELEASE** 的 `net.devh.boot.grpc.client.config.GrpcChannelProperties` **字段清单里根本没有 `deadline`**（只有 `immediateConnectTimeout` = 连接超时，非调用 deadline）⇒ 该 starter **无处可配 call deadline** ⇒ 不配即无<br>另：`service/users/user/user-api/src/main/resources/application.yml:90-97` 的 `grpc.client.user-rpc` 也确实没有 deadline 项 |
+| E38 修法 | `deadlineEpochMs` 由 `now + timeout` 改为 **min(服务端预算, 客户端 deadline 剩余)**；超时调度器延时同用 `effectiveTimeoutMs` | `align/global` commit **`d531abd`**，落点 `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`（已读 diff 原文核实：`effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())`）|
+
+⇒ **本组件结论：无变化、无可观察差异。**
+- Go 侧有效期限 = min(客户端 2000ms, 服务端 2000ms) = **2000ms**
+- RAG 侧有效期限 = min(**无客户端 deadline** ⇒ 服务端 2000ms) = **2000ms**（E38 修前也是 2000ms）
+⇒ 两侧**同形** ⇒ `DRIFT-USERRPC-V-007` 之外**不新增任何条目**，§10 的计数**不变**。
+
+> ⚠️ **但两侧的「2000ms 从哪一刻起算」不同**（**毫秒级，不构成可观察漂移**，故不立条目，只记事实）：
+> Go 的客户端 deadline **在客户端发出时起算** ⇒ 服务端收到时**已消耗一段传输时间** ⇒ 服务端 ctx 的剩余期限是「2000ms − 传输耗时」；
+> RAG 的服务端预算 `rpc-timeout: 2s` **在服务端收到时起算** ⇒ 恒为满额 2000ms。
+> ⇒ **RAG 的绝对截止点比 Go 晚约一个传输耗时**（本机直连为亚毫秒级）。
+> ⇒ 之所以不立条目：**可观察面在秒级抖动之内**，且 E38 的修法方向正是「向 Go 靠」（一旦 RAG 客户端带上 deadline，服务端就会像 Go 一样继承并被传输时间扣减）。
+
+> ⚠️ **顺带记一条「消费方不对称」**（**本组件内**，不是漂移）：
+> **Go 的 user-api 给 user-rpc 传 2000ms deadline，RAG 的 user-api 不传。**
+> ⇒ 当前**数值相同 ⇒ 行为同形**。
+> ⇒ ⚠️ **但 E38 落地后，这条注记的「分叉方向」变了**（原文写的是「RAG 不会跟着客户端提前死」——
+> **在 E38 修前确实如此，修后不再如此**）：
+> **E38 修法落地后，RAG 的服务端会 `min(服务端预算, 客户端 deadline 剩余)`**
+> ⇒ **只要 RAG 侧一旦给 user-rpc 配上 deadline，服务端就会像 Go 一样跟着客户端提前死**。
+> ⇒ 也就是说，**两侧「跟着客户端死」这个行为已经是同形的**；
+> 当前剩下的**唯一**不对称是「**RAG 客户端没配 deadline**」这一个配置事实（以及由它带来的毫秒级起算点差异，见上）。
+> ⇒ 故记此条，**供将来调参时对照**：若有人给 RAG 的 `grpc.client.user-rpc` 加了 deadline，
+> **两侧会同时变同形，不需要额外的服务端改动**；若有人只调 RAG 的 `rpc-timeout`，两侧就会分叉。
+> ⚠️ 另注：`global` 域已明确
+> 「`UNRESOLVED-ARPC-002` 的 CONFIRMED SEMANTIC MISMATCH 定性不变」⇒ 那是 **users/admin 域**的编号，**不在本域**。
+
+---
 
 ### DRIFT-USERRPC-V-008 死代码 + **伪出处** —— ✅ **已修（2026-10-23 第四轮，commit `fa2de52`）**
 

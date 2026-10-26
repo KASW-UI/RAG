@@ -478,7 +478,7 @@ Caused by: org.postgresql.util.PSQLException:
 | 问题 | Go 有没有 | 依据 |
 |---|---|---|
 | **① 账本撞车（Flyway 特有）** | **结构性没有** | GORM `AutoMigrate` 无状态：没有版本号、没有 `flyway_schema_history`、没有 checksum、没有 `baseline`。DRIFT-NEW-015 是**本仓库自己引入的复杂度造成的**，不是 PG 或 Go 的固有问题 |
-| **② PG 的 DDL 并发竞态** | **有，只是窗口窄得多** | GORM 的建表 SQL **没有** `IF NOT EXISTS`（`gorm@v1.31.1/migrator.go:309` 就是 `tx.Exec("CREATE TABLE ? (...")`），保护只来自 `HasTable` 先查（`migrator.go:124` 的 check-then-act）。并发失败形态会是 `relation already exists`，与 RAG 的 `pg_type_typname_nsp_index` 不同 |
+| **② PG 的 DDL 并发竞态** | **有，只是窗口窄得多** | GORM 的建表 SQL **没有** `IF NOT EXISTS`（`gorm.io/gorm@v1.31.1/migrator/migrator.go:309` 就是 `tx.Exec(createTableSQL, values...).Error`，而 `createTableSQL = "CREATE TABLE ? ("` 定义在同文件 `:225`），保护只来自 `HasTable` 先查（`gorm.io/gorm@v1.31.1/migrator/migrator.go:124` 的 `if !queryTx.Migrator().HasTable(value)` check-then-act，`HasTable` 本体在 `:333`）。并发失败形态会是 `relation already exists`，与 RAG 的 `pg_type_typname_nsp_index` 不同<br>⚠️ **2026-10-26 更正引用路径**：本行初稿把这两处写成「`gorm@v1.31.1` 下的**根** `migrator.go`」与「**裸** `migrator.go`」—— **行号全对**（已逐行核对：`:124` 就是那行 `HasTable` 判断、`:309` 就是那句 `tx.Exec`），**但路径少了 `migrator/` 子目录**：gorm 包里 `migrator.go`（根，111 行）与 `migrator/migrator.go`（1038 行）是**两个不同文件**，且 modcache 内同名文件不止一处（`v1.31.1` / `v1.31.2` 各一份）⇒ 短路径**有歧义** ⇒ 已按 `docs/DRIFT/users/user/rpc.md:1332` 的同款写法补全 |
 | **③ 真实部署里两个服务同时对空库启动** | **两边都不发生** | Go 与 RAG 的 `docker-compose` **都只有基建、没有应用服务**（Go 侧连 user-rpc / admin-rpc 都没有）。首次初始化通常由单个服务完成 |
 
 **② 的实测**：把 Go 的 user-rpc 与 admin-rpc **同时**对着一个全新空库启动（刻意不 sleep 错开），
@@ -873,7 +873,7 @@ RAG `3047ms/4455ms`，量级一致、可复现，**但以复测值为准**：
 ⚠️ 这是本轮**第二次**推翻自己（第一次是 V-004 的归因）⇒ 与 `docs/Pitfalls/_cross/testing-pitfalls.md`
 的「绿测试可能是错误答案的守卫」同源：**结论错，比没结论更贵。**
 真正残留的差异是 **`V-010`（`update_time` 推进）**，已修：GORM 的
-`gorm@v1.31.1/callbacks/update.go:235-252` 会**无条件**把 `UpdateTime`（autoUpdateTime）放进 SET，
+`gorm.io/gorm@v1.31.1/callbacks/update.go:235-252` 会**无条件**把 `UpdateTime`（autoUpdateTime）放进 SET，
 RAG 曾用 `if (!any) return 0;` 把它挡掉了。修复后双侧实测：空 body / `extra_info={}` / 改 email
 **三种情况两侧 `update_time` 都推进**。
 
@@ -883,7 +883,7 @@ RAG 曾用 `if (!any) return 0;` 把它挡掉了。修复后双侧实测：空 b
 |---|---|---|
 | `DRIFT-USERRPC-V-004`（可观察半边） | `users_user_avatar_history` 时间列 `TIMESTAMP⇒TIMESTAMPTZ` + 渲染换算到进程本地时区 | user 半边 ✅ |
 | `DRIFT-USERRPC-V-009`（新） | `insertHistory` 由 DB 的 `CURRENT_TIMESTAMP` 改绑**应用侧时钟**（对齐 GORM autoCreateTime/autoUpdateTime 同源） | user 半边 ✅ |
-| `DRIFT-USERRPC-V-010`（新） | `update_time` 无条件进 SET（Go 依据 `gorm@v1.31.1/callbacks/update.go:235-252`） | user 半边 ✅ |
+| `DRIFT-USERRPC-V-010`（新） | `update_time` 无条件进 SET（Go 依据 `gorm.io/gorm@v1.31.1/callbacks/update.go:235-252`） | user 半边 ✅ |
 | `DRIFT-USERAPI-001` | 畸形 claim 走业务层 200+1006，**不是**鉴权层 401 | user 半边 ✅ |
 | `DRIFT-USERAPI-002` | delete / update 的 `uid<=0` 透传（Go 的两套 uid 语义不抹平） | user 半边 ✅ |
 | `DRIFT-USERRPC-V-005` | **关闭**（结论被证伪，非修复） | user 半边 ✅ |
@@ -1028,9 +1028,30 @@ AGENTS.md §9 / §8 / §0 三处都写着「**过期状态必须随实测同步�
 ### 5. 复跑方式
 
 ```bash
-python3 tools/check-ledger-selfcheck.py            # 复核 users/user 域 6 份台账
-python3 tools/check-ledger-selfcheck.py --strict   # 有 FAIL 时退出码非 0（可进 CI）
-python3 tools/check-ledger-selfcheck.py --ledger <file> ...   # 指定台账
+python3 tools/check-ledger-selfcheck.py                       # 复核 task 域（工具的默认域）
+python3 tools/check-ledger-selfcheck.py --domain users        # 复核 users 域（本域）
+python3 tools/check-ledger-selfcheck.py --mutation-test       # 跑变异自检
 ```
 
+⚠️ **2026-10-26 更正（下方原句是 2026-10-24 时的状态，已过期）**：
+原写「`--strict`（有 FAIL 时退出码非 0）/ `--ledger <file>`（指定台账）」——
+**这两个 flag 工具实际不支持**（现有 flag 只有 `--domain` / `--go-root` / `--repo-root` / `--mutation-test`）。
+且 **`--strict` 本来就是多余的**：有 FAIL 时工具**本就退出 1** ⇒ 直接看退出码即可。
+
 ⚠️ 本轮复核后： **FAIL 3 → 0**（发现 1、2 已修；发现 3 属 admin 域，本轮不动 ⇒ 仍为 WARN 级）。
+
+### ⚠️ 2026-10-26 复测：**这 3 条「0」是旧工具的结论，用新版工具复测后结论已变**
+
+> 用 `global` 域 **2026-10-26 最新**的 `tools/check-ledger-selfcheck.py`（`bb680a3` + 其后 N13 归属判定修订）
+> 对**本域台账**复跑（`--domain users --repo-root <主仓>`）：
+
+| 层 | 结果 |
+|---|---|
+| 第 1 层 | ✅ **51 引用 ⇒ 缺失 1** —— 那 1 条是 `RpcInterceptorTimeoutDescriptionGateTest.java`（**已在本文件显式标注为「合并前悬空＝预期状态」**）⇒ **不是台账缺陷** |
+| 第 2 层 | ⚠️ **10/10 OK，但断言全是 task 域的** ⇒ 该层**没按域筛选** |
+| 第 3 层 | ❌ **45 处「commit 清单缺陷」** ⇒ **全是工具假阳性**：① 台账路径**写死** `docs/DRIFT/task/_README.md`（那 45 条登记**属 task 域**）；② 窗口算法 `merge-base(HEAD, do-my-own-gh)..HEAD` **在主分支上恒空** ⇒ 44 条哈希被误判「不在本分支上」（实测它们**都在**本地 `do-my-own-gh` 上）+ 1 条行数不守恒 |
+| 第 4 层 | ❌ **3 条，全部是 gorm 出处** ⇒ 根因定位到工具源码：第 4 层靠 `THIRD_PARTY` 映射表还原第三方路径，**该表只有 6 项、缺 `gorm`**（尽管注释写着「版本取自真源 go.mod」，而真源 go.mod **第 28 行**明写 `gorm.io/gorm v1.31.1`）⇒ **任何 gorm 出处都必然被判「找不到」** ⇒ **工具侧缺口**。<br>✅ **本域侧已修**：3 处引用补全为全路径（`gorm.io/gorm@v1.31.1/...`）⇒ 消歧，**行号全部核对无误**（`:124` = `HasTable` 判断、`:309` = `tx.Exec`、`:235-252` = AutoUpdateTime 那 18 行） |
+
+⇒ **「FAIL 3 → 0」这句现在是过期的**：用今天的工具跑，**第 1 层是真的 0 缺陷**，
+但**第 3 层会红 45 条、第 4 层会红 3 条** ⇒ **这 48 条都不该由本域改台账来消**（第 4 层那 3 条虽已由本域把引用写全，但工具不补 `gorm` 映射就仍会红）。
+⇒ 逐层根因与复现命令 ⇒ [`docs/Pitfalls/users/_shared.md` 的 PIT-USERS-SHARED-019](../../../Pitfalls/users/_shared.md)。
