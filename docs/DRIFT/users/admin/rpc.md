@@ -4272,3 +4272,8 @@ if (connectTimeout != null) {                                     // :16
   ⇒ 逐项明细见 [`../user/rpc.md` §9](../user/rpc.md) ⇒ **两个独立口径交叉验过**（maven 自身模块汇总 ＋ surefire XML 逐文件求和）
 - **门禁 5/5 EXIT=0**（lane-ownership / role-model / coupling / doc-links / ledger-count）
 - ⚠️ **错峰**：G4 的 52 模块全量与 G3 的 29 模块回归期间本域**不起 maven** ⇒ 独占窗口才跑 ⇒ **无 `EXIT=137`**。
+  - 🔴 **订正（2026-10-27 · 第十八轮 · G3 回执）**：「G3 的 **29** 模块回归」**写错了** ⇒ **G3 的域级回归是 12 个模块**（4 域 × 3 组件：article / comment / favorite / hot 各 api+rpc+common）
+    ⇒ **「29」是 G4 第八次全量的「有测试模块数」**（52 模块 / 29 个有测试模块 / 2461 条）⇒ 本行是**两处口径串台**。
+    ⇒ **本轮已独立复核**：G3 树实测域内 12 模块**全部有 surefire 报告**（`service/{article,comment,favorite,hot}/*-{api,rpc,common}`）⇒ 「12 模块」成立 ⇒ 原「29」作废。
+    ⇒ ⚠️ **不影响错峰结论本身**（时间点仍对：本域确实等 G3 跑完才起）⇒ 只订正**数字**，不改**结论**。
+    ⇒ 📌 **同款串台的另一处** ⇒ [`../user/rpc.md` §9](../user/rpc.md) 同步订正。

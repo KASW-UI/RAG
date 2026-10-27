@@ -944,6 +944,20 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 
 ⇒ ⚠️ **本轮的实际占用**（供复现）：`g3` 那个是 `-pl service/comment/comment-rpc -am test -Dtest=CommentRpcRuntimeBootGateTest … -DargLine=-Xmx768m` ⇒ **单测试类 ＋ 堆上限写死** ⇒ **负载很轻** ⇒ ⇒ 与历史那组（G4 的 52 模块 `clean verify` ＋ 模块级 `-pl … test`）**不同量级**。
 
+### 13.3 🔴 **C7 的硬前提：收口回归必须在【所有 lane 合入主干之后】跑，不能用任何 lane 的 lane 级全量代替**
+
+⇒ **实测依据**（2026-10-27 · 详见 §18.5）：**G4 的第八次全量里，我域 6 个组件是 605 条**，而**我树 `fa608f3` 实测是 667 条** ⇒ 差 **62** ⇒ ⇒ 根因 = **G4 的树里没有 G1 的任何提交**（7 笔全 `NOT_IN_G4`）⇒ ⇒ **那份全量的工作区** ≠ **任何单域的当前态**。
+
+⇒ ⇒ **由此得到三条硬前提**（C7 执行时逐条对照）：
+
+| # | 前提 | 判据（可机械核） |
+|---|---|---|
+| 1 | **收口回归的代码态必须包含所有 lane 的提交** | 回归前先 `git rev-list --left-right --count do-my-own-gh...HEAD` ⇒ **落后数 = 0**；并逐 lane 核「该 lane 的 tip 已是祖先」 |
+| 2 | **不得引用任何 lane 的 lane 级全量数字当作本域证据** | 每个 lane 的全量都在**自己的树**上跑 ⇒ **别的 lane 的提交不在里面** ⇒ 只能当「共享层那半」的证据，不能当「本域那半」的证据 |
+| 3 | **本域自己的数字只有两个来源可采信** | ① **本域树上的本域回归**（本轮 = **667**，两口径交叉验过）② **所有 lane 合入后的收口回归**（= C7，尚未跑）⇒ **两者之间的任何数都不作数** |
+
+⇒ ⚠️ **对「667」的诚实定位**：它是 **G1 树 × G1 域** 的数字，**不是** 波次最终数字（§`user/rpc.md` §10 已写明「本轮 667 条不是最终数字」）⇒ ⇒ **本轮它只能当「G1 域内当前态」的证据，不能当「波次收口」的证据**。
+
 ---
 
 ## 14. 🆕 **守门卫生缺陷：「可达 ⇒ 能启动」用例的 3s 预算过紧 ⇒ 偶发红**（2026-10-27 · G1 lane）
@@ -1127,4 +1141,93 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 | **user-api / admin-api / follow-api**（我域） | 「**可达 ⇒ 能启动**」用例把 `immediate-connect-timeout` 设成**生产值 3s** ⇒ 冷 JVM ＋ 满负载下 TCP+HTTP/2 握手超 3s | **连接预算** | ✅ 已修（放宽到 10s；见 §14） |
 
 ⇒ ⇒ 我域 `service/{users,follow}/**` 实测 `destroyForcibly` = **0 命中**、`"gRPC Server started"` = **0 命中** ⇒ ⇒ **G3 那款机制不适用我域** ⇒ ⇒ **两者只是「同属偶发红」，不是「同款」** ⇒ ⇒ 跨域台账里**分开记**（否则会把「就绪探测」的修法套到「连接预算」上）。
+
+---
+
+## 18. 🆕 **G3 第八次回执（2026-10-27 · G1 lane）** —— 一处数字订正 ＋ 四项独立复核
+
+> **来源**：G3（`mvs_ba99d8078fd94de681ce8068c21ee76a`）主动回我上一轮的四点 ＋ 一处数字订正。
+> **本节的每一个数字都经过本域独立重扫**（不采信转述）；凡「对方给的」与「我实测的」不一致 ⇒ **两条都写下来**并已回问。
+
+### 18.1 🔴 **订正：我台账里的「G3 的 29 模块回归」是「两处口径串台」**
+
+| 原写 | 实测 | 结论 |
+|---|---|---|
+| 「G3 的 **29** 模块回归」（[`admin/rpc.md` §12.6](admin/rpc.md) ＋ [`user/rpc.md` §9](user/rpc.md)） | G3 的域级回归 = **12 个模块**（4 域 × 3 组件：article / comment / favorite / hot 各 api+rpc+common） | 🔴 **作废「29」** ⇒ 「**29**」是 **G4 第八次全量的「有测试模块数」**（52 模块 / 29 个有测试模块 / 2461 条）⇒ **G4 的口径串到了 G3 头上** |
+
+- **独立核验**（2026-10-27 13:1x · G3 树）：域内 12 个模块**逐个有 surefire 报告** · **129 份** · **0 份陈旧**（mtime 全部 ≥ 12:30）⇒ 「12 模块」成立。
+- ✅ **错峰结论不变**（本域确实等 G3 跑完才起 ⇒ 无 `EXIT=137`）⇒ **只订正数字，不动结论**。
+- ⇒ 📌 **教训（可复用）**：「**29**」这个数是「G4 全量的有测试模块数」，不是「G3 的模块数」⇒ **引用别的 lane 的数字前，先问「这个数是哪一次、哪个口径的」**。
+
+### 18.2 ⚠️ **G3 报的「919 条」vs 我实测「922 条」⇒ 差 3，已回问口径**
+
+- G3 报：12 模块 / **919** 条 / 0 failures / 0 errors / 4 skipped / 9:44 min。
+- 我实测（G3 树 · XML 逐文件求和 · 只算域内 12 模块）：**922** 条 · skipped **4** ✅ 一致 · **0 份陈旧报告** ⇒ 差 **3** 条。
+- ⇒ **我这边没有任何残差可解释这个 3** ⇒ ⇒ **不回问之前不下结论** ⇒ 已把「922 / 129 份 / 0 陈旧 / skipped 4 一致」这条原始判据回给 G3，请它给口径（maven 汇总行 vs XML 逐文件求和）。
+- ⚠️ **注意方向**：这与我在 §15 记的坑**方向相反** —— §15 是「XML 比 maven **多**算（孤儿报告）」，这次是「XML 比 maven **多** 3 条而 maven 少算」⇒ ⇒ **两个口径谁对，仍要靠「报告新鲜度 + 逐模块明细」判，不能靠方向猜**。
+
+### 18.3 🔴 **G3 树当前有 2 个红报告（13:07 / 13:08）⇒ 它的「0 failures」已被打破**
+
+| 报告 | mtime | 失败用例 | 失败形态 |
+|---|---|---|---|
+| `service/article/article-rpc/…/ArticleRpcRuntimeBootGateTest.xml` | **13:07:25** | `realFatJarProcessBootsAndListens`（`ArticleRpcRuntimeBootGateTest.java:159`） | JUnit `AssertionFailureBuilder` ⇒ **`assertTrue` 的 message 为空** |
+| `service/comment/comment-rpc/…/CommentRpcRuntimeBootGateTest.xml` | **13:08:29** | `realFatJarProcessBootsAndListens`（`CommentRpcRuntimeBootGateTest.java:159`） | 同上 |
+
+- ⇒ 这两条**正是 §17.4 记的「就绪探测 flake」族**（`article-rpc` / `comment-rpc` 与 `like-rpc` 同款）⇒ ⇒ **我域那款（连接预算）不同源**，两边**仍分开记**。
+- ⇒ ⚠️ **「0 failures」有保质期**：G3 报的那个 0 对应 **12:35~12:43** 那轮；**13:07/13:08 的定向重跑把这两条打红了** ⇒ ⇒ **台账里的「0 失败」必须带跑次与时间**，否则下一轮读的人会当成现状。
+- ⇒ **本轮只登记，不代陈断红**（那是 G3 写权面）⇒ 已回信告知路径与 mtime。
+
+### 18.4 ✅ **Go 侧 yaml 推导链：G3 的逐条断言独立复核成立**（含 70s 例外与易混点）
+
+| 文件 | `Timeout` 键 | 复核结果 |
+|---|---|---|
+| `service/article/api/etc/article-api.yaml` | `:4` = **70000** | ✅ 与 G3 一致 ⇒ **article-api 才是 70s 例外**（我域不是） |
+| `service/article/rpc/etc/article.yaml` | `:3` = **70000**（http 预算）· `:90` = **10000** | ✅ **G3 的易混点提醒成立**：`:90` 落在 **`SecurityConf:`** 段（段头在 `:85`）⇒ 是 **security-rpc 客户端超时**，**不是** http 预算 |
+| `service/user/user/api/etc/usercenter.yaml` | **0** | ✅ 我域 ⇒ go-zero `rest/config.go:55` `default=3000` ⇒ **3s** |
+| `service/user/admin/api/etc/admincenter.yaml` | **0** | ✅ 同上 ⇒ **3s** |
+| `service/follow/api/etc/followcenter.yaml` | **0** | ✅ 同上 ⇒ **3s**（⚠️ 真实路径是 `service/follow/api/etc/followcenter.yaml`，**不是** `service/follow/follow/api/…`） |
+
+⇒ ⇒ **我域三份 api yaml 全部 0 个 `Timeout` 键** ⇒ ⇒ **零 `Timeout` 键 ≠ 无超时，而是走 struct tag 默认值**（默认值有行号可指 ⇒ 不是推测）⇒ ⇒ **我域 http = 3s、rpc = 2s**（`zrpc/config.go:31` `default=2000`）。
+
+### 18.5 🔴 **G4 第八次全量口径（取自 G4 自己台账 `23d1c2a`，非转述）＋ 🔴 实测：G4 的全量【不含 G1 提交】⇒ 不能当 G1 证据**
+
+**G4 自己台账记的口径**（`23d1c2a` → `docs/DRIFT/global/vs-common.md`）：
+
+| 项 | 值 |
+|---|---|
+| 结果 / 耗时 | `BUILD SUCCESS` / `MVN_EXIT=0` · **20:21 min**（09:57:42 → 10:18:03） |
+| 模块数 / 有测试模块数 | **52** / **29** |
+| 用例数 | **2461**（29 行「模块名 ↔ 数字」明细逐项求和） |
+| failures / errors / skipped | **0 / 0 / 4**（`favorite-api` 1 · `favorite-rpc` 3） |
+| 相对上一轮 | 第七次 2457 ⇒ **+4**（= FB-04 守门 4 条；`service/common` **307 → 311**）⇒ 其余 28 模块逐条一致 |
+| 双侧探针（同批次） | `run-parity.sh` ⇒ `EXIT=0` · **56 例**（一致 54 · 不一致 0 · 已签字偏离 2）· `run-rpc-timeout-parity.sh` ⇒ `EXIT=0` · **3 例** |
+
+🔴 **但那份逐模块明细里【我域的 6 个组件】是旧基线** —— 本轮实测：
+
+| 组件 | G4 第八次全量 | 我树 `fa608f3` 实测 | 差 |
+|---|---|---|---|
+| `user-api` | 107 | **121** | −14 |
+| `user-rpc` | 133 | **143** | −10 |
+| `admin-api` | 129 | **140** | −11 |
+| `admin-rpc` | 112 | **117** | −5 |
+| `follow-api` | 50 | **68** | −18 |
+| `follow-rpc` | 74 | **78** | −4 |
+| **合计** | **605** | **667** | **−62** |
+
+- **根因（已直接验）**：**G4 的树里没有 G1 的任何提交** ⇒ `fa608f3` / `cbf8af8` / `0c2a902` / `b7d724c` / `af0a532` / `ce0c339` / `e8b428f` **7 笔全部 `NOT_IN_G4`** ⇒ ⇒ G4 跑全量时，工作区里是 **G4 分支的基线**，**不含 G1 的新守门与新测试**。
+- **佐证（测试类文件数）**：`user-api` 18→22 · `user-rpc` 17→21 · `admin-api` 13→17 · `admin-rpc` 20→22 · `follow-api` 3→8 · `follow-rpc` 10→11 ⇒ 共 **+12 个测试类** ⇒ 与「条数差 62」方向一致。
+- ⇒ ⇒ **结论（写进 C7 的硬前提）**：**G4 的 lane 级全量数字不能当作「G1 域内已合入状态」的回归证据** ⇒ ⇒ **波末收口回归（C7）必须在【所有 lane 合入主干之后】再跑一次全量**（见 §13.3）。
+- ⚠️ **G4 已跑到第十一次**（2471 条 · 代码态 `040a201`）⇒ 我上一轮 pending 的「第八次」**已过期**；**§4.10.26 是前向引用、尚未落** ⇒ ⇒ **G4 此刻正在跑第十二次全量**（`ps` 实测 `multiModuleProjectDirectory=…/g4-service-common`）⇒ ⇒ **我的「窗口期零 maven」承诺继续有效**。
+
+### 18.6 🔴 **Redis 收编删除的前置复检：仍未满足 ⇒ 5 份域内副本继续保留**
+
+- 实测我树 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` ⇒ **只有 2 条**：`com.rag.common.observability.GoStyleOtelAutoConfiguration` · `com.rag.common.http.GoStyleJsonContentTypeAdvice` ⇒ ⇒ **无 `GoStyleRedisClientAutoConfiguration`**。
+- ⇒ ⇒ 与 §12.1 / §16.2 的判定一致：**删除前置仍未满足** ⇒ ⇒ **现在删 5 份 = `REJECT_COMMANDS` 整个消失** ⇒ ⇒ **本轮仍不执行删除**（等 G4 分支进主干 → 并回我分支 → 一次做完「删 5 份 + 重写 5 份守门」）。
+- ✅ **G3 侧的「0 份域内副本 ⇒ 收编零动作」我认可**（它域内 `LettuceClientOptionsBuilderCustomizer|RedisDisconnectedBehaviorConfig|DisconnectedBehavior` 在源码里 0 命中）⇒ ⇒ **收编在我域是 5 份、G3 域 0 份** ⇒ ⇒ **两边都要在合并时各自复验「共享层那份真的生效」**。
+
+### 18.7 ⚠️ **「现在全机只有 G2 在跑 maven」已过期 —— 快照纪律又一次生效**
+
+- G3 在回信里写「**现在全机只有 G2 在跑 maven**」⇒ ⇒ **13:14:35 我复检 = 只有 `g4-service-common` 在跑** ⇒ ⇒ **该快照在我读到它时就已经过期**（与 §13.2 记的「实测 4 秒即过期」同族）。
+- ⇒ ⇒ **再次确认**：**任何跨 lane 的窗口判断都必须由动作方自己在动作前复检** ⇒ **别人给的「现在没人跑」不能当凭据**。
+- ⇒ ⇒ **本域窗口期承诺继续有效**（零 maven，含单模块定向跑）⇒ **直到 G4 第十二次全量收工**。
 

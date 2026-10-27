@@ -448,3 +448,19 @@ installed_rank | version |      description       | success
 
 ③ **G4 ⑥（池自愈）与我域登记同构**：`follow-rpc` 与另两个 rpc 一样 `@Import ObservabilityLifecycle` 且 classpath **无 servlet**
 ⇒ ⇒ **受影响面 = 3/3** ⇒ ⇒ `3b573fb` 与 `7488b3d` **必须同批合入**（只合前者 ⇒ 池「终止即永久」⇒ 我域由绿转红）⇒ 详见 §11.3 / §11.4。
+
+### 11.8 🆕 **G3 第八次回执 ＋ G4 第八次全量口径**（2026-10-27 · follow 域相关部分）
+
+> 完整记录在 users 侧 ⇒ [`users/vs-common.md` §18](../users/vs-common.md)。本节只留 **follow 域那半**。
+
+① 🔴 **「G3 的 29 模块回归」是口径串台** ⇒ G3 的域级回归 = **12 模块**（4 域 × 3 组件）⇒ **「29」= G4 第八次全量的「有测试模块数」**
+⇒ ⇒ 本域两处台账（[`users/admin/rpc.md` §12.6](../users/admin/rpc.md) · [`users/user/rpc.md` §9](../users/user/rpc.md)）**已同批订正**（保留原值 + 加注记）⇒ ⇒ **错峰结论不变**（只订正数字）。
+
+② 🔴 **G4 第八次全量里 follow 域的两个组件是旧基线** ⇒ `follow-api` **50**（我树 `fa608f3` 实测 **68**）· `follow-rpc` **74**（我树实测 **78**）
+⇒ ⇒ 根因 = **G4 的树不含 G1 的任何提交**（`fa608f3` 等 7 笔全 `NOT_IN_G4`）⇒ ⇒ **那份全量不能当 follow 域的回归证据** ⇒ ⇒ 收口回归（C7）必须在**所有 lane 合入主干后**跑 ⇒ 详见 §11.5 与 [`users/vs-common.md` §13.3](../users/vs-common.md)。
+
+③ 🔴 **删除前置仍未满足（复检）**：本树 `service/common/…/AutoConfiguration.imports` 仍**只有 2 条**（`GoStyleOtelAutoConfiguration` · `GoStyleJsonContentTypeAdvice`）⇒ **无 `GoStyleRedisClientAutoConfiguration`** ⇒ ⇒ **follow 域那 1 份副本继续保留** ⇒ ⇒ 现在删 = `REJECT_COMMANDS` 消失 ⇒ 等 G4 分支进主干后**同批**执行「删副本 + 重写 `FollowApiRedisDisconnectedFastFailTest` 的装配方式」。
+
+④ ✅ **G3 侧「0 份域内副本 ⇒ 收编零动作」我认可** ⇒ ⇒ **收编在 G3 域零动作、在 G1 域 5 份** ⇒ ⇒ **两边都要在合并时各自复验「共享层那份真的生效」**（`@ConditionalOnMissingBean` 是**遮蔽**不是叠加）。
+
+⑤ ⚠️ **G3 树当前有 2 个红报告**（`article-rpc` 13:07:25 / `comment-rpc` 13:08:29 的 `realFatJarProcessBootsAndListens`）⇒ 是**就绪探测 flake** 族 ⇒ ⇒ **与我域那款（连接预算）不同源** ⇒ ⇒ follow 域的 `FollowApiStartupFailFastTest` **不要照搬** G3 的修法（我域已用「放宽到 10s」修完，见 §11.6）。
