@@ -7,7 +7,8 @@ AGENTS.md §3.3 要求的「**两侧同时跑的探针**」的落盘实现：
 
 ## 定位：是回归守门，不是缺陷清单
 
-⚠️ **当前 23/23 一致是「预期基线」，不是「现在还有 23 个 bug」。**
+⚠️ **当前 56 例（一致 54 · 已签字偏离 2 · 不一致 0）是「预期基线」，不是「现在还有 56 个 bug」。**
+（这 56 个数字是**脚本实跑出来的**，不是写死的 ⇒ 见下面「怎么复核这个数字」。）
 
 `DRIFT-MSGAPI-001` / `-002`（`service/message/message-api` 的 `,string` 语义漂移）已于 2026-10-22 修完。
 本工具的价值在**往后**：任何人把 DTO 的 `,string` setter 改回 `String` 类型，`run-parity.sh` 会立刻 exit 1
@@ -44,9 +45,21 @@ Go 真源：`Sea-RideTheWind_golang/service/message/api/internal/types/types.go`
 两侧天生不同，例如「required 显式 null」：Go 是 `mustn't be nil`、RAG 是 `is not set`。
 表里仍然打印原因（截断到 46 字符），只是**不参与判定**，方便漂移复现时定位。
 
-Go 侧首行是 banner（不含 `|`），脚本在配对前会过滤掉所有不含 `|` 的行 —— 不过滤计数会变成 24 vs 23。
+Go 侧首行是 banner（不含 `|`），脚本在配对前会过滤掉所有不含 `|` 的行 —— 不过滤计数会变成 57 vs 56。
 
-## 用例清单（23 例）
+## 用例清单（56 例）
+
+### 怎么复核这个数字（**别信本文档，信脚本**）
+
+```bash
+bash tools/semantic-probe/run-parity.sh     # 末行应打印：
+#   总计 56 例：一致 54，不一致 0，已签字偏离 2
+```
+
+⇒ **56 / 54 / 0 / 2 这四个数是脚本实跑出来的**，不是本文档写死的 ⇒
+⇒ 本文档与脚本不一致时，**以脚本为准，并顺手把本文档改过来**（本节就是为此存在的）。
+
+### 原有 6 组（23 例）
 
 ### `,string` int64 请求字段（6 例 · `ConversationMessagesReq.conversation_id`）
 
@@ -85,6 +98,72 @@ Jackson 默认允许标量强转，Go 直接 `type mismatch`（`core/mapping/unm
 
 `broadcast` / `kind` 收 JSON 字符串 ⇒ 拒绝；新补的 **`target_id`** 两个方向
 （`"9"` 接受 / `9` 接受）⇒ 验证 `,string` 与 `,optional` 组合时的语义。
+
+### A 组 · bool 字段收 JSON 数字（**7 例** · `unread_only` / `broadcast`）
+
+Go 侧 `type mismatch for field "unread_only", expect "bool"` ⇒ 两侧都**拒绝**
+（RAG 侧是 Jackson 的「不能把 Integer 转成 boolean」）。
+
+| 用例 | Go | RAG |
+|---|---|---|
+| `unread_only` 收数字 `1` | 拒绝 | 拒绝 |
+| `unread_only` 收数字 `0` | 拒绝 | 拒绝 |
+| `unread_only` 收数字 `2` | 拒绝 | 拒绝 |
+| `unread_only` 收数字 `1.0` | 拒绝 | 拒绝 |
+| `unread_only` 收数字 `1.5` | 拒绝 | 拒绝 |
+| `broadcast` 收数字 `1` | 拒绝 | 拒绝 |
+| `broadcast` 收数字 `0` | 拒绝 | 拒绝 |
+
+⚠️ **编号跳过 A6** —— A6 在探针源码（`go/` 与 `java/` 两半）里**根本不存在**
+⇒ 是**编号留了坑**，**不是**有用例被静默丢掉。
+
+### B 组 · `extra` map 的值/键形态（**10 例** · `AdminSendNotificationReq.extra`）
+
+| 用例 | Go | RAG |
+|---|---|---|
+| 值收 JSON 数字 `1` | 接受 `{k=1}` | 接受 `{k=1}` |
+| 值收 JSON 数字 `1.5` | 接受 `{k=1.5}` | 接受 `{k=1.5}` |
+| 值收 JSON 数字 `1.0` | 接受 `{k=1.0}` | 接受 `{k=1.0}` |
+| 值收 JSON 数字 `1e2` | 接受 `{k=1e2}` | 接受 `{k=1e2}` |
+| 值收 JSON 空串 | 接受 `{k=}` | 接受 `{k=}` |
+| **键**收 JSON 数字 | 接受 `{1=v}` | 接受 `{1=v}` |
+| **值收显式 `null`** | 拒绝 | 拒绝 |
+| 值收 JSON bool | 拒绝 | 拒绝 |
+| 值收 JSON 数组 | 拒绝 | 拒绝 |
+| **整体**收 JSON 字符串 | 拒绝 | 拒绝 |
+
+⚠️ **别把两件事混起来**：`extra` **整体**收显式 `null` ⇒ 两侧**放行**（见上面「`extra` 的显式 null（2 例）」）；
+而 `extra` 的**元素**（值）收显式 `null` ⇒ 两侧**拒绝** ⇒ `map[string]string` 的元素不接受 `null`。
+
+### C 组 · 显式 `null` 与 int32 边界（**8 例**）
+
+| 用例 | Go | RAG |
+|---|---|---|
+| `offset` 显式 `null` | 接受 `offset=0` | 接受 `offset=0` |
+| `limit` 显式 `null` | 接受 `limit=0` | 接受 `limit=0` |
+| `unread_only` 显式 `null` | 接受 `unread_only=false` | 接受 `unread_only=false` |
+| `kind` 显式 `null` | 接受 `kind=0` | 接受 `kind=0` |
+| `,string,optional` 的 `target_id` 显式 `null` | 接受（`target_id_present=false`） | 接受（同） |
+| `offset` 收 int32 上限 `2147483647` | 接受 | 接受 |
+| **`offset` 收 int32 上限+1** | 拒绝 | 拒绝 |
+| `offset` 收负数 `-1` | 接受 | 接受 |
+
+### D 组 · `,string` 的字面量形态（**6 例**）
+
+| 用例 | Go | RAG |
+|---|---|---|
+| 收 `"+123"` | 接受 `123` | 接受 `123` |
+| 收 `"0012"` | 接受 `12` | 接受 `12` |
+| 收 `" 12"`（带前导空格） | 拒绝 | 拒绝 |
+| 收空串 `""` | 拒绝 | 拒绝 |
+| 收 `"0x10"` | 拒绝 | 拒绝 |
+| 收 `1e2` | 拒绝 | 拒绝 |
+
+### X 组 · 出参 `,string`（**2 例** · **已签字偏离** `SD-2026-10-23-03`）
+
+Go 的 tag **无** `,string` ⇒ 输出**数字**；RAG 按签字结论输出**字符串**
+⇒ ⇒ 这 2 例是「**预期差异**，不计入失败」，但**仍会逐条列在输出里**（便于漂移复现时定位）。
+`X2`（零值形态）专门确认「**不是只有非零才转字符串**」。
 
 ## 踩过的坑（改动前务必先读）
 

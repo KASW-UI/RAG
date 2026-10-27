@@ -28,11 +28,50 @@ import java.util.Properties;
  * 而不做翻译时，RAG 的超时响应体是 {@code {"code":5001,"msg":"系统内部错误"}}，
  * 而 Go 是 {@code {"code":1015,"msg":"服务繁忙"}} —— <b>离 Go 更远了</b>。
  *
- * <p><b>Go 出处</b>：Go 侧 ctx 到点后，查询返回 {@code context.DeadlineExceeded}，
- * 经 go-zero 的错误映射成为「服务繁忙」1015。RAG 侧对应的 1015 由
- * {@code user-api} / {@code admin-api} 的 {@code mapRPCStatusToCode} 的 default 分支产出
- * （{@code DEADLINE_EXCEEDED} 未被单列，落 default → {@code CODE_SERVER_BUSY}=1015）。
- * 因此<b>本类只要产出正确的 DEADLINE_EXCEEDED，api 层无需任何改动即可与 Go 对齐</b>。
+ * <p><b>Go 出处（消费点，不是声明点）—— 1015 是谁产出的</b>：
+ * <b>各 api logic 显式 {@code switch st.Code()} 的 {@code default} 分支</b>；
+ * <b>不是</b> go-zero 的错误映射，<b>也不是</b> deadline 映射：
+ * <ul>
+ *   <li>{@code service/user/admin/api/internal/logic/admin/getuserlistlogic.go:44-48}
+ *       （{@code switch st.Code()} 44 · {@code case codes.Internal:} 45 → {@code errmsg.ErrorServerCommon} 46
+ *       · {@code default:} 47 → {@code errmsg.CodeServerBusy} 48）
+ *       ⇒ <b>同族共 13 个 admin logic</b>同款
+ *       （{@code resetuserpasswordlogic.go:56} · {@code deletelogic.go:55} · {@code getuserlogic.go:48}
+ *       · {@code unbanuserlogic.go:56} · {@code banuserlogic.go:56} · {@code updatelogic.go:66}
+ *       · {@code getuserlistlogic.go:48} · {@code createinvitelogic.go:62} · {@code loginlogic.go:56}
+ *       · {@code logoutlogic.go:52} · {@code createlogic.go:55} · {@code updateuserlogic.go:62}
+ *       · {@code getselflogic.go:59}）；</li>
+ *   <li>{@code service/user/user/api/internal/logic/user/selectavatarlogic.go:59-60}
+ *       （{@code default:} → {@code errmsg.CodeServerBusy}）—— user 域同款；</li>
+ *   <li>{@code service/user/common/errmsg/errmsg.go:6}（{@code CodeServerBusy = 1015}）
+ *       ＋ {@code :41}（{@code "服务繁忙"}）；</li>
+ * </ul>
+ * ⇒ <b>这些 switch 只单列了 {@code codes.Internal}（→5001）与 {@code codes.NotFound}（→500）
+ * ⇒ {@code DEADLINE_EXCEEDED} 未被单列 ⇒ 落 default ⇒ 1015</b>。
+ *
+ * <p><b>那 Go 侧 ctx 到点是怎么变成 {@code DeadlineExceeded} 的</b>：
+ * {@code service/common/observability/observability.go:146-158}（{@code IsTimeoutError}：
+ * {@code errors.Is(err, context.DeadlineExceeded)} 在 {@code :150}、
+ * {@code codes.DeadlineExceeded} 在 {@code :153}、网络超时在 {@code :157}）
+ * ⇒ 它<b>只做可观测性判定（判「是不是超时」），不产出任何业务码</b>
+ * ⇒ ⇒ 「超时 ⇒ 1015」这一步<b>完全落在 api logic 的 default 分支</b>上。
+ * ⚠️ （{@code knowledge} 域另有 4 处 {@code context.DeadlineExceeded}，但该域不在本项目范围。）
+ *
+ * <p><b>RAG 侧的对应消费点</b>（同样逐行）：
+ * <ul>
+ *   <li>{@code service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/advice/GlobalExceptionHandler.java:83}
+ *       （{@code mapRPCStatusToCode} 声明）＋ <b>:90</b>（default → {@code CODE_SERVER_BUSY} 1015）；</li>
+ *   <li>{@code service/users/user/user-api/src/main/java/com/rag/users/user/api/advice/GlobalExceptionHandler.java:153}
+ *       ＋ <b>:162</b>（同款）；</li>
+ * </ul>
+ * ⇒ <b>因此本类只要产出正确的 DEADLINE_EXCEEDED，api 层无需任何改动即可与 Go 对齐</b>。
+ *
+ * <p>⚠️ <b>结论的适用范围</b>：「{@code DEADLINE_EXCEEDED} 未被单列 ⇒ 落 default ⇒ 1015」
+ * <b>只对 users 域（admin + user 的 api）成立</b> ——
+ * Go 侧 <b>article 域单列了</b> {@code codes.DeadlineExceeded}
+ * （{@code service/article/api/internal/logic/article/create_article_logic.go:66}
+ * ⇒ 走 {@code errmsg.ErrorArticlePublishing}，<b>不走 1015</b>）
+ * ⇒ <b>本条不适用于 article 域</b>，也不外推到其它域。
  *
  * <p><b>为什么不能翻译成 INTERNAL 再在 api 层改</b>：那是把「超时」和「数据库真的坏了」混成
  * 一个码，而 Go 侧这两者本来就不同（超时 1015 / 数据库错 5001）。翻译点必须在

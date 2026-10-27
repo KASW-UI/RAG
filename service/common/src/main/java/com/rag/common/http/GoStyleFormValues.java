@@ -35,13 +35,31 @@ import java.util.Map;
  *   <tr><th>域</th><th>Go 侧</th><th>wire 形状</th></tr>
  *   <tr><td>hot / follow / like / message / comment</td><td><b>注册了</b> {@code SetErrorHandler}</td>
  *       <td><b>HTTP 200</b> + {@code {"code":5001,"msg":"&lt;该域文案&gt;","data":null}}</td></tr>
- *   <tr><td>article / user / task / favorite</td><td><b>没注册</b></td>
+ *   <tr><td>article / user / admin</td><td><b>没注册</b></td>
  *       <td><b>HTTP 400</b> + {@code text/plain} + {@code nosniff} + Go 的原文 body</td></tr>
+ *   <tr><td>favorite</td><td><b>没注册</b>，但 <b>7 个 handler 各自捕获</b> {@code httpx.Parse} 的错<br>
+ *       ⇒ <b>拒绝形状由域自己定</b>（<b>不</b>走共享层的闸门）</td>
+ *       <td><b>HTTP 200</b> + {@code {"code":5003,"msg":"参数错误","data":null}}<br>
+ *           （= {@code httpx.OkJsonCtx} + {@code favoritecommon.ErrorInvalidParam}）</td></tr>
  * </table>
+ * <br>⚠️ <b>task 域不在上表的任何一行里</b>：它 Go 侧<b>不解析</b> form/query ⇒
+ * {@code r.Form} 从不被求值 ⇒ 两道上限<b>都不可达</b> ⇒ <b>闸门根本不开</b>
+ * ⇒ ⇒ 它<b>既不会</b>收到 400 + text/plain，<b>也不会</b>收到 5001
+ * ⇒ ⇒ 「没注册 {@code SetErrorHandler}」<b>推不出</b>「它走 400 形状」——
+ * ⇒ ⇒ <b>「装不装闸门」与「拒成什么形状」是两条独立的轴</b>
+ * ⇒ ⇒ 见 {@link GoStyleFormLimitMode} 的逐轴判据与 {@link GoStyleFormLimitMode#SEMANTIC_REACHABILITY}。
  * <br>⚠️ <b>各域 5001 的文案还不一样</b>：hot / follow / message = {@code "internal server error"}；
  * like / comment = {@code "系统内部错误"} ⇒ <b>共享层不得硬编码这条文案</b>
  * ⇒ ⇒ <b>本类只产出「Go 的原文」（{@link #goParseViolation}），
  * 拒绝成什么形状由各域自己的错误出口决定</b>。
+ *
+ * <h3>🔴 本表管的是「拒成什么形状」，不是「开不开」</h3>
+ * <p>闸门的「<b>开不开</b>」由<b>语义可达性</b>决定（Go 侧该域是否真的解析 form/query）
+ * ⇒ 见 {@link GoStyleFormLimitMode#SEMANTIC_REACHABILITY} 的逐域取证表。
+ * <p>⇒ 两条轴<b>必须分开看</b>：本表里的「task」说的是
+ * 「若它拒绝，Go 的形状是 raw」（task 确实没注册 SetErrorHandler）
+ * ⇒ 但 task 的闸门<b>根本不开</b>（Go 侧不解析 form/query ⇒ 两道上限不可达）
+ * ⇒ ⇒ 两者不矛盾。
  *
  * <h3>🔴 它与 Tomcat 容器上限的关系（本条最容易被忽略的一层）</h3>
  * <p>Tomcat 自己也有 {@code maxParameterCount}（{@code Connector.maxParameterCount}，
@@ -241,7 +259,9 @@ public final class GoStyleFormValues {
 
     /**
      * Go 的 {@code net/http.Error} 形状 —— <b>只给「没注册 {@code SetErrorHandler}」的域用</b>
-     * （article / user / task / favorite）。
+     * （article / user / admin；task 也没注册，但它 Go 侧不解析 form/query
+     * ⇒ 闸门根本不开 ⇒ 用不到这个形状；favorite 也没注册，但它 <b>自己捕获</b>解析错
+     * ⇒ 拒绝形状由域自己定 ⇒ <b>也用不到这个形状</b>）。
      *
      * <p>Go 出处：{@code net/http/server.go} 的 {@code Error()}：
      * <pre>

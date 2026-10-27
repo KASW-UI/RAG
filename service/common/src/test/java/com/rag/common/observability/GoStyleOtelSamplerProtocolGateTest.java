@@ -21,7 +21,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 🔴🔴 **T-11 残留守门**：采样比例（{@code Telemetry.Sampler}）与 batcher（{@code Telemetry.Batcher}）。
  *
  * <h2>为什么单独一个类</h2>
- * <p>{@link GoStyleOtelAgentGateTest} 证的��「全局 provider 装上了 / span 真导出 / 关停会 flush」，
+ * <p>{@link GoStyleOtelAgentGateTest} 证明「全局 provider 装上了 / span 真导出 / 关停会 flush」，
  * <b>都是 {@code Sampler = 1.0} 这一个取值</b> ⇒ 采样器与 batcher 的其它分支<b>一条都没被验证过</b>。
  * ⇒ 本类补上这两条分支。
  *

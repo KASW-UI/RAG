@@ -213,6 +213,42 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- ============ 4a. Spring MVC / Lettuce（**provided** · 2026-10-27 新增） ============ -->
+        <!--
+            ⚠️ 为什么是 provided 而不是 compile：**provided 依赖不传递** ⇒
+            这三个 jar **不会**出现在 16 个下游组件的 classpath 上 ⇒ 对消费者零影响。
+            共享层只在「消费方自己已经带了这些库」时才会真正用到它们：
+
+            · spring-webmvc —— 为了在 **Filter 里**解析「注册期路由模板」
+              （org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping）。
+              只在 10 个 api（servlet 进程）上有；10 个 rpc 组件没有 ⇒ 那些组件里
+              引用到本模块的类会因 NoClassDefFoundError 而**不能加载** ⇒
+              ⇒ 所以引用方必须是 **@ConditionalOnClass 保护的自动配置**，
+              不能是 @Component（组件扫描会硬失败）。
+            · lettuce-core + spring-boot-data-redis —— 为了给 Lettuce 客户端装
+              「断连即拒单」（Go 的 fail-open 语义）。
+              只有用 Redis 的组件才有这两个 jar ⇒ 同理必须 @ConditionalOnClass 保护。
+
+            ⚠️ 这三个依赖**不能**改成 compile：那会让 16 个组件全部背上
+            spring-webmvc / lettuce（其中 6 个 rpc 组件一个都不用）⇒ 违反
+            「共享层不得把下游不需要的框架塞给下游」这条纪律。
+        -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.lettuce</groupId>
+            <artifactId>lettuce-core</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-data-redis</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- ============ 5. JSON Canonicalization (RFC 8785 / JCS) ============ -->
         <!--
             对应 Go 版 communityfact/wire.go 的 github.com/cyberphone/json-canonicalization
@@ -469,10 +505,98 @@
             <artifactId>lombok</artifactId>
             <scope>provided</scope>
         </dependency>
+        <!-- ============ 3c. MyBatis-Plus（**仅 test 作用域** · 2026-10-27 新增）============ -->
+        <!--
+            用途：让本模块的守门能证明「**MyBatis-Plus 自动收集容器内的 `Interceptor[]` Bean**」
+            这条机制**真的生效**（AGENTS.md §3.3：注解存在 ≠ 机制生效 ⇒ 必须有运行证据）。
+
+            ⚠️ **为什么 scope 必须是 test（而不是 3b 段明令禁止的 compile）**：
+            3b 段禁止 mybatis-plus-boot-starter 的理由是「starter 会带 MybatisPlusAutoConfiguration，
+            把所有依赖本模块的服务（含纯 gRPC 进程与无数据源的 api 模块）都拖进自动配置扫描范围」。
+            而 **test 作用域不传递给下游**（Maven 语义：test 依赖不可传递）
+            ⇒ ⇒ 下游 16 个组件的编译期与运行期 classpath **完全不受影响**
+            ⇒ ⇒ 3b 段的顾虑**在 test 作用域下不成立** ⇒ 这正是把这条机制钉死在共享层的唯一可行落点
+            （写在某个域的 rpc 模块里 ⇒ 就变成「那个域的证据」，不是「全仓的证据」）。
+
+            ⚠️ **版本必须与生产一致**：mybatis-plus 由根 pom 的 `mybatis-plus-bom`（3.5.17）管、
+            mybatis 本体由根 pom 显式锁 3.5.19 ⇒ ⇒ 本模块的测试解析到的
+            **与 10 个 rpc 组件运行时解析到的完全一致** ⇒ ⇒ 不会出现「同一个 Executor 接口被加载两份、
+            拦截器的 type/signature 匹配静默失效」（3b 段的告诫）。
+
+            ⚠️ **实测前提（javap，2026-10-27）**：MP 3.5.17 的 `MybatisPlusAutoConfiguration`
+            构造器收 `ObjectProvider<org.apache.ibatis.plugin.Interceptor[]>` ⇒ ⇒ 它**确实**会把容器内
+            全部 `Interceptor` Bean 收集起来交给 `SqlSessionFactoryBean.setPlugins(...)`。
+            ⚠️ 该类在 **3.5.17 里位于 `mybatis-plus-spring-boot3-starter` jar 内**（不在 autoconfigure jar），
+            且 **3.5.5 与 3.5.17 的包结构不同** ⇒ ⇒ 结论必须在**项目实际使用的版本**上验证，不能拿旧版推。
+        -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- 真 PostgreSQL（守门要真 PG，不是 H2 替身）—— 版本由 spring-boot-starter-parent 的 BOM 管 -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
+
 
     <build>
         <plugins>
+            <!--
+                关掉 Ryuk：Testcontainers 2.x 的 ResourceReaper 读的是**环境变量**
+                System.getenv("TESTCONTAINERS_RYUK_DISABLED")，testcontainers.properties 与 -D 无效，
+                只有 surefire 注入 env 才有效（同 message-rpc / like-rpc / article-rpc 的实测结论）。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                    <!--
+                        🔴 本模块的 test classpath 上**有** pgjdbc 驱动（单 1 的真 PG 守门需要它）
+                        ⇒ ⇒ `DataSourceAutoConfiguration` 会**被激活**
+                        ⇒ ⇒ 而本模块里另有 7 个用 `@EnableAutoConfiguration` 的测试上下文
+                        （真 Tomcat 守门 / 观测装配守门 等）**并不配数据源**
+                        ⇒ ⇒ 上下文启动时就会炸：
+                        「Failed to configure a DataSource: 'url' attribute is not specified」。
+
+                        ⚠️ **这不是新缺陷，是单 1 引入 test scope 驱动后的连带效应**
+                        ⇒ 这里用两个系统属性把它压掉（**只作用于本模块的测试**，
+                        对 16 个下游组件零影响 —— test scope 不传递）：
+
+                        ① `spring.datasource.url` —— 给一个**必然连不上**的地址：
+                           只为让自动配置**有 url 可读**，不代表真有人会连它；
+                        ② `spring.datasource.hikari.initialization-fail-timeout=-1`
+                           —— Hikari 的默认值是 1ms（**fail fast**）⇒ 启动即校验连接
+                           ⇒ 连不上就直接把上下文打挂；-1 = **启动时不去校验连接**
+                           ⇒ ⇒ 不碰数据库的测试上下文可以正常起来。
+
+                        ⚠️ 需要真 PG 的那条守门（`MybatisPlusInterceptorChainGateTest`）
+                        用 `@DynamicPropertySource` 指向 testcontainers 起的真容器
+                        ⇒ `@DynamicPropertySource` 的优先级**高于**系统属性 ⇒ 它不受这两条影响。
+                    -->
+                    <systemPropertyVariables>
+                        <spring.datasource.url>jdbc:postgresql://127.0.0.1:1/none</spring.datasource.url>
+                        <spring.datasource.hikari.initialization-fail-timeout>-1</spring.datasource.hikari.initialization-fail-timeout>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
