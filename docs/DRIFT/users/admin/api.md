@@ -359,7 +359,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | M-35 | ALL | 标量强转 / 浮点截断 | number/bool→String **拒**；float→int **拒**（含 `1.0`） | 同（`GoStyleCoercion` 全局生效） | EQUIVALENT | R1 已修；⚠️ Jackson 3 类级 coercion 实测无效 ⇒ 只能全局（`GoStyleCoercion` 类注释「第三个坑」） |
 | M-36 | ALL | 超时时长 | **3000ms**（yaml 未写，来自 `go-zero@v1.10.2/rest/config.go:55` 的 `json:",default=3000"`） | `observability.http-timeout: 3s` | EQUIVALENT | **消费点**：`TimeoutFromMillis(conf.Timeout)`；`application.yml:131-132` |
 | M-37 | ALL | 超时的**包含范围** | 计时器在 Authorize **之后**起算 ⇒ **JWT 验签不计入** | 计时器在 `HttpMiddlewareFilter`(**+7**) 起算；验签在 `GoStyleJwtAuthFilter`(**+6**) ⇒ 同样**不计入** | **EQUIVALENT**（**2026-10-27 已闭环**） | → DRIFT-ADMINAPI-006 的 **② 半已修**：验签搬出预算 ⇒ 见 §12.2。黑名单 Redis 两侧都在预算**之内**（Go = route 级中间件最内层；RAG = interceptor 段）⇒ 本行**整体**等价 |
-| M-38 | ALL | 超时响应 | `503` + `text/plain; charset=utf-8` + `nosniff` + 尾换行 | `503` + `text/plain; charset=utf-8` + 尾换行，**无 nosniff** | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-007（**代码在 `service/common`，非本组件文件**）<br>〔**2026-10-24 完整性复核补记 ①**：上表两边写的都是**源码字面量**；**线上字节** Tomcat 会把 `Content-Type` 重渲染成 `text/plain;charset=utf-8`（**分号后无空格**）⇒ 与 Go 的 `text/plain; charset=utf-8`（**有空格**）**逐字节不同**（归一化后相同）。**499/503 都走这条**；400 的同款残差已记在 §UNRESOLVED-002<br>〔**2026-10-24 完整性复核补记 ②**：**nosniff 已被 `align/message` 分支跨域修掉**（`HttpMiddleware.writeTimeoutResponse` 加了 `setHeader("X-Content-Type-Options","nosniff")`）⇒ **未合并前本条仍成立，合并后本条自动消失** —— 见 ADMINAPI-007 的处置栏〕 |
+| M-38 | ALL | 超时响应 | `503` + `text/plain; charset=utf-8` + `nosniff` + 尾换行 | `503` + `text/plain; charset=utf-8` + `nosniff` + 尾换行 | **EQUIVALENT**（**2026-10-28 已闭环 · 真 Tomcat L4**） | → DRIFT-ADMINAPI-007（**代码在 `service/common`**）**已闭合**：共享层 `HttpMiddleware.writeTimeoutResponse:728` 的 `nosniff` 已在我树 ⇒ **wire 实测 503 响应确实带 `nosniff`**（`AdminApiRealTomcatResponseBytesTest`，见 §14）<br>〔**2026-10-24 完整性复核补记 ①**：上表两边写的都是**源码字面量**；**线上字节** Tomcat 会把 `Content-Type` 重渲染成 `text/plain;charset=utf-8`（**分号后无空格**）⇒ 与 Go 的 `text/plain; charset=utf-8`（**有空格**）**逐字节不同**（归一化后相同）。**499/503 都走这条**；400 的同款残差已记在 §UNRESOLVED-002<br>〔**2026-10-24 完整性复核补记 ②**：**nosniff 已被 `align/message` 分支跨域修掉**（`HttpMiddleware.writeTimeoutResponse` 加了 `setHeader("X-Content-Type-Options","nosniff")`）⇒ **已合入我树并经真 Tomcat L4 实测** —— 见 §14<br>〔**2026-10-28 实测补记**：真实栈上 503 的 `Content-Length` = **16**（`"Request Timeout"` 15 字符 + 尾随换行 1 字节）⇒ 与 Go 的 net/http 按缓冲内容算出的长度**逐字节相同**；**且 503 响应带 `nosniff`、200 JSON 响应不带**（Go 的 `httpx.OkJson` 也不设 nosniff）⇒ 两侧一致〕 |
 | M-39 | ALL | 中间件外层顺序 / 遥测面 | 签名无效的请求：**Sea 侧 `markHTTPResult` 观测数据不产生**（`Authorize` 短路 ⇒ 内层中间件不执行）；但 go-zero native `TraceHandler` 在**链首**，**仍产生 OTel server span** | 会产生（401 的观测数据与 span 都产生） | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-006 的 **① 半**（**2026-10-27 复核：原写「完全不产生 observability span」口径过宽；验签搬到 +6 后 **span 侧仍等价**（`Traceparent(+3)` 在其外层），但**观测数据侧仍不等价**）） |
 | M-40 | 全部外部调用 | Retry | **无** | **无** | EQUIVALENT | 两侧 `application.yml` / `admincenter.yaml` 均无重试配置 |
 | M-41 | 启动 | 下游依赖不可达 | `zrpc.MustNewClient` **启动即失败**（进程不启动） | Nacos + devh 懒连接，**进程能起**、每请求失败 | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-009 |
@@ -716,7 +716,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **⚠️ 归属**：`service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`
   **不在本组件的修改范围内**（本会话只允许改两个台账文件）⇒ **只留档，不实施**。
   影响面是**所有 api 组件**，不是 admin-api 独有。
-- **Evidence strength**：`静态源码·双侧`
+- **Evidence strength**：`静态源码·双侧` → ✅ **2026-10-28 升级为 L4**（**真实 Tomcat + 真 HTTP 客户端 · wire 实测**，
+  三条变异各红各的 ⇒ 见下方订正块 + **§14**）
 
 > #### ⚠️ 2026-10-24 完整性复核补记：**本条已被别的域分支跨域修掉（未合并）**
 >
@@ -741,6 +742,39 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 > ⚠️ **归类**：这是**框架限制**（Tomcat 的 `setContentType` 会解析成 `MediaType` 再序列化），
 > **不是 RAG 写错了** ⇒ 与 Go 的 `text/plain; charset=utf-8` **无法逐字节一致**，
 > 任何写法都产出不了那个空格 ⇒ 归「框架限制」，**不必修**。
+
+> #### ✅ 2026-10-28（· G1 lane）**本条已闭合**：共享层修复已在我树，且**经真 Tomcat L4 实测**
+>
+> **① 修复现状**：共享层 `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:728`
+> 的 `resp.setHeader("X-Content-Type-Options", "nosniff")` **已在我树**（随 `align/g4-service-common` 合入）
+> ⇒ 处置纪律第 2 条落地：**不再当新回归去「修」**，也不删条 —— 改为「已闭合」并标证据。
+>
+> **② 证据强度升级**：原条是 **L1（静态源码·双侧）** ⇒ 现补 **L4（真实 Tomcat + 真 HTTP 客户端 · wire 实测）**：
+>
+> | 维度 | Go（真源，逐行） | RAG（真 Tomcat，wire 实测） | 判定 |
+> |---|---|---|---|
+> | 状态码 | `http.StatusServiceUnavailable`（`http.go:83`） | **503** | ✅ 一致 |
+> | Content-Type | `text/plain; charset=utf-8`（Go `net/http.Error` 逐字写死） | `text/plain;charset=utf-8` | ✅ **归一化后一致**（空格残差 = 框架限制，见上） |
+> | nosniff | `X-Content-Type-Options: nosniff` | **`nosniff`** | ✅ **一致**（**本条争的就是这一项**） |
+> | body | `"Request Timeout\n"` | `Request Timeout\n` | ✅ **逐字节一致** |
+> | Content-Length | net/http 按缓冲内容算 = **16** | **16** | ✅ 一致 |
+>
+> ⇒ 守门 = `AdminApiRealTomcatResponseBytesTest#slowDownstreamYieldsGoTimeout503OnRealTomcat`
+> （**真 Tomcat `RANDOM_PORT` + 真 `java.net.http.HttpClient`** ⇒ 断言的是 wire 上真正落地的字节，
+> **不是 MockMvc 的模拟对象** ⇒ §3.3「MockMvc 测不到真实栈」这条坑被绕开）。
+> 完整记录见 **§14**。
+>
+> **③ 变异验证（绿测试必须能变红 · 三条各红各的）**：
+>
+> | 变异 | 落点 | 预期红在 | 实测 |
+> |---|---|---|---|
+> | **A** | 共享层 `HttpMiddleware.writeTimeoutResponse` 摘掉 `nosniff` | CASE-26 的 **nosniff 目标断言** | ✅ 红（`expected: <nosniff> but was: <null>`）**且只有它红**（CASE-24 仍绿 ⇒ 两条独立） |
+> | **B** | 域侧 `GlobalExceptionHandler.goStylePlainTextBadRequest` 的 Content-Type 去掉 charset | CASE-24 的 **charset 目标断言** | ✅ 红（`expected: <true> but was: <false>`）**且只有它红**（CASE-26 仍绿） |
+> | **C** | 测试侧把慢桩改快（**前提**不成立） | CASE-26 的 **503 前提断言** | ✅ 红（`expected: <503> but was: <200>`）**且只有它红** |
+>
+> ⇒ 三条变异**回滚后 sha256 与基线逐字节一致**（`git checkout --` 只用于已跟踪文件；本次三个目标全是已跟踪文件）。
+> ⚠️ **变异 A 落在 `service/common`（G4 写权面）** ⇒ 仅在**本工作树内临时施加 + 回滚**，
+> **不产生任何跨 lane 提交** ⇒ 零越权。
 
 ---
 
@@ -856,9 +890,9 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | CASE-21 | `@ResponseBodyAdvice` 成功路径只包一层 | — | — | ✅ | 已有（非本轮，但用 `standaloneSetup`，**不加载 `HttpMiddlewareFilter`**） |
 | CASE-22 | `@ResponseBodyAdvice` 异常路径不被二次包裹 | — | — | ✅ | 已有（非本轮，同上限制） |
 | CASE-23 | 400 text/plain 不被包 envelope | `400` text/plain | `400` text/plain | ✅ | 已有（非本轮，MockMvc） |
-| CASE-24 | **真实 Tomcat 下** 400 的 Content-Type / nosniff | `text/plain` + `nosniff` | 同 | **UNRESOLVED** | **缺**（`check-plaintext400-headers.sh` **只打 user-api**，见 UNRESOLVED-002） |
+| CASE-24 | **真实 Tomcat 下** 400 的 Content-Type / nosniff | `text/plain` + `nosniff` | 同 | ✅ **已闭合**（**2026-10-28 · G1 lane · 真 Tomcat L4**） | 🆕 `AdminApiRealTomcatResponseBytesTest#missingRequiredFieldYieldsGoPlainText400OnRealTomcat`（RANDOM_PORT + 真 `HttpClient`）⇒ 实测 `400` + `text/plain;charset=utf-8` + `nosniff` + `Content-Length: 28` + body `field "username" is not set\n`（**与 Go 逐字节相同**）⇒ 见 §14 |
 | CASE-25 | 405 / 415 | Go 无对应端点（404） | `405` / `415`，body 为空 | ⚠️ 语义不同 | **缺**（`body == null` 守卫分支无断言） |
-| CASE-26 | 3s 超时 | `503` + nosniff | `503` 无 nosniff | ❌ | **缺**（→ DRIFT-ADMINAPI-007，且超时路径测试用 MockMvc 测不到） |
+| CASE-26 | 3s 超时 | `503` + nosniff | `503` + nosniff | ✅ **已闭合**（**2026-10-28 · G1 lane · 真 Tomcat L4**） | 🆕 `AdminApiRealTomcatResponseBytesTest#slowDownstreamYieldsGoTimeout503OnRealTomcat` ⇒ 实测 `503` + `text/plain;charset=utf-8` + `nosniff` + `Content-Length: 16` + body `Request Timeout\n`（耗时 3585ms）⇒ **DRIFT-ADMINAPI-007 已闭合** ⇒ 见 §14 |
 | CASE-27 | 并发调用（同一端点 N 次） | 无状态 | 无状态，但 worker pool 饱和有独有 503 分支 | UNKNOWN | **缺**（→ UNRESOLVED-004） |
 
 ---
@@ -960,7 +994,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | 14 | Timeout scope 是否一致 | ✅ 是（**2026-10-27 更新**） | 时长一致（M-36）；**包含范围已一致**（M-37 —— 验签搬进 `GoStyleJwtAuthFilter(+6)` ⇒ 出 3s 预算） |
 | 15 | Concurrency semantics 是否一致 | ⚠️ UNKNOWN | 无状态部分一致；RAG 多一个 worker-pool 分支（UNRESOLVED-004） |
 | 16 | Authentication / Authorization 是否一致 | ❌ **否** | **DRIFT-ADMINAPI-001 / 002 / 003 / 004** —— 本组件最严重的一组 |
-| 17 | Serialization semantics 是否一致 | ⚠️ 部分 | `uid` 字符串化 / `extra_info` / `email` omitempty / 显式 null 一致（M-30~M-35）；**user 缺失形态不一致**（DRIFT-ADMINAPI-005）、503 缺 nosniff（DRIFT-ADMINAPI-007） |
+| 17 | Serialization semantics 是否一致 | ✅ **部分**（**2026-10-28 更新**） | `uid` 字符串化 / `extra_info` / `email` omitempty / 显式 null 一致（M-30~M-35）；**user 缺失形态不一致**（DRIFT-ADMINAPI-005）；~~503 缺 nosniff（DRIFT-ADMINAPI-007）~~ ⇒ ✅ **已闭合**（真 Tomcat L4 实测 503 带 nosniff，见 §14） |
 | 18 | Lifecycle 是否一致 | ❌ 否 | DRIFT-ADMINAPI-009 |
 
 **统计**：18 项中 ✅ 5 项、⚠️ 7 项、❌ 5 项、UNKNOWN 1 项。
@@ -1752,7 +1786,7 @@ RAG 的 admin-api 现在**必须在 admin-rpc ready 之后起**（fail-fast ⇒ 
 | 维度 | 结论 |
 |---|---|
 | **① 覆盖完整性** | ✅ HTTP 端点 **13/13**、gRPC RPC **13/13**、共用 DDL（`03`/`04`）、`admin-proto`（13 rpc 逐字节）、7 条签字偏离 —— **全部有记录**。<br>🔴 **但缺一整类维度**：**admin-rpc 的 gRPC 拦截器链**（Go 7 个 vs RAG 1 个）⇒ 已补 **DRIFT-ARPC-009**（见 `rpc.md`） |
-| **② 时效性** | 🔴 **DRIFT-ADMINAPI-007 的 nosniff 已被 `align/message` 分支跨域修掉（未合并）** ⇒ 本条合并后自动消失 ⇒ 已加处置纪律<br>🔴 **M-38 缺一条 charset 空格残差**（503/499 的线上字节与 Go 不同）⇒ 已补<br>🔴 **签字档 3 处链接失效** ⇒ 已修（见 §3） |
+| **② 时效性** | ✅ **DRIFT-ADMINAPI-007 的 nosniff 已合入我树并经真 Tomcat L4 实测**（2026-10-28）⇒ 本条**已闭合**，不再是「待合并」⇒ 见 §14<br>🟡 **M-38 仍留一条 charset 空格残差**（503/499 的线上字节与 Go 逐字节不同、归一化后相同）⇒ **归「框架限制」，不必修**<br>🔴 签字档 3 处链接失效 ⇒ 已修（见 §3） |
 | **③ 内部一致性** | ✅ 行号引用逐条校准（`engine.go:154-155`、`server.go:222-235` 等）<br>🔴 **上一轮复核自己引入了一处误判**（H-2 行号）⇒ 已订正（见 §4） |
 
 ## 1. 跨分支影响体检（**合并时会发生什么**）
@@ -1762,7 +1796,7 @@ RAG 的 admin-api 现在**必须在 admin-rpc ready 之后起**（fail-fast ⇒ 
 
 | 共享文件 | 改动方 | 是否影响本域断言 |
 |---|---|---|
-| `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java` | `align/message` | 🔴 **影响** —— 补了 `nosniff` ⇒ **ADMINAPI-007 合并后自动消失**（已加处置栏） |
+| `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java` | `align/message` → **已随 `align/g4-service-common` 合入我树** | ✅ **影响，但已闭合** —— 补的 `nosniff` **已在我树**，且**经真 Tomcat L4 实测**（503 响应确实带 `nosniff`）⇒ **ADMINAPI-007 闭合**（见 §14） |
 | `service/common/src/main/java/com/rag/common/protection/GoStyleCpuSheddingFilter.java` | `align/users-user` | ✅ **不影响** —— 只新增静态辅助方法 `elapsedRtMs`，**`@Order` 未变** ⇒ M-37 / M-39 的 filter 顺序断言仍成立 |
 | `service/users/users-common/src/main/java/com/rag/users/common/jwt/JwtUtil.java` | `align/users-user` | ⚠️ **不影响 N-5 的结论** —— 改的是 `signWith` 的实现（`Keys.hmacShaKeyFor` → 显式 `SecretKeySpec(..., "HmacSHA256")` + `SignatureAlgorithm`），**`padToHmacKeySize` 本身未动** ⇒「Go 签的 token 在 RAG 验不过」仍成立。**但**：该改动顺带修掉了「密钥 ≥48 字节时 `header.alg` 漂移到 HS384/HS512」的问题 ⇒ **N-5 签字档引用的代码已变**，合并后应复核一次 |
 | `service/users/users-common/db/01_create_user.sql` | `align/users-user` | ✅ 不影响（属 users/user 域；admin-rpc 只**读** `users_user`） |
@@ -2209,3 +2243,110 @@ go-zero@v1.10.2/rest/server.go:222-233     WithMiddleware ⇒ middleware(route.H
    ⇒ 本条覆盖了 admin-api 的**全部** Redis 故障面
 4. **域内副本是过渡形态**：G4 收编后要回来删副本（见 §13.3）
    🟢 **2026-10-27：已回来删掉了** —— `admin-api` 的域内副本已删除，共享层接管（见 [`../vs-common.md` §26](../vs-common.md)）⇒ ⇒ **本条是历史修法，不是现状**
+
+---
+
+## 14. 🆕 admin-api **真 Tomcat（RANDOM_PORT）字节级探针** ⇒ CASE-24 / CASE-26 闭合 + **DRIFT-ADMINAPI-007 已闭合**（2026-10-28 · G1 lane）
+
+### 14.1 落码（**零生产代码**）
+
+| 文件 | 行数 | 作用 |
+|---|---|---|
+| `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiRealTomcatResponseBytesTest.java` | 新建 | **3 条**用例：① CASE-24（真 Tomcat 400 字节）② CASE-26（真 Tomcat 503 字节）③ **对照组**（同路由 + 快下游 ⇒ 200 + JSON） |
+
+⇒ **零生产代码改动** ⇒ 不与 G4 的共享层写权面冲突；`src/test/java` 也不在 G4 的源扫守门扫描面内。
+
+### 14.2 为什么必须是**真 Tomcat**（不是 MockMvc）
+
+- CASE-24 在本台账里被标 **UNRESOLVED**，原因**不是「没写测试」**，而是**已有的测试全是 MockMvc**
+  ⇒ MockMvc 的 `MockHttpServletResponse` 在 `setHeader` / `commit` 的时序上与 Tomcat 不同
+  ⇒ **MockMvc 里的断言对真实字节没有判别力**（CASE-23 那行的备注就是这个意思）。
+- ⇒ 本类用 `webEnvironment = RANDOM_PORT` 起**真 Tomcat**，再用**真 `java.net.http.HttpClient`** 打过去
+  ⇒ 断言的是 **wire 上真正落地的字节**。
+- ⇒ 这正是 §3.3「判断 Java 框架能力是否生效必须有运行证据」与「MockMvc 测不到真实栈」的落地。
+
+### 14.3 实测字节（**2026-10-28 · 真 Tomcat · wire 级**）
+
+| 用例 | status | Content-Type | nosniff | Content-Length | body |
+|---|---|---|---|---|---|
+| **CASE-24** `/admin/v1/create` `{}` | **400** | `text/plain;charset=utf-8` | **nosniff** | 28 | `field "username" is not set\n` |
+| **CASE-26** `/admin/v1/login`（下游睡 5s） | **503** | `text/plain;charset=utf-8` | **nosniff** | **16** | `Request Timeout\n`（端到端 **3585ms**） |
+| **对照组** `/admin/v1/login`（快下游） | **200** | `application/json;charset=utf-8` | **<缺失>** | 186 | `[{"code":200,"msg":"OK","data":{"token":"…"}}]` |
+
+⇒ **三个观察点**：
+
+1. **400 的 body 与 Go 逐字节相同**（28 字节）：Go 出处 = `go-zero@v1.10.2/core/mapping/unmarshaler.go:1199`
+   的 `fmt.Errorf("field %q is not set", name)` ⇒ `field "username" is not set` ＋ `http.Error` 的 `fmt.Fprintln` 补的 `\n`。
+   ⇒ ⚠️ **台账原先写「文本内容不对齐、也不试图对齐」**（那是 DRIFT-ADMINAPI-011 **修复前**的状态）
+   ⇒ ⇒ **本条实测已把两侧钉成逐字节相同** ⇒ 把原文钉成守卫（比「以 `\n` 结尾」强得多）。
+2. **503 的 `Content-Length` = 16** ⇒ `"Request Timeout"` 是 **15 个字符** ＋ 尾随换行 1 字节
+   ⇒ 与 Go 的 net/http「按缓冲内容算长度」**逐字节相同**。
+   ⚠️ **我自己在 javadoc 里先写成了 15**（少算了「Request」7 + 空格 1 + 「Timeout」7 = 15 字符这件事的加法）
+   ⇒ **实测纠正为 16** ⇒ 代码里用的是 `GO_TIMEOUT_BODY.length() + 1`（**算出来的，不是写死的**）⇒ 断言本身没受影响，只有注释错。
+3. **200 的 JSON 响应不带 nosniff** ⇒ 与 Go 的 `httpx.OkJson`（不设 nosniff）**一致**
+   ⇒ ⇒ 「nosniff 只出现在 Go 的 `http.Error` 分支上」这条**两侧同形**。
+
+### 14.4 Go 出处（逐条到**消费点**，不是声明点）
+
+```
+【CASE-24 · 400】
+Sea-RideTheWind_golang/service/user/admin/api/internal/handler/admin/createhandler.go:20-21
+    if err := httpx.Parse(r, &req); err != nil { httpx.ErrorCtx(r.Context(), w, err) }
+go-zero@v1.10.2/rest/httpx/responses.go:36      → doHandleError(w, err, buildErrorHandler(ctx), …)
+go-zero@v1.10.2/rest/httpx/responses.go:127-140  → buildErrorHandler 返回 nil
+    （前提：service/user 全树**从未**调用 httpx.SetErrorHandler ⇒ 实测零命中）
+go-zero@v1.10.2/rest/httpx/responses.go:145-156  → handler == nil 分支 → http.Error(w, err.Error(), 400)
+go-zero@v1.10.2/core/mapping/unmarshaler.go:1199   → fmt.Errorf("field %q is not set", name)
+
+【CASE-26 · 503】
+Sea-RideTheWind_golang/service/common/observability/http.go:22  → httpTimeoutBody = "Request Timeout"
+Sea-RideTheWind_golang/service/common/observability/http.go:80  → case <-ctx.Done():
+Sea-RideTheWind_golang/service/common/observability/http.go:83  → statusCode := http.StatusServiceUnavailable
+Sea-RideTheWind_golang/service/common/observability/http.go:88  → http.Error(w, httpTimeoutBody, statusCode)
+```
+
+### 14.5 变异验证（**绿测试必须能变红 · 三条各红各的**）
+
+| 变异 | 落点（**写权归属**） | 预期红在 | 实测 |
+|---|---|---|---|
+| **A** | 共享层 `HttpMiddleware.writeTimeoutResponse` 摘掉 `nosniff`（**G4 写权面**） | CASE-26 的 **nosniff 目标断言** | ✅ 红（`expected: <nosniff> but was: <null>`）**且只有它红**（CASE-24 仍绿 ⇒ 两条独立） |
+| **B** | 域侧 `GlobalExceptionHandler.goStylePlainTextBadRequest` 的 Content-Type 去掉 charset（**本域**） | CASE-24 的 **charset 目标断言** | ✅ 红（`expected: <true> but was: <false>`）**且只有它红**（CASE-26 仍绿） |
+| **C** | 测试侧把慢桩改快（**前提**不成立） | CASE-26 的 **503 前提断言** | ✅ 红（`expected: <503> but was: <200>`）**且只有它红** |
+
+⇒ **三条回滚后 sha256 与基线逐字节一致**（`git checkout --` 只对**已跟踪**文件安全；三个目标全是已跟踪文件）。
+⇒ ⚠️ **变异 A 落在 `service/common`（G4 写权面）** ⇒ 仅在**本工作树内临时施加 + 回滚** ⇒ **零跨 lane 提交、零越权**。
+
+### 14.6 🟡 新坑（本轮实测踩到）：**RANDOM_PORT 下必须关掉 Nacos 自动注册**
+
+- **现象**：首次跑本类 ⇒ **上下文起不来**，报
+  `Failed to start bean 'webServerStartStop'` ⇒ `Caused by: ErrCode:-401, ErrMsg:Client not connected, current status:STARTING`
+  （at `NacosServiceRegistry.register`）。
+- **根因**：`RANDOM_PORT` **真起 web server** ⇒ Spring Cloud Alibaba 在 web server 启动阶段**注册 Nacos**
+  ⇒ 而 `spring.cloud.nacos.discovery.server-addr=127.0.0.1:1` **连不上** ⇒ 注册抛异常 ⇒ **整个上下文起不来**。
+- ⚠️ **`MOCK` 环境不启动 web server** ⇒ admin-api 现有的 MockMvc 测试**一条都踩不到** ⇒
+  ⇒ **这正是 admin-api 此前「没有 RANDOM_PORT 先例」的原因**（不是没人想写，是写了就起不来）。
+- **修法（测试配置，不是产品配置）**：`spring.cloud.service-registry.auto-registration.enabled=false`
+  ⇒ 与 hot-api 的 `HotApiRealTomcatGateTest` 同款处置。
+- **判定纪律复盘**：**「上下文起不来」≠「被测行为红」** ⇒ 必须先读 `Caused by` 链，
+  区分「装配/环境问题」与「被测行为问题」⇒（`BindException` / `Failed to load ApplicationContext` 属前者）。
+
+### 14.7 效力边界（如实登记，**不夸大**）
+
+1. **Go 腿是源码逐行对照**（`文件:行号`），**不是本轮活体对拍** ⇒ 本条的证据强度是
+   **RAG 腿 L4（wire 实测）+ Go 腿 L1（源码）** ⇒ 按弱侧记 ⇒ **L1/L4**，**不写「双侧 L4」**。
+   （⚠️ 这与本轮 §50 的 V-014 / ARPC-013 不同 —— 那两条是**两侧都跑了探针**。）
+2. **只覆盖 public 路径**（`/admin/v1/create`、`/admin/v1/login`）⇒ 受保护路径的 401 分支**不在本类覆盖面**。
+3. **400 的 charset 空格残差仍在**（`text/plain;charset=utf-8` vs Go 的 `text/plain; charset=utf-8`）
+   ⇒ **归「框架限制」，不修** ⇒ 见 §UNRESOLVED-002 与 [`../vs-common.md`](../vs-common.md) 第 4 行。
+4. **只验字节与状态码**，不验 envelope 语义（那是 CASE-01/02 的面）。
+5. **未起容器** ⇒ 本类**零 Docker 依赖** ⇒ 既省启动时间，也躲开「宿主→容器端口转发」那类环境 flake
+   ⇒ ⇒ **对波末收口回归的负载增量极小**（实测整类 **11.0s / 3 条**，其中含 1 次真 Tomcat 上下文启动）。
+
+### 14.8 本轮回归数字（**admin-api 单模块**）
+
+| 组件 | 上轮 | 本轮 | 增量 |
+|---|---|---|---|
+| `admin-api` | 140 | **147** | **+3**（本类 3 条） |
+
+⇒ `mvn -B -o -DargLine=-Xmx2g -am -pl service/users/admin/admin-api test` ⇒ **BUILD SUCCESS · EXIT=0**
+⇒ ⚠️ **本轮只跑了 admin-api 单模块**（不是域级 6 模块全量）⇒ **域级全量留到波末 C7 收口回归重测**。
