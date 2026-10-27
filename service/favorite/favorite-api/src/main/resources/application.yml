@@ -32,7 +32,22 @@ spring:
       host: ${REDIS_ADDR:redis}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
+      # 命令超时（读写）= Go 的 ReadTimeout/WriteTimeout = 3s
       timeout: 3s
+      # 🔴 connect-timeout（**TCP 连接**超时）必须显式写 5s：
+      #   Go 出处（消费点）：service/favorite/api/internal/svc/service_context.go:20
+      #       redisDB := redis.MustNewRedis(c.BizRedis)
+      #     → go-zero core/stores/redis/redisclientmanager.go:32-40 构造
+      #       red.NewClient(&red.Options{Addr, Username, Password, DB, MaxRetries, MinIdleConns, TLSConfig})
+      #     ⇒ **没有设置 DialTimeout** ⇒ 走 go-redis v9.20.0 options.go:338-340 的默认
+      #       DialTimeout = **5s**（ReadTimeout/WriteTimeout 同理走 :364-379 的 3s）。
+      #   RAG 侧：Boot 4.0.8 的 LettuceConnectionConfiguration.createClientOptions **只在**
+      #       spring.data.redis.connect-timeout 非空时才设 SocketOptions.connectTimeout
+      #     ⇒ 不配 ⇒ 走 Lettuce SocketOptions.DEFAULT_CONNECT_TIMEOUT = **10s**
+      #   ⇒ 不配 ⇒ 连接超时 10s vs Go 5s ⇒ **漂移 2 倍**（连接不可达时要等 2 倍时间）。
+      # ⚠️ spring.data.redis.timeout 只管**命令**超时；Boot 4 起它**不再**兼管连接超时
+      #    （Boot 2/3 才是同一个属性）—— 两个超时必须分别配。
+      connect-timeout: 5s
 
   # ===== 2. Nacos 服务发现客户端 =====
   # ⚠️ namespace / group 的默认值必须与 favorite-rpc 的 application.yml 一致，

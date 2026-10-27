@@ -1685,3 +1685,62 @@ public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryS
 | gRPC deadline 传播 | ❌ **恒不生效**（`DeadlineState` 从未设置） | ✅ **已生效**，行为级断言钉住 |
 | SQL `queryTimeout` 注入 | ❌ 因拿不到 `DeadlineState` 而**不注入** | ✅ 随之恢复 |
 | 组件判定 | `NOT EQUIVALENT`（域外三条 D21/D22/D23 + D14/D25/D27） | 🟥 **2026-10-26 订正**：这句**已过期** —— **D21/D22/D23 第十三轮已落地 10/10** · **D14 已实现**（`HttpMiddleware.java:692` 的 nosniff）· **D25 已闭合**（T-13）· **D27 已签字为有意偏离**（`SD-2026-10-25-01`）⇒ **这 6 条不再是「域外未闭合项」** ⇒ 本条**不是**域内漂移，是**装配缺口** |
+---
+
+## 九、🔴 Redis **TCP 连接超时**漂移（Go `DialTimeout` **5s** vs Lettuce 默认 **10s**）—— 2026-10-27 已修
+
+### 9.1 漂移事实（修前）
+
+| 项 | Go（真源，唯一基准） | RAG 修前 | RAG 修后 |
+|---|---|---|---|
+| **TCP 连接**超时<br>（`DialTimeout` / `SocketOptions.connectTimeout`） | **5s** | 🔴 **10s** | ✅ **5s** |
+| 命令超时<br>（`Read/WriteTimeout` / `commandTimeout`） | **3s** | ✅ 3s | ✅ 3s |
+
+**Go 出处（消费点，不是声明点）**：
+
+```
+service/hot/rpc/internal/svc/service_context.go:17-19
+    rds := redis.NewClient(&redis.Options{Addr: c.RedisConf.Host, Password: c.RedisConf.Pass})
+    ← **只设了 Addr + Password** ⇒ DialTimeout 未设
+  → go-redis v9.20.0 options.go:338-340
+    if opt.DialTimeout == 0 { opt.DialTimeout = 5 * time.Second }
+    ⇒ DialTimeout = **5s**
+    （ReadTimeout/WriteTimeout 同理走 options.go:364-379 ⇒ 3s）
+```
+
+**RAG 侧为什么「不写就错」**（Spring Boot **4.0.8**，L3 字节码实测）：
+
+| 事实 | 证据 |
+|---|---|
+| `spring.data.redis.connect-timeout` **非空时**才设 `SocketOptions.connectTimeout` | `LettuceConnectionConfiguration.createClientOptions` 字节码 offset 9→31：`getConnectTimeout()` → `SocketOptions.builder().connectTimeout(...)` → `ClientOptions.Builder.socketOptions(...)` |
+| **不写 ⇒ 整段不设** ⇒ 落回 Lettuce 默认 | lettuce-core 6.8.2 `SocketOptions.DEFAULT_CONNECT_TIMEOUT = 10`（秒） |
+| `spring.data.redis.timeout` 只喂**命令**超时，**不再**兼管连接超时 | 同一自动配置里 `getTimeout()` → `LettuceClientConfigurationBuilder.commandTimeout(...)` ⇒ **Boot 2/3 才是同一个属性** |
+| 该属性确实存在（不是臆造的名字） | `spring-boot-data-redis-4.0.8.jar` 的 `spring-configuration-metadata.json`：`spring.data.redis.connect-timeout`（defaultValue = None） |
+
+⇒ **修前漂移 = 2 倍**。
+
+> 🔴 **本条在 hot-rpc 的可观察性最强**：hot-rpc 是**纯 gRPC 进程**（**无 HTTP 预算兜底**），
+> 且它的 Redis 路径就是 `get_hot_articles_logic.go:43` 的
+> `RedisClient.ZRevRangeWithScores(...)`（Top-K 读）⇒ 连接超时 10s vs 5s
+> **直接**体现在 gRPC 调用耗时上。
+
+### 9.2 修法与守门
+
+| 项 | 内容 |
+|---|---|
+| 修法 | `application.yml` 的 `spring.data.redis` 下显式加 `connect-timeout: 5s`（**域内文件 ⇒ 域侧自修**，不依赖共享层） |
+| 为什么共享层不参与 | `service/common` 的 `GoStyleRedisClientAutoConfiguration` **只**设 `disconnectedBehavior(REJECT_COMMANDS)`、**不碰** `socketOptions` / `timeoutOptions`（其 javadoc「为什么不动命令超时」段已写明）⇒ 连接超时**完全由本域 yml 决定** ⇒ **不装副本、不重复收编** |
+| 守门 | 新增 1 个契约守门（**1 例**）—— 走**整条真实链路**：`ConfigDataApplicationContextInitializer` 加载本模块**真实的** `application.yml` → Boot **真实** `DataRedisAutoConfiguration`（它 `@Import` 了 `LettuceConnectionConfiguration`）→ 真 `LettuceConnectionFactory` → 断言**消费点** `getClientConfiguration().getClientOptions().get().getSocketOptions().getConnectTimeout()` 与 `getClientConfiguration().getCommandTimeout()` |
+| 为什么断言「消费点」而不是「yml 里有这个键」 | 后者挡不住「属性名写错 ⇒ Spring 静默用默认值」（§3.3.1） |
+
+### 🧪 变异验证（防假绿）
+
+| 步骤 | 结果 |
+|---|---|
+| 本轮跑守门 | ✅ **1/1 绿** |
+| **变异**：删掉 `connect-timeout: 5s` 一行（其余不动） | 🔴 **精确转红**：报「**expected: 5S but was: 10S**」⇒ 守门**真的**在读 Lettuce 的 socket 连接超时，不是恒绿 |
+| 还原 | ✅ **1/1 绿** · `sha256` 与变异前备份**逐字一致** |
+| 整域回归 | ✅ **四域 12 模块 = 919 条**（article-common 15 / article-api 99 / article-rpc 155 / comment-common 27 / comment-api 52 / comment-rpc 116 / favorite-common 29 / favorite-api 105 / favorite-rpc 114 / hot-common 14 / hot-api 96 / hot-rpc 97）⇒ **0 failures / 0 errors / 4 skipped** · 9:44 min · BUILD SUCCESS<br>口径：`mvn -o --fail-at-end -pl <12 模块> -am test`；基线 `eb4d1d2` + 本轮改动；核对日期 **2026-10-27**；两口径（模块汇总行求和 ≡ 逐类明细行求和）**逐模块一致** |
+
+**证据强度**：L3 静态实测（Boot 4.0.8 **字节码** + Lettuce 6.8.2 常量 + go-redis v9.20.0 源码）
+＋ L4 **真容器**装配断言（`ApplicationContextRunner` + Boot 真实 `DataRedisAutoConfiguration`）。

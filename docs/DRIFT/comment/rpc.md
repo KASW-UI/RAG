@@ -500,3 +500,107 @@
 | [`docs/DRIFT/comment/common.md`](./common.md) | `comment-common` 的独立台账 |
 | [`docs/DRIFT/comment/proto.md`](./proto.md) | `comment-proto` 的独立台账 |
 | [`docs/DRIFT/_cross/component-coverage-matrix.md`](../_cross/component-coverage-matrix.md) | 38 组件覆盖矩阵 —— **共享文件，合并后由主会话统一更新**（本工作树不碰） |
+---
+
+## 7. 🔴 D10 · Redis **TCP 连接超时**漂移（Go `DialTimeout` **5s** vs Lettuce 默认 **10s**）—— 2026-10-27 已修
+
+### 7.1 漂移事实（修前）
+
+| 项 | Go（真源，唯一基准） | RAG 修前 | RAG 修后 |
+|---|---|---|---|
+| **TCP 连接**超时<br>（`DialTimeout` / `SocketOptions.connectTimeout`） | **5s** | 🔴 **10s** | ✅ **5s** |
+| 命令超时<br>（`Read/WriteTimeout` / `commandTimeout`） | **3s** | ✅ 3s | ✅ 3s |
+
+**Go 出处（消费点，不是声明点）**：
+
+```
+service/comment/rpc/internal/cache/redis.go:17-19
+    rdb := redis.NewClient(&redis.Options{Addr: Host})   ← **只设了 Addr**
+  ⇒ DialTimeout 未设
+  → go-redis v9.20.0 options.go:338-340
+    if opt.DialTimeout == 0 { opt.DialTimeout = 5 * time.Second }
+    ⇒ DialTimeout = **5s**
+    （ReadTimeout/WriteTimeout 同理走 options.go:364-379 ⇒ 3s）
+```
+
+**RAG 侧为什么「不写就错」**（Spring Boot **4.0.8**，L3 字节码实测）：
+
+| 事实 | 证据 |
+|---|---|
+| `spring.data.redis.connect-timeout` **非空时**才设 `SocketOptions.connectTimeout` | `LettuceConnectionConfiguration.createClientOptions` 字节码 offset 9→31：`getConnectTimeout()` → `SocketOptions.builder().connectTimeout(...)` → `ClientOptions.Builder.socketOptions(...)` |
+| **不写 ⇒ 整段不设** ⇒ 落回 Lettuce 默认 | lettuce-core 6.8.2 `SocketOptions.DEFAULT_CONNECT_TIMEOUT = 10`（秒） |
+| `spring.data.redis.timeout` 只喂**命令**超时，**不再**兼管连接超时 | 同一自动配置里 `getTimeout()` → `LettuceClientConfigurationBuilder.commandTimeout(...)` ⇒ **Boot 2/3 才是同一个属性** |
+| 该属性确实存在（不是臆造的名字） | `spring-boot-data-redis-4.0.8.jar` 的 `spring-configuration-metadata.json`：`spring.data.redis.connect-timeout`（defaultValue = None） |
+
+⇒ **修前漂移 = 2 倍**。
+
+> 🔴 **本条在 comment-rpc 的可观察性比 api 域强**：comment-rpc 是**纯 gRPC 进程**
+> （**没有 HTTP 预算兜底**）⇒ 连接超时 10s vs 5s 会**直接**体现在 gRPC 调用耗时上。
+
+### 7.2 修法与守门
+
+| 项 | 内容 |
+|---|---|
+| 修法 | `application.yml` 的 `spring.data.redis` 下显式加 `connect-timeout: 5s`（**域内文件 ⇒ 域侧自修**，不依赖共享层） |
+| 为什么共享层不参与 | `service/common` 的 `GoStyleRedisClientAutoConfiguration` **只**设 `disconnectedBehavior(REJECT_COMMANDS)`、**不碰** `socketOptions` / `timeoutOptions`（其 javadoc「为什么不动命令超时」段已写明）⇒ 连接超时**完全由本域 yml 决定** ⇒ **不装副本、不重复收编** |
+| 守门 | 新增 1 个契约守门（**1 例**）—— 走**整条真实链路**：`ConfigDataApplicationContextInitializer` 加载本模块**真实的** `application.yml` → Boot **真实** `DataRedisAutoConfiguration`（它 `@Import` 了 `LettuceConnectionConfiguration`）→ 真 `LettuceConnectionFactory` → 断言**消费点** `getClientConfiguration().getClientOptions().get().getSocketOptions().getConnectTimeout()` 与 `getClientConfiguration().getCommandTimeout()` |
+| 为什么断言「消费点」而不是「yml 里有这个键」 | 后者挡不住「属性名写错 ⇒ Spring 静默用默认值」（§3.3.1） |
+
+### 🧪 变异验证（防假绿）
+
+| 步骤 | 结果 |
+|---|---|
+| 本轮跑守门 | ✅ **1/1 绿** |
+| **变异**：删掉 `connect-timeout: 5s` 一行（其余不动） | 🔴 **精确转红**：报「**expected: 5S but was: 10S**」⇒ 守门**真的**在读 Lettuce 的 socket 连接超时，不是恒绿 |
+| 还原 | ✅ **1/1 绿** · `sha256` 与变异前备份**逐字一致** |
+| 整域回归 | ✅ **四域 12 模块 = 919 条**（article-common 15 / article-api 99 / article-rpc 155 / comment-common 27 / comment-api 52 / comment-rpc 116 / favorite-common 29 / favorite-api 105 / favorite-rpc 114 / hot-common 14 / hot-api 96 / hot-rpc 97）⇒ **0 failures / 0 errors / 4 skipped** · 9:44 min · BUILD SUCCESS<br>口径：`mvn -o --fail-at-end -pl <12 模块> -am test`；基线 `eb4d1d2` + 本轮改动；核对日期 **2026-10-27**；两口径（模块汇总行求和 ≡ 逐类明细行求和）**逐模块一致** |
+
+**证据强度**：L3 静态实测（Boot 4.0.8 **字节码** + Lettuce 6.8.2 常量 + go-redis v9.20.0 源码）
+＋ L4 **真容器**装配断言（`ApplicationContextRunner` + Boot 真实 `DataRedisAutoConfiguration`）。
+
+> ⚠️ 本域 yml 开了 `spring.data.redis.lettuce.pool.enabled: true` ⇒ pom **必须**引
+> `commons-pool2`（本域 pom 已显式声明并写了理由）⇒ 守门起真容器时不会踩
+> `NoClassDefFoundError: GenericObjectPoolConfig`。
+
+---
+
+## 8. 🧹 U+FFFD 清理（2026-10-27）—— **1 处真损坏**
+
+| 文件:行 | 损坏形态 | 重建 | 依据 |
+|---|---|---|---|
+| `service/CommentAuditPublisher.java:19` | `把它当` + **3×U+FFFD** + `<b>会失败</b>` | `把它当作<b>会失败</b>` | 3×U+FFFD = **1 个汉字**（UTF-8 3 字节逐字节替换）；同句语义「把它当作『会失败』的操作处理」是唯一自然读法；**只改注释**，不改行为 |
+
+⇒ 重建后本域 `grep -rln $'\xef\xbf\xbd'` **零命中**。
+
+---
+
+## 9. 🧹 启动守门 flake 修法（2026-10-27 · G4 登记）
+
+### 9.1 症状
+
+`CommentRpcRuntimeBootGateTest#realFatJarProcessBootsAndListens` 在 G4 的全量回归（2448 条）里**偶发红 1 条**。
+
+### 9.2 根因（**不是启动失败**）
+
+原逻辑：真进程 fat jar 起来 → `tcpProbe` 端口一连上就**立刻** `destroyForcibly()` ⇒
+**drain 线程还没读到**「gRPC Server started」那行日志 ⇒ 该断言**必然偶发红**。
+
+**辨识度**（为什么判定它是竞态而不是启动失败）：端口已监听 + 无 `NoClassDefFoundError`
+⇒ 进程**真的起来了** ⇒ 红的只是「断言与日志读取的竞态」。
+
+### 9.3 修法（对齐 G4 建议方向）
+
+| 步骤 | 内容 |
+|---|---|
+| ① 收摊前**先等日志行出现** | 轮询「gRPC Server started」标志行，上限 30s、间隔 200ms |
+| ② sink 改**线程安全** | `StringBuilder` → **`StringBuffer`**（sink 跨线程读写） |
+| ③ 建 happens-before | `drain.join(10s)` |
+
+### 9.4 验证
+
+| 项 | 结果 |
+|---|---|
+| 定向跑 | ✅ `CommentRpcRuntimeBootGateTest` **2/2 绿** |
+| 整域回归 | ✅ **comment-rpc 116 条**（skipped 0）全绿 ⇒ **四域 12 模块合计 919 条**（0 failures / 0 errors / 4 skipped · 9:44 min · BUILD SUCCESS · 基线 `eb4d1d2` + 本轮改动 · 核对日期 2026-10-27 · 两口径逐模块一致） |
+| 同款缺陷在本域另一组件 | 🔴 `ArticleRpcRuntimeBootGateTest` **同款** ⇒ 已在 **article 域**同批修（属 G3 写权面） |
+| 同款缺陷在 G2 域 | 🔴 `like/like-rpc/…/LikeRpcRuntimeBootGateTest.java` **同款** ⇒ **属 G2 写权面** ⇒ 已回报 G2，本域**不越权改** |

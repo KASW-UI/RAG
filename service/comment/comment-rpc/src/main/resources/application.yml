@@ -123,6 +123,16 @@ spring:
       database: 0
       # 对应 Go cache/redis.go:21-22 的 `context.WithTimeout(3s)` Ping
       timeout: 3s
+      # 🔴 connect-timeout（**TCP 连接**超时）必须显式写 5s：
+      #   Go 出处（消费点）：service/comment/rpc/internal/cache/redis.go:17-19
+      #       rdb := redis.NewClient(&redis.Options{Addr: Host})   ← **只设了 Addr**
+      #     ⇒ DialTimeout 未设 ⇒ 走 go-redis v9.20.0 options.go:338-340 的默认 **5s**。
+      #   RAG 侧：Boot 4.0.8 的 LettuceConnectionConfiguration.createClientOptions **只在**
+      #       spring.data.redis.connect-timeout 非空时才设 SocketOptions.connectTimeout
+      #     ⇒ 不配 ⇒ 走 Lettuce SocketOptions.DEFAULT_CONNECT_TIMEOUT = **10s**
+      #   ⇒ 不配 ⇒ 连接超时 10s vs Go 5s ⇒ **漂移 2 倍**。
+      # ⚠️ spring.data.redis.timeout 只管**命令**超时；Boot 4 起它**不再**兼管连接超时。
+      connect-timeout: 5s
       # ⚠️ pool.enabled=true ⇒ pom **必须**引 commons-pool2，否则
       #    NoClassDefFoundError: GenericObjectPoolConfig ⇒ 组件起不来（like-rpc 实测）
       lettuce:
