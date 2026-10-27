@@ -540,3 +540,54 @@ Boot **4.0.8** 的 `spring-boot-data-redis-4.0.8.jar`：
 - 同源的通用纪律：**「你以为的那个量」与「系统实际吃到的那个量」不是同一个**
   ⇒ 与「两口径交叉验先查报告新鲜度」「跨树引用要带 commit id」同族。
 
+---
+
+## PIT-FAV-API-012 · 🔴 **守门断言的期望值若引用「被测代码的常量」⇒ 那条守门是哑的**（实测 0 红）
+
+> **一句话**：断言的期望值**不能与被测代码同源** ⇒ 改常量 ⇒ 业务代码与断言**一起变** ⇒ 断言恒成立 ⇒ **守门看着全绿，实际什么都没守住**。
+
+### 现象（2026-10-27 实测 · favorite 域 span 守门）
+
+第一版 `FavoriteApiSpanWiringTest` 的期望值写成 **`FavoriteSpans.API_CREATE_FAVORITE`**（**生产代码的常量**）：
+
+```java
+SpanData span = requireSpan(FavoriteSpans.API_CREATE_FAVORITE);
+assertEquals(PROBE_USER_ID, longAttr(span, FavoriteSpans.ATTR_USER_ID));
+```
+
+变异 **MUT-E** 把那个常量的**值**从 `"FavoriteAPI.CreateFavorite"` 改成 `"FavoriteAPI.CreateFavoriteV2"`
+⇒ ⇒ **业务代码（`FavoriteCreateItemService`）跟着用新名字** ⇒ ⇒ **导出的 span 名与断言期望值一起变**
+⇒ ⇒ **守门 0 红**（其余 6 个变异都正常转红 ⇒ 一开始差点把它当成「变异点选错层」放过）。
+
+### 机制
+
+- 变异点选在哪一层 ⇒ 决定变异**转不转得动**；
+- **期望值同源** ⇒ 决定断言**转不转得红** —— 这是**另一层**，两者要**各自**查。
+
+⇒ 所以「7 个变异里 6 个转红、1 个 0 红」时，**不能**只归因于「变异点选错层」，**还要查期望值是不是同源**。
+
+### 修法
+
+1. **期望值一律用 Go 真源的字面量**（不是生产代码常量）：
+
+   ```java
+   // Go 出处：api/internal/logic/favorite/create_favorite_logic.go:34
+   private static final String GO_API_CREATE_FAVORITE = "FavoriteAPI.CreateFavorite";
+   // Go 出处：api/internal/logic/favorite/*.go:42~47（硬编码字面量，Go 侧无集中常量表）
+   private static final String GO_ATTR_USER_ID = "biz.user_id";
+   ```
+
+   ⇒ 守门与被测代码**零同源** ⇒ 「常量被改坏」「业务代码被改坏」「属性 key 被改坏」「tracer 名被改坏」四类变异都会**精确转红**。
+
+2. **本地常量名带 `GO_` 前缀 ＋ 每个都写 Go 侧 `文件:行号`** ⇒ 一眼能看出「这是真源抄来的，不是从代码里引的」。
+
+### 判据式
+
+> **写守门时问一句：这条断言的期望值，能不能在**不改被测代码**的前提下被单独改掉？**
+> **不能 ⇒ 它就是同源的 ⇒ 它可能哑。**
+
+### 同族
+
+- **PIT-FAV-API-010**（共享层一改，本域守门的变异守护就哑了）—— 那条讲**变异点**选在**上游拥有的层**；
+  本条讲**期望值**与**被测代码**同源 ⇒ ⇒ **两条是「哑」的两个不同来源**，查的时候都要查。
+- AGENTS.md §3.3.3「跑绿 ≠ 判据活着」⇒ ⇒ 本条是那条纪律的**一个具体失效形态**。

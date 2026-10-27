@@ -25,7 +25,7 @@
 | 项 | 值 |
 |---|---|
 | 落地 | **36 个 Java 文件 / 7,571 行 / 7 个迁移脚本**（V7 为第十轮前新增的时钟源对齐脚本）<br>⚠️ **核对 2026-10-25（第十轮）**：行数首轮记 7,057 ⇒ 现 **7,571**，增量 514 行**全部是各轮的纯注释增量**（可执行逻辑零改动）（本轮前：34 个文件全 0 字节、`pom.xml` 零依赖零插件、6 个 `.sql` 全 0 字节） |
-| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §26**（favorite-rpc：**20 个测试类 / 110 例**（含 3 skip）—— ⚠️ **第二十轮实测**：新增的 `FavoriteSqlStatementParityTest` 在**没有探针环境变量**时按设计 skip ⇒ skip 数 2 → 3；⚠️ **第二十三轮实测**：新增 `FavoriteFolderItemTimeColumnTest` **5 例**（真 PG）⇒ 100 → **105**；⚠️ **第二十五轮实测**：新增 `FavoriteSqlTimeoutProductionPathTest` **4 例**（真 PG + 真 HikariCP + 真 MyBatis 链）⇒ 105 → **109**；⚠️ **第二十七轮实测**：该守门把「代理层秒数」与「驱动内部原始毫秒」**拆成两个测试方法**（同方法内第一条失败会遮住第二条）⇒ 4 → **5 例** ⇒ 109 → **110**） |
+| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §26**（favorite-rpc：**22 个测试类 / 126 例**（⚠️ **第二十九轮实测**：新增 `FavoriteRpcSpanWiringTest` **12 例**（**零 Docker / 零真 PG**）⇒ 110 → **126**；⇒ 含 3 skip ⇒ **123 例绿**）（含 3 skip）—— ⚠️ **第二十轮实测**：新增的 `FavoriteSqlStatementParityTest` 在**没有探针环境变量**时按设计 skip ⇒ skip 数 2 → 3；⚠️ **第二十三轮实测**：新增 `FavoriteFolderItemTimeColumnTest` **5 例**（真 PG）⇒ 100 → **105**；⚠️ **第二十五轮实测**：新增 `FavoriteSqlTimeoutProductionPathTest` **4 例**（真 PG + 真 HikariCP + 真 MyBatis 链）⇒ 105 → **109**；⚠️ **第二十七轮实测**：该守门把「代理层秒数」与「驱动内部原始毫秒」**拆成两个测试方法**（同方法内第一条失败会遮住第二条）⇒ 4 → **5 例** ⇒ 109 → **110**） |
 | 构建 | `mvn -o -pl service/favorite/favorite-rpc -am install` ⇒ **BUILD SUCCESS** |
 | 本轮发现并修复 | **6 处 L2 语义偏差**（§2）+ **2 处实现期真 bug**（§3） |
 | 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选已签字**（2026-10-25）：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK）⇒ **本域已无 🏷 候选**，见 §13.2<br>✅ **U8（第十五轮新增 · 域内可动的最后一条）已于第十六轮闭合**：create / create_item 的**成功路径** + `ensureUserExists` 五分支 + **落库等价性**全部拿到双侧活体证据（**15 case 全 SAME**）⇒ **§25**（盘点全表 ⇒ §24.1）⇒ ~~域内「未知项」归零~~（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认）<br>🔴🔴 **第二十轮翻案**：「域内『未知项』归零」是**提前收口** —— 当时**没查 SQL 语句层**（DDL / 错误码 / 事务语义三层闭了，**语句层是第四层，没做**）⇒ 第二十轮补上那一层 ⇒ **当场抓出 3 处 L1 可观察的漂移**（RAG 侧 INSERT / UPDATE **少绑时间列** ⇒ 落库 `NULL` ⇒ 对外时间戳 = **0**）⇒ **§29**<br>🔴 **U9（第十七轮新增 · 部署形态类 · 待拍板）**：Go 生产形态有 **16062** 那个 HTTP 面（`etc/favorite.yaml:23-30` 的 DevServer + `internal/devserver/server.go:79-82` 的 `if !c.Enabled { return }` ⇒ **与 mode 无关，生产也开**），RAG 侧 `web-application-type: none` ⇒ **没有** ⇒ 要么 RAG 侧也开（**部署形态变更**，需引 servlet 容器），要么**签字接受**⇒ **§26.8** |
@@ -1660,6 +1660,10 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 | 写入方盘点 | `python3 tools/outbox-writer-audit/favorite/check-outbox-writers.py` ⇒ **EXIT=0**（扩面后复跑） |
 | Tomcat 三旋钮 / Flyway 账本 / proto 静态 / jar 可执行性 | 全 **EXIT=0** |
 | 共享面（`docs/DRIFT/_INDEX.md` / `_MANIFEST.json` / `docs/Intentional_Deviations/_INDEX.md` / `docs/Pitfalls/_INDEX.md` / `AGENTS.md` / `docs/DRIFT/_cross/`） | **零改动** |
+> 🔴🔴 **2026-10-27 第二十九轮订正（本条是「某一轮」的声明，不是「分支永远零改动」的声明）**：
+> ⇒ ⇒ 本表的「**零改动**」说的是**第十四轮那一轮** ⇒ ⇒ **仍然成立**。
+> ⇒ ⇒ 但 `tools/ledger-lint/favorite/check-ledger-vs-reality.py` 的「共享面零改动」门禁
+> ⇒ ⇒ 是**按 git 判**的：`git diff --name-only $(git merge-base HEAD do-my-own-gh)..HEAD` ⇒ ⇒ **它量的是「本分支相对主干的累计 diff」**，⇒ ⇒ **合并 G4 共享层（`e18fd52` ⇒ `cd893d1`）之后必然含 `service/common/**`** ⇒ ⇒ **该门禁在这套「域 lane 合并共享层」的波次模型下结构性地不可能为绿** ⇒ ⇒ **改台账文字修不好它**（工具的判据是 git，不是文字）⇒ ⇒ **本条按「已知、已归因、不修」登记** ⇒ ⇒ ⇒ **不要**因为它红就以为本域偷偷改了共享层 ⇒ ⇒ 真实口径 = 「**本域的每一轮**对共享层零改动」（本轮实测：`git status` 只有域内文件 + 域内台账 ⇒ 共享面零改动成立）。
 
 ### 22.7 ⚠️ 合并后需主会话统一更新的共享面（本域**未碰**）
 
@@ -3739,7 +3743,7 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 | 落点 | `FavoriteDomainService` 的 **7 个方法**（`createFavoriteFolder` / `createFavorite` / `deleteFavoriteFolder` / `deleteFavorite` / `getFavoriteFolders` / `getFavoritesByFolder` / `updateFavoriteFolderName`）＋ `FavoriteUserGuard#ensureExists`（= `Dependency.User.GetUser`）＋ `FavoriteArticleSnapshotResolver#resolve`（= `Dependency.Article.GetArticle`） |
 | 工具类 | `service/favorite/favorite-common/.../span/FavoriteSpans.java`（域内私有，api/rpc 共用） |
 | 判据 | 🔴 **三类，与 comment 域不同**（详见 [`api.md` §16.2](api.md#162-)）⇒ rpc 侧 = **凡错都记**（含业务失败）· 两个依赖 span = **只记下游 RPC 失败**，业务判定失败**不记** |
-| 证据强度 | 🔴 **L1（源码级）· 守门未写** ⇒ **不得读作「已验证」** ⇒ 详见 [`api.md` §16.5](api.md#165-) |
+| 证据强度 | 🟢 **L3**（Go 侧 **L1 逐行对照** `Sea-RideTheWind_golang/service/favorite/rpc/**` ＋ RAG 侧 **L4 运行证据**：`FavoriteRpcSpanWiringTest` 自装 OTel SDK ＋ 收集型 exporter ＋ **真 in-process gRPC 下游** ⇒ 断言**导出的 9 个 span** ⇒ **12 条全绿** ＋ **4 个变异精确转红**）⚠️ **边界**：**Go 侧无同时跑的探针** ⇒ ⇒ **不是「双侧活体对拍」** ⇒ 详见 [`api.md` §16.5](api.md#165-) ＋ [`api.md` §16.6](api.md#166-) |
 | 核对日期 | 2026-10-27 |
 
 ⚠️ **依赖 span 的两段式改造要点**（改这两处时别弄错）：「下游调用」与「调用后的业务判定」必须**拆成两个函数段**（`tracedDependency` 的 `call` 与 `after`）⇒ 否则会**多记** Go 侧那三条**没有** `RecordError` 的业务分支（`helper.go:109-111` / `:113-115` / `:117-119`）。

@@ -20,7 +20,7 @@
 | 项 | 值 |
 |---|---|
 | 落地形态 | 31 个 main 文件 / **3,116 行** / **15 个 DTO** / 7 个 Service / 1 个 Controller<br>⚠️ **核对 2026-10-25（第十轮）**：行数比首轮台账记的 2,920 多 196 行 ⇒ **全部是各轮的纯注释增量**（可执行逻辑零改动）；DTO 数首轮记的 **13 是错的**（基线 `58e8314` 就是 15 个） |
-| 测试 | **8 个测试类 / 97 例全绿**（33 输入契约 + 36 MVC 管线 + **6 装配** + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍** + **1 探针（自动 skip）** + **4 端口归属守门**）→ 第六轮 **+1 个测试类 / +5 例**；第十四轮收尾 **+1 个测试类 / +4 例**（`RealTomcatPortTest`）；**2026-10-26 合并当天**：防护链类 3 ⇒ **6 例**（绝对 `@Order` ⇒ Go 相对链序，**§12**） |
+| 测试 | **11 个测试类 / 111 例全绿**（33 输入契约 + 36 MVC 管线 + **6 装配** + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍** + **1 探针（自动 skip）** + **4 端口归属守门** + **11 span 守门（第二十九轮新增 · 零 Docker）**）⚠️ **另有 4 个已知共享层 error**（`FavoriteApiRealTomcatGateTest` 3 ＋ `FavoriteApiEnvelopeParityTest` 1 ⇒ 根因在共享层 `cd893d1` ⇒ §16.5）⇒ **合计 116 例 / 1 skip**；⚠️ **明细之和不等于总数**（本行只列主要构成 ⇒ 以 surefire 求和为准）→ 第六轮 **+1 个测试类 / +5 例**；第十四轮收尾 **+1 个测试类 / +4 例**（`RealTomcatPortTest`）；**2026-10-26 合并当天**：防护链类 3 ⇒ **6 例**（绝对 `@Order` ⇒ Go 相对链序，**§12**） |
 | 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条已签字偏离** |
 | 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **1 条跨域待拍板**：② **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，落点在 `service/common` ⇒ 收口在 `global`）—— ① 容器层参数上限口径**已于 2026-10-27 闭合**（共享层把容器上限抬到 10001 + 域侧动作完成 ⇒ **§14**）<br>✅ **U8（第十五轮登记的唯一一条业务路径缺口）已于第十六轮闭合**：create 成功路径 + `ensureUserExists` 五分支 + 落库等价性全部拿到双侧活体证据（15 case 全 SAME）⇒ [`rpc.md`](./rpc.md) **§25**；盘点全表 ⇒ **§24.1** ⇒ **域内「未知项」归零**（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认）<br>🔴 **U9（第十七轮新增 · 部署形态类 · 待拍板）**：Go 生产形态有 **16062** 那个 HTTP 面，RAG 侧没有 ⇒ **§11** |
 | 本台账范围 | **仅 `favorite-api`**。`favorite-common` / `favorite-rpc` / `favorite-proto` 见同目录另三份台账 |
@@ -528,7 +528,7 @@ CheckBlacklistMiddleware: middleware.NewCheckBlacklistMiddleware(redisDB).Handle
 **2026-10-25 第十五轮复核后的实测口径**（只算**真用**的 ⇒ **剥掉注释**再数 ——
 本域那两个只在 javadoc 里提到它的**支撑类**因此不计）：
 
-⇒ **修完之后**：**7 个域 / 14 个测试类**还在用 `RANDOM_PORT`（**favorite 域已归零** ⇒ 本轮已修）。
+⇒ **修完之后**：**7 个域 / 17 个测试类**还在用 `RANDOM_PORT`（**favorite 域已归零** ⇒ 本轮已修）。
 
 > 🔴🔴 **2026-10-26 合并当天订正（第三十轮）**：本行原写「**6 个域 / 10 个测试类**」
 > ⇒ **合并 `global` 的成果后变成 7 个域 / 14 个测试类** ——
@@ -537,6 +537,7 @@ CheckBlacklistMiddleware: middleware.NewCheckBlacklistMiddleware(redisDB).Handle
 > `GoStyleJsonContentTypeCharsetTomcatTest` / `GoStyleParamLimitGateTest`）
 > ⇒ ⇒ **不是本域的改动** ⇒ ⇒ 这条计数**是全仓事实**，**别的域一合并就会变**
 > ⇒ ⇒ `tools/ledger-lint/favorite/check-ledger-vs-reality.py` 会**自动**把它抓出来（它每次都按**当前仓库**重算）⇒ ⇒ **不用靠人记得改**。
+> 🔴🔴 **2026-10-27 第二十九轮订正**：本行原写「**7 个域 / 14 个测试类**」⇒ ⇒ **合并 G4 共享层后实际是 7 个域 / 17 个测试类** ⇒ ⇒ 差额 **+3** （`GoStyleJsonContentTypeCharsetTomcatTest` / `GoStyleParamLimitGateTest` / `GoStyleJsonBodyRawHeaderTomcatTest`）⇒ ⇒ **全部在 `service/common`（共享层）** ⇒ ⇒ **不是 favorite 域的改动** ⇒ ⇒ **本域的「favorite 域 = 0」这一格不变** ⇒ ⇒ 仍是「**别的域/共享层一合并就会变**」的全仓事实。
 > ⇒ ⇒ 顺带一条观察：那 4 个在**共享层**里 ⇒ ⇒ 「需要一份**共享**的端口选取实现」这个选项
 > ⇒ 对它们**已经是既成事实**（共享层自己就在用 `RANDOM_PORT`）⇒ ⇒ 落点二选一的问题**缩小到其余各域**。
 
@@ -549,7 +550,7 @@ CheckBlacklistMiddleware: middleware.NewCheckBlacklistMiddleware(redisDB).Handle
 | `users/user` | 1 | `GoStyleGrpcClientBreakerE2ETest` |
 | `task` | 1 | `TaskApiContentTypeTest` |
 | `like` | 1 | `LikeApiRouterErrorRealTomcatTest` |
-| **`common`（共享层本身）** | **4** | 🆕 **合并当天新增**（`global` 的共享层改动）—— `GoStyleFormLimitEnvelopeGateTest` / `GoStyleJsonBodyRawHeaderTomcatTest` / `GoStyleJsonContentTypeCharsetTomcatTest` / `GoStyleParamLimitGateTest` |
+| **`common`（共享层本身）** | **7** | 🆕 **合并当天新增**（`global` 的共享层改动）—— `GoStyleBreakerRouteTemplateGateTest` / `GoStyleParamLimitOffModeGateTest` / `GoStyleFormLimitEnvelopeGateTest` / `GoStylePathNormalizingTomcatGateTest` / `GoStyleJsonContentTypeCharsetTomcatTest` / `GoStyleParamLimitGateTest` / `GoStyleJsonBodyRawHeaderTomcatTest` |
 
 ⇒ **同款暴露面全仓都在** ⇒ 需要一份**共享**的端口选取实现
 ⇒ 落点二选一（**本域不拍板**）：`service/common` 的 test-jar，**或**各域各自复制本域这份
@@ -822,7 +823,7 @@ service/favorite/api/internal/svc/service_context.go:20
 | RAG 侧落码 | ✅ **16/16 全部落位**（api 侧 7 个 Service 方法 ＋ rpc `FavoriteDomainService` 7 个方法 ＋ `FavoriteUserGuard` ＋ `FavoriteArticleSnapshotResolver`） |
 | 共享工具类 | **新增** `service/favorite/favorite-common/src/main/java/com/rag/favorite/favorite/common/span/FavoriteSpans.java`（**域内私有**；`favorite-api` 与 `favorite-rpc` **都依赖** `favorite-common` ⇒ 一份两边共用）＋ `favorite-common/pom.xml` 加 `opentelemetry-api`（**不写 `<version>`**，由 Boot 4.0.8 BOM 管版本）⇒ ⚠️ 两个业务模块**不需要**改 pom（实测 classpath 上已有 `opentelemetry-api:1.55.0`） |
 | 属性名 | **7 个**：`biz.user_id` · `biz.folder_id` · `biz.favorite_id` · `biz.folder_name` · `biz.target_id` · `biz.target_type` · `biz.article_id` ⇒ ⚠️ **Go 侧这 7 个 key 是硬编码字面量、无集中常量表** ⇒ 只能逐条落 |
-| **证据强度** | 🔴 **L1（源码级）** —— ⚠️ **守门未写** ⇒ ⇒ **不得读作「已验证」**；编译与既有回归见 §16.4 |
+| **证据强度** | 🟢 **L3**（Go 侧 = **L1 逐行对照** `Sea-RideTheWind_golang/service/favorite/**`；RAG 侧 = **L4 运行证据**：`FavoriteApiSpanWiringTest`（**11 条**）＋ `FavoriteRpcSpanWiringTest`（**12 条**）自装 **真 OTel SDK** ＋ 收集型 exporter ⇒ 断言**导出的 `SpanData`** ⇒ ⇒ **7 个变异全部精确转红**）—— ⚠️ **边界**：**Go 侧没有同时跑的探针**（真源进程在本轮机器级 Docker 转发故障下起不来）⇒ ⇒ **不得读作「双侧活体对拍」**；详见 §16.5 ＋ §16.6 |
 | 核对日期 | 2026-10-27 |
 
 ### 16.2 🔴 三类错误判据（**逐字保留 Go 侧的不一致**，未套用 comment 域的判据）
@@ -856,10 +857,44 @@ service/favorite/api/internal/svc/service_context.go:20
 |---|---|
 | 编译 | ✅ `mvn -B -o -pl service/favorite/favorite-api,service/favorite/favorite-rpc -am compile` ⇒ **BUILD SUCCESS**（EXIT=0） |
 | 既有回归 | ✅ 既有回归：`mvn -B -o -pl service/favorite/favorite-api -am test` ⇒ **105 条 / 0 failures / 4 errors / 1 skipped** ⇒ 其中 **4 个 error 全是「form 参数超限 / 达限」用例**（`FavoriteApiRealTomcatGateTest#nonEmptyFormValueCountOverLimitIsRejected` · `#nonEmptyFormValueCountAtLimitIsPassedThrough` · `#containerParameterLimitIsSurfacedAsGoParseError` · `FavoriteApiEnvelopeParityTest#tooManyFormParamsMatchGoByteForByte`）⇒ 根因 = `java.net.ProtocolException: Too many interim responses received: 9 > 8`（**JDK HttpClient 对 Tomcat 多次 100-Continue 的上限**）⇒ ⇒ **与本次 span 落码无关**（span 在业务层，**不在 form 解析路径上**）⇒ ⇒ **根因在共享层 `cd893d1` 把容器上限抬到 10001**（⇒ Tomcat 不再在 2048 拒 ⇒ 继续收 ⇒ 触发更多 100-Continue）⇒ ⇒ **已转派 G4**（共享层写权）⇒ ⚠️ **本轮 span 落码未引入回归**：其余 101 条全绿 |
-| 🔴 **守门缺口（本轮未补）** | **未写** `FavoriteApiSpanWiringTest` / `FavoriteRpcSpanWiringTest`（真 Spring 上下文 ＋ 真 OTel SDK ＋ 自写 `SpanExporter`）⇒ ⇒ **16 个 span 的「真被导出」「属性值正确」「鉴权失败无属性无事件」三条都还没有运行时证据** ⇒ ⇒ **本条只能算 L1**；**未做**变异验证（改 span 名 / 改属性名 ⇒ 断言必须精确转红）⇒ ⇒ 「守门是否活着」**未体检** |
-| 约束（补守门时必须遵守） | 守门**不得依赖 Docker / Testcontainers / 真 PG / 真 Redis**（机器级 Docker 端口转发当前是坏的）⇒ favorite-api 无数据库 ⇒ 可用真 Spring 上下文；favorite-rpc 需 **mock 数据层** ＋ 真装配（**装配层证据仍成立**，但须在 javadoc 里写明这条理由） |
+| ✅ **守门（已补 · 第二十九轮）** | **新增 2 个守门类**（**域内文件** · **零 Docker / 零 Testcontainers / 零真 PG / 零真 Redis**）：<br>① `service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/FavoriteApiSpanWiringTest.java` ⇒ **11 条**<br>② `service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteRpcSpanWiringTest.java` ⇒ **12 条**<br>**形态** = 自装 **真 OTel SDK**（`OpenTelemetrySdk` ＋ `SdkTracerProvider` ＋ `SimpleSpanProcessor` ＋ 自写 `CollectingExporter`）⇒ 断言**导出的 `SpanData`**（**不是**「代码写成了这样」⇒ AGENTS.md §3.3.3）⇒ ⇒ **16/16 个 span 的「真被导出」「属性名与属性值」「三类记错判据」「status 恒 UNSET」四条都有运行时证据** |
+| 🟡 **守门的边界（必须与结论一起读）** | ① **Go 侧没有同时跑的探针** ⇒ ⇒ **不是「双侧活体对拍」** ⇒ 本条最高只到 **L3**（Go 侧 L1 逐行对照 ＋ RAG 侧 L4 运行证据）<br>② **favorite-rpc 侧不起 Spring 上下文**（`application.yml` 里 `spring.flyway.enabled=true` ⇒ 真上下文**必须连真 PG** ⇒ Docker 转发故障下不可用）⇒ 改为**直接装配生产对象**（真 `FavoriteDomainService` ＋ 真 `FavoriteUserGuard` ＋ 真 `FavoriteArticleSnapshotResolver` ＋ 真 `FavoriteRpcMetrics` ＋ 真 `FavoriteSpans` ＋ 真 OTel SDK），**mock 的只有两条外部边界**：数据层 mapper（`interface` ＋ mock）与下游 gRPC 客户端（**真 in-process server** ⇒ 走真传输层）⇒ ⇒ **本守门不证明 SQL / DDL / 事务行为**（那些归 `FavoriteDdlParityTest` / `FavoriteSqlStatementParityTest` 等）<br>③ **favorite-api 侧无数据源** ⇒ 用**真 in-process gRPC server** 顶上那一次下游调用 ⇒ **顺带能钉死「span 属性 trim 过、下游请求带未 trim 原值」这条不对称**（靠下游**真收到**的请求断言，不是靠读代码） |
+| ✅ **变异验证（7 个变异 · 全部精确转红）** | 见 **§16.6** ⇒ ⇒ 「守门是否活着」**已体检**（不是假绿） |
+| 🔴 **本轮回归（可复算）** | `mvn -B -o -pl service/favorite/favorite-api,service/favorite/favorite-rpc,service/favorite/favorite-common -am test -DargLine="-Xmx2g"` ⇒ **favorite-api 116 条 / 0 failures / 4 errors / 1 skipped**（`11` 份 surefire XML）· **favorite-common 29 条 / 0 failures / 0 errors / 0 skipped**（`4` 份）· **favorite-rpc 126 条 / 0 failures / 0 errors / 3 skipped**（`22` 份）<br>⚠️ **favorite-api 的 4 个 error 全是既有的「form 参数超限 / 达限」用例**（`FavoriteApiRealTomcatGateTest` 3 个 ＋ `FavoriteApiEnvelopeParityTest#tooManyFormParamsMatchGoByteForByte` 1 个）⇒ 根因 = `java.net.ProtocolException: Too many interim responses received: 9 > 8`（**JDK HttpClient 对 Tomcat 多次 100-Continue 的上限**）⇒ ⇒ **根因在共享层 `cd893d1` 抬容器上限到 10001**（⇒ Tomcat 不再在 2048 拒 ⇒ 继续收 ⇒ 触发更多 100-Continue）⇒ ⇒ **与本次 span 落码无关**（span 在业务层，**不在 form 解析路径上**）⇒ ⇒ **已转派 G4**（共享层写权）⇒ ⚠️ **本轮新增的 23 条 span 守门全绿** ⇒ ⇒ **未引入回归** |
 
-### 16.6 🔴 一个**必须记下**的 diff 形态问题（供后续 lane 参考）
+### 16.6 ✅ 变异验证 —— **7 个变异全部精确转红**（第二十九轮）
+
+⚠️ **纪律**：AGENTS.md §3.3.3 ——「跑绿」≠「判据活着」⇒ ⇒ 守门写完**必须**逐条复算变异表。
+⚠️ **复算方式**：改生产代码 → 跑守门 → 记「红几条」→ `git checkout --` 还原（⚠️ **还原前先 `git add`**，否则会无声抹掉未暂存的真实改动）。
+
+| 变异 | 改动点（**生产代码**，域内文件） | 它该抓住什么 | **实测** |
+|---|---|---|---|
+| **MUT-A** | `FavoriteSpans.tracedApi`：鉴权失败的 catch 里**多记**一个 `recordException` | api 判据①「鉴权失败不记错」 | ✅ **1 红** |
+| **MUT-B** | `FavoriteCreateItemService`：`biz.target_id` **不 trim** | 取值不对称① | ✅ **3 红** |
+| **MUT-C** | `FavoriteSpans.tracedDependency`：多写一个 `setStatus(ERROR)` | span status 恒 `UNSET` | ✅ **2 红** |
+| **MUT-D** | `FavoriteSpans.tracedDependency`：`after`（业务判定）失败也**记错** | rpc 依赖判据② | ✅ **2 红** |
+| **MUT-E** | `FavoriteSpans.API_CREATE_FAVORITE` 的**值**改成 `"...V2"` | span 名 | ✅ **5 红**（🔴 **修好之前是 0 红** ⇒ 见 §16.6.1） |
+| **MUT-F** | `FavoriteSpans.ATTR_FOLDER_NAME` 改成 `"biz.folderName"` | 属性 key | ✅ **api 3 红 ＋ rpc 3 红** |
+| **MUT-G** | `FavoriteSpans.TRACER_NAME_API` 改成 `"favorite_api"` | tracer 名 | ✅ **8 红** |
+
+⇒ **7/7 变异全部转红** ⇒ ⇒ **守门活着**（不是「跑绿就放心」）。
+
+### 16.6.1 🔴 **一颗真实的「哑守门」**（本轮实测抓到 · 值得记进坑档）
+
+⚠️ **第一版守门**把期望值写成 `FavoriteSpans.API_CREATE_FAVORITE` 这样的**生产代码常量** ⇒ ⇒ **MUT-E（改那个常量的值）转不动** ⇒ **0 红** ⇒ ⇒ **守门看着全绿，实际什么都没守住**。
+
+- **机制**：断言的期望值与被测代码**同源** ⇒ 改常量 ⇒ **业务代码与断言一起变** ⇒ 断言恒成立。
+- **判据式**：**守门断言的期望值必须独立于被测代码** ⇒ 用 **Go 侧字面量**。
+  本轮已**逐条从 `Sea-RideTheWind_golang/service/favorite/**` 取回** 16 个 span 名（`otel.Tracer(...).Start(l.ctx, "…")`）
+  ＋ 7 个属性 key（`attribute.Int64("biz.…")` / `attribute.String("biz.…")`）⇒ 全部写成守门里的**本地字面量常量**。
+- ⇒ ⇒ 这样「**常量被改坏**」「**业务代码被改坏**」「**属性 key 被改坏**」「**tracer 名被改坏**」四类变异都会**精确转红**。
+- ⚠️ **与「变异点选在哪一层」是同族但更隐蔽的一层**：变异点选在哪一层决定变异**转不转得动**；
+  而**期望值同源**决定断言**转不转得红** ⇒ ⇒ **两者都要各自查**。
+- ⇒ 已入坑档 **PIT-FAV-API-012**。
+
+---
+
+### 16.7 🔴 一个**必须记下**的 diff 形态问题（供后续 lane 参考）
 
 ⚠️ 「把方法体包进 lambda」**必然**导致**既有行整体缩进 +4** ⇒ ⇒ `git diff` 会把整个文件标记为改动 ⇒ ⇒ **复核者必须用 `git diff --ignore-all-space` 对照**才能看清「真实改动 = 净新增行数」：
 ⇒ ⇒ 本次实测：`FavoriteDomainService.java` 的 `git diff --stat` = **1163 行**，`git diff --ignore-all-space --stat` = **97 插入 / 0 删除** ⇒ ⇒ **没有夹带语义改动**（纯缩进平移）⇒ ⇒ **不是噪声 bug，是包裹式改造的固有代价** ⇒ ⇒ **判据 = 两个数字一比**（⚠️ 别据此判定「夹带了语义改动」，也别据此要求「重做成零缩进」—— 那是做不到的）。
