@@ -7,6 +7,9 @@ import com.rag.article.article.rpc.domain.ArticleEntity;
 import com.rag.article.article.rpc.mapper.ArticleMapper;
 import com.rag.article.article.rpc.mapper.ArticleSyncOutboxMapper;
 import com.rag.article.article.rpc.service.ArticleAtomicService;
+import com.rag.article.article.rpc.service.ArticleSpans;
+import com.rag.common.observability.MqConsumer;
+import io.opentelemetry.context.Context;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,6 +83,46 @@ public class ArticleSyncResultConsumer {
             groupId = "${article-rpc.article-sync-result-consumer-conf.group}",
             containerFactory = "articleKafkaListenerContainerFactory")
     public void onMessage(ConsumerRecord<String, String> record, String value) {
+        // 🔴 L-10（Go 出处：article_sync_result_consumer.go:39-40）：
+        //     func (l *ArticleSyncResultConsumer) Consume(ctx context.Context, key, val string) error {
+        //         return observability.TraceConsumer(ctx, "article-rpc", "ArticleSyncResultConsumer.Consume",
+        //             articleMessageAttrs("article_sync_result", key), func(ctx context.Context) error { … })
+        //     }
+        //    ⇒ 共享层 MqConsumer.traceConsumer 与 Go 的 TraceConsumer **逐项同构** ⇒ 纯域侧接线。
+        //    ⚠️ messaging.destination 是**逻辑名** "article_sync_result"，
+        //      **不是** kafka topic（真源 topic 是 article-sync-results）。
+        Map<String, Object> attrs = ArticleSpans.consumerAttrs(
+                ArticleSpans.DESTINATION_SYNC_RESULT, record == null ? null : record.key());
+        Throwable outcome = MqConsumer.traceConsumer(Context.current(), ArticleSpans.TRACER_NAME,
+                ArticleSpans.CONSUMER_SYNC_RESULT, attrs, ctx -> consume(value));
+        if (outcome != null) {
+            // Go 的 kq：Consume 返回 error ⇒ 不确认位点 ⇒ 重投 ⇒ 必须**抛出**而不是吞掉。
+            throw toRuntime(outcome);
+        }
+    }
+
+    /**
+     * 消费主体；返回非 null 即代表「失败，要重投」。
+     *
+     * <p>🔴 语义等价论证见 {@code ArticleReviewConsumer#consume}：
+     * Go 的 {@code TraceConsumer} 在 {@code err != nil} 时
+     * <b>既</b> {@code MarkSystemError}/{@code MarkTimeout} <b>又</b> {@code return err}
+     * ⇒ 本实现：lambda 内转成返回值（让共享层能标错），lambda 外原样抛出（保重投）。
+     */
+    private Throwable consume(String value) {
+        try {
+            doConsume(value);
+            return null;
+        } catch (RuntimeException e) {
+            return e;
+        }
+    }
+
+    private RuntimeException toRuntime(Throwable t) {
+        return (t instanceof RuntimeException re) ? re : new IllegalStateException(t);
+    }
+
+    private void doConsume(String value) {
         // ---------- 分支 1：JSON 解析失败 ⇒ 丢弃（Go :42-45）----------
         ArticleSyncEventTypes.ArticleSyncResult result;
         try {

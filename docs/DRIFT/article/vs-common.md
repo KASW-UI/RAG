@@ -188,6 +188,81 @@ comment 域的 `CommentSpans` 用的是「异常逃出 ⇒ 按业务码段判一
   ⇒ ⇒ 但**要多一维「能打事件」**，且**错误记录改成逐点显式**（不是异常逃出统一判）；
 - ⇒ ⇒ **下一轮可直接落码**（本轮**只做取证补全**，**未改任何生产代码** ⇒ ⇒ 本域基线不受影响）。
 
+### 3.2 ✅ **L-10 已落码**（2026-10-28 · G3）—— 8 个 span（6 logic + 2 consumer）全部补齐
+
+**证据强度（分层，不合并）**：**RAG 侧 L4**（真 OTel SDK ＋ 收集型 exporter ⇒ 断言**导出的 span**，非「方法被调用」）
+· **Go 侧 L1**（逐行源码取证，§3.1 ①~⑦ 的行号）· 🔴 **双侧同时跑的对拍：未做** ⇒ ⇒ **本条不得读作「两侧已对拍一致」**。
+
+**落码清单（5 个文件 · 纯域侧 · 未碰 `service/common`）**
+
+| 文件 | 改动 | 行数 |
+|---|---|---|
+| `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/service/ArticleSpans.java` | **新建**（321 行）：8 个 span 名 ＋ 15 个属性名 ＋ 12 个事件名 ＋ `traced` 模板 ＋ `record` / `event` 助手 ＋ `consumerAttrs` | 321 |
+| `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/service/ArticleDomainService.java` | 6 个方法各加一层 span 包装 ＋ **逐点** `record` / `event` | 668 → 935 |
+| `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mq/ArticleReviewConsumer.java` | 接共享层 `MqConsumer.traceConsumer` ＋ 拆出 `doConsume` | 373 → 419 |
+| `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mq/ArticleSyncResultConsumer.java` | 同上 | 209 → 251 |
+| `service/article/article-rpc/src/test/java/com/rag/article/article/rpc/ArticleSpanWiringTest.java` | **新建**（583 行）：**16 条**守门 | 583 |
+
+**8 个 span 的落点对照（行号取自落码后的 RAG 侧）**
+
+| span 名 | 落点 | 起始属性 | 后续属性 | 事件 | `record` 点 |
+|---|---|---|---|---|---|
+| `CreateArticle` | `ArticleDomainService.java:118` | `author_id` `title` | `article_id` `:150` 之后 | 0 | 4（`:134` 雪花 · `:150` MinIO · `:187` insert · `:201` kafka）|
+| `GetArticle` | `:248`（🔴 前置校验在**外** `:236-247`）| `article_id` | `article_found` `:269`/`:274` | **8**（`:257 :273 :285 :300 :309 :322 :323 :324`）| 4（`:263` 查询 · `:296` IncrView · `:317` MinIO）|
+| `UpdateArticle` | `:397` | `article_id` | — | 0 | 8（`:415` 查询 · `:422` NotFound · `:433` applySourceUpdates · `:461` 分支A · `:478`/`:485` 分支B · `:503`/`:511` 分支C）|
+| `DeleteArticle` | `:641` | `article_id` | — | 0 | 5（`:653` 查询 · `:660` NotFound · `:669` PermissionDenied · `:678` 事件ID · `:686` 事务）|
+| `ListArticles` | `:728`（🔴 **公开分支也有** span）| `page` `page_size` `sort_by` `desc` | `manual_type_tag` `secondary_tag` `author_id`（条件）· `total_articles` | 2（`:766` `:786`）| 1（`:782`）|
+| `UploadFile` | `:835` | `file_name` | `file_id` `content_type` `object_name` | 2（`:869` `:882`）| 2（`:847` 雪花 · `:876` MinIO）|
+| `ArticleConsumer.Consume` | `ArticleReviewConsumer.java:125` | — | `messaging.*` × 4 | — | 共享层 `markSystemError` |
+| `ArticleSyncResultConsumer.Consume` | `ArticleSyncResultConsumer.java:96` | — | `messaging.*` × 4 | — | 同上 |
+
+**「Go 记不记」的逐点白/黑名单（§3.1 ② 的三处缺口 ⇒ 守门逐条钉死）**
+
+| 位置 | Go | 落码 | 守门用例 |
+|---|---|---|---|
+| `get_article_logic.go:56-58` NotFound | **不记**（改用 `article_found=false`）| 不调 `record` | `getArticleNotFoundIsNotRecorded` |
+| `get_article_logic.go:66-68` PermissionDenied | **不记** | 不调 `record` | `getArticlePermissionDeniedIsNotRecorded` |
+| `get_article_logic.go:73-75` IncrViewCount | **记了但不返回** | `record` 后**不抛**，继续往下走 | `getArticleIncrViewFailureIsRecordedButNotReturned` |
+| `update_article_logic.go:59-63` NotFound | **记** | `record` | `updateArticleNotFoundIsRecorded` |
+| `delete_article_logic.go:53-57` / `:58-62` | **都记** | `record` | `deleteArticlePermissionDeniedIsRecorded` |
+| `update_article_logic.go:89-90` / `:108-109` `setReviewNonce` | **不记** | 不调 `record` | （无独立用例；由「不自动记」这一机制保证）|
+
+**守门（`ArticleSpanWiringTest` · 16 条 · 2026-10-28）**
+- **走装配层**：自装 `OpenTelemetrySdk` ＋ `SimpleSpanProcessor` ＋ 自建 `CollectingExporter` ⇒ 断言**导出的 `SpanData`** ⇒ ⇒ **不是「方法被调用」那种假绿**（AGENTS.md §3.3）。
+- **⓪ 第一条是「装置活性」**（`collectorIsAlive`）：先证明收集器**真的**收到了探针 span ⇒ 否则「什么 span 都没导出」会让全部断言**平凡通过**。
+- **轻量 Mockito 版**：**不起 Spring 上下文 · 不碰 PG · 不占 gRPC 端口** ⇒ ⇒ 不抢 Testcontainers 端口段（article 域的 `22850–22879` 这轮**没用上**）、不受库表状态影响、可毫秒级跑完。
+- **双向断言**：不仅钉「该有的 span 有」，还钉「**不该有的路径不得产生 span**」（`getArticle` 的 2 条前置校验路径）＋「**该有但容易漏的路径必须有**」（`listArticles` 的公开分支**有** span）。
+
+**全模块回归（防「守门绿但既有测试红」）**
+`mvn -B -o -pl service/article/article-rpc -am test`
+⇒ **172 条 / 0 failures / 0 errors / 0 skipped**（2026-10-28T01:59:33+08:00）⇒ BUILD SUCCESS
+⇒ 含既有 `ArticleReviewConsumerTest`（15/0）· `ArticleDomainServiceSemanticsTest`（19/0）· `ArticleSemanticsRegressionTest`（11/0）
+⇒ ⇒ **两个 consumer 的处理体拆分（`onMessage` → `doConsume`）与 6 个 logic 的 span 包装没有破坏任何既有断言**。
+
+**变异验证（5 轮 · 每轮只翻一个变量 · 编译通过 + 红在目标断言）**
+
+| 变异 | 结果 | 红在 |
+|---|---|---|
+| 基线（未变异）| **16 / 0f / 0e / 0s** | — |
+| M1 删 `start find article` 事件 | 16 / **3f** / 0e | `getArticleExportsGoSpanWithEightEvents` + 两条「不记」用例 |
+| M2 删 `updateArticle` 的 NotFound 记录 | 16 / **1f** / 0e | `updateArticleNotFoundIsRecorded` |
+| M3 删 `deleteArticle` 的 PermissionDenied 记录 | 16 / **1f** / 0e | `deleteArticlePermissionDeniedIsRecorded` |
+| M4 把 `messaging.destination` 改成 kafka topic | 16 / **1f** / 0e | `reviewConsumerExportsGoSpan` |
+| M5 绕开 `traceConsumer` | 16 / **2f** / 0e | 两条 consumer 用例 |
+⇒ 每轮还原均以 **sha256 逐字节**校验一致（脚本 `/tmp/g3_l10_mutate.py`，备份 `/tmp/g3_l10_mut_backup/`）。
+
+🔴 **守门当场抓到的真 bug（本轮最有价值的产出）**：落码首版**漏发了** `get_article_logic.go:53` 的 `start find article` 事件
+⇒ ⇒ 被 M1 那条「事件集合逐字相等」的断言抓住（红 3 条）⇒ ⇒ **若没有这条断言，RAG 的 trace 会静默少 1 个事件**（与原口径漏掉 `AddEvent` 那一维同类）。
+
+**🔴 三条「结构性差异」（不是漂移，但必须留痕）**
+1. **雪花 ID 失败分支**：Go `snowflake.GetID()` 返回 error ⇒ `RecordError`（`create:52` / `upload:49` / `delete:70`）；RAG 的 `Snowflake.nextId()` 抛 `IllegalStateException` ⇒ ⇒ 落码**记了** ＋ **原样上抛**（**不改错误码**）⇒ 错误码语义差异是**既有的**，不是本次引入。
+2. **MinIO 两阶段被 RAG 合成一次调用**：Go `GetObject` + `io.ReadAll` 各带一对事件；RAG 的 `storage.readString` = `readAll(get(...))` ⇒ ⇒ **成功路径按 Go 的事件顺序发全 4 个**（保持事件集合一致）；**失败路径无法区分是哪一阶段失败** ⇒ 只发第 1 个（与 Go「get 阶段失败」同形）。
+3. **`ListArticles` 的 db list**：Go 一次 `List` 返回 `(articles, total, err)`；RAG 两次调用（`countAuthorView` + `selectAuthorView`）⇒ ⇒ 事件集合一致（2 个），`total_articles` 取自 `count` ⇒ 失败时两条都在 try 内 ⇒ `record` 一次（与 Go 一次 `RecordError` 同形）。
+
+**⚠️ 尚未做（下一步候选）**：**Go 侧 span 导出探针** ⇒ 把「Go 侧 L1」升级为「双侧活体对拍」
+⇒ 形态可照抄 `docs/DRIFT/hot/rpc.md` §十二.9 的 `redis-disconnect-probe` 规格（Go 腿起一个 in-process OTel exporter，把 span 名/属性/事件 dump 出来 ⇒ 与 RAG 侧守门的期望值对拍）
+⇒ ⇒ **本条不写进 §4 派单**（域侧能自修 ⇒ 自修即可），但**需要 `tools/**` 写权** ⇒ ⛔ 等 G4 分配或由 G4 落码。
+
 ## 4. 需转派 **G4**（`align/g4-service-common`）的（**本域只登记：现象 + 证据 + 建议修法**）
 
 > 派单走**实时轨**（`session send` ＋ 反馈单 7 项）＋ **正式轨**（本表）⇒ 两轨内容须一致（AGENTS.md §5.3e）。
