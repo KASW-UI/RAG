@@ -187,6 +187,11 @@ Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
 ⇒ ⇒ customizer 里要读回的是 **`getClientConfiguration().getCommandTimeout()`**（**不是** yml、**不是** `getTimeoutOptions()`）
 ⇒ ⇒ 且本域的**域侧调用点清单**已备好（like-rpc **11 处** / task-rpc **3 处** · 见本文件 §4 的 FB-05 / FB-06）
 
+- 📌 **变异方法约束（G4 2026-10-28 告知 · E66 落码时的「assertion-direction 变异」必读）**
+  - ⇒ ⇒ **A/B（机制位）在 Boot 默认装配下【恒真】** ⇒ ⇒ **变异点必须选在「装配面」（共享层 customizer 那一侧 —— 它一旦调 `timeoutOptions(...)` 就会整体替换 `enabled()` 那份 default source），【不能】选在「断言面」**。
+  - ⇒ ⇒ ⚠️ **但共享层另有一条守门 ③**（`GoStyleRedisClientOptionsGateTest`「命令超时必须**未被**本层改动」）⇒ ⇒ **若变异把整个 `TimeoutOptions` 换掉 ⇒ ③ 也会红** ⇒ ⇒ ⇒ **「恰好 1 条红」的判据会被破坏**（会被误读成「两条网一起塌」）⇒ ⇒ ⇒ **必须用「只翻那一位」的最小翻转**（如让 `enabled()` 少一位），**不要**用「另一个 `TimeoutOptions` 整体替换」。
+  - ⇒ ⇒ ⇒ **本条是「变异怎么翻」的硬约束，不是结论** ⇒ ⇒ **E66 未落码 ⇒ 本轮不执行**（等 Jason 拍板）。
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次** —— 🟡 **本轮只做静态前置检查，未启动进程**（见 §6）⇒ 仍为待办

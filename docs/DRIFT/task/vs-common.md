@@ -256,6 +256,10 @@
       ⇒ **`isTimeoutCommands()` 恒为 true**：Lettuce 的 `TimeoutOptions.enabled()` = `builder().timeoutCommands().connectionTimeout().build()` ⇒ ⇒ **两个机制位被同一次调用同时打开** ⇒ ⇒ **单独不构成「时长会被施加」的判据** ⇒ ⇒ **它永远不会红**（我域守门 `TaskRedisCommandTimeoutGateTest` 的注释 `:107-116` 早已写明这一点）。
       ⇒ ⇒ **E66 落码后若有红测试，必须红在真网 = ③（`RedisURI.timeout == 3s`）**（消费点 = `LettuceConnectionFactory` 取**连接级 timeout**）⇒ ⇒ **A/B（机制位）只能当形态断言**。
       ⇒ ⇒ ⇒ **别把「① 没红」当成「E66 没关超时」** ⇒ ⇒ **原措辞保留供追溯**。
+   ⇒ 📌 **变异方法约束（G4 2026-10-28 告知 · E66 落码时的「assertion-direction 变异」必读）**
+      ⇒ ⇒ **A/B（机制位）在 Boot 默认装配下【恒真】** ⇒ ⇒ **变异点必须选在「装配面」（共享层 customizer 那一侧 —— 它一旦调 `timeoutOptions(...)` 就会整体替换 `enabled()` 那份 default source），【不能】选在「断言面」**。
+      ⇒ ⇒ ⚠️ **但共享层另有一条守门 ③**（`GoStyleRedisClientOptionsGateTest`「命令超时必须**未被**本层改动」）⇒ ⇒ **若变异把整个 `TimeoutOptions` 换掉 ⇒ ③ 也会红** ⇒ ⇒ ⇒ **「恰好 1 条红」的判据会被破坏**（会被误读成「两条网一起塌」）⇒ ⇒ ⇒ **必须用「只翻那一位」的最小翻转**（如让 `enabled()` 少一位），**不要**用「另一个 `TimeoutOptions` 整体替换」。
+      ⇒ ⇒ ⇒ **本条是「变异怎么翻」的硬约束，不是结论** ⇒ ⇒ **E66 未落码 ⇒ 本轮不执行**（等 Jason 拍板）。
    ⇒ 配套：新 source 在**本请求没有 deadline** 时必须回落到 **`getClientConfiguration().getCommandTimeout()`（本域 = 3s）** ⇒ 否则命令失去 3s 上限（断连从「3s 快速失败」退化为「无限等待」）⇒ ⇒ **这条已经写进本域台账的 E66 硬约束段（已独立核实并订正其机制表述）**
 5. 🆕 **两个「合并后必红」的共享门禁**（2026-10-27 第四轮**实测** ⇒ **写权在 G4 ⇒ 已派单** · 编号 `FB-S1`/`FB-S2`）
    ⚠️ **编号说明**：已发给 G4 的消息里把这两条写成 **FB-06 / FB-07** ⇒ 但**本域 §4 里 FB-06 指的是 E66 那条** ⇒ ⇒ **撞名** ⇒ **以本台账的 `FB-S*` 为准**（`S` = 跨域共享门禁）⇒ G4 侧按**内容**识别。
