@@ -61,7 +61,7 @@
 |---|---|---|---|---|---|
 | **A1** | 超时 / deadline | `observability/RpcInterceptor`（服务端 deadline 传播）· `observability/GoStyleRequestDeadline`（HTTP 预算载体）· `observability/HttpMiddleware:304`/`:336`（预算写入/清除）· `persistence/DeadlineQueryTimeoutInjector`（SQL statement timeout）· `persistence/SqlTimeoutStatusTranslator`（57014 → `DEADLINE_EXCEEDED`）· `observability/GoStyleRecoverInterceptor` | 🟡 **机制面已对齐**（HTTP 预算 → SQL 取消 → 1015 的整条链，Go 侧逐条有出处）<br>🔴 **但 rpc→rpc 出向仍不继承 deadline（E65）⇒ 共享层侧 = 半开** | **L4**（双侧探针 `run-rpc-timeout-parity.sh` EXIT=0，`client_deadline_ctx` 一致）＋ **L1**（E65 的 ThreadLocal 写入面逐行） | 2026-10-27 |
 | **A2** | gRPC 拦截器链 | `spring/RpcServerInterceptorFactory` · `observability/RpcInterceptor` · `protection/GoStyleRpcBreakerInterceptor` · `protection/GoStyleGrpcClientBreakerInterceptor`（**本轮新落** = G3 单 2）· `protection/GoStyleGrpcClientBreakerConfiguration` · `protection/GoStyleProtectionConfiguration:80`（`@Import` 桥）· `protection/GoStyleRpcProtectionChain` | ✅ **client 侧 breaker 已进共享层，10/10 rpc 零改动生效**（`GoStyleProtectionConfiguration` 被 **10/10** rpc `@Import`）<br>🟡 **但只有「有出向调用」的 rpc 组件可观测** —— 本层**自核**（不采信转述）：`@GrpcClient` 计数 ＋ **六种出向方式**交叉核 ⇒<br>**可观测 6 个**：article-rpc **5** · comment-rpc **2** · favorite-rpc **2** · like-rpc **2** · message-rpc **2** · follow-rpc **1**<br>**N/A 4 个**：hot-rpc **0** · task-rpc **0** · user-rpc **0** · admin-rpc **0**（`@GrpcClient` / `newBlockingStub` / `newFutureStub` / `newStub` / `ManagedChannel` / `RestTemplate` / `WebClient` **全 0**） | **L3**（真容器 + 真 gRPC server 守门）＋ **L1**（10/10 `@Import` 用**剥注释后解析注解块**核出；出向面用**六种方式交叉核**） | 2026-10-27 |
-| **A3** | HTTP 保护链 | `http/GoStyleFormValues` · `http/GoStyleFormLimitMode` · `http/GoStyleFormValueLimitInterceptor` · `http/GoStyleFormLimitExceededException` · `http/GoStyleFormLimitWebMvcConfig` · `http/GoStyleTomcatParameterLimitCustomizer` · `http/GoStylePathNormalizingFilter`（**本轮新落** = FB-01）· `protection/GoStyleBreakerFilter`（键改**注册期路由模板**）· `protection/GoStyleMaxConnsFilter` · `protection/GoStyleMaxBytesFilter` · `protection/GoStyleCpuSheddingFilter` | 🟡 **共享层 11 个类已验**（含本轮新增：路径归一 / breaker 键）<br>🔴 **仍缺「10 域逐域真实请求」证据**（**共享层已验 ≠ 各域已验**）<br>⚠️ `GoStyleMaxConnsFilter` 的 MaxConns 半边 = **已签字偏离**（`SD-2026-10-25-01`）⇒ 不重复质疑 | **L3**（真 Tomcat 守门：form 闸门 / 路径归一 / breaker 模板键 / Tomcat 参数上限）＋ **L1** | 2026-10-27 |
+| **A3** | HTTP 保护链 | `http/GoStyleFormValues` · `http/GoStyleFormLimitMode` · `http/GoStyleFormValueLimitInterceptor` · `http/GoStyleFormLimitExceededException` · `http/GoStyleFormLimitWebMvcConfig` · `http/GoStyleTomcatParameterLimitCustomizer` · `http/GoStylePathNormalizingFilter`（**本轮新落** = FB-01）· `protection/GoStyleBreakerFilter`（键改**注册期路由模板**）· `protection/GoStyleMaxConnsFilter` · `protection/GoStyleMaxBytesFilter` · `protection/GoStyleCpuSheddingFilter` | 🟡 **共享层 11 个类已验**（含本轮新增：路径归一 / breaker 键）<br>🔴 **仍缺「10 域逐域真实请求」证据**（**共享层已验 ≠ 各域已验**）<br>🟢→🟢 **补（`c15dfeb` · G2 FB-05）**：**`off` 这个取值原先在 YAML 里写不出来** —— YAML 1.1 把未加引号的 `off` 变布尔 `false` ⇒ 域侧按文档写 `mode: off` ⇒ **进程起不来** ⇒ ⇒ 已让 `parse` 接受 `"false"` 这个**精确别名**（**不放宽成任意兜底**）⇒ ⇒ **A3 轴的「配置值 → 代码」这一环此前是断的，现已闭合**（守门 5 条 + 变异 2 个，L4：真启动 + 生产同款 YAML loader）<br>⚠️ `GoStyleMaxConnsFilter` 的 MaxConns 半边 = **已签字偏离**（`SD-2026-10-25-01`）⇒ 不重复质疑 | **L3**（真 Tomcat 守门：form 闸门 / 路径归一 / breaker 模板键 / Tomcat 参数上限）＋ **L1**<br>🆕 **FB-05 = L4**（真 servlet 上下文 + 真 yaml ⇒ 起得来；生产同款 `YamlPropertySourceLoader` ⇒ 断言拿到 `Boolean.FALSE`） | 2026-10-27 |
 | **A4** | 错误码 / envelope | `http/GoStyleRouterErrorResponses`（404 / 405 **字节形状**）· `http/GoStyleFormLimitExceededException` · `exception/BusinessException` · `response/Response`（⚠️ **业务码本身在域侧** api 的 `GlobalExceptionHandler.mapRPCStatusToCode`，不在共享层） | ✅ **Go 侧「1015 从哪来」已查实并订正归因**（本轮 G3 单 3：1015 = 各 api logic `switch st.Code()` 的 **default 分支**，**不是** go-zero 的错误映射）<br>⚠️ **该结论只对 users 域成立** —— Go 侧 **article 域单列了** `codes.DeadlineExceeded`（`create_article_logic.go:66`）⇒ **不外推** | **L1**（两侧逐行对照，行号逐条核实）＋ 404/405 字节形状另有 **L3**（真 Tomcat） | 2026-10-27 |
 | **A5** | 端口治理 | 共享层侧**只有** `http/GoStyleTomcatParameterLimitCustomizer`（管的是**参数个数**，**不是端口**）；**端口段本身在域侧 yaml**（`server.port`）＋ `tools/difftest/check-tomcat-limits.py`（**整合者共享面** ⇒ 本层不写） | 🟡 **共享层在本轴落点很薄** ⇒ 端口治理的**主体不在共享层** ⇒ 本层只能给「**容器参数上限**」这一格结论，端口段以各域台账为准 | **L3**（真 Tomcat 参数上限守门）＋ **N/A**（端口段 = 域侧 / 共享脚本） | 2026-10-27 |
 | **A6** | errmsg 契约 | 共享层**不产 errmsg**（1015 等业务码在域侧 api）⇒ 共享层只负责**错误响应形状**（`http/GoStyleRouterErrorResponses`） | ✅ **双侧对拍通过**：`bash tools/semantic-probe/run-parity.sh` ⇒ **EXIT=0 · 56 例（一致 54 · 已签字偏离 2 · 不一致 0）**（⚠️ README 原写「23 例」已过期 ⇒ 本轮订正 `2231398`） | **L4**（双侧活体对拍） | 2026-10-27 |
@@ -945,7 +945,55 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | **回归口径（本轮）** | **模块级**：`mvn -o -pl service/common test` ⇒ **315 条 / 0 失败 / 0 errors / 0 skipped**（311 + 本次 4 条）<br>**全量未跑 · 理由**：本轮**零生产代码改动**（只新增**一个测试文件**）⇒ 其余 51 个模块的产物与行为**不受影响** ⇒ 且第八次全量（**基线 `23d1c2a` 代码态** · 52 模块 / **2461** 条 / 0 失败 / 0 errors / 4 skipped / 20:21 min / `EXIT=0`）刚跑过且全绿 ⇒ 不重复 20 分钟全量<br>**双侧探针**（同批次复跑）：`run-parity.sh` ⇒ **EXIT=0 · 56 例**（一致 54 / 不一致 0 / 已签字偏离 2）· `run-rpc-timeout-parity.sh` ⇒ **EXIT=0 · 3 例**<br>**三门禁**：**0 / 0 / 0** · **台账三门禁**：**0 / 0 / 0** |
 | **本层对 G1 后续项的表态** | G1 的 `DRIFT-USERAPI-009 §7`（MaxBytes 相对 observability 的位置：Go 在预算外 / RAG 在内）⇒ **同意其定性**：其代码修法 = 把 MaxBytes 挪到 +7 之前 ⇒ **槽位已满** ⇒ 必须**整体重排共享层顺序** ⇒ 按 AGENTS.md §5.3c「跨共享层 + 多域必须同一次提交」⇒ **不是 G4 能单方面落的** ⇒ **更便宜的路是签字**（并入 `SD-USERAPI-002` 的范围说明，方向与它一致：RAG 多记 413）⇒ **签字档归整合者，本层不代签、只登记** |
 
-#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `d56989f`）
+#### 4.10.13 🟢 **G2 派单 FB-05**（A3）—— **已落码**：`mode: off` 在 YAML 里必须可用（核对日期 2026-10-27 · 基线 `align/g4-service-common` @ `c15dfeb`）
+
+| 项 | 内容 |
+|---|---|
+| **① 现象** | 未加引号的 `mode: off` 被 **YAML 1.1**（SnakeYAML）解析成**布尔 `false`** ⇒ `@Value` 拿到字符串 `"false"` ⇒ 而 `parse` 的合法值域（`off\|raw\|envelope`）里**没有**它 ⇒ **构造期抛 `IllegalArgumentException` ⇒ `BeanCreationException` ⇒ 进程起不来** ⇒ ⇒ **文档里那个合法取值，在 YAML 里根本写不出来**（除非加引号 `mode: "off"`）<br>⇒ **一颗等着踩的雷**：任何域一旦按文档写 `mode: off` 就会起不来 |
+| **② Go 侧出处** | Go 侧**没有这个开关**（`rest/config.go` 里没有 form-limit 旋钮；`maxFormParamCount = 2048` 是 `rest/httpx/util.go:15` 的常量）⇒ ⇒ **OFF 在 Go 侧的等价物就是「什么都不做」** ⇒ ⇒ RAG 的 OFF 语义本身**是对的**，问题**只出在「配置值 → 代码」的传递** |
+| **③ RAG 侧现状（修前）** | `service/common/src/main/java/com/rag/common/http/GoStyleFormLimitMode.java:209-225`（`parse` 只认 `off`/`raw`/`envelope`）· `…/http/GoStyleFormValueLimitInterceptor.java:68-72`（**构造期** `@Value` + `parse` ⇒ 非法值 ⇒ 启动失败）· `…/http/GoStyleTomcatParameterLimitCustomizer.java:110-111`（**同一把尺子**）<br>⇒ 🟢 **本层实测核对了 G2 的「两边不会对同一属性得出不同解读」**：两个消费点的 `@Value` **默认值完全一致**（都是 `${rag.http.go-form-limit.mode:off}` ⇒ `…FormValueLimitInterceptor.java:70` 与 `…TomcatParameterLimitCustomizer.java:111`）⇒ ⇒ **成立**；且 `GoStyleFormLimitWebMvcConfig` **不消费**该属性（只注册拦截器）⇒ 无第三个解读点 |
+| **④ 证据强度** | **L4** —— ① G2 的**真上下文启动失败实测**（报错值是 `false` 而不是 `off` ⇒ YAML 1.1 布尔化的实证）；② **本层独立复现**：守门 ③ 用**生产同款**的 `YamlPropertySourceLoader` 解析未加引号的 `mode: off` ⇒ 断言拿到的**确实是 `Boolean.FALSE`** ⇒ ⇒ **本层独立确认「当前 Boot 4 的解析器仍走 YAML 1.1 布尔表」**（不采信转述，也不拿裸 SnakeYAML 代替） |
+| **⑤ 修法** | `parse` **额外接受 `"false"`** —— ⚠️ **只加这一个别名**（`false`/`False`/`FALSE` 三个形态，因 `parse` 已 `toLowerCase`）<br>⇒ **理由（本层独立判断，非照抄派单）**：`"false"` 是**精确匹配**、**不是**兜底 —— 它是**文档化合法取值 `off` 的「唯一实际编码形式」**（YAML 1.1 把 `off`/`no`/`n` 全变成 `false`）⇒ ⇒ 接受它 = **让实现对齐文档**，而不是放宽合法性<br>⇒ **不放宽成「任意非法值都当 OFF」** —— 那会**重新引入**「静默兜底 = 以为装上了其实没装」（`parse` 自己的 javadoc 明确反对）⇒ 例：`mode: OFF1` 若兜底成 OFF ⇒ 该域会**静默失去闸门** ⇒ ⇒ **非法值仍一律抛异常**<br>⇒ **方向性判断**：**让实现对齐文档**（`off` 是文档化合法取值）而不是**改文档迁就实现**（把 `off` 从值域里删掉）<br>⇒ 同步：`PROPERTY` 的 javadoc 写清「YAML 里写 `off` **必须加引号**：`mode: \"off\"`」；**异常消息改成自解释**（列出 `off \| false \| raw \| envelope` + 引号提示 ⇒ 免得下一个人被「值：false」误导成配置写错） |
+| **⑥ 守门（新增 5 条）** | `service/common/src/test/java/com/rag/common/http/GoStyleFormLimitModeYamlBooleanGateTest.java`：① `off`/`raw`/`envelope`/`null`/空串 的**原语义一字未改**；② `"false"`/`"False"`/`"FALSE"` 与 `off` **同义**；③ **YAML 端到端**（生产同款 loader ⇒ 断言是 `Boolean.FALSE`）；④ **真启动**（`WebApplicationContextRunner` + **真 yaml**（未加引号）⇒ **上下文起得来**）；⑤ **非法值仍炸**（`bogus`/`true`/`on`/`yes`/`OFF1`/`no`/`n`）⇒ 证明**没有兜底** |
+| **⑦ 变异验证** | **A** 删掉 `case "false"`（回到修前）⇒ **②③④ 红**（④ = 真启动起不来 ⇒ **复刻了 G2 的 L4 失败形态**）<br>**B** `default` 改成「任意非法值都当 OFF」⇒ **⑤ 红**<br>⇒ 恢复后 **5/5 绿** · 生产代码 diff 只含正式修法 |
+| **⑧ 是否阻塞本波** | **否** ⇒ 现状行为**零变化**（见下方「独立核实」：**当前受害域 = 0**） |
+
+##### 4.10.13.1 本层的**独立核实**（不采信转述）
+
+| 项 | 实测结果 |
+|---|---|
+| **「当前受害域 = 0」** | ✅ **成立** —— 全仓 `service/*/*-api/src/main/resources/application.yml` 实测：`article-api` `raw` · `comment-api` `envelope` · `follow-api` `envelope` · `hot-api` `envelope` · `like-api` `envelope` · `message-api` `envelope` · `user-api` `raw` · `admin-api` `raw` · **favorite-api 根本没有 `go-form-limit` 段**（⇒ 缺省 `OFF` ⇒ 正是 {@link GoStyleFormLimitMode#REGISTERED_DEVIATIONS} 里那条**已登记的刻意偏离**）⇒ ⇒ **无任何域写字面量 `off`** ⇒ ⇒ **本次修法对现状零行为变化** |
+| 🔴 **但我树里 `task-api` 仍是 `mode: raw`** | 而 `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` 表里 **task-api 的语义答案是 `OFF`**（Go 侧 `task/api/**` 的 `httpx.Parse`/`ParseForm`/`GetFormValues` 命中数 = **0** ⇒ `r.Form` 从不被求值 ⇒ 两道上限**都不可达**）⇒ ⇒ **我树里存在一条「yaml 与语义答案不一致」的待修漂移**（task-api 开了本该关的闸门）⇒ **归属 task 域（G2 写权）** ⇒ **G2 在自己树里改成 `mode: \"off\"` 正是修它** ⇒ ⇒ 本层**只登记、不代改** |
+| 🟢 **本层回 Go 真源复核了那张表（不采信共享层自写的「目标态」表）** | `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` 的 javadoc 自陈「这张表是**目标态**，不是现状快照」⇒ ⇒ 本层**回 Go 真源逐条核了 task 这一格**：<br>· `service/task/api/**` 对 `httpx.Parse` / `ParseForm` / `GetFormValues` / `r.Form` ⇒ **零命中**<br>· handler 走 `json.NewDecoder(r.Body)`（`service/task/api/internal/handler/task/gettaskhandler.go:19`）⇒ `r.Form` **从不被求值** ⇒ 两道上限**都不可达** ⇒ **语义答案 = `OFF`** ✅ 与表一致<br>· 横向对比（防「只核了一个域」）：`service/article/api/**` 与 `service/message/api/**` 均有 `httpx.Parse` 命中 ⇒ 那些域闸门**必须开** ✅<br>⇒ ⇒ **该表在 task 这一格是准确的**（⚠️ 其余 9 格本层**未逐条核**，不外推） |
+| 🔴 **漂移的方向 = 「误拒」，不是「多记 413」** | 我树里 task-api 的 `mode: raw` ⇒ 闸门**装着** ⇒ **超过 2048 个非空 query 值就 400 拒掉**<br>⇒ 而 Go 侧 `r.Form` 从不求值 ⇒ **Go 照常受理**<br>⇒ ⇒ 可观察差异 = **RAG 拒掉了 Go 能受理的请求**（<b>误拒</b>方向）⇒ ⚠️ 正是 `GoStyleFormLimitMode` 类 javadoc 自己说的「**『误拒』比『漏拒』更危险**（会挡掉 Go 能受理的请求）」⇒ ⇒ **这条的优先级高于「多记 413」那一类** ⇒ ⇒ 归 task 域（G2 写权）⇒ 本层只登记 |
+| **各域 yaml 注释的订正** | 落点是 `service/*/*-api/src/main/resources/application.yml`（**各域写权**）⇒ 本层**只登记**；G2 已在 task-api 域内改好<br>⚠️ **实测澄清**：全仓**没有任何**域的 yaml 注释写着「`mode: off`」—— 各域注释写的都是 `mode: raw` / `mode: envelope` ⇒ ⇒ **「各域 yaml 注释」实际只指 G2 自己改过的那份 task-api**（他在改值时把注释写成了 `mode: off` ⇒ 故需订正成 `mode: \"off\"`）⇒ ⇒ **不需要逐域改 9 份** |
+| **🔴 全仓「唯一未加引号的 `mode: off`」** | 实测 `grep -rn "mode: *off" service/`（排除 `target/`）⇒ **全仓唯一命中就是本层守门自己的那段测试 yaml**（`GoStyleFormLimitModeYamlBooleanGateTest.java:57`）⇒ ⇒ ① 测试面（`src/test/resources` / `src/test/java`）**零配置** ② 无其它配置源（`application-*.yml` / `*.properties` 均无）⇒ ⇒ **「当前受害域 = 0」彻底成立**，且那颗雷已被**主动引爆**（而不是等着踩） |
+| 🔴 **favorite 域零影响（写权硬线）** | `GoStyleFormLimitMode` 的 javadoc 明确：favorite **不在 global 的写权范围内** ⇒ **共享层对它必须零影响** ⇒ 本轮改了共享层的 `parse` ⇒ **必须自证零影响**：<br>① favorite-api **不声明**该属性（实测其 yaml 无 `go-form-limit` 段）⇒ `@Value` 取**缺省** `${...:off}` ⇒ 注入字符串 `"off"`<br>② `parse("off")` 的返回值**一字未改**（守门 ① 钉死）⇒ OFF（与修前相同）<br>③ 新增的 `"false"` 分支**只在属性显式写成 `false`/未加引号的 `off` 时触发** ⇒ favorite 走**缺省路径** ⇒ **永不进入新分支**<br>⇒ ⇒ **对 favorite 零行为变化** ✅ |
+
+#### 4.10.14 🟢 **第九次全量回归口径**（核对日期 2026-10-27 · 代码态 `c15dfeb`）
+
+| 项 | 值 |
+|---|---|
+| **命令** | `mvn -B clean verify`（**全量**，不是 `-pl` 子集） |
+| **结果** | ✅ **BUILD SUCCESS / `MVN_EXIT=0`** |
+| **模块数** | **52**（Reactor Summary 计数） |
+| **有测试的模块数** | **29**（与前两轮同） |
+| **用例数** | **2470**（**29 行「模块名 ↔ 数字」明细**逐项求和 ⇒ **非按行序 tail**） |
+| **failures / errors / skipped** | **0 / 0 / 4**（`favorite-api` skipped 1 · `favorite-rpc` skipped 3） |
+| **耗时** | **20:22 min**（10:34:55 起跑 ⇒ 10:55:17 完成） |
+| **相对上一轮** | 第八次 2461 ⇒ **+9**（= 槽位快照守门 **4** + FB-05 守门 **5**）⇒ `service/common` **311 → 320** ⇒ **其余 28 个模块逐条一致** |
+| **逐模块明细** | `users-common` 33 · `common` **320** · `admin-rpc` 112 · `admin-api` 129 · `user-rpc` 133 · `user-api` 107 · `article-common` 15 · `article-rpc` 154 · `article-api` 92 · `hot-common` 14 · `hot-api` 96 · `hot-rpc` 96 · `message-common` 21 · `message-rpc` 84 · `message-api` 88 · `like-common` 18 · `like-api` 81 · `like-rpc` 96 · `task-api` 90 · `task-rpc` 114 · `follow-common` 37 · `follow-api` 50 · `follow-rpc` 74 · `favorite-common` 29 · `favorite-api` 97 · `favorite-rpc` 110 · `comment-common` 27 · `comment-api` 45 · `comment-rpc` 108 ⇒ **逐项可复算** |
+| **双侧探针**（同批次复跑） | `run-parity.sh` ⇒ **EXIT=0 · 56 例**（一致 54 · 不一致 0 · 已签字偏离 2）· `run-rpc-timeout-parity.sh` ⇒ **EXIT=0 · 3 例** |
+| **三门禁**（同批次复跑） | `check-wave-lane-ownership` / `check-wave-role-model` / `check-wave-coupling` ⇒ **0 / 0 / 0** |
+| **台账门禁** | `check-ledger-tables` / `check-ledger-selfcheck` / `check-ledger-count` ⇒ **全 EXIT=0** |
+| **写权自证** | 本轮改动**全部**落在 `service/common/**` ＋ 本文件 ⇒ **零域侧改动** |
+
+> 🟡 **为什么本轮必须跑全量（而上一轮「只加守门」时可以不跑）**：本轮**改了共享层生产代码**
+> （`GoStyleFormLimitMode.parse` 新增一个 `case`）⇒ ⇒ 它被 **10 个 api 全依赖** ⇒ ⇒ 必须全量。
+> ⇒ 上一轮（槽位快照守门）**零生产代码改动** ⇒ 只跑 `service/common` 模块（315 条）并写明「未跑全量 + 理由」。
+> ⇒ ⇒ **两者都写进了台账**，不混用口径。
+
+#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `c15dfeb`）
 
 | commit | 内容 | 落点（`文件:行号`） | A 轴 |
 |---|---|---|---|
@@ -957,6 +1005,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | `853767b` | 🔴 **G2 FB-04**：业务 handler 执行期能拿到**当前 server span** | `…/observability/RpcInterceptor.java:456`（`onHalfClose()` 里 `makeCurrent()` 的 scope 包住 handler 执行期）· **新增** `…/observability/RpcServerSpanCurrentGateTest.java`（4 条） | **A9** |
 | `0c72969` | 🟢 **U+FFFD 两处**（纯注释 · 零行为变化） | `…/observability/GoStyleOtelSamplerProtocolGateTest.java:24` · `…/protection/FakeServerCall.java:13` | 无（纯注释） |
 | `d56989f` | 🟢 **共享层 Filter 槽位快照守门**（4 条 · 零生产改动） | **新增** `…/spring/SharedFilterOrderSnapshotGateTest.java`（① 槽位快照 ② 预算起点不被抢占 ③ 域侧可用槽位 ④ 真容器次序） | 无（只加守门） |
+| `c15dfeb` | 🟢 **G2 FB-05**：`parse` 接受 `"false"` 作为 `off` 的别名（YAML 1.1 布尔化） | `…/http/GoStyleFormLimitMode.java:…`（`parse` 加一个 `case` + `PROPERTY` javadoc + 异常消息）· **新增** `…/http/GoStyleFormLimitModeYamlBooleanGateTest.java`（5 条） | **A3** |
 
 **回归口径与结果（第七次全量 · 核对日期 2026-10-27）**
 
