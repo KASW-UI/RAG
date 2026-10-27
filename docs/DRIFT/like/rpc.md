@@ -580,6 +580,24 @@ payload 与冻结信封**用同一份原文**；`aggregate_version` / `target_re
 ⇒ 本组件的 `timeout: 3s` **本身是对的**（3ms 快速失败，与 Go 的 1.7s 同形）⇒
 本条只针对**连接超时**这一项（10s vs 5s）。
 
+#### 🆕 断连时的「失败耗时」在我域 rpc 侧同样成立（2026-10-27 · G1 在 users 域查到同款形态后我域自查）
+
+- **机制**：我域两个 rpc 组件**合并前都没有任何 `disconnectedBehavior` 设置**
+  （`grep 'disconnectedBehavior|REJECT_COMMANDS'` 于 `service/{like,task,message}/*-rpc/src/main` ⇒ **0 命中**）
+  ⇒ 走 Lettuce 默认 `DisconnectedBehavior.DEFAULT` ⇒ 断连期间命令**排队等重连** ⇒ 挂到 `commandTimeout`（我已配 **3s**）
+  ⇒ **3s ≫ 本组件 `rpc-timeout: 2s`** ⇒ ⇒ **RPC 先超时**（客户端看到超时态），
+  而 Go 是「**快速失败**（go-redis `MaxRetries=3` ⇒ 实测 ≈1.7s，仍在 2s 预算内）⇒ 进业务层 ⇒ 返回**业务错误码**」。
+- **两侧的失败语义本身是同形的**（漂移**只在耗时**）：
+  - like-rpc：Go `likeactionlogic.go:193-200` Lua 出错 ⇒ **致命**（`ErrorRedisUpdate`「Redis更新失败」）
+    ⇔ RAG `LikeDomainService.java:706-713` Lua 出错 ⇒ **致命**（5012）⇒ 一致；
+  - task-rpc：Go `get_task_logic.go:51` `rerr != nil` ⇒ **回源查库**（fail-open）
+    ⇔ RAG `TaskDomainService.java:161-162` 吞异常回源 ⇒ 一致。
+- ⇒ **修法在共享层**（G4 的 `GoStyleRedisClientAutoConfiguration` ⇒ `REJECT_COMMANDS`）
+  ⇒ **合并后**我域断连即拒单（实测 **1 ms**）⇒ 不再撞 rpc-timeout ⇒ **与 Go 同形**
+  ⇒ ⇒ **域侧零改动**；⚠️ 但**合并前**这条漂移**在本域成立**（只是后果比「未配 timeout」时轻：3s 而非 60s）。
+- ⚠️ **证据强度 = L1**（源码对照 + 我域已有的 3s 排队实测）⇒ **未做「组件本体」双侧活体对拍**
+  ⇒ 按 AGENTS.md §0 记「**在该证据强度下一致**」，**不写 L4**。
+
 **修法**：本域 `application.yml` 补 `connect-timeout: 5s`（属性名 = `spring.data.redis.connect-timeout`
 ⇒ Boot 4 `DataRedisProperties#getConnectTimeout` ⇒ `LettuceConnectionConfiguration:212-215` 写进
 `SocketOptions.connectTimeout`）。
@@ -590,10 +608,18 @@ payload 与冻结信封**用同一份原文**；`aggregate_version` / `target_re
 ＋ 机制启用断言 ＋ **阳性对照**（`RedisURI.create(...).getTimeout() == 60s`）。
 ✅ **变异测试已做**：删 `connect-timeout: 5s` ⇒ **1 条红**（`expected: 5S but was: 10S`）⇒ 非假绿。
 
-⚠️ **判据踩过的坑（留给下一任）**：`ClientOptions.getTimeoutOptions()` 的 source **恒为**
-`DefaultTimeoutSource`（Boot 在 `LettuceConnectionConfiguration:229` 只写 `TimeoutOptions.enabled()`
-⇒ 启用机制但不给固定时长；真正的时长由 `CommandExpiryWriter:174` 的 `applyConnectionTimeout` 分支
-从**连接级** timeout 取）⇒ **断言 source 类型是错的判据**（本轮守门先红了，但根因是判据写错 ⇒ 已订正）。
+⚠️ **判据踩过的坑（留给下一任）** —— 🔴 **G1 补充的更精确一层（2026-10-27，我已 javap 独立复核，成立）**：
+- **命令超时压根不挂在 `ClientOptions` 上** —— `io.lettuce.core.ClientOptions`（lettuce 6.8.2）
+  **没有** `getCommandTimeout()`（`javap` 实测：该类只有 `getTimeoutOptions()` / `getSocketOptions()` /
+  `getDisconnectedBehavior()` …；`getCommandTimeout` 命中数 = **0**）
+  ⇒ 正确判据 = **`LettuceClientConfiguration.getCommandTimeout()`**，取值路径
+  **`cf.getClientConfiguration().getCommandTimeout()`**（本守门用的正是这条 ✅）
+- `ClientOptions.getTimeoutOptions()` 的 source **恒为** `DefaultTimeoutSource`
+  （Boot `LettuceConnectionConfiguration:229` 只写 `TimeoutOptions.enabled()`
+  ⇒ 启用机制但不给固定时长；真正的时长由 `CommandExpiryWriter:174` 的 `applyConnectionTimeout` 分支
+  从**连接级** timeout 取）⇒ **断言 source 类型是错的判据**（本轮守门先红了，但根因是判据写错 ⇒ 已订正）
+- ⇒ 由此，本守门里的 `getTimeoutOptions().isTimeoutCommands()` 一条**不是「超时值」的判据**，
+  而是守「**Boot 有没有打开命令超时机制**」⇒ **该条有独立价值，但读台账的人别把它当值的判据**。
 
 ⚠️ **与 G4 共享层落码的关系**：G4 的 `REJECT_COMMANDS` 在本域**会真命中**（`mvn dependency:list` 实测
 本组件自带 `spring-boot-starter-data-redis` ⇒ `lettuce-core:6.8.2` + `spring-boot-data-redis:4.0.8`

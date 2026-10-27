@@ -419,6 +419,24 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
 ⚠️ 域侧的 lenient 语义**本来就是对的**（`TaskDomainService.java:161-162` / `readProgressCache` 吞异常回源），
 **问题只在于「异常来得太晚」**（60s 后才来）⇒ 这也解释了为什么此前的降级测试（Mockito）全绿。
 
+#### 🆕 断连时的「失败耗时」在我域 rpc 侧同样成立（2026-10-27 · G1 在 users 域查到同款形态后我域自查）
+
+- **机制**：我域两个 rpc 组件**合并前都没有任何 `disconnectedBehavior` 设置**
+  （`grep 'disconnectedBehavior|REJECT_COMMANDS'` 于 `service/{like,task,message}/*-rpc/src/main` ⇒ **0 命中**）
+  ⇒ 走 Lettuce 默认 `DisconnectedBehavior.DEFAULT` ⇒ 断连期间命令**排队等重连** ⇒ 挂到 `commandTimeout`（我已配 **3s**）
+  ⇒ **3s ≫ 本组件 `rpc-timeout: 2s`** ⇒ ⇒ **RPC 先超时**（客户端看到超时态），
+  而 Go 是「**快速失败**（go-redis `MaxRetries=3` ⇒ 实测 ≈1.7s，仍在 2s 预算内）⇒ 进业务层 ⇒ 返回**业务错误码**」。
+- **两侧的失败语义本身是同形的**（漂移**只在耗时**）：
+  - like-rpc：Go `likeactionlogic.go:193-200` Lua 出错 ⇒ **致命**（`ErrorRedisUpdate`「Redis更新失败」）
+    ⇔ RAG `LikeDomainService.java:706-713` Lua 出错 ⇒ **致命**（5012）⇒ 一致；
+  - task-rpc：Go `get_task_logic.go:51` `rerr != nil` ⇒ **回源查库**（fail-open）
+    ⇔ RAG `TaskDomainService.java:161-162` 吞异常回源 ⇒ 一致。
+- ⇒ **修法在共享层**（G4 的 `GoStyleRedisClientAutoConfiguration` ⇒ `REJECT_COMMANDS`）
+  ⇒ **合并后**我域断连即拒单（实测 **1 ms**）⇒ 不再撞 rpc-timeout ⇒ **与 Go 同形**
+  ⇒ ⇒ **域侧零改动**；⚠️ 但**合并前**这条漂移**在本域成立**（只是后果比「未配 timeout」时轻：3s 而非 60s）。
+- ⚠️ **证据强度 = L1**（源码对照 + 我域已有的 3s 排队实测）⇒ **未做「组件本体」双侧活体对拍**
+  ⇒ 按 AGENTS.md §0 记「**在该证据强度下一致**」，**不写 L4**。
+
 **修法（域内自修 · 写权在 G2）**：
 1. `application.yml` 的 `spring.data.redis` 段补 `timeout: 3s`（对齐 Go 的 go-redis 默认 ReadTimeout）
    ＋ `connect-timeout: 5s`（对齐 Go 的默认 DialTimeout；不配会落 Lettuce 默认 **10s**，
@@ -435,9 +453,17 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
    - 连接超时 ⇒ `ClientOptions.getSocketOptions().getConnectTimeout()`（⇒ Boot `LettuceConnectionConfiguration:212-215`）
    - 机制启用 ⇒ `ClientOptions.getTimeoutOptions().isTimeoutCommands()`（Boot `:229` 打开的，不是 Lettuce 默认）
    - **阳性对照** ⇒ `RedisURI.create(...).getTimeout() == 60s`（证明断言在区分「配了」与「没配」）
-   ⚠️ **判据必须查消费点、不能查声明点**：`ClientOptions.getTimeoutOptions()` 的 source **恒为**
-   `DefaultTimeoutSource`（Boot 只写 `TimeoutOptions.enabled()` ⇒ 启用机制但不给固定时长）
-   ⇒ 断言 source 类型是**错的判据**（本轮实测踩过：守门红了但根因是判据写错，不是配置错 ⇒ 已订正）。
+   ⚠️ **判据必须查消费点、不能查声明点** —— 🔴 **G1 补充的更精确一层（2026-10-27，我已 javap 独立复核，成立）**：
+   - **命令超时压根不挂在 `ClientOptions` 上** —— `io.lettuce.core.ClientOptions`（lettuce 6.8.2）
+     **没有** `getCommandTimeout()`（`javap` 实测：该类只有 `getTimeoutOptions()` / `getSocketOptions()` /
+     `getDisconnectedBehavior()` …；`getCommandTimeout` 命中数 = **0**）
+     ⇒ 正确判据 = **`LettuceClientConfiguration.getCommandTimeout()`**，取值路径
+     **`cf.getClientConfiguration().getCommandTimeout()`**（本守门用的正是这条 ✅）
+   - ⚠️ `ClientOptions.getTimeoutOptions()` 的 source **恒为** `DefaultTimeoutSource`
+     （Boot `LettuceConnectionConfiguration:229` 只写 `TimeoutOptions.enabled()` ⇒ 启用机制但不给固定时长）
+     ⇒ **断言 source 类型是错的判据**（本轮实测踩过：守门红了但根因是判据写错，不是配置错 ⇒ 已订正）
+   - ⇒ 由此，本守门里的 `getTimeoutOptions().isTimeoutCommands()` 一条**不是「超时值」的判据**，
+     而是守「**Boot 有没有打开命令超时机制**」（Boot 哪天不写 `timeoutOptions(enabled())` 它就会红）⇒ **该条有独立价值，但读台账的人别把它当值的判据**。
 2. ✅ **变异测试已做（3 条，全部红在目标断言）**：
 
    | 变异 | 结果 |
