@@ -77,6 +77,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>⇒ Go 侧的第二道上限是 {@code net/url} 的
  * {@code defaultMaxParams = 10000}（Go 1.25.11 {@code src/net/url/url.go:1001}）
  * ⇒ 总值数 >10000 时两侧都是「解析失败 ⇒ 5003」。
+ *
+ * <h2>🔴 订正（2026-10-27）：上面的「残余窗口」已闭合，容器层<b>不再</b>当判定权</h2>
+ * <p>⚠️ <b>上面那段 2026-10-25 的实测与结论描述的是「容器上限 = 2048」那个时代</b>
+ * ⇒ ⇒ <b>不改写原文</b>（历史事实保留），此处加订正：
+ * <ul>
+ *   <li>共享层新增 {@code GoStyleTomcatParameterLimitCustomizer}（G4 落码 {@code cd893d1}）
+ *       ⇒ <b>无条件</b>把 Tomcat 的 {@code maxParameterCount} 抬到 <b>10001</b>
+ *       （= Go 的 {@code net/url} 段数上限 10000 + 1）⇒ ⇒ <b>判定权交还应用层</b>
+ *       ⇒ ⇒ 容器层<b>不再</b>比 Go 更早拒；</li>
+ *   <li>⇒ ⇒ 「总「值」数 2049~10000 且非空值数 ≤2048」这一格：
+ *       <b>Go 放行 / RAG 也放行</b> ⇒ ⇒ 旧漂移 <b>DRIFT-HOTAPI-030</b>（跨域，收口在 global）
+ *       的这一格<b>已闭合</b>（另见 {@code docs/DRIFT/global/vs-common.md} §4.10.25）；</li>
+ *   <li>⇒ ⇒ 下面 {@code containerParameterLimitIsSurfacedAsGoParseError} 那条用例的断言
+ *       <b>已从「必须落 5003」改成 Go 语义「放行 ⇒ 进业务层」</b>
+ *       ⇒ 它<b>方法名保留旧名</b>是为了不打断 {@code global/vs-common.md} §4.10.25.4 的引用
+ *       ⇒ ⇒ <b>以该方法的 DisplayName 与断言为准</b>；</li>
+ *   <li>⚠️ <b>仍然存在、本次不覆盖</b>的残余：总「值」数<b>超过 Go 的 10000 段上限</b>时，
+ *       Go 拒（400 + {@code net/url} 原文）；而 favorite 域<b>没有</b>实现这道段数上限
+ *       （域内判据只数<b>非空值</b>；共享层的段数闸门因 favorite = {@code OFF}（域自捕获）而不装）
+ *       ⇒ ⇒ 该区间两侧不一致 ⇒ 归 DRIFT-HOTAPI-030 的<b>后续格</b>，<b>显式登记，不假装闭合</b>。</li>
+ * </ul>
  */
 @SpringBootTest(
         classes = FavoriteApiApplication.class,
@@ -275,30 +296,46 @@ class FavoriteApiRealTomcatGateTest {
     }
 
     @Test
-    @DisplayName("🔴 容器层参数上限：Tomcat 拒 ⇒ 必须落 200 + 业务信封（修复前是 500 + 5001）")
+    @DisplayName("🔴 Go 放行（1 个非空值 + 2048 个空值 ⇒ 非空值数 1 ≤ 2048）⇒ RAG 必须放行进业务层（不是 5003）")
     void containerParameterLimitIsSurfacedAsGoParseError() throws Exception {
-        // 本用例是**容器层**上限（server.tomcat.max-parameter-count=2048）的触发面，
-        // 与上面两条的**应用层**上限（Go 逐字复刻的 2048 非空值）刻意用**不同形状**的输入区分：
-        //   总「值」数 = 1 + 2048 = 2049  ⇒ 超 Tomcat 上限
-        //   非空值数 = 1                  ⇒ Go 侧放行（httpx.GetFormValues 只数非空值）
+        // ⚠️ **方法名沿用旧名**（"容器层上限 ⇒ Go 解析失败"）：那描述的是**修复前**的形态
+        //    （当时容器上限 = 2048 ⇒ Tomcat 在第 2049 个条目就拒 ⇒ 域内映射成 5003）。
+        //    ⇒ 2026-10-27 共享层把容器上限抬到 10001（GoStyleTomcatParameterLimitCustomizer，
+        //      G4 落码 cd893d1）⇒ **判定权交还应用层** ⇒ 本用例断言已改为 **Go 语义（放行）**。
+        //    ⇒ 方法名保留是为了不打断 docs/DRIFT/global/vs-common.md §4.10.25.4 的引用
+        //      ⇒ ⇒ **以本方法的 DisplayName 与断言为准**。
         //
-        // ⚠️ 修复前：Tomcat 抛 org.apache.tomcat.util.http.InvalidParameterException
-        //    （**不是** IllegalArgumentException 的子类）⇒ 绕过 GlobalExceptionHandler#handleIllegalArgument
-        //    ⇒ 落到 handleAny 兜底 ⇒ **HTTP 500 + {code:5001}**。
-        //    而 Go 的 7 个 handler 全部走 httpx.OkJsonCtx ⇒ **HTTP 恒 200** ⇒ 500 是 RAG 独有的形态。
-        // ✅ 修复后：异常在 FavoriteApiSupport#parameterMap 被映射成 IllegalArgumentException
-        //    ⇒ 落 handleIllegalArgument ⇒ **HTTP 200 + {code:5003, msg:"参数错误"}**。
+        // Go 出处（真源逐行，非转述）：
+        //   ① Go 1.25 net/url/url.go:1001 `const defaultMaxParams = 10000`
+        //      ⇒ query 段数 = 2049 ≤ 10000 ⇒ **不触发** Go 的段数上限；
+        //   ② go-zero@v1.10.2/rest/httpx/util.go:15 `maxFormParamCount = 2048`
+        //      ＋ :44 `if len(v) == 0 { continue }` ⇒ **空值不计数** ⇒ 非空值数 = 1 ≤ 2048
+        //      ⇒ ⇒ **Go 放行**（两道上限都不触发）；
+        //   ③ 放行后 handler 进业务层：favorite/api/internal/handler/favorite/
+        //      get_favorites_by_folder_handler.go:27-33 ⇒ `httpx.OkJsonCtx`
+        //      ⇒ **HTTP 恒 200 + 业务信封**（Go 的 api 层没有 5xx 出口）；
+        //   ④ 业务失败时的码 = codeFromRPCError(rpcErr)
+        //      （favorite/api/internal/logic/favorite/helper.go:44-46 ⇒ favoritecommon.BizCodeFromError）
+        //      ⇒ favorite/common/errmsg.go:113-116：普通 error ⇒ status.FromError 的 ok=false
+        //         ⇒ **CodeServerBusy = 1015**（:12 ＋ 文案「服务繁忙」:46）
+        //         ⇒ gRPC Unavailable 也落 default 分支（:135-136）⇒ 同样是 1015。
+        // 语义等价论证：本用例断言的「200 + {code:1015}」= Go 在**同一输入**下的**同一出口**
+        //   （放行 ⇒ 进业务层 ⇒ 业务失败 ⇒ 1015）⇒ ⇒ **不是** RAG 独有的形态。
         HttpResponse<String> resp = getWithToken(ITEM_LIST + "?" + oneNonEmptyPlusEmpty(2048));
 
         assertEquals(200, resp.statusCode(),
-                "容器层的参数上限也必须落 HTTP 200（Go 的 api 层不存在 500 出口）；实际 body=["
-                        + resp.body() + "] ct=" + resp.headers().firstValue("content-type").orElse("-"));
-        // ⚠️ 5003 是**当前实现**的形态，**不是** Go 的形态：Go 在同一输入下是「放行 ⇒ 200 + 业务结果」。
-        //    ⇒ 这一格残余差异（总「值」数 2049~10000 且非空值 ≤2048）见 DRIFT-HOTAPI-030（跨域，收口在 global）。
-        //    ⇒ 若全局把 max-parameter-count 放宽到 10000（Go net/url 的真实上限），本断言需同步更新。
-        assertTrue(resp.body() != null && resp.body().contains("\"code\":5003"),
-                "容器层上限触发后必须落 Go 的解析失败出口 5003（不是兜底的 5001）；实际 body=["
-                        + resp.body() + "]");
+                "Go 侧这一格是「放行 ⇒ 进业务层 ⇒ httpx.OkJsonCtx」⇒ HTTP 恒 200（api 层无 5xx 出口）；"
+                        + "实际 body=[" + resp.body() + "] ct="
+                        + resp.headers().firstValue("content-type").orElse("-"));
+        assertFalse(resp.body() != null && resp.body().contains("\"code\":5003"),
+                "Go 在这一格是**放行**（非空值数 = 1 ≤ 2048，且段数 2049 ≤ 10000）⇒ 不得落 5003"
+                        + "（5003 是「解析失败」那一格）；实际 body=[" + resp.body() + "]");
+        assertTrue(resp.body() != null && resp.body().contains("\"code\":1015"),
+                "必须证明请求**真的进了业务层**（Go 同形：放行 ⇒ 业务失败 ⇒ 1015 服务繁忙）；"
+                        + "实际 body=[" + resp.body() + "]");
+        assertFalse(isTomcatHtmlErrorPage(resp),
+                "不得出现 Tomcat 的 HTML 错误页（Go 侧不存在这个响应形态）；实际 status="
+                        + resp.statusCode() + " body=[" + resp.body() + "]");
     }
 
     @Test

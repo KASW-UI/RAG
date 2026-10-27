@@ -132,6 +132,18 @@
 | **⇒ 本域需要的改动** | **零** —— (b) 落地后本域自动对齐 ⇒ **不需要 (a)**，也不需要新增域侧检查 |
 | **🔴 给 G4 的实现要求（本轮新增的一条）** | 本域 mode = **OFF**（未配 `rag.http.go-form-limit.mode` ⇒ 默认 `off`）⇒ 当前共享层 `GoStyleTomcatParameterLimitCustomizer.java:109` 在 OFF 时**直接 return** ⇒ **不动容器上限** ⇒ ⇒ **(b) 落地时，容器上限的抬升必须对所有域**无条件**生效**（OFF 只该关掉**应用层**的 Go 风格判定，**不该关掉**容器上限的抬升）⇒ ⇒ 否则 OFF 域会继续卡在「2048 条目数」这一层 ⇒ ⇒ 差 1 不会闭合 |
 
+### 4.3 ✅ G4 已落码（`cd893d1`）⇒ 本域已合并（**选项 D**）⇒ **域侧动作已完成**（2026-10-27 第十八轮）
+
+| 判据 | 实测 |
+|---|---|
+| **G4 那条实现要求是否被满足** | 「容器上限的抬升必须对所有域**无条件**生效，OFF 只该关掉**应用层**的 Go 风格判定」⇒ ✅ **满足**：`GoStyleTomcatParameterLimitCustomizer#customize()` **不再按 `mode` 分叉**（`mode` 只在构造期做**校验**，非法值仍 fail-fast）⇒ ⇒ **OFF 域（favorite / task）同样抬到 10001** |
+| **本域合并** | **选项 D**：`git merge --no-ff --no-commit align/g4-service-common`（起始 `cec7131` → 落点 `cd893d1`）⇒ ⇒ **共享层改动与本域改动进同一笔 merge commit**（不留半截）⇒ **冲突面实测 0**（merge-base `a282012`：本树 77 个改动文件 ∩ G4 树 52 个改动文件 = **空集**） |
+| **本域可观察变化（唯一一格）** | 总「值」数 **2049~10000 且非空值 ≤2048** ⇒ Go 放行 / RAG 由「拒（200 + 5003）」变「放行」⇒ ⇒ **差 1 闭合**（`DRIFT-HOTAPI-030` 的这一格） |
+| **域侧动作（G4 §4.10.25.4 点名的那件事）** | ✅ **已完成**：`FavoriteApiRealTomcatGateTest#containerParameterLimitIsSurfacedAsGoParseError` 的断言从「必须落 `5003`」改为 **Go 语义**（200 ＋ 非 5003 ＋ **含 1015**（证明**真的进了业务层**）＋ 非 Tomcat HTML）⇒ ⇒ **方法名故意保留旧名**（不打断 `global/vs-common.md` §4.10.25.4 的引用）⇒ 详见 [`favorite/api.md`](./api.md) **§14** |
+| **变异守护** | 🔴 **两条旧变异当场失效**（MUT-A / MUT-C 实测 **0 红**）⇒ ⇒ 新增 **MUT-F**（域内判据「数非空值」→「数总值」）⇒ ✅ **1 例转红** ⇒ ⇒ 坑档 ⇒ [`PIT-FAV-API-010`](../../Pitfalls/favorite/api.md) |
+| **仍未闭合的下一格** | 总「值」数**超过 Go 的 10000 段上限**：Go 拒（400 + `net/url` 原文）/ favorite **没有**实现这道段数上限（域内判据只数**非空值**；共享层的段数闸门因本域 = `OFF` 而**不装**）⇒ ⇒ 该区间两侧不一致 ⇒ 归 `DRIFT-HOTAPI-030` 的**后续格** ⇒ **显式登记，不假装闭合** |
+| **证据强度** | **L3**（真容器活体：合并后实测 **200 + `{"code":1015,"msg":"服务繁忙"}`** ⇒ 请求**真的进了业务层**）⇒ ⚠️ **不是 L4**：这一格**缺双侧活体用例**（`tools/api-envelope-probe/favorite/` 现有的 2049 用例是「**全非空值**」＝应用层判据，**不是**本次闭合的「1 非空 + 2048 空」那格）⇒ ⇒ **L4 待补**（探针属 favorite 域工具面；G4 已建议 G3 补一条 ⇒ **该目录不在任何 lane 的写权名单里 ⇒ 归属待整合者裁定**） |
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ✅ **2026-10-27 阶段 2 已完成**：`mvn -o -pl service/favorite/favorite-rpc,... -am test` ⇒ **favorite-rpc 114 条 / 0 failures / 0 errors / skipped 3**（含 `FavoriteSqlTimeoutProductionPathTest`（**真 Spring 上下文 ＋ 真 PG ＋ 真 Hikari**）5/5 绿、`FavoriteDdlParityTest`（**真 Flyway**）、`fact/FavoriteAuthority*Test`（**真进程 gRPC**））。⚠️ **必须带 `-am`**（否则拿旧共享层跑，见文末「本轮踩坑」）。

@@ -22,7 +22,7 @@
 | 落地形态 | 31 个 main 文件 / **3,116 行** / **15 个 DTO** / 7 个 Service / 1 个 Controller<br>⚠️ **核对 2026-10-25（第十轮）**：行数比首轮台账记的 2,920 多 196 行 ⇒ **全部是各轮的纯注释增量**（可执行逻辑零改动）；DTO 数首轮记的 **13 是错的**（基线 `58e8314` 就是 15 个） |
 | 测试 | **8 个测试类 / 97 例全绿**（33 输入契约 + 36 MVC 管线 + **6 装配** + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍** + **1 探针（自动 skip）** + **4 端口归属守门**）→ 第六轮 **+1 个测试类 / +5 例**；第十四轮收尾 **+1 个测试类 / +4 例**（`RealTomcatPortTest`）；**2026-10-26 合并当天**：防护链类 3 ⇒ **6 例**（绝对 `@Order` ⇒ Go 相对链序，**§12**） |
 | 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条已签字偏离** |
-| 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **2 条跨域待拍板**：① 容器层参数上限口径 ⇒ 收口在 `global`（与 hot 域 `DRIFT-HOTAPI-030` 同一格）；② **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，落点在 `service/common` ⇒ 同样收口在 `global`）<br>✅ **U8（第十五轮登记的唯一一条业务路径缺口）已于第十六轮闭合**：create 成功路径 + `ensureUserExists` 五分支 + 落库等价性全部拿到双侧活体证据（15 case 全 SAME）⇒ [`rpc.md`](./rpc.md) **§25**；盘点全表 ⇒ **§24.1** ⇒ **域内「未知项」归零**（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认）<br>🔴 **U9（第十七轮新增 · 部署形态类 · 待拍板）**：Go 生产形态有 **16062** 那个 HTTP 面，RAG 侧没有 ⇒ **§11** |
+| 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **1 条跨域待拍板**：② **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，落点在 `service/common` ⇒ 收口在 `global`）—— ① 容器层参数上限口径**已于 2026-10-27 闭合**（共享层把容器上限抬到 10001 + 域侧动作完成 ⇒ **§14**）<br>✅ **U8（第十五轮登记的唯一一条业务路径缺口）已于第十六轮闭合**：create 成功路径 + `ensureUserExists` 五分支 + 落库等价性全部拿到双侧活体证据（15 case 全 SAME）⇒ [`rpc.md`](./rpc.md) **§25**；盘点全表 ⇒ **§24.1** ⇒ **域内「未知项」归零**（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认）<br>🔴 **U9（第十七轮新增 · 部署形态类 · 待拍板）**：Go 生产形态有 **16062** 那个 HTTP 面，RAG 侧没有 ⇒ **§11** |
 | 本台账范围 | **仅 `favorite-api`**。`favorite-common` / `favorite-rpc` / `favorite-proto` 见同目录另三份台账 |
 
 ---
@@ -109,8 +109,8 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 | 项 | Go | RAG | 结论 |
 |---|---|---|---|
 | `relaxed-query-chars` | Go 的 `net/http` 不校验 query 里的 `[` `]` | `application.yml:65` | ✅ **运行证据**（真 Tomcat 门禁） |
-| `max-parameter-count`（**容器层**） | Go 的 `net/http` **不限参数个数**；Go 的真实上限是 `net/url` 的 `defaultMaxParams = 10000`（Go 1.25.11 `src/net/url/url.go:1001`） | `:66` = **2048** | ⚠️ **值与口径都不同**（Tomcat 数**总「值」数含空值** / Go 数**非空值数**）⇒ 残余窗口见 §3 |
-| `maxFormParamCount`（**应用层**） | `httpx/util.go:15` = **2048**，数**非空值**、计数器 `n` **跨所有 key 共享** | `FavoriteApiSupport#goFormFirstValue`（Go 逐字复刻） | ✅ 源码级一致；⚠️ **在真 Tomcat 栈上不可达**（容器在第 2049 个就先拒了）⇒ 见 §2-D4 |
+| `max-parameter-count`（**容器层**） | Go 的 `net/http` **不限参数个数**；Go 的真实上限是 `net/url` 的 `defaultMaxParams = 10000`（Go 1.25.11 `src/net/url/url.go:1001`） | **yaml** `:66` = **2048**（**一字未动**）<br>**运行期 = 10001**（共享层 `GoStyleTomcatParameterLimitCustomizer` **无条件**抬升，G4 落码 `cd893d1`） | ✅ **运行期已对齐**（容器不再比 Go 更早拒 ⇒ **判定权交还应用层**）⇒ ⚠️ **别只看 yaml**（AGENTS.md §3.3.1：yaml ≠ 运行期值）⇒ 残余见 §3 与 §14 |
+| `maxFormParamCount`（**应用层**） | `httpx/util.go:15` = **2048**，数**非空值**、计数器 `n` **跨所有 key 共享** | `FavoriteApiSupport#goFormFirstValue`（Go 逐字复刻） | ✅ 源码级一致；🔴 **2026-10-27 订正**：容器上限抬到 10001 后，这条判据**成为唯一判定者** ⇒ 「在真 Tomcat 栈上不可达」**已不成立** ⇒ 见 §2-D4 与 §14 |
 | `max-http-request-header-size` | `DefaultMaxHeaderBytes(1<<20) + 4096` = **1028KB** | `:67` | ✅ **运行证据**（真 Tomcat 门禁） |
 | HTTP 超时 | `rest/config.go:55` `Timeout default=3000` | `observability.http-timeout: 3s` | ✅ |
 | **MaxConns / MaxBytes / CPU 降载 / 熔断（服务端）** | `rest/config.go:52-56` + `zrpc/internal/config.go:14-15` | `GoStyleProtectionProperties` 默认值 = Go 默认值 | ✅ **运行证据**（`FavoriteApiProtectionWiringTest` + 真 Tomcat 门禁） |
@@ -195,11 +195,12 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 
 | # | 变异 | 预期转红 | 实测 |
 |---|---|---|---|
-| **MUT-A** | 去掉 `parameterMap` 的异常归一（回到裸 `request.getParameterMap()`） | `containerParameterLimitIsSurfacedAsGoParseError` + `nonEmptyFormValueCountOverLimitIsRejected` | ✅ **2 例转红** —— 实测 HTTP **500** + `{code:5001}`（即修复前的形态） |
+| **MUT-A** | 去掉 `parameterMap` 的异常归一（回到裸 `request.getParameterMap()`） | `containerParameterLimitIsSurfacedAsGoParseError` + `nonEmptyFormValueCountOverLimitIsRejected` | ✅ **2 例转红** —— 实测 HTTP **500** + `{code:5001}`（即修复前的形态）<br>🔴 **2026-10-27 合并后已失效**（实测 **0 例转红**）⇒ 容器不再抛「参数过多」⇒ 这层归一永不触发 ⇒ 见 §14.2 |
 | **MUT-B** | `rag.protection.max-bytes` 1024 → 8192 | `oversizedBodyYieldsBare413` + `oversizedBodyBeatsAuth` | ✅ **2 例转红**（413 ⇒ 401） |
-| **MUT-C** | `server.tomcat.max-parameter-count` 2048 → 1000 | `nonEmptyFormValueCountAtLimitIsPassedThrough` | ✅ **1 例转红**（2048 个值被容器提前拒 ⇒ 5003） |
+| **MUT-C** | `server.tomcat.max-parameter-count` 2048 → 1000 | `nonEmptyFormValueCountAtLimitIsPassedThrough` | ✅ **1 例转红**（2048 个值被容器提前拒 ⇒ 5003）<br>🔴 **2026-10-27 合并后已失效**（实测 **0 例转红**）⇒ yaml **不再决定运行期值**（共享层无条件抬到 10001）⇒ 见 §14.2 |
 | **MUT-D** | `server.max-http-request-header-size` 1028KB → 8KB | `longRequestLineIsAccepted` + 3 条带长 query 的 | ✅ **4 例转红**（Tomcat 400 HTML 错误页） |
-| **MUT-E** | `server.tomcat.relaxed-query-chars` → 错值 | `bracketNotationIsAcceptedLikeGo` | ✅ **1 例转红**（Tomcat 400 HTML 错误页） |
+| **MUT-E** | `server.tomcat.relaxed-query-chars` → 错值 | `bracketNotationIsAcceptedLikeGo` | ✅ **1 例转红**（Tomcat 400 HTML 错误页）<br>🔴 **2026-10-27 复验**：**8 例 error**（错值在**上下文启动期**就被拒 ⇒ 整类起不来）⇒ ⇒ `bracketNotationIsAcceptedLikeGo` **仍在其中**（该断言仍转红）⇒ 但**波及面**从 1 例扩到 8 例 ⇒ ⇒ **按实测改记，不沿用旧值** |
+| **MUT-F** | 域内判据从「数非空值」退化成「数总值」（删 `goFormFirstValue` 里的 `if (value == null \|\| value.isEmpty()) { continue; }`） | `containerParameterLimitIsSurfacedAsGoParseError` | ✅ **1 例转红**（body 变 `{code:5003}`）⇒ **2026-10-27 新增**：它**替掉**已失效的 MUT-A / MUT-C 对该断言的守护 ⇒ 见 §14.2 |
 
 > ⚠️ **MUT-E 顺带撞出一条绑定细节**（值得单独记）：用**测试属性**把
 > `server.tomcat.relaxed-query-chars` 覆盖成**空串**时，**断言不转红** ——
@@ -208,6 +209,13 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 > ⇒ **「配了」与「被采用了」是两件事**（§3.3 的老教训，此处又撞一次）：
 > 静态守门脚本（`check-tomcat-limits.py`）查的是**配置文本**，它**证明不了**容器采用了它；
 > 只有真 Tomcat 的行为断言 + 变异转红才能。
+
+> 🔴 **2026-10-27 合并后复验全表**（共享层把容器上限抬到 10001 ⇒ **容器层不再当判定权**
+> ⇒ ⇒ **两条变异当场失效**）：实测 ⇒ **MUT-A 0 红**（容器不再抛「参数过多」⇒ `parameterMap`
+> 的归一永不触发）· **MUT-C 0 红**（yaml 不再决定运行期值）· **MUT-B 2 红**（不变）·
+> **MUT-D 4 红**（不变）· **MUT-E 8 error**（旧记录 1 红 ⇒ 已按实测改记）·
+> **MUT-F 1 红**（新增，替掉 MUT-A/MUT-C 对该断言的守护）
+> ⇒ ⇒ **没有任何一条断言失去专属变异** —— 失效的变异 = 假绿的开始（AGENTS.md §3.3）。
 
 ### 2.2 ✅ 本轮补上的证据缺口：响应字节的**双侧活体对拍**（新探针）
 
@@ -290,10 +298,11 @@ RAG 侧 **500 + JSON envelope**（`{code:5001,…}`）。
 ⇒ **不修**：RAG 侧给了可解析的 envelope（Go 侧是空 body），且与 users / admin / comment 域一致
 ⇒ 改成空 body 只会让客户端在 500 时拿不到任何信息。
 
-### 🔁 跨域待拍板 · 容器层参数上限的**口径差**（残余窗口，收口在 `global`）
+### 🔁 跨域待拍板 · 容器层参数上限的**口径差**（残余窗口，收口在 `global`）—— 🔴 **2026-10-27 已闭合**（域侧动作已完成，见 §14）
 
 | | 内容 |
 |---|---|
+| **🔴 订正（2026-10-27）** | 本格**已闭合**：共享层把容器上限**无条件**抬到 **10001**（G4 落码 `cd893d1`，类 `GoStyleTomcatParameterLimitCustomizer`）⇒ ⇒ 容器不再比 Go 更早拒 ⇒ ⇒ **「总「值」数 2049~10000 且非空值数 ≤2048」那一格：Go 放行 / RAG 也放行** ⇒ ⇒ 域侧动作（把域内守门从「必须落 5003」改成 Go 语义「放行 ⇒ 进业务层」）**已完成**（§14）<br>⇒ ⇒ **下面各行保留原文**（历史事实 + 当时的推理，不改写）⇒ 其中「残余窗口（精确）」那一行**已被本行订正**<br>⚠️ **仍在的下一格（不假装闭合）**：总「值」数**超过 Go 的 10000 段上限**时，Go 拒（400 + `net/url` 原文），而 favorite 域**没有**实现这道段数上限（域内判据只数**非空值**；共享层的段数闸门因 favorite = `OFF`（域自捕获）而**不装**）⇒ ⇒ 该区间两侧不一致 ⇒ 归 `DRIFT-HOTAPI-030` 的**后续格** ⇒ 本轮**不覆盖** |
 | **事实（2026-10-25 真 Tomcat 实测，4 组判别用例）** | Tomcat 的 `maxParameterCount` 数的是**总参数「值」个数（含空值）**；Go 的 `maxFormParamCount` 数的是**非空值个数**（`httpx/util.go:44-45` 的 `if len(v) == 0 { continue }` 空值不计数），且计数器 `n` **跨所有 key 共享** |
 | **判别用例（每组都带一个合法非空 `folderId` ⇒ 应用层永不拒、字段必在场 ⇒ 结果只可能来自 Tomcat）** | 总「值」=2048（名字 1，非空 1）⇒ **放行**；总「值」=2049（名字 1，非空 1）⇒ **拒**；总「值」=2049（名字 2，非空 1）⇒ **拒**；总「值」=3000（名字 3000，非空 1）⇒ **拒** ⇒ 判定「**数值不数名**」 |
 | **残余窗口（精确）** | **总「值」数 2049~10000 且非空值数 ≤2048** ⇒ Go **放行**（200 + 业务结果）/ RAG **拒**（200 + 5003） |
@@ -328,7 +337,7 @@ RAG 侧 **500 + JSON envelope**（`{code:5001,…}`）。
 |---|---|---|
 | 双侧活体对拍（真 Go favorite-api vs RAG） | ✅ **已验**（2026-10-25 **第十四轮**） | 探针 [`tools/api-full-parity-probe/favorite/`](../../../tools/api-full-parity-probe/favorite/README.md) ⇒ **EXIT=0**：<br>· **32 个 case**（鉴权 6 / 路由 3 / 解析 7 / 业务 7 / 只读 4 / 响应头面 1 / 写入 3 / 写入生效验证 1）<br>· **24 条逐字节全等**（含 int64 以字符串出参、时间戳、空集合 `[]`）<br>· 业务组 **7 条**穿过 **HTTP → gRPC → description 反查 → 业务码 → envelope** 全链 ⇒ **逐字节一致**<br>· 1 条 SAME_CODE（黑名单命中，业务码两侧都是 5004）/ 4 条 SAME_STATUS（Go 的 401 是**空 body** ⇒ 取不到业务码；形态差异**已签字** DEV-FAV-API-001）/ 2 条 SAME_BODY（405 的 **Content-Type** 不同 ⇒ **新发现的跨域漂移**）/ 1 条 OBS（Go 多 `traceparent`）<br>⇒ **两个模块都是 `java -jar` 真进程**（⇒ 顺带查出 2 个启动阻塞，见 [`rpc.md`](./rpc.md) §22.3） |
 | **servlet filter 链真生效** | ✅ **已验**（2026-10-25 第三轮） | `FavoriteApiRealTomcatGateTest`（**8 例**，`webEnvironment = RANDOM_PORT` ⇒ **真 Tomcat**）：MaxBytes → **413 + 空 body + 无 Content-Type**、413 **压过** 401、未超限仍 401、三旋钮各自生效 ⇒ **真容器的 chain 里真的跑了它**（不再只是「Bean 存在 + `@Order` 一致」） |
-| **容器层参数上限的精确口径** | ✅ **已验** | 4 组判别用例（真 Tomcat）⇒ Tomcat 数**总「值」数（含空值）**、Go 数**非空值数** ⇒ 残余窗口见 §3 |
+| **容器层参数上限的精确口径** | ✅ **已验** | 4 组判别用例（真 Tomcat）⇒ Tomcat 数**总「值」数（含空值）**、Go 数**非空值数** ⇒ 残余窗口见 §3<br>🔴 **2026-10-27 订正**：容器上限已由共享层抬到 **10001**（**运行期**值）⇒ ⇒ §3 那条「残余窗口」**已闭合**（§14）⇒ ⇒ 域内 Go 口径判据**成为唯一判定者** |
 | **Go 侧「非空值 >2048」时的逐字节响应** | ✅ **已验**（2026-10-25 第六轮，**双侧活体对拍**） | Go 侧用**真** `httpx.Parse`（`maxFormParamCount=2048` 真生效）⇒ 2049 个非空值 ⇒ **200 + `{code:5003,msg:"参数错误",data:null}`**；RAG 侧走**真 HTTP** ⇒ **逐字节相同** ⇒ 探针 `tools/api-envelope-probe/favorite/`（EXIT=0）⇒ 见 §2.2 第 1 条 |
 | 真实 gRPC 链路上的 description 保真 | ✅ **已验**（2026-10-25 第四轮） | `FavoriteGrpcErrorWireFidelityTest`（**4 例**，`favorite-common`，**真 in-process gRPC**）⇒ description 与 `FavoriteErrorMessages.getMsg(码)` **逐字节相同**、经 `bizCodeFromError` **能还原回原业务码**（含唯一只能靠文案反查的 **5304**）、标准 gRPC 码在链路上保真 ⇒ **变异**（去掉 `withDescription`）⇒ **3 例转红** ⇒ 不是假绿 |
 | Go 侧 `httpx.Parse` 的入参解析矩阵 | ✅ **已验** | RAG 侧的 DTO 注释记录了 go-zero v1.10.2 真源探针的实测矩阵（缺席/null/类型不符/空串/重复参数/key 大小写），并由 `FavoriteApiInputContractTest`（33 例）守住 |
@@ -693,3 +702,47 @@ service/favorite/api/internal/svc/service_context.go:20
 
 **证据强度**：L3 静态实测（Boot 4.0.8 **字节码** + Lettuce 6.8.2 常量 + go-redis v9.20.0 源码）
 ＋ L4 **真容器**装配断言（`ApplicationContextRunner` + Boot 真实 `DataRedisAutoConfiguration`）。
+
+---
+
+## 14. 2026-10-27 第十八轮 —— 🔴 **共享层合并（选项 D）** + 容器上限那格的**域侧动作**
+
+### 14.1 为什么这一轮必须做（起因链）
+
+| 环节 | 事实 |
+|---|---|
+| **G4 的共享层落码** | `cd893d1`（类 `GoStyleTomcatParameterLimitCustomizer`）把「容器上限的抬升」与「闸门的有无」**解耦** ⇒ 容器上限**无条件**抬到 **10001**（= Go `net/url` 段数上限 10000 + 1）⇒ ⇒ **判定权交还应用层** |
+| **favorite 域的运行期变化** | 本域 `mode` 未声明 ⇒ 缺省 `OFF` ⇒ 但**上限照抬** ⇒ 运行期上限 **2048 → 10001** ⇒ ⇒ **跨域可观察行为变更**：总「值」数 **2049~10000 且非空值 ≤2048** 那一格，Go **放行**、RAG 由「拒（200 + 5003）」变成「放行」⇒ ⇒ 旧漂移 `DRIFT-HOTAPI-030` 的这一格**闭合** |
+| **域内那条红** | `FavoriteApiRealTomcatGateTest#containerParameterLimitIsSurfacedAsGoParseError` 断言「**必须**落 `{code:5003}`」⇒ 而 5003 **恰恰是 RAG 独有的形态**（Go 放行）⇒ ⇒ **那条绿测试当时守的是一条漂移**（AGENTS.md §3.3：「绿测试可能是『错误答案的守卫』」） |
+| **G4 的书面要求** | `docs/DRIFT/global/vs-common.md` §4.10.25.4：「**域侧动作（G3）** … **本层不代改（域侧写权）** ⇒ ⇒ **须在 G3 那一笔 merge 里一起改**（否则留下半截）」⇒ ⇒ 本轮就是那一笔 merge |
+| **合并方式** | **选项 D**：`git merge --no-ff --no-commit align/g4-service-common`（起始 `cec7131`，落点 `cd893d1`）⇒ ⇒ **共享层改动与本域改动进同一笔 merge commit**（不留半截） |
+| **冲突面（实测，非推断）** | 以 merge-base `a282012` 为界：本树 **77** 个改动文件 ∩ G4 树 **52** 个改动文件 = **空集** ⇒ ⇒ **无文本冲突** |
+
+### 14.2 域侧改了什么（都在本域写权面内）
+
+| 项 | 内容 |
+|---|---|
+| **断言改写** | `containerParameterLimitIsSurfacedAsGoParseError`：从「必须含 `code:5003`」改为 **Go 语义** —— ① HTTP **200**；② **不含** `code:5003`；③ **含** `code:1015`（证明**真的进了业务层**）；④ **不是** Tomcat HTML 错误页 |
+| **为什么 1015 是 Go 的形态（不是测试环境的巧合）** | Go：`favorite/common/errmsg.go:113-116`（普通 error ⇒ `status.FromError` 的 `ok=false` ⇒ `CodeServerBusy = 1015`，:12 ＋ 文案「服务繁忙」:46）＋ `:135-136`（gRPC `Unavailable` 也落 `default` ⇒ **同样 1015**）；<br>RAG：`FavoriteGrpcError#bizCodeFromError`（非 gRPC status ⇒ 1015；`Unavailable` 不在白名单 ⇒ `default` ⇒ 1015）⇒ ⇒ **两侧同码同形** |
+| **方法名故意保留旧名** | `…IsSurfacedAsGoParseError` ⇒ 为了**不打断** `global/vs-common.md` §4.10.25.4 的引用 ⇒ ⇒ **以 DisplayName 与断言为准**（已在方法 javadoc 里写明） |
+| **类 javadoc** | 「⚠️ 两个上限的口径不同」那节**保留原文**（2026-10-25 的历史实测）＋ 加**订正注记**（容器层不再当判定权）⇒ **不改写历史**（AGENTS.md 纪律） |
+| **变异守护换血** | 新增 **MUT-F**（域内判据从「数非空值」退化成「数总值」）⇒ ✅ **1 例转红** ⇒ 它**替掉**已失效的 MUT-A / MUT-C 对该断言的守护（两者实测 **0 红**）⇒ ⇒ 坑档 ⇒ [`PIT-FAV-API-010`](../../Pitfalls/favorite/api.md) |
+
+### 14.3 实测（可复算）
+
+| 项 | 值 |
+|---|---|
+| 守门（合并后 + 断言改写） | ✅ **8/8 绿**（`FavoriteApiRealTomcatGateTest`） |
+| **变异 MUT-F** | ✅ **1 例转红**（失败消息点名「不得落 5003」，实际 body = `{"code":5003,…}`）⇒ 其余 7 条仍绿 ⇒ **精确变红** |
+| 变异全表复验 | MUT-A **0 红** · MUT-C **0 红** · MUT-B **2 红** · MUT-D **4 红** · MUT-E **8 error** · MUT-F **1 红** ⇒ ⇒ **无断言失去专属变异** |
+| 整域回归 | **见 §14.4** |
+
+### 14.4 🔴 整域回归：**被机器级 Docker 端口转发故障阻塞**（不是代码问题，已用探针证伪）
+
+| 项 | 值 |
+|---|---|
+| **已完成部分（全绿）** | `users-common` **33** · **`common` 324**（**合并进来的共享层本体**，61 个测试类）· `article-common` **15** ⇒ 合计 **372 条 / 0 failures / 0 errors**（两口径：模块汇总行求和 ≡ 逐类明细行求和；类数 83）⇒ ⇒ **共享层随合并进来后自身 324 条全绿** |
+| **卡住的位置** | `article-rpc` 的 `ArticleTransactionWiringTest`（**Testcontainers 起 PG**）⇒ 线程栈显示主线程停在 `org.postgresql.core.v3.ConnectionFactoryImpl.doAuthentication`（**读不到 PG 的 auth 包**）⇒ 容器日志显示 PG 本身 **「ready to accept connections」** ⇒ ⇒ **不是代码、不是容器内服务** |
+| **判据（探针，非推断）** | ① `docker exec ddl-favorite-pg psql …` ⇒ **容器内连得上**（只报角色不存在，不是连接失败）⇒ **容器内服务正常**；② 宿主机 socket 探针：绝大多数容器的映射口 **「TCP 连上但 3~5s 读不到任何字节」**（PG/Redis/Kafka/Nacos/minio/… 全中），而 `Sea-user-rpc` / `milvus` / `jaeger` / `neo4j` 四个**正常**（前者收到 32 字节，后三者立即 0 字节 EOF）⇒ ⇒ **宿主 → 容器的转发路径对多数容器失效**，与本轮改动**无关** |
+| **处置** | 🔴 停掉卡住的跑批 + 清掉残留容器 ⇒ **不做跨 lane 的破坏性处置**（重启 Docker Desktop 会连带干掉 G1/G2/G4 各自跑了 30+ 小时的 `ddl-*-pg` 等容器 ⇒ **不擅自做**）⇒ ⇒ **全域 12 模块的完整回归待 Docker 恢复后补跑**（基线：合并前 **922 条**全绿，2026-10-27 09:44 min） |
+| **证据强度** | 本条 = **L3 环境级实测**（socket 探针 + 容器内直连 + 线程栈），**不**据此声称「合并后全域已验」 |

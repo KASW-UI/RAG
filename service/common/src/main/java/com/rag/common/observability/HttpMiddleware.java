@@ -37,6 +37,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.rag.common.observability.Observability.durationMillis;
 import static com.rag.common.observability.Observability.markBusinessError;
@@ -152,28 +153,47 @@ public final class HttpMiddleware {
      */
     static final int MAX_HTTP_WORKERS = 512;
 
-    /** 供测试与排障观察当前 worker 池的活跃/上限，不参与任何判定。 */
+    /**
+     * 供测试与排障观察当前 worker 池的活跃/上限，不参与任何判定。
+     *
+     * <p>🔴 <b>若上一轮 {@link #shutdown()} 已把池终止 ⇒ 这里按需重建一份新的</b>
+     * （与 {@code RpcInterceptor} 的两个池同款理由：<b>进程级静态池 + 终止即永久</b>
+     * ⇒ 与「同一个 JVM 里存在第二个 Spring 上下文」不兼容）。
+     */
     static ThreadPoolExecutor httpExecutor() {
-        return (ThreadPoolExecutor) HTTP_EXECUTOR;
+        while (true) {
+            ExecutorService current = HTTP_EXECUTOR.get();
+            if (!current.isShutdown()) {
+                return (ThreadPoolExecutor) current;
+            }
+            if (HTTP_EXECUTOR.compareAndSet(current, newHttpExecutor())) {
+                return (ThreadPoolExecutor) HTTP_EXECUTOR.get();
+            }
+        }
     }
 
-    private static final ExecutorService HTTP_EXECUTOR = new ThreadPoolExecutor(
-            0,
-            MAX_HTTP_WORKERS,
-            60L,
-            TimeUnit.SECONDS,
-            // ⚠️ 必须仍是 SynchronousQueue：与旧的 newCachedThreadPool 保持同一形状
-            //    （提交即交接、不排队）。换成 LinkedBlockingQueue 会引入「排队」语义 ——
-            //    请求在队列里等，超时计时就从「进入业务」推迟到了「开始处理」，那是新行为。
-            new SynchronousQueue<>(),
-            r -> {
-                Thread t = new Thread(r, "obs-http-worker");
-                t.setDaemon(true);
-                return t;
-            },
-            // 饱和 ⇒ 抛 RejectedExecutionException，由调用点转成**裸 503**（见 doFilter）。
-            // 刻意不用 CallerRunsPolicy：那会把业务搬回容器线程，等于「超时保护整条失效」。
-            new ThreadPoolExecutor.AbortPolicy());
+    private static final AtomicReference<ExecutorService> HTTP_EXECUTOR =
+            new AtomicReference<>(newHttpExecutor());
+
+    private static ExecutorService newHttpExecutor() {
+        return new ThreadPoolExecutor(
+                0,
+                MAX_HTTP_WORKERS,
+                60L,
+                TimeUnit.SECONDS,
+                // ⚠️ 必须仍是 SynchronousQueue：与旧的 newCachedThreadPool 保持同一形状
+                //    （提交即交接、不排队）。换成 LinkedBlockingQueue 会引入「排队」语义 ——
+                //    请求在队列里等，超时计时就从「进入业务」推迟到了「开始处理」，那是新行为。
+                new SynchronousQueue<>(),
+                r -> {
+                    Thread t = new Thread(r, "obs-http-worker");
+                    t.setDaemon(true);
+                    return t;
+                },
+                // 饱和 ⇒ 抛 RejectedExecutionException，由调用点转成**裸 503**（见 doFilter）。
+                // 刻意不用 CallerRunsPolicy：那会把业务搬回容器线程，等于「超时保护整条失效」。
+                new ThreadPoolExecutor.AbortPolicy());
+    }
 
     private static final Logger log = LoggerFactory.getLogger(HttpMiddleware.class);
 
@@ -186,7 +206,7 @@ public final class HttpMiddleware {
      * <p><b>幂等</b>：重复调用安全。
      */
     public static void shutdown() {
-        HTTP_EXECUTOR.shutdownNow();
+        HTTP_EXECUTOR.get().shutdownNow();
     }
 
     /**
@@ -295,7 +315,7 @@ public final class HttpMiddleware {
 
                 Future<?> workerFuture;
                 try {
-                    workerFuture = HTTP_EXECUTOR.submit(() -> {
+                    workerFuture = httpExecutor().submit(() -> {
                     // 先进上下文，再跑业务；finally 必须还原，避免线程池复用时串味
                     RequestAttributes prevAttrs = RequestContextHolder.getRequestAttributes();
                     Map<String, String> prevMdc = MDC.getCopyOfContextMap();
