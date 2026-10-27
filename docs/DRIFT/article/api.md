@@ -2436,3 +2436,22 @@ vt                     in=0b                       out=225c7622
 ⇒ **判据是守门脚本**：`tools/difftest/check-jar-executable.sh`
 （逐个 api 模块解包 `META-INF/MANIFEST.MF` 看 `Main-Class`）
 ⇒ **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）。
+---
+
+## 附录 · 🧹 U+FFFD 复核结论（2026-10-27）—— **本域 1 处**是**故意保留**，**不修**
+
+| 文件:行 | 表象 | 结论 |
+|---|---|---|
+| `src/test/java/com/rag/article/article/api/ArticleApiMvcPipelineTest.java:1143` | `.putExtInfo("` + **U+FFFD** + `", "4")` | 🟢 **故意的测试数据** |
+| 同文件 `:1159` | `body.indexOf("\"" + **U+FFFD** + "\"")` | 🟢 同上 |
+
+**为什么不能改**：该用例（`@DisplayName`：🔴 DRIFT-007：ext_info 的 key 含**非 BMP**字符时仍按码点序输出）
+把 U+FFFD 当作 `ext_info` 的 **key** 来用，钉死「按**码点序**（= Go 的 UTF-8 字节序）输出」：
+
+```
+a < 中 < U+E000 < **U+FFFD** < 😀（U+1F600，非 BMP 代理对）
+```
+
+⇒ 这里的 U+FFFD 是**被测对象**，不是编码损坏 ⇒ **改它会直接破坏该测试的语义**
+⇒ **本轮刻意不动** ⇒ ⚠️ 「全仓 U+FFFD 归零」这条目标**在本域不成立**（也不该成立）——
+**扫描 U+FFFD 时必须先判断它是不是测试数据**。
