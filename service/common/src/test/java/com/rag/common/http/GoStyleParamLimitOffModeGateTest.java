@@ -17,8 +17,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -166,6 +169,68 @@ class GoStyleParamLimitOffModeGateTest {
                         + "⚠️ 若这里变成 false，说明「off ⇒ 不装闸门」这条被破坏了"
                         + "⇒ 而 favorite 域的拒绝形状会被共享层抢先接管（200 + 5003 ⇒ 400/5001）");
         assertEquals(0, resp.getContentAsByteArray().length, "off 模式不得写 body");
+    }
+
+    // ==================================================================
+    // ④ 结构锁：被抽出来的那段「抬上限」逻辑**结构上**不可能依赖 mode
+    // ==================================================================
+
+    /**
+     * 🔴 <b>结构锁</b>（与断言①是<b>互补</b>的两层，不是重复）。
+     *
+     * <h3>为什么 ① 抓不住这一类退化</h3>
+     * <p>断言①是<b>行为性</b>的：mode=off 时运行期上限 == 10001。
+     * ⇒ ⇒ 它抓得住「把 mode 分支<b>接回</b> {@code customize()}」这种退化。
+     * <br>⇒ ⇒ 但它<b>抓不住</b>下面这一种：
+     * <pre>
+     *   public static TomcatConnectorCustomizer limitCustomizer(String mode) { … }
+     *   // customize() 里仍然无条件调用它 ⇒ 运行期仍是 10001 ⇒ 断言① 仍绿
+     *   // ⇒ 但「抬上限的产物与 mode 无关」这条**结构性**契约已经破了
+     *   // ⇒ ⇒ 下一任 agent 只要顺手加一个 if (mode == OFF) return; 就会静默退化
+     *   // ⇒ ⇒ 而那时「① 何时会红」取决于有没有人再跑它
+     * </pre>
+     * ⇒ ⇒ 本条把「<b>产物不可能依赖 mode</b>」变成<b>签名层面的事实</b>：
+     * {@code limitCustomizer()} 必须是 <b>static 且无参</b>
+     * ⇒ ⇒ <b>结构上</b>就拿不到 mode ⇒ ⇒ 那条退化<b>写不出来</b>。
+     *
+     * <h3>🔴 为什么用「遍历 {@code getDeclaredMethods()}」而不是 {@code getMethod("limitCustomizer")}</h3>
+     * <p>因为变异验证要求「<b>红在目标断言上</b>」（AGENTS.md §3.3.3）。
+     * <br>⇒ 若用 {@code getMethod("limitCustomizer")}（无参查找）⇒ 一旦生产侧给它加了参数
+     * ⇒ 查找本身就抛 {@link NoSuchMethodException} ⇒ ⇒ 测试红在「<b>异常</b>」上，
+     * 而不是在「<b>无参</b>」这个断言上 ⇒ ⇒ 红得没有意义。
+     * <br>⇒ ⇒ 改成遍历 + 按名字筛 ⇒ 变异后<b>仍然找得到</b>那个方法（只是多了参数）
+     * ⇒ ⇒ <b>红在「必须无参」这条断言上</b> ⇒ ⇒ 才是有效证据。
+     *
+     * <h3>⚠️ 为什么期望值写「字面量」而不是引用常量</h3>
+     * <p>断言①写的是字面量 {@code 10001}（= Go {@code net/url} 的 {@code defaultMaxParams = 10000} + 1）
+     * ⇒ ⇒ <b>刻意不引用</b> {@link GoStyleTomcatParameterLimitCustomizer#MAX_PARAMETER_COUNT}
+     * ⇒ ⇒ 否则「有人把常量改成 2048」会<b>同时改掉期望值</b> ⇒ ⇒ <b>守门变哑</b>
+     * ⇒ ⇒ 期望值必须与被测代码<b>不同源</b>（§3.3.3 的「期望值同源 ⇒ 守门是哑的」）。
+     */
+    @Test
+    @DisplayName("④ 结构锁：limitCustomizer() 是 static 且**无参** ⇒ 产物结构上不可能依赖 mode")
+    void limitCustomizerIsStatelessAndParameterless() {
+        Method[] declared = GoStyleTomcatParameterLimitCustomizer.class.getDeclaredMethods();
+
+        Method[] candidates = Arrays.stream(declared)
+                .filter(m -> "limitCustomizer".equals(m.getName()))
+                .toArray(Method[]::new);
+
+        assertEquals(1, candidates.length,
+                "必须**恰好一个** limitCustomizer（两个就会有两个「抬上限」口径 ⇒ 互相覆盖）"
+                        + " ⇒ 实际找到 " + candidates.length + " 个：" + Arrays.toString(candidates));
+
+        Method m = candidates[0];
+
+        assertTrue(Modifier.isStatic(m.getModifiers()),
+                "必须是 static（否则产物会带实例状态 ⇒ 就有可能读 mode）"
+                        + " ⇒ ⇒ 变异：把 public static 改成 public（instance）⇒ 本条红");
+
+        assertEquals(0, m.getParameterCount(),
+                "必须**无参** ⇒ ⇒ 它的产物**结构上**不可能依赖 mode"
+                        + " ⇒ ⇒ 这是「两轴解耦」的**结构性**保证（断言①是行为性保证）"
+                        + " ⇒ ⇒ 变异：给它加一个 String mode 参数 ⇒ 本条红"
+                        + " ⇒ ⇒ 而此时断言①仍绿（运行期仍是 10001）⇒ ⇒ 本条是那一格唯一的网");
     }
 
     // ==================================================================

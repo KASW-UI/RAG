@@ -106,6 +106,7 @@ Tomcat 的 `maxParameterCount` 数的是**总参数个数**（query + post），
 """
 
 import os
+import re
 import sys
 
 try:
@@ -137,26 +138,73 @@ BOOT_DEFAULT_MAX_HEADER_SIZE = 8 * 1024  # 8KB
 # 值的语义 = 「Go 侧该 api 有没有注册 httpx.SetErrorHandler」（逐域取证）：
 #   raw      ⇒ 没注册 ⇒ http.Error(w, err.Error(), 400) ⇒ 400 + text/plain + Go 原文
 #   envelope ⇒ 注册了 ⇒ 业务信封 ⇒ 200 + {code:5001, 该域自己的文案, data:null}
-#   缺省     ⇒ OFF（不装闸门、也不改容器上限）
+#   off      ⇒ Go 侧该域**根本不解析 form** ⇒ 两道上限**不可达** ⇒ 语义答案就是 off
+#              （task/api/** 的 httpx.Parse / ParseForm / GetFormValues 命中数 = 0）
 #
-# ⚠️ favorite-api **故意不在表里** ⇒ 它的 yaml 里不得出现这个属性
-#    （favorite 不在 global 的写权范围内 ⇒ 共享层对它必须零影响）。
+# 🔴🔴 期望值**从共享层真源派生**，本脚本**不再持有副本**（2026-10-27 订正 · G2 FB-S1）
+# ----------------------------------------------------------------------------
+# 为什么必须派生：本脚本此前抄了一份**手写副本** ⇒ ⇒ **副本与真源漂移**：
+#   task-api 的副本写 "raw"，而真源 `GoStyleFormLimitMode.java:237` 写 `Mode.OFF`
+#   ⇒ ⇒ 守门红 ⇒ ⇒ **守门会把下一个人推向「把 task-api 的 yaml 改回 raw」**
+#   ⇒ ⇒ 重新引入误拒（task 域这个上限在 Go 侧根本不可达）
+# ⇒ ⇒ 真源 javadoc 明写「判据**只有一份**，且**可被机器核对**」
+# ⇒ ⇒ 副本 = 违背该设计的**第二份判据** ⇒ ⇒ **删副本，改为读真源**
+# ⇒ ⇒ **解析失败一律终止**（绝不静默回退到任何副本）——
+#   静默回退 = 「以为在核对真源、其实在核对一份可能过期的副本」= §3.3 同款静默失效
 FORM_LIMIT_MODE_PROPERTY = "rag.http.go-form-limit.mode"
-EXPECTED_FORM_LIMIT_MODE = {
-    "service/article/article-api": "raw",
-    "service/users/user/user-api": "raw",
-    "service/users/admin/admin-api": "raw",
-    "service/task/task-api": "raw",
-    "service/hot/hot-api": "envelope",
-    "service/like/like-api": "envelope",
-    "service/follow/follow-api": "envelope",
-    "service/message/message-api": "envelope",
-    "service/comment/comment-api": "envelope",
-}
+GO_STYLE_FORM_LIMIT_MODE_JAVA = (
+    "service/common/src/main/java/com/rag/common/http/GoStyleFormLimitMode.java"
+)
+
 # 🔴 favorite 域**必须**没有这一项（零触碰守卫）
+#   ⚠️ favorite 在**真源表里是 off**（域自捕获 parse 错 ⇒ 共享层不装闸门），
+#   但「零触碰」口径要求它的 yaml 里**根本不能出现这个属性**
+#   ⇒ ⇒ 「语义答案」与「边界口径」是**两件不同的事** ⇒ ⇒ 两个集合分开维护
 FORBIDDEN_FORM_LIMIT_MODE_MODULES = {
     "service/favorite/favorite-api",
 }
+
+# 一个域的 yaml 怎么写才与「语义答案」一致 —— **逐条对齐 Java 的 GoStyleFormLimitMode.parse**：
+#   parse(null) ⇒ OFF · parse("off") ⇒ OFF · parse("false") ⇒ OFF（YAML 1.1 布尔形态）
+#   parse("raw") ⇒ RAW · parse("envelope") ⇒ ENVELOPE
+# ⇒ ⇒ 语义答案 = off ⇒ 合法写法 = 不写 / "off" / "false"（三者行为**逐字节相同**）
+# ⇒ ⇒ 语义答案 = raw|envelope ⇒ 该属性**是承重的** ⇒ 必须逐字写对
+_ACCEPTABLE_BY_SEMANTIC = {
+    "off": (None, "off", "false"),
+    "raw": ("raw",),
+    "envelope": ("envelope",),
+}
+
+
+def derive_expected_form_limit_mode():
+    """从共享层真源派生 ④ 旋钮的期望表。
+
+    🔴 **唯一真源** = `GoStyleFormLimitMode.SEMANTIC_REACHABILITY`（判据只有一份）。
+    🔴 失败一律 `SystemExit`（**不**静默回退）—— 理由见上面注释。
+    """
+    path = os.path.join(ROOT, GO_STYLE_FORM_LIMIT_MODE_JAVA)
+    if not os.path.isfile(path):
+        raise SystemExit(
+            f"🔴 找不到共享层真源 {GO_STYLE_FORM_LIMIT_MODE_JAVA}\n"
+            f"   ⇒ 终止（**不**静默回退到任何副本）"
+        )
+    with open(path, encoding="utf-8") as fh:
+        src = fh.read()
+    entries = re.findall(
+        r'new\s+DomainReachability\(\s*"([^"]+)"\s*,\s*(?:true|false)\s*,\s*'
+        r'(?:true|false)\s*,\s*Mode\.(\w+)\s*,',
+        src,
+    )
+    if not entries:
+        raise SystemExit(
+            f"🔴 真源 {GO_STYLE_FORM_LIMIT_MODE_JAVA} 里**没解析出任何** "
+            f"DomainReachability 条目\n"
+            f"   ⇒ 正则失效或真源被改坏 ⇒ 终止（**不**静默回退）"
+        )
+    return {module: mode.lower() for module, mode in entries}
+
+
+EXPECTED_FORM_LIMIT_MODE = derive_expected_form_limit_mode()
 
 
 def find_api_modules():
@@ -263,11 +311,18 @@ def main():
         gate = http.get("go-form-limit") or {}
         mode = gate.get("mode")
         expected_mode = EXPECTED_FORM_LIMIT_MODE.get(mod)
+        unregistered = False
         if mod in FORBIDDEN_FORM_LIMIT_MODE_MODULES:
             # 🔴 favorite：这一项**必须不存在**（零触碰守卫）
             gate_ok = mode is None
+        elif expected_mode is None:
+            # 🔴 该 api 模块**没在共享层真源登记** ⇒ ④ 这一格**根本没有判据**
+            #    ⚠️ 旧实现：expected_mode=None ⇒ gate_ok = (mode == None)
+            #    ⇒ ⇒ **新域只要不写这个属性就静默通过** ⇒ 盲区 ⇒ 现在显式判红
+            gate_ok = False
+            unregistered = True
         else:
-            gate_ok = (mode == expected_mode)
+            gate_ok = mode in _ACCEPTABLE_BY_SEMANTIC[expected_mode]
 
         problems = []
         if chars != EXPECTED_RELAXED_QUERY_CHARS:
@@ -334,18 +389,45 @@ def main():
                 print("        ⇒ favorite 域不在 global 的写权范围内（AGENTS.md §5.3c）")
                 print("        ⇒ 共享层对它必须**零影响**：既不改容器上限、也不装闸门")
             else:
-                print(f"     缺 ④ {FORM_LIMIT_MODE_PROPERTY}：实际 {actual.get('mode')!r}，"
-                      f"应为 {actual.get('expected_mode')!r}")
-                print("        ⇒ raw      = Go 未注册 httpx.SetErrorHandler"
-                      " ⇒ 400 + text/plain + Go 原文")
-                print("        ⇒ envelope = Go 注册了 httpx.SetErrorHandler"
-                      " ⇒ 200 + {code:5001, 该域自己的文案, data:null}")
-                print("        ⇒ 缺它 ⇒ 容器上限不会被抬到 10001 ⇒ Tomcat 会先于应用层拒绝")
-                print("          （且拒绝形状是 400 + HTML 错误页 ⇒ 与 Go 不同）")
+                exp = actual.get("expected_mode")
+                if exp is None:
+                    # 🔴 「该域未登记」—— **不是**「期望值是 None」
+                    #    ⚠️ 旧实现此处打印「应为 None」⇒ 读的人会以为期望值真的
+                    #       是 None ⇒ **两个语义必须分开说**（G2 FB-S1 附带瑕疵）
+                    print(f"     🔴 ④ {FORM_LIMIT_MODE_PROPERTY}：**该域未在共享层真源登记**")
+                    print(f"        ⇒ 实际 {actual.get('mode')!r}，但**没有期望值可比**")
+                    print(f"        ⇒ 请在 {GO_STYLE_FORM_LIMIT_MODE_JAVA} 的 "
+                          f"`SEMANTIC_REACHABILITY` 里补该域（按 Go 侧取证后再填）")
+                    print("        ⇒ ⚠️ 这里**不是**「期望值为 None」——"
+                          "「没登记」与「期望 None」是两件事")
+                else:
+                    print(f"     🔴 ④ {FORM_LIMIT_MODE_PROPERTY} 不匹配：实际 "
+                          f"{actual.get('mode')!r}，应为 {exp!r}")
+                    print(f"        ⇒ 合法写法 = {_ACCEPTABLE_BY_SEMANTIC[exp]!r}"
+                          + ("　（⚠️ `off` **必须带引号** ⇒ YAML 1.1 会把未加引号的 "
+                             "`off` 解析成布尔 false）" if exp == "off" else ""))
+                    print(f"        ⇒ 真源 = {GO_STYLE_FORM_LIMIT_MODE_JAVA} 的 "
+                          f"`SEMANTIC_REACHABILITY`（判据只有这一份）")
+                    print("        ⇒ raw      = Go 未注册 httpx.SetErrorHandler"
+                          " ⇒ 400 + text/plain + Go 原文")
+                    print("        ⇒ envelope = Go 注册了 httpx.SetErrorHandler"
+                          " ⇒ 200 + {code:5001, 该域自己的文案, data:null}")
+                    print("        ⇒ off      = Go 侧该域**根本不解析 form**"
+                          " ⇒ 两道上限不可达 ⇒ 不装闸门")
+                    print("        ⇒ 缺它 ⇒ 容器上限不会被抬到 10001 ⇒ Tomcat 会先于应用层拒绝")
+                    print("          （且拒绝形状是 400 + HTML 错误页 ⇒ 与 Go 不同）")
         print("     修法：在该模块 application.yml 的 rag: 块下补 ——")
         print("       http:")
         print("         go-form-limit:")
-        print(f"           mode: {actual.get('expected_mode') or 'raw'}")
+        exp_hint = actual.get("expected_mode") or "raw"
+        if exp_hint == "off":
+            # ⚠️ 必须带引号：YAML 1.1（SnakeYAML）把**未加引号的** off 解析成布尔 false
+            #    ⇒ 域侧未加引号时，共享层拿到的是 "false"
+            #    （G2 反馈单 FB-05 的 L4 实测；Java 侧 parse 已接受 "false" ⇒ 语义不炸，
+            #      但**显式加引号**才是与文档一致、且不受 YAML 版本影响的形式）
+            print('           mode: "off"      # ⚠️ 必须带引号（YAML 1.1：未加引号的 off ⇒ 布尔 false）')
+        else:
+            print(f"           mode: {exp_hint}")
         print("     ⚠️ 光补配置不够：还要配一条断言「这些旋钮真的生效」的测试")
         print("        （§3.3：配置写对了 ≠ 框架采用了它）")
         print()

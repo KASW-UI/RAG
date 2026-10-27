@@ -85,8 +85,14 @@ public class ObservabilityLifecycle {
      * <p>HTTP 侧的池由 {@link HttpPoolLifecycle} 负责（只有 servlet 进程才注册那个 Bean）
      * ⇒ 详见本类 javadoc 的「为什么 HTTP 池不能在这里关」。
      *
-     * <p>本方法不吞异常：即使某个池关闭出错，也要保证其他池被尝试关闭，
-     * 因此调用各自独立、异常向上抛（Spring 会在 destroy 阶段记录并继续销毁其余 bean）。
+     * <p>🔴 <b>单池口径</b>（2026-10-27 订正 · G1 反馈单）：本方法<b>只关一个池</b>
+     * （{@link RpcInterceptor}）⇒ ⇒ 原先那句「即使某个池关闭出错，也要保证<b>其他池</b>
+     * 被尝试关闭，因此调用各自独立」<b>已随 HTTP 池拆出而过期</b>
+     * （HTTP 池改由 {@link HttpPoolLifecycle} 关 ⇒ <b>不在本方法里</b>）
+     * ⇒ ⇒ 现在只剩「本方法不吞异常、异常向上抛」这一条
+     * ⇒ ⇒ ⚠️ <b>读者不要误以为这里仍有「多个池各自独立关闭」的异常隔离保证</b>
+     * —— 现在的形态是「一个池、一次调用、异常直接上抛」
+     * ⇒ ⇒ 若将来再加池进来，<b>必须同时把这段改回多池口径</b>（否则又是一处过期 javadoc）。
      */
     @PreDestroy
     public void shutdown() {
