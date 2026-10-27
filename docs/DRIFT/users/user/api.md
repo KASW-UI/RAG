@@ -1255,7 +1255,7 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
 
 - **探针工程**：真源整仓复制到 `/tmp/goprobe`（**不动被冻结的真源**）· 探针 `probejwt/main.go`
   **import 真源自己的 `sea-try-go/service/common/observability`**（`:31`）⇒ 不是重写版。
-  ⚠️ 探针落在 `/tmp`（**易失**）⇒ **落仓 `tools/difftest/` 需整合者拍板**（`tools/` 不在 G1 写权内）⇒ 已登记待办。
+  ⚠️ 探针落在 `/tmp`（**易失**）⇒ **落仓 `tools/difftest/` 需合并收口执行者拍板**（`tools/` 不在 G1 写权内）⇒ 已登记待办。
 - **启动路径与真源 api 逐行同构**（`messagecenter.go:36-42` 同款）：
   `DisableNativeRestTimeout` → `rest.MustNewServer` → `server.Use(observability.NewHTTPMiddleware(...))`
   ⇒ 打印 `PROBE conf.Timeout=3000ms httpTimeout=3s nativeTimeoutMiddlewareEnabled=**false**`
@@ -1363,7 +1363,7 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
    ⇒ ⇒ **该并列在本语义下无害**（因为验签 Filter 不写响应）。
 3. **①（401 计入观测面）仍在** ⇒ `SD-USERAPI-002` 继续有效。
 
-#### 7. 🟡 跨服务推广（**本轮未做**，登记给整合者）
+#### 7. 🟡 跨服务推广（**本轮未做**，登记给合并收口执行者）
 
 - 改法 A 的推广是**逐服务**的（Go 侧每个 api 自己 `server.Use` ⇒ 每个服务链序各自决定）
   ⇒ **同款差异在另外 9 个 api 服务上都成立**：

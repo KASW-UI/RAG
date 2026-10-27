@@ -478,6 +478,40 @@ Tests run: 22, Failures: 9, Errors: 0, Skipped: 0
 | `user-api` | **76** tests / 0 failures / 0 errors（与 `user/api.md` 第三轮记录的 76 一致） |
 | `admin-api` | BUILD SUCCESS |
 
+### 5.7 🟢 **点名：共享层新增的跨 lane 依赖守门 `GoStyleRequiredFieldGateTest`（6 条）**
+
+> 📌 **本节是「点名」而不是「本轮实施的修改」** —— 这份守门由**共享层波（G4，`align/g4-service-common`）**落，
+> 落在 `service/users/users-common/**` ⇒ **写权归 G4** ⇒ **G1 只点名、不改码**。
+> ⇒ 并入笔 = `ddb63f7`（我树并入 G4 终版 `c26e462`，11 笔 · 零冲突）。
+> ⇒ **门禁不强制本节存在**（没有机器检查「谁点了名」）⇒ 属**自觉点名**，记在此处以免这层依赖再次丢失。
+
+| 项 | 内容 |
+|---|---|
+| 文件 | `service/users/users-common/src/test/java/com/rag/users/common/http/GoStyleRequiredFieldGateTest.java` |
+| 断言数 | **6**（`@Test` × 6）⇒ `users-common` 模块条数 **33 → 39** |
+| 它锁住什么 | **G1 销号结论所依赖的两个不变量**（见下） |
+| 复开触发器 | ① 或 ② 任一被改 ⇒ 本守门红 ⇒ **失败消息直接点名 G1 的销号条目** |
+
+**两个被钉住的不变量（G1 的 `DRIFT-USERSCOMMON-001` 销号结论的前提）**：
+
+1. **`GoStyleRequest#normalize(Object, Supplier)` 必须调 `assertGoRequiredFields()`**
+   ⇒ ⇒ **必填校验在 service 层之前拦**（断言用 `AtomicBoolean` 记「回调**真的被调用过**」，
+   **不是**去比对异常实例的同一性 —— DTO 内部自建异常实例，比同一性是错的期望值）。
+2. **`GoStyleRequired#field(String, Object)` 在 `value == null` 时抛 `GoRequiredFieldException`**
+   ⇒ ⇒ 缺 uid ⇒ **400 `field "uid" is not set`**（**逐字节**对 Go 文案）。
+
+⇒ ⇒ **这才是「销号结论的复开触发器」这一形态的样本**：销号（证伪关闭）本身**不留代码痕迹**，
+只留在台账里 ⇒ ⇒ 台账里的「复开条件」若没有机器网兜着，就是**靠谁记得去复核** ⇒ ⇒
+G4 把这两个前提**变成可执行的断言** ⇒ ⇒ **不靠记性，靠机器逼着复核**。
+⇒ ⇒ **值得其他域照抄**（凡有「证伪关闭」类销号的域，都应把自己的前提变成机器断言）。
+
+⚠️ **本组件台账里的复开触发条件（原文照录，供对照）**：
+「**必填校验不再在 service 层之前拦**」或「**`normalize` 不再调 `assertGoRequiredFields()`**」
+⇒ ⇒ **两者都已被上面那 6 条断言覆盖** ⇒ ⇒ 我域 §3 `DRIFT-USERSCOMMON-001` 的销号结论**现在有机器网兜底**。
+
+⚠️ **边界（写权）**：`service/users/users-common/**` ⛔ **G1 只读** ⇒ ⇒ 本节**不含任何我域改动**，
+若这 6 条断言将来要改 ⇒ **落点归 G4** ⇒ ⇒ 我域只需重核销号结论，不需改码。
+
 ---
 
 ## 6. Unresolved（本组件，**此节不得为空**）

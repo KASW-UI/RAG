@@ -108,7 +108,7 @@
 | **3** | `UNRESOLVED-ARPC-002`（= **E38②**） ⚠️ **2026-10-27 订正：此条本轮不需要落码** | 超时是否 **min(客户端 deadline, 服务端 timeout)**：Go 继承父 ctx ⇒ 客户端更早就提前取消。**RAG 侧已于 2026-10-26 落地该语义** ⇒ **① 已闭环** | `service/common/observability/rpc.go:38` ⇒ `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)`<br>**已核 ✅**：该行内容逐字 = `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` | ✅ **已落地**：`RpcInterceptor.java:234` ⇒ `Math.min(serverBudgetMs, clientDeadlineRemainingMs())`；`:263` 调度器用 `effectiveTimeoutMs`；`:592-601` 从 `io.grpc.Context.current().getDeadline()` 取 | **L3 双侧活体**（`tools/semantic-probe/rpc-timeout/` **本轮实跑 EXIT=0**：`client_deadline_ctx` **一致** · `timeout_wire` 一致 · 3/3 一致） | 两侧都应是 **Y** = 「**有效期限 = min(客户端 deadline, 服务端 timeout)**」⇒ ✅ **这个 Y 已经达成** ⇒ ⛔ **请勿改 `RpcInterceptor` 的 deadline 计算**（会把对的改错 ⇒ 制造新漂移）<br>剩下**第②层**（`ServerCall#close()` 不取消业务线程 ⇒ 架构级 ⇒ Jason 2026-10-26 已拍板「**另立项**」）⇒ **不是本轮落码项** | `service/common` ⇒ 编译面 16 个组件 | 🟢 **不阻塞**（**本轮不落码**） |
 | **4** | `DRIFT-ADMINAPI-007` | 503 超时响应的 `Content-Type` **charset 分号后空格**残差（`nosniff` 已于 `HttpMiddleware.java:692` 落地 ⇒ **原条自动消失** ⇒ **需重开一条**） | `service/common/observability/http.go:88` ⇒ `http.Error(w, httpTimeoutBody, statusCode)`（Go 标准库 `net/http.Error` 的 5 件事：`text/plain; charset=utf-8` ＋ `nosniff` ＋ 状态码 ＋ 尾换行） | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`（超时分支）＋ `http/GoStyleRouterErrorResponses.java` | **L1 源码**（⚠️ 响应头层须**真 Tomcat** 验 ⇒ MockMvc 测不到，见 `Pitfalls/common/http.md`） | 两侧都应是 **Y** = 「**503 的 `Content-Type` = `text/plain; charset=utf-8`（分号后**无**空格）**」⇒ 与 `DRIFT-MSGAPI-010` 同族（那条用户已拍板「保持登记，本轮不做」⇒ **本条要不要做请 G4 明确**） | `service/common` ⇒ 编译面 16 个组件 | 🟡 不阻塞 |
 | **5** | `UNRESOLVED-USERSCOMMON-003`（**只派一半**） | `users-common` 的**通用版** `GoStyleCoercion::applyTo` 被 **user-api / admin-api / favorite-api** 三域注册（**favorite 是外域**）⇒ 规则一改，favorite 的解析语义跟着变 ⇒ 「通用版规则内容是否该被外域复用」待定 | go-zero `core/mapping/unmarshaler.go`（`UnmarshalJsonReader` 的 coercion 与必填校验规则）—— ⚠️ **本条 Go 侧行号本轮未核** ⇒ 落码前请回真源逐条核 | `service/users/users-common/src/main/java/com/rag/users/common/http/GoStyleCoercion.java`（**通用版**，G4 写权）· 另 5 域用**本域私有**变体 | **L1 源码**（规则内容）＋ **L3 活体**（本轮实测 8 个 api 域的 `WebMvcConfig` 注册了哪个变体 ⇒ **落点口径已订正**，见 §6.4.1） | 两侧都应是 **Y** = 「**通用版的规则集合 = Go 侧 `UnmarshalJsonReader` 的等价规则**」⇒ 是否允许外域复用，由**规则内容**决定，不由「通用版」这个文件名决定 | `service/users/users-common` ⇒ **被 6 个外域 api 引用** ⇒ 编译面大 | 🟡 不阻塞 |
-| **6** | `DRIFT-USERRPC-V-002` | DDL：`users_user.status` 的 **NOT NULL** 两侧不同（Go `status bigint DEFAULT 0` **可空** / RAG `status BIGINT NOT NULL DEFAULT 0`）⇒ RAG 侧任何写 NULL 的代码在 PG 层被拒 | Go `service/user/user/rpc/internal/model/data_model.go:11` ⇒ `Status int64 \`gorm:"column:status;default:0"\``（**值类型 · 非指针**）⇒ ✅ **2026-10-27 13:2x 已核到该行**（原「本条 Go 侧行号本轮未核」的标记**撤销**）⇒ ⇒ **更强的推论**：GORM 对**值类型**字段写库时**恒写 0**（不会写 NULL）⇒ ⇒ **Go 侧这一列实际上永远不出现 NULL** | `service/users/users-common/src/main/resources/db/01_create_user.sql:39` ⇒ `status BIGINT NOT NULL DEFAULT 0` | **L2 真库实证**（`information_schema` 对照）<br>＋ **L1 逐层复核**（2026-10-27 · GORM `field.go:616-622` ＋ `database/sql/convert.go:431-435`） | ⛔ **2026-10-27 订正：原建议修法已被本域逐层证据链推翻 ⇒ 本单不需要 G4 落码。**<br>**原写**「两侧都应是 Y =「`users_user.status` **可空**」」⇒ **错的** ⇒ **放开可空会制造新漂移**（RAG 侧 `callSettersOnNulls=false` ⇒ NULL 时跳过 setter ⇒ 读出 **null** ≠ Go 的 **0** ⇒ 方向相反）。<br>⇒ **正确口径 = 两侧都应是 Y =「维持 RAG NOT NULL」**（Go 读 NULL ⇒ **0** 且不报错；RAG 读不到 NULL ⇒ 也是 0 ⇒ **可观察结果相同**）⇒ 本条定性为「**DDL 层差异 · 行为层零差异**」⇒ 落点 `users-common` **无动作**。<br>⇒ 剩下只差「**销号签字**」，而 `docs/Intentional_Deviations/**` **不在 G1 写权面** ⇒ **请 G4 / 整合者确认销号口径**；逐层证据链见 [`user/rpc.md` 的 V-002 订正块](user/rpc.md)<br>🔴 **2026-10-27 13:2x · G4 回执 ⑧ 说「等 G1 的 #6 第 1 步（让 `admin-rpc` 的 `UserEntity.status` 能表达 NULL）」⇒ ⇒ 本条已由本域订正 ⇒ ⇒ 「第 1 步」【取消】⇒ ⇒ **G4 不需要为本单落 DDL 那步**（落 DDL = 把 RAG 改成可空 = 制造上面那条新漂移）⇒ ⇒ **落点只剩签字档** | `service/users/users-common` ⇒ **6 个外域 api 引用**（但 **本单落点无动作 ⇒ 实际影响面 = 0**） | 🟡 不阻塞（**原写「须与 users 域同一次提交」已作废** ⇒ 无需任何组件改动） |
+| **6** | `DRIFT-USERRPC-V-002` | DDL：`users_user.status` 的 **NOT NULL** 两侧不同（Go `status bigint DEFAULT 0` **可空** / RAG `status BIGINT NOT NULL DEFAULT 0`）⇒ RAG 侧任何写 NULL 的代码在 PG 层被拒 | Go `service/user/user/rpc/internal/model/data_model.go:11` ⇒ `Status int64 \`gorm:"column:status;default:0"\``（**值类型 · 非指针**）⇒ ✅ **2026-10-27 13:2x 已核到该行**（原「本条 Go 侧行号本轮未核」的标记**撤销**）⇒ ⇒ **更强的推论**：GORM 对**值类型**字段写库时**恒写 0**（不会写 NULL）⇒ ⇒ **Go 侧这一列实际上永远不出现 NULL** | `service/users/users-common/src/main/resources/db/01_create_user.sql:39` ⇒ `status BIGINT NOT NULL DEFAULT 0` | **L2 真库实证**（`information_schema` 对照）<br>＋ **L1 逐层复核**（2026-10-27 · GORM `field.go:616-622` ＋ `database/sql/convert.go:431-435`） | ⛔ **2026-10-27 订正：原建议修法已被本域逐层证据链推翻 ⇒ 本单不需要 G4 落码。**<br>**原写**「两侧都应是 Y =「`users_user.status` **可空**」」⇒ **错的** ⇒ **放开可空会制造新漂移**（RAG 侧 `callSettersOnNulls=false` ⇒ NULL 时跳过 setter ⇒ 读出 **null** ≠ Go 的 **0** ⇒ 方向相反）。<br>⇒ **正确口径 = 两侧都应是 Y =「维持 RAG NOT NULL」**（Go 读 NULL ⇒ **0** 且不报错；RAG 读不到 NULL ⇒ 也是 0 ⇒ **可观察结果相同**）⇒ 本条定性为「**DDL 层差异 · 行为层零差异**」⇒ 落点 `users-common` **无动作**。<br>⇒ 剩下只差「**销号签字**」，而 `docs/Intentional_Deviations/**` **不在 G1 写权面** ⇒ **请 G4 / 合并收口执行者确认销号口径**；逐层证据链见 [`user/rpc.md` 的 V-002 订正块](user/rpc.md)<br>🔴 **2026-10-27 13:2x · G4 回执 ⑧ 说「等 G1 的 #6 第 1 步（让 `admin-rpc` 的 `UserEntity.status` 能表达 NULL）」⇒ ⇒ 本条已由本域订正 ⇒ ⇒ 「第 1 步」【取消】⇒ ⇒ **G4 不需要为本单落 DDL 那步**（落 DDL = 把 RAG 改成可空 = 制造上面那条新漂移）⇒ ⇒ **落点只剩签字档** | `service/users/users-common` ⇒ **6 个外域 api 引用**（但 **本单落点无动作 ⇒ 实际影响面 = 0**） | 🟡 不阻塞（**原写「须与 users 域同一次提交」已作废** ⇒ 无需任何组件改动） |
 | **7** | `DRIFT-USERAPI-014` 的**跨域推广** | `RedisDisconnectedBehaviorConfig`（Redis 断连 ⇒ Lettuce 排队 ⇒ 撞 3s 预算 ⇒ 503；Go 是 200 fail-open）**只装在 `user-api`** ⇒ 其余 api 服务**有同款漂移** | `service/common/middleware/checkblacklistmiddleware.go:35-36`（Go 侧 Redis 断连 ⇒ fail-open 200）· ⚠️ **本条 Go 侧行号本轮未核** | `service/users/user/user-api/**`（**域侧**，G1 可改）⇒ 但**同款机制应在共享层统一** ⇒ 落点 `service/common` | **L3 双侧活体**（域台账 2026-10-24 第九轮：真进程+真 PG+真 Redis ⇒ 已修 `DRIFT-USERAPI-014` 本体） | 两侧都应是 **Y** = 「**Redis 断连 ⇒ fail-open（不排队等重连）**」⇒ **配置上移到 `service/common`** ⇒ 一次修，全域同向 | `service/common` ⇒ 编译面 16 个组件 | 🟡 不阻塞 |
 
 > ⚠️ **派单纪律**：① **缺项不进排期**（本表 7 项齐了才够）② **编号必须带全前缀**（`UNRESOLVED-ARPC-002` ≠ `DRIFT-ARPC-002`）③
@@ -123,7 +123,7 @@
 - [ ] §1 的每一条**重新核对状态**并写回（带核对日期）
 - [ ] §3 的域侧修法**落码 + 守门**（含变异验证）
 - [ ] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）
-- [ ] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
+- [ ] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由合并收口执行者统一更新）
 
 ---
 
@@ -369,13 +369,13 @@ follow-api: Caused by: java.lang.IllegalStateException: Can't connect to channel
 | **本域复跑** | 另编一份二进制（`CGO_ENABLED=0 go build`，**不动 G2 的文件**）+ 自己的端口 **25790** ⇒ 三腿全中：<br>① 有效 token `/fast` ⇒ HTTP **200**；`A deadline_set=**false** claim_userId=12345` · `B deadline_set=**true** remaining=3s`<br>② 有效 token `/slow`（handler 睡 4s）⇒ **HTTP 503 @ 3.002s**（与 Go `http.go:88` 逐字一致）<br>③ **非法 token** ⇒ **HTTP 401 + 空 body（0 字节）**，且 **A/B/HANDLER 一个都没打印** ⇒ 🔴 **决定性反证**：Authorize 在所有 user middleware 之前 ⇒ **验签在 3s 预算之外** |
 | ⚠️ **腿③ 才是判据** | 腿①②只是正证；腿③ 是**负证据**（「观测点 A 没打印」⇒ Authorize 更靠外）⇒ **比正证据更硬** |
 | 对本 lane 的价值 | `user-api` / `admin-api` / `follow-api` 的 Go 侧结论**同构**（三个 api 的 `xxxcenter.go` 都是 `DisableNativeRestTimeout` + `server.Use(observability.NewHTTPMiddleware(...))`）⇒ ⇒ **Go 侧证据由 L1 升到 L4** ⇒ §2 的 A1 轴（①③⑤）与三份域台账的实施记录（元信息行）同步改写 |
-| ⚠️ **诚实边界** | ① **两次独立运行**（Go 腿与 RAG 腿不在同一次编排里）⇒ 比的是**属性**（验签是否计入 3s 预算），**不是逐字节 diff**；② **探针落在 `/tmp`（易失）** ⇒ **落仓 `tools/difftest/` 需整合者拍板**（`tools/` 不在 G1 白名单）⇒ **已登记待办**；⚠️ **但源码已在本节 §8.4.1 抄了一份保全副本**（域台账在 G1 写权内 ⇒ 不会被 `/tmp` 清空带走）③ 探针的 `Timeout` 走 go-zero struct tag 默认值 3000ms（真源 api 的 yaml 同样不写 `Timeout`）⇒ 口径与真源一致 |
+| ⚠️ **诚实边界** | ① **两次独立运行**（Go 腿与 RAG 腿不在同一次编排里）⇒ 比的是**属性**（验签是否计入 3s 预算），**不是逐字节 diff**；② **探针落在 `/tmp`（易失）** ⇒ **落仓 `tools/difftest/` 需合并收口执行者拍板**（`tools/` 不在 G1 白名单）⇒ **已登记待办**；⚠️ **但源码已在本节 §8.4.1 抄了一份保全副本**（域台账在 G1 写权内 ⇒ 不会被 `/tmp` 清空带走）③ 探针的 `Timeout` 走 go-zero struct tag 默认值 3000ms（真源 api 的 yaml 同样不写 `Timeout`）⇒ 口径与真源一致 |
 
 #### 8.4.1 📦 **探针源码保全副本**（2026-10-27 · 防 `/tmp` 一清就没了）
 
-> ⚠️ **为什么抄在这里**：`tools/difftest/` 是**无人拥有 ⇒ 整合者**（G1 不写）⇒ 在整合者落仓前，
+> ⚠️ **为什么抄在这里**：`tools/difftest/` 是**无人拥有 ⇒ 合并收口执行者**（G1 不写）⇒ 在合并收口执行者落仓前，
 > 探针**只活在 `/tmp`** ⇒ **易失**（机器重启即没）⇒ **工件有丢失风险**。
-> ⇒ 本节把**探针源码原文**抄进**域台账**（`docs/DRIFT/users/**` = **G1 写权内**）⇒ **保住这份工件**，等整合者落仓时可直接取用。
+> ⇒ 本节把**探针源码原文**抄进**域台账**（`docs/DRIFT/users/**` = **G1 写权内**）⇒ **保住这份工件**，等合并收口执行者落仓时可直接取用。
 > ⇒ 原文出自 **G2 建的** `/tmp/goprobe/probejwt/main.go`（**本域只复跑、未改动一个字节**）；下面的副本与 `/tmp` 现存副本**逐字一致**。
 >
 > **取用方式**（G2 已确认）：**不必整仓复制** —— 直接复用 `/tmp/goprobe`（`go build` 到自己目录 ＋ 自己端口）即可；
@@ -545,7 +545,7 @@ Log:
 | `service/users/users-common/**` | 🔴 **只读** | ✅ **可写（唯一）** |
 | `docs/DRIFT/users/**` · `docs/DRIFT/follow/**` | ✅ 可写 | 🔴 只读 |
 | `docs/DRIFT/global/vs-common.md` | 🔴 只读 | ✅ 可写 |
-| `AGENTS.md` · 三个 `_INDEX.md` · `_MANIFEST.json` · `docs/DRIFT/_cross/**` · `docs/Worktree.md` · `docs/DRIFT/global/{_README,common-tails,cross-domain,cycle-deps}.md` | 🔴 **无人拥有** | 🔴 **无人拥有** ⇒ **合并后由整合者统一更新** |
+| `AGENTS.md` · 三个 `_INDEX.md` · `_MANIFEST.json` · `docs/DRIFT/_cross/**` · `docs/Worktree.md` · `docs/DRIFT/global/{_README,common-tails,cross-domain,cycle-deps}.md` | 🔴 **无人拥有** | 🔴 **无人拥有** ⇒ **合并后由合并收口执行者统一更新** |
 
 > ⚠️ **`users-common` 的物理位置在 `service/users/` 下面，但写权归 G4** —— §5.3f：**共享判据 = 依赖度数，不是目录位置** ⇒
 > 「目录在我名下」≠「我能写」。
@@ -555,7 +555,7 @@ Log:
 > §5.3f 那句「3 个 users 专用类（`ErrorCode` · `PasswordUtil` · `SchemaInitializer`）留 users 域」
 > **在本面上不适用** ⇒ 🔴 **G1 一律不改 `users-common` 里的任何类（含这 3 个）** ⇒ 要改就**走派单**。
 > ⚠️ 该裁定**尚未回写 `AGENTS.md` §5.3f**（共享面无人拥有 ＋ 余量 82 B ⇒ 域侧不许写）
-> ⇒ **待整合者合并时统一订正** ⇒ 在那之前，**以守门口径为准**。
+> ⇒ **待合并收口执行者统一订正时一并处理** ⇒ 在那之前，**以守门口径为准**。
 
 ### 6.2 G1 → G4：派单（**反馈单 7 项**，缺项不进排期）
 
@@ -577,7 +577,7 @@ Log:
 1. **实时**：`session send` 给 G4 会话；
 2. **正式**：按各自写权写台账 —— G1 写**本域** `docs/DRIFT/users/vs-common.md`（本节 §4）＋
    [`docs/DRIFT/follow/vs-common.md`](../follow/vs-common.md)；G4 写 `docs/DRIFT/global/vs-common.md`
-   ⇒ **合并后整合者才看得见对方写了什么**。
+   ⇒ **合并后合并收口执行者才看得见对方写了什么**。
 
 **⚠️ 编号纪律（派单必须带全前缀）**：`UNRESOLVED-ARPC-002`（= E38②）**≠** `DRIFT-ARPC-002`
 （`UpdateUserResp.success` 的 wire 差异，已修）⇒ 只写「ARPC-002」会让 G4 **销错账**。
@@ -597,8 +597,8 @@ G4 落码 ⇒ 共享层行为变 ⇒ **G1 这域的 A1~A9 结论要复核**（�
 | `UNRESOLVED-ARPC-002`（= **E38②**） | 超时是否 min 客户端 deadline | `service/common`（`RpcInterceptor` 的 `effectiveTimeoutMs`） | ✅ **① 已闭环**（2026-10-26 落地）· ⏸ **② 未做**（架构级，已另立项）⇒ **本轮不派落码** | ✅ ① 双侧活体一致（探针 `client_deadline_ctx`）· ⏸ ② 等立项 |
 | ~~`UNRESOLVED-USERSCOMMON-003`~~ | ~~`GoStyleCoercion` 规则是否波及非 users 域~~ | — | ✅ **已关闭（2026-10-27）** ⇒ **从派单表撤下** | ✅ **问法订正 ⇒ 前提不成立 ⇒ 无漂移**（`GoStyleCoercion` **刻意不做 `@Configuration`** ⇒ 各 api 各自注册 customizer ⇒ **进程内作用域** ⇒ 无跨域全局副作用；hot-api / task-api 未注册**不是漏**）⇒ 逐条证据见 [`users/common.md` 的 2026-10-27 订正块](common.md)<br>⚠️ **原派单拆的两半**：①「哪个域注册哪个变体」= 域侧自修 ⇒ **已结清**（8 个 api 域注册方已清点）· ②「通用版规则内容」= G4 ⇒ **仍开放**，但它**不是本条**（那是规则内容本身，见上方 §5 表第 5 行） |
 | `DRIFT-ADMINAPI-007` | 503 响应 `Content-Type` charset 分号后空格残差 | `service/common` | 🔴 **G4** | 🟡 半修（`nosniff` 已落地 ⇒ 原条消失）⇒ **需重开一条** |
-| 🆕 **`DRIFT-USERAPI-009 §7 补充`** | **MaxBytes 相对 observability(3s) 的位置**：Go 在预算**之外**，RAG 在**之内** ⇒ 超限 413 **计入** access log/span/指标（Go 不计） | `service/common`（`GoStyleMaxBytesFilter` 的 `@Order`） | 🔴 **G4**（代码）· 🟡 **整合者**（签字档） | 🔴 **未签字**（台账建议**并入 `SD-USERAPI-002` 的范围说明** ⇒ 签字比改码便宜）⇒ ⚠️ **见 §6.4.2 的槽位联动警告** |
-| 🆕 **Go 腿 JWT 预算探针落仓** | §8.4 的探针（`/tmp/goprobe/probejwt/main.go` · G2 建、本域独立复跑）**只在 `/tmp`** ⇒ 易失 ⇒ 重跑要重新搭一遍 | `tools/difftest/`（**新脚本**） | 🔴 **无人拥有 ⇒ 整合者**（`tools/difftest/README.md` 在共享面清单里；**新脚本目录级不属任何 lane** ⇒ 见 `check-wave-lane-ownership.py` 的 `SHARED` 列表） | 🔴 **待整合者拍板**（**G1 不写 `tools/`**）⇒ 建议内容：`probe-jwt-budget/`（Go 工程副本的取用方式 ＋ 三腿期望输出 ＋ 清理口径）⇒ ⚠️ **落仓前必须解决「真源整仓复制到 `/tmp`」的体积问题**（本轮探针靠复制整仓才能 import 真源自己的 `observability`） |
+| 🆕 **`DRIFT-USERAPI-009 §7 补充`** | **MaxBytes 相对 observability(3s) 的位置**：Go 在预算**之外**，RAG 在**之内** ⇒ 超限 413 **计入** access log/span/指标（Go 不计） | `service/common`（`GoStyleMaxBytesFilter` 的 `@Order`） | 🔴 **G4**（代码）· 🟡 **合并收口执行者**（签字档） | 🔴 **未签字**（台账建议**并入 `SD-USERAPI-002` 的范围说明** ⇒ 签字比改码便宜）⇒ ⚠️ **见 §6.4.2 的槽位联动警告** |
+| 🆕 **Go 腿 JWT 预算探针落仓** | §8.4 的探针（`/tmp/goprobe/probejwt/main.go` · G2 建、本域独立复跑）**只在 `/tmp`** ⇒ 易失 ⇒ 重跑要重新搭一遍 | `tools/difftest/`（**新脚本**） | 🔴 **无人拥有 ⇒ 合并收口执行者**（`tools/difftest/README.md` 在共享面清单里；**新脚本目录级不属任何 lane** ⇒ 见 `check-wave-lane-ownership.py` 的 `SHARED` 列表） | 🔴 **待合并收口执行者拍板**（**G1 不写 `tools/`**）⇒ 建议内容：`probe-jwt-budget/`（Go 工程副本的取用方式 ＋ 三腿期望输出 ＋ 清理口径）⇒ ⚠️ **落仓前必须解决「真源整仓复制到 `/tmp`」的体积问题**（本轮探针靠复制整仓才能 import 真源自己的 `observability`） |
 | 🆕 **Redis 断连行为（`REJECT_COMMANDS`）的共享层收编** | **五个**用 Redis 的组件的 Lettuce **断连**行为必须 `REJECT_COMMANDS`（否则命令被排队挂到 `commandTimeout` 3s ⇒ **api 侧**撞 HTTP 3s 预算 ⇒ **503**（Go 是 fail-open **200**）；**rpc 侧**撞 `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ 客户端看到 **1015**（Go 是**快速失败** ⇒ `INTERNAL「注销失败,Redis写入异常」`））⇒ 修法是把 `LettuceClientOptionsBuilderCustomizer` 设成 `REJECT_COMMANDS` | 🟢 **域侧已自修**（**五份域内副本**：`user-api`（原有）＋ `admin-api` ＋ `follow-api` ＋ **`user-rpc`** ＋ **`admin-rpc`**，后两份是 2026-10-27 本轮补）<br>🔴 **共享层收编** = 把五份并成一个 `service/common` 里的自动配置 | 🟢 **域侧**（已完成）<br>🔴 **G4**（**收编**） | 🟢 **域侧已闭环**（2026-10-27 · `admin-api` 落 `DRIFT-ADMINAPI-012` / `follow-api` 落 `DRIFT-FOLLOW-012` · 修前 3013/3019ms ⇒ 修后 1/0ms · 变异 5/5 变红；**本轮补 `user-rpc`（`DRIFT-USERRPC-V-014` ②）/ `admin-rpc`（`DRIFT-ARPC-013`）** ⇒ 两侧 rpc 口径一致）<br>🟢 **共享层已落码**（G4 commit `1fb26b2` ＋ `2f12236` · `GoStyleRedisClientAutoConfiguration` 走 `AutoConfiguration.imports`）⇒ **待 G4 分支合入本树后，删除这五份域内副本**（`user-api` / `admin-api` / `follow-api` / `user-rpc` / `admin-rpc`）⇒ **删除前置 ＝ 共享层那份先合进各域的树**（否则双份配置 ⇒ 两处都要维护）<br>🔴 **2026-10-27 升级危害等级**（据 G3 提供的信息）：G4 那份 `GoStyleRedisClientAutoConfiguration` 的 customizer 带 **`@ConditionalOnMissingBean`** ⇒ **域内副本在 ⇒ 共享层那份整个不创建** ⇒ ⇒ **不删副本 ⇒ 收编根本没发生**（不是「重复维护」这种小问题），而且**共享层后续任何改动对我域静默不生效** ⇒ ⇒ **删除动作是收编的「必要条件」而非「收尾清理」** ⇒ 收编完成时必须**复验**：域内副本删掉后，**共享层那份是否真的生效**（`REJECT_COMMANDS` 仍在客户端 `ClientOptions` 上）。<br>⚠️ **rpc 侧与 api 侧后果不同**（503 vs RPC 撞超时）⇒ **共享层收编时不要只按 api 侧的现象判「已修」** ⇒ 两侧各自的行为要分别验 |
 
 > ⚠️ **状态带核对日期**（AGENTS.md §6）⇒ 复核后就地更新 + 改日期。
@@ -675,7 +675,7 @@ G4 落码 ⇒ 共享层行为变 ⇒ **G1 这域的 A1~A9 结论要复核**（�
 ⇒ ⇒ **`GoStylePathNormalizingFilter`（+2）由 G4 的 `9690b04` 引入，而 `9690b04` 不在 `do-my-own-gh` ⇒ 我树里没有这个文件** ⇒ ⇒ **「6 vs 7」的差异是代码态差，不是我漏数**（G4 说我「漏了 1 个」⇒ 指的是**合入主干后我域会面对 7 个**⇒ ⇒ **我域的「重排清单」必须把 +2 一并算进去**）。
 ⇒ ⇒ ⚠️ **跨树行号会漂（实测差 20 行）** ⇒ 凡引他树 `文件:行号` ⇒ **必须同写该树的 commit id**（`HttpMiddleware.java:324` 只在 G4 的 `cd893d1` 上有效）。
 ⇒ ⇒ ✅ **G4 的「+7 = 3s 预算起点」成立**（两侧独立核到 `begin` / `clear` **都在 `HttpMiddlewareFilter` 的链内**）⇒ ⇒ **域侧 +6 必须 < +7** 的推导**不受 +2 影响**（+2 在区间外）⇒ ⇒ **我域的推导仍成立**。
-⇒ ⇒ ✅ **「`MaxBytes`(+8) 是唯一排在 +7 之后的共享层 Filter」两侧都成立**（+2 在前，其余逐条同值）⇒ ⇒ 这正是「RAG 多记 413」的机制体现 ⇒ ⇒ **要把它挪到 +7 之前，必须同一次提交改：共享层 `@Order` ＋ G4 的槽位快照守门 ＋ 台账登记理由**（否则 G4 的 `SharedFilterOrderSnapshotGateTest` 必红）⇒ ⇒ **签字比改码便宜 ⇒ 优先走签字**（落点 = 签字档 ⇒ **整合者写权面**）。
+⇒ ⇒ ✅ **「`MaxBytes`(+8) 是唯一排在 +7 之后的共享层 Filter」两侧都成立**（+2 在前，其余逐条同值）⇒ ⇒ 这正是「RAG 多记 413」的机制体现 ⇒ ⇒ **要把它挪到 +7 之前，必须同一次提交改：共享层 `@Order` ＋ G4 的槽位快照守门 ＋ 台账登记理由**（否则 G4 的 `SharedFilterOrderSnapshotGateTest` 必红）⇒ ⇒ **签字比改码便宜 ⇒ 优先走签字**（落点 = 签字档 ⇒ **合并收口执行者写权面**）。
 
 ⇒ 域侧的 `GoStyleJwtAuthFilter`（user-api）落在 **+6**，靠两条硬约束夹出来：
 **必须 < +7**（否则验签仍被 3s 预算覆盖 ⇒ `DRIFT-USERAPI-009②` 退回 OPEN）
@@ -1024,7 +1024,7 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 
 > 🟢 **2026-10-27 订正**：#18~#20 这 **3 份「无人拥有」** 已由 **G4 认领并修复**
 > （随 `6375faf` 合入我树 ⇒ 合并态我树这 3 份**零命中**）
-> ⇒ ⇒ **「待整合者认领」这条待办【关闭】** ⇒ ⇒ §20.2 合并规则里
+> ⇒ ⇒ **「待合并收口执行者认领」这条待办【关闭】** ⇒ ⇒ §20.2 合并规则里
 > 「合并后目标 = 7 份文件命中」**已过期** ⇒ 实际目标 = **只剩 6 处故意（4 份文件）**。
 
 ### 20.2 ⇒ ⇒ **合并规则（写死，别再逐次口头对）**
@@ -1033,7 +1033,7 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
    ⚠️ **份数是加出来的，别拍脑袋**：**13 真损坏 ＋ 4 份故意 ＋ 3 份无人拥有 = 20 份** ⇒ 与全仓扫描的 20 份**闭合**（加不出来就说明漏了或多数了 ⇒ 这是这张表的**自校验**）。
    ⇒ **处数同样闭合**：13 份真损坏 **34 处**（G4 4 + G2 9 + G3 13 + G1 8）＋ 故意 **6 处** ＋ 无人拥有 **11 处** = **51 处** ✅ 与全仓扫描的 51 处一致。
 2. **6 处是「故意」**（#14~#17，共 **4 份文件**）⇒ ⇒ **一个字都不动** ⇒ ⇒ **「全仓 U+FFFD 归零」不是合法目标**。
-3. **3 份是「无人拥有」**（#18~#20）⇒ ⇒ **不在任何 lane 的写权面** ⇒ ⇒ **我域不代改** ⇒ ⇒ 已登记，请整合者认领。
+3. **3 份是「无人拥有」**（#18~#20）⇒ ⇒ **不在任何 lane 的写权面** ⇒ ⇒ **我域不代改** ⇒ ⇒ 已登记，请合并收口执行者认领。
 4. ⚠️ **G2 的清单只覆盖它自己的 3 份** ⇒ ⇒ **我域的 3 份（#11~#13）此前不在任何人的清单里** ⇒ ⇒ 本轮**主动补进**（否则合并时按主干取 ⇒ 我域那 3 处坏字符回流）。
 5. ⇒ **合并后必须再跑一次字节级扫描**（不是 `grep` —— 见 §19 的判据纪律）⇒ ⇒ **目标 = 只剩 6 处故意（4 份文件）＋ 3 份待认领 = 7 份文件命中**。
 
@@ -1041,7 +1041,7 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 
 | 树 | 命中份数 | 说明 |
 |---|---|---|
-| **主干 `do-my-own-gh`** | **20** | **一份都没修**（整合者还没合） |
+| **主干 `do-my-own-gh`** | **20** | **一份都没修**（合并收口那一步还没做） |
 | **我树 G1** | 20 | 我域 3 处真损坏已清零（+3 份台账的**故意引述**）⇒ **数值与主干同、构成不同** ⚠️ ⇒ **命中数相同 ≠ 同一批文件** ⇒ **不能用「份数」当判据，要用「文件清单」** |
 | **G2 树** | 15 | 它域 3 份已清零（+ `service/common` 2 份因**合并了 G4 分支**而清零） |
 | **G3 树** | 13 | 它域 5 份已清零 |
@@ -1071,12 +1071,12 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 | 归属 | 命中 | 分布 |
 |---|---|---|
 | ✅ **我域写权面** | **38 行 / 15 份文件** | `docs/DRIFT/users/user/rpc.md` **14** · `service/users/user/user-rpc/src/test/java/…/UserRpcNacosGroupTest.java` **5** · `…/UserRpcRedisTimeoutConfigTest.java` **3** · `…/UserRpcGrpcInterceptorWiringTest.java` **3** · `docs/Pitfalls/users/_shared.md` **2** · `service/users/user/user-rpc/src/main/resources/application.yaml` **3**（自身）· `docs/DRIFT/users/vs-common.md` **1** · `docs/DRIFT/users/_shared.md` **1** · `…/UserRpcPrimaryKeySourceParityTest.java` **1** · `…/UserRpcProperties.java` **1** · `…/NacosRegistration.java` **1** · `…/UserRpcApplication.java` **1** · `service/users/user/user-api/src/main/resources/application.yml` **1**（注释）· `…/UserApiProperties.java` **1** · `service/users/admin/admin-rpc/src/main/resources/application.yml` **1**（注释）· `…/AdminRpcProperties.java` **1** |
-| 🔴 **无人拥有（整合者写权面）** | **3 处** | `docs/DRIFT/_cross/open-items.md:80` · `docs/FileTree/like/rpc.md:20` · `tools/difftest/run.sh:184`（注释）⇒ ⇒ **我改不了** |
+| 🔴 **无人拥有（合并收口执行者写权面）** | **3 处** | `docs/DRIFT/_cross/open-items.md:80` · `docs/FileTree/like/rpc.md:20` · `tools/difftest/run.sh:184`（注释）⇒ ⇒ **我改不了** |
 | ✅ **不受影响** | 2 个脚本 | `tools/difftest/check-grpc-runtime-classpath.py:140` · `check-tomcat-limits.py:174` ⇒ 两者都是 `for fn in ("application.yml", "application.yaml")` ⇒ **两个扩展名都认** ⇒ 改名不影响它们 |
 
 ### 21.3 ⇒ ⇒ **本轮决定：不改名，改为在台账登记**（三条独立理由，任一条都足够）
 
-1. **成本 ≫ 收益**：收益 = 消除**一个**命名误判点；成本 = **≈ 42 处**引用同步（其中 **3 处我改不了**）⇒ ⇒ **跨 lane 协调成本**（要请整合者同步 3 处 + 我自己改 38 行）⇒ ⇒ **与 G2 的「顺手最省事」估计差两个数量级**。
+1. **成本 ≫ 收益**：收益 = 消除**一个**命名误判点；成本 = **≈ 42 处**引用同步（其中 **3 处我改不了**）⇒ ⇒ **跨 lane 协调成本**（要请合并收口执行者同步 3 处 + 我自己改 38 行）⇒ ⇒ **与 G2 的「顺手最省事」估计差两个数量级**。
 2. 🔴 **会留下我无法同步的不一致**：`docs/Pitfalls/users/_shared.md` 的 **2 处**引用 **不在任何 lane 白名单**（写权守门实测：G1 白名单 = `service/users/**`（除 `users-common`）＋ `service/follow/**` ＋ `docs/DRIFT/{users,follow}/**`）⇒ ⇒ **改名后这 2 处会变成过期引用，而我没有写权去改** ⇒ ⇒ **等于用「消除误判」换「引入新的不一致」** ⇒ ⇒ 不可接受。
 3. ⚠️ **改名对 Go 对齐零收益**：AGENTS.md §三规定「差异只允许出现在**表达层**」⇒ ⇒ 文件扩展名是**纯表达层** ⇒ ⇒ 改它**不改善任何一条语义漂移** ⇒ ⇒ 而本项目对「行为层零变化」的改动一律要求配回归 ⇒ ⇒ **窗口期内还不能跑回归** ⇒ ⇒ 现在改 = **既无收益、又欠一次未验证的回归**。
 
@@ -1084,7 +1084,7 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 
 - ① 将来某个工具/脚本**按扩展名做单文件假设**（只找 `application.yml`、不认 `application.yaml`）⇒ ⇒ **那时才必须统一**（当前两个脚本都两个都认 ✅）。
 - ② 后人**再犯一次**「同域两种扩展名 ⇒ 会不会互相覆盖」的误判（G2 本轮就差点误判 ⇒ **说明这个误判是真实存在的**）⇒ ⇒ **那时一次性改完 42 处**。
-- ③ 若 §21.2 里那 **3 处无人拥有的引用**被整合者先改掉 ⇒ ⇒ 成本降到 38 处 ⇒ ⇒ **那时再评估**。
+- ③ 若 §21.2 里那 **3 处无人拥有的引用**被合并收口执行者先改掉 ⇒ ⇒ 成本降到 38 处 ⇒ ⇒ **那时再评估**。
 
 ### 21.5 🟡 **G2 ④ 的联动登记**：共享层若改命令超时判据 ⇒ **两域必须一起改**
 
@@ -1275,7 +1275,7 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 
 ## 15. 🆕 **口径坑：探针源文件删了，`surefire` 报告还在 ⇒ XML 求和比 maven 多算**（2026-10-27 · G1 lane）
 
-> ⚠️ **本条建议归档到 `docs/Pitfalls/`** —— 但 `docs/Pitfalls/**` **不属任何 lane 的写权面**（`check-wave-lane-ownership.py` 的白名单里只有 `docs/DRIFT/<域>/**`）⇒ ⇒ **请整合者归档**；此处先留在本域台账。
+> ⚠️ **本条建议归档到 `docs/Pitfalls/`** —— 但 `docs/Pitfalls/**` **不属任何 lane 的写权面**（`check-wave-lane-ownership.py` 的白名单里只有 `docs/DRIFT/<域>/**`）⇒ ⇒ **请合并收口执行者归档**；此处先留在本域台账。
 
 ### 15.1 现象
 
@@ -1331,7 +1331,7 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 | **5** | **`admin-rpc`** | **第十四轮 `DRIFT-ARPC-013` ②** |
 
 ⇒ ⇒ 第 4、5 份正是**rpc 侧同款形态**（断连排队 3s ≫ `rpc-timeout: 2s` ⇒ **RPC 先超时 ⇒ 客户端 1015**）⇒ ⇒ **它们是收编的原始动机之一**。
-⇒ ⇒ **只删 3 份 ⇒ `user-rpc` / `admin-rpc` 仍被遮蔽 ⇒ 共享层对这两个域仍静默不生效** ⇒ **已回信要求 G4 把「3 份」改成「5 份」再转整合者**。
+⇒ ⇒ **只删 3 份 ⇒ `user-rpc` / `admin-rpc` 仍被遮蔽 ⇒ 共享层对这两个域仍静默不生效** ⇒ **已回信要求 G4 把「3 份」改成「5 份」再转合并收口执行者**。
 
 ### 16.2 🔴 **删除的前置判定：本轮【不能】执行**（不是保守，是前置未满足）
 
@@ -1345,7 +1345,7 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 - **rpc 侧**：断连排队 3s ≫ `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ **客户端 1015**（Go 是快速失败 ⇒ `INTERNAL`）。
 
 ⇒ ⇒ **我域 5 份 FastFail 守门会立刻变红**（它们断言的正是「立即失败」那一半）⇒ ⇒ **删除 + 守门重写必须同一次提交**。
-⇒ ⇒ **正确顺序**：**整合者把 G4 分支合进 `do-my-own-gh` ⇒ 我把主干并回我分支 ⇒ 一次性执行**（配方见 §12.2）。
+⇒ ⇒ **正确顺序**：**合并收口执行者把 G4 分支合进 `do-my-own-gh` ⇒ 我把主干并回我分支 ⇒ 一次性执行**（配方见 §12.2）。
 
 ### 16.3 🟡 **A2 邻接：`@GrpcClient` 出向调用面**（G4 逐个 rpc 计数 ＋ 六种出向方式交叉核）
 
@@ -1541,7 +1541,7 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 
 - 预算的 `begin` / `clear` **都在 `HttpMiddlewareFilter` 的链内**（我树 `HttpMiddleware.java:304` / `:336`；G4 树 `:324` / `:356`）⇒ ⇒ 排在 `HttpMiddlewareFilter` **之后**的 Filter 都会**落进 3s 预算内** ⇒ ⇒ **「域侧 +6 必须 < +7」成立**。
 - ⚠️ **跨树行号差 20 行** ⇒ ⇒ **凡引他树 `文件:行号` 必须同写该树的 commit id**（`HttpMiddleware.java:324` 只在 G4 的 `cd893d1` 上有效）⇒ **本条已按此纪律写进 §6.4.2 的双代码态表**。
-- ✅ **「`MaxBytes`(+8) 是唯一排在 +7 之后的共享层 Filter」两侧都成立** ⇒ ⇒ **要挪它，必须同一次提交改：共享层 `@Order` ＋ G4 的槽位快照守门快照 ＋ 台账登记理由** ⇒ ⇒ **签字比改码便宜 ⇒ 优先走签字**（落点 = 签字档 ⇒ **整合者写权面**）。
+- ✅ **「`MaxBytes`(+8) 是唯一排在 +7 之后的共享层 Filter」两侧都成立** ⇒ ⇒ **要挪它，必须同一次提交改：共享层 `@Order` ＋ G4 的槽位快照守门快照 ＋ 台账登记理由** ⇒ ⇒ **签字比改码便宜 ⇒ 优先走签字**（落点 = 签字档 ⇒ **合并收口执行者写权面**）。
 
 ### 19.3 🔴 **订正我上一轮的一条推断：「G4 正在跑第十二次全量」⇒ 不成立**
 
@@ -1555,8 +1555,8 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 - G4 回执 ⑧：「等你的 **#6 第 1 步**（`admin-rpc` 的 `UserEntity.status` 能表达 NULL）⇒ 之后我落 DDL 那步 ＋ 跑全量 ＋ 回执」。
 - ⇒ ⇒ **这一步基于的修法已被我域的逐层证据链推翻**（见派单表 #6 行）⇒ ⇒ **正确处置 = 维持 RAG NOT NULL** ⇒ ⇒ **落 DDL 那步会把 RAG 改成可空 = 制造新漂移**（RAG `callSettersOnNulls=false` ⇒ NULL 时跳过 setter ⇒ 读出 `null` ≠ Go 的 `0`）⇒ ⇒ **本条落点 = 无动作**。
 - ⇒ ⇒ **本轮又核到一条更强的论据**（原台账标着「Go 侧行号本轮未核」⇒ **已核**）：Go `service/user/user/rpc/internal/model/data_model.go:11` ⇒ `Status int64 \`gorm:"column:status;default:0"\`` ⇒ **值类型 · 非指针** ⇒ ⇒ **GORM 对值类型字段恒写 0 ⇒ Go 侧这一列实际上永远不出现 NULL** ⇒ ⇒ **DDL 声明差异、行为零差异**这条结论**更硬了**。
-- ⇒ ⇒ **剩下的唯一落点 = 销号签字**（`docs/Intentional_Deviations/**` ⇒ **不在 G1 写权面**，也不在 G4 写权面）⇒ ⇒ **需要整合者拍板** ⇒ ⇒ **G4 不必为这条再做任何事**。
-- ⚠️ **机制教训（跨 lane 协作的通用坑）**：**发出去的消息不会自己更新** ⇒ ⇒ 我改了自己的结论（V-002 订正）⇒ ⇒ **对方树上的台账是旧的**（实测：G4 树里 `docs/DRIFT/users/vs-common.md` **连「V-002」都零命中** ⇒ 它那份是整合者 sweep 那版 ⇒ **完全不含 G1 lane 的任何内容**）⇒ ⇒ **对方很可能还在按我更早那条消息里的旧单等我** ⇒ ⇒ **改了结论必须主动通知，不能指望对方去读文件**。
+- ⇒ ⇒ **剩下的唯一落点 = 销号签字**（`docs/Intentional_Deviations/**` ⇒ **不在 G1 写权面**，也不在 G4 写权面）⇒ ⇒ **需要合并收口执行者拍板** ⇒ ⇒ **G4 不必为这条再做任何事**。
+- ⚠️ **机制教训（跨 lane 协作的通用坑）**：**发出去的消息不会自己更新** ⇒ ⇒ 我改了自己的结论（V-002 订正）⇒ ⇒ **对方树上的台账是旧的**（实测：G4 树里 `docs/DRIFT/users/vs-common.md` **连「V-002」都零命中** ⇒ 它那份是合并收口执行者 sweep 那版 ⇒ **完全不含 G1 lane 的任何内容**）⇒ ⇒ **对方很可能还在按我更早那条消息里的旧单等我** ⇒ ⇒ **改了结论必须主动通知，不能指望对方去读文件**。
 
 
 ## 26. 🆕 **共享层 Redis 收编【已落码】（2026-10-27 · G1 lane）** —— 前置怎么被满足 ＋ 一条**方法论订正**
@@ -1569,7 +1569,7 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
   - **merge-base `a282012`** · **冲突面实测 0**（`git diff --name-only --diff-filter=U` 空）
   - **合并态下 5/5 门禁全 EXIT=0**（lane-ownership / role-model / coupling / doc-links / ledger-count）
   - ⇒ **合并后 `AutoConfiguration.imports` = 6 条**（合并前 **2 条**）⇒ 共享层那份到位 ⇒ **收编删除的前置在本树内即可满足**
-- ⇒ ⇒ **落点从「等整合者合主干」变成「本 lane 自行合并 G4 分支」** ⇒ 与 G2（`37816ca`）/ G3（`cd893d1`）**同一步骤** ⇒ ⇒ **三棵树现在都有共享层**。
+- ⇒ ⇒ **落点从「等合并收口执行者合主干」变成「本 lane 自行合并 G4 分支」** ⇒ 与 G2（`37816ca`）/ G3（`cd893d1`）**同一步骤** ⇒ ⇒ **三棵树现在都有共享层**。
 - ⚠️ **这不改变 C7 的硬前提**：收口回归**仍必须**在所有 lane 合入主干后跑（§13.3）—— **合并 G4 分支 ≠ 合并进主干**。
 
 ### 26.2 🟢 落码前的**逐字核对**（不采信转述）
@@ -1683,9 +1683,9 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
   | `common_radiation` | 🔴 **只多一个键**：`'GoStyleRedisClientAutoConfiguration': ['users']` ⇒ 其余 **40 个类的辐射度全部逐值一致** |
 - ⇒ ⇒ **根因 = 收编的【预期后果】**：删掉 5 份域内副本 ⇒ 断连策略改由共享层那份提供 ⇒ ⇒ **`users` 域第一次出现在 `GoStyleRedisClientAutoConfiguration` 的辐射度里** ⇒ ⇒ **这正是「收编真的发生了」的正面证据**（不是缺陷）。
 - ⚠️ **口径注记（别把辐射度当受益面）**：`scan_common_radiation` 的判据是 **源码 `import` 语句**（扫 `service/**/src/**/*.java`，**含测试源码**）⇒ ⇒ `['users']` 的来源是**我域 5 份守门里的 `@ImportAutoConfiguration(GoStyleRedisClientAutoConfiguration.class)`**（测试源码 import）⇒ ⇒ ⚠️ **它不等于「运行时受益面」** —— 运行时受益面是 **10 个组件**（G4 `§4.10.24.6` 已列），其中 G2/G3 那些**零 import、靠自动配置清单命中**的组件**不会出现在辐射度里** ⇒ ⇒ **辐射度与受益面是两个口径，不要互相引用**。
-- 🔴 **落点不在本域写权面**：`docs/DRIFT/_cross/cross-domain-coupling.md` ∈ `check-wave-lane-ownership.py` 的 **`SHARED` 无人拥有清单**（⇒ 归整合者）⇒ ⇒ **G1 不能写**，且 **G4 也不能写**（同一份清单对所有 lane 一视同仁）⇒ ⇒ **只能由整合者更新**。
+- 🔴 **落点不在本域写权面**：`docs/DRIFT/_cross/cross-domain-coupling.md` ∈ `check-wave-lane-ownership.py` 的 **`SHARED` 无人拥有清单**（⇒ 归合并收口执行者）⇒ ⇒ **G1 不能写**，且 **G4 也不能写**（同一份清单对所有 lane 一视同仁）⇒ ⇒ **只能由合并收口执行者更新**。
 - ⇒ ⇒ **守门自己给出的处置**也是「先更新文档快照（`--print`）再谈分波」⇒ ⇒ **新的期望值已实测出来**（`common_radiation` 加 `'GoStyleRedisClientAutoConfiguration': ['users']` 一项，其余不动）。
-- ⚠️ **为什么必须转派、不能拖**：**主干上的 `_cross` 快照仍是收编前的版本** ⇒ ⇒ 各 lane 合并回主干后，**主干上的守门仍然红** ⇒ ⇒ **必须在合并前由整合者更新**，否则「合并后全绿」这一步会被这个共享面卡住。
+- ⚠️ **为什么必须转派、不能拖**：**主干上的 `_cross` 快照仍是收编前的版本** ⇒ ⇒ 各 lane 合并回主干后，**主干上的守门仍然红** ⇒ ⇒ **必须在合并前由合并收口执行者更新**，否则「合并后全绿」这一步会被这个共享面卡住。
 - ⚠️ **口径纪律（我自己踩了一次）**：**判「报告是否陈旧」的阈值必须取自「本次运行的起止」，不能随手取一个钟点** ⇒ ⇒ 本轮我先取 `14:11`（以为 common 段在那之后跑）⇒ 误报「**65 份陈旧报告**」⇒ ⇒ 实测 common 段跑在 **14:10:01~14:10:46**（本轮 14:09:50 起）⇒ ⇒ **正确阈值下：168 份本轮新生成 / 0 份陈旧**。
 - 🔴🔴 **守门自检的写法纪律（本轮差点交出假绿）** —— **门禁「5/5 全 EXIT=0」这句话本身也会骗人**：
   - **坏写法**：`python3 "$g" >/dev/null 2>&1; printf "  %s EXIT=%s\n" "$(basename $g)" "$?"`
@@ -1742,7 +1742,7 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 ### 27.4 🟢 **#6 第 1 步：G4 已撤回 ⇒ 与我域结论一致**
 
 - G4 `745a8b2`「撤回 #6 的『两步方案』与『需 Jason 拍板』那条裁决题 —— 它的前提已被 GORM 源码证伪」⇒ ⇒ **与我域的结论一致**（落 DDL = RAG 可空 = **方向相反的新漂移**）⇒ ⇒ **G4 不必为本单再做任何事**。
-- ⇒ ⇒ **剩下的唯一落点 = 销号签字**（`docs/Intentional_Deviations/**` ⇒ **不在 G1 也不在 G4 写权面** ⇒ 需整合者拍板）。
+- ⇒ ⇒ **剩下的唯一落点 = 销号签字**（`docs/Intentional_Deviations/**` ⇒ **不在 G1 也不在 G4 写权面** ⇒ 需合并收口执行者拍板）。
 - ⚠️ **本轮我域台账 `§19.4` 那条「V-002 我域『#6 第 1 步』已取消」的登记 ⇒ 现已由 G4 的撤回【双向确认】** ⇒ ⇒ 该待确认项**关闭**。
 
 ---
@@ -1871,13 +1871,13 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
     `docs/DRIFT/_cross/cross-domain-coupling.md` 的期望快照里**零命中** `MybatisPlusOrderingBridgeAutoConfiguration`
     ⇒ ⇒ **排序桥不是跨域共享件**（它只被 rpc 组件引用，不是被 api 组件引用）⇒ 与 §5.3f 的
     「共享判据 = 依赖度数」一致：**度数不够 ⇒ 不该下沉**（G4 那份下沉是**形态统一**的收益，不是依赖度数驱动的）。
-    ⇒ 落点 `docs/DRIFT/_cross/**` = **无人拥有面** ⇒ 仍**等整合者**更新快照（与 §26.10 同一条，不新增待办）。
+    ⇒ 落点 `docs/DRIFT/_cross/**` = **无人拥有面** ⇒ 仍**等合并收口执行者**更新快照（与 §26.10 同一条，不新增待办）。
 
 ### 28.7 🔴 **写权外 ⇒ 登记并转派（`docs/FileTree/**`）**
 
 | 位置 | 引用形态 | 动作 |
 |---|---|---|
-| `docs/FileTree/users/user/rpc.md:19` / `:209` / `:258` / `:369` / `:385` | 目录树 ＋ 逐文件说明 ＋ 「逐文件对照索引」里的**独立一行** ＋ 「新增文件有职责依据」列举 | 🔴 **写权外**（`docs/FileTree/**` 归整合者）⇒ **不写**，登记转派 |
+| `docs/FileTree/users/user/rpc.md:19` / `:209` / `:258` / `:369` / `:385` | 目录树 ＋ 逐文件说明 ＋ 「逐文件对照索引」里的**独立一行** ＋ 「新增文件有职责依据」列举 | 🔴 **写权外**（`docs/FileTree/**` 归合并收口执行者）⇒ **不写**，登记转派 |
 | `docs/FileTree/users/admin/rpc.md:19` / `:332` / `:398` / `:549` / `:565` | 同上 | 🔴 同上 |
 | `docs/FileTree/follow/rpc.md:469` / `:508` | 目录树 ＋ 逐文件说明（还写着「**必须同时写进 `AutoConfiguration.imports`**」） | 🔴 同上 |
 | `docs/FileTree/like/rpc.md:20` · `docs/FileTree/comment/rpc.md:27` / `:30` · `docs/FileTree/article/rpc.md:18` | **别域**（like / comment / article）在「对照模块」列里提到 **我域** 的桥 | 🔴 同上（且那几条要等 G2 / G3 各自删完自己的副本后再统一改） |
@@ -1952,7 +1952,7 @@ G2 第九轮回信写：「你域的 `RedisDisconnectedBehaviorConfig.java:103` 
 | #20 | `component-semantic-verification/springboot-semantic-model.md:269` / `:320` | `f68a9cd`（原文按语义补回） |
 
 ⇒ 随 `6375faf`（再并 G4 `6cb0a60`）合入我树 ⇒ 合并态我树这 3 份**零命中**
-⇒ ⇒ **「待整合者认领」这条待办【关闭】** ⇒ ⇒ §20.2 合并规则的「目标 = 7 份文件命中」**已过期**
+⇒ ⇒ **「待合并收口执行者认领」这条待办【关闭】** ⇒ ⇒ §20.2 合并规则的「目标 = 7 份文件命中」**已过期**
 ⇒ **实际目标 = 只剩 6 处故意（4 份文件）**。
 
 ### 29.6 🟢 **共享层 javadoc 变更复核**：`RpcInterceptor.java` 的改动**只是 javadoc**
@@ -2225,7 +2225,7 @@ G4 第十一轮来信：「新门禁 `22dc67e` + 台账 `c164e63`，请再并一
 要让我域侧也有「池耗尽上限」，必须**同时**做三件事：① 加 `commons-pool2` 依赖 ② 配 `pool.enabled=true`
 ③ 配 `max-active` / `max-wait` ⇒ ⇒ 而 **① 一旦加上，池形态就静默从「无池」变成「有池」**
 ⇒ ⇒ 这是**所有域共享的形态决策**，改一个域就与其他域不一致 ⇒ ⇒ **不是我域能自修的**
-⇒ ⇒ **落点 = `global` 收口域**（`docs/DRIFT/global/cross-domain.md` = **无人拥有面**，由整合者写）
+⇒ ⇒ **落点 = `global` 收口域**（`docs/DRIFT/global/cross-domain.md` = **无人拥有面**，由合并收口执行者写）
 ⇒ ⇒ **我域零落码**；本条只登记 + 回执。
 
 🟢 **对 G3 那条新发现的直接回答**：它问「Redis 池的跨域条目登记在哪」⇒ ⇒ **答案是 `global` 收口域，不是域侧台账**
@@ -2298,7 +2298,7 @@ adminSchemaBootstrap init 失败
 ### 34.6 落点（跨 lane ⇒ 无人拥有面）
 
 「Testcontainers 残留容器 ＋ 随机宿主口落在 OS 临时段」是**跨 lane 共享环境**问题 ⇒ ⇒
-落点 = **整合者**（`docs/DRIFT/_cross/**` = 无人拥有面）⇒ ⇒ **我域零落码**。
+落点 = **合并收口执行者**（`docs/DRIFT/_cross/**` = 无人拥有面）⇒ ⇒ **我域零落码**。
 ⇒ ⇒ **可选修法（仅登记，不实施）**：① 固定 Testcontainers 宿主口段（避开 `49152–65535`）② 跑完显式清理
 ③ 统一「容器名 ＋ 标签」回收（本机 Ryuk 不可用 ⇒ 需自建）。
 
@@ -2363,7 +2363,7 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
 ② 容器内 `docker exec ddl-favorite-pg psql …` 连得上（仅报 role 不存在）⇒ 容器内服务正常；
 ③ 宿主 socket 探针「多数映射口 TCP 连上但 3~5s 读不到任何字节」（PG/Redis/Kafka/Nacos/minio/grafana/prometheus/etcd/beanstalkd 全中），
 而 `Sea-user-rpc`（收 32 字节）/ `milvus`/`jaeger`/`neo4j`（立即 0 字节 EOF）正常
-⇒ ⇒ 推断「约 30 个容器中多数转发失效，疑似代理资源耗尽」⇒ ⇒ 需 Jason / 整合者拍板是否重启 Docker Desktop。
+⇒ ⇒ 推断「约 30 个容器中多数转发失效，疑似代理资源耗尽」⇒ ⇒ 需 Jason / 合并收口执行者拍板是否重启 Docker Desktop。
 
 ### 37.2 🔴 我方复检方法（**按 G3 同款判据先复现，再换判据**）
 
@@ -2449,9 +2449,9 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
 | `check-wave-coupling.py` | **EXIT=1** |
 | 红项 | `common_radiation` · `GoStyleRedisClientAutoConfiguration` ⇒ **文档快照 `None`** vs **仓库现状 `['users']`** |
 | 五键逐项差量 | `pom_dependents` **0** · `grpc_edges` **0** · `cross_domain_topics` **0** · `users_common_classes` **0** · `common_radiation` **1**（**仅此一项**） |
-| 这一项**是不是新的** | **不是** —— **§26.10**（Redis 收编轮）已把它定性为「收编的**预期后果**」＋「落点在 `docs/DRIFT/_cross/**` = 无人拥有 = 整合者」＋「精确修法 = `common_radiation` 加一项」；**§28**（排序桥收编轮）也明写「仍是收编前那一条 ⇒ **项数未增** ⇒ 与本次收编无关」 |
+| 这一项**是不是新的** | **不是** —— **§26.10**（Redis 收编轮）已把它定性为「收编的**预期后果**」＋「落点在 `docs/DRIFT/_cross/**` = 无人拥有 = 合并收口执行者」＋「精确修法 = `common_radiation` 加一项」；**§28**（排序桥收编轮）也明写「仍是收编前那一条 ⇒ **项数未增** ⇒ 与本次收编无关」 |
 
-⇒ ⇒ **⇒ 它从收编落码那笔（`312a09b`）起就一直是红的**，经过 4 轮**仍未被整合者修**。
+⇒ ⇒ **⇒ 它从收编落码那笔（`312a09b`）起就一直是红的**，经过 4 轮**仍未被合并收口执行者修**。
 
 ### 38.2 🔴 **我的「转绿」判据是错的（订正）**
 
@@ -2467,11 +2467,11 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
 
 ### 38.3 精确修法（**一行**）+ 归属
 
-- **修法**（整合者侧）：在 `docs/DRIFT/_cross/cross-domain-coupling.md` 的快照 json 的 `common_radiation` 里补一行 ——
+- **修法**（合并收口执行者侧）：在 `docs/DRIFT/_cross/cross-domain-coupling.md` 的快照 json 的 `common_radiation` 里补一行 ——
   `"GoStyleRedisClientAutoConfiguration": ["users"],`
 - **归属**：该文件 ∈ `check-wave-lane-ownership.py` 的 **`SHARED`（无人拥有）清单**
-  ⇒ ⇒ **G1 不能写，G4 也不能写**（同一份清单对所有 lane 一视同仁）⇒ ⇒ **只能整合者写** ⇒ ⇒ **已转派协调会话**。
-- ⚠️ **给整合者的口径提醒**：**权威快照必须在所有 lane 合入之后、从合并后的树重算**
+  ⇒ ⇒ **G1 不能写，G4 也不能写**（同一份清单对所有 lane 一视同仁）⇒ ⇒ **只能合并收口执行者写** ⇒ ⇒ **已转派协调会话**。
+- ⚠️ **给合并收口执行者的口径提醒**：**权威快照必须在所有 lane 合入之后、从合并后的树重算**
   （`python3 tools/difftest/check-wave-coupling.py --print`）⇒ ⇒ 否则其他域的 `common_radiation` 也会对不上
   ⇒ ⇒ ⇒ **上面这一行是「只解我域阻塞」的最小增量，不是最终快照。**
 
@@ -2615,7 +2615,7 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
   ① **域级回归命令必须带 `-am`**（且在报告里写明 **reactor 实跑了几个模块** ⇒ 才能证明 `users-common` 用的是本树源码）；
   ② **域级数字 = 本域模块的 surefire 目录逐文件求和**（我 669 / G2 668）⇒ **共享层单列**（两边共享层都 327）⇒ ⇒ **reactor 总数（996 / 995）不是域级数** ⇒ ⇒ **两边共享层同为 327 ⇒ 域级差的那 1 条与共享层无关**。
 
-### 42.2 🔴 **`check-tomcat-limits.py` 的根因定位被推翻**（G2 / G3 / 我此前都报成「落点 `tools/difftest/**` 无人拥有 ⇒ 需整合者」⇒ ⇒ **错**）
+### 42.2 🔴 **`check-tomcat-limits.py` 的根因定位被推翻**（G2 / G3 / 我此前都报成「落点 `tools/difftest/**` 无人拥有 ⇒ 需合并收口执行者」⇒ ⇒ **错**）
 
 - **G4 的 `d4e4745` 已经把「第二份判据」删掉了**：该版守门**不再维护期望表副本**，改为**直接读真源** `service/common/src/main/java/com/rag/common/http/GoStyleFormLimitMode.java` 的 `SEMANTIC_REACHABILITY` ⇒ ⇒ ⇒ **「期望表与权威表自相矛盾」这件事在 G4 树里已经不存在** ⇒ ⇒ ⇒ **守门自带的注释也明写「副本 = 违背该设计的第二份判据 ⇒ 删副本，改为读真源」**。
 - 🔴 **实测（用 G4 的 `d4e4745` 版守门对着【我的树】跑，脚本放在 `/tmp` 假 ROOT + 软链回我的树 ⇒ 我树 0 改动）**：
@@ -2624,7 +2624,7 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
     （`user-api`=`raw` / `admin-api`=`raw` / `follow-api`=`envelope` ⇒ **与权威表逐条一致**）。
 - 🟢 **配对已机器实证**（同一套假 ROOT，只把 `task-api` 的 yml 改成守门要求的写法 ⇒ **我树仍 0 改动**）：
   `mode: raw` ⇒ `mode: "off"` ⇒ ⇒ **守门 EXIT=0** ⇒ ⇒ ⇒ **「G2 那半 + G4 那半 = 全绿」已被机器跑出来，不是推断。**
-- ⇒ ⇒ **真正剩下的唯一缺口 = `service/task/task-api/src/main/resources/application.yml` ⇒ 【G2 写权内】** ⇒ ⇒ **不需要整合者** ⇒ ⇒ ⇒ **三条 lane 之前都把这事推给整合者 ⇒ ⇒ 根因被误定位 ⇒ 代价是多绕了好几轮** ⇒ ⇒ ⇒ **⇒ 这条要以「根因纠正」而不是「再推一次」的方式落地。**
+- ⇒ ⇒ **真正剩下的唯一缺口 = `service/task/task-api/src/main/resources/application.yml` ⇒ 【G2 写权内】** ⇒ ⇒ **不需要合并收口执行者** ⇒ ⇒ ⇒ **三条 lane 之前都把这事推给合并收口执行者 ⇒ ⇒ 根因被误定位 ⇒ 代价是多绕了好几轮** ⇒ ⇒ ⇒ **⇒ 这条要以「根因纠正」而不是「再推一次」的方式落地。**
 - ⚠️ **语法坑（守门自己写明的）**：`off` **必须带引号** —— YAML 1.1 会把未加引号的 `off` 解析成**布尔 false** ⇒ ⇒ 正确写法 `mode: "off"`。
 - ⇒ ⇒ **§41 的「持住不合并」由「等 G2 进来」升级为「配对条件已实证」** ⇒ ⇒ **解除条件不变**：G2 的 yml 订正进我树 ⇒ ⇒ 再成对合 `d4e4745` ⇒ ⇒ 届时我树 10 个 api 进程全 ✅。
 
@@ -2669,7 +2669,7 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
 | ④ **真装配面** | 登记的每个域侧 Filter **真的被挂进容器装配出的链**，且排在 **3s 预算起点**（`HttpMiddlewareFilter`）**之前** | G4 §4.10.18.3「可行落法方向 ① 域内」+ §4.10.12 ④ 的读法（`ServletContextInitializerBeans`） |
 
 **⚠️ 三条实现约束（每条都有代价，不是风格偏好）**：
-- **不 import 共享层的 Filter 类** ⇒ 只按 **bean 名**（`httpMiddlewareFilter`）定位 ⇒ ⇒ **共享层辐射度快照（`common_radiation`，按 import 统计）保持不变** ⇒ ⇒ 不制造跨 lane 快照漂移（那张快照归整合者，本 lane 无写权）⇒ ⇒ **本轮实测 `check-wave-coupling.py` 的差量仍是那 1 项已知漂移（`GoStyleRedisClientAutoConfiguration`），未被我扩大**。
+- **不 import 共享层的 Filter 类** ⇒ 只按 **bean 名**（`httpMiddlewareFilter`）定位 ⇒ ⇒ **共享层辐射度快照（`common_radiation`，按 import 统计）保持不变** ⇒ ⇒ 不制造跨 lane 快照漂移（那张快照归合并收口执行者，本 lane 无写权）⇒ ⇒ **本轮实测 `check-wave-coupling.py` 的差量仍是那 1 项已知漂移（`GoStyleRedisClientAutoConfiguration`），未被我扩大**。
 - **枚举面 = 本模块自己的 `target/classes`**（code source 取 ⇒ 与工作目录无关）⇒ ⇒ 拿到共享层的 `SharedFilterOrderSnapshotGateTest` 那套**已验证可靠**的判据，不自创。
 - **枚举失败 ⇒ 直接失败，不跳过** ⇒ ⇒ 否则第 ① 条会退化成「什么都不查」的恒绿（与共享层 ⑤ 的同款守恒断言）。
 
@@ -2700,7 +2700,7 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
 | 项 | 状态 | 落点 / 解除条件 |
 |---|---|---|
 | 🟡 **等 G2 的 task-api yml 订正** | `check-tomcat-limits.py` 唯一红点 = `service/task/task-api/.../application.yml`（`mode: raw` ⇒ 应为 `mode: "off"`） | **G2 写权内** ⇒ ⇒ G2 的订正进我树 ⇒ ⇒ 再成对合 G4 的 `d4e4745`（§41 / §42.2 的顺序约束**不变**） |
-| 🟡 **共享面 `cross-domain-coupling` 快照过期** | `check-wave-coupling.py` EXIT=1（`common_radiation` 差 1 行：`"GoStyleRedisClientAutoConfiguration": ["users"]`） | 落点 `docs/DRIFT/_cross/cross-domain-coupling.md` ∈ 守门 `SHARED`（**无人拥有**）⇒ ⇒ **G1/G4 都不能写** ⇒ ⇒ 需整合者在四 lane 全合后重生成（单树重生成必错 ⇒ 我树 1 项 / G2 树 9 项） |
+| 🟡 **共享面 `cross-domain-coupling` 快照过期** | `check-wave-coupling.py` EXIT=1（`common_radiation` 差 1 行：`"GoStyleRedisClientAutoConfiguration": ["users"]`） | 落点 `docs/DRIFT/_cross/cross-domain-coupling.md` ∈ 守门 `SHARED`（**无人拥有**）⇒ ⇒ **G1/G4 都不能写** ⇒ ⇒ 需合并收口执行者在四 lane 全合后重生成（单树重生成必错 ⇒ 我树 1 项 / G2 树 9 项） |
 | 🟡 **等 G3 跑完 rpc 侧活体对拍** | 我域 `DRIFT-USERRPC-V-014` / `DRIFT-ARPC-013` 的证据强度仍停在 **L3** | 前置已解除（PG 口协议级全通 + Redis 宿主口清单已给）⇒ ⇒ 等 G3 回我 ⇒ ⇒ 我域才升 **L4** |
 | 🟡 **合并 G4 后补一条台账点名** | G4 的 `4cec90e` 在 `service/users/users-common/src/test/java/com/rag/users/common/http/GoStyleRequiredFieldGateTest.java` 新增一条守门（钉住**我域**销号所依赖的两个不变量：必填校验在 service 层之前拦） | 该类在 `users-common`（G4 代码写权面）⇒ ⇒ 但**台账**落点是 `docs/DRIFT/users/common.md`（**我的写权面**）⇒ ⇒ 合并后**我域补一条点名**；⚠️ 门禁**不强制**（`JAVA_ROOTS` 的 `users` = `service/users/user` · `users-admin` = `service/users/admin` ⇒ **`users-common` 不在任何域的扫描根** ⇒ 层 5 不会报它）⇒ ⇒ 属**自觉点名**，不是门禁倒逼 |
 
@@ -2746,7 +2746,7 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
   m.layer1_paths(root, {f: m.read(os.path.join(root, f)) for f in extra})
   PY
   ```
-- 🔴 **落点归属**：`tools/check-ledger-selfcheck.py` ∈ **两张表都查不到**（4 条 lane 的写权白名单 ∪ `SHARED` 那 13 项）⇒ ⇒ **写权孤儿** ⇒ ⇒ **按「两张表」纪律 ⇒ 只能整合者改** ⇒ ⇒ **我域零落码** ⇒ ⇒ **登记给整合者**：`LEDGER_FILES` 补 `follow` 域的 5 份 ＋ `docs/DRIFT/users/{vs-common,common}.md` ⇒ ⇒ 补完后这 7 份就不用再手工扫了。
+- 🔴 **落点归属**：`tools/check-ledger-selfcheck.py` ∈ **两张表都查不到**（4 条 lane 的写权白名单 ∪ `SHARED` 那 13 项）⇒ ⇒ **写权孤儿** ⇒ ⇒ **按「两张表」纪律 ⇒ 只能合并收口执行者改** ⇒ ⇒ **我域零落码** ⇒ ⇒ **登记给合并收口执行者**：`LEDGER_FILES` 补 `follow` 域的 5 份 ＋ `docs/DRIFT/users/{vs-common,common}.md` ⇒ ⇒ 补完后这 7 份就不用再手工扫了。
 - ⚠️ **同理提醒**：`--domain users` / `--domain users-admin` 也**只覆盖** `LEDGER_FILES` 列出的那 3+3 份 ⇒ ⇒ **每轮跑门禁必须带 `--domain`**，否则查的是 task 域。
 
 ## 45. 🟢 **Testcontainers 宿主口钉段落码（G4 §4.10.39 ② 的域侧那一半）—— 38 个容器起点全部显式绑口 + 2 台域级守门**（2026-10-27 · G1 lane）
@@ -2842,3 +2842,111 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
 - ⇒ ⇒ **结论订正**：**四 lane 停摆 = 不成立** ⇒ ⇒ **不需要 Jason 充值才能继续推进** ⇒ ⇒ **我此前把它列成「最高优先机器级阻塞」是误判**（属于「拿一个信号当结论」）。
 - ⇒ ⇒ **判定式（可复用）**：`status.message` 里带错误码（这里 `2056` / `42212`）**不能单独用作 liveness 判据** ⇒ ⇒ 要判「是否停摆」，得看**行为证据**（有没有新提交 / `updatedAt` 有没有推进）⇒ ⇒ 与「单点现象 ≠ 结论」同族。
 - ⇒ ⇒ **顺带**：**这不改变**「并发全量 maven 会被 OOM-kill（EXIT=137）」那条纪律（那是**实测**过的资源约束，不是 status 推断）⇒ ⇒ **争用窗口的规避照旧**。
+
+## 47. 🟢 **并入 G4 终版 `c26e462`（11 笔 · 零冲突）+ 角色口径改写（59 处 / 6 份）**（2026-10-27 · G1 lane）
+
+### 47.1 🟢 **并入 G4 终版（合并提交 `ddb63f7`）—— 并把「为什么推翻 §41 的持住决定」写清**
+
+**决策反转的记录（依 AGENTS.md「不重写历史」：保留原值 + 补记理由）**：
+§41 曾记「**持住不合并 `d4e4745`** ⇒ 配对条件 = G2 的 `4786eb5`（task-api yml `mode: raw` ⇒ `mode: "off"`）进我树」。
+⇒ ⇒ **本轮那个配对条件仍未满足**（`4786eb5` 至今**不在**我树 ⇒ 实测 `git merge-base --is-ancestor 4786eb5 HEAD` = 否）
+⇒ ⇒ **但本轮仍然合并了** ⇒ ⇒ **理由必须写清，否则就是「无出处的决策变更」**：
+
+| 判据 | §41 当时 | 本轮实测 | 结论 |
+|---|---|---|---|
+| 待合笔数 | **1**（只有 `d4e4745`） | **11** | 「只差一笔」的代价 = 1 笔；「差 11 笔」的代价 = **共享层整整落后一整轮** ⇒ ⇒ **我域的守门与回归都跑在过时的共享层上** ⇒ ⇒ 代价的**性质**变了 |
+| 红点数量 | 唯一红 = task-api yml | **仍然唯一** = task-api yml（**实测**，§47.2） | 红点数**没变** ⇒ ⇒ 「保持全绿」这个收益**也没变** |
+| 红点归属 | G2 写权内 · G2 已在他们树修 | 同上（**重核过**：G2 分支 `align/g2-message-like-task` 的 `4786eb5` 在） | 这个红是「**还没合过来**」，**不是**「没人管」⇒ ⇒ 它**有确定的消解路径**（G2 合主干 → 我合主干） |
+
+⇒ ⇒ **结论**：**「保持全绿」在 §41 当时是正确取舍**（那时只差 1 笔）；⇒ ⇒
+但当差距变成 **11 笔**、而唯一红点**在他树已修好**时，**继续持住 = 用一个「可归因的红」换「共享层落后一整轮」⇒ ⇒ 方向反了**
+⇒ ⇒ **本轮改为「先合、再如实归因」**。
+
+⚠️ **口径纪律（不许含糊）**：本轮**不是**「等配对条件满足后再合」，**也不是**「无视红点硬合」
+⇒ ⇒ 是「**合并 + 把那一个红点逐条归因（谁写权 · 谁已修 · 何时消）写进台账**」
+⇒ ⇒ **红点不被掩盖，也不被用来挡进度**。
+
+### 47.2 🔴 **合并后守门复跑：唯一红点 = `task-api`（G2 写权内 · G2 已修）—— 我域三个 api 四旋钮全 ✅**
+
+| 守门 | 合并前 | 合并后 | 说明 |
+|---|---|---|---|
+| `check-wave-lane-ownership.py` | 0 | **0** | ✅ |
+| `check-wave-role-model.py` | 0 | **0** | ✅ |
+| `check-global-lane-ownership.py` | 0 | **0** | ✅ |
+| `check-doc-links.py` | 0 | **0** | ✅ |
+| `check-ledger-count.py` | 0 | **0** | ✅ |
+| `check-ledger-selfcheck.py`（默认 + `--domain users` + `--domain users-admin`） | 0 | **0** | ✅ |
+| `check-tomcat-limits.py` | 0 | **1** | 🔴 **唯一红点 = `service/task/task-api`**（见下） |
+| `check-wave-coupling.py` | 1 | **1** | 🟡 **共享面 `common_radiation` 快照差 1 行**（落点归合并收口执行者 ⇒ 见 §47.5） |
+
+**`check-tomcat-limits.py` 红点的逐条归因（新版守门实测输出）**：
+
+- **红点唯一**：`service/task/task-api/src/main/resources/application.yml` ⇒ `rag.http.go-form-limit.mode` 实际 `'raw'`、应为 `'off'`。
+- **归属**：`service/task/**` = **G2 写权内** ⇒ ⇒ **G1 不能写，也不该写**。
+- **G2 已修**：G2 分支 `align/g2-message-like-task` 的 `4786eb5` 就是这条订正 ⇒ ⇒ **这个红是「还没合过来」，不是「没人管」**。
+- **消解路径**：G2 合主干 → 我合主干 ⇒ ⇒ **不需要任何人拍板**（不需要 Jason、不需要合并收口执行者代改）。
+- **我域三 api 的实测结论**（新版守门 10 行表格逐行读出）：
+
+| api | ① relaxed-chars | ② max-param | ③ header-size | ④ form-gate | 结论 |
+|---|---|---|---|---|---|
+| `service/users/user/user-api` | ✅ | ✅ | ✅ | ✅ | **✅** |
+| `service/users/admin/admin-api` | ✅ | ✅ | ✅ | ✅ | **✅** |
+| `service/follow/follow-api` | ✅ | ✅ | ✅ | ✅ | **✅** |
+
+⇒ ⇒ **我域三个 api 的四旋钮全部对齐**（新版守门比旧版**更严** —— 期望表改成直接读共享层真源
+`GoStyleFormLimitMode.SEMANTIC_REACHABILITY` ⇒ **不再维护期望表副本** ⇒ §41/§42.2 记的
+「期望表与权威表自相矛盾」这件事在 G4 树里已经不存在）。
+
+### 47.3 🟢 **并入带来的三件事（都是对我域有利的）**
+
+| # | 东西 | 对我域的意义 |
+|---|---|---|
+| ① | `tools/difftest/check-tomcat-limits.py` 改为**直接读共享层真源** | 我域三个 api 的四旋钮对齐现在由**单一判据**裁决 ⇒ ⇒ 我域 §42.2 记的「根因纠正」在 G4 树里落地了 |
+| ② | 共享层新增 `GoStyleRequiredFieldGateTest`（`users-common`，**6 条**） | **我域 `DRIFT-USERSCOMMON-001` 销号结论的两个前提被钉成机器网** ⇒ ⇒ 已在我域 `users/common.md` **§5.7 点名** |
+| ③ | `GoStyleParamLimitOffModeGateTest` 补结构锁 ＋ `ObservabilityLifecycle` javadoc 改单池口径 | ②的配套；③是 **javadoc-only**（**已逐行核过 diff** ⇒ **零行为变化**） |
+
+⚠️ **代码层零重叠（实测）**：G4 自 merge-base `f6d58de` 以来真正改的**代码/工具文件只有 4 个**
+（`ObservabilityLifecycle.java` · `GoStyleParamLimitOffModeGateTest.java` · `GoStyleRequiredFieldGateTest.java` · `check-tomcat-limits.py`）
+⇒ ⇒ 与我写权面（`service/users/{user,admin}/**` ＋ `service/follow/**`）**交集 = 空** ⇒ ⇒ 合并零冲突是**结构性**的，不是运气。
+⚠️ 文档层：G4 这 11 笔**没碰** `docs/DRIFT/users/**` 与 `docs/DRIFT/follow/**` ⇒ ⇒ **我域台账未被覆盖**。
+
+### 47.4 🟢 **角色口径改写：「整合者」→「合并收口执行者」（59 处 / 6 份）**
+
+**依据**：`docs/Worktree.md` §1e（主干 `4ae5461`）—— **「整合者」不是一个存在的角色** ⇒
+2026-10-27 实测踩到过一次**误升级**：lane 读到「归整合者」就去找「整合者」⇒ ⇒
+**角色名 = 一条真实的升级路径** ⇒ ⇒ 共享面必须写成**可指向的职责** ⇒ ⇒ 现行角色名 = **「合并收口执行者」**
+（**它是一个步骤，不是一个常驻会话**）。
+
+**改了什么**：我域 6 份台账里 **59 处**「整合者」全部改写为「合并收口执行者」——
+`users/vs-common.md` **48** · `follow/vs-common.md` **6** · `users/user/api.md` **2** ·
+`users/user/rpc.md` **1** · `users/admin/_shared.md` **1** · `follow/api.md` **1**。
+
+**改的边界（逐条看过上下文，不做盲替换）**：
+- ✅ 改的**只有角色词**，**没有一个事实被改动**（计数、行号、commit hash、结论一律照旧）。
+- ✅ 两处**读着别扭**的另做了顺句：「（合并收口执行者还没合）」⇒「（合并收口那一步还没做）」；
+  「待合并收口执行者合并时统一订正」⇒「待合并收口执行者统一订正时一并处理」。
+- ✅ **历史记述里的「整合者」也一并改**：它从来不是「历史上存在过一个整合者」，而是**当时写错了一个角色名**
+  ⇒ ⇒ 留着它 = **继续留一条指向不存在角色的升级路径** ⇒ ⇒ 改掉才是如实。
+  （**与「订正姿势」不冲突**：那条讲的是**事实**不改；这里是**角色名**订正，事实一个字没动。）
+
+**改完的复核**：① 我域 6 份台账「整合者」残留 **0**；② 门禁复跑全绿（§47.2 表）；
+③ **他域同款措辞**（`docs/DRIFT/{like,comment,message,favorite,task,hot,article}/vs-common.md:73`
+＋ `docs/DRIFT/global/lanes/L7-slowgate.md`）⇒ ⇒ **不在 G1 写权面** ⇒ ⇒ **零落码、登记**（§47.5）。
+
+### 47.5 🟡 **本轮登记给「合并收口执行者」的共享面事项（我域零落码）**
+
+| # | 事项 | 落点 | 现状 |
+|---|---|---|---|
+| ① | `docs/DRIFT/_cross/cross-domain-coupling.md` 的 `common_radiation` 快照差 1 行（`"GoStyleRedisClientAutoConfiguration": ["users"]`） | 共享面 ⇒ **G1/G4 都不能写** | 🔴 仍红 ⇒ **必须等四 lane 全合后从合并后的树重算**（单树重生成必错：我树 1 项 / G2 树 9 项） |
+| ② | **他域台账的同款「整合者」措辞**（7 份 `docs/DRIFT/<域>/vs-common.md:73` ＋ `global/lanes/L7-slowgate.md`） | 他域写权 ＋ 共享面 | 🟡 我域零落码 ⇒ 建议**合并收口执行者**在合并回写时一并改（否则「只改一份 = 诱导还在」） |
+| ③ | `tools/check-ledger-selfcheck.py` 的 `LEDGER_FILES` 补 `follow` 域 + 7 份台账 | **两张表都查不到** ⇒ 写权孤儿 | 🟡 §44.4 已登记 ⇒ **需 Jason 拍板**或纳入合并收口执行者清单 |
+| ④ | `docs/Intentional_Deviations/users/_shared.md` 销号（`DRIFT-USERRPC-V-002`） | 不在 G1 写权面 | 🟡 等签字档落点确认 |
+| ⑤ | `docs/FileTree/**` 9 处提及 MP 排序桥 | 写权外 | 🟡 §28.7 已登记 |
+
+### 47.6 🟢 **本轮提交清单**
+
+| commit | 内容 |
+|---|---|
+| `ddb63f7` | **merge(g4)** —— 并入 G4 终版 `c26e462`（11 笔 · 零冲突 · 代码层零重叠） |
+| （本笔） | **docs(drift)** —— §47 写回 ＋ 6 份台账 59 处角色口径改写 ＋ `users/common.md` §5.7 点名 |
+

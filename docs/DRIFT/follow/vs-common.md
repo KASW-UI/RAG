@@ -118,7 +118,7 @@
 - [x] §1 的每一条**重新核对状态**并写回（带核对日期）⇒ §1.1
 - [ ] §3 的域侧修法**落码 + 守门**（含变异验证）⇒ ⏸ **阶段 2**（本轮 = 阶段 1 只读对账，不落码）
 - [x] §4 的派单**登记到 G4** ⇒ **本域台账已写**（§4 表）；**实时轨** = `session send` 给 G4 会话；`docs/DRIFT/global/vs-common.md` 由 **G4 写**（G1 只读）
-- [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
+- [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由合并收口执行者统一更新）
 
 ---
 
@@ -137,7 +137,7 @@
 | `service/common/**` · `service/users/users-common/**` | 🔴 **只读** | ✅ **可写（唯一）** |
 | `docs/DRIFT/follow/**` | ✅ 可写 | 🔴 只读 |
 | `docs/DRIFT/global/vs-common.md` | 🔴 只读 | ✅ 可写 |
-| `AGENTS.md` · 三个 `_INDEX.md` · `_MANIFEST.json` · `docs/DRIFT/_cross/**` · `docs/Worktree.md` · `docs/DRIFT/global/{_README,common-tails,cross-domain,cycle-deps}.md` | 🔴 **无人拥有** | 🔴 **无人拥有** ⇒ **合并后由整合者统一更新** |
+| `AGENTS.md` · 三个 `_INDEX.md` · `_MANIFEST.json` · `docs/DRIFT/_cross/**` · `docs/Worktree.md` · `docs/DRIFT/global/{_README,common-tails,cross-domain,cycle-deps}.md` | 🔴 **无人拥有** | 🔴 **无人拥有** ⇒ **合并后由合并收口执行者统一更新** |
 
 ### 6.2 follow 侧派单（G4）—— **3 条，已核准落点**
 
@@ -290,10 +290,10 @@ installed_rank | version |      description       | success
 域台账 `docs/Pitfalls/follow/rpc.md` 记着一条 🔴 未修：**共享 `service/common` 在纯 gRPC 进程里缺 servlet-api** ⇒ 关闭路径抛 `NoClassDefFoundError: jakarta/servlet/Filter`。
 **本轮复核根因链已读通**：`HttpMiddleware.java:8` `import jakarta.servlet.Filter` ⇒ `ObservabilityLifecycle.java:54` `HttpMiddleware.shutdown()` ⇒ **该类在纯 gRPC 进程里的首次加载恰好落在 destroy 路径** ⇒ 落点 **`service/common`** ⇒ **不在 G1 写权** ⇒ **派 G4**（§4 #2）。
 
-### 9.3 共享索引过时（**无人拥有 ⇒ 交整合者**，G1 不写）
+### 9.3 共享索引过时（**无人拥有 ⇒ 交合并收口执行者**，G1 不写）
 
 `AGENTS.md:32` 与 `docs/DRIFT/_INDEX.md:32,85` 仍写 follow「**零台账 / 仅 proto 层**」⇒ **与事实不符**（follow 域 4 个组件均已完成组件级对照，9 条 DRIFT + 15 条 PITFALL + 逐文件索引，见 `docs/DRIFT/follow/{api,rpc,common,proto}.md`）。
-⇒ **共享面文件**（`AGENTS.md` / `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**`）**G1 一律不写** ⇒ 登记在此，**合并后由整合者统一刷新**（`docs/DRIFT/follow/rpc.md` 待办 6 早已记同一件事）。
+⇒ **共享面文件**（`AGENTS.md` / `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**`）**G1 一律不写** ⇒ 登记在此，**合并后由合并收口执行者统一刷新**（`docs/DRIFT/follow/rpc.md` 待办 6 早已记同一件事）。
 
 ### 9.4 元教训
 
@@ -479,7 +479,7 @@ installed_rank | version |      description       | success
 ⇒ ⚠️ **`follow-rpc` 不在清单里**（它**不用 Redis** ⇒ 无副本 ⇒ 无删除动作）。
 ⇒ 🔴 **删除的前置未满足**：G4 的 `5564c27` / tip `cec7131` **还没进 `do-my-own-gh`** ⇒ 本树里没有共享层那份
 ⇒ ⇒ **现在删 = `REJECT_COMMANDS` 整个消失**（api 侧退回「排队 3s ⇒ 撞 HTTP 3s ⇒ 503」，Go 是 fail-open 200）
-⇒ ⇒ **我域 FastFail 守门会立刻变红** ⇒ ⇒ **等整合者把 G4 分支合进主干后一次性执行**（配方见 §11.2）。
+⇒ ⇒ **我域 FastFail 守门会立刻变红** ⇒ ⇒ **等合并收口执行者把 G4 分支合进主干后一次性执行**（配方见 §11.2）。
 
 ③ **G4 ⑥（池自愈）与我域登记同构**：`follow-rpc` 与另两个 rpc 一样 `@Import ObservabilityLifecycle` 且 classpath **无 servlet**
 ⇒ ⇒ **受影响面 = 3/3** ⇒ ⇒ `3b573fb` 与 `7488b3d` **必须同批合入**（只合前者 ⇒ 池「终止即永久」⇒ 我域由绿转红）⇒ 详见 §11.3 / §11.4。
@@ -570,7 +570,7 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
 ⇒ ⇒ 完整判据、变异三连与边界 ⇒ [`users/vs-common.md` §43.2](../users/vs-common.md)。
 
 **④ 🔴 顺带挖出：台账自检**从未查过 follow 域** ⇒ 本轮按域跑才见红**：`tools/check-ledger-selfcheck.py` 的 `LEDGER_FILES` 只有 `task` / `users` / `users-admin` 三个域键 ⇒ ⇒ **`follow` 域 + `users/{vs-common,common}.md` 这 7 份台账从来没被它查过** ⇒ ⇒ **默认参数跑出来的 EXIT=0 查的是 task 域** ⇒ ⇒ 本轮用**门禁自己的层-1 判据**单独扫了那 7 份 ⇒ ⇒ **8 处失效引用**（两轮「真删除」收编删了文件、台账历史记述仍写全路径）⇒ ⇒ 已逐条**如实标注状态**（不是让门禁闭嘴）⇒ ⇒ 复扫 **118 个引用路径 ⇒ 缺失 0**。
-⇒ ⇒ 落点 `tools/check-ledger-selfcheck.py` ∈ **两张表都查不到** ⇒ ⇒ **写权孤儿 ⇒ 只能整合者改** ⇒ ⇒ **follow 域零落码** ⇒ ⇒ 完整经过与可复跑命令 ⇒ [`users/vs-common.md` §44](../users/vs-common.md)。
+⇒ ⇒ 落点 `tools/check-ledger-selfcheck.py` ∈ **两张表都查不到** ⇒ ⇒ **写权孤儿 ⇒ 只能合并收口执行者改** ⇒ ⇒ **follow 域零落码** ⇒ ⇒ 完整经过与可复跑命令 ⇒ [`users/vs-common.md` §44](../users/vs-common.md)。
 
 ### 11.14 🟢 **Testcontainers 宿主口钉段落码（G4 §4.10.39 ② 的域侧那一半）—— follow 域 6 个容器起点 + 1 台域级守门**（2026-10-27 · G1 lane）
 
@@ -588,3 +588,21 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
 ⇒ ⇒ 完整经过与 users 域那半 ⇒ [`users/vs-common.md` §45](../users/vs-common.md)。
 
 **⑤ 回归口径**：`follow-api` **72**（+0）· `follow-rpc` **81**（+3 = 新守门）⇒ ⇒ follow 域 **153**；我域 6 模块合计 **688** ⇒ ⇒ 详见 [`users/vs-common.md` §45.7](../users/vs-common.md)（含一条「基线过期」的实测订正）。
+
+### 11.15 🟢 **并入 G4 终版 `c26e462`（11 笔 · 零冲突）+ 角色口径改写**（2026-10-27 · G1 lane）
+
+**① 并入 G4 终版（合并提交 `ddb63f7`）**：
+- **代码层零重叠**（实测）：G4 自 merge-base `f6d58de` 以来真正改的代码/工具文件**只有 4 个**，
+  全在共享层 ⇒ ⇒ 与 follow 域写权面（`service/follow/**`）**交集 = 空** ⇒ ⇒ 零冲突是结构性的。
+- **对 follow 域最直接的一条**：`tools/difftest/check-tomcat-limits.py` 改为**直接读共享层真源**
+  ⇒ ⇒ **新版守门实测 `service/follow/follow-api` 四旋钮全 ✅**（① relaxed-chars ② max-param ③ header-size ④ form-gate）
+  ⇒ ⇒ §11.14 之外的 follow 域 api 容器面**没有被并入改坏**。
+- ⚠️ **合并后唯一红点 = `service/task/task-api`**（G2 写权内 · G2 已在他们树用 `4786eb5` 修）
+  ⇒ ⇒ 与 follow 域**无关** ⇒ ⇒ 完整归因与「为什么本轮推翻 §41 的持住决定」⇒ [`users/vs-common.md` §47.1~§47.2](../users/vs-common.md)。
+
+**② 角色口径改写**：本台账 **6 处**「整合者」→ **「合并收口执行者」**（依据 `docs/Worktree.md` §1e · 主干 `4ae5461`）
+⇒ ⇒ 改的**只有角色词**，事实一个没动；**他域台账的同款措辞不在 G1 写权面** ⇒ ⇒ 零落码、登记给合并收口执行者
+⇒ ⇒ 完整边界与清单 ⇒ [`users/vs-common.md` §47.4~§47.5](../users/vs-common.md)。
+
+**③ 共享层新增守门对 follow 域无影响**：`GoStyleRequiredFieldGateTest` 落在 `service/users/users-common/**`（G4 写权）
+⇒ ⇒ 与 follow 域无 import 关系 ⇒ ⇒ **零影响** ⇒ ⇒ 已在我域 `users/common.md` §5.7 点名。
