@@ -1,6 +1,8 @@
 package com.rag.common.protection;
 
 import io.grpc.Metadata;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 import io.grpc.ServerCall;
 import io.grpc.ServerCallHandler;
 import io.grpc.Status;
@@ -178,6 +180,41 @@ class GoStyleRpcSheddingInterceptorTest {
 
         assertThat(call.handlerRan).isTrue();
         assertThat(call.closedStatus.getCode()).isEqualTo(Status.Code.OK);
+    }
+
+    @Test
+    @DisplayName("🔴 RT 测量必须保留小数（Go: float64 毫秒 + ceil）⇒ helper 层不得整型截断")
+    void rtMeasurementKeepsFractionalMilliseconds() {
+        GoStyleRpcSheddingInterceptor interceptor =
+                new GoStyleRpcSheddingInterceptor(shedder(1000), true, GoStyleSheddingStat.getInstance());
+
+        double rt = interceptor.measuredRtMs(System.nanoTime() - 1_500_000L);
+
+        // ⚠️ **只断言下界，不设上界**：机器有负载时，两次 nanoTime() 之间可能隔几百微秒
+        //    ⇒ 实测过 2.47ms ⇒ ⇒ **任何上界都会在慢机上假红** ⇒ ⇒ 而**这正是本条要消灭的那类脆弱性**
+        //    ⇒ ⇒ 判据只抓「有没有被截断」：截断 ⇒ 恰好 1.0（整型毫秒）⇒ 不截断 ⇒ ≥ 1.5。
+        assertThat(rt).as("1.5ms 前开始的调用 ⇒ RT 必须 > 1.0（整型截断会得到恰好 1.0）")
+                .isGreaterThan(1.0D);
+    }
+
+    @Test
+    @DisplayName("🔴 调用点必须把【浮点毫秒】交给被调方（Go: ceil(1.5ms)=2）⇒ 整型截断 ⇒ 记 1 ⇒ 必红")
+    void callSiteMustPassFractionalMillisecondsToShedder() {
+        GoStyleAdaptiveShedder s = shedder(1000);
+        // 假时钟：第 1 次取（startNanos）= 0，第 2 次取（测 RT）= 1_500_000ns ⇒ **RT 恰好 1.5ms**
+        AtomicLong clock = new AtomicLong(0L);
+        LongSupplier fakeClock = () -> clock.getAndIncrement() == 0 ? 0L : 1_500_000L;
+        GoStyleRpcSheddingInterceptor interceptor =
+                new GoStyleRpcSheddingInterceptor(s, true, GoStyleSheddingStat.getInstance(), fakeClock);
+
+        drive(interceptor, Status.Code.OK);
+
+        // Go: adaptiveshedder.go:285-287 ⇒ rt = 1.5 ⇒ math.Ceil(1.5) = 2 ⇒ rtCounter 记 **2**
+        // ⚠️ **这一条才是守「调用点」的网**：上一条只守 helper ⇒ helper 绿、调用点照样能截断
+        //    ⇒ ⇒ **两处都要有网**（与 tools/check-ledger-selfcheck.py 那条「两处契约不一致」同族）。
+        //    ⇒ ⇒ 整型截断 ⇒ 被调方收到 1.0 ⇒ ceil(1.0)=1 ⇒ 记 **1** ⇒ ⇒ 本断言必红。
+        assertThat(s.recordedRtSum()).as("1.5ms 的调用 ⇒ 被调方必须记 2（整型截断会记 1）")
+                .isEqualTo(2L);
     }
 
     private static void sleepOneBucket() {
