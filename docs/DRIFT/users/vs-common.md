@@ -1719,6 +1719,12 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 - ⚠️ **R3 那个「需 G1 自行判定是否刻意」的开放项 —— 我域已判定：不是刻意**：
   - Go 侧生效的是 **go-redis v9 的库默认 `ReadTimeout = 3s`**（真源 `go.mod` pin `go-redis/v9 v9.20.0`）⇒ ⇒ **Go 侧本来就是 3s**；
   - ⇒ 而那个 2s **疑似抄自** go-zero `core/stores/redis/redis.go:27` 的 `readWriteTimeout = 2 * time.Second` ⇒ ⇒ 那个常量是**死常量**（全文件仅此一处、**从未被使用**）⇒ ⇒ **不能当依据** ⇒ ⇒ 故按 3s 对齐。
+  - 🟢 **2026-10-27 交叉验证（G3 引用了 `rest/config.go:55` ⇒ 独立复核后判定：那是【另一层】，不替代本条）**
+    - G3 给的出处 = go-zero `rest/config.go:55` `Timeout int64 \`json:",default=3000"\`` ⇒ 那个字段在 **`rest.RestConf`** 里 ⇒ 是 **HTTP server 的请求超时**，**不是 Redis 的**。
+    - 🔴 **go-zero 的 `core/stores/redis/conf.go` 的 `RedisConf` 根本没有 `Timeout` 字段**（实测：只有 `Host` / `Type` / `User` / `Pass` / `Tls` / `NonBlock` / `PingTimeout`）⇒ ⇒ **Go 侧 Redis 命令超时根本不由 yaml 控制** ⇒ ⇒ 也**不可能**走 `rest` 的默认值。
+    - 且 go-zero `core/stores/redis/redis.go` **全文无 `ReadTimeout`** ⇒ ⇒ **不覆盖** go-redis 的默认 ⇒ ⇒ 真值就是库默认。
+    - ✅ **真源 pin 的版本**（`go.mod:15` = `github.com/redis/go-redis/v9 v9.20.0`）实测 `options.go:364-370` ⇒ `case 0: opt.ReadTimeout = 3 * time.Second`；`:338-339` ⇒ `opt.DialTimeout = 5 * time.Second` ⇒ ⇒ **命令 3s ＋ 连接 5s，与 RAG 侧逐条对齐**。
+    - ⇒ ⇒ **两边数字都对，但指的是【两个不同的量】**：HTTP 预算 3s（go-zero `rest` 默认）≠ Redis 命令超时 3s（go-redis 库默认）⇒ ⇒ **本条 R3 的出处【保持不变】**，G3 的引用**不能**替代它（AGENTS.md §3.3.1：「必须读到**消费**该 tag 的那段控制流」⇒ 配置文件的内容是**意图**，不是**行为**）。
 - ⇒ ⇒ **R1~R4 我域零动作**（已修，不是待办）⇒ ⇒ 已回函告知 G4，并附「我域现态 vs 主干现态」对照表，请它按我域最新提交复核。
 
 ### 27.3 🟢 **G4 的新机器门禁已并入我树，且我域通过**
