@@ -99,6 +99,35 @@
 > ℹ️ **口径说明**：上表的 ✅ 指 **「G4 的回执给了该单的落码 commit ＋ 验证口径」** ⇒ **不等于「本域已复验」** ⇒ 本域复验的前置 = **G4 的共享层 commit 进本树**（本树 HEAD 暂无 `2e2a84f` / `e3f2046` / `a1a2e05` ⇒ `git merge-base --is-ancestor` 全部为否）。
 > ⚠️ **G4 回执给的是第七次全量**（`5564c27` / 2457 条）⇒ 本域台账已按**第八次**（`23d1c2a` / 2461 条）回填（**加注记、不覆写原值**）。
 
+### 4.2 ✅ 拍板结论（2026-10-27 · Jason）—— 本域的**唯一**真决策项已定
+
+#### ① 🔴 **C-3 / U15（= global E65）出向 gRPC 不继承请求 deadline ⇒ 方向已定：等 global 统一载体**
+
+| 项 | 内容 |
+|---|---|
+| **拍板** | **走 global 的统一载体**（`GoStyleRequestDeadline.applyTo(stub)`）⇒ **本轮不改** ⇒ 共享层那半落地后本域照做 |
+| **被否决的备选** | 用 `DeadlineState.remainingMillis()` 直接构造出向 stub deadline |
+| **否决理由（三条）** | ① 会引入**第二种载体** —— 仓内已有 `GoStyleRequestDeadline` 与 `DeadlineState` 两种互不相通的载体，**这正是 global 认定的病根**；② **偏离 Go 的单载体语义** —— Go 侧只有 `ctx` 一个载体（靠 ctx 传播）⇒ **「统一载体」才对应它**；③ 需 global 改探针期望值（`outgoing_carrier` 探针键当前钉的是 `absent` ⇒ 改实现即变红）⇒ **代价明确 ⇒ 不选** |
+| **影响面** | 本域 `comment-rpc` 的 2 个出向出口（`client/ArticleRpcClient.java` · `client/MessageRpcClient.java`）＋ 跨域的 like / message（**G2 域**）⇒ ⇒ **本域那半的前置 = 共享层统一载体落地** |
+
+⚠️ **本轮核出的新事实（防下一个人误引先例）**：本域台账原引「同仓既有先例：`users/admin/AdminDomainService.java:140` · `users/user/UserDomainService.java:145` 已用 `DeadlineState.isExpired()`」⇒
+**实测该先例不成立** —— 那两处是**本地超时检查**（`if (Thread.currentThread().isInterrupted() || DeadlineState.isExpired())` ⇒ 判到期后走本地降级）⇒
+**不是「用 `DeadlineState` 构造出向 gRPC deadline」** ⇒ ⇒ **不得据它论证「仓内已有第二种载体的出向用法」**；
+⚠️ 另：该判断的**行号已漂移**（实测命中在 `AdminDomainService.java:178`）⇒ **引用前须重新定位**。
+
+#### ② 🟡 **C-4（`:9091` metrics 暴露面）⇒ 不升级为拍板（登记类）**
+
+- **依据**：① **不是代码缺陷**（部署形态类，与本域已登记的 U9 同款）⇒ **不阻塞任何落码**；
+  ② **指标内容两侧已对齐** —— Go `service/comment/rpc/internal/metrics/metrics.go:42-43` **主动注销** `collectors.NewGoCollector()` 与 `NewProcessCollector()`
+  ⇒ `:9091` **只暴露 5 个 `comment_*` 向量**（`request_total` · `request_seconds_counter` · `list_size` · `postgres_error_total` · `redis_error_total`）；
+  RAG 侧 `comment-rpc/.../application.yml:277-283` **显式关掉** `management.metrics.enable.jvm` / `.process` ⇒ **同样只暴露 comment_*** ⇒
+  ⇒ ⇒ **差异只在「有没有对外抓取面」，不在指标内容**。
+- **三个选项（留档，将来要改时直接用）**：
+  ① **维持现状**（纯 gRPC 进程无 HTTP 面 ⇒ 指标只在进程内，抓取侧拿不到）
+  ② **给 rpc 进程开一个 HTTP 暴露面**（`management.server.port`）⇒ 代价：**部署形态变更**（纯 gRPC 变「有 HTTP 端」）＋ 抓取路径与 Go 不同（`/actuator/prometheus` vs Go 的 `/metrics`）⇒ 抓取侧要改 URL
+  ③ **照 Go 起一个独立 promhttp `:9091`** ⇒ 代价：**引入第二套指标暴露路径**（与 Actuator 并存 ⇒ 两处维护）
+  ⇒ ⇒ **三条都要拍板才能定** ⇒ **本轮按「登记类不占用拍板额度」处理**（AGENTS.md 协作规则）⇒ **本条仍挂在 §4 的待办清单里**。
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ✅ **2026-10-27 阶段 2 已完成**：`mvn -o -pl service/comment/comment-rpc -am test` ⇒ **comment-rpc 115 条 / 0 failures / 0 errors / 0 skipped**（含 `CommentRpcGrpcInterceptorWiringTest`（**真 gRPC server**）＋ `CommentFlywaySharedSchemaGateTest`（**真 PG ＋ 真 Flyway**）＋ `CommentSqlDeadlinePrecisionGateTest`（**真 PG ＋ 真 Hikari ＋ 真 MyBatis 插件链**）3/3 绿 ＋ **C-3 新增的 `CommentSpanWiringTest`（真 Spring 上下文 ＋ 真 PG ＋ 自装 SDK 收集型 exporter）7/7 绿**）。⚠️ **必须带 `-am`**（否则拿旧共享层跑，见文末「本轮踩坑」）。

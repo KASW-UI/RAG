@@ -705,3 +705,17 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 
 ⚠️ **本块是「加注记」，不是「改原值」**：上文第七次口径（2457 条 / 20:28 min / `5564c27`）**原样保留** ⇒
 读本域历史结论的人**以两块并列为准** ⇒ ⇒ **不要把第八次误读成「第七次作废」**。
+---
+
+### 附录 · 📌 拍板落地注记（2026-10-27 · Jason）＋ 订正一处「既有先例」（U15 / D8 = global E65）
+
+**① 方向已定**：**走 global 统一载体**（`GoStyleRequestDeadline.applyTo(stub)`）⇒ **本轮不改** ⇒ 共享层那半落地后本域照做。
+⇒ **被否决的备选** = 用 `DeadlineState.remainingMillis()` 直接构造出向 stub deadline（理由：会引入第二种载体 ＋ 偏离 Go 的单载体语义 ＋ 需 global 改探针期望值）
+⇒ 完整理由与影响面见 [`vs-common.md`](vs-common.md) **§4.2**。
+
+**② 🔴 订正一处「同仓既有先例」**：本文件 §3.5 与 U15 行原引
+「`users/admin/AdminDomainService.java:140` · `users/user/UserDomainService.java:145` 已用 `DeadlineState.isExpired()`」⇒
+**实测不成立** —— 那两处是**本地超时检查**（`if (Thread.currentThread().isInterrupted() || DeadlineState.isExpired())`）
+⇒ **不是「用 `DeadlineState` 构造出向 gRPC deadline」** ⇒ ⇒ **不得据它论证「仓内已有第二种载体的出向用法」**；
+⚠️ 且该判断的**行号已漂移**（实测命中在 `AdminDomainService.java:178`）⇒ **引用前须重新定位**
+⇒ **保留原值不改写**（本条即订正注记）。
