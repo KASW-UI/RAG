@@ -221,24 +221,58 @@ class ArticleApiAssemblyWiringTest {
                 "traceparent filter 必须排在 MaxConns **之前**（Go 的 TraceHandler 是 native 链第一个 ⇒ "
                         + "被拒成 503 的响应**也带** traceparent）；实际=" + order);
 
+        // ②ter 🔴 2026-10-27（DRIFT-USERAPI-009②）：**JWT 验签 Filter 的两条承重约束**
+        //        （这两条才是行为语义；它与 CpuShedding 的相对位置**不承重**，见下）
+        //   ① **必须在 traceparent 之后** —— Go 侧 `TraceHandler`（`engine.go:135`）是 native
+        //      链**第一个**，`Authorize`（`:108`）在其**内** ⇒ 验签发生在 SERVER span **之内**
+        //      ⇒ RAG 侧验签 Filter 必须排在 `GoStyleTraceparentFilter` **之后**
+        //      ⇒ 否则验签会跑在 span **之外**（span 里看不到这段耗时）。
+        //   ② **必须在 70s 预算之前** —— Go 侧 observability(3s)（`:110-112`）在 `Authorize`
+        //      **内层** ⇒ 计时器在验签**之后**起算 ⇒ RAG 侧验签 Filter 必须排在
+        //      `HttpMiddlewareFilter` **之前** ⇒ 否则验签耗时会**被计入** 70s 预算。
+        int jwtAuth = order.indexOf("GoStyleJwtAuthFilter");
+        assertTrue(jwtAuth >= 0,
+                "本域的 GoStyleJwtAuthFilter 必须真在 Filter 链里"
+                        + "（§3.3：Bean 存在 ≠ 进了链），实际=" + order);
+        assertTrue(traceparent < jwtAuth,
+                "JWT 验签 Filter 必须排在 traceparent **之后**（Go 的 Authorize 在 TraceHandler **之内**"
+                        + " ⇒ 验签耗时必须落进 SERVER span）；实际=" + order);
+        assertTrue(jwtAuth < timeout,
+                "JWT 验签 Filter 必须排在 70s 预算 Filter **之前**（Go 的 observability(3s) 在 Authorize "
+                        + "**内层** ⇒ 计时器在验签之后起算 ⇒ 验签耗时不计入预算）；实际=" + order);
+
         // ③ 🔴 **完整链序**钉死（2026-10-24 真容器实测得出，2026-10-25 第十九轮插入 traceparent）
         // ⚠️ 2026-10-25 起**前两位不再同级**：CORS(+1) / path.Clean(+2) **各自显式取值**
         //    ⇒ 它们的相对顺序现在**由 @Order 表达**，不再依赖 Bean 注册序（此前是隐式依赖）。
         //    而 Go 侧这个相对顺序是明确的：**CORS 在外、path.Clean 在内**
         //    （server.go:148-153 的 WithCors 包装的是 router，patrouter.go:48,60 的 path.Clean 在 router 内部）
         //    ⇒ 实测结果与 Go **一致**，不是巧合。
+        //
+        // ⚠️ **2026-10-27（DRIFT-USERAPI-009②）新增 `GoStyleJwtAuthFilter`**：
+        //    Go 侧 `rest/engine.go:108` 的 `Authorize(JWT)` 排在 `:110-112` 的 observability(3s)
+        //    **之外**（更外层）⇒ 验签在 70s 预算**之外** ⇒ RAG 侧必须把验签 Filter 排在
+        //    `HttpMiddlewareFilter` **之前** ⇒ 本列表里它在 Breaker 与 CpuShedding 之间。
+        //    🔴 **它与 `GoStyleCpuSheddingFilter` 并列 +6**（共享层已占满 [+3,+6] 四槽
+        //    ⇒ 合法窗口里没有别的空位）⇒ 两者的**相对位置由组件扫描顺序决定**
+        //    （本域 `com.rag.article.article.api` 先于 `com.rag.common`）⇒
+        //    ⚠️ **这条相对顺序【不承重】**：本 Filter **绝不写响应** ⇒ 与 CpuShedding 互换
+        //    **不改变任何可观察行为** ⇒ 真正的承重约束只有「traceparent 之内、70s 预算之外」两条。
         assertEquals(List.of(
                         "ArticleGoStyleCorsFilter",
                         "GoStylePathNormalizingFilter",
                         "GoStyleTraceparentFilter",
                         "GoStyleMaxConnsFilter",
                         "GoStyleBreakerFilter",
+                        "GoStyleJwtAuthFilter",
                         "GoStyleCpuSheddingFilter",
                         "HttpMiddlewareFilter",
                         "GoStyleMaxBytesFilter",
                         "GoStyleJsonBodyLimitFilter"),
                 order,
-                "真容器实测的 Filter 链序；Go 对应链序见方法 javadoc");
+                "真容器实测的 Filter 链序；Go 对应链序见方法 javadoc"
+                        + "（⚠️ GoStyleJwtAuthFilter 与 GoStyleCpuSheddingFilter 并列 +6 ⇒ "
+                        + "两者相对位置由扫描顺序决定、**不承重** ⇒ 若本条**只因这两个互换**而红，"
+                        + "那是注册序变化、**不是行为回归**）");
 
         // ④ 🔴 2026-10-25 第十四轮：Go 的 query 解析与 form 值上限闸门**不再是 Filter**，
         //    而是 Spring MVC 的 **HandlerInterceptor**（共享层 `GoStyleFormValueLimitInterceptor`）。
