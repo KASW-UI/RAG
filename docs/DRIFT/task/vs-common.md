@@ -441,3 +441,22 @@ G4 的 `cd893d1` 同时新增了一个**共享层**守门：`service/common/src/
 ⇒ ⇒ 🟢 **另一条前提复核（本域台账 §「合并后我域必做」第 2 条的 ⑤⑥）**：G4 新树里 `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java:131` **仍只** `builder -> builder.disconnectedBehavior(...)` ⇒ ⇒ **不碰 `timeoutOptions`、不碰池** ⇒ ⇒ **本域「池守门 ⑤⑥ 不受共享层收编影响」的前提在新树里仍成立**（`cd893d1` 只改了那个文件的 3 行 javadoc「三份→五份」）⇒ ⇒ **本域 Redis 侧无需新增动作**
 
 ⇒ ⇒ 📌 **顺带一条「我自己的路径引用也会过期」的实例**：本条复核里我第一次按 `service/common/src/main/java/com/rag/common/spring/GoStyleRedisClientAutoConfiguration.java` 去查 ⇒ **零命中** ⇒ 实际路径是 **`.../common/redis/`**（不是 `.../common/spring/`）⇒ ⇒ **同 §「跨树引用必须带 commit id」** —— 路径也会漂 ⇒ ⇒ **跨树引用要连路径一起在该 commit 上重新定位**
+
+### 🟢 **task-api 活体验证**（2026-10-27 13:17:53 → 13:18:24）· yml 注释改动**零行为影响**
+
+**验什么**：`service/task/task-api/src/main/resources/application.yml` 的 ② 段注释被改成 **merge-conditional**（本树现状 = 停在 2048 / 合并 G4 `cd893d1` 后 = 无条件抬到 10001）⇒ ⇒ **必须证明「注释改动没碰坏配置解析、进程仍起得来、form 守门仍全绿」**。
+
+| 口径 | 值 |
+|---|---|
+| 命令 | `mvn -o -B -pl service/task/task-api test`（**模块级**） |
+| 结果 | **Tests run: 97, Failures: 0, Errors: 0, Skipped: 0** · **BUILD SUCCESS** · 36.832 s |
+| 数字口径 | 本轮 mtime 切的 surefire XML 求和（起跑标记 epoch `1793078266`）⇒ **0 stale 报告**（与 8 模块那轮同一口径） |
+| 真 Tomcat | 起在 **21801**（本域专用段 **21800–21899**）⇒ **端口治理未受影响**（未落进 OS 临时段） |
+| 配置解析 | `rag.http.go-form-limit.mode` = **字符串 `'off'`**（Python yaml 解析确认 · 非 YAML 1.1 的布尔 `False`）⇒ **起得来即证明** |
+
+**`TaskApiFormLimitReachabilityTest` 6 条逐条全绿**（真 Tomcat + `HttpURLConnection`）：
+`bindsToDedicatedPortSegment` · `formLimitGateMustBeOff`（**直接**断言 `GoStyleFormLimitInterceptor#mode() == Mode.OFF` ⇒ 区分「关掉」与「根本没装」）· `overLimitNonEmptyQueryValuesAreAccepted`（**>2048 个非空 query 值 ⇒ 200**）· `malformedPercentEncodingQueryIsAccepted`（`?a=%zz`）· `semicolonSeparatedQueryIsAccepted`（`?a=1;b=2`）· `normalRequestStillWorks`（阳性对照）
+
+⚠️ **窗口与口径纪律（两条，随数字一起留档）**：
+- **窗口**：G4 13:09 起第 12 次全量（ETA ~13:31）⇒ 按其知会只跑**模块级 `-pl`** ⇒ ⇒ **全量并发会被 OOM-kill（EXIT=137）** ⇒ ⇒ 与 8 模块那轮的 637 **不是同一口径**（单模块 vs 8 模块）⇒ ⇒ **不可相加、不可并列引用**
+- ⇒ ⇒ **合并 G4 后仍需复跑**：本次只证明了**本树（含旧版共享层）**的形态 ⇒ **合并后的形态（容器上限 10001）要由收口回归验证**（本守门在两种形态下都应全 200 ⇒ 若合并后变红 ⇒ 说明 Tomcat 真开始解析参数 ⇒ 查本域是否新增 `getParameter*`）
