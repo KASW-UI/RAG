@@ -65,13 +65,17 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
  *   <li><b>各 rpc 组件</b>：comment / like / hot / task 的缓存读写在 Redis 断连时
  *       同样会<b>挂起</b>而不是快速失败 ⇒ 与 Go 的「快速失败」不一致。</li>
  * </ul>
- * ⇒ 上移到共享层 ⇒ <b>零域侧改动</b>即让全部用 Redis 的组件获得 Go 的失败语义。
+ * ⇒ 上移到共享层 ⇒ <b>零域侧改动</b>即让<b>没有域内副本</b>的用 Redis 组件获得 Go 的失败语义。
  *
- * <p><b>⚠️ 过渡期与 users 域那份并存 ⇒ 幂等，不是冲突</b>：
- * 两份都把 {@code disconnectedBehavior} 设成 {@code REJECT_COMMANDS} ⇒
- * Boot 的 {@code LettuceClientOptionsBuilderCustomizer} 会把<b>所有</b> customizer 依次应用
- * ⇒ 后者覆盖前者，<b>值相同 ⇒ 结果相同</b>。
- * ⇒ ⇒ users 域那份可在合并后单独删除（纯删除、零行为变化）。
+ * <p><b>⚠️ 域内副本与本类并存时，是「遮蔽」不是「叠加」（2026-10-27 实测订正）</b>：
+ * 本类的 {@code @Bean} 带 {@code @ConditionalOnMissingBean} ⇒
+ * <b>域内一旦已定义 {@code LettuceClientOptionsBuilderCustomizer}，共享层这份 Bean 根本不会被创建</b>
+ * ⇒ 容器里<b>只有一份</b> customizer ⇒ <b>不存在「后者覆盖前者」的叠加顺序问题</b>。
+ * ⇒ 净效果：断连行为仍为 {@code REJECT_COMMANDS}（域内副本与本类<b>逐字同值</b>）⇒ <b>对外行为零变化</b>；
+ * ⚠️ <b>但代价是「遮蔽」</b>：共享层的任何后续改动（例如 E66 的 {@code timeoutOptions}）
+ * 在<b>仍有域内副本的域</b>会<b>静默不生效</b> ⇒ ⇒ <b>域内副本必须删除</b>，删除才是真正的收编。
+ * 删除前须逐条核对两侧<b>同值</b>（本仓现状：三份域内副本都只设
+ * {@code disconnectedBehavior(REJECT_COMMANDS)}、都<b>不碰</b> {@code timeoutOptions} ⇒ 纯删除、零行为变化）。
  *
  * <p><b>⚠️ 为什么用自动配置而不是 {@code @Component}</b>：
  * 本类引用 {@link io.lettuce.core.ClientOptions} 与 {@link LettuceConnectionFactory}
@@ -99,11 +103,26 @@ public class GoStyleRedisClientAutoConfiguration {
      * <p>⚠️ Bean 名固定为 {@code goStyleRedisClientOptionsCustomizer}
      * ⇒ 便于守门按名字精确断言「共享层这一份确实在容器里」。
      *
-     * <p>⚠️ <b>为什么有 {@code @ConditionalOnMissingBean}</b>：本类位于 {@code com.rag.common.redis}
-     * ⇒ <b>api 组件的 {@code scanBasePackages} 含 {@code com.rag.common}</b>
-     * ⇒ 本类会<b>既被组件扫描、又被自动配置清单</b>各注册一次
-     * ⇒ 两者 {@code @Bean} 方法名相同 ⇒ 不同名冲突 ⇒ <b>启动直接失败</b>
-     * ⇒ ⇒ 必须去重（与 {@code GoStylePathNormalizingAutoConfiguration} 同一套办法）。
+     * <p>⚠️ <b>为什么有 {@code @ConditionalOnMissingBean}</b>（2026-10-27 字节码级订正）
+     * ⇒ <b>原注释的理由是错的</b>：它说「本类会被组件扫描与自动配置清单各注册一次 ⇒ 启动直接失败」。
+     * ⇒ <b>实测不成立</b>（Boot 4.0.8）：
+     * <ul>
+     *   <li>{@code @AutoConfiguration} <b>元注解就是 {@code @Configuration}</b>
+     *       （{@code javap} ⇒ {@code @AliasFor(annotation = Configuration.class)}）；</li>
+     *   <li>而 {@code AutoConfigurationExcludeFilter}（{@code @SpringBootApplication} 内建的
+     *       {@code @ComponentScan} 排除过滤器之一；{@code task-api} 甚至显式把它重写了一遍）
+     *       的判据是：<b>既是 {@code @Configuration}、又出现在 {@code AutoConfiguration.imports} 清单里</b>
+     *       ⇒ <b>本类被排除出组件扫描</b>；</li>
+     *   <li>⇒ 本类<b>只经自动配置清单注册一次</b> ⇒ <b>不存在双重注册</b>
+     *       ⇒ 原注释描述的「启动直接失败」<b>不成立</b>。</li>
+     * </ul>
+     * ⇒ <b>本条件注解的真实作用</b>：<b>让域内副本优先</b> ——
+     * 域内若已定义 {@code LettuceClientOptionsBuilderCustomizer}，本层<b>退让</b>、不叠加第二份
+     * ⇒ 容器里恒为<b>恰好一份</b> customizer（守门按此断言）。
+     * ⚠️ <b>代价 = 遮蔽</b>：域内副本存在时本层在该域<b>完全不生效</b>
+     * ⇒ 共享层的任何后续改动（例如 E66 的 {@code timeoutOptions}）在该域<b>静默不生效</b>
+     * ⇒ ⇒ <b>域内副本必须删除</b>，删除才是真正的收编。
+     * 守门：{@code GoStyleRedisClientOptionsPrecedenceGateTest}（钉住「遮蔽」而非「叠加」这个契约）。
      */
     @Bean
     @ConditionalOnMissingBean
