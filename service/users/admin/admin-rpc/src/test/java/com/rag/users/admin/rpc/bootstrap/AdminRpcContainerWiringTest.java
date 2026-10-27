@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * admin-rpc 真实 Spring 容器 + 真实 PostgreSQL 集成测试（issue #71186443）。
@@ -86,7 +87,7 @@ class AdminRpcContainerWiringTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("admin_rpc_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

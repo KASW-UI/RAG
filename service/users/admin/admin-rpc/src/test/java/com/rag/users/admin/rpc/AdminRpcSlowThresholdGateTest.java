@@ -45,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 <b>slow threshold 分支的独立守门</b>（global L2 · X-5 残留的第二半）。
@@ -114,7 +115,7 @@ class AdminRpcSlowThresholdGateTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("admin_rpc_slow_threshold_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

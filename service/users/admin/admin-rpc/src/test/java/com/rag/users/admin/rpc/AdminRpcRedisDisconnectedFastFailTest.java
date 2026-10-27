@@ -45,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 admin-rpc 的 <b>Redis 断连行为</b>必须与 Go 真源同形：<b>快速失败</b> ⇒ 客户端拿到
@@ -133,7 +134,7 @@ class AdminRpcRedisDisconnectedFastFailTest {
 
     @Container
     static final GenericContainer<?> REDIS =
-            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379).withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 6379));
 
     /** app 与 Redis 之间的透传代理（上游地址延迟解析 ⇒ 容器起来前就能建好）。 */
     static final GracefulDisconnectProxy PROXY = GracefulDisconnectProxy.create(() -> {

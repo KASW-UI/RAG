@@ -27,6 +27,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * R5 防回归测试 —— {@code admin.create} 里 bcrypt 哈希与前置业务检查的<b>先后顺序</b>。
@@ -77,7 +78,7 @@ class AdminCreatePasswordOrderRegressionTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("admin_rpc_r5_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

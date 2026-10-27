@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static com.rag.follow.follow.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 「gRPC interceptor 真的挂到 server 上了吗」的<b>运行期</b>证据 —— AGENTS.md §3.3 的核心命题。
@@ -86,7 +87,7 @@ class FollowGrpcInterceptorWiringTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("follow_rpc_interceptor_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 DRIFT-ARPC-004 ①② 守门测试 —— admin 域 DDL 列类型与 Go 真源同构。
@@ -99,7 +100,7 @@ class AdminRpcColumnTypeParityTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("admin_rpc_column_parity_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

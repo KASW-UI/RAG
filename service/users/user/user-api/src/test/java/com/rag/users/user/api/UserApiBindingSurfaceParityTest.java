@@ -25,6 +25,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static com.rag.users.user.api.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 <b>锁死「user-api 的绑定面只有 JSON body」这一事实</b> ——
@@ -110,7 +111,7 @@ class UserApiBindingSurfaceParityTest {
 
     @Container
     static final GenericContainer<?> REDIS =
-            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379).withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 6379));
 
     @DynamicPropertySource
     static void redis(DynamicPropertyRegistry r) {

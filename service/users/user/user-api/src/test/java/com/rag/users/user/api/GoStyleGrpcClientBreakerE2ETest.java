@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static com.rag.users.user.api.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 <b>user-api 的 gRPC client 熔断</b>：真 in-process gRPC server + 真 channel + 真拦截器。
@@ -114,7 +115,7 @@ class GoStyleGrpcClientBreakerE2ETest {
 
     @Container
     static final GenericContainer<?> REDIS =
-            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379).withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 6379));
 
     @DynamicPropertySource
     static void redis(DynamicPropertyRegistry r) {

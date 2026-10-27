@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * <p><b>关闭 {@code DRIFT-USERRPC-V-006}</b>：两张表的 {@code id} 取值来源
@@ -73,7 +74,7 @@ class UserRpcPrimaryKeySourceParityTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("user_rpc_pk_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

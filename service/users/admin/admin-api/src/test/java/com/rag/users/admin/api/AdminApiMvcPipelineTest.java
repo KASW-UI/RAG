@@ -33,6 +33,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static com.rag.users.admin.api.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * admin-api 真实 MVC 管线集成测试（issue #71186443）。
@@ -83,7 +84,7 @@ class AdminApiMvcPipelineTest {
 
     @Container
     static final GenericContainer<?> REDIS =
-            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379).withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 6379));
 
     @DynamicPropertySource
     static void redis(DynamicPropertyRegistry r) {

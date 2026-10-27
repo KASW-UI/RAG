@@ -33,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 DRIFT-ARPC-006 守门 —— admin-rpc 的手写 span 必须<b>真的被导出</b>。
@@ -77,7 +78,7 @@ class AdminSpanWiringTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("admin_rpc_span_wiring_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

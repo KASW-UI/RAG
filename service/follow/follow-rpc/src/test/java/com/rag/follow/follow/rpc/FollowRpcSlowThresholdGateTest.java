@@ -49,6 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static com.rag.follow.follow.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 <b>slow threshold 分支的独立守门</b>（global L9 · task-rpc / follow-rpc 的 X-5 之外的另一半）。
@@ -153,7 +154,7 @@ class FollowRpcSlowThresholdGateTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("follow_rpc_slow_threshold_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

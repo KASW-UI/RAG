@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 守门测试 —— {@code users_user.status IS NULL} 的读取语义
@@ -95,7 +96,7 @@ class UserRpcLoginNullStatusReadsAsZeroTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("users_login_null_status_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

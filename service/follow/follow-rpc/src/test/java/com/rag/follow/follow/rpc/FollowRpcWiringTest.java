@@ -32,6 +32,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static com.rag.follow.follow.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * §6.3 / §3.3 的真 PG 证据 —— 在<b>真实 PostgreSQL 16</b> 上验证
@@ -83,7 +84,7 @@ class FollowRpcWiringTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("follow_rpc_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

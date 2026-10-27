@@ -41,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static com.rag.follow.follow.api.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 follow-api 的 **Redis 断连行为**必须与 Go 真源同形：<b>快速失败 ⇒ fail-open 放行</b>。
@@ -187,7 +188,7 @@ class FollowApiRedisDisconnectedFastFailTest {
 
     @Container
     static final GenericContainer<?> REDIS =
-            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379).withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 6379));
 
     /**
      * app 与 Redis 之间的透传代理。

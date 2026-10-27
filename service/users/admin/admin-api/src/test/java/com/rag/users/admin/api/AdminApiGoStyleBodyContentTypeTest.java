@@ -30,6 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static com.rag.users.admin.api.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * <b>admin-api 自动继承了共享的请求体判据，却从未被任何测试覆盖过。</b>
@@ -106,7 +107,7 @@ class AdminApiGoStyleBodyContentTypeTest {
 
     @Container
     static final GenericContainer<?> REDIS =
-            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379).withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 6379));
 
     @DynamicPropertySource
     static void redis(DynamicPropertyRegistry r) {

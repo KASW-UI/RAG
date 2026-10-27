@@ -2,22 +2,17 @@ package com.rag.users.user.rpc;
 
 import com.github.dockerjava.api.command.CreateContainerCmd;
 import com.github.dockerjava.api.model.ExposedPort;
-import com.github.dockerjava.api.model.HostConfig;
-import com.github.dockerjava.api.model.PortBinding;
-import com.github.dockerjava.api.model.Ports;
+import com.rag.users.user.rpc.support.GoStyleHostPortPinning;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.PostgreSQLContainer;
 
-import java.io.IOException;
-import java.net.ServerSocket;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -58,25 +53,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class UserRpcTestcontainersHostPortSegmentGateTest {
 
     /** G4 §4.10.39 ② 分配的 users 域宿主口段。 */
-    static final int SEGMENT_START = 22700;
-    static final int SEGMENT_END = 22729;
+    static final int SEGMENT_START = GoStyleHostPortPinning.SEGMENT_START;
+    static final int SEGMENT_END = GoStyleHostPortPinning.SEGMENT_END;
 
     /**
-     * 在分配段内挑一个**当前空闲**的宿主口。
+     * 在分配段内挑一个<b>当前空闲</b>的宿主口。
      *
-     * <p>「占用要可自愈」：被占时**换同段内下一个**，而不是直接失败 ⇒ ⇒ 这也是
+     * <p>「占用要可自愈」：被占时<b>换同段内下一个</b>，而不是直接失败 ⇒ ⇒ 这也是
      * 「不把钉口写成端口写死」的实现形态 —— 同段内仍能并行起多个容器。
+     *
+     * <p>⚠️ <b>本类不再自带实现</b> ⇒ ⇒ 统一委托给 {@link GoStyleHostPortPinning}
+     * ⇒ ⇒ 这样本探针测的**就是落地工具本体**，而不是一份会漂的副本。
      */
     static int pickFreeHostPortInSegment() {
-        for (int p = SEGMENT_START; p <= SEGMENT_END; p++) {
-            try (ServerSocket probe = new ServerSocket(p)) {
-                probe.setReuseAddress(false);
-                return p;
-            } catch (IOException taken) {
-                // 该口已被占 ⇒ 换同段内下一个（自愈）
-            }
-        }
-        throw new IllegalStateException("分配段 " + SEGMENT_START + "-" + SEGMENT_END + " 已无空闲宿主口");
+        return GoStyleHostPortPinning.pickFreeHostPortInSegment();
     }
 
     /**
@@ -88,6 +78,14 @@ class UserRpcTestcontainersHostPortSegmentGateTest {
     /**
      * 把指定容器口的宿主口**钉死**到 {@code hostPort}，并保留其它容器口的既有绑定。
      *
+     * <p>⚠️ <b>绑定的替换语义（读消费点得出，不是猜）</b>：
+     * {@code HostConfig.withPortBindings(List)} 是<b>整体替换</b>而不是追加
+     * ⇒ ⇒ 若只往里加一条固定绑定，默认那条随机绑定会与之并存（同一个容器口两条绑定）⇒ ⇒ 必须先
+     * <b>剔除该容器口的旧绑定</b>，再放固定绑定；<b>其它容器口的绑定必须原样保留</b>。
+     *
+     * <p>⇒ ⇒ 实现在 {@link GoStyleHostPortPinning#pinContainerPort}（本类只负责「记录 modifier 看到的暴露口」
+     * 这条<b>探针专用</b>的观测，再委托给落地工具）。
+     *
      * @param cmd           Testcontainers 组装好的 create 指令
      * @param hostPort      要钉的宿主口
      * @param containerPort 容器内口
@@ -97,26 +95,7 @@ class UserRpcTestcontainersHostPortSegmentGateTest {
         for (ExposedPort exposed : cmd.getExposedPorts()) {
             EXPOSED_PORTS_SEEN_BY_MODIFIER.add(exposed.getPort());
         }
-        HostConfig hostConfig = cmd.getHostConfig();
-        if (hostConfig == null) {
-            hostConfig = new HostConfig();
-            cmd.withHostConfig(hostConfig);
-        }
-        List<PortBinding> merged = new ArrayList<>();
-        Ports existing = hostConfig.getPortBindings();
-        if (existing != null) {
-            for (Map.Entry<ExposedPort, Ports.Binding[]> entry : existing.getBindings().entrySet()) {
-                if (entry.getKey().getPort() == containerPort) {
-                    // 剔除该容器口的默认随机绑定（否则同一个容器口会有两条绑定）
-                    continue;
-                }
-                for (Ports.Binding binding : entry.getValue()) {
-                    merged.add(new PortBinding(binding, entry.getKey()));
-                }
-            }
-        }
-        merged.add(new PortBinding(Ports.Binding.bindPort(hostPort), ExposedPort.tcp(containerPort)));
-        hostConfig.withPortBindings(merged);
+        GoStyleHostPortPinning.pinContainerPort(cmd, containerPort, hostPort);
     }
 
     @Test

@@ -571,3 +571,20 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
 
 **④ 🔴 顺带挖出：台账自检**从未查过 follow 域** ⇒ 本轮按域跑才见红**：`tools/check-ledger-selfcheck.py` 的 `LEDGER_FILES` 只有 `task` / `users` / `users-admin` 三个域键 ⇒ ⇒ **`follow` 域 + `users/{vs-common,common}.md` 这 7 份台账从来没被它查过** ⇒ ⇒ **默认参数跑出来的 EXIT=0 查的是 task 域** ⇒ ⇒ 本轮用**门禁自己的层-1 判据**单独扫了那 7 份 ⇒ ⇒ **8 处失效引用**（两轮「真删除」收编删了文件、台账历史记述仍写全路径）⇒ ⇒ 已逐条**如实标注状态**（不是让门禁闭嘴）⇒ ⇒ 复扫 **118 个引用路径 ⇒ 缺失 0**。
 ⇒ ⇒ 落点 `tools/check-ledger-selfcheck.py` ∈ **两张表都查不到** ⇒ ⇒ **写权孤儿 ⇒ 只能整合者改** ⇒ ⇒ **follow 域零落码** ⇒ ⇒ 完整经过与可复跑命令 ⇒ [`users/vs-common.md` §44](../users/vs-common.md)。
+
+### 11.14 🟢 **Testcontainers 宿主口钉段落码（G4 §4.10.39 ② 的域侧那一半）—— follow 域 6 个容器起点 + 1 台域级守门**（2026-10-27 · G1 lane）
+
+**① 落码（follow 域部分）**：
+- **2 份** `GoStyleHostPortPinning`（`follow-api` / `follow-rpc` 各一份）⇒ 段 = **follow 域 `22730–22759`**（G4 §4.10.39 ②）⇒ ⇒ **全部落在 OS 临时段 `49152–65535` 之外**。
+- **6 个容器起点**各加一行 `.withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, <5432|6379>))`：`follow-api` 2 个（Redis 6379）· `follow-rpc` 4 个（PG 5432）—— `FollowApiRedisDisconnectedFastFailTest` · `FollowFlywaySharedSchemaGateTest` · `FollowGrpcInterceptorWiringTest` · `FollowRpcSlowThresholdGateTest` · `FollowRpcWiringTest`。
+- **1 台域级守门** `FollowDomainHostPortPinningGateTest`（3 条断言）：① **覆盖（守恒）**：域内每个容器起点都带 modifier 且钉的是该容器自己的口 · ② **段正确**：在 `22730–22759` 内且**与 OS 临时段不相交** · ③ **副本等价**：2 份 helper 剥注释后逐字等价。
+
+**② 为什么是「段内挑空闲口」而不是写死一个口**：本模块 surefire 设 `TESTCONTAINERS_RYUK_DISABLED=true` ⇒ **Ryuk 不回收** ⇒ 残留容器可能**跨轮存在** ⇒ ⇒ 写死一个口 ⇒ 残留占住 ⇒ Docker 绑口**硬失败** ⇒ ⇒ **把「偶发撞口」换成「确定性撞口」⇒ 方向反了** ⇒ ⇒ 「段内挑空闲」可自愈。
+⚠️ **残留的竞态（如实登记）**：「探端口」与 Docker「绑端口」之间有极小窗口 ⇒ ⇒ 两个 JVM 同时挑中同一个口 ⇒ ⇒ 后绑者**硬失败**（大声失败，不是静默走偏）。
+
+**③ 真容器那一层 follow 域不重复起容器**：「钉口后 `getMappedPort()` == 那个固定口且真连得通」由 users 域的 `UserRpcTestcontainersHostPortSegmentGateTest` 实测（L4）⇒ ⇒ follow 域靠①（覆盖）+③（副本等价）保证「用的是同一份实现」⇒ ⇒ **不重复起容器**（follow 域的容器测试已够慢）。
+
+**④ 变异验证**（users 域那份守门上实测，三条断言各有判别力）：A 拿掉一个钉口 ⇒ 只有①红 · B 把段起点改成 `49152` ⇒ 只有②红 · C 改一份 helper 的逻辑 ⇒ 只有③红 ⇒ ⇒ 复原后 **3+3 全绿**。
+⇒ ⇒ 完整经过与 users 域那半 ⇒ [`users/vs-common.md` §45](../users/vs-common.md)。
+
+**⑤ 回归口径**：`follow-api` **72**（+0）· `follow-rpc` **81**（+3 = 新守门）⇒ ⇒ follow 域 **153**；我域 6 模块合计 **688** ⇒ ⇒ 详见 [`users/vs-common.md` §45.7](../users/vs-common.md)（含一条「基线过期」的实测订正）。

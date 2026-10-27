@@ -36,6 +36,7 @@ import java.util.TimeZone;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 守门测试 —— users 域<b>唯一 wire 可见</b>的时间列：{@code users_user_avatar_history}。
@@ -137,7 +138,7 @@ class UserRpcAvatarHistoryTimestamptzParityTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("user_rpc_avatar_tstz_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

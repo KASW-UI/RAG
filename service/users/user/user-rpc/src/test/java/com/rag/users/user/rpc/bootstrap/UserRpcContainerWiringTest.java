@@ -49,6 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * user-rpc 真实 Spring 容器 + 真实 PostgreSQL 集成测试。
@@ -118,7 +119,7 @@ class UserRpcContainerWiringTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("user_rpc_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
