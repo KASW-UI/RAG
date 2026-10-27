@@ -1728,12 +1728,61 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 
 ---
 
+#### 4.10.28 🟢 **把「不得新建域内 Redis 副本」从台账禁令落成机器门禁**（G2 的显式禁止项 ⇒ 台账拦不住人 ⇒ 源文件扫描守门 · 提交 `22dc67e`）
+
+> **触发**：G2 在其域台账里写了**显式禁止项**（「不得新建域内 Redis 副本」）⇒ ⇒ 本层的判断是：
+> **台账禁令拦不住人** ⇒ ⇒ 域侧 agent **看不到**共享层台账（各域各一份 ⇒ 零重叠 ⇒ 不自动送达）⇒ ⇒
+> 「域内新建一份更保险」这种直觉很容易被执行 ⇒ ⇒ ⇒ **必须有机器闸门**。
+> ⇒ ⇒ 本节 = 把那条禁令**落成「真构建会红」的守门**。
+
+##### 4.10.28.1 落码（**零生产改动** ⇒ 零运行时行为变化）
+
+| 项 | 值 |
+|---|---|
+| 新增守门 | `service/common/src/test/java/com/rag/common/redis/GoStyleRedisClientShadowingGateTest.java`（**3 条**） |
+| 生产代码 | **零改动**（只加测试面） |
+| 判据 | 扫 `service/**/src/main/java`（**排除 `service/common`**）找 `LettuceClientOptionsBuilderCustomizer` ⇒ ⇒ **白名单之外零命中** |
+| 白名单 | `service/users/user/user-api/src/main/java/com/rag/users/user/api/config/RedisDisconnectedBehaviorConfig.java`（**收编前的遗留** · 第九轮修 `DRIFT-USERAPI-014` 落的原件） |
+| 扫描根 | **从 code source 向上找**（同时含 `service/` 与 `pom.xml` 的目录）⇒ ⇒ **不依赖工作目录**（surefire 的 cwd = 模块目录 · IDE = 仓库根 ⇒ 两种布局都得对） |
+| Go 出处 | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:14`（`maxRetries = 3` ⇒ 断连**立即失败**）＋ `service/user/user/api/internal/middleware/checkblacklistmiddleware.go:35-36`（`err != nil` ⇒ **放行**）⇒ ⇒ 断连要**快速失败**才进得了 fail-open 那段 |
+
+##### 4.10.28.2 🔴 三条断言 ＋ **每条一条专属变异**（实测：每次**只有那一条**红）
+
+| 断言 | 断言什么 | 专属变异 | 实测结果 |
+|---|---|---|---|
+| ① `noDomainSideShadowingCopyExists` | 白名单之外**零**声明（闸门的主断言） | **M1** = 白名单跳过失效（`allowed.contains(...)` → `false && ...`） | ✅ **只有 ① 红**（`Failures: 1` · 报出 user-api 那份） |
+| ② `scannerActuallyReportsACopy` | **临时目录**造假副本 ⇒ 扫描器**必须**报出（防 ① 是「什么都没扫到」的**假绿**） | **M2** = 只扫「有 `pom.xml` 的 Maven 模块」（临时假模块没有 `pom.xml`） | ✅ **只有 ② 红** |
+| ③ `scannerSeesTheRealRepository` | **真实仓**自检：(a) 关掉共享层排除 ⇒ 必须扫到**共享层那份**（锚点恒存在）；(b) 白名单中**仍存在**的每一份 ⇒ 必须都能扫到 | **M3** = 扫描器跳过路径含 `/com/rag/common/` 的文件 | ✅ **只有 ③ 红**（报「在**真实仓**里根本扫不到声明 ⇒ 断言①是假绿」） |
+
+⇒ ⇒ **还原方式 = 字节备份 + md5 双向校验**（**不用 `git checkout --`** ⇒ 本文件当时是**未跟踪的新文件** ⇒ `checkout` 会**无声抹掉**真实改动）⇒ ⇒ 三次还原 md5 全部 `1714c7ff4e094451857aeb222bd4ecf6`（一致）。
+⇒ ⇒ ⚠️ **实现层刻意不带「模块必须有 `pom.xml`」这条约束**（它就是 M2 的注入点）⇒ ⇒ 写在实现里会让断言②**直接红**（第一次跑正是如此 ⇒ 已改）⇒ ⇒ **「变异注入点」不得提前落进实现**。
+
+##### 4.10.28.3 🔴 **白名单必须自适应**（收编完成后**不得**变红）
+
+> G1 已 merge 本分支（`b19a61a`「收编删除的前置」）⇒ ⇒ 他们的工作区里 **5 份 `RedisDisconnectedBehaviorConfig` 已 `D`（已暂存删除）**
+> ⇒ ⇒ **白名单里的 user-api 那份也会被删掉** ⇒ ⇒ 若断言写成「白名单那份必须存在」⇒ ⇒ **收编一完成这条守门就红**
+> ⇒ ⇒ **红的原因与守门意图无关** ⇒ ⇒ **那是最坏的一种红** ⇒ ⇒ 故本守门的设计是三条自适应：
+> ① **白名单项文件不存在 ⇒ 自动跳过**（不红，并在断言消息里提示清空白名单）；
+> ② 断言③(a) 的锚点用**共享层那份**（`GoStyleRedisClientAutoConfiguration` · 本层不删 ⇒ **恒存在**）⇒ ⇒ 收编前后**恒有断言**；
+> ③ 断言③(b) 只断言「白名单中**仍存在**的每一份能被扫到」⇒ ⇒ 收编完成后自动为空 ⇒ ⇒ **不红**。
+> ⇒ ⇒ **收编完成后的正确处置 = 清空白名单**（本层写权）。
+
+##### 4.10.28.4 ⚠️ 边界（**不外推**）
+
+| 项 | 说明 |
+|---|---|
+| 判据是「文件里出现该类型名」 | ⇒ ⇒ **保守**（引用即算）⇒ ⇒ 但仓内现状：**生产源码里出现该类型名的只有 2 份**（共享层那份 + user-api 那份遗留）⇒ ⇒ **无误报面** |
+| 只扫**生产**源码 | ⇒ ⇒ 域侧**测试**里引用该类型是允许的（测试不产生生产 Bean）⇒ ⇒ 共享层自己的测试替身 `DomainLikeRedisDisconnectedBehaviorConfig` 也在允许范围内 |
+| 跨 lane 表现 | G2/G3 树里 user-api 那份**存在** ⇒ ⇒ 绿；G1 树里删完 ⇒ ⇒ 白名单项失效 ⇒ ⇒ **仍绿**（§4.10.28.3）⇒ ⇒ **这条守门不会因为别的 lane 收编而变红** |
+| 证据强度 | **L2（构建期）** —— 它证明的是「**再建一份就会红**」⇒ ⇒ **不主张 L4**（不涉及活体行为）⇒ ⇒ **不改变任何 A 轴结论**（只是把 §4.10.24 的既有结论变成机器可执行） |
+
 #### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `cd893d1`）
 
 > ⚠️ **代码态基线 = `cd893d1`**（= 本轮**最后一次**改代码的提交）⇒ ⇒ `cd893d1` **改了生产代码**（容器上限无条件化）
 > ⇒ ⇒ 与「第十一次全量（§4.10.22 · 代码态 `040a201`）」**不是**同一个代码态 ⇒ ⇒ **必须重跑全量** ⇒ ⇒ **第十二次全量口径见 §4.10.26**。
 > ⇒ ⇒ 上一行「代码行为自 `5a954bb` 起未变」**已被本轮打破**（`cd893d1` 改了生产代码）⇒ ⇒ 该行按「不改写历史」保留，**以本行为准**。
 > ⇒ ⇒ **中间那批提交**（`ee1b797` · `2f3d5c2` · `acb6fe6` · `b71ac22` · `1e1899f` · `46f67bf`）= **全是文档**（台账）⇒ ⇒ **零代码影响**。
+> ⇒ ⇒ **测试面变更**：`22dc67e`（§4.10.28 的新守门，**只加测试** ⇒ **生产代码态仍是 `cd893d1`**）⇒ ⇒ **生产行为未变**，但**用例数变了** ⇒ ⇒ **需重跑全量**（口径见 §4.10.29）。
 
 | commit | 内容 | 落点（`文件:行号`） | A 轴 |
 |---|---|---|---|
@@ -1749,6 +1798,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | `5a954bb` | 🟢 **G3 反馈单 轴②**：form 闸门判据补「**域自捕获**」第一判据 ⇒ favorite 语义答案 = `OFF` | `…/http/GoStyleFormLimitMode.java:…`（`DomainReachability` 加 `goSideHandlesParseError` + `selfConsistent` 两规则 + 表的 favorite 行 + **删** `REGISTERED_DEVIATIONS` 的 favorite 条 + `Mode.OFF`/类 javadoc）· `…/http/GoStyleTomcatParameterLimitCustomizer.java:…`（订正「无分叉 / favorite 零改动」等三处陈述）· `…/http/GoStyleFormValues.java:…` · `…/http/GoStyleFormLimitExceededException.java:…` · **重写** `…/http/GoStyleFormLimitSemanticCriterionTest.java`（6 条）· 另 2 个测试类 javadoc 订正 | **A3** |
 | `040a201` | 🟢 **G1 约束② 的「共享层那一半」闭合**：新增断言 ⑤「共享层**产出**的带 `@Order` 的 Filter 全集 == 快照」⇒ ⇒ **新增第 8 个共享层 Filter 必红** ⇒ ⇒ 逼它显式登记槽位 | `service/common/src/test/java/com/rag/common/spring/SharedFilterOrderSnapshotGateTest.java:…`（⑤ `everySharedLayerFilterIsRegisteredInSnapshot` + `sharedLayerClassesRoot()` + `enumerateOrderedFilters()`）⇒ ⇒ **只改测试面** ⇒ ⇒ **零生产改动 / 零运行时行为变化** | 无（只加守门；**协调约束**的机器保障，**不改任何 A 轴结论**） |
 | `cd893d1` | 🔴 **容器上限的抬升与闸门的有无解耦**（G3 反馈 (b)）＝ **本轮唯一改生产代码的提交**：删掉 `if (mode == OFF) return;` ⇒ **一律抬到 10001**；构造函数改为**只校验** `mode`（fail-fast 不丢） | `service/common/src/main/java/com/rag/common/http/GoStyleTomcatParameterLimitCustomizer.java:…`（`customize()` + 构造函数 + 类级 javadoc「两轴解耦」一节）· `…/http/GoStyleFormLimitMode.java:…`（`Mode.OFF` 的 javadoc）· `…/test/java/com/rag/common/http/GoStyleFormLimitModeTest.java:…`（类 javadoc）· **新增** `…/test/java/com/rag/common/http/GoStyleParamLimitOffModeGateTest.java`（**3 条**）· `…/redis/GoStyleRedisClientAutoConfiguration.java:…`（**纯注释**：javadoc「三份」→「五份」） | **A3**（超时/deadline 的失败语义）＋ **A1**（Redis 断连的 fail-fast/fail-open 语义 · 仅 javadoc） |
+| `22dc67e` | 🟢 **把「不得新建域内 Redis 副本」从台账禁令落成机器门禁**（G2 的显式禁止项 ⇒ 台账拦不住人） | **新增** `…/redis/GoStyleRedisClientShadowingGateTest.java`（**3 条** · 变异 M1/M2/M3 各专属）⇒ ⇒ **零生产改动** | 无（只加守门；**把 §4.10.24 的既有结论变成机器可执行** ⇒ **不改变任何 A 轴结论**） |
 
 **回归口径与结果（第七次全量 · 核对日期 2026-10-27）**
 
