@@ -214,7 +214,28 @@ class LikeRpcArtifactClasspathGateTest {
         }
     }
 
-    /** jar 比 pom / 源码旧 ⇒ 构建产物是旧的 ⇒ 必须重建。 */
+    /**
+     * jar 比 pom / 源码旧 ⇒ 构建产物是旧的 ⇒ 必须重建。
+     *
+     * <p>🔴🔴 <b>2026-10-28（G3 转派）：共享层的源码与 pom 也必须算进「新鲜度」的输入集</b>
+     * <p><b>漏了它会发生什么（机制）</b>：本守门断言的是<b>fat jar 里内嵌的那份 common jar</b>
+     * ⇒ ⇒ 而内嵌的那份是由<b>构建时</b>的 {@code service/common} 决定的
+     * ⇒ ⇒ 若<b>只有共享层改了、本模块没改</b> ⇒ ⇒ 本模块的 {@code pom.xml} 与 {@code src/main}
+     * 都没变 ⇒ ⇒ 「旧于 jar」这个判据<b>不成立</b> ⇒ ⇒ **fat jar 不会重建**
+     * ⇒ ⇒ 守门读到的是<b>上一轮的陈旧内嵌 jar</b> ⇒ ⇒
+     * <ul>
+     *   <li><b>假绿</b>：共享层刚把排序桥删了 ⇒ 陈旧内嵌 jar 里<b>还带着桥</b> ⇒ ⇒ 第 ③ 条断言照样绿
+     *       ⇒ ⇒ <b>共享层的破坏被守门掩盖</b>；</li>
+     *   <li><b>假红</b>：共享层刚把排序桥<b>改名/新增</b> ⇒ 陈旧内嵌 jar 里<b>没有</b>新名字
+     *       ⇒ ⇒ 第 ③ 条断言红 ⇒ ⇒ 报错指向「构建命令不带 -am」
+     *       ⇒ ⇒ <b>而真实原因是守门读了旧字节</b> ⇒ ⇒ 排查方向被带偏。</li>
+     * </ul>
+     * <p>⇒ ⇒ 所以输入集必须包含：{@code service/common/pom.xml} ＋
+     * {@code service/common/src/main} 下的全部文件。
+     * <p>⚠️ <b>为什么不能只加「共享层的 jar」</b>：本守门在 {@code test} 阶段跑，
+     * 此时 reactor 还没到 {@code package} ⇒ ⇒ 共享层的当轮 jar <b>还不存在</b>
+     * ⇒ ⇒ 只能以<b>源码 + pom</b> 的 mtime 作判据（G3 同款修法）。
+     */
     private static boolean isStale(Path jar, Path moduleDir) throws IOException {
         long jarTime = jar.toFile().lastModified();
         List<Path> inputs = new ArrayList<>();
@@ -222,6 +243,15 @@ class LikeRpcArtifactClasspathGateTest {
         Path main = moduleDir.resolve("src").resolve("main");
         if (Files.isDirectory(main)) {
             try (Stream<Path> files = Files.walk(main)) {
+                files.filter(Files::isRegularFile).forEach(inputs::add);
+            }
+        }
+        // 🔴 共享层（service/common）也必须算进输入集 —— 见上方 javadoc 的两种失真形态。
+        Path sharedModule = repoRoot().resolve("service").resolve("common");
+        inputs.add(sharedModule.resolve("pom.xml"));
+        Path sharedMain = sharedModule.resolve("src").resolve("main");
+        if (Files.isDirectory(sharedMain)) {
+            try (Stream<Path> files = Files.walk(sharedMain)) {
                 files.filter(Files::isRegularFile).forEach(inputs::add);
             }
         }
