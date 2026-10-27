@@ -2013,11 +2013,10 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 > ⚠️ **第七次之前的那次（第六次）是 BUILD FAILURE** ⇒ 失败与修法见 §4.10.8 ⇒
 > ⇒ **前五轮全量都绿，是因为 #8 的缺陷恰好挡在前面** ⇒ 那不是「本来就对」。
 
-#### 4.10.34 🟢 **本轮落码清单（最新）**（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `15cf93a`）
+#### 4.10.34 🟢 **本轮落码清单（最新）**（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `e966a67`）
 
-> ⚠️ **代码态基线 = `15cf93a`**（= 本轮**最后一次**改生产代码的提交）⇒ ⇒ 其后的提交若只动台账 ⇒ **生产代码态仍是 `15cf93a`**。
-> ⇒ ⇒ **本轮的生产代码相对第十三次全量（§4.10.30 · 代码态 `cd893d1`）**变了**（`15cf93a` 改了 1xx 探针的行数上界）
-> ⇒ ⇒ ⇒ **合并前必须重跑全量**（口径口径以本节的 `service/common` 330 为准，全量数字待重跑后回填）。
+> ⚠️ **代码态基线 = `407c230`**（= 本轮**最后一次**改生产代码的提交；`e966a67` 只动测试面）⇒ ⇒ 其后若只动台账 ⇒ **生产代码态仍是 `407c230`**。
+> ⇒ ⇒ **第十四次全量口径见 §4.10.37**（代码态 `407c230` 的**前一个**生产代码态 `15cf93a` + `d546f45` + `407c230` 三笔均已入账 ⇒ ⇒ §4.10.37 的口径覆盖当前代码态）。
 
 | commit | 内容 | 落点（`文件:行号`） | A 轴 |
 |---|---|---|---|
@@ -2029,6 +2028,10 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | `6df0090` | 🟢 `io/` 工作区噪声的**根因定位**（md5 对上 `~/.m2` 旧版 1.36.0 jar ⇒ 不是构建产物）＋ 已清 | 本台账 | 无（零落码） |
 | `22dc67e` | 🟢 「不得新建域内 Redis 副本」的**机器门禁**（源文件扫描守门 · 3 条 + 变异 M1/M2/M3） | 新增 `…/redis/GoStyleRedisClientShadowingGateTest.java` | 无（只加守门） |
 | `a553a7b` / `c164e63` | 🟢 台账 §4.10.28 / §4.10.29（+ 就地订正 §4.10.24.2/.3） | 本台账 | 无 |
+| `d546f45` | 🟢 **订正 `GoStyleTomcatParameterLimitCustomizer` 的过期 javadoc**（G2 反馈）—— 「mode==OFF ⇒ 运行期 2048」与实际行为（**无条件 10001**）自相矛盾 | `…/http/GoStyleTomcatParameterLimitCustomizer.java:95-101` | 无（**纯 javadoc** · 零行为变化） |
+| `139b428` | 🟢 **台账门禁第 5 层「分子/分母口径不对称」** ⇒ 支撑类不再产生**永消不掉**的覆盖缺口（§4.10.35） | `tools/check-ledger-selfcheck.py` | 无（**只改守门** · 三域输出**逐行一致** ⇒ 零行为影响） |
+| `407c230` | 🟢 **独立复核（verifier · PASS）⇒ 3 条 🟡 + 2 条 🟢 全部落码**（§4.10.36） | `…/observability/GoStyleClientDisconnectProbe.java`（javadoc 三处限定 + WARN 改**每进程一次**） | 无（**纯 javadoc + 日志门闩** · 零行为变化） |
+| `e966a67` | 🟢 **修 traceparent 守门的判据缺陷** —— 「等待条件弱于断言条件」⇒ 高负载下假红（§4.10.37） | `…/http/GoStyleTraceparentFilterTraceSourceGateTest.java`（等待循环改为轮询**断言的那个东西**） | 无（**纯测试面** · 零生产变化） |
 
 **回归口径与结果（第十三次全量 · 核对日期 2026-10-27 · 代码态 `cd893d1` + `22dc67e`）**
 
@@ -2102,6 +2105,48 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | **为什么本层可以改（写权自证）** | 写权守门 `tools/difftest/check-wave-lane-ownership.py` 的 `SHARED` 清单是 **13 个具体文件** ⇒ **`tools/check-ledger-selfcheck.py` 不在其中** ⇒ ⇒ **无人拥有** ⇒ ⇒ 按「无人拥有面 ⇒ 本层自修」的既有先例处理（同 `component-semantic-verification/springboot-semantic-model.md`）⇒ ⇒ 🔴 **同时订正本层自己的一处过宽分类**（§4.10.7 ③ 原写「`tools/**` = 整合者共享面」⇒ **泛化错误**，已就地订正） |
 | **验证（零行为影响）** | 当前受检的 **3 个域**（`task` / `users` / `users-admin`）**都没有支撑类** ⇒ ⇒ 改前改后**逐行一致**（实测 `diff` 为空：`/tmp/g4-selfcheck-before.txt` vs `/tmp/g4-selfcheck-after.txt`）⇒ ⇒ 默认档 `EXIT=0` ⇒ ⇒ **对其它 lane 零影响**（不改「已点名」的判定 ⇒ 不可能让别的域**新红**） |
 | **效果（面向未来）** | 一旦某个域被加进 `JAVA_ROOTS` 且它有支撑类（如 favorite 域的 `RealTomcatPort`）⇒ ⇒ **不再**产生那条消不掉的⚠️ ⇒ ⇒ **提示级输出**回到「有据可查」的状态 |
+
+#### 4.10.37 🟢 **第十四次全量回归口径**（核对日期 2026-10-27 · 代码态 `15cf93a` + `d546f45` + `407c230`）＋ 🟢 **一条真 Tomcat 守门判据缺陷已修**
+
+> **为什么重跑**：§4.10.32 的 `15cf93a` **改了生产代码** ⇒ ⇒ 第十三次全量口径（代码态 `cd893d1`）**已过期**
+> ⇒ ⇒ 按 §5.3e「变了就重跑一次收口回归」⇒ ⇒ 本节是**当前代码态**的权威口径。
+> ⚠️ **起跑方式**：`ps` 实测到 G2/G3 两棵树都在跑 maven ⇒ ⇒ **硬起第三个会 OOM**（§4.10.13 的 EXIT=137 实证）
+> ⇒ ⇒ 本层用「**等空窗再自动起跑**」的看门脚本（`/tmp/g4-full14-wait-run.sh`）⇒ 判据 = 「别的 lane 有没有在跑**全量**（命令行无 `-pl`）」
+> ⇒ ⇒ 域内小跑（`-pl` 子集）**允许重叠**（合计 ~5g，24g 机器安全）⇒ ⇒ 起跑前 + 起跑后**各复检一次**。
+
+| 段 | 日志 | 结果 | 说明 |
+|---|---|---|---|
+| **主跑** | `/tmp/g4-full14.log` | 🔴 `BUILD FAILURE` · **10:35 min** | **fail-fast 停在第 8 个模块 `common`** ⇒ 其后 **45 个模块 SKIPPED**<br>🔴 红的 1 条 = `GoStyleTraceparentFilterTraceSourceGateTest.responseTraceparentBelongsToTheExportedSpan` ⇒ **判据缺陷**（不是被测代码）⇒ **已修**（见下）⇒ **隔离复跑 1/1 绿** |
+| **续跑 ①** | `/tmp/g4-full14-rerun.log` | 🔴 `BUILD FAILURE` · **27:51 min**（`-rf :common`） | `common` **整模块绿**（330/0/0/0 ⇒ **flake 不复现**）⇒ 一路跑到 `favorite-api` 才停 ⇒ 其后 **6 个模块 SKIPPED**<br>🔴 红的 1 条 = `FavoriteApiRealTomcatGateTest.containerParameterLimitIsSurfacedAsGoParseError` ⇒ **与第十三次同一条**（**已登记**的判定权口径漂移 `DRIFT-FAV-API-001` ＋ `DRIFT-HOTAPI-030` ⇒ **不是回归**） |
+| **续跑 ②** | `/tmp/g4-full14-rerun2.log` | ✅ **BUILD SUCCESS** · **3:06 min**（`-rf :favorite-rpc`） | 最后 6 个模块（`favorite-rpc` / `comment*`）全绿 |
+
+**口径（按 surefire XML 逐模块求和 · 去重）**
+
+| 项 | 值 |
+|---|---|
+| 命令 | `mvn -B clean verify -DargLine=-Xmx3g`（**全量**，不是 `-pl` 子集）⇒ 续跑用 `-rf :<模块>` |
+| Reactor 模块数 | **52** |
+| **有测试模块数** | **29** |
+| **用例数** | **2480**（第十三次 **2477** ⇒ **+3** = `15cf93a` 的新守门 3 条 ⇒ ⇒ **口径自洽**） |
+| **failures / errors / skipped** | **1 / 0 / 4**<br>（那 1 条 failure = `favorite-api` 的**旧**断言 5003 ⇒ **预期内**；`favorite-api` 1 条 skipped ＋ `favorite-rpc` 3 条 skipped = **4**） |
+| 耗时 | 主跑 **10:35 min** ＋ 续跑① **27:51 min** ＋ 续跑② **3:06 min** ⇒ **合计 41:32 min** |
+| **三门禁** | `check-wave-lane-ownership` **EXIT=0** · `check-wave-role-model` **EXIT=0** · `check-wave-coupling` **EXIT=0** |
+| **台账三门禁** | `check-ledger-tables` **EXIT=0** · `check-ledger-selfcheck` **EXIT=0** · `check-ledger-count` **EXIT=0** |
+| **三探针** | `run-parity.sh` **EXIT=0 · 56 例**（一致 54 · 不一致 0 · 已签字偏离 2）· `run-rpc-timeout-parity.sh` **EXIT=0 · 3 例**（两侧一致）· `api-envelope-probe/favorite` **EXIT=0**（5/5 ⇒ **修前 EXIT=2**） |
+| **写权自证** | 本轮改动**全部**落在 `service/common/**` ＋ `tools/check-ledger-selfcheck.py`（**无人拥有面**）＋ 本台账 ⇒ **零域侧改动** |
+
+> 🟢 **🔴 那条假红的定性（三步，**不是**「隔离复跑绿就算 flake」）**
+> ① **隔离复跑 1/1 绿**（`-Dtest=GoStyleTraceparentFilterTraceSourceGateTest`）
+> ② **续跑 ① 里该模块整模块绿**（`common` 330/0/0/0）⇒ ⇒ 与被测代码无关
+> ③ **根因是判据本身**：原等待条件等的是「**任意一个**导出请求到达」（`requestCount() > 0`），
+> 而断言的是「**含这条 trace-id** 的导出到达」⇒ ⇒ **等的条件比断言弱**
+> ⇒ ⇒ 在「导出本身慢」（机器负载高 / batcher 线程被抢 / 别的 lane 并发跑 maven）时，
+> 3s 窗口耗尽 ⇒ **报「span 没被导出」的假红** ⇒ ⇒ **修法**：等待条件改为**断言条件本身**
+> （轮询「导出字节里含这条 trace-id」，预算仍 3s）⇒ ⇒ **判据与断言同源** ⇒ 且**比原来更严**
+> （不再接受「来的是别的 span」）⇒ 提交 `e966a67`（**纯测试面 · 零生产变化**）
+> ⚠️ **旁证**：`service/common` 在第十三次全量的补跑①里也抖过一次（`GoStyleJsonContentTypeCharsetTomcatTest`
+> 「expected 200 but was -1」）⇒ ⇒ **「真容器 + 固定等待窗口」类守门在机器负载高时是一族已知抖动源**
+> ⇒ ⇒ **本层不逐条去改**（改一个还有一个）⇒ ⇒ **只登记**，等下一轮统一处理「等待窗口」这一族。
 
 ## 5. 交付物清单
 
