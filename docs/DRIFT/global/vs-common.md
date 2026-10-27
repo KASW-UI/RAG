@@ -2515,6 +2515,69 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 
 **⑥ 本层这一条** | **零落码**（① 是口径澄清 + 归属核对 · ② 是转派整合者 · ③ 是撤销一条拦截 · ④ 是核对一致 · ⑤ 是状态订正）⇒ ⇒ ⇒ **本层 `service/**` 与 `tools/**` 零改动** ⇒ ⇒ ⇒ **第十四次全量的「用例总数」口径仍为 **2486（推算）**；其余口径不变** ⇒ ⇒ ⇒ **本层 HEAD `4cec90e`（基线 `a282012` 之上 82 笔，未 push）**。
 
+#### 4.10.46 🔴🟢 **G3 的 favorite 容器上限要求 ⇒ 自我订正（上一轮结论**错**）＋ 真增量只剩「结构锁」⇒ 落码 1 条 ＋ 变异 M1/M2 证据**（2026-10-27 深夜 · **生产代码零改动**）
+
+> **本节零生产代码改动** ⇒ 只动**测试**（`service/common/src/test/**`）＋ 台账。
+> ⇒ ⇒ **AGENTS.md §3.1「以 Go 为唯一基准」不涉及**（本节不判行为对错，只判**机器网**是否到位）。
+
+**① 🔴 自我订正：上一轮结论「`service/common/src/test` 里 `MAX_PARAMETER_COUNT` / `limitCustomizer` **零命中** ⇒ ⇒ 缺机器网」—— 这个结论是**错的**
+
+| 项 | 核对结果 |
+|---|---|
+| **上一轮的说法** | 「既有测试里**零命中** ⇒ ⇒ 「无条件抬上限」只活在注释里 ⇒ ⇒ 谁把它改回按 mode 分支，没人拦 ⇒ ⇒ 本层正在补真 Tomcat 机器网」 |
+| **实测（本轮重核）** | 🟢 **既有守门已经钉住了**：`service/common/src/test/java/com/rag/common/http/GoStyleParamLimitOffModeGateTest.java`（**`cd893d1`**，第十三轮，G3 反馈 (b) 落码时同批加的，290 行）⇒ ⇒ **断言①** `runtimeParameterCountIsRaisedEvenWhenGateIsOff`：`assertEquals(10001, connector().getMaxParameterCount(), …)`（**字面量 10001**）⇒ ⇒ **断言②** 活体：2049 个非空值 ⇒ **200 放行**（无 HTML 错误页）⇒ ⇒ **断言③** 闸门侧：容器里那个闸门 `mode()` == `OFF` |
+| **⇒ 结论订正** | ⇒ ⇒ **G3 的「容器上限的抬升必须对所有域无条件生效」这条要求，早已被机器网钉住**（`cd893d1`）⇒ ⇒ **G3 引的「`:109` 在 OFF 时直接 return」是**旧版描述**（当前 `:207`/`limitCustomizer()` 无任何 mode 分支）⇒ ⇒ **本层不需要为这条要求新落码** |
+| **🔴 判据错在哪（可复用的教训）** | ⇒ **「零命中」的判据选错了**：我搜的是**标识符**（`MAX_PARAMETER_COUNT` / `limitCustomizer`）⇒ 既有守门用的是**字面量 `10001`** ⇒ ⇒ **标识符零命中 ≠ 语义零覆盖** ⇒ ⇒ 这是 §4.10.38 ④（「『零命中』必须先复核判据」）的**新变种**：上次的错是**管道/`head` 截断**（判据错在**管道**），这次判据本身**没错**（全仓 grep、无截断）⇒ 错在**搜的是名字、不是被测语义** ⇒ ⇒ **⇒ 新规则：要判「某行为有没有网」，必须搜「断言值 / 被测行为」，不能只搜「被测对象的标识符」** |
+| **⇒ 另一处自违** | ⇒ ⇒ §4.10.38 ③ 已明写「**不造第二条守门守同一件事**」⇒ ⇒ 本轮**原本**要新建一个独立真 Tomcat 守门类 ⇒ **违反了本层自己上一轮立的规矩** ⇒ ⇒ 处置：撤销那个独立类（`mavis-trash`，未提交⇒ 无历史）⇒ ⇒ **改为在既有守门里追加** |
+
+**② 🟢 真增量 = **一条结构锁**（不是三条）**
+
+| 层 | 既有 `GoStyleParamLimitOffModeGateTest` 覆盖 | 本轮新增 |
+|---|---|---|
+| **行为**（运行期值） | ① mode=off 时真 Tomcat connector 上限 == **字面量 10001** ✅ | — |
+| **行为**（活体） | ② 2049 个非空值 ⇒ 放行 200 + 无 HTML ✅ | — |
+| **行为**（闸门） | ③ 容器里那个闸门 `mode()` == `OFF` ✅ | — |
+| **结构**（签名） | ❌ **零覆盖** | 🆕 **④ `limitCustomizer()` 必须 `static` 且**无参**` ⇒ ⇒ 产物**结构上**不可能依赖 mode** |
+
+- ⇒ ⇒ **为什么结构锁是真增量**（不是重复）：断言①是**行为性**的，它抓得住「把 mode 分支**接回** `customize()`」；但它**抓不住**下面这一种 ——
+  ```java
+  public static TomcatConnectorCustomizer limitCustomizer(String mode) { … }
+  // customize() 里仍无条件调用它 ⇒ 运行期仍是 10001 ⇒ 断言① 仍绿
+  // ⇒ 但「抬上限的产物与 mode 无关」这条**结构性**契约已破
+  // ⇒ ⇒ 下一任 agent 只要顺手加一个 if (mode == OFF) return; 就静默退化
+  ```
+  ⇒ ⇒ ④ 把「产物不可能依赖 mode」变成**签名层面的事实** ⇒ ⇒ 那条退化**写不出来** ⇒ ⇒ 这是 AGENTS.md §3.2/§3.3 的典型缺口（**注释里的契约无网**）的**合法补网**。
+- ⇒ ⇒ **为什么不加第 5 条「直接调 `limitCustomizer()`」**（我一度加过、已撤）：在 ④ 成立的前提下它**零增量**（「值写错」会被①抓住；「方法被删」会被④抓住）⇒ ⇒ 且它会**破坏变异验证的干净性**（④ 一旦被破坏，⑤ 的**编译**就先失败 ⇒ 红在编译错误上 ⇒ 不是「红在目标断言上」）。
+
+**③ 🟢 落码：`service/common/src/test/java/com/rag/common/http/GoStyleParamLimitOffModeGateTest.java` 追加 ④（**不新建第二个真 Tomcat 守门** ⇒ 遵守 §4.10.38 ③）**
+
+- **④ 的实现取巧点（有意为之）**：用 `getDeclaredMethods()` **遍历 + 按名字筛**，**不用** `getMethod("limitCustomizer")`（无参查找）⇒ ⇒ 否则变异一旦给它加参数 ⇒ **查找本身**就抛 `NoSuchMethodException` ⇒ ⇒ 测试红在「**异常**」上而不是「**无参**」这个断言上 ⇒ ⇒ **红得没有意义**（AGENTS.md §3.3.3）。
+- **期望值写**字面量** 10001，**刻意不引用** `MAX_PARAMETER_COUNT` 常量 ⇒ ⇒ 否则「有人把常量改成 2048」会**同时改掉期望值** ⇒ ⇒ **守门变哑**（§3.3.3「期望值同源 ⇒ 守门是哑的」）⇒ ⇒ 与既有断言①口径一致。
+
+**④ 🟢 变异验证（M1 / M2 各**恰好 1 条红**、且**红在目标断言上**）**
+
+| 变异 | 改法 | 实测结果 |
+|---|---|---|
+| **M1**（专属） | `limitCustomizer()` 加 `String mode` 参数（+ 构造器存 `mode` + `customize()` 传参）⇒ **运行期仍无条件抬** | `Tests run: 4, Failures: 1, Errors: 0` ⇒ **红在 ④ 的「必须无参」**：`expected: <0> but was: <1>`（`GoStyleParamLimitOffModeGateTest.java:229`）⇒ ⇒ **①②③ 全绿**（运行期上限仍 10001）⇒ ⇒ **④ 是那一格唯一的网** |
+| **M2**（专属） | `public static` ⇒ 改 `public`（instance，无参） | `Tests run: 4, Failures: 1, Errors: 0` ⇒ **红在 ④ 的「必须是 static」**：`expected: <true> but was: <false>` ⇒ ⇒ **①②③ 全绿** |
+| **复原** | 两个变异均已 `git checkout` 复原 ⇒ 工作区只剩测试文件一处改动 | ✅ |
+
+**⑤ 🟢 回归口径（核对日期 2026-10-27 深夜 · 代码态 = HEAD + 本轮 1 条测试改动）**
+
+| 项 | 值 |
+|---|---|
+| **改了什么** | **仅** `service/common/src/test/java/com/rag/common/http/GoStyleParamLimitOffModeGateTest.java`（+1 条断言 ④ + 2 个 import）⇒ ⇒ **生产代码零改动** |
+| **`service/common` 全模块** | `mvn -o -B -DargLine=-Xmx2g -am -pl service/common test` ⇒ **331 / 0f / 0e / 0s**（上一轮 **330** ⇒ **+1** = 新增的 ④）⇒ **EXIT=0** |
+| **守门类单跑** | `GoStyleParamLimitOffModeGateTest` ⇒ **4 / 0f / 0e / 0s**（3 ⇒ +1） |
+| **全量口径** | ⇒ **第十四次全量（代码态 `15cf93a`+`d546f45`+`407c230`）的其余口径不变**；**用例总数推算 2486 ⇒ 2487**（= 2486 + 本轮 `service/common` +1）⇒ ⇒ ⚠️ **仍是推算，未跑全量**（本轮只复跑了 `service/common`）⇒ ⇒ **波末收口回归时必须重跑全量并重新逐模块求和** |
+| **三门禁** | 本轮未跑全仓 `check-*.py`（本轮**零产品面**改动 ⇒ 写权/装配/耦合三类守门的输入未变）⇒ ⇒ **以第十四次全量的口径为准**，波末统一复跑 |
+
+**⑥ 🟢 回 G3 的口径（本节即回执底稿）**
+
+1. 🟢 **「容器上限的抬升必须对所有域无条件生效」—— 已满足，且**早就有机器网**：`cd893d1`（本层第十三轮）已把两轴解耦（`GoStyleTomcatParameterLimitCustomizer:207` 的 `limitCustomizer()` **无任何 mode 分支**）⇒ ⇒ 既有守门 `GoStyleParamLimitOffModeGateTest` 的**断言①**（真 Tomcat + `mode=off` ⇒ 运行期 == 10001）**就是**那条机器网 ⇒ ⇒ **G3 引的「`:109` 在 OFF 时直接 return」是旧版描述**（`:109` 现在是 javadoc 里讲**旧版**如何分叉的历史说明）⇒ ⇒ ⇒ **「本域零改动」的裁定是对的**。
+2. 🟢 **本层这一轮只加了一条**「结构锁」（④）⇒ ⇒ **不影响 G3 域内任何行为** ⇒ ⇒ **G3 的域内守门（`FavoriteApiRealTomcatGateTest#containerParameterLimitIsSurfacedAsGoParseError` 改成 Go 语义放行）**不需要为本轮重做**。
+3. 🟡 **仍归 G3 域内的那一格**：**总「值」数 > Go 的 10000 段上限**（Tomcat 拒 HTML / Go 拒 text/plain）⇒ ⇒ **G3 已显式登记** ⇒ ⇒ 本层**不代销**。
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
