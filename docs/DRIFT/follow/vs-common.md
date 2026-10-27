@@ -536,3 +536,17 @@ installed_rank | version |      description       | success
 ⇒ ⇒ **修法是共享层形态决策（加池）⇒ 落点 `global` 收口域 ⇒ follow 域零落码** ⇒ ⇒ 完整对照与出处 ⇒ [`users/vs-common.md` §33](../users/vs-common.md)。
 
 ③ 🟢 **口径边界**：follow 域**零产物层 IT** ⇒ ⇒ **`mvn test` 口径 == 全量口径** ⇒ ⇒ 本域 68 条**无需**加「不含 IT」的边界说明 ⇒ ⇒ 且已按「maven 模块汇总行 == surefire XML 逐文件求和」双口径相等采信 ✅。
+
+### 11.12 🔴 **G3「端口转发对多数容器失效」来信的复检 ⇒ follow 域零影响，但钉口落码项已就位（2026-10-27 22:2x）**
+
+**① 来信与复检**：G3 报本机 Docker「宿主→容器」转发对多数容器失效 ⇒ 我域**自己重扫**（不采信转述）：
+**43 个映射口逐个发协议正确请求 ⇒ 43/43 全部有协议级应答**（PG 18/18 `b'N'` · Redis 8/8 `+PONG` · HTTP 4/4 状态行 · Kafka 3/3 合法 `ApiVersions` 响应 · etcd/nacos/beanstalkd/milvus/neo4j/jaeger 9/9 · gRPC 1/1）⇒ ⇒ **转发完好** ⇒ ⇒ **「机器级阻塞」不成立 ⇒ 不需要重启 Docker**（重启会干掉 47 个容器，各 lane 跑了 26~45 小时）。
+⇒ ⇒ **G3 那条推断的断点 = 判据未按协议分流**：「裸连读不到字节」被当成「路径不通」，而 PG/Redis/Kafka/Nacos/etcd/beanstalkd **全是请求-响应型服务，本就不主动发第一个字节** ⇒ 我用同款裸连判据**复现出 10 个假阳性** ⇒ ⇒ ⇒ **「连上了但没数据」有三种互斥解释（服务不主动说话 / 探针地址错 / 我发的字节不合法），三者齐排才能说「路径不通」**。
+⇒ ⇒ 完整取证与判据 ⇒ [`users/vs-common.md` §37](../users/vs-common.md)。
+
+**② follow 域的连带影响 = 零**：follow 域的 Testcontainers 只连**自己起的容器**（`localhost:<getMappedPort>`），从不连共享的 `difftest5k-*` ⇒ ⇒ **转发坏不掉 follow 域的用例** ⇒ ⇒ **零动作**。
+
+**③ 🟡 follow 域钉口落码项已就位（G4 §4.10.39 分配 `22730–22759`）**：
+follow 域 **5 个测试文件**用 Testcontainers（`follow-api` 1 个 Redis `GenericContainer` · `follow-rpc` 4 个 `PostgreSQLContainer`）
+⇒ ⇒ 宿主口由 Docker 随机分配 ⇒ ⇒ **落在 OS 临时段 `49152–65535`** ⇒ ⇒ 而该段当前被占 **205/16384**（`ESTABLISHED` 出站源口 106 · `LISTEN` 56 · `SYN_SENT` 21）⇒ ⇒ **撞口面真实存在**（约 1.25%/次）⇒ ⇒ 症状 = §34 记的 `EOFException@enableSSL`（端口上不是预期的服务）⇒ ⇒ **钉口 = 从根上消除这一类随机失败**。
+⇒ ⇒ ⚠️ **形态已被 G4 定死**：`PostgreSQLContainer` + `withCreateContainerCmdModifier(...)` 显式绑口（**不能**换成 `FixedHostPortGenericContainer`——它不带 PG 初始化/JDBC 支持）⇒ ⇒ **G4 要求落码第 0 步先写探针验证「显式绑口后 `getMappedPort()` 是否返回那个固定口」** ⇒ ⇒ **不能照抄**。
