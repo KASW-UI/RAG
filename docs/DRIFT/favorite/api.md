@@ -1143,3 +1143,99 @@ Go 的 `net/http` **服务端没有 103 Early Hints 这个特性** ⇒ ⇒ **RAG
   （2026-10-27T22:57:42+08:00，`mvn -B -o -pl service/favorite/favorite-api -am test` exit 0）；
 - ⇒ ⇒ **10001 段那一格暂不加守门**：现在加 = 把**已知的漂移**钉成绿的 ⇒ ⇒
   等共享层改完上限再加「**必须被拒**」的断言（届时本格会转红 ⇒ 正好是修好的信号）。
+
+---
+
+## 19. ✅ favorite-api 的 **Redis 连接池形态**已对齐 Go（无池 → 有池）—— 2026-10-28（G3）
+
+### 19.1 一句话
+
+**Go 侧有池，favorite-api 原先无池** ⇒ ⇒ 已落码对齐（yml 加 `lettuce.pool` 段 ＋ pom 加 `commons-pool2`）
+⇒ ⇒ 并新增**池契约守门 4 条**（真装配）⇒ ⇒ **形态漂移 🔴 → ✅**。
+
+### 19.2 Go 出处（**消费点**，逐条可追 ⇒ 不是声明点）
+
+| 环节 | 位置 | 内容 |
+|---|---|---|
+| ① 构造 | `service/favorite/api/internal/svc/service_context.go:20` | `redisDB := redis.MustNewRedis(c.BizRedis)` |
+| ② 配置 | `service/favorite/api/internal/config/config.go:16` ＋ `etc/favorite.yaml:14-17` | `BizRedis redis.RedisConf` ⇒ `Host: redis:6379` / **`Type: node`** / `Pass: ""` |
+| ③ go-zero 分派 | `core/stores/redis/redis.go:109` `MustNewRedis` → `:122` `NewRedis` → `:139` `newRedis`（`Type: NodeType`）→ `:2723` `case NodeType: return getClient(r)` | ⇒ **node 路径必经 `getClient`** |
+| ④ **消费点** | `core/stores/redis/redisclientmanager.go:32-40` | `red.NewClient(&red.Options{Addr, Username, Password, DB, MaxRetries: maxRetries, **MinIdleConns: idleConns**, TLSConfig})` ⇒ `:15` **`idleConns = 8`** ⇒ ⇒ **`MinIdleConns = 8`** |
+| ⑤ 池大小 | go-redis v9.20.0 `options.go:350-351` | `PoolSize` 未设 ⇒ `= 10 × GOMAXPROCS` ⇒ **Go 有池** |
+| ⑥ 池耗尽 | `options.go:380-386` ＋ `internal/pool/pool.go:1113` | `PoolTimeout` 未设 ⇒ `= ReadTimeout + 1s` = **4s**（本域 `timeout: 3s` 对齐的就是 Go 的 ReadTimeout）|
+
+### 19.3 🔴 为什么本域 `min-idle` 是 **8**，而 hot-rpc / comment-rpc 是 **0**（**不同族，别抄**）
+
+| 域 | Go 的客户端 | `MinIdleConns` | 本仓 `min-idle` |
+|---|---|---|---|
+| **favorite-api（本域）** | **go-zero** `MustNewRedis` ⇒ `redisclientmanager.go:15` `idleConns = 8` | **8** | **8** ✅ **精确对齐** |
+| hot-rpc | go-redis 直连 `redis.NewClient(&redis.Options{...})` ⇒ `MinIdleConns` **未设** ⇒ `options.go:218-222` **无 default** ⇒ 0 | 0 | 0 ✅ 精确对齐 |
+| comment-rpc | go-redis 直连（同上） | 0 | 0 ✅ 精确对齐 |
+
+⇒ ⚠️ **照抄别域的 0 就是抄错**（AGENTS.md §3.1：不得拿「现有 RAG 代码」当对照基准）
+⇒ ⇒ 已在 yml 注释里把这条区分**写死**，避免下一个人顺手「统一」成 0。
+
+### 19.4 落码（2 个文件）
+
+| 文件 | 改动 |
+|---|---|
+| `service/favorite/favorite-api/pom.xml` | 加 `commons-pool2`（**不写 `<version>`** ⇒ BOM 管 ⇒ 实测 **2.12.1**）|
+| `service/favorite/favorite-api/src/main/resources/application.yml` | 加 `spring.data.redis.lettuce.pool`：`enabled: true` / `max-active: 64` / `max-idle: 16` / **`min-idle: 8`** / **`max-wait: 4s`** |
+
+🔴 **`commons-pool2` 不可省**：Boot 4 的 starter **不再传递**它（实测 `spring-boot-starter-data-redis:4.0.8` 与 `spring-boot-data-redis:4.0.8` 的 pom 里**都没有**）
+⇒ 缺它 ⇒ **应用启动期硬失败**（本轮 **L4 实测**，见 §19.6）⇒ **不是**「静默变无池」。
+🔴 **`max-wait` 不可省**：不配 ⇒ 落 commons-pool2 自己的 `DEFAULT_MAX_WAIT = -1` ⇒ `GenericObjectPool:306` `idleObjects.takeFirst()` ⇒ **无限等**
+⇒ 且 Lettuce 的 3s 命令超时**此时尚未起算**（`CommandExpiryWriter.write()` 才起算，而**借连接在写命令之前**）⇒ ⇒ **光加池反而比 Go 更糟**。
+
+### 19.5 守门（**4 条**，真装配）
+
+新增 `service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/config/FavoriteApiRedisPoolContractTest.java`
+= ① 池必须启用 · ② 参数 **64 / 16 / 8** · ③ 池耗尽等待 = **4s** · ④ 阳性对照（commons-pool2 自己的默认 `maxWait` = **-1** ⇒ 证明 ③ 有识别能力）。
+
+⚠️ **断言读的是「消费点」**：走 `ConfigDataApplicationContextInitializer`（加载本模块**真实的** yml）＋ Boot 真 `DataRedisAutoConfiguration`
+⇒ 断言 `LettucePoolingClientConfiguration.getPoolConfig()`（Boot 4 的装配点是内部类 `LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig`）
+⇒ ⇒ **不读 yml 文本** ⇒ 属性名写错 / 层级写错 ⇒ 一律红。
+⚠️ 与本模块既有的 `FavoriteApiRedisTimeoutContractTest` **不同轴**（**超时轴** vs **池形态轴**）⇒ **不重复守同一件事**。
+
+### 19.6 变异验证（**4 条** · 2026-10-28 00:0x · 本轮现跑）
+
+| 变异 | 结果 | 红在哪儿 |
+|---|---|---|
+| **M1** `min-idle: 8` → `0` | **4 条里恰好 1 条红** | `redisPoolParametersMatchGoBaseline`（minIdle 断言，`:182`）⇒ ⇒ 证明「8 不是随便写的」|
+| **M2** 删掉 `max-wait: 4s` | **4 条里恰好 1 条红** | `poolExhaustionWaitMustBeBounded`（`:200`）⇒ ⇒ 证明「不配 = 无限等」被守住 |
+| **M3** `enabled: true` → `false` | **4 条里 3 条红** | ①②③（池不启用 ⇒ 读不到池参数）⇒ ⇒ 3 条红是**预期**（它们都读池参数）|
+| **M4** 抽掉 pom 的 `commons-pool2` | 🔴 **不是「守门转红」，而是 test-compile 失败** | ⇒ 本守门类**直接 `import org.apache.commons.pool2.impl.GenericObjectPoolConfig`** ⇒ 抽依赖 ⇒ 编译期就挂 ⇒ ⇒ **它证明「这条依赖对本守门不可省（编译期）」，但它**不是**「守门识别运行时退化」的证据** |
+
+⇒ ⇒ **M4 改用「应用启动探针」实测**（把池守门挪走 ＋ 抽 pom 依赖 ＋ 跑**真 Spring 上下文**）：
+
+| 探针 | 实测 |
+|---|---|
+| favorite-api `FavoriteApiRealTomcatGateTest`（`@SpringBootTest(webEnvironment = DEFINED_PORT)`）| **8 errors** · `Caused by: java.lang.NoClassDefFoundError: org/apache/commons/pool2/impl/GenericObjectPoolConfig` · `Caused by: ClassNotFoundException: org.apache.commons.pool2.impl.GenericObjectPoolConfig` ⇒ 链路 = `redisConnectionFactory`（`LettuceConnectionConfiguration`）⇒ `Factory method 'redisConnectionFactory' threw exception with message: org/apache/commons/pool2/impl/GenericObjectPoolConfig` ⇒ ⇒ **启动期硬失败** |
+| hot-rpc `HotRpcSpringContextWiringTest`（`@SpringBootTest(webEnvironment = NONE)`）| **8 errors** · 同一组 `NoClassDefFoundError` / `ClassNotFoundException` ⇒ 同款 ⇒ ⇒ 顺带**订正** hot-rpc 台账那条 MUT-E 的取证路径（见 [`hot/vs-common.md` H-9](../hot/vs-common.md)）|
+
+⇒ ⇒ **证据强度**：池形态 = **L3**（Go 侧 L1 逐行对照 ＋ RAG 侧**真装配**运行证据 ＋ 3 条变异精确转红）；
+「抽掉 pom ⇒ 启动期硬失败」= **L4**（**真启动实测**，不是源码推断）。
+
+### 19.7 残留差异（**逐条，勿外推**）
+
+| 项 | Go 侧 | 本仓 | 性质 |
+|---|---|---|---|
+| `max-active` | `PoolSize = 10 × 核数`（本机 100，**机器相关**）· `MaxActiveConns` 未设 ⇒ `options.go:230-235`「zero ⇒ no limit」⇒ **Go 无总量硬上限** | **64** | 🟡 **数量级对齐** · **性能面** |
+| `max-idle` | `MaxIdleConns` 未设 ⇒ `options.go:224-228` 无 default ⇒ 0 ⇒ 消费点 `internal/pool/pool.go:1257` ⇒ **0 = 无上限** | **16** | 🟡 **表达层取值**（比 Go 更严：只影响空闲连接的保留/回收，**不影响命令结果**）|
+| `min-idle` | `MinIdleConns = 8`（go-zero `idleConns = 8`）| **8** | ✅ **精确对齐** |
+| `max-wait` | `PoolTimeout = 4s` | **4s** | ✅ **语义对齐**（异常类型不同，耗时口径一致）|
+
+⚠️ **`max-idle: 16` 与 `max-active: 64` 是「表达层更严」** ⇒ ⇒ 它们**不是**对 Go 的行为漂移（不影响命令结果）
+⇒ ⇒ **若要登记为有意偏离项，落点是 `docs/Intentional_Deviations/favorite/api.md`（⛔ 非本 lane 写权面）⇒ 留待整合者登记**（同款在 hot-rpc / comment-rpc 侧也已存在）。
+
+### 19.8 复现
+
+```bash
+cd <RAG 根>
+MAVEN_OPTS="-Xmx768m" mvn -B -o -pl service/favorite/favorite-api -am test \
+  -Dtest='FavoriteApiRedisPoolContractTest,FavoriteApiRedisTimeoutContractTest' \
+  -Dsurefire.failIfNoSpecifiedTests=false -DargLine="-Xmx2g"
+```
+
+⇒ **5 条 / 0 failures / 0 errors / 0 skipped**（2026-10-27T23:57:48+08:00）⇒ BUILD SUCCESS
+（4 条池 ＋ 1 条既有超时守门）。

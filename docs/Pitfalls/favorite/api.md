@@ -642,3 +642,74 @@ GET /favorite/v1/item/list?folderId=0&…（2049 个参数）
 - **PIT-FAV-API-008**（`RANDOM_PORT` 挑的端口可能根本不是你的）—— 那条是「打到了别人」；
   本条是「**打到了、但自己先死了**」⇒ ⇒ **两类都是「请求没到达被测逻辑」** ⇒ ⇒ 症状相似、根因完全不同 ⇒
   ⇒ **判据要能分开它们**（本条的分界 = 异常类型：`ProtocolException` vs `IOException` 且「读到 0 字节」）。
+
+## PIT-FAV-API-014 · 🔴 **守门类 `import` 了被测依赖 ⇒ 抽依赖的变异只能拿到「编译失败」** ⇒ ⇒ 那**不是**「运行时退化」的证据
+
+### 现象（2026-10-28 · 给 favorite-api 落池时实测）
+
+跑「**抽掉 pom 的 `commons-pool2`**」这条变异 ⇒ ⇒ **测试根本没跑到** ⇒ maven 在 **test-compile** 阶段就挂：
+
+```
+[ERROR] FavoriteApiRedisPoolContractTest.java:[8,37] 程序包org.apache.commons.pool2.impl不存在
+[ERROR] Failed to execute goal ...maven-compiler-plugin:3.14.1:testCompile ... Compilation failure
+```
+
+⇒ ⇒ **拿不到任何「红在目标断言」的证据** ⇒ ⇒ 而这条变异的本意恰恰是回答
+「**这条依赖承不承重？**」⇒ ⇒ **工具在这一格上失灵了**。
+
+### 根因（两层，一层套一层）
+
+1. **守门类直接 `import org.apache.commons.pool2.impl.GenericObjectPoolConfig`**
+   —— 为了断言 `getMaxTotal()` / `getMaxIdle()` / `getMinIdle()` / `getMaxWaitDuration()`。
+2. ⇒ ⇒ 抽掉依赖 ⇒ **编译期就挂** ⇒ ⇒ **运行时那条路根本没走到**
+   （真正要验的是：Boot 的 `LettuceConnectionConfiguration$PoolBuilderFactory` 构造
+   `GenericObjectPoolConfig` ⇒ 类不在 ⇒ 启动期 `NoClassDefFoundError`）。
+
+⇒ ⇒ 🔴 **推论**：「这条依赖是承重的」这个**结论仍然成立**（甚至更强）⇒
+但它证明的是「**对本守门不可省（编译期）**」，**不是**「**应用启动期会 `NoClassDefFoundError`**」。
+
+### 🔴 危险处：证据强度会被悄悄写高
+
+变异记录里如果写「**1 红，`NoClassDefFoundError` ⇒ 启动期直接失败**」，
+而那条证据**只可能来自一个「绕开了编译期」的探针** ⇒ ⇒
+**看记录的人无法判断它跑的是哪条路** ⇒ ⇒ **证据强度被写高了一格**。
+
+⇒ ⇒ **本仓既有实例**：`hot-rpc` 台账 H-9 的 MUT-E 记的就是「1 红 `NoClassDefFoundError` ⇒ 启动期直接失败」
+⇒ ⇒ 而 `HotRpcRedisPoolContractTest.java:8` **也直接 import 了该类** ⇒ ⇒ **它记的取证方法跑不出这个结果**
+⇒ ⇒ 本轮已用「应用启动探针」重验并**订正取证路径**（见 `docs/DRIFT/hot/vs-common.md` H-9 的 📌 注记
+＋ `docs/DRIFT/favorite/api.md` §19.6）⇒ ⇒ **原结论保留，只把取证路径与证据强度改对**。
+
+### 正确做法（可复用，三步）
+
+1. **把「import 了该类」的守门挪走**（否则编译期先挂，跑不到运行时）；
+2. 跑**真 Spring 上下文**的守门（不是 MockMvc、不是纯 Mockito）；
+3. 看**异常链**（`Caused by: java.lang.NoClassDefFoundError: …` ＋ `ClassNotFoundException`）
+   ⇒ ⇒ **这条才是 L4（真启动实测）**，而源码推断只能写 L1/L3。
+
+⇒ ⇒ 本轮实测的两个探针（**均 8 errors**）：
+
+| 域 | 探针 | 注解 |
+|---|---|---|
+| favorite-api | `FavoriteApiRealTomcatGateTest` | `@SpringBootTest(webEnvironment = DEFINED_PORT)` |
+| hot-rpc | `HotRpcSpringContextWiringTest` | `@SpringBootTest(webEnvironment = NONE)` |
+
+⇒ ⇒ 链路（两侧一致）：`redisConnectionFactory`（`LettuceConnectionConfiguration`）
+⇒ `Factory method 'redisConnectionFactory' threw exception with message: org/apache/commons/pool2/impl/GenericObjectPoolConfig`
+⇒ ⇒ **启动期硬失败**，**不是**「静默变无池」。
+
+### 判据（下次照着做）
+
+- 一条变异要算「**守门识别该退化**」，必须**编译通过 ＋ 红在目标断言**
+  ⇒ ⇒ 「编译失败」只能算「**这条依赖对本守门不可省**」，**两件事别混写**。
+- 看到变异记录里写着**运行时异常**（`NoClassDefFoundError` / `ClassNotFoundException`）
+  ⇒ ⇒ **先问一句「守门类 `import` 了它吗」** ⇒ import 了 ⇒ ⇒ **那条证据必然来自别的探针**
+  ⇒ ⇒ **要么把那个探针补上，要么把记录降级**。
+
+### 同族
+
+- 与 **PIT-FAV-API-012**（守门断言的期望值若引用「被测代码的常量」⇒ 那条守门是哑的）**同源**：
+  都是「**守门自己站在被测对象身上**」⇒ 一改就一起变 ⇒ 守门就哑了。
+  本条是「守门站在**依赖**上」；那条是「守门站在**常量**上」。
+- 与 **PIT-FAV-API-011**（yaml 里没写 `lettuce.pool.enabled` ≠ 池没开 —— Boot 4 的判据是 **classpath**）**互补**：
+  那条讲「**classpath 决定池开不开**」；本条讲「**classpath 上的类被 `import` 进来，
+  会把「classpath 缺了」这件事挡在编译期**」⇒ ⇒ **同一个 classpath 事实，两种观测面**。
