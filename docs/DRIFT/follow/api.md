@@ -920,11 +920,20 @@ go-zero@v1.10.2 rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Ha
 `user-api` **121**（上轮 120 · +1）· `user-rpc` **137** · `admin-api` **140**（上轮 137 · +3）· `admin-rpc` **115**
 · `follow-api` **68**（上轮 65 · +3）· `follow-rpc` **78** ⇒ **合计 659**（上轮 652 · **+7**）⇒ **Failures 0 / Errors 0**。
 ⇒ **守门 5/5 EXIT=0**（`check-wave-lane-ownership` · `check-wave-role-model` · `check-wave-coupling` · `check-ledger-count` · `check-doc-links`）。
-⇒ ⚠️ **本轮回归的一次偶发（留痕）**：第一次 6 组件回归里 `FollowApiStartupFailFastTest.startsWithGlobalClientInterceptor`
-红过一次（cause = devh `connectOnStartup` 的「Can't connect to channel follow-rpc」⇒ 本地 channel 3s 内没到 READY）；
-**该测试与本轮改动无耦合面**（它测 gRPC 拨号，本轮改 Redis）⇒ 处置：单独重跑 follow-api **3 次全绿** ＋
-第二次 6 组件回归 **EXIT=0** ＋ 给本轮新守门补**收尾卫生**（socket 守门 `@DirtiesContext(AFTER_CLASS)` 关 Lettuce 客户端；
-断连守门 `@AfterAll` 关 TCP 代理线程池）⇒ **记为「偶发 · 未归因」**，不写成「已修」。
+⇒ ⚠️ **本轮回归的一次偶发（留痕，不掩盖）**：第一次 6 组件回归里 `FollowApiStartupFailFastTest.startsWithGlobalClientInterceptor`
+红过一次（cause = devh `connectOnStartup` 的「Can't connect to channel follow-rpc」⇒ **本地** channel 3s 内没到 READY）；
+**该测试与本轮改动无耦合面**（它测 gRPC 拨号，本轮改 Redis）。
+⇒ **归因取证（2026-10-27 · 用 surefire 报告的 mtime 还原并发时间线）**：
+· **05:25~05:45 窗口内四棵工作树全有 surefire 报告产出** ⇒ **4 个 maven 并发**（`g1` 16 份 · `g2` 81 份 · `g3` 29 份 · `g4` **256** 份）
+· **G4 的全量回归 05:30~05:46 逐分钟都有报告** ⇒ 与我的第一次回归窗口 **05:32:16~05:38:02 完全重叠**
+· 但**并发不是充分条件**：我的 3 次单独重跑（**05:40:17 / 05:41:09 / 05:42:02，G4 当时仍在跑**）**全绿**
+· 第二次 6 组件回归（05:42~05:50:52）⇒ **EXIT=0 · 659 全绿**
+⇒ **结论（诚实口径）**：**诱因高度可疑 = 并发 lane 回归的资源争抢**（与 G4 同窗口那次 `EXIT=137` 的 OOM-kill **同源**）
+⇒ **未做受控复现**（要复现得故意再开 4 个并发回归，代价过高）⇒ 记为「**偶发 · 诱因高度可疑 · 未受控复现**」，
+**不写成「已修」**；⇒ **但也不是本轮改动引入**（改动面 = Redis，红的是 gRPC 拨号；变异 5/5 变红证明守门有效；第二次全量 EXIT=0；同窗口 3 次单独重跑全绿）。
+⇒ **⇒ 落到一条通用纪律**（AGENTS.md §4.1「大回归错峰」不是形式主义）：**多 lane 并发时看到「本地连接/拨号超时」类偶发，先查别的 lane 的 maven 进程列表，别当代码问题**。
+⇒ 另：已给本轮新守门补**收尾卫生**（socket 守门 `@DirtiesContext(AFTER_CLASS)` 关 Lettuce 客户端；断连守门 `@AfterAll` 关 TCP 代理线程池）⇒ 消掉本域唯一可能与后续测试抢资源的路径。
+⇒ 📌 **同款现象 G2 侧也有**（`message-rpc` 的 `MessageRpcSlowThresholdGateTest` 全量并发下偶发 `UNAVAILABLE` ⇒ 已登记 `DRIFT-MSG-V-032`）⇒ **两边同族**。
 
 ### 12.4 ⚠️ 效力边界（如实登记）
 
