@@ -160,11 +160,23 @@ rag:
     #   · envelope ⇒ Go 注册了 SetErrorHandler ⇒ 走业务信封
     #                ⇒ **200 + {"code":5001,"msg":"<该域自己的错误码表文案>","data":null}**
     #
-    # ⚠️ 本属性**同时**决定两件事（缺一不可）：
+    # ⚠️ 本属性决定两件事，**但只在 mode ≠ OFF 时**（共享层
+    #    GoStyleTomcatParameterLimitCustomizer#customize 的 OFF 分支**直接 return**）：
     #   ① service/common 的 GoStyleTomcatParameterLimitCustomizer 把 Tomcat 的
     #      maxParameterCount 抬到 10001（= Go 段数上限 +1）⇒ 否则 Tomcat 会先于应用层拒绝，
     #      且拒绝形状是 400 + HTML 错误页（与 Go 不同）；
     #   ② service/common 的 GoStyleFormValueLimitInterceptor 按 Go 的语义判定。
+    #
+    # 🔴 **本域 mode = "off" ⇒ ① 不发生 ⇒ 运行期容器上限停在 yaml 的 2048**
+    #    （而不是别的域的 10001）⇒ 即「**比 Go 更严**」—— 但**当前不可达**：
+    #    · Go 侧本域 handler 走 `json.NewDecoder(r.Body)`（gettaskhandler.go:19）⇒
+    #      `httpx.Parse` / `r.Form` **从不求值** ⇒ Go 的 2048 **应用层**判据不生效，
+    #      Go 实际只有 `net/url` 的 `defaultMaxParams = 10000`（Go 1.25 net/url/url.go:1001）；
+    #    · RAG 侧本域**从不调 `request.getParameter*`**（`@RequestParam` / `@RequestPart` 命中 = 0）
+    #      ⇒ Tomcat **永不解析 query** ⇒ 2048 **够不着** ⇒ ⇒ **两侧都不可达 ⇒ 无可观察差异**。
+    #    ✅ 守门已钉住这条不可达性：`TaskApiFormLimitReachabilityTest` 的
+    #       「>2048 个非空 query 值 ⇒ 200」（真 Tomcat）⇒ **若哪天本域开始读 query 参数**，
+    #       该守门会红 ⇒ ⇒ 届时须把容器上限提到 10001（对齐 Go 的 net/url 段数上限）。
     #
     # ⚠️ 各域 5001 的文案**不一样**（like/comment =「系统内部错误」，
     #    hot/follow/message = "internal server error"）⇒ 共享层**不硬编码文案**：
