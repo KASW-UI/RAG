@@ -2600,3 +2600,29 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
 | ⇒ ⇒ **解除条件** | G2 的 `4786eb5`（task-api yml `mode: raw` ⇒ `off`）进我树 ⇒ ⇒ **再合 `d4e4745`** ⇒ ⇒ 两者成对 ⇒ ⇒ `check-tomcat-limits.py` 应 EXIT=0（G4 已实测：把打好的守门跑在 G2 树 ⇒ EXIT=0） |
 
 ⇒ ⇒ ⚠️ **这不是「我落后了」的疏忽** ⇒ ⇒ **是成对落地的顺序约束** ⇒ ⇒ 已通报 G4 与协调会话 ⇒ ⇒ **合并时必须两笔同批**（谁先合谁负责等另一笔）。
+
+## 42. 🔴 **G2 第六轮来信的两条复检 —— 一条成立并升级为波次判据，一条【根因定位被推翻】**
+
+### 42.1 🟢 **G2 [3] 的「`-am` 那条的延伸」= 成立 ⇒ 升级为波次级判据**
+
+- **我独立复核**（`grep -rln '<artifactId>users-common</artifactId>' --include=pom.xml service/`）：
+  **`users-common` 的仓内消费者 = 8 个 api 模块**（`article-api` · `comment-api` · `favorite-api` · `follow-api` · `like-api` · `message-api` · `admin-api` · `user-api`）**＋ 2 个 rpc 模块**（`admin-rpc` · `user-rpc`）⇒ ⇒ **跨 4 条 lane**（G3 三家 / G1 三家 / G2 两家）。
+- ⇒ ⇒ **不带 `-am`** ⇒ ⇒ 那 8 个 api 从 `~/.m2` 解析 `users-common` 的**旧 jar** ⇒ ⇒ **测的不是本树代码** ⇒ ⇒ **「跑绿是假绿」的同款**。
+- ⇒ ⇒ **写权归属**：`service/users/users-common/**` ∈ `check-wave-lane-ownership.py` 的 `EXCLUSIVE`（**G4 写权唯一**）⇒ ⇒ **G4 改 `users-common` ⇒ 四条 lane 的域级回归都必须带 `-am` 重跑**。
+- ⇒ ⇒ **我域 3 个 api（`follow-api` / `user-api` / `admin-api`）就在受影响的 8 个里** ⇒ ⇒ **我域那 669 条之所以可信，正是因为每轮命令都带 `-am`**（reactor 实跑含 `users-common` 本树源码）。
+- ⇒ ⇒ **建议写进 C7 收口协议的两条**（我采纳并已固化进本 lane 的固定命令）：
+  ① **域级回归命令必须带 `-am`**（且在报告里写明 **reactor 实跑了几个模块** ⇒ 才能证明 `users-common` 用的是本树源码）；
+  ② **域级数字 = 本域模块的 surefire 目录逐文件求和**（我 669 / G2 668）⇒ **共享层单列**（两边共享层都 327）⇒ ⇒ **reactor 总数（996 / 995）不是域级数** ⇒ ⇒ **两边共享层同为 327 ⇒ 域级差的那 1 条与共享层无关**。
+
+### 42.2 🔴 **`check-tomcat-limits.py` 的根因定位被推翻**（G2 / G3 / 我此前都报成「落点 `tools/difftest/**` 无人拥有 ⇒ 需整合者」⇒ ⇒ **错**）
+
+- **G4 的 `d4e4745` 已经把「第二份判据」删掉了**：该版守门**不再维护期望表副本**，改为**直接读真源** `service/common/src/main/java/com/rag/common/http/GoStyleFormLimitMode.java` 的 `SEMANTIC_REACHABILITY` ⇒ ⇒ ⇒ **「期望表与权威表自相矛盾」这件事在 G4 树里已经不存在** ⇒ ⇒ ⇒ **守门自带的注释也明写「副本 = 违背该设计的第二份判据 ⇒ 删副本，改为读真源」**。
+- 🔴 **实测（用 G4 的 `d4e4745` 版守门对着【我的树】跑，脚本放在 `/tmp` 假 ROOT + 软链回我的树 ⇒ 我树 0 改动）**：
+  - **10 个 api 进程里只有 `service/task/task-api` 红** ⇒ ④ form-gate：实际 `'raw'`、应为 `'off'`；
+  - ⇒ ⇒ **我域三个 api（`user-api` / `admin-api` / `follow-api`）四旋钮全 ✅**
+    （`user-api`=`raw` / `admin-api`=`raw` / `follow-api`=`envelope` ⇒ **与权威表逐条一致**）。
+- 🟢 **配对已机器实证**（同一套假 ROOT，只把 `task-api` 的 yml 改成守门要求的写法 ⇒ **我树仍 0 改动**）：
+  `mode: raw` ⇒ `mode: "off"` ⇒ ⇒ **守门 EXIT=0** ⇒ ⇒ ⇒ **「G2 那半 + G4 那半 = 全绿」已被机器跑出来，不是推断。**
+- ⇒ ⇒ **真正剩下的唯一缺口 = `service/task/task-api/src/main/resources/application.yml` ⇒ 【G2 写权内】** ⇒ ⇒ **不需要整合者** ⇒ ⇒ ⇒ **三条 lane 之前都把这事推给整合者 ⇒ ⇒ 根因被误定位 ⇒ 代价是多绕了好几轮** ⇒ ⇒ ⇒ **⇒ 这条要以「根因纠正」而不是「再推一次」的方式落地。**
+- ⚠️ **语法坑（守门自己写明的）**：`off` **必须带引号** —— YAML 1.1 会把未加引号的 `off` 解析成**布尔 false** ⇒ ⇒ 正确写法 `mode: "off"`。
+- ⇒ ⇒ **§41 的「持住不合并」由「等 G2 进来」升级为「配对条件已实证」** ⇒ ⇒ **解除条件不变**：G2 的 yml 订正进我树 ⇒ ⇒ 再成对合 `d4e4745` ⇒ ⇒ 届时我树 10 个 api 进程全 ✅。
