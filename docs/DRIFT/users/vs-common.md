@@ -1041,6 +1041,49 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 
 ---
 
+## 21. 🆕 **`application.yaml` 命名例外** —— 定性：**不是缺陷 · 有意保留**（2026-10-27 · G2 提醒 ＋ 本域独立核实）
+
+> **G2 的提醒**：`service/users/user/user-rpc` 用 `application.yaml`，而全仓其余组件用 `application.yml` ⇒ G2 已核「**不是『两种扩展名并存』**」⇒ **不是缺陷**；但提醒「**后人排查配置时极易误判『同一域两种扩展名 ⇒ 会不会互相覆盖』**」⇒ 并建议「若顺手，统一成 `.yml` 最省事（**改动 1 处文件名 + 1 处引用**）」。
+
+### 21.1 ✅ **本域独立核实（不采信转述）** —— 结论成立，但**分母与连带面都要订正**
+
+| 项 | G2 的说法 | **本域实测** | 判定 |
+|---|---|---|---|
+| 组件总数 | **16** | **20**（article / comment / favorite / follow / hot / like / message / task 各 2 ＋ users 4） | 🔴 **分母订正** |
+| 用 `.yml` 的组件 | 15 | **19** | 同上 |
+| 用 `.yaml` 的组件 | 1（`user-rpc`） | **1** ✅ | ✅ **「唯一例外」成立** |
+| 同 location 双扩展名 | 无 | `user-rpc/src/main/resources/` = `META-INF` ＋ `application.yaml` ⇒ **该组件只有一个配置文件** | ✅ **无覆盖、无加载顺序风险** |
+| 改名的连带项 | 「**1 处引用**」 | **≈ 42 处**（见 §21.2） | 🔴 **G2 低估了连带面** |
+
+⇒ ⇒ **定性成立：不是缺陷**（Spring Boot 两种扩展名都认 ⇒ 零行为差异；且每组件只有一个配置文件 ⇒ 不存在覆盖）⇒ ⇒ **但「1 处引用」这个成本估计不成立**。
+
+### 21.2 🔴 **若真改名，连带面是 ≈ 42 处**（实测 `application\.yaml` 命中）
+
+| 归属 | 命中 | 分布 |
+|---|---|---|
+| ✅ **我域写权面** | **38 行 / 15 份文件** | `docs/DRIFT/users/user/rpc.md` **14** · `service/users/user/user-rpc/src/test/java/…/UserRpcNacosGroupTest.java` **5** · `…/UserRpcRedisTimeoutConfigTest.java` **3** · `…/UserRpcGrpcInterceptorWiringTest.java` **3** · `docs/Pitfalls/users/_shared.md` **2** · `service/users/user/user-rpc/src/main/resources/application.yaml` **3**（自身）· `docs/DRIFT/users/vs-common.md` **1** · `docs/DRIFT/users/_shared.md` **1** · `…/UserRpcPrimaryKeySourceParityTest.java` **1** · `…/UserRpcProperties.java` **1** · `…/NacosRegistration.java` **1** · `…/UserRpcApplication.java` **1** · `service/users/user/user-api/src/main/resources/application.yml` **1**（注释）· `…/UserApiProperties.java` **1** · `service/users/admin/admin-rpc/src/main/resources/application.yml` **1**（注释）· `…/AdminRpcProperties.java` **1** |
+| 🔴 **无人拥有（整合者写权面）** | **3 处** | `docs/DRIFT/_cross/open-items.md:80` · `docs/FileTree/like/rpc.md:20` · `tools/difftest/run.sh:184`（注释）⇒ ⇒ **我改不了** |
+| ✅ **不受影响** | 2 个脚本 | `tools/difftest/check-grpc-runtime-classpath.py:140` · `check-tomcat-limits.py:174` ⇒ 两者都是 `for fn in ("application.yml", "application.yaml")` ⇒ **两个扩展名都认** ⇒ 改名不影响它们 |
+
+### 21.3 ⇒ ⇒ **本轮决定：不改名，改为在台账登记**（三条独立理由，任一条都足够）
+
+1. **成本 ≫ 收益**：收益 = 消除**一个**命名误判点；成本 = **≈ 42 处**引用同步（其中 **3 处我改不了**）⇒ ⇒ **跨 lane 协调成本**（要请整合者同步 3 处 + 我自己改 38 行）⇒ ⇒ **与 G2 的「顺手最省事」估计差两个数量级**。
+2. 🔴 **会留下我无法同步的不一致**：`docs/Pitfalls/users/_shared.md` 的 **2 处**引用 **不在任何 lane 白名单**（写权守门实测：G1 白名单 = `service/users/**`（除 `users-common`）＋ `service/follow/**` ＋ `docs/DRIFT/{users,follow}/**`）⇒ ⇒ **改名后这 2 处会变成过期引用，而我没有写权去改** ⇒ ⇒ **等于用「消除误判」换「引入新的不一致」** ⇒ ⇒ 不可接受。
+3. ⚠️ **改名对 Go 对齐零收益**：AGENTS.md §三规定「差异只允许出现在**表达层**」⇒ ⇒ 文件扩展名是**纯表达层** ⇒ ⇒ 改它**不改善任何一条语义漂移** ⇒ ⇒ 而本项目对「行为层零变化」的改动一律要求配回归 ⇒ ⇒ **窗口期内还不能跑回归** ⇒ ⇒ 现在改 = **既无收益、又欠一次未验证的回归**。
+
+### 21.4 🔓 **复开触发条件（写死，将来满足其一就统一）**
+
+- ① 将来某个工具/脚本**按扩展名做单文件假设**（只找 `application.yml`、不认 `application.yaml`）⇒ ⇒ **那时才必须统一**（当前两个脚本都两个都认 ✅）。
+- ② 后人**再犯一次**「同域两种扩展名 ⇒ 会不会互相覆盖」的误判（G2 本轮就差点误判 ⇒ **说明这个误判是真实存在的**）⇒ ⇒ **那时一次性改完 42 处**。
+- ③ 若 §21.2 里那 **3 处无人拥有的引用**被整合者先改掉 ⇒ ⇒ 成本降到 38 处 ⇒ ⇒ **那时再评估**。
+
+### 21.5 🟡 **G2 ④ 的联动登记**：共享层若改命令超时判据 ⇒ **两域必须一起改**
+
+⇒ 判据 = **`LettuceClientConfiguration.getCommandTimeout()`**（值）＋ **`getTimeout()==3000` ＋ `isApplyConnectionTimeout()`**（机制）⇒ ⇒ **不是** `isTimeoutCommands()`（恒真 ⇒ 非有效判据）。
+⇒ ⇒ **用同一判据的守门**：**我域 5 份** FastFail 守门（user-api / admin-api / follow-api / user-rpc / admin-rpc）＋ **G2 域 8 条**（`LikeRpcRedisTimeoutsGateTest` 4 ＋ `TaskRedisCommandTimeoutGateTest` 4）⇒ ⇒ **共 13 份跨 2 个域** ⇒ ⇒ ⇒ **若共享层改这个判据 ⇒ 两域必须同一次提交一起改** ⇒ ⇒ **已登记为「共享层变更的联动清单」**（与 §13 的必查表并列）。
+
+---
+
 ## 14. 🆕 **守门卫生缺陷：「可达 ⇒ 能启动」用例的 3s 预算过紧 ⇒ 偶发红**（2026-10-27 · G1 lane）
 
 > **本节记的是本域自己的测试缺陷**（不是产品缺陷、也不是漂移）⇒ **落点全在 G1 写权内，已自修**。
