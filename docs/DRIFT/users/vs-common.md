@@ -2289,3 +2289,31 @@ adminSchemaBootstrap init 失败
 落点 = **整合者**（`docs/DRIFT/_cross/**` = 无人拥有面）⇒ ⇒ **我域零落码**。
 ⇒ ⇒ **可选修法（仅登记，不实施）**：① 固定 Testcontainers 宿主口段（避开 `49152–65535`）② 跑完显式清理
 ③ 统一「容器名 ＋ 标签」回收（本机 Ryuk 不可用 ⇒ 需自建）。
+
+## 35. 🟢 **C7 的「最小充分集」判据：共享层提交按【变更面】分级（2026-10-27 晚）**
+
+### 35.1 判据的事实基础（实测，非推断）
+
+`service/common` **不发布 `test-jar`**（`service/common/pom.xml` 无 `test-jar` 目标）
+⇒ ⇒ 我域 6 个模块只依赖 `common` 的 **main jar**（`pom.xml` 里 `<artifactId>common</artifactId>`，无 `<type>test-jar</type>`）
+⇒ ⇒ ⇒ **`service/common/src/test/**` 根本不在我域的测试 classpath 上**
+⇒ ⇒ ⇒ ⇒ ⇒ **⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ 共享层的「test-only 提交」在【构造上】不可能改变我域的测试结果。**
+
+### 35.2 三档 C7 义务（按共享层提交的变更面分级）
+
+| 共享层提交类型 | 我域的 C7 义务 | 依据 |
+|---|---|---|
+| 仅 `service/common/src/test/**` | ① 复跑 `service/common` 自身测试（**改动所在模块必须跑**）② 复跑**耦合最紧的 1 个域模块**（我域 = `user-rpc`：三层 MP 桥守门 ＋ 5 份 Redis FastFail 守门 ＋ 容器装配守门都在这）⇒ ⇒ **其余 5 个域模块的条数沿用上一次全量** | §35.1 ＋ 改动面 |
+| 含 `service/common/src/main/**` | **域级全量重跑**（我域 669 条） | 生产代码进我域 classpath ⇒ ⇒ 影响面不可推断 |
+| 仅 `docs/**` 或 `tools/**` | 复跑**受影响的守门脚本** | 零运行时影响 |
+
+### 35.3 本轮实测（两例，都按上表执行）
+
+- `139b428`（`tools/check-ledger-selfcheck.py` ＋ 共享层测试 ＋ global 台账）⇒ ⇒ 域级全量重跑 ⇒
+  第一次撞上环境 flake（§34）⇒ ⇒ 复跑 18/18 SUCCESS，**我域 669 条逐项一致**；
+- `407c230`（仅 `service/common/src/test/.../GoStyleClientDisconnectProbe.java` ＋ global 台账）⇒ ⇒
+  按本表：① `service/common` = **330 条全绿** ② `user-rpc` = **144 条全绿** ⇒ ⇒ **零回归**（我域其余 5 个模块沿用上一轮全量）。
+
+⚠️ **反面提醒**：**「共享层提交 ⇒ 一律跳过」是错的** ⇒ ⇒ 共享层**自身**可能红（本轮 G4 的第十四次全量就撞上了同一类 flake：
+它用 `-rf :common` 续跑、且 `common` 这次没复现 ⇒ ⇒ **同一个 Testcontainers 端口冲突，两条 lane 都撞上了**）
+⇒ ⇒ ⇒ **共享层自己的测试必须跑，不能借「它只是 test」跳过。**
