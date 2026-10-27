@@ -108,7 +108,7 @@
 | **3** | `UNRESOLVED-ARPC-002`（= **E38②**） ⚠️ **2026-10-27 订正：此条本轮不需要落码** | 超时是否 **min(客户端 deadline, 服务端 timeout)**：Go 继承父 ctx ⇒ 客户端更早就提前取消。**RAG 侧已于 2026-10-26 落地该语义** ⇒ **① 已闭环** | `service/common/observability/rpc.go:38` ⇒ `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)`<br>**已核 ✅**：该行内容逐字 = `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` | ✅ **已落地**：`RpcInterceptor.java:234` ⇒ `Math.min(serverBudgetMs, clientDeadlineRemainingMs())`；`:263` 调度器用 `effectiveTimeoutMs`；`:592-601` 从 `io.grpc.Context.current().getDeadline()` 取 | **L3 双侧活体**（`tools/semantic-probe/rpc-timeout/` **本轮实跑 EXIT=0**：`client_deadline_ctx` **一致** · `timeout_wire` 一致 · 3/3 一致） | 两侧都应是 **Y** = 「**有效期限 = min(客户端 deadline, 服务端 timeout)**」⇒ ✅ **这个 Y 已经达成** ⇒ ⛔ **请勿改 `RpcInterceptor` 的 deadline 计算**（会把对的改错 ⇒ 制造新漂移）<br>剩下**第②层**（`ServerCall#close()` 不取消业务线程 ⇒ 架构级 ⇒ Jason 2026-10-26 已拍板「**另立项**」）⇒ **不是本轮落码项** | `service/common` ⇒ 编译面 16 个组件 | 🟢 **不阻塞**（**本轮不落码**） |
 | **4** | `DRIFT-ADMINAPI-007` | 503 超时响应的 `Content-Type` **charset 分号后空格**残差（`nosniff` 已于 `HttpMiddleware.java:692` 落地 ⇒ **原条自动消失** ⇒ **需重开一条**） | `service/common/observability/http.go:88` ⇒ `http.Error(w, httpTimeoutBody, statusCode)`（Go 标准库 `net/http.Error` 的 5 件事：`text/plain; charset=utf-8` ＋ `nosniff` ＋ 状态码 ＋ 尾换行） | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`（超时分支）＋ `http/GoStyleRouterErrorResponses.java` | **L1 源码**（⚠️ 响应头层须**真 Tomcat** 验 ⇒ MockMvc 测不到，见 `Pitfalls/common/http.md`） | 两侧都应是 **Y** = 「**503 的 `Content-Type` = `text/plain; charset=utf-8`（分号后**无**空格）**」⇒ 与 `DRIFT-MSGAPI-010` 同族（那条用户已拍板「保持登记，本轮不做」⇒ **本条要不要做请 G4 明确**） | `service/common` ⇒ 编译面 16 个组件 | 🟡 不阻塞 |
 | **5** | `UNRESOLVED-USERSCOMMON-003`（**只派一半**） | `users-common` 的**通用版** `GoStyleCoercion::applyTo` 被 **user-api / admin-api / favorite-api** 三域注册（**favorite 是外域**）⇒ 规则一改，favorite 的解析语义跟着变 ⇒ 「通用版规则内容是否该被外域复用」待定 | go-zero `core/mapping/unmarshaler.go`（`UnmarshalJsonReader` 的 coercion 与必填校验规则）—— ⚠️ **本条 Go 侧行号本轮未核** ⇒ 落码前请回真源逐条核 | `service/users/users-common/src/main/java/com/rag/users/common/http/GoStyleCoercion.java`（**通用版**，G4 写权）· 另 5 域用**本域私有**变体 | **L1 源码**（规则内容）＋ **L3 活体**（本轮实测 8 个 api 域的 `WebMvcConfig` 注册了哪个变体 ⇒ **落点口径已订正**，见 §6.4.1） | 两侧都应是 **Y** = 「**通用版的规则集合 = Go 侧 `UnmarshalJsonReader` 的等价规则**」⇒ 是否允许外域复用，由**规则内容**决定，不由「通用版」这个文件名决定 | `service/users/users-common` ⇒ **被 6 个外域 api 引用** ⇒ 编译面大 | 🟡 不阻塞 |
-| **6** | `DRIFT-USERRPC-V-002` | DDL：`users_user.status` 的 **NOT NULL** 两侧不同（Go `status bigint DEFAULT 0` **可空** / RAG `status BIGINT NOT NULL DEFAULT 0`）⇒ RAG 侧任何写 NULL 的代码在 PG 层被拒 | Go `service/user/user/rpc/internal/model/data_model.go:11` ⇒ `Status int64`（值类型 ⇒ GORM 建出**可空**）· ⚠️ **本条 Go 侧行号本轮未核** | `service/users/users-common/src/main/resources/db/01_create_user.sql:39` ⇒ `status BIGINT NOT NULL DEFAULT 0` | **L2 真库实证**（`information_schema` 对照）<br>＋ **L1 逐层复核**（2026-10-27 · GORM `field.go:616-622` ＋ `database/sql/convert.go:431-435`） | ⛔ **2026-10-27 订正：原建议修法已被本域逐层证据链推翻 ⇒ 本单不需要 G4 落码。**<br>**原写**「两侧都应是 Y =「`users_user.status` **可空**」」⇒ **错的** ⇒ **放开可空会制造新漂移**（RAG 侧 `callSettersOnNulls=false` ⇒ NULL 时跳过 setter ⇒ 读出 **null** ≠ Go 的 **0** ⇒ 方向相反）。<br>⇒ **正确口径 = 两侧都应是 Y =「维持 RAG NOT NULL」**（Go 读 NULL ⇒ **0** 且不报错；RAG 读不到 NULL ⇒ 也是 0 ⇒ **可观察结果相同**）⇒ 本条定性为「**DDL 层差异 · 行为层零差异**」⇒ 落点 `users-common` **无动作**。<br>⇒ 剩下只差「**销号签字**」，而 `docs/Intentional_Deviations/**` **不在 G1 写权面** ⇒ **请 G4 / 整合者确认销号口径**；逐层证据链见 [`user/rpc.md` 的 V-002 订正块](user/rpc.md) | `service/users/users-common` ⇒ **6 个外域 api 引用**（但 **本单落点无动作 ⇒ 实际影响面 = 0**） | 🟡 不阻塞（**原写「须与 users 域同一次提交」已作废** ⇒ 无需任何组件改动） |
+| **6** | `DRIFT-USERRPC-V-002` | DDL：`users_user.status` 的 **NOT NULL** 两侧不同（Go `status bigint DEFAULT 0` **可空** / RAG `status BIGINT NOT NULL DEFAULT 0`）⇒ RAG 侧任何写 NULL 的代码在 PG 层被拒 | Go `service/user/user/rpc/internal/model/data_model.go:11` ⇒ `Status int64 \`gorm:"column:status;default:0"\``（**值类型 · 非指针**）⇒ ✅ **2026-10-27 13:2x 已核到该行**（原「本条 Go 侧行号本轮未核」的标记**撤销**）⇒ ⇒ **更强的推论**：GORM 对**值类型**字段写库时**恒写 0**（不会写 NULL）⇒ ⇒ **Go 侧这一列实际上永远不出现 NULL** | `service/users/users-common/src/main/resources/db/01_create_user.sql:39` ⇒ `status BIGINT NOT NULL DEFAULT 0` | **L2 真库实证**（`information_schema` 对照）<br>＋ **L1 逐层复核**（2026-10-27 · GORM `field.go:616-622` ＋ `database/sql/convert.go:431-435`） | ⛔ **2026-10-27 订正：原建议修法已被本域逐层证据链推翻 ⇒ 本单不需要 G4 落码。**<br>**原写**「两侧都应是 Y =「`users_user.status` **可空**」」⇒ **错的** ⇒ **放开可空会制造新漂移**（RAG 侧 `callSettersOnNulls=false` ⇒ NULL 时跳过 setter ⇒ 读出 **null** ≠ Go 的 **0** ⇒ 方向相反）。<br>⇒ **正确口径 = 两侧都应是 Y =「维持 RAG NOT NULL」**（Go 读 NULL ⇒ **0** 且不报错；RAG 读不到 NULL ⇒ 也是 0 ⇒ **可观察结果相同**）⇒ 本条定性为「**DDL 层差异 · 行为层零差异**」⇒ 落点 `users-common` **无动作**。<br>⇒ 剩下只差「**销号签字**」，而 `docs/Intentional_Deviations/**` **不在 G1 写权面** ⇒ **请 G4 / 整合者确认销号口径**；逐层证据链见 [`user/rpc.md` 的 V-002 订正块](user/rpc.md)<br>🔴 **2026-10-27 13:2x · G4 回执 ⑧ 说「等 G1 的 #6 第 1 步（让 `admin-rpc` 的 `UserEntity.status` 能表达 NULL）」⇒ ⇒ 本条已由本域订正 ⇒ ⇒ 「第 1 步」【取消】⇒ ⇒ **G4 不需要为本单落 DDL 那步**（落 DDL = 把 RAG 改成可空 = 制造上面那条新漂移）⇒ ⇒ **落点只剩签字档** | `service/users/users-common` ⇒ **6 个外域 api 引用**（但 **本单落点无动作 ⇒ 实际影响面 = 0**） | 🟡 不阻塞（**原写「须与 users 域同一次提交」已作废** ⇒ 无需任何组件改动） |
 | **7** | `DRIFT-USERAPI-014` 的**跨域推广** | `RedisDisconnectedBehaviorConfig`（Redis 断连 ⇒ Lettuce 排队 ⇒ 撞 3s 预算 ⇒ 503；Go 是 200 fail-open）**只装在 `user-api`** ⇒ 其余 api 服务**有同款漂移** | `service/common/middleware/checkblacklistmiddleware.go:35-36`（Go 侧 Redis 断连 ⇒ fail-open 200）· ⚠️ **本条 Go 侧行号本轮未核** | `service/users/user/user-api/**`（**域侧**，G1 可改）⇒ 但**同款机制应在共享层统一** ⇒ 落点 `service/common` | **L3 双侧活体**（域台账 2026-10-24 第九轮：真进程+真 PG+真 Redis ⇒ 已修 `DRIFT-USERAPI-014` 本体） | 两侧都应是 **Y** = 「**Redis 断连 ⇒ fail-open（不排队等重连）**」⇒ **配置上移到 `service/common`** ⇒ 一次修，全域同向 | `service/common` ⇒ 编译面 16 个组件 | 🟡 不阻塞 |
 
 > ⚠️ **派单纪律**：① **缺项不进排期**（本表 7 项齐了才够）② **编号必须带全前缀**（`UNRESOLVED-ARPC-002` ≠ `DRIFT-ARPC-002`）③
@@ -657,12 +657,25 @@ G4 落码 ⇒ 共享层行为变 ⇒ **G1 这域的 A1~A9 结论要复核**（�
 
 | `@Order` | Filter | 作用 |
 |---|---|---|
+| **+2** | 🆕 `GoStylePathNormalizingFilter` | **Go 的 `path.Clean` 路径归一**（G4 `9690b04` · G2 FB-01）⇒ ⚠️ **该 Filter 只包装 request、不短路、不产生响应头** ⇒ **在 3s 预算起点（+7）之前** ⇒ **不进预算** |
 | +3 | `GoStyleTraceparentFilter` | 起 SERVER span |
 | +4 | `GoStyleMaxConnsFilter` | 连接数闸门 |
 | +5 | `GoStyleBreakerFilter` | 熔断 |
 | +6 | `GoStyleCpuSheddingFilter` | CPU 降载 |
 | **+7** | **`HttpMiddlewareFilter`** | **3s 预算起算点** |
 | +8 | `GoStyleMaxBytesFilter` | 请求体上限 |
+
+⚠️ **这张表有「两个代码态」（2026-10-27 13:2x · G4 槽位回执后补记）** —— **别把它当唯一事实**：
+
+| 代码态 | Filter 数 | 槽位 | 3s 预算起点行号 |
+|---|---|---|---|
+| **我树**（`align/g1-users-follow` @ `544e310` · `service/common` = 主干基线） | **6** | +3 / +4 / +5 / +6 / +7 / +8（**无 +2**） | `HttpMiddleware.java:304`（`begin`）· `:336`（`clear`） |
+| **G4 树**（`align/g4-service-common` @ `cd893d1`） | **7** | **+2** / +3 / +4 / +5 / +6 / +7 / +8 | `HttpMiddleware.java:324`（`begin`）· `:356`（`clear`） |
+
+⇒ ⇒ **`GoStylePathNormalizingFilter`（+2）由 G4 的 `9690b04` 引入，而 `9690b04` 不在 `do-my-own-gh` ⇒ 我树里没有这个文件** ⇒ ⇒ **「6 vs 7」的差异是代码态差，不是我漏数**（G4 说我「漏了 1 个」⇒ 指的是**合入主干后我域会面对 7 个**⇒ ⇒ **我域的「重排清单」必须把 +2 一并算进去**）。
+⇒ ⇒ ⚠️ **跨树行号会漂（实测差 20 行）** ⇒ 凡引他树 `文件:行号` ⇒ **必须同写该树的 commit id**（`HttpMiddleware.java:324` 只在 G4 的 `cd893d1` 上有效）。
+⇒ ⇒ ✅ **G4 的「+7 = 3s 预算起点」成立**（两侧独立核到 `begin` / `clear` **都在 `HttpMiddlewareFilter` 的链内**）⇒ ⇒ **域侧 +6 必须 < +7** 的推导**不受 +2 影响**（+2 在区间外）⇒ ⇒ **我域的推导仍成立**。
+⇒ ⇒ ✅ **「`MaxBytes`(+8) 是唯一排在 +7 之后的共享层 Filter」两侧都成立**（+2 在前，其余逐条同值）⇒ ⇒ 这正是「RAG 多记 413」的机制体现 ⇒ ⇒ **要把它挪到 +7 之前，必须同一次提交改：共享层 `@Order` ＋ G4 的槽位快照守门 ＋ 台账登记理由**（否则 G4 的 `SharedFilterOrderSnapshotGateTest` 必红）⇒ ⇒ **签字比改码便宜 ⇒ 优先走签字**（落点 = 签字档 ⇒ **整合者写权面**）。
 
 ⇒ 域侧的 `GoStyleJwtAuthFilter`（user-api）落在 **+6**，靠两条硬约束夹出来：
 **必须 < +7**（否则验签仍被 3s 预算覆盖 ⇒ `DRIFT-USERAPI-009②` 退回 OPEN）
@@ -1217,7 +1230,12 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 - **根因（已直接验）**：**G4 的树里没有 G1 的任何提交** ⇒ `fa608f3` / `cbf8af8` / `0c2a902` / `b7d724c` / `af0a532` / `ce0c339` / `e8b428f` **7 笔全部 `NOT_IN_G4`** ⇒ ⇒ G4 跑全量时，工作区里是 **G4 分支的基线**，**不含 G1 的新守门与新测试**。
 - **佐证（测试类文件数）**：`user-api` 18→22 · `user-rpc` 17→21 · `admin-api` 13→17 · `admin-rpc` 20→22 · `follow-api` 3→8 · `follow-rpc` 10→11 ⇒ 共 **+12 个测试类** ⇒ 与「条数差 62」方向一致。
 - ⇒ ⇒ **结论（写进 C7 的硬前提）**：**G4 的 lane 级全量数字不能当作「G1 域内已合入状态」的回归证据** ⇒ ⇒ **波末收口回归（C7）必须在【所有 lane 合入主干之后】再跑一次全量**（见 §13.3）。
-- ⚠️ **G4 已跑到第十一次**（2471 条 · 代码态 `040a201`）⇒ 我上一轮 pending 的「第八次」**已过期**；**§4.10.26 是前向引用、尚未落** ⇒ ⇒ **G4 此刻正在跑第十二次全量**（`ps` 实测 `multiModuleProjectDirectory=…/g4-service-common`）⇒ ⇒ **我的「窗口期零 maven」承诺继续有效**。
+- ⚠️ **G4 已跑到第十一次**（2471 条 · 代码态 `040a201`）⇒ 我上一轮 pending 的「第八次」**已过期**；**§4.10.26 是前向引用、尚未落** ⇒ ⇒ **我的「窗口期零 maven」承诺继续有效**。
+- 🔴 **订正（2026-10-27 13:2x · G4 槽位回执）**：上面那句「**G4 此刻正在跑第十二次全量**」**是错的 ⇒ 已撤**。
+  - **我当时的推断** = 「`§4.10.26` 尚未落 ＋ `ps` 显示 `g4-service-common` 在跑 maven ⇒ ⇒ 正在跑第十二次全量」。
+  - **G4 回执 ⑥ 的实测** = **本轮【未跑全量】**（理由：零生产代码改动 ⇒ 其余 51 个模块产物与行为不受影响 ＋ 第八次全量刚跑过且全绿 ⇒ 不重复 20 分钟全量）⇒ ⇒ **它当时跑的是模块级 `mvn -o -pl service/common test`（315 条）**。
+  - ⇒ ⇒ **根因 = 我把「代理指标」当成了「被测属性」**：`ps` 只能证明「**这个树在跑 maven**」，**不能**证明「**在跑全量**」（模块级与全量级在 `ps` 里长得一样）⇒ ⇒ 与「`grep -c` 计数会自匹配」同族 ⇒ ⇒ **判据要能区分「跑什么」**：全量有 `mvn ... clean verify` / `-pl` 列表长度 / `Reactor Summary` 行数可查，模块级没有。
+  - ⇒ ⇒ **「§4.10.26 尚未落」的**事实**仍成立**（G4 确实还没跑第十二次全量）⇒ ⇒ **我域台账不写「正在跑」这种动态断言**，只写「**截至 <时间戳> 尚未发生**」⇒ ⇒ **动态状态必须带时间戳**。
 
 ### 18.6 🔴 **Redis 收编删除的前置复检：仍未满足 ⇒ 5 份域内副本继续保留**
 
@@ -1229,5 +1247,45 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 
 - G3 在回信里写「**现在全机只有 G2 在跑 maven**」⇒ ⇒ **13:14:35 我复检 = 只有 `g4-service-common` 在跑** ⇒ ⇒ **该快照在我读到它时就已经过期**（与 §13.2 记的「实测 4 秒即过期」同族）。
 - ⇒ ⇒ **再次确认**：**任何跨 lane 的窗口判断都必须由动作方自己在动作前复检** ⇒ **别人给的「现在没人跑」不能当凭据**。
-- ⇒ ⇒ **本域窗口期承诺继续有效**（零 maven，含单模块定向跑）⇒ **直到 G4 第十二次全量收工**。
+- ⇒ ⇒ **本域窗口期承诺继续有效**（零 maven，含单模块定向跑）⇒ **直到 G4 的下一次全量收工**（🔴 **不要把「第十二次全量」当成已发生** ⇒ 见 §18.5 的订正 ＋ §19.3）。
+
+---
+
+## 19. 🆕 **G4 槽位协调回执（2026-10-27 · G1 lane）** —— 一处漏项 ＋ 一处**我的结论被推翻**
+
+> **来源**：G4（`mvs_e8063ac67c654150ab7797b8116ef0a1`）回我更早那条「Filter 槽位协调约束」。
+> **本节每个数字都两侧实测过**（不采信转述）⇒ 而且**其中一条推翻了我上一轮台账的推断**。
+
+### 19.1 ✅ **「6 个共享层 Filter」在【我树】成立 ⇒ 但【G4 分支】是 7 个 ⇒ 合入后我域面对 7 个**
+
+| 代码态 | Filter 数 | 槽位 | 3s 预算起点行号 |
+|---|---|---|---|
+| **我树** `align/g1-users-follow` @ `544e310` | **6** | +3 / +4 / +5 / +6 / +7 / +8 | `HttpMiddleware.java:304`（`begin`）· `:336`（`clear`） |
+| **G4 树** `align/g4-service-common` @ `cd893d1` | **7** | **+2** / +3 / +4 / +5 / +6 / +7 / +8 | `HttpMiddleware.java:324`（`begin`）· `:356`（`clear`） |
+
+- **实测方式**：逐个 `*Filter.java` 读 `@Order(...)` 的**字面值**（不是靠台账转述）。
+- ⇒ **`GoStylePathNormalizingFilter`（+2）由 G4 的 `9690b04` 引入，而 `9690b04` 不在 `do-my-own-gh` ⇒ 我树里没有这个文件** ⇒ ⇒ **「6 vs 7」= 代码态差，不是我漏数**。
+- ⇒ ⇒ **但 G4 的提醒有实质效力**：**合入主干后，我域的重排清单必须把 +2 一并算进去**（漏了它 ⇒ 重排后 `PathNormalizing` 留在 +2 ⇒ 它**只包装 request、不短路、不产生响应头** ⇒ 影响可控，但仍是「被刻意排在那儿」的）⇒ ⇒ **已把 +2 行补进 §6.4.2 的槽位表**（并标注「合入后适用」）。
+- ⇒ ⇒ ✅ **我域「+6 必须 < +7」的推导仍成立**（+2 在区间外）⇒ ⇒ **域侧槽位约束不受影响**。
+
+### 19.2 ✅ **G4 ③「+7 = 3s 预算起点」独立复核成立**（两侧各读一遍）
+
+- 预算的 `begin` / `clear` **都在 `HttpMiddlewareFilter` 的链内**（我树 `HttpMiddleware.java:304` / `:336`；G4 树 `:324` / `:356`）⇒ ⇒ 排在 `HttpMiddlewareFilter` **之后**的 Filter 都会**落进 3s 预算内** ⇒ ⇒ **「域侧 +6 必须 < +7」成立**。
+- ⚠️ **跨树行号差 20 行** ⇒ ⇒ **凡引他树 `文件:行号` 必须同写该树的 commit id**（`HttpMiddleware.java:324` 只在 G4 的 `cd893d1` 上有效）⇒ **本条已按此纪律写进 §6.4.2 的双代码态表**。
+- ✅ **「`MaxBytes`(+8) 是唯一排在 +7 之后的共享层 Filter」两侧都成立** ⇒ ⇒ **要挪它，必须同一次提交改：共享层 `@Order` ＋ G4 的槽位快照守门快照 ＋ 台账登记理由** ⇒ ⇒ **签字比改码便宜 ⇒ 优先走签字**（落点 = 签字档 ⇒ **整合者写权面**）。
+
+### 19.3 🔴 **订正我上一轮的一条推断：「G4 正在跑第十二次全量」⇒ 不成立**
+
+- G4 回执 ⑥ 的实测 = **本轮未跑全量**（理由：零生产代码改动 ＋ 第八次全量刚跑过且全绿）⇒ ⇒ **它跑的是模块级 `mvn -o -pl service/common test`（315 条）**。
+- ⇒ ⇒ **我错在把「代理指标」当「被测属性」**：`ps` 只能证明「**这个树在跑 maven**」，**不能**证明「**在跑全量**」⇒ ⇒ **模块级与全量级在 `ps` 里长得一样** ⇒ ⇒ 判据必须能区分「跑什么」（全量有 `clean verify` / `-pl` 列表长度 / `Reactor Summary` 行数可查）。
+- ⇒ ⇒ **「§4.10.26 尚未落」这个事实仍成立**（G4 确实还没跑第十二次全量）⇒ ⇒ **我域台账从此只写「截至 <时间戳> 尚未发生」，不写「正在跑」这种动态断言**。
+- ⇒ ⇒ ✅ **G4 本轮的落码是「零生产代码改动 + 1 个新测试文件」**（`SharedFilterOrderSnapshotGateTest` 4 条 ＋ 3 组变异全验证）⇒ ⇒ **共享层 Filter 顺序没被动 ⇒ 我域的槽位约束没被打破** ⇒ ⇒ **我域零改动**。
+
+### 19.4 🔴 **V-002：我域「#6 第 1 步」【取消】⇒ G4 不需要为本单落 DDL 那步**
+
+- G4 回执 ⑧：「等你的 **#6 第 1 步**（`admin-rpc` 的 `UserEntity.status` 能表达 NULL）⇒ 之后我落 DDL 那步 ＋ 跑全量 ＋ 回执」。
+- ⇒ ⇒ **这一步基于的修法已被我域的逐层证据链推翻**（见派单表 #6 行）⇒ ⇒ **正确处置 = 维持 RAG NOT NULL** ⇒ ⇒ **落 DDL 那步会把 RAG 改成可空 = 制造新漂移**（RAG `callSettersOnNulls=false` ⇒ NULL 时跳过 setter ⇒ 读出 `null` ≠ Go 的 `0`）⇒ ⇒ **本条落点 = 无动作**。
+- ⇒ ⇒ **本轮又核到一条更强的论据**（原台账标着「Go 侧行号本轮未核」⇒ **已核**）：Go `service/user/user/rpc/internal/model/data_model.go:11` ⇒ `Status int64 \`gorm:"column:status;default:0"\`` ⇒ **值类型 · 非指针** ⇒ ⇒ **GORM 对值类型字段恒写 0 ⇒ Go 侧这一列实际上永远不出现 NULL** ⇒ ⇒ **DDL 声明差异、行为零差异**这条结论**更硬了**。
+- ⇒ ⇒ **剩下的唯一落点 = 销号签字**（`docs/Intentional_Deviations/**` ⇒ **不在 G1 写权面**，也不在 G4 写权面）⇒ ⇒ **需要整合者拍板** ⇒ ⇒ **G4 不必为这条再做任何事**。
+- ⚠️ **机制教训（跨 lane 协作的通用坑）**：**发出去的消息不会自己更新** ⇒ ⇒ 我改了自己的结论（V-002 订正）⇒ ⇒ **对方树上的台账是旧的**（实测：G4 树里 `docs/DRIFT/users/vs-common.md` **连「V-002」都零命中** ⇒ 它那份是整合者 sweep 那版 ⇒ **完全不含 G1 lane 的任何内容**）⇒ ⇒ **对方很可能还在按我更早那条消息里的旧单等我** ⇒ ⇒ **改了结论必须主动通知，不能指望对方去读文件**。
 

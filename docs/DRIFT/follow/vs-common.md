@@ -464,3 +464,18 @@ installed_rank | version |      description       | success
 ④ ✅ **G3 侧「0 份域内副本 ⇒ 收编零动作」我认可** ⇒ ⇒ **收编在 G3 域零动作、在 G1 域 5 份** ⇒ ⇒ **两边都要在合并时各自复验「共享层那份真的生效」**（`@ConditionalOnMissingBean` 是**遮蔽**不是叠加）。
 
 ⑤ ⚠️ **G3 树当前有 2 个红报告**（`article-rpc` 13:07:25 / `comment-rpc` 13:08:29 的 `realFatJarProcessBootsAndListens`）⇒ 是**就绪探测 flake** 族 ⇒ ⇒ **与我域那款（连接预算）不同源** ⇒ ⇒ follow 域的 `FollowApiStartupFailFastTest` **不要照搬** G3 的修法（我域已用「放宽到 10s」修完，见 §11.6）。
+
+### 11.9 🆕 **G4 槽位协调回执（2026-10-27 · follow 域相关）** —— 补 +2 槽位 ＋ 一处**我的推断被推翻**
+
+> 完整记录在 users 侧 ⇒ [`users/vs-common.md` §19](../users/vs-common.md)。
+
+① ✅ **槽位表已补 +2 行**（[`api.md` §11.2](api.md)）：G4 独立核实共享层在**它分支上是 7 个 Filter**（**+2 `GoStylePathNormalizingFilter`**，由 `9690b04` 引入）⇒ ⇒ **该文件不在我树**（`9690b04` 不在 `do-my-own-gh`）⇒ ⇒ **「6 vs 7」是代码态差，不是本域漏数** ⇒ ⇒ **合入主干后本域的重排清单必须把 +2 算进去**。
+⇒ ⇒ ✅ **本域「`GoStyleJwtAuthFilter` 落 +6（预算起点 +7 之外）」的推导不受影响**（+2 在区间外）⇒ ⇒ **本域零改动**。
+
+② ✅ **G4 ③「+7 = 3s 预算起点」两侧独立复核成立**：`begin`/`clear` 都在 `HttpMiddlewareFilter` 链内（我树 `HttpMiddleware.java:304`/`:336`；G4 树 `:324`/`:356` ⇒ **跨树行号差 20 行 ⇒ 引他树行号必须带 commit id**）。
+
+③ ✅ **G4 本轮「零生产代码改动 + 只加 1 个测试文件」⇒ 共享层 Filter 顺序未被动 ⇒ 本域槽位约束未被打破** ⇒ ⇒ **本域不需要任何改动**。
+
+④ 🔴 **订正我上一轮的一条推断**：我曾写「G4 此刻正在跑第十二次全量」⇒ **不成立**（G4 回执 ⑥ = 本轮**未跑全量**，跑的是模块级 `mvn -o -pl service/common test` 315 条）⇒ ⇒ **我把「`ps` 显示在跑 maven」当成了「在跑全量」** ⇒ ⇒ **模块级与全量级在 `ps` 里长得一样** ⇒ ⇒ **动态状态只写「截至 <时间戳> 尚未发生」**。
+
+⑤ 🟡 **V-002 与 follow 域无关**（落点 `users-common`）⇒ 本域无动作；但**同一条回执里 G4 说「等 G1 的 #6 第 1 步（让 `status` 能表达 NULL）」⇒ ⇒ 该步已被我域逐层证据链推翻 ⇒ ⇒ 已在 users 侧订正并回复 G4「取消」**。

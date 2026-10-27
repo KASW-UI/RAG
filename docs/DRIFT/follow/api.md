@@ -824,6 +824,7 @@ go-zero@v1.10.2 rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Ha
 
 | `@Order` | Filter | 作用 | 出处 |
 |---|---|---|---|
+| **+2** | 🆕 `GoStylePathNormalizingFilter` | Go 的 `path.Clean` 路径归一（G4 `9690b04`）⇒ ⚠️ **只包装 request、不短路、不产生响应头** ⇒ **在 3s 预算起点（+7）之前 ⇒ 不进预算** | ⚠️ **该文件不在我树**（`9690b04` 不在 `do-my-own-gh`）⇒ **合入主干后适用** |
 | **+3** | `GoStyleTraceparentFilter` | 起 SERVER span | `GoStyleTraceparentFilter.java:190` |
 | **+4** | `GoStyleMaxConnsFilter` | 连接数闸门 | `GoStyleMaxConnsFilter.java:96` |
 | **+5** | `GoStyleBreakerFilter` | 熔断 | `GoStyleBreakerFilter.java:77` |
@@ -833,6 +834,8 @@ go-zero@v1.10.2 rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Ha
 
 ⇒ **合法窗口 `[+3,+6]`** —— 四个槽位（+3/+4/+5/+6）**全被共享层占满** ⇒ 只能**并列** ⇒ 落 **+6**。
 ⇒ **并列无害**：本 Filter **绝不写响应** ⇒ 与并列者的先后**不改变任何响应**。
+⇒ ✅ **G4 2026-10-27 13:2x 槽位回执独立复核**：共享层在 **G4 分支**上是 **7 个** Filter（**+2** 由 `9690b04` 引入）⇒ ⇒ **「6 vs 7」是代码态差，不是本域漏数** ⇒ ⇒ **本域「+6 必须 < +7」的推导不受影响**（+2 在区间外）⇒ ⇒ **但合入主干后本域的重排清单必须把 +2 一并算进去**（`PathNormalizing` 不短路、不产生响应头 ⇒ 影响可控，但仍是「被刻意排在那儿」的）。
+⇒ ⚠️ **跨树行号会漂**：G4 树 `HttpMiddleware.java` 的 `begin`/`clear` 在 `:324`/`:356`，**我树是 `:304`/`:336`**（差 20 行）⇒ ⇒ **凡引他树 `文件:行号` 必须同写该树的 commit id**。
 
 ### 11.3 ✅ 实际落地的形态：**「Filter 只验签、interceptor 抛异常」**
 
