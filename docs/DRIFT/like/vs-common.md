@@ -51,7 +51,7 @@
 | **A6** | errmsg 契约 | `LikeErrorCode.java:18-97`（29 码）· `LikeErrorMessages.java:37-88`（29 条文案 + 未知码回退 "FAIL"）· `LikeGrpcError.java:110-115` | ✅ 一致（Go `service/like/common/errmsg/errmsg.go:37-67` / `:69-99` / `:101-107` / `:33-35` 逐条同）<br>🟡 trailer 迁移 = **已签字偏离** `SD-2026-10-23-06`（框架限制）⇒ **勿当回归** | L1 | 2026-10-27 |
 | **A7** | proto 契约 | `service/like/like-proto/src/main/proto/like.proto` · 消费点 `LikeServiceGrpcImpl.java:48` | ✅ 一致（47 条 message 行 / 16 条 enum 行两侧同；`package` 归一 = **已签字偏离** `SD-2026-10-23-05`） | L1 | 2026-10-27 |
 | **A8** | DDL / 账本 | `application.yml:78` **`baseline-version: 0`** · `:81` `table: flyway_schema_history_like` · `:56-57` `enabled`/`baseline-on-migrate` · DDL `V1__create_like_record.sql:22-24`（TIMESTAMPTZ）· `V4__create_like_domain_fact_outbox.sql:32`（`DEFAULT CURRENT_TIMESTAMP`） | ✅ 一致（账本表名独立 ✅、baseline 钉 0 ✅、时间列全 TIMESTAMPTZ ✅；`DEFAULT CURRENT_TIMESTAMP` 1 处与 Go tag 同源 ⇒ **不是**残留）<br>✅ 账本隔离：`check-flyway-ledger.py` **EXIT=0** | L1 / L3 | 2026-10-27 |
-| **A9** | trace / otel | `Traceparent`：`GoStyleTraceparentFilter.java:188-191` ⇒ like-api 扫到即生效 · 全局 provider `AutoConfiguration.imports:1` → `GoStyleOtelAutoConfiguration.java:58-61` → `GoStyleOtelAgent.java:187-193`（endpoint 非空才装 batcher）· `application.yml:278-286`（`otel.exporter.otlp.endpoint=jaeger:4317`）<br>🟢 **域侧 span 属性：阶段 2 已补齐**（新增 `LikeSpans.java` + `LikeDomainService.java` 6 个方法 + `LikeUpdateKafkaListener.java` MQ 路径）| 🟡 **OBS**（**域侧写法已与 Go 逐条对齐**：Go **8 处落点 → RAG 8 处**，**13 个属性名**全对；守门 `LikeSpansAttributeGateTest.java` **11/11 绿** + **变异验证红在目标断言**）<br>🔴 **但 gRPC 路径的端到端还差共享层一步**：真链上 handler 执行期 `Span.current()` = **invalid（no-op）** ⇒ 域侧写法在真链上**暂时落不了地** ⇒ 已派单 **FB-04** | **L4（RAG 侧探针活体）+ L3（Go 侧源码逐条）** | 2026-10-27 |
+| **A9** | trace / otel | `Traceparent`：`GoStyleTraceparentFilter.java:188-191` ⇒ like-api 扫到即生效 · 全局 provider `AutoConfiguration.imports:1` → `GoStyleOtelAutoConfiguration.java:58-61` → `GoStyleOtelAgent.java:187-193`（endpoint 非空才装 batcher）· `application.yml:278-286`（`otel.exporter.otlp.endpoint=jaeger:4317`）<br>🟢 **域侧 span 属性：阶段 2 已补齐**（新增 `LikeSpans.java` + `LikeDomainService.java` 6 个方法 + `LikeUpdateKafkaListener.java` MQ 路径）| 🟡 **OBS**（**域侧写法已与 Go 逐条对齐**：Go **8 处落点 → RAG 8 处**，**13 个属性名**全对；守门 `LikeSpansAttributeGateTest.java` **11/11 绿** + **变异验证红在目标断言**）<br>✅ **gRPC 路径端到端已闭环**（2026-10-27 第七轮）：FB-04（`853767b`）已随合并 `37816ca` 入本树 ⇒ ⇒ 新增端到端探针 `LikeA9GrpcSpanEndToEndTest`（3 条）—— **真 in-process gRPC 链路** ⇒ 域侧属性落在**导出的 server span** 上；**对照组**（同一份域服务、同一通真实调用，只把拦截器换成「复刻 FB-04 之前行为」的那个）⇒ 属性**被丢弃** ⇒ ⇒ **A/B 坐实「机制是承重的」** ＋ 变异验证**红在目标断言** ⇒ ⇒ **原写「🔴 但 gRPC 路径的端到端还差共享层一步 … 已派单 FB-04」—— 该条已销号**（原值保留备查） | **L4（RAG 侧探针活体）+ L3（Go 侧源码逐条）**<br>🆕 **第七轮追加一条 L4：真 gRPC 链路端到端（含对照组 A/B + 变异验证）** ⇒ ⇒ ⚠️ **Go 侧仍是源码级（L3）⇒ 本轴【不】写「双侧活体闭环」** | 2026-10-27 |
 
 > 🟡 **A9 轴定义提醒**：`audit.*` 是 **admin/users 域专用**（`AdminSpans.java:91-93`）⇒ like 域的 Go 侧实际用 `query.*` / `cache.*` / `like.*` / `messaging.*` ⇒ **不要照抄 `audit.*` 前缀**。轴定义本身的问题记在共享面（**本 lane 不写**）⇒ 见 message 域台账 §6 的同款登记。
 
@@ -454,6 +454,8 @@ Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
   · **111 ⇒ 113** = 提交 `cd12ce3`「Redis 连接池 min-idle 4 ⇒ 8 ＋ **新增池守门 ⑤⑥**（like-rpc **首次**有池守门）」⇒ +2 ⇒ ⇒ **13:00 合并前实测 113 ✔ 吻合**
   · **113 ⇒ 115** = 本轮 FB-03 升级（`LikeProtectionChainWiringTest` 2 ⇒ 4）⇒ +2 ⇒ ⇒ **13:39 合并后实测 115 ✔ 吻合**
   · ⚠️ **第三轮记录的 111 保留在下方订正行**（原口径 = `mvn test`）
+  · **115 ⇒ 118** = 本轮（第七轮）新增 `LikeA9GrpcSpanEndToEndTest` **3 条**（A9 真链路 + 对照组 + 护栏）⇒ +3 ⇒ ⇒ **14:1x 实测 118 ✔ 吻合**（`mvn -o -B -DargLine=-Xmx2g -pl service/common,service/like/like-rpc test`⇒ **118 条 / 0 failures / 0 errors / 0 skipped · BUILD SUCCESS · 2:36 min**；surefire **mtime 切分口径 = 20 份报告 / 118 条** ⇒ **与 maven 汇总行相等** ✔）
+  · ⚠️ **`service/common` 必须在 reactor 里**：`~/.m2` 的 `common` jar 里 `makeCurrent` **只有 1 处**（**不含 FB-04**）⇒ ⇒ 只跑 like-rpc 会编译到**旧**共享层 ⇒ **真链路那条必然红** ⇒ ⇒ 这是「`~/.m2` 的 jar ≠ 源码」的老坑 ⇒ ⇒ **不 install、只在 reactor 内解决**
   · ⚠️ **我一度把 113 写进台账**（只按「第三轮 111 + 本轮 +2」推算）⇒ **被合并后实测 115 证伪** ⇒ ⇒ **推算值必须等实测打脸才认** ⇒ 这是「实测 vs 推算」的同一条纪律
 - ⇒ 🟢 **同类 stale 会被 `check-ledger-selfcheck.py` 层 3 抓到**（默认只查 task 域 ⇒ **like / message 域的数字要自己盯** ⇒ 这是「守门覆盖面 ≠ 全域」的已知缺口）
 
@@ -552,3 +554,33 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 - ⚠️ **我域的选择**：本轮用**短式** `go-zero@v1.10.2/<path>` ⇒ 理由 = 与 global 台账**既有写法同形**（`docs/DRIFT/global/common-tails.md:51` 等实测）⇒ ⇒ **跨域一致性优先** ⇒ ⇒ **不擅自改跨域约定**
 
 **⑧ 本域当前状态**：落码前 HEAD = `align/g2-message-like-task` @ `05ac555` · **落后 0 / 领先 106** ⇒ ⇒ 本轮提交后 = **领先 107** · 4 个标准门禁 EXIT=0 · 写权面 340 文件 U+FFFD = 0
+
+---
+
+#### 🆕 第七轮（2026-10-27 14:1x）—— **A9 端到端闭环（FB-04 的那「另一半」）** ＋ like-rpc **115 ⇒ 118**
+
+**① 为什么需要这一条（已有守门覆盖不到的那一半）**
+- `LikeSpansAttributeGateTest`（11 条）用 `runInSpan(...)` **自造一个 span** 再把域服务塞进去跑 ⇒ ⇒ 它验的是「**域侧写法**」（属性会被打到「当前 span」上），**不是**「**真链路上 handler 执行期的当前 span 就是 server span**」
+- ⇒ ⇒ **FB-04（`853767b`）落地之前**：handler 执行期 `Context.current()` 是**根 context** ⇒ `Span.current()` = **invalid（no-op）span** ⇒ 属性**静默丢弃** ⇒ ⇒ **域侧那条守门照样全绿**（它自己造了 span）⇒ ⇒ 「**跑绿但零效果**」
+- ⇒ ⇒ FB-04 已随合并入我树（`37816ca`）⇒ ⇒ **这「另一半」现在可验了** ⇒ ⇒ 本轮补上
+
+**② 新守门 `LikeA9GrpcSpanEndToEndTest`（3 条）· 真链路 ＋ 对照组 A/B**
+- **真链路**：真 **in-process gRPC**（`InProcessServerBuilder` ＋ `LikeServiceGrpc.bindService(new LikeServiceGrpcImpl(真域服务))`）＋ **共享层真的** `RpcInterceptor.newUnaryServerInterceptor(2s, 1s)` ⇒ ⇒ 真 OTel SDK ＋ 真 exporter ⇒ ⇒ 断言**导出的 server span** 上有 `query.target_type=article` / `query.batch_size=2` / `cache.hits=0` / `cache.misses=2`
+- **对照组（本类内联）**：**同一份域服务**、**同一通真实 gRPC 调用**，只把 server 拦截器换成「**复刻 FB-04 之前行为**」的那个（起 SERVER span、但**只在 `close()` 里** `makeCurrent()`，**handler 执行期不包 scope** ⇒ 与共享层 javadoc 记的旧形态一致）⇒ ⇒ **属性必须被丢弃**
+- ⇒ ⇒ **A/B 之间唯一差别就是共享层那个机制** ⇒ ⇒ **这才是「机制是承重的」的证据**，而不是「代码写成了这样」
+- **护栏（第 3 条）**：锁住「共享层那个静态工厂必须仍能产出 server 拦截器」⇒ ⇒ 防止将来共享层改了实现、而本文件还在测「域侧写法」
+
+**③ 变异验证（红在目标断言）**
+- 变异 = **把对照组的 scope 包回去**（让它不再丢弃属性）⇒ ⇒ 这比「改断言值」更强：它证明**对照组真的会区分**
+- 结果：**3 条里只红 1 条**，红点**精确**在 `attributesAreDroppedWithoutTheSharedLayerMechanism:327` ⇒ 报错 `expected: <null> but was: <article>` ⇒ ⇒ **断言读的是运行期真值**
+- ⇒ ⇒ **另 2 条（真链路 ＋ 护栏）仍绿** ⇒ ⇒ **不是整体崩、不是恒绿**
+- ⇒ ⇒ 还原**逐字节一致**（md5 `f56a6b28…` 前后相同）⇒ ⇒ 复跑 **3 条绿**
+
+**④ 数字：like-rpc 115 ⇒ 118**
+- **115 ⇒ 118** = 本轮新增 `LikeA9GrpcSpanEndToEndTest` **3 条** ⇒ +3
+- **实测**：`mvn -o -B -DargLine=-Xmx2g -pl service/common,service/like/like-rpc test` ⇒ **118 条 / 0 failures / 0 errors / 0 skipped · BUILD SUCCESS · 2:36 min**（14:1x）⇒ ⇒ surefire **mtime 切分口径 = 20 份报告 / 118 条** ⇒ **与 maven 汇总行相等** ✔
+- ⚠️ **`service/common` 必须在 reactor 里** —— `~/.m2` 的 `common` jar 里 `makeCurrent` **只有 1 处**（**不含 FB-04**）⇒ ⇒ 只跑 like-rpc 会编译到**旧**共享层 ⇒ **真链路那条必然红** ⇒ ⇒ 「`~/.m2` 的 jar ≠ 源码」的老坑 ⇒ ⇒ **不 install、只在 reactor 内解决**（会改变别的 lane 正在解析的依赖）
+
+**⑤ §5.3e 项⑥ 销号 ＋ A9 轴的证据升级**
+- ⇒ ⇒ **A9 轴由「域侧写法已验（自造 span）」升级为「真链路端到端已验（真 gRPC ＋ 对照组 A/B ＋ 变异验证）」** ⇒ ⇒ **FB-04 的收益第一次被本域实测坐实**
+- ⇒ ⇒ ⚠️ **仍不写「双侧活体闭环」**：Go 侧 span 属性是**源码级逐条对照（L3）** ⇒ ⇒ 跨侧逐属性活体比对**未做** ⇒ ⇒ 本轴 = **RAG 侧 L4（真链路端到端）＋ Go 侧 L3（源码）**
