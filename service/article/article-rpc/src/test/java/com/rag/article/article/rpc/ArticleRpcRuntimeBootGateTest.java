@@ -64,6 +64,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Testcontainers(disabledWithoutDocker = true)
 class ArticleRpcRuntimeBootGateTest {
 
+    /**
+     * 🔴 devh 打印「gRPC Server started」的那一行标志串 —— <b>提为常量</b>（2026-10-27）。
+     *
+     * <p><b>为什么必须提常量</b>：本类的「<b>等这行出现</b>」（收摊前的等待循环）与
+     * 「<b>断言这行在</b>」（最终断言）<b>两处都要用到同一个字面量</b> ⇒
+     * 若任一处被改而另一处没改 ⇒ <b>等待与断言就不再配套</b> ⇒
+     * 要么白等满 30s 上限后莫名失败，要么断言<b>平凡通过</b>（守门失效）。
+     * ⇒ 提为常量 ⇒ <b>两处共用一个定义</b> ⇒ 不可能漂移。
+     *
+     * <p>（做法照 G2 同款修复 {@code f57ff38}：like-rpc 的真启动守门同款。）
+     */
+    private static final String GRPC_STARTED_MARKER = "gRPC Server started";
+
+
     @Container
     @SuppressWarnings("resource")
     static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
@@ -129,7 +143,7 @@ class ArticleRpcRuntimeBootGateTest {
         long logDeadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(30);
         while (System.currentTimeMillis() < logDeadline
                 && process.isAlive()
-                && !log.toString().contains("gRPC Server started")) {
+                && !log.toString().contains(GRPC_STARTED_MARKER)) {
             Thread.sleep(200);
         }
 
@@ -142,8 +156,8 @@ class ArticleRpcRuntimeBootGateTest {
 
         assertTrue(listening,
                 "真 fat jar 起不来（gRPC 端口 " + port + " 没有在监听）—— 进程日志尾部：\n" + tail(output));
-        assertTrue(output.contains("gRPC Server started"),
-                "日志里没有 devh 的「gRPC Server started」⇒ 不能算真 gRPC server 起来了。日志尾部：\n"
+        assertTrue(output.contains(GRPC_STARTED_MARKER),
+                "日志里没有 devh 的「" + GRPC_STARTED_MARKER + "」⇒ 不能算真 gRPC server 起来了。日志尾部：\n"
                         + tail(output));
         assertFalse(output.contains("NoClassDefFoundError"),
                 "日志里有 NoClassDefFoundError ⇒ 运行时 classpath 缺依赖（grpc-inprocess?）"

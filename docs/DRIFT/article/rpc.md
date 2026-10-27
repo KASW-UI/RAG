@@ -1932,6 +1932,7 @@ readValue("  ", List)   => 抛异常: MismatchedInputException
 | 根因 | **不是启动失败**：真进程 fat jar 起来 → `tcpProbe` 端口一连上就立刻 `destroyForcibly()` ⇒ **drain 线程还没读到**「gRPC Server started」⇒ 断言与日志读取**竞态**。辨识度：端口已监听 + 无 `NoClassDefFoundError` ⇒ 进程真的起来了 |
 | 修法 | ① 收摊前**先等日志标志行出现**（上限 30s、间隔 200ms）② sink `StringBuilder` → **`StringBuffer`**（跨线程读写）③ `drain.join(10s)` 建 happens-before |
 | 验证 | ✅ `ArticleRpcRuntimeBootGateTest` **1/1 绿** |
+| 守门加固（**2026-10-27 · 照 G2 同款修复 `f57ff38` 的增强**） | 🟢 **标志串提为常量** `GRPC_STARTED_MARKER` ⇒ 消除「**等待循环**」与「**断言**」两处**各写字面量**的漂移隐患（任一处被改 ⇒ 等待与断言不再配套 ⇒ 要么白等满 30s 上限后莫名失败，要么断言**平凡通过**）⇒ **两处共用一个定义** ⇒ 不可能漂移。<br>**验证**：提取后 `ArticleRpcRuntimeBootGateTest` **1/1 绿**（10.40s）· **变异 1/1 精确变红**（把常量值改成假串 ⇒ 等满 30s 上限 ⇒ 红在 `:159` 的**目标断言**、失败消息点名 `MUTANT` 且**带真实日志尾部** ⇒ 证明「进程真起来了、红的是标志串不匹配」⇒ **非假绿**）· 回滚后**字节一致**（md5 相同 ⇒ 与绿版同一份内容） |
 | 整域回归 | ✅ **article-rpc 155 条**（skipped 0）全绿 ⇒ **四域 12 模块合计 919 条**（0 failures / 0 errors / 4 skipped · 9:44 min · BUILD SUCCESS · 基线 `eb4d1d2` + 本轮改动 · 核对日期 2026-10-27 · 两口径逐模块一致） |
 | 整域回归（**本轮 · D10 落码后 · 2026-10-27**） | ✅ **article-rpc 155 条**（skipped 0）全绿 ⇒ **四域 12 模块合计 922 条**（0 failures / 0 errors / 4 skipped · **10:17 min** · BUILD SUCCESS · 基线 `deeeb8d` + 本轮文档改动 · 核对日期 2026-10-27 · 两口径逐模块一致）<br>⚠️ **上一行的 919 保留原值不改写**（那是基线 `eb4d1d2` 的口径）⇒ ⇒ **两个数不在同一条基线上 ⇒ 不可相加**；本轮本域 **article 三个模块逐条不变**（15 / 99 / 155）⇒ ⇒ 差额 **+3 全部来自 comment-rpc**（D10 新增 3 条守门，commit `deeeb8d`） |
 | 同款缺陷 | 🔴 `comment-rpc` 同款（**同属 G3 写权面** ⇒ 已在 comment 域同批修）· 🔴 `like-rpc` 同款（**属 G2 写权面** ⇒ 已回报 G2，本域**不越权改**） |
