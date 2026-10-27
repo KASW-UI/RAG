@@ -236,8 +236,16 @@ class GoStyleTimeoutResponseRaceGateTest {
             return "一个字节都没收到（连接被掐断）";
         }
         // ⚠️ RFC 9110 §15.2：1xx 是 **informational（临时）响应**，客户端**必须忽略**它、
-        //    继续等最终响应。Tomcat 11 会自发地发一条 `HTTP/1.1 103 Early Hints`
-        //    （RAG 侧**无人**设 103 ⇒ 是容器自己的行为；修前修后都出现 ⇒ 与本缺陷无关）。
+        //    继续等最终响应。
+        // 🔴 **订正（2026-10-27）**：本注释原写「Tomcat 11 会自发地发一条 103
+        //    （RAG 侧**无人**设 103 ⇒ 是容器自己的行为）」—— **这个归因是错的**：
+        //    那行 1xx 是**共享层自己**写的 ⇒ 出处是
+        //    `com.rag.common.observability.GoStyleClientDisconnectProbe`
+        //    （裸写 socket 的 `HTTP/1.1 103 Early Hints`，已签字偏离 SD-2026-10-25-04）。
+        //    ⇒ 证据：同一条「无 Authorization 的 401 路径」实测**零 1xx**
+        //    （401 走得快 ⇒ 来不及触发探测）⇒ 若 103 真是容器自发的，401 也该有。
+        //    ⇒ 影响：**归因订正不影响本用例的判定**（两种来源下都要跳过 1xx），
+        //    但它会影响「谁负责 1xx 的行数」——那是共享层的行数上界问题。
         //    ⇒ 这里按规范跳过所有 1xx，再看最终响应 —— 这也是任何真实客户端（如 java.net.http）做的事。
         int pos = 0;
         String statusLine;
