@@ -1,6 +1,7 @@
 package com.rag.users.user.rpc;
 
 import com.rag.common.redis.GoStyleRedisClientAutoConfiguration;
+import com.rag.users.user.rpc.support.GoStyleRedisDisconnectProxy;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.RedisAsyncCommandsImpl;
 import io.lettuce.core.api.StatefulConnection;
@@ -27,18 +28,9 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import java.io.IOException;
-import java.net.InetAddress;
-import java.net.ServerSocket;
-import java.net.Socket;
 import java.time.Duration;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -148,7 +140,7 @@ class UserRpcRedisDisconnectedFastFailTest {
      * <p>上游地址<b>延迟解析</b>（accept 时才取）⇒ 代理可以在容器启动<b>之前</b>就建好，
      * 从而 {@code @DynamicPropertySource} 能在 Spring 上下文创建前就拿到端口。
      */
-    static final GracefulDisconnectProxy PROXY = GracefulDisconnectProxy.create(() -> {
+    static final GoStyleRedisDisconnectProxy PROXY = GoStyleRedisDisconnectProxy.create(() -> {
         try {
             return REDIS.getHost() + ":" + REDIS.getMappedPort(6379);
         } catch (RuntimeException e) {
@@ -360,111 +352,11 @@ class UserRpcRedisDisconnectedFastFailTest {
      * <p>为什么不用 {@code container.stop()}：那发的是 <b>RST</b>
      * ⇒ Lettuce 往 socket 写命令时立刻失败 ⇒ 压根不经过 {@code disconnectedBehavior} 分支
      * ⇒ 测不出本条漂移。
+     *
+     * <p>⚠️ **2026-10-28 抽到共享 support 类**（{@code support/GoStyleRedisDisconnectProxy}）⇒ ⇒
+     * 抽出的**直接原因不是去重，是方法学要求**：{@code DRIFT-USERRPC-V-014} 的 **A/B 受控对照
+     * 必须两组用【同一个】代理实现** ⇒ 否则「同口径」不成立 ⇒ ⇒ 两组各写一份 ⇒ 一旦有人改了其中一份
+     * ⇒ 对照就悄悄换了变量 ⇒ ⇒ **结论作废且看不出来** ⇒ ⇒ 现在是同一份 ⇒ ⇒ 必然同款。
+     * ⇒ ⚠️ 抽取时**逐字搬运了实现**（只改类名/包名/可见性）⇒ ⇒ 行为零变化 ⇒ ⇒ 本类抽取后**已重跑**确认未漂。
      */
-    static final class GracefulDisconnectProxy implements AutoCloseable {
-
-        private final ServerSocket listener;
-        private final Supplier<String> upstream;
-        private final Set<Socket> clients = ConcurrentHashMap.newKeySet();
-        private final ExecutorService pool = Executors.newCachedThreadPool(r -> {
-            Thread t = new Thread(r, "uu-redis-rpc-proxy");
-            t.setDaemon(true);
-            return t;
-        });
-        private volatile boolean closed;
-
-        private GracefulDisconnectProxy(Supplier<String> upstream) throws IOException {
-            this.upstream = upstream;
-            this.listener = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
-        }
-
-        static GracefulDisconnectProxy create(Supplier<String> upstream) {
-            try {
-                GracefulDisconnectProxy p = new GracefulDisconnectProxy(upstream);
-                p.start();
-                return p;
-            } catch (IOException e) {
-                throw new IllegalStateException("透传代理起不来", e);
-            }
-        }
-
-        int port() {
-            return listener.getLocalPort();
-        }
-
-        private void start() {
-            pool.submit(() -> {
-                while (!closed) {
-                    try {
-                        Socket client = listener.accept();
-                        clients.add(client);
-                        String[] hp = upstream.get().split(":");
-                        Socket server = new Socket(hp[0], Integer.parseInt(hp[1]));
-                        pool.submit(() -> pipe(client, server));
-                        pool.submit(() -> pipe(server, client));
-                    } catch (Exception e) {
-                        if (!closed) {
-                            // 上游还没起来等一小会儿再来
-                            try {
-                                Thread.sleep(50);
-                            } catch (InterruptedException ie) {
-                                Thread.currentThread().interrupt();
-                                return;
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        private static void pipe(Socket from, Socket to) {
-            byte[] buf = new byte[8192];
-            try (Socket f = from) {
-                int n;
-                while ((n = f.getInputStream().read(buf)) > 0) {
-                    to.getOutputStream().write(buf, 0, n);
-                    to.getOutputStream().flush();
-                }
-            } catch (Exception ignored) {
-                // 断连是预期内的
-            } finally {
-                try {
-                    to.shutdownOutput();
-                } catch (Exception ignored) {
-                    // 已关闭
-                }
-            }
-        }
-
-        /**
-         * 制造断连：<b>先关监听口</b>（⇒ 重连被 connection refused 挡掉）
-         * ⇒ <b>再半关闭已建立的连接</b>（⇒ 客户端收到 FIN）。
-         *
-         * <p>⚠️ 用 {@code shutdownOutput()} 而不是 {@code close()}：
-         * socket 上若还有未读数据，{@code close()} 会发 <b>RST</b> ⇒ 就退回成
-         * 「Connection reset」那条不经过 {@code disconnectedBehavior} 的路径了。
-         */
-        void disconnectGracefully() {
-            closed = true;
-            try {
-                listener.close();
-            } catch (Exception ignored) {
-                // 已关闭
-            }
-            for (Socket s : clients) {
-                try {
-                    s.shutdownOutput();
-                } catch (Exception ignored) {
-                    // 已关闭
-                }
-            }
-            clients.clear();
-        }
-
-        @Override
-        public void close() {
-            disconnectGracefully();
-            pool.shutdownNow();
-        }
-    }
 }

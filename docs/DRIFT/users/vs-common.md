@@ -3108,6 +3108,27 @@ python3 /tmp/g1_gozeroref.py    # 138 条唯一引用
 ② **探针源码落点 `/tmp/g1_go_probe_v1`**（真源整仓副本）⇒ **/tmp 会清** ⇒ ⇒ 与 §8.4 的 JWT 探针同款处置：
    **本节把关键源码与出处抄进域台账**（域台账在 G1 写权内 ⇒ 不会被 /tmp 清空带走）。
 
+### 48.1-bis 🟢 **隔离维度逐条对照（G3 交来的隔离配方 ⇒ 我域 7 条里 5 条 N/A、2 条已排除）**
+
+> **为什么加这一节**：G3 在 `comment/rpc.md` §4.6.1-bis 把「**怎么把两侧同时跑起来**」的隔离配方交给了我域
+> （它原话：「交的是**隔离配方**，不是只有结果」）⇒ ⇒ 其中一条纪律是「**这 7 条里任何一条没做到 ⇒ 差异里会混进『串味』
+> ⇒ ⇒ 得到的是『两侧环境差异』而不是『两侧差异』⇒ ⇒ 对拍结论作废**」⇒ ⇒ **我必须逐条对照，不能默认自己没串味。**
+> ⇒ ⇒ **对照结果（逐条查了，不是想当然）**：
+
+| G3 的隔离维度 | 我域（rpc 侧断连对拍）是否适用 | 依据 |
+|---|---|---|
+| **Redis 分 db**（Go `db0` / RAG `db1`） | 🟢 **不适用** ⇒ ⇒ **串味已排除** | G3 那条是「**共用同一个 Redis 实例**」时的隔离法 ⇒ ⇒ **我域两侧根本不是同一个实例**：Go 腿用**专用容器 `g1-users-probe-redis`**（本轮收尾已 `docker rm -f` 清掉）· RAG 腿用**它自己 Testcontainers 起的 `redis:7-alpine`**（`UserRpcRedisDisconnectedFastFailTest` 的 `@Container`）⇒ ⇒ **两个独立实例 ⇒ db 级串味不可能发生**<br>⚠️ **我探针的 `RedisConf` 没设 `DB` 字段 ⇒ 走 db0**（go-zero `RedisConf.DB` 零值 = 0）⇒ ⇒ **但既然不是同一实例，这条就不构成风险** ⇒ ⇒ **前提是「实例不同」，不是「db 不同」** |
+| **数据库分库**（`go_comment` / `rag_comment`） | 🟢 **不适用** | Go 腿**跳过 `model.InitDB`**（`logoutlogic.Logout` 只读 `Config.UserAuth.AccessExpire` 与 `BizRedis` ⇒ **不碰 `UserModel`** ⇒ 源码 `logoutlogic.go:29-46` 全文可核）⇒ ⇒ **两侧都不连 PG** ⇒ ⇒ 无库可串 |
+| **Kafka 两套 topic + 两套消费组** | 🟢 **N/A** | users / follow 域 **rpc 侧不涉 Kafka**（用户域无 Kafka 事实链路） |
+| **服务发现**（RAG 关 Nacos 注册 / Go 删 etcd） | 🟢 **N/A** | 两腿都是**进程内直调**（Go 腿直调真源 `logic.LogoutLogic.Logout`；RAG 腿直调 `UserDomainService.logout`）⇒ ⇒ **不经服务发现、不起完整应用** ⇒ ⇒ 不注册也不查 Nacos |
+| **端口分离**（Go `19001` / RAG `59001`） | 🟢 **N/A** | 同上 ⇒ ⇒ **两腿都不监听端口**（Redis 走本地代理口）⇒ ⇒ 无端口可撞 |
+| **下游 RPC 同一死端点** | 🟢 **N/A** | logout 路径**不调下游 RPC**（无出向 stub） |
+| **消息位点**（`Offset: first` + 每轮删 topic） | 🟢 **N/A** | 同 Kafka 条 |
+
+⇒ ⇒ **7 条里 5 条 N/A、1 条（Redis）已用「独立实例」排除、1 条（PG）不适用** ⇒ ⇒ **串味已排除** ⇒ ⇒ **本节的四条腿数字仍然可用**。
+⚠️ **但这一条以前没写进台账** ⇒ ⇒ **缺陷在于「没记录」，不在于「没做」** ⇒ ⇒ ⇒ **教训：隔离维度要逐条落账**
+⇒ ⇒ **否则下一个读台账的人无法判断「这组数字是不是混了环境差异」** ⇒ ⇒ ⇒ **这正是 G3 那句纪律的落点：不是「做了就行」，是「要能证明做了」。**
+
 ### 48.2 🔴 **3 台「共享层 artifact 新鲜度守门」⇒ 把「陈旧 `~/.m2` jar」从谜团变成一条精确的红**
 
 **起因 = G2 回执②**（🔴 急件）：单模块构建不带 `-am` ⇒ `service/common` 不在 reactor ⇒ 依赖从 `~/.m2` 取
@@ -3263,3 +3284,121 @@ python3 /tmp/g1_gozeroref.py    # 138 条唯一引用
   ⇒ ⇒ **教训：台账里贴源码要避开 markdown 的链接语法** ⇒ ⇒ 这条已随 §44.5 落账。
 
 ⇒ ⇒ **本轮提交序列**：`3914064`（§34.4 两条口径 + §36 状态订正 + 锚点自查）→ `f6a01fb`（merge G4 `b79779e`）→ `bc34c7c`（2 条错引用改正 + 落点归属改判 + §44.5）。
+
+## 50. 🔴🟢 **L4 缺口闭合：RAG 腿的「客户端可见 gRPC 响应」升 L4 ＋ 同场 A/B 反事实对照**（2026-10-28 · G1 lane）
+
+### 50.1 🟢 **§48.1 留下的那一格，现在补上了（user + admin 两个域各自闭合）**
+
+**起因**：§48.1 的四条腿里，**Go 腿的「客户端可见 gRPC status」是 L4**（真源进程内直观测），
+而 **RAG 腿那一格当时只有 L1**（源码推断）⇒ ⇒ 两侧强度不齐 ⇒ 按弱侧记
+⇒ ⇒ **V-014 / ARPC-013 当时只能写「机制面双侧 L4 ＋ 响应面 Go 腿 L4 / RAG 腿 L1」**。
+
+**为什么不能直调 service 就完事**：那一格要答的不是「service 抛了什么异常」，而是
+「**客户端最终看到什么 status**」⇒ ⇒ 而最终形态由**整条拦截器链**决定
+（`recover → breaker → shedding → 业务观测拦截器(2s 预算)`）
+⇒ ⇒ 直调 `UserDomainService.logout` **绕过了整条链** ⇒ ⇒ 恰恰漏掉题眼那一格：
+**2s 超时预算会不会先于业务异常触发**（触发了 ⇒ 客户端看到 `DEADLINE_EXCEEDED` / 1015，**不是** `INTERNAL`）。
+
+**做法**：`@SpringBootTest(classes = UserRpcApplication.class)` ⇒
+`grpc-server-spring-boot-starter` 的 `@GrpcService` 会**真起一个 gRPC server**
+⇒ ⇒ 用**真 gRPC 客户端**调 `logout` ⇒ ⇒ 把 **wire 上**的 status 抓下来。
+
+**实测（四组，全部实测原文）**：
+
+| 腿 | 断连策略 | 客户端可见 status | 耗时 | 证据 |
+|---|---|---|---|---|
+| **Go user**（真源） | — | `Internal` ＋「注销失败,Redis写入异常」 | **1689ms** | L4（§48.1） |
+| **Go admin**（真源） | — | `Internal` ＋「注销失败,Redis写入异常」 | **1680ms** | L4（§48.1） |
+| **RAG user · A 组** | `REJECT_COMMANDS`（共享层默认） | `INTERNAL` ＋「注销失败,Redis写入异常」 | **19ms** | **L4（wire 实测）** |
+| **RAG user · B 组** | `DEFAULT`（test 侧遮蔽共享层） | **`DEADLINE_EXCEEDED`** ＋「context deadline exceeded」 | **2013ms** | L4（同场反例） |
+| **RAG admin · A 组** | `REJECT_COMMANDS`（共享层默认） | `INTERNAL` ＋「注销失败,Redis写入异常」 | **8ms** | **L4（wire 实测）** |
+| **RAG admin · B 组** | `DEFAULT`（test 侧遮蔽共享层） | **`DEADLINE_EXCEEDED`** ＋「context deadline exceeded」 | **2010ms** | L4（同场反例） |
+
+⇒ ⇒ **口径更新**：
+- **V-014 / ARPC-013 的证据强度 = 双侧 L4**（不再有「RAG 腿 L1」那一格）⇒ ⇒ **逐条订正见 `user/rpc.md` / `admin/rpc.md`**。
+- **「客户端看到 1015 还是 INTERNAL」这个分歧点，现在有正面证据了**：
+  **RAG（有 `REJECT_COMMANDS`）= `INTERNAL`（与 Go 逐字同形）**；
+  **RAG（没有它）= `DEADLINE_EXCEEDED` / 1015** ⇒ ⇒ **这条修复不是可有可无的严格性偏好，而是「客户端能不能拿到与 Go 一样的 status」的前提**。
+
+### 50.2 🟢 **B 组怎么做到「唯一变量」⇒ 以及由此带来的三条纪律**
+
+**机制**：共享层 `GoStyleRedisClientAutoConfiguration` 的 bean 带 **`@ConditionalOnMissingBean`**
+⇒ ⇒ **域侧一旦已定义 `LettuceClientOptionsBuilderCustomizer`，共享层那份根本不会创建**
+（是「**遮蔽**」不是「叠加」）⇒ ⇒ 于是 **B 组可以是域侧 test 侧的一个 `@TestConfiguration`**：
+提供一份值设成 `DEFAULT` 的 customizer ⇒ ⇒ **断连策略从 `REJECT_COMMANDS` 变成 `DEFAULT`，其余全部不变**。
+⇒ ⇒ **域内零落码**（不碰共享层、不碰域内生产代码）。
+
+**纪律①（同一次对照内部必须用【同一份】被测组件的实现）**：
+⇒ A 组与 B 组**必须用同一个代理实现** ⇒ ⇒ 否则有人改了其中一份 ⇒ 对照**悄悄换了变量**
+⇒ ⇒ **结论作废且看不出来**（测试照样绿）⇒ ⇒ **user-rpc 的那份代理因此抽到
+`support/GoStyleRedisDisconnectProxy`**（**逐字搬运 + 抽完重跑原测试**确认未漂）。
+⚠️ **抽出去的理由不是去重，是方法学** ⇒ ⇒ 注释里必须写对，否则下一个人会当「可跳过的重构」删掉。
+⚠️ admin-rpc **不需要抽** ⇒ ⇒ 它原本就有一份嵌套代理 ⇒ ⇒ 本轮的 admin A/B 两组**共用那一份** ⇒ ⇒ 同样满足纪律。
+
+**纪律②（故障注入类测试的第一条断言必须是「故障确实按预期形态发生了」）**：
+⚠️ **本轮 B 组第一版漏了「先建立连接」** ⇒ ⇒ Lettuce **从未建连** ⇒ ⇒ 断连后发的第一条命令是
+「**连接被拒**」（proxy 监听口已关 ⇒ connection refused ⇒ **~15ms 快失败**）
+⇒ ⇒ 测的是「**连不上**」，**不是**「连上之后被断开」⇒ ⇒ `disconnectedBehavior` **根本不起作用**
+⇒ ⇒ 第一版实测 `elapsedMs=15 · INTERNAL`（**假象**）⇒ ⇒ 补上对照组后才复现出真正的排队（2013ms / 1015）。
+⇒ ⇒ **症状一样 ≠ 故障一样** ⇒ ⇒ 报数前必须先问「这个故障真的是我以为的那个吗」。
+
+**纪律③（前提断言与目标断言要分开，并分别做变异）**：
+
+| 变异 | 注入 | 红在 | 证明了什么 |
+|---|---|---|---|
+| **M1** | 摘掉 B 组那个 `@Bean` ⇒ 共享层 `REJECT_COMMANDS` 接管 | **前提断言**：「断连行为必须是 DEFAULT ⇒ expected: <DEFAULT> but was: <REJECT_COMMANDS>」 | 前提断言有判别力 |
+| **M2** | 排掉共享层那份自动配置（`spring.autoconfigure.exclude`）⇒ A 组回落 `DEFAULT` | **目标断言**：「必须是 INTERNAL ⇒ 实测 DEADLINE_EXCEEDED / 2028ms ⇒ expected: <INTERNAL> but was: <DEADLINE_EXCEEDED>」 | **目标断言有判别力** |
+
+⇒ ⇒ **只红在前提**只证明前提有判别力 ⇒ ⇒ **必须另做一个变异让它红在目标断言上** ⇒ ⇒ 两条变异分别落在两条断言上 ⇒ 才算数。
+⇒ ⇒ **M2 是独立于 B 组的第二条证据**：它用**另一条机制路径**（排掉自动配置）得到了**同一个结论**
+（没有 `REJECT_COMMANDS` ⇒ 客户端 1015）⇒ ⇒ **交叉验证**。
+
+### 50.3 🟢 **本轮顺带挖到的四条（都留档，因为都会重复发生）**
+
+- **① `success` 恒为 `false` 不是漂移 —— 改成 `true` 反而会制造漂移**：
+  Go 真源 `service/user/user/rpc/internal/logic/logoutlogic.go:43` = **`return &pb.LogoutResp{}, nil`**
+  ⇒ ⇒ `success` **永远是 proto3 的默认值 `false`** ⇒ ⇒ RAG 侧 `LogoutResp.newBuilder().build()`（**不 setSuccess**）
+  **与 Go 逐字同形** ⇒ ⇒ ⚠️ **本轮第一版断言按直觉写了 `success == true` ⇒ 实测红** ⇒ ⇒
+  **现已把「`success` 是 false」钉成守卫**（附 Go 出处）⇒ ⇒ **谁把它改成 true，谁就制造了一条新漂移**。
+- **② javadoc 里不能出现字面的「星号-斜杠」组合**：
+  写 `{@code service/**/src/main/java}` ⇒ ⇒ 那个 `*/` **提前闭合了整份 javadoc** ⇒ ⇒
+  后面 200 行全被当成代码 ⇒ ⇒ 编译器报了几十行「非法字符 / 需要 class」这种**看起来毫不相关**的错误
+  ⇒ ⇒ 真因在几十行之前 ⇒ ⇒ 已改成不含该组合的写法。
+- **③ 端口**：两个 rpc 的 yaml 里分别是 `49210`（user）与 `8081`（admin）⇒ ⇒ **本机 8081/8889/8082 有别人的进程**
+  ⇒ ⇒ 新测试一律用**运行时挑的空闲口**（挑完即释放 ⇒ 被抢 ⇒ **上下文起不来 ⇒ 大声失败**，不静默）。
+- **④ 隔离**：本轮两组各自用**自己的 Testcontainers 容器**（A 组与 B 组各一个）⇒ ⇒
+  **「同场」的准确口径 = 同一 JVM 运行 ＋ 同一镜像配置 ＋ 唯一变量 = 断连策略**，
+  **不是**「同一个容器」⇒ ⇒ **台账按前者写**（不按后者吹）⇒ ⇒ 与 §48.1-bis 的隔离维度对照表同源。
+
+### 50.4 🟢 **新增落码清单**
+
+| 项 | 数量 | 落点 |
+|---|---|---|
+| A 组（L4 正面证据） | 2 类（user 1 · admin 1） | `service/users/user/user-rpc/src/test/.../UserRpcLogoutClientVisibleGrpcStatusTest.java` · `service/users/admin/admin-rpc/src/test/.../AdminRpcLogoutClientVisibleGrpcStatusTest.java` |
+| B 组（同场反例） | 2 类（user 1 · admin 1） | 同目录 `*DefaultBehaviorTest.java`（各 1 条） |
+| 代理抽到共享 support 类 | 1 份 | `service/users/user/user-rpc/src/test/.../support/GoStyleRedisDisconnectProxy.java`（**user-rpc 专用** ⇒ admin-rpc 用它自己模块那份嵌套的） |
+| 改动既有测试 | 1 处 | `UserRpcRedisDisconnectedFastFailTest` 改用共享代理（**行为零变化** ⇒ 已重跑确认仍绿 2/2） |
+| **生产代码** | **0 行** | 本轮**零生产改动** ⇒ ⇒ 纯测试 + 纯台账 |
+
+⚠️ **B 组不踩 G4 的源扫守门**：该守门扫的是各模块的 `src/main/java` 那一层
+⇒ ⇒ **`src/test/java` 不在扫描面** ⇒ ⇒ 守门在我域仍绿（已实测，见 §49.1）。
+
+### 50.5 🟢 **回归口径（2026-10-28 实测 · 域级两模块 + 依赖链）**
+
+```
+mvn -B -o -DargLine=-Xmx1g -am -pl service/users/user/user-rpc,service/users/admin/admin-rpc test
+⇒ BUILD SUCCESS · 7:18 · mvn EXIT=0
+```
+
+| 模块 | 本轮之前 | 本轮 | 差 | 差在哪 |
+|---|---|---|---|---|
+| `user-rpc` | 150 | **152** | **+2** | 2 个新测试类各 1 条（A 组 + B 组） |
+| `admin-rpc` | 120 | **122** | **+2** | 2 个新测试类各 1 条（A 组 + B 组） |
+| `common`（共享层） | 331 | 331 | **0** | 未改共享层 |
+| `users-common`（共享层） | 39 | 39 | **0** | 未改共享层 |
+| **我域 6 模块合计** | **694** | **698** | **+4** | 4 个新类 × 1 条，**逐条对得上** |
+
+⇒ ⇒ **零条旧用例被动**（+4 恰好吃掉 4 个新类的 1 条）⇒ ⇒ **「代理抽到 support 类」没有破坏既有用例**
+⇒ ⇒ 且**既有 `UserRpcRedisDisconnectedFastFailTest`（2 条）与 `AdminRpcRedisDisconnectedFastFailTest`（2 条）重跑仍绿**。
+⇒ ⇒ ⚠️ **本轮只跑了两个 rpc 模块 ＋ 其依赖链**（不是域级全量）⇒ ⇒ **域级全量（6 模块）留到波末 C7 收口回归**重跑
+⇒ ⇒ 数字届时以那一次为准。

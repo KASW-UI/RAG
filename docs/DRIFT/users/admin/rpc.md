@@ -4279,7 +4279,27 @@ if (connectTimeout != null) {                                     // :16
 > | 本节原写的「没证」 | 现在的状态 |
 > |---|---|
 > | ① 「Go 腿是 L1 源码对照，不是双侧活体对拍」⇒ 证据强度 L1 | 🔴 **已解除一半**：本轮**自己**跑了 Go 腿 —— **真源的 `logoutlogic.Logout`**（不是重写）＋ **真源同款 go-zero Options**（`MustNewRedis` ⇒ `MaxRetries:3`/`MinIdleConns:8`、三个 timeout 都不传）＋ **同款 FIN 代理**（先关监听口 + 已建立连接半关闭）⇒ 实测 **1680ms**（本域自己的 Go 腿）＋ **客户端可见 gRPC status = `Internal`「注销失败,Redis写入异常」**（进程内直观测）⇒ ⇒ **Go 腿 = L4（活体）**；⇒ 逐条（含探针源码出处与两条踩坑）⇒ [`vs-common.md` §48.1](../vs-common.md) |
-> | ② 「没有做『客户端看到 1015 vs INTERNAL』的端到端双侧活体对拍 ⇒ 另一半（客户端可见值）未实测」 | 🔴 **仍成立（RAG 那一侧）** ⇒ ⇒ **本条不写 L4** ⇒ ⇒ 诚实口径 = **机制面（断连后第一条写的失败形态与耗时）双侧 L4** ＋ **客户端可见响应面「Go 腿 L4 / RAG 腿 L1」** |
+> | ② 「没有做『客户端看到 1015 vs INTERNAL』的端到端双侧活体对拍 ⇒ 另一半（客户端可见值）未实测」 | 🟢 **已解除（2026-10-28 · G1 lane · 本轮落码）** ⇒ ⇒ **RAG 侧的「客户端可见值」现在也是 L4（wire 上实测）** ⇒ ⇒ 配合上一行的 Go 腿 L4 ⇒ ⇒ **本条现在可以写 L4（双侧）** ⇒ ⇒ 逐条（四组实测数字 + A/B 反事实对照 + 两条变异验证 + 三条纪律）⇒ [`vs-common.md` §50](../vs-common.md) |
+>
+> 🔴🟢 **2026-10-28 第二块订正（§50 · G1 lane）—— 本条（②）已闭合，且【归因】也升到 L4**
+>
+> **实测四组（全部原文数字）**：
+> | 腿 | 断连策略 | 客户端可见 status | 耗时 |
+> |---|---|---|---|
+> | **Go admin**（真源） | — | `Internal` ＋「注销失败,Redis写入异常」 | **1680ms** |
+> | **RAG admin · A 组** | `REJECT_COMMANDS` | `INTERNAL` ＋「注销失败,Redis写入异常」 | **8ms** |
+> | **RAG admin · B 组** | `DEFAULT`（同场反例） | **`DEADLINE_EXCEEDED`** ＋「context deadline exceeded」 | **2010ms** |
+>
+> ⇒ ⇒ **做法**：`@SpringBootTest(classes = AdminRpcApplication.class)` ⇒ `@GrpcService` 真起 gRPC server
+> ⇒ ⇒ **真 gRPC 客户端**调 `logout` ⇒ ⇒ **wire 上**抓 status ⇒ ⇒ **L4（不是源码推断）**。
+> ⇒ ⇒ **B 组是同场反事实**：唯一变量 = 断连策略（共享层那份 bean 带 `@ConditionalOnMissingBean`
+> ⇒ ⇒ 域侧 test 侧提供一个 `DEFAULT` 的 customizer 即可**遮蔽**它 ⇒ ⇒ **域内零落码**）
+> ⇒ ⇒ **B 组看到 1015 这件事 = 「A 组的 INTERNAL 是这条机制换来的」的正面证据**
+> ⇒ ⇒ ⇒ **本条的修法不是可有可无的严格性偏好，而是「客户端能不能拿到与 Go 一样的 status」的前提**。
+> ⇒ ⇒ **两条变异**：M1（摘掉 B 组的 `@Bean`）⇒ **红在前提断言**；M2（排掉共享层自动配置）⇒ **红在目标断言**
+> ⇒ ⇒ **归因强度 = L4**（不是 L3：原先 B 组只以「变异形态」存在）。
+> ⚠️ **本条的三条纪律**（同一次对照内部必须用**同一份**代理实现 · 故障注入前必须**先建立连接** ·
+> **前提断言与目标断言分别做变异**）⇒ 逐条 ⇒ [`vs-common.md` §50.2](../vs-common.md)。
 >
 > ⚠️ **admin 侧的一处形态说明（2026-10-28 订正）**：**admin 与 user 的 logout 是真源里两份**独立实现**
 > （`service/user/admin/rpc/internal/logic/logoutlogic.go` 与 `service/user/user/rpc/internal/logic/logoutlogic.go`
@@ -4290,10 +4310,11 @@ if (connectTimeout != null) {                                     // :16
 > ⇒ ⇒ **写之前自己核了一遍真源**（`ls` + `grep` 两个 logoutlogic.go）⇒ ⇒ **发现是两份** ⇒ ⇒ 才没写成假话
 > ⇒ ⇒ **教训同「不采信转述」：连自己刚写下的推断也要核**。
 
-- ⚠️ **本轮 Go 腿是 L1 源码对照**，**不是**双侧活体对拍 ⇒ 证据强度 **L1**（api 侧那条有 L3 真容器活体）。
-- ⚠️ **没有做「客户端看到 1015 vs INTERNAL」的端到端双侧活体对拍** ⇒
-  「修后客户端拿到 INTERNAL」是由**代码路径推出**（`REJECT_COMMANDS` ⇒ 立即抛 ⇒ 走进 `catch (Exception e)`）
-  ＋ **守门证明「立即失败」这一半** ⇒ **另一半（客户端可见值）未实测**。
+- ⚠️ **原写（2026-10-27）：「本轮 Go 腿是 L1 源码对照，不是双侧活体对拍 ⇒ 证据强度 L1」** ⇒ ⇒
+  🟢 **2026-10-28 订正：已解除**（Go 腿 L4，见上表 ①）⇒ ⇒ **原文保留**（不重写历史）⇒ ⇒ **只加订正**。
+- ⚠️ **原写（2026-10-27）：「没有做『客户端看到 1015 vs INTERNAL』的端到端双侧活体对拍 ⇒
+  「修后客户端拿到 INTERNAL」是由代码路径推出 ⇒ 另一半（客户端可见值）未实测」** ⇒ ⇒
+  🟢 **2026-10-28 订正：已解除**（RAG 侧的客户端可见值现在是 **wire 上实测** = L4）⇒ ⇒ **原文保留**（不重写历史）⇒ ⇒ 只加订正。
 - ⚠️ `admin-rpc` 的 `connect-timeout: 5s` 早于本轮就已配对 ⇒ **本轮没动那个值**；
   本轮在 admin-rpc 侧只落了**断连策略**（`REJECT_COMMANDS`）与其守门。
 

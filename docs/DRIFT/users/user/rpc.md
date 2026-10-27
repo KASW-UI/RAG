@@ -1599,7 +1599,7 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 | **DRIFT-USERRPC-V-007** | 超时的 gRPC `description` 不同（`service/common` 组件） | ✅ **已销账（2026-10-26）** | 由 **`global` 域**修完（落点 `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 的 `GO_DEADLINE_EXCEEDED_DESCRIPTION`；守门 `RpcInterceptorTimeoutDescriptionGateTest`；探针 `tools/semantic-probe/rpc-timeout/`）⇒ 两侧 description 逐字一致。⚠️ 修前状态保留在 §7 V-007 小节 |
 | **DRIFT-USERRPC-V-008** | 死代码 + **伪出处**（3 个异常类 + 2 个 mapper 方法） | ✅ **已修**（`fa2de52`） | 第四轮 §2 已删；且**伪出处是两个，不是一个**（`PasswordMismatchException` 声称的 `ALREADY_EXISTS` 在 Go 恰好相反）。⚠️ 本行此前仍写「仍成立」，属台账脱节，本轮复核更正 |
 | **DRIFT-USERRPC-V-012（新 · 2026-10-26）** | **超时时的业务日志错误归因**：RAG 记「Redis 写入异常」而客户端收到「超时」；Go 两侧一致 | ✅ **已修（2026-10-27 · G1 lane · 域内一行）** —— 仅**「原始异常被整个吞掉」**这一条闭环（补 `logBusinessErr`）⇒ **wire 面零影响**；⚠️ ②③ 两条架构级**另立项** ⇒ **本条不销** | 三形态 × 双侧 gRPC 直连实测发现（**wire 面两侧一致**：都是 `INTERNAL` + 同一句）：<br>① **RAG 把原始异常整个吞掉**（`catch (Exception e)` 里既没 log 也没挂 cause ⇒ 实测 `cause=null`）⇒ 底层 Lettuce 异常在日志里看不见<br>🔴 **2026-10-26 晚范围收窄**：**只对 `logout` 的 Redis 写路径这 1 处成立**（本类 18 处 `catch (Exception e)` 里其余 17 处**都带 `e` 记了日志**）⇒ 修法收窄为「只补 1 处」；<br>② **B-1 守卫只挡 SQL 路径**（Redis 抛 `QueryTimeoutException` / `RedisConnectionFailureException`，**都不是** gRPC 的 `StatusRuntimeException` ⇒ 守卫永不命中）；<br>③ RAG 的 Redis 写**不绑** gRPC deadline ⇒ 在途写跑满 3s（客户端 2s 已收 `DEADLINE_EXCEEDED`）⇒ 解释「日志晚 1s」。<br>⚠️ **修法不能改 status/description**（会与 Go 不一致）⇒ 只能在 `catch (Exception e)` 里**补一行把原始异常记进日志**（与 admin 域写法对齐）⇒ 域内一行可闭环。<br>⚠️ 与 `global` 域 **E38 第②层**同型；**admin 域已独立确认并登记 `DRIFT-ARPC-010`** ⇒ **三域口径宜一起定** |
-| **DRIFT-USERRPC-V-014（新 · 2026-10-27）** | **Redis 超时/断连在 rpc 侧的两条**：① 缺 `connect-timeout` ⇒ 连接超时落 Lettuce 自己的默认 **10s** ≠ Go `DialTimeout` **5s**；② 断连时 Lettuce `DEFAULT` 把命令**排队** ⇒ 挂到 `commandTimeout: 3s` ≫ 本组件 `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ 客户端看到 1015「服务繁忙」，而 Go 是**快速失败** ⇒ `INTERNAL「注销失败,Redis写入异常」` | ✅ **已修（2026-10-27 · G1 lane · 域内自闭环）** —— ① 补 `connect-timeout: 5s` ＋ 守门；② 落**域内副本** `config/RedisDisconnectedBehaviorConfig`（`REJECT_COMMANDS`）⇒ 断连时**立即拒命令** ⇒ 走进 `catch (Exception e)` ⇒ **INTERNAL「注销失败,Redis写入异常」** ⇒ 与 Go 同形 | 与 api 侧 `DRIFT-ADMINAPI-012` / `DRIFT-FOLLOW-012` **同机制、不同形态**（api 侧后果 = 503；rpc 侧后果 = **RPC 撞超时**）⇒ 由 G2 在 task/like 域独立发现的同款形态**互相印证**。⚠️ **共享层收编仍归 G4**（现共 **5** 份域内副本 ⇒ 收编时须**一并删掉**，否则双份配置）<br>🟢 **2026-10-27 订正：收编【已完成】** —— **5 份域内副本已全部删除**，共享层那份接管（见 [`vs-common.md` §26](../vs-common.md)）⇒ ⇒ **本段「收编仍归 G4 / 现共 5 份副本」是历史状态，不是现状**|
+| **DRIFT-USERRPC-V-014（新 · 2026-10-27）** | **Redis 超时/断连在 rpc 侧的两条**：① 缺 `connect-timeout` ⇒ 连接超时落 Lettuce 自己的默认 **10s** ≠ Go `DialTimeout` **5s**；② 断连时 Lettuce `DEFAULT` 把命令**排队** ⇒ 挂到 `commandTimeout: 3s` ≫ 本组件 `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ 客户端看到 1015「服务繁忙」，而 Go 是**快速失败** ⇒ `INTERNAL「注销失败,Redis写入异常」` | ✅ **已修（2026-10-27 · G1 lane · 域内自闭环）** —— ① 补 `connect-timeout: 5s` ＋ 守门；② 落**域内副本** `config/RedisDisconnectedBehaviorConfig`（`REJECT_COMMANDS`）⇒ 断连时**立即拒命令** ⇒ 走进 `catch (Exception e)` ⇒ **INTERNAL「注销失败,Redis写入异常」** ⇒ 与 Go 同形 | 与 api 侧 `DRIFT-ADMINAPI-012` / `DRIFT-FOLLOW-012` **同机制、不同形态**（api 侧后果 = 503；rpc 侧后果 = **RPC 撞超时**）⇒ 由 G2 在 task/like 域独立发现的同款形态**互相印证**。⚠️ **共享层收编仍归 G4**（现共 **5** 份域内副本 ⇒ 收编时须**一并删掉**，否则双份配置）<br>🟢 **2026-10-27 订正：收编【已完成】** —— **5 份域内副本已全部删除**，共享层那份接管（见 [`vs-common.md` §26](../vs-common.md)）⇒ ⇒ **本段「收编仍归 G4 / 现共 5 份副本」是历史状态，不是现状**|<br>🔴🟢 **2026-10-28 订正：本条的证据强度升【双侧 L4】** —— 「客户端看到 1015 vs INTERNAL」那一格原先只到 **RAG 腿 L1**（源码推断）⇒ ⇒ **本轮真起 gRPC server ＋ 真客户端把 wire 上的 status 抓了下来**：Go `Internal`/1689ms · RAG(A 组) `INTERNAL`/19ms · RAG(B 组·同场反例) **`DEADLINE_EXCEEDED`**/2013ms ⇒ ⇒ **归因也升 L4**（B 组是受控反事实）⇒ ⇒ 逐条 ⇒ [`vs-common.md` §50](../vs-common.md)|
 | **UNRESOLVED-USERRPC-004 ②** | 启动期 Redis 不可用：Go `MustNewRedis` fail-fast vs RAG 懒连接 | ✅ **已闭环（2026-10-24，§9.3）** —— **原推断被活体实验证伪**：go-zero `RedisConf.NonBlock` 的 struct tag 默认 `true` ⇒ `MustNewRedis` **不做连接检查** ⇒ **两侧都启动成功** ⇒ **无差异** | 本轮做了「把两侧 Redis 都指到死端口再起进程」的注入实验（`tools/difftest/exp-difftest-redis-failfast.sh`） |
 | **UNRESOLVED-USERRPC-005** | `users_user` 建表责任交叉（user-rpc ↔ admin-rpc） | ✅ **已闭环（2026-10-24，§9.2）** —— 双侧对称并发启动实测：两侧都能起来、表都建齐、0 致命错误 | ⚠️ 本行此前写「仍 unresolved」，是**过期状态**（第六轮已关，第七轮复核才发现汇总表没同步）。⇒ **机制不同**（Go 靠 `HasTable` 的时序侥幸 / RAG 靠 advisory lock）**但可观察结果一致** |
 
@@ -2347,6 +2347,30 @@ UserDomainService.logout:905-930
 
 ⚠️ **只改「断连」，不改「连着但不回包」**：后者两侧都等满各自的读超时（Go `ReadTimeout` 3s / RAG `timeout: 3s`）
 ⇒ 都 ≫ 本组件 2s 预算 ⇒ **两侧都是 DEADLINE_EXCEEDED** ⇒ 已一致 ⇒ 两类故障**分别**对齐。
+
+> 🔴🟢 **2026-10-28 订正块（§50 · G1 lane）—— 上表的「客户端看到」那一列，现在从【推断】升级为【wire 上实测】**
+>
+> **上表三行里，「客户端看到」那一列当时是【代码路径推出的】**（`REJECT_COMMANDS` ⇒ 立即抛 ⇒ 走进 `catch (Exception e)` ⇒ INTERNAL）
+> ⇒ ⇒ 本轮**真起了一个 gRPC server ＋ 真 gRPC 客户端**，把 wire 上的 status 抓了下来 ⇒ ⇒ **实测**：
+>
+> | 腿 | 断连策略 | 客户端可见 status（**wire 实测**） | 耗时 |
+> |---|---|---|---|
+> | **Go user**（真源） | — | `Internal` ＋「注销失败,Redis写入异常」 | **1689ms** |
+> | **RAG user · A 组** | `REJECT_COMMANDS` | `INTERNAL` ＋「注销失败,Redis写入异常」 | **19ms** |
+> | **RAG user · B 组** | `DEFAULT`（**同场反事实**） | **`DEADLINE_EXCEEDED`** ＋「context deadline exceeded」 | **2013ms** |
+>
+> ⇒ ⇒ **上表「RAG 修后 ≈1ms ⇒ 客户端看到 INTERNAL ✅」现在是 L4 实测**（实测 19ms）⇒ ⇒
+> ⇒ ⇒ **上表「RAG 修前 ≈3s ⇒ 客户端看到 1015」也拿到正面实测**（B 组 = 2013ms / DEADLINE_EXCEEDED）
+> ⇒ ⇒ ⇒ **「1015 vs INTERNAL」这个分歧点，两侧都有活体证据了**。
+> ⇒ ⇒ **B 组是同场反事实**：唯一变量 = 断连策略（共享层那份 bean 带 `@ConditionalOnMissingBean`
+> ⇒ ⇒ 域侧 test 侧提供一个 `DEFAULT` 的 customizer 即可**遮蔽**它 ⇒ ⇒ **域内零落码**）
+> ⇒ ⇒ ⇒ **这才是「A 组的 INTERNAL 是这条机制换来的」的正面证据** ⇒ ⇒ **归因强度 L4**（原先 B 组只以「变异形态」存在 ⇒ 只能写 L3）。
+> ⇒ ⇒ **两条变异**：M1（摘掉 B 组的 `@Bean`）⇒ **红在前提断言**；M2（排掉共享层自动配置）⇒ **红在目标断言**
+> ⇒ ⇒ ⇒ 「A 组的 INTERNAL」与「B 组的 1015」**互为对照**，且 M2 是**另一条机制路径**得到同一结论 ⇒ ⇒ **交叉验证**。
+> ⇒ ⇒ **⚠️ 顺带一条「差点写错的断言」**：本轮第一版断言按直觉写了「`success == true`」⇒ ⇒ **实测红**
+> ⇒ ⇒ ⇒ 核 Go 真源 `logoutlogic.go:43` = **`return &pb.LogoutResp{}, nil`** ⇒ ⇒ **`success` 恒为 proto3 默认 `false`**
+> ⇒ ⇒ ⇒ **RAG 侧不 setSuccess 与 Go 逐字同形 ⇒ 改成 true 反而制造漂移** ⇒ ⇒ 现已把「false」钉成守卫。
+> ⇒ ⇒ 逐条（四组数字 · A/B 反事实 · 两条变异 · 三条纪律 · 四个新测试类）⇒ [`vs-common.md` §50](../vs-common.md)。
 
 ### 3. 落点决策：**域内副本**（不是等 G4）
 
