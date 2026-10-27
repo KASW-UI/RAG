@@ -875,11 +875,15 @@ service/favorite/api/internal/svc/service_context.go:20
 | 项 | 本域（favorite）应取的值 | Go 出处 | 与别域的差别 |
 |---|---|---|---|
 | `enabled` | `true` | Go 有池（go-zero 路径同样落 go-redis 默认池） | 同 |
-| `max-active` | 🟡 数量级（64） | Go `PoolSize = 10 × GOMAXPROCS`（机器相关） | 同 |
+| `max-active` | 🟡 数量级（64） | Go **`MaxActiveConns` 未设 ⇒ 无连接数硬上限**（`PoolSize` 是**基准值 / 并发槽位容量**，**不是**上限 ⇒ **不可与 `max-active` 对照**）| 同 |
 | `min-idle` | ✅ **8** | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:15` `idleConns = 8` | 🔴 **不同于 hot/task/comment 的 0** |
 | `max-idle` | 🟡 表达层（16） | Go `MaxIdleConns` 未设 ⇒ 0 ⇒ 无上限 | 同 |
 | `max-wait` | ✅ **4s** | Go `PoolTimeout = ReadTimeout + 1s` | 🔴 **别域目前都缺这条**（本轮新查出） |
 | pom | `commons-pool2`（不写 `<version>`） | — | 同 |
+
+> 📌 **订正注记（2026-10-28 · G3）**：本表的 `max-active` 行**原措辞**写「Go `PoolSize = 10 × GOMAXPROCS`（机器相关）」⇒ **那不是 `max-active` 的对应项**（`PoolSize` 是**基准值 / 并发槽位容量**，**不是**上限）
+> ⇒ ⇒ 正确对应项是 Go 的 **`MaxActiveConns`**（go-zero 未设 ⇒ **无连接数硬上限**）⇒ ⇒ 完整订正与出处见 **§19.7 的订正注记**（同一结论，本文件 §15.3 早已有同源订正）
+> ⇒ ⇒ `max-wait` 那一行**数值仍是 4s ✅**，但**触发资源**两侧不同（Go ＝ 并发命令槽位 · RAG ＝ 借连接）⇒ 详见 §19.7 订正注记。
 
 ---
 
@@ -1220,10 +1224,20 @@ Go 的 `net/http` **服务端没有 103 Early Hints 这个特性** ⇒ ⇒ **RAG
 
 | 项 | Go 侧 | 本仓 | 性质 |
 |---|---|---|---|
-| `max-active` | `PoolSize = 10 × 核数`（本机 100，**机器相关**）· `MaxActiveConns` 未设 ⇒ `options.go:230-235`「zero ⇒ no limit」⇒ **Go 无总量硬上限** | **64** | 🟡 **数量级对齐** · **性能面** |
+| `max-active` | 🔴 **原措辞**：「`PoolSize = 10 × 核数`（本机 100，**机器相关**）· `MaxActiveConns` 未设 ⇒ `options.go:230-235`「zero ⇒ no limit」⇒ **Go 无总量硬上限**」⇒ **前半句与后半句自相矛盾** ⇒ 📌 **见下方订正注记** | **64** | 🟡 **表达层更严**（连接数硬上限比 Go 更紧 ⇒ **饱和区可观察**，见订正注记）|
 | `max-idle` | `MaxIdleConns` 未设 ⇒ `options.go:224-228` 无 default ⇒ 0 ⇒ 消费点 `internal/pool/pool.go:1257` ⇒ **0 = 无上限** | **16** | 🟡 **表达层取值**（比 Go 更严：只影响空闲连接的保留/回收，**不影响命令结果**）|
 | `min-idle` | `MinIdleConns = 8`（go-zero `idleConns = 8`）| **8** | ✅ **精确对齐** |
-| `max-wait` | `PoolTimeout = 4s` | **4s** | ✅ **语义对齐**（异常类型不同，耗时口径一致）|
+| `max-wait` | `PoolTimeout = 4s` | **4s** | ✅ **数值对齐**（4s = 4s）· 🟡 **触发资源不同**（Go ＝ **并发命令槽位** · RAG ＝ **借连接**）⇒ 见订正注记 |
+
+> 📌 **订正注记（2026-10-28 · G3 · 据 G1 lane 的两侧源码复核，本域独立读 go-redis v9.20.0 源码后确认）** ——
+> 上面 `max-active` 行的**原措辞把 `PoolSize` 当成了 `max-active` 的对应项**，同一行里又写「Go 无总量硬上限」⇒ **自相矛盾** ⇒ **前半句作废**（原文保留在「原措辞」里，不改写）。
+> - **正确的对应关系**：RAG 的 `max-active`（**连接数硬上限**）↔ Go 的 **`MaxActiveConns`**（`options.go:230-235` 注释：「the maximum number of connections allocated by the pool at a given time」；消费点 `internal/pool/pool.go:579` / `:600` **仅在 `> 0` 时生效**）⇒ ⇒ 本域 Go 走 go-zero `redisclientmanager.go:32-40`，**只传了** `Addr` / `Username` / `Password` / `DB` / `MaxRetries` / `MinIdleConns` / `TLSConfig` ⇒ ⇒ **`MaxActiveConns` 未设 ＝ 0 ⇒ Go 无连接数硬上限** ⇒ ⇒ RAG 的 `64` 是**比 Go 更严**的表达层取值。
+> - **`PoolSize` 的真正身份**：`options.go:200-206` 字段注释明写「`PoolSize` is the **base** number of socket connections. If there is not enough connections in the pool, new connections will be allocated **in excess of PoolSize**, you can limit it through `MaxActiveConns`」⇒ ⇒ **`PoolSize` 是基准值、不是上限**；它的**实际作用 ＝ 信号量容量**（`internal/pool/pool.go:421` `semaphore: internal.NewFastSemaphore(opt.PoolSize)`）⇒ ⇒ **`PoolSize` 量的是「并发命令数」不是「连接数」**（`waitTurn()` `:1098-1128`：抢不到槽位就 `Acquire(ctx, PoolTimeout, ErrPoolTimeout)`，槽位在整个命令期间被持有 ⇒ `:1128` 才 Release）。
+> - 🔴 **⇒ 因此 `PoolSize` 与 RAG 的 `max-active` 不是同一维** ⇒ ⇒ **两者不可互相对照**（这正是本条要订正的病根）；Go 的 `PoolSize = 10 × GOMAXPROCS`（`options.go:350-351`）在 RAG 侧**没有对应参数**（Lettuce 池按连接计、不按并发命令计）⇒ ⇒ **属结构不对称，不是漂移**。
+> - 📌 **顺带一条精度修正**：go-zero `redisclientmanager.go:21` 的 `nodePoolSize = 10 * runtime.GOMAXPROCS(0)` 与 `:52` 的 `poolSize: nodePoolSize` **只喂给 `connCollector.registerClient`（监控统计）**，**不是** client 的 `Options.PoolSize` ⇒ ⇒ 真源的**有效** `PoolSize` 来自 **go-redis 自己的默认**（`options.go:350-351`）⇒ 两者公式**恰好相同**但**来源不同** ⇒ ⇒ **别把 `:52` 当成「Go 显式设了池大小」的证据**。
+> - **`max-wait` 的「语义对齐」要收窄**：Go 的 `PoolTimeout` 触发条件是**并发命令槽位耗尽**（`pool.go:1098-1128`）；RAG 的 `max-wait` 是 **commons-pool2 借连接**的等待上限（借不到空闲连接就等到 `max-wait`）⇒ ⇒ **数值一致（4s ＝ 4s）**、**触发资源不同** ⇒ ⇒ 且因 RAG 的连接上限 64 **小于** Go 的槽位上限 `10×核数`（本机 100）⇒ ⇒ **饱和区 RAG 可能比 Go 更早超时** ⇒ ⇒ 性质由「✅ 语义对齐」收窄为「**✅ 数值对齐 ＋ 🟡 触发条件不对称**」。
+> - **证据强度**：**L1**（两侧源码逐行）⇒ ⇒ 未做并发压测 ⇒ **不写 L4**。
+> - 📌 **与本文件 §15.3 的既有订正注记同源**（那里 2026-10-27 已订正「`PoolSize` ＝ 基准值、不是上限」）⇒ ⇒ **本次是那张表的两个「表格落点」的补订正**（§15.7 落码清单表 ＋ §19.7 残留差异表）⇒ **同源、同结论**。
 
 ⚠️ **`max-idle: 16` 与 `max-active: 64` 是「表达层更严」** ⇒ ⇒ 它们**不是**对 Go 的行为漂移（不影响命令结果）
 ⇒ ⇒ **若要登记为有意偏离项，落点是 `docs/Intentional_Deviations/favorite/api.md`（⛔ 非本 lane 写权面）⇒ 留待整合者登记**（同款在 hot-rpc / comment-rpc 侧也已存在）。

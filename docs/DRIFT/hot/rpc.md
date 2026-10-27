@@ -2173,6 +2173,7 @@ Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方�
 | 动作 | 谁 | 何时 | 判据 |
 |---|---|---|---|
 | **跑 `python3 tools/check-ledger-count.py --fix`**（把 `docs/Pitfalls/_INDEX.md` 那行改成实测值 ⇒ **315 → 328**） | **合并方 / 整合者**（`docs/Pitfalls/_INDEX.md` 是共享索引 ⇒ AGENTS.md §5.3b「合并后统一更新」） | **合并后** | 跑完 `check-ledger-count.py` ⇒ **EXIT=0** |
+| 📌 **订正（2026-10-28 · G3）**：**实测目标值已从 328 变成 330** | **同上（合并方 / 整合者）** | **合并后** | 本 lane 在 §十二.6 定位（+13）之后**又新增了 2 条编号式条目** ⇒ 315 + 13 + 2 = **330**（实测 `check-ledger-count.py` ⇒ 索引 315 / 实测 **330** ⇒ 差 **+15**）：① `docs/Pitfalls/article/rpc.md` 的 **`PF-ARTICLE-RPC-016`**（Testcontainers PG 宿主口错位 ⇒ `EOFException` 的环境 flake 真签名 · 2026-10-28 据 G1 lane 通报）② `docs/DRIFT/article/vs-common.md` 的 **`G4-9`** 派单行（编号式 ⇒ 也计入条目数）⇒ ⇒ **原文的 328 保留不改写**，**当前实测 = 330** ⇒ ⇒ **任何一边都不改代码、不改索引** |
 | ⚠️ **不要各 lane 各自 `--fix`** | 各 lane | — | 同一行会被多个分支改 ⇒ ⇒ **合并必撞** ⇒ ⇒ **只在合并后统一跑一次** |
 | **本 lane 需要做的** | **无**（**代码零改动**、**索引零改动**） | — | 我树当前 EXIT=1 是**预期内**的 |
 
@@ -2195,7 +2196,7 @@ Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方�
 | article 域 gRPC 测试段号（预留池 `22200–22599` **仍未分配** ⇒ **本域不擅自占预留段**）| global 段表是 **G4 写权面** | **G4**（会话恢复后）|
 | 共享层 `MAX_PARAMETER_COUNT` `10001 → 10000`（差一格那一行）| `service/common/**` = **G4 唯一写者** | **G4** |
 | 合并共享层后重跑全量（`15cf93a` 改了生产代码 ⇒ 本域基线失效）| 需要 G4 的共享层提交先落 | **G4** |
-| 合并后统一 `python3 tools/check-ledger-count.py --fix`（315 → 329）| `docs/Pitfalls/_INDEX.md` = **整合者写权面** | **整合者** |
+| 合并后统一 `python3 tools/check-ledger-count.py --fix`（**315 → 330**）| `docs/Pitfalls/_INDEX.md` = **整合者写权面** | **整合者** |
 | comment C-5（tools 探针骨架）| `tools/**` = **G4 写权面**（本来就该它做）| **G4** |
 
 ⇒ ⇒ **纪律（本轮新增，两条）**：
