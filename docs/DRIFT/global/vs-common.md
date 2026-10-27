@@ -67,7 +67,7 @@
 | **A6** | errmsg 契约 | 共享层**不产 errmsg**（1015 等业务码在域侧 api）⇒ 共享层只负责**错误响应形状**（`http/GoStyleRouterErrorResponses`） | ✅ **双侧对拍通过**：`bash tools/semantic-probe/run-parity.sh` ⇒ **EXIT=0 · 56 例（一致 54 · 已签字偏离 2 · 不一致 0）**（⚠️ README 原写「23 例」已过期 ⇒ 本轮订正 `2231398`） | **L4**（双侧活体对拍） | 2026-10-27 |
 | **A7** | proto 契约 | `service/proto`（**不在共享层写权面**）⇒ 共享层侧 **N/A** | **N/A**（共享层无落点）⚠️ 提醒：**复制忠实 ≠ 消费方式已验**（AGENTS.md §3.4 的效力边界）⇒ 10 个 proto 的 message/字段号/类型/枚举 10/10 一致，但 `optional` presence 语义 / Jackson 配置差异**不在**该结论覆盖内 | **L1**（静态逐条对照，AGENTS.md §3.4 背书） | 2026-10-27 |
 | **A8** | DDL 时间列 / 类型 | 共享层**无 DDL / migration**（`service/common` 不建表）⇒ 本轴共享层落点 = `persistence/DeadlineQueryTimeoutInjector`（`default-statement-timeout` 的**运行时**语义，**不是** DDL） | **N/A**（共享层不建表）⚠️ DDL 双侧活体逐列对照 = **9 域**（类型/长度 **0 差异**；`DEFAULT CURRENT_TIMESTAMP` 残留 **16 处** = **刻意保留**；users 域缺 3 条非唯一索引 = **性能非行为**）⇒ 结论以各域台账为准 | **L3**（`tools/difftest/check-ddl-static.py` 双侧活体对拍） | 2026-10-27 |
-| **A9** | trace / otel | `observability/GoStyleOtelAutoConfiguration`（**`BeanFactoryPostProcessor`** 装配点）· `observability/GoStyleOtelAgent` · `observability/GoStyleOtelConfig` · `http/GoStyleTraceparentFilter` · `observability/GoStyleClientDisconnectProbe` | ✅ **全局 OTel 装配点已收口共享层**（`GlobalOpenTelemetry.set` 只能调一次，且**先 `get()` 会让后续 `set()` 抛 `IllegalStateException`** ⇒ 必须 BFPP ⇒ 理由与 4 个构造器抢跑点已写进 javadoc）<br>🟡 **域特有业务 span 不在共享层**（comment 6 个 / favorite 16 个业务 span 缺失 ⇒ **域侧自修**：G3 已登记 `C-3` / `L-4` ⇒ **共享层零改动**）<br>🔴→🟢 **补（`853767b` · G2 反馈单 FB-04）**：本轴此前**缺一个子面 ——「业务 handler 执行期能拿到当前 server span」**。Go 侧 `tracinginterceptor.go:18-24` 把 span **放回 ctx** ⇒ 业务 `trace.SpanFromContext(l.ctx)` 取得到 ⇒ 属性真落；RAG 侧 handler **不接收 ctx** ⇒ 唯一等价物是 `Span.current()`，而拦截器此前**只在 `close()` / `onCancel()` 里 `makeCurrent()`** ⇒ **handler 执行期取到 invalid（no-op）span** ⇒ 属性**静默丢弃** ⇒ ⇒ 域侧若按 `Span.current().setAttribute(...)` 落码 ⇒ **跑绿但零效果**（与「假绿」同源）⇒ 已在 `onHalfClose()` 里把 `makeCurrent()` 的 scope **包住 handler 执行期**修好 ⇒ **本轴此前不是「全绿」，是「少验了一个面」** | **L3**（真容器 + `GoStyleOtelAgentGateTest`）＋ **L1**（域侧 span 清单由 G3 逐条核）<br>🆕 **FB-04 子面 = L3**（真 netty gRPC server + 真 OTel SDK + `InMemorySpanExporter`）＋ **变异 4/4 精确命中** | 2026-10-27 |
+| **A9** | trace / otel | `observability/GoStyleOtelAutoConfiguration`（**`BeanFactoryPostProcessor`** 装配点）· `observability/GoStyleOtelAgent` · `observability/GoStyleOtelConfig` · `http/GoStyleTraceparentFilter` · `observability/GoStyleClientDisconnectProbe` | ✅ **全局 OTel 装配点已收口共享层**（`GlobalOpenTelemetry.set` 只能调一次，且**先 `get()` 会让后续 `set()` 抛 `IllegalStateException`** ⇒ 必须 BFPP ⇒ 理由与 4 个构造器抢跑点已写进 javadoc）<br>🟡 **域特有业务 span 不在共享层**（**comment 的 6 个已由 G3 修完** ⇒ `C-3` 落码 `d2d7268` ⇒ **本层登记的跨域线索闭环**；**favorite 的 16 个仍缺** ⇒ `L-4` 未落 ⇒ **域侧自修** ⇒ ⇒ **共享层零改动**）<br>🔴→🟢 **补（`853767b` · G2 反馈单 FB-04）**：本轴此前**缺一个子面 ——「业务 handler 执行期能拿到当前 server span」**。Go 侧 `tracinginterceptor.go:18-24` 把 span **放回 ctx** ⇒ 业务 `trace.SpanFromContext(l.ctx)` 取得到 ⇒ 属性真落；RAG 侧 handler **不接收 ctx** ⇒ 唯一等价物是 `Span.current()`，而拦截器此前**只在 `close()` / `onCancel()` 里 `makeCurrent()`** ⇒ **handler 执行期取到 invalid（no-op）span** ⇒ 属性**静默丢弃** ⇒ ⇒ 域侧若按 `Span.current().setAttribute(...)` 落码 ⇒ **跑绿但零效果**（与「假绿」同源）⇒ 已在 `onHalfClose()` 里把 `makeCurrent()` 的 scope **包住 handler 执行期**修好 ⇒ **本轴此前不是「全绿」，是「少验了一个面」** | **L3**（真容器 + `GoStyleOtelAgentGateTest`）＋ **L1**（域侧 span 清单由 G3 逐条核）<br>🆕 **FB-04 子面 = L3**（真 netty gRPC server + 真 OTel SDK + `InMemorySpanExporter`）＋ **变异 4/4 精确命中** | 2026-10-27 |
 
 > **A3 已预填一条实测锚点（2026-10-27 核）** —— X-6（`DRIFT-HOTAPI-030`）共享层 6 个类已落码
 > （`GoStyleFormValues` / `GoStyleFormLimitMode` / `GoStyleFormLimitExceededException` /
@@ -1141,6 +1141,41 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | **G1 的说法** | 「G1 三个域侧排序桥（`MybatisPlusOrderingBridgeAutoConfiguration`）等 G4 的共享层桥落码后再删」 |
 | **实测** | ✅ **共享层版本早已存在**：`service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java`（⇒ 各域 `*/rpc/config/` 下另有 10 份**域内副本**）⇒ ⇒ 合并后**域内副本被遮蔽**（不是叠加）⇒ ⇒ **域内副本在合并时删即可** ⇒ ⇒ **不存在「还没落的共享层桥」** |
 | ⚠️ **别把两件事混谈** | `MybatisPlusOrderingBridgeAutoConfiguration` 管的是 **MyBatis-Plus 拦截器链**的顺序 ⇒ ⇒ 与 **Filter 槽位**（§4.10.16.1）**无关** ⇒ ⇒ 两件事各自的证据与修法都要分开读 |
+
+#### 4.10.17 🟢 **G3 的 C-3 回执（2026-10-27）—— comment 域 6 个业务 span 闭环（本层零落码）**
+
+> **性质**：**回执**，不是派单 —— G3 域内自修（不动共享层、不改 pom）⇒ ⇒ 本层只需**确认 + 更新台账**。
+
+##### 4.10.17.1 G3 落了什么（本层只登记，不复核代码）
+
+| 项 | 内容 |
+|---|---|
+| **落码** | 域内私有常量类 `service/comment/comment-rpc/.../service/CommentSpans.java`（照仓内先例 `AdminSpans` 的范式）＋ `CommentDomainService` 的 **6 个方法**改成「开 span → 设属性 → 跑业务体」（业务体拆成 `doXxx` 私有方法 ⇒ **span 生命周期覆盖整个 logic** ⇔ Go 的 `defer span.End()`） |
+| **Go 侧逐条实测（不是按方法名推）** | 5 个 `Action-Comment-*`（tracer = `comment-rpc`）＋ `GetComment`（🔴 tracer = **`comment.rpc`（带点）**、🔴 **无 `audit.*` 前缀**）⇒ ⇒ **Go 侧三处不一致逐字保留**（tracer 名 / 属性前缀 / 状态语义）⇒ ⇒ ✅ 符合 AGENTS.md §3.1「**不得顺手统一**」 |
+| **「Go 记不记这个错误」的判据** | Go 的 `RecordError` 精确落在 `result = "sys_fail"` 的 **15 处**分支，`biz_fail` **一律不记** ⇒ ⇒ 判据取自 Go `service/comment/common/errmsg/errmsg.go:35-48` 的**码段事实**（**5xxx = 系统类** · **1xxx/2xxx = 业务类**）⇒ ⇒ 「业务码 ≥ 5000 ⇒ 系统失败 ⇒ Go 会记」⇒ ⇒ **可复用范式**（见 §4.10.17.3） |
+| **刻意不做的三处** | `likeComment` **不加 span**（Go 侧 `tracer.Start` 命中数 = 0 ⇒ 是**对齐不是遗漏**）· 枚举按 Go `EnumStringOf`（未知值 = **数字字符串**，不是 Java 的 `UNRECOGNIZED`）· `GetComment` 的 `page`/`page_size` 记**原始入参**（Go `:72-73`） |
+| **验证** | 守门 `CommentSpanWiringTest`（真 Spring 上下文 ＋ 真 PG ＋ 自装 SDK ＋ **收集型 exporter** ⇒ 断言**导出的 span**）⇒ **7/7**，含 4 条判别式断言（业务失败无异常事件 · `GetComment` 有异常事件且状态 ERROR · `GetComment` 的 span 里不出现任何 `audit.*` · `likeComment` 不产生 span）；comment-rpc 整域 **115 条 / 0 failures** |
+
+##### 4.10.17.2 ✅ 本层确认：那条 `GlobalOpenTelemetry.set has already been called` 的 ERROR 是**预期噪声**
+
+| 项 | 内容 |
+|---|---|
+| **G3 的观察** | 测试日志里有 `GoStyleOtelAgent: GlobalOpenTelemetry.set has already been called` 的 ERROR ⇒ 他判断是「预期噪声」并**没有**当缺陷 |
+| **本层的机制出处** | ✅ **本层台账 §2 的 A9 行早已写明**：「全局 OTel 装配点已收口共享层（`GlobalOpenTelemetry.set` **只能调一次**，且**先 `get()` 会让后续 `set()` 抛 `IllegalStateException`** ⇒ **必须 BFPP** ⇒ 理由与 4 个构造器抢跑点已写进 javadoc）」⇒ ⇒ **域侧自装 OTel SDK 时**：共享层的 `set` 因「已被域侧占用」而抛 ⇒ **被 `install` 捕获** ⇒ **继续启动** ⇒ ⇒ **域侧那个 SDK 保持生效** ⇒ ⇒ **⇒ 这恰好是 G3 的守门能断言「导出的 span」的前提**（不是噪声掩盖了问题，而是**设计使然**） |
+| **本层的态度** | ✅ **确认「预期噪声」** ⇒ ⇒ 已在 A9 行补上这句，避免下一个 agent 在别处看到同款日志时误判为缺陷 |
+
+##### 4.10.17.3 🟢 可复用范式（**从 G3 这条里抽出来的，值得沉淀**）
+
+> **「Go 记不记这个错误」的判据，不要靠「读 Go 源码感觉」，要落到**可求值的事实**上。**
+> G3 的做法：Go 的 `RecordError` 精确落在 `result = "sys_fail"` 的 15 处分支 ⇒ ⇒ 判据取自 `errmsg.go` 的**码段事实**（5xxx 系统类 / 1xxx·2xxx 业务类）⇒ ⇒ 「业务码 ≥ 5000 ⇒ Go 会记」⇒ ⇒ **域侧只要按码段判，就能复刻 Go 的记/不记**。
+> ⇒ ⇒ 与 AGENTS.md §5.3e「判据必须是**能在真源上求值的事实**」同款 ⇒ ⇒ 与本层 FB-04 用的判据（`Span.current()` 能否拿到真 span）同族。
+
+##### 4.10.17.4 🟡 本层转给 G3 的**另一条**尚未回复（⇒ 不销账）
+
+| 项 | 内容 |
+|---|---|
+| **本层上轮转的线索** | 🔴 **comment 域 fact 投递链路上的 `Span.current()`**：`CommentFactDeliveryService.java:148` 的 `Span.current()` 发生在**调度线程**（`CommentFactDispatchScheduler.java:95`）⇒ ⇒ 取到 **invalid span** ⇒ ⇒ `:193-194` 的属性**静默丢弃**；而 Go 侧 comment fact 投递链路**根本不用 span** ⇒ ⇒ **RAG 侧独有的无效代码** |
+| **本轮 G3 的回执里没提这条** | ⇒ ⇒ **不销账**（不能因为 C-3 落了就默认这条也修了）⇒ ⇒ **本层已在台账保留** ⇒ ⇒ 回执里**点名问一次**（是已修、未修，还是判定为「不修」） |
 
 #### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `2f3d5c2`）
 
