@@ -4,6 +4,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,6 +13,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
+import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -85,6 +87,87 @@ class LikeRpcArtifactClasspathGateTest {
     }
 
     // ==================================================================
+    // ③ fat jar 内嵌的共享层 jar 必须带 MyBatis-Plus 排序桥（2026-10-27 第十七轮新增）
+    // ==================================================================
+
+    /**
+     * 🔴 <b>产物层第 ③ 条守门</b>：断言 fat jar 里内嵌的那份 {@code common-*.jar}
+     * <b>带着共享层的 MyBatis-Plus 自动配置排序桥</b>。
+     *
+     * <p><b>它守的是什么缺陷</b>：域侧排序桥收编到共享层之后，排序边<b>只</b>由共享层那份提供
+     * ⇒ ⇒ <b>内嵌的 common jar 必须是当轮构建的那份</b>（否则里面没有桥）
+     * ⇒ ⇒ 缺桥 ⇒ MyBatis-Plus 的 {@code @AutoConfigureAfter}（Boot 3 包名）在 Boot 4 下悬空
+     * ⇒ ⇒ MP 自动配置在 DataSource 之前求值 ⇒
+     * {@code @ConditionalOnSingleCandidate(DataSource)} 失败 ⇒ ⇒
+     * <b>不产 {@code SqlSessionFactory}</b> ⇒ ⇒ <b>真进程启动即挂</b>
+     * （{@code Property 'sqlSessionFactory' or 'sqlSessionTemplate' are required}）。
+     *
+     * <p>⚠️ <b>为什么这条守门不可省</b>：同包的
+     * {@code LikeRpcRuntimeBootGateTest}（进程级）已经能抓到「起不来」，
+     * <b>但它是在「起不来」之后才报</b> ⇒ ⇒ 失败点离根因很远（要读进程日志尾部才能反推）
+     * ⇒ ⇒ 本条把判据前移到<b>产物层</b>：内嵌 jar 里有没有那行注册，<b>一眼可判</b>。
+     *
+     * <p>⚠️ <b>期望值不能与被测代码同源</b>：这里断言的是<b>共享层那一行全限定名</b>
+     * （字面量，来自 {@code service/common} 的
+     * {@code META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports}），
+     * <b>不是</b>从被测代码里取常量 ⇒ ⇒ 共享层改了包名 ⇒ 这条会<b>如实转红</b>（= 提醒同步）。
+     */
+    @Test
+    @DisplayName("真 fat jar 内嵌的 common jar 必须带共享层排序桥（否则 MP 自动配置退避 ⇒ 进程起不来）")
+    void fatJarCarriesSharedLayerOrderingBridge() throws Exception {
+        Path jar = fatJar();
+        try (JarFile jarFile = new JarFile(jar.toFile())) {
+            JarEntry entry = jarFile.stream()
+                    .filter(e -> e.getName().startsWith("BOOT-INF/lib/common-")
+                            && e.getName().endsWith(".jar"))
+                    .findFirst()
+                    .orElse(null);
+            assertNotNull(entry, "fat jar " + jar.getFileName() + " 的 BOOT-INF/lib 里没有 common-*.jar ⇒ "
+                    + "共享层不在运行时 classpath 上 ⇒ 本模块的自动配置根本不会被加载。");
+
+            byte[] bytes;
+            try (InputStream in = jarFile.getInputStream(entry)) {
+                bytes = in.readAllBytes();
+            }
+            Path tmp = Files.createTempFile("embedded-common", ".jar");
+            String imports;
+            try {
+                Files.write(tmp, bytes);
+                try (JarFile inner = new JarFile(tmp.toFile())) {
+                    JarEntry imp = inner.getJarEntry(
+                            "META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports");
+                    imports = imp == null
+                            ? ""
+                            : new String(inner.getInputStream(imp).readAllBytes(), StandardCharsets.UTF_8);
+                }
+            } finally {
+                Files.deleteIfExists(tmp);
+            }
+
+            assertTrue(imports.contains(SHARED_LAYER_ORDERING_BRIDGE),
+                    "内嵌的 " + entry.getName() + " 的 AutoConfiguration.imports 里【没有】共享层排序桥（"
+                            + SHARED_LAYER_ORDERING_BRIDGE + "）⇒ ⇒ 排序边不成立 ⇒ ⇒ MyBatis-Plus 的 "
+                            + "@AutoConfigureAfter（Boot 3 包名）在 Boot 4 下悬空 ⇒ ⇒ MP 自动配置在 "
+                            + "DataSource 之前求值 ⇒ ⇒ @ConditionalOnSingleCandidate(DataSource) 失败 ⇒ ⇒ "
+                            + "不产 SqlSessionFactory ⇒ ⇒ **真进程启动即挂**（Property 'sqlSessionFactory' or "
+                            + "'sqlSessionTemplate' are required）。\n"
+                            + "根因 = 构建 fat jar 的那条 mvn 命令【不带 -am】⇒ service/common 从 ~/.m2 取旧 jar "
+                            + "⇒ 旧 jar 里没有桥。\n实际取到的 imports 内容：\n" + imports);
+        }
+    }
+
+    /**
+     * 共享层排序桥的<b>全限定类名</b>（字面量，来自共享层的
+     * {@code META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports}）。
+     *
+     * <p>⚠️ <b>刻意写成字面量而不是引用共享层的常量</b>：守门断言的期望值若与被测代码同源
+     * ⇒ 改一处两边一起变 ⇒ 断言恒成立 ⇒ ⇒ 守门变哑 ⇒ ⇒ 这里用<b>独立字面量</b>，
+     * 共享层改包名时这条会如实转红。
+     */
+    private static final String SHARED_LAYER_ORDERING_BRIDGE =
+            "com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration";
+
+    // ==================================================================
     // helpers（package-private ⇒ 同包的进程级守门类复用）
     // ==================================================================
 
@@ -150,10 +233,31 @@ class LikeRpcArtifactClasspathGateTest {
         return false;
     }
 
-    /** 构建 fat jar（跳过测试 —— 本类自己就是那个测试）。 */
+    /**
+     * 构建 fat jar（跳过测试 —— 本类自己就是那个测试）。
+     *
+     * <p>🔴🔴 <b>2026-10-27 第十七轮：必须带 {@code -am}（否则测的不是本树代码）</b>
+     * <p><b>不带 {@code -am} 时会发生什么（实测）**：{@code service/common} <b>不在</b>本次
+     * reactor 里 ⇒ ⇒ 它从 <b>{@code ~/.m2}</b> 取 jar ⇒ ⇒ 而 {@code ~/.m2} 里那份
+     * {@code common-0.0.1-SNAPSHOT.jar} <b>可能早于共享层排序桥的落码</b>
+     * ⇒ ⇒ <b>内嵌的 common jar 里没有排序桥</b> ⇒ ⇒ MyBatis-Plus 的
+     * {@code @AutoConfigureAfter}（<b>Boot 3 的包名</b>）在 Boot 4 下<b>悬空</b>
+     * ⇒ ⇒ MP 自动配置在 DataSource 之前求值 ⇒
+     * {@code @ConditionalOnSingleCandidate(DataSource)} 失败 ⇒ ⇒
+     * <b>不产 {@code SqlSessionFactory}</b> ⇒ ⇒
+     * <b>fat jar 真启动即挂</b>（{@code Property 'sqlSessionFactory' or
+     * 'sqlSessionTemplate' are required}）。
+     * <p>⚠️ <b>这条曾被域内排序桥掩盖住</b>：域内那份桥在 {@code BOOT-INF/classes} 里
+     * ⇒ ⇒ 不管内嵌的 common jar 多旧，排序边都成立 ⇒ ⇒ <b>fat jar 一直是绿的</b>
+     * ⇒ ⇒ <b>域内桥一收编，这条潜伏的构建路径缺陷才暴露</b>（本轮 like-rpc 首次撞上）。
+     * <p>⇒ ⇒ 带 {@code -am} ⇒ reactor 会先产出 <b>当轮</b>的
+     * {@code service/common/target/common-*.jar} ⇒ ⇒ fat jar 内嵌的就是它
+     * ⇒ ⇒ <b>排序桥在内嵌 jar 里</b>（已实测：内嵌 jar 的
+     * {@code AutoConfiguration.imports} 第 4 行 = 共享层排序桥）。
+     */
     private static void buildFatJar() throws Exception {
         ProcessBuilder builder = new ProcessBuilder(List.of(
-                "mvn", "-o", "-q", "package", "-Dmaven.test.skip=true", "-pl", MODULE_PATH))
+                "mvn", "-o", "-q", "package", "-Dmaven.test.skip=true", "-pl", MODULE_PATH, "-am"))
                 .directory(repoRoot().toFile())
                 .redirectErrorStream(true);
         Process process = builder.start();

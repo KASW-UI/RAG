@@ -786,7 +786,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | **Evidence** | E-Boot（`/tmp/like-boot-nokafka.log:59,67`）；同仓正确写法：`service/users/admin/admin-api/src/main/resources/application.yml:56,65,71`、`service/like/like-api/src/main/resources/application.yml:104`、`service/hot/hot-api/…:53,59`、`service/message/message-api/…:52`（均三斜杠）；`MessageRpcClient.java:52` 的 `@GrpcClient("message-rpc")` |
 
 ### DRIFT-LIKE-014 — MyBatis-Plus（Boot 3 starter）在 Boot 4 下自动配置被静默跳过 ⇒ 无 `SqlSessionFactory` ⇒ 启动失败
-> ✅ **状态：已修（2026-10-23 第三轮 / 2026-10-24 修复轮）** —— 修法：新增 `config/MybatisPlusOrderingBridgeAutoConfiguration.java`（排序桥接）+ `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 注册它 ⇒ 绕过 Boot 3/4 的 `@AutoConfigureAfter` 旧包名悬空。**下表是修复前的描述。**
+> ✅ **状态：已修（2026-10-23 第三轮 / 2026-10-24 修复轮）** —— 修法：新增 `config/MybatisPlusOrderingBridgeAutoConfiguration.java`（排序桥接）+ `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 注册它 ⇒ 绕过 Boot 3/4 的 `@AutoConfigureAfter` 旧包名悬空。**下表是修复前的描述。** ⚠️ **2026-10-27 第十七轮订正**：**该修法本身仍有效**（问题同源）⇒ 但**承载者已换** ⇒ ⇒ 本轮已把域侧的 `config/MybatisPlusOrderingBridgeAutoConfiguration.java` + 本模块的 `META-INF/spring/…AutoConfiguration.imports` **整份删除**（该 `imports` 原本**只含这一行** ⇒ 整份随类一起删）⇒ ⇒ 排序边改由**共享层**那份承担 ⇒ ⇒ **下面那张「修复前的描述」表指域侧实现 ⇒ 已过期** |
 
 | 项 | 内容 |
 |---|---|
@@ -1519,7 +1519,7 @@ Java 侧 `DefaultErrorHandler(recoverer, new FixedBackOff(0, 0))` ⇒ 失败**�
 | `spring-boot-flyway` 依赖 | 同上 `:224-227` | Boot 4 拆模块后必需 —— 缺它**启动日志里连一行 Flyway 都没有** |
 | `commons-pool2` 依赖 | 同上 `:124-127` | Lettuce 连接池 |
 | `grpc-inprocess` 显式版本 | 同上 `:265-270` | 测试用 |
-| `MybatisPlusOrderingBridgeAutoConfiguration` + `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | `config/` + `resources/META-INF/` | **DRIFT-LIKE-014 的修法**（台账原正文只写了「怎么坏」，没写「怎么修」） |
+| `MybatisPlusOrderingBridgeAutoConfiguration` + `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | `config/` + `resources/META-INF/` | **DRIFT-LIKE-014 的修法**（台账原正文只写了「怎么坏」，没写「怎么修」） | ⚠️ **2026-10-27 第十七轮订正**：**这两项已于本轮删除**（域侧收编到共享层）⇒ ⇒ **DRIFT-LIKE-014 的修法本身仍成立**（问题同源）⇒ ⇒ **但「怎么修」的落点已换**：现在由**共享层** `com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration` + 共享层的 `AutoConfiguration.imports` 承担 ⇒ ⇒ **本行的文件清单已过期** ⇒ ⇒ ⚠️ **形态差异（合并清单要点名）**：本域那份 `imports` **只含排序桥一行** ⇒ ⇒ **整份文件随类一起删**；而 G3 的 `article-rpc` 那份**有 2 行** ⇒ ⇒ **只删第 1 行、文件保留** ⇒ ⇒ **两种形态不同，合并时不能一刀切** |
 | `Jackson2ObjectMapperConfiguration` | `config/Jackson2ObjectMapperConfiguration.java` | **DRIFT-LIKE-016 的修法**（含 number→string / number→boolean 一律 `Fail` 的强转策略） |
 | `LikeSchemaGate` | `bootstrap/LikeSchemaGate.java`（`@Component`） | Flyway 之后的第二道防线（启动自检）—— 台账此前只在说「测试类 `LikeSchemaGateTest` 不存在」时提过它 |
 | `like.redis.list-ttl`（7d） | `application.yml:166-170` + `config/LikeRpcProperties.java:80` | Go 出处已写在 yaml 注释里（`getuserlikelistlogic.go:120` / `gettargetlikerlistlogic.go:128`，两处都是 7 天） |

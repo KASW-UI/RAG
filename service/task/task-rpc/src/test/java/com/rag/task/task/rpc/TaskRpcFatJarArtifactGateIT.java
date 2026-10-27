@@ -142,6 +142,88 @@ class TaskRpcFatJarArtifactGateIT {
                         + "压过了 net.devh:grpc-server-spring-boot-starter 传递进来的 compile 声明。");
     }
 
+    /**
+     * 🔴 <b>产物层第 ④ 条守门（2026-10-27 第十七轮新增）</b>：断言 fat jar 里内嵌的那份
+     * {@code common-*.jar} <b>带着共享层的 MyBatis-Plus 自动配置排序桥</b>。
+     *
+     * <p><b>它守的是什么缺陷</b>：域侧排序桥收编到共享层之后，排序边<b>只</b>由共享层那份提供
+     * ⇒ ⇒ 若 fat jar 里嵌的是<b>旧</b>的 {@code ~/.m2} 里的 {@code common} jar
+     * （构建 fat jar 的命令<b>不带 {@code -am}</b> ⇒ {@code service/common} 不在 reactor 里
+     * ⇒ ⇒ 只能从本地仓库取）⇒ ⇒ <b>桥不在 fat jar 里</b> ⇒ ⇒ MyBatis-Plus 的
+     * {@code @AutoConfigureAfter}（<b>Boot 3 的包名</b>）在 Boot 4 下<b>悬空</b>
+     * ⇒ ⇒ MP 自动配置在 DataSource 之前求值 ⇒ ⇒
+     * {@code @ConditionalOnSingleCandidate(DataSource)} 失败 ⇒ ⇒
+     * <b>不产 {@code SqlSessionFactory}</b> ⇒ ⇒ <b>真进程启动即挂</b>
+     * （{@code Property 'sqlSessionFactory' or 'sqlSessionTemplate' are required}）。
+     *
+     * <p>⚠️ <b>为什么本类必须自己守这条</b>：本类<b>只解包、不起进程</b> ⇒ ⇒ 它<b>抓不到</b>
+     * 那个缺陷（症状要到 like 域的 {@code LikeRpcRuntimeBootGateTest} 才暴露）⇒ ⇒
+     * **本域的产物层守门存在一个「解包但不起进程 ⇒ 看不见排序边」的缺口** ⇒ ⇒ **本条把它补上**。
+     *
+     * <p>⚠️ <b>期望值用独立字面量</b>（共享层那个全限定名，来自共享层的
+     * {@code META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports}），
+     * <b>不</b>从被测代码取常量 ⇒ ⇒ 共享层改包名时这条会<b>如实转红</b>（= 提醒同步）。
+     */
+    @Test
+    @DisplayName("真实 fat jar 内嵌的 common jar 必须带共享层排序桥（否则 MP 自动配置退避 ⇒ 进程起不来）")
+    void fatJarMustCarrySharedLayerOrderingBridge() throws IOException {
+        Path jar = locateFatJar();
+        String imports;
+        ZipEntry commonEntry = null;
+
+        try (JarFile jarFile = new JarFile(jar.toFile())) {
+            var entries = jarFile.entries();
+            while (entries.hasMoreElements() && commonEntry == null) {
+                ZipEntry entry = entries.nextElement();
+                String name = entry.getName();
+                if (name.startsWith("BOOT-INF/lib/common-") && name.endsWith(".jar")) {
+                    commonEntry = entry;
+                }
+            }
+            assertNotNull(commonEntry, "fat jar " + jar.getFileName() + " 的 BOOT-INF/lib/ 里没有 common-*.jar ⇒ "
+                    + "共享层不在运行时 classpath 上 ⇒ 本组件的自动配置根本不会被加载。");
+
+            byte[] bytes;
+            try (InputStream in = jarFile.getInputStream(commonEntry)) {
+                bytes = in.readAllBytes();
+            }
+            Path tmp = Files.createTempFile("embedded-common", ".jar");
+            try {
+                Files.write(tmp, bytes);
+                try (JarFile inner = new JarFile(tmp.toFile())) {
+                    ZipEntry imp = inner.getJarEntry(
+                            "META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports");
+                    imports = imp == null
+                            ? ""
+                            : new String(inner.getInputStream(imp).readAllBytes(), StandardCharsets.UTF_8);
+                }
+            } finally {
+                Files.deleteIfExists(tmp);
+            }
+        }
+
+        assertTrue(imports.contains(SHARED_LAYER_ORDERING_BRIDGE),
+                "内嵌的 " + commonEntry.getName() + " 的 AutoConfiguration.imports 里【没有】共享层排序桥（"
+                        + SHARED_LAYER_ORDERING_BRIDGE + "）⇒ ⇒ 排序边不成立 ⇒ ⇒ MyBatis-Plus 的 "
+                        + "@AutoConfigureAfter（Boot 3 包名）在 Boot 4 下悬空 ⇒ ⇒ MP 自动配置在 DataSource "
+                        + "之前求值 ⇒ ⇒ @ConditionalOnSingleCandidate(DataSource) 失败 ⇒ ⇒ 不产 "
+                        + "SqlSessionFactory ⇒ ⇒ **真进程启动即挂**（Property 'sqlSessionFactory' or "
+                        + "'sqlSessionTemplate' are required）。\n"
+                        + "根因 = 构建 fat jar 的那条 mvn 命令【不带 -am】⇒ service/common 从 ~/.m2 取旧 jar "
+                        + "⇒ 旧 jar 里没有桥。\n实际取到的 imports 内容：\n" + imports);
+    }
+
+    /**
+     * 共享层排序桥的<b>全限定类名</b>（字面量，来自共享层的
+     * {@code META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports}）。
+     *
+     * <p>⚠️ <b>刻意写成字面量而不是引用共享层的常量</b>：守门断言的期望值若与被测代码同源
+     * ⇒ 改一处两边一起变 ⇒ 断言恒成立 ⇒ ⇒ 守门变哑 ⇒ ⇒ 这里用<b>独立字面量</b>，
+     * 共享层改包名时这条会如实转红。
+     */
+    private static final String SHARED_LAYER_ORDERING_BRIDGE =
+            "com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration";
+
     // ==================================================================
     // helpers
     // ==================================================================
