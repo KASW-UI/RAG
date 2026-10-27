@@ -67,7 +67,7 @@
 | **A6** | errmsg 契约 | 共享层**不产 errmsg**（1015 等业务码在域侧 api）⇒ 共享层只负责**错误响应形状**（`http/GoStyleRouterErrorResponses`） | ✅ **双侧对拍通过**：`bash tools/semantic-probe/run-parity.sh` ⇒ **EXIT=0 · 56 例（一致 54 · 已签字偏离 2 · 不一致 0）**（⚠️ README 原写「23 例」已过期 ⇒ 本轮订正 `2231398`） | **L4**（双侧活体对拍） | 2026-10-27 |
 | **A7** | proto 契约 | `service/proto`（**不在共享层写权面**）⇒ 共享层侧 **N/A** | **N/A**（共享层无落点）⚠️ 提醒：**复制忠实 ≠ 消费方式已验**（AGENTS.md §3.4 的效力边界）⇒ 10 个 proto 的 message/字段号/类型/枚举 10/10 一致，但 `optional` presence 语义 / Jackson 配置差异**不在**该结论覆盖内 | **L1**（静态逐条对照，AGENTS.md §3.4 背书） | 2026-10-27 |
 | **A8** | DDL 时间列 / 类型 | 共享层**无 DDL / migration**（`service/common` 不建表）⇒ 本轴共享层落点 = `persistence/DeadlineQueryTimeoutInjector`（`default-statement-timeout` 的**运行时**语义，**不是** DDL） | **N/A**（共享层不建表）⚠️ DDL 双侧活体逐列对照 = **9 域**（类型/长度 **0 差异**；`DEFAULT CURRENT_TIMESTAMP` 残留 **16 处** = **刻意保留**；users 域缺 3 条非唯一索引 = **性能非行为**）⇒ 结论以各域台账为准 | **L3**（`tools/difftest/check-ddl-static.py` 双侧活体对拍） | 2026-10-27 |
-| **A9** | trace / otel | `observability/GoStyleOtelAutoConfiguration`（**`BeanFactoryPostProcessor`** 装配点）· `observability/GoStyleOtelAgent` · `observability/GoStyleOtelConfig` · `http/GoStyleTraceparentFilter` · `observability/GoStyleClientDisconnectProbe` | ✅ **全局 OTel 装配点已收口共享层**（`GlobalOpenTelemetry.set` 只能调一次，且**先 `get()` 会让后续 `set()` 抛 `IllegalStateException`** ⇒ 必须 BFPP ⇒ 理由与 4 个构造器抢跑点已写进 javadoc）<br>🟡 **域特有业务 span 不在共享层**（comment 6 个 / favorite 16 个业务 span 缺失 ⇒ **域侧自修**：G3 已登记 `C-3` / `L-4` ⇒ **共享层零改动**） | **L3**（真容器 + `GoStyleOtelAgentGateTest`）＋ **L1**（域侧 span 清单由 G3 逐条核） | 2026-10-27 |
+| **A9** | trace / otel | `observability/GoStyleOtelAutoConfiguration`（**`BeanFactoryPostProcessor`** 装配点）· `observability/GoStyleOtelAgent` · `observability/GoStyleOtelConfig` · `http/GoStyleTraceparentFilter` · `observability/GoStyleClientDisconnectProbe` | ✅ **全局 OTel 装配点已收口共享层**（`GlobalOpenTelemetry.set` 只能调一次，且**先 `get()` 会让后续 `set()` 抛 `IllegalStateException`** ⇒ 必须 BFPP ⇒ 理由与 4 个构造器抢跑点已写进 javadoc）<br>🟡 **域特有业务 span 不在共享层**（comment 6 个 / favorite 16 个业务 span 缺失 ⇒ **域侧自修**：G3 已登记 `C-3` / `L-4` ⇒ **共享层零改动**）<br>🔴→🟢 **补（`853767b` · G2 反馈单 FB-04）**：本轴此前**缺一个子面 ——「业务 handler 执行期能拿到当前 server span」**。Go 侧 `tracinginterceptor.go:18-24` 把 span **放回 ctx** ⇒ 业务 `trace.SpanFromContext(l.ctx)` 取得到 ⇒ 属性真落；RAG 侧 handler **不接收 ctx** ⇒ 唯一等价物是 `Span.current()`，而拦截器此前**只在 `close()` / `onCancel()` 里 `makeCurrent()`** ⇒ **handler 执行期取到 invalid（no-op）span** ⇒ 属性**静默丢弃** ⇒ ⇒ 域侧若按 `Span.current().setAttribute(...)` 落码 ⇒ **跑绿但零效果**（与「假绿」同源）⇒ 已在 `onHalfClose()` 里把 `makeCurrent()` 的 scope **包住 handler 执行期**修好 ⇒ **本轴此前不是「全绿」，是「少验了一个面」** | **L3**（真容器 + `GoStyleOtelAgentGateTest`）＋ **L1**（域侧 span 清单由 G3 逐条核）<br>🆕 **FB-04 子面 = L3**（真 netty gRPC server + 真 OTel SDK + `InMemorySpanExporter`）＋ **变异 4/4 精确命中** | 2026-10-27 |
 
 > **A3 已预填一条实测锚点（2026-10-27 核）** —— X-6（`DRIFT-HOTAPI-030`）共享层 6 个类已落码
 > （`GoStyleFormValues` / `GoStyleFormLimitMode` / `GoStyleFormLimitExceededException` /
@@ -815,8 +815,10 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | ③ | G2 的 FB-02 对拍脚本（「域的 Go handler 是否调 `httpx.Parse`」× 「该域 yaml 的 mode」） | `tools/difftest/**` = **共享面** | —— （G2 已自陈落点并要求「只登记」） | **只记账** |
 | ④ | 各域台账 / `AGENTS.md` 里「**E38② 未闭合 / ① 不销本条**」的措辞**已过期** ⇒ 应读作「**① 已闭环、② 未做且已另立项**」 | 各域台账 = **域侧写权**；`AGENTS.md` = 整合者 | ✅ 成立（§1.1 重核：① 已由双侧探针坐实） | **只记账**（已在 §1.1 就地订正本 lane 自己的表） |
 | ⑤ | `docs/DRIFT/_cross/domain-common-lanes.md:125`（`DRIFT-FOLLOW-008` 仍写「未修」） | `docs/DRIFT/_cross/**` = **整合者专属** | —— | **只记账** |
+| ⑥ | **UTF-8 替换字符（U+FFFD）**：`tools/errmsg-probe/README.md:59`（`未登记码的回〈FFFD×3〉结果`）· `tools/sql-statement-probe/favorite/compare.py:561`（`两侧都〈FFFD×3〉 / 两侧都没有`） | `tools/errmsg-probe/**` · `tools/sql-statement-probe/**` = **既非整合者专属（≠ `tools/difftest/**`）· 也非任何 lane 的写权面** ⇒ **无人拥有** | ✅ **成立**（G3 于 2026-10-27 的 U+FFFD 全仓扫描报出；**本层已用字节级扫描复核**：`grep -rn $'\xef\xbf\xbd'` 会因 shell 转义而**漏报** ⇒ 一律以 python 字节扫描为准）<br>⚠️ 建议字**由 owner 自核**（本层只登记，不代改） | **只记账**（无人拥有 ⇒ 交整合者） |
+| ⑦ | 🔴 **`AGENTS.md` 体量已到预算上限**：`tools/check-agents-budget.py` ⇒ **32,686 B / 326 行 = 99.7% · 余量仅 82 B** ⇒ 「下一次写修复记录就会顶破」 | `AGENTS.md` = **整合者专属** | ✅ **成立**（本轮实测 `EXIT=0`，但工具自己已打出告警行）<br>⚠️ 本层**未改** `AGENTS.md`（不在写权面）⇒ 只登记 | **只记账**（整合者需按该工具提示把逐条记录搬去 `docs/DRIFT/_cross/`） |
 
-> ⚠️ **本 lane 的写权边界**：以上 5 条**没有一条**落在 `service/common/**` / `service/users/users-common/**` / 本文件
+> ⚠️ **本 lane 的写权边界**：以上 **7** 条**没有一条**落在 `service/common/**` / `service/users/users-common/**` / 本文件
 > ⇒ ⇒ **一律只登记，不擅自改**（AGENTS.md §5.3c：跨写权变更须同一次提交或由整合者统一处理）。
 
 #### 4.10.8 🔴 修 G1 #8 时**暴露**出来的潜伏缺陷：**进程级静态池「终止即永久」⇒ 多 Spring 上下文被毒化**
@@ -839,7 +841,97 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 > **绿是因为没走到**。
 > ⇒ 判定式：**问「这条路径在本轮之前真的被执行过吗」**，而不只是问「测试绿不绿」。
 
-#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 基线 `align/g4-service-common` @ `7488b3d`）
+#### 4.10.9 🔴 G2 派单 **FB-04**（A9）—— **已落码**：业务 handler 执行期能拿到**当前 server span**
+
+| 项 | 内容 |
+|---|---|
+| **1 现象** | Go 侧 like 域 6 处业务逻辑用 `trace.SpanFromContext(l.ctx)` 给 **server span 加属性**；RAG 侧的 Java gRPC handler **不接收 ctx** ⇒ 唯一等价物是 `Span.current()` ⇒ 而 `RpcInterceptor` 此前**只在 `close()`（`:391`）与 `onCancel()`（`:490`）里 `makeCurrent()`** ⇒ **handler 执行期 `Context.current()` 是根 context** ⇒ `Span.current()` 拿到 **invalid（no-op）span** ⇒ `setAttribute` **静默丢弃** ⇒ ⇒ 域侧若按 `Span.current().setAttribute(...)` 落码 ⇒ **跑绿但零效果**（与「假绿」同源） |
+| **2 Go 侧 `文件:行号`** | `go-zero v1.10.2 zrpc/internal/serverinterceptors/tracinginterceptor.go:18-24` —— `UnaryTracingInterceptor` 里 `ctx, span := startSpan(ctx, info.FullMethod)` ⇒ `resp, err := handler(ctx, req)` ⇒ **handler 拿到的 ctx 携带 span**<br>同文件 **`:95-107`**（`startSpan` 全函数）⇒ `tr.Start(trace.ContextWithRemoteSpanContext(ctx, spanCtx), …)` ⇒ **span 从 ctx 派生并放回 ctx**<br>⇒ 业务 `trace.SpanFromContext(l.ctx)` **取得到** ⇒ 属性真落 |
+| **3 RAG 侧现状（修前）** | `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:453-465`（`onHalfClose()`）—— **没有** `makeCurrent()` ⇒ handler 执行期无 current span<br>（`makeCurrent()` 只在 `:391` `close()` 与 `:490` `onCancel()`） |
+| **4 证据强度** | **L3** —— 真 netty gRPC server（端口 0）＋ 真 OTel SDK（`InMemorySpanExporter`）⇒ 断言落在**导出的 span 数据**上；不是「注解存在」也不是「Bean 存在」 |
+| **5 修法（落共享层 ⇒ 域侧零改动）** | `RpcInterceptor.java:456` —— 在 `onHalfClose()` 里把 `otelCtx.makeCurrent()` 的 scope **包住 `super.onHalfClose()`**（即 handler 执行期）⇒ 业务 `Span.current()` 就是那个 server span<br>⇒ **不做「让业务自建子 span」**：Go 侧 like 域是**给已有 server span 加属性、不新建** ⇒ 自建子 span 会让 trace 里多一个 Go 没有的 span ⇒ **结构漂移** |
+| **6 守门（新增 4 条）** | `service/common/src/test/java/com/rag/common/observability/RpcServerSpanCurrentGateTest.java`：① handler 里 `Span.current()` 必须**有效且 recording**；② 业务 `setAttribute` 的属性必须**真的出现在导出的 server span 上**；③ handler 里看到的必须**就是**导出的那个 span（不是子 span）；④ scope 不得**泄漏到下一次**请求<br>⇒ 每次调用前清空观测与导出 ⇒ **不依赖 JUnit 方法执行顺序**（JUnit 5 默认按方法名 hash 排序） |
+| **6.1 与既有守门的分工（**先查再造 ⇒ 不重复造网**）** | 🔴 合理的质疑：「在 `onHalfClose` 里加一层 OTel scope，会不会**破坏 deadline 预算的 ThreadLocal 传播**？」<br>⇒ 查既有守门：`service/common/src/test/java/com/rag/common/observability/RpcInterceptorDeadlineBindingTest.java` ① **已在真 gRPC 管线 + 真 handler 线程**上断言「入口 `remainingMillis() != Long.MAX_VALUE`」＋「睡过 deadline 后 `isExpired() == true`」⇒ ⇒ **该问题已被现有守门覆盖** ⇒ **本层不新增重复守门**，由第八次全量**实跑**它来实证<br>⇒ **两者互补不重叠**：它验「**deadline** 在 handler 线程可见」（`DeadlineState` = **预算** ThreadLocal）· 本轮新守门验「**span** 在 handler 线程可见」（OTel `Context` = **另一套** ThreadLocal）⇒ ⇒ **两套 ThreadLocal 互不干扰**这一点由「两个守门同时绿」共同证明 |
+| **7 变异验证** | 撤掉 `makeCurrent()` 包装 ⇒ **4/4 红（0 errors）** ⇒ 精确命中目标断言，无邻近误伤 |
+| **8 是否阻塞本波** | **否** —— 纯共享层改动 ⇒ 10 个 rpc 组件**域侧零改动** |
+
+##### 4.10.9.1 影响面**自核**（Go 全仓 `SpanFromContext` **12 处**逐处分类，核对日期 2026-10-27）
+
+| Go 侧落点 | 数量 | RAG 侧等价物 | FB-04 是否相关 |
+|---|---|---|---|
+| `service/like/rpc/internal/logic/` 6 处（`getlikestatelogic.go:37` · `getlikecountlogic.go:37` · `gettargetlikerlistlogic.go:35` · `getuserlikelistlogic.go:34` · `getusertotallikelogic.go:34` · `likeactionlogic.go:161`） | 6 | `Span.current()`（**域侧待落码**） | ✅ **正是 FB-04 修的** —— `l.ctx` 就是 handler 传下来的携带 span 的 ctx |
+| `service/common/observability/observability.go:70/:92/:114/:132` | 4 | `Observability.mark*` 的 **`Span.fromContext(ctx)`**（**显式传 ctx**，`Observability.java:73/:94/:120/:139`） | ❌ **不受影响** ⇒ 共享层 `sea.*` 属性**本来就落得到**（与 Go 的显式 ctx 语义一一对应）⇒ **零回归** |
+| `service/knowledge/api/internal/telemetry/operation.go:256` · `http.go:128` | 2 | —— | ❌ **范围外**（`knowledge` 不在 10 域范围内 ⇒ 不是待办） |
+
+> ⇒ **RAG 侧主源码里 `Span.current()` 的真实调用只有 1 处**（其余命中全是 javadoc / 注释）：
+> `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentFactDeliveryService.java:148`
+> ⇒ 它由 **`CommentFactDispatchScheduler.java:95`（`deliveryService::dispatchOnce`）** 在**调度线程**上调用
+> ⇒ **不经过 gRPC handler** ⇒ **FB-04 碰不到它** ⇒ **零回归** ✅
+
+> 🟢 **对称性核查（FB-04 是否需要对称补 HTTP 侧）⇒ 不需要**
+> ⇒ Go 侧 `service/common/observability/http.go` **无任何 span 起点**（span 归 go-zero `rest` 自带的 `TraceHandler`）
+> ⇒ RAG 侧 **`HttpMiddleware.java:332` 已有 `parentOtelCtx.makeCurrent()`** 包住处理链
+> ⇒ ⇒ **HTTP 路径的 current span 可见性本来就具备** ⇒ ⇒ **FB-04 的修法只落 gRPC 侧** ⇒ **影响面不扩散**。
+
+> ⚠️ **附带查出（属 comment 域 = G3 写权，本 lane 不代改）**：上述 `:148` 拿到的 `Span.current()` 在调度线程上是 **invalid span**
+> ⇒ `:193-194` 的 `comment.fact.event_id` / `comment.fact.aggregate_version` **静默丢弃**
+> ⇒ 而 **Go 侧 comment 的 fact 投递链路根本不用 span**（`service/comment/rpc/internal/model/fact_delivery.go` 与 `cmd/fact-dispatch/main.go` **均无 span/trace 调用**）
+> ⇒ ⇒ 定性：**不是「RAG 少了 Go 有的东西」（不是漂移），而是 RAG 侧多了一段「看似在做可观测、实则完全无效」的代码**
+> ⇒ ⚠️ **风险是「给人错觉」**：读代码会以为 comment 的 fact 投递有 trace 追踪 ⇒ **实际上一条 span 都没有**
+> ⇒ 已按回执规格 **4-3 点明给 G3**。
+
+#### 4.10.10 🟢 **U+FFFD（UTF-8 替换字符）**：G3 的全仓扫描 ⇒ **2 条落在 G4 写权面 ⇒ 本层自修**（核对日期 2026-10-27）
+
+| 项 | 内容 |
+|---|---|
+| **来源** | G3 于 2026-10-27 做的**全仓 U+FFFD 扫描**（13 条域外）⇒ 其中 **2 条正好落在 `service/common/**`（= G4 写权面）** ⇒ 按「**域侧能自修的域侧修**」**本层自修** |
+| **落点 ①** | `service/common/src/test/java/com/rag/common/observability/GoStyleOtelSamplerProtocolGateTest.java:24`<br>修前：`{@link GoStyleOtelAgentGateTest} 证的〈FFFD×2〉「全局 provider 装上了 / span 真导出 / 关停会 flush」`<br>修后：`{@link GoStyleOtelAgentGateTest} 证明「全局 provider 装上了 / span 真导出 / 关停会 flush」` |
+| **落点 ②** | `service/common/src/test/java/com/rag/common/protection/FakeServerCall.java:13`<br>修前：`测试用〈FFFD×2〉 {@link ServerCall} —— 只实现服务端拦截器真正用到的那几个方法。`<br>修后：`测试用的 {@link ServerCall} —— 只实现服务端拦截器真正用到的那几个方法。` |
+| **核验（不盲信 G3 的「建议字」）** | ① **字节级扫描**（python 读 `bytes`）⇒ 两处各 `FFFD_total=2` ⇒ **确认损坏**；② **码点 dump** ⇒ 两处都是 `0xfffd 0xfffd` 连续；③ **`git log --all` 逐提交追** ⇒ 两文件**首个提交即已损坏** ⇒ **原字不可考** ⇒ 只能**按语义重建**（与 G3 处理 favorite 那 4 处的方式一致） |
+| **推断依据（形态 + 语义双重吻合）** | **2×FFFD = 一个 3 字节汉字丢了末字节**（UTF-8 汉字 3 字节 ⇒ 剩 2 字节不完整 ⇒ 2 个替换符）<br>⇒ 「**明**」`E6 98 8E` 丢末字节 → `E6 98` ⇒ **正好 2×FFFD**；「**的**」`E7 9A 84` 丢末字节 → `E7 9A` ⇒ **正好 2×FFFD**<br>⇒ 两条推断**都与字节形态吻合**，且语义通顺（`证明「…」` / `测试用的 {@link …}`）⇒ **可信** |
+| **修法** | **字节级替换**（python `\uXXXX` 转义）⇒ 写进文件的是**正确 UTF-8 字节**；⚠️ **不用 bash heredoc 写中文**（AGENTS.md 已记：heredoc 的中文会被打成 U+FFFD —— 本次用转义序列**绕开**该陷阱）⇒ 替换后**严格 UTF-8 解码通过** |
+| **影响面** | **纯 javadoc 注释** ⇒ **零行为变化**；两文件都在 `service/common` 的**测试**面 ⇒ 由第八次全量回归覆盖 |
+| **其余 11 条的分派（不归本层）** | **G2 域 3 条**（`like-rpc/…/LikeOutboxEventEntity.java:17` · `message-rpc/…/MessageRpcProductionAddressTest.java:96` · `message-api/…/GoStyleGrpcClientBreakerE2ETest.java:43`）⇒ **G2 写权**（G3 已直接分派给 G2）· **G1 域 3 条** ⇒ **G1 写权**（G3 已分派）· **共享面 2 条** ⇒ **无人拥有** ⇒ 已登记到 **§4.10.7 ⑥** · **3 处「故意保留」**（`article-api` 的非 BMP 码点序用例 · `user-api` 的「body 不得含替换符」断言 · `docs/Pitfalls/**` 记录病症样本处）⇒ **一个字都不动** |
+
+> ⚠️ **可复用的核验手法（值得留在仓里）**：`grep -rn $'\xef\xbf\xbd'` **会漏报**（shell 转义 / locale 差异）
+> ⇒ ⇒ **一律用 python 读 `bytes` 判**；且 **必须逐行看上下文** ⇒ **有的 U+FFFD 是「故意的」**（被测对象 / 病症样本）⇒ **改它会直接废掉那条测试**。
+
+> 🔴 **本层自己踩到的坑（差点「修 U+FFFD 却引入 U+FFFD」）**：台账里**引用**病症样本时，
+> 我把 G3 回信里的**带替换符原文原样抄了进去** ⇒ **自己的台账里多了 10 个真 U+FFFD**（字节级扫描当场抓到）
+> ⇒ ⇒ **修法：引用病症样本一律用**描述**而不是复制替换符** —— 写 `〈FFFD×3〉`（连着几个就写几）⇒ **文件里不留真替换符**
+> ⇒ ⚠️ 而且这与「故意保留」是**两回事**：故意保留是**被测对象**（改了就废测试）· **引用**是**台账叙述**（完全可以写成描述）⇒ ⇒ **两者都不该留真替换符**。
+
+#### 4.10.11 🟢 **第八次全量回归口径**（核对日期 2026-10-27 · 代码态 `853767b` + `0c72969`）
+
+| 项 | 值 |
+|---|---|
+| **命令** | `mvn -B clean verify`（**全量**，不是 `-pl` 子集） |
+| **结果** | ✅ **BUILD SUCCESS / `MVN_EXIT=0`** |
+| **模块数** | **52**（Reactor Summary 计数） |
+| **有测试的模块数** | **29**（与第七次同） |
+| **用例数** | **2461**（**29 行「模块名 ↔ 数字」明细**逐项求和 ⇒ **非按行序 tail**） |
+| **failures / errors / skipped** | **0 / 0 / 4**（`favorite-api` skipped 1 · `favorite-rpc` skipped 3） |
+| **耗时** | **20:21 min**（09:57:42 起跑 ⇒ 10:18:03 完成） |
+| **相对上一轮** | 第七次 2457 ⇒ **+4**（= FB-04 守门 **4 条**；`service/common` **307 → 311**）⇒ **其余 28 个模块逐条一致** |
+| **逐模块明细** | `users-common` 33 · `common` **311** · `admin-rpc` 112 · `admin-api` 129 · `user-rpc` 133 · `user-api` 107 · `article-common` 15 · `article-rpc` 154 · `article-api` 92 · `hot-common` 14 · `hot-api` 96 · `hot-rpc` 96 · `message-common` 21 · `message-rpc` 84 · `message-api` 88 · `like-common` 18 · `like-api` 81 · `like-rpc` 96 · `task-api` 90 · `task-rpc` 114 · `follow-common` 37 · `follow-api` 50 · `follow-rpc` 74 · `favorite-common` 29 · `favorite-api` 97 · `favorite-rpc` 110 · `comment-common` 27 · `comment-api` 45 · `comment-rpc` 108 ⇒ **逐项可复算** |
+| **双侧探针**（同批次复跑） | `run-parity.sh` ⇒ **EXIT=0 · 56 例**（一致 54 · 不一致 0 · 已签字偏离 2）· `run-rpc-timeout-parity.sh` ⇒ **EXIT=0 · 3 例**（两侧一致；`timeout_telemetry` 是已登记的 C-1 表述差异，不计失败） |
+| **三门禁**（同批次复跑） | `check-wave-lane-ownership` **EXIT=0** · `check-wave-role-model` **EXIT=0** · `check-wave-coupling` **EXIT=0** |
+| **台账门禁** | `check-ledger-tables` / `check-ledger-selfcheck` / `check-ledger-count` ⇒ **全 EXIT=0** · `check-agents-budget` ⇒ EXIT=0（⚠️ 但 **AGENTS.md 余量仅 82 B** ⇒ 已登记 §4.10.7 ⑦） |
+| **写权自证** | 本轮改动**全部**落在 `service/common/**` ＋ `docs/DRIFT/global/vs-common.md` ⇒ **零域侧改动**（`git diff --name-only 5564c27..HEAD` = **4 个文件，全在 `service/common/**`**） |
+
+> 🔴 **口径纪律（本轮特意再确认一次）**：surefire 的输出有**两类行** ——
+> ① **模块汇总行**（`Tests run: N, Failures: …` 且**不以 `-- in` 结尾**）⇒ **每模块恰一行**；
+> ② **测试类行**（以 `-- in <FQCN>` 结尾）⇒ 每**测试类**一行（本轮 358 行）。
+> ⇒ ⇒ **合计只能取 ①**；**②** 求和会**多算**（把每个测试类的总数又加了一遍）
+> ⇒ ⇒ 本轮用「**先剥注释、再按 `Building <module>` 行配对**」把 ① 与**模块名**绑定 ⇒ **29 行明细可逐项复算**。
+> ⇒ ⚠️ **绝不按行序 tail**（上一次就栽在「把 `comment-common` 的 27 当成 `comment-rpc` 的条数」）。
+
+> 🟡 **错峰记录**：本次**没有**在别的 lane 跑 maven 的窗口起全量 ——
+> 起跑前**实测确认**（`ps aux | grep maven` ⇒ 零真实 maven 进程），
+> 且此前 G1 正在跑 6 模块子集回归（pid 6839/6840，09:53 起）⇒ **本层等到 09:57:15 它结束后才起**
+> ⇒ ⇒ **避免了 EXIT=137（系统 OOM-kill）**（§4.9.13 已记该机制）。
+
+#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `0c72969`）
 
 | commit | 内容 | 落点（`文件:行号`） | A 轴 |
 |---|---|---|---|
@@ -848,6 +940,8 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | `2e2a84f` | **G3 单 3**：`SqlTimeoutStatusTranslator` 的「Go 出处」归因订正 + 补齐 `文件:行号` | `…/persistence/SqlTimeoutStatusTranslator.java:…` | A4 |
 | `6d9c3b2` | **§2 的 A1~A9 逐轴表** ＋ **§1 抽取快照逐条重核**（本 lane 交付主体） | `docs/DRIFT/global/vs-common.md` | A1~A9 |
 | `7488b3d` | 🔴 **静态池「终止即永久」⇒ 按需自愈**（修 #8 时暴露的潜伏缺陷） | `…/observability/RpcInterceptor.java:…`（`timeoutScheduler()` / `handleExecutor()`）· `…/observability/HttpMiddleware.java:…`（`httpExecutor()`）· **新增** `…/observability/ObservationPoolSelfHealingGateTest.java`（3 条） | A1 |
+| `853767b` | 🔴 **G2 FB-04**：业务 handler 执行期能拿到**当前 server span** | `…/observability/RpcInterceptor.java:456`（`onHalfClose()` 里 `makeCurrent()` 的 scope 包住 handler 执行期）· **新增** `…/observability/RpcServerSpanCurrentGateTest.java`（4 条） | **A9** |
+| `0c72969` | 🟢 **U+FFFD 两处**（纯注释 · 零行为变化） | `…/observability/GoStyleOtelSamplerProtocolGateTest.java:24` · `…/protection/FakeServerCall.java:13` | 无（纯注释） |
 
 **回归口径与结果（第七次全量 · 核对日期 2026-10-27）**
 
@@ -884,6 +978,8 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
       `bash tools/semantic-probe/rpc-timeout/run-rpc-timeout-parity.sh` ⇒ **EXIT=0 · 3 例**（`client_deadline_ctx` 一致）⇒ **A1 的 L4 证据**。
 - [x] §1 的每一条**重新核对状态**并写回（带核对日期）⇒ **2026-10-27 完成**（`6d9c3b2`）
       ⚠️ **未复核的条目刻意不补核对日期**（「没查」≠「查过没问题」）⇒ 净结果：**无一条被推翻**，**2 条口径过期已就地订正**（E38② 的 ① 层 · E65 的附注）。
-- [x] §3 的域侧修法**落码 + 守门**（含变异验证）⇒ 共享层侧全部完成（`1fb26b2` Redis 断连 · `138b6ef`+`0b4d10d` breaker 键 · `9690b04` 路径归一 · `182fc32` form 判据 + 保护链只读入口 · `a1a2e05` MP 排序桥 · `3b573fb` 关闭路径 web 类型 · `2f12236` 遮蔽契约守门）
+- [x] §3 的域侧修法**落码 + 守门**（含变异验证）⇒ 共享层侧全部完成（`1fb26b2` Redis 断连 · `138b6ef`+`0b4d10d` breaker 键 · `9690b04` 路径归一 · `182fc32` form 判据 + 保护链只读入口 · `a1a2e05` MP 排序桥 · `3b573fb` 关闭路径 web 类型 · `2f12236` 遮蔽契约守门 · **`853767b` A9：handler 执行期 current server span（G2 FB-04）**）
+- [x] 🆕 **G4 写权面内的 U+FFFD 自修**（`0c72969`，2 处 · 纯注释 · 零行为变化）⇒ 详见 §4.10.10
+      ⚠️ 来源是 **G3 的全仓扫描** ⇒ ⇒ **跨 lane 的发现要落到「谁拥有谁修」**：落在本 lane 写权面的**本层自修**，落在别人域的**转派**，落在无人拥有面的**只登记**（§4.10.7 ⑥）。
 - [x] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）—— ⚠️ **`_README.md` §七之二属共享面 ⇒ 本 lane 不写**（合并后由整合者统一更新）⇒ **G3 四张 + G2 三张 + G1 八张共 15 张已登记在 §4.3~§4.10**（G1 七张的逐条定性见 §4.9.1 · 第八张见 §4.10.1）
 - [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）⇒ **本 lane 全程未写**；⇒ 需要回写的 **5 条**已登记在 **§4.10.7**（含 `tools/difftest/flyway-concurrent-verify.py` 漏记 `article-rpc` · `AGENTS.md:173` 漏记 `article-rpc`）。
