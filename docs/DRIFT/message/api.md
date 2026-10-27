@@ -1723,3 +1723,25 @@ message-api：84 + 2（MessageApiTimeoutRealTomcatTest）= 86 tests / 0 failures
 **⚠️ 归属**：属**别的域**，按域间纪律本工作树**不改它们的 pom** ⇒ 登记为跨域待办
 （与 `DRIFT-MSG-V-029` 同款处理：登记 + 交接，不越界）。
 ⇒ 修法与清单 ⇒ 见 [`docs/DRIFT/message/rpc.md` 第九轮 · 第 4 节](rpc.md)。
+
+---
+
+## 2026-10-27 · G2 · U+FFFD 跨树复核：G3 报的「message-api 那条」**在本树已干净**（主树仍坏）
+
+| G3 报的 | 本树实测（**字节级**） | 结论 |
+|---|---|---|
+| `service/message/message-api/src/test/java/com/rag/message/message/api/GoStyleGrpcClientBreakerE2ETest.java:43`：`响应码先U+FFFD×3 5001` | **FFFD = 0**；真实内容 = `断言 HTTP 响应码先是 5001、` —— ⚠️ **行号是 `:46` 不是 `:43`**（`:43` 是 G3 那棵树的行号） | 🟢 **已干净** |
+
+⚠️ **判据本身的坑**：**`read` 的输出会把正常的「是」渲染成 `U+FFFD×3`** ⇒ **不能拿 `read` 的输出判 U+FFFD**；
+`grep -rn $'\xef\xbf\xbd'` 在本机也会 0 命中 ⇒ **只认字节级扫描**（`b'\xef\xbf\xbd' in read_bytes()`）。
+
+> 📌 **本节引述里的坏字符已改写为 ASCII 标记 `U+FFFD×3`**（3 个替换字符 = 1 个 UTF-8 汉字的 3 字节全丢）
+> ⇒ **台账自身不再植入坏字节** ⇒ 复扫可保持 **0 命中**；需原样比对时按「`文件:行号` + `U+FFFD×3`」去主树/G1/G3/G4 树取原件。
+
+🔴 **主树 / G1 树 / G3 树 / G4 树 仍各坏 1 处** ⇒ **因果坐实**：`ce81c5f^` ⇒ FFFD=**3**、`ce81c5f` ⇒ FFFD=**0**
+⇒ 本树阶段 2 那个 commit 重写该文件区域时**顺带写对了中文**。
+⇒ 该文件在**我域写权面** ⇒ 合并时**以本树版本为准** ⇒ **登记为合并后必查项**。
+
+⚠️ **顺带提醒（别当「无关改动」误删）**：本树该文件相对主树还有**正常改动** ——
+`RANDOM_PORT` → `DEFINED_PORT` ＋ `RealTomcatPort` 支撑类 ＋ 端口段注释
+（属 commit `c6fdc1f`「A5 · 真容器测试端口段治理」，**不是** `ce81c5f`）⇒ 合并时**两处都要带**。

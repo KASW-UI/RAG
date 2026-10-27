@@ -165,10 +165,80 @@
 | **FB-02**（form 闸门判据改「语义可达性」） | 🟢 **已落** | `182fc32` |
 | **FB-03**（保护链「层构成」只读入口） | 🟢 **已落** | `182fc32` |
 | **澄清第 1 步**（form 判据措辞） | 🟢 **已落且与本域要求逐条一致** | `182fc32` |
+| **FB-04**（A9 gRPC handler 拿到当前 server span） | 🟢 **已落**（⚠️ **第八次落码，不在本表 4 项规格内** ⇒ 独立复核见 **§4·六**） | `853767b` |
 | **E66**（Redis 写不绑 deadline） | 🔴 **仍 OPEN · 本轮转立项** | — |
 
 ⇒ **G4 未越界**（按本域给的边界）：共享层**没有**为 task 写特例 · **没有**碰 favorite 的任何东西 ·
 本域建议项 3 的对拍脚本落点 = `tools/difftest/**`（无 lane 拥有的共享面）⇒ **只登记，不擅自改** ✅
+
+## 4·六、🟢 **FB-04 已落码**（`853767b` · 2026-10-27）· G2 **直接读 diff 独立复核**（未采信转述）
+
+| 项 | 独立复核结论 |
+|---|---|
+| **落码 commit** | `853767b`「fix(common): 让 gRPC 业务 handler 执行期能拿到当前 server span（修 G2 FB-04 · A9）」 |
+| **修法** | `RpcInterceptor.onHalfClose()` 里把 `otelCtx.makeCurrent()` 的 scope **包住 `super.onHalfClose()`**（= handler 执行期）⇒ 业务代码 `Span.current()` 就是 server span（`RpcInterceptor.java:456`） |
+| **`otelCtx` 来源（我域自核）** | `:270` `Context otelCtx = Context.current().with(span);`（在 `interceptCall` 里创建，**携带 server span**）⇒ `onHalfClose` 闭包捕获 ⇒ **有效** ✔ |
+| **scope 不泄漏** | `try (Scope ignored = otelCtx.makeCurrent())` ⇒ try-with-resources ⇒ **不泄漏** ✔（与 G4 守门第 4 条同口径）；`makeCurrent()` 三处 = `:391`（close）· `:456`（onHalfClose · 新增）· `:490`（onCancel）⇒ **非嵌套**（`onHalfClose` → `close` 顺序） |
+| **Go 出处（我域侧独立再核）** | Go 侧 `SpanFromContext(l.ctx)` **6 处全在 `internal/logic/*logic.go`**（`getuserlikelistlogic.go:34` · `getusertotallikelogic.go:34` · `gettargetlikerlistlogic.go:35` · `likeactionlogic.go:161` · `getlikecountlogic.go:37` · `getlikestatelogic.go:37`）⇒ **全部 gRPC handler 路径**、**给已有 server span 加属性**、**不新建 span** ⇒ 与 G4「不建子 span」的取舍**一致** ✔ |
+| **我域受益面（我域自核）** | 我域对应落点 = `LikeDomainService`（`LikeSpans.queryUserId` / `cacheHits` / `cacheStatusHit` …）⇒ 跑在 **gRPC handler 线程** ⇒ **FB-04 正是我域 A9 的必要前提** |
+| 🔴 **合并前我域 A9 属性的实际效果 = 零** | `onHalfClose` 未包 scope ⇒ handler 执行期 `Context.current()` 是**根 context** ⇒ `Span.current()` = **invalid（no-op）span** ⇒ `LikeSpans` 的属性**静默丢弃** ⇒ ⇒ 域侧 A9 落码在 FB-04 合入前是「**跑绿但零效果**」⇒ **A9 端到端结论必须等合并** |
+| **我域 A9 守门的层级（勿误当端到端）** | `LikeSpansAttributeGateTest` 用 `runInSpan(...)` = **手工** `tracer.spanBuilder("gate").startSpan()` + `makeCurrent()` ⇒ **契约级**（证明「有 span 时属性会落到那个 span」）⇒ **不覆盖**「真实 handler 链上 handler 期有无 span」⇒ 11/11 绿 **≠** 端到端生效（与 §6 第 4/5 条一致，**无需订正**） |
+| **MQ 路径 = N/A（我域自核）** | `LikeUpdateKafkaListener.onMessage` 走 `MqConsumer.traceConsumer(Context.current(), …)` ⇒ **自建** consumer span ⇒ **不依赖** FB-04 ⇒ `messaging.*` 属性**本来就生效**（与 Go 侧 `TraceConsumer` 同形）⇒ **不受本改动影响** |
+| ⚠️ **跨树影响面表述的差异（不是 G4 算错）** | G4 写「全仓 `src/main` 里 `Span.current()` **只有 1 处**（comment-rpc）」⇒ 在 **G4 自己树**上成立（**我域 `LikeSpans` 未合入它树**）⇒ **两树不同步** ⇒ 合并后我域 `LikeSpans` 将是**第 2 处** ⇒ 但它是**受益者**（从 no-op 变真生效）⇒ **域侧零改动** ⚠️ 已就此给 G4 提 javadoc 订正项（它的 javadoc 合并后会「过时」） |
+
+⇒ **我域单据状态更新**：**FB-04** 🟢 **已落**（`853767b`）· 域侧**零改动** · **端到端 E2E 仍待合并后补**（§6 第 4 条）。
+
+### 🟢 **G4 FB-04 最终回执**（`23d1c2a` · 2026-10-27 · 基线 `5564c27` 之上 **33 提交** · 未 push）
+
+| 项 | G4 回执内容 | G2 独立复核 |
+|---|---|---|
+| **落码** | `RpcInterceptor.java:453-465`（`onHalfClose()`）· `:456` **新增** `try (Scope ignored = otelCtx.makeCurrent()) {`（**包住** `super.onHalfClose()` = handler 执行期）· `:457-460` `deadlineEpochMs == Long.MAX_VALUE` 分支**也在 scope 内** · `:461-463` `DeadlineState.bindToCurrent` **顺序不变**（仍在 `super.onHalfClose()` 之前） | ✅ **一致**（我核的是 `853767b` 的同一处改动）⇒ ⚠️ **`DeadlineState` 仍在 scope 内** ⇒ **域侧 E66 的载体不受影响**（`DeadlineState` 与 OTel scope 是两套） |
+| **守门** | 新增 `RpcServerSpanCurrentGateTest`（**4 条**）：① handler 里 `Span.current()` 有效且 recording ② 属性真落在**导出的** server span 上 ③ handler 看到的就是导出的那个 span（**不是子 span**）④ scope **不泄漏**到下一次请求 · 辅助 `runCalls(int)`（**每次调用前清空观测与导出** ⇒ 不依赖 JUnit 方法执行顺序） | ✅ 4 条设计与我的影响面判断**吻合**（尤其 ③ 对应 Go「不新建子 span」） |
+| **A 轴** | **只**触及 **A9**，未触及其它 8 轴 | ✅ 与我域判断一致 |
+| **Go 出处** | `go-zero v1.10.2 zrpc/internal/serverinterceptors/tracinginterceptor.go:18-24` ＋ `:95-107`；like 域 6 处 `SpanFromContext` | ✅ 我域**独立 grep** 得**同样 6 处**（文件与行号逐条一致） |
+| **回归口径** | 第八次全量 `mvn -B clean verify` ⇒ **52 模块 / 29 有测试 / 2461 条 / 0 失败 / 0 errors / 4 skipped / 20:21 min** · 双侧探针 `run-parity.sh` **EXIT=0 · 56 例**（一致 54 / 不一致 0 / 已签字偏离 2）＋ `run-rpc-timeout-parity.sh` **EXIT=0 · 3 例** · 三门禁 0/0/0 | ✅ 我域用 **surefire XML 独立复核**了 52 模块里我域 8 个模块的条数 ⇒ **592** ⇒ 与它的明细表**逐条一致**（见 §4·七） |
+| **写权自证** | `git diff --name-only 5564c27..HEAD` = **4 个文件，全在 `service/common/**`** ＋ 本台账 ⇒ **零域侧改动** | ✅ 我域**零改动**（本轮我域只改 `like-rpc` 一个**测试类** + 台账 + 一处 yaml 注释缩进） |
+
+### ⚠️ 影响面**精确化**（G4 第 ⑤ 条第 3 点触发 ⇒ G2 独立核过）
+- G4 说「**HTTP 侧不用管** —— `HttpMiddleware.java:332` **已有** `makeCurrent()` ⇒ current span 可见性本来就具备 ⇒ 本次修法**只落 gRPC 侧**」。
+- ⇒ **G2 独立核我域六组件的 `Span.current()` 用量（主源码，排除测试）**：
+  | 组件 | `Span.current()` 命中 | 结论 |
+  |---|---|---|
+  | **like-rpc** | **2 处**（`LikeSpans.java:242` / `:246`）⇒ 跑在 **gRPC handler 线程** | ✅ **FB-04 的唯一受益者** |
+  | like-api | **0** | N/A（HTTP 侧的 `makeCurrent` 对我域**无作用**） |
+  | message-api / message-rpc | **0 / 0** | N/A |
+  | task-api / task-rpc | **0 / 0** | N/A |
+- ⇒ ⇒ **FB-04 对我域 = 只惠及 `like-rpc` 一个组件**，其余五个组件 **N/A** ⇒ **域侧零改动**、**零待办**（除 like-rpc 的合并后 E2E）。
+- ⚠️ **合并后必查（like-rpc）**：`LikeSpans` 的属性**从「静默丢弃」变成「真落」** ⇒ 这是**行为变更**（预期）⇒ 收口回归里 **like-rpc 的 span 相关守门必须仍绿** ⇒ 若红 ⇒ 优先怀疑「属性真生效后与既有断言冲突」，而不是「没生效」。
+
+### 📌 G4 对 like 域落码的三条结论（G2 已全部采纳 ⇒ 无异议）
+1. **落码形态** = `Span.current().setAttribute(...)`（等价 Go 的 `trace.SpanFromContext(l.ctx).SetAttributes(...)`）⇒ **现在拿到的是真的 server span**（修前是 invalid no-op span ⇒ **跑绿但零效果**）；
+2. **不要自建子 span**（Go 是**给已有 server span 加属性**、不新建 ⇒ 自建会让 trace 里多一个 Go 没有的 span ⇒ **结构漂移**）⇒ 我域 `LikeSpans` **已是**「给 current span 加属性」的写法 ✔；
+3. **HTTP 侧不用管**（见上表）。
+
+⇒ **本层对我域已闭环**（FB-04 落码 + 守门 + 变异 + 全量 + 回执）⇒ 我域**不需要**请求共享层再跑全量（**域侧零改动**）。
+
+## 4·七、🟢 **G4 第八次全量口径**（2026-10-27 · 09:57:42 → 10:18:03）· G2 **用 surefire XML 独立复核**
+
+| 项 | 值 |
+|---|---|
+| 结果 | **BUILD SUCCESS / `MVN_EXIT=0`** · **52 模块**（Reactor）· **29 个有测试模块** · **2461 条** · **0 失败 / 0 errors / 4 skipped** · **20:21 min** |
+| 我域在 **G4 树**里的口径（**G2 独立复核**） | `message-api` **88** · `message-rpc` **84** · `like-common` **18** · `like-api` **81** · `like-rpc` **96** · `task-api` **90** · `task-rpc` **114** · `message-common` **21** ⇒ **我域 8 模块合计 = 592** |
+
+⚠️ **口径隔离（关键，别混用）**：**592 = G4 树口径** ⇒ 该树**不含**我域尚未合入的守门（Redis 超时 8 条 · A9 span 11 条 · form 闸门 5 条 等）⇒
+⇒ **我域自己的口径另计**（本域台账记的是我域树实测值）⇒ **两个数不可相加、不可互称**。
+⇒ **我域树口径（2026-10-27 · 本轮实测）**：`message-api` **98** · `message-rpc` **84** · `like-api` **89** · `like-rpc` **111** · `task-api` **97** · `task-rpc` **115** ⇒ **六模块合计 = 594** · **0 failures / 0 errors / 0 skipped**（与上一轮同口径 ⇒ **无回归**）。
+
+### ⚠️ 取数字的**方法论**（本轮踩到两条 ⇒ 留档）
+- ✅ **权威口径 = surefire 的 `TEST-*.xml`**（读每个 `testsuite` 的 `tests`/`failures`/`errors`/`skipped` 属性再求和）⇒ 本轮据此复核，**8 个模块逐条与 G4 的明细表一致**。
+- ❌ **不可用「按 maven 日志的 `[INFO] Building <module>` 分段聚合」**：本轮用它把 `task-rpc` 算成 **110**（真实 **114**）⇒ **错 4 条** ⇒ 根因 = 日志分段与 surefire 输出的归属**不严格对齐**（`-am` 会先构建依赖模块）。
+- ❌ 同样**不可**用 `grep -h "^Tests run:" *.txt`（JUnit5 的 `.txt` 是**每类一行**且**都带 `-- in`** ⇒ 没有独立的模块汇总行）。
+- ⇒ **判定式**：跨树的数字只能来自**产物目录的测试报告**；日志只用来定位**失败**，不用来**求和**。
+- 🔴 **但 surefire 的报告目录【不清空】** ⇒ 跨轮**残留**会污染「目录求和」：本轮 like-rpc 目录里有 **20 个** XML ⇒ 求和得 **112**，而 maven 模块汇总行是 **111** ⇒ 差 1。
+  - **元凶已定位** = **`LikeRpcServerSpanCurrentProbeTest`（1 条，mtime 03:52:04）** ⇒ 那是**已删除的探针类**留下的**陈旧产物**（`find` 确认源码已不在该树）⇒ 剔除后 = **111** ⇒ **双口径一致** ✔。
+  - ⇒ **判定式（补）**：**求和前必须先确认「目录里没有跨轮残留」** ⇒ 两条做法：① **按文件 mtime 切出本轮** ② **与 maven 模块汇总行对照**；**两条口径必须相等**才采信。
+  - ⇒ **附带一条通用形态**：「**源码已删、报告还在**」⇒ 陈旧 XML **不会随源码删除而消失** ⇒ 同机多轮跑的仓，`target/` 里的测试报告**不可直接当历史证据**。
+  - ⇒ **本轮六模块的交叉验算结果**（maven 汇总行 vs surefire XML，剔除陈旧项后）：`message-api` 98 · `message-rpc` 84 · `like-api` 89 · `like-rpc` 111 · `task-api` 97 · `task-rpc` 115 ⇒ **逐条相等** ⇒ 合计 **594** ✔
 
 ### 🔴 合并后我域**必做**动作（收口回归 · §5.3e）
 
@@ -197,6 +267,23 @@ Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
 （`javap` 实测 `io.lettuce.core.ClientOptions` **没有** `getCommandTimeout()`，命中数 = **0**）
 ⇒ ⇒ customizer 里要读回的是 **`getClientConfiguration().getCommandTimeout()`**（**不是** yml、**不是** `getTimeoutOptions()`）
 ⇒ ⇒ 且本域的**域侧调用点清单**已备好（like-rpc **11 处** / task-rpc **3 处** · 见本文件 §4 的 FB-05 / FB-06）
+
+### 📥 G3 跨 lane 回执的**逐条复核**（2026-10-27 · 不采信转述，全部独立取证）
+
+| G3 报的 | 本域复核结论 |
+|---|---|
+| **① U+FFFD 我域 3 条** | 🟢 **在我树已干净**（**字节级**扫描：FFFD=0）⇒ 但 **主树 / G1 / G3 / G4 树仍各坏 1 处** ⇒ **合并以我树版本为准**（我域写权面）⇒ 见 [`like/rpc.md`](rpc.md) B 节 + [`message/rpc.md`](../message/rpc.md) + [`message/api.md`](../message/api.md) 同款条目 |
+| **② like-rpc 同款启动 flake** | ✅ **成立且已在本域落码修法**（`StringBuffer` ＋ 等日志行 ＋ `drain.join(10s)`）⇒ 并**独立核过全我域同款范围**：全域 `grep -rn "destroyForcibly" service/{like,task,message} --include=*.java` = **1 命中**（就是这处）⇒ `TaskRpcFatJarArtifactGateIT` 是**产物层**（不起进程）⇒ **不是**同款；`message-rpc` **无**此类 |
+| **③ Redis 超时口径**（Boot 4 两属性不再共用；不配 `connect-timeout` ⇒ Lettuce 默认 **10s** ⇒ **漂移 2 倍**） | 🟢 **与我域独立复核结论一致** ⇒ **我域已修，无需再动**：`like-rpc` 补 `connect-timeout: 5s`；`task-rpc` 补 `timeout: 3s` ＋ `connect-timeout: 5s`（双侧活体对拍：Go **1694ms** vs RAG 修前 **60021ms** vs 修后 **3ms**）⇒ 守门 8 条（`LikeRpcRedisTimeoutsGateTest` 4 ＋ `TaskRedisCommandTimeoutGateTest` 4） |
+| **④ G3 扫到的 13 条域外 U+FFFD** | 其中 **2 条标「共享面（无人拥有）」** = `tools/errmsg-probe/README.md:59` ＋ `tools/sql-statement-probe/favorite/compare.py:561` ⇒ **`tools/**` 不在我写权面** ⇒ **只登记、转派 G4**（见 §6 第 7 条） |
+
+⚠️ **判据坑（同款，全域适用）**：**`read` 的输出会把正常的汉字渲染成 `U+FFFD×3`** ⇒ 判 U+FFFD **只认字节级扫描**；
+`grep -rn $'\xef\xbf\xbd'` 在本机也会 0 命中 ⇒ 同样不可用。
+
+> 📌 **本文件引述里的坏字符已改写为 ASCII 标记 `U+FFFD×3`**（3 个替换字符 = 1 个 UTF-8 汉字的 3 字节全丢）
+> ⇒ **台账自身不再植入坏字节** ⇒ 我域复扫（`docs` + 我域源码，排除 `target/`）**0 命中**
+> （余下 2 处在 `docs/Pitfalls/**`：`message/rpc.md` 2 处 + `users/user/rpc.md` 1 处 ⇒ **故意保留**（记录故障现象本身）＋ **不在我写权面** ⇒ 不改）。
+> ⇒ 需原样比对时，按「`文件:行号` + `U+FFFD×3`」去主树/G1/G3/G4 树取原件。
 
 ## 5. 交付物清单
 
@@ -232,6 +319,10 @@ Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
 2. **FB-01 的「RAG 返 404」** —— 🟢 **Go 侧已由 G4Common 活体坐实**（go-zero 真 server，5 种路径变体全 200，2026-10-27）⇒ 剩下的是 **RAG 侧**的对应证据，**正在 G4 手里**（共享层归一器 + 真 Tomcat 守门）⇒ 本域只需在收口回归时复核。
 3. **A2 客户端熔断缺双侧活体**：like-api 真实 channel 上拦截器是否真在链中，未跑 ⇒ **「Bean 存在」≠「机制生效」**（§3.3.3）。
 4. 🆕 **A9 的 gRPC 路径端到端缺 RAG 侧真链证据**：域侧属性写法已落码且守门绿（域内契约级），但**真链上**「server span 携带 `query.*`/`cache.*`/`like.*`」这条**端到端证据要等 FB-04 落码后才拿得到**（探针已证：handler 期 `Span.current()` = invalid）⇒ **收口窗口**补一条 E2E（真 server + 真链 ⇒ 断言导出的 server span 带属性）。
+   - 🟢 **2026-10-27 更新**：FB-04 **已落码**（`853767b` · 我域已独立复核，见 **§4·六**）⇒ 现在**只差「合入本树 + 补 E2E」**两步 ⇒ **E2E 前置已满足** ⇒ 合并后即可跑。
+   - ⚠️ **合并前我域 A9 属性的实际效果 = 零**（属性落在 invalid span 上 ⇒ 静默丢弃）⇒ **A9 轴在合并前不得判为已闭环**。
 5. 🆕 **A9 的 Go 侧活体未跑**：Go 侧属性清单目前是 **L3**（源码逐条对照 + go-zero `tracinginterceptor.go` 取证）⇒ 未与 RAG 侧做「同一属性名 + 同一取值」的**双侧活体对拍** ⇒ A9 轴的最终结案仍需该对拍（AGENTS.md §3.3.3：无双侧活体不得写 L4）。
 4. **A9 缺双侧活体**：Go 侧 7 处 span 属性 vs RAG 侧 0 处 —— 差异已由**源码逐条对照**坐实（L1），但**未跑双侧探针** ⇒ 落码后须补一条两侧 span 属性对拍探针。
 5. **`like_promotion_topic` 生产与消费同 topic**（`LikeKafkaTopics.java:36` + `application.yml:217`）是 Go 现状而非笔误（`LikeKafkaTopics.java:8-16` 已注释）⇒ 灰度期两侧同 topic 消费的字段一致性靠 `LikeEventContracts.java:57`（`@JsonPropertyOrder`）保障，**未经双侧活体对拍**。
+7. ✅ **启动守门 flake 的修复**（`LikeRpcRuntimeBootGateTest` · G3 `8b2c6e9` 同款）—— **已落 + 已回归 + 已变异验证**（2026-10-27）：<br>· **落码**：`StringBuilder` → **`StringBuffer`** ＋ **收摊前等日志标志行**（30s / 200ms）＋ **`drain.join(10s)`** ＋ 标志串提为常量 `GRPC_STARTED_MARKER`（消除「等待与断言两处字面量漂移」）<br>· **回归**：**like-rpc 111 / task-rpc 115**（`0 failures / 0 errors / 0 skipped`）· `BUILD SUCCESS`；目标类 **Tests run: 1, Skipped: 0**（4.641 s）⇒ **真跑没被 skip** ✔<br>· **变异**：标志串改假串（只改一处）⇒ **红在目标断言** `:155`（36.11 s ≈ 等满 30s 后失败，且失败消息带真实日志尾部 ⇒ 证明进程确实起来了）⇒ 改回后复跑 **1 条绿**（5.784 s）✔<br>· **我域同款排查**：全域 `grep -rn "destroyForcibly" service/{like,task,message}` = **1 命中** ⇒ 同款**仅此一处**（`TaskRpcFatJarArtifactGateIT` 是产物层、message-rpc 无此类）<br>⚠️ **仍剩**：**重复跑 N 次全绿**的统计样本偏小（本轮该类共跑 2 次）⇒ 收口回归时再补几轮 ⇒ 详见 [`like/rpc.md`](rpc.md) A 节。
+8. 🆕 **两条「无人拥有」的 U+FFFD 落在 `tools/**`**（G3 扫出并建议修，我域**不越权改**）—— `tools/errmsg-probe/README.md:59`（`未登记码的回U+FFFD×3结果`）+ `tools/sql-statement-probe/favorite/compare.py:561`（`两侧都U+FFFD×3 / 两侧都没有`）⇒ **`tools/**` 不在我 G2 写权面** ⇒ **转派 G4**（若 `tools/**` 归 G4 写权面则请修；否则请指定 owner）⇒ **修复前先字节级复核**（`read` 的输出不可当判据，见上）。

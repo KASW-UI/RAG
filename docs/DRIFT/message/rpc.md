@@ -2746,3 +2746,35 @@ RAG: message_notification.created_at | timestamptz | 可空 | DEFAULT CURRENT_TI
 | **Evidence** | 全量日志 `/tmp/g2-full-reg2.log:15549-15552`；单独复跑 `Tests run: 2, Failures: 0, Errors: 0` |
 | **Difference** | 与 Go 无对应关系（Go 侧无此测试）⇒ **不是语义漂移**，是**测试自身的时序脆弱性** |
 | **Disposition** | **登记不改**（域侧无法单独消除：涉及其它模块的 gRPC 建连时序）；⚠️ **不因此判 message-rpc 回归**；⇒ 后续遇到同一症状，按「先单独复跑定性」处理，不直接当回归修 |
+
+---
+
+## 2026-10-27 · G2 · U+FFFD 跨树复核：G3 报的「message-rpc 那条」**在本树已干净**（主树仍坏）
+
+| G3 报的 | 本树实测（**字节级**） | 结论 |
+|---|---|---|
+| `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcProductionAddressTest.java:96`：`地址都必须U+FFFD×3 discovery:///` | **FFFD = 0**；真实内容 = `@DisplayName("生产 application.yml 的两个 grpc client 地址都必须是 discovery:///（三斜杠）")` | 🟢 **已干净** |
+
+⚠️ **判据本身的坑（本轮实测 ⇒ 留档）**：
+
+> 📌 **本节引述里的坏字符已改写为 ASCII 标记 `U+FFFD×3`**（3 个替换字符 = 1 个 UTF-8 汉字的 3 字节全丢）
+> ⇒ **台账自身不再植入坏字节** ⇒ 复扫可保持 **0 命中**；需原样比对时按「`文件:行号` + `U+FFFD×3`」去主树/G1/G3/G4 树取原件。
+
+- **`read` 工具的输出不能作为「含 U+FFFD」的证据** —— 本轮 `read` 把正常的「是」渲染成 `U+FFFD×3` ⇒ **纯渲染假象**，字节里没有。
+- ⚠️ `grep -rn $'\xef\xbf\xbd'` 在本机 shell 下**也会 0 命中**（转义未生效）⇒ 同样**不能**当判据。
+- ⇒ **唯一可信判据 = 字节级扫描**：`b'\xef\xbf\xbd' in path.read_bytes()`。
+
+### 🔴 但：主树 / G1 树 / G3 树 / G4 树 **仍各坏 1 处**（同一句，FFFD×3）
+
+⇒ **因果已坐实**（`git show` 逐版本字节计数）：`ce81c5f^` ⇒ FFFD=**3** ⇒ `ce81c5f` ⇒ FFFD=**0**
+⇒ 即 **本树阶段 2 那个 commit（JWT 验签搬出 3s 预算）重写该文件区域时顺带写对了中文**。
+⇒ **合并影响**：该文件在**我域写权面** ⇒ 合并时**以本树版本为准** ⇒ 合并后自动干净；
+**若取主树侧版本 ⇒ 坏字符被带回去** ⇒ **登记为合并后必查项**。
+
+### ✅ 附带：message-rpc **无**同款启动守门 flake
+
+| 判据 | 结果 |
+|---|---|
+| 全我域 `grep -rn "destroyForcibly" service/{like,task,message} --include=*.java` | **1 命中**（`LikeRpcRuntimeBootGateTest`）⇒ **message-rpc 不命中** |
+| `message-rpc` 有无 `*RuntimeBootGate*` 类 | **无** ⇒ 真进程层守门形态在本模块**不存在** ⇒ G3 报的 flake **不适用本域** |
+

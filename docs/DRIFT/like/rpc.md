@@ -1570,3 +1570,72 @@ global 第三十三轮的 **E47 原定性已被第三十六轮全面订正**：*
 ### 状态
 
 🟡 **待 like 域 owner 接手**（本域无 owner 会话 ⇒ 主会话转达）⇒ **主会话不改代码、不下结论**，只留指针。
+
+---
+
+# 2026-10-27 · G2 · 启动守门 flake（同款形态）已在本域落码 ＋ U+FFFD 跨树复核
+
+## 🔴 A. `LikeRpcRuntimeBootGateTest` 偶发红 —— 同款形态，本域已落修法
+
+| 项 | 内容 |
+|---|---|
+| 症状 | `LikeRpcRuntimeBootGateTest#realFatJarProcessBootsAndListens` **偶发红**（G4 在全量回归里抓到同款 1 failure；G3 已在 comment-rpc / article-rpc 落同款修法，commit `8b2c6e9`） |
+| 根因 | **不是启动失败**：真进程 fat jar 起来 → `tcpProbe` 端口一连上就**立刻** `destroyForcibly()` ⇒ **drain 线程还没读到**「gRPC Server started」⇒ 断言与日志读取**竞态**（gRPC 端口 **bind 成功早于** devh 把那行写进 stdout） |
+| 辨识度 | 同一用例里「gRPC 端口已在监听」与「无 `NoClassDefFoundError`」两条**都通过** ⇒ 进程**真的起来了** ⇒ 红的只是竞态 |
+| 修法（三步） | ① 收摊前**先等日志标志行出现**（上限 30s、间隔 200ms）—— **不是**加长整体启动超时 ② sink `StringBuilder` → **`StringBuffer`**（drain 线程写 / 测试线程读 ⇒ 原来不是线程安全的）③ `drain.join(10s)` ⇒ 建立 happens-before，否则测试线程读到的 sink 是**残缺的** |
+| **本域实现的一处增强** | 同款修法在**两处各写字面量** `"gRPC Server started"`（等待循环 + 断言）⇒ **任一处被改 ⇒ 等待与断言就不再配套**（等 A、查 B）⇒ 本域**提为常量 `GRPC_STARTED_MARKER`** ⇒ **同源不可漂移** + 变异验证只需改一处 ⇒ **行为与同款修法等价**（不偏离 G3 的修法） |
+| 落码 | `service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRpcRuntimeBootGateTest.java`（`StringBuffer` ＋ 等日志行 ＋ `drain.join`） |
+| 证据强度 | ✅ **代码级已落 · 回归已跑 · 变异已验证**（见下方「验证」两行） |
+| **验证 ①（回归）** | `mvn -o -pl service/like/like-rpc,service/task/task-rpc test` ⇒ **like-rpc 111 / task-rpc 115**（`Failures: 0, Errors: 0, Skipped: 0`）· `BUILD SUCCESS`（10:22:51 → 10:29:10 · 两批）<br>⇒ **目标类真跑没被 skip**：`LikeRpcRuntimeBootGateTest` **Tests run: 1, Skipped: 0**（4.641 s）⇒ 真进程真起来并读到日志行 ✔ |
+| **验证 ②（变异）** | 把常量 `GRPC_STARTED_MARKER` 改成假串（**只改这一处**）⇒ **红在目标断言**：`LikeRpcRuntimeBootGateTest.java:155`「日志里没有 devh 的「gRPC Server started」」⇒ `Tests run: 1, Failures: 1, Errors: 0`（36.11 s ≈ 等满 30s 上限后失败）⇒ 失败消息里带**真实日志尾部** ⇒ 证明「进程确实起来了、红的是标志串不匹配」⇒ **非假绿**。<br>⇒ 改回后**复跑单类**：**1 条绿**（5.784 s）· `BUILD SUCCESS` ✔ |
+
+### ⚠️ 我域「同款」排查范围（**不只这一处**，逐个核过）
+
+| 我域候选 | 结论 | 判据 |
+|---|---|---|
+| `LikeRpcRuntimeBootGateTest` | ✅ **同款** ⇒ 本节已修 | 起真进程 ＋ `tcpProbe` 端口探活 ＋ 立刻 `destroyForcibly` ＋ 断言日志含「gRPC Server started」 |
+| `TaskRpcFatJarArtifactGateIT` | ❌ **不是同款** | **产物层**判定（读 MANIFEST 的 `Main-Class`/`Start-Class`、jar 大小比、classpath 条目）⇒ **不起进程**（无 `ProcessBuilder` / 无 `destroyForcibly`） |
+| `message-rpc` | ❌ **无此类** | 全我域 `grep -rn "destroyForcibly" service/{like,task,message} --include=*.java` = **1 命中**（就是本节这处） |
+
+⇒ 判据一句话：**同款 = 「起真进程 ＋ 端口探活 ＋ 立刻收摊 ＋ 断言日志内容」四要素同时成立**。
+
+## 🟢 B. U+FFFD 跨树复核：G3 报的「我域 3 条」**在我树已不存在**（**主树仍坏**）
+
+> G3 回执报了 3 条落在我域的 U+FFFD。**我域逐条字节级复核**（不采信转述）：
+
+| G3 报的 | 我域实测（字节级） | 结论 |
+|---|---|---|
+| `LikeOutboxEventEntity.java:17` `事实流那张表才U+FFFD×3。` | **FFFD = 0**；真实内容 `事实流那张表才有。`（`:17`） | 🟢 **已干净** |
+| `MessageRpcProductionAddressTest.java:96` `地址都必须U+FFFD×3 discovery:///` | **FFFD = 0**；真实内容 `地址都必须是 discovery:///（三斜杠）`（`:96`） | 🟢 **已干净** |
+| `GoStyleGrpcClientBreakerE2ETest.java:43` `响应码先U+FFFD×3 5001` | **FFFD = 0**；真实内容 `断言 HTTP 响应码先是 5001、`（**`:46`**，不是 `:43` ⇒ G3 的行号是**它那棵树**的） | 🟢 **已干净** |
+
+⚠️ **判据本身的坑（本轮实测 ⇒ 值得留档）**：
+
+> 📌 **本表引述里的坏字符已统一改写为 ASCII 标记 `U+FFFD×3`**（3 个替换字符 = 1 个 UTF-8 汉字的 3 字节全丢）
+> ⇒ **台账自身不再植入坏字节** ⇒ 本仓复扫（`docs` + 我域源码，排除 `target/`）可保持 **0 命中**
+> ⇒ 需要原样比对时，按「`文件:行号` + `U+FFFD×3`」去主树/G1/G3/G4 树取原件即可。
+
+- **`read` 工具的输出不能作为「文件含 U+FFFD」的证据** —— 本轮 `read` 把「事实流那张表**才**」渲染成「才U+FFFD×3」⇒ **纯渲染假象**，字节里根本没有。
+- ⚠️ `grep -rn $'\xef\xbf\xbd'` 在本机 shell 下**也会 0 命中**（转义未生效）⇒ **同样不能当判据**。
+- ⇒ **唯一可信判据 = 字节级扫描**：`b'\xef\xbf\xbd' in path.read_bytes()`（本轮用它复核了 4 棵树）。
+
+### 🔴 但：**主树 + G1/G3/G4 三棵树**这 3 处**仍然坏着**
+
+| 树 | 三处状态 |
+|---|---|
+| `RAG`（主树） | 🔴 FFFD×3 @ `:17` / `:96` / `:43` |
+| `g1-users-follow` | 🔴 同上 |
+| `g3-article-comment-favorite-hot` | 🔴 同上 |
+| `g4-service-common` | 🔴 同上 |
+| **`g2-message-like-task`（本树）** | 🟢 **三处全干净** |
+
+⇒ **根因**：本树 `ce81c5f`（阶段 2 · JWT 验签搬出 3s 预算）重写了那三个文件的对应区域 ⇒ **顺带把坏字符写对了**。
+⇒ **合并影响**：这 3 个文件在**我域写权面** ⇒ 合并时**以本树版本为准** ⇒ 合并后自动干净；**若合并时取主树侧版本 ⇒ 坏字符会被带回去**。
+⇒ ⇒ **登记为合并后必查项**。
+
+### 🟡 本节**未验证**项（**不写成已闭环**）
+
+- ✅ **A 节修复已验证完毕**（回归 111 绿 + 变异红在目标断言 + 改回复跑绿）⇒ **本节无遗留**。
+- ⚠️ **仍待合并后补的只有一件事**：`like-rpc` 的 **A9 端到端 E2E**（真 server span 上真带 `query.*`/`cache.*`/`like.*`）—— 依赖 G4 的 FB-04（`853767b` / 最终回执 HEAD `23d1c2a`）合入本树 ⇒ 见 [`like/vs-common.md` §4·六](vs-common.md) 与 §6 第 4 条。
+- ⚠️ **「等日志行」这一段的可见效果是消除偶发红** ⇒ **无法用单次稳定断言证明** ⇒ 辅以**重复跑 N 次全绿**统计（与 G3 同口径）—— 本轮该类跑了 **2 次**（回归 1 次 + 改回复验 1 次）均绿，**样本仍偏小** ⇒ 收口回归时再补几轮。
+
