@@ -8,6 +8,7 @@ import io.grpc.ServerInterceptor;
 import io.grpc.Status;
 
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.LongSupplier;
 
 /**
  * <b>gRPC 服务端 CPU 自适应降载</b> —— 对齐 go-zero 的 {@code UnarySheddingInterceptor}。
@@ -95,10 +96,28 @@ public final class GoStyleRpcSheddingInterceptor implements ServerInterceptor {
      */
     private final GoStyleSheddingStat stat;
 
+    /**
+     * <b>纳秒时钟源</b>（默认 {@link System#nanoTime()}）——<b>测试接缝</b>。
+     *
+     * <p>🔴 <b>为什么需要它</b>（2026-10-28 · G4）：
+     * 本类原先把 RT 测量写成内联的一行 {@code long rtMs = (System.nanoTime() - startNanos) / 1_000_000L;}
+     * ⇒ ⇒ **整型截断** ⇒ ⇒ 被调方的 {@code Math.ceil} 成了空操作 ⇒ ⇒ **系统性比 Go 少记约 1ms**
+     * ⇒ ⇒ 而<b>调用点</b>这一截断<b>从来没有被任何断言覆盖</b>（{@code GoStyleAdaptiveShedderTest}
+     * 只在 {@code pass(double)} 那一层断言过 ceil ⇒ ⇒ 「有守门」≠「这一处被守住」）。
+     *
+     * <p>⇒ ⇒ 把时钟做成可注入 ⇒ ⇒ 测试能把 RT <b>钉死成 1.5ms</b> ⇒ ⇒
+     * <b>调用点</b>的语义就能被确定性断言（Go: {@code math.Ceil(1.5) = 2}）：
+     * <ul>
+     *   <li>不截断 ⇒ 被调方记 <b>2</b> ✔</li>
+     *   <li>整型截断 ⇒ 被调方记 <b>1</b> ✘ ⇒ ⇒ 守卫必红</li>
+     * </ul>
+     * ⇒ ⇒ **只测 {@code measuredRtMs} 这个 helper 是不够的**（helper 绿、调用点照样能截断）
+     * ⇒ ⇒ ⇒ **两处都要有网**（与 tools/check-ledger-selfcheck.py 那条「两处契约不一致」同族）。
+     */
+    private final LongSupplier nanoTime;
+
     public GoStyleRpcSheddingInterceptor(GoStyleAdaptiveShedder shedder, boolean enabled) {
-        this.shedder = shedder;
-        this.enabled = enabled;
-        this.stat = GoStyleSheddingStat.getInstance();
+        this(shedder, enabled, GoStyleSheddingStat.getInstance(), System::nanoTime);
         // Go: sheddinginterceptor.go:23-25 —— ensureSheddingStat() 就在拦截器**构造时**被调用
         //   （NewSheddingStat 内部 `go st.run()` 起那个每分钟上报的 goroutine）
         // ⇒ 只有「降载真的被装配」的进程才会有这条上报线程
@@ -108,14 +127,44 @@ public final class GoStyleRpcSheddingInterceptor implements ServerInterceptor {
 
     /** 测试注入用（让断言能拿到具体的 stat 实例）。 */
     GoStyleRpcSheddingInterceptor(GoStyleAdaptiveShedder shedder, boolean enabled, GoStyleSheddingStat stat) {
+        this(shedder, enabled, stat, System::nanoTime);
+    }
+
+    /** 测试注入用（把纳秒时钟换成可控源 ⇒ 让 <b>调用点</b>的 RT 语义可被确定性断言）。 */
+    GoStyleRpcSheddingInterceptor(GoStyleAdaptiveShedder shedder, boolean enabled,
+            GoStyleSheddingStat stat, LongSupplier nanoTime) {
         this.shedder = shedder;
         this.enabled = enabled;
         this.stat = stat;
+        this.nanoTime = nanoTime;
     }
 
     /** 排障用：本次降载统计。 */
     GoStyleSheddingStat stat() {
         return stat;
+    }
+
+    /**
+     * <b>RT 测量</b>（Go: {@code adaptiveshedder.go:285}）。
+     *
+     * <pre>
+     * rt := float64(timex.Since(p.start)) / float64(time.Millisecond)
+     * p.shedder.rtCounter.Add(int64(math.Ceil(rt)))
+     * </pre>
+     *
+     * <p>⇒ <b>浮点毫秒</b>（保留小数）⇒ 再由被调方的 {@code Math.ceil} <b>向上取整</b>、<b>无下限</b>。
+     *
+     * <p>🔴 **单抽成方法不是为了好看，是为了让它【有网】**：本方法原先是内联的一行
+     * {@code long rtMs = (System.nanoTime() - startNanos) / 1_000_000L;}
+     * ⇒ ⇒ **整型截断** ⇒ ⇒ 被调方的 {@code Math.ceil} 成了空操作 ⇒ ⇒ **系统比 Go 少记约 1ms**
+     * ⇒ ⇒ 而 {@code GoStyleAdaptiveShedderTest} 只在 {@code pass(double)} 这一层断言过 ceil
+     * ⇒ ⇒ **调用点这一截断从来没有被任何断言覆盖** ⇒ ⇒ 「半修」长期不可见。
+     *
+     * <p>⇒ ⇒ 抽出来之后，守门可以**确定性地**断言「小数部分没被截断」（见
+     * {@code GoStyleRpcSheddingInterceptorTest#rtMeasurementKeepsFractionalMilliseconds}）。
+     */
+    double measuredRtMs(long startNanos) {
+        return (nanoTime.getAsLong() - startNanos) / 1_000_000D;
     }
 
     @Override
@@ -126,9 +175,15 @@ public final class GoStyleRpcSheddingInterceptor implements ServerInterceptor {
             return next.startCall(call, headers);
         }
 
-        final long startNanos = System.nanoTime();
+        final long startNanos = nanoTime.getAsLong();
 
-        // Go: sheddinginterceptor.go:25 —— **每个进入本拦截器的请求都先 +1**（在 Allow 之前）
+        // Go: sheddinginterceptor.go:31 —— `sheddingStat.IncrementTotal()` 在 `Allow()` **之前**
+        // ⚠️ **2026-10-28 · G4 订正**：本行原注释写「每个进入本拦截器的请求都先 +1（在 Allow 之前）」，
+        //   **那是错的** —— 在途数 **+1 发生在 `Allow()` 内部、且在判降载之后**
+        //   （Go: adaptiveshedder.go:127-133 ⇒ `if as.shouldDrop() { return nil, ErrServiceOverloaded }`
+        //     ⇒ 之后才 `as.addFlying(1)`）⇒ ⇒ **被降载拒绝的请求【不计入在途】**。
+        //   ⇒ ⇒ 本仓 `GoStyleAdaptiveShedder#allow()` 与 Go **逐字一致**（先判降载、后 +1）⇒ **不是漂移**。
+        //   ⇒ ⇒ 但这条注释会误导读代码的人去「先 +1」⇒ ⇒ 订正之（§3.2：留痕必须准确）。
         stat.incrementTotal();
 
         // Go: sheddinginterceptor.go:36-45 的 defer —— 调用结束后结算 promise
@@ -145,8 +200,23 @@ public final class GoStyleRpcSheddingInterceptor implements ServerInterceptor {
                         if (isCtxDeadlineExpired(status.getCode())) {
                             shedder.fail();                 // Go: promise.Fail()
                         } else {
-                            long rtMs = (System.nanoTime() - startNanos) / 1_000_000L;
-                            shedder.pass(rtMs);             // Go: promise.Pass()（内部测 RT）
+                            // Go: adaptiveshedder.go:284-287（promise.Pass）
+                            //   rt := float64(timex.Since(p.start)) / float64(time.Millisecond)
+                            //   p.shedder.rtCounter.Add(int64(math.Ceil(rt)))
+                            // ⇒ **浮点毫秒 + 向上取整，无下限**（Go 的 Add(0) 合法：Count +1、Sum +0）。
+                            //
+                            // 🔴 **2026-10-28 · G4 修（原值是「整型毫秒截断」）**：
+                            //   本行原先是 `long rtMs = (System.nanoTime() - startNanos) / 1_000_000L;`
+                            //   ⇒ ⇒ **先截断成整数**，再交给 `shedder.pass(rtMs)` ⇒ ⇒ 里面的
+                            //   `Math.ceil(rtMs)` 因此成了**空操作** ⇒ ⇒ **Go 的「浮点 + ceil」语义被这一行抵消掉**
+                            //   ⇒ ⇒ **系统性比 Go 少记约 1ms**（RT=0.2ms：Go 记 1、RAG 记 0；RT=1.5ms：Go 记 2、RAG 记 1）
+                            //   ⇒ ⇒ `minRt()` 偏小 ⇒ `maxFlight = maxPass * minRt * 0.01` 偏小
+                            //   ⇒ ⇒ **在途上限偏低 ⇒ RAG 比 Go 更早降载**（AGENTS.md §3.1：行为差异默认判 RAG 错）。
+                            //   ⇒ ⇒ 与 `GoStyleAdaptiveShedder#pass(double)` 的 javadoc 是**两处配套**：
+                            //         「整型截断」在**调用点**被修掉，才轮到**被调方**的 `ceil` 真正生效 ⇒
+                            //         只修被调方 = **半修**（与 tools/check-ledger-selfcheck.py 那条「两处契约不一致」同族）。
+                            double rtMs = measuredRtMs(startNanos);
+                            shedder.pass(rtMs);             // Go: promise.Pass()（内部测 RT · 浮点毫秒 + ceil）
                             // Go: sheddinginterceptor.go:37 —— IncrementPass() 与 promise.Pass() **同一支**
                             //    （ctx 超时那一支只 Fail，**不**计 pass）
                             stat.incrementPass();

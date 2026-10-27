@@ -33,7 +33,9 @@
    目录分支返回绝对路径、直接文件分支返回相对路径 ⇒ 两边永不相交 ⇒ 断言恒绿）。
 2. **共享文件无人拥有** —— `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` /
    `docs/DRIFT/_cross/**` / `docs/Worktree.md` / `tools/difftest/README.md`
-   ⇒ 它们由**整合者**在合并后统一更新（§5.3 同款纪律）。
+   ⇒ 它们由**合并收口执行者**在合并后统一更新（§5.3 同款纪律）。
+   ⇒ ⚠️ **「合并收口执行者」是一个步骤，不是一个常驻会话** ⇒ lane 不该去找任何叫「整合者」的会话
+   ⇒ 角色表与 lane 的正确动作 ⇒ `docs/Worktree.md` §1e。
 3. **`favorite` 只归 G3** —— 其他 lane 不得声明 `service/favorite/**` 或 `docs/*/favorite/`。
 4. **共享层只归 G4** —— 其他 lane 不得声明 `service/common/**` 或 `service/users/users-common/**`
    （AGENTS.md §5.3e·§5.3f：共享层写权唯一 + 域波期间只读）。
@@ -151,7 +153,9 @@ ACTIVE: dict[str, list[str]] = {
 }
 
 # ---------------------------------------------------------------- 共享文件
-# 这些**不属于任何 lane** ⇒ 只能由整合者在合并后统一更新。
+# 这些**不属于任何 lane** ⇒ 只能由合并收口执行者在合并后统一更新。
+# ⚠️ 原措辞「归整合者」已删（2026-10-27）：**「整合者」不是一个存在的角色** ⇒
+#    它诱导 lane 去向上升级找一个不存在的人 ⇒ 改用可指向的「合并收口执行者」。
 SHARED = [
     "AGENTS.md",
     "docs/DRIFT/_INDEX.md",
@@ -301,7 +305,7 @@ def main() -> int:
             if shared in expanded[lane]:
                 failures.append(
                     f"🔴 共享文件被 lane 占用：`{lane}` 声明了 `{shared}`"
-                    " ⇒ 共享文件只能由整合者在合并后统一更新"
+                    " ⇒ 共享文件只能由合并收口执行者在合并后统一更新"
                 )
 
     # ---- 3/4. 排他归属 --------------------------------------------------
@@ -365,7 +369,7 @@ def main() -> int:
 
     print("✅ PASS")
     print(f"  · {len(ACTIVE)} 棵波次工作树写权范围两两不重叠")
-    print(f"  · {len(SHARED)} 个共享文件无人拥有（归整合者）")
+    print(f"  · {len(SHARED)} 个共享文件无人拥有（归合并收口执行者）")
     print("  · favorite 只归 G3")
     print("  · 共享层只归 G4")
     print("  · 7 个真私有 `<域>-common` 无跨域引用")

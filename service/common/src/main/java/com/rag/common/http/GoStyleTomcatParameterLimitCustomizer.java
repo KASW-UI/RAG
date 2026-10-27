@@ -92,8 +92,13 @@ import org.springframework.stereotype.Component;
  * （那是 hot 域 2026-10-25 第十三轮为了对齐 Go 统一加的）
  * ⇒ <b>yaml 层全仓一致</b>（守门 {@code tools/difftest/check-tomcat-limits.py} 的
  * {@code EXPECTED_MAX_PARAM_COUNT = 2048} 校的就是这一层）。
- * <br>⇒ 但<b>运行期值</b>由本类决定：{@code mode ≠ OFF} ⇒ 抬到 {@link #MAX_PARAMETER_COUNT}（10001）；
- * {@code mode == OFF} ⇒ <b>不动</b> ⇒ 运行期 = yaml 的 2048。
+ * <br>⇒ 但<b>运行期值</b>由本类决定：<b>一律</b>抬到 {@link #MAX_PARAMETER_COUNT}（10001）——
+ * <b>与 {@code mode} 无关</b>（<b>无条件</b>；详见下面「两轴解耦」一节）。
+ * 🔴 **订正（2026-10-27 · G2 反馈）**：本行原先写「{@code mode ≠ OFF} ⇒ 抬到 10001；
+ * {@code mode == OFF} ⇒ <b>不动</b> ⇒ 运行期 = yaml 的 2048」—— **这句是过期描述**，
+ * 它与本类 javadoc 下方的「两轴解耦」结论（以及 {@link #limitCustomizer()} 的实际实现：
+ * <b>无任何 mode 判断</b>）<b>自相矛盾</b> ⇒ ⇒ **读者落到这两行会读到错误的当前行为**。
+ * ⇒ ⇒ 保留上一句的 yaml 层事实（10 份 yaml 都写 2048）⇒ ⇒ **运行期一律 10001**。
  *
  * <h3>🔴 「OFF 域的运行期上限 = 2048」这个分叉<b>已消除</b>（2026-10-27 第十三轮）</h3>
  * <p>本类旧版 javadoc 写「10 份 yaml 保持一致 ＋ 共享层统一覆盖 ⇒ <b>无分叉、favorite 零改动</b>」

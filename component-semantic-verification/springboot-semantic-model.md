@@ -266,7 +266,7 @@ Java 的 `LoggerFactoryBean` 若异常会把「回落昵称」变成 500）。
 |---|---|
 | Concurrent Calls | Tomcat 线程池（默认 max-threads=200）+ `GoStyleMaxConnsFilter`(10000) |
 | Mutual Exclusion | 与 Go 同一套 `com.rag.common.protection` 实现 |
-| Duplicate Execution | **无幂等保护**。OP-2/OP-3 的「先读后写」两次调用存在同样��� TOCTOU 窗口 |
+| Duplicate Execution | **无幂等保护**。OP-2/OP-3 的「先读后写」两次调用存在同样的 TOCTOU 窗口 |
 | Atomicity | OP-2/OP-3 读+写非原子（两个独立 RPC），与 Go 同 |
 | Lost Update | OP-2 无版本号 ⇒ 后写覆盖先写 |
 | Visibility | 经 gRPC，天然可见 |
@@ -317,7 +317,7 @@ Java 的 `LoggerFactoryBean` 若异常会把「回落昵称」变成 500）。
 - `ArticleGoStyleCoercion` = `GoStyleCoercion` + 两条补强：
   `LogicalType.Integer/Float` × `CoercionInputShape.String` ⇒ `Fail`
   理由：article 的 `types.go` **全文没有一个 `,string` option**，所以 users 域那条
-  「String → int 豁免」的前提在本文��**不成立**
+  「String → int 豁免」的前提在本文中**不成立**
 - ⚠️ 类型不匹配的**错误文案**与 Go 不同（DRIFT-006）
 
 **Content-Type**

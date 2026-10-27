@@ -403,6 +403,7 @@ public final class HttpMiddleware {
                 // ⚠️ 探测本身是 fail-open：探不到（UNAVAILABLE）就什么都不做，继续等。
                 boolean workerDone;
                 boolean clientDisconnected = false;
+                boolean probeBudgetLogged = false;
                 try {
                     final long waitStartNanos = System.nanoTime();
                     final long budgetNanos = TimeUnit.MILLISECONDS.toNanos(timeoutMs);
@@ -428,6 +429,21 @@ public final class HttpMiddleware {
                         if (probeState == GoStyleClientDisconnectProbe.State.DISCONNECTED) {
                             clientDisconnected = true;
                             break;
+                        }
+                        if (probeState == GoStyleClientDisconnectProbe.State.BUDGET_EXHAUSTED) {
+                            // 🔴 2026-10-27：本请求的 1xx 行数预算已用尽 ⇒ **不再写探针字节**。
+                            //   ⚠️ **等待语义完全不变**（仍等到 worker 完成或超时 ⇒ 总窗口不变）
+                            //   ⇒ 唯一代价：超长请求里客户端中途断连**不再被提前发现**
+                            //   ⇒ 在飞的下游 gRPC 要等写最终响应时才被取消（而非提前取消）
+                            //   ⇒ 这是「保住客户端能解析响应」换来的取舍（详见探针类 javadoc）。
+                            //   ⇒ 只记一次（每请求最多一条日志，避免刷屏）。
+                            if (!probeBudgetLogged) {
+                                probeBudgetLogged = true;
+                                log.info("[HTTP] 1xx 探针行数预算用尽（cap={}）⇒ 本请求不再写探针字节"
+                                                + "（客户端断连将只能等写最终响应时才发现）",
+                                        GoStyleClientDisconnectProbe.maxProbeLines());
+                            }
+                            continue;
                         }
                         // ALIVE / UNAVAILABLE ⇒ 什么都不做，继续等（fail-open）
                     }
