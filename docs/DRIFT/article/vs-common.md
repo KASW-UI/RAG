@@ -101,6 +101,93 @@
 > 🟡 **共享层 U+FFFD 反馈单只登记一次** ⇒ 见 [`comment/vs-common.md`](../../DRIFT/comment/vs-common.md) §4-**G4-4**（`service/common` 两个测试类，各丢 1 个汉字，纯注释）⇒ **本域不重复派单**。
 
 
+### 3.1 📌 **L-10 的 Go 侧取证已补全**（2026-10-28 · G3）—— 原口径漏了一维：**`span.AddEvent`**
+
+🔴 **原 L-10 口径只记了「span 名 + 属性 + `RecordError`」，漏了 Go 侧还有 `span.AddEvent` 这一维** ⇒ ⇒
+本轮实测**全量 12 处** ⇒ ⇒ **落码时必须一并对齐**，否则 RAG 的 trace 里会**少 12 个事件**（不是少几个 span ⇒ 观测面一样缺）。
+
+**① 6 个 logic span 的完整矩阵**（逐条现核 · 2026-10-28 · 行号取自 `service/article/rpc/internal/logic/`）：
+
+| Go logic | tracer | span 名 | 起始属性（`WithAttributes`）| 后续 `SetAttributes` | `AddEvent` | `RecordError` |
+|---|---|---|---|---|---|---|
+| `create_article_logic.go:42` | `article-rpc` | `CreateArticle` | `author_id`(Str) `:45` · `title`(Str) `:46` | `article_id`(Str) `:57` | 0 | **4**（`:52` `:71` `:110` `:126`）|
+| `update_article_logic.go:46` | `article-rpc` | `UpdateArticle` | `article_id`(Str) `:49` | — | 0 | **8**（`:55` `:61` `:68` `:83` `:93` `:98` `:113` `:119`）|
+| `delete_article_logic.go:40` | `article-rpc` | `DeleteArticle` | `article_id`(Str) `:43` | — | 0 | **5**（`:49` `:55` `:60` `:70` `:93`）|
+| `get_article_logic.go:40` | `article-rpc` | `GetArticle` | `article_id`(Str) `:49` | `article_found`(Bool) `:57` / `:65` | **8** | **4**（`:60` `:73` `:86` `:98`）|
+| `list_articles_logic.go:30` | `article-rpc` | `ListArticles` | `page`(I64) `:33` · `page_size`(I64) `:34` · `sort_by`(Str) `:35` · `desc`(Bool) `:36` | `manual_type_tag`(Str) `:51` · `secondary_tag`(Str) `:55` · `author_id`(Str) `:59`（**三个都条件设置**）· `total_articles`(I64) `:71` | 2 | 1（`:66`）|
+| `upload_file_logic.go:40` | `article-rpc` | `UploadFile` | `file_name`(Str) `:43` | `file_id`(I64) `:53` · `content_type`(Str) + `object_name`(Str) `:62` | 2 | 2（`:49` `:76`）|
+
+⇒ ⇒ **属性名合计 15 个（裸名，无 `biz.` / `sea.` / `audit.` 前缀）**：
+String 9 = `author_id` · `title` · `article_id` · `sort_by` · `manual_type_tag` · `secondary_tag` · `file_name` · `content_type` · `object_name`；
+Int64 4 = `page` · `page_size` · `total_articles` · `file_id`；Bool 2 = `desc` · `article_found`。
+⚠️ **属性名口径与 favorite 域的 `biz.*` / comment 域的 `audit.*` 完全不同域 ⇒ 不可套用**。
+
+⚠️ **事件名带空格**（不是 `snake_case`）⇒ 逐字保留：
+`GetArticle` 8 个 = `"start find article"` `:53` · `"find article success"` `:64` · `"start incr view count"` `:71` ·
+`"incr view count success"` `:77` · `"start get minio object"` `:82` · `"get minio object success"` `:93` ·
+`"start read minio object"` `:95` · `"read minio object success"` `:102`；
+`ListArticles` 2 个 = `"start db list"` `:62` · `"db list success"` `:70`；
+`UploadFile` 2 个 = `"start upload to minio"` `:66` · `"upload to minio success"` `:82`。
+
+**② 🔴 三处「Go 不记这个错误」的缺口（本轮把行号现核）**：
+
+| 缺口 | 位置 | Go 的写法 | RAG 侧要对齐成 |
+|---|---|---|---|
+| `UpdateArticle` 的 `setReviewNonce` 失败 | `update_article_logic.go:89-90`（switch 分支）· `:108-109`（default 分支）| `return nil, err` —— **没有** `span.RecordError` | **不记** |
+| `GetArticle` 的 NotFound | `get_article_logic.go:56-59` | `span.SetAttributes(attribute.Bool("article_found", false))` ＋ `return nil, status.Error(codes.NotFound, …)` —— **没有** `RecordError` | **不记**（改用 `article_found=false` 表达）|
+| `GetArticle` 的 PermissionDenied | `get_article_logic.go:66-68` | `return nil, status.Error(codes.PermissionDenied, …)` —— **没有** `RecordError` | **不记** |
+
+⇒ ⇒ **「业务失败也记」**（`DeleteArticle` 的 5 处、`CreateArticle` 的 4 处里含业务类）⇒ ⇒
+🔴 **不能用「异常类型 = 业务异常 ⇒ 一律不记」这种一刀切判据**（comment 域那套「业务码段」判据**在本域不适用**）
+⇒ ⇒ **判据必须是「逐点白/黑名单」**。
+
+**③ 🔴 两处时机差（原口径已记，本轮现核）**：
+
+| 差异 | Go 侧 | RAG 侧要对齐成 |
+|---|---|---|
+| `GetArticle` 的**前置校验在 span 之前** | `:41-46`（`PublicOnly` → `getPublicArticle`；`RequesterId != "" && IncrView` → InvalidArgument）⇒ **这两条路径根本不存在 span** | **前置校验必须在 span 之外** |
+| 其余 5 个的**起始属性在方法第一行** | 早于入参校验 ⇒ **非法入参也会产生一个带属性的 span** | 起始属性**在入参校验之前**设置 |
+
+**④ 🔴 一处「记了但不返回」**（`get_article_logic.go:72-75`）：`IncrViewCount` 失败 ⇒ **记 `RecordError` ＋ 记日志，但 `return` 继续往下走**
+⇒ ⇒ **RAG 侧若按「抛异常 ⇒ 整个 span 记一次」处理，就会与 Go 不一致**（Go 是「记了，但方法继续、最终成功返回」）⇒ ⇒ **这条要单独表达**。
+
+**⑤ 2 个 consumer span —— 🔴 本轮实测：RAG 侧**没有**接共享层那座 ⇒ 缺**
+
+| 侧 | 事实 |
+|---|---|
+| Go | `internal/mqs/article_consumer.go:45` ＝ `observability.TraceConsumer(ctx, "article-rpc", "ArticleConsumer.Consume", articleMessageAttrs("article_review", key), …)`；`internal/mqs/article_sync_result_consumer.go:40` ＝ 同款，span 名 `ArticleSyncResultConsumer.Consume` · topic `article_sync_result` |
+| Go 的属性 | `internal/mqs/article_consumer.go:144-150` `articleMessageAttrs(topic, key)` ⇒ **4 个**：`messaging.system`="kafka" · `messaging.destination`=topic · `messaging.operation`="consume" · `messaging.message.key`=key |
+| Go 的语义 | `service/common/observability/mq.go:12-27` ⇒ tracer=`article-rpc` · **SpanKind = CONSUMER** · `trace.WithAttributes(attrs...)` · `defer span.End()` |
+| **共享层（RAG）** | `service/common/src/main/java/com/rag/common/observability/MqConsumer.java:71-123` `traceConsumer(...)` ⇒ **与 Go 的 `TraceConsumer` 逐项同构**（SpanKind=CONSUMER `:83` · attrs map `:86-93` · 错误分档 `:110-117` · `finally span.end()` `:120-122`）⇒ ⇒ **共享层这一半已经齐了** |
+| **域侧（RAG）缺口** | 实测 `service/article/**/src/main/java` 下 `MqConsumer` **0 命中**（只有 `target/` 里的 jar 命中 ⇒ 是共享层那份）⇒ ⇒ article-rpc 用的是**自己的** `@KafkaListener`：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mq/ArticleReviewConsumer.java:100` ＋ `ArticleSyncResultConsumer.java:77` ⇒ ⇒ 这两个类里 `Span` / `Tracer` / `otel` **0 命中** ⇒ ⇒ **2 个 consumer span 全缺** |
+
+⇒ ⇒ **⇒ 好消息：consumer span 这一半**不需要动共享层**（共享层那座已与 Go 同构）⇒ ⇒ **纯域侧接线**：
+把两个 consumer 的处理体包进 `MqConsumer.traceConsumer(ctx, "article-rpc", "ArticleConsumer.Consume" / "ArticleSyncResultConsumer.Consume", 4 个 `messaging.*` 属性, body)`。
+⚠️ **类名对应关系待核**：Go 叫 `ArticleConsumer`，RAG 叫 **`ArticleReviewConsumer`** ⇒ ⇒ **不能默认一一对应** ⇒ 落码前要逐条核 RAG 那个类消费的是不是 Go `ArticleConsumer` 消费的那个 topic。
+
+**⑥ 共享层已覆盖、不要重复做**：server span 的**业务/系统错误分档**（`sea.error.kind` ＋ `SetStatus`）在共享层 `RpcInterceptor` 里
+⇒ ⇒ 域侧这 8 个 span **只对齐 Go 的 logic 层行为**；
+且 Go 侧 `service/article/` 全树 `span.SetStatus` = **0 次** ⇒ ⇒ **域侧这 8 个 span 一律不得自行设 ERROR 状态**。
+
+**⑦ 🔴 落码方案（本轮定的设计，建议下轮按此落）——「显式逐点记录」，不要「异常逃出就记」**
+
+comment 域的 `CommentSpans` 用的是「异常逃出 ⇒ 按业务码段判一次」⇒ ⇒ **本域用不了**（② 的三处缺口要「不记」，
+④ 要「记了但不返回」）⇒ ⇒ **本域应把 live `Span` 交回给业务方法，在 Go 的每个 `RecordError` / `AddEvent` 点显式调用**：
+
+- ⇒ **逐点 1:1 映射**（24 处 `RecordError` + 12 处 `AddEvent` + 15 个属性）⇒ ⇒ **不可能漏、也不会多记**；
+- ⇒ 缺口 ② 的三处 ⇒ **不调 `recordException`** 即可（天然「不记」，不需要 sentinel、不需要改异常类型）；
+- ⇒ 缺口 ④ ⇒ 在该分支里显式 `recordException` 而**不抛**；
+- ⇒ 与共享层无冲突（域侧不碰 `service/common`）⇒ ⇒ **纯域侧改动**。
+
+**⑧ 🔴 本轮结论：取证**已完整**，阻断**不是取证，是落地机制**
+- 取证：**已完成**（本节 ①~⑥ 逐条现核，含原口径漏掉的 `AddEvent` 一维 ＋ consumer span 的属性/Kind/共享层同构性）；
+- 落点：**已无歧义** ⇒ 6 个 logic span ⇒ `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/service/ArticleDomainService.java`
+  的 6 个方法（`createArticle` · `getArticle` · `updateArticle` · `deleteArticle` · `listArticles` · `uploadFile`）
+  ＋ 2 个 consumer span ⇒ `mq/ArticleReviewConsumer.java` ＋ `mq/ArticleSyncResultConsumer.java`（**接共享层 `MqConsumer` 即可**）；
+- 范式：照抄 comment 域的 `CommentSpans.java`（`service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentSpans.java`）
+  ⇒ ⇒ 但**要多一维「能打事件」**，且**错误记录改成逐点显式**（不是异常逃出统一判）；
+- ⇒ ⇒ **下一轮可直接落码**（本轮**只做取证补全**，**未改任何生产代码** ⇒ ⇒ 本域基线不受影响）。
+
 ## 4. 需转派 **G4**（`align/g4-service-common`）的（**本域只登记：现象 + 证据 + 建议修法**）
 
 > 派单走**实时轨**（`session send` ＋ 反馈单 7 项）＋ **正式轨**（本表）⇒ 两轨内容须一致（AGENTS.md §5.3e）。
