@@ -132,7 +132,19 @@
 
 | 项 | 内容 |
 |---|---|
-| **被卡住的 4 件事** | ① Redis 断连快速失败的**活体对拍**（favorite-api 侧）—— ⚠️ **本域现状已核清（2026-10-27 · 独立实测，不是转述）**：**我四域的域侧副本 = 0**（全仓生产代码里 `RedisDisconnectedBehaviorConfig` 只命中 G1 域的 `users/user/user-api` 等 **5** 份 ⇒ 我域**零命中**）⇒ ⇒ **G4 收编时的删除动作在我域 = 0**（与 G1 的 5 份不同）；且**我树共享层根本没有 redis 自动配置**（`find service/common/src/main/java -iname "*redis*"` ⇒ 零命中；`2f12236` 不在 HEAD 历史）🔴 **订正（2026-10-27 第十八轮 · 合并后）**：**这一条已不成立** —— merge `e18fd52` 把 `align/g4-service-common` @ `cd893d1` 合入 ⇒ ⇒ `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java` **已在本树** ⇒ ⇒ 「共享层那份**必被创建**」现在**可在树内验**（我四域仍**零域侧副本** ⇒ **无遮蔽** ⇒ 收编成立）⇒ ⇒ **「G4 收编时的删除动作在我域 = 0」这条结论不变**（域内副本数仍为 0）⇒ ⇒ **我域不是「被域内副本遮蔽」，而是「两边都没有」** ⇒ ⇒ 断连快速失败在我域**尚未成立** ⇒ ⇒ **活体对拍必须等共享层落地**（这正是它卡在选项 D 的原因）<br>② 删域侧排序桥副本（本域 **article-rpc / favorite-rpc** 各 1 份）③ client breaker **装配复验**（= §4-G4-2）④ **U15 / C-3 统一载体**落地（= global E65） |
+| **被卡住的 4 件事** | ① Redis 断连快速失败的**活体对拍**（favorite-api 侧）—— ⚠️ **本域现状已核清（2026-10-27 · 独立实测，不是转述）**：**我四域的域侧副本 = 0**（全仓生产代码里 `RedisDisconnectedBehaviorConfig` 只命中 G1 域的 `users/user/user-api` 等 **5** 份 ⇒ 我域**零命中**）⇒ ⇒ **G4 收编时的删除动作在我域 = 0**（与 G1 的 5 份不同）；且**我树共享层根本没有 redis 自动配置**（`find service/common/src/main/java -iname "*redis*"` ⇒ 零命中；`2f12236` 不在 HEAD 历史）🔴 **订正（2026-10-27 第十八轮 · 合并后）**：**这一条已不成立** —— merge `e18fd52` 把 `align/g4-service-common` @ `cd893d1` 合入 ⇒ ⇒ `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java` **已在本树** ⇒ ⇒ 「共享层那份**必被创建**」现在**可在树内验**（我四域仍**零域侧副本** ⇒ **无遮蔽** ⇒ 收编成立）⇒ ⇒ **「G4 收编时的删除动作在我域 = 0」这条结论不变**（域内副本数仍为 0）⇒ ⇒ **我域不是「被域内副本遮蔽」，而是「两边都没有」** ⇒ ⇒ 断连快速失败在我域**尚未成立** ⇒ ⇒ **活体对拍必须等共享层落地**（这正是它卡在选项 D 的原因）<br>② 删域侧排序桥副本（🔴 **2026-10-27 订正：原写「本域 article-rpc / favorite-rpc 各 1 份」是**漏了本域** ⇒ 本域自己也有 1 份（`service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` ＋ 自己的 `imports:1`）⇒ **全仓 9 座域侧桥**（article / comment / favorite / follow / like / message / task / users-user / users-admin）⇒ 本域那份此前**没进过台账**）
+> 🔴 **2026-10-27 · G3 独立核结论（4 项全过 ⇒ 删除动作本身结构上安全，但**等真 PG 窗口**才落刀）**
+> ① **共享层那份是自动配置**：`service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:4` 登记了 `com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration`
+>    ⇒ **每个消费者 classpath 上都会加载** ⇒ **前置已满足**（`e18fd52` 已把它合进本树）；
+> ② **两份排序边同向同目标**：共享层**字符串版**（`afterName`/`beforeName`）＝ 域内**类字面量版**（`after = …class` / `before = …class`）
+>    ⇒ **同一条边、同一个方向** ⇒ 排序图里多一个同向节点、**无环**、功能等价 ⇒ 共存**不改变任何行为**；
+> ③ **两份都不注册任何 bean** ⇒ ⇒ **无同名 bean 冲突** ⇒ 共存**结构上安全**（不是「侥幸没炸」）；
+> ④ **域内那份外部引用 = 0 命中**（`grep -rn "config.MybatisPlusOrderingBridgeAutoConfiguration" --include=*.java service/comment` ⇒ 只命中文件自身）
+>    ⇒ ⇒ **删除不断编译**。
+> ⇒ **删除动作 = 纯删减**，但**运行期验证**需要真 PG ⇒ ⇒ **当前被机器级 Docker 端口转发故障阻塞** ⇒ ⇒ 本轮**只落核结论，不落删除**。
+> ⚠️ **附带（删 imports 的具体形态）**：`comment-rpc` 的 `imports` 文件**只有这一行**（= 桥类）
+> ⇒ ⇒ 删桥后**文件变空** ⇒ 决定**连文件一起删**（空 imports 文件无意义）。
+③ client breaker **装配复验**（= §4-G4-2）④ **U15 / C-3 统一载体**落地（= global E65） |
 | **共同前置** | 共享层的落码 commit **不在我树 HEAD 历史**（`2e2a84f` · `a1a2e05` · `e3f2046` ⇒ `git merge-base --is-ancestor` 对我树 HEAD **全为否**，仅 object 库里存在）⇒ ⇒ **共享层标准件没进我树 ⇒ 我不能先删域侧副本**（先删 ⇒ MP 排序边消失 ⇒ 上下文起不来） |
 | **选项 D（本轮新增 · 我推荐）** | 我直接 `git merge align/g4-service-common` 到我树 ⇒ **同一仓库 ⇒ 提交对象共享 ⇒ 不产生「内容同、hash 异」的副本** ⇒ 合主干时**不会** add/add 撞 ⇒ ⇒ **只需你给一个稳定点**（从哪个 commit 起） |
 | **其他选项** | **A**（你合主干后我合主干）· **B**（我 cherry-pick ⇒ **会**造出 hash 不同的副本 ⇒ 合主干时大概率撞）· **C**（你替我合） |
