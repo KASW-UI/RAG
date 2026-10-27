@@ -1018,9 +1018,14 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 | 15 | `service/article/article-api/…/ArticleApiMvcPipelineTest.java:1143` + `:1159` | 2 | **故意**（`ext_info` 的 **key** 钉死码点序 + 同一测试类里的 FFFD 断言） | — | **不动**（G3 已判） |
 | 16 | `docs/Pitfalls/users/user/rpc.md:146` | 1 | **故意**（`'用户不␦?'` = 故意记录「末字已不可恢复」） | — | **不动**（本域） |
 | 17 | `docs/Pitfalls/message/rpc.md:911` / `:921` | 2 | **故意**（`CONTAINER␦: unbound variable` = **shell 报错原文样本**） | — | **不动**（G2 域） |
-| 18 | 🔴 `tools/errmsg-probe/README.md:59` | 3 | **真损坏**（「未登记码的回␦␦␦结果」） | ❌ **无人拥有** | 🔴 **待整合者认领** |
-| 19 | 🔴 `tools/sql-statement-probe/favorite/compare.py:561` | 3 | **真损坏** | ❌ **无人拥有**（`tools/**` 非 lane 白名单） | 🔴 **待整合者认领** |
-| 20 | 🔴 `component-semantic-verification/springboot-semantic-model.md:269` / `:320` | 5 | **真损坏** | ❌ **无人拥有** | 🔴 **待整合者认领** |
+| 18 | 🔴 `tools/errmsg-probe/README.md:59` | 3 | **真损坏**（「未登记码的回␦␦␦结果」） | ✅ **G4 已认领并修** | 🟢 **已关闭**（G4 `cc6e38e` · 原文取自同仓完好副本，不靠猜） |
+| 19 | 🔴 `tools/sql-statement-probe/favorite/compare.py:561` | 3 | **真损坏** | ✅ **G4 已认领并修** | 🟢 **已关闭**（G4 `cc6e38e`） |
+| 20 | 🔴 `component-semantic-verification/springboot-semantic-model.md:269` / `:320` | 5 | **真损坏** | ✅ **G4 已认领并修** | 🟢 **已关闭**（G4 `f68a9cd` · 原文按语义补回） |
+
+> 🟢 **2026-10-27 订正**：#18~#20 这 **3 份「无人拥有」** 已由 **G4 认领并修复**
+> （随 `6375faf` 合入我树 ⇒ 合并态我树这 3 份**零命中**）
+> ⇒ ⇒ **「待整合者认领」这条待办【关闭】** ⇒ ⇒ §20.2 合并规则里
+> 「合并后目标 = 7 份文件命中」**已过期** ⇒ 实际目标 = **只剩 6 处故意（4 份文件）**。
 
 ### 20.2 ⇒ ⇒ **合并规则（写死，别再逐次口头对）**
 
@@ -1874,3 +1879,96 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 > ⚠️ ⇒ **`docs/FileTree/**` 的那批行要等 G2 / G3 也删完之后再一次性改** ⇒
 > **否则会出现「FileTree 说 like-rpc 有桥、但 like-rpc 已删」的半旧状态** ⇒
 > ⇒ **这 9 处不急 ⇒ 但必须登记在案 ⇒ 不能因为「不是我的写权」就当它不存在**。
+
+---
+
+## 29. 🆕 **Redis 超时「联动条款」的机制复核（2026-10-27 · G2 提出 · G1 独立复核 ＋ 确认接受）**
+
+> **本节记录**：G2 第九轮回信提出的「共享层 customizer 改动 ⇒ 影响各域守门」的**真实机制**。
+> ⇒ **我域逐条独立复核（不采信转述）**，结论：**成立**，且**我域守门已覆盖** ⇒ **我域接受该条款，零落码**。
+
+### 29.1 ✅ **机制复核：逐条成立（G1 自己读源码 ＋ 字节码）**
+
+| G2 的说法 | G1 独立实测 | 结论 |
+|---|---|---|
+| `LettuceConnectionConfiguration.createClientOptions(ObjectProvider<LettuceClientOptionsBuilderCustomizer>, SslBundle)` | `spring-boot-data-redis-4.0.8-sources.jar` ⇒ `LettuceConnectionConfiguration.java:208-210` | ✅ 成立 |
+| `connectTimeout` ⇒ `builder.socketOptions(SocketOptions.builder().connectTimeout(connectTimeout).build())` | 同文件 `:212-215` | ✅ 成立 |
+| `builder.timeoutOptions(TimeoutOptions.enabled())` | 同文件 `:229` | ✅ 成立 |
+| **customizer 最后执行**（`:230`）⇒ 共享层那份能覆盖 Boot 刚设的值 | 同文件 `:230` = `clientConfigurationBuilderCustomizers.orderedStream().forEach((customizer) -> customizer.customize(builder));` | ✅ 成立 |
+| `ClientOptions$Builder.timeoutOptions(...)` / `socketOptions(...)` 是**替换语义**（不是合并） | `javap -p -c` 实测 `io.lettuce.core.ClientOptions$Builder.timeoutOptions` = **`putfield` ⇒ 整体替换** | ✅ 成立 |
+
+### 29.2 🟢 **可达性分级（G1 采纳）**
+
+| 判据 | 落点 | 共享层 customizer 能覆盖吗 |
+|---|---|---|
+| 命令超时 **3s** | `LettuceClientConfiguration.Builder.commandTimeout` ⇒ `getCommandTimeout()` ⇒ `RedisURI.timeout` | **不能**（不是同一个 builder） |
+| 连接超时 **5s** | `ClientOptions.Builder.socketOptions`（`:213-214`） | **能** |
+| 机制位 `timeoutOptions.enabled()` | `ClientOptions.Builder.timeoutOptions`（`:229`） | **能**（覆盖 ⇒ `applyConnectionTimeout` 位丢失） |
+
+⇒ ⇒ **登记的联动条款（我域确认接受）**：
+> **共享层 customizer 若新增 `timeoutOptions(...)` / `socketOptions(...)` 调用**
+> （E66「Redis 命令感知 deadline」正是这条路）⇒ **必须与受影响域的守门同一次提交一起改**。
+
+### 29.3 🟢 **我域守门【已覆盖】这两个面 ⇒ 我域零落码**
+
+我域 **5 份** Redis 守门（`UserRpc` / `AdminRpc` / `UserApi` / `AdminApi` / `FollowApi` 的 `*RedisDisconnectedFastFailTest`）
+实测**每份都有**（grep 5/5 命中）：
+
+| 我域断言 | 抓什么 |
+|---|---|
+| `getSocketOptions().getConnectTimeout() == Duration.ofSeconds(5)` | **连接超时的消费层锚点** ⇒ 共享层改 `socketOptions` ⇒ **红** |
+| `getClientConfiguration().getCommandTimeout() == Duration.ofSeconds(3)` | 命令超时的消费层锚点 |
+| `options.getTimeoutOptions().isApplyConnectionTimeout()` | **机制腿** ⇒ 共享层改 `timeoutOptions` ⇒ **红** |
+| `connectionFactory.getTimeout() == 3000L` | 连接级 timeout（`source` 恒 −1 ⇒ 时长只能走这一路） |
+| `getBeansOfType(LettuceClientOptionsBuilderCustomizer)` **size()==1** ＋ bean 名 = `goStyleRedisClientOptionsCustomizer` | 收编真的发生了（不是两份叠加、也不是一份都没） |
+
+⇒ ⇒ **我域不会出现「共享层改了 ⇒ 我域静默」** ⇒ **E66 落地时我域不用改守门**，
+只需提醒 E66 本身**别把我域这 5 份守门的期望值改掉**。
+
+### 29.4 🔴 **订正 G2 的一条过时前提**
+
+G2 第九轮回信写：「你域的 `RedisDisconnectedBehaviorConfig.java:103` 那份**域内副本**会**遮蔽**共享层 ⇒ 共享层那次改动在**你域静默不生效**」
+⇒ ⇒ **这条在我域【已不成立】** —— 我域那 **5 份域内副本已在提交 `312a09b` 全部删除**
+（`find service/users service/follow -name "RedisDisconnectedBehaviorConfig.java"` ⇒ **零命中**）
+⇒ ⇒ **我域不存在「遮蔽 ⇒ 静默不生效」那个面** ⇒ **我域守门已经能看见共享层的后续改动**。
+⚠️ G2 的**结论方向**（「删域内副本是让联动条款真正生效的前提」）**完全正确** —— 只是**我域已先做完**。
+
+### 29.5 🟢 **附带关闭**：3 份「无人拥有 U+FFFD」已由 G4 认领并修
+
+| 原编号 | 文件 | G4 提交 |
+|---|---|---|
+| #18 | `tools/errmsg-probe/README.md:59` | `cc6e38e`（原文取自同仓完好副本，不靠猜） |
+| #19 | `tools/sql-statement-probe/favorite/compare.py:561` | `cc6e38e` |
+| #20 | `component-semantic-verification/springboot-semantic-model.md:269` / `:320` | `f68a9cd`（原文按语义补回） |
+
+⇒ 随 `6375faf`（再并 G4 `6cb0a60`）合入我树 ⇒ 合并态我树这 3 份**零命中**
+⇒ ⇒ **「待整合者认领」这条待办【关闭】** ⇒ ⇒ §20.2 合并规则的「目标 = 7 份文件命中」**已过期**
+⇒ **实际目标 = 只剩 6 处故意（4 份文件）**。
+
+### 29.6 🟢 **共享层 javadoc 变更复核**：`RpcInterceptor.java` 的改动**只是 javadoc**
+
+`87d72e0 → 6cb0a60` 的 `RpcInterceptor.java` 差异 = **21 行全是 javadoc**（FB-04 计数口径订正）
+⇒ **零代码变更** ⇒ ⇒ 对我域**零影响** ⇒ 仍按 C7 跑了合并后回归（见 §29.7）。
+
+### 29.7 🟢 **C7 回归（合并 G4 `6cb0a60` 后）**
+
+- 命令：`mvn -B -o -DargLine=-Xmx2g -am -pl <我域 6 模块> clean test` ⇒ **MVN_EXIT=0 / BUILD SUCCESS**。
+- 口径 = **按本域模块的 surefire 报告目录**统计（不把 reactor 总数当本域数）：
+
+  | 模块 | 用例数 | 报告份数 | f/e/s |
+  |---|---|---|---|
+  | `service/users/user/user-api` | 121 | 22 | 0/0/0 |
+  | `service/users/user/user-rpc` | 144 | 21 | 0/0/0 |
+  | `service/users/admin/admin-api` | 140 | 17 | 0/0/0 |
+  | `service/users/admin/admin-rpc` | 118 | 22 | 0/0/0 |
+  | `service/follow/follow-api` | 68 | 8 | 0/0/0 |
+  | `service/follow/follow-rpc` | 78 | 11 | 0/0/0 |
+  | **我域合计** | **669** | **101** | **0/0/0** |
+  | ＋ `service/common`（共享层） | 327 | 62 | 0/0/0 |
+  | **总计** | **996** | **163** | **0/0/0** |
+
+- ⇒ ⇒ **与合并前（§28.6）逐项完全一致 ⇒ 共享层那 4 笔（含新测试 `GoStyleJsonContentTypeCharsetTomcatTest`）对我域零回归**。
+- ⇒ 门禁（合并态）：`check-wave-lane-ownership.py` **0** · `check-wave-role-model.py` **0** ·
+  `check-doc-links.py` **0** · `check-ledger-count.py` **0** · **`check-wave-coupling.py` 1**（仍是我域那一条既有项）。
+- ⇒ **U+FFFD**：我域写权面 **4 份 / 14 处**（与合并前一致，**零新增**）；
+  而 §29.5 那 **3 份「原无人拥有」实测归零** ⇒ **真损坏已全部消除**。
