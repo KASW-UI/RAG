@@ -938,7 +938,7 @@ SEMANTICALLY NOT EQUIVALENT
 
 - **Go 行为**：`httpx/requests.go:66-68` 的 `ParseJsonBody` 在 `Parse` 里**无条件**执行；
   `httpx/requests.go:153-155` 的 `withJsonBody(r)` = `r.ContentLength > 0 && strings.Contains(Content-Type, "application/json")`；
-  `core/mapping/jsonunmarshaler.go:45-53` 先 `jsonx.UnmarshalFromReader`（**JSON 语法校验**）再按 json tag 填字段。
+  `core/mapping/jsonunmarshaler.go:45-52` 先 `jsonx.UnmarshalFromReader`（**JSON 语法校验**）再按 json tag 填字段。
 - **Go 活体探针实测**（Content-Type: application/json）：
 
   | body | Go | RAG 修前 | RAG 修后 |
@@ -1694,7 +1694,7 @@ RAG：`--rag.protection.max-conns=8`），16 个请求**完全重叠**（两侧�
 ### 现象
 
 在「桩切 `article-slow-short` ⇒ 补全拖过 3s HTTP 超时」的场景下打 HTTP 级熔断
-（`breakerhandler.go:19-44`，判别器 = **503 且 body 为空** vs **503 且 body = `Request Timeout\n`**）：
+（`breakerhandler.go:22-29`，**503 裸写在 `:27`** ⇒ body 为空；判别器 = **503 且 body 为空** vs **503 且 body = `Request Timeout\n`**）：
 
 | 轮次 | Go 真源 | RAG |
 |---|---|---|
@@ -1743,10 +1743,23 @@ Go 侧 zrpc 的超时是 `zrpc/client.go:70-71` + `TimeoutInterceptor` ⇒ **min
 | **MaxBytes** | `rest/handler/maxbyteshandler.go:10-25` | 两侧**默认阈值**下：超限 → **413 + 空 body + 无 Content-Type**（逐字节相同）；**恰好等于阈值** → 两侧都放行（200 + 同一份 1112B 信封） | ✅ **EQUIVALENT**（连接层有一处已记录差异 ⇒ **DRIFT-HOTAPI-026**） |
 | **MaxConns** | `rest/handler/maxconnshandler.go:12-36` | 两侧**同阈值 8** + 16 并发 → **各 8 个裸 503（空 body）**，拒绝数恰等于阈值 | ✅ 机制 **EQUIVALENT**；⚠️ **默认阈值 10000 下 RAG 侧结构性不可达**（Tomcat 200 线程 / 8192 连接）⇒ **DRIFT-HOTAPI-027** |
 | **CpuShedding** | `rest/handler/sheddinghandler.go:20-52` + `core/load/adaptiveshedder.go` | 🔴 **darwin 上 Go 侧结构性不可达**：`core/stat/internal/cpu_other.go` 带 `//go:build !linux` ⇒ `RefreshCpu()` 恒 0 ⇒ `stat.CpuUsage()` 恒 0 ⇒ `systemOverloaded()` 恒 false ⇒ `shouldDrop()` 永假。**活体佐证**：Go 自己的 stat 行打 `CPU: 0m` | 🟡 **无法双侧活体对拍**（平台事实，非实现缺陷）⇒ 证据降级为：① 源码逐条对照；② **go-zero 上游自带测试**（`core/load` / `core/breaker`，从 module cache 复制到 /tmp 跑，**真源仓库零改动**）全绿；③ RAG 侧 `GoStyleAdaptiveShedderTest` 10 例覆盖**同一组场景**（含 `overloadedAndHighInFlightSheds`） |
-| **Breaker** | `rest/handler/breakerhandler.go:19-44` | 两侧都能**真的打开**，拒绝形态 = **裸 503 + 空 body**（与超时的「503 + `Request Timeout\n`」可区分） | ✅ 机制 **EQUIVALENT**；⚠️ 当时「打开时机不稳定」⇒ **U5-OPEN-1** ⇒ **第十一轮已定性并修复**（根因 = 补全预算取样时刻 ⇒ **DRIFT-HOTAPI-029**）⇒ 修后两侧**逐波完全一致** |
+| **Breaker** | `rest/handler/breakerhandler.go:18-42`（**503 裸写在 `:27`**；判别器 `cw.Code < 500` 在 `:33`） | 两侧都能**真的打开**，拒绝形态 = **裸 503 + 空 body**（与超时的「503 + `Request Timeout\n`」可区分） | ✅ 机制 **EQUIVALENT**；⚠️ 当时「打开时机不稳定」⇒ **U5-OPEN-1** ⇒ **第十一轮已定性并修复**（根因 = 补全预算取样时刻 ⇒ **DRIFT-HOTAPI-029**）⇒ 修后两侧**逐波完全一致** |
 
 > **证据强度**：MaxBytes / MaxConns / Breaker 三闸 = **双侧活体**（最强档）；
 > CpuShedding = **静态 + 上游参考测试**（本机不可能更强）。
+
+### 📌 订正注记（2026-10-27 · G3 · 21:0x）：本域 **3 处引用行号越界**已实修（**结论一个字未改**）
+
+⚠️ **本块是「加注记」，不是「改原值」** ⇒ 上文那些**机制结论**全部**原样有效** ⇒ 本轮只改**引用指针**。
+
+| 位置 | 原引用 | 事实 | 实修 |
+|---|---|---|---|
+| 上文 `DRIFT-HOTAPI-013` 段 | `core/mapping/jsonunmarshaler.go:45-53` | go-zero v1.10.2 该文件**只有 52 行** ⇒ `53` 越界 | ⇒ 改为 **`core/mapping/jsonunmarshaler.go:45-52`**（`unmarshalJsonReader` 全函数；`jsonx.UnmarshalFromReader` 在 `:47`，按 json tag 填字段在 `:51`）|
+| 本节「现象」段 | `breakerhandler.go:19-44` | 同上 ⇒ 该文件**只有 42 行** ⇒ `44` 越界 | ⇒ 改为 **`breakerhandler.go:22-29`**（`if err != nil` 分支；**503 裸写在 `:27`**）|
+| 本节 Breaker 行 | `rest/handler/breakerhandler.go:19-44` | 同上 ⇒ `44` 越界 | ⇒ 改为 **`rest/handler/breakerhandler.go:18-42`**（`BreakerHandler` 全函数；**503 裸写在 `:27`**；判别器 `cw.Code < 500` 在 `:33`，`promise.Accept()` 在 `:34`，`promise.Reject(...)` 在 `:36`，`next.ServeHTTP` 在 `:39`）|
+
+⇒ **G2 通报来源**：`docs/DRIFT/global/_README.md:569` 已把这条登记为 **hot 域漂移**（「🔴 行号越界 —— go-zero `rest/handler/breakerhandler.go` 只有 42 行 ⇒ `44` 越界」）⇒ ⇒ **owner = G3** ⇒ 本域自修。
+⇒ **顺带记一条方法论**：**真源的 api 入口文件名【逐域不同】，不能按 go-zero 惯例推** —— 实测 `service/article/api/article.go` · `service/favorite/api/favorite.go`（**无 center**）· 但 `service/hot/api/hotcenter.go` · `service/comment/api/commentservice.go`（**有 center/service**）⇒ ⇒ **按惯例猜文件名 ⇒ 必错** ⇒ ⇒ **必须逐个 `ls` 真源**。
 
 ---
 

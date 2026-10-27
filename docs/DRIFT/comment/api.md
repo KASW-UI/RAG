@@ -130,8 +130,19 @@
 | **D2** | Bearer 前缀剥离的**长度边界** | `golang-jwt/jwt/v4/request/oauth2.go:8-14`：`len(tok) > 6 && ToUpper(tok[0:7]) == "BEARER "` | `users-common/.../BearerTokenExtractor.java:74-81`：判据 `length() > 7` | 长度恰为 7 的头（`"Bearer "`）：Go 剥成空串→解析失败→**401**；RAG 保留整串→解析失败→**401**。**结局相同**，仅错误文本不同 ⇒ 当前不可观察，可对齐为 `> 6` 以消除隐患 |
 | **D3** | 熔断**隔离键** | `zrpc/internal/clientinterceptors/breakerinterceptor.go:13-18` `path.Join(cc.Target(), method)` | `common/protection/GoStyleGrpcClientBreakerInterceptor.java:193` `method.getFullMethodName()`（**无 target 前缀**） | 单 channel 下不可观察；将来多 target 会把计数合并。⚠️ 该类在 `service/common` 下，**改动影响多域** ⇒ 只登记不改 |
 | **D4** | **`iat` 在未来**的 token | `golang-jwt/jwt/v4@v4.5.2/map_claims.go:124-141` `MapClaims.Valid()` → `:63-85` `VerifyIssuedAt` → `claims.go:250-255` `verifyIat`：**`now >= iat` 才有效**（**无时钟偏移容忍**）⇒ **拒绝** | **修复前** jjwt 0.12.6 **不校验 iat** ⇒ **接受** | ✅ **已修**（2026-10-24，详见 §3.1）—— 修复前 **RAG 比 Go 松**（安全面更宽） |
-| **D5** | **HS384 / HS512** 的 token | `jwt/v4/hmac.go:49-74` `SigningMethodHMAC.Verify` **不限制 alg**；go-zero 的 `rest/token/tokenparser.go:127-129` `newParser()` 也**没有** `WithValidMethods` ⇒ **接受** | jjwt 的 `verifyWith(key)` 把 key **绑死**在一个算法上（`Keys.hmacShaKeyFor` 对 32 字节 ⇒ `HmacSHA256`）⇒ 头写 HS384/HS512 ⇒ **`WeakKeyException`** ⇒ **拒绝** | ✅ **已签字偏离**（2026-10-24 用户 Jason，`SD-2026-10-24-CAND-07`）—— **RAG 更严一侧** ⇒ 代码不动 |
+| **D5** | **HS384 / HS512** 的 token | `jwt/v4/hmac.go:49-74` `SigningMethodHMAC.Verify` **不限制 alg**；go-zero 的 `rest/token/tokenparser.go:122-124` `newParser()` 也**没有** `WithValidMethods` ⇒ **接受** | jjwt 的 `verifyWith(key)` 把 key **绑死**在一个算法上（`Keys.hmacShaKeyFor` 对 32 字节 ⇒ `HmacSHA256`）⇒ 头写 HS384/HS512 ⇒ **`WeakKeyException`** ⇒ **拒绝** | ✅ **已签字偏离**（2026-10-24 用户 Jason，`SD-2026-10-24-CAND-07`）—— **RAG 更严一侧** ⇒ 代码不动 |
 | **D6** | ✅ **已签字偏离**（2026-10-24 用户 Jason）—— **保护层的覆盖范围**：未注册路径上的 **MaxBytes** | go-zero v1.10.2 `rest/engine.go:105` —— chain 只在 `bindRoute` 内拼装 ⇒ **未注册的路径根本不经 MaxBytes** ⇒ 服务端**从不返回 413**（客户端表现为 `Broken pipe`） | 4 个保护是**全局 servlet Filter** ⇒ **未注册路径也经过 MaxBytes** ⇒ **413** | ✅ **已签字**（`docs/Intentional_Deviations/comment/api.md` 的 `SD-2026-10-24-CAND-08`）⇒ **RAG 是更严/更安全的一侧** ⇒ 代码不动 ⇒ 详见 §3.2 |
+
+### 📌 订正注记（2026-10-27 · G3 · 21:0x）：D5 行 **1 处引用行号越界**已实修（**结论与签字一个字未改**）
+
+⚠️ **本块是「加注记」，不是「改原值」** ⇒ 上表 D5 的**判定与签字（`SD-2026-10-24-CAND-07`）原样有效** ⇒ 本轮只改**引用指针**。
+
+| 位置 | 原引用 | 事实 | 实修 |
+|---|---|---|---|
+| 上表 **D5** 行 | `rest/token/tokenparser.go:127-129` | go-zero v1.10.2 该文件**只有 124 行** ⇒ `127-129` 越界 | ⇒ 改为 **`rest/token/tokenparser.go:122-124`**（`func newParser() *jwt.Parser` 全函数；`:123` = `jwt.NewParser(jwt.WithJSONNumber())`）|
+
+⇒ **断言本身复核通过**：`grep -rn "WithValidMethods" go-zero@v1.10.2/rest/token/ go-zero@v1.10.2/core/jwtx/` ⇒ **0 命中** ⇒ ⇒ **「`newParser()` 没有 `WithValidMethods`」这个事实成立** ⇒ ⇒ 只有行号错，**结论不用改**。
+⇒ **核对来源**：G2 lane 通报（2026-10-27 14:10）＋ 本域**自建核对器全量扫**（覆盖 go-zero / go-redis / Go stdlib / 全模块缓存 / 真源仓 / RAG 树 ⇒ 本域 **1262** 处「文件:行号」引用逐条核「文件存在 + 行号在范围内」）⇒ ⇒ **真缺陷 7 处已全部实修**（本域 1 + hot 3 + article 1 + favorite 1 + 坑档 1）⇒ ⇒ **残留 10 项全为误报或「台账在记述历史纠错」**。
 
 ### 3.1 ✅ D4 已修：`iat` 在未来的 token ⇒ 401（此前 RAG 接受、Go 拒绝）
 

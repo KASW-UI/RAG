@@ -1937,6 +1937,26 @@ Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方�
 （`go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:15` `idleConns = 8` ⇒ `MinIdleConns = 8`），
 本域的 Go 走 **go-redis 直连**（`MinIdleConns = 0`）⇒ **两个域的 Go 客户端本就不同** ⇒ 池参数**不必同族**。
 
+#### 📌 订正注记（2026-10-27 · G3 · 21:1x）：**`PoolSize` 是「基准连接数」，不是「连接数硬上限」**（G1 lane 提出 · 本域**独立读源码复核后确认**）
+
+⚠️ **本块是「加注记」，不是「改原值」** ⇒ 上表**结论一个字未改**（本域原表的「总量上限」行**本来就写对了**）⇒ 本轮只是把**口径**写得更准。
+
+- **G1 的订正（原始出处）**：**别把「Go 最多 `10×核数` 条连接」写进台账** ⇒ ⇒ 那会把**基准值**当成**上限**。
+- **本域独立复核（go-redis v9.20.0 `options.go:200-206` 字段注释原文）**：
+  `// PoolSize is the base number of socket connections.`
+  ＋ `// If there is not enough connections in the pool, new connections will be allocated in excess of PoolSize,`
+  ＋ `// you can limit it through MaxActiveConns`
+  ⇒ ⇒ **池不够时连接数会「超出 `PoolSize`」** ⇒ ⇒ **真正的总量上限是 `MaxActiveConns`**
+  ⇒ ⇒ 本域 Go 侧 `MaxActiveConns` **未设** ⇒ **Go 无总量硬上限** ✅（上表「总量上限」行**原本就写对了**）。
+- **更精确的说法（本轮补）**：`PoolSize` 的真正作用是**「信号量容量」** ——
+  `internal/pool/pool.go:421` `semaphore: internal.NewFastSemaphore(opt.PoolSize)`
+  ⇒ ⇒ **池耗尽的上限 = `PoolSize` 这个信号量容量**
+  ⇒ ⇒ `pool.go:1098` `func (p *ConnPool) waitTurn(ctx context.Context) error` ⇒ 抢不到就
+  `pool.go:1113` `p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)`
+  ⇒ ⇒ `pool.go:1124` `case ErrPoolTimeout:` ⇒ **错误身份 = `redis: connection pool timeout`**
+  ⇒ ⇒ **并发命令数 > `PoolSize` ⇒ 必然进等待 ⇒ 上限 4s**（与上表「池耗尽等待」行**一致**）。
+⇒ **证据强度**：**L1**（两侧源码逐行）⇒ ⇒ **未做并发压测 ⇒ 不写 L4**。
+
 ### 十一.4 🔴 本轮最有价值的副产物：**光加池会引入比 Go 更糟的行为**（`max-wait` 不可省）
 
 ⚠️ **这是本轮新查出的、全仓此前无人登记的一条**（实测：`grep -rn "max-wait\|PoolTimeout\|无限等" docs/DRIFT/` ⇒ **零命中**）。

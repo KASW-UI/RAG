@@ -810,9 +810,18 @@ service/favorite/api/internal/svc/service_context.go:20
 
 ① **不是表达层差异** —— 池形态改变**可观察行为**（并发下：Go 多连接并行 vs RAG 单连接**命令串行化**）⇒ 不能按 §3.2「idiomatization 留痕」放行。
 ② **数值不可 1:1**：Go 的 `PoolSize = 10 × GOMAXPROCS(0)` 是**运行时 CPU 数推导值**；Lettuce 侧是**固定 YAML 值** ⇒ 只能近似。
-③ **两套池语义没有一一对应**：go-redis = `PoolSize`（总连接上限）+ `MinIdleConns`（空闲下限）**2 参数**；Lettuce = `max-active`（活跃上限）+ `max-idle`（空闲保留上限）+ `min-idle`（空闲下限）**3 参数** ⇒ ⇒ **不存在「逐值抄」这个动作**。
+③ **两套池语义没有一一对应**：go-redis = `PoolSize`（**基准连接数**，⚠️ **不是上限** · 见下方订正注记）+ `MinIdleConns`（空闲下限）**2 参数**；Lettuce = `max-active`（活跃上限）+ `max-idle`（空闲保留上限）+ `min-idle`（空闲下限）**3 参数** ⇒ ⇒ **不存在「逐值抄」这个动作**。
 ④ 落码需**并发活体对拍**（当前被机器级 Docker 端口转发故障阻塞 ⇒ 见 [`api.md` §14.4](#144-🔴-整域回归被机器级-docker-端口转发故障阻塞不是代码问题已用探针证伪)）。
 ⑤ 改形态会**连带影响断连语义**（共享层 `GoStyleRedisClientAutoConfiguration` 的 `disconnectedBehavior(REJECT_COMMANDS)`）⇒ 须连带验。
+
+> 📌 **订正注记（2026-10-27 · G3 · 21:1x）：上面 ③ 的「`PoolSize`（总连接上限）」措辞不准确** ⇒ **已在本行就地改正**（**原措辞保留在本句里** ⇒ 见下）⇒ ⇒ **G1 lane 提出 · 本域独立读 go-redis v9.20.0 源码后确认**。
+>
+> - **原文措辞**：「go-redis = `PoolSize`（**总连接上限**）+ `MinIdleConns`（空闲下限）」⇒ **不准确** ⇒ ⇒ `PoolSize` 是**基准连接数**，**不是上限**。
+> - **源码原文（`options.go:200-206` 字段注释）**：`// PoolSize is the base number of socket connections.` ＋ `// If there is not enough connections in the pool, new connections will be allocated in excess of PoolSize,` ＋ `// you can limit it through MaxActiveConns`
+>   ⇒ ⇒ **池不够时连接数会「超出 `PoolSize`」** ⇒ ⇒ **真正的总量上限是 `MaxActiveConns`** ⇒ ⇒ 本域 Go 侧（go-zero `redisclientmanager.go:32-40`）**未传 `MaxActiveConns`** ⇒ ⇒ **Go 无总量硬上限** ⇒ ⇒ **§15.7 里 `max-active: 64` 是「表达层硬上限」这个定位** ✅ **成立**（性能面残留已登记）。
+> - **`PoolSize` 的真正作用 = 「信号量容量」**：`internal/pool/pool.go:421` `semaphore: internal.NewFastSemaphore(opt.PoolSize)` ⇒ ⇒ **池耗尽的上限 = `PoolSize` 这个信号量容量** ⇒ ⇒ `pool.go:1098` `waitTurn()` 抢不到就 `pool.go:1113` `p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)` ⇒ ⇒ `pool.go:1124` `case ErrPoolTimeout:` ⇒ **错误身份 = `redis: connection pool timeout`** ⇒ ⇒ **并发命令数 > `PoolSize` ⇒ 必然进等待 ⇒ 上限 4s** ⇒ ⇒ 与 §15.7 里 `max-wait: 4s` 的取值依据一致。
+> - **证据强度**：**L1**（两侧源码逐行）⇒ ⇒ **未做并发压测 ⇒ 不写 L4**。
+> - ⚠️ **同族提醒**：**别把「Go 最多 `10×核数` 条连接」写进任何台账** —— 那是把**基准值**当成**上限**（与本条同一毛病的两种写法）。
 
 ⇒ **复开触发条件**（写死）：
 - 该域出现**并发下 Redis 路径 p99 明显高于 Go** 的对拍数据 ⇒ 立即复开；
