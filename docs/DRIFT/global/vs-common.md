@@ -60,7 +60,7 @@
 | 轴 | 机制 | **共享层侧落点** | 结论 | 证据强度 | 核对日期 |
 |---|---|---|---|---|---|
 | **A1** | 超时 / deadline | `observability/RpcInterceptor`（服务端 deadline 传播）· `observability/GoStyleRequestDeadline`（HTTP 预算载体）· `observability/HttpMiddleware:304`/`:336`（预算写入/清除）· `persistence/DeadlineQueryTimeoutInjector`（SQL statement timeout）· `persistence/SqlTimeoutStatusTranslator`（57014 → `DEADLINE_EXCEEDED`）· `observability/GoStyleRecoverInterceptor` | 🟡 **机制面已对齐**（HTTP 预算 → SQL 取消 → 1015 的整条链，Go 侧逐条有出处）<br>🔴 **但 rpc→rpc 出向仍不继承 deadline（E65）⇒ 共享层侧 = 半开** | **L4**（双侧探针 `run-rpc-timeout-parity.sh` EXIT=0，`client_deadline_ctx` 一致）＋ **L1**（E65 的 ThreadLocal 写入面逐行） | 2026-10-27 |
-| **A2** | gRPC 拦截器链 | `spring/RpcServerInterceptorFactory` · `observability/RpcInterceptor` · `protection/GoStyleRpcBreakerInterceptor` · `protection/GoStyleGrpcClientBreakerInterceptor`（**本轮新落** = G3 单 2）· `protection/GoStyleGrpcClientBreakerConfiguration` · `protection/GoStyleProtectionConfiguration:80`（`@Import` 桥）· `protection/GoStyleRpcProtectionChain` | ✅ **client 侧 breaker 已进共享层，10/10 rpc 零改动生效**（`GoStyleProtectionConfiguration` 被 **10/10** rpc `@Import`）<br>🟡 **但只有「有出向调用」的 rpc 组件可观测**（article-rpc `@GrpcClient`=5 · comment-rpc=2 · favorite-rpc=2；**hot-rpc=0 ⇒ N/A**） | **L3**（真容器 + 真 gRPC server 守门）＋ **L1**（10/10 `@Import` 用**剥注释后解析注解块**核出，非 grep 命中数） | 2026-10-27 |
+| **A2** | gRPC 拦截器链 | `spring/RpcServerInterceptorFactory` · `observability/RpcInterceptor` · `protection/GoStyleRpcBreakerInterceptor` · `protection/GoStyleGrpcClientBreakerInterceptor`（**本轮新落** = G3 单 2）· `protection/GoStyleGrpcClientBreakerConfiguration` · `protection/GoStyleProtectionConfiguration:80`（`@Import` 桥）· `protection/GoStyleRpcProtectionChain` | ✅ **client 侧 breaker 已进共享层，10/10 rpc 零改动生效**（`GoStyleProtectionConfiguration` 被 **10/10** rpc `@Import`）<br>🟡 **但只有「有出向调用」的 rpc 组件可观测** —— 本层**自核**（不采信转述）：`@GrpcClient` 计数 ＋ **六种出向方式**交叉核 ⇒<br>**可观测 6 个**：article-rpc **5** · comment-rpc **2** · favorite-rpc **2** · like-rpc **2** · message-rpc **2** · follow-rpc **1**<br>**N/A 4 个**：hot-rpc **0** · task-rpc **0** · user-rpc **0** · admin-rpc **0**（`@GrpcClient` / `newBlockingStub` / `newFutureStub` / `newStub` / `ManagedChannel` / `RestTemplate` / `WebClient` **全 0**） | **L3**（真容器 + 真 gRPC server 守门）＋ **L1**（10/10 `@Import` 用**剥注释后解析注解块**核出；出向面用**六种方式交叉核**） | 2026-10-27 |
 | **A3** | HTTP 保护链 | `http/GoStyleFormValues` · `http/GoStyleFormLimitMode` · `http/GoStyleFormValueLimitInterceptor` · `http/GoStyleFormLimitExceededException` · `http/GoStyleFormLimitWebMvcConfig` · `http/GoStyleTomcatParameterLimitCustomizer` · `http/GoStylePathNormalizingFilter`（**本轮新落** = FB-01）· `protection/GoStyleBreakerFilter`（键改**注册期路由模板**）· `protection/GoStyleMaxConnsFilter` · `protection/GoStyleMaxBytesFilter` · `protection/GoStyleCpuSheddingFilter` | 🟡 **共享层 11 个类已验**（含本轮新增：路径归一 / breaker 键）<br>🔴 **仍缺「10 域逐域真实请求」证据**（**共享层已验 ≠ 各域已验**）<br>⚠️ `GoStyleMaxConnsFilter` 的 MaxConns 半边 = **已签字偏离**（`SD-2026-10-25-01`）⇒ 不重复质疑 | **L3**（真 Tomcat 守门：form 闸门 / 路径归一 / breaker 模板键 / Tomcat 参数上限）＋ **L1** | 2026-10-27 |
 | **A4** | 错误码 / envelope | `http/GoStyleRouterErrorResponses`（404 / 405 **字节形状**）· `http/GoStyleFormLimitExceededException` · `exception/BusinessException` · `response/Response`（⚠️ **业务码本身在域侧** api 的 `GlobalExceptionHandler.mapRPCStatusToCode`，不在共享层） | ✅ **Go 侧「1015 从哪来」已查实并订正归因**（本轮 G3 单 3：1015 = 各 api logic `switch st.Code()` 的 **default 分支**，**不是** go-zero 的错误映射）<br>⚠️ **该结论只对 users 域成立** —— Go 侧 **article 域单列了** `codes.DeadlineExceeded`（`create_article_logic.go:66`）⇒ **不外推** | **L1**（两侧逐行对照，行号逐条核实）＋ 404/405 字节形状另有 **L3**（真 Tomcat） | 2026-10-27 |
 | **A5** | 端口治理 | 共享层侧**只有** `http/GoStyleTomcatParameterLimitCustomizer`（管的是**参数个数**，**不是端口**）；**端口段本身在域侧 yaml**（`server.port`）＋ `tools/difftest/check-tomcat-limits.py`（**整合者共享面** ⇒ 本层不写） | 🟡 **共享层在本轴落点很薄** ⇒ 端口治理的**主体不在共享层** ⇒ 本层只能给「**容器参数上限**」这一格结论，端口段以各域台账为准 | **L3**（真 Tomcat 参数上限守门）＋ **N/A**（端口段 = 域侧 / 共享脚本） | 2026-10-27 |
@@ -83,6 +83,14 @@
 > ③ **A1 / A3 共享层已验但仍半开**（E65 / 10 域逐域真实请求）⇒ 不得读成「全绿」。
 > **两侧同时跑的探针**（AGENTS.md §3.3 要求「只跑 RAG 的探针不算数」）⇒ 本层实跑：
 > `run-parity.sh`（**56 例** · EXIT=0 · A6 证据）＋ `run-rpc-timeout-parity.sh`（**3 例** · EXIT=0 · A1 证据）。
+>
+> ⚠️ **A2 的影响面是本层「自核 + 订正」的结果**（2026-10-27）：
+> G3 的订正把 G3 域内的面从「4/4」改成「**3/4**（hot-rpc N/A）」⇒ **该订正本身也不完整** ——
+> 本层逐个 rpc 用 **`@GrpcClient` 计数 ＋ 六种出向方式交叉核**，得：
+> **可观测 6 个**（article-rpc 5 · comment-rpc 2 · favorite-rpc 2 · like-rpc 2 · message-rpc 2 · follow-rpc 1）
+> ＋ **N/A 4 个**（hot-rpc 0 · **task-rpc 0** · **user-rpc 0** · **admin-rpc 0**）
+> ⇒ ⇒ **「共享层缺位」不等于「本域受害」**：缺位是**全域**事实，受害是**逐域**事实
+> ⇒ ⇒ 写影响面必须**逐域实测出向面**，不能拿一个域的结论推另一个域。
 
 ## 3. 共享层能自修的（**G4 直接修**；G1~G3 只登记 + 派单到这里）
 
@@ -831,13 +839,44 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 > **绿是因为没走到**。
 > ⇒ 判定式：**问「这条路径在本轮之前真的被执行过吗」**，而不只是问「测试绿不绿」。
 
+#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 基线 `align/g4-service-common` @ `7488b3d`）
+
+| commit | 内容 | 落点（`文件:行号`） | A 轴 |
+|---|---|---|---|
+| `3b573fb` | **G1 #8**：关闭路径不得触发 web 类型的类加载 | `service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:…`（`shutdown()` 只关 RPC 池）· **新增** `…/spring/HttpPoolLifecycle.java`（`@ConditionalOnWebApplication(type = SERVLET)`）· **新增** `…/spring/HttpPoolShutdownWithoutServletGateTest.java`（3 条）· **新增** `…/spring/HttpShutdownProbeWithoutServlet.java`（子进程探针） | A3 |
+| `2f12236` | Redis 自动配置的两处**事实订正** ＋ **遮蔽契约**守门 | `…/redis/GoStyleRedisClientAutoConfiguration.java:…`（类级 javadoc + `@Bean` javadoc）· **新增** `…/precedence/GoStyleRedisClientOptionsPrecedenceGateTest.java`（3 条）· **新增** `…/precedence/DomainLikeRedisDisconnectedBehaviorConfig.java` | A3 |
+| `2e2a84f` | **G3 单 3**：`SqlTimeoutStatusTranslator` 的「Go 出处」归因订正 + 补齐 `文件:行号` | `…/persistence/SqlTimeoutStatusTranslator.java:…` | A4 |
+| `6d9c3b2` | **§2 的 A1~A9 逐轴表** ＋ **§1 抽取快照逐条重核**（本 lane 交付主体） | `docs/DRIFT/global/vs-common.md` | A1~A9 |
+| `7488b3d` | 🔴 **静态池「终止即永久」⇒ 按需自愈**（修 #8 时暴露的潜伏缺陷） | `…/observability/RpcInterceptor.java:…`（`timeoutScheduler()` / `handleExecutor()`）· `…/observability/HttpMiddleware.java:…`（`httpExecutor()`）· **新增** `…/observability/ObservationPoolSelfHealingGateTest.java`（3 条） | A1 |
+
+**回归口径与结果（第七次全量 · 核对日期 2026-10-27）**
+
+| 项 | 值 |
+|---|---|
+| 命令 | `mvn -B clean verify`（**全量**，不是 `-pl` 子集） |
+| 结果 | ✅ **BUILD SUCCESS / `MVN_EXIT=0`** |
+| 模块数 | **52**（Reactor Summary 计数） |
+| 用例数 | **2457**（**29 个有测试的模块**逐模块求和 ⇒ 非按行序 tail） |
+| failures / errors / skipped | **0 / 0 / 4** |
+| 耗时 | **20:28 min**（09:19:51 起跑 ⇒ 09:40:19 完成） |
+| 相对上一轮 | 第五次 2448 ⇒ **+9**（本轮新增 3×3 条守门：关闭路径 / 遮蔽契约 / 池自愈） |
+| 逐模块明细 | `service/common` **307**（304 + 3）· `article-rpc` **154**（第六次同模块 2 条失败 ⇒ 本轮 0）· 其余 27 个模块与第五次逐条一致 |
+| **双侧探针**（同批次复跑） | `run-parity.sh` ⇒ **EXIT=0 · 56 例**（一致 54 · 不一致 0 · 已签字偏离 2）· `run-rpc-timeout-parity.sh` ⇒ **EXIT=0 · 3 例**（两侧一致） |
+| **三门禁**（同批次复跑） | `check-wave-lane-ownership` **EXIT=0** · `check-wave-role-model` **EXIT=0** · `check-wave-coupling` **EXIT=0** |
+| 写权自证 | 本轮改动**全部**落在 `service/common/**` ＋ `docs/DRIFT/global/vs-common.md` ⇒ **零域侧改动** |
+
+> ⚠️ **第七次之前的那次（第六次）是 BUILD FAILURE** ⇒ 失败与修法见 §4.10.8 ⇒
+> ⇒ **前五轮全量都绿，是因为 #8 的缺陷恰好挡在前面** ⇒ 那不是「本来就对」。
+
 ## 5. 交付物清单
 
-- [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
+- [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
       —— ⚠️ **共享层本身没有独立进程**（它是库）⇒ 等价形态 = **让承载它的组件真启动一次**：
-      本波新增的 `HttpPoolLifecycle` / `GoStyleRedisClientAutoConfiguration` / `GoStyleGrpcClientBreakerConfiguration`
-      都在**真容器**里被装配（守门用真 Tomcat / 真 gRPC server），
-      且**全量回归**里含各组件的**真 fat-jar 启动门禁**（`…RuntimeBootGateTest`）⇒ 见 §4.10.6 的实测结果。
+      ① 第七次全量含各组件的**真 fat-jar 启动门禁**（`…RuntimeBootGateTest`）⇒ 全部真起来过；
+      ② 本波新增的 `HttpPoolLifecycle` / `GoStyleRedisClientAutoConfiguration` / `GoStyleGrpcClientBreakerConfiguration`
+      都在**真容器**里被装配（守门用真 Tomcat / 真 gRPC server）；
+      ③ 🔴 **这一条在本轮之前是「假完成」的** —— §4.10.8 记着：修 #8 之前，`RpcInterceptor.shutdown()`
+      **从未在纯 gRPC 进程里真正执行过** ⇒ **那条路径根本没被走到** ⇒ ⇒ 本轮才第一次真正走到。
 - [x] **9 条轴**逐轴填表（§2）：结论 ✅/🔴/🟡/N/A ＋ **证据强度** ＋ **核对日期** ⇒ **2026-10-27 完成**（`6d9c3b2`）
       ⚠️ 表内含 **3 条诚实边界**（2 轴 N/A ≠ 已验 · A5 落点很薄 · A1/A3 仍半开）⇒ **不得读成「9 轴全绿」**。
 - [x] **两侧同时跑**的探针（AGENTS.md §3.3）—— 只跑 RAG 的探针**不算数**
