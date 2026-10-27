@@ -2787,6 +2787,48 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
 - 🔴 **落点归属**：`tools/check-ledger-selfcheck.py` ∈ **两张表都查不到**（4 条 lane 的写权白名单 ∪ `SHARED` 那 13 项）⇒ ⇒ **写权孤儿** ⇒ ⇒ **按「两张表」纪律 ⇒ 只能合并收口执行者改** ⇒ ⇒ **我域零落码** ⇒ ⇒ **登记给合并收口执行者**：`LEDGER_FILES` 补 `follow` 域的 5 份 ＋ `docs/DRIFT/users/{vs-common,common}.md` ⇒ ⇒ 补完后这 7 份就不用再手工扫了。
 - ⚠️ **同理提醒**：`--domain users` / `--domain users-admin` 也**只覆盖** `LEDGER_FILES` 列出的那 3+3 份 ⇒ ⇒ **每轮跑门禁必须带 `--domain`**，否则查的是 task 域。
 
+### 44.5 🟢 **落点归属订正（2026-10-28 · G4 动了那个文件 ⇒ 从「写权孤儿」改判为「G4 实权」）＋ 它一修就暴露我台账 2 条错引用**
+
+**① 落点归属改判（这一步把一项「要 Jason 拍板」变成「转派 G4」）**
+
+- §44.4 记的是：`tools/check-ledger-selfcheck.py` ∈ **两张表都查不到** ⇒ ⇒ **写权孤儿** ⇒ ⇒ 只能合并收口执行者改。
+- 🔴 **2026-10-28 实测推翻「孤儿」这个前提**：G4 的 `9037a2b`（`fix(tools): check-ledger-selfcheck 层 4 的「带版本前缀精确定位通道」是死代码 ⇒ 修提取器 + 支持短式 + 补端到端自测`）
+  **直接改了这个文件**（+115/-5）⇒ ⇒ **它事实上已是该文件的实际写权人** ⇒ ⇒
+  ⇒ ⇒ **「写权孤儿」这个描述已不成立** ⇒ ⇒ **「`LEDGER_FILES` 补 `follow` 域 5 份 + `users/{vs-common,common}.md`」这条反馈单 ⇒ 改判为【转派 G4】**
+  ⇒ ⇒ **不再需要 Jason 拍板**（登记 ≠ 派单；而这条现在有明确落点 ⇒ 就该直接给落点的人）。
+- ⚠️ **保留原记述不删**（§44.4 原文一字未改）⇒ ⇒ 这里只加改判注记。
+
+**② 它一修就暴露我台账 2 条错引用 ⇒ 已逐条重核真源并改正**（`docs/DRIFT/users/admin/rpc.md`）
+
+- **现象**：并入 G4 的 `9037a2b` 后，`check-ledger-selfcheck.py --domain users-admin` ⇒ **EXIT=1 · 2 处「行号超出文件范围」** ⇒ ⇒ **不是工具误报**。
+- **根因（两条都是我的错，且错法不同）**：
+  | # | 原引用 | 真实文件 | 判定 | 改正后 |
+  |---|---|---|---|---|
+  | 1 | `zrpc/server.go:143-170` | **168 行** | 两端都超 ⇒ **行号偏移** | `zrpc/server.go:144-168` |
+  | 2 | `zrpc/internal/**config**.go:57-60` | **30 行**，且整份是配置结构体 | **里面根本没有 `AddUnaryInterceptors`** ⇒ ⇒ **指错文件**（不是行号笔误） | `zrpc/internal/**server**.go:57-59` |
+- ⇒ ⇒ **第 2 条最阴**：`zrpc/internal/` 下 `config.go` 与 `server.go` **是两个相邻同族文件** ⇒ ⇒ **行号 57~59 恰好与原值一致** ⇒ ⇒ **错的只有文件名** ⇒ ⇒
+  **若不是「行号超范围」这个粗判据，根本发现不了** ⇒ ⇒ ⇒ **这正是 §3.3 的价值：粗判据先响，细判据再定责**。
+- ⇒ ⇒ **语义结论没变**（「先注册的最外层」仍成立），但**证据链补全了**（原来只到「append」就停）：
+  **声明点** `zrpc/internal/server.go:57-59`（append 到尾部）→ **消费点** `zrpc/internal/rpcserver.go:53`
+  （`grpc.ChainUnaryInterceptor(s.unaryInterceptors...)`）→ **最外层的证明** grpc-go v1.65.0 `server.go:1185-1187`
+  （`chainUnaryInterceptors` 把 **`interceptors[0]`**（**index 0**）当**最外层**调，下一层 handler 是
+  `getChainUnaryHandler(interceptors, 0, info, handler)` ⇒ ⇒ **index 0 最外层**）。
+  （⚠️ grpc-go 原文是一句 `return` ＋ **`interceptors[0]`** ＋ `(ctx, req, info, getChainUnaryHandler(...))` ⇒ ⇒ **这里把 `[` 与 `(` 拆开写**
+  ⇒ ⇒ 因为 `tools/check-doc-links.py` 的 `LINK_RE` **不跳过代码块** ⇒ ⇒ 相邻写法会被 markdown 解析成链接 ⇒ ⇒ 守门误报。）
+- ⇒ ⇒ **顺手核过同段其它引用，全部正确**：`zrpc/config.go:42`（`Auth bool json:",optional"`）· `:46`（`Timeout int64 json:",default=2000"`）·
+  `:47`（`CpuThreshold int64 json:",default=900,range=[0:1000)"`）· `zrpc/internal/config.go:20`（`Trace bool json:",default=true"`）·
+  `zrpc/server.go:81`（公开包装，转调 `rs.server.AddUnaryInterceptors`）· 真源 `service/user/admin/rpc/admin.go:33,43`（均实测逐字读过）。
+
+**③ 顺手做了一次全量自扫**（不靠门禁 ⇒ 因为门禁只查 `LEDGER_FILES` 覆盖的域 ⇒ follow 域查不到）
+
+```bash
+# 扫我域 20 份台账里全部 go-zero 引用 ⇒ 逐条核「文件存在 + 行号在范围内」
+python3 /tmp/g1_gozeroref.py    # 138 条唯一引用
+```
+
+⇒ ⇒ 实测 **138 条**里 **真错 2 条**（即上面那两条）· 其余 8 条是**记法约定**（`<path>` 占位符 · `core/mapping.UnmarshalJsonMap` 是**符号名不是路径** · `{a,b,c}` 花括号展开）⇒ ⇒ **不是缺陷**。
+⇒ ⇒ **修完复跑**：`--domain users` ⇒ **EXIT=0** · `--domain users-admin` ⇒ **EXIT=0**。
+
 ## 45. 🟢 **Testcontainers 宿主口钉段落码（G4 §4.10.39 ② 的域侧那一半）—— 38 个容器起点全部显式绑口 + 2 台域级守门**（2026-10-27 · G1 lane）
 
 ### 45.1 🟢 **形态选择：按 G4 的处方走【per-call-site 显式绑口】，不用我在 §39 记的 ServiceLoader 形态**

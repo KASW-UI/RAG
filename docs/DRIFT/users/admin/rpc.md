@@ -2862,9 +2862,31 @@ Redis 不可达的实际表现由 **3s 的命令超时**主导，5s 的连接超
 
 ### 1.1 Go 侧：zrpc **框架级**自带 7 个 unary 拦截器
 
-**装配点**：`go-zero@v1.10.2/zrpc/server.go:143-170` `setupUnaryInterceptors`（按顺序 `AddUnaryInterceptors`）
-＋ `go-zero@v1.10.2/zrpc/internal/config.go:57-60`（`AddUnaryInterceptors` 是 **append 到尾部** ⇒ **先注册的最外层**）
+**装配点**：`go-zero@v1.10.2/zrpc/server.go:144-168` `setupUnaryInterceptors`（按顺序 `AddUnaryInterceptors`）
+＋ `go-zero@v1.10.2/zrpc/internal/server.go:57-59`（`AddUnaryInterceptors` 是 **append 到尾部** ⇒ **先注册的最外层**）
 ＋ `service/user/admin/rpc/admin.go:33,43`。
+
+> 🔴 **引用订正（2026-10-28 · G4 修好 `check-ledger-selfcheck.py` 层 4 之后才暴露）**：
+> 上面两条 Go 引用**原先写的行号/文件名有错**，本轮被守门判为「行号超出文件范围」⇒ ⇒ **已逐条重核真源并改正**：
+> ① `zrpc/server.go` **真实 168 行** ⇒ 原写 `:143-170` **两端都超** ⇒ ⇒ 正确 = **`:144-168`**（`setupUnaryInterceptors` 的真实范围）；
+> ② 原写 `zrpc/internal/**config**.go:57-60` ⇒ ⇒ **该文件真实只有 30 行，且整份是配置结构体**
+>    （`StatConf` / `ClientMiddlewaresConf` / `ServerMiddlewaresConf` / `MethodTimeoutConf`）⇒ ⇒ **里面根本没有 `AddUnaryInterceptors`**
+>    ⇒ ⇒ **这不是行号笔误，是【指错文件】**（`zrpc/internal/` 下 `config.go` 与 `server.go` **两个相邻同名族文件**）
+>    ⇒ ⇒ 正确出处 = **`zrpc/internal/server.go:57-59`**（行号 57~59 **恰好与原值一致** ⇒ ⇒ **错的只有文件名**）。
+>
+> ⇒ ⇒ **语义结论本身没变**（「先注册的最外层」仍成立），但**现在补上了完整证据链**（原来只到「append」这一步就停了）：
+> - **声明点**：`zrpc/internal/server.go:57-59` = `s.unaryInterceptors = append(s.unaryInterceptors, interceptors...)` ⇒ **append 到尾部**；
+> - **消费点**（§3.3.1 要求写**消费点**而非只有声明点）：`zrpc/internal/rpcserver.go:53`
+>   = `grpc.ChainUnaryInterceptor(s.unaryInterceptors...)` ⇒ ⇒ 顺序原样交给 grpc-go；
+> - **最外层的证明**（grpc-go v1.65.0 `server.go:1185-1187` `chainUnaryInterceptors`）：
+>   它的返回值把 **`interceptors[0]`**（**index 0**）作为**最外层**去调用，而它拿到的「下一层 handler」
+>   正是 `getChainUnaryHandler(interceptors, 0, info, handler)`
+>   ⇒ ⇒ **index 0 最外层** ⇒ ⇒ 结合「append 到尾部」⇒ ⇒ **先注册的最外层** ✔。
+>   （⚠️ 原文是一句 `return` ＋ **`interceptors[0]`** ＋ `(ctx, req, info, getChainUnaryHandler(...))` ⇒ ⇒ **这里把 `[` 与 `(` 拆开写**
+>   ⇒ ⇒ 因为 `tools/check-doc-links.py` 的 `LINK_RE` **不跳过代码块** ⇒ ⇒ 写成相邻形式会被 markdown 解析成链接 ⇒ ⇒ 守门误报。）
+> - 顺带核过同段其它引用，**均正确**：`zrpc/config.go:42`（`Auth bool json:",optional"`）· `:46`（`Timeout int64 json:",default=2000"`）
+>   · `:47`（`CpuThreshold int64 json:",default=900,range=[0:1000)"`）· `zrpc/internal/config.go:20`（`Trace bool json:",default=true"`）
+>   · `zrpc/server.go:81`（`RpcServer.AddUnaryInterceptors` 公开包装，转调 `rs.server.AddUnaryInterceptors`）。
 
 | # | 拦截器 | 装不装 | 依据 |
 |---|---|---|---|
