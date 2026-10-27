@@ -7,7 +7,7 @@
 > ⚠️ **`task-rpc` 未验对之前，api 侧的 ✅ 只是条件性的** —— 见 `rpc.md` §五的证据边界。
 >
 > **Go 出处基准**：`Sea-RideTheWind_golang/service/task/api/`（全部 8 个文件，215 行）+ **go-zero `v1.10.2` 真实源码**
-> （`rest/httpx/responses.go`、`rest/internal/errcode/grpc.go`）。
+> （`go-zero@v1.10.2/rest/httpx/responses.go`、`go-zero@v1.10.2/rest/internal/errcode/grpc.go`）。
 > ⚠️ **本台账没有沿用任何既有结论**：go-zero 的错误响应形状是本轮**直接读模块缓存源码**核出来的，
 > 不是从别的域的台账抄的（AGENTS.md §3.1：不要拿现有 RAG 代码或注释当对照基准）。
 >
@@ -38,12 +38,12 @@
 |---|---|---|---|
 | `TaskApiContentTypeTest` | **13** | **DRIFT-TASK-API-003**：任何 Content-Type（含 `form-urlencoded` / `multipart`）的 JSON body 都应被收下（Go `gettaskhandler.go:19` 裸 decoder）＋ `spring.servlet.multipart.enabled` **真的**被解析成 false<br>🆕 **+1 条端口段守门** `bindsToDedicatedPortSegment`（2026-10-27 阶段 2 加） | 变异测试 |
 | `TaskApiMvcPipelineTest` | **20** | **真实 MVC 管线**（非 `standaloneSetup`）：请求体转换器插在 Boot 的 Jackson 转换器**之前** ＋ 共享的 `GoStyleJsonBodyConverterConfig` **真的被排除** ＋ 404 裸 `text/plain` / 405 裸状态码 | 装配 + 端点级 |
-| `TaskApiWiringTest` | **5** | **装配层**：HTTP 3s 超时中间件 + 四道请求保护闸门**真的在容器里**（Go `rest/config.go:12-23` tag 默认全开）＋ 端点映射在 `/taskcenter/v1/task/get` | 装配层 |
+| `TaskApiWiringTest` | **5** | **装配层**：HTTP 3s 超时中间件 + 四道请求保护闸门**真的在容器里**（Go `go-zero@v1.10.2/rest/config.go:12-23` tag 默认全开）＋ 端点映射在 `/taskcenter/v1/task/get` | 装配层 |
 | `GetTaskReqParsingTest` | **23** | **解析层**（用 Jackson 3 = Boot 4 MVC 边界同一个 mapper）：`{"id":"123"}` 接受 + `TrimSpace`（Go `types.go:24-25`） | 契约层 |
 | `GrpcStatusHttpMappingTest` | **23** | gRPC code → HTTP 状态码的映射（Go `responses.go:143-160`） | 契约层 |
 | `TaskGetServiceTest` | **7** | `GetTask` 的领域逻辑（合并任务定义、pack/unpack 进度） | 领域层 |
 | `TaskApiRawBodyConfig` / `GoStyleRawBodyArgumentProcessor` | — | （生产代码）请求体转换器本体 | — |
-| `TaskApiFormLimitReachabilityTest` | **6** | **form 值上限闸门在本域的语义可达性**（2026-10-27 阶段 2 新增）：Go 侧 handler 用**裸** `json.NewDecoder(r.Body)` ⇒ `r.Form` 从不被求值 ⇒ go-zero 的 `maxFormParamCount=2048`（`rest/httpx/util.go:15`）**在本域不可达** ⇒ 本域闸门必须 `mode: "off"`（`task-api/application.yml:213`）—— 断言 ① 生效模式必须是 OFF（**直接**断言 `GoStyleFormValueLimitInterceptor#mode()`）② >2048 个非空 query 值 ⇒ 200 ③ `?a=%zz`（畸形转义）⇒ 200 ④ `?a=1;b=2`（分号）⇒ 200 ⑤ 阳性对照（无 query ⇒ 200 + 正常 task 载荷）<br>🆕 **+1 条端口段守门** `bindsToDedicatedPortSegment`（2026-10-27 阶段 2 加） | 真 Tomcat + 变异测试（改回 `mode: raw` ⇒ 4 条红） |
+| `TaskApiFormLimitReachabilityTest` | **6** | **form 值上限闸门在本域的语义可达性**（2026-10-27 阶段 2 新增）：Go 侧 handler 用**裸** `json.NewDecoder(r.Body)` ⇒ `r.Form` 从不被求值 ⇒ go-zero 的 `maxFormParamCount=2048`（`go-zero@v1.10.2/rest/httpx/util.go:15`）**在本域不可达** ⇒ 本域闸门必须 `mode: "off"`（`task-api/application.yml:213`）—— 断言 ① 生效模式必须是 OFF（**直接**断言 `GoStyleFormValueLimitInterceptor#mode()`）② >2048 个非空 query 值 ⇒ 200 ③ `?a=%zz`（畸形转义）⇒ 200 ④ `?a=1;b=2`（分号）⇒ 200 ⑤ 阳性对照（无 query ⇒ 200 + 正常 task 载荷）<br>🆕 **+1 条端口段守门** `bindsToDedicatedPortSegment`（2026-10-27 阶段 2 加） | 真 Tomcat + 变异测试（改回 `mode: raw` ⇒ 4 条红） |
 | `RealTomcatPort`（`…/task/api/support/RealTomcatPort.java`） | — | （**测试支撑类**，非用例）真 Tomcat 的**端口选取 + 双绑定自检**：本域专用段 **21800–21899** ⇒ 避开 favorite 的 21300–21399 / 探针的 21400–21599 / favorite 脚手架的 21950–21999 / **OS 临时段 49152–65535**（Docker 随机发布端口就在那一段）<br>⚠️ 复制自 favorite 域同款（`service/common` **不发布 test-jar** ⇒ 业务模块 test scope 拿不到共享层测试类 ⇒ 只能复制） | 支撑类 |
 
 > ⚠️ **本节新增的 `RealTomcatPort` 会被 `check-ledger-selfcheck.py` 第 5 层报成「台账未点名的测试类」—— 这是**工具口径**缺口，不是台账缺陷**：
@@ -98,10 +98,10 @@ AGENTS.md §3.3.2 硬要求：**任何以「Go: …」措辞出现的断言，�
 
 | 位置 | 原引用 | go-zero v1.10.2 实际 | 修后 |
 |---|---|---|---|
-| 类注释 | `rest/httpx/responses.go:143-160` | `doHandleError` 整体 = **142-173** | `142-173` |
-| gRPC 分支 | `rest/httpx/responses.go:147-149` | `else if errcode.IsGrpcError(err)` = **150-153** | `150-153` |
+| 类注释 | `go-zero@v1.10.2/rest/httpx/responses.go:143-160` | `doHandleError` 整体 = **142-173** | `142-173` |
+| gRPC 分支 | `go-zero@v1.10.2/rest/httpx/responses.go:147-149` | `else if errcode.IsGrpcError(err)` = **150-153** | `150-153` |
 | 兜底分支注释 | `responses.go:151-153` | `} else {` + `http.Error(..., StatusBadRequest)` = **154-155** | `154-155` |
-| 运行日志 | `Go responses.go:152` | **155** | `go-zero v1.10.2 rest/httpx/responses.go:155` |
+| 运行日志 | `Go responses.go:152` | **155** | `go-zero v1.10.2 go-zero@v1.10.2/rest/httpx/responses.go:155` |
 
 ⚠️ 原值 152 恰好落在注释行 `// it hides the rpc error headers.` 上 ——
 **照着它去读，读到的是一句英文注释而不是行为**。
@@ -142,9 +142,9 @@ AGENTS.md §3.3.2 硬要求：**任何以「Go: …」措辞出现的断言，�
 
 | 行为点 | go-zero v1.10.2 出处 | RAG | 结论 |
 |---|---|---|---|
-| 未注册 errorHandler 时的默认分支 | `rest/httpx/responses.go:145-159` | `GlobalExceptionHandler` | ✅ |
+| 未注册 errorHandler 时的默认分支 | `go-zero@v1.10.2/rest/httpx/responses.go:145-159` | `GlobalExceptionHandler` | ✅ |
 | 非 gRPC 错误 ⇒ **400** `http.Error(msg, 400)` | `:154-155` | `handleAny` → `plainText(BAD_REQUEST, msg)` | ✅ **是 400 不是 500** |
-| gRPC 错误 ⇒ `errcode.CodeFromGrpcError` 的 **15 分支**映射 | `rest/internal/errcode/grpc.go:12-42` | `httpStatusOf` 逐条对应 | ✅ 17 个 `Status.Code` + default 500 全覆盖 |
+| gRPC 错误 ⇒ `errcode.CodeFromGrpcError` 的 **15 分支**映射 | `go-zero@v1.10.2/rest/internal/errcode/grpc.go:12-42` | `httpStatusOf` 逐条对应 | ✅ 17 个 `Status.Code` + default 500 全覆盖 |
 | 响应体 `err.Error()`（grpc-go 文本） | `:153` `http.Error(w, err.Error(), ...)` | `goStatusText` 复刻 `rpc error: code = X desc = Y` | ✅ |
 | `Content-Type: text/plain; charset=utf-8` + `X-Content-Type-Options: nosniff` + 末尾换行 | `http.Error` 的标准行为 | `plainText(...)` | ✅ |
 | 本域**未注册** errorHandler（决定上面形状的前提） | `api/task.go:28-33` 只 `Use(NewHTTPMiddleware)`，无 `httpx.SetErrorHandler` | 未注册 | ✅ |
@@ -157,7 +157,7 @@ AGENTS.md §3.3.2 硬要求：**任何以「Go: …」措辞出现的断言，�
 
 | 行为点 | Go 出处 | RAG | 结论 |
 |---|---|---|---|
-| client 超时 **2000ms**（yaml 未配 ⇒ zrpc 默认） | `zrpc/config.go:31` `Timeout int64 \`json:",default=2000"\`` | `TaskRpcClient.DEFAULT_CALL_TIMEOUT_MILLIS = 2000` | ✅ |
+| client 超时 **2000ms**（yaml 未配 ⇒ zrpc 默认） | `go-zero@v1.10.2/zrpc/config.go:31` `Timeout int64 \`json:",default=2000"\`` | `TaskRpcClient.DEFAULT_CALL_TIMEOUT_MILLIS = 2000` | ✅ |
 | 取较小值（下游 deadline 与自身预算取 min） | — | `withDeadline` `Math.min(...)` | ✅ 更严一侧，不放宽 Go 的语义 |
 | 熔断开启 | go-zero `zrpc` client 内建 breaker | `rag.protection.breaker.enabled: true` + `GoStyleGrpcClientBreakerInterceptor` | ✅ |
 | 零下游 gRPC 依赖 | `svc/servicecontext.go:24-33` 只有 `TaskCli`（Points/User 客户端被注释） | rpc 只引 server starter，**刻意不引** client starter | ✅ |
@@ -508,7 +508,7 @@ body 在转换器被调用前就被换掉了（见上面 (3)）⇒ 转换器层�
 | RAG | `application/json`（**无 charset**） / `text/plain;charset=utf-8`（**无空格**） |
 
 **出处**：Go 的成功响应走 `httpx.WriteJsonCtx` → `w.Header().Set(ContentType, header.ContentTypeJson)`
-（go-zero `rest/httpx/responses.go:182`），常量是 `"application/json; charset=utf-8"`；
+（go-zero `go-zero@v1.10.2/rest/httpx/responses.go:182`），常量是 `"application/json; charset=utf-8"`；
 错误响应走 `http.Error`（Go 标准库）⇒ `"text/plain; charset=utf-8"`。
 RAG 侧由 Spring 的转换器与本域的 `plainText()` 产生。
 

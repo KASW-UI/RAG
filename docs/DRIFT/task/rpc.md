@@ -44,7 +44,7 @@
 | `RedisPipelinesRealRedisGateTest`（9） | **DRIFT-TASK-RPC-004/005**：pipeline 语义（**不是** MULTI/EXEC）＋ 错误**向上抛**不吞 | **真 Redis**（非 mock）—— 这是「整条消息链路是死的而 81 条测试全绿」那次的教训 |
 | `TaskProgressUpsertParityTest`（15） | **DRIFT-TASK-RPC-003**：两条 upsert 与 Go 的 `AutoMigrate` 产物逐字对齐 | **真 PG** ＋ `@EnabledIfDockerAvailable` ⇒ **无 Docker 时会静默全跳** ⇒ CI 必须有 Docker |
 | `TaskServiceGrpcImplWireTest`（4） | **wire 层**：客户端真正收到的 gRPC code + description（Go `get_task_logic.go` 的 `codes.InvalidArgument` / `"user_id invalid"`） | **真 channel**（InProcess）—— 领域层抛对了 ≠ 客户端收到了 |
-| `TaskGrpcInterceptorWiringTest`（2）🆕 | **gRPC 拦截器注册链**（Go `task.go:28` `DisableNativeRpcTimeout` ＋ `task.go:44` `AddUnaryInterceptors(NewUnaryServerInterceptor(timeout, SlowThreshold()))`）：**服务端超时真的由容器里的 `GrpcServerConfigurer` 施加到 server 上**（≈300ms 返回 `DEADLINE_EXCEEDED`，而不是等满客户端 5s deadline）＋ 生产 `application.yml` 的 `observability.rpc-timeout` 必须是 **2s**（Go `task.yaml` 未配 ⇒ 走 go-zero `zrpc/config.go` 的 `default=2000`） | **真 gRPC server**（用容器里那个 `GrpcServerConfigurer` 装配一个「睡 10 秒」的服务）＋ **真 PG**<br>⚠️ **只断言「容器里有 `ServerInterceptor` Bean」是假绿** —— devh starter 3.1.0 **从不自动注册**它（common 域已 `javap` 证伪，H2）⇒ 缺 `@Bean GrpcServerConfigurer` 时超时/deadline 传播/span **全部静默消失** |
+| `TaskGrpcInterceptorWiringTest`（2）🆕 | **gRPC 拦截器注册链**（Go `task.go:28` `DisableNativeRpcTimeout` ＋ `task.go:44` `AddUnaryInterceptors(NewUnaryServerInterceptor(timeout, SlowThreshold()))`）：**服务端超时真的由容器里的 `GrpcServerConfigurer` 施加到 server 上**（≈300ms 返回 `DEADLINE_EXCEEDED`，而不是等满客户端 5s deadline）＋ 生产 `application.yml` 的 `observability.rpc-timeout` 必须是 **2s**（Go `task.yaml` 未配 ⇒ 走 go-zero `go-zero@v1.10.2/zrpc/config.go` 的 `default=2000`） | **真 gRPC server**（用容器里那个 `GrpcServerConfigurer` 装配一个「睡 10 秒」的服务）＋ **真 PG**<br>⚠️ **只断言「容器里有 `ServerInterceptor` Bean」是假绿** —— devh starter 3.1.0 **从不自动注册**它（common 域已 `javap` 证伪，H2）⇒ 缺 `@Bean GrpcServerConfigurer` 时超时/deadline 传播/span **全部静默消失** |
 | `TaskSinkConsumeTest`（19） | 两个 sink 的消费路径（进度写 Redis + `like:cnt` 语义） | mock 领域层 |
 | `TaskDomainServiceTest`（19） | `GetTask` 的领域逻辑（合并任务定义、pack/unpack 进度） | mock 数据层 |
 | `TaskEventParsingTest`（21） | `LogEvent` 解析（`uid <= 0` / `total <= 0` 的拒绝语义） | 纯函数 |
@@ -401,7 +401,7 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
 | Go 的 `redis.Options` | **只设** `Addr` / `Password` / `DB` ⇒ 不设 `ReadTimeout` / `DialTimeout` | `service/task/rpc/internal/svc/service_context.go:25-30` |
 | 真源 yaml 写的值 | `ReadTimeoutMs: 1000` / `DialTimeoutMs: 500` —— **不生效**（见下） | `service/task/rpc/etc/task.yaml:42-44` |
 | struct 是否收这些字段 | **不收** —— `LikeRedis struct` 只有 `Addr` / `Pass` / `DB` / `ConsumerName` | `service/task/rpc/internal/config/config.go:32-37` |
-| go-zero 的 conf 严格性 | **非严格模式** ⇒ yaml 里有、struct 里没有的字段被**静默忽略** | `core/conf/config.go`（无 `strict` / `ErrorUnused`） |
+| go-zero 的 conf 严格性 | **非严格模式** ⇒ yaml 里有、struct 里没有的字段被**静默忽略** | `go-zero@v1.10.2/core/conf/config.go`（无 `strict` / `ErrorUnused`） |
 | 真正生效的 | go-redis **v9.20.0**（真源 `go.mod:15` 锁的就是它）的库默认：**`ReadTimeout = 3s`** · **`DialTimeout = 5s`** | `go-redis@v9.20.0/options.go:370` · `:338-340` |
 
 ⇒ **Go 侧真实口径 = 命令超时 3s ＋ 连接超时 5s**（**不是** yaml 里的 1000ms / 500ms）。
@@ -550,7 +550,7 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
 | 行为点 | Go 出处 | RAG 出处 | 结论 |
 |---|---|---|---|
 | 关掉 go-zero 自带的 zrpc 服务端超时，**取出**生效 timeout | `service/task/rpc/task.go:28` `rpcTimeout := observability.DisableNativeRpcTimeout(&c.RpcServerConf)` | `TaskRpcApplication` `@Import(ObservabilityProperties.class)` ＋ `application.yml` 的 `observability.rpc-timeout: 2s` | ✅ 口径一致（见下一行） |
-| timeout 的**生效值** = **2000ms**（`task.yaml` **未配** Timeout ⇒ 走 go-zero 默认） | `task.yaml` 无 `Timeout` 键 ⇒ go-zero `zrpc/config.go` 的 `Timeout int64 `json:",default=2000"`` | `application.yml:231` `rpc-timeout: 2s` | ✅ **2s = 2s**（`TaskGrpcInterceptorWiringTest` 第 2 条锁死） |
+| timeout 的**生效值** = **2000ms**（`task.yaml` **未配** Timeout ⇒ 走 go-zero 默认） | `task.yaml` 无 `Timeout` 键 ⇒ go-zero `go-zero@v1.10.2/zrpc/config.go` 的 `Timeout int64 `json:",default=2000"`` | `application.yml:231` `rpc-timeout: 2s` | ✅ **2s = 2s**（`TaskGrpcInterceptorWiringTest` 第 2 条锁死） |
 | **显式**把拦截器挂到 server 上（**不是**自动注册） | `service/task/rpc/task.go:44` `s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, observability.SlowThreshold()))` | `TaskRpcApplication.rpcInterceptorConfigurer`：`server -> server.intercept(rpcUnaryServerInterceptor)` | ✅ **两件套齐**（`@Import(RpcServerInterceptorFactory.class)` ＋ `@Bean GrpcServerConfigurer`） |
 | 拦截器带 **timeout ＋ slow threshold** 两个参数 | `observability/rpc.go:25-28` `NewUnaryServerInterceptor(timeout, slowThreshold)`，`slowThreshold <= 0` ⇒ 回退 `DefaultSlowThreshold` | `RpcInterceptor`（`common` 域）：`markTimeout` ＋ `markDurationAndSlow` | ✅ 两个参数都有对应物 |
 | 超时把 in-flight 调用打断（**服务端**提前返回 `DEADLINE_EXCEEDED`） | `observability/rpc.go:38-55` `context.WithTimeout` ＋ 独立 goroutine 跑 handler | `RpcInterceptor` 用 `ScheduledExecutorService` 到时 `close(DEADLINE_EXCEEDED)` | ✅ **运行期实测**：≈300ms 返回，不是等满客户端 5s deadline |
@@ -1281,7 +1281,7 @@ KEEP_UP=1 ./tools/difftest/run-task-offset-oldest.sh # 跑完保留服务与容�
 | 本仓**无任何 Java 代码**读 `otel.*` 键 | 全仓 grep `getProperty("otel` / `@Value("${otel` ⇒ 空 |
 | 本仓**不注册**全局 OTel SDK | `GlobalOpenTelemetry.set` / `OpenTelemetrySdk.builder` 只出现在 `service/common` 的**测试**与 `communityfact/ProcessLogger`（后者无调用点）⇒ `GlobalOpenTelemetry.get()` 拿到的是 **no-op** 实现 |
 | ⚠️ **全仓 20 个 yaml 都有 otel 段** | article / comment / favorite / follow / hot / like / message / task / users 全部 |
-| **Go 侧确实导出 span** | `zrpc.MustNewServer(c.RpcServerConf, ...)` → `RpcServerConf` 继承 `ServiceConf` → `core/service/serviceconf.go:67 trace.StartAgent(sc.Telemetry)` ⇒ `Telemetry{Endpoint: jaeger:4317, Batcher: otlpgrpc}` **生效** |
+| **Go 侧确实导出 span** | `zrpc.MustNewServer(c.RpcServerConf, ...)` → `RpcServerConf` 继承 `ServiceConf` → `go-zero@v1.10.2/core/service/serviceconf.go:67 trace.StartAgent(sc.Telemetry)` ⇒ `Telemetry{Endpoint: jaeger:4317, Batcher: otlpgrpc}` **生效** |
 
 ⇒ **判定：存在观测差异**（Go 把 span 发到 jaeger，Java 侧是 no-op tracer）。
 ⇒ ⚠️ **但这不是 task 域能单方面修的**：① 缺的是 `spring-boot` 的 OTel 自动配置模块（**共享构建基建**）；

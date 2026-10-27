@@ -48,9 +48,9 @@
 |---|---|---|
 | **Purpose** | HTTP → gRPC 网关。**零业务逻辑**：解析、鉴权、转发、映射错误 | `internal/handler/routes.go`、`internal/logic/like/*.go`（全部逻辑 = 取 uid + 调 rpc + 搬字段） |
 | **Public Operations** | **6 个 POST**，全部前缀 `/like/v1`、全部要 JWT、**零 public 路径** | `internal/handler/routes.go:16-51` |
-| **Inputs** | JSON body（`Content-Type` 含 `application/json` 且 `ContentLength > 0` 时才读）+ `Authorization: Bearer <jwt>` | `rest/httpx/requests.go:117-124,153-155` |
-| **Outputs** | 恒 `200` + `{"code":200,"msg":"OK","data":{…}}`；错误恒 `200` + `{"code":<业务码>,"msg":…,"data":null}` | `likecenter.go:41-61`、`rest/httpx/responses.go:161-172` |
-| **Dependencies** | ① `like-rpc`（gRPC，etcd `like.rpc`）② JWT 验签密钥 ③ go-zero 自带的 Trace/Log/Prometheus/MaxConns/Breaker/Shedding/Recover/Metrics/MaxBytes/Gunzip | `internal/svc/servicecontext.go:18-23`、`etc/likecenter.yaml:31-36`、`rest/config.go:11-23` |
+| **Inputs** | JSON body（`Content-Type` 含 `application/json` 且 `ContentLength > 0` 时才读）+ `Authorization: Bearer <jwt>` | `go-zero@v1.10.2/rest/httpx/requests.go:117-124,153-155` |
+| **Outputs** | 恒 `200` + `{"code":200,"msg":"OK","data":{…}}`；错误恒 `200` + `{"code":<业务码>,"msg":…,"data":null}` | `likecenter.go:41-61`、`go-zero@v1.10.2/rest/httpx/responses.go:161-172` |
+| **Dependencies** | ① `like-rpc`（gRPC，etcd `like.rpc`）② JWT 验签密钥 ③ go-zero 自带的 Trace/Log/Prometheus/MaxConns/Breaker/Shedding/Recover/Metrics/MaxBytes/Gunzip | `internal/svc/servicecontext.go:18-23`、`etc/likecenter.yaml:31-36`、`go-zero@v1.10.2/rest/config.go:11-23` |
 | **State** | **无**。本组件不碰数据库、不碰缓存 | 全仓 grep 无 DB/Redis 引用 |
 | **Side Effects** | 只发出 gRPC 调用（含 `likeaction` 这条写路径）。无本地写、无 MQ | `internal/logic/like/*.go` |
 | **Failure Model** | 解析失败/必填缺失 → `200 + 5001`；身份解析失败 → `200 + 1006`；鉴权失败 → `401 + 空 body`；路由错误 → `404` / `405` 裸；超时 → `503 + "Request Timeout"` | 见 §5 |
@@ -62,16 +62,16 @@
 ### 请求链（按执行顺序）
 
 ```
-1. engine.start → bindRoutes → bindRoute                rest/engine.go:101-116
+1. engine.start → bindRoutes → bindRoute                go-zero@v1.10.2/rest/engine.go:101-116
    ├─ chain = 原生中间件 (Trace/Log/Prom/MaxConns/Breaker/Shedding/Recover/Metrics/MaxBytes/Gunzip)
-   ├─ chain += handler.Authorize(secret)                rest/handler/authhandler.go:45-84
+   ├─ chain += handler.Authorize(secret)                go-zero@v1.10.2/rest/handler/authhandler.go:45-84
    ├─ chain += observability.NewHTTPMiddleware(3s)     likecenter.go:36-38
    └─ router.Handle(POST, path, chain.ThenFunc(handler))
    ⚠️ chain 只挂在**匹配上**的路由上 ⇒ 404/405 分支进不了 chain
-      （rest/router/patrouter.go:73,79）
+      （go-zero@v1.10.2/rest/router/patrouter.go:73,79）
 
 2. Authorize: token 从 Authorization 头取（BearerExtractor 要求 "bearer " 前缀，大小写不敏感）
-   jwt.NewParser(jwt.WithJSONNumber())                  rest/token/tokenparser.go:122-124
+   jwt.NewParser(jwt.WithJSONNumber())                  go-zero@v1.10.2/rest/token/tokenparser.go:122-124
    ⇒ 数字 claim 解出来是 json.Number（其 Kind == String）
    失败 ⇒ unauthorized()：**只 WriteHeader(401)，不写一个字节**  authhandler.go:106-122
 
@@ -79,7 +79,7 @@
    ctx, cancel := context.WithTimeout(r.Context(), 3s)   :53
    超时 ⇒ http.Error(w, "Request Timeout", 503)          :88
 
-4. httpx.Parse                                          rest/httpx/requests.go:50-77
+4. httpx.Parse                                          go-zero@v1.10.2/rest/httpx/requests.go:50-77
    ├─ ParsePath / ParseForm / ParseHeaders（本 DTO 无对应 tag ⇒ no-op）
    └─ ParseJsonBody                                      :117-124
       withJsonBody(r) = r.ContentLength > 0
@@ -102,13 +102,13 @@
    失败 ⇒ NewErrCode(ErrorTokenRuntime) ⇒ 1006 + "TOKEN已过期"
 
 7. gRPC：zrpc.MustNewClient(c.LikeRpc)
-   RpcClientConf.Timeout 默认 **2000ms**（zrpc/config.go:31）
-   → WithTimeout(2s)                                    zrpc/client.go:70-72
+   RpcClientConf.Timeout 默认 **2000ms**（go-zero@v1.10.2/zrpc/config.go:31）
+   → WithTimeout(2s)                                    go-zero@v1.10.2/zrpc/client.go:70-72
    → TimeoutInterceptor：每次调用 context.WithTimeout(ctx, 2s)
                                                           clientinterceptors/timeoutinterceptor.go:17-30
    无 retry（RpcClientConf 无 Retries 字段）；client breaker 默认开（default=true）
 
-8. 出参：httpx.OkJsonCtx → jsonx.Marshal（**SetEscapeHTML(false)**）core/jsonx/json.go:12-30
+8. 出参：httpx.OkJsonCtx → jsonx.Marshal（**SetEscapeHTML(false)**）go-zero@v1.10.2/core/jsonx/json.go:12-30
    Content-Type: application/json; charset=utf-8
 ```
 
@@ -203,10 +203,10 @@
 | 27 | 4 个端点 | 身份失败 ⇒ `200 + 1006`（不是 401/5001） | `:37-49` | `LikeApiSupport:95-126` | EQUIVALENT | E-Src + 现有绿测 |
 | 28 | 2 个端点 | **鉴权不对称**：`getlikecount`/`gettargetlikerlist` 不读 uid | 全文无 `ctx.Value("userId")` | 不注入 `HttpServletRequest` | EQUIVALENT | E-Src + 现有绿测 |
 | 29 | all 6 | gRPC 错误二分：status→业务码+`st.Message()` 原文；非 status→**5001**（不是 1015） | `:41-47` ×6 | `LikeApiSupport:177-186` | EQUIVALENT | E-Src |
-| 30 | all 6 | **HTTP 超时 3s → 503 + `Request Timeout`** | `rest/config.go:55` + `http.go:88` | `application.yml:27-29` + `HttpMiddleware:208+` | EQUIVALENT（配置+装配层） | E-Go 源码链 + E-Cfg。⚠️ **运行期 503 出口本轮未在真 Tomcat 上复现** ⇒ 见 §9 |
+| 30 | all 6 | **HTTP 超时 3s → 503 + `Request Timeout`** | `go-zero@v1.10.2/rest/config.go:55` + `http.go:88` | `application.yml:27-29` + `HttpMiddleware:208+` | EQUIVALENT（配置+装配层） | E-Go 源码链 + E-Cfg。⚠️ **运行期 503 出口本轮未在真 Tomcat 上复现** ⇒ 见 §9 |
 | 31 | all 6 | 超时**作用域** = 解析 + RPC（🔴 **不含鉴权**） | `NewHTTPMiddleware` 包住 chain 中 **Authorize 之后**的那一段 | `HttpMiddleware` 包住 `chain.doFilter`（**验签已搬出预算**） | EQUIVALENT | E-Src + **E-Go 活体探针**（2026-10-27）⇒ `DRIFT-LIKEAPI-023` |
 | 32 | all 6 | 超时后的**取消语义** | ctx 到期 ⇒ `DEADLINE_EXCEEDED`（在 `codes.Acceptable` 失败名单内） | `Future.cancel(true)` ⇒ `CANCELLED`（**不在名单内**） | OBSERVABLE DIFFERENCE | E-Src（`GoStyleRequestDeadline` javadoc 已自陈） |
-| 33 | all 6 | **单次 RPC 超时** | **固定 2000ms**（`zrpc/config.go:31` → `zrpc/client.go:70-72`） | **HTTP 剩余预算**（≤3000ms），无独立 2s 上限 | **SEMANTIC MISMATCH** | E-Go(E-Go 源码链) + E-Src ⇒ **DRIFT-017** |
+| 33 | all 6 | **单次 RPC 超时** | **固定 2000ms**（`go-zero@v1.10.2/zrpc/config.go:31` → `go-zero@v1.10.2/zrpc/client.go:70-72`） | **HTTP 剩余预算**（≤3000ms），无独立 2s 上限 | **SEMANTIC MISMATCH** | E-Go(E-Go 源码链) + E-Src ⇒ **DRIFT-017** |
 | 34 | all 6 | gRPC **无 retry** | `RpcClientConf` 无 `Retries` | 无 retry | EQUIVALENT | E-Src |
 | 35 | all 6 | 响应 `Content-Type` | `application/json; charset=utf-8`（分号后**有空格**） | `application/json`（**无 charset 参数**） | OBSERVABLE DIFFERENCE | E-Go(F01) + E-Rag(A03)。按 RFC 9110 语义等价（JSON 恒 UTF-8） ⇒ **DRIFT-021** |
 | 36 | all 6 | 容量饱和时的拒绝出口 | 无上限 goroutine，**无此出口** | worker 池 512 上界，饱和 ⇒ **裸 503 无 body** | OBSERVABLE DIFFERENCE | E-Src（`HttpMiddleware:296-317`） ⇒ **DRIFT-022** |
@@ -301,7 +301,7 @@ Side Effect     : likeaction 会改 like-rpc 侧的数据（本组件无本地�
 ### 6.6 Timeout Semantics（§17）
 | | Go | RAG | Result |
 |---|---|---|---|
-| **HTTP 超时来源** | `rest/config.go:55` `Timeout int64 json:",default=3000"`（yaml 未写 ⇒ 3000） | `observability.http-timeout: 3s`（显式写） | EQUIVALENT（值一致） |
+| **HTTP 超时来源** | `go-zero@v1.10.2/rest/config.go:55` `Timeout int64 json:",default=3000"`（yaml 未写 ⇒ 3000） | `observability.http-timeout: 3s`（显式写） | EQUIVALENT（值一致） |
 | **HTTP 超时作用域** | 「解析 + 业务」（`NewHTTPMiddleware` 包住 chain 中 **Authorize 之后**的那一段 ⇒ **不含鉴权**） | 「解析 + 业务」（`chain.doFilter`；🔴 2026-10-27：验签已搬到 `LikeJwtAuthFilter`(+6)、在预算层之外 ⇒ **不再含鉴权**） | ✅ EQUIVALENT（🔴 原写「整个请求」= **两侧都错**，已按 `DRIFT-LIKEAPI-023` 订正） |
 | **HTTP 超时结果** | `503` + `http.Error` ⇒ text/plain + nosniff + 尾随换行 | `503` + `Request Timeout` | EQUIVALENT（字节级待真 Tomcat 复核） |
 | **单次 RPC 超时来源** | `RpcClientConf.Timeout` 默认 **2000**（yaml 未写） | 无独立项；取 HTTP 剩余预算 | **SEMANTIC MISMATCH** ⇒ DRIFT-017 |
@@ -391,14 +391,14 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Category** | Serialization / Input Interpretation |
 | **Go Behavior** | `{"target_type":"article","target_ids":[1,2]}` ⇒ **解析成功**，`TargetIds == ["1","2"]`，**真的发出 RPC**。`[1.5]` ⇒ `["1.5"]`。`[99999999999999999999]` ⇒ `["99999999999999999999"]`（连溢出都不管，就是字面量） |
 | **Java Behavior** | 同样三个 body **全部解析失败** ⇒ `200 + {"code":5001}`，**不发出 RPC** |
-| **Difference** | Go 的 `fillSliceValue`（`core/mapping/unmarshaler.go:227-231`）的 type switch 里有 `case fmt.Stringer:`，而 `json.Number` **实现了** `Stringer`（`type Number string`）⇒ 数字被字符串化接受。RAG 用 `LikeGoStyleCoercion` 的 `LogicalType.Textual ← Integer/Float = Fail` 把它挡掉 |
+| **Difference** | Go 的 `fillSliceValue`（`go-zero@v1.10.2/core/mapping/unmarshaler.go:227-231`）的 type switch 里有 `case fmt.Stringer:`，而 `json.Number` **实现了** `Stringer`（`type Number string`）⇒ 数字被字符串化接受。RAG 用 `LikeGoStyleCoercion` 的 `LogicalType.Textual ← Integer/Float = Fail` 把它挡掉 |
 | **Why It Matters** | 这是 **go-zero 自身的不对称**：同一个 JSON 数字，进**标量** String 字段被拒（`unmarshaler.go:648-661` 的 `processFieldPrimitive`）、进 **Slice 元素**却被收（`fillSliceValue` 没走那条路）。只看「String 字段拒数字」这条规则去实现整个解析层，必然漏掉 Slice 这一半 |
 | **Observable Impact** | Go 返回真实点赞数；RAG 返回 5001。**方向是「RAG 更严」**，属拒绝而非错误数据 |
 | **Classification** | **SEMANTIC MISMATCH** |
 | **Risk** | **HIGH**（§26 反事实检验：**YES** —— 一个没读过 `fillSliceValue` 的 Spring 开发者，几乎必然会用 `List<String>` + 「数字不许进 String」的全局 coercion，**正是现在 RAG 的样子**。这是「不看控制流就会写成的样子」的教科书案例） |
 | **Must Preserve** | `target_ids` 的**元素**允许 JSON 数字，且按 `json.Number.String()` 原样字符串化 |
 | **Recommended Verification** | ① 在 `GetLikeCountReq` / `GetLikeStateReq` 的 `setTargetIds` 改用 `Object` 入参 + 一个仿 `GoStyleStringInt64` 的元素级解析器（只对 Slice 元素放开 Integer/Float，标量规则不动）；② 或给 DTO 加显式元素级 coercion 豁免。**⚠️ 注意 Jackson 3 的 coercion 配置只有 LogicalType 级生效，类级无效**（`GoStyleCoercion:74-83` 已实测记录此坑），所以**不要指望 `withCoercionConfig(SomeListClass, …)`** |
-| **Evidence** | **双侧活体对拍**：Go `/tmp/likeprobe` B05 `OK ids=[1 2]` / B06 `OK ids=[1.5]` / B28 `OK ids=[99999999999999999999]`；RAG 同输入 `InvalidFormatException: Cannot coerce Integer value (1) to java.lang.String`。消费点：`core/mapping/unmarshaler.go:227-231`（`fillSliceValue` 的 `case fmt.Stringer`） |
+| **Evidence** | **双侧活体对拍**：Go `/tmp/likeprobe` B05 `OK ids=[1 2]` / B06 `OK ids=[1.5]` / B28 `OK ids=[99999999999999999999]`；RAG 同输入 `InvalidFormatException: Cannot coerce Integer value (1) to java.lang.String`。消费点：`go-zero@v1.10.2/core/mapping/unmarshaler.go:227-231`（`fillSliceValue` 的 `case fmt.Stringer`） |
 | **状态** | ✅ **已修（第四轮）** —— 修复：`GoStyleRawStringListDeserializer`（数字取原始 token 文本）· 守门 `LikeApiGoAlignmentTest` 3 条 + 变异验证 2 条转红。**本表的 `Java Behavior` / `Difference` / `Observable Impact` 三列是修复前的快照** ⇒ 现状见第四轮章节。 |
 
 ---
@@ -418,7 +418,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Risk** | **MEDIUM**（触发需要客户端在数组里塞 null；但**失败方向是「本该成功的读变成 5001」**，且错误被 NPE 兜底掩盖，排查成本高） |
 | **Must Preserve** | Go 对 null 元素的实际语义：全 null ⇒ nil slice；部分 null ⇒ 该位变空串且**长度不变** |
 | **Recommended Verification** | 在 `LikeCountService` / `LikeStateService` 的 `idList` 里把 null 元素替换成 `""`；并单独钉死「全 null ⇒ 空列表」与「部分 null ⇒ 长度不变、null 位为空串」两条（后者**不是**过滤，Go 不会缩短数组） |
-| **Evidence** | **双侧活体对拍**：Go B08 `OK ids=[] nil=true` / B09 `OK ids=[]string{"x", "", "y"}`；RAG `ids=[null]` / `ids=[x, null, y]`，proto 侧 `/tmp/likeprobe/NullElem.java` 实测 `NullPointerException: Element at index 0 is null.`。消费点：`core/mapping/unmarshaler.go:156-160,181-183` |
+| **Evidence** | **双侧活体对拍**：Go B08 `OK ids=[] nil=true` / B09 `OK ids=[]string{"x", "", "y"}`；RAG `ids=[null]` / `ids=[x, null, y]`，proto 侧 `/tmp/likeprobe/NullElem.java` 实测 `NullPointerException: Element at index 0 is null.`。消费点：`go-zero@v1.10.2/core/mapping/unmarshaler.go:156-160,181-183` |
 | **状态** | ✅ **已修（第三轮）** —— 修复：`GoStyleTargetIds`（全 null ⇒ 空列表 / 部分 null ⇒ 空串占位）· 守门测试 5 条。**本表三列是修复前的快照** ⇒ 现状见第三轮章节。 |
 
 ---
@@ -430,7 +430,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Component** | like-api（全部 6 个端点） |
 | **Operation** | 全部 |
 | **Category** | Serialization |
-| **Go Behavior** | `json.Decoder.Decode` 只解**第一个** JSON 值，其后的内容既不报错也不检查（`core/jsonx/json.go:74-77`）。`{…} xx` ⇒ **解析成功**；`{…}{…}` ⇒ **解析成功**，用的是第一个对象 |
+| **Go Behavior** | `json.Decoder.Decode` 只解**第一个** JSON 值，其后的内容既不报错也不检查（`go-zero@v1.10.2/core/jsonx/json.go:74-77`）。`{…} xx` ⇒ **解析成功**；`{…}{…}` ⇒ **解析成功**，用的是第一个对象 |
 | **Java Behavior** | 两者都**解析失败**。尾随 token 的报错文案直接点名了机制：`not allowed as per DeserializationFeature.FAIL_ON_TRAILING_TOKENS` |
 | **Difference** | ⚠️ **Jackson 3 的默认值与 Jackson 2 相反**：Jackson 2 的 `FAIL_ON_TRAILING_TOKENS` 默认 **false**，Jackson 3（`tools.jackson` 3.1.5）默认 **true**。这是「升级 Jackson 大版本时静默改变默认行为」的又一例 |
 | **Observable Impact** | Go 接受并按第一个对象执行（**会发出 RPC**）；RAG 返回 5001。含 `likeaction` ⇒ **写路径**也受影响 |
@@ -438,7 +438,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Risk** | **LOW-MEDIUM**（正常客户端不会发尾随 token；恶意/畸形客户端的行为两侧不同但都「不该成功」——⚠️ 严格说 Go 侧是**会成功**的，所以这是 Go 侧的一个宽松点，RAG 更严） |
 | **Must Preserve** | 二选一必须**显式决策**：要么在 RAG 侧关掉 `FAIL_ON_TRAILING_TOKENS` 以对齐 Go，要么把这条登记为**签字的有意偏离**。⚠️ **当前的沉默状态最坏**：既没关，也没有任何台账记录它 |
 | **Recommended Verification** | 在 `LikeGoStyleCoercion.applyTo` 里 `builder.disable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)`（或显式 `enable` 并签字），并加一条锁死该判定的测试 |
-| **Evidence** | **双侧活体对拍**：Go B21 `OK tt="a"` / B22 `OK tt="a"`（取第一个对象）；RAG B21 `StreamReadException: Unrecognized token 'xx'` / B22 `MismatchedInputException: Trailing token … not allowed as per DeserializationFeature.FAIL_ON_TRAILING_TOKENS`。消费点：`core/jsonx/json.go:74-77` |
+| **Evidence** | **双侧活体对拍**：Go B21 `OK tt="a"` / B22 `OK tt="a"`（取第一个对象）；RAG B21 `StreamReadException: Unrecognized token 'xx'` / B22 `MismatchedInputException: Trailing token … not allowed as per DeserializationFeature.FAIL_ON_TRAILING_TOKENS`。消费点：`go-zero@v1.10.2/core/jsonx/json.go:74-77` |
 | **状态** | ✅ **已修（第三轮）** —— 修复：`LikeGoStyleCoercion` 关掉 `FAIL_ON_TRAILING_TOKENS`（对齐 Go 只解第一个值）· 守门测试 2 条。**本表三列是修复前的快照** ⇒ 现状见第三轮章节。 |
 
 ---
@@ -458,7 +458,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Risk** | **MEDIUM**（HTTP 规范说媒体类型大小写不敏感 ⇒ 客户端写大写是合法请求；Go 因为用了字面串比较而丢弃，两侧行为必须分出胜负） |
 | **Must Preserve** | 判据必须作用在**未经解析的原始头**上（`request.getHeader("Content-Type")`），而不是 `getContentType().toString()` |
 | **Recommended Verification** | 改 `GoStyleJsonBodyConverter.read` 传入 `((HttpServletRequest) …).getHeader("Content-Type")`（或 `inputMessage.getHeaders().getFirst("Content-Type")`）；加一条**走完整管线**（不能只测 `goReadsBody`）的用例钉死 `Content-Type: APPLICATION/JSON` |
-| **Evidence** | **双侧活体对拍**：Go A04 `Content-Type: APPLICATION/JSON` ⇒ `ERR field "target_type" is not set`；RAG A04/A08b ⇒ `200 {"code":200,…,"echo_ids":"[1]"}`。消费点：`rest/httpx/requests.go:153-155`（`r.Header.Get` 原始头）vs `GoStyleJsonBodyConverter.java:115-118`（`getContentType().toString()`） |
+| **Evidence** | **双侧活体对拍**：Go A04 `Content-Type: APPLICATION/JSON` ⇒ `ERR field "target_type" is not set`；RAG A04/A08b ⇒ `200 {"code":200,…,"echo_ids":"[1]"}`。消费点：`go-zero@v1.10.2/rest/httpx/requests.go:153-155`（`r.Header.Get` 原始头）vs `GoStyleJsonBodyConverter.java:115-118`（`getContentType().toString()`） |
 | **状态** | 🔴 **仍未修** —— 修法落在 `service/common` 的 `GoStyleJsonBodyConverter`（**6 个域共用**）⇒ **须单域串行**。⚠️ 2026-10-24 审计更正：本条「各域都有 `*GoStyleBodyContentTypeTest`」**不准确**（实测只有 like / message / users×2 **4 个模块**有）；且**域内绕过已实测排除**（`OrderComparator` 同 order 无 tiebreak ⇒ 排序不可控）。 |
 
 ---
@@ -478,7 +478,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Risk** | **MEDIUM**（`weight` 直接进结算链路；`+Inf` 会污染下游任何按权重加权的计算。⚠️ 注意 `1e39`（f64 合法、f32 溢出）两侧**都接受**且都窄化成 `+Inf`，那条是等价的 —— 差异**只在字面量本身越出 f64** 时出现） |
 | **Must Preserve** | `weight` 超出 float64 值域 ⇒ 解析失败，不得产生 `Infinity` |
 | **Recommended Verification** | 给 `LikeActionReq#setWeight` 改成 `Object` 入参 + 显式 `isFinite()` 校验；或在 DTO 层加一道 `Double.isFinite` 断言（抛 `IllegalArgumentException` ⇒ 已被 `handleIllegalArgument` 折叠成 5001） |
-| **Evidence** | **双侧活体对拍**：Go D07 `ERR strconv.ParseFloat: parsing "1e400": value out of range`；RAG D07 `OK w=Infinity`。消费点：`core/mapping/unmarshaler.go:686-693`（`v.Float64()` 后的 `target.SetFloat`，**未检查 ErrRange** 之外的上层 `setValueFromString` 路径）→ 实测报错来自 `setValueFromString` 的 `ParseFloat` 返回值检查 |
+| **Evidence** | **双侧活体对拍**：Go D07 `ERR strconv.ParseFloat: parsing "1e400": value out of range`；RAG D07 `OK w=Infinity`。消费点：`go-zero@v1.10.2/core/mapping/unmarshaler.go:686-693`（`v.Float64()` 后的 `target.SetFloat`，**未检查 ErrRange** 之外的上层 `setValueFromString` 路径）→ 实测报错来自 `setValueFromString` 的 `ParseFloat` 返回值检查 |
 | **状态** | ✅ **已修（第四轮）** —— 修复：`GoStyleFloat64Deserializer`（`isFinite` 校验）· 守门 4 条 + 变异验证 2 条转红。**本表三列是修复前的快照** ⇒ 现状见第四轮章节。 |
 
 ---
@@ -490,7 +490,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Component** | like-api |
 | **Operation** | 全部 6 个端点的下游调用 |
 | **Category** | Timeout（§17 / §20） |
-| **Go Behavior** | `zrpc.RpcClientConf.Timeout int64 json:",default=2000"`（`zrpc/config.go:31`；`etc/likecenter.yaml` **没写** ⇒ 2000）→ `zrpc/client.go:70-72` `WithTimeout(2000ms)` → `clientinterceptors/timeoutinterceptor.go:25` `context.WithTimeout(ctx, 2s)`。⇒ **每次 RPC 调用独立封顶 2s**，再叠加外层 HTTP 3s ⇒ 实际 = `min(2s, 3s − 已耗时)` |
+| **Go Behavior** | `zrpc.RpcClientConf.Timeout int64 json:",default=2000"`（`go-zero@v1.10.2/zrpc/config.go:31`；`etc/likecenter.yaml` **没写** ⇒ 2000）→ `go-zero@v1.10.2/zrpc/client.go:70-72` `WithTimeout(2000ms)` → `clientinterceptors/timeoutinterceptor.go:25` `context.WithTimeout(ctx, 2s)`。⇒ **每次 RPC 调用独立封顶 2s**，再叠加外层 HTTP 3s ⇒ 实际 = `min(2s, 3s − 已耗时)` |
 | **Java Behavior** | `LikeRpcClient#likeRpc()` → `GoStyleRequestDeadline.applyTo(stub)` ⇒ `withDeadlineAfter(剩余预算)`，剩余预算是 **HTTP 3s 的剩余量** ⇒ 实际 = `3s − 已耗时`，**没有 2s 这个独立上界** |
 | **Difference** | 两个语义相同的旋钮（单次下游调用超时），Go 是**固定值 2000**，RAG 是**父预算派生**（≤3000）。**没有任何一个 yaml 字段能对应 Go 的 2000** |
 | **Observable Impact** | 下游耗时落在 **2s ~ 3s** 这一段时：Go 返 `DEADLINE_EXCEEDED` ⇒ `200 + 5001`；RAG **成功返回**。2s 以下 / 3s 以上两侧一致 |
@@ -498,7 +498,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Risk** | **MEDIUM**（只在 2–3s 窗口可观测；但下游变慢时「RAG 会把本该超时的调用放过去」正是线上最难查的一类问题） |
 | **Must Preserve** | 单次 RPC 调用封顶 **2000ms**，与 HTTP 总预算 **3000ms** 是**两个独立旋钮** |
 | **Recommended Verification** | 给 `LikeRpcClient` 增加一个显式的 `like-rpc` 超时配置（默认 `2000ms`），在 `likeRpc()` 里取 `min(配置值, HTTP 剩余预算)`；⚠️ 改完后 `GoStyleRequestDeadline` 的「无预算就原样返回」分支也要重新审 —— 单测里没有 HTTP 超时上下文时，两侧语义会再次分叉<br>🔴 **2026-10-23 第五轮更正（本行后半句是错的）** —— 「需连带审 `common` 的 deadline 组件」**不成立**：<br>① `GoStyleRequestDeadline` 的**公开** API 已有 `isPresent()` / `remainingMillis()`，而 `applyTo(stub)` 的语义就是「把当前线程的剩余预算套到 stub 上」⇒ **只读**这两个方法就能拿到剩余预算，**不需要改 common**；<br>② 「无预算就原样返回」那条分支**根本不参与**：修法是**不再调用 `applyTo`**，改成 like-api 自己算 `min(2000, 剩余)` —— 无预算时 Go 的有效 deadline 是**纯 2s**（`context.WithTimeout(ctx, 2s)` 在无 deadline 的 ctx 上就是 2s），不是「没有 deadline」。<br>⇒ **本条是纯域内可修项，不受 §4 的跨域并发约束。** 详见第五轮章节。 |
-| **Evidence** | E-Go 源码链：`zrpc/config.go:31` → `zrpc/client.go:70-72` → `clientinterceptors/timeoutinterceptor.go:17-30`；E-Src：`GoStyleRequestDeadline.java:110-120` + `LikeRpcClient.java:133-147`（🔴 2026-10-24 更正：原写 78-80，是第五轮改实现前的行号）。⚠️ 「3000 − 已耗时 > 2000 时 RAG 真的放行」这一条**未做双端活体对拍**（需要真的让 like-rpc 慢 2.5s），见 §9 U-04 |
+| **Evidence** | E-Go 源码链：`go-zero@v1.10.2/zrpc/config.go:31` → `go-zero@v1.10.2/zrpc/client.go:70-72` → `clientinterceptors/timeoutinterceptor.go:17-30`；E-Src：`GoStyleRequestDeadline.java:110-120` + `LikeRpcClient.java:133-147`（🔴 2026-10-24 更正：原写 78-80，是第五轮改实现前的行号）。⚠️ 「3000 − 已耗时 > 2000 时 RAG 真的放行」这一条**未做双端活体对拍**（需要真的让 like-rpc 慢 2.5s），见 §9 U-04 |
 | **状态** | ✅ **已修（第五轮）** —— 修复：`LikeRpcClient.likeRpc()` 改为 `min(2000ms, HTTP 剩余预算)`、**不再调用 `applyTo`**；`LikeApiProperties` 新增 `LikeRpc.timeout`（默认 2000ms）· 守门 `LikeRpcTimeoutCapTest` 6 条（真 in-process gRPC server）+ 变异验证 3 条转红。**本表三列是修复前的快照** ⇒ 现状见第五轮章节。 |
 
 ---
@@ -511,14 +511,14 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Operation** | n/a（文档） |
 | **Category** | **文档致高危**（AGENTS.md §3.3.2 同款形态） |
 | **断言原文** | `LikeApiApplication.java:25-41`（🔴 2026-10-24 更正：原写 25-29）：<br>「⚠️ **本服务没有配置超时**：Go 侧 `etc/likecenter.yaml` 的 RestConf **没有 `Timeout` 字段** ⇒ `TimeoutFromMillis(0) == 0` ⇒ `observability.NewHTTPMiddleware` 走 `timeout <= 0` 的『不设超时』分支。Java 侧因此**刻意不配** `observability.http-timeout`，配了就等于凭空加了一条 Go 没有的 503 超时出口。」 |
-| **事实** | ① Go 的 `Timeout` 由 **struct tag** 提供：`rest/config.go:55` `Timeout int64 json:",default=3000"` ⇒ yaml 不写也等于 **3000ms**；② Java 侧**已经配了** —— `application.yml:27-29` `observability.http-timeout: 3s`；③ 因此这条注释描述的「刻意不配」**早已不存在**，且它描述的 Go 行为是 **DRIFT-LIKEAPI-001 的成因本身** |
+| **事实** | ① Go 的 `Timeout` 由 **struct tag** 提供：`go-zero@v1.10.2/rest/config.go:55` `Timeout int64 json:",default=3000"` ⇒ yaml 不写也等于 **3000ms**；② Java 侧**已经配了** —— `application.yml:27-29` `observability.http-timeout: 3s`；③ 因此这条注释描述的「刻意不配」**早已不存在**，且它描述的 Go 行为是 **DRIFT-LIKEAPI-001 的成因本身** |
 | **Why It Matters** | 这是 §3.3.2 点名的**最危险形态**：一段「引用真实文件、行文自信」的 Go 断言，指向已被证伪的推理，而它就在**应用入口类**上 —— 任何人排查超时或整理配置时**第一眼就会读到它**，并据此把 `http-timeout: 3s` 当成「凭空多出来的出口」删掉 ⇒ **DRIFT-LIKEAPI-001 原地复活** |
 | **Observable Impact** | 无运行时影响；影响的是下一次改动 |
 | **Classification** | **SEMANTIC MISMATCH（文档层）** |
 | **Risk** | **HIGH**（复活成本 = 一次「清理无用配置」的提交） |
 | **Must Preserve** | — |
-| **Recommended Verification** | 改写为：「Go 的 3s 来自 `rest/config.go:55` 的 struct tag 默认值（yaml 未写），本模块在 `application.yml` **显式写出同值**」 |
-| **Evidence** | E-Go：`rest/config.go:55`（tag 声明）+ `observability/http.go:30-34,88`（消费点）；E-Src/E-Cfg：`application.yml:27-29` 已配 3s。**本条已由本轮实测交叉确认**：若 Go 真无超时，则 `A01`（无 Content-Type）那条路径不会有 3s 窗口 —— 无关；决定性证据是 tag 默认值本身 |
+| **Recommended Verification** | 改写为：「Go 的 3s 来自 `go-zero@v1.10.2/rest/config.go:55` 的 struct tag 默认值（yaml 未写），本模块在 `application.yml` **显式写出同值**」 |
+| **Evidence** | E-Go：`go-zero@v1.10.2/rest/config.go:55`（tag 声明）+ `observability/http.go:30-34,88`（消费点）；E-Src/E-Cfg：`application.yml:27-29` 已配 3s。**本条已由本轮实测交叉确认**：若 Go 真无超时，则 `A01`（无 Content-Type）那条路径不会有 3s 窗口 —— 无关；决定性证据是 tag 默认值本身 |
 | **状态** | ✅ **已修（第四轮，纯注释）** —— `LikeApiApplication` 的类 javadoc 已改成「整条推理不成立」。**刻意不加运行期断言**（U-03 记着「3s 的 503 出口未复现」）⇒ 加一条恒真断言等于制造假绿。 |
 
 ---
@@ -537,7 +537,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Risk** | **HIGH** |
 | **Must Preserve** | 类级注释里的 Go 结论必须与 §59-73 行一致：**无 tag 的 Slice 与标量同样必填**，只是错误文案不同 |
 | **Recommended Verification** | 删除 `-31` 的「Slice 永不计必填」字样与 `-40` 的 `← 不报错` 标注，改写为指向同文件 59-73 行的结论 + `unmarshaler.go:944-950 → processFieldNotFromString(emptyMap) → processFieldPrimitive → newTypeMismatchError` 的完整调用链 |
-| **Evidence** | E-Go 探针 **B02 = `ERR type mismatch for field "target_ids"`**（`{"target_type":"a"}`），**B04 = `OK ids=[]`**（`target_ids:[]` 合法）。消费点：`core/mapping/unmarshaler.go:944-950` |
+| **Evidence** | E-Go 探针 **B02 = `ERR type mismatch for field "target_ids"`**（`{"target_type":"a"}`），**B04 = `OK ids=[]`**（`target_ids:[]` 合法）。消费点：`go-zero@v1.10.2/core/mapping/unmarshaler.go:944-950` |
 | **状态** | ✅ **已修（第四轮，纯注释）** —— `LikeReqGoStyleValidationTest` 类注释已改成「标量与 Slice 都必填」。 |
 
 ---
@@ -554,7 +554,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Classification** | **SEMANTIC MISMATCH（文档层，精度问题）** |
 | **Risk** | **LOW-MEDIUM**（有人据此以为「Go 拒绝一切 `+json`」⇒ 可能给 `application/json-patch+json` 加上 Go 没有的拒绝逻辑） |
 | **Recommended Verification** | 把 DisplayName 收窄为「`application/vnd.api+json` 不含 `application/json` 子串 ⇒ Go 不读；⚠️ `application/json-patch+json` **含**该子串 ⇒ Go 会读，RAG 也读」；并在 `goReadsBody` 的边界测试里补一条 `application/json-patch+json → true`（本轮实测确为 `true`） |
-| **Evidence** | E-Go A05 `Content-Type: application/json-patch+json` ⇒ **`OK tt="a" ids=[1]`**（读）；A-E-Rag `goReadsBody("application/json-patch+json",10) = true`。消费点：`rest/httpx/requests.go:154` 的 `strings.Contains` |
+| **Evidence** | E-Go A05 `Content-Type: application/json-patch+json` ⇒ **`OK tt="a" ids=[1]`**（读）；A-E-Rag `goReadsBody("application/json-patch+json",10) = true`。消费点：`go-zero@v1.10.2/rest/httpx/requests.go:154` 的 `strings.Contains` |
 | **状态** | ✅ **已修（第四轮）** —— `LikeApiGoStyleBodyContentTypeTest` 的措辞已收窄，并补边界用例 `jsonPatchContentTypeIsReadBecauseItContainsTheSubstring`。 |
 
 ---
@@ -574,7 +574,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Risk** | **LOW** |
 | **Must Preserve** | 不必强行对齐（会与容器对抗）；⚠️ 若将来有客户端按原始字符串比对，需登记为签字偏离 |
 | **Recommended Verification** | 保持现状；在 `docs/Intentional_Deviations/_cross/signed-deviations.md` 追加一行留档 |
-| **Evidence** | E-Go F01/F04 `ct="application/json; charset=utf-8"`；E-Rag A03 `ct=application/json`。消费点：`core/jsonx` + `rest/httpx/responses.go:182` `w.Header().Set(ContentType, header.ContentTypeJson)` |
+| **Evidence** | E-Go F01/F04 `ct="application/json; charset=utf-8"`；E-Rag A03 `ct=application/json`。消费点：`core/jsonx` + `go-zero@v1.10.2/rest/httpx/responses.go:182` `w.Header().Set(ContentType, header.ContentTypeJson)` |
 | **状态** | ⏳ **已建档为待签字候选**（**不是**已签字）—— `docs/Intentional_Deviations/like/api.md` 的 SD-2026-10-23-08 / -09。⚠️ 2026-10-24 更正：本节原写「在 `docs/Intentional_Deviations/_cross/signed-deviations.md` 追加一行留档」—— **该文件里没有任何 like 条目**，实际建档位置是 `docs/Intentional_Deviations/like/api.md`。 |
 
 ---
@@ -586,7 +586,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Component** | like-api |
 | **Operation** | 全部 6 个端点 |
 | **Category** | Concurrency / Load Shedding |
-| **Go Behavior** | 每请求一个 goroutine（初始栈 2KB），**无上限** ⇒ 不存在「worker 池饱和」这个事件。Go 侧唯一的容量拒绝是 `MaxConnsHandler`（`rest/config.go:52` 默认 10000）与 `SheddingHandler`（CPU 90%），两者都由 `rag.protection` 对齐（历史条目 -003/-004 已关） |
+| **Go Behavior** | 每请求一个 goroutine（初始栈 2KB），**无上限** ⇒ 不存在「worker 池饱和」这个事件。Go 侧唯一的容量拒绝是 `MaxConnsHandler`（`go-zero@v1.10.2/rest/config.go:52` 默认 10000）与 `SheddingHandler`（CPU 90%），两者都由 `rag.protection` 对齐（历史条目 -003/-004 已关） |
 | **Java Behavior** | `HttpMiddleware` 的 worker 池**上限 512**（`MAX_HTTP_WORKERS`）；饱和 ⇒ `RejectedExecutionException` ⇒ **裸 503，无 body、无 Content-Type**（`HttpMiddleware:296-317`） |
 | **Difference** | RAG 多了一条 Go 不存在的拒绝出口，且**形状刻意与超时 503 不同**（超时那条有 body） |
 | **Observable Impact** | 高并发 + 下游卡死时，RAG 会出现 Go 不会出现的裸 503。⚠️ 512 远大于 Tomcat 默认 `max-threads`（200），正常流量不该触发 |
@@ -594,7 +594,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Risk** | **LOW**（触发窗口窄；且这是**有意的兜底**，`HttpMiddleware:116-128` 的注释已自陈「是『拿不到 ctx 传播』这件事的兜底，不是 Go 语义的一部分」） |
 | **Must Preserve** | 无（这是有意接受的实现差异，不属 Go 语义） |
 | **Recommended Verification** | 保持现状；建议在 `docs/Intentional_Deviations/_cross/signed-deviations.md` 留档，避免下次复核被当成新漂移 |
-| **Evidence** | E-Src：`HttpMiddleware.java:130`（`MAX_HTTP_WORKERS = 512`）+ `:296-317`（饱和分支）；Go 侧无对应物（`rest/engine.go` 全文无 worker 池） |
+| **Evidence** | E-Src：`HttpMiddleware.java:130`（`MAX_HTTP_WORKERS = 512`）+ `:296-317`（饱和分支）；Go 侧无对应物（`go-zero@v1.10.2/rest/engine.go` 全文无 worker 池） |
 
 ---
 
@@ -612,7 +612,7 @@ RAG ： 3s 预算【含】JWT 验签（验签在 HandlerInterceptor ⇒ Dispatch
 | **原生 `TimeoutHandler` 不在链上** | `service/common/observability/http.go:30-34` `DisableNativeRestTimeout` ⇒ `conf.Middlewares.Timeout = false`（真源 10 个 api 全部调它，如 `service/like/api/likecenter.go:36`） |
 | **3s 预算实际由真源自己的中间件提供**，注册在 `server.Use` ⇒ 落在 `ng.middlewares` | `service/like/api/likecenter.go:38` `server.Use(observability.NewHTTPMiddleware(...))` |
 | **计时器起点 = 该中间件自己的入口** | `service/common/observability/http.go:53` `ctx, cancel := context.WithTimeout(r.Context(), timeout)` |
-| **`ng.middlewares` 在 `Authorize` 之内** | `rest/engine.go:101-116` bindRoute：`:108` `appendAuthHandler`（JWT）**先**，`:110-112` `for _, mw := range ng.middlewares { chn = chn.Append(...) }` **后**<br>`rest/chain/chain.go:38-42` `Append` = 「加在请求流的**最后**」⇒ 越 Append 越靠内；`:86-88` `Then` 反向包裹 ⇒ 列表首位 = 最外层 |
+| **`ng.middlewares` 在 `Authorize` 之内** | `go-zero@v1.10.2/rest/engine.go:101-116` bindRoute：`:108` `appendAuthHandler`（JWT）**先**，`:110-112` `for _, mw := range ng.middlewares { chn = chn.Append(...) }` **后**<br>`go-zero@v1.10.2/rest/chain/chain.go:38-42` `Append` = 「加在请求流的**最后**」⇒ 越 Append 越靠内；`:86-88` `Then` 反向包裹 ⇒ 列表首位 = 最外层 |
 
 ⇒ 执行序：**原生中间件 → Authorize(验签) → observability(3s 计时) → handler** ⇒ **验签在 3s 预算之外**。
 
@@ -863,7 +863,7 @@ SEMANTICALLY NOT EQUIVALENT
 ⇒ 被 `GlobalExceptionHandler#handleAny` 兜成 `200 + 5001`，**下游 RPC 根本没发出**；
 Go 侧则**正常发出**。
 
-**Go 真实语义**（`core/mapping/unmarshaler.go:156-183`）：
+**Go 真实语义**（`go-zero@v1.10.2/core/mapping/unmarshaler.go:156-183`）：
 
 | 输入 | Go 结果 | 后果 |
 |---|---|---|
@@ -882,7 +882,7 @@ Go 侧则**正常发出**。
 
 ## 2. DRIFT-LIKEAPI-014 ✅ 已修（**主动放宽解析器**）
 
-**Go 语义**：`core/jsonx/json.go:74-77` 只解**第一个** JSON 值，其后内容既不报错也不检查。
+**Go 语义**：`go-zero@v1.10.2/core/jsonx/json.go:74-77` 只解**第一个** JSON 值，其后内容既不报错也不检查。
 `{…} xx` ⇒ **解析成功**（用第一个对象，**会真的发出 RPC**）；`{…}{…}` ⇒ 同理。
 
 **RAG 原状**：Jackson 3（`tools.jackson` 3.1.5）把 `FAIL_ON_TRAILING_TOKENS` 的**默认值翻转成 `true`**
@@ -917,7 +917,7 @@ Go 侧则**正常发出**。
 | **DRIFT-LIKEAPI-015** | `Content-Type` 大小写：Go 用**原始头**（`strings.Contains` 大小写敏感），RAG 用**已解析的 MediaType**（媒体类型已小写化） | ⚠️ **修法落在 `service/common` 的 `GoStyleJsonBodyConverter`**，该类被 **6 个域**共用（like / follow / message / users×2 / task / article），各域都有 `*GoStyleBodyContentTypeTest`。在**多域并发 worktree**（§5.3）下改共享组件会产生跨域冲突 ⇒ **须单域串行处理**，不在本 worktree 内做<br>🔴 **2026-10-24 审计更正：「各域都有 `*GoStyleBodyContentTypeTest`」这句不准确** —— 实测（`find service -name "*GoStyleBodyContentTypeTest.java"`）该测试类**只有 4 个模块**有：like-api / message-api / user-api / admin-api；follow / task / article **没有**这个类（它们覆盖的是 `FollowApiMvcPipelineTest` / `TaskApiMvcPipelineTest` / `TaskApiWiringTest` / `GetTaskReqParsingTest` 与 article 的 `GoStyleJsonBodyLimitFilter`）。<br>⇒ 「6 个域共用」**属实**；「各域都有该测试类」**高估了改动面** —— 真正需要**复核断言**的只有 **4 个模块**。<br>⚠️ **另经实测排除「域内绕过」这条路**：`OrderComparator.doCompare`（spring-core 7.0.9）在两个 config **order 相同**时**返回 0、无类名 tiebreak** ⇒ 排序退化为稳定排序、取决于 bean 注册顺序 ⇒ 「子类化 + 替换 common 插入的转换器」**顺序不可控** ⇒ 域内绕过不可靠，**确认须单域串行**。 |
 | **DRIFT-LIKEAPI-012** | `target_ids` 里放 JSON 数字：Go **接受**（`fillSliceValue` 的 `case fmt.Stringer` 命中 `json.Number`），RAG **拒**（`LogicalType.Textual ← Integer = Fail`） | 修法需**元素级解析器**（setter 改 `Object` 入参）。⚠️ 台账已实测记录「Jackson 3 的 coercion **只有 LogicalType 级生效、类级无效**」，所以 `withCoercionConfig(SomeListClass, …)` 这条路走不通 —— 需新增一个显式的元素级解析组件，范围大于本轮 |
 | **DRIFT-LIKEAPI-016** | `weight: 1e400` ⇒ Go **拒**（`strconv.ParseFloat` 检查 `ErrRange`），RAG 收成 `Double.POSITIVE_INFINITY` ⇒ **真的发出一次 `weight=+Inf` 的写调用** | 修法明确（`setWeight` 改 `Object` 入参 + `isFinite()` 校验），但需与 012 共用同一套「元素级/字段级解析器」组件 ⇒ **与 012 合并做**，避免两次改动同一批 DTO |
-| **DRIFT-LIKEAPI-017** | 单次 RPC 超时：Go **固定 2000ms**（`zrpc/config.go:31` 的 struct tag 默认），RAG 取 **HTTP 剩余预算**（≤3000） | 需新增独立配置项 + 改 `GoStyleRequestDeadline` 的「无预算就原样返回」分支（单测里没有 HTTP 超时上下文时两侧语义会再次分叉）⇒ 需要连带审 `common` 的 deadline 组件，同样受 §4 的并发约束<br>🔴 **2026-10-23 第五轮更正：后半句整段是错的** —— **不需要改 `common`，也不受 §4 并发约束**：只**读** `GoStyleRequestDeadline` 已有的公开 `isPresent()` / `remainingMillis()` 即可拿到剩余预算，并在 like-api 侧自己算 `min(2000, 剩余)`（**不再调用 `applyTo`**）。理由见 §7.2 该条的更正。 |
+| **DRIFT-LIKEAPI-017** | 单次 RPC 超时：Go **固定 2000ms**（`go-zero@v1.10.2/zrpc/config.go:31` 的 struct tag 默认），RAG 取 **HTTP 剩余预算**（≤3000） | 需新增独立配置项 + 改 `GoStyleRequestDeadline` 的「无预算就原样返回」分支（单测里没有 HTTP 超时上下文时两侧语义会再次分叉）⇒ 需要连带审 `common` 的 deadline 组件，同样受 §4 的并发约束<br>🔴 **2026-10-23 第五轮更正：后半句整段是错的** —— **不需要改 `common`，也不受 §4 并发约束**：只**读** `GoStyleRequestDeadline` 已有的公开 `isPresent()` / `remainingMillis()` 即可拿到剩余预算，并在 like-api 侧自己算 `min(2000, 剩余)`（**不再调用 `applyTo`**）。理由见 §7.2 该条的更正。 |
 | **DRIFT-LIKEAPI-018/019/020** | 3 条**文档层**高危断言 | ⚠️ **纯注释修正**，无需运行期测试。本轮**未做**，留待下一轮（改动零风险，但需要逐条核对 Go 出处，不能凭印象改） |
 | **DRIFT-LIKEAPI-021/022** | 响应 `Content-Type` 无 `charset`（判语义等价）/ 裸 503（RAG 独有） | ✅ **已建档**为待签字候选：`Intentional_Deviations/like/api.md` 的 SD-…-08 / -09。⚠️ 标注为**待签字**而非已签字 —— 保留在案是为了让下一轮复核**不会把它们当新发现重提**，不是代替用户拍板 |
 
@@ -960,8 +960,8 @@ Go 侧则**正常发出**。
 | # | 位置 | 事实 |
 |---|---|---|
 | 1 | `go-zero@v1.10.2/core/jsonx/json.go:74-77` | `unmarshalUseNumber` 对**三个** Unmarshal 入口统一 `decoder.UseNumber()` ⇒ 一切 JSON 数字是 `json.Number`（`type Number string`），**不是** float64 |
-| 2 | `core/mapping/unmarshaler.go:228-229` | `fillSliceValue` 的 type switch **第一条**就是 `case fmt.Stringer: setValueFromString(baseKind, ithVal, v.String())`；`json.Number` 实现了 `Stringer` ⇒ 数组里的数字被字符串化**接受** |
-| 3 | `core/mapping/utils.go` `convertTypeFromString` | `case reflect.String: return str, nil` —— **原样返回，不解析不校验** ⇒ `99999999999999999999` 连溢出都不管 |
+| 2 | `go-zero@v1.10.2/core/mapping/unmarshaler.go:228-229` | `fillSliceValue` 的 type switch **第一条**就是 `case fmt.Stringer: setValueFromString(baseKind, ithVal, v.String())`；`json.Number` 实现了 `Stringer` ⇒ 数组里的数字被字符串化**接受** |
+| 3 | `go-zero@v1.10.2/core/mapping/utils.go` `convertTypeFromString` | `case reflect.String: return str, nil` —— **原样返回，不解析不校验** ⇒ `99999999999999999999` 连溢出都不管 |
 
 ⚠️ **这是 go-zero 自身的不对称**：同一个 JSON 数字，进**标量** String 字段被拒（`processFieldPrimitive`），
 进 **Slice 元素**却被收。只学「String 字段拒数字」必然漏掉这一半 —— 台账原判 HIGH 成立。
@@ -999,7 +999,7 @@ Go 侧则**正常发出**。
 
 ## 2. 016：`1e400` 为什么会变成一次 `+Inf` 的写调用
 
-**Go 判据**（`core/mapping/unmarshaler.go:684-687`）：
+**Go 判据**（`go-zero@v1.10.2/core/mapping/unmarshaler.go:684-687`）：
 ```go
 case reflect.Float32:
     fValue, err := v.Float64()      // v 是 json.Number
@@ -1027,7 +1027,7 @@ case reflect.Float32:
 |---|---|---|---|
 | **018** | 「Go 侧 yaml **没有** `Timeout` 字段 ⇒ `TimeoutFromMillis(0)==0` ⇒ 不设超时；Java 侧**刻意不配**」 | `go-zero@v1.10.2/rest/config.go:55` `Timeout int64 \`json:",default=3000"\`` ⇒ **yaml 写不写都是 3000ms**；且 `application.yml:27-29` **早已配了 3s** | 整条推理**不成立**。⚠️ 这正是 §3.3.1「配置里没写 ≠ 没开」的原型案例，且落在**应用入口类**上 ⇒ 任何人清理配置时第一眼就会读到 |
 | **019** | 「Slice 永不计必填」+ 给 Go 代码标 `← 不报错` | `unmarshaler.go:944-950` 的 Slice 分支**不是** `return nil`，而是把 `emptyMap` 交给 `processFieldNotFromString` → `default:` → `processFieldPrimitive` → `typeKind≠valueKind` ⇒ **`newTypeMismatchError`** | 两处都错，且**与同文件 59-73 行自相矛盾**（那里已写对）。⚠️ 这是 **DRIFT-LIKEAPI-002 的案发现场** |
-| **020** | 「`application/*+json` 在 Go 侧同样不算 JSON」 | `rest/httpx/requests.go:153-155` 判据是 `strings.Contains(ct, "application/json")`（**子串包含**）⇒ `application/vnd.api+json` 不含 ⇒ 不读；⚠️ **`application/json-patch+json` 含 ⇒ Go 会读** | 措辞**过宽**（把两条混成一条）。⚠️ 已补 `jsonPatchContentTypeIsReadBecauseItContainsTheSubstring` 钉住反向那一半，防止有人照旧措辞给它加 Go 没有的拒绝逻辑 |
+| **020** | 「`application/*+json` 在 Go 侧同样不算 JSON」 | `go-zero@v1.10.2/rest/httpx/requests.go:153-155` 判据是 `strings.Contains(ct, "application/json")`（**子串包含**）⇒ `application/vnd.api+json` 不含 ⇒ 不读；⚠️ **`application/json-patch+json` 含 ⇒ Go 会读** | 措辞**过宽**（把两条混成一条）。⚠️ 已补 `jsonPatchContentTypeIsReadBecauseItContainsTheSubstring` 钉住反向那一半，防止有人照旧措辞给它加 Go 没有的拒绝逻辑 |
 
 ## 4. 仍未修（与上一轮 §4 相同，无新增）
 
