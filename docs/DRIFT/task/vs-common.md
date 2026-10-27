@@ -292,6 +292,53 @@ Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
 - 🔴 **订正 1（机制表述不准）**：G4 原句写「offset 146 先写 `timeoutOptions`（**来自 `spring.data.redis.timeout`**）」⇒ **不对** ⇒ 源码 `LettuceConnectionConfiguration.java:229` = `builder.timeoutOptions(TimeoutOptions.enabled());` ⇒ **入参是硬编码默认** ⇒ **`spring.data.redis.timeout` 压根不进 `ClientOptions.timeoutOptions`** ⇒ 它走 `:173-174` `builder.commandTimeout(getProperties().getTimeout())` ⇒ ⇒ 落 `getClientConfiguration().getCommandTimeout()` ⇒ **RedisURI.timeout**（= 本域守门 ③ 读的那个值）
 - ⇒ ⇒ **对修法的影响 = 无**（结论与处方都成立）⇒ 但**新增一条实现约束**：customizer 的 `TimeoutSource` 会**整体替换** `TimeoutOptions.enabled()` 那份 default source ⇒ ⇒ **无 deadline 时必须回落到 `getCommandTimeout()`（本域 = 3s）** ⇒ 否则**命令失去 3s 上限**（断连从「3s 快速失败」退化为「无限等待」）⇒ ⇒ **本域守门 ①（`getTimeoutOptions().isTimeoutCommands()` 必须为 true）就是钉这条的网** ⇒ 🔴 **E66 落码后若 ① 变红 ⇒ 属新回归 ⇒ 直接找 G4**
 
+### 🔴 第四轮追加（2026-10-27 13:0x · G2 独立取证）· 两个共享门禁的**根因归属坐实** ＋ **跨树行号引用纪律**
+
+#### ① FB-S1 的根因 = **G4 树内部三方矛盾**（不是本域 yml 错）⇒ 守门期望值 stale 的铁证
+
+把 G4 树（`align/g4-service-common` @ **`cec7131`**）里三处并排看，**互不相容**：
+
+| # | 位置（G4 树 `cec7131`） | 内容 | 指向 |
+|---|---|---|---|
+| 1 | `service/common/src/main/java/com/rag/common/http/GoStyleFormLimitMode.java:237` | `new DomainReachability("service/task/task-api", false, false, Mode.OFF, "task/api/**：httpx.Parse / ParseForm / GetFormValues 命中数 = 0（gettaskhandler.go:19 用 json.NewDecoder(r.Body) + UseNumber，只 import 了 httpx 但只用 httpx.ErrorCtx）⇒ r.Form 从不被求值 ⇒ 两道上限不可达 ⇒ 语义答案是 off")` | **权威语义 = OFF** |
+| 2 | `service/task/task-api/src/main/resources/application.yml:176-178` | `# Go 侧 task/api **没有** httpx.SetErrorHandler ⇒ 同 article ⇒ **400 + Go 原文** ⇒ mode: raw` ＋ `mode: raw` | **现状 = raw**（与 1 自相矛盾） |
+| 3 | `tools/difftest/check-tomcat-limits.py:149` | `EXPECTED_FORM_LIMIT_MODE` 把 `"service/task/task-api"` 写死为 **`"raw"`** | **守门期望 = raw**（固化的是 2 的现状，不是 1 的语义） |
+
+⇒ ⇒ **权威源（1）说 OFF，而现状（2）与守门（3）都说 raw** ⇒ ⇒ **守门红 = 守门的期望值 stale**（AGENTS.md §3.3 的「绿/红」纪律：守门红先问「期望值的权威来源是什么」⇒ 权威来源 = `SEMANTIC_REACHABILITY`，而它与硬编码表直接打架 ⇒ **守门错**）
+⇒ ⇒ **G4 树那行 yml 注释的推理漏了一条判据**：它只用了**轴②（拒成什么形状）**（「没注册 `SetErrorHandler` ⇒ 400 + 原文」）来定**轴①（开不开）**⇒ ⇒ 而轴①在 task 域的判据是「**上限不可达 ⇒ OFF**」（`GoStyleFormLimitMode` 的 javadoc `:36-52` 明列「`Mode.OFF` ⇔ 域自捕获 **或** 上限不可达」）⇒ ⇒ **那行注释本身就 stale** ⇒ ⇒ 合并取本域版本（`mode: "off"` ＋ 订正注释）即修正
+⇒ ⇒ **处置纪律（不变，重申）**：该门禁若仍红 ⇒ **不改本域 yml** ⇒ 改 G4 的期望表（最小：`:149` ⇒ `"off"`；更稳：期望值改从 `SEMANTIC_REACHABILITY.semanticMode` 取 ⇒ **单一真源** ⇒ 以后不再 stale）
+
+#### ② ⚠️ 新纪律：**跨树引用必须带 commit id**（本条是本轮实测踩出来的）
+
+⚠️ **本台账原引 G4 树的行号已过期**（G4 树继续前移 ⇒ 行号漂移）：
+
+| 原引（本台账 §4·五 ①） | **G4 树 `cec7131` 实际行号** | 漂移 |
+|---|---|---|
+| `GoStyleFormLimitMode.java:219`（task 行） | **`:237`** | **+18** |
+| `GoStyleFormLimitMode.java:280`（javadoc「task 域 yaml 声明 raw，而语义答案是 OFF」） | **`:298`** | **+18** |
+
+⇒ ⇒ **同一批受影响**：原引的 article/comment/favorite/follow/like/message 各行（`:191/:194/:197/:207/:213/:216`）⇒ **现为 `:209/:212/:215/:225/:231/:234`**（`SEMANTIC_REACHABILITY` 列表起点 `:208` · record 定义 `:166` · `selfConsistent()` `:187` · `parse()` `:334` · 合法别名 `off`/`false`/`raw`/`envelope` = `:340/:342/:346/:348` · 非法值抛错 `:351`）
+⇒ ⇒ ⇒ **规则**：AGENTS.md §3.3.1 要求「行号指向**消费点**」⇒ **跨树场景还要加一句**：**行号只在指定的 commit 上有效** ⇒ ⇒ **凡引他树 `文件:行号`，必须同时写出该树的 commit id**（本条已按此改写：全部改为「G4 树 `cec7131`」）
+⇒ ⇒ ⇒ **同族**：与「从别的域抄过来的**类名**会过期 ⇒ 引用前按域重新定位」同源 ⇒ ⇒ **这次过期的是**「**行号**」⇒ ⇒ **凡跨树引 `文件:行号` ⇒ 一律先在该树的**当前 commit** 上重新定位**
+
+#### ③ FB-S2 的 6 条漂移：**MAIN / TEST 分类**（全量逐条定位 · 脚本化实证）
+
+用与守门同口径的扫描（`import` 判定 · `service/**/src/**/*.java`）逐类定位 ⇒ **6 条里 5 条是纯 `src/test/` 引用，只有 1 条是生产引用**：
+
+| 共享类 | 漂移 | 引用方（本域） | 层级 |
+|---|---|---|---|
+| `GoStyleFormLimitMode` | `None` → `["task"]` | `task-api/…/TaskApiFormLimitReachabilityTest.java` | **TEST** |
+| `GoStyleFormValueLimitInterceptor` | `None` → `["task"]` | 同上 | **TEST** |
+| `GoStyleRpcBreakerInterceptor` | `None` → `["task"]` | `task-rpc/…/TaskProtectionChainWiringTest.java` | **TEST** |
+| `GoStyleRpcSheddingInterceptor` | `None` → `["task"]` | 同上 | **TEST** |
+| `GoStyleGrpcClientBreakerInterceptor` | 增 `like` | `like-api/…/LikeApiGrpcClientBreakerE2ETest.java` | **TEST** |
+| `MqConsumer` | 增 `like` | `like-rpc/…/mq/LikeUpdateKafkaListener.java`（**`src/main`**）＋ `like-rpc/…/LikeSpansAttributeGateTest.java` | **MAIN ＋ TEST** |
+
+⇒ ⇒ **task 生产代码对前 4 个共享类的 `import` = 0**（与本台账上一轮结论一致 · 这次用脚本逐条坐实）
+⇒ ⇒ 🔴 **给 G4 更新快照时的语义提醒**：**守门的 `scan_common_radiation` 把测试 import 与生产 import 视为等价**（扫 `service/**/src/**/*.java` ⇒ 含 `src/test`）⇒ ⇒ 若直接贴 `--print` 的输出 ⇒ 快照会写成「**task 域引用了 `GoStyleFormLimitMode` 等 4 个共享类**」⇒ ⇒ **读者会以为共享层改这 4 个类会波及 task 的生产路径** ⇒ ⇒ **实际只是「本域有一条测试在验证这个共享类」** ⇒ ⇒ **高估共享层爆炸半径**
+⇒ ⇒ ⇒ **建议（二选一，由 G4 定）**：① **改口径**：`scan_common_radiation` 分 **MAIN / TEST 两轴**记录 ⇒ 快照里能看出「生产依赖」与「测试引用」的差别（**根治**：共享层爆炸半径的语义本来就指生产依赖）② **保持单轴但加标注**：快照生成时保留层级标记 ⇒ 读者不会误读
+⇒ ⇒ ⇒ ⚠️ **无论 G4 选哪种**：**本域不会回退这些测试**（它们分别是 A3「不可达性」与 A2「保护链构成」的守门网）⇒ ⇒ ⇒ **修法只能落在「快照/口径」侧 ⇒ 不能靠删域侧 import 消漂移**
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次** —— 🟡 **本轮只做静态前置检查，未启动进程**（见 §6）⇒ 仍为待办
@@ -327,3 +374,26 @@ Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
 3. ~~**A2 的 shedding 在链上**无任何守门证明（现存守门主动关掉降载）⇒ 这是本轮最实的一个「**跑绿 ≠ 对**」形态。~~ ⇒ ✅ **2026-10-27 订正：本条已过期（阶段 2 `fad4c63` 已补）** —— 原写「无任何守门证明」指的是**旧守门**（`TaskProtectionChainWiringTest:80-81` **主动关掉降载** ⇒ 拿到的 call 永远归熔断层所有 ⇒ **分不出 shedding 是否在链上**）⇒ ⇒ 现守门已扩到 **2 条链层断言**：① 「关降载 ⇒ 拿到的 call 归熔断层所有」② 「**不关降载** ⇒ 拿到的 call 归降载层所有」⇒ ⇒ **现在能分别断言 breaker / shedding 两层**（判据选「**包装层归属**」而非「降载统计增量」—— 后者是**进程级单例**且每分钟上报会**清零** ⇒ 增量断言有 ~1e-5/次的**假红**概率 ⇒ **守门不能带随机性**）⇒ ⇒ **并做过变异验证**（摘掉降载层 ⇒ **1 failure** 红在 `sheddingLayerWrapsTheBusinessInterceptor:150`；摘掉熔断层 ⇒ **1 failure** 红在 `breakerLayerWrapsTheBusinessInterceptor:118` ⇒ 两次都**只红 1 条**、另一条阴性对照仍绿 ⇒ **非假绿**）⇒ ⇒ **本条销号**<br>⚠️ **留痕**：共享层的「链层构成」只读入口（FB-03）**已由 G4 落码**（`compose(props)` / `layerNames(chain)` · G4 `182fc32`）但**未合入本树** ⇒ ⇒ 本轮引用它会让本模块**编译不过** ⇒ ⇒ 域侧改用等价的「包装层归属」判据顶上 ⇒ ⇒ **合并后**应升级为直接断言 `layerNames(chain)`（= 更贴共享层原生判据） |
 4. ✅ **`task-rpc` 侧 `MqConsumer` / `TraceConsumer`** 是否在两个 sink 上都包了 —— ✅ **2026-10-27 已核实（结论：都包了）**：原写「本轮只读源码未见对应调用点，**未排除也未证实**」⇒ ⇒ **本轮逐条查消费点后证实**：<br>· **`UserLikeProgressSink`**：`import com.rag.common.observability.MqConsumer`（`:3`）⇒ `MqConsumer.traceConsumer(...)` **2 处**（`:135` / `:228`）<br>· **`ArticleLikeProgressSink`**：同 import（`:4`）⇒ `MqConsumer.traceConsumer(...)` **2 处**（`:150` / `:241`）<br>⇒ ⇒ **两个 sink 都包了** ⇒ ⇒ **A9 的这个遗漏面销号**<br>⚠️ **同轮附带核了两条「看着像漂移、其实不是」的**（**都是我的判据错，不是代码错**）：<br>① 🔴 **Go 侧 task 域的 mq 目录我一次 `find -path "*mq*"` 零命中 ⇒ 差点断言「Go 侧没有 sink」** ⇒ ⇒ **实际 Go 侧目录叫 `service/task/rpc/internal/sink/`**（`like_sink.go` / `article_sink.go`）⇒ ⇒ **目录名判据错** ⇒ ⇒ 教训：**一次 find 零命中 ≠ 事实为零**（先怀疑判据，再怀疑对象）<br>② 🔴 **Go 侧 yaml 我一次 `grep "out-user-topic"` 零命中 ⇒ 差点断言「Go 侧没这两个 topic」** ⇒ ⇒ **Go 侧是大驼峰 `OutUserTopic` / `OutArticleTopic`**（`service/task/rpc/etc/task.yaml:20-21`）⇒ ⇒ **命名风格判据错**<br>⇒ ⇒ **改正后的完整核对（6 个消费点逐条对上）**：Go `initKafkaRaw.go:32`(`GroupKafkaRaw`/`InTopic`) ⇒ RAG `TaskRawDiagnosticConsumer` · Go `initGoKa.go:124`(`GroupGoKa`/`InTopic`) ⇒ RAG `TaskRawLogRouter` · Go `initGoKa.go:165`(`GroupGoKaUser`/`RawUserTopic`) ⇒ RAG `TaskUserCountConsumer` · Go `initGoKa.go`(`GroupGoKaArticle`/`RawArticleTopic`) ⇒ RAG `TaskArticleCountConsumer` · Go `initUserFilter.go:30`(`GroupFilterUser`/`OutUserTopic`) ⇒ RAG `UserLikeProgressSink` · Go `initArticleFilter.go:30`(`GroupKafkaFilter`/`OutArticleTopic`) ⇒ RAG `ArticleLikeProgressSink` ⇒ ⇒ **6/6 一致**；且 `GroupFilterArticle`(`task.rpc.consumer91`) 在 **Go 侧确实无消费点**、RAG 侧 yml 也如实标注「保留仅为配置面完整」⇒ **两侧同款** ✔<br>③ 🔴 **per-listener 的 `auto.offset.reset`：Go 侧 goka 三处 `sarama.OffsetOldest`（`initGoKa.go:131/:173/:207`）vs RAG 侧实际 `latest`？** ⇒ ⇒ **不成立** —— RAG 现状**已是点分形式**且**真生效**：3 个 goka 路 = `auto.offset.reset=earliest`（`TaskRawLogRouter:83` / `TaskUserCountConsumer:84` / `TaskArticleCountConsumer:80`）· 3 个 kq 路 = `auto.offset.reset=latest`（`TaskRawDiagnosticConsumer:54` / `UserLikeProgressSink:129` / `ArticleLikeProgressSink:144`）⇒ ⇒ **与 Go 逐条同向**（goka 三处 `OffsetOldest` / kq 三处硬编码 `Offset: "latest"`）⇒ ⇒ 该条**早已闭环**（`DRIFT-TASK-RPC-006` · 2026-10-24 查出连字符 `auto-offset-reset` 被 Kafka 忽略 ⇒ 已修 ⇒ **活体验证 8 条全过**）⇒ ⚠️ **listener 注释里那句「此前这里写的 earliest 从未生效」是「修复前」的记述、不是现状** ⇒ ⇒ **注释里的历史记述 ≠ 现状**（必须查实际配置）
 5. **未核项**：共享层 `service/common` 的既有结论（`docs/DRIFT/common/{protection,http,deadline,audit}.md`）本轮**未逐条复核** ⇒ 本域只负责「本域是否真接上」，「共享层本身对不对」沿用共享层台账。<br>6. 🟢 **E65（= global U15 · 出向 gRPC 不继承请求 deadline）—— 本域 = 不适用**（2026-10-27 独立核实 · G3 知会 + Jason 拍板方向）<br>· **本域跨域出向 gRPC = 0 处** ⇒ ⇒ **E65 在本域不成立**（不是「已修」，是「不适用」）⇒ 逐条实测依据：本域唯一的出向 gRPC client 是 `service/task/task-api/src/main/java/com/rag/task/task/api/client/TaskRpcClient.java`（**task-api → task-rpc = 本域内**）⇒ 而本域**没有**「rpc → 别的域」的出向口（unlike `like-rpc → message-rpc` / `message-rpc → user-rpc` / `message-rpc → admin-rpc` ⇒ **那 3 处才是 E65 的落点**）<br>· ⚠️ **区分**：`TaskRpcClient` 的 `min(DEFAULT_CALL_TIMEOUT_MILLIS, remaining)` 是**本域内** api→rpc 的 deadline 传递（阶段 2 已落）⇒ **与 E65 无关** ⇒ 别把它当成 E65 的修法或现状<br>· ⇒ ⇒ **Jason 拍板的方向（走 global 统一载体 `GoStyleRequestDeadline.applyTo(stub)`）⇒ 本轮不改** 对本域**无影响** ⇒ 本域**零动作**、零待办<br>7. 🔴 **命令超时的守门判据偏弱（G1 探针发现 · G2 独立字节码核实 ⇒ 比 G1 再精化一层）**<br>· **G1 的探针读数（转述）**：`TimeoutOptions.isTimeoutCommands()`=true · `isApplyConnectionTimeout()`=true · `getSource()`=`DefaultTimeoutSource` · `LettuceConnectionFactory.getTimeout()`=3000ms（连接级 ⇒ RedisURI.timeout）⇒ ⇒ G1 判「`isTimeoutCommands()` 不是有效判据、应改断言 `isApplyConnectionTimeout()`」<br>· 🟢 **G2 独立核实（字节码级，不采信转述）**：① `TimeoutOptions.enabled()` = `builder().timeoutCommands().connectionTimeout().build()` ⇒ ⇒ **`timeoutCommands` 与 `applyConnectionTimeout` 两个位被同时打开** ⇒ ⇒ **在 Boot 4 默认装配下这两个断言单独都是恒真** ⇒ ⇒ ⚠️ **所以「改断言 `isApplyConnectionTimeout()`」并不能把弱判据变成强判据** ⇒ ⇒ **两条合起来才等于 `enabled()` 的全貌**（任一位缺 ⇒ Boot 装配被改）② `DefaultTimeoutSource.getTimeout(...)` = **恒返回 -1**（`ldc2_w -1l`）⇒ ⇒ **`source` 这一路给不出任何时长** ⇒ ⇒ 时长**只能**走 `applyConnectionTimeout` 分支从**连接级 timeout**（RedisURI.timeout）取 ⇒ 与 G1 的读数**一致**<br>· ⇒ ⇒ **本域完整判据链 = 四条合起来**：**A** `isTimeoutCommands()`（机制位①）＋ **B** `isApplyConnectionTimeout()`（机制位②）＋ **C** `getSource()` 恒 -1（⇒ 时长只能走连接级分支）＋ **D** `RedisURI.timeout` = 3s（**时长出口** · 本域守门 ③ **已断言**）⇒ ⇒ **A+B 抓「Boot 装配路径变了」，D 抓「时长值错了」** ⇒ ⇒ **任何单条都不充分**<br>· ✅ **域侧补强动作已落码（2026-10-27 12:3x · **已编译 + 已变异验证** · 证据见本节末）**：本域守门 ① 原先只有 **A** ⇒ ⇒ **已补 B**（`isApplyConnectionTimeout()`）⇒ ⇒ 但**必须在注释里写明「A+B 才等于 enabled() 全貌、单独恒真」** ⇒ ⇒ **不得**把它写成「时长会被施加」的判据（那会重演「绿是因为没走到」）<br>· ⚠️ **边界（与 G1 同一判断）**：被测机制（Boot 的 `TimeoutOptions.enabled()` 接线）**不在域侧写权面** ⇒ ⇒ **无法从域侧做「机制变异」** ⇒ ⇒ 这条只能是**回归网**，**不是**「我已证伪过该机制」⇒ ⇒ 变异只能做「断言方向变异」（断言写反 ⇒ 必红 ⇒ 证明断言在读运行期值）<br>· ⚠️ **另一条边界（G1 提醒 · 我域已核）**：`LettuceConnectionFactory.getTimeout()`（连接级那个出口）G2 **未独立复核**（它在 `AbstractRedisClientFactory` 里，非 `LettuceConnectionFactory` 本体）⇒ ⇒ 本域**已独立复核过的时长出口是 `RedisURI.timeout`**（守门 ③）⇒ ⇒ 引用时不要把两者混用<br>7. 🔴 **我的一条「转移单」是假转移（G4 独立核实并拦截 · G2 采信 · 2026-10-27 12:4x）** ⇒ **自我订正**：我曾据「Go 侧该域有 `rest.WithJwt` ⇒ 适用」就推断「article-api / comment-api / favorite-api 也欠修 009 式的『JWT 验签落在 HTTP 预算内』」，并准备请 G4 转发 ⇒ ⇒ **G4 已独立核实：那三域的 RAG 侧早已修好**（`GoStyleJwtAuthFilter` 的 `@Order(HIGHEST_PRECEDENCE + 6)` ⇒ 验签在预算起点**之前**）⇒ ⇒ **「Go 侧适用」≠「RAG 侧还欠修」** ⇒ ⇒ **我的推断把『适用』悄悄换成了『欠修』** ⇒ ⇒ **该转移单作废**（**我未发出**，已在 G3 队列侧核过 ⇒ 无需撤回；G4 的预防性拦截件已入 G3 队列）<br>⇒ ⇒ **教训（本域留档）**：**真源侧有该行为 ⇒ 只说明「适用」，不说明「RAG 侧还没修」** ⇒ ⇒ 判定「谁欠修」**必须同时读 RAG 侧的当前状态**（`@Order` / 现有实现）⇒ ⇒ **「适用」与「欠修」是两个独立判断，合并成一个就是假转移** ⇒ ⇒ **转派前必须先读被转域的现状**<br>⇒ ⇒ ⚠️ **另一处不精确（G4 指出）**：那三域**不是**都在 3s 预算上 —— article-api 是 **70s**、comment-api / favorite-api 是 3s ⇒ ⇒ **槽位相同（+6 在预算起点 +7 之前）≠ 预算时长相同** ⇒ ⇒ 引用时**槽位与时长要分两轴写**<br>⇒ ⇒ 🟡 **仍属我域的残留（G4 指出 · 由整合者处理）**：那三个拦截器都保留「Filter attribute 缺失时就地验签」的 inline fallback ⇒ ⇒ 那条路径把验签放回预算内 ⇒ **我域无同类实现**（我域 task-api 无鉴权 ⇒ `DRIFT-USERAPI-009②` 对我域**不适用**）⇒ ⇒ **不属我域待办**<br>🟢 **「机制位②」断言已落码 + 已编译 + 已变异验证（2026-10-27 12:5x）** ⇒ **上一行「等待编译与变异验证」的状态已销账**：<br>· **落码**：`ab0d782` ⇒ task-rpc 与 like-rpc 的 Redis 超时守门 ① 各补一条 `isApplyConnectionTimeout()` 断言（断言消息写明「只覆盖第二位 · 与 ① 合起来才等于 `enabled()` 全貌 · **单条恒真** · **不是**『时长会被施加』的判据 · 时长由 ② 断言」）<br>· **编译**：✅ 通过（`mvn -o -pl … -am -DskipTests install`）<br>· **守门跑绿**：task-rpc **6 条 / 0 failures / 0 errors / 0 skipped · BUILD SUCCESS** · like-rpc **6 条 / 0 failures / 0 errors / 0 skipped · BUILD SUCCESS**<br>· **变异验证（断言方向变异）**：把新断言的 `isTrue()` 改成 `isFalse()` ⇒ ⇒ **两域各红 1 条**，且**红在目标断言** `commandTimeoutMechanismIsEnabled`（task-rpc `TaskRedisCommandTimeoutGateTest` · like-rpc `LikeRpcRedisTimeoutsGateTest`）⇒ ⇒ **恰好 1 条红**（另一条阴性对照仍绿）⇒ ⇒ **非假绿** ⇒ ⇒ 还原后复跑**两域 6/0/0/0 绿**⇒ ⇒ **sha256 与提交版逐字节一致**（还原无残留）<br>· ⚠️ **诚实的边界（不变）**：被测机制（Boot 的 `TimeoutOptions.enabled()` 接线）**不在域侧写权面** ⇒ ⇒ **无法做「机制变异」** ⇒ ⇒ 本条是**回归网**，**不是**「我已证伪过该机制」⇒ ⇒ 上面那次变异证明的是「断言在读运行期值」<br>· ⚠️ **判据自身的一条踩坑**（记下来免得下次重踩）：第一次变异我用 `grep -E "…|expected|but was"` 抓输出 ⇒ ⇒ **被 Kafka 的 `sasl.oauthbearer.expected.audience` 配置行占满 `head` 配额** ⇒ ⇒ **「红没红」根本没被看到**（既不能算红、也不能算绿）⇒ ⇒ 改成只抓 `Tests run:` / `<<< FAILURE` / `BUILD` 后才拿到真相 ⇒ ⇒ **抓取模式本身也会骗人 ⇒ 变异验证的判据必须精确到「失败计数」与「失败用例名」** |
+
+### 🟢 **8 模块域级回归 · 完整数字**（2026-10-27 13:00:44 → 13:07:38 · 独占跑 · `MVN_EXIT=0` · `BUILD SUCCESS` · 6:47 min）
+
+**本轮首次拿到 G2 三域 8 模块的完整数字**（此前只有 message-rpc 独占 84 条与两个守门各 6 条）：
+
+| 模块 | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `service/message/message-api` | 98 | 0 | 0 | 0 |
+| `service/message/message-rpc` | 84 | 0 | 0 | 0 |
+| `service/message/message-common` | 21 | 0 | 0 | 0 |
+| `service/like/like-api` | 89 | 0 | 0 | 0 |
+| `service/like/like-rpc` | 113 | 0 | 0 | 0 |
+| `service/like/like-common` | 18 | 0 | 0 | 0 |
+| `service/task/task-api` | 97 | 0 | 0 | 0 |
+| `service/task/task-rpc` | 117 | 0 | 0 | 0 |
+| **合计** | **637** | **0** | **0** | **0** |
+
+⚠️ **口径纪律（三条，随数字一起留档）**：
+1. **权威口径 = 本轮 mtime 切的 surefire `TEST-*.xml` 逐文件求和**（起跑标记 epoch `1793077244`）⇒ **不用**「按 `[INFO] Building <module>` 分段聚合」⇒ ⇒ **637 与上一轮「八模块 637」口径一致**（上一轮 message-rpc 有 2 errors ⇒ 本轮同一批用例**由红转绿** ⇒ 归因 = 上一轮是**端口撞车**（64118 落在 OS 临时段）⇒ **不是代码缺陷**）
+2. 🔴 **排掉 1 份孤儿报告**：`service/like/like-rpc/target/surefire-reports/TEST-com.rag.like.like.rpc.LikeRpcServerSpanCurrentProbeTest.xml`（mtime 早于起跑标记）⇒ **源文件已不在树里**（`find service/like/like-rpc/src/test -name '*Probe*.java'` **零命中** ⇒ 该探针类**从未进过 git** ⇒ 是「建在模块里的本地探针、源删了报告没删」）⇒ ⇒ **like-rpc 报告 20 份 / 测试类 19 个 ⇒ 差 1 = 这份孤儿** ⇒ ⇒ **本域不会回退任何测试来消它** ⇒ ⇒ **教训（复用 G1 同款）**：**探针要么放 `/tmp`，要么连报告一起删** ⇒ ⇒ **「两口径交叉验」遇到差值先查「哪个口径读的是残留」**
+3. ⚠️ **独占跑**：起跑前 `pgrep -f 'plexus.classworlds.launcher.Launcher'` = **0**（G1 的 6 模块回归 12:52:27 起、约 13:0x 收工 ⇒ 我 13:00:44 才起）⇒ ⇒ **零端口撞车** ⇒ ⇒ **本轮 637 全绿不含任何环境噪声**（对比：上一轮同口径因撞车红 2 条）
+
+⇒ ⇒ **本轮数字的用途边界**：这是**我域当前代码态**的回归网 ⇒ ⇒ **不是**「合并 G4 共享层后」的结论 ⇒ ⇒ **合并后必须重跑**（§「合并后我域必做」第 1/2/4 条）⇒ ⇒ **本轮数字不升级任何轴的证据强度**（跑绿 ≠ 对）
