@@ -18,6 +18,7 @@
 | 域侧台账 | [`_README.md`](_README.md) · [`cross-domain.md`](cross-domain.md) · [`common-tails.md`](common-tails.md) · [`cycle-deps.md`](cycle-deps.md) · [`lanes/`](lanes/) |
 | **写权** | 🔴 **`service/common/**` + `service/users/users-common/**` 的唯一写者**（G4 = 共享层波）＋ 本 lane 台账 `docs/DRIFT/global/vs-common.md`；⚠️ 旧的 `align/global` 全域 lane **已弃用**（Jason：一个工作树跨多域 ⇒ 粒度与操作内容不可控） |
 | common 侧机制面台账 | [`docs/DRIFT/common/`](../common/)：`deadline.md` · `http.md` · `protection.md` · `audit.md` · `alignment-2026-10-23.md` |
+| 🔴 **Go 出处的路径口径** | ⚠️ **go-zero 的内部路径一律是「依赖源码」，不是真源仓路径** —— 真源仓 `Sea-RideTheWind_golang` **没有** `core/` `rest/` `zrpc/` 目录（实测：顶层只有 `api/` `doc/` `proto/` `service/` `grafana/` 等）⇒ ⇒ 凡引用 go-zero 内部文件，**必须写成 `go-zero@v1.10.2/<路径>`**（版本 = 真源 `go.mod` pin 的版本）⇒ ⇒ **不带前缀 ⇒ 后人回真源仓找不到 ⇒ 引用等于失效** ⇒ ⇒ **2026-10-27 已把本台账 19 处补齐**（唯一例外 = `javap` 的 Java 常量池签名 `core/annotation/Order;` ⇒ 那不是 go-zero 路径） |
 
 ## 1. 本域侧已知的 common 相关条目（**2026-10-27 抽取**，逐条证据以域台账为准）
 
@@ -203,7 +204,7 @@
 | 核查项 | 结论 |
 |---|---|
 | **编号 ↔ 主题是否对得上** | ❌ **对不上** —— 权威面 `docs/DRIFT/article/api.md:676-682` 的 `DRIFT-ARTICLE-API-006` = 「**8–10 MiB JSON body 的错误文案**（LOW，**2026-10-24 已确认不修**）」；而 `docs/DRIFT/article/vs-common.md:27` 把「**Go 必填字段校验**」挂在**同一编号**下 ⇒ 命中 `api.md:8-11` 自己警告的「**两套编号同形不同义**」 |
-| **该机制是否还缺共享层实现** | ✅ **不缺** —— 契约 `GoStyleRequiredFields` 已落地于 `service/users/users-common/.../http/GoStyleRequiredFields.java:46-53`，带**三段 Go 出处**（`core/mapping/utils.go` `parseOption` · `unmarshaler.go:918-969` · `:1199`）＋ 运行时探针 `tools/difftest/probe-go-required-fields.py`（2026-10-21） |
+| **该机制是否还缺共享层实现** | ✅ **不缺** —— 契约 `GoStyleRequiredFields` 已落地于 `service/users/users-common/.../http/GoStyleRequiredFields.java:46-53`，带**三段 Go 出处**（`go-zero@v1.10.2/core/mapping/utils.go` `parseOption` · `unmarshaler.go:918-969` · `:1199`）＋ 运行时探针 `tools/difftest/probe-go-required-fields.py`（2026-10-21） |
 | **article 域接入情况** | `CreateArticleReq implements GoStyleRequiredFields`（`service/article/article-api/.../dto/CreateArticleReq.java:57` + `:109`）⇒ **已接入**；`DeleteArticleReq.java:14` / `UpdateArticleReq.java:31` **显式不实现**（附了理由） |
 | **落点复核结果** | ⇒ 若真残留，落点在 **`service/article/article-api/**`（DTO 层）= G3 自己的写权面** ⇒ 按 C3「域侧能自修的自修」⇒ **不甩给 G4** |
 | **结论** | ⛔ **不进 G4 排期** —— ① 编号撞号（须先由 G3 订正编号/摘要）；② 落点疑在域侧 ⇒ 派单前请 G3 核实行号 + 明确落点 |
@@ -330,7 +331,7 @@
 | 项 | 结论 |
 |---|---|
 | 1 现象 | Go 的 router 对请求路径做 `path.Clean` ⇒ 路径变体命中同一条路由；RAG 侧原先**只有 article-api 有**（域内副本）⇒ 其余 9 个 api 缺这一层 |
-| 2 Go 侧出处 | go-zero v1.10.2 `rest/router/patrouter.go:48`（注册侧 `cleanPath := path.Clean(reqPath)`）+ `:60`（匹配侧 `reqPath := path.Clean(r.URL.Path)`）—— 逐字核对过 |
+| 2 Go 侧出处 | go-zero v1.10.2 `go-zero@v1.10.2/rest/router/patrouter.go:48`（注册侧 `cleanPath := path.Clean(reqPath)`）+ `:60`（匹配侧 `reqPath := path.Clean(r.URL.Path)`）—— 逐字核对过 |
 | 3 RAG 侧现状 | `service/common/src/main/**` 下 `GoStylePathNormalizingFilter` 命中数 = **0**；全仓唯一实现在 `service/article/article-api/.../config/GoStylePathNormalizingFilter.java`（域内类） |
 | 4 证据强度 | **L4（双侧活体）**：🟢 Go 侧 = /tmp 临时工程起**真 go-zero v1.10.2 rest server** + curl，5 个 target 全 200；RAG 侧 = **真 Tomcat + 裸 socket** 同 5 个 target 同解 ⇒ ⇒ 两侧比的是**同一个请求**（JDK HttpClient 会自己归一 URI ⇒ 必须裸 socket） |
 | 5 建议修法 | **Y = 「所有 api 的请求路径都按 Go 的 `path.Clean` 归一后再匹配」** ⇒ 归一器落**共享层**（不得按域各写一份）⇒ 归一语义 = Go `path/clean.go` ⇒ 必须排在读路径的 Filter 之前 |
@@ -351,7 +352,7 @@
 | 项 | 结论 |
 |---|---|
 | 1 现象 | 共享层把「`off` 的依据」写成「**favorite 域不在 global 的写权范围内**」⇒ 那是一条**与 Go 行为无关**的理由 ⇒ ① 回答不了「下一个域该开还是该关」② 漏声明的域**静默落到缺省 `off`**（而缺省只对「Go 侧不解析」的域才正确） |
-| 2 Go 侧出处 | go-zero v1.10.2 `rest/httpx/requests.go`（`Parse → ParseForm → GetFormValues`）+ `rest/httpx/util.go:15`（`maxFormParamCount = 2048`，数**非空值**）+ `:48-53`（超限 ⇒ `too many form values` ⇒ Parse 失败）⇒ **只有 handler 真调 `httpx.Parse` 的域，`r.Form` 才被求值** ⇒ 两道上限才可达 |
+| 2 Go 侧出处 | go-zero v1.10.2 `go-zero@v1.10.2/rest/httpx/requests.go`（`Parse → ParseForm → GetFormValues`）+ `go-zero@v1.10.2/rest/httpx/util.go:15`（`maxFormParamCount = 2048`，数**非空值**）+ `:48-53`（超限 ⇒ `too many form values` ⇒ Parse 失败）⇒ **只有 handler 真调 `httpx.Parse` 的域，`r.Form` 才被求值** ⇒ 两道上限才可达 |
 | 3 RAG 侧现状 | `service/common/http/GoStyleFormLimitMode.java:41-49`（旧判据）；`GoStyleTomcatParameterLimitCustomizer.java:107-108` 与 `GoStyleFormValues.java:38`（同一套措辞的三处落点） |
 | 4 证据强度 | **L1（两侧源码逐字对照）**；Go 侧命中数**实测**：task/api = **0**、article/api = 6（对照组）、favorite/api = 7、user/api = 8、admin/api = 13 |
 | 5 建议修法 | **Y = 「闸门按『Go 侧是否真的解析 form/query』决定开否」** ⇒ 判据从「写权范围」扩成「语义可达性」 |
@@ -380,7 +381,7 @@
 | 项 | 结论 |
 |---|---|
 | 1 现象 | 链构成由两个条件分支决定（`:65` shedding 需 `enabled && maxCpuPermille>0`；`:72` breaker 需 `enabled`）⇒ 域级守门无法**分别**断言 breaker / shedding ⇒ 只能「关掉降载换确定性」⇒ 断言被迫退化（名义上写 breaker/shedding，实际只证明了 breaker） |
-| 2 Go 侧出处 | go-zero v1.10.2 `zrpc/server.go:157-159`（Breaker，默认 true）+ `:160-163`（Shedding，`CpuThreshold > 0` 才挂）⇒ Go 侧四个拦截器**无条件按序装上** |
+| 2 Go 侧出处 | go-zero v1.10.2 `go-zero@v1.10.2/zrpc/server.go:157-159`（Breaker，默认 true）+ `:160-163`（Shedding，`CpuThreshold > 0` 才挂）⇒ Go 侧四个拦截器**无条件按序装上** |
 | 3 RAG 侧现状 | `service/common/protection/GoStyleRpcProtectionChain.java:61-78` —— 链构成不可从外部查询 |
 | 4 证据强度 | **L1**（两侧源码逐字对照） |
 | 5 建议修法 | **Y = 「每一层是否在链上，可被域级守门直接断言」** ⇒ 共享层暴露**只读**的「链层构成」查询入口 ⇒ **零行为改动** |
@@ -472,7 +473,7 @@
 | 项 | 结论 |
 |---|---|
 | 派单说法 | 「Go 每路由一个 MaxConns latch」⇒ 落点 `service/common/.../protection/GoStyleMaxConnsFilter.java` |
-| **独立复核** | Go 侧确实每路由一个：`rest/engine.go:99-101`（`bindRoute` ⇒ `route` 是**逐路由参数**）→ `rest/engine.go:131-132`（`buildChainWithNativeMiddlewares` ⇒ 逐路由调 `handler.MaxConnsHandler`）→ `rest/handler/maxconnshandler.go:12-20`（每次 `syncx.NewLimit(n)`） |
+| **独立复核** | Go 侧确实每路由一个：`go-zero@v1.10.2/rest/engine.go:99-101`（`bindRoute` ⇒ `route` 是**逐路由参数**）→ `go-zero@v1.10.2/rest/engine.go:131-132`（`buildChainWithNativeMiddlewares` ⇒ 逐路由调 `handler.MaxConnsHandler`）→ `go-zero@v1.10.2/rest/handler/maxconnshandler.go:12-20`（每次 `syncx.NewLimit(n)`） |
 | **但** | 这条**已经签字**：`docs/Intentional_Deviations/global/common-tails.md:11-31` 的 **`SD-2026-10-25-01`**（2026-10-25 用户拍板，签字决定 = **保留 RAG 的全局闸门，不改成 per-route**）⇒ ⇒ **不修、不重复质疑、也不「顺手改回」** |
 | ⚠️ 台账口径冲突（**共享面，本层不回写**） | `docs/DRIFT/_cross/domain-common-lanes.md:125` 仍把 `DRIFT-FOLLOW-008` 列为「🔴 未修」⇒ **已过期**（签字后应从 DRIFT 侧移除）⇒ ⇒ **登记给整合者**（该文件属共享面 ⇒ 本 lane 不写） |
 
@@ -482,9 +483,9 @@
 
 | Go 事实 | 位置 | 对 RAG 的含义 |
 |---|---|---|
-| breaker 是**逐路由**建的 | `rest/engine.go:99-101` + `:131-132`（`handler.BreakerHandler(route.Method, route.Path, metrics)`） | 隔离单位 = 路由，不是具体 URI |
-| breaker 的**名字** = `METHOD://route.Path` | `rest/handler/breakerhandler.go:15`（`breakerSeparator = "://"`）+ `:19`（`breaker.WithName(strings.Join([]string{method, path}, breakerSeparator))`） | 键必须是**注册期模板** |
-| **404 不经过 breaker** | `rest/router/patrouter.go:59-78`（没匹配上 ⇒ `handleNotFound`）→ `rest/engine.go:244-268`（`notFoundHandler` 的链**只有 Trace + Log** ⇒ **没有 MaxConns / Breaker / Shedding**） | 未命中路由**不得**进 breaker |
+| breaker 是**逐路由**建的 | `go-zero@v1.10.2/rest/engine.go:99-101` + `:131-132`（`handler.BreakerHandler(route.Method, route.Path, metrics)`） | 隔离单位 = 路由，不是具体 URI |
+| breaker 的**名字** = `METHOD://route.Path` | `go-zero@v1.10.2/rest/handler/breakerhandler.go:15`（`breakerSeparator = "://"`）+ `:19`（`breaker.WithName(strings.Join([]string{method, path}, breakerSeparator))`） | 键必须是**注册期模板** |
+| **404 不经过 breaker** | `go-zero@v1.10.2/rest/router/patrouter.go:59-78`（没匹配上 ⇒ `handleNotFound`）→ `go-zero@v1.10.2/rest/engine.go:244-268`（`notFoundHandler` 的链**只有 Trace + Log** ⇒ **没有 MaxConns / Breaker / Shedding**） | 未命中路由**不得**进 breaker |
 
 **RAG 侧修前状态**：`GoStyleBreakerFilter.routeKey` = `request.getMethod() + "://" + request.getRequestURI()` ⇒ ① 每个**具体 URI** 一个 breaker ⇒ ② 404 也进 breaker。
 
@@ -517,6 +518,16 @@
 **路线（已探明，可行）**：`io.lettuce.core.TimeoutOptions.TimeoutSource` 是**抽象类**，
 `public abstract long getTimeout(RedisCommand<?,?,?>)` ⇒ **逐命令动态求值** ⇒
 ⇒ 共享层可以返回一个「当前请求的剩余 deadline」⇒ **Redis 命令被 deadline 约束** ⇒ **零域侧改动**。
+
+**🆕 2026-10-27 补充约束（G2 提供 · 本层独立核过）—— rpc 侧**已有现成载体**，但**读的不是同一个东西**：
+
+| 项 | 事实（本层实测） | 对 E66 落码的影响 |
+|---|---|---|
+| api 侧的载体 | `GoStyleRequestDeadline.begin(deadlineNanos)` **只在** `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:324` 绑定（`:356` clear）⇒ ⇒ **api 侧独占** | ⇒ ⇒ **rpc 侧用不了它** |
+| rpc 侧的载体 | `RpcInterceptor` 的 `DeadlineState`：`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:461`（worker 线程里 `DeadlineState.bindToCurrent(deadlineEpochMs)`）⇒ ⇒ **已经在 handler 线程绑好了**（`:215-236` 的 javadoc 已写明「业务线程可随时读 `remainingMillis()`」） | ⇒ ⇒ **E66 的 `TimeoutSource` 若在 rpc 侧落地 ⇒ 读的是 `DeadlineState.remainingMillis()`，不是 `GoStyleRequestDeadline`** ⇒ ⇒ **两个域面要接两个不同的载体** ⇒ ⇒ **落码时不能只实现 api 侧** |
+| ⇒ ⇒ **结论** | ⇒ ⇒ **rpc 侧不需要新增机制**（载体已在）⇒ ⇒ ⇒ **但 `TimeoutSource` 的取值函数必须同时认这两个来源** | ⇒ ⇒ **E66 的实现清单要多一个分支**（不是「只改 api 侧」） |
+| ⚠️ **边界（G2 已划清，本层同意）** | like/task 的 **MQ / outbox / sink 路径不属 E66 域** —— Go 侧那些 ctx 是 **Kafka 消费 ctx**（`service/task/rpc/internal/sink/like_sink.go:110-128` 的 `loop(ctx)`）⇒ 本来就没有请求 deadline ⇒ ⇒ **两侧同形 ⇒ 不修**（避免造出「比 Go 更严」的新漂移） | ⇒ ⇒ **不扩到 MQ 面** |
+| **证据强度** | G2 域侧逐条核好的调用点清单已登记（like-rpc **11** 处 · task-rpc **3** 处）⇒ ⇒ **L1（源码级）** ⇒ ⇒ **不主张 L4** | ⇒ ⇒ 与 E66 现有强度同此 |
 
 **🔴 但有一处硬约束（本轮实测字节码得出，**改法必须绕开它**）**：
 Boot 4 的 `LettuceConnectionConfiguration.createClientOptions` 里的**顺序**是：
@@ -584,7 +595,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | Go 事实 | 位置 |
 |---|---|
 | 黑名单查询失败 ⇒ **放行**（fail-open） | `service/user/user/api/internal/middleware/checkblacklistmiddleware.go:35-36`（`if err == nil && exists` ⇒ **err != nil 不拦截**）· 同款另见 `service/user/admin/api/internal/middleware/checkblacklistmiddleware.go` 与 `service/follow/api/internal/middleware/checkblacklistmiddleware.go`（⚠️ **三份文件 md5 各不相同**，但「err != nil ⇒ 放行」三条一致） |
-| Redis 客户端**快速失败** | `core/stores/redis/redisclientmanager.go:18`（`maxRetries = 3`）· `:27-46`（`red.NewClient(&red.Options{Addr, MaxRetries: maxRetries, MinIdleConns: idleConns})` ⇒ **未设** `DialTimeout`/`ReadTimeout` ⇒ 用 go-redis v9 默认值 ⇒ 连接被拒时**立即失败** ⇒ 实测 ~1.7s） |
+| Redis 客户端**快速失败** | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:14`（`maxRetries = 3`）· `:32-40`（`red.NewClient(&red.Options{Addr, MaxRetries: maxRetries, MinIdleConns: idleConns})` ⇒ **未设** `DialTimeout`/`ReadTimeout` ⇒ 用 go-redis v9 默认值 ⇒ 连接被拒时**立即失败** ⇒ 实测 ~1.7s） |
 
 **本层落码**：新增 `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java`
 ⇒ 注册 `LettuceClientOptionsBuilderCustomizer` ⇒ `builder.disconnectedBehavior(REJECT_COMMANDS)`
@@ -954,7 +965,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | 项 | 内容 |
 |---|---|
 | **① 现象** | 未加引号的 `mode: off` 被 **YAML 1.1**（SnakeYAML）解析成**布尔 `false`** ⇒ `@Value` 拿到字符串 `"false"` ⇒ 而 `parse` 的合法值域（`off\|raw\|envelope`）里**没有**它 ⇒ **构造期抛 `IllegalArgumentException` ⇒ `BeanCreationException` ⇒ 进程起不来** ⇒ ⇒ **文档里那个合法取值，在 YAML 里根本写不出来**（除非加引号 `mode: "off"`）<br>⇒ **一颗等着踩的雷**：任何域一旦按文档写 `mode: off` 就会起不来 |
-| **② Go 侧出处** | Go 侧**没有这个开关**（`rest/config.go` 里没有 form-limit 旋钮；`maxFormParamCount = 2048` 是 `rest/httpx/util.go:15` 的常量）⇒ ⇒ **OFF 在 Go 侧的等价物就是「什么都不做」** ⇒ ⇒ RAG 的 OFF 语义本身**是对的**，问题**只出在「配置值 → 代码」的传递** |
+| **② Go 侧出处** | Go 侧**没有这个开关**（`go-zero@v1.10.2/rest/config.go` 里没有 form-limit 旋钮；`maxFormParamCount = 2048` 是 `go-zero@v1.10.2/rest/httpx/util.go:15` 的常量）⇒ ⇒ **OFF 在 Go 侧的等价物就是「什么都不做」** ⇒ ⇒ RAG 的 OFF 语义本身**是对的**，问题**只出在「配置值 → 代码」的传递** |
 | **③ RAG 侧现状（修前）** | `service/common/src/main/java/com/rag/common/http/GoStyleFormLimitMode.java:209-225`（`parse` 只认 `off`/`raw`/`envelope`）· `…/http/GoStyleFormValueLimitInterceptor.java:68-72`（**构造期** `@Value` + `parse` ⇒ 非法值 ⇒ 启动失败）· `…/http/GoStyleTomcatParameterLimitCustomizer.java:110-111`（**同一把尺子**）<br>⇒ 🟢 **本层实测核对了 G2 的「两边不会对同一属性得出不同解读」**：两个消费点的 `@Value` **默认值完全一致**（都是 `${rag.http.go-form-limit.mode:off}` ⇒ `…FormValueLimitInterceptor.java:70` 与 `…TomcatParameterLimitCustomizer.java:111`）⇒ ⇒ **成立**；且 `GoStyleFormLimitWebMvcConfig` **不消费**该属性（只注册拦截器）⇒ 无第三个解读点 |
 | **④ 证据强度** | **L4** —— ① G2 的**真上下文启动失败实测**（报错值是 `false` 而不是 `off` ⇒ YAML 1.1 布尔化的实证）；② **本层独立复现**：守门 ③ 用**生产同款**的 `YamlPropertySourceLoader` 解析未加引号的 `mode: off` ⇒ 断言拿到的**确实是 `Boolean.FALSE`** ⇒ ⇒ **本层独立确认「当前 Boot 4 的解析器仍走 YAML 1.1 布尔表」**（不采信转述，也不拿裸 SnakeYAML 代替） |
 | **⑤ 修法** | `parse` **额外接受 `"false"`** —— ⚠️ **只加这一个别名**（`false`/`False`/`FALSE` 三个形态，因 `parse` 已 `toLowerCase`）<br>⇒ **理由（本层独立判断，非照抄派单）**：`"false"` 是**精确匹配**、**不是**兜底 —— 它是**文档化合法取值 `off` 的「唯一实际编码形式」**（YAML 1.1 把 `off`/`no`/`n` 全变成 `false`）⇒ ⇒ 接受它 = **让实现对齐文档**，而不是放宽合法性<br>⇒ **不放宽成「任意非法值都当 OFF」** —— 那会**重新引入**「静默兜底 = 以为装上了其实没装」（`parse` 自己的 javadoc 明确反对）⇒ 例：`mode: OFF1` 若兜底成 OFF ⇒ 该域会**静默失去闸门** ⇒ ⇒ **非法值仍一律抛异常**<br>⇒ **方向性判断**：**让实现对齐文档**（`off` 是文档化合法取值）而不是**改文档迁就实现**（把 `off` 从值域里删掉）<br>⇒ 同步：`PROPERTY` 的 javadoc 写清「YAML 里写 `off` **必须加引号**：`mode: "off"`」；**异常消息改成自解释**（列出 `off \| false \| raw \| envelope` + 引号提示 ⇒ 免得下一个人被「值：false」误导成配置写错） |
@@ -1009,7 +1020,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | 项 | 实测结果 |
 |---|---|
 | **G3 的质疑成立吗** | ✅ **成立** —— 共享层表 `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` 的 favorite 行原写 `Mode.RAW`（＝「Go 侧没注册 `SetErrorHandler` ⇒ 400 + text/plain + Go 原文」）⇒ **错** |
-| **Go 侧 favorite 的真实形状** | **200 ＋ `{"code":5003,"msg":"参数错误","data":null}`** —— 7 个 handler **各自捕获** `httpx.Parse` 的错：<br>· `service/favorite/api/internal/handler/favorite/*.go:18-22`（形态一致）⇒ `httpx.OkJsonCtx` ＋ `Code: favoritecommon.ErrorInvalidParam` ＋ `Msg: GetErrMsg(...)` ＋ `Data: nil`<br>· `service/favorite/common/errmsg.go:16` ⇒ `ErrorInvalidParam = 5003`；`:51` ⇒ 文案「参数错误」<br>· go-zero `rest/httpx/responses.go:56-63` ⇒ `OkJsonCtx` ⇒ `WriteJsonCtx(ctx, w, http.StatusOK, v)` ⇒ **HTTP 200** |
+| **Go 侧 favorite 的真实形状** | **200 ＋ `{"code":5003,"msg":"参数错误","data":null}`** —— 7 个 handler **各自捕获** `httpx.Parse` 的错：<br>· `service/favorite/api/internal/handler/favorite/*.go:18-22`（形态一致）⇒ `httpx.OkJsonCtx` ＋ `Code: favoritecommon.ErrorInvalidParam` ＋ `Msg: GetErrMsg(...)` ＋ `Data: nil`<br>· `service/favorite/common/errmsg.go:16` ⇒ `ErrorInvalidParam = 5003`；`:51` ⇒ 文案「参数错误」<br>· go-zero `go-zero@v1.10.2/rest/httpx/responses.go:56-63` ⇒ `OkJsonCtx` ⇒ `WriteJsonCtx(ctx, w, http.StatusOK, v)` ⇒ **HTTP 200** |
 | ⇒ ⇒ **既非 RAW（400＋text/plain）也非 ENVELOPE（200＋5001）** | ⇒ ⇒ **第三种形状：域自定义业务码信封** ⇒ ⇒ 「轴 ②」只按「注册 / 没注册」分**两档不够用** |
 | **`SetErrorHandler` 注册点复核** | 全仓 **5 个**：`like/api/likecenter.go:48` · `comment/api/commentservice.go:47` · `follow/api/followcenter.go:53` · `message/api/messagecenter.go:53` · `hot/api/hotcenter.go:53` ⇒ ⇒ **与表的 `envelope` 档一致**；**其余 9 域的「自捕获」命中行数全 0** |
 | **Go 侧目录复核**（防「只核了一个域」） | Go api 域目录 = `service/{article,comment,favorite,follow,hot,knowledge,like,message,task}/api` ＋ **`service/user/user/api`**（`httpx.Parse` **8** 处）＋ **`service/user/admin/api`**（**13** 处）⇒ ⇒ 与表的命中数一致 |
@@ -1197,8 +1208,8 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | 项 | 内容 |
 |---|---|
 | **结论** | ✅ **Go 侧 = MaxBytes(413) 优先于 Authorize(401)** ⇒ ⇒ **G1 的前提成立** ⇒ ⇒ 「`DRIFT-USERAPI-009 §7` 并入 `SD-USERAPI-002` 签字」的前提**成立** ⇒ ⇒ **本层不反对**（签字档 `docs/Intentional_Deviations/` 归整合者 ⇒ 本层不代签） |
-| **硬证据（`go-zero@v1.10.2`，真源 `go.mod` pin 的版本）** | `rest/engine.go:101-116` `bindRoute`：`:103` 取 `ng.chain` → `:105` `buildChainWithNativeMiddlewares(...)`（**native middlewares 在内**，其中 `rest/engine.go:163-164` 挂 `handler.MaxBytesHandler`）→ `:108` `appendAuthHandler(...)`（**`Authorize` 在 `:74/:77`**）→ `:110` 用户自定义 middlewares → `:113` `ThenFunc`<br>⇒ ⇒ **同一条 `chn`** ⇒ ⇒ **`Authorize` 排在 native middlewares 之后** ⇒ ⇒ **413 先于 401** |
-| ⚠️ **本层两次判反的教训（可复用）** | ① **行号直觉会骗人**：`:74`（Authorize）看起来早于 `:105`（native middlewares），但 `:74` **在另一个函数里**，真正把它 append 上去的是 `:108`（在 `:105` **之后**）⇒ ⇒ **必须看调用结构，不能看行号大小**<br>② **`chain.Then` 的反向包裹不是「执行顺序反转」**：`rest/chain/chain.go:38-42` 的注释写明「`Append` … as the **last** ones in the request flow … requests in c go m1 -> m2 -> m3 -> m4」⇒ ⇒ `Then`（`:81-91`）的反向包裹**正是为了实现「append 顺序 = 请求流顺序」**⇒ ⇒ ⇒ **推中间件顺序必须同时看「调用结构」与「库的顺序契约」两样** |
+| **硬证据（`go-zero@v1.10.2`，真源 `go.mod` pin 的版本）** | `go-zero@v1.10.2/rest/engine.go:101-116` `bindRoute`：`:103` 取 `ng.chain` → `:105` `buildChainWithNativeMiddlewares(...)`（**native middlewares 在内**，其中 `go-zero@v1.10.2/rest/engine.go:163-164` 挂 `handler.MaxBytesHandler`）→ `:108` `appendAuthHandler(...)`（**`Authorize` 在 `:74/:77`**）→ `:110` 用户自定义 middlewares → `:113` `ThenFunc`<br>⇒ ⇒ **同一条 `chn`** ⇒ ⇒ **`Authorize` 排在 native middlewares 之后** ⇒ ⇒ **413 先于 401** |
+| ⚠️ **本层两次判反的教训（可复用）** | ① **行号直觉会骗人**：`:74`（Authorize）看起来早于 `:105`（native middlewares），但 `:74` **在另一个函数里**，真正把它 append 上去的是 `:108`（在 `:105` **之后**）⇒ ⇒ **必须看调用结构，不能看行号大小**<br>② **`chain.Then` 的反向包裹不是「执行顺序反转」**：`go-zero@v1.10.2/rest/chain/chain.go:38-42` 的注释写明「`Append` … as the **last** ones in the request flow … requests in c go m1 -> m2 -> m3 -> m4」⇒ ⇒ `Then`（`:81-91`）的反向包裹**正是为了实现「append 顺序 = 请求流顺序」**⇒ ⇒ ⇒ **推中间件顺序必须同时看「调用结构」与「库的顺序契约」两样** |
 | ⚠️ **跨树引用共享层行号必须带基线** | G1 引的 `service/common/observability/HttpMiddleware.java:270/294/304/322` 是**他树**（`align/g1-users-follow` @ `0c2a902`）的行号；**本树**（`align/g4-service-common`）的预算起算/清除在 **`:324` begin / `:356` clear** ⇒ ⇒ **同一文件不同树 ⇒ 行号不同** ⇒ ⇒ 跨树引用必须标基线 commit，否则复核会「找不到」⇒ ⇒ **（与 memory 里「引用库内依赖源码必须带模块限定路径」同族）** |
 
 ##### 4.10.18.3 🟡 **已知缺口（显式登记 · 本层落码尝试后撤掉）**：「共享层新增 Filter ⇒ 必须让出 +4/+5/+6」**目前无机器保障**
@@ -1534,6 +1545,23 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | 🟢 **订正共享层 javadoc 的「三份」** | `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java` 的类级 javadoc「本仓现状：**三份**域内副本」⇒ ⇒ **改为「五份」并列出 5 个模块名** ⇒ ⇒ **原句是**「共享层自己的事实描述」**写错了 ⇒ 会误导下一个 agent 只删 3 份 ⇒ 留下 2 份仍遮蔽共享层** ⇒ ⇒ 必须改 |
 | **落点** | `…/redis/GoStyleRedisClientAutoConfiguration.java:77-79`（`@Bean` javadoc 上方那段的末行） |
 | **零运行时行为变化** | 纯注释 ⇒ ⇒ **代码态不变**（本节 §4.10.25 的落码才是代码态变更） |
+
+---
+
+##### 4.10.24.6 🟢 **受益面：本层此前只写了「要删的 5 份」，漏了「已经在受益的 5 个」**（G2 订正 · 本层实测复核）
+
+⇒ **G2 的订正**（本层已独立复核，**成立**）：共享层那份 customizer **不只**影响「有域内副本」的域 ⇒ ⇒ 像 like-rpc / task-rpc 这种**自带 `spring-boot-starter-data-redis` 且无域内副本**的组件 ⇒ ⇒ **共享层那份本来就命中** ⇒ ⇒ 对它们是**净收益**（断连时命令从「挂 60s」变「1ms 拒单」）⇒ ⇒ ⇒ **不是「零行为影响」，是「零代码改动、但有行为收益」**。
+
+⇒ **本层独立实测（不采信转述）** —— 生产代码真在用 Redis 的组件共 **10** 个：
+
+| 分类 | 组件 | 共享层那份是否命中 |
+|---|---|---|
+| **有域内副本 ⇒ 共享层被遮蔽 ⇒ 收编 = 删副本** | user-api · user-rpc · admin-api · admin-rpc · follow-api（**5**） | ❌ **被遮蔽**（`@ConditionalOnMissingBean` ⇒ 域内副本在场 ⇒ 共享层那份**根本不创建**） |
+| **无域内副本 ⇒ 共享层直接命中 ⇒ 已在受益** | comment-rpc · hot-rpc · like-rpc · task-rpc · favorite-api（**5**） | ✅ **命中**（`AutoConfiguration.imports` 注册 ⇒ 这 5 个都是 `@SpringBootApplication` ⇒ 自动配置生效面全覆盖） |
+| 有 redis starter 但生产代码不用 Redis | task-api | — （不构成受益面） |
+
+⇒ ⇒ **口径订正**：本台账此前（§4.9.9 的落码表 ＋ §4.10.24 的收编表）**只强调了「G1 域要删 5 份」** ⇒ ⇒ **漏写了「另外 5 个组件已经在受益」** ⇒ ⇒ **本节补齐**（**不删旧段，只加指路**）。
+⇒ ⇒ **证据分层**：本层腿 = **静态实测**（10 个组件的 pom + 生产代码 + `@SpringBootApplication` + 自动配置清单）· **域侧运行证据 = G2 提供**（like-rpc / task-rpc 断连 ⇒ 命令从「挂 60s」变「1ms 拒单」）⇒ ⇒ 两者**互为两侧** ⇒ ⇒ **合并按弱侧 = L3** ⇒ ⇒ **不写 L4**。
 
 ---
 
