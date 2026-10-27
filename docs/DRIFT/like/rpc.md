@@ -998,7 +998,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 
 ## 2026-10-23 第三轮：DRIFT-LIKE-017 已修
 
-> like-rpc 当前：**54 tests / 0 failures / 0 errors**（含新类 `LikeDomainFactSchemaParityTest` 8 条），BUILD SUCCESS。
+> like-rpc 当前：**54 tests / 0 failures / 0 errors**（含新类 `LikeDomainFactSchemaParityTest` 8 条），BUILD SUCCESS。<br>🆕 **2026-10-28 订正（**原值保留不改写**）**：上面那个 **54** 是**历史值**（早已过期）⇒ ⇒ **当前权威值 = 129**（第二十轮 Redis 池探针 +3 ⇒ 125 · 第二十一轮 Testcontainers 固定口守门 +4 ⇒ **129**）⇒ ⇒ 依据 = **模块级 `clean test` 实测**（带 `-am` · BUILD SUCCESS · 7:41 min · 逐模块 surefire XML 求和 == maven 汇总行）。
 > 🔴 **2026-10-24 审计更正：原文写「64 tests」—— 与任何时点都不自洽**（31 → 46 → 55 → 57 四个数各自可复算，只有 64 无对应状态）⇒ 按本章节时点应为 **54**（46 + 8）。
 > **本文件最终条数 = 57**（第三轮 55 + 第五轮 2）。
 > 全部在**真 PG** 上验证（Testcontainers `postgres:16-alpine`）。

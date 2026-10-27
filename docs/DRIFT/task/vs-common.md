@@ -1038,6 +1038,67 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 
 ---
 
+### 🟢 第二十一轮 · Testcontainers 宿主口（**层 2**）落码 —— **回答 G4 那个未实测项**（2026-10-27）
+
+**① 起因（G4 §4.10.39 ② 分配段号 ＋ 明确要求「先探针、不能照抄」）**
+- G4 把 `22700–22999` 划为「**Testcontainers 宿主口段**」，**按域分子段**：**task 域 = `22820–22849`**。
+- 根因：Testcontainers 的**默认随机宿主口**落在 **OS 临时段 `49152–65535`**（= Docker published 段）⇒ ⇒ 与 `tools/difftest/ddl-parity.sh` 的固定口 `55560–55569` **同属一个池子** ⇒ ⇒ 全局段表把该段标为**禁占** ⇒ ⇒ **真容器测试不得继续用随机口**。
+- ⚠️ G4 同一格里**明写了两层「未实测」**：① `PostgreSQLContainer` **不能直接换成** `FixedHostPortGenericContainer`（后者不带 PG 的初始化/JDBC 支持）⇒ ⇒ 正确形态 = **原容器 ＋ `withCreateContainerCmdModifier(...)` 显式绑口**；② 「**显式绑口后 `getMappedPort()` 是否返回那个固定口**」未实测 ⇒ ⇒ **域侧落地必须先写一条探针验证，不能照抄**。
+
+**② 🔴 「两层口径」在我域的真实含义（本轮第一次把两层说清）**
+
+| 层 | 是什么 | 载体 | 本域段 | 本轮之前的状态 |
+|---|---|---|---|---|
+| **层 1** | **api 侧 Tomcat 监听端口**（`@SpringBootTest(webEnvironment = DEFINED_PORT)`） | `RealTomcatPort` | task 域另有一段（见 §2/A5 行） | ✅ **早已治理**（阶段 2 · D-7 已销号） |
+| **层 2** | **rpc 侧 Testcontainers 容器宿主口**（`PostgreSQLContainer` / `GenericContainer`） | 🆕 `RealContainerPort` | **`22820–22849`** | 🔴 **整个域没人管** —— **6 个容器类**全部用随机口 ⇒ ⇒ **都落在 OS 临时段** |
+
+⇒ ⇒ **本轮补的是层 2 的缺口**（不是重复治理层 1）⇒ ⇒ **两层都要守**：层 1 已有 `bindsToDedicatedPortSegment`，层 2 本轮新增。
+
+**③ 落码（6 个容器类 ＋ 3 份支撑类 ＋ 6 个守门类 · **零生产代码改动**）**
+
+| 项 | 内容 |
+|---|---|
+| **被绑的容器类** | task 域 **6 个**：PG **3** 个 ＋ Redis **3** 个 ⇒ 全部钉在本域段内的**独占**固定宿主口 |
+| **支撑类** | `service/task-rpc/src/test/java/com/rag/task/task/rpc/support/RealContainerPort.java` ⇒ 段边界常量 ＋ `withFixedHostPort(container, hostPort, containerPort)` ＋ **端口越段直接抛异常**（拒绝落码） |
+| **机制层守门**（真容器） | `taskPostgresFixedHostPortGateTest`（3 条）⇒ 钉「**映射口 == 固定口**」＋「固定口真在监听」＋「固定口上确实是 PG（`SELECT 1` 成功）」 |
+| **覆盖层守门**（源扫 · 无容器 · 秒级） | `taskContainerFixedHostPortSegmentGateTest`（1 条）⇒ ① 凡声明容器的类**必须**有 `FIXED_HOST_PORT` ② **必须**在本域段内 ③ **全域不重号** ④ 容器数 **≠ 0**（防空过） |
+| **端口分配方式** | **逐类写死**（不是轮询）⇒ surefire **每个 fork 一个独立 JVM** ⇒ ⇒ 静态计数器在每个 fork 里都从头开始 ⇒ ⇒ 两个并发 fork 会拿到同一端口 ⇒ ⇒ 撞车 |
+
+**④ 🔴 直接回答 G4 的未实测项（**实测，不是推断**）**
+
+> G4 §4.10.39 ② 的原问句：「**显式绑口后 `getMappedPort()` 是否返回那个固定口**」
+
+### **实测结论：会。**
+
+- `taskPostgresFixedHostPortGateTest`（**真容器**）实测：① `getMappedPort(5432)` **== 22840**（就是那个固定口，**不是**随机口、**不是** 0）② 那个固定宿主口**真在监听**（从宿主机 TCP 连得上）③ 那个口上**确实是 PG**（真 JDBC 连接 ＋ `SELECT 1` 成功）。
+⇒ ⇒ **形态两层都验完了**：形态 = 原容器 ＋ `withCreateContainerCmdModifier`（`FixedHostPortGenericContainer` **确实不能混用** —— 实测 `PostgreSQLContainer` 的父链是 `JdbcDatabaseContainer` → `GenericContainer`，与它**无继承关系**）；行为 = **映射口就是那个固定口**。
+
+**⑤ 🔴 实现里踩到的三个坑（写死，给下一个域）**
+1. **必须「先摘随机绑定、再加固定绑定」** —— 只加不摘 ⇒ Docker 会**同时看到两条同容器端口的绑定** ⇒ 行为不确定。做法：`HostConfig.getPortBindings()` 取出全部 ⇒ **`removeIf` 掉「容器端口 == 5432/6379」的那条**（Testcontainers 默认给的是随机宿主口）⇒ 再 `add` 一条 `new PortBinding(Ports.Binding.bindPort(hostPort), ExposedPort.tcp(containerPort))` ⇒ 最后 `hc.withPortBindings(bindings)`。
+2. **泛型写法会编译不过** —— `public static <T extends GenericContainer<T>> T withFixedHostPort(T container, …)` ⇒ 传进去的是 `PostgreSQLContainer<?>`（**通配符捕获**）⇒ 编译器报「推论变量 T 具有不兼容的上限」⇒ ⇒ **改成非泛型签名**：`public static void withFixedHostPort(GenericContainer<?> container, int hostPort, int containerPort)`。
+3. 🔴 **javadoc 里写 `src/test/java/**/*.java` 会提前闭合注释块** —— `*/` 出现在注释内部 ⇒ ⇒ 注释提前结束 ⇒ ⇒ 后面的**全角括号等中文被当代码解析** ⇒ ⇒ javac 报「**非法字符**」⇒ ⇒ 而**报错位置在几十行之后**（不是出问题的那一行）⇒ ⇒ **看起来像「编码坏了」，实际是注释块被截断**。修法：写成 `{@code src/test/java} 递归下的全部 {@code .java} 文件`（避开 `*/` 序列）。
+
+**⑥ 回归实测（本轮）**
+| 模块 | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `service/common`（共享层） | **330** | 0 | 0 | 0 |
+| `service/message/message-common` | 21 | 0 | 0 | 0 |
+| `service/message/message-rpc` | **93** | 0 | 0 | 0 |
+| `service/like/like-common` | 18 | 0 | 0 | 0 |
+| `service/like/like-rpc` | **129** | 0 | 0 | 0 |
+| `service/task/task-rpc` | **129** | 0 | 0 | 0 |
+
+⇒ ⇒ 三模块 `clean test`（带 `-am`）⇒ **BUILD SUCCESS · 7:41 min** ⇒ ⇒ 本域 `task-rpc` = **129**（上轮 125 ⇒ **+4** = 机制层 3 条 ＋ 覆盖层 1 条）⇒ ⇒ 共享层 `service/common` = **330（未变）** ⇒ ⇒ ⚠️ **口径**：本轮只跑了 3 个 rpc 模块 ＋ 它们的依赖（`-am`）⇒ ⇒ **9 模块口径尚未重测** ⇒ ⇒ **本域之外的模块条数一律沿用上一轮实测值，不做推算**。
+
+**⑦ ⚠️ 口径提醒（写给下一个复核者）**
+- **数「真容器类」要数 `new PostgreSQLContainer<>` / `new GenericContainer<>` 的**声明**，**不要**把 import / javadoc / 泛型里的类型名算进去（与「数真 `RANDOM_PORT` 注解、不数提及」同款纪律）。
+- **端口守门是源扫型**：它核的是「**源码上有没有绑**」；机制层才是「**运行期绑没绑成**」⇒ ⇒ **两层不重复、缺一不可**。
+
+**⑧ 原值保留不改写**
+本轮**未改动**任何生产代码 ⇒ ⇒ 前面各轮的行为结论与条数口径**一律不变**；本轮新增的只有**测试面**（6 个容器类的绑定 ＋ 6 个守门类 ＋ 3 份支撑类）⇒ ⇒ **域侧条数的变化**见 §⑥ 的实测。
+
+---
+
 ## 4·十二、🟢 **第十二轮（2026-10-27 18:4x）· 合并 G4 的 13 笔（零冲突）⇒ 新机器门禁在本树为绿 ＋ 全仓 U+FFFD 复扫下降 ＋ 两个红门禁的根因定位到行**
 
 ### ① 合并（`5636164`）

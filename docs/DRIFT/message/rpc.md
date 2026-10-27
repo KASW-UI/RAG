@@ -1271,7 +1271,7 @@ RAG application.yml:27
 
 ## 2026-10-23 第二轮：DRIFT-MSG-V-014 / -017 已修
 
-> message-rpc 当前：**49 tests / 0 failures / 0 errors**，BUILD SUCCESS（原 39 + 分页 7 + isRead 3）。
+> message-rpc 当前：**49 tests / 0 failures / 0 errors**，BUILD SUCCESS（原 39 + 分页 7 + isRead 3）。<br>🆕 **2026-10-28 订正（**原值保留不改写**）**：上面那个 **49** 是**历史值**（早已过期）⇒ ⇒ **当前权威值 = 93**（第二十一轮 Testcontainers 固定口守门 +4 ⇒ **93**；上轮为 89）⇒ ⇒ 依据 = **模块级 `clean test` 实测**（带 `-am` · BUILD SUCCESS · 7:41 min · 逐模块 surefire XML 求和 == maven 汇总行）。
 
 ### ✅ FIX-MSG-014 —— 负 `offset` 不再变成 `OFFSET must not be negative`
 

@@ -49,6 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import com.rag.task.task.rpc.support.RealContainerPort;
 
 /**
  * 🔴 <b>slow threshold 分支的独立守门</b>（global L9 · task-rpc / follow-rpc 的 X-5 之外的另一半）。
@@ -156,6 +157,21 @@ class TaskRpcSlowThresholdGateTest {
                     .withDatabaseName("task_rpc_slow_threshold_it")
                     .withUsername("rag")
                     .withPassword("rag");
+/**
+     * 本类的真容器**固定宿主口**（task 域段 22820–22849 内 · 全局段表 §4.10.19.3 / §4.10.39.2 分配）。
+     *
+     * <p>🔴 为什么不用 Testcontainers 的默认随机口：随机宿主口落在 **OS 临时段 49152–65535**
+     * （= Docker published 段）⇒ ⇒ 与 {@code tools/difftest/ddl-parity.sh} 的固定口 {@code 55560–55569}
+     * 同属一个池子 ⇒ ⇒ 全局段表把该段标为**禁占**。
+     *
+     * <p>🔴 为什么端口写死在本类里、而不是轮询分配：Testcontainers 的 surefire **每个 fork 一个独立 JVM**
+     * ⇒ ⇒ 静态计数器在每个 fork 里都从头开始 ⇒ ⇒ 两个并发 fork 会拿到同一个端口 ⇒ ⇒ 撞车。
+     */
+    private static final int FIXED_HOST_PORT = 22821;
+    static {
+        RealContainerPort.withFixedHostPort(POSTGRES, FIXED_HOST_PORT,
+                RealContainerPort.PG_CONTAINER_PORT);
+    }
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
