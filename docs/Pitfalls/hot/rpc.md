@@ -761,3 +761,51 @@ func (s *Server) initialReadLimitSize() int64 {
    **上一次跑剩的产物** ⇒ ⇒ **本轮实测踩到了**：变异跑完后 XML 求和显示 comment-rpc「3 failures」，
    而 maven 汇总行是 123/0/0/0 ⇒ ⇒ **两者不一致时，先查报告新鲜度（mtime + 跑次）**，
    **别急着相信其中一个**。
+
+## P-HOTRPC-24 🔴 「Redis 断连」活体对拍的**配方** —— 三个地方做错，测出来的是**假对照**
+
+**背景**：要证明共享层那份 `REJECT_COMMANDS`「**在 hot-rpc 里真的生效**」⇒ ⇒ 光读配置项 / 光看
+`ClientOptions` 的声明都**不算证据**（AGENTS.md §3.3：「注解存在 ≠ 机制生效」）⇒ ⇒ 必须**活体断连**。
+
+**配方（本轮实测跑通）**：
+
+```
+真 Redis 容器 ⇒ 连上 ⇒ PING ⇒ 静默等待 1s（期间【不发任何命令】）⇒ 外部 docker stop ⇒ 量【第一条命令】的耗时
+```
+
+⚠️ **三处做错就得到假对照（按踩坑顺序）**：
+
+1. 🔴 **`kill` 容器 ≠ `stop` 容器** —— `docker kill` 发 **SIGKILL** ⇒ 内核直接 **RST** socket
+   ⇒ Lettuce **立刻**感知到 socket 错误 ⇒ ⇒ **测不出「排队等重连」那个窗口** ⇒ ⇒
+   **A/B 两组都会是毫秒级** ⇒ ⇒ **看起来像「机制生效」，其实对照组没测到该测的东西**。
+   ⇒ ⇒ 必须用 **`docker stop`**（SIGTERM ⇒ **优雅 FIN**）⇒ 客户端**感知不到**断连 ⇒ ⇒ 才会**排队**。
+2. 🔴 **「静默等待」期间不能发任何命令** —— Lettuce 的 **watchdog 自动重连**（默认 `ping` 周期）
+   ⇒ ⇒ 期间一旦有命令，重连就被**提前触发** ⇒ ⇒ 断连后第一条命令**直接成功** ⇒ ⇒
+   **A/B 两组都会是「毫秒级且成功」** ⇒ ⇒ **对照组失效**。
+   ⇒ ⇒ 停 1s 期间**一个字都不能发**。
+3. 🔴 **`ClientOptions` 必须在 `connect()` 之前设** —— Lettuce 6.x **没有** `create(RedisURI, ClientOptions)` 重载
+   ⇒ ⇒ 只能 `RedisClient.create(uri)` 之后 `client.setOptions(options)` ⇒ ⇒
+   ⚠️ **若在 `connect()` 之后才 `setOptions`**，已建立的连接**不会换选项** ⇒ ⇒
+   **A 组其实跑的是默认 `DEFAULT`** ⇒ ⇒ **A 也变快/变慢都测不出差别** ⇒ ⇒ **守门假绿**。
+   ⇒ ⇒ 判据：**`setOptions` 必须在 `connect()` 之前**，且 A/B 两组都要用**同一个 client 构造流程**。
+
+⇒ **必须有对照组**（只测 A 组「REJECT_COMMANDS 快」**不能**证明是那条机制决定的）：
+⇒ ⇒ **A 组** = 共享层产出的那套 `ClientOptions`；**B 组** = 同一套**只**把断连行为换成 Lettuce 默认 `DEFAULT`
+⇒ ⇒ **A 必须毫秒级、B 必须排队到命令超时**（本域实测 **A=1 ms / B=3007 ms** ⇒ 差 3006 ms）
+⇒ ⇒ 差异**只可能**来自那一条机制。
+
+🔴 **配套的环境坑（两个）**：
+
+- **排一个 classpath 上【不存在】的自动配置类 ⇒ Boot 直接启动失败** ——
+  hot-rpc **没有** Flyway 依赖 ⇒ ⇒ **不能** `spring.autoconfigure.exclude=…FlywayAutoConfiguration`
+  ⇒ ⇒ 只能 `spring.flyway.enabled=false` ⇒ ⇒ **「排 Flyway」不是通用配方**，**先看 classpath 上有没有**。
+  （comment-rpc **有** Flyway ⇒ 那边**可以** exclude ⇒ ⇒ **各域的适配点不同 ⇒ 不能照抄**。）
+- **`RedisClient` 不是 `AutoCloseable`** ⇒ ⇒ 不能 try-with-resources ⇒ 必须 `finally { connection.close(); client.shutdown(); }`；
+  **`ProcessBuilder` 没有 `add(String...)`** ⇒ ⇒ 只能用 `command(List<String>)`（或 `command(String[])`）。
+
+⇒ **可复用判据**：凡「**断连 / 超时类**活体对拍」，先问三句 ——
+① **我是优雅 FIN 还是 RST？** ② **等待期间我发命令了吗？** ③ **对照组真的换了那一条机制吗（且选项在 connect 前生效）？**
+⇒ ⇒ **三句任一答错 ⇒ 结论作废**。
+⇒ ⚠️ **跨域提醒**：本配方在 comment 域的**变体**（有 Flyway ⇒ 可 exclude；两个出向 gRPC client 必须提前指向不可达地址）
+⇒ **完整机制与本域台账** ⇒ [`../../DRIFT/hot/rpc.md` §十二](../../DRIFT/hot/rpc.md)；
+⇒ **comment 域变体** ⇒ [`../../Pitfalls/comment/rpc.md` 的 PIT-COMMENT-RPC-16](../../Pitfalls/comment/rpc.md)。

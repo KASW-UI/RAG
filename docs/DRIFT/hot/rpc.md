@@ -1813,6 +1813,14 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
   ⚠️ **因此**：上文「断连 ⇒ 命令排队到 `commandTimeout: 3s` ≫ `rpc-timeout: 2s` ⇒ **RPC 先超时**」里的 2s，
   指的就是**这个服务端预算** ⇒ **不是**客户端 2s 封顶那一条 ⇒ 别拿客户端那条来解释服务端先超时。
 
+### 附录 · 📌 **订正注记（2026-10-27 · G3 · 20:15）：上面「🔴 待验」的**机制格已验完**（新增 §十二）
+
+⚠️ **本块是「加注记」，不是「改原值」** ⇒ 上文「🔴 **待验**」**原样保留** ⇒ 读本域历史结论的人**以两块并列为准**。
+
+- **已验的格**：**「共享层那份 `REJECT_COMMANDS` 在本域真的生效吗」** ⇒ ✅ **已验**（§十二：仓内守门 2 条 ＋ **活体 A/B** 实测 **A=1ms / B=3007ms** ＋ **Go 腿 1669–1808ms**）
+- **仍未验的格**：**「断连时客户端（api 侧）到底看到什么」** ⇒ 仍 🔴 **待验**（那是 **gRPC 响应层**的问题：断连 ⇒ 命令是**毫秒级拒单**（不是排 3s）⇒ ⇒ **RPC 不再撞 2s 服务端超时** ⇒ ⇒ 客户端看到的**不再是 1015「服务繁忙」**，而是域内的业务错误 ⇒ **但这条要真发一次 gRPC 调用才测得到** ⇒ **未做**）
+- ⇒ ⚠️ **上文的「修法落点 = 共享层」这句现在有了实测支撑**：共享层那份**确实**在 hot-rpc 里生效（无域内副本 ⇒ `size == 1` ＋ bean 名对得上）⇒ ⇒ **hot-rpc 零域侧改动**这条结论成立 ✅。
+
 
 ---
 
@@ -1845,7 +1853,7 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 
 ## 十、🔴 Redis **连接池形态**漂移（Go **有池** vs RAG **无池**）—— 2026-10-27 登记（G2 挖出 · 本域**独立复核** · **只登记不落码**）
 
-> **公共证据链（Boot 4.0.8 字节码判据 · classpath 探测 · 处置理由 · 复开触发条件）见 [`favorite/api.md` §15](../favorite/api.md#15-)** ⇒ 本节**只记本域特有**的部分。
+> **公共证据链（Boot 4.0.8 字节码判据 · classpath 探测 · 处置理由 · 复开触发条件）见 [`favorite/api.md` §15](../favorite/api.md#15-🔴-redis-连接池形态漂移go-有池-vs-rag-无池-2026-10-27-登记g2-挖出--本域独立复核--只登记不落码)** ⇒ 本节**只记本域特有**的部分。
 
 ### 十.1 本域结论
 
@@ -2046,6 +2054,69 @@ Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方�
 
 ---
 
+## 十二、✅ Redis **断连活体对拍**（共享层的 `REJECT_COMMANDS` 在本域**真的生效**）—— 2026-10-27 · G3
+
+### 十二.1 一句话
+
+**共享层那份 `REJECT_COMMANDS` 在 hot-rpc 里真的生效** ⇒ 断连后第一条命令 **1 ms 失败**（不是排队到 3s 命令超时）
+⇒ **Go 腿同场景 1669–1808 ms（4 轮）** ⇒ ⇒ **两侧都是「快速失败」，语义等价**；
+⇒ 对照组（Lettuce 默认 `DEFAULT`）**3007 ms** ⇒ ⇒ **机制是承重的**（不是「反正都快」）。
+
+### 十二.2 三段判据（守门 = `HotRedisDisconnectFastRejectGateTest`，**2 条**，零 Testcontainers / 零真 PG）
+
+| 判据 | 内容 | 为什么这么判 |
+|---|---|---|
+| **①** | 共享层那份 customizer **在场且没被域内副本遮蔽**：`getBeansOfType(LettuceClientOptionsBuilderCustomizer.class)` 的 **size == 1** ＋ bean 名含 `goStyleRedisClientOptionsCustomizer` | 共享层那份带 `@ConditionalOnMissingBean` ⇒ **域内若自己声明一个，共享层就退让** ⇒ 那时 size 可能是 1 但不是共享层那个 ⇒ **size == 1 ＋ 名字对得上两条合起来**才证明「用的就是共享层那份」 |
+| **②** | 断连行为**消费点** = `connectionFactory.getNativeClient().getOptions().getDisconnectedBehavior()` == `REJECT_COMMANDS` | **不是读配置项**（那是「声明」）、也不是读 `ClientConfiguration` ⇒ 必须读**真在跑的客户端**的选项 |
+| **③** | **活体 A/B**：真 Redis 容器 ⇒ 连上 ⇒ PING ⇒ **静默等待 1s（期间不发任何命令）** ⇒ 外部 `docker stop`（**优雅 FIN**，不是 kill 的 RST）⇒ 量**第一条命令**的耗时 | **A 组** = 共享层产出的那套 ClientOptions；**B 组** = 同一套**只**把断连行为换成 Lettuce 默认 `DEFAULT` ⇒ ⇒ **A 快 / B 排队到命令超时** ⇒ ⇒ 唯一差别就是那条机制 |
+
+### 十二.3 实测数字（**2026-10-27 20:0x–20:1x · 本轮现跑**）
+
+| 侧 | 场景 | 实测 | 判读 |
+|---|---|---|---|
+| **Go 腿**（真源 go-redis v9.20.0 ＋ **hot 域真源 `Options`** = `service/hot/rpc/internal/svc/service_context.go:17-20` 的 `{Addr, Password}`） | 断连后第一条命令 | **1669 / 1808 / 1710 / 1771 ms**（**4 轮**） | **快速失败**（go-redis 的 `MaxRetries` 默认 3 ＋ 重试退避 ⇒ 拒连重试若干次后失败）⇒ 与 G2 台账记的 **1694 ms** 同量级 ✅；err = `dial tcp … connect: connection refused` |
+| **Go 腿**（comment 域真源 `Options` = `{Addr}`，**同一支探针换参数跑**） | 同上 | **1708 / 1776 / 1741 / 1753 ms**（**4 轮**） | 同量级 ⇒ ⇒ **两套真源 `Options` 的断连行为一致** |
+| **RAG A 组**（共享层 `REJECT_COMMANDS`） | 同上 | **1 ms** | **毫秒级拒单** ⇒ 不排队 ⇒ **绝不撞 3s 命令超时** |
+| **RAG B 组**（Lettuce 默认 `DEFAULT`） | 同上 | **3007 ms** | **排队到 3s 命令超时** ⇒ ⇒ 这是**对照组** |
+
+⇒ **A/B 差 = 3006 ms** ⇒ ⇒ **机制是承重的**。
+⇒ **两侧对比**：Go **~1.7 s** vs RAG(A) **1 ms** ⇒ ⇒ **量级不同（Go 的重试退避 vs Lettuce 立即拒单），
+但语义相同：都是「快速失败」，都不是「挂到命令超时」** ⇒ ⇒ ⇒ **Go 的 `MaxRetries=3` 重试面**另属他档（**Lettuce 无重试**）⇒ **本条不覆盖那一条**（不混）。
+
+### 十二.4 ⚠️ 口径边界（三条，逐条读）
+
+1. 🔴 **Go 腿是「本轮现跑的一次性探针」，源文件不在仓内** ⇒ ⇒ **不可从仓复现**
+   ⇒ ⇒ **证据强度**：RAG 腿 = **L4（仓内可复现的活体 A/B）**；Go 腿 = **L4-一次性（实测但仓外）**
+   ⇒ ⇒ ⇒ **本轴整体不能写成「仓内可复现的双侧活体对拍」** ⇒ ⇒ 要长期可复现 ⇒ **需把 Go 探针入 `tools/`**
+   （**`tools/**` 是 G4 写权面** ⇒ 已派单给 G4）。
+   ⇒ **探针的等价规格**（可据此重建，**不依赖原探针文件**）：
+   - **真源 `Options`**：`service/hot/rpc/internal/svc/service_context.go:17-20` 的 `{Addr, Password}`
+     （comment 域 = `service/comment/rpc/internal/cache/redis.go:17-19` 的 `{Addr}`）
+   - **其余全部走 go-redis v9.20.0 库默认**（`ReadTimeout 3s` / `DialTimeout 5s` /
+     `PoolSize 10×GOMAXPROCS` / `PoolTimeout = ReadTimeout+1s`）
+   - **时序**：**连上 → PING → 静默 1000ms（期间不发任何命令）→ `docker stop`（SIGTERM ⇒ 优雅 FIN）→ 量第一条命令**
+   - **编排**：每组**各自**取一个空闲端口（不能复用同一个：容器还在占着）⇒ 起 `redis:7-alpine` ⇒ 等就绪 ⇒ 跑探针 ⇒ `docker rm -f` 收尾
+2. **RAG 腿测的是「池里有空闲连接」这一形态**（本域现在**有池**）⇒ **不是**「池耗尽」那形态
+   ⇒ ⇒ 两者**必须分开判**（池耗尽那形态由 §十一 的 `max-wait` 那条覆盖）⇒ ⚠️ **别把两条混为一谈**。
+3. **不外推**：like / task / comment / users / admin 各域的域上下文不同 ⇒ customizer 数量可能不同
+   ⇒ 行为可能不同 ⇒ ⇒ **每个域自己跑一遍**才是证据（**G3 的 comment 域自己跑了一份** ⇒ **两域互不代替**）。
+
+### 十二.5 回归与门禁（**2026-10-27 20:23 · 本轮现跑**）
+
+| 项 | 结果 |
+|---|---|
+| **hot-rpc 全量** | **103 / 0 failures / 0 errors / 0 skipped** ⇒ **BUILD SUCCESS**（exit 0，Finished at `2026-10-27T20:23:37+08:00`）⇒ 基线 **101** ＋ 本轮新守门 **2** = **103** ✅ |
+| **hot-rpc surefire 复核** | **21 份 XML**（基线 20 ＋ 新增 1 个测试类）⇒ **求和 103/0/0/0** ⇒ **与 maven 汇总行一致** ⇒ **0 孤儿报告** |
+| **新守门自身** | `HotRedisDisconnectFastRejectGateTest` = **2 / 0 / 0 / 0**，**Skipped = 0** ⇒ ⇒ **docker 路径真跑到了**（不是被 `assumeTrue` 跳过）⇒ 耗时 **64.03 s** |
+| **comment-rpc 全量**（同轮） | **125 / 0 / 0 / 0** ⇒ 基线 123 ＋ 2 = 125 ✅（详见 [`comment/rpc.md` §十二](../comment/rpc.md#十二✅-redis-断连活体对拍共享层的-reject_commands-在本域真的生效-2026-10-27--g3)） |
+| **service/common 全量**（同轮 reactor） | **324 / 0 / 0 / 0** ⇒ **三模块合计 552 / 0 红** |
+| **本轮改动文件** | `HotRedisDisconnectFastRejectGateTest.java`（新增 303 行 / 2 条）· 本档两处段落 |
+| **门禁（本轮终检）** | `tools/check-ledger-tables` **EXIT=0** · `tools/check-ledger-selfcheck` **EXIT=0** · `tools/check-ledger-count` **EXIT=1**（索引称 **315** / 实测 **328** ⇒ 差 **+13** ⇒ 索引在 `docs/DRIFT/_INDEX.md` = **整合者写权面** ⇒ **合并后统一 `--fix`**；⚠️ 相对 §十一.8 记的 **326（+11）**，本轮 **+2** 来自两域各增的 **§十二** ⇒ ⇒ **旧值保留不改写**）· `tools/check-doc-links` **EXIT=0**（本轮**实修 18 处**失效锚点 ⇒ 全部改用门禁自己的 `slug()` **实算值**）· `tools/difftest/check-wave-{lane-ownership,coupling,role-model}` **全 0** · `tools/ledger-lint/favorite/{tables,selfcheck,vs-reality}` = **0 / 1 / 1** ⇒ **与本轮改动前完全相同**（selfcheck 仍 **5 条**，**全在本轮 diff 之外**；vs-reality 那 1 条 = 「共享面零改动」，**结构性**）⇒ ⇒ **本轮零新增门禁级问题** |
+| **U+FFFD 字节级扫描** | 本轮改动文件 **8 份全部 0 命中** · 本域台账＋坑档全量（**33 份**，已剔 `target/`）**0 命中** |
+| **全仓 `check-*.py` 巡检** | **18 个脚本 ⇒ 17 个 EXIT=0 / 1 个 EXIT=1** ⇒ 那 1 个是 `tools/difftest/check-ddl-static.py` ⇒ **是 `users` 域的 9 处既知差异**（`users_user.status` 可空性 1 处 ＋ `DEFAULT CURRENT_TIMESTAMP` 残留 8 处）⇒ ⇒ **不在本域** ⇒ ⇒ **与本轮改动无因果关系** |
+
+---
+
 ## 🔴 **阈值类结论的「共享层依赖」声明**（2026-10-27 · 按 G2 [3] 的要求做的重核）
 
 ⚠️ **凡本档写了「**运行期上限 / 阈值 / 池形态**」类结论，必须标「依赖共享层哪个版本」** ⇒ ⇒ **共享层一改 ⇒ 那条要重核**（重核，不是重写）。
@@ -2055,10 +2126,12 @@ Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方�
 | **§十 的 Redis 池形态 = 无池**（hot-rpc） | **依赖共享层的 dependency 状态**（`isPoolEnabled` 在 `enabled == null` 时**回落到「classpath 上有没有 `commons-pool2`」**） | ✅ 共享层 `service/common` 的 classpath 上 `commons-pool2` **零命中**（`mvn -B -o -pl service/common dependency:tree -Dincludes=org.apache.commons:commons-pool2` ⇒ BUILD SUCCESS，无该行）⇒ ⇒ **无池结论成立** | 共享层依赖树一变 ⇒ ⇒ **池形态静默翻转** ⇒ ⇒ **§十 要重核** |
 | **Redis connect-timeout = 5s** | **不依赖**共享层（共享层只设 `disconnectedBehavior(REJECT_COMMANDS)`） | ✅ 域内 yml 显式配 5s | 共享层开始碰 `socketOptions` 时才变 |
 | **rpc 服务端超时 = 2s** | 域内 `observability.rpc-timeout` ＋ 共享层的 `RpcServerInterceptorFactory` | ✅ 2s | 共享层改拦截器链时要重核 |
-| **🆕 §十一 的 Redis 池形态 = 有池 ＋ 池参数 64/16/0 ＋ `maxWait=4s`**（hot-rpc） | **仍然依赖共享层的 dependency 状态** —— ⚠️ **但依赖方向变了**：`enabled` 已被**显式配成 `true`** ⇒ ⇒ **不再回落到 `COMMONS_POOL2_AVAILABLE`** ⇒ ⇒ **共享层依赖树变化不再能翻转本域的池形态**；**真正的 load-bearing 依赖变成「域内 pom 里那条 `commons-pool2`」** | ✅ **2026-10-27 实测**：`enabled: true` ＋ 域内 pom 显式声明 `commons-pool2` ⇒ **池启用**（守门 ① 实测）⇒ ⚠️ **抽掉 pom 那条依赖 ⇒ 启动期 `NoClassDefFoundError`**（MUT-E 实测）⇒ ⇒ **域内 pom 少这条 ⇒ 组件起不来** | 🔴 **共享层**：`GoStyleRedisClientAutoConfiguration` **只设 `disconnectedBehavior(REJECT_COMMANDS)`**（不碰 `pool.*` / 不碰 `timeoutOptions`）⇒ ⇒ **共享层本轮不动也不会翻转本域结论**；<br>🔴 **域内 pom**：**删掉 `commons-pool2` ⇒ 启动期直接失败**（不是「静默变无池」）⇒ ⇒ **这正是想要的形状**（[`favorite/api.md` §15.4](../favorite/api.md#154-陷阱lettucepoolenabled-没写--池没开本条最有价值的副产物) 的陷阱「classpath 一变池就静默翻转」在本域**已被消除**） |
+| **🆕 §十一 的 Redis 池形态 = 有池 ＋ 池参数 64/16/0 ＋ `maxWait=4s`**（hot-rpc） | **仍然依赖共享层的 dependency 状态** —— ⚠️ **但依赖方向变了**：`enabled` 已被**显式配成 `true`** ⇒ ⇒ **不再回落到 `COMMONS_POOL2_AVAILABLE`** ⇒ ⇒ **共享层依赖树变化不再能翻转本域的池形态**；**真正的 load-bearing 依赖变成「域内 pom 里那条 `commons-pool2`」** | ✅ **2026-10-27 实测**：`enabled: true` ＋ 域内 pom 显式声明 `commons-pool2` ⇒ **池启用**（守门 ① 实测）⇒ ⚠️ **抽掉 pom 那条依赖 ⇒ 启动期 `NoClassDefFoundError`**（MUT-E 实测）⇒ ⇒ **域内 pom 少这条 ⇒ 组件起不来** | 🔴 **共享层**：`GoStyleRedisClientAutoConfiguration` **只设 `disconnectedBehavior(REJECT_COMMANDS)`**（不碰 `pool.*` / 不碰 `timeoutOptions`）⇒ ⇒ **共享层本轮不动也不会翻转本域结论**；<br>🔴 **域内 pom**：**删掉 `commons-pool2` ⇒ 启动期直接失败**（不是「静默变无池」）⇒ ⇒ **这正是想要的形状**（[`favorite/api.md` §15.4](../favorite/api.md#154-🔴-陷阱lettucepoolenabled-没写--池没开本条最有价值的副产物) 的陷阱「classpath 一变池就静默翻转」在本域**已被消除**） |
+
+| **🆕 §十二 的断连行为 = `REJECT_COMMANDS`**（hot-rpc） | **完全依赖共享层那份 `GoStyleRedisClientAutoConfiguration`**（域内**零副本** ⇒ 共享层那份带 `@ConditionalOnMissingBean` ⇒ **域内一旦自己声明一个，共享层就退让**） | ✅ **2026-10-27 20:1x 实测**：`getBeansOfType(LettuceClientOptionsBuilderCustomizer.class)` **size == 1** ＋ bean 名含 `goStyleRedisClientOptionsCustomizer` ⇒ **无域内副本遮蔽**；**消费点** `connectionFactory.getNativeClient().getOptions().getDisconnectedBehavior()` == `REJECT_COMMANDS`；**活体 A/B** = **A(REJECT_COMMANDS) 1 ms** vs **B(DEFAULT) 3007 ms** ⇒ 差 **3006 ms** | 🔴 **共享层若删掉/改名那份 customizer** ⇒ ⇒ 本域**静默回落**到 Lettuce 默认 `DEFAULT` ⇒ ⇒ 断连从 **1 ms** 变成 **~3005 ms**（排队到命令超时）⇒ ⇒ **重新撞 2s 服务端超时** ⇒ ⇒ **§十二 必须重核**；<br>ℹ️ **域内侧无风险**：本域**零副本** ⇒ 域内改代码**不会**翻转这条 ⇒ ⇒ **这条的写权全在共享层** |
 
 > 📌 **订正注记（2026-10-27 · G3）**：上表**第一行**（「§十 的 Redis 池形态 = 无池」）是**落码前**的重核结论 ⇒ **原样保留不改写** ⇒
 > ⇒ 读本域历史结论的人**以「第一行 + 🆕 行」并列为准** ⇒ ⇒ **不要**把 🆕 行误读成「第一行作废」⇒
 > ⇒ 落码后的权威口径 = **§十一**（含守门与变异证据）。
 
-⇒ **共享的判据明细表在 [`favorite/api.md` §17](../favorite/api.md#17-)（同款机制，三域共用一条判据）** ⇒ ⇒ 改一处要三域一起重核。
+⇒ **共享的判据明细表在 [`favorite/api.md` §17](../favorite/api.md#17-🔴-阈值类结论的共享层依赖声明2026-10-27--按-g2-3-的要求做的重核)（同款机制，三域共用一条判据）** ⇒ ⇒ 改一处要三域一起重核。

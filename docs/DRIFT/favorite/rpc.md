@@ -3742,8 +3742,8 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 |---|---|
 | 落点 | `FavoriteDomainService` 的 **7 个方法**（`createFavoriteFolder` / `createFavorite` / `deleteFavoriteFolder` / `deleteFavorite` / `getFavoriteFolders` / `getFavoritesByFolder` / `updateFavoriteFolderName`）＋ `FavoriteUserGuard#ensureExists`（= `Dependency.User.GetUser`）＋ `FavoriteArticleSnapshotResolver#resolve`（= `Dependency.Article.GetArticle`） |
 | 工具类 | `service/favorite/favorite-common/.../span/FavoriteSpans.java`（域内私有，api/rpc 共用） |
-| 判据 | 🔴 **三类，与 comment 域不同**（详见 [`api.md` §16.2](api.md#162-)）⇒ rpc 侧 = **凡错都记**（含业务失败）· 两个依赖 span = **只记下游 RPC 失败**，业务判定失败**不记** |
-| 证据强度 | 🟢 **L3**（Go 侧 **L1 逐行对照** `Sea-RideTheWind_golang/service/favorite/rpc/**` ＋ RAG 侧 **L4 运行证据**：`FavoriteRpcSpanWiringTest` 自装 OTel SDK ＋ 收集型 exporter ＋ **真 in-process gRPC 下游** ⇒ 断言**导出的 9 个 span** ⇒ **12 条全绿** ＋ **4 个变异精确转红**）⚠️ **边界**：**Go 侧无同时跑的探针** ⇒ ⇒ **不是「双侧活体对拍」** ⇒ 详见 [`api.md` §16.5](api.md#165-) ＋ [`api.md` §16.6](api.md#166-) |
+| 判据 | 🔴 **三类，与 comment 域不同**（详见 [`api.md` §16.2](api.md#162-🔴-三类错误判据逐字保留-go-侧的不一致未套用-comment-域的判据)）⇒ rpc 侧 = **凡错都记**（含业务失败）· 两个依赖 span = **只记下游 RPC 失败**，业务判定失败**不记** |
+| 证据强度 | 🟢 **L3**（Go 侧 **L1 逐行对照** `Sea-RideTheWind_golang/service/favorite/rpc/**` ＋ RAG 侧 **L4 运行证据**：`FavoriteRpcSpanWiringTest` 自装 OTel SDK ＋ 收集型 exporter ＋ **真 in-process gRPC 下游** ⇒ 断言**导出的 9 个 span** ⇒ **12 条全绿** ＋ **4 个变异精确转红**）⚠️ **边界**：**Go 侧无同时跑的探针** ⇒ ⇒ **不是「双侧活体对拍」** ⇒ 详见 [`api.md` §16.5](api.md#165-实测可复算) ＋ [`api.md` §16.6](api.md#166-✅-变异验证--7-个变异全部精确转红第二十九轮) |
 | 核对日期 | 2026-10-27 |
 
 ⚠️ **依赖 span 的两段式改造要点**（改这两处时别弄错）：「下游调用」与「调用后的业务判定」必须**拆成两个函数段**（`tracedDependency` 的 `call` 与 `after`）⇒ 否则会**多记** Go 侧那三条**没有** `RecordError` 的业务分支（`helper.go:109-111` / `:113-115` / `:117-119`）。

@@ -811,7 +811,7 @@ service/favorite/api/internal/svc/service_context.go:20
 ① **不是表达层差异** —— 池形态改变**可观察行为**（并发下：Go 多连接并行 vs RAG 单连接**命令串行化**）⇒ 不能按 §3.2「idiomatization 留痕」放行。
 ② **数值不可 1:1**：Go 的 `PoolSize = 10 × GOMAXPROCS(0)` 是**运行时 CPU 数推导值**；Lettuce 侧是**固定 YAML 值** ⇒ 只能近似。
 ③ **两套池语义没有一一对应**：go-redis = `PoolSize`（总连接上限）+ `MinIdleConns`（空闲下限）**2 参数**；Lettuce = `max-active`（活跃上限）+ `max-idle`（空闲保留上限）+ `min-idle`（空闲下限）**3 参数** ⇒ ⇒ **不存在「逐值抄」这个动作**。
-④ 落码需**并发活体对拍**（当前被机器级 Docker 端口转发故障阻塞 ⇒ 见 [`api.md` §14.4](#144-整域回归被机器级-docker-端口转发故障阻塞不是代码问题已用探针证伪)）。
+④ 落码需**并发活体对拍**（当前被机器级 Docker 端口转发故障阻塞 ⇒ 见 [`api.md` §14.4](#144-🔴-整域回归被机器级-docker-端口转发故障阻塞不是代码问题已用探针证伪)）。
 ⑤ 改形态会**连带影响断连语义**（共享层 `GoStyleRedisClientAutoConfiguration` 的 `disconnectedBehavior(REJECT_COMMANDS)`）⇒ 须连带验。
 
 ⇒ **复开触发条件**（写死）：

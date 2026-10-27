@@ -704,6 +704,29 @@ attempt, span := otel.Tracer("sea.rtw.communityfact").Start(ctx, "community.fact
 📌 **同款机制在 G3 的另一域已落码**（`hot-rpc`：形态对齐 + `max-wait` + 守门 4 条 + 变异 5 条全红）
 ⇒ **完整机制与坑档** ⇒ [`../../Pitfalls/hot/rpc.md` 的 P-HOTRPC-21](../../Pitfalls/hot/rpc.md)。
 
+## PIT-COMMENT-RPC-16 🔴 · **Redis 断连活体对拍**在本域的**适配点** —— 照抄别的域的配方 ⇒ **上下文起不来**
+
+**背景**：本域要证明共享层那份 `REJECT_COMMANDS`「**在 comment-rpc 里真的生效**」⇒ ⇒ 必须**活体断连**。
+⇒ **配方本体（三处易错点）见 [`../../Pitfalls/hot/rpc.md` 的 P-HOTRPC-24](../../Pitfalls/hot/rpc.md)**，
+本条只记**本域特有的适配差异** —— ⇒ 🔴 **照抄 hot 域那份 ⇒ 本域上下文起不来**。
+
+| 项 | hot-rpc | **comment-rpc（本域）** | 为什么不一样 |
+|---|---|---|---|
+| **排 Flyway** | 🔴 **不能** `spring.autoconfigure.exclude=…FlywayAutoConfiguration`（**本模块无 Flyway 依赖** ⇒ 排一个 **classpath 上不存在**的自动配置类 ⇒ **Boot 直接启动失败**）⇒ ⇒ 只能 `spring.flyway.enabled=false` | ✅ **可以** exclude（**本模块有** Flyway 依赖）⇒ ⇒ 排除后 `CommentSchemaGate` 仍会打一条「表不存在」错误日志，但它**只 log 不阻断** ⇒ ⇒ **上下文仍能起** | ⇒ **「排 Flyway」不是通用配方** ⇒ ⇒ **先看该模块 classpath 上有没有** ⇒ ⇒ **各域不能照抄** |
+| **出向 gRPC client** | 本域**无**出向 gRPC 调用 ⇒ 无需处理 | 🔴 **两个出向 client 必须提前指向不可达地址**：`grpc.client.message-rpc.address=static://127.0.0.1:1` ＋ `grpc.client.article-rpc.address=static://127.0.0.1:1` ⇒ ⇒ **devh 在 Bean 初始化期就建 channel** ⇒ ⇒ 不覆盖则**上下文起不来** | ⇒ ⇒ **「不需要出向依赖」的域**与**需要**的域，**测试注解写法不同** |
+| **PG** | 本域无 PG | 本域有 PG ⇒ ⇒ 用 `POSTGRES_HOST=127.0.0.1` / `POSTGRES_PORT=1` 指向**不可达端口** ⇒ ⇒ **任何摸库都快速失败**（不挂起）⇒ ⇒ 不需要 Testcontainers | ⇒ ⇒ **「摸库要挂起」会让活体对拍变成超时测试** ⇒ ⇒ 用不可达端口 |
+
+⇒ **可复用判据**：**同一个活体对拍配方，不同模块的「适配点」不同** ⇒ ⇒
+① **排自动配置前先确认它在不在 classpath 上**（不在 ⇒ 排它 = 启动失败）；
+② **有出向 client 的模块要在 Bean 初始化期就把它指向不可达地址**；
+③ **有 DB 的模块要把数据源指向不可达端口**（快速失败 ≫ 挂起）。
+
+⇒ **本域实测（本轮现跑）**：RAG 腿 **A(REJECT_COMMANDS) = 1 ms** vs **B(DEFAULT) = 3005 ms** ⇒ 差 **3004 ms**；
+Go 腿 **1708–1776 ms**（4 轮）⇒ ⇒ **两侧都是「快速失败」，语义等价**（Go 的 `MaxRetries=3` 重试面另属他档 ⇒ **不混**）。
+⇒ **守门** `CommentRedisDisconnectFastRejectGateTest`（**2 条**）· **本域台账** ⇒ [`../../DRIFT/comment/rpc.md` §十二](../../DRIFT/comment/rpc.md)。
+⇒ ⚠️ **仍待验**：**gRPC 响应层**（断连时客户端到底看到什么 ⇒ 要真发一次 gRPC 调用）；
+⚠️ **Go 探针未入仓**（`tools/**` 属 G4 写权面 ⇒ 已派单 ⇒ ⇒ 仓内**不可复现** ⇒ 证据强度只能写「L4-一次性」）。
+
 ## 与既有台账的关系
 
 | 文件 | 关系 |

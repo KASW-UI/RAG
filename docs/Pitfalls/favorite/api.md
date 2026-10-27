@@ -489,7 +489,7 @@ FavoriteApiProtectionWiringTest.serverSideProtectionFiltersAreBeansInGoChainOrde
 
 ## PIT-FAV-API-011 · 🔴 **yaml 里没写 `lettuce.pool.enabled` ≠ 池没开** —— Boot 4 的判据是 **classpath**，不是配置
 
-> 登记于 2026-10-27（G2 挖出「Lettuce 池形态」· 本域独立复核）⇒ 权威面 = [`docs/DRIFT/favorite/api.md` §15](../../../../DRIFT/favorite/api.md#15-)
+> 登记于 2026-10-27（G2 挖出「Lettuce 池形态」· 本域独立复核）⇒ 权威面 = [`docs/DRIFT/favorite/api.md` §15](../../DRIFT/favorite/api.md#15-🔴-redis-连接池形态漂移go-有池-vs-rag-无池-2026-10-27-登记g2-挖出--本域独立复核--只登记不落码)
 
 ### 现象
 
