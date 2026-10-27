@@ -465,7 +465,7 @@
 | **3** | `UNRESOLVED-ARPC-002`（= **E38②**）：有效期限 = min(客户端 deadline, 服务端 timeout) ⇒ `deadlineEpochMs` + 超时调度器延时两处都要改 | **❌ 前提已过期** | 🟢 **不落码**（① 第三十一轮已修；② 第四十六轮已否决原修法并窄化成 E65/E66） | 已在 `service/common/.../observability/RpcInterceptor.java`（`af416d9`） |
 | **4** | `DRIFT-ADMINAPI-007`：503 响应 `Content-Type` charset 分号后空格 | **成立**（残差） | 🟢 **本轮不做 + 登记在案**（兄弟条 `DRIFT-MSGAPI-010` 用户已拍板「保持登记，本轮不做」⇒ 同类同先例 ⇒ **不升级为拍板题**） | 属 `admin-api` 域（`DRIFT-ADMINAPI-007`）⇒ 不在本层写权 |
 | **5** | `UNRESOLVED-USERSCOMMON-003`：`GoStyleCoercion::applyTo` 的全局副作用 | **❌ 前提不成立** | 🟢 **不落码**（口径已过期；且已注册的 8 个 api **不会误伤**） | 台账口径订正属 **users 域台账写权** ⇒ 归 G1 |
-| **6** | `DRIFT-USERRPC-V-002`：`users_user.status` NOT NULL 两侧不同 | **成立** | 🔴 **不落码 ⇒ 跨 lane 协调**（放开可空会**立刻激活 admin-rpc 的同款缺陷** ⇒ 必须与 admin 侧同改 ⇒ 那半边在 **G1 写权面**） | DDL 落点 `service/users/users-common/src/main/resources/db/01_create_user.sql:39`（**本层写权**）· 配套 `service/users/admin/admin-rpc/.../domain/UserEntity.java:60`（**G1 写权**） |
+| **6** | `DRIFT-USERRPC-V-002`：`users_user.status` NOT NULL 两侧不同 | **DDL 层成立 · 行为层零差异**（🔴 **2026-10-27 订正**，见 §4.9.7） | 🟢 **不落码 · 本层 DDL 保持 NOT NULL 不动**（放开可空**反而制造新漂移**：`callSettersOnNulls=false` ⇒ 读出 `null` ≠ Go 的 `0` ⇒ 方向相反）⇒ ⇒ **原「跨 lane 协调 + 两步方案」整体撤回**（前提「Go 读到 NULL 会扫描报错」已被 GORM 源码证伪）⇒ ⇒ **销号条件已满足**（G1 `ded22af` 已在其域台账逐处订正，本层确认成立） | DDL 落点 `service/users/users-common/src/main/resources/db/01_create_user.sql:39`（**本层写权**· **保持不动**）· 原配套 `service/users/admin/admin-rpc/.../domain/UserEntity.java:60`（**G1 写权**· **不必改**） |
 | **7** | `DRIFT-USERAPI-014` 跨域推广：Redis 断连 ⇒ fail-open（不排队等重连）⇒ 机制上移到 `service/common` | **成立** | 🟢 **已落码**（零域侧改动 ⇒ 覆盖所有用 Redis 的组件） | 新增 `service/common/.../redis/GoStyleRedisClientAutoConfiguration.java` |
 
 #### 4.9.2 🔴 #1 的 MaxConns 半边 = **已签字偏离 ⇒ 不修**（§5.3b）
@@ -579,8 +579,9 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | 漂移成立 | Go：`service/user/user/rpc/internal/model/data_model.go:11` = `Status int64 \`gorm:"column:status;default:0"\`` ⇒ GORM **未标 `not null`** ⇒ 建出**可空**列；RAG：`service/users/users-common/src/main/resources/db/01_create_user.sql:39` = `status BIGINT NOT NULL DEFAULT 0` ⇒ 🔴 **可空性不同**（真库实证见 `docs/DRIFT/users/user/rpc.md:1518`） |
 | **为什么不能单独改** | 🔴 `docs/DRIFT/users/user/rpc.md:1559` 明写：「**动它会立刻激活 admin-rpc 的同款缺陷**」—— `service/users/admin/admin-rpc/.../domain/UserEntity.java:60` 是 `private Long status = 0L;` ＋ MyBatis `callSettersOnNulls=false` ⇒ **NULL 读成 0** ⇒ admin 侧会把 NULL 当「活跃」⇒ ⇒ **必须与 admin 侧一起改** |
 | **写权归属** | DDL（`service/users/users-common/**`）= **本层写权**；`admin-rpc` 的 `UserEntity` = **G1 写权** ⇒ ⇒ **跨 lane** |
-| **可安全排序的两步方案**（建议给 G1） | **第 1 步（G1）**：先把 `admin-rpc` 的 `UserEntity.status` 改成能表达 NULL（此时 DDL 仍 NOT NULL ⇒ **不可能出现 NULL ⇒ 行为零变化**）→ **第 2 步（本层）**：放开 DDL 的 NOT NULL ⇒ ⇒ **中间态两侧都合法，不留半截** ⇒ ⇒ 可绕开「必须同一次提交」的物理约束 |
-| ⚠️ **另注（这才是裁决题）** | 即便放开可空，**Go 侧读到 NULL status 会扫描报错**（GORM 把 NULL 扫进**非指针** `int64` ⇒ `converting NULL to int64 is unsupported`）⇒ 而 RAG 读成 0 ⇒ ⇒ **NULL 行上两侧行为仍不同** ⇒ ⇒ **这是「保留 NOT NULL（并把 V-001 按不可达降级）」vs「放开可空（V-001 变成实打实的安全缺陷）」的裁决** ⇒ ⇒ **需 Jason 拍板** ⇒ 本层**不擅自落码** |
+| 🔴🔴 **2026-10-27 订正：上一行的「必须与 admin 侧同改」前提被证伪 ⇒ 两步方案整体撤回** | G1 回执（提交 `ded22af`）给出逐层证据链，**本层已独立复核成立**：<br>① `gorm.io/gorm` `schema/field.go`（真源 `go.mod` pin 的 **v1.31.1**；v1.31.2 同一段代码**逐字相同**）的 `case reflect.Int, …, reflect.Int64:` 分支里：`case **int64: if data != nil && *data != nil { field.ReflectValueOf(ctx, value).SetInt(**data) }` ⇒ ⇒ **DB 值是 NULL ⇒ `*data == nil` ⇒ 什么都不做 ⇒ 字段保持 Go 零值 0 ⇒ 不报错**（本层读源码核实）；<br>② `database/sql/convert.go` 的 `case reflect.Pointer: if src == nil { dv.SetZero(); return nil }` ⇒ **dest 的 kind 是 Pointer** ⇒ 走这一支 ⇒ **不报错**；<br>③ 双侧活体对拍（G1 域台账 `docs/DRIFT/users/user/rpc.md`「2026-10-23 第三轮」）：`status IS NULL` 打 Login ⇒ **Go 200 + token** ⇒ ⇒ **「删掉 = 0L」才是不等价的那一侧**，上午那次「删 = 0L + 加 null ⇒ INTERNAL」是**误修**，当天已恢复。<br>⇒ ⇒ **本层原来的那句「Go 侧读到 NULL status 会扫描报错（`converting NULL to int64 is unsupported`）= 事实错误** ⇒ ⇒ **「保留 NOT NULL」与「放开可空」在行为层同形 ⇒ ⇒ 那条裁决题不存在 ⇒ ⇒ 「需 Jason 拍板」撤销** |
+| ⇒ ⇒ **正确的结论（与原两步方案相反）** | **行为层零差异**：Go「可空 + 读成 **0**」vs RAG「**不可空** ⇒ 读不到 NULL ⇒ 也是 **0**」⇒ ⇒ **可观察结果相同** ⇒ ⇒ **保持 RAG 的 NOT NULL 就是等价的那一侧**（RAG 更严：写 NULL 被 PG 拒；Go 侧写得进去但读出来还是 0 ⇒ 行为同形）⇒ ⇒ **「放开可空」反而会制造新漂移**：RAG 侧 MyBatis `callSettersOnNulls=false` ⇒ NULL 时**跳过 setter** ⇒ 若字段没有 `= 0L` 初始值 ⇒ 读出 **null** ≠ Go 的 **0**；且 admin 侧会从「NULL 当活跃(0)」变成「NULL 当未知(null)」⇒ ⇒ **方向相反** ⇒ ⇒ ⇒ **第 1 步（改 `admin-rpc` 的 `UserEntity.status`）不执行；第 2 步（放开 DDL 的 NOT NULL）也不执行 ⇒ ⇒ 两步方案整体撤回** ⇒ ⇒ **本层 DDL 保持 `status BIGINT NOT NULL DEFAULT 0` 不动**（DDL 层差异**如实保留** ⇒ 归「**DDL 层差异 · 行为层零差异**」）⇒ ⇒ **本层零落码** |
+| ⇒ ⇒ **销号条件已满足** | G1 已在其域台账（`users/user/rpc.md` 的 V-002 条 ＋ `users/_shared.md` 的 ADJ-01 ＋ `users/vs-common.md` 的 A8 轴）逐处订正（提交 `ded22af`，**纯台账零代码**）⇒ ⇒ **本层已确认该订正成立** ⇒ ⇒ **V-002 / ADJ-01 / A8 那一格 ⇒ 可销号**（本层无遗留落码动作） |
 
 #### 4.9.8 🟢 #4 = **本轮不做 + 登记在案**（不升级为拍板题）
 
@@ -648,7 +649,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 |---|---|---|
 | `docs/DRIFT/_cross/domain-common-lanes.md:125` | `DRIFT-FOLLOW-008` 仍列为「🔴 **未修**」 | ⬆️ **已过期** ⇒ 2026-10-25 用户签字（`SD-2026-10-25-01`）后应从 DRIFT 侧移除 |
 | `docs/DRIFT/users/common.md` §6 | `UNRESOLVED-USERSCOMMON-003` 的问法（「**全局副作用**是否波及非 users 域」） | ⬆️ **前提已过期**（不是全局施加，是各 api 各自注册）⇒ 且实测**已注册的 8 个 api 不会误伤** ⇒ 可直接结案（**该文件属 users 域台账写权 ⇒ 归 G1 改**） |
-| `docs/DRIFT/users/user/rpc.md` §`DRIFT-USERRPC-V-002` | 「🔴 仍成立，但被卡」 | 仍是**成立**的 ⇒ 但「卡点」的**形状**已可细化 ⇒ 见 §4.9.7 的两步方案 + ⚠️ 「Go 侧读 NULL 会扫描报错 ⇒ 两侧在 NULL 行上仍不同 ⇒ **需 Jason 拍板**」 |
+| `docs/DRIFT/users/user/rpc.md` §`DRIFT-USERRPC-V-002` | 「🔴 仍成立，但被卡」 | 🔴 **2026-10-27 订正**：**「卡点」不存在** ⇒ ⇒ **DDL 层差异成立 · 行为层零差异**（Go 读 NULL ⇒ GORM 跳过 setter ⇒ 得 **0**；RAG NOT NULL ⇒ 读不到 NULL ⇒ 也是 **0**）⇒ ⇒ ⇒ **「保持 NOT NULL」就是等价的那一侧** ⇒ ⇒ **原两步方案与「需 Jason 拍板」那条裁决题一并撤销**（详见 §4.9.7 的逐层证据链）⇒ ⇒ **可销号** |
 
 #### 4.9.12 🟡 全量回归里撞到一条**既有**时序 flake（**不是本波引入** · 属 comment 域写权 ⇒ 已通知 G3）
 
