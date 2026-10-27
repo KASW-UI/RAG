@@ -2,6 +2,7 @@ package com.rag.task.task.rpc;
 
 import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.common.protection.GoStyleRpcBreakerInterceptor;
+import com.rag.common.protection.GoStyleRpcProtectionChain;
 import com.rag.common.protection.GoStyleRpcSheddingInterceptor;
 import io.grpc.Metadata;
 import io.grpc.MethodDescriptor;
@@ -69,14 +70,29 @@ import static org.mockito.Mockito.when;
  * （降载层的包装由 {@link GoStyleRpcSheddingInterceptor} 创建、熔断层的由
  * {@link GoStyleRpcBreakerInterceptor} 创建）⇒ 无时间窗口、无共享状态、无假红可能。
  *
- * <h3>⚠️ 合并后可以升级为更强判据（本轮<b>不能</b>用）</h3>
- * <p>共享层已落码「链层构成」只读入口（FB-03 · G4 提交 {@code 182fc32}）：
+ * <h3>✅ 合并后已升级为更强判据（2026-10-27 · 合并 G4 `align/g4-service-common` @ {@code 37816ca}）</h3>
+ * <p>共享层的「链层构成」只读入口（FB-03 · G4 提交 {@code 182fc32}）已随合并到位：
  * {@code GoStyleRpcProtectionChain.compose(props)} 与
  * {@code GoStyleRpcProtectionChain.layerNames(chain)}
- * ⇒ 合并后本类可改用它们，**直接**断言层名列表（{@code [recover, breaker, shedding]}）。
- * <p><b>本轮不用它的原因</b>：该入口在 G4 的分支上，<b>尚未合入本波的工作树</b>
- * ⇒ 现在引用它 ⇒ 本模块<b>编译不过</b> ⇒ 本波提交会直接红。
- * ⇒ 本轮先用「包装层归属」这个等价且确定性的判据顶上，合并后按 §5.3e 重跑收口回归时再升级。
+ * ⇒ ⇒ 本类新增两条用例，<b>直接</b>断言层名列表（{@code [recover, breaker, shedding]}）。
+ * <p><b>为什么这两条比旧判据更强</b>（旧判据保留，不删）：
+ * <ul>
+ *   <li>旧判据「包装层归属」只能证明<b>某一层确实包住了业务 call</b> ⇒ 它<b>证不出层序</b>
+ *       （recover 在 breaker 外还是内，旧判据完全无感）；</li>
+ *   <li>新判据 {@code layerNames(chain)} <b>由外到内</b>列出真实装上的层 ⇒ ⇒
+ *       <b>一次同时钉住「有 breaker」「有 shedding」「顺序是 recover→breaker→shedding」</b>
+ *       ⇒ 与 Go 侧 {@code zrpc/server.go:144-167} 的注册序逐项对齐；</li>
+ *   <li>再加一条「关掉降载 ⇒ 层名列表变成 {@code [recover, breaker]}」⇒ ⇒
+ *       证明<b>降载层是条件装的</b>（不是恒在）⇒ ⇒ 旧判据要靠「关掉降载来换取确定性」，
+ *       新判据<b>不必关</b> ⇒ ⇒ 旧判据降级为「包装语义」证据，新判据承担「构成 + 顺序」证据，
+ *       两者<b>互补而非替代</b>。</li>
+ * </ul>
+ * <p><b>第三条断言（一致性）</b>：{@code layerNames(chain)} 必须 <b>等于</b> {@code compose(props).layerNames()}
+ * ⇒ ⇒ 证明「<b>实际装到 server 上的那条链</b>」与「<b>配置推出的构成</b>」<b>逐项一致</b>
+ * ⇒ ⇒ 这一条是旧判据完全覆盖不到的：它能抓住「配置说三层、实际只装两层」这类
+ * <b>装配与配置脱节</b>的漂移。
+ * <p>⚠️ <b>三层断言合起来才是「A2 链序对齐」的完整判据</b>；任何单条都不充分
+ * （这与本域 Redis 命令超时守门「机制位①/② 单独都恒真」是同一条纪律）。
  */
 @DisplayName("DRIFT-MSG-V-026 TaskRpcApplication：熔断/降载链必须真的挂到 gRPC server 上")
 class TaskProtectionChainWiringTest {
@@ -150,6 +166,72 @@ class TaskProtectionChainWiringTest {
                 .isEqualTo(GoStyleRpcSheddingInterceptor.class);
     }
 
+    @Test
+    @DisplayName("🔴 链的层名列表必须是 [recover, breaker, shedding]（共享层原生判据 · 一次钉住两层 + 层序）")
+    void chainLayerNamesMatchComposedChain() {
+        ServerInterceptor interceptor = mock(ServerInterceptor.class);
+
+        GoStyleProtectionProperties props = new GoStyleProtectionProperties();
+        props.getCpuShedding().setEnabled(true);
+        // ⚠️ 阈值抬到 999（Go 的 tag 声明域 [0:1000) 的上界）⇒ 即使整机 CPU 打满也不触发降载
+        //    ⇒ 本用例只依赖「层在不在链上 + 顺序」，**不依赖跑测试那一刻的机器负载**（确定性）。
+        props.getCpuShedding().setCpuThreshold(999L);
+
+        ServerInterceptor chained = captureChainedInterceptor(interceptor, props);
+
+        assertThat(GoStyleRpcProtectionChain.layerNames(chained))
+                .as("本组件交给 gRPC server 的链必须含 recover → breaker → shedding 三层"
+                        + "（Go: zrpc/server.go:144-167 的注册序 = Trace → Recover → Stat → Prometheus"
+                        + " → Breaker → Shedding ⇒ 本仓的链 = recover → breaker → shedding → 业务观测拦截器）。"
+                        + "若少了 breaker 或 shedding ⇒ 该组件的熔断 / 降载形同虚设，且**不报任何错**。")
+                .containsExactly("recover", "breaker", "shedding");
+
+        assertThat(GoStyleRpcProtectionChain.layerNames(chained))
+                .as("**实际装到 server 上的链**必须与**配置推出的构成**逐项一致"
+                        + "（compose() 是构成的唯一计算点 ⇒ 这条断言能抓住"
+                        + "「配置说三层、实际只装两层」这类装配与配置脱节的漂移）。")
+                .isEqualTo(GoStyleRpcProtectionChain.compose(props).layerNames());
+    }
+
+    @Test
+    @DisplayName("🔴 关掉降载 ⇒ 层名列表必须变成 [recover, breaker]（证明降载层是**条件装的**，不是恒在）")
+    void sheddingLayerIsConditional() {
+        ServerInterceptor interceptor = mock(ServerInterceptor.class);
+
+        GoStyleProtectionProperties props = new GoStyleProtectionProperties();
+        props.getCpuShedding().setEnabled(false);
+
+        ServerInterceptor chained = captureChainedInterceptor(interceptor, props);
+
+        assertThat(GoStyleRpcProtectionChain.layerNames(chained))
+                .as("降载关掉后，链上必须**只剩** recover → breaker 两层"
+                        + "（Go: zrpc/server.go:160-163 CpuThreshold > 0 才挂 Shedding）。"
+                        + "若降载层仍在 ⇒ 说明它被写成了恒在 ⇒ 与 Go 的条件挂载不一致。")
+                .containsExactly("recover", "breaker");
+    }
+
+    /**
+     * 只把本组件<b>真的交给 {@code ServerBuilder}</b> 的那条拦截器<b>抓出来</b>（不跑调用）。
+     *
+     * <p>⇒ 这是「层名观测」的入口：共享层的 {@code layerNames(chain)} 需要一个<b>已构造出的链</b>，
+     * 而本组件的链是在 {@code rpcInterceptorConfigurer} 里造的 ⇒ ⇒ 必须经由
+     * {@code GrpcServerConfigurer} 这条真实路径取 ⇒ ⇒ **不能自己 new 一条链**（否则验的不是本组件的装配）。
+     */
+    private static ServerInterceptor captureChainedInterceptor(
+            ServerInterceptor business, GoStyleProtectionProperties props) {
+
+        GrpcServerConfigurer configurer =
+                new TaskRpcApplication().rpcInterceptorConfigurer(business, props);
+
+        ServerBuilder<?> builder = mock(ServerBuilder.class);
+        ArgumentCaptor<ServerInterceptor> captor = ArgumentCaptor.forClass(ServerInterceptor.class);
+
+        configurer.accept(builder);
+
+        verify(builder).intercept(captor.capture());
+        return captor.getValue();
+    }
+
     /**
      * 跑一次链的结果：<b>原始 call</b>（交给链的那个）与<b>业务 interceptor 拿到的 call</b>（链包过的那个）。
      *
@@ -178,16 +260,7 @@ class TaskProtectionChainWiringTest {
     private static ChainRun runChainAndCaptureBusinessCall(
             ServerInterceptor business, GoStyleProtectionProperties props) {
 
-        GrpcServerConfigurer configurer =
-                new TaskRpcApplication().rpcInterceptorConfigurer(business, props);
-
-        ServerBuilder<?> builder = mock(ServerBuilder.class);
-        ArgumentCaptor<ServerInterceptor> captor = ArgumentCaptor.forClass(ServerInterceptor.class);
-
-        configurer.accept(builder);
-
-        verify(builder).intercept(captor.capture());
-        ServerInterceptor chained = captor.getValue();
+        ServerInterceptor chained = captureChainedInterceptor(business, props);
 
         // 真跑一遍被交给 builder 的那个拦截器。
         ServerCall<Object, Object> call = mock(ServerCall.class);

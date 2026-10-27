@@ -42,7 +42,7 @@
 | 轴 | 机制 | 本域侧的落点 / 调用 | 结论 | 证据强度 | 核对日期 |
 |---|---|---|---|---|---|
 | **A1** | 超时 / deadline | rpc：`MessageRpcApplication.java:85-86`（`@Import DeadlineQueryTimeoutInjector` + `SqlTimeoutStatusTranslator`）、`:75-77`、`:134-135`（链装配）；`message-rpc/application.yml:225-226` `rpc-timeout: 2s`<br>api：`MessageRpcClient.java:87`（`GoStyleRequestDeadline.applyTo`）；`message-api/application.yml:226-227` `http-timeout: 3s`· 🔴 **2026-10-27 新增**：`MessageJwtAuthFilter`（+6）—— **3s 预算的作用域**（验签在预算之外，= `DRIFT-MSGAPI-014`）<br>SQL 取消：`DeadlineQueryTimeoutInjector.java:139-145` | ✅ 一致（2s=2000ms / 3s=3000ms 毫秒精度一致；`DEADLINE_EXCEEDED` 文案对齐 `RpcInterceptor.java:109`）<br>🔴 2026-10-27：**3s 预算的作用域也已对齐**（Go 的预算**不含**验签 —— 真源 `observability/http.go:30-34` 关掉原生 TimeoutHandler、改由 `server.Use` 的自建中间件计时 ⇒ 计时器在 `Authorize` **之后**起算；RAG 侧原把验签放在 `HandlerInterceptor`（预算内）⇒ 现已搬到 `MessageJwtAuthFilter`(+6) ⇒ **验签在预算外**，两侧一致）<br>🟢 **2026-10-27（G2 第三/四轮 · 补记）：本组件的 Redis 轴 = **N/A**（**不碰 Redis**）** —— ① RAG 侧：`service/message/message-rpc/pom.xml` **无** `spring-boot-starter-data-redis`（⇒ 无 `commons-pool2` 需求）＋ `src/main/java` 里 `RedisTemplate` / `StringRedisTemplate` / `LettuceConnectionFactory` **命中数 = 0**；② Go 侧：`$GO/service/message/**` 全目录 `redis` **命中数 = 0**（`redis.NewClient` / `MustNewRedis` 均 0）⇒ ⇒ **两侧都不碰 Redis** ⇒ ⇒ 故 **Redis 连接池轴（2026-10-27 第四轮 task/like 两域新立的那条）在本组件 = N/A**（**不是「漏审」** ⇒ 也不是「没配池」⇒ 是**本组件没有这个面**）⇒ 📌 **供整合者/其他 lane 免再猜**：G2 域三组件的 Redis 池状况已查清 —— **task-rpc** 原**无池** ⇒ **已修**（+守门 ⑤⑥）· **like-rpc** 形态已对齐但 `min-idle` 偏离 ⇒ **已修**（4⇒8，+守门 ⑤⑥）· **message-rpc 不碰 Redis** ⇒ **N/A** | L4（Go 腿活体探针：观测点 A `deadline_set=false` / B `deadline_set=true remaining=3s`；**非法 token ⇒ 401 且三个观测点一个都没打印** ⇒ Authorize 在所有 user middleware 之前） | 2026-10-27 |
-| **A2** | gRPC 拦截器链 | 服务端：`MessageRpcApplication.java:134-135` → `GoStyleRpcProtectionChain.java:65`(shedding)/`:72`(breaker)/`:77`(recover) **消费点**<br>客户端熔断：`GoStyleGrpcClientBreakerInterceptor.java:104-106`（`@Component` + `@GrpcGlobalClientInterceptor`）⇒ 被 `MessageApiApplication.java:63-66` 注册 | ✅ 一致（链序 recover→breaker→shedding→业务；Go `zrpc/server.go:144-167`） | L1 | 2026-10-27 |
+| **A2** | gRPC 拦截器链 | 服务端：`MessageRpcApplication.java:134-135` → `GoStyleRpcProtectionChain.java:65`(shedding)/`:72`(breaker)/`:77`(recover) **消费点**<br>客户端熔断：`GoStyleGrpcClientBreakerInterceptor.java:104-106`（`@Component` + `@GrpcGlobalClientInterceptor`）⇒ 被 `MessageApiApplication.java:63-66` 注册 | ✅ 一致（链序 recover→breaker→shedding→业务；Go `zrpc/server.go:144-167`）<br>🆕 **2026-10-27 第四轮：A2 轴由 L1 升为 L2（运行期 · 组件级守门 + 变异验证）** —— **本组件此前完全没有链守门**（兄弟组件 task-rpc / like-rpc 都有 ⇒ 本域 A2 只有 L1 源码级证据、**无运行期证据**）⇒ ⇒ 合并 `align/g4-service-common`（merge commit `37816ca` · G4 要求的整支合并协议）后，共享层的 `compose(props)` / `layerNames(chain)` 到位 ⇒ ⇒ **补 `MessageProtectionChainWiringTest`（新类 · 5 条）**：① `@Import` 必须含 `GoStyleProtectionConfiguration` ② 层名列表 == `[recover, breaker, shedding]` ＋ **实际链 == 配置推出的构成** ③ 关掉降载 ⇒ 层名列表变成 `[recover, breaker]` ④ 熔断层真的包住业务 call ⑤ 降载层真的包住业务 call ⇒ ⇒ **组件级、运行期、确定性**（层名是共享层唯一计算点的只读观测 ⇒ 零行为影响）<br>⇒ ⇒ **与客户端那一面合并看**：客户端熔断（`GoStyleGrpcClientBreakerInterceptor` · `MessageApiApplication.java:63-66` 扫 `com.rag.common` 注册）由阶段 2 的 `GoStyleGrpcClientBreakerE2ETest` 覆盖 ⇒ ⇒ **本轴两侧均有运行期证据** | **L2（运行期）** | 2026-10-27 |
 | **A3** | HTTP 保护链 | 配置 `message-api/application.yml:121-169`（四道闸门 + `mode: envelope`）<br>共享层消费点：`GoStyleMaxConnsFilter.java:96`(+4) · `GoStyleBreakerFilter.java:77`(+5) · `GoStyleCpuSheddingFilter.java:63`(+6) · `GoStyleMaxBytesFilter.java:83`(+8) · `GoStyleTraceparentFilter.java:190`(+3) · `GoStyleFormValueLimitInterceptor.java:81-97` + `GoStyleFormLimitWebMvcConfig.java:42` · `GoStyleTomcatParameterLimitCustomizer.java:134` | 🟡 **OBS**（三条有界残留：① **form 闸门与鉴权先后** —— **已登记**为「有界残留·刻意不改」（[`global/cross-domain.md`](../global/cross-domain.md) 第十四轮 §⑤之五-1）⇒ **不重复派单** ② **路径归一** ⇒ 🟢 **共享层已落码**（FB-01 · G4 `182fc32`：`GoStylePathNormalizingFilter` 字节级移植 Go `path.Clean` + 自动配置注册点；🟢 Go 侧已 L4 活体坐实）但**未合入本树** ⇒ 合并后本域跑**真 Tomcat 探针**即可升 ✅ ③ **缺本域真实请求证据**（envelope 拒绝形状 / 2049 参数 / `..` 路径））<br>> 📌 **共享层落点（按符号记，不钉行号 —— G4 树 `182fc32` 的行号合并后会位移）**：FB-01 = `GoStylePathNormalizingFilter` ＋ `GoStylePathNormalizingAutoConfiguration`（唯一注册点）；FB-02 = `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` / `REGISTERED_DEVIATIONS`；FB-03 = `GoStyleRpcProtectionChain.Layered` / `Composition` / `compose(props)` / `layerNames(chain)` ⇒ 共享层侧回归（G4 自测）：**52 模块 / 2442 条 / 0 failures / 0 errors / 4 skipped** / 21:59 min<br>🆕 **2026-10-27 订正（G4 第七次全量 · `5564c27`）**：**2442** 是**第六次**全量的数字 ⇒ **第七次 = 2457 条**（52 模块 / 0 failures / 0 errors / **4 skipped** / **20:28 min** / `MVN_EXIT=0`）⇒ ⚠️ **2457 是 G4 树（52 模块）的口径**，**不是本域数字** ⇒ 本域三域六模块 = **594 条**（`mvn test` 口径）
 ⇒ ⚠️ **合并后**本域需跑真 Tomcat 探针复核（路径归一）⇒ 那是**收口回归**窗口的事（§5.3e）
 
@@ -232,3 +232,41 @@ Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
 ⇒ ⇒ **本轮数字的用途边界**：这是**我域当前代码态**的回归网 ⇒ ⇒ **不是**「合并 G4 共享层后」的结论 ⇒ ⇒ **合并后必须重跑**（§「合并后我域必做」第 1/2/4 条）⇒ ⇒ **本轮数字不升级任何轴的证据强度**（跑绿 ≠ 对）
 
 ⇒ ⇒ 🟡 **本域相关的两条残留**：① **E65 两处跨域出向**（`UserRpcClient` / `AdminRpcClient`）⇒ 共享层 `GoStyleRequestDeadline.applyTo(stub)` 落地后**本域照做** ⇒ ⇒ **合并后本域这两处必须重跑**；② **U+FFFD 3 处真损坏在主树、**不在本树**（本树字节级 0 命中）⇒ ⇒ **合并时这 3 个文件一律取 G2 树版本**（`LikeOutboxEventEntity.java` · `MessageRpcProductionAddressTest.java` · `GoStyleGrpcClientBreakerE2ETest.java`）⇒ ⇒ **合并后请再跑一次字节级扫描**（不是 grep）
+
+### 🔴 第四轮（2026-10-27 13:2x~13:4x）· 合并 G4 共享层 + **补上 message-rpc 缺失的组件级链守门** ⇒ 本域 A2 轴 **L1 ⇒ L2**
+
+#### ① 合并（G4 要求的协议 · 整支合并、**不 cherry-pick**）
+
+- `git merge align/g4-service-common` ⇒ **merge commit `37816ca`** ⇒ **零冲突**（合并前已用 `git merge-tree --write-tree` 预演：`main←G2` / `main←G4` / **`G4←G2`** 三者 EXIT=0）
+- ⇒ ⇒ **天然满足 §5.3e 的合并顺序硬约束**：`3b573fb` 与 `7488b3d` **同批到位**（`git merge-base --is-ancestor` 逐个核对 = YES）⇒ ⇒ **不会**出现「池终止即永久 ⇒ 由绿转红」
+- ⇒ 带入共享层 API `compose(props)` / `layerNames(chain)`（G4 `182fc32`）⇒ ⇒ **域侧守门升级条件满足**
+- ⚠️ **口径纪律（合并后必须改口径）**：合并后**本分支相对主干的 diff 里含 `service/common/**`** ⇒ 但那些 commit 的**作者是 G4** ⇒ ⇒ **本 lane 没有写共享层**（写权仍归 G4）⇒ ⇒ 「共享面零触碰」改述为「**本 lane 未新增、未修改任何共享层 commit**」
+
+#### ② 🟢 **补域内缺口**：本组件此前**完全没有**链守门 ⇒ 新增 `MessageProtectionChainWiringTest`（**新类 · 5 条**）
+
+⇒ ⇒ **为什么这是缺口而不是「锦上添花」**：AGENTS.md §3.5 要求**组件级** —— 熔断 / 降载在 Go 侧是 **zrpc 框架级**能力，每个 rpc server 都自带；本仓把链的定义点放在共享模块，但**每个组件仍要自己把链交给 ServerBuilder** ⇒ 漏掉任何个组件，那个组件就**既没有 recover、也没有熔断、也没有降载**，而**不报任何错**（§3.3 的经典形态）
+⇒ ⇒ **合并前的域内事实**：兄弟组件 `task-rpc` / `like-rpc` **都有**链守门，而**本组件没有** ⇒ ⇒ **本域 A2 轴此前只有 L1（源码级）证据、零运行期证据** ⇒ ⇒ 现补齐：
+
+| # | 断言 | 证什么 |
+|---|---|---|
+| ① | `@Import` 必须含 `GoStyleProtectionConfiguration` | properties Bean 真的存在（否则上下文起不来） |
+| ② | 层名列表 == `[recover, breaker, shedding]` **且** `layerNames(chain)` == `compose(props).layerNames()` | 一次钉住「两层都在 + 层序」，**并**抓住「配置说三层、实际只装两层」 |
+| ③ | 关掉降载 ⇒ 层名列表变成 `[recover, breaker]` | 降载层是**条件装的**（Go `zrpc/server.go:160-163`），不是恒在 |
+| ④ | 熔断层**真的包住**业务 call（包装层归属） | 证「不是只在名单上」 |
+| ⑤ | 降载层**真的包住**业务 call（包装层归属） | 同上，且它是**最内层**（Go 链序 Breaker → Shedding → handler） |
+
+⇒ ⇒ **② 与 ④⑤ 互补而非替代**（层名证「有哪些层 + 层序」；包装归属证「真的包住了调用」）⇒ ⇒ **五条合起来才是「A2 链序对齐」的完整判据**（任何单条都不充分）
+⇒ ⇒ **客户端熔断那一面**（`GoStyleGrpcClientBreakerInterceptor` · `MessageApiApplication.java:63-66` 扫 `com.rag.common` 注册）**已由阶段 2 的 `GoStyleGrpcClientBreakerE2ETest` 覆盖** ⇒ ⇒ **本轴两侧（服务端链 + 客户端熔断）均有运行期证据**
+⇒ ⇒ **本域 A2 轴：L1（源码）⇒ L2（运行期 · 组件级守门 + 变异验证）**
+
+#### ③ 变异验证（判据非假绿）
+
+- 变异方式 = **断言方向变异**（期望层名改成 `["recover","breaker"]`）⇒ ⚠️ **被测机制在共享层、不在本 lane 写权** ⇒ ⇒ 只能做方向变异（证明**断言读的是运行期真值**）⇒ ⇒ **这是「回归网」证据，不是「已证伪该机制」**
+- 结果：**本域红且只红 1 条**，红点**精确**在 `chainLayerNamesMatchComposedChain`（`MessageProtectionChainWiringTest.java:102`）⇒ ⇒ **其余 4 条阴性对照仍绿** ⇒ ⇒ **非假绿**
+- ⇒ 还原后复跑：**5 条绿** · 0 failures / 0 errors / 0 skipped · BUILD SUCCESS
+- ⚠️ **还原脚本的判据坑（我自己踩到）**：变异后文件里有 **2 处** `containsExactly("recover", "breaker")` ⇒ ⇒ 全局字面量替换的还原脚本会**断言失败并中止**（文件停在变异态）⇒ ⇒ **还原必须按位置精确替换**
+
+#### ④ 数字订正
+
+- **message-rpc**：`mvn test` 口径 **84 ⇒ 89**（新守门类 **5 条**）⇒ ⚠️ 本文件里另有更早的历史数字（`49` / `68` 等）⇒ 那些是**旧轮次**的记述、**不是现状** ⇒ 引用时以本行与本节为准
+- ⇒ ⚠️ **守门覆盖缺口**：`check-ledger-selfcheck.py` 层 3（数字断言）**默认只查 task 域** ⇒ ⇒ **like / message 域的测试数 stale 它不会报** ⇒ ⇒ **这两域的数字要自己盯**（本轮是我自己发现并订正的）

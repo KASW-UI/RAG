@@ -41,7 +41,7 @@
 | 轴 | 机制 | 本域侧的落点 / 调用 | 结论 | 证据强度 | 核对日期 |
 |---|---|---|---|---|---|
 | **A1** | 超时 / deadline | api：`LikeRpcClient.java:133-147`（`min(2000ms, 剩余)`）+ `LikeApiProperties.java:125`（默认 2000ms）· 消费点 `HttpMiddleware.java:304`（`begin()`）/`:336`（`clear()`）· 🔴 **2026-10-27 新增**：`LikeJwtAuthFilter`（+6）—— **3s 预算的作用域**（验签在预算之外，= `DRIFT-LIKEAPI-023`）<br>rpc：`LikeRpcApplication.java:90`（`@Import`）+ `:137`（`server.intercept(...)`）+ `application.yml:299` `rpc-timeout: 2s` · **Redis 超时**：`like-rpc/application.yml` `spring.data.redis.timeout: 3s` ＋ `connect-timeout: 5s` → 消费点 `RedisURI.timeout`（`CommandExpiryWriter:160`）＋ `ClientOptions.socketOptions.connectTimeout`（Boot `LettuceConnectionConfiguration:212-215`）· **Redis 连接池**：`like-rpc/application.yml` `spring.data.redis.lettuce.pool.{enabled,max-active,max-idle,min-idle}` ＋ `like-rpc/pom.xml` 的 `commons-pool2` → 消费点 Boot 4 `LettuceConnectionConfiguration:267-271`（`getPoolConfig` ⇒ `:269 setMaxTotal` / `:270 setMaxIdle` / `:271 setMinIdle`）＋ `DataRedisConnectionConfiguration:195-198`（`isPoolEnabled`） | ✅ 一致（Go `zrpc/config.go:31` 客户端 2000 / `:46` 服务端 2000 / `rest/config.go:55` HTTP 3000 ⇒ 有效值 = `min(2s, 3s−已耗)`，RAG 同式）<br>🔴 2026-10-27：**3s 预算的作用域也已对齐**（Go 的预算**不含**验签 —— 真源 `observability/http.go:30-34` 关掉原生 TimeoutHandler、改由 `server.Use` 的自建中间件计时 ⇒ 计时器在 `Authorize` **之后**起算；RAG 侧原把验签放在 `HandlerInterceptor`（预算内）⇒ 现已搬到 `LikeJwtAuthFilter`(+6) ⇒ **验签在预算外**，两侧一致）🆕 **2026-10-27（下一轮 · 池轴）**：**Redis 连接池数值轴已修** —— `min-idle: 4` ⇒ **`8`**（= Go 的 `MinIdleConns`：真源走 **go-zero 的 redis** ⇒ `redisclientmanager.go:15` `idleConns = 8` ⇒ **精确对齐**）＋ 新增守门 **⑤⑥**（`LikeRpcRedisTimeoutsGateTest` 4 ⇒ **6 条**）⇒ ⇒ 详见 [`like/rpc.md` 的 `DRIFT-LIKE-RPC-REDIS-POOL`](rpc.md)（残留 = `max-active` 性能面） | L4（Go 腿活体探针：观测点 A `deadline_set=false` / B `deadline_set=true remaining=3s`；**非法 token ⇒ 401 且三个观测点一个都没打印** ⇒ Authorize 在所有 user middleware 之前；Redis 超时轴 = **双侧活体对拍** L4）<br>🔴 2026-10-27（G2 第二轮）：**Redis 连接超时原先未配** ⇒ 落 Lettuce 默认 **10s**（Go 是 go-redis v9.20.0 库默认 **5s**）⇒ **已修**（补 `connect-timeout: 5s`；命令超时 `3s` 本就对齐 ✓）⇒ 详见 [DRIFT-LIKE-RPC-REDIS-TIMEOUT](rpc.md#🔴-drift-like-rpc-redis-timeout--redis-连接超时未配--落-lettuce-默认-10sgo-是-5s) | 2026-10-27 |
-| **A2** | gRPC 拦截器链 | 服务端：`LikeRpcApplication.java:137` → `GoStyleRpcProtectionChain.java:61-78`（recover→breaker→shedding→business）<br>客户端熔断：`GoStyleGrpcClientBreakerInterceptor.java:103-105`（`@Component` + `@GrpcGlobalClientInterceptor`）⇒ 被 `LikeApiApplication.java:75-78`（扫 `com.rag.common`）注册<br>🟡 **域侧 javadoc 假断言**：`LikeRpcClient.java:43-54` 仍写「Java 侧尚未接入」 | 🟡 **OBS**（链序 ✅；🟡 **域侧 javadoc 与事实相反** ⇒ 域侧自修 D-1；🟡 **like-api 无客户端熔断 E2E 守门** ⇒ 其余域都有 ⇒ 域侧补 D-1） | L1（源码） | 2026-10-27 |
+| **A2** | gRPC 拦截器链 | 服务端：`LikeRpcApplication.java:137` → `GoStyleRpcProtectionChain.java:61-78`（recover→breaker→shedding→business）<br>客户端熔断：`GoStyleGrpcClientBreakerInterceptor.java:103-105`（`@Component` + `@GrpcGlobalClientInterceptor`）⇒ 被 `LikeApiApplication.java:75-78`（扫 `com.rag.common`）注册<br>🟡 **域侧 javadoc 假断言**：`LikeRpcClient.java:43-54` 仍写「Java 侧尚未接入」 | 🟡 **OBS**（链序 ✅；🟡 **域侧 javadoc 与事实相反** ⇒ 域侧自修 D-1；🟡 **like-api 无客户端熔断 E2E 守门** ⇒ 其余域都有 ⇒ 域侧补 D-1）<br>🆕 **2026-10-27 第四轮：A2 轴由 L1 升为 L2（运行期 · 守门 + 变异验证）** —— 合并 `align/g4-service-common`（merge commit `37816ca` · G4 要求的整支合并协议）后，共享层的 `compose(props)` / `layerNames(chain)` 已在共享层 ⇒ ⇒ **`LikeProtectionChainWiringTest` 新增 2 条原生判据**（① 层名列表 == `[recover, breaker, shedding]` ＋ **实际链 == 配置推出的构成** ② 关掉降载 ⇒ 层名列表变成 `[recover, breaker]`）⇒ ⇒ **旧的「包装层归属」那条保留不删**（互补而非替代：层名证「有哪些层 + 层序」，包装归属证「真的包住了调用」）⇒ ⇒ **本域客户端熔断那一面**（`GoStyleGrpcClientBreakerInterceptor` · `LikeApiApplication.java:75-77` 扫 `com.rag.common` 注册）**已由阶段 2 的 `LikeApiGrpcClientBreakerE2ETest` 覆盖**（真 in-process gRPC server ⇒ 熔断打开后调用不再触达下游）⇒ ⇒ **本轴两侧均有运行期证据** | **L2（运行期）** | 2026-10-27 |
 | **A3** | HTTP 保护链 | 四个 Filter：`GoStyleProtectionConfiguration.java:55-57` ⇒ like-api 扫 `com.rag.common` ⇒ 扫到即生效（`LikeApiProtectionMvcTest.java:96-103` 断言 4 个 Filter Bean 存在）· 域侧配置 `application.yml:126-140` · form-limit `application.yml:122-125` `mode: envelope` + 消费点 `GoStyleFormValueLimitInterceptor.java:90-93` + `GoStyleTomcatParameterLimitCustomizer.java:105-118` | 🟡 **OBS**（接线齐备、`mode=envelope` 与 Go `likecenter.go:48` **同向** ✅；🟡 **路径归一** ⇒ 🟢 **共享层已落码**（FB-01 · G4 `182fc32`）但**未合入本树** ⇒ 合并后本域跑**真 Tomcat 探针**即可升 ✅；🟡 **缺本域真实请求证据**）<br>🟢 **2026-10-27 G4 FB-05 共享层落码（`parse` 精确接受 `"false"` 作为 OFF 的**唯一**别名 + 5 条守门）⇒ 对本域零影响**：本域的值是 **`envelope`**、**不是 `off`** ⇒ 走的是**原分支** ⇒ **零行为变化** ⇒ 合并后复跑本域 form 相关守门即可（预计全绿 ⇒ **「预计」不算数 ⇒ 合并后实测**）<br>> 📌 **共享层落点（按符号记，不钉行号 —— G4 树 `182fc32` 的行号合并后会位移）**：FB-01 = `GoStylePathNormalizingFilter` ＋ `GoStylePathNormalizingAutoConfiguration`（唯一注册点）；FB-02 = `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` / `REGISTERED_DEVIATIONS`；FB-03 = `GoStyleRpcProtectionChain.Layered` / `Composition` / `compose(props)` / `layerNames(chain)` ⇒ 共享层侧回归（G4 自测）：**52 模块 / 2442 条 / 0 failures / 0 errors / 4 skipped** / 21:59 min<br>🆕 **2026-10-27 订正（G4 第七次全量 · `5564c27`）**：**2442** 是**第六次**全量的数字 ⇒ **第七次 = 2457 条**（52 模块 / 0 failures / 0 errors / **4 skipped** / **20:28 min** / `MVN_EXIT=0`）⇒ ⚠️ **2457 是 G4 树（52 模块）的口径**，**不是本域数字** ⇒ 本域三域六模块 = **594 条**（`mvn test` 口径）
 ⇒ ⚠️ **合并后**本域需跑真 Tomcat 探针复核（路径归一）⇒ 那是**收口回归**窗口的事（§5.3e）
 
@@ -421,3 +421,34 @@ Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
 ⇒ ⇒ **本轮数字的用途边界**：这是**我域当前代码态**的回归网 ⇒ ⇒ **不是**「合并 G4 共享层后」的结论 ⇒ ⇒ **合并后必须重跑**（§「合并后我域必做」第 1/2/4 条）⇒ ⇒ **本轮数字不升级任何轴的证据强度**（跑绿 ≠ 对）
 
 ⇒ ⇒ 🟡 **本域相关的一条残留**：`MqConsumer` 现在是 like-rpc 的**生产依赖**（见上节 ③）⇒ ⇒ **合并 G4 共享层后，本域 MQ 相关用例必须重跑**（`LikeSpansAttributeGateTest` ＋ `LikeUpdateKafkaListener` 相关用例）⇒ ⇒ **本轮 113 条里已包含这些用例 ⇒ 合并后若它们变红 ⇒ 是共享层 `MqConsumer` 改动 ⇒ 属新回归 ⇒ 直接找 G4**
+
+### 🔴 第四轮（2026-10-27 13:2x~13:4x）· 合并 G4 共享层 + **FB-03 域侧守门升级** ⇒ 本域 A2 轴 **L1 ⇒ L2**
+
+#### ① 合并（G4 要求的协议 · 整支合并、**不 cherry-pick**）
+
+- `git merge align/g4-service-common` ⇒ **merge commit `37816ca`** ⇒ **零冲突**（合并前已用 `git merge-tree --write-tree` 预演：`main←G2` / `main←G4` / **`G4←G2`** 三者 EXIT=0）
+- ⇒ ⇒ **天然满足 §5.3e 的合并顺序硬约束**：`3b573fb` 与 `7488b3d` **同批到位**（`git merge-base --is-ancestor` 逐个核对 = YES）⇒ ⇒ **不会**出现「池终止即永久 ⇒ 由绿转红」
+- ⇒ 带入共享层 API `compose(props)` / `layerNames(chain)`（G4 `182fc32`）⇒ ⇒ **FB-03 的域侧升级条件满足**
+- ⚠️ **口径纪律（合并后必须改口径）**：合并后**本分支相对主干的 diff 里含 `service/common/**`** ⇒ 但那些 commit 的**作者是 G4** ⇒ ⇒ **本 lane 没有写共享层**（写权仍归 G4）⇒ ⇒ 「共享面零触碰」改述为「**本 lane 未新增、未修改任何共享层 commit**」
+
+#### ② 域侧守门升级（FB-03）—— 本域 `LikeProtectionChainWiringTest`：**2 条 ⇒ 4 条**
+
+- **新增 ①**「链的层名列表 == `[recover, breaker, shedding]`」**且**「**实际装上的链 == 配置推出的构成**」（`layerNames(chain)` == `compose(props).layerNames()`）
+  ⇒ ⇒ 一次同时钉住「有 breaker」「有 shedding」「层序 = recover→breaker→shedding」（Go `zrpc/server.go:144-167`）
+  ⇒ ⇒ 「实际链 == 配置推出的构成」抓住「**配置说三层、实际只装两层**」这类装配与配置脱节 ⇒ ⇒ **旧判据完全覆盖不到**
+- **新增 ②**「关掉降载 ⇒ 层名列表变成 `[recover, breaker]`」⇒ ⇒ 证明**降载层是条件装的**（Go `zrpc/server.go:160-163`）⇒ ⇒ **不必再「关掉降载来换取确定性」**
+- ⇒ ⇒ **旧的「包装层归属」那条保留不删** ⇒ ⇒ **互补而非替代**（层名证「有哪些层 + 层序」；包装归属证「真的包住了调用」）
+- ⇒ ⇒ **客户端熔断那一面**（`GoStyleGrpcClientBreakerInterceptor` · `LikeApiApplication.java:75-77` 扫 `com.rag.common` 注册）**已由阶段 2 的 `LikeApiGrpcClientBreakerE2ETest` 覆盖**（真 in-process gRPC server ⇒ 熔断打开后调用不再触达下游）⇒ ⇒ **本轴两侧（服务端链 + 客户端熔断）均有运行期证据**
+- ⇒ ⇒ **本域 A2 轴：L1（源码）⇒ L2（运行期 · 守门 + 变异验证）**
+
+#### ③ 变异验证（判据非假绿）
+
+- 变异方式 = **断言方向变异**（期望层名改成 `["recover","breaker"]`）⇒ ⚠️ **被测机制在共享层、不在本 lane 写权** ⇒ ⇒ 只能做方向变异（证明**断言读的是运行期真值**）⇒ ⇒ **这是「回归网」证据，不是「已证伪该机制」**
+- 结果：**本域红且只红 1 条**，红点**精确**在 `chainLayerNamesMatchComposedChain`（`LikeProtectionChainWiringTest.java:132`）⇒ ⇒ **其余 3 条阴性对照仍绿** ⇒ ⇒ **非假绿**
+- ⇒ 还原后复跑：**4 条绿** · 0 failures / 0 errors / 0 skipped · BUILD SUCCESS
+- ⚠️ **还原脚本的判据坑（我自己踩到）**：变异后文件里有 **2 处** `containsExactly("recover", "breaker")` ⇒ ⇒ 全局字面量替换的还原脚本会**断言失败并中止**（文件停在变异态）⇒ ⇒ **还原必须按位置精确替换**
+
+#### ④ 数字订正
+
+- **like-rpc**：`mvn test` 口径 **111 ⇒ 113**（守门 +2 条）⇒ ⚠️ **第三轮记录的 111 保留在下方订正行**（原口径 = `mvn test`）
+- ⇒ 🟢 **同类 stale 会被 `check-ledger-selfcheck.py` 层 3 抓到**（默认只查 task 域 ⇒ **like / message 域的数字要自己盯** ⇒ 这是「守门覆盖面 ≠ 全域」的已知缺口）
