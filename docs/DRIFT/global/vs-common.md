@@ -1879,7 +1879,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | 逐模块要点 | `service/common` **327**（本轮 330 是 §4.10.32 之后）· `article-rpc` **154** · `admin-rpc` **112** · `task-rpc` **110** · `favorite-rpc` **110**（3 skipped） |
 | **三门禁**（同批次复跑） | `check-wave-lane-ownership` **EXIT=0** · `check-wave-role-model` **EXIT=0** · `check-wave-coupling` **EXIT=0** |
 | **台账三门禁** | `check-ledger-tables` **EXIT=0** · `check-ledger-selfcheck` **EXIT=0** · `check-ledger-count` **EXIT=0** |
-| **三探针** | `run-parity.sh` **EXIT=0 · 56 例** · `run-rpc-timeout-parity.sh` **EXIT=0 · 3 例** · 🔴 `api-envelope-probe/favorite` **EXIT=2（两次）** ⇒ ⇒ **根因见 §4.10.31 ⇒ 产品侧逐字节正确 ⇒ 已在 §4.10.32 修掉成因** |
+| **三探针** | `run-parity.sh` **EXIT=0 · 56 例** · `run-rpc-timeout-parity.sh` **EXIT=0 · 3 例** · 🔴 `api-envelope-probe/favorite` **EXIT=2（两次）** ⇒ ⇒ **根因见 §4.10.31 ⇒ 产品侧逐字节正确 ⇒ 已在 §4.10.32 修掉成因**（修后 **EXIT=0 · 5/5**） |
 
 #### 4.10.31 🔴 **探针 `api-envelope-probe/favorite` EXIT=2 的根因：三层取证 ⇒「红的是客户端层，产品侧正确」**
 
@@ -1932,6 +1932,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | **为什么取 4 而不是 8** | 客户端硬上限 = JDK 默认 **8** ⇒ 取**一半** ⇒ 即便客户端把上限配到 4 也炸不了 ⇒ ⚠️ **不要写成 8**（那就没有余量） |
 | **变异验证（各红**且仅红**一条）** | **M1** 闸门差一（`written > max`）⇒ 只红 ①（实测行数=5）· **M2** 计数器改全局静态 ⇒ 只红 ③（first=0 second=0）· **M3** 默认上界 4→1000 ⇒ 只红 ②（**复现原始故障原文 `Too many interim responses received: 9 > 8`**）⇒ 三次跑完均**逐字节还原**（MD5 MATCH） |
 | **回归** | `mvn -o -B -DargLine=-Xmx2g -am -pl service/common test` ⇒ **330 / 0 failures / 0 errors / 0 skipped · BUILD SUCCESS**（327 + 新守门 3） |
+| ✅ **端到端闭环（原失败探针转绿）** | `bash tools/api-envelope-probe/favorite/run.sh` ⇒ **PROBE_EXIT=0**（修前 **EXIT=2**）· `FavoriteApiEnvelopeParityTest` **5/5 全绿**（14.574s）⇒ ⇒ **且不需要任何客户端绕过参数**（此前用 `-Djdk.httpclient.maxNonFinalResponses=0` 才绿 ⇒ 现证明**成因确实在共享层** ⇒ **那个绕过参数不再需要**）⇒ ⇒ 双侧逐字节一致（Go 真源 == `expected.txt` == RAG 实测）⇒ ⇒ **本条把 §4.10.31 的根因彻底闭环** |
 | 🔴 **已知代价（已写进类 javadoc）** | 预算用尽后**不再有主动探测** ⇒ 超长请求里客户端中途断连**不再被提前发现** ⇒ 在飞的下游 gRPC 要等**写最终响应**时才被取消 ⇒ ⇒ **这是「保住客户端能解析响应」换来的取舍**（宁可晚取消，不可让客户端失败）⇒ ⇒ **不再改探测间隔**（那会改掉已签字偏离 `SD-2026-10-25-04` 的「延迟 ≈ 探测间隔」表述） |
 | 🔴 **跨域暴露面（只登记 · 共享面待整合）** | 暴露量由各域 `observability.http-timeout` 决定 ⇒ **`article-api` = 70s**（Go 真源 `Timeout: 70000` 对齐值 ⇒ **不能靠改域 yaml 规避**）⇒ **修前最多 140 行**；其余 9 域 = 3s ⇒ 最多 6 行 ⇒ ⇒ **`article` 域最危险** ⇒ 修后一律 ≤ 4 行 |
 | ⚠️ **签字档的连带** | `docs/Intentional_Deviations/global/common-tails.md` 的 `SD-2026-10-25-04` 仍写「N = 探测轮数 ≈ 慢请求秒数 ÷ 0.5s」⇒ ⇒ **该文件不属本 lane 写权** ⇒ ⇒ **只在此登记，待整合者回写**（把 N 改成「有上界（默认 4）」并补 JDK interim 上限的事实） |
