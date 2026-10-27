@@ -44,7 +44,7 @@
 | **E38②** | 🔴 A 类 backlog | 🔴 **口径已过期**：**第 ① 层已闭环** —— 本层**自己复跑** `bash tools/semantic-probe/rpc-timeout/run-rpc-timeout-parity.sh` ⇒ **EXIT=0**、`client_deadline_ctx` **一致**（另 1 条 `timeout_telemetry` 是**已签字的 C-1 表述差异**，不计入失败）。⇒ 剩下的 **②** = **E65 / E66**（架构级第四十六轮已否决原修法 ⇒ 窄化） | 🟡 **① 已闭环 / ② 另立项** |
 | **E46 / E62** | ✅ 已修并合回主干 | 本轮改动面**不涉及** ⇒ **未复核** ⇒ 维持 | 维持 ✅ |
 | **E65** | 🔴 OPEN ＋ 附注「**`applyTo` 是 no-op**」 | 🔴 **仍 OPEN，但附注错**：`applyTo` **不是 no-op** —— `service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:110-120` 实测会 `stub.withDeadlineAfter(remainingNanos, NANOSECONDS)`；且有**真实调用点**（`follow-api` `FollowRpcClient.java:123` · `message-api` `MessageRpcClient.java:87` · `favorite-rpc` `UserRpcClient.java:46` 等）。⇒ **真正的不继承发生在 rpc 进程**：预算 ThreadLocal **只**由 `HttpMiddleware.java:304`（`begin`）/ `:336`（`clear`）写入 ⇒ rpc 进程无 HTTP 入口 ⇒ `DEADLINE_NANOS` 恒 `null` ⇒ `applyTo` 原样返回 stub ⇒ **rpc→rpc 出向不挂 deadline** | 🔴 **OPEN**（**描述订正**） |
-| **E66** | 🔴 OPEN | 🔴 **仍 OPEN** ⇒ 本轮**转立项**（路线已探明：Lettuce `TimeoutOptions.TimeoutSource` 逐命令动态返回剩余 deadline ⇒ 零域侧改动；**硬约束**：Boot 4 `LettuceConnectionConfiguration.createClientOptions` 字节码顺序 = offset 146 **先**写 `timeoutOptions`（来自 `spring.data.redis.timeout`）→ offset 151 **才**应用 customizer ⇒ customizer 再调 `timeoutOptions(...)` 会**覆盖运维配置**） | 🔴 **OPEN**（转立项） |
+| **E66** | 🔴 OPEN | 🔴 **仍 OPEN** ⇒ 本轮**转立项**（路线已探明：Lettuce `TimeoutOptions.TimeoutSource` 逐命令动态返回剩余 deadline ⇒ 零域侧改动；**硬约束**：Boot 4 `LettuceConnectionConfiguration.createClientOptions` 字节码顺序 = offset 146 **先**写 `timeoutOptions` → offset 151 **才**应用 customizer ⇒ customizer 再调 `timeoutOptions(...)` 会**覆盖运维配置**；🔴 **2026-10-27 订正（G2 独立核实 · 本层采纳）**：`offset 146` 写的是**硬编码 `TimeoutOptions.enabled()`**，**不是** `spring.data.redis.timeout` ⇒ ⇒ 后者走 `:173-174` 的 `builder.commandTimeout(...)` ⇒ 落 `LettuceClientConfiguration.getCommandTimeout()` ⇒ **RedisURI.timeout**（`ClientOptions` 上**没有** `getCommandTimeout()`）⇒ ⇒ ⇒ **顺序结论不变、归因订正**） | 🔴 **OPEN**（转立项 · 处方与回归口径已齐 ⇒ **待 Jason 拍板**） |
 | **E68 / E69 / E70** | ✅ 已落 | 本轮改动面**不涉及** ⇒ **未复核** ⇒ 维持 | 维持 ✅ |
 | **未修 27 条编号** | 🔴 未修 | 本轮改动面**不涉及**（落点在 `docs/DRIFT/common/alignment-2026-10-23.md`）⇒ **未复核** ⇒ 维持 | 维持 🔴 |
 | **X-6** | ✅ 已落地（第十四轮） | ✅ 维持（共享层 6 个类已落码；本轮另有 `GoStyleFormLimitMode` 判据改写 = FB-02，见 §4.6） | 维持 ✅ |
@@ -537,12 +537,23 @@ offset 146: ClientOptions$Builder.timeoutOptions(TimeoutOptions)      ← 先写
 offset 151: ObjectProvider.orderedStream()                            ← 后应用 customizer
 ```
 
-（`spring-boot-data-redis-4.0.8.jar` ⇒ `javap -c` 实测；timeout 来源 = `DataRedisProperties.getTimeout()`，
-即 `spring.data.redis.timeout`。）⇒ ⇒ **customizer 里再调一次 `timeoutOptions(...)` 会整体覆盖运维配的命令超时** ⇒ ⇒ **那是新漂移** ⇒ ⇒ 实现时必须**先读回 `spring.data.redis.timeout`** 再包一层 source（无 deadline 时回落到该值）⇒ ⇒ 需要一轮专门实现。
+（`spring-boot-data-redis-4.0.8.jar` ⇒ `javap -c` 实测；**G2 独立复核 · 逐位吻合**：offset `142` `aload_3`（builder）→ `143` `invokestatic io/lettuce/core/TimeoutOptions.enabled()` → **`146` `invokevirtual ClientOptions$Builder.timeoutOptions`** → `149` `pop`；`150` `aload_1` → **`151` `invokeinterface ObjectProvider.orderedStream()`** → `157` `invokedynamic`（＝`lambda$createClientOptions$0` ⇒ 逐个 `customize(builder)`）→ `162` `Stream.forEach` → `168` `build()`）⇒ ⇒ **顺序结论成立** ✔
+⇒ ⇒ **customizer 里再调一次 `timeoutOptions(...)` 会整体替换 `TimeoutOptions.enabled()` 那份 default source** ⇒ ⇒ **那是新漂移** ⇒ ⇒ 实现时必须**包一层 source 并显式回落**（见下）⇒ ⇒ 需要一轮专门实现。
+
+> 🔴 **订正（2026-10-27 · G2 独立核实 · 本层采纳）**：本节原文写「timeout 来源 = `DataRedisProperties.getTimeout()`，即 `spring.data.redis.timeout`」⇒ ⇒ **这个括号里的归因不对** ⇒ ⇒ **顺序结论不变、处方实质不变、措辞要改**：
+> - 源码 `LettuceConnectionConfiguration.java:229` = `builder.timeoutOptions(TimeoutOptions.enabled());` ⇒ ⇒ **入参是硬编码的 default source** ⇒ ⇒ **`spring.data.redis.timeout` 根本没进 `ClientOptions.timeoutOptions`**；
+> - 它走**另一条路**：`:173-174` `if (getProperties().getTimeout() != null) { builder.commandTimeout(getProperties().getTimeout()); }` ⇒ ⇒ 落 `LettuceClientConfiguration.getCommandTimeout()` ⇒ ⇒ **RedisURI.timeout**；
+> - ⇒ ⇒ `javap io.lettuce.core.ClientOptions` ⇒ **无** `getCommandTimeout()` ⇒ ⇒ **域侧守门读 `getClientConfiguration().getCommandTimeout()` 才拿得到 3s** ⇒ ⇒ **本层原句「先读回 `spring.data.redis.timeout`」的「读回位置」不准**（**读回的值**相同 ⇒ ⇒ **处方不变**）。
+>
+> ⇒ ⇒ **由此多出一条实现约束（本节原文没有）**：customizer 的 `TimeoutSource` 会**整体替换** `TimeoutOptions.enabled()` 那份 default source ⇒ ⇒ **新 source 在「本请求没有 deadline」时必须回落到 `getClientConfiguration().getCommandTimeout()`** ⇒ ⇒ 否则**命令会失去 3s 上限**（断连时从「3s 快速失败」退化成「无限等待」）⇒ ⇒ **这条正是域侧守门 ①（`getTimeoutOptions().isTimeoutCommands()` 必须为 true）所钉的那一根网** ⇒ ⇒ **E66 落码后若 ① 变红 ⇒ 属新回归 ⇒ 域侧直接反馈回来**。
+
+**🟢 E66 落码后的回归口径（G2 已给出 · 本层登记）**：
+⇒ ⇒ **以 G2 域 task-rpc 的 6 条 Redis 守门全绿为口径** —— ① 命令超时机制启用（`isTimeoutCommands()` = true）· ② 连接超时 5s · ③ 命令超时 3s（读 `getClientConfiguration().getCommandTimeout()`）· ④ 阳性对照（Lettuce 默认 60s）· ⑤ 连接池已启用 · ⑥ 池参数 64/16/0
+⇒ ⇒ ⚠️ **⑤⑥ 与 E66 无关** ⇒ ⇒ **若 ⑤⑥ 也红 ⇒ 那是另一件事，不是 E66 引起** ⇒ ⇒ **不拿 ⑤⑥ 的红去否 E66**（也不拿 ⑤⑥ 的绿当 E66 的证据）
 
 **另两处待定（立项时要一起答）**：
 1. **载体不统一**：rpc 路径用 `RpcInterceptor.DeadlineState`（epoch 毫秒，静态 `remainingMillis()`）· api 路径用 `GoStyleRequestDeadline`（`nanoTime` 纳秒）⇒ ⇒ 要么统一，要么 source 两处都读。
-2. **无 deadline 时的回落值**：Go 侧无 ctx deadline 的 Redis 调用由 go-zero 自己的 `Timeout` 决定；RAG 侧今天靠 `spring.data.redis.timeout` ⇒ ⇒ 回落值必须**等于现状**，否则又是新漂移。
+2. ~~**无 deadline 时的回落值**：Go 侧无 ctx deadline 的 Redis 调用由 go-zero 自己的 `Timeout` 决定；RAG 侧今天靠 `spring.data.redis.timeout` ⇒ ⇒ 回落值必须**等于现状**，否则又是新漂移。~~ ⇒ ⇒ 🟢 **已答（G2 核实 · 本层采纳）**：回落值 = **`getClientConfiguration().getCommandTimeout()`**（＝ `spring.data.redis.timeout` 的值，**不是** `TimeoutOptions.enabled()` 的默认值）⇒ ⇒ **与现状同值** ⇒ ⇒ **不构成新漂移** ⇒ ⇒ ⚠️ **但必须显式回落** —— customizer 的 source 是**整体替换** default source 的 ⇒ ⇒ 不回落 = **命令失去 3s 上限** ⇒ ⇒ 断连时从「3s 快速失败」退化成「无限等待」。
 
 **为什么本轮不硬落**：E66 在 global 台账里本来的定性就是「**落点跨域 ⇒ 只记账 + 提请立项，实施需各域 owner 参与**」
 （`docs/DRIFT/global/_README.md` §七之二十）⇒ ⇒ 且它还缺**双侧活体证据**（E66 现有证据强度 = 源码级，**未经双侧活体验证**）
