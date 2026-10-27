@@ -2346,6 +2346,17 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 
 **⑦ 本层这一条** | **落码 2 处**（`d4e4745` 守门派生 + `ObservabilityLifecycle` javadoc）＋ **改派 1 条**（FB-S2 ⇒ 整合者）＋ **写权/口径/数字各订正 3 条**（FB-S2 归属 · 辐射度口径 · G1 的域暴露面数字）⇒ ⇒ **生产代码净改动 = 1 个 javadoc** ⇒ ⇒ ⇒ **第十四次全量口径（代码态 `15cf93a` + `d546f45` + `407c230`）仍有效**（本轮只改 `docs/**` 与 `tools/**`，未动任何 `service/**` 的**可执行**代码 ⇒ ⇒ **但 `ObservabilityLifecycle.java` 是 `service/**` 下的 java 文件 ⇒ 已复跑 common 模块**）。<br>🟢 **复跑口径（2026-10-27 22:47~22:49 · `mvn -o -B -DargLine=-Xmx2g -am -pl service/common test`）** = **330 条 / 0 failures / 0 errors / 0 skipped / EXIT=0**（约 1:15 min）⇒ ⇒ **首跑曾红 1 条**（`RpcServerSpanCurrentGateTest.handlerCanSeeTheServerSpan` ⇒ `UNAVAILABLE: Network closed for unknown reason`）⇒ ⇒ **隔离复跑该类 = 4/0/0/0 全绿（EXIT=0）** ＋ **整模块复跑 = 330 全绿** ⇒ ⇒ ⇒ **定性 = 瞬态**（G2 树同刻在跑 8 模块 `clean test` ⇒ 抢端口/抢资源）⇒ ⇒ **与本次 javadoc 改动无因果关系**（改的是注释 ⇒ 不改字节码）⇒ ⇒ **教训同款**：**「同一条失败在隔离复跑里是否复现」= 定性瞬态 vs 缺陷的唯一判据** ⇒ ⇒ ⚠️ **且「共享层一条红 ⇒ 别的 lane 的回归链整条断在他域之前」⇒ 共享层的偶发红是跨 lane 的公共风险**。
 
+**⑧ 🟢 「第十四次全量口径是否仍成立」—— 逐条核对（**不靠「没改生产代码」一句话带过**）**
+
+| 第十四次之后的提交 | 触及面 | 是否已被执行过 | 对「2480 条 / 1 预期内红」口径的影响 |
+|---|---|---|---|
+| `e966a67`（traceparent 守门判据） | `service/common/src/test/.../GoStyleTraceparentFilterTraceSourceGateTest.java` | ✅ **定向复跑 1/0/0/0**（`-Dtest=GoStyleTraceparentFilterTraceSourceGateTest`）＋ **整模块复跑 330 全绿**（含该类） | 🟢 **该类 `@Test` 数量改前改后都是 1**（实测 `grep -c "@Test"`）⇒ ⇒ **用例总数不变 ⇒ 2480 仍成立**；⚠️ 但**那一条断言**在本全量里是**旧判据**跑的 ⇒ ⇒ 已被上面的定向复跑覆盖 |
+| `4cef806`（`ObservabilityLifecycle` javadoc） | `service/common/src/main/java/.../ObservabilityLifecycle.java` | ✅ 整模块复跑 330 全绿 | 🟢 **只改注释** ⇒ `git diff` 的非注释行差集为**空** ⇒ ⇒ **无字节码变化 ⇒ 行为零变化** |
+| `d4e4745`（守门派生） | `tools/difftest/check-tomcat-limits.py` | ✅ **不在 maven reactor 内** ⇒ 由**变异 M1/M2/M3** + **打好的守门跑在 G2 树的端到端模拟（EXIT=0）** 覆盖 | 🟢 **不进任何测试计数** |
+| `f6d58de` · `96b40df` · `5a50845` · `9a6d99b` · `2643f91` | `docs/**` | — | 🟢 **纯文档** |
+
+⇒ ⇒ **结论：第十五次全量**不必跑** —— 判据不是「没改生产代码」（那是**弱判据**，会漏掉「改的是测试断言」这种情况），而是**「每一个改动过的行都已被执行过」** ⇒ ⇒ **第十四次全量口径（52 模块 / 29 有测试 / 2480 条 / 1 预期内红 / 0 errors / 4 skipped / 41:32 min / 三门禁 0-0-0）继续有效** ⇒ ⇒ ⚠️ **但若后续再有任何 `service/**` 的可执行改动 ⇒ 必须重跑全量**（本条口径的有效期随之结束）。
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
