@@ -1098,7 +1098,51 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | 🟢 **③ 工具口径缺口：只登记 ＋ 转整合者（`tools/**` = 整合者共享面 ⇒ 本层不写）** | G2 报：`check-ledger-selfcheck.py` 第 5 层的 `CLASS_RE` 只认 `…Test` / `…GateTest` / `…IT` ⇒ ⇒ **支撑类**（各域的 `RealTomcatPort` 等）**永远无法被点名** ⇒ ⇒ 必然进「未点名」⚠️（**提示级 · 不影响退出码**）⇒ ⇒ 本层**只登记**，改动归整合者 |
 | 🟢 **④ FB-04 / FB-05 的回执已发，但 G2 侧仍在等 ⇒ 已重发摘要** | 本层对 FB-04（`853767b`）与 FB-05（`c15dfeb`）**上一轮就发了最终回执**（4 项规格 ＋ 回归口径 ＋ 独立核实）⇒ ⇒ G2 本轮回信仍写「**仍在等你回执**」⇒ ⇒ **两侧消息队列未消化**（G2 侧队列深）⇒ ⇒ 本层**重发一份摘要**（结论不变，不重复长表）⇒ ⇒ ⚠️ 「不重派」指的是**不重派派单**，**回执摘要不属重派** |
 
-#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `ee1b797`）
+#### 4.10.16 🟢 **G1 的补充回执（2026-10-27）—— 槽位权威表 ＋ 一处理由更正 ＋ 零落码**
+
+> **来源**：G1 在槽位协调约束的回执之后补了一条：① 复核槽位表 ② 两个域的实证（`+6` 并列 CpuShedding 无害）③ 对本层的请求（「**不要**把 `HttpMiddlewareFilter` 的 @Order 下调到 +6 或更低；上调（更外层）同样不行 ⇒ **保持 +7**」）。
+> ⇒ ⇒ **本轮本层零落码**（只回执 + 台账）⇒ ⇒ G1 的 `9203bcc` 不需要为本层做任何调整。
+
+##### 4.10.16.1 槽位权威表（**共享层真源 = 本层树**，2026-10-27 实测）
+
+| 槽位 | Filter | 落点（`文件:行号`） |
+|---|---|---|
+| **+2** | `GoStylePathNormalizingFilter` | `service/common/src/main/java/com/rag/common/http/GoStylePathNormalizingFilter.java:16` |
+| **+3** | `GoStyleTraceparentFilter` | `…/http/GoStyleTraceparentFilter.java:32` |
+| **+4** | `GoStyleMaxConnsFilter` | `…/protection/GoStyleMaxConnsFilter.java:20` |
+| **+5** | `GoStyleBreakerFilter` | `…/protection/GoStyleBreakerFilter.java:22` |
+| **+6** | `GoStyleCpuSheddingFilter` | `…/protection/GoStyleCpuSheddingFilter.java:19` |
+| **+7** | `HttpMiddlewareFilter`（**3s 预算起点**） | `…/spring/HttpMiddlewareFilter.java:20` |
+| **+8** | `GoStyleMaxBytesFilter` | `…/protection/GoStyleMaxBytesFilter.java:19` |
+
+⚠️ **实测方式**：`@Order(Ordered.HIGHEST_PRECEDENCE + N)` **不是**单 token ⇒ 必须**剥注释后解析完整表达式并求值**（单 token 正则会只捞到 `LOWEST_PRECEDENCE` 那一个 ⇒ 清单类结论不得用 grep 命中数）。
+⚠️ **G1 报的是 6 档（无 +2）⇒ 不是谁错，是两棵树的共享层版本不同**：`+2` 那条落在 **`9690b04`（G2 FB-01 · A3，共享层）** ⇒ ⇒ **G1 树里还没有它**（实测：`ls` ⇒ no such file）⇒ ⇒ **合并后是 7 档**。
+
+##### 4.10.16.2 🔴 **一处理由更正（结论不变，理由要换）**
+
+| 项 | 内容 |
+|---|---|
+| **G1 的结论** | 「域内 Filter 的合法窗口 `[+3,+6]`，四槽全被占满 ⇒ 域侧只能**并列 +6**」 |
+| **合并后的真实理由** | 域侧可用区间 = **「[+3, 预算起点)」的最后一个槽位（= +6）**，由三条推出 ——<br>① `GoStyleTraceparentFilter` 必须 **≤ +6** ⇒ 域侧必须 **≥ +3**（否则验签落到 traceparent 的 SERVER span 之外 ⇒ 观测面漂移）<br>② **+2 不可用**：它与 `GoStylePathNormalizingFilter` **同槽** ⇒ 同 order 的相对顺序由**容器注册序**决定 ⇒ **不是确定性** ⇒ 域侧不应依赖它<br>③ **+7 = 预算起点** ⇒ 不可用（否则验签落进 3s 预算 ⇒ 域侧的「413 压过 401」不变式会变）<br>⇒ ⇒ **⇒ 结论不变（并列 +6），但「四槽占满」是**他树**的描述 ⇒ 合并后该说法会失效** ⇒ ⇒ 域侧若照「四槽占满 ⇒ 只能并列」去推理，会在合并后误以为「+2 空出来了 ⇒ 可以用」 |
+| **这三条已被机器钉住** | ✅ 正是 §4.10.12 落的那台**快照守门**第 ③ 条（`SharedFilterOrderSnapshotGateTest`）：预算起点 ≥ +7 ＋ Traceparent ≤ +6 ＋ `[+3, 预算起点)` 区间**必须仍被占用** ⇒ ⇒ **域侧「并列 +6」由共享层断言保证** ⇒ ⇒ 域侧**不必各自维护槽位表** |
+
+##### 4.10.16.3 「共享层常量会漂」的兜底机制（= G1 自己点出的那个根因）
+
+| 项 | 内容 |
+|---|---|
+| **根因（G1 指出）** | `d9062f8` 插入 `Traceparent(+3)` 时**整体后移**了其它 Filter 的 `@Order` ⇒ ⇒ 「照抄旧 @Order 数字的推论」必然过期 ⇒ ⇒ 任何域侧推论**必须重算** |
+| **本层的兜底** | ✅ **快照守门**（`d56989f`）：7 个 Filter 的 `@Order` 精确值**逐条钉死** ⇒ ⇒ **有人重排 ⇒ 守门必红** ⇒ ⇒ 而**重排前共享层没有任何测试会红** ⇒ ⇒ 这就是「常量会漂」的**机器级**兜底<br>⇒ ⇒ **⇒ 域侧不必自己 grep 维护表**；**要拿权威表就读那台守门的 `SLOT_SNAPSHOT`** |
+| ⚠️ **本层回执正文的一处笔误（已当场订正）** | 本层给 G1 的消息里把守门路径写成 `…/src/main/java/com/rag/common/spring/SharedFilterOrderSnapshotGateTest.java` ⇒ ⇒ **错** ⇒ ⇒ 实际在 **`service/common/src/test/java/com/rag/common/spring/SharedFilterOrderSnapshotGateTest.java`** ⇒ ⇒ **台账 §4.10.12 的路径本来就是对的**（`src/test/java/…`）⇒ ⇒ 只错在回执正文 ⇒ ⇒ **已在给 G1 的消息里订正** |
+
+##### 4.10.16.4 「共享层排序桥」**早已落了**（⇒ G1 的域侧副本合并时即可删）
+
+| 项 | 内容 |
+|---|---|
+| **G1 的说法** | 「G1 三个域侧排序桥（`MybatisPlusOrderingBridgeAutoConfiguration`）等 G4 的共享层桥落码后再删」 |
+| **实测** | ✅ **共享层版本早已存在**：`service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java`（⇒ 各域 `*/rpc/config/` 下另有 10 份**域内副本**）⇒ ⇒ 合并后**域内副本被遮蔽**（不是叠加）⇒ ⇒ **域内副本在合并时删即可** ⇒ ⇒ **不存在「还没落的共享层桥」** |
+| ⚠️ **别把两件事混谈** | `MybatisPlusOrderingBridgeAutoConfiguration` 管的是 **MyBatis-Plus 拦截器链**的顺序 ⇒ ⇒ 与 **Filter 槽位**（§4.10.16.1）**无关** ⇒ ⇒ 两件事各自的证据与修法都要分开读 |
+
+#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `2f3d5c2`）
 
 | commit | 内容 | 落点（`文件:行号`） | A 轴 |
 |---|---|---|---|
