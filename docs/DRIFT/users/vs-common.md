@@ -909,6 +909,8 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 | `1fb26b2` ＋ `2f12236` | Redis 断连策略收编进共享层（`GoStyleRedisClientAutoConfiguration`） | 🟡 **有影响**：域内副本会**遮蔽**共享层那份 ⇒ 收编要**删 5 份副本 ＋ 重写 5 份守门** | 🔴 **待 G4 合入后执行**（清单见 §12.2） |
 | `3b573fb` | 关闭路径不触发 web 类加载（拆出 `HttpPoolLifecycle`） | 🔴 **有影响**：我域 **3/3 rpc** 全部 `@Import ObservabilityLifecycle` 且运行时 classpath **无 servlet** ⇒ 全暴露 | ✅ 合入后按 §12.3 的 3 条必查复验 |
 | `7488b3d` ＋ `182fc32` | 进程级静态池改为「被终止后按需重建」 | 🔴 **与 `3b573fb` 有顺序耦合** ⇒ **必须同批**（见 §12.4） | ✅ 合入后按 §12.4 复验 |
+| `853767b`（G2 FB-04 · A9） | 让 gRPC 业务 handler 执行期能拿到当前 server span（`RpcInterceptor.onHalfClose()` 里用 `otelCtx.makeCurrent()` 包住 handler 调用） | ✅ **零影响**（本域**自核**，不采信转述）：① 我域主源码 `Span.current()` **读取点 = 0 命中**；② 共享层主源码 `Span.current()` **读取点 = 0 命中**（只有 `makeCurrent()` 的**设置**方：`RpcInterceptor:332/:392/:429` · `HttpMiddleware:312` · `GoStyleTraceparentFilter:278` · `MqConsumer:95`）⇒ ⇒ 让 server span 变 current **没有任何消费方**；③ 全仓唯一读取点 `comment-rpc/CommentFactDeliveryService.java:148` 跑在**调度线程** ⇒ FB-04 改的是 **handler 线程** ⇒ 碰不到它 | ✅ **无**（合入后复验即可） |
+| `853767b` 的**反向含义**（写明以免后人误记） | —— | ⚠️ **正因为双方都零读取点**，FB-04 这类「让 span 变成 current」的改动**在本波不会体现在任何域的可观察面上** ⇒ ⇒ **若将来某个域开始用 `Span.current().setAttribute(...)`，它会立刻依赖 FB-04 这个前提** ⇒ ⇒ 那时 FB-04 就是**必需**而非「零影响」⇒ **复开触发条件已锁定** | —— |
 
 ### 13.1 `182fc32` 对本域 = **零影响**（逐条核过，非转述）
 
