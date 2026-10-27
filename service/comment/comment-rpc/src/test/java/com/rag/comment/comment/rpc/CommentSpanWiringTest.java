@@ -35,6 +35,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import com.rag.comment.comment.rpc.support.RealGrpcPort;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -87,11 +88,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         classes = CommentRpcApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                // 🔴 **固定端口，不用 port=0**：port=0 会让 OS 从临时端口段（macOS 49152–65535）里挑，
-                //    而那是 **Docker 随机发布容器端口用的同一段** ⇒ 别的会话的容器先占住 ⇒ EADDRINUSE
-                //    ⇒ 整个测试类启动失败（表现为「偶尔红、换个时间又绿」的抖动）。
-                //    21500–21599 段是 comment-rpc 的测试专用段（favorite 域占 21300–21399 / 21400–21499）。
-                "grpc.server.port=21500",
+                // 🔴 gRPC server 端口走**本域专用段**（RealGrpcPort），**不用 `port=0`**：
+                //    port=0 会让 OS 从临时端口段（macOS 49152–65535）里挑，而那是
+                //    **Docker 随机发布容器端口用的同一段** ⇒ 别的会话的容器先占住
+                //    ⇒ EADDRINUSE ⇒ 整个测试类启动失败（表现为「偶尔红、换个时间又绿」的抖动）。
+                //    ⇒ 本域专用段 = **22600–22699**（global 段表预分配给 comment 域），
+                //    原先的裸硬编码 21500 **落在 favorite 域的探针段 21400–21599 内**
+                //    ⇒ ⇒ 两边都以为对方不在自己段里 ⇒ ⇒ 2026-10-27 一并迁出。
+                //    ⇒ 端口在 @DynamicPropertySource 里注册（**不进 context cache key**）。
                 // 指到必然拒连的地址：NacosRegistration 捕获 NacosException 只记日志不中断启动。
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 // devh 的 @GrpcClient 在 Bean 初始化期就建 channel（不是懒建）⇒ 必须给静态地址。
@@ -120,6 +124,12 @@ class CommentSpanWiringTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        // 🔴 gRPC server 端口走**本域专用段**（22600–22699），不用 `port=0`
+        //    （port=0 落 OS 临时段 ⇒ 与 Docker 发布口同段 ⇒ 环境性抖动）。
+        //    ⚠️ **@DynamicPropertySource 的值不进 Spring 的 context cache key**
+        //    ⇒ ⇒ 各测试类的**专属 context key**（rag.test.gate.context-key=*）仍是必需的
+        //    ⇒ ⇒ 两处都要留：一个是「端口不撞段」，一个是「上下文不共享」。
+        r.add("grpc.server.port", RealGrpcPort::pick);
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

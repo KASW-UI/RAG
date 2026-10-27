@@ -39,8 +39,18 @@ import java.util.concurrent.TimeUnit;
  *
  * <h2>⚠️ 端口段与 favorite-api 的关系</h2>
  * <p>favorite-api 用 {@code 21300–21399}（{@code RealTomcatPort}）⇒
- * <b>本类刻意用 {@code 21400–21499}</b> ⇒ 两个段<b>互不重叠</b>
+ * <b>本类刻意用 {@code 22100–22199}</b> ⇒ 两个段<b>互不重叠</b>
  * ⇒ 两域的测试并发跑时不会互相抢端口。
+ *
+ * <h2>🔴 2026-10-27：本段从 {@code 21400–21499} 迁到 {@code 22100–22199}</h2>
+ * <p>原段 {@code 21400–21499} <b>嵌套在 favorite 域的「探针段」{@code 21400–21599} 内</b>
+ * （global 端口段表 §4.10.19.3）⇒ ⇒ <b>两边都以为对方不在自己段里</b>
+ * ⇒ ⇒ 这就是「段表必须把探针段也列进去」的全部意义（表里少一行 = 隐性重叠）。
+ * <p>⇒ ⇒ 迁到 global 段表<b>预分配给 favorite-rpc</b>的 {@code 22100–22199}
+ * （2026-10-27 实测整段可绑 100/100）⇒ ⇒
+ * <b>探针段 {@code 21400–21599} 不动</b>、<b>脚手架段 {@code 22050–22099} 不动</b>
+ * ⇒ ⇒ {@code tools/probe-gate/favorite/check-port-ownership.sh} 的段断言<b>也不用动</b>
+ * （它守的是**探针工具自己的段**，不是本类的段）。
  *
  * <h2>为什么不在 Go 侧对照</h2>
  * <p>本类是<b>测试设施</b>，不是产品行为 ⇒ Go 侧<b>没有对应物</b> ⇒ <b>不存在语义对照义务</b>。
@@ -58,10 +68,10 @@ public final class RealGrpcPort {
      * <p>⚠️ 这是一段<b>共享</b>端口：别的会话若也起 favorite-rpc 测试，会靠
      * {@link #isFree(int)} 的自检<b>各拿各的</b>（同一段内先到先得）。
      */
-    public static final int FIRST = 21400;
+    public static final int FIRST = 22100;
 
     /** 端口段上界（含）。 */
-    public static final int LAST = 21499;
+    public static final int LAST = 22199;
 
     /** 单次 bind 自检的超时（bind 本身是本地的，给 1s 足够）。 */
     private static final int BIND_TIMEOUT_MS = 1000;

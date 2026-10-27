@@ -8,7 +8,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -16,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import com.rag.comment.comment.rpc.support.RealGrpcPort;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -89,7 +89,9 @@ class CommentRpcRuntimeBootGateTest {
     @DisplayName("真 fat jar 起真 CommentRpcApplication：gRPC 端口真的在监听（生产 classpath + 生产 yaml）")
     void realFatJarProcessBootsAndListens() throws Exception {
         Path jar = CommentRpcArtifactClasspathGateTest.fatJar();
-        int port = freePort();
+        // 🔴 真进程口走**本域专用段**（22600–22699），不用 OS 临时段
+        //    （OS 临时段 49152–65535 = Docker 发布口同段 ⇒ 别的会话的容器会抢）。
+        int port = RealGrpcPort.pick();
 
         List<String> command = new ArrayList<>(List.of(
                 "java", "-jar", jar.toAbsolutePath().toString(),
@@ -178,13 +180,6 @@ class CommentRpcRuntimeBootGateTest {
             return true;
         } catch (Exception e) {
             return false;
-        }
-    }
-
-    private static int freePort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            socket.setReuseAddress(true);
-            return socket.getLocalPort();
         }
     }
 

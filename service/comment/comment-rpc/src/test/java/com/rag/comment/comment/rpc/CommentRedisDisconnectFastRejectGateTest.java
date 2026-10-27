@@ -12,8 +12,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 
-import java.io.IOException;
-import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -21,6 +19,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import com.rag.comment.comment.rpc.support.RealGrpcPort;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -88,7 +89,14 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
                 //    ⇒ 本类的断言可能读到别的测试装配出来的 factory。
                 "rag.test.gate.context-key=comment-redis-disconnect-reject",
 
-                "grpc.server.port=0",
+                // 🔴 gRPC server 端口走**本域专用段**（RealGrpcPort），**不用 `port=0`**：
+                //    port=0 会让 OS 从临时端口段（macOS 49152–65535）里挑，而那是
+                //    **Docker 随机发布容器端口用的同一段** ⇒ 别的会话的容器先占住
+                //    ⇒ EADDRINUSE ⇒ 整个测试类启动失败（表现为「偶尔红、换个时间又绿」的抖动）。
+                //    ⇒ 本域专用段 = **22600–22699**（global 段表预分配给 comment 域），
+                //    原先的裸硬编码 21500 **落在 favorite 域的探针段 21400–21599 内**
+                //    ⇒ ⇒ 两边都以为对方不在自己段里 ⇒ ⇒ 2026-10-27 一并迁出。
+                //    ⇒ 端口在 @DynamicPropertySource 里注册（**不进 context cache key**）。
                 // 绕过 Nacos
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "logging.level.com.alibaba.nacos=WARN",
@@ -113,6 +121,13 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
         })
 @DisplayName("comment-rpc：共享层那份 REJECT_COMMANDS 在本域真的生效（活体断连 A/B）")
 class CommentRedisDisconnectFastRejectGateTest {
+
+    // 🔴 gRPC server 端口走**本域专用段**（22600–22699），不用 `port=0`
+    //    （port=0 落 OS 临时段 ⇒ 与 Docker 发布口同段 ⇒ 环境性抖动）。
+    @DynamicPropertySource
+    static void grpcPort(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", RealGrpcPort::pick);
+    }
 
     @Autowired
     LettuceConnectionFactory connectionFactory;
@@ -188,12 +203,10 @@ class CommentRedisDisconnectFastRejectGateTest {
      */
     private long measureFirstCommandAfterDisconnect(ClientOptions options, String containerName) {
         // 🔴 每组**各自**取一个空闲端口（不能复用同一个：容器还在占着）
-        int port;
-        try {
-            port = freePort();
-        } catch (IOException e) {
-            throw new IllegalStateException("取空闲端口失败", e);
-        }
+        // 🔴 容器发布口也**不用 OS 临时段**（49152–65535 与 Docker 发布口同段）
+        //    ⇒ 改走本域专用段（22600–22699）⇒ ⇒ 与别的会话的容器不抢口。
+        //    ⚠️ 这是 global §4.10.47 ② 点的「4 处」之外的**第 5 处**（2026-10-27 G3 实测补）。
+        int port = RealGrpcPort.pick();
         String name = containerName + "-" + port;
         String out = docker("run", "-d", "--rm", "--name", name,
                 "-p", "127.0.0.1:" + port + ":6379", "redis:7-alpine");
@@ -291,12 +304,6 @@ class CommentRedisDisconnectFastRejectGateTest {
             if (client != null) {
                 client.shutdown();
             }
-        }
-    }
-
-    private static int freePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
         }
     }
 
