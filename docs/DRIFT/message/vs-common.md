@@ -43,7 +43,7 @@
 |---|---|---|---|---|---|
 | **A1** | 超时 / deadline | rpc：`MessageRpcApplication.java:85-86`（`@Import DeadlineQueryTimeoutInjector` + `SqlTimeoutStatusTranslator`）、`:75-77`、`:134-135`（链装配）；`message-rpc/application.yml:225-226` `rpc-timeout: 2s`<br>api：`MessageRpcClient.java:87`（`GoStyleRequestDeadline.applyTo`）；`message-api/application.yml:226-227` `http-timeout: 3s`· 🔴 **2026-10-27 新增**：`MessageJwtAuthFilter`（+6）—— **3s 预算的作用域**（验签在预算之外，= `DRIFT-MSGAPI-014`）<br>SQL 取消：`DeadlineQueryTimeoutInjector.java:139-145` | ✅ 一致（2s=2000ms / 3s=3000ms 毫秒精度一致；`DEADLINE_EXCEEDED` 文案对齐 `RpcInterceptor.java:109`）<br>🔴 2026-10-27：**3s 预算的作用域也已对齐**（Go 的预算**不含**验签 —— 真源 `observability/http.go:30-34` 关掉原生 TimeoutHandler、改由 `server.Use` 的自建中间件计时 ⇒ 计时器在 `Authorize` **之后**起算；RAG 侧原把验签放在 `HandlerInterceptor`（预算内）⇒ 现已搬到 `MessageJwtAuthFilter`(+6) ⇒ **验签在预算外**，两侧一致） | L4（Go 腿活体探针：观测点 A `deadline_set=false` / B `deadline_set=true remaining=3s`；**非法 token ⇒ 401 且三个观测点一个都没打印** ⇒ Authorize 在所有 user middleware 之前） | 2026-10-27 |
 | **A2** | gRPC 拦截器链 | 服务端：`MessageRpcApplication.java:134-135` → `GoStyleRpcProtectionChain.java:65`(shedding)/`:72`(breaker)/`:77`(recover) **消费点**<br>客户端熔断：`GoStyleGrpcClientBreakerInterceptor.java:104-106`（`@Component` + `@GrpcGlobalClientInterceptor`）⇒ 被 `MessageApiApplication.java:63-66` 注册 | ✅ 一致（链序 recover→breaker→shedding→业务；Go `zrpc/server.go:144-167`） | L1 | 2026-10-27 |
-| **A3** | HTTP 保护链 | 配置 `message-api/application.yml:121-169`（四道闸门 + `mode: envelope`）<br>共享层消费点：`GoStyleMaxConnsFilter.java:96`(+4) · `GoStyleBreakerFilter.java:77`(+5) · `GoStyleCpuSheddingFilter.java:63`(+6) · `GoStyleMaxBytesFilter.java:83`(+8) · `GoStyleTraceparentFilter.java:190`(+3) · `GoStyleFormValueLimitInterceptor.java:81-97` + `GoStyleFormLimitWebMvcConfig.java:42` · `GoStyleTomcatParameterLimitCustomizer.java:134` | 🟡 **OBS**（三条有界残留：① **form 闸门与鉴权先后** —— **已登记**为「有界残留·刻意不改」（[`global/cross-domain.md`](../global/cross-domain.md) 第十四轮 §⑤之五-1）⇒ **不重复派单** ② **路径归一** ⇒ 🟢 **共享层已落码**（FB-01 · G4 `182fc32`：`GoStylePathNormalizingFilter` 字节级移植 Go `path.Clean` + 自动配置注册点；🟢 Go 侧已 L4 活体坐实）但**未合入本树** ⇒ 合并后本域跑**真 Tomcat 探针**即可升 ✅ ③ **缺本域真实请求证据**（envelope 拒绝形状 / 2049 参数 / `..` 路径））<br>> 📌 **共享层落点（按符号记，不钉行号 —— G4 树 `182fc32` 的行号合并后会位移）**：FB-01 = `GoStylePathNormalizingFilter` ＋ `GoStylePathNormalizingAutoConfiguration`（唯一注册点）；FB-02 = `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` / `REGISTERED_DEVIATIONS`；FB-03 = `GoStyleRpcProtectionChain.Layered` / `Composition` / `compose(props)` / `layerNames(chain)` ⇒ 共享层侧回归（G4 自测）：**52 模块 / 2442 条 / 0 failures / 0 errors / 4 skipped** / 21:59 min
+| **A3** | HTTP 保护链 | 配置 `message-api/application.yml:121-169`（四道闸门 + `mode: envelope`）<br>共享层消费点：`GoStyleMaxConnsFilter.java:96`(+4) · `GoStyleBreakerFilter.java:77`(+5) · `GoStyleCpuSheddingFilter.java:63`(+6) · `GoStyleMaxBytesFilter.java:83`(+8) · `GoStyleTraceparentFilter.java:190`(+3) · `GoStyleFormValueLimitInterceptor.java:81-97` + `GoStyleFormLimitWebMvcConfig.java:42` · `GoStyleTomcatParameterLimitCustomizer.java:134` | 🟡 **OBS**（三条有界残留：① **form 闸门与鉴权先后** —— **已登记**为「有界残留·刻意不改」（[`global/cross-domain.md`](../global/cross-domain.md) 第十四轮 §⑤之五-1）⇒ **不重复派单** ② **路径归一** ⇒ 🟢 **共享层已落码**（FB-01 · G4 `182fc32`：`GoStylePathNormalizingFilter` 字节级移植 Go `path.Clean` + 自动配置注册点；🟢 Go 侧已 L4 活体坐实）但**未合入本树** ⇒ 合并后本域跑**真 Tomcat 探针**即可升 ✅ ③ **缺本域真实请求证据**（envelope 拒绝形状 / 2049 参数 / `..` 路径））<br>> 📌 **共享层落点（按符号记，不钉行号 —— G4 树 `182fc32` 的行号合并后会位移）**：FB-01 = `GoStylePathNormalizingFilter` ＋ `GoStylePathNormalizingAutoConfiguration`（唯一注册点）；FB-02 = `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` / `REGISTERED_DEVIATIONS`；FB-03 = `GoStyleRpcProtectionChain.Layered` / `Composition` / `compose(props)` / `layerNames(chain)` ⇒ 共享层侧回归（G4 自测）：**52 模块 / 2442 条 / 0 failures / 0 errors / 4 skipped** / 21:59 min<br>🆕 **2026-10-27 订正（G4 第七次全量 · `5564c27`）**：**2442** 是**第六次**全量的数字 ⇒ **第七次 = 2457 条**（52 模块 / 0 failures / 0 errors / **4 skipped** / **20:28 min** / `MVN_EXIT=0`）⇒ ⚠️ **2457 是 G4 树（52 模块）的口径**，**不是本域数字** ⇒ 本域三域六模块 = **594 条**（`mvn test` 口径）
 ⇒ ⚠️ **合并后**本域需跑真 Tomcat 探针复核（路径归一）⇒ 那是**收口回归**窗口的事（§5.3e）
 
 🟢 **共享层的 form 语义表已落码**（FB-02 · G4 `182fc32`：`SEMANTIC_REACHABILITY` 逐域取证表）⇒ **message 行 = `Mode.ENVELOPE`** ⇒ 与本域 `mode: envelope` **一致** ⇒ 本域**不在** `REGISTERED_DEVIATIONS` 里 ⇒ **不是**「已登记的例外」，是**真对齐**） | L1（静态） | 2026-10-27 |
@@ -84,6 +84,88 @@
 | **⑦ 是否阻塞本波** | **否**（不阻塞本波台账；阻塞 A3 结案 —— A3 在归一层落位前只能记 🟡） |
 
 > ⚠️ **本单与 `like` 域 `D-3` / `task` 域 `C-2` 是同一条**（三域独立发现）⇒ **同批落码**（一个共享层实现 ⇒ 9 域受益）。
+
+## 4·五、🟢 **G4 正式回执（4 项规格）· 2026-10-27 · `align/g4-service-common` @ `5564c27`**
+
+> 📌 **本节是 G4 那张「4 项规格」回执的域侧归档**（AGENTS.md §5.3b：产出**必写回**本域 §4）。
+> ⚠️ **本节不销任何单** —— 销号须**合并后**按 §5.3e 重跑收口回归才成立（见末「合并后必做动作」）。
+
+### ① HEAD
+
+`align/g4-service-common` @ **`5564c27`**（基线 `a282012` 之上 **30** 提交 · 工作区干净 · **未 push**）
+
+### ② 改动文件清单（逐个 `文件:行号`）
+
+- `service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:92` ＋ 类级 javadoc `:40-90`
+- `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:50` ＋ `:60`
+- `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:88` / `:122` / `:137` / `:181-182`
+- `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:163` / `:175` / `:209`
+- `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java:70-84` / `:106-127` / `:129`
+- `service/common/src/main/java/com/rag/common/persistence/SqlTimeoutStatusTranslator.java:31`
+- 守门新增 5 文件：`…/spring/HttpPoolShutdownWithoutServletGateTest.java` · `…/spring/HttpShutdownProbeWithoutServlet.java` ·
+  `…/precedence/GoStyleRedisClientOptionsPrecedenceGateTest.java` · `…/precedence/DomainLikeRedisDisconnectedBehaviorConfig.java` ·
+  `…/observability/ObservationPoolSelfHealingGateTest.java`
+- 台账：`docs/DRIFT/global/vs-common.md`
+
+### ③ 触及的 A 轴 ＋ Go 出处
+
+- **A3**：`HttpMiddleware.java:1089`（Go 出处 `service/common/observability/http.go`）；
+  `ObservabilityLifecycle` 的 Go 出处 = `service/follow/rpc/follow.go:45` ＋ `:3-21`（零 web 类型）
+- **A1**：`RpcInterceptor.java:623`（Go 出处 `service/common/observability/rpc.go:38`）
+- **A4**：`SqlTimeoutStatusTranslator.java:31`（Go 出处 `getuserlistlogic.go:44-48` · `selectavatarlogic.go:59-60` ·
+  `errmsg/errmsg.go:6`/`:41` · `observability.go:146-158`）
+
+### ④ 回归口径与结果
+
+`mvn -B clean verify`（全量）⇒ **BUILD SUCCESS / `MVN_EXIT=0`** · **52 模块** · **2457 条** ·
+**failures 0 / errors 0 / skipped 4** · **20:28 min**
+⇒ 双侧探针同批次复跑：`run-parity.sh` **EXIT=0 · 56 例**（一致 54 / 不一致 0 / 已签字偏离 2）·
+`run-rpc-timeout-parity.sh` **EXIT=0 · 3 例**
+⇒ 三门禁同批次复跑：**0 / 0 / 0**
+
+⚠️ **口径提醒**：**2457 条是 G4 树（52 模块）的数字** ⇒ **不是**本域的数字
+⇒ 本域三域六模块的数字见本文件各自的「测试」行（口径 = `mvn test`）⇒ **两者不可混用**。
+
+### 🟢 我域三张单 + 澄清的逐条状态
+
+| 单 | 状态 | 落码 commit |
+|---|---|---|
+| **FB-01**（A3 路径归一进共享层） | 🟢 **已落** | `9690b04` |
+| **FB-02**（form 闸门判据改「语义可达性」） | 🟢 **已落** | `182fc32` |
+| **FB-03**（保护链「层构成」只读入口） | 🟢 **已落** | `182fc32` |
+| **澄清第 1 步**（form 判据措辞） | 🟢 **已落且与本域要求逐条一致** | `182fc32` |
+| **E66**（Redis 写不绑 deadline） | 🔴 **仍 OPEN · 本轮转立项** | — |
+
+⇒ **G4 未越界**（按本域给的边界）：共享层**没有**为 task 写特例 · **没有**碰 favorite 的任何东西 ·
+本域建议项 3 的对拍脚本落点 = `tools/difftest/**`（无 lane 拥有的共享面）⇒ **只登记，不擅自改** ✅
+
+### 🔴 合并后我域**必做**动作（收口回归 · §5.3e）
+
+⚠️ **本域当前仍用「等价判据」顶着**（因为 G4 的落码**未合入本树**）⇒ 合并后必须：
+
+1. **复跑本域 3 处 `DEADLINE_EXCEEDED` 断言**（`LikeRpcGrpcInterceptorWiringTest:178` ·
+   `LikeRpcSlowThresholdGateTest` · `LikeRpcTimeoutCapTest` × 4）
+   ⇒ 原因 = G4 `7488b3d` 修的「**进程级静态池**终止即永久」缺陷**本域同构**
+   （`ObservabilityLifecycle` 被本域三个 rpc 组件全部 `@Import` ⇒ 每个 Spring 上下文关闭都毒化池）
+   ⇒ 合并后池**自愈**（`AtomicReference` + CAS 重建）⇒ 这三处应从「**侥幸绿**」变「**真绿**」
+   ⇒ ⚠️ **若仍红 ⇒ 不是新回归，是毒化未被覆盖 ⇒ 直接找 G4**
+2. **复核共享层的 `REJECT_COMMANDS` 在本域生效**（`GoStyleRedisClientAutoConfiguration`）
+   ⇒ 本域 like-rpc / task-rpc **自带** `spring-boot-starter-data-redis` ⇒ `@ConditionalOnClass` 命中
+   ⇒ 且本域**零域内副本** ⇒ **共享层那份生效** ⇒ 断连即拒单（实测 1ms）⇒ 不再撞 `rpc-timeout: 2s`
+   ⇒ ⚠️ **顺带确认「遮蔽契约」**：本域**不得**新建 `RedisDisconnectedBehaviorConfig` 之类的域内副本
+   （那会遮蔽共享层 ⇒ E66 等后续修正在本域**静默失效**）
+3. **A3 升 ✅ 的前置**：共享层的 `GoStylePathNormalizingFilter` 合并后 ⇒ 跑**真 Tomcat 探针**复核
+   ⇒ 本域 A3 才能整体升 ✅（Go 侧已 L4 活体坐实：5 种路径变体全 200）
+
+⚠️ **E66 的硬约束（G4 已探明，落地前必须解决）**：
+Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
+**offset 146 先写 `timeoutOptions`（来自 `spring.data.redis.timeout`）→ offset 151 才应用 customizer**
+⇒ ⇒ customizer 再调 `timeoutOptions(...)` 会**覆盖运维配置的命令超时**
+⇒ ⇒ 落码前必须先解决「**保留既有命令超时**」
+⇒ 🆕 **本域提供的实测数据**：命令超时**压根不挂在 `ClientOptions` 上**
+（`javap` 实测 `io.lettuce.core.ClientOptions` **没有** `getCommandTimeout()`，命中数 = **0**）
+⇒ ⇒ customizer 里要读回的是 **`getClientConfiguration().getCommandTimeout()`**（**不是** yml、**不是** `getTimeoutOptions()`）
+⇒ ⇒ 且本域的**域侧调用点清单**已备好（like-rpc **11 处** / task-rpc **3 处** · 见本文件 §4 的 FB-05 / FB-06）
 
 ## 5. 交付物清单
 

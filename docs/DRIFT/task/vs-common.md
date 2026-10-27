@@ -80,7 +80,7 @@
 > - **FB-01**：`service/common/.../http/GoStylePathNormalizingFilter.java`（`@Order(HIGHEST_PRECEDENCE+2)` + `goPathClean`）＋ `GoStylePathNormalizingAutoConfiguration.java`（唯一注册点）＋ `AutoConfiguration.imports` +1 行
 > - **FB-02**：`service/common/.../http/GoStyleFormLimitMode.java`（`SEMANTIC_REACHABILITY` ＋ `REGISTERED_DEVIATIONS` ＋ `parse` 行为不变）＋ `GoStyleTomcatParameterLimitCustomizer.java` ＋ `GoStyleFormValues.java`（「开不开」与「拒成什么形状」两条独立的轴）
 > - **FB-03**：`service/common/.../protection/GoStyleRpcProtectionChain.java`（`Layered` ＋ `Composition` ＋ `compose(props)` ＋ `layerNames(chain)` ＋ `build` 改为消费 `compose` ⇒ 条件与顺序逐字不变）
-> ⇒ **共享层侧回归（G4 自测）**：全量 `mvn -B clean verify`（仓库根，**不是**只跑「看起来受影响」的域）⇒ **52 个模块 / 2442 条 / 0 failures / 0 errors / 4 skipped**（4 条 skip 全是 favorite 的对拍探针自动 skip）/ 21:59 min ⇒ 变异验证：FB-01 撤掉归一层的自动配置注册 ⇒ **4 failures**；FB-03 摘掉降载层的 `Layered` 标记 ⇒ **5 failures** ⇒ 均红在目标断言
+> ⇒ **共享层侧回归（G4 自测）**：全量 `mvn -B clean verify`（仓库根，**不是**只跑「看起来受影响」的域）⇒ **52 个模块 / 2442 条 / 0 failures / 0 errors / 4 skipped**（4 条 skip 全是 favorite 的对拍探针自动 skip）/ 21:59 min<br>🆕 **2026-10-27 订正（G4 第七次全量 · `5564c27`）**：上行的 **2442** 是**第六次**全量的数字 ⇒ **第七次全量 = 2457 条**（52 模块 / 0 failures / 0 errors / **4 skipped** / **20:28 min** / `MVN_EXIT=0`）⇒ 多出的 15 条 = G4 后续落的守门（含 `ObservationPoolSelfHealingGateTest` 等）⇒ ⚠️ **2457 是 G4 树（52 模块）的口径**，**不是本域数字** ⇒ 本域三域六模块 = **594 条**（`mvn test` 口径） ⇒ 变异验证：FB-01 撤掉归一层的自动配置注册 ⇒ **4 failures**；FB-03 摘掉降载层的 `Layered` 标记 ⇒ **5 failures** ⇒ 均红在目标断言
 > ⇒ ⚠️ **本域的三域回归与之重叠过**（我 04:45 看到 G4 的 surefire 进程 ⇒ 机器负载高、我的回归变慢）⇒ 已在台账登记「错峰」共识
 > ✅ **G4 回执（2026-10-27 · `182fc32`）**：共享层已落码 `GoStylePathNormalizingFilter`（**字节级逐字移植** Go `path.Clean`）+ `GoStylePathNormalizingAutoConfiguration`（唯一注册点）⇒ 🟢 **Go 侧已 L4 活体坐实**（真 go-zero rest server + curl：5 种路径变体全 200）⇒ **共享层那半已闭环**<br>⚠️ **但仍未合入本树** ⇒ **本域 A3 暂不整体升 ✅** ⇒ 合并后本域只需跑**真 Tomcat 探针**复核即可<br>⚠️ **跨域协调项（G3 的活）**：article-api 的**域内副本** `service/article/article-api/.../config/GoStylePathNormalizingFilter.java` 仍在 ⇒ G4 用「按 Bean 名去重」保证 article-api 的守门仍绿 ⇒ **由 G3 删**（不在本域写权内） |
 
@@ -100,7 +100,7 @@
 > - **FB-01**：`service/common/.../http/GoStylePathNormalizingFilter.java`（`@Order(HIGHEST_PRECEDENCE+2)` + `goPathClean`）＋ `GoStylePathNormalizingAutoConfiguration.java`（唯一注册点）＋ `AutoConfiguration.imports` +1 行
 > - **FB-02**：`service/common/.../http/GoStyleFormLimitMode.java`（`SEMANTIC_REACHABILITY` ＋ `REGISTERED_DEVIATIONS` ＋ `parse` 行为不变）＋ `GoStyleTomcatParameterLimitCustomizer.java` ＋ `GoStyleFormValues.java`（「开不开」与「拒成什么形状」两条独立的轴）
 > - **FB-03**：`service/common/.../protection/GoStyleRpcProtectionChain.java`（`Layered` ＋ `Composition` ＋ `compose(props)` ＋ `layerNames(chain)` ＋ `build` 改为消费 `compose` ⇒ 条件与顺序逐字不变）
-> ⇒ **共享层侧回归（G4 自测）**：全量 `mvn -B clean verify`（仓库根，**不是**只跑「看起来受影响」的域）⇒ **52 个模块 / 2442 条 / 0 failures / 0 errors / 4 skipped**（4 条 skip 全是 favorite 的对拍探针自动 skip）/ 21:59 min ⇒ 变异验证：FB-01 撤掉归一层的自动配置注册 ⇒ **4 failures**；FB-03 摘掉降载层的 `Layered` 标记 ⇒ **5 failures** ⇒ 均红在目标断言
+> ⇒ **共享层侧回归（G4 自测）**：全量 `mvn -B clean verify`（仓库根，**不是**只跑「看起来受影响」的域）⇒ **52 个模块 / 2442 条 / 0 failures / 0 errors / 4 skipped**（4 条 skip 全是 favorite 的对拍探针自动 skip）/ 21:59 min<br>🆕 **2026-10-27 订正（G4 第七次全量 · `5564c27`）**：上行的 **2442** 是**第六次**全量的数字 ⇒ **第七次全量 = 2457 条**（52 模块 / 0 failures / 0 errors / **4 skipped** / **20:28 min** / `MVN_EXIT=0`）⇒ 多出的 15 条 = G4 后续落的守门（含 `ObservationPoolSelfHealingGateTest` 等）⇒ ⚠️ **2457 是 G4 树（52 模块）的口径**，**不是本域数字** ⇒ 本域三域六模块 = **594 条**（`mvn test` 口径） ⇒ 变异验证：FB-01 撤掉归一层的自动配置注册 ⇒ **4 failures**；FB-03 摘掉降载层的 `Layered` 标记 ⇒ **5 failures** ⇒ 均红在目标断言
 > ⇒ ⚠️ **本域的三域回归与之重叠过**（我 04:45 看到 G4 的 surefire 进程 ⇒ 机器负载高、我的回归变慢）⇒ 已在台账登记「错峰」共识
 > ✅ **G4 回执（2026-10-27 · `182fc32`）**：**本单已闭环**（零行为改动）—— 共享层把判据从「写权范围」改成「**语义可达性**」+ 落一张 **10 个 api 域逐域取证表**（每行带 Go 侧 `文件:行号` / 命中数）⇒ 判据**只有一份**且可被机器核对 ⇒ 「下一个裸 decoder 域不会重复踩」有了机制<br>🟢 **本域那半（task 的 `mode: "off"`）已在 `4786eb5` 落码**，且**与共享层表里的 task 行（`Mode.OFF`）同向** ⇒ 两侧一致、无需再动<br>⚠️ **favorite 的偏离已由共享层登记**（`REGISTERED_DEVIATIONS`，写清可观察差异：Go 400+text/plain vs RAG 400+Tomcat HTML，且 Tomcat 计**参数总数**、Go 计**非空值**）⇒ **不在本域写权内 ⇒ 本域不动** |
 
@@ -120,7 +120,7 @@
 > - **FB-01**：`service/common/.../http/GoStylePathNormalizingFilter.java`（`@Order(HIGHEST_PRECEDENCE+2)` + `goPathClean`）＋ `GoStylePathNormalizingAutoConfiguration.java`（唯一注册点）＋ `AutoConfiguration.imports` +1 行
 > - **FB-02**：`service/common/.../http/GoStyleFormLimitMode.java`（`SEMANTIC_REACHABILITY` ＋ `REGISTERED_DEVIATIONS` ＋ `parse` 行为不变）＋ `GoStyleTomcatParameterLimitCustomizer.java` ＋ `GoStyleFormValues.java`（「开不开」与「拒成什么形状」两条独立的轴）
 > - **FB-03**：`service/common/.../protection/GoStyleRpcProtectionChain.java`（`Layered` ＋ `Composition` ＋ `compose(props)` ＋ `layerNames(chain)` ＋ `build` 改为消费 `compose` ⇒ 条件与顺序逐字不变）
-> ⇒ **共享层侧回归（G4 自测）**：全量 `mvn -B clean verify`（仓库根，**不是**只跑「看起来受影响」的域）⇒ **52 个模块 / 2442 条 / 0 failures / 0 errors / 4 skipped**（4 条 skip 全是 favorite 的对拍探针自动 skip）/ 21:59 min ⇒ 变异验证：FB-01 撤掉归一层的自动配置注册 ⇒ **4 failures**；FB-03 摘掉降载层的 `Layered` 标记 ⇒ **5 failures** ⇒ 均红在目标断言
+> ⇒ **共享层侧回归（G4 自测）**：全量 `mvn -B clean verify`（仓库根，**不是**只跑「看起来受影响」的域）⇒ **52 个模块 / 2442 条 / 0 failures / 0 errors / 4 skipped**（4 条 skip 全是 favorite 的对拍探针自动 skip）/ 21:59 min<br>🆕 **2026-10-27 订正（G4 第七次全量 · `5564c27`）**：上行的 **2442** 是**第六次**全量的数字 ⇒ **第七次全量 = 2457 条**（52 模块 / 0 failures / 0 errors / **4 skipped** / **20:28 min** / `MVN_EXIT=0`）⇒ 多出的 15 条 = G4 后续落的守门（含 `ObservationPoolSelfHealingGateTest` 等）⇒ ⚠️ **2457 是 G4 树（52 模块）的口径**，**不是本域数字** ⇒ 本域三域六模块 = **594 条**（`mvn test` 口径） ⇒ 变异验证：FB-01 撤掉归一层的自动配置注册 ⇒ **4 failures**；FB-03 摘掉降载层的 `Layered` 标记 ⇒ **5 failures** ⇒ 均红在目标断言
 > ⇒ ⚠️ **本域的三域回归与之重叠过**（我 04:45 看到 G4 的 surefire 进程 ⇒ 机器负载高、我的回归变慢）⇒ 已在台账登记「错峰」共识
 > ✅ **G4 回执（2026-10-27 · `182fc32`）**：共享层已落码 `Layered` 标记 + `Composition` + `compose(props)`（**唯一**构成计算点，`build` 内部消费它）+ `layerNames(chain)`（观测已构造出的链）⇒ **零行为改动**（条件与顺序逐字不变）⇒ 配套守门 7 条，变异（摘掉降载层的 `Layered` 标记）**5 failures**<br>⚠️ **本树尚未合入** ⇒ 本域守门 D-2 改用**等价**判据（「包装层归属」，见 §2/A2）⇒ **合并后**按 §5.3e 重跑收口回归时**升级为 `layerNames(chain)` 断言** |
 
@@ -152,6 +152,88 @@
 | **⑤ 建议修法（共享层先落 · 域侧再跟）** | 共享层：提供「当前请求剩余 deadline」的统一载体（rpc 侧 = `RpcInterceptor.DeadlineState`，它**已经在** handler 线程绑定 ⇒ **零新增机制**）<br>域侧（本域）：在 Redis 调用点把 `DeadlineState.remainingMillis()` 绑进命令超时<br>⚠️ **落点顺序**：若 G4 在共享层做「Lettuce `TimeoutOptions.TimeoutSource` 逐命令动态返回剩余 deadline」（G4 知会里说的路线）⇒ **域侧零改动** ⇒ 本域只需复核；若是「各域调用点自己查载体」⇒ 本域需改 3 处 |
 | **⑥ 影响面** | 本域 = **task-rpc 的 3 处请求路径调用点**（上表③①②③）<br>⚠️ **MQ sink 的 Redis 调用**（`UserLikeProgressSink` / `ArticleLikeProgressSink` / `TaskCountStore` / `TaskRewardPublisher`）**不属 E66 域** —— Go 侧它们的 ctx 是 **Kafka 消费 ctx**（`service/task/rpc/internal/sink/like_sink.go:110-128` 的 `loop(ctx)`）⇒ **本来就没有请求 deadline** ⇒ 两侧同形 ⇒ **不修**（避免造出「比 Go 更严」的新漂移） |
 | **⑦ 是否阻塞本波** | **否**（G4 已明确「本轮不落码、提请立项」⇒ 本域**只登记**）<br>⚠️ 但**本域已单独修掉一条相邻的、更严重的漂移**（Redis **命令/连接超时**未配 ⇒ 断连挂 60s）⇒ 见 [DRIFT-TASK-RPC-007](rpc.md#🔴-drift-task-rpc-007--redis-命令超时未配--落-lettuce-默认-60s--断连时命令挂-60sgo-是-17s-快速失败) |
+
+## 4·五、🟢 **G4 正式回执（4 项规格）· 2026-10-27 · `align/g4-service-common` @ `5564c27`**
+
+> 📌 **本节是 G4 那张「4 项规格」回执的域侧归档**（AGENTS.md §5.3b：产出**必写回**本域 §4）。
+> ⚠️ **本节不销任何单** —— 销号须**合并后**按 §5.3e 重跑收口回归才成立（见末「合并后必做动作」）。
+
+### ① HEAD
+
+`align/g4-service-common` @ **`5564c27`**（基线 `a282012` 之上 **30** 提交 · 工作区干净 · **未 push**）
+
+### ② 改动文件清单（逐个 `文件:行号`）
+
+- `service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:92` ＋ 类级 javadoc `:40-90`
+- `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:50` ＋ `:60`
+- `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:88` / `:122` / `:137` / `:181-182`
+- `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:163` / `:175` / `:209`
+- `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java:70-84` / `:106-127` / `:129`
+- `service/common/src/main/java/com/rag/common/persistence/SqlTimeoutStatusTranslator.java:31`
+- 守门新增 5 文件：`…/spring/HttpPoolShutdownWithoutServletGateTest.java` · `…/spring/HttpShutdownProbeWithoutServlet.java` ·
+  `…/precedence/GoStyleRedisClientOptionsPrecedenceGateTest.java` · `…/precedence/DomainLikeRedisDisconnectedBehaviorConfig.java` ·
+  `…/observability/ObservationPoolSelfHealingGateTest.java`
+- 台账：`docs/DRIFT/global/vs-common.md`
+
+### ③ 触及的 A 轴 ＋ Go 出处
+
+- **A3**：`HttpMiddleware.java:1089`（Go 出处 `service/common/observability/http.go`）；
+  `ObservabilityLifecycle` 的 Go 出处 = `service/follow/rpc/follow.go:45` ＋ `:3-21`（零 web 类型）
+- **A1**：`RpcInterceptor.java:623`（Go 出处 `service/common/observability/rpc.go:38`）
+- **A4**：`SqlTimeoutStatusTranslator.java:31`（Go 出处 `getuserlistlogic.go:44-48` · `selectavatarlogic.go:59-60` ·
+  `errmsg/errmsg.go:6`/`:41` · `observability.go:146-158`）
+
+### ④ 回归口径与结果
+
+`mvn -B clean verify`（全量）⇒ **BUILD SUCCESS / `MVN_EXIT=0`** · **52 模块** · **2457 条** ·
+**failures 0 / errors 0 / skipped 4** · **20:28 min**
+⇒ 双侧探针同批次复跑：`run-parity.sh` **EXIT=0 · 56 例**（一致 54 / 不一致 0 / 已签字偏离 2）·
+`run-rpc-timeout-parity.sh` **EXIT=0 · 3 例**
+⇒ 三门禁同批次复跑：**0 / 0 / 0**
+
+⚠️ **口径提醒**：**2457 条是 G4 树（52 模块）的数字** ⇒ **不是**本域的数字
+⇒ 本域三域六模块的数字见本文件各自的「测试」行（口径 = `mvn test`）⇒ **两者不可混用**。
+
+### 🟢 我域三张单 + 澄清的逐条状态
+
+| 单 | 状态 | 落码 commit |
+|---|---|---|
+| **FB-01**（A3 路径归一进共享层） | 🟢 **已落** | `9690b04` |
+| **FB-02**（form 闸门判据改「语义可达性」） | 🟢 **已落** | `182fc32` |
+| **FB-03**（保护链「层构成」只读入口） | 🟢 **已落** | `182fc32` |
+| **澄清第 1 步**（form 判据措辞） | 🟢 **已落且与本域要求逐条一致** | `182fc32` |
+| **E66**（Redis 写不绑 deadline） | 🔴 **仍 OPEN · 本轮转立项** | — |
+
+⇒ **G4 未越界**（按本域给的边界）：共享层**没有**为 task 写特例 · **没有**碰 favorite 的任何东西 ·
+本域建议项 3 的对拍脚本落点 = `tools/difftest/**`（无 lane 拥有的共享面）⇒ **只登记，不擅自改** ✅
+
+### 🔴 合并后我域**必做**动作（收口回归 · §5.3e）
+
+⚠️ **本域当前仍用「等价判据」顶着**（因为 G4 的落码**未合入本树**）⇒ 合并后必须：
+
+1. **复跑本域 3 处 `DEADLINE_EXCEEDED` 断言**（`LikeRpcGrpcInterceptorWiringTest:178` ·
+   `LikeRpcSlowThresholdGateTest` · `LikeRpcTimeoutCapTest` × 4）
+   ⇒ 原因 = G4 `7488b3d` 修的「**进程级静态池**终止即永久」缺陷**本域同构**
+   （`ObservabilityLifecycle` 被本域三个 rpc 组件全部 `@Import` ⇒ 每个 Spring 上下文关闭都毒化池）
+   ⇒ 合并后池**自愈**（`AtomicReference` + CAS 重建）⇒ 这三处应从「**侥幸绿**」变「**真绿**」
+   ⇒ ⚠️ **若仍红 ⇒ 不是新回归，是毒化未被覆盖 ⇒ 直接找 G4**
+2. **复核共享层的 `REJECT_COMMANDS` 在本域生效**（`GoStyleRedisClientAutoConfiguration`）
+   ⇒ 本域 like-rpc / task-rpc **自带** `spring-boot-starter-data-redis` ⇒ `@ConditionalOnClass` 命中
+   ⇒ 且本域**零域内副本** ⇒ **共享层那份生效** ⇒ 断连即拒单（实测 1ms）⇒ 不再撞 `rpc-timeout: 2s`
+   ⇒ ⚠️ **顺带确认「遮蔽契约」**：本域**不得**新建 `RedisDisconnectedBehaviorConfig` 之类的域内副本
+   （那会遮蔽共享层 ⇒ E66 等后续修正在本域**静默失效**）
+3. **A3 升 ✅ 的前置**：共享层的 `GoStylePathNormalizingFilter` 合并后 ⇒ 跑**真 Tomcat 探针**复核
+   ⇒ 本域 A3 才能整体升 ✅（Go 侧已 L4 活体坐实：5 种路径变体全 200）
+
+⚠️ **E66 的硬约束（G4 已探明，落地前必须解决）**：
+Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
+**offset 146 先写 `timeoutOptions`（来自 `spring.data.redis.timeout`）→ offset 151 才应用 customizer**
+⇒ ⇒ customizer 再调 `timeoutOptions(...)` 会**覆盖运维配置的命令超时**
+⇒ ⇒ 落码前必须先解决「**保留既有命令超时**」
+⇒ 🆕 **本域提供的实测数据**：命令超时**压根不挂在 `ClientOptions` 上**
+（`javap` 实测 `io.lettuce.core.ClientOptions` **没有** `getCommandTimeout()`，命中数 = **0**）
+⇒ ⇒ customizer 里要读回的是 **`getClientConfiguration().getCommandTimeout()`**（**不是** yml、**不是** `getTimeoutOptions()`）
+⇒ ⇒ 且本域的**域侧调用点清单**已备好（like-rpc **11 处** / task-rpc **3 处** · 见本文件 §4 的 FB-05 / FB-06）
 
 ## 5. 交付物清单
 
