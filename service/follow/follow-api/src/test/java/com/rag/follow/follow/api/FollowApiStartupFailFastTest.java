@@ -129,7 +129,7 @@ class FollowApiStartupFailFastTest {
                     .withPropertyValues(
                             "grpc.client.follow-rpc.address=static://127.0.0.1:" + server.getPort(),
                             "grpc.client.follow-rpc.negotiation-type=plaintext",
-                            "grpc.client.follow-rpc.immediate-connect-timeout=3s")
+                            "grpc.client.follow-rpc.immediate-connect-timeout=10s") // 可达用例用**宽预算**：3s 是**生产值**（另有 yml 静态断言守住），本用例只验「可达 ⇒ 不该启动失败」；冷 JVM + 满负载下 TCP+HTTP/2 握手可能超 3s ⇒ **偶发红**（2026-10-27 admin-api 侧实测同类现象：全量红 / 隔离绿 ⇒ 属测试自身预算过紧，不是产品缺陷）
                     .run(context -> {
                         assertThat(context).hasNotFailed();
                         assertThat(context).hasSingleBean(FollowRpcClient.class);
@@ -172,7 +172,7 @@ class FollowApiStartupFailFastTest {
                     .withPropertyValues(
                             "grpc.client.follow-rpc.address=static://127.0.0.1:" + server.getPort(),
                             "grpc.client.follow-rpc.negotiation-type=plaintext",
-                            "grpc.client.follow-rpc.immediate-connect-timeout=3s")
+                            "grpc.client.follow-rpc.immediate-connect-timeout=10s") // 可达用例用**宽预算**：3s 是**生产值**（另有 yml 静态断言守住），本用例只验「可达 ⇒ 不该启动失败」；冷 JVM + 满负载下 TCP+HTTP/2 握手可能超 3s ⇒ **偶发红**（2026-10-27 admin-api 侧实测同类现象：全量红 / 隔离绿 ⇒ 属测试自身预算过紧，不是产品缺陷）
                     .run(context -> {
                         assertThat(context).hasNotFailed();
                         assertThat(context).hasSingleBean(FollowRpcClient.class);

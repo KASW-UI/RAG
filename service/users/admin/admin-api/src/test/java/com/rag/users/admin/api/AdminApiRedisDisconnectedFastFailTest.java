@@ -263,6 +263,28 @@ class AdminApiRedisDisconnectedFastFailTest {
                 "连接超时必须等于 5s（= go-redis DialTimeout 默认）⇒ 连接超时的**消费层**锚点。"
                         + "若是 10s ⇒ 那是 Lettuce 自己的默认（Boot 4 在 null 时整段跳过，不回落 timeout）。");
 
+        // ── 命令超时的**机制腿**：3s 这个时长到底会不会被施加 ─────────
+        // 🔴 2026-10-27 探针实测（Boot 4.0.8 + spring-data-redis 4.0.7 + lettuce 6.8.2）：
+        //   TimeoutOptions.isTimeoutCommands        = true
+        //   TimeoutOptions.isApplyConnectionTimeout = true
+        //   TimeoutOptions.getSource()              = DefaultTimeoutSource ⇒ 恒返回 -1
+        //   LettuceConnectionFactory.getTimeout()   = 3000ms（连接级 ⇒ RedisURI.timeout）
+        // ⇒ **source 这一路给不出时长**（恒 -1）⇒ 3s 只能由 **applyConnectionTimeout 分支**
+        //   从连接级 timeout 取 ⇒ ⇒ 「命令超时 3s 真的生效」是**两条腿**：
+        //   ① 值（getCommandTimeout）② 机制（applyConnectionTimeout ＋ 连接级 timeout）
+        // ⇒ ⚠️ **只断言值 ⇒ 假绿**：若 applyConnectionTimeout 被关掉，值照样读得到 3s，
+        //   但命令**永不过期** ⇒ 断连时从「3s 快速失败」退化成「无限等待」
+        // ⇒ ⚠️ `isTimeoutCommands()` **不是**有效判据（它恒为 true，与时长是否被施加无关）
+        assertEquals(3000L, connectionFactory.getTimeout(),
+                "连接级 timeout（⇒ RedisURI.timeout）必须是 3000ms —— "
+                        + "Boot 4 的 TimeoutOptions.source 恒为 DefaultTimeoutSource（返回 -1）"
+                        + " ⇒ 命令过期的时长只能从这一路取");
+        assertTrue(options.getTimeoutOptions().isApplyConnectionTimeout(),
+                "Lettuce 的 TimeoutOptions 必须开着 applyConnectionTimeout："
+                        + "source 恒为 DefaultTimeoutSource（-1）⇒ 若这一位是 false，"
+                        + "source 与回落两条路都给不出时长 ⇒ 命令永不过期 ⇒ "
+                        + "「命令超时 3s」就只剩配置层事实、运行期不生效（假绿）");
+
         redisTemplate.opsForValue().set("admin:redis:probe", "1");
         assertEquals(Boolean.TRUE, redisTemplate.hasKey("admin:redis:probe"),
                 "Redis 可达时 hasKey 必须为 true（否则后面的故障注入测不到断连状态机）");

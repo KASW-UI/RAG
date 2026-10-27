@@ -139,7 +139,7 @@ class AdminApiStartupFailFastTest {
                     .withPropertyValues(
                             "grpc.client.admin-rpc.address=static://127.0.0.1:" + server.getPort(),
                             "grpc.client.admin-rpc.negotiation-type=plaintext",
-                            "grpc.client.admin-rpc.immediate-connect-timeout=3s")
+                            "grpc.client.admin-rpc.immediate-connect-timeout=10s") // 可达用例用**宽预算**：3s 是**生产值**（另有 yml 静态断言守住），本用例只验「可达 ⇒ 不该启动失败」；冷 JVM + 满负载下 TCP+HTTP/2 握手可能超 3s ⇒ **偶发红**（2026-10-27 实测：全量红 / 隔离绿 ⇒ 属测试自身预算过紧，不是产品缺陷）
                     .run(context -> {
                         assertThat(context).hasNotFailed();
                         assertThat(context).hasSingleBean(AdminRpcClient.class);
@@ -182,7 +182,7 @@ class AdminApiStartupFailFastTest {
                     .withPropertyValues(
                             "grpc.client.admin-rpc.address=static://127.0.0.1:" + server.getPort(),
                             "grpc.client.admin-rpc.negotiation-type=plaintext",
-                            "grpc.client.admin-rpc.immediate-connect-timeout=3s")
+                            "grpc.client.admin-rpc.immediate-connect-timeout=10s") // 可达用例用**宽预算**：3s 是**生产值**（另有 yml 静态断言守住），本用例只验「可达 ⇒ 不该启动失败」；冷 JVM + 满负载下 TCP+HTTP/2 握手可能超 3s ⇒ **偶发红**（2026-10-27 实测：全量红 / 隔离绿 ⇒ 属测试自身预算过紧，不是产品缺陷）
                     .run(context -> {
                         assertThat(context).hasNotFailed();
                         assertThat(context).hasSingleBean(AdminRpcClient.class);
