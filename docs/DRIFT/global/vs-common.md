@@ -18,6 +18,7 @@
 | 域侧台账 | [`_README.md`](_README.md) · [`cross-domain.md`](cross-domain.md) · [`common-tails.md`](common-tails.md) · [`cycle-deps.md`](cycle-deps.md) · [`lanes/`](lanes/) |
 | **写权** | 🔴 **`service/common/**` + `service/users/users-common/**` 的唯一写者**（G4 = 共享层波）＋ 本 lane 台账 `docs/DRIFT/global/vs-common.md`；⚠️ 旧的 `align/global` 全域 lane **已弃用**（Jason：一个工作树跨多域 ⇒ 粒度与操作内容不可控） |
 | common 侧机制面台账 | [`docs/DRIFT/common/`](../common/)：`deadline.md` · `http.md` · `protection.md` · `audit.md` · `alignment-2026-10-23.md` |
+| 🔴 **Go 出处的路径口径** | ⚠️ **go-zero 的内部路径一律是「依赖源码」，不是真源仓路径** —— 真源仓 `Sea-RideTheWind_golang` **没有** `core/` `rest/` `zrpc/` 目录（实测：顶层只有 `api/` `doc/` `proto/` `service/` `grafana/` 等）⇒ ⇒ 凡引用 go-zero 内部文件，**必须写成 `go-zero@v1.10.2/<路径>`**（版本 = 真源 `go.mod` pin 的版本）⇒ ⇒ **不带前缀 ⇒ 后人回真源仓找不到 ⇒ 引用等于失效** ⇒ ⇒ **2026-10-27 已把本台账 19 处补齐**（唯一例外 = `javap` 的 Java 常量池签名 `core/annotation/Order;` ⇒ 那不是 go-zero 路径） |
 
 ## 1. 本域侧已知的 common 相关条目（**2026-10-27 抽取**，逐条证据以域台账为准）
 
@@ -203,7 +204,7 @@
 | 核查项 | 结论 |
 |---|---|
 | **编号 ↔ 主题是否对得上** | ❌ **对不上** —— 权威面 `docs/DRIFT/article/api.md:676-682` 的 `DRIFT-ARTICLE-API-006` = 「**8–10 MiB JSON body 的错误文案**（LOW，**2026-10-24 已确认不修**）」；而 `docs/DRIFT/article/vs-common.md:27` 把「**Go 必填字段校验**」挂在**同一编号**下 ⇒ 命中 `api.md:8-11` 自己警告的「**两套编号同形不同义**」 |
-| **该机制是否还缺共享层实现** | ✅ **不缺** —— 契约 `GoStyleRequiredFields` 已落地于 `service/users/users-common/.../http/GoStyleRequiredFields.java:46-53`，带**三段 Go 出处**（`core/mapping/utils.go` `parseOption` · `unmarshaler.go:918-969` · `:1199`）＋ 运行时探针 `tools/difftest/probe-go-required-fields.py`（2026-10-21） |
+| **该机制是否还缺共享层实现** | ✅ **不缺** —— 契约 `GoStyleRequiredFields` 已落地于 `service/users/users-common/.../http/GoStyleRequiredFields.java:46-53`，带**三段 Go 出处**（`go-zero@v1.10.2/core/mapping/utils.go` `parseOption` · `unmarshaler.go:918-969` · `:1199`）＋ 运行时探针 `tools/difftest/probe-go-required-fields.py`（2026-10-21） |
 | **article 域接入情况** | `CreateArticleReq implements GoStyleRequiredFields`（`service/article/article-api/.../dto/CreateArticleReq.java:57` + `:109`）⇒ **已接入**；`DeleteArticleReq.java:14` / `UpdateArticleReq.java:31` **显式不实现**（附了理由） |
 | **落点复核结果** | ⇒ 若真残留，落点在 **`service/article/article-api/**`（DTO 层）= G3 自己的写权面** ⇒ 按 C3「域侧能自修的自修」⇒ **不甩给 G4** |
 | **结论** | ⛔ **不进 G4 排期** —— ① 编号撞号（须先由 G3 订正编号/摘要）；② 落点疑在域侧 ⇒ 派单前请 G3 核实行号 + 明确落点 |
@@ -330,7 +331,7 @@
 | 项 | 结论 |
 |---|---|
 | 1 现象 | Go 的 router 对请求路径做 `path.Clean` ⇒ 路径变体命中同一条路由；RAG 侧原先**只有 article-api 有**（域内副本）⇒ 其余 9 个 api 缺这一层 |
-| 2 Go 侧出处 | go-zero v1.10.2 `rest/router/patrouter.go:48`（注册侧 `cleanPath := path.Clean(reqPath)`）+ `:60`（匹配侧 `reqPath := path.Clean(r.URL.Path)`）—— 逐字核对过 |
+| 2 Go 侧出处 | go-zero v1.10.2 `go-zero@v1.10.2/rest/router/patrouter.go:48`（注册侧 `cleanPath := path.Clean(reqPath)`）+ `:60`（匹配侧 `reqPath := path.Clean(r.URL.Path)`）—— 逐字核对过 |
 | 3 RAG 侧现状 | `service/common/src/main/**` 下 `GoStylePathNormalizingFilter` 命中数 = **0**；全仓唯一实现在 `service/article/article-api/.../config/GoStylePathNormalizingFilter.java`（域内类） |
 | 4 证据强度 | **L4（双侧活体）**：🟢 Go 侧 = /tmp 临时工程起**真 go-zero v1.10.2 rest server** + curl，5 个 target 全 200；RAG 侧 = **真 Tomcat + 裸 socket** 同 5 个 target 同解 ⇒ ⇒ 两侧比的是**同一个请求**（JDK HttpClient 会自己归一 URI ⇒ 必须裸 socket） |
 | 5 建议修法 | **Y = 「所有 api 的请求路径都按 Go 的 `path.Clean` 归一后再匹配」** ⇒ 归一器落**共享层**（不得按域各写一份）⇒ 归一语义 = Go `path/clean.go` ⇒ 必须排在读路径的 Filter 之前 |
@@ -351,7 +352,7 @@
 | 项 | 结论 |
 |---|---|
 | 1 现象 | 共享层把「`off` 的依据」写成「**favorite 域不在 global 的写权范围内**」⇒ 那是一条**与 Go 行为无关**的理由 ⇒ ① 回答不了「下一个域该开还是该关」② 漏声明的域**静默落到缺省 `off`**（而缺省只对「Go 侧不解析」的域才正确） |
-| 2 Go 侧出处 | go-zero v1.10.2 `rest/httpx/requests.go`（`Parse → ParseForm → GetFormValues`）+ `rest/httpx/util.go:15`（`maxFormParamCount = 2048`，数**非空值**）+ `:48-53`（超限 ⇒ `too many form values` ⇒ Parse 失败）⇒ **只有 handler 真调 `httpx.Parse` 的域，`r.Form` 才被求值** ⇒ 两道上限才可达 |
+| 2 Go 侧出处 | go-zero v1.10.2 `go-zero@v1.10.2/rest/httpx/requests.go`（`Parse → ParseForm → GetFormValues`）+ `go-zero@v1.10.2/rest/httpx/util.go:15`（`maxFormParamCount = 2048`，数**非空值**）+ `:48-53`（超限 ⇒ `too many form values` ⇒ Parse 失败）⇒ **只有 handler 真调 `httpx.Parse` 的域，`r.Form` 才被求值** ⇒ 两道上限才可达 |
 | 3 RAG 侧现状 | `service/common/http/GoStyleFormLimitMode.java:41-49`（旧判据）；`GoStyleTomcatParameterLimitCustomizer.java:107-108` 与 `GoStyleFormValues.java:38`（同一套措辞的三处落点） |
 | 4 证据强度 | **L1（两侧源码逐字对照）**；Go 侧命中数**实测**：task/api = **0**、article/api = 6（对照组）、favorite/api = 7、user/api = 8、admin/api = 13 |
 | 5 建议修法 | **Y = 「闸门按『Go 侧是否真的解析 form/query』决定开否」** ⇒ 判据从「写权范围」扩成「语义可达性」 |
@@ -380,7 +381,7 @@
 | 项 | 结论 |
 |---|---|
 | 1 现象 | 链构成由两个条件分支决定（`:65` shedding 需 `enabled && maxCpuPermille>0`；`:72` breaker 需 `enabled`）⇒ 域级守门无法**分别**断言 breaker / shedding ⇒ 只能「关掉降载换确定性」⇒ 断言被迫退化（名义上写 breaker/shedding，实际只证明了 breaker） |
-| 2 Go 侧出处 | go-zero v1.10.2 `zrpc/server.go:157-159`（Breaker，默认 true）+ `:160-163`（Shedding，`CpuThreshold > 0` 才挂）⇒ Go 侧四个拦截器**无条件按序装上** |
+| 2 Go 侧出处 | go-zero v1.10.2 `go-zero@v1.10.2/zrpc/server.go:157-159`（Breaker，默认 true）+ `:160-163`（Shedding，`CpuThreshold > 0` 才挂）⇒ Go 侧四个拦截器**无条件按序装上** |
 | 3 RAG 侧现状 | `service/common/protection/GoStyleRpcProtectionChain.java:61-78` —— 链构成不可从外部查询 |
 | 4 证据强度 | **L1**（两侧源码逐字对照） |
 | 5 建议修法 | **Y = 「每一层是否在链上，可被域级守门直接断言」** ⇒ 共享层暴露**只读**的「链层构成」查询入口 ⇒ **零行为改动** |
@@ -464,7 +465,7 @@
 | **3** | `UNRESOLVED-ARPC-002`（= **E38②**）：有效期限 = min(客户端 deadline, 服务端 timeout) ⇒ `deadlineEpochMs` + 超时调度器延时两处都要改 | **❌ 前提已过期** | 🟢 **不落码**（① 第三十一轮已修；② 第四十六轮已否决原修法并窄化成 E65/E66） | 已在 `service/common/.../observability/RpcInterceptor.java`（`af416d9`） |
 | **4** | `DRIFT-ADMINAPI-007`：503 响应 `Content-Type` charset 分号后空格 | **成立**（残差） | 🟢 **本轮不做 + 登记在案**（兄弟条 `DRIFT-MSGAPI-010` 用户已拍板「保持登记，本轮不做」⇒ 同类同先例 ⇒ **不升级为拍板题**） | 属 `admin-api` 域（`DRIFT-ADMINAPI-007`）⇒ 不在本层写权 |
 | **5** | `UNRESOLVED-USERSCOMMON-003`：`GoStyleCoercion::applyTo` 的全局副作用 | **❌ 前提不成立** | 🟢 **不落码**（口径已过期；且已注册的 8 个 api **不会误伤**） | 台账口径订正属 **users 域台账写权** ⇒ 归 G1 |
-| **6** | `DRIFT-USERRPC-V-002`：`users_user.status` NOT NULL 两侧不同 | **成立** | 🔴 **不落码 ⇒ 跨 lane 协调**（放开可空会**立刻激活 admin-rpc 的同款缺陷** ⇒ 必须与 admin 侧同改 ⇒ 那半边在 **G1 写权面**） | DDL 落点 `service/users/users-common/src/main/resources/db/01_create_user.sql:39`（**本层写权**）· 配套 `service/users/admin/admin-rpc/.../domain/UserEntity.java:60`（**G1 写权**） |
+| **6** | `DRIFT-USERRPC-V-002`：`users_user.status` NOT NULL 两侧不同 | **DDL 层成立 · 行为层零差异**（🔴 **2026-10-27 订正**，见 §4.9.7） | 🟢 **不落码 · 本层 DDL 保持 NOT NULL 不动**（放开可空**反而制造新漂移**：`callSettersOnNulls=false` ⇒ 读出 `null` ≠ Go 的 `0` ⇒ 方向相反）⇒ ⇒ **原「跨 lane 协调 + 两步方案」整体撤回**（前提「Go 读到 NULL 会扫描报错」已被 GORM 源码证伪）⇒ ⇒ **销号条件已满足**（G1 `ded22af` 已在其域台账逐处订正，本层确认成立） | DDL 落点 `service/users/users-common/src/main/resources/db/01_create_user.sql:39`（**本层写权**· **保持不动**）· 原配套 `service/users/admin/admin-rpc/.../domain/UserEntity.java:60`（**G1 写权**· **不必改**） |
 | **7** | `DRIFT-USERAPI-014` 跨域推广：Redis 断连 ⇒ fail-open（不排队等重连）⇒ 机制上移到 `service/common` | **成立** | 🟢 **已落码**（零域侧改动 ⇒ 覆盖所有用 Redis 的组件） | 新增 `service/common/.../redis/GoStyleRedisClientAutoConfiguration.java` |
 
 #### 4.9.2 🔴 #1 的 MaxConns 半边 = **已签字偏离 ⇒ 不修**（§5.3b）
@@ -472,7 +473,7 @@
 | 项 | 结论 |
 |---|---|
 | 派单说法 | 「Go 每路由一个 MaxConns latch」⇒ 落点 `service/common/.../protection/GoStyleMaxConnsFilter.java` |
-| **独立复核** | Go 侧确实每路由一个：`rest/engine.go:99-101`（`bindRoute` ⇒ `route` 是**逐路由参数**）→ `rest/engine.go:131-132`（`buildChainWithNativeMiddlewares` ⇒ 逐路由调 `handler.MaxConnsHandler`）→ `rest/handler/maxconnshandler.go:12-20`（每次 `syncx.NewLimit(n)`） |
+| **独立复核** | Go 侧确实每路由一个：`go-zero@v1.10.2/rest/engine.go:99-101`（`bindRoute` ⇒ `route` 是**逐路由参数**）→ `go-zero@v1.10.2/rest/engine.go:131-132`（`buildChainWithNativeMiddlewares` ⇒ 逐路由调 `handler.MaxConnsHandler`）→ `go-zero@v1.10.2/rest/handler/maxconnshandler.go:12-20`（每次 `syncx.NewLimit(n)`） |
 | **但** | 这条**已经签字**：`docs/Intentional_Deviations/global/common-tails.md:11-31` 的 **`SD-2026-10-25-01`**（2026-10-25 用户拍板，签字决定 = **保留 RAG 的全局闸门，不改成 per-route**）⇒ ⇒ **不修、不重复质疑、也不「顺手改回」** |
 | ⚠️ 台账口径冲突（**共享面，本层不回写**） | `docs/DRIFT/_cross/domain-common-lanes.md:125` 仍把 `DRIFT-FOLLOW-008` 列为「🔴 未修」⇒ **已过期**（签字后应从 DRIFT 侧移除）⇒ ⇒ **登记给整合者**（该文件属共享面 ⇒ 本 lane 不写） |
 
@@ -482,9 +483,9 @@
 
 | Go 事实 | 位置 | 对 RAG 的含义 |
 |---|---|---|
-| breaker 是**逐路由**建的 | `rest/engine.go:99-101` + `:131-132`（`handler.BreakerHandler(route.Method, route.Path, metrics)`） | 隔离单位 = 路由，不是具体 URI |
-| breaker 的**名字** = `METHOD://route.Path` | `rest/handler/breakerhandler.go:15`（`breakerSeparator = "://"`）+ `:19`（`breaker.WithName(strings.Join([]string{method, path}, breakerSeparator))`） | 键必须是**注册期模板** |
-| **404 不经过 breaker** | `rest/router/patrouter.go:59-78`（没匹配上 ⇒ `handleNotFound`）→ `rest/engine.go:244-268`（`notFoundHandler` 的链**只有 Trace + Log** ⇒ **没有 MaxConns / Breaker / Shedding**） | 未命中路由**不得**进 breaker |
+| breaker 是**逐路由**建的 | `go-zero@v1.10.2/rest/engine.go:99-101` + `:131-132`（`handler.BreakerHandler(route.Method, route.Path, metrics)`） | 隔离单位 = 路由，不是具体 URI |
+| breaker 的**名字** = `METHOD://route.Path` | `go-zero@v1.10.2/rest/handler/breakerhandler.go:15`（`breakerSeparator = "://"`）+ `:19`（`breaker.WithName(strings.Join([]string{method, path}, breakerSeparator))`） | 键必须是**注册期模板** |
+| **404 不经过 breaker** | `go-zero@v1.10.2/rest/router/patrouter.go:59-78`（没匹配上 ⇒ `handleNotFound`）→ `go-zero@v1.10.2/rest/engine.go:244-268`（`notFoundHandler` 的链**只有 Trace + Log** ⇒ **没有 MaxConns / Breaker / Shedding**） | 未命中路由**不得**进 breaker |
 
 **RAG 侧修前状态**：`GoStyleBreakerFilter.routeKey` = `request.getMethod() + "://" + request.getRequestURI()` ⇒ ① 每个**具体 URI** 一个 breaker ⇒ ② 404 也进 breaker。
 
@@ -517,6 +518,16 @@
 **路线（已探明，可行）**：`io.lettuce.core.TimeoutOptions.TimeoutSource` 是**抽象类**，
 `public abstract long getTimeout(RedisCommand<?,?,?>)` ⇒ **逐命令动态求值** ⇒
 ⇒ 共享层可以返回一个「当前请求的剩余 deadline」⇒ **Redis 命令被 deadline 约束** ⇒ **零域侧改动**。
+
+**🆕 2026-10-27 补充约束（G2 提供 · 本层独立核过）—— rpc 侧**已有现成载体**，但**读的不是同一个东西**：
+
+| 项 | 事实（本层实测） | 对 E66 落码的影响 |
+|---|---|---|
+| api 侧的载体 | `GoStyleRequestDeadline.begin(deadlineNanos)` **只在** `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:324` 绑定（`:356` clear）⇒ ⇒ **api 侧独占** | ⇒ ⇒ **rpc 侧用不了它** |
+| rpc 侧的载体 | `RpcInterceptor` 的 `DeadlineState`：`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:461`（worker 线程里 `DeadlineState.bindToCurrent(deadlineEpochMs)`）⇒ ⇒ **已经在 handler 线程绑好了**（`:215-236` 的 javadoc 已写明「业务线程可随时读 `remainingMillis()`」） | ⇒ ⇒ **E66 的 `TimeoutSource` 若在 rpc 侧落地 ⇒ 读的是 `DeadlineState.remainingMillis()`，不是 `GoStyleRequestDeadline`** ⇒ ⇒ **两个域面要接两个不同的载体** ⇒ ⇒ **落码时不能只实现 api 侧** |
+| ⇒ ⇒ **结论** | ⇒ ⇒ **rpc 侧不需要新增机制**（载体已在）⇒ ⇒ ⇒ **但 `TimeoutSource` 的取值函数必须同时认这两个来源** | ⇒ ⇒ **E66 的实现清单要多一个分支**（不是「只改 api 侧」） |
+| ⚠️ **边界（G2 已划清，本层同意）** | like/task 的 **MQ / outbox / sink 路径不属 E66 域** —— Go 侧那些 ctx 是 **Kafka 消费 ctx**（`service/task/rpc/internal/sink/like_sink.go:110-128` 的 `loop(ctx)`）⇒ 本来就没有请求 deadline ⇒ ⇒ **两侧同形 ⇒ 不修**（避免造出「比 Go 更严」的新漂移） | ⇒ ⇒ **不扩到 MQ 面** |
+| **证据强度** | G2 域侧逐条核好的调用点清单已登记（like-rpc **11** 处 · task-rpc **3** 处）⇒ ⇒ **L1（源码级）** ⇒ ⇒ **不主张 L4** | ⇒ ⇒ 与 E66 现有强度同此 |
 
 **🔴 但有一处硬约束（本轮实测字节码得出，**改法必须绕开它**）**：
 Boot 4 的 `LettuceConnectionConfiguration.createClientOptions` 里的**顺序**是：
@@ -568,8 +579,9 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | 漂移成立 | Go：`service/user/user/rpc/internal/model/data_model.go:11` = `Status int64 \`gorm:"column:status;default:0"\`` ⇒ GORM **未标 `not null`** ⇒ 建出**可空**列；RAG：`service/users/users-common/src/main/resources/db/01_create_user.sql:39` = `status BIGINT NOT NULL DEFAULT 0` ⇒ 🔴 **可空性不同**（真库实证见 `docs/DRIFT/users/user/rpc.md:1518`） |
 | **为什么不能单独改** | 🔴 `docs/DRIFT/users/user/rpc.md:1559` 明写：「**动它会立刻激活 admin-rpc 的同款缺陷**」—— `service/users/admin/admin-rpc/.../domain/UserEntity.java:60` 是 `private Long status = 0L;` ＋ MyBatis `callSettersOnNulls=false` ⇒ **NULL 读成 0** ⇒ admin 侧会把 NULL 当「活跃」⇒ ⇒ **必须与 admin 侧一起改** |
 | **写权归属** | DDL（`service/users/users-common/**`）= **本层写权**；`admin-rpc` 的 `UserEntity` = **G1 写权** ⇒ ⇒ **跨 lane** |
-| **可安全排序的两步方案**（建议给 G1） | **第 1 步（G1）**：先把 `admin-rpc` 的 `UserEntity.status` 改成能表达 NULL（此时 DDL 仍 NOT NULL ⇒ **不可能出现 NULL ⇒ 行为零变化**）→ **第 2 步（本层）**：放开 DDL 的 NOT NULL ⇒ ⇒ **中间态两侧都合法，不留半截** ⇒ ⇒ 可绕开「必须同一次提交」的物理约束 |
-| ⚠️ **另注（这才是裁决题）** | 即便放开可空，**Go 侧读到 NULL status 会扫描报错**（GORM 把 NULL 扫进**非指针** `int64` ⇒ `converting NULL to int64 is unsupported`）⇒ 而 RAG 读成 0 ⇒ ⇒ **NULL 行上两侧行为仍不同** ⇒ ⇒ **这是「保留 NOT NULL（并把 V-001 按不可达降级）」vs「放开可空（V-001 变成实打实的安全缺陷）」的裁决** ⇒ ⇒ **需 Jason 拍板** ⇒ 本层**不擅自落码** |
+| 🔴🔴 **2026-10-27 订正：上一行的「必须与 admin 侧同改」前提被证伪 ⇒ 两步方案整体撤回** | G1 回执（提交 `ded22af`）给出逐层证据链，**本层已独立复核成立**：<br>① `gorm.io/gorm` `schema/field.go`（真源 `go.mod` pin 的 **v1.31.1**；v1.31.2 同一段代码**逐字相同**）的 `case reflect.Int, …, reflect.Int64:` 分支里：`case **int64: if data != nil && *data != nil { field.ReflectValueOf(ctx, value).SetInt(**data) }` ⇒ ⇒ **DB 值是 NULL ⇒ `*data == nil` ⇒ 什么都不做 ⇒ 字段保持 Go 零值 0 ⇒ 不报错**（本层读源码核实）；<br>② `database/sql/convert.go` 的 `case reflect.Pointer: if src == nil { dv.SetZero(); return nil }` ⇒ **dest 的 kind 是 Pointer** ⇒ 走这一支 ⇒ **不报错**；<br>③ 双侧活体对拍（G1 域台账 `docs/DRIFT/users/user/rpc.md`「2026-10-23 第三轮」）：`status IS NULL` 打 Login ⇒ **Go 200 + token** ⇒ ⇒ **「删掉 = 0L」才是不等价的那一侧**，上午那次「删 = 0L + 加 null ⇒ INTERNAL」是**误修**，当天已恢复。<br>⇒ ⇒ **本层原来的那句「Go 侧读到 NULL status 会扫描报错（`converting NULL to int64 is unsupported`）= 事实错误** ⇒ ⇒ **「保留 NOT NULL」与「放开可空」在行为层同形 ⇒ ⇒ 那条裁决题不存在 ⇒ ⇒ 「需 Jason 拍板」撤销** |
+| ⇒ ⇒ **正确的结论（与原两步方案相反）** | **行为层零差异**：Go「可空 + 读成 **0**」vs RAG「**不可空** ⇒ 读不到 NULL ⇒ 也是 **0**」⇒ ⇒ **可观察结果相同** ⇒ ⇒ **保持 RAG 的 NOT NULL 就是等价的那一侧**（RAG 更严：写 NULL 被 PG 拒；Go 侧写得进去但读出来还是 0 ⇒ 行为同形）⇒ ⇒ **「放开可空」反而会制造新漂移**：RAG 侧 MyBatis `callSettersOnNulls=false` ⇒ NULL 时**跳过 setter** ⇒ 若字段没有 `= 0L` 初始值 ⇒ 读出 **null** ≠ Go 的 **0**；且 admin 侧会从「NULL 当活跃(0)」变成「NULL 当未知(null)」⇒ ⇒ **方向相反** ⇒ ⇒ ⇒ **第 1 步（改 `admin-rpc` 的 `UserEntity.status`）不执行；第 2 步（放开 DDL 的 NOT NULL）也不执行 ⇒ ⇒ 两步方案整体撤回** ⇒ ⇒ **本层 DDL 保持 `status BIGINT NOT NULL DEFAULT 0` 不动**（DDL 层差异**如实保留** ⇒ 归「**DDL 层差异 · 行为层零差异**」）⇒ ⇒ **本层零落码** |
+| ⇒ ⇒ **销号条件已满足** | G1 已在其域台账（`users/user/rpc.md` 的 V-002 条 ＋ `users/_shared.md` 的 ADJ-01 ＋ `users/vs-common.md` 的 A8 轴）逐处订正（提交 `ded22af`，**纯台账零代码**）⇒ ⇒ **本层已确认该订正成立** ⇒ ⇒ **V-002 / ADJ-01 / A8 那一格 ⇒ 可销号**（本层无遗留落码动作） |
 
 #### 4.9.8 🟢 #4 = **本轮不做 + 登记在案**（不升级为拍板题）
 
@@ -584,7 +596,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | Go 事实 | 位置 |
 |---|---|
 | 黑名单查询失败 ⇒ **放行**（fail-open） | `service/user/user/api/internal/middleware/checkblacklistmiddleware.go:35-36`（`if err == nil && exists` ⇒ **err != nil 不拦截**）· 同款另见 `service/user/admin/api/internal/middleware/checkblacklistmiddleware.go` 与 `service/follow/api/internal/middleware/checkblacklistmiddleware.go`（⚠️ **三份文件 md5 各不相同**，但「err != nil ⇒ 放行」三条一致） |
-| Redis 客户端**快速失败** | `core/stores/redis/redisclientmanager.go:18`（`maxRetries = 3`）· `:27-46`（`red.NewClient(&red.Options{Addr, MaxRetries: maxRetries, MinIdleConns: idleConns})` ⇒ **未设** `DialTimeout`/`ReadTimeout` ⇒ 用 go-redis v9 默认值 ⇒ 连接被拒时**立即失败** ⇒ 实测 ~1.7s） |
+| Redis 客户端**快速失败** | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:14`（`maxRetries = 3`）· `:32-40`（`red.NewClient(&red.Options{Addr, MaxRetries: maxRetries, MinIdleConns: idleConns})` ⇒ **未设** `DialTimeout`/`ReadTimeout` ⇒ 用 go-redis v9 默认值 ⇒ 连接被拒时**立即失败** ⇒ 实测 ~1.7s） |
 
 **本层落码**：新增 `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java`
 ⇒ 注册 `LettuceClientOptionsBuilderCustomizer` ⇒ `builder.disconnectedBehavior(REJECT_COMMANDS)`
@@ -637,7 +649,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 |---|---|---|
 | `docs/DRIFT/_cross/domain-common-lanes.md:125` | `DRIFT-FOLLOW-008` 仍列为「🔴 **未修**」 | ⬆️ **已过期** ⇒ 2026-10-25 用户签字（`SD-2026-10-25-01`）后应从 DRIFT 侧移除 |
 | `docs/DRIFT/users/common.md` §6 | `UNRESOLVED-USERSCOMMON-003` 的问法（「**全局副作用**是否波及非 users 域」） | ⬆️ **前提已过期**（不是全局施加，是各 api 各自注册）⇒ 且实测**已注册的 8 个 api 不会误伤** ⇒ 可直接结案（**该文件属 users 域台账写权 ⇒ 归 G1 改**） |
-| `docs/DRIFT/users/user/rpc.md` §`DRIFT-USERRPC-V-002` | 「🔴 仍成立，但被卡」 | 仍是**成立**的 ⇒ 但「卡点」的**形状**已可细化 ⇒ 见 §4.9.7 的两步方案 + ⚠️ 「Go 侧读 NULL 会扫描报错 ⇒ 两侧在 NULL 行上仍不同 ⇒ **需 Jason 拍板**」 |
+| `docs/DRIFT/users/user/rpc.md` §`DRIFT-USERRPC-V-002` | 「🔴 仍成立，但被卡」 | 🔴 **2026-10-27 订正**：**「卡点」不存在** ⇒ ⇒ **DDL 层差异成立 · 行为层零差异**（Go 读 NULL ⇒ GORM 跳过 setter ⇒ 得 **0**；RAG NOT NULL ⇒ 读不到 NULL ⇒ 也是 **0**）⇒ ⇒ ⇒ **「保持 NOT NULL」就是等价的那一侧** ⇒ ⇒ **原两步方案与「需 Jason 拍板」那条裁决题一并撤销**（详见 §4.9.7 的逐层证据链）⇒ ⇒ **可销号** |
 
 #### 4.9.12 🟡 全量回归里撞到一条**既有**时序 flake（**不是本波引入** · 属 comment 域写权 ⇒ 已通知 G3）
 
@@ -954,7 +966,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | 项 | 内容 |
 |---|---|
 | **① 现象** | 未加引号的 `mode: off` 被 **YAML 1.1**（SnakeYAML）解析成**布尔 `false`** ⇒ `@Value` 拿到字符串 `"false"` ⇒ 而 `parse` 的合法值域（`off\|raw\|envelope`）里**没有**它 ⇒ **构造期抛 `IllegalArgumentException` ⇒ `BeanCreationException` ⇒ 进程起不来** ⇒ ⇒ **文档里那个合法取值，在 YAML 里根本写不出来**（除非加引号 `mode: "off"`）<br>⇒ **一颗等着踩的雷**：任何域一旦按文档写 `mode: off` 就会起不来 |
-| **② Go 侧出处** | Go 侧**没有这个开关**（`rest/config.go` 里没有 form-limit 旋钮；`maxFormParamCount = 2048` 是 `rest/httpx/util.go:15` 的常量）⇒ ⇒ **OFF 在 Go 侧的等价物就是「什么都不做」** ⇒ ⇒ RAG 的 OFF 语义本身**是对的**，问题**只出在「配置值 → 代码」的传递** |
+| **② Go 侧出处** | Go 侧**没有这个开关**（`go-zero@v1.10.2/rest/config.go` 里没有 form-limit 旋钮；`maxFormParamCount = 2048` 是 `go-zero@v1.10.2/rest/httpx/util.go:15` 的常量）⇒ ⇒ **OFF 在 Go 侧的等价物就是「什么都不做」** ⇒ ⇒ RAG 的 OFF 语义本身**是对的**，问题**只出在「配置值 → 代码」的传递** |
 | **③ RAG 侧现状（修前）** | `service/common/src/main/java/com/rag/common/http/GoStyleFormLimitMode.java:209-225`（`parse` 只认 `off`/`raw`/`envelope`）· `…/http/GoStyleFormValueLimitInterceptor.java:68-72`（**构造期** `@Value` + `parse` ⇒ 非法值 ⇒ 启动失败）· `…/http/GoStyleTomcatParameterLimitCustomizer.java:110-111`（**同一把尺子**）<br>⇒ 🟢 **本层实测核对了 G2 的「两边不会对同一属性得出不同解读」**：两个消费点的 `@Value` **默认值完全一致**（都是 `${rag.http.go-form-limit.mode:off}` ⇒ `…FormValueLimitInterceptor.java:70` 与 `…TomcatParameterLimitCustomizer.java:111`）⇒ ⇒ **成立**；且 `GoStyleFormLimitWebMvcConfig` **不消费**该属性（只注册拦截器）⇒ 无第三个解读点 |
 | **④ 证据强度** | **L4** —— ① G2 的**真上下文启动失败实测**（报错值是 `false` 而不是 `off` ⇒ YAML 1.1 布尔化的实证）；② **本层独立复现**：守门 ③ 用**生产同款**的 `YamlPropertySourceLoader` 解析未加引号的 `mode: off` ⇒ 断言拿到的**确实是 `Boolean.FALSE`** ⇒ ⇒ **本层独立确认「当前 Boot 4 的解析器仍走 YAML 1.1 布尔表」**（不采信转述，也不拿裸 SnakeYAML 代替） |
 | **⑤ 修法** | `parse` **额外接受 `"false"`** —— ⚠️ **只加这一个别名**（`false`/`False`/`FALSE` 三个形态，因 `parse` 已 `toLowerCase`）<br>⇒ **理由（本层独立判断，非照抄派单）**：`"false"` 是**精确匹配**、**不是**兜底 —— 它是**文档化合法取值 `off` 的「唯一实际编码形式」**（YAML 1.1 把 `off`/`no`/`n` 全变成 `false`）⇒ ⇒ 接受它 = **让实现对齐文档**，而不是放宽合法性<br>⇒ **不放宽成「任意非法值都当 OFF」** —— 那会**重新引入**「静默兜底 = 以为装上了其实没装」（`parse` 自己的 javadoc 明确反对）⇒ 例：`mode: OFF1` 若兜底成 OFF ⇒ 该域会**静默失去闸门** ⇒ ⇒ **非法值仍一律抛异常**<br>⇒ **方向性判断**：**让实现对齐文档**（`off` 是文档化合法取值）而不是**改文档迁就实现**（把 `off` 从值域里删掉）<br>⇒ 同步：`PROPERTY` 的 javadoc 写清「YAML 里写 `off` **必须加引号**：`mode: "off"`」；**异常消息改成自解释**（列出 `off \| false \| raw \| envelope` + 引号提示 ⇒ 免得下一个人被「值：false」误导成配置写错） |
@@ -1009,7 +1021,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | 项 | 实测结果 |
 |---|---|
 | **G3 的质疑成立吗** | ✅ **成立** —— 共享层表 `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` 的 favorite 行原写 `Mode.RAW`（＝「Go 侧没注册 `SetErrorHandler` ⇒ 400 + text/plain + Go 原文」）⇒ **错** |
-| **Go 侧 favorite 的真实形状** | **200 ＋ `{"code":5003,"msg":"参数错误","data":null}`** —— 7 个 handler **各自捕获** `httpx.Parse` 的错：<br>· `service/favorite/api/internal/handler/favorite/*.go:18-22`（形态一致）⇒ `httpx.OkJsonCtx` ＋ `Code: favoritecommon.ErrorInvalidParam` ＋ `Msg: GetErrMsg(...)` ＋ `Data: nil`<br>· `service/favorite/common/errmsg.go:16` ⇒ `ErrorInvalidParam = 5003`；`:51` ⇒ 文案「参数错误」<br>· go-zero `rest/httpx/responses.go:56-63` ⇒ `OkJsonCtx` ⇒ `WriteJsonCtx(ctx, w, http.StatusOK, v)` ⇒ **HTTP 200** |
+| **Go 侧 favorite 的真实形状** | **200 ＋ `{"code":5003,"msg":"参数错误","data":null}`** —— 7 个 handler **各自捕获** `httpx.Parse` 的错：<br>· `service/favorite/api/internal/handler/favorite/*.go:18-22`（形态一致）⇒ `httpx.OkJsonCtx` ＋ `Code: favoritecommon.ErrorInvalidParam` ＋ `Msg: GetErrMsg(...)` ＋ `Data: nil`<br>· `service/favorite/common/errmsg.go:16` ⇒ `ErrorInvalidParam = 5003`；`:51` ⇒ 文案「参数错误」<br>· go-zero `go-zero@v1.10.2/rest/httpx/responses.go:56-63` ⇒ `OkJsonCtx` ⇒ `WriteJsonCtx(ctx, w, http.StatusOK, v)` ⇒ **HTTP 200** |
 | ⇒ ⇒ **既非 RAW（400＋text/plain）也非 ENVELOPE（200＋5001）** | ⇒ ⇒ **第三种形状：域自定义业务码信封** ⇒ ⇒ 「轴 ②」只按「注册 / 没注册」分**两档不够用** |
 | **`SetErrorHandler` 注册点复核** | 全仓 **5 个**：`like/api/likecenter.go:48` · `comment/api/commentservice.go:47` · `follow/api/followcenter.go:53` · `message/api/messagecenter.go:53` · `hot/api/hotcenter.go:53` ⇒ ⇒ **与表的 `envelope` 档一致**；**其余 9 域的「自捕获」命中行数全 0** |
 | **Go 侧目录复核**（防「只核了一个域」） | Go api 域目录 = `service/{article,comment,favorite,follow,hot,knowledge,like,message,task}/api` ＋ **`service/user/user/api`**（`httpx.Parse` **8** 处）＋ **`service/user/admin/api`**（**13** 处）⇒ ⇒ 与表的命中数一致 |
@@ -1197,8 +1209,8 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | 项 | 内容 |
 |---|---|
 | **结论** | ✅ **Go 侧 = MaxBytes(413) 优先于 Authorize(401)** ⇒ ⇒ **G1 的前提成立** ⇒ ⇒ 「`DRIFT-USERAPI-009 §7` 并入 `SD-USERAPI-002` 签字」的前提**成立** ⇒ ⇒ **本层不反对**（签字档 `docs/Intentional_Deviations/` 归整合者 ⇒ 本层不代签） |
-| **硬证据（`go-zero@v1.10.2`，真源 `go.mod` pin 的版本）** | `rest/engine.go:101-116` `bindRoute`：`:103` 取 `ng.chain` → `:105` `buildChainWithNativeMiddlewares(...)`（**native middlewares 在内**，其中 `rest/engine.go:163-164` 挂 `handler.MaxBytesHandler`）→ `:108` `appendAuthHandler(...)`（**`Authorize` 在 `:74/:77`**）→ `:110` 用户自定义 middlewares → `:113` `ThenFunc`<br>⇒ ⇒ **同一条 `chn`** ⇒ ⇒ **`Authorize` 排在 native middlewares 之后** ⇒ ⇒ **413 先于 401** |
-| ⚠️ **本层两次判反的教训（可复用）** | ① **行号直觉会骗人**：`:74`（Authorize）看起来早于 `:105`（native middlewares），但 `:74` **在另一个函数里**，真正把它 append 上去的是 `:108`（在 `:105` **之后**）⇒ ⇒ **必须看调用结构，不能看行号大小**<br>② **`chain.Then` 的反向包裹不是「执行顺序反转」**：`rest/chain/chain.go:38-42` 的注释写明「`Append` … as the **last** ones in the request flow … requests in c go m1 -> m2 -> m3 -> m4」⇒ ⇒ `Then`（`:81-91`）的反向包裹**正是为了实现「append 顺序 = 请求流顺序」**⇒ ⇒ ⇒ **推中间件顺序必须同时看「调用结构」与「库的顺序契约」两样** |
+| **硬证据（`go-zero@v1.10.2`，真源 `go.mod` pin 的版本）** | `go-zero@v1.10.2/rest/engine.go:101-116` `bindRoute`：`:103` 取 `ng.chain` → `:105` `buildChainWithNativeMiddlewares(...)`（**native middlewares 在内**，其中 `go-zero@v1.10.2/rest/engine.go:163-164` 挂 `handler.MaxBytesHandler`）→ `:108` `appendAuthHandler(...)`（**`Authorize` 在 `:74/:77`**）→ `:110` 用户自定义 middlewares → `:113` `ThenFunc`<br>⇒ ⇒ **同一条 `chn`** ⇒ ⇒ **`Authorize` 排在 native middlewares 之后** ⇒ ⇒ **413 先于 401** |
+| ⚠️ **本层两次判反的教训（可复用）** | ① **行号直觉会骗人**：`:74`（Authorize）看起来早于 `:105`（native middlewares），但 `:74` **在另一个函数里**，真正把它 append 上去的是 `:108`（在 `:105` **之后**）⇒ ⇒ **必须看调用结构，不能看行号大小**<br>② **`chain.Then` 的反向包裹不是「执行顺序反转」**：`go-zero@v1.10.2/rest/chain/chain.go:38-42` 的注释写明「`Append` … as the **last** ones in the request flow … requests in c go m1 -> m2 -> m3 -> m4」⇒ ⇒ `Then`（`:81-91`）的反向包裹**正是为了实现「append 顺序 = 请求流顺序」**⇒ ⇒ ⇒ **推中间件顺序必须同时看「调用结构」与「库的顺序契约」两样** |
 | ⚠️ **跨树引用共享层行号必须带基线** | G1 引的 `service/common/observability/HttpMiddleware.java:270/294/304/322` 是**他树**（`align/g1-users-follow` @ `0c2a902`）的行号；**本树**（`align/g4-service-common`）的预算起算/清除在 **`:324` begin / `:356` clear** ⇒ ⇒ **同一文件不同树 ⇒ 行号不同** ⇒ ⇒ 跨树引用必须标基线 commit，否则复核会「找不到」⇒ ⇒ **（与 memory 里「引用库内依赖源码必须带模块限定路径」同族）** |
 
 ##### 4.10.18.3 🟡 **已知缺口（显式登记 · 本层落码尝试后撤掉）**：「共享层新增 Filter ⇒ 必须让出 +4/+5/+6」**目前无机器保障**
@@ -1508,9 +1520,13 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 
 ##### 4.10.24.2 🔴 G1 删副本时的**连带必改项**（本层实测清单，防编译断裂）
 
+> ⚠️ **本小节的「位置」列全部是跨树引用**（G1 树）⇒ ⇒ **在本树按路径查会零命中** ⇒ ⇒ 「零命中」≠「不存在」
+> ⇒ ⇒ **复核时必须带树 + commit**：`git -C <G1 树> show b7d724c:<path>`（**行号只在那个 commit 上有效**）。
+> ⇒ ⇒ **本层实测**：本树只有 `user-api` 的那份副本与守门 ⇒ ⇒ **其余 4 份副本与 4 份守门是 G1 第十四轮 `0c2a902` 新增的** ⇒ ⇒ 本树 `find` 只命中 1 份（⇒ **本层自己踩了一次「零命中 ⇒ 不存在」的坑** ⇒ 由此才有 §4.10.29.6 那条纪律）。
+
 | 项 | 位置（G1 树 `b7d724c`） | 为什么必须一起改 |
 |---|---|---|
-| 🔴 **2 处 `@Import`** | `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcRedisDisconnectedFastFailTest.java:159` · `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcRedisDisconnectedFastFailTest.java:170` | 删掉 `RedisDisconnectedBehaviorConfig` 类 ⇒ **`@Import` 指向不存在的类 ⇒ 编译断裂** ⇒ ⇒ 必须连带删 `@Import` |
+| 🔴 **2 处 `@Import`** | `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcRedisDisconnectedFastFailTest.java:159` · `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcRedisDisconnectedFastFailTest.java:170` | 删掉 `RedisDisconnectedBehaviorConfig` 类 ⇒ **`@Import` 指向不存在的类 ⇒ 编译断裂** ⇒ ⇒ 必须连带处理<br>🔴🔴 **本行建议已订正（G1 实测 ＋ 本层独立核 · §4.10.29.1）**：**不是「删」，是「换成 `@ImportAutoConfiguration(GoStyleRedisClientAutoConfiguration.class)`」** ⇒ ⇒ 理由：那 2 份 rpc 守门的上下文是 **`@SpringBootConfiguration`**（**不含** `@EnableAutoConfiguration`）⇒ ⇒ **`AutoConfiguration.imports` 清单根本不会被读** ⇒ ⇒ 只删 `@Import` ⇒ 容器里 customizer 数量 = **0** ⇒ ⇒ 守门**静默测不到任何断连策略**（这类「测不到」的绿测试比没有测试更危险）⇒ ⇒ **api 侧连带项 = 零**（3 份 api 守门用 **`@SpringBootTest`** 引导真实应用类 ⇒ 清单会被读 ⇒ 注解都不用改 —— 本层在 G1 树逐份核过注解行） |
 | 🟡 **3 个域测试的 javadoc 提及该类名** | follow-api `FollowApiRedisDisconnectedFastFailTest.java:90` / `:132` / `:328` · admin-api `AdminApiRedisDisconnectedFastFailTest.java:86` / `:128` / `:324` · user-api `UserApiRedisDisconnectedFastFailTest.java:80` / `:122` / `:310` | 指向**不存在的类** ⇒ 后人按注释找不到文件 ⇒ 须改措辞 |
 | 🔴 **域侧变异验证会失效** | 5 个 `*RedisDisconnectedFastFailTest` | 变异的前提是「改域内副本」⇒ **副本删掉后这个前提消失** ⇒ ⇒ 变异必须改到**共享层那份** ⇒ ⇒ 而共享层那份在**仍有副本时是被遮蔽的** ⇒ ⇒ 删副本后共享层那份才真正生效 ⇒ ⇒ **域侧守门不能再靠「变异自己的副本」自证**（要么变异点迁到共享层（跨 lane），要么由共享层自己的守门承担）⇒ ⇒ **这是收编的真实代价，必须登记，不能装作「删了就完事」** |
 
@@ -1518,8 +1534,8 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 
 | 坑 | 事实 | 出处 |
 |---|---|---|
-| **必须 FIN，不能 `container.stop()`** | `container.stop()` 发的是 **RST**（强杀）⇒ 测不出「排队」分支；线上真实场景（`docker stop`）是**优雅退出 ⇒ FIN** ⇒ ⇒ 须**先关监听口 + 再对已建立的连接半关闭** | G1 树 `service/users/user/user-api/src/test/java/com/rag/users/user/api/UserApiRedisDisconnectedFastFailTest.java:88-105` / `:280-291` / `:331-333`（本层读原文核实） |
-| **`LettuceConnectionFactory` 没有 `getClientOptions()`** | 只能走 `getClientConfiguration().getClientOptions()`（`orElse(null)`） | 同上 `:225` / `:245`（本层读原文核实） |
+| **必须 FIN，不能 `container.stop()`** | `container.stop()` 发的是 **RST**（强杀）⇒ 测不出「排队」分支；线上真实场景（`docker stop`）是**优雅退出 ⇒ FIN** ⇒ ⇒ 须**先关监听口 + 再对已建立的连接半关闭** | **G1 树 `b7d724c`** `service/users/user/user-api/src/test/java/com/rag/users/user/api/UserApiRedisDisconnectedFastFailTest.java:88-105` / `:280-291` / `:331-333`（本层读原文核实）<br>🟢 **本树等价行号**（同一机制 · **两树版本不同 ⇒ 行号不同**）：**`:102`**（FIN/RST 说明 javadoc）· **`:343`** / **`:367`**（`shutdownOutput()` 半关闭） |
+| **`LettuceConnectionFactory` 没有 `getClientOptions()`** | 只能走 `getClientConfiguration().getClientOptions()`（`orElse(null)`） | 同上（**G1 树 `b7d724c`** `:225` / `:245`）<br>🟢 **本树等价行号**：**`:206`**（`connectionFactory.getClientConfiguration().getClientOptions().orElse(null)`） |
 
 ##### 4.10.24.4 🟡 「同机制不同形态」的准确含义（**不推翻**「删除 = 零行为变化」）
 
@@ -1534,6 +1550,23 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | 🟢 **订正共享层 javadoc 的「三份」** | `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java` 的类级 javadoc「本仓现状：**三份**域内副本」⇒ ⇒ **改为「五份」并列出 5 个模块名** ⇒ ⇒ **原句是**「共享层自己的事实描述」**写错了 ⇒ 会误导下一个 agent 只删 3 份 ⇒ 留下 2 份仍遮蔽共享层** ⇒ ⇒ 必须改 |
 | **落点** | `…/redis/GoStyleRedisClientAutoConfiguration.java:77-79`（`@Bean` javadoc 上方那段的末行） |
 | **零运行时行为变化** | 纯注释 ⇒ ⇒ **代码态不变**（本节 §4.10.25 的落码才是代码态变更） |
+
+---
+
+##### 4.10.24.6 🟢 **受益面：本层此前只写了「要删的 5 份」，漏了「已经在受益的 5 个」**（G2 订正 · 本层实测复核）
+
+⇒ **G2 的订正**（本层已独立复核，**成立**）：共享层那份 customizer **不只**影响「有域内副本」的域 ⇒ ⇒ 像 like-rpc / task-rpc 这种**自带 `spring-boot-starter-data-redis` 且无域内副本**的组件 ⇒ ⇒ **共享层那份本来就命中** ⇒ ⇒ 对它们是**净收益**（断连时命令从「挂 60s」变「1ms 拒单」）⇒ ⇒ ⇒ **不是「零行为影响」，是「零代码改动、但有行为收益」**。
+
+⇒ **本层独立实测（不采信转述）** —— 生产代码真在用 Redis 的组件共 **10** 个：
+
+| 分类 | 组件 | 共享层那份是否命中 |
+|---|---|---|
+| **有域内副本 ⇒ 共享层被遮蔽 ⇒ 收编 = 删副本** | user-api · user-rpc · admin-api · admin-rpc · follow-api（**5**） | ❌ **被遮蔽**（`@ConditionalOnMissingBean` ⇒ 域内副本在场 ⇒ 共享层那份**根本不创建**） |
+| **无域内副本 ⇒ 共享层直接命中 ⇒ 已在受益** | comment-rpc · hot-rpc · like-rpc · task-rpc · favorite-api（**5**） | ✅ **命中**（`AutoConfiguration.imports` 注册 ⇒ 这 5 个都是 `@SpringBootApplication` ⇒ 自动配置生效面全覆盖） |
+| 有 redis starter 但生产代码不用 Redis | task-api | — （不构成受益面） |
+
+⇒ ⇒ **口径订正**：本台账此前（§4.9.9 的落码表 ＋ §4.10.24 的收编表）**只强调了「G1 域要删 5 份」** ⇒ ⇒ **漏写了「另外 5 个组件已经在受益」** ⇒ ⇒ **本节补齐**（**不删旧段，只加指路**）。
+⇒ ⇒ **证据分层**：本层腿 = **静态实测**（10 个组件的 pom + 生产代码 + `@SpringBootApplication` + 自动配置清单）· **域侧运行证据 = G2 提供**（like-rpc / task-rpc 断连 ⇒ 命令从「挂 60s」变「1ms 拒单」）⇒ ⇒ 两者**互为两侧** ⇒ ⇒ **合并按弱侧 = L3** ⇒ ⇒ **不写 L4**。
 
 ---
 
@@ -1582,7 +1615,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | 🔴 **新值（改后）** | **200 + `{code:1015, msg:"服务繁忙"}`** ⇒ ⇒ **1015 = Go 侧 `CodeServerBusy`**（真源 `service/favorite/common/errmsg.go:13` ＋ `:48`）⇒ ⇒ 含义 = **请求真的进了业务层**（测试环境 favorite-rpc 不可用 ⇒ `status.FromError` ⇒ 1015）⇒ ⇒ ⇒ **与 Go 同形**（Go：放行 ⇒ 进业务层 ⇒ 同一出口） |
 | ⇒ **结论** | ⇒ ⇒ **这次改动让 RAG 从「误拒」变成「与 Go 同形」** ⇒ ⇒ **不是新引入的漂移，是旧漂移（`DRIFT-HOTAPI-030` 那一格）被闭合** |
 | ⇒ **G3 自己早已预告过** | G3 树 `FavoriteApiRealTomcatGateTest.java:287-289`：「⚠️ 5003 是**当前实现**的形态，**不是** Go 的形态：Go 在同一输入下是「放行 ⇒ 200 + 业务结果」… ⇒ **若全局把 max-parameter-count 放宽到 10000（Go net/url 的真实上限），本断言需同步更新**」⇒ ⇒ 与本层的落码**完全一致** |
-| ⇒ **域侧动作（G3）** | 该断言须从「必须含 `code:5003`」改为「**不得**是 5003 / 不得是 Tomcat HTML 错误页」⇒ ⇒ **本层不代改**（域侧写权）⇒ ⇒ **须在 G3 那一笔 merge 里一起改**（否则留下半截） |
+| ⇒ **域侧动作（G3）** | 该断言须从「必须含 `code:5003`」改为「**不得**是 5003 / 不得是 Tomcat HTML 错误页」⇒ ⇒ **本层不代改**（域侧写权）⇒ ⇒ **须在 G3 那一笔 merge 里一起改**（否则留下半截）<br>🔴🔴 **本行建议已订正（G3 已落码 ＋ 本层独立核 · §4.10.29.8）**：**纯负向断言不够**（「200 + body 里没有 5003 + 不是 HTML」**证明不了请求真的进了业务层** —— 200 + 空 body 也能过）⇒ ⇒ **必须再有一条正向断言** ⇒ ⇒ 而正向断言就该写 Go 的契约值 **1015**（真源 `favorite/common/errmsg.go:13` ＋ `:115` ＋ `:136` ⇒ **`CodeServerBusy = 1015` 就是这一格的契约**）⇒ ⇒ ⇒ **G3 的写法（负向两条 ＋ 正向一条）正确且更强** |
 
 ##### 4.10.25.5 变异验证（**每条断言都有专属变异**）
 
@@ -1633,7 +1666,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | **三门禁**（同批次复跑） | `check-wave-lane-ownership` **EXIT=0** · `check-wave-role-model` **EXIT=0** · `check-wave-coupling` **EXIT=0** |
 | **台账门禁** | `check-ledger-tables` **EXIT=0** · `check-ledger-selfcheck` **EXIT=0** · `check-ledger-count` **EXIT=0** |
 | **写权自证** | 本轮改动**全部**落在 `service/common/**` ＋ `docs/DRIFT/global/vs-common.md` ⇒ **零域侧改动** |
-| ⚠️ **已知工作区噪声** | `git status` 有一个未跟踪目录 `io/`（内含 `io/opentelemetry/api/GlobalOpenTelemetry.class`，**mtime 被归一化成 1980-02-01** ⇒ 是**从 jar 里解出来的 class**，不是源码产物）⇒ ⇒ **未跟踪 ⇒ 不影响构建与提交** ⇒ ⇒ **但会出现在每个 agent 的 `git status` 里** ⇒ ⇒ **根因待查**（疑似某个本地步骤把 jar 解到了 CWD）⇒ ⇒ **不属本层写权面** ⇒ ⇒ **登记** |
+| 🟢 **工作区噪声（根因已定位并已清）** | 原：未跟踪目录 `io/`（`io/opentelemetry/api/GlobalOpenTelemetry.class`，**mtime 归一化成 1980-02-01** ⇒ 从 jar 解出、不是源码产物）⇒ ⇒ **本层 2026-10-27 14:3x 定位根因**：该文件 md5 `e7207e7c24aa36c55a8d283bd82cdae9` **==** `~/.m2/.../opentelemetry-api-**1.36.0**.jar` 内同名条目的 md5（**逐字节相同**）⇒ ⇒ 而**本仓 pin 的是 `opentelemetry-bom 1.44.0`**（`service/common/pom.xml:18`）⇒ ⇒ 连版本**都不是构建在用的** ⇒ ⇒ **它 = 本层早前做 OTel 字节码取证时、在仓库根解 jar 的遗留**（`tools/**` 全仓无解压 ⇒ 不是脚本干的）⇒ ⇒ **不是构建产物 ⇒ 不影响构建与提交** ⇒ ⇒ **已按可恢复方式删除**（`mavis-trash`）⇒ ⇒ 本层工作区 `git status` 现为**空**<br>🆕 **新规则（取证纪律）**：**解 jar 一律解到 `mktemp -d` 的临时目录 ⇒ 绝不在仓库根解** ⇒ ⇒ 否则既污染 `git status`，又让「工作区噪声」变成每个 agent 都要重新查一遍的**悬案** |
 
 > 🔴 **本轮口径的三条诚实边界**：
 > ① **不是「一次跑完 52 模块」** —— 是 fail-fast 停在 [46/52] ＋ 补跑 6 个 ⇒ ⇒ **别把 `MVN_EXIT=1` 读成「全量红了」**；
@@ -1642,12 +1675,192 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 
 ---
 
+#### 4.10.27 🔴🟢 **Redis 超时的跨域全表**（G2 的发现 ⇒ 本层推广成 10 个组件的逐项实测）—— **8 个组件的连接超时比 Go 松 2 倍**
+
+> **触发**：G2 在其域发现「task-rpc 的命令/连接超时**两个都没配** ⇒ 落 Lettuce 默认（命令 60s / 连接 10s）⇒ 断连时命令挂 60s ⇒ 撞 `rpc-timeout: 2s` ⇒ 客户端看到 1015」
+> ⇒ ⇒ **本层把它推广成「全部用 Redis 的组件」的逐项实测**（G2 的发现本身成立，且**不是孤例**）。
+
+##### 4.10.27.1 三条机制事实（本层**独立核过**，不采信转述）
+
+| # | 事实 | 证据（本层实测） |
+|---|---|---|
+| ① | **Go 侧生效的 Redis 超时 = go-redis 的库默认**，不是真源 yaml 里写的值 | 真源 `go.mod` pin：`github.com/redis/go-redis/v9 **v9.20.0**` · `github.com/zeromicro/go-zero **v1.10.2**`；<br>go-redis `options.go` 的 `init()`：`if opt.DialTimeout == 0 { opt.DialTimeout = **5 * time.Second** }` ＋ `switch opt.ReadTimeout { case 0: opt.ReadTimeout = **3 * time.Second** }` ⇒ ⇒ **连接 5s / 命令 3s**；<br>⚠️ 真源 yaml 里的 `ReadTimeoutMs: 1000` / `DialTimeoutMs: 500` **不生效**（G2 实测：对应 struct **没有**这两个字段 ＋ go-zero 的 `conf.Load` 是**非严格**模式 ⇒ 未知字段被静默忽略 ⇒ `LOAD OK` 但字段没进 struct）⇒ ⇒ **真值 = 库默认** |
+| ② | 🔴 **Boot 的两个超时属性彼此独立**：`timeout` → **命令**超时；`connect-timeout` → **连接**超时 | `spring-boot-data-redis-4.0.3` 的 `LettuceConnectionConfiguration` 字节码：`DataRedisProperties.getTimeout()` → `LettuceClientConfigurationBuilder.commandTimeout(...)`；另一处 `DataRedisProperties.getConnectTimeout()` → `SocketOptions$Builder.connectTimeout(...)` ⇒ ⇒ **未配 `connect-timeout` ⇒ 不会回落到 `timeout`** |
+| ③ | ⇒ ⇒ **未配 `connect-timeout` ⇒ 连接超时 = Lettuce 自己的默认 = 10s**（**不是** `timeout` 的值） | `lettuce-core-6.1.8` 的 `SocketOptions` 静态块：`DEFAULT_CONNECT_TIMEOUT_DURATION = Duration.ofSeconds(**10**)`（字节码 `ldc2_w 10` + `Duration.ofSeconds`）⇒ ⇒ **比 Go 的 5s 松 2 倍** ⇒ ⇒ ⚠️ **G1 的 `admin-rpc/application.yml` 注释写的是「回落 3s」⇒ 机制写错**（结论方向不变：仍与 Go 的 5s 不一致；但**值与机制都错**）⇒ ⇒ 见 §4.10.27.3 的转派单 |
+
+##### 4.10.27.2 🔴 逐组件实测表（**10 个生产代码真在用 Redis 的组件**，YAML 解析器读值，不是 grep）
+
+| 组件 | 域 | yaml | 命令 timeout | 连接 connect-timeout | 与 Go（**命令 3s / 连接 5s**）相比 |
+|---|---|---|---|---|---|
+| `admin-api` | G1 | `application.yml` | 3s | **5s** | ✅ **完全一致** |
+| `admin-rpc` | G1 | `application.yml` | 3s | **5s** | ✅ **完全一致**（⚠️ 但它的**注释**把机制写错了 ⇒ §4.10.27.3） |
+| `user-api` | G1 | `application.yml` | 3s | — | 🔴 **连接 = 10s**（≠ 5s） |
+| `user-rpc` | G1 | `application.yaml` | 3s | — | 🔴 **连接 = 10s**（≠ 5s） |
+| `follow-api` | G1 | `application.yml` | **2s** | — | 🔴🔴 **命令 2s（≠ 3s，比 Go 更严）＋ 连接 = 10s** |
+| `like-rpc` | G2 | `application.yml` | 3s | — | 🔴 连接 = 10s ⇒ **G2 本轮已补 `connect-timeout: 5s`** |
+| `task-rpc` | G2 | `application.yml` | — | — | 🔴🔴 **两个都没配 ⇒ 命令 60s（实测 60021ms，G2）＋ 连接 10s** ⇒ **G2 本轮已补 `timeout: 3s` + `connect-timeout: 5s`** |
+| `comment-rpc` | G3 | `application.yml` | 3s | — | 🔴 **连接 = 10s** |
+| `hot-rpc` | G3 | `application.yml` | 3s | — | 🔴 **连接 = 10s** |
+| `favorite-api` | G3 | `application.yml` | 3s | — | 🔴 **连接 = 10s** |
+
+⇒ ⇒ **6 个组件待修**（G1 的 3 个 ＋ G3 的 3 个）；G2 的 2 个已修。
+⇒ ⇒ 🔴 **危害口径**（**比 Go 更松，不是更严**）：连接超时 10s > 任何 rpc 组件的 `rpc-timeout: 2s` ⇒ ⇒ **一次 Redis 断连 ⇒ 先撞 RPC 超时 ⇒ 客户端看到 1015「服务繁忙」**（Go 是**快速失败** ⇒ `INTERNAL「注销失败,Redis写入异常」`）⇒ ⇒ 与 G2 在 task-rpc 上实测到的是**同一机制**。
+⇒ ⇒ ⚠️ `follow-api` 的**命令超时 2s** 是**反方向**的一条（比 Go 的 3s 更严 ⇒ 「比 Go 更严」同样是漂移）⇒ ⇒ 单独列出，不与连接超时那条混为一谈。
+
+##### 4.10.27.3 转派单（**域侧动作，本层不改域内文件**）
+
+| # | 落点（域写权面） | 事实 | 建议修法 |
+|---|---|---|---|
+| **R1** | `service/users/user/user-api/src/main/resources/application.yml`（G1） | `timeout: 3s` ✔ 但**无** `connect-timeout` ⇒ 连接 = **10s** | 补 `connect-timeout: 5s`（与 `admin-api` 同款） |
+| **R2** | `service/users/user/user-rpc/src/main/resources/application.yaml`（G1） | 同上 | 同上 |
+| **R3** | `service/follow/follow-api/src/main/resources/application.yml`（G1） | `timeout: **2s**`（≠ Go 3s）＋ 无 `connect-timeout` | 命令超时改 **3s** ＋ 补 `connect-timeout: 5s` ⇒ ⇒ ⚠️ **2s 这个值 yaml 里没有任何理由说明** ⇒ ⇒ **G1 需自行判定它是「刻意收紧」还是「抄错」**（若刻意 ⇒ 登记为签字偏离，不改） |
+| **R4** | `service/users/admin/admin-rpc/src/main/resources/application.yml`（G1） | ✅ **值是对的**（3s + 5s）但**注释的机制写错**（写「不显式配 ⇒ 连接超时跟着变成 3s」⇒ **实际是 Lettuce 默认 10s**） | **只改注释**（零行为变化）⇒ ⇒ 注释是「值为什么会错」的依据 ⇒ ⇒ 写错会误导下一个 agent |
+| **R5** | `service/comment/comment-rpc/src/main/resources/application.yml`（G3） | `timeout: 3s` ✔ 但无 `connect-timeout` | 补 `connect-timeout: 5s` |
+| **R6** | `service/hot/hot-rpc/src/main/resources/application.yml`（G3） | 同上 | 同上 |
+| **R7** | `service/favorite/favorite-api/src/main/resources/application.yml`（G3） | 同上 | 同上 |
+
+⇒ ⇒ ⚠️ **本层只登记 + 转派**：这 7 条的落点**全部在域侧写权面**（`service/**/<域>/**`）⇒ ⇒ **本层不代改**（与 §5.3e「共享层缺陷一律转派 G4」不冲突 —— 这不是共享层缺陷，是**域侧配置缺项**）。
+⇒ ⇒ ⚠️ **与 E66 的关系**：E66（Redis 命令绑 deadline）解决的是「**命令**超时要按请求剩余预算」⇒ ⇒ **它不修「连接超时 = 10s」**（那是 `connect-timeout` 的配置缺项）⇒ ⇒ **两条独立**：配置缺项 ⇒ **域侧补 yaml**（本节）；deadline 感知 ⇒ **共享层机制**（§4.9.4）⇒ ⇒ **别把 E66 的实现清单当成这条的修法**。
+
+##### 4.10.27.4 证据强度（**按弱侧，不写 L4**）
+
+| 腿 | 强度 | 说明 |
+|---|---|---|
+| Go 腿 | **L1 源码级（本层直接读依赖源码）** | `go-redis@v9.x` 的 `options.go` `init()`（DialTimeout 5s / ReadTimeout 3s）＋ 真源 `go.mod` 的 pin 版本；⚠️ **真源 yaml 里那两个字段不生效**这条是 **G2 的域侧实测**（`LOAD OK` 但字段没进 struct）⇒ ⇒ **合并后按 L1 记**，**不主张 L4** |
+| RAG 腿 | **L2 配置层（本层逐组件 YAML 解析）+ L2 机制层（本层字节码）** | 10 个组件的值逐项解析 ＋ Boot 4.0.3 / Lettuce 6.1.8 的字节码（命令/连接两条独立路径 ＋ `DEFAULT_CONNECT_TIMEOUT_DURATION = 10s`）⇒ ⇒ **不是「读 yaml 就信」**（§3.3.1） |
+| 合并 | **L1~L2** | ⇒ ⇒ **「连接超时 = 10s」是机制级结论**（不依赖活体）⇒ ⇒ **「断连 ⇒ 1015」那半仍是 L1**（G2 在 task-rpc 上有活体实测） |
+
+---
+
+#### 4.10.28 🟢 **把「不得新建域内 Redis 副本」从台账禁令落成机器门禁**（G2 的显式禁止项 ⇒ 台账拦不住人 ⇒ 源文件扫描守门 · 提交 `22dc67e`）
+
+> **触发**：G2 在其域台账里写了**显式禁止项**（「不得新建域内 Redis 副本」）⇒ ⇒ 本层的判断是：
+> **台账禁令拦不住人** ⇒ ⇒ 域侧 agent **看不到**共享层台账（各域各一份 ⇒ 零重叠 ⇒ 不自动送达）⇒ ⇒
+> 「域内新建一份更保险」这种直觉很容易被执行 ⇒ ⇒ ⇒ **必须有机器闸门**。
+> ⇒ ⇒ 本节 = 把那条禁令**落成「真构建会红」的守门**。
+
+##### 4.10.28.1 落码（**零生产改动** ⇒ 零运行时行为变化）
+
+| 项 | 值 |
+|---|---|
+| 新增守门 | `service/common/src/test/java/com/rag/common/redis/GoStyleRedisClientShadowingGateTest.java`（**3 条**） |
+| 生产代码 | **零改动**（只加测试面） |
+| 判据 | 扫 `service/**/src/main/java`（**排除 `service/common`**）找 `LettuceClientOptionsBuilderCustomizer` ⇒ ⇒ **白名单之外零命中** |
+| 白名单 | `service/users/user/user-api/src/main/java/com/rag/users/user/api/config/RedisDisconnectedBehaviorConfig.java`（**收编前的遗留** · 第九轮修 `DRIFT-USERAPI-014` 落的原件） |
+| 扫描根 | **从 code source 向上找**（同时含 `service/` 与 `pom.xml` 的目录）⇒ ⇒ **不依赖工作目录**（surefire 的 cwd = 模块目录 · IDE = 仓库根 ⇒ 两种布局都得对） |
+| Go 出处 | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:14`（`maxRetries = 3` ⇒ 断连**立即失败**）＋ `service/user/user/api/internal/middleware/checkblacklistmiddleware.go:35-36`（`err != nil` ⇒ **放行**）⇒ ⇒ 断连要**快速失败**才进得了 fail-open 那段 |
+
+##### 4.10.28.2 🔴 三条断言 ＋ **每条一条专属变异**（实测：每次**只有那一条**红）
+
+| 断言 | 断言什么 | 专属变异 | 实测结果 |
+|---|---|---|---|
+| ① `noDomainSideShadowingCopyExists` | 白名单之外**零**声明（闸门的主断言） | **M1** = 白名单跳过失效（`allowed.contains(...)` → `false && ...`） | ✅ **只有 ① 红**（`Failures: 1` · 报出 user-api 那份） |
+| ② `scannerActuallyReportsACopy` | **临时目录**造假副本 ⇒ 扫描器**必须**报出（防 ① 是「什么都没扫到」的**假绿**） | **M2** = 只扫「有 `pom.xml` 的 Maven 模块」（临时假模块没有 `pom.xml`） | ✅ **只有 ② 红** |
+| ③ `scannerSeesTheRealRepository` | **真实仓**自检：(a) 关掉共享层排除 ⇒ 必须扫到**共享层那份**（锚点恒存在）；(b) 白名单中**仍存在**的每一份 ⇒ 必须都能扫到 | **M3** = 扫描器跳过路径含 `/com/rag/common/` 的文件 | ✅ **只有 ③ 红**（报「在**真实仓**里根本扫不到声明 ⇒ 断言①是假绿」） |
+
+⇒ ⇒ **还原方式 = 字节备份 + md5 双向校验**（**不用 `git checkout --`** ⇒ 本文件当时是**未跟踪的新文件** ⇒ `checkout` 会**无声抹掉**真实改动）⇒ ⇒ 三次还原 md5 全部 `1714c7ff4e094451857aeb222bd4ecf6`（一致）。
+⇒ ⇒ ⚠️ **实现层刻意不带「模块必须有 `pom.xml`」这条约束**（它就是 M2 的注入点）⇒ ⇒ 写在实现里会让断言②**直接红**（第一次跑正是如此 ⇒ 已改）⇒ ⇒ **「变异注入点」不得提前落进实现**。
+
+##### 4.10.28.3 🔴 **白名单必须自适应**（收编完成后**不得**变红）
+
+> G1 已 merge 本分支（`b19a61a`「收编删除的前置」）⇒ ⇒ 他们的工作区里 **5 份 `RedisDisconnectedBehaviorConfig` 已 `D`（已暂存删除）**
+> ⇒ ⇒ **白名单里的 user-api 那份也会被删掉** ⇒ ⇒ 若断言写成「白名单那份必须存在」⇒ ⇒ **收编一完成这条守门就红**
+> ⇒ ⇒ **红的原因与守门意图无关** ⇒ ⇒ **那是最坏的一种红** ⇒ ⇒ 故本守门的设计是三条自适应：
+> ① **白名单项文件不存在 ⇒ 自动跳过**（不红，并在断言消息里提示清空白名单）；
+> ② 断言③(a) 的锚点用**共享层那份**（`GoStyleRedisClientAutoConfiguration` · 本层不删 ⇒ **恒存在**）⇒ ⇒ 收编前后**恒有断言**；
+> ③ 断言③(b) 只断言「白名单中**仍存在**的每一份能被扫到」⇒ ⇒ 收编完成后自动为空 ⇒ ⇒ **不红**。
+> ⇒ ⇒ **收编完成后的正确处置 = 清空白名单**（本层写权）。
+
+##### 4.10.28.4 ⚠️ 边界（**不外推**）
+
+| 项 | 说明 |
+|---|---|
+| 判据是「文件里出现该类型名」 | ⇒ ⇒ **保守**（引用即算）⇒ ⇒ 但仓内现状：**生产源码里出现该类型名的只有 2 份**（共享层那份 + user-api 那份遗留）⇒ ⇒ **无误报面** |
+| 只扫**生产**源码 | ⇒ ⇒ 域侧**测试**里引用该类型是允许的（测试不产生生产 Bean）⇒ ⇒ 共享层自己的测试替身 `DomainLikeRedisDisconnectedBehaviorConfig` 也在允许范围内 |
+| 跨 lane 表现 | G2/G3 树里 user-api 那份**存在** ⇒ ⇒ 绿；G1 树里删完 ⇒ ⇒ 白名单项失效 ⇒ ⇒ **仍绿**（§4.10.28.3）⇒ ⇒ **这条守门不会因为别的 lane 收编而变红** |
+| 证据强度 | **L2（构建期）** —— 它证明的是「**再建一份就会红**」⇒ ⇒ **不主张 L4**（不涉及活体行为）⇒ ⇒ **不改变任何 A 轴结论**（只是把 §4.10.24 的既有结论变成机器可执行） |
+
+#### 4.10.29 🔴 **G1 的订正 ＋ 一条波次级判据**（2026-10-27 14:1x）—— 本层的「连带删 `@Import`」**错了**，已就地订正
+
+> **触发**：G1 完成收编后回函，指出两条：① 本层 §4.10.24.2 的「连带**删** `@Import`」**不够**；② 一条**波次级**判据（`-pl` 不带 `-am` ⇒ 跑的是 `~/.m2` 里的**旧** `com.rag:common`）。
+> ⇒ ⇒ **本层对两条都独立核过**（不采信转述）⇒ ⇒ ① **成立**（§4.10.24.2 已就地订正）；② **成立且对本层无影响**（见 §4.10.29.2）。
+
+##### 4.10.29.1 🔴 订正一：「连带**删** `@Import`」⇒ **必须换成 `@ImportAutoConfiguration`**
+
+| 腿 | 事实 | 出处（本层读原文核实） |
+|---|---|---|
+| rpc 侧 | 2 份守门的上下文 = **`@SpringBootConfiguration`**（**不含** `@EnableAutoConfiguration`）⇒ ⇒ **`AutoConfiguration.imports` 清单根本不会被读** ⇒ ⇒ 只删 `@Import` ⇒ 容器里 customizer 数量 = **0** ⇒ ⇒ 守门**静默测不到任何断连策略** | G1 树 `b19a61a` 工作区：`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcRedisDisconnectedFastFailTest.java:195` · `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcRedisDisconnectedFastFailTest.java:182` |
+| api 侧 | 3 份守门用 **`@SpringBootTest`**（引导真实应用类）⇒ ⇒ 清单会被读 ⇒ ⇒ 删掉域内副本后**共享层那份自动接管** ⇒ ⇒ **连带项 = 零**（注解都不用改） | 同树 `service/users/user/user-api/src/test/java/com/rag/users/user/api/UserApiRedisDisconnectedFastFailTest.java:140` |
+| 结论 | ⇒ ⇒ **G1 的订正成立**（**值与机制都对**）⇒ ⇒ §4.10.24.2 第 1 行**已就地订正**（不重写历史段，只加指路）⇒ ⇒ **G1 已实施**（其树内两处 `@ImportAutoConfiguration`） | — |
+
+⚠️ **本层的教训（自己踩的）**：**同一机制在不同组件上的装配形态可以不同** ⇒ ⇒ 我把「api 侧连带项 = 零」**外推**成「rpc 侧也是零」⇒ ⇒ **错了** ⇒ ⇒ **逐组件实测，不外推**（§4.10.24.4 说「不推翻『删除 = 零行为变化』」那条仍然成立 —— 被推翻的只是**连带项的修法**）。
+
+##### 4.10.29.2 🔴 订正二（**波次级**）：`-pl` 不带 `-am` ⇒ 跑的是**本地仓库里的旧 `com.rag:common`**
+
+| 项 | 事实 |
+|---|---|
+| 机制 | `mvn -pl <域内模块> test`（**不带 `-am`**）⇒ reactor 里**只有域内模块** ⇒ `com.rag:common` **从 `~/.m2` 解析** ⇒ ⇒ 跑的是**旧 jar** |
+| 实测 | G1 域内跑收编后回归 ⇒ `MVN_EXIT=1` ＋ 编译错误「程序包 `com.rag.common.redis` 不存在」⇒ ⇒ 那个 jar 里 `com/rag/common/redis/` 条目 = **0** ⇒ ⇒ G4 新增的 4 个类**全部不在** ⇒ ⇒ 它 = **主干代码态** |
+| ⇒ ⇒ 含义 | **任何域级回归，只要共享层代码在期间变过，那个回归就【证明不了共享层改动的兼容性】**（域内模块压根没加载改过的那份共享层）⇒ ⇒ **判据**：跑之前先问「**这次回归的 classpath 上 `com.rag:common` 是哪一份？**」⇒ 共享层动过 ⇒ **必须带 `-am`** |
+| ⇒ 对**本层**的影响 | **本层的全量（52 模块）是有效的** —— `service/common` **在 reactor 内** ⇒ ⇒ 用**源码** ⇒ ⇒ 不受这条影响 ⇒ ⇒ 但**各域拿本层的全量当「我域与共享层兼容」的证据是不成立的** ⇒ ⇒ 各域必须**自己**带 `-am` 跑一次 |
+| ⇒ 与本层既有纪律的关系 | 与「**lane 级全量 ≠ 别的 lane 的回归证据**」同族，但**更隐蔽**：那条是「**别的 lane 的树**不含我的提交」；这条是「**连共享层都不是我这份树**」⇒ ⇒ **两者都会让「跑绿」变成假绿** ⇒ ⇒ **本层的守门清单里已加这一条**（见 §4.10.29.7） |
+
+##### 4.10.29.3 🟢 G1 的收编落地结果（**本层只登记，不复算**）
+
+| 项 | G1 的实测值 |
+|---|---|
+| 收编 | 5 份域内副本**已删**；5 份守门各补 **2 条 bean 身份断言**（`size()==1` ＋ key 含 `goStyleRedisClientOptionsCustomizer`） |
+| 回归 | 我域 6 组件 **667** ＋ `service/common` **324** = **991** · BUILD SUCCESS · 06:47 min（**带 `-am`**） |
+| 变异 | ① 去掉 rpc 侧 `@ImportAutoConfiguration` ⇒ **2/2 红**；② 运行期 exclude 共享层自动配置（**直接 `-D`** 才传得进测试 JVM ⇒ 塞在 `-DargLine` 里**不生效** ⇒ 又一个「参数没到它该到的地方」的实例）⇒ **2/2 红**；③ 装回「域内副本替身」⇒ 2 条只红 1 条（**名字断言**红、机制腿绿）⇒ ⇒ 证明「收编真的发生」这条判据能**单独**抓住「收编没做」 |
+| ⇒ 对本层新守门的影响 | G1 树里那 5 份副本已删 ⇒ ⇒ 本层 §4.10.28 的守门在 G1 树里**仍绿**（白名单项自动失效 ＋ 锚点恒存在）⇒ ⇒ **这条守门不会因收编而变红**（设计目标达成） |
+
+##### 4.10.29.4 🟡 共享面数字订正（**只登记，不代改**）
+
+| 项 | 值 |
+|---|---|
+| 全仓 U+FFFD 清单 | G1 实测：**合并回主干后 = 23 份 / 63 处**（本层 §4.10.20 记录的是本树口径）⇒ ⇒ **复扫要比「文件清单」而不是比份数**（两份清单**不是同一批文件**）⇒ ⇒ **本层不自行改数**（等主干合并态实测） |
+
+##### 4.10.29.5 🔴 **本层自己踩了一次「零命中 ⇒ 不存在」的坑**（**自陈，非指责**）
+
+| 事实 | 说明 |
+|---|---|
+| 现象 | 复核 G1 的订正时，按 §4.10.24.2 的路径在**本树** `find` ⇒ **4/5 份守门文件零命中** ⇒ ⇒ 第一反应是「G1 的文件不存在 / 他在说假话」 |
+| 真因 | 那 4 份文件是 **G1 第十四轮 `0c2a902` 新增的** ⇒ ⇒ **只存在于 G1 树** ⇒ ⇒ 本树零命中是**正常**的 ⇒ ⇒ §4.10.24.2 的「位置」列**已带树 + commit**（`G1 树 b7d724c`）⇒ ⇒ **引用本身合规**，只是**复核姿势**错了 |
+| ⇒ ⇒ 纪律 | **引用他树的文件 ⇒ 复核必须用 `git -C <树> show <commit>:<path>`** ⇒ ⇒ **在本树按路径查 ⇒ 零命中 ≠ 不存在**（与 §4.10.20 的 U+FFFD「grep 会假阴性 ⇒ 一律 python 读 bytes」同族：**工具口径错 ⇒ 结论就错**） |
+
+##### 4.10.29.6 🟡 本层为此新增的两条**复核纪律**（写进本层工作方式）
+
+| # | 纪律 | 触发 |
+|---|---|---|
+| ① | **跨树引用必须带「树 + commit」**（行号只在那个 commit 上有效）⇒ ⇒ **本层台账里所有引他树的位置列一律带** | §4.10.24.2 / §4.10.24.3 |
+| ② | **跑域级回归前先问「classpath 上的 `com.rag:common` 是哪一份」** ⇒ ⇒ 共享层动过 ⇒ **必须带 `-am`** | §4.10.29.2 |
+
+##### 4.10.29.7 证据强度
+
+| 腿 | 强度 | 说明 |
+|---|---|---|
+| Go 腿 | **N/A** | 本节是**装配形态**与**构建口径**问题 ⇒ ⇒ 与 Go 侧无关 ⇒ ⇒ **不产生任何 A 轴结论变化** |
+| RAG 腿 | **L1（源码级 · 本层读原文核实）** | ① 的三处注解行（rpc `:195` / `:182` ＋ api `:140`）**本层在 G1 树逐行读过** ⇒ ⇒ **不是「采信转述」** |
+| 合并 | **L1** | ⇒ ⇒ **不主张 L4**（无活体） |
+
+##### 4.10.29.8 🔴 订正三（**本层自己**）：§4.10.25.4 的「形状断言」建议**少了一条正向断言** ⇒ ⇒ **G3 的写法更强、且是对的**
+
+| 项 | 内容 |
+|---|---|
+| 本层原建议 | §4.10.25.4：「该断言须从「必须含 `code:5003`」改为「**不得**是 5003 / 不得是 Tomcat HTML 错误页」」⇒ ⇒ **纯负向** |
+| 缺口 | 🔴 **纯负向断言不够** —— 「200 ＋ body 里没有 5003 ＋ 不是 HTML」**证明不了请求真的进了业务层**（一个 200 ＋ 空 body 也能过）⇒ ⇒ ⇒ **必须有一条正向断言** |
+| G3 的实际写法（G3 树 `e18fd52` 工作区 · `service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/FavoriteApiRealTomcatGateTest.java` · 方法体自 `:300` 起） | ① `assertEquals(200, statusCode)` ② `assertFalse(body.contains("\"code\":5003"))` ③ **`assertTrue(body.contains("\"code\":1015"))`** ④ `assertFalse(isTomcatHtmlErrorPage(resp))` ⇒ ⇒ **在负向之上补了正向那条** ⇒ ⇒ 并保留了旧方法名（**以 DisplayName 与断言为准**） |
+| Go 侧核对（**本层独立核，非转述**） | 真源 `service/favorite/common/errmsg.go:13` ⇒ `CodeServerBusy = 1015`；`:108-116` ⇒ `BizCodeFromError` 中 `status.FromError(err)` 不 ok ⇒ **`:115` 返回 `CodeServerBusy`**；`:130-137` ⇒ `default: return CodeServerBusy`（gRPC `Unavailable` 也落这里）⇒ ⇒ **1015 就是这一格的 Go 契约值** |
+| ⇒ ⇒ 订正 | **本层的建议缺了正向那条** ⇒ ⇒ 正确的下限是「**负向两条 ＋ 正向一条（Go 契约值）**」⇒ ⇒ §4.10.25.4 已就地加订正标记（不重写历史段）⇒ ⇒ **G3 的写法正确** |
+| 🆕 教训 | **「别写死具体值」不是通用规则** —— 只有当那个值**不是契约**时才适用；**当它就是 Go 侧契约值时，硬编码反而更强**（能抓住「错误码映射被改」这类漂移）⇒ ⇒ **先问「这个值是不是契约」再决定断言形态** ⇒ ⇒ 与本层「形状优先」的泛化相比：**G3 比本层更准** |
+
 #### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `cd893d1`）
 
 > ⚠️ **代码态基线 = `cd893d1`**（= 本轮**最后一次**改代码的提交）⇒ ⇒ `cd893d1` **改了生产代码**（容器上限无条件化）
 > ⇒ ⇒ 与「第十一次全量（§4.10.22 · 代码态 `040a201`）」**不是**同一个代码态 ⇒ ⇒ **必须重跑全量** ⇒ ⇒ **第十二次全量口径见 §4.10.26**。
 > ⇒ ⇒ 上一行「代码行为自 `5a954bb` 起未变」**已被本轮打破**（`cd893d1` 改了生产代码）⇒ ⇒ 该行按「不改写历史」保留，**以本行为准**。
 > ⇒ ⇒ **中间那批提交**（`ee1b797` · `2f3d5c2` · `acb6fe6` · `b71ac22` · `1e1899f` · `46f67bf`）= **全是文档**（台账）⇒ ⇒ **零代码影响**。
+> ⇒ ⇒ **测试面变更**：`22dc67e`（§4.10.28 的新守门，**只加测试** ⇒ **生产代码态仍是 `cd893d1`**）⇒ ⇒ **生产行为未变**，但**用例数变了** ⇒ ⇒ **需重跑全量**（口径见 §4.10.29）。
 
 | commit | 内容 | 落点（`文件:行号`） | A 轴 |
 |---|---|---|---|
@@ -1663,6 +1876,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | `5a954bb` | 🟢 **G3 反馈单 轴②**：form 闸门判据补「**域自捕获**」第一判据 ⇒ favorite 语义答案 = `OFF` | `…/http/GoStyleFormLimitMode.java:…`（`DomainReachability` 加 `goSideHandlesParseError` + `selfConsistent` 两规则 + 表的 favorite 行 + **删** `REGISTERED_DEVIATIONS` 的 favorite 条 + `Mode.OFF`/类 javadoc）· `…/http/GoStyleTomcatParameterLimitCustomizer.java:…`（订正「无分叉 / favorite 零改动」等三处陈述）· `…/http/GoStyleFormValues.java:…` · `…/http/GoStyleFormLimitExceededException.java:…` · **重写** `…/http/GoStyleFormLimitSemanticCriterionTest.java`（6 条）· 另 2 个测试类 javadoc 订正 | **A3** |
 | `040a201` | 🟢 **G1 约束② 的「共享层那一半」闭合**：新增断言 ⑤「共享层**产出**的带 `@Order` 的 Filter 全集 == 快照」⇒ ⇒ **新增第 8 个共享层 Filter 必红** ⇒ ⇒ 逼它显式登记槽位 | `service/common/src/test/java/com/rag/common/spring/SharedFilterOrderSnapshotGateTest.java:…`（⑤ `everySharedLayerFilterIsRegisteredInSnapshot` + `sharedLayerClassesRoot()` + `enumerateOrderedFilters()`）⇒ ⇒ **只改测试面** ⇒ ⇒ **零生产改动 / 零运行时行为变化** | 无（只加守门；**协调约束**的机器保障，**不改任何 A 轴结论**） |
 | `cd893d1` | 🔴 **容器上限的抬升与闸门的有无解耦**（G3 反馈 (b)）＝ **本轮唯一改生产代码的提交**：删掉 `if (mode == OFF) return;` ⇒ **一律抬到 10001**；构造函数改为**只校验** `mode`（fail-fast 不丢） | `service/common/src/main/java/com/rag/common/http/GoStyleTomcatParameterLimitCustomizer.java:…`（`customize()` + 构造函数 + 类级 javadoc「两轴解耦」一节）· `…/http/GoStyleFormLimitMode.java:…`（`Mode.OFF` 的 javadoc）· `…/test/java/com/rag/common/http/GoStyleFormLimitModeTest.java:…`（类 javadoc）· **新增** `…/test/java/com/rag/common/http/GoStyleParamLimitOffModeGateTest.java`（**3 条**）· `…/redis/GoStyleRedisClientAutoConfiguration.java:…`（**纯注释**：javadoc「三份」→「五份」） | **A3**（超时/deadline 的失败语义）＋ **A1**（Redis 断连的 fail-fast/fail-open 语义 · 仅 javadoc） |
+| `22dc67e` | 🟢 **把「不得新建域内 Redis 副本」从台账禁令落成机器门禁**（G2 的显式禁止项 ⇒ 台账拦不住人） | **新增** `…/redis/GoStyleRedisClientShadowingGateTest.java`（**3 条** · 变异 M1/M2/M3 各专属）⇒ ⇒ **零生产改动** | 无（只加守门；**把 §4.10.24 的既有结论变成机器可执行** ⇒ **不改变任何 A 轴结论**） |
 
 **回归口径与结果（第七次全量 · 核对日期 2026-10-27）**
 
