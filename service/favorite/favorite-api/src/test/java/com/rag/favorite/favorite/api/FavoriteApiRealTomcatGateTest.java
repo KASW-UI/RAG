@@ -2,6 +2,7 @@ package com.rag.favorite.favorite.api;
 
 import com.rag.favorite.favorite.api.client.FavoriteRpcClient;
 import com.rag.favorite.favorite.api.support.RealTomcatPort;
+import com.rag.favorite.favorite.api.support.RealTomcatHttp;
 import com.rag.users.common.jwt.JwtUtil;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -155,12 +156,6 @@ class FavoriteApiRealTomcatGateTest {
     @Autowired
     private org.springframework.context.ApplicationContext context;
 
-    private HttpClient client() {
-        return HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .version(HttpClient.Version.HTTP_1_1)   // 与 Go 侧默认一致，且避免 h2c 升级干扰响应头
-                .build();
-    }
 
     /**
      * 发请求；<b>把「一个字节都没读到」的传输层失败翻译成人能读懂的诊断</b>。
@@ -173,7 +168,10 @@ class FavoriteApiRealTomcatGateTest {
      */
     private HttpResponse<String> send(HttpRequest req) throws Exception {
         try {
-            return client().send(req, HttpResponse.BodyHandlers.ofString());
+            // 🔴 走 RealTomcatHttp：JDK HttpClient 对 interim(1xx) 的上限是 8 条且**硬编码**，
+            //    而 Tomcat 11.0.24 在这类请求上会连发 103 Early Hints ⇒ ⇒ 撞上限就回落 HttpURLConnection。
+            //    详见 RealTomcatHttp 的类注释（裸 socket 实测证据）。
+            return RealTomcatHttp.send(req);
         } catch (IOException e) {
             throw new IOException("端口 " + port + " 上读到了 0 字节（本请求没打到本测试的 Tomcat？）"
                     + "；该端口的监听者=[" + RealTomcatPort.holders(port) + "]"

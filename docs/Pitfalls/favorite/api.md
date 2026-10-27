@@ -591,3 +591,54 @@ assertEquals(PROBE_USER_ID, longAttr(span, FavoriteSpans.ATTR_USER_ID));
 - **PIT-FAV-API-010**（共享层一改，本域守门的变异守护就哑了）—— 那条讲**变异点**选在**上游拥有的层**；
   本条讲**期望值**与**被测代码**同源 ⇒ ⇒ **两条是「哑」的两个不同来源**，查的时候都要查。
 - AGENTS.md §3.3.3「跑绿 ≠ 判据活着」⇒ ⇒ 本条是那条纪律的**一个具体失效形态**。
+
+---
+
+## PIT-FAV-API-013 · 🔴 **JDK `HttpClient` 的 1xx 上限是 8 条且硬编码** ⇒ 撞上 Tomcat 11 的 `103 Early Hints` ⇒ **测试整体失明**
+
+> **一句话**：`ProtocolException: Too many interim responses received: 9 > 8` **不是**「服务端行为异常」，
+> **也不是**「请求没打到」⇒ ⇒ **是客户端自己的 1xx 容忍度用完了** ⇒ ⇒ **测试读不到应用层的任何响应**。
+
+### 现象（2026-10-27 实测 · favorite 域 4 条真 Tomcat 用例长期红）
+
+```
+java.net.ProtocolException: Too many interim responses received: 9 > 8
+```
+
+⇒ ⇒ 但这条异常当时被测试自己的 `catch (IOException)` 翻译成了
+「**端口 N 上读到了 0 字节（本请求没打到本测试的 Tomcat？）**」⇒ ⇒ **症状指向了错的方向**
+⇒ ⇒ 我据此把根因归到「共享层把容器上限抬到 10001 ⇒ Tomcat 多发 100-Continue」⇒ ⇒ **那个归因是错的**。
+
+### 真根因（裸 socket 实测，不是推测）
+
+```
+GET /favorite/v1/item/list?folderId=0&…（2049 个参数）
+← HTTP/1.1 103 Early Hints   × 11
+← HTTP/1.1 200  {"code":5003,…}
+```
+
+⇒ ⇒ ① Tomcat 11.0.24 发的是 **`103 Early Hints`**（**不是** `100 Continue`）；
+⇒ ⇒ ② JDK `java.net.http.HttpClient` 对 interim(1xx) 的上限 = **8 条**、**硬编码不可配**
+（`jdk.httpclient.*` 属性表里没有对应开关 ⇒ 只能换客户端）；
+⇒ ⇒ ③ **被测行为是对的**（200 + 5003 = Go 语义）⇒ ⇒ **红的是测试的传输层**。
+
+### 修法（域内自修 · 零共享层改动）
+
+新增 `favorite-api/src/test/.../support/RealTomcatHttp.java`：JDK 客户端优先 ⇒ 撞「Too many interim responses」
+且请求**无 body** 时 ⇒ **回落 `HttpURLConnection`**（透明忽略 1xx）⇒ ⇒ **调用点一行没改**。
+
+### 三条可复用的判据
+
+1. 🔴 **`ProtocolException extends IOException`** ⇒ ⇒ 凡是把 `IOException` 一律翻译成
+   「没打到服务端的 0 字节」的**诊断层**，都会**把协议错误误报成连不上** ⇒ ⇒ **症状指向错方向 ⇒ 归因跑偏**。
+   ⇒ ⇒ **诊断层要按异常类型分流**，不要一个大 catch。
+2. 🔴 **「服务端发了什么」必须看原始字节**（裸 socket），不能只看客户端的异常文案 ⇒
+   ⇒ 客户端异常只说「我收到的 1xx 超了」，**不说那 1xx 是什么**。
+3. ⚠️ **回落只是让测试能观测到应用层** ⇒ ⇒ **不等于 wire 层偏差已修** ⇒ ⇒
+   偏差本身（Go 不发 103 / RAG 发 11 条）**另案上报**，别在「修好测试」时顺手销账。
+
+### 同族
+
+- **PIT-FAV-API-008**（`RANDOM_PORT` 挑的端口可能根本不是你的）—— 那条是「打到了别人」；
+  本条是「**打到了、但自己先死了**」⇒ ⇒ **两类都是「请求没到达被测逻辑」** ⇒ ⇒ 症状相似、根因完全不同 ⇒
+  ⇒ **判据要能分开它们**（本条的分界 = 异常类型：`ProtocolException` vs `IOException` 且「读到 0 字节」）。

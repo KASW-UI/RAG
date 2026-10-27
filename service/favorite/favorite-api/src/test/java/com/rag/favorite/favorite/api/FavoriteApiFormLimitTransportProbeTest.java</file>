@@ -1,0 +1,126 @@
+package com.rag.favorite.favorite.api;
+
+import com.rag.favorite.favorite.api.client.FavoriteRpcClient;
+import com.rag.favorite.favorite.api.support.RealTomcatPort;
+import com.rag.users.common.jwt.JwtUtil;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockitoBean;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+
+/**
+ * 🔴 **临时探针**（用完即删）—— 测「2049 个 form 值 ⇒ JDK HttpClient 抛
+ * {@code ProtocolException: Too many interim responses received: 9 > 8}」的**真凶是谁**。
+ */
+@SpringBootTest(
+        classes = FavoriteApiApplication.class,
+        webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT,
+        properties = {
+                "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
+                "spring.cloud.nacos.discovery.enabled=false",
+                "grpc.client.favorite-rpc.address=static://127.0.0.1:65535",
+                "grpc.client.favorite-rpc.negotiation-type=plaintext",
+                "management.otlp.tracing.export.enabled=false",
+                "logging.level.com.alibaba.nacos=WARN",
+                "rag.protection.max-bytes=1024",
+                "observability.http-timeout=30s",
+                "rag.protection.cpu-sholding.enabled=false"
+        })
+class FavoriteApiFormLimitTransportProbeTest {
+
+    private static final String ACCESS_SECRET = "ae0536f9-6450-4606-8e13-5a19ed505da0";
+    private static final String ITEM_LIST = "/favorite/v1/item/list";
+
+    @DynamicPropertySource
+    static void serverPort(DynamicPropertyRegistry registry) {
+        registry.add("server.port", RealTomcatPort::pick);
+    }
+
+    @MockitoBean
+    private FavoriteRpcClient rpcClient;
+
+    @Autowired
+    private org.springframework.context.ApplicationContext context;
+
+    @LocalServerPort
+    private int port;
+
+    private static String manyFormParams(int count) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            if (i > 0) {
+                sb.append('&');
+            }
+            sb.append("folderId=").append(i);
+        }
+        return sb.toString();
+    }
+
+    private String token() {
+        return JwtUtil.getToken(ACCESS_SECRET, System.currentTimeMillis() / 1000L, 3600L, 42L);
+    }
+
+    @Test
+    @DisplayName("🔴 探针：裸 socket 扫参数个数 ⇒ 103 Early Hints 条数 / 最终状态 / 业务码")
+    void probe() throws Exception {
+        String auth = token();
+        System.out.println("=== PROBE port=" + port + " ===");
+
+        for (int n : new int[]{0, 1, 100, 1000, 2048, 2049, 3000}) {
+            String path = ITEM_LIST + (n == 0 ? "" : "?" + manyFormParams(n));
+            try (Socket s = new Socket("127.0.0.1", port)) {
+                s.setSoTimeout(20000);
+                OutputStream out = s.getOutputStream();
+                String req = "GET " + path + " HTTP/1.1\r\n"
+                        + "Host: 127.0.0.1:" + port + "\r\n"
+                        + "Authorization: Bearer " + auth + "\r\n"
+                        + "Connection: close\r\n\r\n";
+                out.write(req.getBytes(StandardCharsets.ISO_8859_1));
+                out.flush();
+                InputStream in = s.getInputStream();
+                byte[] buf = new byte[65536];
+                java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                int k;
+                while ((k = in.read(buf)) > 0) {
+                    bos.write(buf, 0, k);
+                }
+                String raw = bos.toString(StandardCharsets.ISO_8859_1);
+                int hints = 0;
+                int statusLines = 0;
+                String last = "";
+                for (String line : raw.split("\r\n")) {
+                    if (line.startsWith("HTTP/1.1 103")) {
+                        hints++;
+                    } else if (line.startsWith("HTTP/1.1 ")) {
+                        statusLines++;
+                        last = line.trim();
+                    }
+                }
+                int bodyAt = raw.lastIndexOf("\r\n\r\n");
+                String body = bodyAt < 0 ? "" : raw.substring(bodyAt + 4);
+                String code = "-";
+                int at = body.indexOf("\"code\":");
+                if (at >= 0) {
+                    code = body.substring(at, Math.min(body.length(), at + 20)).replace("\r", "").replace("\n", "");
+                }
+                System.out.println("PROBE SWEEP params=" + n
+                        + " queryLen=" + path.length()
+                        + " hints103=" + hints
+                        + " statusLines=" + statusLines
+                        + " last=" + last
+                        + " code=" + code);
+            } catch (Exception e) {
+                System.out.println("PROBE SWEEP params=" + n + " FAILED: " + e);
+            }
+        }
+    }
+}

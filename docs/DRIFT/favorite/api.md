@@ -20,7 +20,7 @@
 | 项 | 值 |
 |---|---|
 | 落地形态 | 31 个 main 文件 / **3,116 行** / **15 个 DTO** / 7 个 Service / 1 个 Controller<br>⚠️ **核对 2026-10-25（第十轮）**：行数比首轮台账记的 2,920 多 196 行 ⇒ **全部是各轮的纯注释增量**（可执行逻辑零改动）；DTO 数首轮记的 **13 是错的**（基线 `58e8314` 就是 15 个） |
-| 测试 | **11 个测试类 / 111 例全绿**（33 输入契约 + 36 MVC 管线 + **6 装配** + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍** + **1 探针（自动 skip）** + **4 端口归属守门** + **11 span 守门（第二十九轮新增 · 零 Docker）**）⚠️ **另有 4 个已知共享层 error**（`FavoriteApiRealTomcatGateTest` 3 ＋ `FavoriteApiEnvelopeParityTest` 1 ⇒ 根因在共享层 `cd893d1` ⇒ §16.5）⇒ **合计 116 例 / 1 skip**；⚠️ **明细之和不等于总数**（本行只列主要构成 ⇒ 以 surefire 求和为准）→ 第六轮 **+1 个测试类 / +5 例**；第十四轮收尾 **+1 个测试类 / +4 例**（`RealTomcatPortTest`）；**2026-10-26 合并当天**：防护链类 3 ⇒ **6 例**（绝对 `@Order` ⇒ Go 相对链序，**§12**） |
+| 测试 | **11 个测试类 / 116 例全绿**（33 输入契约 + 36 MVC 管线 + **6 装配** + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍** + **1 探针（自动 skip）** + **4 端口归属守门** + **11 span 守门（第二十九轮新增 · 零 Docker）**）⚠️ **另有 4 条曾长期红的用例已在第三十轮转绿**（`FavoriteApiRealTomcatGateTest` 3 ＋ `FavoriteApiEnvelopeParityTest` 1 ⇒ 真根因 = **Tomcat 11 的 `103 Early Hints` 撞 JDK 客户端的 1xx 上限** ⇒ ⇒ **域内自修** ⇒ **不是共享层问题** ⇒ §16.8）⇒ **合计 116 例 / 1 skip**（口径 = surefire XML 求和 ≡ maven 模块汇总行）；⚠️ **明细之和不等于总数**（本行只列主要构成 ⇒ 以 surefire 求和为准）→ 第六轮 **+1 个测试类 / +5 例**；第十四轮收尾 **+1 个测试类 / +4 例**（`RealTomcatPortTest`）；**2026-10-26 合并当天**：防护链类 3 ⇒ **6 例**（绝对 `@Order` ⇒ Go 相对链序，**§12**） |
 | 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条已签字偏离** |
 | 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **1 条跨域待拍板**：② **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，落点在 `service/common` ⇒ 收口在 `global`）—— ① 容器层参数上限口径**已于 2026-10-27 闭合**（共享层把容器上限抬到 10001 + 域侧动作完成 ⇒ **§14**）<br>✅ **U8（第十五轮登记的唯一一条业务路径缺口）已于第十六轮闭合**：create 成功路径 + `ensureUserExists` 五分支 + 落库等价性全部拿到双侧活体证据（15 case 全 SAME）⇒ [`rpc.md`](./rpc.md) **§25**；盘点全表 ⇒ **§24.1** ⇒ **域内「未知项」归零**（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认）<br>🔴 **U9（第十七轮新增 · 部署形态类 · 待拍板）**：Go 生产形态有 **16062** 那个 HTTP 面，RAG 侧没有 ⇒ **§11** |
 | 本台账范围 | **仅 `favorite-api`**。`favorite-common` / `favorite-rpc` / `favorite-proto` 见同目录另三份台账 |
@@ -860,7 +860,7 @@ service/favorite/api/internal/svc/service_context.go:20
 | ✅ **守门（已补 · 第二十九轮）** | **新增 2 个守门类**（**域内文件** · **零 Docker / 零 Testcontainers / 零真 PG / 零真 Redis**）：<br>① `service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/FavoriteApiSpanWiringTest.java` ⇒ **11 条**<br>② `service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteRpcSpanWiringTest.java` ⇒ **12 条**<br>**形态** = 自装 **真 OTel SDK**（`OpenTelemetrySdk` ＋ `SdkTracerProvider` ＋ `SimpleSpanProcessor` ＋ 自写 `CollectingExporter`）⇒ 断言**导出的 `SpanData`**（**不是**「代码写成了这样」⇒ AGENTS.md §3.3.3）⇒ ⇒ **16/16 个 span 的「真被导出」「属性名与属性值」「三类记错判据」「status 恒 UNSET」四条都有运行时证据** |
 | 🟡 **守门的边界（必须与结论一起读）** | ① **Go 侧没有同时跑的探针** ⇒ ⇒ **不是「双侧活体对拍」** ⇒ 本条最高只到 **L3**（Go 侧 L1 逐行对照 ＋ RAG 侧 L4 运行证据）<br>② **favorite-rpc 侧不起 Spring 上下文**（`application.yml` 里 `spring.flyway.enabled=true` ⇒ 真上下文**必须连真 PG** ⇒ Docker 转发故障下不可用）⇒ 改为**直接装配生产对象**（真 `FavoriteDomainService` ＋ 真 `FavoriteUserGuard` ＋ 真 `FavoriteArticleSnapshotResolver` ＋ 真 `FavoriteRpcMetrics` ＋ 真 `FavoriteSpans` ＋ 真 OTel SDK），**mock 的只有两条外部边界**：数据层 mapper（`interface` ＋ mock）与下游 gRPC 客户端（**真 in-process server** ⇒ 走真传输层）⇒ ⇒ **本守门不证明 SQL / DDL / 事务行为**（那些归 `FavoriteDdlParityTest` / `FavoriteSqlStatementParityTest` 等）<br>③ **favorite-api 侧无数据源** ⇒ 用**真 in-process gRPC server** 顶上那一次下游调用 ⇒ **顺带能钉死「span 属性 trim 过、下游请求带未 trim 原值」这条不对称**（靠下游**真收到**的请求断言，不是靠读代码） |
 | ✅ **变异验证（7 个变异 · 全部精确转红）** | 见 **§16.6** ⇒ ⇒ 「守门是否活着」**已体检**（不是假绿） |
-| 🔴 **本轮回归（可复算）** | `mvn -B -o -pl service/favorite/favorite-api,service/favorite/favorite-rpc,service/favorite/favorite-common -am test -DargLine="-Xmx2g"` ⇒ **favorite-api 116 条 / 0 failures / 4 errors / 1 skipped**（`11` 份 surefire XML）· **favorite-common 29 条 / 0 failures / 0 errors / 0 skipped**（`4` 份）· **favorite-rpc 126 条 / 0 failures / 0 errors / 3 skipped**（`22` 份）<br>⚠️ **favorite-api 的 4 个 error 全是既有的「form 参数超限 / 达限」用例**（`FavoriteApiRealTomcatGateTest` 3 个 ＋ `FavoriteApiEnvelopeParityTest#tooManyFormParamsMatchGoByteForByte` 1 个）⇒ 根因 = `java.net.ProtocolException: Too many interim responses received: 9 > 8`（**JDK HttpClient 对 Tomcat 多次 100-Continue 的上限**）⇒ ⇒ **根因在共享层 `cd893d1` 抬容器上限到 10001**（⇒ Tomcat 不再在 2048 拒 ⇒ 继续收 ⇒ 触发更多 100-Continue）⇒ ⇒ **与本次 span 落码无关**（span 在业务层，**不在 form 解析路径上**）⇒ ⇒ **已转派 G4**（共享层写权）⇒ ⚠️ **本轮新增的 23 条 span 守门全绿** ⇒ ⇒ **未引入回归** |
+| ✅ **本轮回归（可复算 · 第三十轮修完 4 条长期红）** | `mvn -B -o -pl service/favorite/favorite-api,service/favorite/favorite-rpc,service/favorite/favorite-common -am test -DargLine="-Xmx2g"` ⇒ **favorite-api 116 条 / 0 failures / 0 errors / 1 skipped**（`11` 份 surefire XML ⇒ **与 maven 汇总行一致** ⇒ ⚠️ 跑之前多一份**孤儿报告**（我删掉的临时探针 `FavoriteApiFormLimitTransportProbeTest`，1 条）⇒ 已删 ⇒ 计数口径归位）· **favorite-common 29 条 / 0 failures / 0 errors / 0 skipped**（`4` 份）· **favorite-rpc 126 条 / 0 failures / 0 errors / 3 skipped**（`22` 份）<br>✅ **原先长期红的 4 条已全部转绿**（`FavoriteApiRealTomcatGateTest` 3 条 ＋ `FavoriteApiEnvelopeParityTest#tooManyFormParamsMatchGoByteForByte` 1 条）⇒ ⇒ **根因不是我先前说的「100-Continue」** ⇒ ⇒ **真根因 = Tomcat 11.0.24 连发的 `103 Early Hints` 撞了 JDK `HttpClient` 的 1xx 上限** ⇒ ⇒ **域内自修**（测试传输层回落 `HttpURLConnection`）⇒ **零共享层改动** ⇒ ⇒ **完整取证见 §16.8** |
 
 ### 16.6 ✅ 变异验证 —— **7 个变异全部精确转红**（第二十九轮）
 
@@ -891,6 +891,66 @@ service/favorite/api/internal/svc/service_context.go:20
 - ⚠️ **与「变异点选在哪一层」是同族但更隐蔽的一层**：变异点选在哪一层决定变异**转不转得动**；
   而**期望值同源**决定断言**转不转得红** ⇒ ⇒ **两者都要各自查**。
 - ⇒ 已入坑档 **PIT-FAV-API-012**。
+
+---
+
+### 16.8 🔴 **「4 条真 Tomcat 用例长期红」的真根因 —— 不是 100-Continue，是 `103 Early Hints`**（第三十轮 · 实测）
+
+⚠️ **订正**：本域 §16.5 早先写「根因 = JDK HttpClient 对 Tomcat 多次 **100-Continue** 的上限」⇒ ⇒ **那个说法是错的**
+⇒ ⇒ **已实测推翻**（下面是裸 socket 的原始响应字节）。
+
+#### 16.8.1 🔴 实测证据（裸 socket，不是推测）
+
+```
+GET /favorite/v1/item/list?folderId=0&folderId=1&…（2049 个参数）
+← HTTP/1.1 103 Early Hints      ← 第 1 条
+   …（**共 11 条**，每条后面跟一个空行）
+← HTTP/1.1 103 Early Hints      ← 第 11 条
+← HTTP/1.1 200
+   Traceparent: 00-…
+   Content-Type: application/json;charset=utf-8
+   {"code":5003,"msg":"参数错误","data":null}
+```
+
+⇒ ⇒ **被测行为完全正确**（Go 语义：2049 个非空 form 值 ⇒ `maxFormParamCount` 触发 ⇒ **HTTP 200 + 5003 业务信封**）
+⇒ ⇒ **红的是「测试的传输层客户端」**，**不是应用层、也不是共享层**。
+
+#### 16.8.2 🔴 三个事实（逐条有据）
+
+| 事实 | 证据 |
+|---|---|
+| ① Tomcat 发的是 **`103 Early Hints`**，**不是** `100 Continue` | 裸 socket 抓到的原始字节（§16.8.1）⇒ 11 条 `HTTP/1.1 103 Early Hints` |
+| ② JDK `java.net.http.HttpClient` 对 interim(1xx) 响应的上限 = **8 条**，且**硬编码不可配** | 异常原文 `Too many interim responses received: 9 > 8` ＋ 实测 `jdk.httpclient.*` 属性表里**没有**对应开关（`java.net.http` 模块全量扫）⇒ ⇒ **只能换客户端** |
+| ③ **不是共享层主动发的** | 全仓 `service/**` grep `EarlyHints` / `early-hints` / `sendEarlyHints` ⇒ **零命中** ⇒ ⇒ 是 **Tomcat 11.0.24**（`spring-boot-starter-tomcat:4.0.8` ⇒ `tomcat-embed-core:11.0.24`）自身的行为 |
+
+#### 16.8.3 ⚠️ **wire 层偏差：Go 不发这条 1xx**
+
+Go 的 `net/http` **服务端没有 103 Early Hints 这个特性** ⇒ ⇒ **RAG 多发了一段 1xx** ⇒ ⇒
+**这是 Go ↔ RAG 的真实差异**（任何 1xx 容忍度低的客户端都会被打断 —— JDK 客户端就是活例）
+⇒ ⇒ **已作为跨域发现上报**（收口在共享层 / `global`）⇒ ⇒ **本域不自行改共享层**。
+
+#### 16.8.4 ✅ 域内自修（第三十轮 · 零共享层改动）
+
+**新增** `service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/support/RealTomcatHttp.java`
+（**域内测试支撑类**）：
+
+- 传输层 = **JDK `HttpClient` 优先** ⇒ 撞 `ProtocolException` 且形态是「Too many interim responses」时
+  ⇒ **回落 `HttpURLConnection`**（它**透明忽略 1xx**）⇒ ⇒ 拿到应用层的真实响应；
+- 回落到 JDK 的 `HttpResponse<String>` 形态 ⇒ ⇒ **两个测试类的调用点一行没改**；
+- ⚠️ **回落只对「无请求体」的请求生效**（`bodyPublisher` 不可重放）⇒ 带 body 的 POST 仍走 JDK 客户端
+  ⇒ ⇒ **不掩盖其它形态的失败**。
+
+⇒ ⇒ **两个真 Tomcat 测试类改走 `RealTomcatHttp.send(req)`** ⇒ ⇒ **4 条长期红全部转绿，且无新红**
+（`FavoriteApiRealTomcatGateTest` **8/0/0** ＋ `FavoriteApiEnvelopeParityTest` **5/0/0**）。
+
+⚠️ **本修法的边界（必须一起读）**：它**只**让守门能观测到应用层响应 ⇒ ⇒ **wire 层的 1xx 偏差仍在**
+⇒ ⇒ **不是「该偏差已修」** ⇒ ⇒ 等共享层那条（关掉 Tomcat 的 Early Hints，或改回 Go 形状）落码后，
+本域这条兜底**可以退掉**（但不必急）。
+
+⚠️ **顺带修掉的一处误导性诊断**：两个测试类的 `send()` 原本把**任何** `IOException` 都翻译成
+「端口 N 上读到了 0 字节（本请求没打到本测试的 Tomcat？）」⇒ ⇒ **而 `ProtocolException` 是 `IOException` 的子类**
+⇒ ⇒ **协议错误被误报成「没打到」** ⇒ ⇒ 这正是「症状指向错方向」的源头（我先前据此把根因归到容器上限）
+⇒ ⇒ 现改为：**只有回落分支之外的真 IOException 才走那条消息**，而 `ProtocolException` 走它自己的分支。
 
 ---
 

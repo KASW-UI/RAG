@@ -8,6 +8,7 @@ import com.rag.favorite.favorite.api.dto.FavoriteFolder;
 import com.rag.favorite.favorite.api.dto.FavoriteItem;
 import com.rag.favorite.favorite.api.dto.GetFavoriteFoldersResp;
 import com.rag.favorite.favorite.api.support.RealTomcatPort;
+import com.rag.favorite.favorite.api.support.RealTomcatHttp;
 import com.rag.favorite.favorite.common.errmsg.FavoriteErrorCode;
 import com.rag.favorite.favorite.common.errmsg.FavoriteErrorMessages;
 import com.rag.users.common.jwt.JwtUtil;
@@ -415,12 +416,6 @@ class FavoriteApiEnvelopeParityTest {
 
     // ══════════════════ 真 HTTP 辅助 ══════════════════
 
-    private HttpClient client() {
-        return HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .version(HttpClient.Version.HTTP_1_1)
-                .build();
-    }
 
     /**
      * 发请求；<b>把「一个字节都没读到」的传输层失败翻译成人能读懂的诊断</b>
@@ -432,7 +427,10 @@ class FavoriteApiEnvelopeParityTest {
      */
     private HttpResponse<String> send(HttpRequest req) throws Exception {
         try {
-            return client().send(req, HttpResponse.BodyHandlers.ofString());
+            // 🔴 走 RealTomcatHttp：JDK HttpClient 对 interim(1xx) 的上限是 8 条且**硬编码**，
+            //    而 Tomcat 11.0.24 在这类请求上会连发 103 Early Hints ⇒ ⇒ 撞上限就回落 HttpURLConnection。
+            //    详见 RealTomcatHttp 的类注释（裸 socket 实测证据）。
+            return RealTomcatHttp.send(req);
         } catch (IOException e) {
             throw new IOException("端口 " + port + " 上读到了 0 字节（本请求没打到本测试的 Tomcat？）"
                     + "；该端口的监听者=[" + RealTomcatPort.holders(port) + "]"
