@@ -554,6 +554,52 @@ payload 与冻结信封**用同一份原文**；`aggregate_version` / `target_re
 
 ⇒ **结论：Redis 的错误语义整体 EQUIVALENT**，唯一差异是**指标口径**（首轮 DRIFT-LIKE-009）。
 
+#### 🔴 DRIFT-LIKE-RPC-REDIS-TIMEOUT · Redis **连接超时**未配 ⇒ 落 Lettuce 默认 10s（Go 是 5s）
+
+**性质**：SEMANTIC MISMATCH（配置层 · 但**行为可观察** ⇒ 不是洁癖）
+
+**发现时间**：2026-10-27（G2 lane · 复核 G4 共享层落码知会时，按 G1「同族横向对比」查出的**同族口径差**）
+
+| 项 | Go（真源） | RAG（修前） | RAG（修后） |
+|---|---|---|---|
+| `redis.Options` | `redis.MustNewRedis(c.Storage.Redis.RedisConf)`（`service/like/rpc/internal/svc/servicecontext.go:27`）⇒ go-zero 的 `RedisConf`（`core/stores/redis/conf.go:19-28`）**没有 timeout 字段** ⇒ 不设 Dial/ReadTimeout | 由 Boot 自动装配 | 同 |
+| 真正生效的值 | go-redis **v9.20.0**（真源 `go.mod:15` 锁的就是它）库默认：**`ReadTimeout = 3s`**（`options.go:370`）· **`DialTimeout = 5s`**（`options.go:338-340`） | `timeout: 3s` ✓（命令超时已对齐）· **连接超时未配 ⇒ Lettuce 默认 10s**（`SocketOptions.DEFAULT_CONNECT_TIMEOUT = 10` 秒） | `timeout: 3s` ✓ ＋ **`connect-timeout: 5s`** ✓ |
+| 可观察后果 | 拒连 5s ⇒ 快速失败 | 连接超时 10s（Go 的 2 倍） | 5s ⇒ 与 Go 一致 |
+
+⚠️ **真源 yaml 里没有任何 timeout 字段可抄**（`RedisConf` 根本不收）⇒ 依据是**库默认**，不是配置。
+
+**双侧活体实测（L4 · 2026-10-27 · 真 Redis 容器 + 探针 · 同一操作 GET · 同一故障注入）**：
+
+| 侧 / 口径 | 断连后行为 | 实测耗时 |
+|---|---|---|
+| **Go**（go-redis，与真源同款 `Options`） | 拒连快速失败 | **1694 ms** |
+| RAG · 命令超时未配 | 命令**排队等重连** ⇒ `RedisCommandTimeoutException` | **60021 ms** |
+| RAG · 命令超时 3s | 快速失败 | **3 ms**（复跑 2 次：3ms / 2ms） |
+| RAG · 3s + `REJECT_COMMANDS`（G4 共享层落码后） | `RedisException: Commands are rejected.` | **1 ms** |
+
+⇒ 本组件的 `timeout: 3s` **本身是对的**（3ms 快速失败，与 Go 的 1.7s 同形）⇒
+本条只针对**连接超时**这一项（10s vs 5s）。
+
+**修法**：本域 `application.yml` 补 `connect-timeout: 5s`（属性名 = `spring.data.redis.connect-timeout`
+⇒ Boot 4 `DataRedisProperties#getConnectTimeout` ⇒ `LettuceConnectionConfiguration:212-215` 写进
+`SocketOptions.connectTimeout`）。
+
+**守门**：[`LikeRpcRedisTimeoutsGateTest`](../../../service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRpcRedisTimeoutsGateTest.java)（4 条）
+—— 起真 Spring 上下文（用真应用类 ⇒ 加载真实 yml）、读真的 `ClientOptions`、断言**消费点**
+（命令超时 ⇒ `getCommandTimeout()` ⇒ `RedisURI.timeout`；连接超时 ⇒ `getSocketOptions().getConnectTimeout()`）
+＋ 机制启用断言 ＋ **阳性对照**（`RedisURI.create(...).getTimeout() == 60s`）。
+✅ **变异测试已做**：删 `connect-timeout: 5s` ⇒ **1 条红**（`expected: 5S but was: 10S`）⇒ 非假绿。
+
+⚠️ **判据踩过的坑（留给下一任）**：`ClientOptions.getTimeoutOptions()` 的 source **恒为**
+`DefaultTimeoutSource`（Boot 在 `LettuceConnectionConfiguration:229` 只写 `TimeoutOptions.enabled()`
+⇒ 启用机制但不给固定时长；真正的时长由 `CommandExpiryWriter:174` 的 `applyConnectionTimeout` 分支
+从**连接级** timeout 取）⇒ **断言 source 类型是错的判据**（本轮守门先红了，但根因是判据写错 ⇒ 已订正）。
+
+⚠️ **与 G4 共享层落码的关系**：G4 的 `REJECT_COMMANDS` 在本域**会真命中**（`mvn dependency:list` 实测
+本组件自带 `spring-boot-starter-data-redis` ⇒ `lettuce-core:6.8.2` + `spring-boot-data-redis:4.0.8`
+在 classpath 上 ⇒ `@ConditionalOnClass` 命中；且本域**无自建 `LettuceConnectionFactory`** ⇒ 走 Boot 自动装配）
+⇒ **对本域是净收益**（断连 1ms 拒单）⇒ **不需要域侧任何动作**。
+
 ### 5.2 PostgreSQL
 
 | | Go | Java |

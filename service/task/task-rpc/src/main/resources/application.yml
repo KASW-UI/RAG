@@ -92,6 +92,29 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       database: 0        # 对应 Go LikeRedis.DB: 0
+      # ⚠️ Go 侧 yaml 写的 `ReadTimeoutMs: 1000` **不生效** ⇒ 真正生效的是 go-redis 库默认 **3s**。
+      #    证据（Go 侧活体实测，2026-10-27 G2）：
+      #      ① `service/task/rpc/internal/config/config.go:32-37` 的 LikeRedis struct
+      #         **只有** Addr / Pass / DB / ConsumerName —— 没有 ReadTimeoutMs 字段；
+      #      ② go-zero 的 `conf.Load` **非严格模式**（`core/conf/config.go` 无 strict/ErrorUnused）
+      #         ⇒ yaml 里有、struct 里没有的字段被**静默忽略**（Go 探针实测：`LOAD OK`，
+      #         `ReadTimeoutMs: 1000` 未进 struct）；
+      #      ③ 真正生效的是 go-redis v9.20.0 的库默认：`options.go:370` `ReadTimeout = 3s`。
+      #    ⇒ 本项对齐 Go 的 **3s**（不是 yaml 里的 1000ms）。
+      #    ⚠️ 不配会落 Boot 的默认 **60s**（实测 `LettuceClientConfiguration.getCommandTimeout()`
+      #    = PT1M）⇒ Redis 断连时命令挂 60s，远超本组件的 rpc-timeout（2s）
+      #    ⇒ 与 Go 的「快速失败 ⇒ 域侧 lenient 包装 catch ⇒ 回源 DB」不同形。
+      #    ⇒ 同 like-rpc（`timeout: 3s`）保持同族一致。
+      timeout: 3s
+      # ⚠️ 连接超时 = 5s，对齐 Go 的 go-redis v9.20.0 默认 `DialTimeout`：
+      #    `options.go:338-340` `if opt.DialTimeout == 0 { opt.DialTimeout = 5 * time.Second }`
+      #    （真源 go.mod:15 锁的就是 v9.20.0；真源自己的 `redis.Options` 只设 Addr/Password/DB
+      #    ⇒ 不设 DialTimeout ⇒ 走库默认 5s）。
+      #    ⚠️ 不配会落 Lettuce 的默认 **10s**（`SocketOptions.DEFAULT_CONNECT_TIMEOUT = 10` 秒）
+      #    ⇒ 与 Go 差 2 倍。属性名 = `spring.data.redis.connect-timeout`
+      #    （Boot 4 `DataRedisProperties#getConnectTimeout` ⇒
+      #    `LettuceConnectionConfiguration:212-215` 写进 `SocketOptions.connectTimeout`）。
+      connect-timeout: 5s
 
   # ============== Kafka ==============
   # 对应 Go Kafka.Brokers

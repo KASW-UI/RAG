@@ -26,7 +26,7 @@
 | 证据强度 | ✅✅✅ **Kafka 端到端活体对拍**（2026-10-23 23:4x，真 Kafka + 真 Redis + 真 PG，两侧同批消息比最终态，见 §四·三）· ✅✅✅ **Kafka 畸形消息活体对拍**（2026-10-24，五个用例，见 §四·五·二）· ✅✅ **gRPC 双向跨语言对拍**（2026-10-24，Java 客户端 + **Go 客户端**各打两端，见 §四·五·一）· ✅ 真启动 + 真 PG 16 容器 |
 | DDL 对拍 | ✅ **GORM AutoMigrate 产物 vs Flyway 产物逐列一致**（本轮实测，见 §四·二） |
 | ⚠️ 仍未覆盖 | ⓿ **「Kafka 写入 → task-api 读到」这条跨域闭环**未做活体对拍 —— 但两侧的读写 Redis key **本来就不一致**（Go 侧也读不到自己写的缓存），⇒ **不是 RAG 的缺陷**，见 §五 第 7 条；① ⚠️ **goka 的「表 topic」config（`cleanup.policy` / `retention.ms`）未做逐项对照** —— 但已实测「compact 不按时间删」且 Go 侧**不创建** topic（§四·七）⇒ 两侧**都不管** topic 生命周期 ⇒ 一致；② ⚠️ **yaml 里查出了三类「死配置」**（`spring.mybatis-plus.*` / `otel.*` / `spring.jpa.*`，§四·九）—— **零行为影响**（三处逐一核过），但 `otel.*` **与 Go 存在观测差异**（Go 真导出 span，Java 侧 no-op）⇒ **全部是跨域共性**（8~20 个模块同款），本域不单方面修 |
-| 测试 | **111 tests / 0 failures / 0 errors / 0 skipped**（**2026-10-27 阶段 2 实测口径 = `mvn test`**；其中 **17 条真 PG**（`TaskProgressUpsertParityTest` 15 + `TaskRpcSlowThresholdGateTest` 2 · Testcontainers）、**9 条真 Redis**、**4 条真 gRPC server**（`TaskGrpcInterceptorWiringTest` 2 + `TaskRpcSlowThresholdGateTest` 2）；另 2 条**装配层**（mock `ServerBuilder`）+ **4 条产物层**（解包真 fat jar ⇒ 只在 `mvn verify` 阶段跑，`mvn test` 阶段 jar 还没生成）；task-api 另 **97** 条，合计 **208**）<br>🆕 **2026-10-27 订正**：原写「106 / 真 PG 15 / 真 gRPC 2 / 合计 196」⇒ **过期 8 条** —— `align/global` 的 **L12 / L13 / L15** 三个 lane 随 `4f839f9` 合入主干时给 task-rpc 加了 **3 个守门类 / 8 条用例**（`TaskProtectionChainWiringTest` 2 + `TaskRpcFatJarArtifactGateIT` 4 + `TaskRpcSlowThresholdGateTest` 2）⇒ **106 + 8 = 114**（那是 **`mvn verify`** 口径）<br>🆕 **2026-10-27 阶段 2 再订正（口径对齐）**：本行的数字**必须与 `check-ledger-selfcheck.py` 第 3 层的实测口径一致** —— 该层读的是 `target/surefire-reports` ⇒ 即 **`mvn test` 口径** ⇒ **`mvn verify` 才有的 4 条产物层（`TaskRpcFatJarArtifactGateIT`）不在其中** ⇒ 本行 **114 ⇒ 111**（阶段 2 给 `TaskProtectionChainWiringTest` 补了 1 条降载层断言：2 ⇒ 3）⇒ **`mvn verify` 口径 = 111 + 4 = 115**（`mvn test` 阶段 jar 还没生成）<br>⇒ 证据：**surefire XML 实测 13 个测试类 / 111 条 / 0 failures / 0 errors / 0 skipped**（2026-10-27 阶段 2 · 三域六模块全量 `mvn test`：task-api **97** / task-rpc **111** / message-rpc **84** / message-api **91** / like-rpc **108** / like-api **84** / common **261** ⇒ **BUILD SUCCESS**，0 failures / 0 errors / 0 skipped） |
+| 测试 | **115 tests / 0 failures / 0 errors / 0 skipped**（**2026-10-27 G2 第二轮实测口径 = `mvn test`**；其中 **17 条真 PG**（`TaskProgressUpsertParityTest` 15 + `TaskRpcSlowThresholdGateTest` 2 · Testcontainers）、**9 条真 Redis**、**4 条真 gRPC server**（`TaskGrpcInterceptorWiringTest` 2 + `TaskRpcSlowThresholdGateTest` 2）；另 2 条**装配层**（mock `ServerBuilder`）+ **4 条产物层**（解包真 fat jar ⇒ 只在 `mvn verify` 阶段跑，`mvn test` 阶段 jar 还没生成）；task-api 另 **97** 条，合计 **208**）<br>🆕 **2026-10-27 订正**：原写「106 / 真 PG 15 / 真 gRPC 2 / 合计 196」⇒ **过期 8 条** —— `align/global` 的 **L12 / L13 / L15** 三个 lane 随 `4f839f9` 合入主干时给 task-rpc 加了 **3 个守门类 / 8 条用例**（`TaskProtectionChainWiringTest` 2 + `TaskRpcFatJarArtifactGateIT` 4 + `TaskRpcSlowThresholdGateTest` 2）⇒ **106 + 8 = 114**（那是 **`mvn verify`** 口径）<br>🆕 **2026-10-27 阶段 2 再订正（口径对齐）**：本行的数字**必须与 `check-ledger-selfcheck.py` 第 3 层的实测口径一致** —— 该层读的是 `target/surefire-reports` ⇒ 即 **`mvn test` 口径** ⇒ **`mvn verify` 才有的 4 条产物层（`TaskRpcFatJarArtifactGateIT`）不在其中** ⇒ 本行 **114 ⇒ 111**（阶段 2 给 `TaskProtectionChainWiringTest` 补了 1 条降载层断言：2 ⇒ 3）⇒ **`mvn verify` 口径 = 111 + 4 = 115**（`mvn test` 阶段 jar 还没生成）<br>⇒ 证据：**surefire XML 实测 14 个测试类 / 115 条 / 0 failures / 0 errors / 0 skipped**（2026-10-27 **G2 第二轮** · 三域六模块全量 `mvn test`：task-api **97** / task-rpc **115** / message-rpc **84** / message-api **91** / like-rpc **111** / like-api **84** ⇒ **BUILD SUCCESS**，0 failures / 0 errors / 0 skipped）<br>🆕 **2026-10-27 G2 第二轮订正（口径对齐）**：阶段 2 写 **111**（13 个测试类）⇒ 本轮新增 `TaskRedisCommandTimeoutGateTest` **4 条**（Redis 命令超时 3s ＋ 连接超时 5s · 见 [DRIFT-TASK-RPC-007](#🔴-drift-task-rpc-007--redis-命令超时未配--落-lettuce-默认-60s--断连时命令挂-60sgo-是-17s-快速失败)）⇒ **111 + 4 = 115**（14 个测试类）⇒ 同族 like-rpc 同步 **108 + 4 = 111**<br>⚠️ **取数口径的坑（本轮实测踩到）**：surefire 的 `-- in <类名>` 行里，**测试类的 `@DisplayName` 含中文时打印的是 DisplayName 而非 FQCN** ⇒ 用 `grep 'in com\.rag\.task\.'` 求和会**漏掉**中文 DisplayName 的那几条 ⇒ 明细求和（213）与 reactor 汇总（226）不符 ⇒ **必须按 reactor 汇总行为准**，或用「按模块段切分后逐类求和」交叉验 ⇒ 本轮两口径已对齐为 like-rpc **111** / task-rpc **115** |
 
 ### 〇·一、本组件的守门测试清单（2026-10-24 复核补登）
 
@@ -380,6 +380,93 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
    **都必须是 `ConsumerConfig.configNames()` 里认识的合法名** ⇒ 以后写错任何键名都会被立刻抓住。
    ✅ **变异测试已做**：把任一 listener 改回连字符 ⇒ **2 条变红**（报的正是「不是 Kafka 的合法配置名」）⇒ 非假绿。
 2. **运行证据**：`run-task-offset-oldest.sh` 的 A2/A4 —— 修复前 FAIL（`<absent>`），修复后 PASS（`5`）⇒ 见 §四·八。
+
+### 🔴 DRIFT-TASK-RPC-007 · Redis 命令超时**未配** ⇒ 落 Lettuce 默认 **60s** ⇒ 断连时命令挂 60s（Go 是 1.7s 快速失败）
+
+**性质**：SEMANTIC MISMATCH（行为层 · **配置面看不出差异** ⇒ 典型「跑绿 ≠ 对」）
+
+**发现时间**：2026-10-27（G2 lane · 复核 G4 的共享层落码知会时顺带查出的**同族口径差**）
+
+**症状**：本组件的 `application.yml` 的 `spring.data.redis` 段**没有** `timeout` 键
+⇒ Boot 4 不调 `commandTimeout(...)`（`LettuceConnectionConfiguration#applyProperties:173-175` 只在
+`getTimeout() != null` 时才设）⇒ 落到 **`RedisURI` 的默认 timeout = 60s**
+（`RedisURI.java:221` "Default timeout: 60 sec" · `:257` `private Duration timeout = DEFAULT_TIMEOUT_DURATION`）
+⇒ **一次 Redis 断连会把本组件的整个 RPC 拖到超时**（本组件 `rpc-timeout: 2s`）。
+
+**Go 侧真值（为什么是 3s，而不是 yaml 里写的 1000ms）**：
+
+| 环节 | 事实 | 出处 |
+|---|---|---|
+| Go 的 `redis.Options` | **只设** `Addr` / `Password` / `DB` ⇒ 不设 `ReadTimeout` / `DialTimeout` | `service/task/rpc/internal/svc/service_context.go:25-30` |
+| 真源 yaml 写的值 | `ReadTimeoutMs: 1000` / `DialTimeoutMs: 500` —— **不生效**（见下） | `service/task/rpc/etc/task.yaml:42-44` |
+| struct 是否收这些字段 | **不收** —— `LikeRedis struct` 只有 `Addr` / `Pass` / `DB` / `ConsumerName` | `service/task/rpc/internal/config/config.go:32-37` |
+| go-zero 的 conf 严格性 | **非严格模式** ⇒ yaml 里有、struct 里没有的字段被**静默忽略** | `core/conf/config.go`（无 `strict` / `ErrorUnused`） |
+| 真正生效的 | go-redis **v9.20.0**（真源 `go.mod:15` 锁的就是它）的库默认：**`ReadTimeout = 3s`** · **`DialTimeout = 5s`** | `go-redis@v9.20.0/options.go:370` · `:338-340` |
+
+⇒ **Go 侧真实口径 = 命令超时 3s ＋ 连接超时 5s**（**不是** yaml 里的 1000ms / 500ms）。
+
+**双侧活体实测（L4 · 2026-10-27 · 真 Redis 容器 + 探针 · 同一操作 GET · 同一故障注入）**：
+
+| 侧 / 口径 | 断连后行为 | 实测耗时 |
+|---|---|---|
+| **Go**（go-redis，与真源同款 `Options`） | 拒连快速失败（5 次 dial 尝试 + 100ms backoff） | **1694 ms** |
+| **RAG · 未配 timeout**（修前） | Lettuce 默认 `DisconnectedBehavior.DEFAULT` ⇒ 命令**排队等重连** ⇒ `RedisCommandTimeoutException` | **60021 ms** |
+| **RAG · 配 3s**（修后） | 快速失败 | **3 ms**（复跑 2 次：3ms / 2ms） |
+| **RAG · 3s + `REJECT_COMMANDS`**（G4 共享层落码后） | `RedisException: Currently not connected. Commands are rejected.` | **1 ms** |
+
+⇒ **60s ≫ 2s** ⇒ 修前一次 Redis 断连即可让本组件的 RPC **必然超时**（而不是像 Go 那样「快速失败 ⇒
+域侧 lenient 包装 catch ⇒ 回源 DB ⇒ 请求按时返回」）。
+⚠️ 域侧的 lenient 语义**本来就是对的**（`TaskDomainService.java:161-162` / `readProgressCache` 吞异常回源），
+**问题只在于「异常来得太晚」**（60s 后才来）⇒ 这也解释了为什么此前的降级测试（Mockito）全绿。
+
+**修法（域内自修 · 写权在 G2）**：
+1. `application.yml` 的 `spring.data.redis` 段补 `timeout: 3s`（对齐 Go 的 go-redis 默认 ReadTimeout）
+   ＋ `connect-timeout: 5s`（对齐 Go 的默认 DialTimeout；不配会落 Lettuce 默认 **10s**，
+   `SocketOptions.DEFAULT_CONNECT_TIMEOUT = 10` 秒 ⇒ 与 Go 差 2 倍）。
+   ⚠️ 这两行**不是「照抄 yaml」** ⇒ 依据是**库默认**（见上表），yaml 里那两个值根本不生效。
+2. 同族一致：like-rpc 原本已有 `timeout: 3s`（✓ 对齐），但**缺** `connect-timeout` ⇒ 一并补 5s。
+
+**守门**：
+1. [`TaskRedisCommandTimeoutGateTest`](../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/config/TaskRedisCommandTimeoutGateTest.java)（4 条）
+   ＋ [`LikeRpcRedisTimeoutsGateTest`](../../../service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRpcRedisTimeoutsGateTest.java)（4 条）
+   —— **起真 Spring 上下文**（用真应用类 ⇒ 加载真实 yml）、读**真的** `LettuceConnectionFactory` / `ClientOptions`，
+   断言**消费点**：
+   - 命令超时 ⇒ `clientConfiguration.getCommandTimeout()`（⇒ `RedisURI.timeout` ⇒ `CommandExpiryWriter.setTimeout`）
+   - 连接超时 ⇒ `ClientOptions.getSocketOptions().getConnectTimeout()`（⇒ Boot `LettuceConnectionConfiguration:212-215`）
+   - 机制启用 ⇒ `ClientOptions.getTimeoutOptions().isTimeoutCommands()`（Boot `:229` 打开的，不是 Lettuce 默认）
+   - **阳性对照** ⇒ `RedisURI.create(...).getTimeout() == 60s`（证明断言在区分「配了」与「没配」）
+   ⚠️ **判据必须查消费点、不能查声明点**：`ClientOptions.getTimeoutOptions()` 的 source **恒为**
+   `DefaultTimeoutSource`（Boot 只写 `TimeoutOptions.enabled()` ⇒ 启用机制但不给固定时长）
+   ⇒ 断言 source 类型是**错的判据**（本轮实测踩过：守门红了但根因是判据写错，不是配置错 ⇒ 已订正）。
+2. ✅ **变异测试已做（3 条，全部红在目标断言）**：
+
+   | 变异 | 结果 |
+   |---|---|
+   | M1：task-rpc 删 `timeout: 3s` | 1 条红 —— `expected: 3S but was: 1M`（`assertThat` 报 1 分钟） |
+   | M2：task-rpc 删 `connect-timeout: 5s` | 1 条红 —— `expected: 5S but was: 10S` |
+   | M3：like-rpc 删 `connect-timeout: 5s` | 1 条红 —— `expected: 5S but was: 10S` |
+
+**⚠️ 与 G4 共享层落码的关系（订正 G4 知会里的「零域侧改动」）**：
+
+- G4 的 `GoStyleRedisClientAutoConfiguration`（`REJECT_COMMANDS`）**在我域会真命中**，不是「零影响」：
+  `mvn dependency:list` 实测 like-rpc / task-rpc **自带** `spring-boot-starter-data-redis`
+  ⇒ `lettuce-core:6.8.2` + `spring-boot-data-redis:4.0.8` 都在 classpath 上
+  ⇒ `@ConditionalOnClass({LettuceConnectionFactory, ClientOptions, LettuceClientOptionsBuilderCustomizer})` **命中**
+  ⇒ 且我域**无自建 `LettuceConnectionFactory`**（`grep` 实测 0 命中）⇒ 走 Boot 自动装配 ⇒ customizer 生效。
+  ⇒ **该落码对我域是净收益**（断连 1ms 拒单，替掉 60s 挂起）⇒ 不需要域侧任何动作。
+- 但 G4 引的 Go 出处 `core/stores/redis/redisclientmanager.go` **在真源仓里不存在**
+  （真源仓无 `core/` 目录）⇒ 那是 **go-zero 依赖源码**的路径
+  （`go-zero@v1.10.2/core/stores/redis/redisclientmanager.go`，`:14` `maxRetries = 3` · `:32-40` 构造 `red.NewClient`）
+  ⇒ 口径本身成立（`MaxRetries=3` 且不设 Dial/ReadTimeout ⇒ 快速失败），但**引用路径要标注是依赖源码**。
+
+**⚠️ 效力边界（本条的证据强度）**：
+
+- ✅ **L4 双侧活体**：Go 腿与 RAG 腿**同时跑**、同一 Redis 容器、同一故障注入、同一操作（GET）。
+- ⚠️ **不是**「生产组件级」活体：探针跑的是**独立进程 + 生产 classpath**，不是 task-rpc 本体
+  ⇒ 「本组件 2s 预算下会不会真的被拖到 60s」这一步是**推理**（60s ≫ 2s），不是端到端实测。
+- ⚠️ **故障形态**：`docker stop` = 优雅退出（FIN）⇒ 客户端进入 DISCONNECTED（正在重连）⇒ 命令**被排队**
+  ⇒ 这正是 60s 挂起的成因。⚠️ 若用 `docker kill`（RST）⇒ Lettuce 立刻失败 ⇒ **分不出** 60s 与 3s
+  ⇒ 复现**必须**用优雅断开。
 
 ---
 
