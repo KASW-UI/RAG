@@ -115,6 +115,31 @@ spring:
       #    （Boot 4 `DataRedisProperties#getConnectTimeout` ⇒
       #    `LettuceConnectionConfiguration:212-215` 写进 `SocketOptions.connectTimeout`）。
       connect-timeout: 5s
+      # ⚠️ 连接池 = 与 Go 侧**形态**对齐（2026-10-27 G2 · `DRIFT-TASK-RPC-008` 已修）：
+      #    Go 侧 `service/task/rpc/internal/svc/service_context.go:25-29`
+      #    `redis.NewClient(&redis.Options{Addr, Password, DB})` ⇒ 只设 3 个字段
+      #    ⇒ `PoolSize` / `MinIdleConns` **未设** ⇒ 落 go-redis v9.20.0 库默认
+      #    （`go-redis@v9.20.0/options.go:350-351` `PoolSize = 10 * runtime.GOMAXPROCS(0)`）⇒ **Go 侧是有池的**。
+      #    ⚠️ 而本模块原先**无 pool 段 + pom 无 commons-pool2** ⇒ Boot 4 的判据
+      #    `DataRedisConnectionConfiguration#isPoolEnabled`（`:195-198`）：
+      #    `Boolean enabled = pool.getEnabled(); return (enabled != null) ? enabled : COMMONS_POOL2_AVAILABLE;`
+      #    ⇒ enabled 为 null + classpath 里**没有** commons-pool2 ⇒ **池不启用**
+      #    ⇒ Lettuce 走**共享单连接** ⇒ 并发下命令互相串行排队 ⇒ 可能撞 3s 命令超时
+      #    ⇒ ⇒ 原状是**形态漂移**（Go 有池 / RAG 无池）⇒ 本项对齐「有池」这个形态。
+      #    ⚠️ 池大小**无法逐值对齐**（Go 是 10 × 核数，**机器相关**：本机 10 核 ⇒ Go = 100）⇒ 按**数量级**对齐：
+      #      · `max-active: 64` ↔ Go 的 `PoolSize`（本机 100）⇒ **性能面**数值差异（已登记）
+      #      · `min-idle: 0` ↔ Go 的 `MinIdleConns`（`go-redis@v9.20.0/options.go:218-222`
+      #        **无 default 赋值** ⇒ 保持 0）⇒ **精确对齐**
+      #      · `max-idle: 16` 在 Go 侧**无对应项**（go-redis 不限空闲连接数，靠 `IdleTimeout` 回收）⇒ **纯表达层取值**
+      #    ⚠️ **不要拿 like-rpc 的 64/16/4 当基准**（AGENTS.md §3.1：不得拿「现有 RAG 代码」当对照基准）：
+      #    like 域的 Go 走 **go-zero 的 redis**（`go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:14`
+      #    `idleConns = 8` ⇒ `MinIdleConns = 8`），本域的 Go 走 **go-redis 直连** ⇒ 两个域的 Go 客户端本就不同。
+      lettuce:
+        pool:
+          enabled: true
+          max-active: 64
+          max-idle: 16
+          min-idle: 0
 
   # ============== Kafka ==============
   # 对应 Go Kafka.Brokers

@@ -562,7 +562,7 @@ payload 与冻结信封**用同一份原文**；`aggregate_version` / `target_re
 
 | 项 | Go（真源） | RAG（修前） | RAG（修后） |
 |---|---|---|---|
-| `redis.Options` | `redis.MustNewRedis(c.Storage.Redis.RedisConf)`（`service/like/rpc/internal/svc/servicecontext.go:27`）⇒ go-zero 的 `RedisConf`（`core/stores/redis/conf.go:19-28`）**没有 timeout 字段** ⇒ 不设 Dial/ReadTimeout | 由 Boot 自动装配 | 同 |
+| `redis.Options` | `redis.MustNewRedis(c.Storage.Redis.RedisConf)`（`service/like/rpc/internal/svc/servicecontext.go:27`）⇒ go-zero 的 `RedisConf`（`go-zero@v1.10.2/core/stores/redis/conf.go:19-27`，⚠️ **库内文件 · 真源仓没有 `core/` 目录**）**没有 timeout 字段** ⇒ 不设 Dial/ReadTimeout | 由 Boot 自动装配 | 同 |
 | 真正生效的值 | go-redis **v9.20.0**（真源 `go.mod:15` 锁的就是它）库默认：**`ReadTimeout = 3s`**（`options.go:370`）· **`DialTimeout = 5s`**（`options.go:338-340`） | `timeout: 3s` ✓（命令超时已对齐）· **连接超时未配 ⇒ Lettuce 默认 10s**（`SocketOptions.DEFAULT_CONNECT_TIMEOUT = 10` 秒） | `timeout: 3s` ✓ ＋ **`connect-timeout: 5s`** ✓ |
 | 可观察后果 | 拒连 5s ⇒ 快速失败 | 连接超时 10s（Go 的 2 倍） | 5s ⇒ 与 Go 一致 |
 
@@ -1586,7 +1586,7 @@ global 第三十三轮的 **E47 原定性已被第三十六轮全面订正**：*
 | **本域实现的一处增强** | 同款修法在**两处各写字面量** `"gRPC Server started"`（等待循环 + 断言）⇒ **任一处被改 ⇒ 等待与断言就不再配套**（等 A、查 B）⇒ 本域**提为常量 `GRPC_STARTED_MARKER`** ⇒ **同源不可漂移** + 变异验证只需改一处 ⇒ **行为与同款修法等价**（不偏离 G3 的修法） |
 | 落码 | `service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRpcRuntimeBootGateTest.java`（`StringBuffer` ＋ 等日志行 ＋ `drain.join`） |
 | 证据强度 | ✅ **代码级已落 · 回归已跑 · 变异已验证**（见下方「验证」两行） |
-| **验证 ①（回归）** | `mvn -o -pl service/like/like-rpc,service/task/task-rpc test` ⇒ **like-rpc 111 / task-rpc 115**（`Failures: 0, Errors: 0, Skipped: 0`）· `BUILD SUCCESS`（10:22:51 → 10:29:10 · 两批）<br>⇒ **目标类真跑没被 skip**：`LikeRpcRuntimeBootGateTest` **Tests run: 1, Skipped: 0**（4.641 s）⇒ 真进程真起来并读到日志行 ✔ |
+| **验证 ①（回归）** | `mvn -o -pl service/like/like-rpc,service/task/task-rpc test` ⇒ **like-rpc 111 / task-rpc 115**（`Failures: 0, Errors: 0, Skipped: 0`）· `BUILD SUCCESS`（10:22:51 → 10:29:10 · 两批）<br>⇒ **目标类真跑没被 skip**：`LikeRpcRuntimeBootGateTest` **Tests run: 1, Skipped: 0**（4.641 s）⇒ 真进程真起来并读到日志行 ✔<br>🆕 **2026-10-27 第三轮补充（不改上一行原值）**：上行的 task-rpc **115** 是**当时**的数 ⇒ 本轮 task-rpc 落码 Redis **连接池**（守门 +2 条：⑤⑥）⇒ **115 + 2 = 117**；本轮 8 模块全量 `mvn -o -pl <8 模块> test` = **BUILD SUCCESS · 6:06 min** · `message-common` 21 · `message-rpc` 84 · `message-api` 98 · `like-common` 18 · `like-api` 89 · `like-rpc` **111**（未变 ✔）· `task-api` 97 · `task-rpc` **117** ⇒ ⇒ **六模块 596 / 八模块 635** · **0 failures / 0 errors / 0 skipped**（maven 汇总行 = surefire XML **双口径相等**） |
 | **验证 ②（变异）** | 把常量 `GRPC_STARTED_MARKER` 改成假串（**只改这一处**）⇒ **红在目标断言**：`LikeRpcRuntimeBootGateTest.java:155`「日志里没有 devh 的「gRPC Server started」」⇒ `Tests run: 1, Failures: 1, Errors: 0`（36.11 s ≈ 等满 30s 上限后失败）⇒ 失败消息里带**真实日志尾部** ⇒ 证明「进程确实起来了、红的是标志串不匹配」⇒ **非假绿**。<br>⇒ 改回后**复跑单类**：**1 条绿**（5.784 s）· `BUILD SUCCESS` ✔ |
 
 ### ⚠️ 我域「同款」排查范围（**不只这一处**，逐个核过）
@@ -1647,11 +1647,11 @@ global 第三十三轮的 **E47 原定性已被第三十六轮全面订正**：*
 
 | 项 | 事实 |
 |---|---|
-| **① Go 侧（真源 · 本域走 go-zero 那条路）** | `core/stores/redis/redisclientmanager.go:32-40`（go-zero v1.10.2）构造 `red.NewClient(&red.Options{Addr, Username, Password, DB, MaxRetries: maxRetries, MinIdleConns: idleConns, TLSConfig})` ⇒ 常量 `:14-15` `maxRetries = 3` · **`idleConns = 8`** ⇒ ⚠️ **未设 `PoolSize`** ⇒ 落 go-redis v9.20.0 库默认 **`PoolSize = 10 × GOMAXPROCS`**（`options.go:350-351`）⇒ ⇒ **池大小 = 10 × 核数（机器相关）** · `MinIdleConns = 8` |
+| **① Go 侧（真源 · 本域走 go-zero 那条路）** | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40`（⚠️ **库内文件 · 真源仓没有 `core/` 目录** —— `ls $GO/core` = `No such file or directory`）构造 `red.NewClient(&red.Options{Addr, Username, Password, DB, MaxRetries: maxRetries, MinIdleConns: idleConns, TLSConfig})` ⇒ 常量 `:14-15` `maxRetries = 3` · **`idleConns = 8`** ⇒ ⚠️ **未设 `PoolSize`** ⇒ 落 go-redis v9.20.0 库默认 **`PoolSize = 10 × GOMAXPROCS`**（`go-redis@v9.20.0/options.go:350-351`）⇒ ⇒ **池大小 = 10 × 核数（机器相关）** · `MinIdleConns = 8`<br>⚠️ go-zero 的 `:21 nodePoolSize` / `:52 poolSize: nodePoolSize` 只是**统计上报**那侧（`statGetter`）的值，**不参与 client 构造** ⇒ 数值上同为 `10 × 核数`，但**依据是 go-redis 的库默认** |
 | **② RAG 侧现状** | `service/like/like-rpc/src/main/resources/application.yml:106-111` ⇒ `lettuce.pool.enabled: true` / `max-active: 64` / `max-idle: 16` / `min-idle: 4`；且 `pom.xml:124-127` **显式**声明 `commons-pool2`（注释已写明：Boot 4 的 starter **不再传递** 它）⇒ ⇒ **形态对齐**（都是池化） |
-| **③ 差异定性** | 🟡 **仅数值漂移**（形态相同）：`max-active` **64** vs Go 的 **10×核数**（8 核机 = 80）· `min-idle` **4** vs Go 的 **8** ⇒ ⇒ **性能面**（池大小影响并发下的排队），**非形态问题** ⇒ 与 task 域那条（**无池 vs 有池**）级别不同 |
+| **③ 差异定性** | 🟡 **仅数值漂移**（形态相同）：`max-active` **64** vs Go 的 **10×核数**（**本机 10 核 ⇒ Go = 100**；`sysctl -n hw.ncpu` = 10）· `min-idle` **4** vs Go 的 **8** ⇒ ⇒ **性能面**（池大小影响并发下的排队），**非形态问题** ⇒ 与 task 域那条（**无池 vs 有池**）级别不同 |
 | **④ 证据强度** | **L1 ＋ 装配级**（两侧配置逐条对照 + go-zero 常量 + go-redis 库默认行号）⇒ ⚠️ **未做并发活体对拍** ⇒ **不写 L4** |
-| **⑤ 归属与处置** | **域侧**（共享层不碰池）⇒ 🟡 **只登记，不落码** —— 池大小**无法逐值对齐**（Go 侧是机器相关的 `10×核数`）⇒ 且属**性能面**、改池参数**有回归风险** ⇒ **待决**（配死一个值？还是按核数算？）⇒ **本轮域侧零改动** |
+| **⑤ 归属与处置** | **域侧**（共享层不碰池）⇒ 🟡 **只登记，不落码** —— 池大小**无法逐值对齐**（Go 侧是机器相关的 `10×核数`）⇒ 且属**性能面**、改池参数**有回归风险** ⇒ **待决**（配死一个值？还是按核数算？）⇒ **本轮域侧零行为改动**（仅订正两处**误导性引用路径**：原写法 `core/stores/redis/…` 看着像真源仓路径，实际是 **go-zero 库内文件** ⇒ 已改成模块限定路径）<br>🔴 **2026-10-27 G2 新增的判定规则（task 域本轮落码时确立）**：**「Go 侧有确切值的轴 ⇒ 取 Go 的确切值」**（task 域 `min-idle` = Go 的 `MinIdleConns` = **0** ⇒ 精确对齐）；**「Go 侧没有对应项的轴（机器相关 / 无对应）⇒ 只按数量级或纯表达层取值」**（`max-active` / `max-idle`）⇒ ⇒ 按此规则，**本域的 `min-idle` 应取 Go 的 `idleConns = 8`**（当前 4）⇒ 🟡 **本轮不改**（本域**无池守门测试** ⇒ 改池参数**无网可依**）⇒ **留作下一轮的候选**，且本条已登记 ⇒ **不是漏项** |
 
 > ⚠️ **两条通用教训（与 task 域那份同源，详见该处）**：
 > ① **Boot 4 的 Lettuce 池「开不开」不由 yml 决定，而由 `commons-pool2` 在不在 classpath 决定**（`Pool.enabled` 未配时为 `null` ⇒ Boot 自动判定）⇒ ⇒ **加/减一个依赖 ⇒ 池形态静默变化** ⇒ **池形态必须同时查 pom 依赖，不能只断言 yml**；

@@ -233,7 +233,7 @@ G4 回执 ④ 声称「共享层 `Observability.mark*` 是**显式传 ctx** ⇒ 
 
 ⚠️ **口径隔离（关键，别混用）**：**592 = G4 树口径** ⇒ 该树**不含**我域尚未合入的守门（Redis 超时 8 条 · A9 span 11 条 · form 闸门 5 条 等）⇒
 ⇒ **我域自己的口径另计**（本域台账记的是我域树实测值）⇒ **两个数不可相加、不可互称**。
-⇒ **我域树口径（2026-10-27 · 本轮实测）**：`message-api` **98** · `message-rpc` **84** · `like-api` **89** · `like-rpc` **111** · `task-api` **97** · `task-rpc` **115** ⇒ **六模块合计 = 594** · **0 failures / 0 errors / 0 skipped**（与上一轮同口径 ⇒ **无回归**）。
+⇒ **我域树口径（2026-10-27 · 第三轮实测）**：`message-api` **98** · `message-rpc` **84** · `like-api` **89** · `like-rpc` **111** · `task-api` **97** · `task-rpc` **117** ⇒ **六模块合计 = 596**（上一轮同口径 **594** ⇒ **+2** = 本轮新增的 Redis **连接池**断言 ⑤⑥）· **0 failures / 0 errors / 0 skipped**（与上一轮同口径 ⇒ **无回归**）⇒ 🆕 **八模块口径**（加 `like-common` 18 ＋ `message-common` 21）= **635** · BUILD SUCCESS · 6:06 min。
 
 ### ⚠️ 取数字的**方法论**（本轮踩到两条 ⇒ 留档）
 - ✅ **权威口径 = surefire 的 `TEST-*.xml`**（读每个 `testsuite` 的 `tests`/`failures`/`errors`/`skipped` 属性再求和）⇒ 本轮据此复核，**8 个模块逐条与 G4 的明细表一致**。
@@ -244,7 +244,7 @@ G4 回执 ④ 声称「共享层 `Observability.mark*` 是**显式传 ctx** ⇒ 
   - **元凶已定位** = **`LikeRpcServerSpanCurrentProbeTest`（1 条，mtime 03:52:04）** ⇒ 那是**已删除的探针类**留下的**陈旧产物**（`find` 确认源码已不在该树）⇒ 剔除后 = **111** ⇒ **双口径一致** ✔。
   - ⇒ **判定式（补）**：**求和前必须先确认「目录里没有跨轮残留」** ⇒ 两条做法：① **按文件 mtime 切出本轮** ② **与 maven 模块汇总行对照**；**两条口径必须相等**才采信。
   - ⇒ **附带一条通用形态**：「**源码已删、报告还在**」⇒ 陈旧 XML **不会随源码删除而消失** ⇒ 同机多轮跑的仓，`target/` 里的测试报告**不可直接当历史证据**。
-  - ⇒ **本轮六模块的交叉验算结果**（maven 汇总行 vs surefire XML，剔除陈旧项后）：`message-api` 98 · `message-rpc` 84 · `like-api` 89 · `like-rpc` 111 · `task-api` 97 · `task-rpc` 115 ⇒ **逐条相等** ⇒ 合计 **594** ✔
+  - ⇒ **第三轮六模块的交叉验算结果**（maven 汇总行 vs surefire XML **按 mtime 切本轮**）：`message-api` 98 · `message-rpc` 84 · `like-api` 89 · `like-rpc` 111 · `task-api` 97 · `task-rpc` **117** ⇒ **逐条相等** ⇒ 合计 **596** ✔（八模块 **635** ✔）⇒ ⚠️ 第三轮 like-rpc 目录里**仍有 1 个陈旧 XML**（`LikeRpcServerSpanCurrentProbeTest` · 源码已删）⇒ 被 mtime 切分正确剔除 ⇒ **未污染求和**（旧坑仍在 ⇒ 判定式继续有效）
 
 ### 🔴 合并后我域**必做**动作（收口回归 · §5.3e）
 
@@ -282,7 +282,7 @@ Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
 |---|---|
 | **① U+FFFD 我域 3 条** | 🟢 **在我树已干净**（**字节级**扫描：FFFD=0）⇒ 但 **主树 / G1 / G3 / G4 树仍各坏 1 处** ⇒ **合并以我树版本为准**（我域写权面）⇒ 见 [`like/rpc.md`](rpc.md) B 节 + [`message/rpc.md`](../message/rpc.md) + [`message/api.md`](../message/api.md) 同款条目 |
 | **② like-rpc 同款启动 flake** | ✅ **成立且已在本域落码修法**（`StringBuffer` ＋ 等日志行 ＋ `drain.join(10s)`）⇒ 并**独立核过全我域同款范围**：全域 `grep -rn "destroyForcibly" service/{like,task,message} --include=*.java` = **1 命中**（就是这处）⇒ `TaskRpcFatJarArtifactGateIT` 是**产物层**（不起进程）⇒ **不是**同款；`message-rpc` **无**此类 |
-| **③ Redis 超时口径**（Boot 4 两属性不再共用；不配 `connect-timeout` ⇒ Lettuce 默认 **10s** ⇒ **漂移 2 倍**） | 🟢 **与我域独立复核结论一致** ⇒ **我域已修，无需再动**：`like-rpc` 补 `connect-timeout: 5s`；`task-rpc` 补 `timeout: 3s` ＋ `connect-timeout: 5s`（双侧活体对拍：Go **1694ms** vs RAG 修前 **60021ms** vs 修后 **3ms**）⇒ 守门 8 条（`LikeRpcRedisTimeoutsGateTest` 4 ＋ `TaskRedisCommandTimeoutGateTest` 4） |
+| **③ Redis 超时口径**（Boot 4 两属性不再共用；不配 `connect-timeout` ⇒ Lettuce 默认 **10s** ⇒ **漂移 2 倍**） | 🟢 **与我域独立复核结论一致** ⇒ **我域已修，无需再动**：`like-rpc` 补 `connect-timeout: 5s`；`task-rpc` 补 `timeout: 3s` ＋ `connect-timeout: 5s`（双侧活体对拍：Go **1694ms** vs RAG 修前 **60021ms** vs RAG 修后 **3ms**）⇒ 守门 **10 条**（`LikeRpcRedisTimeoutsGateTest` 4 ＋ `TaskRedisCommandTimeoutGateTest` **6**，后者 2026-10-27 本轮 +2 = Redis **连接池** ⑤⑥） |
 | **④ G3 扫到的 13 条域外 U+FFFD** | 其中 **2 条标「共享面（无人拥有）」** = `tools/errmsg-probe/README.md:59` ＋ `tools/sql-statement-probe/favorite/compare.py:561` ⇒ **`tools/**` 不在我写权面** ⇒ **只登记、转派 G4**（见 §6 第 7 条） |
 
 ⚠️ **判据坑（同款，全域适用）**：**`read` 的输出会把正常的汉字渲染成 `U+FFFD×3`** ⇒ 判 U+FFFD **只认字节级扫描**；
