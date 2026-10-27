@@ -89,7 +89,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
                 "logging.level.com.alibaba.nacos=WARN",
                 // 便于触发「413 压过 401」那条（Go 侧 favorite-api 没有 MaxBytes，
                 // 走 rest/config.go:53 的 default=1048576 ⇒ 本类只证明 RAG 侧的不变式成立）
-                "rag.protection.max-bytes=1024"
+                "rag.protection.max-bytes=1024",
+                // 让判据**只**取决于「本类要验的那条路径」，不被 CPU 自适应降载抢先返回：
+                // 降载命中时 GoStyleCpuSheddingFilter#doFilter 走 `response.setStatus(503)` 并**直接 return**
+                // ⇒ **裸 503、无 body、无业务信封** ⇒ 本类要验的「HTTP 200 + 业务信封」判据被抢先盖掉
+                // ⇒ ⇒ 机器一忙就**红在错的地方**（判据与被测路径无关）。
+                // ⚠️ 这是**测试专用**覆盖，不改生产默认值：默认 true 对齐 Go 侧
+                //    rest/config.go:22 `Middlewares.Shedding bool json:",default=true"`
+                //    （默认值与 Go 出处见 GoStyleProtectionProperties.CpuShedding#enabled）。
+                "rag.protection.cpu-shedding.enabled=false"
         })
 @AutoConfigureMockMvc
 @DisplayName("DRIFT-USERAPI-009②（favorite-api）：JWT 验签在 3s 预算之外")

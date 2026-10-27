@@ -91,7 +91,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
                 "rag.protection.max-bytes=1024",
                 // ⚠️ 真 Tomcat 下首个请求要加载 Jackson/MyBatis 等类，可能超过 3s
                 //    ⇒ 服务端会回 503 "Request Timeout"（那是预热，不是被测行为）
-                "observability.http-timeout=30s"
+                "observability.http-timeout=30s",
+                // 让判据**只**取决于「本类要验的那条路径」，不被 CPU 自适应降载抢先返回：
+                // 降载命中时 GoStyleCpuSheddingFilter#doFilter 走 `response.setStatus(503)` 并**直接 return**
+                // ⇒ **裸 503、无 body、无业务信封**（与上面 http-timeout 那个 503 是两回事）
+                // ⇒ ⇒ 本类要验的「HTTP 200 + 业务信封」判据被抢先盖掉 ⇒ 机器一忙就**红在错的地方**。
+                // ⚠️ 这是**测试专用**覆盖，不改生产默认值：默认 true 对齐 Go 侧
+                //    rest/config.go:22 `Middlewares.Shedding bool json:",default=true"`
+                //    （默认值与 Go 出处见 GoStyleProtectionProperties.CpuShedding#enabled）。
+                // ⚠️ 本类**不验**降载行为（8 条用例没有一条断言 503/降载）⇒ 关掉它不损失任何覆盖。
+                "rag.protection.cpu-shedding.enabled=false"
         })
 class FavoriteApiRealTomcatGateTest {
 
