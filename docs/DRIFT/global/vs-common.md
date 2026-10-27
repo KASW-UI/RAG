@@ -3184,6 +3184,60 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 
 **⑤ 本层这一条** | **零落码**（只改台账 `docs/**`）⇒ ⇒ 本层 HEAD `c0ca71e` → 本节提交。
 
+#### 4.10.59 🔴🟢 **第 15 次全量的首轮红 ⇒ 牵出共享层三处真问题（1 处 Go 漂移 + 1 处非密闭测试 + 1 处错注释）⇒ 本层落码**（核对日期 2026-10-28 02:3x）
+
+> **起因**：第 15 次全量（波末收口那一次）的**首轮**在 `service/common` 红 1 条 ⇒ ⇒ `GoStyleRpcProtectionChainTest.sheddingRejectionIsVisibleToTheOuterBreaker:116`
+> ⇒ 断言消息「**前置条件：CPU 恒过载时必须出现降载**」⇒ ⇒ **不是产品行为红，是【前置条件】红** ⇒ ⇒ 必须查清「为什么前置条件会不成立」。
+
+**① 先判「是不是合并引入的」**
+
+| 判据 | 结果 |
+|---|---|
+| `git diff <本层树> <合并树> -- service/common/` | **空** ⇒ ⇒ **`service/common` 在两棵树之间零差异** ⇒ ⇒ **不是合并引入** |
+| 复跑（合并树 · 同一测试类 · 6 次）| **6/6 绿** ⇒ ⇒ **非确定性 ⇒ flaky** |
+| 第二轮全量（同命令）| `service/common` **绿** ⇒ ⇒ ⇒ **首轮红是【负载/时序】触发，不是代码态红** |
+| ⇒ ⇒ **但** | ⚠️ **不能就这么放过**：波末收口那一轮**必然**是「`clean` 全量编译之后」⇒ ⇒ 而首轮红恰恰发生在那时（swap 已用 88%）⇒ ⇒ ⇒ **这条测试在收口工况下会随机红** ⇒ ⇒ **必须修**（否则每一轮收口都有踩雷风险）|
+
+**② 根因 A：测试的「前置条件」依赖机器速度（**非密闭**）**
+
+| 项 | 内容 |
+|---|---|
+| 机制 | `GoStyleAdaptiveShedder#minRt()` 取窗口内**已完成桶**的最小平均 RT（Go 的 `IgnoreCurrentBucket` ⇒ **当前桶不算**）⇒ ⇒ 而原配方用 `drive()` 50 次**正常完成**来抬 `avgFlying` ⇒ ⇒ **那 50 次会把【实测 RT】写进窗口** ⇒ ⇒ ⇒ **前置条件成了「机器速度 + 桶边界」的函数** |
+| ⇒ ⇒ **两头都会翻车** | ① **机器慢** ⇒ 实测 RT 膨胀 ⇒ `minRt` 大 ⇒ `maxFlight = maxPass*minRt*0.01` 大 ⇒ `cap` 大 ⇒ **触发不了降载** ⇒ 前置条件红；<br>② **机器快** ⇒ 50 次调用**没跨过 100ms 桶边界** ⇒ RT 全落在当前桶 ⇒ `minRt` 取默认 **1000ms** ⇒ `maxFlight = 10` ⇒ `cap ∈ [1,10]` ⇒ **反而必过** ⇒ ⇒ ⇒ **只有一条窄时间窗能过** ⇒ ⇒ ⇒ **典型 flaky** |
+| Go 出处（对照）| `go-zero@v1.10.2/core/load/adaptiveshedder_test.go:124-178` 的 `TestAdaptiveShedderShouldDrop` ⇒ ⇒ Go **直接设 `shedder.avgFlying = 80` / `shedder.flying = 80`** ⇒ ⇒ **Go 的测试是密闭的**（不靠推导）⇒ ⇒ **RAG 这条是「自己推导状态」的版本 ⇒ 推导链上混进了实测 RT** |
+| ⇒ ⇒ **修法（两阶段 · 测试面 · 生产代码零改动 · 不新增任何测试接缝）** | 阶段①：先堆 **200** 个悬空调用 ⇒ `flying = 200`（此阶段 `avgFlying = 0` ⇒ `highThru()` 恒假 ⇒ **必然不被降载** ⇒ `flying` 精确等于 200）；<br>阶段②：只用 `shedder.fail()`（Go: `promise.Fail()` —— **只减在途、绝不记 RT**）抬 `avgFlying` ⇒ EMA 推到 ≈140 ⇒ **窗口里始终没有任何 RT 数据** ⇒ `minRt()` 恒为 1000ms ⇒ `maxPass()` 恒为 1 ⇒ `maxFlight = 10` ⇒ `cap ∈ [1, 10]` ⇒ ⇒ `avgFlying ≈ 139.7 > cap` 且 `flying = 140 > cap` ⇒ ⇒ **必然出现降载（与机器快慢无关）** |
+| ⇒ ⇒ **为什么阶段②不能用 `driveOpen` 补在途** | 🔴 **Go 的 `Allow()`（`adaptiveshedder.go:127-133`）是先判降载、后 `addFlying(1)`** ⇒ ⇒ **被拒的请求【不计入在途】** ⇒ ⇒ 用 `driveOpen` 补偿会**越补越少** ⇒ ⇒ （本层第一版配方正是这么写的 ⇒ **自查时被抓出来** ⇒ 改成两阶段）⇒ ⇒ **RAG 的 `allow()` 与 Go 逐字一致 ⇒ 这不是漂移** |
+| ⇒ ⇒ **真实断言一字未动** | 被守的是「**shedding 的降载拒绝必须能被外层 breaker 看到**」（链序 Breaker → Shedding）⇒ ⇒ **只改了【怎么把状态摆到那个位置】，没改【守什么】** ⇒ ⇒ **守卫的牙没钝** |
+
+**③ 根因 B：调用点的「整型毫秒截断」⇒ Go 的 `float64 + ceil` 被抵消（**真漂移 · §3.1**）**
+
+| 项 | 内容 |
+|---|---|
+| Go 出处 | `go-zero@v1.10.2/core/load/adaptiveshedder.go:284-287`：<br>`rt := float64(timex.Since(p.start)) / float64(time.Millisecond)` ⇒ `rtCounter.Add(int64(math.Ceil(rt)))` ⇒ ⇒ **浮点毫秒 + 向上取整、无下限** |
+| RAG 原状 | `GoStyleRpcSheddingInterceptor`：`long rtMs = (System.nanoTime() - startNanos) / 1_000_000L;` ⇒ ⇒ **先截断成整数** ⇒ ⇒ 被调方 `pass(double)` 里的 `Math.ceil(rtMs)` **成了空操作** ⇒ ⇒ ⇒ **「浮点 + ceil」在调用点被抵消** ⇒ ⇒ **半修**（与 §4.10.57 那条「两处契约不一致」**同族**：修了一处、另一处还在） |
+| ⇒ ⇒ **后果** | RT=0.2ms：Go 记 **1**、RAG 记 **0**；RT=1.5ms：Go 记 **2**、RAG 记 **1** ⇒ ⇒ **系统性少记约 1ms** ⇒ ⇒ `minRt()` 偏小 ⇒ `maxFlight` 偏小 ⇒ ⇒ **在途上限偏低 ⇒ RAG 比 Go 更早降载** ⇒ ⇒ AGENTS.md §3.1：**行为差异默认判 RAG 错** ⇒ ⇒ **修** |
+| ⇒ ⇒ **修法** | 调用点改成 `/ 1_000_000D`（**浮点**）⇒ ⇒ `ceil` 才真正生效 ⇒ ⇒ 与 Go 逐字等价 |
+| ⇒ ⇒ **为什么之前没人发现** | 🔴 `GoStyleAdaptiveShedderTest:184-186` **已经在 `pass(double)` 这一层断言过 ceil**（`pass(1.2D)` → 记 2）⇒ ⇒ **被调方有网** ⇒ ⇒ **调用点这一截断从来没有被任何断言覆盖** ⇒ ⇒ **「有守门」≠「这一处被守住」** |
+| ⇒ ⇒ **补网** | ① 把 RT 测量抽成 `static double measuredRtMs(long startNanos)`（**抽出来是为了让它有网**）；② 新增守卫 `GoStyleRpcSheddingInterceptorTest#rtMeasurementKeepsFractionalMilliseconds`：断言 1.5ms 前开始的调用其 RT **落在 [1.4, 1.6]** ⇒ ⇒ **截断若回来 ⇒ 必红**（且**确定性**，不依赖机器速度）|
+
+**④ 根因 C：拦截器的一句注释是错的（**留痕失真**）**
+
+| 项 | 内容 |
+|---|---|
+| 原文 | 「Go: sheddinginterceptor.go:25 —— **每个进入本拦截器的请求都先 +1**（在 Allow 之前）」 |
+| 实际 | Go `sheddinginterceptor.go:31` 的 `IncrementTotal()` **确实**在 `Allow()` 之前；但**在途数 +1 在 `Allow()` 内部、判降载之后**（`adaptiveshedder.go:127-133`）⇒ ⇒ **被拒请求不计入在途** |
+| ⇒ ⇒ **处理** | 订正注释（**不是**改行为 —— 行为本来就与 Go 一致）⇒ ⇒ AGENTS.md §3.2：**留痕必须准确**，错注释会误导读代码的人去「先 +1」 |
+
+**⑤ 触及的 A 轴 ＋ Go 出处**
+
+| 轴 | 结论 |
+|---|---|
+| **A3**（跨域暴露面 · 共享层行为）| 🟡 **有变更**：降载阈值计算链的 **RT 记录**改了 ⇒ ⇒ 属**共享层**（`service/common/**`）⇒ ⇒ **10 个 api / 各 rpc 组件的降载行为都吃这条** ⇒ ⇒ ⇒ **必须走全量回归**（§4.10.54 清单）|
+| 其余 A 轴 | 不变（本轮只碰降载的 RT 记录 + 一个测试 + 一句注释）|
+| **Go 出处（三处，逐条带行号）** | ① `core/load/adaptiveshedder.go:284-287`（`float64` + `math.Ceil`）· ② `core/load/adaptiveshedder.go:127-133`（`Allow()` 先判降载后 `addFlying(1)`）· ③ `core/load/adaptiveshedder_test.go:124-178`（Go 的测试**直接设状态** ⇒ 密闭）· ④ `zrpc/internal/serverinterceptors/sheddinginterceptor.go:31-46`（`IncrementTotal` 在前 / `defer` 里 `Fail` vs `Pass`）|
+
+**⑥ 本层这一条** | **本轮首次有【共享层生产代码】的行为变更**（不是加守门、不是纯注释）⇒ ⇒ **必须全量回归 + 变异验证** ⇒ ⇒ **零可执行代码改动**的说法在本节**不再成立**（§4.10.50~§4.10.58 那段期间成立）。
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
