@@ -2526,3 +2526,64 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
 | 探针（`UserRpcTestcontainersHostPortSegmentGateTest`，4 条断言 ＋ 2 次变异验证） | 🟢 **已落码 · 已变异验证**（`mvn -pl service/users/user/user-rpc -Dtest=…` ⇒ 绿；变异 A/B ⇒ 红在目标断言） |
 | **6 个模块的服务文件 ＋ 实现类 ＋ 守恒守门** | 🟡 **未做**（§39.3 已把形态定死，下一轮落码） |
 | 落码后必须复跑 | 🔴 **域级全量必须重跑**（钉口会改**所有** Testcontainers 容器的启动路径 ⇒ ⇒ 38 个文件全部受影响） |
+
+## 40. 🔴 **G3 第二轮来信（U+FFFD 归属 + rpc 侧活体对拍「仍被机器级转发故障卡住」）的复检（2026-10-27 22:4x）**
+
+### 40.1 🟢 (a) 那 3 份「真损坏且无人拥有」的 U+FFFD —— **已清零，待办关闭**（G4 已认领并修完）
+
+| 文件 | 我树复扫 |
+|---|---|
+| `tools/errmsg-probe/README.md` | **0** |
+| `tools/sql-statement-probe/favorite/compare.py` | **0** |
+| `component-semantic-verification/springboot-semantic-model.md` | **0** |
+
+⇒ ⇒ G4 的 `cc6e38e` / `f68a9cd` **均为我 HEAD 的祖先** ⇒ ⇒ **合并时取 G4 树版本** ⇒ ⇒ **我域零改动、零派单**。
+
+### 40.2 🔴 (b) **G3 点名的 4 个 PG 口：全部协议级应答 ⇒ 「机器级转发故障」在他点的口上也不成立**
+
+| 域 | 宿主口 | 发什么 | 收到 | 耗时 |
+|---|---|---|---|---|
+| article | 55560 | SSLRequest（8 字节） | `b'N'` | 4ms |
+| hot | 55562 | SSLRequest | `b'N'` | 0ms |
+| favorite | 55564 | SSLRequest | `b'N'` | 0ms |
+| comment | 55566 | SSLRequest | `b'N'` | 0ms |
+
+⇒ ⇒ `b'N'` = **PG 对 SSLRequest 的正确首字节应答**（非 SSL 模式）⇒ ⇒ ⇒ **G3 的 rpc 侧活体对拍前置【是满足的】⇒ 不用等 Docker 恢复。**
+
+### 40.3 🔴 **G3 的 `127.0.0.1:6379` refused = 探了【容器内口】，不是转发故障**
+
+- 宿主上**根本没有 6379 监听**（6379 是容器内口）⇒ ⇒ **refused 是「没有监听者」，不是「有监听者但不回」**。
+- 本机 8 个 Redis 宿主口，**逐个发 `PING` 全部 `+PONG`**：
+  `36379`（`redis` 容器 · 独立 · Up 7 days）· `49380`（`Sea-redis`）· `56395`（cdifftest）· `56380`（taskprobe）·
+  `56382` / `56390`（uudifftest）· `57379`（userprobe）· `61379`（difftest5k）
+- ⚠️ **断连对拍建议用 `36379`** ⇒ **不要动 `61379`（`difftest5k-redis`）** —— 那是**我域 4 个进程也在用的共享容器** ⇒ 断它必须先约窗口（谁断/多久/谁恢复）。
+
+⇒ ⇒ **判据式（跨 lane 可复用的第三条）**：
+**「TCP 连上但读不到字节」不能直接读成「转发坏」⇒ 必须先发协议正确的首字节再判**
+⇒ ⇒ PG 的首字节协议 = **SSLRequest**（`00 00 00 08 04 d2 16 2f`）⇒ 正常回 `b'N'` / `b'S'`；Redis = **`PING\r\n`** ⇒ 正常回 `+PONG`
+⇒ ⇒ **裸连超时 ≠ 路径不通**（我同款裸连判据在本机复现出 **10 个假阳性**，见 §37.3 ①）。
+
+### 40.4 🟡 **U+FFFD 基线订正：我域 = 15 处 / 5 份（含 1 处【刻意保留】）**
+
+| 文件 | 处数 | 性质 |
+|---|---|---|
+| `docs/DRIFT/users/user/api.md` | 7 | 既有基线 |
+| `docs/DRIFT/users/user/rpc.md` | 4 | 既有基线 |
+| `docs/DRIFT/users/vs-common.md` | 2 | 既有基线 |
+| `service/users/user/user-api/…/UserApiGoStyleBodyContentTypeTest.java` | 1 | 既有基线 |
+| **`docs/Pitfalls/users/user/rpc.md:146`** | **1** | 🆕 **刻意保留** —— 该行是在**举例**「末字已不可恢复」的损坏串（形如 `'用户不<U+FFFD>?'`）⇒ ⇒ **不是缺陷，禁止「修」** |
+
+⇒ ⇒ **全仓现况：41 处 / 15 份**（其余属 like/comment/message/favorite/article 各域 ⇒ 不是我的）
+⇒ ⇒ **我域零新增**（相对既有基线只多出上面那处**刻意**的）。
+⇒ ⇒ ⚠️ **本轮自踩的坑（与「在台账里描述坏锚点必须用代码格式」同族）**：
+**我第一次写这一节时把那个坏字符【原样抄】进了表格 ⇒ 自己给自己加了 1 处新 U+FFFD**（2 → 3）
+⇒ ⇒ ⇒ **判据式：台账里引用「含坏字符的原文」时，必须用转义/描述（如 `<U+FFFD>`），不能原样粘贴**
+⇒ ⇒ ⇒ 已改回转义写法 ⇒ **复扫确认回到 2 处**（我域 15 处 / 5 份）。
+
+### 40.5 🔴 **写权口径订正：`docs/Pitfalls/<域>/**` 不属于任何 lane（我早前的理解是错的）**
+
+- 我早前依据 AGENTS.md §5.3b（「产出**必写回**同名的**本域子目录**」）以为 `docs/Pitfalls/users/**` 是我的写权面 ⇒ ⇒ **错**。
+- **机器准绳**（`tools/difftest/check-wave-lane-ownership.py` 的 `ACTIVE` 白名单）里**四个 lane 全部只列 `docs/DRIFT/<域>/**`，没有任何 lane 含 `docs/Pitfalls/**`** ⇒ ⇒ **那面是「无人拥有面」**。
+  （守门里的 `EXCLUSIVE` 条目 `["service/favorite/**", "docs/DRIFT/favorite/**", "docs/Pitfalls/favorite/**"]` 是**排他归属声明** —— 声明「favorite 域只归 G3」，**不是**给 G3 开 `docs/Pitfalls/favorite/**` 的写权。）
+- ⇒ ⇒ **§40.4 那处刻意 U+FFFD 只能【登记】、不能改** —— 幸好它本来就该保留。
+- ⇒ ⇒ **顺带一条给所有 lane 的提醒**：AGENTS.md §5.3b 那句「必写回本域子目录」在 `docs/DRIFT/` 上成立；在 `docs/Pitfalls/` 上**不成立** ⇒ ⇒ **两者读起来像同一件事，写权面却不同** ⇒ ⇒ **以守门白名单为准**。
