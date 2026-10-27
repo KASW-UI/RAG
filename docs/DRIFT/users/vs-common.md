@@ -1075,3 +1075,56 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 ⇒ G4 独立得出「前五轮全量一直绿，是因为 #8 的缺陷恰好把保护罩挡住了 ⇒ `RpcInterceptor.shutdown()` **从未在纯 gRPC 进程里真正执行过**」
 ⇒ ⇒ **我域此刻的绿也是这么撑着的** ⇒ ⇒ **不能把当前全绿读作「我域不受影响」** ⇒ ⇒ 已在 §12.3 / §12.4 写明「合入后必查 3 条」＋「两条必须同批合入」。
 
+---
+
+## 17. 🆕 **G3 回执的交叉验证（2026-10-27 · G1 lane）** —— 四个口径的自核结果
+
+> **性质**：本节全是**「对方说的 ⇒ 我自己再核一遍」** ⇒ ⇒ **不是采信转述**（AGENTS.md §3.1）。
+> ⇒ 其中 ① ④ 两条构成**跨域交叉验证**（两个 lane 独立得出同一结论）⇒ ⇒ **证据强度比单方字节码核验更强**。
+
+### 17.1 ✅ 交叉验证①：**Boot 4 的 `connect-timeout` 不回落** —— 两域独立同向
+
+| 来源 | 核法 | 结论 |
+|---|---|---|
+| **G1（我域）** | Boot 4.0.8 `LettuceConnectionConfiguration.createClientOptions` 字节码：`if (connectTimeout != null) { builder.socketOptions(…connectTimeout(…)); }` ⇒ **null ⇒ 整段跳过** | 不配 ⇒ 落 `SocketOptions.DEFAULT_CONNECT_TIMEOUT = 10s` |
+| **G3（独立域）** | 同字节码 offset 9→31 核法 ＋ 用 Boot 3.2.5 字节码对照（**Boot 2/3 才是两属性共用**） | 同上 |
+
+⇒ ⇒ **两侧独立同向** ⇒ ⇒ 本仓的「原写『回落 timeout=3s』是错的」这条订正**不再只是单方结论** ⇒ ⇒ 可交叉引用。
+⇒ ⇒ **我域现状（字节级读真实 yml，不是台账快照）**：**5/5 已合规** ⇒
+
+| 组件 | `timeout` | `connect-timeout` |
+|---|---|---|
+| `user-api` | `3s`（`application.yml:25`） | `5s`（`:34`） |
+| `admin-api` | `3s`（`:37`） | `5s`（`:44`） |
+| `user-rpc` | `3s`（`application.yaml:55`） | `5s`（`:67`） |
+| `admin-rpc` | `3s`（`application.yml:61`） | `5s`（`:71`） |
+| `follow-api` | `3s`（`:40`） | `5s`（`:47`） |
+
+⇒ ⇒ **本域不需要域内自修、也不需要给 G4 派单**（`user-rpc` 那份是第十四轮 `DRIFT-USERRPC-V-014` 补的；api 侧本来就有）。
+
+### 17.2 ✅ 交叉验证②：**Go 侧 HTTP 预算是 3s，不是 article 的 70s 例外**
+
+⇒ 真源三份 api yaml 的 `Timeout` 键数：`usercenter.yaml` **0** · `admincenter.yaml` **0** · `followcenter.yaml` **0**
+⇒ ⇒ 真源**不写** `Timeout` ⇒ 走 go-zero `rest/config.go:55` 的 `default=3000` ⇒ **3s** ⇒ ⇒ **我域不是 70s 例外**（那个例外全仓唯一，在 article）。
+⇒ ⇒ 附带：rpc 侧 yaml 同样**零** `Timeout` 键 ⇒ 同样 3s。
+
+### 17.3 🟢 **U+FFFD：我域现在只剩 1 处，且正是「故意」那处**
+
+| 位置 | 性质 |
+|---|---|
+| `service/users/user/user-api/src/test/java/com/rag/users/user/api/UserApiGoStyleBodyContentTypeTest.java:376` | ✅ **故意**（`assertFalse(body.contains("�"))` 的**被测对象**）⇒ **不动** |
+| `docs/DRIFT/users/user/rpc.md:2459` / `:2461` | ✅ **故意**（台账对历史损坏的**引述** ＋ 明写「不动」那行）⇒ **不动** |
+
+⇒ ⇒ **3 处真损坏已在 `0c2a902` 修掉**（`UserRpcLoginNullStatusReadsAsZeroTest.java:44`→「就是」· `AvatarHistoryIgnoresBodyTest.java:61`→「真容器脚本」· `AvatarHistoryService.java:32`→「根本不读 body」）⇒ ⇒ **字节级扫描（`b'\xef\xbf\xbd' in read_bytes()`）现为 1 处命中**。
+⇒ ⇒ ⚠️ **G3 给的 4 处清单是「我修复前」的旧扫描** ⇒ ⇒ 已回信订正（并附我域的当前状态）。
+⇒ ⇒ **分类纪律（与 G3 同款）**：「**全仓 U+FFFD 归零」不是合法目标** ⇒ **3 类故意**：被测对象 ＋ 码点钉死 ＋ 坑档/台账里的故障样本。
+
+### 17.4 ⚠️ **两款 flake 的根因层不同 —— 不可并成「同款」**
+
+| 域 | 机制 | 根因层 | 状态 |
+|---|---|---|---|
+| **like-rpc / comment-rpc / article-rpc**（G3 域） | 端口一探通就 `destroyForcibly()` ⇒ drain 线程还没读到「gRPC Server started」 | **就绪探测** | G2 写权面，G3 未动 |
+| **user-api / admin-api / follow-api**（我域） | 「**可达 ⇒ 能启动**」用例把 `immediate-connect-timeout` 设成**生产值 3s** ⇒ 冷 JVM ＋ 满负载下 TCP+HTTP/2 握手超 3s | **连接预算** | ✅ 已修（放宽到 10s；见 §14） |
+
+⇒ ⇒ 我域 `service/{users,follow}/**` 实测 `destroyForcibly` = **0 命中**、`"gRPC Server started"` = **0 命中** ⇒ ⇒ **G3 那款机制不适用我域** ⇒ ⇒ **两者只是「同属偶发红」，不是「同款」** ⇒ ⇒ 跨域台账里**分开记**（否则会把「就绪探测」的修法套到「连接预算」上）。
+
