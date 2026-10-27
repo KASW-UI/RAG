@@ -1666,7 +1666,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | **三门禁**（同批次复跑） | `check-wave-lane-ownership` **EXIT=0** · `check-wave-role-model` **EXIT=0** · `check-wave-coupling` **EXIT=0** |
 | **台账门禁** | `check-ledger-tables` **EXIT=0** · `check-ledger-selfcheck` **EXIT=0** · `check-ledger-count` **EXIT=0** |
 | **写权自证** | 本轮改动**全部**落在 `service/common/**` ＋ `docs/DRIFT/global/vs-common.md` ⇒ **零域侧改动** |
-| ⚠️ **已知工作区噪声** | `git status` 有一个未跟踪目录 `io/`（内含 `io/opentelemetry/api/GlobalOpenTelemetry.class`，**mtime 被归一化成 1980-02-01** ⇒ 是**从 jar 里解出来的 class**，不是源码产物）⇒ ⇒ **未跟踪 ⇒ 不影响构建与提交** ⇒ ⇒ **但会出现在每个 agent 的 `git status` 里** ⇒ ⇒ **根因待查**（疑似某个本地步骤把 jar 解到了 CWD）⇒ ⇒ **不属本层写权面** ⇒ ⇒ **登记** |
+| 🟢 **工作区噪声（根因已定位并已清）** | 原：未跟踪目录 `io/`（`io/opentelemetry/api/GlobalOpenTelemetry.class`，**mtime 归一化成 1980-02-01** ⇒ 从 jar 解出、不是源码产物）⇒ ⇒ **本层 2026-10-27 14:3x 定位根因**：该文件 md5 `e7207e7c24aa36c55a8d283bd82cdae9` **==** `~/.m2/.../opentelemetry-api-**1.36.0**.jar` 内同名条目的 md5（**逐字节相同**）⇒ ⇒ 而**本仓 pin 的是 `opentelemetry-bom 1.44.0`**（`service/common/pom.xml:18`）⇒ ⇒ 连版本**都不是构建在用的** ⇒ ⇒ **它 = 本层早前做 OTel 字节码取证时、在仓库根解 jar 的遗留**（`tools/**` 全仓无解压 ⇒ 不是脚本干的）⇒ ⇒ **不是构建产物 ⇒ 不影响构建与提交** ⇒ ⇒ **已按可恢复方式删除**（`mavis-trash`）⇒ ⇒ 本层工作区 `git status` 现为**空**<br>🆕 **新规则（取证纪律）**：**解 jar 一律解到 `mktemp -d` 的临时目录 ⇒ 绝不在仓库根解** ⇒ ⇒ 否则既污染 `git status`，又让「工作区噪声」变成每个 agent 都要重新查一遍的**悬案** |
 
 > 🔴 **本轮口径的三条诚实边界**：
 > ① **不是「一次跑完 52 模块」** —— 是 fail-fast 停在 [46/52] ＋ 补跑 6 个 ⇒ ⇒ **别把 `MVN_EXIT=1` 读成「全量红了」**；
