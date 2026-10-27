@@ -123,21 +123,35 @@ class GoStyleTraceparentFilterTraceSourceGateTest {
         assertThat(m.matches()).as("Traceparent 形状必须是 00-<32hex>-<16hex>-<flags>。实际=" + header).isTrue();
         String traceIdHex = m.group(1);
 
+        // 🔴 关键断言的字节（OTLP protobuf 里 trace-id 是原始字节，不是 hex 串）
+        //    ⚠️ **必须先算出来** —— 下面的等待条件要用它（见下）
+        byte[] traceIdBytes = hexToBytes(traceIdHex);
+
         // 关停 ⇒ flush（Go: core/trace/agent.go:55-62 tp.Shutdown ⇒ flush 未导出的 span）
         GoStyleOtelAgent.shutdown();
 
-        // 等导出到达（关停是同步 flush ⇒ 通常立即到 ⇒ 给 3s 余量）
+        // ⚠️🔴 2026-10-27 订正：等待条件**必须等于断言条件**
+        //    原写法等的是「**任意一个**导出请求到达」（`requestCount() > 0`），
+        //    断言的却是「**含这条 trace-id** 的导出到达」⇒ ⇒ **等的条件比断言弱**
+        //    ⇒ ⇒ 在「导出本身慢」（机器负载高 / batcher 线程被抢）时，
+        //    3s 窗口耗尽 ⇒ **报「span 没被导出」的假红**。
+        //    ⇒ 实测（第十四次全量 · 主跑）：本条在 `service/common` 上红了 1 次，
+        //      **隔离复跑 1/1 绿** ⇒ 与被测代码无关 ⇒ **是判据缺陷**。
+        //    ⇒ 改为：**等断言的那个东西本身**出现（trace-id 出现在导出字节里）
+        //      ⇒ 仍然是 3s 预算，但**判据与断言同源** ⇒ 不再假红。
         long deadline = System.currentTimeMillis() + 3_000L;
-        while (collector.requestCount() == 0 && System.currentTimeMillis() < deadline) {
+        while (!containsBytes(collector.receivedBytesBlob(), traceIdBytes)
+                && System.currentTimeMillis() < deadline) {
             Thread.sleep(50);
         }
         assertThat(collector.requestCount())
-                .as("server span 必须真的被导出（Go: core/trace/agent.go:114-121 装 batcher）")
+                .as("server span 必须真的被导出（Go: core/trace/agent.go:114-121 装 batcher）"
+                        + "—— 3s 内**一个**导出请求都没到 ⇒ 导出链路本身有问题"
+                        + "（本条曾因「等的条件比断言弱」而在高负载下假红，2026-10-27 已订正等待条件）")
                 .isGreaterThanOrEqualTo(1);
 
         // 🔴 关键断言：导出的字节里必须含**响应头那个 trace-id 的 16 个原始字节**
         //    （OTLP protobuf 里 trace-id 是原始字节，不是 hex 串）
-        byte[] traceIdBytes = hexToBytes(traceIdHex);
         assertThat(containsBytes(collector.receivedBytesBlob(), traceIdBytes))
                 .as("响应头的 trace-id=" + traceIdHex + " 必须出现在**真正导出**的 span 里 ⇒ 同一条 trace。"
                         + "若这条红了，说明响应头与导出物**不同源**（那正是私有 provider 形态的症状）。")
