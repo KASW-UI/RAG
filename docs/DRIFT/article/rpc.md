@@ -1922,3 +1922,15 @@ readValue("  ", List)   => 抛异常: MismatchedInputException
 > 中间任何一层的「无 presence」语义都可能把它**自动抹平**。
 > ⇒ 反过来：**没有 presence 的字段（proto3 的 `repeated`/`map`、可空标量）会把空与缺混为一谈** ——
 > 想区分它们，就必须在**更靠近存储的那一层**去判。
+---
+
+## 附录 · 🧹 启动守门 flake 修法（2026-10-27 · G4 登记 · G3 域内同款）
+
+| 项 | 内容 |
+|---|---|
+| 症状 | `ArticleRpcRuntimeBootGateTest#realFatJarProcessBootsAndListens` 偶发红（G4 全量回归 2448 条里 1 failure） |
+| 根因 | **不是启动失败**：真进程 fat jar 起来 → `tcpProbe` 端口一连上就立刻 `destroyForcibly()` ⇒ **drain 线程还没读到**「gRPC Server started」⇒ 断言与日志读取**竞态**。辨识度：端口已监听 + 无 `NoClassDefFoundError` ⇒ 进程真的起来了 |
+| 修法 | ① 收摊前**先等日志标志行出现**（上限 30s、间隔 200ms）② sink `StringBuilder` → **`StringBuffer`**（跨线程读写）③ `drain.join(10s)` 建 happens-before |
+| 验证 | ✅ `ArticleRpcRuntimeBootGateTest` **1/1 绿** |
+| 整域回归 | ✅ **article-rpc 155 条**（skipped 0）全绿 ⇒ **四域 12 模块合计 919 条**（0 failures / 0 errors / 4 skipped · 9:44 min · BUILD SUCCESS · 基线 `eb4d1d2` + 本轮改动 · 核对日期 2026-10-27 · 两口径逐模块一致） |
+| 同款缺陷 | 🔴 `comment-rpc` 同款（**同属 G3 写权面** ⇒ 已在 comment 域同批修）· 🔴 `like-rpc` 同款（**属 G2 写权面** ⇒ 已回报 G2，本域**不越权改**） |

@@ -99,7 +99,9 @@ class CommentRpcRuntimeBootGateTest {
         env.put("REDIS_PORT", "6379");
 
         Process process = builder.start();
-        StringBuilder log = new StringBuilder();
+        // ⚠️ 用 StringBuffer（同步）而不是 StringBuilder：本类的 sink 会被
+        //    「drain 线程」写、被「测试线程」读 ⇒ StringBuilder 不是线程安全的。
+        StringBuffer log = new StringBuffer();
         Thread drain = new Thread(() -> drain(process.getInputStream(), log));
         drain.setDaemon(true);
         drain.start();
@@ -116,8 +118,26 @@ class CommentRpcRuntimeBootGateTest {
             }
             Thread.sleep(500);
         }
+
+        // 🔴 **收摊前先等日志行出现**（2026-10-27 · G4 在全量回归里抓到 1 次偶发红）：
+        //   gRPC 端口 **bind 成功** 早于 devh 把「gRPC Server started」写进 stdout
+        //   ⇒ 探活一成功就 `destroyForcibly()` ⇒ drain 线程**可能还没读到**那一行
+        //   ⇒ 「日志里没有 gRPC Server started」这条断言**偶发红**。
+        // ⚠️ 注意症状的辨识度：同一用例里「gRPC 端口已在监听」与「无 NoClassDefFoundError」
+        //   两条**都通过** ⇒ 进程**真的起来了** ⇒ 是**断言与日志读取的竞态**，不是启动失败。
+        // ⇒ 故这里**等日志行出现（带上限）再收摊**，而不是加长整体启动超时。
+        long logDeadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(30);
+        while (System.currentTimeMillis() < logDeadline
+                && process.isAlive()
+                && !log.toString().contains("gRPC Server started")) {
+            Thread.sleep(200);
+        }
+
         process.destroyForcibly();
         process.waitFor(30, TimeUnit.SECONDS);
+        // ⚠️ 必须 join drain 线程：它可能还没把最后一段 stdout 读完
+        //    ⇒ join 同时建立 happens-before（否则测试线程读到的 sink 是**残缺的**）。
+        drain.join(TimeUnit.SECONDS.toMillis(10));
         String output = log.toString();
 
         assertTrue(listening,
@@ -154,7 +174,7 @@ class CommentRpcRuntimeBootGateTest {
         }
     }
 
-    private static void drain(InputStream in, StringBuilder sink) {
+    private static void drain(InputStream in, StringBuffer sink) {
         try (InputStream stream = in) {
             byte[] buffer = new byte[8192];
             int read;
