@@ -2918,7 +2918,15 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 
 **⑥ 三门禁**：`check-wave-lane-ownership` · `check-wave-role-model` · `check-wave-coupling` ⇒ ⇒ **全 EXIT=0**。
 
+> **🔴 订正（2026-10-28 03:3x · 第 15 次全量实测）** —— 上一行的「**全 EXIT=0**」这个**期望值本身要改** ⇒ ⇒ 保留原值可追：
+> ⇒ ⇒ `check-wave-coupling` 在**四路合并树**上实测 **EXIT=1（10 项 `common_radiation` 漂移）** ⇒ ⇒ **且这 10 项是【既有债、非合并引入】** ⇒ ⇒ **实测证据**：三棵 lane 树各跑 ⇒ **G1 = 1 项** · **G2 = 9 项** · **G3 = 1 项**（⊂ G2 同名项）⇒ ⇒ **并集 = 10 项** ⇒ ⇒ **与合并树逐条吻合 ⇒ 合并零新增** ✅
+> ⇒ ⇒ **归属**：`docs/DRIFT/_cross/cross-domain-coupling.md` = **SHARED 面** ⇒ ⇒ **本层只登记、交合并收口执行者**（工具支持 `--print`）。
+> ⇒ ⇒ **另两条**（`check-wave-lane-ownership` / `check-wave-role-model`）实测 **EXIT=0** ✅
+> ⇒ ⇒ ⚠️ **给合并收口执行者的一句话**：**「三门禁全 EXIT=0」这个门槛在收口那一步【达不成】** ⇒ ⇒ 要么**先 `--print` 更新快照**（把 10 项对齐到仓库现状），要么**把它降级为「不新增」**（= 并集零新增）⇒ ⇒ **别把既有债当合并引入**。
+
 **⑦ 台账三门禁**：`check-ledger-tables` · `check-ledger-selfcheck` · `check-ledger-count` ⇒ ⇒ ⚠️ **`check-ledger-selfcheck.py` 的默认域是 `task`** ⇒ ⇒ **必须按域跑**，否则拿到的是**别人的绿**。
+
+> **🟢 本轮按域跑（2026-10-28 03:3x）** —— `LEDGER_FILES` 只配了 **task / users / users-admin** 三个域 ⇒ ⇒ 逐域跑：**task EXIT=0** · **users EXIT=0** · **users-admin EXIT=0** ✅ ⇒ ⇒ **默认（= task）也 EXIT=0**（对照）⇒ ⇒ ⚠️ **其余 7 个域（message / like / task 之外的 article / comment / favorite / follow / hot）不在该工具的扫描集内** ⇒ ⇒ **回执里要写清这个边界**（工具口径限制 ⇒ **不是「全绿」**）⇒ ⇒ `--entity-all` 可扩到全仓，但它是**提示级、不计入退出码**。
 
 **⑧ 基线对照表**（第十四次 = 2026-10-27 · 波末 = 待测）
 
