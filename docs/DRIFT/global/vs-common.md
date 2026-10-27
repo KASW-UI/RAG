@@ -1670,6 +1670,63 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 
 ---
 
+#### 4.10.27 🔴🟢 **Redis 超时的跨域全表**（G2 的发现 ⇒ 本层推广成 10 个组件的逐项实测）—— **8 个组件的连接超时比 Go 松 2 倍**
+
+> **触发**：G2 在其域发现「task-rpc 的命令/连接超时**两个都没配** ⇒ 落 Lettuce 默认（命令 60s / 连接 10s）⇒ 断连时命令挂 60s ⇒ 撞 `rpc-timeout: 2s` ⇒ 客户端看到 1015」
+> ⇒ ⇒ **本层把它推广成「全部用 Redis 的组件」的逐项实测**（G2 的发现本身成立，且**不是孤例**）。
+
+##### 4.10.27.1 三条机制事实（本层**独立核过**，不采信转述）
+
+| # | 事实 | 证据（本层实测） |
+|---|---|---|
+| ① | **Go 侧生效的 Redis 超时 = go-redis 的库默认**，不是真源 yaml 里写的值 | 真源 `go.mod` pin：`github.com/redis/go-redis/v9 **v9.20.0**` · `github.com/zeromicro/go-zero **v1.10.2**`；<br>go-redis `options.go` 的 `init()`：`if opt.DialTimeout == 0 { opt.DialTimeout = **5 * time.Second** }` ＋ `switch opt.ReadTimeout { case 0: opt.ReadTimeout = **3 * time.Second** }` ⇒ ⇒ **连接 5s / 命令 3s**；<br>⚠️ 真源 yaml 里的 `ReadTimeoutMs: 1000` / `DialTimeoutMs: 500` **不生效**（G2 实测：对应 struct **没有**这两个字段 ＋ go-zero 的 `conf.Load` 是**非严格**模式 ⇒ 未知字段被静默忽略 ⇒ `LOAD OK` 但字段没进 struct）⇒ ⇒ **真值 = 库默认** |
+| ② | 🔴 **Boot 的两个超时属性彼此独立**：`timeout` → **命令**超时；`connect-timeout` → **连接**超时 | `spring-boot-data-redis-4.0.3` 的 `LettuceConnectionConfiguration` 字节码：`DataRedisProperties.getTimeout()` → `LettuceClientConfigurationBuilder.commandTimeout(...)`；另一处 `DataRedisProperties.getConnectTimeout()` → `SocketOptions$Builder.connectTimeout(...)` ⇒ ⇒ **未配 `connect-timeout` ⇒ 不会回落到 `timeout`** |
+| ③ | ⇒ ⇒ **未配 `connect-timeout` ⇒ 连接超时 = Lettuce 自己的默认 = 10s**（**不是** `timeout` 的值） | `lettuce-core-6.1.8` 的 `SocketOptions` 静态块：`DEFAULT_CONNECT_TIMEOUT_DURATION = Duration.ofSeconds(**10**)`（字节码 `ldc2_w 10` + `Duration.ofSeconds`）⇒ ⇒ **比 Go 的 5s 松 2 倍** ⇒ ⇒ ⚠️ **G1 的 `admin-rpc/application.yml` 注释写的是「回落 3s」⇒ 机制写错**（结论方向不变：仍与 Go 的 5s 不一致；但**值与机制都错**）⇒ ⇒ 见 §4.10.27.3 的转派单 |
+
+##### 4.10.27.2 🔴 逐组件实测表（**10 个生产代码真在用 Redis 的组件**，YAML 解析器读值，不是 grep）
+
+| 组件 | 域 | yaml | 命令 timeout | 连接 connect-timeout | 与 Go（**命令 3s / 连接 5s**）相比 |
+|---|---|---|---|---|---|
+| `admin-api` | G1 | `application.yml` | 3s | **5s** | ✅ **完全一致** |
+| `admin-rpc` | G1 | `application.yml` | 3s | **5s** | ✅ **完全一致**（⚠️ 但它的**注释**把机制写错了 ⇒ §4.10.27.3） |
+| `user-api` | G1 | `application.yml` | 3s | — | 🔴 **连接 = 10s**（≠ 5s） |
+| `user-rpc` | G1 | `application.yaml` | 3s | — | 🔴 **连接 = 10s**（≠ 5s） |
+| `follow-api` | G1 | `application.yml` | **2s** | — | 🔴🔴 **命令 2s（≠ 3s，比 Go 更严）＋ 连接 = 10s** |
+| `like-rpc` | G2 | `application.yml` | 3s | — | 🔴 连接 = 10s ⇒ **G2 本轮已补 `connect-timeout: 5s`** |
+| `task-rpc` | G2 | `application.yml` | — | — | 🔴🔴 **两个都没配 ⇒ 命令 60s（实测 60021ms，G2）＋ 连接 10s** ⇒ **G2 本轮已补 `timeout: 3s` + `connect-timeout: 5s`** |
+| `comment-rpc` | G3 | `application.yml` | 3s | — | 🔴 **连接 = 10s** |
+| `hot-rpc` | G3 | `application.yml` | 3s | — | 🔴 **连接 = 10s** |
+| `favorite-api` | G3 | `application.yml` | 3s | — | 🔴 **连接 = 10s** |
+
+⇒ ⇒ **6 个组件待修**（G1 的 3 个 ＋ G3 的 3 个）；G2 的 2 个已修。
+⇒ ⇒ 🔴 **危害口径**（**比 Go 更松，不是更严**）：连接超时 10s > 任何 rpc 组件的 `rpc-timeout: 2s` ⇒ ⇒ **一次 Redis 断连 ⇒ 先撞 RPC 超时 ⇒ 客户端看到 1015「服务繁忙」**（Go 是**快速失败** ⇒ `INTERNAL「注销失败,Redis写入异常」`）⇒ ⇒ 与 G2 在 task-rpc 上实测到的是**同一机制**。
+⇒ ⇒ ⚠️ `follow-api` 的**命令超时 2s** 是**反方向**的一条（比 Go 的 3s 更严 ⇒ 「比 Go 更严」同样是漂移）⇒ ⇒ 单独列出，不与连接超时那条混为一谈。
+
+##### 4.10.27.3 转派单（**域侧动作，本层不改域内文件**）
+
+| # | 落点（域写权面） | 事实 | 建议修法 |
+|---|---|---|---|
+| **R1** | `service/users/user/user-api/src/main/resources/application.yml`（G1） | `timeout: 3s` ✔ 但**无** `connect-timeout` ⇒ 连接 = **10s** | 补 `connect-timeout: 5s`（与 `admin-api` 同款） |
+| **R2** | `service/users/user/user-rpc/src/main/resources/application.yaml`（G1） | 同上 | 同上 |
+| **R3** | `service/follow/follow-api/src/main/resources/application.yml`（G1） | `timeout: **2s**`（≠ Go 3s）＋ 无 `connect-timeout` | 命令超时改 **3s** ＋ 补 `connect-timeout: 5s` ⇒ ⇒ ⚠️ **2s 这个值 yaml 里没有任何理由说明** ⇒ ⇒ **G1 需自行判定它是「刻意收紧」还是「抄错」**（若刻意 ⇒ 登记为签字偏离，不改） |
+| **R4** | `service/users/admin/admin-rpc/src/main/resources/application.yml`（G1） | ✅ **值是对的**（3s + 5s）但**注释的机制写错**（写「不显式配 ⇒ 连接超时跟着变成 3s」⇒ **实际是 Lettuce 默认 10s**） | **只改注释**（零行为变化）⇒ ⇒ 注释是「值为什么会错」的依据 ⇒ ⇒ 写错会误导下一个 agent |
+| **R5** | `service/comment/comment-rpc/src/main/resources/application.yml`（G3） | `timeout: 3s` ✔ 但无 `connect-timeout` | 补 `connect-timeout: 5s` |
+| **R6** | `service/hot/hot-rpc/src/main/resources/application.yml`（G3） | 同上 | 同上 |
+| **R7** | `service/favorite/favorite-api/src/main/resources/application.yml`（G3） | 同上 | 同上 |
+
+⇒ ⇒ ⚠️ **本层只登记 + 转派**：这 7 条的落点**全部在域侧写权面**（`service/**/<域>/**`）⇒ ⇒ **本层不代改**（与 §5.3e「共享层缺陷一律转派 G4」不冲突 —— 这不是共享层缺陷，是**域侧配置缺项**）。
+⇒ ⇒ ⚠️ **与 E66 的关系**：E66（Redis 命令绑 deadline）解决的是「**命令**超时要按请求剩余预算」⇒ ⇒ **它不修「连接超时 = 10s」**（那是 `connect-timeout` 的配置缺项）⇒ ⇒ **两条独立**：配置缺项 ⇒ **域侧补 yaml**（本节）；deadline 感知 ⇒ **共享层机制**（§4.9.4）⇒ ⇒ **别把 E66 的实现清单当成这条的修法**。
+
+##### 4.10.27.4 证据强度（**按弱侧，不写 L4**）
+
+| 腿 | 强度 | 说明 |
+|---|---|---|
+| Go 腿 | **L1 源码级（本层直接读依赖源码）** | `go-redis@v9.x` 的 `options.go` `init()`（DialTimeout 5s / ReadTimeout 3s）＋ 真源 `go.mod` 的 pin 版本；⚠️ **真源 yaml 里那两个字段不生效**这条是 **G2 的域侧实测**（`LOAD OK` 但字段没进 struct）⇒ ⇒ **合并后按 L1 记**，**不主张 L4** |
+| RAG 腿 | **L2 配置层（本层逐组件 YAML 解析）+ L2 机制层（本层字节码）** | 10 个组件的值逐项解析 ＋ Boot 4.0.3 / Lettuce 6.1.8 的字节码（命令/连接两条独立路径 ＋ `DEFAULT_CONNECT_TIMEOUT_DURATION = 10s`）⇒ ⇒ **不是「读 yaml 就信」**（§3.3.1） |
+| 合并 | **L1~L2** | ⇒ ⇒ **「连接超时 = 10s」是机制级结论**（不依赖活体）⇒ ⇒ **「断连 ⇒ 1015」那半仍是 L1**（G2 在 task-rpc 上有活体实测） |
+
+---
+
 #### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `cd893d1`）
 
 > ⚠️ **代码态基线 = `cd893d1`**（= 本轮**最后一次**改代码的提交）⇒ ⇒ `cd893d1` **改了生产代码**（容器上限无条件化）
