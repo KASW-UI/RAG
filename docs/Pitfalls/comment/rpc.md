@@ -670,6 +670,40 @@ attempt, span := otel.Tracer("sea.rtw.communityfact").Start(ctx, "community.fact
 
 ---
 
+## PIT-COMMENT-RPC-15 🔴 · **「把池打开」会引入比 Go 更糟的行为** —— 池耗尽的等待上限（`max-wait`）**不可省**
+
+**症状**：本域 Go 侧 Redis 客户端**池耗尽时 4s 就失败**；RAG 侧改成「有池」之后，**池耗尽变成无限等**
+⇒ 请求永久挂起（连超时都没有）⇒ **比改之前更糟**。
+
+**根因（三段都要查，缺一段就会掉坑）**：
+
+1. **Go 侧有上限** —— `go-redis@v9.20.0/internal/pool/pool.go:1113`
+   `err := p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)`
+   ⇒ `PoolTimeout` 未设 ⇒ `options.go:380-386` `= ReadTimeout + 1s` ⇒ ReadTimeout 3s ⇒ **4s**
+   ⇒ 池耗尽 ⇒ 4s 后报 `ErrPoolTimeout`。
+2. **RAG 侧默认无上限** —— 不配 `max-wait` ⇒ commons-pool2 2.12.1
+   `BaseObjectPoolConfig:59,68` `DEFAULT_MAX_WAIT = Duration.ofMillis(-1L)`
+   ⇒ 消费点 `GenericObjectPool.java:306`
+   `p = negativeDuration ? idleObjects.takeFirst() : idleObjects.pollFirst(remainingWaitDuration)`
+   ⇒ **负值 ⇒ `takeFirst()` ⇒ 阻塞到有人还连接为止**。
+3. 🔴 **「命令超时会兜住」是错的** —— `CommandExpiryWriter.write(command)` **才起算**计时器
+   （实测 lettuce-core 6.8.2 字节码），而**借连接发生在写命令之前**
+   ⇒ ⇒ **池耗尽时，3s 命令超时根本还没开始** ⇒ ⇒ **无限挂起**。
+
+⇒ **修法**：`spring.data.redis.lettuce.pool.max-wait: 4s`（**必配**，与 `enabled` 同级）。
+
+⚠️ **本域还踩到第二个坑**：`min-idle` 原先写 **4**，而本域 Go 侧走 **go-redis 直连**
+（`service/comment/rpc/internal/cache/redis.go:17-19` 只设 `Addr`）
+⇒ `MinIdleConns` 未设 ⇒ `options.go:218-222` **无 default** ⇒ **0**
+⇒ ⇒ **4 是对 Go 的偏离**（go-zero 的 `idleConns = 8` 只适用于**走 go-zero** 的域）
+⇒ ⇒ ⚠️ **别把别域的池参数当本域的基准**（AGENTS.md §3.1：不得拿「现有 RAG 代码」当对照基准）。
+
+⇒ **通用教训**：① **「打开一个池」不是单点改动** —— 至少同时改了「并发度 / 总量上限 / **耗尽时的等待语义**」三件事
+⇒ ⇒ 改之前**逐轴对着上游库的默认值**核；② **「超时兜底」要查它从什么时候开始计时** ——
+超时机制存在 ≠ 它在这个场景下生效（**差一个阶段 ⇒ 兜底失效**）。
+📌 **同款机制在 G3 的另一域已落码**（`hot-rpc`：形态对齐 + `max-wait` + 守门 4 条 + 变异 5 条全红）
+⇒ **完整机制与坑档** ⇒ [`../../Pitfalls/hot/rpc.md` 的 P-HOTRPC-21](../../Pitfalls/hot/rpc.md)。
+
 ## 与既有台账的关系
 
 | 文件 | 关系 |

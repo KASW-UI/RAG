@@ -2037,7 +2037,7 @@ Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方�
 |---|---|
 | `tools/check-ledger-tables.py` | **EXIT=0** |
 | `tools/check-ledger-selfcheck.py` | **EXIT=0** |
-| `tools/check-ledger-count.py` | **EXIT=1** —— 索引称 315 / 实测 325（**差 +10**）⇒ 索引在 `docs/DRIFT/_INDEX.md`（**整合者写权面**）⇒ **合并后统一 `--fix`**（本轮 +10 来自本域台账新增的编号式条目：hot §十一 / §十一.8 / favorite §15.6-15.7 / comment §十一 / 坑档 P-HOTRPC-21~23） |
+| `tools/check-ledger-count.py` | **EXIT=1** —— 索引称 315 / 实测 326（**差 +11**）⇒ 索引在 `docs/DRIFT/_INDEX.md`（**整合者写权面**）⇒ **合并后统一 `--fix`**（本轮 +11 来自本域台账新增的编号式条目：hot §十一 / §十一.8 / favorite §15.6-15.7 / comment §十一 / 坑档 P-HOTRPC-21~23 + PIT-COMMENT-RPC-15） |
 | `tools/difftest/check-wave-lane-ownership.py` | **EXIT=0** |
 | `tools/difftest/check-wave-coupling.py` | **EXIT=0** |
 | `tools/difftest/check-wave-role-model.py` | **EXIT=0** |
