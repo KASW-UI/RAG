@@ -1004,7 +1004,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | 项 | 实测结果 |
 |---|---|
 | **「当前受害域 = 0」** | ✅ **成立** —— 全仓 `service/*/*-api/src/main/resources/application.yml` 实测：`article-api` `raw` · `comment-api` `envelope` · `follow-api` `envelope` · `hot-api` `envelope` · `like-api` `envelope` · `message-api` `envelope` · `user-api` `raw` · `admin-api` `raw` · **favorite-api 根本没有 `go-form-limit` 段**（⇒ 缺省 `OFF` ⇒ **语义正确**，不是「刻意保留的偏离」⇒ 详见 §4.10.15）⇒ ⇒ **无任何域写字面量 `off`** ⇒ ⇒ **本次修法对现状零行为变化** |
-| 🔴 **但我树里 `task-api` 仍是 `mode: raw`** | 而 `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` 表里 **task-api 的语义答案是 `OFF`**（Go 侧 `task/api/**` 的 `httpx.Parse`/`ParseForm`/`GetFormValues` 命中数 = **0** ⇒ `r.Form` 从不被求值 ⇒ 两道上限**都不可达**）⇒ ⇒ **我树里存在一条「yaml 与语义答案不一致」的待修漂移**（task-api 开了本该关的闸门）⇒ **归属 task 域（G2 写权）** ⇒ **G2 在自己树里改成 `mode: "off"` 正是修它** ⇒ ⇒ 本层**只登记、不代改**<br>🆕 **2026-10-27 复核**：G2 树已改（`service/task/task-api/src/main/resources/application.yml:225` = `mode: "off"`，**带引号**）⇒ ⇒ **合并后本条自动闭环** ⇒ ⇒ ⚠️ **合并前本层树见旧值 = 「树间差异」，不是「漂移」**（同一文件在不同树上的内容/行号都可能不同 ⇒ 跨树断言必须带基线） |
+| 🔴 **但我树里 `task-api` 仍是 `mode: raw`** | 而 `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` 表里 **task-api 的语义答案是 `OFF`**（Go 侧 `task/api/**` 的 `httpx.Parse`/`ParseForm`/`GetFormValues` 命中数 = **0** ⇒ `r.Form` 从不被求值 ⇒ 两道上限**都不可达**）⇒ ⇒ **我树里存在一条「yaml 与语义答案不一致」的待修漂移**（task-api 开了本该关的闸门）⇒ **归属 task 域（G2 写权）** ⇒ **G2 在自己树里改成 `mode: "off"` 正是修它** ⇒ ⇒ 本层**只登记、不代改**<br>🆕 **2026-10-27 复核**：G2 树已改（`service/task/task-api/src/main/resources/application.yml` = `mode: "off"`（**带引号**；⚠️ **行号随树漂 ⇒ 跨树行号必须带 commit**：G2 树 `4786eb5` = `:213` · G2 树当前 HEAD `f5c9e82` = `:236` ⇒ 原写的 `:225` **在两处都对不上**））⇒ ⇒ **合并后本条自动闭环** ⇒ ⇒ ⚠️ **合并前本层树见旧值 = 「树间差异」，不是「漂移」**（同一文件在不同树上的内容/行号都可能不同 ⇒ 跨树断言必须带基线） |
 | 🟢 **本层回 Go 真源复核了那张表（不采信共享层自写的「目标态」表）** | `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` 的 javadoc 自陈「这张表是**目标态**，不是现状快照」⇒ ⇒ 本层**回 Go 真源逐条核了 task 这一格**：<br>· `service/task/api/**` 对 `httpx.Parse` / `ParseForm` / `GetFormValues` / `r.Form` ⇒ **零命中**<br>· handler 走 `json.NewDecoder(r.Body)`（`service/task/api/internal/handler/task/gettaskhandler.go:19`）⇒ `r.Form` **从不被求值** ⇒ 两道上限**都不可达** ⇒ **语义答案 = `OFF`** ✅ 与表一致<br>· 横向对比（防「只核了一个域」）：`service/article/api/**` 与 `service/message/api/**` 均有 `httpx.Parse` 命中 ⇒ 那些域闸门**必须开** ✅<br>⇒ ⇒ **该表在 task 这一格是准确的**（⚠️ 其余 9 格本层**未逐条核**，不外推） |
 | 🔴 **漂移的方向 = 「误拒」，不是「多记 413」** | 我树里 task-api 的 `mode: raw` ⇒ 闸门**装着** ⇒ **超过 2048 个非空 query 值就 400 拒掉**<br>⇒ 而 Go 侧 `r.Form` 从不求值 ⇒ **Go 照常受理**<br>⇒ ⇒ 可观察差异 = **RAG 拒掉了 Go 能受理的请求**（<b>误拒</b>方向）⇒ ⚠️ 正是 `GoStyleFormLimitMode` 类 javadoc 自己说的「**『误拒』比『漏拒』更危险**（会挡掉 Go 能受理的请求）」⇒ ⇒ **这条的优先级高于「多记 413」那一类** ⇒ ⇒ 归 task 域（G2 写权）⇒ 本层只登记 |
 | **各域 yaml 注释的订正** | 落点是 `service/*/*-api/src/main/resources/application.yml`（**各域写权**）⇒ 本层**只登记**；G2 已在 task-api 域内改好<br>⚠️ **实测澄清**：全仓**没有任何**域的 yaml 注释写着「`mode: off`」—— 各域注释写的都是 `mode: raw` / `mode: envelope` ⇒ ⇒ **「各域 yaml 注释」实际只指 G2 自己改过的那份 task-api**（他在改值时把注释写成了 `mode: off` ⇒ 故需订正成 `mode: "off"`）⇒ ⇒ **不需要逐域改 9 份** |
@@ -1665,7 +1665,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 |---|---|---|---|---|---|
 | article / user-api / admin-api | `raw` | 10001 | 10001 | **零** | 本层不动这些域的 yaml ⇒ 运行期本来就是 10001 |
 | comment / follow / hot / like / message | `envelope` | 10001 | 10001 | **零** | 同上 |
-| **task** | ⚠️ **树间差异**：**本层树**（`a282012` 基线）= **`raw`** ⇒ 运行期**本来就**是 10001 ⇒ **零变化**；**G2 树**已改为 `mode: "off"`（`service/task/task-api/src/main/resources/application.yml:225`）⇒ **合并后** 2048 → 10001 ⇒ **仍零可观察变化**（上限不可达） | 10001（本层树） | 10001 | **零** | ✅ **task-api 全绿**（上限不可达：Go 侧 `r.Form` 从不求值 ＋ 控制器只 `@RequestBody`）⇒ ⇒ 抬上限**打不到任何可观察面** |
+| **task** | ⚠️ **树间差异**：**本层树**（`a282012` 基线）= **`raw`** ⇒ 运行期**本来就**是 10001 ⇒ **零变化**；**G2 树**已改为 `mode: "off"`（`service/task/task-api/src/main/resources/application.yml`；⚠️ **行号仅在指定 commit 上有效**：G2 树 `4786eb5` = `:213` · G2 树当前 HEAD `f5c9e82` = `:236`）⇒ **合并后** 2048 → 10001 ⇒ **仍零可观察变化**（上限不可达） | 10001（本层树） | 10001 | **零** | ✅ **task-api 全绿**（上限不可达：Go 侧 `r.Form` 从不求值 ＋ 控制器只 `@RequestBody`）⇒ ⇒ 抬上限**打不到任何可观察面** |
 | **favorite** | **未声明** ⇒ 缺省 `off` | 2048 | **10001** | 🔴 **唯一一格**：总「值」数 2049~10000 且非空值 ≤2048 ⇒ **Go 放行 / RAG 由「拒（200+5003）」变「进业务层」** ⇒ ⇒ **差 1 闭合** | ✅ **实测红 1 条**（见下） |
 
 > 🔴 **本层自己改自己的一处前提（留痕）**：提交 `cd893d1` 的说明里写「**task（`mode: "off"`）**：2048 → 10001」⇒ ⇒ 那个 `mode` 值是 **G2 树**的 ⇒ ⇒ **本层树**（`a282012` 基线）里 task 的 `mode` 是 **`raw`** ⇒ ⇒ **「task 零可观察变化」这个结论不变**（两种 mode 下上限都不可达）⇒ ⇒ 但**前提要写准** ⇒ ⇒ 本表已按实测改写。
@@ -1678,7 +1678,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | 旧值（改前） | **200 + `{code:5003, msg:"参数错误"}`**（容器在第 2049 个条目就拒 ⇒ 域内 `FavoriteApiSupport#parameterMap` 把它映射成 Go 的解析失败出口）⇒ ⇒ **这是 RAG 独有的形态**（Go 在同一输入下是「放行」） |
 | 🔴 **新值（改后）** | **200 + `{code:1015, msg:"服务繁忙"}`** ⇒ ⇒ **1015 = Go 侧 `CodeServerBusy`**（真源 `service/favorite/common/errmsg.go:13` ＋ `:48`）⇒ ⇒ 含义 = **请求真的进了业务层**（测试环境 favorite-rpc 不可用 ⇒ `status.FromError` ⇒ 1015）⇒ ⇒ ⇒ **与 Go 同形**（Go：放行 ⇒ 进业务层 ⇒ 同一出口） |
 | ⇒ **结论** | ⇒ ⇒ **这次改动让 RAG 从「误拒」变成「与 Go 同形」** ⇒ ⇒ **不是新引入的漂移，是旧漂移（`DRIFT-HOTAPI-030` 那一格）被闭合** |
-| ⇒ **G3 自己早已预告过** | G3 树 `FavoriteApiRealTomcatGateTest.java:287-289`：「⚠️ 5003 是**当前实现**的形态，**不是** Go 的形态：Go 在同一输入下是「放行 ⇒ 200 + 业务结果」… ⇒ **若全局把 max-parameter-count 放宽到 10000（Go net/url 的真实上限），本断言需同步更新**」⇒ ⇒ 与本层的落码**完全一致** |
+| ⇒ **G3 自己早已预告过** | ⚠️ **G3 树 `FavoriteApiRealTomcatGateTest.java`（原引 `:287-289`）**：「⚠️ 5003 是**当前实现**的形态，**不是** Go 的形态：Go 在同一输入下是「放行 ⇒ 200 + 业务结果」… ⇒ **若全局把 max-parameter-count 放宽到 10000（Go net/url 的真实上限），本断言需同步更新**」⇒ ⇒ 与本层的落码**完全一致**<br>🔴 **2026-10-28 订正（本层自查 · G2 提出的「跨树引用必须带 commit」纪律的实证）**：**这条引用不只是行号漂 ⇒ 它的【内容】在 G3 树当前 HEAD `7b3b27d` 里已经不存在了**（实测：该文件现在只有 `:330` 一处含「5003 是」的字样，且是**另一条**断言消息；原引的那段「5003 是当前实现的形态」注释**已不在文件里**）⇒ ⇒ ⇒ **跨树引用会【整段消失】，不只是行号变** ⇒ ⇒ **引用前必须重核内容是否还在**，不能只核行号 |
 | ⇒ **域侧动作（G3）** | 该断言须从「必须含 `code:5003`」改为「**不得**是 5003 / 不得是 Tomcat HTML 错误页」⇒ ⇒ **本层不代改**（域侧写权）⇒ ⇒ **须在 G3 那一笔 merge 里一起改**（否则留下半截）<br>🔴🔴 **本行建议已订正（G3 已落码 ＋ 本层独立核 · §4.10.29.8）**：**纯负向断言不够**（「200 + body 里没有 5003 + 不是 HTML」**证明不了请求真的进了业务层** —— 200 + 空 body 也能过）⇒ ⇒ **必须再有一条正向断言** ⇒ ⇒ 而正向断言就该写 Go 的契约值 **1015**（真源 `favorite/common/errmsg.go:13` ＋ `:115` ＋ `:136` ⇒ **`CodeServerBusy = 1015` 就是这一格的契约**）⇒ ⇒ ⇒ **G3 的写法（负向两条 ＋ 正向一条）正确且更强** |
 
 ##### 4.10.25.5 变异验证（**每条断言都有专属变异**）
@@ -2645,7 +2645,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 - G3 原话：「当前 `GoStyleTomcatParameterLimitCustomizer.java:109` 在 OFF 时**直接 return**」⇒ ⇒ **在我树与 G3 树**都**不成立**。
 - **实测**：
   - `:107-111` = **javadoc 文字**（「**旧版实测**：favorite … 运行期 = **2048** ⇒ 它是**唯一**停在 2048 的域」）⇒ ⇒ **它描述的是历史，不是现状**；
-  - `limitCustomizer` 定义 = **我树 `:211`** / **G3 树 `:206`** = `public static TomcatConnectorCustomizer limitCustomizer()` ⇒ ⇒ **无参、无 mode 分支**；
+  - `limitCustomizer` 定义 = **我树 `:211`**（本层 HEAD `8b12d68`） / **G3 树 `:206`**（G3 树 `3249ef7` / `a20282f` / `7b3b27d` **三处实测同为 `:206`**）= `public static TomcatConnectorCustomizer limitCustomizer()` ⇒ ⇒ **无参、无 mode 分支**；
   - 整个文件 `Mode.OFF` **只出现 2 次**，**两次都在 javadoc** ⇒ ⇒ 代码里**零** mode 分支。
 - ⇒ ⇒ **「(b) 容器上限抬升对所有域无条件生效」早已落地**（`cd893d1`，**两棵树都有**）⇒ ⇒ **机器网也早已有**（`GoStyleParamLimitOffModeGateTest:121-122`，**两棵树都有**）⇒ ⇒ ⇒ **G3「本域零改动」的裁定是对的**。
 - ⇒ ⇒ **教训（与「行号随分支漂移」同族，但更隐蔽）**：**同一个行号在两棵树里指向不同内容** ⇒ ⇒ `:109` 在我树是「旧版实测」的 javadoc，在 G3 树是**另一句** javadoc ⇒ ⇒ ⇒ **引用行号时必须带「树 + commit」**（AGENTS.md §3.1 的引用纪律在跨树场景的延伸）⇒ ⇒ ⇒ **本层回执里凡是「行号 + 内容」的断言，都应附一条可复制的探针命令**，让对方能自核，而不是要求对方相信我。
@@ -2753,6 +2753,84 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 > **自第十四次全量的代码态（`407c230`）起 ⇒ 本层只改了 1 个 `.java` 的 javadoc**（`d4e4745` 的 `ObservabilityLifecycle.java` 注释口径）＋ **3 个测试文件** ＋ `docs/**` ＋ `tools/**` ⇒ ⇒ **可执行代码零改动** ⇒ ⇒ `service/common` 已单独复跑（330 ⇒ **331**，§4.10.46 的结构锁 ④）⇒ ⇒ **第十四次全量口径（2480 条）其余模块仍有效**；⚠️ **全量推算值 = 2487，但未跑全量 ⇒ 不可当实测数引用**（§4.10.37）。
 
 **⑤ 措辞订正** | 本层台账 **88 处**「整合者」⇒ **全部改为「合并收口执行者」** ⇒ 理由见 ② ⇒ ⇒ **后续 lane 读到的每一处都指向一个【可指向的角色】**，而不是一个不存在的会话 ⇒ ⇒ 与 §4.10.50 ① 同款纪律：**别让读者按一个空指针去找人**。
+
+#### 4.10.51 🟢 **G2 的 FB-S1/FB-S2 根因归属补充单 ⇒ 逐条处置 ＋ FB-S2「三选一」的正式答复 ＋ 跨树引用纪律的自我审计**（核对日期 2026-10-28 00:2x · 本层 HEAD `8b12d68` → 本节提交）
+
+**① 🔴 这封补充单是【过期上下文】⇒ 但它的根因定位全部成立且有价值**
+
+| 项 | 实测 |
+|---|---|
+| 补充单出稿 | 2026-10-27 **13:2x**（距本节约 **11 小时**）⇒ 一直在本层队列里 |
+| 它引的树 | 本层 `cec7131`（= **第 11 次**全量那会儿）⇒ **落后本层 5 代** |
+| 根因归属 | ✅ **全部成立**（下逐条核）⇒ ⇒ **值得吸收的是「根因」与「三选一」，不是它的状态判断** |
+
+**② FB-S1 ⇒ 🔴 已闭环（我树 `d4e4745`）—— 它的根因定性【完全正确】，但它诊断的是我树的旧快照**
+
+| 环节 | 它指的是（G4 树 `cec7131`） | **我树现状（`8b12d68`）** |
+|---|---|---|
+| ① 权威语义 | `GoStyleFormLimitMode.java:237` = `Mode.OFF` | ✅ **同**（`:237` 仍是 `Mode.OFF`） |
+| ② 域侧现状 | `task-api/application.yml:176-178` = `mode: raw` | ✅ **同**（但那是 **G2 的域文件** ⇒ G2 已改） |
+| ③ 守门期望 | `check-tomcat-limits.py:149` 写死 `"raw"` | ✅ **已改** ⇒ `:179` `derive_expected_form_limit_mode()` + `:207` `EXPECTED_FORM_LIMIT_MODE = derive_expected_form_limit_mode()` ⇒ **期望值已从 `SEMANTIC_REACHABILITY` 派生 ⇒ 单一真源 ⇒ 不会再 stale** |
+
+⇒ ⇒ **它建议的修法（:149 ⇒ 从 `SEMANTIC_REACHABILITY.semanticMode` 取）= 我落码的形态**（落码提交 = **`d4e4745`**）⇒ ⇒ **FB-S1 在本层已闭环**；**它之所以还红，是因为【它的树】没并入 `d4e4745`** ⇒ ⇒ **re-merge 到 `8b12d68` 即绿**（实测：**本层的真源派生守门跑 G2 的树 = EXIT=0 绿** · 假 ROOT 模拟）。
+⇒ 🟢 **附一条它没提、但我要登记的教训**：本层最初也差点做成「**直接改 `:149` 的字面量**」⇒ 那只是把 stale 换成「**另一份会再 stale 的副本**」⇒ ⇒ **落码时必须删副本、改为派生**（这正是它建议的形态 —— **根因定位对了，修法形态也要对**）。
+
+**③ 它指出的 yaml 注释 stale ⇒ 属实 ⇒ 但那个文件是 G2 的域 ⇒ 本层不碰**
+⇒ `service/task/task-api/src/main/resources/application.yml:177` 那条注释**只用了轴②（拒成什么形状）来定轴①（开不开）**⇒ 而轴①在 task 域的判据是「**上限不可达 ⇒ OFF**」（`GoStyleFormLimitMode` 的 javadoc 明列「`Mode.OFF` ⇔ 域自捕获 **或** 上限不可达」）⇒ ⇒ 那行注释**确实 stale** ⇒ ⇒ **G2 的版本已订正** ⇒ 合并时取 G2 树版本 ⇒ ⇒ **本层不代改**（写权 = G2 域）。
+
+**④ FB-S2 ⇒ 根因 6 条定位【成立】⇒ 其中一条改变了本层的风险口径**
+
+| 共享类 | 漂移 | 引用方 | 层级 |
+|---|---|---|---|
+| `GoStyleFormLimitMode` · `GoStyleFormValueLimitInterceptor` | None → `["task"]` | `task-api/…/TaskApiFormLimitReachabilityTest.java` | **TEST** |
+| `GoStyleRpcBreakerInterceptor` · `GoStyleRpcSheddingInterceptor` | None → `["task"]` | `task-rpc/…/TaskProtectionChainWiringTest.java` | **TEST** |
+| `GoStyleGrpcClientBreakerInterceptor` | 增 `like` | `like-api/…/LikeApiGrpcClientBreakerE2ETest.java` | **TEST** |
+| **`MqConsumer`** | 增 `like` | `like-rpc/…/mq/LikeUpdateKafkaListener.java`（**`src/main`**）＋ 1 份 TEST | **MAIN ＋ TEST** |
+
+⇒ ⇒ **6 条里 5 条是纯 `src/test` 引用；唯一的 MAIN 是 `MqConsumer`** ⇒ ⇒ **`MqConsumer` 现在是 `like-rpc` 的生产依赖** ⇒ ⇒ **本层改 `MqConsumer` 会波及 like-rpc 的生产 MQ 消费路径** ⇒ ⇒ **G2 合并后必须复跑 like-rpc 的 MQ 用例** —— 这条**本层接受**，并写进波末收口清单。
+
+**⑤ 🔴 FB-S2「三选一」⇒ 本层的正式答复：① + ② 同批（治高估 + 治读法）· ③ 单列一轴（治漏计）且**必须标为「保守上界」**
+
+| 候选 | 治什么 | 本层裁定 | 理由 |
+|---|---|---|---|
+| ① 分 MAIN / TEST 两轴记录 | **高估**（test import 被记成生产依赖）| ✅ **要做** | 与 ③ **正交**：只做 ① ⇒ 漏计仍在；只做 ③ ⇒ 高估仍在 ⇒ ⇒ **半个修法 = 守门仍然会骗人** |
+| ② 快照保留层级标注 | **读法** | ✅ **与 ① 同批** | 分两轴后「task 域引用了 4 个共享类」本身变**二义** ⇒ 不带层级标注 = 读者仍会误读 ⇒ ⇒ **① 与 ② 不可拆** |
+| ③ 扫描注册型依赖单列一轴 | **漏计**（`@Component` + `scanBasePackages` ⇒ 域侧 import = 0 但生产路径真的过它）| ✅ **要做**，但**定位为「上界」** | ③ 的静态实现**注定不完整**（`@Bean` 显式注册 / `@Import` / `AutoConfiguration.imports` 都会产生「域侧 import = 0」的依赖）⇒ ⇒ **宁可多报、不可漏报** ⇒ ⇒ **快照里要显式标该轴是上界而非真相** |
+
+⇒ ⇒ **为什么 ③ 不能省**（本层的独立论证）：**注册型依赖是共享层最危险的一类** ⇒ 域侧改一行 `scanBasePackages`、或加一个 `@Import`，就能把共享层的一个 `@Component` 拉进它的**生产路径**，而**域侧生产代码对它零 import** ⇒ ⇒ **import 判定结构性看不见** ⇒ ⇒ 后果 = 共享层改这个类**可能击穿某个域的生产路径，而耦合矩阵却写「零依赖」** ⇒ ⇒ **这正是这个工具存在的意义被漏掉的那一半**。
+⇒ ⇒ **支持 ① + ② 的另一条**：G2 自己提的读法修正（「task 生产代码对 4 个 form 闸门类 import = 0」字面为真、但会被读成「task 域对共享层零依赖」，而 `task-rpc` 生产路径**链级**依赖 breaker / shedding）⇒ ⇒ **快照必须能区分「import 级」与「链级（facade 级）」** ⇒ ⇒ 这正是 ① + ② 要解决的。
+
+**⑥ 🔴 FB-S2 的归属：`tools/difftest/check-wave-coupling.py` ∈ SHARED ⇒ 本层不落码 ⇒ 规格写进本层台账 ⇒ 交合并收口执行者**
+⇒ ⇒ **本层的动作 = 把修法写成可执行级规格**（判据口径 · 快照字段 · 三条要守的边界）⇒ **不是**本层改那个文件（写权不在本层）。
+⇒ ⇒ **当轮实测补充（决定「修法时点」）**：本层 `8b12d68` 跑 `python3 tools/difftest/check-wave-coupling.py` ⇒ **EXIT=0 · 5 项全绿**（含「service/common 逐类辐射度与文档一致」）⇒ ⇒ **那 6 条漂移是「G2 的分支合并进来之后才会红」**（= 它自己说的「合并后必红」）⇒ ⇒ ⇒ **修法时点 = 合并收口那一刻重生成快照**，**不是现在改**（现在改 ⇒ 快照会与当前树对不上 ⇒ 反而制造一条假漂移）。
+
+**⑦ ✅ 合并顺序硬约束：当前【已满足】** ⇒ `3b573fb` + `7488b3d` **必须同批** ⇒ 实测：**本层 `8b12d68` = 两个都在** ✔ · **G2 树 `f5c9e82` = 两个都在** ✔ ⇒ ⇒ **两棵树都齐** ⇒ ⇒ 合并时**不要只挑其一**（只挑 `3b573fb` ⇒ 池「终止即永久」⇒ 拦截器返 INTERNAL 而非 DEADLINE_EXCEEDED ⇒ 由绿转红 ⇒ **那不是域侧回归**）。
+
+**⑧ G2 的 8 模块回归口径 ⇒ 收到，记为波末收口的输入之一**
+
+| 项 | 值 |
+|---|---|
+| 数字 | **637 条 / 0 failures / 0 errors / 0 skipped** · BUILD SUCCESS · **6:47 min**（13:00:44 → 13:07:38 · 独占跑）|
+| 逐模块 | message-api 98 · message-rpc 84 · message-common 21 · like-api 89 · like-rpc 113 · like-common 18 · task-api 97 · task-rpc 117 |
+| 口径 | 权威 = 本轮 mtime 切的 surefire XML 求和（起跑标记 epoch `1793077244`）⇒ 与上一轮「八模块 637」一致 |
+
+⇒ ⇒ ⚠️ **这 637 只是「G2 域当前代码态的回归网」，不是「合并共享层后」的结论** ⇒ 合并后仍需复跑（它列的三项：3 处 `DEADLINE_EXCEEDED` 断言 · 共享层 `REJECT_COMMANDS` 零域内配置的断连活体 · Redis 池守门 ⑤⑥）⇒ ⇒ **本层把它记进波末收口清单**。
+
+**⑨ 孤儿 surefire 报告（`LikeRpcServerSpanCurrentProbeTest`：探针建在模块里、源删了报告没删 ⇒ 20 份报告 / 19 个测试类）⇒ 域侧文件本层不碰；但登记一条【共享面建议项】**
+⇒ ⇒ **问题不在那一份报告，在「探针的收摊没人管」** ⇒ ⇒ 建议：**探针要么放 `/tmp`，要么连报告一起删** ⇒ ⇒ 且**需要一道守门**（否则下一轮还会出现「按报告求和」被孤儿报告污染）⇒ ⇒ **登记给合并收口执行者**（`tools/difftest/**` = SHARED）。
+
+**⑩ 🔴 「跨树引用必须带 commit id」⇒ 本层采纳，并把它落成【一次自查动作】**
+⇒ ⇒ 本层台账 **4 处**跨树引用自查 ⇒ **订正 3 处 ＋ 发现 1 处更严重的失效**：
+
+| 失效形态 | 实证 | 订正 |
+|---|---|---|
+| ① **行号漂移** | G2 树 `task-api` yaml 的 `mode: "off"`：原写 `:225` ⇒ **在 `4786eb5` = `:213`、在 `f5c9e82` = `:236` ⇒ 两处都对不上** | 已改成「文件路径 ＋ 两处 commit 的实际行号」 |
+| ② 🔴 **内容整段消失** | G3 树 `FavoriteApiRealTomcatGateTest` 那段「5003 是当前实现的形态」注释 ⇒ 在 G3 树当前 HEAD `7b3b27d` **已不在文件里**（现只剩 `:330` 另一条含「5003 是」的断言消息） | 已改成「⚠️ 内容已消失 ＋ 引用前必须重核内容是否还在」 |
+| ③ 缺 commit | `limitCustomizer` 的「G3 树 `:206`」 | 已补 commit（`3249ef7` / `a20282f` / `7b3b27d` **三处实测同为 `:206`**）|
+
+⇒ ⇒ **判定式（跨树引用 = 三件套）**：**行号 ＋ commit ＋ 内容摘录**，且**引用前重核「内容是否还在」** ⇒ ⇒ 只核行号不够（内容可能整段被改掉）⇒ ⇒ **行号漂移**是「你以为的那份 ≠ 系统实际吃的那份」同族，**内容消失**是它更狠的一档。
+
+**⑪ 本层这一条** | **零落码**（只改台账 `docs/**`）⇒ ⇒ **第十四次全量口径（2480 条）仍有效** ⇒ ⇒ 本层 HEAD `8b12d68` → 本节提交。
 
 ## 5. 交付物清单
 
