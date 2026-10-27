@@ -828,3 +828,53 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 - 🟢 **落码本身我核过（不采信转述）**：生产侧把 RT 测量抽成 `measuredRtMs(long startNanos)` 且改用 **`/ 1_000_000D`（浮点）** ⇒ ⇒ 与 Go `adaptiveshedder.go:284-287` 的 `float64 + math.Ceil` **逐字等价** ✔ ⇒ ⇒ **本轮零域侧落码、零域侧动作**。
 
 ---
+
+---
+
+### 🟢 第二十三轮 · **波末收口回归实测：9 模块 = 1022（域侧 689 ＋ 共享层 333）** —— 两个前置条件已【同时】满足
+
+**① 两个前置条件的解除（都实测过，不是转述）**
+- **① G4 的 §4.10.59 落码已提交** ⇒ ⇒ `d212323`（`fix(common): 降载 RT 的【调用点】整型截断 ⇒ 与 Go 的「浮点毫秒 + ceil」对齐 + 两处都有网`）⇒ ⇒ G4 树工作树 clean ⇒ ⇒ **我已并入**（`adfdf30`；`git merge-tree --write-tree` 预演**零冲突**）⇒ ⇒ **7 条门禁全绿**（EXIT=0 × 7）· 台账「文件:行号」引用核对 **0 findings**（`checked 672 / skipped 320`）。
+- **② 独占 maven 窗口** ⇒ ⇒ 起跑前实测：**只有 G3 树在跑**（G4 树 / 主仓 / 我树都没在跑）⇒ ⇒ **窗口空** ⇒ ⇒ ⇒ **两个条件同时满足** ⇒ ⇒ 本轮起跑。
+
+**② 回归命令与口径（写死，后续复用）**
+```
+mvn -o -B -DargLine=-Xmx2g -am -pl service/common,service/message/message-api,service/message/message-rpc,service/message/message-common,service/like/like-api,service/like/like-rpc,service/like/like-common,service/task/task-api,service/task/task-rpc clean test
+```
+- **必须是 `clean test`（不是 `verify`）** —— `service/task/task-rpc/pom.xml:364-376` 把 `*IT` 绑在 `verify` 阶段的第二个 surefire execution 上 ⇒ ⇒ `verify` 的合计会混进 `*IT` ⇒ ⇒ 本轮两口径（含 IT / 不含 IT）**都是 1022** ⇒ ⇒ `clean test` 下两者重合 ✔
+- **必须带 `-am`** —— 否则 reactor 不含 `service/common` ⇒ ⇒ `com.rag:common` 从 `~/.m2` 解析 ⇒ ⇒ **跑的是旧 jar，不是你以为的那份共享层**（G1 已踩过，见 G4 台账 §4.10.29.2）。
+
+**③ 逐模块实测（本轮 · BUILD SUCCESS · 14:47 min · 2026-10-28 02:55:03 → 03:09:52）**
+
+| 模块 | 条数 | F | E | S | 相对第二十轮 |
+|---|---|---|---|---|---|
+| `service/common`（共享层） | **333** | 0 | 0 | 0 | 330 ⇒ **+3** |
+| `service/message/message-api` | **103** | 0 | 0 | 0 | 103 ⇒ 0 |
+| `service/message/message-rpc` | **93** | 0 | 0 | 0 | 89 ⇒ **+4** |
+| `service/message/message-common` | **21** | 0 | 0 | 0 | 21 ⇒ 0 |
+| `service/like/like-api` | **94** | 0 | 0 | 0 | 94 ⇒ 0 |
+| `service/like/like-rpc` | **129** | 0 | 0 | 0 | 125 ⇒ **+4** |
+| `service/like/like-common` | **18** | 0 | 0 | 0 | 18 ⇒ 0 |
+| `service/task/task-api` | **102** | 0 | 0 | 0 | 102 ⇒ 0 |
+| `service/task/task-rpc` | **129** | 0 | 0 | 0 | 125 ⇒ **+4** |
+| **域侧 8 模块小计** | **689** | 0 | 0 | 0 | 677 ⇒ **+12** |
+| **9 模块合计** | **1022** | **0** | **0** | **0** | 1007 ⇒ **+15** |
+
+**④ 交叉核对（两条独立路径 · 逐字相等）**
+- **XML 侧**：9 个目标模块 `target/surefire-reports/TEST-*.xml` 的 `<testsuite>` 属性**逐模块求和** ⇒ ⇒ **1022**。
+- **maven 侧**：模块级 `Results:` 汇总行合计 ⇒ ⇒ **1061** ⇒ ⇒ **差 39 = `service/users/users-common`**（`-am` 带出的**非目标**模块，**不属收口口径**）⇒ ⇒ **1022 + 39 = 1061 ⇒ 逐字相等** ✔
+- ⚠️ **一个本轮踩到的坑**：第一版核对正则把**每类用例行**（`Tests run: N, … -- in <class>`）也当成模块级汇总行 ⇒ ⇒ 得 2122（= 1061 × 2）⇒ ⇒ **过滤条件必须是 `-- in`（双横线）** ⇒ ⇒ 否则会拿到一个「看起来对、其实重复计数」的数。
+- ⚠️ **收口口径只算 9 个目标模块** —— `-am` 会把 `users-common` / `admin-proto` 等依赖闭包带进 reactor（实测 reactor 共 **23** 个模块）⇒ ⇒ **拿 reactor 全量当收口数字会得 1061，不是 1022**。
+
+**⑤ 增量的归因（每一处都有出处）**
+- **域侧 677 ⇒ 689（+12）** ⇒ ⇒ **全部来自第二十一轮**新增的固定宿主口守门断言：`MessagePostgresFixedHostPortGateTest`（机制层 3 条）＋ `MessageContainerFixedHostPortSegmentGateTest`（覆盖层 1 条）= **+4** ⇒ ⇒ like 域 +4 · task 域 +4 ⇒ ⇒ **12** ⇒ ⇒ ⇒ **⇒ 相对第二十一轮的域侧实测值，本轮 = 0 变化**（第二十一轮台账已记 message-rpc = **93** / like-rpc = **129** / task-rpc = **129** ⇒ 本轮逐条对上 ✔）。
+- **共享层 330 ⇒ 333（+3）** ⇒ ⇒ 其中 C7 复跑已到 **331**（第二十二轮）⇒ ⇒ **本轮 +2** ⇒ ⇒ **全部来自 G4 `d212323` 新增的 2 条守卫**（`rtMeasurementKeepsFractionalMilliseconds` · `callSiteMustPassFractionalMillisecondsToShedder`）⇒ ⇒ ⇒ **⇒ 与 G4 自己 commit message 里写的「331 + 本次新增 2 条 = 333」逐字一致** ✔（**独立复核，非采信转述**）。
+
+**⑥ 原值保留不改写**
+第二十轮的 **1007 / 677 / 330**、第二十一轮的域侧 **689**、第二十二轮的 **331** 与推算值 **332** —— **全部原样保留**；本段的 **1022 / 689 / 333** 为**当前权威值**。
+
+**⑦ 判绿红只看两项（本轮日志里全是噪音）**
+本轮日志里满屏 `logger-test-fatal` / `otel exporter 装配失败` / `kafka NetworkClient` / `nacos register FAILED` 等 **ERROR 级日志行** ⇒ ⇒ **那些不是失败** ⇒ ⇒ **唯一判据 = surefire 的 `Failures`/`Errors`/`Skipped`（0 / 0 / 0）＋ mvn 退出码（EXIT=0）＋ `BUILD SUCCESS`** ✔
+
+**⑧ ℹ️ 本域 U+FFFD = 0**
+我域（message / like / task）源码里的 **9 处真乱码已修并提交** ⇒ ⇒ **本树已归零** ⇒ ⇒ ⚠️ 但**「不许改」名单 19 处**（题材/被测对象 6 ＋ G1 域台账证据表 13）必须**显式保护** ⇒ ⇒ 详见给 G4 / G1 / G3 的三封通报（**已发出**）。
