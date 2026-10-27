@@ -113,7 +113,25 @@ public final class GoStyleFormLimitMode {
     /** 本域的闸门形状。 */
     public enum Mode {
         /**
-         * 不装闸门、也不改容器上限。
+         * 不装闸门（<b>但容器上限照抬</b> —— 见下方「🔴 2026-10-27 两轴解耦」）。
+         *
+         * <p>🔴🔴 <b>2026-10-27：{@code OFF} 只管「装不装闸门」，不管「抬不抬容器上限」</b>
+         * <ul>
+         *   <li><b>轴 ①（拒绝形状）</b>⇒ 由本枚举管 ⇒ {@code OFF} = <b>共享层不装</b>闸门；</li>
+         *   <li><b>轴 ②（判定权归谁）</b>⇒ <b>与本枚举无关</b> ⇒ 容器上限
+         *       <b>一律</b>由 {@link GoStyleTomcatParameterLimitCustomizer} 抬到 10001
+         *       （= Go {@code net/url} 段数上限 10000 + 1）。</li>
+         * </ul>
+         * ⇒ ⇒ <b>旧版「{@code OFF} ⇒ 不改容器上限」是错的</b>：它把两件独立的事耦合在了同一个
+         * {@code mode} 上 ⇒ ⇒ 造成「OFF 域停在 yaml 的 2048、其余域 10001」的<b>运行期分叉</b>
+         * ⇒ ⇒ 而 Go 的段数上限是 <b>10000</b> ⇒ Tomcat 停在 2048 会比 Go <b>更早</b>地拒
+         * ⇒ ⇒ 两种 OFF 情形都被误伤：
+         * <ul>
+         *   <li><b>上限不可达</b>（Go 侧 {@code r.Form} 从不求值）⇒ 容器不该比 Go 更早拒；</li>
+         *   <li><b>域自捕获</b>（favorite）⇒ 域内已有 Go 口径的应用层判据（数非空值）
+         *       ⇒ 判定权<b>应该</b>交还应用层 ⇒ 容器上限<b>应该</b>抬到 10001
+         *       ⇒ 否则「Tomcat 总参数值数 vs Go 非空值数」的<b>差 1</b>闭不上。</li>
+         * </ul>
          *
          * <p>🔴 <b>两种语义完全不同的情形都归它</b>（用 {@code goSideHandlesParseError} 分流）：
          * <ul>

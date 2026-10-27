@@ -22,13 +22,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>{@code GoStyleFormLimitEnvelopeGateTest}（envelope 模式，真 Tomcat + 真 Spring MVC + 真 advice）。</li>
  * </ul>
  *
- * <h3>🔴 为什么「off」必须真的什么都不做</h3>
+ * <h3>🔴 为什么「off」必须真的<b>不装闸门</b>（但<b>不是</b>「什么都不做」）</h3>
  * <p>{@code favorite} 域<b>自己捕获</b> {@code httpx.Parse} 的错（Go 侧 7 个 handler 各自捕获
  * ⇒ 拒绝形状 = 域自定义信封 200 + {code:5003,…}）⇒ ⇒ <b>共享层装闸门反而会破坏形状</b>
  * ⇒ ⇒ 它的语义答案<b>就是</b> {@code OFF}（不是「将就」，是<b>语义正确</b>）
- * ⇒ ⇒ 缺省即正确 ⇒ 既不改它的容器上限、也不装闸门。
- * <br>⚠️ 但「不改容器上限」这条对 favorite <b>有后果</b>（运行期上限停在 yaml 的 2048
- * ⇒ 与其余域的 10001 分叉 ⇒ 边界口径漂移）⇒ 归 DRIFT-HOTAPI-030 / DRIFT-FAV-API-001。
+ * ⇒ ⇒ 缺省即正确 ⇒ <b>不装</b>闸门。
+ * <br>⚠️ 但「off」<b>不等于</b>「不管容器上限」：**2026-10-27 起「抬容器上限」与「装不装闸门」已解耦**
+ * ⇒ 容器上限<b>一律</b>抬到 10001（见 {@link GoStyleTomcatParameterLimitCustomizer}）
+ * ⇒ ⇒ favorite 的「Tomcat 总参数值数 vs Go 非空值数」<b>差 1</b> 由此闭合
+ * ⇒ ⇒ 守门见 {@link GoStyleParamLimitOffModeGateTest}。
  */
 @DisplayName("🔴 form 值上限闸门的模式分派")
 class GoStyleFormLimitModeTest {

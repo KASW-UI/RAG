@@ -74,7 +74,8 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
  * ⇒ 净效果：断连行为仍为 {@code REJECT_COMMANDS}（域内副本与本类<b>逐字同值</b>）⇒ <b>对外行为零变化</b>；
  * ⚠️ <b>但代价是「遮蔽」</b>：共享层的任何后续改动（例如 E66 的 {@code timeoutOptions}）
  * 在<b>仍有域内副本的域</b>会<b>静默不生效</b> ⇒ ⇒ <b>域内副本必须删除</b>，删除才是真正的收编。
- * 删除前须逐条核对两侧<b>同值</b>（本仓现状：三份域内副本都只设
+ * 删除前须逐条核对两侧<b>同值</b>（本仓现状：<b>五份</b>域内副本 —— user-api / user-rpc /
+ * admin-api / admin-rpc / follow-api —— 都只设
  * {@code disconnectedBehavior(REJECT_COMMANDS)}、都<b>不碰</b> {@code timeoutOptions} ⇒ 纯删除、零行为变化）。
  *
  * <p><b>⚠️ 为什么用自动配置而不是 {@code @Component}</b>：

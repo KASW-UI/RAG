@@ -1483,6 +1483,116 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | 🔴 **附带修掉本层台账的 4 处「字面反斜杠」残留** | 本层早期用工具写文件时留下的 `\〈反斜杠〉+双引号 的转义残留（`mode: "off"` 共 4 处，分布在 2 行）⇒ ⇒ **markdown 能正常显示**（`〈反斜杠 + 双引号〉` 渲染成 `"`）⇒ ⇒ **肉眼看不出来** ⇒ ⇒ ⚠️ **本节刻意保留 1 处「反斜杠 + 双引号」的组合** —— 那是**扫描命令的 pattern 本身** ⇒ ⇒ 与「故意保留的 U+FFFD」**同款道理**（它是**被测对象**：改了就废掉这条扫描说明）⇒ ⇒ **口径 = 除这 1 处外全清**（本层其他台账文件亦同）⇒ ⇒ 但**源码是脏的** ⇒ ⇒ 扫法：`grep '\\\"'`（注意：**`grep` 会假阴性的坑见 §4.10.20 —— U+FFFD 那次**；本次用 python 逐行 repr 定位 ⇒ 计数权威）<br>⇒ ⇒ **修法 = 纯 ASCII 替换**（`〈反斜杠 + 双引号〉` → `"`）⇒ 改完 U+FFFD = 0 ＋ UTF-8 严格解码通过 ⇒ ⇒ **零行为变化**（纯文档） |
 | **本层这一条** | **只登记 + 订正文档**（**零落码**）⇒ ⇒ **代码态仍是 `040a201`** ⇒ ⇒ 第十一次全量（2471 条）口径**仍然有效**，不需重跑 |
 
+#### 4.10.24 🟢 **G1 的 Redis 收编反馈单**（2026-10-27 13:0x）—— 独立复核：**五份**副本（不是三份）· 共享层**零代码改动** · 收编 = 删 5 份
+
+> **G1 的原话**：「收编时请删掉这**三份**域内副本（user-api / admin-api / follow-api）」⇒ ⇒ **本层不采信这个数字**，到 G1 树（HEAD `b7d724c`）**实测**。
+
+##### 4.10.24.1 实测：域内副本是 **5 份**，且**代码逐字一致**
+
+| # | 副本路径（G1 树 `b7d724c`） | 注解 | `@Bean` 方法名 | body |
+|---|---|---|---|---|
+| 1 | `service/users/user/user-api/src/main/java/com/rag/users/user/api/config/RedisDisconnectedBehaviorConfig.java` | `@Configuration` | `goStyleRedisDisconnectedBehavior` | `builder -> builder.disconnectedBehavior(REJECT_COMMANDS)` |
+| 2 | `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/config/RedisDisconnectedBehaviorConfig.java` | `@Configuration` | 同上 | 同上 |
+| 3 | `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/config/RedisDisconnectedBehaviorConfig.java` | `@Configuration` | 同上 | 同上 |
+| 4 | `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/config/RedisDisconnectedBehaviorConfig.java` | `@Configuration` | 同上 | 同上 |
+| 5 | `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/config/RedisDisconnectedBehaviorConfig.java` | `@Configuration` | 同上 | 同上 |
+
+⇒ ⇒ **5 份的「非 javadoc 代码」逐字一致** ⇒ ⇒ 与共享层那份
+（`service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java`
+的 `goStyleRedisClientOptionsCustomizer`）**只差 bean 方法名** ⇒ ⇒
+⇒ **删除 = 纯删除、零行为变化**（两边都只设 `disconnectedBehavior`、都**不碰** `timeoutOptions`）。
+
+⇒ ⇒ **共享层那份的「目标态」已被机器钉住**（`service/common/src/test/java/com/rag/common/redis/GoStyleRedisClientOptionsGateTest.java` 3 条：
+`REJECT_COMMANDS` / **恰好一份**且名为 `goStyleRedisClientOptionsCustomizer` / `timeoutOptions` 未被改写）
+⇒ ⇒ **共享层零代码改动** ⇒ ⇒ **删除动作在 G1 写权面 ⇒ G1 做**（本层不代删）。
+
+##### 4.10.24.2 🔴 G1 删副本时的**连带必改项**（本层实测清单，防编译断裂）
+
+| 项 | 位置（G1 树 `b7d724c`） | 为什么必须一起改 |
+|---|---|---|
+| 🔴 **2 处 `@Import`** | `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcRedisDisconnectedFastFailTest.java:159` · `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcRedisDisconnectedFastFailTest.java:170` | 删掉 `RedisDisconnectedBehaviorConfig` 类 ⇒ **`@Import` 指向不存在的类 ⇒ 编译断裂** ⇒ ⇒ 必须连带删 `@Import` |
+| 🟡 **3 个域测试的 javadoc 提及该类名** | follow-api `FollowApiRedisDisconnectedFastFailTest.java:90` / `:132` / `:328` · admin-api `AdminApiRedisDisconnectedFastFailTest.java:86` / `:128` / `:324` · user-api `UserApiRedisDisconnectedFastFailTest.java:80` / `:122` / `:310` | 指向**不存在的类** ⇒ 后人按注释找不到文件 ⇒ 须改措辞 |
+| 🔴 **域侧变异验证会失效** | 5 个 `*RedisDisconnectedFastFailTest` | 变异的前提是「改域内副本」⇒ **副本删掉后这个前提消失** ⇒ ⇒ 变异必须改到**共享层那份** ⇒ ⇒ 而共享层那份在**仍有副本时是被遮蔽的** ⇒ ⇒ 删副本后共享层那份才真正生效 ⇒ ⇒ **域侧守门不能再靠「变异自己的副本」自证**（要么变异点迁到共享层（跨 lane），要么由共享层自己的守门承担）⇒ ⇒ **这是收编的真实代价，必须登记，不能装作「删了就完事」** |
+
+##### 4.10.24.3 🟢 两个故障注入坑（G1 反馈单给出 · **本层已独立核过接口面**）
+
+| 坑 | 事实 | 出处 |
+|---|---|---|
+| **必须 FIN，不能 `container.stop()`** | `container.stop()` 发的是 **RST**（强杀）⇒ 测不出「排队」分支；线上真实场景（`docker stop`）是**优雅退出 ⇒ FIN** ⇒ ⇒ 须**先关监听口 + 再对已建立的连接半关闭** | G1 树 `service/users/user/user-api/src/test/java/com/rag/users/user/api/UserApiRedisDisconnectedFastFailTest.java:88-105` / `:280-291` / `:331-333`（本层读原文核实） |
+| **`LettuceConnectionFactory` 没有 `getClientOptions()`** | 只能走 `getClientConfiguration().getClientOptions()`（`orElse(null)`） | 同上 `:225` / `:245`（本层读原文核实） |
+
+##### 4.10.24.4 🟡 「同机制不同形态」的准确含义（**不推翻**「删除 = 零行为变化」）
+
+G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指的是 **Redis 断连漂移在 api 侧与 rpc 侧的「后果」形态不同**
+（`DRIFT-USERRPC-V-014` / `DRIFT-ARPC-013`）：**api 侧后果 = 503**；**rpc 侧后果 = 命令排队挂到 `commandTimeout: 3s` ≫ `rpc-timeout: 2s` ⇒ RPC 先超时 ⇒ 客户端看到 1015「服务繁忙」**（而 Go 是**快速失败** ⇒ `INTERNAL「注销失败,Redis写入异常」`）
+⇒ ⇒ **它说的是「后果」的形态，不是「断连副本」本身的形态** ⇒ ⇒ **5 份副本代码逐字一致**这条实测结论**不受影响** ⇒ ⇒ **删除仍是零行为变化**。
+
+##### 4.10.24.5 本层动作（**只 1 处 javadoc 订正 · 零运行时行为变化**）
+
+| 项 | 内容 |
+|---|---|
+| 🟢 **订正共享层 javadoc 的「三份」** | `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java` 的类级 javadoc「本仓现状：**三份**域内副本」⇒ ⇒ **改为「五份」并列出 5 个模块名** ⇒ ⇒ **原句是**「共享层自己的事实描述」**写错了 ⇒ 会误导下一个 agent 只删 3 份 ⇒ 留下 2 份仍遮蔽共享层** ⇒ ⇒ 必须改 |
+| **落点** | `…/redis/GoStyleRedisClientAutoConfiguration.java:77-79`（`@Bean` javadoc 上方那段的末行） |
+| **零运行时行为变化** | 纯注释 ⇒ ⇒ **代码态不变**（本节 §4.10.25 的落码才是代码态变更） |
+
+---
+
+#### 4.10.25 🔴🟢 **G3 反馈：favorite 容器上限走 (b) 共享层解耦** ⇒ **已落码**：容器上限的抬升与闸门的有无**解耦**
+
+> **G3 的答复**（提交 `cd676f2`）：**(b) 共享层解耦，本域零改动**；并给了一条**实现要求**：
+> 「容器上限的抬升必须对所有域**无条件**生效，OFF 只该关掉应用层的 Go 风格判定」。
+
+##### 4.10.25.1 本层的独立核（**不采信转述**，三处关键事实）
+
+| 事实 | 本层核法 | 结论 |
+|---|---|---|
+| Go 的 query **段数**上限 | 真源 Go 1.25 `net/url/url.go:1001` `defaultMaxParams = 10000`（共享层 javadoc 已引，本层沿用同一出处） | ⇒ **10001 = 段数上限 + 1**（既不是 2048，也不是不限）⇒ ⇒ **抬到 10001 对两类域都是对齐** |
+| 🔴 `check-tomcat-limits.py` 校的是**哪一层** | 读脚本（`tools/difftest/check-tomcat-limits.py:105` `EXPECTED_MAX_PARAM_COUNT = 2048` ＋ 逐 api 模块读 `application.yml`） | ⇒ **yaml 层**（静态）⇒ ⇒ ⇒ **本次改动 yaml 一字不动 ⇒ 静态门禁不会红 ⇒ 不需要整合者动手**；<br>⚠️ 该脚本还对 favorite-api 的 `mode` 属性做**反向断言**（存在即红）⇒ ⇒ **不新增 favorite 的 mode 声明**（也不需要） |
+| G3 的实现要求是否成立 | 读 `GoStyleTomcatParameterLimitCustomizer` + `GoStyleFormValueLimitInterceptor` 两处 | ⇒ **成立**：旧实现把「装不装闸门」（拒绝形状）与「抬不抬容器上限」（判定权归谁）**耦合在同一个 `mode` 上** ⇒ ⇒ 拦截器那侧**已经**按 mode 分支（`mode == OFF ⇒ return true`）⇒ ⇒ **只需把 customizer 那侧解耦** |
+
+##### 4.10.25.2 落码（生产侧 · **A3 轴**）
+
+| 项 | 内容 |
+|---|---|
+| 🔴 **容器上限无条件化** | `service/common/src/main/java/com/rag/common/http/GoStyleTomcatParameterLimitCustomizer.java` ⇒ **删掉** `if (mode == OFF) { return; }` ⇒ ⇒ **一律抬到 10001** |
+| 🟢 **构造函数改为只校验** | 同一个类的构造函数：`GoStyleFormLimitMode.parse(mode)` **只做校验、不再保存** ⇒ ⇒ **「非法 mode 值 ⇒ 构造期炸」这条 fail-fast 纪律不因解耦而丢**（真判定在拦截器那侧） |
+| 🟢 **语义 javadoc 同步** | `…/http/GoStyleFormLimitMode.java`（`Mode.OFF`：「不装闸门、也不改容器上限」⇒ 改为「**不装闸门（但容器上限照抬）**」＋ 两轴解耦说明）· `…/http/GoStyleFormLimitModeTest.java`（类 javadoc） |
+| 🟢 **新增守门** | `service/common/src/test/java/com/rag/common/http/GoStyleParamLimitOffModeGateTest.java`（**3 条**）：① 运行期 connector = **10001**（off 模式）② 活体：2049 个非空值 ⇒ **200**（容器不拒 + 闸门没装）③ 容器里那个**真的**闸门 bean 确实是 `OFF` 且原样放行 |
+
+##### 4.10.25.3 影响面（**按域实测**，不是按推理）
+
+| 域 | `mode` | 改前运行期 | 改后运行期 | 可观察变化 | 实测 |
+|---|---|---|---|---|---|
+| article / comment / follow / hot / like / message / user-api / admin-api | ≠ `OFF` | 10001 | 10001 | **零** | 本层不动这些域的 yaml ⇒ 运行期本来就是 10001 |
+| **task** | `"off"` | 2048 | 10001 | **零** | ✅ **task-api 全绿**（上限不可达：Go 侧 `r.Form` 从不求值 ＋ 控制器只 `@RequestBody`）⇒ ⇒ 抬上限**打不到任何可观察面** |
+| **favorite** | 未声明 ⇒ 缺省 `off` | 2048 | **10001** | 🔴 **唯一一格**：总「值」数 2049~10000 且非空值 ≤2048 ⇒ **Go 放行 / RAG 由「拒（200+5003）」变「进业务层」** ⇒ ⇒ **差 1 闭合** | ✅ **实测红 1 条**（见下） |
+
+##### 4.10.25.4 🔴 实测：favorite 域红的**只有那一条**，且**新值就是 Go 的形态**
+
+| 项 | 实测值 |
+|---|---|
+| 红的那一条 | `service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/FavoriteApiRealTomcatGateTest#containerParameterLimitIsSurfacedAsGoParseError`（favorite-api 共 **97** 条 / **红 1** / skipped 1） |
+| 旧值（改前） | **200 + `{code:5003, msg:"参数错误"}`**（容器在第 2049 个条目就拒 ⇒ 域内 `FavoriteApiSupport#parameterMap` 把它映射成 Go 的解析失败出口）⇒ ⇒ **这是 RAG 独有的形态**（Go 在同一输入下是「放行」） |
+| 🔴 **新值（改后）** | **200 + `{code:1015, msg:"服务繁忙"}`** ⇒ ⇒ **1015 = Go 侧 `CodeServerBusy`**（真源 `service/favorite/common/errmsg.go:13` ＋ `:48`）⇒ ⇒ 含义 = **请求真的进了业务层**（测试环境 favorite-rpc 不可用 ⇒ `status.FromError` ⇒ 1015）⇒ ⇒ ⇒ **与 Go 同形**（Go：放行 ⇒ 进业务层 ⇒ 同一出口） |
+| ⇒ **结论** | ⇒ ⇒ **这次改动让 RAG 从「误拒」变成「与 Go 同形」** ⇒ ⇒ **不是新引入的漂移，是旧漂移（`DRIFT-HOTAPI-030` 那一格）被闭合** |
+| ⇒ **G3 自己早已预告过** | G3 树 `FavoriteApiRealTomcatGateTest.java:287-289`：「⚠️ 5003 是**当前实现**的形态，**不是** Go 的形态：Go 在同一输入下是「放行 ⇒ 200 + 业务结果」… ⇒ **若全局把 max-parameter-count 放宽到 10000（Go net/url 的真实上限），本断言需同步更新**」⇒ ⇒ 与本层的落码**完全一致** |
+| ⇒ **域侧动作（G3）** | 该断言须从「必须含 `code:5003`」改为「**不得**是 5003 / 不得是 Tomcat HTML 错误页」⇒ ⇒ **本层不代改**（域侧写权）⇒ ⇒ **须在 G3 那一笔 merge 里一起改**（否则留下半截） |
+
+##### 4.10.25.5 变异验证（**每条断言都有专属变异**）
+
+| 变异 | 做法 | 红在哪 |
+|---|---|---|
+| **M1（产品侧 · customizer）** | 把「无条件抬上限」改回「`mode == OFF ⇒ return`」 | ⇒ **断言① 红**（运行期落到 **1000** = Boot 默认，本测试应用没配 yaml ⇒ **不是** 2048）⇒ + **断言② 连带红**（容器在第 2049 个就拒 ⇒ 400）⇒ ⇒ **如实标注：②对M1不是专属** |
+| **M2（产品侧 · interceptor）** | 删掉「`mode == OFF ⇒ 直接放行`」 | ⇒ **断言③ 红**（`preHandle` 不再返回 true）⇒ + **断言② 连带红**（400 + Go 原文）⇒ ⇒ **如实标注：③对M2专属，②对M2不专属** |
+
+⇒ ⇒ **① ← M1（专属）· ③ ← M2（专属）· ② 被两个变异连带打红（因为它同时依赖容器上限与闸门缺席两件事）** ⇒ ⇒ **无「无专属变异」的断言**。
+
+##### 4.10.25.6 ⚠️ 共享面待整合（**本层只登记 · 不改** —— 那个文件不属本层写权面）
+
+| 项 | 内容 |
+|---|---|
+| 🟡 `tools/difftest/check-tomcat-limits.py` 的**文档字符串** | 仍写「`off` ⇒ 不装闸门、**也不改容器上限**」⇒ ⇒ **语义已变**（现在 off 也抬上限）⇒ ⇒ 该脚本的**逻辑**（校 yaml 层）**不受影响** ⇒ ⇒ **不会红** ⇒ ⇒ 但**文档会误导** ⇒ ⇒ **属整合者写权面 ⇒ 本层不改 ⇒ 登记** |
+
 #### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `040a201`）
 
 > ⚠️ **代码态基线 = `040a201`**（= 本轮**最后一次**改代码的提交）⇒ ⇒ **代码行为自 `5a954bb` 起未变**（`040a201` 只改了**测试面** ⇒ ⇒ **零生产代码改动** ⇒ ⇒ 运行时行为与第十次全量一致）。
