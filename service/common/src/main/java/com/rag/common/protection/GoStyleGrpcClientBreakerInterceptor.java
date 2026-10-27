@@ -11,10 +11,8 @@ import io.grpc.Metadata;
 import io.grpc.MethodDescriptor;
 import io.grpc.Status;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -24,7 +22,7 @@ import java.util.function.DoubleSupplier;
  * L4 idiomatization：**gRPC client 侧**按方法的熔断，对齐 Go
  * {@code zrpc/internal/clientinterceptors.BreakerInterceptor}。
  *
- * <p><b>⚠️ 两个注解缺一不可，且都不是可选项</b>（都是 {@code GoStyleGrpcClientBreakerWiringTest} 实测出来的）：
+ * <p><b>⚠️ {@code @GrpcGlobalClientInterceptor} 不可省</b>（由 {@code GoStyleGrpcClientBreakerWiringTest} 实测出来）：
  * <ul>
  *   <li>{@code @GrpcGlobalClientInterceptor} —— devh starter 的
  *       {@code AnnotationGlobalClientInterceptorConfigurer} 用
@@ -32,13 +30,21 @@ import java.util.function.DoubleSupplier;
  *       <b>它只认这个注解，不认「是不是 ClientInterceptor」</b>。
  *       漏了它 ⇒ Bean 存在但 {@code GlobalClientInterceptorRegistry} 列表为空
  *       ⇒ channel 工厂不会把它装进 channel ⇒ <b>熔断代码一次都不会执行</b>。</li>
- *   <li>{@code @Component} —— {@code @GrpcGlobalClientInterceptor} 本身
- *       <b>不是</b> Spring stereotype（javap 显示只有 {@code @Target} + {@code @Retention}），
- *       不加它 Bean 根本不会被创建。</li>
  * </ul>
- * ⚠️ 这正是 AGENTS.md §3.3「不能仅凭存在 {@code @Component} 就推断责任已被承担」的形态 ——
- * 纯单元测试直接 {@code new} 拦截器，8 条全绿，
- * 而真实的 Spring 装配下它<b>完全没生效</b>。
+ *
+ * <p><b>⚠️ 2026-10-27：本类的 {@code @Component} 已摘除</b>（原先靠它才能成为 Bean）。
+ * <b>摘除理由</b>：{@code @Component} 只能靠<b>组件扫描</b>拿到，而纯 gRPC 进程
+ * <b>刻意不扫</b> {@code com.rag.common} ⇒ ⇒ <b>rpc 侧永远拿不到本拦截器</b>
+ * ⇒ <b>出向调用无熔断</b>（Go 侧 zrpc 默认开）⇒ 两侧行为分叉。
+ * <b>现在由谁产出本 Bean</b>：{@link GoStyleGrpcClientBreakerConfiguration}（{@code @Bean} 方法），
+ * 而它被 {@link GoStyleProtectionConfiguration} {@code @Import} ⇒ ⇒
+ * <b>10 个 rpc 组件（本来就全部 @Import 了那个类）零改动</b>即获得 client breaker；
+ * api 侧扫到 {@code com.rag.common.protection} 时<b>扫到的是同一个定义点</b>
+ * ⇒ <b>结构上不可能重复注册</b>（没用 {@code @ConditionalOnMissingBean}，理由见该类注释）。
+ * <p>⚠️ 摘 {@code @Component} <b>不改变</b>「Bean 存在 ≠ 机制生效」这条纪律：
+ * {@code @GrpcGlobalClientInterceptor} <b>仍在类上</b> ⇒ devh 仍靠它收集
+ * ⇒ 锁定用例 {@code GoStyleGrpcClientBreakerRpcAssemblyTest} 断言的是
+ * <b>starter 自己的 {@code GlobalClientInterceptorRegistry}</b> 里确实有它，而不是「Bean 存在」。
  *
  * <p><b>Go 出处（三段，缺一不可）</b>：
  * <pre>
@@ -100,8 +106,6 @@ import java.util.function.DoubleSupplier;
  * {@code request/sendMessage/halfClose/cancel} 五个方法，任何一个漏转发都会静默挂死调用。
  * ⇒ 用 gRPC 官方的 forwarding 基类，框架负责透传，本类只覆写 {@code start} 加一层 listener。
  */
-@ConditionalOnClass({GrpcGlobalClientInterceptor.class, io.grpc.ManagedChannel.class})
-@Component
 @GrpcGlobalClientInterceptor
 public class GoStyleGrpcClientBreakerInterceptor implements ClientInterceptor {
 

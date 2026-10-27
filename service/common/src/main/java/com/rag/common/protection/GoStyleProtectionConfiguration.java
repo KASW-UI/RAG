@@ -2,6 +2,7 @@ package com.rag.common.protection;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 
 /**
  * 让 {@link GoStyleProtectionProperties} <b>随包自动注册</b>，不要求每个业务模块写一行装配。
@@ -51,8 +52,31 @@ import org.springframework.context.annotation.Configuration;
  * ⚠️ 这也是为什么 {@code admin-rpc} / {@code user-rpc} / {@code message-rpc} / {@code like-rpc}
  * 刻意不扫 {@code com.rag.common}：一旦扫了，本类与四个 Filter 都会被拉进来，
  * 而它们依赖 servlet API —— 那正是四个 Filter 上那个条件注解要挡住的情形。
+ *
+ * <h2>⚠️ 2026-10-27：本类新增 {@code @Import(GoStyleGrpcClientBreakerConfiguration.class)}</h2>
+ *
+ * <p><b>为什么</b>：gRPC <b>client</b> 侧熔断拦截器原先带 {@code @Component} ⇒ 只能靠组件扫描拿到
+ * ⇒ 而纯 gRPC 进程<b>刻意不扫</b> {@code com.rag.common} ⇒ ⇒ <b>rpc 侧永远拿不到 client breaker</b>
+ * ⇒ <b>出向调用无熔断</b>（Go 侧 zrpc <b>默认开</b>：{@code zrpc/internal/config.go:14}
+ * {@code Breaker bool `json:",default=true"`} ＋ {@code zrpc/internal/client.go:112-113} 装配）。
+ *
+ * <p><b>为什么这样改，而不是「让 10 个 rpc 模块各加一行 {@code @Import}」</b>：
+ * 本仓库的纪律是「共享层的装配义务收回包内、下游模块零装配代码」；
+ * 而且 10 个 rpc 组件<b>已经全部</b> {@code @Import} 了本类
+ * ⇒ ⇒ <b>零域侧改动</b>即让全部 rpc 进程获得 client breaker。
+ *
+ * <p><b>语义等价论证</b>：Go 侧每个 zrpc client 都装 breaker 拦截器（{@code client.go:112-113}）
+ * ⇒ RAG 侧每个 rpc 进程现在也装 ⇒ 两侧「client breaker 是否在链上」<b>不再有域差异</b>；
+ * acceptable 判据与默认开关<b>均未改动</b>（分别见
+ * {@link GoStyleGrpcClientBreakerInterceptor#isAcceptable} 与
+ * {@link GoStyleProtectionProperties#getBreaker()}）。
+ *
+ * <p>⇒ 锁定用例：{@code GoStyleGrpcClientBreakerRpcAssemblyTest}（真 Spring 上下文，
+ * 模拟 rpc 进程的装配面）＋ {@code GoStyleGrpcClientBreakerSingleRegistrationTest}
+ * （证明 api 侧与 rpc 侧<b>不会各注册一个</b>）。
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(GoStyleProtectionProperties.class)
+@Import(GoStyleGrpcClientBreakerConfiguration.class)
 public class GoStyleProtectionConfiguration {
 }

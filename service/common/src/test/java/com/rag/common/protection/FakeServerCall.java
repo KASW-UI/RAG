@@ -10,7 +10,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
- * 测试用�� {@link ServerCall} —— 只实现服务端拦截器真正用到的那几个方法。
+ * 测试用的 {@link ServerCall} —— 只实现服务端拦截器真正用到的那几个方法。
  *
  * <p><b>为什么需要它</b>：拦截器的判据观察点是 {@code ServerCall#close(Status, Metadata)}，
  * 没有可断言的返回值 ⇒ 必须用一个能<b>记录</b> close 的假 call。
