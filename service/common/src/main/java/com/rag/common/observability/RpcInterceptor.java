@@ -413,15 +413,54 @@ public final class RpcInterceptor {
                      * <p>grpc-java 的执行模型：{@code interceptCall} 与 {@code onHalfClose}（真正调 handler）
                      * 通常是同一线程，但框架允许换线程。{@code onHalfClose} 才是 handler 的入口，
                      * 所以 deadline 必须在它里面绑定。
+                     *
+                     * <h2>🔴 A9 修复（2026-10-27 · G2 反馈单 FB-04）：让 <b>业务 handler 执行期</b>能拿到当前 server span</h2>
+                     *
+                     * <p><b>Go 侧的机制来源（逐行）</b>：
+                     * <pre>
+                     *   go-zero v1.10.2 zrpc/internal/serverinterceptors/tracinginterceptor.go:18-24
+                     *       ctx, span := startSpan(ctx, info.FullMethod)
+                     *       …
+                     *       resp, err := handler(ctx, req)        ← handler 拿到的 ctx **携带 span**
+                     *   同文件 :95-107（startSpan）
+                     *       return tr.Start(trace.ContextWithRemoteSpanContext(ctx, spanCtx), name, …)
+                     *                 ⇒ span 是**从 ctx 派生**并**放回 ctx**的
+                     *   ⇒ 业务代码 trace.SpanFromContext(l.ctx) 取得到 ⇒ 属性真落
+                     * </pre>
+                     *
+                     * <p><b>RAG 侧为什么取不到</b>：Java 的 gRPC handler<b>不接收 ctx</b>
+                     * ⇒ 业务代码唯一的等价物是 {@code Span.current()}（= {@code Context.current()} 里的 span）
+                     * ⇒ 而本拦截器此前<b>只在</b> {@code close()}（{@code :391}）与 {@code onCancel()}（{@code :451}）
+                     * 里 {@code makeCurrent()} ⇒ <b>handler 执行期 {@code Context.current()} 是根 context</b>
+                     * ⇒ {@code Span.current()} 拿到 <b>invalid（no-op）span</b> ⇒ 属性<b>静默丢弃</b>
+                     * ⇒ ⇒ 域侧若按 {@code Span.current().setAttribute(...)} 落码 ⇒ <b>跑绿但零效果</b>。
+                     *
+                     * <p><b>修法</b>：在 {@code onHalfClose} 里把 {@code otelCtx.makeCurrent()} 的 scope
+                     * <b>包住 {@code super.onHalfClose()}</b>（即 handler 执行期）
+                     * ⇒ 业务代码 {@code Span.current()} 就是那个 server span。
+                     *
+                     * <p><b>为什么不是「让业务自建子 span」</b>：Go 侧 like 域是<b>给已有的 server span 加属性</b>、
+                     * <b>不新建</b> ⇒ 自建子 span 会让 trace 里多一个 Go 没有的 span ⇒ <b>结构漂移</b>。
+                     *
+                     * <p><b>影响面</b>：范围内 10 个 rpc 组件的 gRPC handler 线程；
+                     * 但<b>只有 like 域</b>依赖「当前 span」语义（Go 侧 {@code SpanFromContext} 6 处）。
+                     * ⚠️ 全仓主源码里 {@code Span.current()} 原本只有 1 处
+                     * （{@code comment-rpc} 的 {@code CommentFactDeliveryService.java:148}），
+                     * 而它跑在 <b>调度线程</b>上（{@code CommentFactDispatchScheduler} ⇒ 不走 gRPC handler）
+                     * ⇒ <b>本改动碰不到它</b> ⇒ 零回归。
                      */
                     @Override
                     public void onHalfClose() {
-                        if (deadlineEpochMs == Long.MAX_VALUE) {
-                            super.onHalfClose();
-                            return;
-                        }
-                        try (DeadlineState.Scope ignoredScope = DeadlineState.bindToCurrent(deadlineEpochMs)) {
-                            super.onHalfClose();
+                        // 🔴 A9（FB-04）：scope 必须**包住整个 handler 执行期**
+                        //    ⇒ 业务代码 Span.current() 拿到的就是 server span
+                        try (Scope ignored = otelCtx.makeCurrent()) {
+                            if (deadlineEpochMs == Long.MAX_VALUE) {
+                                super.onHalfClose();
+                                return;
+                            }
+                            try (DeadlineState.Scope ignoredScope = DeadlineState.bindToCurrent(deadlineEpochMs)) {
+                                super.onHalfClose();
+                            }
                         }
                     }
 
