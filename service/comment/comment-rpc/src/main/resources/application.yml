@@ -135,12 +135,34 @@ spring:
       connect-timeout: 5s
       # ⚠️ pool.enabled=true ⇒ pom **必须**引 commons-pool2，否则
       #    NoClassDefFoundError: GenericObjectPoolConfig ⇒ 组件起不来（like-rpc 实测）
+      # ⚠️ 池参数逐项对着 Go 的真值（**不拿「现有 RAG 代码」当基准** · AGENTS.md §3.1）：
+      #    Go 出处（消费点）：service/comment/rpc/internal/cache/redis.go:17-19
+      #        rdb := redis.NewClient(&redis.Options{Addr: Host})   ← **只设了 Addr**
+      #      ⇒ `PoolSize` 未设 ⇒ go-redis v9.20.0 options.go:350-351
+      #        `PoolSize = 10 * runtime.GOMAXPROCS(0)` ⇒ **Go 侧是有池的**
+      #      ⇒ `MinIdleConns` 未设 ⇒ options.go:218-222 **无 default 赋值** ⇒ **0**
+      #        ⇒ ⚠️ 本域原先写的 `min-idle: 4` **是对 Go 的偏离** ⇒ **已订正为 0**
+      #          （go-zero 的 `idleConns = 8` 只适用于**走 go-zero** 的域，如 like / favorite；
+      #            **本域走 go-redis 直连** ⇒ 不是 8，也不是 4）
+      #      ⇒ `MaxIdleConns` 未设 ⇒ options.go:224-228 **无 default** ⇒ 0 ⇒ 消费点
+      #        internal/pool/pool.go:1257 `if p.cfg.MaxIdleConns == 0 || …` ⇒ **0 = 无上限**
+      #        ⇒ `max-idle: 16` 是**表达层**取值（**比 Go 更严**，只影响空闲连接回收）
+      #    🔴 `max-wait` 不可省（2026-10-27 G3 实测，**全仓级共性缺陷**）：
+      #      · Go 侧：go-redis@v9.20.0/internal/pool/pool.go:1113
+      #          `p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)`
+      #        ⇒ `PoolTimeout` 未设 ⇒ options.go:380-386 `= ReadTimeout + 1s` = **4s**
+      #        ⇒ 池耗尽 ⇒ **4s 后**报 `redis: connection pool timeout`
+      #      · RAG 侧不配 ⇒ commons-pool2 `BaseObjectPoolConfig:59,68` `DEFAULT_MAX_WAIT = -1ms`
+      #        ⇒ `GenericObjectPool:306` `negativeDuration ? idleObjects.takeFirst()` ⇒ **无限等**
+      #      · 🔴 Lettuce 的 3s 命令超时**救不了场**：`CommandExpiryWriter.write()` 才起算计时器，
+      #        而**借连接在写命令之前** ⇒ 池耗尽时 3s 超时**根本没开始** ⇒ ⇒ **无限挂起**
       lettuce:
         pool:
           enabled: true
           max-active: 64
           max-idle: 16
-          min-idle: 4
+          min-idle: 0
+          max-wait: 4s
 
   # ============== Kafka ==============
   # 对应 Go etc/comment.yaml 的 KqPusherConf（生产）与 KqConsumerConf（消费）

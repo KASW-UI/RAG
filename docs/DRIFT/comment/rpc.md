@@ -816,6 +816,100 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 **形态已对齐 ⇒ 不必动**；**数值不对齐 ⇒ 登记**（**不落码**）⇒ 理由与复开触发条件见 [`favorite/api.md` §15.3](../favorite/api.md#153-处置只登记不落码写死复开触发条件)（① 可观察行为 ② `10 × GOMAXPROCS` 是运行时推导值 ③ 两套池语义无一一对应 ④ 需并发活体对拍 ⑤ 连带影响断连/重试语义）。
 ⇒ ⚠️ **本域是三个用 Redis 的域里唯一「有池」的那个** ⇒ ⇒ 若共享层未来要加**池形态**维度的守门，**本域是唯一能提供正样本的域**（`favorite-api` / `hot-rpc` 都是无池）⇒ 记一笔给 **G4**。
 
+### 10.4 📌 **订正注记（2026-10-27 · G3）：§10 的「数值不对齐」已落码修复** —— 上文原样保留不改写
+
+⚠️ **本块是「加注记」，不是「改原值」** ⇒ §10.1 的表（含「`min-idle: 4`」与「⛔ go-redis 无对应概念」两处）与 §10.3 的「**不落码**」**原样保留** ⇒
+读本域历史结论的人**以两块并列为准** ⇒ ⇒ **不要**把 §十一 误读成「§10 作废」。
+
+1. **§10.1 表里「空闲连接下限 = `min-idle: 4`」这一行已过期** ⇒ 现行口径 = **`min-idle: 0`**（**精确对齐 Go**）⇒ 落码与守门见 **§十一**。
+2. 🔴 **§10.1 表里「⛔ go-redis 无对应概念（只存 `PoolSize` + `MinIdleConns`）」这句措辞不准确** ——
+   **go-redis v9.20.0 有 `MaxIdleConns`**（`options.go:224-228`，**无 default 赋值** ⇒ **0**）
+   ⇒ 消费点 `internal/pool/pool.go:1257`
+   `if p.cfg.MaxIdleConns == 0 || p.idleConnsLen.Load() < p.cfg.MaxIdleConns` ⇒ **0 = 无上限**
+   ⇒ ⇒ 所以正确的表述是：**「有对应项，Go 侧取值 = 0（无上限）」**，而不是「无对应概念」
+   ⇒ ⇒ RAG 侧的 `max-idle: 16` 是**表达层取值（比 Go 更严）**，属**可登记的残留差异**，不是「语义无对应 ⇒ 不可 1:1」。
+   ⚠️ **同款措辞错误也出现在 G2 的 `task/vs-common.md` A1 ⑦** ⇒ 已一并通报（见 §十一.4）。
+3. **§10.3 写的「不落码」已被本轮推翻** ⇒ **落码**（域侧自修）⇒ 见 **§十一**。
+
+---
+
+## 十一、✅ Redis **连接池参数口径** —— **已落码**（2026-10-27 · G3 · 修 §10 的「数值不对齐」）
+
+### 十一.1 一句话
+
+**形态本来就对**（§10）⇒ 本轮只修**参数**：`min-idle` **4 → 0**（**精确对齐 Go**）＋ **新增 `max-wait: 4s`**（池耗尽的等待上限）⇒
+守门 **4 条** ＋ **变异 4 条全部精确转红**。
+
+### 十一.2 落码清单
+
+| # | 文件 | 位置 | 改了什么 |
+|---|---|---|---|
+| 1 | `service/comment/comment-rpc/src/main/resources/application.yml` | `:159-165` | `min-idle: 4` → **`0`**；**新增** `max-wait: 4s`（`enabled` / `max-active` / `max-idle` 未动） |
+| 2 | `service/comment/comment-rpc/src/test/java/com/rag/comment/comment/rpc/config/CommentRpcRedisPoolContractTest.java` | **新增** | 守门 **4 条**（读**真装配**，不读 yml 文本） |
+
+⚠️ **pom 无需改**：`commons-pool2` 早已显式声明（`service/comment/comment-rpc/pom.xml:181-191`）⇒ 本域**不存在** `hot-rpc` 那条「pom 必须补依赖否则启动期 `NoClassDefFoundError`」的风险。
+
+### 十一.3 取值依据（逐项对着 Go 的真值，不拿「现有 RAG 代码」当基准 · AGENTS.md §3.1）
+
+| 语义 | Go 真值（消费点） | 本域取值 | 对齐度 |
+|---|---|---|---|
+| 有没有池 | ✅ `service/comment/rpc/internal/cache/redis.go:17-19` `redis.NewClient(&redis.Options{Addr: Host})` ⇒ `PoolSize` 未设 ⇒ `go-redis@v9.20.0/options.go:350-351` `= 10 × GOMAXPROCS` ⇒ **有池** | `enabled: true` ＋ pom 有 `commons-pool2` | ✅ 形态一致（§10 已记，本轮未动） |
+| 总量上限 | 🟡 `MaxActiveConns` 未设 ⇒ `options.go:230-235` ⇒ Go **无总量硬上限**；`PoolSize` = 10×核数（机器相关） | `max-active: 64` | 🟡 数量级（性能面残留） |
+| **最少空闲** | ✅ `MinIdleConns` 未设 ⇒ `options.go:218-222` **无 default** ⇒ **0**（本域 Go **直连 go-redis**，**不走** go-zero ⇒ 不是 8） | **`min-idle: 0`** | ✅ **精确对齐（本轮修复项）** |
+| 最多空闲 | 🟡 `MaxIdleConns` 未设 ⇒ `options.go:224-228` **无 default** ⇒ **0** ⇒ 消费点 `internal/pool/pool.go:1257` ⇒ **0 = 无上限** | `max-idle: 16` | 🟡 表达层取值（比 Go 更严） |
+| **池耗尽等待** | ✅ `PoolTimeout` 未设 ⇒ `options.go:380-386` `= ReadTimeout + 1s` = **4s**；消费点 `internal/pool/pool.go:1113` `p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)` | **`max-wait: 4s`** | ✅ **语义对齐（本轮新增项）** |
+
+🔴 **`max-wait` 为什么是「必配」而不是「优化」**：不配 ⇒ commons-pool2 2.12.1 `BaseObjectPoolConfig:59,68`
+`DEFAULT_MAX_WAIT = Duration.ofMillis(-1L)` ⇒ 消费点 `GenericObjectPool:306`
+`p = negativeDuration ? idleObjects.takeFirst() : idleObjects.pollFirst(remainingWaitDuration)`
+⇒ **负值 ⇒ 阻塞到有人还连接为止（无上限）**；
+🔴 且 **Lettuce 的 3s 命令超时救不了场** —— `CommandExpiryWriter.write(command)` 才起算计时器
+（实测 lettuce-core 6.8.2 字节码），而**借连接发生在写命令之前**
+⇒ ⇒ 池耗尽时 **3s 超时根本没开始** ⇒ ⇒ **无限挂起**（Go 是 4s 失败）⇒ ⇒ **光有池反而比 Go 更糟**。
+
+### 十一.4 守门 + 变异验证（**4 条全部精确转红** ⇒ 守门非假绿）
+
+**守门**：`CommentRpcRedisPoolContractTest`（**4 条**，零 Docker / 零 Testcontainers / 零真 Redis）——
+起**真** `ApplicationContextRunner` ＋ Boot **真** `DataRedisAutoConfiguration` ⇒ 断言**真装配**的
+`LettucePoolingClientConfiguration.getPoolConfig()`：
+① 池必须启用 · ② `maxTotal=64` / `maxIdle=16` / **`minIdle=0`** · ③ **`maxWait=4s`** · ④ 阳性对照（commons-pool2 默认 = -1ms）。
+
+**变异**：① `min-idle: 0→4`（**回到本轮修之前的值**）⇒ 红在 ② 的 `minIdle`；② 删 `max-wait` ⇒ 红在 ③；
+③ `max-active: 64→65` ⇒ 红在 ② 的 `maxTotal`；④ `enabled: true→false` ⇒ 红在 ①。
+
+**实测结果（4 条全部精确转红 · 2026-10-27）**
+
+| 变异 | 手法 | 结果 |
+|---|---|---|
+| **MUT-A** | yml `pool.min-idle: 0` → `4`（**回到本轮修之前的值**） | ✅ **1 红**（`expected: 0 but was: 4`） |
+| **MUT-B** | yml 删掉 `pool.max-wait` | ✅ **1 红**（`expected: 4S but was: -0.001S` ⇒ **实测到「无限等」**） |
+| **MUT-C** | yml `pool.max-active: 64` → `65` | ✅ **1 红**（`expected: 64 but was: 65`） |
+| **MUT-D** | yml `pool.enabled: true` → `false` | ✅ **3 红**（① ＋ ② ＋ ③，全部红在「池必须已启用」这条**前置断言**上 ⇒ **红点精确**） |
+
+🔴 **一条必须记下的方法论**：变异跑**故意跑红的报告会留在 `target/surefire-reports/` 里**
+⇒ ⇒ 跑完变异**必须再做一次覆盖性全量回归**，否则任何「读 `target/` 的判据」读到的是**上一次跑剩的产物**
+⇒ ⇒ **本轮实测踩到了**：变异跑完后 XML 求和显示 comment-rpc「3 failures」，而 maven 汇总行是 123/0/0/0
+⇒ ⇒ **以 maven 汇总行为准、以 XML 求和复核**，两者不一致时**先查报告新鲜度**。
+
+### 十一.5 证据强度与边界
+
+| 项 | 值 |
+|---|---|
+| **证据强度** | **L3** —— Go 侧 **L1 逐行对照** ＋ RAG 侧**真装配运行证据** ＋ 变异 |
+| ⚠️ **不是 L4** | Go 侧无同时跑的探针 ⇒ **不是双侧活体对拍** |
+| ⚠️ **未覆盖** | 并发活体对拍（p99 口径）⇒ ⚠️ **原记的阻塞理由「机器级 Docker 端口转发故障」已于 2026-10-27 19:2x 实测不成立**（四个探针全通，见 [`hot/rpc.md` §十一.8](../hot/rpc.md)）⇒ ⇒ **阻塞前提已消失** ⇒ 现在只差「Go 侧同时跑的探针」 |
+| ⚠️ **守门不证明** | SQL / DDL / 事务（本域有库，守门只起 Redis 自动配置）· Kafka · 断连语义 |
+
+### 十一.6 跨域影响（本轮实测 · 已通报 G2 / G4）
+
+| 组件 | 原状 | 结论 |
+|---|---|---|
+| **`comment-rpc`** | 本域 | ✅ **已修**（本节） |
+| **`hot-rpc`** | 本域（G3） | ✅ **已修**（[`hot/rpc.md` §十一](../hot/rpc.md)）⇒ **形态 ＋ 参数 ＋ `max-wait` 三项全修** |
+| **`task-rpc`** | G2 | 🔴 **缺 `max-wait`** ⇒ 池耗尽**无限等**（Go 4s）⇒ 已通报 |
+| **`like-rpc`** | G2 | 🔴 **缺 `max-wait`** ＋ `min-idle: 4`（Go 侧走 go-zero ⇒ 应 **8**）⇒ 已通报 |
+| **`favorite-api`** | 本域（G3） | 🟡 **无池** ⇒ 池形态本身仍是漂移 ⇒ 见 [`favorite/api.md` §15.7](../favorite/api.md#157-落码清单本域-favorite-域--尚未落码--待排期) 的落码清单（**`min-idle` 应为 8**，与本域不同） |
+
 ---
 
 ## 🔴 **阈值类结论的「共享层依赖」声明**（2026-10-27 · 按 G2 [3] 的要求做的重核）
