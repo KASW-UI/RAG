@@ -61,7 +61,7 @@
 |---|---|---|---|---|---|
 | **A1** | 超时 / deadline | `observability/RpcInterceptor`（服务端 deadline 传播）· `observability/GoStyleRequestDeadline`（HTTP 预算载体）· `observability/HttpMiddleware:304`/`:336`（预算写入/清除）· `persistence/DeadlineQueryTimeoutInjector`（SQL statement timeout）· `persistence/SqlTimeoutStatusTranslator`（57014 → `DEADLINE_EXCEEDED`）· `observability/GoStyleRecoverInterceptor` | 🟡 **机制面已对齐**（HTTP 预算 → SQL 取消 → 1015 的整条链，Go 侧逐条有出处）<br>🔴 **但 rpc→rpc 出向仍不继承 deadline（E65）⇒ 共享层侧 = 半开** | **L4**（双侧探针 `run-rpc-timeout-parity.sh` EXIT=0，`client_deadline_ctx` 一致）＋ **L1**（E65 的 ThreadLocal 写入面逐行） | 2026-10-27 |
 | **A2** | gRPC 拦截器链 | `spring/RpcServerInterceptorFactory` · `observability/RpcInterceptor` · `protection/GoStyleRpcBreakerInterceptor` · `protection/GoStyleGrpcClientBreakerInterceptor`（**本轮新落** = G3 单 2）· `protection/GoStyleGrpcClientBreakerConfiguration` · `protection/GoStyleProtectionConfiguration:80`（`@Import` 桥）· `protection/GoStyleRpcProtectionChain` | ✅ **client 侧 breaker 已进共享层，10/10 rpc 零改动生效**（`GoStyleProtectionConfiguration` 被 **10/10** rpc `@Import`）<br>🟡 **但只有「有出向调用」的 rpc 组件可观测** —— 本层**自核**（不采信转述）：`@GrpcClient` 计数 ＋ **六种出向方式**交叉核 ⇒<br>**可观测 6 个**：article-rpc **5** · comment-rpc **2** · favorite-rpc **2** · like-rpc **2** · message-rpc **2** · follow-rpc **1**<br>**N/A 4 个**：hot-rpc **0** · task-rpc **0** · user-rpc **0** · admin-rpc **0**（`@GrpcClient` / `newBlockingStub` / `newFutureStub` / `newStub` / `ManagedChannel` / `RestTemplate` / `WebClient` **全 0**） | **L3**（真容器 + 真 gRPC server 守门）＋ **L1**（10/10 `@Import` 用**剥注释后解析注解块**核出；出向面用**六种方式交叉核**） | 2026-10-27 |
-| **A3** | HTTP 保护链 | `http/GoStyleFormValues` · `http/GoStyleFormLimitMode` · `http/GoStyleFormValueLimitInterceptor` · `http/GoStyleFormLimitExceededException` · `http/GoStyleFormLimitWebMvcConfig` · `http/GoStyleTomcatParameterLimitCustomizer` · `http/GoStylePathNormalizingFilter`（**本轮新落** = FB-01）· `protection/GoStyleBreakerFilter`（键改**注册期路由模板**）· `protection/GoStyleMaxConnsFilter` · `protection/GoStyleMaxBytesFilter` · `protection/GoStyleCpuSheddingFilter` | 🟡 **共享层 11 个类已验**（含本轮新增：路径归一 / breaker 键）<br>🔴 **仍缺「10 域逐域真实请求」证据**（**共享层已验 ≠ 各域已验**）<br>🟢→🟢 **补（`c15dfeb` · G2 FB-05）**：**`off` 这个取值原先在 YAML 里写不出来** —— YAML 1.1 把未加引号的 `off` 变布尔 `false` ⇒ 域侧按文档写 `mode: off` ⇒ **进程起不来** ⇒ ⇒ 已让 `parse` 接受 `"false"` 这个**精确别名**（**不放宽成任意兜底**）⇒ ⇒ **A3 轴的「配置值 → 代码」这一环此前是断的，现已闭合**（守门 5 条 + 变异 2 个，L4：真启动 + 生产同款 YAML loader）<br>⚠️ `GoStyleMaxConnsFilter` 的 MaxConns 半边 = **已签字偏离**（`SD-2026-10-25-01`）⇒ 不重复质疑 | **L3**（真 Tomcat 守门：form 闸门 / 路径归一 / breaker 模板键 / Tomcat 参数上限）＋ **L1**<br>🆕 **FB-05 = L4**（真 servlet 上下文 + 真 yaml ⇒ 起得来；生产同款 `YamlPropertySourceLoader` ⇒ 断言拿到 `Boolean.FALSE`） | 2026-10-27 |
+| **A3** | HTTP 保护链 | `http/GoStyleFormValues` · `http/GoStyleFormLimitMode` · `http/GoStyleFormValueLimitInterceptor` · `http/GoStyleFormLimitExceededException` · `http/GoStyleFormLimitWebMvcConfig` · `http/GoStyleTomcatParameterLimitCustomizer` · `http/GoStylePathNormalizingFilter`（**本轮新落** = FB-01）· `protection/GoStyleBreakerFilter`（键改**注册期路由模板**）· `protection/GoStyleMaxConnsFilter` · `protection/GoStyleMaxBytesFilter` · `protection/GoStyleCpuSheddingFilter` | 🟡 **共享层 11 个类已验**（含本轮新增：路径归一 / breaker 键）<br>🔴 **仍缺「10 域逐域真实请求」证据**（**共享层已验 ≠ 各域已验**）<br>🟢→🟢 **补（`c15dfeb` · G2 FB-05）**：**`off` 这个取值原先在 YAML 里写不出来** —— YAML 1.1 把未加引号的 `off` 变布尔 `false` ⇒ 域侧按文档写 `mode: off` ⇒ **进程起不来** ⇒ ⇒ 已让 `parse` 接受 `"false"` 这个**精确别名**（**不放宽成任意兜底**）⇒ ⇒ **A3 轴的「配置值 → 代码」这一环此前是断的，现已闭合**（守门 5 条 + 变异 2 个，L4：真启动 + 生产同款 YAML loader）<br>⚠️ `GoStyleMaxConnsFilter` 的 MaxConns 半边 = **已签字偏离**（`SD-2026-10-25-01`）⇒ 不重复质疑<br>🟢→🟢 **补（`5a954bb` · G3 反馈单 轴②）**：**轴 ② 的判据漏了「域自捕获」这一档** ⇒ favorite 的 Go 侧 **7 个 handler 各自捕获** `httpx.Parse` 的错 ⇒ 拒绝形状 = **域自定义信封（200 + {code:5003,msg:"参数错误",data:null}）** ⇒ **既非 `raw` 也非 `envelope`** ⇒ 而旧表把它记成 `raw` ⇒ **错** ⇒ ⇒ 判据补成**两档**（① 域自捕获 ⇒ `off`；② 否则按「Go 侧是否注册 `SetErrorHandler`」分 `raw` / `envelope`）⇒ ⇒ 共享层**不装**闸门（装了会**抢先**于域自己的捕获 ⇒ 形状变 400/5001 ⇒ 与 Go 不符）⇒ ⇒ 与 `tools/difftest/check-tomcat-limits.py` 的「favorite **一项都不许**声明 mode」**不再打架**<br>🔴 **但残留没销账**：favorite 的**边界口径**漂移（**Tomcat 数总「值」数（含空值）vs Go 数非空值个数** ⇒ 总「值」数 2049~10000 且非空值 ≤2048 时 **Go 放行 / RAG 拒**）**仍在** ⇒ 归 `DRIFT-HOTAPI-030`（跨域）+ `DRIFT-FAV-API-001`（域内）⇒ ⇒ 修法要动**运行期容器上限**（= 跨域可观察行为变更）⇒ ⇒ **本层只登记 + 转派**，本轮**不改行为** | **L3**（真 Tomcat 守门：form 闸门 / 路径归一 / breaker 模板键 / Tomcat 参数上限）＋ **L1**<br>🆕 **FB-05 = L4**（真 servlet 上下文 + 真 yaml ⇒ 起得来；生产同款 `YamlPropertySourceLoader` ⇒ 断言拿到 `Boolean.FALSE`）<br>🆕 **G3 轴② = L4**（**双侧活体对拍** `tools/api-envelope-probe/favorite` ⇒ **EXIT=0** ⇒ Go 真源实测 == `expected.txt` == RAG **真 HTTP** 逐字节）＋ **变异 10/10**（每条断言都有专属变异） | 2026-10-27 |
 | **A4** | 错误码 / envelope | `http/GoStyleRouterErrorResponses`（404 / 405 **字节形状**）· `http/GoStyleFormLimitExceededException` · `exception/BusinessException` · `response/Response`（⚠️ **业务码本身在域侧** api 的 `GlobalExceptionHandler.mapRPCStatusToCode`，不在共享层） | ✅ **Go 侧「1015 从哪来」已查实并订正归因**（本轮 G3 单 3：1015 = 各 api logic `switch st.Code()` 的 **default 分支**，**不是** go-zero 的错误映射）<br>⚠️ **该结论只对 users 域成立** —— Go 侧 **article 域单列了** `codes.DeadlineExceeded`（`create_article_logic.go:66`）⇒ **不外推** | **L1**（两侧逐行对照，行号逐条核实）＋ 404/405 字节形状另有 **L3**（真 Tomcat） | 2026-10-27 |
 | **A5** | 端口治理 | 共享层侧**只有** `http/GoStyleTomcatParameterLimitCustomizer`（管的是**参数个数**，**不是端口**）；**端口段本身在域侧 yaml**（`server.port`）＋ `tools/difftest/check-tomcat-limits.py`（**整合者共享面** ⇒ 本层不写） | 🟡 **共享层在本轴落点很薄** ⇒ 端口治理的**主体不在共享层** ⇒ 本层只能给「**容器参数上限**」这一格结论，端口段以各域台账为准 | **L3**（真 Tomcat 参数上限守门）＋ **N/A**（端口段 = 域侧 / 共享脚本） | 2026-10-27 |
 | **A6** | errmsg 契约 | 共享层**不产 errmsg**（1015 等业务码在域侧 api）⇒ 共享层只负责**错误响应形状**（`http/GoStyleRouterErrorResponses`） | ✅ **双侧对拍通过**：`bash tools/semantic-probe/run-parity.sh` ⇒ **EXIT=0 · 56 例（一致 54 · 已签字偏离 2 · 不一致 0）**（⚠️ README 原写「23 例」已过期 ⇒ 本轮订正 `2231398`） | **L4**（双侧活体对拍） | 2026-10-27 |
@@ -73,8 +73,11 @@
 > （`GoStyleFormValues` / `GoStyleFormLimitMode` / `GoStyleFormLimitExceededException` /
 > `GoStyleFormValueLimitInterceptor` / `GoStyleFormLimitWebMvcConfig` / `GoStyleTomcatParameterLimitCustomizer`）；
 > **本 lane 就是共享层本身** ⇒ 「逐域 `go-form-limit.mode` ＋ Go 侧 `SetErrorHandler` 注册」的对照由本 lane 核：
-> comment/follow/hot/like/message **5 域注册 ⇒ envelope**；article/task/user/admin **4 域未注册 ⇒ raw**；
-> favorite **未注册 ＋ RAG 侧刻意 `off`** ⇒ 两侧都不过限 ⇒ 零触碰。
+> comment/follow/hot/like/message **5 域注册 ⇒ envelope**；article/user/admin **3 域未注册且装了闸门 ⇒ raw**；
+> **task 未注册，但 Go 侧 `r.Form` 从不求值 ⇒ 语义答案 = `off`（闸门本不该开）** ⇒ 待修漂移（**G2 域内**改 yaml）；
+> **favorite 未注册，但 7 个 handler 各自捕获 `httpx.Parse` 的错 ⇒ 拒绝形状 = 域自定义信封
+> （200 + {code:5003,…}）⇒ 语义答案 = `off`（共享层不装闸门）** ⇒ ⇒ **两侧都限**，只是限的形状不同
+> ⇒ ⇒ **不是「零触碰」**（2026-10-27 订正，详见 §4.10.15）。
 > ⇒ ⚠️ **共享层已验 ≠ 各域已验** ⇒ 本 lane 仍须**逐域跑一次真实请求**确认拒绝形状。
 
 > **本表的三条诚实边界**（AGENTS.md §0：「已改」≠「已验证」）：
@@ -962,7 +965,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 
 | 项 | 实测结果 |
 |---|---|
-| **「当前受害域 = 0」** | ✅ **成立** —— 全仓 `service/*/*-api/src/main/resources/application.yml` 实测：`article-api` `raw` · `comment-api` `envelope` · `follow-api` `envelope` · `hot-api` `envelope` · `like-api` `envelope` · `message-api` `envelope` · `user-api` `raw` · `admin-api` `raw` · **favorite-api 根本没有 `go-form-limit` 段**（⇒ 缺省 `OFF` ⇒ 正是 {@link GoStyleFormLimitMode#REGISTERED_DEVIATIONS} 里那条**已登记的刻意偏离**）⇒ ⇒ **无任何域写字面量 `off`** ⇒ ⇒ **本次修法对现状零行为变化** |
+| **「当前受害域 = 0」** | ✅ **成立** —— 全仓 `service/*/*-api/src/main/resources/application.yml` 实测：`article-api` `raw` · `comment-api` `envelope` · `follow-api` `envelope` · `hot-api` `envelope` · `like-api` `envelope` · `message-api` `envelope` · `user-api` `raw` · `admin-api` `raw` · **favorite-api 根本没有 `go-form-limit` 段**（⇒ 缺省 `OFF` ⇒ **语义正确**，不是「刻意保留的偏离」⇒ 详见 §4.10.15）⇒ ⇒ **无任何域写字面量 `off`** ⇒ ⇒ **本次修法对现状零行为变化** |
 | 🔴 **但我树里 `task-api` 仍是 `mode: raw`** | 而 `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` 表里 **task-api 的语义答案是 `OFF`**（Go 侧 `task/api/**` 的 `httpx.Parse`/`ParseForm`/`GetFormValues` 命中数 = **0** ⇒ `r.Form` 从不被求值 ⇒ 两道上限**都不可达**）⇒ ⇒ **我树里存在一条「yaml 与语义答案不一致」的待修漂移**（task-api 开了本该关的闸门）⇒ **归属 task 域（G2 写权）** ⇒ **G2 在自己树里改成 `mode: \"off\"` 正是修它** ⇒ ⇒ 本层**只登记、不代改** |
 | 🟢 **本层回 Go 真源复核了那张表（不采信共享层自写的「目标态」表）** | `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` 的 javadoc 自陈「这张表是**目标态**，不是现状快照」⇒ ⇒ 本层**回 Go 真源逐条核了 task 这一格**：<br>· `service/task/api/**` 对 `httpx.Parse` / `ParseForm` / `GetFormValues` / `r.Form` ⇒ **零命中**<br>· handler 走 `json.NewDecoder(r.Body)`（`service/task/api/internal/handler/task/gettaskhandler.go:19`）⇒ `r.Form` **从不被求值** ⇒ 两道上限**都不可达** ⇒ **语义答案 = `OFF`** ✅ 与表一致<br>· 横向对比（防「只核了一个域」）：`service/article/api/**` 与 `service/message/api/**` 均有 `httpx.Parse` 命中 ⇒ 那些域闸门**必须开** ✅<br>⇒ ⇒ **该表在 task 这一格是准确的**（⚠️ 其余 9 格本层**未逐条核**，不外推） |
 | 🔴 **漂移的方向 = 「误拒」，不是「多记 413」** | 我树里 task-api 的 `mode: raw` ⇒ 闸门**装着** ⇒ **超过 2048 个非空 query 值就 400 拒掉**<br>⇒ 而 Go 侧 `r.Form` 从不求值 ⇒ **Go 照常受理**<br>⇒ ⇒ 可观察差异 = **RAG 拒掉了 Go 能受理的请求**（<b>误拒</b>方向）⇒ ⚠️ 正是 `GoStyleFormLimitMode` 类 javadoc 自己说的「**『误拒』比『漏拒』更危险**（会挡掉 Go 能受理的请求）」⇒ ⇒ **这条的优先级高于「多记 413」那一类** ⇒ ⇒ 归 task 域（G2 写权）⇒ 本层只登记 |
@@ -993,7 +996,98 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 > ⇒ 上一轮（槽位快照守门）**零生产代码改动** ⇒ 只跑 `service/common` 模块（315 条）并写明「未跑全量 + 理由」。
 > ⇒ ⇒ **两者都写进了台账**，不混用口径。
 
-#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `c15dfeb`）
+#### 4.10.15 🟢 **G3 反馈单「轴 ② 判据」订正落码**（核对日期 2026-10-27 · 代码态 `5a954bb`）
+
+> **派单来源**：G3 本轮发来 5 条（④免单 · ⑤确认，无需动作）；本条 = 其 **②「轴 ② 判据对 favorite 不成立」**。
+> **落点已独立核准**（派单的「落点」列是快照，不采信）：`service/common/src/main/java/com/rag/common/http/GoStyleFormLimitMode.java`
+> ＋ `GoStyleTomcatParameterLimitCustomizer.java` ＋ `GoStyleFormValues.java` ＋ `GoStyleFormLimitExceededException.java`
+> ＋ 3 个测试类 ⇒ **共 7 文件，全部在 G4 写权面内**。
+
+##### 4.10.15.1 本层的**独立核实**（不采信转述）
+
+| 项 | 实测结果 |
+|---|---|
+| **G3 的质疑成立吗** | ✅ **成立** —— 共享层表 `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` 的 favorite 行原写 `Mode.RAW`（＝「Go 侧没注册 `SetErrorHandler` ⇒ 400 + text/plain + Go 原文」）⇒ **错** |
+| **Go 侧 favorite 的真实形状** | **200 ＋ `{"code":5003,"msg":"参数错误","data":null}`** —— 7 个 handler **各自捕获** `httpx.Parse` 的错：<br>· `service/favorite/api/internal/handler/favorite/*.go:18-22`（形态一致）⇒ `httpx.OkJsonCtx` ＋ `Code: favoritecommon.ErrorInvalidParam` ＋ `Msg: GetErrMsg(...)` ＋ `Data: nil`<br>· `service/favorite/common/errmsg.go:16` ⇒ `ErrorInvalidParam = 5003`；`:51` ⇒ 文案「参数错误」<br>· go-zero `rest/httpx/responses.go:56-63` ⇒ `OkJsonCtx` ⇒ `WriteJsonCtx(ctx, w, http.StatusOK, v)` ⇒ **HTTP 200** |
+| ⇒ ⇒ **既非 RAW（400＋text/plain）也非 ENVELOPE（200＋5001）** | ⇒ ⇒ **第三种形状：域自定义业务码信封** ⇒ ⇒ 「轴 ②」只按「注册 / 没注册」分**两档不够用** |
+| **`SetErrorHandler` 注册点复核** | 全仓 **5 个**：`like/api/likecenter.go:48` · `comment/api/commentservice.go:47` · `follow/api/followcenter.go:53` · `message/api/messagecenter.go:53` · `hot/api/hotcenter.go:53` ⇒ ⇒ **与表的 `envelope` 档一致**；**其余 9 域的「自捕获」命中行数全 0** |
+| **Go 侧目录复核**（防「只核了一个域」） | Go api 域目录 = `service/{article,comment,favorite,follow,hot,knowledge,like,message,task}/api` ＋ **`service/user/user/api`**（`httpx.Parse` **8** 处）＋ **`service/user/admin/api`**（**13** 处）⇒ ⇒ 与表的命中数一致 |
+| **RAG 侧 favorite 装了吗** | ✅ **装了**（域内自实现，**逐字复刻 Go**）：`FavoriteApiSupport#goFormFirstValue`（`:369-392`）数**非空值**、**跨 key 累计**、超 2048 抛 `IllegalArgumentException("too many form values")`（`:381-383`）；`#parameterMap`（`:428-436`）把 Tomcat 的 `InvalidParameterException` **映射成同一出口** ⇒ ⇒ 对外只呈现 Go 的那一种形态 |
+| **L4 活体对拍（两侧同时跑）** | ✅ `bash tools/api-envelope-probe/favorite/run.sh` ⇒ **EXIT=0** ⇒ **Go 真源实测 == `expected.txt` == RAG 真 HTTP 逐字节**（`err_too_many_form_params` = `200` ＋ `application/json; charset=utf-8` ＋ `{"code":5003,"msg":"参数错误","data":null}`）⇒ ⇒ 「favorite 与 Go 逐字同形」是**实测**，不是源码推断 |
+| ✅ **G3 的 ③（守门脚本矛盾）** | 矛盾**真实存在**：`tools/difftest/check-tomcat-limits.py:156-159` 的 `FORBIDDEN_FORM_LIMIT_MODE_MODULES = {"service/favorite/favorite-api"}` 要求 favorite **一项都不许声明**（理由 `:334` =「favorite 域不在 global 写权范围 ⇒ 共享层必须零影响」），而共享层表原写 favorite = `RAW` ⇒ ⇒ **两份文件互相打架**<br>⇒ ⇒ **本轮方案使它自然消解**：表改成 favorite = `OFF`（**语义正确**）⇒ ⇒ 与「不许声明」一致 ⇒ ⇒ **`tools/difftest/**` 零改动**（该目录 = **整合者共享面**，本层不写） |
+
+##### 4.10.15.2 落码内容（**零运行时行为变化**）
+
+| 落点 | 改动 | 行为影响 |
+|---|---|---|
+| `GoStyleFormLimitMode.DomainReachability` | 新增字段 `boolean goSideHandlesParseError`（插在 `goSideParsesForm` 之后）＋ 补 `@param` javadoc | **无**（`Mode` 枚举未动、`parse` 未动；record 加字段 ⇒ 10 个构造点同步改写） |
+| `GoStyleFormLimitMode#selfConsistent` | 改成**两条规则**：域自捕获 ⇒ 语义模式必须 `OFF`；否则维持 `OFF ⇔ !goSideParsesForm` | **无**（自洽校验，不参与运行时决策） |
+| `SEMANTIC_REACHABILITY` 的 favorite 行 | `(…, true, **true**, Mode.**OFF**, …)` ＋ 证据串补「RAG 侧域内也已自装」 | **无**（目标态表；域侧 yaml 不变 ⇒ 运行期不变） |
+| `REGISTERED_DEVIATIONS` | **删 favorite 那条** ⇒ 表变空 | **无**（该表只被 `hasRegisteredDeviation` 查询；无调用方依赖其内容） |
+| `Mode.OFF` javadoc | 补「**第二种情形**」（域自捕获） | **无**（注释） |
+| 类 javadoc 轴 ② | 改成**两判据** ＋ 轴 ② 表补「域自定义」一行 | **无**（注释） |
+| `GoStyleTomcatParameterLimitCustomizer` javadoc | 订正**三处错误陈述**（见 §4.10.15.4） | **无**（注释） |
+| `GoStyleFormValues` / `GoStyleFormLimitExceededException` / `GoStyleParamLimitGateTest` / `GoStyleFormLimitModeTest` javadoc | 同源错误陈述（「favorite ⇒ RAW」「favorite 零触碰」）同步订正 | **无**（注释） |
+| **守门** `GoStyleFormLimitSemanticCriterionTest` | **重写**（6 条） | **无** |
+
+##### 4.10.15.3 守门与**变异验证**（每条断言都有专属变异）
+
+| 断言 | 专属变异 | 实测打红位置 |
+|---|---|---|
+| ① 表覆盖全部 api 域 | favorite 的模块名改 `favorite-api-X` | 🔴 `tableCoversEveryApiModule`（＋④⑥） |
+| ② 每一行自洽 | favorite 的 `goSideHandlesParseError` 改 `false` / favorite 的 mode 改 `RAW` / task 的 parses 改 `true` / task 的 mode 改 `RAW` | 🔴 `everyRowIsSelfConsistent`（**4** 个变异） |
+| ③ task 语义 = OFF | task 的 parses 改 `true` / handles 改 `true` / mode 改 `RAW` | 🔴 `taskIsSemanticallyOff`（**3** 个变异） |
+| ④ favorite 语义 = OFF ＋ **不是**模式偏离 | handles 改 `false` / mode 改 `RAW` / parses 改 `false` / 证据串去掉 `5003` / 把 favorite 加回 `REGISTERED_DEVIATIONS` | 🔴 `favoriteIsSemanticallyOffBecauseTheDomainHandlesItItself`（**5** 个变异） |
+| ⑤ 刻意保留的偏离表为空 | 把 favorite 加回 `REGISTERED_DEVIATIONS` | 🔴 `noRegisteredDeviationIsKept` |
+| ⑥ 查询入口 | `semanticModeOf` 对未知域返回 `OFF` 而非 `null` / favorite 的 mode 改 `RAW` | 🔴 `lookupApiBehaves` |
+
+⇒ **10/10 变异全部按预期打红**，且**失败方法集合与预期逐一吻合**（无多余红、**无编译错误**）⇒ ⇒ 每条断言都有判别力（**不是恒绿空转**）。
+⇒ 脚本 `/tmp/g4-g3-axis2-mutations.sh`：每个变异改一处 → 跑守门 → 比对失败方法集合 → 还原 ⇒ 末尾 `SRC_RESTORED_OK`。
+
+##### 4.10.15.4 🔴 **顺带订正的三处错误陈述**（**同源错误**，不订就会误导下一个 agent）
+
+| 位置 | 错在哪 | 改成 |
+|---|---|---|
+| `GoStyleTomcatParameterLimitCustomizer`（类 javadoc ＋ `customize()` 内注释） | ① 「10 份 yaml 保持一致 ＋ 共享层统一覆盖 ⇒ **无分叉、favorite 零改动**」—— 它把「**yaml 层**一致」当成了「**运行期**一致」；② 「favorite 停在 OFF 是**刻意保留**的已知偏离，不是『已对齐』」 | ① 写清「yaml 层全仓 = 2048，但**运行期**由 `mode` 决定 ⇒ ⇒ **favorite（唯一未声明 `mode` 的域）运行期 = 2048、其余 9 域 = 10001 ⇒ 分叉真实存在**」；② 改成「favorite 停在 OFF 是**语义正确**的（域自捕获 ⇒ 共享层不能装闸门）⇒ 与 Go **逐字同形**」 |
+| `GoStyleFormValues`（类 javadoc 的逐域取证表 ＋ `goParseViolation` 的 javadoc） | 把 favorite 与 article/user/task 并列在「**没注册 `SetErrorHandler`** ⇒ 400 + text/plain」那一行 ⇒ **推论错误** | favorite 单列一行「**没注册，但 7 个 handler 各自捕获** ⇒ 拒绝形状由域自己定（200 ＋ {code:5003,…}）」；并补「『没注册』**推不出**『走 400 形状』——**装不装闸门**与**拒成什么形状**是**两条独立的轴**」 |
+| `GoStyleFormLimitExceededException`（类 javadoc） | 「其余域（article / user / task / favorite）走 RAW」 | 改成「其余**装闸门**的域（article / user / admin）走 RAW」＋「**两个域收不到它**：task（闸门不开）与 favorite（域自己捕获）」 |
+
+##### 4.10.15.5 🔴 **残留漂移（未销账）＋ 修法方向（本轮只登记 ＋ 转派）**
+
+| 项 | 内容 |
+|---|---|
+| **残留事实** | favorite 的 form 上限**边界口径**与 Go 不同：**Tomcat 数「总参数值个数（含空值）」，Go 数「非空值个数」** ⇒ ⇒ 总「值」数 **2049~10000** 且非空值 ≤2048 时，**Go 放行 / RAG 拒**（RAG 落 200 ＋ {code:5003}，Go 落 200 ＋ 正常业务结果）⇒ ⇒ 归 **`DRIFT-HOTAPI-030`**（跨域 · 收口在 global）＋ **`DRIFT-FAV-API-001`**（域内） |
+| **根因（本层实测定位）** | 共享层把**两件独立的事**耦合在同一个 `mode` 上：①「**装不装** form 值闸门（决定拒绝**形状**）」与 ②「**抬不抬**容器参数上限（决定谁来当**判定权**）」⇒ ⇒ **`OFF` ⇒ 不覆盖容器上限** ⇒ ⇒ favorite（**唯一未声明 `mode` 的域**）**运行期上限 = 2048** ⇒ ⇒ 其余 9 域（都声明了 `mode` ⇒ ≠ OFF）**运行期 = 10001** ⇒ ⇒ **favorite 是唯一停在 2048 的域** ⇒ ⇒ **分叉存在**，且它就是这条漂移的**成因** |
+| **L4 实测证据** | 🔴 **探针日志实锤**：favorite 域把容器超限映射成 Go 出口时打出的原文 = `too many request parameters: More than the …` ⇒ ⇒ **Tomcat 的 `max-parameter-count` 确实在 2049 时触发** ⇒ ⇒ **运行期上限 = 2048**（不是 10001）⇒ ⇒ 分支**不是推理，是实测** |
+| **候选修法（两条）** | **(a) 域侧**：favorite 自己的 yaml 把 `max-parameter-count` 改成 **10001** ⇒ ⚠️ 与全仓守门 `tools/difftest/check-tomcat-limits.py` 的 `EXPECTED_MAX_PARAM_COUNT = 2048` **冲突** ⇒ ⇒ 需**跨域拍板**（且该脚本 = **整合者共享面** ⇒ 本层不写）<br>**(b) 共享层**：把 ①②**解耦** —— 容器上限**一律**抬到 10001（与 `mode` 无关），形状闸门仍由 `mode` 决定 ⇒ ⇒ **只改共享层一个类，不碰任何域的 yaml** ⇒ ⚠️ 但它会让 **OFF 域的运行期上限 2048 → 10001**（favorite）⇒ ⇒ **跨域可观察行为变更** ⇒ favorite 域的 `FavoriteApiRealTomcatGateTest` 会随之改 ⇒ ⇒ **必须域侧参与** |
+| **本层为什么不直接改 (b)** | ① 属**跨域可观察行为**变更（favorite 域的响应会变）⇒ 按「共享层缺陷转 G4，但**跨域行为变更必须让域侧参与**」⇒ ⇒ 先**登记 ＋ 转派**（G3 域内 ＋ 整合者的 `tools/difftest/**`）；② 共享层**不能假设**「Go 侧自捕获 ⇒ RAG 侧域内也自装了判据」（那是拿 RAG 实现推断 RAG 实现）⇒ ⇒ 判据必须由**域侧**提供 |
+| ⚠️ **顺带暴露的另一格** | **task 域同样受影响**：它 yaml 声明 `mode: raw` ⇒ ≠ OFF ⇒ **运行期 = 10001**；而它的语义答案是 `OFF` ⇒ ⇒ 一旦 G2 把它改成 `off` ⇒ **运行期会掉回 2048** ⇒ ⇒ ⇒ **「改 yaml」这个动作会顺带改掉容器上限** ⇒ ⇒ **G2 改 task-api 时必须知道这件事**（否则会以为只改了形状闸门）⇒ ⇒ **转 G2** |
+
+##### 4.10.15.6 回归口径（**第十次全量** · 核对日期 2026-10-27 · 代码态 `5a954bb`）
+
+| 项 | 值 |
+|---|---|
+| **命令** | `mvn -B clean verify`（**全量**，不是 `-pl` 子集） |
+| **结果** | ✅ **BUILD SUCCESS** |
+| **模块数 / 有测试的模块数** | **52 / 29** |
+| **用例数** | **2470**（**29 行「模块名 ↔ 数字」明细**逐项求和 ⇒ **非按行序 tail**）⇒ 与第九次**持平**（守门仍是 6 条 ⇒ **用例数守恒**） |
+| **failures / errors / skipped** | **0 / 0 / 4**（`favorite-api` skipped 1 · `favorite-rpc` skipped 3） |
+| **耗时** | **20:23 min**（11:18:58 起跑 ⇒ 11:39:21 完成） |
+| **逐模块明细** | `users-common` 33 · `common` **320** · `admin-rpc` 112 · `admin-api` 129 · `user-rpc` 133 · `user-api` 107 · `article-common` 15 · `article-rpc` **154** · `article-api` 92 · `hot-common` 14 · `hot-api` 96 · `hot-rpc` 96 · `message-common` 21 · `message-rpc` 84 · `message-api` 88 · `like-common` 18 · `like-api` 81 · `like-rpc` 96 · `task-api` 90 · `task-rpc` 114 · `follow-common` 37 · `follow-api` 50 · `follow-rpc` 74 · `favorite-common` 29 · `favorite-api` 97 · `favorite-rpc` 110 · `comment-common` 27 · `comment-api` 45 · `comment-rpc` 108 ⇒ **逐项可复算**（与第九次**逐条一致**） |
+| **双侧探针**（同批次） | `tools/api-envelope-probe/favorite/run.sh` ⇒ **EXIT=0**（Go 真源 == `expected.txt` == RAG 真 HTTP **逐字节**）· `run-parity.sh` ⇒ **EXIT=0 · 56 例**（一致 54 · 不一致 0 · 已签字偏离 2）· `run-rpc-timeout-parity.sh` ⇒ **EXIT=0 · 3 例** |
+| **三门禁 ＋ 台账门禁** | `check-wave-lane-ownership` / `check-wave-role-model` / `check-wave-coupling` ⇒ **0 / 0 / 0**；`check-ledger-tables` / `check-ledger-selfcheck` / `check-ledger-count` ⇒ 全 **EXIT=0** |
+| **写权自证** | 本轮改动**全部**落在 `service/common/**` ＋ 本文件 ⇒ **零域侧改动**（`tools/difftest/**` = 整合者共享面 ⇒ **零改动**） |
+
+##### 4.10.15.7 ✅ **G3 的 ①（「隔离跑 article-rpc 154 条」是否受旧 jar 影响）—— 用本轮全量闭环**
+
+| 项 | 结论 |
+|---|---|
+| **原问题** | G3 曾用 `mvn -o -pl service/article/article-rpc test`（**不带 `-am`** ⇒ 共享层从 `~/.m2` 取**旧 jar**）跑出「**154 条 0 失败**」⇒ 该结论**可不可信**？ |
+| **本层复核方式** | 用**第十次全量**（reactor 内构建 ⇒ **用当前源码**）里的同一模块作对照 ⇒ **`article-rpc` = 154 条 / 0 失败 / 0 errors** ⇒ ⇒ **两个数字**与那次隔离跑**逐条一致** |
+| **结论** | ✅ **那次隔离跑的结论成立**（「article-rpc 154 条 0 失败」不因旧 jar 而失效）⇒ ⇒ 旧 jar 的影响面**没有落到 article-rpc 这 154 条上**<br>⚠️ **但纪律不变**：**单模块跑域内测试必须加 `-am`**，否则共享层取 `~/.m2` 旧 jar ⇒ **假红 / 假绿**都可能 ⇒ 本轮已把它立为本层纪律 |
+| **⚠️ 为什么不另跑一次 `-am` 隔离跑** | 本轮全量**已经**是「reactor 内构建 ＋ 当前源码」的**更强**对照（覆盖 52 模块 / 2470 条）⇒ ⇒ 再跑一次 `-am` 隔离跑**不增加证据强度**，只是重复 ⇒ ⇒ 结论以全量口径为准（§4.10.15.6 的逐模块明细可复算） |
+
+#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `5a954bb`）
 
 | commit | 内容 | 落点（`文件:行号`） | A 轴 |
 |---|---|---|---|
@@ -1006,6 +1100,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | `0c72969` | 🟢 **U+FFFD 两处**（纯注释 · 零行为变化） | `…/observability/GoStyleOtelSamplerProtocolGateTest.java:24` · `…/protection/FakeServerCall.java:13` | 无（纯注释） |
 | `d56989f` | 🟢 **共享层 Filter 槽位快照守门**（4 条 · 零生产改动） | **新增** `…/spring/SharedFilterOrderSnapshotGateTest.java`（① 槽位快照 ② 预算起点不被抢占 ③ 域侧可用槽位 ④ 真容器次序） | 无（只加守门） |
 | `c15dfeb` | 🟢 **G2 FB-05**：`parse` 接受 `"false"` 作为 `off` 的别名（YAML 1.1 布尔化） | `…/http/GoStyleFormLimitMode.java:…`（`parse` 加一个 `case` + `PROPERTY` javadoc + 异常消息）· **新增** `…/http/GoStyleFormLimitModeYamlBooleanGateTest.java`（5 条） | **A3** |
+| `5a954bb` | 🟢 **G3 反馈单 轴②**：form 闸门判据补「**域自捕获**」第一判据 ⇒ favorite 语义答案 = `OFF` | `…/http/GoStyleFormLimitMode.java:…`（`DomainReachability` 加 `goSideHandlesParseError` + `selfConsistent` 两规则 + 表的 favorite 行 + **删** `REGISTERED_DEVIATIONS` 的 favorite 条 + `Mode.OFF`/类 javadoc）· `…/http/GoStyleTomcatParameterLimitCustomizer.java:…`（订正「无分叉 / favorite 零改动」等三处陈述）· `…/http/GoStyleFormValues.java:…` · `…/http/GoStyleFormLimitExceededException.java:…` · **重写** `…/http/GoStyleFormLimitSemanticCriterionTest.java`（6 条）· 另 2 个测试类 javadoc 订正 | **A3** |
 
 **回归口径与结果（第七次全量 · 核对日期 2026-10-27）**
 
