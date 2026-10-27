@@ -130,7 +130,22 @@ spring:
       #      · `max-active: 64` ↔ Go 的 `PoolSize`（本机 100）⇒ **性能面**数值差异（已登记）
       #      · `min-idle: 0` ↔ Go 的 `MinIdleConns`（`go-redis@v9.20.0/options.go:218-222`
       #        **无 default 赋值** ⇒ 保持 0）⇒ **精确对齐**
-      #      · `max-idle: 16` 在 Go 侧**无对应项**（go-redis 不限空闲连接数，靠 `IdleTimeout` 回收）⇒ **纯表达层取值**
+      #      · `max-idle: 16` ↔ Go 的 `MaxIdleConns`（`go-redis@v9.20.0/options.go:224-228`
+      #        **有对应项**、注释写明 `default: 0` ⇒ 消费点 `internal/pool/pool.go:1257`
+      #        `if p.cfg.MaxIdleConns == 0 || p.idleConnsLen.Load() < p.cfg.MaxIdleConns`
+      #        ⇒ ⇒ **Go 取值 = 0 = 无上限**）⇒ ⇒ 本项 16 ⇒ **比 Go 更严**
+      #        （只影响空闲连接的回收时机，**不影响命令结果**）⇒ 属**可登记残留**
+      #        ⇒ ⚠️ 原写「Go 侧**无对应项** ⇒ 纯表达层取值」**不准确** ⇒ 2026-10-27 第十八轮订正
+      #      · `max-wait: 4s` ↔ Go 的 `PoolTimeout`（`go-redis@v9.20.0/options.go:380-386`
+      #        `if opt.PoolTimeout == 0 { if opt.ReadTimeout > 0 { opt.PoolTimeout = opt.ReadTimeout + time.Second } else { opt.PoolTimeout = 30 * time.Second } }`
+      #        ⇒ 本域 `redis.NewClient` **未设 ReadTimeout** ⇒ 落库默认 **3s**
+      #        （`options.go` `case 0: opt.ReadTimeout = 3 * time.Second`）⇒ ⇒ **Go 侧池耗尽 ⇒ 4s 后失败**
+      #        （消费点 `internal/pool/pool.go:1113` `p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)`）
+      #        ⇒ ⚠️ **不配的后果**：commons-pool2 2.12.1 `BaseObjectPoolConfig:DEFAULT_MAX_WAIT_MILLIS = -1`
+      #        ⇒ 消费点 `GenericObjectPool.borrowObject` 的**负值分支走 `takeFirst()`（无参 = 永久阻塞）**
+      #        ⇒ ⇒ **无限等** ⇒ 且 Lettuce 的 3s 命令超时**救不了场**（计时器在 `CommandExpiryWriter.write` 才起算，
+      #        而**借连接发生在写命令之前**）⇒ ⇒ **比 Go 更糟**（Go 4s 失败 / RAG 无限挂起）
+      #        ⇒ 2026-10-27 第十八轮修（守门 = `TaskRedisCommandTimeoutGateTest` 断言 ⑦）
       #    ⚠️ **不要拿 like-rpc 的 64/16/4 当基准**（AGENTS.md §3.1：不得拿「现有 RAG 代码」当对照基准）：
       #    like 域的 Go 走 **go-zero 的 redis**（`go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:14`
       #    `idleConns = 8` ⇒ `MinIdleConns = 8`），本域的 Go 走 **go-redis 直连** ⇒ 两个域的 Go 客户端本就不同。
@@ -140,6 +155,7 @@ spring:
           max-active: 64
           max-idle: 16
           min-idle: 0
+          max-wait: 4s
 
   # ============== Kafka ==============
   # 对应 Go Kafka.Brokers

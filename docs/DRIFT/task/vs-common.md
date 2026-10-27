@@ -668,7 +668,7 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 - like 域与 task 域**各跑了自己的活体 A/B**，**没有**拿一个域的结论去覆盖另一个域
   ⇒ ⇒ 理由：**域上下文不同 ⇒ customizer 数量可能不同 ⇒ 行为可能不同** ⇒ ⇒ 「共享层那个 bean 一样」**推不出**「两个域的行为一样」
 - ⇒ ⇒ **全仓实测**：`LettuceClientOptionsBuilderCustomizer` 的**域内副本只有 1 处** —— 在 **users 域**
-  （`service/users/user/user-api/.../RedisDisconnectedBehaviorConfig.java:103`）⇒ ⇒ **我三域零遮蔽副本** ✔
+  （`service/users/user/user-api/.../RedisDisconnectedBehaviorConfig.java:103`）⇒ ⇒ **我三域零遮蔽副本** ✔<br>🆕 **2026-10-27 第十八轮订正（G1 [1] 回信）**：G1 已在他们的 `312a09b`**删掉全部 5 份域内副本** ⇒ ⇒ 「users 域那份会遮蔽共享层」这个前提**在 G1 侧已不成立** ⇒ ⇒ **但我树未合入 `312a09b`** ⇒ ⇒ 我树里那份**仍在**（实测 `find service/users service/follow -name RedisDisconnectedBehaviorConfig.java` = 1 命中）⇒ ⇒ **本条陈述对我树仍成立** ⇒ ⇒ 合并后该前提自动消失 ⇒ ⇒ **结论不变**（我三域零遮蔽副本 ✔）。
   ⇒ ⇒ （users 域那份**会遮蔽**共享层 ⇒ 那是 G1 域的事 ⇒ 本域不代改）
 
 ---
@@ -856,6 +856,48 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 - ⚠️ **本域的风险是「反过来」的，而且更硬**：`enabled: true` ⇒ Boot 必走 `getPoolConfig` ⇒ ⇒ **`commons-pool2` 是启动期硬前提**（缺它 ⇒ `NoClassDefFoundError: org/apache/commons/pool2/impl/GenericObjectPoolConfig`）⇒ ⇒ **不是「静默翻转」，是「起不来」** ⇒ ⇒ **对域侧更安全（fail-fast）** ⇒ ⇒ 这一点已写在 `service/task/task-rpc/pom.xml:123-138` 的注释里（含「Boot 4 的 starter 不再传递 commons-pool2 ⇒ 只能由应用自己声明」+ like-rpc 2026-10-23 的事故实证）。
 - ⇒ ⇒ **但「依赖面」这条纪律本域照样标，且要分两轴写**：**轴 ①「池开关」** ⇒ 本域**不依赖**共享层 dependency 状态（`enabled` 显式）⇒ ⇒ **轴 ②「参数值」** ⇒ 本域**依赖**共享层（E66 那条联动条款：共享层 customizer 若碰 `timeoutOptions(...)` / `socketOptions(...)` ⇒ 覆盖本域的值）⇒ ⇒ ⇒ **两轴各自盯住：轴 ① 盯共享层的 dependency 声明，轴 ② 盯共享层 customizer 的取值**
 
+
+### 🔴 第十八轮 · Redis 池 `max-wait` 对齐（Go 的 `PoolTimeout`）—— **池耗尽时无限等 ⇒ 比 Go 更糟**（2026-10-27）
+
+**① 缺陷本体（真缺陷）**
+- **现象**：池耗尽（连接全在用）时，**借连接这一步没有任何等待上限** ⇒ ⇒ **无限挂起**（不是「等 3s」）。
+- **Go 侧（本域自己推，不照抄）**：本域 Go 走 **go-redis 直连** ⇒ `service/task/rpc/internal/svc/service_context.go:25-29` `redis.NewClient(&redis.Options{Addr, Password, DB})` ⇒ **只设 3 个字段** ⇒ `ReadTimeout`/`PoolTimeout` **都没设** ⇒ ⇒ 落 go-redis v9.20.0 库默认（`options.go` `case 0: opt.ReadTimeout = 3 * time.Second` ⇒ **3s**；`options.go:380-386` ⇒ **`PoolTimeout = ReadTimeout + 1s = 4s`**）⇒ ⇒ 消费点 `internal/pool/pool.go:1113` `p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)` ⇒ ⇒ **Go 侧池耗尽 ⇒ 4s 后失败**。
+- **RAG 侧为何更糟（字节级实测）**：commons-pool2 2.12.1 `BaseObjectPoolConfig` 的 **`DEFAULT_MAX_WAIT_MILLIS = -1l`**（`javap -constants`）⇒ 消费点 `GenericObjectPool.borrowObject` 读 `getMaxWaitDuration()`（`javap -c` 实测：两个调用点 ＋ 分支到 **`takeFirst()`（无参 = 永久阻塞）** 与 `pollFirst(Duration)`）⇒ ⇒ **负值 ⇒ 永久阻塞** ⇒ ⇒ **无限等**。
+- ⚠️ **Lettuce 的 3s 命令超时救不了场**：计时器在 `CommandExpiryWriter.write(command)` 才起算，而**借连接发生在写命令之前** ⇒ ⇒ 池耗尽时那个 3s **根本没开始**。
+
+**② 落码（1 个文件）**
+- `service/task/task-rpc/src/main/resources/application.yml` 的 `spring.data.redis.lettuce.pool` ⇒ 加 **`max-wait: 4s`**（对齐 Go 的 `PoolTimeout`）。
+- ⚠️ **不动 `min-idle`**：本域 = **0**（go-redis 直连，`MinIdleConns` 未设 ⇒ 无 default ⇒ 0）⇒ **精确对齐**；⚠️ **G3 消息里「like `min-idle: 4`」与我树不符**（like 早就是 8）⇒ ⇒ **两域的 `min-idle` 都未改**。
+
+**③ 守门 + 变异验证（恰好 1 条红，红在目标断言）**
+- 🆕 `TaskRedisCommandTimeoutGateTest.redisPoolMaxWaitMatchesGoPoolTimeout`（新增断言 ⑦）⇒ 本类 **6 ⇒ 7 条**。
+- 变异 = 抽掉 `max-wait: 4s` ⇒ **7 条恰红 1 条**（红在 `:287`）⇒ 另 6 条仍绿 ⇒ ⇒ **非假绿** ⇒ ⇒ 还原后 **sha256 与变异前逐字节一致**（`b8f17b429abc9121827f61bd`）⇒ ⇒ 复跑 **7 / 0f 0e 0s**。
+
+**④ 🟢 顺带订正两处「我域自己写错的引用」**
+- **`MaxIdleConns` 不是「无对应项」**：go-redis v9.20.0 `options.go:224-228` **有**该字段（注释写明 `default: 0`）⇒ 消费点 `internal/pool/pool.go:1257` `if p.cfg.MaxIdleConns == 0 || p.idleConnsLen.Load() < p.cfg.MaxIdleConns` ⇒ ⇒ **Go 取值 = 0 = 无上限** ⇒ ⇒ **正确表述 = 「有对应项，Go 取值 = 0（无上限）」** ⇒ ⇒ **`max-idle: 16` 重新归类 = 「比 Go 更严」的**可登记残留**（只影响空闲连接回收时机，**不影响命令结果**）** ⇒ ⇒ 原写「Go 侧无对应项 ⇒ 纯表达层取值」**不准确**，已订正（yml 注释 + 守门断言消息 + 本文件）。
+- **`getPoolConfig` 的引用路径**：Boot 4.0.8 的 `LettuceConnectionConfiguration`（外层类）**没有** `getPoolConfig` 方法（实测 `javap` 方法清单）⇒ ⇒ **真实消费点是内部类** `LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig(DataRedisProperties$Pool)` ⇒ ⇒ 原引「`:267-271`」是 **Boot 2/3 旧路径**，在 Boot 4.0.8 上**对不上** ⇒ ⇒ **一律改按「类名 + 方法名」引用**。
+
+**⑤ ⚠️ 口径影响（数字要跟着改 · 第十八轮**实测**）**
+- 本域 **+1 条**守门 ⇒ ⇒ **task-rpc 121 ⇒ 122**（`mvn test` 口径）。
+- 🆕 **第十八轮实测（9 模块全量 `clean test` · 带 `-am` · BUILD SUCCESS · 9:52 min）**：
+
+| 模块 | tests | failures | errors | skipped | 报告数 |
+|---|---|---|---|---|---|
+| `service/common`（**共享层**） | 327 | 0 | 0 | 0 | 62 |
+| `service/message/message-api` | 103 | 0 | 0 | 0 | 15 |
+| `service/message/message-rpc` | 89 | 0 | 0 | 0 | 20 |
+| `service/message/message-common` | 21 | 0 | 0 | 0 | 2 |
+| `service/like/like-api` | 94 | 0 | 0 | 0 | 11 |
+| `service/like/like-rpc` | **122** | 0 | 0 | 0 | 21 |
+| `service/like/like-common` | 18 | 0 | 0 | 0 | 2 |
+| `service/task/task-api` | 102 | 0 | 0 | 0 | 9 |
+| `service/task/task-rpc` | **122** | 0 | 0 | 0 | 15 |
+| **合计** | **998** | **0** | **0** | **0** | **157** |
+
+  ⇒ ⇒ **域侧 8 模块 = 671** ＋ 共享层 **327** ⇒ ⇒ **9 模块 `mvn test` 口径 = 998** ⇒ ⇒ **`test`+`verify` 口径 = 998 + 5（task 的产物层 IT）= 1003**。
+- 🔴 **订正我本轮自己写错的推算**：上面原写「9 模块 `mvn test` 口径 995 ⇒ 997」⇒ ⇒ **实测是 998（差 +1）** ⇒ ⇒ **那个 997 是推算、且推算错了** ⇒ ⇒ **根因（已实测定位，不是玄学）**：**第十七轮**新增的 `LikeRpcArtifactClasspathGateTest.fatJarCarriesSharedLayerOrderingBridge` 落在 **`test` 阶段**（类名 `*Test` ⇒ surefire 默认 includes 命中）⇒ ⇒ **like-rpc +1**（实测复核：`git show 016e95a:…/LikeRpcArtifactClasspathGateTest.java` 的 `@Test` 数 = **2** ⇒ HEAD = **3** ⇒ +1 ✔）⇒ ⇒ **第十七轮结束时真实值已是 996**，而第十七轮**只重跑了 `task-rpc`**（121）、**沿用了第十六轮的 9 模块总数 995** ⇒ ⇒ **基线在第十七轮就悄悄过期了**（未被发现）⇒ ⇒ 第十八轮 +2（两域池断言 ⑦）⇒ ⇒ **996 + 2 = 998** ✔
+  ⇒ ⇒ **教训（写死）**：**「只重跑受影响模块 + 沿用上轮总数」会让总数悄悄过期** ⇒ ⇒ 跨轮改动落在 **`test` 阶段的类**上时，要么**重跑 9 模块全量**，要么把总数标成「**已过期**」⇒ ⇒ 本轮能抓出来，靠的是**逐模块 XML 求和 == maven 汇总行**的**双口径交叉验算**（单靠「我加了 2 条 ⇒ 997」这个推算**推不出来**）。
+  ⇒ ⇒ **原值保留不改写**：第十六/十七轮台账里的 **995 / 1000 原值保留**，以本条订正为准。
 ---
 
 ## 4·十二、🟢 **第十二轮（2026-10-27 18:4x）· 合并 G4 的 13 笔（零冲突）⇒ 新机器门禁在本树为绿 ＋ 全仓 U+FFFD 复扫下降 ＋ 两个红门禁的根因定位到行**
@@ -874,7 +916,7 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 - 实测：`mvn -o -B -DargLine=-Xmx2g -pl service/common test` ⇒ **327 / 0f 0e 0s**（324 + **3** = G4 那 3 条）· **BUILD SUCCESS**
 - surefire 报告里三条用例**都在**：`scannerSeesTheRealRepository` · `noDomainSideShadowingCopyExists` · `scannerActuallyReportsACopy`
 - **我三域 `src/main/java` 的 `LettuceClientOptionsBuilderCustomizer` 命中数 = 0** ⇒ ⇒ 我域那两处引用在 `src/test/java`（`LikeRedisDisconnectFastRejectGateTest` · `TaskRedisDisconnectFastRejectGateTest`）⇒ ⇒ **门禁的扫描范围（只扫 `src/main/java`）天然排除** ✔
-- 白名单那份（users 域 `RedisDisconnectedBehaviorConfig.java`）在本树**仍存在** ⇒ ⇒ 门禁的 ③(b) 通过 ⇒ ⇒ 与「自适配」设计一致（G1 删掉后那半条自动为空）
+- 白名单那份（users 域 `RedisDisconnectedBehaviorConfig.java`）在本树**仍存在** ⇒ ⇒ 门禁的 ③(b) 通过 ⇒ ⇒ 与「自适配」设计一致（G1 删掉后那半条自动为空）<br>🆕 **2026-10-27 第十八轮订正（G1 [1] 回信 · 第二处）**：G1 已在 `312a09b` **删掉全部 5 份域内副本** ⇒ ⇒ **「在本树仍存在」只对我当前树成立**（我树未合 `312a09b`；实测仍有 1 命中）⇒ ⇒ **合并后这半条会自动为空** ⇒ ⇒ 门禁的**自适配**设计不受影响（③(b) 仍通过）⇒ ⇒ **结论不变**。
 
 ### ③ 🟢 全仓字节级 U+FFFD 复扫（**合并后**）：**15 份 / 38 字节 ⇒ 12 份 / 27 字节**（−3 份 / −11 字节）
 

@@ -188,28 +188,74 @@ class LikeRpcRedisTimeoutsGateTest {
         //       （🆕 2026-10-27 原为 4 ⇒ 那是**偏离 Go**；已修）
         //     · `PoolSize` 未设 ⇒ `go-redis@v9.20.0/options.go:350-351` `= 10 * GOMAXPROCS`
         //       ⇒ **机器相关**（本机 10 核 ⇒ 100）⇒ **无法逐值对齐** ⇒ 只按**数量级**对齐 64。
-        //     · 「最大空闲连接数」在 go-redis **无对应项**（不限空闲连接数，靠 `IdleTimeout` 回收）
-        //       ⇒ `max-idle` 是**纯表达层**取值。
-        //   消费点（Boot 4 `LettuceConnectionConfiguration`）：
-        //     · `:162-165` `createBuilder` ⇒ 池启用时走 `PoolBuilderFactory`
-        //     · `:264` `LettucePoolingClientConfiguration.builder().poolConfig(getPoolConfig(properties))`
-        //     · `:267-271` `getPoolConfig` ⇒ `:269 setMaxTotal(maxActive)` · `:270 setMaxIdle(maxIdle)` · `:271 setMinIdle(minIdle)`
+        //     · 「最大空闲连接数」↔ Go 的 `MaxIdleConns`（`go-redis@v9.20.0/options.go:224-228`
+        //       **有对应项**、注释写明 `default: 0` ⇒ 消费点 `internal/pool/pool.go:1257`
+        //       `if p.cfg.MaxIdleConns == 0 || p.idleConnsLen.Load() < p.cfg.MaxIdleConns`
+        //       ⇒ ⇒ **Go 取值 = 0 = 无上限**）⇒ ⇒ 本项 16 ⇒ **比 Go 更严**
+        //       （只影响空闲连接回收时机，不影响命令结果）⇒ 属**可登记残留**
+        //       ⇒ ⚠️ 原写「go-redis **无对应项**（不限空闲连接数）」**不准确** ⇒ 2026-10-27 第十八轮订正
+        //   消费点（Boot 4.0.8 `LettuceConnectionConfiguration`）：
+        //     · `createBuilder` ⇒ 池启用时走 `PoolBuilderFactory`
+        //     · `LettucePoolingClientConfiguration.builder().poolConfig(getPoolConfig(properties))`
+        //     · ⚠️ **真实消费点是内部类** `LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig`
+        //       （⚠️ 外层类**没有** `getPoolConfig` 方法 —— 实测 `javap` 方法清单；
+        //       「`:267-271`」是 **Boot 2/3 旧路径**，在 Boot 4.0.8 上**对不上** ⇒ ⇒ 引用一律按**类名 + 方法名**）
+        //       ⇒ 它 `setMaxTotal(maxActive)` · `setMaxIdle(maxIdle)` · `setMinIdle(minIdle)` · `setMaxWait(maxWait)`
         GenericObjectPoolConfig<?> poolConfig = poolConfig();
         assertThat(poolConfig.getMaxTotal())
-                .as("🔴 连接池最大连接数必须 = 64（Boot 4 `LettuceConnectionConfiguration:269` "
-                        + "`config.setMaxTotal(properties.getMaxActive())`）"
+                .as("🔴 连接池最大连接数必须 = 64（Boot 4 `LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig` "
+                        + "⇒ `config.setMaxTotal(properties.getMaxActive())`）"
                         + " ⇒ Go 侧是 `10 × 核数`（本机 100，机器相关 ⇒ **数量级**对齐，非逐值对齐）"
                         + " ⇒ 数值差异属**性能面**，已登记在 `DRIFT-LIKE-RPC-REDIS-POOL`")
                 .isEqualTo(64);
         assertThat(poolConfig.getMaxIdle())
-                .as("连接池最大空闲连接数必须 = 16（Boot 4 `:270` `setMaxIdle`）"
-                        + " ⇒ Go 侧**无对应项**（go-redis 不限空闲连接数）⇒ 纯表达层取值")
+                .as("连接池最大空闲连接数必须 = 16（Boot 4 `LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig` "
+                        + "⇒ `config.setMaxIdle(properties.getMaxIdle())`）"
+                        + " ⇒ Go 侧**有对应项** `MaxIdleConns`（`go-redis@v9.20.0/options.go:224-228`，`default: 0`）"
+                        + " ⇒ 消费点 `internal/pool/pool.go:1257` ⇒ **Go 取值 0 = 无上限**"
+                        + " ⇒ 本项 16 ⇒ **比 Go 更严**（只影响空闲连接回收时机，不影响命令结果）⇒ 属**可登记残留**"
+                        + " ⇒ ⚠️ 原写「Go 侧**无对应项**」**不准确** ⇒ 2026-10-27 第十八轮订正")
                 .isEqualTo(16);
         assertThat(poolConfig.getMinIdle())
-                .as("🔴 连接池最小空闲连接数必须 = 8（Boot 4 `:271` `setMinIdle`）"
+                .as("🔴 连接池最小空闲连接数必须 = 8（Boot 4 `LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig` "
+                        + "⇒ `config.setMinIdle(properties.getMinIdle())`）"
                         + " ⇒ Go 侧 `MinIdleConns = 8`（go-zero 的 `idleConns = 8`）⇒ **精确对齐**"
                         + " ⇒ 写成 4 会变成**对 Go 的偏离**")
                 .isEqualTo(8);
+    }
+
+    /**
+     * 🔴 **断言 ⑦（2026-10-27 第十八轮新增）**：等连接的最长等待必须 = **4s**，
+     * 对齐 Go 的 {@code PoolTimeout}。
+     *
+     * <p><b>Go 侧怎么来的</b>：本域走 go-zero 的 redis ⇒ go-zero 构造 {@code red.Options} 时
+     * <b>不设</b> {@code PoolTimeout}、也<b>不设</b> {@code ReadTimeout}
+     * ⇒ ⇒ 落 go-redis v9.20.0 库默认 ⇒ {@code ReadTimeout = 3s}
+     * ⇒ ⇒ {@code PoolTimeout = ReadTimeout + 1s = 4s} ⇒ 池耗尽 ⇒ <b>4s 后失败</b>。
+     *
+     * <p>⚠️ <b>不配的后果</b>：commons-pool2 落 {@code DEFAULT_MAX_WAIT_MILLIS = -1}
+     * ⇒ 消费点走<b>负值分支</b> ⇒ {@code takeFirst()}（<b>无参 = 永久阻塞</b>）⇒ ⇒ <b>无限等</b>
+     * ⇒ 且 Lettuce 的 3s 命令超时<b>救不了场</b>（计时器在写命令时才起算，而借连接在写命令之前）。
+     */
+    @Test
+    @DisplayName("⑦ 等连接的最长等待必须 = 4s（对齐 Go 的 PoolTimeout；不配 ⇒ commons-pool2 负值 ⇒ 永久阻塞）")
+    void redisPoolMaxWaitMatchesGoPoolTimeout() {
+        GenericObjectPoolConfig<?> poolConfig = poolConfig();
+        assertThat(poolConfig.getMaxWaitDuration())
+                .as("🔴 等连接的最长等待必须 = 4s（Boot 4 `LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig` "
+                        + "⇒ `config.setMaxWait(properties.getMaxWait())`）"
+                        + " ⇒ Go 侧 `PoolTimeout` 未设（go-zero 的 `red.Options` 只传 Addr/Username/Password/DB/"
+                        + "MaxRetries/MinIdleConns/TLSConfig）⇒ 落 go-redis v9.20.0 默认"
+                        + "（`options.go:380-386`：`ReadTimeout > 0` ⇒ `PoolTimeout = ReadTimeout + time.Second`；"
+                        + "而 `ReadTimeout` 也没设 ⇒ 库默认 **3s**）"
+                        + " ⇒ ⇒ **Go 侧池耗尽 ⇒ 4s 后失败**"
+                        + "（消费点 `internal/pool/pool.go:1113` `p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)`）"
+                        + " ⇒ ⚠️ 不配 ⇒ commons-pool2 2.12.1 `BaseObjectPoolConfig:DEFAULT_MAX_WAIT_MILLIS = -1`"
+                        + " ⇒ 消费点 `GenericObjectPool.borrowObject` 走**负值分支 = `takeFirst()`（永久阻塞）**"
+                        + " ⇒ ⇒ **无限等** ⇒ 且 Lettuce 的 3s 命令超时救不了场"
+                        + "（计时器在 `CommandExpiryWriter.write` 才起算，而借连接在写命令之前）"
+                        + " ⇒ ⇒ **比 Go 更糟**（Go 4s 失败 / RAG 无限挂起）")
+                .isEqualTo(java.time.Duration.ofSeconds(4));
     }
 
     /** 池配置（**读消费点**：Boot 装配出来的 `LettucePoolingClientConfiguration`）。 */

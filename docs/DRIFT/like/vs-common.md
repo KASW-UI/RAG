@@ -826,6 +826,47 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 - ⚠️ **本域的风险是「反过来」的，而且更硬**：`enabled: true` ⇒ Boot 必走 `getPoolConfig` ⇒ ⇒ **`commons-pool2` 是启动期硬前提**（缺它 ⇒ `NoClassDefFoundError: org/apache/commons/pool2/impl/GenericObjectPoolConfig`）⇒ ⇒ **不是「静默翻转」，是「起不来」** ⇒ ⇒ **对域侧更安全（fail-fast）** ⇒ ⇒ 本域同款事故实证（like-rpc 2026-10-23 缺它时启动报该 `NoClassDefFoundError`）⇒ ⇒ 已写在 `service/task/task-rpc/pom.xml:123-138` 的注释里（同一形态，两域同源）。
 - ⇒ ⇒ **但「依赖面」这条纪律本域照样标，且要分两轴写**：**轴 ①「池开关」** ⇒ 本域**不依赖**共享层 dependency 状态（`enabled` 显式）⇒ ⇒ **轴 ②「参数值」** ⇒ 本域**依赖**共享层（E66 那条联动条款：共享层 customizer 若碰 `timeoutOptions(...)` / `socketOptions(...)` ⇒ 覆盖本域的值）⇒ ⇒ ⇒ **两轴各自盯住：轴 ① 盯共享层的 dependency 声明，轴 ② 盯共享层 customizer 的取值**
 
+
+### 🔴 第十八轮 · Redis 池 `max-wait` 对齐（Go 的 `PoolTimeout`）—— **池耗尽时无限等 ⇒ 比 Go 更糟**（2026-10-27）
+
+**① 缺陷本体（真缺陷）**
+- **现象**：池耗尽时**借连接没有任何等待上限** ⇒ ⇒ **无限挂起**（不是「等 3s」）。
+- **Go 侧（本域自己推，不照抄）**：本域走 **go-zero 的 redis** ⇒ `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40` 的 `red.Options` 只传 `Addr/Username/Password/DB/MaxRetries/MinIdleConns/TLSConfig` ⇒ ⇒ **同样不设 `ReadTimeout`/`PoolTimeout`** ⇒ ⇒ 落 go-redis v9.20.0 库默认（`ReadTimeout = 3s`）⇒ ⇒ **`PoolTimeout = 4s`** ⇒ ⇒ 消费点 `internal/pool/pool.go:1113` ⇒ ⇒ **Go 侧池耗尽 ⇒ 4s 后失败**。
+- **RAG 侧为何更糟（字节级实测）**：commons-pool2 2.12.1 **`DEFAULT_MAX_WAIT_MILLIS = -1l`** ⇒ 消费点 `GenericObjectPool.borrowObject` 的**负值分支走 `takeFirst()`（无参 = 永久阻塞）** ⇒ ⇒ **无限等**；⚠️ **Lettuce 的 3s 命令超时救不了场**（计时器在 `CommandExpiryWriter.write` 才起算，而**借连接在写命令之前**）。
+
+**② 落码（1 个文件）**
+- `service/like/like-rpc/src/main/resources/application.yml` 的 `spring.data.redis.lettuce.pool` ⇒ 加 **`max-wait: 4s`**。
+- ⚠️ **不动 `min-idle`**：本域早就是 **8**（= go-zero 的 `idleConns = 8` ⇒ **精确对齐**）⇒ ⇒ ⚠️ **G3 消息里的「like `min-idle: 4`」与我树不符** ⇒ ⇒ **未改**。
+
+**③ 守门 + 变异验证（恰好 1 条红，红在目标断言）**
+- 🆕 `LikeRpcRedisTimeoutsGateTest.redisPoolMaxWaitMatchesGoPoolTimeout`（新增断言 ⑦）⇒ 本类 **6 ⇒ 7 条**。
+- 变异 = 抽掉 `max-wait: 4s` ⇒ **7 条恰红 1 条**（红在 `:258`）⇒ 另 6 条仍绿 ⇒ ⇒ **非假绿** ⇒ ⇒ 还原后 **sha256 与变异前逐字节一致**（`9b406dca745a5906ab40a522`）⇒ ⇒ 复跑 **7 / 0f 0e 0s**。
+
+**④ 🟢 顺带订正两处「我域自己写错的引用」**
+- **`MaxIdleConns` 不是「无对应项」**（`options.go:224-228` `default: 0` ＋ 消费点 `internal/pool/pool.go:1257` ⇒ **0 = 无上限**）⇒ ⇒ **`max-idle: 16` 重新归类 = 「比 Go 更严」的可登记残留**（不影响命令结果）⇒ ⇒ 原写「无对应项 ⇒ 纯表达层取值」**不准确**，已订正。
+- **`getPoolConfig` 的引用路径**：Boot 4.0.8 外层类**没有** `getPoolConfig`（实测 `javap`）⇒ ⇒ 真实消费点是内部类 **`LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig`** ⇒ ⇒ 原引「`:267-271`」是 **Boot 2/3 旧路径**，已改按**类名 + 方法名**。
+
+**⑤ ⚠️ 口径影响（数字要跟着改 · 第十八轮**实测**）**
+- 本域 **+1 条**守门 ⇒ ⇒ **like-rpc 120 ⇒ 121**（`mvn test` 口径）。
+- 🆕 **第十八轮实测（9 模块全量 `clean test` · 带 `-am` · BUILD SUCCESS · 9:52 min）**：
+
+| 模块 | tests | failures | errors | skipped | 报告数 |
+|---|---|---|---|---|---|
+| `service/common`（**共享层**） | 327 | 0 | 0 | 0 | 62 |
+| `service/message/message-api` | 103 | 0 | 0 | 0 | 15 |
+| `service/message/message-rpc` | 89 | 0 | 0 | 0 | 20 |
+| `service/message/message-common` | 21 | 0 | 0 | 0 | 2 |
+| `service/like/like-api` | 94 | 0 | 0 | 0 | 11 |
+| `service/like/like-rpc` | **122** | 0 | 0 | 0 | 21 |
+| `service/like/like-common` | 18 | 0 | 0 | 0 | 2 |
+| `service/task/task-api` | 102 | 0 | 0 | 0 | 9 |
+| `service/task/task-rpc` | **122** | 0 | 0 | 0 | 15 |
+| **合计** | **998** | **0** | **0** | **0** | **157** |
+
+  ⇒ ⇒ **域侧 8 模块 = 671** ＋ 共享层 **327** ⇒ ⇒ **9 模块 `mvn test` 口径 = 998** ⇒ ⇒ **`test`+`verify` 口径 = 998 + 5（task 的产物层 IT）= 1003**。
+- 🔴 **订正我本轮自己写错的推算**：上面原写「9 模块 `mvn test` 口径 995 ⇒ 997」⇒ ⇒ **实测是 998（差 +1）** ⇒ ⇒ **那个 997 是推算、且推算错了** ⇒ ⇒ **根因（已实测定位）**：**第十七轮**新增的 `LikeRpcArtifactClasspathGateTest.fatJarCarriesSharedLayerOrderingBridge` 落在 **`test` 阶段**（类名 `*Test` ⇒ surefire 默认 includes 命中）⇒ ⇒ **like-rpc +1**（实测复核：`git show 016e95a:…/LikeRpcArtifactClasspathGateTest.java` 的 `@Test` 数 = **2** ⇒ HEAD = **3** ⇒ +1 ✔）⇒ ⇒ **第十七轮结束时真实值已是 996**，而第十七轮**只重跑了 `task-rpc`**、**沿用了第十六轮的 9 模块总数 995** ⇒ ⇒ **基线在第十七轮就悄悄过期了**（未被发现）⇒ ⇒ 第十八轮 +2（两域池断言 ⑦）⇒ ⇒ **996 + 2 = 998** ✔
+  ⇒ ⇒ **教训（写死）**：**「只重跑受影响模块 + 沿用上轮总数」会让总数悄悄过期** ⇒ ⇒ 跨轮改动落在 **`test` 阶段的类**上时，要么**重跑 9 模块全量**，要么把总数标成「**已过期**」⇒ ⇒ 本轮能抓出来，靠的是**逐模块 XML 求和 == maven 汇总行**的**双口径交叉验算**。
+  ⇒ ⇒ **原值保留不改写**：第十六/十七轮台账里的 **995 / 1000 原值保留**，以本条订正为准。
 ---
 
 ## 4·十二、🟢 **第十二轮（2026-10-27 18:4x）· 合并 G4 的 13 笔（零冲突）⇒ 新机器门禁在本树为绿 ＋ 全仓 U+FFFD 复扫下降 ＋ 两个红门禁的根因定位到行**

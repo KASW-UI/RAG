@@ -113,8 +113,24 @@ spring:
       #    ⇒ `PoolSize` **未设** ⇒ 落 go-redis v9.20.0 库默认 `10 × GOMAXPROCS`
       #      （`go-redis@v9.20.0/options.go:350-351`；本机 10 核 ⇒ 100）⇒ **机器相关、无法逐值对齐**
       #      ⇒ `max-active: 64` 按**数量级**对齐（数值差异属**性能面**，已登记）
-      #    ⇒ 「最大空闲连接数」在 Go 侧**无对应项**（go-redis 不限空闲连接数，靠 `IdleTimeout` 回收）
-      #      ⇒ `max-idle: 16` = **纯表达层**取值
+      #    ⇒ 「最大空闲连接数」↔ Go 的 `MaxIdleConns`（`go-redis@v9.20.0/options.go:224-228`
+      #      **有对应项**、注释写明 `default: 0` ⇒ 消费点 `internal/pool/pool.go:1257`
+      #      `if p.cfg.MaxIdleConns == 0 || p.idleConnsLen.Load() < p.cfg.MaxIdleConns`
+      #      ⇒ ⇒ **Go 取值 = 0 = 无上限**）⇒ ⇒ 本项 16 ⇒ **比 Go 更严**
+      #      （只影响空闲连接的回收时机，**不影响命令结果**）⇒ 属**可登记残留**
+      #      ⇒ ⚠️ 原写「Go 侧**无对应项** ⇒ 纯表达层取值」**不准确** ⇒ 2026-10-27 第十八轮订正
+      #    ⇒ 「等连接的最长等待」↔ Go 的 `PoolTimeout`（`go-redis@v9.20.0/options.go:380-386`
+      #      `if opt.PoolTimeout == 0 { if opt.ReadTimeout > 0 { opt.PoolTimeout = opt.ReadTimeout + time.Second } else { opt.PoolTimeout = 30 * time.Second } }`
+      #      ⇒ **本域的 go-zero 不设 `PoolTimeout`、也不设 `ReadTimeout`**
+      #      （`go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40` 的 `red.Options` 只有
+      #      `Addr/Username/Password/DB/MaxRetries/MinIdleConns/TLSConfig`）⇒ ⇒ 落 go-redis 库默认
+      #      `ReadTimeout = 3s` ⇒ ⇒ **Go 侧池耗尽 ⇒ 4s 后失败**
+      #      （消费点 `internal/pool/pool.go:1113` `p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)`）
+      #      ⇒ ⚠️ **不配的后果**：commons-pool2 2.12.1 `BaseObjectPoolConfig:DEFAULT_MAX_WAIT_MILLIS = -1`
+      #      ⇒ 消费点 `GenericObjectPool.borrowObject` 的**负值分支走 `takeFirst()`（无参 = 永久阻塞）**
+      #      ⇒ ⇒ **无限等** ⇒ 且 Lettuce 的 3s 命令超时**救不了场**（计时器在 `CommandExpiryWriter.write` 才起算，
+      #      而**借连接发生在写命令之前**）⇒ ⇒ **比 Go 更糟**（Go 4s 失败 / RAG 无限挂起）
+      #      ⇒ 2026-10-27 第十八轮修（守门 = `LikeRpcRedisTimeoutsGateTest` 断言 ⑦）
       #    ⚠️ 池形态的判据**不能只读 yml**：Boot 4 `DataRedisConnectionConfiguration#isPoolEnabled`（`:195-198`）
       #      `enabled != null ? enabled : COMMONS_POOL2_AVAILABLE` ⇒ **classpath 里没有 commons-pool2 ⇒ 池不启用**
       #      ⇒ 本模块 pom **必须显式声明** commons-pool2（Boot 4 的 starter 不再传递它）
@@ -125,6 +141,7 @@ spring:
           max-active: 64
           max-idle: 16
           min-idle: 8
+          max-wait: 4s
 
   # ============== Kafka ==============
   # 对应 Go KafkaConf（producer）/ mq.yaml 的 Kafka（consumer）
