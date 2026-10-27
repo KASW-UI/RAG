@@ -87,6 +87,18 @@
 
 | **G4-4** | 🟡 **共享层 2 处 U+FFFD 注释损坏**（各丢 1 个汉字；**纯注释、零行为影响**） | `service/common/src/test/java/com/rag/common/observability/GoStyleOtelSamplerProtocolGateTest.java:24`（`证的␦␦「全局 provider…（2×U+FFFD）` ⇒ 疑为「明」）· `service/common/src/test/java/com/rag/common/protection/FakeServerCall.java:13`（`测试用␦␦ {@link ServerCall}（2×U+FFFD）` ⇒ 疑为「的」） | **现象**：两处各丢 1 个汉字（3 字节 UTF-8 ⇒ 2×U+FFFD = 丢末字节）。<br>**建议修法**：按语义补回（只改注释、不改行为）；⚠️ **先判断是不是「故意的」** —— 本轮全仓扫出 **4 处故意**的 U+FFFD（如 `UserApiGoStyleBodyContentTypeTest:376` 的 `assertFalse(body.contains("\uFFFD"))` 是**断言的被测对象**；`docs/Pitfalls/message/rpc.md:911` 是**故障现象的样本**）⇒ **「全仓 U+FFFD 归零」不是合法目标**。<br>**影响面**：`service/common` 的两个测试类。**是否阻塞本波**：**否**。<br>🟡 **全域共性 ⇒ 只派一次**：本条**只在 comment 域登记**，其余域不重复派（G3 域内已自查完毕）。 |
 
+
+### 4.1 §4 派单闭合状态（2026-10-27 · G4 第七次回执 4 项规格）
+
+| 本域派单 | G4 回执对应 | 状态 | 证据 |
+|---|---|---|---|
+| **G4-1**（MyBatis-Plus 自动收集 `Interceptor[]` Bean） | **单 1** | ✅ **已闭合**（2026-10-27） | G4 树 commit `e3f2046`「test(common): 钉死『MyBatis-Plus 自动收集 Interceptor[] Bean』这条机制（**G3 单 1**）」⇒ 新增 `service/common/src/test/java/com/rag/common/persistence/MybatisPlusInterceptorChainGateTest.java`（**3 条 · 三层加码**）：① **收集层**（`MybatisPlusAutoConfiguration.interceptors` 里确有本拦截器）② **装载层**（`SqlSessionFactory.getConfiguration().getInterceptors()` 里确有本拦截器）③ **行为层（真 PG ＋ 真 mapper）**：绑一个已过期 deadline ⇒ 查询以 `57014` / `DEADLINE_EXCEEDED` 失败（前置：无 deadline 时同一查询**必须成功** ⇒ 失败才可归因于拦截器）⇒ **3/3 绿（实测）**。⚠️ **我域原登记的「全仓无任何测试证明」在登记时成立、现已由该守门闭合** ⇒ **保留原登记不改写**，此处加注记。⚠️ **该 commit 未进本树**（`git merge-base --is-ancestor` = 否）⇒ 本域要自己复跑该守门时**需先合入共享层**。 |
+| **G4-2**（client breaker 在 rpc 侧无装配路径） | **单 2** | ✅ **已闭合**（2026-10-27） | G4 回执：「**client breaker 进共享层**」⇒ **本域零改动**（落点全在 `service/common`）。⚠️ **影响面口径（不得外推）**：G4 逐个 rpc 自核（`@GrpcClient` 计数 ＋ **六种出向方式**交叉核）后给出**全局**口径 = **6/10 可观测 ＋ 4/10 N/A**（N/A = `hot-rpc` · `task-rpc` · `user-rpc` · `admin-rpc`）⇒ ⇒ **本域面 = **3/4**（`article-rpc` 5 · `comment-rpc` 2 · `favorite-rpc` 2 可观测；`hot-rpc` = 0 ⇒ N/A）** ⇒ **「3/4」只覆盖本域四个 rpc 组件** ⇒ **不得被读成全局口径**。 |
+
+
+> ℹ️ **口径说明**：上表的 ✅ 指 **「G4 的回执给了该单的落码 commit ＋ 验证口径」** ⇒ **不等于「本域已复验」** ⇒ 本域复验的前置 = **G4 的共享层 commit 进本树**（本树 HEAD 暂无 `2e2a84f` / `e3f2046` / `a1a2e05` ⇒ `git merge-base --is-ancestor` 全部为否）。
+> ⚠️ **G4 回执给的是第七次全量**（`5564c27` / 2457 条）⇒ 本域台账已按**第八次**（`23d1c2a` / 2461 条）回填（**加注记、不覆写原值**）。
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ✅ **2026-10-27 阶段 2 已完成**：`mvn -o -pl service/comment/comment-rpc -am test` ⇒ **comment-rpc 115 条 / 0 failures / 0 errors / 0 skipped**（含 `CommentRpcGrpcInterceptorWiringTest`（**真 gRPC server**）＋ `CommentFlywaySharedSchemaGateTest`（**真 PG ＋ 真 Flyway**）＋ `CommentSqlDeadlinePrecisionGateTest`（**真 PG ＋ 真 Hikari ＋ 真 MyBatis 插件链**）3/3 绿 ＋ **C-3 新增的 `CommentSpanWiringTest`（真 Spring 上下文 ＋ 真 PG ＋ 自装 SDK 收集型 exporter）7/7 绿**）。⚠️ **必须带 `-am`**（否则拿旧共享层跑，见文末「本轮踩坑」）。
