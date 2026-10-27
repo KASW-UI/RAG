@@ -975,6 +975,56 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 
 ---
 
+## 20. 🆕 **U+FFFD 跨树全表（2026-10-27 · G1 lane）** —— 四棵树各修各的，**主干一份都没修**
+
+> **触发**：G2 回执 ④ 说「U+FFFD 跨树复核（**3 条我树已干净 / 主树仍坏** ⇒ 合并须**以 G2 树版本为准**）」⇒ ⇒ **本轮把范围扩到全仓逐行扫描**（字节级 · `b'\xef\xbf\xbd'`）⇒ ⇒ **发现 G2 的清单只覆盖了它自己的 3 份**。
+
+### 20.1 🔴 **主干 `do-my-own-gh` 的全仓 U+FFFD 清单：20 份文件 / 51 处**（逐行定位）
+
+| # | 文件 | 处数 | 性质 | **已修的 lane（字节级实测）** | **合并时该取谁** |
+|---|---|---|---|---|---|
+| 1 | `service/common/…/observability/GoStyleOtelSamplerProtocolGateTest.java:24` | 2 | 真损坏 | ✅ **G4**（`0c72969`） | **G4 树** |
+| 2 | `service/common/…/protection/FakeServerCall.java:13` | 2 | 真损坏 | ✅ **G4** | **G4 树** |
+| 3 | `service/like/like-rpc/…/domain/LikeOutboxEventEntity.java:17` | 3 | 真损坏 | ✅ **G2** | **G2 树** |
+| 4 | `service/message/message-api/…/GoStyleGrpcClientBreakerE2ETest.java:43` | 3 | 真损坏 | ✅ **G2** | **G2 树** |
+| 5 | `service/message/message-rpc/…/MessageRpcProductionAddressTest.java:96` | 3 | 真损坏 | ✅ **G2** | **G2 树** |
+| 6 | `service/comment/comment-rpc/…/service/CommentAuditPublisher.java:19` | 3 | 真损坏 | ✅ **G3** | **G3 树** |
+| 7 | `service/favorite/favorite-rpc/…/config/FavoriteRpcLabels.java:9` | 3 | 真损坏 | ✅ **G3** | **G3 树** |
+| 8 | `service/favorite/favorite-rpc/…/mapper/FavoriteItemMapper.java:78` | 2 | 真损坏 | ✅ **G3** | **G3 树** |
+| 9 | `service/favorite/favorite-rpc/…/service/FavoriteRpcSupport.java:70` | 2 | 真损坏 | ✅ **G3** | **G3 树** |
+| 10 | `service/favorite/favorite-rpc/…/service/FavoriteFactSemanticsTest.java:37` | 3 | 真损坏 | ✅ **G3** | **G3 树** |
+| 11 | 🟡 **`service/users/user/user-api/…/service/AvatarHistoryService.java:32`** | 2 | 真损坏 | ✅ **G1（本域 · `0c2a902`）** | **G1 树** ← **本轮新增** |
+| 12 | 🟡 **`service/users/user/user-api/…/AvatarHistoryIgnoresBodyTest.java:61`** | 3 | 真损坏 | ✅ **G1（本域 · `0c2a902`）** | **G1 树** ← **本轮新增** |
+| 13 | 🟡 **`service/users/user/user-rpc/…/UserRpcLoginNullStatusReadsAsZeroTest.java:44`** | 3 | 真损坏 | ✅ **G1（本域 · `0c2a902`）** | **G1 树** ← **本轮新增** |
+| 14 | `service/users/user/user-api/…/UserApiGoStyleBodyContentTypeTest.java:376` | 1 | **故意**（`assertFalse(decodedAsUtf8.contains("␦"))` 的**被测对象**） | — | **不动** |
+| 15 | `service/article/article-api/…/ArticleApiMvcPipelineTest.java:1143` + `:1159` | 2 | **故意**（`ext_info` 的 **key** 钉死码点序 + 同一测试类里的 FFFD 断言） | — | **不动**（G3 已判） |
+| 16 | `docs/Pitfalls/users/user/rpc.md:146` | 1 | **故意**（`'用户不␦?'` = 故意记录「末字已不可恢复」） | — | **不动**（本域） |
+| 17 | `docs/Pitfalls/message/rpc.md:911` / `:921` | 2 | **故意**（`CONTAINER␦: unbound variable` = **shell 报错原文样本**） | — | **不动**（G2 域） |
+| 18 | 🔴 `tools/errmsg-probe/README.md:59` | 3 | **真损坏**（「未登记码的回␦␦␦结果」） | ❌ **无人拥有** | 🔴 **待整合者认领** |
+| 19 | 🔴 `tools/sql-statement-probe/favorite/compare.py:561` | 3 | **真损坏** | ❌ **无人拥有**（`tools/**` 非 lane 白名单） | 🔴 **待整合者认领** |
+| 20 | 🔴 `component-semantic-verification/springboot-semantic-model.md:269` / `:320` | 5 | **真损坏** | ❌ **无人拥有** | 🔴 **待整合者认领** |
+
+### 20.2 ⇒ ⇒ **合并规则（写死，别再逐次口头对）**
+
+1. **9 份真损坏分属 4 个 lane**（G4 2 · G2 3 · G3 5 · **G1 3**）⇒ ⇒ **合并时必须逐份取「已修的那个 lane 的树」** ⇒ ⇒ **若按主干版本取 ⇒ 9 份坏字符全部被带回去**。
+2. **6 处是「故意」**（#14~#17）⇒ ⇒ **一个字都不动** ⇒ ⇒ **「全仓 U+FFFD 归零」不是合法目标**。
+3. **3 份是「无人拥有」**（#18~#20）⇒ ⇒ **不在任何 lane 的写权面** ⇒ ⇒ **我域不代改** ⇒ ⇒ 已登记，请整合者认领。
+4. ⚠️ **G2 的清单只覆盖它自己的 3 份** ⇒ ⇒ **我域的 3 份（#11~#13）此前不在任何人的清单里** ⇒ ⇒ 本轮**主动补进**（否则合并时按主干取 ⇒ 我域那 3 处坏字符回流）。
+5. ⇒ **合并后必须再跑一次字节级扫描**（不是 `grep` —— 见 §19 的判据纪律）⇒ ⇒ 目标 = **只剩 6 处故意 + 3 份待认领**。
+
+### 20.3 ✅ **四棵树的当前命中数（字节级全仓扫描，2026-10-27 13:2x）**
+
+| 树 | 命中份数 | 说明 |
+|---|---|---|
+| **主干 `do-my-own-gh`** | **20** | **一份都没修**（整合者还没合） |
+| **我树 G1** | 20 | 我域 3 处真损坏已清零（+3 份台账的**故意引述**）⇒ **数值与主干同、构成不同** ⚠️ ⇒ **命中数相同 ≠ 同一批文件** ⇒ **不能用「份数」当判据，要用「文件清单」** |
+| **G2 树** | 15 | 它域 3 份已清零（+ `service/common` 2 份因**合并了 G4 分支**而清零） |
+| **G3 树** | 13 | 它域 5 份已清零 |
+
+⇒ ⇒ **「命中份数」这个数在四棵树上分别是 20 / 20 / 15 / 13** ⇒ ⇒ **看起来接近的 20 与 20 其实是两批完全不同的文件** ⇒ ⇒ **复扫必须比「文件清单」而不是比「份数」**（与 §15「孤儿报告」同族：**总量相同不代表构成相同**）。
+
+---
+
 ## 14. 🆕 **守门卫生缺陷：「可达 ⇒ 能启动」用例的 3s 预算过紧 ⇒ 偶发红**（2026-10-27 · G1 lane）
 
 > **本节记的是本域自己的测试缺陷**（不是产品缺陷、也不是漂移）⇒ **落点全在 G1 写权内，已自修**。
