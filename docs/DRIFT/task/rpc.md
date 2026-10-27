@@ -494,7 +494,7 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
   - ⇒ ⚠️ **本域的硬约束**：**不要在本域新建 `RedisDisconnectedBehaviorConfig` 之类的域内副本** ——
     那会**遮蔽**共享层（⇒ E66 等共享层后续修正在本域**静默失效**）
     ⇒ **修 Redis 断连行为一律走共享层**（G4 写权）⇒ 域侧**只登记、不落码**。
-- 但 G4 引的 Go 出处 `core/stores/redis/redisclientmanager.go` **在真源仓里不存在**
+- 但 G4 引的 Go 出处（**只有文件名 `redisclientmanager.go`、不带模块限定**）**在真源仓里不存在**
   （真源仓无 `core/` 目录）⇒ 那是 **go-zero 依赖源码**的路径
   （`go-zero@v1.10.2/core/stores/redis/redisclientmanager.go`，`:14` `maxRetries = 3` · `:32-40` 构造 `red.NewClient`）
   ⇒ 口径本身成立（`MaxRetries=3` 且不设 Dial/ReadTimeout ⇒ 快速失败），但**引用路径要标注是依赖源码**。
