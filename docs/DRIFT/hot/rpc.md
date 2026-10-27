@@ -1877,6 +1877,173 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 **只登记，不落码**（理由与复开触发条件见 [`favorite/api.md` §15.3](../favorite/api.md#153-处置只登记不落码写死复开触发条件)）⇒ 本域补充一条：
 ⚠️ **本域同时承载「命令重试」已登记差异**（go-redis `MaxRetries = 3` vs Lettuce **无重试**，见 [`vs-common.md`](vs-common.md) 的 `DRIFT-HOTRPC-004`）⇒ **改池形态会同时改这两项**（有池 ⇒ 并发下失败重试的分布完全变样）⇒ ⇒ **复开时必须与重试那条一起验**。
 
+### 十.5 📌 **订正注记（2026-10-27 · G3）：本条已复开并落码** —— 上文「只登记，不落码」是**当时**的结论，**原样保留不改写**
+
+⚠️ **本块是「加注记」，不是「改原值」** ⇒ 上文 §十.1（池形态 = 无池）与 §十.4（只登记不落码）**原样保留** ⇒
+读本域历史结论的人**以两块并列为准** ⇒ ⇒ **不要把 §十一 误读成「§十 作废」**。
+
+- **复开理由**：命中 [`favorite/api.md` §15.3](../favorite/api.md#153-处置只登记不落码写死复开触发条件) 写死的**复开触发条件第 ② 条**
+  —— 「**任何**模块的 classpath 上**新增** `commons-pool2` ⇒ 池会**静默打开** ⇒ 必须复验」⇒
+  **本轮 G3 自己在 `hot-rpc` 加了 `commons-pool2`** ⇒ ⇒ **触发条件由本域自己命中** ⇒ **必须复验**（不是「顺便修」）。
+- **§十.3 提的那条「复开时必须与重试那条一起验」的约束**：本轮**未能**与重试那条一起做活体验证
+  （`DRIFT-HOTRPC-004` 的重试面需要**真 Redis 断连** ⇒ ⚠️ **原记的阻塞理由「机器级 Docker 端口转发故障」已于 2026-10-27 19:2x 实测不成立** ⇒ ⇒ **现在只差「排期跑一次断连对拍」**，不是环境问题）⇒
+  ⇒ **本轮只验「池形态 + 池参数 + 池耗尽等待上限」三个位** ⇒ **重试分布那条仍挂起** ⇒ 详见 §十一.5。
+- **落码与守门** ⇒ 见 **§十一**。
+
+---
+
+## 十一、✅ Redis **连接池形态**漂移 —— **已落码**（2026-10-27 · G3 · 复开自 §十）
+
+> **本节登记编号 = `DRIFT-HOTRPC-011`**（承接 §十 的「只登记」条目，本轮由「登记」推进到「已修」）。
+> ⚠️ **§十 原样保留不改写** ⇒ 读本域历史结论的人**以 §十 + §十一 两块并列为准**。
+
+### 十一.1 一句话
+
+**Go 有池、RAG 无池 ⇒ 已修**（加 `commons-pool2` ＋ `lettuce.pool.enabled: true`）⇒ 守门 **4 条** ＋ **变异 5 条全部精确转红** ⇒
+🔴 **顺带查出并修掉一个「光加池反而比 Go 更糟」的陷阱：池耗尽时的等待上限（Go 4s vs Lettuce 默认「无限等」）**。
+
+### 十一.2 落码清单（逐个 `文件:行号`）
+
+| # | 文件 | 位置 | 改了什么 |
+|---|---|---|---|
+| 1 | `service/hot/hot-rpc/pom.xml` | `:117-120` | **新增** `org.apache.commons:commons-pool2`（**不写 `<version>`** ⇒ 由 `spring-boot-dependencies` BOM 管理）⇒ 实测解析到 **2.12.1** |
+| 2 | `service/hot/hot-rpc/src/main/resources/application.yml` | `:89-95` | **新增** `spring.data.redis.lettuce.pool`：`enabled: true` / `max-active: 64` / `max-idle: 16` / `min-idle: 0` / **`max-wait: 4s`** |
+| 3 | `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/config/HotRpcRedisPoolContractTest.java` | 新增，**218 行** | 守门 **4 条**（读**真装配**，不读 yml 文本） |
+
+⚠️ **注释里写的是 Boot 4 的**真实**装配点**（不是照抄别处的行号）⇒
+Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方法（实测 `javap` 方法清单里没有）⇒
+池参数实际在**内部类** `LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig` 里建 ⇒
+⇒ **本仓多处台账引用的「`LettuceConnectionConfiguration:267-271`」是 Boot 2/3 的旧路径**，在 Boot 4.0.8 上**对不上** ⇒ 已在本域台账按**类名 + 方法名**引用。
+
+### 十一.3 取值逐项对着 Go 的真值（不拿「现有 RAG 代码」当基准 · AGENTS.md §3.1）
+
+| 语义 | Go 真值（消费点） | Lettuce / Boot 4 | 本仓取值 | 对齐度 |
+|---|---|---|---|---|
+| 有没有池 | ✅ 有 —— `service/hot/rpc/internal/svc/service_context.go:17-20` `redis.NewClient(&redis.Options{Addr, Password})` ⇒ `PoolSize` 未设 ⇒ `go-redis@v9.20.0/options.go:350-351` `PoolSize = 10 * GOMAXPROCS(0)` | `isPoolEnabled` ⇒ `enabled ?? COMMONS_POOL2_AVAILABLE` | `enabled: true` ＋ pom 里有 `commons-pool2` | ✅ **形态对齐**（本条是主体） |
+| 总量上限 | 🟡 Go 的 `MaxActiveConns` **未设** ⇒ `options.go:230-235`「When zero, there is no limit」⇒ **Go 无总量硬上限**；Go 的 `PoolSize` = 10×核数（本机 100）⇒ **机器相关，不可 1:1** | `maxTotal` | `64` | 🟡 **数量级**对齐（性能面残留，已登记） |
+| 最少空闲 | ✅ `MinIdleConns` **未设** ⇒ `options.go:218-222` **无 default 赋值** ⇒ **0** | `minIdle` | `0` | ✅ **精确对齐** |
+| 最多空闲 | 🟡 `MaxIdleConns` **未设** ⇒ `options.go:224-228` **无 default** ⇒ **0**；消费点 `internal/pool/pool.go:1257` `if p.cfg.MaxIdleConns == 0 || …` ⇒ **0 = 无上限** | `maxIdle` | `16` | 🟡 表达层取值（**比 Go 更严** ⇒ 只影响空闲连接回收，**不影响命令结果**） |
+| **池耗尽等待** | ✅ `PoolTimeout` 未设 ⇒ `options.go:380-386` `PoolTimeout = ReadTimeout + 1s`；ReadTimeout = 3s ⇒ **4s**；消费点 `internal/pool/pool.go:1113` `p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)` ⇒ **4s 后报 `redis: connection pool timeout`** | `maxWait` | **`4s`** | ✅ **语义对齐**（异常类型不同，耗时口径一致） |
+
+⚠️ **不要拿 `like-rpc` / `comment-rpc` 的 `64/16/4` 当基准**：like 域的 Go 走 **go-zero 的 redis**
+（`go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:15` `idleConns = 8` ⇒ `MinIdleConns = 8`），
+本域的 Go 走 **go-redis 直连**（`MinIdleConns = 0`）⇒ **两个域的 Go 客户端本就不同** ⇒ 池参数**不必同族**。
+
+### 十一.4 🔴 本轮最有价值的副产物：**光加池会引入比 Go 更糟的行为**（`max-wait` 不可省）
+
+⚠️ **这是本轮新查出的、全仓此前无人登记的一条**（实测：`grep -rn "max-wait\|PoolTimeout\|无限等" docs/DRIFT/` ⇒ **零命中**）。
+
+1. **Go 侧池耗尽有上限**：`go-redis@v9.20.0/internal/pool/pool.go:1113`
+   `err := p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)`
+   ⇒ `PoolTimeout` 未设 ⇒ `options.go:380-386` `PoolTimeout = ReadTimeout + 1s` ⇒ ReadTimeout = 3s ⇒ **4s**
+   ⇒ ⇒ 池耗尽 ⇒ **4s 后失败**（`ErrPoolTimeout`，`pool.go:59-60`）。
+2. **RAG 侧不配 `max-wait` ⇒ 无限等**：commons-pool2 2.12.1 `BaseObjectPoolConfig:59,68`
+   `DEFAULT_MAX_WAIT_MILLIS = -1L` / `DEFAULT_MAX_WAIT = Duration.ofMillis(-1L)`
+   ⇒ 消费点 `GenericObjectPool.java:306`
+   `p = negativeDuration ? idleObjects.takeFirst() : idleObjects.pollFirst(remainingWaitDuration)`
+   ⇒ **负值 ⇒ `takeFirst()` ⇒ 阻塞到有人还连接为止（无上限）**。
+3. 🔴 **Lettuce 的 3s 命令超时救不了场**：`CommandExpiryWriter.write(command)` 才起算计时器
+   （实测 lettuce-core **6.8.2** 字节码），而**借连接发生在写命令之前**
+   （`RedisTemplate.execute` → `getConnection()` → `borrowObject()` → 之后才 `write`）
+   ⇒ ⇒ 池耗尽时 **3s 命令超时根本没开始** ⇒ ⇒ **无限挂起**。
+4. ⇒ ⇒ **落码必须同时配 `max-wait: 4s`**（`LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig` ⇒
+   `setMaxWait(getMaxWait())`，**只在 `maxWait != null` 时才设** ⇒ 不配 ⇒ 落 commons-pool2 自己的 -1）。
+5. ⚠️ **变异实测坐实**：删掉 `max-wait` ⇒ 守门读到 **`-0.001S`**（＝ -1ms ＝ commons-pool2 的 -1 默认值＝无限等）⇒
+   **不是推断，是量出来的**。
+
+### 十一.5 守门 + 变异验证（**5 条全部精确转红** ⇒ 守门非假绿）
+
+**守门**：`HotRpcRedisPoolContractTest`（**4 条**，零 Docker / 零 Testcontainers / 零真 Redis）——
+起**真** `ApplicationContextRunner` ＋ Boot **真** `DataRedisAutoConfiguration` ⇒ 拿**真** `LettuceConnectionFactory`
+⇒ 断言**真装配出来**的 `LettucePoolingClientConfiguration.getPoolConfig()`：
+
+| # | 断言 | 读的消费点 |
+|---|---|---|
+| ① | 池必须**启用** | `getClientConfiguration()` 是 `LettucePoolingClientConfiguration`（未启用时装配出的是普通 `LettuceClientConfiguration`＝共享单连接） |
+| ② | `maxTotal=64` / `maxIdle=16` / `minIdle=0` | Boot 4 `PoolBuilderFactory.getPoolConfig` ⇒ `setMaxTotal/setMaxIdle/setMinIdle` |
+| ③ | **`maxWait=4s`** | 同上 ⇒ `setMaxWait` |
+| ④ | **阳性对照**：commons-pool2 自己的默认 `maxWait` = **-1ms** | `new GenericObjectPoolConfig().getMaxWaitDuration()` ⇒ 证明 ③ 有识别能力 |
+
+**变异（5 条 · 每条都跑过「还原 + sha256 校验」再复跑）**：
+
+| 变异 | 手法 | 结果 |
+|---|---|---|
+| **MUT-A** | yml `pool.enabled: true` → `false` | ✅ **3 红**（① ＋ ② ＋ ③，全部红在「池必须已启用」这条前置断言上 ⇒ **红点精确**） |
+| **MUT-B** | yml `pool.max-active: 64` → `65` | ✅ **1 红**（`expected: 64 but was: 65`） |
+| **MUT-C** | yml `pool.min-idle: 0` → `1` | ✅ **1 红**（`expected: 0 but was: 1`） |
+| **MUT-D** | yml 删掉 `pool.max-wait` | ✅ **1 红**（`expected: 4S but was: -0.001S` ⇒ **实测到「无限等」**） |
+| **MUT-E** | pom 抽掉 `commons-pool2` | ✅ **1 红**（**`NoClassDefFoundError: org/apache/commons/pool2/impl/GenericObjectPoolConfig`** ⇒ **启动期直接失败**）<br>⚠️ **手法说明**：守门类**直接引用** `GenericObjectPoolConfig` ⇒ 抽掉依赖后**连编译都过不了** ⇒ 为拿到**运行时**证据，本轮把守门类临时移开、换上一条**不引用** `commons-pool2` 的临时探针（只断言「上下文能起来」）⇒ ⇒ **实测到 `NoClassDefFoundError`** ⇒ 探针已删、还原已校验 |
+
+🔴 **一个必须记下的「口径」**：MUT-E 的**编译失败**本身就是「`commons-pool2` 不可省」的**最强证据**
+（守门把依赖变成 load-bearing）⇒ ⇒ **不要**把「编译不过」当成变异失败的 excuses。
+
+### 十一.6 证据强度与边界（**不得越读**）
+
+| 项 | 值 |
+|---|---|
+| **证据强度** | **L3** —— Go 侧 **L1 逐行对照**（`service_context.go:17-20` ＋ go-redis v9.20.0 源码/字节码）＋ RAG 侧 **真装配运行证据**（Boot 4.0.8 / commons-pool2 2.12.1 / lettuce-core 6.8.2 字节码 ＋ 真上下文断言 ＋ 5 条变异） |
+| ⚠️ **不是 L4** | **Go 侧没有同时跑的探针** ⇒ **不是「双侧活体对拍」** ⇒ 按本仓口径只能写 **L3** |
+| ⚠️ **本轮未覆盖** | ① **并发活体对拍**（p99 口径）—— ⚠️ **原记的阻塞理由「机器级 Docker 端口转发故障」已于 2026-10-27 19:2x 实测不成立**（见 §十一.8 的四个探针）⇒ ⇒ **阻塞前提已消失** ⇒ **本条现在只差「Go 侧同时跑的探针」**（G1 已通报，其域那半可复跑）；② **`DRIFT-HOTRPC-004` 的重试分布**（§十.3 要求「复开时必须与重试那条一起验」⇒ 本轮**只验了三个位**）⇒ **两条仍挂起** |
+| ⚠️ **守门不证明** | 不证明 SQL / DDL / 事务（hot-rpc 无库）· 不证明 Kafka 消费 · 不证明并发下的实际吞吐 |
+
+### 十一.7 跨域影响面（本轮实测，**已派单**）
+
+| 组件 | 落点 | 原状 | 结论 |
+|---|---|---|---|
+| **`hot-rpc`** | 本域 | 无池 | ✅ **已修**（本节） |
+| **`comment-rpc`** | 本域（G3） | 有池（`commons-pool2` 已有）· `min-idle: 4` ❌ · **缺 `max-wait`** ❌ | 🔴 **同机制 ⇒ 本域自修**（见 `comment/rpc.md`） |
+| **`task-rpc`** | G2 | 有池 · **缺 `max-wait`** ❌ | 🟡 **G2 域** ⇒ 已通报 |
+| **`like-rpc`** | G2 | 有池 · `min-idle: 4` ❌（Go 侧 go-zero ⇒ 应 **8**）· **缺 `max-wait`** ❌ | 🟡 **G2 域** ⇒ 已通报 |
+| **`favorite-api`** | 本域（G3） | 无池（Go 走 go-zero ⇒ `MinIdleConns = 8`）· 无 `max-wait` | 🟡 **未落码**（favorite-api 的池需求与本域不同 ⇒ 单独排期） |
+
+⚠️ **「`max-wait` 缺失」这条是**全仓级**的共性缺陷**（凡已开池的组件都有）⇒ ⇒ 已作为**跨域发现**通报 G4（登记进 `global` 台账 · `docs/DRIFT/global/**` 是 G4 写权面 ⇒ 本域不写）。
+
+### 十一.8 回归、门禁与环境实测（**可复算**）
+
+**① 回归（2026-10-27 19:4x 重跑）**
+
+| 模块 | tests | failures | errors | skipped | 口径 |
+|---|---|---|---|---|---|
+| **`hot-rpc`** | **101** | **0** | **0** | **0** | surefire XML 求和 ≡ maven 模块汇总行；**20 份 XML ≡ 20 个 test 阶段测试类 ⇒ 0 孤儿报告**（`HotRpcFatJarArtifactGateIT` 绑 `verify` 阶段 ⇒ 本阶段不产 XML） |
+| `service/common`（共享层，本轮 `-am` 连带） | 324 | 0 | 0 | 0 | 61 份 XML ≡ 61 个测试类 |
+| **`comment-rpc`**（同机制，G3 另一域） | **123** | **0** | **0** | **0** | 22 份 XML ≡ 22 个测试类；基线 119 ＋ 新守门 4 = 123 |
+
+**② 🔴 首轮全量回归的 4 条 failures —— 已隔离复跑定性为「瞬态」**
+
+- 首轮（2026-10-27 19:10–19:20）：**101 条 / 4 failures**，4 条**全部**在 `HotKafkaConsumerGateTest.awaitContainerJoinedGroup`
+  （失败原文「生产 listener 容器没拿到全部分区（实际 0/3）」；日志直指 broker 端点 `localhost:64802` 连不上）。
+- **隔离复跑该类**（19:3x）：**4 条 / 0 failures / 0 errors / 0 skipped ⇒ BUILD SUCCESS（27.81 s）**。
+- **重跑全量**（19:4x）：**101 条 / 0 / 0 / 0 ⇒ BUILD SUCCESS**。
+- ⇒ ⇒ **定性 = 并发跑批时的容器/端口争抢**，**与本轮 Redis 池改动无因果关系**
+  （本轮改动只碰了 `hot-rpc` 的 pom / Redis 配置 / 一条新测试类，**不涉及 Kafka**）
+  ⇒ ⚠️ **教训**：遇到「全量跑红但单类跑绿」⇒ **先隔离复跑再定性**，别急着改代码（改错方向的代价高于多跑一次）。
+
+**③ 🔴 环境实测：此前记的「机器级 Docker 宿主→容器端口转发故障」**前提**现已不成立**（4 个探针全通）
+
+| 探针 | 对象 | 结果 |
+|---|---|---|
+| ① 新建容器 | `redis:7-alpine` 发布 `16399:6379` | 宿主 `PING` ⇒ **`+PONG`**（0.03 s） |
+| ② **42 小时前**的容器 | `ddl-comment-pg` `127.0.0.1:55566` | PG `SSLRequest` ⇒ **有应答**（0.01 s） |
+| ③ **23 小时前**的容器 | `difftest5k-redis` `127.0.0.1:61379` | **`+PONG`** |
+| ④ **3 天前**的容器 | `uudifftest-redis:56382` / `cdifftest-redis:56395` | **`+PONG`** |
+
+⇒ ⇒ **转发链路现在是通的** ⇒ ⇒ **本档里所有「被机器级 Docker 转发故障阻塞」的搁置项，阻塞前提已消失**
+⇒ ⇒ **已通报 G1 / G2 / G4**（三边各自那半现在可以复跑）。
+⚠️ **本域自己仍挂着的只剩一条**：并发活体对拍差「**Go 侧同时跑的探针**」（不是 Docker 问题了）⇒ 见 §十一.6。
+
+**④ 门禁与字节级扫描（2026-10-27）**
+
+| 项 | 结果 |
+|---|---|
+| `tools/check-ledger-tables.py` | **EXIT=0** |
+| `tools/check-ledger-selfcheck.py` | **EXIT=0** |
+| `tools/check-ledger-count.py` | **EXIT=1** —— 索引称 315 / 实测 325（**差 +10**）⇒ 索引在 `docs/DRIFT/_INDEX.md`（**整合者写权面**）⇒ **合并后统一 `--fix`**（本轮 +10 来自本域台账新增的编号式条目：hot §十一 / §十一.8 / favorite §15.6-15.7 / comment §十一 / 坑档 P-HOTRPC-21~23） |
+| `tools/difftest/check-wave-lane-ownership.py` | **EXIT=0** |
+| `tools/difftest/check-wave-coupling.py` | **EXIT=0** |
+| `tools/difftest/check-wave-role-model.py` | **EXIT=0** |
+| `tools/ledger-lint/favorite/{tables,selfcheck,vs-reality}` | 0 / **1** / **1** ⇒ **与本轮改动前完全相同**（selfcheck 的 5 条 = `api.md:691` / `vs-common.md:44,86,172` / `rpc.md:3643`，**全在本轮 diff 之外**；`vs-reality` 的 1 条 = 「共享面零改动」，**结构性、已归因**）⇒ ⇒ **本轮零新增门禁级问题** |
+| U+FFFD 字节级扫描 | 本轮改动文件 **0 命中** · 本域台账＋坑档全量（**33 份**，已剔 `target/`）**0 命中** ⇒ **0 个 U+FFFD 字符** |
+
 ---
 
 ## 🔴 **阈值类结论的「共享层依赖」声明**（2026-10-27 · 按 G2 [3] 的要求做的重核）
@@ -1888,5 +2055,10 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 | **§十 的 Redis 池形态 = 无池**（hot-rpc） | **依赖共享层的 dependency 状态**（`isPoolEnabled` 在 `enabled == null` 时**回落到「classpath 上有没有 `commons-pool2`」**） | ✅ 共享层 `service/common` 的 classpath 上 `commons-pool2` **零命中**（`mvn -B -o -pl service/common dependency:tree -Dincludes=org.apache.commons:commons-pool2` ⇒ BUILD SUCCESS，无该行）⇒ ⇒ **无池结论成立** | 共享层依赖树一变 ⇒ ⇒ **池形态静默翻转** ⇒ ⇒ **§十 要重核** |
 | **Redis connect-timeout = 5s** | **不依赖**共享层（共享层只设 `disconnectedBehavior(REJECT_COMMANDS)`） | ✅ 域内 yml 显式配 5s | 共享层开始碰 `socketOptions` 时才变 |
 | **rpc 服务端超时 = 2s** | 域内 `observability.rpc-timeout` ＋ 共享层的 `RpcServerInterceptorFactory` | ✅ 2s | 共享层改拦截器链时要重核 |
+| **🆕 §十一 的 Redis 池形态 = 有池 ＋ 池参数 64/16/0 ＋ `maxWait=4s`**（hot-rpc） | **仍然依赖共享层的 dependency 状态** —— ⚠️ **但依赖方向变了**：`enabled` 已被**显式配成 `true`** ⇒ ⇒ **不再回落到 `COMMONS_POOL2_AVAILABLE`** ⇒ ⇒ **共享层依赖树变化不再能翻转本域的池形态**；**真正的 load-bearing 依赖变成「域内 pom 里那条 `commons-pool2`」** | ✅ **2026-10-27 实测**：`enabled: true` ＋ 域内 pom 显式声明 `commons-pool2` ⇒ **池启用**（守门 ① 实测）⇒ ⚠️ **抽掉 pom 那条依赖 ⇒ 启动期 `NoClassDefFoundError`**（MUT-E 实测）⇒ ⇒ **域内 pom 少这条 ⇒ 组件起不来** | 🔴 **共享层**：`GoStyleRedisClientAutoConfiguration` **只设 `disconnectedBehavior(REJECT_COMMANDS)`**（不碰 `pool.*` / 不碰 `timeoutOptions`）⇒ ⇒ **共享层本轮不动也不会翻转本域结论**；<br>🔴 **域内 pom**：**删掉 `commons-pool2` ⇒ 启动期直接失败**（不是「静默变无池」）⇒ ⇒ **这正是想要的形状**（[`favorite/api.md` §15.4](../favorite/api.md#154-陷阱lettucepoolenabled-没写--池没开本条最有价值的副产物) 的陷阱「classpath 一变池就静默翻转」在本域**已被消除**） |
+
+> 📌 **订正注记（2026-10-27 · G3）**：上表**第一行**（「§十 的 Redis 池形态 = 无池」）是**落码前**的重核结论 ⇒ **原样保留不改写** ⇒
+> ⇒ 读本域历史结论的人**以「第一行 + 🆕 行」并列为准** ⇒ ⇒ **不要**把 🆕 行误读成「第一行作废」⇒
+> ⇒ 落码后的权威口径 = **§十一**（含守门与变异证据）。
 
 ⇒ **共享的判据明细表在 [`favorite/api.md` §17](../favorite/api.md#17-)（同款机制，三域共用一条判据）** ⇒ ⇒ 改一处要三域一起重核。

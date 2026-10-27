@@ -749,6 +749,26 @@ service/favorite/api/internal/svc/service_context.go:20
 | **处置** | 🔴 停掉卡住的跑批 + 清掉残留容器 ⇒ **不做跨 lane 的破坏性处置**（重启 Docker Desktop 会连带干掉 G1/G2/G4 各自跑了 30+ 小时的 `ddl-*-pg` 等容器 ⇒ **不擅自做**）⇒ ⇒ **全域 12 模块的完整回归待 Docker 恢复后补跑**（基线：合并前 **922 条**全绿，2026-10-27 09:44 min） |
 | **证据强度** | 本条 = **L3 环境级实测**（socket 探针 + 容器内直连 + 线程栈），**不**据此声称「合并后全域已验」 |
 
+### 14.5 📌 **订正注记（2026-10-27 · G3 · 19:2x–19:4x）：§14.4 的阻塞前提**已实测不成立** ⇒ 本节原样保留不改写
+
+⚠️ **本块是「加注记」，不是「改原值」** ⇒ §14.4 的标题与结论**原样保留** ⇒ 读本域历史结论的人**以两块并列为准**。
+
+**四个探针全部通过 ⇒ 「宿主→容器转发对多数容器失效」在本轮实测下**不复现**：
+
+| 探针 | 对象 | 结果 |
+|---|---|---|
+| ① 新建容器 | `redis:7-alpine` 发布 `16399:6379` | 宿主 `PING` ⇒ **`+PONG`**（0.03 s） |
+| ② **42 小时前**的容器 | `ddl-comment-pg` `127.0.0.1:55566` | PG `SSLRequest` ⇒ **有应答**（0.01 s） |
+| ③ **23 小时前**的容器 | `difftest5k-redis` `127.0.0.1:61379` | **`+PONG`** |
+| ④ **3 天前**的容器 | `uudifftest-redis:56382` / `cdifftest-redis:56395` | **`+PONG`** |
+
+⇒ ⇒ **§14.4 的「整域回归被阻塞」这一状态**已过期 ⇒ ⇒ **全域 12 模块完整回归现在可以跑了**
+⇒ ⇒ **同轮实测的反例（说明那 4 条 failures 是瞬态，不是缺陷）**：hot-rpc 全量回归首轮 **101 条 / 4 failures**
+（4 条全在 `HotKafkaConsumerGateTest`，日志：broker 端点连不上）⇒ **隔离复跑该类 = 4/0/0/0 全绿（27.81 s）**
+⇒ **重跑全量 = 101/0/0/0 全绿** ⇒ ⇒ **并发跑批时的容器/端口争抢** ⇒ ⇒ **「全量红 + 隔离绿」⇒ 先隔离复跑再定性**。
+⇒ ⇒ **已通报 G1 / G2 / G4**（三边各自那半现在可复跑）。
+⇒ 📌 **证据明细** ⇒ [`hot/rpc.md` §十一.8](../hot/rpc.md) 的四个探针表 ＋ 瞬态定性段。
+
 ---
 
 ## 15. 🔴 Redis **连接池形态**漂移（Go **有池** vs RAG **无池**）—— 2026-10-27 登记（G2 挖出 · 本域**独立复核** · **只登记不落码**）
@@ -810,6 +830,47 @@ service/favorite/api/internal/svc/service_context.go:20
 
 - **L-10（候选）**：加一条**跨组件**的池形态守门（真 Spring 上下文起 `LettuceConnectionFactory` ⇒ 断言 `clientConfiguration.isPoolEnabled()`）⇒ 属**域内** ⇒ 可自修；
   但**必须先定「期望值」** —— 期望 = 「Go 有池 ⇒ RAG 也应有池」？⇒ 那就回到 §15.3 的「数值不可 1:1」⇒ **需要一次决策**（是「形态对齐即可，数值按经验值」还是「严格照抄 Go 的运行时推导式」）⇒ ⇒ **先登记，不落码**。
+
+### 15.6 📌 **订正注记（2026-10-27 · G3）：§15.4 的实测表已被本域之外的改动推翻一条 + §15.5 的「决策」其实是技术强制的**
+
+⚠️ **本块是「加注记」，不是「改原值」** ⇒ §15.4 那行「`favorite-api` 无 · `favorite-rpc` 无 · **`hot-rpc` 无** · `comment-rpc` 有」**原样保留** ⇒
+读本域历史结论的人**以两块并列为准** ⇒ ⇒ **不要**把本块误读成「§15.4 作废」。
+
+1. **`hot-rpc` 已由 G3 落码 ⇒ 池形态从「无」变「有」** ⇒ 现行口径：
+   `favorite-api` **无** · `favorite-rpc` **无** · **`hot-rpc` 有（2.12.1 · 域内 pom 显式声明）** · `comment-rpc` **有**（2.12.1）
+   ⇒ ⇒ §15.4 的「**任何**模块的 classpath 上新增 `commons-pool2` ⇒ 池会**静默打开** ⇒ 必须复验」这条**复开触发条件，已由 `hot-rpc` 命中并复验完毕**
+   ⇒ 落码与守门证据 ⇒ [`hot/rpc.md` §十一](../hot/rpc.md) ＋ [`hot/vs-common.md`](../hot/vs-common.md) 的 **H-9**。
+2. 🔴 **§15.5 说的「需要一次决策」，实测是**技术强制**的，不是自由裁量**：
+   「严格照抄 Go 的运行时推导式」这一支**在 YAML 里不可表达** —— Go 的 `PoolSize = 10 × runtime.GOMAXPROCS(0)`
+   （`go-redis@v9.20.0/options.go:350-351`）是**运行时 CPU 数推导值**，而 Lettuce 侧只接受**固定 YAML 值**
+   ⇒ ⇒ 那一支**没有可落码的动作** ⇒ ⇒ 只剩「形态对齐 ＋ 数值按数量级」这一支 ⇒
+   ⇒ **不需要另行拍板**（`hot-rpc` 与 `task-rpc` 用的是同一套取值口径）。
+3. 🔴 **本轮新查出一条 §15 未覆盖的池语义维度：「池耗尽时的等待上限」**
+   —— Go 侧 `PoolTimeout` = `ReadTimeout + 1s` = **4s**（`go-redis@v9.20.0/options.go:380-386`；消费点 `internal/pool/pool.go:1113`）
+   ⇒ 池耗尽 ⇒ **4s 后失败**；
+   RAG 侧不配 `max-wait` ⇒ commons-pool2 `BaseObjectPoolConfig:59,68` `DEFAULT_MAX_WAIT = -1ms`
+   ⇒ `GenericObjectPool:306` `negativeDuration ? idleObjects.takeFirst()` ⇒ **无限等**
+   ⇒ 且 Lettuce 的命令超时**此时尚未起算**（`CommandExpiryWriter.write()` 才起算，而借连接在写命令之前）
+   ⇒ ⇒ **光加池反而比 Go 更糟** ⇒ ⇒ **`max-wait` 是必配项**
+   ⇒ ⚠️ **这条对 `favorite-api` 同样适用**（本域 Go 走 go-zero ⇒ `MinIdleConns = 8`，但 `PoolTimeout` 仍是 4s ⇒ 等待上限一样是 4s）
+   ⇒ ⇒ **本域若后续落池，`max-wait: 4s` 必须一起配** ⇒ 已写进本域的落码清单（§15.5 L-10 候选 ⇒ 见 §15.7）。
+4. ⚠️ **守门缺口只关掉了 `hot-rpc` 一家** ⇒ **本域（`favorite-api` / `favorite-rpc`）与 `comment-rpc` 仍无池形态守门**
+   ⇒ ⇒ §15.4 的「静默翻转」风险对这三家**依然成立** ⇒ 仍未落码，见 §15.7。
+
+### 15.7 🆕 落码清单（**本域 favorite 域 · 尚未落码 · 待排期**）
+
+> ⚠️ **本域（favorite）的池语义与 hot/task/comment **不同** ⇒ **不能照抄别域的取值**：
+> favorite 的 Go 侧走 **go-zero**（`redis.MustNewRedis` ⇒ `core/stores/redis/redisclientmanager.go:32-40`
+> ⇒ `MinIdleConns: idleConns` ＝ **8**（`:15`））⇒ ⇒ 本域若落池，**`min-idle` 应为 8**（不是 0 / 不是 4）。
+
+| 项 | 本域（favorite）应取的值 | Go 出处 | 与别域的差别 |
+|---|---|---|---|
+| `enabled` | `true` | Go 有池（go-zero 路径同样落 go-redis 默认池） | 同 |
+| `max-active` | 🟡 数量级（64） | Go `PoolSize = 10 × GOMAXPROCS`（机器相关） | 同 |
+| `min-idle` | ✅ **8** | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:15` `idleConns = 8` | 🔴 **不同于 hot/task/comment 的 0** |
+| `max-idle` | 🟡 表达层（16） | Go `MaxIdleConns` 未设 ⇒ 0 ⇒ 无上限 | 同 |
+| `max-wait` | ✅ **4s** | Go `PoolTimeout = ReadTimeout + 1s` | 🔴 **别域目前都缺这条**（本轮新查出） |
+| pom | `commons-pool2`（不写 `<version>`） | — | 同 |
 
 ---
 

@@ -682,3 +682,82 @@ func (s *Server) initialReadLimitSize() int64 {
    本轮就是靠「4096 = 2^12 = bufio 的经典 slop」把两条完全不同的现象对上了。
 3. **台账里原先写的修法（`1MB`）也要一起订正** —— 照抄旧结论会把「差 4096 字节」固化下来。
    ⇒ 守门脚本要断言**精确字节数**（1052672），不能只断言「非空」。
+
+---
+
+## P-HOTRPC-21 🔴 **「把池打开」会引入比 Go 更糟的行为** —— 池耗尽的等待上限（`max-wait`）**不可省**
+
+**症状**：Go 侧 Redis 客户端**池耗尽时 4s 就失败**；RAG 侧改成「有池」之后，
+**池耗尽变成无限等** ⇒ 请求永久挂起（连超时都没有）⇒ **比改之前更糟**。
+
+**根因（三段都要查，缺一段就会掉坑）**：
+
+1. **Go 侧有上限** —— `go-redis@v9.20.0/internal/pool/pool.go:1113`
+   `err := p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)`
+   ⇒ `PoolTimeout` 未设 ⇒ `options.go:380-386`
+   `if opt.PoolTimeout == 0 { if opt.ReadTimeout > 0 { opt.PoolTimeout = opt.ReadTimeout + time.Second } … }`
+   ⇒ ReadTimeout = 3s ⇒ **PoolTimeout = 4s** ⇒ 池耗尽 ⇒ 4s 后报 `ErrPoolTimeout`。
+2. **RAG 侧默认无上限** —— 不配 `max-wait` ⇒ 落 commons-pool2 2.12.1
+   `BaseObjectPoolConfig:59,68` `DEFAULT_MAX_WAIT = Duration.ofMillis(-1L)`
+   ⇒ 消费点 `GenericObjectPool.java:306`
+   `p = negativeDuration ? idleObjects.takeFirst() : idleObjects.pollFirst(remainingWaitDuration)`
+   ⇒ **负值 ⇒ `takeFirst()` ⇒ 阻塞到有人还连接为止**。
+3. 🔴 **「命令超时会兜住」是错的** —— `CommandExpiryWriter.write(command)` **才起算**计时器
+   （实测 lettuce-core 6.8.2 字节码），而**借连接发生在写命令之前**
+   （`RedisTemplate.execute` → `getConnection()` → `borrowObject()` → 之后才 `write`）
+   ⇒ ⇒ **池耗尽时，3s 命令超时根本还没开始** ⇒ ⇒ **无限挂起**。
+
+⇒ **修法**：`spring.data.redis.lettuce.pool.max-wait: 4s`（**必配**，与 `enabled` 同级）。
+⚠️ **Boot 4 的装配点**：`LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig` ⇒
+`setMaxWait(getMaxWait())`（**只在 `maxWait != null` 时才设**）⇒ 不配 ⇒ 落 commons-pool2 自己的 -1。
+
+**教训（可推广）**：
+1. **「打开一个池」不是单点改动** —— 它至少同时改了「并发度」「总量上限」「**耗尽时的等待语义**」三件事
+   ⇒ ⇒ 改池必须**逐轴对着 Go 的库默认**核，不能只核「有没有池」。
+2. **「超时兜底」要查它**从什么时候**开始计时** —— 超时机制存在 ≠ 它在这个场景下生效
+   ⇒ ⇒ 本例的计时点在「写命令」，而卡点在「借连接」⇒ **差一个阶段 ⇒ 兜底失效**。
+3. **⚠️ 这条在**本仓是全仓级共性**：凡是「开了池」的组件都缺 `max-wait`
+   ⇒ ⇒ 已在 G3 域内修 hot-rpc / comment-rpc，并通报 G2（task-rpc / like-rpc）与 G4（全局登记）。
+
+---
+
+## P-HOTRPC-22 🟠 **Boot 2/3 的行号在 Boot 4 上「对不上」** —— 真实消费点搬进了**内部类**
+
+**症状**：照抄别域台账里的「`LettuceConnectionConfiguration:267-271` ⇒ `getPoolConfig` ⇒
+`setMaxTotal/setMaxIdle/setMinIdle`」去写守门的注释与证据 ⇒ **在 Boot 4.0.8 上那段行号根本不存在那个方法**。
+
+**根因**（实测 `javap`）：Boot 4.0.8 的 `LettuceConnectionConfiguration` 的方法清单是
+`lettuceClientResources` / `redisConnectionFactory`（×2）/ `createConnectionFactory` /
+`getLettuceClientConfiguration` / **`createBuilder`** / `applyProperties` /
+`getCanonicalReadFromName` / `createClientOptions` / `initializeClientOptionsBuilder` /
+`customizeConfigurationFromUrl` / 若干 lambda
+⇒ ⇒ **没有 `getPoolConfig`** ⇒ 池参数实际在**内部类**
+`LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig` 里建。
+
+**教训（可推广）**：
+1. **引用框架的「消费点」要用「类名 + 方法名」，不要用「文件 + 行号」** ——
+   行号**随版本漂移**，方法名也**会搬家**（Boot 2/3 → Boot 4 就搬到了内部类）
+   ⇒ ⇒ 写进台账的证据必须能**被复核的人重新定位**。
+2. **「照抄别域的证据」要先自己复核** —— AGENTS.md §3.1 说「不得拿现有 RAG 代码当对照基准」，
+   **台账之间互相照抄**是同一个毛病的另一条路径 ⇒ ⇒ 跨域复用证据前，
+   **在自己树里 `javap` 一次**（本轮就是这么发现两域台账都引了 Boot 2/3 的旧路径）。
+
+---
+
+## P-HOTRPC-23 🟠 「全量跑红、隔离跑绿」= **瞬态**，别急着改代码；且**变异跑红的报告会留在 `target/`**
+
+**症状（本轮实测）**：hot-rpc 全量回归首轮 **101 条 / 4 failures**，4 条全在
+`HotKafkaConsumerGateTest`（日志：broker 端点连不上）⇒ 看起来像「我的改动搞坏了 Kafka 消费」。
+⇒ 但**隔离复跑该类 = 4/0/0/0 全绿（27.81 s）**，**重跑全量 = 101/0/0/0 全绿**。
+
+**根因**：并发跑批时的**容器/端口争抢**（当时机器上有 47+ 容器，多个 lane 同时建容器）
+⇒ ⇒ **不是代码缺陷**。
+
+**教训（可推广）**：
+1. **「全量红 + 隔离绿」⇒ 先判定瞬态，别改代码** —— 改错方向的代价（引入真回归 + 污染台账）
+   **远高于**多跑一次隔离。⇒ 判据：**同一条失败**在**隔离复跑**里是否复现。
+2. 🔴 **变异跑故意跑红的报告会留在 `target/surefire-reports/` 里** ⇒
+   ⇒ 跑完变异**必须再做一次覆盖性全量回归**，否则任何「读 `target/` 的判据」读到的是
+   **上一次跑剩的产物** ⇒ ⇒ **本轮实测踩到了**：变异跑完后 XML 求和显示 comment-rpc「3 failures」，
+   而 maven 汇总行是 123/0/0/0 ⇒ ⇒ **两者不一致时，先查报告新鲜度（mtime + 跑次）**，
+   **别急着相信其中一个**。

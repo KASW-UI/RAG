@@ -37,6 +37,62 @@ spring:
       #   ⇒ 不配 ⇒ 连接超时 10s vs Go 5s ⇒ **漂移 2 倍**。
       # ⚠️ spring.data.redis.timeout 只管**命令**超时；Boot 4 起它**不再**兼管连接超时。
       connect-timeout: 5s
+      # ⚠️ 连接池 = 与 Go 侧**形态**对齐（2026-10-27 G3 · `DRIFT-HOTRPC-011` 已修）：
+      #    Go 侧 `service/hot/rpc/internal/svc/service_context.go:17-20`
+      #    `redis.NewClient(&redis.Options{Addr: c.RedisConf.Host, Password: c.RedisConf.Pass})`
+      #    ⇒ **只设 2 个字段** ⇒ `PoolSize` 未设 ⇒ 落 go-redis v9.20.0 库默认
+      #      （`go-redis@v9.20.0/options.go:350-351` `PoolSize = 10 * runtime.GOMAXPROCS(0)`）⇒ **Go 侧是有池的**。
+      #    ⚠️ 而本模块原先**无 pool 段 + pom 无 commons-pool2** ⇒ Boot 4 的判据
+      #      `DataRedisConnectionConfiguration#isPoolEnabled`（`:195-198`，实测字节码）：
+      #      `Boolean enabled = pool.getEnabled(); return (enabled != null) ? enabled : COMMONS_POOL2_AVAILABLE;`
+      #      ⇒ enabled 为 null + classpath 里**没有** commons-pool2 ⇒ **池不启用**
+      #      ⇒ Lettuce 走**共享单连接** ⇒ 并发下命令互相串行排队 ⇒ 可能撞 3s 命令超时
+      #      ⇒ ⇒ 原状是**形态漂移**（Go 有池 / RAG 无池）⇒ 本项对齐「有池」这个形态。
+      #    ⚠️ 池大小**无法逐值对齐**（Go 是 10 × 核数，**机器相关**：本机 10 核 ⇒ Go = 100）⇒ 按**数量级**对齐：
+      #      · `max-active: 64` ↔ Go 的 `PoolSize`（本机 100）⇒ **性能面**数值差异（已登记）
+      #        ⚠️ 另注：Go 的 `MaxActiveConns` **未设** ⇒ `options.go:230-235`「When zero, there is no limit
+      #          on the number of connections in the pool」⇒ **Go 侧无总量硬上限** ⇒ RAG 的 64 是
+      #          **表达层**的硬上限（残留差异属性能面，已登记）
+      #      · `min-idle: 0` ↔ Go 的 `MinIdleConns`（`go-redis@v9.20.0/options.go:218-222`
+      #        **无 default 赋值** ⇒ 保持 0）⇒ **精确对齐**（写成 4 会变成对 Go 的偏离）
+      #      · `max-idle: 16` ↔ Go 的 `MaxIdleConns`（`options.go:224-228` **无 default 赋值** ⇒ 0
+      #        ⇒ 消费点 `go-redis@v9.20.0/internal/pool/pool.go:1257`
+      #           `if p.cfg.MaxIdleConns == 0 || p.idleConnsLen.Load() < p.cfg.MaxIdleConns`
+      #        ⇒ **0 = 无上限**）⇒ RAG 的 16 是**表达层**取值：**比 Go 更严**（只影响空闲连接的保留/回收，
+      #        **不影响命令结果**）⇒ 已登记为有意偏离项
+      #    ⚠️ **不要拿 like-rpc / comment-rpc 的 64/16/4 当基准**（AGENTS.md §3.1：不得拿「现有 RAG 代码」
+      #       当对照基准）：like 域的 Go 走 **go-zero 的 redis**
+      #       （`go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:15` `idleConns = 8`
+      #         ⇒ `MinIdleConns = 8`），本域的 Go 走 **go-redis 直连**（`MinIdleConns = 0`）
+      #       ⇒ 两个域的 Go 客户端本就不同 ⇒ 池参数**不必同族**。
+      #    🔴 **`max-wait` 不可省**（2026-10-27 G3 实测）—— **光加池会引入比 Go 更糟的行为**：
+      #      · Go 侧：`go-redis@v9.20.0/internal/pool/pool.go:1113`
+      #          `err := p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)`
+      #        ⇒ 池耗尽 ⇒ 等 **`PoolTimeout`** ⇒ `options.go:380-386`
+      #          `if opt.PoolTimeout == 0 { if opt.ReadTimeout > 0 { opt.PoolTimeout = opt.ReadTimeout + time.Second } }`
+      #          ⇒ ReadTimeout = 3s（本模块 `timeout: 3s` 对齐的就是它）⇒ **`PoolTimeout` = 4s**
+      #          ⇒ 池耗尽 ⇒ **4s 后**报 `redis: connection pool timeout`。
+      #      · RAG 侧若**不配** `max-wait` ⇒ commons-pool2 的 `BaseObjectPoolConfig:59,68`
+      #          `DEFAULT_MAX_WAIT = Duration.ofMillis(-1L)` ⇒ **-1 = 无限等**
+      #          ⇒ 消费点 `GenericObjectPool.java:306`
+      #            `p = negativeDuration ? idleObjects.takeFirst() : idleObjects.pollFirst(remainingWaitDuration)`
+      #          ⇒ **阻塞到有人还连接为止**（无上限）。
+      #      · 🔴 **Lettuce 的 3s 命令超时救不了场**：`CommandExpiryWriter.write(command)` 才起算计时器
+      #        （实测 lettuce-core 6.8.2 字节码），而**借连接发生在写命令之前**
+      #        （`RedisTemplate.execute` → `getConnection()` → `borrowObject()` → 之后才 `write`）
+      #        ⇒ ⇒ 池耗尽时 **3s 命令超时根本没开始** ⇒ ⇒ **无限挂起**。
+      #      · ⇒ 本项对齐 Go 的 **4s**（`max-wait: 4s`）⇒ 池耗尽 ⇒ 4s 后失败（异常类型不同、
+      #        耗时口径一致）。
+      #      · ⚠️ Boot 4 的装配点：`LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig`
+      #        ⇒ `setMaxWait(pool.getMaxWait())`（**只在 `maxWait != null` 时才设**）
+      #        ⇒ 不配 ⇒ 落 commons-pool2 自己的 -1。
+      lettuce:
+        pool:
+          enabled: true
+          max-active: 64
+          max-idle: 16
+          min-idle: 0
+          max-wait: 4s
 
   # ============== Kafka（对应 Go KqConsumerConf + sarama Config）==============
   kafka:
