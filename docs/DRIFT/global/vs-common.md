@@ -1520,9 +1520,13 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 
 ##### 4.10.24.2 🔴 G1 删副本时的**连带必改项**（本层实测清单，防编译断裂）
 
+> ⚠️ **本小节的「位置」列全部是跨树引用**（G1 树）⇒ ⇒ **在本树按路径查会零命中** ⇒ ⇒ 「零命中」≠「不存在」
+> ⇒ ⇒ **复核时必须带树 + commit**：`git -C <G1 树> show b7d724c:<path>`（**行号只在那个 commit 上有效**）。
+> ⇒ ⇒ **本层实测**：本树只有 `user-api` 的那份副本与守门 ⇒ ⇒ **其余 4 份副本与 4 份守门是 G1 第十四轮 `0c2a902` 新增的** ⇒ ⇒ 本树 `find` 只命中 1 份（⇒ **本层自己踩了一次「零命中 ⇒ 不存在」的坑** ⇒ 由此才有 §4.10.29.6 那条纪律）。
+
 | 项 | 位置（G1 树 `b7d724c`） | 为什么必须一起改 |
 |---|---|---|
-| 🔴 **2 处 `@Import`** | `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcRedisDisconnectedFastFailTest.java:159` · `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcRedisDisconnectedFastFailTest.java:170` | 删掉 `RedisDisconnectedBehaviorConfig` 类 ⇒ **`@Import` 指向不存在的类 ⇒ 编译断裂** ⇒ ⇒ 必须连带删 `@Import` |
+| 🔴 **2 处 `@Import`** | `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcRedisDisconnectedFastFailTest.java:159` · `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcRedisDisconnectedFastFailTest.java:170` | 删掉 `RedisDisconnectedBehaviorConfig` 类 ⇒ **`@Import` 指向不存在的类 ⇒ 编译断裂** ⇒ ⇒ 必须连带处理<br>🔴🔴 **本行建议已订正（G1 实测 ＋ 本层独立核 · §4.10.29.1）**：**不是「删」，是「换成 `@ImportAutoConfiguration(GoStyleRedisClientAutoConfiguration.class)`」** ⇒ ⇒ 理由：那 2 份 rpc 守门的上下文是 **`@SpringBootConfiguration`**（**不含** `@EnableAutoConfiguration`）⇒ ⇒ **`AutoConfiguration.imports` 清单根本不会被读** ⇒ ⇒ 只删 `@Import` ⇒ 容器里 customizer 数量 = **0** ⇒ ⇒ 守门**静默测不到任何断连策略**（这类「测不到」的绿测试比没有测试更危险）⇒ ⇒ **api 侧连带项 = 零**（3 份 api 守门用 **`@SpringBootTest`** 引导真实应用类 ⇒ 清单会被读 ⇒ 注解都不用改 —— 本层在 G1 树逐份核过注解行） |
 | 🟡 **3 个域测试的 javadoc 提及该类名** | follow-api `FollowApiRedisDisconnectedFastFailTest.java:90` / `:132` / `:328` · admin-api `AdminApiRedisDisconnectedFastFailTest.java:86` / `:128` / `:324` · user-api `UserApiRedisDisconnectedFastFailTest.java:80` / `:122` / `:310` | 指向**不存在的类** ⇒ 后人按注释找不到文件 ⇒ 须改措辞 |
 | 🔴 **域侧变异验证会失效** | 5 个 `*RedisDisconnectedFastFailTest` | 变异的前提是「改域内副本」⇒ **副本删掉后这个前提消失** ⇒ ⇒ 变异必须改到**共享层那份** ⇒ ⇒ 而共享层那份在**仍有副本时是被遮蔽的** ⇒ ⇒ 删副本后共享层那份才真正生效 ⇒ ⇒ **域侧守门不能再靠「变异自己的副本」自证**（要么变异点迁到共享层（跨 lane），要么由共享层自己的守门承担）⇒ ⇒ **这是收编的真实代价，必须登记，不能装作「删了就完事」** |
 
@@ -1530,8 +1534,8 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 
 | 坑 | 事实 | 出处 |
 |---|---|---|
-| **必须 FIN，不能 `container.stop()`** | `container.stop()` 发的是 **RST**（强杀）⇒ 测不出「排队」分支；线上真实场景（`docker stop`）是**优雅退出 ⇒ FIN** ⇒ ⇒ 须**先关监听口 + 再对已建立的连接半关闭** | G1 树 `service/users/user/user-api/src/test/java/com/rag/users/user/api/UserApiRedisDisconnectedFastFailTest.java:88-105` / `:280-291` / `:331-333`（本层读原文核实） |
-| **`LettuceConnectionFactory` 没有 `getClientOptions()`** | 只能走 `getClientConfiguration().getClientOptions()`（`orElse(null)`） | 同上 `:225` / `:245`（本层读原文核实） |
+| **必须 FIN，不能 `container.stop()`** | `container.stop()` 发的是 **RST**（强杀）⇒ 测不出「排队」分支；线上真实场景（`docker stop`）是**优雅退出 ⇒ FIN** ⇒ ⇒ 须**先关监听口 + 再对已建立的连接半关闭** | **G1 树 `b7d724c`** `service/users/user/user-api/src/test/java/com/rag/users/user/api/UserApiRedisDisconnectedFastFailTest.java:88-105` / `:280-291` / `:331-333`（本层读原文核实）<br>🟢 **本树等价行号**（同一机制 · **两树版本不同 ⇒ 行号不同**）：**`:102`**（FIN/RST 说明 javadoc）· **`:343`** / **`:367`**（`shutdownOutput()` 半关闭） |
+| **`LettuceConnectionFactory` 没有 `getClientOptions()`** | 只能走 `getClientConfiguration().getClientOptions()`（`orElse(null)`） | 同上（**G1 树 `b7d724c`** `:225` / `:245`）<br>🟢 **本树等价行号**：**`:206`**（`connectionFactory.getClientConfiguration().getClientOptions().orElse(null)`） |
 
 ##### 4.10.24.4 🟡 「同机制不同形态」的准确含义（**不推翻**「删除 = 零行为变化」）
 
@@ -1775,6 +1779,69 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | 只扫**生产**源码 | ⇒ ⇒ 域侧**测试**里引用该类型是允许的（测试不产生生产 Bean）⇒ ⇒ 共享层自己的测试替身 `DomainLikeRedisDisconnectedBehaviorConfig` 也在允许范围内 |
 | 跨 lane 表现 | G2/G3 树里 user-api 那份**存在** ⇒ ⇒ 绿；G1 树里删完 ⇒ ⇒ 白名单项失效 ⇒ ⇒ **仍绿**（§4.10.28.3）⇒ ⇒ **这条守门不会因为别的 lane 收编而变红** |
 | 证据强度 | **L2（构建期）** —— 它证明的是「**再建一份就会红**」⇒ ⇒ **不主张 L4**（不涉及活体行为）⇒ ⇒ **不改变任何 A 轴结论**（只是把 §4.10.24 的既有结论变成机器可执行） |
+
+#### 4.10.29 🔴 **G1 的订正 ＋ 一条波次级判据**（2026-10-27 14:1x）—— 本层的「连带删 `@Import`」**错了**，已就地订正
+
+> **触发**：G1 完成收编后回函，指出两条：① 本层 §4.10.24.2 的「连带**删** `@Import`」**不够**；② 一条**波次级**判据（`-pl` 不带 `-am` ⇒ 跑的是 `~/.m2` 里的**旧** `com.rag:common`）。
+> ⇒ ⇒ **本层对两条都独立核过**（不采信转述）⇒ ⇒ ① **成立**（§4.10.24.2 已就地订正）；② **成立且对本层无影响**（见 §4.10.29.2）。
+
+##### 4.10.29.1 🔴 订正一：「连带**删** `@Import`」⇒ **必须换成 `@ImportAutoConfiguration`**
+
+| 腿 | 事实 | 出处（本层读原文核实） |
+|---|---|---|
+| rpc 侧 | 2 份守门的上下文 = **`@SpringBootConfiguration`**（**不含** `@EnableAutoConfiguration`）⇒ ⇒ **`AutoConfiguration.imports` 清单根本不会被读** ⇒ ⇒ 只删 `@Import` ⇒ 容器里 customizer 数量 = **0** ⇒ ⇒ 守门**静默测不到任何断连策略** | G1 树 `b19a61a` 工作区：`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcRedisDisconnectedFastFailTest.java:195` · `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcRedisDisconnectedFastFailTest.java:182` |
+| api 侧 | 3 份守门用 **`@SpringBootTest`**（引导真实应用类）⇒ ⇒ 清单会被读 ⇒ ⇒ 删掉域内副本后**共享层那份自动接管** ⇒ ⇒ **连带项 = 零**（注解都不用改） | 同树 `service/users/user/user-api/src/test/java/com/rag/users/user/api/UserApiRedisDisconnectedFastFailTest.java:140` |
+| 结论 | ⇒ ⇒ **G1 的订正成立**（**值与机制都对**）⇒ ⇒ §4.10.24.2 第 1 行**已就地订正**（不重写历史段，只加指路）⇒ ⇒ **G1 已实施**（其树内两处 `@ImportAutoConfiguration`） | — |
+
+⚠️ **本层的教训（自己踩的）**：**同一机制在不同组件上的装配形态可以不同** ⇒ ⇒ 我把「api 侧连带项 = 零」**外推**成「rpc 侧也是零」⇒ ⇒ **错了** ⇒ ⇒ **逐组件实测，不外推**（§4.10.24.4 说「不推翻『删除 = 零行为变化』」那条仍然成立 —— 被推翻的只是**连带项的修法**）。
+
+##### 4.10.29.2 🔴 订正二（**波次级**）：`-pl` 不带 `-am` ⇒ 跑的是**本地仓库里的旧 `com.rag:common`**
+
+| 项 | 事实 |
+|---|---|
+| 机制 | `mvn -pl <域内模块> test`（**不带 `-am`**）⇒ reactor 里**只有域内模块** ⇒ `com.rag:common` **从 `~/.m2` 解析** ⇒ ⇒ 跑的是**旧 jar** |
+| 实测 | G1 域内跑收编后回归 ⇒ `MVN_EXIT=1` ＋ 编译错误「程序包 `com.rag.common.redis` 不存在」⇒ ⇒ 那个 jar 里 `com/rag/common/redis/` 条目 = **0** ⇒ ⇒ G4 新增的 4 个类**全部不在** ⇒ ⇒ 它 = **主干代码态** |
+| ⇒ ⇒ 含义 | **任何域级回归，只要共享层代码在期间变过，那个回归就【证明不了共享层改动的兼容性】**（域内模块压根没加载改过的那份共享层）⇒ ⇒ **判据**：跑之前先问「**这次回归的 classpath 上 `com.rag:common` 是哪一份？**」⇒ 共享层动过 ⇒ **必须带 `-am`** |
+| ⇒ 对**本层**的影响 | **本层的全量（52 模块）是有效的** —— `service/common` **在 reactor 内** ⇒ ⇒ 用**源码** ⇒ ⇒ 不受这条影响 ⇒ ⇒ 但**各域拿本层的全量当「我域与共享层兼容」的证据是不成立的** ⇒ ⇒ 各域必须**自己**带 `-am` 跑一次 |
+| ⇒ 与本层既有纪律的关系 | 与「**lane 级全量 ≠ 别的 lane 的回归证据**」同族，但**更隐蔽**：那条是「**别的 lane 的树**不含我的提交」；这条是「**连共享层都不是我这份树**」⇒ ⇒ **两者都会让「跑绿」变成假绿** ⇒ ⇒ **本层的守门清单里已加这一条**（见 §4.10.29.7） |
+
+##### 4.10.29.3 🟢 G1 的收编落地结果（**本层只登记，不复算**）
+
+| 项 | G1 的实测值 |
+|---|---|
+| 收编 | 5 份域内副本**已删**；5 份守门各补 **2 条 bean 身份断言**（`size()==1` ＋ key 含 `goStyleRedisClientOptionsCustomizer`） |
+| 回归 | 我域 6 组件 **667** ＋ `service/common` **324** = **991** · BUILD SUCCESS · 06:47 min（**带 `-am`**） |
+| 变异 | ① 去掉 rpc 侧 `@ImportAutoConfiguration` ⇒ **2/2 红**；② 运行期 exclude 共享层自动配置（**直接 `-D`** 才传得进测试 JVM ⇒ 塞在 `-DargLine` 里**不生效** ⇒ 又一个「参数没到它该到的地方」的实例）⇒ **2/2 红**；③ 装回「域内副本替身」⇒ 2 条只红 1 条（**名字断言**红、机制腿绿）⇒ ⇒ 证明「收编真的发生」这条判据能**单独**抓住「收编没做」 |
+| ⇒ 对本层新守门的影响 | G1 树里那 5 份副本已删 ⇒ ⇒ 本层 §4.10.28 的守门在 G1 树里**仍绿**（白名单项自动失效 ＋ 锚点恒存在）⇒ ⇒ **这条守门不会因收编而变红**（设计目标达成） |
+
+##### 4.10.29.4 🟡 共享面数字订正（**只登记，不代改**）
+
+| 项 | 值 |
+|---|---|
+| 全仓 U+FFFD 清单 | G1 实测：**合并回主干后 = 23 份 / 63 处**（本层 §4.10.20 记录的是本树口径）⇒ ⇒ **复扫要比「文件清单」而不是比份数**（两份清单**不是同一批文件**）⇒ ⇒ **本层不自行改数**（等主干合并态实测） |
+
+##### 4.10.29.5 🔴 **本层自己踩了一次「零命中 ⇒ 不存在」的坑**（**自陈，非指责**）
+
+| 事实 | 说明 |
+|---|---|
+| 现象 | 复核 G1 的订正时，按 §4.10.24.2 的路径在**本树** `find` ⇒ **4/5 份守门文件零命中** ⇒ ⇒ 第一反应是「G1 的文件不存在 / 他在说假话」 |
+| 真因 | 那 4 份文件是 **G1 第十四轮 `0c2a902` 新增的** ⇒ ⇒ **只存在于 G1 树** ⇒ ⇒ 本树零命中是**正常**的 ⇒ ⇒ §4.10.24.2 的「位置」列**已带树 + commit**（`G1 树 b7d724c`）⇒ ⇒ **引用本身合规**，只是**复核姿势**错了 |
+| ⇒ ⇒ 纪律 | **引用他树的文件 ⇒ 复核必须用 `git -C <树> show <commit>:<path>`** ⇒ ⇒ **在本树按路径查 ⇒ 零命中 ≠ 不存在**（与 §4.10.20 的 U+FFFD「grep 会假阴性 ⇒ 一律 python 读 bytes」同族：**工具口径错 ⇒ 结论就错**） |
+
+##### 4.10.29.6 🟡 本层为此新增的两条**复核纪律**（写进本层工作方式）
+
+| # | 纪律 | 触发 |
+|---|---|---|
+| ① | **跨树引用必须带「树 + commit」**（行号只在那个 commit 上有效）⇒ ⇒ **本层台账里所有引他树的位置列一律带** | §4.10.24.2 / §4.10.24.3 |
+| ② | **跑域级回归前先问「classpath 上的 `com.rag:common` 是哪一份」** ⇒ ⇒ 共享层动过 ⇒ **必须带 `-am`** | §4.10.29.2 |
+
+##### 4.10.29.7 证据强度
+
+| 腿 | 强度 | 说明 |
+|---|---|---|
+| Go 腿 | **N/A** | 本节是**装配形态**与**构建口径**问题 ⇒ ⇒ 与 Go 侧无关 ⇒ ⇒ **不产生任何 A 轴结论变化** |
+| RAG 腿 | **L1（源码级 · 本层读原文核实）** | ① 的三处注解行（rpc `:195` / `:182` ＋ api `:140`）**本层在 G1 树逐行读过** ⇒ ⇒ **不是「采信转述」** |
+| 合并 | **L1** | ⇒ ⇒ **不主张 L4**（无活体） |
 
 #### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `cd893d1`）
 
