@@ -319,6 +319,13 @@ class FavoriteApiRealTomcatGateTest {
         //         ⇒ gRPC Unavailable 也落 default 分支（:135-136）⇒ 同样是 1015。
         // 语义等价论证：本用例断言的「200 + {code:1015}」= Go 在**同一输入**下的**同一出口**
         //   （放行 ⇒ 进业务层 ⇒ 业务失败 ⇒ 1015）⇒ ⇒ **不是** RAG 独有的形态。
+        //
+        // 📌 订正注记（2026-10-28 · G3，按 G4 §4.10.27 的要求）：**断言不再钉死业务码**。
+        //   旧断言是 contains("\"code\":1015") —— 1015 是「当前实现恰好落『服务繁忙』」的**实现细节**
+        //   （下游 folder 不存在 / RPC 不可用 ⇒ default 分支 ⇒ 1015）⇒ ⇒ 一旦下游状态或错误码分段变化，
+        //   这条断言就会**假红**，而请求其实仍然「放行进了业务层」⇒ ⇒ 断言的对象应当是**可观察的不变量**：
+        //   ① 不是 5003（不是「解析失败」那一格）② 不是 Tomcat HTML ③ **是业务信封**。
+        //   ⇒ ⇒ 原文保留（不改写），以本注记 + 下方断言为准。
         HttpResponse<String> resp = getWithToken(ITEM_LIST + "?" + oneNonEmptyPlusEmpty(2048));
 
         assertEquals(200, resp.statusCode(),
@@ -328,9 +335,11 @@ class FavoriteApiRealTomcatGateTest {
         assertFalse(resp.body() != null && resp.body().contains("\"code\":5003"),
                 "Go 在这一格是**放行**（非空值数 = 1 ≤ 2048，且段数 2049 ≤ 10000）⇒ 不得落 5003"
                         + "（5003 是「解析失败」那一格）；实际 body=[" + resp.body() + "]");
-        assertTrue(resp.body() != null && resp.body().contains("\"code\":1015"),
-                "必须证明请求**真的进了业务层**（Go 同形：放行 ⇒ 业务失败 ⇒ 1015 服务繁忙）；"
-                        + "实际 body=[" + resp.body() + "]");
+        // 🔴 只钉「是业务信封」⇒ 不钉死具体业务码（理由见上方 📌 订正注记）
+        assertTrue(isBusinessEnvelope(resp),
+                "必须证明请求**真的进了业务层**（响应是业务信封，而不是容器层/框架层的错误页）；"
+                        + "实际 status=" + resp.statusCode() + " body=[" + resp.body() + "] ct="
+                        + resp.headers().firstValue("content-type").orElse("-"));
         assertFalse(isTomcatHtmlErrorPage(resp),
                 "不得出现 Tomcat 的 HTML 错误页（Go 侧不存在这个响应形态）；实际 status="
                         + resp.statusCode() + " body=[" + resp.body() + "]");
@@ -363,6 +372,23 @@ class FavoriteApiRealTomcatGateTest {
         String body = resp.body() == null ? "" : resp.body();
         return contentType.contains("text/html")
                 && (body.contains("<html") || body.contains("Apache Tomcat"));
+    }
+
+    /**
+     * 业务信封 ＝ {@code {"code":…,"msg":…,"data":…}} 的 JSON 形态。
+     *
+     * <p>🔴 <b>为什么不钉死 code</b>（2026-10-28 · G3，按 G4 §4.10.27 的要求）：
+     * 旧断言是 {@code contains("\"code\":1015")}，而 1015 是「当前实现恰好落『服务繁忙』」的
+     * <b>实现细节</b>（下游 folder 不存在 / RPC 不可用 ⇒ default 分支）⇒ ⇒ 下游状态一变就<b>假红</b>，
+     * 而请求其实仍然「放行进了业务层」⇒ ⇒ 断言的对象应是<b>可观察的不变量</b>（是业务信封 ⇒ 进过业务层），
+     * 而非<b>某个具体码</b>。
+     */
+    private static boolean isBusinessEnvelope(HttpResponse<String> resp) {
+        String contentType = resp.headers().firstValue("content-type").orElse("");
+        String body = resp.body() == null ? "" : resp.body();
+        return contentType.contains("application/json")
+                && body.contains("\"code\"")
+                && body.contains("\"msg\"");
     }
 
     private static String oversizedJson() {

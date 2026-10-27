@@ -1239,3 +1239,28 @@ MAVEN_OPTS="-Xmx768m" mvn -B -o -pl service/favorite/favorite-api -am test \
 
 ⇒ **5 条 / 0 failures / 0 errors / 0 skipped**（2026-10-27T23:57:48+08:00）⇒ BUILD SUCCESS
 （4 条池 ＋ 1 条既有超时守门）。
+
+## 20. ✅ 容器上限那一格的**守门断言不再钉死业务码**（2026-10-28 · G3 · 按 G4 §4.10.27 的要求）
+
+**改动**：`service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/FavoriteApiRealTomcatGateTest.java`
+的 `containerParameterLimitIsSurfacedAsGoParseError`（:296-337）
+
+| | 旧 | 新 |
+|---|---|---|
+| 拒绝形状 | `assertFalse(body.contains("\"code\":5003"))` | **不变** |
+| 进业务层的证据 | `assertTrue(body.contains("\"code\":1015"))` 🔴 **钉死业务码** | `assertTrue(isBusinessEnvelope(resp))` ⇒ 只钉「**是业务信封**」（`content-type` 含 `application/json` ＋ body 含 `"code"` 与 `"msg"`）|
+| 容器层排除 | `assertFalse(isTomcatHtmlErrorPage(resp))` | **不变** |
+
+**为什么改**（G4 §4.10.27 的原话：assert "must NOT be 5003 and must NOT be a Tomcat HTML page", **not `== 1015`**）：
+`1015` 是「**当前实现恰好落『服务繁忙』**」的**实现细节** —— 业务层为什么失败取决于下游
+（folder 不存在 / RPC 不可用 ⇒ `codeFromRPCError` 的 default 分支 ⇒ `CodeServerBusy = 1015`）
+⇒ ⇒ 一旦下游状态或错误码分段变化，这条断言就会**假红**，而请求其实仍然「**放行进了业务层**」
+⇒ ⇒ 断言的对象应当是**可观察的不变量**（不是 5003 · 不是 Tomcat HTML · 是业务信封），而**不是某个具体码**。
+⇒ 原文保留（不改写），以方法内的 📌 订正注记 ＋ 新断言为准。
+
+**🔴 与合并的关系**：G4 要求这条改动与「合并 `align/g4-service-common`」在**同一个 commit**
+（option D：单一 merge 源、**不 cherry-pick**）⇒ ⇒ **本条已在 G3 树落码**（干净的前向改动，
+merge-base `cd893d1` 处是 `== 5003` 的更老版本 ⇒ 合并会取本版本，前提是 G4 自己不再改这个 hunk）。
+
+**验证**：`mvn -B -o -pl service/favorite/favorite-api -am test -Dtest='FavoriteApiRealTomcatGateTest'`
+⇒ **8 条 / 0 failures / 0 errors / 0 skipped**（2026-10-28 · 真 Tomcat）⇒ BUILD SUCCESS。
