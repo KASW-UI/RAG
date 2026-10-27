@@ -2208,6 +2208,162 @@ Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方�
 
 ---
 
+### 十二.9 🔴 `tools/redis-disconnect-probe/` 的**完整落码规格**（2026-10-28 · G3 · 自包含，**照此即可落码**）
+
+> **为什么这一节存在**：G4 回执说「`tools/redis-disconnect-probe/` 派单**只拿到摘要，规格全文未到 ⇒ 不凭摘要落码**」
+> ⇒ ⇒ 🔴 **规格不该活在聊天里**（聊天会截断、会过期、会被略读）⇒ ⇒ **落进仓内**才是可交付的形态
+> ⇒ ⇒ **G4 落码时不必再等我的信，直接照本节落** ⇒ ⇒ 本节 = 规格全文（含可直接复制的 Go 探针源码）。
+> ⚠️ **落点 `tools/redis-disconnect-probe/` = G4 写权面** ⇒ ⇒ **G3 只写规格、不建目录**（⛔ 越权）。
+
+#### 12.9.1 目的
+
+把「Redis 连接被服务端优雅关闭（FIN）后，客户端**第一条命令**多久失败」从**一次性仓外探针**升级为**仓内可复现的双侧活体对拍**
+⇒ ⇒ 补上 §十二.4 口径边界 ① 记的那个缺口（「Go 腿 = L4-一次性（实测但仓外）⇒ **不可从仓复现**」）。
+
+#### 12.9.2 Go 腿：Options **按真源逐字取**，其余**全走库默认**
+
+| 模式 | 真源出处（**消费点**）| 逐字取的字段 | 其余 |
+|---|---|---|---|
+| `hot` | `service/hot/rpc/internal/svc/service_context.go:17-20` | `redis.NewClient(&redis.Options{Addr, Password})` ⇒ **只 2 个** | **库默认** |
+| `comment` | `service/comment/rpc/internal/cache/redis.go:17-19` | `redis.NewClient(&redis.Options{Addr})` ⇒ **只 1 个**（Password 留空）| **库默认** |
+| `zeroway`（like / favorite 等走 go-zero 的域）| `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40` | `MaxRetries: maxRetries(3)` + `MinIdleConns: idleConns(8)` | **库默认** |
+
+⇒ ⇒ **「库默认」= go-redis v9.20.0 的默认值**：`ReadTimeout 3s`（`options.go:364-379`）· `DialTimeout 5s`（`options.go:338-340`）·
+`PoolSize = 10 × GOMAXPROCS`（`options.go:350-351`）· `PoolTimeout = ReadTimeout + 1s`（`options.go:380-386`）
+⇒ ⇒ **不要自己发明任何字段**。
+
+#### 12.9.3 Go 探针源码（**可直接复制**；G3 原型在 `/tmp/g3_go_redis_disconnect/`，**/tmp 会清 ⇒ 以本节为准**）
+
+```go
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"os/exec"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+)
+
+// 用途：测「Redis 连接被服务端优雅关闭（FIN）后，客户端第一条命令多久失败」。
+// ⚠️ Options 按**真源**逐字取（见台账 §12.9.2），其余全部走 go-redis v9.20.0 库默认。
+func main() {
+	addr := flag.String("addr", "", "redis host:port")
+	container := flag.String("container", "", "docker container name（用于 docker stop）")
+	mode := flag.String("mode", "hot", "hot | comment | zeroway")
+	password := flag.String("password", "", "redis password")
+	wait := flag.Int("wait-ms", 1000, "静默等待毫秒（期间不发任何命令）")
+	flag.Parse()
+
+	if *addr == "" || *container == "" {
+		fmt.Println("PROBE-FAIL missing -addr/-container")
+		os.Exit(2)
+	}
+
+	opts := &redis.Options{Addr: *addr}
+	switch *mode {
+	case "hot":
+		opts.Password = *password
+	case "comment":
+		// 真源只设了 Addr ⇒ Password 留空
+	case "zeroway":
+		opts.MaxRetries = 3
+		opts.MinIdleConns = 8
+	default:
+		fmt.Println("PROBE-FAIL unknown -mode")
+		os.Exit(2)
+	}
+
+	client := redis.NewClient(opts)
+	ctx := context.Background()
+
+	// ① 连上 + PING（测的必须是「断连」而不是「连不上」）
+	if err := client.Ping(ctx).Err(); err != nil {
+		fmt.Println("PROBE-FAIL ping:", err)
+		os.Exit(2)
+	}
+	fmt.Println("PROBE-READY")
+
+	// ② 静默等待：**期间不发任何命令**（发了会掩盖「断连后第一条命令」的排队窗口）
+	time.Sleep(time.Duration(*wait) * time.Millisecond)
+
+	// ③ 外部优雅关闭（docker stop = SIGTERM ⇒ redis 优雅退出 ⇒ 客户端看到 FIN，不是 RST）
+	out, err := exec.Command("docker", "stop", *container).CombinedOutput()
+	fmt.Printf("PROBE-DOCKER-STOP err=%v out=%s", err, string(out))
+
+	// ④ 断连后第一条命令 ⇒ 量它多久失败
+	t0 := time.Now()
+	cmdErr := client.Get(ctx, "g3-probe-key").Err()
+	elapsed := time.Since(t0)
+	fmt.Printf("PROBE-RESULT mode=%s first_command_ms=%d err=%v\n", *mode, elapsed.Milliseconds(), cmdErr)
+
+	_ = client.Close()
+}
+```
+
+**依赖（`go.mod` / `go.sum`）** —— ⚠️ **不要写死版本、不要 `go mod tidy`**
+（tidy 会去解析**依赖的测试依赖**（go-zero → yaml.v2 → check.v1 → rogpeppe），那些未必在本地 module cache 里 ⇒ tidy 必然失败，而探针根本不需要它们）。
+⇒ ⇒ **沿用真源的 `go.mod` / `go.sum` 整体继承**（改 module 名）+ 只 import 真正用到的包 ⇒ 版本集与 hash 与真源逐条一致。
+⇒ ⇒ 探针以 `CGO_ENABLED=0` 跑（纯 Go，本机无可用 cgo 工具链 ⇒ 必须关掉）+ `GOPROXY=off` + `GOTOOLCHAIN=local`。
+⇒ ⇒ 本原型用到的版本（**核对用**）：`go-redis/v9 v9.20.0` + `xxhash/v2 v2.3.0` + `go-rendezvous v0.0.0-20200823014737-9f7001d12a5f` + `go.uber.org/atomic v1.11.0`；`go 1.25`。
+
+#### 12.9.4 时序（**关键：期间不发任何命令**，否则掩盖排队窗口）
+
+1. 连上 → `PING`（**必须成功** ⇒ 测的是「断连」不是「连不上」）
+2. 静默等待 **1000 ms**（`--wait-ms`，**期间不发任何命令**）
+3. 外部 `docker stop <container>`（**SIGTERM ⇒ 优雅 FIN**，**不是** RST）
+4. 量**第一条命令**的失败耗时
+
+#### 12.9.5 编排
+
+每组**各自**取一个空闲端口（**不能复用同一个** —— 容器还在占着）⇒ 起 `redis:7-alpine` ⇒ 等就绪 ⇒ 跑探针 ⇒ `docker rm -f` 收尾。
+
+#### 12.9.6 Java 腿：A/B 对照（**域内已有守门，工具层要做的是「把 Go 腿拉进来」**）
+
+| 组 | 配置 | 实测（hot 域 · 2026-10-27 20:0x）|
+|---|---|---|
+| **A** | 共享层产出的那套 ClientOptions（`REJECT_COMMANDS`）| **1 ms** |
+| **B** | 同一套**只**把断连行为换成 Lettuce 默认 `DEFAULT` | **3007 ms**（排队到 `commandTimeout: 3s`）|
+
+⇒ ⇒ **A/B 差 3006 ms** ⇒ ⇒ **机制是承重的**。
+⇒ ⇒ **消费点（不是读配置项）**：`connectionFactory.getNativeClient().getOptions().getDisconnectedBehavior()`
+⇒ ⇒ **运行期生效判据**：`getBeansOfType(LettuceClientOptionsBuilderCustomizer.class).size() == 1` ＋ bean 名含 `goStyleRedisClientOptionsCustomizer` ⇒ ⇒ **无域内副本遮蔽**。
+⚠️ **共享层已有更上一层的守门**（G4 实测）：`service/common/src/test/java/com/rag/common/redis/GoStyleRedisClientOptionsGateTest.java:50/:61/:71`（在场 + 没被遮蔽 + 不覆盖运维 `timeoutOptions`）＋ `GoStyleRedisClientShadowingGateTest.java`（源文件扫描）⇒ ⇒ **本工具**只补「**Go 腿**」这一半 ⇒ ⇒ **不造第二条 customizer 守门**（已与 G4 达成一致）。
+
+#### 12.9.7 Go 腿实测基线（G3 已跑，**可作为期望值**）
+
+| 模式 | 4 轮 `first_command_ms` | 判读 |
+|---|---|---|
+| `hot`（真源 `{Addr, Password}`）| **1669 / 1808 / 1710 / 1771 ms** | **快速失败**（go-redis `MaxRetries` 默认 3 ＋ 重试退避 ⇒ 拒连重试若干次后失败）⇒ err = `dial tcp … connect: connection refused` |
+| `comment`（真源 `{Addr}`，**同一支探针换参数跑**）| **1708 / 1776 / 1741 / 1753 ms** | 同量级 ⇒ ⇒ **两套真源 `Options` 的断连行为一致** |
+
+⇒ ⇒ **两侧语义相同（都「快速失败」），量级不同**（Go 的重试退避 vs Lettuce 立即拒单）
+⇒ ⇒ **「Go 的 `MaxRetries=3` 重试面」另属他档**（Lettuce 无重试）⇒ ⇒ **本工具不覆盖那一条**（不混）。
+
+#### 12.9.8 输出格式与退出码
+
+| 标记 | 含义 |
+|---|---|
+| `PROBE-READY` | 已连上且 PING 成功（**这一步不过 ⇒ 测的是「连不上」⇒ 无效**）|
+| `PROBE-DOCKER-STOP err=… out=…` | 外部优雅关闭的结果 |
+| `PROBE-RESULT mode=… first_command_ms=… err=…` | **第一条命令的失败耗时**（判读用的就是这个数）|
+| `PROBE-FAIL …` | 环境/参数问题 |
+
+⇒ ⇒ **工具退出码**：`0` = 双侧都「快速失败」且语义一致；`1` = 不一致；`2` = 环境问题 / 真源漂移（**照 `tools/api-envelope-probe/favorite/run.sh` 的三段式：Go 腿输出 → 与冻结的 `expected.txt` 逐字节 diff → 再跑 Java 腿**）。
+
+#### 12.9.9 与域内既有守门的关系（**不重复造**）
+
+- 域内已有：`HotRedisDisconnectFastRejectGateTest`（hot · 2 条）· `CommentRedisDisconnectFastRejectGateTest`（comment · 2 条）—— ⇒ 它们守的是 **RAG 腿**；
+- 本工具守的是 **Go 腿 ＋ 双侧对照** ⇒ ⇒ **不同轴**；
+- ⚠️ **不覆盖**：① 池耗尽那形态（由各域 `max-wait` 那条覆盖）② 「断连时 gRPC 响应层客户端看到什么」（要真发一次 gRPC 调用）③ 每个域**自己**跑一遍（**不外推** —— like / task / comment / users / admin 各域的域上下文不同 ⇒ customizer 数量可能不同）。
+
+—— G3（2026-10-28 · `align/g3-article-comment-favorite-hot`）
+
+---
+
 ## 🔴 **阈值类结论的「共享层依赖」声明**（2026-10-27 · 按 G2 [3] 的要求做的重核）
 
 ⚠️ **凡本档写了「**运行期上限 / 阈值 / 池形态**」类结论，必须标「依赖共享层哪个版本」** ⇒ ⇒ **共享层一改 ⇒ 那条要重核**（重核，不是重写）。
