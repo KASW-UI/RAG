@@ -270,3 +270,23 @@ Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
 
 - **message-rpc**：`mvn test` 口径 **84 ⇒ 89**（新守门类 **5 条**）⇒ ⚠️ 本文件里另有更早的历史数字（`49` / `68` 等）⇒ 那些是**旧轮次**的记述、**不是现状** ⇒ 引用时以本行与本节为准
 - ⇒ ⚠️ **守门覆盖缺口**：`check-ledger-selfcheck.py` 层 3（数字断言）**默认只查 task 域** ⇒ ⇒ **like / message 域的测试数 stale 它不会报** ⇒ ⇒ **这两域的数字要自己盯**（本轮是我自己发现并订正的）
+
+#### ⑤ 🟢 **合并后回归（实测 · 2026-10-27 13:31:32 → 13:39:12 · 7:39 min · `MVN_EXIT=0` · BUILD SUCCESS）**
+
+reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **为什么必须把 `service/common` 放进 reactor**：`layerNames` / `compose` 只存在于**合并后的共享层源码**里，而 `~/.m2` 里还是旧 jar ⇒ ⇒ 若只跑 8 个域模块 ⇒ 它们会编译到**旧**共享层 ⇒ **编译不过** ⇒ ⇒ **替代方案是 `install` 共享层 jar 到 `~/.m2`** ⇒ ⇒ **我拒绝这么做**（那会改变别的 lane 正在解析的依赖 ⇒ 尤其 G4 当时正在跑第 12 次全量）⇒ ⇒ **只在 reactor 内解决**
+
+| 模块 | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `service/common`（**合并进来的共享层**） | 324 | 0 | 0 | 0 |
+| `service/message/message-api` | 98 | 0 | 0 | 0 |
+| `service/message/message-rpc` | **89** | 0 | 0 | 0 |
+| `service/message/message-common` | 21 | 0 | 0 | 0 |
+| `service/like/like-api` | 89 | 0 | 0 | 0 |
+| `service/like/like-rpc` | **115** | 0 | 0 | 0 |
+| `service/like/like-common` | 18 | 0 | 0 | 0 |
+| `service/task/task-api` | 97 | 0 | 0 | 0 |
+| `service/task/task-rpc` | **119** | 0 | 0 | 0 |
+| **合计** | **970** | **0** | **0** | **0** |
+
+⇒ ⇒ **域侧 8 模块 = 646**（合并前同口径 **637** ⇒ **+9** = task +2 ＋ like +2 ＋ message +5 ⇒ ⇒ **逐条对得上本轮新增的用例**）⇒ ⇒ **共享层自身 324 条全绿** ⇒ ⇒ **合并进来的共享层在我树里是绿的**（不是「合进来就假定它对」）
+⇒ ⇒ ⚠️ **口径纪律**：① 数字取自**本轮 mtime 切的 surefire XML**（起跑标记 epoch `1793079092`）⇒ **0 stale 报告**（like-rpc 那 1 份孤儿 `LikeRpcServerSpanCurrentProbeTest` 被正确剔除 ⇒ 见上文口径段）② **并发事故披露**：起跑瞬间 **G3 与 G4 也同时起了 maven** ⇒ **三路并发** ⇒ 我的占用者检查**确实打印出了**那两个树，但被我紧跟的一句写死 echo「(空 = 可起跑)」**盖住** ⇒ ⇒ **我没有看到自己打的字就起了跑** ⇒ ⇒ 幸而机器 24 GB、`memory_pressure` 42% free、0 throttled page ⇒ **三路都跑完、无 OOM**（G4 的第 12 次全量正常完成、其台账已落「第十二次全量口径」）⇒ ⇒ **但这是运气不是纪律** ⇒ ⇒ **已落 memory：占用者检查的输出不许被任何写死的结论句盖住**
