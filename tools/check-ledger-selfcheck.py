@@ -205,7 +205,14 @@ PATH_RE = re.compile(r'(?:service|tools|docs)/[A-Za-z0-9_./-]+\.(?:java|md|py|sh
 #    ⚠️ 用 `[a-z]IT` 而不是 `IT`：`LIMIT` / `WAIT` 这类**全大写词**不该被当成类名
 #    （`[a-z]` 要求 `IT` 前面紧邻一个小写字母 ⇒ 只有 CamelCase 的 `…GateIT` 才命中）。
 CLASS_RE = re.compile(r'`([A-Z][A-Za-z0-9]*(?:Test|ContractTest|GateTest|[a-z]IT))\b')
-REF_RE = re.compile(r'`?([A-Za-z0-9_][A-Za-z0-9_./-]*\.go):(\d+)(?:-(\d+))?`?')
+# 🔴 **字符类必须含 `@`**（2026-10-28 · G2 报 · 本层修）：
+#    提取器与解析器的**契约** = 「`module@version/path` 原样传给 `_direct_module_candidate`」
+#    ⇒ 少了 `@` ⇒ 正则在 `@` 处**截断** ⇒ `go-zero@v1.10.2/rest/httpx/util.go` 被提成
+#    `v1.10.2/rest/httpx/util.go` ⇒ ⇒ 精确定位通道**从台账文本永远进不去** ⇒ 是**死代码**
+#    ⇒ ⇒ 而该通道正是「带版本前缀 ⇒ 路径唯一 ⇒ 消除跨库同名歧义」的兑现点
+#    ⇒ ⇒ 台账里**短式是既有写法**（`docs/DRIFT/global/common-tails.md:51` 就是短式）
+#    ⇒ ⇒ 修法 = **提取器补 `@` ＋ 解析器支持短式**（见 `_direct_module_candidate`）⇒ **写法不必改**
+REF_RE = re.compile(r'`?([A-Za-z0-9_][A-Za-z0-9_@./-]*\.go):(\d+)(?:-(\d+))?`?')
 
 # 🆕 2026-10-27（G4 · 跨 lane 发现的共享工具缺陷）：把「**什么算测试类名**」抽成
 #    **单一真源** ⇒ **分子（CLASS_RE）与分母（第 5 层的候选集）必须用同一套口径**。
@@ -1048,6 +1055,48 @@ def _detect_goroot():
     return None
 
 
+# ── module cache 里的「`<name>@<version>` 目录」索引（懒建 + 进程内缓存）──────
+_MODULE_DIRS_CACHE = {}
+
+
+def _module_dirs_index(gomodcache):
+    """module cache 里的 `<name>@<version>` 目录 → 完整路径列表。
+
+    🔴 **为什么需要它**（2026-10-28 · G2 报 · 本层修）：
+       `_direct_module_candidate` 的**全式**正则要求模块段**含 `.`** ⇒
+       **短式**（`go-zero@v1.10.2/rest/httpx/util.go`）**解析不到**
+       ⇒ 而台账里**短式是既有写法** ⇒ ⇒ 短式**从来没进过精确定位通道**
+       ⇒ ⇒ 「带版本前缀 ⇒ 路径唯一 ⇒ 消除同名歧义」这条设计意图【兑现不了】
+       ⇒ ⇒ 台账引用只能靠 basename 猜（跨库同名：`config.go` 14 处 · `unmarshaler.go` 3 处 …）。
+
+    🟢 **短式其实可以做到【同样精确】**：module cache 里的真实路径是
+       `<cache>/github.com/zeromicro/go-zero@v1.10.2/rest/httpx/util.go`
+       ⇒ ⇒ **`<name>@<version>/<rest>` 是它的一段唯一【路径后缀】**
+       ⇒ ⇒ 所以「短式」不必退化成 basename 猜 ⇒ ⇒ **两种写法都能走精确定位**
+       ⇒ ⇒ ⇒ **台账写法不必改**（跨域一致性优先）。
+
+    ⚠️ **只扫有限深度**：模块目录最深 3 层（`github.com/zeromicro/go-zero@v1.10.2`）
+       ⇒ ⇒ 不做全量递归 ⇒ 不拖慢门禁。
+    """
+    if not gomodcache:
+        return {}
+    if gomodcache in _MODULE_DIRS_CACHE:
+        return _MODULE_DIRS_CACHE[gomodcache]
+    idx = {}
+    if os.path.isdir(gomodcache):
+        for dp, dns, _ in os.walk(gomodcache):
+            rel = os.path.relpath(dp, gomodcache)
+            depth = 0 if rel == '.' else rel.count(os.sep) + 1
+            if depth >= 3:
+                dns[:] = []          # 再深就不是模块目录了 ⇒ 剪枝
+                continue
+            for d in list(dns):
+                if '@' in d:
+                    idx.setdefault(d, []).append(os.path.join(dp, d))
+    _MODULE_DIRS_CACHE[gomodcache] = idx
+    return idx
+
+
 def _direct_module_candidate(path, gomodcache):
     """`module@version/...` 前缀 ⇒ **直接在 module cache 里找**（最精确）。
 
@@ -1055,12 +1104,31 @@ def _direct_module_candidate(path, gomodcache):
     ⇒ 写成完整模块路径（`gorm.io/gorm@v1.31.1/schema/naming.go`）反而**解析不到**
     （basename 是 `naming.go`，而索引里没有这个模块）⇒ 假 FAIL。
     ⇒ 带版本前缀 ⇒ 路径**唯一** ⇒ 直接拼出来即可 ⇒ 顺带**消除跨库同名歧义**。
+
+    🟢 **两种写法都支持（2026-10-28 · 本层修）**：
+       ① **全式** `github.com/zeromicro/go-zero@v1.10.2/rest/httpx/util.go`
+          ⇒ 直接拼 `<cache>/<escaped module>@<ver>/<rest>`（原逻辑，一字未改）
+       ② **短式** `go-zero@v1.10.2/rest/httpx/util.go`
+          ⇒ 模块段**不含 `/`** ⇒ 走**路径后缀**匹配（`_module_dirs_index`）
+          ⇒ ⇒ **唯一命中才返回**；**多命中 = 仍有歧义 ⇒ 返回 None（不猜）**
     """
     m = re.match(r'^([a-zA-Z0-9._~/-]+\.[a-zA-Z0-9._~/-]+)@(v[^\s/]+)/(.+)$', path)
-    if not m:
-        return None
-    mod, ver, rest = m.groups()
-    return os.path.join(gomodcache, _modcache_escape(mod) + '@' + ver, rest)
+    if m:
+        mod, ver, rest = m.groups()
+        return os.path.join(gomodcache, _modcache_escape(mod) + '@' + ver, rest)
+    # ── 🔴 短式：模块段**不含 `/`** ⇒ 按 `<name>@<ver>` 目录名 + 路径后缀唯一匹配
+    m = re.match(r'^([A-Za-z0-9._~+-]+)@(v[^\s/]+)/(.+)$', path)
+    if m:
+        mod, ver, rest = m.groups()
+        if '/' not in mod:
+            hits = []
+            for d in _module_dirs_index(gomodcache).get(f'{mod}@{ver}', []):
+                cand = os.path.join(d, rest)
+                if os.path.isfile(cand):
+                    hits.append(cand)
+            # ⚠️ **必须唯一** ⇒ 多命中说明仍有歧义 ⇒ 返回 None（**不猜** ⇒ 保住消歧语义**）
+            return hits[0] if len(hits) == 1 else None
+    return None
 
 
 def _stdlib_candidate(path, goroot):
@@ -1923,6 +1991,48 @@ def layer0_selfcheck(root):
         print('    ✅ 层 4 的 module cache 路径转义正确（大写字母 → !小写）')
     else:
         print('    ❌ 层 4 的 module cache 路径转义不对 ⇒ 带大写的模块永远找不到')
+        bad += 1
+
+    # ②⁚ 层 4 的**端到端**通道：台账文本 → `REF_RE` 提取 → `_direct_module_candidate` → 真命中
+    #     🔴 **为什么必须端到端**（2026-10-28 · G2 报 · 本层修）：
+    #        原自测**直调** `_direct_module_candidate` ⇒ **绕过了 `REF_RE`**
+    #        ⇒ ⇒ 提取器与解析器的**契约**不一致（`REF_RE` 字符类**不含 `@`**）
+    #        ⇒ ⇒ 精确定位通道是【死代码】⇒ **自测过、真跑不通** ⇒ ⇒ 自测必须走完整链路
+    with tempfile.TemporaryDirectory() as _td:
+        _cache = os.path.join(_td, 'pkg/mod')
+        _f = os.path.join(_cache, 'github.com/zeromicro/go-zero@v1.10.2', 'rest/httpx/util.go')
+        os.makedirs(os.path.dirname(_f))
+        with open(_f, 'w', encoding='utf-8') as fh:
+            fh.write('package httpx\n')
+        _text = '见 `go-zero@v1.10.2/rest/httpx/util.go:15`'
+        _m = REF_RE.search(_text)
+        _got = _m.group(1) if _m else None
+        _c = _direct_module_candidate(_got, _cache) if _got else None
+        _hit = bool(_c) and os.path.isfile(_c)
+    if _got and '@' in _got:
+        print('    ✅ 层 4 的 REF_RE 能提取出带 `@版本` 的完整路径')
+    else:
+        print(f'    ❌ 层 4 的 REF_RE 提取不出带 `@版本` 的完整路径（提取到 {_got!r}）')
+        bad += 1
+    if _hit:
+        print('    ✅ 层 4 的短式 `module@version/...` 也能【端到端】定位到 module cache 里的文件')
+    else:
+        print('    ❌ 层 4 的短式 `module@version/...` 端到端定位失败 ⇒ 精确定位通道是死代码')
+        bad += 1
+
+    # ②⁛ 层 4：短式在【同名多模块】时必须返回 None（**不猜**）⇒ 消歧语义不许被破坏
+    with tempfile.TemporaryDirectory() as _td:
+        _cache = os.path.join(_td, 'pkg/mod')
+        for _pre in ('github.com/zeromicro', 'gitlab.com/other'):
+            _f = os.path.join(_cache, _pre, 'go-zero@v1.10.2', 'rest/httpx/util.go')
+            os.makedirs(os.path.dirname(_f))
+            with open(_f, 'w', encoding='utf-8') as fh:
+                fh.write('package httpx\n')
+        _c2 = _direct_module_candidate('go-zero@v1.10.2/rest/httpx/util.go', _cache)
+    if _c2 is None:
+        print('    ✅ 层 4 的短式在【同名多模块】时返回 None（不猜）⇒ 消歧语义保住')
+    else:
+        print('    ❌ 层 4 的短式在同名多模块时乱挑了一个 ⇒ 消歧语义被破坏')
         bad += 1
 
     # ②⁙ 层 4：Go **标准库**的引用必须能定位（`<GOROOT>/src/...`）
