@@ -923,6 +923,14 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 ⇒ ⚠️ **但它同时新增了一条对本域有约束的共享层判据**：`SEMANTIC_REACHABILITY` 把「Go 侧该域是否真的解析 form/query」写成了**逐域取证表** ⇒
 ⇒ **⇒ 若将来 Go 侧 user/admin/follow 的 handler 改成解析 form/query，本域的 `mode` 必须跟着改** ⇒ **复开触发条件已在本节锁定**（G4 侧有 `GoStyleFormLimitSemanticCriterionTest` 6 条守门守着这张表）。
 
+> ⚠️⚠️ **本节预检的边界（必读）**：上表**只覆盖 G4 已提交的 4 条**。
+> ⇒ **G4 还有未提交的在途工作**（2026-10-27 13:0x 观测到其工作树在改
+> `GoStyleTomcatParameterLimitCustomizer` ＋ 新增 `GoStyleParamLimitOffModeGateTest`，
+> 方向 = **「OFF ⇒ 容器上限也要抬到 10001」**，即把「装不装应用层闸门」与「抬不抬容器上限」**解耦**）。
+> ⇒ ⇒ **对本域三域（raw / raw / envelope，均为可达态）该改动是零影响**（容器上限**本来就是 10001**）
+> ⇒ ⇒ **但它会改变 `OFF` 域的语义** ⇒ ⇒ **合入时必须以 G4 的最终提交为准重新核一遍本节**
+> ⇒ ⇒ **本节的真正作用是「给合入后的复验清单」，不是「合入前的免检证明」**。
+
 ---
 
 ## 14. 🆕 **守门卫生缺陷：「可达 ⇒ 能启动」用例的 3s 预算过紧 ⇒ 偶发红**（2026-10-27 · G1 lane）
