@@ -1854,7 +1854,123 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | ⇒ ⇒ 订正 | **本层的建议缺了正向那条** ⇒ ⇒ 正确的下限是「**负向两条 ＋ 正向一条（Go 契约值）**」⇒ ⇒ §4.10.25.4 已就地加订正标记（不重写历史段）⇒ ⇒ **G3 的写法正确** |
 | 🆕 教训 | **「别写死具体值」不是通用规则** —— 只有当那个值**不是契约**时才适用；**当它就是 Go 侧契约值时，硬编码反而更强**（能抓住「错误码映射被改」这类漂移）⇒ ⇒ **先问「这个值是不是契约」再决定断言形态** ⇒ ⇒ 与本层「形状优先」的泛化相比：**G3 比本层更准** |
 
+#### 4.10.30 🟢 **第十三次全量回归口径**（核对日期 2026-10-27 · 代码态 `cd893d1` + `22dc67e`）
+
+> ⚠️ **口径的复算方法（本轮新增 · 可复算）**：从三段日志里取**每个模块的 surefire 汇总行**
+> （即 `<b>没有</b> " -- in " 后缀的那一行`）逐模块求和 ⇒ **不要按行序 tail**（那是 reactor 末模块，不是总数）。
+> 🔴 **三段日志不能直接相加**：补跑那两段的命令带了 `-am` ⇒ `users-common` / `favorite-common` / `common`
+> **被重新构建** ⇒ 直接相加会**重复计 389 条** ⇒ 下面的口径是**去重后**的。
+
+| 段 | 日志 | 模块 | 用例 | failures | errors | skipped | 结论 |
+|---|---|---|---|---|---|---|---|
+| **主跑** | `/tmp/g4-full13.log` | **25**（含 `favorite-api`） | **2187** | **1**（预期内） | 0 | 1 | 🔴 `BUILD FAILURE` / `MVN_EXIT=1` ⇒ **fail-fast 停在 [46/52] `favorite-api`** ⇒ 其后 6 个模块 SKIPPED |
+| **补跑 ①** | `/tmp/g4-rest6-13.log` | 3（重叠 3 + 新 0） | 89 | **3**（`common`） | 0 | 0 | 🔴 `BUILD FAILURE` ⇒ `common` 3 条新红（`GoStyleJsonContentTypeCharsetTomcatTest`「expected 200 but was -1」）⇒ **隔离复跑 4/4 绿** ⇒ 判为**非确定性抖动**（不是本波引入） |
+| **补跑 ②** | `/tmp/g4-rest6-13b.log` | **4 个新**（+ 3 个重叠） | **290** | 0 | 0 | **3** | ✅ **全绿 / `BUILD SUCCESS` / `MVN_EXIT=0`**（14:36:24 → 14:39:37 = **3:13 min**） |
+| **合计（去重）** | —— | **29 个有测试模块** | **2477** | **1** | **0** | **4** | ✅ 除 `favorite-api` 那 1 条**预期内**旧断言外全绿 |
+
+| 项 | 值 |
+|---|---|
+| 命令 | `mvn -B clean verify -DargLine=-Xmx3g`（**全量**，不是 `-pl` 子集） |
+| 主跑耗时 | **19:12 min**（14:09:08 起跑） |
+| 模块数 | **52**（Reactor 计数）· 其中 **29 个有测试模块** |
+| 用例数 | **2477**（逐模块汇总行求和 ⇒ 去重后） |
+| failures / errors / skipped | **1 / 0 / 4**（那 1 条 failure = `favorite-api` 的**旧**断言 5003 ⇒ **预期内**；`favorite-api` 另 1 条 skipped ＋ `favorite-rpc` 3 条 skipped = **4**） |
+| 相对上一轮 | 第十二次 **2474** ⇒ **+3**（= `22dc67e` 的新守门 3 条）⇒ ⇒ **本轮的生产代码态与第十二次相同**（`cd893d1` 未变） |
+| 逐模块要点 | `service/common` **327**（本轮 330 是 §4.10.32 之后）· `article-rpc` **154** · `admin-rpc` **112** · `task-rpc` **110** · `favorite-rpc` **110**（3 skipped） |
+| **三门禁**（同批次复跑） | `check-wave-lane-ownership` **EXIT=0** · `check-wave-role-model` **EXIT=0** · `check-wave-coupling` **EXIT=0** |
+| **台账三门禁** | `check-ledger-tables` **EXIT=0** · `check-ledger-selfcheck` **EXIT=0** · `check-ledger-count` **EXIT=0** |
+| **三探针** | `run-parity.sh` **EXIT=0 · 56 例** · `run-rpc-timeout-parity.sh` **EXIT=0 · 3 例** · 🔴 `api-envelope-probe/favorite` **EXIT=2（两次）** ⇒ ⇒ **根因见 §4.10.31 ⇒ 产品侧逐字节正确 ⇒ 已在 §4.10.32 修掉成因**（修后 **EXIT=0 · 5/5**） |
+
+#### 4.10.31 🔴 **探针 `api-envelope-probe/favorite` EXIT=2 的根因：三层取证 ⇒「红的是客户端层，产品侧正确」**
+
+> **结论先行**：RAG 的最终响应与 Go 冻结期望 **逐字节一致** ⇒ **业务侧无缺陷**；
+> 红的是**客户端层** —— 共享层的 1xx 探测行数**无上界** ⇒ 击穿了客户端对 interim(1xx) 响应的硬上限。
+> ⚠️ **教训：「探针红」≠「产品错」** —— 必须先做 **raw socket 抓包 + 字节级比对**再定性。
+
+**第 ① 层：raw socket 抓原始字节**（`/tmp/g4wire/raw.py` · `sweep.py` · `timed.py`）
+
+| 观测 | 值 | ⇒ 说明 |
+|---|---|---|
+| 端口 21300（`RealTomcatPort.FIRST`）上的 Tomcat 在最终响应前连发 | **N 行 `HTTP/1.1 103 Early Hints\r\n\r\n`** | 1xx 是**共享层探针写的**（不是 Tomcat 自发） |
+| `n=2049` 一次采样 | `elapsed=6.73s` · `count103=12` · 最终 `200 + {"code":5003,"msg":"参数错误","data":null}` | ⇒ **行数 ≈ 耗时 ÷ 探测间隔（500ms）⇒ 无上界** |
+| `n=5` / `n=2047`（走业务层） | 最终 `200 + {"code":1015,"msg":"服务繁忙","data":null}` | ⇒ **1015 与 5003 是两个不同格子**（见下方注） |
+| 不带 Authorization 的 401 路径 | **零 1xx**、干净 401 JSON | ⇒ **1xx 只出现在「过了鉴权、走业务」路径** ⇒ 进一步否掉「Tomcat 自发」 |
+
+**第 ② 层：JDK 源码（`$JAVA_HOME/lib/src.zip`）**
+
+| 位置 | 事实 |
+|---|---|
+| `java.net.http/jdk/internal/net/http/Exchange.java:71-72` | `MAX_NON_FINAL_RESPONSES = Utils.getIntegerNetProperty("jdk.httpclient.maxNonFinalResponses", 8)` ⇒ **默认上限 8**（可由系统属性配置；`module-info.java:129` 亦列出该属性） |
+| 同文件 `:544-550` | 计数超限即抛 `ProtocolException("Too many interim responses received: 9 > 8")` ⇒ **8 个 1xx 可过、第 9 个即炸** |
+| 同文件 `:566-568` | 仅当 `request.expectContinue()` 为真才发 `Expect: 100-Continue` ⇒ 本测试未设 ⇒ **不是 Expect 导致**（假服务器 `FakeServer.java` 抓到 JDK 实际只发 4 行头：`GET` / `Host` / `User-Agent` / 空行） |
+
+**第 ③ 层：字节级比对**
+
+| 项 | 结论 |
+|---|---|
+| `tools/api-envelope-probe/favorite/expected.txt:10`（Go 冻结期望，Content-Type 按 RFC 9110 OWS 归一后） **vs** RAG 实测 | **逐字节一致 = True** ⇒ ⇒ **探针期望值是对的，RAG 实现也是对的** |
+
+> 🔴 **1015 与 5003 不可混为一谈**（本轮差点误判）：Go 侧 `httpx.Parse` 失败 ⇒ `favorite/common/errmsg.go:16` `ErrorInvalidParam=5003`（文案「参数错误」，`:51`）；
+> **进业务层后**业务失败 ⇒ `BizCodeFromError`（同文件 `:113-136`）default ⇒ `:13` `CodeServerBusy=1015`（文案「服务繁忙」，`:48`）
+> ⇒ ⇒ **两格对应两个不同的失败阶段** ⇒ **不可把 1015 当成「参数超限」的答案**。
+
+> ⚠️ **已排除的假设**（每条都有取证，不是推测）：
+> 「探针红 = 我的改动引入」**错**（`cd893d1` 早于第十二次全量 ⇒ 12/13 轮运行期上限相同）·
+> 「端口被别人占」**错**（监听者就是本测试自己的 JVM）·「`expected.txt` 被改 / Go 侧输出漂移」**错**（sha256 一致）·
+> 「Tomcat 自发 1xx」**错**（401 路径零 1xx）·「JDK 发 `Expect: 100-continue`」**错**（抓包证否）。
+
+#### 4.10.32 🔴🟢 **1xx 探测行数上界**（已落码 `15cf93a`）—— 共享层 ⇒ **10 个 api 组件全部适用**
+
+| 项 | 值 |
+|---|---|
+| **为什么必须落** | 共享层的「客户端断连主动探测」每片等待醒来就往 socket 写一行 1xx ⇒ **行数 ≈ 耗时 ÷ 探测间隔 ⇒ 原本无上界** ⇒ ⇒ **任何耗时 > ~4s 的请求**（8 × 500ms）都会让 JDK `java.net.http` 客户端**直接抛异常、读不到最终响应** |
+| **落点 ①** | `service/common/src/main/java/com/rag/common/observability/GoStyleClientDisconnectProbe.java`<br>新增 `MAX_PROBE_LINES_PROPERTY`（`rag.common.http.disconnect-probe-max-lines`）· `DEFAULT_MAX_PROBE_LINES = 4` · `State.BUDGET_EXHAUSTED` · `maxProbeLines()` · 计数**按请求**（request attribute）· 预算闸门排在**反射链之前** · 类 javadoc 补「为什么必须有行数上界」一节（含 JDK 源码取证） |
+| **落点 ②** | 同目录 `HttpMiddleware.java` ⇒ 识别 `BUDGET_EXHAUSTED` ⇒ **每请求记一条 INFO**；⚠️ **等待语义完全不变**（总窗口既不延长也不缩短）⇒ **fail-open** |
+| **落点 ③（新守门）** | `service/common/src/test/java/com/rag/common/observability/GoStyleClientDisconnectProbeBudgetGateTest.java`（**3 条**）—— ① 线上 1xx 行数 ≤ 预算 ② **真 JDK `HttpClient`** 能读到最后响应 ③ 预算是**按请求**的（第二个请求不吃光前一个的预算）<br>⇒ **真 Tomcat + 真 JDK 客户端**（§3.3：mock response 的 `write()` 永远不失败 ⇒ 那种测试是「错误答案的守卫」） |
+| **落点 ④（顺带订正）** | `GoStyleTimeoutResponseRaceGateTest.java` ⇒ **归因错误**：原注释称 103 是「Tomcat 11 自发」⇒ 实测是**共享层探针**写的（401 路径零 1xx ⇒ 若容器自发，401 也该有）⇒ **不影响该用例判定**（两种来源下都要跳过 1xx），但影响「谁负责 1xx 行数」 |
+| **落点 ⑤（顺带订正）** | `GoStyleClientDisconnectProbe` 类 javadoc 的签字档指针：`SD-2026-10-25-02`（**已撤销**）⇒ **`SD-2026-10-25-04`（✅ 已签字 2026-10-25）** |
+| **为什么取 4 而不是 8** | 客户端硬上限 = JDK 默认 **8** ⇒ 取**一半** ⇒ 即便客户端把上限配到 4 也炸不了 ⇒ ⚠️ **不要写成 8**（那就没有余量） |
+| **变异验证（各红**且仅红**一条）** | **M1** 闸门差一（`written > max`）⇒ 只红 ①（实测行数=5）· **M2** 计数器改全局静态 ⇒ 只红 ③（first=0 second=0）· **M3** 默认上界 4→1000 ⇒ 只红 ②（**复现原始故障原文 `Too many interim responses received: 9 > 8`**）⇒ 三次跑完均**逐字节还原**（MD5 MATCH） |
+| **回归** | `mvn -o -B -DargLine=-Xmx2g -am -pl service/common test` ⇒ **330 / 0 failures / 0 errors / 0 skipped · BUILD SUCCESS**（327 + 新守门 3） |
+| ✅ **端到端闭环（原失败探针转绿）** | `bash tools/api-envelope-probe/favorite/run.sh` ⇒ **PROBE_EXIT=0**（修前 **EXIT=2**）· `FavoriteApiEnvelopeParityTest` **5/5 全绿**（14.574s）⇒ ⇒ **且不需要任何客户端绕过参数**（此前用 `-Djdk.httpclient.maxNonFinalResponses=0` 才绿 ⇒ 现证明**成因确实在共享层** ⇒ **那个绕过参数不再需要**）⇒ ⇒ 双侧逐字节一致（Go 真源 == `expected.txt` == RAG 实测）⇒ ⇒ **本条把 §4.10.31 的根因彻底闭环** |
+| 🔴 **已知代价（已写进类 javadoc）** | 预算用尽后**不再有主动探测** ⇒ 超长请求里客户端中途断连**不再被提前发现** ⇒ 在飞的下游 gRPC 要等**写最终响应**时才被取消 ⇒ ⇒ **这是「保住客户端能解析响应」换来的取舍**（宁可晚取消，不可让客户端失败）⇒ ⇒ **不再改探测间隔**（那会改掉已签字偏离 `SD-2026-10-25-04` 的「延迟 ≈ 探测间隔」表述） |
+| 🔴 **跨域暴露面（只登记 · 共享面待整合）** | 暴露量由各域 `observability.http-timeout` 决定 ⇒ **`article-api` = 70s**（Go 真源 `Timeout: 70000` 对齐值 ⇒ **不能靠改域 yaml 规避**）⇒ **修前最多 140 行**；其余 9 域 = 3s ⇒ 最多 6 行 ⇒ ⇒ **`article` 域最危险** ⇒ 修后一律 ≤ 4 行 |
+| ⚠️ **签字档的连带** | `docs/Intentional_Deviations/global/common-tails.md` 的 `SD-2026-10-25-04` 仍写「N = 探测轮数 ≈ 慢请求秒数 ÷ 0.5s」⇒ ⇒ **该文件不属本 lane 写权** ⇒ ⇒ **只在此登记，待整合者回写**（把 N 改成「有上界（默认 4）」并补 JDK interim 上限的事实） |
+
+#### 4.10.33 🟢 **本轮三条杂项**（`io/` 工作区噪声根因 · U+FFFD 三分类 · 收到的订正归档）
+
+**① `io/` 工作区噪声的根因（已清 · 不是构建产物）**
+
+| 项 | 值 |
+|---|---|
+| 现象 | 仓库根出现 `io/opentelemetry/api/GlobalOpenTelemetry.class` ⇒ `git status` 脏 |
+| **根因** | 该文件的 **md5 == `~/.m2` 里 `opentelemetry-api-1.36.0.jar` 的同名条目**；而本仓 pin 的是 `opentelemetry-bom` **1.44.0** ⇒ ⇒ **连版本都不是构建在用的** ⇒ ⇒ 它 = 本层早前做 OTel 字节码取证时**在仓库根解 jar** 的**遗留** ⇒ `tools/**` 全仓无解压 ⇒ **不是脚本干的** ⇒ **归本层** |
+| 处置 | 按**可恢复**方式删除（`mavis-trash`）⇒ 本层工作区 `git status` 现为空 |
+| 🆕 **新规则（取证纪律）** | **解 jar 一律解到 `mktemp -d` 临时目录**，绝不在仓库根解（提交 `6df0090`） |
+
+**② U+FFFD 的**三分类**（本轮口径 · 取代「全仓归零」这个非法目标）**
+
+| 类别 | 判据 | 处置 |
+|---|---|---|
+| **① 真损坏** | 源码里的坏字节（`bytes` 里含 `EF BF BD`） | **按语义重建**（先追 `git log --all` 看原字是否可考；不可考才按语义补） |
+| **② 故意保留** | **被测对象**（如「body 不得含替换符」的断言）· **病症样本**（`docs/Pitfalls/**`） | **一个字都不动**（改了就废掉那条测试） |
+| **③ 引用/搬运** | 台账或消息里**抄了**带替换符的原文 | **写成描述**（`〈FFFD×N〉`）⇒ **文件里不留真替换符**（复制即新造） |
+
+> ⚠️ **口径纪律**：`bytes.count(b"\xef\xbf\xbd")` = **U+FFFD 字符个数**（每字符 3 字节）⇒ **不是字节数**
+> ⇒ ⇒ **「全仓归零」不是合法目标**（存在 ①/② 两类合法命中）。
+> ⚠️ **扫描范围**：必须**区分「源码」与「构建产物」** ⇒ `target/` 里的旧 jar 会带着**已修掉**的坏字符 ⇒ 判据 = **构建时间 vs 修复时间**。
+
+**③ 本轮收到的订正（归档）**
+
+| 来源 | 订正内容 | 处置 |
+|---|---|---|
+| **G2** | `853767b` 的 javadoc 称「全仓 `Span.current()` 原本只有 1 处」⇒ **合并后不成立** | ✅ **已独立核准并落码** `6cb0a60` ⇒ 改为「合并前 1 处（comment-rpc `CommentFactDeliveryService.java:148`，跑在调度线程 ⇒ 碰不到 ⇒ 零回归）；合并后 2 处（like 域 `LikeSpans.java:242/:246`，落在受益面上 ⇒ **由 no-op 变真生效 ⇒ 预期行为变更，非回归**）」+ 补写「like 域 A9 端到端 E2E 必须在合并后补」「契约级守门 ≠ 端到端生效」「MQ 路径不受影响」⇒ **回执见 §4.10.34** |
+| **G2** | 本层 `GoStyleRedisClientAutoConfiguration` 的 customizer **只调 `disconnectedBehavior(REJECT_COMMANDS)`**（本树实测 `:129-131` ⇒ **不调 `timeoutOptions`、不碰池**） | ✅ **已回执** ⇒ ⇒ G2 新增的 Redis 连接池（`task-rpc`）**理论上不受影响**，但「理论上」**不算数** ⇒ ⇒ **合并后仍须实测复跑其 ⑤⑥** |
+| **G3** | `service/common` 里 2 处 U+FFFD | ✅ **本层已修**（`0c72969`）⇒ 并已就 §4.10.31/§4.10.32 向 G3 通报「探针红在客户端层、产品侧正确」 |
+
 #### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `cd893d1`）
+
+> ⚠️ **本节已被 §4.10.34 取代**（口径截至 `cd893d1`）⇒ ⇒ **最新落码清单与最新回归口径看 §4.10.34** ⇒ ⇒ 本节按「不改写历史」原样保留。
 
 > ⚠️ **代码态基线 = `cd893d1`**（= 本轮**最后一次**改代码的提交）⇒ ⇒ `cd893d1` **改了生产代码**（容器上限无条件化）
 > ⇒ ⇒ 与「第十一次全量（§4.10.22 · 代码态 `040a201`）」**不是**同一个代码态 ⇒ ⇒ **必须重跑全量** ⇒ ⇒ **第十二次全量口径见 §4.10.26**。
@@ -1897,6 +2013,47 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 > ⚠️ **第七次之前的那次（第六次）是 BUILD FAILURE** ⇒ 失败与修法见 §4.10.8 ⇒
 > ⇒ **前五轮全量都绿，是因为 #8 的缺陷恰好挡在前面** ⇒ 那不是「本来就对」。
 
+#### 4.10.34 🟢 **本轮落码清单（最新）**（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `15cf93a`）
+
+> ⚠️ **代码态基线 = `15cf93a`**（= 本轮**最后一次**改生产代码的提交）⇒ ⇒ 其后的提交若只动台账 ⇒ **生产代码态仍是 `15cf93a`**。
+> ⇒ ⇒ **本轮的生产代码相对第十三次全量（§4.10.30 · 代码态 `cd893d1`）**变了**（`15cf93a` 改了 1xx 探针的行数上界）
+> ⇒ ⇒ ⇒ **合并前必须重跑全量**（口径口径以本节的 `service/common` 330 为准，全量数字待重跑后回填）。
+
+| commit | 内容 | 落点（`文件:行号`） | A 轴 |
+|---|---|---|---|
+| `15cf93a` | 🔴 **1xx 探测行数设「每请求上界」**（默认 4）⇒ 慢请求不再击穿客户端 interim 上限（§4.10.31 根因 ⇒ §4.10.32 修法） | `…/observability/GoStyleClientDisconnectProbe.java`（`MAX_PROBE_LINES_PROPERTY` / `DEFAULT_MAX_PROBE_LINES=4` / `State.BUDGET_EXHAUSTED` / `maxProbeLines()` / `probe()` 预算闸门 / 类 javadoc）· `…/observability/HttpMiddleware.java`（`BUDGET_EXHAUSTED` 分支）· **新增** `…/observability/GoStyleClientDisconnectProbeBudgetGateTest.java`（3 条 + 变异 M1/M2/M3）· `…/observability/GoStyleTimeoutResponseRaceGateTest.java`（归因订正） | **A5**（HTTP 超时/断连的失败语义）＋ **A3**（共享层的跨域暴露面） |
+| `6cb0a60` | 🟢 **订正 `853767b` 的 javadoc 计数口径**（G2 FB-04）：「合并前 1 处 / 合并后 2 处」分写 + 受益面说明 | `…/observability/RpcInterceptor.java`（`onHalfClose()` 的类内 javadoc「计数口径（2026-10-27 订正 · G2 反馈单 FB-04）」小节） | **A9**（业务 handler 执行期的 span 可见性） |
+| `cc6e38e` | 🟢 修 `tools/errmsg-probe/README.md:59` + `tools/sql-statement-probe/favorite/compare.py:561` 两处 **U+FFFD 真损坏**（G2 转派） | tools 面（G2 明确转派 ⇒ 属本层可写面） | 无（纯文本） |
+| `f68a9cd` | 🟢 修 `component-semantic-verification/springboot-semantic-model.md` 两处 **U+FFFD 真损坏**（无人拥有面 ⇒ 本层承接） | 同上 | 无（纯文本） |
+| `01b9c4c` | 🟢 裸 socket 空响应从不透明 `-1` 改成可读失败（诊断可用性） | `…/observability/**`（测试侧工具方法） | 无（只改测试） |
+| `6df0090` | 🟢 `io/` 工作区噪声的**根因定位**（md5 对上 `~/.m2` 旧版 1.36.0 jar ⇒ 不是构建产物）＋ 已清 | 本台账 | 无（零落码） |
+| `22dc67e` | 🟢 「不得新建域内 Redis 副本」的**机器门禁**（源文件扫描守门 · 3 条 + 变异 M1/M2/M3） | 新增 `…/redis/GoStyleRedisClientShadowingGateTest.java` | 无（只加守门） |
+| `a553a7b` / `c164e63` | 🟢 台账 §4.10.28 / §4.10.29（+ 就地订正 §4.10.24.2/.3） | 本台账 | 无 |
+
+**回归口径与结果（第十三次全量 · 核对日期 2026-10-27 · 代码态 `cd893d1` + `22dc67e`）**
+
+| 项 | 值 |
+|---|---|
+| 命令 | `mvn -B clean verify -DargLine=-Xmx3g`（**全量**，不是 `-pl` 子集） |
+| 结果 | 🔴 主跑 `BUILD FAILURE` / `MVN_EXIT=1`（**预期内**：fail-fast 停在 [46/52] `favorite-api`）⇒ ⇒ **补跑 ② 全绿 / `BUILD SUCCESS` / `MVN_EXIT=0`** |
+| 模块数 | **52**（Reactor）· **29 个有测试模块** |
+| 用例数 | **2477**（逐模块 surefire 汇总行求和 ⇒ **去重后**；详见 §4.10.30） |
+| failures / errors / skipped | **1 / 0 / 4**（那 1 条 = `favorite-api` 的**旧**断言 5003 ⇒ **预期内**） |
+| 耗时 | 主跑 **19:12 min**（14:09:08 起）＋ 补跑 ② **3:13 min**（14:36:24→14:39:37） |
+| 相对上一轮 | 第十二次 2474 ⇒ **+3**（= `22dc67e` 的新守门） |
+| **三门禁** | `check-wave-lane-ownership` **EXIT=0** · `check-wave-role-model` **EXIT=0** · `check-wave-coupling` **EXIT=0** |
+| **台账三门禁** | `check-ledger-tables` **EXIT=0** · `check-ledger-selfcheck` **EXIT=0** · `check-ledger-count` **EXIT=0** |
+| **三探针** | `run-parity.sh` **EXIT=0 · 56 例** · `run-rpc-timeout-parity.sh` **EXIT=0 · 3 例** · 🔴 `api-envelope-probe/favorite` **EXIT=2** ⇒ ⇒ **根因见 §4.10.31 ⇒ 产品侧逐字节正确** |
+| **写权自证** | 本轮改动**全部**落在 `service/common/**` ＋ `tools/**`（G2 转派 + 无人拥有面）＋ 本台账 ⇒ **零域侧改动** |
+
+**`15cf93a` 之后的增量回归（合并前需重跑全量）**
+
+| 项 | 值 |
+|---|---|
+| 命令 | `mvn -o -B -DargLine=-Xmx2g -am -pl service/common test` |
+| 结果 | ✅ **Tests run: 330, Failures: 0, Errors: 0, Skipped: 0 · BUILD SUCCESS**（327 + 新守门 3） |
+| 变异验证 | M1 / M2 / M3 **各红且仅红一条断言** ⇒ 三次跑完均**逐字节还原**（MD5 MATCH） |
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
@@ -1923,3 +2080,8 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
       ⇒ ⇒ 🔴 **域侧那一半仍未闭合**（「**域侧**新增 Filter ⇒ 不得吃掉 +4/+5/+6」）⇒ ⇒ **需域侧真装配面守门**（域侧落码 ⇒ 本层不代做）
 - [x] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）—— ⚠️ **`_README.md` §七之二属共享面 ⇒ 本 lane 不写**（合并后由整合者统一更新）⇒ **G3 四张 + G2 三张 + G1 八张共 15 张已登记在 §4.3~§4.10**（G1 七张的逐条定性见 §4.9.1 · 第八张见 §4.10.1）
 - [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）⇒ **本 lane 全程未写**；⇒ 需要回写的 **5 条**已登记在 **§4.10.7**（含 `tools/difftest/flyway-concurrent-verify.py` 漏记 `article-rpc` · `AGENTS.md:173` 漏记 `article-rpc`）。
+- [x] 🆕 **1xx 探测行数上界**（`15cf93a`）—— 共享层 ⇒ **10 个 api 组件全部适用**（§4.10.32）
+      ⇒ ⇒ 守门 3 条 ＋ **专属变异 M1/M2/M3**（各红且仅红一条）⇒ ⇒ `service/common` **330 条全绿**
+      ⇒ ⇒ 🔴 **待整合者回写 1 条**：`docs/Intentional_Deviations/global/common-tails.md` 的 `SD-2026-10-25-04`
+      仍写「N = 探测轮数 ≈ 慢请求秒数 ÷ 0.5s」⇒ **N 现在有上界（默认 4）** ⇒ 建议补「客户端 interim 上限」的事实
+      ⇒ ⇒ **该文件不属本 lane 写权 ⇒ 本层只登记、不代改**（§4.10.32 末行）
