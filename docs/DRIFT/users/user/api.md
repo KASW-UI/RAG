@@ -2089,7 +2089,7 @@ V-012 是 **2026-10-26 第十一轮新发现**（观测面，落点在 user-rpc 
 >    ⚠️ **真正的结构差在「失败路径」**（不是超时值）：
 >    - **Go**：拨号失败**立即返回错误**（`MaxRetries=3` + 每次重试都立即失败）⇒ **~1.8s** 就失败 ⇒ 落在 3s HTTP 预算内 ⇒ **fail-open 200**；
 >    - **RAG**：Lettuce 在连接建立期间把命令**挂起**等重连，等满 **commandTimeout 3s** 才失败 ⇒ **~3.0s** ⇒ **与 3s HTTP 预算竞速** ⇒ 200/503 摇摆。
->    ⇒ 机制出处：`service/users/user/user-api/src/main/java/com/rag/users/user/api/config/RedisDisconnectedBehaviorConfig.java` 的**类 javadoc**
+>    ⇒ 机制出处：`service/users/user/user-api/src/main/java/com/rag/users/user/api/config/RedisDisconnectedBehaviorConfig.java` 的**类 javadoc** —— ⚠️ **该域内副本已于 Redis 收编轮【删除】**（5 份域内副本全部删除 ⇒ 共享层那份接管 ⇒ 见 [`vs-common.md` §26](../vs-common.md)）
 >    （Go 出处 = `redisclientmanager.go:27-46`；已做过变异验证：把 `REJECT_COMMANDS` 改回 `DEFAULT` ⇒ 耗时那条实测 3017ms、异常链 `RedisCommandTimeoutException`）。
 > 3. ⇒ **`follow-api` 的 2s 比 Go 的 3s 早 1s 失败** ⇒ 若该域 HTTP 预算 ≥ 3s，
 >    **RAG 会比 Go 更早返回**（RAG 2s 拿 200 fail-open，Go 还在等到 3s）⇒ **失败耗时与到达形状都不同**

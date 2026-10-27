@@ -923,7 +923,7 @@ go-zero@v1.10.2/rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Ha
 
 | 文件 | 性质 | 说明 |
 |---|---|---|
-| `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/config/RedisDisconnectedBehaviorConfig.java` | 🆕 **新增**（主代码） | 把 Lettuce 的 `disconnectedBehavior` 设成 `REJECT_COMMANDS` |
+| `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/config/RedisDisconnectedBehaviorConfig.java` | 🆕 **新增**（主代码）· ⚠️ **已于 Redis 收编轮【删除】** | 把 Lettuce 的 `disconnectedBehavior` 设成 `REJECT_COMMANDS` |
 | `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiRedisDisconnectedFastFailTest.java` | 🆕 **新增**（守门 · 2 例） | 真故障注入（FIN）⇒ 断连后 `hasKey` <1500ms 失败 |
 | `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiRedisConnectTimeoutSocketTest.java` | 🆕 **新增**（守门 · 1 例） | socket 层 5s 连接超时（黑洞 IP ＋ `timeout` 覆盖成 30s） |
 | `service/follow/follow-api/pom.xml` | ✏️ **改** | 🆕 补 `org.testcontainers:testcontainers` ＋ `testcontainers-junit-jupiter`（**test 作用域**）—— 本域原先**没有** testcontainers（user-api / admin-api 有）⇒ 断连守门需要真 Redis 容器。版本由 `spring-boot-starter-parent` 管理，**不写 `<version>`** |

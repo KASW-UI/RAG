@@ -1775,12 +1775,12 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 
 | 文件 | 动作 |
 |---|---|
-| `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` | **删** |
-| `service/users/user/user-rpc/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | **删**（只含那一行） |
-| `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` | **删** |
-| `service/users/admin/admin-rpc/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | **删**（只含那一行） |
-| `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` | **删** |
-| `service/follow/follow-rpc/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | **删**（只含那一行） |
+| `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` | **已删除** |
+| `service/users/user/user-rpc/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | **已删除**（该文件只含那一行） |
+| `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` | **已删除** |
+| `service/users/admin/admin-rpc/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | **已删除**（该文件只含那一行） |
+| `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` | **已删除** |
+| `service/follow/follow-rpc/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | **已删除**（该文件只含那一行） |
 | `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/FollowRpcApplication.java` | javadoc 改写（桥的提供方 = 共享层，并写明 `getResources`（复数）这个机制依据） |
 | `docs/DRIFT/follow/rpc.md` | 逐文件对照索引**删第 5 行** ⇒ 原 #6~#21 前移为 **#5~#20** ⇒ Java 侧 21 → **20**；连带修 :368 跨文档交叉引用 + :377「行 #1–#21」→「#1–#20」 |
 | `docs/DRIFT/follow/vs-common.md` | §10 加 §10.2「订正：§10.4 的『本轮不动手』已被后续事实取代」 |
@@ -2095,7 +2095,8 @@ G4 第十一轮来信：「新门禁 `22dc67e` + 台账 `c164e63`，请再并一
 
 ⚠️ **但「现在删」会把 G4 自己的门禁改红** —— G4 树里
 `service/users/user/user-api/src/main/java/com/rag/users/user/api/config/RedisDisconnectedBehaviorConfig.java`
-**仍然存在**（实测：`git ls-tree align/g4-service-common` 命中；该文件第 4 行
+**仍然存在**（⚠️ **该文件在我树已于 Redis 收编轮【删除】** ⇒ **只**在 G4 树里还留着
+⇒ ⇒ 实测：`git ls-tree align/g4-service-common` 命中；该文件第 4 行
 `import org.springframework.boot.data.redis.autoconfigure.LettuceClientOptionsBuilderCustomizer;`、
 第 103 行 `public LettuceClientOptionsBuilderCustomizer goStyleRedisDisconnectedBehavior()`）
 ⇒ ⇒ 那条白名单在 **G4 自己的树上仍是承重的** ⇒ 先删白名单 ⇒ 断言① 的 `found` 命中它 ⇒ **门禁红**。
@@ -2626,3 +2627,124 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
 - ⇒ ⇒ **真正剩下的唯一缺口 = `service/task/task-api/src/main/resources/application.yml` ⇒ 【G2 写权内】** ⇒ ⇒ **不需要整合者** ⇒ ⇒ ⇒ **三条 lane 之前都把这事推给整合者 ⇒ ⇒ 根因被误定位 ⇒ 代价是多绕了好几轮** ⇒ ⇒ ⇒ **⇒ 这条要以「根因纠正」而不是「再推一次」的方式落地。**
 - ⚠️ **语法坑（守门自己写明的）**：`off` **必须带引号** —— YAML 1.1 会把未加引号的 `off` 解析成**布尔 false** ⇒ ⇒ 正确写法 `mode: "off"`。
 - ⇒ ⇒ **§41 的「持住不合并」由「等 G2 进来」升级为「配对条件已实证」** ⇒ ⇒ **解除条件不变**：G2 的 yml 订正进我树 ⇒ ⇒ 再成对合 `d4e4745` ⇒ ⇒ 届时我树 10 个 api 进程全 ✅。
+
+## 43. 🟢 **G4 §4.10.27 的 R1~R4 复核（我域零动作 · 附结构性根因）＋ G4 §4.10.21「域侧那一半」的落码闭合**（2026-10-27 · G1 lane）
+
+### 43.1 ✅ **R1~R4 我域四条【全部已修】⇒ 我域零动作** —— 但 🔴 **根因不是「我修漏了」，是「G4 那张表读的是它自己那棵树」**
+
+| 组件 | 我树现态（2026-10-27 实测） | G4 §4.10.27.2 表里写的 | 判定 |
+|---|---|---|---|
+| `user-api` | `timeout: 3s` ＋ `connect-timeout: 5s` | 🔴 连接 = 10s ⇒ R1 | ✅ **已修** |
+| `user-rpc` | `timeout: 3s` ＋ `connect-timeout: 5s` | 🔴 连接 = 10s ⇒ R2 | ✅ **已修** |
+| `follow-api` | **`timeout: 3s`** ＋ `connect-timeout: 5s` | 🔴🔴 命令 2s ＋ 连接 10s ⇒ R3 | ✅ **已修**（R3 的开放项「是刻意收紧还是抄错」已在 §27.2 判定 = **不是刻意** ⇒ Go 侧生效的是 go-redis v9 库默认 `ReadTimeout = 3s` ⇒ 按 3s 对齐） |
+| `admin-rpc` | `timeout: 3s` ＋ `connect-timeout: 5s`（注释已按 Boot 4 字节码订正） | 「值对、注释错」⇒ R4 | ✅ **已修** |
+
+⇒ ⇒ 这四条在 **§27.2 已复核并回函过一次** ⇒ ⇒ **本轮把它升级为「结构性根因」** ⇒ ⇒ 因为**不定位它就会无限重报**（每轮 G4 重新解析一次，就再报一次）：
+
+🔴 **根因（实测，不是推断）**：
+- G4 那张表的标题是「**逐组件实测表（YAML 解析器读值，不是 grep）**」（`docs/DRIFT/global/vs-common.md` §4.10.27.2）⇒ ⇒ **它的输入是「执行 YAML 解析的那棵树」**；
+- ⇒ ⇒ **执行解析的那棵树 = G4 自己的树** ⇒ ⇒ **G4 的树里没有我 lane 的任何提交**（实测：`git merge-base --is-ancestor 4997c29 align/g4-service-common` ⇒ **不成立** ⇒ 我树不在它树的祖先链上）；
+- ⇒ ⇒ **直接证据**：在 **G4 树**里取我域那三个 yml，`connect-timeout` 命中数 = **0 / 0 / 0**；而**在我树**里同三个文件全部是 `connect-timeout: 5s`
+  ⇒ ⇒ **同一份代码，两棵树读出两个相反的结论** ⇒ ⇒ **结论对不对取决于「站在哪棵树上看」**。
+
+⇒ ⇒ 🟢 **判定式（可复用）**：**跨 lane 的「逐组件实测表」若不带「树 / commit 基线」，就必然「对那棵树成立、对别的 lane 不成立」**
+⇒ ⇒ 读到这种表，**第一件事不是照单全收，是问「这张表的输入是哪棵树」** ⇒ ⇒ 本轮已回函 G4（附可复跑的一行命令）。
+
+### 43.2 🟢 **G4 §4.10.21 留下的「域侧那一半」⇒ 由 G1 落码闭合（3 个 api 各一份 `GoStyleDomainFilterSlotGateTest`）**
+
+**缺口原文**（G4 §4.10.21.1 末行 + §4.10.18.3 + §4.10.21.6）：
+「共享层那一半已闭合（新增共享层 Filter ⇒ 必红）」⇒ ⇒ **「仍未闭合的是域侧那一半」**：「**域侧新增** Filter ⇒ 不得吃掉 +4/+5/+6」⇒ ⇒ 落在**域侧文件** ⇒ ⇒ 需**域侧真装配面**（真 api 上下文读「实际注册的带 `@Order` 的 Filter」）⇒ ⇒ **共享层不代做**。
+⇒ ⇒ **处方（同 §4.10.21.6）**：「**各模块各守自己那份** ⇒ 避免跨模块的路径依赖」⇒ ⇒ **我域 3 个 api 各落一份**。
+
+**落码（三个模块各一份，同款）**：
+`service/users/user/user-api/src/test/java/com/rag/users/user/api/GoStyleDomainFilterSlotGateTest.java` ·
+`service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/GoStyleDomainFilterSlotGateTest.java` ·
+`service/follow/follow-api/src/test/java/com/rag/follow/follow/api/GoStyleDomainFilterSlotGateTest.java`
+
+| 断言 | 内容 | 判据来源 |
+|---|---|---|
+| ① **守恒面（核心）** | 本模块**产出**的带 `@Order` 的 Filter 全集 == **域侧登记清单**（**双向相等**，不是 ⊆）⇒ ⇒ **域侧新增任何一个 Filter 必红** | G4 §4.10.21.3 的 ⑤ 同款判据（双向相等 + 枚举面守恒） |
+| ② **槽位面** | 登记的每个 Filter 的**实际**槽位（读**实际** `@Order`，不是快照）== 登记槽位 | G4 §4.10.16.1 权威表 + §4.10.16.2 窗口推导 |
+| ③ **排他面** | 域侧 Filter **不得占用**共享层独占槽位 **+4（MaxConns）/ +5（Breaker）** —— 那两个**都写响应** ⇒ 同槽 ⇒ 相对次序由容器注册序决定 ⇒ **不可确定** | G4 §4.10.16.1 + §4.10.18.2 的「MaxConns 半边 = 已签字偏离 `SD-2026-10-25-01`」 |
+| ④ **真装配面** | 登记的每个域侧 Filter **真的被挂进容器装配出的链**，且排在 **3s 预算起点**（`HttpMiddlewareFilter`）**之前** | G4 §4.10.18.3「可行落法方向 ① 域内」+ §4.10.12 ④ 的读法（`ServletContextInitializerBeans`） |
+
+**⚠️ 三条实现约束（每条都有代价，不是风格偏好）**：
+- **不 import 共享层的 Filter 类** ⇒ 只按 **bean 名**（`httpMiddlewareFilter`）定位 ⇒ ⇒ **共享层辐射度快照（`common_radiation`，按 import 统计）保持不变** ⇒ ⇒ 不制造跨 lane 快照漂移（那张快照归整合者，本 lane 无写权）⇒ ⇒ **本轮实测 `check-wave-coupling.py` 的差量仍是那 1 项已知漂移（`GoStyleRedisClientAutoConfiguration`），未被我扩大**。
+- **枚举面 = 本模块自己的 `target/classes`**（code source 取 ⇒ 与工作目录无关）⇒ ⇒ 拿到共享层的 `SharedFilterOrderSnapshotGateTest` 那套**已验证可靠**的判据，不自创。
+- **枚举失败 ⇒ 直接失败，不跳过** ⇒ ⇒ 否则第 ① 条会退化成「什么都不查」的恒绿（与共享层 ⑤ 的同款守恒断言）。
+
+**🔴 变异验证（3 个 · 逐条证明 4 条断言各有判别力 · user-api 上实测）**：
+
+| 变异 | 做法 | 实测结果 |
+|---|---|---|
+| **A（产品侧 ·「多一个」）** | 在 user-api 新增第 2 个带 `@Order(+9)` 的 Filter | ✅ **红** —— **只有 ① 红**（`everyDomainProducedFilterIsRegisteredInTheDomainRegistry`），②③④ 仍绿 ⇒ 「多一个」方向由 ① 独占 |
+| **B（产品侧 ·「换槽位」）** | 把 `GoStyleJwtAuthFilter` 的 `@Order` 从 +6 改成 **+4**（占用 MaxConns 的独占槽位） | ✅ **红** —— **② 与 ③ 红**（`domainFilterSlotsMatchTheRegistry` + `domainFiltersDoNotOccupySharedExclusiveSlots`），①④ 仍绿 ⇒ 「槽位被改 / 占用共享层独占槽位」由 ②③ 独占 |
+| **C（产品侧 ·「摘注册」）** | 摘掉 `GoStyleJwtAuthFilter` 的 `@Component` | ✅ **红** —— **只有 ④ 红**（`domainFiltersAreReallyAssembledBeforeTheBudgetStart`，失败消息 = 「没有注册进 Spring 上下文」）⇒ ⇒ 「注解在、bean 不在」被抓 |
+
+⇒ ⇒ **复原后 4/4 绿**（三个模块各 4/4 ⇒ **新增 12 条**）⇒ ⇒ **生产代码零改动**（只加测试面）。
+
+🟢 **回归口径（2026-10-27 实测 · 域内小跑 · `mvn -B -o -DargLine=-Xmx2g -am -pl <三个 api> clean test`）**：
+**BUILD SUCCESS · 15/15 模块** ⇒ `user-api` **121 → 125**（+4）· `admin-api` **140 → 144**（+4）· `follow-api` **68 → 72**（+4）⇒ ⇒ **我域 669 → 681**；共享层 `common` 330 + `users-common` 33 **逐条不变**（⇒ ⇒ 变更只落在域内测试面，零跨 lane 影响）⇒ ⇒ failures/errors/skipped 全 **0**。
+⚠️ **本次只跑域内小跑、没跑域级全量**，理由 = **本轮变更 100% 是测试面**（3 个新增测试类 + 台账）⇒ ⇒ **生产代码零改动** ⇒ ⇒ 按 C7 的变更面分级，**域级全量留到波末收口**（或等 G4 的 `15cf93a` 生产改动合入后一并跑）⇒ ⇒ **不谎报「域级全量已跑」**。
+
+**证据强度**：**L3**（真 Spring 上下文 ＋ 真容器装配结果 `ServletContextInitializerBeans` ＋ 真字节码槽位读数）⇒ ⇒ **不是 L4**（不涉及 Go 腿 ⇒ 这条是**协调约束**的机器保障，不是 A 轴的行为级证据 —— 与 G4 §4.10.21.6 的边界一致）。
+
+**边界（不得外推）**：
+- **只管「域侧产出」的 Filter** ⇒ ⇒ 共享层那 7 个由共享层自己的 `SharedFilterOrderSnapshotGateTest` 管；**两份合起来才覆盖「+2..+8 全槽位」**。
+- **只管本模块产物** ⇒ ⇒ 跨模块的 Filter（若将来某个模块把 Filter 放进 `users-common`）**不在本门禁覆盖面** ⇒ ⇒ 那属共享层写权面（G4）⇒ ⇒ 我域零动作。
+- **不覆盖「不带 `@Order` 的 Filter」** ⇒ ⇒ Spring 给它 `LOWEST_PRECEDENCE`（链尾）⇒ ⇒ 不占任何槽位 ⇒ ⇒ **有意不管**（与共享层 ⑤ 同款口径）。
+- **零运行时行为变化**（只改 `src/test/java/**`）⇒ ⇒ 部署行为零变化。
+
+### 43.3 🟡 **本轮仍未闭合 / 等外部输入的三项（不改结论，只登记）**
+
+| 项 | 状态 | 落点 / 解除条件 |
+|---|---|---|
+| 🟡 **等 G2 的 task-api yml 订正** | `check-tomcat-limits.py` 唯一红点 = `service/task/task-api/.../application.yml`（`mode: raw` ⇒ 应为 `mode: "off"`） | **G2 写权内** ⇒ ⇒ G2 的订正进我树 ⇒ ⇒ 再成对合 G4 的 `d4e4745`（§41 / §42.2 的顺序约束**不变**） |
+| 🟡 **共享面 `cross-domain-coupling` 快照过期** | `check-wave-coupling.py` EXIT=1（`common_radiation` 差 1 行：`"GoStyleRedisClientAutoConfiguration": ["users"]`） | 落点 `docs/DRIFT/_cross/cross-domain-coupling.md` ∈ 守门 `SHARED`（**无人拥有**）⇒ ⇒ **G1/G4 都不能写** ⇒ ⇒ 需整合者在四 lane 全合后重生成（单树重生成必错 ⇒ 我树 1 项 / G2 树 9 项） |
+| 🟡 **等 G3 跑完 rpc 侧活体对拍** | 我域 `DRIFT-USERRPC-V-014` / `DRIFT-ARPC-013` 的证据强度仍停在 **L3** | 前置已解除（PG 口协议级全通 + Redis 宿主口清单已给）⇒ ⇒ 等 G3 回我 ⇒ ⇒ 我域才升 **L4** |
+| 🟡 **合并 G4 后补一条台账点名** | G4 的 `4cec90e` 在 `service/users/users-common/src/test/java/com/rag/users/common/http/GoStyleRequiredFieldGateTest.java` 新增一条守门（钉住**我域**销号所依赖的两个不变量：必填校验在 service 层之前拦） | 该类在 `users-common`（G4 代码写权面）⇒ ⇒ 但**台账**落点是 `docs/DRIFT/users/common.md`（**我的写权面**）⇒ ⇒ 合并后**我域补一条点名**；⚠️ 门禁**不强制**（`JAVA_ROOTS` 的 `users` = `service/users/user` · `users-admin` = `service/users/admin` ⇒ **`users-common` 不在任何域的扫描根** ⇒ 层 5 不会报它）⇒ ⇒ 属**自觉点名**，不是门禁倒逼 |
+
+## 44. 🔴 **台账自检第一次【按域】跑 ⇒ 挖出 8 处失效引用（两轮收编删了文件，台账历史记述仍写着全路径）**（2026-10-27 · G1 lane）
+
+### 44.1 🔴 **「跑绿」此前查的【不是我的域】**
+
+- **此前每一轮**跑 `tools/check-ledger-selfcheck.py` 都**用默认参数** ⇒ ⇒ 默认 `--domain task` ⇒ ⇒ **`--domain users` 从来没被跑过** ⇒ ⇒ 历轮报的「EXIT=0」= **task 域的结论**，**我域是「没查」**（脚本自己会打印「⏭ 本层的『已修断言』清单只覆盖 ['task'] 域 ⇒ **users 域不适用**（⚠️ 不是「通过」—— 是「没查」）」）。
+- ⇒ ⇒ **这是「跑绿 ≠ 判据活着」的又一形态**：门禁**默认域不是自己的域** ⇒ ⇒ 不带 `--domain` 跑出来的绿是**别人的绿**。
+- 🟢 **本轮按域跑** ⇒ `--domain users` ⇒ **EXIT=1**（2 处层-1 不一致）· `--domain users-admin` ⇒ **EXIT=1**（1 处）⇒ ⇒ **我域此前是红的，只是没人按域跑过**。
+
+### 44.2 ✅ **根因 = 两轮「真删除」的收编，台账的历史记述没跟上**
+
+| 轮次 | 删掉的东西 | 台账里仍写着全路径的地方 |
+|---|---|---|
+| **Redis 收编**（§26 · 提交 `312a09b`） | **5 份域内副本** `config/RedisDisconnectedBehaviorConfig.java`（3 api + 2 rpc）⇒ **真删除** | `users/user/api.md` · `users/user/rpc.md` · `users/admin/api.md` · `follow/api.md` · `users/vs-common.md` · `follow/vs-common.md` |
+| **排序桥收编**（§28 · 提交 `17624d1`） | **3 份域内副本** `config/MybatisPlusOrderingBridgeAutoConfiguration.java`（user-rpc / admin-rpc / follow-rpc）＋ 3 个只含那一行的 `META-INF/…/AutoConfiguration.imports` | `users/vs-common.md` §28.2「落码清单（已完成）」的 6 行 |
+
+⇒ ⇒ **共 8 处**（路径去重后 **5 个不同路径**、分布在 **6 份台账文件**里）。
+
+### 44.3 🟢 **修法 = 按 N13 规则【如实标注状态】，不是让门禁闭嘴**
+
+- 门禁的第 1 层自带 **N13** 规则：**台账同行/邻行若写明该文件的状态（已删除 / 不存在 / 0 字节占位 …）⇒ 判为「历史记述」⇒ 不计 FAIL**（护栏：行里带「路径写错」这类**缺陷标记**时，落地态/免责两层一律不生效 ⇒ **宁可报缺，也不吃真缺陷**）。
+- ⇒ ⇒ 我把 8 处逐条改成**如实标注**：`「已于 Redis 收编轮【删除】」` / `「**已删除**」`（原 `「**删**」` 是**祈使语气**，而 §28.2 的标题是「落码清单（**已完成**）」⇒ 改成「已删除」才与事实一致）。
+- ⇒ ⇒ **复跑结果**：`--domain users` ⇒ **EXIT=0**（68 个引用路径 ⇒ 缺失 **0**）· `--domain users-admin` ⇒ **EXIT=0**（81 ⇒ **0**）⇒ ⇒ **生产代码零改动**。
+
+### 44.4 🔴 **门禁的覆盖面缺口（本域只登记，不改）**
+
+- `LEDGER_FILES` 只有 3 个域键：**`task` / `users` / `users-admin`** ⇒ ⇒ **`follow` 域不在覆盖面**（`--domain follow` ⇒ 「找不到 domain=follow 的台账文件」）⇒ ⇒ 且 **`docs/DRIFT/users/vs-common.md` / `docs/DRIFT/users/common.md` / `docs/DRIFT/follow/**` 5 份**也不在任何域的清单里。
+- ⇒ ⇒ **我域台账有 7 份文件从来没被这个门禁查过**（`follow/{api,common,proto,rpc,vs-common}.md` + `users/{vs-common,common}.md`）。
+- 🟢 **本轮用门禁自己的层-1 判据单独扫了那 7 份**（不重写判据 ⇒ 口径与门禁一致）⇒ ⇒ **又挖出 5 处失效引用**（其中 2 处与 §44.2 的 `--domain users`/`users-admin` 结果重叠 ⇒ **去重后总计 8 处**）⇒ ⇒ **全部已修** ⇒ ⇒ **复扫：118 个引用路径 ⇒ 缺失 0**。
+- ⇒ ⇒ **可复跑**（不依赖我改脚本）：
+  ```bash
+  python3 - <<'PY'
+  import importlib.util, os, glob
+  spec = importlib.util.spec_from_file_location("cls", "tools/check-ledger-selfcheck.py")
+  m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+  root = m.repo_root()
+  files = sorted(set(glob.glob("docs/DRIFT/users/**/*.md", recursive=True)
+                   + glob.glob("docs/DRIFT/follow/**/*.md", recursive=True)))
+  covered = set(m.LEDGER_FILES['users']) | set(m.LEDGER_FILES['users-admin'])
+  extra = [f for f in files if f not in covered]
+  m.layer1_paths(root, {f: m.read(os.path.join(root, f)) for f in extra})
+  PY
+  ```
+- 🔴 **落点归属**：`tools/check-ledger-selfcheck.py` ∈ **两张表都查不到**（4 条 lane 的写权白名单 ∪ `SHARED` 那 13 项）⇒ ⇒ **写权孤儿** ⇒ ⇒ **按「两张表」纪律 ⇒ 只能整合者改** ⇒ ⇒ **我域零落码** ⇒ ⇒ **登记给整合者**：`LEDGER_FILES` 补 `follow` 域的 5 份 ＋ `docs/DRIFT/users/{vs-common,common}.md` ⇒ ⇒ 补完后这 7 份就不用再手工扫了。
+- ⚠️ **同理提醒**：`--domain users` / `--domain users-admin` 也**只覆盖** `LEDGER_FILES` 列出的那 3+3 份 ⇒ ⇒ **每轮跑门禁必须带 `--domain`**，否则查的是 task 域。

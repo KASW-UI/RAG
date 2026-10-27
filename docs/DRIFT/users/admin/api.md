@@ -2142,7 +2142,7 @@ go-zero@v1.10.2/rest/server.go:222-233     WithMiddleware ⇒ middleware(route.H
 
 ### 13.3 修法：**域内副本**（🔴 **不写共享层**）
 
-新增 `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/config/RedisDisconnectedBehaviorConfig.java`
+新增 `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/config/RedisDisconnectedBehaviorConfig.java` —— ⚠️ **该域内副本已于 Redis 收编轮【删除】**（5 份域内副本全部删除 ⇒ 共享层那份接管 ⇒ 见 [`vs-common.md` §26](../vs-common.md)）
 —— 把 Lettuce 的断连行为设成 `ClientOptions.DisconnectedBehavior.REJECT_COMMANDS`。
 
 ⚠️ **为什么是域内副本而不是共享层**：

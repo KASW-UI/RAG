@@ -366,7 +366,7 @@ installed_rank | version |      description       | success
 |---|---|---|---|
 | ① | 自动配置能被装配 | `FollowApiApplication.java:68` 带 `@SpringBootApplication` ⇒ 含 `@EnableAutoConfiguration` | ✅ |
 | ② | 自动配置清单在 classpath 上 | `follow-api` pom 依赖 `com.rag:common`（默认 compile scope） | ✅ |
-| ③ | 值逐字同值 ＋ 只设断连行为 | `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/config/RedisDisconnectedBehaviorConfig.java:111-112` 只调 `disconnectedBehavior(REJECT_COMMANDS)`，**零** `timeoutOptions` 触碰 | ✅ |
+| ③ | 值逐字同值 ＋ 只设断连行为 | `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/config/RedisDisconnectedBehaviorConfig.java:111-112` 只调 `disconnectedBehavior(REJECT_COMMANDS)`，**零** `timeoutOptions` 触碰（⚠️ **该域内副本已于 Redis 收编轮【删除】** ⇒ 本行是**收编前的核验记录**） | ✅ |
 
 ⇒ **follow 侧要删的只有 1 份**：`follow-api` 的 `config/RedisDisconnectedBehaviorConfig.java`。
 
@@ -390,7 +390,7 @@ installed_rank | version |      description       | success
 
 ⇒ **本域收编落码的实际动作（2026-10-27 · 已实施）**：
 
-1. **删** `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/config/RedisDisconnectedBehaviorConfig.java`；
+1. **删除** `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/config/RedisDisconnectedBehaviorConfig.java`；
 2. **补「收编真的发生」的两条断言**（`FollowApiRedisDisconnectedFastFailTest`）：
    - `context.getBeansOfType(LettuceClientOptionsBuilderCustomizer.class)` ⇒ **size == 1**；
    - 该 map 的 key 含 **`goStyleRedisClientOptionsCustomizer`**（共享层那份的固定 bean 名）。
@@ -550,3 +550,24 @@ installed_rank | version |      description       | success
 follow 域 **5 个测试文件**用 Testcontainers（`follow-api` 1 个 Redis `GenericContainer` · `follow-rpc` 4 个 `PostgreSQLContainer`）
 ⇒ ⇒ 宿主口由 Docker 随机分配 ⇒ ⇒ **落在 OS 临时段 `49152–65535`** ⇒ ⇒ 而该段当前被占 **205/16384**（`ESTABLISHED` 出站源口 106 · `LISTEN` 56 · `SYN_SENT` 21）⇒ ⇒ **撞口面真实存在**（约 1.25%/次）⇒ ⇒ 症状 = §34 记的 `EOFException@enableSSL`（端口上不是预期的服务）⇒ ⇒ **钉口 = 从根上消除这一类随机失败**。
 ⇒ ⇒ ⚠️ **形态已被 G4 定死**：`PostgreSQLContainer` + `withCreateContainerCmdModifier(...)` 显式绑口（**不能**换成 `FixedHostPortGenericContainer`——它不带 PG 初始化/JDBC 支持）⇒ ⇒ **G4 要求落码第 0 步先写探针验证「显式绑口后 `getMappedPort()` 是否返回那个固定口」** ⇒ ⇒ **不能照抄**。
+
+### 11.13 🟢 **G4 §4.10.27 的 R3 复核（follow 域零动作 · 附根因）＋ 域侧 Filter 槽位守门在 follow-api 落码**（2026-10-27 · G1 lane）
+
+**① R3 复核：follow 域【已修】⇒ 零动作**。
+`follow-api` 的 Redis 段现态 = **`timeout: 3s` ＋ `connect-timeout: 5s`**（两个值都在 yml 里，且都带出处注释）⇒ ⇒ **不是** G4 §4.10.27.2 表里写的「命令 2s ＋ 连接 10s」。
+⇒ ⇒ R3 里那个「需 G1 自行判定是『刻意收紧』还是『抄错』」的开放项，**follow 域已判定 = 不是刻意**（§27.2 的交叉验证：Go 侧生效的是 **go-redis v9 库默认 `ReadTimeout = 3s`**，真源 `go.mod` pin `go-redis/v9 v9.20.0` ⇒ `options.go:364-370`；那个 2s 疑似抄自 go-zero `core/stores/redis/redis.go:27` 的 `readWriteTimeout = 2 * time.Second`，而它是**死常量**（全文件仅此一处、从未被使用）⇒ ⇒ 不能当依据）⇒ ⇒ **按 3s 对齐，已落码**。
+
+**② 🔴 结构性根因（与 users 侧 §43.1 同一条，不重复展开）**：
+G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出的 ⇒ ⇒ **G4 的树里没有我 lane 的任何提交** ⇒ ⇒ 在 G4 树里取 `follow-api` 的 yml，`connect-timeout` 命中数 = **0** ⇒ ⇒ **同一份代码，两棵树读出两个相反的结论** ⇒ ⇒ **跨 lane 的实测表若不带「树 / commit 基线」，必然只对那棵树成立** ⇒ ⇒ 已在 §43.1 记完整判定式并回函 G4。
+
+**③ 🟢 域侧 Filter 槽位守门在 follow-api 落码**（闭合 G4 §4.10.21 留下的「**域侧那一半**」）：
+新增 `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/GoStyleDomainFilterSlotGateTest.java`（**4 条断言**）——
+**①** 本模块产出的带 `@Order` 的 Filter 全集 == 域侧登记清单（**双向相等** ⇒ **域侧新增 Filter 必红**）·
+**②** 实际槽位 == 登记槽位（读**实际** `@Order`）· **③** 不得占用共享层独占槽位 **+4（MaxConns）/ +5（Breaker）**（那两个都写响应 ⇒ 同槽 ⇒ 相对次序不可确定）·
+**④** 真装配面：登记的域侧 Filter 真的挂进了容器装配出的链，且排在 **3s 预算起点**（`HttpMiddlewareFilter`）**之前**（读法 = `ServletContextInitializerBeans`，与既有 `FollowApiJwtVerificationScopeTest` 同款）。
+⇒ ⇒ **follow 域现态**：唯一的有序 Filter = `GoStyleJwtAuthFilter`（`@Order(+6)`，与共享层 `CpuShedding(+6)` 并列；它**只把验签结果放进 request attribute、不写响应** ⇒ 并列安全）⇒ ⇒ **4/4 绿**。
+⇒ ⇒ ⚠️ **不 import 共享层的 Filter 类**（只按 bean 名定位）⇒ ⇒ **共享层辐射度快照（`common_radiation`）不变** ⇒ ⇒ 本轮实测 `check-wave-coupling.py` 的差量**仍是那 1 项已知漂移，未被 follow 域扩大**。
+⇒ ⇒ 完整判据、变异三连与边界 ⇒ [`users/vs-common.md` §43.2](../users/vs-common.md)。
+
+**④ 🔴 顺带挖出：台账自检**从未查过 follow 域** ⇒ 本轮按域跑才见红**：`tools/check-ledger-selfcheck.py` 的 `LEDGER_FILES` 只有 `task` / `users` / `users-admin` 三个域键 ⇒ ⇒ **`follow` 域 + `users/{vs-common,common}.md` 这 7 份台账从来没被它查过** ⇒ ⇒ **默认参数跑出来的 EXIT=0 查的是 task 域** ⇒ ⇒ 本轮用**门禁自己的层-1 判据**单独扫了那 7 份 ⇒ ⇒ **8 处失效引用**（两轮「真删除」收编删了文件、台账历史记述仍写全路径）⇒ ⇒ 已逐条**如实标注状态**（不是让门禁闭嘴）⇒ ⇒ 复扫 **118 个引用路径 ⇒ 缺失 0**。
+⇒ ⇒ 落点 `tools/check-ledger-selfcheck.py` ∈ **两张表都查不到** ⇒ ⇒ **写权孤儿 ⇒ 只能整合者改** ⇒ ⇒ **follow 域零落码** ⇒ ⇒ 完整经过与可复跑命令 ⇒ [`users/vs-common.md` §44](../users/vs-common.md)。

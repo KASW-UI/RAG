@@ -2342,7 +2342,7 @@ UserDomainService.logout:905-930
 
 ⇒ **同一套 Redis 机制，在 api 侧的后果是 503，在 rpc 侧的后果是「RPC 撞超时」** —— 这就是 G2 说的「同机制、不同形态」。
 
-**修法**：落**域内副本** `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/config/RedisDisconnectedBehaviorConfig.java`
+**修法**：落**域内副本** `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/config/RedisDisconnectedBehaviorConfig.java` —— ⚠️ **该域内副本已于 Redis 收编轮【删除】**（5 份域内副本全部删除 ⇒ 共享层那份接管 ⇒ 见 [`vs-common.md` §26](../vs-common.md)）
 （`LettuceClientOptionsBuilderCustomizer` ⇒ `REJECT_COMMANDS`）。
 
 ⚠️ **只改「断连」，不改「连着但不回包」**：后者两侧都等满各自的读超时（Go `ReadTimeout` 3s / RAG `timeout: 3s`）
