@@ -1512,3 +1512,24 @@ KEEP_UP=1 ./tools/difftest/run-task-offset-oldest.sh # 跑完保留服务与容�
    ⇒ 后一张表的行混进「commit 清单」⇒ 判据的粒度就错了。
    ⇒ **本轮第 0 层自检当场抓到**（样本里故意让两张表紧挨着）⇒ 切表边界必须靠「**分隔行**」，
    不能靠空行；且只认「表头首列 == commit」的表。
+
+---
+
+## 🔴 `DRIFT-TASK-RPC-008`（新登记 · 2026-10-27）**Redis 连接池维度未对齐** —— 形态漂移（RAG **无池** vs Go **有池**）
+
+> ⚠️ **这条是上一轮 Redis 超时修复（`591ab0b`）的**遗漏维度** —— 上一轮只对齐了「超时」两项，**没对齐「连接池」**。
+> ⇒ 触发来源：G3 回执里的一条 grep 命中（`ReadTimeoutMs|DialTimeoutMs|TimeoutMs` 全仓只有 3 处、全在 Go 真源 `service/task/rpc/etc/task.yaml:42-44`）⇒ **顺着它核出池参数也被丢弃** ⇒ **顺手挖出这条新漂移**。
+
+| 项 | 事实 |
+|---|---|
+| **① Go 侧（真源）** | `service/task/rpc/internal/svc/service_context.go:25-29`：`redis.NewClient(&redis.Options{Addr: c.LikeRedis.Addr, Password: c.LikeRedis.Pass, DB: c.LikeRedis.DB})` ⇒ **只设 3 个字段** ⇒ `PoolSize` / `MinIdleConns` **未设** ⇒ 落 **go-redis v9.20.0 库默认**：`options.go:350-351` `if opt.PoolSize == 0 { opt.PoolSize = 10 * runtime.GOMAXPROCS(0) }` ⇒ **有池**，大小 = **10 × 核数**；`MinIdleConns` = **0** |
+| **② Go 侧 yaml 里那 5 个字段**（`etc/task.yaml:42-46`） | `DialTimeoutMs: 500` · `ReadTimeoutMs: 1000` · `WriteTimeoutMs: 1000` · `PoolSize: 200` · `MinIdleConns: 20` ⇒ ⚠️ **全部不生效** —— `service/task/rpc/internal/config/config.go:32-37` 的 `LikeRedis` struct **只有** `Addr` / `Pass` / `DB` / `ConsumerName` **4 个字段** ⇒ **没有** timeout 与池字段 ⇒ go-zero `conf.Load` **非严格模式** ⇒ **静默忽略**（已由 Go 探针实测 `LOAD OK`） |
+| **③ RAG 侧现状** | `service/task/task-rpc/src/main/resources/application.yml` **无 `lettuce.pool` 段** ⇒ 且 `service/task/task-rpc/pom.xml` **无 `commons-pool2` 依赖** ⇒ ⇒ Boot 4.0.8 `DataRedisProperties.Lettuce.Pool.enabled` = **null**（未显式配置）⇒ 其 javadoc 明写「**Enabled automatically if "commons-pool2" is available**」⇒ ⇒ **classpath 里没有 `commons-pool2` ⇒ 池不启用** ⇒ ⇒ **Lettuce 走共享单连接**（所有命令串行到一条连接） |
+| **④ 差异定性** | 🔴 **形态漂移（不是数值漂移）**：Go = **有池**（10×核数）· RAG = **无池**（共享单连接）⇒ ⇒ 高并发下 RAG 的命令**互相串行排队** ⇒ 排队延迟随时长线性增长 ⇒ **可能撞 3s 命令超时**（与上一轮修的 `timeout: 3s` 叠加）⇒ ⇒ **有条件的行为面差异**（并发压力下才显现） |
+| **⑤ 证据强度** | **L1（源码级 · 两侧逐条对照）＋ 装配级判据**（Boot 4 `Pool.enabled` 的自动判定 + 本模块 pom 无 `commons-pool2`）⇒ ⚠️ **未做双侧并发活体对拍**（并发压测下量排队延迟）⇒ **不写 L4**、**不主张已闭环** |
+| **⑥ 归属** | **域侧**（共享层 `GoStyleRedisClientAutoConfiguration` **只加 `ClientOptions`**，**不碰池** ⇒ 池配置完全由域侧 yml ＋ pom 决定）⇒ ⇒ 我域**可自修** |
+| **⑦ 建议修法（待定，需先定「对齐到哪」）** | 形态对齐的最小改法 = **加 `commons-pool2` 依赖 ＋ 显式 `lettuce.pool.enabled: true`** ⇒ 至少让 RAG 也是**池化**；⚠️ **池大小无法逐值对齐**（Go 的 `10 × GOMAXPROCS` 是**机器相关**）⇒ ⇒ 只能**定性对齐形态 + 数量级对齐** ⇒ ⚠️ 具体数值需一次**决策**（配死 64？按核数算？）⇒ |
+| **⑧ 本轮处置** | 🟡 **只登记，不落码** —— ① 属**性能面**（需双侧并发活体才能定性）② 加依赖 ＋ 改池参数**有回归风险** ⇒ ⇒ 按本仓纪律**登记 + 待决** ⇒ **本轮域侧零改动** |
+
+> ⚠️ **附带的通用教训（值得写死）**：**Boot 4 的 Lettuce 池「开不开」不由 yml 决定，而由 `commons-pool2` 在不在 classpath 决定** —— `Pool.enabled` 未显式配置时是 **null**，由 Boot 自动判定 ⇒ ⇒ **加/减一个依赖 ⇒ 连接池形态静默变化**（无池 ⇄ 有池）⇒ ⇒ 「池形态」**不能只靠 yml 断言**，必须**同时查 pom 的依赖** ⇒ 且 Boot 4 的 **starter 不再传递 `commons-pool2`**（`like-rpc/pom.xml:106-127` 已因此显式声明）。
+> ⚠️ **类名也变了**：Boot 4 **没有独立的 `LettuceProperties`** ⇒ 已并入 `DataRedisProperties$Lettuce`（`org.springframework.boot.data.redis.autoconfigure`）⇒ 且 Redis 自动配置已从 `spring-boot-autoconfigure` **拆到 `spring-boot-data-redis`** 模块 ⇒ ⇒ 查 Boot 4 源码时**别在老 jar 里找**。

@@ -1639,3 +1639,21 @@ global 第三十三轮的 **E47 原定性已被第三十六轮全面订正**：*
 - ⚠️ **仍待合并后补的只有一件事**：`like-rpc` 的 **A9 端到端 E2E**（真 server span 上真带 `query.*`/`cache.*`/`like.*`）—— 依赖 G4 的 FB-04（`853767b` / 最终回执 HEAD `23d1c2a`）合入本树 ⇒ 见 [`like/vs-common.md` §4·六](vs-common.md) 与 §6 第 4 条。
 - ⚠️ **「等日志行」这一段的可见效果是消除偶发红** ⇒ **无法用单次稳定断言证明** ⇒ 辅以**重复跑 N 次全绿**统计（与 G3 同口径）—— 本轮该类跑了 **2 次**（回归 1 次 + 改回复验 1 次）均绿，**样本仍偏小** ⇒ 收口回归时再补几轮。
 
+---
+
+## 🟡 `DRIFT-LIKE-RPC-REDIS-POOL`（新登记 · 2026-10-27）**Redis 连接池数值未对齐**（形态已对齐，仅数值不同）
+
+> ⚠️ 与 [`task/rpc.md` 的 `DRIFT-TASK-RPC-008`](task/rpc.md#🔴-drift-task-rpc-008新登记--2026-10-27redis-连接池维度未对齐--形态漂移-rag-无池-vs-go-有池) **同源**（同一轮取证挖出）⇒ **详细取证在 task 域那份**，此处只记本域的差异与差异级别。
+
+| 项 | 事实 |
+|---|---|
+| **① Go 侧（真源 · 本域走 go-zero 那条路）** | `core/stores/redis/redisclientmanager.go:32-40`（go-zero v1.10.2）构造 `red.NewClient(&red.Options{Addr, Username, Password, DB, MaxRetries: maxRetries, MinIdleConns: idleConns, TLSConfig})` ⇒ 常量 `:14-15` `maxRetries = 3` · **`idleConns = 8`** ⇒ ⚠️ **未设 `PoolSize`** ⇒ 落 go-redis v9.20.0 库默认 **`PoolSize = 10 × GOMAXPROCS`**（`options.go:350-351`）⇒ ⇒ **池大小 = 10 × 核数（机器相关）** · `MinIdleConns = 8` |
+| **② RAG 侧现状** | `service/like/like-rpc/src/main/resources/application.yml:106-111` ⇒ `lettuce.pool.enabled: true` / `max-active: 64` / `max-idle: 16` / `min-idle: 4`；且 `pom.xml:124-127` **显式**声明 `commons-pool2`（注释已写明：Boot 4 的 starter **不再传递** 它）⇒ ⇒ **形态对齐**（都是池化） |
+| **③ 差异定性** | 🟡 **仅数值漂移**（形态相同）：`max-active` **64** vs Go 的 **10×核数**（8 核机 = 80）· `min-idle` **4** vs Go 的 **8** ⇒ ⇒ **性能面**（池大小影响并发下的排队），**非形态问题** ⇒ 与 task 域那条（**无池 vs 有池**）级别不同 |
+| **④ 证据强度** | **L1 ＋ 装配级**（两侧配置逐条对照 + go-zero 常量 + go-redis 库默认行号）⇒ ⚠️ **未做并发活体对拍** ⇒ **不写 L4** |
+| **⑤ 归属与处置** | **域侧**（共享层不碰池）⇒ 🟡 **只登记，不落码** —— 池大小**无法逐值对齐**（Go 侧是机器相关的 `10×核数`）⇒ 且属**性能面**、改池参数**有回归风险** ⇒ **待决**（配死一个值？还是按核数算？）⇒ **本轮域侧零改动** |
+
+> ⚠️ **两条通用教训（与 task 域那份同源，详见该处）**：
+> ① **Boot 4 的 Lettuce 池「开不开」不由 yml 决定，而由 `commons-pool2` 在不在 classpath 决定**（`Pool.enabled` 未配时为 `null` ⇒ Boot 自动判定）⇒ ⇒ **加/减一个依赖 ⇒ 池形态静默变化** ⇒ **池形态必须同时查 pom 依赖，不能只断言 yml**；
+> ② **Boot 4 没有独立的 `LettuceProperties`**（已并入 `DataRedisProperties$Lettuce`）且 Redis 自动配置**已拆到 `spring-boot-data-redis` 模块** ⇒ 查 Boot 4 源码别在老 jar 里找。
+
