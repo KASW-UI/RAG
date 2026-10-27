@@ -927,6 +927,66 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 
 ---
 
+### 🔴 第二十轮 · Redis 池维度的**双侧活体对拍**（真 Redis ＋ 真 go-redis 客户端）⇒ **池轴 L3 ⇒ L4** ＋ 🟡 **本域定性降级**（2026-10-27）
+
+**① 为什么本轮要补这一层（缺口在哪）**
+- 第十八轮（池 `max-wait: 4s`）证明的是「**配置层**对」（守门 ⑦ 读 Boot 装配出来的那份 `poolConfig`）⇒ ⇒ 它**不能**证明「**运行期**真按这个上限在跑」⇒ ⇒ 本轮补后半段：**真的把池占满，量第 N+1 条等了多久**。
+- ⇒ ⇒ **本条取代第十八轮台账里「⚠️ 未做双侧并发活体对拍 ⇒ 不写 L4」的效力边界**。
+
+**② 🟡 本域定性降级（本轮的核心结论）**
+- **降级依据（域内源码级实测 · 不是外推）**：本域主代码（`service/like/like-rpc/src/main/java/**`）里 `openPipeline` / `executePipelined` / `SessionCallback` / `.multi()` **命中数 = 0** ⇒ ⇒ 本域 Redis 只有**普通命令**路径（`LikeDomainService.java:104` 的 `StringRedisTemplate` · `LikeActionScript.java` 的 Lua `execute(RedisScript, …)`）⇒ ⇒ 而**普通命令走共享 native 连接、池不参与**（本域活体实测：50 条普通命令 ⇒ 服务端 `connected_clients` **delta = 0**）⇒ ⇒ ⇒ **修前那个「池耗尽 ⇒ 无限挂起」的漂移，在本域生产路径上几乎不可达** ⇒ ⇒ 原写的「🔴 真缺陷（比 Go 更糟）」**降级为「形态上已对齐的防御性配置」**（**不是可达缺陷**）⇒ ⇒ **原值保留不改写**，以本条为准。
+- ⚠️ **task 域同款漂移仍成立**（那边**有** pipeline 生产路径）⇒ ⇒ **不外推**：一条轴的定性**按域不同源**。
+
+**③ 落码（1 个新测试类 · 3 条 · 零生产代码改动）**
+- `service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRedisPoolExhaustionP99GateTest.java`
+- 构造 = **真 Redis 容器**（`redis:7-alpine`）＋ **真 Spring 上下文**（真应用类 ⇒ 加载本模块**真** `application.yml`）＋ **真装配**的 `LettuceConnectionFactory`；判据全部是**运行期读数**。
+- ⚠️ **本域单独建、不抄 task 域那条的读数**：两个模块的 `application.yml` 各自生效 ⇒ ⇒ 「task 域量到 X」**推不出**「like 域也是 X」。
+
+**④ 三条活体读数（like 域实测）**
+
+| 断言 | 实测 |
+|---|---|
+| ① 普通命令走不走池 | `connected_clients` **before=8 / after=8 / delta=0** |
+| ② pipeline 走不走池 | 占位 63 条 ⇒ **before=8 / after=64 / delta=56** |
+| ③ 池耗尽 ⇒ 等连接上限 | **`wait_elapsed_ms = 4003**`，异常链 `RedisConnectionFailureException → PoolException → NoSuchElementException: Timeout waiting for idle object, borrowMaxWaitDuration=PT3.999992S` |
+
+⇒ ⇒ **单次池等待上限 = 4s（真行为读数，不是配置值）**。
+
+**⑤ 🆕 顺带把本域 `min-idle: 8` 从「配置层」升级到「活体」（L4）**
+- 探针里**借任何连接之前**，服务端就已经有 **8 条**连接（task 域同款探针 = **1** 条 ⇒ 差值 = 本域的 `min-idle`）⇒ ⇒ **受控实验归因**（把本域 yml 的 `min-idle: 8` 翻成 `0` 再跑 ⇒ 借前基线 **8 ⇒ 1**、净增量 **56 ⇒ 63** ⇒ 回滚后 sha256 = `9b406dca745a5906ab40a522` 与变异前**逐字节一致**）⇒ ⇒ **「`min-idle: 8` = Go 的 `MinIdleConns = 8`」这条对齐结论，现在有 L4 活体证据**（此前只是 L1 配置层 + 装配层读数）⇒ ⇒ 也顺带**证实 G3 那条消息里「like `min-idle: 4`」的前提过期**（本域早就是 8）。
+- ⚠️ **归因是受控实验得出的，不是推测**：8 这个数还可能来自本域 `@PostConstruct` 的调度器（`LikeFactDispatchScheduler`）⇒ ⇒ **不能靠「数值相符」下结论** ⇒ ⇒ 必须翻转变量实测。
+
+**⑥ Go 腿活体读数**（探针用**真源的 `go.mod`/`go.sum` 离线构建** · `CGO_ENABLED=0`）：`PoolTimeout = 4s` ⇒ 并发 80 ⇒ **16 个等待者全部 `ErrPoolTimeout`** ⇒ **p50=16086ms / p99=16135ms** ⇒ ⇒ ⚠️ **Go 的 4s 是「单次池等待」**（go-redis v9.20.0 `error.go` 的 `shouldRetry` 对 `ErrPoolTimeout` **无条件重试** ⇒ `MaxRetries=3` ⇒ 共 4 次）⇒ ⇒ **命令整体 ≈16.1s** ⇒ ⇒ 原「Go 4s / RAG ∞」的**参照量级要改**（**漂移方向不变**）。
+
+**⑦ 变异验证**：抽掉本域 yml 的 `max-wait: 4s` ⇒ 同一探针 ⇒ **`wait_elapsed_ms = 8004` / `timedOut = true`** ⇒ ⇒ **3 条恰红 1 条**（红在 `timedOut` 断言，失败信息「Expecting value to be false but was true」）⇒ ⇒ 另 2 条仍绿 ⇒ ⇒ **非假绿** ⇒ ⇒ 回滚后 sha256 与变异前**逐字节一致** ⇒ `git status` 对该 yml **为空**。
+
+**⑧ 修后定性**：单次池等待 Go **4s** / RAG **4.003s** ⇒ **对齐**；命令整体 RAG 更短 ⇒ ⇒ **「比 Go 更严」** ⇒ ⇒ 本域这条**可登记为「有界残留 · 刻意不改」**（**不是缺陷**）。
+
+**⑨ 🟡 探针自身的 3 个缺陷（自曝 · 已修 · 留档）**：① **漏了 `grpc.server.port=0`** ⇒ gRPC server 走固定端口 8082 ⇒ 本机 8082 被桌面运行时的 Python 进程占着 ⇒ **上下文起不来**、整类红、且**不是**被测行为红（**本域这条先暴露**）⇒ ⇒ 已补；② **② 的断言写错了量**（原写「净增量 ≥ 占位数」⇒ 但池里**已有**的空闲连接会被复用 ⇒ like 实测净增 **56 < 63**）⇒ ⇒ 改成「服务端连接数必须**长到池上限**」＋ 前置「借前基线 < 占位数」；③ **② 失败时不释放占位** ⇒ 池被占满 ⇒ **③ 在准备阶段就 4s 超时** ⇒ 「红在别处」⇒ ⇒ 释放动作移到 `@AfterEach`。
+
+**⑩ 回归实测（9 模块 `clean test` · 带 `-am` · BUILD SUCCESS · 12:01 min）**
+
+| 模块 | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `service/common`（**共享层**） | **330** | 0 | 0 | 0 |
+| `service/message/message-api` | 103 | 0 | 0 | 0 |
+| `service/message/message-rpc` | 89 | 0 | 0 | 0 |
+| `service/message/message-common` | 21 | 0 | 0 | 0 |
+| `service/like/like-api` | 94 | 0 | 0 | 0 |
+| `service/like/like-rpc` | **125** | 0 | 0 | 0 |
+| `service/like/like-common` | 18 | 0 | 0 | 0 |
+| `service/task/task-api` | 102 | 0 | 0 | 0 |
+| `service/task/task-rpc` | **125** | 0 | 0 | 0 |
+| **合计** | **1007** | **0** | **0** | **0** |
+
+⇒ ⇒ **域侧 8 模块 = 677**（上轮 671 ⇒ **+6** = 两条探针各 3 条）＋ 共享层 **330（未变）** ⇒ ⇒ **9 模块 `mvn test` 口径 1001 ⇒ 1007**；**逐模块 surefire XML 求和 == maven 汇总行（9/9 逐字相等）** ✔
+⇒ ⇒ ⚠️ **口径坑（写死）**：**定向跑（`-Dtest=`）会改写该模块的 surefire 报告** ⇒ ⇒ 探针跑完后**必须**补一次覆盖该模块的**全量**跑。
+
+**⑪ 原值保留不改写**
+第十九轮的 **1001 / 671 原值保留**，以本条为准（**当前权威值 = 1007 / 677**）⇒ ⇒ **共享层 330 两轮之间一字未变** ⇒ ⇒ 变的只有域侧（+6 = 两条探针）。
+
+---
+
 ## 4·十二、🟢 **第十二轮（2026-10-27 18:4x）· 合并 G4 的 13 笔（零冲突）⇒ 新机器门禁在本树为绿 ＋ 全仓 U+FFFD 复扫下降 ＋ 两个红门禁的根因定位到行**
 
 ### ① 合并（`5636164`）

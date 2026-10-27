@@ -957,6 +957,87 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 
 ---
 
+### 🔴 第二十轮 · Redis 池维度的**双侧活体对拍**（真 Redis ＋ 真 go-redis 客户端）⇒ **池轴 L3 ⇒ L4**（2026-10-27）
+
+**① 为什么本轮要补这一层（缺口在哪）**
+- 第十八轮（池 `max-wait: 4s`）证明的是「**配置层**对」—— 守门 ⑦ 读的是 **Boot 装配出来的那份 `poolConfig`**（`LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig`）⇒ ⇒ 它**不能**证明「**运行期**真按这个上限在跑」⇒ ⇒ 本轮补的就是后半段：**真的把池占满，量第 N+1 条等了多久**。
+- ⇒ ⇒ **本条取代第十八轮台账里「⚠️ 未做双侧并发活体对拍 ⇒ 不写 L4」的效力边界**；第十八轮的**结论（补 `max-wait: 4s`）不变**，变的是**证据强度**与**参照量级**。
+
+**② 落码（2 个新测试类 · 各 3 条 · 零生产代码改动）**
+| 模块 | 文件 | 条数 |
+|---|---|---|
+| task-rpc | `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/config/TaskRedisPoolExhaustionP99GateTest.java` | **3** |
+| like-rpc | `service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRedisPoolExhaustionP99GateTest.java` | **3** |
+- 构造 = **真 Redis 容器**（`redis:7-alpine`）＋ **真 Spring 上下文**（真应用类 ⇒ 加载本模块**真** `application.yml`）＋ **真装配**的 `LettuceConnectionFactory`。
+- 判据全部是**运行期读数**（Redis 服务端 `connected_clients` ＋ 实测等待毫秒），**不是**配置值。
+- ⚠️ **两域各建一条（不共用）**：两个模块的 `application.yml` 是**各自**生效的 ⇒ ⇒ 「task 域量到 X」**推不出**「like 域也是 X」⇒ ⇒ **不外推**。
+
+**③ 三条活体读数（RAG 腿 · 两域各自实测）**
+
+| 断言 | task 域 | like 域 |
+|---|---|---|
+| ① 普通命令走不走池 | `connected_clients` **before=1 / after=1 / delta=0** | **before=8 / after=8 / delta=0** |
+| ② pipeline 走不走池 | 占位 63 条 ⇒ **before=1 / after=64 / delta=63** | 占位 63 条 ⇒ **before=8 / after=64 / delta=56** |
+| ③ 池耗尽 ⇒ 等连接上限 | **`wait_elapsed_ms = 4004`**（复跑 4005） | **`wait_elapsed_ms = 4003`** |
+
+- ③ 的异常链（两域同形）：`RedisConnectionFailureException → PoolException → NoSuchElementException: Timeout waiting for idle object, borrowMaxWaitDuration=PT3.999998S` ⇒ ⇒ **单次池等待上限 = 4s（真行为读数，不是配置值）**。
+- 机制（源码级）：`LettuceConnectionFactory.java:132` `shareNativeConnection = true`（默认）＋ Boot 4.0.8 `LettuceConnectionConfiguration` **零处** `setShareNativeConnection` ⇒ `SharedConnection.getConnection()` 只持**一条** ⇒ ⇒ **普通命令走共享连接、池不参与**；只有 `LettuceConnection.openPipeline()` → `getOrCreateDedicatedConnection()` → `doGetAsyncDedicatedConnection()` 才**从池借**。
+
+**④ Go 腿活体读数**（探针 `/tmp/g2poolp99b/probe/main.go` · **用真源的 `go.mod`/`go.sum` 离线构建** · `CGO_ENABLED=0` ⇒ 不引入真源之外的依赖）：生效 options = `PoolSize=64`（显式设以对齐 RAG `max-active`）· **`PoolTimeout = 4s`** · `ReadTimeout = 3s` · `MaxActiveConns = 0` ⇒ hold 30s ＋ 并发 80 ⇒ ⇒ **16 个等待者全部 `ErrPoolTimeout`** ⇒ ⇒ **p50=16086ms / p99=16135ms / min=16053 / max=16135**（= 4 次尝试 × 4s ＋ 退避）。
+
+**⑤ 活体对拍表**
+
+| 量 | Go | RAG | 判定 |
+|---|---|---|---|
+| **单次池等待上限** | **4s** | **4.003–4.005s** | ✅ **对齐** |
+| **命令整体耗时**（池耗尽时） | **≈16.1s**（4 次重试） | **4.005s**（一次就失败） | 🟢 **RAG 更严**（更快失败） |
+
+⇒ ⇒ ⇒ **漂移方向 = 「RAG 做了更严/更快的那一侧」** ⇒ ⇒ 修后定性 = **对齐（且更严）**。
+
+**⑥ 三个受控实验（每个都带回滚 ＋ sha256 逐字节校验）**
+
+| 实验 | 做法 | 实测 | 回滚校验 |
+|---|---|---|---|
+| **A（归因）** | like yml `min-idle: 8 → 0` | 借前基线 **8 ⇒ 1**、净增量 **56 ⇒ 63** ⇒ **`min-idle` 真的在运行期预热出对应条数的连接** | sha256 `9b406dca745a5906ab40a522` 逐字节一致 ✔ |
+| **B（like 变异）** | 抽掉 `max-wait: 4s` | **`wait=8004ms / timedOut=true`** ⇒ **3 条恰红 1 条**（红在 `timedOut` 断言）⇒ 另 2 条仍绿 ⇒ **非假绿** | sha256 逐字节一致 ✔ |
+| **C（task 变异）** | 抽掉 `max-wait: 4s` | **`wait=8002ms / timedOut=true`** ⇒ **3 条恰红 1 条** | sha256 `b8f17b429abc9121827f61bd` 逐字节一致 ✔ |
+
+⇒ ⇒ **实验 A 是额外收获**：like 域 `min-idle: 8`（= Go 的 `MinIdleConns = 8`）从「配置层」升级成 **L4 活体证据**。
+
+**⑦ ⚠️ 三条订正（**原值保留不改写**，以本条为准）**
+1. **Go 侧的参照量级**：第十八轮写的「Go 侧池耗尽 ⇒ **4s 后失败**」**不准确** ⇒ go-redis v9.20.0 `error.go` 的 `shouldRetry` 对 `ErrPoolTimeout` **无条件 `return true`**（注释 `// connection pool timeout, increase retries. #3289`）⇒ `MaxRetries = 3` ⇒ ⇒ **共 4 次尝试** ⇒ ⇒ **Go 侧真实语义 = 「单次池等待 4s ＋ 命令整体 ≈16.1s 后失败」**（活体 p99 = 16135ms）⇒ ⇒ **「4s」是单次借连接的上限、不是命令整体的上限**（**漂移方向不变**）。
+2. **RAG 侧的池只治理 pipeline/事务路径** ⇒ ⇒ 「无限等」只可能发生在**真正借连接的路径**上 ⇒ ⇒ **task 域有**那条路径（`service/task/task-rpc/src/main/java/com/rag/task/task/rpc/service/RedisPipelines.java:92` 与 `:121` 两处 `redis.executePipelined(new SessionCallback<Object>(){…})`）⇒ ⇒ **task 域修前漂移可达 ⇒ 真缺陷成立**；**like 域零 pipeline ⇒ 定性降级**（见 like 域那份）；**message 域零 Redis ⇒ 本轴不适用**。
+3. **按域不同源，不外推** ⇒ ⇒ 本轮的「池真被用」结论**只对 task 域成立**。
+
+**⑧ 🟡 探针自身的 3 个缺陷（自曝 · 已修 · 留档）**
+1. **首版漏了 `grpc.server.port=0`** ⇒ gRPC server 走固定端口（task 9005 / like **8082**）⇒ 端口被占时**上下文起不来**、整类红、且**不是**被测行为红 —— **by like 那条在 8082 上暴露**（本机 8082 被桌面运行时的 Python 进程占着）⇒ ⇒ 已给两条探针都补上。
+2. **② 的断言写错了量** —— 原写「净增量 ≥ 占位数」⇒ 但**池里已有的空闲连接会被复用** ⇒ 净增量可以小于占位数（like 就是 56 < 63）⇒ ⇒ 改成「服务端连接数必须**长到池的上限**」＋ 前置「借前基线 < 占位数」（防空过）。
+3. **② 失败时不释放占位** ⇒ 池被占满 ⇒ **③ 会在准备阶段就 4s 超时** ⇒ 报错落在**准备代码**上 ⇒ 「红在别处」⇒ ⇒ 变异验证失效 ⇒ ⇒ 释放动作移到 `@AfterEach`（断言失败也会跑）。
+
+**⑨ 回归实测（9 模块 `clean test` · 带 `-am` · BUILD SUCCESS · 12:01 min）**
+
+| 模块 | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `service/common`（**共享层**） | **330** | 0 | 0 | 0 |
+| `service/message/message-api` | 103 | 0 | 0 | 0 |
+| `service/message/message-rpc` | 89 | 0 | 0 | 0 |
+| `service/message/message-common` | 21 | 0 | 0 | 0 |
+| `service/like/like-api` | 94 | 0 | 0 | 0 |
+| `service/like/like-rpc` | **125** | 0 | 0 | 0 |
+| `service/like/like-common` | 18 | 0 | 0 | 0 |
+| `service/task/task-api` | 102 | 0 | 0 | 0 |
+| `service/task/task-rpc` | **125** | 0 | 0 | 0 |
+| **合计** | **1007** | **0** | **0** | **0** |
+
+⇒ ⇒ **域侧 8 模块 = 677**（上轮 671 ⇒ **+6** = 两条探针各 3 条）＋ 共享层 **330（未变）** ⇒ ⇒ **9 模块 `mvn test` 口径 1001 ⇒ 1007**。
+⇒ ⇒ **口径**：逐模块 surefire `TEST-*.xml` 的 `testsuite` 属性求和 **== maven 模块汇总行**（**9/9 逐字相等**）⇒ ⇒ **0 stale 报告**（`clean` 已清空旧目录）。
+⇒ ⇒ ⚠️ **本轮踩到的口径坑（写死）**：**定向跑（`-Dtest=`）会改写该模块的 surefire 报告** ⇒ ⇒ 两条探针跑完后**必须**补一次覆盖该模块的**全量**跑 ⇒ ⇒ 否则报告集只剩探针那一类 ⇒ ⇒ **凡以 `target/` 为输入的判据，必须绑定「本次运行的产物」**。
+
+**⑩ 原值保留不改写**
+第十九轮的 **1001 / 671 原值保留**，以本条为准（**当前权威值 = 1007 / 677**）⇒ ⇒ **共享层 330 两轮之间一字未变** ⇒ ⇒ 变的只有域侧（+6 = 两条探针）。
+
+---
+
 ## 4·十二、🟢 **第十二轮（2026-10-27 18:4x）· 合并 G4 的 13 笔（零冲突）⇒ 新机器门禁在本树为绿 ＋ 全仓 U+FFFD 复扫下降 ＋ 两个红门禁的根因定位到行**
 
 ### ① 合并（`5636164`）

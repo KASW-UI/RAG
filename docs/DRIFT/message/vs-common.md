@@ -689,3 +689,27 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 **⑦ 原值保留不改写**
 第十八轮的 **998 / 671 原值保留**，以本条订正为准（**当前权威值 = 1001 / 671**）⇒ ⇒ **域侧 8 模块的 671 在两轮之间一字未变** ⇒ ⇒ 变的只有共享层（+3）。
 
+---
+
+### ⏸️ 第二十轮 · Redis 池维度的双侧活体对拍 —— **本轮不涉及本域**（2026-10-27）
+
+**① 本域为什么「不涉及」（不是「漏做」）**
+- 本轮做的是 **Redis 连接池**维度的双侧活体对拍（真 Redis 容器 ＋ 真 go-redis 客户端 ⇒ 量「池耗尽时等连接的最长等待」）。
+- **实测**：本域主代码（`service/message/**/src/main/java/**`）里 **Redis 引用数 = 0**（`RedisTemplate` / `StringRedisTemplate` / `RedisConnectionFactory` / `LettuceConnectionFactory` / `openPipeline` / `executePipelined` / `SessionCallback` 全部零命中）⇒ ⇒ **本域根本没有 Redis 客户端** ⇒ ⇒ **连接池这一维在本域不存在** ⇒ ⇒ 本轮**不建探针、不落码、不改任何本域代码**。
+- ⇒ ⇒ **「本轮不涉及」≠「该做而没做」**：本轴对 message 域是 **N/A**，不是缺口。
+
+**② 本域受影响面 = 零**
+- 本轮两条新探针（`TaskRedisPoolExhaustionP99GateTest` / `LikeRedisPoolExhaustionP99GateTest`）**都不在本域** ⇒ ⇒ 本域生产代码与测试代码**零改动**。
+
+**③ 计数（本轮 9 模块 `clean test` 实测 · BUILD SUCCESS · 12:01 min）**
+- `service/message/message-api` **103**（未变）· `service/message/message-rpc` **89**（未变）· `service/message/message-common` **21**（未变）⇒ ⇒ **本域三模块合计 213（一字未变）**。
+- 共享层 **330（未变）** ⇒ ⇒ **9 模块 = 1007**（域侧 8 模块 **677** ＋ 共享层 **330**）⇒ ⇒ **逐模块 surefire XML 求和 == maven 汇总行（9/9 逐字相等）** ✔
+- ⇒ ⇒ **域侧 8 模块 671 ⇒ 677（+6）** —— 那 +6 **全部来自 like / task 两域的探针**，**本域 +0**。
+
+**④ ⚠️ 一条「不外推」的纪律（本轮再次坐实）**
+- Redis 池这条轴上，**task 域 = 真缺陷（可达）** · **like 域 = 定性降级（几乎不可达）** · **message 域 = N/A（不存在该轴）** ⇒ ⇒ **同一轴、三种定性** ⇒ ⇒ **一条轴的结论不能外推到另一个域**。
+- 详细逐条见 [`docs/DRIFT/task/vs-common.md`](../task/vs-common.md) 与 [`docs/DRIFT/like/vs-common.md`](../like/vs-common.md) 的第二十轮段。
+
+**⑤ 原值保留不改写**
+第十九轮的 **1001 / 671 原值保留**，以本条为准（**当前权威值 = 1007 / 677**）⇒ ⇒ **本域三模块 103 / 89 / 21 在两轮之间一字未变**。
+
