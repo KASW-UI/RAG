@@ -2234,3 +2234,58 @@ G4 第十一轮来信：「新门禁 `22dc67e` + 台账 `c164e63`，请再并一
 > **我域任何模块若新增 `commons-pool2` 依赖、或把 `pool.enabled` 写成 `true`**
 > ⇒ ⇒ **这条轴立刻从我域的「不可达」变成「可达」** ⇒ ⇒ **必须同时定 `max-active` 与 `max-wait`**（Go 侧真值 = `10×GOMAXPROCS` / `4s`）
 > ⇒ ⇒ 否则就是**静默引入一条新的行为漂移**。
+
+## 34. 🟢 **C7 复跑撞上「Testcontainers 容器泄漏」⇒ 一次 5 条 error 的正确读法（2026-10-27 晚）**
+
+### 34.1 现象
+
+并入 G4 新 tip（5 提交）后的**第一次**域级全量 ⇒ ⇒ **`admin-rpc` 5 条 error**
+（`AdminRpcUpdateTimeAdvanceWiringTest` 的 5 条全部 `Failed to load ApplicationContext`）⇒ ⇒ **BUILD FAILURE**。
+
+### 34.2 根因链（读到最内层）
+
+```
+adminSchemaBootstrap init 失败
+  → IllegalStateException: admin-rpc 建表失败，进程拒绝启动   (AdminSchemaBootstrap.java:61)
+  → PSQLException: 尝试连线已失败
+  → java.io.EOFException  at PGStream.receiveChar / ConnectionFactoryImpl.enableSSL
+```
+
+⇒ ⇒ **判读：服务端在 SSL 协商阶段直接把连接关了** ⇒ ⇒ ⇒ **这不是「PG 挂了」，是「回应我的那个端口上不是我要的那个 PG」**
+⇒ ⇒ （对照实测：`127.0.0.1:60432` 的 SSLRequest 回应是 `b'N'` = **正常 PG**；而失败那次的连接是**另一个东西**）
+
+### 34.3 🔴 **排除「代码回归」的三条独立判据（三条齐 ⇒ 才定性）**
+
+| # | 判据 | 实测 |
+|---|---|---|
+| ① | **我域自上次全绿以来零代码变更** | 只有台账提交（`91699e8` / `785d528`）⇒ 零 `.java` 变更 |
+| ② | **G4 这 5 个提交的变更面** | 只碰 `service/common`（探针 + `HttpMiddleware.java` +16 行）＋ `tools/check-ledger-selfcheck.py` ＋ global 台账 ⇒ ⇒ **零业务代码进入我域**；且失败点在**上下文启动期的 PG 连接**，与 `HttpMiddleware` 无关 |
+| ③ | **同一测试类单独复跑** | **5/5 全绿 / BUILD SUCCESS（36.03s）** ⇒ ⇒ **同代码、同环境下单独跑能过** ⇒ ⇒ **问题在「那一次跑的环境瞬间」，不在代码** |
+
+⇒ ⇒ **域级全量复跑 ⇒ 18/18 模块 SUCCESS；我域 669 条逐项与并入前一致（user-api 121 / user-rpc 144 / admin-api 140 / admin-rpc 118 / follow-api 68 / follow-rpc 78）⇒ 零回归**；
+共享层 363 条（`common` 330 ＋ `users-common` 33）⇒ ⇒ 比并入前 +3 ⇒ ⇒ **= G4 新增的 3 条门禁** ⇒ ⇒ 数字自洽。
+
+### 34.4 🔴 **环境根因（实测）：Testcontainers 容器泄漏 ⇒ 宿主口被占 ⇒ 随机口冲突**
+
+- `docker ps` 实测 **47 个容器在跑**，其中 **`postgres:16-alpine` 18 个 ＋ `redis:7-alpine` 7 个** = **25 个 Testcontainers 残留**
+  ⇒ ⇒ 创建时间跨 **2026-05-20 → 2026-10-27**（最老的 **43 小时**）⇒ ⇒ **长期累积，不是本轮偶发**；
+- **`docker ps --filter name=ryuk` ⇒ 零命中** ⇒ ⇒ **Testcontainers 的回收器（Ryuk）根本没在跑** ⇒ ⇒ **残留没人清**；
+- 我域的 `AdminRpcUpdateTimeAdvanceWiringTest` 用 `@Container static final PostgreSQLContainer<>`（`postgres:16-alpine`）
+  ⇒ ⇒ **每次起新容器要抢一个随机宿主口** ⇒ ⇒ 那些残留容器**占着 55562–55569 等口**（落在 **OS 临时段 49152–65535**）
+  ⇒ ⇒ **抢不到口 ⇒ 连到「别的那个」⇒ ⇒ 症状 = SSL 协商阶段被对端 EOF**；
+- 同一瞬间 `docker ps` 也**卡住**（实测第一次 20s 超时、之后 0.16s）⇒ ⇒ 佐证 Docker 当时在忙。
+
+### 34.5 ⚠️ **纪律（本条是本轮真正要留下的东西）**
+
+1. **一次失败不判回归** ⇒ ⇒ 必须「① 单独复跑 ＋ ② 代码变更面 ＋ ③ 环境普查」**三条齐**才定性；
+2. **「重跑绿了」≠「已修」** ⇒ ⇒ 这一条**没有代码可修** ⇒ ⇒ 只能记成**环境瞬时**（与 §32.4 同一纪律）；
+3. 🔴 **「PG 连接失败」先问「那个端口上回应我的是不是 PG」** ⇒ ⇒ **`EOFException` 出现在 `enableSSL` ⇒ 强烈指向「对端不是预期的服务」**，
+   **不要**直接读成「PG 挂了」⇒ ⇒ 否则会去查一个根本没坏的东西；
+4. 🔴 **不动别人的容器** ⇒ ⇒ 25 个残留里混着别的 lane 正在用的 ⇒ ⇒ **本轮不删**（不碰别人的进程与端口）⇒ ⇒ 登记 ＋ 通报。
+
+### 34.6 落点（跨 lane ⇒ 无人拥有面）
+
+「Testcontainers 残留容器 ＋ 随机宿主口落在 OS 临时段」是**跨 lane 共享环境**问题 ⇒ ⇒
+落点 = **整合者**（`docs/DRIFT/_cross/**` = 无人拥有面）⇒ ⇒ **我域零落码**。
+⇒ ⇒ **可选修法（仅登记，不实施）**：① 固定 Testcontainers 宿主口段（避开 `49152–65535`）② 跑完显式清理
+③ 统一「容器名 ＋ 标签」回收（本机 Ryuk 不可用 ⇒ 需自建）。
