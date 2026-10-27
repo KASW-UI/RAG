@@ -132,7 +132,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **被卡住的 4 件事** | ① Redis 断连快速失败的**活体对拍**（favorite-api 侧）② 删域侧排序桥副本（本域 **article-rpc / favorite-rpc** 各 1 份）③ client breaker **装配复验**（= §4-G4-2）④ **U15 / C-3 统一载体**落地（= global E65） |
+| **被卡住的 4 件事** | ① Redis 断连快速失败的**活体对拍**（favorite-api 侧）—— ⚠️ **本域现状已核清（2026-10-27 · 独立实测，不是转述）**：**我四域的域侧副本 = 0**（全仓生产代码里 `RedisDisconnectedBehaviorConfig` 只命中 G1 域的 `users/user/user-api` 等 **5** 份 ⇒ 我域**零命中**）⇒ ⇒ **G4 收编时的删除动作在我域 = 0**（与 G1 的 5 份不同）；且**我树共享层根本没有 redis 自动配置**（`find service/common/src/main/java -iname "*redis*"` ⇒ 零命中；`2f12236` 不在 HEAD 历史）⇒ ⇒ **我域不是「被域内副本遮蔽」，而是「两边都没有」** ⇒ ⇒ 断连快速失败在我域**尚未成立** ⇒ ⇒ **活体对拍必须等共享层落地**（这正是它卡在选项 D 的原因）<br>② 删域侧排序桥副本（本域 **article-rpc / favorite-rpc** 各 1 份）③ client breaker **装配复验**（= §4-G4-2）④ **U15 / C-3 统一载体**落地（= global E65） |
 | **共同前置** | 共享层的落码 commit **不在我树 HEAD 历史**（`2e2a84f` · `a1a2e05` · `e3f2046` ⇒ `git merge-base --is-ancestor` 对我树 HEAD **全为否**，仅 object 库里存在）⇒ ⇒ **共享层标准件没进我树 ⇒ 我不能先删域侧副本**（先删 ⇒ MP 排序边消失 ⇒ 上下文起不来） |
 | **选项 D（本轮新增 · 我推荐）** | 我直接 `git merge align/g4-service-common` 到我树 ⇒ **同一仓库 ⇒ 提交对象共享 ⇒ 不产生「内容同、hash 异」的副本** ⇒ 合主干时**不会** add/add 撞 ⇒ ⇒ **只需你给一个稳定点**（从哪个 commit 起） |
 | **其他选项** | **A**（你合主干后我合主干）· **B**（我 cherry-pick ⇒ **会**造出 hash 不同的副本 ⇒ 合主干时大概率撞）· **C**（你替我合） |

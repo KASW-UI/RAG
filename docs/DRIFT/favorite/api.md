@@ -678,7 +678,7 @@ service/favorite/api/internal/svc/service_context.go:20
 | 项 | 内容 |
 |---|---|
 | 修法 | `application.yml` 的 `spring.data.redis` 下显式加 `connect-timeout: 5s`（**域内文件 ⇒ 域侧自修**，不依赖共享层） |
-| 为什么共享层不参与 | `service/common` 的 `GoStyleRedisClientAutoConfiguration` **只**设 `disconnectedBehavior(REJECT_COMMANDS)`、**不碰** `socketOptions` / `timeoutOptions`（其 javadoc「为什么不动命令超时」段已写明）⇒ 连接超时**完全由本域 yml 决定** ⇒ **不装副本、不重复收编** |
+| 为什么共享层不参与 | `service/common` 的 `GoStyleRedisClientAutoConfiguration` **只**设 `disconnectedBehavior(REJECT_COMMANDS)`、**不碰** `socketOptions` / `timeoutOptions`（其 javadoc「为什么不动命令超时」段已写明）⇒ 连接超时**完全由本域 yml 决定** ⇒ **不装副本、不重复收编**。<br>⚠️ **引用出处说明（2026-10-27 补 · 防止后人按本树复核时判「引用的文件不存在」）**：该类**不在本树**（实测 `find service/common/src/main/java -iname "*redis*"` ⇒ **零命中**；G4 的 `2f12236` 不在我树 HEAD 历史）⇒ ⇒ 上面的结论是**照 G4 树实测**的（跨树指针）⇒ ⇒ **本树读者要复核这条，须先合入共享层**（见 [`favorite/vs-common.md`](vs-common.md) §4.2 与 [`comment/vs-common.md`](../../DRIFT/comment/vs-common.md) §4.3 的选项 D） |
 | 守门 | 新增 1 个契约守门（**1 例**）—— 走**整条真实链路**：`ConfigDataApplicationContextInitializer` 加载本模块**真实的** `application.yml` → Boot **真实** `DataRedisAutoConfiguration`（它 `@Import` 了 `LettuceConnectionConfiguration`）→ 真 `LettuceConnectionFactory` → 断言**消费点** `getClientConfiguration().getClientOptions().get().getSocketOptions().getConnectTimeout()` 与 `getClientConfiguration().getCommandTimeout()` |
 | 为什么断言「消费点」而不是「yml 里有这个键」 | 后者挡不住「属性名写错 ⇒ Spring 静默用默认值」（§3.3.1） |
 
