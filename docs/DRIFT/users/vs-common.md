@@ -1682,3 +1682,46 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
     ⇒ ⇒ **先捕获退出码，再做命令替换**。
   - ⚠️ **对照**：把 `$(basename $g)` 放在**重定向目标**里（`> /tmp/$(basename $g).out`）是**安全的** ⇒ 因为它在 `python3` 之前展开，**不覆盖 `$?`** ⇒ ⇒ **危险的不是「命令替换」，是「命令替换与 `$?` 读同一批参数」**。
   - ⇒ ⇒ **可复现的反证**：坏写法下 `check-wave-coupling.py` 打印 `EXIT=0`，好写法打印 `EXIT=1` ⇒ ⇒ **同一个门禁、同一份代码、两种结论** ⇒ ⇒ **凡是要用退出码下结论，先跑一遍反证**。
+
+## 27. 🆕 **G4 第十次全量前的窗口协调 ＋ 它 §4.10.27 的 R1~R4 复核（2026-10-27 · G1 lane）**
+
+### 27.1 🟢 **窗口协调：全量回归零占用**
+
+- G4 知会：「starting the 10th full regression（`mvn -B clean verify`，~20 min）on `align/g4-service-common` @ `5a954bb` ⇒ 请暂缓任何全量回归」。
+- ⇒ ⇒ **我域全量回归零占用**：我域本轮无全量待跑（收编验收已完成，见 §26.6）⇒ ⇒ **已回函确认**。
+- ⇒ ⇒ 本轮唯一在跑的是**单测试类**（`GoStyleRedisClientShadowingGateTest`，3 条）的**域内定向跑** —— 按 G4 明示的「域内跑可以」执行，**显式 `-DargLine=-Xmx2g`**（堆上限 2 GB）⇒ ⇒ **不构成全量**。
+- ⇒ ⇒ **起跑前复检**：两条占用（G2 的 `-pl service/common,service/like/like-rpc` + G4 的 `clean verify`）⇒ **两条都带 `-Xmx`** ⇒ 堆受限 ⇒ `memory_pressure` 44% free ⇒ ⇒ 并发安全（判据按「条数 × 1/4 物理内存」算 + 实际空闲双查，见 §23）。
+
+### 27.2 🔴 **G4 §4.10.27 的 R1~R4 复核结论：我域四条【全部已修】—— 它那张表读的是主干代码态**
+
+- **G4 的转派单**（它的表里 10 个组件逐项 YAML 解析）⇒ 其中 **R1~R4 四条落在我域**。
+- **我域实测（YAML 解析器读值，不是 grep）**：
+
+| 组件 | 我域现态 | 主干现态 | G4 表里写的 | 判定 |
+|---|---|---|---|---|
+| `user-api` | 3s ＋ **connect-timeout 5s** | 3s ＋ **缺** | 🔴 连接 = 10s ⇒ R1 | ❌ **已修** |
+| `user-rpc` | 3s ＋ **connect-timeout 5s** | 3s ＋ **缺** | 🔴 连接 = 10s ⇒ R2 | ❌ **已修** |
+| `follow-api` | **3s** ＋ **5s** | **2s** ＋ **缺** | 🔴🔴 命令 2s ＋ 连接 10s ⇒ R3 | ❌ **已修** |
+| `admin-rpc` | 3s ＋ 5s（**注释已订正**） | 3s ＋ 5s（**注释机制写错**） | 「值对、注释错」⇒ R4 | ❌ **已修** |
+| `admin-api` | 3s ＋ 5s | 3s ＋ 5s | ✅ 一致 | ✅ 一致 |
+
+- ⇒ ⇒ **G4 描述的那 4 种形态逐字对应【主干】** ⇒ ⇒ **根因 = G4 的树不含 G1 的任何提交**（已实测：G4 树里 `docs/DRIFT/users/vs-common.md` 连「V-002」都零命中）⇒ ⇒ **不是 G4 判错，是它看不到我域的修复**。
+- ⇒ ⇒ **我域这四条的修法与出处**：`DRIFT-USERAPI-016`（user-api 补 `connect-timeout: 5s` ＋ `UserApiRedisTimeoutConfigTest` 2 例）· `DRIFT-USERRPC-V-014` ①（user-rpc 同款）· `DRIFT-FOLLOW-011`（follow-api `timeout` **2s → 3s** ＋ 补 5s ＋ `FollowApiRedisTimeoutConfigTest` 2 例）· `DRIFT-ARPC-013` 订正块（admin-rpc 注释的**字节码级**订正：Boot 4.0.8 `createClientOptions` 在 `connectTimeout == null` 时**整段跳过** ⇒ 用 Lettuce 默认 10s ⇒ 「回落到 timeout」是错的）。
+- ⚠️ **R3 那个「需 G1 自行判定是否刻意」的开放项 —— 我域已判定：不是刻意**：
+  - Go 侧生效的是 **go-redis v9 的库默认 `ReadTimeout = 3s`**（真源 `go.mod` pin `go-redis/v9 v9.20.0`）⇒ ⇒ **Go 侧本来就是 3s**；
+  - ⇒ 而那个 2s **疑似抄自** go-zero `core/stores/redis/redis.go:27` 的 `readWriteTimeout = 2 * time.Second` ⇒ ⇒ 那个常量是**死常量**（全文件仅此一处、**从未被使用**）⇒ ⇒ **不能当依据** ⇒ ⇒ 故按 3s 对齐。
+- ⇒ ⇒ **R1~R4 我域零动作**（已修，不是待办）⇒ ⇒ 已回函告知 G4，并附「我域现态 vs 主干现态」对照表，请它按我域最新提交复核。
+
+### 27.3 🟢 **G4 的新机器门禁已并入我树，且我域通过**
+
+- G4 `22dc67e` 新增 `service/common/src/test/.../redis/GoStyleRedisClientShadowingGateTest`（3 条）⇒ **把「不得新建域内 Redis 副本」从台账禁令落成机器门禁**。
+- ⇒ **我树再并一次 G4 分支**（`87d72e0`，比上次的 `dcd0706` 多 9 笔）⇒ **冲突面实测 0** ⇒ **我域写权面零变更** ⇒ 带进 2 个文件（G4 的 global 台账 +258 行 ＋ 新守门）。
+- ⇒ ⇒ **域内定向验证：3 条全绿**（`service/common` · `-Dtest=GoStyleRedisClientShadowingGateTest` · `-DargLine=-Xmx2g` · BUILD SUCCESS）⇒ ⇒ **我域收编后这道机器门禁通过**（域内零副本）。
+- ⇒ ⇒ **守门的设计值得记**：它的 `stillExistingWhitelistEntries` 只取**文件仍存在**的白名单项 ⇒ ⇒ **我删掉副本后那半条自动为空 ⇒ 不会红**；且另有 `staleWhitelistHint` 提示「收编已完成、该清白名单了」。
+- 🟡 **白名单清理是 `service/common` 的写权 ⇒ 只能 G4 清**（已转派）⇒ 我域零动作。
+
+### 27.4 🟢 **#6 第 1 步：G4 已撤回 ⇒ 与我域结论一致**
+
+- G4 `745a8b2`「撤回 #6 的『两步方案』与『需 Jason 拍板』那条裁决题 —— 它的前提已被 GORM 源码证伪」⇒ ⇒ **与我域的结论一致**（落 DDL = RAG 可空 = **方向相反的新漂移**）⇒ ⇒ **G4 不必为本单再做任何事**。
+- ⇒ ⇒ **剩下的唯一落点 = 销号签字**（`docs/Intentional_Deviations/**` ⇒ **不在 G1 也不在 G4 写权面** ⇒ 需整合者拍板）。
+- ⚠️ **本轮我域台账 `§19.4` 那条「V-002 我域『#6 第 1 步』已取消」的登记 ⇒ 现已由 G4 的撤回【双向确认】** ⇒ ⇒ 该待确认项**关闭**。
