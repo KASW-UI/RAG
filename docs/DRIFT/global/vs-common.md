@@ -2357,6 +2357,50 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 
 ⇒ ⇒ **结论：第十五次全量**不必跑** —— 判据不是「没改生产代码」（那是**弱判据**，会漏掉「改的是测试断言」这种情况），而是**「每一个改动过的行都已被执行过」** ⇒ ⇒ **第十四次全量口径（52 模块 / 29 有测试 / 2480 条 / 1 预期内红 / 0 errors / 4 skipped / 41:32 min / 三门禁 0-0-0）继续有效** ⇒ ⇒ ⚠️ **但若后续再有任何 `service/**` 的可执行改动 ⇒ 必须重跑全量**（本条口径的有效期随之结束）。
 
+#### 4.10.42 🟢 **G3 的 D10 回执核对 ＋ 跨 lane 合并选型（D/A）裁定 ＋ 排序桥副本删除授权**（2026-10-27 晚 · **本层零落码**）
+
+**① 🟢 G3 的 D10（comment 域 fact 投递 span 拓扑）—— 逐条核实成立 ⇒ **共享层零改动**
+
+| 项 | 本层独立核（**双方断言都落在共享层 ⇒ 本层必须自己核**） |
+|---|---|
+| Go 侧 | `Sea-RideTheWind_golang/service/common/communityfact/process.go:26` = `otel.Tracer("sea.rtw.communityfact").Start(ctx, "community.fact_delivery.dispatch")`；全文 **69 行**、**`SetAttributes` 命中 0** ✔ |
+| RAG 侧 | `service/common/src/main/java/com/rag/common/communityfact/Dispatcher.java:168`（tracer = `sea.rtw.communityfact`）· **`:186`** = `tracer.spanBuilder("community.fact_delivery.dispatch")`；**`SetAttributes` 命中 0** ✔ |
+| ⇒ 结论 | ✅ **span 拓扑两侧已对齐**（同名 · 同 tracer · 同在共享层 · 两侧都零属性）⇒ ⇒ **G3 域内那两行「删死代码 = 零行为变化」的结论成立** ⇒ ⇒ **共享层不需要改任何东西** ⇒ ⇒ ⚠️ **G3 自己订正了此前「Go 侧 fact 投递根本不用 span」的写法**（真源有 span，只是**建在共享层**）⇒ ⇒ **这正是「某文件零命中」推不出「整条链路零命中」**（G3 记进坑档 PIT-COMMENT-RPC-14，方向正确） |
+
+**② 🟢 跨 lane 合并选型：G3 提 D（直接 merge 本层分支进 G3 树）vs A —— 本层裁「D」，并附可复算证据**
+
+| 项 | 证据（本层实测，**不是推测**） |
+|---|---|
+| **两树 HEAD** | G4 `aeddbcb` · G3 `5361863` |
+| **merge-base** | **`cd893d1`**（= `git merge-base HEAD 5361863`）⇒ ⇒ **本层这 29 笔是 G3 缺的**；G3 另有 **54 笔**本层没有 |
+| **合并会不会撞** | ✅ **零冲突** —— `git merge-tree --write-tree --name-only HEAD 5361863` ⇒ **EXIT=0**、输出**只有合并树哈希、无冲突条目**（Git 2.50.1）⇒ ⇒ **不碰任何工作区**的空跑验证 |
+| 🔴 **合并会不会覆盖 G3 的域侧工作** | ✅ **不会** —— 本层这 29 笔触及的 `service/**` **全部落在 `service/common/`（10 个文件）**，**零** `service/{comment,hot,favorite,article}/**`；另有 `tools/` 4 个 + **本层自己的** `docs/DRIFT/global/vs-common.md` ⇒ ⇒ ⇒ **G3 的域侧提交一个都不会被覆盖** |
+| **写权守门会不会因此变红** | ✅ **不会** —— `check-wave-lane-ownership.py` 的 7 项判据里**没有一项看 diff**：查的是 ① 各 lane 声明的**路径集合**两两不重叠 ② `SHARED` 文件无人声明 ③ 排他归属 ④ **白名单路径必须命中真实文件**（合并只会**增加**文件 ⇒ 更满足）⑤ 7 个私有 `<域>-common` 无跨域引用（本层没碰私有库）⑥ **分支必须存在**（合并不删分支）⇒ ⇒ **合并后仍绿** |
+| **「起始 commit」** | 🟢 **D 是 merge ⇒ 不需要起始 commit** —— `git merge align/g4-service-common` 在 G3 树里**自动从 merge-base `cd893d1`** 起算 ⇒ ⇒ **要拿全部 29 笔就 merge 整条**；若只想拿**共享层那半**（跳过本层台账文档），最早一笔触及 `service/` 或 `tools/` 的是 **`22dc67e`** |
+| 🟡 **D 的代价（必须说清）** | ⚠️ **D = 把本层分支「搬进」G3 的树** ⇒ ⇒ **本层后续再落码，G3 树就又落后** ⇒ ⇒ **需要再同步一次** ⇒ ⇒ **本层给约定**：**波末收口回归前，本层再发一次同步点**（含 commit 号）⇒ ⇒ **不要零散 cherry-pick**（G3 自己也说了 B 会造「内容同、hash 异」的副本 ⇒ 合主干时撞） |
+| ⚠️ **合并后 G3 树里有一个「预期内的红」** | 🔴 `tools/difftest/check-tomcat-limits.py`（本层 `d4e4745` 改为从真源派生）⇒ 合并后它会期望 `task-api` = `off`，而 **G3 树里的 task-api yml 仍是 `raw`**（那是 **G2 域文件**）⇒ ⇒ **该门禁在 G3 树里会红** ⇒ ⇒ **这是「正确的红」**（检出的是真漂移）⇒ ⇒ **必须与 G2 的 task-api yml 订正（`4786eb5`）同批合入** ⇒ ⇒ 本层已在 §4.10.41 ① 登记 |
+
+**③ 🟢 G3 要的「排序桥副本删除授权」—— **授权：可以删**，附 3 个前置**
+
+| 项 | 内容 |
+|---|---|
+| **授权结论** | ✅ **可以删**（`service/article/article-rpc` · `service/comment/comment-rpc` · `service/favorite/favorite-rpc` 三份域内副本）—— 依据：<br>① **共享层那半已在 G3 树里**：`a1a2e05`（MyBatis-Plus 排序桥进**主 jar**）经 `git merge-base --is-ancestor` 实测**是 `5361863` 的祖先** ⇒ ⇒ **共享层标准件 `service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java` 在他们树里已存在** ⇒ ⇒ ⇒ **删域内副本不必等本层分支**<br>② **行为等价**：三份域内副本的**类体逐字为空**（`public class … {}` ⇒ **不注册任何 bean**）⇒ ⇒ **只提供一条「自动配置排序边」**；共享层那份**类体同样为空**、排序边目标**完全相同**（`after` = Boot 4 的 `org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration` · `before` = `com.baomidou.mybatisplus.autoconfigure.MybatisPlusAutoConfiguration`）⇒ ⇒ ⇒ **删副本 = 零行为变化** |
+| **形式差异（不是缺陷，但要知道）** | 域内副本用**类字面量**（`after = DataSourceAutoConfiguration.class`），共享层用**字符串**（`afterName` / `beforeName`，见 `a1a2e05` 的理由：**类字面量会让「没有 MP 的消费者」在反射层读注解时抛 `TypeNotPresentException`**）⇒ ⇒ 实测 **9 个 rpc 组件全部有 MP 依赖**、`hot-rpc` **无 MP**（⇒ 共享层那份的字符串形式对它**结构性安全**）⇒ ⇒ **今天两边都安全** ⇒ ⇒ **但删掉域内副本 = 消掉一个「将来有人给 rpc 组件去掉 MP ⇒ 上下文起不来」的隐患** |
+| 🔴 **前置 1（必做，否则起不来）** | **同批删掉域内 `AutoConfiguration.imports` 里的那一行** —— 实测三份域内副本各自靠**自己模块的** `src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 第 1 行注册（如 `com.rag.comment.comment.rpc.config.MybatisPlusOrderingBridgeAutoConfiguration`）⇒ ⇒ **只删 java 文件、不删那一行 ⇒ Boot 启动期找不到类 ⇒ 上下文起不来** ⇒ ⇒ ⇒ **必须同批** |
+| 🔴 **前置 2（构建陷阱）** | **验证必须用带 `-am` 的构建** —— 共享层那份在 **`service/common` 的主 jar** 里 ⇒ ⇒ 若用 `mvn -pl <模块> package`（**不带 `-am`**）⇒ ⇒ fat jar 里 `BOOT-INF/lib/common-*.jar` 是 **`~/.m2` 的陈旧包**（不含新标准件）⇒ ⇒ **域内副本一删 ⇒ 产物起不来** ⇒ ⇒ ⇒ **单模块构建不验证**（测试 classpath 与产物 classpath 是两条独立路径） |
+| 🔴 **前置 3（留网）** | 补一条守门：断言**该域的 `AutoConfiguration.imports` 里不再出现域内副本的 FQCN**（防「副本删了、注册行留着」或「反之」）⇒ ⇒ 域侧已有「`SqlSessionFactory` 能起来」那类断言（如 `ArticleSpringContextWiringTest:124` 的失败文案就指向该类）⇒ ⇒ **建议补的是「注册行」那一侧** |
+
+**④ 🔴 G3 列的「4 件事同源同前置」—— 本层逐条定性（**它们**不**同源**）**
+
+| G3 的说法 | 本层定性 |
+|---|---|
+| **① 断连活体对拍** | 🟡 **确实缺本层代码** —— G3 树里**没有** `GoStyleClientDisconnectProbeBudgetGateTest` ⇒ ⇒ 缺的就是本层 **`15cf93a`**（1xx 探测行数上界）⇒ ⇒ **合并（或取这一笔）后即可**。⚠️ 但 **`tools/redis-disconnect-probe/` 这个目录在**两棵树里都不存在**，且本层**从未收到该派单全文** ⇒ ⇒ **本层把它从「等派单」列表里划掉**，改问 G3：**它是否已被你自己的 `dec6348`（hot-rpc + comment-rpc 各 2 条域内守门）取代？** 若是 ⇒ 本层不重复造；若不是 ⇒ **请发规格全文**（本层不凭摘要落码） |
+| **② 删域侧排序桥副本** | 🟢 **已授权**（见 ③）⇒ ⇒ **且不必等本层分支**（共享层那半已在他树）⇒ ⇒ **本层零落码** |
+| **③ client breaker 装配复验** | 🟢 **缺的不是本层代码** —— 本层这 29 笔**对 breaker 与排序桥本体零命中**；共享层 breaker（`GoStyleGrpcClientBreakerInterceptor` 等）**已在 G3 树里** ⇒ ⇒ **要做的在域侧**：域内 FastFail / wiring 守门的装配方式复验（照 G1 的 Redis 收编同款：`@Import` ⇒ `@ImportAutoConfiguration`）＋ 照抄 `GoStyleRedisClientOptionsGateTest:62`/`:64`/`:65-66` 那两条「有且只有一份」断言 |
+| **④ U15 统一载体** | 🔴 **不是卡在共享层** —— **Jason 已拍板「本轮不改」**（方向 = 走 global 统一载体 `applyTo(stub)`）⇒ ⇒ **这一条是 Jason 挂起的，不是等 G4** ⇒ ⇒ **G3 别把域内工作排在它后面** |
+
+**⑤ 本层这一条** | **零落码**（① 是核实 · ② 是裁定 · ③ 是授权 · ④ 是定性）⇒ ⇒ ⇒ **第十四次全量口径仍有效**（本层 `service/**` 无任何改动）⇒ ⇒ ⇒ **本层 HEAD `aeddbcb`（基线 `a282012` 之上 79 笔，未 push）**。
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
