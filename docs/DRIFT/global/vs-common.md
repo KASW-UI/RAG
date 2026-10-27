@@ -931,7 +931,21 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 > 且此前 G1 正在跑 6 模块子集回归（pid 6839/6840，09:53 起）⇒ **本层等到 09:57:15 它结束后才起**
 > ⇒ ⇒ **避免了 EXIT=137（系统 OOM-kill）**（§4.9.13 已记该机制）。
 
-#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `0c72969`）
+#### 4.10.12 🟢 **G1 的 Filter 槽位协调约束** ⇒ 独立核实 + 落码**槽位快照守门**（核对日期 2026-10-27）
+
+| 项 | 内容 |
+|---|---|
+| **来源** | G1 落码 `DRIFT-USERAPI-009②`（user-api 的 JWT 验签搬出 3s 预算）后发来**协调约束（非派单 · 无需落码）**：「共享层若要动 Filter 的 `@Order`，请在回执里点名这一条」 |
+| **🔴 本层的独立核实（不采信转述）** | 逐个类反射/文本核 `@Order` ⇒ **G1 给的 6 个槽位全部一致**：Traceparent **+3** · MaxConns **+4** · Breaker **+5** · CpuShedding **+6** · HttpMiddleware **+7** · MaxBytes **+8**<br>⇒ **但 G1 的清单漏了一个**：`GoStylePathNormalizingFilter` = **+2**（`http/GoStylePathNormalizingFilter.java:70`）⇒ 共享层实际是 **7 个** Filter 槽位<br>⇒ **另核 G1 的推导前提**（「+7 = 3s 预算起点」）：**成立** —— 预算的 `begin` / `clear` 都在 `HttpMiddlewareFilter` 的链内（`…/observability/HttpMiddleware.java:324 begin` / `:356 clear`）⇒ ⇒ **G1 的域侧约束推导正确** |
+| **G1 的约束（原文要点）** | 域侧 `GoStyleJwtAuthFilter` 落在 **+6**，两端被夹住：**必须 &lt; +7**（否则验签回到 3s 预算内 ⇒ 002 退回 OPEN）· **必须 ≥ +3**（否则验签落到 traceparent 的 SERVER span 外 ⇒ 观测面漂移）⇒ ⇒ **[+3,+6] 四槽全被共享层占满** ⇒ 域侧只能与 CpuShedding(+6) 并列<br>⇒ 并列为何安全：该 Filter **绝不写响应**（只验签、只把结果放进 request attribute，401 仍由 interceptor 抛）⇒ 谁先谁后不改任何响应 |
+| **🔴 本层动作：把「先后手清单」变成机器可验** | 新增 `service/common/src/test/java/com/rag/common/spring/SharedFilterOrderSnapshotGateTest.java`（**4 条**）：<br>① **槽位快照**：7 个共享层 Filter 的 `@Order` 精确值 ⇒ **任何重排都红** ⇒ 强制「改槽位」变成**显式决策**（改快照 = 明知故犯）而不是「顺手挪一个数字」<br>② **3s 预算起点不被抢占**：其后的共享层 Filter **只允许**已签字的 `MaxBytes(+8)`<br>③ **域侧仍有可用槽位**：`HttpMiddlewareFilter` 槽位必须 **≥ +7** ⇒ 域侧 +6 才能排在预算外；且 `[+3, 预算起点)` 区间**必须仍被占用**（说明这段是**被刻意保留**的）<br>④ **真 servlet 上下文**里 7 个 Filter **确实注册** ＋ **生效次序**与快照一致（防「注解在、bean 不在」） |
+| **与 G1 域侧守门的分工（**互补，不重复**）** | G1 的 `UserApiJwtVerificationScopeTest` 在 **users 域**、且只在**真被重排时**才红 ⇒ **只覆盖 user-api 一个域**<br>⇒ 本守门是 **共享层侧**、**全域**、且是**快照式**（重排必红 ⇒ 强制显式化）⇒ ⇒ **两者互补** |
+| **变异验证（三个 · 逐条证明 4 条断言各有判别力）** | **A** `HttpMiddlewareFilter +7 → +6`（= G1 担心的「下调」场景）⇒ **①③ 红（2/4）**<br>**B** `Traceparent +3 ↔ MaxConns +4`（相对次序交换）⇒ **①④ 红（2/4）**<br>**C** `CpuShedding +6 → +9`（落到预算起点之后）⇒ **①②④ 红（3/4）**<br>⇒ 恢复后 **4/4 绿** · **生产代码零改动** |
+| **🔴 过程中被自己的守门抓出两次「空转」（值得留仓）** | ① **④** 曾写成「从容器取 `FilterRegistrationBean` 断言其 order」⇒ 我加的**守恒断言当场把它抓红** ⇒ 查 Boot 4 源码才知：**容器根本不注册 `FilterRegistrationBean` 这个 bean**（`ServletContextInitializerBeans` 内部用**包级私有**的 `FilterRegistrationBeanAdapter` **临时**包装）⇒ ⇒ 「哪个 Filter 注册在哪个 order」**没有公开读法** ⇒ 改用 **Spring 自己排 Filter 用的 `AnnotationAwareOrderComparator`**（即 `ServletContextInitializerBeans#getOrder` 内部走的那条路）作**等价读法**（并把这段经过写进 javadoc）<br>② **②** 曾用**快照值**而非**实际读数**算越界者 ⇒ **变异 C 抓出它恒绿（空转）** ⇒ 已改为**实际读数**（`readActualSlots()`）⇒ ⇒ **「绿是因为没走到」的又一形态：断言自己算的是「快照」而不是「事实」** |
+| **回归口径（本轮）** | **模块级**：`mvn -o -pl service/common test` ⇒ **315 条 / 0 失败 / 0 errors / 0 skipped**（311 + 本次 4 条）<br>**全量未跑 · 理由**：本轮**零生产代码改动**（只新增**一个测试文件**）⇒ 其余 51 个模块的产物与行为**不受影响** ⇒ 且第八次全量（**基线 `23d1c2a` 代码态** · 52 模块 / **2461** 条 / 0 失败 / 0 errors / 4 skipped / 20:21 min / `EXIT=0`）刚跑过且全绿 ⇒ 不重复 20 分钟全量<br>**双侧探针**（同批次复跑）：`run-parity.sh` ⇒ **EXIT=0 · 56 例**（一致 54 / 不一致 0 / 已签字偏离 2）· `run-rpc-timeout-parity.sh` ⇒ **EXIT=0 · 3 例**<br>**三门禁**：**0 / 0 / 0** · **台账三门禁**：**0 / 0 / 0** |
+| **本层对 G1 后续项的表态** | G1 的 `DRIFT-USERAPI-009 §7`（MaxBytes 相对 observability 的位置：Go 在预算外 / RAG 在内）⇒ **同意其定性**：其代码修法 = 把 MaxBytes 挪到 +7 之前 ⇒ **槽位已满** ⇒ 必须**整体重排共享层顺序** ⇒ 按 AGENTS.md §5.3c「跨共享层 + 多域必须同一次提交」⇒ **不是 G4 能单方面落的** ⇒ **更便宜的路是签字**（并入 `SD-USERAPI-002` 的范围说明，方向与它一致：RAG 多记 413）⇒ **签字档归整合者，本层不代签、只登记** |
+
+#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `d56989f`）
 
 | commit | 内容 | 落点（`文件:行号`） | A 轴 |
 |---|---|---|---|
@@ -942,6 +956,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | `7488b3d` | 🔴 **静态池「终止即永久」⇒ 按需自愈**（修 #8 时暴露的潜伏缺陷） | `…/observability/RpcInterceptor.java:…`（`timeoutScheduler()` / `handleExecutor()`）· `…/observability/HttpMiddleware.java:…`（`httpExecutor()`）· **新增** `…/observability/ObservationPoolSelfHealingGateTest.java`（3 条） | A1 |
 | `853767b` | 🔴 **G2 FB-04**：业务 handler 执行期能拿到**当前 server span** | `…/observability/RpcInterceptor.java:456`（`onHalfClose()` 里 `makeCurrent()` 的 scope 包住 handler 执行期）· **新增** `…/observability/RpcServerSpanCurrentGateTest.java`（4 条） | **A9** |
 | `0c72969` | 🟢 **U+FFFD 两处**（纯注释 · 零行为变化） | `…/observability/GoStyleOtelSamplerProtocolGateTest.java:24` · `…/protection/FakeServerCall.java:13` | 无（纯注释） |
+| `d56989f` | 🟢 **共享层 Filter 槽位快照守门**（4 条 · 零生产改动） | **新增** `…/spring/SharedFilterOrderSnapshotGateTest.java`（① 槽位快照 ② 预算起点不被抢占 ③ 域侧可用槽位 ④ 真容器次序） | 无（只加守门） |
 
 **回归口径与结果（第七次全量 · 核对日期 2026-10-27）**
 
