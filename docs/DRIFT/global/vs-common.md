@@ -2429,6 +2429,49 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 
 **④ 本层这一条** | **零落码**（① 是登记「不重发」· ② 是状态知会 · ③ 是措辞确认 + 一条操作性提醒）⇒ ⇒ ⇒ **第十四次全量口径仍有效**（本层 `service/**` 无任何改动）⇒ ⇒ ⇒ **本层 HEAD `1be3499`（基线 `a282012` 之上 80 笔，未 push）**。
 
+#### 4.10.44 🟢🔴 **G1 的跨 lane 依赖登记 ⇒ 本层落码补网 ＋ 两处订正 ＋ 一条写权口径冲突（改派整合者）**（2026-10-27 晚）
+
+> **G1 的登记**：`DRIFT-USERSCOMMON-001`（1017/1018 文案）销号，结论 = **两侧均不可观察 ⇒ 该条不成立**（证伪关闭）⇒ ⇒ **但该销号依赖 `service/users/users-common/**` 的两个类**（本层写权面）⇒ ⇒ G1 不写本模块 ⇒ 只能「登记 + 通知」⇒ ⇒ **本层收到 ⇒ 本层必须自己核这条依赖，并保证它不被无声破坏**。
+
+**① 🔴 订正 G1 的 L4 反证：「`NEW_DRIFT = 0` ⇒ 反证成立」这一步**不成立****
+
+| 项 | 本层独立核（读的是 `tools/difftest/matrix.py` 的实现，不是结论） |
+|---|---|
+| G1 的原论证 | 「`tools/difftest/matrix-results.txt`（run_id=1792602663396 · 273 条）**NEW_DRIFT = 0**；而 `matrix.py:618-620` 的 `classify()` 写明『status 不一致一律 NEW_DRIFT』⇒ ⇒ 若 admin-api 真的在 wire 上返回 1017（Go 400 vs RAG 200+1017），必被记为 NEW_DRIFT ⇒ 桶为 0 ⇒ **反证成立**」 |
+| 🔴 **反证不成立的原因** | **`classify()` 在 `:618-620` 之前还有一个豁免分支** —— `matrix.py:605-611` 的 **`KNOWN_FORM_EMPTY`**：<br>`if (case["go_channel"] == "form" and case["value"] in ("", None, OMIT) and go["status"] != rag["status"]): return "KNOWN_FORM_EMPTY", ...`<br>⇒ ⇒ **「form 通道 + 空值 + 两侧 status 不一致」被**明确豁免** ⇒ ⇒ **不进 NEW_DRIFT 桶**<br>⇒ ⇒ 而 **「uid 缺失」恰恰就是这个形态**（form 通道 + 空值 + Go 400 / RAG 200+1017）⇒ ⇒ ⇒ **⇒ 「桶为 0」证明不了「1017 不可达」** ⇒ ⇒ ⇒ **它证明的只是「没有落进 NEW_DRIFT 桶的漂移」** |
+| **实测数据** | `matrix-results.txt`（583 B）= **273 条**（MATCH **130** + KNOWN_FORM_EMPTY **1** + KNOWN_FRAMEWORK_TEXT **142**）· run_id=1792602663396 ✔ · 根因聚类 R1~R4 全 **0** ⇒ ⇒ **无 NEW_DRIFT 桶** ✔（G1 数字**全对**）⇒ ⇒ ⚠️ **但那 143 条 KNOWN 桶里，status 不一致是被容忍的** ⇒ ⇒ ⇒ **「NEW_DRIFT=0」≠「全一致」** |
+| ⇒ ⇒ **结论** | 🟡 **G1 的销号结论（1017 在 HTTP 入口不可达 ⇒ 该漂移条不成立）本身仍可能成立**（其域侧另有机器网：`AdminApiMvcPipelineTest` 的「N-3 留档证伪：uid=0 实际透传到 rpc → 1003（与 Go 相同，不是留档所写的 1017）」）⇒ ⇒ **但支撑它的那条 L4 反证不成立** ⇒ ⇒ ⇒ **⇒ 真正的支撑 = 「必填校验在 service 层之前拦」这条代码顺序** ⇒ ⇒ ⇒ **⇒ 而那正是 G1 登记在本层写权面上的依赖** ⇒ ⇒ ⇒ **⇒ 本层据此落码补网（见 ②）** |
+
+**② 🟢 本层落码：把 G1 销号依赖的两个不变量**钉成机器网**（`service/users/users-common/**` ⇒ 本层写权面内）**
+
+| 项 | 内容 |
+|---|---|
+| **落码** | 新增 `service/users/users-common/src/test/java/com/rag/users/common/http/GoStyleRequiredFieldGateTest.java`（**6 条**）—— 钉住：<br>① `GoStyleRequest.normalize` **必须**调 `assertGoRequiredFields()`（用「回调被调用过」证明 ⇒ **不依赖异常实例同一性**）⇒ **这就是 G1 写的复开触发条件①**；<br>② `normalize(req=null)` ⇒ 走 factory 的零值 DTO **且仍跑**必填校验；<br>③ `field("uid", null)` ⇒ 文案**逐字节** = `field "uid" is not set`；<br>④ `field("uid", 0L / "" / "x")` **不抛**（**零值 ≠ 缺席**，Go 的零值 struct 语义 ⇒ **正向对照，防「一律抛」的假网**）；<br>⑤ 显式 null ⇒ `mustn't be nil`（**与「缺席」是两种文案**，防压成同一文本）；<br>⑥ 零值 DTO（uid=0）⇒ 过校验 |
+| **Go 出处（逐条核过，不是照抄 javadoc）** | 🟢 go-zero **`v1.10.2`**（Go 仓 `go.mod` 钉的版本）`core/mapping/unmarshaler.go`：**`:1199`** = `newInitError` 里的 `field %q is not set`（函数头 `:1198`）⇒ 对应本类 ③；**`:862`** = `processNamedFieldWithValue` 里的 `field %q mustn't be nil`（函数头 `:854`）⇒ 对应本类 ⑤；**零值 ≠ 缺席** ⇒ 对应本类 ④ |
+| **变异验证（3 项全过，各自红在目标断言上）** | **M1** 去掉 `normalize` 里的 `target.assertGoRequiredFields();` ⇒ **① + ② 红** ⇒ ⇒ **证明它钉的正是「必填校验不再在 service 层之前拦」**<br>**M2** 把 `field` 的 null 检查改成「一律不抛」⇒ **① + ② + ③ 红**<br>**M3** 把 `field` 的文案改成 `mustn't be nil` ⇒ **① + ② + ③ 红**（③ 的失败消息直指「文案必须逐字节一致」）<br>⇒ ⇒ **还原后 6/0/0/0 全绿**，生产代码 **0 改动**（已 `diff` 核过） |
+| **回归口径** | `mvn -o -B -DargLine=-Xmx2g -am -pl service/users/users-common test` ⇒ **39 条 / 0 failures / 0 errors / 0 skipped / EXIT=0**（逐类：JwtUtilParityTest · JwtUtilTest · PasswordUtilGoCompatibilityTest · **GoStyleRequiredFieldGateTest**）<br>⇒ ⇒ **`users-common` 由 33 → 39（+6）** ⇒ ⇒ ⚠️ **全量总数口径随之变化：2480 → 2486（= 2480 + 本模块实测增量 6）· 全量未重跑 ⇒ 总数为推算，不是实测**（AGENTS.md 口径纪律：沿用上轮总数必须标注「已过期」⇒ 此处已标注）<br>⇒ ⇒ **爆炸半径已核**：`users-common/pom.xml` **无 `test-jar` 目标** ⇒ ⇒ **本新增只影响本模块的测试编译** ⇒ ⇒ **其余 51 个模块不受影响** ⇒ ⇒ ⇒ **本轮不需要重跑全量**（唯一改动 = 本模块 +6 条测试，且该模块已整跑绿） |
+| **给 G1 的意义** | ⇒ ⇒ **G1 的销号结论从此有机器网**：本层改这两个类 ⇒ 本守门红 ⇒ 失败消息直接指向 `DRIFT-USERSCOMMON-001` ⇒ ⇒ **不靠「谁记得去复核」** |
+
+**③ 🔴 订正 G1 引的行号**：`GoStyleRequest.normalize` 在 **`GoStyleRequest.java:52`**、`target.assertGoRequiredFields()` 在 **`:54`** ⇒ ⇒ **G1 写的 `:59` 定位不到**（AGENTS.md：引用必须可定位）⇒ ⇒ `GoStyleRequired.field(...)` 的 **`:32`** ⇒ **G1 写的 `:32` ✔ 对**。
+
+**④ 🔴 一条写权口径冲突（**本层不擅自改 ⇒ 改派整合者**）**
+
+| 项 | 内容 |
+|---|---|
+| **冲突** | 🟢 **AGENTS.md §5.3f 写的是「按类判定」**：「`users-common` 是**混合体** ⇒ **按类判定**（**8 个跨域类归 G4** / **3 个 users 专用类留 users 域**），**不按模块一刀切**」<br>🔴 **但机器守门 `tools/difftest/check-wave-lane-ownership.py` 的 G4 白名单是**整目录**：`service/users/users-common/src/**` ⇒ ⇒ **且它的注释自己写着「§5.3f …… 写权归共享层波，**不归 G1**」⇒ ⇒ 引用了 §5.3f 却**丢掉了它的「按类」那一半** ⇒ ⇒ ⇒ **⇒ G1 按 §5.3f 改 `ErrorCode` / `PasswordUtil` / `SchemaInitializer` ⇒ 会被机器守门判**越权** ⇒ ⇒ ⇒ **⇒ 这是「政策 vs 机器门禁」的真实分歧，不是笔误** |
+| **本层实测（**按类判定，不是按目录**）** | 🟢 **11 个类逐个按「谁 import 它」测**：<br>**跨域（⇒ G4，8 个）**：`GoRequiredFieldException` · `GoStyleCoercion` · `GoStyleRequest` · `GoStyleRequired` · `GoStyleRequiredFields` · `GoStyleStringInt64` · `BearerTokenExtractor` · `JwtUtil`（**均被 6 个外域 api 之一 import**）<br>**users 域专用（⇒ G1，3 个）**：`PasswordUtil` · `SchemaInitializer` · **`ErrorCode`**（**只被 `users/admin` + `users/user` import**）<br>⇒ ⇒ **与 AGENTS.md §5.3f 写的「8 个 / 3 个」**逐条吻合** ⇒ ⇒ ⇒ **政策是对的，门禁的粒度不对** |
+| **本层不擅自改的理由** | 🔴 `tools/difftest/check-wave-lane-ownership.py` **不在任何 lane 的白名单里**、也**不在 `SHARED`（整合者）清单里**（`SHARED` 只列了 `tools/difftest/README.md`）⇒ ⇒ **按「两张表」判据（lane 白名单 ∪ 整合者清单）⇒ 它是**写权孤儿** ⇒ ⇒ ⇒ **四条 lane 都被守门禁止碰它 ⇒ 只能整合者改** ⇒ ⇒ ⇒ **本层只登记 + 改派** |
+| **给整合者的具体修法** | ① G4 白名单把 `service/users/users-common/src/**` **收窄为**「8 个跨域类 + 该目录其余文件」⇒ ⇒ **users 专用类从 G4 白名单里剔除**（**真实路径已核**）：`service/users/users-common/src/main/java/com/rag/users/common/cryptx/PasswordUtil.java` · `.../ddl/SchemaInitializer.java` · `.../errmsg/ErrorCode.java`；② G1 白名单**加**这 3 个文件；③ **注意 `users-common/src` 下还有 4 个非 java 资源**（`src/main/resources/db/01_create_user.sql` · `02_create_user_avatar_history.sql` · `03_create_admin.sql` · `04_create_admin_invite.sql`）⇒ ⇒ **建表脚本属哪一边要单独定**（它们只服务 users 域 ⇒ **倾向 G1**，但**建表责任**按 AGENTS.md §6.3 属 users 域 ⇒ ⇒ **留给整合者一并裁定**）；④ `expand()` 的 pattern 语言需支持**排除**（现在是纯 glob，无 `-` 语义）⇒ ⇒ **本层已把实测清单备好，可直接照抄** |
+
+**⑤ 🟡 本层一处自我订正（「无人拥有面 ⇒ 我可自修」这个口径本身不完整）**
+
+| 项 | 内容 |
+|---|---|
+| **我此前写的** | FB-S1（`tools/difftest/check-tomcat-limits.py`）时我写的是「该 .py ∉ SHARED ⇒ **无人拥有面 ⇒ 我可自修**」 |
+| 🔴 **订正** | **「不在 SHARED」≠「有人能写」** —— 正确判据是**两张表都查**：**lane 白名单 ∪ 整合者（SHARED）清单** ⇒ ⇒ `check-tomcat-limits.py` **两张表都没有** ⇒ ⇒ **它是写权孤儿 ⇒ 严格说只能整合者改** ⇒ ⇒ ⇒ **⇒ 那次落码成立的理由应改为「**G2 的派单**点名了该文件并要求修 ⇒ **等价于一次转派**」**，而不是「无人拥有面 ⇒ 我可修」⇒ ⇒ ⇒ **⇒ 本层已在本节留痕**（结论不变、推导订正）⇒ ⇒ ⇒ **⇒ 通用纪律：写权归属要查两张表；「孤儿」不等于「可自修」** |
+
+**⑥ 本层这一条** | **落码 1 处**（`users-common` 新增 6 条守门）+ **订正 3 处**（G1 的 L4 反证 · G1 的行号 · 本层自己的写权口径）+ **改派 1 条**（写权守门粒度 ⇒ 整合者）⇒ ⇒ ⇒ **生产代码零改动** ⇒ ⇒ ⇒ **第十四次全量的「用例总数」口径已过期（2480 → 2486·推算）**，**其余口径（模块数 / failures / errors / skipped / 三门禁 / 三探针）不变** ⇒ ⇒ ⇒ **本层 HEAD 待提交（基线 `a282012` 之上 81 笔之上 +1）**。
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
