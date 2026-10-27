@@ -104,6 +104,25 @@ class TaskRedisCommandTimeoutGateTest {
                 .as("命令超时必须启用；Lettuce 自己的 DEFAULT_TIMEOUT_COMMANDS=false，"
                         + "是 Boot 把它打开的 ⇒ 若此处为 false，说明 Boot 版本/装配路径变了")
                 .isTrue();
+        // 🔴 **机制位②（G1 探针发现 · G2 字节码核实后补的第二条腿）**
+        //   io.lettuce.core.TimeoutOptions.enabled() =
+        //       builder().timeoutCommands().connectionTimeout().build()
+        //   ⇒ **两个位被同一次调用同时打开** ⇒ Boot 4
+        //     LettuceConnectionConfiguration:229 走的正是 enabled()
+        //   ⇒ ⇒ 在默认装配下 **isTimeoutCommands() 与 isApplyConnectionTimeout() 各自都恒为 true**
+        //   ⇒ ⇒ ⚠️ **本条单独不构成「时长会被施加」的判据**（那正是 G1 指出的假绿口子）
+        //   ⇒ ⇒ 本条只覆盖 **enabled() 的第二位**；第一位由上面的 isTimeoutCommands() 覆盖
+        //   ⇒ ⇒ **两条合起来 = enabled() 的全貌**（任一位缺 ⇒ Boot 装配被改）
+        //   ⇒ 而**时长本身**由 ②（RedisURI.timeout == 3s）覆盖
+        //   ⇒ ⇒ **完整判据链 = 机制位① + 机制位② + 「source 恒 -1」+ 时长出口**，缺一不可
+        assertThat(options.getTimeoutOptions().isApplyConnectionTimeout())
+                .as("机制位②：Boot 的 TimeoutOptions.enabled() 把 timeoutCommands 与 "
+                        + "applyConnectionTimeout **同时**打开 ⇒ 本条只覆盖第二位；"
+                        + "与上面的 isTimeoutCommands()（第一位）**合起来**才等于 enabled() 的全貌。"
+                        + "⚠️ 单条恒真 ⇒ **不是**「时长会被施加」的判据 —— 时长由 ②"
+                        + "（RedisURI.timeout）断言；且 TimeoutOptions 的 source 恒为 "
+                        + "DefaultTimeoutSource（getTimeout 恒 -1）⇒ 时长只能走这一位对应的分支")
+                .isTrue();
     }
 
     @Test
