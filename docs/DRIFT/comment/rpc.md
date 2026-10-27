@@ -604,3 +604,38 @@ service/comment/rpc/internal/cache/redis.go:17-19
 | 整域回归 | ✅ **comment-rpc 116 条**（skipped 0）全绿 ⇒ **四域 12 模块合计 919 条**（0 failures / 0 errors / 4 skipped · 9:44 min · BUILD SUCCESS · 基线 `eb4d1d2` + 本轮改动 · 核对日期 2026-10-27 · 两口径逐模块一致） |
 | 同款缺陷在本域另一组件 | 🔴 `ArticleRpcRuntimeBootGateTest` **同款** ⇒ 已在 **article 域**同批修（属 G3 写权面） |
 | 同款缺陷在 G2 域 | 🔴 `like/like-rpc/…/LikeRpcRuntimeBootGateTest.java` **同款** ⇒ **属 G2 写权面** ⇒ 已回报 G2，本域**不越权改** |
+---
+
+### 附录 · 📌 G4 侧共享层基线与影响面订正（2026-10-27 · 来自 G4 第七次全量回归）
+
+**① G4 第七次全量回归口径**（**共享层基线** ⇒ 本域下次合并 G4 分支时的对照物）：
+
+| 项 | 值 |
+|---|---|
+| 命令 | `mvn -B clean verify`（**全量**，不是 `-pl` 子集） |
+| 结果 | **BUILD SUCCESS / MVN_EXIT=0** |
+| 规模 | **52 模块 · 2457 条**（29 个有测试的模块**逐模块求和**，不按行序 tail） |
+| 计数 | **failures 0 · errors 0 · skipped 4** |
+| 耗时 | **20:28 min** |
+| 相对上次 | 第五次 2448 ⇒ **+9**（本轮新增 3×3 条守门：关闭路径 / 遮蔽契约 / 池自愈） |
+| 双侧探针 | `run-parity.sh` **EXIT=0**（56 例：一致 54 / 不一致 0 / 已签字偏离 2）＋ `run-rpc-timeout-parity.sh` **EXIT=0**（3 例） |
+| 三门禁 | `wave-lane-ownership` / `wave-role-model` / `wave-coupling` ⇒ **0/0/0** |
+| 来源 | G4 commit `5564c27`（基线含单 4 的 `a1a2e05`） |
+
+**② 🟡 影响面订正注记（**保留原值不改写** + 加注记）**：
+G4 在共享层 `docs/DRIFT/global/vs-common.md` §2 的 **A2 行**逐个 rpc **自核**（`@GrpcClient` 计数 ＋
+**六种出向方式**交叉核：`newBlockingStub` / `newFutureStub` / `newStub` / `ManagedChannel` /
+`RestTemplate` / `WebClient`）后给出**全局**口径：
+
+| 口径 | 内容 |
+|---|---|
+| **全局**（G4 自核） | **可观测 6 个**（article-rpc · comment-rpc · favorite-rpc · like-rpc · message-rpc · follow-rpc）＋ **N/A 4 个**（**hot-rpc** · task-rpc · user-rpc · admin-rpc）⇒ **6/10 可观测 ＋ 4/10 N/A** |
+| **本域面**（G3 自核） | **3/4**（article-rpc · comment-rpc · favorite-rpc 有出向面；**hot-rpc = 0 ⇒ N/A**） |
+
+⇒ ⚠️ **本域面 ≠ 全局面**：**「3/4」只覆盖本域四个 rpc 组件** ⇒ **不得被读成全局口径**。
+⇒ **可复用判据**：「**共享层缺位**」是**全域事实**，「**本域受害**」是**逐域事实** ⇒
+写影响面必须**逐域实测**（并用**多种检索方式交叉核**），且**不得把域内结论外推**。
+
+**③ G4-4 反馈单已闭合**（本域 2026-10-27 登记的共享层 U+FFFD）：
+G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）⇒ 纯注释，零行为变化」
+⇒ **本域的反馈单已落、零行为变化** ⇒ **无需再跟进**。
