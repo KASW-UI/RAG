@@ -271,6 +271,14 @@ G4 回执 ④ 声称「共享层 `Observability.mark*` 是**显式传 ctx** ⇒ 
    ⇒ E66 的落点会**整体替换** `ClientOptions.timeoutOptions` 那份 default source ⇒ 若新实现不含「命令超时」语义 ⇒ ①（`getTimeoutOptions().isTimeoutCommands()` 必须为 **true**）会红
    ⇒ ⚠️ ① 红 = **新回归**（不是「E66 故意关掉了超时」）⇒ **直接找 G4**
    ⇒ 配套：新 source 在**本请求没有 deadline** 时必须回落到 **`getClientConfiguration().getCommandTimeout()`**（本域 = 3s）⇒ 否则命令失去 3s 上限（断连从「3s 快速失败」退化为「无限等待」）⇒ ⇒ **这条已写进本域台账的 E66 硬约束段（并已独立核实 + 订正其机制表述）**
+5. 🆕 **两个「合并后必红」的共享门禁**（2026-10-27 第四轮**实测** ⇒ **写权在 G4 ⇒ 已派单** · 编号 `FB-S1`/`FB-S2`）
+   ⚠️ **编号说明**：已发给 G4 的消息里把这两条写成 **FB-06 / FB-07** ⇒ 与本域 §4 的 FB-0x 系列**不同域内编号**，但与 **task 域台账**的 FB-06 撞名 ⇒ ⇒ **以各域台账的 `FB-S*` 为准**（`S` = 跨域共享门禁）⇒ G4 侧按**内容**识别。
+   - 🟡 **FB-S1 · `tools/difftest/check-tomcat-limits.py`**：**对 like 域零影响**（期望表里 `like-api` = `envelope`，本域 yml 未动 ⇒ 该门禁的红**只来自 `task-api` 那一条**）⇒ ⚠️ 但**合并后整仓复跑仍会红** ⇒ **仍须 G4 修**（修法与影响面见 [task/vs-common.md](vs-common.md) 第 5 条的 `FB-S1`）
+   - 🔴 **FB-S2 · `tools/difftest/check-wave-coupling.py`**：我树 **EXIT=1**（6 条 `common_radiation` 漂移）；主干与 G4 树 **EXIT=0**
+     ⇒ **其中 2 条与本域相关**：`GoStyleGrpcClientBreakerInterceptor` 增 `like`（**生产代码** `LikeRpcClient`）· `MqConsumer` 增 `like`（**生产代码** `LikeUpdateKafkaListener`）
+     ⇒ ⇒ 另 4 条是 **task 域**的（`GoStyleFormLimitMode` / `GoStyleFormValueLimitInterceptor` / `GoStyleRpcBreakerInterceptor` / `GoStyleRpcSheddingInterceptor` ⇒ **全部来自 `src/test/` 的 import**，**本域与 task 生产代码对这些类的 import = 0**）
+     ⇒ ⇒ **根因 = 快照过期，不是代码回退**：`docs/DRIFT/_cross/cross-domain-coupling.md`（**744 行 · 三棵树逐字相同**）的 `<!-- wave-coupling-snapshot -->` 块**未含 X-6(task) 与 A9(like) 的接入** ⇒ ⇒ **文档三棵树一致 + 主干/G4 树绿 ⇒ 差异全部来自域侧接线代码**
+     ⇒ ⇒ **修法在 global 写权 ⇒ G4**：用 `python3 tools/difftest/check-wave-coupling.py --print` 的输出更新快照块（目标值已取到 = `/tmp/g2-coupling-target.json`）
 
 ⚠️ **E66 的硬约束（G4 已探明，落地前必须解决）**：
 Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =

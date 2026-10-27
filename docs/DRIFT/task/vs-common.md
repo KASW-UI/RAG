@@ -253,6 +253,24 @@
    ⇒ E66 的落点会**整体替换** `ClientOptions.timeoutOptions` 那份 default source ⇒ 若新实现不含「命令超时」语义 ⇒ ①（`getTimeoutOptions().isTimeoutCommands()` 必须为 **true**）会红
    ⇒ ⚠️ ① 红 = **新回归**（不是「E66 故意关掉了超时」）⇒ **直接找 G4**
    ⇒ 配套：新 source 在**本请求没有 deadline** 时必须回落到 **`getClientConfiguration().getCommandTimeout()`（本域 = 3s）** ⇒ 否则命令失去 3s 上限（断连从「3s 快速失败」退化为「无限等待」）⇒ ⇒ **这条已经写进本域台账的 E66 硬约束段（已独立核实并订正其机制表述）**
+5. 🆕 **两个「合并后必红」的共享门禁**（2026-10-27 第四轮**实测** ⇒ **写权在 G4 ⇒ 已派单** · 编号 `FB-S1`/`FB-S2`）
+   ⚠️ **编号说明**：已发给 G4 的消息里把这两条写成 **FB-06 / FB-07** ⇒ 但**本域 §4 里 FB-06 指的是 E66 那条** ⇒ ⇒ **撞名** ⇒ **以本台账的 `FB-S*` 为准**（`S` = 跨域共享门禁）⇒ G4 侧按**内容**识别。
+   - 🔴 **FB-S1 · `tools/difftest/check-tomcat-limits.py`**：我树 **EXIT=1**；主干 `do-my-own-gh` 与 G4 树 **EXIT=0**
+     ⇒ 报错原文：`🔴 service/task/task-api 缺 ④ rag.http.go-form-limit.mode：实际 'off'，应为 'raw'`
+     ⇒ **根因 = 期望表 stale，不是本域 yml 错**：`tools/difftest/check-tomcat-limits.py:149` 的 `EXPECTED_FORM_LIMIT_MODE` 写死 `"service/task/task-api": "raw"` ⇒ 比对是纯字符串 `gate_ok = (mode == expected_mode)`（`:265-271`）
+     ⇒ ⇒ **期望值应为 `off` 的独立证据**：**G4 自己的语义表就这么写** —— `GoStyleFormLimitMode.java:219`（G4 树）`new DomainReachability("service/task/task-api", false, false, Mode.OFF, "task/api/**：httpx.Parse / ParseForm / GetFormValues 命中数 = 0 …")`；同文件 javadoc `:280` 举例明写「task 域 yaml 声明 raw，而语义答案是 OFF」⇒ ⇒ ⇒ **域侧改 `mode: "off"` 正是按共享层判据走** ⇒ ⇒ **守门表与共享层表直接打架**
+     ⇒ ⇒ **守门想抓的漂移在 task 域不存在**：Go 侧 `gettaskhandler.go:19` 走 `json.NewDecoder(r.Body)` ⇒ `httpx.Parse` / `r.Form` 从不求值 ⇒ Go 的 httpx 2048「非空值」判据从不生效；RAG 侧本域 `@RequestParam` / `getParameter*` 命中 = 0 ⇒ Tomcat 永不解析 query ⇒ **两侧都不可达** ⇒ 不存在「Go 放行而 RAG 被拒」⇒ ⇒ 守门报错文案那句「缺它 ⇒ 容器上限不会被抬到 10001 ⇒ Tomcat 会先于应用层拒绝」**对 task 域不成立**
+     ⇒ 🔴 **危害具体化**：守门红 ⇒ **会推动下一个人把 task-api 改回 `raw`** ⇒ **重新引入误拒**（>2048 个非空 query 被 400 + HTML 页拒，而 Go 照常受理）⇒ ⇒ 而本域**已有网钉住不可达性**：`TaskApiFormLimitReachabilityTest` 的「>2048 个非空 query 值 ⇒ 200」（真 Tomcat）⇒ ⇒ **若哪天本域开始读 query 参数，该守门会红** ⇒ ⇒ 届时才需把容器上限提到 **10001**
+     ⇒ ⇒ **合并后处置纪律**：该门禁若仍红 ⇒ **不要改本域 yml** ⇒ 是 **G4 的期望表**要改（最小：`:149` ⇒ `"off"`；更稳：期望值改从 `SEMANTIC_REACHABILITY.semanticMode` 取 ⇒ 单一真源 ⇒ 以后不再 stale）
+   - 🔴 **FB-S2 · `tools/difftest/check-wave-coupling.py`**：我树 **EXIT=1**（6 条 `common_radiation` 漂移）；主干与 G4 树 **EXIT=0**
+     ⇒ **根因 = 快照过期，不是代码回退**：`docs/DRIFT/_cross/cross-domain-coupling.md`（**744 行 · 三棵树逐字相同**）的 `<!-- wave-coupling-snapshot -->` 块**未含 X-6(task) 与 A9(like) 的接入** ⇒ ⇒ **文档三棵树一致 + 主干/G4 树绿 ⇒ 差异全部来自域侧接线代码**
+     ⇒ 6 条漂移：`GoStyleFormLimitMode` / `GoStyleFormValueLimitInterceptor` / `GoStyleRpcBreakerInterceptor` / `GoStyleRpcSheddingInterceptor`（**None → `["task"]`**）· `GoStyleGrpcClientBreakerInterceptor`（**增 `like`**）· `MqConsumer`（**增 `like`**）
+     ⇒ ⇒ **task 那 4 条全部来自 `src/test/` 的 import**（`TaskProtectionChainWiringTest` / `TaskApiFormLimitReachabilityTest`）⇒ **task 生产代码对这几个类的 import = 0**（守门 `scan_common_radiation` 用 `service/**/src/**/*.java` ⇒ 含 test）
+     ⇒ ⇒ **修法在 global 写权 ⇒ G4**：用 `python3 tools/difftest/check-wave-coupling.py --print` 的输出更新快照块（目标值已取到 = `/tmp/g2-coupling-target.json`）
+6. 🆕 **合并 G4 共享层落码时，`task-api` 的 yml 可能被覆盖回 `mode: raw`**（2026-10-27 **实测**）
+   ⇒ G4 树 `service/task/task-api/src/main/resources/application.yml:177-178` 仍是 `mode: raw`（+ 一条**用错判据轴**的注释：拿「有没有注册 `httpx.SetErrorHandler`」（**轴② 拒绝形状**）来定「开不开」（**轴①**）；而轴①在 task 域的判据是「上限不可达 ⇒ OFF」⇒ **与 G4 自己的 `SEMANTIC_REACHABILITY` 自相矛盾**）
+   ⇒ ⇒ **合并风险** = 以 G4 树版本覆盖 ⇒ 本域 D-1 的 `mode: "off"` 被回退 ⇒ ① 上条 FB-S1 的期望值又要跟着变；② 域侧回到「上限可达但闸门开着」的错配形态
+   ⇒ ⇒ **合并清单里必须显式写一行**：`service/task/task-api/src/main/resources/application.yml` **以 G2 分支版本为准**（或合并后按 `SEMANTIC_REACHABILITY` 的 OFF 复核一次）
 
 ⚠️ **E66 的硬约束（G4 已探明，落地前必须解决）**：
 Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
