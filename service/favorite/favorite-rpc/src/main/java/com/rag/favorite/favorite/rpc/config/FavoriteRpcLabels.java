@@ -6,7 +6,7 @@ package com.rag.favorite.favorite.rpc.config;
  *
  * <p><b>为什么要单点定义</b>：Go 把它们放在 {@code helper.go} 的 const 块里，
  * 7 个 logic 共 30+ 处调用点复用同一批字符串。Java 侧若散落在各 service 里，
- * 必然出现「同一个 action 在不同调用点拼成两个���」的漂移 —— 而 label 一旦拼错，
+ * 必然出现「同一个 action 在不同调用点拼成两个值」的漂移 —— 而 label 一旦拼错，
  * 对应的告警就<b>静默失效</b>（没有异常，只是不再上报那个维度）。
  *
  * <p>⚠️ <b>这些字符串是运维契约</b>：{@code docs/DRIFT/favorite/rpc.md} 的

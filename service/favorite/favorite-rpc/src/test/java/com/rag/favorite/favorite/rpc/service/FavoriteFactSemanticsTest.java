@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code FavoriteFactSchemaAndChainTest}（Testcontainers 真 PG）承接。
  *
  * <p>⚠️ 本类<b>不</b>断言「能编译通过」或「Bean 存在」——
- * 那是 §3.3.3 点名的伪断言形态。每一���用例都必须能说清：
+ * 那是 §3.3.3 点名的伪断言形态。每一个用例都必须能说清：
  * 「哪一行 Go 代码 ⇒ 哪个可观察行为」。
  */
 class FavoriteFactSemanticsTest {
