@@ -1660,6 +1660,15 @@ message-api：84 + 2（MessageApiTimeoutRealTomcatTest）= 86 tests / 0 failures
 ```
 
 > ⚠️ **超时路径会打一条 `HttpMessageNotWritableException` 日志 —— 不是行为差异，别当 bug 修**
+
+### 🆕 6. 第十轮新增守门（§5.3e 项⑤ · A3「路径归一」的真 Tomcat 探针 · 2026-10-27）
+
+- **`MessageApiPathNormalizationRealTomcatTest`（3 条）** · **`MessageApiPathNormalizationControlTest`（2 条）** ⇒ ⇒ **共 5 条**
+- **锁住的契约**：Go 侧 `go-zero@v1.10.2/rest/router/patrouter.go:48`（注册时 `path.Clean`）· `:60`（匹配时 `path.Clean`）⇒ ⇒ **路径变体命中同一条路由**
+- **实测**：4 种变体（尾斜杠 / 重复斜杠 / `.` 段 / `..` 段）**与规范路径同状态且非 404**（A 组 401 ⇒ 路由匹配上了、被鉴权拦下）⇒ ⇒ **对照组（归一层缺席）实测 4 种变体全部 404** ⇒ ⇒ **Tomcat / Spring 自己不会归一它们** ⇒ ⇒ **共享层那层是承重件**
+- **变异验证**（三域各做一遍）：域内放**同名但什么都不做**的 Filter Bean ⇒ 共享层那份被 `@ConditionalOnMissingBean(name=…)` 跳过（= **遮蔽**，不是叠加 —— 与 users 域「域内副本遮蔽共享层」同款真实形态）⇒ ⇒ **3 条红 2 条、`Errors = 0`**（上下文正常启动，不是启动期炸）⇒ ⇒ **红在两条目标断言上**（前提断言 + 变体断言）⇒ ⇒ 还原**逐字节一致** ⇒ ⇒ 复跑全绿
+- ⚠️ **本轮暴露并已修的一条设计缺陷**：第一版用 `@Autowired GoStylePathNormalizingFilter`（**具体类型**）⇒ 遮蔽时**上下文启动期就炸** ⇒ ⇒ 守门会「**红在启动**」而不是「红在断言」⇒ ⇒ 改成**按 Bean 名 + 断言类型**（`containsBean` + `getBean` + `instanceof`）⇒ ⇒ 遮蔽现在**红在断言上**
+- ⇒ ⇒ **「路径归一」这一格 = RAG 腿 L4**；**Go 腿 = 共享层那一次的活体（不是本域独立跑的）** ⇒ ⇒ **不整体升 L4** ⇒ 详见 `docs/DRIFT/message/vs-common.md` §4·十
 > （`No converter for [class com.rag.common.response.Response] with preset Content-Type 'text/plain;charset=utf-8'`）
 >
 > 机理：`HttpMiddleware#writeTimeoutResponse` 已经**写完并 flush 了** 503 + `text/plain`；

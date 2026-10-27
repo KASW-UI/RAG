@@ -43,7 +43,7 @@
 |---|---|---|---|---|---|
 | **A1** | 超时 / deadline | rpc：`MessageRpcApplication.java:85-86`（`@Import DeadlineQueryTimeoutInjector` + `SqlTimeoutStatusTranslator`）、`:75-77`、`:134-135`（链装配）；`message-rpc/application.yml:225-226` `rpc-timeout: 2s`<br>api：`MessageRpcClient.java:87`（`GoStyleRequestDeadline.applyTo`）；`message-api/application.yml:226-227` `http-timeout: 3s`· 🔴 **2026-10-27 新增**：`MessageJwtAuthFilter`（+6）—— **3s 预算的作用域**（验签在预算之外，= `DRIFT-MSGAPI-014`）<br>SQL 取消：`DeadlineQueryTimeoutInjector.java:139-145` | ✅ 一致（2s=2000ms / 3s=3000ms 毫秒精度一致；`DEADLINE_EXCEEDED` 文案对齐 `RpcInterceptor.java:109`）<br>🔴 2026-10-27：**3s 预算的作用域也已对齐**（Go 的预算**不含**验签 —— 真源 `observability/http.go:30-34` 关掉原生 TimeoutHandler、改由 `server.Use` 的自建中间件计时 ⇒ 计时器在 `Authorize` **之后**起算；RAG 侧原把验签放在 `HandlerInterceptor`（预算内）⇒ 现已搬到 `MessageJwtAuthFilter`(+6) ⇒ **验签在预算外**，两侧一致）<br>🟢 **2026-10-27（G2 第三/四轮 · 补记）：本组件的 Redis 轴 = **N/A**（**不碰 Redis**）** —— ① RAG 侧：`service/message/message-rpc/pom.xml` **无** `spring-boot-starter-data-redis`（⇒ 无 `commons-pool2` 需求）＋ `src/main/java` 里 `RedisTemplate` / `StringRedisTemplate` / `LettuceConnectionFactory` **命中数 = 0**；② Go 侧：`$GO/service/message/**` 全目录 `redis` **命中数 = 0**（`redis.NewClient` / `MustNewRedis` 均 0）⇒ ⇒ **两侧都不碰 Redis** ⇒ ⇒ 故 **Redis 连接池轴（2026-10-27 第四轮 task/like 两域新立的那条）在本组件 = N/A**（**不是「漏审」** ⇒ 也不是「没配池」⇒ 是**本组件没有这个面**）⇒ 📌 **供整合者/其他 lane 免再猜**：G2 域三组件的 Redis 池状况已查清 —— **task-rpc** 原**无池** ⇒ **已修**（+守门 ⑤⑥）· **like-rpc** 形态已对齐但 `min-idle` 偏离 ⇒ **已修**（4⇒8，+守门 ⑤⑥）· **message-rpc 不碰 Redis** ⇒ **N/A** | L4（Go 腿活体探针：观测点 A `deadline_set=false` / B `deadline_set=true remaining=3s`；**非法 token ⇒ 401 且三个观测点一个都没打印** ⇒ Authorize 在所有 user middleware 之前） | 2026-10-27 |
 | **A2** | gRPC 拦截器链 | 服务端：`MessageRpcApplication.java:134-135` → `GoStyleRpcProtectionChain.java:65`(shedding)/`:72`(breaker)/`:77`(recover) **消费点**<br>客户端熔断：`GoStyleGrpcClientBreakerInterceptor.java:104-106`（`@Component` + `@GrpcGlobalClientInterceptor`）⇒ 被 `MessageApiApplication.java:63-66` 注册 | ✅ 一致（链序 recover→breaker→shedding→业务；Go `go-zero@v1.10.2/zrpc/server.go:144-167`）<br>🆕 **2026-10-27 第四轮：A2 轴由 L1 升为 L2（运行期 · 组件级守门 + 变异验证）** —— **本组件此前完全没有链守门**（兄弟组件 task-rpc / like-rpc 都有 ⇒ 本域 A2 只有 L1 源码级证据、**无运行期证据**）⇒ ⇒ 合并 `align/g4-service-common`（merge commit `37816ca` · G4 要求的整支合并协议）后，共享层的 `compose(props)` / `layerNames(chain)` 到位 ⇒ ⇒ **补 `MessageProtectionChainWiringTest`（新类 · 5 条）**：① `@Import` 必须含 `GoStyleProtectionConfiguration` ② 层名列表 == `[recover, breaker, shedding]` ＋ **实际链 == 配置推出的构成** ③ 关掉降载 ⇒ 层名列表变成 `[recover, breaker]` ④ 熔断层真的包住业务 call ⑤ 降载层真的包住业务 call ⇒ ⇒ **组件级、运行期、确定性**（层名是共享层唯一计算点的只读观测 ⇒ 零行为影响）<br>⇒ ⇒ **与客户端那一面合并看**：客户端熔断（`GoStyleGrpcClientBreakerInterceptor` · `MessageApiApplication.java:63-66` 扫 `com.rag.common` 注册）由阶段 2 的 `GoStyleGrpcClientBreakerE2ETest` 覆盖 ⇒ ⇒ **本轴两侧均有运行期证据** | **L2（运行期）** | 2026-10-27 |
-| **A3** | HTTP 保护链 | 配置 `message-api/application.yml:121-169`（四道闸门 + `mode: envelope`）<br>共享层消费点：`GoStyleMaxConnsFilter.java:96`(+4) · `GoStyleBreakerFilter.java:77`(+5) · `GoStyleCpuSheddingFilter.java:63`(+6) · `GoStyleMaxBytesFilter.java:83`(+8) · `GoStyleTraceparentFilter.java:190`(+3) · `GoStyleFormValueLimitInterceptor.java:81-97` + `GoStyleFormLimitWebMvcConfig.java:42` · `GoStyleTomcatParameterLimitCustomizer.java:134` | 🟡 **OBS**（三条有界残留：① **form 闸门与鉴权先后** —— **已登记**为「有界残留·刻意不改」（[`global/cross-domain.md`](../global/cross-domain.md) 第十四轮 §⑤之五-1）⇒ **不重复派单** ② **路径归一** ⇒ 🟢 **共享层已落码**（FB-01 · G4 `182fc32`：`GoStylePathNormalizingFilter` 字节级移植 Go `path.Clean` + 自动配置注册点；🟢 Go 侧已 L4 活体坐实）但**未合入本树** ⇒ 合并后本域跑**真 Tomcat 探针**即可升 ✅ ③ **缺本域真实请求证据**（envelope 拒绝形状 / 2049 参数 / `..` 路径））<br>> 📌 **共享层落点（按符号记，不钉行号 —— G4 树 `182fc32` 的行号合并后会位移）**：FB-01 = `GoStylePathNormalizingFilter` ＋ `GoStylePathNormalizingAutoConfiguration`（唯一注册点）；FB-02 = `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` / `REGISTERED_DEVIATIONS`；FB-03 = `GoStyleRpcProtectionChain.Layered` / `Composition` / `compose(props)` / `layerNames(chain)` ⇒ 共享层侧回归（G4 自测）：**52 模块 / 2442 条 / 0 failures / 0 errors / 4 skipped** / 21:59 min<br>🆕 **2026-10-27 订正（G4 第七次全量 · `5564c27`）**：**2442** 是**第六次**全量的数字 ⇒ **第七次 = 2457 条**（52 模块 / 0 failures / 0 errors / **4 skipped** / **20:28 min** / `MVN_EXIT=0`）⇒ ⚠️ **2457 是 G4 树（52 模块）的口径**，**不是本域数字** ⇒ 本域三域六模块 = **594 条**（`mvn test` 口径）
+| **A3** | HTTP 保护链 | 配置 `message-api/application.yml:121-169`（四道闸门 + `mode: envelope`）<br>共享层消费点：`GoStyleMaxConnsFilter.java:96`(+4) · `GoStyleBreakerFilter.java:77`(+5) · `GoStyleCpuSheddingFilter.java:63`(+6) · `GoStyleMaxBytesFilter.java:83`(+8) · `GoStyleTraceparentFilter.java:190`(+3) · `GoStyleFormValueLimitInterceptor.java:81-97` + `GoStyleFormLimitWebMvcConfig.java:42` · `GoStyleTomcatParameterLimitCustomizer.java:134` | 🟡 **OBS**（三条有界残留：① **form 闸门与鉴权先后** —— **已登记**为「有界残留·刻意不改」（[`global/cross-domain.md`](../global/cross-domain.md) 第十四轮 §⑤之五-1）⇒ **不重复派单** ② **路径归一** ⇒ 🟢 **共享层已落码**（FB-01 · G4 `182fc32`：`GoStylePathNormalizingFilter` 字节级移植 Go `path.Clean` + 自动配置注册点；🟢 Go 侧已 L4 活体坐实）但**已合入本树** ⇒ ✅ **本域已跑真 Tomcat 探针**（第十轮 · A/B 对照组 + 本域独立变异验证）⇒ ⇒ **「路径归一」这一格 = RAG 腿 L4** ③ **缺本域真实请求证据**（envelope 拒绝形状 / 2049 参数 —— `..` 路径**已由第十轮补上**））<br>> 📌 **共享层落点（按符号记，不钉行号 —— G4 树 `182fc32` 的行号合并后会位移）**：FB-01 = `GoStylePathNormalizingFilter` ＋ `GoStylePathNormalizingAutoConfiguration`（唯一注册点）；FB-02 = `GoStyleFormLimitMode.SEMANTIC_REACHABILITY` / `REGISTERED_DEVIATIONS`；FB-03 = `GoStyleRpcProtectionChain.Layered` / `Composition` / `compose(props)` / `layerNames(chain)` ⇒ 共享层侧回归（G4 自测）：**52 模块 / 2442 条 / 0 failures / 0 errors / 4 skipped** / 21:59 min<br>🆕 **2026-10-27 订正（G4 第七次全量 · `5564c27`）**：**2442** 是**第六次**全量的数字 ⇒ **第七次 = 2457 条**（52 模块 / 0 failures / 0 errors / **4 skipped** / **20:28 min** / `MVN_EXIT=0`）⇒ ⚠️ **2457 是 G4 树（52 模块）的口径**，**不是本域数字** ⇒ 本域三域六模块 = **594 条**（`mvn test` 口径）
 ⇒ ⚠️ **合并后**本域需跑真 Tomcat 探针复核（路径归一）⇒ 那是**收口回归**窗口的事（§5.3e）
 
 🟢 **共享层的 form 语义表已落码**（FB-02 · G4 `182fc32`：`SEMANTIC_REACHABILITY` 逐域取证表）⇒ **message 行 = `Mode.ENVELOPE`** ⇒ 与本域 `mode: envelope` **一致** ⇒ 本域**不在** `REGISTERED_DEVIATIONS` 里 ⇒ **不是**「已登记的例外」，是**真对齐**） | L1（静态） | 2026-10-27 |
@@ -386,5 +386,116 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 **③ 仍未销号（与本轮无关，等 G4）**
 - **项②**（共享层 `REJECT_COMMANDS` 断连活体对拍）：🟢 **本域 N/A** —— **message 域零 Redis**（`service/message/*` 的 pom 里 `spring-boot-starter-data-redis` **零命中**；本域只在`message-rpc` 用 gRPC 调下游）⇒ ⇒ **没有 Redis 连接 ⇒ 谈不上「断连行为」** ⇒ ⇒ **不是「没做」，是「不适用」** ⇒ ⇒ 同一机制在 **like 域 ＋ task 域**各做了一遍活体 A/B（第八轮）⇒ ⇒ 本域只需在**合并后**确认「共享层那份 customizer 在本域上下文里在不在」（本域无 Redis ⇒ 连装配都不会发生 ⇒ ⇒ 预期零影响）
 - **项④**（E66 落码后守门 ① 仍绿）：**E66 未落码** ⇒ ⇒ N/A（等落码）
-- **项⑤**（A3 升 ✅ 的真 Tomcat 探针）：**未做**
+- **项⑤**（A3 升 ✅ 的真 Tomcat 探针）：✅ **已做**（第十轮 · 真 Tomcat ＋ A/B 对照组 ＋ 本域独立变异验证）
 - **两个共享门禁**（`check-tomcat-limits.py` · `check-wave-coupling.py`）仍红 ⇒ ⇒ **`tools/**` 非本 lane 写权 ⇒ 仍等 G4**（本轮新增证据：那三个门禁依据文件在**我树 vs G4 最新 tip `c814689`** 之间**逐字节相同** ⇒ ⇒ G4 树里它们绿**是因为不含我域改动**，不是「已修」）
+
+---
+
+## 4·九、🔵 **第九轮（2026-10-27 17:1x）· G1 来的「波次级通用判据」⇒ 本域侧逐条处置**（G2 全部**独立取证**，不采信转述）
+
+### ① ⏸ **命令超时判据联动 —— 本域 N/A**（零 Redis ⇒ 无 Redis 判据 ⇒ 无联动面）
+
+- **G1 的判据**：`getCommandTimeout()`（值）＋ `getTimeout()==3000` ＋ `isApplyConnectionTimeout()`（机制），**不是** `isTimeoutCommands()`（source 恒 `DefaultTimeoutSource` = −1 ⇒ 恒真 ⇒ 非有效判据）
+- ✅ **同意 G1 的口径**（在 **like / task** 两域成立）—— 那两域的判据链已落地（机制位①＋机制位②＋「source 恒 −1」＋时长出口，缺一不可）
+- ⏸ **本域 N/A 的依据**：`service/message/*` 的 pom 里 `spring-boot-starter-data-redis` **零命中** ⇒ ⇒ **本域零 Redis** ⇒ ⇒ 既无「命令超时」判据 ⇒ 也无「共享层 customizer 覆盖域内超时」的联动面 ⇒ ⇒ **不是「没做」，是「不适用」**
+- 📌 **同一机制的受益域证据在 like / task 两域**（第八轮活体 A/B + 变异验证）⇒ ⇒ **本域不重复做、不外推**
+
+### ② ✅ **`-pl` 不带 `-am` ⇒ classpath 上是 `~/.m2` 的旧 `com.rag:common`**（G1 实测踩到）—— **本域已规避**
+
+- G1 的实测现象：`-pl <域内模块>`（**不带 `-am`**）⇒ reactor 里**没有** `service/common` ⇒ `com.rag:common` **从本地仓库解析** ⇒ 那个 jar 是**主干代码态** ⇒ ⇒ **共享层改动根本没进过测试 classpath** ⇒ ⇒ 「跑绿」是**假绿**
+- ✅ **本域全部回归命令都显式把 `service/common` 放进 `-pl`** ⇒ 等效于带 `-am`（用**本树源码**）⇒ ⇒ **本域不受该坑影响**
+  - 实测命令形如：`mvn -o -B -DargLine=-Xmx2g -pl service/common,service/like/like-rpc test`
+  - ⚠️ **不 `install`** 共享层 jar 到 `~/.m2`（那会改变别的 lane 正在解析的依赖）
+- ⚠️ **口径纪律**：`service/common` 在 reactor 里 ⇒ **reactor 总数 ≠ 本域数**（共享层自己的 **324** 条会进汇总）⇒ ⇒ **本域数字按本域模块的 surefire 目录**统计（`service/{message,like,task}/**/target/surefire-reports/TEST-*.xml`）⇒ ⇒ **不把 reactor 总数当本域数**
+
+### ③ 🟢 **G1 [3]「连带删 `@Import` 不够」—— 本域实测「不适用」**
+
+- G1 的坑：守门用 `@SpringBootConfiguration`（**不含** `@EnableAutoConfiguration`）⇒ **自动配置清单不会被读** ⇒ 单纯删 `@Import` ⇒ 容器里 customizer = 0 ⇒ ⇒ **守门静默测不到任何断连策略**（零报错）
+- ✅ **本域实测不适用**：`service/{message,like,task}/**` 内 **`@SpringBootConfiguration` = 0 命中** ⇒ ⇒ 本域**没有**「最小上下文」守门 ⇒ ⇒ 该坑不适用
+- ✅ **本域两个新 Redis 守门用的是真应用类**：`@SpringBootTest(classes = LikeRpcApplication.class)` / `TaskRpcApplication.class`（**真 `@SpringBootApplication`** ⇒ 含 `@EnableAutoConfiguration` ⇒ **清单会被读**）⇒ ⇒ 且已用 **`size()==1` ＋ bean 名含 `goStyleRedisClientOptionsCustomizer`** 双重断言坐实「共享层那份确实在容器里」⇒ ⇒ **即使清单没被读，断言也会红** ⇒ ⇒ **不会静默测不到**
+
+### ④ ⚠️ **U+FFFD 跨树数字不可直接比**（G1 合并后全仓 = **23 份 / 64 处**）
+
+- G1 报：合并后全仓 **23 份 / 64 处**（原 20 份 / 51 处）⇒ 增量来自 G1 台账**引述了坏字节**（把「真损坏」现场当证据写进台账）⇒ ⇒ G1 域真损坏 = 0
+- **G2 本树口径**：全仓 **4103 份**扫描 ⇒ 含 `target/` **18 份 / 60 字节** · 剔 `target/` **15 份 / 38 字节**（源级）
+- ⇒ ⇒ **两个口径（份数 / 处数）与构成都不同** ⇒ ⇒ **复扫要比「文件清单」而不是比数字** ⇒ ⇒ **本域写权面 340 文件 = 0 命中**
+
+### ⑤ ✅ **`application.yaml` 不改名（G1 (b)）—— 本域同意，走「台账登记 ＋ 复开触发条件」**
+
+- **同意 G1 的三条理由**：收益仅消除 **1 个**命名误判点 / 成本 ≈ **42 处**引用且其中 3 处 ＋ `docs/Pitfalls/users/_shared.md` 2 处**不在任何 lane 白名单** / 扩展名是**纯表达层、零语义收益**
+- **本域现状**：`service/{message,like,task}/**/src/main/resources/application.yml`（`.yml`）⇒ ⇒ 本轮**零改动**
+- **复开触发条件**（本域侧登记）：当出现「**按扩展名分派的机器判定**」成为某个门禁 / 脚本的**正确性前提**时（例如某个守门开始区分 `application.yml` 与 `application.yaml`）⇒ ⇒ 届时重开该议题
+
+---
+
+---
+
+## 4·十、🟢 **第十轮（2026-10-27 17:3x）· §5.3e 项⑤ 销号 —— A3「路径归一」的**真 Tomcat** 探针**（共享层那层已在本树 ⇒ 本域自己补上探针）
+
+### ① 交付物（**本域自己的**，不外推）
+- `MessageApiPathNormalizationRealTomcatTest`（**3 条**）· `MessageApiPathNormalizationControlTest`（**2 条**）⇒ ⇒ **A/B 两类**
+- ⚠️ **不外推**：like / message 两域**各做了一遍自己的 A/B** ⇒ ⇒ **三域各 5 条 = 15 条**（不是「一个域跑一遍、三域通用」）
+
+### ② 判据（三段，每段都落到消费点）
+① **共享层那份在、且没被域内同名 Bean 遮蔽** ⇒ `context.containsBean("goStylePathNormalizingFilter")` ＋ 按名取到的**类型**必须是 `com.rag.common.http.GoStylePathNormalizingFilter` ＋ `@Order` = `HIGHEST_PRECEDENCE + 2`
+② **真 Tomcat ＋ 真请求** ⇒ `DEFINED_PORT` ＋ 本域专用端口段 `21700-21799`（`RealTomcatPort`）＋ **`HttpURLConnection`**
+   - ⚠️ **为什么不能用 `java.net.http`**：它的 `URI` 构造器**自己就规范化路径**（`URI.create("…/a/../b")` ⇒ `…/b`）⇒ ⇒ 变体在**发出去之前**就被抹平 ⇒ ⇒ 测到的会是「规范路径」⇒ ⇒ **探针失效**
+   - ⚠️ **`java.net.URL` 不校验也不规范化** ⇒ 请求行里原样带上变体（与 Go 的 `net/http` 同形：`r.URL.Path` 拿到的是客户端发的**原样**路径）
+③ **变体 ⇒ 与规范路径同状态、且 ≠ 404**（`404` = 压根没匹配到路由）
+
+### ③ 实测矩阵（**三域一致**）
+| 域 | 规范路径 | 4 种变体（**A 组**：归一层在） | 4 种变体（**B 组**：归一层缺席） |
+|---|---|---|---|
+| task-api | 200 | **200 ×4** | **404 ×4** |
+| like-api | 401 | **401 ×4** | **404 ×4** |
+| message-api | 401 | **401 ×4** | **404 ×4** |
+
+- 4 种变体 = **尾斜杠** · **重复斜杠** · **`.` 段** · **`..` 段**
+- ⇒ ⇒ **Tomcat / Spring 自己不会归一这四种形态** ⇒ ⇒ **共享层那层是全部四种变体的承重件**（不是「Tomcat 顺手干了」）
+- ⇒ ⇒ **B 组 = 同一份域服务 ＋ 同一通真实请求，唯一差别是「那层机制在不在」**（`spring.autoconfigure.exclude=…GoStylePathNormalizingAutoConfiguration`）⇒ ⇒ **A 组的绿不是空断言**
+
+### ④ 变异验证（**三域各做一遍**，红在目标断言）
+- 变异 = 在域内放一个**同名但什么都不做**的 Filter Bean（`@Component("goStylePathNormalizingFilter")`）⇒ ⇒ 共享层那份被 `@ConditionalOnMissingBean(name=…)` **跳过**（= **遮蔽**，不是叠加）
+- ⇒ ⇒ **这不是人造的失效形态**：users 域的「域内副本遮蔽共享层那份」就是同款形态 ⇒ ⇒ 变异复现的是**真实隐患**
+- 结果（三域**完全一致**）：**3 条里红 2 条**、**`Errors = 0`** ⇒ ⇒ **上下文正常启动**（不是启动期炸）⇒ 红点精确：
+  - `sharedLayerNormalizingFilterIsPresent`（实测类型 = 域内影子 Bean）
+  - `pathVariantsReachTheSameRoute`（变体 404）
+  - **仍绿 1 条** = 规范路径照通 ⇒ ⇒ 坏的只有归一，不是路由本身
+- ⇒ ⇒ 还原**逐字节一致**（三个 md5 与变异前完全相同）⇒ ⇒ 复跑全绿
+
+### ⑤ 🔴 变异暴露的一条**设计缺陷**（已修 · 值得留档）
+- 第一版用 `@Autowired GoStylePathNormalizingFilter`（**具体类型**）⇒ ⇒ 遮蔽时**上下文启动期就炸**（`NoSuchBeanDefinitionException`）⇒ ⇒ 守门会「**红在启动**」而不是「红在断言」⇒ ⇒ 看不出是哪条判据挂了 ⇒ ⇒ 无法区分「压根没这层」与「这层不对」
+- ⇒ ⇒ **改成按 Bean 名 ＋ 断言类型**（`containsBean` ＋ `getBean` ＋ `instanceof`）⇒ ⇒ 遮蔽现在**红在断言上**（实测三域一致）
+- ⇒ ⇒ **可复用的判据**：**守门的前置断言不要用「注入具体类型」**，否则一旦机制缺席，失败点会前移到容器启动期 ⇒ ⇒ **看不出是哪条判据挂了**
+
+### ⑥ 与 Go 的对照口径（**不外推 · 不整体写 L4**）
+- **Go 出处**：`rest/router/patrouter.go:48`（注册时 Clean）· `:60`（匹配时 Clean）⇒ ⇒ 变体命中同一条路由
+- ⚠️ **Go 侧的 L4 活体证据是共享层那一份**（真 go-zero `rest` server ＋ curl：5 种变体全 200 · 2026-10-27）⇒ ⇒ **那不是本域独立跑的 Go 腿**
+- ⇒ ⇒ **本轮补的是「RAG 腿」**：本域上下文里**那层真的承重**（真容器 ＋ A/B ＋ 变异验证）⇒ ⇒ **A3 轴的「路径归一」这一格 = RAG 腿 L4**；**Go 腿 = 共享层那一次的活体（不是本域独立跑的）** ⇒ ⇒ 台账按此口径记，**不整体升 L4**
+
+### ⑦ §5.3e 清单更新
+| 项 | 状态 |
+|---|---|
+| ⑤ A3 升 ✅ 的真 Tomcat 探针 | ✅ **本域侧销号**（本轮：真 Tomcat ＋ A/B 对照组 ＋ 三域各自变异验证） |
+
+---
+
+### 🟢 **第十一轮 · 合并后 9 模块回归（刷新 · 2026-10-27 17:55 → 18:0x）**（**上一张 970 的表是 13:31–13:39 那次的历史记录 ⇒ 原值保留不改写**）
+
+| 模块 | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `service/common`（**合并进来的共享层**） | 324 | 0 | 0 | 0 |
+| `service/message/message-api` | **103** | 0 | 0 | 0 |
+| `service/message/message-rpc` | 89 | 0 | 0 | 0 |
+| `service/message/message-common` | 21 | 0 | 0 | 0 |
+| `service/like/like-api` | **94** | 0 | 0 | 0 |
+| `service/like/like-rpc` | **120** | 0 | 0 | 0 |
+| `service/like/like-common` | 18 | 0 | 0 | 0 |
+| `service/task/task-api` | **102** | 0 | 0 | 0 |
+| `service/task/task-rpc` | **121** | 0 | 0 | 0 |
+| **合计** | **992** | **0** | **0** | **0** |
+
+⇒ ⇒ **域侧 8 模块 = 668**（相对 970 那次的 646 ⇒ **+22**）⇒ ⇒ **逐条对得上本轮新增的用例**：
+**like-rpc +5**（115→120 · A9 端到端 3 条 ＋ Redis 断连 2 条）· **task-rpc +2**（119→121 · Redis 断连 2 条）· **三域 api 各 +5**（第十轮 A3 探针：message-api 98→103 · like-api 89→94 · task-api 97→102）⇒ ⇒ **22 = 5 + 2 + 5 + 5 + 5** ✔
+⇒ ⇒ **口径**：surefire XML **mtime 切**求和（**156 份报告**）**== maven 9 模块汇总行**（**逐字相等**）⇒ ⇒ **0 stale 报告**
+⇒ ⇒ ⚠️ **本轮踩到的一个「stale 产物污染计数」的实例（值得留档）**：第十轮做**变异验证**时跑出了 **task-api failures = 2** 的报告 ⇒ ⇒ `check-ledger-selfcheck.py` 第 3 层当场报「❌ task-api failures/errors/skipped 全 0」⇒ ⇒ **根因不是代码坏了，是变异跑的失败报告还留在 `target/surefire-reports/`** ⇒ ⇒ 本轮全量回归把 task-api 重跑一遍 ⇒ ⇒ **failures 归 0、门禁恢复绿** ⇒ ⇒ ⇒ **判据**：门禁读的是 `target/` 里的报告 ⇒ ⇒ **任何一次带 `-Dtest=` 的定向跑都会改写/污染它** ⇒ ⇒ **跑门禁前必须有一次覆盖该模块的全量跑**（否则门禁报的是「上一次跑剩的产物」，不是当前代码态）

@@ -26,6 +26,7 @@
 > 🔴 **2026-10-24 更新（第五轮后）**：like-api 现有 **81 tests / 0 failures**；
 > 那 6 条里 **5 条已修**（012 / 013 / 014 / 016 / 017），**只剩 015**（落点在 6 域共用的 `service/common`）。
 > ⇒ **首轮的「SEMANTICALLY NOT EQUIVALENT」判定已过期** —— 当前判定见下方速览与末尾第五轮章节。
+> 🆕 **2026-10-27 第十轮新增（§5.3e 项⑤ · A3「路径归一」的真 Tomcat 探针）**：`LikeApiPathNormalizationRealTomcatTest`（**3** 条）· `LikeApiPathNormalizationControlTest`（**2** 条）⇒ ⇒ **共 5 条**，锁住「Go 侧 `patrouter.go:48/:60` 两次 `path.Clean` ⇒ **路径变体命中同一条路由**」这条契约 —— 4 种变体（尾斜杠 / 重复斜杠 / `.` 段 / `..` 段）**与规范路径同状态且非 404**（A 组 401）⇒ ⇒ **对照组实测 4 种变体全部 404**（归一层缺席 ⇒ Tomcat/Spring 自己不会归一）⇒ ⇒ **A/B 对照组 + 三域各自变异验证**（域内同名影子 Bean ⇒ **3 条红 2 条、Errors=0**、红在目标断言）⇒ ⇒ **「路径归一」这一格 = RAG 腿 L4** ⇒ 详见 `docs/DRIFT/like/vs-common.md` §4·十。
 
 ---
 

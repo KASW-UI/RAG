@@ -39,7 +39,7 @@
 |---|---|---|---|---|---|
 | **A1** | 超时 / deadline | ① server：`task-rpc/application.yml:231` `rpc-timeout: 2s` → 消费点 `RpcServerInterceptorFactory.java:80-81` ② 链挂载 `TaskRpcApplication.java:138` ③ HTTP：`task-api/application.yml:127` `http-timeout: 3s` → `HttpMiddlewareFilter.java:52-57` ④ client deadline：`TaskRpcClient.java:105-111`（`min(2000ms, 剩余)`）⑤ SQL 取消 `TaskRpcApplication.java:92-93` ⑥ **Redis 超时**：`task-rpc/application.yml` `spring.data.redis.timeout: 3s` ＋ `connect-timeout: 5s` → 消费点 `RedisURI.timeout`（`CommandExpiryWriter:160`）＋ `ClientOptions.socketOptions.connectTimeout`（Boot `LettuceConnectionConfiguration:212-215`）⑦ **Redis 连接池**：`task-rpc/application.yml` `spring.data.redis.lettuce.pool.{enabled,max-active,max-idle,min-idle}` ＋ `task-rpc/pom.xml` 的 `commons-pool2` → 消费点 Boot 4 `LettuceConnectionConfiguration:267-271`（`getPoolConfig` ⇒ `:269 setMaxTotal` / `:270 setMaxIdle` / `:271 setMinIdle`）＋ `DataRedisConnectionConfiguration:195-198`（`isPoolEnabled`） | ✅ 一致（三个超时：rpc 2s / http 3s / client 2s，逐个对齐 Go 的 struct tag 默认值）<br>🔴 2026-10-27：**3s 预算的作用域** —— ✅ 一致且**天然不适用**「验签是否计入预算」这个问题：Go 侧 `service/task/api/internal/handler/routes.go` 的路由表（**1 条** `/task/get`）**不带** `rest.WithJwt` ⇒ **task-api 没有鉴权** ⇒ 没有「验签」这件事 ⇒ users 域那条 `DRIFT-USERAPI-009②` 对本域**不适用**（不是「已修」，是「不适用」）<br>🔴 2026-10-27（G2 第二轮）：**Redis 命令/连接超时原先未配** ⇒ 落 Lettuce 默认（命令 **60s** / 连接 **10s**）⇒ Go 侧真值是 go-redis v9.20.0 库默认（命令 **3s** / 连接 **5s**）⇒ **已修**（补 `timeout: 3s` ＋ `connect-timeout: 5s`）⇒ 双侧活体实测：Go 1694ms 快速失败 vs RAG 修前 60021ms 挂起 ⇒ 详见 [DRIFT-TASK-RPC-007](rpc.md#🔴-drift-task-rpc-007--redis-命令超时未配--落-lettuce-默认-60s--断连时命令挂-60sgo-是-17s-快速失败)<br>🆕 **2026-10-27（G2 第三轮）：Redis 连接池维度** —— 原状 = **无池**（Go 侧 go-redis 默认**有池** ⇒ **形态漂移**）⇒ **已修**（加 `commons-pool2` ＋ `lettuce.pool.enabled: true` / `max-active: 64` / `max-idle: 16` / `min-idle: 0`）⇒ 守门 **⑤⑥**（**读真装配**，不读 yml）＋ **三条变异验证**（红在目标断言）⇒ 详见 [DRIFT-TASK-RPC-008](rpc.md#🔴-drift-task-rpc-008新登记--2026-10-27redis-连接池维度未对齐--形态漂移-rag-无池-vs-go-有池) | L4（Go 腿活体探针已把「Go 的 3s 预算**不含**验签」钉死；task 侧因其无验签 ⇒ 该子问题在 task 域**恒成立**；Redis 超时轴 = **双侧活体对拍** L4；🆕 Redis **连接池**轴 = **L1 ＋ 装配级 + 变异**（⚠️ 未做双侧并发活体对拍 ⇒ **不写 L4**）） | 2026-10-27 |
 | **A2** | gRPC 拦截器链 | ① `@Import`：`TaskRpcApplication.java:83-115`（`RpcServerInterceptorFactory`:87 / `ObservabilityProperties`:88 / `GoStyleProtectionConfiguration`:**113**）② `@Bean GrpcServerConfigurer` `:130-139` ③ 链定义 `GoStyleRpcProtectionChain.java:61-78`（`:65` shedding 分支 / `:72` breaker 分支）④ breaker 包装点 `GoStyleRpcBreakerInterceptor.java:140-154` | ✅ **一致**（相对序 recover→breaker→shedding→业务 与 Go `go-zero@v1.10.2/zrpc/server.go:144-167` 一致；本域 yaml 无 `rag.protection` 段 ⇒ 走默认 `enabled=true`/`900` ⇒ Go 的 `CpuThreshold>0` 等价成立）<br>✅ **守门已补齐两层**（`fad4c63`）：`TaskProtectionChainWiringTest` 由 **1 条链层断言**扩到 **2 条** —— ① 「关降载 ⇒ 拿到的 call 归熔断层所有」② 「不关降载 ⇒ 拿到的 call 归降载层所有」⇒ 原 DisplayName「breaker/shedding」是**假断言**（`:80-81` 主动关降载）⇒ 已订正<br>🟡 **共享层的「链层构成」只读入口（FB-03）已由 G4 落码**（`compose(props)` / `layerNames(chain)`，G4 提交 `182fc32`）但**未合入本树** ⇒ 本轮引用它会让本模块**编译不过** ⇒ 改用等价的「包装层归属」判据顶上，**合并后**按 §5.3e 重跑收口回归时升级<br>🆕 **2026-10-27 第四轮：已按 §5.3e 升级完毕（合并 G4 共享层后）** —— 上面的「未合入本树 / 合并后升级」是**合并前**的记述、**不是现状** ⇒ ⇒ 合并 `align/g4-service-common`（merge commit `37816ca` · G4 要求的**整支合并**协议、**不 cherry-pick**）后，`compose(props)` / `layerNames(chain)` 已在本树 ⇒ ⇒ **`TaskProtectionChainWiringTest` 新增 2 条共享层原生判据**：① 「链的层名列表 == `[recover, breaker, shedding]`」**且**「**实际装上的链 == 配置推出的构成**」（`layerNames(chain)` == `compose(props).layerNames()`）② 「关掉降载 ⇒ 层名列表变成 `[recover, breaker]`」（证明降载层是**条件装的**、不是恒在）⇒ ⇒ **旧的「包装层归属」两条保留不删**（它证「那些层真的包住了调用」，层名证不了；层名证「有哪些层 + 层序」，包装归属证不了 ⇒ ⇒ **互补而非替代**）⇒ ⇒ **本域 A2 轴由 L1 升为 L2（运行期 · 守门 + 变异验证）** | **L2（运行期）** | 2026-10-27 |
-| **A3** | HTTP 保护链 | ① 扫描面 `TaskApiApplication.java:78-91`（`basePackages` 含 `com.rag.common`，**排除** `GoStyleJsonBodyConverterConfig`:88-90）② maxConns `GoStyleMaxConnsFilter.java:95-97,128` ③ breaker `GoStyleBreakerFilter.java:76-78,116` ④ shedding `GoStyleCpuSheddingFilter.java:62-64,117` ⑤ maxBytes `GoStyleMaxBytesFilter.java:82-84,112` ⑥ form 闸门 `GoStyleFormValueLimitInterceptor.java:80-97` + 注册 `GoStyleFormLimitWebMvcConfig.java:41-43`；mode=**"off"**（**阶段 2 已改**，原 `raw`）← `task-api/application.yml:213` ⑦ Tomcat 上限 `GoStyleTomcatParameterLimitCustomizer.java:95,106-118` ⑧ Content-Type 判据 `TaskApiJsonBodyConfig.java:83-97,117-119` ⑨ **路径归一缺** | ✅ **一致**（四道闸门 + 拒绝形状 503/503/503/413 与 Go 一致；🟢 **form 闸门已按「语义可达性」关掉** ⇒ 本域不再多出 Go 没有的拒绝（守门 `TaskApiFormLimitReachabilityTest` 5/5 绿 + 变异 4 红）；🟢 **共享层的判据已由 G4 落码**（FB-02 · G4 `182fc32`：新增 `SEMANTIC_REACHABILITY` 逐域取证表，**task 行 = `Mode.OFF`** ⇒ 与本域 `mode: "off"` **同向** ⇒ 域侧与共享层**不会互相打架**；🟡 **路径归一共享层已落码但未合入本树**（FB-01 · G4 `182fc32`）⇒ 合并后本域需**真容器探针**复核才能把「路径归一」也升 ✅；🔴 **`off` 在 YAML 里必须加引号**（YAML 1.1 → 布尔 false）⇒ §4 **FB-05**）<br>🆕 **2026-10-27（G4 `2f3d5c2` 订正 + G2 复核）**：G4 上一轮判「本域改 `off` ⇒ 运行期容器上限掉回 2048 ⇒ **比 Go 更严**」⇒ ⇒ **已被本域实测否掉**（G4 已自行订正并撤销该提醒）⇒ ⇒ **本域结论：OFF ⇒ 运行期 2048 对 task 域无害**（本域控制器只有 `@RequestBody`、从不调 `getParameter*` ⇒ Tomcat 参数解析惰性 ⇒ 2048 **不可达**）⇒ ⇒ 与 G4 现在的 A3 轴行**同向** ⇒ ⇒ **两侧无冲突**<br>⇒ ⇒ **教训（已写进本域 D-1 与 yml 注释）**：「**运行期上限不同**」≠「**行为不同**」⇒ 判定漂移必须再问一句「**这个上限在该域的代码路径上可达吗**」<br>🆕 **2026-10-27（G2 补 Go 侧活体）**：**form 闸门这一格的 Go 侧证据已从 L3 升到 L4** —— Go 真源 `task-api` 实起（18886）⇒ **`POST /taskcenter/v1/task/get` ＋ 2100 个非空 query 值 ⇒ 响应 503（下游 task-rpc 未起）⇒ 不是 400 + `too many form values`** ⇒ ⇒ **Go 侧闸门不触发 = 活体坐实**（与源码 `gettaskhandler.go:19` 走 `json.NewDecoder(r.Body)` 互相印证）⇒ ⇒ **两侧在「form 闸门可达性」这一轴上一致** ⇒ ⚠️ **但 A3 轴整体仍不标 L4**：Go 侧给的是 503 ⇒ 「**两侧响应逐字节一致**」那一格**未闭合**（需 Go `task-rpc` 起着）⇒ 详见 §6 第 1 条 | L1（+ 域侧守门 L4 · Go 腿 form 闸门一格 L4） | 2026-10-27 |
+| **A3** | HTTP 保护链 | ① 扫描面 `TaskApiApplication.java:78-91`（`basePackages` 含 `com.rag.common`，**排除** `GoStyleJsonBodyConverterConfig`:88-90）② maxConns `GoStyleMaxConnsFilter.java:95-97,128` ③ breaker `GoStyleBreakerFilter.java:76-78,116` ④ shedding `GoStyleCpuSheddingFilter.java:62-64,117` ⑤ maxBytes `GoStyleMaxBytesFilter.java:82-84,112` ⑥ form 闸门 `GoStyleFormValueLimitInterceptor.java:80-97` + 注册 `GoStyleFormLimitWebMvcConfig.java:41-43`；mode=**"off"**（**阶段 2 已改**，原 `raw`）← `task-api/application.yml:213` ⑦ Tomcat 上限 `GoStyleTomcatParameterLimitCustomizer.java:95,106-118` ⑧ Content-Type 判据 `TaskApiJsonBodyConfig.java:83-97,117-119` ⑨ **路径归一缺** | ✅ **一致**（四道闸门 + 拒绝形状 503/503/503/413 与 Go 一致；🟢 **form 闸门已按「语义可达性」关掉** ⇒ 本域不再多出 Go 没有的拒绝（守门 `TaskApiFormLimitReachabilityTest` 5/5 绿 + 变异 4 红）；🟢 **共享层的判据已由 G4 落码**（FB-02 · G4 `182fc32`：新增 `SEMANTIC_REACHABILITY` 逐域取证表，**task 行 = `Mode.OFF`** ⇒ 与本域 `mode: "off"` **同向** ⇒ 域侧与共享层**不会互相打架**；✅ **路径归一：共享层已落码（FB-01 · G4 `182fc32`）且已合入本树** ⇒ ⇒ **本域已跑真容器探针**（第十轮 · A/B 对照组 + 本域独立变异验证）⇒ ⇒ **「路径归一」这一格 = RAG 腿 L4**；🔴 **`off` 在 YAML 里必须加引号**（YAML 1.1 → 布尔 false）⇒ §4 **FB-05**）<br>🆕 **2026-10-27（G4 `2f3d5c2` 订正 + G2 复核）**：G4 上一轮判「本域改 `off` ⇒ 运行期容器上限掉回 2048 ⇒ **比 Go 更严**」⇒ ⇒ **已被本域实测否掉**（G4 已自行订正并撤销该提醒）⇒ ⇒ **本域结论：OFF ⇒ 运行期 2048 对 task 域无害**（本域控制器只有 `@RequestBody`、从不调 `getParameter*` ⇒ Tomcat 参数解析惰性 ⇒ 2048 **不可达**）⇒ ⇒ 与 G4 现在的 A3 轴行**同向** ⇒ ⇒ **两侧无冲突**<br>⇒ ⇒ **教训（已写进本域 D-1 与 yml 注释）**：「**运行期上限不同**」≠「**行为不同**」⇒ 判定漂移必须再问一句「**这个上限在该域的代码路径上可达吗**」<br>🆕 **2026-10-27（G2 补 Go 侧活体）**：**form 闸门这一格的 Go 侧证据已从 L3 升到 L4** —— Go 真源 `task-api` 实起（18886）⇒ **`POST /taskcenter/v1/task/get` ＋ 2100 个非空 query 值 ⇒ 响应 503（下游 task-rpc 未起）⇒ 不是 400 + `too many form values`** ⇒ ⇒ **Go 侧闸门不触发 = 活体坐实**（与源码 `gettaskhandler.go:19` 走 `json.NewDecoder(r.Body)` 互相印证）⇒ ⇒ **两侧在「form 闸门可达性」这一轴上一致** ⇒ ⚠️ **但 A3 轴整体仍不标 L4**：Go 侧给的是 503 ⇒ 「**两侧响应逐字节一致**」那一格**未闭合**（需 Go `task-rpc` 起着）⇒ 详见 §6 第 1 条 | L1（+ 域侧守门 L4 · Go 腿 form 闸门一格 L4） | 2026-10-27 |
 | **A4** | 错误码 / envelope | ① 无信封 `TaskController.java:87-90`（直接返回 `GetTaskResp`）② gRPC→HTTP `GlobalExceptionHandler.java:86-95,101-137`（17 码 + default 500）③ 兜底 = **400** `:290-294` ④ 裸响应体 `:305-311`（`text/plain; charset=utf-8` + `nosniff` + 尾 `\n`）⑤ 404/405 `:254-258,267-274` → `GoStyleRouterErrorResponses` | ✅ 一致（本域**未注册** `SetErrorHandler` ⇒ 形状 = 真状态码 + text/plain，**不是** 200 + 信封 ⇒ 与 like/message/hot 域刻意不同，与 Go 同） | L1 | 2026-10-27 |
 | **A5** | 端口治理 | ① api `task-api/application.yml:72` `port: ${TASK_API_PORT:18886}` ② rpc `task-rpc/application.yml:139` `grpc.server.port: 9005` ③ client 寻址 `task-api/application.yml:113` `127.0.0.1:9005`（`negotiation-type: plaintext`:114） | ✅ 一致（与 Go `task/api/etc/task.yaml:3` / `task/rpc/etc/task.yaml:2` / `:6` 逐条对齐；⚠️ 本域下游**不走服务发现**，与 Go 一致）<br>✅ **阶段 2 已治理测试端口段**：本域 **2 处** `RANDOM_PORT`（`TaskApiContentTypeTest.java:62` + 本波新增的 `TaskApiFormLimitReachabilityTest.java:70`）⇒ **`DEFINED_PORT`** + 本域专用段 **21800–21899**（`service/task/task-api/src/test/java/com/rag/task/task/api/support/RealTomcatPort.java` · favorite 同款复制）+ 每类 1 条端口段守门 `bindsToDedicatedPortSegment` | L1（+ 端口段断言 L3） | 2026-10-27 |
 | **A6** | errmsg 契约 | — | **N/A**（Go 的 task 域**无** errmsg 模块：`service/task/**` 全目录 `errmsg` 命中 0 ⇒ 错误文案只有两条字面量，已在 A4 内核） | L1 | 2026-10-27 |
@@ -607,7 +607,7 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 **③ 仍未销号（与本轮无关，等 G4）**
 - **项②**（共享层 `REJECT_COMMANDS` 断连活体对拍）：**本轮未做**（需 docker ＋ 断连窗口配方）⇒ ⇒ 仍是开放项
 - **项④**（E66 落码后守门 ① 仍绿）：**E66 未落码** ⇒ ⇒ N/A（等落码）
-- **项⑤**（A3 升 ✅ 的真 Tomcat 探针）：**未做**
+- **项⑤**（A3 升 ✅ 的真 Tomcat 探针）：✅ **已做**（第十轮 · 真 Tomcat ＋ A/B 对照组 ＋ 本域独立变异验证）
 - **两个共享门禁**（`check-tomcat-limits.py` · `check-wave-coupling.py`）仍红 ⇒ ⇒ **`tools/**` 非本 lane 写权 ⇒ 仍等 G4**（本轮新增证据：那三个门禁依据文件在**我树 vs G4 最新 tip `c814689`** 之间**逐字节相同** ⇒ ⇒ G4 树里它们绿**是因为不含我域改动**，不是「已修」）
 
 ---
@@ -652,3 +652,131 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 - ⇒ ⇒ **全仓实测**：`LettuceClientOptionsBuilderCustomizer` 的**域内副本只有 1 处** —— 在 **users 域**
   （`service/users/user/user-api/.../RedisDisconnectedBehaviorConfig.java:103`）⇒ ⇒ **我三域零遮蔽副本** ✔
   ⇒ ⇒ （users 域那份**会遮蔽**共享层 ⇒ 那是 G1 域的事 ⇒ 本域不代改）
+
+---
+
+## 4·九、🔵 **第九轮（2026-10-27 17:1x）· G1 来的「波次级通用判据」⇒ 本域侧逐条处置**（G2 全部**独立取证**，不采信转述）
+
+### ① 🟡 **命令超时判据联动**（**同意 G1 的口径；但「联动」的真实机制与 G1 写的不一样** —— 已从 Boot 4.0.8 **源码**读出）
+
+- **两域守门现状**（实测）：like 域 `LikeRpcRedisTimeoutsGateTest` **6 条**（①②③④ 超时相关 ＋ ⑤⑥ 池）· task 域 `TaskRedisCommandTimeoutGateTest` **6 条**（同结构）⇒ ⇒ **超时相关 = 各 4 条，合计 8 条**（与 G1 口径一致）· **两域合计 12 条**
+- **判据链两域均已落地**（**不是「没做」**）：
+  - like ① `isTimeoutCommands()` ＋ `isApplyConnectionTimeout()`（两个机制位合起来 = `TimeoutOptions.enabled()` 的全貌）· ② `getClientConfiguration().getCommandTimeout() == 3s`（消费点）· ④ **阳性对照** `RedisURI.create(...)` 默认 `getTimeout() == 60s`（证明断言有识别能力）
+  - task 同构：① 两机制位 · ② `socketOptions.connectTimeout == 5s` · ③ `RedisURI.timeout == 3s` · ④ 60s 阳性对照
+- ✅ **同意 G1 的口径**：`isTimeoutCommands()` **单独**不构成「时长会被施加」的判据 ⇒ 本域两份守门已把它定位成「机制位①」· **时长另由「消费点」那条覆盖** ⇒ ⇒ **不是「恒真 ⇒ 无效」，而是「单独不足」** ⇒ 两腿合起来 = 完整链
+- 🔴 **但「联动」的真实风险面不是 G1 写的那条** —— G2 **从 Boot 4.0.8 源码**独立读出装配顺序（`~/.m2/.../spring-boot-data-redis-4.0.8-sources.jar` ⇒ `LettuceConnectionConfiguration`）：
+  - `:208-210` `createClientOptions(ObjectProvider<LettuceClientOptionsBuilderCustomizer> clientConfigurationBuilderCustomizers, …)`
+  - `:211` `ClientOptions.Builder builder = initializeClientOptionsBuilder();`
+  - `:212-215` `connectTimeout` ⇒ `builder.socketOptions(SocketOptions.builder().connectTimeout(connectTimeout).build())`
+  - `:229` `builder.timeoutOptions(TimeoutOptions.enabled());`
+  - **`:230` `clientConfigurationBuilderCustomizers.orderedStream().forEach(c -> c.customize(builder));` ⇒ customizer 在最后执行**
+  - ⇒ ⇒ `ClientOptions.Builder` 的 `timeoutOptions(...)` / `socketOptions(...)` 是**替换**语义 ⇒ 共享层那份 customizer 一旦调它们 ⇒ **整体覆盖** Boot 刚设的值
+  - ⇒ ⇒ **可达性分级**（本域判据的真实风险面）：
+
+    | 本域判据 | 落点 | 共享层 customizer 能否覆盖 |
+    |---|---|---|
+    | 命令超时 3s | `LettuceClientConfiguration.Builder.commandTimeout`（`:174`）⇒ `getCommandTimeout()` ⇒ `RedisURI.timeout` | **不能**（不是同一个 builder） |
+    | 连接超时 5s | `ClientOptions.Builder.socketOptions`（`:213-214`） | **能**（`:230` 在其后） |
+    | 机制位 `timeoutOptions.enabled()` | `ClientOptions.Builder.timeoutOptions`（`:229`） | **能**（`:230` 在其后 ⇒ 覆盖 ⇒ `applyConnectionTimeout` 位丢失） |
+
+  - ⇒ ⇒ **联动条款（登记 · 跨域）**：**共享层 `GoStyleRedisClientAutoConfiguration` 若未来要碰 `timeoutOptions(...)` / `socketOptions(...)`（E66「Redis 命令感知 deadline」正是这条路）⇒ 必须与受影响域的守门同一次提交一起改** ⇒ ⇒ 否则 like-rpc / task-rpc 的 ①②③ 与连接超时 5s 会**同时**变红 ⇒ ⇒ **触发条件 = 共享层 customizer 新增上述调用**
+
+### ② ✅ **`-pl` 不带 `-am` ⇒ classpath 上是 `~/.m2` 的旧 `com.rag:common`**（G1 实测踩到）—— **本域已规避**
+
+- G1 的实测现象：`-pl <域内模块>`（**不带 `-am`**）⇒ reactor 里**没有** `service/common` ⇒ `com.rag:common` **从本地仓库解析** ⇒ 那个 jar 是**主干代码态** ⇒ ⇒ **共享层改动根本没进过测试 classpath** ⇒ ⇒ 「跑绿」是**假绿**
+- ✅ **本域全部回归命令都显式把 `service/common` 放进 `-pl`** ⇒ 等效于带 `-am`（用**本树源码**）⇒ ⇒ **本域不受该坑影响**
+  - 实测命令形如：`mvn -o -B -DargLine=-Xmx2g -pl service/common,service/like/like-rpc test`
+  - ⚠️ **不 `install`** 共享层 jar 到 `~/.m2`（那会改变别的 lane 正在解析的依赖）
+- ⚠️ **口径纪律**：`service/common` 在 reactor 里 ⇒ **reactor 总数 ≠ 本域数**（共享层自己的 **324** 条会进汇总）⇒ ⇒ **本域数字按本域模块的 surefire 目录**统计（`service/{message,like,task}/**/target/surefire-reports/TEST-*.xml`）⇒ ⇒ **不把 reactor 总数当本域数**
+
+### ③ 🟢 **G1 [3]「连带删 `@Import` 不够」—— 本域实测「不适用」**
+
+- G1 的坑：守门用 `@SpringBootConfiguration`（**不含** `@EnableAutoConfiguration`）⇒ **自动配置清单不会被读** ⇒ 单纯删 `@Import` ⇒ 容器里 customizer = 0 ⇒ ⇒ **守门静默测不到任何断连策略**（零报错）
+- ✅ **本域实测不适用**：`service/{message,like,task}/**` 内 **`@SpringBootConfiguration` = 0 命中** ⇒ ⇒ 本域**没有**「最小上下文」守门 ⇒ ⇒ 该坑不适用
+- ✅ **本域两个新 Redis 守门用的是真应用类**：`@SpringBootTest(classes = LikeRpcApplication.class)` / `TaskRpcApplication.class`（**真 `@SpringBootApplication`** ⇒ 含 `@EnableAutoConfiguration` ⇒ **清单会被读**）⇒ ⇒ 且已用 **`size()==1` ＋ bean 名含 `goStyleRedisClientOptionsCustomizer`** 双重断言坐实「共享层那份确实在容器里」⇒ ⇒ **即使清单没被读，断言也会红** ⇒ ⇒ **不会静默测不到**
+
+### ④ ⚠️ **U+FFFD 跨树数字不可直接比**（G1 合并后全仓 = **23 份 / 64 处**）
+
+- G1 报：合并后全仓 **23 份 / 64 处**（原 20 份 / 51 处）⇒ 增量来自 G1 台账**引述了坏字节**（把「真损坏」现场当证据写进台账）⇒ ⇒ G1 域真损坏 = 0
+- **G2 本树口径**：全仓 **4103 份**扫描 ⇒ 含 `target/` **18 份 / 60 字节** · 剔 `target/` **15 份 / 38 字节**（源级）
+- ⇒ ⇒ **两个口径（份数 / 处数）与构成都不同** ⇒ ⇒ **复扫要比「文件清单」而不是比数字** ⇒ ⇒ **本域写权面 340 文件 = 0 命中**
+
+### ⑤ ✅ **`application.yaml` 不改名（G1 (b)）—— 本域同意，走「台账登记 ＋ 复开触发条件」**
+
+- **同意 G1 的三条理由**：收益仅消除 **1 个**命名误判点 / 成本 ≈ **42 处**引用且其中 3 处 ＋ `docs/Pitfalls/users/_shared.md` 2 处**不在任何 lane 白名单** / 扩展名是**纯表达层、零语义收益**
+- **本域现状**：`service/{message,like,task}/**/src/main/resources/application.yml`（`.yml`）⇒ ⇒ 本轮**零改动**
+- **复开触发条件**（本域侧登记）：当出现「**按扩展名分派的机器判定**」成为某个门禁 / 脚本的**正确性前提**时（例如某个守门开始区分 `application.yml` 与 `application.yaml`）⇒ ⇒ 届时重开该议题
+
+---
+
+---
+
+## 4·十、🟢 **第十轮（2026-10-27 17:3x）· §5.3e 项⑤ 销号 —— A3「路径归一」的**真 Tomcat** 探针**（共享层那层已在本树 ⇒ 本域自己补上探针）
+
+### ① 交付物（**本域自己的**，不外推）
+- `TaskApiPathNormalizationRealTomcatTest`（**3 条**）· `TaskApiPathNormalizationControlTest`（**2 条**）⇒ ⇒ **A/B 两类**
+- ⚠️ **不外推**：like / message 两域**各做了一遍自己的 A/B** ⇒ ⇒ **三域各 5 条 = 15 条**（不是「一个域跑一遍、三域通用」）
+
+### ② 判据（三段，每段都落到消费点）
+① **共享层那份在、且没被域内同名 Bean 遮蔽** ⇒ `context.containsBean("goStylePathNormalizingFilter")` ＋ 按名取到的**类型**必须是 `com.rag.common.http.GoStylePathNormalizingFilter` ＋ `@Order` = `HIGHEST_PRECEDENCE + 2`
+② **真 Tomcat ＋ 真请求** ⇒ `DEFINED_PORT` ＋ 本域专用端口段 `21800-21899`（`RealTomcatPort`）＋ **`HttpURLConnection`**
+   - ⚠️ **为什么不能用 `java.net.http`**：它的 `URI` 构造器**自己就规范化路径**（`URI.create("…/a/../b")` ⇒ `…/b`）⇒ ⇒ 变体在**发出去之前**就被抹平 ⇒ ⇒ 测到的会是「规范路径」⇒ ⇒ **探针失效**
+   - ⚠️ **`java.net.URL` 不校验也不规范化** ⇒ 请求行里原样带上变体（与 Go 的 `net/http` 同形：`r.URL.Path` 拿到的是客户端发的**原样**路径）
+③ **变体 ⇒ 与规范路径同状态、且 ≠ 404**（`404` = 压根没匹配到路由）
+
+### ③ 实测矩阵（**三域一致**）
+| 域 | 规范路径 | 4 种变体（**A 组**：归一层在） | 4 种变体（**B 组**：归一层缺席） |
+|---|---|---|---|
+| task-api | 200 | **200 ×4** | **404 ×4** |
+| like-api | 401 | **401 ×4** | **404 ×4** |
+| message-api | 401 | **401 ×4** | **404 ×4** |
+
+- 4 种变体 = **尾斜杠** · **重复斜杠** · **`.` 段** · **`..` 段**
+- ⇒ ⇒ **Tomcat / Spring 自己不会归一这四种形态** ⇒ ⇒ **共享层那层是全部四种变体的承重件**（不是「Tomcat 顺手干了」）
+- ⇒ ⇒ **B 组 = 同一份域服务 ＋ 同一通真实请求，唯一差别是「那层机制在不在」**（`spring.autoconfigure.exclude=…GoStylePathNormalizingAutoConfiguration`）⇒ ⇒ **A 组的绿不是空断言**
+
+### ④ 变异验证（**三域各做一遍**，红在目标断言）
+- 变异 = 在域内放一个**同名但什么都不做**的 Filter Bean（`@Component("goStylePathNormalizingFilter")`）⇒ ⇒ 共享层那份被 `@ConditionalOnMissingBean(name=…)` **跳过**（= **遮蔽**，不是叠加）
+- ⇒ ⇒ **这不是人造的失效形态**：users 域的「域内副本遮蔽共享层那份」就是同款形态 ⇒ ⇒ 变异复现的是**真实隐患**
+- 结果（三域**完全一致**）：**3 条里红 2 条**、**`Errors = 0`** ⇒ ⇒ **上下文正常启动**（不是启动期炸）⇒ 红点精确：
+  - `sharedLayerNormalizingFilterIsPresent`（实测类型 = 域内影子 Bean）
+  - `pathVariantsReachTheSameRoute`（变体 404）
+  - **仍绿 1 条** = 规范路径照通 ⇒ ⇒ 坏的只有归一，不是路由本身
+- ⇒ ⇒ 还原**逐字节一致**（三个 md5 与变异前完全相同）⇒ ⇒ 复跑全绿
+
+### ⑤ 🔴 变异暴露的一条**设计缺陷**（已修 · 值得留档）
+- 第一版用 `@Autowired GoStylePathNormalizingFilter`（**具体类型**）⇒ ⇒ 遮蔽时**上下文启动期就炸**（`NoSuchBeanDefinitionException`）⇒ ⇒ 守门会「**红在启动**」而不是「红在断言」⇒ ⇒ 看不出是哪条判据挂了 ⇒ ⇒ 无法区分「压根没这层」与「这层不对」
+- ⇒ ⇒ **改成按 Bean 名 ＋ 断言类型**（`containsBean` ＋ `getBean` ＋ `instanceof`）⇒ ⇒ 遮蔽现在**红在断言上**（实测三域一致）
+- ⇒ ⇒ **可复用的判据**：**守门的前置断言不要用「注入具体类型」**，否则一旦机制缺席，失败点会前移到容器启动期 ⇒ ⇒ **看不出是哪条判据挂了**
+
+### ⑥ 与 Go 的对照口径（**不外推 · 不整体写 L4**）
+- **Go 出处**：`rest/router/patrouter.go:48`（注册时 Clean）· `:60`（匹配时 Clean）⇒ ⇒ 变体命中同一条路由
+- ⚠️ **Go 侧的 L4 活体证据是共享层那一份**（真 go-zero `rest` server ＋ curl：5 种变体全 200 · 2026-10-27）⇒ ⇒ **那不是本域独立跑的 Go 腿**
+- ⇒ ⇒ **本轮补的是「RAG 腿」**：本域上下文里**那层真的承重**（真容器 ＋ A/B ＋ 变异验证）⇒ ⇒ **A3 轴的「路径归一」这一格 = RAG 腿 L4**；**Go 腿 = 共享层那一次的活体（不是本域独立跑的）** ⇒ ⇒ 台账按此口径记，**不整体升 L4**
+
+### ⑦ §5.3e 清单更新
+| 项 | 状态 |
+|---|---|
+| ⑤ A3 升 ✅ 的真 Tomcat 探针 | ✅ **本域侧销号**（本轮：真 Tomcat ＋ A/B 对照组 ＋ 三域各自变异验证） |
+
+---
+
+### 🟢 **第十一轮 · 合并后 9 模块回归（刷新 · 2026-10-27 17:55 → 18:0x）**（**上一张 970 的表是 13:31–13:39 那次的历史记录 ⇒ 原值保留不改写**）
+
+| 模块 | tests | failures | errors | skipped |
+|---|---|---|---|---|
+| `service/common`（**合并进来的共享层**） | 324 | 0 | 0 | 0 |
+| `service/message/message-api` | **103** | 0 | 0 | 0 |
+| `service/message/message-rpc` | 89 | 0 | 0 | 0 |
+| `service/message/message-common` | 21 | 0 | 0 | 0 |
+| `service/like/like-api` | **94** | 0 | 0 | 0 |
+| `service/like/like-rpc` | **120** | 0 | 0 | 0 |
+| `service/like/like-common` | 18 | 0 | 0 | 0 |
+| `service/task/task-api` | **102** | 0 | 0 | 0 |
+| `service/task/task-rpc` | **121** | 0 | 0 | 0 |
+| **合计** | **992** | **0** | **0** | **0** |
+
+⇒ ⇒ **域侧 8 模块 = 668**（相对 970 那次的 646 ⇒ **+22**）⇒ ⇒ **逐条对得上本轮新增的用例**：
+**like-rpc +5**（115→120 · A9 端到端 3 条 ＋ Redis 断连 2 条）· **task-rpc +2**（119→121 · Redis 断连 2 条）· **三域 api 各 +5**（第十轮 A3 探针：message-api 98→103 · like-api 89→94 · task-api 97→102）⇒ ⇒ **22 = 5 + 2 + 5 + 5 + 5** ✔
+⇒ ⇒ **口径**：surefire XML **mtime 切**求和（**156 份报告**）**== maven 9 模块汇总行**（**逐字相等**）⇒ ⇒ **0 stale 报告**
+⇒ ⇒ ⚠️ **本轮踩到的一个「stale 产物污染计数」的实例（值得留档）**：第十轮做**变异验证**时跑出了 **task-api failures = 2** 的报告 ⇒ ⇒ `check-ledger-selfcheck.py` 第 3 层当场报「❌ task-api failures/errors/skipped 全 0」⇒ ⇒ **根因不是代码坏了，是变异跑的失败报告还留在 `target/surefire-reports/`** ⇒ ⇒ 本轮全量回归把 task-api 重跑一遍 ⇒ ⇒ **failures 归 0、门禁恢复绿** ⇒ ⇒ ⇒ **判据**：门禁读的是 `target/` 里的报告 ⇒ ⇒ **任何一次带 `-Dtest=` 的定向跑都会改写/污染它** ⇒ ⇒ **跑门禁前必须有一次覆盖该模块的全量跑**（否则门禁报的是「上一次跑剩的产物」，不是当前代码态）

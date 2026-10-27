@@ -27,7 +27,7 @@
 | 未修 | 0 条语义漂移（余 1 条**全域共性** DRIFT-TASK-API-004，按 §三·三 不在本域单独修） |
 | 证据强度 | ✅✅ **双侧活体对拍**（2026-10-24 重跑，44 条 MATCH 44/DIFF 0）· ✅✅ **真 Tomcat 守门**（`TaskApiContentTypeTest` 12 条 + 变异测试）· ✅✅ **Nacos 真注册中心**（2026-10-24，注册/注销实测，见 §四·六）· ✅ 真实 MVC 管线（MockMvc，20 条）· ⚠️ gRPC 边界在单测里是 mock |
 | 对拍结果 | **44 用例：MATCH 44 / DIFF 0**（判定口径：状态码 + **归一后**的 Content-Type 媒体类型 + nosniff + 响应体逐字节） |
-| 测试 | **97 tests / 0 failures / 0 errors / 0 skipped**（task-api；原 78 + 新增 12 ⇒ **2026-10-27 阶段 2**：新增 `TaskApiFormLimitReachabilityTest` **6** 条（form 闸门语义可达性 + 端口段）+ `TaskApiContentTypeTest` 的端口段守门 **1** 条 ⇒ 90 + 7 = **97**） |
+| 测试 | **102 tests / 0 failures / 0 errors / 0 skipped**（task-api；原 78 + 新增 12 ⇒ **2026-10-27 阶段 2**：新增 `TaskApiFormLimitReachabilityTest` **6** 条（form 闸门语义可达性 + 端口段）+ `TaskApiContentTypeTest` 的端口段守门 **1** 条 ⇒ 90 + 7 = **97** ⇒ 🆕 **2026-10-27 第十轮**：新增 `TaskApiPathNormalizationRealTomcatTest` **3** 条 ＋ `TaskApiPathNormalizationControlTest` **2** 条（A3「路径归一」的真 Tomcat 探针 ＋ A/B 对照组）⇒ 97 + 5 = **102**） |
 
 ### 〇·一、本组件的守门测试清单（2026-10-24 复核补登）
 
@@ -44,6 +44,8 @@
 | `TaskGetServiceTest` | **7** | `GetTask` 的领域逻辑（合并任务定义、pack/unpack 进度） | 领域层 |
 | `TaskApiRawBodyConfig` / `GoStyleRawBodyArgumentProcessor` | — | （生产代码）请求体转换器本体 | — |
 | `TaskApiFormLimitReachabilityTest` | **6** | **form 值上限闸门在本域的语义可达性**（2026-10-27 阶段 2 新增）：Go 侧 handler 用**裸** `json.NewDecoder(r.Body)` ⇒ `r.Form` 从不被求值 ⇒ go-zero 的 `maxFormParamCount=2048`（`go-zero@v1.10.2/rest/httpx/util.go:15`）**在本域不可达** ⇒ 本域闸门必须 `mode: "off"`（`task-api/application.yml:213`）—— 断言 ① 生效模式必须是 OFF（**直接**断言 `GoStyleFormValueLimitInterceptor#mode()`）② >2048 个非空 query 值 ⇒ 200 ③ `?a=%zz`（畸形转义）⇒ 200 ④ `?a=1;b=2`（分号）⇒ 200 ⑤ 阳性对照（无 query ⇒ 200 + 正常 task 载荷）<br>🆕 **+1 条端口段守门** `bindsToDedicatedPortSegment`（2026-10-27 阶段 2 加） | 真 Tomcat + 变异测试（改回 `mode: raw` ⇒ 4 条红） |
+| `TaskApiPathNormalizationRealTomcatTest` | **3** | 🆕 **A3「路径归一」的真 Tomcat 守门**（2026-10-27 第十轮）：Go 侧 `go-zero@v1.10.2/rest/router/patrouter.go:48`（注册时 `path.Clean`）· `:60`（匹配时 `path.Clean`）⇒ ⇒ **路径变体命中同一条路由**。断言 ① **前提非空洞**：共享层那份 `GoStylePathNormalizingFilter` **按 Bean 名**（`goStylePathNormalizingFilter`）在容器里 **且类型是共享层那份**（不是域内同名副本 —— 共享层自动配置带 `@ConditionalOnMissingBean(name=…)` ⇒ **域内同名 Bean 会遮蔽它**）＋ `@Order = HIGHEST_PRECEDENCE+2` ② **阳性对照**：规范路径 ⇒ 命中路由 ③ **4 种路径变体**（尾斜杠 / 重复斜杠 / `.` 段 / `..` 段）⇒ **与规范路径同状态、同业务分支**<br>⚠️ **必须用 `HttpURLConnection` 而不是 `java.net.http`** ⇒ 后者的 `URI` 构造器**自己就规范化路径** ⇒ 变体在发出去之前就被抹平 ⇒ 探针失效 | 真 Tomcat + **A/B 对照组** + 变异测试（域内同名影子 Bean ⇒ **3 条红 2 条、Errors=0**、红在目标断言） |
+| `TaskApiPathNormalizationControlTest` | **2** | 🆕 **A3 路径归一的对照组**（2026-10-27 第十轮）：与上一类**唯一差别** = `spring.autoconfigure.exclude=com.rag.common.http.GoStylePathNormalizingAutoConfiguration` ⇒ 那层 Filter **压根不在容器里**（= 合入共享层之前的状态）⇒ ⇒ **实测 4 种变体全部 404**（Tomcat / Spring 自己**不会**归一它们）⇒ ⇒ 证明「变体能命中路由」这件事**全是共享层那层在承重** ⇒ ⇒ 上一类的绿**不是空断言** | 真 Tomcat + **对照组** |
 | `RealTomcatPort`（`…/task/api/support/RealTomcatPort.java`） | — | （**测试支撑类**，非用例）真 Tomcat 的**端口选取 + 双绑定自检**：本域专用段 **21800–21899** ⇒ 避开 favorite 的 21300–21399 / 探针的 21400–21599 / favorite 脚手架的 21950–21999 / **OS 临时段 49152–65535**（Docker 随机发布端口就在那一段）<br>⚠️ 复制自 favorite 域同款（`service/common` **不发布 test-jar** ⇒ 业务模块 test scope 拿不到共享层测试类 ⇒ 只能复制） | 支撑类 |
 
 > ⚠️ **本节新增的 `RealTomcatPort` 会被 `check-ledger-selfcheck.py` 第 5 层报成「台账未点名的测试类」—— 这是**工具口径**缺口，不是台账缺陷**：
