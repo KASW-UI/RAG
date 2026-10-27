@@ -3248,6 +3248,15 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | 其余 A 轴 | 不变（本轮只碰降载的 RT 记录 + 一个测试 + 一句注释）|
 | **Go 出处（三处，逐条带行号）** | ① `core/load/adaptiveshedder.go:284-287`（`float64` + `math.Ceil`）· ② `core/load/adaptiveshedder.go:127-133`（`Allow()` 先判降载后 `addFlying(1)`）· ③ `core/load/adaptiveshedder_test.go:124-178`（Go 的测试**直接设状态** ⇒ 密闭）· ④ `zrpc/internal/serverinterceptors/sheddinginterceptor.go:31-46`（`IncrementTotal` 在前 / `defer` 里 `Fail` vs `Pass`）|
 
+> **🔴 影响面订正（2026-10-28 03:0x · 落码后 grep 实测）** —— 上一行的「**10 个 api / 各 rpc 组件**」这个写法**不准** ⇒ ⇒ 保留原值可追，此处给准确口径：
+>
+> | 项 | 实测结果 |
+> |---|---|
+> | 降载拦截器的位置 | **gRPC server 侧**（`GoStyleRpcSheddingInterceptor` 是 `io.grpc.ServerInterceptor`）⇒ ⇒ **api 组件（HTTP 入口）零装配** |
+> | 实际吃这条的 = **10 个 rpc 组件** | 逐条 grep 生产装配点 `GoStyleRpcProtectionChain.build(...)`：<br>`like-rpc/LikeRpcApplication.java:137` · `comment-rpc/CommentRpcApplication.java:99` · `follow-rpc/FollowRpcApplication.java:118` · `message-rpc/MessageRpcApplication.java:134` · `favorite-rpc/FavoriteRpcApplication.java:108` · `admin-rpc/AdminRpcApplication.java:112` · `user-rpc/UserRpcApplication.java:118` · `task-rpc/TaskRpcApplication.java:138` · `hot-rpc/HotRpcApplication.java:108` · `article-rpc/ArticleRpcApplication.java:131` |
+> | ⇒ ⇒ **结论修正** | 影响面 = **10 个 rpc 组件**（不是「10 个 api」）⇒ ⇒ **全量回归的必要性不变**（这 10 个 rpc 全在 reactor 里）⇒ ⇒ 但**若有人按「10 个 api」去核对 api 侧 ⇒ 会核对错对象**（api 侧零装配 ⇒ 改 RT 对 api 侧**零行为影响**）|
+
+
 **⑥ 本层这一条** | **本轮首次有【共享层生产代码】的行为变更**（不是加守门、不是纯注释）⇒ ⇒ **必须全量回归 + 变异验证** ⇒ ⇒ **零可执行代码改动**的说法在本节**不再成立**（§4.10.50~§4.10.58 那段期间成立）。
 
 ## 5. 交付物清单
