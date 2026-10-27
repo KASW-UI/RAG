@@ -422,3 +422,22 @@ Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
 ⇒ ⇒ 🟢 **FB-S1 仍然成立**（`cd893d1` **没有**动 `tools/difftest/check-tomcat-limits.py:149`）⇒ ⇒ 期望表**仍**把 task-api 写死 `"raw"` ⇒ ⇒ **守门红的原因不变**（期望值 stale · 权威语义 = OFF）⇒ ⇒ **改守门，不改本域 yml** ⇒ ⇒ **本条的判据链在 `cd893d1` 之后仍然成立**（权威行仍是 `GoStyleFormLimitMode.java:237` = `Mode.OFF` · task 行**未变**）
 
 ⇒ ⇒ 📌 **一条方法论留档（跨层改动会改写域侧结论）**：**共享层的一次解耦，足以把域侧的「有界残留」从「更严」翻成「更松」** ⇒ ⇒ ⇒ **域侧台账里凡写了「运行期上限 / 阈值」类结论，都必须标「依赖共享层哪个版本」** ⇒ ⇒ ⇒ **共享层一改 ⇒ 域侧这条要重核**（不是「重写」⇒ 是**重核**）⇒ ⇒ ⇒ **与「配置里没写 ≠ 没开」同族** —— **读到的那个值，可能不是系统会吃到的那个值**
+
+### 🟢 **交叉验证**（2026-10-27 13:3x）· G4 新增的共享层守门与本域守门**同向互证**
+
+G4 的 `cd893d1` 同时新增了一个**共享层**守门：`service/common/src/test/java/com/rag/common/http/GoStyleParamLimitOffModeGateTest.java`（**G4 树 `cd893d1`** · 290 行）⇒ ⇒ **它的判据与本域的守门正好互为两侧**：
+
+| 侧 | 文件 | 断言 | 判据轴 |
+|---|---|---|---|
+| **共享层（G4）** | `GoStyleParamLimitOffModeGateTest`（`:120-127`） | **off 域的运行期 connector 参数上限 == 10001**（「抬上限与 mode 解耦」） | 容器层 |
+| **共享层（G4）** | 同上（`:141`） | 「off 域：容器上限 10001 ⇒ **2049 个参数不该被容器拒**」 | 应用层 |
+| **共享层（G4）** | 同上（`:154-157`） | 「off ⇒ 容器里那个闸门 bean 确实是 `Mode.OFF`，且 **2049 个非空值原样放行**」 | 应用层 |
+| **本域（G2）** | `TaskApiFormLimitReachabilityTest` | 「**>2048** 个非空 query 值 ⇒ **200**」 | 应用层（真 Tomcat） |
+
+⇒ ⇒ 🔴 **G4 的守门 javadoc 明确点名了本域**（`cd893d1` 版 `:36` / `:56-57`）：「不装 ⇒ 域自捕获（**favorite**）/ **上限不可达（task）**」·「**上限不可达**（task：Go 侧 `r.Form` 从不求值）⇒ ⇒ Tomcat 不该比 Go **更早**拒 ⇒ 容器上限也该抬到 10001」
+⇒ ⇒ ⇒ **两侧判据同向、证据互证** ⇒ ⇒ **合并后本域守门与共享层守门应当同时绿** ⇒ ⇒ **零判据冲突风险**（不是「各写各的、恰好不冲突」，是**同一个 Go 侧事实的两侧表达**）
+⇒ ⇒ ⇒ 📌 **G4 的 javadoc 把旧行为（OFF ⇒ 停在 2048）称为「误伤」**，并点名 **task（上限不可达）** 与 **favorite（域自捕获）** 两种 OFF 情形 ⇒ ⇒ **与本域 D-1 订正的方向完全一致**（本域订正：旧残留那一面「比 Go 更严」已被共享层消除）
+
+⇒ ⇒ 🟢 **另一条前提复核（本域台账 §「合并后我域必做」第 2 条的 ⑤⑥）**：G4 新树里 `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java:131` **仍只** `builder -> builder.disconnectedBehavior(...)` ⇒ ⇒ **不碰 `timeoutOptions`、不碰池** ⇒ ⇒ **本域「池守门 ⑤⑥ 不受共享层收编影响」的前提在新树里仍成立**（`cd893d1` 只改了那个文件的 3 行 javadoc「三份→五份」）⇒ ⇒ **本域 Redis 侧无需新增动作**
+
+⇒ ⇒ 📌 **顺带一条「我自己的路径引用也会过期」的实例**：本条复核里我第一次按 `service/common/src/main/java/com/rag/common/spring/GoStyleRedisClientAutoConfiguration.java` 去查 ⇒ **零命中** ⇒ 实际路径是 **`.../common/redis/`**（不是 `.../common/spring/`）⇒ ⇒ **同 §「跨树引用必须带 commit id」** —— 路径也会漂 ⇒ ⇒ **跨树引用要连路径一起在该 commit 上重新定位**
