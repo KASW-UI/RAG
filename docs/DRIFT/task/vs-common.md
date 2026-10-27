@@ -165,6 +165,24 @@
 
 ## 6. 未验证项（本轮明确留下的缺口，**不写成已闭环**）
 
+6. 🆕 **共享层「进程级静态池」缺陷在我域同构 ⇒ 合并后必须复核**（2026-10-27 · G4 `7488b3d` 触发我做静态自查）：
+   - **G4 修的缺陷**：共享层的 `HttpMiddleware.HTTP_EXECUTOR` / `RpcInterceptor.TIMEOUT_SCHEDULER` / `RpcInterceptor.HANDLE_EXECUTOR`
+     是 **`static final`** ⇒ `shutdown()` **永久终止** ⇒ surefire 一个模块一个 JVM ⇒ 模块内**多个 Spring 上下文**
+     ⇒ 前一个上下文关闭后 `schedule()` / `submit()` 被拒 ⇒ 拦截器返回 **`INTERNAL`** 而不是 `DEADLINE_EXCEEDED`。
+   - **触发钩子**：`service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:52-56`
+     （`@Component` + `@PreDestroy` ⇒ 调 `HttpMiddleware.shutdown()` + `RpcInterceptor.shutdown()`）
+     ⇒ ⚠️ **我域三个 rpc 组件全部 `@Import` 了它**
+     （`LikeRpcApplication.java:91` · `TaskRpcApplication.java:89` · `MessageRpcApplication.java:77`）
+     ⇒ ⇒ **我域同构，不是「别的域才有」**。
+   - **我域的暴露面（实测）**：`LikeRpcGrpcInterceptorWiringTest:178` 断言 `DEADLINE_EXCEEDED`
+     （另 `LikeRpcSlowThresholdGateTest` · `LikeRpcTimeoutCapTest` × 4）
+     ⇒ 且 like-rpc 有 **9 个** `@SpringBootTest`（properties 互不相同 ⇒ 9 个独立上下文）
+     ⇒ 按 surefire 报告写入时间还原，该断言所在类排**第 7 位** ⇒ 其前已有 5 个 Spring 上下文跑过。
+   - **G4 的修法**：`AtomicReference` + 取用时 `isShutdown()` 检出即 **CAS 重建**（自愈）⇒ 合并后**毒化自动恢复**。
+   - ⇒ **我域动作 = 0**（域侧无自建静态池 ⇒ 只经共享层受影响 ⇒ 合并即受益）
+   - ⚠️ **但「合并前我域的绿是真是侥幸」我未实证** —— 需**合并后**复跑本域这三处 `DEADLINE_EXCEEDED` 断言
+     ⇒ **收口回归必查项**（这正是 G4 那句「绿可能只是没走到」）。
+
 1. ~~**FB-02 的 RAG 侧后果（400 vs 200）未跑**~~ ⇒ ✅ **阶段 2 已补 RAG 侧**：`TaskApiFormLimitReachabilityTest`（真 Tomcat）覆盖 3 条 query 变体（>2048 非空值 / `?a=%zz` / `?a=1;b=2`）⇒ 现状全部 **200**（= Go 侧语义，因 Go 侧从不解析 query）⇒ **域侧已闭环**。<br>⚠️ **仍缺 Go 侧活体** ⇒ 这 3 条变体在 Go 真源上的对应响应**未实测** ⇒ 按 §3.3「无双侧活体不得写 L4」⇒ A3 轴整体仍不得标 L4。
 2. **FB-01 的「RAG 对尾斜杠返 404」** —— 🟢 **Go 侧已由 G4Common 活体坐实**（go-zero 真 server，5 种路径变体全 200，2026-10-27）⇒ 剩下的是 **RAG 侧**的对应证据，**正在 G4 手里**（共享层归一器 + 真 Tomcat 守门）；article 域的等价断言见 `service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiRouteAuthBoundaryTest.java:221`。
 3. **A2 的 shedding 在链上**无任何守门证明（现存守门主动关掉降载）⇒ 这是本轮最实的一个「**跑绿 ≠ 对**」形态。
