@@ -202,10 +202,21 @@ rag:
       # ⚠️ off 的两个前提（已逐条核实）：
       #    ① GoStyleFormValueLimitInterceptor.preHandle 的 OFF 分支**直接 return true**
       #       （不判定、不拒绝）
-      #    ② GoStyleTomcatParameterLimitCustomizer.customize 的 OFF 分支**直接 return**
-      #       ⇒ **不动**容器上限 ⇒ Tomcat 保留 yaml 的 2048
-      #    ⇒ 但本域**从不调 getParameter***（控制器只有 @RequestBody，没有 @RequestParam）
-      #    ⇒ Tomcat 的参数解析是**惰性**的 ⇒ **不可达 ⇒ 无影响**
+      #    ② GoStyleTomcatParameterLimitCustomizer.customize 的 OFF 分支
+      #       —— ⚠️ **两版本语义不同（容器上限的抬升与闸门的有无「解耦」了）**：
+      #       · **本树现状**（共享层仍含 `if (mode == OFF) return;`）⇒ **不动**容器上限
+      #         ⇒ Tomcat 保留 yaml 的 2048
+      #       · **合并 G4 `cd893d1`（「容器上限抬升」与「闸门有无」解耦）之后** ⇒ OFF
+      #         **只关应用层判定** ⇒ 容器上限**无条件**抬到 10001
+      #         （`setMaxParameterCount(MAX_PARAMETER_COUNT)`）
+      #       ⇒ ⇒ **两种状态下本域都不可达 ⇒ 行为无差异**：
+      #         本域**从不调 getParameter***（控制器只有 @RequestBody，没有 @RequestParam）
+      #         ⇒ Tomcat 的参数解析是**惰性**的 ⇒ 上限既不被触发、也不被越过
+      #         ⇒ ⚠️ **反向残留**（不是「RAG 更严」，而是「若本域将来开始读 query 参数」）：
+      #           RAG 会放行到 **10001**，而 Go 侧 `net/url` 在 **10000** 就拒 ⇒ 差 1
+      #           ⇒ 届时才需处理 ⇒ 当前**不可达**
+      #         ⇒ 守门 `TaskApiFormLimitReachabilityTest`（下面）负责钉住「当前不可达」
+      #    ⇒ ⚠️ **合并清单**：本段的 ② 描述**依赖共享层版本** ⇒ 合并 G4 后请按上面对照一次
       #
       # ⇒ 守门：service/task/task-api/src/test/java/com/rag/task/task/api/
       #        TaskApiFormLimitReachabilityTest.java（真 Tomcat）
