@@ -1969,3 +1969,16 @@ G4 在共享层 `docs/DRIFT/global/vs-common.md` §2 的 **A2 行**逐个 rpc **
 **③ G4-4 反馈单已闭合**（本域 2026-10-27 登记的共享层 U+FFFD）：
 G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）⇒ 纯注释，零行为变化」
 ⇒ **本域的反馈单已落、零行为变化** ⇒ **无需再跟进**。
+---
+
+### 附录 · 📌 第六次全量回归的 `article-rpc` 2 条失败 ⇒ **根因在共享层，本域零改动**（2026-10-27 · G4 通报）
+
+| 项 | 内容 |
+|---|---|
+| 现象 | `ArticleGrpcInterceptorWiringTest.serverSideTimeoutIsActuallyEnforced` ⇒ `actual status=INTERNAL description=panic: Task … rejected from ScheduledThreadPoolExecutor[Terminated, …]`；另一条 **`handler` 根本没被调用** |
+| **归属** | 🔴 **根因在共享层**（`service/common`）⇒ **本域零改动、那两条用例不用改**（G4 已修）⇒ ⚠️ **别把它读成「article-rpc 有缺陷」** |
+| 根因 | `RpcInterceptor` / `HttpMiddleware` 的三个**进程级静态池**是 `static final` ⇒ `shutdown()` **永久终止** ⇒ surefire **一模块一 JVM** ⇒ **模块内多个 Spring 上下文** ⇒ 前一个上下文关闭后，后续上下文里 `schedule()/submit()` **被拒** ⇒ 拦截器返回 **INTERNAL** 而不是 **DEADLINE_EXCEEDED** |
+| 🔴 **为什么前五轮全量都绿** | 修 G1 派单 #8 之前，纯 gRPC 进程的 `@PreDestroy` **先抛 `NoClassDefFoundError`** ⇒ `RpcInterceptor.shutdown()` **根本没机会执行** ⇒ 三个静态池**侥幸存活** ⇒ ⇒ **那不是「本来就对」，是「缺陷把保护罩挡住了」** |
+| 修法 | 三个池改 `AtomicReference` + CAS 自旋 ⇒ **终止后按需重建** ⇒ 落 `service/common`（**G4 写权**）⇒ **本域不用改** |
+| 实测 | `article-rpc` **154 条 / 0 失败**（修前同模块 2 条失败）⇒ 已转绿 |
+| **教训（可复用）** | ① **「跑绿 ≠ 对」的第四种形态：绿是因为那条路径根本没被执行过** ⇒ 拿到「一直绿」的结论时多问一句「**这条路径在本轮之前真的被执行过吗**」——不只问「测试绿不绿」，还要问「**有没有被另一个缺陷挡在前面**」。<br>② **归属判定看「根因落在哪一层」，不看「失败用例在哪个域」** ⇒ 失败用例在别人域、根因在共享层 ⇒ **修共享层，域侧零改动**（用例不用改）。<br>③ **「修好一个缺陷 ⇒ 另一个潜伏缺陷显形」不是意外而是常态** ⇒ 修缺陷前先想「**它挡住了什么**」⇒ 修完要准备接住新暴露的问题，而不是把它当成「回归失败」。 |

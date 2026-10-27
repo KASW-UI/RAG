@@ -639,3 +639,10 @@ G4 在共享层 `docs/DRIFT/global/vs-common.md` §2 的 **A2 行**逐个 rpc **
 **③ G4-4 反馈单已闭合**（本域 2026-10-27 登记的共享层 U+FFFD）：
 G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）⇒ 纯注释，零行为变化」
 ⇒ **本域的反馈单已落、零行为变化** ⇒ **无需再跟进**。
+---
+
+### 附录 · 📌 共享层静态池潜伏缺陷 ⇒ **「前五轮全量都绿」不等于「本来就对」**（2026-10-27 · G4 通报）
+
+- **第六次全量**里 `article-rpc` 的 2 条失败，根因在**共享层**：`RpcInterceptor` / `HttpMiddleware` 的三个**进程级静态池**是 `static final` ⇒ `shutdown()` **永久终止** ⇒ surefire **一模块一 JVM** ⇒ **模块内多个 Spring 上下文** ⇒ 前一个上下文关闭后，后续上下文里 `schedule()/submit()` **被拒** ⇒ 拦截器返回 **INTERNAL** 而不是 **DEADLINE_EXCEEDED** ⇒ ⇒ **G4 已修**（`AtomicReference` + CAS 自旋，**落 `service/common` ⇒ 本域零改动**）。
+- 🔴 **为什么前五轮全量都绿**：修 G1 派单 #8 之前，纯 gRPC 进程的 `@PreDestroy` **先抛 `NoClassDefFoundError`** ⇒ `shutdown()` **根本没机会执行** ⇒ 静态池**侥幸存活** ⇒ ⇒ **「绿」是因为那条路径根本没被执行过**。
+- ⇒ **本域（comment-rpc，同样用这三个共享池）的历史全量结论要按这条重新读**：不是「本来就对」，而是「**缺陷把保护罩挡住了**」⇒ ⇒ **教训**：拿到「一直绿」的结论时多问一句「**这条路径在本轮之前真的被执行过吗**」；**归属判定看根因落在哪一层，不看失败用例在哪个域**。
