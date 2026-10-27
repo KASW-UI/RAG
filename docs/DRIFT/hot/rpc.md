@@ -2131,9 +2131,52 @@ Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方�
 | **comment-rpc 全量**（同轮） | **125 / 0 / 0 / 0** ⇒ 基线 123 ＋ 2 = 125 ✅（详见 [`comment/rpc.md` §十二](../comment/rpc.md#十二✅-redis-断连活体对拍共享层的-reject_commands-在本域真的生效-2026-10-27--g3)） |
 | **service/common 全量**（同轮 reactor） | **324 / 0 / 0 / 0** ⇒ **三模块合计 552 / 0 红** |
 | **本轮改动文件** | `HotRedisDisconnectFastRejectGateTest.java`（新增 303 行 / 2 条）· 本档两处段落 |
-| **门禁（本轮终检）** | `tools/check-ledger-tables` **EXIT=0** · `tools/check-ledger-selfcheck` **EXIT=0** · `tools/check-ledger-count` **EXIT=1**（索引称 **315** / 实测 **328** ⇒ 差 **+13** ⇒ 索引在 `docs/DRIFT/_INDEX.md` = **整合者写权面** ⇒ **合并后统一 `--fix`**；⚠️ 相对 §十一.8 记的 **326（+11）**，本轮 **+2** 来自两域各增的 **§十二** ⇒ ⇒ **旧值保留不改写**）· `tools/check-doc-links` **EXIT=0**（本轮**实修 18 处**失效锚点 ⇒ 全部改用门禁自己的 `slug()` **实算值**）· `tools/difftest/check-wave-{lane-ownership,coupling,role-model}` **全 0** · `tools/ledger-lint/favorite/{tables,selfcheck,vs-reality}` = **0 / 1 / 1** ⇒ **与本轮改动前完全相同**（selfcheck 仍 **5 条**，**全在本轮 diff 之外**；vs-reality 那 1 条 = 「共享面零改动」，**结构性**）⇒ ⇒ **本轮零新增门禁级问题** |
+| **门禁（本轮终检）** | `tools/check-ledger-tables` **EXIT=0** · `tools/check-ledger-selfcheck` **EXIT=0** · `tools/check-ledger-count` **EXIT=1**（索引称 **315** / 实测 **328** ⇒ 差 **+13** ⇒ 索引在 `docs/DRIFT/_INDEX.md` = **整合者写权面** ⇒ **合并后统一 `--fix`**；⚠️ 相对 §十一.8 记的 **326（+11）**，本轮 **+2** 来自两域各增的 **§十二** ⇒ ⇒ **旧值保留不改写**）〔📌 **2026-10-27 订正**：**索引路径写错了** ⇒ 被改的是 **`docs/Pitfalls/_INDEX.md`**（不是 `docs/DRIFT/_INDEX.md`）⇒ **根因与闭合动作详见 §十二.6** ⇒ **原值保留不改写**〕· `tools/check-doc-links` **EXIT=0**（本轮**实修 18 处**失效锚点 ⇒ 全部改用门禁自己的 `slug()` **实算值**）· `tools/difftest/check-wave-{lane-ownership,coupling,role-model}` **全 0** · `tools/ledger-lint/favorite/{tables,selfcheck,vs-reality}` = **0 / 1 / 1** ⇒ **与本轮改动前完全相同**（selfcheck 仍 **5 条**，**全在本轮 diff 之外**；vs-reality 那 1 条 = 「共享面零改动」，**结构性**）⇒ ⇒ **本轮零新增门禁级问题** |
 | **U+FFFD 字节级扫描** | 本轮改动文件 **8 份全部 0 命中** · 本域台账＋坑档全量（**33 份**，已剔 `target/`）**0 命中** |
 | **全仓 `check-*.py` 巡检** | **18 个脚本 ⇒ 17 个 EXIT=0 / 1 个 EXIT=1** ⇒ 那 1 个是 `tools/difftest/check-ddl-static.py` ⇒ **是 `users` 域的 9 处既知差异**（`users_user.status` 可空性 1 处 ＋ `DEFAULT CURRENT_TIMESTAMP` 残留 8 处）⇒ ⇒ **不在本域** ⇒ ⇒ **与本轮改动无因果关系** |
+
+### 十二.6 📌 台账计数差 **+13** 的根因定位（2026-10-27 · G3）
+
+**一句话**：**+13 不是漂移** ⇒ ⇒ 它是「**本 lane 在共享索引最后一次更新之后新增了 13 条编号式坑位**」⇒ ⇒ **两棵树各自的数字都是对的**（G4 树 **315** / G3 树 **328**）⇒ ⇒ **合并后跑一次 `--fix`（315 → 328）即可闭合** ⇒ ⇒ **任何一边都不需要改代码**。
+
+#### ① 可复算的判据（三条，逐条给出命令与实测值）
+
+| 判据 | 命令 | 实测 | 结论 |
+|---|---|---|---|
+| **基线处本来就 PASS** | `git merge-base <G4 HEAD> <G3 HEAD>` = **`cd893d1`** ⇒ `git archive cd893d1 docs/Pitfalls` 解到临时目录 ⇒ 用**同一口径**复算 | **315 条** ＋ 索引那行写着 **315**（`docs/Pitfalls/_INDEX.md:117`）⇒ ⇒ **守门 PASS** | ⇒ ⇒ **基线无漂移** ⇒ ⇒ 漂移量 **13 全部产生于本 lane 的提交** |
+| **本 lane 的树** | `python3 tools/check-ledger-count.py`（我树 HEAD `0d5691a`） | 索引 **315** / 实测 **328** ⇒ **差 +13** ⇒ EXIT=1 | ⇒ ⇒ 这就是「差 +13」的**全部来源** |
+| **差集方向（决定性）** | 逐文件逐条比对两树的编号式标题（脚本按 `tools/check-ledger-count.py` 的 `HEADING_RE` + `TOKEN_RE` **同口径**跑） | **G4 有、G3 无 = 0 条** ⇒ ⇒ **纯增、无减、无改写** | ⇒ ⇒ **不存在「有人删条目 / 编号撞号 / 改写旧条目」** ⇒ ⇒ **两树不是「谁错了」，是「谁还没合并」** |
+
+⚠️ **为什么两树会差**：G4 树**不含本 lane 的任何提交**（`0d5691a` / `50ccd00` / `a20282f` / `3249ef7` / `5361863` 全部 `git merge-base --is-ancestor` = **否**）⇒ ⇒ G4 树看的是**本 lane 落码前**的快照 ⇒ ⇒ **315 在 G4 树里是对的，328 在我树里也是对的** ⇒ ⇒ **两边都不该「修」**。
+
+#### ② 那 13 条是谁（逐条给 `文件:行号` ⇒ 可复算）
+
+| 文件 | 行号 | 条目号 | 合计 |
+|---|---|---|---|
+| `docs/Pitfalls/comment/rpc.md` | `614` / `673` / `707` | `PIT-COMMENT-RPC-14` / `-15` / `-16` | **3** |
+| `docs/Pitfalls/favorite/api.md` | `433` / `490` / `545` / `597` | `PIT-FAV-API-010` / `-011` / `-012` / `-013` | **4** |
+| `docs/Pitfalls/favorite/rpc.md` | `1787` / `1836` | `PIT-FAV-RPC-038` / `-039` | **2** |
+| `docs/Pitfalls/hot/rpc.md` | `688` / `724` / `747` / `765` | `P-HOTRPC-21` / `-22` / `-23` / `-24` | **4** |
+| | | **合计** | **13** ✅ |
+
+⇒ ⇒ **13 条全部落在本 lane 的写权面内**（`docs/Pitfalls/{comment,favorite,hot}/**`）⇒ ⇒ **没有一条落在别人域**。
+ℹ️ **「编号前缀族」那一行没有漂移**（守门只报了条目数那一项）⇒ ⇒ 这 13 条**全部落在已存在的 4 个前缀族里** ⇒ ⇒ 前缀集合没变。
+
+#### ③ 🔴 顺带订正：**索引的路径之前写错了**
+
+- 守门工具 `tools/check-ledger-count.py` 写的是 **`INDEX = PITFALLS / "_INDEX.md"`**（`PITFALLS = REPO / "docs/Pitfalls"`）⇒ ⇒ **被改的那个索引是 `docs/Pitfalls/_INDEX.md`**（实测：该文件 `:117` 行就是 `| **全域坑位条目** | **315 条** …`）⇒ ⇒ **`docs/DRIFT/_INDEX.md` 里没有这一行**（实测 `grep "全域坑位条目"` **只命中** `docs/Pitfalls/_INDEX.md`）。
+- ⇒ ⇒ **本档 §十二.5 门禁行 与 [`comment/rpc.md`](../comment/rpc.md) §十二 门禁行里写的「索引在 `docs/DRIFT/_INDEX.md`」是错的** ⇒ ⇒ **两处均已订正为 `docs/Pitfalls/_INDEX.md`**（**原文保留 + 📌 注记**，不改写历史断言）。
+  ℹ️ [`favorite/rpc.md`](../favorite/rpc.md) §15.6 的 ② 块**当时就写对了**（`docs/Pitfalls/_INDEX.md`）⇒ ⇒ **那一处不动**。
+
+#### ④ 归属与收口动作（谁在什么时候做什么）
+
+| 动作 | 谁 | 何时 | 判据 |
+|---|---|---|---|
+| **跑 `python3 tools/check-ledger-count.py --fix`**（把 `docs/Pitfalls/_INDEX.md` 那行改成实测值 ⇒ **315 → 328**） | **合并方 / 整合者**（`docs/Pitfalls/_INDEX.md` 是共享索引 ⇒ AGENTS.md §5.3b「合并后统一更新」） | **合并后** | 跑完 `check-ledger-count.py` ⇒ **EXIT=0** |
+| ⚠️ **不要各 lane 各自 `--fix`** | 各 lane | — | 同一行会被多个分支改 ⇒ ⇒ **合并必撞** ⇒ ⇒ **只在合并后统一跑一次** |
+| **本 lane 需要做的** | **无**（**代码零改动**、**索引零改动**） | — | 我树当前 EXIT=1 是**预期内**的 |
+
+⇒ ⇒ **结论：+13 已闭环，不需要任何一方改代码；它只在合并那一刻需要一个 `--fix`。**
 
 ---
 
