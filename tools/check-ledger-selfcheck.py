@@ -207,6 +207,23 @@ PATH_RE = re.compile(r'(?:service|tools|docs)/[A-Za-z0-9_./-]+\.(?:java|md|py|sh
 CLASS_RE = re.compile(r'`([A-Z][A-Za-z0-9]*(?:Test|ContractTest|GateTest|[a-z]IT))\b')
 REF_RE = re.compile(r'`?([A-Za-z0-9_][A-Za-z0-9_./-]*\.go):(\d+)(?:-(\d+))?`?')
 
+# 🆕 2026-10-27（G4 · 跨 lane 发现的共享工具缺陷）：把「**什么算测试类名**」抽成
+#    **单一真源** ⇒ **分子（CLASS_RE）与分母（第 5 层的候选集）必须用同一套口径**。
+#
+# 🔴 **为什么要抽**：第 5 层原来「分母统计测试源文件里的**所有**类型、分子只认
+#    **测试类命名**」⇒ ⇒ **支撑类**（`RealTomcatPort` / `FakeServerCall` 这类
+#    **不是测试类**的测试源文件）会成为**永远消不掉**的覆盖缺口
+#    ⇒ 「台账怎么改都消不掉」⇒ 门禁恒红 ⇒ **门禁失效**（与本文件上方 `*IT` 那条同族）。
+#    ⇒ 本次修复的方向是**对齐分母**（不是放宽分子）⇒ ⇒ **不会把真实缺口掩盖成绿**
+#    （放宽分子 = 往「假绿」方向走 ⇒ 本层不做）。
+TEST_CLASS_SUFFIX_RE = r'(?:Test|ContractTest|GateTest|[a-z]IT)'
+# ⚠️ 与 CLASS_RE **同一套命名约定**：类名以这些后缀结尾才算「测试类」。
+TEST_CLASS_NAME_RE = re.compile(r'^[A-Z][A-Za-z0-9]*' + TEST_CLASS_SUFFIX_RE + r'$')
+# ⚠️ 与原第 5 层内联的那条**逐字一致**（只把 `re.search` 换成 `re.findall`）
+#    ⇒ ⇒ 「一个文件里先声明支撑类、后声明测试类」的文件也能被看到。
+TYPE_DECL_RE = re.compile(r'^\s*(?:public\s+)?(?:static\s+)?(?:final\s+)?'
+                          r'(?:class|interface|enum|@interface)\s+([A-Z][A-Za-z0-9]*)', re.M)
+
 
 # ====================================================================
 # 工具
@@ -1614,10 +1631,18 @@ def layer5_unmentioned(root, texts, domain):
         #    漏掉它们 ⇒ 静默漏登记（本轮实测：task 域的 2 个 Mapper 接口正属这一类；
         #    碰巧已被台账点名 ⇒ 无实际后果，**但判据的盲区本身要修** ——
         #    换域 / 加类型就会漏）
-        m = re.search(r'^\s*(?:public\s+)?(?:static\s+)?(?:final\s+)?'
-                      r'(?:class|interface|enum|@interface)\s+([A-Z][A-Za-z0-9]*)', src, re.M)
-        if m and m.group(1) not in mentioned:
-            unmentioned.append((m.group(1), f))
+        #
+        # 🔴 2026-10-27（G4）：**候选集必须与分子（CLASS_RE）同一套口径**
+        #    ⇒ 只把「**本文件里存在测试类命名类型**」的文件计入分母，
+        #    且候选名 = 该文件里**所有**测试类命名的类型
+        #    ⇒ ⇒ **支撑类**（`RealTomcatPort` / `FakeServerCall` 这类**不是测试类**
+        #    的测试源文件）不再成为「永远消不掉」的覆盖缺口
+        #    ⇒ ⇒ **不掩盖真实缺口**（真实测试类仍必须被台账点名）。
+        for name in re.findall(TYPE_DECL_RE, src):
+            if not TEST_CLASS_NAME_RE.match(name):
+                continue
+            if name not in mentioned:
+                unmentioned.append((name, f))
     print(f'  仓库内 {domain} 域测试类 {len(files)} 个 ⇒ 台账未点名 {len(unmentioned)} 个')
     for c, f in unmentioned:
         print(f'    ⚠️  {c}')
