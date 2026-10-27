@@ -1276,8 +1276,9 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | 段 | 用途 | 归属 | 状态 | 出处（`文件:行号`） |
 |---|---|---|---|---|
 | 21300–21399 | favorite-api 真容器测试 | G3 | ✅ 已落码 | `service/favorite/favorite-api/src/test/.../support/RealTomcatPort.java:61` `:64` |
-| 21400–21599 | **favorite 探针**（3 个探针共用一段） | **G3**（见 §4.10.19.6 归因订正） | ✅ 已落码 | `tools/api-full-parity-probe/favorite/run.sh:96` · `tools/sql-statement-probe/favorite/run.sh:200` · `tools/grpc-contract-probe/favorite/run.sh:186` |
+| 21400–21599 | **favorite 探针**（3 个探针共用一段） | **G3**（见 §4.10.19.6 归因订正） | ✅ 已落码 | `tools/api-full-parity-probe/favorite/run.sh:96` · `tools/sql-statement-probe/favorite/run.sh:200` · `tools/grpc-contract-probe/favorite/run.sh:186` · 另有守门 `tools/probe-gate/favorite/check-port-ownership.sh:81-88` 在**同段内**做断言 |
 | 21400–21499 | favorite-rpc 真进程测试 | G3 | 🔴 **与上一行嵌套重叠** ⇒ 见 §4.10.19.4 | `service/favorite/favorite-rpc/src/test/.../support/RealGrpcPort.java:61` `:64` |
+| **21500**（段 `21500–21599`） | comment-rpc 真 gRPC 进程测试 | G3 | 🔴 **落在上一行探针段 `21400–21599` 内 ⇒ 第二处重叠**（🆕 2026-10-27 实测新增 ⇒ §4.10.19.7） | `service/comment/comment-rpc/src/test/.../rpc/CommentSpanWiringTest.java:94` |
 | 21600–21699 | like-api 真容器测试 | G2 | ✅ 已落码 | `service/like/like-api/src/test/.../support/RealTomcatPort.java:69` `:72` |
 | 21700–21799 | message-api 真容器测试 | G2 | ✅ 已落码 | `service/message/message-api/src/test/.../support/RealTomcatPort.java:69` `:72` |
 | 21800–21899 | task-api 真容器测试 | G2 | ✅ 已落码 | `service/task/task-api/src/test/.../support/RealTomcatPort.java:69` `:72` |
@@ -1293,6 +1294,8 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 
 > ⚠️ **「预分配」≠「已落码」** ⇒ 域侧照 §4.10.19.3 取自己的段、复制 `RealTomcatPort`（favorite 域那份是**模板**）、改两个常量 + 补一条 `bindsToDedicatedPortSegment` 守门即可。
 > ⚠️ **comment 域不分配**：实测**零** `RANDOM_PORT`（全部 MockMvc）⇒ ⇒ **N/A，不是「漏了」**（G3 域台账 A5 行自己也写了 N/A）⇒ ⇒ 将来若 comment 域起真容器测试，从 **22600+** 预留段里取。
+> 🔴 **订正（2026-10-27 · G3 树 @ `dec6348` 实测）**：上面这条**已过期** —— comment-rpc **现在有真 gRPC 固定端口 `21500`**（`service/comment/comment-rpc/src/test/.../rpc/CommentSpanWiringTest.java:94` 的 `grpc.server.port=21500`）⇒ ⇒ 「comment 域 N/A / 不分配」**不再成立** ⇒ ⇒ comment 域**已占一段** ⇒ ⇒ 且它**落在 favorite 探针段 `21400–21599` 内** ⇒ ⇒ **第二处重叠** ⇒ ⇒ 见 §4.10.19.7。
+> ⚠️ **「预分配」行也不是「已落码」**：上表 `22100`~`22500` 五段在**核对日期 2026-10-27** 实测**全为零命中**（G3 树全仓 `22100|22199|22200|22299|22300|22399|22400|22499|22500|22599` ⇒ 零命中）⇒ ⇒ **段仍可用**。
 > ⚠️ **选段不是「随便挑一段空闲的」**：要避开的清单 = 上表**全部已占段** ＋ **OS 临时段** ＋ **部署端口段**（`Infrastructure.md` 的 18xxx / 19xxx / 49xxx —— 与测试段是两套空间，**不冲突**）。
 
 ##### 4.10.19.4 🔴 **新发现：favorite 域自己的两段嵌套重叠**（**本层不单方面改 ⇒ 转 G3**）
@@ -1325,6 +1328,18 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | **为什么要订正** | 留着「本层占用」的写法 ⇒ ⇒ ① 别的 lane 会以为**共享层**要改这些文件（⇒ 抢写权）⇒ ② 将来若探针段要与 favorite-rpc 段解耦 ⇒ ⇒ 会找错人 ⇒ ⇒ **归属写错 = 协调必错** |
 | **订正后** | 探针段 = **G3（favorite 域）** ⇒ ⇒ §4.10.19.4 的「两侧都在 G3 写权面内」这一条才成立 ⇒ ⇒ **转派对象正确** |
 | **教训（同族）** | 「目录位置 ≠ 归属」—— `tools/**` 放在仓库根，但**文件可以是某个域的** ⇒ ⇒ 归属要**按文件内容/域标注**判，不按目录判（与「**共享判据 = 依赖度数，不是目录位置**」同族） |
+
+##### 4.10.19.7 🔴🟢 **第二处重叠：comment-rpc 的真 gRPC 端口 `21500` 落在 favorite 探针段内**（2026-10-27 实测新增 · **本层只登记 ＋ 转派 G3** ⇒ 零落码）
+
+| 项 | 说明 |
+|---|---|
+| **现象** | comment-rpc 的真 gRPC 进程测试用**固定端口 `21500`** ⇒ ⇒ `21500` **落在 favorite 探针段 `21400–21599` 之内** ⇒ ⇒ 与 §4.10.19.4 那对**同型**、但**是另一处** ⇒ ⇒ **段表原先只记了 favorite-rpc 那一对 ⇒ 漏了本对** |
+| **两侧证据** | comment-rpc：`service/comment/comment-rpc/src/test/.../rpc/CommentSpanWiringTest.java:94` ⇒ `"grpc.server.port=21500"`（`:93` 的注释自称「21500–21599 段是 comment-rpc 的测试专用段」）<br>探针侧：`tools/api-full-parity-probe/favorite/run.sh:96` · `tools/sql-statement-probe/favorite/run.sh:200` · `tools/grpc-contract-probe/favorite/run.sh:186` ⇒ 三处皆 `FIRST, LAST = 21400, 21599`（另 `tools/probe-gate/favorite/check-port-ownership.sh:81-88` 在同段内断言） |
+| **为什么两边互不知情** | comment-rpc 自己的注释只列了 favorite 的**域测试段**（`21300–21399` / `21400–21499`）⇒ ⇒ **它看不见 favorite 的「探针段」**（那段住在 `tools/**` 下、域侧看不到）⇒ ⇒ ⇒ **这就是「段表必须把探针段也列进去」的全部意义** —— 表里少一行 = 两边都以为对方不在自己段里 |
+| **危害路径** | 与 §4.10.19.4 同款：探针的 `pick_free_port()` **绑住并 listen 后进程退出 ⇒ 端口随即释放** ⇒ ⇒ 有「端口空着」的窗口 ⇒ ⇒ 若 comment-rpc 此刻起 gRPC 服务挑中同一端口 ⇒ ⇒ 探针的 `wait_port()` **只验「连得上」** ⇒ ⇒ **连上 comment-rpc 的测试服务也算「就绪」** ⇒ ⇒ **探针结论不可信** |
+| **处置（**两侧都在 G3 写权面 ⇒ **域侧能自修 ⇒ 本层不单方面改**）** | comment-rpc 迁到**预留段 `22600–22699`**（本表末行已写「将来若 comment 域起真容器测试，从 22600+ 预留段里取」⇒ **表早就把段留好了，只是没人回填**）⇒ ⇒ 只需改 `CommentSpanWiringTest.java:94` 的**一个常量** ＋ `:93` 的注释 |
+| **为什么不反过来迁探针段** | 探针段被**守门钉死**（`check-port-ownership.sh:81` 的 `21400 <= p1 <= 21599` ＋ `:91` 用 21400 做「被占」样本 ＋ `:95` 断言跳过）⇒ ⇒ 迁探针 = **改 4 个工具的段常量 + 改守门** ⇒ ⇒ 改动面更大 ⇒ ⇒ **迁 comment-rpc 更省** |
+| **本层这一条** | **只登记 ＋ 转派**（AGENTS.md §5.3d「域侧能自修的域侧修」）⇒ ⇒ **本层零落码** |
 
 #### 4.10.20 🟢 **U+FFFD 全仓复扫（2026-10-27）—— 本层写权面零命中 ＋ 一处口径差异登记**
 
@@ -2147,6 +2162,31 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 > ⚠️ **旁证**：`service/common` 在第十三次全量的补跑①里也抖过一次（`GoStyleJsonContentTypeCharsetTomcatTest`
 > 「expected 200 but was -1」）⇒ ⇒ **「真容器 + 固定等待窗口」类守门在机器负载高时是一族已知抖动源**
 > ⇒ ⇒ **本层不逐条去改**（改一个还有一个）⇒ ⇒ **只登记**，等下一轮统一处理「等待窗口」这一族。
+
+#### 4.10.38 🟢 **standby 窗口的三件实活（2026-10-27）—— 全仓 `check-*.py` 全量实跑 ＋ 跨树复核的端口段第二处重叠 ＋ 共享层 customizer 守门「已存在 ⇒ 不重复造」**
+
+> **本节零落码** ⇒ 只做**登记 + 转派**（§5.3d「域侧能自修的域侧修」+ §5.3e「G4 随时接收反馈单 ⇒ 落码 ⇒ 回执」）。
+
+**① 全仓 `check-*.py` 全量实跑（**19 个**）⇒ 18 EXIT=0 · 1 EXIT=1**
+
+| 项 | 说明 |
+|---|---|
+| **触发** | G3 的提醒：「`check-doc-links.py` **不在** AGENTS.md §7.2 点名的 4 个标准门禁里 ⇒ ⇒ 收口回归要跑**仓里全部** `check-*.py`」⇒ ⇒ **本层照办**（`for g in $(ls tools/*.py tools/difftest/check-*.py)` ⇒ 逐个跑 ⇒ **先捕获 `$?` 再替换**，不用同批命令替换覆盖退出码） |
+| **🔴 唯一的红** | `tools/difftest/check-ddl-static.py` ⇒ **EXIT=1** ⇒ ⇒ **已登记的 DDL 差异，不是本轮引入**：脚本只跑 `users` 一个域就退出 ⇒ **9 处实质差异**（`users_user.status` 可空性 **1** ＋ `DEFAULT CURRENT_TIMESTAMP` **8**）⇒ ⇒ 本轮 72 笔对 `*.sql` / `*migration*` 的改动 = **0**（`git diff --name-only a282012..HEAD -- '*.sql' '*migration*'` ⇒ **空**）⇒ ⇒ 属 AGENTS.md §0 第 2 条「**刻意保留**」那批 ⇒ ⇒ **只登记，不擅自改** |
+| **⇒ 口径修正（重要）** | 本层历次口径里的「**六门禁 0**」＝ AGENTS.md §7.2 点名的 6 个装配/写权守门 **＋** 3 个台账门禁 ⇒ ⇒ **不覆盖** `check-ddl-static` / `check-doc-links` / `check-agents-budget` / `check-cross-domain-holds` / `check-deadline-{downstream,verdict}` / `check-flyway-ledger` / `check-global-lane-ownership` / `check-go-json-body-predicate` / `check-grpc-interceptor-wiring` / `check-grpc-runtime-classpath` / `check-tomcat-limits` ⇒ ⇒ ⇒ **「全部 `check-*.py` 全绿」这句话在 2026-10-27 之前**不成立**；今天成立，但它**不等于 1** ⇒ ⇒ **诚实登记**（不写「全绿」） |
+
+**② 跨树复核 ⇒ 端口段表**第二处**重叠** ⇒ §4.10.19.7**（comment-rpc `21500` ∈ favorite 探针段 `21400–21599`）⇒ ⇒ **只登记 + 转派 G3 ⇒ 零落码**
+- ⇒ 顺带**就地订正**了本表两条过期口径：① 「comment 域不分配 ⇒ N/A」**已过期**（comment-rpc 已有真 gRPC 固定端口 `21500`）② 探针段的引用清单**漏了** `tools/probe-gate/favorite/check-port-ownership.sh:81-88`（**在同段内做断言**的守门）
+- ⇒ **favorite-rpc 的迁段转派单仍未处理**：G3 树 @ `dec6348` 实测 `service/favorite/favorite-rpc/src/test/.../support/RealGrpcPort.java:61` **仍** `FIRST = 21400` ⇒ ⇒ 预分配段 `22100–22199` **实测零占用**（G3 树全仓 `22100|22199` ⇒ 零命中）⇒ ⇒ **段仍可用**
+- ⇒ 🆕 **comment-rpc 域内做法不一致**（新发现 · 转派）：`CommentSpanWiringTest.java:90-94` 的注释**明确写**「`port=0` 会让 OS 从临时端口段挑，而那是 **Docker 随机发布容器端口用的同一段** ⇒ `EADDRINUSE` ⇒ 抖动」⇒ ⇒ 但同域 `service/comment/comment-rpc/src/test/.../rpc/CommentRpcGrpcInterceptorWiringTest.java:101` **仍写** `"grpc.server.port=0"` ⇒ ⇒ **那个类正好踩中它自己注释里说的坑** ⇒ ⇒ 转派 G3（域侧）
+
+**③ 共享层 Redis customizer 的「存在性守门」**已存在** ⇒ 不重复造**（回答 G3 的建议）
+- `service/common/src/test/java/com/rag/common/redis/GoStyleRedisClientOptionsGateTest.java:50`（`disconnectedBehaviorIsRejectCommands` ⇒ 断言 `options.getDisconnectedBehavior()` = `REJECT_COMMANDS` ⇒ **在场且生效**）· `:61`（`customizerIsRegisteredExactlyOnce` ⇒ **不重复注册** ⇒ 即「没被遮蔽」）· `:71`（`commandTimeoutIsNotClobbered` ⇒ **不覆盖运维 `timeoutOptions`**）
+- ＋ `service/common/src/test/java/com/rag/common/redis/GoStyleRedisClientShadowingGateTest.java`（源文件扫描 ⇒ **域内不得有副本**）
+- ⇒ ⇒ G3 提的「共享层 customizer 存在性建议加守门」**已被现有守门覆盖** ⇒ ⇒ **本层零落码** ⇒ ⇒ **不造第二条守门守同一件事**（与 §3.3「断言『Bean 存在』≠ 断言『机制生效』」同源：已有的是**机制生效**级别的断言）
+
+**④ 一条自证教训（同一个坑的第 N 次 —— 「零命中」先复核判据）**
+- 查本表那条 `tools/grpc-contract-probe/favorite/run.sh:186` 的出处时，**第一次 grep 零命中** ⇒ 若就此判定「引用已失效」就会**误订正**一条**仍然有效**的出处 ⇒ ⇒ 复核后确认：**文件仍在、出处仍在**（`:186` = `FIRST, LAST = 21400, 21599`）⇒ ⇒ **零命中的真因是 `head -10` 把命中截断了**（管道 + 截断）⇒ ⇒ ⇒ **「零命中」必须先复核判据**（管道/过滤/`head` 截断/大小写/路径写法），**再**下结论 ⇒ ⇒ 这与「**跨树零命中 ≠ 不存在**」同族，但这次是**同树内的 grep 截断** ⇒ ⇒ **更隐蔽**：跨树那条至少有「树 + commit」可核，本条连树都不用换。
 
 ## 5. 交付物清单
 
