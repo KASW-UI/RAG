@@ -1,11 +1,13 @@
 package com.rag.like.like.rpc;
 
 import io.lettuce.core.ClientOptions;
+import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.connection.lettuce.LettucePoolingClientConfiguration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -70,7 +72,7 @@ import static org.assertj.core.api.Assertions.assertThat;
                 "spring.autoconfigure.exclude="
                         + "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration"
         })
-@DisplayName("like-rpc：Redis 命令超时 3s ＋ 连接超时 5s（对齐 Go 的 go-redis 库默认）")
+@DisplayName("like-rpc：Redis 命令超时 3s ＋ 连接超时 5s ＋ **连接池 64/16/8**（对齐 Go 的 go-redis 库默认 ＋ go-zero 的 `idleConns = 8`）")
 class LikeRpcRedisTimeoutsGateTest {
 
     @Autowired
@@ -129,6 +131,74 @@ class LikeRpcRedisTimeoutsGateTest {
                 .as("★ 阳性对照：Lettuce 默认命令超时是 60s ⇒ 若断言 ② 恒真，"
                         + "说明它没在区分「配了 3s」与「没配」")
                 .isEqualTo(java.time.Duration.ofSeconds(60));
+    }
+
+    @Test
+    @DisplayName("⑤ Redis 连接池必须**启用**（Go 侧有池；Boot 4 的判据 = enabled ?? COMMONS_POOL2_AVAILABLE）")
+    void redisPoolIsEnabled() {
+        // ⚠️ **判据必须查「消费点」**（AGENTS.md §3.3.1）：
+        //   Boot 4 `DataRedisConnectionConfiguration#isPoolEnabled`（`:195-198`）：
+        //     `Boolean enabled = pool.getEnabled(); return (enabled != null) ? enabled : COMMONS_POOL2_AVAILABLE;`
+        //   ⇒ 显式配了 `enabled: true` ⇒ 走 `LettuceConnectionConfiguration#createBuilder:162-165`
+        //     的 `PoolBuilderFactory` ⇒ 产出 `LettucePoolingClientConfiguration`（**池化**）
+        //   ⇒ 未启用时产出的是普通 `LettuceClientConfiguration`（**共享单连接**）。
+        //   Go 侧：真源 `service/like/rpc/internal/svc/servicecontext.go:27` 走 **go-zero 的 redis**
+        //     ⇒ go-zero 构造 `red.Options`（`go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40`）
+        //     ⇒ **未设 `PoolSize`** ⇒ 落 go-redis v9.20.0 库默认
+        //       （`go-redis@v9.20.0/options.go:350-351` `PoolSize = 10 * runtime.GOMAXPROCS(0)`）⇒ **Go 侧有池**。
+        //   ⇒ RAG 侧若不池化 ⇒ 并发下命令互相串行排队 ⇒ 可能撞 3s 命令超时 ⇒ **形态漂移**。
+        //   ⚠️ 本条**不能只靠 yml 断言**：`enabled` 未配时判据由 **classpath 有无 commons-pool2** 决定
+        //     ⇒ 必须像本条这样**读真装配出来的 ClientConfiguration**。
+        assertThat(connectionFactory.getClientConfiguration())
+                .as("🔴 Lettuce 连接池必须**启用**（Go 侧 go-redis 默认有池：PoolSize = 10 × 核数）。"
+                        + "Boot 4 的判据是 `enabled != null ? enabled : COMMONS_POOL2_AVAILABLE`"
+                        + " ⇒ 若 yml 的 `spring.data.redis.lettuce.pool.enabled` 缺失，"
+                        + "且 classpath 里没有 commons-pool2 ⇒ 池不启用 ⇒ Lettuce 走**共享单连接**"
+                        + " ⇒ 并发下命令串行排队 ⇒ 可能撞 3s 命令超时。")
+                .isInstanceOf(LettucePoolingClientConfiguration.class);
+    }
+
+    @Test
+    @DisplayName("⑥ 连接池参数必须 = 64 / 16 / 8（min-idle = Go 的 MinIdleConns 8；max-active 按数量级）")
+    void redisPoolParametersMatchGoBaseline() {
+        // ⚠️ **逐项对着 Go 的真值**，不拿「现有 RAG 代码」当基准（AGENTS.md §3.1）：
+        //   Go 侧（本域走 **go-zero 的 redis** ⇒ 底层仍是 go-redis v9.20.0）：
+        //     · `MinIdleConns` = go-zero 的常量 `idleConns = 8`
+        //       （`go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:15` ⇒ `:38` 写进 `red.Options`）
+        //       ⇒ **Go 侧有确切值** ⇒ 本项 **8 = 精确对齐**
+        //       （🆕 2026-10-27 原为 4 ⇒ 那是**偏离 Go**；已修）
+        //     · `PoolSize` 未设 ⇒ `go-redis@v9.20.0/options.go:350-351` `= 10 * GOMAXPROCS`
+        //       ⇒ **机器相关**（本机 10 核 ⇒ 100）⇒ **无法逐值对齐** ⇒ 只按**数量级**对齐 64。
+        //     · 「最大空闲连接数」在 go-redis **无对应项**（不限空闲连接数，靠 `IdleTimeout` 回收）
+        //       ⇒ `max-idle` 是**纯表达层**取值。
+        //   消费点（Boot 4 `LettuceConnectionConfiguration`）：
+        //     · `:162-165` `createBuilder` ⇒ 池启用时走 `PoolBuilderFactory`
+        //     · `:264` `LettucePoolingClientConfiguration.builder().poolConfig(getPoolConfig(properties))`
+        //     · `:267-271` `getPoolConfig` ⇒ `:269 setMaxTotal(maxActive)` · `:270 setMaxIdle(maxIdle)` · `:271 setMinIdle(minIdle)`
+        GenericObjectPoolConfig<?> poolConfig = poolConfig();
+        assertThat(poolConfig.getMaxTotal())
+                .as("🔴 连接池最大连接数必须 = 64（Boot 4 `LettuceConnectionConfiguration:269` "
+                        + "`config.setMaxTotal(properties.getMaxActive())`）"
+                        + " ⇒ Go 侧是 `10 × 核数`（本机 100，机器相关 ⇒ **数量级**对齐，非逐值对齐）"
+                        + " ⇒ 数值差异属**性能面**，已登记在 `DRIFT-LIKE-RPC-REDIS-POOL`")
+                .isEqualTo(64);
+        assertThat(poolConfig.getMaxIdle())
+                .as("连接池最大空闲连接数必须 = 16（Boot 4 `:270` `setMaxIdle`）"
+                        + " ⇒ Go 侧**无对应项**（go-redis 不限空闲连接数）⇒ 纯表达层取值")
+                .isEqualTo(16);
+        assertThat(poolConfig.getMinIdle())
+                .as("🔴 连接池最小空闲连接数必须 = 8（Boot 4 `:271` `setMinIdle`）"
+                        + " ⇒ Go 侧 `MinIdleConns = 8`（go-zero 的 `idleConns = 8`）⇒ **精确对齐**"
+                        + " ⇒ 写成 4 会变成**对 Go 的偏离**")
+                .isEqualTo(8);
+    }
+
+    /** 池配置（**读消费点**：Boot 装配出来的 `LettucePoolingClientConfiguration`）。 */
+    private GenericObjectPoolConfig<?> poolConfig() {
+        assertThat(connectionFactory.getClientConfiguration())
+                .as("Lettuce 连接池必须已启用（否则读不到池参数 ⇒ 断言 ⑥ 无法成立）")
+                .isInstanceOf(LettucePoolingClientConfiguration.class);
+        return ((LettucePoolingClientConfiguration) connectionFactory.getClientConfiguration()).getPoolConfig();
     }
 
     /** Lettuce 原生客户端上的 ClientOptions（Boot 把它组装进去的地方）。 */

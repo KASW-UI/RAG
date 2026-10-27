@@ -103,12 +103,28 @@ spring:
       #    （Boot 4 `DataRedisProperties#getConnectTimeout` ⇒
       #    `LettuceConnectionConfiguration:212-215` 写进 `SocketOptions.connectTimeout`）。
       connect-timeout: 5s
+      # ⚠️ 连接池 = 与 Go 侧**逐轴**对齐（2026-10-27 G2 · `DRIFT-LIKE-RPC-REDIS-POOL` 数值轴已修）：
+      #    Go 侧（真源）走 **go-zero 的 redis** ⇒ `service/like/rpc/internal/svc/servicecontext.go:27`
+      #    `redis.MustNewRedis(c.Storage.Redis.RedisConf)` ⇒ go-zero 构造 `red.Options` 时
+      #    （`go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40`）只传
+      #    `MaxRetries: maxRetries` ＋ **`MinIdleConns: idleConns`** ⇒ 常量 `:14-15`
+      #    `maxRetries = 3` · **`idleConns = 8`** ⇒ ⇒ **`MinIdleConns = 8`**（**Go 侧有确切值**）
+      #    ⇒ ⇒ `min-idle: 8` = **精确对齐**（🆕 原为 `4` ⇒ 那是**偏离 Go**）
+      #    ⇒ `PoolSize` **未设** ⇒ 落 go-redis v9.20.0 库默认 `10 × GOMAXPROCS`
+      #      （`go-redis@v9.20.0/options.go:350-351`；本机 10 核 ⇒ 100）⇒ **机器相关、无法逐值对齐**
+      #      ⇒ `max-active: 64` 按**数量级**对齐（数值差异属**性能面**，已登记）
+      #    ⇒ 「最大空闲连接数」在 Go 侧**无对应项**（go-redis 不限空闲连接数，靠 `IdleTimeout` 回收）
+      #      ⇒ `max-idle: 16` = **纯表达层**取值
+      #    ⚠️ 池形态的判据**不能只读 yml**：Boot 4 `DataRedisConnectionConfiguration#isPoolEnabled`（`:195-198`）
+      #      `enabled != null ? enabled : COMMONS_POOL2_AVAILABLE` ⇒ **classpath 里没有 commons-pool2 ⇒ 池不启用**
+      #      ⇒ 本模块 pom **必须显式声明** commons-pool2（Boot 4 的 starter 不再传递它）
+      #      ⇒ 缺它 + `enabled: true` ⇒ **启动期 NoClassDefFoundError**（2026-10-23 本域实证）
       lettuce:
         pool:
           enabled: true
           max-active: 64
           max-idle: 16
-          min-idle: 4
+          min-idle: 8
 
   # ============== Kafka ==============
   # 对应 Go KafkaConf（producer）/ mq.yaml 的 Kafka（consumer）
