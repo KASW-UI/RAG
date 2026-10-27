@@ -604,7 +604,7 @@ service/comment/rpc/internal/cache/redis.go:17-19
 | 项 | 内容 |
 |---|---|
 | 修法 | `application.yml` 的 `spring.data.redis` 下显式加 `connect-timeout: 5s`（**域内文件 ⇒ 域侧自修**，不依赖共享层） |
-| 为什么共享层不参与 | `service/common` 的 `GoStyleRedisClientAutoConfiguration` **只**设 `disconnectedBehavior(REJECT_COMMANDS)`、**不碰** `socketOptions` / `timeoutOptions`（其 javadoc「为什么不动命令超时」段已写明）⇒ 连接超时**完全由本域 yml 决定** ⇒ **不装副本、不重复收编** |
+| 为什么共享层不参与 | `service/common` 的 `GoStyleRedisClientAutoConfiguration` **只**设 `disconnectedBehavior(REJECT_COMMANDS)`、**不碰** `socketOptions` / `timeoutOptions`（其 javadoc「为什么不动命令超时」段已写明）⇒ 连接超时**完全由本域 yml 决定** ⇒ **不装副本、不重复收编**<br>🔴 **订正（2026-10-27 第十八轮 · 合并后）**：合并前这条是**跨树指针**（本树 `find service/common/src/main/java -iname "*redis*"` ⇒ 零命中）⇒ ⇒ 合并后**已在本树** ⇒ ⇒ **树内重验成立**：唯一的 builder 调用 = `disconnectedBehavior(REJECT_COMMANDS)`（`:131-132`）⇒ **不碰 `socketOptions` / `timeoutOptions`** ⇒ ⇒ **结论不变**（从跨树推断升级为树内事实） |
 | 守门 | 新增 1 个契约守门（**1 例**）—— 走**整条真实链路**：`ConfigDataApplicationContextInitializer` 加载本模块**真实的** `application.yml` → Boot **真实** `DataRedisAutoConfiguration`（它 `@Import` 了 `LettuceConnectionConfiguration`）→ 真 `LettuceConnectionFactory` → 断言**消费点** `getClientConfiguration().getClientOptions().get().getSocketOptions().getConnectTimeout()` 与 `getClientConfiguration().getCommandTimeout()` |
 | 为什么断言「消费点」而不是「yml 里有这个键」 | 后者挡不住「属性名写错 ⇒ Spring 静默用默认值」（§3.3.1） |
 
@@ -728,6 +728,7 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
   ⇒ ⇒ **本域不装副本**（域内副本会**遮蔽**共享层那份 ⇒ **收编根本没发生**）
   ⇒ ⇒ **等 G4 合进我树后**，按 G2 的配方做**断连活体对拍**（先连上 → 静默等待且**期间不发命令** → 外部 `docker stop`
   ⇒ 量第一条命令挂多久）⇒ **本域零域侧改动**；⚠️ 但**「两侧后果分别验」要落进验的清单**，不能只验 api 侧。
+  - 🔴 **订正（2026-10-27 第十八轮 · 合并后）**：**「等 G4 合进我树后」这个前置已解除** —— merge `e18fd52` 把 `align/g4-service-common` @ `cd893d1` 合入 ⇒ ⇒ 共享层的 `GoStyleRedisClientAutoConfiguration` **已在本树** ⇒ ⇒ **「共享层那份必被创建」现在可以在树内验**（我四域仍是**零域侧副本** ⇒ **无遮蔽** ⇒ 收编在技术上成立）⇒ ⇒ ⚠️ **但活体对拍本身仍被机器级环境阻塞**：本机 Docker 的「宿主→容器」端口转发对多数容器失效（映射口「TCP 连上但读不到字节」，而容器内 `psql` 正常 ⇒ 坏的是转发路径）⇒ ⇒ **本条维持「🔴 待验」**，待 Docker 恢复后按 G2 的配方重跑（**零域内配置**，量第一条命令挂多久）⇒ ⇒ **本域零域侧改动**这一条**不变**。
 - ✅ **本域无遮蔽风险（已自核）**：`grep -rn "LettuceClientOptionsBuilderCustomizer|RedisDisconnectedBehaviorConfig|DisconnectedBehavior"`
   在 `service/{favorite,comment,hot,article}` 的**源码**里 ⇒ **0 命中** ⇒ 共享层那份**必被创建**
   （三模块都引 `spring-boot-starter-data-redis` ⇒ `@ConditionalOnClass` 命中）⇒ **零域侧动作** ✅
