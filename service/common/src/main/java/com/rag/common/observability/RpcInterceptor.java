@@ -444,10 +444,27 @@ public final class RpcInterceptor {
                      *
                      * <p><b>影响面</b>：范围内 10 个 rpc 组件的 gRPC handler 线程；
                      * 但<b>只有 like 域</b>依赖「当前 span」语义（Go 侧 {@code SpanFromContext} 6 处）。
-                     * ⚠️ 全仓主源码里 {@code Span.current()} 原本只有 1 处
+                     *
+                     * <p>⚠️ <b>计数口径（2026-10-27 订正 · G2 反馈单 FB-04）</b>：
+                     * <b>合并前</b>全仓主源码里 {@code Span.current()} 的<b>调用点</b>只有 1 处
                      * （{@code comment-rpc} 的 {@code CommentFactDeliveryService.java:148}），
                      * 而它跑在 <b>调度线程</b>上（{@code CommentFactDispatchScheduler} ⇒ 不走 gRPC handler）
-                     * ⇒ <b>本改动碰不到它</b> ⇒ 零回归。
+                     * ⇒ <b>本改动碰不到它</b> ⇒ 该处零回归。
+                     *
+                     * <p>但<b>合并后</b>全仓是 <b>2 处</b>：<b>like 域</b>的
+                     * {@code LikeSpans.java:242/:246}（{@code Span.current().setAttribute(...)}，
+                     * G2 树 {@code 2b3c49a}）在 like 域落码后并入本树
+                     * ⇒ 它<b>落在本改动的受益面上</b>（调用点 {@code LikeDomainService}
+                     * ⇒ gRPC handler 线程）⇒ 合并后该处由 <b>no-op 变真生效</b>
+                     * ⇒ <b>预期行为变更，非回归</b>。
+                     * <p>⇒ 因此 like 域的 <b>A9 端到端 E2E 必须在合并后补</b>
+                     * （真 server + 真链 ⇒ 断言导出的 server span 真带 {@code query.*} /
+                     * {@code cache.*} / {@code like.*} 属性）；
+                     * 域侧<b>契约级</b>守门（如 {@code LikeSpansAttributeGateTest} 的手工
+                     * {@code makeCurrent}）<b>不等于</b>端到端生效。
+                     * <p>⚠️ MQ 路径不受影响：{@code LikeUpdateKafkaListener.onMessage} 走
+                     * {@code MqConsumer.traceConsumer(Context.current(), …)} ⇒ <b>自建</b> consumer span
+                     * ⇒ 不依赖本改动 ⇒ {@code messaging.*} 本来就生效（与 Go 侧 {@code TraceConsumer} 同形）。
                      */
                     @Override
                     public void onHalfClose() {

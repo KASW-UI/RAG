@@ -558,7 +558,7 @@ def order_by_equivalent(go_sig, rag_sig, schema):
     ⇒ 加不加这个 ORDER BY 都只会取到同一行 ⇒ 等价（ORM-GENERIC）。
     """
     # ⚠️ 只有「**一侧有、一侧没有**」才可能是 GORM 的隐式 ORDER BY。
-    #    两侧都��� / 两侧都没有 ⇒ 不是这类差异（下面的调用方已单独处理「都空」）。
+    #    两侧都有 / 两侧都没有 ⇒ 不是这类差异（下面的调用方已单独处理「都空」）。
     if bool(go_sig["order_by"]) == bool(rag_sig["order_by"]):
         return False
     with_order = go_sig if go_sig["order_by"] else rag_sig
