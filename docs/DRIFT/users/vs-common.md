@@ -2951,11 +2951,54 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
 | ③ | `tools/check-ledger-selfcheck.py` 的 `LEDGER_FILES` 补 `follow` 域 + 7 份台账 | **两张表都查不到** ⇒ 写权孤儿 | 🟡 §44.4 已登记 ⇒ **需 Jason 拍板**或纳入合并收口执行者清单 |
 | ④ | `docs/Intentional_Deviations/users/_shared.md` 销号（`DRIFT-USERRPC-V-002`） | 不在 G1 写权面 | 🟡 等签字档落点确认 |
 | ⑤ | `docs/FileTree/**` 9 处提及 MP 排序桥 | 写权外 | 🟡 §28.7 已登记 |
+| ⑥ | `GoStyleRedisClientShadowingGateTest.LEGACY_DOMAIN_COPIES` 里**已失效**的 user-api 条目 | 共享层（`service/common/**`）⇒ **G1/G4 都不能写** | 🟡 **本轮实测确认失效**：`service/users/user/user-api/src/main/java/com/rag/users/user/api/config/RedisDisconnectedBehaviorConfig.java` **在我树里已不存在**（Redis 收编轮真删除）⇒ ⇒ 该守门的 `staleWhitelistHint` 只出**提示、不判失败** ⇒ ⇒ **无害** ⇒ ⇒ 等 G4 清条目 |
 
 ### 47.6 🟢 **本轮提交清单**
 
 | commit | 内容 |
 |---|---|
 | `ddb63f7` | **merge(g4)** —— 并入 G4 终版 `c26e462`（11 笔 · 零冲突 · 代码层零重叠） |
-| （本笔） | **docs(drift)** —— §47 写回 ＋ 6 份台账 59 处角色口径改写 ＋ `users/common.md` §5.7 点名 |
+| `18d63cb` | **docs(drift)** —— §47 写回 ＋ 6 份台账 59 处角色口径改写 ＋ `users/common.md` §5.7 点名 |
+| `6535ac4` | **docs(drift)** —— §43.3 状态订正（四项里两项已变，原值保留只补指针） |
+| （本笔） | **docs(drift)** —— §47.7 回归实测写回 ＋ §47.5 ⑥ 补「白名单条目已失效」的实证 |
+
+### 47.7 🟢 **并入 G4 终版后的域级全量回归（实测 · 2026-10-28 00:09~00:17 · 18/18 BUILD SUCCESS）**
+
+**命令**（`clean` ＋ `-am` ＋ 显式堆）：
+`mvn -B -o -DargLine=-Xmx2g -am -pl service/users/user/user-api,service/users/user/user-rpc,service/users/admin/admin-api,service/users/admin/admin-rpc,service/follow/follow-api,service/follow/follow-rpc clean test`
+
+| 模块 | 并入前 | **本轮实测** | 差 |
+|---|---|---|---|
+| `service/users/user/user-api` | 125 | **125** | 0 |
+| `service/users/user/user-rpc` | 148 | **148** | 0 |
+| `service/users/admin/admin-api` | 144 | **144** | 0 |
+| `service/users/admin/admin-rpc` | 118 | **118** | 0 |
+| `service/follow/follow-api` | 72 | **72** | 0 |
+| `service/follow/follow-rpc` | 81 | **81** | 0 |
+| **我域 6 模块合计** | **688** | **688** | **0** |
+| 共享层 `service/common` | 330 | **331** | **+1** |
+| 共享层 `service/users/users-common` | 33 | **39** | **+6** |
+| （本域私有）`service/follow/follow-common` | 37 | **37** | 0 |
+
+- ⇒ ⇒ **failures / errors / skipped 全 0**；`mvn` **EXIT=0**；`BUILD SUCCESS`；总耗时 **7:46**。
+- ⇒ ⇒ **域内 6 模块逐条不变（688 = 688）** ⇒ ⇒ 这**本身就是「并入对我域零副作用」的证据**
+  （因为并入在代码层与我的写权面**零重叠** ⇒ ⇒ 域内条数**理应**不变；实测与理应一致 ⇒ ⇒ 两侧互证）。
+- ⇒ ⇒ **共享层 +7 条全部有出处**：`common` +1 = `GoStyleParamLimitOffModeGateTest` 补结构锁；
+  `users-common` +6 = `GoStyleRequiredFieldGateTest`（§5.7 点名的那份）。
+- ⇒ ⇒ **「总量相同 ≠ 构成相同」的又一个例证**：**域内**总量 688 前后**一模一样**，
+  而**共享层**已经变了（363 → 370）⇒ ⇒ 只报「688」这一个数**会漏掉共享层的变动** ⇒ ⇒ 报数必须**分域 + 分层**。
+- ⚠️ **本轮是「真重跑全量」，不是推算**（依 §45.7 那条教训：只重跑受影响模块 + 沿用上轮总数 ⇒ 总数会悄悄过期且无门禁会报）。
+
+**窗口纪律的执行（记录，因为它是本轮唯一的「调度」动作）**：
+- 起跑前用「**别的 lane 有没有 maven 在跑**」做守卫 ⇒ **G2 与 G3 同时在跑全量** ⇒ ⇒ 本轮**等 120 秒**才拿到窗口；
+- ⇒ ⇒ **没有制造第三次并发全量**（G4 实测并发全量会被 OOM-kill ⇒ EXIT=137）⇒ ⇒ 纪律是有效的，不是形式主义；
+- ⇒ ⇒ 起跑前**二次确认**（避免「刚空出来就被别人抢走」的竞态）。
+
+⚠️ **日志里的 `ERROR` 行 ≠ 失败**（本轮日志里有很多，避免下一轮 agent 误判）：
+- `nacos register FAILED ...` ⇒ 测试环境**没有 Nacos** ⇒ 启动自检按预期**记 ERROR 后继续** ⇒ ⇒ **不是测试失败**；
+- `Surefire is going to kill self fork JVM. The exit has elapsed 30 seconds after System.exit(0).`
+  ⇒ surefire **fork 子 JVM 的收尾消息** ⇒ ⇒ **不是失败**；
+- ⇒ ⇒ **判据只能看两样**：**surefire 的 `Tests run` 汇总**（Failures / Errors / Skipped 三项）
+  ＋ **`mvn` 的退出码** ⇒ ⇒ **不要 grep 日志里的 `ERROR` / `FAIL` 字符串当结论**（那正是「拿一个信号当结论」）。
+
 

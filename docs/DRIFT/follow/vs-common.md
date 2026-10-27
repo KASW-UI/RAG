@@ -606,3 +606,10 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
 
 **③ 共享层新增守门对 follow 域无影响**：`GoStyleRequiredFieldGateTest` 落在 `service/users/users-common/**`（G4 写权）
 ⇒ ⇒ 与 follow 域无 import 关系 ⇒ ⇒ **零影响** ⇒ ⇒ 已在我域 `users/common.md` §5.7 点名。
+
+**④ 并入后的域级全量回归（实测 · 2026-10-28 00:09~00:17）**：
+`mvn -B -o -DargLine=-Xmx2g -am -pl <我域 6 模块> clean test` ⇒ ⇒ **18/18 BUILD SUCCESS · mvn EXIT=0 · 总耗时 7:46**；
+`follow-api` **72**（+0）· `follow-rpc` **81**（+0）· `follow-common` **37**（+0）⇒ ⇒ **follow 域 190**（含本域私有 `follow-common`）；
+⇒ ⇒ **域内条数逐条不变**（并入在代码层与我域**零重叠** ⇒ 理应不变 ⇒ 实测与理应一致 ⇒ 两侧互证）；
+共享层 `common` 330→**331** · `users-common` 33→**39**（+7 全部有出处：结构锁 1 + 新守门 6）。
+⇒ ⇒ 完整逐模块表 ＋ **窗口纪律的执行记录** ＋ **「日志里 ERROR ≠ 失败」的判据** ⇒ [`users/vs-common.md` §47.7](../users/vs-common.md)。
