@@ -86,6 +86,40 @@
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
 
+        <!--
+            ⚠️ commons-pool2 **不可省**（2026-10-27 G3 · favorite-api 的 Redis 连接池形态对齐）：
+               本模块的 application.yml 配了
+               `spring.data.redis.lettuce.pool.enabled: true`
+               ⇒ Boot 4 的 `DataRedisConnectionConfiguration#isPoolEnabled`（`:195-198`，实测字节码）：
+                  `Boolean enabled = pool.getEnabled(); return (enabled != null) ? enabled : COMMONS_POOL2_AVAILABLE;`
+               ⇒ 显式配了 true 就走 `LettuceConnectionConfiguration#createBuilder` 的 `PoolBuilderFactory`
+               ⇒ **该分支会构造 `org.apache.commons.pool2.impl.GenericObjectPoolConfig`**
+               ⇒ 而 **Boot 4 的 starter 不再传递 commons-pool2** ⇒ 缺它 ⇒ **启动期直接失败**
+                  （`NoClassDefFoundError: org/apache/commons/pool2/impl/GenericObjectPoolConfig`）。
+               ⚠️ 实测：spring-boot-starter-data-redis:4.0.8 的 pom 里只有 spring-boot-starter +
+                  spring-boot-data-redis；spring-boot-data-redis:4.0.8 的 pom 里**也没有** commons-pool2
+                  （只有 lettuce-core）⇒ ⇒ commons-pool2 **只能由应用自己声明**，无任何传递来源。
+               ⚠️ 同款事故已有本仓实证：like-rpc 2026-10-23 缺它时启动报同一个 NoClassDefFoundError。
+               ⇒ Go 出处（形态对齐的依据 · **消费点**，逐条）：
+                  真源 `service/favorite/api/internal/svc/service_context.go:20`
+                     `redisDB := redis.MustNewRedis(c.BizRedis)`
+                  ⇒ `c.BizRedis` 是 `redis.RedisConf`（`internal/config/config.go:16`），
+                    `Type: node`（`etc/favorite.yaml:16`）
+                  ⇒ go-zero `core/stores/redis/redis.go:109` `MustNewRedis` → `:122` `NewRedis`
+                     → `:139` `newRedis`（`Type: NodeType`）→ `:2723` `case NodeType: return getClient(r)`
+                  ⇒ **消费点** `core/stores/redis/redisclientmanager.go:32-40`：
+                     `red.NewClient(&red.Options{Addr, Username, Password, DB, MaxRetries: maxRetries, MinIdleConns: idleConns, TLSConfig})`
+                     ⇒ `:15` `idleConns = 8` ⇒ ⇒ **`MinIdleConns = 8`**（Go 侧至少保留 8 条空闲连接）
+                  ⇒ `PoolSize` 未设 ⇒ 落 go-redis v9.20.0 库默认 `10 × GOMAXPROCS` ⇒ **Go 侧是有池的**
+                  ⇒ RAG 侧若无池 ⇒ Lettuce 走**共享单连接** ⇒ 并发下命令互相串行排队
+                  ⇒ ⇒ **形态漂移**（不是数值漂移）⇒ 池大小按数量级对齐（Go 是 10×核数，机器相关）。
+               ⚠️ 版本由 spring-boot-dependencies BOM 管理 ⇒ **不写 <version>**。
+        -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-pool2</artifactId>
+        </dependency>
+
         <!-- ============== 4. Metrics ============== -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
