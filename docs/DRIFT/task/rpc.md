@@ -454,6 +454,19 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
   ⇒ `@ConditionalOnClass({LettuceConnectionFactory, ClientOptions, LettuceClientOptionsBuilderCustomizer})` **命中**
   ⇒ 且我域**无自建 `LettuceConnectionFactory`**（`grep` 实测 0 命中）⇒ 走 Boot 自动装配 ⇒ customizer 生效。
   ⇒ **该落码对我域是净收益**（断连 1ms 拒单，替掉 60s 挂起）⇒ 不需要域侧任何动作。
+
+- 🆕 **遮蔽契约（本域**不得**新建域内副本）—— G4 `2f12236` 实测订正后补记（2026-10-27）**：
+  - G4 订正了自己的两处事实错误：域内副本与共享层那份**并存时是「遮蔽」不是「叠加」** ——
+    `@ConditionalOnMissingBean` ⇒ **域内一旦已定义 `LettuceClientOptionsBuilderCustomizer`，共享层那份 Bean 根本不会被创建**
+    ⇒ 容器里恒为**恰好一份** ⇒ 不存在「后者覆盖前者」的顺序问题。
+  - ⇒ 断连行为仍是 `REJECT_COMMANDS`（两侧逐字同值）⇒ **对外行为零变化**；
+    ⚠️ **但代价是「遮蔽」**：**共享层的任何后续改动（例如 E66 的 `timeoutOptions`）在仍有域内副本的域会静默不生效**。
+  - ⇒ **本域的位置（实测）**：全仓三份真实域内副本**全在 users / follow 域**
+    （`service/users/user/user-api` · `service/users/admin/admin-api` · `service/follow/follow-api` · G1 写权面）
+    ⇒ **本域零副本** ⇒ **共享层那份在本域生效** ⇒ **本域不需要任何域内副本**。
+  - ⇒ ⚠️ **本域的硬约束**：**不要在本域新建 `RedisDisconnectedBehaviorConfig` 之类的域内副本** ——
+    那会**遮蔽**共享层（⇒ E66 等共享层后续修正在本域**静默失效**）
+    ⇒ **修 Redis 断连行为一律走共享层**（G4 写权）⇒ 域侧**只登记、不落码**。
 - 但 G4 引的 Go 出处 `core/stores/redis/redisclientmanager.go` **在真源仓里不存在**
   （真源仓无 `core/` 目录）⇒ 那是 **go-zero 依赖源码**的路径
   （`go-zero@v1.10.2/core/stores/redis/redisclientmanager.go`，`:14` `maxRetries = 3` · `:32-40` 构造 `red.NewClient`）
