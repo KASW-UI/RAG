@@ -609,3 +609,46 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 - **项④**（E66 落码后守门 ① 仍绿）：**E66 未落码** ⇒ ⇒ N/A（等落码）
 - **项⑤**（A3 升 ✅ 的真 Tomcat 探针）：**未做**
 - **两个共享门禁**（`check-tomcat-limits.py` · `check-wave-coupling.py`）仍红 ⇒ ⇒ **`tools/**` 非本 lane 写权 ⇒ 仍等 G4**（本轮新增证据：那三个门禁依据文件在**我树 vs G4 最新 tip `c814689`** 之间**逐字节相同** ⇒ ⇒ G4 树里它们绿**是因为不含我域改动**，不是「已修」）
+
+---
+
+#### 🆕 第八轮（2026-10-27 14:3x）—— **§5.3e 项② 销号：共享层那份 `REJECT_COMMANDS` 在本域【真的生效】**（活体断连 A/B）
+
+**① 这条补的是哪一个缺口（别当成「新做一遍」）**
+- 我域上轮已做过一次**真 Redis 容器**的断连实测（记在 `LikeRpcRedisTimeoutsGateTest` 的 javadoc 对拍表里）：
+  Go 侧 go-redis **拒连快速失败 = 1694 ms** · RAG 侧未配 timeout **排队等重连 = 60021 ms** · RAG 侧配 3s **快速失败 = 3 ms**
+- ⇒ ⇒ **但那次的条件是「手动配 `REJECT_COMMANDS`」** ⇒ ⇒ 它证明的是「**该配置项有效**」，
+  **不是**「**共享层那份已在本域生效**」⇒ ⇒ **本条补的就是这一格**
+
+**② 新守门 `TaskRedisDisconnectFastRejectGateTest`（2 条）**
+- **① 共享层那份 customizer 在场且【没被域内副本遮蔽】**：
+  `getBeansOfType(LettuceClientOptionsBuilderCustomizer.class)` 的 **size == 1** ＋ bean 名含
+  **`goStyleRedisClientOptionsCustomizer`** ⇒ ⇒ 共享层那份带 `@ConditionalOnMissingBean`
+  ⇒ ⇒ **size==1 ＋ 名字对得上**两条合起来才证明「用的就是共享层那份、**没有域内副本遮蔽**」
+- **② 断连行为真被设成 `REJECT_COMMANDS`**：**消费点** =
+  `connectionFactory.getNativeClient().getOptions().getDisconnectedBehavior()`
+  ⇒ ⇒ **不是读配置项**（那是「声明」），也不是读 `ClientConfiguration`
+- **③ 断连活体 A/B**（真 docker redis 容器）：连上 → PING → **静默等待（期间不发命令，否则 watchdog 重连会掩盖排队窗口）**
+  → `docker stop`（优雅 FIN，不是 kill 的 RST）→ 量**第一条命令**的耗时
+  - **A 组 = 共享层产出的那套 ClientOptions** ⇒ **实测 0 ms**
+  - **B 组 = 同一套、只把断连行为换成 Lettuce 默认的 `DEFAULT`** ⇒ **实测 3004 ms**（排队到 3s 命令超时）
+  - ⇒ ⇒ **A/B 唯一差别就是那条机制** ⇒ ⇒ **这才是「机制是承重的」的证据**，而不是「反正都快」
+
+**③ 变异验证（红在目标断言）**
+- 变异 = **把 A 组也换成 `DEFAULT`**（模拟「共享层那份没生效」）⇒ ⇒ 比「改断言值」更强
+- 结果：**2 条里只红 1 条**，红点**精确**在 `disconnectIsFastRejectedWithSharedLayerOptions:201`；
+  且探针打印出 **A=3005 ms / B=3003 ms** ⇒ ⇒ **测量确实跟着机制走**（不是碰巧）
+- ⇒ ⇒ 还原**逐字节一致**（md5 `2fa201c2…` 前后相同）⇒ ⇒ 复跑 **2 条绿**（A=0 ms / B=3009 ms）
+
+**④ 数字：Task-rpc 119 ⇒ 121（+2 = 本条 2 条）**
+- 实测：`mvn -o -B -DargLine=-Xmx2g -pl service/common,service/task/rpc test`
+  ⇒ **121 条 / 0 failures / 0 errors / 0 skipped · BUILD SUCCESS**（mtime 切分口径 **15 份报告 / 121 条**
+  ⇒ **与 maven 汇总行相等** ✔）
+- ⚠️ **`service/common` 必须在 reactor 里** —— `~/.m2` 的 `common` jar 是**旧**的（不含 FB-04 / 不含共享层的最新装配）⇒ ⇒ 只能**在 reactor 内**解决，**不 `install`**（那会改变别的 lane 正在解析的依赖）
+
+**⑤ ⚠️ 一条「不外推」的纪律（本轮两个域各做了一遍）**
+- like 域与 task 域**各跑了自己的活体 A/B**，**没有**拿一个域的结论去覆盖另一个域
+  ⇒ ⇒ 理由：**域上下文不同 ⇒ customizer 数量可能不同 ⇒ 行为可能不同** ⇒ ⇒ 「共享层那个 bean 一样」**推不出**「两个域的行为一样」
+- ⇒ ⇒ **全仓实测**：`LettuceClientOptionsBuilderCustomizer` 的**域内副本只有 1 处** —— 在 **users 域**
+  （`service/users/user/user-api/.../RedisDisconnectedBehaviorConfig.java:103`）⇒ ⇒ **我三域零遮蔽副本** ✔
+  ⇒ ⇒ （users 域那份**会遮蔽**共享层 ⇒ 那是 G1 域的事 ⇒ 本域不代改）
