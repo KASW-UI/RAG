@@ -2287,6 +2287,65 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 
 **本层这一条** | **生产代码零改动**（本轮只改台账）⇒ ⇒ ⇒ **第十四次全量口径（代码态 `15cf93a` + `d546f45` + `407c230`）仍然有效** ⇒ ⇒ ⇒ 本轮**不需要重跑全量**（改的全是 `docs/**`）⇒ ⇒ 但**门禁自证必须重跑**（改的是台账本体）⇒ ⇒ 见下节。
 
+#### 4.10.41 🟢 **G2 三张「合并后必红」单 ＋ G1 回执三条 ⇒ 逐条处置**（2026-10-27 晚 · **本层 2 处落码 ＋ 1 处改派 ＋ 1 处订正**）
+
+> **背景**：G2 提 FB-S1 / FB-S2 / FB-S3（= FB-06/07/08）三张「合并后必红」单；G1 回执给了三条（合并顺序约束 / javadoc 过期 / Redis 收编前置）⇒ ⇒ **本层逐条独立复核后处置**，其中 **1 条订正了 G2 的写权归属判断**、**1 条订正了 G1 的计数口径**。
+
+**① 🟢 FB-S1（`tools/difftest/check-tomcat-limits.py` 的 task 行写死 `"raw"`）—— 已落码**
+
+| 项 | 内容 |
+|---|---|
+| **G2 的原断** | `:149` 的 `EXPECTED_FORM_LIMIT_MODE` 把 `service/task/task-api` 写死 `"raw"`，而共享层真源 `GoStyleFormLimitMode.java:237` 是 `Mode.OFF` ⇒ ⇒ **守门红 ⇒ 守门会把下一个人推向「把 task-api 的 yml 改回 raw」⇒ 重新引入误拒**；附带 `:337` 报错文案 `actual.get('expected_mode')` 恒打印 `None` |
+| **本层独立复核** | ✅ **成立** —— 副本 `task-api: "raw"` vs 真源 `:237` `Mode.OFF`；且 `:337` 的 `None` **不是**「期望值为 None」，而是「该域**没在期望表里**」⇒ ⇒ **两个语义必须分开说** |
+| **本层修法（不只改那一行）** | 🔴 **删副本，改为从真源派生** —— 真源 javadoc 明写「判据**只有一份**，且**可被机器核对**」⇒ ⇒ **副本即违背该设计的第二份判据** ⇒ ⇒ 本脚本改为 regex 读 `GoStyleFormLimitMode.java` 的 `SEMANTIC_REACHABILITY`（module + `Mode`）⇒ ⇒ **task-api 的期望值随真源自动变 `off`**；<br>⇒ ⇒ **解析失败一律 `SystemExit`**（文件缺失 / 解析出 0 条）⇒ **绝不静默回退到任何副本**（静默回退 = 「以为在核对真源、其实在核对一份可能过期的副本」= §3.3 同款静默失效）；<br>⇒ ⇒ **新增「该域未在真源登记 ⇒ ④ 判据缺失 ⇒ 显式判红」分支**（旧实现 `expected_mode=None` ⇒ `gate_ok=(mode==None)` ⇒ **新域不写这个属性就静默通过** = 盲区）；<br>⇒ ⇒ **合法写法逐条对齐 Java `parse`**：语义答案 `off` ⇒ 合法 = 不写 / `"off"` / `"false"`（三者行为逐字节相同）；`raw`/`envelope` ⇒ 该属性**承重** ⇒ 必须逐字写对；<br>⇒ ⇒ **修法提示里 `off` 改为带引号**（脚本自己原来建议 `mode: off` 无引号 ⇒ **正是 YAML 1.1 布尔坑** ⇒ 会让域侧进程起不来） |
+| **落码** | `tools/difftest/check-tomcat-limits.py`（`d4e4745`） |
+| **变异验证（3 项全过）** | **M1** Java `task-api` `Mode.OFF` ⇒ `Mode.RAW` ⇒ **门禁转绿** ⇒ ⇒ **证明期望值来自 Java、不是写死**<br>**M2** 删掉 Java 的 `hot-api` 条目 ⇒ **门禁报「该域未在共享层真源登记」** ⇒ ⇒ **新分支是活的**<br>**M3** 真源文件改名 ⇒ **脚本终止并报「不静默回退」** ⇒ ⇒ **无静默失效** |
+| 🔴 **合并顺序约束（本层产出）** | 本单使门禁在**本树**转红（task-api 的 yml 仍是 `raw`）⇒ ⇒ **这是「正确的红」**（它检出的是**真漂移**）⇒ ⇒ **必须与 G2 的 task-api yml 订正（`mode: raw` ⇒ `mode: "off"`，G2 提交 `4786eb5`）同批合入** ⇒ ⇒ ✅ **已端到端实测**：把本单打好的守门**模拟跑在 G2 树**上 ⇒ **EXIT=0 全绿** ⇒ ⇒ **成对落地必绿** |
+
+**② 🔴 FB-S2（耦合快照 `common_radiation` 落后）—— 改派整合者（本层不写）**
+
+| 项 | 内容 |
+|---|---|
+| **G2 的原断** | `docs/DRIFT/_cross/cross-domain-coupling.md` 的 `<!-- wave-coupling-snapshot -->` 块落后 ⇒ 合并即红；且 G2 认为该文件属「global 写权（G4）」 |
+| 🔴 **本层订正写权归属** | **该文件属整合者面** —— 写权守门真源 `tools/difftest/check-wave-lane-ownership.py:161` 的 `SHARED` 清单**明确列了** `docs/DRIFT/_cross/cross-domain-coupling.md` ⇒ ⇒ ⇒ **本层不写**（§5.3c 写权硬线）⇒ ⇒ **改派整合者** |
+| **本层实测（本树 vs G2 树）** | **G4 树**（`96b40df`）⇒ `check-wave-coupling.py` **EXIT=0**、漂移 **0** 项 ✔<br>**G2 树**（`2016fa6`）⇒ **EXIT=1**、漂移 **9** 项 ⇒ ⇒ ⚠️ **G2 报的是 6 条，现实测 9 条** ⇒ ⇒ **不是口径冲突，是他们树前移了** ⇒ ⇒ 又一次「**先比 commit，再比数字**」 |
+| **口径问题（本层裁定）** | G2 问「测试 import 是否计入辐射度」⇒ ⇒ 🔴 **不用改口径** —— 守门**自己的实现**已经定案：`check-wave-coupling.py:162`/`:184` 的扫描 glob 是 `service/**/src/**/*.java` ⇒ ⇒ **含 `src/test`** ⇒ ⇒ 且这是**合理的**：域侧测试 import 共享层类 ⇒ ⇒ **共享层改动确实会影响该域的测试** ⇒ ⇒ ⇒ **所以 G2 报的「口径要不要改」这个问题本身不成立** —— 快照只是**过期** |
+| **可机械执行的修法（交给整合者）** | `python3 tools/difftest/check-wave-coupling.py --print` ⇒ 打印重算结果 ⇒ 贴回 `<!-- wave-coupling-snapshot:begin/end -->` 块 ⇒ ⇒ **不需要人工推演**，整合者一条命令即可 |
+
+**③ 🟢 FB-S3（task-api yml 的注释与语义表自相矛盾）—— 合并顺序裁定（本层不写）**
+
+| 项 | 内容 |
+|---|---|
+| **G2 的原断** | `service/task/task-api/src/main/resources/application.yml:177-178` 仍是 `mode: raw` + 用错判据轴（拿「有没有注册 `httpx.SetErrorHandler`」定「开不开」）的注释 ⇒ ⇒ 与 G4 的语义表自相矛盾 |
+| **写权** | 🔴 **该文件是 G2 域文件 ⇒ 本层不写**（§5.3c） |
+| **裁定** | ✅ **合并时以 G2 分支版本为准**（`mode: "off"` + G2 已订正的注释）⇒ ⇒ **合并清单里必须显式标一行**（否则可能取到我树里那份仍是 `raw` 的旧版 ⇒ ⇒ **门禁会红**）⇒ ⇒ ⇒ **与 ① 的合并顺序约束是同一条** |
+
+**④ 🟢 G1 ①（`3b573fb` 与 `7488b3d` 的合并顺序约束）—— 成立，本层已核 ⇒ 转整合者**
+
+| 项 | 内容 |
+|---|---|
+| **G1 的原断** | 两笔**必须同批合入**（或先 `7488b3d` 后 `3b573fb`）⇒ ⇒ 单合 `3b573fb` ⇒ `ObservabilityLifecycle.shutdown()` 真的执行 ⇒ 进程级静态池「终止即永久」⇒ 同模块后续 Spring 上下文被毒化 ⇒ ⇒ **前几轮全量一直绿是「因为没走到」** |
+| **本层独立核** | ✅ **成立** —— `3b573fb` = 「关闭路径不得触发 web 类型的类加载（拆出 `HttpPoolLifecycle`）」⇒ 拆出后 `shutdown()` 第一句不再抛 `NoClassDefFoundError` ⇒ ⇒ `RpcInterceptor.shutdown()` 真的会执行；`7488b3d` = 「修『进程级静态池终止即永久』⇒ 多 Spring 上下文被毒化」⇒ ⇒ **方向不对称成立**（`7488b3d` 单独在位 ⇒ 池可重建 ⇒ 仍绿；`3b573fb` 单独在位 ⇒ 会红）<br>⇒ ⇒ **本树状态**：两笔**都已是本分支祖先**（`git merge-base --is-ancestor` 双双 YES）⇒ ⇒ **本层分支已满足该约束** ⇒ ⇒ **约束只对「整合者逐笔 cherry-pick」与「G1 分支」有效** ⇒ ⇒ **转整合者**（本层只登记） |
+| ⚠️ **G1 的域暴露面数字订正** | G1 报 `user-rpc` **11** / `admin-rpc` **13** / `follow-rpc` **5** 个 `@SpringBootTest` 上下文 ⇒ ⇒ 🔴 **本层按「真注解」重数 = `user-rpc` 9 / `admin-rpc` 12 / `follow-rpc` 3**（`grep -rE "^\s*@SpringBootTest"`）⇒ ⇒ **G1 的数是「含 javadoc 提及」的数**（follow-rpc：提及 7 / 真注解 **3**）⇒ ⇒ ⇒ **方向不变**（这三个域确实是「同模块多 Spring 上下文」的形态 ⇒ 暴露面成立）⇒ ⇒ **数字按注解口径订正**（同 §4.10.19.1 的三层计数纪律） |
+
+**⑤ 🟢 G1 ②（`ObservabilityLifecycle` javadoc 过期）—— 已修（该文件在本层写权面内）**
+
+| 项 | 内容 |
+|---|---|
+| **G1 的原断** | `3b573fb` 之后本类只剩 `RpcInterceptor.shutdown()` 一句，但 javadoc 仍写「即使某个池关闭出错，也要保证**其他池**被尝试关闭，因此**调用各自独立**」⇒ ⇒ 建议改单池口径 |
+| **本层独立核** | ✅ **成立** —— `ObservabilityLifecycle.java:88-89`（修前）确实写着那句 ⇒ ⇒ **该文件属 `service/common/**` ⇒ 本层写权面内** ⇒ ⇒ ⇒ **本层直接修，不转派** |
+| **修法** | 改为**单池口径**并**写明「这句已随 HTTP 池拆出而过期」** ⇒ ⇒ 并补一句「若将来再加池进来，**必须同时把这段改回多池口径**」（防止下一轮又留一处过期 javadoc） |
+
+**⑥ 🟢 G1 ③（Redis 收编删除前置）—— 共享层那两条断言**已存在** ⇒ 本层零落码**
+
+| 项 | 内容 |
+|---|---|
+| **G1 的原断** | 删 5 份域内副本前必须同批重写 5 份 FastFail 守门的装配（`@Import` ⇒ `@ImportAutoConfiguration(GoStyleRedisClientAutoConfiguration.class)`）**并补两条断言**：`getBeansOfType(LettuceClientOptionsBuilderCustomizer.class).size()==1` ＋ key 含 `goStyleRedisClientOptionsCustomizer` ⇒ ⇒ 否则**只断言行为值 ⇒ 收编没做也绿**（`@ConditionalOnMissingBean` 是「**遮蔽**」不是「叠加」） |
+| **本层独立核** | ✅ **G1 的判断成立**（`@ConditionalOnMissingBean` = 遮蔽）<br>⇒ ⇒ 🟢 **但那两条断言在共享层**已经存在**（**逐条等价**）—— `service/common/src/test/java/com/rag/common/redis/GoStyleRedisClientOptionsGateTest.java:62`（`getBeanNamesForType(LettuceClientOptionsBuilderCustomizer.class)`）· `:64`（`.hasSize(1)`）· `:65-66`（`[0]` 等于 `"goStyleRedisClientOptionsCustomizer"`）⇒ ⇒ ⇒ **域侧那 5 份守门照抄这两条即可** ⇒ ⇒ **本层零落码**（不重复造） |
+| **G1 的 5 项静态核验** | ✅ 本层已复核关键两条：**共享层那份** customizer 只设 `disconnectedBehavior(REJECT_COMMANDS)`、**零 `timeoutOptions` 触碰**（与守门 ③ 同款）⇒ ⇒ **删除域内副本 = 纯删减、零行为变化** ⇒ ⇒ **同意 G1 的结论** |
+
+**⑦ 本层这一条** | **落码 2 处**（`d4e4745` 守门派生 + `ObservabilityLifecycle` javadoc）＋ **改派 1 条**（FB-S2 ⇒ 整合者）＋ **写权/口径/数字各订正 3 条**（FB-S2 归属 · 辐射度口径 · G1 的域暴露面数字）⇒ ⇒ **生产代码净改动 = 1 个 javadoc** ⇒ ⇒ ⇒ **第十四次全量口径（代码态 `15cf93a` + `d546f45` + `407c230`）仍有效**（本轮只改 `docs/**` 与 `tools/**`，未动任何 `service/**` 的**可执行**代码 ⇒ ⇒ **但 `ObservabilityLifecycle.java` 是 `service/**` 下的 java 文件 ⇒ 已复跑 common 模块**）。<br>🟢 **复跑口径（2026-10-27 22:47~22:49 · `mvn -o -B -DargLine=-Xmx2g -am -pl service/common test`）** = **330 条 / 0 failures / 0 errors / 0 skipped / EXIT=0**（约 1:15 min）⇒ ⇒ **首跑曾红 1 条**（`RpcServerSpanCurrentGateTest.handlerCanSeeTheServerSpan` ⇒ `UNAVAILABLE: Network closed for unknown reason`）⇒ ⇒ **隔离复跑该类 = 4/0/0/0 全绿（EXIT=0）** ＋ **整模块复跑 = 330 全绿** ⇒ ⇒ ⇒ **定性 = 瞬态**（G2 树同刻在跑 8 模块 `clean test` ⇒ 抢端口/抢资源）⇒ ⇒ **与本次 javadoc 改动无因果关系**（改的是注释 ⇒ 不改字节码）⇒ ⇒ **教训同款**：**「同一条失败在隔离复跑里是否复现」= 定性瞬态 vs 缺陷的唯一判据** ⇒ ⇒ ⚠️ **且「共享层一条红 ⇒ 别的 lane 的回归链整条断在他域之前」⇒ 共享层的偶发红是跨 lane 的公共风险**。
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
