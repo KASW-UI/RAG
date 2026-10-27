@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import com.rag.comment.comment.rpc.support.RealGrpcPort;
+import com.rag.comment.comment.rpc.support.RealContainerHostPort;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -83,7 +84,8 @@ class CommentRpcRuntimeBootGateTest {
     static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("first_db")
             .withUsername("admin")
-            .withPassword("password");
+            .withPassword("password")
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.COMMENT_RPC_RUNTIME_BOOT_GATE));
 
     @Test
     @DisplayName("真 fat jar 起真 CommentRpcApplication：gRPC 端口真的在监听（生产 classpath + 生产 yaml）")

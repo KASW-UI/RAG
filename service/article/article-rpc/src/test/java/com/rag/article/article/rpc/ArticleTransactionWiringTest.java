@@ -10,6 +10,7 @@ import com.rag.article.article.rpc.mq.ArticleSyncEventTypes;
 import com.rag.article.article.rpc.service.ArticleAtomicService;
 import com.rag.article.article.rpc.service.ArticlePublicDomainService;
 import com.rag.article.article.rpc.service.ArticlePublicDomainService.PublicArticleView;
+import com.rag.article.article.rpc.support.RealContainerHostPort;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -89,7 +90,8 @@ class ArticleTransactionWiringTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("article_rpc_tx_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.TRANSACTION_WIRING));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

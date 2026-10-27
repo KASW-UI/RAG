@@ -1,5 +1,6 @@
 package com.rag.article.article.rpc;
 
+import com.rag.article.article.rpc.support.RealContainerHostPort;
 import com.rag.article.article.proto.ArticleServiceGrpc;
 import com.rag.article.article.proto.GetArticleRequest;
 import com.rag.article.article.proto.GetArticleResponse;
@@ -128,7 +129,8 @@ class ArticleGrpcInterceptorWiringTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("article_rpc_interceptor_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.GRPC_INTERCEPTOR_WIRING));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

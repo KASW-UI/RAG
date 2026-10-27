@@ -2,6 +2,7 @@ package com.rag.favorite.favorite.rpc.fact;
 
 import com.rag.favorite.favorite.rpc.service.FavoriteAuthorityLookupService;
 import com.rag.favorite.favorite.rpc.support.RealGrpcPort;
+import com.rag.favorite.favorite.rpc.support.RealContainerHostPort;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -83,7 +84,8 @@ class FavoriteAuthorityLiveParityTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("first_db")
                     .withUsername("admin")
-                    .withPassword("password");
+                    .withPassword("password")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.FAVORITE_AUTHORITY_LIVE_PARITY));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry registry) {

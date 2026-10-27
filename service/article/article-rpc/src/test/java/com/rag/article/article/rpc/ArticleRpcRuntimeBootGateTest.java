@@ -1,5 +1,6 @@
 package com.rag.article.article.rpc;
 
+import com.rag.article.article.rpc.support.RealContainerHostPort;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -83,7 +84,8 @@ class ArticleRpcRuntimeBootGateTest {
     static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("first_db")
             .withUsername("admin")
-            .withPassword("password");
+            .withPassword("password")
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.RUNTIME_BOOT_GATE));
 
     @Test
     @DisplayName("真 fat jar 起真 ArticleRpcApplication：gRPC 端口真的在监听（生产 classpath + 生产 yaml）")

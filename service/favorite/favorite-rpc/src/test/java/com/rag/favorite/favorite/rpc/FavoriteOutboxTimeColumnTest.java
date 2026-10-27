@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.rag.favorite.favorite.rpc.support.RealGrpcPort;
+import com.rag.favorite.favorite.rpc.support.RealContainerHostPort;
 
 /**
  * 🔴🔴 真 PG 上的 **outbox 时间列**校验 —— 守住 2026-10-25 第七轮修的时钟源漂移。
@@ -80,7 +81,8 @@ class FavoriteOutboxTimeColumnTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("first_db")
                     .withUsername("admin")
-                    .withPassword("password");
+                    .withPassword("password")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.FAVORITE_OUTBOX_TIME_COLUMN));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry registry) {

@@ -5,6 +5,7 @@ import com.rag.article.article.rpc.domain.ArticleRevisionEntity;
 import com.rag.article.article.rpc.mapper.ArticleMapper;
 import com.rag.article.article.rpc.mapper.ArticlePublicMapper;
 import com.rag.article.article.rpc.mapper.ArticleRevisionMapper;
+import com.rag.article.article.rpc.support.RealContainerHostPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -89,7 +90,8 @@ class ArticleJsonbResultMapWiringTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("article_rpc_jsonb_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.JSONB_RESULT_MAP_WIRING));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

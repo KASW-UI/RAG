@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit;
 import com.rag.hot.hot.rpc.config.HotRpcProperties;
 import com.rag.hot.hot.rpc.domain.HeavyKeeper;
 import com.rag.hot.hot.rpc.metrics.HotRpcMetrics;
+import com.rag.hot.hot.rpc.support.RealContainerHostPort;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -69,7 +70,8 @@ class HotRedisLuaGateTest {
     @Container
     @SuppressWarnings("resource")
     static final GenericContainer<?> REDIS =
-            new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379);
+            new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379)
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindRedis(RealContainerHostPort.HOT_REDIS_LUA_GATE));
 
     private static StringRedisTemplate redis;
     private static HotRpcProperties props;

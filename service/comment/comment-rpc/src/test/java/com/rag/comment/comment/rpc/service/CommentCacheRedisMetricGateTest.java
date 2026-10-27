@@ -8,6 +8,7 @@ import com.rag.comment.comment.rpc.mapper.CommentContentMapper;
 import com.rag.comment.comment.rpc.mapper.CommentIndexMapper;
 import com.rag.comment.comment.rpc.mapper.SubjectMapper;
 import com.rag.comment.comment.rpc.metrics.CommentRpcMetrics;
+import com.rag.comment.comment.rpc.support.RealContainerHostPort;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.ibatis.mapping.Environment;
@@ -94,14 +95,16 @@ class CommentCacheRedisMetricGateTest {
     @Container
     @SuppressWarnings("resource")
     static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7-alpine")
-            .withExposedPorts(6379);
+            .withExposedPorts(6379)
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindRedis(RealContainerHostPort.COMMENT_CACHE_REDIS_METRIC_GATE_REDIS));
 
     @Container
     @SuppressWarnings("resource")
     static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("first_db")
             .withUsername("admin")
-            .withPassword("password");
+            .withPassword("password")
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.COMMENT_CACHE_REDIS_METRIC_GATE_PG));
 
     /** 本类独立账本（不与其它 gate test 的账本撞号）。 */
     private static final String LEDGER = "flyway_schema_history_comment_cache_gate";

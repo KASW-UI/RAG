@@ -3,6 +3,7 @@ package com.rag.article.article.rpc.service;
 import com.rag.article.article.proto.Article;
 import com.rag.article.article.rpc.domain.ArticleEntity;
 import com.rag.article.article.rpc.mapper.ArticleMapper;
+import com.rag.article.article.rpc.support.RealContainerHostPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -99,7 +100,8 @@ class ArticleNullJsonbToProtoMappingTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("article_rpc_nulljsonb_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.NULL_JSONB_TO_PROTO_MAPPING));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

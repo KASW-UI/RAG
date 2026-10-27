@@ -1,5 +1,6 @@
 package com.rag.comment.comment.rpc;
 
+import com.rag.comment.comment.rpc.support.RealContainerHostPort;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.configuration.FluentConfiguration;
 import org.junit.jupiter.api.DisplayName;
@@ -65,7 +66,8 @@ class CommentFlywaySharedSchemaGateTest {
     static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("comment_rpc_shared_schema_it")
             .withUsername("rag")
-            .withPassword("rag");
+            .withPassword("rag")
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.COMMENT_FLYWAY_SHARED_SCHEMA_GATE));
 
     @Test
     @DisplayName("🔴 非空 schema 下 V1 必须真执行 ⇒ subject 表必须存在")

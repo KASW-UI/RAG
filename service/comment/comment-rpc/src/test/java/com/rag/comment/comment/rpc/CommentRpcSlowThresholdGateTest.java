@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import com.rag.comment.comment.rpc.support.RealGrpcPort;
+import com.rag.comment.comment.rpc.support.RealContainerHostPort;
 
 import static com.rag.common.observability.ObservabilityConstants.ATTR_DURATION;
 import static com.rag.common.observability.ObservabilityConstants.ATTR_SLOW;
@@ -149,7 +150,8 @@ class CommentRpcSlowThresholdGateTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("comment_rpc_slow_threshold_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.COMMENT_RPC_SLOW_THRESHOLD_GATE));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

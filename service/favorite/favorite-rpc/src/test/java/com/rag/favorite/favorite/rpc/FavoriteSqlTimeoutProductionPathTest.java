@@ -3,6 +3,7 @@ package com.rag.favorite.favorite.rpc;
 import com.rag.common.observability.RpcInterceptor.DeadlineState;
 import com.rag.favorite.favorite.rpc.mapper.FavoriteFolderMapper;
 import com.rag.favorite.favorite.rpc.support.RealGrpcPort;
+import com.rag.favorite.favorite.rpc.support.RealContainerHostPort;
 import org.apache.ibatis.executor.statement.StatementHandler;
 import org.apache.ibatis.plugin.Interceptor;
 import org.apache.ibatis.plugin.Intercepts;
@@ -117,7 +118,8 @@ class FavoriteSqlTimeoutProductionPathTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("first_db")
                     .withUsername("admin")
-                    .withPassword("password");
+                    .withPassword("password")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.FAVORITE_SQL_TIMEOUT_PRODUCTION_PATH));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry registry) {

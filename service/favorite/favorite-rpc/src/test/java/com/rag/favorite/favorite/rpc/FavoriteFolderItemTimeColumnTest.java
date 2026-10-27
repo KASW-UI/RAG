@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.rag.favorite.favorite.rpc.support.RealGrpcPort;
+import com.rag.favorite.favorite.rpc.support.RealContainerHostPort;
 
 /**
  * 🔴🔴 真 PG 上的 **folder / item 时间列**校验 —— 守住 2026-10-26 第二十三轮修的漂移。
@@ -78,7 +79,8 @@ class FavoriteFolderItemTimeColumnTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("first_db")
                     .withUsername("admin")
-                    .withPassword("password");
+                    .withPassword("password")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.FAVORITE_FOLDER_ITEM_TIME_COLUMN));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry registry) {

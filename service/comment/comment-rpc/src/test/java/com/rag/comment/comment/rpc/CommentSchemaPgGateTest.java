@@ -1,5 +1,6 @@
 package com.rag.comment.comment.rpc;
 
+import com.rag.comment.comment.rpc.support.RealContainerHostPort;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -51,7 +52,8 @@ class CommentSchemaPgGateTest {
     static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("first_db")
             .withUsername("admin")
-            .withPassword("password");
+            .withPassword("password")
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.COMMENT_SCHEMA_PG_GATE));
 
     /** 与生产同一条 DSN 形态（含 TimeZone=Asia/Shanghai，对齐 Go 的 comment.yaml:9）。 */
     private static String jdbcUrl() {

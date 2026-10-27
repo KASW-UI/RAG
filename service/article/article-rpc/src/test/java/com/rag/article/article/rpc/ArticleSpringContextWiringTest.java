@@ -15,6 +15,7 @@ import com.rag.article.article.rpc.service.ArticleAtomicService;
 import com.rag.article.article.rpc.service.ArticleDomainService;
 import com.rag.article.article.rpc.service.ArticlePublicDomainService;
 import com.rag.article.article.rpc.service.impl.ArticleServiceGrpcImpl;
+import com.rag.article.article.rpc.support.RealContainerHostPort;
 import io.grpc.ServerInterceptor;
 import net.devh.boot.grpc.server.serverfactory.GrpcServerConfigurer;
 import org.junit.jupiter.api.DisplayName;
@@ -88,7 +89,8 @@ class ArticleSpringContextWiringTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("article_rpc_wiring_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.SPRING_CONTEXT_WIRING));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

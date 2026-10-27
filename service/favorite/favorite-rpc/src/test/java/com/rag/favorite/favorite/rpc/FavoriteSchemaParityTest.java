@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.rag.favorite.favorite.rpc.support.RealGrpcPort;
+import com.rag.favorite.favorite.rpc.support.RealContainerHostPort;
 
 /**
  * 🔴 真 PostgreSQL 上的 schema 资产校验 —— 对应 Go 侧
@@ -66,7 +67,8 @@ class FavoriteSchemaParityTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("first_db")
                     .withUsername("admin")
-                    .withPassword("password");
+                    .withPassword("password")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.FAVORITE_SCHEMA_PARITY));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry registry) {

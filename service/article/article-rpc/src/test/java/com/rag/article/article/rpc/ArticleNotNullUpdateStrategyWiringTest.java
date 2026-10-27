@@ -2,6 +2,7 @@ package com.rag.article.article.rpc;
 
 import com.rag.article.article.rpc.domain.ArticleEntity;
 import com.rag.article.article.rpc.mapper.ArticleMapper;
+import com.rag.article.article.rpc.support.RealContainerHostPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -107,7 +108,8 @@ class ArticleNotNullUpdateStrategyWiringTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("article_rpc_notnull_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.NOT_NULL_UPDATE_STRATEGY_WIRING));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

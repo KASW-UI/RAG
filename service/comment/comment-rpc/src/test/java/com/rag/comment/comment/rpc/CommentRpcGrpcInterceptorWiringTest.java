@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import com.rag.comment.comment.rpc.support.RealGrpcPort;
+import com.rag.comment.comment.rpc.support.RealContainerHostPort;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -134,7 +135,8 @@ class CommentRpcGrpcInterceptorWiringTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("comment_rpc_interceptor_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.COMMENT_RPC_GRPC_INTERCEPTOR_WIRING));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

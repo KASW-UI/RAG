@@ -1,5 +1,6 @@
 package com.rag.article.article.rpc;
 
+import com.rag.article.article.rpc.support.RealContainerHostPort;
 import net.devh.boot.grpc.server.event.GrpcServerStartedEvent;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -65,7 +66,8 @@ class ArticleSchemaGateStartupOrderTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("article_rpc_gate_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.SCHEMA_GATE_STARTUP_ORDER));
 
     @BeforeAll
     static void migrateOnce() {

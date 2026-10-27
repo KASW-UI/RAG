@@ -1,6 +1,7 @@
 package com.rag.favorite.favorite.api;
 
 import com.rag.favorite.favorite.api.client.FavoriteRpcClient;
+import com.rag.favorite.favorite.api.support.RealContainerHostPort;
 import com.rag.favorite.favorite.proto.FavoriteServiceGrpc;
 import com.rag.users.common.jwt.JwtUtil;
 import io.grpc.Status;
@@ -96,7 +97,8 @@ class FavoriteApiMvcPipelineTest {
 
     @Container
     static final GenericContainer<?> REDIS =
-            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379)
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindRedis(RealContainerHostPort.FAVORITE_API_MVC_PIPELINE_REDIS));
 
     @DynamicPropertySource
     static void redis(DynamicPropertyRegistry r) {

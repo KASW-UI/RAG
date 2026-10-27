@@ -8,6 +8,7 @@ import com.rag.favorite.favorite.rpc.domain.FavoriteItemEntity;
 import com.rag.favorite.favorite.rpc.service.FavoriteAuthorityLookupService;
 import com.rag.favorite.favorite.rpc.service.FavoriteFactEnvelopeFactory;
 import com.rag.favorite.favorite.rpc.support.RealGrpcPort;
+import com.rag.favorite.favorite.rpc.support.RealContainerHostPort;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -112,7 +113,8 @@ class FavoriteAuthorityV2ResponseShapeTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("first_db")
                     .withUsername("admin")
-                    .withPassword("password");
+                    .withPassword("password")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.FAVORITE_AUTHORITY_V2_RESPONSE_SHAPE));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry registry) {

@@ -14,6 +14,7 @@ import com.rag.comment.comment.rpc.mapper.CommentDomainFactOutboxMapper;
 import com.rag.comment.comment.rpc.mapper.CommentIndexMapper;
 import com.rag.comment.comment.rpc.service.CommentDeliveryValidator;
 import com.rag.comment.comment.rpc.service.CommentFactDeliveryService;
+import com.rag.comment.comment.rpc.support.RealContainerHostPort;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.trace.Span;
@@ -101,7 +102,8 @@ class CommentRpcGoSemanticsGateTest {
     static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("first_db")
             .withUsername("admin")
-            .withPassword("password");
+            .withPassword("password")
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.COMMENT_RPC_GO_SEMANTICS_GATE));
 
     /** 本类独立账本（不与 {@code CommentSchemaPgGateTest} 的账本撞号）。 */
     private static final String LEDGER = "flyway_schema_history_comment_go_gate";

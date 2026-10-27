@@ -36,6 +36,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import com.rag.comment.comment.rpc.support.RealGrpcPort;
+import com.rag.comment.comment.rpc.support.RealContainerHostPort;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -120,7 +121,8 @@ class CommentSpanWiringTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("comment_rpc_span_wiring_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.COMMENT_SPAN_WIRING));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

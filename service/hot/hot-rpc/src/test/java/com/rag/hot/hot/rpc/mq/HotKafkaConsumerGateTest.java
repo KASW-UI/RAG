@@ -15,6 +15,7 @@ import java.util.function.BooleanSupplier;
 
 import com.rag.hot.hot.rpc.HotRpcApplication;
 import com.rag.hot.hot.rpc.domain.HeavyKeeper;
+import com.rag.hot.hot.rpc.support.RealContainerHostPort;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -158,7 +159,8 @@ class HotKafkaConsumerGateTest {
     @Container
     @SuppressWarnings("resource")
     static final GenericContainer<?> REDIS =
-            new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379);
+            new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379)
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindRedis(RealContainerHostPort.HOT_KAFKA_CONSUMER_GATE));
 
     @DynamicPropertySource
     static void infra(DynamicPropertyRegistry registry) {
