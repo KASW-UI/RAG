@@ -1177,7 +1177,42 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | **本层上轮转的线索** | 🔴 **comment 域 fact 投递链路上的 `Span.current()`**：`CommentFactDeliveryService.java:148` 的 `Span.current()` 发生在**调度线程**（`CommentFactDispatchScheduler.java:95`）⇒ ⇒ 取到 **invalid span** ⇒ ⇒ `:193-194` 的属性**静默丢弃**；而 Go 侧 comment fact 投递链路**根本不用 span** ⇒ ⇒ **RAG 侧独有的无效代码** |
 | **本轮 G3 的回执里没提这条** | ⇒ ⇒ **不销账**（不能因为 C-3 落了就默认这条也修了）⇒ ⇒ **本层已在台账保留** ⇒ ⇒ 回执里**点名问一次**（是已修、未修，还是判定为「不修」） |
 
-#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `2f3d5c2`）
+#### 4.10.18 🟢 **G1 的补充回执 ③（2026-10-27）—— Go 腿活体证据 + 本层核验 + 一条已知缺口**
+
+##### 4.10.18.1 G1 给的 L4 证据（本层登记）
+
+| 项 | 内容 |
+|---|---|
+| **Go 腿活体探针** | 探针 **import 真源自己的 `service/common/observability`**（非重写版）⇒ 打印 `nativeTimeoutMiddlewareEnabled=false` ⇒ **go-zero 原生 TimeoutHandler 不在链上** ⇒ 3s **只**由真源自己的 observability 中间件提供（ctx 在 `observability/http.go:53` 自建）⇒ ⇒ **Go 侧「3s 预算不覆盖 JWT 验签」由 L1（读源码）升为 L4（运行时活体）** ⇒ user / admin / follow 三域的 `009②` 结论同步升 L4 |
+| **三腿** | ① 有效 token ⇒ `PROBE-A(outer) deadline_set=false` / `PROBE-B(inner) deadline_set=true remaining=3s` ② handler 睡 4s ⇒ **HTTP 503 @ 3.002s**（与 Go `http.go:88` 逐字一致）③ **非法 token ⇒ 401 + 空 body，且 A/B/HANDLER 三个观测点一个都没打印** ⇒ 🔴 **决定性反证**：Authorize 在所有 user middleware 之前 ⇒ 验签在 3s 预算之外 |
+| **对共享层的约束（重申并加固）** | ① `HttpMiddlewareFilter` 的 `@Order` **必须保持 +7**（下调到 +6 或更低 ⇒ 吃掉域侧唯一可用槽位；上调 ⇒ 验签落回预算内 ⇒ **两个方向都不行**）② **共享层若新增 Filter ⇒ 必须让出 +4/+5/+6** ③ `@Order` 数字会漂 ⇒ 任何据旧数字的推论都要**重算** |
+
+##### 4.10.18.2 🟢 本层**独立核验**了「Go 侧 413 优先于 401」这个前提（**G1 是对的，本层一度两次判反**）
+
+| 项 | 内容 |
+|---|---|
+| **结论** | ✅ **Go 侧 = MaxBytes(413) 优先于 Authorize(401)** ⇒ ⇒ **G1 的前提成立** ⇒ ⇒ 「`DRIFT-USERAPI-009 §7` 并入 `SD-USERAPI-002` 签字」的前提**成立** ⇒ ⇒ **本层不反对**（签字档 `docs/Intentional_Deviations/` 归整合者 ⇒ 本层不代签） |
+| **硬证据（`go-zero@v1.10.2`，真源 `go.mod` pin 的版本）** | `rest/engine.go:101-116` `bindRoute`：`:103` 取 `ng.chain` → `:105` `buildChainWithNativeMiddlewares(...)`（**native middlewares 在内**，其中 `rest/engine.go:163-164` 挂 `handler.MaxBytesHandler`）→ `:108` `appendAuthHandler(...)`（**`Authorize` 在 `:74/:77`**）→ `:110` 用户自定义 middlewares → `:113` `ThenFunc`<br>⇒ ⇒ **同一条 `chn`** ⇒ ⇒ **`Authorize` 排在 native middlewares 之后** ⇒ ⇒ **413 先于 401** |
+| ⚠️ **本层两次判反的教训（可复用）** | ① **行号直觉会骗人**：`:74`（Authorize）看起来早于 `:105`（native middlewares），但 `:74` **在另一个函数里**，真正把它 append 上去的是 `:108`（在 `:105` **之后**）⇒ ⇒ **必须看调用结构，不能看行号大小**<br>② **`chain.Then` 的反向包裹不是「执行顺序反转」**：`rest/chain/chain.go:38-42` 的注释写明「`Append` … as the **last** ones in the request flow … requests in c go m1 -> m2 -> m3 -> m4」⇒ ⇒ `Then`（`:81-91`）的反向包裹**正是为了实现「append 顺序 = 请求流顺序」**⇒ ⇒ ⇒ **推中间件顺序必须同时看「调用结构」与「库的顺序契约」两样** |
+| ⚠️ **跨树引用共享层行号必须带基线** | G1 引的 `service/common/observability/HttpMiddleware.java:270/294/304/322` 是**他树**（`align/g1-users-follow` @ `0c2a902`）的行号；**本树**（`align/g4-service-common`）的预算起算/清除在 **`:324` begin / `:356` clear** ⇒ ⇒ **同一文件不同树 ⇒ 行号不同** ⇒ ⇒ 跨树引用必须标基线 commit，否则复核会「找不到」⇒ ⇒ **（与 memory 里「引用库内依赖源码必须带模块限定路径」同族）** |
+
+##### 4.10.18.3 🟡 **已知缺口（显式登记 · 本层落码尝试后撤掉）**：「共享层新增 Filter ⇒ 必须让出 +4/+5/+6」**目前无机器保障**
+
+| 项 | 内容 |
+|---|---|
+| **缺口** | ①~④ 都**只读快照里那 7 个类**（`readActualSlots()` 与真容器上下文里 `withUserConfiguration(...)` 显式列出的 7 个）⇒ ⇒ **共享层新增第 8 个 Filter ⇒ ① 根本看不到它** ⇒ ⇒ ⇒ **G1 的约束②只有口头约定，没有网** |
+| **本层的落码尝试（已撤）** | 试过加第 ⑤ 条：**类路径扫描** `com.rag.common` 下所有带 `@Order` 的 `Filter` 实现 ⇒ 断言「⊆ 快照」⇒ ⇒ **实测只扫到 2/7**（`GoStylePathNormalizingFilter` + `HttpMiddlewareFilter`；**`protection` 包的 4 个与 `http` 包的 `GoStyleTraceparentFilter` 全漏**）⇒ ⇒ **原因未查明** ⇒ ⇒ ⇒ **⚠️ 判据本身不可靠 ⇒ 拿它当守门 = 假绿** ⇒ ⇒ ⇒ **按「宁可不做，不要假绿」撤掉 ⑤**（回退到 4 条，4 条已复跑绿）<br>⇒ ⇒ 附一条**可复用教训**：**类路径扫描（`ClassPathScanningCandidateComponentProvider`）在这个仓的环境下扫不全 ⇒ 不可直接当守门判据** ⇒ ⇒ 引用它时必须先自证「扫到的集合 = 预期的全集」 |
+| **可行落法方向（未落）** | ① **域内**：在某个真 api 应用（如 `favorite-api`）的上下文里读「**实际注册的**带 `@Order` 的 Filter」集合 ⇒ ⇒ 那才是**真装配面** ⇒ ⇒ **G3 的域可做**<br>② **共享层**：需要一个**统一装配面**才能一次装全 ⇒ ⇒ ⚠️ 现状是 `GoStyleProtectionConfiguration` **刻意不扫 `com.rag.common`**（`protection/GoStyleProtectionConfiguration.java:53-54`）⇒ ⇒ 那 4 个 protection Filter 靠**各域的组件扫描**注册 ⇒ ⇒ 共享层自己的测试上下文**装不全** ⇒ ⇒ ⇒ **⇒ 落 ①（域内）更现实** |
+| **本层的态度** | ⏸️ **本轮不落**（只登记）⇒ ⇒ **不把「看起来能过」的守门塞进仓** ⇒ ⇒ 该缺口**留在台账上**，等有人能做出**不假绿**的实现再落 |
+
+##### 4.10.18.4 另两条（**不是 G4 的**）—— 本层的处置
+
+| 项 | 处置 |
+|---|---|
+| **`UNRESOLVED-ARPC-002`（E38② 第①层）** | G1 与 G2 的探针口径一致 ⇒ **① 层已闭环** ⇒ ⇒ 🔴 **本层不动 `RpcInterceptor` 的 deadline 计算**（会把对的改错 ⇒ 制造新漂移）⇒ ⇒ **确认不动** |
+| **`DRIFT-USERAPI-009 §7`（MaxBytes 相对 observability 的位置）** | 落点是共享层 `GoStyleMaxBytesFilter` 的 `@Order`（**归 G4**），但台账建议**并入 `SD-USERAPI-002` 的范围说明**（签字比改码便宜）⇒ ⇒ ⚠️ 签字档 `docs/Intentional_Deviations/` **归整合者** ⇒ ⇒ **本层只登记、不代签**（§4.10.18.2 已核其前提成立） |
+
+#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `b71ac22`）
 
 | commit | 内容 | 落点（`文件:行号`） | A 轴 |
 |---|---|---|---|
