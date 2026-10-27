@@ -4,14 +4,17 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
+import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -85,6 +88,66 @@ class CommentRpcArtifactClasspathGateTest {
     }
 
     // ==================================================================
+    // ③ fat jar 内嵌的 common jar 必须带共享层排序桥（域侧副本删掉后，排序边只能来自共享层）
+    // ==================================================================
+
+    /**
+     * 共享层排序桥的<b>全限定名</b> —— <b>独立字面量 oracle</b>。
+     *
+     * <p>⚠️ <b>为什么不从 {@code service/common} 的源码里读这个类名</b>：
+     *   那样写的话，共享层<b>改包名</b>时这条断言会跟着一起变 ⇒ ⇒ 永远绿 ⇒ ⇒ 守门失效。
+     *   ⇒ 这里<b>写死字符串</b> ⇒ 共享层真改了包名 ⇒ 本条<b>如实转红</b> ⇒ ⇒ 提醒人同步改这里。
+     */
+    private static final String SHARED_LAYER_ORDERING_BRIDGE =
+            "com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration";
+
+    @Test
+    @DisplayName("fat jar 内嵌的 common jar 必须带共享层排序桥（域侧副本删掉后，排序边只能来自共享层）")
+    void fatJarEmbeddedCommonJarCarriesSharedLayerOrderingBridge() throws Exception {
+        Path jar = fatJar();
+
+        try (JarFile jarFile = new JarFile(jar.toFile())) {
+            JarEntry commonJar = jarFile.stream()
+                    .filter(e -> e.getName().startsWith("BOOT-INF/lib/common-")
+                            && e.getName().endsWith(".jar"))
+                    .findFirst()
+                    .orElse(null);
+            assertNotNull(commonJar,
+                    "fat jar " + jar.getFileName() + " 的 BOOT-INF/lib 里没有内嵌的 common-*.jar"
+                            + " ⇒ ⇒ 无从判断排序桥在不在 ⇒ ⇒ 这条守门的前提就断了");
+
+            Path extracted = Files.createTempFile("embedded-common-", ".jar");
+            try {
+                try (InputStream in = jarFile.getInputStream(commonJar)) {
+                    Files.copy(in, extracted, StandardCopyOption.REPLACE_EXISTING);
+                }
+                try (JarFile embedded = new JarFile(extracted.toFile())) {
+                    JarEntry importsEntry = embedded.getJarEntry(
+                            "META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports");
+                    assertNotNull(importsEntry,
+                            "内嵌的 common jar 里没有 AutoConfiguration.imports"
+                                    + " ⇒ ⇒ 共享层的排序桥根本没被注册");
+                    String imports;
+                    try (InputStream in = embedded.getInputStream(importsEntry)) {
+                        imports = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+                    }
+                    assertTrue(imports.contains(SHARED_LAYER_ORDERING_BRIDGE),
+                            "fat jar 内嵌的 common jar 的 AutoConfiguration.imports 里【没有】共享层排序桥（"
+                                    + SHARED_LAYER_ORDERING_BRIDGE + "）"
+                                    + " ⇒ ⇒ 域侧排序桥副本删掉后，MyBatis-Plus 的排序边就没了"
+                                    + " ⇒ ⇒ MP 的 @AutoConfigureAfter（Boot 3 包名）在 Boot 4 下悬空"
+                                    + " ⇒ ⇒ MP 先于 DataSource 求值 ⇒ ⇒ 不产 SqlSessionFactory"
+                                    + " ⇒ ⇒ 进程启动即挂"
+                                    + "（Property 'sqlSessionFactory' or 'sqlSessionTemplate' are required）"
+                                    + " ⇒ ⇒ 常见根因 = 构建 fat jar 的命令【没带 -am】⇒ 从 ~/.m2 取了旧 common jar");
+                }
+            } finally {
+                Files.deleteIfExists(extracted);
+            }
+        }
+    }
+
+    // ==================================================================
     // helpers（package-private ⇒ 同包的进程级守门类复用）
     // ==================================================================
 
@@ -142,6 +205,18 @@ class CommentRpcArtifactClasspathGateTest {
                 files.filter(Files::isRegularFile).forEach(inputs::add);
             }
         }
+        // 🔴 2026-10-27 补：共享层的源码也要算进「新鲜度」——
+        //    fat jar 里内嵌的是 BOOT-INF/lib/common-*.jar
+        //    ⇒ 共享层改了而本模块没改时，本模块的 fat jar **不会**自动重建
+        //    ⇒ ⇒ 内嵌的那份是旧的 ⇒ ⇒ 第 ③ 条守门会读到过期内容（假绿/假红都可能出现）。
+        Path sharedLayer = repoRoot().resolve("service/common");
+        inputs.add(sharedLayer.resolve("pom.xml"));
+        Path sharedMain = sharedLayer.resolve("src").resolve("main");
+        if (Files.isDirectory(sharedMain)) {
+            try (Stream<Path> files = Files.walk(sharedMain)) {
+                files.filter(Files::isRegularFile).forEach(inputs::add);
+            }
+        }
         for (Path input : inputs) {
             if (Files.exists(input) && input.toFile().lastModified() > jarTime) {
                 return true;
@@ -150,10 +225,25 @@ class CommentRpcArtifactClasspathGateTest {
         return false;
     }
 
-    /** 构建 fat jar（跳过测试 —— 本类自己就是那个测试）。 */
+    /**
+     * 构建 fat jar（跳过测试 —— 本类自己就是那个测试）。
+     *
+     * <p>🔴 <b>2026-10-27 补：命令必须带 {@code -am}</b>（G2 急件 · 本域同一类坑）：
+     * <ul>
+     *   <li>不带 {@code -am} ⇒ {@code service/common} <b>不在 reactor 里</b>
+     *       ⇒ ⇒ fat jar 内嵌的 {@code BOOT-INF/lib/common-*.jar} 来自 <b>{@code ~/.m2}</b>
+     *       ⇒ ⇒ 那是<b>旧的</b>共享层包（实测：{@code ~/.m2} 那份的
+     *       {@code AutoConfiguration.imports} 里<b>没有</b>共享层排序桥）</li>
+     *   <li>⇒ ⇒ 域侧排序桥副本一旦删掉，fat jar 里就<b>没有排序桥</b>
+     *       ⇒ ⇒ MyBatis-Plus 的 {@code @AutoConfigureAfter}（Boot 3 包名）在 Boot 4 下<b>悬空</b>
+     *       ⇒ ⇒ MP 先于 DataSource 求值 ⇒ ⇒ 不产 {@code SqlSessionFactory}
+     *       ⇒ ⇒ <b>进程启动即挂</b>
+     *       （{@code Property 'sqlSessionFactory' or 'sqlSessionTemplate' are required}）</li>
+     * </ul>
+     */
     private static void buildFatJar() throws Exception {
         ProcessBuilder builder = new ProcessBuilder(List.of(
-                "mvn", "-o", "-q", "package", "-Dmaven.test.skip=true", "-pl", MODULE_PATH))
+                "mvn", "-o", "-q", "package", "-Dmaven.test.skip=true", "-am", "-pl", MODULE_PATH))
                 .directory(repoRoot().toFile())
                 .redirectErrorStream(true);
         Process process = builder.start();

@@ -1,2 +1,1 @@
-com.rag.article.article.rpc.config.MybatisPlusOrderingBridgeAutoConfiguration
 com.rag.article.article.rpc.client.ContentSecurityAutoConfiguration
