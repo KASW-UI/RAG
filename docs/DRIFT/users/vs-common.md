@@ -1080,7 +1080,39 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 ### 21.5 🟡 **G2 ④ 的联动登记**：共享层若改命令超时判据 ⇒ **两域必须一起改**
 
 ⇒ 判据 = **`LettuceClientConfiguration.getCommandTimeout()`**（值）＋ **`getTimeout()==3000` ＋ `isApplyConnectionTimeout()`**（机制）⇒ ⇒ **不是** `isTimeoutCommands()`（恒真 ⇒ 非有效判据）。
-⇒ ⇒ **用同一判据的守门**：**我域 5 份** FastFail 守门（user-api / admin-api / follow-api / user-rpc / admin-rpc）＋ **G2 域 8 条**（`LikeRpcRedisTimeoutsGateTest` 4 ＋ `TaskRedisCommandTimeoutGateTest` 4）⇒ ⇒ **共 13 份跨 2 个域** ⇒ ⇒ ⇒ **若共享层改这个判据 ⇒ 两域必须同一次提交一起改** ⇒ ⇒ **已登记为「共享层变更的联动清单」**（与 §13 的必查表并列）。
+⇒ ⇒ **用同一判据的守门**：**我域 5 份** FastFail 守门（user-api / admin-api / follow-api / user-rpc / admin-rpc）＋ **G2 域 8 条**（`LikeRpcRedisTimeoutsGateTest` 4 ＋ `TaskRedisCommandTimeoutGateTest` 4）⇒ ⇒ **共 13 份跨 2 个域**⇒ ⇒ ⇒ **若共享层改这个判据 ⇒ 两域必须同一次提交一起改** ⇒ ⇒ **已登记为「共享层变更的联动清单」**（与 §13 的必查表并列）。
+
+---
+
+## 22. 🆕 **三路 maven 并发 ＋ 内存账**（2026-10-27 13:35 · G1 lane 实测）—— 并发风险的真实算法
+
+> **触发**：G4 发错峰知会说「从现在起跑第九次全量」⇒ ⇒ **我复检时发现全机有【三条】maven 同时在跑** ⇒ ⇒ 本节把「并发到底有多危险」从「感觉」变成**可算的账**。
+
+### 22.1 🔴 **实测：三条 lane 同时在跑**（判据 = `ps -eo command | grep "[p]lexus.classworlds.launcher.Launcher"`）
+
+| 树 | 命令形态 | `-pl` 覆盖面 |
+|---|---|---|
+| **G3** | `-B --fail-at-end -am test` | **12 模块**：article ×3 ＋ comment ×3 ＋ favorite ×3 ＋ hot ×3 |
+| **G4** | `-o -B -fae -am verify` | **5 模块**：comment-api / comment-rpc / comment-common / comment-proto / favorite-rpc |
+| **G2** | `-o -B test` | **9 模块**：`service/common` ＋ message ×3 ＋ like ×3 ＋ task ×2 |
+
+⇒ ⇒ **19 个 java 进程** · **load average 11.76 / 12.19 / 9.70**。
+
+### 22.2 🔴 **内存账（新知识）：「没显式设 `-Xmx`」才是并发 OOM 的真根因**
+
+⇒ **物理内存 24.0 GB** ⇒ ⇒ **JVM 默认堆上限 = 物理内存的 1/4 = 6 GB/条** ⇒ ⇒ **实测三条命令行里 `-Xmx` 零命中** ⇒ ⇒ **堆上限合计 = 18 GB / 24 GB** ⇒ ⇒ 加上 19 个 java 进程的其余开销 ⇒ ⇒ **`EXIT=137`（系统 OOM-kill）的风险是真的**（历史上那组 = 52 模块 `clean verify` ＋ 模块级 `-pl … test` ⇒ **同形态 ⇒ 真的死过**）。
+⇒ ⇒ **此刻系统级内存空闲 40%** ⇒ ⇒ **未到临界** ⇒ ⇒ **处置 = 不叫停任何一条（杀了就丢工作）＋ 不再叠第四条 ＋ 下一条显式压堆上限**。
+
+### 22.3 ⇒ ⇒ **可执行的三条纪律（比「等窗口」实在）**
+
+1. 🔴 **每条 maven 显式设堆上限**：`-DargLine=-Xmx2g` ⇒ ⇒ **6 GB → 2 GB ⇒ 三条并发也安全** ⇒ ⇒ **G3 之前的轻量跑本来就写了 `-Xmx768m`** ⇒ ⇒ **这个习惯要推广到「重」的那几条**（重跑尤其要设 ⇒ 因为它是全量 ⇒ 更吃内存 ⇒ 更需要压上限而不是压模块数）。
+2. ⚠️ **判据口诀（看三样，不只看一样）**：`ps -eo command | grep "[p]lexus.classworlds.launcher.Launcher"` ⇒ ⇒ ① **树名**（cwd ⇒ 谁在跑）② **完整 `-pl` 列表**（量级）③ **有没有 `-Xmx` / `-DargLine`**（堆上限）⇒ ⇒ **只问「有没有人在跑」是不够的**（本轮就是「三条都以为窗口是空的」）。
+3. ⚠️ **「复检 → 起跑」之间有窗口**（实测：我 13:29 复检 = 只有 G3 一条 ⇒ **4 分钟后变成三条**）⇒ ⇒ **起跑后要再复检一次**（十几秒成本，换一个「我以为没人跑」的确定性）。
+
+### 22.4 🔴 **G4 的「第九次全量」与实测命令不符 ⇒ 共享层的「全量回归证据」这一轮【不存在】**
+
+⇒ G4 知会写「**第九次全量（`mvn -B clean verify`，约 20 分钟）**」⇒ ⇒ **实测它那条是** `-pl <5 模块> -am verify` ⇒ ⇒ **`users` / `user` / `admin` / `follow` / `hot` / `like` / `message` / `task` / `article` 的测试类都不在 `-pl` 里 ⇒ 不会跑** ⇒ ⇒ **不是全仓全量** ⇒ ⇒ **这一轮没有「共享层全量回归」这个证据** ⇒ ⇒ **§13.3 的 C7 硬前提因此更远**（⇒ 共享层的全量证据仍停在 `23d1c2a` 那一轮）。
+⇒ ⇒ 📌 **这正是 §19 那条教训的复现**：「**`ps` 只证明在跑 maven，不证明在跑全量**」⇒ ⇒ **我上轮已写过这一条** ⇒ ⇒ **本轮它自己踩了 ⇒ ⇒ 已请它在 §4.10.26 写清实际覆盖面**。
 
 ---
 
