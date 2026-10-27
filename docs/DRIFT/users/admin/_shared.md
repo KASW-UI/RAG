@@ -27,7 +27,7 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 
 留档初版（commit `9b2303c`）写「Go admin 侧的 uid 走 `form:"uid,string"` 绑定，**key 缺失时静默保留零值**且不报错 ⇒ `uid=0` 进 rpc ⇒ 查无此人 ⇒ 返回 1003」。**前半段理由已被实测推翻**：
 
-- go-zero `httpx.Parse` 对 `form:"uid,string"` 的 required 缺失行为是**直接 400**（`core/mapping/unmarshaler.go` 的 `parseOption` 把所有非 `optional` 字段标 `Required=true`，缺失走 `newInitError` 报 `field %q is not set`），不是「静默保留零值」。
+- go-zero `httpx.Parse` 对 `form:"uid,string"` 的 required 缺失行为是**直接 400**（`go-zero@v1.10.2/core/mapping/unmarshaler.go` 的 `parseOption` 把所有非 `optional` 字段标 `Required=true`，缺失走 `newInitError` 报 `field %q is not set`），不是「静默保留零值」。
 - 实测覆盖：`admin.getuser` 三态（完全不传 → `400 field "uid" is not set` / `uid=abc` → `400 strconv.ParseInt` / `uid=0` → `200 {code:1003}`），取证脚本 `tools/difftest/probe-go-required-fields.py`（page_size=100 三组各 3 次，可复现）。
 
 **结论本身不变**（保留 RAG 的 1017），但理由改为「Go 把 `uid=0` 当合法查询，业务不存在语义掩盖参数拼装 bug」。边界也明确收窄到 `uid=0` 这一路径 —— 缺失/非数字/空串的覆盖在 N-6 + DRIFT-016（实施后两边统一 400+text/plain）。**N-3 与 N-6 不再是「同源」**，N-3 单独覆盖「显式 0 被业务路径吃掉」这一边界。

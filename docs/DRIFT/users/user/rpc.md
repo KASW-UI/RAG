@@ -280,7 +280,7 @@ Result 只用 5 个枚举值。证据列的记号：
 
 | Dimension | Go | Spring Boot | Result | Evidence |
 |---|---|---|---|---|
-| 服务端超时时长 | struct tag default 2000ms（`zrpc/config.go:46`） | `observability.rpc-timeout: 2s` | **EQUIVALENT** | 本轮实读 `go-zero@v1.10.2/zrpc/config.go`，**行号指向消费该 tag 的 `conf.MustLoad`** |
+| 服务端超时时长 | struct tag default 2000ms（`go-zero@v1.10.2/zrpc/config.go:46`） | `observability.rpc-timeout: 2s` | **EQUIVALENT** | 本轮实读 `go-zero@v1.10.2/zrpc/config.go`，**行号指向消费该 tag 的 `conf.MustLoad`** |
 | 超时触发机制 | `context.WithTimeout` 真取消（ctx 到 PG） | `call.close(DEADLINE_EXCEEDED)` + `DeadlineState` + `setQueryTimeout` 补 | **IMPLEMENTATION DIFFERENCE**（B-1 已签字：JDBC 不响应 interrupt） | `_shared.md` §6.2.6 E-4 |
 | 超时的 gRPC **description** | `"context deadline exceeded"`（`rpc.go:69`） | **逐字相同**（`RpcInterceptor` 的超时描述常量，global 修后命名为 `GO_DEADLINE_EXCEEDED_DESCRIPTION`） | **EQUIVALENT** | ✅ **已修（2026-10-26，`global` 域）** —— 修前 RAG 为 `"rpc timeout after 2000ms"`；修前状态见 §7 V-007；📌 **已合回主干（`4f839f9`，2026-10-26 23:1x）** ⇒ ✅ **本域双侧活体已复跑**（2026-10-26 23:31 · `REDIS_MODE=hanging` · 3 轮 description 逐字一致 ⇒ 见 §7 V-007）<br>⚠️ **历史留痕**：本日**早间**拍板为「暂不合回」⇒ 同日 23:1x 实际合回（合并提交 `4f839f9`）⇒ **上面那句已过期** |
 | 拦截器是否真挂上 server | `user.go:43` 显式 `AddUnaryInterceptors` | `@Bean GrpcServerConfigurer`（`UserRpcApplication.java:103-107`） | **EQUIVALENT** | `[T]` `GrpcInterceptorWiringTest`（含对照用例证明 starter 自身无此入口） |
@@ -405,7 +405,7 @@ Result 只用 5 个枚举值。证据列的记号：
 与 admin-rpc 相关，**在本组件无对应面**。
 
 ### 6.6 Timeout Semantic Equivalence
-- **来源**：Go 藏在 struct tag（`zrpc/config.go:46`，`user.yaml` 未配），RAG 显式 `observability.rpc-timeout: 2s`。
+- **来源**：Go 藏在 struct tag（`go-zero@v1.10.2/zrpc/config.go:46`，`user.yaml` 未配），RAG 显式 `observability.rpc-timeout: 2s`。
   ⚠️ 这正是 §3.3.1 的典型：**只看 yaml 会以为 Go 没有超时**；读到消费 tag 的那段控制流才拿到 2000ms。
 - **时长**：2000 = 2000 ⇒ **EQUIVALENT**。
 - **scope**：Go 是 `context.WithTimeout` 包住整个 handler；RAG 是「调度线程到点 `call.close` + 业务侧 `checkDeadline()` 主动抛」。
@@ -760,10 +760,10 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 
 | 项 | 事实 | 出处 |
 |---|---|---|
-| Go 侧（**客户端**） | `RpcClientConf.Timeout int64 json:",default=2000"` ⇒ **zrpc 客户端默认带 2000ms deadline** | `go-zero@v1.10.2/zrpc/config.go:31`（`RpcClientConf` 结构体，line 24 起）+ `zrpc/client.go:71`（`opts = append(opts, WithTimeout(...))`）|
+| Go 侧（**客户端**） | `RpcClientConf.Timeout int64 json:",default=2000"` ⇒ **zrpc 客户端默认带 2000ms deadline** | `go-zero@v1.10.2/zrpc/config.go:31`（`RpcClientConf` 结构体，line 24 起）+ `go-zero@v1.10.2/zrpc/client.go:71`（`opts = append(opts, WithTimeout(...))`）|
 | Go 侧（**服务端**） | `RpcServerConf.Timeout int64 json:",default=2000"`（注释原文：`setting 0 means no timeout`）⇒ **user-rpc 服务端预算 2000ms** | `go-zero@v1.10.2/zrpc/config.go:46` |
 | Go 侧是否覆盖 | `service/user/user/rpc/etc/user.yaml` **通篇没有 `Timeout`** ⇒ 客户端与服务端**双双走默认 2000ms**；`service/user/user/api/etc/usercenter.yaml` 的 `UserRpc:` 只配了 `Etcd` ⇒ 客户端 Timeout 也走默认 | `service/user/user/rpc/etc/user.yaml`（全文实测）· `service/user/user/api/etc/usercenter.yaml:37-41` |
-| RAG 侧（**服务端**） | `observability.rpc-timeout: 2s` ⇒ **user-rpc 服务端预算 2000ms** | `service/users/user/user-rpc/src/main/resources/application.yaml:155-156`（注释自述对齐 `zrpc/config.go:46` 的 2000ms）|
+| RAG 侧（**服务端**） | `observability.rpc-timeout: 2s` ⇒ **user-rpc 服务端预算 2000ms** | `service/users/user/user-rpc/src/main/resources/application.yaml:155-156`（注释自述对齐 `go-zero@v1.10.2/zrpc/config.go:46` 的 2000ms）|
 | RAG 侧（**客户端**） | **不带 call deadline** ⇒ 有效期限只剩服务端预算 | ✅ **字节码级证据**（非「配置里没写」）：devh `grpc-client-spring-boot-starter` **3.1.0.RELEASE** 的 `net.devh.boot.grpc.client.config.GrpcChannelProperties` **字段清单里根本没有 `deadline`**（只有 `immediateConnectTimeout` = 连接超时，非调用 deadline）⇒ 该 starter **无处可配 call deadline** ⇒ 不配即无<br>另：`service/users/user/user-api/src/main/resources/application.yml:90-97` 的 `grpc.client.user-rpc` 也确实没有 deadline 项 |
 | E38 修法 | `deadlineEpochMs` 由 `now + timeout` 改为 **min(服务端预算, 客户端 deadline 剩余)**；超时调度器延时同用 `effectiveTimeoutMs` | `align/global` commit **`d531abd`**，落点 `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`（已读 diff 原文核实：`effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())`）|
 
@@ -1163,7 +1163,7 @@ RedisConf struct {
     PingTimeout time.Duration `json:",default=1s"`
 }
 ```
-而 `core/stores/redis/redis.go:122-148`：
+而 `go-zero@v1.10.2/core/stores/redis/redis.go:122-148`：
 ```go
 rds := newRedis(conf.Host, opts...)
 if !conf.NonBlock {                     // ← 默认 true ⇒ **整个连接检查被跳过**
@@ -2277,7 +2277,7 @@ G2（message / like / task lane）发来回执，说它在自己域的 **rpc 侧
 ```
 Go service/user/user/rpc/etc/user.yaml:17-20
     BizRedis: { Host: redis:6379, Type: "node", Pass: "" }   ← **没有任何 timeout 字段**
-  → go-zero v1.10.2 core/stores/redis/redisclientmanager.go:32-39
+  → go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-39
       建 red.Options 时只传 Addr/User/Pass/DB/MaxRetries/MinIdleConns/TLSConfig
       —— **三个 timeout 一个都没传**
   → github.com/redis/go-redis/v9 options.go 的 init()：

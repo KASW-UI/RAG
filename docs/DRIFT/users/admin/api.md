@@ -149,13 +149,13 @@ Admin Center 的 **HTTP 网关**。它自身**不持有任何业务状态、不�
 | 断言 | 出处（消费点） |
 |---|---|
 | `Authorize` 在 `ng.middlewares` **之前** append ⇒ JWT 比 observability **更外层** | go-zero `rest/engine.go:108-112`：`chn = ng.appendAuthHandler(...)` 后才 `for _, middleware := range ng.middlewares { chn = chn.Append(...) }` |
-| chain 索引 0 最外层、先执行 | `rest/chain/chain.go` 的 `Then` = `m0(m1(...(mN(h))))` |
+| chain 索引 0 最外层、先执行 | `go-zero@v1.10.2/rest/chain/chain.go` 的 `Then` = `m0(m1(...(mN(h))))` |
 | **黑名单不在 chain 里**，它是 `ThenFunc` 的**参数** ⇒ 比 chain 任何元素都内层 | go-zero `rest/server.go:222-235` `WithMiddleware`：`Handler: middleware(route.Handler)` —— 在 `routes.go` 构造期就完成，早于 `bindRoute` |
 | ⇒ **真实顺序 = Authorize(JWT) → observability → CheckBlacklist → handler** | 三段合成 |
 
 ### 2.2 鉴权两层
 
-**层 1 — `rest.WithJwt`（`rest/handler/authhandler.go:45-84`）**
+**层 1 — `rest.WithJwt`（`go-zero@v1.10.2/rest/handler/authhandler.go:45-84`）**
 
 ```
 Authorization 头缺失/空            → unauthorized() → HTTP 401，body 空
@@ -168,7 +168,7 @@ claims 注入 ctx：for k,v := range claims { switch k { case "aud","exp","jti",
 ⇒ **ctx 里的 key 是 JWT claim 的名字**。admin 侧签发的 token 声明只有 3 个
 （`service/user/common/jwt/jwt.go:8-14`：`exp` / `iat` / `userId`），
 过滤掉 `exp` / `iat` 后 ⇒ **ctx 实际只有 `userId` 一个 key**（`json.Number`，因为
-`rest/token/tokenparser.go:122-124` `newParser()` = `jwt.NewParser(jwt.WithJSONNumber())`）。
+`go-zero@v1.10.2/rest/token/tokenparser.go:122-124` `newParser()` = `jwt.NewParser(jwt.WithJSONNumber())`）。
 **ctx 里没有 `uid`。** 这是 §7 DRIFT-ADMINAPI-001 的全部依据。
 
 **层 2 — `CheckBlacklistMiddleware`（`internal/middleware/checkblacklistmiddleware.go:22-44`）**
@@ -211,7 +211,7 @@ ctx = WithValue(ctx,"jwt_token", token)   ← 写的是 TrimPrefix 结果
 2. 身份来源：6 个端点读 `ctx["userId"]`（真实 uid），5 个读 `ctx["uid"]`（**恒 0**）。
 3. `success` 的来源：OP-03/04/10/11 **透传** `rpcResp.Success`；OP-09/12/13 **写死 true**。
 
-### 2.4 请求解析层（`httpx.Parse` → `core/mapping`）
+### 2.4 请求解析层（`httpx.Parse` → `go-zero@v1.10.2/core/mapping`）
 
 ```
 ParsePath → ParseForm → ParseHeaders → ParseJsonBody → validator
@@ -219,7 +219,7 @@ ParseJsonBody: ContentLength > 0 && ContentType 含 "application/json"  ⇒  Unm
                否则                                                 ⇒  UnmarshalJsonMap(nil, v)
 ```
 
-**必填判据**（`core/mapping/unmarshaler.go:918-969` `processNamedFieldWithoutValue` 的**消费点**）：
+**必填判据**（`go-zero@v1.10.2/core/mapping/unmarshaler.go:918-969` `processNamedFieldWithoutValue` 的**消费点**）：
 
 ```
 1. opts.getDefault() 命中（tag 含 ",default="）→ 填默认值、return，不报错
@@ -227,10 +227,10 @@ ParseJsonBody: ContentLength > 0 && ContentType 含 "application/json"  ⇒  Unm
 3. 其他标量 且 !opts.optional() → newInitError ⇒ field "xxx" is not set
 ```
 
-⚠️ `parseOption`（`core/mapping/utils.go`）**只认 `optional` / `optional,type=...`**，
+⚠️ `parseOption`（`go-zero@v1.10.2/core/mapping/utils.go`）**只认 `optional` / `optional,type=...`**，
 **`,omitempty` 被静默忽略** ⇒ `json:"email,omitempty"` 仍是**必填**。
 
-⚠️ **form 通道额外丢空值**（`rest/httpx/util.go:37-43` `GetFormValues`：`if len(v) == 0 { continue }`）
+⚠️ **form 通道额外丢空值**（`go-zero@v1.10.2/rest/httpx/util.go:37-43` `GetFormValues`：`if len(v) == 0 { continue }`）
 ⇒ `keyword=`（空串）退化成「字段缺席」⇒ 400。json 通道的空串是合法值。
 
 ### 2.5 输出层
@@ -357,7 +357,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | M-33 | ALL | 序列化：`extra_info` | 空 map 省略 | 空 map 省略 | EQUIVALENT | `omitempty` on map；`AdminApiSupport:82,106` |
 | M-34 | ALL | 序列化：显式 `null` vs 缺席（map 字段） | `null⇒400 mustn't be nil` / 缺席⇒通过 | 同（`extraInfoPresent` 标志） | EQUIVALENT | R2 已修；`GoStyleRequired.explicitNull:67-71` |
 | M-35 | ALL | 标量强转 / 浮点截断 | number/bool→String **拒**；float→int **拒**（含 `1.0`） | 同（`GoStyleCoercion` 全局生效） | EQUIVALENT | R1 已修；⚠️ Jackson 3 类级 coercion 实测无效 ⇒ 只能全局（`GoStyleCoercion` 类注释「第三个坑」） |
-| M-36 | ALL | 超时时长 | **3000ms**（yaml 未写，来自 `rest/config.go:55` 的 `json:",default=3000"`） | `observability.http-timeout: 3s` | EQUIVALENT | **消费点**：`TimeoutFromMillis(conf.Timeout)`；`application.yml:131-132` |
+| M-36 | ALL | 超时时长 | **3000ms**（yaml 未写，来自 `go-zero@v1.10.2/rest/config.go:55` 的 `json:",default=3000"`） | `observability.http-timeout: 3s` | EQUIVALENT | **消费点**：`TimeoutFromMillis(conf.Timeout)`；`application.yml:131-132` |
 | M-37 | ALL | 超时的**包含范围** | 计时器在 Authorize **之后**起算 ⇒ **JWT 验签不计入** | 计时器在 `HttpMiddlewareFilter`(**+7**) 起算；验签在 `GoStyleJwtAuthFilter`(**+6**) ⇒ 同样**不计入** | **EQUIVALENT**（**2026-10-27 已闭环**） | → DRIFT-ADMINAPI-006 的 **② 半已修**：验签搬出预算 ⇒ 见 §12.2。黑名单 Redis 两侧都在预算**之内**（Go = route 级中间件最内层；RAG = interceptor 段）⇒ 本行**整体**等价 |
 | M-38 | ALL | 超时响应 | `503` + `text/plain; charset=utf-8` + `nosniff` + 尾换行 | `503` + `text/plain; charset=utf-8` + 尾换行，**无 nosniff** | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-007（**代码在 `service/common`，非本组件文件**）<br>〔**2026-10-24 完整性复核补记 ①**：上表两边写的都是**源码字面量**；**线上字节** Tomcat 会把 `Content-Type` 重渲染成 `text/plain;charset=utf-8`（**分号后无空格**）⇒ 与 Go 的 `text/plain; charset=utf-8`（**有空格**）**逐字节不同**（归一化后相同）。**499/503 都走这条**；400 的同款残差已记在 §UNRESOLVED-002<br>〔**2026-10-24 完整性复核补记 ②**：**nosniff 已被 `align/message` 分支跨域修掉**（`HttpMiddleware.writeTimeoutResponse` 加了 `setHeader("X-Content-Type-Options","nosniff")`）⇒ **未合并前本条仍成立，合并后本条自动消失** —— 见 ADMINAPI-007 的处置栏〕 |
 | M-39 | ALL | 中间件外层顺序 / 遥测面 | 签名无效的请求：**Sea 侧 `markHTTPResult` 观测数据不产生**（`Authorize` 短路 ⇒ 内层中间件不执行）；但 go-zero native `TraceHandler` 在**链首**，**仍产生 OTel server span** | 会产生（401 的观测数据与 span 都产生） | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-006 的 **① 半**（**2026-10-27 复核：原写「完全不产生 observability span」口径过宽；验签搬到 +6 后 **span 侧仍等价**（`Traceparent(+3)` 在其外层），但**观测数据侧仍不等价**）） |
@@ -448,7 +448,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
   2. go-zero `rest/handler/authhandler.go:72-78` —— `for k, v := range claims` 逐个 `context.WithValue(ctx, k, v)`，
      **key 就是 claim 名**；`jwt.go` 没有 `uid` claim ⇒ ctx 里不会有 `uid` 这个 key；
   3. 同一段 switch 过滤掉 `aud/exp/jti/iat/iss/nbf/sub` ⇒ ctx 里实际**只有 `userId`**（值类型 `json.Number`，
-     因为 `rest/token/tokenparser.go:123` `newParser()` = `jwt.NewParser(jwt.WithJSONNumber())`）。
+     因为 `go-zero@v1.10.2/rest/token/tokenparser.go:123` `newParser()` = `jwt.NewParser(jwt.WithJSONNumber())`）。
 - **RAG Behavior**：这 5 个 Service 都调 `IdentityResolver.claimedUID`（`IdentityResolver.java:93-106`）：
   ```java
   Object v = request.getAttribute("userId");
@@ -648,7 +648,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
   ⚠️ 共享层槽位实测值见 §3.1（注：`HttpMiddlewareFilter` 的 `@Order` 原写 `+5`，**已过期** ⇒ 实测为 `+7`）。
 - **Difference**：
   1. **遥测面（仍成立）**：一个签名无效的请求，Go 在 `Authorize` 就短路 ⇒ **Sea 侧 `markHTTPResult` 的观测数据不产生**
-     （`observability/http.go:48`/`:78` 都不执行）；但 go-zero native `TraceHandler`（`rest/handler/tracehandler.go:26-60`）
+     （`observability/http.go:48`/`:78` 都不执行）；但 go-zero native `TraceHandler`（`go-zero@v1.10.2/rest/handler/tracehandler.go:26-60`）
      在**链首**、用 `tracer.Start` 真实创建 **OTel server span** ⇒ **401 也会产生 span**。
      RAG 侧 `HttpMiddlewareFilter(+7)` 在**验签 Filter(+6) 之后**执行 ⇒ 401 的观测数据**仍产生**；
      ⚠️ **span 侧已等价**（`GoStyleTraceparentFilter(+3)` 在验签 Filter 之外 ⇒ 401 同样产生 SERVER span）。
@@ -668,10 +668,10 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 > | 环节 | 出处 | 作用 |
 > |---|---|---|
 > | ① 关掉 native Timeout | `admincenter.go:34` → `observability/http.go:30-34`：`conf.Middlewares.Timeout = false` | 必须在 `admincenter.go:35` `rest.MustNewServer(c.RestConf)` **之前**调用（值拷贝 ⇒ 先改后传才生效） |
-> | ② native Timeout 不进链 | `rest/engine.go:154-155`：`if ng.conf.Middlewares.Timeout { chn = chn.Append(handler.TimeoutHandler(...)) }` | 条件为 false ⇒ **`TimeoutHandler` 不在链上** ⇒ native 那条链（Trace→…→Shedding→**Timeout**→Recover）**不参与**计时 |
+> | ② native Timeout 不进链 | `go-zero@v1.10.2/rest/engine.go:154-155`：`if ng.conf.Middlewares.Timeout { chn = chn.Append(handler.TimeoutHandler(...)) }` | 条件为 false ⇒ **`TimeoutHandler` 不在链上** ⇒ native 那条链（Trace→…→Shedding→**Timeout**→Recover）**不参与**计时 |
 > | ③ 真正的计时器 | `observability/http.go:36-92` `NewHTTPMiddleware`（`context.WithTimeout`） | 经 `server.Use` 进 `ng.middlewares` |
-> | ④ 挂载点 | `rest/engine.go:110-112`：`for _, middleware := range ng.middlewares { chn = chn.Append(...) }` | `chain.Append` **接在末尾**（`rest/chain/chain.go:43-45`：请求流 m1→m2→m3→m4，**列表首 = 最外层**）⇒ `ng.middlewares` 比 `Authorize`（`engine.go:70-84` append）**更内层** |
-> | ⑤ 黑名单在哪 | `rest/server.go:222-235` `WithMiddleware`：`Handler: middleware(route.Handler)` | 直接包在 **route.Handler** 上 ⇒ **最内层**，在计时器内 |
+> | ④ 挂载点 | `go-zero@v1.10.2/rest/engine.go:110-112`：`for _, middleware := range ng.middlewares { chn = chn.Append(...) }` | `chain.Append` **接在末尾**（`go-zero@v1.10.2/rest/chain/chain.go:43-45`：请求流 m1→m2→m3→m4，**列表首 = 最外层**）⇒ `ng.middlewares` 比 `Authorize`（`engine.go:70-84` append）**更内层** |
+> | ⑤ 黑名单在哪 | `go-zero@v1.10.2/rest/server.go:222-235` `WithMiddleware`：`Handler: middleware(route.Handler)` | 直接包在 **route.Handler** 上 ⇒ **最内层**，在计时器内 |
 >
 > ⇒ **最终 Go 链（外→内）**：Trace → Log → Prometheus → MaxConns → Breaker → Shedding → Recover → Metrics →
 > **Authorize(JWT)** → **observability(3s 计时)** → **黑名单** → handler
@@ -989,7 +989,7 @@ SEMANTICALLY NOT EQUIVALENT
 1. 本轮**没有**产出任何「已闭环」结论；最强者是 `静态源码·双侧`。
 2. 引用到的 difftest / matrix / `AdminApiMvcPipelineTest` 成果均为 **2026-10-21/22 他人已跑**，本轮**未复跑**。
 3. `admin/_shared.md` 的 **DRIFT-009 行**（「黑名单先执行」）与当前源码**冲突**：
-   本轮已复核 go-zero `rest/engine.go:108-112` + `rest/server.go:222-235`，**真实顺序是验签先、黑名单后**，
+   本轮已复核 go-zero `rest/engine.go:108-112` + `go-zero@v1.10.2/rest/server.go:222-235`，**真实顺序是验签先、黑名单后**，
    与 `AdminJwtAuthInterceptor` 的现状一致。⇒ 该行已过期，**但该文件不属本会话修改范围**，故在此标注。
 4. `AGENTS.md` §4.2 的「13 Service + 2 client」需上游修正（DRIFT-ADMINAPI-010）。
 
@@ -1682,7 +1682,7 @@ RAG 的 admin-api 现在**必须在 admin-rpc ready 之后起**（fail-fast ⇒ 
 
 `admincenter.go:34` 调了 `observability.DisableNativeRestTimeout(&c.RestConf)`，
 它把 `conf.Middlewares.Timeout` 置 **false**（`observability/http.go:32`），
-而 `rest/engine.go:154-155` 的条件 `if ng.conf.Middlewares.Timeout` 因此为假 ⇒ **`TimeoutHandler` 不在链上**。
+而 `go-zero@v1.10.2/rest/engine.go:154-155` 的条件 `if ng.conf.Middlewares.Timeout` 因此为假 ⇒ **`TimeoutHandler` 不在链上**。
 真正计时的 3s 是 `NewHTTPMiddleware`（经 `server.Use` ⇒ `ng.middlewares` ⇒ 在 `engine.go:110-112`
 **最后** append ⇒ 比 `Authorize` **更内层**）。
 
@@ -1899,13 +1899,13 @@ global **E47**（业务层把「SQL 被 deadline 取消」改写/吞掉 ⇒ 事�
 service/user/admin/api/admincenter.go:34  httpTimeout := observability.DisableNativeRestTimeout(&c.RestConf)
 service/user/admin/api/admincenter.go:36  server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, ...))
                                           ⇒ observability 是**唯一**的 user middleware
-go-zero@v1.10.2 rest/engine.go:101-113     bindRoute：
+go-zero@v1.10.2/rest/engine.go:101-113     bindRoute：
                                             chn = buildChainWithNativeMiddlewares(...)   // 原生中间件（索引 0 = 最外层）
                                             chn = appendAuthHandler(fr, chn, verifier)   // ← JWT 验签
                                             for _, mw := range ng.middlewares { ... }    // ← observability(3s) 在 JWT **之内**
                                             handle = chn.ThenFunc(route.Handler)
-go-zero@v1.10.2 rest/chain/chain.go:38-43  Append = 「加在请求流的最后」⇒ 越 Append 越靠内
-go-zero@v1.10.2 rest/server.go:222-233     WithMiddleware ⇒ middleware(route.Handler) ⇒ 黑名单最内层
+go-zero@v1.10.2/rest/chain/chain.go:38-43  Append = 「加在请求流的最后」⇒ 越 Append 越靠内
+go-zero@v1.10.2/rest/server.go:222-233     WithMiddleware ⇒ middleware(route.Handler) ⇒ 黑名单最内层
 ⇒ 执行序：原生中间件 → **Authorize(JWT)** → **observability(3s 计时)** → **黑名单** → handler
 ⇒ 3s 计时器在 Authorize **之后**起算 ⇒ **JWT 验签耗时不计入 3s 预算**
 ```

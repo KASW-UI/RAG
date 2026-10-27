@@ -86,11 +86,11 @@ HTTP body：         {"user_ids":null}
 | 8 个路由（方法 + 路径） | `api/internal/handler/routes.go:16-64` | `controller/FollowController.java:97-145` | ✅ 一致（全 POST） |
 | 前缀 `/follow/v1` | `rest.WithPrefix("/follow/v1")` | `@RequestMapping("/follow/v1")` | ✅ 一致 |
 | **8 个端点全部要 JWT**，无 public 路径 | `rest.WithJwt(...)` 挂在整段 AddRoutes 上 | `config/WebMvcConfig.java:73-79`（`/follow/v1/**`，无 exclude） | ✅ 一致 |
-| 中间件顺序：JWT 在外、黑名单在内 | `rest/engine.go` chain 顺序 | 同上注册顺序 | ✅ 一致 |
+| 中间件顺序：JWT 在外、黑名单在内 | `go-zero@v1.10.2/rest/engine.go` chain 顺序 | 同上注册顺序 | ✅ 一致 |
 | 黑名单 fail-open（Redis 故障 ⇒ 放行） | `middleware/checkblacklistmiddleware.go:41` | `interceptor/FollowBlacklistInterceptor.java:150-161` | ✅ 一致 |
 | 黑名单 key 前缀 `user:jwt_blacklist:` | 同上 `:39` | `:105` | ✅ 一致 |
 | 黑名单 401 body = `{"code":5004,"msg":"unauthorized"}`（**无 data**） | 同上 `:42-48` | `:169-179` | ✅ 一致 |
-| 验签失败 = **401 + 空 body** | `rest/handler/authhandler.go:106` | `advice/GlobalExceptionHandler.java:91-95` | ✅ 一致 |
+| 验签失败 = **401 + 空 body** | `go-zero@v1.10.2/rest/handler/authhandler.go:106` | `advice/GlobalExceptionHandler.java:91-95` | ✅ 一致 |
 | 业务错误 ⇒ **HTTP 200 + envelope** | `api/followcenter.go:53-66`（`httpx.SetErrorHandler`） | `GlobalExceptionHandler.java:112-116` | ✅ 一致 |
 | 成功 ⇒ `{code:200,msg:"OK",data:<v>}` | `followcenter.go:45-51` | `advice/GlobalResponseAdvice.java:65-77` | ✅ 一致 |
 | 未注册路径 ⇒ 404（**不被鉴权遮蔽**） | go-zero router 404 | `handler instanceof HandlerMethod` 判据 | ✅ 一致（body `404 page not found` 逐字节相同） |
@@ -101,7 +101,7 @@ HTTP body：         {"user_ids":null}
 | 失败时用 rpc 回传的 msg，不查本地码表 | `NewErrCodeMsg(int(rpcResp.Code), rpcResp.Msg)` | `FollowApiSupport.requireRpcSuccess` | ✅ 一致 |
 | `,string` int64 入参**同时接受字符串与数字** | go-zero `mapping` 的 `json.Number` Kind==String | `users-common` 的 `GoStyleStringInt64` | ✅ 一致（见下） |
 | gRPC client 无 retry | `zrpc.RpcClientConf` 无 `Retries` 字段 | `client/FollowRpcClient.java` | ✅ 一致 |
-| gRPC client 熔断默认开 | `zrpc/internal/config.go:14` `Breaker default=true` | `GoStyleGrpcClientBreakerInterceptor` | ✅ 一致 |
+| gRPC client 熔断默认开 | `go-zero@v1.10.2/zrpc/internal/config.go:14` `Breaker default=true` | `GoStyleGrpcClientBreakerInterceptor` | ✅ 一致 |
 | 指标口径（3 个 counter + 1 个 histogram，label 名一致） | `api/internal/metrics/metrics.go` | `metrics/FollowApiMetrics.java` | ✅ 一致（**U1 已双侧抓取比对**；文本层残留见 DRIFT-FOLLOW-007） |
 
 ### `,string` 入参语义的实测核对（go-zero v1.10.2 真源）
@@ -228,7 +228,7 @@ RAG 侧改 `--grpc.client.follow-rpc.address=static://127.0.0.1:19999`），两�
   （`service/follow/api/followcenter.go:40-42` `DisableNativeRestTimeout` + `NewHTTPMiddleware`；
   `service/common/observability/http.go:53` `context.WithTimeout(r.Context(), timeout)`，
   `:67-68` `r = r.WithContext(ctx)`）。
-- Go 的 **zrpc 客户端超时 2s**：`zrpc/config.go:34`
+- Go 的 **zrpc 客户端超时 2s**：`go-zero@v1.10.2/zrpc/config.go:34`
   `Timeout int64 `json:",default=2000"``（`RpcClientConf`；`etc/followcenter.yaml` 未配 ⇒ 走 default）。
   客户端拦截器做的是 `context.WithTimeout(ctx, c.Timeout)` ⇒ **两层取更小的生效** ⇒ 2s 先到。
 - ⇒ Go 侧下游挂死时，**api 拿到的是 rpc 错误**（`DeadlineExceeded`）⇒ 走业务错误通道 ⇒
@@ -265,12 +265,12 @@ U3 的突发测试里抓到过 **`HTTP 200` + body `Request Timeout`** ——
     server := rest.MustNewServer(c.RestConf)
     server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, observability.SlowThreshold()))
     ⇒ observability 是**唯一**的 user middleware
-  rest/engine.go:101-113  bindRoute：
+  go-zero@v1.10.2/rest/engine.go:101-113  bindRoute：
     chn = ng.buildChainWithNativeMiddlewares(...)   // 原生中间件（索引 0 = 最外层）
     chn = ng.appendAuthHandler(fr, chn, verifier)   // ← JWT 验签
     for _, mw := range ng.middlewares { ... }        // ← observability(3s) 在 JWT **之内**
     handle = chn.ThenFunc(route.Handler)
-  rest/chain/chain.go:38-43  Append = 「加在请求流的最后」⇒ 越 Append 越靠内
+  go-zero@v1.10.2/rest/chain/chain.go:38-43  Append = 「加在请求流的最后」⇒ 越 Append 越靠内
   ⇒ 执行序：原生中间件 → **JWT 验签** → **observability(3s 计时)** → 黑名单 → handler
   ⇒ 3s 计时器在 Authorize **之后**起算 ⇒ **验签耗时不计入 3s 预算**
   ```
@@ -314,7 +314,7 @@ U3 的突发测试里抓到过 **`HTTP 200` + body `Request Timeout`** ——
   ```
   Go service/follow/api/etc/followcenter.yaml
       BizRedis { Host=redis:6379 / Type=node / Pass="" } —— **没有任何 timeout 字段**
-    → go-zero v1.10.2 core/stores/redis/redisclientmanager.go:32-39
+    → go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-39
       建 red.Options 时不传任何 timeout
     → github.com/redis/go-redis/v9 options.go 的 init()
         DialTimeout = 5s                                   （:329-330）
@@ -497,8 +497,8 @@ PITFALL-FOLLOW-011 / PITFALL-FOLLOW-012。）
 
 **根因**
 
-- Go：`rest/engine.go:146` 在 **`bindRoute` 的每条路由链里**各建一次
-  `handler.MaxConnsHandler(ng.conf.MaxConns)`；`rest/handler/maxconnshandler.go:20`
+- Go：`go-zero@v1.10.2/rest/engine.go:146` 在 **`bindRoute` 的每条路由链里**各建一次
+  `handler.MaxConnsHandler(ng.conf.MaxConns)`；`go-zero@v1.10.2/rest/handler/maxconnshandler.go:20`
   `latch := syncx.NewLimit(n)` ⇒ **每路由一个闸门**。
   ⇒ routeA 被慢请求占满时，**routeB 不受影响**。
 - RAG：`com.rag.common.protection.GoStyleMaxConnsFilter` 是 **一个全局 Semaphore**
@@ -518,8 +518,8 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 
 **现象（U1：两侧归零重测后抓 /metrics 对拍）**
 
-- Go 侧出口：`go-zero` 的 **DevServer**（`internal/devserver/server.go:79` `StartAgent`，
-  由 `zrpc/server.go:63` 的 `c.SetUp()` ⇒ `core/service/serviceconf.go:77` 触发）
+- Go 侧出口：`go-zero` 的 **DevServer**（`go-zero@v1.10.2/internal/devserver/server.go:79` `StartAgent`，
+  由 `go-zero@v1.10.2/zrpc/server.go:63` 的 `c.SetUp()` ⇒ `go-zero@v1.10.2/core/service/serviceconf.go:77` 触发）
   ⇒ `http://<host>:16064/metrics`（**api 侧 = 16064**；**rpc 侧才是 16065** —— 见 [`rpc.md`](rpc.md) 的 `DRIFT-FOLLOW-006`）。
   ⚠️ **2026-10-27 订正**：本行原写 `16065`，那是 **follow-rpc** 的 DevServer 端口
   （真源 `service/follow/rpc/etc/follow.yaml:23`）；**api 侧的真源是
@@ -633,7 +633,7 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 | 10 | `dto/RelationActionResp.java` | `internal/types/types.go` `RelationActionResp` | 单字段 | ✅ |
 | 11 | `dto/RecommendListResp.java` | `internal/types/types.go` `RecommendListResp` | 单字段 | ✅ |
 | 12 | `dto/RecommendUser.java` | `internal/types/types.go` `RecommendUser` | **字段顺序** `target_id` 在前（DRIFT-005） | ✅ |
-| 13 | `interceptor/FollowJwtAuthInterceptor.java` | `rest/handler/authhandler.go` + `rest/token/tokenparser.go` | 验签失败 = **401 + 空 body**；`handler instanceof HandlerMethod` ⇒ 404 不被鉴权遮蔽；Bearer 前缀大小写不敏感；jjwt ≥32 字节 vs Go 不校验长度<br>⚠️ **2026-10-27**：**验签本体已搬进 `auth/GoStyleJwtAuthFilter`**（DRIFT-FOLLOW-010）⇒ 本类现在只**消费**验签结果 + 原样重抛 | ✅ |
+| 13 | `interceptor/FollowJwtAuthInterceptor.java` | `go-zero@v1.10.2/rest/handler/authhandler.go` + `go-zero@v1.10.2/rest/token/tokenparser.go` | 验签失败 = **401 + 空 body**；`handler instanceof HandlerMethod` ⇒ 404 不被鉴权遮蔽；Bearer 前缀大小写不敏感；jjwt ≥32 字节 vs Go 不校验长度<br>⚠️ **2026-10-27**：**验签本体已搬进 `auth/GoStyleJwtAuthFilter`**（DRIFT-FOLLOW-010）⇒ 本类现在只**消费**验签结果 + 原样重抛 | ✅ |
 | 14 | `interceptor/FollowBlacklistInterceptor.java` | `internal/middleware/checkblacklistmiddleware.go` | key 前缀 `user:jwt_blacklist:`；fail-open；401 body 无 `data` | ✅ |
 | 15 | `advice/GlobalExceptionHandler.java` | `followcenter.go` `httpx.SetErrorHandler` | 业务错误 = **HTTP 200 + envelope**；415 分支实测不可达（OPEN-001） | ✅ |
 | 16 | `advice/GlobalResponseAdvice.java` | `followcenter.go` `httpx.SetOkHandler` | 成功 = `{code:200,msg:"OK",data:<v>}` | ✅ |
@@ -648,11 +648,11 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 | 25 | `service/GetFollowerListService.java` | `internal/logic/follow/getfollowerlistlogic.go` | 列表归一化三段序 | ✅ |
 | 26 | `service/GetBlockListService.java` | `internal/logic/follow/getblocklistlogic.go` | **归属校验**（只能查自己） | ✅ |
 | 27 | `service/GetRecommendationsService.java` | `internal/logic/follow/getrecommendationslogic.go` | **归属校验** + 推荐算法 6 条硬语义 | ✅ |
-| 28 | `auth/GoStyleJwtAuthFilter.java` | `rest/engine.go:101-113` + `rest/chain/chain.go:38-43` | 🔴 **验签搬出 3s 预算**（`@Order(+6)`，在预算的 `+7` **之外**）；**绝不写响应** ⇒ 413 仍压过 401、401 仍由 interceptor 抛（DRIFT-FOLLOW-010） | ✅ |
-| 29 | `auth/FollowJwtSignatureVerifier.java` | `rest/handler/authhandler.go:45-84` + `rest/token/tokenparser.go:81-86` | 验签本体；claim 存**原始对象**（取值判定属业务层 `helper.go:13-33` ⇒ 5004 ⇒ HTTP 200）；Bearer 前缀大小写不敏感 | ✅ |
+| 28 | `auth/GoStyleJwtAuthFilter.java` | `go-zero@v1.10.2/rest/engine.go:101-113` + `go-zero@v1.10.2/rest/chain/chain.go:38-43` | 🔴 **验签搬出 3s 预算**（`@Order(+6)`，在预算的 `+7` **之外**）；**绝不写响应** ⇒ 413 仍压过 401、401 仍由 interceptor 抛（DRIFT-FOLLOW-010） | ✅ |
+| 29 | `auth/FollowJwtSignatureVerifier.java` | `go-zero@v1.10.2/rest/handler/authhandler.go:45-84` + `go-zero@v1.10.2/rest/token/tokenparser.go:81-86` | 验签本体；claim 存**原始对象**（取值判定属业务层 `helper.go:13-33` ⇒ 5004 ⇒ HTTP 200）；Bearer 前缀大小写不敏感 | ✅ |
 | 30 | `auth/FollowJwtAuthPaths.java` | `internal/handler/routes.go:16-64` | **无 public 路径**（8 端点全 protected）；Filter 与 interceptor **共用同一份**判据 | ✅ |
 | 31 | `auth/FollowJwtVerificationResult.java` | （表达层载体） | 失败带**异常对象**而非标志位 ⇒ `@ExceptionHandler` 仍管得到 ⇒ 401 空 body 形状不变 | ✅ |
-| 32 | `config/RedisDisconnectedBehaviorConfig.java` | `core/stores/redis/redisclientmanager.go:27-46`（go-redis `MaxRetries=3` ⇒ 快速失败） | 🔴 **Redis 断连 ⇒ 命令被拒而不是排队**（`REJECT_COMMANDS`）⇒ 断连时 fail-open **200** 而非 503（DRIFT-FOLLOW-012）<br>⚠️ **域内副本**（user-api 早有同款）⇒ **共享层收编归 G4** | ✅ |
+| 32 | `config/RedisDisconnectedBehaviorConfig.java` | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:27-46`（go-redis `MaxRetries=3` ⇒ 快速失败） | 🔴 **Redis 断连 ⇒ 命令被拒而不是排队**（`REJECT_COMMANDS`）⇒ 断连时 fail-open **200** 而非 503（DRIFT-FOLLOW-012）<br>⚠️ **域内副本**（user-api 早有同款）⇒ **共享层收编归 G4** | ✅ |
 
 ## 证据强度
 
@@ -807,10 +807,10 @@ service/follow/api/followcenter.go:40-42
   server := rest.MustNewServer(c.RestConf)
   server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, observability.SlowThreshold()))
   ⇒ observability 是**唯一**的 user middleware
-go-zero@v1.10.2 rest/engine.go:101-113   bindRoute：buildChainWithNativeMiddlewares → appendAuthHandler(JWT)
+go-zero@v1.10.2/rest/engine.go:101-113   bindRoute：buildChainWithNativeMiddlewares → appendAuthHandler(JWT)
                                           → ng.middlewares(observability) → chn.ThenFunc(route.Handler)
-go-zero@v1.10.2 rest/chain/chain.go:38-43 Append = 「加在请求流的最后」⇒ 越 Append 越靠内
-go-zero@v1.10.2 rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Handler) ⇒ 黑名单最内层
+go-zero@v1.10.2/rest/chain/chain.go:38-43 Append = 「加在请求流的最后」⇒ 越 Append 越靠内
+go-zero@v1.10.2/rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Handler) ⇒ 黑名单最内层
 ⇒ 执行序：原生中间件 → **Authorize(JWT)** → **observability(3s 计时)** → **黑名单** → handler
 ⇒ 3s 计时器在 Authorize **之后**起算 ⇒ **JWT 验签耗时不计入 3s 预算**
 ```

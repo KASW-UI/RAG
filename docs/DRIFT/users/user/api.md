@@ -86,7 +86,7 @@ usercenter.go:35-41
   handler.RegisterHandlers(server, ctx)
 ```
 
-`rest/engine.go:101-116 bindRoute` 决定链序：
+`go-zero@v1.10.2/rest/engine.go:101-116 bindRoute` 决定链序：
 
 ```text
 chn := ng.buildChainWithNativeMiddlewares(...)   // Trace/Log/Prometheus/MaxConns/
@@ -97,7 +97,7 @@ for _, mw := range ng.middlewares { chn = chn.Append(...) }   // observability  
 handle := chn.ThenFunc(route.Handler)            // route.Handler 内含黑名单包装
 ```
 
-`rest/chain/chain.go` 的 `Then = m0(m1(...mN(h)))` ⇒ 索引 0 最外层先执行：
+`go-zero@v1.10.2/rest/chain/chain.go` 的 `Then = m0(m1(...mN(h)))` ⇒ 索引 0 最外层先执行：
 
 ```text
 执行序：原生中间件 → MaxBytes → … → JWT 验签 → observability(3s) → 黑名单 → handler
@@ -330,11 +330,11 @@ Result 只用 5 个枚举值。Evidence 列的强度标记见文件头。
 | 3 | ALL | public 路径集合 | login, register | register, login | **EQUIVALENT** | `routes.go:16-30` vs `JwtAuthInterceptor.java:65-67` · 静态源码 |
 | 4 | ALL | protected 路径集合（7 条） | delete/get/history/logout/avatar/select/update | 同 7 条 | **EQUIVALENT**（前缀已计入 #1） | `routes.go:32-75` vs `UserController.java:154-204` · 静态源码 |
 | 5 | ALL | 响应信封 `{code,msg,data}` | `response.Response`（`common/response/response.go:3-7`，`data` 无 omitempty） | `com.rag.common.response.Response`（无 `@JsonInclude`） | **EQUIVALENT** | Go `httpx.OkJson` + RAG `GlobalResponseAdvice:74` · 静态源码 |
-| 6 | ALL | 业务失败的 HTTP 状态码 | 恒 200（`OkJson`） | 恒 200（`decideStatus:294-296`） | **EQUIVALENT** | `rest/httpx/responses.go:52` · 静态源码 |
+| 6 | ALL | 业务失败的 HTTP 状态码 | 恒 200（`OkJson`） | 恒 200（`decideStatus:294-296`） | **EQUIVALENT** | `go-zero@v1.10.2/rest/httpx/responses.go:52` · 静态源码 |
 | 7 | Login | `Status==1 → 1002` | `loginlogic.go:58-62` | `UserLoginService.java:101-105` | **EQUIVALENT** | 静态源码 |
 | 8 | Login | `Status==2 → 1011` | `loginlogic.go:64-68` | `UserLoginService.java:108-112` | **EQUIVALENT** | 静态源码 |
 | 9 | Login | JWT 签发（HS256 / claim `userId` / `exp`+`iat`） | `jwt/jwt.go:7-15` | `JwtUtil.java:12-23` | **EQUIVALENT**（条件项见 U-002） | 静态源码 |
-| 10 | Register | email 必填（`,omitempty` ≠ `,optional`） | `types.go:9` | `RegisterReq.java:58` | **EQUIVALENT** | `core/mapping/utils.go:18-20`（消费点）· 静态源码 |
+| 10 | Register | email 必填（`,omitempty` ≠ `,optional`） | `types.go:9` | `RegisterReq.java:58` | **EQUIVALENT** | `go-zero@v1.10.2/core/mapping/utils.go:18-20`（消费点）· 静态源码 |
 | 11 | Register | `extra_info` 缺席不校验 / 显式 null 报错 | `unmarshaler.go` Map 分支 | `GoStyleRequired.explicitNull:67-71` | **EQUIVALENT** | `RegisterReq.java:61` · 静态源码 |
 | 12 | Register | `uid` 序列化为 **字符串** | `types.go:14 json:"uid,string"` | `RegisterResp.java:17-19` `String` | **EQUIVALENT** | 静态源码 |
 | 13 | Get | 5 个 identity sentinel → 5 个业务码 | `identity/resolve.go:99-111` | `IdentityResolver.java:131-148` | **EQUIVALENT** | 静态源码 |
@@ -368,19 +368,19 @@ Result 只用 5 个枚举值。Evidence 列的强度标记见文件头。
 | 41 | 鉴权 | Bearer 前缀两套取法（验签大小写不敏感 / 黑名单敏感） | `golang-jwt/request/oauth2.go` vs `strings.TrimPrefix` | `BearerTokenExtractor:74-81` vs `:95-99` | **EQUIVALENT** | 静态源码 + 2 条 `UserApiMvcPipelineTest` |
 | 42 | 鉴权 | 黑名单 401 的 `Content-Type` | `appliaction/json;charset=utf-8`（**Go 侧拼写错误**） | `application/json` | OBSERVABLE DIFFERENCE（有意不复刻） | **DRIFT-USERAPI-010** · 静态源码 |
 | 43 | 异常 | panic / 兜底异常的响应形状 | `recoverhandler.go:17` → **500 空 body** | `handleAny:262-272` → **500 + envelope(5001)** | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-007** · 静态源码 |
-| 44 | 过载 | Breaker / Shedding / MaxConns | `rest/config.go:12-23` 全 `default=true`；`sheddinghandler.go:40` 过载 → 503 空 body | `service/common/protection/` 四个 Go 风格 Filter（MaxConns `+1` / Breaker `+2` / CpuShedding `+3` / MaxBytes `+6`） | **机制齐备**（原记「无任何对应物」**已证伪**）；⚠️ MaxConns 闸门粒度不同（Go per-route vs RAG 全局） | **DRIFT-USERAPI-008** · 静态源码 |
-| 45 | 请求体上限 | MaxBytes 1 MiB，**413 压过 401** | `rest/config.go:53` `default=1048576`；`engine.go:164` 在 JWT 之外 | `GoStyleMaxBytesFilter:84-117` `@Component @Order(+6)` | **EQUIVALENT** | 静态源码（层次等价：Filter ⊃ Interceptor） |
+| 44 | 过载 | Breaker / Shedding / MaxConns | `go-zero@v1.10.2/rest/config.go:12-23` 全 `default=true`；`sheddinghandler.go:40` 过载 → 503 空 body | `service/common/protection/` 四个 Go 风格 Filter（MaxConns `+1` / Breaker `+2` / CpuShedding `+3` / MaxBytes `+6`） | **机制齐备**（原记「无任何对应物」**已证伪**）；⚠️ MaxConns 闸门粒度不同（Go per-route vs RAG 全局） | **DRIFT-USERAPI-008** · 静态源码 |
+| 45 | 请求体上限 | MaxBytes 1 MiB，**413 压过 401** | `go-zero@v1.10.2/rest/config.go:53` `default=1048576`；`engine.go:164` 在 JWT 之外 | `GoStyleMaxBytesFilter:84-117` `@Component @Order(+6)` | **EQUIVALENT** | 静态源码（层次等价：Filter ⊃ Interceptor） |
 | 46 | 超时 | 3s 预算的**作用域** | **不覆盖** JWT 验签 | **覆盖** 验签 + 黑名单 + handler | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-009** · 静态源码 |
 | 47 | 可观测性 | 401 是否计入 `markHTTPResult` | **否**（Authorize 在 obs 外层） | **是**（Filter 在 DispatcherServlet 外） | **OBSERVABLE DIFFERENCE** | **DRIFT-USERAPI-009** · 静态源码 |
 | 48 | Metrics | login 5 + register 2 埋点 | `metrics.go` + `loginlogic.go:47,59,65,77,82` / `registerlogic.go:46,58` | `UserApiMetrics` 7 个 Counter，调用点逐条对应 | **EQUIVALENT** | 静态源码 |
 | 49 | Metrics | 其余 7 个 RPC 不埋点 | 不埋 | 不埋（1:1 不补） | **EQUIVALENT** | 静态源码 |
 | 50 | 配置 | JWT secret / expire | `etc/usercenter.yaml:11-12` | `application.yml:91-92`（同值 + env 覆盖） | **EQUIVALENT** | 静态源码 |
-| 51 | 配置 | HTTP 超时 3000ms | `rest/config.go:55` `default=3000`（yaml 未写） | `application.yml:142-143` `observability.http-timeout: 3s` | **EQUIVALENT**（配置层） | 静态源码；✅ **运行时已验**（2026-10-24 第九/十轮，见 §6.7 · CASE-05/05b/05e/05f）<br>⚠️ 原写「运行时未验 ⇒ 记 UNKNOWN」，**已过期** |
+| 51 | 配置 | HTTP 超时 3000ms | `go-zero@v1.10.2/rest/config.go:55` `default=3000`（yaml 未写） | `application.yml:142-143` `observability.http-timeout: 3s` | **EQUIVALENT**（配置层） | 静态源码；✅ **运行时已验**（2026-10-24 第九/十轮，见 §6.7 · CASE-05/05b/05e/05f）<br>⚠️ 原写「运行时未验 ⇒ 记 UNKNOWN」，**已过期** |
 | 52 | 配置 | gRPC 传输 | Go `zrpc` = plain | `application.yml:81` `negotiation-type: plaintext` | **EQUIVALENT** | 静态源码 + `UserApiGrpcNegotiationTest` |
 | 53 | 错误码表 | code→msg 全表 | `errmsg.go:38-68` | `ErrorCode` 枚举（users-common） | **EQUIVALENT**（以 users-common 为公理，不在本组件复验） | 逐条比对 30 项常量一致 · 静态源码 |
 | 54 | 错误码表 | 未知码 → "FAIL" | `errmsg.go:70-76` `codeMsg[Error]` | `ErrorCode.of` → `ERROR`（`getMsg` 500→"FAIL"） | **EQUIVALENT** | 静态源码 |
 | 55 | 并发 | 本组件的并发语义 | 无状态、无写、无幂等键 | 同 | **EQUIVALENT** | 静态源码 |
-| 56 | 过载 | **客户端熔断打开**时的对外形状 | `zrpc/internal/clientinterceptors/breakerinterceptor.go:13-19` → `core/breaker/breaker.go:18-19` `ErrServiceUnavailable`（**普通 error**）→ `loginlogic.go:46-56` `status.FromError`⇒`Unknown`⇒`default`⇒**1015**；`loginhandler.go` 用 `httpx.OkJson` ⇒ **HTTP 200** | 修前：`GlobalExceptionHandler` **无**该分支 ⇒ 落兜底 ⇒ **HTTP 500 + 5001**，并把**入口**熔断喂开 ⇒ 对外变成 **503 空 body** | ❌ → ✅ **已修**（2026-10-24 第七轮） | **DRIFT-USERAPI-011** · 双侧活体（真 in-process gRPC server + 真 channel） |
+| 56 | 过载 | **客户端熔断打开**时的对外形状 | `go-zero@v1.10.2/zrpc/internal/clientinterceptors/breakerinterceptor.go:13-19` → `go-zero@v1.10.2/core/breaker/breaker.go:18-19` `ErrServiceUnavailable`（**普通 error**）→ `loginlogic.go:46-56` `status.FromError`⇒`Unknown`⇒`default`⇒**1015**；`loginhandler.go` 用 `httpx.OkJson` ⇒ **HTTP 200** | 修前：`GlobalExceptionHandler` **无**该分支 ⇒ 落兜底 ⇒ **HTTP 500 + 5001**，并把**入口**熔断喂开 ⇒ 对外变成 **503 空 body** | ❌ → ✅ **已修**（2026-10-24 第七轮） | **DRIFT-USERAPI-011** · 双侧活体（真 in-process gRPC server + 真 channel） |
 | 57 | 生命周期 | 启动顺序 / 关闭 | `usercenter.go:24-45` | `UserApiApplication.main` + `ObservabilityLifecycle:47` | **EQUIVALENT**（表达层） | 静态源码 |
 | 58 | 并发/事务 | user-rpc 的事务边界、`FOR UPDATE`、`extra_info` jsonb、`is_current` 陈旧 | — | — | **不在本组件判定权内**（非「未知」）⇒ 结论见 `user/rpc.md`：`extra_info` 列类型 ✅ 已修（V-003，`ec33159`）· `is_current` 派生 ✅ EQUIVALENT | `UNRESOLVED-005` **已关**（2026-10-24） |
 | 59 | 外部依赖 | Redis **断连**时的黑名单查询 | `checkblacklistmiddleware.go:36` `err == nil && exists` ⇒ **fail-open 放行**（实测 ~1.7s） | Lettuce 默认把断连期命令**排队** ⇒ 撞 3s HTTP 预算 ⇒ 503 | **OBSERVABLE DIFFERENCE**（已修：2026-10-24 第九轮，`REJECT_COMMANDS` ⇒ 两侧都 200） | **DRIFT-USERAPI-014** · 双侧活体对拍 |
@@ -476,8 +476,8 @@ Side Effect:     无（只读）
 |---|---|---|---|
 | JWT secret | `etc/usercenter.yaml:11` | `application.yml:91`（同值 + env 覆盖） | EQUIVALENT |
 | JWT expire | 2592000 | 2592000 | EQUIVALENT |
-| HTTP 超时 | `rest/config.go:55` tag 默认 3000ms（yaml 未写） | `observability.http-timeout: 3s` | EQUIVALENT（配置层） |
-| MaxBytes | `rest/config.go:53` 默认 1048576 | `GoStyleMaxBytesFilter`（`GoStyleProtectionProperties.getMaxBytes()`） | EQUIVALENT |
+| HTTP 超时 | `go-zero@v1.10.2/rest/config.go:55` tag 默认 3000ms（yaml 未写） | `observability.http-timeout: 3s` | EQUIVALENT（配置层） |
+| MaxBytes | `go-zero@v1.10.2/rest/config.go:53` 默认 1048576 | `GoStyleMaxBytesFilter`（`GoStyleProtectionProperties.getMaxBytes()`） | EQUIVALENT |
 | gRPC 寻址 | `zrpc.MustNewClient` + etcd `user.rpc` | Nacos `discovery:///user-rpc` | OBSERVABLE DIFFERENCE（**已签字 DRIFT-NEW-001**） |
 | gRPC 协商 | plain | `negotiation-type: plaintext` | EQUIVALENT（漏写会静默变 TLS，见 DRIFT-NEW-014） |
 | 监听端口 | 8888 | 49900 | OBSERVABLE DIFFERENCE（**已签字**，Infrastructure.md §3） |
@@ -520,7 +520,7 @@ Side Effect:     无（只读）
 
 | | Go | RAG |
 |---|---|---|
-| 来源 | `rest/config.go:55` tag 默认 3000ms | `application.yml:143` `3s` |
+| 来源 | `go-zero@v1.10.2/rest/config.go:55` tag 默认 3000ms | `application.yml:143` `3s` |
 | 执行者 | `observability.NewHTTPMiddleware`（原生超时中间件已被 `DisableNativeRestTimeout` 关掉） | `HttpMiddleware`（Filter） |
 | **作用域** | 黑名单 + handler（**不含** JWT 验签） | 验签 + 黑名单 + handler |
 | 超时结果 | 503 + `http.Error(httpTimeoutBody, 503)` | 503（`writeTimeoutResponse`） |
@@ -747,7 +747,7 @@ Recommended Verification: 从 user-rpc 台账取每个 RPC 实际发出的 code 
 
 原结论读了 go-zero `core/mapping/utils.go` 的 `parseKeyAndOptions` ——
 它确实在「没有对应 tag」时**回落到 Go 字段名**，据此推断 form/header 通道会按字段名绑定。
-**漏掉了紧挨着的 `core/mapping/unmarshaler.go:570-573`**：
+**漏掉了紧挨着的 `go-zero@v1.10.2/core/mapping/unmarshaler.go:570-573`**：
 
 ```go
 func usingDifferentKeys(key string, field reflect.StructField) bool {
@@ -823,11 +823,11 @@ Operation:    全部 8 个带 httpx.Parse 的端点
 Category:     Serialization · 输入来源
 
 Go Behavior:
-  rest/httpx/requests.go:50-69
+  go-zero@v1.10.2/rest/httpx/requests.go:50-69
     Parse = ParsePath → **ParseForm** → **ParseHeaders** → ParseJsonBody
   requests.go:18,27-31   formUnmarshaler 的 tag key 是 "form"
-  rest/internal/encoding/parser.go:10,12  headerUnmarshaler 的 tag key 是 "header"
-  core/mapping/utils.go:271-275  parseKeyAndOptions：tag 缺失时 **回落到 Go 字段名**
+  go-zero@v1.10.2/rest/internal/encoding/parser.go:10,12  headerUnmarshaler 的 tag key 是 "header"
+  go-zero@v1.10.2/core/mapping/utils.go:271-275  parseKeyAndOptions：tag 缺失时 **回落到 Go 字段名**
   → user-api 的 9 个 Req struct **只有 json tag**（types.go），没有 form/header tag
     ⇒ form 通道的 key 是字段名 `Username`/`Password`/`Email`/`Extrainfo`/`HistoryId`/`AvatarUrl`
     ⇒ header 通道再过 textproto.CanonicalMIMEHeaderKey（大小写规范化）
@@ -843,7 +843,7 @@ Semantic Impact: 客户端契约面收窄。若有客户端（脚本 / 网关 / 
             两侧行为分叉。这属于 §19 的「输入解释」差异，不是纯实现差异。
 Risk:         LOW-MEDIUM（实际是否有客户端这么做，取决于部署现状；真源未改 ⇒ 默认 RAG 侧需对齐）
 Evidence:     静态源码（go-zero 消费点：requests.go:50-69、utils.go:271-275、
-              rest/internal/encoding/parser.go:10-13；RAG：UserController 9 处签名）。
+              go-zero@v1.10.2/rest/internal/encoding/parser.go:10-13；RAG：UserController 9 处签名）。
 Must Preserve: Go 的完整绑定面，或逐条签字放弃。
 Recommended Verification: 真进程各打一次 `?Username=a&Password=b`（空 body），
                断言两侧的 HTTP 状态码与 body。
@@ -948,7 +948,7 @@ Operation:    全部端点的异常兜底
 Category:     Error Flow · 结果映射
 
 Go Behavior:
-  rest/handler/recoverhandler.go:12-23
+  go-zero@v1.10.2/rest/handler/recoverhandler.go:12-23
     defer recover() → w.WriteHeader(http.StatusInternalServerError)
     ⇒ **HTTP 500 + 空 body**（无 Content-Type、无 envelope）
 
@@ -1037,10 +1037,10 @@ Operation:    全部端点在过载时的行为
 Category:     Lifecycle / External Interaction · 可用性
 
 Go Behavior:
-  rest/config.go:12-23   MiddlewaresConf 十项**全部** `default=true`
-  rest/engine.go:130-168 逐项装配（MaxConns → Breaker → Shedding …）
-  rest/handler/sheddinghandler.go:34-41  shedder.Allow() 失败 ⇒ w.WriteHeader(503) + return
-  rest/handler/maxconnshandler.go         连接数超限 ⇒ 503
+  go-zero@v1.10.2/rest/config.go:12-23   MiddlewaresConf 十项**全部** `default=true`
+  go-zero@v1.10.2/rest/engine.go:130-168 逐项装配（MaxConns → Breaker → Shedding …）
+  go-zero@v1.10.2/rest/handler/sheddinghandler.go:34-41  shedder.Allow() 失败 ⇒ w.WriteHeader(503) + return
+  go-zero@v1.10.2/rest/handler/maxconnshandler.go         连接数超限 ⇒ 503
 
 Spring Boot Behavior:
   user-api 侧无任何 breaker / shedding / max-conns 组件。
@@ -1051,7 +1051,7 @@ Difference:  Go 在 CPU 过载 / 连接数超限时**主动丢弃**请求并立�
 Semantic Impact: OBSERVABLE DIFFERENCE。过载场景下的错误率、延迟分布与错误 body 都不同。
             注：这是 go-zero 的**框架默认能力**，不是本项目的业务决策 —— 真源冻结 ⇒ 默认判定 RAG 缺。
 Risk:         MEDIUM（低频但影响面大；且验收环境的压测通常压不出来）。
-Evidence:     静态源码（rest/config.go:12-23、engine.go:145-153、sheddinghandler.go:34-41；
+Evidence:     静态源码（go-zero@v1.10.2/rest/config.go:12-23、engine.go:145-153、sheddinghandler.go:34-41；
               RAG 侧 user-api 模块内零命中）。
 Must Preserve: 或明确签字放弃（并写清「过载行为由上游网关/容器负责」）。
 Recommended Verification: CPU 打满 / 连接数打满条件下双侧压测，比对 503 比例与响应体。
@@ -1072,7 +1072,7 @@ Operation:    全部端点的 401 路径 + 超时作用域
 Category:     Lifecycle · 观测面 + Timeout scope
 
 Go Behavior:
-  rest/engine.go:101-113 bindRoute：
+  go-zero@v1.10.2/rest/engine.go:101-113 bindRoute：
     chn = buildChainWithNativeMiddlewares(...)   // 索引 0，最外层
     chn = appendAuthHandler(...)                 // JWT
     for _, mw := range ng.middlewares { chn = chn.Append(...) }   // observability，再往内
@@ -1135,16 +1135,16 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
 
 | 环节 | 出处 | 位置 |
 |---|---|---|
-| 原生中间件（Trace/Log/Prom/MaxConns/Breaker/Shedding/Timeout/Recover/Metrics/MaxBytes/Gunzip） | `rest/engine.go:130-171` `buildChainWithNativeMiddlewares` | **最外层** |
-| JWT 验签 | `rest/engine.go:74` `chn.Append(handler.Authorize(...))` | 原生**之内** |
-| observability(3s) | `rest/engine.go:110-111` `for ... ng.middlewares { chn = chn.Append(...) }` | JWT **之内** |
-| 黑名单 | `rest/server.go:222-234` `WithMiddleware` 把中间件**套在 `route.Handler` 外面** ⇒ route 级 | **最内层** |
+| 原生中间件（Trace/Log/Prom/MaxConns/Breaker/Shedding/Timeout/Recover/Metrics/MaxBytes/Gunzip） | `go-zero@v1.10.2/rest/engine.go:130-171` `buildChainWithNativeMiddlewares` | **最外层** |
+| JWT 验签 | `go-zero@v1.10.2/rest/engine.go:74` `chn.Append(handler.Authorize(...))` | 原生**之内** |
+| observability(3s) | `go-zero@v1.10.2/rest/engine.go:110-111` `for ... ng.middlewares { chn = chn.Append(...) }` | JWT **之内** |
+| 黑名单 | `go-zero@v1.10.2/rest/server.go:222-234` `WithMiddleware` 把中间件**套在 `route.Handler` 外面** ⇒ route 级 | **最内层** |
 
 - `chain.go` 的 `Append` 文档明写「adding the specified middlewares as the **last** ones in the request flow」
   ⇒ 越 `Append` 越靠内；
-- `rest/server.go:73-76` `AddRoutes`：`rest.WithMiddlewares([CheckBlacklistMiddleware], routes...)`
+- `go-zero@v1.10.2/rest/server.go:73-76` `AddRoutes`：`rest.WithMiddlewares([CheckBlacklistMiddleware], routes...)`
   （`routes.go:33-34`）+ `rest.WithJwt(...)`（`routes.go:73`）；
-- ⚠️ `rest/engine.go:154-156` 的原生 `TimeoutHandler` 被 `observability.DisableNativeRestTimeout`
+- ⚠️ `go-zero@v1.10.2/rest/engine.go:154-156` 的原生 `TimeoutHandler` 被 `observability.DisableNativeRestTimeout`
   关掉了（`service/user/user/api/usercenter.go:35`）⇒ 3s **只**由 observability 提供。
 
 ⇒ **Go 执行序：原生 → JWT 验签 → observability(3s) → 黑名单 → handler**
@@ -1179,7 +1179,7 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
 | # | 连带项 | 依据 | 后果 |
 |---|---|---|---|
 | ① | **①（可观测性）会自动对齐** | Go 的 JWT 401 在 observability **之外** ⇒ 不进 access log/span/指标；改法 A 后 RAG 的 JWT 401 同样在 `HttpMiddlewareFilter` **之外** ⇒ 不进 `markHTTPResult` | ⇒ **① 从「已签字偏离」变成「已对齐」** ⇒ `SD-USERAPI-002` 的签字内容**不再适用**，需复核销号。⚠️ 黑名单 401 两侧都在 observability **内** ⇒ **不受影响** |
-| ② | **会推翻 N-1 的一部分** | Go 的 JWT 失败是 `rest/handler/authhandler.go:121` `writer.WriteHeader(http.StatusUnauthorized)` ⇒ **401 + 空 body**；RAG 现在是 `GlobalExceptionHandler` 转的 **401 + envelope(1006)**，而 **N-1 签的正是「RAG 统一成完整 envelope」** | 改法 A 把验签挪到 filter 后，异常**不再被 `@ControllerAdvice` 捕获**（`@ExceptionHandler` 只在 DispatcherServlet 内生效）⇒ filter 必须自己写响应 ⇒ **二选一**：照 Go 写空 body（推翻 N-1 的一半）/ 在 filter 里手写 envelope（保留 N-1）<br>✅ **已拍板（2026-10-24 用户）：选 envelope** ⇒ **N-1 / `SD-USERAPI-003` 保持不变**；改法 A 若实施，JWT 401 **仍写完整 envelope** ⇒ 改法 A **不会**让 RAG 的两处 401 形态分裂 |
+| ② | **会推翻 N-1 的一部分** | Go 的 JWT 失败是 `go-zero@v1.10.2/rest/handler/authhandler.go:121` `writer.WriteHeader(http.StatusUnauthorized)` ⇒ **401 + 空 body**；RAG 现在是 `GlobalExceptionHandler` 转的 **401 + envelope(1006)**，而 **N-1 签的正是「RAG 统一成完整 envelope」** | 改法 A 把验签挪到 filter 后，异常**不再被 `@ControllerAdvice` 捕获**（`@ExceptionHandler` 只在 DispatcherServlet 内生效）⇒ filter 必须自己写响应 ⇒ **二选一**：照 Go 写空 body（推翻 N-1 的一半）/ 在 filter 里手写 envelope（保留 N-1）<br>✅ **已拍板（2026-10-24 用户）：选 envelope** ⇒ **N-1 / `SD-USERAPI-003` 保持不变**；改法 A 若实施，JWT 401 **仍写完整 envelope** ⇒ 改法 A **不会**让 RAG 的两处 401 形态分裂 |
 | ③ | **推广是跨域的** | Go 逐服务 `server.Use` ⇒ **改法 A 才是对 Go 更忠实的做法**（每个服务对齐自己的 Go 侧），而非共享层一刀切 | RAG 有 10 个 api 服务，只改 user-api ⇒ **中间态是服务间不一致**（user-api 的 JWT 不计入 3s 预算，其余 9 个仍计入）⇒ 需 like/follow/comment/favorite/article/hot/message/task/admin **各域各改各的** |
 
 > ✅ **连带项② 已关闭**（2026-10-24 用户拍板：接受 envelope）⇒
@@ -1207,7 +1207,7 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
 
 | | Go | RAG |
 |---|---|---|
-| MaxBytes 相对 observability(3s) | **在之外**（`rest/engine.go:164` 是 native middleware，而 observability 是 `server.Use` 的 user middleware ⇒ 后者更靠内） | **在之内**（`GoStyleMaxBytesFilter` `@Order(+8)` 晚于 `HttpMiddlewareFilter` `@Order(+7)` ⇒ 数值小的先执行 ⇒ HttpMiddleware 在外） |
+| MaxBytes 相对 observability(3s) | **在之外**（`go-zero@v1.10.2/rest/engine.go:164` 是 native middleware，而 observability 是 `server.Use` 的 user middleware ⇒ 后者更靠内） | **在之内**（`GoStyleMaxBytesFilter` `@Order(+8)` 晚于 `HttpMiddlewareFilter` `@Order(+7)` ⇒ 数值小的先执行 ⇒ HttpMiddleware 在外） |
 | 可观察后果 | 超限 413 **不计入** access log / span / HTTP 指标 | 超限 413 **计入** |
 | 证据强度 | **静态源码**（`engine.go:130-171` + `chain.go` 的 Append 语义） | **静态源码**（两个 `@Order` 数值） |
 
@@ -1403,7 +1403,7 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
 | ④ **超限 body + 无 token** | **HTTP 413** ＋ **空 body** ⇒ **「413 压过 401」在真 Tomcat 下仍成立**（Filter 写响应会破，见变异 2） |
 | ⑤ public 路径（login） | **HTTP 200**（`{"code":1002,...}`）⇒ **不验签直接放行**（public 判定未误伤） |
 
-⚠️ ④ 的响应**没有 Content-Type 头** ⇒ 与 Go 侧 `rest/handler/maxbyteshandler.go` 的
+⚠️ ④ 的响应**没有 Content-Type 头** ⇒ 与 Go 侧 `go-zero@v1.10.2/rest/handler/maxbyteshandler.go` 的
 `w.WriteHeader(http.StatusRequestEntityTooLarge)`（**裸 413、无 body、无 Content-Type**）一致 ✅。
 ⚠️ **端口**：本轮 `user-rpc` 用了 **49211**（`grpc.server.port` 默认 49210 **被 Docker 容器占用**）
 ⇒ **未改仓库任何配置文件**，只在启动脚本里用 env 覆盖 ⇒ **零仓库影响**。
@@ -1463,12 +1463,12 @@ Go Behavior:
   checkblacklistmiddleware.go:36  if err == nil && exists { …401… }
     ⇒ **err != nil 时不拦截 ⇒ fail-open 放行**
   为什么 err 会「快速」变成非 nil：
-    go-zero@v1.10.2 core/stores/redis/redisclientmanager.go:14  maxRetries = 3
-    go-zero@v1.10.2 core/stores/redis/redisclientmanager.go:32-40
+    go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:14  maxRetries = 3
+    go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40
       red.NewClient(&red.Options{Addr, …, MaxRetries: maxRetries, MinIdleConns: idleConns})
       ⚠️ **没有**设 DialTimeout / ReadTimeout ⇒ 用 go-redis v9 默认值
     ⇒ 连接被拒时**每次重试都立即失败** ⇒ 整体快速失败（实测 ~1.7s，仍在 3s 预算内）
-  Go 的 HTTP 预算：go-zero@v1.10.2 rest/config.go:55  Timeout int64 `json:",default=3000"`
+  Go 的 HTTP 预算：go-zero@v1.10.2/rest/config.go:55  Timeout int64 `json:",default=3000"`
 
 Spring Boot Behavior（修前）:
   Lettuce 默认把**断连期间**的命令**挂起排队**等重连
@@ -1567,7 +1567,7 @@ Category:     State Semantics · Failure Semantics（可用性语义）+ **不�
   ⇒ 本条是**顺着这次误诊**、用双侧活体对拍**重新测**出来的**真漂移**。
 
 Go Behavior（实测，2026-10-24 19:17，真进程 + 真 PG + 真 DNS 失败）：
-  go-zero@v1.10.2 core/stores/redis/redisclientmanager.go:32-40
+  go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40
     red.NewClient(&red.Options{Addr: r.Addr, …, MaxRetries: 3, MinIdleConns: 8})
     ⚠️ **不设** DialTimeout / ReadTimeout ⇒ 用 go-redis v9 默认值
   实测日志：
@@ -1575,7 +1575,7 @@ Go Behavior（实测，2026-10-24 19:17，真进程 + 真 PG + 真 DNS 失败）
           dial tcp: lookup redis: no such host
     [REDIS] slowcall on executing: exists user:jwt_blacklist:… duration: 1802.2ms
   ⇒ **5 次拨号全部快速失败**（DNS NXDOMAIN 是同步返回的）⇒ 失败耗时 ≈ 1.8~1.9s
-  ⇒ < Go 的 HTTP 预算 3s（rest/config.go:55 Timeout int64 `json:",default=3000"`）
+  ⇒ < Go 的 HTTP 预算 3s（go-zero@v1.10.2/rest/config.go:55 Timeout int64 `json:",default=3000"`）
   ⇒ 进业务层 ⇒ checkblacklistmiddleware.go:36 `if err == nil && exists` 判 false
   ⇒ **fail-open 放行 ⇒ HTTP 200**（三轮**全部** 200，1.81/1.90/1.92s，**稳定**）
 
@@ -1690,7 +1690,7 @@ Must Preserve: 「Redis 不可用 ⇒ **fail-open 放行**」（Go 的 `err == n
   ```
   Go service/user/user/api/etc/*.yaml
       BizRedis 段**没有任何** timeout 字段
-    → go-zero v1.10.2 core/stores/redis/redisclientmanager.go:32-39
+    → go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-39
       建 red.Options 时只传 Addr/User/Pass/DB/MaxRetries/MinIdleConns/TLSConfig
       ——**三个 timeout 一个都没传**
     → github.com/redis/go-redis/v9 options.go 的 init()
@@ -2679,11 +2679,11 @@ RAG 侧 `GlobalExceptionHandler#handleAny:262-272` ⇒ **HTTP 500 + 完整 envel
 | # | 位置 | 事实 |
 |---|---|---|
 | 1 | `handler/routes.go:32-75` | protected 路由经 `rest.WithMiddlewares([]rest.Middleware{serverCtx.CheckBlacklistMiddleware}, routes...)` 包装；同处 `:73` `rest.WithJwt(...)` |
-| 2 | `rest/server.go:221-235` `WithMiddleware` | `Handler: middleware(route.Handler)` ⇒ **黑名单包在 `route.Handler` 里面** |
-| 3 | `rest/engine.go:101-113` `bindRoute` | 顺序：① `buildChainWithNativeMiddlewares` ② `appendAuthHandler` ③ `for _, mw := range ng.middlewares { chn = chn.Append(...) }` |
-| 4 | `rest/engine.go:70-84` `appendAuthHandler` | `chn = chn.Append(handler.Authorize(...))` ⇒ **JWT 用 Append，不是 Prepend** |
+| 2 | `go-zero@v1.10.2/rest/server.go:221-235` `WithMiddleware` | `Handler: middleware(route.Handler)` ⇒ **黑名单包在 `route.Handler` 里面** |
+| 3 | `go-zero@v1.10.2/rest/engine.go:101-113` `bindRoute` | 顺序：① `buildChainWithNativeMiddlewares` ② `appendAuthHandler` ③ `for _, mw := range ng.middlewares { chn = chn.Append(...) }` |
+| 4 | `go-zero@v1.10.2/rest/engine.go:70-84` `appendAuthHandler` | `chn = chn.Append(handler.Authorize(...))` ⇒ **JWT 用 Append，不是 Prepend** |
 | 5 | `user/api/usercenter.go:37` | `server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, ...))` ⇒ observability 进 `ng.middlewares` |
-| 6 | `rest/chain/chain.go:81-91` `Then` | `for i := range { h = c.middlewares`len-1-i` }` ⇒ **索引 0 最外层、先执行** |
+| 6 | `go-zero@v1.10.2/rest/chain/chain.go:81-91` `Then` | `for i := range { h = c.middlewares`len-1-i` }` ⇒ **索引 0 最外层、先执行** |
 
 **⇒ Go 的最终执行序（本轮逐环推出）**：
 
@@ -2843,17 +2843,17 @@ users-common · user-rpc · user-api **96**（+6：5 条绑定面 + 1 条 UTF-8 
 
 | 段 | 出处 | 内容 |
 |---|---|---|
-| 默认开启 | `zrpc/internal/config.go:14` | `Breaker bool \`json:",default=true"\`` |
-| 装配 | `zrpc/internal/client.go:112-113` | `if c.middlewares.Breaker { interceptors = append(interceptors, clientinterceptors.BreakerInterceptor) }` |
-| 实现 | `zrpc/internal/clientinterceptors/breakerinterceptor.go:13-19` | `breaker.DoWithAcceptableCtx(ctx, breakerName, fn, codes.Acceptable)` |
+| 默认开启 | `go-zero@v1.10.2/zrpc/internal/config.go:14` | `Breaker bool \`json:",default=true"\`` |
+| 装配 | `go-zero@v1.10.2/zrpc/internal/client.go:112-113` | `if c.middlewares.Breaker { interceptors = append(interceptors, clientinterceptors.BreakerInterceptor) }` |
+| 实现 | `go-zero@v1.10.2/zrpc/internal/clientinterceptors/breakerinterceptor.go:13-19` | `breaker.DoWithAcceptableCtx(ctx, breakerName, fn, codes.Acceptable)` |
 
 **② 熔断打开时返回的是「普通 error」，不是 gRPC status**：
 
 | 出处 | 内容 |
 |---|---|
-| `core/breaker/breaker.go:18-19` | `var ErrServiceUnavailable = errors.New("circuit breaker is open")` |
-| `core/breaker/googlebreaker.go:73-75` | `if b.proba.TrueOnProba(dropRatio) { return ErrServiceUnavailable }` |
-| `core/breaker/breaker.go:155-163` | `DoWithAcceptableCtx` → `DoWithAcceptable` → `throttle.doReq(req, nil, acceptable)`（**fallback = nil ⇒ 原样返回该 error**） |
+| `go-zero@v1.10.2/core/breaker/breaker.go:18-19` | `var ErrServiceUnavailable = errors.New("circuit breaker is open")` |
+| `go-zero@v1.10.2/core/breaker/googlebreaker.go:73-75` | `if b.proba.TrueOnProba(dropRatio) { return ErrServiceUnavailable }` |
+| `go-zero@v1.10.2/core/breaker/breaker.go:155-163` | `DoWithAcceptableCtx` → `DoWithAcceptable` → `throttle.doReq(req, nil, acceptable)`（**fallback = nil ⇒ 原样返回该 error**） |
 
 **③ 业务码落点 = `default` ⇒ 1015**（本域 **9 个 logic 全部如此**）：
 
@@ -2955,7 +2955,7 @@ users-common · user-rpc · user-api **96**（+6：5 条绑定面 + 1 条 UTF-8 
 
 这是核对 force-pass 时的**意外收获**，写下来是因为它**极易被「顺手改好」**。
 
-`core/breaker/googlebreaker.go:53-80` 与 RAG `GoStyleBreaker.accept()` 的判定顺序**逐条一致**：
+`go-zero@v1.10.2/core/breaker/googlebreaker.go:53-80` 与 RAG `GoStyleBreaker.accept()` 的判定顺序**逐条一致**：
 
 ```go
 dropRatio := (float64(history.total-protection) - weightedAccepts) / float64(history.total+1)
@@ -3002,7 +3002,7 @@ users-common **33** · user-rpc **122** · user-api **99**（+3：2 条接线 + 
 | 项 | 值 |
 |---|---|
 | 对照面 | `service/common/src/main/java/com/rag/common/protection/`（4 个 Filter + 2 个算法类 + 配置类） |
-| Go 对照面 | go-zero v1.10.2：`rest/config.go`、`rest/engine.go`、`rest/handler/{maxconnshandler,breakerhandler,sheddinghandler,maxbyteshandler}.go`、`core/breaker/{googlebreaker,breaker}.go`、`core/load/adaptiveshedder.go`、`core/collection/rollingwindow.go`、`zrpc/internal/{config,client}.go`、`zrpc/internal/clientinterceptors/breakerinterceptor.go`、`zrpc/internal/codes/accept.go`、`core/stat/{metrics,usage}.go` |
+| Go 对照面 | go-zero v1.10.2：`rest/config.go`、`go-zero@v1.10.2/rest/engine.go`、`go-zero@v1.10.2/rest/handler/{maxconnshandler,breakerhandler,sheddinghandler,maxbyteshandler}.go`、`go-zero@v1.10.2/core/breaker/{googlebreaker,breaker}.go`、`go-zero@v1.10.2/core/load/adaptiveshedder.go`、`go-zero@v1.10.2/core/collection/rollingwindow.go`、`go-zero@v1.10.2/zrpc/internal/{config,client}.go`、`go-zero@v1.10.2/zrpc/internal/clientinterceptors/breakerinterceptor.go`、`go-zero@v1.10.2/zrpc/internal/codes/accept.go`、`go-zero@v1.10.2/core/stat/{metrics,usage}.go` |
 | 证据强度 | ✅ **源码逐行对照**（两侧全部读原文，非凭记忆）+ 🆕 **运行时证据**（Shedding 层本轮首次拿到） |
 | ⚠️ **证据边界** | 本轮**没有**做「双侧活体压测对拍」—— 四个机制都是**过载路径**，真源那侧要复现同一条过载曲线需要独占 CPU；⇒ 本轮结论的性质是「**源码逐行等价性**」，不是「同输入同输出」的实测 |
 
@@ -3010,7 +3010,7 @@ users-common **33** · user-rpc **122** · user-api **99**（+3：2 条接线 + 
 
 | 维度 | Go | RAG | 判定 |
 |---|---|---|---|
-| 阈值来源 | `rest/config.go:52` `MaxConns int json:",default=10000"` | `GoStyleProtectionProperties.maxConns = 10000` | ✅ |
+| 阈值来源 | `go-zero@v1.10.2/rest/config.go:52` `MaxConns int json:",default=10000"` | `GoStyleProtectionProperties.maxConns = 10000` | ✅ |
 | yaml 是否显式配置 | ❌ 未写（走 tag 默认） | ❌ 未写 | ✅ |
 | **闸门粒度** | **per-route**：`engine.go` 的 `buildChainWithNativeMiddlewares` **逐路由**调用 ⇒ 每条路由各 new 一个 `syncx.NewLimit(n)` | **全局一个** `Semaphore` | ❌ **DRIFT-013 ①** |
 | 获取方式 | `latch.TryBorrow()`（非阻塞） | `latch.tryAcquire()`（非阻塞） | ✅ |
@@ -3023,7 +3023,7 @@ users-common **33** · user-rpc **122** · user-api **99**（+3：2 条接线 + 
 
 | 维度 | Go | RAG | 判定 |
 |---|---|---|---|
-| 阈值来源 | `rest/config.go:53` `MaxBytes int64 json:",default=1048576"` | `maxBytes = 1048576L` | ✅ |
+| 阈值来源 | `go-zero@v1.10.2/rest/config.go:53` `MaxBytes int64 json:",default=1048576"` | `maxBytes = 1048576L` | ✅ |
 | 判据 | `r.ContentLength > n`（`maxbyteshandler.go:19`） | `getContentLengthLong() > maxBytes` | ✅ |
 | **chunked 绕过** | `ContentLength == -1` ⇒ `-1 > n` 恒 false ⇒ **放行** | 同样 `-1` ⇒ **放行** | ✅（**刻意不修**：修正它＝新增行为＝漂移） |
 | `<=0` 语义 | no-op | no-op | ✅ |
@@ -3037,7 +3037,7 @@ users-common **33** · user-rpc **122** · user-api **99**（+3：2 条接线 + 
 |---|---|---|---|
 | 隔离单位 | **per-route**，`breakerhandler.go:19` 名字 = `method://path` | **per-route**，`method://URI` | ✅（粒度同；键的**取值**不同见下） |
 | **键的取值** | `route.Path` = **去掉组前缀**的路径（如 `user/login`） | `request.getRequestURI()` = **完整 URI**（如 `/usercenter/v1/user/login`） | ⚠️ 本域 9 条路由**无重名** ⇒ 等价；若将来两个前缀下出现**同名子路径**，Go 会**共用**一个 breaker 而 RAG 会**各建**一个 |
-| **算法** | `core/breaker/googlebreaker.go:53-80` | `GoStyleBreaker.accept()` | ✅ **逐行一致**（含「`dropRatio <= 0` 的早退**不**更新 `lastPass`」这个极易被顺手改好的细节） |
+| **算法** | `go-zero@v1.10.2/core/breaker/googlebreaker.go:53-80` | `GoStyleBreaker.accept()` | ✅ **逐行一致**（含「`dropRatio <= 0` 的早退**不**更新 `lastPass`」这个极易被顺手改好的细节） |
 | 常量 | window 10s / 40 桶（250ms）/ k 1.5 / minK 1.1 / protection 5 / forcePass 1s | 同 | ✅ |
 | 拒绝形状 | `w.WriteHeader(503)` ⇒ 503 空 body | `setStatus(503)` ⇒ 同 | ✅ |
 | 成败判据 | `cw.Code < 500` ⇒ `promise.Accept()` | `capturedStatus < 500` ⇒ `markSuccess()` | ✅ |
@@ -3050,7 +3050,7 @@ users-common **33** · user-rpc **122** · user-api **99**（+3：2 条接线 + 
 | 维度 | Go | RAG | 判定 |
 |---|---|---|---|
 | 共享范围 | **全局一个**（`engine.go` 的 `newEngine` 里建一个 shedder，`getShedder` 直接取它） | 全局一个 | ✅ |
-| 阈值 | `rest/config.go:56` `CpuThreshold default=900,range=[0:1000)` | `cpuThreshold = 900`，越界夹到 `[0,1000)` | ✅（越界处理是表达层加固：Go 在**配置加载期**报错拒绝启动，Java 不夹会变成「永不降载」的静默失效） |
+| 阈值 | `go-zero@v1.10.2/rest/config.go:56` `CpuThreshold default=900,range=[0:1000)` | `cpuThreshold = 900`，越界夹到 `[0,1000)` | ✅（越界处理是表达层加固：Go 在**配置加载期**报错拒绝启动，Java 不夹会变成「永不降载」的静默失效） |
 | CPU 口径 | **整机**（`stat.CpuUsage()` ← cgroup / `/proc/stat`） | `getSystemCpuLoad()` 整机 | ✅ |
 | 读不到 CPU | `CpuUsage()` 返回 0 ⇒ `0 >= 900` false ⇒ **不过载** | `-1` ⇒ fail-open | ✅ 同向 |
 | 拒绝条件 | `systemOverloaded() \|\| stillHot()` **且** `highThru()` | 同 | ✅ |
@@ -3064,7 +3064,7 @@ users-common **33** · user-rpc **122** · user-api **99**（+3：2 条接线 + 
 
 ### 6. `DRIFT-USERAPI-012`（已修）：降载的 RT 统计口径
 
-**Go 侧**（`core/load/adaptiveshedder.go:284-289`）：
+**Go 侧**（`go-zero@v1.10.2/core/load/adaptiveshedder.go:284-289`）：
 
 ```go
 func (p *promise) Pass() {
@@ -3158,7 +3158,7 @@ Go 侧 `breaker.NewBreaker` 在**路由注册时**调用 ⇒ **有界**。
 
 | | key 的拼法 | 语义 | 基数 |
 |---|---|---|---|
-| **Go** | `rest/engine.go:149` → `handler.BreakerHandler(route.Method, route.Path, metrics)` ⇒ `rest/handler/breakerhandler.go:19` `breaker.NewBreaker(breaker.WithName(strings.Join([]string{method, path}, breakerSeparator)))`，`breakerSeparator = "://"`（`:15`） | `route.Path` = **注册期路由模板**（如 `/user/avatar/history/:id`）⇒ **同一路由的所有请求共用一个 breaker** | **= 路由数**（有界）|
+| **Go** | `go-zero@v1.10.2/rest/engine.go:149` → `handler.BreakerHandler(route.Method, route.Path, metrics)` ⇒ `go-zero@v1.10.2/rest/handler/breakerhandler.go:19` `breaker.NewBreaker(breaker.WithName(strings.Join([]string{method, path}, breakerSeparator)))`，`breakerSeparator = "://"`（`:15`） | `route.Path` = **注册期路由模板**（如 `/user/avatar/history/:id`）⇒ **同一路由的所有请求共用一个 breaker** | **= 路由数**（有界）|
 | **RAG** | `GoStyleBreakerFilter.routeKey` → `request.getMethod() + "://" + request.getRequestURI()` | `getRequestURI()` = **原始请求 URI（含具体参数值）** ⇒ **每个不同的取值一个 breaker** | **= 参数取值数**（无界）|
 
 ⇒ **分隔符两侧一致（都是 `://`）**；**差别只在「path 那一段是模板还是原值」**。
@@ -3185,7 +3185,7 @@ Go 侧 `breaker.NewBreaker` 在**路由注册时**调用 ⇒ **有界**。
 **④ gRPC 客户端熔断那一侧：两侧是对齐的**（别把它混进来）
 
 RAG `GoStyleGrpcClientBreakerInterceptor` 的键 = **fullMethodName**（`breakers.computeIfAbsent(fullMethodName, …)`）；
-Go 侧 `zrpc/internal/clientinterceptors/breakerinterceptor.go` 的键 = `path.Join(cc.Target(), method)` ⇒ **同样是「per 目标 + per 方法」**。
+Go 侧 `go-zero@v1.10.2/zrpc/internal/clientinterceptors/breakerinterceptor.go` 的键 = `path.Join(cc.Target(), method)` ⇒ **同样是「per 目标 + per 方法」**。
 ⇒ ⇒ **013② 的问题只在 HTTP 层**（§8「第八轮」表里那行「Go 侧无对应物」说的是**Go 的 user-api 没有客户端熔断**，是另一件事，别混谈）。
 
 **⑤ 修法边界（给 global 落地时的一条硬约束）**

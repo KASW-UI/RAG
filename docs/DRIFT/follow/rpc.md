@@ -191,9 +191,9 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 **Go 侧的出口从哪来（逐行）**
 
 - `service/follow/rpc/etc/follow.yaml:20-27`：`DevServer.Enabled: true` / `Port: 16065` / `MetricsPath: /metrics`
-- `zrpc/server.go:63`：`c.SetUp()`
-- ⇒ `core/service/serviceconf.go:77`：`devserver.StartAgent(sc.DevServer)`
-- ⇒ `internal/devserver/server.go:79-87`：起一个独立 HTTP server，`:45-47`
+- `go-zero@v1.10.2/zrpc/server.go:63`：`c.SetUp()`
+- ⇒ `go-zero@v1.10.2/core/service/serviceconf.go:77`：`devserver.StartAgent(sc.DevServer)`
+- ⇒ `go-zero@v1.10.2/internal/devserver/server.go:79-87`：起一个独立 HTTP server，`:45-47`
   把 `promhttp.Handler()` 挂在 `MetricsPath` 上。
 
 ⇒ **Go 的 follow-rpc 是「纯 gRPC 进程 + 一个独立的小 HTTP 观测端口」**。
@@ -340,7 +340,7 @@ threading.GoSafe(func() {
 | # | RAG 源文件（follow-rpc 17 + follow-common 4） | Go 对应物（follow/rpc 21 + follow/common 1） | 承重点 | 结论 |
 |---|---|---|---|---|
 | 1 | `rpc/FollowRpcApplication.java` | `follow.go`（`main()`） | Go main 的五步逐条对应（**无 ticker/cron**） | ✅ |
-| 2 | `rpc/bootstrap/NacosRegistration.java` | `follow.go` → `zrpc.MustNewServer` → `zrpc/server.go:63 SetUp()` | 注册名 `follow-rpc`；Go 侧由 zrpc 自动注册 | ✅ |
+| 2 | `rpc/bootstrap/NacosRegistration.java` | `follow.go` → `zrpc.MustNewServer` → `go-zero@v1.10.2/zrpc/server.go:63 SetUp()` | 注册名 `follow-rpc`；Go 侧由 zrpc 自动注册 | ✅ |
 | 3 | `rpc/client/UserRpcClient.java` | `internal/svc/servicecontext.go` 的 `UserRpc` + `internal/logic/helper.go:81-94` | `GetUser` 的三分支判定 | ✅ |
 | 4 | `rpc/config/FollowRpcProperties.java` | `internal/config/config.go`（struct tag 默认值） | `ListConf` / `RecommendConf`；**`default=20` 与 `default=50` 是两个独立常量** | ✅ |
 | 5 | `rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` | **无 Go 对应物** | ⚠️ **表达层**：刻意为空，只建立自动配置排序边（`after=DataSource`、`before=MybatisPlus`），**不注册任何 bean** ⇒ 无行为影响 | ✅ |

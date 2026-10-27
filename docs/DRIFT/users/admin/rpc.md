@@ -260,7 +260,7 @@ OP-SCHEMA  AdminSchemaBootstrap.initSchema（:51-64）
 | Schema | 建表并发保护 | 无（AutoMigrate 裸跑） | `pg_advisory_lock` | **IMPLEMENTATION DIFFERENCE**（增强） | SchemaInitializer.java:91,115 |
 | Flyway | 是否启用 | 不适用（Go 无 Flyway） | pom 无 flyway 三件套；`application.yml` 无 `spring.flyway.*` | **EQUIVALENT** | `check-flyway-ledger.py` EXIT=0 且不含 admin-rpc |
 | 鉴权 | 是否在本组件鉴权 | **不鉴权**，信任入参 uid/operator_id | 同 | **EQUIVALENT** | 全模块无 JWT/session 校验代码 |
-| 超时 | 服务端超时 | 2000ms（`zrpc/config.go` struct tag default）→ `DisableNativeRpcTimeout` → 拦截器 | `observability.rpc-timeout: 2s` → `RpcInterceptor` 调度 close | **EQUIVALENT**（服务端侧） | 静态源码；`AdminDeadlinePassthroughTest` 8 条 |
+| 超时 | 服务端超时 | 2000ms（`go-zero@v1.10.2/zrpc/config.go` struct tag default）→ `DisableNativeRpcTimeout` → 拦截器 | `observability.rpc-timeout: 2s` → `RpcInterceptor` 调度 close | **EQUIVALENT**（服务端侧） | 静态源码；`AdminDeadlinePassthroughTest` 8 条 |
 | 超时 | **是否 min 客户端 deadline** | 继承（`context.WithTimeout(parent,2s)`，rpc.go:38） | 只算自己 2s（`now + timeout`） | **UNKNOWN** | UNRESOLVED-ARPC-002 |
 | 在途 SQL 取消 | 超时后 PG 侧阻塞查询存活时长 | 378ms | 4455ms | **OBSERVABLE DIFFERENCE** | 已台账（B-1 / E-4，跨组件，本组件只是消费方） |
 | Metrics | 指标名与标签 | `admin_rpc_login_total` / `admin_rpc_high_risk_action_logal`（含 typo） | 同名同 typo（AdminRpcMetrics.java 头注释） | **EQUIVALENT** | 静态源码 |
@@ -768,7 +768,7 @@ Required Confirm: 起一个 Redis 容器并 iptables 掉网络，两侧各打一
 >
 > **关闭依据（逐层）**：
 > 1. **库默认值已读到底**（不是猜）：
->    - Go `core/stores/redis/redisclientmanager.go:32-39` 建 `red.Options` 时
+>    - Go `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-39` 建 `red.Options` 时
 >      **三个 timeout 一个都没传** ⇒ 走 go-redis/v9 `options.go` 的 `init()`：
 >      `DialTimeout = 5s`（`:329-330`）/ `ReadTimeout = 3s`；
 >    - 🔴 红鲱鱼：go-zero `core/stores/redis/redis.go:27` 的 `readWriteTimeout = 2 * time.Second`
@@ -1998,7 +1998,7 @@ Required Confirm 是「跑 `exp-difftest-grpc-errors.sh`」。
 
 ### 2.2 ⚠️ 一个会骗人的红鲱鱼：go-zero 里的 `readWriteTimeout`
 
-`core/stores/redis/redis.go:27` 写着：
+`go-zero@v1.10.2/core/stores/redis/redis.go:27` 写着：
 
 ```go
 readWriteTimeout     = 2 * time.Second
@@ -2862,20 +2862,20 @@ Redis 不可达的实际表现由 **3s 的命令超时**主导，5s 的连接超
 
 ### 1.1 Go 侧：zrpc **框架级**自带 7 个 unary 拦截器
 
-**装配点**：`zrpc/server.go:143-170` `setupUnaryInterceptors`（按顺序 `AddUnaryInterceptors`）
-＋ `zrpc/internal/config.go:57-60`（`AddUnaryInterceptors` 是 **append 到尾部** ⇒ **先注册的最外层**）
+**装配点**：`go-zero@v1.10.2/zrpc/server.go:143-170` `setupUnaryInterceptors`（按顺序 `AddUnaryInterceptors`）
+＋ `go-zero@v1.10.2/zrpc/internal/config.go:57-60`（`AddUnaryInterceptors` 是 **append 到尾部** ⇒ **先注册的最外层**）
 ＋ `service/user/admin/rpc/admin.go:33,43`。
 
 | # | 拦截器 | 装不装 | 依据 |
 |---|---|---|---|
-| 1 | `UnaryTracingInterceptor` | ✅ **装** | `Middlewares.Trace` 默认 `true`（`zrpc/internal/config.go:20`） |
+| 1 | `UnaryTracingInterceptor` | ✅ **装** | `Middlewares.Trace` 默认 `true`（`go-zero@v1.10.2/zrpc/internal/config.go:20`） |
 | 2 | `UnaryRecoverInterceptor` | ✅ **装** | `Middlewares.Recover` 默认 `true`（`:21`） |
 | 3 | `UnaryStatInterceptor` | ✅ **装** | `Middlewares.Stat` 默认 `true`（`:22`） |
 | 4 | `UnaryPrometheusInterceptor` | ✅ **装** | `Middlewares.Prometheus` 默认 `true`（`:24`） |
 | 5 | `UnaryBreakerInterceptor` | ✅ **装** | `Middlewares.Breaker` 默认 `true`（`:25`） |
-| 6 | `UnarySheddingInterceptor` | ✅ **装** | `CpuThreshold` 默认 **900** > 0（`zrpc/config.go:47`）⇒ 自适应降载，CPU 阈值 90% |
+| 6 | `UnarySheddingInterceptor` | ✅ **装** | `CpuThreshold` 默认 **900** > 0（`go-zero@v1.10.2/zrpc/config.go:47`）⇒ 自适应降载，CPU 阈值 90% |
 | 7 | `UnaryTimeoutInterceptor` | ❌ **不装** | `admin.go:33` `DisableNativeRpcTimeout(&c.RpcServerConf)` 把 `conf.Timeout` 置 **0**（`observability/rpc.go:19-23`）⇒ `if c.Timeout > 0` 为假 |
-| — | `UnaryAuthorizeInterceptor` | ❌ **不装** | `Auth bool json:",optional"` 默认 false（`zrpc/config.go:42`） |
+| — | `UnaryAuthorizeInterceptor` | ❌ **不装** | `Auth bool json:",optional"` 默认 false（`go-zero@v1.10.2/zrpc/config.go:42`） |
 | 8 | `observability.NewUnaryServerInterceptor(2000ms, slowThreshold)` | ✅ **装（最内层）** | `admin.go:43`（超时由它接管，见第 7 行） |
 
 ⇒ **Go 侧最终链（外→内）**：
@@ -2904,7 +2904,7 @@ public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryS
 
 | | Go | RAG |
 |---|---|---|
-| 谁兜底 panic | `UnaryRecoverInterceptor`（`zrpc/internal/serverinterceptors/recoverinterceptor.go:24-31`） | **无显式 recover 层** ⇒ 落到 grpc-java 框架默认 |
+| 谁兜底 panic | `UnaryRecoverInterceptor`（`go-zero@v1.10.2/zrpc/internal/serverinterceptors/recoverinterceptor.go:24-31`） | **无显式 recover 层** ⇒ 落到 grpc-java 框架默认 |
 | 兜底后的 status | **`codes.Internal`（13）** + `"panic: <值>"`（`recoverinterceptor.go:39-42`：`status.Errorf(codes.Internal, "panic: %v", r)`） | **`Status.UNKNOWN`（2）** + `"Application error processing RPC"`（grpc-java `grpc-core-1.63.0` `io/grpc/internal/ServerImpl.java:811-814` `internalClose` ⇒ `Status.UNKNOWN.withDescription(...)`；`:858-865` catch 后**再 `throw t` 重抛**） |
 | 服务端日志 | `logc.Errorf(ctx, "%+v\n\n%s", r, debug.Stack())` ⇒ **完整堆栈** | 依赖 grpc-java 的 uncaught handler ⇒ **无 Go 式堆栈日志** |
 | **admin-api 渲染出的业务码** | `codes.Internal` ⇒ `getselflogic.go:57-58` `case codes.Internal: return nil, errmsg.ErrorServerCommon` ⇒ **5001** | `Status.UNKNOWN` **不在** `mapRPCStatusToCode`（`GlobalExceptionHandler.java:83-91`）的任何分支 ⇒ 落 **default** ⇒ **`CODE_SERVER_BUSY` = 1015** |
@@ -2919,7 +2919,7 @@ public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryS
 |---|---|---|
 | **Breaker** | 熔断（`Middlewares.Breaker` 默认 true） | 无 ⇒ 慢下游不熔断，请求持续堆积 |
 | **Shedding** | CPU > 90% 自适应降载 | 无 ⇒ 无降载保护 |
-| **Stat** | go-zero stat 日志（慢请求阈值默认 **500ms**，`zrpc/internal/serverinterceptors/statinterceptor.go`） | 无 |
+| **Stat** | go-zero stat 日志（慢请求阈值默认 **500ms**，`go-zero@v1.10.2/zrpc/internal/serverinterceptors/statinterceptor.go`） | 无 |
 | **Prometheus** | gRPC server 侧指标 | admin-rpc 的 `application.yml` 关掉了 `management.endpoint.prometheus` ⇒ 无 HTTP 抓取口 |
 | **Tracing** | go-zero `UnaryTracingInterceptor` | RAG 侧有 span（`RpcInterceptor` + 8 处 `AdminSpans.traced`）⇒ **部分覆盖**，但**不是同一层**，覆盖度未实测 |
 
@@ -2940,7 +2940,7 @@ public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryS
 
 ### 1.6 Evidence strength
 
-`静态源码·双侧`（Go 侧读了 `zrpc/server.go` / `zrpc/internal/config.go` / `zrpc/config.go` /
+`静态源码·双侧`（Go 侧读了 `go-zero@v1.10.2/zrpc/server.go` / `go-zero@v1.10.2/zrpc/internal/config.go` / `go-zero@v1.10.2/zrpc/config.go` /
 `recoverinterceptor.go` ＋ **配置默认值**；RAG 侧读了 `AdminRpcApplication.java` /
 `RpcServerInterceptorFactory.java` / `RpcInterceptor.java` / `GlobalExceptionHandler.java`；
 grpc-java 侧读了 `grpc-core-1.63.0` 的 `io/grpc/internal/ServerImpl.java` 源码）
@@ -4183,7 +4183,7 @@ Go service/user/admin/rpc/internal/logic/logoutlogic.go:35-40
         logger.LogBusinessErr(l.ctx, errmsg.ErrorRedisUpdate, err)
         return nil, status.Error(codes.Internal, "注销失败,Redis写入异常")    ← **快速失败 ⇒ INTERNAL**
     }
-为什么快：go-zero v1.10.2 core/stores/redis/redisclientmanager.go:14 maxRetries = 3
+为什么快：go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:14 maxRetries = 3
           · :32-39 red.NewClient(&red.Options{Addr, MaxRetries: maxRetries, MinIdleConns, ...})
           —— **不设** DialTimeout / ReadTimeout ⇒ 每次重试**立即失败** ⇒ 整体快速失败（实测 ~1.7s，仍在 2s 预算内）
 ```

@@ -103,7 +103,7 @@
 
 | # | 编号 | 现象 | Go 侧 `文件:行号`（**已核 ✅**） | RAG 侧现状 | 证据强度 | 建议修法（**两侧都应是 Y**） | 影响面 | 阻塞本波？ |
 |---|---|---|---|---|---|---|---|---|
-| **1** | `DRIFT-USERAPI-013` ＋ `DRIFT-FOLLOW-008`（**同族，两条一起对账**） | ① **MaxConns 闸门粒度**：Go **每路由一个** latch（RAG = 全局一个）② **breaker 键空间**：Go key = 注册期 `route.Path` **模板**（基数 = 路由数）vs RAG = raw `getRequestURI()`（基数 = 参数取值数 ⇒ 无界）③ `GoStyleBreakerFilter` 的 javadoc 给「无界风险为零」的**错误安全保证** | ① `rest/handler/maxconnshandler.go:12`（`func MaxConnsHandler(n int) func(http.Handler) http.Handler`）<br>② `rest/engine.go:149` → `rest/handler/breakerhandler.go:15,19`（`breakerSeparator="://"`）<br>③ `rest/config.go:52` | `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java`（全局单闸门）· `GoStyleBreakerFilter.java`（raw URI 建 key）· 11 个 `protection/` 类 | **L1 源码逐行对照**（域台账 2026-10-26 只读复核：键语义已钉死 · **可观察面在 `article-api`**，user-api 的 9 条路由零路径变量 ⇒ 本组件不可观察） | 两侧都应是 **Y** = 「**每路由一个 latch**」＋「**breaker key 用注册期 `route.Path` 模板**」＋「**404 取不到模板 ⇒ 不得用 raw URI 兜底**」（这是方案 B 的硬约束） | `service/common` 的 `protection/`（11 类）⇒ **编译面 16 个组件** | 🟡 **不阻塞**（但**与 #2 同族** ⇒ 若 #2 落码，#1 宜同批） |
+| **1** | `DRIFT-USERAPI-013` ＋ `DRIFT-FOLLOW-008`（**同族，两条一起对账**） | ① **MaxConns 闸门粒度**：Go **每路由一个** latch（RAG = 全局一个）② **breaker 键空间**：Go key = 注册期 `route.Path` **模板**（基数 = 路由数）vs RAG = raw `getRequestURI()`（基数 = 参数取值数 ⇒ 无界）③ `GoStyleBreakerFilter` 的 javadoc 给「无界风险为零」的**错误安全保证** | ① `go-zero@v1.10.2/rest/handler/maxconnshandler.go:12`（`func MaxConnsHandler(n int) func(http.Handler) http.Handler`）<br>② `go-zero@v1.10.2/rest/engine.go:149` → `go-zero@v1.10.2/rest/handler/breakerhandler.go:15,19`（`breakerSeparator="://"`）<br>③ `go-zero@v1.10.2/rest/config.go:52` | `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java`（全局单闸门）· `GoStyleBreakerFilter.java`（raw URI 建 key）· 11 个 `protection/` 类 | **L1 源码逐行对照**（域台账 2026-10-26 只读复核：键语义已钉死 · **可观察面在 `article-api`**，user-api 的 9 条路由零路径变量 ⇒ 本组件不可观察） | 两侧都应是 **Y** = 「**每路由一个 latch**」＋「**breaker key 用注册期 `route.Path` 模板**」＋「**404 取不到模板 ⇒ 不得用 raw URI 兜底**」（这是方案 B 的硬约束） | `service/common` 的 `protection/`（11 类）⇒ **编译面 16 个组件** | 🟡 **不阻塞**（但**与 #2 同族** ⇒ 若 #2 落码，#1 宜同批） |
 | **2** | `DRIFT-ARPC-010`（= **E66**，两侧同编号 ⇒ **销账别当两条**） | Redis **写**不绑 deadline（admin `logout` 的 Redis 写）⇒ 超时后写仍在途 | `service/common/observability/rpc.go:38`（`context.WithTimeout(ctx, timeout)` ⇒ ctx 带 deadline ⇒ **出向调用天然继承**） | `service/common` 的 Redis 调用路径 **未绑 `GoStyleRequestDeadline`** ⇒ 只算服务端自己的预算 | **L1 源码**（域台账原文）+ 与 `UNRESOLVED-ARPC-002` 同型 | 两侧都应是 **Y** = 「**Redis 写出向调用绑定请求 deadline**」⇒ 与 gRPC 出向（E65）**同一套绑定机制** | `service/common` ⇒ 编译面 16 个组件 | 🟡 不阻塞 |
 | **3** | `UNRESOLVED-ARPC-002`（= **E38②**） ⚠️ **2026-10-27 订正：此条本轮不需要落码** | 超时是否 **min(客户端 deadline, 服务端 timeout)**：Go 继承父 ctx ⇒ 客户端更早就提前取消。**RAG 侧已于 2026-10-26 落地该语义** ⇒ **① 已闭环** | `service/common/observability/rpc.go:38` ⇒ `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)`<br>**已核 ✅**：该行内容逐字 = `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` | ✅ **已落地**：`RpcInterceptor.java:234` ⇒ `Math.min(serverBudgetMs, clientDeadlineRemainingMs())`；`:263` 调度器用 `effectiveTimeoutMs`；`:592-601` 从 `io.grpc.Context.current().getDeadline()` 取 | **L3 双侧活体**（`tools/semantic-probe/rpc-timeout/` **本轮实跑 EXIT=0**：`client_deadline_ctx` **一致** · `timeout_wire` 一致 · 3/3 一致） | 两侧都应是 **Y** = 「**有效期限 = min(客户端 deadline, 服务端 timeout)**」⇒ ✅ **这个 Y 已经达成** ⇒ ⛔ **请勿改 `RpcInterceptor` 的 deadline 计算**（会把对的改错 ⇒ 制造新漂移）<br>剩下**第②层**（`ServerCall#close()` 不取消业务线程 ⇒ 架构级 ⇒ Jason 2026-10-26 已拍板「**另立项**」）⇒ **不是本轮落码项** | `service/common` ⇒ 编译面 16 个组件 | 🟢 **不阻塞**（**本轮不落码**） |
 | **4** | `DRIFT-ADMINAPI-007` | 503 超时响应的 `Content-Type` **charset 分号后空格**残差（`nosniff` 已于 `HttpMiddleware.java:692` 落地 ⇒ **原条自动消失** ⇒ **需重开一条**） | `service/common/observability/http.go:88` ⇒ `http.Error(w, httpTimeoutBody, statusCode)`（Go 标准库 `net/http.Error` 的 5 件事：`text/plain; charset=utf-8` ＋ `nosniff` ＋ 状态码 ＋ 尾换行） | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java`（超时分支）＋ `http/GoStyleRouterErrorResponses.java` | **L1 源码**（⚠️ 响应头层须**真 Tomcat** 验 ⇒ MockMvc 测不到，见 `Pitfalls/common/http.md`） | 两侧都应是 **Y** = 「**503 的 `Content-Type` = `text/plain; charset=utf-8`（分号后**无**空格）**」⇒ 与 `DRIFT-MSGAPI-010` 同族（那条用户已拍板「保持登记，本轮不做」⇒ **本条要不要做请 G4 明确**） | `service/common` ⇒ 编译面 16 个组件 | 🟡 不阻塞 |
@@ -410,8 +410,8 @@ follow-api: Caused by: java.lang.IllegalStateException: Can't connect to channel
 //   · A 能看到 claim「userId」 ⇒ handler.Authorize 已经跑过（它把 claim 写进 ctx）
 //   · A 看不到 deadline、B 看得到 deadline（remaining≈3s）
 //     ⇒ 预算 ctx 是 observability 中间件自己建的（Go: http.go:53 context.WithTimeout）
-//     ⇒ 而该中间件在链上位于 Authorize **之后**（rest/engine.go:108 先 appendAuthHandler，
-//       :110-112 才 append ng.middlewares；rest/chain/chain.go:38-42 Append = 「追加到请求流最后」）
+//     ⇒ 而该中间件在链上位于 Authorize **之后**（go-zero@v1.10.2/rest/engine.go:108 先 appendAuthHandler，
+//       :110-112 才 append ng.middlewares；go-zero@v1.10.2/rest/chain/chain.go:38-42 Append = 「追加到请求流最后」）
 //     ⇒ ⇒ 验签在 3s 预算**之外**
 //
 //   · 非法 token ⇒ Authorize 直接 401（authhandler.go:56 → unauthorized()，body 为空）
@@ -524,7 +524,7 @@ Log:
   Encoding: plain
 
 # ⚠️ 刻意**不写** Timeout ⇒ 走 go-zero struct tag 的默认值 3000ms
-#    （rest/config.go:55 `Timeout int64 json:",default=3000"`）
+#    （go-zero@v1.10.2/rest/config.go:55 `Timeout int64 json:",default=3000"`）
 #    —— 与真源 api 的 etc/*.yaml 写法一致（真源也不写 Timeout）。
 ```
 
@@ -1154,6 +1154,73 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 
 ---
 
+## 23. 🆕 **路径限定规则**（2026-10-27 · G2 提醒 ＋ 本域全量落码）—— 库内路径必须带模块限定
+
+> **G2 的提醒**：users 域台账里裸写的 go-zero **库内**路径（如 `core/stores/redis/...`）会被读成「真源仓里的文件」⇒ ⇒ **真源仓根本没有 `core/` 目录**（本域实测 `ls $GO/core` = 不存在）⇒ ⇒ 建议改成**模块限定路径**。
+
+### 23.1 ✅ **判据（实测，不是推的）**
+
+⇒ **go-zero@v1.10.2 的顶层目录**（`/Users/pr/go/pkg/mod/github.com/zeromicro/go-zero@v1.10.2`）= **`core` `gateway` `internal` `mcp` `rest` `zrpc`**（+ 若干文件）。
+⇒ **真源仓（`Sea-RideTheWind_golang`）的顶层** = **只有 `service/`** ⇒ ⇒ `rest/` `zrpc/` `core/` `encoding/` `internal/` **在真源仓里都不存在**。
+⇒ ⇒ **判据**：凡路径首段 ∈ {`core` `rest` `zrpc` `gateway` `mcp`} 且**不在 `service/` 之下** ⇒ ⇒ **必是 go-zero 库内路径** ⇒ ⇒ 必须带 `go-zero@v1.10.2/` 前缀。
+
+### 23.2 ✅ **本轮落码：142 处 / 11 份文件 / 136 行**（纯替换，insertions = deletions）
+
+| 文件 | 处数 | 文件 | 处数 |
+|---|---|---|---|
+| `users/user/api.md` | 62 | `users/vs-common.md` | 8 |
+| `follow/api.md` | 18 | `users/_shared.md` | 7 |
+| `users/admin/api.md` | 16 | `users/user/rpc.md` | 5 |
+| `users/admin/rpc.md` | 13 | `follow/vs-common.md` | 4 |
+| `users/common.md` | 4 | `users/admin/_shared.md` | 1 |
+| `follow/rpc.md` | 4 | | |
+
+⇒ ⇒ 统一成 **`go-zero@v1.10.2/<path>`（斜杠式）** ⇒ ⇒ 与 global 台账的既有写法**逐条同形**（`docs/DRIFT/global/common-tails.md` · `cycle-deps.md` · `lanes/L5-signoff.md` 全用斜杠式）⇒ ⇒ **自检：0 处拼接残留**（`go-zero@v1.10.2/go-zero` 等四种畸形全 0 命中）。
+
+### 23.3 🔴 **刻意【不】改的三类（判据写死，防后人「顺手统一」误改）**
+
+| 类 | 处数 | 为什么不动 |
+|---|---|---|
+| **真源仓的 `internal/...`** | **63** | 真源仓结构 = `service/<域>/<组件>/internal/{logic,model,handler,types,config,svc,metrics,middleware,server}/...` ⇒ ⇒ 残留段的分布（`logic` 28 · `model` 10 · `types` 7 · `handler` 7 · `metrics` 3 · `config` 2 · `svc` 2 · `middleware` 2 · `server` 1）**全部是组件内路径** ⇒ ⇒ 台账语境已标明组件 ⇒ **不是「不知哪里的文件」** |
+| **Go 标准库 `encoding/json`** | 10 | **不是** go-zero 的（`encoding` 不在 go-zero 顶层目录清单里）⇒ ⇒ 加前缀是错的 |
+| **`breaker/latch`** | 1 | 是**概念描述**（「给 breaker/latch 的 map 设上限」）⇒ ⇒ **不是文件路径** |
+
+⚠️ **`internal/` 是唯一「真源仓与 go-zero 同名」的顶层目录** ⇒ ⇒ 所以它**不能机械替换**，必须逐处判 ⇒ ⇒ 本轮逐处判完（63 + 2 = 65 处）⇒ ⇒ 2 处 `internal/devserver/server.go` 判为 **go-zero**（真源仓**根本没有** devserver 目录 ⇒ 实测 `find $GO -type d -name devserver` = 零命中）⇒ ⇒ 已加前缀。
+
+### 23.4 🔴 **G2 的清单规模与我域差 13 倍（域内订正不能外推的又一例）**
+
+⇒ G2 列了 **11 处**（只覆盖 `admin/rpc.md` 5 ＋ `user/api.md` 3 ＋ `user/rpc.md` 3）⇒ ⇒ **本域实测 142 处**（含 **follow 域 26 处**，**它完全没提 follow**）⇒ ⇒ **规模差 ≈ 13 倍** ⇒ ⇒ **别把「我列了 11 处」当成「只有 11 处」**。
+
+### 23.5 🟡 **G2 引的「global 台账 E43/E46 的纪律」编号对不上**
+
+⇒ 实查 `docs/DRIFT/global/vs-common.md` ⇒ **E43/E46 是「漂移条目表」**（`E46 / E62` = 超时 deadline 与毫秒精度）⇒ ⇒ **不是**路径纪律条目。
+⇒ ⇒ **但纪律的【内容】成立**（global 的 `common-tails.md` / `cycle-deps.md` / `L5-signoff.md` 实际写法就是 `go-zero@v1.10.2/<path>` 斜杠式）⇒ ⇒ **我按【实际写法】办**（不按编号）⇒ ⇒ **已回问 G2 那个编号的真实出处**。
+
+---
+
+## 24. 🟢 **Redis 池形态自检**（G2 ② 的取值规则在我域 = **不适用** ⇒ 零动作）
+
+⇒ **我域 5 个用 Redis 的组件**（`user-api` · `admin-api` · `follow-api` · `user-rpc` · `admin-rpc`）逐个核：
+
+| 面 | 实测（5 个组件） | 结论 |
+|---|---|---|
+| `min-idle` / `max-idle` | **5/5 零配置** | ⇒ ⇒ G2 的「**若写了 `min-idle` ⇒ 应取 go-zero 的 8**（不是 4）」⇒ **在我域【不适用】**（我域压根没写）⇒ ⇒ **无动作** |
+| `pool.enabled` | **5/5 零配置** | ⇒ ⇒ Boot 4 判据 = `enabled != null ? enabled : COMMONS_POOL2_AVAILABLE`（**由 classpath 决定，不是只读 yml**） |
+| `commons-pool2` 依赖 | **5 个 `pom.xml` 全部零命中** | ⇒ ⇒ ⇒ **池形态 = 无池** ⇒ ⇒ 且**因为没写 `enabled: true`** ⇒ ⇒ **不会触发「缺 commons-pool2 ⇒ 启动期 `NoClassDefFoundError`」** ✅ |
+| **行为等价性** | Lettuce **无池时用 shared connection** ⇒ 连接**天然复用** | ⇒ ⇒ **与 go-zero 的 `MinIdleConns = 8` 池在「可观察行为」上等价**（差别只在连接数/性能）⇒ ⇒ **不是语义漂移** ⇒ ⇒ **零动作** |
+
+⇒ ⇒ **结论：G2 的取值规则（Go 侧有确切值 ⇒ 取 Go 的确切值）我域【用不上】**（我域没有对应的可配项）⇒ ⇒ **但 Boot 4「池形态由 classpath 决定」这条纪律我域已核（5/5）** ⇒ ⇒ **已登记**，将来若有人想加 `min-idle` ⇒ **必须同时查 pom 里的 `commons-pool2`**，否则「加一个依赖」就会**静默改变池形态**。
+
+---
+
+## 25. 🟢 **测试口径边界（G2 ③）**：我域**零产物层 IT** ⇒ `mvn test` 口径 == 全量口径
+
+⇒ `find service/users service/follow -name "*IT.java" -o -name "*ITCase.java"` ⇒ **0 命中** ⇒ ⇒ **我域无产物层 IT 类** ⇒ ⇒ ⇒ **`mvn test` 阶段跑的就是全部测试** ⇒ ⇒ **本域 667 条【无需】加「不含 IT」的边界说明**。
+⇒ ⇒ 且本域**已按 G2 建议的方式采信**（**maven 模块汇总行 == surefire XML 逐文件求和 == 667** ⇒ 两口径相等）⇒ ⇒ ✅ 符合。
+⇒ ⇒ 📌 **口径纪律的由来（G2 侧）**：产物层 IT 绑 surefire 的**第二个 execution**（`phase=verify`）⇒ ⇒ **`mvn test` 根本不跑它、报告目录里也没有它的 XML** ⇒ ⇒ **「目录求和 − N」里的 N 未必是 IT**（也可能是**守门类自己的用例**）⇒ ⇒ **跨轮比较条数前必须先核「被排除的是什么」**。
+
+---
+
 ## 14. 🆕 **守门卫生缺陷：「可达 ⇒ 能启动」用例的 3s 预算过紧 ⇒ 偶发红**（2026-10-27 · G1 lane）
 
 > **本节记的是本域自己的测试缺陷**（不是产品缺陷、也不是漂移）⇒ **落点全在 G1 写权内，已自修**。
@@ -1381,7 +1448,7 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 | `service/user/admin/api/etc/admincenter.yaml` | **0** | ✅ 同上 ⇒ **3s** |
 | `service/follow/api/etc/followcenter.yaml` | **0** | ✅ 同上 ⇒ **3s**（⚠️ 真实路径是 `service/follow/api/etc/followcenter.yaml`，**不是** `service/follow/follow/api/…`） |
 
-⇒ ⇒ **我域三份 api yaml 全部 0 个 `Timeout` 键** ⇒ ⇒ **零 `Timeout` 键 ≠ 无超时，而是走 struct tag 默认值**（默认值有行号可指 ⇒ 不是推测）⇒ ⇒ **我域 http = 3s、rpc = 2s**（`zrpc/config.go:31` `default=2000`）。
+⇒ ⇒ **我域三份 api yaml 全部 0 个 `Timeout` 键** ⇒ ⇒ **零 `Timeout` 键 ≠ 无超时，而是走 struct tag 默认值**（默认值有行号可指 ⇒ 不是推测）⇒ ⇒ **我域 http = 3s、rpc = 2s**（`go-zero@v1.10.2/zrpc/config.go:31` `default=2000`）。
 
 ### 18.5 🔴 **G4 第八次全量口径（取自 G4 自己台账 `23d1c2a`，非转述）＋ 🔴 实测：G4 的全量【不含 G1 提交】⇒ 不能当 G1 证据**
 

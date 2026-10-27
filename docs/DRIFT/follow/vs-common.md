@@ -23,7 +23,7 @@
 
 | 编号 | 摘要 | 落点 | 状态 | 域台账 |
 |---|---|---|---|---|
-| 🔴 `DRIFT-FOLLOW-008` | **MaxConns 闸门**：Go **每路由一个**（`rest/handler/maxconnshandler.go:12` 按 `route.Path` 建闸）vs RAG **全局一个** | `service/common`（`GoStyleMaxConnsFilter`） | 🔴 **未修**（域台账原文即写「派单」）⇒ **本 lane 的头号事项** | [`api.md`](api.md) |
+| 🔴 `DRIFT-FOLLOW-008` | **MaxConns 闸门**：Go **每路由一个**（`go-zero@v1.10.2/rest/handler/maxconnshandler.go:12` 按 `route.Path` 建闸）vs RAG **全局一个** | `service/common`（`GoStyleMaxConnsFilter`） | 🔴 **未修**（域台账原文即写「派单」）⇒ **本 lane 的头号事项** | [`api.md`](api.md) |
 | `DRIFT-FOLLOW-002` | 运行时 classpath 缺 `grpc-inprocess` ⇒ `NoClassDefFoundError` ⇒ 启动失败 | `service/common`（pom 作用域） | ✅ **已修** | [`rpc.md`](rpc.md) |
 | `DRIFT-HOTAPI-030` | Tomcat 参数个数口径 | `service/common`（X-6） | ✅ **已落地** | [`api.md`](api.md) |
 
@@ -101,7 +101,7 @@
 
 | # | 编号 | 现象 | Go 侧 `文件:行号`（**已核 ✅**） | RAG 侧现状 | 证据强度 | 建议修法（**两侧都应是 Y**） | 影响面 | 阻塞本波？ |
 |---|---|---|---|---|---|---|---|---|
-| **1** | `DRIFT-FOLLOW-008`（**与 users 侧 `DRIFT-USERAPI-013` 同族 ⇒ 两条一起对账，别各修各的**） | **MaxConns 闸门**：Go **每路由一个** latch（按 `route.Path` 建闸）vs RAG **全局一个** | `rest/handler/maxconnshandler.go:12` —— **已核 ✅**：逐字 = `func MaxConnsHandler(n int) func(http.Handler) http.Handler` | `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java`（**全局单闸门**） | **L1 源码逐行对照**（域台账原文）＋ 共享层台账 `alignment-2026-10-23.md` §十二·二 **T-2 / T-5**（两条指同一处） | 两侧都应是 **Y** = 「**每路由一个 latch**（按注册期 `route.Path` 模板建闸）」⇒ ⚠️ **404 取不到模板 ⇒ 不得用 raw URI 兜底** | `service/common/protection/` ⇒ 编译面 16 组件 | 🟡 **不阻塞**（与 users 侧 `DRIFT-USERAPI-013` 同批） |
+| **1** | `DRIFT-FOLLOW-008`（**与 users 侧 `DRIFT-USERAPI-013` 同族 ⇒ 两条一起对账，别各修各的**） | **MaxConns 闸门**：Go **每路由一个** latch（按 `route.Path` 建闸）vs RAG **全局一个** | `go-zero@v1.10.2/rest/handler/maxconnshandler.go:12` —— **已核 ✅**：逐字 = `func MaxConnsHandler(n int) func(http.Handler) http.Handler` | `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java`（**全局单闸门**） | **L1 源码逐行对照**（域台账原文）＋ 共享层台账 `alignment-2026-10-23.md` §十二·二 **T-2 / T-5**（两条指同一处） | 两侧都应是 **Y** = 「**每路由一个 latch**（按注册期 `route.Path` 模板建闸）」⇒ ⚠️ **404 取不到模板 ⇒ 不得用 raw URI 兜底** | `service/common/protection/` ⇒ 编译面 16 组件 | 🟡 **不阻塞**（与 users 侧 `DRIFT-USERAPI-013` 同批） |
 | **2** | 🆕 `PITFALL-FOLLOW-005`（**本轮新登记** · 域台账 [`../../Pitfalls/follow/rpc.md`](../../Pitfalls/follow/rpc.md) §PITFALL-FOLLOW-005 · **状态：🔴 未修，本轮已复核仍在**） | **共享层在纯 gRPC 进程里缺 servlet-api** ⇒ 进程**关闭路径**抛 `NoClassDefFoundError: jakarta/servlet/Filter`（污染关闭日志、掩盖真正的关闭原因） | **Go 侧无等价形态**（不是双向语义漂移，是 **RAG 共享层混装**）：`service/follow/rpc/follow.go:3-21` —— **已核 ✅**：import 清单里**零** `net/http` / servlet 类（`grep -rn "net/http\|servlet\|rest\." service/follow/rpc/` 零命中）＋ `:45` `defer s.Stop()` ⇒ Go 侧 rpc 进程的**关闭路径不加载任何 web 类型** | ① `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:8` `import jakarta.servlet.Filter;`（`:236` `newHttpMiddleware(...)` 返回 `Filter`）② `service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:54` `HttpMiddleware.shutdown();` ⇒ **该类在纯 gRPC 进程里的首次加载恰好落在 destroy 路径** ⇒ 抛 `NoClassDefFoundError` | **L1 源码逐行**（根因链已读通：import → 类加载 → destroy 触发）＋ 域台账既有活体症状（`Pitfalls/follow/rpc.md`） | 两侧都应是 **Y** = 「**关闭路径不得触发 web 类型的类加载**」⇒ ① HTTP 侧的池回收挪进**只在 servlet 进程存在**的 Bean（`@ConditionalOnWebApplication(type = SERVLET)`，与 `GoStyleTraceparentFilter` 同款），gRPC 进程只回收 `RpcInterceptor` 的池；② 或把 `HttpMiddleware` 的静态线程池提到**无 web 依赖**的独立类，`shutdown()` 不碰 `HttpMiddleware` 本身 | `service/common/{observability,spring}/` ⇒ 编译面 16 组件 · 受害面 = **所有纯 gRPC 进程**（follow-rpc / user-rpc / admin-rpc / like-rpc / …） | 🟡 **不阻塞**（只污染关闭日志，不影响启动与业务） |
 
 > ⚠️ **派单纪律**：① **缺项不进排期** ② **编号必须带全前缀** ③ **同族 ≠ 同一条**（本条与 users 侧那条编号不同）
@@ -143,7 +143,7 @@
 
 | 编号 | 摘要 | 落点 | 归属 | 状态（2026-10-27 核） |
 |---|---|---|---|---|
-| `DRIFT-FOLLOW-008` | **MaxConns 闸门**：Go **每路由一个**（`rest/handler/maxconnshandler.go:12` 按 `route.Path` 建闸）vs RAG **全局一个** | `service/common`（`GoStyleMaxConnsFilter`） | 🔴 **G4** | 🔴 未修 · **与 users 侧 `DRIFT-USERAPI-013` 同族 ⇒ 两条一起对账，别各修各的** |
+| `DRIFT-FOLLOW-008` | **MaxConns 闸门**：Go **每路由一个**（`go-zero@v1.10.2/rest/handler/maxconnshandler.go:12` 按 `route.Path` 建闸）vs RAG **全局一个** | `service/common`（`GoStyleMaxConnsFilter`） | 🔴 **G4** | 🔴 未修 · **与 users 侧 `DRIFT-USERAPI-013` 同族 ⇒ 两条一起对账，别各修各的** |
 | 🆕 `PITFALL-FOLLOW-005` | 共享层在**纯 gRPC 进程**里缺 servlet-api ⇒ **关闭路径**抛 `NoClassDefFoundError: jakarta/servlet/Filter` | `service/common`（`HttpMiddleware` + `ObservabilityLifecycle`） | 🔴 **G4** | 🔴 未修 · **本轮已复核仍在**（`HttpMiddleware.java:8` import ＋ `ObservabilityLifecycle.java:54` destroy 触发）⇒ **受害面 = 所有纯 gRPC 进程**，不只 follow |
 | 🆕 **Redis 断连行为（`REJECT_COMMANDS`）的共享层收编** | **五个**用 Redis 的组件的 Lettuce **断连**行为必须 `REJECT_COMMANDS`（否则命令被排队挂到 `commandTimeout` 3s ⇒ **api 侧**撞 HTTP 预算 ⇒ **503**（Go 是 fail-open **200**）；**rpc 侧**撞 `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ 客户端看到 **1015**（Go 是**快速失败** ⇒ `INTERNAL「注销失败,Redis写入异常」`）） | 🟢 **域侧已自修**（**本域**：`config/RedisDisconnectedBehaviorConfig`）<br>🔴 **共享层收编** = 把**五份**域内副本（3 api ＋ **2 rpc**：`user-rpc` / `admin-rpc`，2026-10-27 本轮补）并成一个 `service/common` 自动配置 | 🟢 **域侧**（已完成）<br>🔴 **G4**（**收编**） | 🟢 **域侧已闭环**（2026-10-27 · `DRIFT-FOLLOW-012` · 修前 **3012ms** ⇒ 修后 **0ms** · 变异 2/2 变红）<br>🟢 **共享层已落码**（G4 commit `1fb26b2` ＋ `2f12236` · `GoStyleRedisClientAutoConfiguration` 走 `AutoConfiguration.imports`）⇒ **待 G4 分支合入本树后，删除这五份域内副本**（`user-api` / `admin-api` / `follow-api` / `user-rpc` / `admin-rpc`）⇒ **删除前置 ＝ 共享层那份先合进各域的树**（否则双份配置 ⇒ 两处都要维护）<br>🔴 **2026-10-27 升级危害等级**（据 G3 提供的信息）：G4 那份的 customizer 带 **`@ConditionalOnMissingBean`** ⇒ **域内副本在 ⇒ 共享层那份整个不创建** ⇒ ⇒ **不删副本 ⇒ 收编根本没发生**，且**共享层后续改动对本域静默不生效** ⇒ ⇒ **删除动作是收编的「必要条件」而非「收尾清理」** ⇒ 收编完成时必须**复验**共享层那份是否真的生效。<br>⚠️ **rpc 侧与 api 侧后果不同**（503 vs RPC 撞超时）⇒ 收编时**不要只按 api 侧的现象判「已修」** |
 
@@ -195,7 +195,7 @@
 > ✅ **状态：阶段 2 已修（2026-10-27）** ⇒ 修法与 A/B/C 真启动证据见 §7.5。**本节保留修前的原始取证。**
 
 - **Go**：`service/follow/api/internal/svc/servicecontext.go:27` ⇒ `followservice.NewFollowService(zrpc.MustNewClient(c.FollowRpc))`
-  ⇒ go-zero v1.10.2 `zrpc/client.go:50-54` `logx.Must(err)` ⇒ **失败即 panic ⇒ 进程起不来**；`zrpc/internal/client.go:18` `dialTimeout = 3s`
+  ⇒ go-zero v1.10.2 `zrpc/client.go:50-54` `logx.Must(err)` ⇒ **失败即 panic ⇒ 进程起不来**；`go-zero@v1.10.2/zrpc/internal/client.go:18` `dialTimeout = 3s`
 - **RAG**：`follow-api` 的 `grpc.client.follow-rpc` **没有** `immediate-connect-timeout`
   ⇒ 对照：`admin-api` **有**（`application.yml:120`，`DRIFT-ADMINAPI-009` 已修）⇒ **同一 Go 语义，RAG 三个 api 里只对齐了一个**
 
@@ -486,3 +486,15 @@ installed_rank | version |      description       | success
 ⇒ ⇒ ⚠️ **但本域台账里有一处**（`docs/DRIFT/follow/**` 本身）—— 属**我域写权面** ⇒ 本轮已随 users 侧 §20 一并核对：**我域台账里的 U+FFFD 全是「故意引述」**（引用被测对象 / 记录不可恢复的末字）⇒ ⇒ **不动**。
 ⇒ ⇒ 📌 **合并取版本的清单**（G1 贡献 3 份）见 [`users/vs-common.md` §20.2](../users/vs-common.md) ⇒ ⇒ **G2 的清单只覆盖它自己的 3 份 ⇒ 我域那 3 份此前不在任何人的清单里 ⇒ 本轮主动补进**（否则合并按主干取 ⇒ 我域坏字符回流）。
 ⇒ ⇒ ⚠️ **判据纪律**：复扫要比「**文件清单**」而不是「**命中份数**」—— 实测我树与主干的命中份数**都是 20**，但构成完全不同（我域 3 处真损坏已清零、另 3 份台账的故意引述却只在我树有）⇒ ⇒ **份数相同 ≠ 同一批文件**。
+
+### 11.11 🟢 **路径限定规则 + 池形态 + 口径边界（2026-10-27 · G2 提醒）** —— follow 域那 26 处已一并落码
+
+> 完整记录在 users 侧 ⇒ [`users/vs-common.md` §23~§25](../users/vs-common.md)。
+
+① ✅ **路径限定已完成**：follow 域台账里 **26 处**裸写的 go-zero 库内路径已改成 **`go-zero@v1.10.2/<path>`**（`follow/api.md` 18 · `follow/rpc.md` 4 · `follow/vs-common.md` 4）⇒ ⇒ **判据** = go-zero 顶层目录 = `core`/`gateway`/`internal`/`mcp`/`rest`/`zrpc`，而**真源仓顶层只有 `service/`** ⇒ ⇒ 凡不以 `service/` 开头的这些路径 ⇒ **必是库内路径**。
+⇒ ⇒ **刻意不动**：真源仓的 `internal/...`（组件内路径 · 语境已含组件）· Go 标准库 `encoding/json` · `breaker/latch`（概念描述，非路径）⇒ ⇒ **三类判据已写进 users 侧 §23.3，防后人「顺手统一」误改**。
+
+② 🟢 **池形态自检**：`follow-api` **零 `min-idle`** ⇒ ⇒ G2 的「`min-idle` 应取 go-zero 的 8」**在 follow 域不适用**；**零 `pool.enabled`** ＋ **pom 里零 `commons-pool2`** ⇒ ⇒ **池形态 = 无池** ⇒ ⇒ **不会**触发「`enabled: true` + 缺 commons-pool2 ⇒ 启动期 `NoClassDefFoundError`」⇒ ⇒ **零动作**。
+⇒ ⇒ 📌 **将来若给 follow-api 加 `min-idle`，必须同时查 pom 的 `commons-pool2`**（Boot 4 的 `Pool.enabled` 由 classpath 决定 ⇒ 加/减一个依赖 ⇒ 池形态**静默变化**）。
+
+③ 🟢 **口径边界**：follow 域**零产物层 IT** ⇒ ⇒ **`mvn test` 口径 == 全量口径** ⇒ ⇒ 本域 68 条**无需**加「不含 IT」的边界说明 ⇒ ⇒ 且已按「maven 模块汇总行 == surefire XML 逐文件求和」双口径相等采信 ✅。

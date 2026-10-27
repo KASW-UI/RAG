@@ -18,7 +18,7 @@
 | 组件 | `service/users/users-common`（12 个 main 类 + 4 份 DDL + 2 个测试类，1,532 行） |
 | Go 对照面 | `service/user/common/{cryptx/password.go, errmsg/errmsg.go, jwt/jwt.go}`（**全部 3 个文件，无遗漏**） |
 | **证据强度** | ✅ **双侧活体对拍**（Go 进程 ↔ JVM 进程，逐条逐字节比对；非静态源码、非单侧推断） |
-| Go 侧探针 | `/tmp/commonprobe/go/`（`errmsg`/`jwt`/`cryptx` 72 行）、`go3/`（bearer/`core/mapping` 46 行）、`xverify/`（交叉验签）、`alcheck/`（alg 固定消费者） |
+| Go 侧探针 | `/tmp/commonprobe/go/`（`errmsg`/`jwt`/`cryptx` 72 行）、`go3/`（bearer/`go-zero@v1.10.2/core/mapping` 46 行）、`xverify/`（交叉验签）、`alcheck/`（alg 固定消费者） |
 | RAG 侧探针 | `/tmp/commonprobe/CommonProbe.java`（**调用 `users-common` 的真实类**，无重写）、`XVerify.java`、`SigDebug.java` |
 | 冻结仓完整性 | `go.mod` 用 `replace` 指令**只读引用**真源包；跑完 `git status` 与探针前完全一致（仅 2 个先前存在的未跟踪文件） |
 | 依赖版本 | Go：`golang-jwt/jwt/v4@v4.5.2`、`go-zero@v1.10.2`、`x/crypto@v0.53.0`、Go 1.25.11<br>Java：**jjwt 0.12.6**、`spring-security-crypto 7.0.7`、JDK 21 |
@@ -47,7 +47,7 @@
 | 超集部分 | — | `http/*`（go-zero `core/mapping` 的 Java 等价物）、`ddl/*`（GORM `AutoMigrate` 的等价物）**Go 侧没有同名包**，对照面在 go-zero 与 gorm 的库代码 |
 
 > ⚠️ **`http/*` 与 `ddl/*` 的 Go 对照面不在 `service/user/common`**，而在 go-zero / gorm 的**库源码**。
-> 本轮对这两组的取证走的是「**直接调用库的真源函数**」（`core/mapping.UnmarshalJsonMap`、
+> 本轮对这两组的取证走的是「**直接调用库的真源函数**」（`go-zero@v1.10.2/core/mapping.UnmarshalJsonMap`、
 > `gorm` 的建表），不是抄源码重跑 —— 见 §3 的 `MAPPING-01` / `BEARER-01`。
 
 ---
@@ -397,8 +397,8 @@ primitive 层差异（双侧活体）：
 |---|---|---|---|
 | `errmsg` 其余 37 个码（含 200/500/1015/5001-5010/1001-1012/1016/3001-3003 与 7 个未定义码的回落） | 37 | ✅ **逐条逐字节相同**，含未知码回落 `"FAIL"` | 双侧活体 |
 | `BearerTokenExtractor` 两套取法 | 22 | ✅ **11 个输入 × 2 方法全一致**。含易错的 4 个边界：`XXBearer ` **不剥离**（验签路径）、`Bearer `(7 字符) **剥成空串**、`Bearer`(6 字符) **不剥**、`bearer ` 在黑名单路径**不剥**（大小写不对称被完整保留） | 双侧活体（Go 侧用 `golang-jwt` 真 `AuthorizationHeaderExtractor` + `strings.TrimPrefix`） |
-| `GoStyleStringInt64` | 17 | ✅ **17/17 一致**。含 `1.0` 与 `1e2` 被拒（Go `strconv.ParseInt` 对字面量 `"1.0"`/`"1e2"` 失败）、`+123` 被接受、`±2^63` 边界（`Long.MIN_VALUE` 合法 / `2^63` 越界）判定一致 | 双侧活体（Go 侧用真 `core/mapping.UnmarshalJsonMap` + `json:",string"` struct tag） |
-| `GoStyleRequired` 两条文案 | 4 | ✅ 一致。`field(x, null)` → `is not set`；空串**不报错**；`explicitNull(x, present=true, null)` → `mustn't be nil`；`present=false` **不报错** | 双侧活体（Go 侧用真 `core/mapping` 的缺席 / 显式 null / 空串三态） |
+| `GoStyleStringInt64` | 17 | ✅ **17/17 一致**。含 `1.0` 与 `1e2` 被拒（Go `strconv.ParseInt` 对字面量 `"1.0"`/`"1e2"` 失败）、`+123` 被接受、`±2^63` 边界（`Long.MIN_VALUE` 合法 / `2^63` 越界）判定一致 | 双侧活体（Go 侧用真 `go-zero@v1.10.2/core/mapping.UnmarshalJsonMap` + `json:",string"` struct tag） |
+| `GoStyleRequired` 两条文案 | 4 | ✅ 一致。`field(x, null)` → `is not set`；空串**不报错**；`explicitNull(x, present=true, null)` → `mustn't be nil`；`present=false` **不报错** | 双侧活体（Go 侧用真 `go-zero@v1.10.2/core/mapping` 的缺席 / 显式 null / 空串三态） |
 | `cryptx` 判定谱其余 15 项 | 15 | ✅ 一致：匹配/不匹配/双空串/非 bcrypt/截断 hash/`$2b$`/`$2y$`/cost 越界/cost=0/null 字节/72 与 73 字节明文/unicode 明文 | 双侧活体 |
 | `cryptx` 产出形状 | 1 | ✅ 两侧 `$2a$10$` + 60 字节（cost 10 一致） | 双侧活体 |
 | 交叉验签（≤64 字节全档） | 12 | ✅ 全通 | 双侧活体 |

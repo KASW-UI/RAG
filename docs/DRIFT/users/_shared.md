@@ -118,7 +118,7 @@ expected: <field "username" is not set
 > N-1 是「引用了不存在的机制」，DRIFT-009 是「**引用了真实文件、但把 chain 的内外关系读反了**」。
 > 原 javadoc 写「WithJwt 追加到切片尾部 ⇒ 黑名单是外层、先执行」——
 > `Append` 到尾部确实是 chain 里最内层，但**黑名单根本不在 chain 里**：
-> `rest/server.go:222-233` `WithMiddleware` 在**构造期**就把 `route.Handler` 包成
+> `go-zero@v1.10.2/rest/server.go:222-233` `WithMiddleware` 在**构造期**就把 `route.Handler` 包成
 > `middleware(route.Handler)`，它是 `ThenFunc` 的**参数**，比 chain 任何元素都靠内。
 > **假出处比无出处更贵**：无出处时 review 会去查；假出处会让 review 直接采信一个方向相反的结论。
 >
@@ -296,7 +296,7 @@ B 支报 `expected ALREADY_EXISTS but was INTERNAL`、C 支报 `expected PERMISS
 | **DRIFT-NEW-014 修法** | — | `user-api/application.yml` 补 `negotiation-type: plaintext`（含字节码级出处注释）。回归网 `UserApiGrpcNegotiationTest`（3 条）：把 `grpc.client.user-rpc.address` 覆盖成 `static://127.0.0.1:<动态端口>`，起一个**真 plaintext gRPC server**，用容器里**真实的** `UserRpcClient` 打一次**真实调用** —— 走的是 devh `ShadedNettyChannelFactory` 的生产代码路径，不是测试里写死 plaintext。外加一条 **TLS 负向对照**（同一个 server 用 TLS 连必须失败），保证正向用例不是假绿。**已实证能真红**：临时删掉那行配置后，该用例报 `NotSslRecordException: not an SSL/TLS record`、pipeline 里出现 `SslHandler` —— 正是生产上 `HTTP/2 client preface string missing` 的镜像（同根因、客户端侧视角） |
 | **DRIFT-NEW-015** | **P0 · 结构性缺陷 · 已修（2026-10-21，用户拍板去掉 Flyway）** | **Flyway 版本号撞车 ⇒ `admin-rpc` 根本无法启动。** 两个模块各自维护 `classpath:db/migration`，`V1/V2` **版本号相同、内容不同**：`user-rpc` = `V1__create_user` / `V2__create_user_avatar_history`；`admin-rpc` = `V1__create_admin` / `V2__create_admin_invite` / `V3__create_user`。`flyway_schema_history` 挂在 schema 上、**一个 schema 只能有一本账**，共用库时后启动的要么报 `version (3) is newer than the latest available migration (2)` 并**静默跳过自己的迁移**（进程照样 Started，表却是空的），要么 checksum mismatch 直接启动失败 | 而 `admin-rpc` **按设计必须**与 `user-rpc` 共用 `users_user` —— 这是它自己 `V3__create_user.sql` 的注释写明的（「admin-rpc 也读写 users_user 表……用 `IF NOT EXISTS 保证幂等：user-rpc 启动时已经建过表」）。⇒ **要满足设计意图就必须共用库，共用库就撞账本，无解**。§4.1 早就警告过这点，现在有实证了 |
 | **DRIFT-NEW-015 修法** | — | **去掉 Flyway，改为幂等重放 DDL**：4 份 DDL 收归 `users-common/src/main/resources/db/*.sql`，由各 rpc 的 `bootstrap/*SchemaBootstrap` 在 `@PostConstruct` 调 `SchemaInitializer` 原样重放；两个 rpc 的 flyway 三件套依赖全删；`AdminSeederBootstrap` 补显式 `@DependsOn`。详见下方「已定案」小节 |
-| **DRIFT-NEW-016** | P0 · 语义差异 · **已修（2026-10-21，用户拍板「向 Go 对齐」）** | **Go 有必填字段校验，RAG 没有。** go-zero 的 `httpx.Parse` 走 `core/mapping`，只认 `,optional` 标签，**`,omitempty` 不算 optional**（`unmarshaler.go:966-969` 走 `!opts.optional()` 分支直接 `newInitError`）。缺字段 ⇒ `HTTP 400 + text/plain + field "xxx" is not set` | 取证脚本 `tools/difftest/probe-go-required-fields.py`（真 Go 进程，2026-10-21）。修法与完整规则见下方「DRIFT-NEW-016 的处置」小节 |
+| **DRIFT-NEW-016** | P0 · 语义差异 · **已修（2026-10-21，用户拍板「向 Go 对齐」）** | **Go 有必填字段校验，RAG 没有。** go-zero 的 `httpx.Parse` 走 `go-zero@v1.10.2/core/mapping`，只认 `,optional` 标签，**`,omitempty` 不算 optional**（`unmarshaler.go:966-969` 走 `!opts.optional()` 分支直接 `newInitError`）。缺字段 ⇒ `HTTP 400 + text/plain + field "xxx" is not set` | 取证脚本 `tools/difftest/probe-go-required-fields.py`（真 Go 进程，2026-10-21）。修法与完整规则见下方「DRIFT-NEW-016 的处置」小节 |
 | **DRIFT-NEW-016 修法** | — | **新增 `users-common/http/` 四件套**（`GoStyleRequiredFields` 接口 / `GoRequiredFieldException` / `GoStyleRequired.field()` / `GoStyleRequest.normalize()`），14 个 DTO 显式实现必填校验、14 个 controller 端点走 `GoStyleRequest.normalize`，两份 `GlobalExceptionHandler` 各加一个 `@ExceptionHandler(GoRequiredFieldException)` → 复用既有 `goStylePlainTextBadRequest`。**同时推翻了 `UserController` / `AdminController` 类级 javadoc 里的「空 body 是 no-op、不报错」这条错误论证**（详见下方小节） |
 
 > **为什么 DRIFT-NEW-015 至今没被发现**：RAG 的 `docker-compose.yaml` 里**只有
@@ -393,7 +393,7 @@ log 与 OTel span。理由是 §1「行为以 Go 为准、表达以 Spring 为�
 >
 > 原文写：「空 body ⇒ `withJsonBody` 为 false ⇒ `ParseJsonBody` 走
 > `mapping.UnmarshalJsonMap(nil, v)` ⇒ **对 struct 是 no-op、不报错**」。
-> **前半句对，后半句错**：`core/mapping/jsonunmarshaler.go:19-21` 的
+> **前半句对，后半句错**：`go-zero@v1.10.2/core/mapping/jsonunmarshaler.go:19-21` 的
 > `UnmarshalJsonMap(m map[string]any, v any)` 收的是**有类型的 nil map**，
 > 传进 `Unmarshal(i any, ...)` 后在 `unmarshaler.go:988` 的 type switch 里
 > **命中 `case map[string]any`**（不会落到 `default` 的 `errUnsupportedType`），
@@ -430,7 +430,7 @@ log 与 OTel span。理由是 §1「行为以 Go 为准、表达以 Spring 为�
 > `#nonNumericUidIsRejectedByJacksonNotByRequiredCheck`。
 
 > **残留的已知差异（不修，留档）**：`GetUserListReq.keyword` 在 Go 侧走 **form 通道**，
-> 而 `rest/httpx/util.go:37-43` 的 `GetFormValues` 会把空值（`len(v) == 0`）整个丢弃，
+> 而 `go-zero@v1.10.2/rest/httpx/util.go:37-43` 的 `GetFormValues` 会把空值（`len(v) == 0`）整个丢弃，
 > 于是 `keyword=` 退化成「缺席」⇒ 400；RAG 的 keyword 在 JSON body 里，`keyword=""`
 > 会被**接受**。两边是否 400 取决于传输通道，而传输通道差异是 §3.4.1 已签字的 wire 契约偏离。
 > **刻意不为单个字段引入第二套空串规则** —— DRIFT-010 的教训是
@@ -559,8 +559,8 @@ admin-rpc 启动失败：relation "admin_admin" does not exist
 更是整条 DSN 都用 `${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_ADDR}:...`。
 但四个入口都是 `conf.MustLoad(*configFile, &c)`（`user/rpc/user.go:29`、
 `admin/rpc/admin.go:30` 等），**没有传 `conf.UseEnv()`**；
-而 go-zero v1.10.2 只在 `opt.env` 为真时才展开（`core/conf/config.go:62-63`
-的 `os.ExpandEnv`、`core/conf/properties.go:58-59` 同理）。
+而 go-zero v1.10.2 只在 `opt.env` 为真时才展开（`go-zero@v1.10.2/core/conf/config.go:62-63`
+的 `os.ExpandEnv`、`go-zero@v1.10.2/core/conf/properties.go:58-59` 同理）。
 
 ⇒ **这些占位符不会被展开**，密码会被当成字面量字符串 `${POSTGRES_PASSWORD}`，
 SASL 认证必然失败。真源已冻结（§2 不接受写入），**只在 `tools/difftest/conf/go/*.yaml`
@@ -1055,7 +1055,7 @@ AGENTS.md §9 / §8 / §0 三处都写着「**过期状态必须随实测同步�
 | 跨仓同名（`config.go:55` 在真源与模块缓存都有） | ~60 | **行号可能指错文件**的风险提示 | 不改，但**人读时必须确认是哪一份** |
 | 临时探针 `tmp/userprobe/*` | 2 | **不可复现** | 不改（本就不在仓内） |
 
-⚠️ 跨仓同名这条**值得单列**：本仓的 Go 引用大量形如 `rest/config.go:55`（go-zero 模块内）
+⚠️ 跨仓同名这条**值得单列**：本仓的 Go 引用大量形如 `go-zero@v1.10.2/rest/config.go:55`（go-zero 模块内）
 与 `db.go:21`（真源仓内）—— **同名不同仓** ⇒ 脚本能验「行号在范围内」，
 但**验不出「引的是哪一份」** ⇒ 这一类**仍需人工判读**，不能拿脚本的 OK 当结论。
 
