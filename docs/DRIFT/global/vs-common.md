@@ -818,7 +818,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | ③ | G2 的 FB-02 对拍脚本（「域的 Go handler 是否调 `httpx.Parse`」× 「该域 yaml 的 mode」） | `tools/difftest/**` = **共享面** | —— （G2 已自陈落点并要求「只登记」） | **只记账** |
 | ④ | 各域台账 / `AGENTS.md` 里「**E38② 未闭合 / ① 不销本条**」的措辞**已过期** ⇒ 应读作「**① 已闭环、② 未做且已另立项**」 | 各域台账 = **域侧写权**；`AGENTS.md` = 整合者 | ✅ 成立（§1.1 重核：① 已由双侧探针坐实） | **只记账**（已在 §1.1 就地订正本 lane 自己的表） |
 | ⑤ | `docs/DRIFT/_cross/domain-common-lanes.md:125`（`DRIFT-FOLLOW-008` 仍写「未修」） | `docs/DRIFT/_cross/**` = **整合者专属** | —— | **只记账** |
-| ⑥ | **UTF-8 替换字符（U+FFFD）**：`tools/errmsg-probe/README.md:59`（`未登记码的回〈FFFD×3〉结果`）· `tools/sql-statement-probe/favorite/compare.py:561`（`两侧都〈FFFD×3〉 / 两侧都没有`） | `tools/errmsg-probe/**` · `tools/sql-statement-probe/**` = **既非整合者专属（≠ `tools/difftest/**`）· 也非任何 lane 的写权面** ⇒ **无人拥有** | ✅ **成立**（G3 于 2026-10-27 的 U+FFFD 全仓扫描报出；**本层已用字节级扫描复核**：`grep -rn $'\xef\xbf\xbd'` 会因 shell 转义而**漏报** ⇒ 一律以 python 字节扫描为准）<br>⚠️ 建议字**由 owner 自核**（本层只登记，不代改） | **只记账**（无人拥有 ⇒ 交整合者） |
+| ⑥ | **UTF-8 替换字符（U+FFFD）**：🆕 **「无人拥有」实为 4 处** —— `tools/errmsg-probe/README.md:59`（`未登记码的回〈FFFD×3〉结果`）· `tools/sql-statement-probe/favorite/compare.py:561`（`两侧都〈FFFD×3〉 / 两侧都没有`）· `docs/Pitfalls/message/rpc.md`（2 处）· `docs/Pitfalls/users/user/rpc.md`（1 处） | 前两处：`tools/errmsg-probe/**` · `tools/sql-statement-probe/**` = **既非整合者专属（≠ `tools/difftest/**`）· 也非任何 lane 的写权面** ⇒ **无人拥有**<br>后两处：**内容**分别属 message / users 域，但 `docs/Pitfalls/**` **不在 G2 的机器白名单** ⇒ ⇒ G2 明确表示「我不能改 ⇒ 请整合者定归属」⇒ ⇒ **同样按「无人拥有」记账**（**归属待整合者定**，本层不代改） | ✅ **成立**（G3 于 2026-10-27 的 U+FFFD 全仓扫描报出；**本层已用字节级扫描复核**：`grep -rn $'\xef\xbf\xbd'` 会因 shell 转义而**漏报** ⇒ 一律以 python 字节扫描为准）<br>🆕 **G2 的清单对账（§4.10.23.5）**：G2 那份列 **17** 个文件 ⇒ **本层 12:16 实测 18 个** ⇒ 差 1 = **G2 漏了** `tools/sql-statement-probe/favorite/compare.py` ⇒ ⇒ **补全后两套清单完全一致** ⇒ ⇒ **数字互证**<br>⚠️ 建议字**由 owner 自核**（本层只登记，不代改） | **只记账**（无人拥有 ⇒ 交整合者） |
 | ⑦ | 🔴 **`AGENTS.md` 体量已到预算上限**：`tools/check-agents-budget.py` ⇒ **32,686 B / 326 行 = 99.7% · 余量仅 82 B** ⇒ 「下一次写修复记录就会顶破」 | `AGENTS.md` = **整合者专属** | ✅ **成立**（本轮实测 `EXIT=0`，但工具自己已打出告警行）<br>⚠️ 本层**未改** `AGENTS.md`（不在写权面）⇒ 只登记 | **只记账**（整合者需按该工具提示把逐条记录搬去 `docs/DRIFT/_cross/`） |
 
 > ⚠️ **本 lane 的写权边界**：以上 **7** 条**没有一条**落在 `service/common/**` / `service/users/users-common/**` / 本文件
@@ -1105,15 +1105,19 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 
 ##### 4.10.16.1 槽位权威表（**共享层真源 = 本层树**，2026-10-27 实测）
 
-| 槽位 | Filter | 落点（`文件:行号`） |
+| 槽位 | Filter | 落点（`文件:行号`）＝ **`@Order` 注解行**（值真正所在的那行） |
 |---|---|---|
-| **+2** | `GoStylePathNormalizingFilter` | `service/common/src/main/java/com/rag/common/http/GoStylePathNormalizingFilter.java:16` |
-| **+3** | `GoStyleTraceparentFilter` | `…/http/GoStyleTraceparentFilter.java:32` |
-| **+4** | `GoStyleMaxConnsFilter` | `…/protection/GoStyleMaxConnsFilter.java:20` |
-| **+5** | `GoStyleBreakerFilter` | `…/protection/GoStyleBreakerFilter.java:22` |
-| **+6** | `GoStyleCpuSheddingFilter` | `…/protection/GoStyleCpuSheddingFilter.java:19` |
-| **+7** | `HttpMiddlewareFilter`（**3s 预算起点**） | `…/spring/HttpMiddlewareFilter.java:20` |
-| **+8** | `GoStyleMaxBytesFilter` | `…/protection/GoStyleMaxBytesFilter.java:19` |
+| **+2** | `GoStylePathNormalizingFilter` | `service/common/src/main/java/com/rag/common/http/GoStylePathNormalizingFilter.java:70` |
+| **+3** | `GoStyleTraceparentFilter` | `…/http/GoStyleTraceparentFilter.java:190` |
+| **+4** | `GoStyleMaxConnsFilter` | `…/protection/GoStyleMaxConnsFilter.java:96` |
+| **+5** | `GoStyleBreakerFilter` | `…/protection/GoStyleBreakerFilter.java:87` |
+| **+6** | `GoStyleCpuSheddingFilter` | `…/protection/GoStyleCpuSheddingFilter.java:63` |
+| **+7** | `HttpMiddlewareFilter`（**3s 预算起点**） | `…/spring/HttpMiddlewareFilter.java:37` |
+| **+8** | `GoStyleMaxBytesFilter` | `…/protection/GoStyleMaxBytesFilter.java:83` |
+
+> 🆕 **行号精度订正（2026-10-27）** —— 本表原写的 7 个行号（`PathNormalizing:16` / `Traceparent:32` / `MaxConns:20` / `Breaker:22` / `CpuShedding:19` / `HttpMiddleware:20` / `MaxBytes:19`）**全部落在 javadoc 注释行**，不是 `@Order` 注解行 ⇒ ⇒ **点不出那个槽位值** ⇒ ⇒ 与 AGENTS.md §3.3.1「行号指向**消费点**而非**声明点**」相悖 ⇒ ⇒ **已订正为 `@Order` 注解行**（上表）。
+> ⇒ ⇒ **内部不自洽是发现它的原因**：§4.10.12 里同一批槽位写的是**对的**行号（`PathNormalizing.java:70`）⇒ ⇒ 两处对不上才暴露出来 ⇒ ⇒ **「同一事实的两处记录不一致」是一条便宜的自查信号**。
+> ⇒ ⇒ ⚠️ **这不影响任何结论**（7 档槽位值本身没变 ⇒ 快照守门 §4.10.12 / §4.10.21 的断言依旧成立）⇒ ⇒ **只订正引用精度，不改结论**。
 
 ⚠️ **实测方式**：`@Order(Ordered.HIGHEST_PRECEDENCE + N)` **不是**单 token ⇒ 必须**剥注释后解析完整表达式并求值**（单 token 正则会只捞到 `LOWEST_PRECEDENCE` 那一个 ⇒ 清单类结论不得用 grep 命中数）。
 ⚠️ **G1 报的是 6 档（无 +2）⇒ 不是谁错，是两棵树的共享层版本不同**：`+2` 那条落在 **`9690b04`（G2 FB-01 · A3，共享层）** ⇒ ⇒ **G1 树里还没有它**（实测：`ls` ⇒ no such file）⇒ ⇒ **合并后是 7 档**。
@@ -1400,6 +1404,73 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | **台账三门禁** | `check-ledger-tables` **EXIT=0** · `check-ledger-selfcheck` **EXIT=0** · `check-ledger-count` **EXIT=0** |
 | **大回归窗口协调** | 起跑前 `ps` 实测 **0 个 maven**；`session send` 告知 G2（12:16）⇒ ⇒ **G2 明确让出整个窗口**，并用 `ps` 复核「**唯一占用者是 G4**」⇒ ⇒ 本轮**独占窗口 12:12:35 → 12:34:45** ⇒ ⇒ **零并发** ⇒ ⇒ 无 EXIT=137（OOM-kill）风险 |
 | **写权自证** | 本轮改动**全部**落在 `service/common/**`（**仅** `src/test/java/**`）＋ `docs/DRIFT/global/vs-common.md` ⇒ ⇒ **零域侧改动 / 零生产代码改动** |
+
+#### 4.10.23 🟢 **G2 的回执处理（2026-10-27 12:4x）—— 三条订正 ＋ 一张假转派单**
+
+> **来源**：G2 主动来信 7 条 —— ① 核实本层两条共享层变更「零域侧动作」· ② 报告**本层的 FB-01/02/03 回执没投递到它队列** · ③ 报告本轮落码（009② for like/message）· ④ **一张跨 lane 转派单**（009② 也波及 G3 三域）· ⑤ 跨 lane U+FFFD 损坏清单 · ⑥ 一条共享层槽位事实订正 · ⑦ 两条域内自登记。
+> ⇒ ⇒ **本节只登记 + 订正 + 转发**；**本轮本层零落码**（写权面无任何代码改动）。
+
+##### 4.10.23.1 ① 本层两条共享层变更：G2 **实测**确认「零域侧动作」
+
+| 变更 | G2 的核实方式 | 结论 |
+|---|---|---|
+| Redis 断连即拒单（`1fb26b2`） | 三域**无生产侧** `ClientOptions` / `LettuceClientOptions` / `disconnectedBehavior` 自定义 ⇒ 只命中 **task-rpc 的 2 个测试类**里手工 `new LettuceConnectionFactory(...)`（不走 Spring 自动配置 ⇒ 不受影响） | ✅ **like-rpc / task-rpc 无需域侧改动** |
+| HTTP breaker 键改「注册期路由模板」（`138b6ef`） | 三域**无路径变量** ⇒ 模板 == 具体 URI ⇒ **零差别** | ✅ 与本层判断一致 |
+
+⇒ ⇒ **本层登记**（这是**实测**不是口头承诺 ⇒ 证据强度高于「域侧保证」）。
+
+##### 4.10.23.2 ② 🔴 **本层的 FB-01/02/03 回执没投递到 G2 队列** ⇒ 本层**重发**
+
+| 项 | 内容 |
+|---|---|
+| **现象** | G2 收件队列里只有 `9787`（G1 的 009② 同步）· `10239`（G1 回它）· `10375`（本层的知会）⇒ ⇒ **FB-01 / FB-02 / FB-03 的回执不在它队列** ⇒ ⇒ G2 推测「可能发给了某个旧 session id」 |
+| **本层复核** | 三条回执的**工作产物在树上可查**（FB-01 = `9690b04` · FB-02/FB-03 = `182fc32`）⇒ ⇒ G2 也**独立复核过**「三条都在」⇒ ⇒ ⇒ **丢的是「消息投递」，不是「工作产物」** |
+| **本层动作** | ✅ **重发一份摘要**（结论不变）⇒ ⇒ ⚠️ 「不重派」指的是**不重派派单**（新工作）⇒ ⇒ **回执摘要不属重派** |
+| **教训（可复用）** | **「我发了」≠「对方收到了」** ⇒ ⇒ 跨 lane 回执必须**让对方确认收到** ⇒ ⇒ 与「回执要含 4 项」配套：**回执的第 5 项 = 对方确认**（本层此前漏了这一项） |
+
+##### 4.10.23.3 ③ G2 本轮落码（`ce81c5f`）—— 009② for like-api + message-api
+
+⇒ ⇒ 本层登记：其 Go 侧依据**由本层独立复核成立**（见 §4.10.23.4 的 Go 侧核）⇒ ⇒ **共享层侧零动作**（域侧 Filter 落 `+6` ⇒ 共享层槽位表已钉死 ⇒ §4.10.16.1）⇒ ⇒ G2 的 12 条守门 + 变异 6/6 + 三域六模块全量 0/0/0，本层只登记不复核其代码。
+
+##### 4.10.23.4 ④ 🔴 **G2 的转派单 = 假转派单** ⇒ 本层**抢在 G2 消息落地前通知了 G3** ⇒ **不要照它重做**
+
+| 项 | 内容 |
+|---|---|
+| **G2 的主张** | 009②（JWT 验签被计入 HTTP 预算）**也适用于** article-api / comment-api / favorite-api ⇒ 「配方 G1 已写好，Go 侧依据同源」⇒ 请求本层转告 G3 |
+| **G2 的核验方式** | 逐域核 **Go 侧 `routes.go` 有没有 `rest.WithJwt`** ＋ **RAG 侧 api 有没有鉴权类** |
+| **🔴 断点在哪** | **只核了真源有 ⇒ 推出「适用」⇒ 顺势当成「待修」** ⇒ ⇒ **没核 RAG 侧的当前状态** ⇒ ⇒ ⇒ **「真源有这条行为」推不出「RAG 侧还欠这条修复」**（RAG 可能早已修好）⇒ ⇒ **与 §3.1 同族、方向相反**：那边的错是「拿现有 RAG 代码当基准」，这边的错是「拿真源当唯一依据、忽略了 RAG 现状」⇒ ⇒ **两边都不能省** |
+| **本层独立复核 · Go 侧前提成立** | ① `service/article/api/internal/handler/routes.go` `rest.WithJwt` **×1** · `comment` **×1** · `favorite` **×1** · `hot` **×0**（hot 不适用 ✓ 与 G1 独立判定一致）；② `service/common/observability/http.go:30-34` `DisableNativeRestTimeout` 置 `conf.Middlewares.Timeout = false` ⇒ ⇒ 原生 TimeoutHandler **不在链上**；③ 同文件 `:53` `context.WithTimeout(r.Context(), timeout)` ⇒ ⇒ **预算由共享 observability 中间件起算**（它在 `server.Use` 的用户中间件里）⇒ ⇒ 排在 go-zero `Authorize` **之后** ⇒ ⇒ **验签不计入预算** ⇒ ⇒ **前提成立** |
+| **🔴 但 RAG 侧结论不成立** | 三个域**早已落地**：<br>· `article-api/.../auth/GoStyleJwtAuthFilter.java:101` = `@Order(Ordered.HIGHEST_PRECEDENCE + 6)`<br>· `comment-api/.../auth/GoStyleJwtAuthFilter.java:93` = `+6`<br>· `favorite-api/.../auth/GoStyleJwtAuthFilter.java:95` = `+6`<br>⇒ ⇒ 三个拦截器都**只消费** `VERIFICATION_ATTRIBUTE` 并原样重抛 ⇒ ⇒ **验签已在预算之外** |
+| **而且 G3 自己的台账已登记为闭环** | `article/vs-common.md:121`（**L-8** ✅）· `comment/vs-common.md:153`（**C-6** ✅）· `favorite/vs-common.md:137`（**L-8** ✅）⇒ ⇒ ⚠️ **它们用的是各自域的编号**（`L-8` / `C-6`），**不是** users 域的 `009②` ⇒ ⇒ ⚠️ **用别的域的编号当全局编号去检索 ⇒ 必然「零命中」⇒ 差点报出一个假缺口** ⇒ ⇒ **本轮我自己踩了这个坑**（已在 §4.10.23.7 留痕） |
+| **本层动作** | ✅ **已在 G2 的消息落地前通知 G3**（明确「不要照它重做」＋ 附全部实测行号）⇒ ⇒ **共享层侧零动作**（域侧 Filter 落 `+6` ⇒ 预算起点 `+7` ⇒ 槽位权威表 §4.10.16.1 已钉死 ⇒ 且新断言 ⑤ 保证共享层不会偷偷挪预算起点、也不会新增未登记的 Filter） |
+| **第二处不精确（G2 的表）** | 表里三个域都写「3s 预算」⇒ ⇒ **article 域是 70s**（`article-api/application.yml:234` `http-timeout: 70s`）· comment-api 3s（`:185`）· favorite-api 3s（`:157`）⇒ ⇒ **槽位相同（`+6` 在预算起点 `+7` 之前）但时长不同** |
+
+##### 4.10.23.5 ⑤ 🧹 **U+FFFD 跨 lane 清单对账** ⇒ 本层**纠正两处 ＋ 补全一处**
+
+| 项 | 内容 |
+|---|---|
+| **G2 的清单** | 17 个文件：G1 4 · G3 6 · **G4 2** · 无人拥有 5 |
+| **🔴 订正 1：G2 那 2 处「G4」早已修完** | G2 列的 `GoStyleOtelSamplerProtocolGateTest.java`(2) · `FakeServerCall.java`(2) = **本层 `0c72969` 已修**（纯注释 · 零行为变化）⇒ ⇒ 本层 **12:16 字节级复扫 = `service/common/**` 零命中** ⇒ ⇒ ⇒ **G2 的清单在这一点上过时**（基于更早的一次扫描）⇒ ⇒ **不必再来登记** |
+| **🔴 订正 2：第 5 个「无人拥有」文件有归属** | `component-semantic-verification/springboot-semantic-model.md`(5) **已在 `docs/DRIFT/users/admin/rpc.md:2492` 登记** ⇒ ⇒ **属 G1 域台账**，不是「无人拥有 ⇒ 整合者」 |
+| **🟡 补全：G2 的清单漏了 1 个** | `tools/sql-statement-probe/favorite/compare.py`(3) —— 本层 §4.10.7 ⑥ 已登记为「无人拥有」⇒ ⇒ 17 + 1 = **18** ⇒ ⇒ 与本层 **12:16 实测的 18 文件 / 47 处** **完全对上** ⇒ ⇒ ⇒ **两套清单补全后一致 ⇒ 数字互证** |
+| **「无人拥有」实为 4 处** | `tools/errmsg-probe/README.md`(3) · `tools/sql-statement-probe/favorite/compare.py`(3) · `docs/Pitfalls/message/rpc.md`(2) · `docs/Pitfalls/users/user/rpc.md`(1) ⇒ ⇒ ⚠️ 后两处的**内容**分别属 message / users 域，但 `docs/Pitfalls/**` **不在 G2 的机器白名单** ⇒ ⇒ G2 明确「我不能改 ⇒ 请整合者定归属」⇒ ⇒ **同样按「无人拥有」记账**（归属待整合者定）⇒ ⇒ **§4.10.7 ⑥ 已补全** |
+| **本层动作** | ✅ 只登记 + 纠正（**零落码**：无一个文件落在本层写权面） |
+
+##### 4.10.23.6 ⑥ 共享层槽位事实：**本层这份已经是 `+7`** ⇒ **无需订正**
+
+| 项 | 内容 |
+|---|---|
+| **G2 的顾虑** | 三域台账里共享层槽位数字曾被记成 `HttpMiddlewareFilter @Order(HIGHEST_PRECEDENCE+5)` ⇒ ⇒ 请求「共享层那份若也写着 +5，请由写权方订正」 |
+| **本层核** | **本层台账写的就是 `+7`**（§4.10.16.1 槽位权威表 ＋ §4.10.12 独立核实段：Traceparent **+3** · MaxConns **+4** · Breaker **+5** · CpuShedding **+6** · HttpMiddleware **+7** · MaxBytes **+8** ＋ PathNormalizing **+2**）⇒ ⇒ 与真源实测一致（`javap` 字节码层复核，§4.10.21.5）⇒ ⇒ **共享层这份无需订正** ⇒ ⇒ **已回信告知 G2**（免得他继续挂一个不存在的待办） |
+| **🟡 顺带修掉本层自己的一处引用精度缺陷** | 本层 §4.10.16.1 的 7 个行号原本**全落在 javadoc 注释行**（`PathNormalizing:16` / `Traceparent:32` / `MaxConns:20` / `Breaker:22` / `CpuShedding:19` / `HttpMiddleware:20` / `MaxBytes:19`）⇒ ⇒ **点不出那个槽位值** ⇒ ⇒ 已订正为 **`@Order` 注解行**（`:70` / `:190` / `:96` / `:87` / `:63` / `:37` / `:83`）⇒ ⇒ **结论未变**（7 档值本身没变 ⇒ 快照守门断言依旧成立）<br>⇒ ⇒ **发现它的原因 = 内部不自洽**（§4.10.12 里同一批槽位的行号是对的）⇒ ⇒ **「同一事实的两处记录不一致」= 一条便宜的自查信号** |
+
+##### 4.10.23.7 ⑦ 本层这轮自己的三处留痕（**结论对 ≠ 推导对**）
+
+| 项 | 内容 |
+|---|---|
+| **🔴 差点报出的假缺口** | 我先按 users 域的 ID（`009②`）去 grep G3 三个域的台账 ⇒ **零命中** ⇒ ⇒ 差点写成「G3 域台账里 009② 一处都没登记」⇒ ⇒ **实际上三个域都登记了**（`L-8` / `C-6` / `L-8`）⇒ ⇒ **错在「把别的域的编号当全局编号」** ⇒ ⇒ **域内编号不是全局编号 ⇒ 跨域检索必须先找该域自己的编号** ⇒ ⇒ 与「共享判据 = 依赖度数，不是目录位置」同族：**编号的归属与判据一样，不能想当然** |
+| **🟡 差点跟着 G2 的表转发** | 若直接转发 ⇒ ⇒ G3 会照一条**已修**的项**再做一遍** ⇒ ⇒ 那会把对的改错 ⇒ ⇒ **本层在 G2 的消息落地前就通知了 G3**（附实测行号）⇒ ⇒ **成本 = 一次独立核（4 次 grep ＋ 2 次 javap ＋ 1 次拦截器读码）** |
+| **🟢 已发给 G3 的内容（摘要）** | ① 「不要照 G2 那张单子重做」＋ 三域 `GoStyleJwtAuthFilter` 的 `@Order(+6)` 行号 ② G3 三域台账的闭环行号（`article:121` / `comment:153` / `favorite:137`）③ Go 侧前提本层已独立核实成立 ④ **article 的预算是 70s 不是 3s** ⑤ 残留 = 「Filter 未命中 ⇒ 就地验签 ⇒ 落回预算内」（域内代码已用 WARN 自登记）⑥ 共享层侧**零动作**（槽位权威 ＋ 新断言 ⑤）⑦ 另提 article-api 的域内 `GoStylePathNormalizingFilter` 副本（**遮蔽**共享层那份）⇒ 合并时删 |
 
 #### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `040a201`）
 
