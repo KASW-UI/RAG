@@ -2397,6 +2397,19 @@ func main() {
 | `zeroway` | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40`（`{MaxRetries:3, MinIdleConns:8}`）| **1704** | `class=fast-fail err_present=true` | ✅ **逐字节一致**（**首次补齐 zeroway 档**）|
 
 ⇒ ⇒ **与 §12.9.7 的一次性基线同量级**（hot 1669/1808/1710/1771 · comment 1708/1776/1741/1753）⇒ ⇒ **结论未变**
+
+#### Java 腿（RAG 侧）实测（2026-10-28 03:1x）⇒ ⇒ **三段式跑通 ⇒ 双侧活体对拍闭环**
+
+| 腿 | 命令 | 结果 |
+|---|---|---|
+| **Go 腿（hot）** | `run.sh --mode hot` | `first_command_ms=1696` · `class=fast-fail` ⇒ ✅ 与 `expected.txt` 逐字节一致 |
+| **Go 腿（comment）** | `run.sh --mode comment` | `first_command_ms=1679` · `class=fast-fail` ⇒ ✅ 逐字节一致 |
+| **RAG 腿（hot）** | `mvn -pl service/hot/hot-rpc -am test -Dtest=HotRedisDisconnectFastRejectGateTest` | **Tests run: 2, Failures: 0, Errors: 0, Skipped: 0** ⇒ BUILD SUCCESS |
+| **RAG 腿（comment）** | `mvn -pl service/comment/comment-rpc -am test -Dtest=CommentRedisDisconnectFastRejectGateTest` | **Tests run: 2, Failures: 0, Errors: 0, Skipped: 0** ⇒ BUILD SUCCESS |
+
+⇒ ⇒ **两侧语义一致**（都「快速失败」：Go ~1.7 s 走重试退避 / RAG **1 ms** 立即拒单）⇒ ⇒ **AGENTS.md §3.3「两侧同时跑的探针」满足** ⇒ ⇒ 可写 **L4（双侧）**
+⇒ ⇒ 🔴 **但毫秒数差 3 个数量级** ⇒ ⇒ **只主张「语义一致」，不主张「毫秒一致」**
+
 ⇒ ⇒ ⚠️ **毫秒数是观测量不是判据** ⇒ ⇒ 判据是**归一化结论行**（`class` / `err_present`）⇒ ⇒ 可逐字节 diff
 ⇒ ⇒ **阈值口径**：`fast-fail` / `timeout` 的分界取 **2500 ms**（落在 Go 实测上界 1809 与 Lettuce `commandTimeout: 3s` 的 3007 ms **之间**）
 

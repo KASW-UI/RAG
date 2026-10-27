@@ -117,16 +117,16 @@ fi
 # ── ③ Java 腿（域内既有守门；--full 才跑 ⇒ 因为要 maven）────────────────────
 if [ "$FULL" = 1 ]; then
   case "$MODE" in
-    hot) JAVA_GATE="HotRedisDisconnectFastRejectGateTest" ;;
-    comment) JAVA_GATE="CommentRedisDisconnectFastRejectGateTest" ;;
-    *) JAVA_GATE="" ;;
+    hot) JAVA_GATE="HotRedisDisconnectFastRejectGateTest"; JAVA_MOD="service/hot/hot-rpc" ;;
+    comment) JAVA_GATE="CommentRedisDisconnectFastRejectGateTest"; JAVA_MOD="service/comment/comment-rpc" ;;
+    *) JAVA_GATE=""; JAVA_MOD="" ;;
   esac
   if [ -z "$JAVA_GATE" ]; then
     echo "⚠️ mode=$MODE 没有对应的域内 Java 腿守门 ⇒ 跳过"
   else
-    echo "▶ Java 腿：$JAVA_GATE"
+    echo "▶ Java 腿：$JAVA_GATE（$JAVA_MOD）"
     ( cd "$REPO" && MAVEN_OPTS="-Xmx768m" /Users/pr/.sdkman/candidates/maven/current/bin/mvn -B -o \
-        -pl service/hot/hot-rpc,service/comment/comment-rpc -am test \
+        -pl "$JAVA_MOD" -am test \
         -Dtest="$JAVA_GATE" -Dsurefire.failIfNoSpecifiedTests=false -DargLine="-Xmx2g" )
   fi
 fi
