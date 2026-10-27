@@ -248,16 +248,25 @@
    - 🆕 **2026-10-27 第三轮追加（Redis 连接池守门 ⑤⑥）**：G4 那份 `GoStyleRedisClientAutoConfiguration` 的 customizer **只调 `disconnectedBehavior(REJECT_COMMANDS)`**（G4 树实测 `GoStyleRedisClientAutoConfiguration.java:129-131` ⇒ **不调 `timeoutOptions(...)`、不碰池**）⇒ ⇒ 本域 task-rpc 的池守门 ⑤⑥（`redisPoolIsEnabled` / `redisPoolParametersMatchGoBaseline`）**理论上不受影响** ⇒ ⚠️ **「理论上」不算数** ⇒ 合并后必须**复跑**（task-rpc 6 条 ＋ like-rpc 4 条）⇒ 若 ⑤/⑥ 红 ⇒ 说明共享层或 Boot 装配路径碰了池 ⇒ 属**新回归** ⇒ 直接找 G4。
 3. **A3 升 ✅ 的前置**：共享层的 `GoStylePathNormalizingFilter` 合并后 ⇒ 跑**真 Tomcat 探针**复核
    ⇒ 本域 A3 才能整体升 ✅（Go 侧已 L4 活体坐实：5 种路径变体全 200）
+4. 🆕 **E66 落码后：本域 Redis 守门 ① 必须仍绿**（`TaskRedisCommandTimeoutGateTest` 的 `commandTimeoutMechanismIsEnabled`）
+   ⇒ E66 的落点会**整体替换** `ClientOptions.timeoutOptions` 那份 default source ⇒ 若新实现不含「命令超时」语义 ⇒ ①（`getTimeoutOptions().isTimeoutCommands()` 必须为 **true**）会红
+   ⇒ ⚠️ ① 红 = **新回归**（不是「E66 故意关掉了超时」）⇒ **直接找 G4**
+   ⇒ 配套：新 source 在**本请求没有 deadline** 时必须回落到 **`getClientConfiguration().getCommandTimeout()`（本域 = 3s）** ⇒ 否则命令失去 3s 上限（断连从「3s 快速失败」退化为「无限等待」）⇒ ⇒ **这条已经写进本域台账的 E66 硬约束段（已独立核实并订正其机制表述）**
 
 ⚠️ **E66 的硬约束（G4 已探明，落地前必须解决）**：
 Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
-**offset 146 先写 `timeoutOptions`（来自 `spring.data.redis.timeout`）→ offset 151 才应用 customizer**
-⇒ ⇒ customizer 再调 `timeoutOptions(...)` 会**覆盖运维配置的命令超时**
+**offset 146 先写 `timeoutOptions` → offset 151 才应用 customizer**
+⇒ ⇒ customizer 再调 `timeoutOptions(...)` 会**覆盖既有那份 `TimeoutOptions`**
 ⇒ ⇒ 落码前必须先解决「**保留既有命令超时**」
 ⇒ 🆕 **本域提供的实测数据**：命令超时**压根不挂在 `ClientOptions` 上**
 （`javap` 实测 `io.lettuce.core.ClientOptions` **没有** `getCommandTimeout()`，命中数 = **0**）
 ⇒ ⇒ customizer 里要读回的是 **`getClientConfiguration().getCommandTimeout()`**（**不是** yml、**不是** `getTimeoutOptions()`）
 ⇒ ⇒ 且本域的**域侧调用点清单**已备好（like-rpc **11 处** / task-rpc **3 处** · 见本文件 §4 的 FB-05 / FB-06）
+
+🟢 **2026-10-27 G2 独立核实（`javap -c` ＋ 源码双证）—— 结论成立，但「机制表述」有一处不准 ⇒ 订正如下**
+- ✅ **顺序与偏移全部复现**：Boot 4.0.8 `spring-boot-data-redis` 的 `LettuceConnectionConfiguration.createClientOptions` 反汇编 ⇒ `142-149` `invokestatic TimeoutOptions.enabled()` → `146` `ClientOptions$Builder.timeoutOptions` → `150-151` `ObjectProvider.orderedStream()` → `157` `invokedynamic`（`lambda$createClientOptions$0`）→ `162` `forEach` → `168` `build()` ⇒ ⇒ **offset 146 / 151 与 G4 所述逐位吻合** ⇒ ⇒ **「customizer 再调 `timeoutOptions(...)` 会覆盖前一份」成立** ✔
+- 🔴 **订正 1（机制表述不准）**：G4 原句写「offset 146 先写 `timeoutOptions`（**来自 `spring.data.redis.timeout`**）」⇒ **不对** ⇒ 源码 `LettuceConnectionConfiguration.java:229` = `builder.timeoutOptions(TimeoutOptions.enabled());` ⇒ **入参是硬编码默认** ⇒ **`spring.data.redis.timeout` 压根不进 `ClientOptions.timeoutOptions`** ⇒ 它走 `:173-174` `builder.commandTimeout(getProperties().getTimeout())` ⇒ ⇒ 落 `getClientConfiguration().getCommandTimeout()` ⇒ **RedisURI.timeout**（= 本域守门 ③ 读的那个值）
+- ⇒ ⇒ **对修法的影响 = 无**（结论与处方都成立）⇒ 但**新增一条实现约束**：customizer 的 `TimeoutSource` 会**整体替换** `TimeoutOptions.enabled()` 那份 default source ⇒ ⇒ **无 deadline 时必须回落到 `getCommandTimeout()`（本域 = 3s）** ⇒ 否则**命令失去 3s 上限**（断连从「3s 快速失败」退化为「无限等待」）⇒ ⇒ **本域守门 ①（`getTimeoutOptions().isTimeoutCommands()` 必须为 true）就是钉这条的网** ⇒ 🔴 **E66 落码后若 ① 变红 ⇒ 属新回归 ⇒ 直接找 G4**
 
 ## 5. 交付物清单
 
