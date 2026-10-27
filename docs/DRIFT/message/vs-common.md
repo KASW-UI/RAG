@@ -204,6 +204,6 @@ Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
 3. **A1 / A2 缺双侧活体**：Go 侧 2000ms 超时 + `codes.Acceptable` 六码判据（`zrpc/internal/codes/accept.go:9-17`）与 RAG 熔断器的对齐只做了源码对照。
 4. **A9 的前提**：`GoStyleOtelAgent.java:133-137` 装配失败只记 ERROR 并继续启动 ⇒ 「响应带 `Traceparent`」不是无条件成立，需运行期确认。
 5. **A8 的 Flyway 运行时形态**：`baseline-version: 0` 在**非空 schema** 下是否真的执行 V1–V5，只有真 PG 双侧起进程能定论。
-6. **全局端口段表** —— 本域段 **21700–21799** 已登记在本文件 §2/A5；🟡 **全局端口段表归 `global` 收口域**（`docs/DRIFT/global/**` **不在本 lane 写权内**）⇒ 合并后由整合者统一登记（like 21600–21699 / task 21800–21899 同期登记）。
+6. **全局端口段表** —— 本域段 **21700–21799** 已登记在本文件 §2/A5；🟢 **2026-10-27：G4 已把三域段号汇总登记进 `docs/DRIFT/global/vs-common.md`**（落点 = G4 写权面**唯一**的那个文件 ⇒ 不新建）⇒ **like 21600–21699 / message 21700–21799 / task 21800–21899** 三段同批登记（另含 favorite **21300–21399** / 探针 **21400–21599** / favorite 脚手架 **21950–21999** / OS 临时段 **49152–65535**（**禁占** ⇒ 各域真容器测试必须自选专用段））⇒ ⇒ **本域零待办**<br>⚠️ **G4 明确未核 users(G1) 与 article/comment/hot(G3) 的段号 ⇒ 「不外推」** ⇒ 待各域台账补齐后由 G4 统一登记 ⇒ ⇒ **本域不替别的域填段号** |
 
 > 🟡 **共享面观察（本 lane 不写，登记待整合者处理）**：`docs/DRIFT/_cross/domain-common-lanes.md:85` 把 A9 定义为「span 属性（`audit.*`）」，但 `audit.*` 是 **admin/users 域专用**（`AdminSpans.java:91-93`）；like 域 Go 侧实际用 `query.*` / `cache.*` / `like.*` / `messaging.*` ⇒ **轴定义建议改为「按域取 Go 侧实际前缀」**，否则 like / message / comment 等域会被误判为 N/A。

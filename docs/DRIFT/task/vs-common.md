@@ -271,6 +271,11 @@
    ⇒ G4 树 `service/task/task-api/src/main/resources/application.yml:177-178` 仍是 `mode: raw`（+ 一条**用错判据轴**的注释：拿「有没有注册 `httpx.SetErrorHandler`」（**轴② 拒绝形状**）来定「开不开」（**轴①**）；而轴①在 task 域的判据是「上限不可达 ⇒ OFF」⇒ **与 G4 自己的 `SEMANTIC_REACHABILITY` 自相矛盾**）
    ⇒ ⇒ **合并风险** = 以 G4 树版本覆盖 ⇒ 本域 D-1 的 `mode: "off"` 被回退 ⇒ ① 上条 FB-S1 的期望值又要跟着变；② 域侧回到「上限可达但闸门开着」的错配形态
    ⇒ ⇒ **合并清单里必须显式写一行**：`service/task/task-api/src/main/resources/application.yml` **以 G2 分支版本为准**（或合并后按 `SEMANTIC_REACHABILITY` 的 OFF 复核一次）
+7. 🆕 **本条（FB-S1 / FB-S2 / FB-S3）的派单状态**（2026-10-27 11:59 复核）
+   ⇒ ✅ **已发 G4**（`session send` · 入队 id `14683` · 2026-10-27 上午）⇒ ⚠️ **截至 G4 11:59 回信，该条仍在 G4 队列里（未消费）** ⇒ ⇒ G4 本次回信（纠正 + 回执摘要）消费的是**更早**的消息 ⇒ ⇒ **不重发**（重发会重复处理同一份内容）⇒ ⇒ **兜底 = 本台账已完整登记三条的现象/根因/证据/修法/影响面** ⇒ ⇒ 即使队列继续滞留，**整合者从本台账即可拿到全部所需信息**
+   ⇒ 🟢 **G4 11:59 回执已确认的一侧**：**① 纠正**（上一轮「task 改 off ⇒ 比 Go 更严」是错判 ⇒ 域侧 `mode: "off"` 落码正确、**不需要任何额外动作** ⇒ G4 已在 `2f3d5c2` 订正并撤销提醒 ⇒ 与本域 `60add43` 的独立复核**结论同向**）；**② FB-04 / FB-05 回执摘要**（`853767b` / `c15dfeb` ⇒ **task 域 FB-05 销号** · **like 域零影响**）；**③ 端口段表**已汇总登记进 `docs/DRIFT/global/vs-common.md`（含本域 **21800–21899**）⇒ **本域零待办**；**④ 工具口径缺口**（`check-ledger-selfcheck.py` 的 `CLASS_RE` 认不出支撑类）⇒ G4 只登记 + 转整合者（**提示级 · 不影响退出码** ⇒ 本域零动作）；**⑤ 错峰**（G4 第十次全量 11:39:21 收工 ⇒ G4 让出大回归窗口）
+   ⇒ ✅ **`60add43` 的 yml 注释改动的验证**（趁 G4 让出的窗口跑）：`mvn -o -pl service/task/task-api -am -DskipTests install` ＋ `mvn -o -pl service/task/task-api test` ⇒ **97 条 / 0 failures / 0 errors / 0 skipped · BUILD SUCCESS · 35.186 s** ⇒ 与第四轮 **97** 条**逐条口径一致** ⇒ ⇒ **真 Tomcat 起得来**（日志里端口段 **21801** 仍在用 ⇒ 端口治理未受影响）⇒ ⇒ **注释改动零行为影响**（确认）
+   ⇒ ⚠️ **口径纪律**：本次是**单模块**回归（`-am` 只装上游、不跑上游测试）⇒ **不是域级全量** ⇒ ⇒ 数字**不得**与第四轮的六模块 598 / 八模块 637 相加或并列引用
 
 ⚠️ **E66 的硬约束（G4 已探明，落地前必须解决）**：
 Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
