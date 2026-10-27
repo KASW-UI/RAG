@@ -1561,11 +1561,17 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 
 ##### 4.10.25.3 影响面（**按域实测**，不是按推理）
 
-| 域 | `mode` | 改前运行期 | 改后运行期 | 可观察变化 | 实测 |
+> **实测方法**：逐个 api 模块读 `application.yml` 的 `rag.http.go-form-limit.mode` 与 `server.tomcat.max-parameter-count`
+> ⇒ **10 个 api 模块的 yaml 层 `max-parameter-count` **全部**是 `2048`（本层**一字未动** ⇒ ⇒ **静态门禁 `check-tomcat-limits.py` 不会红**）。
+
+| 域 | `mode`（逐模块实测） | 改前运行期 | 改后运行期 | 可观察变化 | 实测 |
 |---|---|---|---|---|---|
-| article / comment / follow / hot / like / message / user-api / admin-api | ≠ `OFF` | 10001 | 10001 | **零** | 本层不动这些域的 yaml ⇒ 运行期本来就是 10001 |
-| **task** | `"off"` | 2048 | 10001 | **零** | ✅ **task-api 全绿**（上限不可达：Go 侧 `r.Form` 从不求值 ＋ 控制器只 `@RequestBody`）⇒ ⇒ 抬上限**打不到任何可观察面** |
-| **favorite** | 未声明 ⇒ 缺省 `off` | 2048 | **10001** | 🔴 **唯一一格**：总「值」数 2049~10000 且非空值 ≤2048 ⇒ **Go 放行 / RAG 由「拒（200+5003）」变「进业务层」** ⇒ ⇒ **差 1 闭合** | ✅ **实测红 1 条**（见下） |
+| article / user-api / admin-api | `raw` | 10001 | 10001 | **零** | 本层不动这些域的 yaml ⇒ 运行期本来就是 10001 |
+| comment / follow / hot / like / message | `envelope` | 10001 | 10001 | **零** | 同上 |
+| **task** | ⚠️ **树间差异**：**本层树**（`a282012` 基线）= **`raw`** ⇒ 运行期**本来就**是 10001 ⇒ **零变化**；**G2 树**已改为 `mode: "off"`（`service/task/task-api/src/main/resources/application.yml:225`）⇒ **合并后** 2048 → 10001 ⇒ **仍零可观察变化**（上限不可达） | 10001（本层树） | 10001 | **零** | ✅ **task-api 全绿**（上限不可达：Go 侧 `r.Form` 从不求值 ＋ 控制器只 `@RequestBody`）⇒ ⇒ 抬上限**打不到任何可观察面** |
+| **favorite** | **未声明** ⇒ 缺省 `off` | 2048 | **10001** | 🔴 **唯一一格**：总「值」数 2049~10000 且非空值 ≤2048 ⇒ **Go 放行 / RAG 由「拒（200+5003）」变「进业务层」** ⇒ ⇒ **差 1 闭合** | ✅ **实测红 1 条**（见下） |
+
+> 🔴 **本层自己改自己的一处前提（留痕）**：提交 `cd893d1` 的说明里写「**task（`mode: "off"`）**：2048 → 10001」⇒ ⇒ 那个 `mode` 值是 **G2 树**的 ⇒ ⇒ **本层树**（`a282012` 基线）里 task 的 `mode` 是 **`raw`** ⇒ ⇒ **「task 零可观察变化」这个结论不变**（两种 mode 下上限都不可达）⇒ ⇒ 但**前提要写准** ⇒ ⇒ 本表已按实测改写。
 
 ##### 4.10.25.4 🔴 实测：favorite 域红的**只有那一条**，且**新值就是 Go 的形态**
 
@@ -1593,10 +1599,54 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 |---|---|
 | 🟡 `tools/difftest/check-tomcat-limits.py` 的**文档字符串** | 仍写「`off` ⇒ 不装闸门、**也不改容器上限**」⇒ ⇒ **语义已变**（现在 off 也抬上限）⇒ ⇒ 该脚本的**逻辑**（校 yaml 层）**不受影响** ⇒ ⇒ **不会红** ⇒ ⇒ 但**文档会误导** ⇒ ⇒ **属整合者写权面 ⇒ 本层不改 ⇒ 登记** |
 
-#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `040a201`）
+##### 4.10.25.7 🟡 **证据强度与已知缺口**（这一格**不是** L4）
 
-> ⚠️ **代码态基线 = `040a201`**（= 本轮**最后一次**改代码的提交）⇒ ⇒ **代码行为自 `5a954bb` 起未变**（`040a201` 只改了**测试面** ⇒ ⇒ **零生产代码改动** ⇒ ⇒ 运行时行为与第十次全量一致）。
-> ⇒ ⇒ **「全量条数」变了**（`040a201` 新增 1 条守门 ⇒ ⇒ 第十一次全量比第十次 **+1**）⇒ ⇒ **次数变了，行为没变** ⇒ ⇒ 两者的差别**只在测试条数**上。
+| 项 | 值 |
+|---|---|
+| **Go 腿** | ✅ **L1 源码级（本层直接读真源，不是转述）**：`go-zero@v1.10.2/rest/httpx/util.go:15` `maxFormParamCount = 2048` ＋ 同文件计数循环里的 `if len(v) == 0 { continue }` ⇒ **空值不计数** ⇒ ⇒ 「1 个非空值 + 2048 个空值」在 Go 侧 **n = 1 ⇒ 不报错 ⇒ 放行**；<br>另：`Go 1.25.11 src/net/url/url.go:1001` `const defaultMaxParams = 10000` ＋ `:1004` `withinDefaultMax := params <= defaultMaxParams` ⇒ ⇒ 2049 段 **不**触发 Go 的段数上限 ⇒ ⇒ **Go 腿的「放行」是两层都放行** |
+| **Go 腿的旁证** | ✅ favorite 域的**既有双侧探针**里已有一个**对照组**：`tools/api-envelope-probe/favorite/go/main.go:149-157`「2048 个参数恰好在界内 ⇒ 必须**不报错**」＋ `:183-188` 的注释「GetFormValues 数的是**非空值个数**」⇒ ⇒ 计数口径早已被**真 httpx.Parse** 实测钉住 |
+| **RAG 腿** | ✅ **L3 真容器活体**：真 Tomcat ＋ 真域内判据 ⇒ 实测 **200 + `{code:1015, msg:"服务繁忙"}`** ⇒ 「请求真的进了业务层」⇒ **与 Go 的「放行 ⇒ 进业务层」同形** |
+| **合并口径** | ⇒ ⇒ **L3**（按弱侧）⇒ ⇒ **不得写成 L4** |
+| 🔴 **已知缺口（L4 那一格还没有）** | **`tools/api-envelope-probe/favorite/` 的 2049 用例是「2049 个**全非空**值」** ⇒ ⇒ 那是**应用层**判据（与本次改动无关）⇒ ⇒ **本次闭合的「差 1」格（1 非空 + 2048 空）没有双侧活体用例** ⇒ ⇒ ⇒ **该探针属 favorite 域工具面（G3 写权）⇒ 本层不扩** ⇒ ⇒ **建议 G3 补一条「1 个非空值 + N 个空值」的双侧用例** ⇒ 那才是这格的 L4 证据 |
+| ⚠️ **另一条仍然存在、但与本次改动无关的残余** | 总「值」数 **> 10001** 时，Tomcat 拒（400 + HTML 错误页），Go 拒（400 + `net/url` 原文）⇒ ⇒ **状态码一致、body 不同** ⇒ ⇒ 归 `DRIFT-HOTAPI-030` 的**下一格** ⇒ ⇒ 本次改动**不覆盖**它（要覆盖需容器上限再抬或做 body 映射）⇒ ⇒ **显式登记，不假装闭合** |
+
+---
+
+#### 4.10.26 🟢 **第十二次全量回归口径**（核对日期 2026-10-27 13:09~13:36 · 代码态 `cd893d1`）
+
+> ⚠️ **本轮口径是「两段拼起来」的** —— 这是**必须如实写**的地方，不能写成「一次跑完 52 模块」。
+> 🔴 **原因**：`mvn -B clean verify` 默认 **fail-fast** ⇒ 撞到 favorite-api 那条红（**预期内**的域侧动作，见 §4.10.25.4）⇒ **reactor 停在 [46/52]** ⇒ ⇒ **后 6 个模块（comment 域 5 个 ＋ `favorite-rpc`）根本没跑** ⇒ ⇒ 所以口径 = **主跑（46 模块）+ 补跑（6 模块，`-fae` + `-pl` + `-am`）**。
+
+| 项 | 值 |
+|---|---|
+| 代码态 | **`cd893d1`**（本轮**唯一**改生产代码的提交）⇒ ⇒ 与第十一次全量（代码态 `040a201`）**不是同一个代码态** |
+| 主跑 | `mvn -B clean verify` ⇒ **BUILD FAILURE / `MVN_EXIT=1`**（**预期内**）· 13:09:05 → 13:28:31 = **19:26 min** · **跑到 [46/52] favorite-api 停住** |
+| 补跑 | `mvn -o -B -fae -pl service/comment/comment-api,service/comment/comment-rpc,service/comment/comment-common,service/comment/comment-proto,service/favorite/favorite-rpc -am verify` ⇒ **EXIT=0** · 13:31~13:35 |
+| **模块数** | **52**（46 ＋ 6，**两段合计**，不是一次跑完） |
+| **有测试的模块数** | **29**（主跑 25 ＋ 补跑 4；`comment` / `comment-proto` / `favorite` 三个聚合器无测试） |
+| **用例数** | **2474** = 主跑 **2184** ＋ 补跑 **290** |
+| **failures / errors / skipped** | **1 / 0 / 4**（skipped：favorite-api 1 ＋ favorite-rpc 3） |
+| **那 1 条红** | `service/favorite/favorite-api/.../FavoriteApiRealTomcatGateTest#containerParameterLimitIsSurfacedAsGoParseError` ⇒ **预期内** ⇒ 断言的是**旧行为**（`code:5003`）⇒ 新行为是 `code:1015`（＝Go 的 `CodeServerBusy`）⇒ ⇒ **需 G3 在同一笔 merge 里改**（§4.10.25.4） |
+| **交叉验证（两条独立路径得同一总数）** | ① 第十一次全量日志里同样那 4 个有测试的模块 = `favorite-rpc` **110** ＋ `comment-common` **27** ＋ `comment-api` **45** ＋ `comment-rpc` **108** = **290** ⇒ 与本轮补跑**逐条一致**；<br>② 第十一次全量 **2471** ＋ 本轮新增的 **3** 条共享层守门 = **2474** ⇒ 与「2184 ＋ 290」**完全吻合** ⇒ ⇒ ⇒ **总数不是估出来的，是两条路各算一遍对上的** |
+| **逐模块要点** | `common` **324**（321 ＋ **3** 新守门）· `favorite-api` **97**（红 1 · skipped 1）· `favorite-rpc` **110**（skipped 3）· `comment-common` **27** · `comment-api` **45** · `comment-rpc` **108** · 其余 24 个模块与第十一次**逐条一致**（0 失败 0 errors） |
+| **双侧探针**（同批次复跑） | `tools/api-envelope-probe/favorite/run.sh` ⇒ **EXIT=0**（**双侧逐字节一致**：Go 真源实测 == `expected.txt` == RAG 实测）· `tools/semantic-probe/run-parity.sh` ⇒ **EXIT=0**（**56 例**：一致 54 · 不一致 0 · 已签字偏离 2）· `tools/semantic-probe/rpc-timeout/run-rpc-timeout-parity.sh` ⇒ **EXIT=0**（**3 例**两侧一致） |
+| **三门禁**（同批次复跑） | `check-wave-lane-ownership` **EXIT=0** · `check-wave-role-model` **EXIT=0** · `check-wave-coupling` **EXIT=0** |
+| **台账门禁** | `check-ledger-tables` **EXIT=0** · `check-ledger-selfcheck` **EXIT=0** · `check-ledger-count` **EXIT=0** |
+| **写权自证** | 本轮改动**全部**落在 `service/common/**` ＋ `docs/DRIFT/global/vs-common.md` ⇒ **零域侧改动** |
+| ⚠️ **已知工作区噪声** | `git status` 有一个未跟踪目录 `io/`（内含 `io/opentelemetry/api/GlobalOpenTelemetry.class`，**mtime 被归一化成 1980-02-01** ⇒ 是**从 jar 里解出来的 class**，不是源码产物）⇒ ⇒ **未跟踪 ⇒ 不影响构建与提交** ⇒ ⇒ **但会出现在每个 agent 的 `git status` 里** ⇒ ⇒ **根因待查**（疑似某个本地步骤把 jar 解到了 CWD）⇒ ⇒ **不属本层写权面** ⇒ ⇒ **登记** |
+
+> 🔴 **本轮口径的三条诚实边界**：
+> ① **不是「一次跑完 52 模块」** —— 是 fail-fast 停在 [46/52] ＋ 补跑 6 个 ⇒ ⇒ **别把 `MVN_EXIT=1` 读成「全量红了」**；
+> ② **那 1 条红是「跨域可观察行为变更的预期后果」**，不是共享层缺陷 ⇒ ⇒ 但它**必须由域侧改掉** ⇒ ⇒ 在 G3 改掉之前，**合并主干后全量仍会红 1 条**；
+> ③ **「差 1」那一格是 L3，不是 L4**（§4.10.25.7）⇒ ⇒ **不许读成「双侧活体已逐字节闭合」**。
+
+---
+
+#### 4.10.6 🟢 本轮落码清单（核对日期 2026-10-27 · 最新基线 `align/g4-service-common` @ `cd893d1`）
+
+> ⚠️ **代码态基线 = `cd893d1`**（= 本轮**最后一次**改代码的提交）⇒ ⇒ `cd893d1` **改了生产代码**（容器上限无条件化）
+> ⇒ ⇒ 与「第十一次全量（§4.10.22 · 代码态 `040a201`）」**不是**同一个代码态 ⇒ ⇒ **必须重跑全量** ⇒ ⇒ **第十二次全量口径见 §4.10.26**。
+> ⇒ ⇒ 上一行「代码行为自 `5a954bb` 起未变」**已被本轮打破**（`cd893d1` 改了生产代码）⇒ ⇒ 该行按「不改写历史」保留，**以本行为准**。
 > ⇒ ⇒ **中间那批提交**（`ee1b797` · `2f3d5c2` · `acb6fe6` · `b71ac22` · `1e1899f` · `46f67bf`）= **全是文档**（台账）⇒ ⇒ **零代码影响**。
 
 | commit | 内容 | 落点（`文件:行号`） | A 轴 |
@@ -1612,6 +1662,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | `c15dfeb` | 🟢 **G2 FB-05**：`parse` 接受 `"false"` 作为 `off` 的别名（YAML 1.1 布尔化） | `…/http/GoStyleFormLimitMode.java:…`（`parse` 加一个 `case` + `PROPERTY` javadoc + 异常消息）· **新增** `…/http/GoStyleFormLimitModeYamlBooleanGateTest.java`（5 条） | **A3** |
 | `5a954bb` | 🟢 **G3 反馈单 轴②**：form 闸门判据补「**域自捕获**」第一判据 ⇒ favorite 语义答案 = `OFF` | `…/http/GoStyleFormLimitMode.java:…`（`DomainReachability` 加 `goSideHandlesParseError` + `selfConsistent` 两规则 + 表的 favorite 行 + **删** `REGISTERED_DEVIATIONS` 的 favorite 条 + `Mode.OFF`/类 javadoc）· `…/http/GoStyleTomcatParameterLimitCustomizer.java:…`（订正「无分叉 / favorite 零改动」等三处陈述）· `…/http/GoStyleFormValues.java:…` · `…/http/GoStyleFormLimitExceededException.java:…` · **重写** `…/http/GoStyleFormLimitSemanticCriterionTest.java`（6 条）· 另 2 个测试类 javadoc 订正 | **A3** |
 | `040a201` | 🟢 **G1 约束② 的「共享层那一半」闭合**：新增断言 ⑤「共享层**产出**的带 `@Order` 的 Filter 全集 == 快照」⇒ ⇒ **新增第 8 个共享层 Filter 必红** ⇒ ⇒ 逼它显式登记槽位 | `service/common/src/test/java/com/rag/common/spring/SharedFilterOrderSnapshotGateTest.java:…`（⑤ `everySharedLayerFilterIsRegisteredInSnapshot` + `sharedLayerClassesRoot()` + `enumerateOrderedFilters()`）⇒ ⇒ **只改测试面** ⇒ ⇒ **零生产改动 / 零运行时行为变化** | 无（只加守门；**协调约束**的机器保障，**不改任何 A 轴结论**） |
+| `cd893d1` | 🔴 **容器上限的抬升与闸门的有无解耦**（G3 反馈 (b)）＝ **本轮唯一改生产代码的提交**：删掉 `if (mode == OFF) return;` ⇒ **一律抬到 10001**；构造函数改为**只校验** `mode`（fail-fast 不丢） | `service/common/src/main/java/com/rag/common/http/GoStyleTomcatParameterLimitCustomizer.java:…`（`customize()` + 构造函数 + 类级 javadoc「两轴解耦」一节）· `…/http/GoStyleFormLimitMode.java:…`（`Mode.OFF` 的 javadoc）· `…/test/java/com/rag/common/http/GoStyleFormLimitModeTest.java:…`（类 javadoc）· **新增** `…/test/java/com/rag/common/http/GoStyleParamLimitOffModeGateTest.java`（**3 条**）· `…/redis/GoStyleRedisClientAutoConfiguration.java:…`（**纯注释**：javadoc「三份」→「五份」） | **A3**（超时/deadline 的失败语义）＋ **A1**（Redis 断连的 fail-fast/fail-open 语义 · 仅 javadoc） |
 
 **回归口径与结果（第七次全量 · 核对日期 2026-10-27）**
 
