@@ -1237,7 +1237,11 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
 
 > **元信息**：落码分支 `align/g1-users-follow`（基线 `a282012` = `do-my-own-gh`）·
 > **写权内**（全部落 `service/users/user/user-api/**` ＋ `service/users/user/user-rpc/**`）·
-> **证据强度**：**L4 运行时双侧活体**（Go 腿 = G2 建的探针 `/tmp/goprobe/probejwt/main.go`，**本域已独立复跑**，三腿全中 —— 见 §9.y.0；RAG 腿 = 真 Tomcat 10 条探针）＋ **L2 装配层守门**
+> **证据强度**：**双侧活体成立，但两侧判据强度不对称** —— ⚠️ **不笼统写「L4」**（据 G2 回执的建议 · 2026-10-27 订正）：
+> **Go 腿 = L4 活体 · 直接判据**（G2 建的探针 `/tmp/goprobe/probejwt/main.go`，**本域已独立复跑**，三腿全中 —— 在 observability 中间件**前后各插一个观测点**读 `r.Context().Deadline()` ＋ **非法 token 的负证据** ⇒ 见 §9.y.0）·
+> **RAG 腿 = L3 真 Tomcat · 间接判据**（行为层：401/413/404 的真实响应形状 ＋ 装配层：Filter 链实际排序 —— **RAG 侧没有等价的 ctx-deadline 观测点** ⇒ 只能由行为与装配反推）＋ **L2 装配层守门**
+> ⇒ ⇒ **合并判据强度按弱侧记 = L3（弱侧口径）**；**只有 Go 腿单独是 L4** ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。
+> ⚠️ 另注：两次运行（Go 腿与 RAG 腿）**不在同一次编排里** ⇒ 比的是**属性**（「验签是否计入 3s 预算」），**不是逐字节 diff**。
 > ⚠️ **两次独立运行**（Go 腿与 RAG 腿不在同一次编排里）⇒ 比的是**属性**（「验签是否计入 3s 预算」），**不是逐字节 diff**。
 > ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。
 >

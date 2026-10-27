@@ -522,6 +522,30 @@ RAG 多一层 properties。**该条不重开。**
 - **Must Preserve**：这是**决策问题**，不是 bug —— 若保留 NOT NULL，V-001 需按「不可达」降级；
   若要与 Go 一致放开可空，V-001 就变成实打实的安全缺陷。**两者必须一起判。**
 
+> 🟢🟡 **2026-10-27 订正（行为层零差异 ⇒ 「保留 NOT NULL」才是等价的那一侧）** —— G1 lane · **本轮独立复核**
+>
+> ⚠️ **本轮推翻的是「Go 读 NULL status 会扫描报错」这个前提**（它被写进了 G4 的派单 #6）。
+> ⇒ **逐层证据链（本轮独立复核，不是转述台账）**：
+> | 层 | 证据 | 结论 |
+> |---|---|---|
+> | ① GORM 装给 int64 字段的 setter | `gorm.io/gorm@v1.31.2/schema/field.go:616-622`（**本轮在 `GOMODCACHE` 里逐行读过**）<br>`case reflect.Int, …, reflect.Int64:` → `switch data := v.(type) { case **int64: if data != nil && *data != nil { field.ReflectValueOf(ctx, value).SetInt(**data) } }` | ⇒ DB 值是 NULL ⇒ `*data == nil` ⇒ **什么都不做** ⇒ 字段保持 Go 零值 **0** ⇒ **不报错** |
+> | ② stdlib 转换层 | `database/sql/convert.go:431-435`（**本轮在 `GOROOT` 里逐行读过**）<br>`case reflect.Pointer: if src == nil { dv.SetZero(); return nil }` | ⇒ dest 的 kind 是 **Pointer**（GORM 传的是 `**int64`）⇒ 走这一支 ⇒ **不报错**<br>（⚠️ 网上常见的 `converting NULL to int64 is unsupported` 那条属 `case reflect.Int64` ⇒ **走不到**） |
+> | ③ 双侧活体对拍 | 本文件「2026-10-23 第三轮」：`status IS NULL` 打 Login ⇒ **Go 200 + token**；RAG 当时「删掉 `= 0L` + 加 null ⇒ INTERNAL」的版本 ⇒ **5001** | ⇒ **删掉 `= 0L` 才是不等价的那一侧**（已恢复，见 `UserEntity.status` 的 javadoc） |
+>
+> ⇒ **行为层结论（本条的关键补充）**：
+> | | Go | RAG |
+> |---|---|---|
+> | DDL | `status bigint DEFAULT 0` ⇒ **可空**（真库实证 `is_nullable=YES`，本文件 §4） | `status BIGINT NOT NULL DEFAULT 0` ⇒ **不可空**（`is_nullable=NO`） |
+> | 库里有 NULL 行时读出来 | **0**（不报错） | **读不到 NULL**（列里就是 0/1） |
+> | **可观察结果** | **status = 0** | **status = 0** |
+> ⇒ ⇒ **`DRIFT-USERRPC-V-002` 是「纯 DDL 层差异」，行为层零差异** ⇒ **两侧在 NULL 行上的可观察结果相同**。
+>
+> ⇒ ⇒ **「保留 RAG 的 NOT NULL」不是缺陷，是等价的那一侧**（RAG 更严：写 NULL 会被 PG 拒；Go 侧会写成 NULL 但读出来还是 0 ⇒ 可观察行为同形）。
+> ⇒ ⇒ **「放开可空」反而会制造新漂移**：RAG 侧 `callSettersOnNulls=false` ⇒ NULL 时跳过 setter ⇒ 若字段无 `= 0L` 初始值 ⇒ 读出 **null** ⇒ 与 Go 的 **0** **不一致**（且 admin 侧会从「NULL 当活跃(0)」变成「NULL 当未知(null)」⇒ **方向相反**）。
+> ⇒ ⇒ **本条从「🔴 仍成立，但被卡」降级为「🟡 DDL 层差异 · 行为层零差异」**，**建议保持 RAG NOT NULL**。
+> ⇒ ⚠️ **本条尚未销号**（销号须与 G4 共同确认，见下）；**分类字段保留原值 `OBSERVABLE DIFFERENCE` 不改写**（订正以注记形式留痕）。
+> ⇒ 🔴 **给 G4 派单 #6 的回执**：其「两步方案」的第 1 步（把 `UserEntity.status` 改成能表达 NULL）**不能执行** ⇒ 那会破坏本条第 ③ 层已用双侧活体对拍证实的等价性；其裁决点「Go 侧读到 NULL status 会扫描报错」**事实错误**（第 ① ② 层）⇒ **#6 应当按「行为层零差异」重新定性，而不是走两步方案**。
+
 ### DRIFT-USERRPC-V-003 DDL：`extra_info` 列类型 **text ↔ jsonb** —— ✅ **已修（2026-10-23 23:4x，commit `ec33159`）**
 
 - **Category**: Schema / Serialization
@@ -1305,6 +1329,18 @@ SEMANTICALLY EQUIVALENT（全部可达路径） + 7 项 OBSERVABLE DIFFERENCE
 属**另一个组件**，本轮未动；admin 侧不跑 `Login`，暴露面不同（`GetUser` 响应会带 `status=0`）。
 ⇒ 登记为跨组件待办，**不要**当成「已随 user-rpc 修好」。
 
+> 🟢 **2026-10-27 订正（本节的「缺陷」指认已被撤销）** —— G1 lane
+>
+> ⚠️ **本节写于 2026-10-23 上午，是那次「误修」期间的判断** ⇒ **已被同日第三轮的双侧活体对拍证伪**：
+> - **Go 侧读 `status IS NULL` 得到的是 `0`，不报错**（逐层证据见本文件 `DRIFT-USERRPC-V-002` 的 2026-10-27 订正块
+>   ① `gorm@v1.31.2/schema/field.go:616-622` ② `database/sql/convert.go:431-435` ③ 双侧活体 `Go 200 + token`）；
+> - ⇒ **admin-rpc 保留 `= 0L` 是「当时正确」的一侧**（与 user-rpc 同形），**不是缺陷** ——
+>   这一点 **admin-rpc 自己的台账已明确撤销该指认**
+>   （`docs/DRIFT/users/admin/rpc.md` 的 `UserEntity.status` javadoc：「admin-rpc 的同名实体一直保留 `= 0L`（与本类同形）—— 是当时正确的一侧 …该指认已撤销」）；
+> - ⇒ **本节保留原文供追溯**（不重写历史），**读本节时以本注记为准**。
+> ⇒ ⚠️ 连带：下面 `nullStatusIsDetectedBeforePasswordCheck` 那条守门所依赖的前提（「Go 的 NULL 扫描失败先于密码错误发生」）
+> **同样已被证伪** ⇒ 那条用例属于**已撤销的误修**留下的残留，**不应再作为「Go 行为」的判据**。
+
 ---
 
 <!-- @fix 2026-10-23 第三轮：双侧活体对拍 + 真 PG 守门（users/user 域） -->
@@ -1556,7 +1592,7 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 
 | ID | 内容 | 本轮结论 | 为什么不动 |
 |---|---|---|---|
-| **DRIFT-USERRPC-V-002** | `users_user.status` **NOT NULL**（Go 可空） | 🔴 **真库实证确认**（§4） | ⚠️ **动它会立刻激活 admin-rpc 的同款缺陷**：admin-rpc 的 `UserEntity.status` 是 `private Long status = 0L;`（MyBatis `callSettersOnNulls=false` ⇒ NULL 读成 0）⇒ 放开 NOT NULL 会让 admin 侧把 NULL 当成「活跃」。⇒ **必须与 admin 侧一起改**（见 `_shared.md` 的 admin 待裁决节） |
+| **DRIFT-USERRPC-V-002** | `users_user.status` **NOT NULL**（Go 可空） | 🟡 **2026-10-27 订正：DDL 层差异 · 行为层零差异**（Go 读 NULL ⇒ **0**，不报错；RAG NOT NULL ⇒ 读不到 NULL ⇒ 也是 0 ⇒ **可观察结果相同**）⇒ **建议保持 RAG NOT NULL**（⚠️ 尚未销号，须与 G4 共同确认） | 🟡 **真库实证确认**（§4） | ⚠️ **本行原写「动它会立刻激活 admin-rpc 的同款缺陷」—— 该指认已于 2026-10-23 被第三轮双侧活体对拍撤销**（admin-rpc 的 `= 0L` 是**与 Go 同形**的一侧，**不是缺陷**）⇒ **且「放开可空」会制造新漂移**（RAG 读出 null ≠ Go 的 0 ⇒ 方向相反）⇒ **正确处置是保持 NOT NULL**，不是与 admin 侧同改 |
 | **DRIFT-USERRPC-V-003** | `extra_info` `text` ↔ `jsonb` | ✅ **已修**（`ec33159`） | 你随后拍板「一起改成 text」。连带改 `JsonTextTypeHandler` + 去掉 2 处 CAST + 3 条守门（详见 §502）。跨域不对称随之消除 |
 | **DRIFT-USERRPC-V-011（新）** | 时间列 **DEFAULT `CURRENT_TIMESTAMP`**（Go 无 DEFAULT） | 🔴 新发现 | 两侧写入路径都**显式**写这两个列（Go 靠 GORM autoCreateTime；RAG 本轮起靠应用侧时钟）⇒ DEFAULT 只在「有人不写该列」时生效 ⇒ **当前不可观察**。⚠️ 改它要先确认 admin 域与 `users_user` 的写入路径 |
 | **DRIFT-USERRPC-V-006** | `id` 的取值来源（Go `bigserial` 序列 vs RAG `IdType.ASSIGN_ID` 雪花） | ✅ **已关闭**（第四轮，真 PG 实证：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；**永不进 wire**） | ⚠️ 本行此前写「仍成立」，是**过期状态**（第四轮已关，第六轮复核才发现汇总表没同步） |

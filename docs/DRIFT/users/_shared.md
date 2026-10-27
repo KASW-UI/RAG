@@ -854,7 +854,7 @@ RAG `3047ms/4455ms`，量级一致、可复现，**但以复测值为准**：
 
 | 项 | Go | RAG | 判定 |
 |---|---|---|---|
-| `users.status` | `is_nullable = YES` | `NO` | 🔴 **V-002 仍在**（真库确证） |
+| `users.status` | `is_nullable = YES` | `NO` | 🟡 **V-002 仍在（真库确证）· 但 2026-10-27 订正为「DDL 层差异 · 行为层零差异」⇒ 建议保持 NOT NULL**（逐层证据见 [`user/rpc.md` 的 V-002 订正块](user/rpc.md)） |
 | `users.extra_info` | `text` | ✅ `text` | ✅ **V-003 已修**（2026-10-23，`ec33159`）；`admin_admin.extra_info` 同轮前后一致 |
 | `users.create_time` / `update_time` 的 **DEFAULT** | **无** | **有 `CURRENT_TIMESTAMP`** | 🔴 **新登记 V-011** |
 | 索引 / 唯一约束 / NOT NULL | 见下 | 见下 | ✅ **功能等价** |
@@ -915,6 +915,23 @@ RAG 曾用 `if (!any) return 0;` 把它挡掉了。修复后双侧实测：空 b
   **暴露面是 `GetUser` 响应**（未注册用户被当成已封禁/已删除）。
 - ⇒ **裁决点**：`users_user.status` 是否放开 NOT NULL；放开则必须同步修 admin-rpc 的判据。
   **本轮不单方面改。**
+
+> 🟢🟡 **2026-10-27 订正（ADJ-01 的前提已被证伪 ⇒ 本条不再是「待裁决」）** —— G1 lane · **本轮独立复核**
+>
+> ⚠️ **上面那条「`= 0L` 是同款缺陷」是 2026-10-23 上午误修期间的判断，已被同日第三轮的双侧活体对拍撤销**
+> （`admin-rpc` 自己的台账 `admin/rpc.md` 的 `UserEntity.status` javadoc 明写：「admin-rpc 的同名实体一直保留 `= 0L`（与本类同形）—— 是**当时正确**的一侧 …该指认**已撤销**」）。
+>
+> ⇒ **本轮独立复核的逐层证据链**（不是转述）：
+> | 层 | 证据（本轮在 `GOMODCACHE` / `GOROOT` 里逐行读过） | 结论 |
+> |---|---|---|
+> | ① GORM 的 int64 setter | `gorm.io/gorm@v1.31.2/schema/field.go:616-622`：`case **int64: if data != nil && *data != nil { …SetInt(**data) }` | DB 值 NULL ⇒ `*data == nil` ⇒ **什么都不做** ⇒ 字段保持 **0**，**不报错** |
+> | ② stdlib 转换层 | `database/sql/convert.go:431-435`：`case reflect.Pointer: if src == nil { dv.SetZero(); return nil }` | dest 的 kind 是 **Pointer** ⇒ 走这一支 ⇒ **不报错** |
+> | ③ 双侧活体对拍 | `user/rpc.md`「2026-10-23 第三轮」：`status IS NULL` 打 Login ⇒ **Go 200 + token** | ⇒ **删掉 `= 0L` 才是不等价的那一侧** |
+>
+> ⇒ ⇒ **行为层零差异**：Go 的「可空 + 读成 0」与 RAG 的「不可空 ⇒ 读不到 NULL ⇒ 也是 0」⇒ **可观察结果相同**。
+> ⇒ ⇒ **「必须与 admin 侧同改」是错的**：那会**制造**新漂移（RAG 读出 `null` ≠ Go 的 `0`；admin 侧从「NULL 当活跃(0)」变成「NULL 当未知(null)」⇒ **方向相反**）。
+> ⇒ ⇒ **ADJ-01 的正确处置 = 保持 RAG 的 NOT NULL**（= RAG 更严的一侧，且与 Go 可观察行为同形）⇒ **不需要联合裁决**。
+> ⇒ ⚠️ **本条尚未销号**（销号须与 G4 共同确认 —— G4 的派单 #6 用了相反的前提）⇒ 逐层证据见 [`user/rpc.md` 的 V-002 订正块](user/rpc.md)。
 
 #### ADJ-02 ⚠️ `admin_admin` / `admin_invite` 时间列仍是 `TIMESTAMP`
 

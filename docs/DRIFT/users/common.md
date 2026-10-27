@@ -439,9 +439,25 @@ Tests run: 22, Failures: 9, Errors: 0, Skipped: 0
 |---|---|---|---|
 | **UNRESOLVED-USERSCOMMON-001** | `DRIFT-USERSCOMMON-001`（1017/1018 文案）要不要改成 `"FAIL"` | 改法会**同时改变 admin-api 的 wire 行为**，属跨域裁决 | 与 `align/users-admin` 会话合并裁决；本轮已取证，未动手 |
 | **UNRESOLVED-USERSCOMMON-002** | `DRIFT-USERSCOMMON-005`（`$1$`/`$2x$`）的实际数据面 | 需查生产库是否存在非 `$2a$` 的 hash（两侧自产的都是 `$2a$`） | 真 PG 上跑 `SELECT DISTINCT left(password,4) FROM users_user WHERE password LIKE '$%'` |
-| **UNRESOLVED-USERSCOMMON-003** | `http/GoStyleCoercion` 的**全局副作用**是否波及非 users 域 | 它通过 `JsonMapperBuilderCustomizer` 全局施加；注释自陈「规则是全局的，误伤了 `GetUserListReq.keyword`」 | 需在 message/like/article 等域各打一次带标量的请求矩阵；本轮只审了 users 域 |
+| ~~**UNRESOLVED-USERSCOMMON-003**~~ ✅ **已关闭（2026-10-27 · G1 lane · 问法订正）** —— 原问「`http/GoStyleCoercion` 的**全局副作用**是否波及非 users 域」 | ~~它通过 `JsonMapperBuilderCustomizer` 全局施加~~ ⇒ **该前提不成立**：`GoStyleCoercion` **刻意不做 `@Configuration`**（自身 javadoc 明写「本类只出规则、两个 api 模块各自注册 customizer」⇒ 避免给纯 gRPC 的 admin-rpc 强加 servlet/Boot 自动配置依赖）⇒ **注册行为是「各 api 进程各自注册」**，**不存在进程内全局作用域**（各域是独立 Spring Boot 进程）⇒ **原问法问的是机制上不存在的东西** | ~~需在 message/like/article 等域各打一次带标量的请求矩阵~~ ⇒ **不需要**：问题前提不成立 ⇒ 已由「逐域清点注册方」直接结清（下方订正块） |
 | **UNRESOLVED-USERSCOMMON-004** | `ddl/SchemaInitializer` 的四份脚本与 Go `AutoMigrate` 的**逐列等价性** | 本轮按用户口径**不动 DDL**，只审了 Java 侧脚本内容；`ADVISORY_LOCK_KEY` 的并发正确性未做双侧对拍 | 真 PG 下同时起 `user-rpc` + `admin-rpc` 打同一空库（`UNRESOLVED-USERRPC-005` 仍是同一个未闭环项） |
 | **UNRESOLVED-USERSCOMMON-005** | `jwt.GetToken` 的 **claim 数值类型**在跨语言消费时是否一致 | 两侧 wire 上都是 JSON 数字（实测 `userId:1234567890`），但 Go 解析后是 `float64`、jjwt 是 `long` | 对「userId 超过 2^53」的值做一次双侧解析比对（本轮探针只用了 `1234567890`） |
+
+> 🟢 **2026-10-27 订正（`UNRESOLVED-USERSCOMMON-003` 的问法订正 + 结论：无漂移）** —— G1 lane
+>
+> ⚠️ **原问法错在把「注册行为」当成了「全局作用域」** ⇒ 下面三行是**本轮独立复核**的结果
+> （据 G4 派单 #5 的线索，**但每条都自己核过**，不是照抄转述）：
+>
+> | 面 | 本轮实测 | 结论 |
+> |---|---|---|
+> | ① `GoStyleCoercion` 是不是 `@Configuration`？ | **不是** —— 自身 javadoc 明写「**为什么这里是纯静态工具、不是 `@Configuration`**」：把 `@Configuration` + `JsonMapperBuilderCustomizer` 放进 `users-common` 会给纯 gRPC 的 admin-rpc 强加 servlet/Boot 自动配置依赖 ⇒ 改成「本类只出规则、**各 api 模块各自注册** customizer」 | ⇒ **「通过 `JsonMapperBuilderCustomizer` 全局施加」这个前提不成立** |
+> | ② 到底哪些 api 域注册了？ | **8 个**：`article` / `comment` / `favorite` / `follow` / `like` / `message`（6 域各用**本域私有**变体）＋ `user-api` / `admin-api`（用 **users-common 通用版**） | ⇒ 原台账「本轮只审了 users 域 ⇒ 需在 message/like/article 各打一次矩阵」这个**待办范围本身也写错了**（不是「三个外域待审」，而是「**八个已注册域**」） |
+> | ③ 未注册的 `hot-api` / `task-api` 是漏吗？ | **不是漏**：**`hot-api` 零 `@RequestBody`** ⇒ 规则不适用；**`task-api`** 的 Go 侧类型带**自定义 `UnmarshalJSON`**（`service/task/api/internal/types/types.go:16` 的 `UserIDParam`）⇒ **Go 侧也不走标准 mapping** ⇒ RAG 已在 DTO 层手写镜像 | ⇒ 「没注册」**不需要补** |
+> | ④ 已注册的 8 域会被「误伤」吗？ | **Go 全仓只有 1 个自定义 `UnmarshalJSON`**（就是上面那个 task 的）⇒ 已注册的 8 个 api 面对的都是 Go 侧的**标准 mapping** | ⇒ **无漂移** |
+>
+> ⇒ ⇒ **结论：两侧一致，无漂移**（`JsonMapperBuilderCustomizer` 是 **Spring 容器级 Bean（进程内作用域）** ⇒ 一个域注册它**不可能**波及另一个域的**进程**）。
+> ⇒ ⚠️ **证据边界**：**L1 静态对照**（逐域清点注册方 ＋ 读 `GoStyleCoercion` 的 javadoc ＋ grep Go 全仓 `UnmarshalJSON`）⇒ **不是活体对拍** ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。
+> ⇒ ⚠️ **原问法提到的「注释自陈『规则是全局的，误伤了 `GetUserListReq.keyword`』」**：那句指的是**同一个进程内**的**跨端点**影响（同一 api 域的所有端点共享一个 `ObjectMapper`），**不是跨域** ⇒ 属域内语义，与本条要问的「是否波及**外域**」**不是同一件事**。
 
 ---
 

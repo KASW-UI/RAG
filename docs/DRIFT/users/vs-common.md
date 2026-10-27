@@ -28,7 +28,7 @@
 | 🔴 `DRIFT-USERAPI-013` | 过载保护：**MaxConns 闸门粒度** + **breaker 键空间**（Go key = 注册期 `route.Path` 模板 ⇒ 基数 = 路由数；RAG = raw `getRequestURI()` ⇒ 基数 = 参数取值数）+ 注释与实现矛盾 | `service/common` | 🔴 **待拍板**（域台账原文）；⚠️ **与 follow 域 `DRIFT-FOLLOW-008` 同族** | [`user/api.md`](user/api.md) |
 | 🟡 `DRIFT-ADMINAPI-007` | 503 超时响应缺 `X-Content-Type-Options: nosniff` | `service/common` | 🟡 **半修** —— `nosniff` **已落地**（`HttpMiddleware.java:692`）⇒ 原条自动消失；**charset 分号后空格残差仍在** ⇒ 需重开一条 | [`admin/api.md`](admin/api.md) |
 | `DRIFT-ARPC-006` | OTel `audit.*` span 属性（`operator_id` 不恒为 0） | `service/common`（otel 埋点） | ✅ **已修** | [`admin/_shared.md`](admin/_shared.md) |
-| 🔴 `UNRESOLVED-USERSCOMMON-003` | `http/GoStyleCoercion` 的**全局副作用**是否波及非 users 域（通过 `JsonMapperBuilderCustomizer` 全局施加） | `service/common` | 🔴 **未核** —— 本轮只审了 users 域 ⇒ **需在 message/like/article 各打一次带标量的请求矩阵** | [`common.md`](common.md) |
+| ✅ `UNRESOLVED-USERSCOMMON-003` | `http/GoStyleCoercion` 的**全局副作用**是否波及非 users 域（通过 `JsonMapperBuilderCustomizer` 全局施加） | ~~`service/common`~~ ⇒ **落点原就写错**（类在 `users-common`，且**不是** `@Configuration`） | ✅ **已关闭（2026-10-27 · G1 lane）—— 问法订正 ⇒ 前提不成立 ⇒ 无漂移**（`GoStyleCoercion` **刻意不做 `@Configuration`** ⇒ 各 api 各自注册 customizer ⇒ **进程内作用域** ⇒ 「全局副作用波及外域」**机制上不存在**；未注册的 hot-api / task-api **不是漏**）⇒ 逐条证据见 [`common.md` 的 2026-10-27 订正块](common.md) | [`common.md`](common.md) |
 | `DRIFT-USERRPC-V-007` | 超时 description 逐字一致（`context deadline exceeded` vs `rpc timeout after 2000ms`） | `service/common` | ✅ **已合回主干 `4f839f9`** ⇒ 双侧活体复跑一致 | [`user/api.md`](user/api.md) |
 
 > ⚠️ **写死数字/状态的纪律**（AGENTS.md §6）：本表是**抽取快照**；每条**逐条证据**以「域台账」列指向的正文为准，
@@ -38,14 +38,15 @@
 
 | 编号 | 快照状态 | **复核结论（核对日期 2026-10-27）** | 复核依据 / 强度 |
 |---|---|---|---|
-| `UNRESOLVED-USERSCOMMON-003` | 🔴 未核（落点 `service/common`） | ✅ **口径已订正** ⇒ **不再整条甩 G4**（拆成「域侧自修」＋「共享层」两半） | **本轮实测 8 个域的 `WebMvcConfig`**（L3 活体）⇒ 见 §6.4.1 |
+| `UNRESOLVED-USERSCOMMON-003` | 🔴 未核（落点 `service/common`） | ✅ **已关闭（2026-10-27 · G1 lane）—— 问法订正 ⇒ 前提不成立 ⇒ 无漂移**（`GoStyleCoercion` **刻意不做 `@Configuration`** ⇒ 各 api 各自注册 ⇒ 进程内作用域 ⇒ 无跨域全局副作用；且 hot-api / task-api 未注册**不是漏**）⇒ **不再需要各外域打请求矩阵** | **L1 静态对照**（逐域清点注册方 ＝ 8 个 api 域 ＋ 读 `GoStyleCoercion` javadoc ＋ grep Go 全仓 `UnmarshalJSON` 仅 1 处）⇒ 见 [`users/common.md` 的 2026-10-27 订正块](common.md) |
 | `DRIFT-USERAPI-013` | 🔴 待拍板 | 🔴 **维持待拍板**；只读复核已于 2026-10-26 完成（键语义钉死 · **可观察面在 `article-api` ⇒ user-api 本组件不可观察**）⇒ 落点确认在共享层 ⇒ **派 G4** | 域台账原文（L1） |
 | `DRIFT-ARPC-010`（= E66） | 🔴 OPEN | 🔴 **维持 OPEN**（本轮**未复核落点**）⇒ 派单时仍须核 Go 侧 `文件:行号` | 本轮未查 |
 | `UNRESOLVED-ARPC-002`（= E38②） | 🔴 未闭合 | ✅ **口径订正（2026-10-27）＝「① 已闭环 ② 未做（已另立项）」** ⇒ **本轮不需要落码**：① 纯 deadline 计算**已落地**（`RpcInterceptor.java:234` 的 `Math.min(serverBudgetMs, clientDeadlineRemainingMs())`）⇒ 剩下**第②层**（grpc-java `ServerCall#close()` **不取消业务线程** ⇒ 在途 SQL 不随客户端 deadline 取消 ⇒ 与 T-14 同根 ⇒ 架构级 ⇒ Jason 2026-10-26 拍板「**另立项**」）⇒ ⚠️ **「① 不销本条」的正解是「① 已做、② 在等立项」⇒ 不是「① 没做」** | **L3 双侧活体**（`tools/semantic-probe/rpc-timeout/` ⇒ EXIT=0 · `client_deadline_ctx` 一致 · 3/3 一致）+ L1 源码（`RpcInterceptor.java:234/263/592-601`） |
 | `DRIFT-ADMINAPI-007` | 🟡 半修 | 🟡 **维持半修**（`nosniff` 已落地于 `HttpMiddleware.java:692` ⇒ 原条自动消失；**charset 分号后空格残差仍在** ⇒ **需重开一条**） | 域台账原文（L1） |
 | `DRIFT-USERRPC-V-007` | ✅ 已合回 `4f839f9` | ✅ **维持**（本轮**未重跑**双侧活体 ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」） | 域台账原文（L3，2026-10-26） |
 
-⚠️ **本轮复核范围声明（诚实边界）**：§1 表里**只有 `UNRESOLVED-USERSCOMMON-003` 的落点被本轮实测订正**；
+⚠️ **本轮复核范围声明（诚实边界）**：§1 表里 **只有 `UNRESOLVED-USERSCOMMON-003` 被本轮实测订正并关闭**
+（问法订正 ⇒ 前提不成立 ⇒ 无漂移 ⇒ **不再是待办**，见上表）；
 其余 5 条**状态未变**（其中 3 条**本轮未复核**）⇒ 按 AGENTS.md §6 记「状态未变」，
 **派单时仍须按反馈单 7 项重新核 Go 侧 `文件:行号`**（台账的「抽取快照」**不算数**）。
 
@@ -58,14 +59,14 @@
 
 | 轴 | 机制 | 本域侧的落点 / 调用 | 结论 | 证据强度 | 核对日期 |
 |---|---|---|---|---|---|
-| **A1** | 超时 / deadline | ① `DRIFT-USERAPI-009②`（**3s 预算作用域**：Go 不覆盖 JWT 验签，RAG 覆盖验签+黑名单+handler）**✅ 已修（2026-10-27 · G1 lane · 域内自闭环）** ② `DRIFT-USERAPI-015`（Redis 主机名解析失败 ⇒ 200/503 摇摆）✅ **已关闭（2026-10-27 · G1 lane）** —— 关闭判据 = **复现失败**（dns 形态 24 次探测两侧都 200；blackhole 形态两侧都 503 ⇒ 同形）＋ **无可执行修法**（候选②实测制造**反向差异** ⇒ 否决）⇒ ⚠️ **关闭 ≠ 证明了等价**（保留重开触发条件）③ `DRIFT-USERRPC-V-012`（超时业务日志归因 ⇒ 落点在本域 `UserDomainService.logout`）**✅ 已修（2026-10-27 · G1 lane · 域内一行）** ④ `DRIFT-USERRPC-V-013`（DB 超时的源码层形态差异 ⇒ **非 wire 漂移，不得改回 Go 行为**）⑤ ✅ **`DRIFT-ADMINAPI-006` 的 ② 半已修**（**本轮 · 2026-10-27 · admin-api 推广 `DRIFT-USERAPI-009②`**：验签搬进 `admin-api` 的 `auth/GoStyleJwtAuthFilter`（`@Order(+6)`）⇒ 移出 3s 预算 ⇒ M-37 由 OBSERVABLE DIFFERENCE 改判 EQUIVALENT ⇒ **L3 真 Tomcat 复验**；⚠️ **① 半（遥测面）仍未动**）⑥ ✅ **`DRIFT-USERAPI-016` 已修**（**本轮 · 2026-10-27 · 新立并自闭环**：`user-api` 缺 `spring.data.redis.connect-timeout` ⇒ Lettuce 回落到 3s ≠ Go 的 `DialTimeout` 5s ⇒ 已补 `connect-timeout: 5s` ＋ 新增 `UserApiRedisTimeoutConfigTest` 2 例；⚠️ **与 ② 是同族但不是同一条** —— ② 是「DNS 解析失败的 200/503 摇摆（取舍题，建议不改）」，⑥ 是「超时**配置值**没抄对（照抄题）」）⑦ ✅ **`DRIFT-ADMINAPI-012` 已修**（**本轮 · 2026-10-27 · 新立并自闭环**：Lettuce 默认 `disconnectedBehavior=DEFAULT` ⇒ **Redis 断连时命令被排队**等重连 ⇒ 挂到 `commandTimeout: 3s` ⇒ **撞 HTTP 3s 预算 ⇒ 503**；Go 是 `MaxRetries=3` 的**快速失败** ⇒ **fail-open 200** ⇒ 落**域内副本** `config/RedisDisconnectedBehaviorConfig`（`REJECT_COMMANDS`）＋ 守门 `AdminApiRedisDisconnectedFastFailTest` 2 例；⚠️ **修前实测 3013ms ⇒ 修后 1ms**；🔴 **共享层收编仍归 G4** ⇒ 见 §6.4 表末行） | 🔴 **1 条 OPEN**（④ 非漂移；② 已关闭）<br>⚠️ **2026-10-27 订正**：原状态写「4 条 OPEN（其中 **②③** 域内可闭环）」⇒ **编号错挂**（② 是 `USERAPI-015`、③ 是 `V-012`）⇒ 域内可闭环的是 **①③**；**② 已于本轮正式关闭** | L1 源码 + **L2 运行时（新增）** + **L4 运行时双侧活体（⑤ · Go 腿探针见 §8.4）** + **L2 配置层守门（⑥）** + **L3 真容器活体（⑦）** + L3 双侧活体（台账原有） | 2026-10-27（**本轮订正 ⑤⑥⑦ ＋ 关闭 ②**） |
+| **A1** | 超时 / deadline | ① `DRIFT-USERAPI-009②`（**3s 预算作用域**：Go 不覆盖 JWT 验签，RAG 覆盖验签+黑名单+handler）**✅ 已修（2026-10-27 · G1 lane · 域内自闭环）** ② `DRIFT-USERAPI-015`（Redis 主机名解析失败 ⇒ 200/503 摇摆）✅ **已关闭（2026-10-27 · G1 lane）** —— 关闭判据 = **复现失败**（dns 形态 24 次探测两侧都 200；blackhole 形态两侧都 503 ⇒ 同形）＋ **无可执行修法**（候选②实测制造**反向差异** ⇒ 否决）⇒ ⚠️ **关闭 ≠ 证明了等价**（保留重开触发条件）③ `DRIFT-USERRPC-V-012`（超时业务日志归因 ⇒ 落点在本域 `UserDomainService.logout`）**✅ 已修（2026-10-27 · G1 lane · 域内一行）** ④ `DRIFT-USERRPC-V-013`（DB 超时的源码层形态差异 ⇒ **非 wire 漂移，不得改回 Go 行为**）⑤ ✅ **`DRIFT-ADMINAPI-006` 的 ② 半已修**（**本轮 · 2026-10-27 · admin-api 推广 `DRIFT-USERAPI-009②`**：验签搬进 `admin-api` 的 `auth/GoStyleJwtAuthFilter`（`@Order(+6)`）⇒ 移出 3s 预算 ⇒ M-37 由 OBSERVABLE DIFFERENCE 改判 EQUIVALENT ⇒ **L3 真 Tomcat 复验**；⚠️ **① 半（遥测面）仍未动**）⑥ ✅ **`DRIFT-USERAPI-016` 已修**（**本轮 · 2026-10-27 · 新立并自闭环**：`user-api` 缺 `spring.data.redis.connect-timeout` ⇒ Lettuce 回落到 3s ≠ Go 的 `DialTimeout` 5s ⇒ 已补 `connect-timeout: 5s` ＋ 新增 `UserApiRedisTimeoutConfigTest` 2 例；⚠️ **与 ② 是同族但不是同一条** —— ② 是「DNS 解析失败的 200/503 摇摆（取舍题，建议不改）」，⑥ 是「超时**配置值**没抄对（照抄题）」）⑦ ✅ **`DRIFT-ADMINAPI-012` 已修**（**本轮 · 2026-10-27 · 新立并自闭环**：Lettuce 默认 `disconnectedBehavior=DEFAULT` ⇒ **Redis 断连时命令被排队**等重连 ⇒ 挂到 `commandTimeout: 3s` ⇒ **撞 HTTP 3s 预算 ⇒ 503**；Go 是 `MaxRetries=3` 的**快速失败** ⇒ **fail-open 200** ⇒ 落**域内副本** `config/RedisDisconnectedBehaviorConfig`（`REJECT_COMMANDS`）＋ 守门 `AdminApiRedisDisconnectedFastFailTest` 2 例；⚠️ **修前实测 3013ms ⇒ 修后 1ms**；🔴 **共享层收编仍归 G4** ⇒ 见 §6.4 表末行） | 🔴 **1 条 OPEN**（④ 非漂移；② 已关闭）<br>⚠️ **2026-10-27 订正**：原状态写「4 条 OPEN（其中 **②③** 域内可闭环）」⇒ **编号错挂**（② 是 `USERAPI-015`、③ 是 `V-012`）⇒ 域内可闭环的是 **①③**；**② 已于本轮正式关闭** | L1 源码 + **L2 运行时（新增）** + **Go 腿 L4 活体·直接判据（⑤）+ RAG 腿 L3 真 Tomcat·间接判据 ⇒ 合并按弱侧记 L3**（Go 腿探针见 §8.4；⚠️ 不笼统写 L4） + **L2 配置层守门（⑥）** + **L3 真容器活体（⑦）** + L3 双侧活体（台账原有） | 2026-10-27（**本轮订正 ⑤⑥⑦ ＋ 关闭 ②**） |
 | **A2** | gRPC 拦截器链 | `DRIFT-USERAPI-011`（客户端熔断 handler）✅ · `DRIFT-USERRPC-V-007`（超时 description 逐字）✅ 已合回 `4f839f9` · ① 三拦截器链（recover/breaker/shedding）已全处置 | ✅ **一致**（在该证据强度下） | L3 双侧活体 | 2026-10-27 |
 | **A3** | HTTP 保护链 | ① 本域 `application.yml` 的 `rag.http.go-form-limit.mode` = **raw**（user-api ＋ admin-api 各一行）② `DRIFT-USERAPI-008`（过载保护「不存在」）**已证伪** ③ `DRIFT-USERAPI-012`（降载 RT 口径）✅ ④ `DRIFT-USERAPI-013`（**MaxConns 粒度 + breaker 键空间 + javadoc 矛盾**）🔴 ⑤ `009② 补充`（MaxBytes 相对 observability 的位置）**未签字** ⑥ ✅ **验签与保护链的相对次序已对齐**（**本轮 · 2026-10-27**：`user-api` / `admin-api` 两域的验签各搬进各自的 `auth/GoStyleJwtAuthFilter`（`@Order(+6)`）⇒ 落在 `+3 Traceparent` 之内、`+7 HttpMiddleware（3s 预算）` 之外 ⇒ **Filter 绝不写响应** ⇒ **413 仍压过 401**（真 Tomcat 实测：user/admin 两域 413 + 空 body）；⚠️ **各域 401 body 形状刻意不统一**（user/admin = 完整信封；follow = 空 body））⑦ ❌ **`hot-api` 对本条 N/A**（**2026-10-27 由 G3 指出 · 本域已独立核实**：Go 侧 `service/hot/api/internal/handler/routes.go` **零 `rest.WithJwt`**、单块 `AddRoutes`、唯一端点 `GET /hot/v1/articles`；RAG 侧 `service/hot/hot-api` **无 `WebMvcConfig`、无任何 `*Jwt*`/`*Auth*` 类** ⇒ **两侧都没有验签环节** ⇒ 热榜本就该匿名读，**「RAG 没有鉴权」不是漂移**） | 🔴 **1 条 G4** ＋ 🟡 **1 条待拍板** ＋ 🔴 **1 条域内**（009② 补充项） | L1 源码 + **L2 装配层守门（容器装配结果）** + **L3 真 Tomcat 活体（⑥）** | 2026-10-27 |
 | **A4** | 错误码 / envelope | `DRIFT-USERAPI-003/-006/-007/-010` ✅（后两条为**签字偏离** `SD-USERAPI-001` 与 N-1）· `UNRESOLVED-001/003/004` **全部已关**（`UNRESOLVED-001` = 真 Tomcat 双侧 + `check-plaintext400-headers.sh` EXIT=0） | ✅ **一致**（**4 条签字偏离**覆盖 ⇒ 审查见红先查签字档） | L3 真 Tomcat + 双侧活体 | 2026-10-27 |
 | **A5** | 端口治理 | ① api 监听 8888 → **49900**（`OBSERVABLE DIFFERENCE`，已签字 `Infrastructure.md §3`）② rpc gRPC `0.0.0.0:9004` → **49210**（`IMPLEMENTATION DIFFERENCE`，已锁定）③ ⚠️ **`RANDOM_PORT` 面的记账缺口（2026-10-27 补记）** —— **实测清点**（非印象）：<br>· 全仓 `RANDOM_PORT` 命中 **21 个文件**（`service/` 全树）；<br>· **G1 三域合计只有 1 处**：`user-api` 的 `GoStyleGrpcClientBreakerE2ETest`（`webEnvironment = RANDOM_PORT`，但那是 **gRPC 熔断 E2E**，**不是 HTTP 响应头面**）；<br>· `admin-api` / `follow-api` 域内 **零** `RANDOM_PORT`、**零** `DEFINED_PORT`；<br>· ⚠️ 域内的**响应头层**验证（`AdminApiPlainText400HeaderProbeTest` 等）走的是 **`webEnvironment = MOCK` ＋ `@AutoConfigureMockMvc`** ⇒ **MockMvc 测不到真 Tomcat 的 header 逐字节** ⇒ 真 Tomcat 面由**仓外脚本** `tools/difftest/check-plaintext400-headers.sh` 覆盖（**不在域内台账的证据面**） | 🟡 **`RANDOM_PORT` 面仍是记账缺口**（**不是「已对齐」**）—— 本轮把「零覆盖」从**空白**变成**有出处的记录**：缺口在**哪几个文件**、**为什么 MockMvc 不算**、**真 Tomcat 面实际由谁覆盖** 三点已钉死 ⇒ **可被下一轮按图索骥** | L1 静态（`grep` 全树清点 ＋ 逐个测试类的 `webEnvironment` 实读） | 2026-10-27（**本轮补记**） |
 | **A6** | errmsg 契约 | code→msg 全表 **30 项 EQUIVALENT**（Go `errmsg.go:38-68` ↔ `users-common.ErrorCode`）· N-2（Go 侧 9 处 GBK 双重编码乱码）✅ 签字 · ⚠️ **但 `DRIFT-USERSCOMMON-001`（1017/1018 文案）属 A6 本体** ⇒ 域台账 [`common.md`](common.md) 判定 **`SEMANTICALLY NOT EQUIVALENT`**（1 条 SEMANTIC MISMATCH 已修 ＋ **3 条 OBSERVABLE DIFFERENCE** ＋ 5 条未决） | 🟡 **30 项等价 ＋ 1 条 A6 本体 OBSERVABLE DIFFERENCE**（`001`：**潜伏** —— users 域内三个调用点全是日志码，wire 观察不到 · ⏸️ 待与 admin 域合并裁决）⇒ ⚠️ **不能写「一致」** | **L4 双侧活体**（域台账核对日期 **2026-10-23** · 176 条逐条实测） | 2026-10-27（**本轮由「✅ 一致」订正为 🟡**） |
 | **A7** | proto 契约 | 两侧 `.proto` 剥离 option/注释/空行后**逐行 diff 零差异** ＋ 常驻守门 `check-proto-static.sh` ＋ `UserInfo.status` 的 `optional` 两侧同 | ✅ **一致** | L1 实测 diff | 2026-10-27 |
-| **A8** | DDL 时间列 / 类型 | ① `DRIFT-USERRPC-V-002`（`users_user.status` **可空性**）🔴 **被卡**（改动须与 admin 域同改 ⇒ 落点 `users-common` ⇒ **G4 写权**）② `DRIFT-USERRPC-V-011`（时间列 `DEFAULT CURRENT_TIMESTAMP`）⚠️ **未修**（8 处，刻意保留）③ `V-003`（`extra_info` text↔jsonb）✅ `V-004`（4 个时间列 timestamptz）✅ `V-006`（id 取值来源）✅ ④ 表名 `users`→`users_user` ✅ 签字 ⑤ 建表责任交叉 EQUIVALENT（**双侧对称并发启动 9 轮**） | 🔴 **2 条**（V-002 落 G4 ＋ V-011 待裁决） | L4 真 PG（并发 9 轮） | 2026-10-27 |
+| **A8** | DDL 时间列 / 类型 | ① `DRIFT-USERRPC-V-002`（`users_user.status` **可空性**）🟡 **2026-10-27 订正：DDL 层差异 · 行为层零差异** ⇒ **建议保持 RAG NOT NULL**（Go 读 NULL ⇒ **0** 不报错；RAG 读不到 NULL ⇒ 也是 0 ⇒ 可观察结果相同）⇒ ⚠️ **未销号**（须与 G4 共同确认）⇒ ⚠️ **原写「改动须与 admin 域同改」是错的**：那会**制造**新漂移（RAG 读出 null ≠ Go 的 0）⇒ 逐层证据链见 [`user/rpc.md` 的 V-002 订正块](user/rpc.md) ② `DRIFT-USERRPC-V-011`（时间列 `DEFAULT CURRENT_TIMESTAMP`）⚠️ **未修**（8 处，刻意保留）③ `V-003`（`extra_info` text↔jsonb）✅ `V-004`（4 个时间列 timestamptz）✅ `V-006`（id 取值来源）✅ ④ 表名 `users`→`users_user` ✅ 签字 ⑤ 建表责任交叉 EQUIVALENT（**双侧对称并发启动 9 轮**） | 🔴 **1 条**（V-011 待裁决）＋ 🟡 **1 条**（V-002 · DDL 层 · 行为零差异） | L4 真 PG（并发 9 轮）＋ **L1 源码逐层复核**（GORM `field.go:616-622` ＋ `database/sql/convert.go:431-435`，本轮独立复核） | 2026-10-27（**本轮订正 V-002**） |
 | **A9** | trace / otel | ① `DRIFT-USERAPI-009①`（401 是否计入观测面）✅ 签字 `SD-USERAPI-002`（**只覆盖 ①**）② `DRIFT-USERRPC-V-012`（业务日志归因）**✅ 已修（2026-10-27 · G1 lane · 域内一行）** —— 仅「原始异常被整个吞掉」闭环；②③ 架构级另立项 ⇒ 本条不销 ③ **`Traceparent` 传播：域台账零条目**（原写「全 users 域零覆盖」—— **本轮补了对照记录，见下方 A9 补记**）④ **`audit.*` span 属性：admin 域已覆盖**（`DRIFT-ARPC-006` ✅ 已修 ＋ `admin/_shared.md` N-4 关联 ＋ 守门 `AdminSpanWiringTest`）⇒ **user 域（user-api / user-rpc）零覆盖**（**本轮已核：Go 侧 user 域也零 ⇒ 不是缺口**）⑤ 共享层本体（otel 装配 + 传播器）**已由 global lane L1 闭合**（`GoStyleOtelAutoConfiguration` 走 `AutoConfiguration.imports` ⇒ 不依赖组件扫描 ⇒ rpc 进程也装） | 🟡 **两条「零覆盖」本轮已重新定性**（**不是空白轴，是「两侧都无 ⇒ 无漂移」**）—— 详见下方 A9 补记 | L1 静态（**本轮补：Go 侧 `audit.*` / `otel.` 逐域清点 ＋ RAG 侧 span 属性逐条对读**）＋ 共享层台账（`common/audit.md` / `global/lanes/L1-delivery.md`） | 2026-10-27（**本轮补记 + 订正**） |
 
 > **🆕 A9 补记（2026-10-27 · G1 lane · 把「零覆盖」从空白变成有出处的对照记录）**
@@ -368,7 +369,164 @@ follow-api: Caused by: java.lang.IllegalStateException: Can't connect to channel
 | **本域复跑** | 另编一份二进制（`CGO_ENABLED=0 go build`，**不动 G2 的文件**）+ 自己的端口 **25790** ⇒ 三腿全中：<br>① 有效 token `/fast` ⇒ HTTP **200**；`A deadline_set=**false** claim_userId=12345` · `B deadline_set=**true** remaining=3s`<br>② 有效 token `/slow`（handler 睡 4s）⇒ **HTTP 503 @ 3.002s**（与 Go `http.go:88` 逐字一致）<br>③ **非法 token** ⇒ **HTTP 401 + 空 body（0 字节）**，且 **A/B/HANDLER 一个都没打印** ⇒ 🔴 **决定性反证**：Authorize 在所有 user middleware 之前 ⇒ **验签在 3s 预算之外** |
 | ⚠️ **腿③ 才是判据** | 腿①②只是正证；腿③ 是**负证据**（「观测点 A 没打印」⇒ Authorize 更靠外）⇒ **比正证据更硬** |
 | 对本 lane 的价值 | `user-api` / `admin-api` / `follow-api` 的 Go 侧结论**同构**（三个 api 的 `xxxcenter.go` 都是 `DisableNativeRestTimeout` + `server.Use(observability.NewHTTPMiddleware(...))`）⇒ ⇒ **Go 侧证据由 L1 升到 L4** ⇒ §2 的 A1 轴（①③⑤）与三份域台账的实施记录（元信息行）同步改写 |
-| ⚠️ **诚实边界** | ① **两次独立运行**（Go 腿与 RAG 腿不在同一次编排里）⇒ 比的是**属性**（验签是否计入 3s 预算），**不是逐字节 diff**；② **探针落在 `/tmp`（易失）** ⇒ **落仓 `tools/difftest/` 需整合者拍板**（`tools/` 不在 G1 白名单）⇒ **已登记待办**；③ 探针的 `Timeout` 走 go-zero struct tag 默认值 3000ms（真源 api 的 yaml 同样不写 `Timeout`）⇒ 口径与真源一致 |
+| ⚠️ **诚实边界** | ① **两次独立运行**（Go 腿与 RAG 腿不在同一次编排里）⇒ 比的是**属性**（验签是否计入 3s 预算），**不是逐字节 diff**；② **探针落在 `/tmp`（易失）** ⇒ **落仓 `tools/difftest/` 需整合者拍板**（`tools/` 不在 G1 白名单）⇒ **已登记待办**；⚠️ **但源码已在本节 §8.4.1 抄了一份保全副本**（域台账在 G1 写权内 ⇒ 不会被 `/tmp` 清空带走）③ 探针的 `Timeout` 走 go-zero struct tag 默认值 3000ms（真源 api 的 yaml 同样不写 `Timeout`）⇒ 口径与真源一致 |
+
+#### 8.4.1 📦 **探针源码保全副本**（2026-10-27 · 防 `/tmp` 一清就没了）
+
+> ⚠️ **为什么抄在这里**：`tools/difftest/` 是**无人拥有 ⇒ 整合者**（G1 不写）⇒ 在整合者落仓前，
+> 探针**只活在 `/tmp`** ⇒ **易失**（机器重启即没）⇒ **工件有丢失风险**。
+> ⇒ 本节把**探针源码原文**抄进**域台账**（`docs/DRIFT/users/**` = **G1 写权内**）⇒ **保住这份工件**，等整合者落仓时可直接取用。
+> ⇒ 原文出自 **G2 建的** `/tmp/goprobe/probejwt/main.go`（**本域只复跑、未改动一个字节**）；下面的副本与 `/tmp` 现存副本**逐字一致**。
+>
+> **取用方式**（G2 已确认）：**不必整仓复制** —— 直接复用 `/tmp/goprobe`（`go build` 到自己目录 ＋ 自己端口）即可；
+> 但**落仓时要解决「怎么让探针仍能 import 真源自己的 `observability`」**（这一版靠**整仓复制**才能 import 到 ⇒ 体积问题就是落仓要处理的那件事）。
+> ⇒ **构建要点**：`CGO_ENABLED=0`（否则报 `stdlib.h not found`）＋ 离线依赖用 `GOPROXY=file://$(go env GOMODCACHE)/cache/download`。
+>
+> **三腿期望输出**（本域在 **25790** 端口复跑实测；G2 侧是 25789）：
+> ```
+> PROBE-A(outer) deadline_set=false claim_userId=12345
+> PROBE-B(inner) deadline_set=true remaining=3s
+> ① 有效 token /fast  ⇒ HTTP 200
+> ② 有效 token /slow（handler 睡 4s）⇒ HTTP 503 @ 3.002s
+> ③ 非法 token ⇒ HTTP 401 + 空 body（0 字节），且 A/B/HANDLER 一个都没打印   ← 决定性反证
+> ```
+
+**`main.go` 原文**（G2 建）：
+
+```go
+// 探针（忠实版）：go-zero v1.10.2 + 真源自己的 service/common/observability 中间件，
+// 实测「3s 预算到底包不包含 JWT 验签」。
+//
+// 与真源 api 的启动路径逐行同构（参照 service/message/api/messagecenter.go:36-42）：
+//     httpTimeout := observability.DisableNativeRestTimeout(&c.RestConf)
+//     server := rest.MustNewServer(c.RestConf)
+//     server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, observability.SlowThreshold()))
+//
+// 判据（三腿，互补）：
+//   观测点 A —— 注册在 observability 中间件**之前**（链上更外层）
+//   观测点 B —— 注册在 observability 中间件**之后**（链上更内层）
+//   业务 handler —— 最内层
+//
+//   · A 能看到 claim「userId」 ⇒ handler.Authorize 已经跑过（它把 claim 写进 ctx）
+//   · A 看不到 deadline、B 看得到 deadline（remaining≈3s）
+//     ⇒ 预算 ctx 是 observability 中间件自己建的（Go: http.go:53 context.WithTimeout）
+//     ⇒ 而该中间件在链上位于 Authorize **之后**（rest/engine.go:108 先 appendAuthHandler，
+//       :110-112 才 append ng.middlewares；rest/chain/chain.go:38-42 Append = 「追加到请求流最后」）
+//     ⇒ ⇒ 验签在 3s 预算**之外**
+//
+//   · 非法 token ⇒ Authorize 直接 401（authhandler.go:56 → unauthorized()，body 为空）
+//     ⇒ 观测点 A/B **一个都不打印** ⇒ 反证 Authorize 位于所有用户中间件**之前**
+package main
+
+import (
+	"fmt"
+	"net/http"
+	"os"
+	"time"
+
+	"sea-try-go/service/common/observability"
+
+	"github.com/golang-jwt/jwt/v4"
+	"github.com/zeromicro/go-zero/core/conf"
+	"github.com/zeromicro/go-zero/rest"
+	"github.com/zeromicro/go-zero/rest/httpx"
+)
+
+const secret = "probe-secret-0123456789"
+
+type probeConfig struct {
+	rest.RestConf
+}
+
+func main() {
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"iat":    time.Now().Unix(),
+		"exp":    time.Now().Add(time.Hour).Unix(),
+		"userId": 12345,
+	})
+	signed, err := tok.SignedString([]byte(secret))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("TOKEN=" + signed)
+
+	var c probeConfig
+	conf.MustLoad("etc/probe.yaml", &c)
+
+	// —— 与真源 api 逐行同构 ——
+	httpTimeout := observability.DisableNativeRestTimeout(&c.RestConf)
+	fmt.Printf("PROBE conf.Timeout=%dms httpTimeout=%v nativeTimeoutMiddlewareEnabled=%v\n",
+		c.Timeout, httpTimeout, c.Middlewares.Timeout)
+
+	server := rest.MustNewServer(c.RestConf)
+
+	// 观测点 A：链上比 observability 中间件更外层
+	server.Use(func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			_, hasDeadline := r.Context().Deadline()
+			fmt.Printf("PROBE-A(outer) path=%s deadline_set=%v claim_userId=%v\n",
+				r.URL.Path, hasDeadline, r.Context().Value("userId"))
+			next(w, r)
+		}
+	})
+
+	// 真源自己的预算中间件（原样调用，不改一行）
+	server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, observability.SlowThreshold()))
+
+	// 观测点 B：链上比 observability 中间件更内层
+	server.Use(func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			dl, hasDeadline := r.Context().Deadline()
+			remaining := "-"
+			if hasDeadline {
+				remaining = time.Until(dl).Round(time.Millisecond).String()
+			}
+			fmt.Printf("PROBE-B(inner) path=%s deadline_set=%v remaining=%s claim_userId=%v\n",
+				r.URL.Path, hasDeadline, remaining, r.Context().Value("userId"))
+			next(w, r)
+		}
+	})
+
+	server.AddRoutes(
+		[]rest.Route{
+			{Method: http.MethodGet, Path: "/fast", Handler: func(w http.ResponseWriter, r *http.Request) {
+				_, hasDeadline := r.Context().Deadline()
+				fmt.Printf("PROBE-HANDLER path=%s deadline_set=%v claim_userId=%v\n",
+					r.URL.Path, hasDeadline, r.Context().Value("userId"))
+				httpx.OkJsonCtx(r.Context(), w, map[string]string{"ok": "1"})
+			}},
+			{Method: http.MethodGet, Path: "/slow", Handler: func(w http.ResponseWriter, r *http.Request) {
+				fmt.Printf("PROBE-HANDLER path=%s sleeping 4s (> budget)\n", r.URL.Path)
+				time.Sleep(4 * time.Second)
+				httpx.OkJsonCtx(r.Context(), w, map[string]string{"ok": "1"})
+			}},
+		},
+		rest.WithJwt(secret),
+		rest.WithPrefix("/probe"),
+	)
+
+	fmt.Println("PROBE listening on 127.0.0.1:25789")
+	server.Start()
+	os.Exit(0)
+}
+```
+
+**`etc/probe.yaml` 原文**：
+
+```yaml
+Name: jwtbudgetprobe
+Host: 127.0.0.1
+Port: 25789
+
+Log:
+  ServiceName: jwtbudgetprobe
+  Mode: console
+  Encoding: plain
+
+# ⚠️ 刻意**不写** Timeout ⇒ 走 go-zero struct tag 的默认值 3000ms
+#    （rest/config.go:55 `Timeout int64 json:",default=3000"`）
+#    —— 与真源 api 的 etc/*.yaml 写法一致（真源也不写 Timeout）。
+```
 
 ---
 
@@ -437,11 +595,11 @@ G4 落码 ⇒ 共享层行为变 ⇒ **G1 这域的 A1~A9 结论要复核**（�
 | `DRIFT-USERAPI-013` | 过载保护：MaxConns 闸门粒度 + breaker 键空间 + 注释与实现矛盾 | `service/common`（`GoStyleMaxConnsFilter` / breaker） | 🔴 **G4** | 🔴 待拍板 · **与 `DRIFT-FOLLOW-008` 同族 ⇒ 两条一起对账** |
 | `DRIFT-ARPC-010`（= **E66**） | Redis 写不绑 deadline（admin `logout` 的 Redis 写） | `service/common`（Redis 调用路径） | 🔴 **G4** | 🔴 OPEN（两侧同编号 ⇒ 销账别当两条） |
 | `UNRESOLVED-ARPC-002`（= **E38②**） | 超时是否 min 客户端 deadline | `service/common`（`RpcInterceptor` 的 `effectiveTimeoutMs`） | ✅ **① 已闭环**（2026-10-26 落地）· ⏸ **② 未做**（架构级，已另立项）⇒ **本轮不派落码** | ✅ ① 双侧活体一致（探针 `client_deadline_ctx`）· ⏸ ② 等立项 |
-| `UNRESOLVED-USERSCOMMON-003` | `GoStyleCoercion` 规则是否波及非 users 域 | 🟡 **拆两半**（见 §6.4.1） | 🟡 **域侧 + G4 各一半** | 🔴 未核 · **口径已订正**（2026-10-27） |
+| ~~`UNRESOLVED-USERSCOMMON-003`~~ | ~~`GoStyleCoercion` 规则是否波及非 users 域~~ | — | ✅ **已关闭（2026-10-27）** ⇒ **从派单表撤下** | ✅ **问法订正 ⇒ 前提不成立 ⇒ 无漂移**（`GoStyleCoercion` **刻意不做 `@Configuration`** ⇒ 各 api 各自注册 customizer ⇒ **进程内作用域** ⇒ 无跨域全局副作用；hot-api / task-api 未注册**不是漏**）⇒ 逐条证据见 [`users/common.md` 的 2026-10-27 订正块](common.md)<br>⚠️ **原派单拆的两半**：①「哪个域注册哪个变体」= 域侧自修 ⇒ **已结清**（8 个 api 域注册方已清点）· ②「通用版规则内容」= G4 ⇒ **仍开放**，但它**不是本条**（那是规则内容本身，见上方 §5 表第 5 行） |
 | `DRIFT-ADMINAPI-007` | 503 响应 `Content-Type` charset 分号后空格残差 | `service/common` | 🔴 **G4** | 🟡 半修（`nosniff` 已落地 ⇒ 原条消失）⇒ **需重开一条** |
 | 🆕 **`DRIFT-USERAPI-009 §7 补充`** | **MaxBytes 相对 observability(3s) 的位置**：Go 在预算**之外**，RAG 在**之内** ⇒ 超限 413 **计入** access log/span/指标（Go 不计） | `service/common`（`GoStyleMaxBytesFilter` 的 `@Order`） | 🔴 **G4**（代码）· 🟡 **整合者**（签字档） | 🔴 **未签字**（台账建议**并入 `SD-USERAPI-002` 的范围说明** ⇒ 签字比改码便宜）⇒ ⚠️ **见 §6.4.2 的槽位联动警告** |
 | 🆕 **Go 腿 JWT 预算探针落仓** | §8.4 的探针（`/tmp/goprobe/probejwt/main.go` · G2 建、本域独立复跑）**只在 `/tmp`** ⇒ 易失 ⇒ 重跑要重新搭一遍 | `tools/difftest/`（**新脚本**） | 🔴 **无人拥有 ⇒ 整合者**（`tools/difftest/README.md` 在共享面清单里；**新脚本目录级不属任何 lane** ⇒ 见 `check-wave-lane-ownership.py` 的 `SHARED` 列表） | 🔴 **待整合者拍板**（**G1 不写 `tools/`**）⇒ 建议内容：`probe-jwt-budget/`（Go 工程副本的取用方式 ＋ 三腿期望输出 ＋ 清理口径）⇒ ⚠️ **落仓前必须解决「真源整仓复制到 `/tmp`」的体积问题**（本轮探针靠复制整仓才能 import 真源自己的 `observability`） |
-| 🆕 **Redis 断连行为（`REJECT_COMMANDS`）的共享层收编** | 三个 api 域的 Lettuce **断连**行为必须 `REJECT_COMMANDS`（否则命令被排队挂到 `commandTimeout` 3s ⇒ 撞 HTTP 预算 ⇒ **503**，而 Go 是 fail-open **200**）⇒ 修法是把 `LettuceClientOptionsBuilderCustomizer` 设成 `REJECT_COMMANDS` | 🟢 **域侧已自修**（三份**域内副本**：`user-api`（原有）＋ `admin-api` ＋ `follow-api`）<br>🔴 **共享层收编** = 把三份并成一个 `service/common` 里的自动配置 | 🟢 **域侧**（已完成）<br>🔴 **G4**（**收编**） | 🟢 **域侧已闭环**（2026-10-27 · `admin-api` 落 `DRIFT-ADMINAPI-012` / `follow-api` 落 `DRIFT-FOLLOW-012` · 修前 3013/3019ms ⇒ 修后 1/0ms · 变异 5/5 变红）<br>🔴 **G4 待收编** ⇒ **G4 落码时应当删除这三份域内副本**（否则双份配置 ⇒ 两处都要维护） |
+| 🆕 **Redis 断连行为（`REJECT_COMMANDS`）的共享层收编** | 三个 api 域的 Lettuce **断连**行为必须 `REJECT_COMMANDS`（否则命令被排队挂到 `commandTimeout` 3s ⇒ 撞 HTTP 预算 ⇒ **503**，而 Go 是 fail-open **200**）⇒ 修法是把 `LettuceClientOptionsBuilderCustomizer` 设成 `REJECT_COMMANDS` | 🟢 **域侧已自修**（三份**域内副本**：`user-api`（原有）＋ `admin-api` ＋ `follow-api`）<br>🔴 **共享层收编** = 把三份并成一个 `service/common` 里的自动配置 | 🟢 **域侧**（已完成）<br>🔴 **G4**（**收编**） | 🟢 **域侧已闭环**（2026-10-27 · `admin-api` 落 `DRIFT-ADMINAPI-012` / `follow-api` 落 `DRIFT-FOLLOW-012` · 修前 3013/3019ms ⇒ 修后 1/0ms · 变异 5/5 变红）<br>🟢 **共享层已落码**（G4 commit `1fb26b2` ＋ `2f12236` · `GoStyleRedisClientAutoConfiguration` 走 `AutoConfiguration.imports`）⇒ **待 G4 分支合入本树后，删除这三份域内副本**（`user-api` / `admin-api` / `follow-api`）⇒ **删除前置 ＝ 共享层那份先合进各域的树**（否则双份配置 ⇒ 两处都要维护） |
 
 > ⚠️ **状态带核对日期**（AGENTS.md §6）⇒ 复核后就地更新 + 改日期。
 
@@ -478,6 +636,17 @@ G4 落码 ⇒ 共享层行为变 ⇒ **G1 这域的 A1~A9 结论要复核**（�
 
 ⇒ ⚠️ **「验证跨域」的那部分**（各打一次带标量的请求矩阵）**G1 登记 + 协调 G2/G3**，
 但**别把它整条塞进派单** —— 矩阵是域侧行为，落点不在共享层。
+
+> ✅ **2026-10-27 收口（上面的拆分已被后续核实取代 ⇒ 本条关闭）** —— G1 lane
+>
+> ⚠️ 本节写于「先拆两半」这一步；**后续核实发现「跨域」这个前提本身不成立**，所以：
+> - **半边①（哪个域注册哪个变体）** ⇒ **已结清**：逐域清点出 **8 个已注册 api 域**
+>   （`article`/`comment`/`favorite`/`follow`/`like`/`message` 用本域私有变体 ＋ `user-api`/`admin-api` 用 users 通用版）；
+> - **「验证跨域」那个待办** ⇒ **不需要做**（问题前提不成立）⇒ **不必再协调 G2/G3 打请求矩阵**；
+> - **半边②（通用版规则内容）** ⇒ **仍开放**，但**归 G4**（规则内容本身）⇒ **不再挂在 003 名下**。
+>
+> ⇒ 逐条证据（`GoStyleCoercion` **刻意不做 `@Configuration`** · hot-api 零 `@RequestBody` · task-api 的 Go 侧带自定义 `UnmarshalJSON` · Go 全仓仅 1 个自定义 `UnmarshalJSON`）
+> ⇒ 见 [`users/common.md` 的 2026-10-27 订正块](common.md) 与 §1.1 表。
 
 #### 6.4.2 🔴 **槽位联动警告**（给共享层写权方 · 2026-10-27）
 
