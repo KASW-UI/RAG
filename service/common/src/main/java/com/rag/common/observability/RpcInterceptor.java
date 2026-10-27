@@ -70,22 +70,81 @@ public final class RpcInterceptor {
      * <p><b>Spring 化</b>：保留静态单例（grpc server 拦截器在启动期就注册，每请求都依赖）；
      * 业务模块在 {@code @PreDestroy} 里显式调 {@link #shutdown()} 关闭线程池，
      * 避免依赖 daemon 兜底导致 Spring 容器已关闭而 dispatcher 资源未清理。
+     *
+     * <p>🔴 <b>为什么是「可重建」的单例，而不是 {@code static final}</b>（2026-10-27 · 修 G1 #8 的连带效应）：
+     * 本池是<b>进程级静态</b>的，而 {@link #shutdown()} 会<b>永久终止</b>它
+     * ⇒ ⇒ <b>同一个 JVM 里只要存在第二个 Spring 上下文</b>（surefire 一个模块一个 JVM ⇒ 模块内多个上下文），
+     * <b>前一个上下文关闭后</b>本池就变成「已终止」
+     * ⇒ 后续请求的 {@code schedule(...)} 被拒（{@code RejectedExecutionException}）
+     * ⇒ 拦截器返回 {@code INTERNAL} 而不是 {@code DEADLINE_EXCEEDED}
+     * （实测症状：{@code ScheduledThreadPoolExecutor[Terminated]}；
+     * {@code ArticleGrpcInterceptorWiringTest} 在全量回归里红、<b>隔离跑却绿</b> ⇒ 典型的跨测试污染）。
+     * ⇒ ⇒ 改为：<b>池被终止后，下一次使用按需重建</b>（见 {@link #timeoutScheduler()}）。
+     * <ul>
+     *   <li><b>生产</b>：单上下文 ⇒ shutdown 之后没有下一次使用 ⇒ <b>池保持关闭</b> ⇒ 关闭钩子的意图不变；</li>
+     *   <li>线程是 <b>daemon</b> ⇒ 即便重建也不阻止 JVM 退出。</li>
+     * </ul>
      */
-    private static final ScheduledExecutorService TIMEOUT_SCHEDULER = Executors.newScheduledThreadPool(2, r -> {
-        Thread t = new Thread(r, "obs-rpc-timeout");
-        t.setDaemon(true);
-        return t;
-    });
+    private static final AtomicReference<ScheduledExecutorService> TIMEOUT_SCHEDULER =
+            new AtomicReference<>(newTimeoutScheduler());
 
     /**
      * {@link #handle} 方法专用 worker 线程池，替换裸 {@code new Thread(...)}。
      * <p>Spring 化：业务模块在 {@code @PreDestroy} 里显式调 {@link #shutdown()} 关闭。
+     *
+     * <p>🔴 与 {@link #TIMEOUT_SCHEDULER} <b>同款</b>：进程级静态 + 终止即永久
+     * ⇒ 必须同样支持<b>按需重建</b>（见 {@link #handleExecutor()}）。
      */
-    private static final ExecutorService HANDLE_EXECUTOR = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "obs-rpc-worker");
-        t.setDaemon(true);
-        return t;
-    });
+    private static final AtomicReference<ExecutorService> HANDLE_EXECUTOR =
+            new AtomicReference<>(newHandleExecutor());
+
+    private static ScheduledExecutorService newTimeoutScheduler() {
+        return Executors.newScheduledThreadPool(2, r -> {
+            Thread t = new Thread(r, "obs-rpc-timeout");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    private static ExecutorService newHandleExecutor() {
+        return Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "obs-rpc-worker");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    /**
+     * 取当前的超时调度器；<b>若上一轮 {@link #shutdown()} 已把它终止 ⇒ 按需重建一份新的</b>。
+     *
+     * <p>CAS + 自旋：并发重建时只会有一个胜出，其余线程直接用胜出的那份 ⇒ 不会漏建、也不会建多份。
+     */
+    static ScheduledExecutorService timeoutScheduler() {
+        while (true) {
+            ScheduledExecutorService current = TIMEOUT_SCHEDULER.get();
+            if (!current.isShutdown()) {
+                return current;
+            }
+            if (TIMEOUT_SCHEDULER.compareAndSet(current, newTimeoutScheduler())) {
+                return TIMEOUT_SCHEDULER.get();
+            }
+        }
+    }
+
+    /**
+     * 取当前的 worker 池；<b>若上一轮 {@link #shutdown()} 已把它终止 ⇒ 按需重建一份新的</b>。
+     */
+    static ExecutorService handleExecutor() {
+        while (true) {
+            ExecutorService current = HANDLE_EXECUTOR.get();
+            if (!current.isShutdown()) {
+                return current;
+            }
+            if (HANDLE_EXECUTOR.compareAndSet(current, newHandleExecutor())) {
+                return HANDLE_EXECUTOR.get();
+            }
+        }
+    }
 
     /**
      * Go 真源 {@code service/common/observability/rpc.go:69} 在超时时给客户端的
@@ -119,8 +178,8 @@ public final class RpcInterceptor {
      * <p><b>幂等</b>：重复调用安全（{@code shutdownNow} 重复 OK）。
      */
     public static void shutdown() {
-        TIMEOUT_SCHEDULER.shutdownNow();
-        HANDLE_EXECUTOR.shutdownNow();
+        TIMEOUT_SCHEDULER.get().shutdownNow();
+        HANDLE_EXECUTOR.get().shutdownNow();
     }
 
     /**
@@ -261,7 +320,7 @@ public final class RpcInterceptor {
                     //   ⚠️ 若客户端 deadline 已过期 ⇒ effective=0 ⇒ 调度器**立即** fire
                     //      （Go 侧：timeoutCtx.Done() 已就绪 ⇒ select 立即走超时分支 ⇒ 同款）
                     long timeoutMs = effectiveTimeoutMs;
-                    timeoutFutureHolder[0] = TIMEOUT_SCHEDULER.schedule(() -> {
+                    timeoutFutureHolder[0] = timeoutScheduler().schedule(() -> {
                         // Go 真源 rpc.go:69-71 —— 超时这一路有**两个**可观察面，本实现必须同时对齐：
                         //   ① wire：client 收到的 status description = timeoutCtx.Err().Error()
                         //        = "context deadline exceeded"（见 GO_DEADLINE_EXCEEDED_DESCRIPTION）
@@ -449,7 +508,7 @@ public final class RpcInterceptor {
             Throwable[] errHolder = new Throwable[1];
             // Spring 化：用 HANDLE_EXECUTOR 替换裸 Thread；用 Future.get(timeout) 替换轮询 Thread.sleep(10)
             // 业务线程被 cancel(true) 后会收到 interrupt，可通过 InterruptedException 感知（对齐 Go 版 cancel 语义）。
-            Future<?> workerFuture = HANDLE_EXECUTOR.submit(() -> {
+            Future<?> workerFuture = handleExecutor().submit(() -> {
                 // DRIFT-018 修复：把 deadline bind 到当前 worker 线程，
                 // 业务 catch InterruptedException 后通过 DeadlineState.isExpired() 感知
                 try (DeadlineState.Scope scope = DeadlineState.bindToCurrent(deadlineEpochMs)) {

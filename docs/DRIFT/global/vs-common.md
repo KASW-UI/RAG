@@ -798,12 +798,53 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 - **未做**（按 G2 的边界）：**没有**在共享层为 task 写特例；**没有**碰 favorite 的任何东西。
 - **G2 建议项 3 的对拍脚本**落点 = `tools/difftest/**` = 无 lane 拥有的共享面 ⇒ **只登记，不擅自改**。
 
+#### 4.10.7 🟡 **共享面待整合项**（本 lane **只登记、不改** —— 那些文件不属任何 lane 的写权面）
+
+| # | 事项 | 落点 | 本层的**独立核对** | 处置 |
+|---|---|---|---|---|
+| ① | `tools/difftest/flyway-concurrent-verify.py:47-51` 的 `KNOWN_BLOCKED` **只登记 `favorite`** ⇒ 同形的 **`article-rpc` 没登记**（G3 的建议项 5） | `tools/difftest/**` = **共享面**（无 lane 拥有 ⇒ 整合者） | ✅ **成立**：实测 `service/article/article-rpc/src/main/resources/application.yml:53-57` 的 flyway 段**既没有 `table:`（⇒ 占用默认账本表名 `flyway_schema_history`）**、**也没有 `baseline-version: 0`** ⇒ 与 `favorite-rpc`（`:86-91`）同款缺陷（`favorite-rpc` 至少有独立 `table:`）⇒ 而该脚本对所有模块都算得出 `baseline_version`、缺省 `"1"` ⇒ **article-rpc 应同样进 `KNOWN_BLOCKED`** | **只记账**（两个 yaml 的修法在**域侧写权**；脚本在共享面） |
+| ② | `AGENTS.md:173`（§3.5 表「共享 Flyway 账本」行）**只把 `favorite-rpc` 列为例外** ⇒ **`article-rpc` 漏记**（G3 的建议项 3） | `AGENTS.md` = **整合者专属** | ✅ **成立**（同上实测） | **只记账** |
+| ③ | G2 的 FB-02 对拍脚本（「域的 Go handler 是否调 `httpx.Parse`」× 「该域 yaml 的 mode」） | `tools/difftest/**` = **共享面** | —— （G2 已自陈落点并要求「只登记」） | **只记账** |
+| ④ | 各域台账 / `AGENTS.md` 里「**E38② 未闭合 / ① 不销本条**」的措辞**已过期** ⇒ 应读作「**① 已闭环、② 未做且已另立项**」 | 各域台账 = **域侧写权**；`AGENTS.md` = 整合者 | ✅ 成立（§1.1 重核：① 已由双侧探针坐实） | **只记账**（已在 §1.1 就地订正本 lane 自己的表） |
+| ⑤ | `docs/DRIFT/_cross/domain-common-lanes.md:125`（`DRIFT-FOLLOW-008` 仍写「未修」） | `docs/DRIFT/_cross/**` = **整合者专属** | —— | **只记账** |
+
+> ⚠️ **本 lane 的写权边界**：以上 5 条**没有一条**落在 `service/common/**` / `service/users/users-common/**` / 本文件
+> ⇒ ⇒ **一律只登记，不擅自改**（AGENTS.md §5.3c：跨写权变更须同一次提交或由整合者统一处理）。
+
+#### 4.10.8 🔴 修 G1 #8 时**暴露**出来的潜伏缺陷：**进程级静态池「终止即永久」⇒ 多 Spring 上下文被毒化**
+
+| 项 | 内容 |
+|---|---|
+| **现象** | 第六次全量回归 **BUILD FAILURE**：`article-rpc` **2 条**失败 ——<br>① `ArticleGrpcInterceptorWiringTest.serverSideTimeoutIsActuallyEnforced`：`actual status=INTERNAL description=panic: Task … rejected from ScheduledThreadPoolExecutor[**Terminated**, pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 4]` ⇒ `expected: <DEADLINE_EXCEEDED> but was: <INTERNAL>`<br>② `ArticleGrpcInterceptorWiringTest.deadlineIsPropagatedToHandlerThread`：`handler 根本没被调用（线程 = <未进入>）` |
+| **归因（3 环）** | ① `RpcInterceptor.TIMEOUT_SCHEDULER` / `HANDLE_EXECUTOR` 与 `HttpMiddleware.HTTP_EXECUTOR` 是 **`static final` 的进程级单例**（`RpcInterceptor.java:74` / `:84`、`HttpMiddleware.java:160`）；② `shutdown()` 会**永久终止**它们（`shutdownNow()`，不可复活）；③ surefire「**一个模块一个 JVM**」⇒ **模块内存在多个 Spring 上下文** ⇒ 前一个上下文关闭 ⇒ 池被终止 ⇒ 后续上下文里 `schedule()` / `submit()` 被拒（`RejectedExecutionException`）⇒ 拦截器返回 `INTERNAL` 而不是 `DEADLINE_EXCEEDED` |
+| 🔴 **为什么这条是「修 #8 才暴露」的** | 修之前，纯 gRPC 进程的 `@PreDestroy` **先抛 `NoClassDefFoundError`** ⇒ `RpcInterceptor.shutdown()` **根本没机会执行** ⇒ 静态池**侥幸存活** ⇒ **前五轮全量一直是绿的** ⇒ ⇒ **那不是「本来就对」，是「缺陷把保护罩挡住了」** |
+| **证据** | ① **隔离跑** `ArticleGrpcInterceptorWiringTest` ⇒ **3/3 绿**（⇒ 典型**跨测试污染**，不是本用例自身缺陷）；② 全量里的失败信息**直指** `ScheduledThreadPoolExecutor[Terminated]`；③ 三处 `static final` 池定义逐行可核 |
+| **修法（落在共享层 ⇒ 域侧零改动）** | 三个池改为 **`AtomicReference` + CAS 自旋** ⇒ **被终止后，下一次使用按需重建**：<br>① **生产**（单上下文）：shutdown 之后没有下一次使用 ⇒ **池保持关闭** ⇒ **关闭钩子的意图不变**；<br>② **多上下文 / 多测试**：用到时自动重建 ⇒ 不再被毒化；<br>③ 线程是 **daemon** ⇒ 即便重建也不阻止 JVM 退出 |
+| **守门（新增 3 条）** | `ObservationPoolSelfHealingGateTest`：① `shutdown()` **真的终止**当时的池（关闭钩子的意图不被稀释）；② 终止后取用 ⇒ 拿到**新**池且**真的能**调度 / 提交；③ HTTP 池同理 |
+| **变异验证** | 把「按需重建」退回「直接返回已终止的那份」⇒ ② 红在「必须是**新的**池」 |
+| ⚠️ **归属** | 失败用例在 `article-rpc`（**G3 写权**）⇒ 但**根因在共享层** ⇒ 修法落 `service/common`（**本层写权**）⇒ **那 2 条用例不用改** |
+| **A 轴** | 属 **A1**（超时 / deadline）的机制面 ⇒ §2 的 A1 行结论不变；证据链由「L4 双侧探针」＋本条的「**L3 全量复现 + 隔离绿对照**」共同支撑 |
+
+> ⇒ **教训（值得留在仓里）**：**「前五轮全量都绿」不等于「这条路径被验过」** ——
+> 在本例里，是**另一个缺陷（#8）恰好挡在前面**，让这条路径**从未真正执行过**。
+> ⇒ ⇒ 修掉挡路的缺陷 ⇒ 潜伏缺陷显形 ⇒ **这是「跑绿 ≠ 对」的第四种形态**：
+> **绿是因为没走到**。
+> ⇒ 判定式：**问「这条路径在本轮之前真的被执行过吗」**，而不只是问「测试绿不绿」。
+
 ## 5. 交付物清单
 
 - [ ] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
-- [ ] **9 条轴**逐轴填表（§2）：结论 ✅/🔴/🟡/N/A ＋ **证据强度** ＋ **核对日期**
-- [ ] **两侧同时跑**的探针（AGENTS.md §3.3）—— 只跑 RAG 的探针**不算数**
-- [ ] §1 的每一条**重新核对状态**并写回（带核对日期）
-- [ ] §3 的域侧修法**落码 + 守门**（含变异验证）
-- [x] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）—— ⚠️ **`_README.md` §七之二属共享面 ⇒ 本 lane 不写**（合并后由整合者统一更新）⇒ **G3 两张 + G2 三张 + G1 七张共 12 张已登记在 §4.3~§4.9**（G1 七张的逐条定性见 §4.9.1）
-- [ ] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）
+      —— ⚠️ **共享层本身没有独立进程**（它是库）⇒ 等价形态 = **让承载它的组件真启动一次**：
+      本波新增的 `HttpPoolLifecycle` / `GoStyleRedisClientAutoConfiguration` / `GoStyleGrpcClientBreakerConfiguration`
+      都在**真容器**里被装配（守门用真 Tomcat / 真 gRPC server），
+      且**全量回归**里含各组件的**真 fat-jar 启动门禁**（`…RuntimeBootGateTest`）⇒ 见 §4.10.6 的实测结果。
+- [x] **9 条轴**逐轴填表（§2）：结论 ✅/🔴/🟡/N/A ＋ **证据强度** ＋ **核对日期** ⇒ **2026-10-27 完成**（`6d9c3b2`）
+      ⚠️ 表内含 **3 条诚实边界**（2 轴 N/A ≠ 已验 · A5 落点很薄 · A1/A3 仍半开）⇒ **不得读成「9 轴全绿」**。
+- [x] **两侧同时跑**的探针（AGENTS.md §3.3）—— 只跑 RAG 的探针**不算数**
+      ⇒ `bash tools/semantic-probe/run-parity.sh` ⇒ **EXIT=0 · 56 例**（一致 54 / 已签字偏离 2 / 不一致 0）⇒ **A6 的 L4 证据**；
+      `bash tools/semantic-probe/rpc-timeout/run-rpc-timeout-parity.sh` ⇒ **EXIT=0 · 3 例**（`client_deadline_ctx` 一致）⇒ **A1 的 L4 证据**。
+- [x] §1 的每一条**重新核对状态**并写回（带核对日期）⇒ **2026-10-27 完成**（`6d9c3b2`）
+      ⚠️ **未复核的条目刻意不补核对日期**（「没查」≠「查过没问题」）⇒ 净结果：**无一条被推翻**，**2 条口径过期已就地订正**（E38② 的 ① 层 · E65 的附注）。
+- [x] §3 的域侧修法**落码 + 守门**（含变异验证）⇒ 共享层侧全部完成（`1fb26b2` Redis 断连 · `138b6ef`+`0b4d10d` breaker 键 · `9690b04` 路径归一 · `182fc32` form 判据 + 保护链只读入口 · `a1a2e05` MP 排序桥 · `3b573fb` 关闭路径 web 类型 · `2f12236` 遮蔽契约守门）
+- [x] §4 的派单**登记到 G4**（`docs/DRIFT/global/vs-common.md` ＋ `docs/DRIFT/global/_README.md` §七之二的跨域桶）—— ⚠️ **`_README.md` §七之二属共享面 ⇒ 本 lane 不写**（合并后由整合者统一更新）⇒ **G3 四张 + G2 三张 + G1 八张共 15 张已登记在 §4.3~§4.10**（G1 七张的逐条定性见 §4.9.1 · 第八张见 §4.10.1）
+- [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` ⇒ 合并后由整合者统一更新）⇒ **本 lane 全程未写**；⇒ 需要回写的 **5 条**已登记在 **§4.10.7**（含 `tools/difftest/flyway-concurrent-verify.py` 漏记 `article-rpc` · `AGENTS.md:173` 漏记 `article-rpc`）。
