@@ -209,6 +209,12 @@
   | message-api / message-rpc | **0 / 0** | N/A |
   | task-api / task-rpc | **0 / 0** | N/A |
 - ⇒ ⇒ **FB-04 对我域 = 只惠及 `like-rpc` 一个组件**，其余五个组件 **N/A** ⇒ **域侧零改动**、**零待办**（除 like-rpc 的合并后 E2E）。
+
+#### 🔴 **间接路径也断了**（G2 独立核 ⇒ 补记 · 2026-10-27 10:35）
+G4 回执 ④ 声称「共享层 `Observability.mark*` 是**显式传 ctx** ⇒ 不受影响 ⇒ 零回归」⇒ **G2 不采信转述、独立核过**：
+- **Go 侧全仓 `SpanFromContext` = 12 处**（G2 独立 grep 逐处分类）：`service/common/observability/observability.go` **4** · `service/like/rpc/internal/logic/` **6**（6 个 logic 文件各 1）· `service/knowledge/api/internal/telemetry/` **2**（**范围外**）⇒ **与 G4 的分类逐条吻合** ✔
+- **RAG 侧对应**：`Observability.java` 的 4 个 `mark*` 方法**签名首参就是 `Context ctx`**（`:68` `markBusinessError` · `:89` `markSystemError` · `:115` `markTimeout` · `:138` `markDurationAndSlow`）⇒ 方法体是 **`Span span = Span.fromContext(ctx);`**（`:73` / `:94` / `:120` / `:139`）⇒ ⇒ **不依赖 current span** ⇒ ⇒ **FB-04 改 `onHalfClose` 的 scope 对这 4 处零影响** ⇒ ⇒ **我域 rpc 侧（含 like-rpc 走 `Observability.mark*` 的路径）零间接影响** ✔
+- ⇒ 结论：FB-04 对我域的**全部**影响面 = **只有 `like-rpc` 的 `LikeSpans` 那 2 处**（直接依赖 current span）⇒ 与上文「六个组件逐个实测」的结论**互相独立、结论一致**。
 - ⚠️ **合并后必查（like-rpc）**：`LikeSpans` 的属性**从「静默丢弃」变成「真落」** ⇒ 这是**行为变更**（预期）⇒ 收口回归里 **like-rpc 的 span 相关守门必须仍绿** ⇒ 若红 ⇒ 优先怀疑「属性真生效后与既有断言冲突」，而不是「没生效」。
 
 ### 📌 G4 对 like 域落码的三条结论（G2 已全部采纳 ⇒ 无异议）
