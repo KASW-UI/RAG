@@ -2124,3 +2124,113 @@ G4 第十一轮来信：「新门禁 `22dc67e` + 台账 `c164e63`，请再并一
 ⇒ ⚠️ 另注：`ea8f01e` 那份引入是有正当理由的（`DRIFT-USERAPI-014`）⇒ **它不是「写错了」**
 ⇒ ⇒ 删除之所以行为等价，是因为共享层那份承载**同一机制**（`disconnectedBehavior(REJECT_COMMANDS)`）
 ⇒ ⇒ 该等价性由 §28 的三层守门 ＋ 三次变异证明，**不是**由「它看起来多余」证明。
+
+## 32. 🟢 **活体环境复检（2026-10-27 晚）** —— 订正 §30 的「进程号」标注 ＋ 一次**瞬时** 503 的定性
+
+### 32.1 🔴 **订正 §30：那一列填的是【端口】，不是【进程号】**
+
+§30 原文写「我域 4 个：`user-rpc 64210` / `admin-rpc 63081` / `user-api 64900` / `admin-api 63889`」，
+并在括号里标注为「进程」⇒ ⇒ **标注错了**：这 4 个数字是**监听端口**，**不是 pid**。
+
+⇒ ⇒ **我自己的查法被自己的标注骗了一次**：复检时用 `ps -p 64210` ⇒ 「查不到」⇒ 一度判定「进程已退出、环境过期」，
+而实际上 `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>` 显示**持有该端口的进程健在**：
+
+| 端口 | **真实 pid** | 启动时刻 | 进程 |
+|---|---|---|---|
+| 64210 | **86864** | 2026-10-26 19:59:29 | `/tmp/difftest5k/bin/user-rpc` |
+| 63081 | **86865** | 2026-10-26 19:59:29 | `/tmp/difftest5k/bin/admin-rpc` |
+| 64900 | **87374** | 2026-10-26 19:59:49 | `/tmp/difftest5k/bin/user-api` |
+| 63889 | **87447** | 2026-10-26 19:59:49 | `/tmp/difftest5k/bin/admin-api` |
+
+⇒ ⇒ **§30 的结论「全在」是对的**（13 个进程一个没少，etime 23h15m）⇒ ⇒ **只订正标注，不推翻结论**。
+⇒ ⚠️ **纪律**：**「端口」与「pid」是两个命名空间** ⇒ ⇒ 以后写「进程」必须用 `lsof`/`ss` 把 pid 查出来再记，
+**不许拿端口号当 pid 记进台账**（⇒ 这一条与「判据自己骗你」同族）。
+
+### 32.2 🟢 **完整进程普查（2026-10-27 20:2x 实测）**
+
+`/tmp/difftest5k` 侧 **12 个**：`go-user-rpc 86595` · `go-admin-rpc 86596` · `go-message-rpc 86626` ·
+`go-user-api 86640` · `go-admin-api 86641` · `go-message-api 86840` · `user-rpc 86864` · `admin-rpc 86865` ·
+`user-api 87374` · `admin-api 87447` · `message-rpc 87658` · `FakeServer 81897(:21999)`；
+另 `/tmp/difftest` 侧 `message-api 95655(:58992)`（G2 域）· 另有 G3 的 `comment-rpc 79778(:19084)`。
+⇒ ⇒ **双侧对拍环境完整可用**（Go 侧 6 个 ＋ Java 侧 6 个都在）。
+
+### 32.3 🟢 **依赖侧实测**：Redis / PG
+
+| 项 | 实测 | 判读 |
+|---|---|---|
+| Redis `61379`（users/follow 域） | TCP 通；**原始 socket `PING` 3/3 = `+PONG`（14–78ms）**；`redis-cli PING` = `PONG` | ✅ 活体可用 |
+| PG `60432` | TCP 通 | ✅ 可用 |
+| Redis `56379`（message 域，G2 的） | **不通** | ⚠️ 该域 Redis 已不可用（**不是我的域**，登记事实） |
+
+⚠️ **我的第一版探针报「3s 内无回复」⇒ 是探针坏了，不是 Redis 坏了**（`nc` 管道写法吞了回复）
+⇒ ⇒ 重写为原始 socket + 3 次重试 ⇒ **3/3 正常** ⇒ ⇒ **「探针失败」必须先自证探针本身**（同族：路径变体探针那一条）。
+
+### 32.4 ⚠️ **一次瞬时 503 —— 不作为状态**
+
+复检时 `user-api:64900 /actuator/health` 偶发 **503 + `text/plain` "Request Timeout" + `Connection: close`，
+耗时 3.009s，响应前置 5 条 `103 Early Hints`** ⇒ 看起来像「健康检查挂了」。
+⇒ ⇒ **复打 8 次：8/8 = 200 `{"groups":["liveness","readiness"],"status":"UP"}`（10–134ms）**
+⇒ ⇒ **判定：一次性瞬时 ⇒ 不构成状态 ⇒ 不进台账结论**，只留观测记录。
+
+⚠️ **排除掉的两个假设（避免留下错误因果）**：
+1. **不是某个健康指示器在挂** —— `/actuator/health/{redis|db|diskSpace|ping|ssl}` **全部 404**
+   ⇒ ⇒ 该构建**一个健康指示器都没注册** ⇒ ⇒ 「redis 指示器挂满 3s」的推断**不成立**；
+2. **不是 Redis 慢** —— 见 §32.3（`PING` 14–78ms）。
+
+⇒ ⇒ **剩下可证的部分**：3.009s **= 共享层 `HttpMiddleware` 的 Go 风格 HTTP 超时预算**（`observability.http-timeout: 3s`）
+⇒ ⇒ 是**共享层超时守卫**赢了竞速才写下 "Request Timeout"（`service/common/.../observability/HttpMiddleware.java:116`）
+⇒ ⇒ **那 3s 里真正慢的是什么，本轮未查清 ⇒ 不下结论** ⇒ ⇒ **登记为「根因未定的一次瞬时」**。
+🟢 **对拍相关性**：Go 侧没有 actuator 对端 ⇒ ⇒ **该端点不参与双侧对拍** ⇒ ⇒ **不是我域漂移，也不动摇 §30 的 L4 路径**。
+
+## 33. 🟢 **Redis「池耗尽等待上限」轴的两侧源码级对照（G3 新发现 ⇒ 我域复检）** —— 订正 §24 的「不是语义漂移」
+
+### 33.1 两侧消费点（**读消费点，不读配置文件**）
+
+| 侧 | 事实 | 出处 |
+|---|---|---|
+| **RAG** | 池**由 classpath 决定**，不是由 yml 决定 | Boot 4.0.8 `DataRedisConnectionConfiguration.java:55` ⇒ `COMMONS_POOL2_AVAILABLE = ClassUtils.isPresent("org.apache.commons.pool2.ObjectPool", …)`；`:195-198` ⇒ `isPoolEnabled(pool) = (enabled != null) ? enabled : COMMONS_POOL2_AVAILABLE`；`LettuceConnectionConfiguration.java:162-166` ⇒ 未启用池 ⇒ 走 `LettuceClientConfiguration.builder()`（**无 `GenericObjectPoolConfig`**） |
+| **RAG（我域实测）** | 6/6 `pom.xml` **零 `commons-pool2`**；6/6 `application.yml` **零 `pool.enabled`**；活体 `user-api` 进程 classpath **零 `commons-pool2`** | ⇒ ⇒ **池形态 = 无池**（与 §24 一致） |
+| **Go** | 池**有并发上限**，且上限 = `PoolSize` | go-redis v9.20.0 `internal/pool/pool.go:421` ⇒ `semaphore: internal.NewFastSemaphore(opt.PoolSize)`；`:1098-1125` ⇒ `waitTurn()`：**抢不到信号量就 `Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)`** |
+| **Go（取值）** | `PoolSize = 10 * GOMAXPROCS`；**`PoolTimeout = ReadTimeout + 1s = 4s`**；`MinIdleConns = 8` | `options.go:350-351` / `:380-384`（`ReadTimeout` 默认 3s，见 `:364-370`）/ go-zero `redisclientmanager.go:15,38`（`idleConns = 8`） |
+
+### 33.2 🔴 **结论：两侧【不对称】—— 这条轴在 Go 侧可达、在 RAG 侧不可达**
+
+- **Go 侧可达**：`PoolSize` 是**并发信号量容量**（不是「连接数上限」）⇒ ⇒ 超过 `10×核数` 个并发 Redis 命令时
+  ⇒ **必然进入 `waitTurn` 等待** ⇒ ⇒ 上限 **`PoolTimeout` = 4s** ⇒ ⇒ 超时返回 **`ErrPoolTimeout`**；
+- **RAG 侧不可达**：无池 ⇒ **没有信号量、没有「池耗尽」这个状态** ⇒ ⇒ **不存在 `max-wait` 语义**
+  （Boot 的 `Pool.maxWait` 默认 `Duration.ofMillis(-1)` 只在**池已启用**时才有意义 ⇒ 我域它根本不生效）;
+  ⇒ ⇒ 我域唯一的命令上限是 **`spring.data.redis.timeout: 3s`（command timeout）**。
+
+⇒ ⇒ ⇒ **两者的「排队上限」不同**：Go **4s**（池耗尽路径）vs RAG **3s**（命令超时路径）⇒ ⇒ **饱和路径可观察**。
+
+### 33.3 ⚠️ **订正 §24**：「不是语义漂移 ⇒ 零动作」在**饱和路径**上不成立
+
+§24 的结论是「Lettuce 无池时用 shared connection ⇒ 与 go-zero 的池在**可观察行为**上等价 ⇒ **不是语义漂移**」
+⇒ ⇒ **该结论在正常路径上仍成立**（单命令、无争用 ⇒ 两侧都是「一条命令 3s 读超时」⇒ 一致）
+⇒ ⇒ **但在高并发饱和路径上不成立**：
+- Go：排队 ≤ **4s**，超时错误 = `pool timeout`；
+- RAG：无排队阶段，命令 ≤ **3s**，超时错误 = 命令超时；
+⇒ ⇒ **同一形态的输入（并发 Redis 需求 > `10×核数`），两侧的失败上限与错误身份都不同** ⇒ ⇒ **OBSERVABLE DIFFERENCE · MEDIUM**。
+
+⚠️ **证据强度 = L1（两侧源码级）**：**未做并发压测 ⇒ 不写 L4** ⇒ ⇒ 升级条件 = 在真 Redis 上把并发打到
+`10×GOMAXPROCS` 以上，双侧同时观察失败时刻与错误身份。
+
+⚠️ **我域的使用面**（为什么这条轴对我域不是纯理论）：
+`user-api` / `admin-api` 的 `JwtAuthInterceptor` 与 `follow-api` 的 `FollowBlacklistInterceptor`
+**都是「每请求一次 Redis `hasKey`」**（fail-open）⇒ ⇒ 高并发下正是这条轴的触发面。
+
+### 33.4 🔴 **修法归属：域内不可自修 ⇒ 落点 `global` 收口域**
+
+要让我域侧也有「池耗尽上限」，必须**同时**做三件事：① 加 `commons-pool2` 依赖 ② 配 `pool.enabled=true`
+③ 配 `max-active` / `max-wait` ⇒ ⇒ 而 **① 一旦加上，池形态就静默从「无池」变成「有池」**
+⇒ ⇒ 这是**所有域共享的形态决策**，改一个域就与其他域不一致 ⇒ ⇒ **不是我域能自修的**
+⇒ ⇒ **落点 = `global` 收口域**（`docs/DRIFT/global/cross-domain.md` = **无人拥有面**，由整合者写）
+⇒ ⇒ **我域零落码**；本条只登记 + 回执。
+
+🟢 **对 G3 那条新发现的直接回答**：它问「Redis 池的跨域条目登记在哪」⇒ ⇒ **答案是 `global` 收口域，不是域侧台账**
+⇒ ⇒ 且它那条轴在 **go-redis 系域里，Go 侧是可达的**（信号量容量 = `PoolSize`）⇒ ⇒ **不是「两侧都不可达」的空发现**。
+
+🟢 **触发条件（写死，防下一轮无声漂移）**：
+> **我域任何模块若新增 `commons-pool2` 依赖、或把 `pool.enabled` 写成 `true`**
+> ⇒ ⇒ **这条轴立刻从我域的「不可达」变成「可达」** ⇒ ⇒ **必须同时定 `max-active` 与 `max-wait`**（Go 侧真值 = `10×GOMAXPROCS` / `4s`）
+> ⇒ ⇒ 否则就是**静默引入一条新的行为漂移**。

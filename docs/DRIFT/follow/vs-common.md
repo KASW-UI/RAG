@@ -531,5 +531,8 @@ installed_rank | version |      description       | success
 
 ② 🟢 **池形态自检**：`follow-api` **零 `min-idle`** ⇒ ⇒ G2 的「`min-idle` 应取 go-zero 的 8」**在 follow 域不适用**；**零 `pool.enabled`** ＋ **pom 里零 `commons-pool2`** ⇒ ⇒ **池形态 = 无池** ⇒ ⇒ **不会**触发「`enabled: true` + 缺 commons-pool2 ⇒ 启动期 `NoClassDefFoundError`」⇒ ⇒ **零动作**。
 ⇒ ⇒ 📌 **将来若给 follow-api 加 `min-idle`，必须同时查 pom 的 `commons-pool2`**（Boot 4 的 `Pool.enabled` 由 classpath 决定 ⇒ 加/减一个依赖 ⇒ 池形态**静默变化**）。
+⇒ ⇒ 🟢 **补一条轴（G3 的「池耗尽等待上限」在 follow 域的复检）**：Go 侧**池耗尽可达**（go-redis v9 `internal/pool/pool.go:421` 信号量容量 = `PoolSize` ⇒ 上限 = `PoolTimeout` = **4s**），
+而 **follow 域 RAG 侧无池 ⇒ 该状态不可达**（唯一上限是命令超时 **3s**）⇒ ⇒ **两侧不对称 ⇒ 饱和路径可观察**（follow-api 每请求一次 `hasKey` ⇒ 正是触发面）
+⇒ ⇒ **修法是共享层形态决策（加池）⇒ 落点 `global` 收口域 ⇒ follow 域零落码** ⇒ ⇒ 完整对照与出处 ⇒ [`users/vs-common.md` §33](../users/vs-common.md)。
 
 ③ 🟢 **口径边界**：follow 域**零产物层 IT** ⇒ ⇒ **`mvn test` 口径 == 全量口径** ⇒ ⇒ 本域 68 条**无需**加「不含 IT」的边界说明 ⇒ ⇒ 且已按「maven 模块汇总行 == surefire XML 逐文件求和」双口径相等采信 ✅。
