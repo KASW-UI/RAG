@@ -1839,3 +1839,39 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 
 ⚠️ **本块是「加注记」，不是「改原值」**：上文第七次口径（2457 条 / 20:28 min / `5564c27`）**原样保留** ⇒
 读本域历史结论的人**以两块并列为准** ⇒ ⇒ **不要把第八次误读成「第七次作废」**。
+
+---
+
+## 十、🔴 Redis **连接池形态**漂移（Go **有池** vs RAG **无池**）—— 2026-10-27 登记（G2 挖出 · 本域**独立复核** · **只登记不落码**）
+
+> **公共证据链（Boot 4.0.8 字节码判据 · classpath 探测 · 处置理由 · 复开触发条件）见 [`favorite/api.md` §15](../favorite/api.md#15-)** ⇒ 本节**只记本域特有**的部分。
+
+### 十.1 本域结论
+
+| 项 | Go 真源 | RAG（本树 HEAD `18aa012`） | 判定 |
+|---|---|---|---|
+| **连接池形态** | ✅ **有池** | ❌ **无池**（Lettuce **单连接共享**） | 🔴 **形态漂移** |
+| 池容量 | `PoolSize = 10 × GOMAXPROCS(0)`（**运行时值**） | — | ⛔ 不可 1:1 |
+| 最小空闲连接 | **= 0**（本域走**直连**路径，**不是** go-zero） | — | ⛔ 不可 1:1 |
+| **证据强度** | **L1** | **L3**（字节码 + `dependency:tree` 实测） | ⚠️ 不是 L4（无活体并发对拍） |
+| 核对日期 | 2026-10-27 | 2026-10-27 | — |
+
+### 十.2 本域特有证据
+
+1. **Go 侧（直连 go-redis，**不走** go-zero）**：`service/hot/rpc/internal/svc/service_context.go:17-19` `redis.NewClient(&redis.Options{Addr: c.RedisConf.Host, Password: c.RedisConf.Pass})` ⇒ **只设了 Addr + Password** ⇒ `PoolSize` 未设 ⇒ go-redis v9.20.0 `options.go:350-351` ⇒ **`PoolSize = 10 × GOMAXPROCS` 生效**；`MinIdleConns` 未设 ⇒ **= 0**。
+   ⚠️ **与 `favorite-api` 的差别**：favorite-api 走 go-zero `MustNewRedis` ⇒ `MinIdleConns = 8`（`redisclientmanager.go:15`）；**hot-rpc 直连 ⇒ = 0** ⇒ ⇒ **Go 侧两个组件的最小空闲连接本来就不一样** ⇒ ⇒ 「RAG 侧该抄哪个」**没有单一答案** ⇒ 又一条「不可逐值对齐」的理由。
+2. **Go yaml**：`service/hot/rpc/etc/hot.yaml:19-21` `RedisConf: {Host, Type}` ⇒ **无池字段**。
+3. **RAG 侧**：`service/hot/hot-rpc/src/main/resources/application.yml` 的 `spring.data.redis` 段 ⇒ **无 `lettuce` 子段**（实测 grep 0 命中）⇒ `Pool.enabled = null`。
+4. **classpath 实测**：`mvn -B -o -pl service/hot/hot-rpc -am dependency:tree -Dincludes=org.apache.commons:commons-pool2` ⇒ EXIT=0 ⇒ **0 命中** ⇒ `COMMONS_POOL2_AVAILABLE = false` ⇒ ⇒ **无池**。
+5. **共享层不碰池**：共享层 `GoStyleRedisClientAutoConfiguration` 的**唯一** builder 调用是 `disconnectedBehavior(REJECT_COMMANDS)`（合并后已树内重验）⇒ **不设 `pool.*`** ⇒ ⇒ **池形态完全由域内 yml + 域内 classpath 决定** ⇒ ⇒ **域侧可自修**（不需要派 G4）。
+
+### 十.3 🔴 可观察性：**本域是三个用 Redis 的域里最强的**
+
+- hot-rpc 是**纯 gRPC 进程（无 HTTP 预算兜底）**；
+- 且 Redis 路径就是 Top-K 读（`get_hot_articles_logic.go:43` `ZRevRangeWithScores`）⇒ ⇒ 单连接串行化会**直接**体现在 gRPC 调用耗时上；
+- 与本域已修的「Redis TCP 连接超时」那条（[`vs-common.md` 的 **H-8**](vs-common.md)）**叠在同一路径上** ⇒ ⇒ 若将来做并发对拍，**池形态会与连接超时两个因素纠缠** ⇒ ⇒ **复开时必须分变量**（先固定连接超时，再动池）。
+
+### 十.4 处置
+
+**只登记，不落码**（理由与复开触发条件见 [`favorite/api.md` §15.3](../favorite/api.md#153-处置只登记不落码写死复开触发条件)）⇒ 本域补充一条：
+⚠️ **本域同时承载「命令重试」已登记差异**（go-redis `MaxRetries = 3` vs Lettuce **无重试**，见 [`vs-common.md`](vs-common.md) 的 `DRIFT-HOTRPC-004`）⇒ **改池形态会同时改这两项**（有池 ⇒ 并发下失败重试的分布完全变样）⇒ ⇒ **复开时必须与重试那条一起验**。

@@ -785,3 +785,33 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 ⇒ **不是「用 `DeadlineState` 构造出向 gRPC deadline」** ⇒ ⇒ **不得据它论证「仓内已有第二种载体的出向用法」**；
 ⚠️ 且该判断的**行号已漂移**（实测命中在 `AdminDomainService.java:178`）⇒ **引用前须重新定位**
 ⇒ **保留原值不改写**（本条即订正注记）。
+
+---
+
+## 10. 🟡 Redis **连接池形态**：**形态已对齐**，仅**数值**不同 —— 2026-10-27 登记（G2 挖出 · 本域**独立复核**）
+
+> **公共证据链（Boot 4.0.8 字节码判据 · classpath 探测 · 处置理由 · 复开触发条件）见 [`favorite/api.md` §15](../favorite/api.md#15-)** ⇒ 本节**只记本域特有**的部分。
+
+### 10.1 本域结论
+
+| 项 | Go 真源 | RAG（本树 HEAD `18aa012`） | 判定 |
+|---|---|---|---|
+| **连接池形态** | ✅ **有池** | ✅ **有池** | 🟢 **形态一致** |
+| 池容量 / 活跃上限 | `PoolSize = 10 × GOMAXPROCS(0)`（**运行时值**） | `max-active: 64`（**固定**） | 🟡 **数值不对齐** |
+| 空闲连接下限 | `MinIdleConns = 0`（本域走**直连**路径） | `min-idle: 4` | 🟡 **数值不对齐** |
+| 空闲连接保留上限 | ⛔ **go-redis 无对应概念**（只存 `PoolSize` + `MinIdleConns`） | `max-idle: 16` | ⛔ **语义无对应 ⇒ 不可 1:1** |
+| **证据强度** | **L1** | **L3**（字节码 + `dependency:tree` 实测） | ⚠️ 不是 L4（无活体并发对拍） |
+| 核对日期 | 2026-10-27 | 2026-10-27 | — |
+
+### 10.2 两侧证据
+
+1. **Go 侧（直连 go-redis）**：`service/comment/rpc/internal/cache/redis.go:17-19` `redis.NewClient(&redis.Options{Addr: Host})` ⇒ **只设了 Addr** ⇒ `PoolSize` 未设 ⇒ go-redis v9.20.0 `options.go:350-351` ⇒ **`PoolSize = 10 × GOMAXPROCS` 生效**；`MinIdleConns` 未设 ⇒ **= 0**。
+2. **Go yaml**：`service/comment/rpc/etc/comment.yaml:37-40` `BizRedis: {Host, Type, Pass}` ⇒ **无池字段**。
+3. **RAG 侧**：`service/comment/comment-rpc/src/main/resources/application.yml:138-143` ⇒ `lettuce.pool.enabled: true` ＋ `max-active: 64` ＋ `max-idle: 16` ＋ `min-idle: 4` ⇒ ⇒ `Pool.enabled = true` ⇒ **有池**（走 `PoolBuilderFactory` 分支）。
+4. **classpath 实测**：`mvn -B -o -pl service/comment/comment-rpc -am dependency:tree -Dincludes=org.apache.commons:commons-pool2` ⇒ EXIT=0 ⇒ **1 命中**：`org.apache.commons:commons-pool2:jar:2.12.1:compile` ⇒ ⇒ `PoolBuilderFactory` 需要的 `GenericObjectPoolConfig` **可用** ⇒ ⇒ 池**真的开得起来**（不是「配了但起不来」）。
+   ⚠️ **这正是本域 pom 里显式声明 `commons-pool2` 的原因**（`service/comment/comment-rpc/pom.xml:181-191`）⇒ **Boot 4 的 starter 不传递 `commons-pool2`** ⇒ 缺它 ⇒ `NoClassDefFoundError: GenericObjectPoolConfig` ⇒ **组件起不来**（先例：`like-rpc`）⇒ ⇒ **本域这条是「配了 + 依赖在位」的完整闭环**，不是「只配了一半」。
+
+### 10.3 处置
+
+**形态已对齐 ⇒ 不必动**；**数值不对齐 ⇒ 登记**（**不落码**）⇒ 理由与复开触发条件见 [`favorite/api.md` §15.3](../favorite/api.md#153-处置只登记不落码写死复开触发条件)（① 可观察行为 ② `10 × GOMAXPROCS` 是运行时推导值 ③ 两套池语义无一一对应 ④ 需并发活体对拍 ⑤ 连带影响断连/重试语义）。
+⇒ ⚠️ **本域是三个用 Redis 的域里唯一「有池」的那个** ⇒ ⇒ 若共享层未来要加**池形态**维度的守门，**本域是唯一能提供正样本的域**（`favorite-api` / `hot-rpc` 都是无池）⇒ 记一笔给 **G4**。

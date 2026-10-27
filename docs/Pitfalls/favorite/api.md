@@ -485,3 +485,58 @@ FavoriteApiProtectionWiringTest.serverSideProtectionFiltersAreBeansInGoChainOrde
 - AGENTS.md §3.3.3：**「绿测试可能是错误答案的守卫」** —— 本条是它的一个**可操作版本**：
   守卫的「牙齿检查」（变异转红）会**随共享层变更悄悄掉光** ⇒ 牙齿要**定期体检**。
 
+---
+
+## PIT-FAV-API-011 · 🔴 **yaml 里没写 `lettuce.pool.enabled` ≠ 池没开** —— Boot 4 的判据是 **classpath**，不是配置
+
+> 登记于 2026-10-27（G2 挖出「Lettuce 池形态」· 本域独立复核）⇒ 权威面 = [`docs/DRIFT/favorite/api.md` §15](../../../../DRIFT/favorite/api.md#15-)
+
+### 现象
+
+某个组件的 `application.yml` 的 `spring.data.redis` 段**没有** `lettuce:` 子段 ⇒ 直觉结论：「**池没开**，用的是 Lettuce 单连接共享」。
+
+**这个结论可能是错的**，而且**没有任何报错**。
+
+### 根因：Boot 4 的 `enabled` 判据会**回落到 classpath 探测**
+
+Boot **4.0.8** 的 `spring-boot-data-redis-4.0.8.jar`：
+
+- `LettuceConnectionConfiguration#createBuilder(DataRedisProperties$Pool)` 字节码：
+  `offset 2 invokevirtual isPoolEnabled` → `offset 5 ifeq 20` ⇒ **真** ⇒ `offset 8 new PoolBuilderFactory`（**有池**）；**假** ⇒ `offset 20 LettuceClientConfiguration.builder()`（**无池**）。
+- **`DataRedisConnectionConfiguration#isPoolEnabled`** 字节码才是判据本体：
+  `getEnabled()` → **`ifnull 16`** → `getstatic COMMONS_POOL2_AVAILABLE` ⇒ ⇒
+  **`enabled` 没配（null）时，判据变成「classpath 上有没有 `org.apache.commons:commons-pool2`」**。
+- `DataRedisProperties$Pool.enabled` 的类型是 `java.lang.Boolean` ⇒ **可以为 null** ⇒ 「没配」是常态，不是异常。
+
+⇒ ⇒ **任何一个传递依赖**（某个 starter 顺带带进 `commons-pool2`）都会让该组件**从「单连接共享」变成「有池」**，而 **yaml 里一个字符都不用改** ⇒ **配置面完全看不出这个变化**。
+
+### 本域实测（2026-10-27 · 逐组件，不是整域推断）
+
+| 组件 | `lettuce` 段 | classpath 上 `commons-pool2` | 实际池形态 |
+|---|---|---|---|
+| `favorite-api` | **无** | **0 命中** | ❌ 无池 |
+| `favorite-rpc` | **无** | **0 命中** | N/A（**不接 Redis**） |
+| `hot-rpc` | **无** | **0 命中** | ❌ 无池 |
+| `comment-rpc` | `pool.enabled: true` | **1 命中**（2.12.1） | ✅ 有池 |
+
+⇒ ⇒ **同一段判据、不同结果** ⇒ **整域推断必然出错** ⇒ 必须**逐组件**测。
+
+### 怎么不再踩
+
+1. 判「池开没开」**只看 yaml 不算数** ⇒ 必须查 classpath：
+   `mvn -B -o -pl <模块> -am dependency:tree -Dincludes=org.apache.commons:commons-pool2`
+   （`-am` 必须带：域内模块依赖 `service/common` 等 reactor 内模块，不带会解析失败）
+2. **逐组件测**，不要按域推断（上表四个组件三种结果）。
+3. **依赖树是会变的资产** ⇒ 池形态会**静默翻转** ⇒ 要有**守门**断言 `LettuceConnectionFactory.getClientConfiguration().isPoolEnabled()`
+   （当前**没有** ⇒ 登记为候选自修项 `L-10`，见 `docs/DRIFT/favorite/api.md` §15.5）。
+4. 顺带记一条**启动期硬失败**：Boot 4 的 starter **不传递** `commons-pool2` ⇒ 配了 `pool.enabled: true` **还必须显式引依赖**，
+   否则 `NoClassDefFoundError: GenericObjectPoolConfig` ⇒ **组件起不来**（先例：`like-rpc`；本域 `comment-rpc` 已显式引）。
+
+### 同族
+
+- **AGENTS.md §3.3.1**：「配置里没写」≠「没开」，也≠「没做」⇒ 本条是它在 **Boot 4 Redis 池**上的具体实例。
+- `PIT-FAV-API-009`（守门网断言了共享层的绝对值 ⇒ 假红）/ `PIT-FAV-API-010`（变异绑错层 ⇒ 断言无人守护）
+  ⇒ 本条是**第三种形态**：**判据的来源根本不在你以为的那一层**（不在 yaml，在 classpath）。
+- 同源的通用纪律：**「你以为的那个量」与「系统实际吃到的那个量」不是同一个**
+  ⇒ 与「两口径交叉验先查报告新鲜度」「跨树引用要带 commit id」同族。
+

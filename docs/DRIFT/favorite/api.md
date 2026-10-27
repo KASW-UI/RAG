@@ -746,3 +746,65 @@ service/favorite/api/internal/svc/service_context.go:20
 | **判据（探针，非推断）** | ① `docker exec ddl-favorite-pg psql …` ⇒ **容器内连得上**（只报角色不存在，不是连接失败）⇒ **容器内服务正常**；② 宿主机 socket 探针：绝大多数容器的映射口 **「TCP 连上但 3~5s 读不到任何字节」**（PG/Redis/Kafka/Nacos/minio/… 全中），而 `Sea-user-rpc` / `milvus` / `jaeger` / `neo4j` 四个**正常**（前者收到 32 字节，后三者立即 0 字节 EOF）⇒ ⇒ **宿主 → 容器的转发路径对多数容器失效**，与本轮改动**无关** |
 | **处置** | 🔴 停掉卡住的跑批 + 清掉残留容器 ⇒ **不做跨 lane 的破坏性处置**（重启 Docker Desktop 会连带干掉 G1/G2/G4 各自跑了 30+ 小时的 `ddl-*-pg` 等容器 ⇒ **不擅自做**）⇒ ⇒ **全域 12 模块的完整回归待 Docker 恢复后补跑**（基线：合并前 **922 条**全绿，2026-10-27 09:44 min） |
 | **证据强度** | 本条 = **L3 环境级实测**（socket 探针 + 容器内直连 + 线程栈），**不**据此声称「合并后全域已验」 |
+
+---
+
+## 15. 🔴 Redis **连接池形态**漂移（Go **有池** vs RAG **无池**）—— 2026-10-27 登记（G2 挖出 · 本域**独立复核** · **只登记不落码**）
+
+### 15.1 结论
+
+| 项 | Go 真源 | RAG（本树 HEAD `18aa012`） | 判定 |
+|---|---|---|---|
+| **连接池形态** | ✅ **有池**（go-redis 客户端自带池） | ❌ **无池**（Lettuce **单连接共享**） | 🔴 **形态漂移** |
+| 池容量 | `PoolSize = 10 × GOMAXPROCS(0)` ⇒ **随运行时 CPU 数变**（非固定值） | — | ⛔ **不可 1:1 对齐**（见 §15.3-②③） |
+| 最小空闲连接 | **go-zero 路径 = 8**（`idleConns`） | — | ⛔ 不可 1:1 |
+| **证据强度** | **L1**（真源源码逐行） | **L3**（Boot **4.0.8** **字节码** ＋ `mvn dependency:tree` **实测** classpath） | ⚠️ **不是 L4**（无活体并发对拍） |
+| 核对日期 | 2026-10-27 | 2026-10-27 | — |
+
+### 15.2 两侧证据（逐条带 `文件:行号`）
+
+**Go 侧（有池）** —— 真源 `Sea-RideTheWind_golang`（`go.mod:15` go-redis **v9.20.0** · `go.mod:17` go-zero **v1.10.2**）：
+
+1. **yaml 没配池字段**：`service/favorite/api/etc/favorite.yaml:14-17` `BizRedis: {Host, Type, Pass}` ⇒ **无 `PoolSize` / `MinIdleConns`**。
+2. **go-zero 的 `RedisConf` 根本没有池字段**：`core/stores/redis/conf.go:19-28` ⇒ struct 只有 `Host/Type/User/Pass/Tls/NonBlock/PingTimeout` ⇒ ⇒ **Go 侧 yaml 里即使写了池参数也会被静默丢弃**（本域没写 ⇒ 无此问题）。
+3. **消费点（真正建客户端的地方）**：`service/favorite/api/internal/svc/service_context.go:20` `redisDB := redis.MustNewRedis(c.BizRedis)` ⇒ 走 go-zero `core/stores/redis/redisclientmanager.go:32-40` `red.NewClient(&red.Options{Addr, Username, Password, DB, MaxRetries, MinIdleConns: idleConns, TLSConfig})`
+   - `redisclientmanager.go:15` `idleConns = 8` ⇒ **`MinIdleConns = 8`**
+   - **没有传 `PoolSize`** ⇒ go-redis v9.20.0 `options.go:350-351` `if opt.PoolSize == 0 { opt.PoolSize = 10 * runtime.GOMAXPROCS(0) }` ⇒ **`PoolSize = 10 × GOMAXPROCS`** **默认生效**
+   - `redisclientmanager.go:52` `poolSize: nodePoolSize`（`:21` `nodePoolSize = 10 * runtime.GOMAXPROCS(0)`）⇒ **Go 侧明确登记了一个连接池**。
+
+**RAG 侧（无池）**：
+
+4. `service/favorite/favorite-api/src/main/resources/application.yml` 的 `spring.data.redis` 段 ⇒ **无 `lettuce` 子段**（实测 grep 0 命中）⇒ `DataRedisProperties$Pool.enabled` = **null**。
+5. **Boot 4.0.8 的判定入口**（`spring-boot-data-redis-4.0.8.jar`）：
+   - `LettuceConnectionConfiguration#createBuilder(DataRedisProperties$Pool)` 字节码：`offset 2 invokevirtual isPoolEnabled` → `offset 5 ifeq 20` ⇒ **真** ⇒ `offset 8 new PoolBuilderFactory`（**有池**）；**假** ⇒ `offset 20 LettuceClientConfiguration.builder()`（**无池**）。
+   - `DataRedisConnectionConfiguration#isPoolEnabled` 字节码：`getEnabled()` ⇒ **`null` ⇒ 跳到 `getstatic COMMONS_POOL2_AVAILABLE`** ⇒ ⇒ **`enabled` 未配置时，判据是「classpath 上有没有 `commons-pool2`」**。
+   - `DataRedisProperties$Pool.enabled` 字段类型 = `java.lang.Boolean`（**可为 null**）。
+6. **classpath 实测**（`mvn -B -o -pl service/favorite/favorite-api -am dependency:tree -Dincludes=org.apache.commons:commons-pool2` ⇒ EXIT=0）⇒ **0 命中** ⇒ `COMMONS_POOL2_AVAILABLE = false` ⇒ ⇒ **无池**（Lettuce 单连接共享）。
+   - 对照：同一命令对 `comment-rpc` **1 命中**（`commons-pool2:2.12.1:compile`）⇒ ⇒ **同一段判据、不同结果** ⇒ ⇒ **必须逐组件测，不能整域推断**。
+
+⚠️ **本条只覆盖 `favorite-api`**：本域 `favorite-rpc` **不接 Redis**（`service/favorite/favorite-rpc/src/main/java/**` 对 `RedisTemplate/StringRedisTemplate/RedisConnectionFactory` **0 命中**；Go 侧 `service/favorite/rpc/**` 对 `BizRedis/RedisConf` **0 命中`）⇒ ⇒ **N/A**。
+
+### 15.3 处置：**只登记，不落码**（写死复开触发条件）
+
+① **不是表达层差异** —— 池形态改变**可观察行为**（并发下：Go 多连接并行 vs RAG 单连接**命令串行化**）⇒ 不能按 §3.2「idiomatization 留痕」放行。
+② **数值不可 1:1**：Go 的 `PoolSize = 10 × GOMAXPROCS(0)` 是**运行时 CPU 数推导值**；Lettuce 侧是**固定 YAML 值** ⇒ 只能近似。
+③ **两套池语义没有一一对应**：go-redis = `PoolSize`（总连接上限）+ `MinIdleConns`（空闲下限）**2 参数**；Lettuce = `max-active`（活跃上限）+ `max-idle`（空闲保留上限）+ `min-idle`（空闲下限）**3 参数** ⇒ ⇒ **不存在「逐值抄」这个动作**。
+④ 落码需**并发活体对拍**（当前被机器级 Docker 端口转发故障阻塞 ⇒ 见 [`api.md` §14.4](#144-整域回归被机器级-docker-端口转发故障阻塞不是代码问题已用探针证伪)）。
+⑤ 改形态会**连带影响断连语义**（共享层 `GoStyleRedisClientAutoConfiguration` 的 `disconnectedBehavior(REJECT_COMMANDS)`）⇒ 须连带验。
+
+⇒ **复开触发条件**（写死）：
+- 该域出现**并发下 Redis 路径 p99 明显高于 Go** 的对拍数据 ⇒ 立即复开；
+- **任何**模块的 classpath 上**新增** `commons-pool2`（含**传递依赖**）⇒ 池会**静默打开** ⇒ 必须复验（见 §15.4）。
+
+### 15.4 🔴 陷阱：`lettuce.pool.enabled` **没写** ≠ **池没开**（本条最有价值的副产物）
+
+由 §15.2-⑤ 的字节码：`enabled` 为 **null** 时，Boot 4 **回落到「classpath 上有没有 `commons-pool2`」** ⇒
+⇒ **任何一个传递依赖**（例如某个 starter 顺带带进 `commons-pool2`）都会让该组件**从「单连接共享」变成「有池」**，而 **yaml 里一个字符都不用改** ⇒ ⇒ **配置面完全看不出这个变化**。
+⇒ ⇒ 这是 AGENTS.md §3.3.1「配置里没写 ≠ 没开」的**又一个实例** ⇒ **判据必须是 classpath，不是 yaml**。
+⇒ 本域当前实测：`favorite-api` **无** · `favorite-rpc` **无** · `hot-rpc` **无** · `comment-rpc` **有**（2.12.1）。
+⇒ ⚠️ **守门缺口**：目前**没有**任何测试断言这四个组件的池形态 ⇒ 下次依赖树一变就会**静默翻转** ⇒ **候选自修项**（见 §15.5）。
+
+### 15.5 候选自修项（未落码 · 待排期）
+
+- **L-10（候选）**：加一条**跨组件**的池形态守门（真 Spring 上下文起 `LettuceConnectionFactory` ⇒ 断言 `clientConfiguration.isPoolEnabled()`）⇒ 属**域内** ⇒ 可自修；
+  但**必须先定「期望值」** —— 期望 = 「Go 有池 ⇒ RAG 也应有池」？⇒ 那就回到 §15.3 的「数值不可 1:1」⇒ **需要一次决策**（是「形态对齐即可，数值按经验值」还是「严格照抄 Go 的运行时推导式」）⇒ ⇒ **先登记，不落码**。
