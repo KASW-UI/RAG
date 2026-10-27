@@ -121,6 +121,17 @@
 > - ⚠️ **⇒ 守门测试必须复刻那座桥**（否则测的是「没有桥的装配」⇒ **假阴性**：实测 G4 的探针在缺桥时 3/3 error，根因原文＝ `MybatisPlusAutoConfiguration: Did not match: @ConditionalOnSingleCandidate (types: javax.sql.DataSource) did not find any beans`）⇒ 修法 = 测试作用域放一座**等价**的空桥 **＋ 在测试资源的 `AutoConfiguration.imports` 里注册它**（**光有类不注册 ⇒ 排序边不建立**）。
 > - 🟡 **附带发现（已登记，未派单）**：桥在 **9 个域各写一份**（域侧重复），**共享层 `service/common` 没有**（其 `imports` 只有 `GoStyleOtelAutoConfiguration` ＋ `GoStyleJsonContentTypeAdvice`）⇒ 下沉共享层可消除重复，但**要改 9 个域的 `imports` 文件 ⇒ 域侧写权** ⇒ 跨写权变更（AGENTS.md §5.3c 须同一次提交）⇒ **需 Jason 排期，本轮不动**。
 
+### 4.2 ✅ G4 来问「favorite 容器上限走 (a) 域内改 yaml 还是 (b) 共享层解耦」⇒ **本域答复：(b)，且本域零改动**（2026-10-27）
+
+| 判据 | 实测 |
+|---|---|
+| **Go 侧 favorite-api 怎么读参** | **7 个 handler 全部** `httpx.Parse(r, &req)`（`delete_favorite_folder_handler.go:18` · `create_favorite_folder_handler.go:18` · `update_favorite_folder_name_handler.go:18` · `get_favorites_by_folder_handler.go:18` · `delete_favorite_handler.go:18` · `create_favorite_handler.go:18` · `get_favorite_folders_handler.go:18`）⇒ ⇒ Go 在**应用层**强制 `httpx/util.go:15 maxFormParamCount=2048` ⇒ ⇒ 越限形态 = **HTTP 200 + {code:5003, msg:"参数错误"}**（**不是 400**） |
+| **RAG 侧现状：两道闸门都在** | ① **容器层**：`favorite-api/application.yml:81` `server.tomcat.max-parameter-count: 2048` ⇒ Tomcat 在 `getParameterMap()` 抛 `InvalidParameterException` ⇒ 被 `FavoriteApiSupport.java:435-442` 捕获并转成 `IllegalArgumentException` ⇒ 对外仍是 Go 的形状（**200 + 5003**）；② **应用层**：`FavoriteApiSupport.java:381-382` **按 Go 口径数非空值个数**，超过 2048 ⇒ 抛 `IllegalArgumentException("too many form values")` ⇒ 对外 **200 + 5003** |
+| **残余窗口（本域唯一一条）** | **计数口径差 1**：Tomcat 数**参数条目数**（key+value 合计），Go 数**非空值个数** ⇒ ⇒ 同名 2048 个值时 **Tomcat 拒、Go 放行** ⇒ ⇒ **RAG 在这一格比 Go 严** ⇒ ⇒ 已登记为 **`DRIFT-HOTAPI-030`**（`global/cross-domain`，权威条目在 `docs/DRIFT/hot/api.md`）⇒ **不在 favorite 域单方面改** |
+| **⇒ 为什么是 (b) 而不是 (a)** | (a) 域内改 yaml ⇒ 要动 `server.tomcat.max-parameter-count`，而该值由**全仓**守门 `tools/difftest/check-tomcat-limits.py` 统一期望为 **2048** ⇒ ⇒ (a) 必然撞跨域门禁 ⇒ ⇒ **需跨域拍板**；(b) 共享层把容器上限抬到 **10001**（容器**不再自己判**）＋ 由应用层按 Go 口径判 ⇒ ⇒ **差 1 自动闭合** ⇒ ⇒ 且 **本域那道 Go 口径的应用层检查已经在位（`:381-382`）⇒ ⇒ 抬上限不会「让 favorite 失去闸门」**（若没有它，(b) 会把 favorite 从「严 1」变成「完全不设限」—— **这正是必须先核域侧那半的原因**） |
+| **⇒ 本域需要的改动** | **零** —— (b) 落地后本域自动对齐 ⇒ **不需要 (a)**，也不需要新增域侧检查 |
+| **🔴 给 G4 的实现要求（本轮新增的一条）** | 本域 mode = **OFF**（未配 `rag.http.go-form-limit.mode` ⇒ 默认 `off`）⇒ 当前共享层 `GoStyleTomcatParameterLimitCustomizer.java:109` 在 OFF 时**直接 return** ⇒ **不动容器上限** ⇒ ⇒ **(b) 落地时，容器上限的抬升必须对所有域**无条件**生效**（OFF 只该关掉**应用层**的 Go 风格判定，**不该关掉**容器上限的抬升）⇒ ⇒ 否则 OFF 域会继续卡在「2048 条目数」这一层 ⇒ ⇒ 差 1 不会闭合 |
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ✅ **2026-10-27 阶段 2 已完成**：`mvn -o -pl service/favorite/favorite-rpc,... -am test` ⇒ **favorite-rpc 114 条 / 0 failures / 0 errors / skipped 3**（含 `FavoriteSqlTimeoutProductionPathTest`（**真 Spring 上下文 ＋ 真 PG ＋ 真 Hikari**）5/5 绿、`FavoriteDdlParityTest`（**真 Flyway**）、`fact/FavoriteAuthority*Test`（**真进程 gRPC**））。⚠️ **必须带 `-am`**（否则拿旧共享层跑，见文末「本轮踩坑」）。
