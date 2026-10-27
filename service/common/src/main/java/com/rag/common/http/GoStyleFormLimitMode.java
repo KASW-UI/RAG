@@ -76,6 +76,22 @@ public final class GoStyleFormLimitMode {
 
     /**
      * 模式属性的 {@code @Value} key —— 值域 {@code off} | {@code raw} | {@code envelope}。
+     *
+     * <h2>🔴 YAML 里写 {@code off} <b>必须加引号</b>：{@code mode: "off"}</h2>
+     *
+     * <p>⚠️ <b>YAML 1.1 会把未加引号的 {@code off} 解析成布尔 {@code false}</b>
+     * （SnakeYAML 沿用 YAML 1.1 的布尔字面量表：{@code y|Y|yes|Yes|YES|n|N|no|No|NO|
+     * true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF}）
+     * ⇒ ⇒ 域侧按文档写 {@code mode: off} 时，{@code @Value} 实际拿到的是字符串 {@code "false"}
+     * ⇒ ⇒ 而 {@code "false"} <b>不在</b> {@link #parse} 的原合法值域里 ⇒ ⇒
+     * <b>构造期就抛 {@link IllegalArgumentException} ⇒ 进程起不来</b>
+     * （G2 反馈单 FB-05 的 L4 实测：报错信息里的值是 {@code false} 而不是 {@code off}）。
+     * <p>⇒ ⇒ <b>两种正确写法</b>：① {@code mode: "off"}（<b>加引号</b>，推荐）② {@code mode: false}
+     * ⇒ ⇒ 本类<b>同时接受这两种</b>（见 {@link #parse}）⇒ ⇒ 域侧<b>按文档写也能用</b>。
+     *
+     * <p>⚠️ <b>为什么不是「把 {@code off} 从合法值里删掉」</b>：{@code off} 是本类的
+     * <b>文档化合法取值</b>（{@link #OFF} 的语义）⇒ 删掉它等于「文档与实现不符」⇒
+     * ⇒ 正确方向是<b>让实现接受文档里那个值的实际编码形式</b>，而不是改文档迁就实现。
      */
     public static final String PROPERTY = "rag.http.go-form-limit.mode";
 
@@ -203,8 +219,21 @@ public final class GoStyleFormLimitMode {
      * <p>⚠️ 静默兜底的后果是「以为装上了、其实没装」或「以为走信封、其实走了 400 原文」
      * ⇒ 两者都是<b>不可见的行为漂移</b> ⇒ 宁可启动失败。
      *
+     * <h2>🟢 唯一的别名：{@code "false"}（YAML 1.1 里 {@code off} 的布尔形态）</h2>
+     *
+     * <p>{@code "false"} <b>不是</b>「非法值兜底」，而是<b>精确匹配</b>：
+     * YAML 1.1（SnakeYAML）把未加引号的 {@code off}（以及 {@code no} / {@code n}）
+     * 解析成布尔 {@code false} ⇒ ⇒ {@code "false"} 是
+     * <b>文档化合法取值 {@code off} 的「唯一实际编码形式」</b>
+     * ⇒ ⇒ 接受它 = 让实现<b>对齐文档</b>，而不是放宽合法性。
+     *
+     * <p>⚠️ <b>为什么不放宽成「任意非法值都当 OFF」</b>：那会<b>重新引入</b>
+     * 「静默兜底 = 以为装上了其实没装」（本方法 javadoc 明确反对的那种失效）
+     * ⇒ ⇒ 例：把 {@code mode: raw} 误写成 {@code mode: OFF1} ⇒ 若兜底成 OFF
+     * ⇒ ⇒ 该域会<b>静默失去闸门</b>（且「多记 413」方向的错误更难察觉）⇒ ⇒ 仍然必须炸。
+     *
      * @param raw 属性原值（{@code null} / 空串 ⇒ {@link Mode#OFF}）
-     * @throws IllegalArgumentException 值不在 {@code off|raw|envelope} 内
+     * @throws IllegalArgumentException 值不在 {@code off|false|raw|envelope} 内
      */
     public static Mode parse(String raw) {
         if (raw == null || raw.isBlank()) {
@@ -214,13 +243,18 @@ public final class GoStyleFormLimitMode {
         switch (v) {
             case "off":
                 return Mode.OFF;
+            case "false":
+                // YAML 1.1：未加引号的 off / no / n ⇒ 布尔 false（G2 反馈单 FB-05 的 L4 实测）
+                // ⇒ 域侧按文档写 `mode: off` 时拿到的就是它 ⇒ 必须与 "off" 同义
+                return Mode.OFF;
             case "raw":
                 return Mode.RAW;
             case "envelope":
                 return Mode.ENVELOPE;
             default:
                 throw new IllegalArgumentException(
-                        "非法的 " + PROPERTY + " 值：" + raw + "（只允许 off | raw | envelope）");
+                        "非法的 " + PROPERTY + " 值：" + raw + "（只允许 off | false | raw | envelope；"
+                                + "注意 YAML 里写 off 必须加引号：mode: \"off\"，否则会被 YAML 1.1 解析成布尔 false）");
         }
     }
 
