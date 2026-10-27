@@ -65,14 +65,43 @@ import org.springframework.stereotype.Component;
  * ⇒ <b>本类必须排在它后面</b>，否则会被 Boot 用 yaml 的值盖回去 ⇒
  * ⇒ 本类取 {@link Ordered#LOWEST_PRECEDENCE}（{@code Integer.MAX_VALUE}）⇒ 必然最后 ⇒ <b>必然生效</b>。
  *
- * <h2>⚠️ yaml 里的 {@code server.tomcat.max-parameter-count} 变成了「名义值」</h2>
- * <p>10 个 api 模块的 {@code application.yml} 里都还写着 {@code max-parameter-count: 2048}
- * （那是 hot 域 2026-10-25 第十三轮为了对齐 Go 统一加的）⇒ <b>运行时真实值 = 本类设的 10001</b>。
- * <br>⇒ <b>为什么不把那 10 份 yaml 改成 10001</b>：{@code favorite-api} 不在 global 的写权范围内
- * ⇒ 只改 9 个就<b>制造分叉</b>（9 个域 10001 / favorite 域 2048 ⇒ 又变成「同一个请求 10 个域 10 种行为」）
- * ⇒ ⇒ <b>10 份 yaml 保持一致（都是 2048）＋ 共享层统一覆盖</b> ⇒ 无分叉、favorite 零改动。
- * <br>⚠️ **别只看 yaml 判断行为**（AGENTS.md §3.3.1）⇒ 真值以<b>运行期 connector</b> 为准
- * ⇒ 守门测试必须断言<b>运行期</b>的值。
+ * <h2>⚠️ yaml 里的 {@code server.tomcat.max-parameter-count} 与<b>运行期值</b>的关系</h2>
+ * <p>10 个 api 模块的 {@code application.yml} 里都写着 {@code max-parameter-count: 2048}
+ * （那是 hot 域 2026-10-25 第十三轮为了对齐 Go 统一加的）
+ * ⇒ <b>yaml 层全仓一致</b>（守门 {@code tools/difftest/check-tomcat-limits.py} 的
+ * {@code EXPECTED_MAX_PARAM_COUNT = 2048} 校的就是这一层）。
+ * <br>⇒ 但<b>运行期值</b>由本类决定：{@code mode ≠ OFF} ⇒ 抬到 {@link #MAX_PARAMETER_COUNT}（10001）；
+ * {@code mode == OFF} ⇒ <b>不动</b> ⇒ 运行期 = yaml 的 2048。
+ *
+ * <h3>🔴 因此「OFF 域的运行期上限 = 2048」是<b>真实存在的分叉</b>（2026-10-27 订正）</h3>
+ * <p>本类旧版 javadoc 写「10 份 yaml 保持一致 ＋ 共享层统一覆盖 ⇒ <b>无分叉、favorite 零改动</b>」
+ * ⇒ ⇒ <b>这句是错的</b>（它把「yaml 层一致」当成了「运行期一致」）：
+ * <ul>
+ *   <li>实测：<b>9 个声明了 {@code mode} 的域</b>运行期 = <b>10001</b>；</li>
+ *   <li>实测：<b>favorite</b>（未声明 ⇒ 缺省 {@code off} ⇒ {@link GoStyleFormLimitMode.Mode#OFF}）
+ *       运行期 = <b>2048</b> ⇒ ⇒ <b>它是唯一停在 2048 的域</b>；</li>
+ *   <li>⇒ ⇒ <b>分叉存在</b>，且它<b>不是</b>无害的：favorite 域的 form 上限<b>边界口径</b>
+ *       与 Go 不同（<b>Tomcat 数「总参数值个数（含空值）」，Go 数「非空值个数」</b>）
+ *       ⇒ ⇒ 总「值」数 2049~10000 且非空值 ≤2048 时 <b>Go 放行 / RAG 拒</b>
+ *       ⇒ ⇒ 归 <b>DRIFT-HOTAPI-030</b>（跨域，收口在 global）+ <b>DRIFT-FAV-API-001</b>（域内）。</li>
+ * </ul>
+ * <p>⇒ ⇒ <b>根因</b>：本类把<b>两件独立的事</b>耦合在了同一个 {@code mode} 上 ——
+ * ①「<b>装不装</b> form 值<b>闸门</b>（决定拒绝<b>形状</b>）」与
+ * ②「<b>抬不抬</b>容器<b>参数上限</b>（决定谁来当<b>判定权</b>）」。
+ * ⇒ ⇒ {@link GoStyleFormLimitMode.Mode#OFF} 的<b>两种语义</b>对②的答案<b>不同</b>：
+ * <ul>
+ *   <li><b>域自捕获</b>（favorite）：域内<b>已经</b>装好了 Go 语义的判据
+ *       ⇒ ⇒ 判定权<b>应该</b>交还给应用层 ⇒ ⇒ 容器上限<b>应该</b>抬到 10001；</li>
+ *   <li><b>上限不可达</b>（Go 侧 {@code r.Form} 从不求值）：Go 对 query 参数个数<b>没有</b> 2048 上限
+ *       ⇒ ⇒ 容器上限<b>也</b>应该抬到 10001（否则 Tomcat 会比 Go <b>更早</b>拒）。</li>
+ * </ul>
+ * <p>⚠️ <b>但本轮不改行为</b>：②的改法会让 <b>OFF 域的运行期容器上限从 2048 变 10001</b>
+ * ⇒ ⇒ 那是<b>跨域可观察行为</b>变更（favorite 域的
+ * {@code FavoriteApiRealTomcatGateTest} 会随之改）⇒ ⇒ 按「共享层缺陷一律转派 G4，
+ * 但<b>跨域行为变更必须让域侧参与</b>」⇒ ⇒ <b>本轮只订正事实 + 登记 + 转派</b>
+ * ⇒ ⇒ 详见 {@code docs/DRIFT/global/vs-common.md} §4.10.15。
+ * <br>⚠️ <b>别只看 yaml 判断行为</b>（AGENTS.md §3.3.1）⇒ 真值以<b>运行期 connector</b> 为准
+ * ⇒ ⇒ 守门测试必须断言<b>运行期</b>的值。
  *
  * <h3>🔴 「{@code OFF} ⇒ 不动容器上限」的判据是<b>语义可达性</b>，不是「写权范围」</h3>
  * <p>本类在 {@link GoStyleFormLimitMode.Mode#OFF} 时<b>不动</b>容器上限
@@ -81,9 +110,10 @@ import org.springframework.stereotype.Component;
  * （见 {@link GoStyleFormLimitMode#SEMANTIC_REACHABILITY} 的逐域取证表）
  * ⇒ ⇒ <b>不是</b>「该域在不在 global 的写权范围内」——
  * 后者是一条与 Go 行为<b>无关</b>的理由 ⇒ ⇒ 用它当判据会让「下一个裸 decoder 域」照抄邻居。
- * <p>⇒ favorite 之所以停在 {@code OFF}，是因为它<b>刻意保留</b>（零写权）
- * ⇒ ⇒ 它已作为<b>已知偏离</b>登记在 {@link GoStyleFormLimitMode#REGISTERED_DEVIATIONS}
- * ⇒ ⇒ <b>不是</b>「已对齐」，也不该被下一个 agent 顺手销账。
+ * <p>⇒ favorite 之所以停在 {@code OFF}，是因为它<b>语义上就该是 OFF</b>
+ * （7 个 handler <b>各自捕获</b> {@code httpx.Parse} 的错 ⇒ 拒绝形状由域自己定
+ * ⇒ ⇒ <b>共享层不能装闸门</b>）⇒ ⇒ <b>不是</b>「刻意保留的偏离」，也不该被下一个 agent 销账
+ * ⇒ ⇒ 它与 Go <b>逐字同形</b>（真 HTTP 对拍：{@code tools/api-envelope-probe/favorite}）。
  *
  * <h2>Go 出处（本类的取值依据）</h2>
  * <p>Go 侧<b>没有</b>「容器层参数上限」这个概念（{@code net/http} 不限参数个数）⇒
@@ -117,7 +147,10 @@ public class GoStyleTomcatParameterLimitCustomizer implements WebServerFactoryCu
     public void customize(WebServerFactory factory) {
         // 🔴 OFF ⇒ **不动**容器上限 ⇒ 本域的容器行为与修之前逐字节一致
         //    （判据 = Go 侧该域是否真的解析 form/query，见 GoStyleFormLimitMode#SEMANTIC_REACHABILITY；
-        //      favorite 停在 OFF 是刻意保留的已知偏离，不是「已对齐」）。
+        //      favorite 停在 OFF 是**语义正确**的（域自捕获 ⇒ 共享层不能装闸门），不是「刻意保留的偏离」）。
+        // ⚠️ 已知后果：OFF 域的运行期上限因此停在 yaml 的 2048（其余域是 10001）⇒ 分叉存在
+        //    ⇒ favorite 域的 form 上限「边界口径」与 Go 不同 ⇒ 归 DRIFT-HOTAPI-030 / DRIFT-FAV-API-001
+        //    ⇒ 本轮只登记 + 转派（改它 = 跨域可观察行为变更 ⇒ 必须域侧参与）。
         if (mode == GoStyleFormLimitMode.Mode.OFF) {
             return;
         }

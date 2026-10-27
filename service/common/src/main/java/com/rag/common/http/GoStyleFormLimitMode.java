@@ -37,21 +37,36 @@ import java.util.Map;
  * <table border="1">
  *   <caption>「开不开」与「拒成什么样」是<b>两条独立的轴</b></caption>
  *   <tr><th>轴</th><th>判据</th><th>取值</th></tr>
- *   <tr><td><b>① 开 / 关</b></td><td>Go 侧该域是否真的解析 form/query（<b>语义可达性</b>）</td>
- *       <td>{@link Mode#OFF} ⇔ 不可达；{@link Mode#RAW} / {@link Mode#ENVELOPE} ⇔ 可达</td></tr>
- *   <tr><td><b>② 拒成什么形状</b></td><td>Go 侧该 api 有没有注册 {@code httpx.SetErrorHandler}</td>
- *       <td>{@link Mode#RAW} ⇔ 没注册（400 + text/plain + Go 原文）；<br>
- *           {@link Mode#ENVELOPE} ⇔ 注册了（200 + 业务信封）</td></tr>
+ *   <tr><td><b>① 开 / 关</b></td>
+ *       <td><b>第一判据</b>：Go 侧 handler 是否<b>自己捕获</b> {@code httpx.Parse} 的错<br>
+ *           ⇒ <b>捕获 ⇒ 拒绝形状由域自己定 ⇒ 共享层不装闸门 ⇒ {@link Mode#OFF}</b>；<br>
+ *           <b>第二判据</b>（只在没捕获时）：Go 侧该域是否真的解析 form/query（<b>语义可达性</b>）</td>
+ *       <td>{@link Mode#OFF} ⇔ 域自捕获（形状由域定）<b>或</b> 上限不可达；<br>
+ *           {@link Mode#RAW} / {@link Mode#ENVELOPE} ⇔ 没捕获<b>且</b>可达</td></tr>
+ *   <tr><td><b>② 拒成什么形状</b></td>
+ *       <td><b>第一判据</b>：Go 侧 handler 是否<b>自己捕获</b> {@code httpx.Parse} 的错<br>
+ *           <b>第二判据</b>（只在没捕获时）：Go 侧该 api 有没有注册 {@code httpx.SetErrorHandler}</td>
+ *       <td>自捕获 ⇒ <b>域自定义信封</b>（favorite = 200 + {code:5003,…}）；<br>
+ *           没捕获 + 没注册 ⇒ {@link Mode#RAW}（400 + text/plain + Go 原文）；<br>
+ *           没捕获 + 注册了 ⇒ {@link Mode#ENVELOPE}（200 + {code:5001,…}）</td></tr>
  * </table>
  * <p>⚠️ <b>轴 ② 的逐域事实（Go 侧 {@code service/…/api/…center.go} / {@code commentservice.go}）</b>：
  * <table border="1">
  *   <tr><th>模式</th><th>域</th><th>wire 形状</th></tr>
- *   <tr><td>{@link #RAW}</td><td>article / user / admin / favorite<br>（<b>没注册</b>）</td>
+ *   <tr><td>{@link #RAW}</td><td>article / user / admin<br>（<b>没注册</b>）</td>
  *       <td><b>HTTP 400</b> + {@code text/plain; charset=utf-8} + {@code nosniff}<br>
  *           + body = Go 原文 + {@code "\n"}</td></tr>
  *   <tr><td>{@link #ENVELOPE}</td><td>hot / follow / like / message / comment<br>（<b>注册了</b>）</td>
  *       <td><b>HTTP 200</b> + {@code {"code":5001,"msg":"&lt;该域文案&gt;","data":null}}</td></tr>
+ *   <tr><td><b>域自定义</b><br>⇒ 共享层不装 ⇒ {@link #OFF}</td>
+ *       <td>favorite<br>（<b>handler 自己捕获</b> {@code httpx.Parse} 的错）</td>
+ *       <td><b>HTTP 200</b> + {@code {"code":5003,"msg":"参数错误","data":null}}<br>
+ *           （= {@code httpx.OkJsonCtx} + {@code favoritecommon.ErrorInvalidParam}）</td></tr>
  * </table>
+ * <p>⚠️ <b>「域自捕获」为什么必须排在第一判据</b>：它<b>推翻</b>了「没注册 {@code SetErrorHandler}
+ * ⇒ 就是 400 + text/plain」这条推理 ⇒ ⇒ favorite <b>没注册</b> {@code SetErrorHandler}
+ * （实测：全仓 5 个注册点 = like / comment / follow / message / hot）⇒ <b>但</b>它的 7 个 handler
+ * <b>各自捕获</b> {@code httpx.Parse} 的错 ⇒ ⇒ 形状是 <b>200 + 5003</b>（既不是 RAW 也不是 ENVELOPE）。
  *
  * <h2>⚠️ 为什么 5001 的文案<b>不能</b>写在共享层</h2>
  * <p>各域 5001 的文案<b>不一样</b>（Go 侧逐域取证）：
@@ -97,7 +112,22 @@ public final class GoStyleFormLimitMode {
 
     /** 本域的闸门形状。 */
     public enum Mode {
-        /** 不装闸门、也不改容器上限（Go 侧<b>不</b>解析 form/query 的域走这条）。 */
+        /**
+         * 不装闸门、也不改容器上限。
+         *
+         * <p>🔴 <b>两种语义完全不同的情形都归它</b>（用 {@code goSideHandlesParseError} 分流）：
+         * <ul>
+         *   <li><b>上限不可达</b>（Go 侧 handler <b>不</b>解析 form/query）
+         *       ⇒ ⇒ RAG 与 Go 同为「不因 query 而拒」；</li>
+         *   <li><b>域自捕获</b>（Go 侧 handler <b>自己捕获</b> {@code httpx.Parse} 的错）
+         *       ⇒ ⇒ 拒绝形状由<b>域自己</b>定（favorite = 200 + {code:5003,…}）
+         *       ⇒ ⇒ <b>共享层绝不能装闸门</b>：装了就会<b>抢先</b>于域自己的捕获
+         *       ⇒ ⇒ 形状会变成 400 + text/plain 或 200 + {code:5001} ⇒ ⇒ <b>与 Go 不符</b>。</li>
+         * </ul>
+         * ⚠️ 两种情形虽然都落在 {@code OFF}，但<b>原因不同</b> ⇒ ⇒ 这正是
+         * {@link DomainReachability#goSideHandlesParseError()} 这个字段存在的原因
+         * （只有它能把两者分开）。
+         */
         OFF,
         /** 拒绝成 Go 的 {@code http.Error} 形状：<b>400 + text/plain + Go 原文</b>。 */
         RAW,
@@ -110,17 +140,37 @@ public final class GoStyleFormLimitMode {
      *
      * @param module            该域的模块路径（相对仓库根，{@code service/…}）
      * @param goSideParsesForm  Go 侧该域的 handler 是否<b>真的</b>调 {@code httpx.Parse}（⇒ 解析 form/query）
-     * @param semanticMode      由上一行推出的<b>语义</b>模式（闸门「应当」是什么）
+     * @param goSideHandlesParseError  Go 侧该域的 handler 是否<b>自己捕获</b> {@code httpx.Parse} 的错
+     *                                  （⇒ 自己捕获 ⇒ 拒绝形状由<b>域自己</b>定 ⇒ 共享层<b>不装</b>闸门）
+     * @param semanticMode      由上一行推出的<b>语义</b>模式（<b>共享层该装成什么</b> ⇒ 不是「该域实际该拒成什么形状」）
      * @param goEvidence        Go 侧证据（文件:行号 / 命中数）
      */
     public record DomainReachability(
             String module,
             boolean goSideParsesForm,
+            boolean goSideHandlesParseError,
             Mode semanticMode,
             String goEvidence) {
 
-        /** 语义模式与「是否解析」是否自洽（{@code OFF} ⇔ 不可达）。 */
+        /**
+         * 语义模式与「是否解析」是否自洽。
+         *
+         * <p>🔴 <b>两条自洽规则（按「域是否自己捕获 {@code httpx.Parse} 的错」分流）</b>：
+         * <ul>
+         *   <li><b>域自己捕获</b>（{@code goSideHandlesParseError == true}）
+         *       ⇒ ⇒ 拒绝形状由<b>域自己</b>定（favorite = {@code 200 + {code:5003, msg:"参数错误"}}）
+         *       ⇒ ⇒ <b>共享层不装闸门</b> ⇒ 语义模式必须是 {@link Mode#OFF}
+         *       ⇒ ⇒ ⚠️ 与「Go 侧不解析」的域<b>同样是 OFF，但原因不同</b>
+         *       （前者「上限不可达」· 后者「形状由域自定」⇒ 这正是本字段存在的原因）；</li>
+         *   <li><b>域不自己捕获</b> ⇒ ⇒ 拒绝形状由<b>共享层</b>决定
+         *       ⇒ ⇒ <b>Go 侧解析 ⇒ 闸门必须开</b>（{@code OFF} ⇔ 不解析）。</li>
+         * </ul>
+         */
         public boolean selfConsistent() {
+            if (goSideHandlesParseError) {
+                // 域自捕获 ⇒ 共享层不参与 ⇒ 语义模式必须是 OFF
+                return semanticMode == Mode.OFF;
+            }
             return (semanticMode == Mode.OFF) == !goSideParsesForm;
         }
     }
@@ -138,76 +188,104 @@ public final class GoStyleFormLimitMode {
      * <b>新增域时照着这张表填，而不是照抄邻居</b>。
      */
     public static final List<DomainReachability> SEMANTIC_REACHABILITY = List.of(
-            new DomainReachability("service/article/article-api", true, Mode.RAW,
+            new DomainReachability("service/article/article-api", true, false, Mode.RAW,
                     "article/api/internal/handler/**：httpx.Parse 命中 6 处；"
                             + "未注册 httpx.SetErrorHandler ⇒ 400 + text/plain + Go 原文"),
-            new DomainReachability("service/comment/comment-api", true, Mode.ENVELOPE,
+            new DomainReachability("service/comment/comment-api", true, false, Mode.ENVELOPE,
                     "comment/api/internal/handler/**：调 httpx.Parse；"
                             + "comment/api/commentservice.go:47 注册了 httpx.SetErrorHandler ⇒ 业务信封"),
-            new DomainReachability("service/favorite/favorite-api", true, Mode.RAW,
+            new DomainReachability("service/favorite/favorite-api", true, true, Mode.OFF,
                     "favorite/api/internal/handler/favorite/**：httpx.Parse 命中 7 处；"
-                            + "未注册 httpx.SetErrorHandler ⇒ 语义答案是 raw"),
-            new DomainReachability("service/follow/follow-api", true, Mode.ENVELOPE,
+                            + "🟢 **7 个 handler 各自捕获 httpx.Parse 的错**"
+                            + "（如 get_favorites_by_folder_handler.go:18-22 ⇒ httpx.OkJsonCtx"
+                            + " + {Code: favoritecommon.ErrorInvalidParam(=5003), Msg:\"参数错误\", Data:nil}）"
+                            + " ⇒ **HTTP 200 + 域自定义业务码信封**（既不是 RAW 的 400+text/plain，"
+                            + "也不是 ENVELOPE 的 5001）⇒ 拒绝形状由**域自己**定 ⇒ **共享层不装闸门**"
+                            + "（RAG 侧域内**也已自装**：favorite-api 的 FavoriteApiSupport#goFormFirstValue"
+                            + " 逐字复刻 Go 的 2048「非空值」判据 + #parameterMap 把容器层超限也映射到"
+                            + " 同一出口 ⇒ 已与 Go **逐字同形**，见 tools/api-envelope-probe/favorite）"),
+            new DomainReachability("service/follow/follow-api", true, false, Mode.ENVELOPE,
                     "follow/api/internal/handler/**：调 httpx.Parse；"
                             + "follow/api/followcenter.go:53 注册了 httpx.SetErrorHandler ⇒ 业务信封"),
-            new DomainReachability("service/hot/hot-api", true, Mode.ENVELOPE,
+            new DomainReachability("service/hot/hot-api", true, false, Mode.ENVELOPE,
                     "hot/api/internal/handler/**：调 httpx.Parse；"
                             + "hot/api/hotcenter.go:53 注册了 httpx.SetErrorHandler ⇒ 业务信封"),
-            new DomainReachability("service/like/like-api", true, Mode.ENVELOPE,
+            new DomainReachability("service/like/like-api", true, false, Mode.ENVELOPE,
                     "like/api/internal/handler/**：调 httpx.Parse；"
                             + "like/api/likecenter.go:48 注册了 httpx.SetErrorHandler ⇒ 业务信封"),
-            new DomainReachability("service/message/message-api", true, Mode.ENVELOPE,
+            new DomainReachability("service/message/message-api", true, false, Mode.ENVELOPE,
                     "message/api/internal/handler/**：调 httpx.Parse；"
                             + "message/api/messagecenter.go:53 注册了 httpx.SetErrorHandler ⇒ 业务信封"),
-            new DomainReachability("service/task/task-api", false, Mode.OFF,
+            new DomainReachability("service/task/task-api", false, false, Mode.OFF,
                     "task/api/**：httpx.Parse / ParseForm / GetFormValues 命中数 = 0"
                             + "（gettaskhandler.go:19 用 json.NewDecoder(r.Body) + UseNumber，"
                             + "只 import 了 httpx 但只用 httpx.ErrorCtx）"
                             + " ⇒ r.Form 从不被求值 ⇒ 两道上限不可达 ⇒ 语义答案是 off"),
-            new DomainReachability("service/users/user/user-api", true, Mode.RAW,
+            new DomainReachability("service/users/user/user-api", true, false, Mode.RAW,
                     "user/api/internal/handler/user/**：httpx.Parse 命中 8 处；"
                             + "未注册 httpx.SetErrorHandler ⇒ 400 + text/plain + Go 原文"),
-            new DomainReachability("service/users/admin/admin-api", true, Mode.RAW,
+            new DomainReachability("service/users/admin/admin-api", true, false, Mode.RAW,
                     "admin/api/internal/handler/admin/**：httpx.Parse 命中 13 处；"
                             + "未注册 httpx.SetErrorHandler ⇒ 400 + text/plain + Go 原文"));
 
     /**
-     * 🔴 <b>已登记的偏离</b>：某域的实际模式与本表的语义答案<b>不一致</b>，且<b>刻意不改</b>。
+     * 🔴 <b>已登记的偏离</b>：某域的<b>实际模式</b>与本表的<b>语义答案</b><b>不一致</b>，且<b>刻意不改</b>。
      *
      * <p>⚠️ 这里只登记<b>刻意保留</b>的偏离；<b>待修</b>的偏离（各域自己改 yaml）不在这里。
      *
-     * @param module    模块路径
+     * <h2>🔴 当前是<b>空表</b>（2026-10-27 · G3 反馈单「轴 ② 判据」订正）</h2>
+     * <p>此前这里登记着 favorite 一条，内容是「实际 off vs 语义答案 raw ⇒ 刻意保留的偏离」⇒
+     * ⇒ <b>三个前提全错</b>，本轮<b>删除</b>：
+     * <ul>
+     *   <li><b>① 模式前提错</b>：favorite 的语义答案**就是** {@link Mode#OFF}
+     *       （7 个 handler <b>各自捕获</b> {@code httpx.Parse} 的错 ⇒ 拒绝形状由域自己定
+     *       ⇒ ⇒ 共享层**不能**装闸门）⇒ ⇒ 「实际 off vs 语义 raw」<b>不成立</b>
+     *       ⇒ ⇒ 它<b>不是</b>「模式偏离」⇒ ⇒ 不该登记在这里；</li>
+     *   <li><b>② Go 侧形状写错</b>：原登记写「Go：&gt;2048 个非空 query 值 ⇒ <b>400 + text/plain</b>」
+     *       ⇒ ⇒ <b>错</b>：Go 侧 favorite 自捕获 ⇒ 落 <b>200 + {code:5003,msg:"参数错误",data:null}</b>
+     *       ⇒ ⇒ 真源：{@code service/favorite/common/errmsg.go:16}（ErrorInvalidParam = 5003）
+     *       + {@code rest/httpx/responses.go:56-63}（{@code OkJsonCtx} ⇒ HTTP 200）；</li>
+     *   <li><b>③ RAG 侧形状写错</b>：原登记写「RAG(OFF)：<b>400 + Tomcat HTML 错误页</b>」
+     *       ⇒ ⇒ <b>错</b>：favorite-api 域内已把容器层的超限<b>映射</b>成 Go 的那一个出口
+     *       ⇒ ⇒ 实测是 <b>200 + {code:5003,…}</b>（真 HTTP 对拍，见
+     *       {@code tools/api-envelope-probe/favorite} 与
+     *       {@code FavoriteApiRealTomcatGateTest}）⇒ ⇒ <b>与 Go 逐字同形</b>。</li>
+     * </ul>
+     * <p>⚠️ <b>残留的那条真漂移没有被销账</b>（只是<b>不归本表</b>）：
+     * favorite 的 form 上限<b>边界口径</b>仍与 Go 不同 ——
+     * <b>Tomcat 数「总参数值个数（含空值）」，Go 数「非空值个数」</b>
+     * ⇒ ⇒ 总「值」数 2049~10000 且非空值 ≤2048 时，<b>Go 放行 / RAG 拒</b>
+     * ⇒ ⇒ 它<b>不是</b>「模式偏离」，而是<b>容器上限口径</b>问题
+     * ⇒ ⇒ 归 <b>DRIFT-FAV-API-001</b>（域内，favorite 域自己）+ <b>DRIFT-HOTAPI-030</b>（跨域，收口在 global）。
+     *
+     * <p>⚠️ <b>为什么不是「删了登记 = 这条漂移不存在了」</b>：本表只承载「<b>模式</b>偏离」
+     * ⇒ ⇒ 「favorite 的模式 = OFF 是<b>语义正确</b>的」与「favorite 的<b>边界口径</b>仍有漂移」
+     * 是<b>两件不同的事</b> ⇒ ⇒ 后者由上面两条 DRIFT 条目承载。
+     *
+     * @param module     模块路径
      * @param actualMode 该域<b>实际</b>生效的模式（= 缺省值）
-     * @param reason    为什么<b>刻意</b>不改
+     * @param reason     为什么<b>刻意</b>不改
      * @param observable 可观察差异（写清楚，别只写「不一致」）
      */
     public record RegisteredDeviation(String module, Mode actualMode, String reason, String observable) {
     }
 
     /**
-     * 🔴 刻意保留的偏离（<b>只登记，不改</b>）。
+     * 🔴 刻意保留的偏离（<b>只登记，不改</b>）—— <b>当前为空</b>。
      *
-     * <p>⚠️ favorite 域<b>不在 global 的写权范围内</b>（AGENTS.md §5.3c）⇒ 共享层对它必须<b>零影响</b>
-     * ⇒ ⇒ 它的 yaml 里**不得**出现 {@code rag.http.go-form-limit.mode}
-     * ⇒ ⇒ 它<b>缺省</b> {@link Mode#OFF}。
-     * <p>⚠️ 而按语义判据，favorite 的 Go 侧<b>真的</b>解析 form（7 处 {@code httpx.Parse}）⇒ 语义答案是 {@link Mode#RAW}
-     * ⇒ ⇒ <b>这是一条已知、刻意保留的偏离</b>，<b>不是</b>「已对齐」：
+     * <p>⚠️ 空表的含义是「<b>目前没有</b>『实际模式 ≠ 语义答案』且<b>刻意不改</b>的域」，
+     * <b>不是</b>「没有漂移」：
      * <ul>
-     *   <li>Go：{@code >2048} 个<b>非空</b> query 值 ⇒ {@code httpx.GetFormValues} 报
-     *       「too many form values」⇒ {@code http.Error} ⇒ <b>400 + text/plain + Go 原文</b>；</li>
-     *   <li>RAG（OFF）：闸门不装；容器层仍按 yaml 的 {@code max-parameter-count: 2048} 拒
-     *       ⇒ <b>400 + Tomcat 的 HTML 错误页</b>，且 Tomcat 数的是<b>参数总数（含空值）</b>。</li>
+     *   <li><b>待修</b>的漂移（实际 ≠ 语义，但<b>各域自己</b>改 yaml 修）<b>不在</b>本表
+     *       ⇒ 例：task 域 yaml 声明 {@code raw}，而语义答案是 {@link Mode#OFF}；</li>
+     *   <li><b>边界口径</b>类漂移（与「模式」无关）也不在本表
+     *       ⇒ 例：favorite 的「Tomcat 总值 vs Go 非空值」（DRIFT-FAV-API-001 / DRIFT-HOTAPI-030）。</li>
      * </ul>
-     * ⇒ ⇒ <b>状态码相同（400），响应体形状不同</b> ⇒ LOW 级形状漂移。
-     * <p>⚠️ <b>下一个 agent 不得把它当成「已对齐」销账，也不得擅自去改 favorite</b>。
+     * ⚠️ <b>下一个 agent 要新增登记时</b>：必须先<b>自己逐行核对前提</b>（两侧确实不同）
+     * ⇒ ⇒ 再登记 ⇒ ⇒ 且「observable」必须写<b>可观察差异</b>（状态码 / 响应体形状），
+     * 不能只写「不一致」。
      */
-    public static final List<RegisteredDeviation> REGISTERED_DEVIATIONS = List.of(
-            new RegisteredDeviation("service/favorite/favorite-api", Mode.OFF,
-                    "favorite 域不在 global 的写权范围内（AGENTS.md §5.3c）⇒ 共享层对它必须零影响；"
-                            + "它的 yaml 不得出现该属性 ⇒ 缺省 off",
-                    "Go：>2048 个非空 query 值 ⇒ 400 + text/plain + Go 原文；"
-                            + "RAG(OFF)：400 + Tomcat HTML 错误页（且计的是参数总数、含空值）"
-                            + " ⇒ 状态码一致、响应体形状不同（LOW）"));
+    public static final List<RegisteredDeviation> REGISTERED_DEVIATIONS = List.of();
 
     private GoStyleFormLimitMode() {
     }

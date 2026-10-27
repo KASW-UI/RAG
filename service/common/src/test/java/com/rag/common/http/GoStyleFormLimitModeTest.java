@@ -23,8 +23,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * </ul>
  *
  * <h3>🔴 为什么「off」必须真的什么都不做</h3>
- * <p>{@code favorite} 域<b>不在 global 的写权范围内</b> ⇒ 共享层对它必须<b>零影响</b>：
- * 既不改它的容器上限、也不装闸门 ⇒ 行为逐字节不变。
+ * <p>{@code favorite} 域<b>自己捕获</b> {@code httpx.Parse} 的错（Go 侧 7 个 handler 各自捕获
+ * ⇒ 拒绝形状 = 域自定义信封 200 + {code:5003,…}）⇒ ⇒ <b>共享层装闸门反而会破坏形状</b>
+ * ⇒ ⇒ 它的语义答案<b>就是</b> {@code OFF}（不是「将就」，是<b>语义正确</b>）
+ * ⇒ ⇒ 缺省即正确 ⇒ 既不改它的容器上限、也不装闸门。
+ * <br>⚠️ 但「不改容器上限」这条对 favorite <b>有后果</b>（运行期上限停在 yaml 的 2048
+ * ⇒ 与其余域的 10001 分叉 ⇒ 边界口径漂移）⇒ 归 DRIFT-HOTAPI-030 / DRIFT-FAV-API-001。
  */
 @DisplayName("🔴 form 值上限闸门的模式分派")
 class GoStyleFormLimitModeTest {
@@ -34,7 +38,7 @@ class GoStyleFormLimitModeTest {
     // ==================================================================
 
     @Test
-    @DisplayName("🔴 缺省 / 空串 ⇒ OFF（favorite 域走这条 ⇒ 共享层对它零影响）")
+    @DisplayName("🔴 缺省 / 空串 ⇒ OFF（favorite 域走这条 ⇒ 它的语义答案就是 OFF ⇒ 缺省即正确）")
     void missingPropertyMeansOff() {
         assertEquals(GoStyleFormLimitMode.Mode.OFF, GoStyleFormLimitMode.parse(null));
         assertEquals(GoStyleFormLimitMode.Mode.OFF, GoStyleFormLimitMode.parse(""));

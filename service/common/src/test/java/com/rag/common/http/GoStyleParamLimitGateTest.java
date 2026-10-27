@@ -44,9 +44,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * go-zero@v1.10.2/rest/httpx/util.go:48      if n &lt; maxFormParamCount { … } else { return nil, fmt.Errorf("too many form values, error: %s", r.Form.Encode()) }
  * Go 1.25 net/url/url.go:1001                defaultMaxParams = 10000（query 段数上限）
  *
- * ⇒ Go 的拒绝形状（**没注册 SetErrorHandler 的域**：article / user / task / favorite）：
+ * ⇒ Go 的拒绝形状（**没注册 SetErrorHandler 且装闸门**的域：article / user / admin）：
  *   HTTP 400 + Content-Type「text/plain; charset=utf-8」+ nosniff
  *   + body = "too many form values, error: " + r.Form.Encode() + "\n"
+ * ⚠️ task 与 favorite **不在这一组**：task Go 侧不解析 form/query（闸门不开）；
+ *   favorite 的 handler 各自捕获解析错（拒绝形状 = 域自定义信封 200 + {code:5003,…}）
+ *   ⇒ ⇒ 「没注册 SetErrorHandler」**推不出**「走 400 形状」⇒ 见 GoStyleFormLimitMode 的逐轴判据。
  * </pre>
  *
  * <h3>🔴 这条守门对应的漂移（{@code DRIFT-HOTAPI-030} / global X-6）</h3>
