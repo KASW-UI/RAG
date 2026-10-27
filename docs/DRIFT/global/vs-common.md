@@ -2578,6 +2578,52 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 2. 🟢 **本层这一轮只加了一条**「结构锁」（④）⇒ ⇒ **不影响 G3 域内任何行为** ⇒ ⇒ **G3 的域内守门（`FavoriteApiRealTomcatGateTest#containerParameterLimitIsSurfacedAsGoParseError` 改成 Go 语义放行）**不需要为本轮重做**。
 3. 🟡 **仍归 G3 域内的那一格**：**总「值」数 > Go 的 10000 段上限**（Tomcat 拒 HTML / Go 拒 text/plain）⇒ ⇒ **G3 已显式登记** ⇒ ⇒ 本层**不代销**。
 
+#### 4.10.47 🔴🟢 **端口段表当轮复测（G3 树 @ `3249ef7`）+ 一处**订正**（comment-rpc 的 OS 分配口是 **4 处**，不是 1 处）+ 一处**新发现**（comment-rpc **没有段管理类**）⇒ 转派 G3 三条**（2026-10-27 深夜 · **本层零落码**）
+
+> **本节零落码** ⇒ 只做**复测 + 订正 + 转派**（AGENTS.md §5.3d「域侧能自修的域侧修」）。
+> ⇒ ⇒ **端口段表的落点 = 本文件**（§4.10.15.8 ②）⇒ ⇒ **本层是 global 协调方 ⇒ 只给结论与段号，不替 G3 改域内代码**。
+
+**① 段表复测（核对日期 2026-10-27 深夜 · **G3 树 @ `3249ef7`**，非旧记录的 `dec6348`）**
+
+| 段 | 归属 | 本轮实测 | 与 §4.10.19.3 的一致性 |
+|---|---|---|---|
+| `21400–21499` | G3（favorite-rpc 真进程）| `service/favorite/favorite-rpc/src/test/.../support/RealGrpcPort.java` ⇒ `FIRST = 21400` / `LAST = 21499` | ✅ **与旧记录一致 ⇒ ⇒ ⚠️ 即「仍未迁段」**（预分配的 `22100–22199` **还没用上**）|
+| `21400–21599` | G3（favorite 探针段，3 个探针 + 1 个守门）| `tools/probe-gate/favorite/check-port-ownership.sh:12`（段说明）· `:81-82`（段断言）· `:91`/`:95`/`:100`（用 `21400` 做「被占」样本）| ✅ 一致 |
+| **`21500`** | G3（comment-rpc 真 gRPC）| `service/comment/comment-rpc/src/test/.../rpc/CommentSpanWiringTest.java:94` `grpc.server.port=21500` | ✅ 一致 ⇒ ⇒ **仍在 favorite 探针段内** ⇒ ⇒ **第二处重叠仍未解** |
+| `22100–22199` | G3（favorite-rpc **迁出用**）| 🟢 **实测零占用**（G3 树全仓 `22100\|22600` ⇒ **零命中**）| ✅ 一致 ⇒ ⇒ **段仍可用** |
+| `22600–22699` | G3（comment-rpc **迁出用**）| 🟢 **实测零占用**（同上）| ✅ 一致 ⇒ ⇒ **段仍可用** |
+
+**② 🔴 订正（§4.10.38 ② 登记的数错了）—— comment-rpc 落 OS 临时段的，是 **4 处**，不是 1 处**
+
+| # | 文件:行号 | 取口方式 | 落在哪 |
+|---|---|---|---|
+| 1 | `service/comment/comment-rpc/src/test/.../rpc/CommentRpcGrpcInterceptorWiringTest.java:101` | `"grpc.server.port=0"` | OS 临时段 |
+| 2 | `service/comment/comment-rpc/src/test/.../rpc/CommentRpcSlowThresholdGateTest.java:120` | `"grpc.server.port=0"` | OS 临时段 |
+| 3 | `service/comment/comment-rpc/src/test/.../rpc/CommentRedisDisconnectFastRejectGateTest.java:91` | `"grpc.server.port=0"` | OS 临时段 |
+| 4 | `service/comment/comment-rpc/src/test/.../rpc/CommentRpcRuntimeBootGateTest.java:92`（`int port = freePort()`）· `:96`（`"--grpc.server.port=" + port`）· `:185`（`new ServerSocket(0)`）| **OS 分配**（不是字面量 `0`，但同样落临时段）| OS 临时段 |
+| — | `CommentSpanWiringTest.java:94` | `"grpc.server.port=21500"`（**硬编码固定口**）| 🔴 **落在 favorite 探针段 `21400–21599` 内** |
+
+⇒ ⇒ **§4.10.38 ② 只点了第 1 处** ⇒ ⇒ **订正为 4 处** ⇒ ⇒ 而且第 4 处**形态不同**（`freePort()` + `new ServerSocket(0)` ⇒ 不是 `port=0` 字面量 ⇒ ⇒ **按字面量 grep `port=0` 会漏掉它** ⇒ ⇒ 「查端口用法」不能只搜 `port=0`）。
+⇒ ⇒ ⚠️ **同域自相矛盾**：`CommentSpanWiringTest.java:90-94` 的注释**明确写**「`port=0` 会让 OS 从临时端口段挑，而那是 **Docker 随机发布容器端口用的同一段** ⇒ `EADDRINUSE` ⇒ 抖动」⇒ ⇒ 而**同域另外 3 个文件正用 `port=0`** ⇒ ⇒ **那个类正好踩中它自己注释里说的坑**（§4.10.38 ② 只发现了第 1 处）。
+
+**③ 🆕 新发现（决定迁段工程量）：comment-rpc **没有** `RealGrpcPort` 段管理类**
+
+- 实测：`find service/comment -name "*Port*.java"` ⇒ **零命中**（favorite-rpc 有 `RealGrpcPort.java` + `RealGrpcPortTest.java`；**comment-rpc 两样都没有**）⇒ ⇒ `21500` 是**裸硬编码常量**（`CommentSpanWiringTest.java:94`）。
+- ⇒ ⇒ **两处迁段的工程量**不同，**不能当成同一件事派**：
+
+| 迁段对象 | 现状 | 改法 | 工程量 |
+|---|---|---|---|
+| **favorite-rpc** `21400–21499` ⇒ `22100–22199` | 有 `RealGrpcPort.java`（`FIRST`/`LAST` 两个常量）⇒ 脚手架段 `22050–22099` 在**另一个文件**里 | 改 `RealGrpcPort.java` 的 **2 个常量** ⇒ 探针段不动 ⇒ `check-port-ownership.sh` 守门**不用动** | 🟢 **小**（§4.10.19.4 已给结论，本轮**仍未执行**）|
+| **comment-rpc** `21500` ⇒ `22600–22699` | **无段管理类** ⇒ 裸常量 | 要么新建一个 `RealGrpcPort` 同款，**要么**只把常量改成 `22600`（但**那样只占 1 个口**，不是一段 ⇒ ⇒ 与「段治理」的初衷不同）| 🟡 **大**（**要 G3 自己裁**：是「补一个段管理类」还是「只迁这一个口」）|
+
+**④ 转派 G3 三条（本层零落码）**
+
+1. 🟡 **favorite-rpc 段迁出**：`RealGrpcPort.java` 的 `FIRST`/`LAST` ⇒ `22100`/`22199`（**2 个常量**）⇒ 脚手架段 `22050–22099` **不动** ⇒ 探针段 `21400–21599` **不动** ⇒ `check-port-ownership.sh` **不用动** ⇒ **实测确认 `22100–22199` 零占用** ⇒ **本层预分配的段已被 G3 认可，只差落码**。
+2. 🟡 **comment-rpc 的 `21500` 迁出** ⇒ 目标段 `22600–22699`（**实测零占用**）⇒ ⇒ **但 comment-rpc 没有段管理类** ⇒ ⇒ **请 G3 先裁「补一个 `RealGrpcPort` 同款」还是「只迁这一个口」** ⇒ ⇒ **本层不替它裁**（裁法不同 ⇒ 守门形态不同 ⇒ 属域内设计）。
+3. 🔴 **comment-rpc 的 4 处 OS 分配口改专用段**（§② 表）⇒ ⇒ 其中第 4 处（`freePort()` / `new ServerSocket(0)`）**按 `port=0` 字面量查不出来** ⇒ ⇒ 查端口用法必须**逐个测试类看**，不能只 grep。
+
+**⑤ 本层这一条** | **零落码** ⇒ ⇒ **端口段表落点（`docs/DRIFT/global/vs-common.md`）已按当轮复测更新** ⇒ ⇒ **全量用例数不变**（本节零代码改动）⇒ ⇒ ⇒ **本层 HEAD `9dd67ab`**（基线 `a282012` 之上 84 笔，未 push）。
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
