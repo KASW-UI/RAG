@@ -225,11 +225,17 @@ rag:
       #        ③ ?a=1;b=2（分号）⇒ 200
       # ⚠️⚠️ **必须加引号**：YAML 1.1（SnakeYAML）把**未加引号的** `off` 解析成
       #    **布尔 false** ⇒ `@Value("${rag.http.go-form-limit.mode}")` 拿到的是
-      #    字符串 **"false"** ⇒ 共享层 `GoStyleFormLimitMode.parse` 判「非法值」
-      #    ⇒ **启动期 BeanCreationException（进程起不来）**。
-      #    （2026-10-27 实测：未加引号时 task-api 上下文直接起不来，
-      #      报错 `非法的 rag.http.go-form-limit.mode 值：false`。）
-      #    ⇒ 域内写法的正确形式是 `mode: "off"`（带引号 ⇒ 保持字符串）。
+      #    字符串 **"false"**。
+      #    📌 **订正（2026-10-28 · G4 告知 + 我域独立复核）**：**这段警告的后半段已过期**
+      #    —— 共享层 `GoStyleFormLimitMode.parse` 现在**接受 `"false"`**
+      #    （`service/common/src/main/java/com/rag/common/http/GoStyleFormLimitMode.java:342-345`
+      #    ⇒ `case "false": return Mode.OFF;` ⇒ 该分支的注释明写「G2 反馈单 FB-05 的 L4 实测」）
+      #    ⇒ ⇒ **未加引号的 `off` 现在取到 `"false"` ⇒ 语义仍是 OFF ⇒ 不会再抛异常**
+      #    ⇒ ⇒ **原实测记录保留（2026-10-27 当时形态）：未加引号时 task-api 上下文直接起不来，
+      #      报错 `非法的 rag.http.go-form-limit.mode 值：false`）** —— 那是 `parse` 尚不认
+      #    `"false"` 时的行为 ⇒ **历史事实，不改写**。
+      #    ⇒ **域内写法不变、且仍推荐显式写法**：`mode: "off"`（带引号 ⇒ 保持字符串）
+      #    ⇒ ⇒ 理由从「不加引号会炸」换成「**显式更稳、不受 YAML 版本/解析器差异影响**」。
       #    ⚠️ 全仓此前**没有任何域**写字面量 `off` ⇒ favorite 域是靠
       #    **「整段不写」** 拿到 OFF（`@Value` 默认值 `:off`）⇒ 别把它的注释
       #    「故意没有这一项（= off）」误读成「写 off 也行」。

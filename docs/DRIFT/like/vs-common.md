@@ -271,6 +271,10 @@ G4 回执 ④ 声称「共享层 `Observability.mark*` 是**显式传 ctx** ⇒ 
 4. 🆕 **E66 落码后：本域 Redis 守门必须仍绿**（task-rpc 的 ① `commandTimeoutMechanismIsEnabled` ＋ like-rpc 的 Redis 超时守门）
    ⇒ E66 的落点会**整体替换** `ClientOptions.timeoutOptions` 那份 default source ⇒ 若新实现不含「命令超时」语义 ⇒ ①（`getTimeoutOptions().isTimeoutCommands()` 必须为 **true**）会红
    ⇒ ⚠️ ① 红 = **新回归**（不是「E66 故意关掉了超时」）⇒ **直接找 G4**
+   ⇒ 📌 **订正（2026-10-28 · G4 告知 + 我域独立复核）—— 这条信号【不存在】**
+      ⇒ **`isTimeoutCommands()` 恒为 true**：Lettuce 的 `TimeoutOptions.enabled()` = `builder().timeoutCommands().connectionTimeout().build()` ⇒ ⇒ **两个机制位被同一次调用同时打开** ⇒ ⇒ **单独不构成「时长会被施加」的判据** ⇒ ⇒ **它永远不会红**（我域守门 `LikeRpcRedisTimeoutsGateTest` 的注释 `:102-115` 早已写明这一点）。
+      ⇒ ⇒ **E66 落码后若有红测试，必须红在真网 = ②（`RedisURI.timeout == 3s`）**（消费点 = `LettuceConnectionFactory` 取**连接级 timeout**）⇒ ⇒ **A/B（机制位）只能当形态断言**。
+      ⇒ ⇒ ⇒ **别把「① 没红」当成「E66 没关超时」** ⇒ ⇒ **原措辞保留供追溯**。
    ⇒ 配套：新 source 在**本请求没有 deadline** 时必须回落到 **`getClientConfiguration().getCommandTimeout()`**（本域 = 3s）⇒ 否则命令失去 3s 上限（断连从「3s 快速失败」退化为「无限等待」）⇒ ⇒ **这条已写进本域台账的 E66 硬约束段（并已独立核实 + 订正其机制表述）**
 5. 🆕 **两个「合并后必红」的共享门禁**（2026-10-27 第四轮**实测** ⇒ **写权在 G4 ⇒ 已派单** · 编号 `FB-S1`/`FB-S2`）
    ⚠️ **编号说明**：已发给 G4 的消息里把这两条写成 **FB-06 / FB-07** ⇒ 与本域 §4 的 FB-0x 系列**不同域内编号**，但与 **task 域台账**的 FB-06 撞名 ⇒ ⇒ **以各域台账的 `FB-S*` 为准**（`S` = 跨域共享门禁）⇒ G4 侧按**内容**识别。
