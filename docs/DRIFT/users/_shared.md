@@ -907,6 +907,8 @@ RAG 曾用 `if (!any) return 0;` 把它挡掉了。修复后双侧实测：空 b
 
 #### ADJ-01 🔴 `users_user.status` 的 NOT NULL 与 admin-rpc 的 `status = 0L` **必须同时改**
 
+> ⚠️ **2026-10-27 订正：标题里的「必须同时改」已被下方订正块推翻 ⇒ 本条不再是「待裁决」** ⇒ **正确处置 = 保持 RAG NOT NULL**（放开可空**反而制造新漂移**）⇒ 逐层证据链见下方「2026-10-27 订正」块。
+
 - 真库实证：Go `users.status` **`is_nullable = YES`**，RAG 是 `NO`（`DRIFT-USERRPC-V-002`）。
 - 但**单独放开 NOT NULL 会立刻激活一个已存在的缺陷**：`admin-rpc` 的 `UserEntity.status = 0L`
   是与 `DRIFT-USERRPC-V-001`（`Login` fail-open）**同款**的缺陷 ——

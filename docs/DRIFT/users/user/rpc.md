@@ -298,7 +298,7 @@ Result 只用 5 个枚举值。证据列的记号：
 | 类别 | 数量 | 编号 |
 |---|---|---|
 | **SEMANTIC MISMATCH** | **0** | ~~V-001~~（**2026-10-24 已闭环**：Go 的 GORM 把 `status IS NULL` 读成 **0** 且不报错 ⇒ **两侧都是 `status=0` 登录成功** ⇒ 行为一致 ⇒ 该条已修） |
-| **OBSERVABLE DIFFERENCE** | **2** | **V-002**（`users_user.status` NOT NULL 差异，🔴 真库实证确认，**未修** · 需与 admin 域同改）<br>✅ **已销账**：**V-007**（超时的 gRPC `description` 不同，归属 `service/common`）—— **2026-10-26 由 `global` 域修完**（见 §7；📌 **已合回主干 `4f839f9`（2026-10-26 23:1x）** ⇒ ✅ **本域双侧活体已复跑**，description 逐字一致）<br>🔴 **V-012（新 · 2026-10-26 第十一轮）**：**超时时的业务日志错误归因** —— RAG 记「Redis 写入异常」而客户端收到的是「超时」，Go 两侧一致（**观测面**，非 wire 面）<br>⚠️ 已闭合的：**V-003**（jsonb⇒text，已修）· **V-004**（timestamptz，已修）· **V-005**（**判为不成立** —— protobuf3 空 map 在 wire 上不可表达）· **V-006**（雪花 id，永不进 wire）· **V-008**（死代码 + 伪出处，已修） |
+| **OBSERVABLE DIFFERENCE** | **2** | **V-002**（`users_user.status` NOT NULL 差异，🟡 真库实证确认 ＋ **2026-10-27 订正：DDL 层差异 · 行为层零差异 ⇒ 建议保持 NOT NULL**（原写「🔴 未修 · 需与 admin 域同改」**已作废** ⇒ 放开可空反而**制造新漂移** ⇒ 落点无动作））<br>✅ **已销账**：**V-007**（超时的 gRPC `description` 不同，归属 `service/common`）—— **2026-10-26 由 `global` 域修完**（见 §7；📌 **已合回主干 `4f839f9`（2026-10-26 23:1x）** ⇒ ✅ **本域双侧活体已复跑**，description 逐字一致）<br>🔴 **V-012（新 · 2026-10-26 第十一轮）**：**超时时的业务日志错误归因** —— RAG 记「Redis 写入异常」而客户端收到的是「超时」，Go 两侧一致（**观测面**，非 wire 面）<br>⚠️ 已闭合的：**V-003**（jsonb⇒text，已修）· **V-004**（timestamptz，已修）· **V-005**（**判为不成立** —— protobuf3 空 map 在 wire 上不可表达）· **V-006**（雪花 id，永不进 wire）· **V-008**（死代码 + 伪出处，已修） |
 | IMPLEMENTATION DIFFERENCE | 4 | 表名 / 指标注册 / 建表机制 / 服务发现 |
 | 已签字偏离（引用不重开） | 2 | N-1、N-2（见 `./api.md`） |
 | **UNKNOWN / unresolved** | **0** | §9 的 **7 条（U-001 ~ U-007）已于 2026-10-24 全部闭环** ⇒ §9.1 / §9.2 / §9.3 |
@@ -509,7 +509,7 @@ RAG 多一层 properties。**该条不重开。**
   插一条 `status IS NULL` 的行，两侧各打一次 `Login`，比对 `Status.getCode()`。
   在改 DDL 前，**不要**把这条按「不可达」销掉。
 
-### DRIFT-USERRPC-V-002 DDL：`users_user.status` 的 **NOT NULL** 两侧不同 —— 🔴 **仍成立，但被卡**（改动必须与 admin 域同改）
+### DRIFT-USERRPC-V-002 DDL：`users_user.status` 的 **NOT NULL** 两侧不同 —— 🟡 **2026-10-27 订正：定性为「DDL 层差异 · 行为层零差异」⇒ 建议保持 NOT NULL**（原标题「🔴 仍成立，但被卡（改动必须与 admin 域同改）」已被推翻 ⇒ **放开可空反而制造新漂移** ⇒ 逐层证据链见下方订正块）
 
 - **Category**: Schema
 - **Go**：`gorm:"column:status;default:0"` ⇒ GORM 建出 **`status bigint DEFAULT 0`（可空）**。
@@ -895,7 +895,7 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 | 条目 | 销账方式 | 销账提交（SHA） | 提交主题（逐字） | 备注 |
 |---|---|---|---|---|
 | **V-001** | 证伪关闭（**无代码修复**）| `9ae121d` | `fix(users/user): 撤销 V-001 反向判定 —— Go 侧 NULL status 是 fail-open 而非 fail-closed` | 原判「Go 拒 / RAG 放」被真 PG 端到端**证伪**（两侧都是 `status=0` 登录成功）⇒ 关闭靠的是**证据**，不是改代码。⚠️ 同一 commit 另含 D-001 / D-002 的实现（⇒ 见 [`api.md` §8.2](./api.md)） |
-| **V-002** | 🔴 **未修**（被卡）| — | — | 改动**必须与 admin 域同一次提交**走完（`users_user.status` 可空性）⇒ 落点 `service/users/users-common` |
+| **V-002** | 🟡 **2026-10-27 订正：定性为「DDL 层差异 · 行为层零差异」⇒ 建议保持 RAG NOT NULL ⇒ 本条无落码动作** | — | — | ⚠️ **本行原写「🔴 未修（被卡）· 改动必须与 admin 域同一次提交」—— 该口径已被 2026-10-27 的逐层证据链推翻**（Go 读 NULL ⇒ **0** 且不报错；RAG NOT NULL ⇒ 读不到 NULL ⇒ 也是 0 ⇒ **可观察结果相同**）⇒ **「放开可空」反而会制造新漂移**（RAG `callSettersOnNulls=false` ⇒ 读出 null ≠ Go 的 0 ⇒ 方向相反）⇒ ⇒ **正确处置 = 维持 NOT NULL**（落点 `service/users/users-common` **无动作**）⇒ ⚠️ **销号签字不在 G1 写权面**（`docs/Intentional_Deviations/**` 不在白名单）⇒ 仍待 G4 / 整合者确认；逐层证据链见 §「2026-10-27 订正块」 |
 | **V-003** | 代码修复 | `ec33159`（DDL + `user-rpc` 侧）<br>`c10f639`（**`admin-rpc` 侧**） | `align(users/user): 修 DRIFT-USERRPC-V-003（users_user.extra_info jsonb⇒text，与 Go 一致）`<br>`fix(users/admin): DDL 列类型对齐 Go + ARPC-002 wire 对齐 + 签字档补录` | 落点 `service/users/users-common/src/main/resources/db/01_create_user.sql`（DDL）+ 两个 rpc 的实体 typeHandler<br>⚠️ **2026-10-26 核实**：写路径绑定侧**跨组件那一格（`admin-rpc`）也已在主干上闭合**（`c10f639`，**`users/admin` 域自己的提交**）⇒ **不是** global 的 B10 `ff80214`（那个仍在 `align/global`、对主干已冗余）⇒ 详见 §7 V-003 的「2026-10-26 补记」 |
 | **V-004** | 代码修复 | ⚠️ **未具名** | — | 实际落在 2026-10-23 的批量导入提交 `4a63342`（主题「`add sth`」，**混合多条漂移**）⇒ 不可作条目级锚点 |
 | **V-005** | 证伪关闭（protobuf3 空 map 在 wire 上不可表达）| ⚠️ **未具名** | — | 同上；关闭依据是**协议层事实**，非代码改动 |
@@ -921,7 +921,7 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 | ~~**UNRESOLVED-USERRPC-002**~~ | ✅ **已闭环（第三轮 §2）** —— 时区偏移量的机制已定 | DSN 钉 `TimeZone=Asia/Shanghai`（`db.go:21`）；列类型 `timestamptz` | JDBC URL 无 `TimeZone`；列类型已改 `timestamptz`（V-004 已修） | ~~JVM 默认时区、PG 会话 `TimeZone`、容器 TZ 三者都未实测~~ ⇒ **已实测** | ~~MEDIUM~~ → 已闭环 | **机制已定**：偏移量由**进程本地时区**（Go 的 `time.Local`）决定，**PG 会话时区不参与**（pgx 走二进制解码）；源码依据 `pgtype/timestamptz.go:133-137`（`ScanLocation` 默认 nil）→ `:270-276` 回落到 `time.Local`。⚠️ 本行原写的「列类型 `timestamp`」是**过期状态**（V-004 已修） |
 | ~~**UNRESOLVED-USERRPC-003**~~ | ✅ **已闭环（第三轮 §3）** —— 「显式空 map」的 wire 可达性已定 | protobuf-go 对非 nil map 视为「已设置」⇒ 会编码 | protobuf-java 的 `MapField` 写出条件**已读源码** | ~~只做了分支层静态对照，未构造 wire 输入~~ ⇒ **已定** | ~~LOW~~ → 已闭环 | 答案：「**protobuf3 的空 map 在 wire 上不可表达**」（零条目 ⇒ 字段缺席 ⇒ 解出来是 nil）⇒ **V-005 判为「不成立」予以关闭** |
 | ~~**UNRESOLVED-USERRPC-004**~~ | ✅ **已闭环（2026-10-24）** —— ① 由第四轮 V-006 关闭；② 由**活体实验**关闭 | — | — | ① id 的取值来源：**V-006 已关闭**（真 PG：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；永不进 wire）。② 启动期 Redis 不可用：**两侧都启动成功 ⇒ 一致**（原推断「Go fail-fast」**被证伪** —— go-zero `RedisConf.NonBlock` 的 struct tag 默认是 `true` ⇒ `MustNewRedis` **不做连接检查**） | ~~LOW~~ → 已闭环 | ⇒ **§9.3**（活体：把两侧 Redis 都指到死端口后起进程） |
-| ~~**UNRESOLVED-USERRPC-006**~~ | ✅ **已闭环（2026-10-23 第五轮 §4，2026-10-24 独立复现）** | — | — | **已逐项核对**（真库对照：两侧各用自己的建表机制把表建出来，再查 `information_schema` + `pg_indexes` + `pg_constraint`）。⚠️ **不要把 `check-ddl-static.py`「全绿」读成「DDL 已一致」** —— 该脚本文件头**自陈**只查 `data_type` 与 `character_maximum_length`，其余标 **NOT CHECKED** | ~~MEDIUM~~ → 已闭环 | ⇒ 结论见本文件 §「2026-10-23 第五轮」§4；**2026-10-24 用本轮自建的一对全新库（`uu_both_go_db` / `uu_both_rag_db`）独立复现，结论逐条一致**：`status` 的 NOT NULL 差异（**V-002**，需与 admin 域同改）、两个时间列的 DEFAULT 差异（**V-011**，Go 无 DEFAULT / RAG 有 `CURRENT_TIMESTAMP`，**当前不可观察**）、唯一约束与索引**功能等价** |
+| ~~**UNRESOLVED-USERRPC-006**~~ | ✅ **已闭环（2026-10-23 第五轮 §4，2026-10-24 独立复现）** | — | — | **已逐项核对**（真库对照：两侧各用自己的建表机制把表建出来，再查 `information_schema` + `pg_indexes` + `pg_constraint`）。⚠️ **不要把 `check-ddl-static.py`「全绿」读成「DDL 已一致」** —— 该脚本文件头**自陈**只查 `data_type` 与 `character_maximum_length`，其余标 **NOT CHECKED** | ~~MEDIUM~~ → 已闭环 | ⇒ 结论见本文件 §「2026-10-23 第五轮」§4；**2026-10-24 用本轮自建的一对全新库（`uu_both_go_db` / `uu_both_rag_db`）独立复现，结论逐条一致**：`status` 的 NOT NULL 差异（**V-002**，⚠️ **原写「需与 admin 域同改」已被 2026-10-27 的逐层证据链推翻** ⇒ 正确处置 = **保持 NOT NULL** ⇒ 落点无动作）、两个时间列的 DEFAULT 差异（**V-011**，Go 无 DEFAULT / RAG 有 `CURRENT_TIMESTAMP`，**当前不可观察**）、唯一约束与索引**功能等价** |
 | ~~**UNRESOLVED-USERRPC-007**~~ | ✅ **已闭环（2026-10-24）** | — | — | 双侧活体对拍已跑（真进程 + 真 PG + 真 Redis，**自带容器 / 自带库 / 自带端口**）：**43 场景 / 39 等价 / 4 处差异**，4 处**全部**是 N-2 已签字的 Go 源码乱码文案 ⇒ **无新漂移** | ~~HIGH（本轮最大的证据缺口）~~ → 已闭环 | ⇒ **§9.1**（含首轮 2 处**假漂移**的辨伪记录 + 守网清单） |
 | ~~**UNRESOLVED-USERRPC-005**~~ | ✅ **已闭环（2026-10-24）** | — | — | **双侧对称并发启动实测**：Go 侧 `go-user-rpc`+`go-admin-rpc` 与 RAG 侧 `user-rpc`+`admin-rpc` **各自同时**对**同一个空库**启动 ⇒ 两侧都起来、表都建齐（各 4 张）、**0 致命错误**（共 9 轮：Go 5 轮 + RAG 6 轮） | ~~HIGH（跨组件不变量）~~ → 已闭环 | ⇒ **§9.2**（含 advisory lock 串行化的时间戳证据 + Go 侧「时序侥幸」的机制差异 + admin 域的复核提示） |
 
@@ -2370,6 +2370,36 @@ UserDomainService.logout:905-930
   ⇒ 同批五组件实测：admin-rpc **5003ms** · admin-api **5136ms** · user-rpc **5004ms** · user-api **5175ms** · follow-api **5003ms**
 - **断连（FIN）**：api 侧修后 admin-api **0ms** · follow-api **3ms**（预算 1500ms）
 
+#### 4.1.1 🔴 命令超时的**四条腿**（探针实测 · 补一个真实的覆盖缺口）
+
+G2 提醒「`getTimeoutOptions()` 不是值的判据」⇒ 我域据此**只**加了「值」那一条断言 ⇒ 用探针实测后发现
+**「值」这一条单独存在 ⇒ 是个假绿口子** ⇒ 本轮补上**机制**那条腿。
+
+**探针实测（user-api · Boot 4.0.8 + spring-data-redis 4.0.7 + lettuce 6.8.2）**
+
+```
+LettuceClientConfiguration.getCommandTimeout()   = PT3S
+LettuceConnectionFactory.getTimeout()            = 3000ms      ← 连接级 ⇒ RedisURI.timeout
+TimeoutOptions.isTimeoutCommands()               = true
+TimeoutOptions.isApplyConnectionTimeout()        = true
+TimeoutOptions.getSource()                       = DefaultTimeoutSource   ← 恒返回 -1
+```
+
+⇒ **链条**：`spring.data.redis.timeout: 3s`（配置层）
+→ `LettuceClientConfiguration.commandTimeout` = **3s**（**值**）
+→ `LettuceConnectionFactory.getTimeout()` = **3000ms** ⇒ `RedisURI.timeout`（**连接级那一路**）
+→ `TimeoutOptions.isApplyConnectionTimeout()` = **true**（**机制**：把连接级 timeout 用作命令过期时长）
+⇒ ⚠️ **因为 `source` 恒为 `DefaultTimeoutSource`（返回 -1）⇒ 真正的时长只能由 `applyConnectionTimeout` 分支从连接级 timeout 取**
+⇒ ⇒ **`isTimeoutCommands()` 恒为 true ⇒ 它不是有效判据**（它只说明「机制位开着」，**不说明时长会被施加**）。
+
+🔴 **由此暴露的缺口（已补）**：我域 5 份 FastFail 守门原本**只断言「值」** ⇒ 若 `applyConnectionTimeout` 被关掉
+（Boot 升级换了接线方式），**值照样读得到 3s、但命令永不过期** ⇒ 断连时从「3s 快速失败」退化成「**无限等待**」
+⇒ 守门会**照样绿** ⇒ **典型的「绿是因为没走到」**。
+⇒ **已补**：5 份守门各加**机制腿**（`getTimeout() == 3000` ＋ `isApplyConnectionTimeout() == true`）。
+⇒ **变异验证**：把期望值 `3000L` 改成 `3001L` ⇒ **红**（`expected: <3001> but was: <3000>`）⇒ 断言**在读运行期值、不是常量**；
+⚠️ **诚实的边界**：被测机制本身（Boot 的 `TimeoutOptions.enabled()` 接线）**不在本域写权面 ⇒ 无法从域侧变异**
+⇒ ⇒ 这条断言的价值是**回归网**（Boot 升级时若换接线方式，它会红），**不是**「我已证伪过该机制」。
+
 #### 4.2 ✅ 变异验证（**3/3 真变红** —— 退出码之外还核了失败原因）
 
 | 变异 | 结果 | 失败详情（原文） |
@@ -2450,3 +2480,16 @@ mvn -B -o -pl service/users/user/user-rpc test \
 - **门禁 5/5 EXIT=0**：`check-wave-lane-ownership` · `check-wave-role-model` · `check-wave-coupling` · `check-doc-links` · `check-ledger-count`
 - ⚠️ **本轮刻意错峰**：G4 的 52 模块全量（09:19~09:42）与 G3 的 29 模块回归（09:42~09:51）期间**本域不起 maven**
   ⇒ 独占窗口才跑 ⇒ **未出现 `EXIT=137`**（AGENTS.md §4.1 错峰纪律有效）。
+
+### 10. 🔴 必查项（共享层合入后必须复跑）—— **本轮 667 条不是最终数字**
+
+| # | 共享层变更 | 我域同构证据 | 为什么要复跑 |
+|---|---|---|---|
+| 1 | G4 `#8`（`3b573fb`）纯 gRPC 进程关闭路径的 `NoClassDefFoundError: jakarta/servlet/Filter` ⇒ 拆出 `HttpPoolLifecycle`（`@ConditionalOnWebApplication(type=SERVLET)`） | 我域 **3 个 rpc 组件全部 `@Import ObservabilityLifecycle`** ⇒ `UserRpcApplication.java:57` · `AdminRpcApplication.java:71` · `FollowRpcApplication.java:77` | 修好 #8 ⇒ `ObservabilityLifecycle.@PreDestroy` **真的会执行** `RpcInterceptor.shutdown()` ⇒ **三个进程级静态池**（`static final` ⇒ 终止即永久）的潜伏缺陷**显形** ⇒ 可能出现**跨测试污染型偶发红**（`ScheduledThreadPoolExecutor[Terminated]`）⇒ ⚠️ **这正是「绿是因为没走到」**：#8 的缺陷此前恰好把保护罩挡住了 |
+| 2 | G4 `7488b3d`（池改 `AtomicReference` + CAS 自旋 ⇒ **终止后按需重建**） | 同上（我域三个 rpc 同构） | 修法在共享层 ⇒ 修完必须复跑我域 6 组件 ⇒ **G2 域已登记同一项** |
+
+⇒ ⚠️ **所以**：上表的 **667 条是跑在 G4 修 #8 / 池自愈**之前**的共享层上**
+⇒ ⇒ **波末收口回归必须重跑**（C7）⇒ **本域不会拿 667 当最终数字**。
+⇒ 📌 **一个纪律记录（今天踩了两次）**：判「有没有别的 lane 在跑 maven」**不能**用 `ps | grep -c` ⇒ **该命令自身的命令行含模式串 ⇒ 自匹配**
+⇒ ⇒ **要判「有哪棵树」**（`multiModuleProjectDirectory=` 后缀），或把判据写进**独立脚本文件**（argv 不含模式名）。
+（今天已在等待器上踩过一次 ⇒ 又在起回归前踩一次 ⇒ 两次都被自己抓到 ⇒ 没造成 137。）

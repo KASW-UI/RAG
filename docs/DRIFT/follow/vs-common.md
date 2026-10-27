@@ -49,7 +49,7 @@
 
 | 轴 | 机制 | 本域侧的落点 / 调用 | 结论 | 证据强度 | 核对日期 |
 |---|---|---|---|---|---|
-| **A1** | 超时 / deadline | ① `DRIFT-FOLLOW-009`（下游挂死：Go **2s ⇒ 200+1015** / RAG **3s ⇒ 503**）✅ 已修 ② ✅ **`DRIFT-G1-002` 已修**（**阶段 2 · 2026-10-27**：`follow-api` 补 `immediate-connect-timeout: 3s` + `FollowRpcClient.afterPropertiesSet()` 自检 ⇒ 真启动 C 组实测**进程退出**，对齐 Go `zrpc.MustNewClient` 的 panic 语义 ⇒ 证据见 §7.5）③ ✅ **`DRIFT-FOLLOW-010` 已修**（**本轮 · 2026-10-27**：Go 的 3s 计时器在 `Authorize` **之后**起算 ⇒ **验签不计入**；RAG 把验签搬进 `auth/GoStyleJwtAuthFilter`（`@Order(+6)`，在 3s 预算的 `+7` **之外**）⇒ 与 Go 一致 ⇒ 证据见 [`api.md` §11](api.md)）④ ✅ **`DRIFT-FOLLOW-011` 已修**（**本轮 · 2026-10-27 · 新立并自闭环**：`follow-api` 的 `spring.data.redis.timeout` 原为 **2s** ≠ Go 的 `ReadTimeout` **3s**，且**缺 `connect-timeout: 5s`** ⇒ 已对齐 ＋ 新增 `FollowApiRedisTimeoutConfigTest` 2 例；⚠️ **Go 侧 go-zero `redis.go:27` 的 `readWriteTimeout=2s` 是死常量**（只有 BLPop 用）⇒ 那个 2s 看起来正是从这里抄来的 ⇒ **不能当依据**）⑤ 🟡 ~~follow-api 的 Redis 命令超时 2s ≠ go-redis `ReadTimeout` 默认 3s~~（`DRIFT-USERAPI-015 附带` 登记的待办）—— ✅ **本轮已审并归入 ④**（原条目作废，见 `api.md` 的 `DRIFT-FOLLOW-011`）⑥ ✅ **`DRIFT-FOLLOW-012` 已修**（**本轮 · 2026-10-27 · 新立并自闭环**：Lettuce 默认 `disconnectedBehavior=DEFAULT` ⇒ **Redis 断连时命令被排队**等重连 ⇒ 挂到 `commandTimeout: 3s` ⇒ **撞 HTTP 3s 预算 ⇒ 503**；Go 侧 `MaxRetries=3` ⇒ **快速失败** ⇒ **fail-open 200** ⇒ 落**域内副本** `config/RedisDisconnectedBehaviorConfig`（`REJECT_COMMANDS`）＋ 守门 `FollowApiRedisDisconnectedFastFailTest` 2 例；⚠️ **修前实测 3012ms ⇒ 修后 0ms**；🔴 **共享层收编仍归 G4**） | ✅ **4 条已修** | L3 双侧活体（台账原有）＋ **本轮真启动活体（A/B/C 三组 ＋ L3 真 Tomcat 10 条）** ＋ **Go 腿 L4 活体·直接判据（③）+ RAG 腿 L3 真 Tomcat·间接判据 ⇒ 合并按弱侧记 L3**（G2 建、本域独立复跑 ⇒ 见 `users/user/api.md` §9.y.0 与 `users/vs-common.md` §8.4；⚠️ 不笼统写 L4） ＋ **L2 配置层守门（④）** ＋ **L3 真容器活体（⑥ · 真 Redis + 可控 TCP 代理造 FIN）** | 2026-10-27 |
+| **A1** | 超时 / deadline | ① `DRIFT-FOLLOW-009`（下游挂死：Go **2s ⇒ 200+1015** / RAG **3s ⇒ 503**）✅ 已修 ② ✅ **`DRIFT-G1-002` 已修**（**阶段 2 · 2026-10-27**：`follow-api` 补 `immediate-connect-timeout: 3s` + `FollowRpcClient.afterPropertiesSet()` 自检 ⇒ 真启动 C 组实测**进程退出**，对齐 Go `zrpc.MustNewClient` 的 panic 语义 ⇒ 证据见 §7.5）③ ✅ **`DRIFT-FOLLOW-010` 已修**（**本轮 · 2026-10-27**：Go 的 3s 计时器在 `Authorize` **之后**起算 ⇒ **验签不计入**；RAG 把验签搬进 `auth/GoStyleJwtAuthFilter`（`@Order(+6)`，在 3s 预算的 `+7` **之外**）⇒ 与 Go 一致 ⇒ 证据见 [`api.md` §11](api.md)）④ ✅ **`DRIFT-FOLLOW-011` 已修**（**本轮 · 2026-10-27 · 新立并自闭环**：`follow-api` 的 `spring.data.redis.timeout` 原为 **2s** ≠ Go 的 `ReadTimeout` **3s**，且**缺 `connect-timeout: 5s`** ⇒ 已对齐 ＋ 新增 `FollowApiRedisTimeoutConfigTest` 2 例；⚠️ **Go 侧 go-zero `redis.go:27` 的 `readWriteTimeout=2s` 是死常量**（只有 BLPop 用）⇒ 那个 2s 看起来正是从这里抄来的 ⇒ **不能当依据**）⑤ 🟡 ~~follow-api 的 Redis 命令超时 2s ≠ go-redis `ReadTimeout` 默认 3s~~（`DRIFT-USERAPI-015 附带` 登记的待办）—— ✅ **本轮已审并归入 ④**（原条目作废，见 `api.md` 的 `DRIFT-FOLLOW-011`）⑥ ✅ **`DRIFT-FOLLOW-012` 已修**（**本轮 · 2026-10-27 · 新立并自闭环**：Lettuce 默认 `disconnectedBehavior=DEFAULT` ⇒ **Redis 断连时命令被排队**等重连 ⇒ 挂到 `commandTimeout: 3s` ⇒ **撞 HTTP 3s 预算 ⇒ 503**；Go 侧 `MaxRetries=3` ⇒ **快速失败** ⇒ **fail-open 200** ⇒ 落**域内副本** `config/RedisDisconnectedBehaviorConfig`（`REJECT_COMMANDS`）＋ 守门 `FollowApiRedisDisconnectedFastFailTest` 2 例；⚠️ **修前实测 3012ms ⇒ 修后 0ms**；🔴 **共享层收编仍归 G4**）⑦ 🆕 **命令超时的「机制腿」已补**（**2026-10-27 · G1 lane · 探针实测**）：`TimeoutOptions.source` 恒为 `DefaultTimeoutSource`（返回 -1）⇒ 3s 只能由 **`applyConnectionTimeout`** 分支从连接级 timeout（`LettuceConnectionFactory.getTimeout()=3000ms` ⇒ `RedisURI.timeout`）取 ⇒ ⇒ **`isTimeoutCommands()` 恒真、不是有效判据** ⇒ 只断言「值」是**假绿口子**（机制被关 ⇒ 值仍读得到 3s、命令却永不过期 ⇒ 断连时从「3s 快速失败」退化成「无限等待」）⇒ `FollowApiRedisDisconnectedFastFailTest` 已补**机制腿**（＋ 变异：期望值 3000L→3001L ⇒ 红 ⇒ 断言在读运行期值）⇒ 证据详见 [`users/user/rpc.md` §4.1.1](../users/user/rpc.md) | ✅ **4 条已修** ＋ ⑦ 覆盖缺口已补 | L3 双侧活体（台账原有）＋ **本轮真启动活体（A/B/C 三组 ＋ L3 真 Tomcat 10 条）** ＋ **Go 腿 L4 活体·直接判据（③）+ RAG 腿 L3 真 Tomcat·间接判据 ⇒ 合并按弱侧记 L3**（G2 建、本域独立复跑 ⇒ 见 `users/user/api.md` §9.y.0 与 `users/vs-common.md` §8.4；⚠️ 不笼统写 L4） ＋ **L2 配置层守门（④）** ＋ **L3 真容器活体（⑥ · 真 Redis + 可控 TCP 代理造 FIN）** ＋ **L3 探针实测（⑦ · 命令超时机制腿）** | 2026-10-27 |
 | **A2** | gRPC 拦截器链 | ① `DRIFT-FOLLOW-002`（运行时 classpath 缺 `grpc-inprocess` ⇒ `NoClassDefFoundError` ⇒ 启动失败）✅ 已修 ② `DRIFT-FOLLOW-003`（`discovery://user-rpc` 两斜杠被 devh 拒绝 ⇒ 启动失败）✅ 已修 ③ **服务端拦截器链**：`FollowRpcApplication.java:118` 挂 `GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, protectionProps)`（recover→breaker→shedding→业务观测）⇒ 有**组件级守门网** `FollowProtectionChainWiringTest`（断言 `@Import` 含 `GoStyleProtectionConfiguration` ＋ 链**真包住**业务 interceptor ⇒ 能区分「在链里」与「链没挂上」） | ✅ **一致**（①② = 启动阻塞型硬失败，已修）＋ ✅ **③ 链已挂且有装配层守门** | L1 + 真启动复验（①②）＋ **L2 装配层守门**（③） | 2026-10-27 |
 | **A3** | HTTP 保护链 | ① `follow-api` 的 `rag.http.go-form-limit.mode` = **envelope**（`application.yml:159`）② `DRIFT-FOLLOW-008`（**MaxConns 闸门：Go 每路由一个 vs RAG 全局一个**）🔴 ③ `OPEN-001`（Content-Type 不支持 ⇒ RAG 415 分支）✅ **已关闭（实测不可达）** ④ ⚠️ **`follow-rpc` 无 `rag:` 块** ⇒ 纯 gRPC 进程，表单限闸门**不适用**（N/A）⑤ ✅ **验签与保护链的相对次序已对齐**（**本轮 · 2026-10-27** `DRIFT-FOLLOW-010`）：验签搬进 `auth/GoStyleJwtAuthFilter`（`@Order(+6)`）⇒ 落在共享层 `+3 Traceparent` 之内、`+7 HttpMiddleware（3s 预算）` 之外、`+8 MaxBytes` 之外侧 ⇒ ① **Filter 绝不写响应** ⇒ **413 仍压过 401**（真 Tomcat 实测 413 + 空 body）② **401 仍由 `FollowJwtAuthInterceptor` 抛** ⇒ **空 body** 形状逐字不变 ③ **未注册路径仍 404**（`handler instanceof HandlerMethod` 判据保留）⇒ 共享层槽位实测值见 [`api.md` §11.2](api.md) | 🔴 **1 条 G4** ＋ ✅ 3 条 ＋ **N/A 1 条** | L1 源码 + **L2 装配层守门（容器装配结果）** + **L3 真 Tomcat 活体** | 2026-10-27 |
 | **A4** | 错误码 / envelope | ① `DRIFT-FOLLOW-001`（**A7/A4 邻接**：wire 级出参 Go `"user_ids":null` / RAG `"user_ids":[]`）✅ 已修 ② `DRIFT-FOLLOW-009` ✅ ③ A3 锚点：Go 侧**已注册**（真源 `service/follow/api/followcenter.go:53` `httpx.SetErrorHandler`）⇒ Go = **200 + 业务信封** ⇒ 与 RAG `mode=envelope` 同向 ✅ | ✅ **一致** | L1 + 活体对拍（台账原有） | 2026-10-27 |
@@ -331,3 +331,103 @@ installed_rank | version |      description       | success
 
 ⚠️ 桥文件**自身 javadoc** 的「什么时候可以删」与那段**过期的「同款」列举**（写 5 个、实际 9 个）
 ⇒ **随文件删除即消失** ⇒ 只需确认没有别的文件引用该文案（已 grep：`docs/DRIFT/{users,follow}/**` 内除上述 3 处外无其他引用）。
+
+---
+
+## 11. 🆕 **Redis 收编的「删除前置」静态核验 ＋ A2 轴关闭路径暴露面**（2026-10-27 · G1 lane）
+
+> **本节是「核验 + 登记」，不是落码** ⇒ 共享层那两份（`1fb26b2` ＋ `2f12236`）**还没合进本树**。
+> 逐条证据与 users 侧的完整推导 ⇒ [`users/vs-common.md` §12](../users/vs-common.md)；
+> 本节只记 **follow 侧**的部分。
+
+### 11.1 本域的删除前置 —— **3 项核验成立**（follow 侧只涉及 1 份副本）
+
+| # | 前置条件 | follow 侧实测 | 判定 |
+|---|---|---|---|
+| ① | 自动配置能被装配 | `FollowApiApplication.java:68` 带 `@SpringBootApplication` ⇒ 含 `@EnableAutoConfiguration` | ✅ |
+| ② | 自动配置清单在 classpath 上 | `follow-api` pom 依赖 `com.rag:common`（默认 compile scope） | ✅ |
+| ③ | 值逐字同值 ＋ 只设断连行为 | `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/config/RedisDisconnectedBehaviorConfig.java:111-112` 只调 `disconnectedBehavior(REJECT_COMMANDS)`，**零** `timeoutOptions` 触碰 | ✅ |
+
+⇒ **follow 侧要删的只有 1 份**：`follow-api` 的 `config/RedisDisconnectedBehaviorConfig.java`。
+
+⚠️ **`follow-rpc` 不在删除清单里**：它**不用 Redis**
+（`service/follow/follow-rpc/pom.xml:26` 明写「任何 redis/kafka starter 在本模块都属于『新增 Go 侧不存在的能力』，一律不引」）
+⇒ **无副本 ⇒ 无删除动作**。
+
+### 11.2 🔴 连带项：**`FollowApiRedisDisconnectedFastFailTest` 是「显式 `@Import` 域内副本」** ⇒ 副本一删就**编译不过**
+
+⇒ 收编 = **删 1 份副本 ＋ 重写这 1 份守门的装配方式**（漏了后半段 ⇒ 编译红）。
+
+1. `@Import(com.rag.follow.follow.api.config.RedisDisconnectedBehaviorConfig.class)`
+   ⇒ 换成 `@ImportAutoConfiguration(com.rag.common.redis.GoStyleRedisClientAutoConfiguration.class)`；
+2. **补「收编真的发生」的两条断言**：
+   - `context.getBeansOfType(LettuceClientOptionsBuilderCustomizer.class)` ⇒ **size == 1**；
+   - 该 map 的 key 含 **`goStyleRedisClientOptionsCustomizer`**（共享层那份的固定 bean 名）。
+
+⚠️ **为什么必须补**：`@ConditionalOnMissingBean` 是「**遮蔽**不是**叠加**」⇒ 域内副本还在时共享层那份**根本不创建**
+⇒ 此时「`REJECT_COMMANDS` 生效」**是真的**、但「**收编发生了**」**是假的**
+⇒ ⇒ **只断言行为值 ⇒ 收编没做也绿** ⇒ 必须断言 **bean 身份**。
+
+### 11.3 A2 轴：关闭路径不得触发 web 类型类加载 ⇒ **`follow-rpc` 暴露**（`PITFALL-FOLLOW-005`）
+
+**缺陷**（G4 `3b573fb` 修的那条）：`ObservabilityLifecycle.shutdown()` 第一句是 `HttpMiddleware.shutdown()`
+⇒ 纯 gRPC 进程 classpath 无 servlet ⇒ 炸 `NoClassDefFoundError: jakarta/servlet/Filter`
+⇒ 该方法**不吞异常** ⇒ **`RpcInterceptor.shutdown()` 根本不执行** ⇒ **RPC 池没被回收**。
+
+**follow 侧暴露面（实测，非转述）**：
+
+| 组件 | `@Import ObservabilityLifecycle` | 运行时 classpath 有 servlet 吗 | 暴露 |
+|---|---|---|---|
+| `follow-rpc` | `FollowRpcApplication.java:77` | ❌ 无（剥掉 pom 注释后逐条查：**零** web/tomcat/servlet 依赖，只有 `spring-boot-web-server`；而 `spring-boot-web-server`（Boot 4.0.8）的 pom 里 **servlet 出现次数 = 0**） | 🔴 暴露 |
+
+⇒ **合入后 follow 侧必查（2 条）**：
+1. `follow-rpc` 关闭路径**不再抛** `NoClassDefFoundError`；
+2. `RpcInterceptor` 的池**真的被回收**（否则缺陷只是「不再污染日志」，**池泄漏仍在**）。
+
+⚠️ **附带（改 `follow-api` 侧的连带面）**：`follow-api` 是 servlet 应用 ⇒ 合入后应**仍注册** `HttpPoolLifecycle`
+⇒ HTTP 池仍被回收 ⇒ **零行为变化**。
+
+### 11.4 🔴 **合并顺序约束**：`3b573fb` 与 `7488b3d` **必须同批合入**（否则本域 `follow-rpc` 由绿转红）
+
+> 已发给 G4（待回复）＋ G2 ＋ G3 ⇒ 登记在此以免只在消息里。完整推导 ⇒ [`users/vs-common.md` §12.4](../users/vs-common.md)。
+
+**follow 侧暴露面（实测，非转述）**：
+
+| 组件 | `@SpringBootTest` 上下文数（surefire 一个模块一个 JVM） | 同款断言 | 暴露 |
+|---|---|---|---|
+| `follow-rpc` | **5** | `FollowGrpcInterceptorWiringTest:102` `serverSideTimeoutIsActuallyEnforced` ⇒ 断言 `DEADLINE_EXCEEDED` | 🔴 暴露 |
+
+⇒ **方向不对称**：`7488b3d` 单独合入 ⇒ 池可重建 ⇒ 测试仍绿；
+`3b573fb` 单独合入 ⇒ 池「终止即永久」⇒ **会红** ⇒ ⇒ **顺序：先 `7488b3d`、后 `3b573fb`，或同批**。
+
+⚠️ **本域此刻仍绿，是「绿是因为没走到」**（修 #8 之前 shutdown 第一句就抛异常 ⇒ 池侥幸存活）
+⇒ **不能**把当前的全绿读作「本域不受这条影响」。
+
+**证据强度**：**L3**（本域静态清点）＋ G4 侧 article-rpc 的 **L4**。
+
+### 11.5 🆕 **C7 预检：G4 共享层变更对 follow 域的影响面**（2026-10-27 · G1 lane · 合入前先算清）
+
+> 完整表在 users 侧 ⇒ [`users/vs-common.md` §13](../users/vs-common.md)。此处只记 follow 域的部分。
+
+| G4 提交 | 对 follow 域的影响 | 本域动作 |
+|---|---|---|
+| `182fc32` | ✅ **零影响**：语义表写着 `service/follow/follow-api` ⇒ **ENVELOPE**，本域 yaml 实值 = `mode: envelope`（`follow-api/application.yml:202`）⇒ 逐条一致；`GoStyleTomcatParameterLimitCustomizer` 的 diff **只动注释**；保护链改动是**只读入口**、**零行为变化** | ✅ **无** |
+| `1fb26b2` ＋ `2f12236` | 🟡 **有影响**：域内副本会**遮蔽**共享层那份 ⇒ 收编要**删 1 份副本（follow-api）＋ 重写 1 份守门** | 🔴 **待 G4 合入后执行**（清单见 §11.2） |
+| `3b573fb` ＋ `7488b3d` | 🔴 **有影响**：`follow-rpc` `@Import ObservabilityLifecycle` 且 classpath **无 servlet** ⇒ 暴露；且两条**必须同批**否则由绿转红 | ✅ 合入后按 §11.3 / §11.4 复验 |
+
+⇒ ⇒ **`182fc32` 对 follow 域零影响** ⇒ **合入后不需要改任何配置**。
+⇒ ⚠️ **但它新增了一条对本域有约束的共享层判据**：`SEMANTIC_REACHABILITY` 把「Go 侧该域是否真的解析 form/query」写成**逐域取证表**
+⇒ ⇒ **若将来 Go 侧 follow 的 handler 改成解析 form/query，本域的 `mode: envelope` 必须跟着改** ⇒ **复开触发条件已锁定**。
+
+### 11.6 🆕 **守门卫生缺陷：「可达 ⇒ 能启动」用例的 3s 预算过紧 ⇒ 偶发红**（2026-10-27 · G1 lane）
+
+> 完整推导（三步定位 + 元教训）在 users 侧 ⇒ [`users/vs-common.md` §14](../users/vs-common.md)。此处只记 follow 侧。
+
+**本域同款缺陷**：`service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiStartupFailFastTest.java`
+的 **2 处「可达 ⇒ 能启动」用例**同样把 `grpc.client.follow-rpc.immediate-connect-timeout` 设成 **3s**（= 生产值）
+⇒ 冷 JVM ＋ 满负载下 TCP+HTTP/2 握手可能超 3s ⇒ **偶发红**（root cause = `Can't connect to channel`）。
+
+**已修**：那 **2 处**放宽到 **`10s`**；**2 处「不可达 ⇒ 启动失败」用例保持 `3s` 不动**（那才是被测语义，且 TCP refused 是立即返回）
+⇒ **生产值 3s 仍由 `applicationYmlArmsImmediateConnectTimeout`（读 `application.yml` 的静态断言）守着** ⇒ **无覆盖损失**。
+
+⚠️ **同批同款修的还有**（users 域）：`UserApiStartupFailFastTest` ＋ `AdminApiStartupFailFastTest` 各 2 处。

@@ -69,10 +69,16 @@
 
 ## 3. 差异明细
 
-### DRIFT-USERSCOMMON-001 🔴 `ErrorCode.getMsg(1017/1018)` 有文案，Go 的 `codeMsg` 里**没有这两条** —— ⏸️ **潜伏，跨域待裁决**
+### DRIFT-USERSCOMMON-001 `ErrorCode.getMsg(1017/1018)` 有文案，Go 的 `codeMsg` 里**没有这两条** —— ✅ **2026-10-27 销号：两侧均不可观察 ⇒ 本条不成立（证伪关闭 · 无代码修复）**
+
+> ⚠️ **原标题为「🔴 潜伏，跨域待裁决」** —— **2026-10-27 已销号**，理由 = **1017 / 1018 在两侧都进不了 wire**（逐条证据见下方订正块）。
+> ⚠️ **原前提「真正会进 wire 的是 `admin-api` 的两处」已被实测推翻** ⇒ ⇒ 「跨域待裁决」这个阻塞**本身不再成立**
+> ⇒ （`align/users-admin` 是**上一波**的 lane 名；当前波次里 user 与 admin **同属 G1** ⇒ 跨域阻塞已消失，
+> 但**结论不是「谁来裁决」，而是「本条不成立」** ⇒ **不需要任何人拍板**）。
 
 > **本域（users/user）内结论**：三个调用点**全是日志码、wire 观察不到** ⇒ 在本组件范围内**不构成可观察漂移**。
 > 真正会进 wire 的是 `admin-api` 的两处 ⇒ **需 admin 域签字**，属跨域项。详见本节末尾「处置」。
+> ⚠️ **上面这段是原记录，保留不删** ⇒ 其**最后一句已被订正**：admin-api 那两处**进不了 wire**（见下方订正块）。
 
 **性质：OBSERVABLE DIFFERENCE（潜伏 · 在 `users/user` 内不进 wire）**
 
@@ -99,7 +105,7 @@
 | `user-rpc/UserDomainService.java:198` | `logger.logBusinessErr(...)` | ❌ 仅日志 |
 | `user-rpc/UserDomainService.java:623` | `logger.logBusinessErr(...)` | ❌ 仅日志 |
 | `user-rpc/UserDomainService.java:686` | `logger.logBusinessErr(...)` | ❌ 仅日志 |
-| `admin-api/AdminApiSupport.java:55-56,62-63` | `new BusinessException(1017, "请求参数错误")` | ✅ **进 wire** |
+| `admin-api/AdminApiSupport.java:55-56,62-63` | `new BusinessException(1017, "请求参数错误")` | ❌ **不可达**（🟡 **2026-10-27 订正**：原写「✅ 进 wire」是**错的** ⇒ HTTP 入口上 `parseUid` **收不到** null/非数字 ⇒ **1017 不进 wire** ⇒ 逐条证据见下方订正块） |
 
 ⇒ **在 `users/user` 的三个调用点全部是日志码，wire 上观察不到。**
 `admin-api` 那两处会进 envelope —— **属 admin 域，且本轮用户口径是「跨域项只取证不动手」**。
@@ -117,6 +123,47 @@
 - 保留现状 ⇒ 登记为潜伏差异 + 补一条守门测试锁住「日志码不得进 wire」
 
 ⇒ **需与 `align/users-admin` 会话合并裁决**（与 `DRIFT-USERRPC-V-002` 属同一类「DDL/枚举归属跨域」的裁决）。
+
+> 🟢✅ **2026-10-27 订正并销号（本条不成立 · 证伪关闭 · 无代码修复）** —— G1 lane · **本轮独立复核**
+>
+> ⚠️ **上面那段「处置」写于本轮之前，保留不删** ⇒ 其**前提已被推翻** ⇒ 「跨域待裁决」这条路**走不通了** ⇒ 因为**本条根本不是漂移**。
+>
+> **逐条证据链（本轮独立复核，不是转述台账）**：
+>
+> | # | 事实 | 证据 | 结论 |
+> |---|---|---|---|
+> | ① | **Go 侧 1017 / 1018 是死码** | `service/user/common/errmsg/errmsg.go:30-31` 只有常量定义；`grep -rn "ErrorRequestParam\|ErrorAvatarHistoryNotExist"` **全仓只命中这两行** ⇒ 零调用点 | ⇒ Go **永远不可能返回 1017/1018** ⇒ `GetErrMsg` 的回落（`errmsg.go:70-76` → `codeMsg[Error]` = `"FAIL"`）**对这两个码永不可观察** |
+> | ② | **RAG 侧 1017 在 user-rpc 侧仅日志** | `UserDomainService.java:237` `logger.logBusinessErr(otelCtx, 1017, …)` | ❌ 不进 wire ✔ |
+> | ③ | **RAG 侧 1018 在 user-rpc 侧仅日志** | `UserDomainService.java:722` / `:797` 均是 `logger.logBusinessErr(ctx, 1018, e)`，随后 `throw Status.NOT_FOUND.withDescription("头像历史不存在")` | ❌ 不进 wire（**wire 上是 gRPC NOT_FOUND + description，不是 1018**）✔ |
+> | ④ | **RAG 侧 1017 在 admin-api 侧不可达**（本轮新查，**原「影响面」表写错的地方**） | ① `GetUserReq.uid` 的类型是 **`Long`**（`dto/GetUserReq.java:27`）⇒ 非数字 uid ⇒ **Jackson 反序列化就抛** `InvalidFormatException` ⇒ **400 + text/plain**，到不了 service；<br>② uid 缺席/显式 null ⇒ controller 走 `GoStyleRequest.normalize(req, GetUserReq::new)`（`AdminController.java:219`）⇒ 内部 `target.assertGoRequiredFields()`（`users-common/.../GoStyleRequest.java:59`）⇒ `GoStyleRequired.field("uid", uid)` ⇒ **400 `field "uid" is not set`**，同样到不了 service；<br>③ ⇒ `parseUid` 的 `uidStr == null` 分支与 `NumberFormatException` 分支**都不会从 HTTP 入口到达** | ❌ **不进 wire** ⇒ **原表「✅ 进 wire」是错的** |
+> | ⑤ | **覆盖面**：6 个带 uid 的 admin 端点**全部**过 `normalize` | 11/13 个端点走 `GoStyleRequest.normalize`；未走的 3 个是 `/logout`、`/getself`、`/invite/create` ⇒ **都不带 uid** | ✅ 无遗漏 |
+> | ⑥ | **双侧活体对拍反证**（**L4**） | `tools/difftest/matrix-results.txt`（run_id=1792602663396 · **273 条**）的四个新漂移根因桶 **R1~R4 全为 0** ⇒ **NEW_DRIFT = 0**；而 `tools/difftest/matrix.py:618-620` 的 `classify()` 写明「**status 不一致一律 NEW_DRIFT**」⇒ ⇒ **若 admin-api 的缺 uid 真在 wire 上返回 1017（Go = 400 ＋ RAG = 200 + 1017 信封）⇒ 必被记为 NEW_DRIFT** ⇒ 桶为 0 ⇒ **反证 1017 不进 wire** | ✅ **L4 反证**（⚠️ 证据边界：矩阵**只落汇总不落逐条分类** ⇒ 这是**桶为 0 的反证**，不是逐条对照） |
+>
+> ⇒ ⇒ **两侧 1017/1018 都进不了 wire ⇒ 本条「msg 文案不同」没有可观察对象 ⇒ 本条不成立** ⇒ **销号（证伪关闭 · 无代码修复）**
+> ⇒ 销账方式与 `DRIFT-USERRPC-V-001` / `V-005` / `V-006` **同款**（**靠证据关闭，不靠改代码**）。
+> ⇒ **证据强度合计**：**L4**（双侧矩阵反证 ＋ Go 侧零调用点）＋ **L2**（MockMvc 三条守门）＋ **L1**（RAG 侧三层拦截链的源码逐层对照）。
+>
+> **守门网（已存在，本轮核实过 ⇒ 不需要新写）**：`AdminApiMvcPipelineTest` 的三条
+> ① `missingUidIs400TextPlainEndToEnd`（`:465`）—— 缺 uid ⇒ 400 + `field "uid" is not set`
+> ② `explicitNullIsRejected`（`:637`）—— 显式 null ⇒ 同上
+> ③ `nonNumericUidIsRejectedByJacksonNotByRequiredCheck`（`:670`）—— `uid="abc"` ⇒ 400 + text/plain
+> ⇒ **三条都断言 rpc stub `never()` 被调用** ⇒ **错误发生在到达业务层之前** ⇒ ⇒ **1017 进不了 wire 这件事已被守门锁住**。
+>
+> 🟡 **顺带修掉的一处 javadoc 事实错误**（**只改注释 · 不改行为** · 本域写权内）：
+> `AdminApiSupport.parseUid` 的 javadoc 原写「与**参考侧** `parseLongOrNull` → `LogicResult.fail(ErrorCode.ERROR_REQUEST_PARAM)` 的语义 1:1」
+> ⇒ **「参考侧」= Java 镜像期，不是 Go 真源** ⇒ 按 AGENTS.md §3.1「**不要拿代码注释当对照基准**」**这条出处无效**
+> ⇒ 已改成指向 Go 真源的锚点（`types.go:67-69` 的 `Uid int64 form:"uid,string"` ⇒ **Go 在绑定层就 400**）
+> ⇒ 并写明「**1017 在 Go 侧没有对应物**」＋「**本方法在 HTTP 入口不可达**」。
+>
+> ⚠️ **残留的将来风险（写明以免被当成「已彻底无风险」）**：`parseUid` **仍然保留**（防将来新增调用点绕过上面两层）
+> ⇒ 若将来某个端点**绕过 `normalize`** 直连它 ⇒ **那才会产生新的 wire 漂移**（Go 无 1017，RAG 有）⇒ **重开触发条件已写进 javadoc**。
+
+> 🔴 **跨 lane 依赖（写明以免销号结论悄悄过期）** —— 本条的销号**依赖 `service/users/users-common/**` 的两个类**：
+> `GoStyleRequest.normalize`（`users-common/.../http/GoStyleRequest.java:59` ⇒ 内部 `target.assertGoRequiredFields()`）
+> ＋ `GoStyleRequired.field(...)`（`users-common/.../http/GoStyleRequired.java:32` ⇒ null 即抛 `GoRequiredFieldException`）
+> ⇒ ⚠️ **这两个类在 G4 写权面**（AGENTS.md §5.3f：`service/users/users-common/**` 整库归 G4，**只有 `ErrorCode`/`PasswordUtil`/`SchemaInitializer` 三个类留在 users 域**）
+> ⇒ ⇒ **G4 若动这两处 ⇒ 本条销号结论必须复核**（复开触发条件 = 「必填校验不再在 service 层之前拦」或「`normalize` 不再调 `assertGoRequiredFields()`」）
+> ⇒ ⇒ 本条**不是**「永久闭合」，而是「**在共享层当前形态下闭合**」⇒ **依赖登记在此**（G4 侧已发通知）。
 
 ---
 
@@ -437,7 +484,7 @@ Tests run: 22, Failures: 9, Errors: 0, Skipped: 0
 
 | # | Question | Why Unknown | Required Confirmation |
 |---|---|---|---|
-| **UNRESOLVED-USERSCOMMON-001** | `DRIFT-USERSCOMMON-001`（1017/1018 文案）要不要改成 `"FAIL"` | 改法会**同时改变 admin-api 的 wire 行为**，属跨域裁决 | 与 `align/users-admin` 会话合并裁决；本轮已取证，未动手 |
+| ~~**UNRESOLVED-USERSCOMMON-001**~~ | ✅ **已闭环（2026-10-27 · G1 lane · 证伪关闭）** —— `DRIFT-USERSCOMMON-001`（1017/1018 文案）**要不要改成 `"FAIL"`** | ~~改法会**同时改变 admin-api 的 wire 行为**，属跨域裁决~~ ⇒ **前提被推翻** ⇒ **admin-api 的 1017 在 HTTP 入口不可达** ⇒ **没有「wire 行为」可改** ⇒ **本条不成立** | ~~与 `align/users-admin` 会话合并裁决~~ ⇒ **不需要任何人裁决** ⇒ 逐条证据链见 §3 `DRIFT-USERSCOMMON-001` 的「2026-10-27 订正并销号」块（Go 侧是死码 ＋ RAG 侧两侧均不可观察） |
 | **UNRESOLVED-USERSCOMMON-002** | `DRIFT-USERSCOMMON-005`（`$1$`/`$2x$`）的实际数据面 | 需查生产库是否存在非 `$2a$` 的 hash（两侧自产的都是 `$2a$`） | 真 PG 上跑 `SELECT DISTINCT left(password,4) FROM users_user WHERE password LIKE '$%'` |
 | ~~**UNRESOLVED-USERSCOMMON-003**~~ ✅ **已关闭（2026-10-27 · G1 lane · 问法订正）** —— 原问「`http/GoStyleCoercion` 的**全局副作用**是否波及非 users 域」 | ~~它通过 `JsonMapperBuilderCustomizer` 全局施加~~ ⇒ **该前提不成立**：`GoStyleCoercion` **刻意不做 `@Configuration`**（自身 javadoc 明写「本类只出规则、两个 api 模块各自注册 customizer」⇒ 避免给纯 gRPC 的 admin-rpc 强加 servlet/Boot 自动配置依赖）⇒ **注册行为是「各 api 进程各自注册」**，**不存在进程内全局作用域**（各域是独立 Spring Boot 进程）⇒ **原问法问的是机制上不存在的东西** | ~~需在 message/like/article 等域各打一次带标量的请求矩阵~~ ⇒ **不需要**：问题前提不成立 ⇒ 已由「逐域清点注册方」直接结清（下方订正块） |
 | **UNRESOLVED-USERSCOMMON-004** | `ddl/SchemaInitializer` 的四份脚本与 Go `AutoMigrate` 的**逐列等价性** | 本轮按用户口径**不动 DDL**，只审了 Java 侧脚本内容；`ADVISORY_LOCK_KEY` 的并发正确性未做双侧对拍 | 真 PG 下同时起 `user-rpc` + `admin-rpc` 打同一空库（`UNRESOLVED-USERRPC-005` 仍是同一个未闭环项） |
@@ -464,16 +511,33 @@ Tests run: 22, Failures: 9, Errors: 0, Skipped: 0
 ## 7. 最终判定（§39 三值）
 
 ```text
-SEMANTICALLY NOT EQUIVALENT
+SEMANTICALLY EQUIVALENT
 ```
 
-- **SEMANTIC MISMATCH：1 条** —— `DRIFT-USERSCOMMON-004`（`alg` 条件性分叉）→ ✅ **本轮已修 + 22 条守门 + 9 条变异验证**
-- **OBSERVABLE DIFFERENCE：3 条**
-  - `001`（1017/1018 文案）—— **潜伏**：`users/user` 内三个调用点全是日志码，wire 观察不到；⏸️ 待与 admin 域合并裁决
-  - `003`（claim 键序）—— 字节级、语义等价；**判为不修**（对齐需绕过 jjwt 签名实现）
-  - `005`（bcrypt `$1$`/`$2x$`）—— 数据依赖、fail-closed；⏸️ 待单独一轮（需改安全原语）
+> 🟢✅ **2026-10-27 订正：判定由 `SEMANTICALLY NOT EQUIVALENT` 升为 `SEMANTICALLY EQUIVALENT`** —— G1 lane · **本轮独立复核**
+>
+> ⚠️ **原判定过重**：§3 的 **5 条全部已闭合** ⇒ **没有任何一条「真正的语义漂移」还开着** ⇒
+> | 条目 | 状态 | 为什么不构成「不一致」 |
+> |---|---|---|
+> | `002` | ✅ 已修 | 已修 ⇒ 残留的只有 header 键序（**字节差，语义等价**） |
+> | `004` | ✅ 已修 | 已修 ＋ 22 条守门 ＋ 9 条变异验证 |
+> | `001` | ✅ **本轮销号** | **两侧均不可观察 ⇒ 本条不成立**（Go 侧是死码；RAG 侧两侧都进不了 wire） |
+> | `003` | ✅ **判为不修** | 条目自身写明「**它不是「漂移」，而是表述差异**」（JSON 对象键序无语义，claim 集合与取值完全一致） |
+> | `005` | ✅ **已签字** | `SD-USERSCOMMON-001` ⇒ **是决策，不是缺陷**（AGENTS.md §0） |
+>
+> ⇒ **依据**：本仓既有成例（`comment/common.md`）= 「**`SEMANTICALLY EQUIVALENT` ＋ OBSERVABLE DIFFERENCE 条目**」并存 ⇒
+> ⇒ ⇒ **判定口径 =「有没有真正开着的语义漂移」，不是「台账里还有几条条目」**。
+> ⇒ ⚠️ **效力边界（AGENTS.md §0）**：✅ 一律读作「**在该证据强度下一致**」⇒ 下方 3 条**取证缺口**（§6）是「**还不知道**」，**不是「已断言不一致」** ⇒ 不构成判定不通过。
+
+- **SEMANTIC MISMATCH：0 条** —— 原 1 条 `DRIFT-USERSCOMMON-004`（`alg` 条件性分叉）✅ **已修 + 22 条守门 + 9 条变异验证**
+- **OBSERVABLE DIFFERENCE：0 条「真漂移」**（原 3 条 ⇒ 本轮销号 1 条 ＋ 表述差异 1 条 ＋ 已签字 1 条）
+  - ~~`001`（1017/1018 文案）—— **潜伏**：`users/user` 内三个调用点全是日志码，wire 观察不到；⏸️ 待与 admin 域合并裁决~~ ⇒ ✅ **2026-10-27 已销号**（**两侧均不可观察 ⇒ 本条不成立** ⇒ 逐层证据链见 §3 的「2026-10-27 订正并销号」块）
+  - `003`（claim 键序）—— 字节级、语义等价；**判为不修**（对齐需绕过 jjwt 签名实现）⇒ **条目自身定性为「表述差异，不是漂移」**
+  - `005`（bcrypt `$1$`/`$2x$`）—— 数据依赖、fail-closed ⇒ ✅ **已签字** `SD-USERSCOMMON-001`（⚠️ 原写「⏸️ 待单独一轮（需改安全原语）」**已过期** —— 该轮已以**签字**方式处置，不是待办）
 - **已修且残留字节差（不计为差异）**：`002` 的 header 键序（`typ`/`alg` 顺序），与 `003` 同型
-- **未决：5 条**（§6）
+- **未决：3 条**（§6：`002` 的 `$1$`/`$2x$` **实际数据面** · `004` 的 DDL 逐列等价性 + `ADVISORY_LOCK_KEY` 并发 · `005` 的 JWT claim > 2^53）
+  ⇒ ⚠️ **三条全是「取证缺口」**（「Why Unknown」栏写的都是「**还没查**」）⇒ **不是已断言的不一致** ⇒ 不构成判定不通过
+  ⇒ **复开触发条件**：任一条被取证 ⇒ **重开本判定**
 - **对照覆盖**：176 条，**全部双侧活体实测**；证据强度为本仓 users 域组件最高
   （对比：`user-api` 上限为静态源码、`user-rpc` 为真 PG + 真启动）
 
