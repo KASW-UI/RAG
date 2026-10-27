@@ -30,7 +30,8 @@ spring:
       # ⚠️ 取值出处（2026-10-27 复核补记，此前只有数值没有出处）：
       #   Go 的 followcenter.yaml 完全没配 BizRedis 超时
       #     → go-zero v1.10.2 redisclientmanager.go:32-39 建 red.Options 时不传任何 timeout
-      #     → go-redis/v9 options.go init() 默认：ReadTimeout = 3s、DialTimeout = 5s
+      #     → go-redis/v9 **v9.20.0**（Sea 仓 go.mod:15 **直接 pin**）options.go 的 init() 默认：
+      #        DialTimeout = 5s（options.go:338-339）· ReadTimeout = 3s（options.go:364-370）· WriteTimeout = ReadTimeout（:374-378）
       #   ⇒ 读命令超时 3s、连接超时 5s，与 go-redis 默认逐字相同。
       #   🔴 go-zero redis.go:27 的 `readWriteTimeout = 2s` 是**死常量**（全文件只在 :293/:315 的
       #      BLPop 用到，ExistsCtx 不用它）⇒ 别被它误导。

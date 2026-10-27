@@ -48,7 +48,8 @@ spring:
       #     → go-zero v1.10.2 core/stores/redis/redisclientmanager.go:32-39
       #       建 red.Options 时只传 Addr/User/Pass/DB/MaxRetries/MinIdleConns/TLSConfig
       #       —— **三个 timeout 一个都没传**
-      #     → go-redis/v9 options.go init() 默认：ReadTimeout = 3s
+      #     → go-redis/v9 **v9.20.0**（Sea 仓 go.mod:15 **直接 pin**）options.go 的 init() 默认：
+      #        ReadTimeout = 3s（options.go:364-370）· DialTimeout = 5s（options.go:338-339）· WriteTimeout = ReadTimeout（:374-378）
       #   ⇒ 读命令超时 3s，与 go-redis 默认逐字相同。
       #   🔴 go-zero redis.go:27 的 `readWriteTimeout = 2s` 是**死常量**（全文件只有 BLPop 用），
       #      对这里的 SETEX 不适用，别被它误导。

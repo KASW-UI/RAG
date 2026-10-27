@@ -3502,3 +3502,74 @@ mvn -B -o -DargLine=-Xmx1g -am -pl service/users/user/user-rpc,service/users/adm
 ⇒ ⇒ **只往【当前主干】补一行 ⇒ 会让主干守门转红** ⇒ ⇒
 ⇒ ⇒ **那一行的落点只能是「合并收口那一次提交」，由整合者写** —— **不是 lane 写，也不是故障处置会话写**。
 ⇒ ⇒ **同族**：与「跑绿 ≠ 判据活着」「零命中是假信号」同源 —— 都是**「你以为的那个量 ≠ 判据实际度量的量」**。
+
+---
+
+## 52. 🔴🟢 **G4 的 R1/R3/R4 三条回执逐条复核 —— 四条全部「在我树已闭合」＋ 两次订正**（2026-10-28 · G1 lane）
+
+### 52.0 ⚠️ 先说时基：**那封信的 HEAD 是 `d4e4745`（2026-10-27 晚）**，而我树已到 `1950157`
+
+⇒ ⇒ 它表里 R1/R3/R4 的「事实」列**逐条核下来都已不成立** ⇒ ⇒ **不是它算错，是它的快照旧了**
+⇒ ⇒ 这正是「**回执也要对时**」的又一次实例（**同一路径 ≠ 同一版本**）⇒ ⇒ **我核的是当前树，不是它的表**。
+
+### 52.1 ✅ R1 / R2 / R3 / R4 —— **四条全部已闭合**（2026-10-27 复核补记那轮就做完了）
+
+| # | G4 表里的「事实」（旧快照） | **我当前树（`1950157`）实测** | 守门 |
+|---|---|---|---|
+| **R1** | user-api「无 `connect-timeout` ⇒ 连接 = 10s」 | ✅ **`timeout: 3s` + `connect-timeout: 5s`**（`user-api/src/main/resources/application.yml:25` · `:34`） | `UserApiRedisTimeoutConfigTest`（2 条）+ `UserApiRedisConnectTimeoutSocketTest` |
+| **R2** | user-rpc 同上 | ✅ **`timeout: 3s` + `connect-timeout: 5s`**（`user-rpc/.../application.yaml:55` · `:67`） | `UserRpcRedisTimeoutConfigTest` + `UserRpcRedisConnectTimeoutSocketTest` |
+| **R3** | follow-api「`timeout: **2s**`（≠ Go 3s）＋ 无 `connect-timeout`」⇒ **要求我判定「刻意收紧」还是「抄错」** | ✅ **已判定并已修**：`timeout: 3s`（`:40`）+ `connect-timeout: 5s`（`:47`）⇒ 注释原文留痕：「⚠️ **本行原为 2s**（无出处、无人审过）⇒ 与 Go 的 3s 不一致 ⇒ 2026-10-27 对齐成 3s」⇒ ⇒ **不是刻意收紧，是抄错**（已对齐，**不是**签字偏离） | `FollowApiRedisTimeoutConfigTest` + `FollowApiRedisConnectTimeoutSocketTest` |
+| **R4** | admin-rpc「值对但注释的机制写错」 | ✅ **值与注释均已修**：`timeout: 3s`（`:61`）+ `connect-timeout: 5s`（`:71`）＋ 注释已写明 go-redis `DialTimeout` 出处 | `AdminRedisTimeoutConfigTest` + `AdminRedisConnectTimeoutSocketTest` |
+
+⇒ ⇒ **我域 5 个用 Redis 的模块（user-api / user-rpc / admin-api / admin-rpc / follow-api）全部是 `3s` + `5s`**
+⇒ ⇒ 且 **5 个都有「配置层 + socket 层」两层守门**（各 2 条 + 2 条 ⇒ **10 条**）⇒ ⇒ **不是「配了就算」，是「真在 socket 层生效」**。
+
+**Go 侧出处（逐条到消费点，本轮我**自己重核**过，不采信转述）**：
+- `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-39` ⇒ `red.NewClient(&red.Options{Addr:33, Username:34, Password:35, DB:36, MaxRetries:37, MinIdleConns:38, TLSConfig:39})`
+  ⇒ ⇒ **三个 timeout 一个都没传** ⇒ ⇒ 全部落到 **go-redis 的库默认值**。
+- ⚠️ **go-redis 版本**：Sea 仓 `go.mod:15` **直接 pin `github.com/redis/go-redis/v9 v9.20.0`**
+  （⚠️ **不是** go-zero v1.10.2 自己 go.mod 里写的 v9.19.0 ⇒ ⇒ 以 Sea 仓的 pin 为准）。
+- `go-redis@v9.20.0/options.go`：`DialTimeout = 5s`（**`:338-339`**）· `ReadTimeout = 3s`（**`:364-370`** 的 `switch opt.ReadTimeout { case 0: … }`）· `WriteTimeout = ReadTimeout`（**`:374-378`**）。
+⇒ ⇒ **Go 侧真值 = 读命令 3s / 连接 5s** ⇒ ⇒ 与 RAG 侧 5 个模块**逐字相同** ✔
+
+### 52.2 🔴 暴露面数字：**G4 的订正成立**，但**当前树已经是新数** ⇒ 两边都得更新
+
+- **G4 订正的是对的**：我此前报 `user-rpc 11 / admin-rpc 13 / follow-rpc 5` ⇒ **那是「含 javadoc 提及」的数**；
+  按真注解（`grep -rE "^\s*@SpringBootTest"`）在同一快照上 = **9 / 12 / 3** ⇒ **它订正得对**。
+- ⚠️ **但它给的数是旧快照的**：我此后**新增了 4 个带 `@SpringBootTest` 的类**（2 个 user-rpc ＋ 2 个 admin-rpc 的 logout 客户端可见状态测试）
+  ⇒ ⇒ **当前树的真注解数 = `13 / 15 / 3`** ⇒ ⇒ **不能直接用它那组数写台账**。
+
+**逐 ref 实测（`git grep -lE "^[[:space:]]*@SpringBootTest" <ref> -- <module>/src/test/java`）**：
+
+| ref | user-rpc | admin-rpc | follow-rpc | 说明 |
+|---|---|---|---|---|
+| `a282012` / `9037a2b` / `d4e4745` / `7488b3d` / `3b573fb` | **9** | **12** | **3** | ⇒ **G4 的订正数就落在这段**（我加 4 个类**之前**） |
+| `b8b9400` / `70219d4` / `1950157` | **13** | **15** | **3** | ⇒ **当前树**（+2 / +2 / +0） |
+
+⇒ ⇒ **方向不变**：三个域仍是「多 Spring 上下文形态」⇒ **暴露面成立** ✔
+⇒ ⇒ ⚠️ **教训**：**订正也会过期** ⇒ ⇒ **凡引「某棵树的计数」，必须同时钉住那棵树的 ref** ⇒ ⇒
+⇒ ⇒ **「回执也要对时」的加强版：回执里被订正的数，也会被后续提交改掉** ⇒ ⇒ **回信时要把新数一起给**。
+
+### 52.3 🔴 **第三方源码的行号必须连版本号一起钉** —— 本轮新发现的一类「过期行号」
+
+- **机制**：「共享层文件被挪长 ⇒ 引用集体过期」我已记录（§52 之前的 memory 条目）；
+  ⚠️ **但这次的对象是【外部依赖】** ⇒ **版本一升，行号即失效** ⇒ ⇒ 而**行号失效后内容可能完全没错**（还是那个默认值）⇒ ⇒ **没人会发现**。
+- **实证（RAG 仓 G1 · admin-rpc 的 yml 注释）**：原文写
+  `github.com/redis/go-redis/v9 options.go 的 init() 填库默认值：DialTimeout = 5s（:329-330）`
+  ⇒ ⇒ **`:329-330` 是 v9.18.0 的行号**（我本机 `go-redis@v9.18.0/options.go` 正是 329-330）
+  ⇒ ⇒ **真源实际用 v9.20.0**（Sea 仓 `go.mod:15` 直接 pin）⇒ ⇒ **实际是 `:338-339`** ⇒ ⇒ **引用已失效**。
+- **修法（零行为变化 · 5 处）**：把我域 5 个 yml 的出处注释**连版本号一起钉**，
+  并把行号改成 **v9.20.0** 的真实行号（`:338-339` / `:364-370` / `:374-378`）⇒
+  ⇒ **变更面已核：只改注释行，零配置行变更**（`git diff` 过滤非注释行 = **空**）⇒
+  ⇒ **5 个锁值守门复跑 10 条全绿**（`UserApi/UserRpc/AdminApi/Admin/FollowApi` `RedisTimeoutConfigTest`）。
+- ⚠️ **为什么这条值得做**：admin-rpc 注释自己写着「这是一致但**无回归网**的巧合：go-zero 升 go-redis、默认值一变即静默分叉」
+  ⇒ ⇒ 现有的 `*RedisTimeoutConfigTest` **锁的是 RAG 侧的值**，**锁不住 Go 侧来源变了**
+  ⇒ ⇒ **把「版本号 + 行号」写进注释，是让这条风险【可被人一眼核对】的最低成本做法**（机器网需读 Go module cache，超出域内范围 ⇒ 如实登记）。
+- ⇒ ⇒ **同族**：与「跨树引用要对齐 commit」「行号是快照不是锚点」同源 ⇒ ⇒ **本条补的是「第三方依赖的版本也是一个快照」**。
+
+### 52.4 🟢 合并顺序约束：**我树已满足**
+
+- G4 的约束：`3b573fb`（HTTP 池拆进 `HttpPoolLifecycle`）与 `7488b3d` **必须同批合入**
+  ⇒ ⇒ 单合 `3b573fb` ⇒ 池「终止即永久」⇒ 同模块后续 Spring 上下文被毒化 ⇒ ⇒ 绿变红。
+- **我树实测**：`git merge-base --is-ancestor` ⇒ **`3b573fb` 在位** · **`7488b3d` 在位** ⇒ ⇒ **我树已满足该约束** ✔
+  ⇒ ⇒ **该约束只对「整合者逐笔 cherry-pick」与「未合的 lane 分支」有效** ⇒ ⇒ 我这边**无待办**。
