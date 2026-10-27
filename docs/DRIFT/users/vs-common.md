@@ -2057,3 +2057,70 @@ G3 第十轮写：「你域的**删除前置复检**（共享层 `imports` 里�
 G3 第十轮答了：**差 3 = 跑次不同** —— `919` 是 D10 落码**前**那一跑次，`comment-rpc` **116→119**（D10 落码后新增 3 条）⇒
 它按同口径实测当前树 = **922**（129 份 / skipped 4）⇒ **与我 §18.2 记的 922 一致** ⇒ ⇒ **该状态关闭**。
 ⇒ ⚠️ 保留 §18.2 原文（不重写历史）⇒ 只加本条订正。
+
+## 31. 🟢 **G4 新门禁入树 ＋ 白名单清理的【顺序约束】（2026-10-27 · G1 lane）**
+
+### 31.1 🟢 **门禁 `22dc67e` 已在我的 HEAD 内 ⇒ 「再并一次」是过时认知**
+
+G4 第十一轮来信：「新门禁 `22dc67e` + 台账 `c164e63`，请再并一次 `align/g4-service-common`（你落后 5 笔）」。
+
+⇒ ⇒ **实测不落后**（三条独立判据）：
+
+| 判据 | 实测值 | 读法 |
+|---|---|---|
+| `git merge-base --is-ancestor 22dc67e HEAD` | **YES** | 门禁提交已在我的 HEAD 内 |
+| `git merge-base --is-ancestor c164e63 HEAD` | **YES** | 台账提交已在我的 HEAD 内 |
+| `git rev-list --count HEAD..align/g4-service-common` | **0** | G4 那边**没有**我缺的提交 |
+
+⇒ ⇒ 「落后 5 笔」是按 `b19a61a`（我上一次并 G4 的合并点）算的**过时状态** ⇒
+我后来在 `6375faf` 并了 G4 的 `6cb0a60`（= G4 当前 tip ＝ 我俩的**共同基线**）⇒ ⇒ **不需要再合并**。
+⇒ 我 HEAD = `2da4a48`；`git rev-list --count do-my-own-gh..HEAD` = **108** / 落后 **0**；工作区干净。
+
+### 31.2 🟢 **门禁在我树实测绿（不是「应该绿」）**
+
+`mvn -o -B -DargLine=-Xmx2g -pl service/common test -Dtest=GoStyleRedisClientShadowingGateTest`
+⇒ ⇒ **Tests run: 3, Failures: 0, Errors: 0, Skipped: 0**（`MVN_EXIT=0` / `BUILD SUCCESS`）。
+
+⇒ ⇒ G4 的「self-adaptive」设计我复核过并成立：`stillExistingWhitelistEntries` **只取文件仍存在**的条目
+⇒ 我树里 5 份副本全删 ⇒ 集合为空 ⇒ 断言③(b) 自动空 ⇒ 不红。
+⇒ 全仓 `src/main/java` 侧 `LettuceClientOptionsBuilderCustomizer` 现在**只有**一处：
+`service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java`（共享层那一份）。
+
+### 31.3 🔴 **白名单清理 = G4 自己的写权，但【顺序不能反】**
+
+`LEGACY_DOMAIN_COPIES` 定义在
+`service/common/src/test/java/com/rag/common/redis/GoStyleRedisClientShadowingGateTest.java:88`
+⇒ 该文件在 G4 白名单 `service/common/src/**`（`tools/difftest/check-wave-lane-ownership.py:146`）
+⇒ ⇒ **删那个条目不需要我域写权** ⇒ G4 可直接删（我域副本早已在 `312a09b` 删掉）。
+
+⚠️ **但「现在删」会把 G4 自己的门禁改红** —— G4 树里
+`service/users/user/user-api/src/main/java/com/rag/users/user/api/config/RedisDisconnectedBehaviorConfig.java`
+**仍然存在**（实测：`git ls-tree align/g4-service-common` 命中；该文件第 4 行
+`import org.springframework.boot.data.redis.autoconfigure.LettuceClientOptionsBuilderCustomizer;`、
+第 103 行 `public LettuceClientOptionsBuilderCustomizer goStyleRedisDisconnectedBehavior()`）
+⇒ ⇒ 那条白名单在 **G4 自己的树上仍是承重的** ⇒ 先删白名单 ⇒ 断言① 的 `found` 命中它 ⇒ **门禁红**。
+
+⇒ ⇒ **正确顺序（已回函 G4）**：
+> **先把「删掉那份」的提交并进 G4 树（或等主干拿到 `312a09b`）⇒ 再删白名单条目。**
+
+### 31.4 🟢 **「删 5 份」在【合并语境】下的口径订正：相对主干的净变化只有 1 份**
+
+`312a09b` 的 diff 删了 **5 份**域内副本（`git show --stat --diff-filter=D 312a09b` ⇒ **5 files changed, 547 deletions**），
+但**合并到主干时的净变化只有 user-api 一份**。逐份追血脉（`git log --diff-filter=A/D`）：
+
+| 域内副本 | 谁**新增**的 | 主干上有吗 | 合并后主干的净变化 |
+|---|---|---|---|
+| `user-api` | `ea8f01e`（**主干上**，修 `DRIFT-USERAPI-014`：Redis 断连时 Lettuce 排队 ⇒ 撞 HTTP 3s 预算 ⇒ 503） | **有** | **删除这一份**（真净变化） |
+| `admin-api` | **`a4e3740`（我自己的提交）** | 无 | 零（删的是我自己引入的影子） |
+| `follow-api` | **`a4e3740`（我自己的提交）** | 无 | 零 |
+| `user-rpc` | **`0c2a902`（我自己的提交）** | 无 | 零 |
+| `admin-rpc` | **`0c2a902`（我自己的提交）** | 无 | 零 |
+
+⇒ ⇒ **那 4 份域内副本是 G1 自己在收编【之前】引入的**（当时为对齐 Go 的断连行为而各域各写一份）
+⇒ ⇒ **共享层收编这个动作，把 G1 自己引入的 4 处影子 ＋ 主干原有的 1 处遗留一次性消掉**。
+⇒ 🟢 **这解释了为什么 G4 的白名单「只登记 user-api 一条」是对的**：只有那 1 条是**主干上真实存在的遗留**，
+另外 4 条是 G1 引入的、压根没进过主干 ⇒ ⇒ 白名单条目数**本来就是 1 条、不是 5 条**。
+⚠️ **口径提醒（防止下一轮又按「5 份」去对账）**：**「我树里删了 5 份」≠「合并后主干少 5 份」** ⇒ 对账一律按【主干净变化】算。
+⇒ ⚠️ 另注：`ea8f01e` 那份引入是有正当理由的（`DRIFT-USERAPI-014`）⇒ **它不是「写错了」**
+⇒ ⇒ 删除之所以行为等价，是因为共享层那份承载**同一机制**（`disconnectedBehavior(REJECT_COMMANDS)`）
+⇒ ⇒ 该等价性由 §28 的三层守门 ＋ 三次变异证明，**不是**由「它看起来多余」证明。
