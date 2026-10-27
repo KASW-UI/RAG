@@ -1817,3 +1817,38 @@ AuthorityLookup（实际在 service/common/communityfact/authority_http.go）
 ⑤ **引用损坏形态作证据时用可见转义写法**（`␦␦` / `\uFFFD`），**不要**把真 U+FFFD 字节写进台账 ——
 否则后续「全仓 U+FFFD 扫描」会把**证据**也标成待修项（噪声）。
 ⑥ **「扫描 ⇒ 归零」这类目标，要先问「这个目标合法吗」**：本例答案是**不合法** ⇒ ⇒ **登记 ≠ 缺陷**：先分类，再决定修不修。
+
+---
+
+## PIT-FAV-RPC-039 · 🕳️ Go 的 yaml **顶层 `Timeout`** 绑的是 **zrpc 服务端超时**（**不是** rest 的 HTTP 预算）—— 而且它**不靠「同名遮蔽」成立**
+
+### 现象
+
+写 RAG 域的 timeout 对照时，我第一反应是：「`RpcServerConf` 内嵌了 `service.ServiceConf`，而 `ServiceConf` 里也有 `Timeout`
+⇒ **同名遮蔽** ⇒ yaml 顶层 `Timeout` 绑到**外层**那个（= 服务端 70s）」。
+
+🔴 **这个机制解释是错的**：`core/service/serviceconf.go:32-40` 的 `ServiceConf`
+**根本没有 `Timeout` 字段**（只有 `Name` / `Log` / `Mode` / `MetricsUrl` / `Prometheus` / `Telemetry` / `DevServer`）
+⇒ **不存在同名遮蔽** ⇒ yaml 顶层 `Timeout` **直接**绑到 `RpcServerConf.Timeout`（`zrpc/config.go:46`，默认 2000ms）。
+
+### 为什么会踩
+
+① **「内嵌结构体同名遮蔽」是 Go 的通识 ⇒ 不查就套上去** —— 但**遮蔽的前提是「两边真有同名字段」** ⇒
+本例**下层压根没有那个字段** ⇒ ⇒ 套上去就变成**错的机制解释**。
+② ⚠️ **两种解释在结论上碰巧一致**（都得出「顶层 `Timeout` ⇒ 服务端 70s」）⇒ ⇒
+**错机制不会在结论上暴露** ⇒ 只有**把推导链一步步写出来**才会发现 ⇒ ⇒
+**「结论对」不等于「推导对」**。
+③ ⚠️ **同类易混**：service / rpc 组件的 yaml 里可能有多处 `Timeout`：
+`article/rpc/etc/article.yaml:3`（顶层 70000 = **zrpc 服务端**）与 `:90`
+（落在 `SecurityConf` 段 = **security-rpc 客户端** 10000）⇒ **两处语义完全不同** ⇒ 别混。
+
+### 怎么不再踩
+
+① **凡要说「某某遮蔽了某某」，必须把「被遮蔽的那个字段确实存在」也指出来（`文件:行号`）** ——
+指不出来 ⇒ **不是遮蔽，是结构不同** ⇒ ⇒ **写不出那个行号，就说明机制没查清**。
+② **写 Go 事实要带消费点**（AGENTS.md §3.3.1）：本例声明点 = `zrpc/config.go:46`，
+**真源侧消费点** = `service/favorite/rpc/favorite.go:40` `DisableNativeRpcTimeout(&c.RpcServerConf)`
+＋ `:49` `NewUnaryServerInterceptor(rpcTimeout, ...)` ⇒ **声明点 + 消费点两条都有**才算坐实。
+③ **⚠️ 本条的适用范围**：Go 侧 **rpc 组件**的 yaml **顶层** `Timeout` ⇒ **zrpc 服务端超时**；
+**api 组件**的 yaml 顶层 `Timeout` ⇒ **rest HTTP 预算**（`rest/config.go:55` 默认 3000ms）。
+**两者不是同一个字段** ⇒ ⇒ 「api 是 3s ⇒ rpc 也是 3s」这种推断**不成立**，必须各自去 yaml 查。

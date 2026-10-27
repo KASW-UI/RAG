@@ -666,3 +666,42 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 - ✅ **本域无遮蔽风险（已自核）**：`grep -rn "LettuceClientOptionsBuilderCustomizer|RedisDisconnectedBehaviorConfig|DisconnectedBehavior"`
   在 `service/{favorite,comment,hot,article}` 的**源码**里 ⇒ **0 命中** ⇒ 共享层那份**必被创建**
   （三模块都引 `spring-boot-starter-data-redis` ⇒ `@ConditionalOnClass` 命中）⇒ **零域侧动作** ✅
+- ✅ **前提已坐实（本轮自核 · 补出处）**：上文说的「`rpc-timeout: 2s`」指的是**服务端**超时（不是客户端封顶），
+  Go 侧出处 = go-zero v1.10.2 `zrpc/config.go:46`
+  `RpcServerConf.Timeout int64 \`json:",default=2000"\`` ⇒ **服务端**默认 2000ms；
+  ⚠️ **`:31` 那个 `Timeout` 是 `RpcClientConf.Timeout`（客户端）** ⇒ **两个字段默认同值但语义不同** ⇒ 别混。
+  ⇒ Go 侧 `service/comment/rpc/etc/comment.yaml` **零顶层 `Timeout` 键** ⇒ 走默认 **2000ms = 2s** ⇒ 两侧同为 2s。
+  ⇒ **真源侧消费点（唯一超时执行者）**：`service/comment/rpc/comment.go:33` `DisableNativeRpcTimeout(&c.RpcServerConf)`
+  ＋ `service/comment/rpc/comment.go:54` `NewUnaryServerInterceptor(rpcTimeout, ...)` ⇒ **框架自带超时被关掉、由真源自建接管**。
+  ⇒ RAG 侧等价物 = `observability.rpc-timeout` ⇒ 消费点 `service/common/.../spring/RpcServerInterceptorFactory.java:80-81`
+  ⇒ **已在 docs/DRIFT/comment/vs-common.md 的 A1 行结案（服务端一致）**。
+  ⚠️ **因此**：上文「断连 ⇒ 命令排队到 `commandTimeout: 3s` ≫ `rpc-timeout: 2s` ⇒ **RPC 先超时**」里的 2s，
+  指的就是**这个服务端预算** ⇒ **不是**客户端 2s 封顶那一条 ⇒ 别拿客户端那条来解释服务端先超时。
+
+
+---
+
+### 附录 · 📌 订正注记（2026-10-27 · G3）：G4 **第八次**全量口径（**保留上文第七次原值不改写**）
+
+**① G4 第八次全量回归口径**（来源 G4 commit `23d1c2a` §4.10.11）：
+
+| 项 | 值 |
+|---|---|
+| 命令 | `mvn -B clean verify`（**全量**，不是 `-pl` 子集） |
+| 结果 | **BUILD SUCCESS / EXIT=0** |
+| 规模 | **52 模块 · 2461 条**（29 个有测试的模块**逐模块求和**，不按行序 tail） |
+| 计数 | **failures 0 · errors 0 · skipped 4** |
+| 耗时 | **20:21 min** |
+| 相对上次 | 第七次 2457 ⇒ **+4** |
+| 双侧探针 | `run-parity.sh` **EXIT=0**（56 例）＋ `run-rpc-timeout-parity.sh` **EXIT=0**（3 例） |
+| 三门禁 ＋ 台账三门禁 | **0/0/0 ＋ 0/0/0** |
+
+⚠️ **「+4」的归因是【推断】**：依据 = G4 `23d1c2a` 的 §4.10.9 记「FB-04（A9）落码 … **守门 4 条** / 变异 4-4」⇒ **条数吻合**；
+（同轮的 §4.10.10 是 **U+FFFD 纯注释**自修 ⇒ 不产生测试条数。）
+
+⚠️ **口径边界（不可相加）**：**2461 是 G4 树的口径**（基线含 G4 单 4 的 `0c72969`）⇒
+**本域的 919 条是 G3 树的口径**（4 域 × 3 组件）⇒ **两个数不在同一条基线上 ⇒ 不可相加**；
+合并后总数会变 ⇒ **波末收口回归才是最终口径**。
+
+⚠️ **本块是「加注记」，不是「改原值」**：上文第七次口径（2457 条 / 20:28 min / `5564c27`）**原样保留** ⇒
+读本域历史结论的人**以两块并列为准** ⇒ ⇒ **不要把第八次误读成「第七次作废」**。
