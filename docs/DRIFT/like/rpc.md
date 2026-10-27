@@ -1643,7 +1643,7 @@ global 第三十三轮的 **E47 原定性已被第三十六轮全面订正**：*
 
 ## 🟡 `DRIFT-LIKE-RPC-REDIS-POOL`（新登记 · 2026-10-27）**Redis 连接池数值未对齐**（形态已对齐，仅数值不同）🆕 **数值轴已修（`min-idle` 4 ⇒ **8** = Go 确切值）· 残留 = `max-active`（性能面）**
 
-> ⚠️ 与 [`task/rpc.md` 的 `DRIFT-TASK-RPC-008`](task/rpc.md#🔴-drift-task-rpc-008新登记--2026-10-27redis-连接池维度未对齐--形态漂移-rag-无池-vs-go-有池) **同源**（同一轮取证挖出）⇒ **详细取证在 task 域那份**，此处只记本域的差异与差异级别。
+> ⚠️ 与 [`task/rpc.md` 的 `DRIFT-TASK-RPC-008`](../task/rpc.md#🔴-drift-task-rpc-008新登记--2026-10-27redis-连接池维度未对齐--形态漂移rag-无池-vs-go-有池) **同源**（同一轮取证挖出）⇒ **详细取证在 task 域那份**，此处只记本域的差异与差异级别。
 
 | 项 | 事实 |
 |---|---|

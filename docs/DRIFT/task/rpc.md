@@ -446,7 +446,7 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
 2. 同族一致：like-rpc 原本已有 `timeout: 3s`（✓ 对齐），但**缺** `connect-timeout` ⇒ 一并补 5s。
 
 **守门**：
-1. [`TaskRedisCommandTimeoutGateTest`](../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/config/TaskRedisCommandTimeoutGateTest.java)（**6 条** —— 🆕 2026-10-27 本轮加 **⑤ 池已启用** ＋ **⑥ 池参数 64/16/0**，见 [DRIFT-TASK-RPC-008](#🔴-drift-task-rpc-008新登记--2026-10-27redis-连接池维度未对齐--形态漂移-rag-无池-vs-go-有池)）
+1. [`TaskRedisCommandTimeoutGateTest`](../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/config/TaskRedisCommandTimeoutGateTest.java)（**6 条** —— 🆕 2026-10-27 本轮加 **⑤ 池已启用** ＋ **⑥ 池参数 64/16/0**，见 [DRIFT-TASK-RPC-008](#🔴-drift-task-rpc-008新登记--2026-10-27redis-连接池维度未对齐--形态漂移rag-无池-vs-go-有池)）
    ＋ [`LikeRpcRedisTimeoutsGateTest`](../../../service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRpcRedisTimeoutsGateTest.java)（4 条）
    —— **起真 Spring 上下文**（用真应用类 ⇒ 加载真实 yml）、读**真的** `LettuceConnectionFactory` / `ClientOptions`，
    断言**消费点**：
