@@ -1875,3 +1875,17 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 
 **只登记，不落码**（理由与复开触发条件见 [`favorite/api.md` §15.3](../favorite/api.md#153-处置只登记不落码写死复开触发条件)）⇒ 本域补充一条：
 ⚠️ **本域同时承载「命令重试」已登记差异**（go-redis `MaxRetries = 3` vs Lettuce **无重试**，见 [`vs-common.md`](vs-common.md) 的 `DRIFT-HOTRPC-004`）⇒ **改池形态会同时改这两项**（有池 ⇒ 并发下失败重试的分布完全变样）⇒ ⇒ **复开时必须与重试那条一起验**。
+
+---
+
+## 🔴 **阈值类结论的「共享层依赖」声明**（2026-10-27 · 按 G2 [3] 的要求做的重核）
+
+⚠️ **凡本档写了「**运行期上限 / 阈值 / 池形态**」类结论，必须标「依赖共享层哪个版本」** ⇒ ⇒ **共享层一改 ⇒ 那条要重核**（重核，不是重写）。
+
+| 本档结论 | 依赖面 | 当前实测（2026-10-27 重核） | 共享层一改会怎样 |
+|---|---|---|---|
+| **§十 的 Redis 池形态 = 无池**（hot-rpc） | **依赖共享层的 dependency 状态**（`isPoolEnabled` 在 `enabled == null` 时**回落到「classpath 上有没有 `commons-pool2`」**） | ✅ 共享层 `service/common` 的 classpath 上 `commons-pool2` **零命中**（`mvn -B -o -pl service/common dependency:tree -Dincludes=org.apache.commons:commons-pool2` ⇒ BUILD SUCCESS，无该行）⇒ ⇒ **无池结论成立** | 共享层依赖树一变 ⇒ ⇒ **池形态静默翻转** ⇒ ⇒ **§十 要重核** |
+| **Redis connect-timeout = 5s** | **不依赖**共享层（共享层只设 `disconnectedBehavior(REJECT_COMMANDS)`） | ✅ 域内 yml 显式配 5s | 共享层开始碰 `socketOptions` 时才变 |
+| **rpc 服务端超时 = 2s** | 域内 `observability.rpc-timeout` ＋ 共享层的 `RpcServerInterceptorFactory` | ✅ 2s | 共享层改拦截器链时要重核 |
+
+⇒ **共享的判据明细表在 [`favorite/api.md` §17](../favorite/api.md#17-)（同款机制，三域共用一条判据）** ⇒ ⇒ 改一处要三域一起重核。

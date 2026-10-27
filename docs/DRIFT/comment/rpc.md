@@ -815,3 +815,17 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 
 **形态已对齐 ⇒ 不必动**；**数值不对齐 ⇒ 登记**（**不落码**）⇒ 理由与复开触发条件见 [`favorite/api.md` §15.3](../favorite/api.md#153-处置只登记不落码写死复开触发条件)（① 可观察行为 ② `10 × GOMAXPROCS` 是运行时推导值 ③ 两套池语义无一一对应 ④ 需并发活体对拍 ⑤ 连带影响断连/重试语义）。
 ⇒ ⚠️ **本域是三个用 Redis 的域里唯一「有池」的那个** ⇒ ⇒ 若共享层未来要加**池形态**维度的守门，**本域是唯一能提供正样本的域**（`favorite-api` / `hot-rpc` 都是无池）⇒ 记一笔给 **G4**。
+
+---
+
+## 🔴 **阈值类结论的「共享层依赖」声明**（2026-10-27 · 按 G2 [3] 的要求做的重核）
+
+⚠️ **凡本档写了「**运行期上限 / 阈值 / 池形态**」类结论，必须标「依赖共享层哪个版本」** ⇒ ⇒ **共享层一改 ⇒ 那条要重核**（重核，不是重写）。
+
+| 本档结论 | 依赖面 | 当前实测（2026-10-27 重核） | 共享层一改会怎样 |
+|---|---|---|---|
+| **§10 的 Redis 池形态 = 有池**（comment-rpc） | **依赖共享层的 dependency 状态**（`isPoolEnabled` 在 `enabled == null` 时**回落到「classpath 上有没有 `commons-pool2`」**） | ✅ 本域 `enabled: true` ⇒ **显式配置 ⇒ 不依赖 classpath 探测**；且实测 classpath **1 命中**（`commons-pool2:2.12.1`）⇒ ⇒ **有池结论成立（且比 favorite/hot 更稳）** | ⚠️ 共享层若把 `enabled` 的默认值**改成 true** ⇒ ⇒ 本域会**静默多出**一份池配置语义 ⇒ ⇒ §10 要重核 |
+| **`min-idle: 4` vs Go 的 `0`**（数值轴） | **不依赖**共享层（域内 yml） | 🔴 仍偏离（Go 侧 go-redis 直连 ⇒ `MinIdleConns` 未设 ⇒ **0**） | 不受影响 |
+| **Redis connect-timeout = 5s** | **不依赖**共享层（共享层只设 `disconnectedBehavior(REJECT_COMMANDS)`） | ✅ 域内 yml 显式配 5s | 共享层开始碰 `socketOptions` 时才变 |
+
+⇒ **共享的判据明细表在 [`favorite/api.md` §17](../favorite/api.md#17-)（同款机制，三域共用一条判据）** ⇒ ⇒ 改一处要三域一起重核。

@@ -863,3 +863,30 @@ service/favorite/api/internal/svc/service_context.go:20
 ⚠️ 「把方法体包进 lambda」**必然**导致**既有行整体缩进 +4** ⇒ ⇒ `git diff` 会把整个文件标记为改动 ⇒ ⇒ **复核者必须用 `git diff --ignore-all-space` 对照**才能看清「真实改动 = 净新增行数」：
 ⇒ ⇒ 本次实测：`FavoriteDomainService.java` 的 `git diff --stat` = **1163 行**，`git diff --ignore-all-space --stat` = **97 插入 / 0 删除** ⇒ ⇒ **没有夹带语义改动**（纯缩进平移）⇒ ⇒ **不是噪声 bug，是包裹式改造的固有代价** ⇒ ⇒ **判据 = 两个数字一比**（⚠️ 别据此判定「夹带了语义改动」，也别据此要求「重做成零缩进」—— 那是做不到的）。
 
+---
+
+## 17. 🔴 **阈值类结论的「共享层依赖」声明**（2026-10-27 · 按 G2 [3] 的要求做的重核）
+
+⚠️ **纪律**：凡本域台账写了「**运行期上限 / 阈值 / 池形态**」类结论，**必须标「依赖共享层哪个版本」**
+⇒ ⇒ **共享层一改 ⇒ 那条要重核**（**重核，不是重写**）⇒ ⇒ **不得把旧结论当现状引用**。
+
+### 17.1 逐条「依赖什么 / 改了会怎样」
+
+| 结论 | 依赖面 | 当前实测（2026-10-27 重核） | 共享层一改会怎样 |
+|---|---|---|---|
+| **form 容器上限 = 10001** | 共享层 `cd893d1` 的 `GoStyleTomcatParameterLimitCustomizer:207`（**无条件** `setMaxParameterCount(MAX_PARAMETER_COUNT)` ⇒ 容器上限与 `mode` **彻底解耦**） | ✅ 我树含 `cd893d1`（`e18fd52` 合并）⇒ ⇒ **运行期一律 10001**，**不再是 yaml 的 2048** | 若该类再按 `mode` 分叉 ⇒ ⇒ 运行期上限会掉回各域 yaml 值 ⇒ ⇒ **§14 那格要重核** |
+| **判定权口径差 1**（Tomcat 数总「值」数含空值 vs Go 数非空值） | **不依赖**共享层（域内 `FavoriteApiSupport#goFormFirstValue` 自己数非空值） | 🔴 仍 OPEN（`DRIFT-HOTAPI-030` ＋ `DRIFT-FAV-API-001`） | 不受影响 |
+| **Redis 池形态 = 无池**（favorite-api） | **依赖共享层的 dependency 状态** —— 判据 `isPoolEnabled` 在 `enabled == null` 时**回落到「classpath 上有没有 `commons-pool2`」** ⇒ ⇒ 共享层**加一个传递依赖**就可能**静默开池** | ✅ **重核**：共享层 `service/common` 的 classpath 上 `commons-pool2` **零命中** ⇒ ⇒ **无池结论成立** | 共享层依赖树一变 ⇒ ⇒ **池形态静默翻转** ⇒ ⇒ **§15 要重核** |
+| **Redis connect-timeout = 5s** | **不依赖**共享层（共享层 `GoStyleRedisClientAutoConfiguration` 的唯一 builder 调用是 `disconnectedBehavior(REJECT_COMMANDS)` ⇒ **不碰** `socketOptions`/`timeoutOptions`） | ✅ 域内 yml 显式配 5s | 只在共享层**开始碰 socketOptions** 时才会变 ⇒ ⇒ 那时 §13 要重核 |
+| **断连行为 = REJECT_COMMANDS** | 依赖共享层 `GoStyleRedisClientAutoConfiguration` | ✅ 合并后已树内重验（唯一 builder 调用 = `disconnectedBehavior(REJECT_COMMANDS)`，`:131-132`） | 共享层改 builder ⇒ ⇒ 要重核 |
+
+### 17.2 本轮重核的可复算数字
+
+| 命令 | 结果 |
+|---|---|
+| `mvn -B -o -pl service/common dependency:tree -Dincludes=org.apache.commons:commons-pool2` | **BUILD SUCCESS**，输出里 **0 行** `commons-pool2` ⇒ ⇒ **共享层不带它** ⇒ ⇒ 三域的池形态结论**当前**成立 |
+| `service/common/.../GoStyleTomcatParameterLimitCustomizer.java:207` | `return connector -> connector.setMaxParameterCount(MAX_PARAMETER_COUNT);` ⇒ ⇒ **无 `mode` 判断** ⇒ ⇒ 容器上限**一律 10001** |
+
+### 17.3 ⚠️ 一条**已过期的说法**（保留原文 + 订正，防下一个人误引）
+
+我曾对 G4 说「**favorite 是唯一运行期停在 yaml 的 2048 的域**」⇒ ⇒ **该说法已过期**：`cd893d1` 把容器上限抬升与 `mode` 解耦 ⇒ ⇒ **favorite 现在也是 10001** ⇒ ⇒ **「停在 2048」这一面已被消掉** ⇒ ⇒ 残留只剩**判定权口径**那一条（上表第 2 行）⇒ ⇒ **不要把「favorite 停在 2048」当现状**。
