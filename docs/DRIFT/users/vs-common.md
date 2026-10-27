@@ -924,6 +924,7 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 | `7488b3d` ＋ `182fc32` | 进程级静态池改为「被终止后按需重建」 | 🔴 **与 `3b573fb` 有顺序耦合** ⇒ **必须同批**（见 §12.4） | ✅ 合入后按 §12.4 复验 |
 | `853767b`（G2 FB-04 · A9） | 让 gRPC 业务 handler 执行期能拿到当前 server span（`RpcInterceptor.onHalfClose()` 里用 `otelCtx.makeCurrent()` 包住 handler 调用） | ✅ **零影响**（本域**自核**，不采信转述）：① 我域主源码 `Span.current()` **读取点 = 0 命中**；② 共享层主源码 `Span.current()` **读取点 = 0 命中**（只有 `makeCurrent()` 的**设置**方：`RpcInterceptor:332/:392/:429` · `HttpMiddleware:312` · `GoStyleTraceparentFilter:278` · `MqConsumer:95`）⇒ ⇒ 让 server span 变 current **没有任何消费方**；③ 全仓唯一读取点 `comment-rpc/CommentFactDeliveryService.java:148` 跑在**调度线程** ⇒ FB-04 改的是 **handler 线程** ⇒ 碰不到它 | ✅ **无**（合入后复验即可） |
 | `853767b` 的**反向含义**（写明以免后人误记） | —— | ⚠️ **正因为双方都零读取点**，FB-04 这类「让 span 变成 current」的改动**在本波不会体现在任何域的可观察面上** ⇒ ⇒ **若将来某个域开始用 `Span.current().setAttribute(...)`，它会立刻依赖 FB-04 这个前提** ⇒ ⇒ 那时 FB-04 就是**必需**而非「零影响」⇒ **复开触发条件已锁定** | —— |
+| `c15dfeb`（G2 FB-05 · A3） | form 闸门的 `mode` 解析**额外接受 `"false"`**（YAML 1.1 把未加引号的 `off` 解析成布尔 false ⇒ 文档里的合法值写不出来 ⇒ 构造期抛异常 ⇒ 进程起不来）⇒ **只改了 2 个文件**：`GoStyleFormLimitMode.java`（+38/−2，**javadoc ＋ `parse` 多一个别名**）＋ 新增 `GoStyleFormLimitModeYamlBooleanGateTest.java`（152 行） | ✅ **零影响（本域自核 · 2026-10-27 13:2x · 不采信转述）**：① `git show --stat c15dfeb` ⇒ **只 2 个文件**，`GoStyleTomcatParameterLimitCustomizer` 的 diff **为空** ⇒ **容器上限 10001 不受影响**；② 本域三 api 的 `mode` 实测 = **user-api `raw` · admin-api `raw` · follow-api `envelope`** ⇒ ⇒ **三个都不是 `off`** ⇒ ⇒ `parse` 的合法值域**扩大**了一个而已 ⇒ ⇒ 本域三个取值**走同一批分支 ⇒ 行为逐字不变** | ✅ **无改动**，但**合入后复验一条**：我域三 api 启动时都会构造该 bean ⇒ ⇒ **复验「我域的三个 `mode` 值仍被 `parse` 接受」**（成本极低） |
 
 ### 13.1 `182fc32` 对本域 = **零影响**（逐条核过，非转述）
 
@@ -972,6 +973,19 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 ⇒ ⚠️ **对「667」的诚实定位**：它是 **G1 树 × G1 域** 的数字，**不是** 波次最终数字（§`user/rpc.md` §10 已写明「本轮 667 条不是最终数字」）⇒ ⇒ **本轮它只能当「G1 域内当前态」的证据，不能当「波次收口」的证据**。
 
 ⇒ 🔴 **补充（2026-10-27 13:2x）**：**四棵树正在往不同方向分叉** —— 实测 **G2 的树已经合并了 G4 的分支**（`37816ca`）⇒ **G2 树里有共享层的 Redis 收编 / 池自愈 / span current**，而 **我树里一个都没有**（我树 `service/common` = 主干基线 ⇒ `AutoConfiguration.imports` 仅 2 条）⇒ ⇒ **同一波次里，不同 lane 的树的内容差异会越来越大** ⇒ ⇒ **汇合点只能是 `do-my-own-gh`（主干）** ⇒ ⇒ **任何 lane 的「全量」都不能代表其他 lane 的树**（与 §18.5 的实测同源）。
+
+### 13.4 🟡 **G4 的错峰知会窗口（2026-10-27 13:2x）** —— 承诺 ＋ 三条实测事实
+
+⇒ **G4 知会**：`FB-05` 已落码（`c15dfeb` · **改了共享层生产代码**）⇒ 从「现在起」跑**第九次全量**（`mvn -B clean verify` · 约 20 分钟）⇒ 请我**此窗口内不要跑 maven 全量**（同窗并发 ⇒ 系统 OOM-kill ⇒ `EXIT=137`）。
+⇒ ⇒ **我域的答复 = 零占用**（**不跑任何 maven，含单模块定向跑**）⇒ 本轮**未起任何 maven**（只跑了 5 个 python 门禁 + 字节级扫描）⇒ ⇒ **本域对共享层变更的复验，统一放到「G4 进主干 → 并回我树 → 一次跑完（域内收口 ＋ C7）」那个窗口**（那时才测得到新代码）。
+
+**三条我自己实测的事实（不采信转述，给 G4 做决策用）**：
+
+1. ✅ **`c15dfeb` 对我域 = 零影响**（详见上表新加的那一行）⇒ ⇒ **我域不需要为这一条单独复跑** ⇒ ⇒ **它不构成我域的额外待办**。
+2. 🟡 **13:29:06 实测占用方是 G3，不是 G4** ⇒ 完整命令行 =
+   `mvn -B -pl service/favorite/favorite-api -am test -Dtest=FavoriteApiRealTomcatGateTest -Dsurefire.failIfNoSpecifiedTests=false -DfailIfNoTests=false -DargLine=-Xmx768m`
+   ⇒ ⇒ **单测试类 ＋ 堆上限写死 768m ＝ 轻量占用** ⇒ ⇒ **与历史那组（52 模块 `clean verify` ＋ 模块级 `-pl … test`）不同量级** ⇒ ⇒ **不是同一类风险** ⇒ ⇒ **但「窗口被占」这个事实仍要由动作方自己复检**（判据：`ps -eo command | grep "[p]lexus.classworlds" | sed 's/.*multiModuleProjectDirectory=//; s/ org.codehaus.*//'` ⇒ **看树名 + 看完整 `-pl` 范围**，不要只看「有没有人在跑」）。
+3. 🟡 **全量次数编号疑似回退（提醒，不追责）**：G4 台账里 **§4.10.14 = 第九次（代码态 `c15dfeb`）**、**§4.10.15.6 = 第十次（`5a954bb`）**、**§4.10.22 = 第十一次（`040a201`）** **均已落** ⇒ ⇒ 「现在起第九次（代码态 `c15dfeb`）」= **与已登记的第九次同代码态** ⇒ ⇒ **是重跑还是编号回退，请 G4 自己在 §4.10.26 里写清** ⇒ ⇒ **理由**：上次「**29**」的串台（我把它误记成「G3 的 29 模块回归」）**就是从这种编号/口径回退里长出来的** ⇒ ⇒ **跨 lane 引用全量口径前，一律先问「哪个代码态、哪一轮」**。
 
 ---
 
