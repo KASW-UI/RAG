@@ -1289,8 +1289,9 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | **22300–22399** | **follow 域** | G1 | 🟡 **本层预分配**（当前**零使用** ⇒ 预占防将来撞车） | — |
 | **22400–22499** | **article 域** | G3 | 🟡 **本层预分配 · 域侧未落码** | — |
 | **22500–22599** | **hot 域** | G3 | 🟡 **本层预分配 · 域侧未落码** | — |
-| 22600–22999 | 预留 | — | — | — |
-| 49152–65535 | **OS 临时段** | — | 🔴 **禁占**（各域真容器测试必须自选专用段） | — |
+| 22600–22699 | comment-rpc 真 gRPC 进程测试（**迁出用**） | G3 | 🟡 **本层预分配 · 域侧未落码**（⇒ §4.10.19.7） | — |
+| **22700–22999** | **Testcontainers 宿主口段**（**全域共用，按域分子段** ⇒ §4.10.39.2） | 全域 | 🟡 **本层预分配 · 域侧未落码** | — |
+| 49152–65535 | **OS 临时段** | — | 🔴 **禁占**（各域真容器测试必须自选专用段）<br>🔴 **2026-10-27 实测新增禁占理由**：Testcontainers 的**随机**宿主口就落在这一段（= Docker published 段，`sysctl net.inet.ip.portrange` 实测 `first=49152 last=65535`）⇒ ⇒ **真容器测试不得继续用 Testcontainers 默认随机口** | — |
 
 > ⚠️ **「预分配」≠「已落码」** ⇒ 域侧照 §4.10.19.3 取自己的段、复制 `RealTomcatPort`（favorite 域那份是**模板**）、改两个常量 + 补一条 `bindsToDedicatedPortSegment` 守门即可。
 > ⚠️ **comment 域不分配**：实测**零** `RANDOM_PORT`（全部 MockMvc）⇒ ⇒ **N/A，不是「漏了」**（G3 域台账 A5 行自己也写了 N/A）⇒ ⇒ 将来若 comment 域起真容器测试，从 **22600+** 预留段里取。
@@ -2187,6 +2188,35 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 
 **④ 一条自证教训（同一个坑的第 N 次 —— 「零命中」先复核判据）**
 - 查本表那条 `tools/grpc-contract-probe/favorite/run.sh:186` 的出处时，**第一次 grep 零命中** ⇒ 若就此判定「引用已失效」就会**误订正**一条**仍然有效**的出处 ⇒ ⇒ 复核后确认：**文件仍在、出处仍在**（`:186` = `FIRST, LAST = 21400, 21599`）⇒ ⇒ **零命中的真因是 `head -10` 把命中截断了**（管道 + 截断）⇒ ⇒ ⇒ **「零命中」必须先复核判据**（管道/过滤/`head` 截断/大小写/路径写法），**再**下结论 ⇒ ⇒ 这与「**跨树零命中 ≠ 不存在**」同族，但这次是**同树内的 grep 截断** ⇒ ⇒ **更隐蔽**：跨树那条至少有「树 + commit」可核，本条连树都不用换。
+
+#### 4.10.39 🔴🟢 **G1 §34 的根因归属订正 ＋ Testcontainers 宿主口段分配**（2026-10-27 · **本层零落码** · 只登记 + 预分配段）
+
+**① 🔴 订正 G1 §34.4 的根因归属（「25 个 Testcontainers 残留 ⇒ Ryuk 没跑 ⇒ 没人清」**不成立**）**
+
+| 项 | 说明 |
+|---|---|
+| G1 的原写法 | 「`docker ps` 实测 **47 个容器在跑**，其中 `postgres:16-alpine` **18** 个 ＋ `redis:7-alpine` **7** 个 = **25 个 Testcontainers 残留**」⇒ ⇒ 「`docker ps --filter name=ryuk` ⇒ **零命中** ⇒ ⇒ Ryuk **根本没在跑** ⇒ ⇒ 残留**没人清**」⇒ ⇒ 由此推出修法①「固定 Testcontainers 宿主口段」 |
+| **实测反证（本层只读普查，不删任何容器）** | ① **47 个容器**成立；但 **23 个是固定名**：`ddl-users-pg` / `ddl-task-pg` / `ddl-comment-pg` / `ddl-favorite-pg` / `ddl-follow-pg` / `ddl-hot-pg` / `ddl-like-pg` / `ddl-article-pg` / `ddl-message-pg` · `difftest5k-postgres` / `difftest5k-redis` · `cdifftest-postgres` / `cdifftest-redis` / `cdifftest-kafka` · `uudifftest-postgres` / `uudifftest-redis` / `uudifftest-redis-bl` · `taskprobe-postgres` · `userprobe-postgres` / `userprobe-redis` · `msg_ddl_pg` · `rag-l12-pg`<br>⇒ ⇒ **Testcontainers 生成的容器名是随机的**（本机唯一确凿的一例：**`sad_napier`**）⇒ ⇒ ⇒ **这 23 个固定名容器不是 Testcontainers 建的** ⇒ ⇒ ⇒ **Ryuk 只回收带 Testcontainers 标签的容器 ⇒ 管不到它们 ⇒ 「开 Ryuk」解决不了这批残留**<br>② 它们的创建方是 **`tools/difftest/**` 与探针脚本**（固定名 + `docker run` / compose）：`tools/difftest/ddl-parity.sh:334`（`ddl-${domain}-pg`）· `tools/difftest/run.sh:71-73`（`DIFTEST_CONTAINER_PREFIX` ⇒ `${prefix}-postgres` / `${prefix}-redis`）· `tools/difftest/exp-difftest-grpc-user9.sh:52-53`（`uudifftest-*`）· `tools/difftest/parity-task-kafka.py:32-33`（`taskprobe-*`）<br>③ 这些脚本**本来有收尾**：`tools/difftest/run.sh:218-229`（`cleanup()` + `trap cleanup EXIT`）· `ddl-parity.sh:354`/`:450`（`docker rm -f`）⇒ ⇒ ⇒ **所以残留来自「收尾路径没跑到」**（进程被 `kill` ⇒ `trap` 不执行；或 `--keep` 显式保留 ⇒ `run.sh:219-221` 自己就写了「`--keep`：保留容器与进程。**手动收摊**」）⇒ ⇒ ⇒ **真因 = 脚本收尾不覆盖异常路径**，**不是**「Ryuk 没跑」 |
+| **⇒ 计数口径订正** | 🔴 **「25 个 Testcontainers 残留」要订正** —— 那 25 个是**按镜像统计**（`postgres:16-alpine` 18 ＋ `redis:7-alpine` 7）⇒ ⇒ **把 difftest/探针的自建容器与 Testcontainers 容器混在一个数里** ⇒ ⇒ ⇒ 本机 Testcontainers 随机名容器**只有 1 个** ⇒ ⇒ ⇒ **修法方向要拆开**：<br>① **占口的**（`tools/difftest/**` ＋ 探针）⇒ ⇒ **收尾必须覆盖异常路径**（`trap` 不覆盖 `SIGKILL`）⇒ ⇒ 建议「启动时先回收**同名前缀**的旧容器」⇒ ⇒ **整合者面 ＋ 域侧探针**<br>② **被撞的**（Testcontainers 随机口）⇒ ⇒ 落在 OS 临时段 ⇒ ⇒ **域侧真容器测试改固定宿主口** ⇒ ⇒ **这一条**才是 G1 的修法① ⇒ ⇒ **段由本层分配**（见 ②） |
+| **⇒ ⚠️ 「Ryuk 零命中」本身也不是「没跑过」** | Ryuk 是**随用随起、随 JVM 退出而回收**的容器 ⇒ ⇒ **此刻没有 Testcontainers JVM 在跑 ⇒ 本就该零命中** ⇒ ⇒ ⇒ **「零命中」⇒「没跑过」是错的推理**（与「跨树零命中 ≠ 不存在」同族，但这次是**同机、跨时刻**）⇒ ⇒ ⇒ ⇒ G1 §34 的**现象**与**三步判据**（一次失败不判回归 ＋ 单独复跑绿 ＋ 环境普查）**仍然成立** ⇒ ⇒ **本层只订正「根因归属」这一格，不动其余结论** |
+
+**② 🟢 Testcontainers 宿主口段分配（**本层的 A5 职责** —— 「段表」这一格归 global 协调）**
+
+| 项 | 说明 |
+|---|---|
+| 为什么必须**按域分子段** | Testcontainers **没有「宿主口段」这个概念** —— 实测 `TestcontainersConfiguration` 的配置项里**零个** `port` 相关项 ⇒ ⇒ 「指定一段」**只能逐容器固定口** ⇒ ⇒ ⇒ ⇒ 若全域共用一段 ⇒ ⇒ **域与域之间会互相撞**（4 个 lane 并发）⇒ ⇒ ⇒ ⇒ **必须按域分子段** —— 这正是段表的作用 |
+| 机制可行性（**已核实的边界**） | ✅ Testcontainers **2.0.5**（版本由 `spring-boot-starter-parent` 的 `testcontainers.version` 管理）⇒ ⇒ `org/testcontainers/containers/FixedHostPortGenericContainer.class` **在本机 jar 里存在**（`~/.m2/repository/org/testcontainers/testcontainers/2.0.5/testcontainers-2.0.5.jar`）⇒ ⇒ **「固定宿主口」在仓内可落地**<br>⚠️ **本层未实测的两层**：① `PostgreSQLContainer` **不能直接换成** `FixedHostPortGenericContainer`（后者不带 PG 的初始化/JDBC 支持）⇒ ⇒ 正确形态应是 `PostgreSQLContainer` ＋ `withCreateContainerCmdModifier(...)` 显式绑口；② **「显式绑口后 `getMappedPort()` 是否返回那个固定口」未实测** ⇒ ⇒ ⇒ **域侧落地时必须先写一条探针验证，不能照抄** |
+| **分配结果（`22700–22999`，按域分子段）** | `22700–22729` **users 域**（G1）· `22730–22759` **follow 域**（G1）· `22760–22789` **message 域**（G2）· `22790–22819` **like 域**（G2）· `22820–22849` **task 域**（G2）· `22850–22879` **article 域**（G3）· `22880–22909` **comment 域**（G3）· `22910–22939` **favorite 域**（G3）· `22940–22969` **hot 域**（G3）· `22970–22999` **预留**（30 口）<br>⇒ ⇒ **每域 30 口** ⇒ ⇒ 够一个域并行起 PG + Redis + Kafka（≈ 4~6 个容器）且有余量 ⇒ ⇒ **全部在 `49152–65535` 之外** ⇒ ⇒ **不与任何已占段/预分配段重叠** |
+| 落点 | **域侧改自己的测试类**（`@Container PostgreSQLContainer` ⇒ 显式绑口）⇒ ⇒ **本层只分配段 + 记录规则 ⇒ 零落码**（§5.3d） |
+
+**③ 🔴 一条**跨 lane**的诊断判据（来自 G1 §34.5 第 3 条 ⇒ 本层采纳为**全局判据**）**
+> **「PG 连接失败」先问「那个端口上回应我的到底是不是 PG」** —— `EOFException` 出现在 `enableSSL` ⇒ **强烈指向「对端不是我预期的服务」**，**不要**直接读成「PG 挂了」⇒ ⇒ 否则会去查一个根本没坏的东西。
+> ⇒ ⇒ 本层记成**共享环境判据**（适用全部 4 个 lane 的任何「连库失败」读法）⇒ ⇒ 与 §4.10.37 的「等待条件弱于断言条件 ⇒ 假红」同族：**症状先归因到「那层真正能观测到的东西」**。
+
+**④ 🔴 共享面待整合者处理（**本层只登记 · 不代改**）**
+- `tools/difftest/ddl-parity.sh:66-79` 的 `port_for()` ⇒ **固定口 `55560–55569`**（含 `*) 55567` 兜底）⇒ ⇒ **整段落在 OS 临时段 `49152–65535` 内** ⇒ ⇒ **Testcontainers 的随机口与它是同一个池子** ⇒ ⇒ **这是一条独立于「残留是否清理」的撞车路径** ⇒ ⇒ 建议迁出（⇒ 本层**预留 `23000–23099` 但未分配**）⇒ ⇒ **落点 = `tools/difftest/**`（整合者面）⇒ 本层不改**
+
+**⑤ 本层这一条** | **零落码**：① 根因归属**已订正**（Ryuk 方向作废）② 段**已分配**（本层职责）③ 域侧改测试类 = 各域 ④ difftest 收尾 = 整合者
 
 ## 5. 交付物清单
 
