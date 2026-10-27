@@ -2149,7 +2149,7 @@ go-zero@v1.10.2/rest/server.go:222-233     WithMiddleware ⇒ middleware(route.H
 - 该类**本来就在 user-api 域内**（`service/users/user/user-api/.../config/`）⇒ **不是共享层文件**
   ⇒ 复制到 admin-api **完全在 G1 写权内**（`service/users/{user,admin}/**`）
   ⇒ **不需要等 G4、不阻塞本波**（AGENTS.md §5.3e「**域侧能自修的域侧修**」）；
-- **共享层收编**（三份副本并成一个自动配置）是**可选的后续收敛** ⇒ 已作为反馈单派给 G4
+- **共享层收编**（三份副本并成一个自动配置）是**可选的后续收敛** ⇒ 已作为反馈单派给 G4<br>🟢 **2026-10-27 订正：收编【已完成】** —— `admin-api` 那份域内副本**已删除**，共享层 `GoStyleRedisClientAutoConfiguration` 接管（见 [`../vs-common.md` §26](../vs-common.md)）⇒ ⇒ **本行的「可选的后续收敛」是历史状态**
   ⇒ **G4 落码时应当删除这三份域内副本**，避免双份配置。
 - ⚠️ **本类只改「断连」这一种故障，不改「连着但不回包」**：后者两侧**都是 503**
   （Go 的 `ReadTimeout` 默认 3s ⇒ 同样撞预算；RAG 同样等满 `timeout: 3s`）
@@ -2208,3 +2208,4 @@ go-zero@v1.10.2/rest/server.go:222-233     WithMiddleware ⇒ middleware(route.H
 3. **只覆盖黑名单读路径**：admin-api 的 Redis **只有黑名单这一处用途**（`AdminJwtAuthInterceptor:201`）
    ⇒ 本条覆盖了 admin-api 的**全部** Redis 故障面
 4. **域内副本是过渡形态**：G4 收编后要回来删副本（见 §13.3）
+   🟢 **2026-10-27：已回来删掉了** —— `admin-api` 的域内副本已删除，共享层接管（见 [`../vs-common.md` §26](../vs-common.md)）⇒ ⇒ **本条是历史修法，不是现状**

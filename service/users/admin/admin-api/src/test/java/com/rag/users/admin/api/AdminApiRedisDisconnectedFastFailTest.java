@@ -11,7 +11,9 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.data.redis.autoconfigure.LettuceClientOptionsBuilderCustomizer;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -27,6 +29,7 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -83,7 +86,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <h2>修法</h2>
  *
- * <p>{@code RedisDisconnectedBehaviorConfig} 把 Lettuce 的断连行为设成
+ * <p>🔴 <b>2026-10-27 共享层收编后改写</b>：本组件的断连策略<b>已不再</b>由域内的
+ * {@code RedisDisconnectedBehaviorConfig} 提供（那份<b>已删除</b>）⇒ 改由<b>共享层</b>的
+ * {@code GoStyleRedisClientAutoConfiguration} 提供（经 {@code AutoConfiguration.imports} 清单注册
+ * ⇒ 本组件启动类扫 {@code com.rag.common} 时它会被 {@code AutoConfigurationExcludeFilter}
+ * 排除出组件扫描 ⇒ <b>只经清单注册一次</b>）⇒ 它把 Lettuce 的断连行为设成
  * {@link ClientOptions.DisconnectedBehavior#REJECT_COMMANDS}
  * ⇒ {@code DefaultEndpoint:314} 直接返回
  * {@code RedisException("Currently not connected. Commands are rejected.")}
@@ -123,12 +130,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 证明不了「断连时命令被排队还是被拒绝」——
  * 那正是 §3.3 说的「绿测试测不到真机制」。
  *
- * <h2>本类的可证伪性</h2>
+ * <h2>本类的可证伪性（2026-10-27 共享层收编后改写）</h2>
  *
- * <p>把 {@code RedisDisconnectedBehaviorConfig} 里的 {@code REJECT_COMMANDS} 改回 {@code DEFAULT}，
- * 用例 2 应当<b>红</b>，且失败消息里的实测耗时应是 <b>≈3000ms</b>（挂到 commandTimeout）
- * 而不是 &lt;1500ms ⇒ 说明这条守卫真的在盯「快速失败」这件事，
- * 而不是「Bean 存在」这种假断言。
+ * <p>域内副本已删 ⇒ 变异目标落在<b>共享层</b> ⇒ ⚠️ <b>共享层在 G4 写权面 ⇒ 域侧不能改它的源码做变异</b>
+ * ⇒ ⇒ 域侧的变异走<b>运行期排除</b>：给本测试加属性
+ * {@code spring.autoconfigure.exclude=com.rag.common.redis.GoStyleRedisClientAutoConfiguration}
+ * ⇒ ⇒ 共享层那份被排除 ⇒ 容器里 customizer 数量 = 0 ⇒ 断连行为回落 {@code DEFAULT}
+ * ⇒ ⇒ <b>用例 1 的机制腿必须红</b>（读到 DEFAULT 而不是 REJECT_COMMANDS）
+ * ⇒ ⇒ 用例 2 也应当<b>红</b>（命令被排队 ⇒ 失败消息里的实测耗时应是 <b>≈3000ms</b>，挂到 commandTimeout，
+ * 而不是 &lt;1500ms）⇒ 说明这条守卫真的在盯「快速失败」这件事，
+ * 而不是「Bean 存在」这种假断言 —— 也真的在盯「<b>共享层那份</b>有没有生效」。
+ * <p>（原域内变异：把域内 {@code RedisDisconnectedBehaviorConfig} 里的 {@code REJECT_COMMANDS} 改回 {@code DEFAULT}。）
  */
 @SpringBootTest(
         classes = AdminApiApplication.class,
@@ -201,6 +213,15 @@ class AdminApiRedisDisconnectedFastFailTest {
     private LettuceConnectionFactory connectionFactory;
 
     /**
+     * 上下文句柄 —— 用来断言「容器里<b>恰好一份</b> customizer，且就是共享层那一份」。
+     *
+     * <p>⚠️ 这是<b>收编的验收判据</b>（2026-10-27 · G1 lane · 共享层收编落码）：
+     * 域内那份 {@code RedisDisconnectedBehaviorConfig} 已删 ⇒ 断连策略<b>只可能</b>来自共享层。
+     */
+    @Autowired
+    private ApplicationContext applicationContext;
+
+    /**
      * 用例 1：<b>断连策略确实被装配进去了</b>，且 Redis 此刻是通的。
      *
      * <p>⚠️ 这一条只是「配置层」的断言，<b>不能单独</b>当作「机制生效」的证据
@@ -245,6 +266,24 @@ class AdminApiRedisDisconnectedFastFailTest {
                         + "Lettuce 的 DEFAULT + autoReconnect=true 会把断连期间的命令**排队**"
                         + "（DefaultEndpoint:149 / :837-852），挂到 commandTimeout(3s) ⇒ HTTP 预算先耗尽 ⇒ 503，"
                         + "而 Go 是快速失败 ⇒ fail-open 200。");
+
+        // ── bean 身份：容器里必须**恰好一份** customizer，且就是共享层那一份 ──
+        // ⚠️ 这两条是**收编的验收判据**（2026-10-27 · G1 lane）：域内副本已删 ⇒
+        //   断连策略只可能来自共享层的 GoStyleRedisClientAutoConfiguration
+        //   ⇒ 「恰好一份」= 收编真的发生了（不是两份叠加，也不是一份都没）
+        //   ⇒ 「名字是 goStyleRedisClientOptionsCustomizer」= 来的确实是共享层那一份
+        // ⇒ 本组件的启动类扫 `com.rag.common` 时，共享层那份会被
+        //   `AutoConfigurationExcludeFilter` 排除出组件扫描 ⇒ 只经 `AutoConfiguration.imports` 注册一次
+        Map<String, LettuceClientOptionsBuilderCustomizer> customizers =
+                applicationContext.getBeansOfType(LettuceClientOptionsBuilderCustomizer.class);
+        assertEquals(1, customizers.size(),
+                "容器里必须**恰好一份** LettuceClientOptionsBuilderCustomizer：实测 " + customizers.keySet() + "。"
+                        + "多于一份 ⇒ 域内副本没删干净（两份都在 ⇒ 后续每次改动都要改两处）；"
+                        + "少于一份 ⇒ 共享层那份没被装配（清单没被读 / 被 @ConditionalOnMissingBean 误退让）"
+                        + "⇒ **断连行为回落 DEFAULT ⇒ 命令被排队**。");
+        assertTrue(customizers.containsKey("goStyleRedisClientOptionsCustomizer"),
+                "那一份必须是共享层的 GoStyleRedisClientAutoConfiguration"
+                        + "（bean 名固定为 goStyleRedisClientOptionsCustomizer）⇒ 实测 " + customizers.keySet());
 
         // ── 命令超时 / 连接超时的**消费层**锚点 ─────────────────────────
         // ⚠️ 判据必须是 `getClientConfiguration().getCommandTimeout()`：
@@ -321,7 +360,8 @@ class AdminApiRedisDisconnectedFastFailTest {
                         + "预算 " + FAST_FAIL_BUDGET_MS + "ms。"
                         + "若接近 3000ms ⇒ Lettuce 又在断连期间**排队**等重连 ⇒ "
                         + "请求会先撞上 HTTP 3s 预算 ⇒ 变成 503，而 Go 是 200（fail-open）。"
-                        + "检查 RedisDisconnectedBehaviorConfig 是否被装配。"
+                        + "检查共享层 GoStyleRedisClientAutoConfiguration 是否被装配"
+                        + "（AutoConfiguration.imports 清单是否生效）。"
                         + " 连接共享模式(shareNativeConnection)=" + connectionFactory.getShareNativeConnection() + "；"
                         + " 异常链：" + causeChain(thrown));
     }

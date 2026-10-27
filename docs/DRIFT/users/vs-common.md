@@ -1326,6 +1326,10 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 
 ### 16.2 🔴 **删除的前置判定：本轮【不能】执行**（不是保守，是前置未满足）
 
+> 🟢 **2026-10-27 订正**：本节的**结论**（当轮不能删）当时正确，但**执行方式**后来变了 ——
+> ⇒ **不需要等共享层先进主干**，只需**把 G4 分支合进本树** ⇒ ⇒ 收编**已完成**（见 §26）。
+> ⇒ ⇒ **本节以下的「不能执行」是历史快照，不是现状。**
+
 ⇒ 实测：`git merge-base --is-ancestor 5564c27 do-my-own-gh` ⇒ **NO**（tip `cec7131` 也未进）⇒ ⇒ **本树里没有 `GoStyleRedisClientAutoConfiguration`**。
 ⇒ ⇒ **现在删 = 不是「双份变一份」，而是「零份」** ⇒ `REJECT_COMMANDS` 整个消失 ⇒ 退回本轮修掉的漂移：
 - **api 侧**：断连排队 3s ⇒ 撞 HTTP 3s ⇒ **503**（Go 是 fail-open **200**）；
@@ -1487,6 +1491,10 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 
 ### 18.6 🔴 **Redis 收编删除的前置复检：仍未满足 ⇒ 5 份域内副本继续保留**
 
+> 🟢 **2026-10-27 订正：本节的前置判定已被【执行方式】推翻 ⇒ 收编【已完成】（见 §26）**
+> ⇒ ⇒ **执行方式 = 把 G4 分支合进本树**（而不是等共享层先进主干）⇒ ⇒ **5 份域内副本已删除**。
+> ⇒ ⇒ **本节以下的「仍未满足 / 继续保留」是历史快照，不是现状。**
+
 - 实测我树 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` ⇒ **只有 2 条**：`com.rag.common.observability.GoStyleOtelAutoConfiguration` · `com.rag.common.http.GoStyleJsonContentTypeAdvice` ⇒ ⇒ **无 `GoStyleRedisClientAutoConfiguration`**。
 - ⇒ ⇒ 与 §12.1 / §16.2 的判定一致：**删除前置仍未满足** ⇒ ⇒ **现在删 5 份 = `REJECT_COMMANDS` 整个消失** ⇒ ⇒ **本轮仍不执行删除**（等 G4 分支进主干 → 并回我分支 → 一次做完「删 5 份 + 重写 5 份守门」）。
 - ✅ **G3 侧的「0 份域内副本 ⇒ 收编零动作」我认可**（它域内 `LettuceClientOptionsBuilderCustomizer|RedisDisconnectedBehaviorConfig|DisconnectedBehavior` 在源码里 0 命中）⇒ ⇒ **收编在我域是 5 份、G3 域 0 份** ⇒ ⇒ **两边都要在合并时各自复验「共享层那份真的生效」**。
@@ -1537,3 +1545,132 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 - ⇒ ⇒ **剩下的唯一落点 = 销号签字**（`docs/Intentional_Deviations/**` ⇒ **不在 G1 写权面**，也不在 G4 写权面）⇒ ⇒ **需要整合者拍板** ⇒ ⇒ **G4 不必为这条再做任何事**。
 - ⚠️ **机制教训（跨 lane 协作的通用坑）**：**发出去的消息不会自己更新** ⇒ ⇒ 我改了自己的结论（V-002 订正）⇒ ⇒ **对方树上的台账是旧的**（实测：G4 树里 `docs/DRIFT/users/vs-common.md` **连「V-002」都零命中** ⇒ 它那份是整合者 sweep 那版 ⇒ **完全不含 G1 lane 的任何内容**）⇒ ⇒ **对方很可能还在按我更早那条消息里的旧单等我** ⇒ ⇒ **改了结论必须主动通知，不能指望对方去读文件**。
 
+
+## 26. 🆕 **共享层 Redis 收编【已落码】（2026-10-27 · G1 lane）** —— 前置怎么被满足 ＋ 一条**方法论订正**
+
+### 26.1 🔴 **前置不是「等主干」，是「把 G4 分支合进本树」** —— 实测零冲突
+
+- 我域原判（§16.2 / §18.6）：**「删除的前置 = 共享层那份先进主干 + 并回本树」⇒ 本轮不能执行**。
+- ⇒ **本轮实测把这条判据的【执行方式】推翻了**（**结论不变，前提变了**）：
+  - `git merge --no-ff --no-commit align/g4-service-common`（tip `dcd0706`，51 笔不在主干）
+  - **merge-base `a282012`** · **冲突面实测 0**（`git diff --name-only --diff-filter=U` 空）
+  - **合并态下 5/5 门禁全 EXIT=0**（lane-ownership / role-model / coupling / doc-links / ledger-count）
+  - ⇒ **合并后 `AutoConfiguration.imports` = 6 条**（合并前 **2 条**）⇒ 共享层那份到位 ⇒ **收编删除的前置在本树内即可满足**
+- ⇒ ⇒ **落点从「等整合者合主干」变成「本 lane 自行合并 G4 分支」** ⇒ 与 G2（`37816ca`）/ G3（`cd893d1`）**同一步骤** ⇒ ⇒ **三棵树现在都有共享层**。
+- ⚠️ **这不改变 C7 的硬前提**：收口回归**仍必须**在所有 lane 合入主干后跑（§13.3）—— **合并 G4 分支 ≠ 合并进主干**。
+
+### 26.2 🟢 落码前的**逐字核对**（不采信转述）
+
+| 项 | 共享层那份 | 我域 5 份副本 | 判定 |
+|---|---|---|---|
+| 注解 | `@AutoConfiguration` + `@ConditionalOnClass` + `@Bean` + **`@ConditionalOnMissingBean`** | `@Configuration` + `@Bean`（**无** `@ConditionalOnMissingBean`） | ⇒ **共享层那份会因域内副本在场而退让**（遮蔽非叠加） |
+| bean 名 | `goStyleRedisClientOptionsCustomizer` | `goStyleRedisDisconnectedBehavior` | 收编后**改名** ⇒ 守门必须按新名断言 |
+| customizer 体 | `builder -> builder.disconnectedBehavior(REJECT_COMMANDS)` | **同一行表达式** | ✅ **逐字同值** |
+| `timeoutOptions` | **零触碰** | **零触碰** | ✅ 同值 |
+
+⇒ ⇒ **删除副本对行为零变化**（不是「差不多」，是**同一行表达式**）⇒ ⇒ 收编的净效果 = **把断连策略的维护点从 5 处收到 1 处**。
+
+### 26.3 🟢 落码动作清单（已完成）
+
+1. **删 5 份域内副本**：`user-api` / `user-rpc` / `admin-api` / `admin-rpc` / `follow-api` 各 1 份 `config/RedisDisconnectedBehaviorConfig.java`。
+2. **改 5 份守门**，各补 **2 条 bean 身份断言**（收编的验收判据）：
+   - `context.getBeansOfType(LettuceClientOptionsBuilderCustomizer.class)` ⇒ **`size() == 1`**；
+   - 该 map 的 key 含 **`goStyleRedisClientOptionsCustomizer`**。
+3. **2 份 rpc 守门**：`@Import(域内副本)` ⇒ `@ImportAutoConfiguration(GoStyleRedisClientAutoConfiguration.class)`。
+4. **3 份 api 守门**：**不改任何注解**（真实 `@SpringBootApplication` ⇒ 清单自动生效）。
+
+⚠️ **框架机制必须验证实际生效（§3.3.1）** —— 落码前逐条实测「清单会真的被读」：
+
+| 判据 | 实测（6 个组件） |
+|---|---|
+| 启动类含 `@EnableAutoConfiguration` | ✅ 6/6（`@SpringBootApplication` 自带） |
+| 无人重写 `AutoConfigurationExcludeFilter` / `TypeExcludeFilter` | ✅ **零命中** |
+| yaml 无 `spring.autoconfigure.exclude` | ✅ **零命中** |
+| api 组件扫 `com.rag.common` ⇒ 共享层那份会被 `AutoConfigurationExcludeFilter` 排除出扫描 | ✅ ⇒ **只经清单注册一次**（不双重注册） |
+
+### 26.4 🔴 **rpc 侧与 api 侧的装配形态不同 ⇒ G4 台账「连带删 `@Import`」这条不够**
+
+- G4 `docs/DRIFT/global/vs-common.md:1513` 写的是「删掉 `RedisDisconnectedBehaviorConfig` 类 ⇒ `@Import` 指向不存在的类 ⇒ 编译断裂 ⇒ **必须连带删 `@Import`**」。
+- ⇒ **「删」不够**：2 份 rpc 守门用的是 `@SpringBootConfiguration`（**不含** `@EnableAutoConfiguration`）
+  ⇒ ⇒ **`AutoConfiguration.imports` 清单根本不会被读**
+  ⇒ ⇒ 单纯删掉 `@Import` ⇒ **容器里 customizer 数量 = 0** ⇒ **守门静默测不到任何断连策略**
+  ⇒ ⇒ 正确处置 = **换成 `@ImportAutoConfiguration(GoStyleRedisClientAutoConfiguration.class)`**（已实施）。
+- ⇒ ⇒ **api 侧更进一步**：3 份 api 守门用真实 `@SpringBootApplication` ⇒ **连注解都不用改**。
+- ⚠️ **台账订正（follow 侧）**：`docs/DRIFT/follow/vs-common.md` §11.2 原写「`FollowApiRedisDisconnectedFastFailTest` 是『显式 `@Import` 域内副本』⇒ 副本一删就编译不过」
+  ⇒ ⇒ **实测该守门 `@Import` 零命中** ⇒ **该前提不成立**（我把 rpc 侧的结构套到了 api 侧）⇒ ⇒ **已订正**。
+  ⇒ ⇒ **教训**：**同一机制在不同组件上的装配形态可以不同** ⇒ 逐条实测，别拿一处的结构推另一处。
+
+### 26.5 🔴🔴 **方法论订正：`-pl` 不带 `-am` ⇒ 跑的是本地仓库里的旧 `com.rag:common` ⇒ 「共享层合入对我域零回归」原本【未被证明】**
+
+- **现象**：第一次跑收编后回归 ⇒ `MVN_EXIT=1`，编译错误 **`程序包 com.rag.common.redis 不存在`**。
+- **根因**：`mvn -pl <6 模块> test`（**不带 `-am`**）⇒ reactor 里**只有那 6 个模块** ⇒ `com.rag:common` **从本地仓库解析** ⇒ 用的是 `~/.m2/.../common-0.0.1-SNAPSHOT.jar`（**12:00 的旧 jar**）。
+- **实测该 jar 的代码态**：`com/rag/common/redis/` 条目 = **0**；G4 新增的 4 个类（`GoStylePathNormalizingFilter` / `MybatisPlusOrderingBridgeAutoConfiguration` / `GoStyleRouteTemplateResolver` / `GoStyleRedisClientAutoConfiguration`）**全部不在** ⇒ ⇒ **那个 jar = 主干代码态**（主干也没有这些类）。
+- ⇒ ⇒ **订正上一轮的说法**：「合并后我域回归 667 条全绿 ⇒ 共享层合入对我域零回归」**不成立** —— 那次跑的是**主干代码态的共享层** ⇒ **共享层改动根本没进过我的测试 classpath**。
+- ⇒ ⇒ **限定条件（更精确，不是全盘否定）**：此前所有 `-pl` 不带 `-am` 的回归数字，**只在「共享层 = 主干代码态」这个前提下有效**（对**我域**行为而言成立）；**一旦共享层代码变了，就必须带 `-am` 重跑**。
+- ⇒ ⇒ **正确命令**（本轮用这条，全绿）：
+  ```bash
+  mvn -B -o -DargLine=-Xmx2g -am -pl <6 模块> test
+  ```
+- ⚠️ **与「lane 级全量 ≠ 别的 lane 的证据」同族，但更隐蔽**：那条是「**别的 lane 的树**不含我的提交」；这条是「**连共享层都不是我这份树**」⇒ ⇒ **两者都会让「跑绿」变成假绿** ⇒ ⇒ **判据：跑之前先问「这次回归的 classpath 上，`com.rag:common` 是哪一份？」**
+
+### 26.6 🟢 **收编后回归（带 `-am`）—— 我域 667 条 + 共享层 324 条，全绿**
+
+| 口径 | 数字 |
+|---|---|
+| 我域 6 组件（101 份 surefire XML 逐文件求和） | **667** / 0 failures / 0 errors / 0 skipped |
+| `service/common`（`-am` 带进来，61 份报告） | **324** / 0 / 0 / 0 |
+| 合计 | **991** 条 · **BUILD SUCCESS** · **06:47 min** |
+| 报告新鲜度 | 168 份本轮新生成 · **陈旧 0 份** |
+
+⚠️ **口径边界**：`-am` 把 18 个模块拉进 reactor（`admin-proto` / `users-common` / `common` / `user-proto` / `follow-common` …）⇒ ⇒ **「18 个模块」不是「测了 18 个域」** ⇒ 本域数字**只按 6 个组件的 surefire 目录统计**。
+
+### 26.7 🟡 **变异验证（收编后守门不是假绿）**
+
+| 变异 | 手段 | 预期 | 实测 |
+|---|---|---|---|
+| **MUT-1**（rpc） | 从 `UserRpcRedisDisconnectedFastFailTest` 去掉 `@ImportAutoConfiguration(GoStyleRedisClientAutoConfiguration.class)` | 守门必须红 | 🔴 **2/2 用例红** —— 用例 1 红在 `expected: <REJECT_COMMANDS> but was: <DEFAULT>`（机制腿）；用例 2 红在 `实测耗时 3013ms`（排队到 commandTimeout 3s）⇒ ⇒ **守门确实在盯「共享层那份」**。⚠️ **诚实注**：这次变异里**新加的两条 bean 身份断言没被执行到**（用例 1 先红就停 ⇒ 后续断言被跳过）⇒ ⇒ **必须再补 MUT-3 单独验它们**（见下） |
+| **MUT-2**（api） | 以 `-Dspring.autoconfigure.exclude=com.rag.common.redis.GoStyleRedisClientAutoConfiguration` 跑 `UserApiRedisDisconnectedFastFailTest` | 机制腿必须红（读到 `DEFAULT`） | 🔴 **2/2 用例红** —— 用例 1 红在 `expected: <REJECT_COMMANDS> but was: <DEFAULT>`；用例 2 红在 `实测耗时 3018ms` ⇒ ⇒ **api 侧的守门确实在盯「清单有没有把共享层那份装上」**。⚠️ **第一轮这个变异「没生效」**：我把属性塞进 `-DargLine='-Xmx2g -Dspring.autoconfigure.exclude=…'` ⇒ **属性没进测试 JVM** ⇒ 用例照常绿（2/2 绿）⇒ ⇒ **改用直接 `-D…` 才生效** ⇒ 又一个「**参数没到它该到的地方**」的实例 |
+| **MUT-3**（rpc · 验新断言） | 在 `UserRpcRedisDisconnectedFastFailTest` 里装回一个「域内副本替身」（`@Configuration` + 同名 bean `goStyleRedisDisconnectedBehavior` + 值仍是 `REJECT_COMMANDS`）⇒ 模拟「**收编没做**」 | **机制腿应仍绿**（副本也提供 `REJECT_COMMANDS`）＋ **名字断言必须红** | 🔴 **2 条用例只红 1 条** —— 红的正是**名字断言**：`那一份必须是共享层的 GoStyleRedisClientAutoConfiguration（bean 名固定为 goStyleRedisClientOptionsCustomizer）⇒ 实测 [goStyleRedisDisconnectedBehavior] ==> expected: <true> but was: <false>`；**机制腿仍绿** ⇒ ⇒ **证明「收编真的发生」这条判据能【单独】抓住「收编没做」**，而机制腿抓不住（它只知道值对）⇒ ⇒ **两条断言不是冗余，各有分工** |
+
+⇒ ⇒ **三个变异的分工（合起来才完整）**：**MUT-1 / MUT-2 证「机制腿有牙齿」（共享层那份没装 ⇒ 守门红）**；**MUT-3 证「收编判据有牙齿」（域内副本还在 ⇒ 名字断言红，而机制腿绿）** ⇒ ⇒ **只做 MUT-1 会漏掉「收编没做」这个真正的失败模式**。
+⇒ ⇒ **为什么 MUT-2 用「运行期排除」而不是改源码**：**共享层在 G4 写权面 ⇒ 域侧不能改它的源码做变异** ⇒ ⇒ 改走**运行期属性**（`spring.autoconfigure.exclude` 对清单注册的自动配置有效）⇒ ⇒ **零共享层写入**。
+⇒ ⇒ **MUT-1 的对照意义**：它证明 **rpc 侧的装配方式本身**是承重的 —— 若有人把 `@ImportAutoConfiguration` 换成「直接删掉」（G4 台账的原建议），**守门会立刻变红** ⇒ ⇒ 守门能挡住「静默测不到任何东西」。
+⇒ ⇒ **还原纪律**：三次变异全部用「**备份文件 + md5 双向校验**」还原（不用 `git checkout --`）⇒ 还原后 `git diff` 为空 ⇒ ⇒ **变异零残留**。
+
+### 26.8 🟡 **U+FFFD：我域台账里有 13 处「故意引述」⇒ 合并回主干后全仓清单 20 → 23 份**
+
+- **逐处核实（字节级，2026-10-27 14:1x 全树重扫）**：我域写权面 **4 份 / 14 处** U+FFFD ⇒ **真损坏 = 0**：
+  - `service/users/user/user-api/src/test/java/.../UserApiGoStyleBodyContentTypeTest.java:376`（1 处 · **被测对象**：`assertFalse(body.contains("�"))`）
+  - `docs/DRIFT/users/vs-common.md:1390`（1 处 · 引述上面那个被测对象）＋ `:1635`（1 处 · 本节再次引述同一被测对象）
+  - `docs/DRIFT/users/user/api.md:3452/:3453/:3457/:3458`（7 处 · 引述 + 记录「末字已不可恢复」）
+  - `docs/DRIFT/users/user/rpc.md:2459/:2461`（4 处 · 同上）
+- ⚠️ **一个自指的坑（写这条时才发现）**：**每在台账里引述一次那个坏字节，台账自己就多一处 U+FFFD** ⇒ ⇒ **登记本身会自我增长** ⇒ ⇒ 收敛办法 = **登记时不再引述新的坏字节**（只引行号 + 说明，不贴字节）⇒ 本节最终落在 **14 处**（其中 13 处在**台账**里，1 处在**源码**里）。
+- ⇒ ⇒ **我域那 3 份源码**（`AvatarHistoryService.java:32` / `AvatarHistoryIgnoresBodyTest.java:61` / `UserRpcLoginNullStatusReadsAsZeroTest.java:44`）**合并取我树版本**（我树 `0c2a902` 已修，字节级 0 命中）。
+- ⇒ ⇒ **合并回主干后，全仓清单 = 23 份 / 64 处**（主干 20 份 / 51 处 ＋ 我域带进的 **3 份台账 / 13 处**）⇒ ⇒ **复扫要比「文件清单」而不是比份数**。
+- ⚠️ **口径实例（这次的版本比上次更狠）**：**我树 18 份 / 52 处 vs 主干 20 份 / 51 处** ⇒ ⇒ **份数差 2、处数差 1、构成完全不同** ⇒ ⇒ 「总量相同 ≠ 构成相同」这条**不够用** —— 这次的教训是**两个口径（份数 / 处数）都会变**，⇒ ⇒ **只能比文件清单**。
+
+### 26.9 🟡 **12 个遗留对拍进程：改判【不杀】**（订正 §23 的清理计划）
+
+- **实测**：12 个全在（17h49m）· **合计 RSS 仅 0.3 GB**（java 侧 5 个 222 MB + go 侧 6 个 72 MB）⇒ **内存零成本**。
+- **决定性理由**：这 12 个（user-rpc / admin-rpc 的 Go 侧 + java 侧）**是我域 `DRIFT-USERRPC-V-014` / `DRIFT-ARPC-013` 两条 L3 条目升 L4 的唯一活体环境** ⇒ ⇒ **杀掉就把升 L4 的条件一起杀了** ⇒ ⇒ **保留**。
+- ⇒ **G2 域那 4 个**（message 侧）**一并保留**（G2 已发收工信号 ⇒ 不再有新需求；但它若要再对拍就还在）⇒ 已去函告知。
+- ⚠️ **订正一处**：上一轮我说「端口 Go 侧 24004/… + java 侧 64210/63081」⇒ **本轮用 `lsof` 按 jar 名 grep 落了空**（`lsof` 的 COMMAND 列是 `java` 不是 jar 名）⇒ ⇒ **端口清单未经 lsof 复核** ⇒ 记为**未验证**，不作证据。
+
+### 26.10 🔴 **收编的连带后果：`check-wave-coupling.py` 红了 —— 但红的是【共享面的文档快照】，不是本域代码**
+
+- **现象**：收编落码后跑 5/5 门禁 ⇒ **`check-wave-coupling.py` EXIT=1**（其余 4 个门禁全 EXIT=0）。
+- **守门报的具体漂移**：`common_radiation` ⇒ 文档快照 `None` vs 仓库现状 `['users']`。
+- **逐项复核（`--print` 与文档快照做 JSON 逐键对比）** ⇒ **差异精确到一项**：
+  | 快照项 | 结论 |
+  |---|---|
+  | `grpc_edges` | ✅ **一致** |
+  | `pom_dependents` | ✅ **一致** |
+  | `users_common_classes` | ✅ **一致** |
+  | `cross_domain_topics` | ✅ **一致** |
+  | `common_radiation` | 🔴 **只多一个键**：`'GoStyleRedisClientAutoConfiguration': ['users']` ⇒ 其余 **40 个类的辐射度全部逐值一致** |
+- ⇒ ⇒ **根因 = 收编的【预期后果】**：删掉 5 份域内副本 ⇒ 断连策略改由共享层那份提供 ⇒ ⇒ **`users` 域第一次出现在 `GoStyleRedisClientAutoConfiguration` 的辐射度里** ⇒ ⇒ **这正是「收编真的发生了」的正面证据**（不是缺陷）。
+- ⚠️ **口径注记（别把辐射度当受益面）**：`scan_common_radiation` 的判据是 **源码 `import` 语句**（扫 `service/**/src/**/*.java`，**含测试源码**）⇒ ⇒ `['users']` 的来源是**我域 5 份守门里的 `@ImportAutoConfiguration(GoStyleRedisClientAutoConfiguration.class)`**（测试源码 import）⇒ ⇒ ⚠️ **它不等于「运行时受益面」** —— 运行时受益面是 **10 个组件**（G4 `§4.10.24.6` 已列），其中 G2/G3 那些**零 import、靠自动配置清单命中**的组件**不会出现在辐射度里** ⇒ ⇒ **辐射度与受益面是两个口径，不要互相引用**。
+- 🔴 **落点不在本域写权面**：`docs/DRIFT/_cross/cross-domain-coupling.md` ∈ `check-wave-lane-ownership.py` 的 **`SHARED` 无人拥有清单**（⇒ 归整合者）⇒ ⇒ **G1 不能写**，且 **G4 也不能写**（同一份清单对所有 lane 一视同仁）⇒ ⇒ **只能由整合者更新**。
+- ⇒ ⇒ **守门自己给出的处置**也是「先更新文档快照（`--print`）再谈分波」⇒ ⇒ **新的期望值已实测出来**（`common_radiation` 加 `'GoStyleRedisClientAutoConfiguration': ['users']` 一项，其余不动）。
+- ⚠️ **为什么必须转派、不能拖**：**主干上的 `_cross` 快照仍是收编前的版本** ⇒ ⇒ 各 lane 合并回主干后，**主干上的守门仍然红** ⇒ ⇒ **必须在合并前由整合者更新**，否则「合并后全绿」这一步会被这个共享面卡住。
+- ⚠️ **口径纪律（我自己踩了一次）**：**判「报告是否陈旧」的阈值必须取自「本次运行的起止」，不能随手取一个钟点** ⇒ ⇒ 本轮我先取 `14:11`（以为 common 段在那之后跑）⇒ 误报「**65 份陈旧报告**」⇒ ⇒ 实测 common 段跑在 **14:10:01~14:10:46**（本轮 14:09:50 起）⇒ ⇒ **正确阈值下：168 份本轮新生成 / 0 份陈旧**。

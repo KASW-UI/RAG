@@ -652,7 +652,7 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 | 29 | `auth/FollowJwtSignatureVerifier.java` | `go-zero@v1.10.2/rest/handler/authhandler.go:45-84` + `go-zero@v1.10.2/rest/token/tokenparser.go:81-86` | 验签本体；claim 存**原始对象**（取值判定属业务层 `helper.go:13-33` ⇒ 5004 ⇒ HTTP 200）；Bearer 前缀大小写不敏感 | ✅ |
 | 30 | `auth/FollowJwtAuthPaths.java` | `internal/handler/routes.go:16-64` | **无 public 路径**（8 端点全 protected）；Filter 与 interceptor **共用同一份**判据 | ✅ |
 | 31 | `auth/FollowJwtVerificationResult.java` | （表达层载体） | 失败带**异常对象**而非标志位 ⇒ `@ExceptionHandler` 仍管得到 ⇒ 401 空 body 形状不变 | ✅ |
-| 32 | `config/RedisDisconnectedBehaviorConfig.java` | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:27-46`（go-redis `MaxRetries=3` ⇒ 快速失败） | 🔴 **Redis 断连 ⇒ 命令被拒而不是排队**（`REJECT_COMMANDS`）⇒ 断连时 fail-open **200** 而非 503（DRIFT-FOLLOW-012）<br>⚠️ **域内副本**（user-api 早有同款）⇒ **共享层收编归 G4** | ✅ |
+| 32 | `config/RedisDisconnectedBehaviorConfig.java` | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:27-46`（go-redis `MaxRetries=3` ⇒ 快速失败） | 🔴 **Redis 断连 ⇒ 命令被拒而不是排队**（`REJECT_COMMANDS`）⇒ 断连时 fail-open **200** 而非 503（DRIFT-FOLLOW-012）<br>⚠️ **域内副本**（user-api 早有同款）⇒ **共享层收编归 G4**<br>🟢 **2026-10-27 订正：收编【已完成】** —— 域内副本**已删除**，共享层 `GoStyleRedisClientAutoConfiguration` 接管（见 [`users/vs-common.md` §26](../users/vs-common.md)）⇒ ⇒ **本行的「域内副本」是历史修法，不是现状** | ✅ |
 
 ## 证据强度
 

@@ -354,17 +354,32 @@ installed_rank | version |      description       | success
 （`service/follow/follow-rpc/pom.xml:26` 明写「任何 redis/kafka starter 在本模块都属于『新增 Go 侧不存在的能力』，一律不引」）
 ⇒ **无副本 ⇒ 无删除动作**。
 
-### 11.2 🔴 连带项：**`FollowApiRedisDisconnectedFastFailTest` 是「显式 `@Import` 域内副本」** ⇒ 副本一删就**编译不过**
+### 11.2 🔴 **订正（2026-10-27 · 收编落码时实测）**：`FollowApiRedisDisconnectedFastFailTest` **不是**「显式 `@Import` 域内副本」⇒ 「副本一删就编译不过」**在本域不成立**
 
-⇒ 收编 = **删 1 份副本 ＋ 重写这 1 份守门的装配方式**（漏了后半段 ⇒ 编译红）。
+> **原写（本节落笔时的前提）**：「`FollowApiRedisDisconnectedFastFailTest` 是『显式 `@Import` 域内副本』⇒ 副本一删就编译不过
+> ⇒ 收编 = 删 1 份副本 **＋ 重写这 1 份守门的装配方式**（漏了后半段 ⇒ 编译红）」。
+>
+> 🔴 **实测推翻**：该守门是 `@SpringBootTest(classes = FollowApiApplication.class)`
+> ⇒ ⇒ **它<b>没有</b>任何 `@Import`**（实测：`grep "@Import"` **零命中**）
+> ⇒ ⇒ 域内副本是**被组件扫描**装进去的（`FollowApiApplication` 扫 `com.rag.follow.follow.api` + `com.rag.common`）
+> ⇒ ⇒ **删掉副本不会造成编译断裂**（编译断裂只发生在**显式 `@Import` 一个已删类**的地方）。
+> ⇒ ⇒ **本域（follow-api）真正需要改的只有第 2 条（补 bean 身份断言）**。
+> ⇒ ⚠️ **「副本一删就编译不过」在 users 域的 rpc 侧成立**（`UserRpcRedisDisconnectedFastFailTest` /
+> `AdminRpcRedisDisconnectedFastFailTest` 确实 `@Import` 了域内副本）⇒ ⇒ **我把 rpc 侧的结构套到了 api 侧**
+> ⇒ ⇒ **教训**：**同一机制在不同组件上的装配形态可以不同** ⇒ 逐条实测，别拿一处的结构推另一处。
 
-1. `@Import(com.rag.follow.follow.api.config.RedisDisconnectedBehaviorConfig.class)`
-   ⇒ 换成 `@ImportAutoConfiguration(com.rag.common.redis.GoStyleRedisClientAutoConfiguration.class)`；
-2. **补「收编真的发生」的两条断言**：
+⇒ **本域收编落码的实际动作（2026-10-27 · 已实施）**：
+
+1. **删** `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/config/RedisDisconnectedBehaviorConfig.java`；
+2. **补「收编真的发生」的两条断言**（`FollowApiRedisDisconnectedFastFailTest`）：
    - `context.getBeansOfType(LettuceClientOptionsBuilderCustomizer.class)` ⇒ **size == 1**；
    - 该 map 的 key 含 **`goStyleRedisClientOptionsCustomizer`**（共享层那份的固定 bean 名）。
+   ⇒ ⚠️ **api 侧不需要改任何注解** —— 但**必须核实「清单真的生效」**，判据三条：
+   ① 启动类含 `@EnableAutoConfiguration`（`@SpringBootApplication` 自带）；
+   ② **无人重写** `AutoConfigurationExcludeFilter` / `TypeExcludeFilter`（实测：`follow-api` **零命中**）；
+   ③ yaml 里**无** `spring.autoconfigure.exclude`（实测：**零命中**）。
 
-⚠️ **为什么必须补**：`@ConditionalOnMissingBean` 是「**遮蔽**不是**叠加**」⇒ 域内副本还在时共享层那份**根本不创建**
+⚠️ **为什么必须补第 2 条**：`@ConditionalOnMissingBean` 是「**遮蔽**不是**叠加**」⇒ 域内副本还在时共享层那份**根本不创建**
 ⇒ 此时「`REJECT_COMMANDS` 生效」**是真的**、但「**收编发生了**」**是假的**
 ⇒ ⇒ **只断言行为值 ⇒ 收编没做也绿** ⇒ 必须断言 **bean 身份**。
 

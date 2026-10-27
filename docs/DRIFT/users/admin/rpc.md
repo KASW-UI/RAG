@@ -4213,7 +4213,7 @@ catch (Exception e) { log.error("admin logout Redis setex failed", e);          
 |---|---|
 | **落码** | `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/config/RedisDisconnectedBehaviorConfig.java`（**新建** · 域内副本）：`LettuceClientOptionsBuilderCustomizer` ⇒ `REJECT_COMMANDS` |
 | **落点决策** | 载体文件住在**本域内** ⇒ **域侧自修**，不等 G4（判据：被改的那份文件本来住在哪） |
-| **共享层收编** | ✅ 已作为反馈单派给 G4（`GoStyleRedisClientAutoConfiguration` ＋ `AutoConfiguration.imports`）⇒ **共享层那份先合进各域的树**，才能删域内副本 ⇒ 现共 **5** 份域内副本（3 api + 2 rpc）⇒ **收编时须一并删掉**（否则双份配置） |
+| **共享层收编** | ✅ 已作为反馈单派给 G4（`GoStyleRedisClientAutoConfiguration` ＋ `AutoConfiguration.imports`）⇒ **共享层那份先合进各域的树**，才能删域内副本 ⇒ 现共 **5** 份域内副本（3 api + 2 rpc）⇒ **收编时须一并删掉**（否则双份配置）<br>🟢 **2026-10-27 订正：收编【已完成】** —— 5 份域内副本**已全部删除**（共享层那份接管；见 [`../vs-common.md` §26](../vs-common.md)）⇒ ⇒ **本行的「现共 5 份副本 / 收编时须一并删掉」是历史状态** |
 | **守门** | `AdminRpcRedisDisconnectedFastFailTest`（**新** · 2 例）：① `REJECT_COMMANDS` 真被装配 ＋ Redis 可达时写黑名单通；② 断连（**FIN** 形态）时写命令**快速失败**（<1500ms）**且**异常**不是** `RedisCommandTimeoutException` |
 | **故障注入** | ⚠️ **必须是 FIN 不是 RST**：`container.stop()` 发 RST ⇒ Lettuce 立刻失败 ⇒ **走不到** `disconnectedBehavior` 分支 ⇒ 两种配置耗时都是 1~13ms ⇒ **分不出** ⇒ 用**可控 TCP 透传代理**「先关监听口 ＋ 再半关闭已建立连接」复刻 live 形态 |
 | **变异验证** | `REJECT_COMMANDS` → `DEFAULT` ⇒ 用例 2 红（实测 ≈3000ms）⇒ **绿测试能变红** ✅ |

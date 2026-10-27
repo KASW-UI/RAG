@@ -3418,7 +3418,7 @@ RAG 侧的完整机制链（**消费点**）：
 | ID | 内容 | 本轮结论 | 为什么不动 |
 |---|---|---|---|
 | `DRIFT-USERAPI-013` | 过载保护：MaxConns 闸门粒度（Go per-route vs RAG 全局一个）+ breaker 按 URI 建 key ⇒ 键空间无界 | 仍待拍板 | 属**共享层**（影响全部 10 个 api 服务），不在本组件单侧判定权内 |
-| `DRIFT-USERAPI-014` 的**跨域推广** | `admin-api` 等其余 api 服务有**同款**黑名单中间件 ⇒ 大概率有同款漂移 | 🔴 **待推广** | `RedisDisconnectedBehaviorConfig` 现在只装在 user-api；**建议上移到 `service/common`** ⇒ 跨域改动，需拍板 |
+| `DRIFT-USERAPI-014` 的**跨域推广** | `admin-api` 等其余 api 服务有**同款**黑名单中间件 ⇒ 大概率有同款漂移 | 🔴 **待推广** | `RedisDisconnectedBehaviorConfig` 现在只装在 user-api；**建议上移到 `service/common`** ⇒ 跨域改动，需拍板<br>🟢 **2026-10-27 订正：已上移** —— 共享层 `GoStyleRedisClientAutoConfiguration` 落码，**5 份域内副本（含 user-api 那份）已全部删除**（见 [`vs-common.md` §26](../vs-common.md)）⇒ ⇒ **本行的「现在只装在 user-api / 待拍板」是历史状态** |
 | `DRIFT-USERAPI-009②` | 3s 超时作用域（observability 在鉴权之外） | 仍成立 | 属已签字 `SD-USERAPI-002` 的**未覆盖部分**（签字只覆盖 ① 可观测性） |
 
 ### 6. 回归
