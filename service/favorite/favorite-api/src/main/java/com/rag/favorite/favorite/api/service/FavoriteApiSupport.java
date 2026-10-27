@@ -413,12 +413,42 @@ public class FavoriteApiSupport {
      * <p><b>⇒ 本方法把「容器层的参数上限」与「应用层的参数上限」统一收敛到 Go 的出口</b>：
      * 无论是谁先发现「参数太多」，对外都只呈现 Go 的那一种形态（<b>200 + 5003</b>）。
      *
-     * <p><b>⚠️ 计数口径仍与 Go 差 1</b>（<b>未修</b>）：
-     * Tomcat 数的是<b>参数条目数</b>（key + value 合计），Go 的 {@code GetFormValues} 数的是
-     * <b>非空值个数</b> ⇒ 同名 2048 个值时，Tomcat 拒、Go 放行。
-     * ⇒ 修它要动 {@code server.tomcat.max-parameter-count}，而该值由<b>全仓</b>守门脚本
-     * {@code tools/difftest/check-tomcat-limits.py} 统一期望为 2048 ⇒ 需跨域拍板，
-     * <b>不</b>在 favorite 域单方面改。
+     * <p><b>🔴 2026-10-27 订正：本段旧文（「计数口径仍与 Go 差 1（<b>未修</b>）…修它要动
+     * {@code server.tomcat.max-parameter-count}，而该值由全仓守门脚本期望为 2048」）
+     * <b>已过期</b></b>：共享层 {@code GoStyleTomcatParameterLimitCustomizer} 现在<b>无条件</b>把
+     * 容器上限抬到 {@code MAX_PARAMETER_COUNT = 10001}（与 {@code mode} 无关）⇒ ⇒
+     * 「Tomcat 在 2048 处拒」那个旧窗口<b>已经不存在</b> ⇒ ⇒ 本方法<b>不必</b>再为
+     * 「Tomcat 抢在应用层之前拒」而存在。
+     *
+     * <p><b>残留窗口 = 恰好 10001 段</b>（🔴 <b>共享层面</b> ⇒ 本域<b>不</b>擅自改）：
+     * <ul>
+     *   <li><b>Go 侧</b>：Go 1.25 {@code net/url/url.go:1001} {@code const defaultMaxParams = 10000}
+     *       ＋ {@code :1019-1022} 的 {@code parseQuery}：段数 &gt; 10000 时<b>提前返回 error
+     *       且一个参数都不解析</b> ⇒ ⇒ 错误沿 go-zero {@code rest/httpx/util.go:25}
+     *       （{@code GetFormValues}）→ {@code rest/httpx/requests.go:57}（{@code httpx.Parse}）传播
+     *       ⇒ ⇒ <b>≥10001 段一律解析失败</b>。</li>
+     *   <li><b>RAG 侧</b>：Tomcat 的准入上限 = {@code maxParameterCount} <b>本身</b>
+     *       （{@code Parameters#addParameter}：{@code parameterCount >= limit} 即抛
+     *       ⇒ ⇒ 准入上限 = limit，<b>不是</b> limit+1）⇒ ⇒ 运行期上限 10001 ⇒ ⇒
+     *       <b>10001 段被放行</b>。
+     *       <br>🔴 <b>2026-10-27 真 Tomcat 实测</b>（favorite-api，输入 = 1 个非空值 + n 个空值
+     *       ⇒ 非空值恒为 1 ⇒ 应用层 2048 判据不触发 ⇒ 只量容器层）：
+     *       <br>· <b>10001 段</b> ⇒ <b>HTTP 200</b> + {@code {"code":1015,…}}（放行，<b>不是</b> 5003、也不是 400）
+     *       <br>· <b>10002 段</b> ⇒ <b>HTTP 200</b> + {@code {"code":5003,"msg":"参数错误"}}
+     *       （Tomcat 拒 ⇒ 经本方法转 {@link IllegalArgumentException} ⇒ {@code invalidParam()}）
+     *       <br>⇒ ⇒ <b>RAG 侧首个翻转点 = 10002 段</b>，而 <b>Go 侧 = 10001 段</b> ⇒ ⇒ <b>差一格</b>。</li>
+     * </ul>
+     *
+     * <p><b>修法与「拒绝形状」（供共享层裁定）</b>：把共享层的 {@code MAX_PARAMETER_COUNT} 从
+     * 10001 改成 <b>10000</b> ⇒ ⇒ Tomcat 在 10001 段就拒 ⇒ ⇒ 经本方法转成
+     * {@link IllegalArgumentException} ⇒ ⇒ {@code GlobalExceptionHandler#handleIllegalArgument}
+     * → {@code invalidParam()} ⇒ ⇒ <b>HTTP 200 + 5003</b> ⇒ ⇒ 与 Go 侧形状<b>逐字节相同</b>
+     * （Go 侧 handler 把<b>任何</b> {@code httpx.Parse} 错误都写成 200 + 5003，见真源
+     * {@code service/favorite/api/internal/handler/favorite/get_favorites_by_folder_handler.go:18-24}）
+     * ⇒ ⇒ <b>改这一个数即可同时闭合「差一格」与「拒绝形状」</b>。
+     * ⚠️ 前提 = <b>每个域都得有本方法这道转换</b>（本域有）；没有转换的域会退化成
+     * {@code handleAny} 的 500 + 5001 ⇒ ⇒ 属共享层裁定面。
+     *
      * <p>⚠️ <b>登记位置（2026-10-27 订正）</b>：本项<b>没有</b> {@code DRIFT-FAV-API-xxx} 条目
      * ⇒ 同一格已由 hot 域登记为 {@code DRIFT-HOTAPI-030}（AGENTS.md §3.5 把「Tomcat 三旋钮」
      * 列为 {@code global/cross-domain}）⇒ 逐条论证见

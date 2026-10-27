@@ -302,7 +302,7 @@ RAG 侧 **500 + JSON envelope**（`{code:5001,…}`）。
 
 | | 内容 |
 |---|---|
-| **🔴 订正（2026-10-27）** | 本格**已闭合**：共享层把容器上限**无条件**抬到 **10001**（G4 落码 `cd893d1`，类 `GoStyleTomcatParameterLimitCustomizer`）⇒ ⇒ 容器不再比 Go 更早拒 ⇒ ⇒ **「总「值」数 2049~10000 且非空值数 ≤2048」那一格：Go 放行 / RAG 也放行** ⇒ ⇒ 域侧动作（把域内守门从「必须落 5003」改成 Go 语义「放行 ⇒ 进业务层」）**已完成**（§14）<br>⇒ ⇒ **下面各行保留原文**（历史事实 + 当时的推理，不改写）⇒ 其中「残余窗口（精确）」那一行**已被本行订正**<br>⚠️ **仍在的下一格（不假装闭合）**：总「值」数**超过 Go 的 10000 段上限**时，Go 拒（400 + `net/url` 原文），而 favorite 域**没有**实现这道段数上限（域内判据只数**非空值**；共享层的段数闸门因 favorite = `OFF`（域自捕获）而**不装**）⇒ ⇒ 该区间两侧不一致 ⇒ 归 `DRIFT-HOTAPI-030` 的**后续格** ⇒ 本轮**不覆盖** |
+| **🔴 订正（2026-10-27）** | 本格**已闭合**：共享层把容器上限**无条件**抬到 **10001**（G4 落码 `cd893d1`，类 `GoStyleTomcatParameterLimitCustomizer`）⇒ ⇒ 容器不再比 Go 更早拒 ⇒ ⇒ **「总「值」数 2049~10000 且非空值数 ≤2048」那一格：Go 放行 / RAG 也放行** ⇒ ⇒ 域侧动作（把域内守门从「必须落 5003」改成 Go 语义「放行 ⇒ 进业务层」）**已完成**（§14）<br>⇒ ⇒ **下面各行保留原文**（历史事实 + 当时的推理，不改写）⇒ 其中「残余窗口（精确）」那一行**已被本行订正**<br>⚠️ **仍在的下一格（不假装闭合）**：总「值」数**超过 Go 的 10000 段上限**时，Go 拒（400 + `net/url` 原文），而 favorite 域**没有**实现这道段数上限（域内判据只数**非空值**；共享层的段数闸门因 favorite = `OFF`（域自捕获）而**不装**）⇒ ⇒ 该区间两侧不一致 ⇒ 归 `DRIFT-HOTAPI-030` 的**后续格** ⇒ 本轮**不覆盖**<br>📌 **2026-10-27 G3 再订正（原文保留不改写）**：上一句里的「Go 拒（**400** + `net/url` 原文）」⇒ ⇒ **前提不成立** ⇒ ⇒ 真源 handler 把 `httpx.Parse` 失败写成 **HTTP 200 + 5003**（`get_favorites_by_folder_handler.go:18-24`）⇒ ⇒ **「拒绝形状」这一维不是漂移**；且该格已**实测**：首个翻转点 = Go **10001 段** / RAG **10002 段** ⇒ ⇒ **差一格坐实**，修法 = 共享层上限 `10001 → 10000` ⇒ ⇒ 详见 **§18** |
 | **事实（2026-10-25 真 Tomcat 实测，4 组判别用例）** | Tomcat 的 `maxParameterCount` 数的是**总参数「值」个数（含空值）**；Go 的 `maxFormParamCount` 数的是**非空值个数**（`httpx/util.go:44-45` 的 `if len(v) == 0 { continue }` 空值不计数），且计数器 `n` **跨所有 key 共享** |
 | **判别用例（每组都带一个合法非空 `folderId` ⇒ 应用层永不拒、字段必在场 ⇒ 结果只可能来自 Tomcat）** | 总「值」=2048（名字 1，非空 1）⇒ **放行**；总「值」=2049（名字 1，非空 1）⇒ **拒**；总「值」=2049（名字 2，非空 1）⇒ **拒**；总「值」=3000（名字 3000，非空 1）⇒ **拒** ⇒ 判定「**数值不数名**」 |
 | **残余窗口（精确）** | **总「值」数 2049~10000 且非空值数 ≤2048** ⇒ Go **放行**（200 + 业务结果）/ RAG **拒**（200 + 5003） |
@@ -1056,3 +1056,80 @@ Go 的 `net/http` **服务端没有 103 Early Hints 这个特性** ⇒ ⇒ **RAG
 ### 17.3 ⚠️ 一条**已过期的说法**（保留原文 + 订正，防下一个人误引）
 
 我曾对 G4 说「**favorite 是唯一运行期停在 yaml 的 2048 的域**」⇒ ⇒ **该说法已过期**：`cd893d1` 把容器上限抬升与 `mode` 解耦 ⇒ ⇒ **favorite 现在也是 10001** ⇒ ⇒ **「停在 2048」这一面已被消掉** ⇒ ⇒ 残留只剩**判定权口径**那一条（上表第 2 行）⇒ ⇒ **不要把「favorite 停在 2048」当现状**。
+
+---
+
+## 18. 🔴 2026-10-27 G3 · 「**差一格**」**实测坐实**：Go 首个翻转点 = **10001 段**，RAG = **10002 段**（且**拒绝形状逐字节相同**）
+
+### 18.1 起因：§3 那一行**早写下**了「下一格」
+
+§3 的 🔁 跨域待拍板条目在 2026-10-27 的 🔴 订正行里**已经预告**了「仍在的下一格」：
+
+> ⚠️ **仍在的下一格（不假装闭合）**：总「值」数**超过 Go 的 10000 段上限**时，Go 拒（**400** + `net/url` 原文），
+> 而 favorite 域**没有**实现这道段数上限（域内判据只数**非空值**；共享层的段数闸门因 favorite = `OFF`（域自捕获）而**不装**）
+
+⇒ ⇒ **本轮把这一格真的量出来了**（不是推演）⇒ ⇒ 并且**证伪了那行里的一个前提**（§18.3）。
+
+### 18.2 实测（L4 · favorite-api **真 Tomcat** · 2026-10-27 22:5x）
+
+输入形状 = **1 个非空值（`folderId=123`）+ n 个空值（`p1=`…）** ⇒ ⇒ **非空值个数恒为 1**
+⇒ ⇒ 应用层的 2048 判据（`FavoriteApiSupport#goFormFirstValue` 数**非空值**）**永不触发**
+⇒ ⇒ ⇒ 量到的**只可能是容器层**（Tomcat 参数条目数上限）。
+
+| 总段数 | RAG 侧实测（favorite-api，真 Tomcat） | Go 侧（源码判定） | 一致？ |
+|---|---|---|---|
+| 2049 | HTTP 200 + `{"code":1015,"msg":"服务繁忙","data":null}`（**放行** ⇒ 进业务路径） | 放行 | ✔ |
+| 10000 | HTTP 200 + 同上（**放行**） | 放行（`params <= 10000`） | ✔ |
+| **10001** | HTTP 200 + 同上（**放行**） | 🔴 **Go 拒**（`parseQuery` 提前返回 error） | 🔴 **差一格** |
+| **10002** | HTTP 200 + `{"code":5003,"msg":"参数错误","data":null}`（**Tomcat 拒** ⇒ 经 `parameterMap()` 转 `IllegalArgumentException` ⇒ `handleIllegalArgument` ⇒ `invalidParam()`） | 拒（5003） | ✔ **形状逐字节相同** |
+| 10003 | 同 10002 | 同上 | ✔ |
+
+⇒ ⇒ **RAG 侧首个翻转点 = 10002 段；Go 侧 = 10001 段 ⇒ ⇒ 「差一格」由 L4 实测坐实**（不是源码推演）。
+
+⚠️ **`1015` 的含义**：`FavoriteErrorCode.CODE_SERVER_BUSY(1015)`（Go `CodeServerBusy`）⇒ ⇒
+本机**无下游 favorite-rpc**（`@MockitoBean` 桩）⇒ ⇒ 业务层回「服务繁忙」⇒ ⇒
+**它只证明「请求进到了业务层、没被参数个数判据拒掉」** ⇒ ⇒ **不参与「拒绝形状」的判断**。
+
+### 18.3 🔴 订正：Go 侧的拒绝形状**不是 400**，而是 **200 + 5003**
+
+§3 那一行写的是「Go 拒（**400** + `net/url` 原文）」⇒ ⇒ **该前提不成立**（本轮真源复核）：
+
+- go-zero `rest/httpx/util.go:25` `GetFormValues` ⇒ `if err := r.ParseForm(); err != nil { return nil, err }`
+  ⇒ ⇒ **传播** `net/url` 的段数错误；
+- go-zero `rest/httpx/requests.go:57` `httpx.Parse` ⇒ `if err := ParseForm(r, v); err != nil { return err }`
+  ⇒ ⇒ **继续传播**；
+- 真源 `service/favorite/api/internal/handler/favorite/get_favorites_by_folder_handler.go:18-24`
+  ⇒ ⇒ `httpx.Parse` 失败时**不是** `httpx.Error`（那是 400），而是
+  `httpx.OkJsonCtx(r.Context(), w, &response.Response{Code: favoritecommon.ErrorInvalidParam, …})`
+  ⇒ ⇒ **HTTP 200 + 5003 + `msg:"参数错误"` + `data:null`**。
+
+⇒ ⇒ **RAG 侧在翻转点上的形状（200 + 5003）与 Go 侧逐字节相同**（实测，见 §18.2 第 4 行）
+⇒ ⇒ ⇒ **「拒绝形状」这一维在本域不是漂移** ⇒ ⇒ **我先前对 G4 说的「Go 400 vs RAG 200+5003」是错的**（已更正）。
+
+### 18.4 修法（**一行**）+ 前提（这一行只在「各域都有转换」时成立）
+
+**改共享层** `service/common/src/main/java/com/rag/common/http/GoStyleTomcatParameterLimitCustomizer.java:165`
+⇒ `MAX_PARAMETER_COUNT = 10001` ⇒ ⇒ 改成 **`10000`**。
+
+⇒ ⇒ 效果：Tomcat 在 **10001 段**就拒 ⇒ ⇒ 经 `FavoriteApiSupport#parameterMap()`（`:435-443`）
+⇒ ⇒ `IllegalArgumentException` ⇒ ⇒ `handleIllegalArgument` ⇒ ⇒ `invalidParam()`（`GlobalExceptionHandler:270-274`）
+⇒ ⇒ **HTTP 200 + 5003** ⇒ ⇒ **与 Go 侧（10001 段即拒 + 200 + 5003）逐字节相同**
+⇒ ⇒ **「差一格」与「拒绝形状」两维同时闭合**（本域）。
+
+⚠️ **前提 = 每个域都得有那道 `RuntimeException → IllegalArgumentException` 的转换**
+⇒ ⇒ 本域**有**；⇒ ⇒ **没有**转换的域会退化成 `handleAny` 的 **500 + 5001** ⇒ ⇒ **那一格属共享层裁定面**。
+
+⚠️ **本域不擅自改**：`service/common/**` 是共享面（AGENTS.md §5.3c）⇒ ⇒ 已派单 G4。
+
+### 18.5 本轮域侧落码（守门）
+
+- ✅ **新增** `FavoriteApiEnvelopeParityTest#oneNonEmptyPlus2048EmptyFormParamsMustNotBeRejected`
+  （**1 个非空 + 2048 个空 ⇒ 总数 2049**）⇒ ⇒ **必须放行**
+  （Go 数**非空值** ⇒ 放行；RAG 数**总条目数** ⇒ 靠「上限抬到 10001」放行）
+  ⇒ ⇒ 与已有的 `err_too_many_form_params`（**2049 个非空 ⇒ 必须拒**）构成**双向守卫**；
+  ⇒ ⇒ 若上限停在 2048 ⇒ Tomcat 拒 ⇒ **400（不是 envelope）** ⇒ ⇒ **断言红**
+  ⇒ ⇒ 这一格是「上限必须 ≥ 2049」的**必要性判据**；
+- ✅ 基线：`FavoriteApiEnvelopeParityTest` = **6 条 / 0 failures / 0 errors / 0 skipped**
+  （2026-10-27T22:57:42+08:00，`mvn -B -o -pl service/favorite/favorite-api -am test` exit 0）；
+- ⇒ ⇒ **10001 段那一格暂不加守门**：现在加 = 把**已知的漂移**钉成绿的 ⇒ ⇒
+  等共享层改完上限再加「**必须被拒**」的断言（届时本格会转红 ⇒ 正好是修好的信号）。
