@@ -4252,6 +4252,22 @@ if (connectTimeout != null) {                                     // :16
 
 ### 12.4 诚实边界
 
+> 🟢 **2026-10-28 订正块（§48.1 · G1 lane）—— 本节第 ① 条与第 ② 条的「未证」状态已部分解除，但**不写 L4****
+>
+> | 本节原写的「没证」 | 现在的状态 |
+> |---|---|
+> | ① 「Go 腿是 L1 源码对照，不是双侧活体对拍」⇒ 证据强度 L1 | 🔴 **已解除一半**：本轮**自己**跑了 Go 腿 —— **真源的 `logoutlogic.Logout`**（不是重写）＋ **真源同款 go-zero Options**（`MustNewRedis` ⇒ `MaxRetries:3`/`MinIdleConns:8`、三个 timeout 都不传）＋ **同款 FIN 代理**（先关监听口 + 已建立连接半关闭）⇒ 实测 **1680ms**（本域自己的 Go 腿）＋ **客户端可见 gRPC status = `Internal`「注销失败,Redis写入异常」**（进程内直观测）⇒ ⇒ **Go 腿 = L4（活体）**；⇒ 逐条（含探针源码出处与两条踩坑）⇒ [`vs-common.md` §48.1](../vs-common.md) |
+> | ② 「没有做『客户端看到 1015 vs INTERNAL』的端到端双侧活体对拍 ⇒ 另一半（客户端可见值）未实测」 | 🔴 **仍成立（RAG 那一侧）** ⇒ ⇒ **本条不写 L4** ⇒ ⇒ 诚实口径 = **机制面（断连后第一条写的失败形态与耗时）双侧 L4** ＋ **客户端可见响应面「Go 腿 L4 / RAG 腿 L1」** |
+>
+> ⚠️ **admin 侧的一处形态说明（2026-10-28 订正）**：**admin 与 user 的 logout 是真源里两份**独立实现**
+> （`service/user/admin/rpc/internal/logic/logoutlogic.go` 与 `service/user/user/rpc/internal/logic/logoutlogic.go`
+> ⇒ 各自 `SetexCtx`、各自的黑名单前缀（`admin:jwt_blacklist:` / `user:jwt_blacklist:`）、各自的 `AccessExpire`）
+> ⇒ ⇒ ⇒ 故本轮**给 admin 单独做了一条 Go 腿探针**（`probe-admin`）⇒ ⇒ **admin 域的 Go 腿也是自己实测的**
+> ⇒ ⇒ 实测：**Go 1680ms**（`Internal`「注销失败,Redis写入异常」）· **RAG 3ms** ⇒ ⇒ 与 user 域（Go 1689ms · RAG 0ms）同形。
+> ⚠️ **这条订正本身也是一次「差点写错」的拦截**：我最初在台账里写的是「两侧共用同一份真源 logoutlogic」
+> ⇒ ⇒ **写之前自己核了一遍真源**（`ls` + `grep` 两个 logoutlogic.go）⇒ ⇒ **发现是两份** ⇒ ⇒ 才没写成假话
+> ⇒ ⇒ **教训同「不采信转述」：连自己刚写下的推断也要核**。
+
 - ⚠️ **本轮 Go 腿是 L1 源码对照**，**不是**双侧活体对拍 ⇒ 证据强度 **L1**（api 侧那条有 L3 真容器活体）。
 - ⚠️ **没有做「客户端看到 1015 vs INTERNAL」的端到端双侧活体对拍** ⇒
   「修后客户端拿到 INTERNAL」是由**代码路径推出**（`REJECT_COMMANDS` ⇒ 立即抛 ⇒ 走进 `catch (Exception e)`）

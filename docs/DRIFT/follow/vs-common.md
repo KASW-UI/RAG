@@ -613,3 +613,17 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
 ⇒ ⇒ **域内条数逐条不变**（并入在代码层与我域**零重叠** ⇒ 理应不变 ⇒ 实测与理应一致 ⇒ 两侧互证）；
 共享层 `common` 330→**331** · `users-common` 33→**39**（+7 全部有出处：结构锁 1 + 新守门 6）。
 ⇒ ⇒ 完整逐模块表 ＋ **窗口纪律的执行记录** ＋ **「日志里 ERROR ≠ 失败」的判据** ⇒ [`users/vs-common.md` §47.7](../users/vs-common.md)。
+
+### 11.16 🟢 **follow 域的「共享层 artifact 新鲜度守门」（G2 回执② 的域侧那半）**（2026-10-28 · G1 lane）
+
+- **落码**：`FollowRpcSharedLayerArtifactFreshnessGateTest`（`service/follow/follow-rpc/src/test/java/**`，**2 条断言**）
+  ① 本模块解析到的共享层 artifact 必须携带「MP 排序桥 + Redis 自动配置」两个 FQCN（**独立字面量**）
+  ② 域内那份排序桥必须不在本模块源码里（收编真的发生了）
+- **它防的是什么**：单模块构建（`mvn -pl <module>` **不带 `-am`**）⇒ `service/common` 不在 reactor
+  ⇒ 依赖从 `~/.m2` 取 ⇒ 拿到**陈旧**的 `common` jar ⇒ ⇒ **共享层那份排序桥不在产物里**
+  ⇒ ⇒ Boot 4 下 MyBatis-Plus 早于 DataSource 求值 ⇒ **进程启动即挂**。
+- **本域已有的那层**：`FollowRpcWiringTest`（容器装配层 · 三条腿：注册层 / 域内副本已消失 / 机制层 `SqlSessionFactory` 真产出）
+  ⇒ ⇒ **不是「零覆盖」** ⇒ ⇒ 新守门补的是「**陈旧 jar 时红得不明白**」那一层。
+- **变异验证**：A 不带 `-am` 单模块构建 ⇒ **恰红 1 条**（红在第①条，消息点名「陈旧 common jar」+ 修法 `-am`）；
+  B 放回域内副本 ⇒ **恰红 1 条**（红在第②条）⇒ ⇒ 两条断言**各有**判别力 ⇒ 复原后全绿。
+- ⇒ ⇒ 完整经过与「类path 层 ≡ 产物层」的机械论证 ⇒ [`users/vs-common.md` §48.2](../users/vs-common.md)。
