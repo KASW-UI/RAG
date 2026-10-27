@@ -60,7 +60,7 @@
 | 轴 | 机制 | 本域侧的落点 / 调用 | 结论 | 证据强度 | 核对日期 |
 |---|---|---|---|---|---|
 | **A1** | 超时 / deadline | ① `DRIFT-USERAPI-009②`（**3s 预算作用域**：Go 不覆盖 JWT 验签，RAG 覆盖验签+黑名单+handler）**✅ 已修（2026-10-27 · G1 lane · 域内自闭环）** ② `DRIFT-USERAPI-015`（Redis 主机名解析失败 ⇒ 200/503 摇摆）✅ **已关闭（2026-10-27 · G1 lane）** —— 关闭判据 = **复现失败**（dns 形态 24 次探测两侧都 200；blackhole 形态两侧都 503 ⇒ 同形）＋ **无可执行修法**（候选②实测制造**反向差异** ⇒ 否决）⇒ ⚠️ **关闭 ≠ 证明了等价**（保留重开触发条件）③ `DRIFT-USERRPC-V-012`（超时业务日志归因 ⇒ 落点在本域 `UserDomainService.logout`）**✅ 已修（2026-10-27 · G1 lane · 域内一行）** ④ `DRIFT-USERRPC-V-013`（DB 超时的源码层形态差异 ⇒ **非 wire 漂移，不得改回 Go 行为**）⑤ ✅ **`DRIFT-ADMINAPI-006` 的 ② 半已修**（**本轮 · 2026-10-27 · admin-api 推广 `DRIFT-USERAPI-009②`**：验签搬进 `admin-api` 的 `auth/GoStyleJwtAuthFilter`（`@Order(+6)`）⇒ 移出 3s 预算 ⇒ M-37 由 OBSERVABLE DIFFERENCE 改判 EQUIVALENT ⇒ **L3 真 Tomcat 复验**；⚠️ **① 半（遥测面）仍未动**）⑥ ✅ **`DRIFT-USERAPI-016` 已修**（**本轮 · 2026-10-27 · 新立并自闭环**：`user-api` 缺 `spring.data.redis.connect-timeout` ⇒ Lettuce 落**自己的默认 10s**（🔴 **原写「回落到 3s」—— 机制说错**，Boot 4 在该属性为 null 时**整段跳过** ⇒ 不回落 timeout；见 `user/api.md` 订正块）≠ Go 的 `DialTimeout` 5s ⇒ 已补 `connect-timeout: 5s` ＋ 新增 `UserApiRedisTimeoutConfigTest` 2 例；⚠️ **与 ② 是同族但不是同一条** —— ② 是「DNS 解析失败的 200/503 摇摆（取舍题，建议不改）」，⑥ 是「超时**配置值**没抄对（照抄题）」）⑦ ✅ **`DRIFT-ADMINAPI-012` 已修**（**本轮 · 2026-10-27 · 新立并自闭环**：Lettuce 默认 `disconnectedBehavior=DEFAULT` ⇒ **Redis 断连时命令被排队**等重连 ⇒ 挂到 `commandTimeout: 3s` ⇒ **撞 HTTP 3s 预算 ⇒ 503**；Go 是 `MaxRetries=3` 的**快速失败** ⇒ **fail-open 200** ⇒ 落**域内副本** `config/RedisDisconnectedBehaviorConfig`（`REJECT_COMMANDS`）＋ 守门 `AdminApiRedisDisconnectedFastFailTest` 2 例；⚠️ **修前实测 3013ms ⇒ 修后 1ms**；🔴 **共享层收编仍归 G4** ⇒ 见 §6.4 表末行）⑧ ✅ **`DRIFT-USERRPC-V-014` / `DRIFT-ARPC-013` 已修**（**本轮 · 2026-10-27 · 新立并自闭环 · rpc 侧同机制不同形态**：`user-rpc` 缺 `connect-timeout` ⇒ 落 Lettuce 默认 **10s** ≠ Go 5s ⇒ 已补；**两个 rpc 组件都缺 `REJECT_COMMANDS`** ⇒ 断连时命令**排队**挂到 `commandTimeout: 3s` ≫ 本组件 `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ 客户端看到 **1015「服务繁忙」**，而 Go 是**快速失败** ⇒ `INTERNAL「注销失败,Redis写入异常」` ⇒ 落**域内副本** `config/RedisDisconnectedBehaviorConfig`（user-rpc ＋ admin-rpc）＋ 守门 2 例各；⚠️ **证据强度 L1**（Go 腿是源码对照，**未**做双侧活体对拍 ⇒ 「客户端可见值」这一半未实测）） | 🔴 **1 条 OPEN**（④ 非漂移；② 已关闭）<br>⚠️ **2026-10-27 订正**：原状态写「4 条 OPEN（其中 **②③** 域内可闭环）」⇒ **编号错挂**（② 是 `USERAPI-015`、③ 是 `V-012`）⇒ 域内可闭环的是 **①③**；**② 已于本轮正式关闭**<br>🆕 **命令超时的「机制腿」已补**（**本轮 · 2026-10-27 · 探针实测**）：`TimeoutOptions.source` 恒为 `DefaultTimeoutSource`（返回 -1）⇒ 3s 只能由 **`applyConnectionTimeout`** 分支从连接级 timeout（`LettuceConnectionFactory.getTimeout()=3000ms` ⇒ `RedisURI.timeout`）取 ⇒ ⇒ **`isTimeoutCommands()` 恒真、不是有效判据** ⇒ 只断言「值」是**假绿口子**（机制被关 ⇒ 值仍读得到 3s、命令却永不过期）⇒ 5 份 FastFail 守门已各补**机制腿**（详见 [`user/rpc.md` §4.1.1](user/rpc.md)） | L1 源码 + **L2 运行时（新增）** + **Go 腿 L4 活体·直接判据（⑤）+ RAG 腿 L3 真 Tomcat·间接判据 ⇒ 合并按弱侧记 L3**（Go 腿探针见 §8.4；⚠️ 不笼统写 L4） + **L2 配置层守门（⑥）** + **L3 真容器活体（⑦）** + **L3 真容器活体（⑧）** + **L3 探针实测（命令超时机制腿）** + L3 双侧活体（台账原有） | 2026-10-27（**本轮订正 ⑤⑥⑦⑧ ＋ 关闭 ②**） |
-| **A2** | gRPC 拦截器链 | `DRIFT-USERAPI-011`（客户端熔断 handler）✅ · `DRIFT-USERRPC-V-007`（超时 description 逐字）✅ 已合回 `4f839f9` · ① 三拦截器链（recover/breaker/shedding）已全处置 | ✅ **一致**（在该证据强度下） | L3 双侧活体 | 2026-10-27 |
+| **A2** | gRPC 拦截器链 | `DRIFT-USERAPI-011`（客户端熔断 handler）✅ · `DRIFT-USERRPC-V-007`（超时 description 逐字）✅ 已合回 `4f839f9` · ① 三拦截器链（recover/breaker/shedding）已全处置 · ② 🟡 **A2 邻接（出向调用面，非 A2 本体）**：G4 逐个 rpc 用 `@GrpcClient` 计数 ＋ 六种出向方式交叉核 ⇒ **`follow-rpc` = 1（可观测）· `user-rpc` = 0 · `admin-rpc` = 0（N/A）** ⇒ **不并进 A2 本体的差异计数**（逐条见 §16.3） | ✅ **一致**（在该证据强度下）· **A2 本体的 OBSERVABLE DIFFERENCE 计数 = 0** | L3 双侧活体 | 2026-10-27 |
 | **A3** | HTTP 保护链 | ① 本域 `application.yml` 的 `rag.http.go-form-limit.mode` = **raw**（user-api ＋ admin-api 各一行）② `DRIFT-USERAPI-008`（过载保护「不存在」）**已证伪** ③ `DRIFT-USERAPI-012`（降载 RT 口径）✅ ④ `DRIFT-USERAPI-013`（**MaxConns 粒度 + breaker 键空间 + javadoc 矛盾**）🔴 ⑤ `009② 补充`（MaxBytes 相对 observability 的位置）**未签字** ⑥ ✅ **验签与保护链的相对次序已对齐**（**本轮 · 2026-10-27**：`user-api` / `admin-api` 两域的验签各搬进各自的 `auth/GoStyleJwtAuthFilter`（`@Order(+6)`）⇒ 落在 `+3 Traceparent` 之内、`+7 HttpMiddleware（3s 预算）` 之外 ⇒ **Filter 绝不写响应** ⇒ **413 仍压过 401**（真 Tomcat 实测：user/admin 两域 413 + 空 body）；⚠️ **各域 401 body 形状刻意不统一**（user/admin = 完整信封；follow = 空 body））⑦ ❌ **`hot-api` 对本条 N/A**（**2026-10-27 由 G3 指出 · 本域已独立核实**：Go 侧 `service/hot/api/internal/handler/routes.go` **零 `rest.WithJwt`**、单块 `AddRoutes`、唯一端点 `GET /hot/v1/articles`；RAG 侧 `service/hot/hot-api` **无 `WebMvcConfig`、无任何 `*Jwt*`/`*Auth*` 类** ⇒ **两侧都没有验签环节** ⇒ 热榜本就该匿名读，**「RAG 没有鉴权」不是漂移**） | 🔴 **1 条 G4** ＋ 🟡 **1 条待拍板** ＋ 🔴 **1 条域内**（009② 补充项） | L1 源码 + **L2 装配层守门（容器装配结果）** + **L3 真 Tomcat 活体（⑥）** | 2026-10-27 |
 | **A4** | 错误码 / envelope | `DRIFT-USERAPI-003/-006/-007/-010` ✅（后两条为**签字偏离** `SD-USERAPI-001` 与 N-1）· `UNRESOLVED-001/003/004` **全部已关**（`UNRESOLVED-001` = 真 Tomcat 双侧 + `check-plaintext400-headers.sh` EXIT=0） | ✅ **一致**（**4 条签字偏离**覆盖 ⇒ 审查见红先查签字档） | L3 真 Tomcat + 双侧活体 | 2026-10-27 |
 | **A5** | 端口治理 | ① api 监听 8888 → **49900**（`OBSERVABLE DIFFERENCE`，已签字 `Infrastructure.md §3`）② rpc gRPC `0.0.0.0:9004` → **49210**（`IMPLEMENTATION DIFFERENCE`，已锁定）③ ⚠️ **`RANDOM_PORT` 面的记账缺口（2026-10-27 补记）** —— **实测清点**（非印象）：<br>· 全仓 `RANDOM_PORT` 命中 **21 个文件**（`service/` 全树）；<br>· **G1 三域合计只有 1 处**：`user-api` 的 `GoStyleGrpcClientBreakerE2ETest`（`webEnvironment = RANDOM_PORT`，但那是 **gRPC 熔断 E2E**，**不是 HTTP 响应头面**）；<br>· `admin-api` / `follow-api` 域内 **零** `RANDOM_PORT`、**零** `DEFINED_PORT`；<br>· ⚠️ 域内的**响应头层**验证（`AdminApiPlainText400HeaderProbeTest` 等）走的是 **`webEnvironment = MOCK` ＋ `@AutoConfigureMockMvc`** ⇒ **MockMvc 测不到真 Tomcat 的 header 逐字节** ⇒ 真 Tomcat 面由**仓外脚本** `tools/difftest/check-plaintext400-headers.sh` 覆盖（**不在域内台账的证据面**） | 🟡 **`RANDOM_PORT` 面仍是记账缺口**（**不是「已对齐」**）—— 本轮把「零覆盖」从**空白**变成**有出处的记录**：缺口在**哪几个文件**、**为什么 MockMvc 不算**、**真 Tomcat 面实际由谁覆盖** 三点已钉死 ⇒ **可被下一轮按图索骥** | L1 静态（`grep` 全树清点 ＋ 逐个测试类的 `webEnvironment` 实读） | 2026-10-27（**本轮补记**） |
@@ -1014,4 +1014,51 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 1. **先查报告新鲜度**（`mtime` ＋ 类名是否还在 `src/test` 里）⇒ **不要先怀疑 maven 漏算**；
 2. ⇒ 口径二**只有在「报告目录已清」时**才与口径一等价 ⇒ ⇒ **跨轮比较测试数时，必须先 `rm -rf target/surefire-reports`**（否则数字不可比）；
 3. ⇒ **「探针类建在模块里」是口径污染源** ⇒ 探针要么放 `/tmp`，要么**连报告一起删**。
+
+---
+
+## 16. 🆕 **G4 第七次回执（2026-10-27）· A2 邻接口径订正 ＋ Redis 收编删除的前置判定**（G1 lane）
+
+> **G4 的回执规格**：HEAD `5564c27`（tip `cec7131`）· 基线 `a282012` 之上 30 提交 · 工作区干净 · **未 push**
+> · 全量 `mvn -B clean verify` ⇒ **BUILD SUCCESS / `MVN_EXIT=0`** · **52 模块 / 2457 条**（failures 0 · errors 0 · **skipped 4**）· 20:28 min
+> · 双侧探针同批复跑：`run-parity.sh` **EXIT=0 · 56 例**（一致 54 / 不一致 0 / 已签字偏离 2）· `run-rpc-timeout-parity.sh` **EXIT=0 · 3 例** · 三门禁 0/0/0
+
+### 16.1 🔴 **Redis 域内副本是 5 份，不是 3 份**（G4 回执里的名单是**扩容前**的）
+
+| # | 副本 | 何时落的 |
+|---|---|---|
+| 1 | `user-api` | 既有（第九轮 `DRIFT-USERAPI-014`） |
+| 2 | `admin-api` | 第十四轮 `DRIFT-ADMINAPI-012` |
+| 3 | `follow-api` | 第十四轮 `DRIFT-FOLLOW-012` |
+| **4** | **`user-rpc`** | **第十四轮 `DRIFT-USERRPC-V-014` ②** |
+| **5** | **`admin-rpc`** | **第十四轮 `DRIFT-ARPC-013` ②** |
+
+⇒ ⇒ 第 4、5 份正是**rpc 侧同款形态**（断连排队 3s ≫ `rpc-timeout: 2s` ⇒ **RPC 先超时 ⇒ 客户端 1015**）⇒ ⇒ **它们是收编的原始动机之一**。
+⇒ ⇒ **只删 3 份 ⇒ `user-rpc` / `admin-rpc` 仍被遮蔽 ⇒ 共享层对这两个域仍静默不生效** ⇒ **已回信要求 G4 把「3 份」改成「5 份」再转整合者**。
+
+### 16.2 🔴 **删除的前置判定：本轮【不能】执行**（不是保守，是前置未满足）
+
+⇒ 实测：`git merge-base --is-ancestor 5564c27 do-my-own-gh` ⇒ **NO**（tip `cec7131` 也未进）⇒ ⇒ **本树里没有 `GoStyleRedisClientAutoConfiguration`**。
+⇒ ⇒ **现在删 = 不是「双份变一份」，而是「零份」** ⇒ `REJECT_COMMANDS` 整个消失 ⇒ 退回本轮修掉的漂移：
+- **api 侧**：断连排队 3s ⇒ 撞 HTTP 3s ⇒ **503**（Go 是 fail-open **200**）；
+- **rpc 侧**：断连排队 3s ≫ `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ **客户端 1015**（Go 是快速失败 ⇒ `INTERNAL`）。
+
+⇒ ⇒ **我域 5 份 FastFail 守门会立刻变红**（它们断言的正是「立即失败」那一半）⇒ ⇒ **删除 + 守门重写必须同一次提交**。
+⇒ ⇒ **正确顺序**：**整合者把 G4 分支合进 `do-my-own-gh` ⇒ 我把主干并回我分支 ⇒ 一次性执行**（配方见 §12.2）。
+
+### 16.3 🟡 **A2 邻接：`@GrpcClient` 出向调用面**（G4 逐个 rpc 计数 ＋ 六种出向方式交叉核）
+
+| 本域组件 | `@GrpcClient` 计数 | 判定 |
+|---|---|---|
+| `follow-rpc` | **1** | **可观测** |
+| `user-rpc` | **0** | **N/A** |
+| `admin-rpc` | **0** | **N/A** |
+
+⇒ ⚠️ **轴归属**：这是「**出向调用面**」的口径，**≠ A2 本体**（A2 = 服务端三拦截器链 recover/breaker/shedding）⇒ ⇒ **记作 A2 邻接，不并进 A2 本体的计数**
+⇒ ⇒ 本域 **A2 本体**的 OBSERVABLE DIFFERENCE 计数 = **0**（`DRIFT-USERRPC-V-007` 已于 2026-10-26 由 `global` 域销账 · 已合回 `4f839f9`）⇒ ⇒ **A2 本体 = ✅ 一致（该证据强度下）**。
+
+### 16.4 ✅ G4 ⑥（池自愈）与我的登记**同构**（它证实了我域台账 §12.4）
+
+⇒ G4 独立得出「前五轮全量一直绿，是因为 #8 的缺陷恰好把保护罩挡住了 ⇒ `RpcInterceptor.shutdown()` **从未在纯 gRPC 进程里真正执行过**」
+⇒ ⇒ **我域此刻的绿也是这么撑着的** ⇒ ⇒ **不能把当前全绿读作「我域不受影响」** ⇒ ⇒ 已在 §12.3 / §12.4 写明「合入后必查 3 条」＋「两条必须同批合入」。
 

@@ -431,3 +431,20 @@ installed_rank | version |      description       | success
 ⇒ **生产值 3s 仍由 `applicationYmlArmsImmediateConnectTimeout`（读 `application.yml` 的静态断言）守着** ⇒ **无覆盖损失**。
 
 ⚠️ **同批同款修的还有**（users 域）：`UserApiStartupFailFastTest` ＋ `AdminApiStartupFailFastTest` 各 2 处。
+
+### 11.7 🆕 **G4 第七次回执（2026-10-27）** —— follow 域相关三条
+
+> 完整记录在 users 侧 ⇒ [`users/vs-common.md` §16](../users/vs-common.md)。
+
+① **A2 邻接（出向调用面）**：`follow-rpc` 的 `@GrpcClient` 计数 = **1**（**可观测**）⇒ 而 `user-rpc` / `admin-rpc` = 0（N/A）⇒
+⇒ ⚠️ 这是「出向调用面」的口径，**≠ A2 本体**（A2 = 服务端三拦截器链）⇒ ⇒ **记作 A2 邻接，不并进 A2 本体的差异计数**。
+
+② **Redis 收编的删除清单 = 5 份（G4 回执写「3 份」是扩容前的名单）** ⇒ **follow 域那 1 份在清单内**
+（`service/follow/follow-api/.../config/RedisDisconnectedBehaviorConfig.java`）；
+⇒ ⚠️ **`follow-rpc` 不在清单里**（它**不用 Redis** ⇒ 无副本 ⇒ 无删除动作）。
+⇒ 🔴 **删除的前置未满足**：G4 的 `5564c27` / tip `cec7131` **还没进 `do-my-own-gh`** ⇒ 本树里没有共享层那份
+⇒ ⇒ **现在删 = `REJECT_COMMANDS` 整个消失**（api 侧退回「排队 3s ⇒ 撞 HTTP 3s ⇒ 503」，Go 是 fail-open 200）
+⇒ ⇒ **我域 FastFail 守门会立刻变红** ⇒ ⇒ **等整合者把 G4 分支合进主干后一次性执行**（配方见 §11.2）。
+
+③ **G4 ⑥（池自愈）与我域登记同构**：`follow-rpc` 与另两个 rpc 一样 `@Import ObservabilityLifecycle` 且 classpath **无 servlet**
+⇒ ⇒ **受影响面 = 3/3** ⇒ ⇒ `3b573fb` 与 `7488b3d` **必须同批合入**（只合前者 ⇒ 池「终止即永久」⇒ 我域由绿转红）⇒ 详见 §11.3 / §11.4。
