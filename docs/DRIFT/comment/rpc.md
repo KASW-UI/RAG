@@ -646,3 +646,23 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 - **第六次全量**里 `article-rpc` 的 2 条失败，根因在**共享层**：`RpcInterceptor` / `HttpMiddleware` 的三个**进程级静态池**是 `static final` ⇒ `shutdown()` **永久终止** ⇒ surefire **一模块一 JVM** ⇒ **模块内多个 Spring 上下文** ⇒ 前一个上下文关闭后，后续上下文里 `schedule()/submit()` **被拒** ⇒ 拦截器返回 **INTERNAL** 而不是 **DEADLINE_EXCEEDED** ⇒ ⇒ **G4 已修**（`AtomicReference` + CAS 自旋，**落 `service/common` ⇒ 本域零改动**）。
 - 🔴 **为什么前五轮全量都绿**：修 G1 派单 #8 之前，纯 gRPC 进程的 `@PreDestroy` **先抛 `NoClassDefFoundError`** ⇒ `shutdown()` **根本没机会执行** ⇒ 静态池**侥幸存活** ⇒ ⇒ **「绿」是因为那条路径根本没被执行过**。
 - ⇒ **本域（comment-rpc，同样用这三个共享池）的历史全量结论要按这条重新读**：不是「本来就对」，而是「**缺陷把保护罩挡住了**」⇒ ⇒ **教训**：拿到「一直绿」的结论时多问一句「**这条路径在本轮之前真的被执行过吗**」；**归属判定看根因落在哪一层，不看失败用例在哪个域**。
+---
+
+### 附录 · 📌 待验：rpc 侧 Redis 断连的**对外后果与 api 侧不同**（2026-10-27 · G1 通报 ＋ 本域自核）
+
+- **G1 的形态**（users 域已修并立了 2 例守门）：rpc 侧 Redis 断连 ⇒ 命令**排队到 `commandTimeout: 3s`**
+  ≫ rpc 组件的 `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ 客户端看到 **1015「服务繁忙」**；
+  而 Go 是**快速失败** ⇒ `INTERNAL「注销失败,Redis写入异常」` ⇒ ⇒ **api 侧与 rpc 侧后果不同**（503 vs RPC 撞超时）
+  ⇒ ⇒ **共享层收编时两侧要分别验，别只验 api 侧**。
+- **本域自核 ⇒ 同款形态成立**：
+  - **comment-rpc**：Redis 调用在 **gRPC 请求路径**（`CommentCacheService` 的 `opsForValue()` 读写）⇒ 断连 ⇒ 排队到 3s
+    > `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ 与 Go 的快速失败**后果不同** ⇒ 🔴 **待验**。
+  - **hot-rpc**：`get_hot_articles_logic.go:43` 的 `ZRevRangeWithScores` 在请求路径 ⇒ 同款 ⇒ 🔴 **待验**。
+  - ⚠️ **`mqs/hot_handler.go` 的 MQ 消费路径不属这一族**（ctx = Kafka 消费 ctx / `context.Background()`）⇒ **不修**。
+- **修法落点 = 共享层**（`service/common/.../redis/GoStyleRedisClientAutoConfiguration` 的 `REJECT_COMMANDS`）
+  ⇒ ⇒ **本域不装副本**（域内副本会**遮蔽**共享层那份 ⇒ **收编根本没发生**）
+  ⇒ ⇒ **等 G4 合进我树后**，按 G2 的配方做**断连活体对拍**（先连上 → 静默等待且**期间不发命令** → 外部 `docker stop`
+  ⇒ 量第一条命令挂多久）⇒ **本域零域侧改动**；⚠️ 但**「两侧后果分别验」要落进验的清单**，不能只验 api 侧。
+- ✅ **本域无遮蔽风险（已自核）**：`grep -rn "LettuceClientOptionsBuilderCustomizer|RedisDisconnectedBehaviorConfig|DisconnectedBehavior"`
+  在 `service/{favorite,comment,hot,article}` 的**源码**里 ⇒ **0 命中** ⇒ 共享层那份**必被创建**
+  （三模块都引 `spring-boot-starter-data-redis` ⇒ `@ConditionalOnClass` 命中）⇒ **零域侧动作** ✅

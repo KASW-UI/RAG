@@ -1777,3 +1777,43 @@ AuthorityLookup（实际在 service/common/communityfact/authority_http.go）
 - `PIT-FAV-RPC-033`：**符号存在 ≠ 符号决定你要论证的那个量**（本轮是它的**镜像**：符号**不在**那里 ≠ 锚点指错了文件）
 - `PIT-FAV-RPC-035`：**别人的「我这边是干净的」会过期一轮**（本轮是它的**同型**：FileTree 文档里两句「当时为真」的陈述已过期）
 - `PIT-FAV-RPC-031`：**恒绿的信号不携带信息**（本轮是它的**同型**：门禁「跑绿」≠「判据活着」⇒ 要做**牙齿检查**）
+---
+
+## PIT-FAV-RPC-038 · 🕳️ **「U+FFFD」不一定是编码损坏 —— 有的是「被测对象」；而且损坏的那个汉字常常「不可考」**
+
+### 现象
+
+本轮扫 `grep -rln $'\xef\xbf\xbd'` 得 6 处命中 ⇒ **逐行看上下文**后发现 **5 处真损坏 ＋ 1 处是故意的**：
+
+| 形态 | 例子 | 真相 |
+|---|---|---|
+| **故意的** | `article-api/…/ArticleApiMvcPipelineTest.java:1143` 的 `.putExtInfo("␦", "4")` | 该用例用 U+FFFD 当 `ext_info` 的 **key**，钉死「按**码点序**（= Go 的 UTF-8 字节序）输出」（`a < 中 < U+E000 < **U+FFFD** < 😀`）⇒ **改它直接破坏测试语义** |
+| **故意的** | `users/user/user-api/…/UserApiGoStyleBodyContentTypeTest.java:376` 的 `assertFalse(body.contains("␦"))` | U+FFFD 是**断言的被测对象**（G1 域） |
+| **故意的** | `docs/Pitfalls/message/rpc.md:911` 的 `CONTAINER␦: unbound variable` | **文档在记录故障现象本身**（UTF-8 locale 下 bash 把多字节字符吞进变量名）⇒ 替换符就是**病症样本** |
+| **真损坏** | `FavoriteRpcLabels.java:9` · `FavoriteItemMapper.java:78` · `FavoriteRpcSupport.java:70` · `FavoriteFactSemanticsTest.java:37` · `CommentAuditPublisher.java:19` | 各丢 **1 个汉字** |
+
+### 为什么会踩
+
+① **「扫描到 U+FFFD ⇒ 一定是编码损坏」是错的** ⇒ **「全仓 U+FFFD 归零」不是合法目标** ——
+有些 U+FFFD 是**被测对象**、是**故障样本**、是**文档刻意引用的病症**。
+② **损坏的那个汉字常常「不可考」**：本轮 5 处里 4 处的原始字符**无法还原** ——
+最早的干净提交**根本没有那几句**（是某次「新增行」引入的）⇒ **无前版可取**；
+而会话快照里**已经是坏的** ⇒ ⇒ **「搜到了」≠「有原文」**。
+③ **字节数能告诉你「丢了几个字」，但告诉不了你「是哪个字」**：
+**3×FFFD = 1 个完整汉字**（UTF-8 3 字节被逐字节替换）；
+**2×FFFD = 3 字节汉字丢了末字节**（本仓两种形态都出现过）。
+
+### 怎么不再踩
+
+① **先逐行看上下文，再决定动不动手** —— 判据：它是**被测对象 / 故障样本 / 文档引用**吗？是 ⇒ **不动**。
+② **找干净前版**：`git log --all -- <file>` ⇒ 逐提交 `git show <c>:<file> | grep -c FFFD`
+⇒ 定位**从哪一版开始坏**。⚠️ 若是**新增行** ⇒ **无前版可取** ⇒ 只能**按语义重建**。
+③ **重建依据的优先级**：
+① **同包干净文件**的同款措辞（本例：`FavoriteItemMapper` 那处照同包 `FavoriteItemEntity` 类注释的「有一个空修订」重建）
+② 本文件自身的术语（本例：`FavoriteRpcLabels` 的类注释写明「label **取值**常量」⇒「拼成两个**值**」）
+③ 唯一自然填充 ⇒ ⇒ **只改注释、不改行为**。
+④ **别把 git 历史 / 会话目录当「原文来源」的保证**：`/Users/pr/.minimax/v2/sessions/` 里 grep 目标短语
+**可能命中已经损坏的快照** ⇒ 命中 ≠ 有原文。
+⑤ **引用损坏形态作证据时用可见转义写法**（`␦␦` / `\uFFFD`），**不要**把真 U+FFFD 字节写进台账 ——
+否则后续「全仓 U+FFFD 扫描」会把**证据**也标成待修项（噪声）。
+⑥ **「扫描 ⇒ 归零」这类目标，要先问「这个目标合法吗」**：本例答案是**不合法** ⇒ ⇒ **登记 ≠ 缺陷**：先分类，再决定修不修。

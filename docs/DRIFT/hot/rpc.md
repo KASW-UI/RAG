@@ -1779,3 +1779,23 @@ G4 在共享层 `docs/DRIFT/global/vs-common.md` §2 的 **A2 行**逐个 rpc **
 **③ G4-4 反馈单已闭合**（本域 2026-10-27 登记的共享层 U+FFFD）：
 G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）⇒ 纯注释，零行为变化」
 ⇒ **本域的反馈单已落、零行为变化** ⇒ **无需再跟进**。
+---
+
+### 附录 · 📌 待验：rpc 侧 Redis 断连的**对外后果与 api 侧不同**（2026-10-27 · G1 通报 ＋ 本域自核）
+
+- **G1 的形态**（users 域已修并立了 2 例守门）：rpc 侧 Redis 断连 ⇒ 命令**排队到 `commandTimeout: 3s`**
+  ≫ rpc 组件的 `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ 客户端看到 **1015「服务繁忙」**；
+  而 Go 是**快速失败** ⇒ `INTERNAL「注销失败,Redis写入异常」` ⇒ ⇒ **api 侧与 rpc 侧后果不同**（503 vs RPC 撞超时）
+  ⇒ ⇒ **共享层收编时两侧要分别验，别只验 api 侧**。
+- **本域自核 ⇒ 同款形态成立**：
+  - **comment-rpc**：Redis 调用在 **gRPC 请求路径**（`CommentCacheService` 的 `opsForValue()` 读写）⇒ 断连 ⇒ 排队到 3s
+    > `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ 与 Go 的快速失败**后果不同** ⇒ 🔴 **待验**。
+  - **hot-rpc**：`get_hot_articles_logic.go:43` 的 `ZRevRangeWithScores` 在请求路径 ⇒ 同款 ⇒ 🔴 **待验**。
+  - ⚠️ **`mqs/hot_handler.go` 的 MQ 消费路径不属这一族**（ctx = Kafka 消费 ctx / `context.Background()`）⇒ **不修**。
+- **修法落点 = 共享层**（`service/common/.../redis/GoStyleRedisClientAutoConfiguration` 的 `REJECT_COMMANDS`）
+  ⇒ ⇒ **本域不装副本**（域内副本会**遮蔽**共享层那份 ⇒ **收编根本没发生**）
+  ⇒ ⇒ **等 G4 合进我树后**，按 G2 的配方做**断连活体对拍**（先连上 → 静默等待且**期间不发命令** → 外部 `docker stop`
+  ⇒ 量第一条命令挂多久）⇒ **本域零域侧改动**；⚠️ 但**「两侧后果分别验」要落进验的清单**，不能只验 api 侧。
+- ✅ **本域无遮蔽风险（已自核）**：`grep -rn "LettuceClientOptionsBuilderCustomizer|RedisDisconnectedBehaviorConfig|DisconnectedBehavior"`
+  在 `service/{favorite,comment,hot,article}` 的**源码**里 ⇒ **0 命中** ⇒ 共享层那份**必被创建**
+  （三模块都引 `spring-boot-starter-data-redis` ⇒ `@ConditionalOnClass` 命中）⇒ **零域侧动作** ✅
