@@ -89,7 +89,8 @@ class AdminApiRedisTimeoutConfigTest {
         assertEquals("5s", dig(root, "spring", "data", "redis", "connect-timeout"),
                 "连接超时应为 5s（= go-redis DialTimeout 默认）。"
                         + "Boot 4 里它是 DataRedisProperties.connectTimeout 这个**独立字段**；"
-                        + "不配就会回落到 timeout=3s，与 Go 不一致");
+                        + "不配**不会**回落到 timeout（Boot 4 在 null 时整段跳过）"
+                        + "⇒ 会用 Lettuce 默认 10s，与 Go 的 5s 不一致");
     }
 
     @Test

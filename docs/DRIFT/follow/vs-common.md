@@ -145,7 +145,7 @@
 |---|---|---|---|---|
 | `DRIFT-FOLLOW-008` | **MaxConns 闸门**：Go **每路由一个**（`rest/handler/maxconnshandler.go:12` 按 `route.Path` 建闸）vs RAG **全局一个** | `service/common`（`GoStyleMaxConnsFilter`） | 🔴 **G4** | 🔴 未修 · **与 users 侧 `DRIFT-USERAPI-013` 同族 ⇒ 两条一起对账，别各修各的** |
 | 🆕 `PITFALL-FOLLOW-005` | 共享层在**纯 gRPC 进程**里缺 servlet-api ⇒ **关闭路径**抛 `NoClassDefFoundError: jakarta/servlet/Filter` | `service/common`（`HttpMiddleware` + `ObservabilityLifecycle`） | 🔴 **G4** | 🔴 未修 · **本轮已复核仍在**（`HttpMiddleware.java:8` import ＋ `ObservabilityLifecycle.java:54` destroy 触发）⇒ **受害面 = 所有纯 gRPC 进程**，不只 follow |
-| 🆕 **Redis 断连行为（`REJECT_COMMANDS`）的共享层收编** | 三个 api 域的 Lettuce **断连**行为必须 `REJECT_COMMANDS`（否则命令被排队挂到 `commandTimeout` 3s ⇒ 撞 HTTP 预算 ⇒ **503**，而 Go 是 fail-open **200**） | 🟢 **域侧已自修**（**本域**：`config/RedisDisconnectedBehaviorConfig`）<br>🔴 **共享层收编** = 把三份域内副本并成一个 `service/common` 自动配置 | 🟢 **域侧**（已完成）<br>🔴 **G4**（**收编**） | 🟢 **域侧已闭环**（2026-10-27 · `DRIFT-FOLLOW-012` · 修前 **3012ms** ⇒ 修后 **0ms** · 变异 2/2 变红）<br>🟢 **共享层已落码**（G4 commit `1fb26b2` ＋ `2f12236` · `GoStyleRedisClientAutoConfiguration` 走 `AutoConfiguration.imports`）⇒ **待 G4 分支合入本树后，删除这三份域内副本**（`user-api` / `admin-api` / `follow-api`）⇒ **删除前置 ＝ 共享层那份先合进各域的树**（否则双份配置 ⇒ 两处都要维护） |
+| 🆕 **Redis 断连行为（`REJECT_COMMANDS`）的共享层收编** | **五个**用 Redis 的组件的 Lettuce **断连**行为必须 `REJECT_COMMANDS`（否则命令被排队挂到 `commandTimeout` 3s ⇒ **api 侧**撞 HTTP 预算 ⇒ **503**（Go 是 fail-open **200**）；**rpc 侧**撞 `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ 客户端看到 **1015**（Go 是**快速失败** ⇒ `INTERNAL「注销失败,Redis写入异常」`）） | 🟢 **域侧已自修**（**本域**：`config/RedisDisconnectedBehaviorConfig`）<br>🔴 **共享层收编** = 把**五份**域内副本（3 api ＋ **2 rpc**：`user-rpc` / `admin-rpc`，2026-10-27 本轮补）并成一个 `service/common` 自动配置 | 🟢 **域侧**（已完成）<br>🔴 **G4**（**收编**） | 🟢 **域侧已闭环**（2026-10-27 · `DRIFT-FOLLOW-012` · 修前 **3012ms** ⇒ 修后 **0ms** · 变异 2/2 变红）<br>🟢 **共享层已落码**（G4 commit `1fb26b2` ＋ `2f12236` · `GoStyleRedisClientAutoConfiguration` 走 `AutoConfiguration.imports`）⇒ **待 G4 分支合入本树后，删除这五份域内副本**（`user-api` / `admin-api` / `follow-api` / `user-rpc` / `admin-rpc`）⇒ **删除前置 ＝ 共享层那份先合进各域的树**（否则双份配置 ⇒ 两处都要维护）<br>🔴 **2026-10-27 升级危害等级**（据 G3 提供的信息）：G4 那份的 customizer 带 **`@ConditionalOnMissingBean`** ⇒ **域内副本在 ⇒ 共享层那份整个不创建** ⇒ ⇒ **不删副本 ⇒ 收编根本没发生**，且**共享层后续改动对本域静默不生效** ⇒ ⇒ **删除动作是收编的「必要条件」而非「收尾清理」** ⇒ 收编完成时必须**复验**共享层那份是否真的生效。<br>⚠️ **rpc 侧与 api 侧后果不同**（503 vs RPC 撞超时）⇒ 收编时**不要只按 api 侧的现象判「已修」** |
 
 ⚠️ **派单口径（7 项 · 缺项不进排期）**见 [`users/vs-common.md` §6.2](../users/vs-common.md) ⇒
 **编号必须带全前缀**（`DRIFT-FOLLOW-008` ≠ `DRIFT-USERAPI-013` ⇒ 同族 ≠ 同一条）⇒
@@ -159,7 +159,7 @@
 - `follow-common` 是**本域真私有**（§5.3f：只被本域引用）⇒ **G1 可写** ⇒ 共享层缺陷不适用
 - 🆕 **Redis 断连行为**（`DRIFT-FOLLOW-012` · 2026-10-27）：`config/RedisDisconnectedBehaviorConfig`
   —— **域内副本**（`REJECT_COMMANDS`）⇒ **完全在 G1 写权内** ⇒ **不需要等共享层**；
-  ⚠️ **但共享层收编（把三份副本并成一个自动配置）仍归 G4** ⇒ 见 §6.2 末行。
+  ⚠️ **但共享层收编（把五份副本并成一个自动配置）仍归 G4** ⇒ 见 §6.2 末行。
 
 ---
 

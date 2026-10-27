@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -231,6 +232,23 @@ class UserApiRedisDisconnectedFastFailTest {
                         + "（DefaultEndpoint:149 / :837-852），挂到 commandTimeout(3s) ⇒ HTTP 预算先耗尽 ⇒ 503，"
                         + "而 Go 是快速失败 ⇒ fail-open 200。");
 
+        // ── 命令超时 / 连接超时的**消费层**锚点 ─────────────────────────
+        // ⚠️ 判据必须是 `getClientConfiguration().getCommandTimeout()`：
+        //   · `io.lettuce.core.ClientOptions` 在 lettuce 6.8.2 **没有** getCommandTimeout()
+        //   · `ClientOptions.getTimeoutOptions()` 的 source 恒为 DefaultTimeoutSource ⇒ 假断言
+        // ⇒ 本测试**不覆盖** spring.data.redis.timeout ⇒ 读到的就是**真实配置值**。
+        assertEquals(Duration.ofSeconds(3),
+                connectionFactory.getClientConfiguration().getCommandTimeout(),
+                "命令超时必须等于 3s（= go-redis ReadTimeout 默认）⇒ 这是命令超时的**消费层**锚点。"
+                        + "拿不到 3s 说明 spring.data.redis.timeout 压根没流到 Lettuce 客户端。");
+        assertEquals(Duration.ofSeconds(5),
+                connectionFactory.getClientConfiguration().getClientOptions()
+                        .map(io.lettuce.core.ClientOptions::getSocketOptions)
+                        .map(io.lettuce.core.SocketOptions::getConnectTimeout)
+                        .orElse(null),
+                "连接超时必须等于 5s（= go-redis DialTimeout 默认）⇒ 连接超时的**消费层**锚点。"
+                        + "若是 10s ⇒ 那是 Lettuce 自己的默认（Boot 4 在 null 时整段跳过，不回落 timeout）。");
+
         redisTemplate.opsForValue().set("uu:redis:probe", "1");
         assertEquals(Boolean.TRUE, redisTemplate.hasKey("uu:redis:probe"),
                 "Redis 可达时 hasKey 必须为 true（否则后面的故障注入测不到断连状态机）");
@@ -257,6 +275,10 @@ class UserApiRedisDisconnectedFastFailTest {
                 "Redis 断连时 hasKey 必须抛异常（上层 JwtAuthInterceptor.isBlacklisted "
                         + "catch (Throwable) ⇒ exists=null ⇒ fail-open 放行）");
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
+
+        // 把实测值打出来：台账要引用**具体数字**，不能只写「断言通过」
+        System.out.printf("[Redis 断连实测] user-api hasKey 失败耗时=%dms（预算 %dms）%n",
+                elapsedMs, FAST_FAIL_BUDGET_MS);
 
         assertTrue(elapsedMs < FAST_FAIL_BUDGET_MS,
                 "Redis 断连后命令必须**快速失败**，实测耗时 " + elapsedMs + "ms，"

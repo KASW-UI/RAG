@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  *       {@code Status int64 `gorm:"column:status;default:0"`} —— <b>无 not null</b>、值类型非指针；</li>
  *   <li>{@code gorm.io/gorm@v1.31.2/scan.go:21} {@code prepareValues} 与
  *       {@code schema/field.go:1009} {@code NewValuePool}
- *       ���是 {@code poolInitializer(reflect.PointerTo(field.IndirectFieldType))}
+ *       就是 {@code poolInitializer(reflect.PointerTo(field.IndirectFieldType))}
  *       ⇒ 传给 {@code rows.Scan} 的 dest 是 <b>{@code **int64}</b>；</li>
  *   <li>{@code database/sql/convert.go:431-435}
  *       {@code case reflect.Pointer: if src == nil { dv.SetZero(); return nil }}

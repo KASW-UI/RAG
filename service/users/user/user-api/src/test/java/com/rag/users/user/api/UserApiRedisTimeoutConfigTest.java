@@ -21,8 +21,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * <h2>本条闭合什么（2026-10-27 复核新发现）</h2>
  *
  * <p>user-api 的 {@code application.yml} 原本<b>只配了</b> {@code spring.data.redis.timeout: 3s}，
- * <b>没配 {@code connect-timeout}</b> ⇒ Lettuce 在 {@code connect-timeout} 未设时**回落到 timeout**
- * ⇒ 连接超时跟着变成 **3s**，而 Go 的 go-redis {@code DialTimeout} 默认是 **5s** ⇒ 两侧不一致。
+ * <b>没配 {@code connect-timeout}</b> ⇒ Boot 4 在该属性为 {@code null} 时**整段跳过**
+ * ⇒ 用 Lettuce 自己的默认 **10s**（{@code io.lettuce.core.SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION}），
+ * 而 Go 的 go-redis {@code DialTimeout} 默认是 **5s** ⇒ 两侧不一致。
+ * <br>⚠️ **2026-10-27 订正**：此处原写「Lettuce 在 connect-timeout 未设时**回落到 timeout** ⇒ 变成 3s」
+ * ——<b>那是错的</b>（Boot 4.0.8 {@code LettuceConnectionConfiguration.createClientOptions} 的字节码是
+ * {@code if (connectTimeout != null) { … }}）⇒ 漂移方向是 <b>10s vs 5s</b> ⇒ <b>修法与结论不变</b>。
  * ⇒ admin-api 早已补上 5s ⇒ **本模块是遗漏**（不是决策）⇒ 已补 {@code connect-timeout: 5s}。
  *
  * <h2>取值出处链（逐层到消费点）</h2>
@@ -91,7 +95,8 @@ class UserApiRedisTimeoutConfigTest {
         assertEquals("5s", dig(root, "spring", "data", "redis", "connect-timeout"),
                 "连接超时应为 5s（= go-redis DialTimeout 默认）。"
                         + "Boot 4 里它是 DataRedisProperties.connectTimeout 这个**独立字段**；"
-                        + "不配就会回落到 timeout=3s，与 Go 不一致");
+                        + "不配**不会**回落到 timeout（Boot 4 在 null 时整段跳过）"
+                        + "⇒ 会用 Lettuce 默认 10s，与 Go 的 5s 不一致");
     }
 
     @Test

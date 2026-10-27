@@ -58,7 +58,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       只有 Service 被 mock）。</li>
  * </ul>
  * ⚠️ <b>本类不覆盖</b>真 Tomcat 下 {@code Content-Type} 的 charset 行为
- * —— 那是 {@code UNRESOLVED-001}，需要 {@code check-plaintext400-headers.sh} 那个真容���脚本。
+ * —— 那是 {@code UNRESOLVED-001}，需要 {@code check-plaintext400-headers.sh} 那个真容器脚本。
  * 两件事不要混。
  *
  * <p>端到端层另有一条 {@code UserApiClaimSemanticsParityTest#avatarHistory_malformedJsonBody_isStill200}

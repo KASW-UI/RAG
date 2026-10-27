@@ -59,9 +59,13 @@ spring:
       #      `readWriteTimeout = 2 * time.Second` —— **它是死常量，全文件仅此一处、
       #      从未被使用**。只看它会错判成「Go 的 Redis 超时是 2s」。
       timeout: 3s
-      # 连接（dial）超时：Go 侧 go-redis 的 DialTimeout 默认 **5s**；
-      # 而上面那个 timeout 同时管命令与连接（Lettuce 在 connect-timeout 未设时回落到 timeout）
-      # ⇒ 不显式配这一项，连接超时会跟着变成 3s，与 Go 的 5s 不一致。
+      # 连接（dial）超时：Go 侧 go-redis 的 DialTimeout 默认 **5s**。
+      # 🔴 2026-10-27 订正：此处原写「上面那个 timeout 同时管命令与连接（Lettuce 在 connect-timeout 未设时
+      #    回落到 timeout）⇒ 不显式配就变成 3s」——**那是错的**：
+      #    Boot 4.0.8 LettuceConnectionConfiguration.createClientOptions 的字节码是
+      #      `if (connectTimeout != null) { builder.socketOptions(…connectTimeout(…)); }`
+      #    ⇒ null ⇒ 整段跳过 ⇒ 用 Lettuce 自己的默认 **10s**（SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION）
+      #    ⇒ 不显式配 = 10s（≠ Go 的 5s）；修法与结论不变。详见 DRIFT-ARPC-013 订正块。
       # Boot 4 里这是**独立属性**（DataRedisProperties.connectTimeout，
       # 模块 spring-boot-data-redis；注意 RedisProperties 已从 spring-boot-autoconfigure 拆出）。
       connect-timeout: 5s

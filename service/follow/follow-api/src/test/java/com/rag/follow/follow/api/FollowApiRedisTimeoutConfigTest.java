@@ -23,7 +23,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * —— <b>无出处、无人审过</b>（台账里只登记成「待审」的 {@code DRIFT-USERAPI-015 附带}）。
  * 而 Go 侧的<b>有效</b>读命令超时是 **3s**（go-redis {@code ReadTimeout} 默认）⇒ 两侧不一致。
  * ⇒ 已对齐成 3s，并补上 {@code connect-timeout: 5s}（Go 的 {@code DialTimeout} 默认；
- * Lettuce 在未设时**回落到 timeout** ⇒ 不配就跟着变成 3s）。
+ * ⚠️ 2026-10-27 订正：此处原写「Lettuce 在未设时**回落到 timeout** ⇒ 不配就跟着变成 3s」
+ * ——<b>那是错的</b>：Boot 4.0.8 {@code createClientOptions} 的字节码是
+ * {@code if (connectTimeout != null) { … }} ⇒ null ⇒ 整段跳过 ⇒ 用 Lettuce 默认 <b>10s</b>
+ * ⇒ 漂移方向是 10s vs 5s（修法与结论不变））。
  *
  * <h2>取值出处链（逐层到消费点）</h2>
  * <pre>
@@ -98,7 +101,8 @@ class FollowApiRedisTimeoutConfigTest {
         assertEquals("5s", dig(root, "spring", "data", "redis", "connect-timeout"),
                 "连接超时应为 5s（= go-redis DialTimeout 默认）。"
                         + "Boot 4 里它是 DataRedisProperties.connectTimeout 这个**独立字段**；"
-                        + "不配就会回落到 timeout，与 Go 不一致");
+                        + "不配**不会**回落到 timeout（Boot 4 在 null 时整段跳过）"
+                        + "⇒ 会用 Lettuce 默认 10s，与 Go 的 5s 不一致");
     }
 
     @Test

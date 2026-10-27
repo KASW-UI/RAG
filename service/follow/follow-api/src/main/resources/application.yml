@@ -39,7 +39,10 @@ spring:
       #   ⇒ **503**，与 Go / user-api 同形（Go 的 CLIENT PAUSE 实测 3.003s）。
       timeout: 3s
       # 连接超时：Go 的 go-redis DialTimeout 默认 **5s**。
-      # Lettuce 在 connect-timeout 未设时回落到 timeout ⇒ 不配这行会跟着变成 3s。
+      # 🔴 2026-10-27 订正：此处原写「Lettuce 在 connect-timeout 未设时回落到 timeout ⇒ 跟着变成 3s」
+      #    ——**那是错的**：Boot 4.0.8 createClientOptions 的字节码是 `if (connectTimeout != null) { … }`
+      #    ⇒ null ⇒ 整段跳过 ⇒ 用 Lettuce 自己的默认 **10s**（SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION）
+      #    ⇒ 不配这行 = 10s（≠ Go 的 5s）；修法与结论不变。详见 DRIFT-FOLLOW-011 订正块。
       # Boot 4 里这是独立属性（DataRedisProperties.connectTimeout，模块 spring-boot-data-redis）。
       connect-timeout: 5s
 

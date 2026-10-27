@@ -24,8 +24,12 @@ spring:
       #      BLPop 用到，ExistsCtx 不用它）⇒ 别被它误导。
       timeout: 3s
       # 连接超时：Go 的 go-redis DialTimeout 默认 **5s**。
-      # ⚠️ **本行原缺**（2026-10-27 补）⇒ Lettuce 在 connect-timeout 未设时**回落到 timeout**
-      #   ⇒ 连接超时跟着变成 3s，与 Go 的 5s 不一致 ⇒ admin-api 早已补上，本模块是遗漏。
+      # ⚠️ **本行原缺**（2026-10-27 补）⇒ Boot 4 在 connect-timeout 为 null 时**整段跳过**
+      #   ⇒ 用 Lettuce 自己的默认 **10s**（SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION）
+      #   ⇒ 连接超时 10s ≠ Go 的 DialTimeout 5s ⇒ admin-api 早已补上，本模块是遗漏。
+      #   🔴 2026-10-27 订正：此处原写「回落到 timeout ⇒ 跟着变成 3s」——**那是错的**
+      #      （Boot 4.0.8 LettuceConnectionConfiguration.createClientOptions 字节码：
+      #       `if (connectTimeout != null) { … }` ⇒ null ⇒ 整段不执行）⇒ 详见 DRIFT-USERAPI-016 订正块。
       # Boot 4 里这是独立属性（DataRedisProperties.connectTimeout，模块 spring-boot-data-redis）。
       connect-timeout: 5s
 

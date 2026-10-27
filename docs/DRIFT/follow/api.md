@@ -327,6 +327,23 @@ U3 的突发测试里抓到过 **`HTTP 200` + body `Request Timeout`** ——
 - **RAG Behavior（修前）**：`application.yml` 写的是 `spring.data.redis.timeout: **2s**`
   ⇒ **无出处、无人审过**（台账里只登记成「待审」的 `DRIFT-USERAPI-015 附带`）
   ⇒ 且**没配 `connect-timeout`** ⇒ Lettuce 回落到 timeout ⇒ 连接超时也变成 **2s**。
+
+> 🔴 **2026-10-27 订正（字节码实测 · 保留原值不改写）**：上一行「**Lettuce 回落到 timeout ⇒ 连接超时也变成 2s**」的机制说法**是错的**。
+> Boot 4.0.8 `LettuceConnectionConfiguration.createClientOptions` 的**字节码**是：
+> ```java
+> Duration connectTimeout = getProperties().getConnectTimeout();   // :9
+> if (connectTimeout != null) {                                     // :16
+>     builder.socketOptions(SocketOptions.builder().connectTimeout(connectTimeout).build());
+> }
+> ```
+> ⇒ **null ⇒ 整段不执行** ⇒ 用 Lettuce 自己的默认
+> `io.lettuce.core.SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION` = **10s**
+> （`javap -constants` 实测：`DEFAULT_CONNECT_TIMEOUT = 10l`）
+> ⇒ **不配 ⇒ 10s，不是 2s、也不是 3s**。
+> ⇒ ⚠️ 修前的真实漂移是「**连接超时 10s vs Go 的 5s**」（比原表述**更松**，不是「更严 2s」）
+> ⇒ **修法与结论不变**（显式配 `connect-timeout: 5s`）⇒ 本域现已配对。
+> ⇒ ⚠️ 本轮**变异实测已印证**：摘掉 `connect-timeout` ⇒ 客户端读数 `PT10S`（不是 PT3S）。
+> ⇒ 同款订正已加在 `follow-api` 的 yml 注释与 2 个守门 javadoc 里（**保留原值不改写**）。
 - **Difference**：
   1. **读命令超时 2s vs Go 3s** ⇒ Redis「**连上但挂住**」时：Go 的 EXISTS 挂到 3s ⇒ 与 HTTP 预算（`observability.http-timeout: 3s`）**同刻耗尽** ⇒ **503**；
      本域修前 2s 就 fail-open ⇒ **200** ⇒ **与 Go 不一致**（也与自己域内 `user-api` / `admin-api` 的 3s 不一致 ⇒ **同族三域口径不一**）。

@@ -4154,3 +4154,121 @@ Go 侧 `service/user/admin/rpc/admin.go` 的注册是 go-zero 的 `reflection.Re
   ② §「抽样复核」表「`UserEntity` 用 jsonb handler」⇒ **已过期**（global B10 已改 `JsonTextTypeHandler`）；
   ③ 同表「`users_user.extra_info` 仍是 JSONB」⇒ **已过期**（`01_create_user.sql:41` 建表就是 TEXT）。
 - **零代码改动** ⇒ 本轮**未重跑门禁**（改的是台账文本，不是代码 ⇒ 门禁结论不变；下次动代码时再跑）。
+
+---
+
+## 12. 2026-10-27：Redis 在 **rpc 侧**的同机制不同形态 ⇒ `DRIFT-ARPC-013`（**已修** · 域内自闭环）
+
+### 12.0 触发：G2 的回执 + **同族横向对比**
+
+G2（message / like / task lane）发来回执，说它在自己域的 **rpc 侧**查到一条
+「Redis 断连把整个 RPC 拖到超时」的漂移 ⇒ 我把**本域所有用 Redis 的组件**并排核了一遍
+（**同族横向对比**是查出「配置口径不一致」最省力的手段 —— 逐个对着真源读看不出「这一族该是多少」）：
+
+| 组件 | Redis 用途 | `timeout`（命令） | `connect-timeout`（连接） | 断连策略 |
+|---|---|---|---|---|
+| `admin-api` | **读**黑名单（fail-open） | 3s ✅ | 5s ✅ | `REJECT_COMMANDS` ✅（`DRIFT-ADMINAPI-012`） |
+| `admin-rpc`（本组件） | **写**黑名单（logout） | 3s ✅ | 5s ✅ | 🔴 **本轮补** |
+
+⇒ **api 侧已补齐、rpc 侧没补** ⇒ 同一个 Redis 机制，**两种后果**。
+
+### 12.1 🔴 漂移本体：断连时命令被**排队** ⇒ 挂到 3s ≫ `rpc-timeout: 2s` ⇒ **RPC 先超时**
+
+**Go 侧形状**
+
+```
+Go service/user/admin/rpc/internal/logic/logoutlogic.go:35-40
+    err := l.svcCtx.BizRedis.SetexCtx(l.ctx, blackListKey, "banned", int(expireTime))
+    if err != nil {
+        logger.LogBusinessErr(l.ctx, errmsg.ErrorRedisUpdate, err)
+        return nil, status.Error(codes.Internal, "注销失败,Redis写入异常")    ← **快速失败 ⇒ INTERNAL**
+    }
+为什么快：go-zero v1.10.2 core/stores/redis/redisclientmanager.go:14 maxRetries = 3
+          · :32-39 red.NewClient(&red.Options{Addr, MaxRetries: maxRetries, MinIdleConns, ...})
+          —— **不设** DialTimeout / ReadTimeout ⇒ 每次重试**立即失败** ⇒ 整体快速失败（实测 ~1.7s，仍在 2s 预算内）
+```
+
+**RAG 侧形状**（`AdminDomainService.logout:258-277`）
+
+```
+catch (StatusRuntimeException e) { throw e; }                                       ← B-1 守卫
+catch (Exception e) { log.error("admin logout Redis setex failed", e);             ← 原始异常进日志（与 Go 同款）
+                      throw Status.INTERNAL.withDescription("注销失败,Redis写入异常").asRuntimeException(); }
+```
+
+⇒ **错误面（status + description）本来就与 Go 逐字一致** ⇒ 漂移**不在错误面**，在**失败耗时**：
+
+| 形态 | 机制 | 耗时 | 客户端看到 |
+|---|---|---|---|
+| **Go** | go-redis `MaxRetries=3` ⇒ 每次重试立即失败 | ≈1.7s | `INTERNAL`「注销失败,Redis写入异常」 |
+| **RAG 修前** | Lettuce `DEFAULT` + `autoReconnect=true` ⇒ **命令排队等重连**（`DefaultEndpoint:149` / `:837-852`）⇒ 挂到 `commandTimeout: 3s` | ≈3s | 🔴 **1015「服务繁忙」**（`DEADLINE_EXCEEDED`，3s ≫ `rpc-timeout: 2s`） |
+| **RAG 修后** | `REJECT_COMMANDS` ⇒ **立即拒命令**（`DefaultEndpoint:314`） | ≈1ms | `INTERNAL`「注销失败,Redis写入异常」 ✅ **与 Go 同形** |
+
+⚠️ **只改「断连」，不改「连着但不回包」**：后者两侧都等满各自的读超时（Go `ReadTimeout` 3s / RAG `timeout: 3s`）
+⇒ 都 ≫ 本组件 2s 预算 ⇒ **两侧都是 DEADLINE_EXCEEDED** ⇒ 已一致 ⇒ 两类故障**分别**对齐。
+
+### 12.2 修法与落点
+
+| 项 | 内容 |
+|---|---|
+| **落码** | `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/config/RedisDisconnectedBehaviorConfig.java`（**新建** · 域内副本）：`LettuceClientOptionsBuilderCustomizer` ⇒ `REJECT_COMMANDS` |
+| **落点决策** | 载体文件住在**本域内** ⇒ **域侧自修**，不等 G4（判据：被改的那份文件本来住在哪） |
+| **共享层收编** | ✅ 已作为反馈单派给 G4（`GoStyleRedisClientAutoConfiguration` ＋ `AutoConfiguration.imports`）⇒ **共享层那份先合进各域的树**，才能删域内副本 ⇒ 现共 **5** 份域内副本（3 api + 2 rpc）⇒ **收编时须一并删掉**（否则双份配置） |
+| **守门** | `AdminRpcRedisDisconnectedFastFailTest`（**新** · 2 例）：① `REJECT_COMMANDS` 真被装配 ＋ Redis 可达时写黑名单通；② 断连（**FIN** 形态）时写命令**快速失败**（<1500ms）**且**异常**不是** `RedisCommandTimeoutException` |
+| **故障注入** | ⚠️ **必须是 FIN 不是 RST**：`container.stop()` 发 RST ⇒ Lettuce 立刻失败 ⇒ **走不到** `disconnectedBehavior` 分支 ⇒ 两种配置耗时都是 1~13ms ⇒ **分不出** ⇒ 用**可控 TCP 透传代理**「先关监听口 ＋ 再半关闭已建立连接」复刻 live 形态 |
+| **变异验证** | `REJECT_COMMANDS` → `DEFAULT` ⇒ 用例 2 红（实测 ≈3000ms）⇒ **绿测试能变红** ✅ |
+
+**✅ 变异实测（M3 · 2026-10-27）**：`REJECT_COMMANDS` → `DEFAULT` ⇒ **2/2 红**，失败原文：
+
+```
+AssertionFailedError: Redis 断连后命令必须**快速失败**，实测耗时 3011ms，预算 1500ms。…
+  异常链：QueryTimeoutException: Redis command timed out <- RedisCommandTimeoutException:
+           Command timed out after 3 second(s)   ==> expected: <true> but was: <false>
+AssertionFailedError: 断连策略必须是 REJECT_COMMANDS：… ==> expected: <REJECT_COMMANDS> but was: <DEFAULT>
+```
+
+⇒ **3011ms** 正是「命令排队到 `commandTimeout: 3s`」的形状 ⇒ **3s ≫ `rpc-timeout: 2s` ⇒ RPC 先超时**这条推理**被实测坐实**。
+⇒ 同批 user-rpc 侧变异（M2）实测 **3012ms** + `RedisCommandTimeoutException: Command timed out after 3 second(s)` ⇒ **两侧同形**。
+⇒ ⚠️ 还原用 `md5` 校验（M2/M3 均 `YES`）。
+
+### 12.3 🔴 顺带订正一个本仓多处写错的机制
+
+本仓此前写「Lettuce 在 `connect-timeout` 未设时**回落到 timeout** ⇒ 跟着变成 3s」——**那是错的**。
+Boot 4.0.8 `LettuceConnectionConfiguration.createClientOptions` 的**字节码**是：
+
+```java
+Duration connectTimeout = getProperties().getConnectTimeout();   // :9
+if (connectTimeout != null) {                                     // :16
+    builder.socketOptions(SocketOptions.builder().connectTimeout(connectTimeout).build());
+}
+```
+
+⇒ **null ⇒ 整段不执行** ⇒ 用 Lettuce 自己的默认
+`io.lettuce.core.SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION` = **10s**
+（`javap -constants` 实测：`DEFAULT_CONNECT_TIMEOUT = 10l`）。
+⇒ 本组件的 `connect-timeout: 5s` **配得对**（值不变），但**注释里的机制说法是错的** ⇒ 已加订正注记（**保留原值不改写**）。
+⇒ ⚠️ **admin-rpc 的 `connect-timeout` 本来就配了 5s** ⇒ 本组件**没有**「缺 connect-timeout」那一条
+⇒ **只有 `user-rpc` 有**（见 `docs/DRIFT/users/user/rpc.md` 的 `DRIFT-USERRPC-V-014` 子项 ①）。
+
+### 12.4 诚实边界
+
+- ⚠️ **本轮 Go 腿是 L1 源码对照**，**不是**双侧活体对拍 ⇒ 证据强度 **L1**（api 侧那条有 L3 真容器活体）。
+- ⚠️ **没有做「客户端看到 1015 vs INTERNAL」的端到端双侧活体对拍** ⇒
+  「修后客户端拿到 INTERNAL」是由**代码路径推出**（`REJECT_COMMANDS` ⇒ 立即抛 ⇒ 走进 `catch (Exception e)`）
+  ＋ **守门证明「立即失败」这一半** ⇒ **另一半（客户端可见值）未实测**。
+- ⚠️ `admin-rpc` 的 `connect-timeout: 5s` 早于本轮就已配对 ⇒ **本轮没动那个值**；
+  本轮在 admin-rpc 侧只落了**断连策略**（`REJECT_COMMANDS`）与其守门。
+
+### 12.5 与相邻域的关系
+
+- **api 侧同款**：`DRIFT-ADMINAPI-012`（`admin-api`）⇒ 机制同、后果不同（503 vs **RPC 撞超时**）。
+- **user 域同款**：`DRIFT-USERRPC-V-014`（`user-rpc`，子项 ② 同条、子项 ① 是 user-rpc 独有）⇒ **两侧 rpc 口径一致**。
+- **跨域形态**：G2 在 task/like 域查到的是**同一个**形态 ⇒ **三域口径一致** ⇒ 共享层收编后应当是**一份**配置。
+
+### 12.6 本轮回归（**2026-10-27 · 独占窗口**）
+
+- **admin-rpc**：**117** 条（115 + 🆕2）· `failures=0 · errors=0 · skipped=0`
+- **本域 6 组件合计 667**（user-api 121 · user-rpc 143 · admin-api 140 · admin-rpc 117 · follow-api 68 · follow-rpc 78）
+  ⇒ 逐项明细见 [`../user/rpc.md` §9](../user/rpc.md) ⇒ **两个独立口径交叉验过**（maven 自身模块汇总 ＋ surefire XML 逐文件求和）
+- **门禁 5/5 EXIT=0**（lane-ownership / role-model / coupling / doc-links / ledger-count）
+- ⚠️ **错峰**：G4 的 52 模块全量与 G3 的 29 模块回归期间本域**不起 maven** ⇒ 独占窗口才跑 ⇒ **无 `EXIT=137`**。

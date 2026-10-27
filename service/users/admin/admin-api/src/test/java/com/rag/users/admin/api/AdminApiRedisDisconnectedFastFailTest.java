@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -244,6 +245,23 @@ class AdminApiRedisDisconnectedFastFailTest {
                         + "Lettuce 的 DEFAULT + autoReconnect=true 会把断连期间的命令**排队**"
                         + "（DefaultEndpoint:149 / :837-852），挂到 commandTimeout(3s) ⇒ HTTP 预算先耗尽 ⇒ 503，"
                         + "而 Go 是快速失败 ⇒ fail-open 200。");
+
+        // ── 命令超时 / 连接超时的**消费层**锚点 ─────────────────────────
+        // ⚠️ 判据必须是 `getClientConfiguration().getCommandTimeout()`：
+        //   · `io.lettuce.core.ClientOptions` 在 lettuce 6.8.2 **没有** getCommandTimeout()
+        //   · `ClientOptions.getTimeoutOptions()` 的 source 恒为 DefaultTimeoutSource ⇒ 假断言
+        // ⇒ 本测试**不覆盖** spring.data.redis.timeout ⇒ 读到的就是**真实配置值**。
+        assertEquals(Duration.ofSeconds(3),
+                connectionFactory.getClientConfiguration().getCommandTimeout(),
+                "命令超时必须等于 3s（= go-redis ReadTimeout 默认）⇒ 这是命令超时的**消费层**锚点。"
+                        + "拿不到 3s 说明 spring.data.redis.timeout 压根没流到 Lettuce 客户端。");
+        assertEquals(Duration.ofSeconds(5),
+                connectionFactory.getClientConfiguration().getClientOptions()
+                        .map(io.lettuce.core.ClientOptions::getSocketOptions)
+                        .map(io.lettuce.core.SocketOptions::getConnectTimeout)
+                        .orElse(null),
+                "连接超时必须等于 5s（= go-redis DialTimeout 默认）⇒ 连接超时的**消费层**锚点。"
+                        + "若是 10s ⇒ 那是 Lettuce 自己的默认（Boot 4 在 null 时整段跳过，不回落 timeout）。");
 
         redisTemplate.opsForValue().set("admin:redis:probe", "1");
         assertEquals(Boolean.TRUE, redisTemplate.hasKey("admin:redis:probe"),

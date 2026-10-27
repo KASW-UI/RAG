@@ -2088,6 +2088,24 @@ go-zero@v1.10.2 rest/server.go:222-233     WithMiddleware ⇒ middleware(route.H
 ⇒ **变异验证 3/3 变红**（本轮）：admin 摘掉 `connect-timeout` ⇒ `expected:<PT5S> but was:<PT10S>`
 · user 改 `3s` ⇒ `expected:<PT5S> but was:<PT3S>` · follow 摘掉 ⇒ `expected:<PT5S> but was:<PT10S>`。
 
+> 🔴 **2026-10-27 订正（字节码实测 · 保留原值不改写）**：上面几处「**≈3s = 回落到 timeout**」的机制说法**是错的**。
+> Boot 4.0.8 `LettuceConnectionConfiguration.createClientOptions` 的**字节码**是：
+> ```java
+> Duration connectTimeout = getProperties().getConnectTimeout();   // :9
+> if (connectTimeout != null) {                                     // :16
+>     builder.socketOptions(SocketOptions.builder().connectTimeout(connectTimeout).build());
+> }
+> ```
+> ⇒ **null ⇒ 整段不执行** ⇒ 用 Lettuce 自己的默认
+> `io.lettuce.core.SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION` = **10s**
+> （`javap -constants` 实测：`DEFAULT_CONNECT_TIMEOUT = 10l`）
+> ⇒ **不配 ⇒ 10s，不是 3s**。
+> ⇒ **本域的 `connect-timeout: 5s` 配得对，修法与结论不变**；但**漂移方向的表述要改**（10s vs 5s，不是 3s vs 5s）。
+> ⇒ ⚠️ 本轮**变异实测已经印证**：摘掉 `connect-timeout` ⇒ 客户端读数 `PT10S`（**不是** PT3S）
+> ⇒ ⇒ 同一轮实测与本条订正**互相印证**（旧文写的是 PT3S，实测是 PT10S）。
+> ⇒ 同款订正已加在 `admin-api` / `admin-rpc` 的 yml 注释与 4 个守门 javadoc 里（**保留原值不改写**）。
+> ⇒ 详见同轮的 `DRIFT-ARPC-013`（admin-rpc 侧：**断连排队**那条真漂移）。
+
 ---
 
 ## 13. 🆕 `DRIFT-ADMINAPI-012` · Redis 断连 ⇒ 命令挂满 3s ⇒ **503**（Go 是 fail-open 200）—— **已修**（2026-10-27 · G1 lane）

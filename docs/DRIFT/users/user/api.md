@@ -1667,6 +1667,21 @@ Must Preserve: 「Redis 不可用 ⇒ **fail-open 放行**」（Go 的 `err == n
 > ⚠️ **与 `DRIFT-USERAPI-015` 同族但不是同一条**：015 是「**DNS 解析失败**时 Go/RAG 的 200/503 摇摆」；
 > **本条是「超时**配置值**本身与 Go 不符」** ⇒ 两件事的判据、影响面、修法都不同。
 
+> 🔴 **2026-10-27 订正（字节码实测 · 保留原值不改写）**：本条标题与下文「**回落到 timeout ⇒ 变成 3s**」的机制说法**是错的**。
+> Boot 4.0.8 `org.springframework.boot.data.redis.autoconfigure.LettuceConnectionConfiguration.createClientOptions` 的**字节码**是：
+> ```java
+> Duration connectTimeout = getProperties().getConnectTimeout();   // :9
+> if (connectTimeout != null) {                                     // :16
+>     builder.socketOptions(SocketOptions.builder().connectTimeout(connectTimeout).build());
+> }
+> ```
+> ⇒ **null ⇒ 整段不执行** ⇒ 用 Lettuce 自己的默认
+> `io.lettuce.core.SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION` = **10s**（`javap -constants` 实测：`DEFAULT_CONNECT_TIMEOUT = 10l`）
+> ⇒ **不配的结果是 10s，不是 3s**（变异实测：摘掉 `connect-timeout` ⇒ 客户端 connectTimeout 读数 = **PT10S**）。
+> ⇒ **修法与结论不变**（显式配 5s），但**漂移方向是 10s vs Go 的 5s**，不是 3s vs 5s。
+> ⇒ 本条已在 **1 个 yml 注释 + 2 个守门 javadoc** 里加同款订正注记（**保留原值不改写**）。
+> ⇒ 详见同轮的 `DRIFT-USERRPC-V-014`（user-rpc 侧**确实缺**这一项 ⇒ 那里是**真漂移**）。
+
 - **Component**：user-api / 全部 protected 端点的黑名单 EXISTS（`JwtAuthInterceptor` 阶段 2）
 - **Category**：Config / Timeout Semantics
 - **Classification**：OBSERVABLE DIFFERENCE（**条件性**：仅在「Redis 连不上（连接阶段挂住）」形态下可见）
@@ -3423,3 +3438,23 @@ RAG 侧的完整机制链（**消费点**）：
 
 ⚠️ **本轮改了 user-api 的 Redis 客户端行为**，
 所以除 user-api 自身外，还要确认 `service/common` / `users-common` / `user-rpc` 没被带崩。
+
+---
+
+## 2026-10-27 第十四轮附记：🧹 **2 处 U+FFFD 注释损坏修复**（**只改注释、不改行为**）
+
+> 触发：G3（article/comment/favorite/hot lane）在全仓扫 U+FFFD 时，把**我域的 3 处**列进了它的清单
+> ⇒ **归属在我域（G1 写权内）⇒ 我域自修** ⇒ 但**原字不可考**，所以我**自己核了上下文**再落笔
+> ⇒ 结论与 G3 的推断**一致**。
+
+| 文件:行 | 损坏形态 | 重建 | 核对依据 |
+|---|---|---|---|
+| `service/users/user/user-api/src/test/java/com/rag/users/user/api/AvatarHistoryIgnoresBodyTest.java:61` | `真容���脚本`（3×FFFD ⇒ 1 个完整汉字） | **「真容器脚本」** | 本仓固定术语「真容器」＝ testcontainers 容器（与同段「真 Tomcat」并列） |
+| `service/users/user/user-api/src/main/java/com/rag/users/user/api/service/AvatarHistoryService.java:32` | `根本��读 body`（2×FFFD ⇒ 3 字节汉字**丢末字节**） | **「根本不读 body」** | 同句前半「Go 侧 `getavatarhistoryhandler.go` 全文 26 行**没有 httpx.Parse**」⇒ 对应「根本不读」 |
+
+⚠️ **刻意保留的两处（不要动）**：
+- `service/users/user/user-api/src/test/java/com/rag/users/user/api/UserApiGoStyleBodyContentTypeTest.java:376`
+  的 U+FFFD 是 `assertFalse(decodedAsUtf8.contains("�"))` 的**被测对象** ⇒ 改了这条断言就废了。
+- `docs/Pitfalls/users/user/rpc.md:146` 的 `'用户不�?'` 是**故意记录「末字已不可恢复」**。
+
+⇒ 修复后 **user-api 源码里只剩上面那 1 处故意的 U+FFFD**（已 `grep` 全域核过：其余命中全在 `target/` 的产物里）。

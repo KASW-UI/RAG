@@ -42,7 +42,29 @@ spring:
       host: ${REDIS_ADDR:redis}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
+      # ⚠️ 取值出处（2026-10-27 补记，此前只有数值没有出处）：
+      #   Go 的 user.yaml 的 BizRedis 段**没有**任何 timeout 字段
+      #     （service/user/user/rpc/etc/user.yaml:17-20 = Host/Type/Pass 三项）
+      #     → go-zero v1.10.2 core/stores/redis/redisclientmanager.go:32-39
+      #       建 red.Options 时只传 Addr/User/Pass/DB/MaxRetries/MinIdleConns/TLSConfig
+      #       —— **三个 timeout 一个都没传**
+      #     → go-redis/v9 options.go init() 默认：ReadTimeout = 3s
+      #   ⇒ 读命令超时 3s，与 go-redis 默认逐字相同。
+      #   🔴 go-zero redis.go:27 的 `readWriteTimeout = 2s` 是**死常量**（全文件只有 BLPop 用），
+      #      对这里的 SETEX 不适用，别被它误导。
       timeout: 3s
+      # 连接超时：Go 的 go-redis DialTimeout 默认 **5s**（service/user/user/rpc 只写黑名单，
+      # 见 logoutlogic.go:35 的 SetexCtx ⇒ 连接超时在这一条路径上是生效的）。
+      # ⚠️ **不配这行会变成 10s，不是 3s**：
+      #   Boot 4.0.8 LettuceConnectionConfiguration.createClientOptions 的字节码是
+      #     Duration connectTimeout = getProperties().getConnectTimeout();
+      #     if (connectTimeout != null) { builder.socketOptions(SocketOptions.builder().connectTimeout(...)); }
+      #   ⇒ **null ⇒ 整段不执行** ⇒ 用 Lettuce 自己的默认
+      #     （io.lettuce.core.SocketOptions.DEFAULT_CONNECT_TIMEOUT = 10s）
+      #   ⇒ 与 Go 的 5s 不一致 ⇒ 必须显式配。
+      # ⚠️ 此前本仓多处写成「不配会回落到 timeout=3s」——**那是错的**（Boot 4 无此回落），
+      #    正确说法是「不配 ⇒ Lettuce 默认 10s」。详见 DRIFT-USERRPC-V-014。
+      connect-timeout: 5s
 
   # ===== 3.5. Nacos 服务注册（修 DRIFT-NEW-001）=====
   # user-rpc 启动时自动注册到 Nacos，user-api 通过 discovery://user-rpc 发现本服务。

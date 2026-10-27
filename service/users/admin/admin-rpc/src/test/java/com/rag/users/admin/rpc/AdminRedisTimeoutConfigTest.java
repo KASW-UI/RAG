@@ -33,8 +33,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * ⇒ Go 的读命令超时 **3s**、连接超时 **5s**。
  *
  * <p>本模块原先只配了 {@code spring.data.redis.timeout: 3s}，**读超时碰巧对上**，
- * 但 Lettuce 在 {@code connect-timeout} 未设时会<b>回落到 timeout</b>
- * ⇒ 连接超时跟着变成 3s，与 Go 的 5s 不一致。已补 {@code connect-timeout: 5s}。
+ * 但 Boot 4 在 {@code connect-timeout} 为 null 时**整段跳过**（**不**回落 timeout）
+ * ⇒ 连接超时用 Lettuce 自己的默认 **10s**（{@code SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION}），
+ * 与 Go 的 5s 不一致。已补 {@code connect-timeout: 5s}。
+ * <br>⚠️ **2026-10-27 订正**：此处原写「回落到 timeout ⇒ 跟着变成 3s」——<b>那是错的</b>
+ * ⇒ 漂移方向是 10s vs 5s（修法与结论不变）。
  *
  * <h2>🔴 一个会骗人的红鲱鱼（本条存在的主要理由之一）</h2>
  *
@@ -96,7 +99,8 @@ class AdminRedisTimeoutConfigTest {
         assertEquals("5s", dig(root, "spring", "data", "redis", "connect-timeout"),
                 "连接超时应为 5s（= go-redis DialTimeout 默认）。"
                         + "Boot 4 里它是 DataRedisProperties.connectTimeout 这个**独立字段**；"
-                        + "不配就会回落到 timeout=3s，与 Go 不一致");
+                        + "不配**不会**回落到 timeout（Boot 4 在 null 时整段跳过）"
+                        + "⇒ 会用 Lettuce 默认 10s，与 Go 的 5s 不一致");
     }
 
     /**
