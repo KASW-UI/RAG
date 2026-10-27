@@ -694,6 +694,10 @@ G4 落码 ⇒ 共享层行为变 ⇒ **G1 这域的 A1~A9 结论要复核**（�
 ## 10. 🆕 **待办依赖：MP 排序桥下沉共享层**（2026-10-27 收到 G3 预告 · **已独立核实**）
 
 > ⚠️ **本节是「登记」，不是派单、也不是动作** ⇒ G3 明确说「只是预告」⇒ 本域**不动手**。
+>
+> 🟢 **2026-10-27 订正：这一节的「不动手」已经作废 —— 收编已落码 ⇒ 见本文件末尾的「§28. MP 排序桥收编」**
+> （前置依赖「先 G4 共享层 ⇒ 再各域删」**已满足**：共享层那份随 `b7faeb4` 合入本树）。
+> 本节以下内容**作为历史记录保留不改**（§6.3「不重写历史」）。
 
 ### 10.1 独立核实的结论（G3 的说法逐条成立）
 
@@ -1725,3 +1729,148 @@ TEST-com.rag.users.user.api.ScratchTimeoutOptionsProbeTest.xml   （1 条，mtim
 - G4 `745a8b2`「撤回 #6 的『两步方案』与『需 Jason 拍板』那条裁决题 —— 它的前提已被 GORM 源码证伪」⇒ ⇒ **与我域的结论一致**（落 DDL = RAG 可空 = **方向相反的新漂移**）⇒ ⇒ **G4 不必为本单再做任何事**。
 - ⇒ ⇒ **剩下的唯一落点 = 销号签字**（`docs/Intentional_Deviations/**` ⇒ **不在 G1 也不在 G4 写权面** ⇒ 需整合者拍板）。
 - ⚠️ **本轮我域台账 `§19.4` 那条「V-002 我域『#6 第 1 步』已取消」的登记 ⇒ 现已由 G4 的撤回【双向确认】** ⇒ ⇒ 该待确认项**关闭**。
+
+---
+
+## 28. 🆕 **MP 排序桥收编：域内 3 份副本删除 ＋ 三层守门 ＋ 三次变异**（2026-10-27 · G1 lane）
+
+> **本节记录**：把 `users`（user-rpc / admin-rpc）＋ `follow`（follow-rpc）三份域内
+> `MybatisPlusOrderingBridgeAutoConfiguration` 收编到共享层。
+> **全部落在 G1 写权内**（`service/users/**` ＋ `service/follow/**` ＋ `docs/DRIFT/{users,follow}/**`）。
+> ⇒ 承接本文件 **§10「待办依赖：MP 排序桥下沉共享层」** —— 那一节的前置依赖**已满足**，本节是它的落码。
+
+### 28.1 🟢 **前置核实（落码前逐条实测，不采信转述）**
+
+| # | 前置项 | 实测 | 结论 |
+|---|---|---|---|
+| 1 | **共享层那份是否已在树** | `service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java` 存在 ⇒ 随 `b7faeb4` 合入 | ✅ **前置满足** |
+| 2 | **共享层那份是否已注册** | `service/common/src/main/resources/META-INF/spring/…AutoConfiguration.imports:4` = `com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration`；且 `service/common/target/classes/META-INF/spring/` 实测有该文件（**会打进 jar**） | ✅ |
+| 3 | **我域 3 个 rpc 是否依赖 `com.rag:common`** | user-rpc / admin-rpc / follow-rpc **全部** `com.rag:common`，**scope 均为默认 compile**（非 provided/test） | ✅ ⇒ 该资源在**运行期** classpath 上 |
+| 4 | **删掉域内清单后共享层那份还注册吗** | Boot 4 `ImportCandidates.findUrlsInClasspath` 字节码实测 = **`ClassLoader.getResources(String)`（复数）** ⇒ 读 classpath 上**全部**同名资源 ⇒ **域内清单删掉不影响共享层那份被读取** | ✅ |
+| 5 | **两份桥的排序边是否同向** | 域内：`after = DataSourceAutoConfiguration.class`（**Boot 4 新包名** `org.springframework.boot.jdbc.autoconfigure.*`）/ `before = MybatisPlusAutoConfiguration.class`；共享层：`afterName = "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration"` / `beforeName = "com.baomidou.mybatisplus.autoconfigure.MybatisPlusAutoConfiguration"` | ✅ **同一对节点 ⇒ 排序图上同向等价 ⇒ 删除零行为差** |
+| 6 | **域内清单是否只含那一行** | user-rpc 72 B / admin-rpc 74 B / follow-rpc 75 B ⇒ **各只含 1 行** ⇒ 删掉整份清单文件（不是留空文件） | ✅ |
+| 7 | **有没有人 import 被删的类** | 全仓 `import com.rag.{users.user.rpc,users.admin.rpc,follow.follow.rpc}.config.MybatisPlusOrderingBridgeAutoConfiguration` ⇒ **零命中** | ✅ 无编译残留 |
+
+> ⚠️ **口径澄清（与 G4 的说法不同，两处都实测过）**：
+> G4 早前说「合并后域内副本被**遮蔽**」⇒ **不成立** —— 共享层那份**没有** `@ConditionalOnMissingBean`
+> ⇒ 两份**都会**被注册 ⇒ 但**两份都刻意为空、不注册任何 bean** ⇒ ⇒ **零行为影响**。
+> ⇒ 本次删除的**不是**「被遮蔽的冗余」，而是**「排序图上多一个同向节点」** ⇒ 删除同样是零行为差。
+
+### 28.2 🟢 **落码清单（已完成）**
+
+| 文件 | 动作 |
+|---|---|
+| `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` | **删** |
+| `service/users/user/user-rpc/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | **删**（只含那一行） |
+| `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` | **删** |
+| `service/users/admin/admin-rpc/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | **删**（只含那一行） |
+| `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` | **删** |
+| `service/follow/follow-rpc/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | **删**（只含那一行） |
+| `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/FollowRpcApplication.java` | javadoc 改写（桥的提供方 = 共享层，并写明 `getResources`（复数）这个机制依据） |
+| `docs/DRIFT/follow/rpc.md` | 逐文件对照索引**删第 5 行** ⇒ 原 #6~#21 前移为 **#5~#20** ⇒ Java 侧 21 → **20**；连带修 :368 跨文档交叉引用 + :377「行 #1–#21」→「#1–#20」 |
+| `docs/DRIFT/follow/vs-common.md` | §10 加 §10.2「订正：§10.4 的『本轮不动手』已被后续事实取代」 |
+
+> ✅ **users 侧台账零改动**：`docs/DRIFT/users/{user,admin}/rpc.md` **实测零命中**该桥 ⇒ 无需订正（不留悬念）。
+
+### 28.3 🟢 **守门：三份「三层加码」判据**
+
+**三层分工**（每层各能独立转红，见 §28.4）：
+
+| 层 | 判据 | 抓什么 |
+|---|---|---|
+| ① **注册层** | classpath 上**全部**同名 `AutoConfiguration.imports` 资源里，**至少一份**含共享层那份的 FQN | 桥没被注册 ⇒ 排序边不存在 |
+| ② **收编层** | 域内那份**类文件必须不在 classpath 上**（`Class.forName` 抛 `ClassNotFoundException`） | 收编没做 ⇒ 全仓两份桥同时注册 ⇒ 共享层后续改动在本域静默不生效 |
+| ③ **机制层** | 运行期容器里**真的有 `SqlSessionFactory`** | 排序边**真的被消费**（不是装饰） |
+
+| 组件 | 守门落点 | 上下文形态 |
+|---|---|---|
+| `user-rpc` | `bootstrap/UserRpcContainerWiringTest#mybatisOrderingBridgeMustBeProvidedBySharedLayer` | `@SpringBootTest(classes = UserRpcApplication.class)` ＋ 真 PG |
+| `admin-rpc` | `bootstrap/AdminRpcContainerWiringTest#mybatisOrderingBridgeMustBeProvidedBySharedLayer` | `@SpringBootTest(classes = AdminRpcApplication.class)` ＋ 真 PG |
+| `follow-rpc` | `FollowRpcWiringTest#mybatisOrderingBridgeMustBeProvidedBySharedLayer` | `@SpringBootTest(classes = FollowRpcApplication.class)` ＋ 真 PG |
+
+> ⚠️ **为什么第 ① 层必须遍历「全部」同名资源**：原写法用 `getResourceAsStream` 取**第一份**
+> ⇒ 而 classpath 上可能有**多份**（各模块自己的 + `service/common` 的）⇒ **命中哪份取决于 classpath 顺序**
+> ⇒ **判定不确定** ⇒ 现改为遍历全部、断言「至少一份含目标行」⇒ ⇒ **与「有几个模块自带清单」解耦**
+> ⇒ 谁再加自己的清单也不会让这条判据变脆。
+>
+> ⚠️ **为什么第 ③ 层不能用「清单里有那行」代替**：清单里有那行只证明**文件写了**，
+> **证明不了 Boot 真的消费了它** ⇒ 排序边失效面是**静默的**（注解对、编译过、上下文可能起得来，
+> 只有 mapper 第一次执行才炸）⇒ 必须有一条**运行期**判据。
+
+### 28.4 🟢 **变异验证：三层各自能独立转红（收编后守门不是假绿）**
+
+| 变异 | 手法 | 结果 |
+|---|---|---|
+| **MUT-A** | 把**域内那份装回来**（follow-rpc：类 + 清单）⇒ 模拟「收编没做」 | ✅ **只红第 ② 层**：`Expected java.lang.ClassNotFoundException to be thrown, but nothing was thrown`；第 ① ③ 层仍绿 ⇒ **收编判据能单独抓住「收编没做」** |
+| **MUT-B** | 运行期 `-Dspring.autoconfigure.exclude=com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration` ⇒ 桥**不被消费** | ✅ **上下文直接起不来**（20/20 全 error），根因 = `Property 'sqlSessionFactory' or 'sqlSessionTemplate' are required` ⇒ **这正是 AGENTS.md §3.3 描述的那个失效面** ⇒ **排序边真的在承重，不是装饰** |
+| **MUT-B2** | 装一份**第三个 FQN** 的等效桥（`MutProbeOrderingBridgeAutoConfiguration`，**同向**排序边）＋ 从共享层清单里**移除**共享层那行 ⇒ **上下文仍能起**（探针桥供给排序边） | ✅ **只红第 ① 层**：`排序桥未注册 ⇒ …`；第 ② ③ 层绿 ⇒ **注册层判据可独立转红**（不是被上下文失败掩盖） |
+
+> ✅ **还原校验**：三次变异全部用**备份文件 + md5 双向校验**还原 ⇒
+> 共享层清单 md5 = `b6b36234d4d0bcf69ebb17fa6a925356`（改前/改后/还原后**三次一致**）、
+> `git diff service/common/` = **空**、探针桥文件残留 = **0** ⇒ **零残留**。
+> ⚠️ MUT-B2 临时改过 `service/common` 的清单（**G4 写权**）⇒ **只作变异探针、立即还原、绝不提交**。
+
+### 28.5 🔴 **踩坑：删资源文件必须 `mvn clean` —— 否则 stale `target/classes` 让 Boot 读到已删的类**
+
+- **现象**：第一次跑定向测试 ⇒ `MVN_EXIT=1`，**12/12 全 error**，根因 =
+  `IllegalStateException: Unable to read meta-data for class
+  com.rag.users.admin.rpc.config.MybatisPlusOrderingBridgeAutoConfiguration`
+  （栈顶 = `AutoConfigurationSorter$AutoConfigurationClass.getAnnotationMetadata`）。
+- **根因**：`maven-resources-plugin` **不删除**已删源文件的副本 ⇒ `target/classes/META-INF/spring/…imports`
+  **仍留着**那一行 ⇒ `target/classes/…/MybatisPlusOrderingBridgeAutoConfiguration.class` **也还在**
+  ⇒ ⇒ **Boot 照旧注册了那个「已经不存在的源码」的类** ⇒ 排序时读元数据失败。
+- **修法**：`mvn … clean test` ⇒ **全绿**。
+- ⚠️ **纪律**：**删除源文件/资源文件后，回归命令必须带 `clean`** ⇒ 否则测的是**上一轮的构建产物**，
+  **不是当前源码** ⇒ 与 §26.5 的 `-am` 纪律**同族但不同触发点**（那条是「上游库是哪一份」，这条是「本模块产物是哪一份」）。
+
+### 28.6 🟢 **回归（带 `-am` ＋ `clean`）**
+
+- 定向轮（3 份守门）：`user-rpc` **18** / `admin-rpc` **12** / `follow-rpc` **20** 条 ⇒ **0f 0e 0s** ⇒ BUILD SUCCESS。
+- **域级全量轮**（`-am` + `clean`）：**MVN_EXIT=0 / BUILD SUCCESS**。
+  口径 = **按本域模块的 surefire 报告目录**统计（不把 reactor 总数当本域数）：
+
+  | 模块 | 用例数 | 报告份数 | f/e/s |
+  |---|---|---|---|
+  | `service/users/user/user-api` | 121 | 22 | 0/0/0 |
+  | `service/users/user/user-rpc` | 144 | 21 | 0/0/0 |
+  | `service/users/admin/admin-api` | 140 | 17 | 0/0/0 |
+  | `service/users/admin/admin-rpc` | 118 | 22 | 0/0/0 |
+  | `service/follow/follow-api` | 68 | 8 | 0/0/0 |
+  | `service/follow/follow-rpc` | 78 | 11 | 0/0/0 |
+  | **我域合计** | **669** | **101** | **0/0/0** |
+  | ＋ `service/common`（共享层，reactor 内） | 327 | 62 | 0/0/0 |
+  | **总计** | **996** | **163** | **0/0/0** |
+
+  ⚠️ 与收编前（667）**差 +2** = 新增 3 条守门中 follow/user/admin 各 +1（follow-rpc 那条是**改写**为更强断言，净 +1）。
+- **门禁（好写法：先捕获 rc 再打印）**：
+  `check-wave-lane-ownership.py` **0** · `check-wave-role-model.py` **0** · `check-doc-links.py` **0** ·
+  `check-ledger-count.py` **0** · **`check-wave-coupling.py` 1**。
+  - ⚠️ **`check-doc-links.py` 一度被我改红**（EXIT=1）⇒ 根因 = 我写的两个**简写锚点**（`#28-` / `#10-`）
+    —— 中文标题的 GitHub slug 含 emoji ＋ 去标点 ⇒ **简写锚点不可用** ⇒ 已改为**不带锚点的文字指名**
+    （「见本文件末尾的 §28」/「承接本文件 §10」）⇒ **不依赖 slug 规则** ⇒ 已修复为 EXIT=0。
+    ⚠️ **自指坑**：连**描述这个坑的文字**都不能写成 markdown 链接（守门会真的去解析它）⇒ 必须用**代码格式**书写。
+  - 🔴 **`check-wave-coupling.py` 的红项与本次收编【无关】**：仍是**收编前那一条**
+    （`GoStyleRedisClientAutoConfiguration` ⇒ users 域第一次引用共享层那份）⇒ **项数未增**。
+    ⇒ **本次排序桥收编不给 coupling 新增漂移项** —— 原因实测：域侧那 3 份在 `service/<域>/**` 下，
+    **不在 `service/common/**` 下** ⇒ 不计入 `common_radiation`；且
+    `docs/DRIFT/_cross/cross-domain-coupling.md` 的期望快照里**零命中** `MybatisPlusOrderingBridgeAutoConfiguration`
+    ⇒ ⇒ **排序桥不是跨域共享件**（它只被 rpc 组件引用，不是被 api 组件引用）⇒ 与 §5.3f 的
+    「共享判据 = 依赖度数」一致：**度数不够 ⇒ 不该下沉**（G4 那份下沉是**形态统一**的收益，不是依赖度数驱动的）。
+    ⇒ 落点 `docs/DRIFT/_cross/**` = **无人拥有面** ⇒ 仍**等整合者**更新快照（与 §26.10 同一条，不新增待办）。
+
+### 28.7 🔴 **写权外 ⇒ 登记并转派（`docs/FileTree/**`）**
+
+| 位置 | 引用形态 | 动作 |
+|---|---|---|
+| `docs/FileTree/users/user/rpc.md:19` / `:209` / `:258` / `:369` / `:385` | 目录树 ＋ 逐文件说明 ＋ 「逐文件对照索引」里的**独立一行** ＋ 「新增文件有职责依据」列举 | 🔴 **写权外**（`docs/FileTree/**` 归整合者）⇒ **不写**，登记转派 |
+| `docs/FileTree/users/admin/rpc.md:19` / `:332` / `:398` / `:549` / `:565` | 同上 | 🔴 同上 |
+| `docs/FileTree/follow/rpc.md:469` / `:508` | 目录树 ＋ 逐文件说明（还写着「**必须同时写进 `AutoConfiguration.imports`**」） | 🔴 同上 |
+| `docs/FileTree/like/rpc.md:20` · `docs/FileTree/comment/rpc.md:27` / `:30` · `docs/FileTree/article/rpc.md:18` | **别域**（like / comment / article）在「对照模块」列里提到 **我域** 的桥 | 🔴 同上（且那几条要等 G2 / G3 各自删完自己的副本后再统一改） |
+| `docs/FileTree/follow/rpc.md:81` | 「**follow-rpc 必须新建**」的结论 ⇒ **已被本次收编推翻** | 🔴 同上 |
+| `docs/FileTree/knowledge/knowledge.md:609` | 「新模块必须复制这份桥」⇒ **已被本次收编推翻**（应改为「新模块依赖 `service/common` 即可」） | 🔴 同上 |
+
+> ⇒ **其余 6 份域侧桥**（like / message / task / article / comment / favorite）**不归 G1** ⇒
+> G2 / G3 各自按同一方法删（**共享层那份已在树 ⇒ 前置满足**）⇒ **全仓只剩 1 份**。
+> ⚠️ ⇒ **`docs/FileTree/**` 的那批行要等 G2 / G3 也删完之后再一次性改** ⇒
+> **否则会出现「FileTree 说 like-rpc 有桥、但 like-rpc 已删」的半旧状态** ⇒
+> ⇒ **这 9 处不急 ⇒ 但必须登记在案 ⇒ 不能因为「不是我的写权」就当它不存在**。

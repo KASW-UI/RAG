@@ -52,8 +52,13 @@ import com.rag.common.protection.GoStyleProtectionConfiguration;
  *   <li><b>{@code spring-boot-flyway}</b>（在 pom 里）— Boot 4 拆模块后必需。
  *       缺它时<b>启动日志里连一行 Flyway 都没有</b>（不是报错，是根本没加载），
  *       {@code follow_relation} / {@code block_relation} 永不创建 ⇒ 第一次真正执行 SQL 才炸。</li>
- *   <li><b>{@code MybatisPlusOrderingBridgeAutoConfiguration}</b>（已通过
- *       {@code AutoConfiguration.imports} 注册）— Boot 4 改了 {@code DataSourceAutoConfiguration}
+ *   <li><b>{@code MybatisPlusOrderingBridgeAutoConfiguration}</b>（<b>2026-10-27 起由共享层提供</b>
+ *       —— 本模块那份域内副本及其 {@code AutoConfiguration.imports} 注册行<b>已删除</b>，
+ *       改由 {@code com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration}
+ *       经 {@code service/common} 的 {@code AutoConfiguration.imports} 注册；
+ *       Boot 的 {@code ImportCandidates} 用 {@code ClassLoader.getResources}（复数）
+ *       读取 classpath 上<b>全部</b>同名资源 ⇒ 共享层那份对本模块同样生效）
+ *       —— Boot 4 改了 {@code DataSourceAutoConfiguration}
  *       的包名，MyBatis-Plus 声明的排序引用<b>静默悬空</b> ⇒ 它先于 DataSource 求值 ⇒
  *       找不到 DataSource ⇒ 整个 MP 自动配置不生效 ⇒ mapper 报
  *       {@code Property 'sqlSessionFactory' or 'sqlSessionTemplate' are required}。</li>

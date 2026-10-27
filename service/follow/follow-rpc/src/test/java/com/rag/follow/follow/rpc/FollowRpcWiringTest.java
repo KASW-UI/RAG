@@ -6,11 +6,13 @@ import com.rag.follow.follow.rpc.mapper.FollowRelationMapper;
 import com.rag.follow.follow.rpc.mapper.GoStyleLimitOffset;
 import com.rag.follow.follow.rpc.service.FollowBlockTransactionService;
 import com.rag.follow.follow.rpc.service.FollowDomainService;
+import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -18,9 +20,13 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Enumeration;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -91,6 +97,8 @@ class FollowRpcWiringTest {
     @Autowired private FollowBlockTransactionService blockTransaction;
     @Autowired private FollowDomainService domainService;
     @Autowired private JdbcTemplate jdbcTemplate;
+    /** 机制层断言用：运行期容器（用来证「排序桥真的被注册 ⇒ MP 自动配置真的生效」）。 */
+    @Autowired private ApplicationContext ctx;
 
     /**
      * 外键守卫表：让「删除 follow_relation 的某一行」被数据库<b>自然拒绝</b>。
@@ -431,15 +439,48 @@ class FollowRpcWiringTest {
     }
 
     @Test
-    @DisplayName("防回归：MybatisPlusOrderingBridgeAutoConfiguration 必须在 AutoConfiguration.imports 里注册")
-    void mybatisOrderingBridgeMustBeRegistered() throws Exception {
-        String imports = new String(getClass().getResourceAsStream(
-                "/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports")
-                .readAllBytes());
-        assertTrue(imports.contains(
-                        "com.rag.follow.follow.rpc.config.MybatisPlusOrderingBridgeAutoConfiguration"),
+    @DisplayName("防回归：MP 排序桥必须由**共享层**那份提供（域内副本已删），且排序边真的生效")
+    void mybatisOrderingBridgeMustBeProvidedBySharedLayer() throws Exception {
+        // ⚠️ 2026-10-27（共享层收编后改写）：**域内那份已删除** ⇒ 排序边现在由
+        //   **共享层**的 `com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration` 提供
+        //   ⇒ 断言对象随之改成共享层的全限定名。
+        //
+        // ⚠️ **本判据分三层，逐层加码**（原来只有第 ① 层，且第 ① 层自己也偏弱）：
+        //   ① **注册层**：classpath 上**全部**同名 imports 资源里，至少一份含共享层那份的 FQN
+        //      —— 原写法用 `getResourceAsStream` 取**第一份**同名资源
+        //      ⇒ 而 classpath 上可能有**多份**（各模块自己的 + service/common 的）
+        //      ⇒ **命中哪份取决于 classpath 顺序** ⇒ 判定不确定
+        //      ⇒ 现在改为**遍历 classpath 上全部同名资源**，断言「**至少一份**含目标行」
+        //      ⇒ ⇒ 与「有几个模块自带清单」**解耦** ⇒ 谁再加自己的清单也不会让这条判据变脆。
+        //   ② **域内那份必须真的没了**：否则共享层那份被域内副本**遮蔽**（同名不同包 ⇒ 其实不遮蔽，
+        //      但两份桥同时注册 ⇒ 排序图多一个同向节点）⇒ 收编就等于没做。
+        //   ③ **机制层（最强）**：**运行期**证明排序边真的生效 —— MP 的 `SqlSessionFactory`
+        //      真的产出了（若排序边没建立，MP 会**早于 DataSource** 求值 ⇒
+        //      `@ConditionalOnSingleCandidate(DataSource)` 落空 ⇒ **整个 MP 自动配置不生效**
+        //      ⇒ **上下文根本起不来** ⇒ 本类其余用例全部连带失败）。
+        List<String> all = new ArrayList<>();
+        Enumeration<URL> resources = getClass().getClassLoader()
+                .getResources("META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports");
+        while (resources.hasMoreElements()) {
+            URL url = resources.nextElement();
+            all.add(new String(url.openStream().readAllBytes(), StandardCharsets.UTF_8));
+        }
+        assertFalse(all.isEmpty(), "classpath 上找不到 AutoConfiguration.imports ⇒ 断言无意义");
+        assertTrue(all.stream().anyMatch(s -> s.contains(
+                        "com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration")),
                 "排序桥未注册 ⇒ Boot 4 下 MyBatis-Plus 早于 DataSource 求值 ⇒ 整个 MP 自动配置不生效 ⇒ "
-                        + "mapper 报 sqlSessionFactory 缺失。contextLoadsWithBothMapperBeans 是它的运行时防线。");
+                        + "mapper 报 sqlSessionFactory 缺失。contextLoadsWithBothMapperBeans 是它的运行时防线。"
+                        + " 实测读到的清单：" + all);
+
+        // ② 域内那份必须真的不在 classpath 上（类文件已删 ⇒ 加载失败）
+        assertThrows(ClassNotFoundException.class,
+                () -> Class.forName("com.rag.follow.follow.rpc.config.MybatisPlusOrderingBridgeAutoConfiguration"),
+                "域内那份排序桥还在 ⇒ 收编没做 ⇒ 全仓会有两份桥同时注册，"
+                        + "共享层那份后续的改动在本域会静默不生效");
+
+        // ③ 机制层：MP 真的产出了 SqlSessionFactory（排序边真的生效）
+        assertNotNull(ctx.getBean(SqlSessionFactory.class),
+                "容器里没有 SqlSessionFactory ⇒ MP 自动配置没生效 ⇒ 排序边没建立（桥没被注册或没被消费）");
     }
 
     // ==================================================================
