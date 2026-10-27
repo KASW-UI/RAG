@@ -24,7 +24,6 @@ import com.rag.article.article.rpc.service.ArticleDomainService;
 import com.rag.article.article.rpc.service.ArticlePublicDomainService;
 import com.rag.article.article.rpc.service.ArticleSpans;
 import com.rag.common.spring.SnowflakeBean;
-import com.rag.common.spring.SnowflakeProperties;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.common.AttributeKey;
@@ -199,7 +198,11 @@ class ArticleSpanWiringTest {
         when(kafkaTemplate.send(anyString(), anyString(), anyString()))
                 .thenReturn(CompletableFuture.completedFuture(null));
 
-        SnowflakeBean snowflake = new SnowflakeBean(new SnowflakeProperties());
+        // ⚠️ 用 mock 而不是真实雪花生成器：
+        //    ① **确定性** ⇒ article_id / file_id 的断言可以是**精确值**，不是「> 0」；
+        //    ② 不引入对共享层 `SnowflakeProperties` 的 import（耦合矩阵按 **import** 判定辐射度）。
+        SnowflakeBean snowflake = mock(SnowflakeBean.class);
+        when(snowflake.nextId()).thenReturn(424242L);
         ArticleRpcProperties properties = new ArticleRpcProperties();
         properties.getKqPusherConf().setTopic("article-creation-topic");
 
@@ -294,8 +297,8 @@ class ArticleSpanWiringTest {
                 "Go 的 tracer.Start 没带 WithSpanKind ⇒ 默认 INTERNAL");
         assertEquals("1001", stringAttr(span, ArticleSpans.ATTR_AUTHOR_ID));
         assertEquals("hello", stringAttr(span, ArticleSpans.ATTR_TITLE));
-        assertNotNull(stringAttr(span, ArticleSpans.ATTR_ARTICLE_ID),
-                "Go: create_article_logic.go:57 ⇒ span.SetAttributes(article_id)");
+        assertEquals("424242", stringAttr(span, ArticleSpans.ATTR_ARTICLE_ID),
+                "Go: create_article_logic.go:57 ⇒ span.SetAttributes(article_id)（雪花 ID 的十进制串）");
     }
 
     @Test
@@ -341,7 +344,7 @@ class ArticleSpanWiringTest {
                 () -> new AssertionError("没有导出 UploadFile span。实际导出 = " + exportedSpanNames()));
         assertEquals("article-rpc", span.getInstrumentationScopeInfo().getName());
         assertEquals("pic.png", stringAttr(span, ArticleSpans.ATTR_FILE_NAME));
-        assertTrue(longAttr(span, ArticleSpans.ATTR_FILE_ID) > 0L,
+        assertEquals(424242L, longAttr(span, ArticleSpans.ATTR_FILE_ID),
                 "Go: upload_file_logic.go:53 ⇒ attribute.Int64(\"file_id\", id)");
         assertEquals("image/png", stringAttr(span, ArticleSpans.ATTR_CONTENT_TYPE));
         assertTrue(stringAttr(span, ArticleSpans.ATTR_OBJECT_NAME).startsWith("articles/images/"));
