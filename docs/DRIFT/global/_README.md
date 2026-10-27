@@ -202,7 +202,14 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
    ⇒ 拆成 **5 条 lane**（`align/global-delivery` / `-rpcgate` / `-ddl` / `-flyway` / `-signoff`），
    **按「叶子文件」切**（议题会跨文件，文件才是不冲突的单位）⇒ **文件级零重叠**。
    ⇒ **协议 + 5 份任务书 ⇒ [`lanes/_PROTOCOL.md`](lanes/_PROTOCOL.md)**
-   （lane 基线 = `align/global` HEAD；lane 不写 4 个规范台账文件与 `AGENTS.md` ⇒ 共享文件由整合者统一更新）。
+   （lane 基线 = `align/global` HEAD；lane 不写 4 个规范台账文件与 `AGENTS.md` ⇒ 共享文件由**合并收口执行者**统一更新）。
+7. 🆕 **角色边界（2026-10-27 用户定）** —— 共享面（`AGENTS.md` / 三个 `_INDEX.md` /
+   `docs/DRIFT/_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/Worktree.md` / `tools/difftest/README.md`）
+   归 **合并收口执行者**（= 合并收口那一步的职责，**不是一个常驻会话**）；
+   `service/common/**` + `service/users/users-common/**` 的**代码**归 **G4**（§1d）。
+   ⇒ ⚠️ **「整合者」不是一个存在的角色** —— 2026-10-27 已从两个写权守门的 SHARED 注释里删除
+   （原措辞诱导 lane 去向上升级找一个不存在的人）⇒ **不要按那个词去找人**。
+   ⇒ 📌 **完整角色表 + lane 遇到共享面 / 跨 lane 问题的正确动作 ⇒ `docs/Worktree.md` §1e**。
 
 ---
 
