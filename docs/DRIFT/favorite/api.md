@@ -1086,6 +1086,16 @@ Go 的 `net/http` **服务端没有 103 Early Hints 这个特性** ⇒ ⇒ **RAG
 
 ⇒ ⇒ **RAG 侧首个翻转点 = 10002 段；Go 侧 = 10001 段 ⇒ ⇒ 「差一格」由 L4 实测坐实**（不是源码推演）。
 
+> 🟢 **2026-10-27 23:4x 补一条：Go 侧的「拒绝形状」现在也有**活体 oracle**（不再只是源码判定）**
+> ⇒ ⇒ `tools/api-envelope-probe/favorite/expected.txt`（**我树与 G4 树逐字节相同**）里的
+> `CASE|err_too_many_form_params` = **200 + `{"code":5003,"msg":"参数错误","data":null}`**
+> ⇒ ⇒ 该用例走的就是**同一条** `httpx.Parse` 失败路径（`GetFormValues` → `ParseForm` → `Parse`）
+> ⇒ ⇒ ⇒ **Go 侧「`httpx.Parse` 失败 ⇒ 200 + 5003」是活体实测值**，**不是**从源码推出来的
+> ⇒ ⇒ ⇒ 与 RAG 侧 **10002 段实测**出来的 body **逐字节相同** ⇒ ⇒
+> **「拒绝形状这一维不是漂移」= 双侧活体证据**（不是 L1 源码判定）
+> ⚠️ **仍未覆盖的一格**：Go 侧**恰好 10001 段**（段数上限那个边界本身）的**活体**测量
+> ⇒ ⇒ 探针里目前**没有**这一行 ⇒ ⇒ 那一行属于 `tools/api-envelope-probe/`（G4 写权面）⇒ ⇒ **已提**。
+
 ⚠️ **`1015` 的含义**：`FavoriteErrorCode.CODE_SERVER_BUSY(1015)`（Go `CodeServerBusy`）⇒ ⇒
 本机**无下游 favorite-rpc**（`@MockitoBean` 桩）⇒ ⇒ 业务层回「服务繁忙」⇒ ⇒
 **它只证明「请求进到了业务层、没被参数个数判据拒掉」** ⇒ ⇒ **不参与「拒绝形状」的判断**。
