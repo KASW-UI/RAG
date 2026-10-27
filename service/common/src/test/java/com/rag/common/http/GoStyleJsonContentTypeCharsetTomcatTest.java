@@ -224,6 +224,21 @@ class GoStyleJsonContentTypeCharsetTomcatTest {
 
             InputStream in = s.getInputStream();
             String raw = new String(in.readAllBytes(), StandardCharsets.ISO_8859_1);
+            if (raw.isEmpty()) {
+                // 🔴 **2026-10-27 第十三次全量时实测到的一次抖动**：本类三条断言同时红成
+                //    「expected: 200 but was: -1」⇒ ⇒ **-1 = 响应头解析不出来** ⇒
+                //    而 Tomcat 那次**正常起在随机端口**（日志可查）⇒ ⇒ 真实现象是
+                //    **连接建立后、服务器一个字节都没回就关掉了**（连接层，不是断言语义）。
+                //    ⇒ ⇒ 旧写法把这种**连接层**故障报成「status = -1」⇒ ⇒ 读者看不出
+                //    「到底是没有响应，还是响应格式不对」⇒ ⇒ **不可诊断**。
+                //    ⇒ ⇒ 这里改成**可读的失败**：直接把「空响应」这个事实说清楚。
+                //    ⇒ ⇒ 注意：**不加重试**（重试会把「服务器真的拒绝连接」这类真缺陷洗成绿的）。
+                throw new IllegalStateException(
+                        "服务器返回**空响应**（连接已建立，但**一个字节都没回**就被关掉了）"
+                                + " ⇒ ⇒ 这不是断言语义不符，而是**连接层**现象"
+                                + "（Tomcat accept 队列被打满 / 连接被立即关闭 / 机器负载抖动）"
+                                + " ⇒ ⇒ 目标=" + target + " 端口=" + port);
+            }
             int sep = raw.indexOf("\r\n\r\n");
             String rawHead = sep < 0 ? raw : raw.substring(0, sep);
             String rawBody = sep < 0 ? "" : raw.substring(sep + 4);
