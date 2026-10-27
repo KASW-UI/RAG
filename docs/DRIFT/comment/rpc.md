@@ -1050,3 +1050,13 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 ⇒ ⇒ 本域那一段：模块 `comment/comment-rpc` · 域段 `22880–22909` · 本模块宿主口段 `22880–22899` · 脚手架段 `22900–22909` · **11** 个 PG + **1** 个 Redis 个容器
 ⇒ ⇒ 落点：`service/comment/comment-rpc/src/test/java/.../support/RealContainerHostPort.java` ＋ 同名 `RealContainerHostPortTest.java`（守门 **6** 条）
 ⇒ ⇒ **与 Go 侧的一致性：N/A**（测试基础设施，不涉及运行时行为）
+
+## 📌 指针 · 🔴🟢 **redis-disconnect 探针（Go 腿 · comment 模式）**（2026-10-28）
+
+⇒ ⇒ **canonical 全文在** [`docs/DRIFT/hot/rpc.md`](../hot/rpc.md) 的「**§十二.9**」一节（含两条订正注记）
+⇒ ⇒ 本域那一档：真源 Options = `service/comment/rpc/internal/cache/redis.go:17-19` ⇒ **`redis.Options{Addr}`**（Password 留空）
+⇒ ⇒ **实测**：`first_command_ms` = **1679 ms** · 归一化结论 `class=fast-fail err_present=true` ⇒ ⇒ **与冻结基线 `expected.txt` 逐字节一致** ✔
+⇒ ⇒ **落点（仓内，可复现）**：`service/hot/hot-rpc/src/test/probe/redis-disconnect/`（`main.go` · `run.sh` · `expected.txt` · `README.md`）
+⇒ ⇒ ⚠️ **归口**：`tools/redis-disconnect-probe/` 是**共享层**写法（`tools/**` 归 G4）⇒ ⇒ 本探针落在**域侧** ⇒ ⇒ **两份实现不要同时存在**
+⇒ ⇒ **RAG 腿不重复造**：域内既有 `CommentRedisDisconnectFastRejectGateTest`（守 RAG 腿）⇒ ⇒ 本探针只守 **Go 腿 ＋ 双侧对照**
+⇒ ⇒ **与 Go 侧的一致性：语义一致（两侧都「快速失败」）· 毫秒数不一致（Go ~1.7 s vs RAG 1 ms）⇒ 只主张语义那一层**

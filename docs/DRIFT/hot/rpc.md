@@ -2363,6 +2363,64 @@ func main() {
 
 —— G3（2026-10-28 · `align/g3-article-comment-favorite-hot`）
 
+### 📌 订正注记 ①（2026-10-28 03:2x）—— **§12.9.3 的规格源码有一处真缺陷**：`GET` 的判据是**死的**（**原文保留不改写**）
+
+> ⚠️ §12.9.3 那段「**可直接复制**」的 Go 源码里，第 ④ 步是
+> `cmdErr := client.Get(ctx, "g3-probe-key").Err()` ⇒ ⇒ **本域按它落码后，变异 M2 把它打了出来**：
+> ⇒ ⇒ **`GET` 一个不存在的 key，在连接完全健康时返回的是 `redis: nil`**（go-redis 的「key 不存在」哨兵）
+> ⇒ ⇒ **`err != nil` 恒真** ⇒ ⇒ **分不清「连着但 key 不存在」与「断了」**
+> ⇒ ⇒ ⇒ **「第一条命令失败了」这个判据是死的** ⇒ ⇒ 且耗时也被误判（健康时 ~4 ms ⇒ 落进 `fast-fail` 桶）
+> ⇒ ⇒ ⇒ ⇒ **⇒ 那种形态下 `expected.txt` 的 diff 永远绿 ⇒ ⇒ 守门形同虚设。**
+> ⇒ ⇒ **修法**：第 ④ 步改用 **`PING`**（健康 ⇒ `PONG, nil`（`err == nil`）· 断连 ⇒ `err != nil`）
+> ⇒ ⇒ ⇒ **与**初始连通性检查用**同一个命令** ⇒ ⇒ 前后对称、判据自洽。
+> ⇒ ⇒ ⇒ 另加一档 `class=not-disconnected`（`err == nil` ⇒ **断连根本没发生**）⇒ ⇒ 这档 ⇒ `PROBE-FAIL` ＋ 退出码 2。
+
+### 📌 订正注记 ②（2026-10-28 03:2x）—— **§12.9.1 记的那个缺口「Go 腿不可从仓复现」⇒ 已闭合**
+
+> **§12.9.1 的原文**：「把「Redis 连接被服务端优雅关闭（FIN）后，客户端**第一条命令**多久失败」从**一次性仓外探针**升级为**仓内可复现的双侧活体对拍**」
+> ⇒ ⇒ **原缺口**（§十二.4 口径边界 ①）：「Go 腿 = L4-一次性（实测但**仓外**）⇒ **不可从仓复现**」⇒ ⇒ **本轮闭合**。
+
+| 项 | 内容 |
+|---|---|
+| **落点（仓内路径）** | `service/hot/hot-rpc/src/test/probe/redis-disconnect/`（`main.go` · `run.sh` · `expected.txt` · `README.md` · `go.mod` · `go.sum`）|
+| **为什么落在域侧** | `tools/**` 是 **G4 的写权面** ⇒ ⇒ 本域**不擅自写** ⇒ ⇒ 落在**域侧**（`service/hot/**` = 本域写权面）⇒ ⇒ **仓内可复现**这个目标照样达成 |
+| **⚠️ 归口（两份实现不要同时存在）** | ⇒ ⇒ 若 G4 后续落 `tools/redis-disconnect-probe/` ⇒ ⇒ **二选一**（G4 那份改成**指向域内这份**的薄壳，或反过来把域内这份降级为引用）⇒ ⇒ **不许两份各跑各的** ⇒ ⇒ 否则同一条结论有两个来源 ⇒ ⇒ 漂移面 |
+| **`go.mod` / `go.sum` 继承** | **与真源整体继承**（只改 module 名）⇒ ⇒ `go.mod` 与真源的差异 = **只有 module 名那一行**；`go.sum` **逐字节一致** ✔ ⇒ ⇒ 版本集与 hash 与真源逐条相同 ⇒ ⇒ **未 `go mod tidy`**（tidy 会去解析依赖的测试依赖 ⇒ 必然失败）|
+| **构建** | `CGO_ENABLED=0 GOPROXY=off GOTOOLCHAIN=local` ⇒ ⇒ **离线可构建** ✔（本机 go1.25.11）|
+
+#### 三模式实测基线（2026-10-28 03:2x · **仓内可复现**）
+
+| 模式 | 真源 Options 出处 | `first_command_ms` | 归一化结论 | 与 `expected.txt` |
+|---|---|---|---|---|
+| `hot` | `service/hot/rpc/internal/svc/service_context.go:17-20`（`{Addr, Password}`）| **1809** | `class=fast-fail err_present=true` | ✅ **逐字节一致** |
+| `comment` | `service/comment/rpc/internal/cache/redis.go:17-19`（`{Addr}`）| **1679** | `class=fast-fail err_present=true` | ✅ **逐字节一致** |
+| `zeroway` | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40`（`{MaxRetries:3, MinIdleConns:8}`）| **1704** | `class=fast-fail err_present=true` | ✅ **逐字节一致**（**首次补齐 zeroway 档**）|
+
+⇒ ⇒ **与 §12.9.7 的一次性基线同量级**（hot 1669/1808/1710/1771 · comment 1708/1776/1741/1753）⇒ ⇒ **结论未变**
+⇒ ⇒ ⚠️ **毫秒数是观测量不是判据** ⇒ ⇒ 判据是**归一化结论行**（`class` / `err_present`）⇒ ⇒ 可逐字节 diff
+⇒ ⇒ **阈值口径**：`fast-fail` / `timeout` 的分界取 **2500 ms**（落在 Go 实测上界 1809 与 Lettuce `commandTimeout: 3s` 的 3007 ms **之间**）
+
+#### 变异验证（2 轮 · 每轮只翻一个变量）
+
+| 变异 | 预期 | 实测 |
+|---|---|---|
+| **M1** 阈值 2500 → 100 | 快速失败被判成 `timeout` ⇒ diff 红 | ✔ 红在 `class=timeout`（exit 1）|
+| **M2** `docker stop` 换成 no-op（**仍编译**）| 断连没发生 ⇒ `not-disconnected` ⇒ diff 红 | ✔ 红在 `class=not-disconnected err_present=false`（exit 1）|
+| 基线复跑 | 还原后必须回绿 | ✔ exit 0 · `class=fast-fail err_present=true` |
+
+⇒ ⇒ **2/2**：每轮**编译通过** ＋ **红在目标处** ＋ 还原后 **sha256 逐字节一致**。
+⇒ ⇒ ⚠️ **M2 的第一版作废**（把 `exec` 改成未使用 import ⇒ **编译失败**）⇒ ⇒ 按纪律「**编译失败不算「守门识别该退化」的证据**」⇒ ⇒ 改成仍编译的 no-op 形态后重跑才算数。
+
+#### 证据强度（**读的时候分层**）
+
+| 事项 | 强度 | 说明 |
+|---|---|---|
+| 「Go 腿在断连后**快速失败**，且三模式一致」| **L4（仓内可复现）** | 探针 + 冻结基线 + 变异 2 轮都在仓内 ⇒ ⇒ **§十二.4 口径边界 ① 的缺口已闭合** |
+| 「RAG 腿 1 ms 立即拒单」| **L4**（域内既有守门）| `HotRedisDisconnectFastRejectGateTest` / `CommentRedisDisconnectFastRejectGateTest` ⇒ **本探针不重复造** |
+| 「两侧**语义**一致（都快速失败）」| **L4（双侧）** | 两腿都在跑 ⇒ ⇒ 满足 AGENTS.md §3.3「两侧同时跑的探针」⇒ ⇒ 可写 L4 |
+| 「两侧**毫秒数**一致」| 🔴 **不成立** | Go ~1700 ms vs RAG 1 ms ⇒ ⇒ **量级差 3 个数量级** ⇒ ⇒ 本条**只主张语义一致** |
+
+
 ---
 
 ## 🔴 **阈值类结论的「共享层依赖」声明**（2026-10-27 · 按 G2 [3] 的要求做的重核）
