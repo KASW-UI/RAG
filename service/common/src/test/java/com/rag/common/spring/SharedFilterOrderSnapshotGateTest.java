@@ -17,10 +17,19 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.AnnotationAwareOrderComparator;
 import org.springframework.core.annotation.Order;
 
+import java.io.File;
+import java.io.IOException;
+import java.net.URISyntaxException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.CodeSource;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -39,7 +48,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 各域的 JWT 验签会立刻退回预算内</b> ⇒ 而且<b>不会有任何共享层测试变红</b>
  * ⇒ ⇒ 本守门就是那道「会红」的网。
  *
- * <h2>本守门钉死三件事</h2>
+ * <h2>本守门钉死四件事</h2>
  * <ol>
  *   <li><b>槽位快照</b>：7 个共享层 Filter 的 {@code @Order} 精确值 ⇒ <b>任何重排都红</b>
  *       ⇒ 强制「改槽位」变成<b>显式决策</b>（改快照 = 明知故犯），而不是「顺手挪一个数字」。</li>
@@ -49,7 +58,35 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       ⇒ ⇒ 排在它<b>之后</b>的 Filter 会在预算内执行 ⇒ 只允许 <b>MaxBytes(+8)</b> 在其后。</li>
  *   <li><b>域侧仍有可用槽位</b>：{@code HttpMiddlewareFilter} 的 order 必须 <b>≥ HIGHEST+7</b>
  *       ⇒ 域侧才能在 +6 找到「在预算外、又不在 traceparent 之外」的位置。</li>
+ *   <li>🆕 <b>共享层「产出」的 Filter 全集 == 快照</b>：枚举<b>本模块自己的编译产物</b>
+ *       ⇒ ⇒ <b>新增第 8 个带 {@code @Order} 的 Filter 必红</b> ⇒ ⇒ 逼它显式登记槽位。</li>
  * </ol>
+ *
+ * <h2>🆕 第 ⑤ 条为什么不是「类路径扫描」（§4.10.18.3 撤回的那条路）</h2>
+ *
+ * <p>§4.10.18.3 记着：本层试过「扫 {@code com.rag.common} 下所有带 {@code @Order} 的 Filter」
+ * ⇒ ⇒ <b>实测只扫到 2/7</b>（{@code protection} 包的 4 个与 {@code http} 包的
+ * {@code GoStyleTraceparentFilter} 全漏）⇒ ⇒ 原因未查明 ⇒ ⇒ <b>判据本身不可靠 ⇒ 撤掉</b>。
+ * <p>⇒ ⇒ 第 ⑤ 条<b>换判据</b>：不用 Spring 的类路径扫描，而是<b>直接枚举本模块自己的编译产物目录</b>
+ * （{@code target/classes}，用 <b>code source</b> 取 ⇒ <b>与工作目录无关</b>）
+ * ⇒ ⇒ <b>枚举面 = 本模块真实产出的全部 class 文件</b> ⇒ ⇒ <b>不存在「扫不全」这条路</b>。
+ * <p>⇒ ⇒ 而且它<b>不需要容器</b>：④ 之所以要在真 servlet 上下文里断言，是因为「哪个 Filter
+ * <b>注册</b>在哪个 order」没有公开读法；而第 ⑤ 条问的是「本模块<b>产出</b>了哪些带 {@code @Order} 的 Filter」
+ * ⇒ ⇒ <b>产物枚举</b>就是那件事的直接读法 ⇒ ⇒ <b>绕开了 §4.10.18.3 的两个死结</b>
+ * （类路径扫描扫不全 ＋ 共享层测试上下文装不齐 {@code protection} 那 4 个）。
+ *
+ * <h2>⚠️ 第 ⑤ 条的边界（不得外推）</h2>
+ * <ul>
+ *   <li><b>只管「共享层产出」的 Filter</b> ⇒ ⇒ <b>域侧新增</b> Filter 仍<b>不在</b>本守门覆盖面
+ *       ⇒ ⇒ 那一半要靠<b>域内真装配面</b>的守门（域侧文件 ⇒ 域侧落码）。</li>
+ *   <li><b>只管「带 {@code @Order}」的</b> ⇒ ⇒ 共享层若产出<b>不带 {@code @Order}</b> 的 Filter，
+ *       Spring 给它 {@code Ordered.LOWEST_PRECEDENCE}（链尾）⇒ ⇒ <b>不占任何槽位</b>
+ *       ⇒ ⇒ 无需登记 ⇒ ⇒ 本条不管它是<b>有意</b>的。</li>
+ *   <li><b>枚举面 = 本模块（{@code service/common}）的产物</b> ⇒ ⇒
+ *       {@code service/users/users-common}（同属 G4 写权面）<b>当前产出 0 个 Filter</b>
+ *       ⇒ ⇒ 故不在本条覆盖面内 ⇒ ⇒ <b>若将来它引入 Filter，本条须扩面</b>
+ *       （做法：在该模块自己的测试里加同一判据 ⇒ <b>各模块各守自己那份</b> ⇒ 避免跨模块的路径依赖）。</li>
+ * </ul>
  *
  * <h2>为什么不止读注解</h2>
  *
@@ -77,7 +114,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>⇒ ⇒ 这条本身就是一个可复用的判据：<b>「断言会不会执行」本身要被断言</b>，
  * 否则「看起来在验注册顺序」的那段可能<b>一次都没跑过</b>。
  */
-@DisplayName("共享层 Filter 槽位：快照钉死 + 3s 预算起点不被抢占 + 域侧仍有可用槽位")
+@DisplayName("共享层 Filter 槽位：快照钉死 + 3s 预算起点不被抢占 + 域侧仍有可用槽位 + 产出全集==快照")
 class SharedFilterOrderSnapshotGateTest {
 
     /**
@@ -258,7 +295,103 @@ class SharedFilterOrderSnapshotGateTest {
                 });
     }
 
+    // ==================== ⑤ 共享层「产出」的 Filter 全集 ====================
+
+    @Test
+    @DisplayName("⑤ 共享层<b>产出</b>的带 @Order 的 Filter 全集 == 快照（新增第 8 个 Filter 必红）")
+    void everySharedLayerFilterIsRegisteredInSnapshot() {
+        Path classesRoot = sharedLayerClassesRoot();
+        Set<Class<? extends Filter>> found = enumerateOrderedFilters(classesRoot);
+        Set<Class<? extends Filter>> expected = new LinkedHashSet<>(SLOT_SNAPSHOT.keySet());
+
+        // ⚠️ 用「双向相等」而不是「⊆」——
+        //    ⊆ 的写法在「枚举面失效」时（例如枚举到 0 个）会**恒绿** ⇒ 空转；
+        //    相等则「枚举不到」与「多出/少了」一样都会红。
+        assertThat(found)
+                .as("共享层<b>产出</b>的带 @Order 的 Filter 必须与快照<b>完全一致</b>："
+                        + "多一个（= 新增了共享层 Filter 却没登记槽位）或少一个（= 快照里那个已经不存在）都必须红。"
+                        + "\n⚠️ 新增共享层 Filter 必须<b>显式登记</b>它占了哪个槽位（改快照 = 显式承认），"
+                        + "而不是「加个类就完事」——否则它可能正好吃掉各域 JWT 验签唯一可用的 +6。"
+                        + "\n枚举根目录：" + classesRoot
+                        + "\n实际枚举到：" + describe(found)
+                        + "\n快照：" + describe(expected))
+                .containsExactlyInAnyOrderElementsOf(expected);
+    }
+
     // ==================== 辅助 ====================
+
+    /**
+     * 共享层自己的编译产物目录（<b>class 目录</b>形态）。
+     *
+     * <p>用 <b>code source</b> 取 ⇒ ⇒ <b>与工作目录无关</b>（IDE 跑也拿得到）。
+     *
+     * <p>⚠️ 若拿不到 ⇒ ⇒ <b>直接失败</b>（不跳过）⇒ ⇒ 否则第 ⑤ 条会退化成「什么都不查」的恒绿。
+     */
+    private static Path sharedLayerClassesRoot() {
+        CodeSource cs = GoStyleTraceparentFilter.class.getProtectionDomain().getCodeSource();
+        assertThat(cs).as("共享层类的 code source 必须可读（否则第 ⑤ 条无法枚举产物 ⇒ 恒绿）").isNotNull();
+        assertThat(cs.getLocation()).as("共享层类的 code source 必须有 location").isNotNull();
+        try {
+            Path p = Path.of(cs.getLocation().toURI());
+            assertThat(Files.isDirectory(p))
+                    .as("共享层产物必须是 class 目录形态（不是 jar）⇒ 实际：" + p)
+                    .isTrue();
+            return p;
+        } catch (URISyntaxException e) {
+            throw new IllegalStateException("无法把共享层 code source 转成目录：" + cs.getLocation(), e);
+        }
+    }
+
+    /**
+     * 枚举产物目录里<b>所有</b>「实现了 {@code jakarta.servlet.Filter} 且带 {@code @Order}」的类。
+     *
+     * <p>⚠️ <b>装载失败就跳过</b>是安全的：真要实现 {@code Filter} 的类，其超类与接口
+     * 必然在本模块的测试 classpath 上 ⇒ ⇒ <b>装载得起来</b> ⇒ ⇒ 跳过的那批不可能是 Filter。
+     */
+    @SuppressWarnings("unchecked")
+    private static Set<Class<? extends Filter>> enumerateOrderedFilters(Path classesRoot) {
+        Set<Class<? extends Filter>> found = new LinkedHashSet<>();
+        ClassLoader cl = SharedFilterOrderSnapshotGateTest.class.getClassLoader();
+
+        List<Path> classFiles = new ArrayList<>();
+        try (Stream<Path> walk = Files.walk(classesRoot)) {
+            walk.filter(p -> p.getFileName().toString().endsWith(".class")).forEach(classFiles::add);
+        } catch (IOException e) {
+            throw new IllegalStateException("枚举共享层产物失败：" + classesRoot, e);
+        }
+        assertThat(classFiles)
+                .as("共享层产物目录里必须能枚举到 class 文件（枚举不到 ⇒ 第 ⑤ 条空转）")
+                .isNotEmpty();
+
+        for (Path cf : classFiles) {
+            String rel = classesRoot.relativize(cf).toString();
+            String className = rel.substring(0, rel.length() - ".class".length())
+                    .replace(File.separatorChar, '.');
+            Class<?> c;
+            try {
+                c = Class.forName(className, false, cl);
+            } catch (Throwable t) {
+                continue; // 装载不了的类不可能是本模块的 Filter（见本方法 javadoc）
+            }
+            if (!Filter.class.isAssignableFrom(c)) {
+                continue;
+            }
+            if (c.getAnnotation(Order.class) == null) {
+                continue; // 不带 @Order ⇒ Spring 给它 LOWEST_PRECEDENCE（链尾）⇒ 不占槽位
+            }
+            found.add((Class<? extends Filter>) c);
+        }
+        return found;
+    }
+
+    private static String describe(Set<Class<? extends Filter>> set) {
+        List<String> names = new ArrayList<>();
+        for (Class<?> c : set) {
+            names.add(c.getSimpleName());
+        }
+        java.util.Collections.sort(names);
+        return names.toString();
+    }
 
     /**
      * 读出 7 个共享层 Filter 的<b>实际</b>槽位（反射读类上的 {@code @Order}）。
