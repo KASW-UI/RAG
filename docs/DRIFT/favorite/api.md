@@ -808,3 +808,58 @@ service/favorite/api/internal/svc/service_context.go:20
 
 - **L-10（候选）**：加一条**跨组件**的池形态守门（真 Spring 上下文起 `LettuceConnectionFactory` ⇒ 断言 `clientConfiguration.isPoolEnabled()`）⇒ 属**域内** ⇒ 可自修；
   但**必须先定「期望值」** —— 期望 = 「Go 有池 ⇒ RAG 也应有池」？⇒ 那就回到 §15.3 的「数值不可 1:1」⇒ **需要一次决策**（是「形态对齐即可，数值按经验值」还是「严格照抄 Go 的运行时推导式」）⇒ ⇒ **先登记，不落码**。
+
+---
+
+## 16. 🟡 favorite 域的 **16 个业务 span** 已落码（Go 侧 `otel.Tracer` 逐条对齐）—— 2026-10-27（G3 · L-4）
+
+### 16.1 结论
+
+| 项 | 值 |
+|---|---|
+| Go 侧 span 总数 | **16**（api **7** + rpc **9**，其中 2 个是 `Dependency.*` 依赖 span）⇒ 取证**双向交叉验通过**（自逐行核 ＋ 独立取证代理，数字与行号逐条吻合） |
+| RAG 侧落码 | ✅ **16/16 全部落位**（api 侧 7 个 Service 方法 ＋ rpc `FavoriteDomainService` 7 个方法 ＋ `FavoriteUserGuard` ＋ `FavoriteArticleSnapshotResolver`） |
+| 共享工具类 | **新增** `service/favorite/favorite-common/src/main/java/com/rag/favorite/favorite/common/span/FavoriteSpans.java`（**域内私有**；`favorite-api` 与 `favorite-rpc` **都依赖** `favorite-common` ⇒ 一份两边共用）＋ `favorite-common/pom.xml` 加 `opentelemetry-api`（**不写 `<version>`**，由 Boot 4.0.8 BOM 管版本）⇒ ⚠️ 两个业务模块**不需要**改 pom（实测 classpath 上已有 `opentelemetry-api:1.55.0`） |
+| 属性名 | **7 个**：`biz.user_id` · `biz.folder_id` · `biz.favorite_id` · `biz.folder_name` · `biz.target_id` · `biz.target_type` · `biz.article_id` ⇒ ⚠️ **Go 侧这 7 个 key 是硬编码字面量、无集中常量表** ⇒ 只能逐条落 |
+| **证据强度** | 🔴 **L1（源码级）** —— ⚠️ **守门未写** ⇒ ⇒ **不得读作「已验证」**；编译与既有回归见 §16.4 |
+| 核对日期 | 2026-10-27 |
+
+### 16.2 🔴 三类错误判据（**逐字保留 Go 侧的不一致**，未套用 comment 域的判据）
+
+| 类别 | Go 侧判据 | RAG 侧实现 | 关键点 |
+|---|---|---|---|
+| **api 侧 7 个** | `SetAttributes` 在**鉴权成功之后**（`extractUserID` 失败 ⇒ 直接 return，**不 `RecordError`**）⇒ **未鉴权请求的 span 一个属性都没有**；此后**任何出错都记**（每条恰好 2 处 `RecordError`：rpcErr ＋ err） | `FavoriteSpans.tracedApi(...)` = **两段式**：**属性阶段抛出的异常（= 鉴权失败）⇒ 不记错、不设属性**，但 span 仍存在并结束（Go 的 `defer span.End()` 一样会跑） | ⚠️ **与 comment 域不同**：comment 是「码段 ≥5000 才记」，favorite 是「凡错都记」⇒ **不可套用** |
+| **rpc 侧 7 个 `FavoriteRPC.*`** | `SetAttributes` **紧跟 Start，先于任何入参校验** ⇒ **非法入参的 span 也带完整属性**；**任何出错都记**（含业务失败 `InvalidArgument` / `AlreadyExists` / 用户不存在 / 名称重复） | `FavoriteSpans.tracedRpc(...)` = **单 catch ⇒ 一律 `recordException`** | ⇒ **不按业务码过滤** |
+| **rpc 侧 2 个 `Dependency.*`** | **只有下游 RPC 调用失败才记**（`helper.go:100` / `:139`）；**业务性失败一律不记**（`:109-111` / `:113-115` / `:117-119` 三条分支**都没有** `RecordError`） | `FavoriteSpans.tracedDependency(...)` = **三段式**：`call` 失败 ⇒ 记错 ＋ 走 `errorMapper`；`after`（业务判定）失败 ⇒ **不记**、原样上抛 | ⇒ 「下游失败」与「业务判定」必须**拆成两段**，否则会**多记** Go 侧不记的那部分 |
+
+### 16.3 🔴 三处「Go 侧的取值不对称」—— 逐字复刻，**不许顺手统一**
+
+| 属性 | Go 侧取值 | RAG 侧 | ⚠️ 不对称点 |
+|---|---|---|---|
+| `biz.target_id` | `strings.TrimSpace(req.TargetId)` / `strings.TrimSpace(in.GetTargetId())` | **trim 过** | ← **只有它被 trim** |
+| `biz.target_type` | `req.TargetType` / `in.GetTargetType()`（**原样大小写**） | **原样**（不 lower、不 trim） | 落库用 `normalizeTargetType`（lower+trim）⇒ **span 记的值 ≠ 落库的值** |
+| `biz.folder_name` | `req.Name` / `in.GetName()`（**原样**） | **原样**（不 trim） | 落库用 `normalizeFolderName`（trim）⇒ 同上 |
+
+⇒ ⚠️ **api 侧下游请求仍带未 trim 的原值**（Go `create_favorite_logic.go:58` `TargetId: req.TargetId`）⇒ **span 属性（trim 过）与下游入参（未 trim）不是同一个值** ⇒ 这是 Go 的形状，**不是 bug** ⇒ RAG 侧逐字保留。
+
+### 16.4 🔴 span status 恒为 `UNSET`（**已实测，不是推断**）
+
+- Go 侧 `span.SetStatus(...)` 在 `service/favorite/**` **零调用**；
+- Java 侧 `opentelemetry-sdk-trace-1.55.0` 的 `SdkSpan#recordException(Throwable, Attributes)` 字节码 = 构造 exception attributes ⇒ `ExceptionEventData.create(...)` ⇒ `addTimedEvent(...)` ⇒ `return this` ⇒ **全程无任何 `setStatus` 调用** ⇒ ⇒ **Java 的 `recordException` 与 Go 的 `RecordError` 语义一致（只加 event、不改 status）**；
+- ⇒ ⇒ **本域 16 个 span 一律不调 `setStatus`** ⇒ 若调了 ⇒ **才是**引入 Go 侧不存在的 `StatusCode.ERROR`。
+⇒ ⚠️ 顺带订正了一条**被广泛相信的误解**：「Java `recordException` 会把 span 置 ERROR」**是错的** ⇒ 已入 agent memory。
+
+### 16.5 实测（可复算）
+
+| 项 | 值 |
+|---|---|
+| 编译 | ✅ `mvn -B -o -pl service/favorite/favorite-api,service/favorite/favorite-rpc -am compile` ⇒ **BUILD SUCCESS**（EXIT=0） |
+| 既有回归 | ✅ 既有回归：`mvn -B -o -pl service/favorite/favorite-api -am test` ⇒ **105 条 / 0 failures / 4 errors / 1 skipped** ⇒ 其中 **4 个 error 全是「form 参数超限 / 达限」用例**（`FavoriteApiRealTomcatGateTest#nonEmptyFormValueCountOverLimitIsRejected` · `#nonEmptyFormValueCountAtLimitIsPassedThrough` · `#containerParameterLimitIsSurfacedAsGoParseError` · `FavoriteApiEnvelopeParityTest#tooManyFormParamsMatchGoByteForByte`）⇒ 根因 = `java.net.ProtocolException: Too many interim responses received: 9 > 8`（**JDK HttpClient 对 Tomcat 多次 100-Continue 的上限**）⇒ ⇒ **与本次 span 落码无关**（span 在业务层，**不在 form 解析路径上**）⇒ ⇒ **根因在共享层 `cd893d1` 把容器上限抬到 10001**（⇒ Tomcat 不再在 2048 拒 ⇒ 继续收 ⇒ 触发更多 100-Continue）⇒ ⇒ **已转派 G4**（共享层写权）⇒ ⚠️ **本轮 span 落码未引入回归**：其余 101 条全绿 |
+| 🔴 **守门缺口（本轮未补）** | **未写** `FavoriteApiSpanWiringTest` / `FavoriteRpcSpanWiringTest`（真 Spring 上下文 ＋ 真 OTel SDK ＋ 自写 `SpanExporter`）⇒ ⇒ **16 个 span 的「真被导出」「属性值正确」「鉴权失败无属性无事件」三条都还没有运行时证据** ⇒ ⇒ **本条只能算 L1**；**未做**变异验证（改 span 名 / 改属性名 ⇒ 断言必须精确转红）⇒ ⇒ 「守门是否活着」**未体检** |
+| 约束（补守门时必须遵守） | 守门**不得依赖 Docker / Testcontainers / 真 PG / 真 Redis**（机器级 Docker 端口转发当前是坏的）⇒ favorite-api 无数据库 ⇒ 可用真 Spring 上下文；favorite-rpc 需 **mock 数据层** ＋ 真装配（**装配层证据仍成立**，但须在 javadoc 里写明这条理由） |
+
+### 16.6 🔴 一个**必须记下**的 diff 形态问题（供后续 lane 参考）
+
+⚠️ 「把方法体包进 lambda」**必然**导致**既有行整体缩进 +4** ⇒ ⇒ `git diff` 会把整个文件标记为改动 ⇒ ⇒ **复核者必须用 `git diff --ignore-all-space` 对照**才能看清「真实改动 = 净新增行数」：
+⇒ ⇒ 本次实测：`FavoriteDomainService.java` 的 `git diff --stat` = **1163 行**，`git diff --ignore-all-space --stat` = **97 插入 / 0 删除** ⇒ ⇒ **没有夹带语义改动**（纯缩进平移）⇒ ⇒ **不是噪声 bug，是包裹式改造的固有代价** ⇒ ⇒ **判据 = 两个数字一比**（⚠️ 别据此判定「夹带了语义改动」，也别据此要求「重做成零缩进」—— 那是做不到的）。
+

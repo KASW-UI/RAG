@@ -19,6 +19,24 @@
 
     <dependencies>
         <!--
+            FavoriteSpans（common/span/FavoriteSpans.java）用 io.opentelemetry.api 的
+            GlobalOpenTelemetry / Tracer / Span 三个类型 —— 它们全在 opentelemetry-api 里。
+
+            ⚠️ 【为什么本模块必须显式引它】：favorite-common 是 favorite-api 与 favorite-rpc
+            共同依赖的域内私有模块，但**本模块自身**不引任何 OTel artifact
+            ⇒ favorite-common 编译期拿不到 io.opentelemetry.api.*。
+            ⚠️ 【为什么不用 spring-boot-starter-*】：本模块只需要 **API 面**（不装 SDK），
+            真正的 SDK / exporter 由 favorite-api 与 favorite-rpc 各自装配
+            （favorite-api 引 opentelemetry-exporter-otlp；favorite-rpc 的 SDK 来自共享层）。
+
+            版本由 spring-boot-dependencies BOM 管理（spring-boot-starter-parent 提供），不写版本号。
+        -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-api</artifactId>
+        </dependency>
+
+        <!--
             FavoriteGrpcError 构造 io.grpc.StatusException / 解析 StatusRuntimeException /
             读 Status.Code，这些类全在 grpc-api；grpc-stub 会传递依赖 grpc-api。
             引 grpc-stub 而不是直接引 grpc-api，是为了与 message-common / like-common 保持同源，

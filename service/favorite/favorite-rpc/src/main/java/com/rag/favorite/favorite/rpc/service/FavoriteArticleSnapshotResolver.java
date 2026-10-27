@@ -4,6 +4,7 @@ import com.rag.article.article.proto.Article;
 import com.rag.article.article.proto.ArticleStatus;
 import com.rag.article.article.proto.GetArticleResponse;
 import com.rag.common.logger.LogOption;
+import com.rag.favorite.favorite.common.span.FavoriteSpans;
 import com.rag.favorite.favorite.rpc.client.ArticleRpcClient;
 import com.rag.favorite.favorite.rpc.config.FavoriteRpcLabels;
 import com.rag.favorite.favorite.rpc.exception.FavoriteExceptions;
@@ -126,20 +127,26 @@ public class FavoriteArticleSnapshotResolver {
     public ArticleSnapshot resolve(String rawTargetId, LogOption... logOptions) {
         String normalizedTargetId = rawTargetId == null ? "" : rawTargetId.trim();
 
-        GetArticleResponse resp;
-        try {
-            // Go: service/favorite/rpc/internal/logic/helper.go:133-137（三个 L1 字段固化在 ArticleRpcClient#getPublicArticle）
-            resp = articleRpcClient.getPublicArticle(normalizedTargetId);
-        } catch (StatusRuntimeException e) {
-            fail();
-            // Go: service/favorite/rpc/internal/logic/helper.go:142-146
-            if (e.getStatus().getCode() == Status.Code.NOT_FOUND) {
-                throw FavoriteExceptions.articleNotFound();
-            }
-            LOG.error("article-rpc GetArticle failed: article_id={} code={} message={}",
-                    normalizedTargetId, e.getStatus().getCode(), e.getStatus().getDescription(), logOptions);
-            throw FavoriteExceptions.internalServerCommon();
-        }
+        // 🔴 Go 出处（rpc/internal/logic/helper.go:126-178 · resolveArticleSnapshot）：
+        //     depCtx, span := otel.Tracer("favorite-rpc").Start(ctx, "Dependency.Article.GetArticle")
+        //     defer span.End()
+        //     normalizedTargetID := strings.TrimSpace(targetID)              // ← :130
+        //     span.SetAttributes(attribute.String("biz.article_id", normalizedTargetID))  // ← :131
+        //     resp, err := svcCtx.ArticleRpc.GetArticle(depCtx, …)          // ← :133-137
+        //     if err != nil { span.RecordError(err) … }                     // ← :139 **只有这里记错**
+        //     if resp == nil || resp.Article == nil { … }                   // ← :148-151 **不记**
+        // ⇒ 用 FavoriteSpans.tracedDependency 的两段式表达同一个时序：
+        //    「下游调用失败 ⇒ 记错」/「调用后的业务判定失败 ⇒ 不记」。
+        GetArticleResponse resp = FavoriteSpans.tracedDependency(
+                FavoriteSpans.DEPENDENCY_ARTICLE_GET_ARTICLE,
+                // Go: helper.go:130-131 —— **已 TrimSpace** 的 targetID
+                span -> span.setAttribute(FavoriteSpans.ATTR_ARTICLE_ID, normalizedTargetId),
+                // Go: helper.go:133-137（三个 L1 字段固化在 ArticleRpcClient#getPublicArticle）
+                () -> articleRpcClient.getPublicArticle(normalizedTargetId),
+                // Go: helper.go:139-146 —— **这里**是唯一记错的地方（记的是原始 gRPC 错误）
+                e -> onDownstreamFailure(normalizedTargetId, e, logOptions),
+                // Go: helper.go:148+ —— 调用后的业务判定**不记错**（下面原样保留）
+                r -> r);
 
         // Go: service/favorite/rpc/internal/logic/helper.go:148-151
         if (resp == null || !resp.hasArticle()) {
@@ -269,5 +276,31 @@ public class FavoriteArticleSnapshotResolver {
     private void fail() {
         metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
                 FavoriteRpcLabels.ACTION_ARTICLE_GET, FavoriteRpcLabels.RESULT_FAIL);
+    }
+
+    /**
+     * Go {@code helper.go:139-146} 的错误分支 —— <b>唯一</b>会 {@code span.RecordError(err)} 的地方。
+     *
+     * <p>⚠️ <b>顺序必须与 Go 一致</b>：Go 是 {@code span.RecordError(err)} → {@code metrics.ObserveOp(...resultFail)}
+     * → 再按 status 分支 ⇒ 本方法里 metrics 的观察发生在「翻译成业务码」之前。
+     * <br>（{@code FavoriteSpans.tracedDependency} 已经在那之前完成了 {@code recordException}。）
+     */
+    private RuntimeException onDownstreamFailure(String normalizedTargetId, Throwable e, LogOption... logOptions) {
+        if (!(e instanceof StatusRuntimeException sre)) {
+            // ⚠️ 原实现只 catch StatusRuntimeException ⇒ 其它异常原样上抛（不被翻译）。
+            //    这里逐字保留该行为，**不**在本次落码里顺手「改成 Go 的 status.FromError 语义」。
+            if (e instanceof RuntimeException re) {
+                throw re;
+            }
+            throw new IllegalStateException(e);
+        }
+        fail();
+        // Go: service/favorite/rpc/internal/logic/helper.go:142-146
+        if (sre.getStatus().getCode() == Status.Code.NOT_FOUND) {
+            throw FavoriteExceptions.articleNotFound();
+        }
+        LOG.error("article-rpc GetArticle failed: article_id={} code={} message={}",
+                normalizedTargetId, sre.getStatus().getCode(), sre.getStatus().getDescription(), logOptions);
+        throw FavoriteExceptions.internalServerCommon();
     }
 }

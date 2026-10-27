@@ -3728,3 +3728,19 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 - ⚠️ **若各 lane 各自 `--fix`** ⇒ 同一行被多个分支改 ⇒ **合并必撞** ⇒ 建议明确「**只在合并后统一 `--fix` 一次**」这条口径。
 - ⚠️ 顺带**纪律订正**：本条纪律 ⑤ 要求「引用损坏形态用可见转义（`␦`）」，而**本条目自身 3 处引用却用了真字节**
   ⇒ **已自纠**（`␦`）⇒ ⇒ **「写完必须验」比「照着纪律写」更可靠**。
+
+---
+
+## 🔴 favorite-rpc 的 **9 个业务 span**（Go 侧 `FavoriteRPC.*` 7 个 ＋ `Dependency.*` 2 个）已落码 —— 2026-10-27（G3 · L-4）
+
+| 项 | 值 |
+|---|---|
+| 落点 | `FavoriteDomainService` 的 **7 个方法**（`createFavoriteFolder` / `createFavorite` / `deleteFavoriteFolder` / `deleteFavorite` / `getFavoriteFolders` / `getFavoritesByFolder` / `updateFavoriteFolderName`）＋ `FavoriteUserGuard#ensureExists`（= `Dependency.User.GetUser`）＋ `FavoriteArticleSnapshotResolver#resolve`（= `Dependency.Article.GetArticle`） |
+| 工具类 | `service/favorite/favorite-common/.../span/FavoriteSpans.java`（域内私有，api/rpc 共用） |
+| 判据 | 🔴 **三类，与 comment 域不同**（详见 [`api.md` §16.2](api.md#162-)）⇒ rpc 侧 = **凡错都记**（含业务失败）· 两个依赖 span = **只记下游 RPC 失败**，业务判定失败**不记** |
+| 证据强度 | 🔴 **L1（源码级）· 守门未写** ⇒ **不得读作「已验证」** ⇒ 详见 [`api.md` §16.5](api.md#165-) |
+| 核对日期 | 2026-10-27 |
+
+⚠️ **依赖 span 的两段式改造要点**（改这两处时别弄错）：「下游调用」与「调用后的业务判定」必须**拆成两个函数段**（`tracedDependency` 的 `call` 与 `after`）⇒ 否则会**多记** Go 侧那三条**没有** `RecordError` 的业务分支（`helper.go:109-111` / `:113-115` / `:117-119`）。
+⚠️ **「其它异常原样上抛」的语义逐字保留**：原实现只 catch `StatusRuntimeException` ⇒ 其它异常**不被翻译** ⇒ 落码里保留（**不**顺手「改成 Go 的 `status.FromError` 语义」）⇒ 见 `FavoriteUserGuard#onDownstreamFailure` / `FavoriteArticleSnapshotResolver#onDownstreamFailure` 的注释。
+

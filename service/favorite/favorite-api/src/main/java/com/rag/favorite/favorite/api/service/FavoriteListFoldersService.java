@@ -3,6 +3,7 @@ package com.rag.favorite.favorite.api.service;
 import com.rag.favorite.favorite.api.client.FavoriteRpcClient;
 import com.rag.favorite.favorite.api.dto.FavoriteFolder;
 import com.rag.favorite.favorite.api.dto.GetFavoriteFoldersResp;
+import com.rag.favorite.favorite.common.span.FavoriteSpans;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Service;
 
@@ -38,28 +39,37 @@ public class FavoriteListFoldersService {
     }
 
     public GetFavoriteFoldersResp getFavoriteFolders(HttpServletRequest httpRequest) {
-        long userId = support.userId(httpRequest);
+        // 🔴 Go 出处（api/internal/logic/favorite/get_favorite_folders_logic.go:33-42）：
+        //     ctx, span := otel.Tracer("favorite-api").Start(l.ctx, "FavoriteAPI.GetFavoriteFolders")
+        //     defer span.End()
+        //     userID, err := extractUserID(ctx)      ← 失败 ⇒ 直接 return（**不 RecordError**、不设属性）
+        //     span.SetAttributes(attribute.Int64("biz.user_id", userID))    ← **只有这一个属性**
+        return FavoriteSpans.tracedApi(
+                FavoriteSpans.API_GET_FAVORITE_FOLDERS,
+                () -> support.userId(httpRequest),
+                (span, userId) -> span.setAttribute(FavoriteSpans.ATTR_USER_ID, userId),
+                userId -> {
+                    com.rag.favorite.favorite.proto.GetFavoriteFoldersReq rpcReq =
+                            com.rag.favorite.favorite.proto.GetFavoriteFoldersReq.newBuilder()
+                                    .setUserId(userId)
+                                    .build();
 
-        com.rag.favorite.favorite.proto.GetFavoriteFoldersReq rpcReq =
-                com.rag.favorite.favorite.proto.GetFavoriteFoldersReq.newBuilder()
-                        .setUserId(userId)
-                        .build();
+                    com.rag.favorite.favorite.proto.GetFavoriteFoldersResp rpcResp =
+                            support.invokeRpc(() -> rpcClient.favoriteRpc().getFavoriteFolders(rpcReq), userId, null);
 
-        com.rag.favorite.favorite.proto.GetFavoriteFoldersResp rpcResp =
-                support.invokeRpc(() -> rpcClient.favoriteRpc().getFavoriteFolders(rpcReq), userId, null);
+                    // Go: get_favorite_folders_logic.go:51-56 —— rpcResp == nil ⇒ 5001
+                    // ⚠️ Go 这一支【只判 nil】（响应消息里没有 success 字段）⇒ 用 nullResponse。
+                    if (rpcResp == null) {
+                        throw support.nullResponse(userId, null);
+                    }
 
-        // Go: get_favorite_folders_logic.go:51-56 —— rpcResp == nil ⇒ 5001
-        // ⚠️ Go 这一支【只判 nil】（响应消息里没有 success 字段）⇒ 用 nullResponse。
-        if (rpcResp == null) {
-            throw support.nullResponse(userId, null);
-        }
+                    List<FavoriteFolder> folders = new ArrayList<>(rpcResp.getFoldersCount());
+                    for (com.rag.favorite.favorite.proto.FavoriteFolder proto : rpcResp.getFoldersList()) {
+                        folders.add(support.toFolderDto(proto));
+                    }
 
-        List<FavoriteFolder> folders = new ArrayList<>(rpcResp.getFoldersCount());
-        for (com.rag.favorite.favorite.proto.FavoriteFolder proto : rpcResp.getFoldersList()) {
-            folders.add(support.toFolderDto(proto));
-        }
-
-        support.logInfo(String.format("get favorite folders success, count=%d", folders.size()), userId, null);
-        return new GetFavoriteFoldersResp(folders);
+                    support.logInfo(String.format("get favorite folders success, count=%d", folders.size()), userId, null);
+                    return new GetFavoriteFoldersResp(folders);
+                });
     }
 }
