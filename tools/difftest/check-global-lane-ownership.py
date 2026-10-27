@@ -24,7 +24,9 @@ L2 曾拥有 `user-rpc/src/test/**`、L1 曾拥有 `like-rpc/**` / `comment-rpc/
    「`tools/difftest/` 下新脚本」这种**目录级**写法（L10/L11 同写 `tools/difftest/`）。
 2. **共享文件无人拥有** —— `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` /
    4 个规范台账 / `tools/difftest/README.md` 必须**不在任何 lane 的白名单里**
-   ⇒ 它们由**整合者**在合并后统一更新（§5.3 同款纪律）。
+   ⇒ 它们由**合并收口执行者**在合并后统一更新（§5.3 同款纪律）。
+   ⇒ ⚠️ **「合并收口执行者」是一个步骤，不是一个常驻会话** ⇒ lane 不该去找任何叫「整合者」的会话
+   ⇒ 角色表与 lane 的正确动作 ⇒ `docs/Worktree.md` §1e。
 3. **favorite 域零写权** —— `service/favorite/**` 与 `docs/*/favorite/` 不得出现在任何白名单。
 
 ⚠️ **2026-10-27：`global-common` 登记 ⇒ 首次点亮「在跑」分支 ⇒ 抓出一条假绿**
@@ -205,7 +207,9 @@ CLOSED: dict[str, list[str]] = {
 LANES = {**ACTIVE, **CLOSED}
 
 # ---------------------------------------------------------------- 共享文件
-# 这些**不属于任何 lane** ⇒ 只能由整合者在合并后统一更新。
+# 这些**不属于任何 lane** ⇒ 只能由合并收口执行者在合并后统一更新。
+# ⚠️ 原措辞「归整合者」已删（2026-10-27）：**「整合者」不是一个存在的角色** ⇒
+#    它诱导 lane 去向上升级找一个不存在的人 ⇒ 改用可指向的「合并收口执行者」。
 SHARED = [
     "AGENTS.md",
     "docs/DRIFT/_INDEX.md",
@@ -314,7 +318,7 @@ def main() -> int:
             if shared in expanded[lane]:
                 failures.append(
                     f"🔴 共享文件被 lane 占用：`{lane}` 声明了 `{shared}`"
-                    " ⇒ 共享文件只能由整合者在合并后统一更新"
+                    " ⇒ 共享文件只能由合并收口执行者在合并后统一更新"
                 )
 
     # ---- 3. favorite 零写权 --------------------------------------------
@@ -353,7 +357,7 @@ def main() -> int:
     else:
         print(f"  · 在跑的 {len(ACTIVE)} 条 lane 写权范围两两不重叠")
     print(f"  · 已合回的 {len(CLOSED)} 条 lane 单列归档（不参与重叠判定）")
-    print(f"  · {len(SHARED)} 个共享文件无人拥有（归整合者）")
+    print(f"  · {len(SHARED)} 个共享文件无人拥有（归合并收口执行者）")
     print("  · favorite 域零写权")
     return 0
 
