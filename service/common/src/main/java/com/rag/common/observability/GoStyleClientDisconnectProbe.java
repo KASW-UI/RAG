@@ -11,6 +11,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * <b>客户端断连的「主动探测」：往 socket 写一个合法的 HTTP/1.1 1xx 探针，把断连提前暴露出来。</b>
@@ -81,17 +82,36 @@ import java.nio.charset.StandardCharsets;
  * <b>直接抛异常</b>，根本读不到最终响应。
  * <p>⚠️ <b>跨域暴露面</b>：暴露量由各域的 {@code observability.http-timeout} 决定 ⇒
  * <b>{@code article-api} = 70s</b>（Go 真源 {@code Timeout: 70000} 对齐值）⇒
- * <b>最多 140 行</b>；其余 9 域 = 3s ⇒ 最多 6 行 ⇒ <b>article 域最危险</b>。
+ * <b>最多 140 行</b>（= 70s ÷ 500ms，<b>推算值 · 未逐域实测</b>）；其余 9 域 = 3s ⇒ 最多 6 行
+ * ⇒ <b>article 域最危险</b>。
  * <p>⇒ <b>本类的做法</b>：给<b>每个请求</b>的 1xx 行数设上界
  * {@link #maxProbeLines()}（默认 {@link #DEFAULT_MAX_PROBE_LINES} = 4，
- * <b>取 4 而不是 8</b>：留一半余量 ⇒ 即便客户端把上限配到 4 也不炸）。
+ * <b>取 4 而不是 8</b>：留一半余量）。
+ * 🔴 <b>这个「余量」只对「按 RFC 9110 忽略 1xx」的客户端成立</b>
+ * （JDK {@code java.net.http} / Go {@code net/http} / curl / 浏览器 ⇒ 都会跳过 1xx 再读最终响应）：
+ * <ul>
+ *   <li>⚠️ <b>把 1xx 当最终响应</b>的客户端（实测：**Python {@code http.client} 3.11**
+ *       看到 {@code status=103}、body 为空 ⇒ <b>1 行即失效</b>）⇒ ⇒ <b>任何正的上界都救不了它</b>
+ *       ⇒ ⇒ 这类客户端在<b>慢请求</b>上<b>本来就</b>读不到最终响应
+ *       ⇒ ⇒ **本改动对它们既无改善也无恶化**（1xx 探针是已签字偏离 {@code SD-2026-10-25-04}）；
+ *       ⚠️ 但<b>不要</b>把「上界 4 ⇒ 客户端不会炸」写成<b>普遍</b>结论。</li>
+ *   <li>⚠️ <b>用 {@code Expect: 100-continue} 的客户端</b>：JDK 把那个 100 响应
+ *       <b>也计入同一个</b> interim 计数器（{@code Exchange.java:466}
+ *       {@code nonFinalResponses.incrementAndGet()}）⇒ ⇒ 计数 = 1 + 上界 ⇒
+ *       ⇒ 这种客户端要把上界<b>再降 1</b>（≤ 3）才安全。</li>
+ * </ul>
+ * <p>🔴 <b>「上界」与「探测间隔」是一个【乘积】，不是两个独立旋钮</b>：
+ * <b>有效探测窗口 = 上界 × 探测间隔</b>（默认 4 × 500ms = <b>2s</b>）⇒ ⇒ 运维若为「更快取消」
+ * 把间隔调到下限 {@link #MIN_PROBE_INTERVAL_MILLIS}（50ms）⇒ ⇒ 窗口<b>等比塌到 200ms</b>
+ * ⇒ ⇒ 也就是说：<b>间隔调小 ⇒ 客户端更安全，但断连的「提前发现」窗口同步变短</b>
+ * ⇒ ⇒ 这正是下面「代价」那条的来源。
  * <ul>
  *   <li>计数<b>按请求</b>（request attribute）⇒ 不会跨请求互相吃预算
  *       ⇒ 不会把「后一个请求」的断连探测能力悄悄关掉；</li>
  *   <li>预算用尽后 <b>不再写探针字节</b>，但<b>等待语义完全不变</b>
  *       （仍然等到 worker 完成或超时 ⇒ <b>总窗口既不延长也不缩短</b>）⇒ <b>fail-open</b>；</li>
  *   <li>⚠️ <b>代价（必须写清）</b>：预算用尽后<b>不再有「主动探测」</b>
- *       ⇒ 超长请求（耗时 ≫ 预算 × 探测间隔）里，客户端中途断连**不再被提前发现**
+ *       ⇒ 超长请求（耗时 ≫ <b>上界 × 探测间隔</b>）里，客户端中途断连**不再被提前发现**
  *       ⇒ 在飞的下游 gRPC 要等到<b>写最终响应</b>时才被取消（而不是提前取消）
  *       ⇒ 这是「保住客户端能解析响应」换来的 ⇒ <b>宁可晚取消，不可让客户端失败</b>。</li>
  * </ul>
@@ -250,6 +270,11 @@ public final class GoStyleClientDisconnectProbe {
      * <p>每次调用都重新读 system property ⇒ 运维改值后<b>无需重启</b>即可生效
      * ⇒ 与 {@link #probeIntervalMillis()} 同一套口径。
      *
+     * <p>🔴 **告警只打一次**（2026-10-27 · 独立复核提出）：本方法被
+     * {@link #probe(HttpServletRequest, HttpServletResponse)} <b>每片</b>调一次
+     * ⇒ ⇒ 若在这里直接 {@code log.warn}，一个 70s 的请求会打 <b>140 条</b> WARN，
+     * 并发下线性放大 ⇒ ⇒ **日志风暴** ⇒ ⇒ 改为<b>每进程一次</b>（{@link AtomicBoolean} 门闩）。
+     *
      * @return 行数上界；<b>0 = 探针被显式关闭</b>；非法值 ⇒ 回退
      *         {@link #DEFAULT_MAX_PROBE_LINES}
      */
@@ -261,22 +286,36 @@ public final class GoStyleClientDisconnectProbe {
         try {
             int parsed = Integer.parseInt(raw.trim());
             if (parsed < 0) {
-                log.warn("[HTTP] 非法 1xx 行数上界 {}（{}），回退到默认 {}",
-                        raw, MAX_PROBE_LINES_PROPERTY, DEFAULT_MAX_PROBE_LINES);
+                warnMaxProbeLinesOnce(raw, "负数 ⇒ 非法", DEFAULT_MAX_PROBE_LINES);
                 return DEFAULT_MAX_PROBE_LINES;
             }
             if (parsed == 0) {
-                log.warn("[HTTP] 1xx 探针已被显式关闭（{}={}）⇒ **主动断连探测失效**"
-                                + "（客户端断连将只能等写最终响应时才发现）",
-                        MAX_PROBE_LINES_PROPERTY, raw);
+                warnMaxProbeLinesOnce(raw, "0 ⇒ 显式关闭探针（**主动断连探测失效**）", 0);
                 return 0;
             }
             return parsed;
         } catch (NumberFormatException e) {
-            log.warn("[HTTP] 非法 1xx 行数上界 {}（{}），回退到默认 {}",
-                    raw, MAX_PROBE_LINES_PROPERTY, DEFAULT_MAX_PROBE_LINES);
+            warnMaxProbeLinesOnce(raw, "非整数 ⇒ 非法", DEFAULT_MAX_PROBE_LINES);
             return DEFAULT_MAX_PROBE_LINES;
         }
+    }
+
+    /** 1xx 行数上界异常的告警门闩（<b>每进程只告警一次</b> ⇒ 防日志风暴）。 */
+    private static final AtomicBoolean MAX_PROBE_LINES_WARNED = new AtomicBoolean();
+
+    /**
+     * 1xx 行数上界异常时告警一次。
+     *
+     * @param raw      原始配置值
+     * @param reason   判定理由
+     * @param effective 实际生效值
+     */
+    private static void warnMaxProbeLinesOnce(String raw, String reason, int effective) {
+        if (!MAX_PROBE_LINES_WARNED.compareAndSet(false, true)) {
+            return;
+        }
+        log.warn("[HTTP] 1xx 行数上界异常（{}={}，{}）⇒ 生效值 = {}（**每进程只告警一次**）",
+                MAX_PROBE_LINES_PROPERTY, raw, reason, effective);
     }
 
     /**

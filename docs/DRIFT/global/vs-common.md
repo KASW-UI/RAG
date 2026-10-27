@@ -1930,11 +1930,11 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | **落点 ④（顺带订正）** | `GoStyleTimeoutResponseRaceGateTest.java` ⇒ **归因错误**：原注释称 103 是「Tomcat 11 自发」⇒ 实测是**共享层探针**写的（401 路径零 1xx ⇒ 若容器自发，401 也该有）⇒ **不影响该用例判定**（两种来源下都要跳过 1xx），但影响「谁负责 1xx 行数」 |
 | **落点 ⑤（顺带订正）** | `GoStyleClientDisconnectProbe` 类 javadoc 的签字档指针：`SD-2026-10-25-02`（**已撤销**）⇒ **`SD-2026-10-25-04`（✅ 已签字 2026-10-25）** |
 | **为什么取 4 而不是 8** | 客户端硬上限 = JDK 默认 **8** ⇒ 取**一半** ⇒ 即便客户端把上限配到 4 也炸不了 ⇒ ⚠️ **不要写成 8**（那就没有余量） |
-| **变异验证（各红**且仅红**一条）** | **M1** 闸门差一（`written > max`）⇒ 只红 ①（实测行数=5）· **M2** 计数器改全局静态 ⇒ 只红 ③（first=0 second=0）· **M3** 默认上界 4→1000 ⇒ 只红 ②（**复现原始故障原文 `Too many interim responses received: 9 > 8`**）⇒ 三次跑完均**逐字节还原**（MD5 MATCH） |
+| **变异验证（各红**且仅红**一条）** | **M1** 闸门差一（`written > max`）⇒ 只红 ①（实测行数=5）· **M2** 计数器改全局静态 ⇒ 只红 ③（first=0 second=0）· **M3** 默认上界 4→1000 ⇒ 只红 ②（**复现原始故障原文 `Too many interim responses received: 9 > 8`**）⇒ 三次跑完均**逐字节还原**（MD5 MATCH）<br>⚠️ **前提（2026-10-27 复核补注）**：M2 的「只红 ③」**只在【隔离单类跑】时成立** ⇒ 整模块一起跑时，既有断连守门也会累加那个全局静态计数器 ⇒ 断言 ① 也可能红 ⇒ ⇒ **这不弱化守门**（整跑只会**更敏感**）⇒ ⇒ 复核已在 `/tmp` 的 `git clone --shared` 副本里**独立复现**三条（结论一致） |
 | **回归** | `mvn -o -B -DargLine=-Xmx2g -am -pl service/common test` ⇒ **330 / 0 failures / 0 errors / 0 skipped · BUILD SUCCESS**（327 + 新守门 3） |
 | ✅ **端到端闭环（原失败探针转绿）** | `bash tools/api-envelope-probe/favorite/run.sh` ⇒ **PROBE_EXIT=0**（修前 **EXIT=2**）· `FavoriteApiEnvelopeParityTest` **5/5 全绿**（14.574s）⇒ ⇒ **且不需要任何客户端绕过参数**（此前用 `-Djdk.httpclient.maxNonFinalResponses=0` 才绿 ⇒ 现证明**成因确实在共享层** ⇒ **那个绕过参数不再需要**）⇒ ⇒ 双侧逐字节一致（Go 真源 == `expected.txt` == RAG 实测）⇒ ⇒ **本条把 §4.10.31 的根因彻底闭环** |
 | 🔴 **已知代价（已写进类 javadoc）** | 预算用尽后**不再有主动探测** ⇒ 超长请求里客户端中途断连**不再被提前发现** ⇒ 在飞的下游 gRPC 要等**写最终响应**时才被取消 ⇒ ⇒ **这是「保住客户端能解析响应」换来的取舍**（宁可晚取消，不可让客户端失败）⇒ ⇒ **不再改探测间隔**（那会改掉已签字偏离 `SD-2026-10-25-04` 的「延迟 ≈ 探测间隔」表述） |
-| 🔴 **跨域暴露面（只登记 · 共享面待整合）** | 暴露量由各域 `observability.http-timeout` 决定 ⇒ **`article-api` = 70s**（Go 真源 `Timeout: 70000` 对齐值 ⇒ **不能靠改域 yaml 规避**）⇒ **修前最多 140 行**；其余 9 域 = 3s ⇒ 最多 6 行 ⇒ ⇒ **`article` 域最危险** ⇒ 修后一律 ≤ 4 行 |
+| 🔴 **跨域暴露面（只登记 · 共享面待整合）** | 暴露量由各域 `observability.http-timeout` 决定 ⇒ **`article-api` = 70s**（Go 真源 `Timeout: 70000` 对齐值 ⇒ **不能靠改域 yaml 规避**）⇒ **修前最多 140 行**（= 70s ÷ 500ms ⇒ ⚠️ **推算值 · 未逐域实测**）；其余 9 域 = 3s ⇒ 最多 6 行 ⇒ ⇒ **`article` 域最危险** ⇒ 修后一律 ≤ 4 行 |
 | ⚠️ **签字档的连带** | `docs/Intentional_Deviations/global/common-tails.md` 的 `SD-2026-10-25-04` 仍写「N = 探测轮数 ≈ 慢请求秒数 ÷ 0.5s」⇒ ⇒ **该文件不属本 lane 写权** ⇒ ⇒ **只在此登记，待整合者回写**（把 N 改成「有上界（默认 4）」并补 JDK interim 上限的事实） |
 
 #### 4.10.33 🟢 **本轮三条杂项**（`io/` 工作区噪声根因 · U+FFFD 三分类 · 收到的订正归档）
@@ -2053,6 +2053,43 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | 命令 | `mvn -o -B -DargLine=-Xmx2g -am -pl service/common test` |
 | 结果 | ✅ **Tests run: 330, Failures: 0, Errors: 0, Skipped: 0 · BUILD SUCCESS**（327 + 新守门 3） |
 | 变异验证 | M1 / M2 / M3 **各红且仅红一条断言** ⇒ 三次跑完均**逐字节还原**（MD5 MATCH） |
+
+#### 4.10.36 🟢 **独立复核（verifier）⇒ PASS ＋ 5 条发现 ⇒ 已全部落码**（2026-10-27）
+
+> **为什么有这一节**：§4.10.32 的改动**改了生产代码**（`15cf93a`）⇒ ⇒ 按本层纪律「**结论对 ≠ 推导对**」，
+> 请了一个**独立 verifier**（只读，变异实验在 `/tmp` 的 `git clone --shared` 副本里做，**不动工作树**）复核
+> 8 个问题 ⇒ ⇒ **VERDICT = PASS**（无功能性缺陷）＋ 提 **3 条 🟡 + 2 条 🟢** ⇒ ⇒ **本节把 5 条逐条销账**。
+
+| # | 复核发现 | 严重级 | 处置 |
+|---|---|---|---|
+| ① | **「有效探测窗口 = 上界 × 探测间隔」是个【乘积】，原 javadoc 没写** ⇒ 运维把间隔调到下限 50ms ⇒ 窗口从 2s 塌到 **200ms** ⇒ 「上界 4」会被误读成「固定 4 次、与间隔无关」 | 🟡 | ✅ **已落码**：类 javadoc 补「乘积」一节（默认 4×500ms=2s；间隔调小 ⇒ 客户端更安全但**提前发现窗口同步变短**）⇒ 提交见下 |
+| ② | **`maxProbeLines()` 的 WARN 每片都打** ⇒ 一个 70s 请求打 **140 条** WARN ⇒ 并发线性放大 ⇒ **日志风暴**（我引入的） | 🟡 | ✅ **已落码**：改为 **每进程一次**（`AtomicBoolean` 门闩 + `warnMaxProbeLinesOnce()`）⇒ ⚠️ **未加守门**（静态门闩天生**进程级一次** ⇒ 断言会**顺序相关** ⇒ 写了就是假绿 ⇒ 只在 javadoc 与台账留痕） |
+| ③ | **「即便客户端把上限配到 4 也不炸」表述过宽** ⇒ 只对「**按 RFC 9110 忽略 1xx** 的客户端」成立；实测 **Python `http.client` 3.11 把 `103 Early Hints` 当最终响应**（`status=103`、body 空）⇒ **1 行即失效** | 🟡 | ✅ **已落码**：javadoc 补前提 + 点名 Python `http.client` + 写明「**对这类客户端既无改善也无恶化**」（1xx 探针是已签字偏离 `SD-2026-10-25-04`）⇒ ⚠️ 本仓 `tools/difftest/matrix.py`（`urllib.request.urlopen`）· `parity-task.py`（`http.client.HTTPConnection`）**正是这类客户端** ⇒ ⇒ 它们能用是因为**那些路径快（< 500ms ⇒ 零 1xx）** ⇒ ⇒ **不是**「它们不受影响」的证明 |
+| ④ | **`Expect: 100-continue` 客户端把那个 100 也计入同一个 interim 计数器**（JDK `Exchange.java:466` `nonFinalResponses.incrementAndGet()`）⇒ 计数 = 1 + 上界 ⇒ 这种客户端要再降 1（≤ 3） | 🟢 | ✅ **已落码**（javadoc 一行）⇒ 本仓无人用 `expectContinue` ⇒ 影响为零 |
+| ⑤ | **M2 变异「只红 ③」只在【隔离单类跑】时成立**（整模块一起跑时，既有断连守门也会累加那个全局静态计数器 ⇒ 断言 ① 也可能红） | 🟢 | ✅ **台账补注**（不弱化守门：整跑只会**更敏感**）⇒ 落点见下 |
+| ⑥ | **正面确认**：`GoStyleTimeoutResponseRaceGateTest` 的**归因订正属实** —— Tomcat 11.0.18 的 `sendEarlyHints` 只有定义、**无内部调用方**；本仓亦 0 命中 ⇒ 那行 103 **确实**出自共享层探针 | 🟢 | ✅ **无需处置**（订正成立） |
+
+**复核给出的三条「正面结论」（独立复现，非采信转述）**
+
+| 项 | 结论 | 复核的取证方式 |
+|---|---|---|
+| **上界绕不过** | 1xx 字节唯一写出点 = `GoStyleClientDisconnectProbe.java:339-341`；`probe(...)` 唯一调用点 = `HttpMiddleware.java:428`；全仓 `setStatus(1xx)`/`sendError(1xx)` **0 命中**；Tomcat 的 `sendEarlyHints` **无调用方** | 扫全 jar 常量池 + 全仓 grep |
+| **计数确为按请求** | `httpReq` 是**未包装**的容器 facade（`HttpMiddleware.java:260`）⇒ attribute map 唯一；读写同在**容器线程的同一循环**（`:411-449`），worker 线程**不碰**；Tomcat `Request.attributes` 实测是 `ConcurrentHashMap` | `javap` 构造器字节码 |
+| **JDK 的 interim 计数是「每请求」不是「每连接」** | `Exchange.java:97` `final AtomicInteger nonFinalResponses` 是 **`Exchange` 的实例字段**；`MultiExchange.java:72` 注释原文 *"Creates a new Exchange for each request/response interaction"* | JDK 21.0.10 `src.zip` 一手源码 |
+
+> 🔴 **最后一条是本次修复能成立的前提**：若按**连接**计数 ⇒ keep-alive 复用会累积 ⇒ **cap=4 根本救不了长连接客户端**
+> ⇒ ⇒ 复核把这条钉死了 ⇒ ⇒ **「上界」方案对 keep-alive 客户端有效**（这条不核 ⇒ 整个修复的有效性是悬空的）。
+> ⚠️ 复核同时指出：**Go `net/http` 客户端对 1xx 无数量上限**（`transport.go` 的 `is1xxNonTerminal` 无限 `continue`）
+> ⇒ ⇒ 「客户端硬上限 8」**只对 JDK 成立** ⇒ ⇒ 本层台账里凡写「客户端上限 8」处，均指 **JDK `java.net.http`**。
+
+**复核的「未核实」边界（据实登记）**
+
+| 项 | 状态 |
+|---|---|
+| `service/common` **全量 330 条绿** | ✅ **本层自跑已证**（`/tmp/g4-common-after-review-fixes.log` ⇒ 330/0/0/0 BUILD SUCCESS）⇒ 复核只跑了 4 个相关类（按约束不许跑全量）⇒ **两者互补，不冲突** |
+| 10 个 api 模块的**活体运行期 1xx 行数 = 4** | ⚠️ **未逐域实测**（本轮是共享层内聚改动 · 零 api 改动 · 零 yaml 改动）⇒ ⇒ **只由 `GoStyleClientDisconnectProbeBudgetGateTest` 的真 Tomcat 用例证明机制成立** |
+| `article-api` 70s ⇒ 「最多 140 行」 | ⚠️ **推算值**（70s ÷ 500ms）· **未实测** ⇒ ⇒ 已把台账与 javadoc 里的这个数**标注为「推算值 · 未逐域实测」** |
+| 其它客户端的 interim 上限谱系（Apache HttpClient 5 / OkHttp / .NET） | ⚠️ **未核实** ⇒ ⇒ 只实证了 **JDK（8/每请求）** · **Python `http.client`（把 1xx 当最终响应 ⇒ 有效上限 0）** · **Go `net/http`（无上限）** |
 
 #### 4.10.35 🟢 **台账门禁第 5 层的「分子/分母口径不对称」** ⇒ 支撑类不再产生**永消不掉**的覆盖缺口（已落码 `139b428`）
 
