@@ -1933,6 +1933,7 @@ readValue("  ", List)   => 抛异常: MismatchedInputException
 | 修法 | ① 收摊前**先等日志标志行出现**（上限 30s、间隔 200ms）② sink `StringBuilder` → **`StringBuffer`**（跨线程读写）③ `drain.join(10s)` 建 happens-before |
 | 验证 | ✅ `ArticleRpcRuntimeBootGateTest` **1/1 绿** |
 | 整域回归 | ✅ **article-rpc 155 条**（skipped 0）全绿 ⇒ **四域 12 模块合计 919 条**（0 failures / 0 errors / 4 skipped · 9:44 min · BUILD SUCCESS · 基线 `eb4d1d2` + 本轮改动 · 核对日期 2026-10-27 · 两口径逐模块一致） |
+| 整域回归（**本轮 · D10 落码后 · 2026-10-27**） | ✅ **article-rpc 155 条**（skipped 0）全绿 ⇒ **四域 12 模块合计 922 条**（0 failures / 0 errors / 4 skipped · **10:17 min** · BUILD SUCCESS · 基线 `deeeb8d` + 本轮文档改动 · 核对日期 2026-10-27 · 两口径逐模块一致）<br>⚠️ **上一行的 919 保留原值不改写**（那是基线 `eb4d1d2` 的口径）⇒ ⇒ **两个数不在同一条基线上 ⇒ 不可相加**；本轮本域 **article 三个模块逐条不变**（15 / 99 / 155）⇒ ⇒ 差额 **+3 全部来自 comment-rpc**（D10 新增 3 条守门，commit `deeeb8d`） |
 | 同款缺陷 | 🔴 `comment-rpc` 同款（**同属 G3 写权面** ⇒ 已在 comment 域同批修）· 🔴 `like-rpc` 同款（**属 G2 写权面** ⇒ 已回报 G2，本域**不越权改**） |
 ---
 

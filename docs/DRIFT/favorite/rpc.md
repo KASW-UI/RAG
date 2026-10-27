@@ -3647,6 +3647,7 @@ python3 /tmp/global-selfcheck.py --entity-all \
 | 原始写入会话是否留存 | **不留存**：10-23 的会话快照里**已经是坏的** ⇒ 全仓无原始字符可取 ⇒ 只能**按语义重建** |
 | 重建是否引入假事实 | **否**：重建后的措辞与**同包干净文件**（`FavoriteItemEntity`）逐条一致；且**只改注释**，不改任何行为 |
 | 回归 | ✅ **favorite-rpc 114 条**（skipped 3）全绿 · favorite-api 105 条（skipped 1）全绿 ⇒ **四域 12 模块合计 919 条**（0 failures / 0 errors / 4 skipped · 9:44 min · BUILD SUCCESS · 基线 `eb4d1d2` + 本轮改动 · 核对日期 2026-10-27 · 两口径逐模块一致） |
+| 回归（**本轮 · D10 落码后 · 2026-10-27**） | ✅ **favorite-rpc 114 条**（skipped 3）全绿 · favorite-api 105 条（skipped 1）全绿 ⇒ **四域 12 模块合计 922 条**（0 failures / 0 errors / 4 skipped · **10:17 min** · BUILD SUCCESS · 基线 `deeeb8d` + 本轮文档改动 · 核对日期 2026-10-27 · 两口径逐模块一致）<br>⚠️ **上一行的 919 保留原值不改写**（那是基线 `eb4d1d2` 的口径）⇒ ⇒ **两个数不在同一条基线上 ⇒ 不可相加**；本轮本域 **favorite 三个模块逐条不变**（29 / 105 / 114）⇒ ⇒ 差额 **+3 全部来自 comment-rpc**（D10 新增 3 条守门，commit `deeeb8d`） |
 
 ### 10.3 ⚠️ 一条**误报**（G2 给的清单里有一条**不能改**）
 

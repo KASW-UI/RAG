@@ -1741,6 +1741,7 @@ service/hot/rpc/internal/svc/service_context.go:17-19
 | **变异**：删掉 `connect-timeout: 5s` 一行（其余不动） | 🔴 **精确转红**：报「**expected: 5S but was: 10S**」⇒ 守门**真的**在读 Lettuce 的 socket 连接超时，不是恒绿 |
 | 还原 | ✅ **1/1 绿** · `sha256` 与变异前备份**逐字一致** |
 | 整域回归 | ✅ **四域 12 模块 = 919 条**（article-common 15 / article-api 99 / article-rpc 155 / comment-common 27 / comment-api 52 / comment-rpc 116 / favorite-common 29 / favorite-api 105 / favorite-rpc 114 / hot-common 14 / hot-api 96 / hot-rpc 97）⇒ **0 failures / 0 errors / 4 skipped** · 9:44 min · BUILD SUCCESS<br>口径：`mvn -o --fail-at-end -pl <12 模块> -am test`；基线 `eb4d1d2` + 本轮改动；核对日期 **2026-10-27**；两口径（模块汇总行求和 ≡ 逐类明细行求和）**逐模块一致** |
+| 整域回归（**本轮 · D10 落码后 · 2026-10-27**） | ✅ **四域 12 模块 = 922 条**（article-common 15 / article-api 99 / article-rpc 155 / comment-common 27 / comment-api 52 / **comment-rpc 119**（= 旧 116 ＋ D10 新增 3） / favorite-common 29 / favorite-api 105（skipped 1） / favorite-rpc 114（skipped 3） / hot-common 14 / hot-api 96 / hot-rpc 97）⇒ **0 failures / 0 errors / 4 skipped** · **10:17 min** · BUILD SUCCESS<br>口径：`mvn -o --fail-at-end -pl <12 模块> -am test`；基线 `deeeb8d` + 本轮文档改动；核对日期 **2026-10-27**；两口径（模块汇总行 ≡ 逐类明细行）**逐模块一致**<br>⚠️ **上一行的 919 保留原值不改写**（那是基线 `eb4d1d2` 的口径）⇒ ⇒ **两个数不在同一条基线上 ⇒ 不可相加**；本轮除 comment-rpc 外**其余 11 个模块逐条不变** ⇒ ⇒ 差额 **+3 全部来自 comment-rpc**（D10 新增 3 条守门，commit `deeeb8d`） |
 
 **证据强度**：L3 静态实测（Boot 4.0.8 **字节码** + Lettuce 6.8.2 常量 + go-redis v9.20.0 源码）
 ＋ L4 **真容器**装配断言（`ApplicationContextRunner` + Boot 真实 `DataRedisAutoConfiguration`）。

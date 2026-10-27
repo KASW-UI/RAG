@@ -611,6 +611,65 @@ Go 侧**每一条 DB 错误路径都改写成业务码**，**不区分 deadline*
 
 ---
 
+## PIT-COMMENT-RPC-14 🔴 · 「Go 侧某文件里零命中」**推不出「整条链路不用 X」** —— 链路的另一半在**共享层**
+
+### 一句话
+
+**在 Go 侧某个**域内文件**里 grep「零命中」，只能证明那个文件没有；
+证明不了**整条链路**没有 —— 链路的一半收口在**共享层**（`service/common/…`），
+而共享层那一段**通常不在你第一眼 grep 的范围里** ⇒ ⇒
+只查域内文件就下「整条链路零 X」的断言 ⇒ **结论可能整个方向反过来**。
+
+### 形态（2026-10-27 实测 · D10 的依据差点写错）
+
+本域 fact 投递链路的两个 span 属性（`comment.fact.event_id` / `comment.fact.aggregate_version`）
+⇒ 初判写的是「**Go 侧 comment 的 fact 投递链路根本不用 span**」，
+依据是 `service/comment/rpc/internal/model/fact_delivery.go` 里 `span`/`Span`/`trace`/`Trace` **零命中**。
+
+⇒ **那个文件确实零命中**（这条断言本身是真的）⇒ ⇒ **但结论错了**：
+Go 侧**有**这个 span —— 它建在**共享层** `service/common/communityfact/process.go:26`：
+
+```go
+attempt, span := otel.Tracer("sea.rtw.communityfact").Start(ctx, "community.fact_delivery.dispatch")
+```
+
+（该文件全文 **69** 行、**零** `SetAttributes` ⇒ ⇒ span **不带属性**）
+⇒ 且 RAG 侧**等价 span 也在共享层**（`service/common/.../communityfact/Dispatcher.java:186`，**同名**同 tracer）
+⇒ ⇒ **span 拓扑两侧其实是对齐的**，差的只是那两个属性。
+
+⇒ 🔴 **真正的根因在共享层的实现细节里**，不在域内文件里：
+共享层把 span 放进 **Context**（`Dispatcher.java:189` `ctx.with(span)`）而**从不 `makeCurrent`**，
+且投递跑在**另一个线程**（`:172-176` `communityfact-dispatch` 单线程池 ＋ `:190` `supplyAsync`）
+⇒ OTel 默认 `ThreadLocalContextStorage` 用的是**普通** `ThreadLocal`（**不继承**）
+⇒ ⇒ 投递线程上 `Span.current()` 恒为 **invalid span**
+⇒ ⇒ 域内那两行 `setAttribute` **永远写不进去**（`if (span != null)` 恒真 ⇒ 落到 invalid span ⇒ 静默丢弃）。
+
+### 可复用的判据
+
+> **判据 1：「零命中」只对**被 grep 的那个作用域**成立。**
+> 要断言「整条链路零 X」，必须把**链路的每一段**都核过 —— 包括**共享层**那一段。
+> ⇒ 域内文件是链路的**一段**，不是**整条** ⇒ ⇒ 「某文件零命中」⇒ **不等于**「链路零命中」。
+>
+> **判据 2：链路常在**共享层**收口 ⇒ 查链路先查**收口点 / 入口点**。**
+> 本例的收口点是共享层的 `Dispatcher`（域侧只提供 `dispatchOnce` 实现）
+> ⇒ 「span 叫什么」「span 是不是 current」「投递跑在哪个线程」**全在收口点**
+> ⇒ ⇒ **不看收口点 ⇒ 根因必然找错**（本例就会把「根因在共享层的 ctx 传播方式」写成「Go 侧不用 span」）。
+>
+> **判据 3：断言「X 从来不生效」之前，先确认 X **可能**生效的那条路径真的被堵死了。**
+> 本例若只查到「域内 `Span.current()` 够不到共享层那个 span」就收工 ⇒ **方向对**；
+> 但若把依据写成「Go 侧不用 span」⇒ ⇒ **依据本身是假的**
+> ⇒ ⇒ 一旦有人后来在共享层补了 `makeCurrent`，那两行属性就会**真的**生效
+> ⇒ ⇒ **假依据会掩盖真回归**（而且会让后人以为「Go 根本没有这个 span ⇒ 加了也没关系」）。
+
+### 对应本轮的漂移
+
+[`../../DRIFT/comment/rpc.md`](../../DRIFT/comment/rpc.md) §3.7（**D10**）⇒
+**结论不变**（那两个属性是 RAG 侧独有的、且写不进去 ⇒ 删掉是**零行为变化**的清理，不是改语义），
+**但依据整条换掉**（§3.7 内已订正，并写明「未提交过 ⇒ 直接改正，不是事后翻案」）
+⇒ ⇒ **本条是「差点把依据写错」的记录，不是缺陷**。
+
+---
+
 ## 与既有台账的关系
 
 | 文件 | 关系 |

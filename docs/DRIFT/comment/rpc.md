@@ -152,7 +152,7 @@
 
 ---
 
-## 3. OBSERVABLE DIFFERENCE（**9 条** —— 行为等价，但实现路径 / 部署形态不同）
+## 3. OBSERVABLE DIFFERENCE（**10 条** —— 行为等价，但实现路径 / 部署形态不同）
 
 | # | 判定点 | Go 侧事实 | RAG 侧现状 | 性质 |
 |---|---|---|---|---|
@@ -165,6 +165,8 @@
 | **D7** | **回填 Redis 失败**时的读路径 | `comment_subject_cache.go:59` `_ = c.SetSubjectCache(...)` ⇒ **显式忽略错误** ⇒ Redis 挂掉时读路径**照常返回 DB 回源的结果** | **修复前** `CommentCacheService` 的 `writeSubjectCache` 抛 `IllegalStateException` ⇒ 整个 `getSubjectWithCache` 失败 ⇒ **对外 500** |
 | **D8** | 🔴 **出向 gRPC 调用不继承请求 deadline**（= global **E65**，2026-10-26 新增） | `subject_fallback.go:17` `articleRPC.GetArticle(ctx, …)` ⇒ **吃 `ctx`** ⇒ deadline 到点**立刻中止** | `ArticleRpcClient.java:54/65` = **裸 stub** ⇒ **零期限** ⇒ deadline 到点**照跑不误** | 🔴 **待修法拍板 + 待共享层**（详见下方 **§3.5**） |
 | **D9** | 🔴 **Redis 调用不感知 deadline**（= global **E66**，2026-10-26 新增） | `internal/cache/*.go` **全部**带 `ctx`（`rdb.Get/Set/Scan`）⇒ deadline 到点缓存操作**立即中止** | `CommentCacheService.java` 全部 `redis.opsForValue()…`（**含写** `:279`/`:331`/`:433`/`:528` 的 `set`、`:619` 的 `delete`）**零 deadline 检查** ⇒ **照写不误** | 🔴 **待共享层**（详见下方 **§3.6**） | ✅ **已修**（2026-10-24，详见下方 §3.4） |
+
+| **D10** | 🔴 **fact 投递链路的 span 属性 = RAG 侧独有的「无效代码」**（2026-10-27 新增 · G4 通报） | `service/comment/rpc/internal/model/fact_delivery.go` 里 `span`/`Span`/`trace`/`Trace` **零命中** ⇒ Go 侧**根本不用 span** | 原实现 `CommentFactDeliveryService.java:148` `Span.current()` ＋ `:193-194` 写 `comment.fact.event_id` / `comment.fact.aggregate_version` ⇒ ⚠️ **唯一调用方是 `bootstrap/CommentFactDispatchScheduler.java:50`（调度线程）** ⇒ `Span.current()` 返回 **invalid span** ⇒ `if (span != null)` **恒真**但 `setAttribute` **静默丢弃** | 🟡 **行为层两侧一致**（Go 也没有这些属性 ⇒ 可观测行为无差）⇒ ⇒ **不是语义漂移，是 RAG 侧独有的无效代码** ⇒ **2026-10-27 已删**（连 `import io.opentelemetry.api.trace.Span`）＋ 原地留注记防复活；⚠️ **本笔提交不含代码**（守门未跑 ⇒ 未验证 ⇒ 不进 PR）⇒ **待窗口跑绿后单独提交** |
 
 ### 3.1 🟢 D1 撤销：Go 的 `default:` 标签会**吃掉** GORM 的 `autoCreateTime`
 
@@ -273,6 +275,62 @@
 | **证据强度** | ⚠️ **源码级**（全量扫描）—— global 已如实标注「**未经双侧活体验证**」⇒ **本域也未做活体验证**（Redis 侧要复现「deadline 到点后写不再发生」，需要在真 Redis 上掐断连接/观察写计数） |
 | **修法方向（**待 Jason 拍板，本轮未实施**）** | global 的判断：**共同根因只有一个 —— RAG 没有 ctx 传播** ⇒ 共享层补一个**统一的「请求期限载体」**（现在两个互不相通的载体才是病根）⇒ Redis 调用点也能查到期限。<br>⇒ **本域那半**：Redis 调用点前查一次期限 ⇒ **依赖共享层先有 Redis 可查的载体** ⇒ **共享层未落地前，本域无法实施** ⇒ **本域不擅自加临时机制**（那会引入第三种载体，与「统一载体」方向相反） |
 | **⚠️ 本域现状登记** | 🟡 **未修** —— 与 D8 不同，本条**没有任何一侧能在本域单方面闭环** ⇒ 完整闭环**必须**等 global 的共享层那半 |
+
+---
+
+
+### 3.7 🔴 D10：fact 投递链路的 span 属性 = RAG 侧独有的**无效代码**（**不是语义漂移**）
+
+**通报来源**：G4 在其 **FB-04**（让 gRPC 业务 handler 执行期能拿到当前 server span）之后查出，**报给 G3**（G3 写权，G4 不代改）。
+⚠️ **一条线索**：FB-04 修好后「**有 span 的线程**」变多了 ⇒ ⇒ 原本「到处都没 span ⇒ 没人发现」变成
+「**handler 有、调度线程没有** ⇒ 差异显形」⇒ ⇒ **这条很可能是被 FB-04 照出来的，不是新引入的**。
+
+**核验（四条逐条实测，不采信转述）**
+
+> ⚠️ **本节含一处早期误判的订正**（2026-10-27，**未提交过 ⇒ 直接改正，不是事后翻案**）：
+> 最初写的是「Go 侧 fact 投递链路**根本不用 span**」⇒ **不准确** ⇒ Go 侧**有**这个 span，
+> 只是建在**共享层**且**不带属性** ⇒ ⇒ **结论不变**（那两个属性是 RAG 侧独有的、且写不进去），
+> **但依据整条换掉** ⇒ ⇒ 教训见坑档 [`PIT-COMMENT-RPC-14`](../../Pitfalls/comment/rpc.md)。
+
+| 判据 | 实测 |
+|---|---|
+| Go 侧用不用 span | ⚠️ **不是「不用」** —— Go 侧**有** fact 投递 span，但**建在共享层**且**不带属性**：`service/common/communityfact/process.go:26` `otel.Tracer("sea.rtw.communityfact").Start(ctx, "community.fact_delivery.dispatch")`（全文 69 行、**零** `SetAttributes`）⇒ ⇒ 域内 `service/comment/rpc/internal/model/` 整包（**10** 个非测试文件）**零** span 命中 ⇒ ⇒ Go 的 `DispatchFactOnce`（`fact_delivery.go:53`）**从不写 span 属性** ⇒ ⇒ **那两个属性确实是 RAG 侧独有的** |
+| RAG 侧对应的 span 在哪 | **共享层** `service/common/.../communityfact/Dispatcher.java:186`（**同名** `community.fact_delivery.dispatch` ＋ **同 tracer** `sea.rtw.communityfact`）⇒ ⇒ **span 拓扑两侧已对齐**，差的只是这两个属性 |
+| 为什么 RAG 侧也写不进去 | 共享层把 span 放进 **Context**（`Dispatcher.java:189` `ctx.with(span)`）而**从不 `makeCurrent`**（该文件**零** `makeCurrent`）＋ `dispatchFactOnce` 跑在**另一个线程**（`:172-176` `communityfact-dispatch` 单线程池、`:190` `supplyAsync`）⇒ ⇒ OTel 默认 `ThreadLocalContextStorage` 用的是**普通** `ThreadLocal`（**不继承**）⇒ ⇒ 投递线程上 `Span.current()` 恒为 **invalid span**（**非 null**）⇒ ⇒ `if (span != null)` **恒真** ⇒ ⇒ `setAttribute` 落到 invalid span ⇒ **静默丢弃**（otel-java 的 invalid span 是 no-op） |
+| RAG 侧谁在调 | 唯一调用方 = `bootstrap/CommentFactDispatchScheduler.java:95`（把 `deliveryService::dispatchOnce` 交给共享层 `Dispatcher.runAsync`）⇒ ⇒ **必走**上面那条 `communityfact-dispatch` 线程 ⇒ ⇒ 上面那条推理对本域**恒成立**（无旁路） |
+
+**⇒ 定性（重要，别写成「语义漂移」）**：**行为层两侧一致**（Go 侧**也没有**这两个属性 ⇒ 可观测行为无差）⇒ ⇒
+**这不是语义漂移**，是 **RAG 侧独有的「看起来在工作、实际永远不生效」的代码** ⇒ ⇒
+属 AGENTS.md §3.3.3「注解 / 写法存在 ≠ 机制生效」那一族。
+
+**修法（2026-10-27 已改）**：删**改动前** `CommentFactDeliveryService.java:148` 的 `Span span = Span.current();`
+＋ `:192` 的 `if (span != null) {` ＋ `:193-194` 的两个 `span.setAttribute(…)` ＋ 随之失效的 `:6` `import io.opentelemetry.api.trace.Span`
+⇒ **零业务行为变化**（那两个属性本来就写不进去）⇒ **信息不丢**（`:146-147` 的 `logger.info` 已打 `event_id` / `aggregate_version`）
+⇒ **原地留注记**（写明「Go 侧那两属性不存在」＋「RAG 侧为什么也写不进去」）⇒ **防复活**。
+
+**守门（3 条 · 加进 `CommentRpcGoSemanticsGateTest`，与该类既有装置同跑）**
+
+| # | 断言 | 作用 |
+|---|---|---|
+| ① **装置活性** | 同线程挂的真 span **能**收到人为写的属性 | ⇒ **排除平凡通过**（否则 ② 会因为「根本没有 span」而恒绿） |
+| ② **对齐** | 把一个**真 span 挂在投递外面**（`makeCurrent` 作用域内跑 `dispatchOnce`）⇒ 断言那个 span 上**无** `comment.fact.*` 属性 | ⇒ **牙齿检查**：若实现又写 `Span.current().setAttribute` ⇒ 该 span 会带上属性 ⇒ **必红** ⇒ 「**改回去必红、改完必绿**」 |
+| ③ **根因** | 不挂作用域时 `Span.current().getSpanContext().isValid() == false` | ⇒ 钉住「原实现写不进去」这个根因 |
+
+⚠️ **② 的前提（已核，写在这里防后人误改）**：`dispatchOnce` **自己不开 span**（**改动前**该类 `Span` 引用仅 2 处：取值 ＋ 写属性），
+且它收到的 `Context.root()` 只是**参数**、**不会** `makeCurrent` ⇒ ⇒ `Span.current()` 仍取决于**线程作用域**。
+
+**范式出处（照抄，不发明第三种写法）**：OTel 装配层 = 同域 `CommentSpanWiringTest`（自建 `CollectingExporter`，
+**不引 `opentelemetry-sdk-testing`** ⇒ **零新依赖**）· 投递装置 = 本类既有装置（真 PG ＋ Flyway ＋ 真 MyBatis ＋ fake sender）。
+
+**🔴 当前状态（2026-10-27 已跑绿 · 核对日期 2026-10-27）**：代码 + 守门**已改且已验证** ⇒
+
+| 项 | 值 |
+|---|---|
+| **落码 commit** | **`deeeb8d`**（代码 + 守门**同一笔**；文档另起一笔）⇒ ⇒ 台账里的行号均指**改动前**的行号（`:6` / `:148` / `:192-194`） |
+| 门禁跑通 | `mvn -o -pl service/comment/comment-rpc -am test -Dtest=CommentRpcGoSemanticsGateTest` ⇒ **EXIT=0** · **14** 条（既有 **11** ＋ 新增 **3**）· 0 failures / 0 errors / 0 skipped ⇒ ⇒ surefire 报告里 **3 条新用例名逐条在列**（⇒ 不是「被过滤掉的绿」） |
+| **变异验证** | 把 `Span span = Span.current();`（原 `:148`）＋ `if (span != null) { … }`（原 `:192-194`）**原样加回**（行号与改动前**逐条对齐**）⇒ ⇒ **14 条里恰好 1 条红**：`factDeliveryDoesNotWriteSpanAttributes`；另两条（① 装置活性、③ 根因）**仍绿** ⇒ ⇒ **精确变红**（不是全红 ⇒ 判据没被别的因素带偏）⇒ ⇒ 失败断言原文点名 `comment.fact.event_id` / `comment.fact.aggregate_version` ⇒ ⇒ **「改回去必红、改完必绿」成立** ⇒ ⇒ 回滚后本域回归恢复全绿 |
+| 本域回归 | `mvn -o --fail-at-end -pl service/comment/comment-rpc,service/comment/comment-api,service/comment/comment-common -am test` ⇒ **BUILD SUCCESS** · **198** 条（common **27** / api **52** / rpc **119**）· **0 failures / 0 errors / 0 skipped** ⇒ ⇒ 两口径（模块汇总行 ≡ 逐类明细行）**逐模块一致** ⇒ ⚠️ rpc **119** = 旧 **116** ＋ 本轮新增 **3** |
+| 零行为变化 | 删掉的那几行**本来就写不进去**（投递线程上 `Span.current()` 恒为 invalid span）⇒ ⇒ 生产行为**零变化** ⇒ ⇒ 本轮净变化 = 删 **6** 行死代码（含 1 个 import）+ 增 **3** 条测试 |
 
 ---
 
@@ -502,7 +560,11 @@
 | [`docs/DRIFT/_cross/component-coverage-matrix.md`](../_cross/component-coverage-matrix.md) | 38 组件覆盖矩阵 —— **共享文件，合并后由主会话统一更新**（本工作树不碰） |
 ---
 
-## 7. 🔴 D10 · Redis **TCP 连接超时**漂移（Go `DialTimeout` **5s** vs Lettuce 默认 **10s**）—— 2026-10-27 已修
+## 7. 🔴 Redis **TCP 连接超时**漂移（Go `DialTimeout` **5s** vs Lettuce 默认 **10s**）—— 2026-10-27 已修
+
+> ℹ️ **2026-10-27 编号订正**：本节原标题含 **`D10`**，与 §3 摘要表的 **`D10`**（fact 投递链路的无效 span 属性）**撞号** ⇒ **已去掉**。
+> ⇒ **本条不占 `D` 编号**：§3 的 `D1`~`D10` 体系 = 「**OBSERVABLE DIFFERENCE（行为等价，但实现路径 / 部署形态不同）**」；
+> 而本条是**真漂移**（连接超时 **10s** vs Go **5s** ⇒ 可观察的时序差异）⇒ **不属该体系** ⇒ 故留在 §7 自成一节。
 
 ### 7.1 漂移事实（修前）
 
@@ -554,6 +616,7 @@ service/comment/rpc/internal/cache/redis.go:17-19
 | **变异**：删掉 `connect-timeout: 5s` 一行（其余不动） | 🔴 **精确转红**：报「**expected: 5S but was: 10S**」⇒ 守门**真的**在读 Lettuce 的 socket 连接超时，不是恒绿 |
 | 还原 | ✅ **1/1 绿** · `sha256` 与变异前备份**逐字一致** |
 | 整域回归 | ✅ **四域 12 模块 = 919 条**（article-common 15 / article-api 99 / article-rpc 155 / comment-common 27 / comment-api 52 / comment-rpc 116 / favorite-common 29 / favorite-api 105 / favorite-rpc 114 / hot-common 14 / hot-api 96 / hot-rpc 97）⇒ **0 failures / 0 errors / 4 skipped** · 9:44 min · BUILD SUCCESS<br>口径：`mvn -o --fail-at-end -pl <12 模块> -am test`；基线 `eb4d1d2` + 本轮改动；核对日期 **2026-10-27**；两口径（模块汇总行求和 ≡ 逐类明细行求和）**逐模块一致** |
+| 整域回归（**本轮 · D10 落码后 · 2026-10-27**） | ✅ **四域 12 模块 = 922 条**（article-common 15 / article-api 99 / article-rpc 155 / comment-common 27 / comment-api 52 / **comment-rpc 119**（= 旧 116 ＋ D10 新增 3） / favorite-common 29 / favorite-api 105（skipped 1） / favorite-rpc 114（skipped 3） / hot-common 14 / hot-api 96 / hot-rpc 97）⇒ **0 failures / 0 errors / 4 skipped** · **10:17 min** · BUILD SUCCESS<br>口径：`mvn -o --fail-at-end -pl <12 模块> -am test`；基线 `deeeb8d` + 本轮文档改动；核对日期 **2026-10-27**；两口径（模块汇总行 ≡ 逐类明细行）**逐模块一致**<br>⚠️ **上一行的 919 保留原值不改写**（那是基线 `eb4d1d2` 的口径）⇒ ⇒ **两个数不在同一条基线上 ⇒ 不可相加**；本轮除 comment-rpc 外**其余 11 个模块逐条不变** ⇒ ⇒ 差额 **+3 全部来自 comment-rpc**（D10 新增 3 条守门，commit `deeeb8d`） |
 
 **证据强度**：L3 静态实测（Boot 4.0.8 **字节码** + Lettuce 6.8.2 常量 + go-redis v9.20.0 源码）
 ＋ L4 **真容器**装配断言（`ApplicationContextRunner` + Boot 真实 `DataRedisAutoConfiguration`）。
@@ -602,6 +665,7 @@ service/comment/rpc/internal/cache/redis.go:17-19
 |---|---|
 | 定向跑 | ✅ `CommentRpcRuntimeBootGateTest` **2/2 绿** |
 | 整域回归 | ✅ **comment-rpc 116 条**（skipped 0）全绿 ⇒ **四域 12 模块合计 919 条**（0 failures / 0 errors / 4 skipped · 9:44 min · BUILD SUCCESS · 基线 `eb4d1d2` + 本轮改动 · 核对日期 2026-10-27 · 两口径逐模块一致） |
+| 整域回归（**订正注记 · 2026-10-27**） | ⚠️ **上一行的 116 / 919 是基线 `eb4d1d2` 的口径，保留原值不改写** ⇒ ⇒ 本轮（D10 落码后）的最新口径 = **comment-rpc 119 条** ＋ **四域合计 922 条**（见本文件 §3.7 与上面那行「整域回归」）⇒ ⇒ **两个数不在同一条基线上 ⇒ 不可相加** |
 | 同款缺陷在本域另一组件 | 🔴 `ArticleRpcRuntimeBootGateTest` **同款** ⇒ 已在 **article 域**同批修（属 G3 写权面） |
 | 同款缺陷在 G2 域 | 🔴 `like/like-rpc/…/LikeRpcRuntimeBootGateTest.java` **同款** ⇒ **属 G2 写权面** ⇒ 已回报 G2，本域**不越权改** |
 ---
