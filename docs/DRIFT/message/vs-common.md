@@ -363,7 +363,7 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 **④-2 🔴 顺带发现【同源缺陷在别的域也存在】⇒ 派单（owner 域自修，我不代改）**
 - 我域修掉的那处越界引用，**G3 的 hot 域有一份同源的**：`docs/DRIFT/hot/api.md:1697` ＋ `:1746` 同样写 **`go-zero@v1.10.2/rest/handler/breakerhandler.go` 的区间 19–44** ⇒ ⇒ **global 已在 `docs/DRIFT/global/_README.md:569` 把它登记为 hot 域漂移**（“🔴 **行号越界** —— go-zero `go-zero@v1.10.2/rest/handler/breakerhandler.go` 只有 42 行”）⇒ ⇒ **⇒ 说明这条是跨域同源缺陷，不是本域独有**
 - ⇒ ⇒ **我域那份此前【未登记】**（本轮自修：`:19-44` → `:19-41`，另加订正注记）⇒ ⇒ **hot 域那份按 global 的登记走**（owner = G3）⇒ ⇒ **我不代改**（代发者不是 owner ⇒ 同「假转移单」）
-- ⇒ ⇒ **顺带**：global 的登记里用的是 **裸 basename**（`breakerhandler.go:19-44`）⇒ ⇒ 加上前缀后**越界判定会更准**（裸 basename 靠 basename 索引，可能匹配到别的库同名文件）
+- ⇒ ⇒ **顺带**：global 的登记里用的是 **裸 basename**（**原引用** `breakerhandler.go:19-44`）⇒ ⇒ 加上前缀后**越界判定会更准**（裸 basename 靠 basename 索引，可能匹配到别的库同名文件）
 
 **⑥ 🔴 遗留一整类：裸 basename 引用（本域 231 处）⇒ ⇒ 【不机械改】+ 登记**
 - 本域裸 basename（形如 `errmsg.go:117-132`）共 **231 处**，分三类（实测）：**库内唯一**（basename 在 go-zero 里唯一）· **库内同名多候选**（如 `config.go` 在库里有 **14** 个同名 · `unmarshaler.go` **3** 个 · `types.go` **2** 个）· **真源仓 / 标准库**（如 `errmsg.go` · `sendchatmessagelogic.go` ⇒ 真源仓里同名）
@@ -782,3 +782,36 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 **⑤ 原值保留不改写**
 第十九轮的 **1001 / 671 原值保留**，以本条为准（**当前权威值 = 1007 / 677**）⇒ ⇒ **本域三模块 103 / 89 / 21 在两轮之间一字未变**。
 
+
+### 🟢 第二十二轮 · **台账「文件:行号」引用全量核对**（用 G3 的核对器扫本域）⇒ **0 处真缺陷** ＋ 并入 G4 尖端 `b79779e`（2026-10-28）
+
+**① 并入 G4 尖端**
+- 父提交 = `caba808`（第二十一轮附 · C7 回执）＋ **`b79779e`**（G4 尖端）⇒ 提交 **`4f9b326`**。
+- `git merge-tree --write-tree` **预演零冲突** ⇒ ⇒ 实合并**零冲突**。
+- G4 那 2 笔新提交（`c0ca71e` §4.10.57 · `b79779e` §4.10.58）**只改 `docs/DRIFT/global/vs-common.md`** ⇒ ⇒ **零代码改动** ⇒ ⇒ 回归数字不受影响。
+- 合并后 **6 个台账门禁全绿**（`check-ledger-tables` · `check-ledger-selfcheck` · `check-ledger-count` · `check-doc-links` · `check-wave-lane-ownership` · `check-flyway-ledger` ⇒ EXIT=0 ×6）。
+
+**② 🔴 自查：用 G3 的核对器全量核本域台账的「文件:行号」引用**
+- 工具 = G3 的 `/tmp/g3_sweep_refs3.py`（**同一台机器 ⇒ 可直接跑**）⇒ ⇒ 我把**源根**与**扫描域**改成我三域后跑（脚本仍留在 `/tmp`，**未进仓** —— `tools/**` 是 G4 写权面 ⇒ ⇒ **我不落码**）。
+- **本域 674 处「文件:行号」引用逐条核「文件存在 + 行号在范围内」** ⇒ ⇒ **首轮报 5 处** ⇒ ⇒ **逐条复核后：真缺陷 0 处**。
+- ⚠️ **这条是「自查」不是「等别人报」** —— 同类缺陷（`breakerhandler.go` 越界）**我自己域内也曾存在**（本文件第二十一轮段记着「原写区间 19–44 ⇒ 订正为 19–41」）⇒ ⇒ **同一个错误我自己犯过 ⇒ 就不能指望别人替我发现第二遍**。
+
+**③ 首轮 3 处的逐条定性（全部是「转述 global 缺陷登记的原文」这一类误报）**
+
+| # | 位置 | 首轮判定 | 复核结论 |
+|---|---|---|---|
+| 1 | `docs/DRIFT/message/vs-common.md:366` | RANGE-OUT（`breakerhandler.go` **42 行** ⇒ `44` 越界）| 🟢 **误报** —— 该行是**转述 global 那条缺陷登记的原文**（global `_README.md:576` 登记 hot 域漂移时**必须引述缺陷原样**）⇒ ⇒ **引用属实**（global 至今仍写 `breakerhandler.go:19-44`）⇒ ⇒ 已在该行加「**原引用**」标记（G3 核对器的排除约定）⇒ ⇒ 重跑**清零** |
+| 2 | `docs/DRIFT/like/vs-common.md:556` | 同上 | 🟢 同上（已加标记）|
+| 3 | `docs/DRIFT/task/vs-common.md:593` | 同上 | 🟢 同上（已加标记）|
+
+**④ ✅ 重跑结果：0 findings**
+- 补齐源根 + 加「原引用」标记后重跑 ⇒ ⇒ **`checked: 672` · `skipped: 320` · `by_kind: {}` · `findings: 0`**（**含本段自身的引用** ⇒ ⇒ 追加本段后复跑仍是 0）。
+- ⇒ ⇒ **本域台账的「文件:行号」引用 ⇒ 零越界、零不存在**。
+
+**⑤ ⚠️ 两条要转出去的事（都不在我写权面）**
+- **`Sea-BreakTheWaves` 必须作为源根进核对器** —— 该仓在本机于 `/Users/pr/Documents/GitHub/Sea-BreakTheWaves`（⚠️ **不在** `java&golang/` 下）⇒ ⇒ 缺这个根 ⇒ ⇒ **任何引用下游消费者仓的域都会被误判成「文件不存在」** ⇒ ⇒ 这条已转给 G3 / G4（G3 已给 G4 派单要落 `tools/ledger-refcheck/` ⇒ ⇒ **这是那个派单必须补的一项**）。
+- **`docs/DRIFT/global/_README.md:576`** 那行登记用的**裸 basename `breakerhandler.go:19-44`** 是**缺陷原样引述**（合法）⇒ ⇒ 我三域的转述已加「原引用」标记 ⇒ ⇒ **不要**把它当漂移去「修」。
+
+- **本域无「指向下游消费者仓」的引用** ⇒ ⇒ 本域首轮 **3 处**全部是「转述 global 缺陷登记的原文」这一类误报 ⇒ ⇒ 但**缺 `Sea-BreakTheWaves` 源根这件事仍要转出去**（本域现在没有依赖它的引用，**不代表别的域没有** ⇒ ⇒ like 域就有 2 处）。
+
+---
