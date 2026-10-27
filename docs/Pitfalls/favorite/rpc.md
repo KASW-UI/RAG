@@ -1865,3 +1865,43 @@ AuthorityLookup（实际在 service/common/communityfact/authority_http.go）
 ③ **⚠️ 本条的适用范围**：Go 侧 **rpc 组件**的 yaml **顶层** `Timeout` ⇒ **zrpc 服务端超时**；
 **api 组件**的 yaml 顶层 `Timeout` ⇒ **rest HTTP 预算**（`rest/config.go:55` 默认 3000ms）。
 **两者不是同一个字段** ⇒ ⇒ 「api 是 3s ⇒ rpc 也是 3s」这种推断**不成立**，必须各自去 yaml 查。
+
+## PIT-FAV-RPC-040 · 🕳️ `grep` 说「binary file matches」⇒ **不一定是编码损坏** —— 可能只是**故意夹具里的真实 NUL 字节**（且**不可「修」**）
+
+> **登记时间**：2026-10-28 · G3 lane（落码 Testcontainers 宿主口钉口时**顺手撞到**）
+> ⚠️ **本条与 `PIT-FAV-RPC-038`（U+FFFD 那条）同款处置**：**故意夹具 ⇒ 保持原样 ⇒ 不许「修」**。
+
+### 现象
+
+`grep -rl "new PostgreSQLContainer" service/favorite/favorite-rpc/src/test/java` 有一条输出是
+
+```
+Binary file service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteDdlParityTest.java matches
+```
+
+⇒ ⇒ 而 `grep` 的同行其它文件都正常列出 ⇒ ⇒ **看起来像「这个文件坏了」**。
+
+### 实测（三步，逐层排除「损坏」这个解释）
+
+| 判据 | 实测 | 结论 |
+|---|---|---|
+| 字节级 UTF-8 解码 | **OK**（无 `UnicodeDecodeError`） | **不是编码损坏** |
+| `U+FFFD`（`b'\xef\xbf\xbd'`）计数 | **0** | **不是 U+FFFD 那类替换符** |
+| `b'\x00'` 计数 | **4**（第 136 / 183 行，各 2 个） | ⇒ ⇒ **真实 NUL 字节** |
+| 字节上下文 | `names.put(p[1] + "<NUL>" + p[2] + "<NUL>" + payload, p[3]);` | ⇒ ⇒ **Redis 复合 key 的分隔符** |
+
+⇒ ⇒ **结论**：这 4 个 NUL 字节是**故意的测试夹具**（用 `\0` 拼复合 Redis key）⇒ ⇒ **不是缺陷**。
+
+### 🔴 后果与处置
+
+1. **`grep` 会把该文件判成 binary** ⇒ ⇒ `grep -n` 打不出行号、`git diff` 按二进制处理（只报「Binary files differ」）
+   ⇒ ⇒ **排查时要先想到这一条**，别以为是「文件损坏」。
+2. 🔴 **不要「修」** ⇒ ⇒ 把它换成 `\\0` 转义、或删掉 ⇒ ⇒ **会改变被测语义**（Redis key 的字节内容变了）
+   ⇒ ⇒ 同 `PIT-FAV-RPC-038` 的处置：**故意测试数据 ⇒ 保持原样**。
+3. ⚠️ **但脚本化改文本时必须按字节往返**
+   ⇒ ⇒ 用 UTF-8 读写（`read_text(encoding="utf-8")` / `write_text(..., encoding="utf-8")`）**能**逐字节往返（U+0000 是合法 UTF-8 码位）⇒ ⇒ **不会**引入新的损坏
+   ⇒ ⇒ 本轮迁移脚本已加**断言「NUL 字节数不变」** ⇒ ⇒ 改完回读校验，命中 0 处异常。
+
+### 适用范围
+
+**只**适用于「源码里以**真实控制字符**当分隔符的测试夹具」这一形态 ⇒ ⇒ **不适用于**真正的编码损坏（那种会解码失败或出现 `U+FFFD`）。

@@ -1278,3 +1278,10 @@ merge-base `cd893d1` 处是 `== 5003` 的更老版本 ⇒ 合并会取本版本�
 
 **验证**：`mvn -B -o -pl service/favorite/favorite-api -am test -Dtest='FavoriteApiRealTomcatGateTest'`
 ⇒ **8 条 / 0 failures / 0 errors / 0 skipped**（2026-10-28 · 真 Tomcat）⇒ BUILD SUCCESS。
+
+## 📌 指针 · 🔴🟢 **Testcontainers 宿主口钉口**（本域已落码 · 2026-10-28）
+
+⇒ ⇒ **canonical 全文在** [`docs/DRIFT/article/rpc.md`](../article/rpc.md) 的「**二十三、🔴🟢 Testcontainers 宿主口钉口**」一节
+⇒ ⇒ 本域那一段：模块 `favorite/favorite-api` · 域段 `22910–22939`（域段横跨两模块 ⇒ 取**上半段**） · 本模块宿主口段 `22930–22934` · 脚手架段 `22935–22939` · **1** 个 Redis 个容器
+⇒ ⇒ 落点：`service/favorite/favorite-api/src/test/java/.../support/RealContainerHostPort.java` ＋ 同名 `RealContainerHostPortTest.java`（守门 **5** 条）
+⇒ ⇒ **与 Go 侧的一致性：N/A**（测试基础设施，不涉及运行时行为）

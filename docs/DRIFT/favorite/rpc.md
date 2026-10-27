@@ -3756,3 +3756,9 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 ⚠️ **依赖 span 的两段式改造要点**（改这两处时别弄错）：「下游调用」与「调用后的业务判定」必须**拆成两个函数段**（`tracedDependency` 的 `call` 与 `after`）⇒ 否则会**多记** Go 侧那三条**没有** `RecordError` 的业务分支（`helper.go:109-111` / `:113-115` / `:117-119`）。
 ⚠️ **「其它异常原样上抛」的语义逐字保留**：原实现只 catch `StatusRuntimeException` ⇒ 其它异常**不被翻译** ⇒ 落码里保留（**不**顺手「改成 Go 的 `status.FromError` 语义」）⇒ 见 `FavoriteUserGuard#onDownstreamFailure` / `FavoriteArticleSnapshotResolver#onDownstreamFailure` 的注释。
 
+## 📌 指针 · 🔴🟢 **Testcontainers 宿主口钉口**（本域已落码 · 2026-10-28）
+
+⇒ ⇒ **canonical 全文在** [`docs/DRIFT/article/rpc.md`](../article/rpc.md) 的「**二十三、🔴🟢 Testcontainers 宿主口钉口**」一节
+⇒ ⇒ 本域那一段：模块 `favorite/favorite-rpc` · 域段 `22910–22939`（域段横跨两模块 ⇒ 取**下半段**） · 本模块宿主口段 `22910–22919` · 脚手架段 `22920–22929` · **8** 个 PG 个容器
+⇒ ⇒ 落点：`service/favorite/favorite-rpc/src/test/java/.../support/RealContainerHostPort.java` ＋ 同名 `RealContainerHostPortTest.java`（守门 **5** 条）
+⇒ ⇒ **与 Go 侧的一致性：N/A**（测试基础设施，不涉及运行时行为）

@@ -2011,3 +2011,96 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 
 ⚠️ **本块是「加注记」，不是「改原值」**：上文第七次口径（2457 条 / 20:28 min / `5564c27`）**原样保留** ⇒
 读本域历史结论的人**以两块并列为准** ⇒ ⇒ **不要把第八次误读成「第七次作废」**。
+
+## 二十三、🔴🟢 **Testcontainers 宿主口钉口** —— 把 `PF-ARTICLE-RPC-016` 的**根因**治掉（核对日期 2026-10-28 02:4x）
+
+> **起因**：G4 台账 §4.10.58 分配了「Testcontainers 宿主口段」并**明写两句**：
+> ① 「Testcontainers **没有「宿主口段」这个概念** ⇒ 实测 `TestcontainersConfiguration` 的配置项里**零个** `port` 相关项 ⇒ ⇒ 「指定一段」**只能逐容器固定口**」；
+> ② 「**本层未实测的两层**：① `PostgreSQLContainer` **不能**直接换成 `FixedHostPortGenericContainer`（后者不带 PG 的初始化/JDBC 支持）⇒ ⇒ 正确形态应是 `PostgreSQLContainer` ＋ `withCreateContainerCmdModifier(...)` 显式绑口；② **「显式绑口后 `getMappedPort()` 是否返回那个固定口」未实测** ⇒ ⇒ **域侧落地时必须先写一条探针验证，不能照抄**」。
+> ⇒ ⇒ 本节就是那个「**域侧探针 + 落码**」⇒ ⇒ **G4 的未知项由本域实测回答**。
+
+### 二十三.1 🔴 先答 G4 那个未知项（**实测，不是推断**）
+
+**探针**（临时落码，跑完即删；正式守门已接管该职责）：`service/article/article-rpc/src/test/java/com/rag/article/article/rpc/support/HostPortMechanismProbeTest.java`
+（**Testcontainers 2.0.5** · `docker-java-api 3.7.1`）
+
+| 机制 | 做法 | `getMappedPort()` | `getFirstMappedPort()` | 那个固定口上**是谁** |
+|---|---|---|---|---|
+| **A** | `withCreateContainerCmdModifier(cmd -> cmd.getHostConfig().withPortBindings(new PortBinding(Ports.Binding.bindPort(pin), new ExposedPort(5432))))` | **22850（== 钉的口）** ✔ | 22850 ✔ | **JDBC 连 22850 成功** · `current_database()`=`probe_db` · `inet_server_port()`=**5432** ✔ |
+| **B** | 子类暴露 `addFixedExposedPort(pin, 5432)`（= `FixedHostPortGenericContainer` 同款） | **22851（== 钉的口）** ✔ | 22851 ✔ | **JDBC 连 22851 成功** · 同上 ✔ |
+
+⇒ ⇒ **「显式绑口后 `getMappedPort()` 是否返回那个固定口」＝ 是**（两条机制都成立）⇒ ⇒ **G4 的未知项有答案了**。
+⇒ ⇒ **落码用机制 A**（G4 台账指定的那个形态）；**机制 B 一并留档** ⇒ 「不止一条路可行」⇒ ⇒ 避免后来人以为只有 A、或反过来去写 `PostgreSQLContainer` 的子类。
+
+⚠️ **口径**：只断言「数字相等」**不够** ⇒ ⇒ 数字相等也可能是「我读到了自己的期望值」⇒ ⇒ 必须**真连一次**：
+JDBC 连**固定口** + `inet_server_port()` 回报**容器内口** ⇒ ⇒ 才证明「那个口上不是别的 PG」。
+（Redis 同款：`PING\r\n` ⇒ 期望 `+PONG`。）
+
+### 二十三.2 落码清单（**4 个模块 · 28 个测试类**）
+
+| 模块 | 域段（G4 分配） | 本模块宿主口段 | 脚手架段 | 容器数 | 落点 |
+|---|---|---|---|---|---|
+| `article-rpc` | `22850–22879` | `22850–22869` | `22870–22879` | **9** 个 PG | `service/article/article-rpc/src/test/java/.../support/RealContainerHostPort.java` |
+| `comment-rpc` | `22880–22909` | `22880–22899` | `22900–22909` | **11** 个 PG + **1** 个 Redis | `.../comment/rpc/support/RealContainerHostPort.java` |
+| `favorite-rpc` | `22910–22939`（域段横跨两模块 ⇒ 取**下半段**） | `22910–22919` | `22920–22929` | **8** 个 PG | `.../favorite/rpc/support/RealContainerHostPort.java` |
+| `favorite-api` | 同上 ⇒ 取**上半段** | `22930–22934` | `22935–22939` | **1** 个 Redis | `.../favorite/api/support/RealContainerHostPort.java` |
+| `hot-rpc` | `22940–22969` | `22940–22959` | `22960–22969` | **3** 个 Redis | `.../hot/rpc/support/RealContainerHostPort.java` |
+
+⇒ ⇒ **切法沿用 comment 域已定的约定**（见 `comment-rpc` 的 `support/RealGrpcPortTest` 的脚手架段说明）：
+**下段 = Testcontainers 宿主口 · 上段 = 守门脚手架段** ⇒ ⇒ **两者零重叠**。
+⚠️ **favorite 域段横跨两个模块** ⇒ ⇒ 必须**再按模块切一刀** ⇒ ⇒ 否则 `favorite-rpc` 与 `favorite-api` 同跑时**会撞同一个口**。
+⚠️ **`hot-rpc` 的 Redis 容器**原本也吃随机口（`new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))`）⇒ ⇒ **同类根因** ⇒ ⇒ 一并钉。
+⚠️ **`hot-rpc` / `comment-rpc` 的 `docker run -p 127.0.0.1:<port>:6379` 那两处**（断连对拍）⇒ ⇒ **本来就是显式口** ⇒ ⇒ 不在本次范围内。
+
+### 二十三.3 三条纪律（本轮踩出来的，别重踩）
+
+1. 🔴 **源扫必须先剥注释**（状态机实现，**不动字符串字面量**）
+   ⇒ ⇒ 本轮守门第一版**把 javadoc 里的示例** `RealContainerHostPort.bindPg(RealContainerHostPort.XXX)` **当成了真代码**
+   ⇒ ⇒ 报了一条**假红**（「`XXX` 没登记」）⇒ ⇒ 修法 = 扫之前先剥注释（注释内容替换成**等长空格** ⇒ 行号不变）。
+2. 🔴 **登记册必须按「常量名」登记，不能按「值」**
+   ⇒ ⇒ 段的边界常量 `FIRST = 22850` 与第一个登记口 `GRPC_INTERCEPTOR_WIRING = 22850` **同值**
+   ⇒ ⇒ 若按值反查名字，会把 `FIRST` 当成登记项 ⇒ ⇒ 守门对不上账 ⇒ ⇒ 只能按名字登记。
+3. 🟡 **「每个测试类一个专属口」而不是「全模块共用一个口」**
+   ⇒ ⇒ surefire 默认 1 fork、无 parallel 配置 ⇒ ⇒ 模块内**串行** ⇒ ⇒ 理论上共用一个口也能跑
+   ⇒ ⇒ 但那样有「上一个类刚停、下一个类立刻抢同一个口」的**释放窗口** ⇒ ⇒ 撞上 = `EADDRINUSE`（响亮的失败，但仍是抖动）
+   ⇒ ⇒ ⇒ 每个测试类一个专属口，**全域不复用**。
+
+### 二十三.4 守门 + 变异验证
+
+**守门**（每模块一份 `support/RealContainerHostPortTest.java`）：**5 条**（article / favorite-rpc / favorite-api / hot-rpc）＋ **6 条**（comment，多一条 Redis 活体）
+
+| # | 断言 | 守的是什么 |
+|---|---|---|
+| ① | `registeredPortsAreInsideTheSegmentUniqueAndOutOfTheEphemeralRange` | 分配合规：段内 · 唯一 · **不落进 OS 临时端口段** |
+| ② | `segmentsDoNotOverlapAndStayInsideTheDomainSegment` | 宿主口段与脚手架段**零重叠**、都在域段内 |
+| ③ | `everyContainerDeclaringTestClassIsPinned` | **守恒**：每个「起容器」的测试类都钉了口（漏钉 ⇒ 抓出来） |
+| ④ | `everyPinnedPortIsRegisteredAndUsedExactlyOnce` | **守恒**：引用的口在白名单里 · 每个登记口**恰好被引用一次**（重复 ⇒ 抓出来） |
+| ⑤ | `pinnedPostgresReportsTheFixedHostPortAndServesPostgresOnIt` / `pinnedRedisReportsTheFixedHostPortAndAnswersPing` | **机制生效（活体）**：`getMappedPort()` == 固定口 ＋ 那个口上就是我的容器 |
+
+**变异验证**（`article-rpc` 那份，5 轮，**每轮只翻一个变量**）：
+
+| 变异 | 预期 | 实测 |
+|---|---|---|
+| **M1** 删掉一个测试类的钉口调用 | 红在 ③ | ✔ 红在 `everyContainerDeclaringTestClassIsPinned` |
+| **M2** 两个类用同一个口 | 红在 ④ | ✔ 红在 `everyPinnedPortIsRegisteredAndUsedExactlyOnce` |
+| **M3** 登记册删一项 | 红在 ④ | ✔ 同上 |
+| **M4** 登记口改成 `22899`（越段） | 红在 ① | ✔ 红在 `registeredPortsAreInsideTheSegmentUniqueAndOutOfTheEphemeralRange` |
+| **M5** 绑定到 `0`（机制失效） | 红在 ⑤ | ✔ 红在 `pinnedContainerReportsTheFixedHostPortAndServesPostgresOnIt` |
+
+⇒ ⇒ **5/5**：每轮**编译通过** ＋ **红在目标断言** ＋ 还原后 **sha256 逐字节一致**。
+
+### 二十三.5 证据强度（**分层读，别混**）
+
+| 事项 | 强度 | 说明 |
+|---|---|---|
+| 「钉口机制可用（两条都成立）」 | **L4**（本域活体） | 探针 + 守门都真起过容器、真连过 |
+| 「本域 28 个测试类不再把宿主口放进 OS 临时端口段」 | **L4**（结构事实 ＋ 源扫守恒） | 段号 `22850–22969` 全在 `49152–65535` 之外 ⇒ **这是结构事实，不是「跑绿了」** |
+| 「宿主口撞口这类 flake 今后不再发生」 | 🟡 **推断** | 一次全量绿**证明不了复发概率** ⇒ 判据是上面的**结构事实** |
+| 与 Go 侧的一致性 | **N/A** | 这是**测试基础设施**，**不涉及任何运行时行为** ⇒ ⇒ **不属于 §3.1 的语义对齐范围** |
+
+### 二十三.6 📌 顺带留档：`FavoriteDdlParityTest.java` 里的 **4 个真实 NUL 字节**（**不是损坏**）
+
+⇒ ⇒ 该文件第 136 / 183 行是 `"\0"`（**真实 NUL 字节**，不是转义序列）⇒ ⇒ 用途 = **Redis 复合 key 的分隔符**（**故意的夹具**）
+⇒ ⇒ **后果**：`grep` 把该文件判成 **binary** ⇒ `git diff` 也按二进制处理 ⇒ ⇒ **不是 U+FFFD、不是编码损坏**
+⇒ ⇒ 🔴 **不要「修」**（与 `article-api` 的 `ArticleApiMvcPipelineTest` 那 2 处 U+FFFD **同款**处置：故意测试数据 ⇒ 保持原样）
+⇒ ⇒ ⚠️ 但**脚本化改文本时要注意**：读写必须**按 UTF-8 逐字节往返** ⇒ ⇒ 本轮迁移脚本已加断言「**NUL 字节数不变**」。

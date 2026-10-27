@@ -1043,3 +1043,10 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 > ⇒ 落码后的权威口径 = **§十一**（池参数）＋ **§十二**（断连行为），二者均带守门与活体证据。
 
 ⇒ **共享的判据明细表在 [`favorite/api.md` §17](../favorite/api.md#17-🔴-阈值类结论的共享层依赖声明2026-10-27--按-g2-3-的要求做的重核)（同款机制，三域共用一条判据）** ⇒ ⇒ 改一处要三域一起重核。
+
+## 📌 指针 · 🔴🟢 **Testcontainers 宿主口钉口**（本域已落码 · 2026-10-28）
+
+⇒ ⇒ **canonical 全文在** [`docs/DRIFT/article/rpc.md`](../article/rpc.md) 的「**二十三、🔴🟢 Testcontainers 宿主口钉口**」一节
+⇒ ⇒ 本域那一段：模块 `comment/comment-rpc` · 域段 `22880–22909` · 本模块宿主口段 `22880–22899` · 脚手架段 `22900–22909` · **11** 个 PG + **1** 个 Redis 个容器
+⇒ ⇒ 落点：`service/comment/comment-rpc/src/test/java/.../support/RealContainerHostPort.java` ＋ 同名 `RealContainerHostPortTest.java`（守门 **6** 条）
+⇒ ⇒ **与 Go 侧的一致性：N/A**（测试基础设施，不涉及运行时行为）

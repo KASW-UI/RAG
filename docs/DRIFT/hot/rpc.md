@@ -2383,3 +2383,10 @@ func main() {
 > ⇒ 落码后的权威口径 = **§十一**（含守门与变异证据）。
 
 ⇒ **共享的判据明细表在 [`favorite/api.md` §17](../favorite/api.md#17-🔴-阈值类结论的共享层依赖声明2026-10-27--按-g2-3-的要求做的重核)（同款机制，三域共用一条判据）** ⇒ ⇒ 改一处要三域一起重核。
+
+## 📌 指针 · 🔴🟢 **Testcontainers 宿主口钉口**（本域已落码 · 2026-10-28）
+
+⇒ ⇒ **canonical 全文在** [`docs/DRIFT/article/rpc.md`](../article/rpc.md) 的「**二十三、🔴🟢 Testcontainers 宿主口钉口**」一节
+⇒ ⇒ 本域那一段：模块 `hot/hot-rpc` · 域段 `22940–22969` · 本模块宿主口段 `22940–22959` · 脚手架段 `22960–22969` · **3** 个 Redis 个容器
+⇒ ⇒ 落点：`service/hot/hot-rpc/src/test/java/.../support/RealContainerHostPort.java` ＋ 同名 `RealContainerHostPortTest.java`（守门 **5** 条）
+⇒ ⇒ **与 Go 侧的一致性：N/A**（测试基础设施，不涉及运行时行为）
