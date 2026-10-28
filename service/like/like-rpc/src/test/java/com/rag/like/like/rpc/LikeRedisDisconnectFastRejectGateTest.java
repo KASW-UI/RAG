@@ -26,6 +26,9 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import com.rag.like.like.rpc.support.GrpcTestPort;
 
 /**
  * 🔴 <b>like 域 §5.3e 项②：共享层那份 {@code REJECT_COMMANDS} 在本域【真的生效】的活体对拍</b>。
@@ -96,6 +99,19 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
         })
 @DisplayName("like-rpc：共享层那份 REJECT_COMMANDS 在本域真的生效（活体断连 A/B）")
 class LikeRedisDisconnectFastRejectGateTest {
+
+
+    /**
+     * 🔴 **本类的 gRPC server 监听口必须由本仓探测**（第二十四轮）⇒
+     * 操作系统盲选的临时口会与 Docker 发布口撞车 ⇒ 表现为
+     * {@code BindException: Address already in use} ⇒ 整批 context 起不来。
+     *
+     * @see com.rag.like.like.rpc.support.GrpcTestPort
+     */
+    @DynamicPropertySource
+    static void grpcServerPort(DynamicPropertyRegistry registry) {
+        registry.add("grpc.server.port", GrpcTestPort::freePort);
+    }
 
     @Autowired
     LettuceConnectionFactory connectionFactory;

@@ -5,7 +5,12 @@
 > **lane 语义**：本域与**共享机制层 `service/common`** 之间的漂移对账
 > —— ⚠️ **不是**「本域自己的 `-common` 库」（那是 `service/message/message-common`，台账见 [`common.md`](common.md)）
 > **总纲** ⇒ [`docs/DRIFT/_cross/domain-common-lanes.md`](../_cross/domain-common-lanes.md)（G1~G4 波次映射 · 9 条机制面轴 · 写权边界）
-> ⇒ **本文件由 `G2` 波次工作树独占**；**共享面（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/DRIFT/global/**`）本 lane 一律不写** ⇒ 合并后由整合者统一更新（AGENTS.md §5.3d）
+> ⇒ **本文件由 `G2` 波次工作树独占**；**共享面（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/DRIFT/global/**`）本 lane 一律不写** ⇒ 合并后由**合并收口执行者**统一更新（AGENTS.md §5.3d）
+
+> 📌 **术语订正（2026-10-28 · G2 自修 · 依 G1 通报）**：「**整合者**」是**已废称**
+> —— `docs/Worktree.md` §1e 明写「『整合者』不是一个存在的角色」⇒ ⇒ 它会诱导 lane 去找一个**不存在的收件人**。
+> ⇒ **现行角色词 = 「合并收口执行者」**（`docs/Worktree.md` §1e 表：它是一个**步骤**，不是一个常驻会话 ⇒ 没有任何会话长期占着这个位置）。
+> ⇒ ⇒ **本文件正文的「整合者」一律按「合并收口执行者」理解**；下方**历史条目里的原值保留不改写**（留档纪律）。
 
 ## 0. lane 身份
 
@@ -200,7 +205,7 @@ Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
 - [x] §1 的每一条**重新核对状态**并写回（带核对日期）—— **7 条全部重核，5 条过期快照已订正**
 - [x] §3 的域侧修法**落码 + 守门**（阶段 2；D-1 / D-3 = `2049a08`；D-2 = 端口段治理，**7 类全绿**）
 - [x] §4 的派单**登记**（本文件 §4 FB-01）＋ **实时轨已发** `session send` 给 `G4Common`（`mvs_e8063ac67c654150ab7797b8116ef0a1`）
-- [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/DRIFT/global/**` ⇒ 合并后由整合者统一更新）
+- [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/DRIFT/global/**` ⇒ 合并后由**合并收口执行者**统一更新）
 
 ## 6. 未验证项（本轮明确留下的缺口，**不写成已闭环**）
 

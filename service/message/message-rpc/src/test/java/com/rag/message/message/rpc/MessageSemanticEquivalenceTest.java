@@ -32,6 +32,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import com.rag.message.message.rpc.support.RealContainerPort;
+import com.rag.message.message.rpc.support.GrpcTestPort;
 
 /**
  * AGENTS.md §6.7 第二轮全域验证的防回退用例 —— 锁住 DRIFT-MSG-V-001 / -002 / -004 / -005 / -006。
@@ -99,6 +100,7 @@ class MessageSemanticEquivalenceTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", GrpcTestPort::freePort);
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

@@ -26,6 +26,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.junit.jupiter.api.Assertions.*;
 import com.rag.like.like.rpc.support.RealContainerPort;
+import com.rag.like.like.rpc.support.GrpcTestPort;
 
 /**
  * 装配证据 —— <b>断言的是「机制真的接上了」，不是「Bean 存在」</b>。
@@ -108,6 +109,7 @@ class LikeRpcSpringContextWiringTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", GrpcTestPort::freePort);
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

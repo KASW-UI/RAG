@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.rag.like.like.rpc.support.RealContainerPort;
+import com.rag.like.like.rpc.support.GrpcTestPort;
 
 /**
  * 🔴 DRIFT-LIKE-017 守门测试 —— {@code like_domain_fact_outbox} 必须与 Go 的实际 schema 对齐。
@@ -88,6 +89,7 @@ class LikeDomainFactSchemaParityTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", GrpcTestPort::freePort);
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

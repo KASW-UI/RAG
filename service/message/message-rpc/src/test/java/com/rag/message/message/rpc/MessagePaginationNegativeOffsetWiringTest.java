@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.rag.message.message.rpc.support.RealContainerPort;
+import com.rag.message.message.rpc.support.GrpcTestPort;
 
 /**
  * 🔴 DRIFT-MSG-V-014 守门测试 —— 负 {@code offset} 必须是<b>被跳过的子句</b>，
@@ -94,6 +95,7 @@ class MessagePaginationNegativeOffsetWiringTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", GrpcTestPort::freePort);
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

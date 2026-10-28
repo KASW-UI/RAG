@@ -38,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.rag.like.like.rpc.support.RealContainerPort;
+import com.rag.like.like.rpc.support.GrpcTestPort;
 
 /**
  * 🔴 <b>运行期守门</b>：like-rpc 的 gRPC 业务观测拦截器<b>真的</b>挂到了 server 上，
@@ -152,6 +153,7 @@ class LikeRpcGrpcInterceptorWiringTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", GrpcTestPort::freePort);
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

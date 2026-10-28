@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.rag.message.message.rpc.support.RealContainerPort;
+import com.rag.message.message.rpc.support.GrpcTestPort;
 
 /**
  * <b>DRIFT-MSG-V-020 的真 PG 守门</b>：断言**运行中的库**里 9 个时间列确实是
@@ -84,6 +85,7 @@ class MessageRpcTimeColumnParityTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", GrpcTestPort::freePort);
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

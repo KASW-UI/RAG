@@ -24,6 +24,7 @@ import java.time.ZoneOffset;
 
 import static org.junit.jupiter.api.Assertions.*;
 import com.rag.message.message.rpc.support.RealContainerPort;
+import com.rag.message.message.rpc.support.GrpcTestPort;
 
 /**
  * §6.6.1 的事务证据 —— 真 PostgreSQL 上验证 DRIFT-MSG-001 与 DRIFT-MSG-002 两个 P0。
@@ -95,6 +96,7 @@ class MessageTransactionWiringTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", GrpcTestPort::freePort);
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.rag.message.message.rpc.support.RealContainerPort;
+import com.rag.message.message.rpc.support.GrpcTestPort;
 
 /**
  * <b>DRIFT-MSG-V-027（2026-10-24）守门：共享 schema 下 Flyway 的 baseline 会把 V1 整条跳过。</b>
@@ -96,6 +97,7 @@ class MessageFlywaySharedSchemaWiringTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) throws Exception {
+        r.add("grpc.server.port", GrpcTestPort::freePort);
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

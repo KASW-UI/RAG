@@ -50,6 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.rag.task.task.rpc.support.RealContainerPort;
+import com.rag.task.task.rpc.support.GrpcTestPort;
 
 /**
  * 🔴 <b>slow threshold 分支的独立守门</b>（global L9 · task-rpc / follow-rpc 的 X-5 之外的另一半）。
@@ -175,6 +176,7 @@ class TaskRpcSlowThresholdGateTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", GrpcTestPort::freePort);
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

@@ -10,6 +10,9 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import org.springframework.data.redis.connection.lettuce.LettucePoolingClientConfiguration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import com.rag.like.like.rpc.support.GrpcTestPort;
 
 /**
  * 🔴 守门：like-rpc 的 <b>Redis 命令超时 = 3s ＋ 连接超时 = 5s</b>（对齐 Go 的 go-redis 库默认）。
@@ -74,6 +77,19 @@ import static org.assertj.core.api.Assertions.assertThat;
         })
 @DisplayName("like-rpc：Redis 命令超时 3s ＋ 连接超时 5s ＋ **连接池 64/16/8**（对齐 Go 的 go-redis 库默认 ＋ go-zero 的 `idleConns = 8`）")
 class LikeRpcRedisTimeoutsGateTest {
+
+
+    /**
+     * 🔴 **本类的 gRPC server 监听口必须由本仓探测**（第二十四轮）⇒
+     * 操作系统盲选的临时口会与 Docker 发布口撞车 ⇒ 表现为
+     * {@code BindException: Address already in use} ⇒ 整批 context 起不来。
+     *
+     * @see com.rag.like.like.rpc.support.GrpcTestPort
+     */
+    @DynamicPropertySource
+    static void grpcServerPort(DynamicPropertyRegistry registry) {
+        registry.add("grpc.server.port", GrpcTestPort::freePort);
+    }
 
     @Autowired
     LettuceConnectionFactory connectionFactory;

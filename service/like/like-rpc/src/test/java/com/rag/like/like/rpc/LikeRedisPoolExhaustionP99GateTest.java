@@ -25,6 +25,9 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import com.rag.like.like.rpc.support.RealContainerPort;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import com.rag.like.like.rpc.support.GrpcTestPort;
 
 /**
  * 🔴 **第二十轮 · Redis 连接池维度的「活体对拍」探针（like 腿）** —— 测「池耗尽时等连接的最长等待」。
@@ -95,6 +98,19 @@ import com.rag.like.like.rpc.support.RealContainerPort;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @DisplayName("like-rpc：Redis 连接池维度活体对拍（普通命令绕池 / pipeline 走池 / 池耗尽等连接的上限）")
 class LikeRedisPoolExhaustionP99GateTest {
+
+
+    /**
+     * 🔴 **本类的 gRPC server 监听口必须由本仓探测**（第二十四轮）⇒
+     * 操作系统盲选的临时口会与 Docker 发布口撞车 ⇒ 表现为
+     * {@code BindException: Address already in use} ⇒ 整批 context 起不来。
+     *
+     * @see com.rag.like.like.rpc.support.GrpcTestPort
+     */
+    @DynamicPropertySource
+    static void grpcServerPort(DynamicPropertyRegistry registry) {
+        registry.add("grpc.server.port", GrpcTestPort::freePort);
+    }
 
     @Container
     static final GenericContainer<?> REDIS =

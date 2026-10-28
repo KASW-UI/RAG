@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import com.rag.task.task.rpc.support.RealContainerPort;
+import com.rag.task.task.rpc.support.GrpcTestPort;
 
 /**
  * 三段 upsert 的<b>真 PG 语义对拍</b> —— 这三段是 Go 两个 sink 幂等链路的全部基石。
@@ -113,6 +114,7 @@ class TaskProgressUpsertParityTest {
      */
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry registry) {
+        registry.add("grpc.server.port", GrpcTestPort::freePort);
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);

@@ -46,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.rag.like.like.rpc.support.RealContainerPort;
+import com.rag.like.like.rpc.support.GrpcTestPort;
 
 /**
  * 🔴 <b>slow threshold 分支的独立守门</b>（global 收口域 X-5 残留的第二半 · like 域）。
@@ -160,6 +161,7 @@ class LikeRpcSlowThresholdGateTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", GrpcTestPort::freePort);
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);
