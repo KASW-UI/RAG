@@ -262,6 +262,7 @@ service/follow/follow-rpc,service/follow/follow-common \
 | **用例总数** | **1195** 条（**0 失败 / 0 错误 / 0 跳过**）· 来自 **193** 个 `TEST-*.xml`（构建收工后求和）|
 | **本域三模块** | `follow-api` **136** · `follow-rpc` **86** · `follow-common` **37** ⇒ **259 条** |
 | 🆕 **与上一轮比** | **1133 → 1195（正好 +62）** ⇒ 增量**全部**来自本轮新增的 `FollowApiFailurePathMatrixTest`（§5.2.1）⇒ **既有 1133 条一条没退化**；`follow-api` **74 → 136**（+62）⇒ 逐模块核对：`user-api` 127 · `user-rpc` 162 · `admin-api` 149 · `admin-rpc` 122 · `users-common` 39 · `common` 337 **均与上一轮逐字相同** |
+| 🆕 **第二轮（同一批代码）** | **EXIT=0 · `BUILD SUCCESS` · 10:01 min · 同样 **1195** 条 / 0F / 0E / 0S · **193** 个 XML** ⇒ 与第一轮**逐模块完全一致**（`user-api` 127 · `user-rpc` 162 · `admin-api` 149 · `admin-rpc` 122 · `users-common` 39 · `follow-api` **136** · `follow-rpc` 86 · `follow-common` 37 · `common` 337）⇒ ⇒ **为什么跑第二轮**：第一轮之后我又改了两个测试文件（`admin-api` 的注释订正 + `follow-api` 的断言消息订正）⇒ ⇒ **让台账里的数字对应「包含全部当前代码」的那一轮**，不拿旧轮的数字冒充 |
 | ⚠️ **首轮曾整类红** | 首轮 `follow-api` 的 `FollowApiRedisDisconnectedFastFailTest` / `…DefaultBehaviorTest` **整类 error**（`Can't get Docker image: testcontainers/ryuk:0.14.0`）⇒ 根因 = **本模块 pom 缺 `TESTCONTAINERS_RYUK_DISABLED`**（全仓 52 个模块里只有它会去拉 ryuk）⇒ **已修（T9）· 本轮复验 2+2 绿** |
 
 ### 5.2 定向复验（本轮两处改动）
@@ -415,7 +416,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | §5.7 要求 | 本轮的值 |
 |---|---|
 | **实际代码状态及版本标识** | 分支 `align/g1-users-follow` · 基线 `29a0bce`（= `do-my-own-gh`）· **本轮改动**：1 个配置行（`follow-rpc` 端口 env 覆盖）＋ 1 个 pom 段（ryuk env）＋ 3 个新增文件（proto 契约测试 ＋ 基准 ＋ 生成脚本）＋ **🆕 2 个新增文件（`RealTomcatPort` ＋ `FollowApiFailurePathMatrixTest`）＋ 1 个修改文件（`BlindPortGateTest` ② 段 8→9）** ＋ 5 份台账订正 ⇒ **提交后以 commit hash 为准** |
-| **构建和测试结果** | 域级回归 **EXIT=0 · BUILD SUCCESS · 08:56 min · 1195 条 / 0F / 0E / 0S**（本域 **259** 条 · 🆕 较上一轮 **+62** ＝ 失败路径矩阵）· 定向复验 **7 条全绿** ＋ 🆕 矩阵复验 **62 条全绿** · 收口验收命令 **9 条**：8 条 EXIT=0、1 条 EXIT=1（**既存**锚点失效） |
+| **构建和测试结果** | 域级回归 **EXIT=0 · BUILD SUCCESS · 08:56 min（第二轮 10:01 min · 同一批代码）· 1195 条 / 0F / 0E / 0S**（本域 **259** 条 · 🆕 较上一轮 **+62** ＝ 失败路径矩阵）· 定向复验 **7 条全绿** ＋ 🆕 矩阵复验 **62 条全绿** · 收口验收命令 **9 条**：8 条 EXIT=0、1 条 EXIT=1（**既存**锚点失效） |
 | **核心业务链路的验收结果** | `follow-api → follow-rpc → PG` ＋ `follow-rpc → user-rpc（用户存在性校验）` ⇒ **域内实测沿用台账**（2026-10-24 的 **52/52 逐字节一致**、2026-10-27 的真启动 A/B/C）⇒ **本轮未起真栈复跑** ⇒ **按原日期读，不提升** |
 | **P0 / P1 / P2 最终状态** | **P0**：域内 ✅ 8/9（#5 项目级 🔴）· **P1**：✅ 至少 5 个机制闭环 · **P2**：3 项登记（1 项已销号 · 1 项已修 · 1 项待重新拍板） |
 | **全部已知缺陷和未验证风险** | §3（`S1-FOLLOW-001~009`）· §6.1 上报项 · §6.2 例外 · 域台账（`api.md` / `rpc.md` / `common.md` / `proto.md`）· [`vs-common.md`](vs-common.md) 9 轴 · 基线 §九 `G-1`（双侧探针未落仓）/ `G-6`（proto 静态守门只覆盖 3 域 ⇒ **本域已由 `FollowProtoContractTest` 补上**）/ **`G-13`（本域无独立失败路径矩阵 ⇒ 🆕 **本轮已闭合**）** / `G-19`（消费方式未取证）|

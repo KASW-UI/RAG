@@ -300,6 +300,7 @@ service/follow/follow-rpc,service/follow/follow-common \
 | **退出码 / 结果** | **0** · `BUILD SUCCESS` · **08:56 min** · 18 个 reactor 模块**全部 SUCCESS** |
 | **用例总数** | **1195** 条（**0 失败 / 0 错误 / 0 跳过**）· 来自 **193** 个 `TEST-*.xml`（构建收工后求和） |
 | **逐模块** | `user-api` 127 · `user-rpc` 162 · `admin-api` 149 · `admin-rpc` 122 · `users-common` 39 · **`follow-api` 136** · `follow-rpc` 86 · `follow-common` 37 · `common` 337 |
+| 🆕 **第二轮（同一批代码）** | **EXIT=0 · `BUILD SUCCESS` · 10:01 min · 同样 **1195** 条 / 0F / 0E / 0S · **193** 个 XML** ⇒ 与第一轮**逐模块完全一致**（`user-api` 127 · `user-rpc` 162 · `admin-api` 149 · `admin-rpc` 122 · `users-common` 39 · `follow-api` **136** · `follow-rpc` 86 · `follow-common` 37 · `common` 337）⇒ ⇒ **为什么跑第二轮**：第一轮之后我又改了两个测试文件（`admin-api` 的注释订正 + `follow-api` 的断言消息订正）⇒ ⇒ **让台账里的数字对应「包含全部当前代码」的那一轮**，不拿旧轮的数字冒充 |
 | ⚠️ **必须带 `clean`** | 否则 stale 的 `target/` 会同时伪造「当前的红」与「当前的条数」⇒ 本轮**两轮都带 `clean`** |
 
 > ⚠️ **与基线的差异**：基线（`docs/PhaseGoal-judge.md` §十二）记全仓 52 模块 **2860 条 / 0F / 0E / 4S**；
@@ -457,7 +458,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | §5.7 要求 | 本轮的值 |
 |---|---|
 | **实际代码状态及版本标识** | 分支 `align/g1-users-follow` · 基线 `29a0bce`（= `do-my-own-gh`）· **首轮提交 `e18ef72`（38 文件 +1660/−70）** ＋ **🆕 本轮增量（`T11`）= 2 个新增源文件（`RealTomcatPort` ＋ `FollowApiFailurePathMatrixTest`）+ 1 个修改文件（`BlindPortGateTest`）+ 5 份台账** ⇒ **提交后以 commit hash 为准**（见 §7 末） |
-| **构建和测试结果** | **域级回归**：`mvn … clean test` ⇒ **EXIT=0 · BUILD SUCCESS · 08:56 min · 1195 条 / 0F / 0E / 0S**（§5.1 · 🆕 较上一轮 **+62** ＝ 失败路径矩阵）· **定向复验 7 条全绿**（§5.2）＋ 🆕 **矩阵复验 62 条全绿**（§5.2.1）· **收口验收命令 15 条**：13 条 EXIT=0、1 条 EXIT=1（**既存**锚点失效）、1 条 EXIT=1（**users DDL 16 处已知差异**，非缺陷） |
+| **构建和测试结果** | **域级回归**：`mvn … clean test` ⇒ **EXIT=0 · BUILD SUCCESS · 08:56 min（第二轮 10:01 min · 同一批代码 · 逐模块一致）· 1195 条 / 0F / 0E / 0S**（§5.1 · 🆕 较上一轮 **+62** ＝ 失败路径矩阵）· **定向复验 7 条全绿**（§5.2）＋ 🆕 **矩阵复验 62 条全绿**（§5.2.1）· **收口验收命令 15 条**：13 条 EXIT=0、1 条 EXIT=1（**既存**锚点失效）、1 条 EXIT=1（**users DDL 16 处已知差异**，非缺陷） |
 | **核心业务链路的验收结果** | `user-api → user-rpc → PG/Redis` 与 `admin-api → admin-rpc → PG/Redis` 两条链路的**域内实测**沿用域台账（`user/rpc.md` §6.4 / `admin/rpc.md` §15，L3/L4）⇒ **本轮未起真栈复跑**（§5.4）⇒ **按原日期读** |
 | **P0 / P1 / P2 最终状态** | **P0**：域内 ✅ 8/9 · 项目级 🔴 1 项（`S1-USERS-001`）· **P1**：✅ 至少 5 个机制闭环（RPC 超时 / 事务并发 / 鉴权与黑名单 / 错误码契约 / proto wire 契约）· **P2**：6 项登记（其中 1 项已销号、1 项已修） |
 | **全部已知缺陷和未验证风险** | §3 差异清单（`S1-USERS-001~005` + `S1-FOLLOW-001~009`）＋ §6.1 的 `S1-USERS-009` + §6.2 六条例外 + 域台账 + [`vs-common.md`](vs-common.md) 9 轴 + 基线 §九 20 条缺口（**G1 相关：G-1 / G-4 / G-6 / G-8 / ~~G-13~~ / G-19** ⇒ 🆕 **`G-13` 在 follow 域已闭合**，其余 3 域归 G2 / G3） |
