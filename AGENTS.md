@@ -262,7 +262,7 @@ RAG 不是从 Go「推测」行为，而是**逐字对照 Go 源码**（§3.1）
 | `tools/difftest/check-{proto-static.sh,plaintext400-headers.sh,jar-executable.sh}` | proto 契约 · **真 Tomcat** 400 头（MockMvc 测不到）· **产物可执行性**（漏配 `Main-Class` ⇒ 行为分叉） | `bash …` |
 | `tools/difftest/check-flyway-ledger.py` | Flyway 账本隔离（按库+schema）⇒ `EXIT=0`；运行时同库共存 ⇒ `check-flyway-concurrent.sh`（§6.3 问题 4） | `python3 …` |
 | `tools/difftest/check-grpc-runtime-classpath.py` | devh client 运行时 classpath + 服务发现地址门禁（baseline 机制） | `python3 …` |
-| `tools/difftest/check-{grpc-interceptor-wiring,tomcat-limits,global-lane-ownership,wave-coupling,wave-lane-ownership,wave-role-model}.py` | 六个装配/写权守门：rpc 拦截器接线 · api 容器上限 · `global` 历史 lane 写权 · **跨域耦合矩阵漂移** · **G1~G4 波次写权** · **G4 角色模型措辞**（⇒ `EXIT=0`） | `python3 tools/difftest/check-*.py`|
+| `tools/difftest/check-{grpc-interceptor-wiring,tomcat-limits,global-lane-ownership,wave-coupling,wave-lane-ownership,wave-role-model,surface-parity,phasegoal-consistency}.py` | 八个装配/写权/基线守门：rpc 拦截器接线 · api 容器上限 · `global` 历史 lane 写权 · **跨域耦合矩阵漂移** · **G1~G4 波次写权** · **G4 角色模型措辞** · **对外契约面** · **阶段一基线自检**（⇒ `EXIT=0`） | `python3 tools/difftest/check-*.py`|
 | `tools/difftest/{check,mutate}-deadline-*.py` | **deadline 家族**：E48 harness 守门+变异 · E62 守门变异 · **E38② 漂移形态守门**（漂移被修好就红） | `python3 tools/difftest/check-deadline-*.py` |
 | `tools/drift-move.py` | AGENTS.md ↔ docs/ 搬移（幂等）· 台账 `docs/DRIFT/_MANIFEST.json` | `python3 … verify` |
 | `tools/check-ledger-{tables,selfcheck,count}.py` · `check-agents-budget.py` | 台账结构层 + 自检 + **计数（口径写死 ⇒ 索引数字机器生成）** + AGENTS.md 体量守门 | `python3 …` |

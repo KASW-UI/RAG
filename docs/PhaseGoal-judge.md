@@ -3,8 +3,10 @@
 > **一句话**：把 `docs/PhasedGoal.md` 与 `docs/twoStage.md` 的**语言描述**落成**可判定的矩阵** ——
 > 每个微服务 / 组件**复刻到什么程度**才算阶段一完成，**用什么命令判定**，**今天到哪一步了**。
 >
-> **核对时间：2026-10-28**（基线 commit `7ec6fc6`）
+> **版本**：**修订版 v3**（2026-10-28 基线一致性审查后重写；v3 = v2 + **机器自检后**的评级订正）
+> **核对时间**：2026-10-28（基线 commit `7ec6fc6` + 本次新增 `tools/difftest/check-{surface-parity,phasegoal-consistency}.py`）
 > **真源**：`/Users/pr/Documents/java&golang/Sea-RideTheWind_golang`（冻结，只读）
+> **上一版**：v1（2026-10-28）—— **v1 的 13 处结论在本版被修订**，逐条见 [§十 变更记录](#十变更记录原结论--问题--修订后结论--依据)。
 
 ---
 
@@ -22,22 +24,38 @@
 2. **每个断言带核对日期。** 无日期按 `UNKNOWN` 处理（AGENTS.md §6.2）。
 3. **「已改」≠「已验证」** ⇒ 复刻度（R，覆盖面）与证据强度（E，可信度）**分开记，不互相推导**。
 
+### ⚠️ v3 的四条新增纪律（本次审查产出）
+
+4. **「台账里写着已修」≠「可以判定通过」。** 必须回到**条目级最新状态**（见 §1.5），不能引用台账头的「组件判定」行。
+5. **判定命令的绿灯只能证明它自己检查的那一面。** 命令的实际覆盖范围见 [§六](#六判定命令的实测覆盖范围)。
+6. **只存在于 `/tmp`、已消失、或无法从当前仓库恢复的探针 ⇒ 不作为当前可复算的通过证据**（历史记录保留，但标记为「曾取得，不可复算」）。
+7. **「无台账」≠「从未对照」。** 判定记录**在哪**是**记录缺口**（⇒ §九），**行为有没有对齐**是**另一件事**（⇒ 组件 R 与状态）。把两者混为一谈，会把「记录缺失」伪装成「行为漂移」（v3 订正了 4 处这样的误判，§十 #18~#21）。
+8. **本文件自身受机器自检约束** —— `tools/difftest/check-phasegoal-consistency.py`（15 组检查：表格结构 · 矩阵集合 · 38 组件构成 · R/E/状态取值域 · **R↔状态耦合** · **判定命令路径存在性** · **✅ ⇒ 有可复算命令** · **域状态 = MIN 聚合** · 编号连续性 · **P0 汇总** · 测试条数 · §6.3 命令数 · 无未来日期）⇒ **改完必跑**。
+
 ---
 
 ## 一、三套刻度
 
 ### 1.1 复刻度 R（覆盖面 —— 「复刻到什么程度」）
 
+> **v2 修订（v3 保留）**：R4 增加「探针须**在版本控制内**、**现在可复算**」这一条；R3 的第 ⑥ 条被精确定义；
+> 新增 **「未评级」**（组件存在但**从未与 Go 对照过** ⇒ 不参与 R 判定，直接判组件状态 🔴）。
+
 | 级 | 名称 | 判据（**全部满足**才够这一级） |
 |---|---|---|
 | **R0** | 范围外 | Go 侧无对应件 ⇒ 本仓不实现（`knowledge` / `points` / `security` 三域） |
 | **R1** | 骨架 | 有端点 / 方法，但业务逻辑是桩、硬编码成功或返回模拟数据 |
 | **R2** | **契约面已复刻** | ① wire 契约（HTTP 路径+方法集合 / gRPC 方法集合 / proto 字段号 / DB 列）**逐条对齐**；② **有守门可复算**（脚本或测试能自动判定）；③ 业务分支**未**逐条对照 |
-| **R3** | **语义面已复刻** | R2 **＋** ④ Go 侧每个业务决策点有 `文件:行号` 出处；⑤ RAG 侧有**自动化测试断言该行为**；⑥ 台账未决项**已清零** |
-| **R4** | **运行面已复刻** | R3 **＋** ⑦ **双侧同时运行**的探针对拍通过（比的是可观察行为，不是「类存在」）；⑧ 有**变异验证**记录（改实现 ⇒ 探针必红） |
+| **R3** | **语义面已复刻** | R2 **＋** ④ Go 侧每个业务决策点有 `文件:行号` 出处；⑤ RAG 侧有**自动化测试断言该行为**；⑥ **归属本组件**的「必须对齐 / 语义 MISMATCH / 真漂移」分歧项 **= 0** |
+| **R4** | **运行面已复刻** | R3 **＋** ⑦ **双侧同时运行**的探针对拍通过，**且该探针在版本控制内、现在可复算**；⑧ 有**变异验证**记录（改实现 ⇒ 探针必红） |
+| **未评级** | 从未对照 | 该组件**既无专属台账，也无任何仓内可复算的 Go↔RAG 对照产物**（守门脚本 / 契约测试类 / 双侧探针）⇒ 从未与 Go 逐条对照过 ⇒ **不得据此判任何等级**，组件状态直接 🔴<br>⚠️ **「无专属台账」≠「从未对照」**（v3 修订）：若存在**仓内可复算的对照产物**或**跨域对照记录**（`docs/DRIFT/_cross/proto-verification.md`），则**不算未评级**；此时「**判定记录位置不统一**」计入 [§九](#九证据缺口清单)，**不因此降 R**（降 R 会把「记录在哪」伪装成「行为没对齐」） |
 
-> ⚠️ **R2 仍是「看起来对」**，R3 是「读过 Go 源码确认对」，R4 是「两侧同时跑出来一样」。
-> 阶段一终点 = **核心组件至少 R3**，**对外契约面至少 R2**（见 §5.2）。
+> **⑥ 的精确边界（v2 澄清）** —— 下列三类**不计入**「归属本组件的必相对齐项」，但**必须**登记到 [§九 证据缺口清单](#九证据缺口清单)：
+> - **已签字偏离**（决策，不是缺陷）⇒ 记入 §11.4；
+> - **落点在共享层 / 别的域**的跨组件残留 ⇒ 不计入组件 R，但**计入域级聚合**与[矩阵 C](#五矩阵-c跨组件不变量12-条)；
+> - **取证缺口**（台账写「为什么仍然 Unknown」，而**不是**「已断言不一致」）⇒ 计入 §九。
+>
+> ⚠️ **R 与 E 不可互相推导**：R4 的组件可能只有 E4（无生产环境）；反过来 E3 的组件可能只有 R2。
 
 ### 1.2 证据强度 E（可信度）—— 直接引用 `docs/twoStage.md` §8.1，**不重定义**
 
@@ -50,33 +68,52 @@
 | E4 | 运行证据 | 有实际运行验证 / 指标 / 故障演练结果 |
 | E5 | 生产运行证据 | 可追溯的真实运行数据、事故记录、SLO |
 
-> ⚠️ **R 与 E 不可互相推导**：R4 的组件可能只有 E4（无生产环境）；反过来 E3 的组件可能只有 R2（测试只断言契约、不断言语义）。
+**E 带星号（E\*）= 曾取得该等级的证据，但**探针不在版本控制内 ⇒ 本轮不可复算**。
 
 ### 1.3 组件状态
 
-| 状态 | 含义 | 对阶段一的影响 |
+| 状态 | 判据 | 对阶段一的影响 |
 |---|---|---|
-| ✅ **达标** | 达到该组件的必达终点指标，且复刻度 ≥ R2 | 计入通过 |
-| 🟡 **契约达标 / 语义待补** | 契约面已复刻，语义面或运行面未达终点 | 登记为差异项或暂缓项（§5.4） |
-| 🔴 **未达标** | 未达终点指标 | **A 类准入阻断项** |
-| ⚫ **受阻** | 环境缺前置条件（本机无 Kafka / Redis / Nacos / etcd） | **不得写成「已修」**，也**不得写成「未修」** |
+| ✅ **达标** | R ≥ R3 **且** 归属本组件的必相对齐项 = 0 **且** 有**可复算**的判定命令<br>⚠️ **「可复算判定命令」的口径（v3 精化）**：① 该命令**今天能跑**（仓内路径真实存在 / `mvn -pl <模块> -am test`）；② 该命令**断言的对象覆盖本组件 R 级所声称的那一层** —— R3 必须有**语义断言**（Go 出处写进期望值），分两种：<br>・**api / rpc / common 组件**：**纯契约面 / 静态集合**守门（`check-surface-parity.py` 的端点集合）**不满足 ⑤** ⇒ 只能支撑 R2；<br>・**proto 组件**：`.proto` 的**字段号 / message 名 / 枚举**就是该组件的行为层 ⇒ `check-proto-static.sh` 这类**逐字节 diff 满足 ⑤**；但它**不覆盖** `optional` presence 与代码里的字段号硬编码 ⇒ 那两项属【PROTO 型】③⑤ 的**取证缺口**（§九），**不降 R** | 计入通过 |
+| 🟡 **契约达标 / 语义待补** | R = R2（未达 R3） | 登记为差异项或暂缓项（§5.5） |
+| 🔴 **未达标** | R 未评级（从未对照）**或** 归属本组件的必相对齐项 ≠ 0 | **A 类准入阻断项** |
+| ⚫ **受阻** | 环境缺前置条件 | **不得写成「已修」**，也**不得写成「未修」** |
 | ⬜ **豁免** | 有明确理由的不适用 | D 类，须写明理由 |
+
+> **v2 注**：本轮实测**中间件全部可用**（Kafka `127.0.0.1:59993` · Redis `127.0.0.1:57379` 等 8 个 · Nacos `127.0.0.1:8848` · etcd 容器 `Sea-etcd` 在跑但宿主 `2379` **未做端口映射**）⇒ **本轮没有 ⚫ 受阻的组件**；原先「本机无 Kafka/Redis/Nacos」的说法**不成立**，已删除（见 §10 变更 #9）。
 
 ### 1.4 指标书写规则
 
 | 反例（不是指标） | 正例（是指标） |
 |---|---|
 | 「错误码要和 Go 一致」 | 「错误码码值 + 文案 + 未知码回落**逐字节一致**，判定：`GO_REPO=… bash tools/errmsg-probe/run-parity.sh` ⇒ EXIT=0」 |
-| 「测试要覆盖失败路径」 | 「每个端点**至少 1 条**失败路径测试（参数非法 / 权限不足 / 下游不可用），判定：模块级 `mvn test` ⇒ surefire XML 中该类 `failures=0` 且 `tests>0`」 |
-| 「要能做双侧对拍」 | 「**两侧同时运行**同一请求矩阵，比响应字节；判定：`bash tools/<probe>/run-parity.sh` ⇒ EXIT=0，且**变异后 EXIT≠0**」 |
+| 「测试要覆盖失败路径」 | 「每端点**至少 1 条**失败路径测试（参数非法 / 权限不足 / 下游不可用），判定：模块级 `mvn test` ⇒ surefire XML 中该类 `failures=0` 且 `tests>0`」 |
+| 「要能做双侧对拍」 | 「**两侧同时运行**同一请求矩阵，比响应字节；判定：`bash tools/<probe>/run.sh` ⇒ EXIT=0，且**变异后 EXIT≠0**」 |
+
+### 1.5 ⭐ 判定权威层模型（v2 新增 · v3 保留 —— 四层状态只认一个来源）
+
+**同一个事实只允许有一个权威记录位置**，其余层一律**引用**，不独立判定。
+
+| 层 | 对象 | **唯一权威位置** | 本文件对应层 | 引用方式 |
+|---|---|---|---|---|
+| **L0 组件层** | 某组件的 R / E / 未决项 | **该组件的台账「条目级最新状态」** —— 即台账里**逐条编号的状态表**（§Unresolved / §7 状态表 / 最新轮次节），**不是**台账头的「组件判定」行 | [§三 A-2](#三矩阵-a终点指标与当前判定39-行) | A-2 的「权威来源」列给出 `文件:行号` |
+| **L1 域层** | 某域的状态 | **L0 的聚合**（聚合规则见 §8.1，**只有这一处**） | [§四 B](#四矩阵-b10-张域级终点指标卡) | B 卡只写聚合结果 + 阻塞项 |
+| **L2 跨组件层** | 跨域不变量 | **`docs/DRIFT/global/`（收口域）** 的对应台账 | [§五 C](#五矩阵-c跨组件不变量12-条) | C 表只写指标 + 判定命令 + 状态 |
+| **L3 阶段层** | P0 九条 / 阶段一结论 | **本文件 §七 / §8.3** | §七 · §8.3 | 由 L0/L1/L2 派生，**不引入新事实** |
+
+> ⚠️ **为什么必须这样**：本轮实测发现 **5 份台账的「文件头核对日期 / 组件判定」已被正文推翻**：
+> `like/api.md:1149`（仍写 NOT EQUIVALENT）被 `:37`（2026-10-27 订正）推翻 ·
+> `like/api.md:463`（015 未修）被 `:38` 推翻 · `like/rpc.md:974` 被 `:978-983` 推翻 ·
+> `message/api.md:10`（日期 10-23）实际已到 10-27 · `message/rpc.md:16`（10-23）实际已到 10-28。
+> ⇒ **直接引用台账头的「组件判定」行会低估现状** ⇒ 本文件一律引用**条目级最新状态**。
 
 ---
 
-## 二、矩阵 A：38 个组件（＋ 1 行共享层 `service/common`）
+## 二、矩阵 A-1：定位与规模（39 行 = 38 组件 ＋ 1 共享层 · 2026-10-28 实测）
 
-### A-1 定位与规模（39 行 = 38 组件 ＋ 1 共享层 · 2026-10-28 实测）
-
-> `main 文件/LOC` = `src/main/java` 下 `.java` 文件数 / 行数；`tests` = **surefire `TEST-*.xml` 逐 `testsuite` 属性求和**（权威读法；不是 maven 汇总行）。
+> `main/LOC` = `src/main/java` 下 `.java` 的**文件数 / 逐文件 `splitlines()` 行数**
+> （**不是** `cat | wc -l` —— 后者少计无尾换行的文件）。
+> `tests` = **surefire `TEST-*.xml` 逐 `testsuite` 属性求和**（权威读法）。
 
 | 域 | 组件 | Go 原件（真源） | RAG 实现 | main/LOC | tests |
 |---|---|---|---|---|---|
@@ -104,7 +141,7 @@
 | `like` | `like-rpc` | `service/like/rpc/internal/logic/`（6） | `service/like/like-rpc/`（`impl/LikeServiceGrpcImpl.java`） | 42 / 6,978 | 129 |
 | `like` | `like-common` | `service/like/common/errmsg/errmsg.go` | `service/like/like-common/…/errmsg/`（4 类） | 4 / 515 | 18 |
 | `like` | `like-proto` | `proto/like.proto` | `service/like/like-proto/src/main/proto/like.proto` | —（生成） | 0 |
-| `message` | `message-api` | `service/message/api/internal/handler/routes.go` + `internal/logic/`（13） | `service/message/message-api/`（`controller/MessageController.java` + `MessageAdminController.java`） | 49 / 4,870 | 107 |
+| `message` | `message-api` | `service/message/api/internal/handler/routes.go` + `internal/logic/`（13） | `service/message/message-api/`（`MessageController` + `MessageAdminController`） | 49 / 4,870 | 107 |
 | `message` | `message-rpc` | `service/message/rpc/internal/logic/`（9） | `service/message/message-rpc/`（`impl/MessageRpcServiceImpl.java`） | 19 / 3,815 | 96 |
 | `message` | `message-common` | `service/message/common/errmsg/errmsg.go` | `service/message/message-common/…/errmsg/`（3 类） | 3 / 526 | 21 |
 | `message` | `message-proto` | `proto/message.proto` | `service/message/message-proto/src/main/proto/message.proto` | —（生成） | 0 |
@@ -115,365 +152,392 @@
 | `users` | `user-rpc` | `service/user/user/rpc/internal/logic/`（9） | `service/users/user/user-rpc/`（`impl/UserServiceGrpcImpl.java`） | 15 / 2,735 | 162 |
 | `users` | `admin-api` | `service/user/admin/api/internal/handler/routes.go` + `internal/logic/`（13） | `service/users/admin/admin-api/`（`controller/AdminController.java`） | 56 / 3,854 | 149 |
 | `users` | `admin-rpc` | `service/user/admin/rpc/internal/logic/`（13） | `service/users/admin/admin-rpc/`（`AdminServiceGrpcImpl.java`） | 20 / 3,560 | 122 |
-| `users` | `users-common` | `service/user/common/{cryptx,errmsg,jwt}`（3 文件） | `service/users/users-common/`（11 类：`JwtUtil` / `ErrorCode` / `SchemaInitializer` / `GoStyle*` 等） | 11 / 1,037 | 39 |
+| `users` | `users-common` | `service/user/common/{cryptx,errmsg,jwt}`（3 文件） | `service/users/users-common/`（11 类） | 11 / 1,037 | 39 |
 | `users` | `user-proto` | `proto/user.proto` | `service/users/user/user-proto/src/main/proto/users.proto`（**已改名**） | —（生成） | 0 |
 | `users` | `admin-proto` | `proto/admin.proto` | `service/users/admin/admin-proto/src/main/proto/admin.proto` | —（生成） | 0 |
 | **共享层** | `service/common` | `service/common/`（5 包：`communityfact` / `logger` / `observability` / `response` / `snowflake`） | `service/common/`（73 类） | 73 / 14,804 | 337 |
 
-> ⚠️ **口径说明**：
-> - **38 组件 = 10 api + 10 rpc + 8 common + 10 proto**（AGENTS.md §3.5 口径，**本轮实测自洽**）。
->   `task` 域**无 `-common`**（Go 侧同样没有，**不是遗漏**）⇒ `task` 计 3 个组件、`users` 计 7 个（user/admin 两套）。
-> - **`service/common`（共享层）不在 38 之内** ⇒ 下表它是**第 39 行**，已单独标注 ⇒ **按行数数会多数 1 行**。
-> - `main/LOC` 口径 = `src/main/java` 下 `.java` 的**文件数 / 逐文件 `splitlines()` 行数**（**不是** `cat | wc -l` —— 后者少计无尾换行的文件）。
-> - `*-proto` 的 `main/LOC = —`：代码由 protoc 生成，不手写（AGENTS.md §3.4）。
-> - **`user.proto` → `users.proto` 的改名**是 AGENTS.md §3.4 记录的**表达层归一**（10 个 proto 中仅此一个改名）。
+> ⚠️ **口径**：
+> - **38 组件 = 10 api + 10 rpc + 8 common + 10 proto**（AGENTS.md §3.5，**本轮实测自洽**）。`task` 域**无 `-common`**（Go 侧同样没有，**不是遗漏**）⇒ `task` 计 3 个、`users` 计 7 个。
+> - **`service/common` 是跨服务共享层，不在 38 之内**（AGENTS.md §5.3f：写权归 G4）⇒ 单列第 39 行。
+>   ⚠️ **源台账的行数陷阱**：`docs/DRIFT/_cross/component-coverage-matrix.md` 的当前态表**有 39 行**（38 组件 ＋ 1 行 `跨服务 / service/common`），标题写「38 组件」⇒ **按行数数会多数 1 行**。
+> - `*-proto` 的 `main/LOC = —（生成）`：代码由 protoc 生成，不手写（AGENTS.md §3.4）。**`user.proto` → `users.proto` 的改名**是记录在案的表达层归一。
 
-### A-2 终点指标与当前判定（39 行 = 38 组件 ＋ 1 共享层 · 2026-10-28 实测）
+---
 
-> **通用终点指标**（下表按组件类型引用，不重复展开）：
+## 三、矩阵 A-2：终点指标与当前判定（39 行 = 38 组件 ＋ 1 共享层）
+
+> **通用终点指标**（按组件类型引用，不重复展开）：
 >
-> - **【API 型】** ① 端点集合：Go `routes.go` 的 `(method, path)` **归一化后**（`:id` ↔ `{id}`）与 RAG 方法级映射**集合相等**；② JWT 保护端点集合与 Go `rest.WithJwt` 段**逐条一致**；③ 每端点 **≥1** 条断言**业务结果**（非仅状态码）的测试；④ 每端点 **≥1** 条**失败路径**测试（参数非法 / 权限不足 / 下游不可用）；⑤ 失败路径**不返回误导性成功**。
-> - **【RPC 型】** ① Go proto 的 `rpc` 方法集合 **≡** RAG `*ImplBase` 子类覆写方法集合（大小写归一后）；② 每方法 **≥1** 条测试；③ 每个**写路径**证明事务边界（回滚）或幂等；④ 下游超时 / 下游不可用**有明确行为且有断言**；⑤ 业务码经 gRPC 传输后**可还原**（`description` 逐字节保真）。
-> - **【COMMON 型】** ① Go 侧该 `<域>-common` **每个文件**都有对应 RAG 类；② 错误码**码值 + 文案 + 未知码回落**逐字节一致；③ 业务码经 gRPC 传输后可还原。
-> - **【PROTO 型】** ① `.proto` 剥 `option` / 空白后**行为层零差异**；② message 名 / 字段名 / 字段号 / rpc 方法**逐条一致**；③ `optional` presence 语义逐条核对；④ 字段号**无硬编码覆盖**；⑤ 消费点构造方式与 Go 一致；⑥ wire 层字节对拍。
+> - **【API 型】** ① 端点集合：Go `routes.go` 的 `(method, path)` **归一化后**与 RAG 方法级映射**集合相等**；② JWT 保护端点集合与 Go `rest.WithJwt` 段**逐条一致**；③ 每端点 **≥1** 条断言**业务结果**（非仅状态码）的测试；④ 每端点 **≥1** 条**失败路径**测试；⑤ 失败路径**不返回误导性成功**。
+> - **【RPC 型】** ① Go proto 的 `rpc` 方法集合 **≡** RAG `*ImplBase` 子类覆写方法集合（大小写归一）；② 每方法 **≥1** 条测试；③ 每个**写路径**证明事务边界或幂等；④ 下游超时 / 不可用**有明确行为且有断言**；⑤ 业务码经 gRPC 传输后**可还原**。
+> - **【COMMON 型】** ① Go 侧该 `<域>-common` **每个文件**都有对应 RAG 类；② 码值 + 文案 + 未知码回落**逐字节一致**；③ 业务码经 gRPC 传输后可还原。
+> - **【PROTO 型】** ① `.proto` 剥 `option` / 空白后行为层零差异；② message 名 / 字段名 / 字段号 / rpc 方法逐条一致；③ `optional` presence 语义逐条核对；④ 字段号**无硬编码覆盖**；⑤ 消费点构造方式与 Go 一致；⑥ wire 层字节对拍。
 
-| 域 | 组件 | 必达终点指标（可判定） | 判定命令 | R | E | 当前状态（2026-10-28） |
-|---|---|---|---|---|---|---|
-| `article` | `article-api` | 【API 型】7 端点（4 个 JWT）集合相等 **＋** 每端点 ≥1 业务断言 ＋ 每端点 ≥1 失败路径 | `bash tools/difftest/check-proto-static.sh`（proto 面）＋ 模块级 `mvn -pl service/article/article-api -am test` | **R2** | E3 | 🟡 **契约达标 / 语义待补** —— 台账判 `SEMANTICALLY NOT EQUIVALENT`（第十二轮，不变）；**无双侧活体对拍**（Go 侧需 etcd，不可拉起） |
-| `article` | `article-rpc` | 【RPC 型】6 rpc 方法全覆盖 ＋ 写路径事务/幂等证明 ＋ MQ 事件契约冻结 | 同上 ＋ `python3 tools/difftest/check-grpc-interceptor-wiring.py` | **R2** | E3 | 🟡 **契约达标 / 语义待补** —— 13 条已改；**S-5 阻塞于 security 域迁移**；MQ 事件契约未冻结；U-2 真并发用例未写 |
-| `article` | `article-common` | 【COMMON 型】45 行 → 1 类；码值/文案/回落**逐字节一致** | `GO_REPO=… bash tools/errmsg-probe/run-parity.sh` ⇒ EXIT=0 | **R4** | E4 | ✅ **达标** —— sha256 逐字节一致（15 码 + 回落） |
-| `article` | `article-proto` | 【PROTO 型】6 项全过 ＋ `optional` 逐个核对 | `bash tools/difftest/check-proto-static.sh`（**不覆盖 article** ⇒ 需人工 diff） | **R3** | E3 | 🟡 **契约达标 / 语义待补** —— 「✅ 一致」成立，但**消费方式核对是源码级，未做 wire 活体对拍**；**无落仓 proto 静态守门** |
-| `comment` | `comment-api` | 【API 型】7 端点（7 JWT）集合相等 ＋ 每端点 ≥1 失败路径 | `bash tools/difftest/comment/run_diff.sh` ⇒ 23 步矩阵 | **R4** | E4 | ✅ **达标** —— 3 条 MISMATCH 全修；活体 23 步**复跑两轮一致**（20 一致 / 8 差异，其中 2 已签字、1 新登记 T20 已签字） |
-| `comment` | `comment-rpc` | 【RPC 型】7 rpc 全覆盖 ＋ 写路径事务证明 | `bash tools/difftest/comment/run_diff.sh` ＋ 模块级 test | **R3** | E3 | 🟡 **契约达标 / 语义待补** —— 7 条 MISMATCH 全修（各配真 PG 守门 + 变异）；**§3 又有 2 条真漂移 D8/D9**（落点 `service/common` ⇒ global 单写权，**待修法拍板**） |
-| `comment` | `comment-common` | 【COMMON 型】码值/文案/回落逐字节一致 | 域内契约测试（`CommentErrorCodeContractTest`） | **R3** | E3 | ✅ **达标** —— 0 条 MISMATCH |
-| `comment` | `comment-proto` | 【PROTO 型】6 项全过 ＋ wire 字节对拍 | `python3 tools/difftest/comment/check-proto-parity.py` | **R4** | E4 | ✅ **达标** —— 245 行行为层零差异 ＋ **双侧活体 wire 对拍**；跨栈路径前缀差异 = **已签字** `SD-2026-10-23-04`（只增别名 `PbCommentServiceAlias`，已闭环） |
-| `favorite` | `favorite-api` | 【API 型】7 端点（7 JWT）集合相等 ＋ 每端点 ≥1 失败路径 | `bash tools/api-envelope-probe/favorite/run.sh` ＋ `bash tools/api-full-parity-probe/favorite/run.sh` | **R4** | E4 | ✅ **达标** —— 7 路由契约逐条一致；响应字节层已升级为**双侧活体对拍**；域内「未知项」归零 |
-| `favorite` | `favorite-rpc` | 【RPC 型】7 rpc 全覆盖 ＋ 写路径事务/幂等 ＋ 熔断生效 | `bash tools/grpc-contract-probe/favorite/run.sh` ＋ `bash tools/ddl-parity-probe/favorite/run.sh` | **R4** | E4 | ✅ **达标** —— 6 项双侧活体对拍（错误码 / path / 指标 / v2 体形 / **protobuf wire 字节** / DDL 逐列）；变异验证 M1/M2 + 4 例转红 |
-| `favorite` | `favorite-common` | 【COMMON 型】24 码 ＋ 回落 ＋ gRPC 可还原 | `bash tools/errmsg-probe/favorite/run-parity.sh` ⇒ EXIT=0（108 行逐字节） | **R4** | E4 | ✅ **达标** —— 本仓**第一个**「§3.3 两侧同时跑的探针」落地域 |
-| `favorite` | `favorite-proto` | 【PROTO 型】6 项全过 ＋ wire 字节对拍 | `bash tools/proto-wire-probe/favorite/run.sh`（6 组消息、**两个不同运行时**） | **R4** | E4 | ✅ **达标** —— 107/108 行（仅 option 块差 1 行）逐条同序；16 个 message 逐条一致 |
-| `follow` | `follow-api` | 【API 型】8 端点（8 JWT）集合相等 ＋ 每端点 ≥1 失败路径 | ⚠️ **无落仓入口**（脚本在 `/tmp/probe.sh` 等 3 个，**未进版本控制**） | **R4\*** | E4\* | 🟡 **契约达标 / 语义待补** —— 台账记「52/52 逐字节一致」，但**探针不可复算** ⇒ 见 §7 G-1 |
-| `follow` | `follow-rpc` | 【RPC 型】8 rpc 全覆盖 ＋ 写路径事务 ＋ 熔断形状 | 同上 ⚠️ **无落仓入口** | **R4\*** | E4\* | 🟡 **契约达标 / 语义待补** —— 同上；并发 12×2 轮探针亦在 `/tmp` |
-| `follow` | `follow-common` | 【COMMON 型】16 码 ＋ 文案逐条一致 | ⚠️ **无落仓入口** | **R3** | E3 | 🟡 契约面逐条一致（16 码 16 文案零漂移），但**无双侧探针** |
-| `follow` | `follow-proto` | 【PROTO 型】6 项全过 | ⚠️ **无落仓 proto 守门**（`check-proto-static.sh` 不覆盖 follow） | **R3** | E2 | 🟡 **契约达标 / 语义待补** —— 52/53 行行为层零差异（仅 option）；**消费方式已验**但无守门网 ⇒ 漂了不会红 |
-| `hot` | `hot-api` | 【API 型】1 端点（0 JWT）＋ Tomcat 三旋钮与 Go 上下限**逐个值**一致 | `python3 tools/difftest/check-tomcat-limits.py`（静态 10/10）＋ `bash tools/json-body-probe/run-parity.sh` | **R4** | E4 | ✅ **达标** —— D21/D22/D23 已闭合；真 Tomcat 活体：值个数翻转 n 两侧都 2049、请求行翻转长度两侧都 1052536 字节（差 0）；**残留 `DRIFT-HOTAPI-030`**（容器输入上限语义）已由共享层修 |
-| `hot` | `hot-rpc` | 【RPC 型】5 rpc 全覆盖 ＋ Kafka 端到端 ＋ 拦截器真接线 | `python3 tools/difftest/check-grpc-interceptor-wiring.py` ⇒ EXIT=0（10/10）＋ `bash tools/difftest/run-hot-rpc-difftest.sh` | **R4** | E4 | ✅ **达标** —— 真 Kafka + 2×真 Redis + 真 gRPC；`DRIFT-COMMON-004` 已修（拦截器真挂上 server） |
-| `hot` | `hot-common` | 【COMMON 型】121 行 → 2 类；码值/文案逐字节一致 | 域内契约测试（14 条全绿 ＋ 变异 11/11 全红） | **R4** | E4 | ✅ **达标** —— 双侧对拍 sha256 逐字节一致（`f23fe570…`） |
-| `hot` | `hot-proto` | 【PROTO 型】6 项全过 | ⚠️ 无落仓 proto 守门（`hot-stub-server.java` 引用生成码但**不是契约守门**） | **R2** | E2 | 🟡 **契约达标 / 语义待补** —— §3.4 复制忠实成立；**消费方式未验**（§3.4 效力边界第 1 条） |
-| `like` | `like-api` | 【API 型】6 端点（6 JWT）集合相等 ＋ 每端点 ≥1 失败路径 | ⚠️ **无落仓入口**（`/tmp/likeprobe/*` **三个文件已消失**） | **R3** | E3\* | 🟡 **契约达标 / 语义待补** —— 台账记 5 条 `SEMANTIC MISMATCH`（DRIFT-012/013/014/015/016）**已修**，但**复算证据不可复算** ⇒ 见 §7 G-2 |
-| `like` | `like-rpc` | 【RPC 型】6 rpc 全覆盖 ＋ 事实投递链路（跨三仓） | ⚠️ **无落仓入口** | **R3** | E3 | 🟡 契约面覆盖完整；事实投递链路已落地（第二十轮 A5′，守门 22 条） |
-| `like` | `like-common` | 【COMMON 型】码值/文案/回落一致 | ⚠️ 无专属落仓入口；`check-ledger-selfcheck.py` 覆盖 | **R3** | E3 | 🟡 契约面逐条一致；**无专属台账**（`docs/DRIFT/like/common.md` 不存在） |
-| `like` | `like-proto` | 【PROTO 型】6 项全过 | ⚠️ **无落仓 proto 守门** | **R3** | E2 | 🟡 复制忠实成立 ＋ **消费方式已验**；`package` 归一 = **已签字** `SD-2026-10-23-05`（跨栈失效面 = 当前不存在） |
-| `message` | `message-api` | 【API 型】13 端点（13 JWT）集合相等 ＋ 每端点 ≥1 失败路径 | `bash tools/semantic-probe/run-parity.sh` ＋ `bash tools/difftest/run.sh` | **R4** | E4 | ✅ **达标** —— 解析语义双侧对拍（含**签字偏离白名单**机制，防「守门人去修绿」）；`affected` 字符串形态 = **已签字** `SD-2026-10-23-03` |
-| `message` | `message-rpc` | 【RPC 型】9 rpc 全覆盖 ＋ 写路径事务 ＋ 失败路径 | `bash tools/difftest/run.sh`（含 message-rpc 双端口 runner）＋ `run-message-ddl-parity.sh` | **R3** | E3 | 🟡 契约面全覆盖；台账记 1 条 MISMATCH + 5 OBS |
-| `message` | `message-common` | 【COMMON 型】码值/文案/回落一致 | 域内契约测试 | **R3** | E3 | ✅ **达标** —— 逐条等价（`FIX-MSG-COMMON-002` 已修） |
-| `message` | `message-proto` | 【PROTO 型】6 项全过 | `bash tools/difftest/grpc-message-dual-port-runner.java` 路径 | **R3** | E3 | ✅ **达标** —— 文件零差异 ＋ 消费方式已验 |
-| `task` | `task-api` | 【API 型】1 端点（0 JWT）＋ 参数非法路径 | `bash tools/difftest/run-task-http-parity.sh` | **R4** | E4 | ✅ **达标** —— 首轮 2 条漂移已修 |
-| `task` | `task-rpc` | 【RPC 型】1 rpc 全覆盖 ＋ Kafka 端到端 ＋ 跨栈 xlang | `bash tools/difftest/run-task-grpc-xlang.sh` ＋ `run-task-kafka-e2e.sh` ＋ `run-task-offset-oldest.sh` | **R4** | E4 | ✅ **达标** —— 首轮 5 条漂移全修并复核；**真 Kafka 端到端** ＋ **HTTP 双侧对拍** |
-| `task` | `task-proto` | 【PROTO 型】6 项全过 | `bash tools/difftest/check-proto-static.sh`（已扩到 task）⇒ EXIT=0 | **R3** | E3 | ✅ **达标** —— 消费方式首次核对未发现差异；**已有持续守门** |
-| `users` | `user-api` | 【API 型】9 端点（7 JWT）集合相等 ＋ 每端点 ≥1 失败路径 | `bash tools/difftest/run.sh` ＋ `python3 tools/difftest/matrix.py` | **R4** | E4 | ✅ **达标** —— 9 端点逐条对拍（方法/参数通道按真源 `types.go` 自动解析）；`uid` 统一拒绝 = **已签字** `SD-2026-10-23-02` |
-| `users` | `user-rpc` | 【RPC 型】9 rpc 全覆盖 ＋ 写路径事务 ＋ JWT 探针 | `bash tools/difftest/grpc-user9-dual-port-runner.java` ＋ `run.sh` | **R4** | E4 | ✅ **达标** —— 真 PG ＋ 9 rpc 逐条；`/tmp/goprobe/probejwt` 三腿全中 |
-| `users` | `admin-api` | 【API 型】13 端点（11 JWT）集合相等 ＋ 每端点 ≥1 失败路径 | `bash tools/difftest/run.sh` ＋ `matrix.py` | **R4** | E4 | ✅ **达标** —— `OperatorId` 严格校验 = **已签字** `SD-2026-10-23-01`（RAG 更严一侧） |
-| `users` | `admin-rpc` | 【RPC 型】13 rpc 全覆盖 ＋ 写路径事务 | `bash tools/difftest/GrpcAdminDualPortRunner.java` ＋ `run.sh` | **R4** | E4 | ✅ **达标** —— 13 rpc 逐条；DDL 半边已对齐（4 张表时间列全 `TIMESTAMPTZ`、类型 0 差异） |
-| `users` | `users-common` | 【COMMON 型】Go 3 文件 → RAG 11 类；JWT/密码/错误码/请求绑定**双侧活体** | `bash tools/semantic-probe/run-parity.sh` ＋ `bash tools/breaker-probe/run-parity.sh` | **R4** | E4 | ✅ **达标** —— 本仓**第一个**双侧活体对拍落地域（Go 进程 ↔ JVM 进程逐字节） |
-| `users` | `user-proto` | 【PROTO 型】6 项全过 | `bash tools/difftest/check-proto-static.sh` ⇒ user 段 EXIT=0 | **R3** | E3 | ✅ **达标** —— 9 rpc 逐条；改名 = 表达层归一（§3.4） |
-| `users` | `admin-proto` | 【PROTO 型】6 项全过 | 同上 ⇒ admin 段 EXIT=0 | **R3** | E3 | ✅ **达标** —— 13 rpc 逐条 |
-| 跨服务 | `service/common` | 【COMMON 型】Go 5 包 → RAG 73 类；**每个可比包**逐行对齐；熔断/deadline/响应体三面双侧活体 | `bash tools/breaker-probe/run-parity.sh` ＋ `bash tools/semantic-probe/deadline-downstream/run-deadline-downstream-parity.sh` ＋ `…/rpc-timeout/run-rpc-timeout-parity.sh` | **R2** | E3 | 🔴 **未达标** —— **5 个可比包 3 个 NOT EQUIVALENT**（communityfact / logger / observability / snowflake；仅 `response` 逐条等价）⇒ **27 条编号未修** ＋ 5 项未编号 ＋ 9 项交接；**G4 共享层单写权** |
+| 域 | 组件 | 必达终点指标（可判定） | 判定命令（**覆盖范围见 §六**） | R | E | **权威来源**（L0） | 仍开放项 | 状态 |
+|---|---|---|---|---|---|---|---|---|
+| `article` | `article-api` | 【API 型】全 6 条 | `python3 tools/difftest/check-surface-parity.py --domain article`（契约面）＋ 模块级 `mvn -pl service/article/article-api -am test` | **R3** ↑ | E3 | `docs/DRIFT/article/api.md:26`（判定）· `:886`（`UNRESOLVED-002`）· `:1095`（双侧 0 条） | `UNRESOLVED-002`（**跨组件**：依赖 article-rpc 响应语义约定） | ✅ |
+| `article` | `article-rpc` | 【RPC 型】全 5 条 | 同上 `--domain article` ＋ `python3 tools/difftest/check-grpc-interceptor-wiring.py` | **R2** | E3 | `docs/DRIFT/article/rpc.md:46`·`:95`（`S-5`）· `:658-666`（U-3/4/9/4′） | **`S-5`**（content security 实现被 security 域阻塞 ⇒ 外部客户端恒抛、审核链路不可用）· `U-3`/`U-4`/`U-9`/`U-4′`（取证缺口） | 🟡 |
+| `article` | `article-common` | 【COMMON 型】全 3 条 | `GO_REPO=… bash tools/errmsg-probe/run-parity.sh` ⇒ EXIT=0 | **R4** | E4 | `docs/DRIFT/article/common.md:5`·`:50-53` | **0 条** | ✅ |
+| `article` | `article-proto` | 【PROTO 型】①–⑤（⑥ 不适用） | `python3 tools/difftest/check-surface-parity.py --domain article`（rpc 方法集） | **R3** | E3 | `docs/DRIFT/article/proto.md:18`·`:175`（`P-U-1`）· `:236-238` | `P-U-1`（跨栈活体未实测 ⇒ 取证缺口）· **台账未见变异验证** | ✅ |
+| `comment` | `comment-api` | 【API 型】全 5 条 | `bash tools/difftest/comment/run_diff.sh` ⇒ 23 步矩阵 | **R4** | E4 | `docs/DRIFT/comment/api.md:24`·`:334-344` | `U4`（共享台账过期结论待更正）· `U10`（D1 机制未查实，可观察行为已定） | ✅ |
+| `comment` | `comment-rpc` | 【RPC 型】全 5 条 | `bash tools/difftest/comment/run_diff.sh`（23 步矩阵）＋ `mvn -pl service/comment/comment-rpc -am test` | **R4** ↑ | E4 | `docs/DRIFT/comment/rpc.md:35`·`:244`(`D8`)·`:264`(`D9`)·`:557-569` | `D8`/`D9`（**落点 `service/common`** ⇒ 跨组件残留，阻塞**域**）· `U13`（跨栈业务码不可传输，协议层） | ✅ |
+| `comment` | `comment-common` | 【COMMON 型】全 3 条 | `bash tools/difftest/comment/run_diff.sh`（错误码链路被 23 步矩阵端到端覆盖） | **R3** | E3 | `docs/DRIFT/comment/common.md:24`·`:112-125` | **0 条必对齐项** · **台账未见变异验证** | ✅ |
+| `comment` | `comment-proto` | 【PROTO 型】全 6 条 | `python3 tools/difftest/comment/check-proto-parity.py` ＋ `run_diff.sh`（wire） | **R4** | E4 | `docs/DRIFT/comment/proto.md:19`·`:112`(`U4`)·`:113`（变异实测） | `U4`（跨栈业务码不可传输，协议层不可修） | ✅ |
+| `favorite` | `favorite-api` | 【API 型】全 5 条 | `bash tools/api-envelope-probe/favorite/run.sh` ＋ `bash tools/api-full-parity-probe/favorite/run.sh` | **R4** | E4 | `docs/DRIFT/favorite/api.md:7-13`·`:316-325`·`:586`(`U9`) | `U9`（Go 16062 DevServer HTTP 面，RAG 无 ⇒ 待拍板）· 405 多一个 `Content-Type`（落点 `service/common`）· `B2`（流程项） | ✅ |
+| `favorite` | `favorite-rpc` | 【RPC 型】全 5 条 | `bash tools/grpc-contract-probe/favorite/run.sh` ＋ `bash tools/ddl-parity-probe/favorite/run.sh` ＋ `bash tools/sql-statement-probe/favorite/run.sh` | **R4** | E4 | `docs/DRIFT/favorite/rpc.md:14-19`·`:504`·`:1801-1804` | `U7`（环境受限）· `U9`（待拍板）· `E65`（出向 gRPC 不继承 deadline ⇒ 落点共享层） | ✅ |
+| `favorite` | `favorite-common` | 【COMMON 型】全 3 条 | `bash tools/errmsg-probe/favorite/run-parity.sh` ⇒ EXIT=0（108 行逐字节） | **R4** | E4 | `docs/DRIFT/favorite/common.md:19-20`·`:52-62` | **0 条**（2 条 OBS 已签字） | ✅ |
+| `favorite` | `favorite-proto` | 【PROTO 型】①–⑤ ＋ wire 字节 | `bash tools/proto-wire-probe/favorite/run.sh`（6 组消息、两个运行时） | **R3** ↓ | E4 | `docs/DRIFT/favorite/proto.md:18`·`:156`·`:183` | **0 条** · **台账未见变异验证** ⇒ R4 不成立 | ✅ |
+| `follow` | `follow-api` | 【API 型】全 5 条 | `mvn -pl service/follow/follow-api -am test` ⇒ `FollowApiMvcPipelineTest` 等（**Go 出处写进用例**：`helper.go:23` / `authhandler.go:106` / `checkblacklistmiddleware.go:42-48`）＋ `python3 tools/difftest/check-surface-parity.py --domain follow`（**仅契约面**）<br>⚠️ **双侧对拍探针在 `/tmp/probe.sh` 等 5 个**（未进版本控制）⇒ 仓内**无双侧对拍入口** ⇒ **R4 不成立** | **R3** ↓ | E3 | `docs/DRIFT/follow/api.md:12-13`（52/52）· `:690-697`（探针位置）· `:746-756`（台账自认应落仓未做）· `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiMvcPipelineTest.java:154`·`:177`·`:229`（Go 出处） | `DRIFT-FOLLOW-008`（MaxConns 闸门粒度 ⇒ **落点 `service/common`**）· ⚠️ 双侧对拍不可复算（§九 G-1） | ✅ |
+| `follow` | `follow-rpc` | 【RPC 型】全 5 条 | ⚠️ **无落仓入口** | **R2** ↓ | E3 | `docs/DRIFT/follow/rpc.md:12-13`（52/52）· `:20`（`DRIFT-FOLLOW-006` 🔴 未修）· `:414-415`（探针位置） | **`DRIFT-FOLLOW-006`**（5 个 `follow_rpc_*` 指标**无任何抓取出口** ⇒ 真实可观察差异，用户 2026-10-24 定「本轮不落地」） | 🟡 |
+| `follow` | `follow-common` | 【COMMON 型】全 3 条 | `mvn -pl service/follow/follow-common -am test` ⇒ `FollowErrorCodeContractTest` / `FollowGrpcErrorContractTest`（域内 **37 条**） | **R3** | E3 | `docs/DRIFT/follow/common.md:11-12`·`:39-45` | **0 条** | ✅ |
+| `follow` | `follow-proto` | 【PROTO 型】①–⑤ | `python3 tools/difftest/check-surface-parity.py --domain follow`（rpc 方法集） | **R2** ↓ | E2 | `docs/DRIFT/follow/proto.md:13`·`:78` | **0 条必对齐项** · **本组件 0 例测试**（proto 模块无 junit 依赖，断言在消费方）⇒ 「RAG 侧自动化语义断言」不满足 ⇒ R3 不成立 | 🟡 |
+| `hot` | `hot-api` | 【API 型】全 5 条 | `python3 tools/difftest/check-tomcat-limits.py`（**仅配置值**）＋ `bash tools/difftest/run-hot.sh`（双侧 29 例） | **R4** | E4 | `docs/DRIFT/hot/api.md:16-27`·`:1237-1238` | `DRIFT-HOTAPI-030`（**第十四轮已落地**，本台账标题过期）· `DRIFT-HOTAPI-031`（框架限制，候选未签字） | ✅ |
+| `hot` | `hot-rpc` | 【RPC 型】全 5 条 | `bash tools/difftest/run-hot-rpc-difftest.sh`（gRPC 逐字节）＋ `check-grpc-interceptor-wiring.py` | **R4** | E4 | `docs/DRIFT/hot/rpc.md:11-20`·`:717`(`DRIFT-HOTRPC-006`)·`:1047-1057` | `DRIFT-HOTRPC-006`（**已取证未签字**）· `DRIFT-HOTRPC-005`（保持不修，已登记）· proto 回归网（用户决定不做） | ✅ |
+| `hot` | `hot-common` | 【COMMON 型】全 3 条 | `mvn -pl service/hot/hot-common -am test` ⇒ `HotErrorCodeContractTest`（**期望值逐条抄自 Go `errmsg.go:34-46`** const 块，断言 11 个码 + 顺序 + 重复）＋ `HotErrorMessagesContractTest` | **R3** ↓ | E4\* | `docs/DRIFT/hot/common.md:11-12`·`:55`（探针放 `/tmp`，不入 Go 仓）· `:57-58`（变异 11/11）· `service/hot/hot-common/src/test/java/com/rag/hot/hot/common/errmsg/HotErrorCodeContractTest.java:18-27`（**Go 出处**） | **0 条** · ⚠️ **双侧对拍探针在 `/tmp` ⇒ 不可复算 ⇒ R4 不成立**（§九 G-5） | ✅ |
+| `hot` | `hot-proto` | 【PROTO 型】①–⑤ | `mvn -o -pl service/hot/hot-rpc test -Dtest=HotProtoContractTest`（**期望值由 `generate.py` 从 Go 真源 `proto/hot.proto` 生成**，记录真源 sha256）＋ `python3 tools/difftest/check-surface-parity.py --domain hot` | **R3** ↑ | E3 | `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/proto/HotProtoContractTest.java:38-45`（期望值**由真源生成**）· `service/hot/hot-rpc/src/test/resources/proto-contract/{hot-proto-contract.expected.txt,generate.py}`（**已入库**）· `docs/DRIFT/hot/vs-common.md:67`（`H-1` 已落码）· `docs/DRIFT/_cross/proto-verification.md:21`（`hot` 0 行 diff · 11=11 · 18=18） | **0 条行为差异** · ⚠️ **判定记录在 `hot/vs-common.md` 而非 `hot/proto.md`**（**位置不统一** ⇒ §九 G-18，**不降 R**）· ⚠️ `hot/vs-common.md:59` 与 `:67` **自相矛盾**（§九 G-15） | ✅ |
+| `like` | `like-api` | 【API 型】全 5 条 | `mvn -pl service/like/like-api -am test` ⇒ `LikeApiGoAlignmentTest` / `LikeApiMvcPipelineTest` 等（**Go 出处写进用例**）＋ `python3 tools/difftest/check-surface-parity.py --domain like`（**仅契约面**）<br>⚠️ **双侧对拍探针 `/tmp/likeprobe/*` 已消失** ⇒ 仓内**无双侧对拍入口** ⇒ **R4 不成立** | **R3** | E3 | `docs/DRIFT/like/api.md:37-38`（6 条 MISMATCH 全修）· `:18-19`（探针位置）· `:761-768`（U-01~U-08）· `service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiGoAlignmentTest.java` | **0 条必对齐项**（012~017 全修）· 4 条待签字候选（021/022/SD-10/SD-11）· `U-01`~`U-08`（**取证缺口**，非必对齐）· ⚠️ 双侧对拍不可复算（§九 G-2） | ✅ |
+| `like` | `like-rpc` | 【RPC 型】全 5 条 | ⚠️ **无落仓入口** | **R2** ↓ | E3 | `docs/DRIFT/like/rpc.md:35-39`·`:1538`（global `E60`）· `:1572` | **`DRIFT-LIKE-003`**（事实投递链路 6 个 4 行骨架 ⇒ `UNRESOLVED`，**有意不碰**）· **`E60`**（`currentUserLikeTotal` 双失败少传 error ⇒ **真漂移，待 like 域 owner 接手**）· `L-U9`/`L-U11` | 🟡 |
+| `like` | `like-common` | 【COMMON 型】全 3 条 | `mvn -pl service/like/like-common -am test` ⇒ `LikeErrorContractTest`（**29 个码逐条 1:1** · 文案表 29 条 · 未知码回落 `FAIL` · `CodeError` 格式与 JSON 序列化 · `newCode`/`newCodeMsg` 区分）＋ `LikeGrpcErrorTest` | **R3** ↑ | E3 | `service/like/like-common/src/test/java/com/rag/like/like/common/errmsg/LikeErrorContractTest.java:28-29`（**Go 出处写进 javadoc**：`errmsg.go:37-67` / `:69-99` / `:101-107`）· `:77-83`（29 条计数） | **0 条行为差异**（逐条钉死）· ⚠️ **无专属台账 ⇒ 判定记录缺失**（**证据记录**缺口，**不是**行为缺口 ⇒ §九 G-17，**不降 R**） | ✅ |
+| `like` | `like-proto` | 【PROTO 型】①–⑤ | `python3 tools/difftest/check-surface-parity.py --domain like` | **R2** ↓ | E2 | `docs/DRIFT/_cross/component-coverage-matrix.md:63`（**无专属台账** · 「消费方式未验」）· `docs/Intentional_Deviations/like/proto.md` | **无台账** + 消费方式未验 ⇒ R3 不成立 | 🟡 |
+| `message` | `message-api` | 【API 型】全 5 条 | `bash tools/semantic-probe/run-parity.sh` ＋ `bash tools/difftest/run.sh` | **R4** | E4 | `docs/DRIFT/message/api.md:1151`·`:1148-1150` | `-010`/`-011`/`-013`（**落点共享层**）· `-012`（**不可修**：Tomcat 序列化吃空格） | ✅ |
+| `message` | `message-rpc` | 【RPC 型】全 5 条 | `bash tools/difftest/exp-difftest-grpc-errors-message.sh` ＋ `run-message-ddl-parity.sh` | **R4** ↑ | E4 | `docs/DRIFT/message/rpc.md:1251`·`:1170-1183` | `UNRESOLVED-MSG-008`（三模块同库三账本 ⇒ **跨域**）· `UNRESOLVED-MSG-V-001`（Nacos namespace ⇒ **跨域**）· 共享面三项 | ✅ |
+| `message` | `message-common` | 【COMMON 型】全 3 条 | `mvn -pl service/message/message-common -am test` ⇒ `MessageErrorMessagesTest` ＋ `MessageGrpcErrorTest`（**21 条**） | **R3** | E3 | `docs/DRIFT/message/common.md:162-164`（证据强度自陈：非双侧活体）· `:172` | `CodeError` Jackson 序列化**无断言**（取证缺口）· **台账未见变异验证** ⇒ R4 不成立 | ✅ |
+| `message` | `message-proto` | 【PROTO 型】①–⑥ | `bash tools/difftest/exp-difftest-grpc-errors-message.sh`（活体往返） | **R3** | E3 | `docs/DRIFT/message/proto.md:112`·`:124-127` | **0 条** · **台账未见变异验证** ⇒ R4 不成立 | ✅ |
+| `task` | `task-api` | 【API 型】全 5 条 | `bash tools/difftest/run-task-http-parity.sh`（44 条矩阵） | **R4** | E4 | `docs/DRIFT/task/api.md:24`·`:27`·`:503-527` | `DRIFT-TASK-API-004`（charset/空白 ⇒ **全域共性**，不在本域单修） | ✅ |
+| `task` | `task-rpc` | 【RPC 型】全 5 条 | `bash tools/difftest/run-task-kafka-e2e.sh` ＋ `run-task-grpc-xlang.sh` ＋ `run-task-offset-oldest.sh` | **R4** | E4 | `docs/DRIFT/task/rpc.md:23`·`:1519`（`DRIFT-TASK-RPC-008` **已落码**）· `:1646` | `DRIFT-TASK-RPC-008` **已落码**（`:449` 池已启用 + 池参数 64/16/0）· `otel.*` 观测差异（**跨域共性**） | ✅ |
+| `task` | `task-proto` | 【PROTO 型】①–⑥ | `bash tools/difftest/check-proto-static.sh`（已覆盖 task ⇒ EXIT=0）＋ `run-task-grpc-xlang.sh` | **R3** | E3 | `docs/DRIFT/task/proto.md:16-18`·`:121-123` | **0 条** · **台账未见变异验证** ⇒ R4 不成立 | ✅ |
+| `users` | `user-api` | 【API 型】全 5 条 | `bash tools/difftest/run.sh` ＋ `python3 tools/difftest/matrix.py` ＋ `exp-difftest-redis-blacklist.sh` | **R4** | E4 | `docs/DRIFT/users/user/api.md:8`·`:623-625`（**头部 3 条已被正文更新为 1 条**）· `:619` | `DRIFT-USERAPI-013`（**落点 `service/common`** ⇒ 跨组件；global 已拆半：MaxConns 半边已签字、breaker 半边已落码） | ✅ |
+| `users` | `user-rpc` | 【RPC 型】全 5 条 | `bash tools/difftest/exp-difftest-grpc-user9.sh`（43 场景） | **R4** | E4 | `docs/DRIFT/users/user/rpc.md:60`·`:898`(`V-002`)·`:905`(`V-011`)·`:906`(`V-012`) | `V-002`（`status` NOT NULL ⇒ **行为层零差异**，建议保持；**销号签字不在 G1 写权面**）· `V-011`（DEFAULT，**当前不可观察**）· `V-012`（观测面，日志归因）⇒ **三者均非必对齐项** | ✅ |
+| `users` | `admin-api` | 【API 型】全 5 条 | `bash tools/difftest/run.sh` ＋ `diff.py --scenario all` | **R4** | E4 | `docs/DRIFT/users/admin/api.md:1179`（`DRIFT-ADMINAPI-001` **已签字 + 严重度下调**）· `:499`(`002` 降级)· `:513`(`003` 已签字) | `DRIFT-ADMINAPI-006 ①`（401 计入观测面 ⇒ OBSERVABLE）· `DRIFT-ADMINAPI-013`（测试基础设施「OS 盲选口」，**非 Go 对照项**） | ✅ |
+| `users` | `admin-rpc` | 【RPC 型】全 5 条 | `bash tools/difftest/exp-difftest-grpc-admin-errors.sh --stacks-up`（18 cases） | **R4** | E4 | `docs/DRIFT/users/admin/rpc.md:1434`（`ARPC-003` **已签字**）· `:3765`(`ARPC-010` 已修) | `ARPC-007`（**Go 真源 12 处字面量转码损坏** ⇒ Go 侧缺陷，记录不修 RAG）· `ARPC-008`（`status = 0L` 等价性已订正） | ✅ |
+| `users` | `users-common` | 【COMMON 型】全 3 条 | `mvn -pl service/users/users-common -am test` ⇒ `JwtUtilParityTest`（**Go 出处写进 javadoc**：`jwt.go:12`·`:14`）＋ `PasswordUtilGoCompatibilityTest`（`password.go:15-18`）＋ `GoStyleRequiredFieldGateTest` | **R3** ↓ | E4\* | `docs/DRIFT/users/common.md:551`（判定已升级 EQUIVALENT）· `:21-22`（探针位置）· `:522-525`（3 条 UNRESOLVED）· `service/users/users-common/src/test/java/com/rag/users/common/jwt/JwtUtilParityTest.java:20-26` | **0 条必对齐项** · `UNRESOLVED-002`/`004`/`005`（**取证缺口**，任一取证即重开判定）· ⚠️ **双侧对拍探针已消失 ⇒ 不可复算 ⇒ R4 不成立**（§九 G-4） | ✅ |
+| `users` | `user-proto` | 【PROTO 型】①–⑤ | `bash tools/difftest/check-proto-static.sh`（user 段 ⇒ **逐字节比对字段名 / 字段号 / message 名 / rpc 签名**，本轮实跑 EXIT=0）＋ `python3 tools/difftest/check-surface-parity.py --domain user` | **R3** ↑ | E3 | `docs/DRIFT/_cross/proto-verification.md:24`（`user`→`users` **0 行**行为层 diff · 20=20 message+enum · 47=47 字段号）· `:44`（**「有网」档** ⇒ 改坏即红）· `docs/DRIFT/users/user/rpc.md:219` | **0 条行为差异** · ⚠️ **消费方式未验**（`optional` presence / 字段号硬编码 / Jackson）⇒ **取证缺口** ⇒ §九 G-19，**不计入 ⑥、不降 R** · ⚠️ **无专属台账**（记录在 `_cross/proto-verification.md`） | ✅ |
+| `users` | `admin-proto` | 【PROTO 型】①–⑤ | `bash tools/difftest/check-proto-static.sh`（**admin 段** ⇒ 逐字节 diff，本轮实跑 EXIT=0）＋ `python3 tools/difftest/check-surface-parity.py --domain admin` | **R3** ↑ | E3 | `docs/DRIFT/_cross/proto-verification.md:19`（`admin` **0 行**行为层 diff · 28=28 message+enum · 61=61 字段号）· `:44`（**「有网」档**）· `docs/DRIFT/users/admin/rpc.md:46` | **0 条行为差异** · ⚠️ **消费方式未验** ⇒ **取证缺口** ⇒ §九 G-19，**不降 R** · ⚠️ **无专属台账** | ✅ |
+| **共享层** | `service/common` | 【COMMON 型】全 3 条 | `bash tools/breaker-probe/run-parity.sh` ＋ `bash tools/semantic-probe/deadline-downstream/run-deadline-downstream-parity.sh` | **R2** | E3 | `docs/DRIFT/common/alignment-2026-10-23.md:36`·`:637-643`·`:645` | **27 条编号未修**（`DRIFT-COMMON` 2 + `DRIFT-CF` 15 + `DRIFT-LOG` 7 + `DRIFT-SF` 3）＋ 5 项未编号 ＋ 10 条外部尾巴；**`DRIFT-COMMON-005` 是唯一硬阻塞**（破坏性变更，需用户裁定）⇒ 🔴 | 🔴 |
 
-> **图例**：R4\* / E4\* = **台账声称的等级，但复算入口未落仓** ⇒ 标 `\*` 表示「**声明的，不是可复算的**」（见 §7）。
-> ⚠️ **行数**：本表 **39 行 = 38 组件 ＋ 1 行共享层 `service/common`** ⇒ 统计组件数时**减 1**。
-
----
-
-## 三、矩阵 B：10 张域级终点指标卡
-
-> **域级聚合规则**：域内**全部**组件达标 ⇒ 域达标；任一组件 🔴 ⇒ 域 🔴；其余 ⇒ 🟡。
-> 例外：`task` 域无 `-common` ⇒ **3 个组件**参与聚合；`users` 域 **7 个**。
-
-### B-1 `article`（4 组件）
-
-| 层 | 必达终点指标 | 当前 |
-|---|---|---|
-| api | 7 端点（4 JWT）+ 每端点 ≥1 业务断言 + ≥1 失败路径 | 🟡 |
-| rpc | 6 rpc + 写路径事务/幂等 + MQ 事件契约冻结 + 真并发用例 | 🟡 |
-| common | 45 行 → 1 类，逐字节一致 | ✅ |
-| proto | 6 项 + wire 活体 | 🟡 |
-| **域聚合** | 4/4 达标 | **🟡 3 达标 1 未达标 ⇒ 域未达标**（api / rpc / proto 三层未达终点） |
-
-**域级硬门（必须清零才放行）**：① `S-5`（阻塞于 security 域迁移，**范围外** ⇒ 走 D 类豁免登记）；② MQ 事件契约冻结；③ U-2 真并发用例。
-
-### B-2 `comment`（4 组件）
-
-| 层 | 必达终点指标 | 当前 |
-|---|---|---|
-| api | 7 端点（7 JWT）+ 23 步双侧矩阵 | ✅ |
-| rpc | 7 rpc + 写路径事务 + **D8/D9 两条真漂移** | 🟡 |
-| common | 码值/文案/回落 | ✅ |
-| proto | 6 项 + wire 活体 | ✅ |
-| **域聚合** | 4/4 | **🟡** —— D8/D9 落点 `service/common` ⇒ **不在本域权限内** ⇒ 走 G4 反馈单 |
-
-### B-3 `favorite`（4 组件）
-
-| 层 | 必达终点指标 | 当前 |
-|---|---|---|
-| api | 7 端点（7 JWT）+ 响应字节双侧对拍 | ✅ |
-| rpc | 7 rpc + 熔断 + DDL 逐列 | ✅ |
-| common | 24 码 + 回落 + gRPC 可还原 | ✅ |
-| proto | 6 项 + wire 字节（两运行时） | ✅ |
-| **域聚合** | 4/4 | **✅ 达标** —— 本仓**唯一 4/4 全绿**的域，**14 个落仓探针** |
-
-### B-4 `follow`（4 组件）
-
-| 层 | 必达终点指标 | 当前 |
-|---|---|---|
-| api | 8 端点（8 JWT）+ 52 步逐字节 | 🟡\*（活体已做，**入口未落仓**） |
-| rpc | 8 rpc + 熔断形状（12 并发 ×2 轮） | 🟡\* |
-| common | 16 码 16 文案 | 🟡 |
-| proto | 6 项 | 🟡（**无守门网**） |
-| **域聚合** | 4/4 | **🟡** —— 全部卡在**同一个根因**：探针未落仓 ⇒ 结论不可复算 |
-
-### B-5 `hot`（4 组件）
-
-| 层 | 必达终点指标 | 当前 |
-|---|---|---|
-| api | 1 端点 + Tomcat 三旋钮上下限逐值一致 | ✅ |
-| rpc | 5 rpc + 真 Kafka + 拦截器真接线 | ✅ |
-| common | 121 行 → 2 类，逐字节 | ✅ |
-| proto | 6 项 | 🟡（消费方式未验） |
-| **域聚合** | 4/4 | **🟡** —— 只差 proto 层消费方式核对 |
-
-### B-6 `like`（4 组件）
-
-| 层 | 必达终点指标 | 当前 |
-|---|---|---|
-| api | 6 端点（6 JWT）+ ≥1 失败路径 | 🟡\*（探针已消失） |
-| rpc | 6 rpc + 事实投递链路 | 🟡 |
-| common | 码值/文案/回落 | 🟡（**无专属台账**） |
-| proto | 6 项 | 🟡（**无守门网**） |
-| **域聚合** | 4/4 | **🟡** —— 5 条 SEMANTIC MISMATCH 已修，但**复算证据已不可复算** |
-
-### B-7 `message`（4 组件）
-
-| 层 | 必达终点指标 | 当前 |
-|---|---|---|
-| api | 13 端点（13 JWT）+ 解析语义双侧 | ✅ |
-| rpc | 9 rpc + 写路径事务 + 失败路径 | 🟡 |
-| common | 码值/文案/回落 | ✅ |
-| proto | 6 项 | ✅ |
-| **域聚合** | 4/4 | **🟡** |
-
-### B-8 `task`（3 组件 · 无 `-common`）
-
-| 层 | 必达终点指标 | 当前 |
-|---|---|---|
-| api | 1 端点（0 JWT）+ 参数非法路径 | ✅ |
-| rpc | 1 rpc + 真 Kafka 端到端 + 跨栈 xlang | ✅ |
-| proto | 6 项 + 持续守门 | ✅ |
-| **域聚合** | 3/3 | **✅ 达标** —— 本仓**唯一 3/3 全绿**的域 |
-
-### B-9 `users`（7 组件）
-
-| 层 | 必达终点指标 | 当前 |
-|---|---|---|
-| user-api | 9 端点（7 JWT）+ 逐条对拍 | ✅ |
-| user-rpc | 9 rpc + 真 PG + JWT 三腿 | ✅ |
-| admin-api | 13 端点（11 JWT）+ 逐条对拍 | ✅ |
-| admin-rpc | 13 rpc + DDL 半边 | ✅ |
-| users-common | Go 3 文件 → 11 类 + 双侧活体 | ✅ |
-| user-proto | 6 项 | ✅ |
-| admin-proto | 6 项 | ✅ |
-| **域聚合** | 7/7 | **✅ 达标** —— **唯一 7/7 全绿的域** |
-
-> ⚠️ **注意**：`users` 域 ✅ **不等于** 全仓 ✅ —— users 的端点路径前缀与方法**是已签字偏离**（`/usercenter/v1/user/*` → `/user/v1/*`，method 统一 POST），**不是逐条相等**。
-
-### B-10 共享层 `service/common`（**不在 38 组件之内**，但必须单列）
-
-> ⚠️ **口径澄清（本轮实测订正）**：
-> - **38 组件 = 10 api + 10 rpc + 8 common + 10 proto**（AGENTS.md §3.5 口径，**实测自洽**）：
->   api = 9 域各 1 + `user-api` + `admin-api`；rpc 同理；common = article/comment/favorite/follow/hot/like/message/`users-common` 共 8（**`task` 无 `-common`**，Go 侧同样没有）；proto = 9 域各 1 + `user-proto` + `admin-proto`。
-> - **`service/common` 是跨服务共享层**（AGENTS.md §5.3f：写权归 G4），**不是第 11 个微服务域、也不在 38 之内**。
-> - ⚠️ **源台账的口径陷阱**：`docs/DRIFT/_cross/component-coverage-matrix.md` 的当前态表**有 39 行** ——
->   38 个组件 **＋ 1 行 `跨服务 / service/common`**。标题写「38 组件」是对的 ⇒ **按行数数会多数 1 行**。
->   ⇒ 本文件 §二 A-1/A-2 的 `service/common` 行**单独标为「共享层」**，不计入 38。
-
-| 层 | 必达终点指标 | 当前 |
-|---|---|---|
-| `service/common` | Go 5 包 → RAG 73 类；**每个可比包逐行对齐**；熔断/deadline/响应体三面双侧活体 | 🔴 **5 包中 3 个 NOT EQUIVALENT · 27 条编号未修** |
+> **图例**：`↑` = v3 上调，`↓` = v3 下调（逐条理由见 §十）。
+> ⚠️ **组件状态与 R 不等价**：`R3` + 「仍开放项 = 取证缺口」⇒ **组件状态仍可判 ✅**（如 `like-api`）；`R3` + 「仍开放项 = 真实差异」⇒ **判 🟡/🔴**（如 `like-rpc`）。
 
 ---
 
-## 四、矩阵 C：跨组件不变量（12 条）
+## 四、矩阵 B：10 张域级终点指标卡
+
+> **域级聚合规则（唯一出处，§8.1）**：域状态 = MIN(域内各组件状态)；
+> 序：✅ 达标 > 🟡 契约达标/语义待补 > ⚫ 受阻 > 🔴 未达标。
+> ⚠️ **跨组件残留**（落点在共享层/别域）**不计入组件 R**，但**计入域级聚合**。
+
+| 域 | 组件数 | 组件状态明细 | **域状态** | 阻塞项（落点） |
+|---|---|---|---|---|
+| `article` | 4 | api ✅ · rpc 🟡 · common ✅ · proto ✅ | **🟡** | `S-5`（**本域**，security 域阻塞）· `U-3/4/9/4′`（取证缺口） |
+| `comment` | 4 | api ✅ · rpc ✅ · common ✅ · proto ✅ | **✅** | `D8`/`D9`（**`service/common`** ⇒ 阻塞共享层，不阻塞本域） |
+| `favorite` | 4 | api ✅ · rpc ✅ · common ✅ · proto ✅ | **✅** | `U9`（部署形态，待拍板）· `E65`（**`service/common`**） |
+| `follow` | 4 | api ✅ · rpc 🟡 · common ✅ · proto 🟡 | **🟡** | `DRIFT-FOLLOW-006`（**本域**，指标无出口）· `-008`（**`service/common`**） |
+| `hot` | 4 | api ✅ · rpc ✅ · common ✅ · proto ✅ | **✅** | `DRIFT-HOTAPI-031`（框架限制，候选未签字）· `DRIFT-HOTRPC-006`（已取证未签字）· **hot-proto 的判定记录在 `hot/vs-common.md` 而非 `hot/proto.md`**（位置不统一 ⇒ §九 G-18） |
+| `like` | 4 | api ✅ · rpc 🟡 · common ✅ · proto 🟡 | **🟡** | **`DRIFT-LIKE-003`**（事实投递链路，本域，有意不碰）· **`E60`**（真漂移，待接手）· **like-common 无专属台账**（**记录缺口**，非行为缺口 ⇒ §九 G-17） |
+| `message` | 4 | api ✅ · rpc ✅ · common ✅ · proto ✅ | **✅** | `-010`/`-011`/`-013`（**`service/common`**）· `MSG-008`/`MSG-V-001`（跨域） |
+| `task` | 3 | api ✅ · rpc ✅ · proto ✅ | **✅** | `DRIFT-TASK-API-004` / `otel.*`（**全域共性**） |
+| `users` | 7 | user-api ✅ · user-rpc ✅ · admin-api ✅ · admin-rpc ✅ · users-common ✅ · user-proto ✅ · admin-proto ✅ | **✅** | `DRIFT-USERAPI-013`（**`service/common`**）· `V-002`/`V-011`（**销号签字不在写权面**）· **两个 proto 的「消费方式」未取证**（§九 G-19） |
+| **共享层** `service/common` | 1 | 🔴 | **🔴** | **27 条编号未修** ＋ 10 条外部尾巴 ⇒ **阻塞全仓** |
+
+---
+
+## 五、矩阵 C：跨组件不变量（12 条）
 
 > **跨组件不变量 = 不归属任何单个组件、但影响多个域的约束**（AGENTS.md §3.5 的 `global` 收口域）。
 > ⇒ **本层不过 ⇒ 域层全绿也不算数。**
+> ⚠️ **本层的状态一律以 `docs/DRIFT/global/` 的台账为准**（L2 权威位置）；下表只写**指标 + 判定命令 + 引用**。
 
-| # | 不变量 | 涉及组件 | 必达终点指标 | 判定命令 | 当前（2026-10-28） |
+| # | 不变量 | 涉及组件 | 必达终点指标 | 判定命令（**覆盖范围见 §六**） | 状态（2026-10-28） |
 |---|---|---|---|---|---|
-| **X-1** | **共享 Flyway 账本隔离** | `message-rpc`↔`like-rpc`↔`article-rpc`↔`favorite-rpc`↔`comment-rpc`↔`follow-rpc`↔`task-rpc` | 每模块独立账本表 `flyway_schema_history_<模块>`；**同库三进程并发**不撞号 | `python3 tools/difftest/check-flyway-ledger.py` ⇒ EXIT=0 **＋** `bash tools/difftest/check-flyway-concurrent.sh` | ✅ **已闭环**（配置层 + 真 PG 三进程并发同库，L4）<br>⚠️ `favorite-rpc` 缺 `baseline-version: 0` ⇒ 只记账 |
-| **X-2** | **DDL 双侧活体逐列** | 9 域（favorite 只建库、hot N/A） | 类型/长度 **0 差异**；可空性、DEFAULT、索引逐项一致或**已签字保留** | `python3 tools/difftest/check-ddl-static.py --domain <域>`（**裸跑只查 users 域**） | 🟡 **类型/长度 9 域 0 差异**；users 可空性 1 + DEFAULT 16 残留（**刻意保留**）· comment 2 条**仅 RAG 有** · hot **N/A**（两侧 0 张表） |
-| **X-3** | **gRPC 拦截器真接线** | 10 个 rpc 模块 | 每个 rpc 模块的拦截器**真挂上 server**（不是「Bean 存在」） | `python3 tools/difftest/check-grpc-interceptor-wiring.py` ⇒ EXIT=0 | ✅ **10/10 接线完整** |
-| **X-4** | **api 容器上限三旋钮** | **全部 10 个 api** | `relaxed-query-chars` / `max-parameter-count` / `max-http-request-header-size` 与 Go 上下限**逐值**一致 | `python3 tools/difftest/check-tomcat-limits.py` ⇒ EXIT=0 ＋ 真 Tomcat 活体 | ✅ **10/10**（`DRIFT-HOTAPI-030` 已由共享层修：容器上限抬到 10001） |
-| **X-5** | **产物可执行性** | 10 个 api + 10 个 rpc | 每个 fat jar **可执行**（含 `Main-Class`）；`discovery://` 三斜杠 | `bash tools/difftest/check-jar-executable.sh` ⇒ EXIT=0 | ✅ **10/10 可执行**（两斜杠与缺 `Main-Class` 两批已修） |
-| **X-6** | **deadline 分层预算与传播** | 10 个 rpc + 共享层 | 下游调用 deadline = `min(客户端 deadline, 服务端 timeout)`；SQL 取消时刻 == deadline 时刻 | `python3 tools/difftest/check-deadline-verdict.py` ＋ `check-deadline-downstream.py` ⇒ EXIT=0 ＋ `bash tools/difftest/run-deadline-gate.sh` | ✅ **双侧活体探针 PASS**（`tools/semantic-probe/rpc-timeout/`）＋ **变异 2 条全红** |
-| **X-7** | **错误码契约（跨域）** | 9 个 `-common` + `users-common` | 码值 + 文案 + 未知码回落**逐字节一致**；业务码经 gRPC **可还原** | `GO_REPO=… bash tools/errmsg-probe/run-parity.sh`（**article**）＋ `bash tools/errmsg-probe/favorite/run-parity.sh`（**favorite**） | 🟡 **只覆盖 2/10 域的双侧逐字节对拍**；其余 8 域只有**域内契约测试**（证据强度不同） |
-| **X-8** | **HTTP 路径 / 方法契约** | 全部 10 个 api | (method, path) 归一化后**集合相等**；JWT 保护集合相等 | 本文件 A-2 各域 API 型指标 | 🟡 **8/10 域逐条相等**；`users`/`admin` 两域 = **已签字偏离**（前缀 + method） |
-| **X-9** | **gRPC 方法覆盖** | 10 个 rpc | Go proto `rpc` 集合 ≡ RAG `*ImplBase` 覆写集合 | 同上 RPC 型指标 | ✅ **10/10 域逐条覆盖 · Go 71 ≡ RAG 71** |
-| **X-10** | **proto 契约 + 消费方式** | 10 个 proto | 行为层零差异 ＋ `optional` presence ＋ 无字段号硬编码 ＋ 消费点一致 | `bash tools/difftest/check-proto-static.sh`（**只覆盖 user/admin/task**）＋ `python3 tools/difftest/comment/check-proto-parity.py` | 🟡 **落仓静态守门只覆盖 4/10**（user · admin · task · comment）；`follow` / `like` **无任何守门网** ⇒ 漂了不会红 |
-| **X-11** | **敏感配置链** | 10 个 api + 2 个 rpc + compose | 密钥**无明文默认值**；缺变量 ⇒ **启动失败**（非空签名密钥） | `docker compose config` ⇒ 渲染出非空 secret **且** 缺变量时启动失败 | 🔴 **未达标** —— 10 处 yaml 带明文默认值（含 `like-api:62` 裸字面量）；compose `:146`/`:193` 缺 `:?` ⇒ 不设变量**空签名密钥起栈**（E4 已实测） |
+| **X-1** | **共享 Flyway 账本隔离** | 7 个 rpc 模块 | 每模块独立账本表 `flyway_schema_history_<模块>`；**同库三进程并发**不撞号 | `python3 tools/difftest/check-flyway-ledger.py` ⇒ EXIT=0（**仅静态 yaml**）＋ `bash tools/difftest/check-flyway-concurrent.sh`（**真并发**） | ✅ **已闭环**（配置层 + 真 PG 三进程并发同库，L4）<br>⚠️ `favorite-rpc` 缺 `baseline-version: 0` ⇒ 只记账 |
+| **X-2** | **DDL 双侧活体逐列** | 9 域（favorite 只建库、hot N/A） | 类型/长度 **0 差异**；可空性、DEFAULT、索引、唯一约束、触发器逐项一致或**已签字保留** | `python3 tools/difftest/check-ddl-static.py --domain <域>` ＋ **`--indexes`** | 🟡 **类型/长度 9 域 0 差异**；users 可空性 1 + DEFAULT 16 残留（**刻意保留**）· comment 2 条**仅 RAG 有** · hot **N/A**<br>⚠️ **默认不开 `--indexes` ⇒ 索引/约束/触发器全部未查**（`check-ddl-static.py:932-935`）<br>⚠️ **它比的是「活库里实际存在的表结构」，不是仓库里的 `.sql` 文件** ⇒ 迁移文件改了没重跑，仍显示「一致」 |
+| **X-3** | **gRPC 拦截器真接线** | 10 个 rpc 模块 | 每个 rpc 模块的拦截器**真挂上 server** | `python3 tools/difftest/check-grpc-interceptor-wiring.py` ⇒ EXIT=0（**纯静态 grep**，不启动服务） | ✅ **10/10 接线完整**（静态层） |
+| **X-4** | **api 容器上限三旋钮** | **全部 10 个 api** | 三个旋钮的**配置值**与 Go 目标值一致 | `python3 tools/difftest/check-tomcat-limits.py` ⇒ EXIT=0（**只读 `application.yml`，不验证运行时**） | ✅ **10/10 配置值一致**；运行时由 `HotApiRealTomcatGateTest` 3 条真 Tomcat 断言覆盖（引 hot 台账） |
+| **X-5** | **产物可执行性** | 10 个 api + 10 个 rpc | 每个 fat jar **可执行**（含 `Main-Class`） | `bash tools/difftest/check-jar-executable.sh` ⇒ EXIT=0 | ⚠️ **本轮未复核** —— 实跑显示 **15/20 模块「没有产物（未构建）」被 `continue` 跳过且不计失败** ⇒ 本次绿灯**只覆盖 5/20**（5 个 rpc 模块）⇒ 需先 `mvn package` 再跑才有效 |
+| **X-6** | **deadline 分层预算与传播** | 10 个 rpc + 共享层 | 下游 deadline = `min(客户端 deadline, 服务端 timeout)`；SQL 取消时刻 == deadline 时刻 | `python3 tools/difftest/check-deadline-verdict.py`（**门禁自身有效性**，fixture + 假探针）＋ `check-deadline-downstream.py`（**真双侧活体**，但**故意不等值** ⇒ 钉漂移形态）＋ `bash tools/difftest/run-deadline-gate.sh` | ✅ 探针 PASS（`tools/semantic-probe/rpc-timeout/`）＋ **变异 2 条全红** |
+| **X-7** | **错误码契约（跨域）** | 8 个 `<域>-common` + `users-common` | 码值 + 文案 + 未知码回落**逐字节一致**；业务码经 gRPC 可还原 | `GO_REPO=… bash tools/errmsg-probe/run-parity.sh`（**article**）＋ `bash tools/errmsg-probe/favorite/run-parity.sh`（**favorite**） | 🟡 **只覆盖 2/9 域的双侧逐字节对拍**；其余 7 域只有**域内契约测试**（证据强度不同） |
+| **X-8** | **HTTP 路径 / 方法契约** | 全部 10 个 api | (method, path) 归一化后**集合相等**；JWT 保护集合相等 | **`python3 tools/difftest/check-surface-parity.py`**（本次新增落仓）⇒ **HTTP 端点 Go 72 ≡ RAG 72**；gRPC 方法 **Go 71 ≡ RAG 71** | 🟡 **8/10 域逐条相等**；`users`/`admin` 两域 = **已签字偏离**（前缀 + method）<br>⚠️ **JWT 保护面未自动比对**（RAG 侧写在拦截器内部名单，非 `addPathPatterns`） |
+| **X-9** | **gRPC 方法覆盖** | 10 个 rpc | Go proto `rpc` 集合 ≡ RAG `*ImplBase` 覆写集合 | 同上 `check-surface-parity.py` | ✅ **10/10 域逐条覆盖 · Go 71 ≡ RAG 71** |
+| **X-10** | **proto 契约 + 消费方式** | 10 个 proto | 行为层零差异 ＋ `optional` presence ＋ 无字段号硬编码 ＋ 消费点一致 ＋ wire 字节 | `bash tools/difftest/check-proto-static.sh`（**只覆盖 user/admin/task**）＋ `python3 tools/difftest/comment/check-proto-parity.py`（**只覆盖 comment**） | 🟡 **落仓静态守门只覆盖 4/10**；`follow` / `like` / `hot` **无任何 proto 静态守门**；`article`/`favorite`/`message` 的 proto **字段级消费方式**靠台账逐条核对，无守门网 |
+| **X-11** | **敏感配置链** | 10 个 api + 2 个 rpc + compose | 密钥**无明文默认值**；缺变量 ⇒ **启动失败** | `docker compose config` ⇒ 渲染出非空 secret **且** 缺变量时启动失败 | 🔴 **未达标** —— 10 处 yaml 带明文默认值（含 `like-api:62` 裸字面量）；compose `:146`/`:193` 缺 `:?` ⇒ 不设变量**空签名密钥起栈**（E4 已实测） |
 | **X-12** | **构建 / 配置 / 启动说明** | 根级 | README ≥ 1 屏且能照着构建启动；`.env.example` 存在；compose fail-closed | 人工 + `docker compose config` | 🔴 **未达标** —— README **21 字节**；无 `.env.example`；`docs/FileTree/Infrastructure.md` 描述的是**旧架构** |
 
 ---
 
-## 五、聚合判定规则
+## 六、判定命令的实测覆盖范围
 
-### 5.1 组件 → 域
+> ⚠️ **本节是 v2 新增的核心（v3 保留）**：绿灯**只能证明命令自己检查的那一面**。
+> 下表的「不能证明」列 ⇒ **任何矩阵行都不得用它推导更强的结论**。
+
+### 6.1 真·双侧活体对拍（两侧同时运行并逐字节/逐字段比对）—— 可作运行面证据
+
+| 命令 | 覆盖面 | case | 依据 |
+|---|---|---|---|
+| `tools/errmsg-probe/run-parity.sh` | **article 域错误码层**（码值+文案+回落） | 19 个未登记码 | `:93-104`（sha256 + `diff -u`） |
+| `tools/errmsg-probe/favorite/run-parity.sh` | **favorite 域错误码层**（五段含 WIRE/BIZCODE） | 19 + 2 OBS | `:150-196` |
+| `tools/semantic-probe/run-parity.sh` | **message 域解析语义**（判定 + 落值） | 23 | `:134-141` |
+| `tools/breaker-probe/run-parity.sh` | **共享层熔断**（A 逐条 / B 逐字 / C 统计 ≤0.15） | 6 码 + 统计批 | `:91-124` |
+| `tools/json-body-probe/run-parity.sh` | **hot 域 body 读取判据**（只比 ACCEPTED/REJECTED） | 20 | `:74-94` |
+| `tools/difftest/diff.py` | **users 域 HTTP wire**（status + 归一化 body 逐字段） | SCENARIOS 表 | `:659-664`、`:710-712` |
+| `tools/difftest/matrix.py` | **users 域 DTO 字段边界矩阵**（字段列表**从真源 `types.go` 现场解析**） | 5 桶分档 | `:32-35`、`:84-99` |
+| `tools/difftest/comment/diff_comment.py` | **comment 域请求矩阵** | 23 步 | `:285-309` |
+| `tools/difftest/run-hot-rpc-difftest.sh` | **hot-rpc gRPC 逐字节**（真 Kafka + 2×真 Redis） | 10 组 | `:178-186` |
+| `tools/difftest/run-task-{http-parity,grpc-xlang,kafka-e2e,offset-oldest}.sh` | **task 域 HTTP / 跨语言 gRPC / Kafka 端到端 / offset 语义** | 44 步 / 7 / 批量 / 正负对照 | `:187-271` |
+| `tools/difftest/run-message-ddl-parity.sh` + `check-ddl-static.py` | **DDL 双侧活体库逐列** | 逐列 | `:102-152` |
+| `tools/api-{envelope,full-parity}-probe/favorite/run.sh` | **favorite 响应字节 + 全 HTTP 面** | 11 / 32 | `:111-134` / `:15-21` |
+| `tools/{grpc-contract,proto-wire,ddl-parity,authority-live,sql-statement}-probe/favorite/run.sh` | **favorite gRPC 契约 / wire 字节 / DDL / 权威读 / SQL 语句** | 36 / 6 / 19 / 40 / 运行时 | 各 `run.sh` |
+| `tools/difftest/check-deadline-downstream.py` | **真双侧活体**，但**故意不等值**（钉漂移形态） | 4 键 | `:66-119` |
+| `service/favorite/favorite-rpc/src/test/java/…/proto/FavoriteProtoWireParityTest.java`（**JUnit，非脚本**） | **favorite proto 的 wire 字节双侧对拍**（Go 生成码 vs Java 生成码，**两个不同运行时**） | 6 组消息 | `FavoriteProtoWireParityTest.java:20-34`（javadoc 自述「两侧运行时不同 ⇒ 不是同一份实现自证」） |
+
+### 6.2 静态 / 单侧检查 —— **不能**当运行面证据
+
+| 命令 | 实际查什么 | **不能证明** |
+|---|---|---|
+| `tools/difftest/check-surface-parity.py`（**本次新增**） | Go `routes.go` ↔ RAG Controller 的 (method, path) 集合；Go proto ↔ RAG `*ImplBase` 方法集合 | **不查**请求体/响应体/错误码/事务/并发；**不查** RAG 侧 JWT 保护面；**不查** proto 的字段号 / presence / wire 字节 |
+| `service/{article/article-rpc,hot/hot-rpc}/src/test/java/…/*ProtoContractTest.java`（**JUnit，非脚本**） | **生成码的描述符** vs **由 Go 真源脚本生成并冻结的基准**（`generate.py` + 真源 sha256） | **不覆盖** wire 字节 / HTTP2 帧；**基准是冻结快照** ⇒ Go 真源改了**必须重跑 `generate.py`** 才反映（否则「绿」是旧基准的绿） |
+| `tools/difftest/check-proto-static.sh` | **仅 user / admin / task** 三个 proto 的**静态文本** diff（字段号/message 名/rpc 签名） | **不查**运行时 `optional` presence 语义；**不查**代码里字段号硬编码；**不覆盖另外 7 个 proto** |
+| `tools/difftest/comment/check-proto-parity.py` | **仅 comment** proto 的静态文本 diff | 脚本自写「**不校验消费方式**」（字段号硬编码 / `optional` presence / Jackson 配置） |
+| `tools/difftest/check-ddl-static.py` | **双侧活体库**逐列 / 可空性 / DEFAULT（`--indexes` 才查索引/约束/触发器） | **默认不开 `--indexes` ⇒ 索引/约束/触发器全未查**；比的是**活库**不是仓库 `.sql` 文件；触发器**只比结构化属性**，不比 SQL 文本、不判函数体语义 |
+| `tools/difftest/check-jar-executable.sh` | 各模块 `target/*.jar` 的 `MANIFEST.MF` 里有没有 `Main-Class` | **不启动 jar**；**⚠️ 没有产物 ⇒ 跳过且不计失败** ⇒ 绿灯可能只覆盖少数模块 |
+| `tools/difftest/check-grpc-interceptor-wiring.py` | rpc 模块的 `*Application.java` 源码里有没有 `@Import` + `.intercept(` | **不启动任何服务**；不验证拦截器真被框架调用 |
+| `tools/difftest/check-flyway-ledger.py` | `application*.yml` 里 `spring.flyway.table` 的**配置值** | **不连库、不启动**；不验证 Flyway 真按该名建表 |
+| `tools/difftest/check-deadline-verdict.py` | **门禁自身有效性**（fixture + 假探针 + bash lint） | **不产生任何业务对拍结论**（脚本自述「不需要起栈」） |
+| `tools/difftest/check-go-json-body-predicate.py` | RAG 源码里该判据**只有一份实现** | **不验证**该判据与 Go 行为一致 |
+| `tools/difftest/check-grpc-runtime-classpath.py` | `pom.xml` 的 `grpc-inprocess` scope ＋ `application.yml` 的 `address:` | **不验证运行时 classpath**；**baseline 内的违规只打印不失败** ⇒「绿 ≠ 全仓没缺陷，只是没有新缺陷」 |
+| `tools/difftest/check-merge-tree-content.py` | git 对象层面的合并内容完整性 | 与业务语义无关；**需 ref 参数**；会向 `.git` 写 commit 对象 |
+| `tools/difftest/check-no-nul-bytes.py` | 文件字节层的 NUL 扫描 | 与语义无关 |
+| `tools/metrics-probe/favorite/run.sh` | **只跑 Go 半边**（脚本自述「本探针不是双侧对拍」） | **不是双侧证据** |
+| `tools/authority-path-probe/favorite/run.sh` | Go 半边是**标准库复刻，不是真源** | **不是双侧证据** |
+| `tools/prod-startup-probe/favorite/run.sh` | **同一个 jar 的三个参数形态** | **不是双侧证据**（单侧启动形态） |
+| `tools/probe-gate/favorite/*.sh` | 探针**基建**正确性（PG 就绪 / 端口归属） | **不产生任何语义结论** |
+| `tools/difftest/{run.sh,run-hot.sh,comment/run_diff.sh,run-task-*.sh,run-hot-rpc-difftest.sh,run-message-ddl-parity.sh}` | **编排器**（起栈 + 前置健康校验） | 自身不判定；**结论强度取决于被它调用的脚本** |
+
+### 6.3 本轮实跑结果（2026-10-28 · **22 项命令** · 14 行）
+
+| 命令 | EXIT | 备注 |
+|---|---|---|
+| `check-proto-static.sh` | **0** | 只覆盖 user/admin/task |
+| `check-ddl-static.py`（裸跑 = users 域） | **1** | 9 处实质差异（类型/长度 0 差异） |
+| `check-tomcat-limits.py` | **0** | 静态配置值 |
+| `check-grpc-interceptor-wiring.py` | **0** | 静态 |
+| `check-flyway-ledger.py` | **0** | 静态 yaml |
+| `check-go-json-body-predicate.py` | **0** | 静态 |
+| `check-grpc-runtime-classpath.py` | **0** | 静态 + baseline |
+| `check-no-nul-bytes.py` / `check-cross-domain-holds.py` | **0** | |
+| `check-deadline-verdict.py` / `check-deadline-downstream.py` | **0** | 前者 fixture，后者真双侧 |
+| `check-global-lane-ownership.py` / `check-wave-{coupling,lane-ownership,role-model}.py` | **0** | |
+| `check-ledger-{count,selfcheck,tables}.py` / `check-agents-budget.py` | **0** | |
+| `check-jar-executable.sh` | **0** | ⚠️ **只实际检查 5/20 模块**（15 个「未构建」被跳过） |
+| **`check-surface-parity.py`（本次新增）** | **0** | HTTP 端点 Go 72 ≡ RAG 72 · gRPC 方法 Go 71 ≡ RAG 71 · 2 个签字偏离域单列 |
+| **`check-phasegoal-consistency.py`（本次新增）** | **0** | **本文件自身的内部一致性自检**：矩阵 ↔ 聚合 ↔ 计数 ↔ 判定命令路径存在性（15 组检查） |
+
+> ⚠️ **本轮未跑**（**既不算通过，也不算失败** ⇒ 一律按「**未复核**」处理）：
+> `check-flyway-concurrent.sh`（真 PG 三进程并发 ⇒ 需起栈）· `check-plaintext400-headers.sh`（真 Tomcat 400 头 ⇒ 需起栈）· `check-merge-tree-content.py`（**需 ref 参数**且会向 `.git` 写对象）。
+> ⇒ 仓内守门脚本共 **25 个** ⇒ 本轮**实跑 22**、**未跑 3**。
+
+---
+
+## 七、P0 九条复核（逐条：指标 → 证据 → 命令 → 结论）
+
+> 对照 `docs/PhasedGoal.md` §二 P0 与 `docs/twoStage.md` §2.1（**两者逐字相同**）。
+> ⚠️ **v2/v3 的修订原则**：**「存在测试」≠「业务行为正确」**；**「证据不足」必须显式标出，不得用邻近证据顶替**。
+
+| P0 | 内容 | 支撑证据（**逐条**） | 判定命令 | **v3 结论** |
+|---|---|---|---|---|
+| **1** | 核心业务链路能够真实运行，不存在关键功能仅有接口骨架、模拟数据或硬编码成功结果 | ① 契约面 **HTTP 72 ≡ 72 + gRPC 71 ≡ 71**（10 域）② 全量回归 **2860 条 / 0F / 0E**（42:41 min 真跑）③ **6 域有仓内可复算的双侧活体**（favorite 10 探针 / comment / message / task / users / hot）④ 10 个域有真 PG / 真容器守门 | `python3 tools/difftest/check-surface-parity.py` ＋ `mvn -o -B -DargLine=-Xmx2g clean test` | 🟡 **部分满足**<br>⚠️ **v1 写 ✅ 是过度声称**：① `like` 域**事实投递链路**登记为 `UNRESOLVED`（跨三仓），其 api 层 56 例活体对拍**已不可复算** ⇒ 该核心链路「真实运行 + 行为等价」**未取证**；② `article` 域**双侧活体 0 条**（Go 侧需 etcd，宿主 `2379` 未映射）<br>⇒ 「不存在骨架/模拟数据/硬编码成功」**成立**；「核心链路已取到双侧活体证据」**不成立** |
+| **2** | 核心参数校验、业务规则、身份认证和必要的权限控制有效 | ① **参数校验**：`matrix.py`（users，字段级笛卡尔，字段列表取自真源 `types.go`）+ `semantic-probe`（message 23 例）+ `json-body-probe`（20 例）+ `comment` 23 步 + `favorite` 32 例 ② **身份认证**：`JwtVerificationScopeTest`（users/admin/comment/favorite/like）+ `CommentJwtTokenMatrixGateTest`（11 例）③ **业务规则 / 权限**：靠各域台账的**逐条源码对照**，**没有**统一的失败路径矩阵 | 同上 + 各域台账条目级状态 | 🟡 **部分满足**<br>⚠️ **v1 写 ✅ 是过度声称**：**「每端点 ≥1 条失败路径测试」只能证明「存在失败路径处理」，不能证明四项都「有效」**；且失败路径的**域覆盖不全**（`article` / `follow` / `task` / `hot` 无独立失败路径矩阵）⇒ 须补：① 4 个域的失败路径矩阵 ② 权限控制的**显式**用例（admin 域有，其余域无「权限」概念） |
+| **3** | 关键数据能够正确持久化，事务边界合理，无严重数据丢失/重复处理/状态错误 | ① **DDL 双侧活体逐列**：9 域**类型/长度 0 差异** ② **事务边界**：真 PG 事务守门（`ArticleTransactionWiringTest` / `CommentRpcGoSemanticsGateTest` / `MessageTransactionWiringTest` / `AdminRpcTransactionWiringTest` / `AvatarTransactionWiringTest`）③ DDL 真源对拍（`run-message-ddl-parity.sh` 等） | `python3 tools/difftest/check-ddl-static.py --domain <域> --indexes` | 🟡 **部分满足**<br>⚠️ **v1 写 ✅ 是过度声称**：① `check-ddl-static.py` **默认不开 `--indexes`** ⇒ **索引 / 唯一约束 / 触发器全部未查**（脚本自陈 `NOT CHECKED`）⇒ §3.1 对照清单的**最后两项至今没有机器核过**；② users 可空性 1 + DEFAULT 16 残留（**已签字保留**）· comment 2 条**仅 RAG 有**（未签字） |
+| **4** | 核心失败路径具有明确行为，不无声吞掉关键异常或返回误导性成功 | ① `semantic-probe` 的 **known-dev 白名单**机制（已签字偏离必然为红但**不计入失败**、始终打印）—— 防止「守门人去把签字决策修回旧行为」 ② `json-body-probe`（**无白名单**，任何不一致都是真漂移）③ `breaker-probe` 三档口径 | `bash tools/semantic-probe/run-parity.sh` ＋ `bash tools/json-body-probe/run-parity.sh` | 🟡 **部分满足**<br>⚠️ **v1 写 ✅ 是过度声称**：上述探针**只覆盖 5 个域**（article / message / hot / shared-layer / favorite）；`article` 域（**失败路径最密集的域**：下载/上传/审核/S-5）**没有失败路径探针** ⇒ 失败路径的**域覆盖不全** |
+| **5** | 项目能够按照实际项目说明完成构建、配置和启动 | README **21 字节**；无 `.env.example`；`docs/FileTree/Infrastructure.md` 描述旧架构 | 人工 + `docker compose config` | 🔴 **不满足**（不变） |
+| **6** | 核心业务具有可执行的自动化测试，且测试断言真实业务结果 | **2860 条 / 0F / 0E / 4S**（52 模块，42:41 min）；业务结果断言实例：`MessageApiMvcPipelineTest` 42 条 / `CommentApiContractTest` / `favorite` 4 个契约测试类 29 例 / `HotApiMvcPipelineTest` 等 | `mvn -o -B -DargLine=-Xmx2g clean test` ＋ surefire XML 求和 | ✅ **满足**（不变）<br>⚠️ **口径**：必须带 `clean`（否则 stale 产物同时伪造「红」与「条数」） |
+| **7** | 项目具有清晰的主要模块职责，能够追踪核心调用链 | A-1 的 Go 原件 ↔ RAG 实现两列；10 域各有一份 `vs-common.md`（A1~A9 机制面轴） | `docs/DRIFT/_cross/component-coverage-matrix.md` | ✅ **满足**（不变） |
+| **8** | 关键配置和敏感信息没有明显的不安全处理方式 | **E4 实测**：`docker compose config` ⇒ 渲染 `USER_JWT_SECRET: ""`；Spring `PropertyPlaceholderHelper` 实测「属性存在但为空串 ⇒ 解析为空串，**不走默认值**」⇒ **不设变量起栈 ⇒ 空签名密钥 ⇒ token 可伪造**；10 处 yaml 明文默认值（含 `like-api:62` 裸字面量）；compose `:146`/`:193` 缺 `:?` | `docker compose config` + 空变量起栈实测 | 🔴 **不满足**（不变） |
+| **9** | 已知严重缺陷、无法验证的关键能力和运行前提得到明确记录 | 38 份组件台账 + `docs/Intentional_Deviations/`（**48 条已签字 + 18 条未签字候选**）+ 本文件 §九 / §十一 | `python3 tools/check-ledger-tables.py` ⇒ EXIT=0 | ✅ **满足**（不变）<br>⚠️ **但**：共享索引 `docs/DRIFT/_INDEX.md` 与 `component-coverage-matrix.md` 对 `favorite` 域仍写「零台账 / 从未对照」，**已被 10-25 后的实测推翻** ⇒ 需更新（§九 G-11） |
+
+> **P0 汇总（v3）**：**✅ 3 条**（#6 #7 #9）· **🟡 4 条**（#1 #2 #3 #4）· **🔴 2 条**（#5 #8）· **⚫ 0 条** ⇒ 合计 **9 条**。
+> **v1 是 ✅ 7 / 🟡 0 / 🔴 2** ⇒ **v3 下调了 4 条**（#1 #2 #3 #4），理由见 §十 变更 #3~#6。
+> ⚠️ **v2 草稿此处写的是「✅ 4 条（#6 #7 #9 …）」且「下调了 3 条」—— 两处都算错**（列了 3 条却写 4 条；列了 4 项却写 3 条）⇒ 由 `check-phasegoal-consistency.py` 的 **P0 汇总** 检查抓出并订正。
+
+---
+
+## 八、聚合判定规则与阶段一结论
+
+### 8.1 组件 → 域（唯一聚合口径）
 
 ```
-域状态 = MIN(域内各组件状态)
-其中 MIN 序：✅ 达标 > 🟡 契约达标/语义待补 > ⚫ 受阻 > 🔴 未达标 > ⬜ 豁免（豁免不参与 MIN）
+组件状态（§1.3 判据）：
+  ✅ 达标   ⟸ R ≥ R3 ∧ 归属本组件的必相对齐项 = 0 ∧ 有可复算的判定命令
+  🟡 待补   ⟸ R = R2
+  🔴 未达标 ⟸ R 未评级（从未对照）∨ 归属本组件的必相对齐项 ≠ 0
+  ⚫ 受阻   ⟸ 环境缺前置条件
+  ⬜ 豁免   ⟸ 有明确理由的不适用
+
+域状态 = MIN(域内各组件状态)，序：✅ > 🟡 > ⚫ > 🔴
+跨组件残留（落点在共享层/别域）不计入组件 R，但计入域级聚合。
 ```
 
-### 5.2 域 → 全仓
-
-**阶段一通过的三条硬条件（全部满足才算通过）**：
+### 8.2 域 → 全仓
 
 | 条件 | 判据 | 当前 |
 |---|---|---|
-| **C-1 核心域达标** | 9 个微服务域中**核心 5 域**（`favorite` `task` `users` `hot` `message`）**全部 ✅ 达标** | 🟡 3/5（favorite ✅ · task ✅ · users ✅；hot 🟡 · message 🟡） |
-| **C-2 无 🔴 组件** | 全仓 **0** 个 🔴 未达标组件（`service/common` 当前 🔴 ⇒ **不满足**） | 🔴 |
-| **C-3 跨组件不变量** | 矩阵 C 的 12 条中，**X-1~X-10 无 🔴**（X-11/X-12 归 P0 准入，见下） | 🟡 X-11 🔴 · X-12 🔴（P0 #5 / #8） |
+| **C-1 核心域达标** | 9 个微服务域中**核心 6 域**（`favorite` `comment` `message` `task` `article` `users`）**全部 ✅ 达标** | 🟡 **5/6**（favorite ✅ · comment ✅ · message ✅ · task ✅ · users ✅；**article 🟡**） |
+| **C-2 无 🔴 组件** | 全仓 **0** 个 🔴 未达标组件 | ❌ **不满足** —— 共享层 `service/common` 🔴（**唯一**；`like-common` 已由 v3 复核修正为 R3 ✅ ⇒ §十 #18） |
+| **C-3 跨组件不变量** | 矩阵 C 的 12 条中 **X-1~X-10 无 🔴** | ✅ **不满足 X-11 / X-12**（属 P0 #8 / #5）<br>🟡 X-2 / X-4 / X-7 / X-8 / X-10 均为「部分满足」 |
+| **C-4 P0 九条** | P0 无 🔴 | ❌ **不满足**（#5 #8 🔴） |
 
-### 5.3 全仓 → 阶段 1 结论（对齐 `docs/twoStage.md` §5.6 的四种）
+### 8.3 全仓 → 阶段 1 结论（对齐 `docs/twoStage.md` §5.6 的四种）
 
 | 结论 | 触发条件 | 当前 |
 |---|---|---|
-| **通过** | C-1 ∧ C-2 ∧ C-3 ∧ P0 九条全满足 | ❌ 不满足 |
-| **有条件通过** | 存在**明确、有限**的例外（已签字偏离 / 已登记暂缓项 / 环境受阻），且**不破坏核心正确性、安全性、数据完整性** | ❌ 不满足（X-11 密钥链**属安全** ⇒ 不属「有限例外」） |
-| **未通过** | 存在破坏核心正确性 / 安全 / 数据完整性的未修项 | ❌ 不满足 |
-| **受阻** | 缺必要环境或证据 | ⚪ 部分受阻（§7 G-6） |
+| **通过** | C-1 ∧ C-2 ∧ C-3 ∧ C-4 ∧ P0 九条全满足 | ❌ 不满足 |
+| **有条件通过** | 存在**明确、有限**的例外，且**不破坏核心正确性、安全性、数据完整性** | ❌ **不满足** —— X-11 密钥链**属安全**；`like-rpc` 的 `DRIFT-LIKE-003` / `E60` 属**业务正确性**；共享层 27 条编号未修 ⇒ 均不属「有限例外」 |
+| **未通过** | 存在破坏核心正确性 / 安全 / 数据完整性的未修项 | ✅ **命中** —— X-11（安全）＋ `like-rpc` 的 `DRIFT-LIKE-003` / `E60`（业务正确性）＋ 共享层 `DRIFT-COMMON-005`（数据/可靠性） |
+| **受阻** | 缺必要环境或证据 | ⚪ **不适用**（中间件全部可用 ⇒ 无环境借口；缺的是**证据载体**与**台账**，归 §九） |
 
-### 5.4 与 P0 九条的映射（哪些矩阵行支撑哪条）
+### 8.4 ⭐ 阶段一准入结论（v3）
 
-| P0 | 内容 | 支撑本文件哪几行 | 当前 |
-|---|---|---|---|
-| 1 | 核心业务链路真实运行 | B-1~B-10 全部 ＋ X-9 | ✅ |
-| 2 | 参数校验 / 业务规则 / 认证 / 权限有效 | X-8 ＋ 各域 API 型「≥1 失败路径」 | ✅（`SD-2026-10-23-01/02` 属**更严一侧**，已签字） |
-| 3 | 数据正确持久化 / 事务边界合理 | X-1 ＋ X-2 ＋ 各域 RPC 型「写路径事务/幂等」 | 🟡（X-2 users 可空性 + DEFAULT 残留） |
-| 4 | 失败路径明确，不误导性成功 | 各域 API/RPC 型「失败路径有断言」 | ✅ |
-| 5 | **能按实际说明构建、配置、启动** | **X-12** ＋ 根级 README / `.env.example` | 🔴 **不满足**（README 21 字节） |
-| 6 | 核心业务有可执行自动化测试且断言真实业务结果 | A-1 的 `tests` 列（**2860 条 / 29 模块**，独立重算一致）＋ 各域「断言业务结果」 | ✅ |
-| 7 | 模块职责清晰，可追踪核心调用链 | A-1 的 Go 原件 ↔ RAG 实现两列 | ✅ |
-| 8 | **关键配置和敏感信息无明显不安全处理** | **X-11** | 🔴 **不满足**（空签名密钥可起栈，E4 实测） |
-| 9 | 已知缺陷 / 不可验证能力 / 运行前提**明确记录** | 本文件 §7 ＋ 各域台账 ＋ `docs/Intentional_Deviations/`（**48 条已签字 + 18 条未签字候选**） | ✅ |
-
-⇒ **P0 九条：7 满足 / 2 不满足（#5、#8）/ 0 受阻**。
-
-### 5.5 差异与暂缓项的登记口径（`twoStage.md` §5.3）
-
-| 归类 | 判据 | 落点 |
-|---|---|---|
-| 要「修回去」 | 与 Go 不同且应一致 | `docs/DRIFT/<域>/<组件>.md` |
-| 不要「修回去」 | 有意为之，已签字 | `docs/Intentional_Deviations/<域>/<组件>.md` |
-| 阶段 1 暂缓 | 阶段 2 补齐，**必须写明**「阶段 2 恢复方案 + 测试场景 + 通过标准」 | `docs/DRIFT/global/`（收口域） |
-
-> ⚠️ **暂缓 ≠ 豁免**：若暂缓项会破坏核心业务正确性、造成严重数据风险或形成不可接受的安全缺口 ⇒ **不得靠登记获得阶段 1 通过资格**（`twoStage.md` §5.3 末段）。
+> ## ❌ **阶段一未通过**
+>
+> **不是**「受阻」（环境可用），**不是**「有条件通过」（剩余项不属有限例外）。
+>
+> **三类硬阻断**：
+> 1. **安全** —— X-11 密钥链：空签名密钥可起栈（E4 实测）⇒ **P0 #8 不满足**。
+> 2. **可构建性** —— X-12 项目说明：README 21 字节、无 `.env.example` ⇒ **P0 #5 不满足**。
+> 3. **业务正确性** —— `like-rpc` 的 `DRIFT-LIKE-003`（事实投递链路 `UNRESOLVED`）与 global `E60`（双失败少传 error，**真漂移待接手**）仍开放；共享层 `service/common` **27 条编号未修**。
+>    （⚠️ `like-common` **不再计入本条**：v3 复核发现它有**仓内 Go 派生的契约测试** ⇒ 「从未与 Go 对照」的判定**不成立** ⇒ 降为**证据缺口** G-17，见 §十 #18。）
+>
+> **另有 4 条 P0 为「部分满足」**（#1 #2 #3 #4）⇒ 它们的证据不足以支撑 ✅，须补齐后才能复判（清单见 §九）。
+>
+> **⇒ 达到「阶段一通过」的最短路径**：
+> ① 修 X-11 + X-12（P0 硬阻断，各 1~2 人日）；
+> ② 落仓 `like` / `follow` / `users-common` 的**双侧**探针（把这 3 域的 R3→R4，并让 P0 #1/#2/#4 的证据覆盖补齐）；**另补 `like-common` / `hot-proto` 的专属台账**（**记录缺口**，不阻断阶段一）；
+> ③ 销 `like-rpc` 的 `DRIFT-LIKE-003` / `E60`；
+> ④ G4 落共享层 27 条（或按 §5.3 登记为**明确的阶段 2 暂缓项**并写明恢复方案）。
+>
+> **估算**：① 1~2 人日 · ② 2~3 人日 · ③ 1~2 人日 · ④ 3~5 人日（共享层）⇒ **合计 ≈ 7~12 人日**（不含阶段 2）。
 
 ---
 
-## 六、当前快照（2026-10-28 实测）
+## 九、证据缺口清单
 
-### 6.1 全量回归（基线 commit `7ec6fc6`）
+> **四类分开**：**真实实现缺陷**（§11.1）· **证据不足**（本节）· **环境受阻**（§11.3）· **已签字偏离**（§11.4）。
+> 本节 = **证据不足**类：**结论可能对，但今天不可复算 / 未取证**。
 
-| 项 | 值 | 来源 |
-|---|---|---|
-| 命令 | `mvn -o -B -DargLine=-Xmx2g clean test` | `docs/DRIFT/global/_README.md:214-217` |
-| 结果 | **BUILD SUCCESS** · **52 模块** · **42:41 min** | 同上 |
-| 测试 | **2860 条 / 0 失败 / 0 错误 / 4 跳过** | 同上 |
-| surefire XML | **442 份** | 同上 |
-| **独立重算** | 我用 442 份 `TEST-*.xml` 逐 `testsuite` 属性求和 = **2860**，与台账**逐字一致** | 本次实测 |
-
-> ⚠️ **口径**：`clean` 必须带 —— 不带 `clean` 时 stale 产物会同时伪造「当前的红」和「当前的条数」（Spring `AutoConfiguration.imports` 引用已删类 ⇒ 整族 `@SpringBootTest` 上下文起不来）。
-
-### 6.2 逐模块测试条数（29 个有测试的模块 · XML 求和）
-
-| 模块 | 条数 | 模块 | 条数 | 模块 | 条数 |
+| 编号 | 缺口 | 影响的结论 | 证据强度 | 处置方向 | 是否阻断阶段一 |
 |---|---|---|---|---|---|
-| `service/common` | **337** | `service/article/article-rpc` | 183 | `service/users/user/user-rpc` | 162 |
-| `service/comment/comment-rpc` | 138 | `service/favorite/favorite-api` | 131 | `service/favorite/favorite-rpc` | 131 |
-| `service/task/task-rpc` | 134 | `service/users/admin/admin-api` | 149 | `service/users/admin/admin-rpc` | 122 |
-| `service/users/user/user-api` | 127 | `service/like/like-rpc` | 129 | `service/follow/follow-rpc` | 83 |
-| `service/article/article-api` | 99 | `service/message/message-api` | 107 | `service/task/task-api` | 102 |
-| `service/hot/hot-rpc` | 114 | `service/hot/hot-api` | 96 | `service/message/message-rpc` | 96 |
-| `service/like/like-api` | 94 | `service/follow/follow-api` | 74 | `service/comment/comment-api` | 52 |
-| `service/follow/follow-common` | 37 | `service/users/users-common` | 39 | `service/favorite/favorite-common` | 29 |
-| `service/comment/comment-common` | 27 | `service/message/message-common` | 21 | `service/like/like-common` | 18 |
-| `service/article/article-common` | 15 | `service/hot/hot-common` | 14 | | |
-| **合计** | **2860**（29 模块） | | | | |
+| **G-1** | **`follow` 域 0 个落仓双侧对拍入口** —— 台账「52/52 逐字节一致」依赖 `/tmp/probe.sh` / `probe_data.sh` / `probe_ext.sh` / `cmp.sh` / `u3d_probe.sh` / `u3c_probe.sh` / `blackhole3.py`（**未进版本控制**）。台账自己写明「故障注入装置应从 `/tmp` 提升为仓库资产 —— **本轮未做**」 | `follow-api` / `follow-rpc` 的 R4 判定 | 声明 E3 | 把探针固化进 `tools/difftest/follow/` | 🟡 **否**（已按 R3 计入；但 P0 #2/#4 的证据缺口依赖它） |
+| **G-2** | **`like` 域 0 个落仓双侧对拍入口** —— `/tmp/likeprobe/{main.go,RagProbe.java,NullElem.java}` **已消失** | `like-api` 6 条 SEMANTIC MISMATCH 的**复算证据不可复算**；P0 #1 | 声明 E3 | 重建探针并落仓；**已修 ≠ 已验证** ⇒ 须**先复核修复仍在**，不能凭台账断言 | 🟡 **否**（但 P0 #1 因此只能判 🟡） |
+| **G-3** | **`article` 域 api / rpc 无任何双侧活体对拍** —— Go 侧需 `etcd:2379`（容器在跑但**宿主端口未映射**）⇒ 0 条 | `article` 域 R4 不可能达到；P0 #1/#4 | E3 | 起 etcd 端口映射后补跑；**不属「环境不可得」** | ⚫ 受阻（**可解除**：宿主端口映射即可） |
+| **G-4** | **`users-common` 的 176 条双侧活体证据在 `/tmp/commonprobe/**`，已消失** | `users-common` 的 R4 判定 | 声明 E4\* | 把探针落进 `tools/` 并补 `run-parity.sh` | 🟡 **否** |
+| **G-5** | **`hot-common` 的对拍探针在 `/tmp`**（`f23fe570…`）⇒ 不可复算 | `hot-common` 的 R4 判定 | 声明 E4\* | 同 G-4 | 🟡 **否** |
+| **G-6** | **proto 落仓静态守门只覆盖 4/10**（user · admin · task · comment）⇒ `follow` / `like` / `hot` **连静态守门都没有** | proto 漂了**不会红** | E2 | 把 `check-proto-static.sh` 扩到 10 域 | 🟡 **否** |
+| **G-7** | **错误码双侧逐字节对拍只覆盖 2/9 域**（article + favorite） | 错误码契约的域覆盖 | E3 | 按域补 `errmsg-probe/<域>/run-parity.sh` | 🟡 **否** |
+| **G-8** | **`check-ddl-static.py` 默认不开 `--indexes`** ⇒ **索引 / 唯一约束 / 触发器全部未查**（§3.1 对照清单最后两项至今无机器核过） | P0 #3 | E3 | 9 域逐域跑 `--indexes` 并把结论入台账 | 🟡 **否**（P0 #3 因此为 🟡） |
+| **G-9** | **`check-ddl-static.py` 比的是「活库里实际存在的表结构」，不是仓库里的 `.sql` 文件** ⇒ 迁移文件改了但未重跑时，脚本仍显示「一致」 | P0 #3 · X-2 | E3 | 增一条「源码 `.sql` ↔ 活库」的双向校验，或在命令里声明比对基准 | 🟡 **否** |
+| **G-10** | **`check-jar-executable.sh` 的「未构建 ⇒ 跳过且不计失败」缺口** —— 本轮实跑**只检查 5/20 模块**却返回绿 | X-5 | E3 | 改为「未构建即失败」或输出「已检查 N/M」并把 M 纳入退出码 | 🟡 **否** |
+| **G-11** | **共享索引过期** —— `docs/DRIFT/_INDEX.md` 与 `component-coverage-matrix.md` 对 `favorite` 域仍写「零台账 / 从未对照」，已被 10-25 后实测推翻；`component-coverage-matrix.md` 当前态表**有 39 行**（38 组件 + 1 共享层） | 读索引会误判现状 | E1 | 收口执行者更新共享索引（属 **SHARED 面**） | 🟡 **否** |
+| **G-12** | **5 份台账的「文件头核对日期 / 组件判定」已被正文推翻**（like/api.md、like/rpc.md、message/api.md、message/rpc.md、users/*） | 直接引用台账头会**低估现状** | E1 | 本文件 §1.5 已规定引用「条目级最新状态」；台账侧可加「当前态指针」 | 🟡 **否** |
+| **G-13** | **4 域无独立失败路径矩阵**（`article` / `follow` / `task` / `hot`） | P0 #2 · #4 | E3 | 按域补失败路径矩阵 | 🟡 **否**（P0 #2/#4 因此为 🟡） |
+| **G-14** | **`like` 域 8 条 Unresolved（U-01~U-08）台账未标关闭**（U-04 已注明闭环） | `like-api` 的取证完整性 | E3 | 逐条销号或明确列为「取证缺口」 | 🟡 **否** |
+| **G-15** | **`hot-proto` 的台账内部矛盾** —— `hot/vs-common.md:59` 写「proto 契约无自动守门」，`:67` 写「已落码 `HotProtoContractTest`」 | `hot-proto` 的判定 | E1 | 裁定后回填 | 🟡 **否** |
+| **G-16** | **`service/common` 的「3 个 NOT EQUIVALENT」自相矛盾** —— 台账 `:36` 写「3 个」，`:645` 的枚举里却列了 **4 个包**（communityfact / logger / **observability** / snowflake）⇒ 实为「**3 个已正式判定 + 4 个实际持开放项**」 | 共享层缺口的基数 | E3 | 一致性订正（共享索引同源问题） | 🟡 **否**（但基数影响工作量估算） |
+| **G-17** | **`like-common` 无专属台账** —— 但它**有**仓内 Go 派生的契约测试（`LikeErrorContractTest`：29 个码逐条 1:1 + 文案表 + 未知码回落 + `CodeError` 序列化）⇒ 「从未与 Go 对照」**不成立**；缺的只是**逐条台账记录** | `like-common` 的判定**可审计性** | E3 | 补 `docs/DRIFT/like/common.md`（逐条抄录 Go 出处与结论） | 🟡 **否**（**记录缺口**，非行为缺口） |
+| **G-18** | **`hot-proto` 的判定记录位置不统一** —— 记录在 `docs/DRIFT/hot/vs-common.md:67`（`H-1` 已落码）而不在 `docs/DRIFT/hot/proto.md`；且 `hot/vs-common.md:59` 仍写「proto 契约无自动守门」⇒ **同文件内自相矛盾** | `hot-proto` 的判定可审计性 | E3 | 裁定 `:59` / `:67` 哪个为准并回填（SHARED 面 ⇒ 收口执行者） | 🟡 **否** |
+| **G-19** | **proto 的「消费方式」未取证**（`optional` presence / 代码里的字段号硬编码 / Jackson 配置）—— `docs/DRIFT/_cross/proto-verification.md:40-46` 的「三档回归网」只覆盖**文件层** ⇒ AGENTS.md §3.4 的效力边界（「复制忠实 ≠ 消费方式已验」）在 **10 个 proto 上全部成立** | 10 个 proto 组件的【PROTO 型】③⑤ | E2 | 按域补「生成码 presence / 消费点构造」断言（`ArticleProtoContractTest` 已示范） | 🟡 **否** |
+| **G-20** | **`docs/DRIFT/_cross/proto-verification.md:45` 已过期** —— 仍写 `article`/`hot`/`like`/`message`/`comment`/`favorite`/`follow`/`task`「**脚本一个都没覆盖**」，但 `ArticleProtoContractTest` / `HotProtoContractTest` / `FavoriteProtoWireParityTest` / `check-surface-parity.py` **已覆盖其中 5 个** | 读跨域 proto 记录会**误判现状** | E1 | 收口执行者订正（**SHARED 面**） | 🟡 **否** |
 
-### 6.3 守门快照（19 项 · 2026-10-28 实测）
+---
 
-| 退出码 | 守门 |
-|---|---|
-| **EXIT=0（16 项）** | `check-cross-domain-holds` · `check-deadline-downstream` · `check-deadline-verdict` · `check-flyway-ledger` · `check-global-lane-ownership` · `check-go-json-body-predicate` · `check-grpc-interceptor-wiring` · `check-grpc-runtime-classpath` · `check-no-nul-bytes` · `check-tomcat-limits` · `check-wave-coupling` · `check-wave-lane-ownership` · `check-wave-role-model` · `check-ledger-count` · `check-ledger-selfcheck` · `check-ledger-tables` · `check-agents-budget` |
-| **EXIT=1（1 项）** | `check-ddl-static`（裸跑只查 users 域 ⇒ 9 差异；**类型/长度 0 差异**） |
-| **EXIT=2（1 项）** | `check-merge-tree-content` —— **用法错**（需 `ref` 参数，合并期工具）⇒ **不是守门缺口** |
+## 十、变更记录（原结论 → 问题 → 修订后结论 → 依据）
 
-**DDL 逐域（`--domain <域>`）**：`article` 0 · `follow` 0 · `like` 0 · `task` 0 ⇒ EXIT=0；`users` 9 · `favorite` 2 · `message` 6 ⇒ EXIT=1；`comment` 2（**仅 RAG 有** `report_record.user_id` / `target_type`）⇒ EXIT=2；`hot` ⇒ **EXIT=3（N/A，两侧 0 张表）**。
+> **v1 ⇒ v3（本次审查）的全部修订**，逐条列明。**没有一条是为「让矩阵变绿」而改的** —— 方向有升有降。
+> **v2 ⇒ v3 的差异**：v2 是初稿；v3 是**机器自检后**的修订 —— 修正了 v2 对 `like-common` / `hot-proto` / `user-proto` / `admin-proto` 四处**评级方向相反**的错误（#18~#20），并把 §1.1「未评级」与 §1.3「✅ 判据」的定义补到可机械执行（#21）。
 
-### 6.4 对外契约面快照
+| # | 原结论（v1） | 发现的问题 | 修订后结论（v3） | 依据 |
+|---|---|---|---|---|
+| **1** | 38 组件矩阵中把 `service/common` 算作第 38 个组件 | `service/common` 是**跨服务共享层**，AGENTS.md §3.5 口径 **10 api + 10 rpc + 8 common + 10 proto = 38** | `service/common` **单列为第 39 行**，不计入 38 | `AGENTS.md` §3.5；`service/` 下 10 个一级目录；源台账当前态表 39 行（38 + 1 共享层） |
+| **2** | A-1 的 `main/LOC` 用 `cat \| wc -l` 统计 ⇒ 28 个组件的行数偏小 | `cat \| wc -l` **少计无尾换行的文件** ⇒ 与逐文件 `splitlines()` 口径不一致 | 全部改为**逐文件 `splitlines()`**（口径写入表注） | 本轮重算：article-api 5332→**5355**、service/common 14768→**14804** 等 |
+| **3** | P0 **#1** = ✅ | 同时又写「本机无 Kafka/Redis/Nacos ⇒ 无运行时证据」⇒ **自相矛盾**；且中间件**全部可用** | P0 #1 = 🟡 **部分满足**；G-6「环境受阻」整条**删除** | 实测：Kafka `59993` · Redis `57379` 等 8 个 · Nacos `8848` 全部可达；`Sea-etcd` 容器 Up 8 天（宿主 `2379` 未映射）⇒ **环境不是借口**。另 `like` 域事实投递链路 `UNRESOLVED` + 其活体证据已不可复算 |
+| **4** | P0 **#2** = ✅，支撑是「每端点 ≥1 失败路径测试」 | **「存在失败路径处理」推不出「参数校验 / 业务规则 / 认证 / 权限四项都有效」**；且失败路径**域覆盖不全** | P0 #2 = 🟡 **部分满足**，并列出待补项（4 域失败路径矩阵 + 权限控制显式用例） | §七 P0 #2 行；G-13 |
+| **5** | P0 **#3** = ✅ | `check-ddl-static.py` **默认不开 `--indexes`** ⇒ 索引/约束/触发器**全未查**；且它比的是**活库**不是仓库 `.sql` | P0 #3 = 🟡 **部分满足** | `check-ddl-static.py:932-935`（脚本自陈 `NOT CHECKED`）；G-8 / G-9 |
+| **6** | P0 **#4** = ✅ | 失败路径探针**只覆盖 5 域**，`article`（失败路径最密集的域）**没有** | P0 #4 = 🟡 **部分满足** | §六 6.1 表 |
+| **7** | `check-proto-static.sh` 被当作 8 个域的 proto 判定命令 | 它**只覆盖 user / admin / task** 三个 proto，且是**静态文本** diff | 只用于 3 个域；其余域改引 §六 的实际入口；**新增** `check-surface-parity.py` 承担契约面 | `check-proto-static.sh:30-38`、`:101-106` |
+| **8** | `check-tomcat-limits.py` 被表述为「与 Go 上下限**逐值一致**」 | 它**只读 `application.yml` 的三个配置值**，不验证运行时行为 | 改述为「**配置值**一致」；运行时证据另引 hot 台账的真 Tomcat 门禁 | `check-tomcat-limits.py` docstring |
+| **9** | X-5「产物可执行性 **10/10 ✅**」 | 本轮实跑显示 **15/20 模块「未构建」被 `continue` 跳过且不计失败** ⇒ 绿灯只覆盖 5/20 | X-5 = ⚠️ **本轮未复核**（本轮只查了 5/20）⇒ 新增 G-10 | `check-jar-executable.sh:56-59`；本轮实跑输出 |
+| **10** | 多个守门被当作「证明组件满足语义/运行面」的依据 | 多数守门是**静态 / 单侧**检查；`check-deadline-verdict.py` **不产生业务结论**；`check-grpc-runtime-classpath.py` **baseline 内的违规不失败** | 新增 [§六](#六判定命令的实测覆盖范围) 逐条列出「能证明 / 不能证明」；矩阵 C 各行的判定命令均按 §六 重述 | §六 6.1 / 6.2 两表 |
+| **11** | `hot-common` = **R4 / E4**；`favorite-proto` = **R4**；`follow-api`/`follow-rpc` = **R4\***；`users-common` = **R4** | ① `hot-common` 对拍探针在 `/tmp` ⇒ **不可复算**（R4 要求可复算）② `favorite-proto` **台账未见变异验证**（R4 要求变异）③ `follow` 域探针全在 `/tmp` ⇒ 降 R3/R2 ④ `users-common` 探针已消失 ⇒ 降 R3 ⑤ `like-common` 的降级理由**本身是错的** ⇒ 由 **#18** 单独处理 | 依次改为 **R3 / R3 / R3 / R2 / R3**（`like-common` 见 #18） | 各台账的探针位置与变异章节；§1.1 R4 判据 ⑦⑧；§九 G-1/G-2/G-4/G-5 |
+| **12** | `comment-rpc` = R3；`message-rpc` = R3 | 二者**双侧活体 + 变异**均齐备且归属本组件的必对齐项已清零 ⇒ 满足 R4 | 升为 **R4**（D8/D9 落点在 `service/common` ⇒ 按 §1.1⑥ 归**跨组件残留**，阻塞**域**不阻塞组件） | `comment/rpc.md:244`、`:264`（D8/D9 落点）· `message/rpc.md:1170-1183`（UNRESOLVED 均为跨域） |
+| **13** | `article-api` = R2 | 新增 `check-surface-parity.py` 后**契约面有可复算守门**；归属本组件的必对齐项 = 0 | 升为 **R3** | `article/api.md:886`（唯一未闭项 `UNRESOLVED-002` 属跨组件） |
+| **14** | `like-proto` / `user-proto` / `admin-proto` = R3；`follow-proto` = R3 | ① `like-proto` / `follow-proto` **无字段级 / wire 级仓内断言**（只有 `check-surface-parity.py` 的 rpc 方法集合）⇒ R3 的 ⑤ 不满足 ② `user-proto` / `admin-proto` 的降级理由**不成立**（二者有 `check-proto-static.sh` 的**逐字节**字段名/字段号/message 名 diff）⇒ 由 **#20** 回调为 R3 | `like-proto` / `follow-proto` 降为 **R2**；`user-proto` / `admin-proto` **维持 R3**（见 #20） | `component-coverage-matrix.md:63`；`follow/proto.md:78`；`docs/DRIFT/_cross/proto-verification.md:44` |
+| **15** | 阶段一结论 = 「❌ 不满足（X-11 属安全 ⇒ 不属有限例外）」 | 方向正确，但**依据不足**且与 P0 映射不自洽 | 明确为 **❌ 阶段一未通过**，并给出**三类硬阻断**与**最短路径 + 工作量估算（≈7~12 人日）** | §8.3 / §8.4 |
+| **16** | 域级聚合 ✅ 3 域（favorite / task / users） | 重判后：`comment`/`message` 升 ✅，`users` 因两个 proto 降 🟡，`like` 因 `like-common` 从未对照降 🔴 | **✅ 4 域**（comment / favorite / message / task）· **🟡 4 域**（article / follow / hot / users）· **🔴 1 域**（like）· 共享层 🔴<br>⚠️ **本行已被 #18~#20 修订**（`like` 不再是 🔴、`users`/`hot` 升 ✅）⇒ **以 #22 为准** | §四 + §8.1 |
+| **17** | 「契约面 / gRPC 方法集合」结论只存在于一次性脚本 | **不可复算**（本轮审查的核心教训） | **新增落仓守门** `tools/difftest/check-surface-parity.py` ⇒ HTTP **72 ≡ 72** · gRPC **71 ≡ 71**，两个签字偏离域单列 | 本次提交；脚本含**前缀断言**与**空解析报错**两条防自误报设计 |
+| **18** | `like-common` = **未评级 🔴**（理由：「无专属台账 ⇒ 从未与 Go 对照」） | 该理由**与仓内证据矛盾** —— `service/like/like-common/src/test/java/…/LikeErrorContractTest.java` 把 **29 个码值 + 29 条文案 + 未知码回落 + `CodeError` 格式与 JSON 序列化**逐条钉死，期望值**抄自 Go `errmsg.go:37-67`/`:69-99`/`:101-107`**（javadoc 写明）⇒ **已对照过**。**「无台账」≠「从未对照」** | 改为 **R3 / E3 / ✅**；「无专属台账」降级为**记录缺口** ⇒ §九 G-17（**不阻断阶段一**） | `LikeErrorContractTest.java:28-29`（Go 出处）· `:77-83`（29 条计数）· `:103-125`（文案与回落） |
+| **19** | `hot-proto` = **R2 / E1 / 🟡**（理由：「无专属台账」） | 同上 —— `service/hot/hot-rpc/.../proto/HotProtoContractTest.java` 比对「**生成码的描述符**」与「**由 `generate.py` 从 Go 真源生成并冻结**的基准」（真源 sha256 记录在案）⇒ **字段级断言已存在且在版本控制内** | 改为 **R3 / E3 / ✅**；「记录位置不统一」（在 `hot/vs-common.md` 而非 `hot/proto.md`）⇒ §九 G-18 | `HotProtoContractTest.java:38-45` · `service/hot/hot-rpc/src/test/resources/proto-contract/{hot-proto-contract.expected.txt,generate.py}`（**`git ls-files` 命中**）· `docs/DRIFT/hot/vs-common.md:67` |
+| **20** | `user-proto` / `admin-proto` = **R2 / E2 / 🟡**（理由：「无专属台账 + 消费方式未验 ⇒ R3 不成立」） | 降级理由**只对「消费方式」成立**，而那是**取证缺口**（§1.1 ⑥ 明列为**不计入**必相对齐项）；而 R3 的 ⑤ 已由 `check-proto-static.sh` 的**逐字节**字段名/字段号/message 名/rpc 签名 diff 满足（本轮实跑 EXIT=0） | 改为 **R3 / E3 / ✅**；「消费方式未验」⇒ §九 G-19（取证缺口，**不降 R**） | `docs/DRIFT/_cross/proto-verification.md:19`·`:24`·`:44`（「有网」档）· `tools/difftest/check-proto-static.sh`（本轮 EXIT=0） |
+| **21** | §1.1「未评级」= 无专属台账；§1.3「✅」= 有可复算的判定命令（**两句都不可机械判定**） | 「无台账」被当成「从未对照」⇒ **把「记录在哪」伪装成「行为没对齐」**；「有可复算的判定命令」没说清**命令要断言哪一层** ⇒ 契约面守门也能冒充语义断言 | §1.1 未评级改为「**既无台账、也无任何仓内可复算的对照产物**」；§1.3 增补**分类型口径**（api/rpc/common：纯契约面**不满足** ⑤；proto：字段级 diff **满足** ⑤，`optional`/字段号硬编码属取证缺口） | §1.1 / §1.3；`docs/DRIFT/_cross/proto-verification.md:37-38`（proto 文件层即行为层） |
+| **22** | 域级聚合：✅ 4 域 / 🟡 4 域 / 🔴 1 域；C-1 = 4/6；§6.3 =「20 项」 | #18~#20 改变了 3 个组件的状态 ⇒ 域级与 C-1 必须重算；§6.3 的命令数实际是 **21**（v2 写 20 ⇒ 数错了） | 域级：**✅ 6 域**（comment · favorite · hot · message · task · users）· **🟡 3 域**（article · follow · like）· **🔴 0 个微服务域** ＋ 共享层 `service/common` **🔴**；C-1 = **5/6**；§6.3 = **22 项命令 / 14 行**，并补列本轮**未跑的 3 个**守门 | §四 + §8.1（唯一聚合口径）· §6.3 实跑记录 |
+| **23** | §七 P0 汇总写「**✅ 4 条**（#6 #7 #9 …）」，且下一行写「**v2 下调了 3 条**（#1 #2 #3 #4）」 | **两处都算错**：列了 **3** 个编号却写「4 条」；列了 **4** 项却写「3 条」⇒ 4+4+2+0 = **10 ≠ 9**（P0 只有九条） | 订正为 **✅ 3 条**（#6 #7 #9）· **🟡 4 条**（#1 #2 #3 #4）· **🔴 2 条**（#5 #8）· **⚫ 0 条** ⇒ 合计 **9**；并写明「v3 下调了 **4** 条」 | 本轮**自检脚本的「P0 汇总」检查**（逐条读 §七 的状态列求和，再与声明比对）⇒ **机器抓出，非人工复查** |
+| **24** | 本文件的四层状态、计数、聚合口径全靠**人工**互相对照 | 人工对 39 行 × 9 列的矩阵 + 4 层状态 ⇒ **必然漂移**；本轮已实证：v2 的 P0 汇总算术错误、v3 初稿的 §6.3 命令数错误 | **新增落仓守门** `tools/difftest/check-phasegoal-consistency.py`（**15 组检查**：表格列数 · A-1↔A-2 集合 · 38 组件构成 · R/E/状态取值域 · **R↔状态耦合** · **判定命令路径存在性** · **✅ ⇒ 有可复算命令** · B 卡↔A-2 逐个 · **域状态 = MIN 聚合** · C-1 · 编号连续性 · **P0 汇总** · 测试条数 · §6.3 命令数 · 无未来日期）⇒ **EXIT=0** | 本次提交；**该脚本已在本轮抓出 §23 与 §22 两处错误** ⇒ 证明「可机械执行」不是口号 |
 
-| 项 | Go | RAG | 结论 |
+---
+
+## 十一、未解决问题清单（四类分开）
+
+### 11.1 🔴 真实实现缺陷（代码/配置层面有确凿差异，**必须修**）
+
+| 编号 | 问题 | 落点 | 影响 | 归属 |
+|---|---|---|---|---|
+| **D-01** | **空签名密钥可起栈** —— 10 处 yaml 带明文默认值（`like-api:62` 是裸字面量）；compose `:146`/`:193` 缺 `:?` | 10 个 api/rpc 的 `application.yml` + `docker-compose.yml` | **token 可伪造** ⇒ P0 #8 🔴 | 域侧 10 处 + 根级 compose（**共享面**） |
+| **D-02** | **README 21 字节 + 无 `.env.example` + `Infrastructure.md` 描述旧架构** | 仓库根 | **无法按说明构建启动** ⇒ P0 #5 🔴 | 共享面 |
+| **D-03** | **`like-rpc` 事实投递链路是 6 个 4 行骨架**（`DRIFT-LIKE-003`） | `service/like/like-rpc` | 点赞是否真记上、消息是否真发出 ⇒ 未取证 | like 域（台账记「有意不碰」，需拍板） |
+| **D-04** | **`like-rpc` 双失败时少传 error**（global `E60`，**真漂移**，待 like 域 owner 接手） | `service/like/like-rpc` | 业务正确性 | like 域 |
+| **D-05** | **`follow-rpc` 的 5 个 `follow_rpc_*` 指标无任何抓取出口**（Go 有 DevServer `/metrics`） | `service/follow/follow-rpc`（同款 5 处：favorite/message/like/user-user/user-admin） | 可观察差异 ⇒ `follow-rpc` 降 R2 | 用户 2026-10-24 定「本轮不落地」⇒ 需重新拍板 |
+| **D-06** | **共享层 27 条编号未修**（`DRIFT-COMMON` 2 + `DRIFT-CF` 15 + `DRIFT-LOG` 7 + `DRIFT-SF` 3）+ 5 项未编号 + 10 条外部尾巴 | `service/common` | **阻塞全仓**；`DRIFT-COMMON-005` 是唯一硬阻塞（破坏性变更，需用户裁定） | **G4 共享层单写权** |
+| **D-07** | **comment 域 2 条「仅 RAG 有」的 DDL**（`report_record.user_id` / `target_type`） | comment 域迁移脚本 | DDL 两侧不对齐 | comment 域（**未签字**） |
+| **D-08** | **`like` 域首轮 8 条错误断言 A~H 仍全部在位**（源码注释里的假断言） | `service/like/like-rpc` 源码注释 | 文档性缺陷（会误导后续读者） | like 域 |
+
+> ⚠️ **本轮从本类移出 1 条**（v2 原 D-08「`like-common` 从未与 Go 对照」）—— 该判定被仓内证据推翻 ⇒ 改列为**证据缺口** G-17（**记录缺口**，非行为缺口）。**移出 ≠ 销号** ⇒ `like-common` 仍需补专属台账。
+
+### 11.2 🟡 证据不足（结论可能对，但今天不可复算 / 未取证）
+
+见 [§九 证据缺口清单](#九证据缺口清单) G-1 ~ G-20（**20 条**）。
+**最关键 5 条**：G-1（follow 探针未落仓）· G-2（like 探针已消失）· G-3（article 零双侧）· G-4（users-common 探针已消失）· G-13（4 域无失败路径矩阵）。
+**本轮新增 4 条（G-17~G-20）全部是「记录/取证缺口」，不改变任何组件的行为判定** —— 其中 G-17（`like-common` 无专属台账）**推翻了 v2 的 🔴 判定**（§十 #18）。
+
+### 11.3 ⚫ 环境受阻（**本轮为零** —— 不要再用它当免责）
+
+| 编号 | 事项 | 实际状态 | 解除条件 |
 |---|---|---|---|
-| api 端点总数 | **72** | **72** | ✅ 逐域相等 |
-| 其中受 JWT 保护 | **63** | — | ✅ 逐域一致（`article` 4/7 · `comment` 7/7 · `favorite` 7/7 · `follow` 8/8 · `hot` 0/1 · `like` 6/6 · `message` 13/13 · `task` 0/1 · `user` 7/9 · `admin` 11/13） |
-| 归一化后路径+方法**集合相等**的域 | — | — | ✅ **8/10**（`article` `comment` `favorite` `follow` `hot` `like` `message` `task`） |
-| 不等的 2 域 | `users` · `admin` | 同 | 🟡 **已签字偏离**：前缀 `/usercenter/v1/user/*`→`/user/v1/*`、`/admincenter/v1/admin/*`→`/admin/v1/*` ＋ method 统一 POST |
-| gRPC 方法 | **71** | **71** | ✅ **10/10 域逐条覆盖**（admin 13 · user 9 · message 9 · follow 8 · comment 7 · favorite 7 · article 6 · like 6 · hot 5 · task 1） |
+| **E-01** | `article` 域 Go 侧需 `etcd:2379` | `Sea-etcd` 容器 **Up 8 天（healthy）**，但**宿主 `2379` 未做端口映射** ⇒ 宿主直连不通 | **映射端口即可**（不是「环境不可得」） |
+| **E-02** | Kafka / Redis / Nacos | ✅ **全部在跑且可达**（59993 / 57379 等 8 个 / 8848） | — |
+| **E-03** | 生产环境 / 真实流量 ⇒ **L4 不可凭源码给** | 无 | 阶段 2 才要求 |
 
-### 6.5 探针可复算性快照（🔴 本轮新发现的关键缺口）
+> ⚠️ **v1 的「本机无 Kafka/Redis/Nacos ⇒ 服务发现故障/实例下线/优雅停机无运行时证据」整条已删除** —— 与实测矛盾（见 §10 变更 #3）。
 
-| 域 | 落仓的双侧对拍入口 | 可复算？ |
-|---|---|---|
-| `favorite` | **13 个**（`tools/{api-envelope,api-full-parity,grpc-contract,proto-wire,ddl-parity,metrics,authority-live,authority-path,sql-statement}-probe/favorite/run.sh` ＋ `errmsg-probe/favorite/run-parity.sh` ＋ 3 个审计脚本） | ✅ **最全** |
-| `comment` | `tools/difftest/comment/run_diff.sh` + `diff_comment.py` + `check-proto-parity.py` | ✅ |
-| `users` | `tools/difftest/run.sh` + `diff.py` + `matrix.py` + `grpc-user9-dual-port-runner.java` | ✅ |
-| `message` | `tools/semantic-probe/run-parity.sh` + `tools/difftest/run.sh`（含 message-rpc 双端口） | ✅ |
-| `hot` | `tools/json-body-probe/run-parity.sh` + `tools/difftest/run-hot*.sh` | ✅ |
-| `task` | `tools/difftest/run-task-{http-parity,grpc-xlang,kafka-e2e,offset-oldest}.sh` + `parity-task.py` | ✅ |
-| `article` | `tools/errmsg-probe/run-parity.sh`（**只覆盖 `article-common` 的错误码**） | 🟡 **部分** —— api / rpc 层**无落仓入口** |
-| `service/common` | `tools/breaker-probe/run-parity.sh` + `tools/semantic-probe/{deadline-downstream,rpc-timeout}` | ✅ |
-| **`follow`** | **0 个** | 🔴 **无** —— 探针在 `/tmp/probe.sh` `/tmp/probe_data.sh` `/tmp/probe_ext.sh` `/tmp/u3d_probe.sh` `/tmp/u3c_probe.sh`（**未进版本控制**） |
-| **`like`** | **0 个** | 🔴 **无** —— 探针在 `/tmp/likeprobe/{main.go,RagProbe.java,NullElem.java}` ⇒ **三个文件已消失** |
+### 11.4 ⬜ 已签字偏离（**决策不是缺陷** —— 不重复质疑、也不得「顺手修回 Go 行为」）
 
-> ⚠️ **台账引用的 `/tmp` 脚本共 61 个**，本次实测 **13 个已消失**（含 `like` 域全部 3 个、`users` 域 `/tmp/userprobe/*` 3 个、`service/common` 的 `/tmp/commonprobe/*` 3 个、`/tmp/hkparity/*`、`/tmp/hk-verify-20261023/*`、`/tmp/eiprobe/zzprobe/main.go`、`/tmp/task-difftest2/probe/RedisPipelineProbe.java`）。
-> ⇒ **「双侧活体对拍」这个证据强度，在 `follow` 与 `like` 两域目前是「声明的，不是可复算的」。**
+| 编号族 | 条数 | 内容 | 依据 |
+|---|---|---|---|
+| `SD-` 族 | **40 条** | 含 HTTP path / method / 表名映射 · admin-api `OperatorId` 严格校验 · user-api `uid` 统一拒绝 · message-api `affected` 字符串 | `docs/Intentional_Deviations/_INDEX.md` |
+| `N-x` 族 | **3 条**（N-1 / N-4 / N-5） | users/admin 域拍板 | `docs/Intentional_Deviations/users/admin/_shared.md` |
+| `A/C/D-x` 族 | **5 条** | `service/common` 逐行审计后无法消除的偏差 | `docs/Intentional_Deviations/common/_signed-deviations.md` |
+| **合计已签字** | **48 条** | | |
+| `CAND` 族 + `like/api.md` 4 条 | **18 条未签字** | 含 `CAND-16`（users 8 处 DEFAULT）· `CAND-17`（`users_user.status` 可空性）· `like` 域 4 条 | `docs/Intentional_Deviations/_INDEX.md` |
+| **本轮新增待签字** | 2 条 | `DRIFT-HOTRPC-006`（已取证未签字）· `DRIFT-HOTAPI-031`（框架限制，候选 `CAND-10` 未签字） | hot 域台账 |
+
+> ⚠️ **签字偏离是决策，不是缺陷** ⇒ 对拍看到它们变红，**先确认是不是签字项，不要当新回归去「修」**。
 
 ---
 
-## 七、证据缺口清单（阶段 1 收口前必须清掉或明确登记为暂缓）
-
-| 编号 | 缺口 | 影响 | 证据强度 | 处置方向 | 是否阻断阶段一 |
-|---|---|---|---|---|---|
-| **G-1** | **`follow` 域无落仓双侧对拍入口** —— 台账「52/52 逐字节一致」依赖 `/tmp` 下 5 个脚本，**未进版本控制** | 52 步结论**不可复算** | 声明 E4\* | 把探针固化进 `tools/difftest/follow/`（follow 台账 §748 已自行提出同一方向） | 🟡 **否**（若登记为暂缓并写明阶段 2 恢复方案） |
-| **G-2** | **`like` 域无落仓双侧对拍入口，且 `/tmp/likeprobe/*` 三个文件已消失** | 5 条 `SEMANTIC MISMATCH`（DRIFT-012~016）的**复算证据已不可复算** | 声明 E3\* | 重建探针并落仓；**已修 ≠ 已验证** | 🟡 **否**（同上；但**必须先复核修复仍在**，不能凭台账断言） |
-| **G-3** | **`article` 域 api / rpc 层无落仓活体对拍入口**（只有 common 的错误码探针） | 两个 🔴/🟡 组件的结论无法升级 | E3 | Go 侧需 etcd ⇒ 属**环境受阻** ⚫，登记为暂缓 | ⚫ 受阻 |
-| **G-4** | **proto 落仓静态守门只覆盖 4/10**（user · admin · task · comment）；`follow` / `like` **连静态守门都没有** | proto 漂了**不会红** | E2 | 把 `check-proto-static.sh` 扩到 10 域 | 🟡 **否** |
-| **G-5** | **错误码双侧逐字节对拍只覆盖 2/10 域**（article + favorite）；其余 8 域只有域内契约测试 | 证据强度不齐 | E3 | 按域补 `errmsg-probe/<域>/run-parity.sh` | 🟡 **否** |
-| **G-6** | **运行证据缺口** —— 本机无 Kafka / Redis / Nacos / etcd ⇒ 服务发现故障、实例下线、优雅停机**无运行时行为证据**；无生产环境 ⇒ **L4 不可凭源码给** | 阶段 2 的前提，不是阶段 1 的 | E0 | 阶段 2 补 | ⚫ 受阻（阶段 1 不要求） |
-| **G-7** | **密钥链 E4 实测**：10 处 yaml 带明文默认值（`like-api:62` 是裸字面量）；compose `:146`/`:193` 缺 `:?` ⇒ 不设变量 ⇒ **空签名密钥起栈** | **P0 #8 不满足** | E4 | 主配置 `${VAR}` 无默认值 + compose `:?` + `.env.example` + 根 pom surefire 注入测试值 | 🔴 **是** |
-| **G-8** | **README 21 字节 + 无 `.env.example` + `Infrastructure.md` 描述旧架构** | **P0 #5 不满足** | E1 | 补 README 与 `.env.example` | 🔴 **是** |
-| **G-9** | **DDL 残留** —— users 可空性 1 + `DEFAULT CURRENT_TIMESTAMP` 16 处（**刻意保留**）· comment 2 条**仅 RAG 有** · hot **N/A** | 类型/长度 **0 差异** ⇒ 非行为差异 | E3 | 已签字保留的走 D 类；comment 2 条须登记 | 🟡 **否** |
-| **G-10** | **10 个 proto 中 8 个无回归网**（§3.4 效力边界） | 同 G-4 | E2 | 同 G-4 | 🟡 **否** |
-| **G-11** | **共享索引过期** —— `docs/DRIFT/_INDEX.md` 仍写「favorite `api`/`common`/`proto` 仍零台账」，实测三份台账**均已有内容**（161 KB / 10 KB / 15 KB）；`component-coverage-matrix.md` 的当前态表**有 39 行**（38 组件 ＋ 1 行共享层），标题写「38 组件」⇒ **按行数数会多数 1 行** | 读索引/按行数数会误判现状 | E1 | 合并收口执行者更新共享索引（`docs/DRIFT/_INDEX.md` 属 **SHARED 面**）；行数口径按 §二 A-1 说明 | 🟡 **否** |
-
----
-
-## 八、命令清单（全部可复算）
+## 十二、命令清单（全部可复算 · 2026-10-28 实跑）
 
 ```bash
 # ── 全量回归（基线推进后必须带 clean）──────────────────────────────
 mvn -o -B -DargLine=-Xmx2g clean test
 
-# ── 逐模块条数（权威读法 = surefire XML 求和，不是 maven 汇总行）──
+# ── 逐模块条数（权威读法 = surefire XML 求和）─────────────────────
 python3 - <<'PY'
 import glob,re
 tot=0
@@ -483,44 +547,65 @@ for f in glob.glob('service/**/target/surefire-reports/TEST-*.xml',recursive=Tru
 print("TOTAL",tot)
 PY
 
-# ── 守门全跑（退出码先落变量再打印）────────────────────────────────
+# ── ⭐ 对外契约面（本次新增落仓 · v1 的结论此前不可复算）──────────
+python3 tools/difftest/check-surface-parity.py            # 全 10 域
+python3 tools/difftest/check-surface-parity.py --domain article
+
+# ── 守门全跑（退出码先落变量再打印；别用 `printf "$(cmd)" "$?"`）────
 for g in tools/difftest/check-*.py tools/check-ledger-*.py tools/check-agents-budget.py; do
   out=$(python3 "$g" 2>&1); rc=$?
   printf "%-52s EXIT=%s\n" "$(basename "$g")" "$rc"
 done
 
-# ── DDL 逐域（裸跑只查 users 域！）────────────────────────────────
-python3 tools/difftest/check-ddl-static.py --domain <域>     # 另有 --indexes
+# ── ⭐ 本文件自身的内部一致性自检（矩阵 ↔ 聚合 ↔ 计数 ↔ 路径存在性）──
+python3 tools/difftest/check-phasegoal-consistency.py
 
-# ── 双侧对拍（按域）─────────────────────────────────────────────
+# ── DDL 逐域（裸跑只查 users 域！索引/约束/触发器需 --indexes）────
+python3 tools/difftest/check-ddl-static.py --domain <域>
+python3 tools/difftest/check-ddl-static.py --domain <域> --indexes
+
+# ── 双侧活体对拍（按域 · 覆盖范围见 §六）────────────────────────
 GO_REPO="/Users/pr/Documents/java&golang/Sea-RideTheWind_golang" bash tools/errmsg-probe/run-parity.sh   # article 错误码
 bash tools/errmsg-probe/favorite/run-parity.sh                 # favorite 错误码
 bash tools/semantic-probe/run-parity.sh                        # message 解析语义
 bash tools/json-body-probe/run-parity.sh                        # hot JSON body
-bash tools/breaker-probe/run-parity.sh                          # service/common 熔断
+bash tools/breaker-probe/run-parity.sh                          # shared-layer 熔断
 bash tools/difftest/comment/run_diff.sh                         # comment 23 步矩阵
-bash tools/difftest/run.sh                                     # users + message 双侧
+bash tools/difftest/run.sh                                     # users 双侧（diff.py + matrix.py）
 bash tools/api-envelope-probe/favorite/run.sh                  # favorite 响应字节
 bash tools/proto-wire-probe/favorite/run.sh                    # favorite wire 字节
+bash tools/difftest/run-task-http-parity.sh                    # task HTTP 44 步
+bash tools/difftest/run-task-grpc-xlang.sh                    # task 跨语言 gRPC
+bash tools/difftest/run-task-kafka-e2e.sh                      # task Kafka 端到端
+bash tools/difftest/run-hot-rpc-difftest.sh                    # hot-rpc gRPC 逐字节
 
 # ── 域测试必须带 -am（否则解析 ~/.m2 过期 com.rag:common ⇒ 假红）──
 mvn -B -o -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end -pl <mods> -am test
+
+# ── R3 组件的「可复算判定命令」＝ 模块级测试（期望值带 Go 出处）────
+mvn -o -B -DargLine=-Xmx2g -pl service/hot/hot-common   -am test   # HotErrorCodeContractTest（Go errmsg.go:34-46）
+mvn -o -B -DargLine=-Xmx2g -pl service/users/users-common -am test  # JwtUtilParityTest / PasswordUtilGoCompatibilityTest
+mvn -o -B -DargLine=-Xmx2g -pl service/like/like-common   -am test  # LikeErrorContractTest（29 码逐条 1:1）
+mvn -o -B -DargLine=-Xmx2g -pl service/hot/hot-rpc test -Dtest=HotProtoContractTest   # 基准由 Go 真源生成
 ```
 
 ---
 
-## 九、本文件与上游文件的关系（一句话版）
+## 十三、与上游文件的关系
 
 ```
 docs/PhasedGoal.md  §二  ─┐
-                          ├─→ 准入线（语言描述）──→ 本文件 §一~§五（可判定矩阵）──→ §五.3 四种结论
+                          ├─→ 准入线（语言描述）──→ 本文件 §一~§五（可判定矩阵）──→ §八 阶段一结论
 docs/twoStage.md    §2.1 ─┘                                        ↑
                                                                    │
 docs/twoStage.md    §8.1（E0–E5）───────────────────────────────→ §1.2
-docs/twoStage.md    §5.3（差异与暂缓）─────────────────────────→ §5.5
+docs/twoStage.md    §5.3（差异与暂缓）─────────────────────────→ §八 末
+docs/twoStage.md    §5.6（四种结论）───────────────────────────→ §8.3
+docs/twoStage.md    §10 （阶段归属 A/B/C/D）────────────────────→ §十一
 docs/twoStage.md    §9  （故障矩阵）────────────────────────────→ 本文件不覆盖（阶段 2）
-docs/twoStage.md    §10 （阶段归属 A/B/C/D）────────────────────→ §5.4 / §7 的「是否阻断」列
 ```
 
-> ⚠️ **本文件不替代任何一份上游文件。** 若本文件与 `docs/PhasedGoal.md` / `docs/twoStage.md` 冲突，
+> ⚠️ **本文件不替代任何一份上游文件。** 若与 `docs/PhasedGoal.md` / `docs/twoStage.md` 冲突，
 > **以上游为准**（准入线以 `PhasedGoal.md` §二 / `twoStage.md` §2.1 为准），并把冲突登记为一条待修项。
+>
+> ⚠️ **台账与本文件冲突时**：以**台账的条目级最新状态**为准（L0），并按 §1.5 更新本文件的引用。
