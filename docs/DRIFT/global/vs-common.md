@@ -68,7 +68,7 @@
 | **A6** | errmsg 契约 | 共享层**不产 errmsg**（1015 等业务码在域侧 api）⇒ 共享层只负责**错误响应形状**（`http/GoStyleRouterErrorResponses`） | ✅ **双侧对拍通过**：`bash tools/semantic-probe/run-parity.sh` ⇒ **EXIT=0 · 56 例（一致 54 · 已签字偏离 2 · 不一致 0）**（⚠️ README 原写「23 例」已过期 ⇒ 本轮订正 `2231398`） | **L4**（双侧活体对拍） | 2026-10-27 |
 | **A7** | proto 契约 | `service/proto`（**不在共享层写权面**）⇒ 共享层侧 **N/A** | **N/A**（共享层无落点）⚠️ 提醒：**复制忠实 ≠ 消费方式已验**（AGENTS.md §3.4 的效力边界）⇒ 10 个 proto 的 message/字段号/类型/枚举 10/10 一致，但 `optional` presence 语义 / Jackson 配置差异**不在**该结论覆盖内 | **L1**（静态逐条对照，AGENTS.md §3.4 背书） | 2026-10-27 |
 | **A8** | DDL 时间列 / 类型 | 共享层**无 DDL / migration**（`service/common` 不建表）⇒ 本轴共享层落点 = `persistence/DeadlineQueryTimeoutInjector`（`default-statement-timeout` 的**运行时**语义，**不是** DDL） | **N/A**（共享层不建表）⚠️ DDL 双侧活体逐列对照 = **9 域**（类型/长度 **0 差异**；`DEFAULT CURRENT_TIMESTAMP` 残留 **16 处** = **刻意保留**；users 域缺 3 条非唯一索引 = **性能非行为**）⇒ 结论以各域台账为准 | **L3**（`tools/difftest/check-ddl-static.py` 双侧活体对拍） | 2026-10-27 |
-| **A9** | trace / otel | `observability/GoStyleOtelAutoConfiguration`（**`BeanFactoryPostProcessor`** 装配点）· `observability/GoStyleOtelAgent` · `observability/GoStyleOtelConfig` · `http/GoStyleTraceparentFilter` · `observability/GoStyleClientDisconnectProbe` | ✅ **全局 OTel 装配点已收口共享层**（`GlobalOpenTelemetry.set` 只能调一次，且**先 `get()` 会让后续 `set()` 抛 `IllegalStateException`** ⇒ 必须 BFPP ⇒ 理由与 4 个构造器抢跑点已写进 javadoc）<br>🟡 **域特有业务 span 不在共享层**（**comment 的 6 个已由 G3 修完** ⇒ `C-3` 落码 `d2d7268` ⇒ **本层登记的跨域线索闭环**；**favorite 的 16 个仍缺** ⇒ `L-4` 未落 ⇒ **域侧自修** ⇒ ⇒ **共享层零改动**）<br>🔴→🟢 **补（`853767b` · G2 反馈单 FB-04）**：本轴此前**缺一个子面 ——「业务 handler 执行期能拿到当前 server span」**。Go 侧 `tracinginterceptor.go:18-24` 把 span **放回 ctx** ⇒ 业务 `trace.SpanFromContext(l.ctx)` 取得到 ⇒ 属性真落；RAG 侧 handler **不接收 ctx** ⇒ 唯一等价物是 `Span.current()`，而拦截器此前**只在 `close()` / `onCancel()` 里 `makeCurrent()`** ⇒ **handler 执行期取到 invalid（no-op）span** ⇒ 属性**静默丢弃** ⇒ ⇒ 域侧若按 `Span.current().setAttribute(...)` 落码 ⇒ **跑绿但零效果**（与「假绿」同源）⇒ 已在 `onHalfClose()` 里把 `makeCurrent()` 的 scope **包住 handler 执行期**修好 ⇒ **本轴此前不是「全绿」，是「少验了一个面」** | **L3**（真容器 + `GoStyleOtelAgentGateTest`）＋ **L1**（域侧 span 清单由 G3 逐条核）<br>🆕 **FB-04 子面 = L3**（真 netty gRPC server + 真 OTel SDK + `InMemorySpanExporter`）＋ **变异 4/4 精确命中** | 2026-10-27 |
+| **A9** | trace / otel | `observability/GoStyleOtelAutoConfiguration`（**`BeanFactoryPostProcessor`** 装配点）· `observability/GoStyleOtelAgent` · `observability/GoStyleOtelConfig` · `http/GoStyleTraceparentFilter` · `observability/GoStyleClientDisconnectProbe` | ✅ **全局 OTel 装配点已收口共享层**（`GlobalOpenTelemetry.set` 只能调一次，且**先 `get()` 会让后续 `set()` 抛 `IllegalStateException`** ⇒ 必须 BFPP ⇒ 理由与 4 个构造器抢跑点已写进 javadoc）<br>🟡 **域特有业务 span 不在共享层**（**comment 的 6 个已由 G3 修完** ⇒ `C-3` 落码 `d2d7268` ⇒ **本层登记的跨域线索闭环**；**favorite 的 16 个已落码** ⇒ `L-4` 落码 ⇒ **域侧自修完成** ⇒ ⇒ **共享层零改动**<br>🟢→🟡 **本层独立核（G3 报 ⇒ 本层读源码核，2026-10-28）**：`service/favorite/favorite-common/src/main/java/com/rag/favorite/favorite/common/span/FavoriteSpans.java`（**418 行**）⇒ span 名逐条点出 = **7 个 API**（`FavoriteAPI.*`）＋ **7 个 RPC**（`FavoriteRPC.*`）＋ **2 个 `Dependency.*`**（`Dependency.User.GetUser` / `Dependency.Article.GetArticle`）⇒ **合计 16** ⇒ 与 G3 报的数**一致** ⇒ ⇒ 落点在 **`favorite-common`**（api/rpc 共用）⇒ ⇒ **共享层零改动成立**<br>⚠️ **但仍不得读作已闭环** —— 🔴 **守门未写**（`FavoriteApiSpanWiringTest` / `FavoriteRpcSpanWiringTest` ＋ 变异待补）⇒ ⇒ **本轴结论 = 🟡 半闭环**（代码在 · 网未张）<br>⚠️ **一条对域内的警告**（§4.10.64 ⑤）：**Java `recordException` 不改 status** ⇒ ⇒ 域内 span 若只调 `recordException` ⇒ **status 恒 UNSET** ⇒ 与 Go 的 `RecordError`（会置 ERROR）**漂移** ⇒ ⇒ **域内写权 ⇒ G3 自查**（共享层自己是对的：`Observability.java:108-109` / `:131-132` = `recordException` ＋**显式** `setStatus(StatusCode.ERROR, msg)`））<br>🔴→🟢 **补（`853767b` · G2 反馈单 FB-04）**：本轴此前**缺一个子面 ——「业务 handler 执行期能拿到当前 server span」**。Go 侧 `tracinginterceptor.go:18-24` 把 span **放回 ctx** ⇒ 业务 `trace.SpanFromContext(l.ctx)` 取得到 ⇒ 属性真落；RAG 侧 handler **不接收 ctx** ⇒ 唯一等价物是 `Span.current()`，而拦截器此前**只在 `close()` / `onCancel()` 里 `makeCurrent()`** ⇒ **handler 执行期取到 invalid（no-op）span** ⇒ 属性**静默丢弃** ⇒ ⇒ 域侧若按 `Span.current().setAttribute(...)` 落码 ⇒ **跑绿但零效果**（与「假绿」同源）⇒ 已在 `onHalfClose()` 里把 `makeCurrent()` 的 scope **包住 handler 执行期**修好 ⇒ **本轴此前不是「全绿」，是「少验了一个面」** | **L3**（真容器 + `GoStyleOtelAgentGateTest`）＋ **L1**（域侧 span 清单由 G3 逐条核）<br>🆕 **FB-04 子面 = L3**（真 netty gRPC server + 真 OTel SDK + `InMemorySpanExporter`）＋ **变异 4/4 精确命中** | 2026-10-27 |
 
 > **A3 已预填一条实测锚点（2026-10-27 核）** —— X-6（`DRIFT-HOTAPI-030`）共享层 6 个类已落码
 > （`GoStyleFormValues` / `GoStyleFormLimitMode` / `GoStyleFormLimitExceededException` /
@@ -1181,7 +1181,8 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | 项 | 内容 |
 |---|---|
 | **G1 的说法** | 「G1 三个域侧排序桥（`MybatisPlusOrderingBridgeAutoConfiguration`）等 G4 的共享层桥落码后再删」 |
-| **实测** | ✅ **共享层版本早已存在**：`service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java`（⇒ 各域 `*/rpc/config/` 下另有 10 份**域内副本**）⇒ ⇒ 合并后**域内副本被遮蔽**（不是叠加）⇒ ⇒ **域内副本在合并时删即可** ⇒ ⇒ **不存在「还没落的共享层桥」** |
+| **实测** | ✅ **共享层版本早已存在**：`service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java`（⇒ 各域 `*/rpc/config/` 下另有 **9** 份**域内副本**：article / comment / favorite / follow / like / message / task / admin / user）⇒ ⇒ **域内副本在合并时删即可** ⇒ ⇒ **不存在「还没落的共享层桥」** |
+| 🔴 **本行的「遮蔽」表述已于 2026-10-28 被 G1 实测推翻（就地订正，保留原值以便追溯）** | 原写：「合并后**域内副本被遮蔽**（不是叠加）」⇒ ⇒ **不成立** —— **排序桥的共享层那份没有 `@ConditionalOnMissingBean`** ⇒ ⇒ **两份都会被注册**（两份都刻意**类体为空、不注册任何 bean**）⇒ ⇒ **零行为影响，但不是「遮蔽」** ⇒ ⇒ **真正的差别 = 排序图上多一个【同向】节点**（域内用类字面量 `after = DataSourceAutoConfiguration.class` / `before = MybatisPlusAutoConfiguration.class`；共享层用**字符串** `afterName` / `beforeName` 指向**同一对 FQN**）⇒ ⇒ **同一对节点 ⇒ 同向等价、无环 ⇒ 删除仍零行为差**（G1 逐条核过）<br>⚠️ **别与 Redis 那份混谈**：`GoStyleRedisClientAutoConfiguration` **确实有** `@ConditionalOnMissingBean` ⇒ ⇒ **那里「遮蔽」是准确表述**（`GoStyleRedisClientOptionsPrecedenceGateTest` 钉的就是这个契约）⇒ ⇒ **「遮蔽」一词在两处含义不同 ⇒ 不能互相套用** |
 | ⚠️ **别把两件事混谈** | `MybatisPlusOrderingBridgeAutoConfiguration` 管的是 **MyBatis-Plus 拦截器链**的顺序 ⇒ ⇒ 与 **Filter 槽位**（§4.10.16.1）**无关** ⇒ ⇒ 两件事各自的证据与修法都要分开读 |
 
 #### 4.10.17 🟢 **G3 的 C-3 回执（2026-10-27）—— comment 域 6 个业务 span 闭环（本层零落码）**
@@ -2918,7 +2919,15 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 
 **⑥ 三门禁**：`check-wave-lane-ownership` · `check-wave-role-model` · `check-wave-coupling` ⇒ ⇒ **全 EXIT=0**。
 
+> **🔴 订正（2026-10-28 03:3x · 第 15 次全量实测）** —— 上一行的「**全 EXIT=0**」这个**期望值本身要改** ⇒ ⇒ 保留原值可追：
+> ⇒ ⇒ `check-wave-coupling` 在**四路合并树**上实测 **EXIT=1（10 项 `common_radiation` 漂移）** ⇒ ⇒ **且这 10 项是【既有债、非合并引入】** ⇒ ⇒ **实测证据**：三棵 lane 树各跑 ⇒ **G1 = 1 项** · **G2 = 9 项** · **G3 = 1 项**（⊂ G2 同名项）⇒ ⇒ **并集 = 10 项** ⇒ ⇒ **与合并树逐条吻合 ⇒ 合并零新增** ✅
+> ⇒ ⇒ **归属**：`docs/DRIFT/_cross/cross-domain-coupling.md` = **SHARED 面** ⇒ ⇒ **本层只登记、交合并收口执行者**（工具支持 `--print`）。
+> ⇒ ⇒ **另两条**（`check-wave-lane-ownership` / `check-wave-role-model`）实测 **EXIT=0** ✅
+> ⇒ ⇒ ⚠️ **给合并收口执行者的一句话**：**「三门禁全 EXIT=0」这个门槛在收口那一步【达不成】** ⇒ ⇒ 要么**先 `--print` 更新快照**（把 10 项对齐到仓库现状），要么**把它降级为「不新增」**（= 并集零新增）⇒ ⇒ **别把既有债当合并引入**。
+
 **⑦ 台账三门禁**：`check-ledger-tables` · `check-ledger-selfcheck` · `check-ledger-count` ⇒ ⇒ ⚠️ **`check-ledger-selfcheck.py` 的默认域是 `task`** ⇒ ⇒ **必须按域跑**，否则拿到的是**别人的绿**。
+
+> **🟢 本轮按域跑（2026-10-28 03:3x）** —— `LEDGER_FILES` 只配了 **task / users / users-admin** 三个域 ⇒ ⇒ 逐域跑：**task EXIT=0** · **users EXIT=0** · **users-admin EXIT=0** ✅ ⇒ ⇒ **默认（= task）也 EXIT=0**（对照）⇒ ⇒ ⚠️ **其余 7 个域（message / like / task 之外的 article / comment / favorite / follow / hot）不在该工具的扫描集内** ⇒ ⇒ **回执里要写清这个边界**（工具口径限制 ⇒ **不是「全绿」**）⇒ ⇒ `--entity-all` 可扩到全仓，但它是**提示级、不计入退出码**。
 
 **⑧ 基线对照表**（第十四次 = 2026-10-27 · 波末 = 待测）
 
@@ -3370,6 +3379,56 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 - **判「谁改了什么」要用【那一步合并自己的】merge-base**：全局共同祖先在「lane 之间有包含关系」时会整片误判（本次误报 72 条）⇒ ⇒ **差一个 base ⇒ 结论方向相反**。
 - ⚠️ 与既有条目的关系：「**跨树引用 = 行号 + commit + 内容摘录三件套**」（§4.10.51 ⑩）**已经写了纪律，但本轮我自己没做到**（只对齐了路径，没对齐 commit）⇒ ⇒ **纪律写了不等于做到了** ⇒ ⇒ 这次靠**新写的守门**才当场发现 ⇒ ⇒ **⇒ 把「人工核对」变成「机器判据」，才是可靠的做法**。
 
+#### 4.10.62 🟢 **G1 / G2 / G3 三封回信逐条处置 ⇒ 销号 10 项 ＋ 白名单「先不动」的理由 ＋ A/B 同批硬约束的实测分布**（核对日期 2026-10-28 09:1x · 本层 HEAD `85d9ecd`）
+
+> **背景**：本层向三方发了**窗口请求**（本层首次有共享层生产代码变更 ⇒ 必须全量回归）⇒ ⇒ 期间收到三方回信（G3 两封 + G1 三封 + G2 一封）⇒ ⇒ 本节逐条处置。
+
+**① 销号清单（10 项 · 本层零动作）**
+
+| 项 | 谁报 | 结论 | 本层动作 |
+|---|---|---|---|
+| **R5 / R6 / R7**（comment-rpc / hot-rpc / favorite-api 的 `connect-timeout: 5s`）| G3 | ✅ **G3 域已落码**（`0c6295c` + 3 条**消费点**守门 + 变异 3/3 精确红「expected: 5S but was: 10S」）⇒ ⇒ 连接超时**由域内 yml 决定**（共享层那份**明确不碰** `socketOptions`）⇒ ⇒ **域侧自修** | **销号** · 本层零动作 |
+| **⑤ D10**（comment fact 投递链路的两个 span 属性）| G3 | ✅ **已修**（`deeeb8d`）⇒ ⇒ **我原先转述「Go 侧根本不用 span」不准确** ⇒ ⇒ 真源是：Go **有**这个 span，但建在**共享层**且**不带属性** ⇒ `service/common/communityfact/process.go:26`（全文 69 行 · 零 `SetAttributes`）⇒ ⇒ 域侧删那两行属性 = **正确对齐** | **销号** · **我的转述按 G3 的口径订正** |
+| **① 容器上限**（favorite-api 的 5003 断言）| G3 | ✅ **已由 `cd893d1` 解决**，G3 合并时已按 Go 语义改写断言（HTTP 200 · 不含 `code:5003` · 含 `code:1015` · 非 Tomcat HTML 页）⇒ ⇒ **「(b) 一律 10001」已是现状** | **销号** · 方法名故意保留旧名（以 DisplayName 与断言为准） |
+| **② article-api 路径归一副本** | G3 | ✅ **已删**（`18aa012` · 删前独立核 4 件事 · article-api 99 条全绿）⇒ ⇒ **已转告 G2**（真 Tomcat 探针可升 ✅）| **销号** |
+| **R1 / R2 / R3 / R4**（users 域的 Redis 超时四种形态）| G1 | ✅ **我域四条已修**（`DRIFT-USERAPI-016` / `DRIFT-USERRPC-V-014`① / `DRIFT-FOLLOW-011` / `DRIFT-ARPC-013` 订正块）⇒ ⇒ **我 §4.10.27 描述的那四种形态逐字对应的是【主干代码态】** ⇒ ⇒ **本层不派单** | **销号** · 本层零动作 |
+| **Redis 收编（5 份域内副本）** | G1 | ✅ **已落码**（删 5 份 + 5 份守门各补 2 条 bean 身份断言 · **991 条全绿** · 变异三连）⇒ ⇒ 共享层那份到位 | **销号** |
+| **FB-04 验收证据** | G2 | ✅ **采纳 G2 的 like 域证据**：真 in-process gRPC + 共享层真 `RpcInterceptor` + 真 OTel SDK/exporter ⇒ 断言导出 span 的 4 个属性；**对照组 = 复刻 FB-04 之前行为的拦截器**（同一份域服务 / 同一通真实调用 / **唯一差别 = `onHalfClose` 里包 scope 那一下**）⇒ ⇒ 变异「把对照组的 scope 包回去」⇒ **3 条里只红 1 条且精确红在 `attributesAreDroppedWithoutTheSharedLayerMechanism:327`** ⇒ ⇒ 「机制承重」成立 | **采纳** · 口径照 G2：**只写「RAG 腿 L4 真 gRPC 端到端（含 A/B 对照组 + 变异验证）」，不写「双侧活体闭环」**（Go 侧 span 属性仍 L3）|
+| **「连带删 `@Import`」** | G1 | 🔴 **已落过**（§4.10.29 · 2026-10-27 14:1x 就已就地订正为「rpc 侧必须换 `@ImportAutoConfiguration`；api 侧连带项 = 零」）⇒ ⇒ **本轮这封是同一条的重复件** | **已落，无需再改** |
+| **`-pl` 不带 `-am` ⇒ 吃旧 `com.rag:common`** | G1 / G2 | ✅ **本层本来就这么做**（历次全量一律 `-DargLine=-Xmx2g` **带 `-am`**）⇒ ⇒ **本层这轮全量的 classpath 上 `com.rag:common` = reactor 内源码**（不是 `~/.m2` 那份 —— 实测那份 jar 里 `com/rag/common/redis/` 条目 = **0**）⇒ ⇒ **但各域拿本层的全量当「我域与共享层兼容」的证据不成立 ⇒ 各域必须自己带 `-am` 跑一次** | **采纳** · 写进回执 ④ |
+| **V-002「#6 第 1 步」** | G1 | ✅ **已取消**（落 DDL = RAG 可空 = **制造方向相反的新漂移**）⇒ ⇒ **唯一剩余落点 = `docs/Intentional_Deviations/**` 的销号签字** ⇒ ⇒ **不在我、也不在 G1 写权面 ⇒ 交合并收口执行者** | **登记** · 本层不代改 |
+
+**② 🟡 白名单【本层先不动】—— 理由必须写清（否则下一个人会误清 ⇒ 造成假红）**
+
+| 项 | 内容 |
+|---|---|
+| 白名单现状 | `GoStyleRedisClientShadowingGateTest.LEGACY_DOMAIN_COPIES` = **仅 1 条**（`service/users/user/user-api/…/config/RedisDisconnectedBehaviorConfig.java`）|
+| 逐树实测 | **G1 树 = 已删** ✅ · **G2 / G3 / 本层 = 还在**（它们未并入 G1 的删除）|
+| ⇒ ⇒ **为什么本层现在不能清** | 清掉白名单那条 ⇒ ⇒ **本层树里那个文件还在** ⇒ ⇒ 守门会把它判成「未登记的域内副本」⇒ ⇒ **🔴 假红** ⇒ ⇒ ⇒ **必须等 G1 的删除并入本层分支后再清** |
+| ⇒ ⇒ **判据（合并树上的正确态）** | 合并树会取 **G1 的版本**（该文件已删）⇒ ⇒ **合并树上白名单那条 = 空转** ⇒ ⇒ 守门的 `stillExistingWhitelistEntries` 只取**文件仍存在**的项 ⇒ ⇒ **不会红**，但会给出 `staleWhitelistHint`（提示该清白名单）⇒ ⇒ **⇒ 合并收口执行者/本层在 G1 并入后清空这 1 条** |
+| ⇒ ⇒ **一条新纪律** | **白名单条目是【登记待删】的，不是【永久豁免】的** ⇒ ⇒ **域侧删完后必须回来清** ⇒ ⇒ **清之前先核「该文件在目标树里真的不存在」**（跨树事实要对齐 commit ⇒ §4.10.61）|
+
+**③ 🔴 A/B 同批硬约束的【逐树实测分布】（回执 ④ 要用）**
+
+| 提交 | G1 | G2 | G3 | 本层 | 合并树 |
+|---|---|---|---|---|---|
+| `d4e4745`（**A** = 真源派生守门）| IN | IN | IN | IN | IN |
+| `4786eb5`（**B** = task-api yaml `off`）| ❌ 缺 | **IN** | ❌ 缺 | ❌ 缺 | **IN** |
+
+⇒ ⇒ **只有 G2 树与合并树满足 A/B 配对** ⇒ ⇒ **G1 / G3 / 本层三棵树里 `check-tomcat-limits` 的红** = 「**B 缺 A 有**」的**必然**（不是缺陷）⇒ ⇒ ⇒ **合并树满足配对 ⇒ 实测 `check-tomcat-limits` EXIT=0** ✅ ⇒ ⇒ ⇒ **合并收口那一步：A 与 B 必须同批进主干**（否则「守门红 + 行为错」或「行为对 + 守门假红」）。
+
+**④ 🟢 本层树上的共享层直接回归（`d212323` 的验证）**
+
+| 项 | 实测 |
+|---|---|
+| 命令 | `mvn -B -pl service/common test`（**本层树** ⇒ ⇒ classpath 上 `com.rag:common` = **本层源码** ⇒ ⇒ 满足 §4.10.29.2 的判据）|
+| 结果 | **333 条 / 0 failures / 0 errors / 0 skipped / BUILD SUCCESS / EXIT=0** |
+| ⇒ ⇒ 含义 | 共享层那笔生产修复（降载 RT 浮点毫秒 + ceil ＋ 注入式时钟）**在共享层模块内全绿** ⇒ ⇒ **含新增的 2 条守卫**（helper 层 + 调用点层）⇒ ⇒ **但**「共享层绿」**≠**「全仓绿」⇒ ⇒ **仍必须跑全量**（10 个 rpc 组件都装配了 `GoStyleRpcProtectionChain`）|
+
+**⑤ 🟡 一条【旧件】的订正（避免下一个人白跑）**
+
+- **G2 说「2 个共享门禁仍红（`check-tomcat-limits` · `check-wave-coupling`）⇒ 仍等我」** ⇒ ⇒ **实测：`check-tomcat-limits` 在 G2 树 = ✅ 全绿**（10 个 api 进程 · 三旋钮 + form-gate 全部 ✅）⇒ ⇒ **那条已过期**；`check-wave-coupling` 在 G2 树 = **9 项** ⇒ ⇒ 属**既有债**（与 §4.10.60 ⑤ 记录的三树分布一致：G1 = 1 · G2 = 9 · G3 = 1 ⇒ 并集 10）⇒ ⇒ **两条都不等本层** ⇒ ⇒ **落点都在 SHARED 面 ⇒ 交合并收口执行者**。
+
 ## 5. 交付物清单
 
 - [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）
@@ -3418,3 +3477,119 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
       ⇒ ⇒ **连带撤下**：§4.10.54 ① 的触发条件（已撤销）· §4.10.56 ③（已加订正注记 · **保留原值**）· 已告知三 lane 的「波末收口起不来」（已发更正）· 向 Jason 提议的「重启 Docker Desktop」（**已撤回 · 不需要任何 Docker 处置**）
       ⇒ ⇒ ⇒ **第 15 次全量的前置阻塞解除** ⇒ ⇒ **唯一剩余触发条件 = 三条 lane 并入本层分支【尖端】**（已满足）
       ⇒ ⇒ **纪律**：**凡据此提议【破坏性处置】的结论，必须有第二个独立探针交叉验证**（本例第二证据 = G2 的 JDBC 探针 ⇒ **当时就在手里 ⇒ 本层没采用**）
+
+#### 4.10.63 🔴🟢 **G2 第二封回信（§5.3e 收口状态）逐条处置 ⇒ 「工具侧新发现」= 本层早已修掉的同一条（跨树陈旧读法）＋ 两个共享门禁的实测现状**（核对日期 2026-10-28 09:3x · 本层 HEAD `2f39b0f`）
+
+> **背景**：G2 发来本域 §5.3e 收口状态（共享层 Redis 断连机制被**两个受益域各做一遍**活体坐实 + 8 项清单 + 4 条「仍在你写权」的事项）⇒ ⇒ 本节逐条处置。
+> ⚠️ **本节最重要的一条不是落码，是【纠正一条陈旧事实】** —— G2 报的「工具侧新发现」**本层在 §4.10.57 就已修掉**，它这回读的是**主干**版本 ⇒ ⇒ **「这是你的决策」实际是【已经做过的决策】**。
+
+**① 🔴 G2 的「工具侧新发现」= 已修的同一条（`9037a2b`）⇒ 不是新发现，是【跨树陈旧读法】**
+
+| 项 | 实测 |
+|---|---|
+| G2 的指控 | 「`REF_RE` 的字符类无 `@` ⇒ 门禁第 4 层的『精确定位通道 ① `module@version/...`』从台账文本永远不可达 ⇒ 该通道实为死代码（工具自测是直调函数绕过 `REF_RE`）」|
+| **真相** | 这**正是** G2 最初报给本层的那一条（本层 §4.10.57 标题即「G2 报的『层 4 精确定位通道是死代码』⇒ 本层落码修掉」）⇒ ⇒ **已落码**（提交 `9037a2b`）⇒ ⇒ **G2 本次读的是【主干 `do-my-own-gh`】的版本** |
+| **blob 三件套** | `tools/check-ledger-selfcheck.py` 的 blob：G1 / G2 / G3 / 本层 = **`4713c112`**（**四棵 lane 树同一份**）· 主干 = **`02abd248`**（旧版）⇒ ⇒ **`9037a2b` 的祖先关系**：四棵 lane 树 **IN** · 主干 **OUT** ⇒ ⇒ **合并主干时会自动带上 ⇒ 本层零动作** |
+| **行号（快照，必须重核）** | 修后 `:215`（四棵 lane 树同）· 修前（主干）`:208` ⇒ ⇒ 跨树引用**行号不同、内容不同** ⇒ ⇒ **§4.10.61 的同族坑** |
+| **内容摘录（修后原文）** | `REF_RE = re.compile(r'`?([A-Za-z0-9_][A-Za-z0-9_@./-]*\.go):(\d+)(?:-(\d+))?`?')` ⇒ ⇒ **字符类含 `@`**；`_direct_module_candidate` 在 `:1100`，**短式后缀唯一匹配**分支在 `:1119–1130`（多命中 ⇒ `None` ⇒ 不猜）|
+| **本层探针实测**（调工具自己的函数，非推理）| `go-zero@v1.10.2/core/load/adaptiveshedder.go:284` ⇒ 捕获完整路径 ⇒ 通道① **HIT** `github.com/zeromicro/go-zero@v1.10.2/core/load/adaptiveshedder.go`；**全式** `github.com/zeromicro/go-zero@v1.10.2/core/load/adaptiveshedder.go:284` ⇒ 同样 **HIT** ⇒ ⇒ **短式 / 全式两条都进得去** ⇒ ⇒ **G2 担心的「短式 vs 全式口径冲突」在本层口径下已不存在**（台账写法**不必改** ⇒ 跨域一致性优先）|
+| **本层动作** | **零落码** ⇒ ⇒ **但必须回信** —— 它据此以为要本层做决策 |
+
+**② 🟢 G2 的「两个共享门禁仍红」⇒ 实测已过期一条、另一条计数也变了**
+
+| 门禁 | G2 的报告 | **本层实测（2026-10-28 09:3x）** |
+|---|---|---|
+| `check-tomcat-limits.py` | 🔴 红（期望表把 task-api 写死 `raw`）| ✅ **EXIT=0** —— **在 G2 自己的树上**（`align/g2-message-like-task` @ `e9c3946`，输出「所有 api 进程的三个旋钮都配好且值正确」）⇒ ⇒ **不是「只在我树绿」** ⇒ ⇒ G2 那封信基于**旧 tip**（它提到我的尖端是 `c814689`，而我的尖端已是 `2f39b0f`；G2 自己的尖端也已从 `454ebca` 前移到 `e9c3946`）|
+| `check-wave-coupling.py` | 🔴 红（**6** 条 `common_radiation` 快照过期）| 🔴 **仍红**，但**逐树实测数不同**：**G2 树 = 9 项** · **四路合并树 `6f5a40f` = 10 项** ⇒ ⇒ 全部是 `common_radiation`（共享层类的**实际引用域集合** 与文档快照不一致）⇒ ⇒ 落点 `docs/DRIFT/_cross/cross-domain-coupling.md` = **SHARED 面** ⇒ ⇒ **本层只登记，不代改**（§4.10.7 ⑥ 的分家规则）|
+| **三个依据文件的 blob 对比** | G2 说「那三个依据文件在我树 vs 你最新 tip 之间逐字节相同」| ✅ **逐字确认**：`cross-domain-coupling.md` = `bf203110`（两侧同）· `check-tomcat-limits.py` = `4639ec0a`（两侧同）· `check-wave-coupling.py` = `f372c063`（两侧同）⇒ ⇒ **⇒ 差异不在守门自身，在【守门扫描到的域侧文件】** ⇒ ⇒ 佐证「红 = 快照滞后」，**不是「红 = 判据错」** |
+
+**③ 🟢 G2 的 8 项清单复核（本层视角）**
+
+| 项 | G2 状态 | 本层复核 |
+|---|---|---|
+| ① 3 处 `DEADLINE_EXCEEDED` 断言 | ✅ 本域侧销号 | ✅ 接受（13:31–13:39 · 9 模块 **970 条 / 0f 0e 0s**）|
+| ② `REJECT_COMMANDS` 断连活体 | ✅ 本域侧销号 | ✅ **接受** —— 关键点在**两个受益域各做一遍**（like + task）⇒ **不是拿一个域的结论覆盖另一个域** ⇒ ⇒ 与本层「受益域实测才算数」口径一致；且「A=0–1ms / B=3004–3016ms」的对照与变异（只红 1 条且精确红在目标断言）**构成机制承重的证据** |
+| ③ 池守门 ⑤⑥ 复跑 | ✅ 本域侧销号 | ✅ 接受 |
+| ④ E66 落码后守门 ① 仍绿 | ⏸ N/A | ✅ **本层确认 E66 仍未立项**（已向 Jason 发问卷，**未答**）⇒ ⇒ **本层不擅自落共享层 Redis 机制** ⇒ ⇒ G2 标 N/A **正确** |
+| ⑤ A3 升 ✅ 的真 Tomcat 探针 | 🟡 **未做** | 🟡 **G2 域内唯一未销号项** ⇒ ⇒ **不转派**（域侧活体 ⇒ 域侧做）⇒ ⇒ **本层只登记** |
+| ⑥ FB-04 like 域 A9 端到端 | ✅ 本域侧销号 | ✅ 接受（口径照 §4.10.62 ① 的 FB-04 行：**只写「RAG 腿 L4 真 gRPC 端到端（含 A/B 对照组 + 变异验证）」，不写「双侧活体闭环」**）|
+| ⑦ FB-03 三域链层守门升级 | ✅ 已完成 | ✅ 接受 |
+| ⑧ 合并后全仓字节级 U+FFFD 复扫 | ✅ 本域侧销号 | ✅ 接受（**4103 份**扫描 ⇒ 含 `target/` **18 份/60 字节** · 剔 `target/` **15 份/38 字节** ⇒ 差额逐条解释 = **3 个 stale jar**（构建于 12:00/12:48，早于源修复）+ **2 字节**故意保留的故障样本）⇒ ⇒ ⚠️ **口径提示**：「是否计 `target/`」在三方与 G1 的清单里口径不同（**收口时要统一**，否则同一个数会被读成两个数）|
+
+**④ 🔵 本轮共享层状态（本轮落码 = 零）**
+
+| 项 | 实测 |
+|---|---|
+| 本层 HEAD | `2f39b0f`（`git status --short` 干净 · 未 push）|
+| 各 lane HEAD（09:3x）| G1 `a080723` · G2 `e9c3946` · G3 `c1954e2` · 主干 `c9cf2c1` |
+| **我层尖端被合入情况** | G1 **已含** `2f39b0f` · G2 **落后 1 笔** · G3 **落后 2 笔** ⇒ ⇒ **三树台账仍未同源**（docs + tools ⇒ **零行为影响** ⇒ 不阻塞全量）|
+| 四路合并树（09:3x 重建）| merge commit **`6f5a40f`** · 真 git worktree `/tmp/g4-wt-merge-1793151161506242000` ⇒ ⇒ 关键提交 `d4e4745`(A) / `4786eb5`(B) / `9dd67ab` / `cd893d1` / `9037a2b` **全 IN** |
+| 合并树守门 | ✅ `check-tomcat-limits` · `check-wave-lane-ownership` · `check-wave-role-model` · `check-grpc-interceptor-wiring` · `check-flyway-ledger` **全 EXIT=0** · 🔴 `check-wave-coupling` **EXIT=1（10 项 · SHARED 既有债）** |
+| **本轮落码** | **零**（本节全部是核对与登记）⇒ ⇒ **第 15 次全量仍是必跑项** —— 共享层生产代码在 `d212323` 改过 ⇒ ⇒ **「跑绿 ≠ 对」** ⇒ ⇒ 必须全量 |
+
+**⑤ 🆕 本轮新增纪律（3 条）**
+
+1. **跨会话来信里的「代码 / 工具现状」类断言 ⇒ 必须当场按 commit 重核，并追问「你读的是哪棵树」**
+   ⇒ ⇒ 本轮 G2 的两条「工具侧新发现」：**一条早已修掉** · **一条实测已过期** ⇒ ⇒ **都不是新发现**
+   ⇒ ⇒ 同族：§4.10.61（时间错位）· §4.10.60（跨树引用要对齐 commit）· AGENTS.md §3.1（不要拿现有代码当对照基准）
+2. **「守门红」的归因必须先分家：守门自身 vs 守门扫描到的域侧文件**
+   ⇒ ⇒ 三个依据文件 blob 逐字相同 ⇒ ⇒ 红因在**被扫描侧** ⇒ ⇒ 「红 = 快照滞后」而非「红 = 判据错」
+3. **回信里给结论要给「可复跑的判据」，不是「我这边是绿的」**
+   ⇒ ⇒ 本节每条都带 **blob / 行号 / 原文摘录 / 探针输出** ⇒ ⇒ 对方不必信我，自己能重跑一遍
+
+#### 4.10.64 🔴🟢 **G3 转派「favorite-api 4 条真 Tomcat 用例红（JDK HttpClient interim 上限 8）」⇒ 根因 = 共享层 1xx 探针（`15cf93a` 已修）· 归属 = 域内 (b) · G3 已自行落地 ⇒ 本层零落码**（核对日期 2026-10-28 09:4x · 本层 HEAD `a5a8619`）
+
+> **信的时效**：G3 这封**信上日期是 2026-10-27**（迟到约一天）⇒ ⇒ 按纪律**不采信转述**，逐条按**当前状态**重核。
+> ⚠️ **本节最重要的一条不是落码，是【把「现象」与「根因」分开采信】** —— 现象（4 条红）**当时为真**，根因（Tomcat 连发 9 次 100-Continue）**当时为假**。
+
+**① 现象复核 ⇒ 4 条现在全绿**
+
+| 项 | 实测 |
+|---|---|
+| 树 | G3 树 `align/g3-article-comment-favorite-hot` @ **`b28326c`** |
+| 证据 | `service/favorite/favorite-api/target/surefire-reports/`（**报告时间 09:36–09:37 今天**）⇒ `FavoriteApiRealTomcatGateTest` = **13 条 / 0 failures / 0 errors / 0 skipped** · `FavoriteApiEnvelopeParityTest` = **6 条 / 0f / 0e / 0s** |
+| 4 条目标用例 | `nonEmptyFormValueCountOverLimitIsRejected` **PASS** · `nonEmptyFormValueCountAtLimitIsPassedThrough` **PASS** · `containerParameterLimitIsSurfacedAsGoParseError` **PASS** · `tooManyFormParamsMatchGoByteForByte` **PASS** |
+
+**② 根因（**不是** Tomcat，**不是**容器上限）⇒ 是共享层自己的 1xx 探针**
+
+| 项 | 实测 |
+|---|---|
+| 真源 | `service/common/src/main/java/com/rag/common/observability/GoStyleClientDisconnectProbe.java:234` ⇒ 直接写裸字节 `"HTTP/1.1 103 Early Hints\r\n\r\n"` ⇒ ⇒ 1xx 行数 ≈ 耗时 ÷ 探测间隔 ⇒ **原本无上界** ⇒ ⇒ 任何耗时 > ~4s 的请求都能让 JDK `java.net.http` 客户端抛 `ProtocolException: Too many interim responses received: 9 > 8` ⇒ ⇒ **客户端读不到最终响应** |
+| **已修** | **`15cf93a`**（共享层）—— 1xx 探针**每请求**上界 **4**（**取客户端硬上限 8 的一半留余量**）⇒ ⇒ 祖先关系：**四棵 lane 树 IN** · 主干 **OUT** ⇒ ⇒ **合并主干时自动带上** |
+| **G3 信里 ③ 的推断【机制上不成立】** | 「Tomcat 发了 9 次 **100-Continue**」⇒ ⇒ Tomcat **只在收到 `Expect: 100-continue` 时**才发 100-Continue ⇒ ⇒ **全仓 `expectContinue` 零命中** ⇒ ⇒ ⇒ **且与 G3 自己的 javadoc 自相矛盾**（其 javadoc 写的是「103 Early Hints，**不是** 100 Continue」）|
+| **G3 javadoc 的归因【错】** | `RealTomcatHttp` 类注释 + `FavoriteApiRealTomcatGateTest:178-180` 写「**Tomcat 11.0.24** 在这类请求上连发 103 Early Hints」⇒ ⇒ **真源是共享层探针** ⇒ ⇒ ⚠️ **同一个归因错误在共享层已于 `15cf93a` 订正过一次**（`GoStyleTimeoutResponseRaceGateTest` 注释：Tomcat `sendEarlyHints` **只有定义、无内部调用方**；**401 路径实测零 1xx** ⇒ 若是容器自发，401 也该有）⇒ ⇒ **域内又犯一次** ⇒ ⇒ **建议 G3 订正**（域侧文件 ⇒ 域侧改）|
+
+**③ 归属与修法 ⇒ (b) 是对的方向，且 G3 已自行落地 ⇒ 本层零落码 · 不派单**
+
+| 方案 | 裁定 |
+|---|---|
+| (a) 共享层压下 Tomcat 的 1xx 次数 | ❌ **不可取** —— 要改**容器行为**去迁就**测试客户端的硬上限** ⇒ 反而偏离 Go；且根因根本不在这条路径上 |
+| (b) 域内改传输层（不改断言语义） | ✅ **对的方向** —— 且 **G3 已自行落地**：`service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/support/RealTomcatHttp.java` ⇒ ⇒ ⚠️ **是域内测试类、不是共享层产物** ⇒ ⇒ **零写权冲突 · 本层零动作** |
+| (c) 回退 favorite 的容器上限 | ❌ **不取** —— 与「容器上限一律 10001」（§4.10.15.5）的论证直接冲突 ⇒ ⇒ 把漂移留在原地 |
+
+**④ 🟡 残留风险（**域内决定**，本层不代改，但必须让 G3 知道）**
+
+- 4 条目标用例**全是 bodyless GET**（都走 `getWithToken` ⇒ `HttpRequest.BodyPublisher` 为空）⇒ ⇒ `RealTomcatHttp` 的回落（`bodyPublisher().isPresent()` ⇒ 原样上抛 ⇒ **只有无体请求才回落**）⇒ ⇒ **回落对这 4 条 100% 生效**。
+- ⇒ ⇒ **若共享层的行数上界回归（1xx > 8 条），这 4 条会回落 `HttpURLConnection` 并【继续绿】** ⇒ ⇒ **共享层回归就此失去跨域证人**。
+- ⇒ ⇒ 兜底只剩共享层自己的 `GoStyleClientDisconnectProbeBudgetGateTest` ②（**真 JDK HttpClient** · `service/common/src/test/.../GoStyleClientDisconnectProbeBudgetGateTest.java:186-206`）⇒ ⇒ 系统**不是全盲**，但**域侧独立证人没了**。
+- ⇒ ⇒ **建议（二选一，域内裁定）**：**删掉回落**（让域侧重新成为独立证人）**或**保留但在 javadoc 写明「**本回落会吞掉共享层 1xx 上界回归 ⇒ 那一层只有共享层守门兜底**」。
+
+**⑤ 🟢 G3 ⑥ 的跨域事实（登记）⇒ 与共享层现状【一致】，但带出一条对域内的警告**
+
+| 项 | 实测 |
+|---|---|
+| G3 的断言 | 「Java `recordException` **不改** status」⇒ ⇒ 可直接采信（字节码实测无 `setStatus` 调用）|
+| 共享层现状 | `service/common/src/main/java/com/rag/common/observability/Observability.java:108-109` 与 `:131-132` ⇒ **=`recordException(...)` ＋【显式】`setStatus(StatusCode.ERROR, msg)`** ⇒ ⇒ **共享层是对的**（Go 侧 `observability.go:103` 的 `span.RecordError(...)` 会把 status 置 ERROR ⇒ Java 必须显式补）|
+| ⚠️ **对域内的警告** | **域内 span 若只调 `recordException` ⇒ status 恒 UNSET ⇒ 与 Go 的 `RecordError` 漂移** ⇒ ⇒ ⇒ **这是域内写权 ⇒ G3 自查**（本层不代改）|
+
+**⑥ G3 其余进展登记（证据强度按 G3 自述，不当作已闭环）**
+
+- favorite 域 **16 个业务 span 已落码**（Go 侧 api 7 ＋ rpc 9，含 2 个 `Dependency.*`）· 域侧私有 `FavoriteSpans` 放 `favorite-common`（api/rpc 共用）⇒ ⇒ **共享层零改动**。
+- 三类判据**逐字保留 Go 侧的不一致**（api 鉴权失败不记错 / rpc 凡错都记 / 依赖 span 只记下游失败）⇒ ⇒ **没有套用 comment 域的「码段 ≥5000 才记」**。
+- 🔴 **守门未写**（`FavoriteApiSpanWiringTest` / `FavoriteRpcSpanWiringTest` ＋ 变异待补）⇒ ⇒ **不得读作已闭环**。
+
+**⑦ 🆕 本轮新增纪律**
+
+1. **跨会话来信里的「现象」与「根因」要【分开采信】** —— 本轮现象**当时为真**、根因**当时为假** ⇒ ⇒ **来信自带根因推断时，必须用当前状态 + 共享层真源独立复核**（同族：§4.10.63 ⑤ ①「按 commit 重核」）
+2. **修法方向对了 ≠ 归因对了** —— G3 的 (b) 修法**正确且有效**，但它把归因写进了 javadoc ⇒ ⇒ **错误归因一旦写进代码注释，下一个人会照着它去改错的地方** ⇒ ⇒ **归因订正必须单独提出来，不能被「修好了」盖过去**
+3. **域内加的「回落 / 兜底」要问一句：它会不会把被测缺陷吞掉** —— 本例 4 条**全是 bodyless GET** ⇒ 回落 100% 生效 ⇒ ⇒ **共享层回归失去跨域证人**（兜底只剩共享层自己的真 HttpClient 守门）

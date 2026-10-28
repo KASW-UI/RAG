@@ -56,6 +56,31 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
  * <p>⇒ ⇒ 域侧那 9 份的删除属于<b>各域的写权</b> ⇒ 共享层<b>只提供这份标准件</b>，
  * <b>不代删</b> ⇒ ⇒ 删完之后，全仓只剩<b>这一份</b>排序桥。
  *
+ * <h2>🔴🔴 域侧删副本时：回归【必须带 {@code mvn clean}】</h2>
+ * <p>（2026-10-28 · G1 实测带出 ⇒ 本层写进共享层 javadoc，因为<b>踩坑点在共享层这份被依赖的方式上</b>）
+ * <p>域侧删掉那份域内副本时，<b>必须同批删掉该模块 {@code AutoConfiguration.imports} 里注册它的那一行</b>
+ * ⇒ ⇒ 只删 java 文件、不删那一行 ⇒ Boot 启动期找不到类 ⇒ 上下文起不来。
+ * <p>🔴 <b>但即使两处都删对了，回归也可能是红的</b> ⇒ <b>原因不在代码，在 stale 产物</b>：
+ * <ul>
+ *   <li>{@code maven-resources-plugin} <b>不会删除已删源文件的副本</b> ⇒ ⇒ {@code target/classes} 里
+ *       <b>旧的 {@code .imports} 与旧的 {@code .class} 仍在</b>；</li>
+ *   <li>⇒ ⇒ Boot 照旧注册那个「<b>源码已不存在</b>」的类 ⇒ ⇒ 报
+ *       {@code IllegalStateException: Unable to read meta-data for class …}
+ *       （栈顶 {@code AutoConfigurationSorter$AutoConfigurationClass.getAnnotationMetadata}）；</li>
+ *   <li>⇒ ⇒ <b>看起来像「收编失败」，其实是 stale 产物</b>。</li>
+ * </ul>
+ * ⇒ ⇒ <b>处置 = 回归带 {@code mvn clean}</b>（或至少清掉该模块的 {@code target/classes}）
+ * ⇒ ⇒ <b>判据</b>：红在 {@code Unable to read meta-data for class …} ⇒ <b>先查 stale 产物，别急着判收编失败</b>。
+ *
+ * <h2>🔴 本类【没有】{@code @ConditionalOnMissingBean} ⇒ 「遮蔽」不成立</h2>
+ * <p>（2026-10-28 · G1 实测订正本层台账的旧表述）
+ * <p>域内副本与本类<b>并存</b>时：<b>两份都会被注册</b>（两份都刻意类体为空、<b>不注册任何 bean</b>）
+ * ⇒ ⇒ <b>零行为影响，但不是「遮蔽」</b> ⇒ ⇒ 真正的差别只是「<b>排序图上多一个同向节点</b>」
+ * （域内用类字面量、共享层用字符串，但指向<b>同一对 FQN</b> ⇒ 同向等价、无环）⇒ ⇒ 删除仍<b>零行为差</b>。
+ * <p>⚠️ <b>别与 Redis 那份混谈</b>：{@code GoStyleRedisClientAutoConfiguration} <b>确实有</b>
+ * {@code @ConditionalOnMissingBean} ⇒ ⇒ <b>那里「遮蔽」是准确表述</b> ⇒ ⇒
+ * <b>「遮蔽」一词在两处含义不同 ⇒ 不能互相套用</b>。
+ *
  * <h2>本类的「行为面」是什么</h2>
  * <p>本类<b>不注册任何 bean</b>，也<b>不改变任何运行时行为</b>
  * ⇒ ⇒ 它只是让 {@code MybatisPlusAutoConfiguration} 能够被求值
