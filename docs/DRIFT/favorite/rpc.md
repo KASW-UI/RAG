@@ -3809,3 +3809,36 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 **🔴 同域的段数闸门（Go `net/url` 段数上限）**：canonical 在
 [`docs/DRIFT/favorite/api.md`](../favorite/api.md) **§21**（含 §21.3 的
 「`MAX_PARAMETER_COUNT = 10001` 是设计值」订正）。
+
+## 📌 NUL 转义（2026-10-28 · G3）—— 真 NUL 字节换成 Java 源码转义，零行为变化，且让文件变回【文本】
+
+### 起因
+
+G4 通报（2026-10-28）：`service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteDdlParityTest.java`
+含 **4 个真 NUL 字节** ⇒ ⇒ git 按**二进制**处理 ⇒ ⇒ **三方合并不做文本合并** ⇒ ⇒
+`git merge-tree --write-tree` 产出**「揉出来」的第三版**且**不报冲突** ⇒ ⇒ **「零冲突」推不出「内容完整」**。
+
+### 本域处置（已落码 · 零行为变化）
+
+| 项 | 值 |
+|---|---|
+| 改法 | 4 处字符串字面量里的**真 NUL 字节** ⇒ 换成 **Java 源码转义 `"\0"`**（八进制转义 ＝ `U+0000`）⇒ ⇒ **运行时字节完全一致** ⇒ **被测语义不变**（Redis 复合 key 的分隔符不变） |
+| 字节计数 | `b'\x00'` **4 → 0**（改后文件**变回文本**）⇒ ⇒ `git diff --numstat` 恢复输出行数（不再是 `-  -`） |
+| 改法边界 | ⛔ **不改被测语义**（key 的字节内容不能变）⇒ ⇒ **只改源码里的写法** |
+| 守门 | `mvn -B -o --fail-at-end -pl service/favorite/favorite-rpc -am test -Dtest='FavoriteDdlParityTest'` ⇒ **1 条 / 0 failures / 0 errors / 0 skipped / BUILD SUCCESS**（8.7 s，**真 PG + Testcontainers 活体** ⇒ 不是「编译过」而已）|
+| 脚本化改法 | 字节级替换（`b'"\x00"'` → `b'"\\0"'`）＋ **守恒断言**（除目标替换外其余字节必须一致）＋ **停手条件**（命中数不等于预期 ⇒ 不改）⇒ ⇒ 脚本见 `/tmp/g3_fix_nul.py`（仓外）|
+| ⚠️ **注意行号漂移** | 插入 3 行说明注释 ⇒ ⇒ 该文件 NUL 位置由 `:138`/`:185` 变为 `:141`/`:188` ⇒ ⇒ **引用必须带 commit** |
+
+### 🔴 订正我自己原来写错的一条
+
+[`PIT-FAV-RPC-040`](../../Pitfalls/favorite/rpc.md#🔴-订正2026-10-28-102x--g3-第-2-条处置的理由是错的且真-nul-的真正代价不是语义)
+原写「🔴 **不要「修」** ⇒ ⇒ 把它换成 `\0` 转义、或删掉 ⇒ ⇒ **会改变被测语义**」⇒ ⇒ **该理由是错的**（`"\0"` 运行时等价 ⇒ 语义不变）⇒ ⇒
+并且原写「本条与 `PIT-FAV-RPC-038`（U+FFFD 那条）同款处置 ⇒ 保持原样 ⇒ 不许「修」」⇒ ⇒ **过度推广** ⇒ ⇒
+**判据**：「**值**不许改」（题材 / 被测对象）vs 「**写法**可以改」（可改写法的夹具）⇒ 二者别混。
+⇒ ⇒ 原结论（① `binary file matches` ≠ 编码损坏 · ② 4 个 NUL 是故意夹具 · ③ 字节往返安全）**全部保留**。
+
+### ⚠️ 顺带：G1 域那 2 处真 NUL（G1 写权面 · G3 只登记）
+
+`docs/DRIFT/users/admin/rpc.md:1329` / `:1334` 含 **2 个真 NUL**（引述 `extra_info = {"k":"«NUL»"}` 的 payload）⇒ ⇒
+按 **G1 自己在 `docs/DRIFT/users/admin/rpc.md:2483-2487` 定的记号约定**（「凡要在文档里展示损坏字节，一律用 `⟪U+FFFD×n⟫` 之类的可见记号」）⇒ ⇒
+**这 2 处也该换成可见记号** ⇒ ⇒ ⛔ **G1 写权面，G3 不代改** ⇒ ⇒ **已通知 G1**（否则 G4 的「文档零 NUL」守门一落地就会红在 G1 域）。
