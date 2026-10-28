@@ -38,7 +38,7 @@ import static org.mockito.Mockito.when;
  * <ul>
  *   <li>{@code service/hot/common/errmsg.go:15-17} ——
  *       {@code func (e *CodeError) Error() string { return fmt.Sprintf("ErrCode:%d, Errmsg:%s", e.Code, e.Msg) }}；</li>
- *   <li>{@code service/hot/common/logger/logger.go:118-123} ——
+ *   <li>{@code service/common/logger/logger.go:118-123} ——
  *       日志的 {@code error_reason} 取 {@code err.Error()}；</li>
  *   <li>{@code service/hot/api/internal/logic/hot/getHotArticlesLogic.go:70-74} ——
  *       hot-rpc 返回空响应时：{@code nilRespErr := hotcommon.NewErrCode(5001)}；

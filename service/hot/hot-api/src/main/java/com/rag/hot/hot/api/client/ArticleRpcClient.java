@@ -24,7 +24,7 @@ import org.springframework.stereotype.Component;
  *   })
  * </pre>
  * 即 {@code PublicOnly=true} / {@code IncrView=false} 是<b>每次调用都要记得重复一遍</b>的约定，
- * 而 {@code ArticleRPC} 暴露的是<b>完整请求结构</b>（Go 侧 {@code serviceContext.go:104} 已注意到这点）。
+ * 而 {@code ArticleRPC} 暴露的是<b>完整请求结构</b>（Go 侧 {@code service/hot/api/internal/svc/serviceContext.go:20-22} 已注意到这点）。
  * <p>本 facade 只暴露 {@code getPublicArticle(articleId)}，两个 flag 在<b>唯一出口</b>硬编码：
  * <ul>
  *   <li><b>语义等价论证</b>：Go 侧本组件<b>只有这一个调用点</b>（{@code grep GetArticle}

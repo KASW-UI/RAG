@@ -846,7 +846,7 @@ class ArticleTransactionWiringTest {
      *
      * <p><b>Go 出处</b>：声明点 {@code service/article/rpc/internal/model/article.go:31}
      * {@code UpdatedAt time.Time `gorm:"autoUpdateTime"`}；
-     * <b>消费点</b> {@code gorm@v1.31.2/callbacks/update.go:243-259}：
+     * <b>消费点</b> {@code gorm@v1.31.1/callbacks/update.go:238-241}：
      * <pre>{@code
      * if field.AutoUpdateTime > 0 && value[field.Name] == nil && value[field.DBName] == nil {
      *     if v, ok := selectColumns[field.DBName]; (ok && v) || !ok {

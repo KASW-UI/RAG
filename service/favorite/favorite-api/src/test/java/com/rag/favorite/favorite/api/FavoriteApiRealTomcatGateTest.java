@@ -145,7 +145,7 @@ class FavoriteApiRealTomcatGateTest {
      */
     private static final String FOLDER_LIST = "/favorite/v1/folder/list";
 
-    /** favorite-api 的默认 AccessSecret（application.yml:94 的默认值，测试未覆盖它）。 */
+    /** favorite-api 的 AccessSecret 取值 —— ⚠️ 主 yaml 的**明文默认值已于 2026-10-29 去掉**（P0 #8 域侧修）⇒ 这里不再是「默认值」，而是 **test scope** 的 `src/test/resources/application.properties`（**不进产物 jar** ⇒ 生产拿不到）。 */
     private static final String ACCESS_SECRET = "ae0536f9-6450-4606-8e13-5a19ed505da0";
 
     @LocalServerPort

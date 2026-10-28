@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit;
  * 本组件最容易被「测成假绿」的两条断言是：
  * <ul>
  *   <li><b>{@code PublicOnly=true / IncrView=false}</b>：这两个 flag 是 Go 侧
- *       {@code _test.go:35-37} 用 fake 客户端主动断言的不变量；
+ *       {@code getHotArticlesLogic_test.go:35-37} 用 fake 客户端主动断言的不变量；
  *       用 Mockito mock 掉 {@code ArticleRpcClient} 就等于<b>把被测行为本身 mock 掉了</b>。</li>
  *   <li><b>2 秒 deadline</b>：devh starter 不提供默认 deadline，
  *       它由 {@link GoStyleGrpcCallDeadline} 施加 —— 只断言「方法被调用过」完全测不到它。</li>

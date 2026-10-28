@@ -39,7 +39,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li>{@code rest/httpx/requests.go:153-155} —— {@code withJsonBody}</li>
  *   <li>{@code rest/httpx/util.go:15,44-61} —— 2048 上限 / 空值丢弃 / {@code []} 后缀</li>
  *   <li>{@code core/mapping/unmarshaler.go:835-846} —— 同名多值取 {@code Index(0)}</li>
- *   <li>{@code core/mapping/jsonunmarshaler.go:45-53} + {@code core/jsonx/json.go:63-77}
+ *   <li>{@code core/mapping/jsonunmarshaler.go:45-52} + {@code core/jsonx/json.go:63-77}
  *       —— JSON body 的语法校验与「只读一个值」语义</li>
  * </ul>
  * 期望值由 <b>Go 活体探针</b>（{@code httpx.Parse} + 逐字复制的 {@code types.HotArticlesReq}）跑出来，
@@ -142,7 +142,7 @@ class HotApiGoParseParityTest {
     }
 
     // ==================================================================
-    // 规则 6：JSON body 的拒绝路径（Go httpx/requests.go:153-155 + jsonunmarshaler.go:45-53）
+    // 规则 6：JSON body 的拒绝路径（Go httpx/requests.go:153-155 + jsonunmarshaler.go:45-52）
     // ==================================================================
 
     @Test

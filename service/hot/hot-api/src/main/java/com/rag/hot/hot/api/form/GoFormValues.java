@@ -93,7 +93,7 @@ import java.util.Map;
  *   httpx/requests.go:66-68   ParseJsonBody（Parse 的最后一步，**无条件**执行）
  *   httpx/requests.go:153-155 withJsonBody(r) = r.ContentLength &gt; 0 &amp;&amp;
  *                                       strings.Contains(Content-Type, "application/json")
- *   core/mapping/jsonunmarshaler.go:45-53
+ *   core/mapping/jsonunmarshaler.go:45-52
  *       jsonx.UnmarshalFromReader(reader, &amp;m)   // ← 先做 JSON 语法校验
  *       unmarshaler.Unmarshal(m, v)                 // ← 再按 json tag 填字段
  * </pre>

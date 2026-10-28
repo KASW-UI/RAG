@@ -76,7 +76,7 @@ public class ArticleEntity {
      * 对应 Go {@code SecondaryTags StringArray `gorm:"type:jsonb"`}。
      *
      * <p>⚠️ Go 的 {@code StringArray.Scan} 在 {@code value == nil} 时置 <b>nil</b>（不是空切片）。
-     * 本实现同样保持 null，这样 {@code list_articles_logic.go:184} 的
+     * 本实现同样保持 null，这样 {@code update_article_logic.go:184} 的
      * {@code len(in.SecondaryTags) > 0} 与之保持同一语义。
      */
     @TableField(typeHandler = JsonbTypeHandler.StringListTypeHandler.class)

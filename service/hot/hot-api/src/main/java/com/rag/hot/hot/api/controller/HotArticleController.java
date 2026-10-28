@@ -67,7 +67,7 @@ public class HotArticleController {
     }
 
     /**
-     * {@code GET /hot/v1/articles} —— Go {@code getHotArticlesHandler.go:15-32} +
+     * {@code GET /hot/v1/articles} —— Go {@code getHotArticlesHandler.go:15-31} +
      * {@code getHotArticlesLogic.go:54-89}。
      *
      * <p>Go 的 handler 是「薄适配层」：Parse → Logic → {@code httpx.OkJsonCtx}，

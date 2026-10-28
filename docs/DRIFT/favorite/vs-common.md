@@ -206,3 +206,49 @@
 | **Redis 池形态 = 无池** | **依赖共享层的 dependency 状态**（`isPoolEnabled` 的 classpath 回退） | ✅ 共享层 classpath 上 `commons-pool2` **零命中** ⇒ ⇒ 结论成立 | 共享层依赖树一变 ⇒ ⇒ 池形态**静默翻转** ⇒ ⇒ 要重核 |
 
 ⇒ **判据明细表见 [`favorite/api.md` §17](api.md#17-🔴-阈值类结论的共享层依赖声明2026-10-27--按-g2-3-的要求做的重核)**（同款机制，三域共用一条判据）⇒ ⇒ **改一处要三域一起重核**。
+
+---
+
+## 6. 🔴 域内未闭合项清单（2026-10-29 · G3 域内收敛自查 A · 全量盘点）
+
+> **盘点口径**：把本域**全部**台账（`api.md` / `rpc.md` / `common.md` / `proto.md` ＋ 本文件）里
+> 所有「未闭合 / 开放 / 待办 / 未修 / 仍 OPEN」条目**逐条**取出 ⇒ 定状态
+> （**已闭 / 仍开 / 范围外 / 归属他方**）＋ 是否阻塞阶段 1 ＋ 证据指针。
+> ⚠️ **本清单是「现状面」**；各轮的「判定变化」表是**历史记录**（AGENTS.md §6.3 状态表纪律）。
+> ⚠️ **登记类事项不进本清单**：已进 `docs/Intentional_Deviations/` 的候选（🏷 候选，建议签）
+> **按 AGENTS.md §5.3c「登记完就躺着，不升级为拍板」** ⇒ 不重复列出、不推拍板。
+
+| # | 项 | 状态 | 归属 | 阻塞阶段 1？ | 证据 |
+|---|---|---|---|---|---|
+| **F-1** | **`U7` rpc 层整域双侧活体对拍**（错误码契约层已做成双侧对拍，**但那是 `favorite-common`，不是 rpc 层**；指标 result 语义只有单侧 Go 锚定 ＋ RAG 侧运行时守门） | 🔴 **仍开 —— 本域最大缺口** | 🟢 **G3（本域）** ⇒ ⚠️ **环境受限**（Go 侧 `etcd` / Kafka 仍不可拉起） | 否 | [`rpc.md` §9.3 `U7`](rpc.md) |
+| **F-2** | **§5 交付物清单「第 0 步：组件真的启动一次」** —— `tools/ddl-parity-probe/favorite/run.sh` 的 RAG 侧是**用 `psql` 直接执行 Flyway 迁移脚本**（`run.sh:180-190` 逐个 `psql_q -d ragdb -f -`）⇒ **全程不启 Java 进程** ⇒ 它证明的是「迁移脚本产出的 DDL 与 Go `AutoMigrate` 一致」（A8 的 L4 成立），**不构成「组件真的启动过」的证据** | 🔴 **仍未完成**（原稿误勾 `[x]` ⇒ 已改回 `[ ]`） | 🟢 **G3（本域）** | 否（影响 A8 结论的**解读**，不改 A8 判定） | 本文件 §5 交付物清单第 1 项 |
+| **F-3** | **`DRIFT-HOTAPI-030` 后续格**（总「值」数超过 Go 的 10000 段上限：Go 拒 400 ＋ `net/url` 原文 / 本域**没有**实现这道段数上限） | 🔴 **仍 OPEN**（**显式登记，不假装闭合**） | 🔴 **global / G4**（共享层段数闸门因本域 = `OFF` 而**不装**）＋ 域侧那半 | 否 | 本文件 §4 表「仍未闭合的下一格」行 |
+| **F-4** | **P0 #8 的共享面半边**（根级 compose 的 `:?` ＋ 根 README 的 `.env.example`） | 🔴 **仍开**（**域侧那半已修**：`application.yml` 去明文默认值 ＋ `@PostConstruct verifyAccessSecret()` ＋ test scope `application.properties` ＋ **3 例真 `ApplicationContextRunner`** 守门 ⇒ **3/3 绿**） | 🔴 **合并收口执行者**（根级文件**无人拥有** ⇒ 根因**并入 G1 的 `S1-USERS-001`**） | **否**（域侧已修 ⇒ P0 #8 的**域侧部分**闭合；⚠️ **P0 #8 整体仍不能判 ✅**） | [`api.md` §24](../favorite/api.md) 第 6/8/11 项 |
+| **F-5** | **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现） | 🔴 **仍开** | 🔴 **global / 收口**（落点在 `service/common` ⇒ **不在 G3 写权面**） | 否 | [`api.md` 头部「未决」行](../favorite/api.md) |
+| **F-6** | **rpc 域的其余明文默认值**（`${POSTGRES_PASSWORD:password}` / `${MINIO_SECRET_KEY:minioadmin}` / `${*_AUTHORITY_TOKEN:}`） | 🟡 **已登记，本轮未动** | 🔴 **G4**（需**单独单据**） | 否 | [`api.md` §24.2 第 8 项第 ③ 条](../favorite/api.md) |
+| **F-7** | **本机 `ddl-favorite-pg` 需重跑一次真 Flyway 迁移**（或重建容器）才能让静态对照与 L4 结论一致 | ⚠️ **环境动作**（**不是代码缺陷** ⇒ 登记为未闭合项，不阻塞阶段一） | 🟢 **G3（本域）** | 否 | [`rpc.md` §「可执行动作」](rpc.md) |
+
+⇒ **favorite 域的「域内可动」未闭合项 = F-1 / F-2 / F-7 三条**（F-3/F-5 属 global，F-4 属根级，F-6 属 G4）⇒ ⇒ **本域阶段一判定不变**。
+
+---
+
+## 7. 🔴 Go 出处引用漂移自查（2026-10-29 · G3 域内收敛自查 B）
+
+> **为什么这是缺陷而不是笔误**：以「Go: …」措辞写在 javadoc / `@DisplayName` / 断言消息里的断言
+> **改一行不会让任何测试变红** ⇒ ⇒ **绿测试可能守着一个错的事实**（AGENTS.md §3.3.2）。
+> ⚠️ **守门本体见 [`article/vs-common.md` §7.1](../article/vs-common.md)（四域共用，G3 域侧落码）**
+> ⇒ 本节只列**本域**的订正项。
+
+| # | 落点 | 原引用 | 订正为 | 缺陷类型 |
+|---|---|---|---|---|
+| 1 | `favorite-api/.../FavoriteApiEnvelopeParityTest.java:101` ＋ `favorite-api/.../FavoriteApiRealTomcatGateTest.java:148` | 「favorite-api 的**默认** AccessSecret（**`application.yml:94` 的默认值**，测试未覆盖它）」 | 「favorite-api 的 AccessSecret 取值 —— ⚠️ 主 yaml 的**明文默认值已于 2026-10-29 去掉**（P0 #8 域侧修）⇒ 这里不再是「默认值」，而是 **test scope** 的 `src/test/resources/application.properties`（**不进产物 jar** ⇒ 生产拿不到）」 | **前提失效 + 行号错**（⚠️ **本轮 `45e0af4` 把主 yaml 的默认值去掉后**，原注释描述的是**已不存在的代码**；且 `:94` 本来就不是那一行 —— 旧文件该行是 `max-wait: 4s`）⇒ ⇒ **典型「台账/注释的现在时描述已过期」形态** |
+
+⇒ **本域 1 类（2 处）已订正（零行为变更：注释 / `@DisplayName`）** ⇒ 本域守门实测 **EXIT=0**（`LINE_OOB` / `FILE_MISSING` / `EMPTY_LINE` / `VERSION_MISMATCH` **全 0**）。
+
+---
+
+## 8. 🔴 台账内部矛盾 / 过期结论订正（2026-10-29 · G3 域内收敛自查 C）
+
+| # | 结果 |
+|---|---|
+| — | ✅ **本域真矛盾 = 0 条** —— 跨行扫描（**排除「同一行『修复前 → 修复后』两列」**这个第一版误报）⇒ favorite 域**无「前提失效」的真矛盾** ⇒ ⇒ **记录「扫过、0 条」本身也是证据**（免得后人重复扫一遍）<br>⚠️ **但本域有一处「过期描述」已在本轮随 §7 一并订正**：`favorite-api` 的两处注释仍把 AccessSecret 写成「**主 yaml 的默认值**」⇒ 而那个默认值**已被本轮 P0 #8 的域侧修复去掉** ⇒ ⇒ **描述的是已不存在的代码** ⇒ 已改指 **test scope** 的 `src/test/resources/application.properties` |

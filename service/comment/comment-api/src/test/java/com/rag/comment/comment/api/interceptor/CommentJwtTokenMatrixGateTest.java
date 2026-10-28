@@ -43,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *     map_claims.go:118-121  'none' 由 Parse 显式拒绝（"signature type is not allowed"）
  *   go-zero@v1.10.2
  *     rest/token/tokenparser.go:81-84  doParseToken → request.ParseFromRequest
- *     rest/token/tokenparser.go:127-129 newParser() = jwt.NewParser(jwt.WithJSONNumber())
+ *     rest/token/tokenparser.go:122-124 newParser() = jwt.NewParser(jwt.WithJSONNumber())
  *                                  ⇒ **没有** WithValidMethods ⇒ 不限制 alg
  * </pre>
  *

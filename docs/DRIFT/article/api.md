@@ -855,16 +855,23 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 | CASE-27 事务回滚 | — | 无事务 | 无事务 | N/A |
 | CASE-28 缓存命中/未命中 | — | 无缓存 | 无缓存 | N/A |
 
-### 8.3 建议补的探针（本轮**未做**，列为待办）
+### 8.3 建议补的探针（**2026-10-24 第二轮当时未做** ⇒ **2026-10-29 G3 逐条重核**）
 
-1. **CASE-17/18 双侧活体对拍**：Go 侧用 `httptest` + 真实 `UploadImageHandler` 注入一个
-   `status.Error(codes.Unavailable, …)` 的 fake client，断言 HTTP 503；RAG 侧同理。**这是修 DRIFT-001 的前置**。
-2. **真实 Tomcat 探针**：参照 `like-api` 的 `LikeApiRouterErrorRealTomcatTest`，
-   起 `RANDOM_PORT` 容器，断言 400 响应的 `Content-Type: text/plain; charset=utf-8`（**带空格**）
-   与 `X-Content-Type-Options: nosniff` ⇒ 用于关闭 §9 UNRESOLVED-001。
-3. **user-rpc 慢响应探针**：Go 侧把 `UserRpcConf.Timeout` 显式写成 0/2000 并注入慢 client，
-   实测首个 `GetUser` 何时返回；RAG 侧注入慢 stub 实测端到端延迟 ⇒ 用于关闭 DRIFT-002。
-4. **重复 query key 探针**：`?page=1&page=2` 双侧各跑一次 ⇒ 用于关闭 DRIFT-003。
+> 🟥 **订正（2026-10-29 · G3 域内收敛自查 C）**：本小节原是**「本轮未做，列为待办」**的四项清单，
+> 但**四项里有三项早已被后续轮次消解，只有状态列没回填** ⇒ ⇒ **读者会以为它们还开着**。
+> ⇒ 依据 AGENTS.md §3.1「台账是下一个 agent 的对照基准」＋ 本文件自己的元教训
+> 「**台账的「现在时」是最危险的一种错**」⇒ **逐条补时间坐标**。
+> ⚠️ **本小节现为「活状态」面；各轮「判定变化」表是历史记录**。
+
+| # | 原探针设想 | **当前状态（2026-10-29 核对）** |
+|---|---|---|
+| 1 | **CASE-17/18 双侧活体对拍**：Go 侧用 `httptest` + 真实 `UploadImageHandler` 注入一个 `status.Error(codes.Unavailable, …)` 的 fake client，断言 HTTP 503；RAG 侧同理 | 🔴 **仍开 —— 但理由已变**：原文写「**这是修 `DRIFT-001` 的前置**」⇒ ⚠️ **该前提已失效**（`DRIFT-ARTICLE-API-001` **已修**：2026-10-24 修复轮 **F-1**，`ArticleApiMvcPipelineTest` × 3 ＋ **变异 3/3 转红**）⇒ ⇒ 现在它**不再是从「前置」降级为「补强」**，而是**双侧活体证据缺口**（⇒ 归属 **G-3 双侧活体**，**不阻塞阶段 1**，基线已按 🟡 计入） |
+| 2 | **真实 Tomcat 探针**：起 `RANDOM_PORT` 容器，断言 400 响应的 `Content-Type: text/plain; charset=utf-8`（**带空格**）与 `X-Content-Type-Options: nosniff` ⇒ 用于关闭 §9 `UNRESOLVED-001` | ✅ **已消解（2026-10-24，第二轮）** —— `UNRESOLVED-001` **已关闭**（§9 标题行已带 ✅）⇒ **本项的前提本身已过期**；且**本域现已真起 `RANDOM_PORT` 容器**（`ArticleApiAssemblyWiringTest` / `ArticleApiFormParamLimitTest` 两个 `@SpringBootTest(webEnvironment = RANDOM_PORT)`）⇒ ⇒ **不需要再补** |
+| 3 | **user-rpc 慢响应探针**：Go 侧把 `UserRpcConf.Timeout` 显式写成 0/2000 并注入慢 client；RAG 侧注入慢 stub 实测端到端延迟 ⇒ 用于关闭 `DRIFT-002` | ✅ **已消解（2026-10-24 修复轮）** —— `DRIFT-ARTICLE-API-002` **已修**（**F-2**：`UserRpcClientDeadlineTest` × 5 ＋ **变异 2/2 转红**）⇒ ⇒ **守门已在**（`UserRpcClientDeadlineTest`），**不需要再补** |
+| 4 | **重复 query key 探针**：`?page=1&page=2` 双侧各跑一次 ⇒ 用于关闭 `DRIFT-003` | ✅ **已消解（2026-10-24 修复轮）** —— `DRIFT-ARTICLE-API-003` **已修**（**F-3**：`ArticleApiMvcPipelineTest` × 3 ＋ **变异 2/2 转红**）⇒ ⇒ **守门已在**，**不需要再补** |
+
+⇒ **小结**：本小节**只剩第 1 项仍开**（🔴 双侧活体证据缺口，**归属 G-3 / 不阻塞阶段 1**）；
+第 2~4 项**均已消解**（原「待办」措辞已过期 ⇒ 本轮订正）。
 
 ---
 

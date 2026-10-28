@@ -30,8 +30,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 🔴 <b>DRIFT-USERAPI-009②</b>（article-api 推广）的守门：JWT <b>验签必须发生在 70s 预算之外</b>。
  *
  * <h2>⚠️ 本域预算是 <b>70s</b>，不是 3s（全仓唯一例外）</h2>
- * <p>RAG `article-api/.../application.yml:234` {@code http-timeout: 70s}
- * ≡ Go `service/article/api/etc/article.yaml:4` {@code Timeout: 70000}
+ * <p>RAG `article-api/.../application.yml:238` {@code http-timeout: 70s}
+ * ≡ Go `service/article/api/etc/article-api.yaml:4` {@code Timeout: 70000}
  * ⇒ 而其余 api 域（favorite / comment / hot / users / follow / message / like / task）
  * 全部是 {@code 3s} ⇒ ⇒ **本域是唯一例外**。
  * ⇒ ⚠️ **教训**：推广配方时**预算数值必须逐域核**，不能照抄上游域的「3s」

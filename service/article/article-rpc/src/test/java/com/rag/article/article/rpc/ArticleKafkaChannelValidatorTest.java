@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <h2>为什么需要它</h2>
  * Go 侧<b>每个通道各自</b>用自己的 {@code Brokers}
- * （{@code internal/svc/service_context.go:65,66} / {@code internal/article.go:58,60}），
+ * （{@code internal/svc/service_context.go:65,66} / {@code service/article/rpc/article.go:58,60}），
  * 而 Spring Kafka 的客户端是<b>全局单例</b>
  * ⇒ 本模块 yml 里的四个 {@code brokers} 键<b>声明了但没有消费点</b> ⇒ <b>改了不生效</b>。
  *

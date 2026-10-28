@@ -45,7 +45,7 @@ class HotRankPaginatorTest {
         }
 
         @Test
-        @DisplayName("page_size 超过 50 被封顶为 50（Go _test.go:85-94）")
+        @DisplayName("page_size 超过 50 被封顶为 50（Go getHotArticlesLogic_test.go:85-94）")
         void capsPageSize() {
             int[] r = HotRankPaginator.normalize(new HotArticlesReq(2, 999));
             assertEquals(2, r[0]);
@@ -133,7 +133,7 @@ class HotRankPaginatorTest {
         }
 
         @Test
-        @DisplayName("⚠️ 第 2 页首条的 rank 是全局稠密序号而不是页内序号（Go _test.go:135-147）")
+        @DisplayName("⚠️ 第 2 页首条的 rank 是全局稠密序号而不是页内序号（Go getHotArticlesLogic_test.go:135-147）")
         void secondPageKeepsCrossPageDenseRank() {
             // rank 在分页**之前**按过滤后下标重算（Go :119），所以第 2 页首条是 rank=2
             List<HotArticleCard> ranked = HotRankPaginator.assignRanks(cards("a", "b", "c"));

@@ -131,7 +131,7 @@ class HotArticleHydratorTest {
     }
 
     @Test
-    @DisplayName("Go _test.go:47-60 —— 源行在改稿、公开投影仍是 PUBLISHED 时不得误过滤")
+    @DisplayName("Go getHotArticlesLogic_test.go:47-60 —— 源行在改稿、公开投影仍是 PUBLISHED 时不得误过滤")
     void keepsApprovedRevisionWhileSourceIsReviewing() {
         // article-rpc 的 public_only 投影返回 status=PUBLISHED（源行可能是 REVIEWING）
         when(articleRpcClient.getPublicArticle(eq("editing"), anyLong()))

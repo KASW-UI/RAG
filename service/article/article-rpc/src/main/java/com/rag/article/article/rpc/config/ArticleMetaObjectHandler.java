@@ -18,8 +18,8 @@ import java.time.ZoneOffset;
  *   <li><b>声明点</b>：{@code service/article/rpc/internal/model/article.go:31}
  *       {@code UpdatedAt time.Time `gorm:"autoUpdateTime"`}；</li>
  *   <li><b>消费点</b>（GORM 真正执行它的那几行，不是 tag 本身）：
- *       {@code gorm@v1.31.2/callbacks/update.go:243-259}（{@code Updates(map)} 路径）
- *       与 {@code :279-281}（{@code Updates(struct)} 路径）：
+ *       {@code gorm@v1.31.1/callbacks/update.go:238-241}（{@code Updates(map)} 路径）
+ *       与 {@code :276-281}（{@code Updates(struct)} 路径）：
  *       <pre>{@code
  *       if !stmt.SkipHooks && stmt.Schema != nil {
  *           for _, dbName := range stmt.Schema.DBNames {

@@ -65,8 +65,8 @@
 | # | 事项 | 落点 | 依据 / 修法 |
 |---|---|---|---|
 | **H-1** | ✅ **补 proto 契约回归网（2026-10-27 阶段 2 已落码）** | **新增** `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/proto/HotProtoContractTest.java` ＋ `src/test/resources/proto-contract/{hot-proto-contract.expected.txt, generate.py}` | **已落码**（域内文件，**未改共享脚本**）：<br>① **基准由脚本从 Go 真源生成** —— `generate.py` 解析 `Sea-RideTheWind_golang/proto/hot.proto` ⇒ 冻结成 `hot-proto-contract.expected.txt`（真源 sha256 `4ede71009039756b…`）⇒ **期望值不是手抄的**；<br>② **比对「生成码的描述符」而不是「.proto 文本」**（读 `Descriptors.FileDescriptor` ⇒ 拿到真正参与 wire 编码的那份契约）；<br>③ 钉住：package · **11 个 message 的字段名/字段号/类型** · `repeated`（`items` / `articles`）· **5 个 rpc 的方法名与出入参**（`HotService`）。<br>⇒ **实测绿**：`mvn -o -pl service/hot/hot-rpc test -Dtest=HotProtoContractTest` ⇒ **EXIT=0**（1 条用例）。<br>⚠️ **覆盖边界**：不覆盖 gRPC 帧 / HTTP2 帧；**字节级**对拍另需 wire 探针（favorite 域有 `tools/proto-wire-probe/favorite/`，hot 域**没有** ⇒ 属 `tools/**` 共享面 ⇒ 已登记，见 §3-H-3）<br>⚠️ **放在 hot-rpc 而不是 hot-proto**：`hot-proto` 模块**一行 junit 依赖都没有** ⇒ 往那儿加测试要先改 pom（与 favorite/article 域同款理由） |
-| **H-2** | 🟡 **A6 升 L4：复制 errmsg 探针骨架到 `hot/`** | `tools/errmsg-probe/{go,java}` → 复制出 `hot/` | 骨架已有（顶层 article ＋ `favorite/`）⇒ 复制一份到 `hot/` 即可拿错误码值/文案/未知码回落的**双侧逐字节**证据<br>⚠️ **落点修正（2026-10-27）**：`tools/**` 是**共享面**（不在 G3 写权面）⇒ 本项**不是「域侧自修」** ⇒ **登记给合并收口执行者/G4**，G3 只登记不落码（除非合并收口执行者把该探针目录划给某域） |
-| **H-3** | 🟡 **A7 升 L4：proto wire 探针** | `tools/proto-wire-probe/` → 复制出 `hot/` | 同款骨架（favorite 已有）⇒ 拿 wire 字节级证据<br>⚠️ **落点修正（2026-10-27）**：`tools/**` 是**共享面**（不在 G3 写权面）⇒ 本项**不是「域侧自修」** ⇒ **登记给合并收口执行者/G4**，G3 只登记不落码（除非合并收口执行者把该探针目录划给某域） |
+| **H-2** | ✅ **已闭合（2026-10-29 · G3 域侧落码）** —— A6 升 L4：**错误码契约的双侧逐字节证据已拿到** | `tools/errmsg-probe/hot/`（**域内落码**） | ✅ **已落码 ＋ 已取证**：落仓 `tools/errmsg-probe/hot/`（`run-parity.sh` + `mutate-parity.sh` + `go/errmsg_probe.go` + `go/main.go` + `java/Probe.java` + `README.md`）⇒ 对拍 **EXIT=0**（Go / Java sha256 均 `bc1db3bf4c9090ce100a2bc76ec6e932f47ecb236c4379ee4fb1129686481bb3` · 34 行 = CONST 11 + TABLE 11 + FALLBACK 12）⇒ 变异 **4/4 精确转红** ＋ 还原后重新转绿 ⇒ **非假绿** ⇒ 证据强度 **L4** ⇒ ⇒ **`hot-common` 的 R 判定由 R3 升 R4**（基线 §九 **G-5 可撤**）⇒ 详见 §4 的 **G4-18** 行 ＋ [`common.md`](common.md) §「2026-10-29 · G3 阶段 1 回填：**G-5 闭合**」<br>⚠️ **归属订正（2026-10-29）**：本行原写「`tools/**` 是**共享面**（不在 G3 写权面）⇒ 本项**不是「域侧自修」**」⇒ **该归属判断已作废** —— 按 AGENTS.md §5.3f「**共享判据 = 依赖度数，不是目录位置**」：`tools/errmsg-probe/hot/` **只被 hot 域引用** ⇒ **真私有** ⇒ ⇒ **G3 域侧落码合法**（写权守门 `check-wave-lane-ownership.py` 的 `SHARED` 清单里只有 `tools/difftest/README.md` 一条） |
+| **H-3** | 🟡 **A7 升 L4：proto wire 探针（仍开 · 停止令下不落码）** | `tools/proto-wire-probe/` → 复制出 `hot/` | 同款骨架（favorite 已有）⇒ 拿 wire 字节级证据<br>⚠️ **归属订正（2026-10-29）**：本行原写「`tools/**` 是**共享面**（不在 G3 写权面）⇒ G3 只登记不落码」⇒ **该归属判断同样作废** —— 按 AGENTS.md §5.3f：`tools/proto-wire-probe/hot/` **只被 hot 域引用** ⇒ **真私有** ⇒ ⇒ **G3 域侧落码合法**（⇒ 本项**不再是「登记给收口执行者」**，而是**域侧自修项**）<br>🔴 **但本轮（2026-10-29）未落码**：调度员**停止令**要求「做完手上这件事就停下、不扩范围」⇒ ⇒ **本项保留为 🟡 开放项**，下一轮 G3 自修时按 favorite 的 `tools/proto-wire-probe/favorite/{run.sh,go/main.go}` 骨架复制一份即可（hot.proto 无 `optional` / 无 `map` ⇒ 探针形态比 favorite 更简单）<br>⚠️ **现状**：hot 域的 A7 证据 = **descriptor 级 L3**（`HotProtoContractTest` ＋ 真源生成的冻结基准，sha256 `4ede71009039756b9df11d1e02251ef88199ec7447cf2764f4e8de540685d3b6` ⇒ **2026-10-29 重跑 `generate.py` 输出与冻结基准逐字节相同** ⇒ 基准与真源同步）＋ **JSON 字段序的 wire 字节级已在第五轮双侧活体逐字节相同**（`api.md` D15 / CASE-15d）⇒ ⇒ **缺的是「proto 消息体字节」那一层的双侧对拍** |
 | **H-4** | 🟡 **部署侧**：`hot-rpc` 的 gRPC 端口未在 `Infrastructure.md §3` 预占 | 部署配置（**非本仓写权面**） | `hot-rpc/.../application.yml:83-85` 的注释自记「Infrastructure.md §3 目前只给 hot 预占了 18897(HTTP)，**gRPC 端口未分配**」⇒ **记录 + 上报**，非代码缺陷 |
 | **H-5** | ✅ A3/A4/A5/A9 —— **无需改** | — | 四轴实测一致（端口差异属已记录的部署口径；Go 侧 hot 无业务 span ⇒ 无需补埋点 ⇒ **补了反而是新增 Go 没有的行为**） |
 
@@ -95,11 +95,11 @@
 
 - [x] **第 0 步**：本域组件**真的启动一次**（AGENTS.md §0 第 3 条：「跑绿」≠「对」）—— ✅ **2026-10-27 阶段 2 已完成**：`mvn -o -pl service/hot/hot-rpc,... -am test` ⇒ **hot-rpc 96 条 / 0 failures / 0 errors / 0 skipped**（含 `HotRpcJarExecutableWiringTest`（**产物可执行性**）＋ `HotGrpcInterceptorWiringTest`（**真 gRPC server**）＋ `HotRpcSpringContextWiringTest`（**真 Spring 上下文**））。⚠️ **必须带 `-am`**（否则拿旧共享层跑，见文末「本轮踩坑」）。
 - [x] **9 条轴**逐轴填表（§2）：结论 ✅/🔴/🟡/N/A ＋ **证据强度** ＋ **核对日期**（**2026-10-27**）
-- [ ] **两侧同时跑**的探针（AGENTS.md §3.3）—— ⬜ **本域无现成域级探针**（`tools/*-probe/` 的域级实例只覆盖 favorite）⇒ 结论最高 **L3** ⇒ 已在 §3-H-2 / H-3 登记「复制探针骨架」的自修项
+- [ ] **两侧同时跑**的探针（AGENTS.md §3.3）—— 🟡 **部分达成（2026-10-29 订正）**：✅ **H-2 已闭合** —— `tools/errmsg-probe/hot/run-parity.sh` **EXIT=0**（A6 错误码契约 ⇒ **L4**）＋ 变异 **4/4 精确转红** ⇒ `hot-common` 升 **R4**（基线 §九 **G-5 可撤**）；⬜ **H-3 仍开** —— proto **消息体字节**那一层缺双侧对拍（`tools/proto-wire-probe/hot/` **本轮未落码**，见 §3-H-3）⇒ ⇒ **本域 A6 = L4 · A7 = L3**（descriptor 级）⇒ **不再**是「本域无现成域级探针」
 - [x] §1 的每一条**重新核对状态**并写回（带核对日期）
 - [x] §3 的域侧修法**落码 + 守门**（含变异验证）—— 🟡 **阶段 2 落码部分已完成**（口径：`mvn -o -pl service/hot/hot-rpc,... -am test` ⇒ hot-rpc **96 / 0 failures**）：
   - **H-1** ✅ proto 契约回归网（新增 `HotProtoContractTest` ＋ 域内 `generate.py` ＋ 冻结 `expected.txt`，**真源 sha256 `4ede71009039756b…`** ⇒ 1/1 绿）
-  - ⏳ **H-2**（A6 升 L4：复制 errmsg 探针骨架到 `hot/`）· **H-3**（A7 升 L4：proto wire 探针）＝ **落点在 `tools/**` 共享面 ⇒ G3 不写**，已登记给合并收口执行者/G4 · **H-4**（`Infrastructure.md §3` 未预占 `hot-rpc` gRPC 端口）＝ **非本仓写权** ⇒ 只登记
+  - ✅ **H-2**（A6 升 L4：复制 errmsg 探针骨架到 `hot/`）＝ **2026-10-29 已落码 ＋ 已取证**（`tools/errmsg-probe/hot/`，对拍 EXIT=0 ＋ 变异 4/4 转红 ⇒ **L4**）· ⏳ **H-3**（A7 升 L4：proto wire 探针）＝ **仍开**（⚠️ **归属已订正**：按 §5.3f，hot-only 探针目录 = **真私有** ⇒ **G3 域侧落码合法** ⇒ **不再是「登记给收口执行者」**；本轮按**停止令**未落码）· **H-4**（`Infrastructure.md §3` 未预占 `hot-rpc` gRPC 端口）＝ **非本仓写权** ⇒ 只登记
 - [x] §4 的派单**已走实时轨**（`session send` → `G4Common` ＋ 本表正式轨，两轨一致）：**单 2** ＝ ✅ G4-1（client breaker 在 rpc 侧无装配路径 —— **全域共性**，请 G4 收口去重；⚠️ **hot 域本身 = N/A**：无 gRPC 出向调用 ⇒ 缺口对 hot 不可观测）—— 7 项反馈单齐全
   - 🟡 G4-2（A9 轴措辞）/ G4-3（A8 = N/A 的登记口径）＝ **登记/转合并收口执行者项**，已随单 1 消息同批发给 G4（**非 7 项反馈单**）
   - 🔴 `docs/DRIFT/global/vs-common.md` ＋ `global/_README.md` §七之二属 **SHARED 面 ⇒ G3 不写**（AGENTS.md §5.3e）⇒ 由 G4 / 合并收口执行者落
@@ -111,3 +111,65 @@
 > ⇒ **全文与跨域影响面见** [`docs/DRIFT/article/vs-common.md`](../article/vs-common.md) §5 的「本轮踩坑」条。
 
 > ℹ️ **G4 回执核账（2026-10-27 · 编号澄清已对齐）**：G4 提示「`DRIFT-HOTRPC-004` 闭的是 **hot-api** 侧、不是 hot-rpc 侧；client breaker 那条的权威编号是 **`U4`**」⇒ **我方阶段 1 已就地订正**（§1 表第 ① 行已改为 `U4` ＋ 标注「该闭合指的是 hot-api 侧 ⇒ hot-rpc 侧仍缺」；`DRIFT-HOTRPC-004` 另列为「Redis 客户端重试」条并标「勿混」）⇒ **两边已一致，G4 无需处理**。
+
+---
+
+## 6. 🔴 域内未闭合项清单（2026-10-29 · G3 域内收敛自查 A · 全量盘点）
+
+> **盘点口径**：把本域**全部**台账（`api.md` / `rpc.md` / `common.md` / `proto.md` ＋ 本文件）里
+> 所有「未闭合 / 开放 / 待办 / 未修 / 仍 OPEN」条目**逐条**取出 ⇒ 定状态
+> （**已闭 / 仍开 / 范围外 / 归属他方**）＋ 是否阻塞阶段 1 ＋ 证据指针。
+> ⚠️ **本清单是「现状面」**；各轮的「判定变化」表是**历史记录**（AGENTS.md §6.3 状态表纪律）。
+> ⚠️ **登记类事项不进本清单**：已进 `docs/Intentional_Deviations/` 的候选（🏷 候选，建议签）
+> **按 AGENTS.md §5.3c「登记完就躺着，不升级为拍板」** ⇒ 不重复列出、不推拍板。
+
+| # | 项 | 状态 | 归属 | 阻塞阶段 1？ | 证据 |
+|---|---|---|---|---|---|
+| **H-A1** | **A7 升 L4：proto 消息体的 wire 字节双侧对拍探针** | 🟡 **仍开**（本轮**未落码**：调度员**停止令**要求「做完手上这件事就停下」） | 🟢 **G3（本域）** —— ⚠️ **归属已订正（2026-10-29）**：原判「`tools/**` 是共享面 ⇒ 不在 G3 写权面」**已作废** ⇒ 按 AGENTS.md §5.3f「**共享判据 = 依赖度数**」⇒ `tools/proto-wire-probe/hot/` 只被 hot 域引用 ⇒ **真私有 ⇒ 域侧落码合法** ⇒ ⇒ **本项是域侧自修项**，不是「登记给收口执行者」项 | 否 | §3 `H-3` 行 · [`proto.md` §3 `H-3`](proto.md)<br>💡 下一轮可照 favorite 的 `tools/proto-wire-probe/favorite/{run.sh,go/main.go}` 骨架复制（hot.proto **无 `optional` / 无 `map`** ⇒ 探针形态更简单） |
+| **H-A2** | **`DRIFT-HOTAPI-030` 后续格**（判定权口径差 1：总「值」数 vs Go 的非空值数） | 🔴 **仍 OPEN** | 🔴 **global / G4**（共享层修法；本域已在第十三轮把容器旋钮对齐） | 否 | [`api.md` §「残余」行](api.md) · [`favorite/vs-common.md` §4](../favorite/vs-common.md)（同一条，跨域） |
+| **H-A3** | **`DRIFT-HOTAPI-031` 超长请求行**（Go **431 + `text/plain`** vs RAG **400 + Tomcat HTML** ⇒ Tomcat 在**连接器层**就拒 ⇒ **框架限制**） | 🟡 **未修（框架限制）** ⇒ **已登记为 `SD-2026-10-25-CAND-10`** ⇒ 按 §5.3c **登记类 ⇒ 不再重复列出、不推拍板** | ⬜ **登记即定案**（`docs/Intentional_Deviations/hot/api.md:332`） | 否 | [`api.md` §「残余 ②」](api.md) |
+
+⇒ **hot 域的「域内可动」未闭合项 = H-A1 一条**（H-A2 属 global，H-A3 已登记为签字候选）⇒
+⇒ **本域三组件的**域内**语义漂移清单为空**（与 `rpc.md:932` 的结论一致），**剩下的只是取证缺口**。
+
+---
+
+## 7. 🔴 Go 出处引用漂移自查（2026-10-29 · G3 域内收敛自查 B）
+
+> **为什么这是缺陷而不是笔误**：以「Go: …」措辞写在 javadoc / `@DisplayName` / 断言消息里的断言
+> **改一行不会让任何测试变红** ⇒ ⇒ **绿测试可能守着一个错的事实**（AGENTS.md §3.3.2）。
+> ⚠️ **守门本体见 [`article/vs-common.md` §7.1](../article/vs-common.md)（四域共用，G3 域侧落码）**
+> ⇒ 本节只列**本域**的订正项。
+
+| # | 落点 | 原引用 | 订正为 | 缺陷类型 |
+|---|---|---|---|---|
+| 1 | `hot-api/.../client/ArticleRpcClient.java:27` | `serviceContext.go:104` | `service/hot/api/internal/svc/serviceContext.go:20-22` | **行号越界**（该文件**仅 58 行**）＋ **域段缺** |
+| 2 | `hot-api/.../controller/HotArticleController.java:70` | `getHotArticlesHandler.go:15-32` | `getHotArticlesHandler.go:15-31` | **范围末尾越界**（全文 **31 行**） |
+| 3 | `hot-api/.../form/GoFormValues.java:96` ＋ `HotApiGoParseParityTest.java:42,145` ＋ `HotApiRealTomcatGateTest.java` | `core/mapping/jsonunmarshaler.go:45-53` | `core/mapping/jsonunmarshaler.go:45-52` | **行号错**（**3+1 处**；go-zero v1.10.2 的该函数止于 `:52`） |
+| 4 | `hot-api/.../exception/HotCodeErrorLogParityTest.java:41` | `service/hot/common/logger/logger.go:118-123` | `service/**common**/logger/logger.go:118-123` | **域段错**（`service/hot/common` 下**只有 `errmsg.go`** ⇒ 没有 `logger.go`） |
+| 5 | `hot-api/.../HotApiRealTomcatGateTest.java:87,119` | `prometheus/client_golang@**v1.21.1**/prometheus/histogram.go:271` | `prometheus/client_golang@**v1.23.2**/prometheus/histogram.go:271` | **版本过期**（真源 `go.mod` pin 的是 **v1.23.2**） |
+| 6 | `hot-api` **6 处**（`HotApiGoParseParityTest` / `HotArticleHydratorTest` / `HotArticleQueryServiceTest` / `HotRankPaginatorTest`）＋ `CapturingClientInterceptor.java:23` | `Go _test.go:NN` | `Go **getHotArticlesLogic_test.go**:NN` | **出处缺文件名** ⇒ **不可核** ⇒ 补全为真源 `service/hot/api/internal/logic/hot/getHotArticlesLogic_test.go`（184 行） |
+| 7 | `hot-rpc/.../mq/HotEventConsumerDropTest.java:174` | `test/cmd/producer.go:18-23` | `service/hot/test/cmd/producer/producer.go:14-19` | **域段缺**（实际是 4 字段 struct 在 `:14-19`） |
+
+⇒ **本域 8 类（15 处）已订正（零行为变更：全是注释 / `@DisplayName`）** ⇒ 本域守门实测 **EXIT=0**（`LINE_OOB` / `FILE_MISSING` / `EMPTY_LINE` / `VERSION_MISMATCH` **全 0**）。
+⇒ ⇒ **hot 域是本轮 16 类缺陷里命中最多的一域**（8/16）⇒ 与「`hot` 域注释密度最高」的形态一致。
+
+---
+
+## 8. 🔴 台账内部矛盾 / 过期结论订正（2026-10-29 · G3 域内收敛自查 C）
+
+> **扫描口径**：把本域台账里**同一个 ID 在不同行**同时出现「已闭」与「仍开」措辞的**候选**全部取出
+> ⇒ 再逐条**人读**核实 ⇒ 只保留**前提真的失效**的。
+> ⚠️ **本轮踩到的第一版误报**：扫描器最初**没有排除「同一行里『修复前 → 修复后』两列」** ⇒ ⇒ 把 18 条
+> **表格内的正常对照**误判成矛盾 ⇒ ⇒ 改成「**只比不同行**」后候选降到 3 条 ⇒ **2 条是「未闭合项」字样误命中**
+> ⇒ ⇒ **真矛盾 = 下面 5 条**（**hot 域是四域里命中最多的**）。
+
+| # | 落点 | 矛盾 | 订正 |
+|---|---|---|---|
+| 1 | [`api.md` D15 行](api.md) | 「**未闭合 / 已知差异**」表里 **D15 仍写「🟡 已知取舍，需登记」** ⇒ 但同文件 `:742` / `:817` 早已写「✅ 已修（`@JsonPropertyOrder` + `HotApiGoWireOrderTest`，去掉注解即变红）」⇒ ⇒ **状态列没回填** ⇒ 读者会以为 D15 还开着 | ✅ **订正为「已修（2026-10-24 第五轮）」** ＋ 补修法与守门出处（`HotArticlesResp:48` / `HotArticleCard:84` ＋ `HotApiGoWireOrderTest` ＋ 第五轮双侧活体**逐字节相同**）⇒ ⇒ **不需要登记为偏离** |
+| 2 | [`api.md` D14 行](api.md) | 备注止于第五轮「**已移交 common 域**」⇒ 实际 **2026-10-26 已订正为「已实现」**（共享层 `HttpMiddleware.java:728` ＋ 本域真 Tomcat 断言）⇒ ⇒ 状态列停在旧轮次 | ✅ **订正为「已实现（2026-10-26）」** ＋ 补 **wire 级 L4** 证据（`HotApiRealTomcatGateTest:229-230`）＋ 补 Go 侧出处说明（Go 全仓零命中 ⇒ nosniff 来自 `net/http` 的 `http.Error` 自动加头） |
+| 3 | [`api.md` D9 行](api.md) | 状态列写「⚠️ 静态确认（2026-10-23）」，而**同一行的备注**已是「✅ 活体（2026-10-24 第八轮）：三闸双侧活体坐实」⇒ ⇒ **同一行自相矛盾** | ✅ 状态列订正为「✅ **已闭合（第八轮，2026-10-24）** —— 三闸双侧活体坐实 + CpuShedding 平台不可达（**非缺陷**）」 |
+| 4 | 本文件 §3 `H-2` 行 ＋ §5 交付物清单 | **H-2 已在 §4 的 `G4-18` 行闭合**（探针落仓 ＋ EXIT=0 ＋ 变异 4/4 转红）⇒ 但 **§3 的 `H-2` 行仍写 🟡「待做」** ＋ **§5 仍写「本域无现成域级探针」** ⇒ ⇒ **同一文件内三处互相打架** | ✅ 三处一并订正（`H-2` → ✅ 已闭合；§5 → 🟡 部分达成：**A6 = L4**（errmsg 探针）＋ **A7 = L3**（descriptor 级）） |
+| 5 | 本文件 §3 `H-2` / `H-3` 行的**归属** | 原写「`tools/**` 是**共享面** ⇒ 不在 G3 写权面 ⇒ 登记给收口执行者」⇒ ⇒ 与 AGENTS.md §5.3f「**共享判据 = 依赖度数，不是目录位置**」**直接冲突**（hot-only 目录 = **真私有** ⇒ G3 域侧落码合法）⇒ ⇒ **归属判断错了** | ✅ 两行归属一并订正（`H-2` 已据此落码 ⇒ 证据强度 **L4**；`H-3` 据此改为**域侧自修项**，本轮按**停止令**未落码 ⇒ 仍列 🟡 开放项） |
+
+⇒ **hot 域真矛盾 = 5 条，已全部订正**。

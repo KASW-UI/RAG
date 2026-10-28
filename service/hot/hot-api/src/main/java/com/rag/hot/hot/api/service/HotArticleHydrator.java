@@ -184,7 +184,7 @@ public class HotArticleHydrator {
         // 分支 ④：Go :150-154 —— 状态不是 PUBLISHED
         // ⚠️ 这里读的是 article-rpc **公开投影**（public_only=true 的 frozen revision）的状态，
         //    不是可变源行。源行在 REVIEWING 时公开投影仍是 PUBLISHED，
-        //    因此改稿中的文章不会从热榜里消失（Go _test.go:47-60 锁住这条）。
+        //    因此改稿中的文章不会从热榜里消失（Go getHotArticlesLogic_test.go:47-60 锁住这条）。
         if (article.getStatus() != ArticleStatus.PUBLISHED) {
             metrics.observeArticleSkip(HotApiMetrics.SKIP_ARTICLE_NOT_PUBLISHED);
             logQuietly(() -> logger.logInfo(Context.current(),
