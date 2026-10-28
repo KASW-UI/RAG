@@ -236,12 +236,44 @@ class SharedFilterOrderSnapshotGateTest {
     @Test
     @DisplayName("④ 真 servlet 上下文里 7 个 Filter <b>确实注册</b>，且注册 order 与快照一致")
     void snapshotIsNotVacuousInRealContainer() {
+        // 🔴🔴 2026-10-28（G4）：**GoStylePathNormalizingFilter 不能再手工注册第 2 份**
+        //
+        // 【现象】本条曾长期红：BeanDefinitionOverrideException:
+        //   "Invalid bean definition with name 'goStylePathNormalizingFilter' defined in
+        //    GoStylePathNormalizingAutoConfiguration: @Bean definition illegally overridden by
+        //    existing bean definition: Generic bean: class=...GoStylePathNormalizingFilter"
+        //   ⇒ 共享层自动配置注册的那份，与本 harness 手工注册的那份，**撞了同一个 Bean 名**。
+        //
+        // 【为什么必须去掉手工注册，而不是「改共享层」】
+        //   ① GoStylePathNormalizingFilter 的**唯一注册点**是
+        //      GoStylePathNormalizingAutoConfiguration#goStylePathNormalizingFilter()
+        //      （见该类 javadoc：「本类是 Filter 的唯一 Bean 定义点 ⇒ 结构上不可能同一层注册两次」）
+        //      ⇒ harness 再手工注册一遍 ⇒ 等于**造出一个生产里不存在的形态**。
+        //   ② **生产形态是安全的，已被钉死**：域内副本还在时（article-api 的 @Component 副本），
+        //      共享层那份靠 @ConditionalOnMissingBean(name="goStylePathNormalizingFilter") 让位
+        //      ⇒ 证据 = article-api 的 ArticleApiAssemblyWiringTest（@SpringBootTest(RANDOM_PORT)
+        //      **整应用启动**）用 assertEquals 钉死**恰好 9 个** Filter 的精确链
+        //      （链里 GoStylePathNormalizingFilter **只出现 1 次**）
+        //      ⇒ 域内副本在 ⇒ 共享层确实让位 ⇒ 生产无双注册。
+        //   ③ ⇒ 本条断言的**不变式**（7 个 Filter 真在真 servlet 上下文里注册 + 次序 == 快照）
+        //      **完全不受影响**：那个 Filter 仍必须由自动配置注册出来，
+        //      少注册一个 ⇒ missing 非空 ⇒ 本条照样红（**不是空转**）。
+        //   ④ ⇒ 而且本条**仍然能抓住「注册了 2 份」**：actualOrder 是从容器里**实际取到的**
+        //      Filter 过滤出来的 ⇒ 若真出现 2 个路径归一 Filter ⇒ actualOrder 会有 8 项
+        //      ⇒ containsExactlyElementsOf(7 项) 必红。
+        //
+        // ⚠️ 一处**诚实边界**（不要在台账里把它写成「已完全解释」）：
+        //   「@ConditionalOnMissingBean(name=…) 在本 harness 里为何没挡住手工注册的那份」
+        //   —— 读 Boot 4.0.8 源码（OnBeanCondition#containsBean → DefaultListableBeanFactory#containsBean
+        //   这条路径）**与观察到的现象不自洽** ⇒ 该层机制**未定位**（记为 OPEN）。
+        //   ⇒ 但这**不影响本条的处置**：harness 手工注册 = 生产不存在的形态，
+        //   而生产形态已被 article-api 的整应用启动测试钉死 ⇒ 处置成立。
         new WebApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(GoStylePathNormalizingAutoConfiguration.class))
                 .withUserConfiguration(
                         GoStyleProtectionProperties.class,
                         ObservabilityProperties.class,
-                        GoStylePathNormalizingFilter.class,
+                        // ⚠️ 此处**故意不再**注册 GoStylePathNormalizingFilter.class —— 见上方注释
                         GoStyleTraceparentFilter.class,
                         GoStyleMaxConnsFilter.class,
                         GoStyleBreakerFilter.class,
