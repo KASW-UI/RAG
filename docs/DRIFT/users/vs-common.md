@@ -4190,3 +4190,34 @@ mvn -B -o -DargLine=-Xmx1g -am -pl service/users/user/user-rpc,service/users/adm
 - **整倍数自检**：`1121 ÷ 712` **不整除** ⇒ ⇒ **排除「重复计数」**（过滤用 `-- in ` 双横线）
 - **增量归因**：`707 → 712 = +5` ⇒ **逐条可指名** = `UserRpcSpanStatusGoParityTest` 的 **5** 条（①②③ 运行期 · ④ 源扫 · ⑤ 判据自检）⇒ ⇒ **没有余量**
 - ⚠️ **口径**：`§54` 记的 **707** 是**那一轮**的快照（**不重写历史**）⇒ ⇒ **本轮起 = 712**；**任何跨 lane 引用的条数都是快照 ⇒ 必须带日期与 commit**
+
+---
+
+## 60. 🟢 **并入 G4 新尖端（4 笔）⇒ 零冲突 ＋ G4 自家门禁 PASS；⚠️ 顺带把一条【已被我域实测证伪】的断言带进了我树**（2026-10-28 · G1 lane）
+
+- **合并对象**：`align/g4-service-common` @ `e22d2bd`（含 `590459e` / `352fb1b` / `f0567bb`）
+- **合并结果**：合并提交 **`247bb63`** · **零冲突**
+  （3 笔只动 `docs/DRIFT/global/vs-common.md`＝它自己的台账 · 1 笔给共享层
+  `MybatisPlusOrderingBridgeAutoConfiguration` 补 javadoc（+25 行 · **零行为变更**）⇒ ⇒ **与 G1 写权面零重叠**）
+- **合并内容复验**：用 **G4 自家的 `check-merge-tree-content.py`** 逐步验 ⇒ **PASS（0 问题 · 0 不可信）**
+
+### 60.1 🔴 **带进我树的那条断言（G4 §2 的 A9 行 · `352fb1b`）—— 方向是反的，已订正**
+
+> G4 台账原文：「Java `recordException` 不改 status ⇒ 域内 span 只调 `recordException` ⇒ status 恒 UNSET
+> ⇒ **与 Go `RecordError` 漂移**（域内写权 ⇒ G3 自查）」
+
+| 项 | 实测 |
+|---|---|
+| **错的** | 把【结论的方向】搞反了 —— Go 的 `RecordError` **同样不改 status**（otel-go SDK v1.44.0 `sdk@v1.44.0/trace/span.go:631-656` 注释原文：“**this method does not change the Span status**”）⇒ ⇒ **域内只调 `recordException` 正是与 Go 一致的形态，不是漂移** |
+| **判据的真身** | 「该 span 在 Go 侧**有没有显式** `span.SetStatus`」⇒ Go 全仓落点 **9 处**（`comment` 4 · `common` 3 · `knowledge` 2）⇒ **`user`/`admin` 域 = 0 处** ⇒ ⇒ 我域那 5 处 `setStatus` 才是漂移（已修，见 §59）|
+| **共享层不受影响** | Go `observability.go:83,105,128` 三处显式 `SetStatus` ⇒ RAG `Observability` 三处一一对应 ⇒ **共享层是对的 ⇒ 一行未动 ✔** |
+| **我域的动作** | **不追改 G4 的台账**（`docs/DRIFT/global/**` = 它写权面）⇒ ⇒ **只在本域台账登记 ＋ 发信订正** ⇒ 已在 §59.6 登记（发信时 G4 = `error` 50001 ⇒ **排队 position 61**）|
+
+### 60.2 🟢 **风险评估：漂移【尚未】进 G3 的树（两道证据）**
+
+1. **G3 lane 自己早已独立查出真相**：它在自己的域内核到**同一处 SDK 源码**，并得出「Go 侧只 `RecordError` 的
+   span，status 本就恒 UNSET ⇒ **域侧零改动**」⇒ ⇒ **G3 大概率没照 G4 加 `setStatus`** ⇒ ⇒ **favorite 域没有新漂移**
+2. ⚠️ **但 G4 在 `352fb1b` 里又把它写了一遍 ⇒ 收口那一步有人照台账「修」favorite 的风险仍在**
+   ⇒ ⇒ **已登记给合并收口那一步**：**收口前必须按本条判据复核 favorite 域的 `setStatus(StatusCode.*)` 命中数**
+   （判据：Go 侧对应 span 有没有**显式** `span.SetStatus` ⇒ 没有 ⇒ Java 侧**不得**补）
+   ⇒ ⇒ 判据与可复用探针 ⇒ G3 那封信（`mode=queued` · position 14）已给全。
