@@ -28,6 +28,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContainerPort;
+import com.rag.users.admin.rpc.support.RealGrpcPort;
 
 /**
  * R5 防回归测试 —— {@code admin.create} 里 bcrypt 哈希与前置业务检查的<b>先后顺序</b>。
@@ -64,7 +65,6 @@ import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContaine
         classes = AdminRpcApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "grpc.server.port=0",
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "management.otlp.tracing.export.enabled=false",
                 "logging.level.com.alibaba.nacos=WARN"
@@ -82,6 +82,7 @@ class AdminCreatePasswordOrderRegressionTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", () -> String.valueOf(RealGrpcPort.pick()));
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

@@ -26,6 +26,7 @@ import java.util.HashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContainerPort;
+import com.rag.users.admin.rpc.support.RealGrpcPort;
 
 /**
  * §6.2.6 E-6 真 PG 上的事务回滚证据 —— admin-rpc 测 {@link AdminCreateAtomicService} 的 4 步事务。
@@ -55,7 +56,6 @@ import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContaine
         classes = AdminRpcApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "grpc.server.port=0",
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "management.otlp.tracing.export.enabled=false",
                 "logging.level.com.alibaba.nacos=WARN"
@@ -73,6 +73,7 @@ class AdminRpcTransactionWiringTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", () -> String.valueOf(RealGrpcPort.pick()));
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

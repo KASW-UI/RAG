@@ -27,6 +27,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainerPort;
+import com.rag.users.user.rpc.support.RealGrpcPort;
 
 /**
  * 🔴 DRIFT-USERRPC-V-004 守门测试 —— {@code users_user} 的时间列必须是 {@code timestamptz}。
@@ -82,7 +83,6 @@ import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainer
         classes = UserRpcApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "grpc.server.port=0",
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "management.otlp.tracing.export.enabled=false",
                 "logging.level.com.alibaba.nacos=WARN"
@@ -100,6 +100,7 @@ class UserRpcUsersUserTimestamptzParityTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", () -> String.valueOf(RealGrpcPort.pick()));
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

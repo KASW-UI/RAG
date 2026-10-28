@@ -32,6 +32,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContainerPort;
+import com.rag.users.admin.rpc.support.RealGrpcPort;
 
 /**
  * admin-rpc 真实 Spring 容器 + 真实 PostgreSQL 集成测试（issue #71186443）。
@@ -71,7 +72,6 @@ import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContaine
                 // GrpcServerLifecycle 没有 @ConditionalOnProperty("grpc.server.enabled")，
                 // 实测写 grpc.server.enabled=false 仍会起 server。这里改用 port=0 让它绑
                 // 临时端口，避免与本机已跑的容器（sea-rtw-admin-rpc 占 8081）撞端口。
-                "grpc.server.port=0",
                 // 指到必然拒连的地址：NacosRegistration 捕获 NacosException 只记日志不中断启动，
                 // 拒连比 DNS 失败更快，也不会让测试挂住
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
@@ -91,6 +91,7 @@ class AdminRpcContainerWiringTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", () -> String.valueOf(RealGrpcPort.pick()));
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

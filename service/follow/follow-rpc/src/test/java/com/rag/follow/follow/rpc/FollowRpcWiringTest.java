@@ -33,6 +33,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static com.rag.follow.follow.rpc.support.GoStyleHostPortPinning.pinContainerPort;
+import com.rag.follow.follow.rpc.support.RealGrpcPort;
 
 /**
  * §6.3 / §3.3 的真 PG 证据 —— 在<b>真实 PostgreSQL 16</b> 上验证
@@ -64,7 +65,6 @@ import static com.rag.follow.follow.rpc.support.GoStyleHostPortPinning.pinContai
         classes = FollowRpcApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "grpc.server.port=0",
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "management.otlp.tracing.export.enabled=false",
                 "logging.level.com.alibaba.nacos=WARN",
@@ -88,6 +88,7 @@ class FollowRpcWiringTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", () -> String.valueOf(RealGrpcPort.pick()));
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

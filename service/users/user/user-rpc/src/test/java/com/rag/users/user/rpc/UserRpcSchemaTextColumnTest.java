@@ -20,6 +20,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainerPort;
+import com.rag.users.user.rpc.support.RealGrpcPort;
 
 /**
  * E-3 根因 **R3** 的回归网 —— users 域 DDL 的字符串列必须是 {@code text}，不是 {@code varchar(255)}。
@@ -49,7 +50,6 @@ import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainer
         classes = UserRpcApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "grpc.server.port=0",
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "management.otlp.tracing.export.enabled=false",
                 "logging.level.com.alibaba.nacos=WARN"
@@ -67,6 +67,7 @@ class UserRpcSchemaTextColumnTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", () -> String.valueOf(RealGrpcPort.pick()));
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

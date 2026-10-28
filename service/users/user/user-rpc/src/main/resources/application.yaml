@@ -12,7 +12,16 @@ spring:
     # compose 会通过 POSTGRES_ADDR 注入正确值
     url: jdbc:postgresql://${POSTGRES_ADDR:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}?sslmode=disable
     username: ${POSTGRES_USER:admin}
-    password: ${POSTGRES_PASSWORD:Sea-TryGo}
+    # ⚠️ 默认口令必须是全仓 rpc 模块的**同一个**值（`password`）——
+    #    另 7 个 rpc 模块（article/comment/favorite/like/message/task/follow）都用它，
+    #    此前只有 user-rpc / admin-rpc 用 `Sea-TryGo` ⇒ 全仓 9 处分裂成 2 种
+    #    ⇒ 同一套 PG，裸跑时「最多一组能连上」。
+    #    Go 侧（`service/user/user/rpc/etc/user.yaml:13`）**没有默认值**：
+    #    go-zero `core/conf/config.go:63` 用 `os.ExpandEnv` 展开 ⇒ 未设 env 即空串 ⇒ 连库失败（fail-fast）。
+    #    本行保留 fallback 仅为本地便利；**取消 fallback 属跨域改动（9 个模块 / 8 个域）**，见
+    #    `docs/DRIFT/users/stage1-admission.md` §3 `S1-USERS-002`。
+    #    ⚠️ env 存在时 Spring 优先取 env ⇒ compose / manage.sh / 对拍装置的注入值一字不变。
+    password: ${POSTGRES_PASSWORD:password}
     driver-class-name: org.postgresql.Driver
 
   # ===== 2. MyBatis-Plus + 建表（取代 JPA/Hibernate；对齐 Go 端 GORM + AutoMigrate）=====
@@ -101,7 +110,12 @@ mybatis-plus:
 # Go 端 user-rpc 是纯 gRPC 进程，行为 1:1。
 grpc:
   server:
-    port: 49210                    # 修 INFRA-001：9004 → 49210（Infrastructure.md §3 锁定）
+    # ⚠️ 默认端口**一字不变**（修 INFRA-001：9004 → 49210，Infrastructure.md §3 锁定）。
+    #    加 env 覆盖是为了与同域 `user-api` / `follow-api` / `follow-rpc` 的**可覆盖策略一致**，
+    #    并解除「本机该口已被占 ⇒ 组件无法真启动 / 无法并行起」的死结
+    #    （2026-10-28 实测：49210 被 `Sea-user-rpc` 容器占着）。
+    #    ⚠️ 改口时**必须同时确认 Nacos 注册地址跟着变** —— devh 用这个端口既监听又注册。
+    port: ${USER_RPC_PORT:49210}
     # DRIFT-003 修正：Go 端 user.go:39-41 仅当 c.Mode == service.DevMode/service.TestMode 时注册 reflection，
     # 而 user.yaml 默认 Log.Mode=file（生产），所以生产环境 reflection 是关闭的。
     # Java 侧默认 false 与 Go 端 1:1；本地调试改 true 或用 GRPC_SERVER_REFLECTION_SERVICE_ENABLED=true 覆盖。
