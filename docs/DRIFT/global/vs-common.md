@@ -3593,3 +3593,56 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 1. **跨会话来信里的「现象」与「根因」要【分开采信】** —— 本轮现象**当时为真**、根因**当时为假** ⇒ ⇒ **来信自带根因推断时，必须用当前状态 + 共享层真源独立复核**（同族：§4.10.63 ⑤ ①「按 commit 重核」）
 2. **修法方向对了 ≠ 归因对了** —— G3 的 (b) 修法**正确且有效**，但它把归因写进了 javadoc ⇒ ⇒ **错误归因一旦写进代码注释，下一个人会照着它去改错的地方** ⇒ ⇒ **归因订正必须单独提出来，不能被「修好了」盖过去**
 3. **域内加的「回落 / 兜底」要问一句：它会不会把被测缺陷吞掉** —— 本例 4 条**全是 bodyless GET** ⇒ 回落 100% 生效 ⇒ ⇒ **共享层回归失去跨域证人**（兜底只剩共享层自己的真 HttpClient 守门）
+
+#### 4.10.65 🔴🔴🟢 **G1 回执④（MP 排序桥收编）逐条处置 ＋ 🔴 本层自查抓到「等待脚本的占用判据自匹配 ⇒ 窗口 5.7 小时永远开不了」**（核对日期 2026-10-28 09:5x · 本层 HEAD `590459e`）
+
+> **背景**：G1 报：域内 3 份排序桥副本（user-rpc / admin-rpc / follow-rpc）**已删**（3 个类 + 3 份只含那一行的 `AutoConfiguration.imports`）⇒ 共享层那份成为其域排序边的**唯一来源**；附 3 条实测发现（其中 2 条落在**本层写权面**）。
+> ⚠️ **本节最重要的一条不是落码，是【本层自己写错的等待脚本】** —— 它让本层**白等 5.7 小时**，并且据此**向三方发过两封「请给 maven 窗口」的函** ⇒ ⇒ **那些「占着」是本层自己造的** ⇒ ⇒ 必须主动更正（§ ④）。
+
+**① 🔴 G1 的实测订正成立 ⇒ 本层台账写错了 ⇒ 已就地订正**
+
+| 项 | G1 的实测 | 本层原写法 | 裁定 |
+|---|---|---|---|
+| 「遮蔽」 | 共享层那份**没有** `@ConditionalOnMissingBean` ⇒ ⇒ **两份都会被注册**（两份都类体为空、不注册任何 bean）⇒ ⇒ **零行为影响，但不是「遮蔽」** | 台账 §4.10.16.4：「合并后**域内副本被遮蔽**（不是叠加）」 | 🔴 **本层写错，已订正**（保留原值以便追溯）⇒ 真正的差别 = **排序图上多一个【同向】节点**（域内用类字面量 / 共享层用字符串，但指向**同一对 FQN**）⇒ ⇒ **同向等价、无环 ⇒ 删除仍零行为差** |
+| 份数 | 域侧副本 **9** 份 | 台账同格：「另有 **10** 份域内副本」 | 🔴 **本层写错，已订正为 9 份**（article / comment / favorite / follow / like / message / task / admin / user；`+1` 才是共享层那份 ⇒ 全仓共 **10** 个文件） |
+| ⚠️ **别与 Redis 那份混谈** | — | — | `GoStyleRedisClientAutoConfiguration` **确实有** `@ConditionalOnMissingBean` ⇒ ⇒ **那里「遮蔽」是准确表述**（`GoStyleRedisClientOptionsPrecedenceGateTest` 钉的就是这个契约）⇒ ⇒ **「遮蔽」一词在两处含义不同 ⇒ 不能互相套用** |
+
+⇒ ⇒ **落码**：`service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java`（**共享层写权面**）的 javadoc 补「🔴 本类【没有】`@ConditionalOnMissingBean` ⇒ 「遮蔽」不成立」一节 ⇒ ⇒ **免得下一个人把 Redis 那份的语义套过来**（提交 `590459e`）。
+
+**② 🔴 G1 要求的踩坑 ⇒ 已写进共享层 javadoc**
+
+- **G1 的实测**：删掉资源文件后回归**必须带 `mvn clean`** ⇒ `maven-resources-plugin` **不删已删源文件的副本** ⇒ `target/classes` 里旧 `.imports` + 旧 `.class` 仍在 ⇒ Boot 照旧注册那个「**源码已不存在**」的类 ⇒ 报 `IllegalStateException: Unable to read meta-data for class …`（栈顶 `AutoConfigurationSorter$AutoConfigurationClass.getAnnotationMetadata`）⇒ ⇒ **看起来像「收编失败」，其实是 stale 产物**。
+- ⇒ ⇒ **已写进共享层 javadoc**（**在**「与 9 个 rpc 组件各自的域侧桥的关系」之后 ⇒ 因为**踩坑点在共享层这份被依赖的方式上**，不是域侧文件的细节）⇒ ⇒ 判据写清：**红在 `Unable to read meta-data for class …` ⇒ 先查 stale 产物，别急着判收编失败**（提交 `590459e`）。
+- ⇒ ⇒ **零行为变化**（仅 javadoc）⇒ ⇒ `javac` **单文件校验 EXIT=0**（**刻意不用 maven** —— 跑批窗口可能被本层自己占用 ⇒ 见 ③ 的纪律）。
+
+**③ 🟢 G1 的三层守门（登记为「域侧收编类守门」的参考范式）**
+
+| 层 | G1 的做法 | 本层裁定 |
+|---|---|---|
+| ① 注册层 | classpath 上**全部**同名 `imports` 资源里**至少一份**含**共享层那份的 FQN**（⚠️ **不能用 `getResourceAsStream` 取第一份** ⇒ classpath 上可能有多份，命中哪份取决于顺序 ⇒ 判定不确定）| ✅ 采信为参考范式 |
+| ② 收编层 | 域内那份**类文件必须不在 classpath**（`Class.forName` 抛 `ClassNotFoundException`）| ✅ 采信 |
+| ③ 机制层 | **运行期**容器里真的有 `SqlSessionFactory`（排序边真的被消费，不是装饰）| ✅ 采信 |
+| **变异** | MUT-A 装回域内副本 ⇒ 只红 ② · **MUT-B 运行期 `-Dspring.autoconfigure.exclude=共享层那份` ⇒ 上下文直接起不来**（根因 = `Property 'sqlSessionFactory' … are required` ⇒ 正是 AGENTS.md §3.3 那个失效面 ⇒ **排序边真的在承重**）· MUT-B2 装第三个 FQN 的同向探针桥 + 从清单里移除共享层那份 ⇒ 上下文仍能起 ⇒ 只红 ① | ✅ **MUT-B 是本层最关心的一条** ⇒ 它证明**共享层那份是承重件，不是装饰** ⇒ ⇒ 与本层 §4.8 的落码意图一致 |
+
+**④ 🔴 `docs/FileTree/**` 的归属裁定 ⇒ 【路径无主 · 主题按域归属】⇒ 转派，不自修**
+
+| 项 | 判定 |
+|---|---|
+| 路径归属 | `docs/FileTree/**` **不在任何 lane 的 ACTIVE 白名单**（G1 = `service/users/**`+`service/follow/**`+`docs/DRIFT/users/**`+`docs/DRIFT/follow/**`；G2/G3/G4 同理）⇒ ⇒ 也不在 **13 个 SHARED 文件**清单里 ⇒ ⇒ **两张表都查不到 = 路径无主** |
+| ⚠️ **但主题归属是清晰的** | 每个文件描述的是**某一个域**的文件树 ⇒ ⇒ `docs/FileTree/follow/rpc.md` = **follow 域**（G1）· `docs/FileTree/users/{user,admin}/rpc.md` = **users 域**（G1）· `docs/FileTree/like/rpc.md` = **like 域**（G2）· `docs/FileTree/comment/rpc.md` = **comment 域**（G3）· `docs/FileTree/knowledge/knowledge.md` = **knowledge 域（范围外 ⇒ 不是待办）** |
+| ⇒ ⇒ **裁定** | 🔴 **不按「路径无主 ⇒ 本层自修」的老先例办** —— 那条先例（§4.10.16 ③ · `139b428`）针对的是**工具脚本**；而这里是**别的域的设计文档** ⇒ ⇒ **本层代改 = 越界写别人的域文档** ⇒ ⇒ **转派各域自改**（G1 已自行登记在 `docs/DRIFT/users/vs-common.md` §28.7）|
+| **要改的具体内容**（供各域取用）| ① **文件树里已不存在的类要划掉**：G1 删了 3 份 ⇒ `docs/FileTree/users/user/rpc.md:19`/`:209`/`:258`/`:369` · `docs/FileTree/users/admin/rpc.md:19`/`:332`/`:398`/`:549` · `docs/FileTree/follow/rpc.md:33`/`:469` 仍在列 `MybatisPlusOrderingBridgeAutoConfiguration` ⇒ ⇒ **已过期**<br>② **两条已被推翻的结论**：`docs/FileTree/follow/rpc.md:81`「🔴 **follow-rpc 必须新建**」与 `docs/FileTree/knowledge/knowledge.md:609`「**必须随新模块一并复制**」⇒ ⇒ **共享层那份已收编 ⇒ 这两条结论作废**（`knowledge` 域范围外 ⇒ 登记给合并收口执行者）<br>③ 其余 4 处（`like/rpc.md:20` · `comment/rpc.md:27`/`:30` · `follow/rpc.md:31`/`:508`）是**事实陈述**（该域此刻确实还有域内副本）⇒ ⇒ **等各自域删完再改**，不是现在改 |
+
+**⑤ 🔴🔴 本层自查抓到的一个真 bug：等待脚本的「占用判据」自匹配 ⇒ 窗口 5.7 小时永远开不了**
+
+| 项 | 内容 |
+|---|---|
+| **症状** | 本层等 maven 独占窗口的脚本，自 **04:09** 起每 5 分钟打一行「**还有 N 个别的树在跑 maven ⇒ 等**」⇒ ⇒ 一直等不到窗口 ⇒ ⇒ **白等 5.7 小时** |
+| **根因** | 判据写的是 `OTHER=$(ps -eo command \| grep -o "multiModuleProjectDirectory=[^ ]*" \| grep -v "g4-wt-merge" \| wc -l)` ⇒ ⇒ **该模式串的字面量就出现在脚本自己那行的命令行里** ⇒ ⇒ `ps` 把**脚本自己**列出来 ⇒ ⇒ **grep 匹配到自己** ⇒ ⇒ **计数恒 ≥1** ⇒ ⇒ 「无人占用」**永远不成立** ⇒ ⇒ 等待循环**永不 break** |
+| **证伪（30 秒）** | 此刻**人工读 = 0 棵**在跑 maven，但**该判据返回 3** ⇒ ⇒ **「判据恒假」而不是「资源一直被占」** ⇒ ⇒ 换**括号技巧** + **路径前缀收窄**后返回 **0** ⇒ ⇒ 坐实自匹配 |
+| **🔴 连带后果（必须主动更正）** | 本层据此**先后向 G1 / G2 / G3 发过「请给 maven 独占窗口」的函**，并把「一直有别的树占着」写进了台账 ⇒ ⇒ **那些「占着」是本层自己造的** ⇒ ⇒ 已向三方各发一封更正 |
+| **修法** | ① **括号技巧** `grep "[m]ultiModuleProjectDirectory="`（正则要**连续字面量** ⇒ 命令行里存的是 `[m]ulti...` ⇒ **不自匹配**）② **只认 `.../RAG.worktrees/` 下的树** ⇒ 合并树（`/tmp/g4-wt-merge-*`）**自动排除**（比 `grep -v` 逐个排除更不易漏）③ 修完**当场人工读核对一次**（返回 0 且人工读也是 0）|
+| **纪律（新增）** | ① **凡「等某个资源空闲」的脚本，第一件事 = 把判据单独跑一遍看它此刻返回什么** ⇒ 尤其在「一直等不到」时 ⇒ ⇒ **等待永不满足 = 判据恒假**，不是「资源一直被占」② **判据里出现的字面量会被自己的进程看到** ⇒ ⇒ 流水线里**每个**进程都要过一遍（本次 `sed` 进程也会自匹配 ⇒ **括号技巧只保护紧邻那一支**）③ **「一直有别人占着」是高度可信的错误现象** ⇒ ⇒ 凡据此发出的请求/指控，**先证伪判据本身**（同族：§4.10.32「端口被别人占」也是同源误判）|
+| **本层改正后的状态** | 新脚本 `/tmp/g4-final-full3.sh`（09:53 起跑）⇒ ⇒ **当场验证判据正确**：它报「还有 **1** 个别的树在跑 maven」⇒ ⇒ 人工读 = **G2 树真的在跑 maven**（`org.codehaus.plexus.classworlds.launcher.Launcher -o -B -DargLine=-Xmx…`）⇒ ⇒ **判据现在报的是真事实** ⇒ ⇒ G2 结束后即自动起跑 |
+
+**⑥ 本层这一条** | **零行为改动**（本节全部是**台账订正** ＋ **javadoc 注释**）⇒ ⇒ 第 15 次全量**仍必须跑**（`d212323` 改过共享层**生产代码** ⇒ ⇒ 「跑绿 ≠ 对」）⇒ ⇒ 本层 HEAD `352fb1b` → **`590459e`**。
