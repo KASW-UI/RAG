@@ -96,6 +96,25 @@
 > ⇒ ⇒ **「共享层缺位」不等于「本域受害」**：缺位是**全域**事实，受害是**逐域**事实
 > ⇒ ⇒ 写影响面必须**逐域实测出向面**，不能拿一个域的结论推另一个域。
 
+### 2.1 🟡 **轴外落点（1 条）** —— 9 条轴装不下的那条机制（2026-10-29 04:1x 新增）
+
+> **为什么单列一节**：§2 的 9 条轴是**共享面**的轴表（`docs/DRIFT/_cross/domain-common-lanes.md`）
+> ⇒ ⇒ **本层不改那张表** ⇒ ⇒ 但本层**必须**把「共享层里有、9 轴装不下」的机制**如实列出来**
+> ⇒ ⇒ 否则 §2 的 9 行结论会被读成「共享层全覆盖」⇒ ⇒ 那又是一条**假绿**。
+
+| 机制 | 共享层落点 | Go 出处（**内容锚定后**）| 结论 | 证据强度 | 核对日期 |
+|---|---|---|---|---|---|
+| **HTTP 请求体读取判据**（**415 漂移的根因**）| `http/GoStyleJsonBodyConverter`（判据本体）· `http/GoStyleJsonBodyConverterConfig`（**注册顺序**：插在 Boot 的 Jackson 转换器之前 ⇒ 影响面限定在 JSON 请求上）| `rest/httpx/requests.go:117-124`（`ParseJsonBody`）· `:153-155`（`withJsonBody` = `ContentLength > 0 && Content-Type 含 "application/json"` ⇒ **否则整个请求体被丢弃**）· `:17-22`（`maxBodyLen` = 8 MiB）· 常量出处 `rest/internal/header/headers.go:5`/`:15` | ✅ **一致** —— 判据不满足时**返回 null** ⇒ 上层产出零值 DTO ⇒ 等价于 Go 的 `UnmarshalJsonMap(nil, v)`（**不是**「宽松接受非 JSON」）| **L3**（`GoStyleJsonBodyRawHeaderTomcatTest` = **真 Tomcat**）＋ **L1**（内容锚定 21 条）| 2026-10-29 |
+
+- ⇒ ⇒ **建议给共享轴表加第 10 条（A10）**：**「HTTP 请求体读取判据（Go `withJsonBody` / 415）」**
+  ⇒ ⇒ 落点 `docs/DRIFT/_cross/domain-common-lanes.md`（**共享面 · 不在任何 lane 白名单**）⇒ ⇒ **本层只登记 + 上报，不改**。
+- ⇒ ⇒ **顺带订正 A7 的措辞**：A7 的 N/A 理由写的是「共享层无落点」⇒ ⇒ 但共享层**确实有**上面这个「HTTP 体读取」落点
+  ⇒ ⇒ **A7 的 N/A 只对「proto3 JSON 语义」成立**（`optional` presence / 字段号 / Jackson 差异），
+  **不能被读成「共享层与 proto/JSON 无关」** ⇒ ⇒ 建议在 A7 行加一句边界说明（**共享面 ⇒ 本层只登记**）。
+- ⇒ ⇒ **本层 §2 的 9 条轴 ＋ 本节这 1 条轴外落点 = 共享层在 `protection/` ＋ `http/` 两个机制密集区（35 类）的完整落点**
+  ⇒ ⇒ **其余 38 个类（`observability`/`spring`/`logger`/`communityfact`/`persistence`/`exception`/`redis`/`response`/`snowflake`）本轮只做轴级归位、未逐类核**
+  ⇒ ⇒ 逐类映射见 **§4.17.3** · 诚实边界见 **§4.17.7**。
+
 ## 3. 共享层能自修的（**G4 直接修**；G1~G3 只登记 + 派单到这里）
 
 - 🔴 **`service/common/**` + `service/users/users-common/**` 的唯一写权 owner**（AGENTS.md §5.3c·§5.3d·§5.3f）⇒ G1~G3 的派单**全部落到 G4**
