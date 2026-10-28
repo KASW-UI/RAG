@@ -21,11 +21,12 @@
 |---|---|
 | **总体判定** | ✅ **一致**（行为层零差异） |
 | **行为差异** | **0 条** |
-| **复刻度 R / 证据强度 E** | **R3 / E3**（与基线 [`docs/PhaseGoal-judge.md`](../../PhaseGoal-judge.md) §四 A-2 的 `hot-proto` 行一致） |
+| **复刻度 R / 证据强度 E** | 基线记 **R3 / E3**（[`docs/PhaseGoal-judge.md`](../../PhaseGoal-judge.md) §四 A-2 的 `hot-proto` 行）⇒ 🆕 **本轮实测已满足 R4 的 ⑦⑧**（**双侧同时运行**的探针对拍通过 ＋ **在版本控制内、现在可复算** ＋ **有变异验证记录**）⇒ ⇒ **建议 R3 → R4**；⚠️ **基线是 SHARED 面 ⇒ 本 lane 不改** ⇒ **登记给合并收口执行者** |
 | **复制忠实度** | ✅ **剥掉 `option` / `package` / 注释 / 空行后逐行 diff 为空** ⇒ message 名 / 字段名 / 字段号 / 类型 / 枚举值 / rpc 签名全部一致 |
 | **表达层差异** | `option go_package`（Go 专用，Java 不消费）· 加 `java_package` + `java_multiple_files=true`（§3.4 允许） |
 | **回归网** | ✅ **域内 `HotProtoContractTest`**（期望值由 `generate.py` **从 Go 真源生成并冻结**）＋ **契约面守门** `check-surface-parity.py --domain hot` |
-| **未覆盖** | ⚠️ **wire 字节级**（H-3 ⇒ `tools/**` 共享面 ⇒ 已登记）· ⚠️ **消费方式**（`optional` presence / 字段号硬编码 / Jackson 配置 ⇒ 基线 §九 **G-19**） |
+| **wire 字节级** | ✅ **已闭合（2026-10-29 · G3）** —— `tools/proto-wire-probe/hot/` ⇒ Go 真源生成码 == `expected.txt` == RAG 生成码 **逐字节一致**（13 条用例）＋ 变异 **3/3 精确转红** ⇒ **A7 = L4** ⇒ `hot-proto` **R3 → R4**（登记给收口执行者改基线） |
+| **仍未覆盖** | ⚠️ **消费方式**（`optional` presence / 字段号硬编码 / Jackson 配置 ⇒ 基线 §九 **G-19**，**10 个 proto 全部**未取证）· ⚠️ **gRPC 帧 / HTTP2 帧**（需两侧同时起服务） |
 
 ---
 
@@ -46,6 +47,7 @@
 | 网 | 落点 | 覆盖 | 状态 |
 |---|---|---|---|
 | **字段级契约** | `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/proto/HotProtoContractTest.java` ＋ `src/test/resources/proto-contract/{generate.py,hot-proto-contract.expected.txt}` | **生成码的描述符**（`Descriptors.FileDescriptor` ⇒ 真正参与 wire 编码的那份契约）↔ **由真源脚本生成并冻结**的基准：package · 11 个 message 的字段名/字段号/类型 · `repeated` · 枚举值 · 5 个 rpc 的方法名与出入参 | ✅ **在版本控制内**（`git ls-files` 命中两个资源文件）⇒ 期望值**不是手抄的** |
+| **wire 字节级** | `tools/proto-wire-probe/hot/{run.sh,mutate-wire.sh,go/main.go,expected.txt}` ＋ `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/proto/HotProtoWireParityTest.java` | 🔴 **proto 消息体**的 **wire 字节**：同一组 **13 条**消息在两侧各序列化一次，比对**十六进制字节** ⇒ 钉住 **字段号** · **零值不落 wire**（proto3 隐式 presence）· **负 int32 = 10 字节 varint** · **`uint32` 最大值 = 5 字节 varint** · **`repeated` 的编码** · 🔴 **`bool=false` ⇒ 整条消息是空字节** | ✅ **EXIT=0**（Go 真源 `hot.pb.go` sha256 `c5b28a8415151ca3…` == 复制件 ⇒ 验的是**生产字节**）· 变异 **3/3 精确转红**（M3 改 **RAG 侧 proto 字段号** ⇒ Java 侧断言红 ⇒ 证明不是「自己跟自己」）· **在版本控制内、可复算** ⇒ 满足基线 §1.1 的 **R4 ⑦⑧** |
 | **契约面** | `python3 tools/difftest/check-surface-parity.py --domain hot` | HTTP 端点集合 ＋ gRPC 方法集合（大小写归一） | ✅ **EXIT=0**：HTTP **Go=1 ≡ RAG=1**（Go 侧 JWT 保护 **0** 条 ⇒ hot-api 两侧都匿名）· gRPC 方法 **Go=5 ≡ RAG=5** |
 
 > ⚠️ **复算命令必须带 `GO_REPO`**：`check-surface-parity.py` 的默认 Go 仓路径是
@@ -61,7 +63,7 @@
 
 | # | 事项 | 类型 | 归属 |
 |---|---|---|---|
-| **H-3** | **wire 字节级**对拍探针（favorite 域已有 `tools/proto-wire-probe/favorite/`） | 取证缺口（**不阻断阶段一**） | 🟡 `tools/**` 共享面 ⇒ **登记 + 反馈单**，G3 只读 |
+| ~~**H-3**~~ | ~~**wire 字节级**对拍探针~~ ⇒ ✅ **已闭合（2026-10-29 · G3 域侧落码）** | 取证缺口 → ✅ **已闭合** | ✅ **已落码**：`tools/proto-wire-probe/hot/`（`run.sh` + `mutate-wire.sh` + `go/main.go` + `expected.txt` + `README.md`）＋ Java 侧 `HotProtoWireParityTest`（**7 例**）⇒ 对拍 **EXIT=0** ＋ 变异 **3/3 精确转红** ⇒ **A7 = L4** ⇒ `hot-proto` **R3 → R4**（基线 §四 A-2 属 **SHARED 面** ⇒ 登记给**合并收口执行者**改基线）<br>⚠️ **归属订正**：本行原写「`tools/**` 共享面 ⇒ G3 只读」⇒ **该归属判断已作废** —— 按 AGENTS.md §5.3f「**共享判据 = 依赖度数**」⇒ `tools/proto-wire-probe/hot/` **只被 hot 域引用** ⇒ **真私有 ⇒ G3 域侧落码合法** |
 | **G-19** | proto 的**消费方式**未取证（`optional` presence / 字段号硬编码 / Jackson 配置）—— AGENTS.md §3.4 的效力边界「复制忠实 ≠ 消费方式已验」在 **10 个 proto 上全部成立** | 取证缺口（**不阻断阶段一**） | 🟡 按域补「生成码 presence / 消费点构造」断言（`ArticleProtoContractTest` 已示范） |
 | **G-15 / G-18** | ~~「hot-proto 无自动守门」与「已落码 `HotProtoContractTest`」自相矛盾~~ ＋ ~~判定记录只在 `vs-common.md` 不在 `proto.md`~~ | 记录缺口 | ✅ **2026-10-29 · G3 已订正**：`vs-common.md` A7 行回填 ＋ **本文件建立** ⇒ 两处口径统一 |
 
