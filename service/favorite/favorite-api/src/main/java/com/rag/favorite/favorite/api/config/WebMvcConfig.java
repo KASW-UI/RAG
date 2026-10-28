@@ -1,7 +1,7 @@
 package com.rag.favorite.favorite.api.config;
 
+import com.rag.favorite.favorite.api.interceptor.FavoriteGoQueryLimitInterceptor;
 import com.rag.favorite.favorite.api.interceptor.FavoriteJwtAuthInterceptor;
-import com.rag.favorite.favorite.api.interceptor.FavoriteQuerySegmentLimitInterceptor;
 import com.rag.users.common.http.GoStyleCoercion;
 import org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer;
 import org.springframework.context.annotation.Bean;
@@ -54,12 +54,12 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     private final FavoriteJwtAuthInterceptor favoriteJwtAuthInterceptor;
 
-    private final FavoriteQuerySegmentLimitInterceptor favoriteQuerySegmentLimitInterceptor;
+    private final FavoriteGoQueryLimitInterceptor favoriteGoQueryLimitInterceptor;
 
     public WebMvcConfig(FavoriteJwtAuthInterceptor favoriteJwtAuthInterceptor,
-            FavoriteQuerySegmentLimitInterceptor favoriteQuerySegmentLimitInterceptor) {
+            FavoriteGoQueryLimitInterceptor favoriteGoQueryLimitInterceptor) {
         this.favoriteJwtAuthInterceptor = favoriteJwtAuthInterceptor;
-        this.favoriteQuerySegmentLimitInterceptor = favoriteQuerySegmentLimitInterceptor;
+        this.favoriteGoQueryLimitInterceptor = favoriteGoQueryLimitInterceptor;
     }
 
     @Bean
@@ -72,13 +72,15 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(favoriteJwtAuthInterceptor)
                 .addPathPatterns(FAVORITE_PREFIX);
 
-        // 🔴 Go 的 query 段数闸门（net/url 的 defaultMaxParams = 10000）
+        // 🔴 Go 的 query 判据闸门（net/url 的 defaultMaxParams = 10000 ＋ 分号 ＋ 非法转义
+        //    ＋ go-zero 的 maxFormParamCount = 2048 非空值计数）—— **7/7 端点都要过**
+        //    （Go 侧 7 个 handler 的第一行都是 httpx.Parse ⇒ 逐条见 FavoriteGoQueryLimitInterceptor 的类注释）
         // ⇒ order = 1 ⇒ **排在鉴权（order = 0）之后**
         // ⇒ ⇒ 理由：Go 的 `httpx.Parse` 在 **handler 内部** ⇒ 解析在鉴权之后
         // ⇒ ⇒ ⇒ 无 token 时 Go 给 401，本实现也必须给 401（不能提前变成 5003）
         // ⇒ ⇒ ⚠️ 若把它排到鉴权之前 ⇒ 就制造出「先解析后鉴权」的偏离
         //      （共享层那道 form 闸门就是这么排的，见 GoStyleFormLimitWebMvcConfig —— 那条偏离已登记）。
-        registry.addInterceptor(favoriteQuerySegmentLimitInterceptor)
+        registry.addInterceptor(favoriteGoQueryLimitInterceptor)
                 .addPathPatterns(FAVORITE_PREFIX)
                 .order(1);
     }
