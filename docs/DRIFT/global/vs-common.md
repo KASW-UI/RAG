@@ -4164,6 +4164,44 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | **动前义务** | **任何改动 `goParseViolation` 的动作**（含改签名 / 改返回形态 / 改判定顺序）⇒ ⇒ **必须先出反馈单给 G3** ⇒ ⇒ **不得在 G4 树里单方面改掉它的返回值语义** |
 | **消费者清单（本轮补进 javadoc）** | ① **生产调用点**：`service/favorite/favorite-api/.../FavoriteGoQueryLimitInterceptor.java`（**只读调用**）② **域侧回归网**：`FavoriteApiRealTomcatGateTest` ＋ `FavoriteGoQueryLimitInterceptorTest` ③ **改完必须通知 G3** ④ **域侧不得改写该方法的返回值语义** |
 
+#### 4.16 🟢 **开工前置回执之后的执行：候选任务① 已按「域侧自修」派给 G3**（2026-10-29 · 本层 HEAD `95ad813` → 本节提交）
+
+> **本节的前提**：`docs/Worktree.md` §二·五 开工前置四步的 ①②③ 已完成（回执落在本档末尾的 `## 开工前置回执` 小节，提交 `95ad813`）；
+> ④ 的批准由**用户（Jason）**给出（他在 G4 会话里说了「继续」）⇒ **⑤ 栏按流程仍留空，由调度员代填**（回执人**不得自批**）。
+
+**§4.16.1 候选任务① 的处置：不落码 ⇒ 按 §5.3c 派给 G3（域侧自修）**
+
+| 项 | 结论 |
+|---|---|
+| **为什么不自己补** | 落点 `tools/g3-anchor-check/` **只存在于** `align/g3-article-comment-favorite-hot`（`do-my-own-gh` 与**本层树都没有**）⇒ ⇒ G4 要补 ⇒ 必须**先把 G3 的整个目录复制进 G4 树** ⇒ ⇒ 合并时两侧**同名文件各自新增** ⇒ ⇒ **撞 `add/add`**（`docs/Pitfalls/_cross/domain-common-lanes.md` **PIT-LANE-01**）⇒ ⇒ **只能由该目录的属主 G3 改** |
+| **依赖度数判据** | 该目录**只被 G3 引用**（四棵树里只有 `align/g3-...:docs/DRIFT/article/vs-common.md` 引用它 ⇒ 其余三树与主干**零引用**）⇒ ⇒ 按 `AGENTS.md` §5.3f「共享判据 = **依赖度数**」⇒ **真私有 ⇒ 归 G3** |
+| **已发出的动作** | ✅ **已向 G3 发反馈单 1 张（7 项格式：现象 / Go 侧 `文件:行号` / RAG 侧现状 / 证据强度 / 建议修法 / 影响面 / 是否阻塞本波）**（`force_steer` ⇒ `mode: steered` ⇒ 已并入 G3 运行中的那一轮）⇒ 内容含：`PINNED`（`:57-69`，11 条）**确实缺** `gorm.io/driver/postgres` ＋ `github.com/lovoo/goka`；真源 `go.mod:11` = goka **v1.1.16** · `go.mod:27` = postgres **v1.6.0** · `go.mod:28` = gorm **v1.31.1**；模块缓存实测 `postgres@v1.6.0/postgres.go` = **305 行**（被引 `:245-256` 合法）· goka 四文件 = **46 / 634 / 403 / 66 行**（被引区间全部合法）⇒ ⇒ **29 条假阳性的根因成立** |
+| **要求的回执** | ① 新 commit SHA ② 补完后 `--all` 的六个分桶行数 ③ 剩余待查条数与按域分布 ④ **输入根探针结果**（模块缓存可见性会间歇 ⇒ **报数必须带探针结果**） |
+| **🟢 价值** | 补完 ⇒ **29 条假阳性归零** ⇒ 只剩 **27 条真欠账（G1 21 / G2 6）** ⇒ ⇒ **这是 G1/G2 那 27 条能被正确派出去的前置**（现在假阳性混在里面 ⇒ 谁去修都是返工）⇒ ⇒ G4 这一步**解锁的是另外两条 lane** |
+
+**§4.16.2 候选任务②（提升为全仓守门并搬进 `tools/difftest/`）⇒ G4 单独做不了 ⇒ 留合并收口执行者**
+
+- 搬运 ⇒ **守门清单 27 → 28** ⇒ **必须同改 `docs/PhaseGoal-judge.md` §6.3**（`:316` + `:338` + §6.3 表）。
+- 该文件**不在任何 lane 白名单**（`check-wave-lane-ownership.py` 实测：G4 白名单只有 `service/common/pom.xml` · `service/common/src/**` · `service/users/users-common/pom.xml` · `service/users/users-common/src/**` · `docs/DRIFT/global/vs-common.md` · `docs/DRIFT/common/**`）⇒ ⇒ **无人拥有** ⇒ ⇒ G4 单独改**立刻制造 B14 计数漂移**（`check-phasegoal-consistency.py` EXIT=1）。
+- ⇒ **不预支**（`docs/twoStage.md` §1.3 / §2.2 / §6 / §7 属阶段 2 ⇒ 收口执行者的事；且 §8.2 已把「出处抽验脚本的形态」定为阶段 2 建设项）。
+
+**§4.16.3 🔴 `tools/**` 的写权口径冲突（**机器守门 vs 调度员文本**）—— 只登记，不自行认领**
+
+| 口径来源 | 结论 |
+|---|---|
+| `docs/CLOSEOUT-2026-10-29.md` §8.2 | 「**`tools/` 写权归 G4** ⇒ 脚本形态由 G4 落码」 |
+| `docs/DRIFT/_cross/cross-domain-coupling.md` §三 **C1** | 只写了 `service/common/**` ＋ `service/users/users-common/**` ⇒ **没提 `tools/**`** |
+| `tools/difftest/check-wave-lane-ownership.py`（**机器守门 = 唯一可核口径**） | **没有任何 lane 的白名单含 `tools/**`** ⇒ ⇒ `tools/**`（除 SHARED 里的 `tools/difftest/README.md`）**无 lane 拥有** |
+
+⇒ ⇒ **本层按机器守门口径保守处理**（不自行认领 `tools/**` 的写权）⇒ ⇒ **候选任务①② 都已按「G4 零落码」处置**。
+
+**§4.16.4 🔴 `docs/Worktree.md` §二·五 的**核验命令对「批准」列是假绿**（共享面 ⇒ 只登记 + 上报）**
+
+- 核验命令用 `grep -c 'Jason 批准' "$f"` 判「批准」列 ⇒ ⇒ **模板自带的小节标题 `⑤ Jason 批准记录` 就含这 5 个字** ⇒ ⇒ **回执一写就 ≥1** ⇒ ⇒ 「**两列都要 ≥1 才算该域已开工**」的**批准列不成立** ⇒ ⇒ **任何 lane 写完回执（哪怕没批准）都能通过该检查**。
+- **本层实测（2026-10-29）**：四棵 lane 树 + 主干的 **10 份 `vs-common.md` 全部 `回执=1` 且 `批=0`** ⇒ ⇒ 即「**全部 lane 都写了回执、但没有任何一条被批准**」这个真实状态 ⇒ **模板法仍会读成「批准 ≥1 ⇒ 已开工」** ⇒ ⇒ **假绿坐实**。
+- **本层实测的两法对照**：模板法 `grep -c 'Jason 批准'` = **3**（全是模板/正文措辞，**无一条真实批准记录**）· 严格法 `grep -cE '^⑤ Jason 批准记录：[^<]'` = **0** ✓。
+- ⇒ **建议收口那一步改判据**（本层**不改**，`docs/Worktree.md` 是共享面）：用「⑤ 后面的值**不是占位符**」或一个独立批准标记（如 `✅ 批准人：Jason · 2026-…`）来判 ⇒ ⇒ 否则收口会把「未批准」读成「已批准」。
+
 ## 开工前置回执
 
 > ⚠️ **本节由 lane 自己写（`docs/Worktree.md` §二·五 ③）**。**⑤「Jason 批准记录」留空，由调度员代填** —— 回执人**不得自批**。
