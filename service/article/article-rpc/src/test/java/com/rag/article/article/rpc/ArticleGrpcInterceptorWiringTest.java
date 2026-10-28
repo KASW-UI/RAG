@@ -1,6 +1,7 @@
 package com.rag.article.article.rpc;
 
 import com.rag.article.article.rpc.support.RealContainerHostPort;
+import com.rag.article.article.rpc.support.RealGrpcPort;
 import com.rag.article.article.proto.ArticleServiceGrpc;
 import com.rag.article.article.proto.GetArticleRequest;
 import com.rag.article.article.proto.GetArticleResponse;
@@ -95,7 +96,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         properties = {
                 // grpc-server-spring-boot-starter 3.1.0 的 GrpcServerLifecycle 没有
                 // @ConditionalOnProperty("grpc.server.enabled")，实测写 false 仍会起 server。
-                "grpc.server.port=0",
                 // 指到必然拒连的地址：NacosRegistration 捕获 NacosException 只记日志不中断启动。
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 // OTLP 指向不可达端点，只会在后台重试刷日志，关掉。
@@ -134,6 +134,14 @@ class ArticleGrpcInterceptorWiringTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        // 🔴 2026-10-28（G3）：gRPC server 端口走**本域专用段**（global 段表预分配给 article 域的 22400–22479）
+        //    ⇒ 不用 `grpc.server.port=0`（0 ⇒ OS 从**临时端口段** 49152–65535 里挑
+        //    ⇒ 而那是 **Docker 随机发布容器端口用的同一段** ⇒ 别的会话的容器先占住
+        //    ⇒ `0.0.0.0:P` ⇒ 本类起 server 时 **EADDRINUSE** ⇒ **整个测试类启动失败**）
+        //    ⇒ ⚠️ 这里**扩展已有的** @DynamicPropertySource 方法（不新增方法）
+        //    ⇒ ⇒ `@DynamicPropertySource` 的**值**不进 Spring 的 context cache key
+        //    ⇒ ⇒ 方法集合不变 ⇒ **上下文共享关系与迁移前逐字相同**（零行为变化）。
+        r.add("grpc.server.port", RealGrpcPort::pick);
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);
@@ -151,7 +159,7 @@ class ArticleGrpcInterceptorWiringTest {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);                  // ← 被测的那一行（接口其实是 Consumer<ServerBuilder<?>>）
         SlowHandlerProbe probe = new SlowHandlerProbe();
         Server server = builder.addService(slowArticleService(probe)).build().start();
@@ -205,7 +213,7 @@ class ArticleGrpcInterceptorWiringTest {
         AtomicReference<String> handlerThread = new AtomicReference<>("<未进入>");
         SlowHandlerProbe probe = new SlowHandlerProbe();
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);
         Server server = builder.addService(slowArticleService(probe, observedRemaining, handlerThread)).build().start();
 

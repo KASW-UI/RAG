@@ -1,30 +1,16 @@
 package com.rag.favorite.favorite.api.support;
 
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URI;
-import java.net.URL;
 import java.net.http.HttpClient;
-import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.net.ProtocolException;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import javax.net.ssl.SSLSession;
 
 /**
- * 🔴 真 Tomcat 守门用的 HTTP 传输层 —— <b>JDK {@code HttpClient} 优先，撞 1xx 上限则回落
- * {@link HttpURLConnection}</b>。
+ * 🔴 真 Tomcat 守门用的 HTTP 传输层 —— <b>只用 JDK {@link HttpClient}，刻意不回落</b>。
  *
- * <h2>🔴 为什么需要这个回落（2026-10-27 实测抓到的真凶）</h2>
+ * <h2>🔴 归因订正（2026-10-28 · G3）：1xx 是<b>共享层探针</b>写的，<b>不是 Tomcat</b></h2>
  * <p>本域 4 条真 Tomcat 用例（{@code FavoriteApiRealTomcatGateTest} 3 条 ＋
- * {@code FavoriteApiEnvelopeParityTest} 1 条）长期红在
+ * {@code FavoriteApiEnvelopeParityTest} 1 条）曾长期红在
  * {@code java.net.ProtocolException: Too many interim responses received: 9 > 8}。
  * ⇒ ⇒ <b>裸 socket 实测（不是推测）</b>：
  * <pre>
@@ -32,21 +18,31 @@ import javax.net.ssl.SSLSession;
  *   ← HTTP/1.1 103 Early Hints   × 11 条
  *   ← HTTP/1.1 200  {"code":5003,…}
  * </pre>
- * ⇒ ⇒ <b>Tomcat 11.0.24 在这类请求上连发 {@code 103 Early Hints}</b>（<b>不是</b> {@code 100 Continue}）
- * ⇒ ⇒ 而 <b>JDK {@code java.net.http.HttpClient} 对 interim(1xx) 响应的上限是 8 条且硬编码、不可配</b>
- * （实测 {@code jdk.httpclient.*} 属性表里<b>没有</b>对应开关）⇒ ⇒ 第 9 条就抛
- * {@code ProtocolException} ⇒ ⇒ <b>客户端根本读不到应用层的响应</b>。
+ * ⇒ ⇒ ⚠️ <b>原归因写「Tomcat 11.0.24 在这类请求上连发 {@code 103 Early Hints}」是错的</b>
+ * （2026-10-28 订正）：那些 1xx 是<b>共享层的「客户端断连主动探测」</b>写的 ——
+ * {@code service/common/src/main/java/com/rag/common/observability/GoStyleClientDisconnectProbe.java:234}
+ * 裸写 {@code "HTTP/1.1 103 Early Hints\r\n\r\n"}（<b>已签字偏离 SD-2026-10-25-04</b>）。
+ * ⇒ ⇒ <b>独立佐证</b>（共享层自己的订正 · {@code 15cf93a}）：<b>无 Authorization 的 401 路径
+ * 实测零 1xx</b> ⇒ ⇒ 若是容器自发，401 也该有 ⇒ ⇒ 1xx 只出现在「进了共享层中间件的请求」上。
  *
- * <h2>🔴 关键：<b>被测行为本身是对的</b></h2>
- * <p>裸 socket 实测最终响应 = <b>{@code HTTP 200 + {"code":5003,…}}</b>
- * ⇒ ⇒ 正是 Go 语义（2049 个非空 form 值 ⇒ {@code maxFormParamCount} 触发 ⇒ 200 + 5003 业务信封）
- * ⇒ ⇒ <b>红的是「测试的传输层客户端」，不是应用层、也不是共享层</b>。
- * ⇒ ⇒ {@link HttpURLConnection} 会<b>透明忽略 1xx</b> ⇒ ⇒ 回落分支拿到的就是应用层的真实响应。
+ * <h2>🔴 为什么现在不需要回落</h2>
+ * <p>共享层已把 1xx 行数设为<b>每请求上界</b>（{@code 15cf93a} · 2026-10-27 19:06）：
+ * {@code DEFAULT_MAX_PROBE_LINES = 4}（<b>取 4 而非客户端上限 8 ⇒ 留一半余量</b>）
+ * ⇒ ⇒ 1xx 行数 ≤ 4 &lt; JDK 客户端上限 8 ⇒ ⇒ <b>JDK HttpClient 读得到最终响应</b>。
  *
- * <h2>⚠️ 本回落只掩盖「客户端上限」，<b>不掩盖 wire 层偏差</b></h2>
- * <p>Go 的 {@code net/http} 服务端<b>不发</b> {@code 103 Early Hints} ⇒ ⇒ RAG 这条 1xx 是
- * <b>wire 层与 Go 的差异</b> ⇒ ⇒ 已作为跨域发现上报（收口在共享层）。
- * ⇒ ⇒ 本类的存在<b>只是</b>让本域守门能观测到应用层响应 ⇒ <b>不是</b>「该偏差已修」。
+ * <h2>🔴 本类<b>刻意没有</b>「撞上限就回落 {@code HttpURLConnection}」的分支</h2>
+ * <p>回落分支会<b>吞掉共享层的回归</b>：共享层若把 1xx 行数上界撤掉，本域这 4 条用例
+ * <b>照样绿</b>（回落让客户端读到了响应）⇒ ⇒ 违反「<b>跑绿 ≠ 判据活着</b>」。
+ * ⇒ ⇒ <b>约定：再看到 {@code ProtocolException: Too many interim responses received: N > 8}
+ * ⇒ 那是【共享层 1xx 行数上界回归】，<b>不要在本域加回落兜底</b> ⇒ 修共享层。</b>
+ * ⇒ ⇒ 旧回落实现（{@code HttpURLConnection} 分支 ＋ 其响应包装类）已在 2026-10-28 移除。
+ *
+ * <h2>⚠️ 跑本域这 4 条用例<b>必须带 {@code -am}</b></h2>
+ * <p>它们同时依赖共享层的两处改动：① 1xx 行数上界（{@code 15cf93a} · 2026-10-27 19:06）
+ * ② 容器参数上限抬到 10001（{@code cd893d1} · 2026-10-27 13:08）
+ * ⇒ ⇒ 若 {@code ~/.m2} 里是旧快照（本地实测旧快照 = <b>2026-10-27 12:00</b>，早于两处改动）
+ * ⇒ ⇒ 用例会<b>假红</b>（不是本域坏了）。
+ * ⇒ ⇒ 复现命令必须带 {@code -am}（从源码树构建共享层）。
  */
 public final class RealTomcatHttp {
 
@@ -54,27 +50,13 @@ public final class RealTomcatHttp {
     }
 
     /**
-     * 发一个请求：JDK {@link HttpClient} 优先 ⇒ 撞 1xx 上限时回落 {@link HttpURLConnection}。
+     * 发一个请求 —— <b>只有 JDK {@link HttpClient} 一条路</b>（刻意不回落，理由见类注释）。
      *
-     * @param req  JDK 侧构造的请求（回落分支只支持<b>无请求体</b>的 GET/HEAD）
-     * @return 应用层的真实响应（1xx 已被透明忽略）
+     * @param req  JDK 侧构造的请求
+     * @return 应用层的真实响应
      */
     public static HttpResponse<String> send(HttpRequest req) throws Exception {
-        try {
-            return jdkClient().send(req, HttpResponse.BodyHandlers.ofString());
-        } catch (ProtocolException e) {
-            if (!isInterimLimit(e) || req.bodyPublisher().isPresent()) {
-                // ⚠️ 只在「1xx 上限」这一种形态上回落；
-                //    带请求体的请求回落不了（bodyPublisher 不可重放）⇒ ⇒ 原样上抛。
-                throw e;
-            }
-            return viaUrlConnection(req);
-        }
-    }
-
-    /** JDK 的 1xx 上限异常长这样：{@code Too many interim responses received: 9 > 8}。 */
-    private static boolean isInterimLimit(ProtocolException e) {
-        return e.getMessage() != null && e.getMessage().contains("Too many interim responses received");
+        return jdkClient().send(req, HttpResponse.BodyHandlers.ofString());
     }
 
     private static HttpClient jdkClient() {
@@ -82,110 +64,5 @@ public final class RealTomcatHttp {
                 .connectTimeout(Duration.ofSeconds(5))
                 .version(HttpClient.Version.HTTP_1_1)   // 与 Go 侧默认一致，且避免 h2c 升级干扰响应头
                 .build();
-    }
-
-    /**
-     * 回落传输：{@link HttpURLConnection} —— 它<b>透明忽略 1xx</b>（含 {@code 103 Early Hints}）
-     * ⇒ ⇒ 拿到的是最终响应。
-     */
-    private static HttpResponse<String> viaUrlConnection(HttpRequest req) throws Exception {
-        URL url = URI.create(req.uri().toString()).toURL();
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setConnectTimeout(5000);
-        conn.setReadTimeout(30000);
-        conn.setRequestMethod(req.method());
-        req.headers().map().forEach((k, v) -> {
-            if (!"host".equalsIgnoreCase(k) && !"content-length".equalsIgnoreCase(k)
-                    && !"connection".equalsIgnoreCase(k)) {
-                conn.setRequestProperty(k, String.join(",", v));
-            }
-        });
-        conn.setRequestProperty("Connection", "close");
-        conn.connect();
-
-        int status = conn.getResponseCode();
-        InputStream in = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
-        String body = "";
-        if (in != null) {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) > 0) {
-                bos.write(buf, 0, n);
-            }
-            in.close();
-            body = bos.toString(StandardCharsets.UTF_8);
-        }
-        Map<String, List<String>> headerMap = conn.getHeaderFields();
-        conn.disconnect();
-        return new UrlConnectionResponse(req, status, body, headerMap);
-    }
-
-    /**
-     * 把 {@link HttpURLConnection} 的结果包成 JDK 的 {@link HttpResponse} ——
-     * 这样<b>调用点一行都不用改</b>（它们只读 {@code statusCode()} / {@code body()} / {@code headers()}）。
-     */
-    private static final class UrlConnectionResponse implements HttpResponse<String> {
-
-        private final HttpRequest request;
-        private final int status;
-        private final String body;
-        private final HttpHeaders headers;
-
-        UrlConnectionResponse(HttpRequest request, int status, String body,
-                              Map<String, List<String>> rawHeaders) {
-            this.request = request;
-            this.status = status;
-            this.body = body;
-            // ⚠️ JDK 没有公开的 HttpHeaders 构造器 ⇒ 用 of(Map, predicate) 静态工厂。
-            //    ⚠️ HttpURLConnection 的 getHeaderFields() 里**状态行**那一项的 key 是 null ⇒ 必须剔掉。
-            java.util.Map<String, List<String>> clean = new java.util.LinkedHashMap<>();
-            rawHeaders.forEach((k, v) -> {
-                if (k != null && v != null) {
-                    clean.put(k, v);
-                }
-            });
-            this.headers = HttpHeaders.of(clean, (k, v) -> true);
-        }
-
-        @Override
-        public int statusCode() {
-            return status;
-        }
-
-        @Override
-        public HttpRequest request() {
-            return request;
-        }
-
-        @Override
-        public Optional<HttpResponse<String>> previousResponse() {
-            return Optional.empty();
-        }
-
-        @Override
-        public HttpHeaders headers() {
-            return headers;
-        }
-
-        @Override
-        public String body() {
-            return body;
-        }
-
-        @Override
-        public Optional<SSLSession> sslSession() {
-            return Optional.empty();
-        }
-
-        @Override
-        public URI uri() {
-            return request.uri();
-        }
-
-        @Override
-        public HttpClient.Version version() {
-            return HttpClient.Version.HTTP_1_1;
-        }
     }
 }

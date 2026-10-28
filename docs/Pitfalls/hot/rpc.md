@@ -809,3 +809,42 @@ func (s *Server) initialReadLimitSize() int64 {
 ⇒ ⚠️ **跨域提醒**：本配方在 comment 域的**变体**（有 Flyway ⇒ 可 exclude；两个出向 gRPC client 必须提前指向不可达地址）
 ⇒ **完整机制与本域台账** ⇒ [`../../DRIFT/hot/rpc.md` §十二](../../DRIFT/hot/rpc.md)；
 ⇒ **comment 域变体** ⇒ [`../../Pitfalls/comment/rpc.md` 的 PIT-COMMENT-RPC-16](../../Pitfalls/comment/rpc.md)。
+
+## P-HOTRPC-25 🔴 守门的「守恒」判据**只写了一种合法出口** ⇒ 把**合规的类**判红 ⇒ 真代码没问题、守门有问题
+
+### 现象（2026-10-28 · G3 · 本轮端口治理）
+
+`mvn -o -B --fail-at-end -pl … -am test` ⇒ ⇒ **hot-rpc FAILURE** ⇒ ⇒ **1 条失败**：
+`RealGrpcPortTest.everyGrpcServerPortDeclarationGoesThroughRealGrpcPort`（该类 **6 条 / 1 failure**）
+⇒ ⇒ 报错把 **4 个类**列成「指定了 gRPC server 端口却没走 RealGrpcPort」：
+
+| 类 | 实际写法 |
+|---|---|
+| `HotRedisDisconnectFastRejectGateTest` | `"grpc.server.port=22502"` |
+| `HotRpcSpringContextWiringTest` | `"grpc.server.port=22500"` |
+| `bootstrap/NacosRegistrationHealthGateTest` | `"grpc.server.port=22500"` |
+| `mq/HotKafkaConsumerGateTest` | `"grpc.server.port=22504"` |
+
+### 🔴 根因：**判据把「动态挑口」当成了「唯一合法写法」**
+
+守门原文（守恒断言）：**「凡是提到 `grpc.server.port` / `ServerBuilder.forPort` 的测试类 ⇒ 必须引用 `RealGrpcPort`」**。
+⇒ ⇒ 而这 4 个类写的是**字面量固定口**（`22500` / `22502` / `22503` / `22504`，**全在本域专用段 `22500–22579` 内**）
+⇒ ⇒ ⇒ **它们已经离开 OS 临时段 ⇒ ⇒ 合规** ⇒ ⇒ **红的是判据，不是被测代码**。
+⚠️ **同款过严的判据在 article / comment 两域也各有一份**（本轮**同批修**，不是只修报错的那个）。
+
+### ✅ 修法：判据改成**两条并列的合法出口**，且**比原来更强**
+
+| 合法出口 | 判据 |
+|---|---|
+| ① 动态挑口 | 引用 `RealGrpcPort` ⇒ ⇒ `pick()` 自带 `[FIRST, LAST]` 范围自检 ⇒ 合规 |
+| ② 写死字面量口 | 该字面量**必须落在 `[FIRST, LAST]` 内** ⇒ ⇒ 落在段外 ⇒ **红** |
+
+⇒ ⇒ **改后判据更强**（多验了「字面量在本域段内」这一条 ⇒ 段外的 `50051` 之类会被抓住）**且不再假红**。
+⚠️ **新判据自带「不被自己扫到」**：字面量抽取用**带反斜杠的正则源码**（`grpc\.server\.port=` / `forPort\(`）
+⇒ ⇒ 与「字面量形态」**逐字不同** ⇒ ⇒ **自匹配 = 0**（否则守门会红在自己身上 —— 那是「源码扫描型守门」的经典坑）。
+
+### 三条纪律（下次照着做）
+
+1. 🔴 **「跑红」先看命中项归属** —— 这次命中项是**合规的类** ⇒ ⇒ 红的是**判据** ⇒ ⇒ **先修判据，别去改合规的代码**。
+2. 🔴 **守恒断言必须枚举「全部合法出口」** ⇒ ⇒ 只写一种 ⇒ ⇒ **其余合法写法全被误判** ⇒ ⇒ 判据不是「越严越好」，是「**该红的红、不该红的不红**」。
+3. ⚠️ **判据改动要同步三域** ⇒ ⇒ 同源判据散在 3 个模块 ⇒ ⇒ 只修报错的那个 ⇒ ⇒ **另外两个留着同样的雷**。

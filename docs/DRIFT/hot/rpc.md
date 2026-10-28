@@ -2086,7 +2086,7 @@ Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方�
 |---|---|
 | `tools/check-ledger-tables.py` | **EXIT=0** |
 | `tools/check-ledger-selfcheck.py` | **EXIT=0** |
-| `tools/check-ledger-count.py` | **EXIT=1** —— 索引称 315 / 实测 326（**差 +11**）⇒ 索引在 `docs/DRIFT/_INDEX.md`（**整合者写权面**）⇒ **合并后统一 `--fix`**（本轮 +11 来自本域台账新增的编号式条目：hot §十一 / §十一.8 / favorite §15.6-15.7 / comment §十一 / 坑档 P-HOTRPC-21~23 + PIT-COMMENT-RPC-15） |
+| `tools/check-ledger-count.py` | **EXIT=1** —— 索引称 315 / 实测 326（**差 +11**）⇒ 索引在 `docs/DRIFT/_INDEX.md`（**合并收口执行者写权面**）⇒ **合并后统一 `--fix`**（本轮 +11 来自本域台账新增的编号式条目：hot §十一 / §十一.8 / favorite §15.6-15.7 / comment §十一 / 坑档 P-HOTRPC-21~23 + PIT-COMMENT-RPC-15） |
 | `tools/difftest/check-wave-lane-ownership.py` | **EXIT=0** |
 | `tools/difftest/check-wave-coupling.py` | **EXIT=0** |
 | `tools/difftest/check-wave-role-model.py` | **EXIT=0** |
@@ -2152,7 +2152,7 @@ Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方�
 | **comment-rpc 全量**（同轮） | **125 / 0 / 0 / 0** ⇒ 基线 123 ＋ 2 = 125 ✅（详见 [`comment/rpc.md` §十二](../comment/rpc.md#十二✅-redis-断连活体对拍共享层的-reject_commands-在本域真的生效-2026-10-27--g3)） |
 | **service/common 全量**（同轮 reactor） | **324 / 0 / 0 / 0** ⇒ **三模块合计 552 / 0 红** |
 | **本轮改动文件** | `HotRedisDisconnectFastRejectGateTest.java`（新增 303 行 / 2 条）· 本档两处段落 |
-| **门禁（本轮终检）** | `tools/check-ledger-tables` **EXIT=0** · `tools/check-ledger-selfcheck` **EXIT=0** · `tools/check-ledger-count` **EXIT=1**（索引称 **315** / 实测 **328** ⇒ 差 **+13** ⇒ 索引在 `docs/DRIFT/_INDEX.md` = **整合者写权面** ⇒ **合并后统一 `--fix`**；⚠️ 相对 §十一.8 记的 **326（+11）**，本轮 **+2** 来自两域各增的 **§十二** ⇒ ⇒ **旧值保留不改写**）〔📌 **2026-10-27 订正**：**索引路径写错了** ⇒ 被改的是 **`docs/Pitfalls/_INDEX.md`**（不是 `docs/DRIFT/_INDEX.md`）⇒ **根因与闭合动作详见 §十二.6** ⇒ **原值保留不改写**〕· `tools/check-doc-links` **EXIT=0**（本轮**实修 18 处**失效锚点 ⇒ 全部改用门禁自己的 `slug()` **实算值**）· `tools/difftest/check-wave-{lane-ownership,coupling,role-model}` **全 0** · `tools/ledger-lint/favorite/{tables,selfcheck,vs-reality}` = **0 / 1 / 1** ⇒ **与本轮改动前完全相同**（selfcheck 仍 **5 条**，**全在本轮 diff 之外**；vs-reality 那 1 条 = 「共享面零改动」，**结构性**）⇒ ⇒ **本轮零新增门禁级问题** |
+| **门禁（本轮终检）** | `tools/check-ledger-tables` **EXIT=0** · `tools/check-ledger-selfcheck` **EXIT=0** · `tools/check-ledger-count` **EXIT=1**（索引称 **315** / 实测 **328** ⇒ 差 **+13** ⇒ 索引在 `docs/DRIFT/_INDEX.md` = **合并收口执行者写权面** ⇒ **合并后统一 `--fix`**；⚠️ 相对 §十一.8 记的 **326（+11）**，本轮 **+2** 来自两域各增的 **§十二** ⇒ ⇒ **旧值保留不改写**）〔📌 **2026-10-27 订正**：**索引路径写错了** ⇒ 被改的是 **`docs/Pitfalls/_INDEX.md`**（不是 `docs/DRIFT/_INDEX.md`）⇒ **根因与闭合动作详见 §十二.6** ⇒ **原值保留不改写**〕· `tools/check-doc-links` **EXIT=0**（本轮**实修 18 处**失效锚点 ⇒ 全部改用门禁自己的 `slug()` **实算值**）· `tools/difftest/check-wave-{lane-ownership,coupling,role-model}` **全 0** · `tools/ledger-lint/favorite/{tables,selfcheck,vs-reality}` = **0 / 1 / 1** ⇒ **与本轮改动前完全相同**（selfcheck 仍 **5 条**，**全在本轮 diff 之外**；vs-reality 那 1 条 = 「共享面零改动」，**结构性**）⇒ ⇒ **本轮零新增门禁级问题** |
 | **U+FFFD 字节级扫描** | 本轮改动文件 **8 份全部 0 命中** · 本域台账＋坑档全量（**33 份**，已剔 `target/`）**0 命中** |
 | **全仓 `check-*.py` 巡检** | **18 个脚本 ⇒ 17 个 EXIT=0 / 1 个 EXIT=1** ⇒ 那 1 个是 `tools/difftest/check-ddl-static.py` ⇒ **是 `users` 域的 9 处既知差异**（`users_user.status` 可空性 1 处 ＋ `DEFAULT CURRENT_TIMESTAMP` 残留 8 处）⇒ ⇒ **不在本域** ⇒ ⇒ **与本轮改动无因果关系** |
 
@@ -2193,8 +2193,8 @@ Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方�
 
 | 动作 | 谁 | 何时 | 判据 |
 |---|---|---|---|
-| **跑 `python3 tools/check-ledger-count.py --fix`**（把 `docs/Pitfalls/_INDEX.md` 那行改成实测值 ⇒ **315 → 328**） | **合并方 / 整合者**（`docs/Pitfalls/_INDEX.md` 是共享索引 ⇒ AGENTS.md §5.3b「合并后统一更新」） | **合并后** | 跑完 `check-ledger-count.py` ⇒ **EXIT=0** |
-| 📌 **订正（2026-10-28 · G3）**：**实测目标值已从 328 变成 330** | **同上（合并方 / 整合者）** | **合并后** | 本 lane 在 §十二.6 定位（+13）之后**又新增了 2 条编号式条目** ⇒ 315 + 13 + 2 = **330**（实测 `check-ledger-count.py` ⇒ 索引 315 / 实测 **330** ⇒ 差 **+15**）：① `docs/Pitfalls/article/rpc.md` 的 **`PF-ARTICLE-RPC-016`**（Testcontainers PG 宿主口错位 ⇒ `EOFException` 的环境 flake 真签名 · 2026-10-28 据 G1 lane 通报）② `docs/DRIFT/article/vs-common.md` 的 **`G4-9`** 派单行（编号式 ⇒ 也计入条目数）⇒ ⇒ **原文的 328 保留不改写**，**当前实测 = 330** ⇒ ⇒ **任何一边都不改代码、不改索引** |
+| **跑 `python3 tools/check-ledger-count.py --fix`**（把 `docs/Pitfalls/_INDEX.md` 那行改成实测值 ⇒ **315 → 328**） | **合并方 / 合并收口执行者**（`docs/Pitfalls/_INDEX.md` 是共享索引 ⇒ AGENTS.md §5.3b「合并后统一更新」） | **合并后** | 跑完 `check-ledger-count.py` ⇒ **EXIT=0** |
+| 📌 **订正（2026-10-28 · G3）**：**实测目标值已从 328 变成 330** | **同上（合并方 / 合并收口执行者）** | **合并后** | 本 lane 在 §十二.6 定位（+13）之后**又新增了 2 条编号式条目** ⇒ 315 + 13 + 2 = **330**（实测 `check-ledger-count.py` ⇒ 索引 315 / 实测 **330** ⇒ 差 **+15**）：① `docs/Pitfalls/article/rpc.md` 的 **`PF-ARTICLE-RPC-016`**（Testcontainers PG 宿主口错位 ⇒ `EOFException` 的环境 flake 真签名 · 2026-10-28 据 G1 lane 通报）② `docs/DRIFT/article/vs-common.md` 的 **`G4-9`** 派单行（编号式 ⇒ 也计入条目数）⇒ ⇒ **原文的 328 保留不改写**，**当前实测 = 330** ⇒ ⇒ **任何一边都不改代码、不改索引** |
 | ⚠️ **不要各 lane 各自 `--fix`** | 各 lane | — | 同一行会被多个分支改 ⇒ ⇒ **合并必撞** ⇒ ⇒ **只在合并后统一跑一次** |
 | **本 lane 需要做的** | **无**（**代码零改动**、**索引零改动**） | — | 我树当前 EXIT=1 是**预期内**的 |
 
@@ -2217,7 +2217,7 @@ Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方�
 | article 域 gRPC 测试段号（预留池 `22200–22599` **仍未分配** ⇒ **本域不擅自占预留段**）| global 段表是 **G4 写权面** | **G4**（会话恢复后）|
 | 共享层 `MAX_PARAMETER_COUNT` `10001 → 10000`（差一格那一行）| `service/common/**` = **G4 唯一写者** | **G4** |
 | 合并共享层后重跑全量（`15cf93a` 改了生产代码 ⇒ 本域基线失效）| 需要 G4 的共享层提交先落 | **G4** |
-| 合并后统一 `python3 tools/check-ledger-count.py --fix`（**315 → 330**）| `docs/Pitfalls/_INDEX.md` = **整合者写权面** | **整合者** |
+| 合并后统一 `python3 tools/check-ledger-count.py --fix`（**315 → 330**）| `docs/Pitfalls/_INDEX.md` = **合并收口执行者写权面** | **合并收口执行者** |
 | comment C-5（tools 探针骨架）| `tools/**` = **G4 写权面**（本来就该它做）| **G4** |
 
 ⇒ ⇒ **纪律（本轮新增，两条）**：
@@ -2542,3 +2542,74 @@ java.lang.AssertionError: 条件在 3000ms 内未成立
 
 **归口**：⛔ `service/common` = 共享层 ⇒ **G3 不改**（AGENTS.md §5.3c）⇒ ⇒ 只登记 + 上报。
 **证据强度**：L4（真跑出来 ＋ 单跑复验）· 核对日期 **2026-10-28**。
+
+## 十三、🟢🔴 **gRPC 真进程端口迁出 OS 临时段**（**10 处**：`grpc.server.port=0` ×6 ＋ `forPort(0)` ×4 ⇒ 本域专用段 `22500–22579`）· 2026-10-28 10:5x · G3
+
+**与 article 域同款（[`article/rpc.md` §二十三.7](../article/rpc.md)）：治的是「被测进程自己 listen 的 gRPC 口」，不是「容器宿主口」。**
+
+#### 起因（域侧自修 · **不等派单**）
+
+`docs/DRIFT/hot/vs-common.md` 的 **A5 行**已登记：本域测试面有 **6 处** `@SpringBootTest` 写 `"grpc.server.port=0"` ⇒ ⇒ 落 **OS 临时段 49152–65535**。
+⚠️ **这一段与 Docker 随机发布容器端口同池** ⇒ ⇒ 别的会话的容器先占住 ⇒ ⇒ `EADDRINUSE` ⇒ ⇒ **长得像「被测行为坏了」，实为环境撞口**。
+⇒ ⇒ **实证（G2 lane 2026-10-28）**：`BindException: Address already in use (/0.0.0.0:49992)` ⇒ ⇒ 49992 = 本机 `Sea-kafka` 容器**发布的端口**（`Up 7 天`）⇒ ⇒ **不是被测代码的错**（同段另有 `Sea-redis` 发布 49380）。
+⇒ ⇒ global 段表 §4.10.19.3 **早就把 `22500–22599` 预分配给 hot 域**（状态「本层预分配 · **域侧未落码**」）⇒ ⇒ **本项本来就是域侧自己的活**（AGENTS.md §5.3d「域侧能自修的域侧修」）。
+
+#### 落码（10 处全迁 ＋ 1 个机制类 ＋ 1 份守门）
+
+| 项 | 值 |
+|---|---|
+| 机制类 | **新增** `service/hot/hot-rpc/src/test/java/.../support/RealGrpcPort.java`（`FIRST=22500` / `LAST=22579` ＋ **双地址 bind 自检** `0.0.0.0` ＋ `127.0.0.1` ＋ `holders(port)` 诊断）|
+| 守门 | **新增** `support/RealGrpcPortTest.java` ⇒ **6 条** = 选取逻辑 **4 条** ＋ **源扫 2 条** |
+| 迁 ① | **6 处** `@SpringBootTest(properties=…)` 的 `"grpc.server.port=0"` ⇒ 换成本段固定口 |
+| 迁 ② | **4 处** `ServerBuilder.forPort(0)` ⇒ `forPort(RealGrpcPort.pick())`（`HotGrpcInterceptorWiringTest` 2 ＋ `HotRpcSlowThresholdGateTest` 2）|
+
+#### 🔴 端口分配的单位是「**Spring 上下文**」，不是「测试类」
+
+`NacosRegistrationHealthGateTest` ＋ `HotRpcSpringContextWiringTest` **同用 `22500`** ⇒ ⇒ 理由**不是**「省口」，而是：
+**Spring 的 context cache key 包含 `properties` 的值** ⇒ ⇒ 两个类的 properties **逐条相同** ⇒ ⇒ 迁移前（都是 `0`）它们**共享同一个 Spring 上下文**、**只有一个** gRPC server ⇒ ⇒ 迁移后若给它们**不同**的固定口 ⇒ properties 就不相同 ⇒ ⇒ **反而把共享拆成两个上下文**（= **行为变化**）⇒ ⇒ **必须同口才能保持「共享关系零变化」**。
+⇒ ⇒ 其余 4 个类的 properties 各不相同 ⇒ ⇒ 各自独占一个口：`22501`（`HotGrpcInterceptorWiringTest`）· `22502`（`HotRedisDisconnectFastRejectGateTest`）· `22503`（`HotRpcSlowThresholdGateTest`）· `22504`（`mq/HotKafkaConsumerGateTest`）。
+⇒ ⇒ ⚠️ **对比：article 域用的是另一种形态** —— article 的 7 个类**共用同一个 `@DynamicPropertySource` 方法**扩展 ⇒ ⇒ properties 逐条相同 ⇒ ⇒ **同样保持共享**（两种做法，同一条纪律）。
+
+#### 段内再切一刀（与 article / comment 域同款约定）
+
+| 段 | 用途 |
+|---|---|
+| `22500–22579`（80 口） | **真进程 gRPC server 端口** |
+| `22580–22599`（20 口） | **守门脚手架段**（造「已被占」样本）|
+
+⇒ ⇒ **必须不相交的理由**：全量套件里**上一个测试类的 gRPC server 还活着**（Spring 缓存测试上下文）⇒ ⇒ 若守门去占**生产段里的**口 ⇒ 就可能撞上那个还活着的 server ⇒ ⇒ 守门被环境左右 ⇒ ⇒ **守门段与生产段零重叠**。
+⇒ ⇒ 与本域**容器宿主口段 `22940–22969`**（§十二）**零重叠** ⇒ ⇒ 与 global 段表 §4.10.19.3 逐条对齐。
+
+#### 🔴 守门最后两条是「源扫」—— 才是真正**堵住缺口**的部分
+
+| 守门 | 断言 |
+|---|---|
+| 源扫 ① | 本模块测试源码里**不得**再出现 5 种「OS 盲选口」形态：`grpc.server.port=0`（属性）· `--grpc.server.port=0`（进程参数）· `forPort(0)` · `new ServerSocket(0)` · `freePort(` |
+| 源扫 ② | **守恒**：凡是提到 `grpc.server.port` / `ServerBuilder.forPort` 的测试类 ⇒ **必须引用 `RealGrpcPort`** ⇒ ⇒ 「指定了端口却没走本域机制」⇒ 红 |
+
+⚠️ **守门自身的两个坑（本轮踩到并已修）**：
+① **禁止清单必须用拼接构造**（如 `"forPort(" + "0"`）⇒ ⇒ 否则 `stripComments`（**不动字符串字面量**）⇒ 守门**扫到自己** ⇒ ⇒ **假红**；
+② **判据要能区分「代码」与「散文」** ⇒ ⇒ 只认**属性字面量形态**（带引号 + 逗号）⇒ ⇒ 否则守门会把自己写的**说明注释**判成违规。
+⚠️ **守门必须自带「排除自己」规则** + **换名假样本** + **判据自检**三件套（否则「守门扫描型守门」类 ⇒ 必假红）。
+
+#### 证据强度与边界
+
+- **L3**（源码扫描：迁后本域 `grpc.server.port=0` / `forPort(0)` / `new ServerSocket(0)` **各 0 处**）**＋ L4**（本轮真回归，见下）。
+- ⚠️ **TOCTOU 窗口诚实标注**：`pick()` 只能**压低**撞口概率，**不能归零**（探测与真正 bind 之间有窗口）⇒ ⇒ **「本段独占给本域」的意义就在这里**（别的域/别的会话不占这一段）。
+- ⚠️ **本节只治「端口从哪来」，不改「测什么」** ⇒ ⇒ 用例语义零变化。
+
+#### 本轮回归（4 模块 · `--fail-at-end`）
+
+| 项 | 值 |
+|---|---|
+| 命令 | `mvn -o -B --fail-at-end -pl service/article/article-rpc,service/hot/hot-rpc,service/comment/comment-rpc,service/favorite/favorite-api -am clean test -DargLine="-Xmx2g"` |
+| 树 / HEAD | `align/g3-article-comment-favorite-hot` @ 本轮工作区（2026-10-28 12:1x ~ 12:4x）|
+| **第 1 跑（12:1x）** | `service/common` **333 / 0 / 0 / 0** ✅ · `article-rpc` **183 / 0 / 0 / 0** ✅ · `favorite-api` **131 / 0 / 0 / 1** ✅（1 skip）· `comment-rpc` **138 / 0 / 0 / 0** ✅ · 🔴 **`hot-rpc` FAILURE（1 条）= 本域新守门的守恒判据过严** ⇒ ⇒ **红的是判据、不是被测代码** ⇒ ⇒ 判据已改（见 [`docs/Pitfalls/hot/rpc.md` P-HOTRPC-25](../../Pitfalls/hot/rpc.md)）|
+| **第 2 跑（12:40）** | `service/common` **333 / 0 / 0 / 0** ✅ · `article-rpc` **183 / 0 / 0 / 0** ✅（⇒ ⇒ **新判据在 article 域真跑绿** ⇒ ⇒ 判据改动本身已验）· 🔴 `hot-rpc` / `comment-rpc` **编译失败**（判据改动时我误插常量 ⇒ 重复定义 / 缺失常量）⇒ ⇒ **已修** ⇒ ⇒ **12:4x 编译验证**：`mvn -o -B --fail-at-end -pl … -am test-compile` ⇒ **EXIT=0** |
+| 🔴 **诚实边界** | **`hot-rpc` / `comment-rpc` 的「新守门判据」目前只到「编译通过」**，**测试未重跑**（Jason 2026-10-28 插队指令：**不起任何全量 / 域级回归**）⇒ ⇒ **不得据此宣布「hot / comment 守门已绿」** ⇒ ⇒ **待下一轮回归补上** |
+
+#### 🟡 **口径订正（2026-10-28 · G3）**：G2 报的本域数字与本树实测**不一致**
+
+⇒ ⇒ **G2 报的「hot = 5 处」** vs **本树实测「6 处」**（`NacosRegistrationHealthGateTest` · `HotRpcSpringContextWiringTest` · `HotGrpcInterceptorWiringTest` · `HotRedisDisconnectFastRejectGateTest` · `HotRpcSlowThresholdGateTest` · `mq/HotKafkaConsumerGateTest`）
+⇒ ⇒ ⇒ **两边数的是不同树**（G2 数的树里 hot 域没有 `HotKafkaConsumerGateTest` 那处 ⇒ 或该树尚未含最新改动）⇒ ⇒ **不是谁数错，是「比的不是同一份」** ⇒ ⇒ 迁移**前**应以**本树实测**为准，迁移**后**以「各形态 = 0」为准（口径见本节「源扫」）。
+⇒ ⇒ ⛔ **本条只登记差异，不回退任何一方数字**（回退会掩盖「两棵树不同」这个事实本身）。

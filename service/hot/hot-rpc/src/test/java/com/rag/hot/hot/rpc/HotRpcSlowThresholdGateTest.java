@@ -3,6 +3,7 @@ package com.rag.hot.hot.rpc;
 import com.rag.hot.hot.proto.GetHotArticlesRequest;
 import com.rag.hot.hot.proto.GetHotArticlesResponse;
 import com.rag.hot.hot.proto.HotServiceGrpc;
+import com.rag.hot.hot.rpc.support.RealGrpcPort;
 import io.grpc.ManagedChannel;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
@@ -146,7 +147,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
                 //    「各类的 properties 恰好不同」—— 谁改一下 properties 就可能撞上。
                 "rag.test.gate.context-key=hot-slow-threshold",
 
-                "grpc.server.port=0",
+                "grpc.server.port=22503",
                 // 绕过 Nacos：devh 的 @GrpcClient 在 Bean 初始化期就建 channel（不是懒建），
                 // 测试环境没有 Nacos ⇒ discovery:// 解析失败 ⇒ 上下文起不来。
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
@@ -296,7 +297,7 @@ class HotRpcSlowThresholdGateTest {
     private void warmUp() throws Exception {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);
         SlowHandlerProbe warm = new SlowHandlerProbe();
         warm.release.countDown();                 // 闸门直接开 ⇒ 立即返回
@@ -319,7 +320,7 @@ class HotRpcSlowThresholdGateTest {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);                  // ← 整条链（recover→breaker→shedding→业务拦截器）
         SlowHandlerProbe probe = new SlowHandlerProbe();
         Server server = builder.addService(slowHotService(probe, holdMillis)).build().start();

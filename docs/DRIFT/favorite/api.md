@@ -20,7 +20,7 @@
 | 项 | 值 |
 |---|---|
 | 落地形态 | 31 个 main 文件 / **3,116 行** / **15 个 DTO** / 7 个 Service / 1 个 Controller<br>⚠️ **核对 2026-10-25（第十轮）**：行数比首轮台账记的 2,920 多 196 行 ⇒ **全部是各轮的纯注释增量**（可执行逻辑零改动）；DTO 数首轮记的 **13 是错的**（基线 `58e8314` 就是 15 个） |
-| 测试 | **11 个测试类 / 116 例全绿**（33 输入契约 + 36 MVC 管线 + **6 装配** + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍** + **1 探针（自动 skip）** + **4 端口归属守门** + **11 span 守门（第二十九轮新增 · 零 Docker）**）⚠️ **另有 4 条曾长期红的用例已在第三十轮转绿**（`FavoriteApiRealTomcatGateTest` 3 ＋ `FavoriteApiEnvelopeParityTest` 1 ⇒ 真根因 = **Tomcat 11 的 `103 Early Hints` 撞 JDK 客户端的 1xx 上限** ⇒ ⇒ **域内自修** ⇒ **不是共享层问题** ⇒ §16.8）⇒ **合计 116 例 / 1 skip**（口径 = surefire XML 求和 ≡ maven 模块汇总行）；⚠️ **明细之和不等于总数**（本行只列主要构成 ⇒ 以 surefire 求和为准）→ 第六轮 **+1 个测试类 / +5 例**；第十四轮收尾 **+1 个测试类 / +4 例**（`RealTomcatPortTest`）；**2026-10-26 合并当天**：防护链类 3 ⇒ **6 例**（绝对 `@Order` ⇒ Go 相对链序，**§12**） |
+| 测试 | **11 个测试类 / 116 例全绿**（33 输入契约 + 36 MVC 管线 + **6 装配** + 4 超时 + **8 真 Tomcat 门禁** + **5 响应字节对拍** + **1 探针（自动 skip）** + **4 端口归属守门** + **11 span 守门（第二十九轮新增 · 零 Docker）**）⚠️ **另有 4 条曾长期红的用例已在第三十轮转绿**（`FavoriteApiRealTomcatGateTest` 3 ＋ `FavoriteApiEnvelopeParityTest` 1 ⇒ 真根因 = **Tomcat 11 的 `103 Early Hints` 撞 JDK 客户端的 1xx 上限** ⇒ ⇒ **域内自修** ⇒ **不是共享层问题** ⇒ §16.8）〔📌 **2026-10-28 订正**：**归因已改** —— 那些 1xx 是**共享层探针**写的 ⇒ ⇒ **「不是共享层问题」这句不成立**（原值保留不改写）⇒ ⇒ 见 §22〕⇒ **合计 116 例 / 1 skip**（口径 = surefire XML 求和 ≡ maven 模块汇总行）；⚠️ **明细之和不等于总数**（本行只列主要构成 ⇒ 以 surefire 求和为准）→ 第六轮 **+1 个测试类 / +5 例**；第十四轮收尾 **+1 个测试类 / +4 例**（`RealTomcatPortTest`）；**2026-10-26 合并当天**：防护链类 3 ⇒ **6 例**（绝对 `@Order` ⇒ Go 相对链序，**§12**） |
 | 本轮发现 | **2 条 L1/L2 语义漂移（均已修）** + **2 条 javadoc 假断言（已修）** + **1 条已签字偏离** |
 | 未决 | **2 条已签字**（401 body 形态 DEV-FAV-API-001 + 500 兜底 body DEV-FAV-API-002，✅ **2026-10-25 用户签字**）⇒ **本域已无 🏷 候选**<br>🔴 **1 条跨域待拍板**：② **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现，落点在 `service/common` ⇒ 收口在 `global`）—— ① 容器层参数上限口径**已于 2026-10-27 闭合**（共享层把容器上限抬到 10001 + 域侧动作完成 ⇒ **§14**）<br>✅ **U8（第十五轮登记的唯一一条业务路径缺口）已于第十六轮闭合**：create 成功路径 + `ensureUserExists` 五分支 + 落库等价性全部拿到双侧活体证据（15 case 全 SAME）⇒ [`rpc.md`](./rpc.md) **§25**；盘点全表 ⇒ **§24.1** ⇒ **域内「未知项」归零**（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认）<br>🔴 **U9（第十七轮新增 · 部署形态类 · 待拍板）**：Go 生产形态有 **16062** 那个 HTTP 面，RAG 侧没有 ⇒ **§11** |
 | 本台账范围 | **仅 `favorite-api`**。`favorite-common` / `favorite-rpc` / `favorite-proto` 见同目录另三份台账 |
@@ -960,7 +960,7 @@ service/favorite/api/internal/svc/service_context.go:20
 | ✅ **守门（已补 · 第二十九轮）** | **新增 2 个守门类**（**域内文件** · **零 Docker / 零 Testcontainers / 零真 PG / 零真 Redis**）：<br>① `service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/FavoriteApiSpanWiringTest.java` ⇒ **11 条**<br>② `service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteRpcSpanWiringTest.java` ⇒ **12 条**<br>**形态** = 自装 **真 OTel SDK**（`OpenTelemetrySdk` ＋ `SdkTracerProvider` ＋ `SimpleSpanProcessor` ＋ 自写 `CollectingExporter`）⇒ 断言**导出的 `SpanData`**（**不是**「代码写成了这样」⇒ AGENTS.md §3.3.3）⇒ ⇒ **16/16 个 span 的「真被导出」「属性名与属性值」「三类记错判据」「status 恒 UNSET」四条都有运行时证据** |
 | 🟡 **守门的边界（必须与结论一起读）** | ① **Go 侧没有同时跑的探针** ⇒ ⇒ **不是「双侧活体对拍」** ⇒ 本条最高只到 **L3**（Go 侧 L1 逐行对照 ＋ RAG 侧 L4 运行证据）<br>② **favorite-rpc 侧不起 Spring 上下文**（`application.yml` 里 `spring.flyway.enabled=true` ⇒ 真上下文**必须连真 PG** ⇒ Docker 转发故障下不可用）⇒ 改为**直接装配生产对象**（真 `FavoriteDomainService` ＋ 真 `FavoriteUserGuard` ＋ 真 `FavoriteArticleSnapshotResolver` ＋ 真 `FavoriteRpcMetrics` ＋ 真 `FavoriteSpans` ＋ 真 OTel SDK），**mock 的只有两条外部边界**：数据层 mapper（`interface` ＋ mock）与下游 gRPC 客户端（**真 in-process server** ⇒ 走真传输层）⇒ ⇒ **本守门不证明 SQL / DDL / 事务行为**（那些归 `FavoriteDdlParityTest` / `FavoriteSqlStatementParityTest` 等）<br>③ **favorite-api 侧无数据源** ⇒ 用**真 in-process gRPC server** 顶上那一次下游调用 ⇒ **顺带能钉死「span 属性 trim 过、下游请求带未 trim 原值」这条不对称**（靠下游**真收到**的请求断言，不是靠读代码） |
 | ✅ **变异验证（7 个变异 · 全部精确转红）** | 见 **§16.6** ⇒ ⇒ 「守门是否活着」**已体检**（不是假绿） |
-| ✅ **本轮回归（可复算 · 第三十轮修完 4 条长期红）** | `mvn -B -o -pl service/favorite/favorite-api,service/favorite/favorite-rpc,service/favorite/favorite-common -am test -DargLine="-Xmx2g"` ⇒ **favorite-api 116 条 / 0 failures / 0 errors / 1 skipped**（`11` 份 surefire XML ⇒ **与 maven 汇总行一致** ⇒ ⚠️ 跑之前多一份**孤儿报告**（我删掉的临时探针 `FavoriteApiFormLimitTransportProbeTest`，1 条）⇒ 已删 ⇒ 计数口径归位）· **favorite-common 29 条 / 0 failures / 0 errors / 0 skipped**（`4` 份）· **favorite-rpc 126 条 / 0 failures / 0 errors / 3 skipped**（`22` 份）<br>✅ **原先长期红的 4 条已全部转绿**（`FavoriteApiRealTomcatGateTest` 3 条 ＋ `FavoriteApiEnvelopeParityTest#tooManyFormParamsMatchGoByteForByte` 1 条）⇒ ⇒ **根因不是我先前说的「100-Continue」** ⇒ ⇒ **真根因 = Tomcat 11.0.24 连发的 `103 Early Hints` 撞了 JDK `HttpClient` 的 1xx 上限** ⇒ ⇒ **域内自修**（测试传输层回落 `HttpURLConnection`）⇒ **零共享层改动** ⇒ ⇒ **完整取证见 §16.8** |
+| ✅ **本轮回归（可复算 · 第三十轮修完 4 条长期红）** | `mvn -B -o -pl service/favorite/favorite-api,service/favorite/favorite-rpc,service/favorite/favorite-common -am test -DargLine="-Xmx2g"` ⇒ **favorite-api 116 条 / 0 failures / 0 errors / 1 skipped**（`11` 份 surefire XML ⇒ **与 maven 汇总行一致** ⇒ ⚠️ 跑之前多一份**孤儿报告**（我删掉的临时探针 `FavoriteApiFormLimitTransportProbeTest`，1 条）⇒ 已删 ⇒ 计数口径归位）· **favorite-common 29 条 / 0 failures / 0 errors / 0 skipped**（`4` 份）· **favorite-rpc 126 条 / 0 failures / 0 errors / 3 skipped**（`22` 份）<br>✅ **原先长期红的 4 条已全部转绿**（`FavoriteApiRealTomcatGateTest` 3 条 ＋ `FavoriteApiEnvelopeParityTest#tooManyFormParamsMatchGoByteForByte` 1 条）⇒ ⇒ **根因不是我先前说的「100-Continue」** ⇒ ⇒ **真根因 = Tomcat 11.0.24 连发的 `103 Early Hints` 撞了 JDK `HttpClient` 的 1xx 上限** ⇒ ⇒ **域内自修**（测试传输层回落 `HttpURLConnection`）⇒ **零共享层改动** ⇒ ⇒ **完整取证见 §16.8**〔📌 **2026-10-28 订正**：**「Tomcat 连发」这个归因错了** —— 1xx 是**共享层探针**写的（`GoStyleClientDisconnectProbe.java:234`）⇒ ⇒ **「零共享层改动」仍成立**（本域确实没改共享层）**但「不是共享层问题」不成立**（共享层已用 `15cf93a` 修掉上界）⇒ ⇒ **原值保留不改写** ⇒ ⇒ 见 §22〕 |
 
 ### 16.6 ✅ 变异验证 —— **7 个变异全部精确转红**（第二十九轮）
 
@@ -995,6 +995,17 @@ service/favorite/api/internal/svc/service_context.go:20
 ---
 
 ### 16.8 🔴 **「4 条真 Tomcat 用例长期红」的真根因 —— 不是 100-Continue，是 `103 Early Hints`**（第三十轮 · 实测）
+
+#### 📌 **订正注记（2026-10-28 · G3）—— 本节的「事实③」归因**错了** ⇒ 原值保留不改写 ⇒ 以本注记 + [§22](#22-🔴🟢-域内-3-处1xx-是-tomcat-连发的归因错误--真凶是共享层探针并删掉域内的-httpurlconnection-回落分支2026-10-28--g3) 为准**
+
+⇒ ⇒ **事实③ 写的是**「**不是共享层主动发的** ⇒ 全仓 `service/**` grep `EarlyHints` / `early-hints` / `sendEarlyHints` ⇒ **零命中** ⇒ ⇒ 是 **Tomcat 11.0.24** 自身的行为」⇒ ⇒ **这个结论是错的**：
+**那 1xx 恰恰是共享层写的** —— `service/common/src/main/java/com/rag/common/observability/GoStyleClientDisconnectProbe.java:234`
+裸写 `"HTTP/1.1 103 Early Hints\r\n\r\n"`（**已签字偏离 `SD-2026-10-25-04`**）。
+⇒ ⇒ 🔴 **根因 = 「零命中是假信号」**：那次 grep 找的是 **Tomcat 的 API 名**（`EarlyHints` / `sendEarlyHints` / `early-hints`）⇒ ⇒
+**共享层是裸写字节串**（`103 Early Hints`）⇒ ⇒ **模式选错 ⇒ 零命中 ⇒ ⇒ 「不是共享层主动发的」被坐实成假结论**。
+⇒ ⇒ **独立佐证**（共享层自己在 `15cf93a` 里的订正）：**无 Authorization 的 401 路径实测零 1xx** ⇒ ⇒ 若是容器自发，401 也该有。
+⇒ ⇒ **同源的错**在共享层**已经犯过一次**（`GoStyleTimeoutResponseRaceGateTest` 注释）⇒ ⇒ 本域**又犯一次** ⇒ ⇒ 记 [`docs/Pitfalls/favorite/api.md` PIT-FAV-API-016](../../Pitfalls/favorite/api.md) 同族「**零命中是假信号**」。
+⇒ ⇒ **本节的实测证据（裸 socket 抓到的 11 行 1xx）仍然成立** ⇒ ⇒ **被测行为正确、客户端上限 8、wire 层多发 1xx** 三条**都不改** ⇒ ⇒ **只有「谁写的」这一条错了**。
 
 ⚠️ **订正**：本域 §16.5 早先写「根因 = JDK HttpClient 对 Tomcat 多次 **100-Continue** 的上限」⇒ ⇒ **那个说法是错的**
 ⇒ ⇒ **已实测推翻**（下面是裸 socket 的原始响应字节）。
@@ -1266,7 +1277,7 @@ Go 的 `net/http` **服务端没有 103 Early Hints 这个特性** ⇒ ⇒ **RAG
 > - 📌 **与本文件 §15.3 的既有订正注记同源**（那里 2026-10-27 已订正「`PoolSize` ＝ 基准值、不是上限」）⇒ ⇒ **本次是那张表的两个「表格落点」的补订正**（§15.7 落码清单表 ＋ §19.7 残留差异表）⇒ **同源、同结论**。
 
 ⚠️ **`max-idle: 16` 与 `max-active: 64` 是「表达层更严」** ⇒ ⇒ 它们**不是**对 Go 的行为漂移（不影响命令结果）
-⇒ ⇒ **若要登记为有意偏离项，落点是 `docs/Intentional_Deviations/favorite/api.md`（⛔ 非本 lane 写权面）⇒ 留待整合者登记**（同款在 hot-rpc / comment-rpc 侧也已存在）。
+⇒ ⇒ **若要登记为有意偏离项，落点是 `docs/Intentional_Deviations/favorite/api.md`（⛔ 非本 lane 写权面）⇒ 留待合并收口执行者登记**（同款在 hot-rpc / comment-rpc 侧也已存在）。
 
 ### 19.8 复现
 
@@ -1445,3 +1456,48 @@ favorite-api **7/7 handler** 都调 `httpx.Parse` ⇒ ⇒ **7/7 端点都该在�
 - ❌ **不**声称「共享层那段数规则已改」⇒ ⇒ **共享层一行没动**（`service/common/**` 只读）⇒ ⇒
   本域**自装**判据正是共享层 javadoc 设计的另一半（见 §21.3 第 4 点）；
 - ❌ **不**把「`%3B` 不触发」写成「已验」⇒ ⇒ 它来自 §21.2 ④ 的**逐行**（判原始串）⇒ ⇒ L1。
+
+## 22. 🔴🟢 **域内 3 处「1xx 是 Tomcat 连发的」归因错误** —— 真凶是**共享层探针**；并**删掉**域内的 `HttpURLConnection` 回落分支（2026-10-28 · G3）
+
+#### 起因：G4 指出的「域内归因是错的」
+
+⇒ ⇒ G4 在共享层修 1xx 探针行数上界（`15cf93a`）时**顺带订正了它自己的一处归因**：原注释称 103 是「**Tomcat 自发**」的 ⇒ ⇒ 实测是**共享层探针**写的 ⇒ ⇒ **独立佐证**：**无 Authorization 的 401 路径实测零 1xx** ⇒ ⇒ 若是容器自发，401 也该有。
+⇒ ⇒ 🔴 **本域有同款错误归因 3 处**（域侧文件 ⇒ 域侧自修）：
+
+| # | 位置 | 原归因 |
+|---|---|---|
+| 1 | `favorite-api/.../support/RealTomcatHttp.java`（**类 javadoc**）| 「**Tomcat 11.0.24** 在这类请求上连发 `103 Early Hints`」|
+| 2 | `favorite-api/.../FavoriteApiRealTomcatGateTest.java`（`send()` 内注释）| 同上 |
+| 3 | `favorite-api/.../FavoriteApiEnvelopeParityTest.java`（`send()` 内注释）| 同上 |
+
+⇒ ⇒ **真源（共享层）**：`service/common/src/main/java/com/rag/common/observability/GoStyleClientDisconnectProbe.java:234`
+裸写 `"HTTP/1.1 103 Early Hints\r\n\r\n"`（**已签字偏离 `SD-2026-10-25-04`**）⇒ ⇒ 1xx 行数 ≈ **耗时 ÷ 探测间隔**（默认 500ms）⇒ ⇒ 慢请求就会写出多行。
+⚠️ **判据的方向**：Go 的 `net/http` 服务端**不发** 1xx ⇒ ⇒ RAG 这条 1xx 是**wire 层与 Go 的差异**（已签字偏离，不是缺陷）⇒ ⇒ 但**归因必须写对**，否则下一个人会去改 Tomcat。
+
+#### 落码
+
+| 项 | 值 |
+|---|---|
+| 订正 ① | `RealTomcatHttp.java` 类 javadoc ⇒ **重写**「为什么需要回落」一节 ⇒ 改成「**归因订正**：1xx 是共享层探针写的」＋ 引真源 `文件:行号` |
+| 订正 ②③ | 两个 `send()` 处的 3 行注释 ⇒ 同款订正 |
+| **删回落** | `RealTomcatHttp.send()` 的 `HttpURLConnection` 回落分支 ＋ 其响应包装类 `UrlConnectionResponse` ⇒ **一并删除** |
+
+#### 🔴 对 G4 [4] 的裁定：**删回落**（不是「保留但写明会吞掉回归」）
+
+⇒ ⇒ **G4 的顾虑原文**：4 条用例**全是 bodyless GET** ⇒ ⇒ `HttpURLConnection` 回落 **100% 生效** ⇒ ⇒ **共享层 1xx 上界若回归，域侧会继续绿** ⇒ ⇒ 建议「删回落」或「保留但在 javadoc 写明会吞掉共享层回归」。
+⇒ ⇒ **本域裁定：删**。理由三条：
+1. **回落的前提已经被上游修掉** ⇒ ⇒ 共享层 `15cf93a` 已把 1xx 行数设为**每请求 ≤ 4**（`DEFAULT_MAX_PROBE_LINES=4`，**取 4 而非客户端上限 8 ⇒ 留一半余量**）⇒ ⇒ JDK 客户端（上限 8）**永远读得到最终响应** ⇒ ⇒ **回落已是死代码**。
+2. **死代码 + 兜底 = 下一类回归的隐身衣** ⇒ ⇒ 保留它 ⇒ ⇒ 共享层若撤掉上界，本域这 4 条用例**照样绿** ⇒ ⇒ 违反「**跑绿 ≠ 判据活着**」⇒ ⇒ 域侧不该替共享层兜底。
+3. **修法要落在根因那一侧** ⇒ ⇒ 再看到 `ProtocolException: Too many interim responses received: N > 8` ⇒ ⇒ 那是**共享层上界回归** ⇒ ⇒ **修共享层**，不是在本域加回落。
+⇒ ⇒ **已在 javadoc 里写成显式约定**（域侧文件 ⇒ 域侧可写）：「**不要在本域加回落兜底 ⇒ 修共享层**」。
+
+#### ⚠️ 跑这 4 条用例**必须带 `-am`**（否则**假红**，不是本域坏了）
+
+⇒ ⇒ 它们同时依赖共享层的两处改动：① **1xx 行数上界**（`15cf93a` · 2026-10-27 **19:06**）② **容器参数上限抬到 10001**（`cd893d1` · 2026-10-27 **13:08**）
+⇒ ⇒ ⚠️ **本地 `~/.m2` 里的 `common-0.0.1-SNAPSHOT.jar` 实测是 2026-10-27 12:00** ⇒ ⇒ **早于两处改动** ⇒ ⇒ 不带 `-am` 就会读到旧快照 ⇒ ⇒ **用例假红**。
+⇒ ⇒ ⇒ **「跑红 ≠ 被测代码坏」的一个新实例**：红的是**环境里的旧依赖**，不是本域。
+
+#### 证据强度
+
+- **L1**（共享层源码 `文件:行号` ＋ 共享层自己的订正取证）**＋ L4**（本轮真 Tomcat 回归 ⇒ 4 条用例在**新共享层**下绿 ⇒ ⇒ 「删回落后仍读得到最终响应」已被实测证明）。
+- ⚠️ **诚实边界**：本条**不**证明「共享层上界将来不会回归」⇒ ⇒ 它证明的是「**当前这 4 条用例不再依赖回落**」⇒ ⇒ 回归时它们会**红**（这正是我们要的）。

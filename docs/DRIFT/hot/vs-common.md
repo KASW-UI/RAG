@@ -65,8 +65,8 @@
 | # | 事项 | 落点 | 依据 / 修法 |
 |---|---|---|---|
 | **H-1** | ✅ **补 proto 契约回归网（2026-10-27 阶段 2 已落码）** | **新增** `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/proto/HotProtoContractTest.java` ＋ `src/test/resources/proto-contract/{hot-proto-contract.expected.txt, generate.py}` | **已落码**（域内文件，**未改共享脚本**）：<br>① **基准由脚本从 Go 真源生成** —— `generate.py` 解析 `Sea-RideTheWind_golang/proto/hot.proto` ⇒ 冻结成 `hot-proto-contract.expected.txt`（真源 sha256 `4ede71009039756b…`）⇒ **期望值不是手抄的**；<br>② **比对「生成码的描述符」而不是「.proto 文本」**（读 `Descriptors.FileDescriptor` ⇒ 拿到真正参与 wire 编码的那份契约）；<br>③ 钉住：package · **11 个 message 的字段名/字段号/类型** · `repeated`（`items` / `articles`）· **5 个 rpc 的方法名与出入参**（`HotService`）。<br>⇒ **实测绿**：`mvn -o -pl service/hot/hot-rpc test -Dtest=HotProtoContractTest` ⇒ **EXIT=0**（1 条用例）。<br>⚠️ **覆盖边界**：不覆盖 gRPC 帧 / HTTP2 帧；**字节级**对拍另需 wire 探针（favorite 域有 `tools/proto-wire-probe/favorite/`，hot 域**没有** ⇒ 属 `tools/**` 共享面 ⇒ 已登记，见 §3-H-3）<br>⚠️ **放在 hot-rpc 而不是 hot-proto**：`hot-proto` 模块**一行 junit 依赖都没有** ⇒ 往那儿加测试要先改 pom（与 favorite/article 域同款理由） |
-| **H-2** | 🟡 **A6 升 L4：复制 errmsg 探针骨架到 `hot/`** | `tools/errmsg-probe/{go,java}` → 复制出 `hot/` | 骨架已有（顶层 article ＋ `favorite/`）⇒ 复制一份到 `hot/` 即可拿错误码值/文案/未知码回落的**双侧逐字节**证据<br>⚠️ **落点修正（2026-10-27）**：`tools/**` 是**共享面**（不在 G3 写权面）⇒ 本项**不是「域侧自修」** ⇒ **登记给整合者/G4**，G3 只登记不落码（除非整合者把该探针目录划给某域） |
-| **H-3** | 🟡 **A7 升 L4：proto wire 探针** | `tools/proto-wire-probe/` → 复制出 `hot/` | 同款骨架（favorite 已有）⇒ 拿 wire 字节级证据<br>⚠️ **落点修正（2026-10-27）**：`tools/**` 是**共享面**（不在 G3 写权面）⇒ 本项**不是「域侧自修」** ⇒ **登记给整合者/G4**，G3 只登记不落码（除非整合者把该探针目录划给某域） |
+| **H-2** | 🟡 **A6 升 L4：复制 errmsg 探针骨架到 `hot/`** | `tools/errmsg-probe/{go,java}` → 复制出 `hot/` | 骨架已有（顶层 article ＋ `favorite/`）⇒ 复制一份到 `hot/` 即可拿错误码值/文案/未知码回落的**双侧逐字节**证据<br>⚠️ **落点修正（2026-10-27）**：`tools/**` 是**共享面**（不在 G3 写权面）⇒ 本项**不是「域侧自修」** ⇒ **登记给合并收口执行者/G4**，G3 只登记不落码（除非合并收口执行者把该探针目录划给某域） |
+| **H-3** | 🟡 **A7 升 L4：proto wire 探针** | `tools/proto-wire-probe/` → 复制出 `hot/` | 同款骨架（favorite 已有）⇒ 拿 wire 字节级证据<br>⚠️ **落点修正（2026-10-27）**：`tools/**` 是**共享面**（不在 G3 写权面）⇒ 本项**不是「域侧自修」** ⇒ **登记给合并收口执行者/G4**，G3 只登记不落码（除非合并收口执行者把该探针目录划给某域） |
 | **H-4** | 🟡 **部署侧**：`hot-rpc` 的 gRPC 端口未在 `Infrastructure.md §3` 预占 | 部署配置（**非本仓写权面**） | `hot-rpc/.../application.yml:83-85` 的注释自记「Infrastructure.md §3 目前只给 hot 预占了 18897(HTTP)，**gRPC 端口未分配**」⇒ **记录 + 上报**，非代码缺陷 |
 | **H-5** | ✅ A3/A4/A5/A9 —— **无需改** | — | 四轴实测一致（端口差异属已记录的部署口径；Go 侧 hot 无业务 span ⇒ 无需补埋点 ⇒ **补了反而是新增 Go 没有的行为**） |
 
@@ -87,7 +87,7 @@
 |---|---|---|---|
 | **G4-1** | ✅ **共享层能力缺口真实存在，但 `hot` 域本身 = N/A** ⇒ 本条**已按全域共性正式派单**，hot 域**不单独重复登记** | `service/common/src/main/java/com/rag/common/protection/GoStyleGrpcClientBreakerInterceptor.java:103-106` ＋ `GoStyleProtectionConfiguration.java:51-53` | **现象（共享层）**：该拦截器是 `@Component` ＋ `@GrpcGlobalClientInterceptor` ⇒ **只能组件扫描**；而 **rpc 进程刻意不扫 `com.rag.common`**（`HotRpcApplication.java:61` 无 `scanBasePackages`；同文件 javadoc 明写「不能扫，HttpMiddlewareFilter 是 servlet Filter，纯 gRPC 进程全包扫描会把 web 类拖进来」）⇒ rpc 侧**永远拿不到 client breaker**（Go 侧 client breaker 默认开：`zrpc/internal/config.go:14` ＋ `zrpc/internal/client.go:113`）⇒ **共享层能力缺口成立**。<br>⚠️ **但 hot 域 = N/A（本轮订正）**：`hot-rpc` **无任何 gRPC 出向调用**（`@GrpcClient`/`ManagedChannel`/`newBlockingStub` 全 0 ＋ 无 `client/` 目录 ⇒ 见 §2-A2 的全扫证据）⇒ **hot 域不可观测**。<br>**实测影响面（核对日期 2026-10-27 · 已订正）**：**G3 域内 3/4 真实命中** —— `article-rpc`（`@GrpcClient` = **5**）· `comment-rpc`（= **2**）· `favorite-rpc`（= **2**）⇒ 这三个域的出向调用**确实无熔断**；**`hot-rpc`（= 0）⇒ N/A** ⇒ 原稿「G3 域内 4/4 命中」**属过报，已更正**（并已向 G4 发更正）。⇒ **建议**：共享层提供一个 **rpc 进程可用的装配入口**（改为可被 `@Import` 引入，或由 `RpcServerInterceptorFactory` 一并产出 client 侧拦截器 —— ⚠️ **后者落点 100% 在 `service/common`**，因实测 **10/10 rpc 组件已 `@Import` `RpcServerInterceptorFactory`** ⇒ 前者需改 10 个**域侧** Application 类 ⇒ **越 G4 写权**），并补一条「rpc 侧出向调用确实经过 breaker」的**装配层**测试（AGENTS.md §3.3.3：注解存在 ≠ 机制生效）。**是否阻塞本波**：否 |
 | **G4-2** | 🟡 **A9 轴定义的措辞缺陷**（共享面 `_cross`） | `docs/DRIFT/_cross/domain-common-lanes.md` 的 A9 行 | 轴定义写「span 属性 **`audit.*`**」⇒ 实测：**共享层 = `sea.*`**（`ObservabilityConstants.java:57-116`）· **admin = `audit.*`** · **favorite = `biz.*`** · **hot 域两侧都无业务 span** ⇒ 轴定义应按域区分 ⇒ **共享面文件，G3 不写** ⇒ 已请 G4 登记进 `global/vs-common.md` 的建议项段 |
-| **G4-3** | ℹ️ **A8 = N/A 的登记口径** | `docs/DRIFT/_cross/ddl-type-divergences.md` | 本域「两侧 0 张表 ⇒ DDL 维度 N/A」⇒ 建议在跨域 DDL 汇总里**把 hot 显式标为 N/A**（而非「已对齐」）⇒ 共享面 ⇒ 整合者/G4 处理 |
+| **G4-3** | ℹ️ **A8 = N/A 的登记口径** | `docs/DRIFT/_cross/ddl-type-divergences.md` | 本域「两侧 0 张表 ⇒ DDL 维度 N/A」⇒ 建议在跨域 DDL 汇总里**把 hot 显式标为 N/A**（而非「已对齐」）⇒ 共享面 ⇒ 合并收口执行者/G4 处理 |
 
 ## 5. 交付物清单
 
@@ -97,11 +97,11 @@
 - [x] §1 的每一条**重新核对状态**并写回（带核对日期）
 - [x] §3 的域侧修法**落码 + 守门**（含变异验证）—— 🟡 **阶段 2 落码部分已完成**（口径：`mvn -o -pl service/hot/hot-rpc,... -am test` ⇒ hot-rpc **96 / 0 failures**）：
   - **H-1** ✅ proto 契约回归网（新增 `HotProtoContractTest` ＋ 域内 `generate.py` ＋ 冻结 `expected.txt`，**真源 sha256 `4ede71009039756b…`** ⇒ 1/1 绿）
-  - ⏳ **H-2**（A6 升 L4：复制 errmsg 探针骨架到 `hot/`）· **H-3**（A7 升 L4：proto wire 探针）＝ **落点在 `tools/**` 共享面 ⇒ G3 不写**，已登记给整合者/G4 · **H-4**（`Infrastructure.md §3` 未预占 `hot-rpc` gRPC 端口）＝ **非本仓写权** ⇒ 只登记
+  - ⏳ **H-2**（A6 升 L4：复制 errmsg 探针骨架到 `hot/`）· **H-3**（A7 升 L4：proto wire 探针）＝ **落点在 `tools/**` 共享面 ⇒ G3 不写**，已登记给合并收口执行者/G4 · **H-4**（`Infrastructure.md §3` 未预占 `hot-rpc` gRPC 端口）＝ **非本仓写权** ⇒ 只登记
 - [x] §4 的派单**已走实时轨**（`session send` → `G4Common` ＋ 本表正式轨，两轨一致）：**单 2** ＝ ✅ G4-1（client breaker 在 rpc 侧无装配路径 —— **全域共性**，请 G4 收口去重；⚠️ **hot 域本身 = N/A**：无 gRPC 出向调用 ⇒ 缺口对 hot 不可观测）—— 7 项反馈单齐全
-  - 🟡 G4-2（A9 轴措辞）/ G4-3（A8 = N/A 的登记口径）＝ **登记/转整合者项**，已随单 1 消息同批发给 G4（**非 7 项反馈单**）
-  - 🔴 `docs/DRIFT/global/vs-common.md` ＋ `global/_README.md` §七之二属 **SHARED 面 ⇒ G3 不写**（AGENTS.md §5.3e）⇒ 由 G4 / 整合者落
-- [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**`）—— ✅ **本轮实测（2026-10-28 · G3，域侧自修 · §1e）**：`check-ledger-tables` **EXIT=0** · `check-ledger-selfcheck` **EXIT=0** · `check-ledger-count` **EXIT=1**（索引 **315** vs 本树实测 **332**，差 **+17** ⇒ **合并收口执行者**统一 `--fix` ⇒ ⛔ **各 lane 不各自 `--fix`**）· `_MANIFEST.json` **不收录** `vs-common.md`（`grep -c` = **0**）⇒ ⇒ **本域无需改共享面** ⇒ ⇒ ⚠️ **措辞订正**：「整合者」⇒ 改称「**合并收口执行者**」
+  - 🟡 G4-2（A9 轴措辞）/ G4-3（A8 = N/A 的登记口径）＝ **登记/转合并收口执行者项**，已随单 1 消息同批发给 G4（**非 7 项反馈单**）
+  - 🔴 `docs/DRIFT/global/vs-common.md` ＋ `global/_README.md` §七之二属 **SHARED 面 ⇒ G3 不写**（AGENTS.md §5.3e）⇒ 由 G4 / 合并收口执行者落
+- [x] **共享面不回写**（`AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**`）—— ✅ **本轮实测（2026-10-28 · G3，域侧自修 · §1e）**：`check-ledger-tables` **EXIT=0** · `check-ledger-selfcheck` **EXIT=0** · `check-ledger-count` **EXIT=1**（索引 **315** vs 本树实测 **332**，差 **+17** ⇒ **合并收口执行者**统一 `--fix` ⇒ ⛔ **各 lane 不各自 `--fix`**）· `_MANIFEST.json` **不收录** `vs-common.md`（`grep -c` = **0**）⇒ ⇒ **本域无需改共享面** ⇒ ⇒ ⚠️ **措辞订正**：「合并收口执行者」⇒ 改称「**合并收口执行者**」
 
 > ⚠️🔴 **本轮踩坑（四域共用 · 已在 G4 同步）——「单模块跑法」会拿 `~/.m2` 里的旧共享层做测试**
 > `mvn -o -pl <模块> test`（**不带 `-am`**）⇒ 共享层从 **~/.m2** 取 ⇒ 本地那份 `service/common` jar 是 **E62 修前**旧版 ⇒ 域内 SQL deadline 守门会以「毫秒精度失效 ＋ 过期后仍执行 SQL」的形态**假红**（comment-rpc 3 条 / favorite-rpc 1 条）⇒ ⇒ **不是漂移**。

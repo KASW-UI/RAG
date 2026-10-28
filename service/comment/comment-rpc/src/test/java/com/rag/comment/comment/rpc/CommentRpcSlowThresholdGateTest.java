@@ -282,7 +282,7 @@ class CommentRpcSlowThresholdGateTest {
     private void warmUp() throws Exception {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);
         Server server = builder.addService(slowCommentService(0L)).build().start();
         ManagedChannel ch = io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
@@ -300,7 +300,7 @@ class CommentRpcSlowThresholdGateTest {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);                  // ← 整条链（recover→breaker→shedding→业务拦截器）
         Server server = builder.addService(slowCommentService(sleepMillis)).build().start();
 

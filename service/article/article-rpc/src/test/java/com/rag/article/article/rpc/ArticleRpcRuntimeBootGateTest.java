@@ -1,6 +1,7 @@
 package com.rag.article.article.rpc;
 
 import com.rag.article.article.rpc.support.RealContainerHostPort;
+import com.rag.article.article.rpc.support.RealGrpcPort;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -9,7 +10,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -91,7 +91,12 @@ class ArticleRpcRuntimeBootGateTest {
     @DisplayName("真 fat jar 起真 ArticleRpcApplication：gRPC 端口真的在监听（生产 classpath + 生产 yaml）")
     void realFatJarProcessBootsAndListens() throws Exception {
         Path jar = ArticleRpcArtifactClasspathGateTest.fatJar();
-        int port = freePort();
+        // 🔴 2026-10-28（G3）：原先这里是 `freePort()`（`new ServerSocket(0)` ⇒ **OS 临时端口段
+        //    49152–65535** ⇒ 与 Docker 随机发布容器端口**同段** ⇒ 别的会话的容器先占住
+        //    `0.0.0.0:P` ⇒ 本用例 **EADDRINUSE** ⇒ 真启动守门**偶发红**）
+        //    ⇒ ⇒ 现改走本域**专用段**（global 段表预分配给 article 域的 `22400–22479`）
+        //    ⇒ ⇒ 详见 `support/RealGrpcPort`。
+        int port = RealGrpcPort.pick();
 
         List<String> command = new ArrayList<>(List.of(
                 "java", "-jar", jar.toAbsolutePath().toString(),
@@ -180,13 +185,6 @@ class ArticleRpcRuntimeBootGateTest {
             return true;
         } catch (Exception e) {
             return false;
-        }
-    }
-
-    private static int freePort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            socket.setReuseAddress(true);
-            return socket.getLocalPort();
         }
     }
 

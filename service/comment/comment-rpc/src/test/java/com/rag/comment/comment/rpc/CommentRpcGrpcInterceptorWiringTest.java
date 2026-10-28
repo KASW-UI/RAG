@@ -163,7 +163,7 @@ class CommentRpcGrpcInterceptorWiringTest {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);                  // ← 被测的那一行（接口其实是 Consumer<ServerBuilder<?>>）
         SlowHandlerProbe probe = new SlowHandlerProbe();
         Server server = builder.addService(slowCommentService(probe)).build().start();
@@ -224,7 +224,7 @@ class CommentRpcGrpcInterceptorWiringTest {
         AtomicReference<String> handlerThread = new AtomicReference<>("<未进入>");
         SlowHandlerProbe probe = new SlowHandlerProbe();
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);
         Server server = builder.addService(
                 slowCommentService(probe, observedRemaining, handlerThread)).build().start();

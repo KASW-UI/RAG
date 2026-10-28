@@ -87,7 +87,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
                 //    ⇒ 本类的断言可能读到别的测试装配出来的 factory。
                 "rag.test.gate.context-key=hot-redis-disconnect-reject",
 
-                "grpc.server.port=0",
+                "grpc.server.port=22502",
                 // 绕过 Nacos：注册在 ApplicationReadyEvent 且已 try/catch，但 devh 的发现配置仍会连
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "logging.level.com.alibaba.nacos=WARN",

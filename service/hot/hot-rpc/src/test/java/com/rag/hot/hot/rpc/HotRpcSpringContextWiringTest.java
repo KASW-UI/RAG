@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assertions.*;
         classes = HotRpcApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "grpc.server.port=0",
+                "grpc.server.port=22500",
                 // 绕过 Nacos：devh 的 @GrpcClient 在 Bean 初始化期就建 channel（不是懒建），
                 // 测试环境没有 Nacos ⇒ discovery:// 解析失败 ⇒ 上下文起不来。
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",

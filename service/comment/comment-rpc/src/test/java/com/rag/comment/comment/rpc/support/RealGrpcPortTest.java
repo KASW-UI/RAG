@@ -110,4 +110,145 @@ class RealGrpcPortTest {
                     "0.0.0.0:" + p + " 已被占 ⇒ 必须判定为不可用");
         }
     }
+
+    // ── 源扫：把「回潮」堵住（2026-10-28 · G3）────────────────────────────────
+    //
+    // ⚠️ **前 4 条守的是「选取逻辑」对不对；它们看不见「有人又写回了 port=0」这种回潮**
+    // ⇒ ⇒ 下面两条**扫源码**才算真正堵住缺口。
+    // ⚠️ **禁止清单刻意用拼接构造** ⇒ ⇒ 这些字面量**不会连续出现在本文件里**
+    // ⇒ ⇒ 源扫**不会把自己扫成违规**（否则守门会永远红在自己身上）。
+
+    /** 禁止：Spring 属性形态 {@code grpc.server.port=0}。 */
+    private static final String BANNED_PROPERTY = "grpc.server.port=" + "0";
+
+    /** 禁止：进程参数形态 {@code --grpc.server.port=0}。 */
+    private static final String BANNED_ARGUMENT = "--grpc.server.port=" + "0";
+
+    /** 禁止：进程内 gRPC server 形态 {@code ServerBuilder.forPort(0)}。 */
+    private static final String BANNED_FOR_PORT = "forPort(" + "0)";
+
+    /** 禁止：裸取临时口 {@code new ServerSocket(0)}。 */
+    private static final String BANNED_SERVER_SOCKET = "new ServerSocket(" + "0)";
+
+    /** 禁止：裸取临时口的辅助方法 {@code freePort(}。 */
+    private static final String BANNED_FREE_PORT = "freePort" + "(";
+
+    /** 识别「本模块给 gRPC server 指定端口」的源码特征（剥注释后）。 */
+    private static final String GRPC_PORT_KEY = "grpc.server.port";
+
+    /** 识别「进程内 gRPC server」的源码特征（剥注释后）。 */
+    private static final String IN_PROCESS_SERVER_KEY = "ServerBuilder.forPort";
+
+    /** 识别「走本域专用段」的源码特征（剥注释后）。 */
+    private static final String REAL_PORT_USAGE = "RealGrpcPort";
+
+    /**
+     * 写死端口号的两种形态（正则里的点与括号<b>都转义</b>）
+     * ⇒ ⇒ <b>判据自身不会被自己扫到</b>（源码里是带反斜杠的形态 ⇒ 与字面量形态逐字不同）。
+     */
+    private static final java.util.regex.Pattern LITERAL_PORT =
+            java.util.regex.Pattern.compile("grpc\\.server\\.port=(\\d+)|forPort\\((\\d+)");
+
+    @Test
+    @DisplayName("🔴 本模块测试源码里不允许再出现「落回 OS 临时端口段」的五种形态（源扫 · 剥注释）")
+    void noTestSourceFallsBackToTheEphemeralPortSegment() throws IOException {
+        java.util.List<String> hits = new java.util.ArrayList<>();
+        for (java.nio.file.Path file : testSourceFiles()) {
+            String code = RealContainerHostPortTest.stripComments(read(file));
+            for (String banned : new String[]{BANNED_PROPERTY, BANNED_ARGUMENT, BANNED_FOR_PORT,
+                    BANNED_SERVER_SOCKET, BANNED_FREE_PORT}) {
+                if (code.contains(banned)) {
+                    hits.add(rel(file) + " ⇒ 含「" + banned + "」");
+                }
+            }
+        }
+        assertTrue(hits.isEmpty(),
+                "这些测试源码又落回 OS 临时端口段了（49152–65535 = Docker 发布口同段）"
+                        + "⇒ 真启动守门会偶发 EADDRINUSE ⇒ 必须走 RealGrpcPort：\n  "
+                        + String.join("\n  ", hits));
+    }
+
+    @Test
+    @DisplayName("🔴 凡是给 gRPC server 指定端口的地方，端口必须落在本域专用段内（源扫 · 守恒）")
+    void everyGrpcServerPortDeclarationStaysInsideTheDedicatedSegment() throws IOException {
+        java.util.List<String> violations = new java.util.ArrayList<>();
+        int declaringFiles = 0;
+        for (java.nio.file.Path file : testSourceFiles()) {
+            String code = RealContainerHostPortTest.stripComments(read(file));
+            boolean declares = code.contains(GRPC_PORT_KEY) || code.contains(IN_PROCESS_SERVER_KEY);
+            if (!declares) {
+                continue;
+            }
+            declaringFiles++;
+            // ① 走 RealGrpcPort（动态挑口）⇒ pick() 保证落在 [FIRST, LAST] ⇒ 合规
+            if (code.contains(REAL_PORT_USAGE)) {
+                continue;
+            }
+            // ② 写死字面量口 ⇒ 该字面量必须落在 [FIRST, LAST] 内（否则仍可能落 OS 临时段）
+            java.util.List<Integer> literals = literalPorts(code);
+            if (literals.isEmpty()) {
+                violations.add(rel(file) + " ⇒ 指定了端口，但既没走 RealGrpcPort、也读不出字面量口");
+                continue;
+            }
+            for (Integer p : literals) {
+                if (p < RealGrpcPort.FIRST || p > RealGrpcPort.LAST) {
+                    violations.add(rel(file) + " ⇒ 字面量端口 " + p + " 不在本域专用段 "
+                            + RealGrpcPort.FIRST + "-" + RealGrpcPort.LAST + " 内（可能落进 OS 临时段）");
+                }
+            }
+        }
+        assertTrue(declaringFiles > 0,
+                "本模块竟然一个提到 grpc.server.port / ServerBuilder.forPort 的测试类都没有"
+                        + " ⇒ 源扫面失效（路径变了？）");
+        assertTrue(violations.isEmpty(),
+                "这些测试类指定的 gRPC server 端口不在本域专用段内 ⇒ 端口仍可能落 OS 临时段：\n  "
+                        + String.join("\n  ", violations));
+    }
+
+    /**
+     * 从源码里抽出「写死的端口号」—— 只认两种形态：{@code grpc.server.port=22500} 与
+     * {@code forPort(22500)}。
+     *
+     * <p>⚠️ <b>判据自身不会被自己扫到</b>：本方法的正则源码里是 {@code grpc\.server\.port=} 与
+     * {@code forPort\(}（<b>带反斜杠</b>）⇒ ⇒ 与「字面量形态」<b>逐字不同</b> ⇒ ⇒ 自匹配 = 0。
+     */
+    private static java.util.List<Integer> literalPorts(String code) {
+        java.util.List<Integer> out = new java.util.ArrayList<>();
+        java.util.regex.Matcher m = LITERAL_PORT.matcher(code);
+        while (m.find()) {
+            String num = m.group(1) != null ? m.group(1) : m.group(2);
+            out.add(Integer.parseInt(num));
+        }
+        return out;
+    }
+
+    // ── 工具 ──────────────────────────────────────────────────────────────────
+
+    private static java.nio.file.Path moduleTestSourceRoot() {
+        java.nio.file.Path dir = java.nio.file.Paths.get("").toAbsolutePath();
+        for (int i = 0; i < 10 && dir != null; i++) {
+            java.nio.file.Path candidate = dir.resolve("service/comment/comment-rpc/src/test/java");
+            if (java.nio.file.Files.isDirectory(candidate)) {
+                return candidate;
+            }
+            dir = dir.getParent();
+        }
+        throw new IllegalStateException("找不到 service/comment/comment-rpc/src/test/java");
+    }
+
+    private static java.util.List<java.nio.file.Path> testSourceFiles() throws IOException {
+        try (java.util.stream.Stream<java.nio.file.Path> stream =
+                     java.nio.file.Files.walk(moduleTestSourceRoot())) {
+            return stream.filter(p -> p.toString().endsWith(".java")).sorted().toList();
+        }
+    }
+
+    private static String read(java.nio.file.Path file) throws IOException {
+        return new String(java.nio.file.Files.readAllBytes(file),
+                java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private static String rel(java.nio.file.Path file) {
+        return moduleTestSourceRoot().relativize(file).toString();
+    }
 }

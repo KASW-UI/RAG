@@ -1,6 +1,7 @@
 package com.rag.article.article.rpc;
 
 import com.rag.article.article.rpc.support.RealContainerHostPort;
+import com.rag.article.article.rpc.support.RealGrpcPort;
 import net.devh.boot.grpc.server.event.GrpcServerStartedEvent;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -153,7 +154,9 @@ class ArticleSchemaGateStartupOrderTest {
                     // ⚠️ 关掉 Flyway：schema 已由 @BeforeAll 用真 Flyway 建好，
                     //    这里要控制的是"迁移跑过、触发器被删"这个状态。
                     "--spring.flyway.enabled=false",
-                    "--grpc.server.port=0",
+                    // 🔴 2026-10-28（G3）：走**本域专用段**（22400–22479）
+                    //    ⇒ 不用 `0`（0 ⇒ OS 临时端口段 ⇒ 与 Docker 发布口同段 ⇒ 抖动）。
+                    "--grpc.server.port=" + RealGrpcPort.pick(),
                     "--spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                     "--management.otlp.tracing.export.enabled=false",
                     "--logging.level.com.alibaba.nacos=WARN",

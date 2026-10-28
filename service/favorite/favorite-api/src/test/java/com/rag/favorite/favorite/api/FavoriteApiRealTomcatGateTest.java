@@ -175,9 +175,12 @@ class FavoriteApiRealTomcatGateTest {
      */
     private HttpResponse<String> send(HttpRequest req) throws Exception {
         try {
-            // 🔴 走 RealTomcatHttp：JDK HttpClient 对 interim(1xx) 的上限是 8 条且**硬编码**，
-            //    而 Tomcat 11.0.24 在这类请求上会连发 103 Early Hints ⇒ ⇒ 撞上限就回落 HttpURLConnection。
-            //    详见 RealTomcatHttp 的类注释（裸 socket 实测证据）。
+            // 🔴 走 RealTomcatHttp：**只用 JDK HttpClient，不回落**。
+            //    ⚠️ 订正（2026-10-28 · G3）：1xx **不是「Tomcat 连发」的**，是**共享层断连探针**写的
+            //    （GoStyleClientDisconnectProbe.java:234 裸写 103 Early Hints · 已签字偏离 SD-2026-10-25-04）
+            //    ⇒ 共享层已把 1xx 行数设为每请求 ≤ 4（15cf93a）< JDK 客户端上限 8 ⇒ 现在读得到最终响应
+            //    ⇒ 再看到「Too many interim responses received」= **共享层上界回归** ⇒ 修共享层，别在本域加回落
+            //    ⇒ 详见 RealTomcatHttp 的类注释（裸 socket 实测 + 共享层订正取证）。
             return RealTomcatHttp.send(req);
         } catch (IOException e) {
             throw new IOException("端口 " + port + " 上读到了 0 字节（本请求没打到本测试的 Tomcat？）"

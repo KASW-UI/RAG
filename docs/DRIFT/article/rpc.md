@@ -2162,6 +2162,74 @@ JDBC 连**固定口** + `inet_server_port()` 回报**容器内口** ⇒ ⇒ 才�
 
 ⇒ ⇒ **纪律**：回执里的门禁口径**必须逐条点名红的那几条** ⇒ ⇒ 只报「几个红」不给成因 ⇒ ⇒ 下一轮的人分不清「真红」与「预期红」。
 
+### 二十三.7 🟢🔴 **gRPC 真进程端口也迁出 OS 临时段**（**13 处** ⇒ 本域专用段 `22400–22479`）· 2026-10-28 10:5x · G3
+
+**13 处的形态拆解**：`grpc.server.port=0`（**属性形态**）**7** ＋ `--grpc.server.port=0`（**进程参数形态**）**1** ＋ `freePort()`（**裸取临时口**）**1** ＋ `forPort(0)`（**进程内 gRPC server**）**4**。
+
+**§二十三 治的是「容器宿主口」；这一节治的是另一类口 —— 「被测进程自己 listen 的 gRPC 口」。**
+
+#### 起因（域侧台账早就记着，我先前只当它是「等 G4 派单」⇒ **误判**）
+
+`docs/DRIFT/article/vs-common.md` 的 **A5 行**（2026-10-27 G3 实测补登）已写明：本域**测试面**有 **9 处**落 **OS 临时段 49152–65535**（＝ **Docker 随机发布容器端口用的同一段** ⇒ 别的会话的容器先占住 ⇒ `EADDRINUSE` ⇒ 环境性抖动）—— **8 处** `@SpringBootTest` 写 `"grpc.server.port=0"` ＋ **1 处** `ArticleRpcRuntimeBootGateTest.java:185` 的 `new ServerSocket(0)`（真 fat jar 进程口）。
+⚠️ **那一行当时写着「需要 global 段表先分配一段（预留池 `22200–22599` 里挑一段）」⇒ ⇒ 我把它列成「⛔ 等 G4 分配」⇒ ⇒ 那是误判** ⇒ ⇒ **global 段表 §4.10.19.3 早就把 `22400–22499` 预分配给 article 域**（状态「本层预分配 · **域侧未落码**」）⇒ ⇒ **本项本来就是域侧自己的活**（AGENTS.md §5.3d「域侧能自修的域侧修」）。
+
+#### 落码（9 处全迁 ＋ 1 个机制类 ＋ 1 份守门）
+
+| 项 | 值 |
+|---|---|
+| 机制类 | **新增** `service/article/article-rpc/src/test/java/.../support/RealGrpcPort.java`（`FIRST=22400` / `LAST=22479` ＋ **双地址 bind 自检** `0.0.0.0` ＋ `127.0.0.1` ＋ `holders(port)` 诊断）|
+| 守门 | **新增** `support/RealGrpcPortTest.java` ⇒ **6 条** = 选取逻辑 **4 条** ＋ **源扫 2 条** |
+| 迁 ① | **7 处** `@SpringBootTest` 的**属性形态** `"grpc.server.port=0"` ⇒ 从 `properties` 里**删掉**该行 ＋ 在**已有的** `@DynamicPropertySource` 方法里注册 `r.add("grpc.server.port", RealGrpcPort::pick)` |
+| 迁 ② | **1 处** `ArticleRpcRuntimeBootGateTest.java` 的 `freePort()` ⇒ `RealGrpcPort.pick()`；**删掉 `freePort()` 方法与 `java.net.ServerSocket` import** |
+| 迁 ③ | **1 处** `ArticleSchemaGateStartupOrderTest.java`（**进程参数形态**：`app.run("--grpc.server.port=0", …)`）⇒ `"--grpc.server.port=" + RealGrpcPort.pick()` |
+| 迁 ④ | **4 处** `ServerBuilder.forPort(0)` ⇒ `forPort(RealGrpcPort.pick())`（`ArticleGrpcInterceptorWiringTest` 2 ＋ `ArticleRpcSlowThresholdGateTest` 2）|
+
+🔴 **为什么是「扩展已有的 `@DynamicPropertySource` 方法」而不是新增一个** ——
+Spring 的 **context cache key** 包含 `properties`、但**不含 `@DynamicPropertySource` 的值** ⇒ ⇒
+若本类的 properties 与同模块另一个 `@SpringBootTest` **恰好相同** ⇒ ⇒ 两者**共享同一个 Spring 上下文** ⇒ ⇒
+共享上下文里只会有**一个** gRPC server（端口由**先建上下文的那个类**的 `@DynamicPropertySource` 决定）。
+⇒ ⇒ **本轮刻意把 8 个类的 properties 里的 `port=0` 那一行【同时删掉】** ⇒ ⇒ 它们的 properties **互相仍然相同** ⇒ ⇒
+**上下文共享关系与迁移前逐字相同**（零行为变化）⇒ ⇒ 端口由**第一个建上下文的类**从本域专用段挑一个 ⇒ ⇒ **全程零 OS 临时端口**。
+⚠️ **踩过的坑（已修）**：迁移脚本的守恒断言第一版写的是「改完源码里不得再出现 `grpc.server.port=0` 这个**子串**」⇒ ⇒ **它把自己新写的说明注释也判成违规** ⇒ ⇒ 改成只认**属性字面量形态**（带引号+逗号）⇒ ⇒ **判据要能区分「代码」与「散文」**。
+
+#### 段内再切一刀（与 comment 域同款约定）
+
+| 段 | 用途 | 谁用 |
+|---|---|---|
+| `22400–22479`（80 口） | **真进程 gRPC server 端口** | `RealGrpcPort.FIRST/LAST` |
+| `22480–22499`（20 口） | **守门脚手架段**（造「已被占」样本）| `RealGrpcPortTest.SCRATCH_FIRST/LAST` |
+
+⇒ ⇒ **必须不相交的理由**：全量套件里**上一个测试类的 gRPC server 还活着**（Spring 缓存测试上下文）⇒ ⇒ 若守门去占**生产段里的**口 ⇒ 就可能撞上那个还活着的 server ⇒ ⇒ **守门自己的样本会 `BindException`** ⇒ ⇒ 守门被环境左右 ⇒ ⇒ 所以守门段与生产段**零重叠**（同 comment 域的 `RealGrpcPortTest`）。
+⇒ ⇒ 与本域**容器宿主口段 `22850–22879`**（§二十三.2）**零重叠** ⇒ ⇒ 两个机制互不抢口。
+⇒ ⇒ **零跨域协调**：全部落在 global 段表**已预分配给 article 域**的那一段内。
+
+#### 📌 口径订正（2026-10-28 · G3）：**A5 行那「9 处」只数了「Spring 上下文形态」** ⇒ 本域实迁 = **13 处**
+
+⚠️ **被订正的是 `docs/DRIFT/article/vs-common.md` 的 **A5 行**（2026-10-27 G3 实测补登 · 已提交）——**那一行保留不改写** ⇒ ⇒ **它写的「9 处」要按本注记读**。
+⇒ ⇒ **A5 行那 9 处** = **8 处** `"grpc.server.port=0"` ＋ **1 处** `freePort()`（`ArticleRpcRuntimeBootGateTest.java`）⇒ ⇒ **漏了 4 处同域、同一个 OS 临时段的** `ServerBuilder.forPort(0)`（**进程内**起 gRPC server，不是 Spring 上下文）
+⇒ ⇒ 实测 4 处 = `ArticleGrpcInterceptorWiringTest.java` **2 处** ＋ `ArticleRpcSlowThresholdGateTest.java` **2 处**
+⇒ ⇒ ⇒ **本域本轮实迁 = 9 + 4 = 13 处**（本节标题与上表按 **13** 写）。
+⚠️ **上表「迁 ①」的口径**（A5 行表述略含糊，此处钉死）：**7 处**是 `@SpringBootTest(properties=…)` 里的**属性形态**
+（`ArticleGrpcInterceptorWiringTest` · `ArticleJsonbResultMapWiringTest` · `ArticleNotNullUpdateStrategyWiringTest` ·
+`ArticleRpcSlowThresholdGateTest` · `ArticleSpringContextWiringTest` · `ArticleTransactionWiringTest` ·
+`service/ArticleNullJsonbToProtoMappingTest`）**＋ 1 处**是**进程参数形态**（`ArticleSchemaGateStartupOrderTest` 的 `--grpc.server.port=0` ⇒ 归「迁 ③」）。
+⚠️ **为什么这条订正重要**：若按 A5 行去核「清零了没有」⇒ ⇒ **会漏掉这 4 处** ⇒ ⇒ **A5 行需按本注记读**。
+
+#### 🔴 守门最后两条是「源扫」—— 才是真正**堵住缺口**的部分
+
+| 守门 | 断言 |
+|---|---|
+| `noTestSourceFallsBackToTheEphemeralPortSegment` | 本模块测试源码（**剥注释后**）不许再出现 **`grpc.server.port=0`** / **`--grpc.server.port=0`** / **`new ServerSocket(0)`** / **`freePort(`** ⇒ ⇒ **三种回潮形态一次堵住**（属性形态 / 进程参数形态 / 辅助方法形态）|
+| `everyGrpcServerPortDeclarationGoesThroughRealGrpcPort` | 凡（剥注释后）提到 `grpc.server.port` 的文件**必须**引用 `RealGrpcPort` ⇒ ⇒ 「新增一个测试类却忘了走专用段」会被抓住（**守恒**）|
+
+⚠️ **禁止清单刻意用拼接构造**（`"grpc.server.port=" + "0"`）⇒ ⇒ 这些字面量**不会连续出现在守门文件里** ⇒ ⇒ **源扫不会把自己扫成违规**（否则守门会永远红在自己身上）。
+⇒ ⇒ 复用同包的 `RealContainerHostPortTest.stripComments(...)`（**剥注释的状态机**，**不动字符串字面量** ⇒ §二十三.3 纪律 ①）⇒ ⇒ **不重复实现**。
+
+⚠️ **一条诚实的边界（TOCTOU）**：`pick()` 返回时口是空闲的，但**被测进程真正 bind 它之前**存在窗口 ⇒ ⇒ 本类**只能把概率压低、不能归零** ⇒ ⇒ 这正是「本段独占给本域」的意义（而不是「大家共用一个大段、各自碰运气」）。
+
+**证据强度**：**L3**（源码静态 ＋ 守门用例 ＋ 源扫）⇒ ⇒ 与 Go 侧的一致性 **N/A**（**测试基础设施**，不涉及任何运行时行为 ⇒ 不属 §3.1 语义对齐范围）。
+📌 **2026-10-28 升 L4（本域侧）**：本域新守门（`support/RealGrpcPortTest` **6 条**）在两轮真回归里**全绿** —— 第 1 跑（12:1x）`article-rpc` **183 / 0 / 0 / 0**；第 2 跑（12:40）**判据改动后仍 183 / 0 / 0 / 0** ⇒ ⇒ 「源扫 + 守恒」这条新判据**在 article 域已跑绿并被验过**（⇒ ⇒ 改判据这一步本身有 L4 支撑，不是「改完就信」）。
+
 ---
 
 ## 二十四、🔴 **G4 共享层合并后的门禁快照（20 条）**（2026-10-28 · G3）

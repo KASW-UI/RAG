@@ -1020,7 +1020,7 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 | **hot-rpc 全量**（同轮） | **103 / 0 / 0 / 0** ⇒ 基线 101 ＋ 2 = 103 ✅（详见 [`hot/rpc.md` §十二](../hot/rpc.md#十二✅-redis-断连活体对拍共享层的-reject_commands-在本域真的生效-2026-10-27--g3)） |
 | **service/common 全量**（同轮 reactor） | **324 / 0 / 0 / 0** ⇒ **三模块合计 552 / 0 红** |
 | **本轮改动文件** | `CommentRedisDisconnectFastRejectGateTest.java`（新增 310 行 / 2 条）· 本档两处段落 |
-| **门禁（本轮终检）** | `tools/check-ledger-tables` **EXIT=0** · `tools/check-ledger-selfcheck` **EXIT=0** · `tools/check-ledger-count` **EXIT=1**（索引称 **315** / 实测 **328** ⇒ 差 **+13** ⇒ 索引在 `docs/DRIFT/_INDEX.md` = **整合者写权面** ⇒ **合并后统一 `--fix`**；本轮 **+2** 来自两域各增的 **§十二**）〔📌 **2026-10-27 订正**：**索引路径写错了** ⇒ 被改的是 **`docs/Pitfalls/_INDEX.md`**（不是 `docs/DRIFT/_INDEX.md`）⇒ **根因与闭合动作见 [`hot/rpc.md` §十二.6](../hot/rpc.md#十二6-📌-台账计数差-13-的根因定位2026-10-27--g3)** ⇒ **原值保留不改写**〕· `tools/check-doc-links` **EXIT=0**（本轮**实修 18 处**失效锚点 ⇒ 全部改用门禁自己的 `slug()` **实算值** ⇒ ⚠️ **锚点不要手写**）· `tools/difftest/check-wave-{lane-ownership,coupling,role-model}` **全 0** · `tools/ledger-lint/favorite/{tables,selfcheck,vs-reality}` = **0 / 1 / 1** ⇒ **与本轮改动前完全相同**（selfcheck 仍 **5 条**，**全在本轮 diff 之外**；vs-reality 那 1 条 = 「共享面零改动」，**结构性**）⇒ ⇒ **本轮零新增门禁级问题** |
+| **门禁（本轮终检）** | `tools/check-ledger-tables` **EXIT=0** · `tools/check-ledger-selfcheck` **EXIT=0** · `tools/check-ledger-count` **EXIT=1**（索引称 **315** / 实测 **328** ⇒ 差 **+13** ⇒ 索引在 `docs/DRIFT/_INDEX.md` = **合并收口执行者写权面** ⇒ **合并后统一 `--fix`**；本轮 **+2** 来自两域各增的 **§十二**）〔📌 **2026-10-27 订正**：**索引路径写错了** ⇒ 被改的是 **`docs/Pitfalls/_INDEX.md`**（不是 `docs/DRIFT/_INDEX.md`）⇒ **根因与闭合动作见 [`hot/rpc.md` §十二.6](../hot/rpc.md#十二6-📌-台账计数差-13-的根因定位2026-10-27--g3)** ⇒ **原值保留不改写**〕· `tools/check-doc-links` **EXIT=0**（本轮**实修 18 处**失效锚点 ⇒ 全部改用门禁自己的 `slug()` **实算值** ⇒ ⚠️ **锚点不要手写**）· `tools/difftest/check-wave-{lane-ownership,coupling,role-model}` **全 0** · `tools/ledger-lint/favorite/{tables,selfcheck,vs-reality}` = **0 / 1 / 1** ⇒ **与本轮改动前完全相同**（selfcheck 仍 **5 条**，**全在本轮 diff 之外**；vs-reality 那 1 条 = 「共享面零改动」，**结构性**）⇒ ⇒ **本轮零新增门禁级问题** |
 | **U+FFFD 字节级扫描** | 本轮改动文件 **8 份全部 0 命中** · 本域台账＋坑档全量（**33 份**，已剔 `target/`）**0 命中** |
 | **全仓 `check-*.py` 巡检** | **18 个脚本 ⇒ 17 个 EXIT=0 / 1 个 EXIT=1** ⇒ 那 1 个是 `tools/difftest/check-ddl-static.py` ⇒ **是 `users` 域的 9 处既知差异**（`users_user.status` 可空性 1 处 ＋ `DEFAULT CURRENT_TIMESTAMP` 残留 8 处）⇒ ⇒ **不在本域** ⇒ ⇒ **与本轮改动无因果关系** |
 
@@ -1094,3 +1094,41 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 ⇒ G4 在共享面写「域内 span 若只调 `recordException` ⇒ status 恒 UNSET ⇒ **与 Go 的 `RecordError` 漂移**」⇒ ⇒ **中间那一步是错的**：Go otel-go **v1.44.0** 的 `RecordError` **【不改】status**（接口契约 `go.opentelemetry.io/otel/trace@v1.44.0/span.go:47-51`「**as this method does not change the Span status**」＋ SDK 实现 `go.opentelemetry.io/otel/sdk@v1.44.0/trace/span.go:626-630` javadoc ＋ `:631-655` 实现**全程无 `SetStatus` 调用**）⇒ ⇒ **Go 侧只 `RecordError` 的业务 span status 本就恒 UNSET ⇒ 两侧一致 ⇒ 不漂移** ⇒ ⇒ **域侧零改动**（**不补 `setStatus`** —— 补了反而是引入 Go 侧不存在的 ERROR）。
 ⇒ ⚠️ **唯一需要显式 `SetStatus` 的是 `GetComment`，本域【已经逐字复刻了】**：Go `service/comment/rpc/internal/logic/get_comment_logic.go:85-86` / `:101-102` / `:110-111` / `:117-118` 四个错误分支**各自** `RecordError` ＋ `SetStatus(codes.Error, err.Error())` ⇒ ⇒ RAG `CommentSpans.tracedWithErrorStatus(...)`（**只给 `GetComment` 用**，其余走 `traced` ⇒ 无 `setStatus`）⇒ 逐条对应 ✅ ⇒ 且守门 `CommentSpanWiringTest.java:237-238`（业务失败 ⇒ **断言 `StatusCode.UNSET`**）／`:390-392`（GetComment 系统失败 ⇒ **断言 `StatusCode.ERROR`**）**两条判别式断言已把两侧 status 语义钉死** ⇒ ⇒ **网已张、语义已对齐**。
 ⇒ 逐条证据 ⇒ [`favorite/api.md` §16.4.1](../favorite/api.md#1641-🟢-补证2026-10-28-go-侧-recorderror-也不改-status--两侧-status-语义同构--status-漂移不成立) ＋ [`comment/vs-common.md`](./vs-common.md) A9 行。
+
+## 十三、🟢🔴 **gRPC 真进程端口补齐到「OS 临时段之外」**（**5 处**：`forPort(0)` ×4 ＋ 裸 `new ServerSocket(0)` 死口 ×1 ⇒ 本域专用段 `22600–22699`）· 2026-10-28 10:5x · G3
+
+**本域的机制类与 Spring 上下文形态的口**在**上一轮**已落（`support/RealGrpcPort.java` · `FIRST=22600` / `LAST=22699`）⇒ ⇒ **本节补的是剩下的两类形态**：**进程内 gRPC server**（`ServerBuilder.forPort(0)`）与**裸取临时口**（`new ServerSocket(0)`）。
+
+#### 起因（与 article / hot 两域同款）
+
+⚠️ **OS 临时段 `49152–65535` ＝ Docker 随机发布容器端口用的同一段** ⇒ ⇒ 别的会话的容器先占住 ⇒ ⇒ `EADDRINUSE` ⇒ ⇒ **长得像「被测行为坏了」，实为环境撞口**
+⇒ ⇒ **实证（G2 lane 2026-10-28）**：`BindException: Address already in use (/0.0.0.0:49992)`（49992 = 本机 `Sea-kafka` 容器发布口 · `Up 7 天`）⇒ ⇒ **不是被测代码的错**。
+⇒ ⇒ global 段表 §4.10.19.3 **早就把 `22600–22699` 预分配给 comment-rpc 域**（状态「本层预分配 · 域侧未落码」）⇒ ⇒ **本项本就是域侧自修**（AGENTS.md §5.3d）。
+
+#### 落码（5 处全迁 ＋ 守门 +2 条）
+
+| 项 | 值 |
+|---|---|
+| 迁 ① | **4 处** `ServerBuilder.forPort(0)` ⇒ `forPort(RealGrpcPort.pick())`（`CommentRpcGrpcInterceptorWiringTest` 2 ＋ `CommentRpcSlowThresholdGateTest` 2）|
+| 迁 ② | **1 处** 裸 `new ServerSocket(0)`（`service/CommentCacheRedisMetricGateTest.java` 的**死口**样本：故意占一个没人听的端口 ⇒ 用来验「连不上时的行为」）⇒ ⇒ `deadPort = RealGrpcPort.pick()` |
+| 守门 | **扩** `support/RealGrpcPortTest.java` ⇒ **+2 条源扫**（5 种「OS 盲选口」形态禁止清单 ＋ **守恒**：提到端口就必须引用 `RealGrpcPort`）|
+
+⚠️ **迁 ② 为什么不能用「随便一个数」**：死口样本的作用是「**确保这个端口没人听**」⇒ ⇒ 用 `RealGrpcPort.pick()`（先 bind 自检、再返回）⇒ ⇒ **既避开 OS 临时段，又保证确实是死口** ⇒ ⇒ 比原来更准（原来 `new ServerSocket(0)` 只是「借一个临时号」，**没有保证它此刻没人听** ⇒ ⇒ 属**弱断言**）。
+
+#### 证据强度与边界
+
+- **L3**（源码扫描：迁后本域 `grpc.server.port=0` / `forPort(0)` / `new ServerSocket(0)` **各 0 处**）**＋ L4**（本轮真回归，见 hot 域同款「本轮回归」表）。
+- ⚠️ **TOCTOU 窗口诚实标注**：`pick()` 只能**压低**概率、**不能归零** ⇒ ⇒ 本段独占给本域 ⇒ 别的域/别的会话不占这一段。
+- ⚠️ **本节只治「端口从哪来」，不改「测什么」** ⇒ ⇒ 用例语义零变化。
+
+#### 本轮回归（与 hot 域同跑）
+
+| 项 | 值 |
+|---|---|
+| 第 1 跑（12:1x）| `comment-rpc` **138 / 0 / 0 / 0** ✅（`service/common` 同轮 **333 / 0 / 0 / 0**）|
+| 第 2 跑（12:40）| 🔴 `comment-rpc` **编译失败**（判据改动时我误插常量 ⇒ 缺 `GRPC_PORT_KEY` / `REAL_PORT_USAGE`）⇒ ⇒ **已修** ⇒ ⇒ **12:4x 编译验证 EXIT=0**（`mvn -o -B --fail-at-end -pl … -am test-compile`）|
+| 🔴 **诚实边界** | 本域**新守门判据**只到「编译通过」，**测试未重跑**（Jason 2026-10-28 插队指令：**不起回归**）⇒ ⇒ **不得宣布「comment 守门已绿」** |
+
+#### 🟡 **口径订正（2026-10-28 · G3）**：G2 报的本域数字与本树实测**不一致**
+
+⇒ ⇒ **G2 报的「comment = 2 处」** vs **本树实测「5 处」（本轮迁的）** ⇒ ⇒ 两边数的**树不同**（本树另有上一轮已迁的 `grpc.server.port` 形态）⇒ ⇒ ⇒ **不是谁数错，是「比的不是同一份」** ⇒ ⇒ **口径**：迁**前**以本树实测为准，迁**后**以「各形态 = 0」为准。
