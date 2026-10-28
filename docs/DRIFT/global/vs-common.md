@@ -3983,3 +3983,37 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | **`docs/DRIFT/users/admin/rpc.md:2767` 提到的 `deadlineEpochMs`** | 该变量名本轮已从生产代码移除（改成 `effectiveTimeoutNanos` / `deadlineNanos`）⇒ ⇒ 但那是 **G1（users 域）的文件** ⇒ ⇒ **本层不写** ⇒ ⇒ 已并入给 G3 的反馈单同款口径知会 G1 |
 | **`align/like` 的 `SD-2026-10-23-09`（同一现象的签字）** | 现象已不复存在 ⇒ ⇒ 但它在 `docs/Intentional_Deviations/like/` ⇒ ⇒ **不是本层能单方面改的** ⇒ ⇒ **登记 + 上报给合并收口执行者** |
 | **E65 统一载体**（21 类 / 30 处零 deadline） | Jason 已拍板走 global 统一载体 `applyTo(stub)` ⇒ ⇒ **本轮只重算覆盖面并登记，不改**（§4.11.5） |
+
+---
+
+#### 4.13 🟢 **`check-surface-parity.py` 的三个「静默跳过 = 假绿/假红」口子已封**（2026-10-29 · 本层 HEAD `1f62a24` → 本节提交）
+
+> **同一根因被两条 lane 各报一次**：G1 报作 `S1-FOLLOW-008`② · G3 报作 `G4-10` ⇒ ⇒ **合并成一条修**（不重复处理）。
+> **落点**：`tools/difftest/check-surface-parity.py`（`tools/**` 不在 G1/G3 写权面 ⇒ **本层写权**）＋ `tools/difftest/check-phasegoal-lanes.py`（生成器）＋ `docs/PhaseGoal/g{1..4}.md`（**机器生成** ⇒ 重跑生成器，不手改）。
+
+**§4.13.1 为什么这条是全仓最高杠杆的修复之一**
+
+`check-surface-parity.py` 是 **38 个组件判定命令的根基**（`docs/PhaseGoal-judge.md` §三 A-2 的「判定命令」列里，**api / rpc / proto 三类组件**的契约面判定都指向它）⇒ ⇒ **它假绿/假红 ⇒ 整批组件的 R 级判定都不可信** ⇒ ⇒ **这不是「某个域的一条小问题」，是「判定链的根基」**。
+
+**§4.13.2 三个口子（逐条：现象 → 根因 → 修法 → 变异验证）**
+
+| # | 现象 | 根因 | 修法 | **变异验证** |
+|---|---|---|---|---|
+| **①** | 在 **worktree** 里跑 ⇒ hot 域 **EXIT=1 假红**（Go 侧 HTTP 1≡1 · gRPC 5≡5 明明一致） | 默认值 `os.path.join(os.path.dirname(REPO), "Sea-RideTheWind_golang")` ⇒ worktree 里 `REPO` = `.../RAG.worktrees/<lane>` ⇒ 拼出 `.../RAG.worktrees/Sea-RideTheWind_golang` ⇒ **不存在** ⇒ ⇒ 脚本把「**找不到 Go 仓**」当成「**Go 侧 0 个端点**」 | 环境变量优先（**校验**：必须同时含 `service/article/api/internal/handler/routes.go` 与 `proto/`）→ 否则**逐级向上搜索**（worktree 与主仓命中同一份真源）→ 都找不到 ⇒ **退出码 2 + 显式报错** | 坏 `GO_REPO` ⇒ **EXIT=2 + 明写「不是 Go 真源仓」** ✓ |
+| **②** | `--domain users` ⇒ **EXIT=0 却一个域都没查** ⇒ **假绿** | `want` 与 `DOMAINS` 里任何域名都不匹配 ⇒ 循环体一次都不跑 ⇒ `failures` 为空 ⇒ EXIT=0。⚠️ **users 域的真名是 `user` / `admin`**（`DOMAINS` 里是两个独立域）⇒ ⇒ 而 `docs/PhaseGoal/g1.md §5` 里写的就是这条错名命令（G1 报作「`--domain users` 用了错名 ⇒ 0/0 却 EXIT=0」） | `--domain` 加**域名白名单校验** ⇒ 未知名 ⇒ **退出码 2 + 列出可用域名**；并修**生成器** `check-phasegoal-lanes.py:171` 的错名 ⇒ `--domain user` + `--domain admin` ⇒ 重跑 `--write` 重生成 `docs/PhaseGoal/g{1..4}.md` ⇒ 校验器 EXIT=0 | `--domain users` ⇒ **EXIT=2 + 列出 10 个可用域名** ✓ |
+| **③** | Go proto 缺失 ⇒ 静默 `continue` ⇒ 该域 **gRPC 面根本没查**，却因为 HTTP 面已红而看不出来 | `if not os.path.isfile(gp): print("⚠️ 跳过"); continue` ⇒ **没查**被读成「相等」 | proto 缺失 ⇒ **报红** + 明写「**gRPC 面没查**（不是「相等」）」 | 造一个「有 routes.go 但只有 article.proto」的假 Go 仓 ⇒ `--domain hot` ⇒ **EXIT=1 + 「Go proto 缺失 ⇒ gRPC 契约面未对照」** ✓ |
+
+**§4.13.3 修后的实测（worktree 内，**不带** `GO_REPO`）**
+
+| 项 | 结果 |
+|---|---|
+| `--domain hot` | **EXIT=0**（修前 EXIT=1 假红）⇒ **HTTP 1≡1 · gRPC 5≡5** |
+| **全量（10 个域）** | **EXIT=0** ⇒ **HTTP 端点 Go 72 ≡ RAG 72** · **gRPC 方法 Go 71 ≡ RAG 71** ⇒ ⇒ **与基线 `docs/PhaseGoal/g1.md §5` 声称的数字逐字吻合**（此前只有显式带 `GO_REPO` 才复算得出）⇒ ⇒ **基线的数字从「声明的」变成「今天可复算的」** |
+| 逐域 | article 7≡7+6≡6 · comment 7≡7+7≡7 · favorite 7≡7+7≡7 · follow 8≡8 · hot 1≡1+5≡5 · like 6≡6 · message 13≡13 · task 1≡1 · **user / admin = 已签字偏离域（单列、不计失败）** |
+| `check-phasegoal-lanes.py` | 改生成器后**先红**（「内容分叉」）⇒ `--write` 重生成 ⇒ **复校 EXIT=0** ⇒ ⇒ **机器门禁自己把「手改生成物」和「改了生成器」区分开了** |
+
+**§4.13.4 一条纪律（本轮又踩到一次的家族）**
+
+> **「找不到真源」与「真源里没有」是两件事**，但脚本把它们**压成了同一个结果**（空集合）⇒ ⇒ 空集合**必须报错**⇒ **绝不能读成「相等」**。
+> 同族：§4.11.1（错误码探针覆盖面 = 0 却写成「56 例全绿」）· §4.11.2（`getTimeoutOptions() != null` 结构上恒真）· 本轮的 ①②③。
+> ⇒ **判据自检**：一条守门必须能回答「**它在什么都没查到的时候会不会也绿？**」—— 答不上来 ⇒ 它的绿灯没有意义。
