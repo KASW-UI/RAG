@@ -1945,6 +1945,79 @@ Binary file service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorit
    - ⇒ ⇒ **决定性实验（尚未做）**：构造 **base / ours / theirs 三方各异**的合并，对比「改前（含 NUL）」与「改后（文本）」⇒ ⇒ 那才是证明。
    - ⇒ ⇒ **同族教训**：**「没触发」与「不可能触发」是两件事** ⇒ ⇒ 报告时必须分开写（AGENTS.md §0：「已改」≠「已验证」）。
 
+### 🔴 订正（第二轮 · 2026-10-28 10:4x · G3）—— 决定性实验已做：「不报冲突」与「揉出第三版」两处措辞【被实测推翻】
+
+⚠️ **本节是订正，上面第 3 / 5 / 7 条的机制措辞一律保留不改写**（按「改旧判断 ⇒ 保留原值 + 加订正注记」纪律）⇒ ⇒ **第 7 条那条「诚实边界」已被本次实验解除**。
+
+#### 实验构造（全部只碰 git 对象层 + 一个临时 worktree ⇒ 不改工作区、不跑 maven）
+
+- 被测文件：`service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteDdlParityTest.java`
+- **base ＝ `31a5d5d`**（含 **4 个真 NUL** 的生产态）· **ours ＝ 去 NUL 文本版**（blob `7d22bbfd2cf4`）· **theirs ＝ 在 base 上开头追加一行** ⇒ ⇒ **两侧改动不重叠 ⇒ 按文本本该合并成功**
+- 工具：`git merge-tree --write-tree`（预演）＋ 临时 worktree 里的**真** `git merge` · git 版本 **2.50.1 (Apple Git-155)** · 脚本 `/tmp/g3_exp_merge_nul.py`（**仓外** ⇒ 见下方「复现」小节：**命令内嵌** ⇒ 不依赖该路径仍可复算）
+
+#### 五组对照（实测 · 2026-10-28 10:4x）
+
+| 组 | base | ours | theirs | 退出码 | git 说了什么 | 结果 blob | 判读 |
+|---|---|---|---|---|---|---|---|
+| **A** | 含 NUL | 去 NUL 文本 | 含 NUL ＋ 追加行 | **1** | `warning: Cannot merge binary files` ＋ `CONFLICT (content)` | **== ours** | ❌ **theirs 的改动丢失** |
+| **B** | 全文本 | 文本 ＋ 末尾行 | 文本 ＋ 开头行 | **0** | **无 warning · 无 CONFLICT** | ≠ ours ≠ theirs | ✅ **两处改动都在**（文本合并的**正常形态**） |
+| **D** | **含 NUL** | **去 NUL 文本** | **去 NUL 文本 ＋ 追加行** | **1** | 同 A | **== ours** | ❌ **theirs 的改动丢失** |
+| **E** | 全文本 | 文本 ＋ 追加行 | **含 NUL** ＋ 追加行 | **1** | 同 A | == ours | ❌ theirs 的改动丢失 |
+| **C** | 真 `git merge`（HEAD 侧含 NUL） | — | — | **1** | `CONFLICT (content)` ＋ `Automatic merge failed; fix conflicts and then commit the result.` | — | index 留 **stage 1/2/3** ⇒ `git commit` **被拒**（`You have unmerged paths`） |
+
+#### 结论（5 条 · 逐条订正上面的旧措辞）
+
+1. 🔴 **不是「静默揉坏」—— git 【报】冲突** ⇒ A/D/E/C 四组一致：`warning: Cannot merge binary files` ＋ `CONFLICT (content): Merge conflict in <file>` ＋ **退出码 1** ⇒ ⇒ **G4「不报冲突」的措辞不成立** ⇒ ⇒ **「零冲突推不出内容完整」这句在本案例上【不适用】**（本案例从未出现零冲突）⇒ ⇒ **但它作为一般性断言仍成立**（B 组证明退出码 0 时结果 ≠ ours ≠ theirs 是正常形态 ⇒ 「≠」不是损坏判据）。
+2. 🔴 **预演树里该文件取【ours】，不是「揉出来的第三版」** ⇒ ⇒ 上面第 3 条那个判据（「三方都不是合并树那个 ⇒ 被揉坏」）**不成立** ⇒ ⇒ ⚠️ **我上一轮把它读成「第三版」是自己的判据 bug**：`blob_of()` 对 40 位十六进制短路 ⇒ 把 **commit OID 当成了 blob**（⇒ 读到的是树对象 ⇒ 打印出「行数 1」的荒谬读数）⇒ ⇒ **B 组同时反证**：「结果 ≠ ours 且 ≠ theirs」在文本合并下是**正常形态**（两处改动都在）⇒ ⇒ **这条不能当损坏判据**。
+3. 🔴 **真正的危害形态 ＝ 「报冲突但【不产生冲突标记】」** ⇒ 二进制文件 git 无法生成 `<<<<<<<` marker ⇒ ⇒ 工作区文件**保留 HEAD 侧内容**（实测：真 NUL 4 个 ＋ 含 theirs 的改动 ＋ **不含** ours 的改动）⇒ ⇒ **看起来「正常」** ⇒ ⇒ 人若**直接 `git add` ＋ commit** ⇒ **另一侧的改动被丢掉** ⇒ ⇒ 这才是真危害（不是「git 静默提交坏内容」）。
+4. 🔴 **最危险的一条（D 组）** ⇒ **只要 merge-base 那侧还含真 NUL，即使 ours / theirs 两侧都已经去 NUL，这次合并仍然走二进制路径** ⇒ ⇒ **「我这边修了 NUL」不足以保证合并安全** ⇒ ⇒ 必须等 **该 NUL 修复本身进入共同祖先**之后再合并 ⇒ ⇒ **合并顺序 / 窗口要按这个排**。
+5. ✅ **触发条件 ＝ 三方中任一侧含 NUL 即退化** ⇒ 实测到 **base 侧**（A/D 组）与 **theirs 侧**（E 组）单独含 NUL 均退化；**ours 侧单独含 NUL 未单独构造**（git 的 binary 判定是逐 blob 的 ⇒ 机理同源）。
+6. ✅ **「去 NUL 后三方合并能正确进行」这条断言【已被实测证明】** ⇒ B 组：三方全文本 ⇒ **退出码 0 · 两处改动都在** ⇒ ⇒ **第 7 条那条「本轮未触发 ⇒ 不得据此宣布已验证」的边界，本轮解除**。
+
+#### 由此得出的判读纪律（3 条）
+
+- 报「合并损坏」时**必须同时报 git 的退出码与 warning 原文**（本案例 ＝ 退出码 1 ＋ `Cannot merge binary files`）⇒ ⇒ 否则会被读成「静默损坏」⇒ ⇒ **而那会引出错误的修法**。
+- **别信「工作区文件里没有冲突标记」** ⇒ ⇒ 二进制冲突**本来就没有** marker ⇒ ⇒ 必须 `git show :1:<file>` / `:2:` / `:3:` **三方逐字节比**。
+- 判「合并结果对不对」**看改动的标记还在不在** ⇒ ⇒ **不看 blob 是否等于 ours / theirs**。
+
+#### 复现（命令内嵌 ⇒ 不依赖任何仓外脚本）
+
+```bash
+# 变量（都在本仓对象层 ⇒ 不改工作区、不占 maven 窗口）
+F=service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteDdlParityTest.java
+BASE=31a5d5d                       # 含 4 个真 NUL 的生产态
+OURS=7d22bbfd2cf4d0ed41a0efe7ea5317d8897377f4   # 去 NUL 后的文本版
+I1=/tmp/g3_repro_i1 ; I2=/tmp/g3_repro_i2       # 两个独立 index（免 rm）
+
+# ① 造 theirs（base 内容 + 末尾追加一行 ⇒ 与 ours 的改动不重叠）
+BASEBLOB=$(git rev-parse $BASE:$F)              # ⚠️ BASE 是 commit ⇒ 必须先解析成 blob
+THEIRS=$(git cat-file blob $BASEBLOB | { cat; echo "// theirs-only line (experiment)"; } | git hash-object -w --stdin)
+
+# ② 造两个「提交」（都挂在 BASE 下 ⇒ BASE 就是 merge-base）
+GIT_INDEX_FILE=$I1 git read-tree $BASE^{tree}
+GIT_INDEX_FILE=$I1 git update-index --add --cacheinfo 100644,$OURS,$F
+OURS_COMMIT=$(git commit-tree $(GIT_INDEX_FILE=$I1 git write-tree) -p $BASE -m exp-ours)
+GIT_INDEX_FILE=$I2 git read-tree $BASE^{tree}
+GIT_INDEX_FILE=$I2 git update-index --add --cacheinfo 100644,$THEIRS,$F
+THEIRS_COMMIT=$(git commit-tree $(GIT_INDEX_FILE=$I2 git write-tree) -p $BASE -m exp-theirs)
+
+# ③ A 组：merge-tree 预演（base 含 NUL）⇒ 期望：退出码 1 + Cannot merge binary files + CONFLICT (content)
+git merge-tree --write-tree $OURS_COMMIT $THEIRS_COMMIT; echo "EXIT=$?"
+# ⇒ 结果 blob 取 ours ⇒ theirs 的追加行不在结果里（用 git rev-parse <结果树>:$F 比）
+# ⚠️ 冲突时 merge-tree 把【冲突树 + stage 1/2/3 + warning + CONFLICT】整段写在 stdout
+#    ⇒ 别在「非 0 就抛异常」的 helper 里丢 stdout（那会把证据本身丢掉）
+
+# ④ C 组：真 `git merge`（临时 worktree）⇒ 期望：退出码 1 + Automatic merge failed + index 留 stage 1/2/3
+git worktree add --detach /tmp/g3-exp-merge-wt $THEIRS_COMMIT
+git -C /tmp/g3-exp-merge-wt merge --no-edit $OURS_COMMIT; echo "EXIT=$?"
+git -C /tmp/g3-exp-merge-wt ls-files -u $F          # ⇒ 期望 3 行（stage 1/2/3）
+git -C /tmp/g3-exp-merge-wt commit --no-edit --dry-run   # ⇒ 期望被拒：You have unmerged paths
+git worktree remove --force /tmp/g3-exp-merge-wt
+```
+
+⇒ ⇒ **本节命令已于 2026-10-28 10:4x 在本树实测跑通**（A 组：退出码 1 ＋ warning ＋ CONFLICT ＋ 结果 blob ＝ ours；C 组：退出码 1 ＋ `Automatic merge failed` ＋ `ls-files -u` 三行 stage ＋ `commit --dry-run` 被拒「You have unmerged paths」＋ 工作区文件仍含 4 个真 NUL 且**无冲突标记**）。
+⇒ ⇒ **判读要点**：**第 ③ 步的 stdout 必须整段留档**（`Cannot merge binary files` 与 `CONFLICT (content)` 都只出现在 stdout）⇒ ⇒ 只看退出码会把它读成「普通冲突」。
+
 ### 适用范围
 
 **只**适用于「源码里以**真实控制字符**当分隔符的测试夹具」这一形态 ⇒ ⇒ **不适用于**真正的编码损坏（那种会解码失败或出现 `U+FFFD`）。
