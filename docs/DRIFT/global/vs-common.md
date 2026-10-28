@@ -1181,7 +1181,8 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | 项 | 内容 |
 |---|---|
 | **G1 的说法** | 「G1 三个域侧排序桥（`MybatisPlusOrderingBridgeAutoConfiguration`）等 G4 的共享层桥落码后再删」 |
-| **实测** | ✅ **共享层版本早已存在**：`service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java`（⇒ 各域 `*/rpc/config/` 下另有 10 份**域内副本**）⇒ ⇒ 合并后**域内副本被遮蔽**（不是叠加）⇒ ⇒ **域内副本在合并时删即可** ⇒ ⇒ **不存在「还没落的共享层桥」** |
+| **实测** | ✅ **共享层版本早已存在**：`service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java`（⇒ 各域 `*/rpc/config/` 下另有 **9** 份**域内副本**：article / comment / favorite / follow / like / message / task / admin / user）⇒ ⇒ **域内副本在合并时删即可** ⇒ ⇒ **不存在「还没落的共享层桥」** |
+| 🔴 **本行的「遮蔽」表述已于 2026-10-28 被 G1 实测推翻（就地订正，保留原值以便追溯）** | 原写：「合并后**域内副本被遮蔽**（不是叠加）」⇒ ⇒ **不成立** —— **排序桥的共享层那份没有 `@ConditionalOnMissingBean`** ⇒ ⇒ **两份都会被注册**（两份都刻意**类体为空、不注册任何 bean**）⇒ ⇒ **零行为影响，但不是「遮蔽」** ⇒ ⇒ **真正的差别 = 排序图上多一个【同向】节点**（域内用类字面量 `after = DataSourceAutoConfiguration.class` / `before = MybatisPlusAutoConfiguration.class`；共享层用**字符串** `afterName` / `beforeName` 指向**同一对 FQN**）⇒ ⇒ **同一对节点 ⇒ 同向等价、无环 ⇒ 删除仍零行为差**（G1 逐条核过）<br>⚠️ **别与 Redis 那份混谈**：`GoStyleRedisClientAutoConfiguration` **确实有** `@ConditionalOnMissingBean` ⇒ ⇒ **那里「遮蔽」是准确表述**（`GoStyleRedisClientOptionsPrecedenceGateTest` 钉的就是这个契约）⇒ ⇒ **「遮蔽」一词在两处含义不同 ⇒ 不能互相套用** |
 | ⚠️ **别把两件事混谈** | `MybatisPlusOrderingBridgeAutoConfiguration` 管的是 **MyBatis-Plus 拦截器链**的顺序 ⇒ ⇒ 与 **Filter 槽位**（§4.10.16.1）**无关** ⇒ ⇒ 两件事各自的证据与修法都要分开读 |
 
 #### 4.10.17 🟢 **G3 的 C-3 回执（2026-10-27）—— comment 域 6 个业务 span 闭环（本层零落码）**
