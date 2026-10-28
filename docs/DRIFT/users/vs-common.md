@@ -4317,3 +4317,52 @@ mvn -B -o -DargLine=-Xmx1g -am -pl service/users/user/user-rpc,service/users/adm
 ⇒ ⇒ **6/6 干净 ⇒ 四棵树合流不会卡在冲突上** ⇒ ⇒ 波末剩下的**只是「谁来合」+「合完跑全量」**，不是技术冲突
 ⇒ ⇒ **这不归我**（落点 = 合并收口执行者 / 主干合并那一步）⇒ ⇒ **我只提供这份就绪矩阵 + 上面那 3 条实测命令**
 ⇒ ⇒ ⚠️ **我域 C7 的触发条件不变**：**待四 lane 全合主干**（`do-my-own-gh`）· **不由我触发**
+
+---
+
+## 63. 🟢 **G2 的「Testcontainers 固定宿主口（层 2）」提示 ⇒ 我域【早已落码】⇒ 逐条核完 ⇒ 零改动**（2026-10-28 · G1 lane）
+
+> G2 来信：① 回答 G4 §4.10.39 ② 的「未实测项」⇒ 答「**会**」（`getMappedPort()` 返回那个固定口）
+> ② 三个会让域侧**直接编译红 / 假红**的坑（绑口要先摘随机绑定 / 泛型签名编译不过 / javadoc 里 `src/test/java/**/*.java` 提前闭合注释）
+> ③ 可直接抄的 `RealContainerPort` ＋ 两层守门 ④ 提醒「层 1 治理过 ≠ 层 2 治理过 ⇒ 请核自己域的 rpc 侧真容器类有没有绑口」
+> ⚠️ 信里引用的基线是它自己的 `caba808` ＋ G4 的**旧尖端 `a38ad75`** ⇒ **内容有效、坐标过期**。
+
+### 63.1 🟢 **我域实况：层 2 机制【早已落码】且三层守门齐全 ⇒ G2 的三个坑我域全部避开**
+
+| 项 | 我域实况（实测）|
+|---|---|
+| 支撑类 | **6 份 `GoStyleHostPortPinning`**（`user-api` · `user-rpc` · `admin-api` · `admin-rpc` · `follow-api` · `follow-rpc` 各一份，位于各模块 `src/test/.../support/`）|
+| 段常量 | **users 4 份 = `22700–22729`** · **follow 2 份 = `22730–22759`** ⇒ ⇒ **与 G4 §4.10.19.3 / §4.10.39.2 的分配逐字一致** ✔ |
+| 越段行为 | 段内无空闲口 ⇒ **抛 `IllegalStateException("分配段 22700-22729 已无空闲宿主口")`** ⇒ 与 G2「端口越段直接抛异常」同形 ✔ |
+| 绑口手法 | **`withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432))`** ✔ 与 G2 说的形态一致（`FixedHostPortGenericContainer` 我域**未**用）|
+| **坑 1（先摘后加）** | ✅ **我域已避开** —— `pinContainerPort` 把 `hostConfig.getPortBindings()` 的**旧绑定逐条搬进新 list**（`for (ExposedPort, Binding[]) …`）⇒ **摘掉该容器口的随机绑定** ⇒ 再 `add(new PortBinding(Ports.Binding.bindPort(hostPort), ExposedPort.tcp(containerPort)))` ⇒ 最后 `hostConfig.withPortBindings(merged)`（`withPortBindings` 是**整体替换** ⇒ 必须整体搬）|
+| **坑 2（泛型签名）** | ✅ **我域已避开** —— 绑定方法是**非泛型**：`public static void pinContainerPort(CreateContainerCmd cmd, int containerPort)` ⇒ **压根不碰 `GenericContainer<?>` 的通配符捕获** ⇒ 编译红不可能发生 |
+| **坑 3（javadoc 里 `src/test/java/**/*.java`）** | ✅ **我域零命中**（全域 grep `src/test/java\*\*/` ⇒ 0）⇒ ⇒ 注释提前闭合 ⇒ 「非法字符」这个坑我域没有 |
+
+### 63.2 🟢 **三层守门（机制层 + 覆盖层 + 副本等价）⇒ 实跑全绿**
+
+| 守门 | 断言 | 本轮实跑 |
+|---|---|---|
+| `UserDomainHostPortPinningGateTest`（users 域）| ① **本域每个容器起点都带显式绑口 modifier**，且钉的是**该容器自己的容器口** · ③ 各模块 helper 的段**落在 G4 分配的 users 段内**且**与 OS 临时段 `49152–65535` 不相交** · ④ **4 份 helper 副本逐字等价**（只允许 package 与段常量不同）⇒ 防副本漂移 | ✅ **3 条绿** |
+| `UserRpcTestcontainersHostPortSegmentGateTest` | **钉口探针**（真容器）：`getMappedPort() == 那个固定口` ＋ 落在分配段内 ＋ **真连得通**（JDBC `SELECT 1`）＋ `jdbcUrl` 含该固定口 | ✅ **1 条绿** |
+| `FollowDomainHostPortPinningGateTest`（follow 域）| 同上（follow 段）| ✅ **3 条绿** |
+
+⇒ ⇒ **这正是 G4 §4.10.39 ② 那个「未实测项」** ⇒ ⇒ **我域已独立实测 = 「会」**（`getMappedPort()` 返回固定口）
+⇒ ⇒ ⇒ 这是**第二个 lane 的独立测量**（G2 域 = message/like/task 三域各自测；我域 = users/follow）⇒ ⇒ 结论一致
+⇒ ⇒ **共享层 `service/common` 是 G4 写权面 ⇒ 我域零动作**（我的守门第 44 行已写明这一点）
+
+### 63.3 🟢 **G2 的 ④ 提醒已核：我域的 rpc 侧真容器类【全部】已绑口**
+
+- **按声明数**（G2 强调的数法：数 `new PostgreSQLContainer<>` / `new GenericContainer<>` 的**声明**，不算 import / javadoc 里的类型名）：
+  **我域 = 52 处容器声明**（users 48 + follow 4）
+- **覆盖层守门 ① 全绿** ⇒ ⇒ **52 处容器起点全部带显式绑口 modifier** ⇒ ⇒ **无遗漏**
+- ⇒ ⇒ **G2 说的「不是只有新写的探针要改，是全域真容器都要改」这一条，我域早就是全域都改了**
+
+### 63.4 📌 **两点给 G4 的（我无权改它的台账 ⇒ 登记 + 转告）**
+
+1. 🔴 **G4 §4.10.19.3 段表那行写「🟡 本层预分配 · **域侧未落码**」⇒ 【已过期】** ——
+   **我域已落码**（6 份 helper ＋ 三层守门，段号与它分配的逐字一致）⇒ ⇒ **收口那一步重算共享面快照时，别把「域侧未落码」当现状**
+2. 📌 **命名口径差异（免得跨 lane 引用对不上）**：G2 域用 `RealContainerPort` ＋ `XxxPostgresFixedHostPortGateTest` ＋ `XxxContainerFixedHostPortSegmentGateTest`；
+   **我域用 `GoStyleHostPortPinning` ＋ `UserDomainHostPortPinningGateTest` / `FollowDomainHostPortPinningGateTest` ＋ `UserRpcTestcontainersHostPortSegmentGateTest`**
+   ⇒ ⇒ **机制同形、命名不同** ⇒ ⇒ 引用时按【域 + 文件名】指，不要按类名猜
+3. **我域零改动** ⇒ 本条**不产生任何落码** ⇒ ⇒ **零派单**
