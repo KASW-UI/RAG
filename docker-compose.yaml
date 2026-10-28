@@ -143,7 +143,12 @@ services:
       # Snowflake（集群内 node_id 必须唯一）
       SNOWFLAKE_NODE_ID: ${SNOWFLAKE_NODE_ID:-1}
       # JWT 签名（user-api / user-rpc 共享同一密钥）
-      USER_JWT_SECRET: ${USER_JWT_SECRET}
+      # 🔴 2026-10-29 · R1·T-1.2（P0 #8 / X-11）：补 `:?` ⇒ **不设变量 ⇒ compose 直接拒绝渲染**
+      #    ⇒ 不会渲染出 `USER_JWT_SECRET: ""` ⇒ 容器不会带着**空签名密钥**起来
+      #    ⇒ （空密钥 = HMAC 空密钥 = 谁都能伪造 token ⇒ P0 #8 的核心风险）
+      #    ⚠️ `:?` 是 **Docker Compose** 的语法（缺变量 ⇒ 报错退出）；**不是** Spring 的
+      #      `${VAR:?msg}`（后者在 Spring 里会被当成「默认值 = 字面量 `?msg`」⇒ 用它反而更危险）。
+      USER_JWT_SECRET: ${USER_JWT_SECRET:?set USER_JWT_SECRET in .env (>=32 bytes; must match the issuer user-api)}
       USER_JWT_EXPIRE: ${USER_JWT_EXPIRE:-2592000}
     ports:
       - "49210:49210"  # 仅 gRPC（Infrastructure.md §3）
@@ -190,7 +195,8 @@ services:
       OTLP_PORT: "4317"
       OTEL_SERVICE_NAME: user-api
       # JWT 签名（必须与 user-rpc 一致）
-      USER_JWT_SECRET: ${USER_JWT_SECRET}
+      # 🔴 2026-10-29 · R1·T-1.2（P0 #8 / X-11）：同上 ⇒ 缺变量 ⇒ compose 拒绝渲染
+      USER_JWT_SECRET: ${USER_JWT_SECRET:?set USER_JWT_SECRET in .env (>=32 bytes; must match user-rpc)}
       USER_JWT_EXPIRE: ${USER_JWT_EXPIRE:-2592000}
     ports:
       - "49900:49900"  # HTTP（Infrastructure.md §3）
@@ -212,5 +218,10 @@ volumes:
 
 networks:
   default:
-    name: "${DOCKER_NETWORK:-Sea-TryGo-java}"
+    # 🔴 2026-10-29 · R1·T-1.1（P0 #5）：默认值订正为 **Sea-TryGo**
+    #    —— 基础设施容器（Sea-postgres / Sea-redis / Sea-nacos / …）实测**就挂在 `Sea-TryGo`** 上
+    #    ⇒ 原默认值 `Sea-TryGo-java` 指向一个**本机不存在的网络** ⇒ `docker compose up` 直接失败
+    #    （`external: true` ⇒ compose 不会自己建 ⇒ 报 "network ... not found"）
+    #    ⇒ 「user 服务加入基础设施所在的同一网络」这个**意图**由本行落地。
+    name: "${DOCKER_NETWORK:-Sea-TryGo}"
     external: true   # 复用已有网络（基础设施在 Sea-TryGo 上跑着，user 服务加入同网络）

@@ -85,7 +85,7 @@ cmd_up() {
     cmd_status
     echo
     ok "user microservice stack is up"
-    echo "  user-api HTTP    : http://localhost:49900/usercenter/v1/user/login"
+    echo "  user-api HTTP    : http://localhost:49900/user/v1/login"
     echo "  user-rpc gRPC    : localhost:49210 (via Nacos discovery://user-rpc)"
     echo "  prometheus       : http://localhost:49090"
     echo "  nacos console    : http://localhost:49848/nacos"

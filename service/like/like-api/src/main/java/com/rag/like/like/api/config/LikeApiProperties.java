@@ -1,5 +1,6 @@
 package com.rag.like.like.api.config;
 
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
 
@@ -16,7 +17,10 @@ import java.time.Duration;
  * <table border="1">
  *   <caption>默认值对照</caption>
  *   <tr><th>字段</th><th>Go 值</th></tr>
- *   <tr><td>{@code userAuth.accessSecret}</td><td>{@code ae0536f9-6450-4606-8e13-5a19ed505da0}</td></tr>
+ *   <tr><td>{@code userAuth.accessSecret}</td><td>{@code ae0536f9-6450-4606-8e13-5a19ed505da0}
+ *       —— 🔴 <b>2026-10-29 起 RAG 侧不再自带这个默认值</b>（P0 #8）⇒ 改由环境变量
+ *       {@code USER_JWT_SECRET} 提供 ⇒ 缺变量 / 空串 ⇒ <b>启动失败</b>
+ *       ⇒ 见 {@link #verifyAccessSecret()} ⇒ <b>「RAG 更严」的有意偏离</b></td></tr>
  *   <tr><td>{@code userAuth.accessExpire}</td><td>{@code 31536000}（365 天）</td></tr>
  * </table>
  *
@@ -59,6 +63,38 @@ public class LikeApiProperties {
 
     @NestedConfigurationProperty
     private LikeRpc likeRpc = new LikeRpc();
+
+    /**
+     * 🔴 <b>验签密钥的 fail-closed 校验</b>（2026-10-29 · R1·T-1.3 · P0 #8）。
+     *
+     * <h3>为什么「去掉 yaml 默认值」还不够</h3>
+     * <p>主配置 {@code application.yml} 现在写的是 {@code like-api.user-auth.access-secret: ${USER_JWT_SECRET}}
+     * ——<b>没有默认值</b> ⇒ 变量<b>完全没设</b>时 Spring 的 placeholder 不可解析 ⇒ 绑定期直接炸
+     * ⇒ 启动失败（这一条由 Spring 自己兜住）。
+     * <p>🔴 <b>但「变量存在、值是空串」这条路径 Spring 不会兜</b>：
+     * Spring 的 {@code PropertyPlaceholderHelper} 对「属性存在但值为空串」
+     * 解析成<b>空串</b>（<b>不走默认值、也不报错</b>）⇒ 属性绑成 {@code ""}
+     * ⇒ ⇒ 应用带着<b>空签名密钥</b>正常起来 ⇒ ⇒ 🔴 <b>token 可伪造</b>
+     * （用空密钥算 HMAC，谁都能算）。
+     * <p>⇒ ⇒ <b>空串必须由代码堵</b> ⇒ 即本方法。
+     *
+     * <h3>为什么空串 ⇒ 启动失败（而不是「启动成功但验签永远失败」）</h3>
+     * <p>因为「用空密钥签发的 token」是<b>可被任何人算出来的</b>（HMAC 空密钥）
+     * ⇒ ⇒ 属于<b>静默的安全降级</b> ⇒ 宁可起不来。
+     *
+     * <p>⚠️ Go 侧写的是<b>字面量</b>（真源公开在仓里）⇒ ⇒ 本条属
+     * <b>「RAG 更严」</b>的一侧 ⇒ 登记为有意偏离（不是「RAG 抄错了 Go」）。
+     */
+    @PostConstruct
+    void verifyAccessSecret() {
+        String secret = userAuth == null ? null : userAuth.getAccessSecret();
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException(
+                    "like-api.user-auth.access-secret 不能为空：请设置环境变量 USER_JWT_SECRET"
+                            + "（必须与签发方 user-api 完全一致）"
+                            + "—— 本模块只验签、不签发，空密钥会让任何人都能伪造 JWT");
+        }
+    }
 
     public UserAuth getUserAuth() {
         return userAuth;
