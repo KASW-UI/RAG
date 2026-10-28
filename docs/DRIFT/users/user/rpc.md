@@ -2541,3 +2541,58 @@ mvn -B -o -pl service/users/user/user-rpc test \
 ⇒ 📌 **一个纪律记录（今天踩了两次）**：判「有没有别的 lane 在跑 maven」**不能**用 `ps | grep -c` ⇒ **该命令自身的命令行含模式串 ⇒ 自匹配**
 ⇒ ⇒ **要判「有哪棵树」**（`multiModuleProjectDirectory=` 后缀），或把判据写进**独立脚本文件**（argv 不含模式名）。
 （今天已在等待器上踩过一次 ⇒ 又在起回归前踩一次 ⇒ 两次都被自己抓到 ⇒ 没造成 137。）
+
+---
+
+## 2026-10-28 第二十二轮：`DRIFT-USERRPC-V-015`（新立 · ✅ 已修 · 域内自闭环）—— Go 的 `span.RecordError`【不】置 span 状态 ⇒ RAG 多置 ERROR（**遥测面**漂移）
+
+### 1. 现象与判据
+
+Go 的 `span.RecordError(err)` **不**把 span 状态置成 ERROR ⇒ ⇒ Go logic 层这些错误分支导出后
+span 状态恒为 **`Unset`** ⇒ ⇒ **RAG 侧多置一个 `ERROR`** 就是**遥测面漂移**（导到 trace 里的 span 状态字段不同）。
+
+| 项 | 证据（逐条）|
+|---|---|
+| **机制（SDK 原文）** | `go.opentelemetry.io/otel/sdk@v1.44.0/trace/span.go:631-656` `recordingSpan.RecordError` 的**方法注释**：<br>“SetStatus is required if the Status of the Span should be set to Error, **this method does not change the Span status**.”<br>⇒ 实现只 `s.addEvent(semconv.ExceptionEventName, opts...)`（带 `exception.type`/`exception.message`）⇒ **全程不碰 `s.status`** |
+| **版本来源** | Sea 仓 `go.mod:18-21` pin `go.opentelemetry.io/otel` ＋ `/sdk` **v1.44.0** |
+| **Go 侧调用点（user-rpc）** | `service/user/user/rpc/internal/logic/`：`loginlogic.go:54` · `registerlogic.go:53,60,69,85` · `deleteuserlogic.go:48,56` ⇒ **7 处 `span.RecordError`，零处 `span.SetStatus`** |
+| **Go 侧调用点（admin-rpc）** | `service/user/admin/rpc/internal/logic/`（8 个 logic）⇒ **16 处 `span.RecordError`，零处 `span.SetStatus`** |
+| **⚠️ 别混的那一条** | Go **共享层** `service/common/observability/observability.go:103-105` 是**显式三句**（`RecordError` ＋ `SetAttributes` ＋ **`SetStatus(otelcodes.Error, msg)`**）⇒ ⇒ **那条路径 Go 确实置 ERROR** ⇒ ⇒ RAG 共享层 `Observability.markSystemError`/`markTimeout` 照此实现是**对的** ⇒ ⇒ **「logic 层只 RecordError」与「共享层 helper 三句」不是一回事** |
+| **Go 腿运行时实测**（otel-go v1.44.0 真跑）| 形态 A（只 `RecordError`）⇒ 导出 span `status.Code=Unset` ＋ 1 条 `exception` 事件；形态 B（`observability.go:103-105` 三句）⇒ `status.Code=Error` |
+
+### 2. RAG 侧现状（修前）
+
+| 文件 | 站点 | Go 对应 | 修前 RAG |
+|---|---|---|---|
+| `UserDomainService.java` | login 的 DB 查询失败 | `loginlogic.go:54` | 🔴 `recordException` ＋ **`setStatus(ERROR,"DB查询失败")`** |
+| `UserDomainService.java` | register 的 DB 查重失败 | `registerlogic.go:53` | 🟢 只 `recordException`（**与 Go 一致**）|
+| `UserDomainService.java` | register 的密码生成失败 | `registerlogic.go:60` | 🔴 `recordException` ＋ **`setStatus(ERROR,"密码生成失败")`** |
+| `UserDomainService.java` | register 的 uid 生成失败 | `registerlogic.go:69` | 🔴 `recordException` ＋ **`setStatus(ERROR,"uid生成失败")`** |
+| `UserDomainService.java` | register 的 DB 更新失败 | `registerlogic.go:85` | 🔴 `recordException` ＋ **`setStatus(ERROR,"DB更新失败")`** |
+| `UserDomainService.java` | delete 的 DB 查询失败 | `deleteuserlogic.go:48` | 🟢 只 `recordException`（**与 Go 一致**）|
+| `UserDomainService.java` | delete 的 DB 更新失败 | `deleteuserlogic.go:56` | 🟢 只 `recordException`（**与 Go 一致**）|
+| `AdminSpans.java` | `traced` 的 catch 分支（覆盖 admin 侧 16 处）| admin 侧 8 个 logic | 🔴 `recordException` ＋ **`setStatus(ERROR, msg)`** |
+
+⇒ ⇒ **域内 `setStatus(StatusCode.*)` 命中 = 5**（user-rpc 4 ＋ admin-rpc 1）⇒ ⇒ **且 user-rpc 自身 4 处置 / 3 处不置 ⇒ 自相矛盾，无任何台账解释**。
+
+### 3. 修法（域内自闭环 · 零共享层改动）
+
+- **删掉那 5 处 `span.setStatus(StatusCode.ERROR, …)`**（**保留 `recordException`** —— **事件面本就与 Go 一致**：Go 的 `RecordError` 就是「加一条 exception 事件」）
+- 共享层 `service/common` 的 `Observability` **一行未动**（它照 Go 的显式 `SetStatus` 实现，是对的）
+- 每处留 Go 出处注记（AGENTS.md §3.2），写明「Go 的 `RecordError` 不改状态」与 SDK 注释原文
+
+### 4. 守门与证据强度（**L4 · 双侧运行期**）
+
+- **新守门** `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/service/UserRpcSpanStatusGoParityTest.java`（**5 条**）
+  - ①②③ **运行期**：自装 OTel SDK ＋ 收集型 `SpanExporter` ⇒ 断言**导出的 span 数据**（先断言 span 真被导出 ＋ 带 `exception` 事件，**再**断言 `status == UNSET` ⇒ 「没产生 span」不会被误读成「状态对了」）
+  - ④ **源扫**：域内主源码**零处** `setStatus(StatusCode.*)`（**先剥注释**；**排除共享层 `users-common`**）
+  - ⑤ **判据自检**：造假文件 ⇒ 扫描器必须报出它；再验「注释里的字面量必须不被报」
+- **修前基线**：5 条里 **2 红** —— ① **红在状态断言**（实得 `ERROR`）· ④ 红在源扫命中（**5 处**，与手工 grep 逐条一致）；②③⑤ 绿（**② ③ 是内建对照** ⇒ 证明有判别力）
+- **修后**：**5 条全绿**；既有 `AdminSpanWiringTest`（3 条）**仍全绿** ⇒ 删 `setStatus` 没打破既有 span 装配守门
+- **变异实证**（对最终代码）：加回 login 那处 `setStatus` ⇒ `maven EXIT=1` ⇒ **2 红且红在目标断言** ⇒ 回滚后三文件 **sha256 逐字节一致**
+
+### 5. 📌 附带发现（对共享层台账的**事实订正**）
+
+`docs/DRIFT/global/vs-common.md` §4.10.64 ⑤ 断言「Go 的 `span.RecordError(...)` **会把 status 置 ERROR** ⇒ Java 必须显式补」
+⇒ ⇒ **与上面 SDK 注释原文正好相反** ⇒ ⇒ **已发信给 G4 订正**（并提醒 G3 别照它加 `setStatus`，否则是在 G3 域**新造**漂移）。
+⇒ ⇒ 域级台账 ⇒ [`../vs-common.md` §59](../vs-common.md)。

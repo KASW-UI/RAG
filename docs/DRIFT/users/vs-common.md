@@ -4039,3 +4039,154 @@ mvn -B -o -DargLine=-Xmx1g -am -pl service/users/user/user-rpc,service/users/adm
 | `DRIFT-ARPC-002`（`UpdateUserResp.success` Go=false / RAG=true）| 我域 | 🟡 **等用户裁决**（已有双侧活体证据 ＋ 决策 tripwire）|
 
 ⇒ ⇒ **结论：我域可自闭合的项已全部闭合** ⇒ ⇒ **我域唯一未完成项 = 波末 C7 收口回归**（待四 lane 全合主干·**非我触发**）。
+
+---
+
+## 59. 🔴🟢 **新立 `DRIFT-USERRPC-V-015`：Go 的 `span.RecordError`【不】置 span 状态 ⇒ RAG 多置了 ERROR（遥测面漂移）⇒ 已域内修完 5 处**（2026-10-28 · G1 lane）
+
+> ⚠️ **本条的起因是一个【对共享层台账的事实订正】** —— G4 的 `docs/DRIFT/global/vs-common.md` §4.10.64 ⑤ 断言：
+> 「Go 侧 `observability.go:103` 的 `span.RecordError(...)` **会把 status 置 ERROR** ⇒ Java 必须显式补」
+> ⇒ ⇒ **这条断言与 otel-go SDK 的源码注释【正好相反】** ⇒ ⇒ **若 G3 照它去给 favorite 域补 `setStatus`，
+> 就等于在 G3 的域里【新造】一处漂移** ⇒ ⇒ **本条因此也是一封给 G3 的预警**（已发信）。
+
+### 59.1 🔴 **机制：otel-go 的 `RecordError` 不改状态（SDK 注释原文 + 实现逐行）**
+
+| 项 | 证据 |
+|---|---|
+| 位置 | `go.opentelemetry.io/otel/sdk@v1.44.0/trace/span.go:631-656`（`recordingSpan.RecordError`）|
+| **方法注释原文** | “SetStatus is required if the Status of the Span should be set to Error, **this method does not change the Span status**.” |
+| 实现 | 只做 `s.addEvent(semconv.ExceptionEventName, opts...)`（带 `exception.type` / `exception.message`）⇒ **全程不碰 `s.status`** |
+| 版本来源 | Sea 仓 `go.mod:18-21` pin `go.opentelemetry.io/otel` + `/sdk` **v1.44.0** |
+
+⇒ ⇒ **Go 侧：只要调用点是「只调 `span.RecordError`」，span 状态就恒为 `Unset`。**
+
+#### 59.2.1 🔴 **Go 全仓 `SetStatus` 落点全表（本条修法的决定性依据 · 自己数的，不采信转述）**
+
+| 目录 | `span.SetStatus(...)` 处数 | 落点 |
+|---|---|---|
+| `service/comment/` | **4** | `service/comment/rpc/internal/logic/get_comment_logic.go:86,102,111,118`（`codes.Error`）|
+| `service/common/` | **3** | `service/common/observability/observability.go:83,105,128`（`otelcodes.Error`）|
+| `service/knowledge/` | **2** | `service/knowledge/api/internal/telemetry/operation.go:191,258`（`codes.Error`）|
+| **`service/user/`（user-rpc + admin-rpc）** | **0** | —— ⇒ ⇒ **我域 Go 侧零处显式 `SetStatus`** |
+| **全仓合计** | **9** | 扫 `Sea-RideTheWind_golang/service/**`（排除 `_test.go`）|
+
+⇒ ⇒ **这条全表直接决定本条的修法**：既然 **user / admin 域 Go 侧零处显式 `SetStatus`** ⇒ ⇒
+**我域那 5 处 `span.setStatus(StatusCode.ERROR, …)` 全部是 RAG 独有的 ⇒ 全部是漂移 ⇒ 全部该删**。
+
+⚠️ **而共享层那 3 处与 Go 一一对应 ⇒ 共享层是对的 ⇒ 本条对共享层零改动**（已逐条核）：
+
+| Go（`observability.go`）| RAG（`service/common/.../Observability.java`）|
+|---|---|
+| `MarkBusinessError` → `:83 span.SetStatus(otelcodes.Error, msg)` | `markBusinessError` → **`:83 span.setStatus(StatusCode.ERROR, msg)`** |
+| `MarkSystemError` → `:105` | `markSystemError` → **`:109`** |
+| `MarkTimeout` → `:128` | `markTimeout` → **`:132`** |
+
+⇒ ⇒ **「共享层必须显式补 `setStatus`」这条【结论】是对的，错的是它的【理由】** ⇒ ⇒
+⚠️ **订正别人的理由时，必须同时写明「结论保留 + 那行代码不许动」** ⇒ ⇒ **本条对共享层只读不写 ✔**
+（否则照着「理由被订正」去删共享层那 3 行 ⇒ **那才是真回归**：Go 的共享层 span 恒 ERROR ⇔ Java 变 UNSET）。
+
+🟢 **交叉印证（两个 lane 独立得出同一结论）**：G3 lane 在自己的域内**独立**核到了同一 SDK 源码
+（`otel/sdk@v1.44.0/trace/span.go:631-655`），并得出「Go 侧只 `RecordError` 的 span，status 本就恒 UNSET ⇒ 域侧零改动」
+⇒ ⇒ **两条互不相识的 lane 独立同结论** ⇒ ⇒ 本条的修法**不是单边推断**。
+（⚠️ 但**按纪律不采信转述**：上面那张全仓落点表是**我自己重新数的**，不是引它的。）
+
+### 59.2 🔴 **Go logic 层【零处】`span.SetStatus` ⇒ 状态恒 Unset（逐文件实测）**
+
+| 目录 | `span.RecordError` 处数 | `span.SetStatus` 处数 |
+|---|---|---|
+| `service/user/user/rpc/internal/logic/` | **7**（`loginlogic.go:54` · `registerlogic.go:53,60,69,85` · `deleteuserlogic.go:48,56`）| **0** |
+| `service/user/admin/rpc/internal/logic/`（8 个 logic）| **16** | **0** |
+
+⇒ ⇒ **另一条路**：Go **共享层** `service/common/observability/observability.go:103-105` 是**显式三句**
+（`span.RecordError(errors.New(msg))` ＋ `span.SetAttributes(...)` ＋ **`span.SetStatus(otelcodes.Error, msg)`**）
+⇒ ⇒ **那一条路径 Go 确实置 ERROR** ⇒ ⇒ RAG 的 `Observability.markSystemError` / `markTimeout`（共享层）照此实现是**对的**
+⇒ ⇒ ⚠️ **「logic 层只 RecordError」与「共享层 helper 三句」不可混为一谈** —— 混淆正是 G4 §4.10.64 ⑤ 的错因。
+
+### 59.3 🟢 **双侧运行时探针（证据强度 = L4）**
+
+- **Go 腿**（otel-go v1.44.0 真跑，探针 `/tmp/g1_span_status_probe/main.go`，复用冻结仓的 `go.mod`/`go.sum`）：
+
+  | 形态 | 导出 span 的 `status.Code` | exception 事件 |
+  |---|---|---|
+  | **A** = logic 层写法（只 `span.RecordError(err)`）| **`Unset`** | 1 条（`exception`）|
+  | **B** = `observability.go:103-105` 三句 | `Error`（description=`system error`）| 1 条（`exception`）|
+
+- **RAG 腿**（`UserRpcSpanStatusGoParityTest`，自装 OTel SDK ＋ 收集型 `SpanExporter` ⇒ 断言**导出的 span 数据**）：
+
+  | # | 用例 | 修**前** | 修**后** |
+  |---|---|---|---|
+  | ① | login 的 DB 失败分支（Go `loginlogic.go:54`）| 🔴 **红在状态断言**（实得 `ERROR`）| 🟢 绿 |
+  | ② | register 的 DB 查重失败分支（Go `registerlogic.go:53`）| 🟢 绿（**本就与 Go 一致**）| 🟢 绿 |
+  | ③ | delete 的 DB 失败分支（Go `deleteuserlogic.go:48`）| 🟢 绿（**本就与 Go 一致**）| 🟢 绿 |
+  | ④ | 域内主源码零处 span 状态写入（源扫）| 🔴 红（命中 **5** 处）| 🟢 绿 |
+  | ⑤ | **判据自检**：造假文件 ⇒ 扫描器必须报出它 | 🟢 绿 | 🟢 绿 |
+
+  ⇒ ⇒ **② ③ 是内建对照**（同样是 `recordException` 分支，一个多置状态、一个不置）⇒ ⇒ **证明本测试有判别力**。
+  ⇒ ⇒ **既有守门 `AdminSpanWiringTest`（3 条）修后仍全绿** ⇒ ⇒ 删 `setStatus` 没打破既有 span 装配守门。
+- **变异实证**（对**最终**代码）：把 login 那处 `setStatus` 加回去 ⇒ `maven EXIT=1` ⇒ **5 条里 2 红**
+  ⇒ ① **红在状态断言**（`status 必须与 Go 同为 UNSET`）· ④ 红在源扫命中 ⇒ ⇒ **编译通过 + 红在目标断言** ✔
+  ⇒ ⇒ 回滚后三个文件 **sha256 与基线逐字节一致** ✔
+
+### 59.4 🟢 **修法（域内自闭环 · 5 处 · 零共享层改动）**
+
+| 文件 | 站点 | 动作 |
+|---|---|---|
+| `service/users/user/user-rpc/.../UserDomainService.java` | 4 处（login DB查询失败 / register 密码生成失败 / register uid生成失败 / register DB更新失败）| **删 `span.setStatus(StatusCode.ERROR, …)`**（保留 `recordException` —— **事件面本就与 Go 一致**）|
+| `service/users/admin/admin-rpc/.../AdminSpans.java` | 1 处（`traced` 的 catch 分支）| 同上 ＋ 改类 javadoc（原写「`recordException(e)` + 置 ERROR 状态」⇒ 订正）|
+
+⇒ ⇒ **共享层 `service/common` 的 `Observability` 一行未动**（它照 Go 的显式 `SetStatus` 实现，是对的）
+⇒ ⇒ **我域 `setStatus(StatusCode.*)` 命中数：5 → 0**（由守门 ④ 钉死）
+⇒ ⇒ ⚠️ **本条同时暴露我域一个【自相矛盾】**：修**前** user-rpc 4 处置状态、3 处不置 ⇒ **同一份代码里两种做法并存，且没有任何台账解释** ⇒ ⇒ **已统一对齐 Go**。
+
+### 59.5 🔴 **本轮自捕三条（都是「假信号」家族）**
+
+1. **源扫守门第一版是【空转】的** —— 路径写成 `service/users/user/src/main/java`，而真实模块在
+   `service/users/user/user-rpc/src/main/java`（`service/users/user` 是**聚合目录**）⇒ **扫了 0 个文件却报绿**
+   ⇒ ⇒ **零命中是假信号** ⇒ ⇒ 修法：递归找 `/src/main/java/` ＋ **守门里加「扫到的文件数 > 20」断言** ＋ **判据自检（造假文件）**
+2. **判据自检当场抓出模式太窄** —— 第一版模式 `setStatus(StatusCode.` 只吃**短式**，
+   漏**全式** `setStatus(io.opentelemetry.api.trace.StatusCode.ERROR` ⇒ ⇒ 改成正则 `setStatus\([^)]*StatusCode\.`
+   ⇒ ⇒ **判据自检不是装饰**：它当场否掉了我的第一版实现
+3. **变异回滚用 `git checkout -- <file>` ⇒ 连带回滚了【未提交的真修法】**（把 4 处删除冲回 HEAD）
+   ⇒ ⇒ 改法：**先 `cp` 一份副本到 `/tmp`，回滚时从副本恢复**，并用 `sha256sum -c` 逐字节核
+   ⇒ ⇒ ⚠️ **`git stash` 在本仓被明令禁用**（工作区级状态会被并发 agent 互偷）⇒ 「存副本」是本仓的等价手段
+   ⇒ ⇒ 🔴 **自曝：这条坑【早就写进 memory 了】**（2026-10-27 · G3 lane · 同仓同一动作链），连修法都写了
+   （「改完先 `git add`」＋「配套更稳：备份文件比对还原」）⇒ ⇒ **我仍然踩了** ⇒ ⇒
+   ⇒ ⇒ **纪律**：**凡要写「变异 → 还原」这段代码之前，先搜 memory**（不是写完复盘才搜）⇒
+   ⇒ ⇒ **memory 里已有的条目 = 已知的坑清单，不是事后回顾** ⇒ ⇒ 「这坑我好像见过」不是豁免理由。
+
+### 59.6 📮 **已发出的两封信（登记）**
+
+| 对象 | 内容要点 | 送达态 |
+|---|---|---|
+| **G4** | **事实订正**：§4.10.64 ⑤ 的断言与 SDK 源码相反 ⇒ 给原文 + 探针输出 + 修法（**不要**照它给域内补 `setStatus`）⇒ 共享层自己的 `Observability` **是对的**，别动 | `mode=queued` · **position 61 · ahead 60**（发信时 G4 = `error` 50001 `unknown error, 722 (1000)`）|
+| **G3** | **预警**：若已按 G4 §4.10.64 ⑤ 给 favorite 域补了 `setStatus` ⇒ **那是新造漂移** ⇒ 给判据（看 Go 调用点有没有**显式** `span.SetStatus`）+ 可复用的探针写法 + 两个踩坑点 | `mode=queued` · **position 14 · ahead 14**（发信时 G3 = `started` / `net::ERR_NETWORK_CHANGED` 50113）|
+
+⇒ ⇒ **两封都因对方会话处于 error 态而排队** ⇒ ⇒ ⚠️ **G3 那封的【时效风险最高】**：若它已按 G4 的错误前提补了 `setStatus`，那处漂移已经进了 G3 的树 ⇒ ⇒ **收口那一步必须按本条判据复核 G3 的 favorite 域**（⇒ 已登记给合并收口那一步）。
+
+### 59.7 📌 **写权与状态**
+
+- 本条 5 处改动**全部在我写权面**（`service/users/user/user-rpc/**` ＋ `service/users/admin/admin-rpc/**`）⇒ **域内自闭环，零派单**
+- 共享层 `service/common` **未动**（`Observability` 的显式 `SetStatus` 与 Go 一致）
+- 逐条组件台账 ⇒ [`user/rpc.md` §11 `DRIFT-USERRPC-V-015`](user/rpc.md) · [`admin/rpc.md` §2.5 订正](admin/rpc.md)
+
+### 59.8 🟢 **本轮域级全量回归 + 条数重测（双路径逐模块相等）**
+
+- **命令**：`mvn -B -o -DargLine=-Xmx2g -am -pl <我域 6 模块> clean test`
+- **结果**：**18/18 BUILD SUCCESS · EXIT=0 · 09:54 · 0 failures / 0 errors / 0 skipped**
+  （⚠️ 比上轮 47:10 快很多 —— 本轮 Testcontainers 容器是热的，且**未复现**上轮那种 Docker 端口编程失败）
+
+| 模块 | 路径 A（maven 模块级 `Results:` 行）| 路径 B（逐模块 surefire `TEST-*.xml` 求和）|
+|---|---|---|
+| user-api | 127 | **127** |
+| user-rpc | **157** | **157** |
+| admin-api | 149 | **149** |
+| admin-rpc | 122 | **122** |
+| follow-api | 74 | **74** |
+| follow-rpc | 83 | **83** |
+| **我域 6 模块合计** | **712** | **712** |
+
+- **非目标** = `common` 333 ＋ `users-common` 39 ＋ `follow-common` 37 = **409**（与上轮一致 ⇒ 共享层本轮没长）
+  ⇒ ⇒ `409 + 712 = 1121` = reactor 合计 ⇒ **逐字相等**
+- **整倍数自检**：`1121 ÷ 712` **不整除** ⇒ ⇒ **排除「重复计数」**（过滤用 `-- in ` 双横线）
+- **增量归因**：`707 → 712 = +5` ⇒ **逐条可指名** = `UserRpcSpanStatusGoParityTest` 的 **5** 条（①②③ 运行期 · ④ 源扫 · ⑤ 判据自检）⇒ ⇒ **没有余量**
+- ⚠️ **口径**：`§54` 记的 **707** 是**那一轮**的快照（**不重写历史**）⇒ ⇒ **本轮起 = 712**；**任何跨 lane 引用的条数都是快照 ⇒ 必须带日期与 commit**

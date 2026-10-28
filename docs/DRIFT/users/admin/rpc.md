@@ -2190,6 +2190,21 @@ Go 的 `span.RecordError(err)` 分布在**具体错误分支**上（全 8 个 lo
 ⇒ **IMPLEMENTATION DIFFERENCE**，不影响 span 名与属性。
 （逐点复刻 16 处不在本轮范围；如需严格对齐应另立条目。）
 
+> 🔴🟢 **2026-10-28 第二十二轮订正（`DRIFT-USERRPC-V-015` · 已修）**：本节原写的
+> 「**`recordException` + 置 ERROR 状态**」⇒ ⇒ **「置 ERROR 状态」这一半是错的，已删**。
+>
+> | 项 | 证据 |
+> |---|---|
+> | **机制** | `go.opentelemetry.io/otel/sdk@v1.44.0/trace/span.go:631-656` `recordingSpan.RecordError` 的**方法注释原文**：<br>“SetStatus is required if the Status of the Span should be set to Error, **this method does not change the Span status**.”<br>⇒ 实现只 `addEvent("exception")` ⇒ **不碰 `s.status`** |
+> | **Go 侧事实** | `service/user/admin/rpc/internal/logic/` 8 个 logic 共 **16 处 `span.RecordError`** ＋ **零处 `span.SetStatus`** ⇒ ⇒ Go 的 span 状态恒为 **`Unset`** |
+> | **Go 腿实测** | otel-go v1.44.0 真跑：只 `RecordError` ⇒ 导出 span `status.Code=Unset` ＋ 1 条 `exception` 事件 |
+> | **RAG 腿实测** | 新守门 `UserRpcSpanStatusGoParityTest`（5 条 · 自装 SDK ＋ 收集型 exporter ⇒ 断言**导出的 span 数据**）⇒ 修前 ① **红在状态断言**（实得 `ERROR`）· ④ 源扫红（命中 5 处）⇒ 修后 5 条全绿 · 变异（加回 `setStatus`）⇒ 2 红且红在目标断言 |
+> | **⚠️ 不可混的那一条** | Go **共享层** `service/common/observability/observability.go:103-105` 是**显式三句**（含 `span.SetStatus(otelcodes.Error, msg)`）⇒ ⇒ **那条路径 Go 确实置 ERROR** ⇒ ⇒ RAG 共享层 `Observability.markSystemError`/`markTimeout` 照此实现是**对的** ⇒ ⇒ **共享层一行未动** |
+> | **处置** | 删掉 `AdminSpans.traced` 里那处 `span.setStatus(StatusCode.ERROR, …)` ⇒ **保留 `recordException`**（**事件面本就与 Go 一致**）⇒ ⇒ 类 javadoc 同步订正 |
+> | **留痕** | 「**统一在异常逃出时记录**」这个**结构**仍是 IMPLEMENTATION DIFFERENCE（逐点复刻 16 处不在本轮范围）⇒ ⇒ 但它**不再包含**「置 ERROR 状态」这一项 |
+>
+> ⇒ ⇒ 逐条 ⇒ [`../vs-common.md` §59](../vs-common.md) · [`../user/rpc.md` 第二十二轮](../user/rpc.md)。
+
 ### 2.6 守门：**装配层**证据 + 变异实证
 
 `AdminSpanWiringTest`（3 条，真 PG）。它**不**断言「代码调用了 `AdminSpans.traced`」——

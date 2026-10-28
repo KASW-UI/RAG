@@ -36,7 +36,6 @@ import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -219,7 +218,11 @@ public class UserDomainService {
             } catch (Exception e) {
                 metrics.getLoginDbError().increment();
                 span.recordException(e);
-                span.setStatus(StatusCode.ERROR, "DB查询失败");
+                // ⚠️ **不置** span 状态：Go 的 span.RecordError(err) **不**改状态
+                //    （otel-go SDK v1.44.0 sdk@v1.44.0/trace/span.go:631-656 注释原文：
+                //     "this method does not change the Span status"）⇒ Go 的 span 状态恒为 Unset
+                //    ⇒ 这里多置 ERROR 就是遥测面漂移 ⇒ 详见 docs/DRIFT/users/vs-common.md §59
+                //    ⇒ 守门：UserRpcSpanStatusGoParityTest（域内主源码零处 span 状态写入）
                 logger.logBusinessErr(otelCtx, ErrorCode.ERROR_DB_SELECT.getCode(), e);
                 throw Status.INTERNAL.withDescription("DB查询失败").asRuntimeException();
             }
@@ -331,7 +334,7 @@ public class UserDomainService {
             } catch (Exception e) {
                 metrics.getRegisterInternalError().increment();
                 span.recordException(e);
-                span.setStatus(StatusCode.ERROR, "密码生成失败");
+                // ⚠️ 不置状态：同本文件 login 分支的说明（Go 的 RecordError 不改 span 状态）
                 logger.logBusinessErr(otelCtx, ErrorCode.ERROR_SERVER_COMMON.getCode(), e);
                 throw Status.INTERNAL.withDescription("密码生成失败").asRuntimeException();
             }
@@ -352,7 +355,7 @@ public class UserDomainService {
             } catch (Exception e) {
                 metrics.getRegisterInternalError().increment();
                 span.recordException(e);
-                span.setStatus(StatusCode.ERROR, "uid生成失败");
+                // ⚠️ 不置状态：同本文件 login 分支的说明（Go 的 RecordError 不改 span 状态）
                 logger.logBusinessErr(otelCtx, ErrorCode.ERROR_SERVER_COMMON.getCode(), e);
                 throw Status.INTERNAL.withDescription("uid生成失败").asRuntimeException();
             }
@@ -384,7 +387,7 @@ public class UserDomainService {
             } catch (Exception e) {
                 metrics.getRegisterDbError().increment();
                 span.recordException(e);
-                span.setStatus(StatusCode.ERROR, "DB更新失败");
+                // ⚠️ 不置状态：同本文件 login 分支的说明（Go 的 RecordError 不改 span 状态）
                 logger.logBusinessErr(otelCtx, ErrorCode.ERROR_DB_UPDATE.getCode(), e);
                 throw Status.INTERNAL.withDescription("DB更新失败").asRuntimeException();
             }
