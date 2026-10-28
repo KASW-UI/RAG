@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * L4 idiomatization：按路由的熔断中间件，对齐 Go {@code handler.BreakerHandler}。
  *
- * <p><b>Go 出处</b>：{@code rest/handler/breakerhandler.go:19-44}
+ * <p><b>Go 出处</b>：{@code rest/handler/breakerhandler.go:18-42}
  * <pre>
  * func BreakerHandler(method, path string, metrics *stat.Metrics) func(http.Handler) http.Handler {
  *     brk := breaker.NewBreaker(breaker.WithName(method + "://" + path))   // ← 每路由一个

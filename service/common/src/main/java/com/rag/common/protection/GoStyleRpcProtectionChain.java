@@ -173,7 +173,7 @@ public final class GoStyleRpcProtectionChain {
             chain = breakerThen(chain);
         }
 
-        // ① Recover（Go: zrpc/server.go:131-133，Middlewares.Recover 默认 true）—— **最外层**
+        // ① Recover（Go: zrpc/server.go:148-150，Middlewares.Recover 默认 true）—— **最外层**
         return recoverThen(chain);
     }
 

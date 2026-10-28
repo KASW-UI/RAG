@@ -23,7 +23,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
  * （rpc 组件刻意不扫 {@code com.rag.common}）；而<b>路由模板解析</b>必须对
  * <b>所有 servlet 进程</b>可用 ⇒ 走自动配置清单 ⇒ 与各组件的 {@code scanBasePackages} 解耦。
  *
- * <p><b>Go 出处</b>：{@code rest/engine.go:131-132}（每路由建一个 breaker）·
+ * <p><b>Go 出处</b>：{@code rest/engine.go:148-149}（每路由建一个 breaker）·
  * {@code rest/handler/breakerhandler.go:15,19}（键 = {@code METHOD://route.Path} 注册期模板）·
  * {@code rest/engine.go:244-268}（404 链里<b>没有</b> breaker）。
  */

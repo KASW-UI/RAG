@@ -145,7 +145,7 @@ class GoStyleTraceparentFilterTraceSourceGateTest {
             Thread.sleep(50);
         }
         assertThat(collector.requestCount())
-                .as("server span 必须真的被导出（Go: core/trace/agent.go:114-121 装 batcher）"
+                .as("server span 必须真的被导出（Go: core/trace/agent.go:115-124 装 batcher）"
                         + "—— 3s 内**一个**导出请求都没到 ⇒ 导出链路本身有问题"
                         + "（本条曾因「等的条件比断言弱」而在高负载下假红，2026-10-27 已订正等待条件）")
                 .isGreaterThanOrEqualTo(1);

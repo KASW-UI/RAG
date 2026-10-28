@@ -67,9 +67,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <h3>⚠️ 与 REST 侧（{@link GoStyleBreakerFilter}）的三处刻意不同</h3>
  * <ol>
  *   <li><b>隔离 key</b>：zrpc 用 {@code info.FullMethod}（gRPC 全方法名），
- *       REST 用 {@code METHOD://path}（{@code rest/handler/breakerhandler.go:21}）。</li>
+ *       REST 用 {@code METHOD://path}（{@code rest/handler/breakerhandler.go:19}）。</li>
  *   <li><b>失败判据</b>：zrpc 用 {@link GoStyleRpcFailurePolicy}（6 码白名单），
- *       REST 用「响应码 ≥ 500」（{@code breakerhandler.go:39}）。</li>
+ *       REST 用「响应码 ≥ 500」（{@code breakerhandler.go:33}）。</li>
  *   <li><b>wire 契约</b>：zrpc 返回 gRPC status {@code UNAVAILABLE} + {@code "circuit breaker is open"}；
  *       REST 返回普通 error ⇒ 上层映射成 {@code 1015 / "service busy"}（见 {@link GoStyleCircuitOpenException}）。
  *       ⇒ <b>zrpc 侧刻意不抛 {@link GoStyleCircuitOpenException}</b>。</li>

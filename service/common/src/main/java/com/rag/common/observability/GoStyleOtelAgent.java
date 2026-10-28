@@ -43,7 +43,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>各 yaml 里的 {@code otel: {...}} <b>一直是对的</b> ⇒ 缺的只是<b>装配</b>。</li>
  * </ul>
  *
- * <h2>🔴 逐条照抄 Go 的 {@code startAgent}（{@code core/trace/agent.go:105-135}）</h2>
+ * <h2>🔴 逐条照抄 Go 的 {@code startAgent}（{@code core/trace/agent.go:105-133}）</h2>
  * <pre>
  * Go: sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(c.Sampler)))   // :111
  *     sdktrace.WithResource(resource.NewSchemaless(attrResources...))                   // :112
@@ -96,7 +96,7 @@ public final class GoStyleOtelAgent {
 
     private static final Object LOCK = new Object();
 
-    /** Go {@code core/trace/agent.go:44-46} 的 {@code once} 同款：同 JVM 只装一次。 */
+    /** Go {@code core/trace/agent.go:48-52} 的 {@code once} 同款：同 JVM 只装一次。 */
     private static final AtomicBoolean INSTALLED = new AtomicBoolean(false);
 
     /** 已装配的 provider（供关停时 flush）。 */
@@ -119,13 +119,13 @@ public final class GoStyleOtelAgent {
     public static OpenTelemetry install(GoStyleOtelConfig config) {
         synchronized (LOCK) {
             if (INSTALLED.get()) {
-                // Go: core/trace/agent.go:44 once.Do ⇒ 第二次调用什么都不做
+                // Go: core/trace/agent.go:48 once.Do ⇒ 第二次调用什么都不做
                 return GlobalOpenTelemetry.get();
             }
             // 🔴 2026-10-25（第二十三轮 · global）：buildProvider 也可能失败
             //   （batcher 非法 / Go 支持但 RAG 未实现）⇒ 照 Go 的 startAgent 失败路径
             //   —— 记 ERROR ⇒ **继续启动**（全局仍是 no-op）⇒ 绝不让异常逃出去阻断容器启动。
-            //   Go 出处：core/trace/agent.go:114-121（createExporter 返错 ⇒ logx.Error + return err）
+            //   Go 出处：core/trace/agent.go:116-120（createExporter 返错 ⇒ logx.Error + return err）
             //           ⇒ core/trace/agent.go:43-52（StartAgent 的 once.Do 里只 logx.Error）
             SdkTracerProvider provider;
             try {
@@ -185,7 +185,7 @@ public final class GoStyleOtelAgent {
                 .setResource(Resource.getDefault().merge(Resource.create(Attributes.of(
                         AttributeKey.stringKey("service.name"), config.serviceName() == null ? "" : config.serviceName()))));
         if (config.endpoint() != null) {
-            // Go: core/trace/agent.go:114-121 —— if len(c.Endpoint) > 0 才装 batcher
+            // Go: core/trace/agent.go:115-124 —— if len(c.Endpoint) > 0 才装 batcher
             SpanExporter exporter = OtlpGrpcSpanExporter.builder()
                     .setEndpoint(config.endpoint())
                     .build();

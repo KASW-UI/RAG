@@ -31,14 +31,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *       Sampler float64 `json:",default=1.0"`
  *       Batcher string  `json:",default=otlpgrpc,options=zipkin|otlpgrpc|otlphttp|file"`
  *
- *   go-zero@v1.10.2/core/trace/agent.go:111
+ *   go-zero@v1.10.2/core/trace/agent.go:110
  *       sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(c.Sampler)))
  *
  *   go-zero@v1.10.2/core/trace/agent.go:100-101（createExporter 的 default 分支）
  *       default:
  *           return nil, fmt.Errorf("unknown exporter: %s", c.Batcher)
  *
- *   go-zero@v1.10.2/core/trace/agent.go:114-121
+ *   go-zero@v1.10.2/core/trace/agent.go:115-124
  *       if len(c.Endpoint) > 0 { exp, err := createExporter(c); if err != nil { logx.Error(err); return err } ... }
  *
  *   go-zero@v1.10.2/core/trace/agent.go:43-52（StartAgent 的 once.Do）
@@ -255,7 +255,7 @@ class GoStyleOtelSamplerProtocolGateTest {
     @Test
     @DisplayName("🔴 端点为空 ⇒ **根本不校验** batcher（Go: createExporter 只在 len(Endpoint)>0 时被调用）")
     void emptyEndpointSkipsBatcherValidation() {
-        // Go 出处：core/trace/agent.go:114-121 —— 端点为空 ⇒ 不建 exporter ⇒ 不走 createExporter
+        // Go 出处：core/trace/agent.go:115-120 —— 端点为空 ⇒ 不建 exporter ⇒ 不走 createExporter
         //          ⇒ Batcher 写什么都不报错。
         var provider = GoStyleOtelAgent.buildProvider(
                 new GoStyleOtelConfig("common-otel-protocol-gate", null, "not-a-batcher", 1.0d));

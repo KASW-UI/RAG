@@ -38,14 +38,14 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <tr>
  *     <td>② <b>span 真的被导出到网络上</b></td>
  *     <td>假 OTLP 接收端（<b>真 gRPC 服务端</b>）收到 ≥1 个非空 Export 请求</td>
- *     <td>{@code core/trace/agent.go:114-121}（{@code if len(c.Endpoint) > 0 { WithBatcher(exp) }}）</td>
+ *     <td>{@code core/trace/agent.go:115-124}（{@code if len(c.Endpoint) > 0 { WithBatcher(exp) }}）</td>
  *   </tr>
  *   <tr>
  *     <td>③ <b>关停会 flush</b></td>
  *     <td>关停（{@code shutdown()}）后，pending 的 span 立刻被导出
  *         （<b>早于</b> BatchSpanProcessor 的 5s 批量周期 ⇒ 证明是 flush 带来的）</td>
  *     <td>{@code core/service/serviceconf.go:71-73}（{@code proc.AddShutdownListener(trace.StopAgent)}）
- *         ＋ {@code core/trace/agent.go:55-62}（{@code tp.Shutdown}）</td>
+ *         ＋ {@code core/trace/agent.go:30-34}（{@code tp.Shutdown}）</td>
  *   </tr>
  * </table>
  *
@@ -162,7 +162,7 @@ class GoStyleOtelAgentGateTest {
             Tracer tracer = GlobalOpenTelemetry.get().getTracer("gate");
             tracer.spanBuilder("pending-span").startSpan().end();
 
-            // 关停 ⇒ Go: core/trace/agent.go:55-62（tp.Shutdown ⇒ flush 未导出的 span）
+            // 关停 ⇒ Go: core/trace/agent.go:30-34（tp.Shutdown ⇒ flush 未导出的 span）
             GoStyleOtelAgent.shutdown();
 
             // ⚠️ 3s 的判定窗口 < BatchSpanProcessor 的 5s 批量周期
