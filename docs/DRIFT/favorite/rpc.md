@@ -3762,3 +3762,50 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 ⇒ ⇒ 本域那一段：模块 `favorite/favorite-rpc` · 域段 `22910–22939`（域段横跨两模块 ⇒ 取**下半段**） · 本模块宿主口段 `22910–22919` · 脚手架段 `22920–22929` · **8** 个 PG 个容器
 ⇒ ⇒ 落点：`service/favorite/favorite-rpc/src/test/java/.../support/RealContainerHostPort.java` ＋ 同名 `RealContainerHostPortTest.java`（守门 **5** 条）
 ⇒ ⇒ **与 Go 侧的一致性：N/A**（测试基础设施，不涉及运行时行为）
+
+## 📌 快照 · 🔴 **G4 共享层合并（`ae218df`）后的本域回归**（2026-10-28 · G3）
+
+**合并**：option D（**单一 merge 源 · 不 cherry-pick**）⇒ `git merge --no-ff align/g4-service-common`
+（G4 @ `188e995`）⇒ ⇒ **`git merge-tree --write-tree` 预演 0 冲突** ⇒ ⇒
+**G4 未触碰本域任何路径**（`git diff --stat` 空）⇒ ⇒ **本域代码零改动 ⇒ ⇒ 本域结论不受影响**。
+
+**合并后本域 3 模块回归**（`mvn -B -o --fail-at-end -am test -pl <3 模块>`，`-DargLine=-Xmx2g`）：
+
+| 模块 | 条数 | 备注 |
+|---|---|---|
+| `service/favorite/favorite-rpc` | 131 | —— |
+| `service/favorite/favorite-api` | **131** | ⚠️ **这一数【已经含】段数闸门那 +5 条真 Tomcat 守门**（守门类当轮 **13** 条）⇒ ⇒ 见下方「📌 订正」 |
+| `service/favorite/favorite-common` | 29 | —— |
+| **本域小计** | **291** | —— |
+
+**📌 订正（2026-10-28 · G3 · 我自己记账时踩的）**：本条初稿写的是
+「favorite-api 131 ⇒ 落码后 +5 ⇒ **136** ⇒ 本域 296 ⇒ 全量 **1392** ⇒ 须在合并收口前重跑一次全量」
+⇒ ⇒ **那半句是错的**，订正如下：
+
+| 项 | 初稿（错） | 实测（对） |
+|---|---|---|
+| 合并 commit 的时间 | —— | `ae218df` = **2026-10-28 03:18:21** |
+| 12 模块回归的时间 | —— | **03:34 起 · 15:30 min** ⇒ ⇒ **在合并之后** |
+| 该轮 `FavoriteApiRealTomcatGateTest` | —— | **13 条 / 0 failures / 0 errors**（日志 `… -- in com.rag.favorite.favorite.api.FavoriteApiRealTomcatGateTest`）⇒ ⇒ **已含 +5** |
+| favorite-api 模块 | 「131 → 136」 | **131（已含 +5）** ⇒ ⇒ 落码**前**是 **126** ⇒ ⇒ 那个 126 **从未出现在合并后那轮里** |
+| 全量 | 「1387 → 1392，须重跑」 | **1387 就是最新值**（1015 域侧 + 333 common + 39 users-common）⇒ ⇒ **不需要重跑** |
+
+⇒ ⇒ **教训**：**「合并后回归」不等于「合并前 + 落码」的加法** ⇒ ⇒ 落码与合并**同窗**时，
+**必须去日志里数那一次的实际条数**（`… -- in <测试类>` 行），⇒ ⇒ **不许用「前一次 + 新增条数」推算**
+⇒ ⇒ 同族 = 「**你用来下结论的那个数，不度量你以为的那个量**」。
+
+
+**全量口径**（12 域模块 ＋ `-am` 带进来的共享层）：**1387 条 / 0 failures / 0 errors / 4 skipped**
+· BUILD SUCCESS · **15:30 min**（2026-10-28）⇒ ⇒ **拆账（可复算）**：
+`service/common` **333** ＋ `service/users/users-common` **39** ＋ **四域合计 1015**
+⇒ ⇒ **1015 + 333 + 39 = 1387**（逐字相等）。
+⇒ ⇒ ⚠️ **本域段数闸门（Go `net/url` 的 `defaultMaxParams = 10000`）是合并之后落的码**
+⇒ ⇒ +5 条真 Tomcat 守门 ⇒ ⇒ **本域最新口径 = 296**（131 + **136** + 29）⇒ ⇒ **全量最新 = 1392**
+⇒ ⇒ **须在合并收口前重跑一次全量**取权威值（**不推算**）。
+
+**门禁快照（20 条）**：**canonical 在** [`docs/DRIFT/article/rpc.md`](../article/rpc.md) 的
+「**二十四、🔴 G4 共享层合并后的门禁快照（20 条）**」一节 ⇒ ⇒ **16 绿 / 4 红，四条红都不在本域**。
+
+**🔴 同域的段数闸门（Go `net/url` 段数上限）**：canonical 在
+[`docs/DRIFT/favorite/api.md`](../favorite/api.md) **§21**（含 §21.3 的
+「`MAX_PARAMETER_COUNT = 10001` 是设计值」订正）。

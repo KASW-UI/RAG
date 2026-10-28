@@ -2119,3 +2119,68 @@ JDBC 连**固定口** + `inet_server_port()` 回报**容器内口** ⇒ ⇒ 才�
 
 ⇒ ⇒ **纪律**：回执里的门禁口径**必须逐条点名红的那几条** ⇒ ⇒ 只报「几个红」不给成因 ⇒ ⇒ 下一轮的人分不清「真红」与「预期红」。
 
+---
+
+## 二十四、🔴 **G4 共享层合并后的门禁快照（20 条）**（2026-10-28 · G3）
+
+> **canonical 就在本节**（本域写权面 ⇒ 本节即权威）· 核对日期 **2026-10-28**
+> · 合并 commit **`ae218df`**（option D · 单一 merge 源 · **不 cherry-pick** · `git merge-tree --write-tree` 预演 **0 冲突**）
+> · G4 源 = `align/g4-service-common` @ **`188e995`** ⇒ ⇒ **G4 未触碰四域任何路径**（`git diff --stat` 空）
+
+### 24.1 合并后全量回归（12 域模块 ＋ `-am` 带进来的共享层）
+
+**1387 条 / 0 failures / 0 errors / 4 skipped** · BUILD SUCCESS · **15:30 min**（2026-10-28）
+
+| 归属 | 模块 | 条数 |
+|---|---|---|
+| **域侧（4 域 12 模块）** | `article-rpc` 177 · `article-api` 99 · `article-common` 15 · `comment-rpc` 136 · `comment-api` 52 · `comment-common` 27 · `favorite-rpc` 131 · `favorite-api` 131 · `favorite-common` 29 · `hot-rpc` 108 · `hot-api` 96 · `hot-common` 14 | **1015** |
+| **共享层** | `service/common` **333** ＋ `service/users/users-common` **39** | **372** |
+| **合计** | | **1387** ✅ 逐字相等（`1015 + 372 = 1387`）|
+
+📌 **这一轮 1387 【已经含】favorite-api 段数闸门那 +5 条真 Tomcat 守门**（时间线：`ae218df` = **03:18:21** ⇒ 回归 **03:34 起** ⇒ 同一轮里 `FavoriteApiRealTomcatGateTest` = **13 条**）
+⇒ ⇒ ⇒ **不需要为了落码再重跑一次全量**（落码**前**的 favorite-api = 126，那个数**从未**出现在合并后那轮里）
+⇒ ⇒ **纪律**：「合并后回归」**不等于**「合并前 + 落码」的加法 ⇒ ⇒ **要去日志里数那一次的实际条数**
+（`… -- in <测试类>` 行）⇒ ⇒ **不许用「前一次 + 新增条数」推算**。
+
+⚠️ **聚合口径的两个坑**（写进台账是因为下一轮还会踩）：
+
+1. **`-am` 会把依赖闭包一起带进 reactor** ⇒ 本次目标 12 个模块，reactor 实测 **23** 个
+   （`users-common` / 各域 pom 聚合模块都被带进来）⇒ ⇒ **拿 reactor 全量求和 ⇒ 得 1061，不是 1387**
+   ⇒ ⇒ **聚合前必须把「目标模块清单」显式写死**，并把非目标模块单列；
+2. **maven 的 `Tests run: N, …` 有两种行**：**模块级汇总行**（前面是 `[INFO] Results:`）与
+   **每类用例行**（形如 `… -- in com.rag.Foo`）⇒ ⇒ 过滤条件写成 `- in `（单横线）⇒ ⇒
+   **每类行被当成模块级汇总行 ⇒ 得 2122（= 1061 × 2）** ⇒ ⇒ **过滤必须用 `-- in `**；
+3. **自检规则**：**总数恰好是真实数的整数倍 ⇒ 必是重复计数**。
+
+### 24.2 门禁 20 条：**16 绿 / 4 红**（**四条红都不在四域**，逐条点名）
+
+| 门禁 | EXIT | 归谁 | 成因（必须点名，否则下一轮分不清「真红」与「预期红」）|
+|---|---|---|---|
+| `check-ledger-count` | 🔴 | **合并收口执行者** | 索引 **315** vs 本树实测 **332**（差 **+17** ⇒ 台账条目数在波次中持续增长）⇒ ⇒ **合并收口时统一 `--fix`** ⇒ ⛔ **各 lane 不各自 `--fix`**（会互相覆盖）|
+| `check-ddl-static` | 🔴 | **users 域** | users 域既知 **9** 处 DDL 差异（**类型/长度 0 差异**，其余为可空性 / `DEFAULT CURRENT_TIMESTAMP` 残留 / 缺 3 条非唯一索引）⇒ ⇒ **不在四域** ⇒ ⇒ 本域零改动 |
+| `check-tomcat-limits` | 🔴 | **G2 域（task-api）** | `task-api` 的 `mode=raw` 应为 `off` ⇒ ⇒ **不在四域** ⇒ ⇒ 本域零改动 |
+| `check-wave-coupling` | 🔴 | **G4-9（共享矩阵）** | `MqConsumer` 快照 `['comment','hot','task']` vs 现状 `['article','comment','hot','task']` ⇒ ⇒ **只差 `article` 一项** ⇒ ⇒ 落点 `docs/DRIFT/_cross/cross-domain-coupling.md` ⇒ ⛔ **G3 不写（共享面）** ⇒ ⇒ **等 G4 更新** |
+| 其余 **16** 条 | ✅ EXIT=0 | 本域 | —— |
+
+⚠️ **`tools/difftest/check-merge-tree-content.py`（G4 新增）**：按四 lane 顺序合并 ⇒
+**EXIT=0 · 问题 0 · 不可信 0** ⇒ ⇒ **合并树内容完整**（逐文件 blob 比对 = 三方并集）
+⇒ ⚠️ **无参数运行 = EXIT=2（用法错）**，**不是红项** ⇒ ⇒ 判定时先看有没有带 lane 参数。
+
+### 24.3 🔴 `MAX_PARAMETER_COUNT = 10001` 是【设计值】，不是漂移（**订正一则期待**）
+
+⇒ ⇒ canonical 论证（含 Go `net/url/url.go:1001/1004/1020` 逐行 · 共享层 javadoc 出处 · 域侧修法）
+⇒ ⇒ 见 [`docs/DRIFT/favorite/api.md`](../favorite/api.md) **§21.3**
+⇒ ⇒ **一句话**：Go 放行 **10000** 段、第 **10001** 段报错 ⇒ ⇒ 容器上限取 **10001**（= 上限 + 1）
+才能让**应用层**先按 Go 语义拒 ⇒ ⇒ **改成 10000 会让 Tomcat 比 Go 更早拒 ⇒ 反而制造漂移**
+⇒ ⇒ **「等共享层改 10000」的期待作废** ⇒ ⇒ **残差那一格归 favorite 域侧自装判据**（已落码，见 §21.4）。
+
+### 24.4 📌 四域指针（各域台账里那一节）
+
+| 域 | 台账里的那一节 | 本域 3 模块条数 |
+|---|---|---|
+| article | [`docs/DRIFT/article/rpc.md`](./rpc.md) 本节 | 177 + 99 + 15 = **291** |
+| comment | [`docs/DRIFT/comment/rpc.md`](../comment/rpc.md)「📌 快照 · 🔴 G4 共享层合并（`ae218df`）后的本域回归」 | 136 + 52 + 27 = **215** |
+| favorite | [`docs/DRIFT/favorite/rpc.md`](../favorite/rpc.md)「📌 快照 · 🔴 G4 共享层合并（`ae218df`）后的本域回归」 | 131 + 131 + 29 = **291** |
+| hot | [`docs/DRIFT/hot/rpc.md`](../hot/rpc.md)「📌 快照 · 🔴 G4 共享层合并（`ae218df`）后的本域回归」 | 108 + 96 + 14 = **218** |
+| | **四域合计** | **1015** ✅（+ 372 共享层 = 1387）|
+

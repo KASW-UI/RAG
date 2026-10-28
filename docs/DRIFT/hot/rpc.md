@@ -517,6 +517,27 @@ Go 形态：`Lock()` → 内部函数 `RLock()` ⇒ `sync.RWMutex` 不可重入 
 | 看门狗 / 合并 | 10s tick、3s 续期 | 同 | EQUIVALENT |
 | `OnPartitionsRevoked` 的 500ms context | `hot_handler.go:129` `context.WithTimeout(…, 500ms)` | **无**（`detach` 不做 I/O） | 随 SD-1 一并处置 |
 
+### 6.6-bis 📌 **订正（2026-10-28 · G3）**：「Redis 连接超时 = OBSERVABLE DIFFERENCE」**在本域已不成立**
+
+**原文保留**（不改写）：上表「Redis 连接超时」一行写的是
+「go-redis `DialTimeout=5s` vs Lettuce `connectTimeout` 默认 10s（`application.yml` 未配）⇒ **OBSERVABLE DIFFERENCE（低）**」。
+
+**📌 订正**：本域 `application.yml` **早已显式配 `connect-timeout: 5s`**
+（落码 commit **`0c6295c`**，2026-10-27）⇒ ⇒ **第四轮那条「未配 ⇒ 落 Lettuce 默认 10s」的取证
+对当前代码已过期** ⇒ ⇒ **本域运行期连接超时 = 5s = Go 的 `DialTimeout`** ⇒ ⇒ **该差异在本域不存在**。
+
+⇒ ⇒ **证据（本轮复验，不是转述）**：
+
+| # | 证据 | 内容 |
+|---|---|---|
+| ① | **域侧 yaml**（落码 `0c6295c`） | `service/hot/hot-rpc/src/main/resources/application.yml` ⇒ `spring.data.redis.timeout: 3s` ＋ **`connect-timeout: 5s`** |
+| ② | **守门（真容器 ⇒ 断言消费点）** | `HotRpcRedisTimeoutContractTest` ⇒ **真容器**（真实 yml）⇒ 真 `LettuceConnectionFactory` ⇒ 断言 **`ClientOptions.getSocketOptions().getConnectTimeout()` == 5s** ＋ `getCommandTimeout()` == 3s ⇒ ⇒ **变异 3/3 精确变红**（`expected: 5S but was: 10S`）⇒ ⇒ **判据活着**（不是恒真）|
+| ③ | **版本差订正** | G4 报的是 **Boot 4.0.3 / lettuce-core 6.1.8** ⇒ ⇒ **我树是 Boot 4.0.8 / lettuce-core 6.8.2.RELEASE**（`spring-boot-dependencies-4.0.8.pom` 的 `<lettuce.version>`）⇒ ⇒ **两个版本都验过**：lettuce `SocketOptions` 静态块 `ldc2_w long 10l → Duration.ofSeconds` ⇒ `DEFAULT_CONNECT_TIMEOUT_DURATION = 10s` ✔；Boot 4.0.8 `LettuceConnectionConfiguration.createClientOptions` offset 9→31 = `getConnectTimeout()` → `SocketOptions.builder().connectTimeout(...)` ⇒ **只在属性非空时才设** ✔ ⇒ ⇒ **结论在两版本都成立 ⇒ ⇒ 是基线过期，不是版本差异** |
+
+⇒ ⇒ **对 G4 第七封派单（R5/R6/R7）的答复**：**三条都已在各自域侧闭合**
+（hot `0c6295c` ＋ `HotRpcRedisTimeoutContractTest` · comment `CommentRpcRedisTimeoutContractTest` ·
+favorite `FavoriteApiRedisTimeoutContractTest`）⇒ ⇒ **不是新缺陷 ⇒ ⇒ 不重做、不重派**。
+
 ### 6.7 Retry Semantics（§18）
 
 | 项 | Go | Java | 判定 |
@@ -793,7 +814,7 @@ Go 形态：`Lock()` → 内部函数 `RLock()` ⇒ `sync.RWMutex` 不可重入 
 |---|---|---|---|---|---|---|
 | **UNR-1** | go-redis `MaxRetries=3` 的**实际重试面**：哪些命令会重试、pipeline 内部失败重试会不会留下半成品（`DEL` 成功但 `ZADD` 失败 ⇒ shadow key 残留）？ | `go-redis@v9.20.0/options.go` `init()` + `shouldRetry` | Lettuce 无重试；`flush` 用 `executePipelined` | ✅ **已闭合（第五轮）**：**重试面已逐条钉到依赖源码**（`options.go:393-398` / `redis.go:842,1002,1114-1119,1130-1201,1204-1227` / `error.go:84-153`）；**pipeline 重试 = 整组重发**（`pipelineProcessCmds` 每次 `writeCmds` 全量）；**「shadow 半成品」不可达**（DEL 先于 ZADD ⇒ 撞不出 WRONGTYPE；网络错 ⇒ 幂等整组重放 ⇒ 终态一致）。⚠️ 台账原定的验证手段被**证伪**：`CLIENT PAUSE` 只延迟不失败 | **重试面结案为「Go 重试的终态不可观察」** ⇒ DRIFT-HOTRPC-004 严重度 MEDIUM→**LOW**；并**反向查出** Go 会重发**非幂等**的 rename 脚本 ⇒ 可能「实际成功却记 fail」 | ✅ 已完成（第五轮）。**证据强度：真 Redis 实测 + 依赖源码逐行**（⚠️ **不是**双侧活体对拍 —— 真源冻结且无法注入网络故障） |
 | **UNR-2** | 4 段 Lua 的**逐条行为**（`EXISTS` 守卫 / `RENAME` 原子性 / `EXPIRE` 与 `RENAME` 的先后） | `hot_handler.go:227-234,301-306,329-334,400-407` | `HotRedisSnapshotStore.java:74-81`、`HotMergeScheduler.java:76-104` | ✅ **已闭合（第四轮）**：真 Redis IT 逐条跑通 4 段 Lua，`DefaultRedisScript` 的 `resultType=Long` 映射已验证；**并证伪了台账对 `EXISTS` 守卫的描述** | 若映射出错，`result==0` 分支判定会翻转 ⇒ 快照 / 合并行为改变 | ✅ 已完成（`HotRedisLuaGateTest`，12 例 + 变异验证） |
-| **UNR-3** | Lettuce `connectTimeout` 默认 10s vs go-redis `DialTimeout=5s` | `go-redis@v9.20.0/options.go` `init()`：`DialTimeout = 5s` | `application.yml:28` 只配 `timeout: 3s`，未配 `connect-timeout` | ✅ **已闭合（第四轮取证）**：消费点 `LettuceConnectionConfiguration.createClientOptions`（字节码：`DataRedisProperties.getConnectTimeout()` → `ifnull` ⇒ 未配置时**不调** `SocketOptions.Builder.connectTimeout`）⇒ 落 Lettuce **6.8.2** `SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION = Duration.ofSeconds(10)`（字节码 `ldc2_w 10l → Duration.ofSeconds`） | 连接阶段失败时机不同（低） | ✅ 已完成。**结论：差异确认存在（10s vs 5s），低影响，未修** |
+| **UNR-3** | Lettuce `connectTimeout` 默认 10s vs go-redis `DialTimeout=5s` | `go-redis@v9.20.0/options.go` `init()`：`DialTimeout = 5s` | `application.yml:28` 只配 `timeout: 3s`，未配 `connect-timeout` | ✅ **已闭合（第四轮取证）**：消费点 `LettuceConnectionConfiguration.createClientOptions`（字节码：`DataRedisProperties.getConnectTimeout()` → `ifnull` ⇒ 未配置时**不调** `SocketOptions.Builder.connectTimeout`）⇒ 落 Lettuce **6.8.2** `SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION = Duration.ofSeconds(10)`（字节码 `ldc2_w 10l → Duration.ofSeconds`） | 连接阶段失败时机不同（低） | ✅ 已完成。**结论：差异确认存在（10s vs 5s），低影响，未修**<br>📌 **订正（2026-10-28 · G3）**：上面那句「**未修**」**已过期** ⇒ ⇒ 本域 yml **已显式配 `connect-timeout: 5s`**（落码 `0c6295c`，2026-10-27）⇒ ⇒ **运行期连接超时 = 5s = Go 的 `DialTimeout`** ⇒ ⇒ **该差异在本域不存在** ⇒ ⇒ **守门**：`HotRpcRedisTimeoutContractTest`（真容器 ⇒ 断言**消费点** `getSocketOptions().getConnectTimeout()` == 5s）⇒ **变异 3/3 精确变红** ⇒ ⇒ 详见 **§6.6-bis** |
 | **UNR-4** | `RoundRobinAssignor` 配置**是否真的落到 consumer**（Boot 4 的 `KafkaProperties.Consumer.buildConsumerProperties()` 是否仍消费 `spring.kafka.consumer.properties.*`） | `hot.go:57` `NewBalanceStrategyRoundRobin` | `application.yml:49` | ✅ **已闭合（第四轮）**：真 Kafka IT 用**生产 `ConsumerFactory`** 建 2 个消费者 + 3 分区 topic ⇒ 实测分配 `[0,2]/[1]`（RoundRobin 形状）；**变异**把策略改成 `RangeAssignor` ⇒ 用例立刻变红（实际 `[0,1]/[2]`）⇒ 证明断言对策略敏感、不是恒真 | 分配策略改变 ⇒ `hkMap` 布局与热榜分布改变 | ✅ 已完成（`HotKafkaConsumerGateTest#productionConsumerFactoryReallyUsesRoundRobinAssignor`） |
 | **UNR-5** | `@KafkaListener` 若能起来，**容器并发度**是否等价于 Go 的「每分区一个 goroutine」 | sarama 每分区一个 goroutine（`consumer_group.go` 的 `consume()` 每 claim 一个 goroutine） | `@KafkaListener` 默认 `concurrency=1`（实测：单容器线程持有全部 3 个分区 ⇒ 串行消费） | ✅ **已回答（第四轮）**，**但结论不是「等价」**：单实例部署下 Go 并行消费 3 个分区、RAG 串行消费 ⇒ **不等价**；在「同一部署 × 3 副本」（3 JVM 同组、每 JVM 恰好 1 个分区）下才等价 ⇒ 登记为 **DRIFT-HOTRPC-009** | 影响跨分区的消费并行度（同分区内的顺序保证两侧一致） | ✅ 已回答；**是否把 `concurrency` 调成 `partition-count` 需单独决策**（会改并发语义，本轮未擅改） |
 | **UNR-6** | 三份 yaml 的**真实差异**到底是什么 | `etc/hot{1,2,3}.yaml` | `application.yml` 收敛为一份 + 环境变量 | ✅ **已闭合（第四轮复核）**：实测 `diff` —— 差异**不止两项**，还有 **`Interaction.Weights[].Code` 字段的缺失**（hot2/hot3 的 4 条权重都没有 `Code`，hot.yaml 有）；`ListenOn` 8083/8084/8085、`Prometheus.Port` 19091/19092/19093 | —— | 历史结论「只差 `ListenOn` 与 `Prometheus.Port`」**不成立** | 若照历史结论收敛，会把 `Code` 字段当噪声丢掉 ⇒ RAG 侧「保留 code 字段」的做法**反而是对的**（与 `application.yml` 注释、`HotRpcProperties.Weight.code` 一致） | ✅ 已完成（`diff etc/hot.yaml etc/hot2.yaml` / `hot3.yaml`） |
@@ -2461,3 +2482,34 @@ func main() {
 ⇒ ⇒ 本域那一段：模块 `hot/hot-rpc` · 域段 `22940–22969` · 本模块宿主口段 `22940–22959` · 脚手架段 `22960–22969` · **3** 个 Redis 个容器
 ⇒ ⇒ 落点：`service/hot/hot-rpc/src/test/java/.../support/RealContainerHostPort.java` ＋ 同名 `RealContainerHostPortTest.java`（守门 **5** 条）
 ⇒ ⇒ **与 Go 侧的一致性：N/A**（测试基础设施，不涉及运行时行为）
+
+## 📌 快照 · 🔴 **G4 共享层合并（`ae218df`）后的本域回归**（2026-10-28 · G3）
+
+**合并**：option D（**单一 merge 源 · 不 cherry-pick**）⇒ `git merge --no-ff align/g4-service-common`
+（G4 @ `188e995`）⇒ ⇒ **`git merge-tree --write-tree` 预演 0 冲突** ⇒ ⇒
+**G4 未触碰本域任何路径**（`git diff --stat` 空）⇒ ⇒ **本域代码零改动 ⇒ ⇒ 本域结论不受影响**。
+
+**合并后本域 3 模块回归**（`mvn -B -o --fail-at-end -am test -pl <3 模块>`，`-DargLine=-Xmx2g`）：
+
+| 模块 | 条数 |
+|---|---|
+| `service/hot/hot-rpc` | 108 |
+| `service/hot/hot-api` | 96 |
+| `service/hot/hot-common` | 14 |
+| **本域小计** | **218** |
+
+**全量口径**（12 域模块 ＋ `-am` 带进来的共享层）：**1387 条 / 0 failures / 0 errors / 4 skipped**
+· BUILD SUCCESS · **15:30 min**（2026-10-28）
+⇒ ⇒ **拆账（可复算）**：`service/common` **333** ＋ `service/users/users-common` **39** ＋ **四域合计 1015**
+⇒ ⇒ **1015 + 333 + 39 = 1387**（逐字相等 ⇒ 口径自洽）。
+⚠️ **聚合口径的两个坑**（别拿 reactor 求和当收口口径）：① `-am` 会把**依赖闭包**一起带进 reactor
+（本次实测 **23** 个模块 ⇒ ⇒ 聚合前必须**写死目标模块清单**）② maven 的 `Tests run:` 有**两种行**
+（模块级汇总行 vs 每类用例行 `… -- in com.rag.Foo`）⇒ ⇒ 过滤必须用 `-- in ` ⇒ ⇒ 否则**重复计数**
+（2122 = 1061 × 2 就是这么来的）。
+
+**门禁快照（20 条）**：**canonical 在** [`docs/DRIFT/article/rpc.md`](../article/rpc.md) 的
+「**二十四、🔴 G4 共享层合并后的门禁快照（20 条）**」一节 ⇒ ⇒ **16 绿 / 4 红，四条红都不在本域**。
+
+**🔴 `MAX_PARAMETER_COUNT = 10001` 是【设计值】，不是待修的漂移** ⇒ ⇒
+**「等共享层把它改成 10000」的期待作废** ⇒ ⇒ canonical 论证见
+[`docs/DRIFT/favorite/api.md`](../favorite/api.md) **§21.3**。

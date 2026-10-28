@@ -1285,3 +1285,137 @@ merge-base `cd893d1` 处是 `== 5003` 的更老版本 ⇒ 合并会取本版本�
 ⇒ ⇒ 本域那一段：模块 `favorite/favorite-api` · 域段 `22910–22939`（域段横跨两模块 ⇒ 取**上半段**） · 本模块宿主口段 `22930–22934` · 脚手架段 `22935–22939` · **1** 个 Redis 个容器
 ⇒ ⇒ 落点：`service/favorite/favorite-api/src/test/java/.../support/RealContainerHostPort.java` ＋ 同名 `RealContainerHostPortTest.java`（守门 **5** 条）
 ⇒ ⇒ **与 Go 侧的一致性：N/A**（测试基础设施，不涉及运行时行为）
+
+---
+
+## 21. ✅ Go 的 **query 段数上限（`net/url` 的 `defaultMaxParams = 10000`）** —— 域侧自装判据（2026-10-28 · G3）
+
+> **canonical 就在本节**（本域写权面 ⇒ 本节即权威）· 核对日期 **2026-10-28**
+> · 证据强度 **L1（Go 逐行）＋ L4（真 Tomcat 真 HTTP 双端点实测 + 变异 3/3）**
+> · 本节同时**订正 §18.4**（那一节的修法已作废，见下）。
+
+### 21.1 一句话
+
+Go 的 `net/url` 在**每一次 `httpx.Parse`** 时都会吃一道「query 段数 ≤ 10000」的规则 ⇒ ⇒
+favorite-api **7/7 handler** 都调 `httpx.Parse` ⇒ ⇒ **7/7 端点都该在第 10001 段拒**；
+⇒ ⇒ **RAG 侧原先 0 道判据**（共享层把容器上限抬到 10001 后，Tomcat 只在第 10002 段才拒，
+且**只有读 query 的那 1 个端点**会触发解析）⇒ ⇒ **漂移 = 整条区间 10001~10001 段无人拒**。
+⇒ ⇒ **本轮域侧自装 `HandlerInterceptor` 判据** ⇒ ⇒ **两侧逐字同形**（HTTP 200 + `{"code":5003}`）。
+
+### 21.2 Go 出处（**消费点**，逐行可追）
+
+| # | 位置 | 内容 |
+|---|---|---|
+| ① | Go 1.25 `net/url/url.go:1001` | `const defaultMaxParams = 10000` |
+| ② | `net/url/url.go:1004` | `withinDefaultMax := params <= defaultMaxParams` ⇒ ⇒ **放行 10000 段、第 10001 段报** |
+| ③ | `net/url/url.go:1020-1022` | `if !urlParamsWithinMax(strings.Count(query, "&") + 1) { return errors.New("number of URL query parameters exceeded limit") }` ⇒ ⇒ **段数 = `Count(rawQuery,"&") + 1`**（含空段）|
+| ④ | `net/url/url.go:1026-1029` | 段循环内 `if strings.Contains(key, ";") { err = fmt.Errorf("invalid semicolon separator in query"); continue }` ⇒ ⇒ **rawQuery 任一处含 `';'` 即拒**；⚠️ 该检查在「`key == ""` 判空」**之前** ⇒ ⇒ **空段含 `';'` 也拒**；且判的是**原始**串 ⇒ ⇒ `%3B`（已转义）**不**触发 |
+| ⑤ | go-zero v1.10.2 `rest/httpx/requests.go:57` ＋ `rest/httpx/util.go:25` | `httpx.Parse` → `httpx.ParseForm` → `r.ParseForm()` → `url.ParseQuery(r.URL.RawQuery)` ⇒ ⇒ **每一次请求都吃一遍上面两条规则** |
+| ⑥ | Go 侧 favorite-api **7/7 handler 首行** | `httpx.Parse(r, &req)`（`create_favorite_folder_handler.go:18` · `create_favorite_handler.go:18` · `delete_favorite_folder_handler.go:18` · `delete_favorite_handler.go:18` · `get_favorite_folders_handler.go:18` · `get_favorites_by_folder_handler.go:18` · `update_favorite_folder_name_handler.go:18`）⇒ ⇒ **段数规则对每个端点都吃** |
+| ⑦ | Go 的**拒绝形状** | 解析失败 ⇒ handler 落 `httpx.OkJsonCtx(ctx, w, ErrorInvalidParam)`（`get_favorites_by_folder_handler.go:18-24`）⇒ ⇒ **HTTP 200 + `{"code":5003,"msg":"参数错误","data":null}`** ⇒ ⇒ **不是 400** |
+
+### 21.3 🔴 共享层 `MAX_PARAMETER_COUNT = 10001` 是**设计值**，不是待修的漂移（**订正 §18.4**）
+
+**原文保留**（§18.4，改不改写由读者自行判断，本节只加订正）：
+
+> §18.4 写的是「改共享层 `GoStyleTomcatParameterLimitCustomizer.java:165` 的
+> `MAX_PARAMETER_COUNT = 10001` ⇒ 改成 `10000`」。
+
+**📌 订正（2026-10-28 · G3 · 证据强度 L1）** ⇒ ⇒ **§18.4 的修法作废**：
+
+1. **Go 侧放行到 10000 段** ⇒ ⇒ 容器上限若设成 **10000**，Tomcat 会在**第 10000 段**就拒
+   ⇒ ⇒ 那比 Go **更早**拒 ⇒ ⇒ 拒绝形状变成 **400 + Tomcat HTML 错误页**
+   ⇒ ⇒ **反而制造出一个新的漂移**（Go 是 200 + 5003）；
+2. **10001 = Go 上限 + 1** 是**刻意的边界**：共享层 javadoc
+   （`GoStyleTomcatParameterLimitCustomizer`「🔴 为什么必须是 10001」一节）明写
+   「= Go 的段数上限 10000 **+1** ⇒ ① ≤10001 个参数 ⇒ Tomcat 放行 ⇒ 由应用层按 Go 的语义判；
+   ② 10001 段 ⇒ Go 的 `net/url` 会拒（>10000）⇒ 我们的 filter 也拒 ⇒ **两边都拿到 Go 的原文 body**；
+   ③ >10001 个参数 ⇒ Tomcat 拒（400+HTML）⇒ Go 也拒（400）⇒ **状态码一致**」
+   ⇒ ⇒ **这是「把判定权交还应用层」所需的最小边界，不是漂移**；
+3. ⇒ ⇒ **「等共享层把 10001 改成 10000」这个期待作废**；
+4. ⇒ ⇒ **残差那一格归本域**：favorite 的 `rag.http.go-form-limit.mode = off`
+   ⇒ ⇒ 共享层**不装**段数闸门（它的 javadoc 明写「favorite 之所以停在 OFF，是因为它
+   **语义上就该是 OFF**（域自捕获）⇒ ⇒ **「不装闸门」不等于「不管上限」⇒ ⇒ 两者已解耦**」）
+   ⇒ ⇒ **域侧自己装那道段数判据** ⇒ ⇒ **本节 §21.4 的落码**。
+
+### 21.4 落码（1 个新类 ＋ 1 处注册 ＋ 5 条守门）
+
+| 落点 | 内容 |
+|---|---|
+| **新增** `service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/interceptor/FavoriteQuerySegmentLimitInterceptor.java` | ① 段数 = `countAmpersands(rawQuery) + 1`（**手写计数**，**不用 `String.split("&")`** —— `split` 丢弃尾部空段 ⇒ 与 Go 的 `Count` 口径不一致）⇒ `> 10000` 即拒；② `rawQuery.indexOf(';') >= 0` 即拒 |
+| `service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/config/WebMvcConfig.java` | 注册：`addPathPatterns("/favorite/v1/**").order(1)` ⇒ ⇒ **排在鉴权（`order = 0`）之后** |
+| `service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/FavoriteApiRealTomcatGateTest.java` | **+5 条**（见 §21.5）|
+
+**三条关键设计（每条都有理由，不是随手写的）**：
+
+1. **判据读 `request.getQueryString()`（原始串），不调 `getParameterMap()`**
+   ⇒ ① **不触发 Tomcat 的解析** ⇒ ⇒ ② **不与容器上限 10001 纠缠** ⇒ ⇒
+   ③ 计数口径与 Go `strings.Count(rawQuery,"&")+1` **逐字一致**；
+2. **用 `HandlerInterceptor` 而不是 `Filter`** ⇒ ⇒ 抛出的 `IllegalArgumentException`
+   能被 `@ControllerAdvice` 接住 ⇒ ⇒ 落 `GlobalExceptionHandler#handleIllegalArgument`
+   ⇒ ⇒ **HTTP 200 + `{"code":5003}`** ⇒ ⇒ 与 Go 的 `httpx.OkJsonCtx(ErrorInvalidParam)` **逐字同形**；
+3. **`order = 1`（鉴权 `order = 0` 之后）** ⇒ ⇒ Go 的 `httpx.Parse` 在 **handler 内部**
+   ⇒ ⇒ 解析**在鉴权之后** ⇒ ⇒ **无 token ⇒ 401 优先**（Go 同）⇒ ⇒ 不制造「先解析后鉴权」的偏离
+   ⇒ ⇒ （共享层那道 form 闸门把闸门排在 `HIGHEST_PRECEDENCE` ⇒ 那些域是「参数闸门先于鉴权」⇒ **已登记的有意偏离** ⇒ ⇒ 本域**不跟**那个形态）
+
+### 21.5 守门（**5 条**，真 Tomcat ＋ 真 JWT ＋ 真 HTTP 客户端）
+
+| # | 用例 | 断言 | 为什么需要它 |
+|---|---|---|---|
+| 1 | `exactly10000QuerySegmentsArePassedThrough` | `/item/list` ＋ 10000 段（1 非空 + 9999 空）⇒ **200** 且**不是 5003** | 钉住**放行侧**（Go `params <= defaultMaxParams` ⇒ 10000 必须放行）⇒ ⇒ 防止把阈值写成 ≤9999 |
+| 2 | `querySegmentCountOver10000IsRejectedLikeGo` | `/folder/list` ＋ 10001 段 ⇒ **200 + 5003** ＋ **不是 Tomcat HTML** | 钉住**拒绝侧**；⚠️ **刻意用 `/folder/list`**（Go `GetFavoriteFoldersReq` 是**空结构体** ⇒ `types.go:59` 无必填字段干扰 ⇒ 且本端点**根本不读 query** ⇒ ⇒ **修前必放行** ⇒ ⇒ 这条断言**真的在守那道闸门**）|
+| 3 | `querySegmentLimitIsUniformAcrossEndpoints` | `/item/list` ＋ 10001 段 ⇒ **200 + 5003** | 证明**覆盖面与「端点是否读 query 参数」无关**（⇒ ⇒ Go 侧 7/7 handler 都吃这道规则）|
+| 4 | `authStillWinsOverQuerySegmentLimit` | 10001 段 **无 token** ⇒ **401** 且不是 5003 | 钉住**次序**（Go：解析在鉴权之后）⇒ ⇒ 防止把拦截器排到鉴权之前 |
+| 5 | `semicolonInQueryIsRejectedLikeGo` | `?folderId=1;a=2` ⇒ **200 + 5003** | 钉住 Go 的**分号规则**（§21.2 ④）|
+
+⇒ ⇒ **期望值全部写死字面量**（`10000` / `10001` / `5003`）⇒ ⇒ **不引用被测代码的常量**
+（`FavoriteQuerySegmentLimitInterceptor#GO_MAX_QUERY_PARAMS`）⇒ ⇒ 否则守门会跟着实现一起漂 ⇒ 恒绿
+（同族坑 ⇒ `PIT-FAV-API-012`）。
+
+### 21.6 变异验证（**3/3 精确变红**，编译均通过）
+
+| 变异 | 期望变红的用例 | 实测 |
+|---|---|---|
+| **M1** 阈值 `10000 → 10001` | 用例 2 / 3（10001 段不再被拒 ⇒ 落到业务层 ⇒ 断言 5003 失败）| ✅ **红在目标断言**（编译通过）|
+| **M2** 短路分号分支（`throw` → `return true`）| 用例 5（分号不再被拒 ⇒ 无 5003）| ✅ **红在目标断言**（编译通过）|
+| **M3** 计数 `+1 → +2` | 用例 1（10000 段被算成 10001 ⇒ 误拒 ⇒ 断言「不是 5003」失败）| ✅ **红在目标断言**（编译通过）|
+
+⇒ ⇒ 三条**各自**打掉一种退化 ⇒ ⇒ **守门不是恒真**。
+
+📌 **这一轮 1387 那次「合并后全量回归」【已经含】这 5 条**（`ae218df` = **03:18:21** ⇒ 回归 **03:34 起** ⇒ 同一轮里本类 = **13 条 / 0 failures / 0 errors**）
+⇒ ⇒ ⇒ **不需要为了落码再重跑一次全量** ⇒ ⇒ 口径与订正见
+[`docs/DRIFT/article/rpc.md`](../article/rpc.md) **§24.1** ＋
+[`docs/DRIFT/favorite/rpc.md`](../favorite/rpc.md) 的「📌 订正」。
+
+### 21.7 L4 实测数据（**裸 socket ＋ 三种传输层对照**，2026-10-28）
+
+| 用例 | 段数 | token | 传输层 | 实测 |
+|---|---|---|---|---|
+| A | 10001 | 有 | 裸 socket | **5.6 s** ⇒ `4×103 Early Hints` ＋ `HTTP/1.1 200` ＋ `{"code":5003,"msg":"参数错误","data":null}` |
+| B | 10001 | 有 | 裸 socket | **5.2 s** ⇒ **同上（`/item/list` 也落 5003 ⇒ 覆盖面与端点无关）** |
+| C | 10000 | 有 | 裸 socket | **5.4 s** ⇒ `HTTP/1.1 200` ＋ `{"code":1015,…}` ⇒ ⇒ **放行进了业务层**（1015 = 业务失败，与「5003 = 解析失败」是**两格**）|
+| D / E | 10001 | **无** | 裸 socket | **2~7 ms** ⇒ `HTTP/1.1 401` ＋ `{"code":5004,…}` ⇒ ⇒ **鉴权优先** |
+| F | 10001 | 有 | **JDK `HttpClient`** | **5.4 s** ⇒ `200` ＋ `{"code":5003,…}` |
+| G | 10001 | 有 | **`HttpURLConnection`** | **5.3 s** ⇒ `200` ＋ `{"code":5003,…}` |
+
+⇒ ⇒ **同一请求，三种传输层结论一致** ⇒ ⇒ **服务端行为是确定的**，不是传输层的假象。
+
+### 21.8 🔴 环境假挂死（**不是代码缺陷**，已排除）—— 同一轮踩出来的坑
+
+第一次跑这条守门时，**用例 3 挂了 982.5 s**（`HttpTimeoutException`，而请求超时只配了 **30 s**）
+⇒ ⇒ **30 s 的超时在 982 s 后才触发** ⇒ ⇒ 判为「**JVM 被饿住**」（当时**同时**有 G4 的全量回归
+＋ G1 的 6 模块回归 ＋ 我这一条在跑 ⇒ ⇒ 24 GB 机器上 3 条 `-Xmx2g` 的 maven + surefire JVM
+⇒ ⇒ **JDK 的超时计时器线程拿不到 CPU ⇒ ⇒ 超时迟迟不触发**）。
+⇒ ⇒ **排除过程（不靠猜）**：用**同一个请求**换传输层复跑（裸 socket / JDK / `HttpURLConnection`）
+⇒ ⇒ **三条都毫秒级-秒级返回正确响应**（§21.7）⇒ ⇒ **服务端没问题** ⇒ ⇒ **独占窗口重跑
+`FavoriteApiRealTomcatGateTest` ⇒ 13 条 / 0 failures / 0 errors / 0 skipped / 42.87 s / BUILD SUCCESS**
+⇒ ⇒ **判「环境假挂死」有据**。
+⇒ ⇒ **可复现的判别动作**：见 [`docs/Pitfalls/favorite/api.md`](../../Pitfalls/favorite/api.md) 的 **`PIT-FAV-API-015`**。
+
+### 21.9 边界（本节**不**声称什么）
+
+- ❌ **不**声称「Go 侧已双侧活体对拍」⇒ 本节 Go 侧是 **L1 逐行**（真源冻结，无法在本环境起 Go 侧 favorite-api：
+  它依赖 etcd + favorite-rpc + Redis ⇒ 与 §类注释同一边界）⇒ ⇒ **RAG 侧 L4 ＋ Go 侧 L1**；
+- ❌ **不**声称「共享层那段数规则已改」⇒ ⇒ **共享层一行没动**（`service/common/**` 只读）⇒ ⇒
+  本域**自装**判据正是共享层 javadoc 设计的另一半（见 §21.3 第 4 点）；
+- ❌ **不**把「`%3B` 不触发」写成「已验」⇒ ⇒ 它来自 §21.2 ④ 的**逐行**（判原始串）⇒ ⇒ L1。

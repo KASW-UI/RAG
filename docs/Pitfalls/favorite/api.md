@@ -713,3 +713,77 @@ GET /favorite/v1/item/list?folderId=0&…（2049 个参数）
 - 与 **PIT-FAV-API-011**（yaml 里没写 `lettuce.pool.enabled` ≠ 池没开 —— Boot 4 的判据是 **classpath**）**互补**：
   那条讲「**classpath 决定池开不开**」；本条讲「**classpath 上的类被 `import` 进来，
   会把「classpath 缺了」这件事挡在编译期**」⇒ ⇒ **同一个 classpath 事实，两种观测面**。
+
+## PIT-FAV-API-015 · 🔴 **真 Tomcat 守门挂了几百秒 ⇒ 先用【同一个请求】换传输层复跑，再判「代码有 bug」还是「环境假挂死」**
+
+> 登记日期 **2026-10-28** · 发生域 **favorite-api** · 类型 **环境 flake（假红）**
+> · 证据强度 **L4（同一 JVM 里三种传输层同时跑）**
+
+### 现象（原始记录，不修饰）
+
+第一次跑 `FavoriteApiRealTomcatGateTest`（新增「query 段数闸门」那 5 条之后）：
+
+```
+Tests run: 13, Failures: 0, Errors: 1, Skipped: 0, Time elapsed: 1020 s <<< FAILURE!
+querySegmentLimitIsUniformAcrossEndpoints -- Time elapsed: 982.5 s <<< ERROR!
+java.net.http.HttpTimeoutException: request timed out
+```
+
+⇒ ⇒ **两个数字自相矛盾**：请求超时只配了 **30 s**（`HttpRequest.timeout(30s)`），
+**却过了 982.5 s 才抛超时** ⇒ ⇒ ⇒ **「超时」这件事本身没按时发生**
+⇒ ⇒ 所以「服务端慢」这个解释**不成立**（服务端再慢，30 s 也该超时了）。
+
+### 🔴 关键判别动作：**用【同一个请求】换传输层复跑**
+
+不是重跑一遍（重跑还是可能挂），而是**换观测面**：裸 socket ＋ JDK `HttpClient` ＋
+`HttpURLConnection` 各打一次**完全相同的 URL**（同段数 · 同 token）：
+
+| 用例 | 段数 | token | 传输层 | 实测 |
+|---|---|---|---|---|
+| B | 10001 | 有 | 裸 socket | **5.2 s** ⇒ `4×103 Early Hints` ＋ `HTTP/1.1 200` ＋ `{"code":5003,"msg":"参数错误","data":null}` |
+| F | 10001 | 有 | JDK `HttpClient` | **5.4 s** ⇒ `200` ＋ `{"code":5003,…}` |
+| G | 10001 | 有 | `HttpURLConnection` | **5.3 s** ⇒ `200` ＋ `{"code":5003,…}` |
+
+⇒ ⇒ **三种传输层、秒级、结论一致** ⇒ ⇒ ⇒ **服务端行为是确定的** ⇒ ⇒
+**那 982.5 s 不是「代码有 bug」**。
+
+### 真正的成因：JVM 被饿住 ⇒ **超时计时器线程拿不到 CPU**
+
+第一次跑的时候，**同时**有三条 maven 在跑：G4 的全量回归 ＋ G1 的 6 模块回归 ＋ 我这一条
+⇒ ⇒ 24 GB 机器上 3 条 `-Xmx2g` 的 maven ＋ surefire JVM ⇒ ⇒ **CPU 饥饿**
+⇒ ⇒ ⇒ **JDK 的超时是「定时器线程到期才触发」** ⇒ ⇒ 那个线程拿不到 CPU ⇒ ⇒
+**30 s 的超时被拖到 982.5 s 才生效** ⇒ ⇒ ⇒ 与现象逐字吻合。
+
+⇒ ⇒ **复跑（独占窗口，无并发）** ⇒ `FavoriteApiRealTomcatGateTest` ⇒
+**13 条 / 0 failures / 0 errors / 0 skipped / 42.87 s / BUILD SUCCESS** ⇒ ⇒ **坐实是环境**。
+
+### 判据（下次照着做）
+
+1. **「超时」类失败，先怀疑「超时有没有按时触发」** ⇒ ⇒ 比对**「配置的超时值」与「实际耗时」**
+   ⇒ ⇒ **两者差一个数量级 ⇒ 说明计时器没被调度 ⇒ 先查环境（并发跑批 / 机器负载），不要先改代码**；
+2. **判「服务端挂 vs 客户端挂」⇒ 换观测面，不是重跑** ⇒ ⇒ **裸 socket** 是最硬的一档
+   （拿到未经客户端加工的原始字节 ⇒ 连共享层写的 `103 Early Hints` 都看得见）；
+3. **同一个探针要能连一个「已知可用对端」** ⇒ ⇒ 本次三传输层互为对照 ⇒ ⇒ 结论不靠推测；
+4. ⚠️ **别用「日志里有没有 ERROR」判红红** ⇒ ⇒ 本次日志里满屏 `ERROR`
+   （`[otel] error: …` / `Failed to export spans` / `gRPC handler panic`）**全部是故意的测试场景**
+   ⇒ ⇒ **只认 surefire 三项 ＋ mvn 退出码**。
+
+### 落点
+
+- 诊断探针**已常驻仓内**：`service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/probe/QuerySegmentRawSocketProbe.java`
+  （**类名不带 `Test` 后缀 ⇒ 不进 surefire 默认 includes ⇒ 对常规回归零影响** ⇒ 需时显式跑：
+  `mvn -B -o -pl service/favorite/favorite-api -am test -Dtest='QuerySegmentRawSocketProbe' -Dsurefire.failIfNoSpecifiedTests=false`）；
+- 事件台账：[`docs/DRIFT/favorite/api.md`](../../DRIFT/favorite/api.md) **§21.8**。
+
+### 同族
+
+- 与 **PIT-FAV-API-008**（`RANDOM_PORT` 挑的端口可能根本不是你的 ⇒ 请求打到 PostgreSQL 上）
+  **同源**：都是「**请求没打到你以为的地方**」⇒ ⇒ 那条是「打到了别的进程」；
+  本条是「**根本没到服务端**（客户端侧被环境拖死）」⇒ ⇒ 两条的判别动作一致：
+  **换一个观测面，确认字节真的到了该到的地方**。
+- 与 **PIT-FAV-API-013**（JDK `HttpClient` 的 1xx 上限 ⇒ 撞上 Tomcat 11 的 `103 Early Hints` ⇒ 测试整体失明）
+  **同源且互补**：那条讲「**客户端读不到应用层响应**」；本条讲「**客户端等不到超时**」
+  ⇒ ⇒ 两条都是「**客户端这一侧的静默失效**」⇒ ⇒ 而 Go 侧 `net/http` 两种都不存在。
+- 与 **PF-ARTICLE-RPC-016**（Testcontainers PG 宿主口错位 ⇒ `EOFException` 环境 flake 真签名）
+  **同族**：都是**环境 flake** ⇒ ⇒ ⇒ 处置纪律一致：
+  **先证明「代码是对的」，再把 flake 登记成 flake**，⇒ ⇒ **不许拿「跑红」当「代码有 bug」去改被测对象**。

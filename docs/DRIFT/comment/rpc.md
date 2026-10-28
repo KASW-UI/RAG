@@ -1060,3 +1060,31 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 ⇒ ⇒ ⚠️ **归口**：`tools/redis-disconnect-probe/` 是**共享层**写法（`tools/**` 归 G4）⇒ ⇒ 本探针落在**域侧** ⇒ ⇒ **两份实现不要同时存在**
 ⇒ ⇒ **RAG 腿不重复造**：域内既有 `CommentRedisDisconnectFastRejectGateTest`（守 RAG 腿）⇒ ⇒ 本探针只守 **Go 腿 ＋ 双侧对照**
 ⇒ ⇒ **与 Go 侧的一致性：语义一致（两侧都「快速失败」）· 毫秒数不一致（Go ~1.7 s vs RAG 1 ms）⇒ 只主张语义那一层**
+
+## 📌 快照 · 🔴 **G4 共享层合并（`ae218df`）后的本域回归**（2026-10-28 · G3）
+
+**合并**：option D（**单一 merge 源 · 不 cherry-pick**）⇒ `git merge --no-ff align/g4-service-common`
+（G4 @ `188e995`）⇒ ⇒ **`git merge-tree --write-tree` 预演 0 冲突** ⇒ ⇒
+**G4 未触碰本域任何路径**（`git diff --stat` 空）⇒ ⇒ **本域代码零改动 ⇒ ⇒ 本域结论不受影响**。
+
+**合并后本域 3 模块回归**（`mvn -B -o --fail-at-end -am test -pl <3 模块>`，`-DargLine=-Xmx2g`）：
+
+| 模块 | 条数 |
+|---|---|
+| `service/comment/comment-rpc` | 136 |
+| `service/comment/comment-api` | 52 |
+| `service/comment/comment-common` | 27 |
+| **本域小计** | **215** |
+
+**全量口径**（12 域模块 ＋ `-am` 带进来的共享层）：**1387 条 / 0 failures / 0 errors / 4 skipped**
+· BUILD SUCCESS · **15:30 min**（2026-10-28）
+⇒ ⇒ **拆账（可复算）**：`service/common` **333** ＋ `service/users/users-common` **39** ＋ **四域合计 1015**
+⇒ ⇒ **1015 + 333 + 39 = 1387**（逐字相等）。
+⇒ ⇒ **本域 Redis 连接超时那条**（`CommentRpcRedisTimeoutContractTest`）⇒ ⇒ **已在 `0c6295c` 闭合**
+（`connect-timeout: 5s`）⇒ ⇒ **G4 的 R6 派单是过期基线** ⇒ ⇒ 详见
+[`docs/DRIFT/comment/vs-common.md`](../comment/vs-common.md) 的 **C-7**。
+
+**门禁快照（20 条）**：**canonical 在** [`docs/DRIFT/article/rpc.md`](../article/rpc.md) 的
+「**二十四、🔴 G4 共享层合并后的门禁快照（20 条）**」一节 ⇒ ⇒ **16 绿 / 4 红，四条红都不在本域**
+（`check-ledger-count` = 合并收口执行者 · `check-ddl-static` = users 域 · `check-tomcat-limits` = G2 域 ·
+`check-wave-coupling` = G4-9 共享矩阵）。
