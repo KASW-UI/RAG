@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # 变异验证：证明 tools/g3-anchor-check/check-anchors.py **不是假绿**（AGENTS.md §3.3.3）。
 # 每条变异都对应一类**机器可判**的漂移 ⇒ 跑完必须**精确转红**，且**还原后必须转绿**。
+# ⚠️ M5 额外覆盖**输入根探针**这条新机制：输入不可见时必须 **exit 2**（硬失败），
+#    绝不能静默降级成「少查了几个根 ⇒ 数字看着更干净」。
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,6 +18,9 @@ run_gate() {
 }
 
 TMP_OUT="$(mktemp)"
+EMPTY_CACHE="$(mktemp -d)"
+# ⚠️ **不删临时目录**：`rm -rf` 在本机会被回收站守卫拦下（mavis-trash 失效 ⇒ 命令被整体拒绝）
+#    ⇒ 留着 `/var/folders/.../tmp.*` 由系统清理（比让脚本在 EXIT 时自杀强）。
 trap 'rm -f "${TMP_OUT}"' EXIT
 
 # mutate <文件> <旧串> <新串>
@@ -73,6 +78,19 @@ run_case "M4 出处缺文件名" "FILE_MISSING" \
   "getHotArticlesLogic_test.go:35-37" "_test.go:35-37"
 
 say ""
+say "== M5 输入根探针硬失败（输入不可见 ⇒ 必须 exit 2，不得静默降级） =="
+( cd "${RAG_ROOT}" && GOMODCACHE="${EMPTY_CACHE}" python3 "${GATE}" ) >"${TMP_OUT}" 2>&1
+RC5=$?
+if [ "${RC5}" = "2" ] && grep -q "输入根探针失败" "${TMP_OUT}"; then
+  say "   ✅ 精确转红（exit 2 · 探针硬失败）"
+  grep -A3 -- "输入根探针失败" "${TMP_OUT}" | sed 's/^/   | /'
+else
+  say "   ❌ 没按预期转红（exit ${RC5}）⇒ 探针没牙齿 ⇒ 输入不可见时会把「我解析不了」伪装成「引用是错的」"
+  tail -12 "${TMP_OUT}" | sed 's/^/   | /'
+  FAILED=1
+fi
+
+say ""
 say "== 还原后必须重新转绿 =="
 RC="$(run_gate)"
 if [ "${RC}" = "0" ]; then
@@ -84,7 +102,7 @@ fi
 
 say ""
 if [ "${FAILED}" = "0" ]; then
-  say "✅ 四条变异全部精确转红 + 还原后转绿 ⇒ 守门非假绿"
+  say "✅ 五条变异全部精确转红（M1~M4 漂移形态 + M5 输入根探针硬失败）+ 还原后转绿 ⇒ 守门非假绿"
   exit 0
 fi
 say "❌ 有变异没转红 ⇒ 守门是假绿"

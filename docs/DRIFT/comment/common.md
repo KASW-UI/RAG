@@ -107,7 +107,7 @@ RAG 侧按职责拆开是**表达层**重组，行为层逐条对齐（§2）。
 | 项 | 值 |
 |---|---|
 | **Go 事实** | `errmsg.go:33-35` `NewGrpcErr(code, msg)` = `status.Error(codes.Code(code), msg)` ⇒ 业务码（1012/1013/1008/5003/2001…）**原样写进 `grpc-status`** ⇒ api 侧 `int(st.Code())` 字面取回 |
-| **RAG 现状** | `CommentGrpcError.java:105-110` `mapToGrpcCode` 只把 2001 映到 `INVALID_ARGUMENT(3)`，其余全部 `UNKNOWN(2)`；业务码改放 **自定义 trailer** `rag-comment-biz-code`（`:72`、`:130`） |
+| **RAG 现状（⚠️ 本行是**修复前**的形态，2026-10-24 已修 ⇒ **别把它读成「仍断」** ⇒ 见下一行）** | `CommentGrpcError.java:105-110` `mapToGrpcCode` 只把 2001 映到 `INVALID_ARGUMENT(3)`，其余全部 `UNKNOWN(2)`；业务码改放 **自定义 trailer** `rag-comment-biz-code`（`:72`、`:130`） |
 | **为何仍判「等价」** | `CommentGrpcError.bizCodeFromError`（`:168-200`）**能**从 trailer 无损取回业务码 ⇒ 契约**在 comment-common 内部是闭合的**。`CommentGrpcErrorTest.java:112-114` 已有断言锁住这一点 |
 | **🟢 通道现状（2026-10-24 更新）** | **已修复并活体验证**：MISMATCH-API-01 已修 —— `comment-api` 的 `CommentApiSupport.rpcError` 改为调用 `bizCodeFromError` ⇒ **通道在真实链路上已闭合**；对拍矩阵实测 **1012 / 1013 / 1008 / 2001 在两侧进程同时在跑时逐条一致**（见 [`api.md`](./api.md) §4.6.1）⇒ **本条不再是「断的通道」** |
 | **残留面（仅跨栈）** | ⚠️ **方向不对称**：**Go-rpc → RAG-api** 的业务码**能**捞回（grpc-java 降级成 `UNKNOWN + "Unknown code 1012"` ⇒ 第①优先级捞文本）；**RAG-rpc → Go-api** 的业务码**传不过去**（Go 只读 grpc-status，看不见 trailer）⇒ 详见 [`proto.md`](./proto.md) §3.1 |

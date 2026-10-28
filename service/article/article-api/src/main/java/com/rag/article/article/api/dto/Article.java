@@ -2,6 +2,7 @@ package com.rag.article.article.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 
 import java.util.List;
 import java.util.Map;
@@ -65,11 +66,30 @@ import java.util.Map;
  * 空文章就会输出 {@code "secondary_tags":[]} 而不是 Go 的 {@code null}。
  * 转换点在 {@code ArticleApiSupport#toArticle}，那里做了显式处理。
  *
+ * <h2>🔴 字段顺序是<b>字节级契约</b>（2026-10-29 · G3 阶段 1 · A-1 双侧活体实测）</h2>
+ * <p>Go 的 {@code encoding/json} 对 struct <b>按字段声明序</b>输出；
+ * Jackson 默认按<b>字母序</b>（{@code MapperFeature.SORT_PROPERTIES_ALPHABETICALLY} 的历史行为）⇒
+ * ⇒ 两侧<b>字段与值完全相同</b>，但<b>字节不同</b>。
+ * <p>⇒ 实测（两侧同时起服务、同一行数据）：
+ * <pre>
+ * Go : {"id":…,"title":…,"brief":…,…,"ext_info":{…}}
+ * RAG: {"author_id":…,"author_name":…,"brief":…,…,"view_count":1}
+ * </pre>
+ * ⇒ 与 hot 域 <b>D15</b>（{@code docs/DRIFT/hot/api.md}）<b>同型</b> ⇒
+ * ⇒ 按 hot 域的既定口径（{@code @JsonPropertyOrder} 固定声明序 ⇒ 双侧活体逐字节相同
+ * ⇒ <b>不需要</b>登记为有意偏离）。
+ * <p>⇒ 守门：{@code ArticleApiJsonFieldOrderTest}（<b>去掉注解即变红</b>）。
+ *
  * <h2>字段名大小写</h2>
  * <p>本仓库<b>没有</b>全局 snake_case 命名策略（已实测：全仓无
  * {@code property-naming-strategy} 配置），所以 snake_case 一律显式
  * {@link JsonProperty}，与 message-api 的 DTO 约定一致。
  */
+@JsonPropertyOrder({
+        "id", "title", "brief", "content", "cover_image_url", "manual_type_tag",
+        "secondary_tags", "author_id", "author_name", "create_time", "update_time",
+        "status", "view_count", "like_count", "comment_count", "share_count", "ext_info"
+})
 public class Article {
 
     @JsonProperty("id")

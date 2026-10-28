@@ -19,7 +19,7 @@
 | — | `ErrorCode.of(int)` / 实例 `getMsg()` | **新增便利层**（无 Go 对应物，见下方边界 3） |
 
 ⚠️ **落点是 `article-common` 而非 `article-api` 的 `service` 包** —— 三条互相独立的依据：
-`article-api` 的 pom **尚未**声明对本模块的依赖（消费侧仍是空骨架）、
+`article-api` 的 pom **已**声明对本模块的依赖（**消费侧早已接线**，见下方边界 1 的 2026-10-29 实测）、
 `service/article/pom.xml` 已把 `article-common` 列为 `<module>`、
 `users-common` / `message-common` / `like-common` / `hot-common` 四域口径统一。
 ⚠️ **类数（1）与落点是两个独立决定** —— 类数由「码与文案是否**同一个结构**」定：
@@ -71,10 +71,20 @@ Go 的 `const` 块与 `codeMsg` 是**两个**结构，但 article 的两侧**一
 
 #### ⚠️ 三条边界（**不得越读成「article 域已完成」**）
 
-1. **消费侧尚未接线** —— `article-api`（29 个文件）与 `article-rpc`（41 个文件）
-   **全部仍是 4 行空骨架**（`wc -l` 实测），本模块目前**零生产调用方**。
-   接线等价式：`new BusinessException(ErrorCode.X.getCode(), ErrorCode.getMsg(code))`
+1. ~~**消费侧尚未接线**~~ ⇒ ✅ **已接线（2026-10-29 · G3 阶段 1 实测订正）** ——
+   本行原文写「`article-api`（29 个文件）与 `article-rpc`（41 个文件）**全部仍是 4 行空骨架**
+   （`wc -l` 实测），本模块目前**零生产调用方**」⇒ ⇒ **该描述已过期，且是**同一份文件里
+   未被自身订正**的过期描述** ⇒ ⇒ **实测**：
+   · `article-api` = **43 个 java 文件 / 5390 行**（`find service/article/article-api/src/main/java -name '*.java'`）；
+   · `article-rpc` = **39 个 java 文件 / 8648 行**；
+   · **两个模块的 pom 都已声明 `<artifactId>article-common</artifactId>` 依赖**；
+   · `article-api` 侧 **10 个生产文件** `import com.rag.article.article.common`；
+   · 生产代码里 `ErrorCode.` / `getMsg(` 共 **53 处**调用。
+   ⇒ ⇒ **不是空骨架、不是零生产调用方** ⇒ ⇒ 本模块**已有真实消费侧**。
+   接线等价式（仍然成立，继续沿用）：`new BusinessException(ErrorCode.X.getCode(), ErrorCode.getMsg(code))`
    ≡ Go 的 `response.Response{Code: code, Msg: errmsg.GetErrMsg(code), Data: resp}`。
+   ⚠️ 订正依据：`docs/DRIFT/_cross/component-coverage-matrix.md` 的「当前态」节也已记
+   `article-api` 41 文件 / 5759 LOC ⇒ ⇒ **共享面那一份同样落后于域台账**（归合并收口执行者）。
 2. **Go 的 rpc 侧只用码值、从不取文案** —— Go rpc 侧把 `errmsg.X` 当
    `logger.LogBusinessErr(ctx, code, err, …)` 的 **`error_code` 日志字段**用
    （`logger.go:145`），**该路径从不调用 `GetErrMsg`** ⇒ rpc 日志里**没有文案**，

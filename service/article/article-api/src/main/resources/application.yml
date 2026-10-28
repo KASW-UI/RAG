@@ -97,11 +97,21 @@ grpc:
 # ⚠️ 36 字节 ≥ 32，jjwt 不需要补齐；JwtUtil.padToHmacKeySize 对它其实是 no-op。
 #   统一调用是为了与其它域共用同一份逻辑。
 article-api:
-    # 🔴 2026-10-29 · G3 阶段 1（P0 #8）：**明文默认值已去掉** ⇒ 缺变量 ⇒ 启动失败；
-    #    变量为空串 ⇒ 也启动失败（ArticleApiProperties#verifyAccessSecret 的 @PostConstruct 校验）
-    #    ⇒ 两条路都 fail-closed（不再有「悄悄用仓里的公开 UUID 起来 ⇒ token 可伪造」）。
-    #    ⚠️ Go 侧写的是**字面量**（article-api.yaml:27）⇒ 本条属「RAG 更严」的一侧 ⇒ 登记为有意偏离。
-    #    ⚠️ 根级 compose 需注入 USER_JWT_SECRET（共享面 ⇒ 已登记反馈单 ⇒ 应改 `${USER_JWT_SECRET:?...}`）。
+  # 🔴 2026-10-29 · G3 阶段 1（P0 #8）：**明文默认值已去掉** ⇒ 缺变量 ⇒ 启动失败；
+  #    变量为空串 ⇒ 也启动失败（ArticleApiProperties#verifyAccessSecret 的 @PostConstruct 校验）
+  #    ⇒ 两条路都 fail-closed（不再有「悄悄用仓里的公开 UUID 起来 ⇒ token 可伪造」）。
+  #    ⚠️ Go 侧写的是**字面量**（article-api.yaml:27）⇒ 本条属「RAG 更严」的一侧 ⇒ 登记为有意偏离。
+  #    ⚠️ 根级 compose 需注入 USER_JWT_SECRET（共享面 ⇒ 已登记反馈单 ⇒ 应改 `${USER_JWT_SECRET:?...}`）。
+  # 🔴 2026-10-29 · G3 阶段 1（A-1 双侧活体实测）：**`auth:` 这一层不能少** ——
+  #    `ArticleApiProperties` 的字段是**嵌套的 `Auth auth`**（`@NestedConfigurationProperty`）
+  #    ⇒ 绑定路径必须是 `article-api.auth.access-secret`
+  #    ⇒ ⚠️ 上一版（P0 #8 的 commit `45e0af4`）在改 `access-secret` 那一行时**把 `auth:` 整行删掉了**
+  #    ⇒ ⇒ yaml 变成 `article-api.access-secret` ⇒ ⇒ **绑定落空** ⇒ `auth.accessSecret` 恒为 null
+  #    ⇒ ⇒ `verifyAccessSecret()` **无论环境变量设没设都会抛** ⇒ ⇒ **article-api 永远起不来**。
+  #    ⇒ 而当时的 `ArticleApiPropertiesSecretGuardTest` 用的是 `withPropertyValues("article-api.auth.access-secret=…")`
+  #    ⇒ ⇒ **它从不读这份 yaml** ⇒ ⇒ 测试全绿而组件起不来（跑绿 ≠ 对）。
+  #    ⇒ 回归网：`ArticleApiPropertiesSecretGuardTest#realYamlBindsSecretIntoNestedAuth`（**读真 yaml**）。
+  auth:
     access-secret: ${USER_JWT_SECRET}
     access-expire: ${USER_JWT_EXPIRE:31536000}
 

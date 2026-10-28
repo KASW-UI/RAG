@@ -771,6 +771,65 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 
 ---
 
+#### DRIFT-ARTICLE-API-011 —— `application.yml` 少 `auth:` 一层 ⇒ **`article-api` 永远起不来**（启动阻断）✅ **已修（2026-10-29 · G3）**
+
+> **当前状态（✅ **已修**（2026-10-29 · G3 阶段 1 · A-1 双侧活体实测时暴露））**
+- **现象（🔴 启动阻断，不是「配置漂移」）**：`article-api` **根本起不来** —— 无论环境变量 `USER_JWT_SECRET` 设没设，容器都抛
+  「access-secret 不能为空」并退出。
+- **根因**：commit **`45e0af4`**（2026-10-29 02:09:34 · P0 #8「去明文默认验签密钥」）在改 `access-secret` 那一行时
+  **把 `auth:` 整行删掉了** ⇒ yaml 变成 `article-api.access-secret` ⇒
+  而 `ArticleApiProperties`（`service/article/article-api/src/main/java/com/rag/article/article/api/config/ArticleApiProperties.java:72-76`）
+  的字段是**嵌套的 `Auth auth`**（`@NestedConfigurationProperty`）⇒
+  **绑定路径必须是 `article-api.auth.access-secret`** ⇒ 绑定**永远落空** ⇒ `auth.accessSecret` 恒为 `null`
+  ⇒ `verifyAccessSecret()`（同文件 `:107-115`）**无条件抛** ⇒ **组件起不来**。
+- **🔴 为什么「跑绿」没抓到**：当时的 `ArticleApiPropertiesSecretGuardTest` 用的是
+  `withPropertyValues("article-api.auth.access-secret=…")` ⇒ **它从不读那份 yaml**
+  ⇒ 3 条用例全绿，而组件在真实部署里**一次都没起来过**。
+  ⚠️ 这正是 AGENTS.md §3.3.3「注解/配置存在 ≠ 机制生效」的同型：**测的是「我写的那份配置」，不是「产物里那份」**。
+- **修法**：① yaml 补回 `auth:` 这一层（并留注释说明**为什么不能少**）；
+  ② 新增回归网 `ArticleApiPropertiesSecretGuardTest#realYamlBindsSecretIntoNestedAuth`
+  —— **读真 `application.yml`**（`YamlPropertySourceLoader` ＋ 真 key 路径 `article-api.auth.access-secret`），
+  而不是 `withPropertyValues`。
+- **证据**：**变异验证** —— 删掉 yaml 的 `auth:` 一行 ⇒ **只有新增这条用例转红**，原有 3 条仍绿
+  ⇒ **证明原有 3 条真的看不见 yaml 的键路径**；还原后转绿。
+  ⇒ **证据强度：L4**（真文件 ＋ 变异精确转红 ＋ 真起容器验证）。
+- **✅ 同族自查（2026-10-29 · G3 已逐个核过，结论：只有 article-api 命中）**：
+  commit `45e0af4` 同时改过 `comment-api` / `favorite-api` 的同类行，但**这两个域不成立**——
+  它们的 yaml 是 `comment-api.user-auth.access-secret` / `favorite-api.user-auth.access-secret`
+  （**一层 `user-auth:`**），而各自的 Properties 类是 `private UserAuth userAuth` **直接挂在 prefix 下**
+  （`CommentApiProperties.java:48` / `FavoriteApiProperties.java:50`）⇒ **键路径与结构一致，绑定正常**。
+  ⇒ 🔴 **只有 `article-api` 的结构是嵌套的 `Auth auth`**（`ArticleApiProperties.java:72-76`）⇒ **只有它要求多一层 `auth:`**。
+  ⇒ **别去「修」没坏的两个域**。
+
+---
+
+#### DRIFT-ARTICLE-API-012 —— JSON **字段顺序**漂移：Go 按 struct 声明序，Jackson 按字母序 ✅ **已修（2026-10-29 · G3）**
+
+> **当前状态（✅ **已修**（2026-10-29 · G3 阶段 1 · A-1 双侧活体实测时暴露））**
+- **现象**：两侧响应的**字段与值完全相同**，但**字节不同** ⇒ 任何按字节比对的对拍都会报红。
+- **根因（框架机制）**：
+  - Go `encoding/json` 序列化 **struct** 时按**字段声明顺序**输出；
+  - Jackson 序列化 **POJO** 时默认按**字母序**（`MapperFeature.SORT_PROPERTIES_ALPHABETICALLY`，默认开）。
+  ⇒ ⇒ **同样的数据 ⇒ 不同的字节序列**。
+- **Go 侧出处**：
+  - `service/article/api/internal/types/types.go:6-24` —— `Article` 的**声明序**：
+    `id` → `title` → `brief` → `content` → `cover_image_url` → `manual_type_tag` → `secondary_tags` →
+    `author_id` → `author_name` → `create_time` → `update_time` → `status` → `view_count` →
+    `like_count` → `comment_count` → `share_count` → `ext_info`；
+  - `service/article/api/internal/types/types.go:67-72` —— `ListArticlesResp` 的**声明序**：
+    `articles` → `total` → `page` → `page_size`。
+- **RAG 侧修法**：给 `service/article/article-api/src/main/java/com/rag/article/article/api/dto/Article.java`
+  与 `.../dto/ListArticlesResp.java` 加 `@JsonPropertyOrder({...})`，顺序**逐条**对齐上面两处 Go 声明序。
+- **分类**：**OBSERVABLE DIFFERENCE**（可观测差异）⇒ **修到逐字节相同**，**不登记为有意偏离**
+  （同 `hot` 域 `DRIFT-HOTAPI-030` 的处理口径）。
+- **证据**：新增 `service/article/article-api/src/test/java/com/rag/article/article/api/dto/ArticleApiJsonFieldOrderTest.java`（3 例）；
+  **变异验证** —— 去掉 `@JsonPropertyOrder` ⇒ **只有 `Article` 那条转红** ⇒ 证明断言真有牙齿；还原后转绿。
+  ⇒ **证据强度：L4**（真 DTO ＋ 变异精确转红）。
+- **⚠️ 边界（不得外推）**：本条只钉了 `Article` 与 `ListArticlesResp` **两个 DTO**；
+  同目录其它 DTO（`GetArticleResp` 等）**尚未逐个核对字段序** ⇒ **登记为域内未闭合项**。
+
+---
+
 ### 7.6 上游实现期的内部编号（`DRIFT-001…007`）对照 —— 本轮**未独立验证**
 
 RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记其存在与本轮的间接观察：
@@ -865,13 +924,14 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 
 | # | 原探针设想 | **当前状态（2026-10-29 核对）** |
 |---|---|---|
-| 1 | **CASE-17/18 双侧活体对拍**：Go 侧用 `httptest` + 真实 `UploadImageHandler` 注入一个 `status.Error(codes.Unavailable, …)` 的 fake client，断言 HTTP 503；RAG 侧同理 | 🔴 **仍开 —— 但理由已变**：原文写「**这是修 `DRIFT-001` 的前置**」⇒ ⚠️ **该前提已失效**（`DRIFT-ARTICLE-API-001` **已修**：2026-10-24 修复轮 **F-1**，`ArticleApiMvcPipelineTest` × 3 ＋ **变异 3/3 转红**）⇒ ⇒ 现在它**不再是从「前置」降级为「补强」**，而是**双侧活体证据缺口**（⇒ 归属 **G-3 双侧活体**，**不阻塞阶段 1**，基线已按 🟡 计入） |
+| 1 | **CASE-17/18 双侧活体对拍**：Go 侧用 `httptest` + 真实 `UploadImageHandler` 注入一个 `status.Error(codes.Unavailable, …)` 的 fake client，断言 HTTP 503；RAG 侧同理 | 🟡 **部分闭合（2026-10-29 · G3）** —— 原文写「**这是修 `DRIFT-001` 的前置**」⇒ ⚠️ **该前提已失效**（`DRIFT-ARTICLE-API-001` **已修**：2026-10-24 修复轮 **F-1**）⇒ ⇒ 它**不是从「前置」降级为「补强」**，而是**双侧活体证据缺口**（⇒ 归属 **G-3 双侧活体**，**不阻塞阶段 1**）<br>🔴 **2026-10-29 G3 已建探针并跑通**：`tools/api-full-parity-probe/article/`（**G3 真私有目录**）⇒ **Go 真源栈与 RAG 栈同时起服务** ⇒ 同一请求 ⇒ **逐字节**比对（Go 真源二进制 + **配置副本**〔真源仓全程 `git status` 干净〕· 两侧**各自独立** Postgres · 真源 `article.sql` + `002_community_revision.sql`）<br>**已取到 3 条 L4 双侧活体证据**（`GET /v1/articles` 200 · `GET /v1/article/9007199254740993` 5001 · `GET /v1/article/does-not-exist` 1002 ⇒ **两侧逐字节一致**）<br>⇒ **同时暴露并修掉 2 个新缺陷**：`DRIFT-ARTICLE-API-011`（yaml 少 `auth:` ⇒ **组件起不来**）· `DRIFT-ARTICLE-API-012`（JSON 字段序漂移）<br>⚠️ **不是全闭合**：① `judge` §九 G-3 原文要求「article 域双侧活体 **0 条**」⇒ 现 3 条 ⇒ **部分**；② **成功路径只覆盖公开列表端点** —— 宿主上 `user.rpc` **两侧都不可达** ⇒ 单条详情端点两侧**同样降级成 5001**（该用例钉的是「**降级路径两侧一致**」，不是「取到文章」）⇒ ⇒ **成功路径的完整字段语义仍未双侧验证** |
 | 2 | **真实 Tomcat 探针**：起 `RANDOM_PORT` 容器，断言 400 响应的 `Content-Type: text/plain; charset=utf-8`（**带空格**）与 `X-Content-Type-Options: nosniff` ⇒ 用于关闭 §9 `UNRESOLVED-001` | ✅ **已消解（2026-10-24，第二轮）** —— `UNRESOLVED-001` **已关闭**（§9 标题行已带 ✅）⇒ **本项的前提本身已过期**；且**本域现已真起 `RANDOM_PORT` 容器**（`ArticleApiAssemblyWiringTest` / `ArticleApiFormParamLimitTest` 两个 `@SpringBootTest(webEnvironment = RANDOM_PORT)`）⇒ ⇒ **不需要再补** |
 | 3 | **user-rpc 慢响应探针**：Go 侧把 `UserRpcConf.Timeout` 显式写成 0/2000 并注入慢 client；RAG 侧注入慢 stub 实测端到端延迟 ⇒ 用于关闭 `DRIFT-002` | ✅ **已消解（2026-10-24 修复轮）** —— `DRIFT-ARTICLE-API-002` **已修**（**F-2**：`UserRpcClientDeadlineTest` × 5 ＋ **变异 2/2 转红**）⇒ ⇒ **守门已在**（`UserRpcClientDeadlineTest`），**不需要再补** |
 | 4 | **重复 query key 探针**：`?page=1&page=2` 双侧各跑一次 ⇒ 用于关闭 `DRIFT-003` | ✅ **已消解（2026-10-24 修复轮）** —— `DRIFT-ARTICLE-API-003` **已修**（**F-3**：`ArticleApiMvcPipelineTest` × 3 ＋ **变异 2/2 转红**）⇒ ⇒ **守门已在**，**不需要再补** |
 
-⇒ **小结**：本小节**只剩第 1 项仍开**（🔴 双侧活体证据缺口，**归属 G-3 / 不阻塞阶段 1**）；
-第 2~4 项**均已消解**（原「待办」措辞已过期 ⇒ 本轮订正）。
+⇒ **小结**：本小节**只剩第 1 项**，且已从「🔴 完全未做」推进到「🟡 **部分闭合**」
+（**2026-10-29 · G3**：3 条 L4 双侧活体证据已取到；**成功路径的完整字段语义**待 `user.rpc` 可用后补）
+⇒ 第 2~4 项**均已消解**（原「待办」措辞已过期 ⇒ 本轮订正）。
 
 ---
 
