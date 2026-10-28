@@ -4163,3 +4163,130 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | **现象** | G3 本轮把 `favorite-api` 的 query 闸门从「域内手写 2 条规则」改成「**调共享层判据** `GoStyleFormValues#goParseViolation(rawQuery)`」⇒ ⇒ **该类的语义已跨域承重** ⇒ ⇒ **改它 = 改 favorite 的可观察行为** |
 | **动前义务** | **任何改动 `goParseViolation` 的动作**（含改签名 / 改返回形态 / 改判定顺序）⇒ ⇒ **必须先出反馈单给 G3** ⇒ ⇒ **不得在 G4 树里单方面改掉它的返回值语义** |
 | **消费者清单（本轮补进 javadoc）** | ① **生产调用点**：`service/favorite/favorite-api/.../FavoriteGoQueryLimitInterceptor.java`（**只读调用**）② **域侧回归网**：`FavoriteApiRealTomcatGateTest` ＋ `FavoriteGoQueryLimitInterceptorTest` ③ **改完必须通知 G3** ④ **域侧不得改写该方法的返回值语义** |
+
+## 开工前置回执
+
+> ⚠️ **本节由 lane 自己写（`docs/Worktree.md` §二·五 ③）**。**⑤「Jason 批准记录」留空，由调度员代填** —— 回执人**不得自批**。
+> 核对日期 **2026-10-29** · lane **G4**（`align/g4-service-common` @ `44ed052`）· 依据 `AGENTS.md` §五·3b-0 + `docs/Worktree.md` §二·五。
+
+### ① 任务范围
+
+**本 lane 本轮候选任务（待 Jason 批准，本回执只确认、不动手）**
+
+| # | 候选任务 | 落点 | 本层实测后的归属结论 |
+|---|---|---|---|
+| **①** | 补守门 `tools/g3-anchor-check/check-anchors.py` 的 `PINNED` 两行（`gorm.io/driver/postgres: v1.6.0` ＋ `github.com/lovoo/goka: v1.1.16`）⇒ 现在这两簇共 **29 条是假阳性** ⇒ 补完重跑应只剩 **27 条真欠账** | `tools/g3-anchor-check/` | 🔴 **技术前提全部成立，但落点归属与调度员描述不一致 ⇒ 建议改派 G3 / 收口执行者**（详见 ③） |
+| **②** | 是否把该守门**提升为全仓守门并搬进 `tools/difftest/`** | `tools/difftest/` ＋ **必须同改** `docs/PhaseGoal-judge.md` §6.3 | 🔴 **G4 单独做不了** —— `docs/PhaseGoal-judge.md` **不在任何 lane 白名单**（无人拥有）⇒ ⇒ 建议**留给合并收口执行者**（否则立刻制造 B14 计数漂移） |
+
+**不做（明确不碰）**
+
+- **阶段二**：`docs/twoStage.md` §1.3 / §2.2 / §6 / §7（业务语义完整性 · 十二维度生产级审查）⇒ 收口执行者的事。
+- **域私有面**：`service/{users/user,users/admin,follow,message,like,task,article,comment,favorite,hot}/**` ⇒ 域侧自修；域侧能自修的**不派 G4**。
+- **共享面（一律只登记 + 上报，不擅自改）**：`AGENTS.md` · 三个 `_INDEX.md` · `docs/DRIFT/_MANIFEST.json` · `docs/DRIFT/_cross/**` · `docs/Worktree.md` · `docs/PhaseGoal-judge.md` · `docs/PhaseGoal/**` · `docs/DRIFT/global/{_README,common-tails,cross-domain,cycle-deps}.md` · `tools/difftest/README.md` · 根级 `README.md` / `docker-compose.yml` / `.env.example`。
+- **不新开子会话**（沿用上轮约束）；**不接队列里的新消息**；**不扩范围**。
+
+### ② 已读四档（本 lane 面 · 路径 + 读到的关键结论）
+
+**`docs/DRIFT/`**
+
+| 文件 | 关键结论 |
+|---|---|
+| `docs/DRIFT/common/alignment-2026-10-23.md`（878 行） | §十三 = 25 条 `CF`/`LOG`/`SF` 逐条定级（`twoStage.md` §5.3 的 **11 字段** ＋ §10 的 A/B/C/D）⇒ ⇒ **0 条命中 P0 九条**（唯一命中的 `DRIFT-SF-001` 已修）⇒ ⇒ **绝大多数是 OBSERVABLE** ⇒ 按 §5.3 属**合法的「差异与暂缓项清单」**，**不是「阶段一未通过」**；§十二·一 计数 **27 → 25 → 24**（`-005` 与 `DRIFT-SF-001` 本轮已修） |
+| `docs/DRIFT/common/audit.md`（100 行） | 2026-10-21 只读审计结论 **SEMANTICALLY NOT EQUIVALENT**（20 项偏差）⇒ **Go 侧 `communityfact` 被 11 个服务用 / RAG 侧 0 个消费** ⇒ ⇒ 观测面缺失 = 「查不出来」的根因 |
+| `docs/DRIFT/common/deadline.md`（101 行） | 用户拍板「**① 池加界 + deadline 透传，两者都做；② 接受「超时计入 client breaker 失败」**（与 Go `codes.Acceptable` 一致）」⇒ ⇒ 本节**记录了被实测两次推翻的推断** ⇒ ⇒ 「推断」不可当证据 |
+| `docs/DRIFT/common/http.md`（162 行） | **DRIFT-006 关闭**：请求体 Content-Type 判据对齐 Go `withJsonBody` ⇒ ⇒ **原签字理由被推翻**、且差点用「看起来最自然的修法」引入一条更糟的漂移 |
+| `docs/DRIFT/common/protection.md`（144 行） | 请求保护层**下沉到 `service/common`** ⇒ 依据：这四层是 **go-zero `rest.Server` 的内建行为**，**任何** `rest.MustNewServer` 起的进程都自带 ⇒ ⇒ 不是 message 域的代码 |
+| `docs/DRIFT/global/_README.md`（922 行） | `global` = 收口域 ⇒ ⇒ **边界**：「`common` 域问 common 自己对不对；`global` 问**别人**因 common 而对不对」 |
+| `docs/DRIFT/global/common-tails.md`（683 行） | T-1~T-12 议题档（别人的漂移、修法落在共享类）⇒ ⚠️ **`:551`「真正只有毫秒的是 `DeadlineState`」已失效**（`DRIFT-COMMON-005` 已修 ⇒ 全仓已无「只有毫秒」的 deadline 载体） |
+| `docs/DRIFT/global/cross-domain.md`（1095 行） | 跨域不变量档 ⇒ ⇒ **B10**（`users_user.extra_info` 写路径 jsonb→text，真 PG 坐实「Go 成功 / RAG 5001」）落点**跨 `users-common` ＋ `admin-rpc`** ⇒ ⇒ **必须同一次提交** ⇒ ⇒ 「修法同时涉及共享层与别域代码时不得留半截」的实证 |
+| `docs/DRIFT/global/cycle-deps.md`（126 行） | **CYCLE-001 ✅ 已闭环**（同一提交两步走完） |
+| `docs/DRIFT/global/vs-common.md`（本档） | §2 = 9 轴逐轴结论：**A1 🟡 / A2 ✅ / A3 🟡 / A4 🟡 / A5 🟡 / A6 🔴 / A7 N/A / A8 N/A / A9 ✅**（A6 = 🔴 因本层 L4 证据**绑定错层**已证伪 ⇒ users 域零探针）；§4.15 = 阶段一收工轮 |
+| `docs/DRIFT/_cross/domain-common-lanes.md`（180 行） | 9 条机制面轴 **A1~A9** 的口径（含 A1 = 「毫秒 vs 秒精度」、A8 = 「Flyway 独立账本 + `baseline-version: 0`」）＋ 写权边界 |
+| `docs/DRIFT/_cross/cross-domain-coupling.md`（832 行） | **C1~C7** ⇒ **C1 共享层写权唯一 = G4**（G1~G3 只读）· **C2 G4 = 常设执行者**（落码窗口常开）· **C7 收口回归在波次末尾跑** ⇒ 「基线作废」是错的，**风险窗口 = 收口回归跑完 ～ 合并之前** ⇒ ⇒ §四 **`users-common` 按类判定**（8 提级 G4 / 3 留 users）⚠️ **必须用全限定名 + `import` 判定**（全文正则会把 javadoc 的 `{@code}` 当真引用 ⇒ 误判提级） |
+| `docs/DRIFT/_cross/ddl-type-divergences.md`（188 行） | 类型/长度 **0 差异**；`DEFAULT CURRENT_TIMESTAMP` 残留 **16 处**（**刻意保留**）；users 域缺 3 条非唯一索引（**性能非行为**）⇒ ⇒ **hot = N/A ⇒ 不许写成「已对齐」** |
+| `docs/DRIFT/_cross/component-coverage-matrix.md`（286 行） | `@EnabledIfDockerAvailable` **静默全跳** = 绿灯底下的空洞 ⇒ ⇒ 「有测试文件」≠「测过」 |
+| `docs/DRIFT/_cross/proto-verification.md`（73 行） | proto 复制一致性实测 + 回归网状态 ⇒ ⚠️ **10 个 proto 中 8 个无回归网**（复制忠实 ≠ 有网可证） |
+| `docs/DRIFT/_cross/go-anchors.md`（37 行） | Go 真源锚点表（**参考资料，非政策**） |
+| `docs/DRIFT/_cross/decisions.md`（68 行） | 问题 1 **「直接把 Flyway 丢掉」**（2026-10-21 拍板）· 问题 2 `admin-rpc` 直连不转发（Go 侧零出向 gRPC ⇒ RAG 现状即一致）· 问题 3 `RpcServerInterceptorFactory` 显式 `@Import` 不拆包 |
+| `docs/DRIFT/_cross/truth-source-switches.md`（24 行） | 真源三次切换 ⇒ ⇒ **11 处回归全部是「无出处 idiomatization」** ⇒ ⇒ 教训「多一跳 = 多一整层可无声漂移处」 |
+| `docs/DRIFT/_cross/fix-round-2026-10-23.md`（42 行）· `fix-round-2026-10-28.md`（78 行） | 后者 §二 **修订了 4 处方向相反的评级错误**（⇒ ⇒ 台账评级也会「方向相反」地错 ⇒ 必须回源核）；§四 = 阶段一结论重算 |
+| `docs/DRIFT/_cross/open-items.md`（133 行） | `DRIFT-INFRA-001` **Flyway 账本撞号**（跨 3 个模块）⇒ ⇒ 根因 = `flyway_schema_history` 是 **schema 级**账本 ⇒ 修法 = 每模块独立账本表名 |
+| `docs/DRIFT/_cross/human-only-status.md`（44 行）· `user-qa-verbatim.md`（15 行）· `status-snapshot-2026-10-22.md`（65 行）· `new-domains-2026-10-23.md`（126 行）· `message-domain-wide.md`（457 行） | 用户问答**原话存档**（防被「优化」掉）· HUMAN_ONLY.MD 现存 **4 份** · 四域 proto 层首轮对照的**复制忠实度实测** |
+
+**`docs/Intentional_Deviations/`**
+
+| 文件 | 关键结论 |
+|---|---|
+| `docs/Intentional_Deviations/global/common-tails.md`（683 行） | 🔴 **本档是「哪些看着像 bug 其实是有意决策」的唯一权威** ⇒ ⇒ `SD-2026-10-25-01` **`MaxConns` 闸门作用域（RAG 全局 vs Go per-route）= 已签字**（⇒ 不是待办，**不得再落码**）· `SD-2026-10-25-02` **已撤销**（「框架限制」不再成立，**从未被签字也不需再签**）· `SD-2026-10-25-04` 主动探测写带来的 wire 偏离（客户端先收 N 行 `103 Early Hints`）**已签字 2026-10-25**（⇒ **当前实现不因本记录返工**）· `CAND-14` HTTP 状态行缺 reason phrase = 🏷 **待签字候选** · `CAND-15`「方法不匹配」多带一个 `Traceparent` = 🏷 **待签字候选** |
+| `docs/Intentional_Deviations/global/cross-domain.md`（70 行） | `SD-2026-10-25-03` **已撤销（重复登记）** ⇒ 真实记录处 = message 域的 `SD-2026-10-23-06` |
+| `docs/Intentional_Deviations/global/cycle-deps.md` | **0 行（空文件）** ⇒ ⇒ 「循环依赖」档实际无签字项 |
+
+**`docs/PhaseGoal/`**
+
+| 文件 | 关键结论 |
+|---|---|
+| `docs/PhaseGoal/g4.md` | G4 lane 矩阵（**机器生成** ⇒ `PhaseGoal-judge.md` 才是权威源，矛盾以 judge 为准并**登记**、不直接改生成物）⇒ 组件 **2 个（✅1 · 🟡0 · 🔴1）** ⇒ **lane 判定 🔴** ⇒ ⚠️ 该文件写着「27 条编号未修」+「`DRIFT-COMMON-005` 是唯一硬阻塞」⇒ ⇒ **两处已陈旧**（现 24 条 / 硬阻塞已消失） |
+| `docs/PhaseGoal-judge.md` 的 `service/common` 行（`:217`） | 🔴 **R2 / E3** ⇒ 理由挂「**27 条编号未修** …… `DRIFT-COMMON-005` 是唯一硬阻塞（破坏性变更，需用户裁定）」⇒ ⇒ 🔴 **判据口径问题**：§1.1 的 **R3 ⑥ 只排除「已签字偏离 / 跨组件残留 / 取证缺口」，没有给「C 类阶段二暂缓项」留出口** ⇒ ⇒ **不是「逐条修」问题** ⇒ ⇒ **R3 ⑥ 一变 ⇒ 4 条 lane 矩阵全部要重算**（顺序有依赖） |
+| `docs/PhasedGoal.md` §二 **P0（九条）** | 逐条读 ⇒ ⇒ **P0 #3 =「关键数据能够正确持久化，事务边界合理，不存在已确认的严重数据丢失、**重复处理**或状态错误问题」** ⇒ ⇒ **`DRIFT-SF-001`（墙钟回拨 ⇒ 重复 ID）命中的就是这一条** ⇒ ⇒ 另：P0 允许「**明确、有限且不影响核心正确性的已知例外**」⇒ ⇒ 与 R3 ⑥ 缺出口是同一件事的两面 |
+| `docs/twoStage.md` §4 / §5.3 / §5.4 / §10 | §4 = 阶段 0 事实基线（**不允许用推测填补证据缺口**）· §5.3 = 差异与暂缓项 **11 字段**（唯一编号 / Go 出处 / 原始行为 / 阶段 1 当前行为 / 具体差异 / 暂缓理由 / 四类影响 / 是否阻断 / 阶段 2 恢复方案 / 阶段 2 测试场景与通过标准 / 当前证据及剩余缺口）· §5.4 = 改造记录 **9 字段** · §10 = **P0~P3（严重程度）× A/B/C/D（阶段归属）两轴不可互替**（**A** = 阶段 1 准入阻断项 / **B** = 竞争力补强项 / **C** = 阶段 2 最终工程建设项 / **D** = 可不实现）⇒ ⇒ 「25 条里绝大多数是 OBSERVABLE」⇒ ⇒ 它们天然落在 **C 类** ⇒ ⇒ **C 类必须有出口**（否则 R3 ⑥ 永远排除不掉它们） |
+
+**`docs/Pitfalls/`**
+
+| 文件 | 关键结论 |
+|---|---|
+| `docs/Pitfalls/common/audit.md`（128 行） | 坑 1 = 「44 个文件里，**26 个从来没有任何 Go 侧的东西可对照**」⇒ ⇒ 「查不出来」≠「没有差异」· 坑 3 = 「**结论里的「已修」也会过期**，且**不会被任何东西提示**」 |
+| `docs/Pitfalls/common/deadline.md`（148 行） | 坑 1 = 「机制在共享库里写好了，**消费方没接线** ⇒ 整条链静默失效」⇒ ⇒ 坑 4 = 「**同一个组件里的两个 deadline 载体，时基不同**」⇒ ⇒ **正是我 `1f62a24` 修的那条的同类** ⇒ ⇒ 纪律：同一组件里出现两个同类载体**本身就该触发怀疑** |
+| `docs/Pitfalls/common/observability.md`（184 行） | 坑 1 = 「同一份代码，两个环境，两种可见性」（默认值随宿主而变）· 坑 2 = 「**测试类名与 javadoc 都在说「已验证机制」，实际只验证了「Bean 在」**」· 坑 3 = 「修「框架不接管」时，**只改了一半**」 |
+| `docs/Pitfalls/common/http.md`（36 行）· `protection.md`（73 行） | 请求体判据与保护层的踩坑档（`protection.md` 的「为什么这条特别容易误判」= 保护层是**框架内建**行为 ⇒ 抄一半最容易出错） |
+| `docs/Pitfalls/global/common-tails.md`（484 行） | 🔴 **PIT-GLOBAL-001「查 Go 出处时，只在项目树里 grep **一定会落空**」** ⇒ ⇒ 真源分 **L1 项目层 `Sea-RideTheWind_golang/service/**` / L2 框架层 `$GOMODCACHE/github.com/zeromicro/go-zero@v1.10.2`** ⇒ ⇒ **判定口诀**：「请求保护层 / body 解析 / RPC 中间件」⇒ 先去 L2；「业务逻辑 / 错误码 / 表结构 / proto」⇒ L1 ⇒ ⇒ ⚠️ **版本必须从 `go.mod` 读**（缓存里 v1.10.0/v1.10.2/v1.10.3 并存 ⇒ **读错版本同样是漂移**）⇒ ⇒ **这正是我上一轮 6 命名空间审计脚本的依据**；另 **PIT-GLOBAL-002「档位错置：代码自称「有意」，但没人签字」** |
+| `docs/Pitfalls/global/cross-domain.md`（2499 行） | **PIT-GLOBAL-005「全量构建偶发红 ≠ 你的改动坏了」** ⇒ ⇒ **三步判定序列**（含**基线对照**，且 ⚠️ **别用 `git stash`**）· **PIT-GLOBAL-006「Go 出处要分两层」** · **PIT-GLOBAL-011「裸 `ServerCallHandler` 造的「慢服务」从不执行 ⇒ 测试绿但**空转**」** |
+| `docs/Pitfalls/global/cycle-deps.md`（105 行） | **PIT-GLOBAL-003「订正一句假断言，必须同时补上它的运行时证据」** ⇒ **三件套，缺一不可**，且 **变异是第 ③ 步、不是可选项** · PIT-GLOBAL-004「守恒扫描会命中它自己（自指陷阱）」· PIT-GLOBAL-010「跨域引用扫描会命中 **JDK 同名类** ⇒ 必须有白名单」 |
+| `docs/Pitfalls/_cross/domain-common-lanes.md`（239 行） | 🔴 **PIT-LANE-01「lane 的基点早于「脚手架落地那次提交」⇒ 回并撞 `add/add`」** ⇒ ⇒ **与候选任务① 直接相关**（见 ③）· **PIT-LANE-02「改一处受益全域」≠「可以并行改」** |
+| `docs/Pitfalls/_cross/testing-pitfalls.md`（142 行） | 「**绿测试可能是「错误答案的守卫」，比没有测试更危险**」· 「**陈旧 surefire 报告会静默抬高测试计数 ⇒ 「回归了多少条」这个数字本身可能是假的**」⇒ ⇒ **必须带 `clean` + 逐 `testsuite` 求和** · 「守门脚本的**排除清单是架构假设** ⇒ 架构一变就**假阳性**」（与「假绿」互为镜像） |
+| `docs/Pitfalls/_cross/flyway-ledger-collision.md`（123 行）· `fix-round-lessons.md`（127 行）· `framework-mechanism-evidence.md`（27 行） | Flyway 账本撞号的**已被实测证伪的绕法**（别再试第二次）· 历轮修复的元教训 · 框架机制必须验实际生效 |
+| `docs/Pitfalls/_cross/message-domain-wide.md` · `open-items.md` · `signed-deviations.md` | **均为 0 行（空文件）** ⇒ ⇒ 不得把它们当「读过了」 |
+
+### ③ 待批准项（**本层读完四档后，对候选任务界定有 3 处订正**）
+
+> ⚠️ **按 `docs/Worktree.md` §二·五「若读完四档后发现候选任务界定与共享层实情不符 ⇒ 在回执里写出来，不要自行改任务范围」** ⇒ 以下**不改任务范围**，只报告实测差异，请 Jason / 调度员裁定。
+
+**🔴 订正 1：候选任务① 的落点 `tools/g3-anchor-check/` **不在 G4 树、也不在主干** ⇒ G4 独立做会撞 `add/add`**
+
+| 项 | 实测 |
+|---|---|
+| 该目录在哪些树里存在 | `do-my-own-gh` **无** · `align/g4-service-common` **无** · **只在** `align/g3-article-comment-favorite-hot`（`check-anchors.py` + `mutate-anchors.sh` + `README.md`） |
+| 谁引用它 | 四棵树里**只有** `align/g3-...:docs/DRIFT/article/vs-common.md` 引用 ⇒ 其余三棵树与主干**零引用** |
+| 后果 | G4 要改它 ⇒ 必须**先把 G3 的目录复制进 G4 树** ⇒ 合并时 G3 分支与 G4 分支**同名文件各自新增** ⇒ ⇒ **撞 `add/add`** —— 这正是 `docs/Pitfalls/_cross/domain-common-lanes.md` **PIT-LANE-01** 记的坑 |
+| ⇒ 建议 | **① 改派 G3**（它是该目录的属主，改完 G4 不用碰）；**或**由**合并收口执行者在合并树里改**（合并后该目录已在主干上，只需 2 行 `PINNED`） |
+
+**🔴 订正 2：`tools/**` 的写权归属，调度员文本与机器守门口径不一致**
+
+| 口径来源 | 结论 |
+|---|---|
+| `docs/DRIFT/_cross/cross-domain-coupling.md` §三 **C1** | 只写了 `service/common/**` ＋ `service/users/users-common/**` ⇒ **唯一归 G4** ⇒ ⇒ **没提 `tools/**`** |
+| `docs/CLOSEOUT-2026-10-29.md` §8.2 | 「**`tools/` 写权归 G4** ⇒ 脚本形态由 G4 落码」 |
+| `tools/difftest/check-wave-lane-ownership.py`（**机器守门 = 唯一可核口径**） | **没有任何 lane 的白名单含 `tools/**`**（G4 白名单实测只有 6 条：`service/common/pom.xml` · `service/common/src/**` · `service/users/users-common/pom.xml` · `service/users/users-common/src/**` · `docs/DRIFT/global/vs-common.md` · `docs/DRIFT/common/**`）⇒ ⇒ `tools/**`（除 SHARED 里的 `tools/difftest/README.md`）**无 lane 拥有** |
+| ⇒ 判定 | 本层按「**机器守门 = 唯一可核口径**」⇒ **保守处理** ⇒ ⇒ ① 与 ② **都需要收口执行者背书**，不自行认领 `tools/**` 的写权 |
+
+**🔴 订正 3：候选任务②（搬进 `tools/difftest/`）**G4 单独做不了** ⇒ 必须与基线同改**
+
+- 搬运 ⇒ 守门清单 **27 → 28** ⇒ **必须同改 `docs/PhaseGoal-judge.md` §6.3**（`:316` + `:338` + §6.3 表）。
+- 该文件**不在任何 lane 白名单** ⇒ **无人拥有** ⇒ ⇒ **G4 单独改 ⇒ 立刻制造 B14 那条计数漂移**（`check-phasegoal-consistency.py` EXIT=1）。
+- ⇒ 建议：**② 整体留给合并收口执行者**（它本来就是收口那一步的动作，见 `docs/CLOSEOUT-2026-10-29.md` §六·3）。
+
+**✅ 已核实为「真」的候选任务① 技术前提（本层实测，非转述）**
+
+| 事实 | 实测 |
+|---|---|
+| `PINNED` 确实缺这两行 | `tools/g3-anchor-check/check-anchors.py:57-69` 的 `PINNED` 共 **11 条**（go-zero v1.10.2 / go-queue / go-redis v9.20.0 / grpc v1.81.1 / gorm v1.31.1 / otel ×3 / golang-jwt v4.5.2 / pgx v5.10.0 / prometheus v1.23.2）⇒ **无** `gorm.io/driver/postgres`、**无** `github.com/lovoo/goka` |
+| 真源 pin 属实 | `go.mod:11` = `github.com/lovoo/goka v1.1.16` · `go.mod:27` = `gorm.io/driver/postgres v1.6.0` · `go.mod:28` = `gorm.io/gorm v1.31.1`（⇒ ⇒ 那 16 条 `VERSION_MISMATCH`（引用写 `gorm@v1.31.2`）**确是真错**） |
+| 模块缓存里两个模块都在 | `gorm.io/driver/postgres@v1.6.0/postgres.go` = **305 行**（被引 `:245-256` **合法**）· `github.com/lovoo/goka@v1.1.16/` 四个文件 = **46 / 634 / 403 / 66 行**（被引区间**全部合法**）⇒ ⇒ **两簇共 29 条假阳性的根因成立** |
+| 共享层出处面零命中 | 与调度员 §8.7 一致 ⇒ 与我上一轮实测（**192 组**可静态定位 / **0** 落空越界 / **0** 内容指错）一致 ⇒ ⇒ **G4 这条线确实没有修缺陷的活** |
+
+**④ 等批准 ⇒ 批准后才开工**
+
+本层**未写任何代码、未改任何台账**（**除本回执小节**）；**未新开子会话**；**未接队列新消息**；**未扩范围**。
+
+**⑤ Jason 批准记录**
+
+> `<批准人> · <批准时间> · <批准范围>` —— **留空，由调度员代填**。回执人**不得自批**。
