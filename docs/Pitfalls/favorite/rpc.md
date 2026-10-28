@@ -1926,6 +1926,18 @@ Binary file service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorit
    - ⚠️ **自测判据**：`git diff --numstat <A> <B> -- <文件>` 输出 `-  -` ⇒ ⇒ git 已把它当二进制 ⇒ ⇒ 那个文件在合并里**不可信**。
 4. 📌 **行号订正**：上面表里「第 136 / 183 行」**是错的** ⇒ ⇒ 实测（改前 · HEAD `cf55cff`）NUL 在 **`:138` / `:185`**（各 2 个）⇒ ⇒ **行号是快照，不是锚点**（同族：共享层文件被后续提交挪长 ⇒ 引用集体过期）。
 5. ✅ **G3 树的实际状态（供下一棒对账）**：我树 `git merge`（真合并，merge commit `a9c3e38`）**没有**揉坏这个文件 ⇒ blob 从 `31a5d5d` 到 HEAD 恒为 `8648028bbc47`（10296 B），且 `import`/`bindPg`/`.withPassword` 三行**全在** ⇒ ⇒ **「揉坏」发生在 `merge-tree`【预演】上，不发生在真合并上**（因为合并时两边该文件无差异 ⇒ 不需三方内容合并 ⇒ 直接取己方）⇒ ⇒ **但这不等于隐患不存在**：一旦对方真的改了这个文件 ⇒ 真合并同样会走二进制路径。
+6. ⚠️ **改完之后，`git diff --numstat` 仍会显示 `-  -` —— 这是【易误读点】，别据此以为没修好**：
+   - git 的 `buffer_is_binary()` 是**逐 blob** 判定的 ⇒ ⇒ **diff 的任一侧**是二进制 ⇒ ⇒ **整个 diff 按二进制处理** ⇒ ⇒ 「**跨越这一次修改**」的那次 diff（**旧 blob 仍含 NUL** ⇒ 二进制）仍输出 `-  -` ＋「Binary files differ」；
+   - ⇒ ⇒ **正确的自测方式 = 拿【两个都是新 blob】的版本比**（2026-10-28 实测）：
+     ```bash
+     F=service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteDdlParityTest.java
+     git cat-file blob $(git rev-parse HEAD:$F) > /tmp/newblob.java
+     python3 -c "b=open('/tmp/newblob.java','rb').read(); open('/tmp/tmpblob.java','wb').write(b.replace(b'FAVORITE_DDL_PARITY',b'FAVORITE_DDL_PARITY2',1))"
+     TB=$(git hash-object -w /tmp/tmpblob.java)
+     git diff --numstat $(git rev-parse HEAD:$F) $TB   # ⇒ 期望输出「1	1」（文本）
+     ```
+     实测：**`1	1`** ✅（对照：旧 blob vs 新 blob ⇒ `-	-`）⇒ ⇒ **新 blob 已是文本** ⇒ ⇒ **从下一次改动起**，该文件的三方合并才能正确进行 ⇒ ⇒ **隐患已消除**；
+   - ⇒ ⇒ 另一条更快的旁证：`file <blob>` ⇒ 旧 blob = `data` · 新 blob = `Unicode text, UTF-8 text` ✅。
 
 ### 适用范围
 
