@@ -129,6 +129,13 @@ class FavoriteApiRealTomcatGateTest {
     private static final String FOLDER_CREATE = "/favorite/v1/folder/create";
     private static final String ITEM_LIST = "/favorite/v1/item/list";
 
+    /**
+     * Go 侧 {@code GetFavoriteFoldersReq} 是<b>空结构体</b>
+     * （{@code service/favorite/api/internal/types/types.go:59}）⇒ ⇒ 无必填字段干扰
+     * ⇒ ⇒ 且本端点<b>不读 query 参数</b> ⇒ ⇒ 用它当「段数闸门覆盖面」的判别点。
+     */
+    private static final String FOLDER_LIST = "/favorite/v1/folder/list";
+
     /** favorite-api 的默认 AccessSecret（application.yml:94 的默认值，测试未覆盖它）。 */
     private static final String ACCESS_SECRET = "ae0536f9-6450-4606-8e13-5a19ed505da0";
 
@@ -357,6 +364,82 @@ class FavoriteApiRealTomcatGateTest {
         assertFalse(isTomcatHtmlErrorPage(resp),
                 "20 KiB 的请求行必须放行（Go 侧上限是 1028KB）；实际 status=" + resp.statusCode());
         assertNotTomcat400(resp);
+    }
+
+    // ══════════════════ Go 的 query 段数闸门（net/url defaultMaxParams = 10000）══════════
+
+    @Test
+    @DisplayName("🔴 Go 的 net/url 段数上限：恰好 10000 段 ⇒ 放行（不是 5003）")
+    void exactly10000QuerySegmentsArePassedThrough() throws Exception {
+        // 10000 段 = 1 个非空 + 9999 个空 ⇒ 非空值数 = 1 ⇒ 应用层那道 2048 判据也不触发
+        // ⇒ ⇒ 唯一可能拒它的就是「段数」判据 ⇒ 放行 ⇒ 证明阈值不是 ≤ 9999。
+        HttpResponse<String> resp = getWithToken(ITEM_LIST + "?" + oneNonEmptyPlusEmpty(9999));
+
+        assertEquals(200, resp.statusCode(),
+                "Go 侧 `params <= defaultMaxParams`（net/url/url.go:1004）⇒ 10000 段必须放行；"
+                        + "实际 body=[" + resp.body() + "]");
+        assertFalse(resp.body() != null && resp.body().contains("\"code\":5003"),
+                "恰好 10000 段必须放行（5003 是「解析失败」那一格）；实际 body=[" + resp.body() + "]");
+    }
+
+    @Test
+    @DisplayName("🔴 Go 的 net/url 段数上限：第 10001 段 ⇒ 200 + 5003（与 Go 逐字同形）")
+    void querySegmentCountOver10000IsRejectedLikeGo() throws Exception {
+        // ⚠️ 刻意用 **/folder/list**（Go 侧 `GetFavoriteFoldersReq` 是**空结构体**
+        //    ⇒ service/favorite/api/internal/types/types.go:59 ⇒ 无必填字段干扰）
+        //    ⇒ 且本端点**根本不读 query 参数** ⇒ ⇒ 修前它对 10001 段**完全放行**
+        //    ⇒ ⇒ 这条断言在修前必红、在修后必绿 ⇒ 它真的在守那道段数闸门。
+        HttpResponse<String> resp = getWithToken(FOLDER_LIST + "?" + oneNonEmptyPlusEmpty(10000));
+
+        assertEquals(200, resp.statusCode(),
+                "Go 侧解析失败走 httpx.OkJsonCtx ⇒ HTTP 恒 200（api 层无 5xx 出口）；实际 body=["
+                        + resp.body() + "] ct=" + resp.headers().firstValue("content-type").orElse("-"));
+        assertTrue(resp.body() != null && resp.body().contains("\"code\":5003"),
+                "第 10001 段必须触发 Go 的 net/url 段数上限 ⇒ 5003；实际 body=[" + resp.body() + "]");
+        assertFalse(isTomcatHtmlErrorPage(resp),
+                "不得出现 Tomcat 的 HTML 错误页（Go 侧是 200 + 业务信封）；实际 status="
+                        + resp.statusCode() + " body=[" + resp.body() + "]");
+    }
+
+    @Test
+    @DisplayName("🔴 段数判据与「端点是否读 query 参数」无关（/item/list 同样在第 10001 段拒）")
+    void querySegmentLimitIsUniformAcrossEndpoints() throws Exception {
+        // /item/list **会**读 query 参数（FavoriteApiSupport#goFormFirstValue）
+        // ⇒ ⇒ 若判据只挂在「读参数的端点」上，这条会放行 ⇒ ⇒ ⇒ 必须与 /folder/list 同结论。
+        HttpResponse<String> resp = getWithToken(ITEM_LIST + "?" + oneNonEmptyPlusEmpty(10000));
+
+        assertEquals(200, resp.statusCode(),
+                "Go 侧 7/7 handler 的第一行都是 httpx.Parse ⇒ 段数上限对**所有**端点一致；实际 body=["
+                        + resp.body() + "]");
+        assertTrue(resp.body() != null && resp.body().contains("\"code\":5003"),
+                "/item/list 也必须在第 10001 段拒（5003）；实际 body=[" + resp.body() + "]");
+    }
+
+    @Test
+    @DisplayName("🔴 401 优先于段数判据（Go 的 httpx.Parse 在 handler 内部 ⇒ 解析在鉴权之后）")
+    void authStillWinsOverQuerySegmentLimit() throws Exception {
+        // 刻意**不带** Authorization ⇒ Go 侧先撞 JWT 鉴权 ⇒ 401（不是 5003）
+        HttpResponse<String> resp = get(FOLDER_LIST + "?" + oneNonEmptyPlusEmpty(10000));
+
+        assertEquals(401, resp.statusCode(),
+                "Go 的 httpx.Parse 在 handler 内部 ⇒ 解析在鉴权之后 ⇒ 无 token 时必须是 401；"
+                        + "实际 body=[" + resp.body() + "]");
+        assertFalse(resp.body() != null && resp.body().contains("\"code\":5003"),
+                "鉴权必须先于段数判据短路（否则就制造出「先解析后鉴权」的偏离）；实际 body=["
+                        + resp.body() + "]");
+    }
+
+    @Test
+    @DisplayName("🔴 Go 的 net/url 分号规则：query 里出现 ';' ⇒ 200 + 5003")
+    void semicolonInQueryIsRejectedLikeGo() throws Exception {
+        // Go net/url/url.go:1026-1029：段里含 ';' ⇒ err = "invalid semicolon separator in query"
+        // ⇒ ⇒ ParseQuery 返回 error ⇒ r.ParseForm 传播 ⇒ httpx.Parse 失败 ⇒ 200 + 5003
+        HttpResponse<String> resp = getWithToken(FOLDER_LIST + "?folderId=1;a=2");
+
+        assertEquals(200, resp.statusCode(),
+                "Go 侧解析失败走 httpx.OkJsonCtx ⇒ HTTP 恒 200；实际 body=[" + resp.body() + "]");
+        assertTrue(resp.body() != null && resp.body().contains("\"code\":5003"),
+                "query 里出现 ';' 必须触发 Go 的分号规则 ⇒ 5003；实际 body=[" + resp.body() + "]");
     }
 
     // ══════════════════ 辅助 ══════════════════
