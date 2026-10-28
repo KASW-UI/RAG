@@ -27,7 +27,7 @@
 | 编号 | 摘要 | 落点（**读消费点后判定**） | 状态（**2026-10-27 核对**） | 证据 | 域台账 |
 |---|---|---|---|---|---|
 | `DRIFT-MSG-V-026` | 熔断 / 降载链必须**真挂到** gRPC server | **拆两笔**：① **装配面 = 域侧**（`TaskRpcApplication` 是域内文件）② **链的可断言性 = 共享层**（`GoStyleRpcProtectionChain`） | 🟡 **部分修**（旧快照「守门已立」**掩盖了一个缺口**）—— ① `@Import GoStyleProtectionConfiguration` **属实**：`TaskRpcApplication.java:113` ＋ `@Bean GrpcServerConfigurer` `:130-139`（**唯一把 interceptor 挂上 server 的入口**）② 链上**确有** breaker：`GoStyleRpcProtectionChain.java:72` → `GoStyleRpcBreakerInterceptor.java:140-154` ③ 🔴 **shedding 未被守门证明** —— `TaskProtectionChainWiringTest.java:80-81` **主动 `props.getCpuShedding().setEnabled(false)`** ⇒ 该测试**只证明 breaker**，而 DisplayName 写的是「breaker/shedding」 | [`rpc.md`](rpc.md) |
-| `TaskRpcFatJarArtifactGateIT`（4 条） | 产物层守门 | 域侧构建 | ✅ **已立**（本轮只读源码，未跑构建 ⇒ 「已立」而非「已验证」） | `task-rpc/pom.xml:283-286`（`spring-boot-maven-plugin`，不写 `<mainClass>`⇒自动探测）+ `:207-211`（`grpc-inprocess` **scope=compile**，非 test）+ `:336-347`（surefire 第二 execution 绑 `verify`）；测试 `TaskRpcFatJarArtifactGateIT.java:74-143` | [`rpc.md`](rpc.md) |
+| `TaskRpcFatJarArtifactGateTest`（4 条） | 产物层守门 | 域侧构建 | ✅ **已立**（本轮只读源码，未跑构建 ⇒ 「已立」而非「已验证」） | `task-rpc/pom.xml:283-286`（`spring-boot-maven-plugin`，不写 `<mainClass>`⇒自动探测）+ `:207-211`（`grpc-inprocess` **scope=compile**，非 test）+ `:336-347`（surefire 第二 execution 绑 `verify`）；测试 `TaskRpcFatJarArtifactGateTest.java:74-143` | [`rpc.md`](rpc.md) |
 | `TaskRpcSlowThresholdGateTest`（2 条） | slow 轴守门 | `service/common`（配置读取） | ✅ **已立**（真 server + 真链 + 真 OTel SDK + 收集型 exporter） | `TaskRpcSlowThresholdGateTest.java:267-275`（取容器里的 `rpcInterceptorConfigurer` + `ServerBuilder.forPort(0)` 真起）+ `:305`/`:312`（判别式断言）· 消费点 `RpcServerInterceptorFactory.java:77-79`；⚠️ 它同样关掉了降载（`:148`） | [`rpc.md`](rpc.md) |
 | ✅ `DRIFT-HOTAPI-030` | Tomcat 参数个数口径 | `service/common`（X-6） | ✅ **已落地**；本域 `mode` **阶段 2 已由 `raw` 改为 `"off"`** ⇒ 与「Go 侧本域根本走不到 form 解析」**同向** ✅（守门 `TaskApiFormLimitReachabilityTest` 5/5 绿 + 变异 4 红）<br>⚠️ **改用 `off` 的判据不是「错误形状」而是「语义可达性」** ⇒ 原判据（按「Go 有没有注册 `SetErrorHandler`」决定 raw/envelope）**只回答「拒绝成什么形状」、没回答「该不该拒绝」** ⇒ 该缺口已作为 **FB-02** 派给共享层；🔴 **`off` 在 YAML 里必须加引号**（YAML 1.1 → 布尔 false ⇒ 上下文起不来）⇒ **FB-05** | Go 侧证据：`service/task/api/**` 内 `httpx.Parse` / `ParseForm` / `GetFormValues` **命中数 = 0**（本轮实测）⇒ `gettaskhandler.go:19` 裸 `json.NewDecoder(r.Body)`；路由只有一条（`routes.go:16-25`：`POST /task/get`）⇒ Go 侧 `r.Form` 从不被求值 ⇒ `go-zero@v1.10.2/rest/httpx/util.go:15`（`maxFormParamCount = 2048`）与 `util.go:48-53` 的计数**均不可达** | [`api.md`](api.md) |
 
@@ -549,7 +549,7 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 
 
 **⑧ 🟢 口径修正（第十七轮收口实测）：`mvn test` 与 `mvn verify` **不是同一个口径**
-- 我域 9 模块里**只有 `task-rpc` 有 `*IT` 类**（`TaskRpcFatJarArtifactGateIT`）⇒ ⇒ 它**只在 `verify` 阶段跑**（task-rpc pom 里第二个 surefire execution，绑 `verify`）⇒ ⇒ **第十六轮那个 995 是 `mvn test` 口径** ⇒ ⇒ 同一 9 模块的 **`test` + `verify` 口径 = 995 + 5 = 1000**。
+- 我域 9 模块里**只有 `task-rpc` 有 `*IT` 类**（`TaskRpcFatJarArtifactGateTest`）⇒ ⇒ 它**只在 `verify` 阶段跑**（task-rpc pom 里第二个 surefire execution，绑 `verify`）⇒ ⇒ **第十六轮那个 995 是 `mvn test` 口径** ⇒ ⇒ 同一 9 模块的 **`test` + `verify` 口径 = 995 + 5 = 1000**。
 - **实测**：`mvn -o -B -DargLine=-Xmx2g -am -pl service/task/task-rpc verify` ⇒ **EXIT=0 · BUILD SUCCESS** ⇒ task-rpc = **121（`test` 阶段）+ 5（`verify` 阶段）= 126** / 0f 0e 0s。
 - ⇒ ⇒ **台账里的数字继续按 `mvn test` 口径写**（`check-ledger-selfcheck.py` 第 3 层读 `target/surefire-reports` ⇒ 那就是 `test` 阶段口径）⇒ ⇒ **不要把 126 写进 `rpc.md:29` 的那一格** ⇒ ⇒ 但那一格「**4 条产物层**」的半句要订正成 **5 条**（本轮 +1）。
 
@@ -558,7 +558,7 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 
 **⑩ ✅ 新守门的变异验证（task IT 那条）**
 - like 那条用「去掉 `-am` ＋ 删旧 fat jar 强制重建」变异 ⇒ **3 条恰红 1 条**（红在 `:147`）。
-- **task 这条不能走同一条路**（见 ⑨ 的编译失败）⇒ ⇒ 改用**产物 zip 手术**：把 fat jar 里 `BOOT-INF/lib/common-0.0.1-SNAPSHOT.jar` 换成 `~/.m2` 那份陈旧包 ⇒ ⇒ 实测**两边 sha256 逐字节相同**（`45f41836d945347e5bed288e9573c06d`）⇒ ⇒ 它的 `imports` 只有 **2 行**、排序桥 **0 行** ⇒ ⇒ 再**单独**跑那条 IT（`mvn surefire:test -Dtest='TaskRpcFatJarArtifactGateIT'` —— **不跑生命周期** ⇒ ⇒ 手术结果不会被 `package` 覆盖）⇒ ⇒ **5 条里恰红 1 条**，红在**目标断言** `fatJarMustCarrySharedLayerOrderingBridge:205`，失败消息 = 「内嵌的 `BOOT-INF/lib/common-0.0.1-SNAPSHOT.jar` 的 `AutoConfiguration.imports` 里【没有】共享层排序桥」⇒ ⇒ **恰好 1 条红**、另 4 条仍绿 ⇒ ⇒ **非假绿** ⇒ ⇒ 还原（换回 reactor 的 jar，排序桥行数回到 1）后复跑 ⇒ **5 条全绿**。
+- **task 这条不能走同一条路**（见 ⑨ 的编译失败）⇒ ⇒ 改用**产物 zip 手术**：把 fat jar 里 `BOOT-INF/lib/common-0.0.1-SNAPSHOT.jar` 换成 `~/.m2` 那份陈旧包 ⇒ ⇒ 实测**两边 sha256 逐字节相同**（`45f41836d945347e5bed288e9573c06d`）⇒ ⇒ 它的 `imports` 只有 **2 行**、排序桥 **0 行** ⇒ ⇒ 再**单独**跑那条 IT（`mvn surefire:test -Dtest='TaskRpcFatJarArtifactGateTest'` —— **不跑生命周期** ⇒ ⇒ 手术结果不会被 `package` 覆盖）⇒ ⇒ **5 条里恰红 1 条**，红在**目标断言** `fatJarMustCarrySharedLayerOrderingBridge:205`，失败消息 = 「内嵌的 `BOOT-INF/lib/common-0.0.1-SNAPSHOT.jar` 的 `AutoConfiguration.imports` 里【没有】共享层排序桥」⇒ ⇒ **恰好 1 条红**、另 4 条仍绿 ⇒ ⇒ **非假绿** ⇒ ⇒ 还原（换回 reactor 的 jar，排序桥行数回到 1）后复跑 ⇒ **5 条全绿**。
 
 **⑪ 🔴 残留登记（本轮两次实测红 ⇒ 都判为**负载敏感型时序 flake**，但必须留痕）**
 - **① 本域 `TaskRedisDisconnectFastRejectGateTest` ③ B 组（对照组）**：一次全量跑里实测红 —— `Expecting actual: 0L to be greater than or equal to: 2000L` ⇒ ⇒ **隔离复跑 3 次全绿**（A=3/1/1ms · B=3023/3005/3042ms）⇒ ⇒ 判为**瞬态**。⚠️ 机制（留给下轮）：B 组依赖「客户端**还没**处理到 FIN」这个**竞态窗口** ⇒ FIN 若先被处理 ⇒ 连接是「已关闭」而不是「断连中」⇒ ⇒ 命令**立刻失败**（0ms）而不是排队到 3s 命令超时 ⇒ ⇒ **该对照组断言不是确定性的** ⇒ ⇒ **本轮只登记、不改断言**（改断言让它绿 = 掩盖现象）。
@@ -844,8 +844,8 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 - **⇒⇒⇒ 通用结论**：**「域内桥一删 ⇒ 单模块构建的 fat jar 起不来」** ⇒ ⇒ ⇒ **凡有进程级 fat jar 守门的域，收编都会红**（G3 的 comment-rpc / article-rpc / favorite-rpc 都带 `*RuntimeBootGateTest`）⇒ ⇒ ⇒ **已回信点名**。
 
 **③ ⚠️ 本域的产物层守门有一个「解包但不起进程 ⇒ 看不见排序边」的缺口 ⇒ 本轮已补**
-- 本域 `TaskRpcFatJarArtifactGateIT` **只解包**（看 manifest 与 `BOOT-INF/lib` 有没有某个 artifact）**、不起进程** ⇒ ⇒ **它抓不到上面那个缺陷**（症状要到 like 域的进程级守门才暴露）⇒ ⇒ ⇒ **所以这条只能本域自己守：别域的进程级守门兜不住本域的产物面**
-- ⇒ ⇒ **本轮已补一条同款断言** `TaskRpcFatJarArtifactGateIT.fatJarMustCarrySharedLayerOrderingBridge` ⇒ ⇒ 断言**内嵌的 common jar 的 `AutoConfiguration.imports` 里含共享层排序桥** ⇒ ⇒ **缺口已闭** ⇒ ⇒ **期望值用独立字面量**（共享层那个全限定名，**不从被测代码取常量**）⇒ ⇒ 共享层改包名时如实转红。
+- 本域 `TaskRpcFatJarArtifactGateTest` **只解包**（看 manifest 与 `BOOT-INF/lib` 有没有某个 artifact）**、不起进程** ⇒ ⇒ **它抓不到上面那个缺陷**（症状要到 like 域的进程级守门才暴露）⇒ ⇒ ⇒ **所以这条只能本域自己守：别域的进程级守门兜不住本域的产物面**
+- ⇒ ⇒ **本轮已补一条同款断言** `TaskRpcFatJarArtifactGateTest.fatJarMustCarrySharedLayerOrderingBridge` ⇒ ⇒ 断言**内嵌的 common jar 的 `AutoConfiguration.imports` 里含共享层排序桥** ⇒ ⇒ **缺口已闭** ⇒ ⇒ **期望值用独立字面量**（共享层那个全限定名，**不从被测代码取常量**）⇒ ⇒ 共享层改包名时如实转红。
 - ⇒ ⇒ **同理 like 域也加了** `LikeRpcArtifactClasspathGateTest.fatJarCarriesSharedLayerOrderingBridge` ⇒ ⇒ **两条守门形态不同：like 那条自己构建 fat jar（连带验证 `-am` 修法），task 这条只解包（补的是「看不见排序边」的缺口）**
 
 **④ 修法与验证（like 域做，因为只有它有进程级守门能证）**
@@ -1278,3 +1278,23 @@ mvn -o -B -DargLine=-Xmx2g -am -pl service/common,service/message/message-api,se
 
 **⑧ ℹ️ 本域 U+FFFD = 0**
 我域（message / like / task）源码里的 **9 处真乱码已修并提交** ⇒ ⇒ **本树已归零** ⇒ ⇒ ⚠️ 但**「不许改」名单 19 处**（题材/被测对象 6 ＋ G1 域台账证据表 13）必须**显式保护** ⇒ ⇒ 详见给 G4 / G1 / G3 的三封通报（**已发出**）。
+
+---
+
+### 🟡 第二十四轮 · ⚠️ 「task-rpc 测试数 = 129」这格**已过期**，待一次 `clean test` 全量复跑后替换
+
+**① 代码态变了（2026-10-28 · G3 转派配方 ⇒ 我域自修 · 提交 `83d691a`）**
+- 产物层守门 `TaskRpcFatJarArtifactGateIT` ⇒ **改名为 `TaskRpcFatJarArtifactGateTest`** ⇒ ⇒ 它**不再只在 `verify` 阶段跑** ⇒ ⇒ **改由测试自己构建 fat jar**（命令带 `-am`）⇒ ⇒ **进 surefire 默认 `test` 阶段 ⇒ 进收口口径**。
+- 同批：`isStale` 已把**共享层**（`service/common/src/main` 全量 ＋ `service/common/pom.xml`）算进「新鲜度」输入集 ⇒ ⇒ 避免「共享层改了而本模块没改」时**不重建** ⇒ ⇒ 守门读到**陈旧内嵌 jar**（⇒ 假绿：掩盖共享层的破坏 / 假红：报错方向被带偏）。
+- ⇒ ⇒ **我域 9 模块现在没有任何 `*IT` 类** ⇒ ⇒ **`mvn test` 与 `mvn verify` 两个口径对我域已重合** ⇒ ⇒ 第十七轮 ⑧ 那条「两个口径差 5 条」的结论**对我域已作废**（原值保留，见下）。
+
+**② 条数影响：129 ⇒ 预期 134（+5）—— ⚠️ 这是【推算】，不是实测**
+- 🔴 **门禁现在报的「实测 134」不能当权威数**：实测它的来源 = **上一轮全量回归留下的 129 条旧报告（mtime 2026-10-28 03:07~03:09）＋ 我后来一次定向跑新增的 5 条**（`TaskRpcFatJarArtifactGateTest.xml`）⇒ ⇒ **孤儿/混合报告** ⇒ ⇒ ⇒ **⇒ 权威值必须来自一次 `clean test` 全量跑**（`clean` 会清掉全部旧报告）⇒ ⇒ **待 maven 窗口空时复跑实测**。
+- ⇒ ⇒ 本段**不写数字**（纪律：只跑部分模块 ⇒ 不做推算、不写进台账）。
+
+**③ 原值保留不改写**
+**129**（第十七轮起沿用）**原样保留**；本段只说明它**已过期**，实测后由新值替换（**原值届时也不删，改为并列**）。
+
+**④ 写权与归属**
+本段全部落在 G2 写权面（`service/task/**` ＋ `docs/DRIFT/task/**`）⇒ ⇒ **不涉共享层、不涉 G4 面**。
+⚠️ **G4 面仍有 2 处旧类名未改**（`docs/DRIFT/global/lanes/L13-rpcboot-message-task.md` · `docs/DRIFT/global/_README.md`）⇒ ⇒ **属 G4 写权 ⇒ 已通知 G4，本 lane 不越权改**。

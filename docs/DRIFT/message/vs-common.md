@@ -324,7 +324,7 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 
 **⑥ 🟢 口径澄清（第十七轮收口实测）**
 - 本域**没有任何 `*IT` 类**（实测：`find service/message/**/src/test -name "*IT.java"` = 0）⇒ ⇒ 本域在 `mvn test` 与 `mvn verify` 两个口径下**数字相同**。
-- 但我域 9 模块里**唯一的 `*IT`** 是 `task-rpc` 的 `TaskRpcFatJarArtifactGateIT`（**5 条**，第十七轮 +1）⇒ ⇒ 它**只在 `verify` 阶段跑** ⇒ ⇒ **同一 9 模块的 `test` + `verify` 口径 = 995 + 5 = 1000** ⇒ ⇒ **口径必须写清**（本域自身数字不受影响，但全域合计会差 5）。
+- 但我域 9 模块里**唯一的 `*IT`** 是 `task-rpc` 的 `TaskRpcFatJarArtifactGateTest`（**5 条**，第十七轮 +1）⇒ ⇒ 它**只在 `verify` 阶段跑** ⇒ ⇒ **同一 9 模块的 `test` + `verify` 口径 = 995 + 5 = 1000** ⇒ ⇒ **口径必须写清**（本域自身数字不受影响，但全域合计会差 5）。
 
 **⑦ 🔴 残留登记（两条负载敏感型时序 flake，**都不在本域代码里**，但会卡住我域的回归链）**
 - **① `task-rpc` 的 `TaskRedisDisconnectFastRejectGateTest` ③ B 组**：一次全量跑实测红（`actual 0L / expected ≥ 2000L`）⇒ **隔离复跑 3 次全绿** ⇒ 判为瞬态；机制 = B 组依赖「客户端还没处理到 FIN」的**竞态窗口** ⇒ ⇒ **该对照组断言不是确定性的** ⇒ ⇒ **只登记、不改断言**。
@@ -559,7 +559,7 @@ reactor = **`service/common` + G2 三域 8 模块**（共 **9** 个）⇒ ⇒ **
 
 **④ 修法与验证（在 like 域做，因为只有它有进程级守门能证）**
 - `LikeRpcArtifactClasspathGateTest.buildFatJar()` 的嵌套命令 **加 `-am`** ⇒ ⇒ reactor 先产出当轮的 `service/common/target/common-*.jar` ⇒ ⇒ fat jar 内嵌的就是它（**实测：内嵌 jar 的 `imports` 第 4 行 = 共享层排序桥**）⇒ ⇒ **真 fat jar 随即能起**。
-- 🆕 **加一条产物层守门** `fatJarCarriesSharedLayerOrderingBridge`（like 域）＋ **task 域同款** `TaskRpcFatJarArtifactGateIT.fatJarMustCarrySharedLayerOrderingBridge` ⇒ ⇒ **把这条潜伏地雷变成可捕获的失败** ⇒ ⇒ **期望值用独立字面量**（共享层那个全限定名，**不从被测代码取常量**）⇒ ⇒ 共享层改包名时如实转红。
+- 🆕 **加一条产物层守门** `fatJarCarriesSharedLayerOrderingBridge`（like 域）＋ **task 域同款** `TaskRpcFatJarArtifactGateTest.fatJarMustCarrySharedLayerOrderingBridge` ⇒ ⇒ **把这条潜伏地雷变成可捕获的失败** ⇒ ⇒ **期望值用独立字面量**（共享层那个全限定名，**不从被测代码取常量**）⇒ ⇒ 共享层改包名时如实转红。
 - **验证（可复算）**：修后 `mvn -o -B -DargLine=-Xmx2g -am -pl service/like/like-rpc test -Dtest='LikeRpcArtifactClasspathGateTest,LikeRpcRuntimeBootGateTest,LikeRpcSpringContextWiringTest'` ⇒ ⇒ **13 条 / 0f 0e 0s · BUILD SUCCESS** ⇒ ⇒ **变异验证**：去掉 `-am` ＋ 删旧 fat jar 强制重建 ⇒ ⇒ **3 条里红 1 条**，**红在目标断言** `fatJarCarriesSharedLayerOrderingBridge:147` ⇒ ⇒ **恰好 1 条红**、另 2 条仍绿 ⇒ ⇒ **非假绿** ⇒ ⇒ 还原后 **sha256 与变异前逐字节一致**（`c3d547e7d5d8706c`）。
 
 **⑤ 一条更深的教训**
@@ -878,3 +878,21 @@ mvn -o -B -DargLine=-Xmx2g -am -pl service/common,service/message/message-api,se
 
 **⑧ ℹ️ 本域 U+FFFD = 0**
 我域（message / like / task）源码里的 **9 处真乱码已修并提交** ⇒ ⇒ **本树已归零** ⇒ ⇒ ⚠️ 但**「不许改」名单 19 处**（题材/被测对象 6 ＋ G1 域台账证据表 13）必须**显式保护** ⇒ ⇒ 详见给 G4 / G1 / G3 的三封通报（**已发出**）。
+
+---
+
+### 🟡 第二十四轮 · 订正「我域 9 模块里**唯一的 `*IT`** 是 task-rpc 的产物层守门」⇒ **它已不是 `*IT` 了**
+
+**① 原判断**（保留，见下）
+「我域 9 模块里**唯一的 `*IT`** 是 `task-rpc` 的产物层守门 ⇒ ⇒ 它**只在 `verify` 阶段跑** ⇒ ⇒ **同一 9 模块的 `test` + `verify` 口径不同（差 5 条）**」。
+
+**② 现在的代码态（2026-10-28 · G3 转派配方 ⇒ 我域自修 · 提交 `83d691a`）**
+- 该类已**改名**为 `TaskRpcFatJarArtifactGateTest`（文件与类同名）⇒ ⇒ **它现在跑在 surefire 默认的 `test` 阶段** ⇒ ⇒ **我域 9 模块现在没有任何 `*IT` 类** ⇒ ⇒ ⇒ **⇒ `mvn test` 与 `mvn verify` 两个口径对我域已重合** ⇒ ⇒ **「两个口径差 5 条」这条结论对我域已作废**。
+- **为什么这么改**：`*IT` **不**匹配 surefire 默认 include（`Test*.java` / `*Test.java` / …）⇒ ⇒ **收口回归（`mvn clean test`）跑不到它** ⇒ ⇒ **本域的产物层守门在收口口径里是【缺失】的** ⇒ ⇒ 改法 = 照 like-rpc 的**已验证**形状（测试**自己构建** fat jar ＋ 命令带 `-am`）⇒ ⇒ 既进收口口径，又比原形状**更严**（原形状在 `verify` 阶段读本次构建的产物；新形状读的是**当轮源码**打出来的产物）。
+- **同批**：`isStale` 已把**共享层**算进「新鲜度」输入集（原本只看本模块 ⇒ 「共享层改了而本模块没改」时不重建 ⇒ ⇒ 读到**陈旧内嵌 jar**）。
+
+**③ 顺带订正一处转述**（G3 信里的「全仓现存 6 座域侧排序桥」名单）
+实测**我域 message / like / task 三个 rpc 的域侧排序桥副本 = 0 座**（三域**都没有** `META-INF/spring/…AutoConfiguration.imports`，也没有域侧 `MybatisPlusOrderingBridgeAutoConfiguration`）⇒ ⇒ **排序桥的唯一来源已经是共享层那座** ⇒ ⇒ 「收编」在我域**无动作可做** ⇒ ⇒ **G3 那份名单里的 like / message / task 三项属误传**（那 6 座实为 article / comment / favorite〔G3 已删〕＋ follow / users-user / users-admin〔G1 写权〕）。
+
+**④ 原值保留不改写**
+原判断与原数字（`test` / `verify` 双口径差 5 条）**原样保留**；本条只说明它**已过期**。

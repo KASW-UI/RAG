@@ -1594,7 +1594,7 @@ global 第三十三轮的 **E47 原定性已被第三十六轮全面订正**：*
 | 我域候选 | 结论 | 判据 |
 |---|---|---|
 | `LikeRpcRuntimeBootGateTest` | ✅ **同款** ⇒ 本节已修 | 起真进程 ＋ `tcpProbe` 端口探活 ＋ 立刻 `destroyForcibly` ＋ 断言日志含「gRPC Server started」 |
-| `TaskRpcFatJarArtifactGateIT` | ❌ **不是同款** | **产物层**判定（读 MANIFEST 的 `Main-Class`/`Start-Class`、jar 大小比、classpath 条目）⇒ **不起进程**（无 `ProcessBuilder` / 无 `destroyForcibly`） |
+| `TaskRpcFatJarArtifactGateTest` | ❌ **不是同款** | **产物层**判定（读 MANIFEST 的 `Main-Class`/`Start-Class`、jar 大小比、classpath 条目）⇒ **不起进程**（无 `ProcessBuilder` / 无 `destroyForcibly`） |
 | `message-rpc` | ❌ **无此类** | 全我域 `grep -rn "destroyForcibly" service/{like,task,message} --include=*.java` = **1 命中**（就是本节这处） |
 
 ⇒ 判据一句话：**同款 = 「起真进程 ＋ 端口探活 ＋ 立刻收摊 ＋ 断言日志内容」四要素同时成立**。
