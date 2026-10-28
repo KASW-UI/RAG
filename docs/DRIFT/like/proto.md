@@ -4,7 +4,7 @@
 
 > **本文件是 `like-proto` 的专属台账** —— 此前该组件**没有**专属台账，
 > 判定记录散落在 `docs/DRIFT/_cross/component-coverage-matrix.md:63`
-> 与 [`docs/PhaseGoal-judge.md`](../../../PhaseGoal-judge.md) 的 A-2 行里
+> 与 [`docs/PhaseGoal-judge.md`](../../PhaseGoal-judge.md) 的 A-2 行里
 > ⇒ 属**记录缺口**（基线 §九 G-17 那一类），本文件把它补上。
 >
 > ⚠️ **与 `docs/Intentional_Deviations/like/proto.md` 的分工**：

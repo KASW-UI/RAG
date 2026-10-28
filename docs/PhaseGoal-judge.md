@@ -96,7 +96,7 @@
 
 | 层 | 对象 | **唯一权威位置** | 本文件对应层 | 引用方式 |
 |---|---|---|---|---|
-| **L0 组件层** | 某组件的 R / E / 未决项 | **该组件的台账「条目级最新状态」** —— 即台账里**逐条编号的状态表**（§Unresolved / §7 状态表 / 最新轮次节），**不是**台账头的「组件判定」行 | [§三 A-2](#三矩阵-a终点指标与当前判定39-行) | A-2 的「权威来源」列给出 `文件:行号` |
+| **L0 组件层** | 某组件的 R / E / 未决项 | **该组件的台账「条目级最新状态」** —— 即台账里**逐条编号的状态表**（§Unresolved / §7 状态表 / 最新轮次节），**不是**台账头的「组件判定」行 | [§三 A-2](#三矩阵-a-2终点指标与当前判定39-行--38-组件--1-共享层) | A-2 的「权威来源」列给出 `文件:行号` |
 | **L1 域层** | 某域的状态 | **L0 的聚合**（聚合规则见 §8.1，**只有这一处**） | [§四 B](#四矩阵-b10-张域级终点指标卡) | B 卡只写聚合结果 + 阻塞项 |
 | **L2 跨组件层** | 跨域不变量 | **`docs/DRIFT/global/`（收口域）** 的对应台账 | [§五 C](#五矩阵-c跨组件不变量12-条) | C 表只写指标 + 判定命令 + 状态 |
 | **L3 阶段层** | P0 九条 / 阶段一结论 | **本文件 §七 / §8.3** | §七 · §8.3 | 由 L0/L1/L2 派生，**不引入新事实** |
@@ -307,13 +307,14 @@
 | `tools/difftest/check-grpc-runtime-classpath.py` | `pom.xml` 的 `grpc-inprocess` scope ＋ `application.yml` 的 `address:` | **不验证运行时 classpath**；**baseline 内的违规只打印不失败** ⇒「绿 ≠ 全仓没缺陷，只是没有新缺陷」 |
 | `tools/difftest/check-merge-tree-content.py` | git 对象层面的合并内容完整性 | 与业务语义无关；**需 ref 参数**；会向 `.git` 写 commit 对象 |
 | `tools/difftest/check-no-nul-bytes.py` | 文件字节层的 NUL 扫描 | 与语义无关 |
+| `tools/difftest/check-no-prod-secrets.py` | `docs/` + `service/` + `tools/` 里的**生产密钥明文**扫描（**脚本自身只存 SHA-256，不存明文** ⇒ 不是新的泄露面） | **只扫工作树、不扫 git 历史** ⇒ 不证明「密钥没进过 git」；白名单是**豁免不是免检**（每条附理由/owner/删法）；`service/users/users-common/**` **永不可豁免** |
 | `tools/metrics-probe/favorite/run.sh` | **只跑 Go 半边**（脚本自述「本探针不是双侧对拍」） | **不是双侧证据** |
 | `tools/authority-path-probe/favorite/run.sh` | Go 半边是**标准库复刻，不是真源** | **不是双侧证据** |
 | `tools/prod-startup-probe/favorite/run.sh` | **同一个 jar 的三个参数形态** | **不是双侧证据**（单侧启动形态） |
 | `tools/probe-gate/favorite/*.sh` | 探针**基建**正确性（PG 就绪 / 端口归属） | **不产生任何语义结论** |
 | `tools/difftest/{run.sh,run-hot.sh,comment/run_diff.sh,run-task-*.sh,run-hot-rpc-difftest.sh,run-message-ddl-parity.sh}` | **编排器**（起栈 + 前置健康校验） | 自身不判定；**结论强度取决于被它调用的脚本** |
 
-### 6.3 本轮实跑结果（2026-10-28 · **23 项命令** · 15 行）
+### 6.3 本轮实跑结果（2026-10-28 · **24 项命令** · 16 行）
 
 | 命令 | EXIT | 备注 |
 |---|---|---|
@@ -332,10 +333,11 @@
 | **`check-surface-parity.py`（本次新增）** | **0** | HTTP 端点 Go 72 ≡ RAG 72 · gRPC 方法 Go 71 ≡ RAG 71 · 2 个签字偏离域单列 |
 | **`check-phasegoal-consistency.py`（本次新增）** | **0** | **本文件自身的内部一致性自检**：矩阵 ↔ 聚合 ↔ 计数 ↔ 判定命令路径存在性（15 组检查） |
 | **`check-phasegoal-lanes.py`（本次新增）** | **0** | **由本文件生成/校验 per-lane 分摊矩阵**（`docs/PhaseGoal/g{1..4}.md`）：lane 组件数 · lane 判定 = MIN · 归属表覆盖无重无漏 · §5 命令路径存在性 |
+| **`check-no-prod-secrets.py`（本次新增）** | **0** | **生产密钥明文扫描**（`docs/` + `service/` + `tools/`）：**未豁免命中 0**；**已豁免 108 处**（glob 白名单 ⇒ **随文件数动态增长**，G4 记的 90 已过期）；`--mutation-test` ⇒ **3/3 变异全部符合预期** |
 
 > ⚠️ **本轮未跑**（**既不算通过，也不算失败** ⇒ 一律按「**未复核**」处理）：
 > `check-flyway-concurrent.sh`（真 PG 三进程并发 ⇒ 需起栈）· `check-plaintext400-headers.sh`（真 Tomcat 400 头 ⇒ 需起栈）· `check-merge-tree-content.py`（**需 ref 参数**且会向 `.git` 写对象）。
-> ⇒ 仓内守门脚本共 **26 个** ⇒ 本轮**实跑 23**、**未跑 3**。
+> ⇒ 仓内守门脚本共 **27 个** ⇒ 本轮**实跑 24**、**未跑 3**。
 
 ---
 
