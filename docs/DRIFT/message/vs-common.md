@@ -1339,7 +1339,7 @@ Go `service/message/api/messagecenter.go:53` ⇒ `httpx.SetErrorHandler` ⇒ `co
 ## 开工前置回执
 
 > **落点**：`align/g2-message-like-task` 工作树 · **基线 commit** `d877b82` · **日期** 2026-10-29
-> ⚠️ **本节只是「读完了」的回执** ⇒ **尚未获批 ⇒ 本 lane 不得开工**（`AGENTS.md` §五·3b-0 ④「经用户批准」＋「调度员不得代批准」）
+> ⚠️ **本节是「读完了」的回执** ⇒ **回执落笔时尚未获批 ⇒ 本 lane 不得开工**（`AGENTS.md` §五·3b-0 ④「经用户批准」＋「调度员不得代批准」）⇒ **Jason 于 2026-10-29 03:44 在本 lane 会话内明示「继续」**（消息 id `182056`）⇒ **已获批开工**（⑤ 由调度员代填，见本节末尾）。
 > ⚠️ **三份 `vs-common.md` 的本节内容逐字相同**（模板要求「会话 + 台账各一份，**同一份内容**」）
 
 【开工前置回执 · G2 · 2026-10-29】
@@ -1348,7 +1348,7 @@ Go `service/message/api/messagecenter.go:53` ⇒ `httpx.SetErrorHandler` ⇒ `co
 
 本 lane 本轮**候选任务 = 修 §8.7 登记的 G2 侧 6 条出处真缺陷**（1 条 `gorm@v1.31.2` 版本写错 ＋ 4 条 `processor.go:82` ＋ 1 条 `like/common/errmsg.go` 路径不精确）⇒ 全部落在 `service/{like,task}/**` 的**注释面**（不改任何断言 ⇒ 不影响产品行为）。
 
-**不做**：① 共享面（`service/common/**` ＋ `service/users/users-common/**`）⇒ 缺陷走反馈单转 G4；② `tools/**`（`tools/g3-anchor-check/` 归 G3）；③ `docs/PhaseGoal-judge.md` / `docs/PhaseGoal/g2.md` / `AGENTS.md` / 三个 `_INDEX.md` / `docs/DRIFT/_cross/**` / 根 `docker-compose.yml`；④ **阶段二不碰、不预支**；⑤ **本轮只出回执，那 6 条一行不动**。
+**不做**：① 共享面（`service/common/**` ＋ `service/users/users-common/**`）⇒ 缺陷走反馈单转 G4；② `tools/**`（`tools/g3-anchor-check/` 归 G3）；③ `docs/PhaseGoal-judge.md` / `docs/PhaseGoal/g2.md` / `AGENTS.md` / 三个 `_INDEX.md` / `docs/DRIFT/_cross/**` / 根 `docker-compose.yml`；④ **阶段二不碰、不预支**；⑤ **回执落笔时本轮只出回执，那 6 条一行不动**；⇒ **Jason 于 2026-10-29 03:44 在本 lane 会话内明示「继续」**（消息 id `182056`）⇒ **已获批开工**。
 
 **② 已读四档（本 lane 面）**
 
@@ -1376,9 +1376,9 @@ Go `service/message/api/messagecenter.go:53` ⇒ `httpx.SetErrorHandler` ⇒ `co
 3. **`docs/PhaseGoal-judge.md:200`/`:202`**（`like-rpc` / `like-proto` 仍 🟡）＋ `:395-396`/`:408`/`:416`（把 `E60`/`003` 列为「未通过」）⇒ **该文件是 4 lane 共用唯一数据源 ⇒ G2 不写** ⇒ 须收口按新状态重读 ＋ 销号。
 4. **`tools/g3-anchor-check/` 的 `PINNED` 缺 `gorm.io/driver/postgres v1.6.0` ＋ `github.com/lovoo/goka v1.1.16`** ⇒ 守门假阳性率 **52%** ⇒ 补 `PINNED` 的落点属 G3 私有目录（**可安全补**，不触发 §6.3 守门计数漂移）；但若要把该守门**搬进 `tools/difftest/` 提升为全仓守门** ⇒ **必须同时改 `docs/PhaseGoal-judge.md` §6.3**，否则立刻制造 **B14**。
 
-**④ 等批准 ⇒ 批准后才开工**（本轮只出回执；⑤ 留空，由**调度员代填** —— 回执人**不得自批**）
+**④ 等批准 ⇒ 批准后才开工**（回执落笔时 ⑤ 留空，由**调度员代填** —— 回执人**不得自批**）⇒ **已获批**：Jason 于 2026-10-29 03:44 在本 lane 会话内明示「继续」（消息 id `182056`）⇒ **⑤ 已由调度员代填**（见本节末尾 ⑤ 行）。
 
-**⑤ 批准记录栏（本栏留空 · 待获批后由调度员代填；填入时须保留核验命令所匹配的字样，见 `docs/Worktree.md` §二·五）**：<批准人> · <批准时间> · <批准范围>　← 回执人**不得自批**
+**⑤ 批准记录：Jason · 2026-10-29 03:44 · 批准范围：本 lane 回执 ① 所列候选任务（修 §8.7 登记的 G2 侧出处真缺陷）—— §8.7 实测口径 = **2 条**（1 版本写错 + 1 路径不精确）；回执 ① 所列另 4 条 `processor.go:82` 经调度员合并树实测为**守门假阳性**（真身是 goka 的 `processor.go:82`，非空且正是注释声称内容）⇒ 不改**　← 由**调度员代填**（依据：Jason 于 2026-10-29 03:44 在**本 lane 会话内**明示「继续」· 消息 id `182056`；**回执人不得自批**· **代填 ≠ 代批准**）
 
 ---
 

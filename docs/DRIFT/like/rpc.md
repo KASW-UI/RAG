@@ -2203,3 +2203,83 @@ service/like/like-api,service/like/like-rpc,service/like/like-common,service/tas
 | **写权守门** | `check-wave-lane-ownership.py` ⇒ **EXIT=0** · `check-phasegoal-lanes.py` ⇒ **EXIT=0** |
 | **⚠️ 口径纪律** | ① 本轮**带 `clean`** ⇒ 报告已清空重写；② 条数在 **BUILD SUCCESS + maven 进程退出**两个条件都满足后采 ⇒ **不是**构建中途的半成品；③ **跨树比条数必须同口径** ⇒ 不可与 G1/G3/G4 的数直接相比 |
 | **日志** | `/tmp/g2run/g2-regress2.log`（**仓外**，不可复算 ⇒ 结论以台账 + 复算命令为准） |
+
+---
+
+## 2026-10-29 · G2 开工轮（Jason「继续」批准）· 🔴→✅ **§8.7 候选清单 G2 侧真错 2 条已修**（版本号 1 条 ＋ 路径 1 条）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `d3c649c`（⑤ 批准记录由调度员代填）· **核对日期** 2026-10-29
+> **批准依据**：**Jason 于 2026-10-29 03:44:57 在本 lane 会话内直接输入「继续」**（role=user 原文 · 消息 id `182056`）⇒ 批准已存在 ⇒ **调度员代填落笔**（**代填 ≠ 代批准**）⇒ 官方判据复验：三份 `vs-common.md` 的 `grep -cE '⑤ 批准记录：Jason · [0-9]{4}-'` 均 = **1** ✓（commit `d3c649c`）
+> **批准范围**：**§8.7 实测口径 = 2 条**（1 条版本写错 ＋ 1 条路径不精确）⇒ **本节 §13.0 与该口径逐条对齐**；另 4 条 `processor.go:82` 经**调度员合并树实测**与**本 lane 逐条回真源核**双向确认为**守门假阳性** ⇒ **不改**（改了就是把对的引用改错）
+> **证据强度**：**E3**（真源 **逐行核验** ＋ 改后逐条回验）
+> **性质**：**P3 · D 类**（**纯注释面**，产品行为零影响；**不阻断**阶段 1 准入）
+
+### §13.0 候选清单的收敛结果（**6 条 → 2 条**）
+
+`docs/CLOSEOUT-2026-10-29.md` §8.7 登记的 G2 侧 **6 条**候选 ⇒ 经本 lane **逐条回真源核** ⇒ **只有 2 条是真错**：
+
+| # | 位置 | 改前 | **改后（真源实况）** | 性质 |
+|---|---|---|---|---|
+| 1 | `src/test/java/com/rag/like/like/rpc/LikeDomainFactSchemaParityTest.java:38` | `{@code gorm@v1.31.2/schema/field.go:330-341}` | **`{@code gorm.io/gorm@v1.31.1/schema/field.go:330-341}`** | **版本号错** —— 真源 `Sea-RideTheWind_golang/go.mod:28` pin 的是 **`gorm.io/gorm v1.31.1`** ⇒ 引用指向了**非真源副本**。<br>⚠️ **为什么极难漏检**：`gorm.io/gorm@v1.31.2` **恰好也装在 GOMODCACHE 里** ⇒ 路径**能解析**、行号**在范围内**、该行**非空** ⇒ ⇒ **廉价判据判它「通过」** ⇒ 只有**回到 `go.mod` 看 pin 的版本**才查得出。<br>⚠️ **行号不用动**：实测 `v1.31.1` ＝ **1004 行** / `v1.31.2` ＝ **1011 行**，而**两版的 `:330-341` 内容逐字相同**（`case reflect.Int32, reflect.Uint32: field.Size = 32`）⇒ ⇒ **只改版本号**。同时把**裸模块短名** `gorm@` 补成**完整模块路径** `gorm.io/gorm@` ⇒ 与同文件 `:39` 的 `gorm.io/driver/postgres@v1.6.0/…` 及同域 `LikeRecordMapper.java:238` 的 `gorm.io/gorm@v1.31.1/…` **形态一致** |
+| 2 | `src/main/java/com/rag/like/like/rpc/service/LikeTaskProgressPublisher.java:141` | `Go like/common/errmsg.go:51 ErrorRedisSelect = 5011` | **`Go service/like/common/errmsg/errmsg.go:51 ErrorRedisSelect = 5011`** | **路径少一段目录** —— 真身 ＝ `Sea/service/like/common/errmsg/errmsg.go:51` ＝ `ErrorRedisSelect = 5011` ⇒ **行号正确**；同域另 4 处（`LikeErrorMessages.java:9` · `LikeErrorCode.java:4` · `LikeGrpcError.java:10` · `CodeError.java:7`）**都已写对完整路径** ⇒ **域内自相矛盾** |
+
+### §13.1 另外 4 条 ⇒ **不改**（守门假阳性）
+
+`processor.go:82` × 4（`TaskArticleCountConsumer.java:91` · `TaskCountStore.java:32` · `TaskUserCountConsumer.java:91` · `TaskSinkConsumeTest.java:312`，全在 task-rpc）
+⇒ 清单定性为「落在 go-redis `push/processor.go` 的空行上」⇒ **实测是守门撞错候选**：引用指向的是 **goka**，真身 `:82` 非空且**与注释里逐字引用的代码完全一致** ⇒ **一行都不用改**。
+⇒ 逐条实测与证据 ⇒ `docs/DRIFT/task/rpc.md` 同日节。
+
+### §13.2 本轮**明确不做**清单
+
+| # | 不做什么 | 为什么 |
+|---|---|---|
+| 1 | **不落仓出处抽验脚本** | G3 已落仓 `tools/g3-anchor-check/` ⇒ 收口在两者间**二选一** ⇒ **本轮不落码**（且 `tools/**` 非本 lane 写权） |
+| 2 | **不碰 `DRIFT-LIKE-003-C`**（权威读暴露形态） | 形态决策（**独立进程** vs 同进程独立 HTTP 端口）**未拍板**；且落地需改 **2 处共享面**（`check-wave-lane-ownership.py` 白名单 ＋ 根 `docker-compose.yml`）⇒ **本 lane 无写权** |
+| 3 | 不碰共享面 / `tools/**` / `docs/PhaseGoal-judge.md` / `docs/PhaseGoal/g2.md` / 三个 `_INDEX.md` / `docs/DRIFT/_cross/**` / `AGENTS.md` / `docs/Worktree.md` / 根 `docker-compose.yml` | 写权边界（`AGENTS.md` §五·3b · `docs/Worktree.md` §二） |
+| 4 | **阶段二不碰、不预支** | `docs/twoStage.md` §6/§7 属收口执行者 |
+
+### §13.3 复算命令（可复算）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+G="/Users/pr/Documents/java&golang/Sea-RideTheWind_golang"
+GOMOD="$HOME/go/pkg/mod"
+
+# ① 版本号：真源 pin 的是 v1.31.1（且两版 :330-341 内容相同 ⇒ 行号不动）
+grep -n "gorm.io/gorm" "$G/go.mod"                                    # ⇒ go.mod:28 gorm.io/gorm v1.31.1
+sed -n '330,341p' "$GOMOD/gorm.io/gorm@v1.31.1/schema/field.go"        # ⇒ :338-339 case reflect.Int32, reflect.Uint32: field.Size = 32
+wc -l "$GOMOD/gorm.io/gorm@v1.31.1/schema/field.go" "$GOMOD/gorm.io/gorm@v1.31.2/schema/field.go"  # ⇒ 1004 / 1011
+sed -n '330,341p' "$GOMOD/gorm.io/gorm@v1.31.2/schema/field.go"        # ⇒ 与上面逐字相同
+
+# ② 路径：真身在 errmsg/ 子目录，:51 就是 ErrorRedisSelect = 5011
+sed -n '51p' "$G/service/like/common/errmsg/errmsg.go"
+```
+
+### §13.4 本轮**域级回归**（`docs/twoStage.md` §5.5「执行必要验证」）
+
+| 项 | 内容 |
+|---|---|
+| **命令** | `mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end clean test -pl <G2 三域 8 模块> -am` |
+| **权威口径（第二轮全量）** | **BUILD SUCCESS** · **11:49 min** · **23 个反应堆模块全 SUCCESS** · **730 tests / 0F / 0E / 0S**（逐 `TEST-*.xml` 的 `testsuite` 属性求和）<br>逐模块：`message-api` **107** · `message-rpc` **100** · `message-common` **21** · `like-api` **94** · `like-rpc` **151** · `like-common` **18** · `task-api` **102** · `task-rpc` **137** |
+| **⚠️ 第一轮全量曾红 1 条 ⇒ 已定性为「已登记瞬态」，非本轮改动** | 第一轮（`/tmp/g2run/g2-regress3.log`）= **BUILD FAILURE** · 730 tests / **1F** ⇒ 失败项 ＝ **`TaskRedisDisconnectFastRejectGateTest.disconnectIsFastRejectedWithSharedLayerOptions:221`**（判据 **③ B 组对照组**）⇒ `Expecting actual: 0L to be greater than or equal to: 2000L`<br>⇒ **不是本轮改动引起**：① 本轮改动是 **like-rpc 的 2 行注释**（`LikeDomainFactSchemaParityTest.java:38` · `LikeTaskProgressPublisher.java:141`）⇒ 与 task-rpc 的 Redis 断连**活体**探针**无因果**；② 该瞬态**早已登记** —— `docs/DRIFT/task/vs-common.md:569` · `docs/DRIFT/message/vs-common.md:335` · `docs/DRIFT/like/vs-common.md:530` **逐字记着同一个断言、同一个机制、同一个处置口径**（「隔离复跑 3 次全绿 ⇒ 判为瞬态 ⇒ **只登记、不改断言**」）<br>⇒ **机制**：B 组依赖「客户端**还没**处理到 FIN」的**竞态窗口** ⇒ FIN 若先被处理 ⇒ 连接是「已关闭」而非「断连中」⇒ 命令**立刻失败（0ms）**而不是排队到 3s 命令超时 ⇒ ⇒ **该对照组断言不是确定性的**（改断言让它绿 ＝ 掩盖现象）<br>⇒ **本轮处置**：**隔离复跑**（`mvn … -Dtest='TaskRedisDisconnectFastRejectGateTest'`）⇒ **2/2 绿**；**再跑一轮全量** ⇒ **BUILD SUCCESS · 730 / 0F / 0E / 0S**，且两处 Redis 探针实测打印 **`[G2-REJECT-PROBE] A(REJECT_COMMANDS)=1ms B(DEFAULT)=3008ms`** 与 **`A=0ms B=3002ms`** ⇒ ⇒ **B 组两轮都正常排队到超时** ⇒ 与「瞬态」定性吻合 |
+| **与前几轮的关系** | **条数三轮完全相同（730）** ⇒ **符合预期**：本轮 2 处改动**全在注释面** ⇒ **断言未改一字** ⇒ ⇒ **条数不变本身就是「没碰断言」的旁证** |
+| **写权守门** | `check-wave-lane-ownership.py` ⇒ **EXIT=0** · `check-phasegoal-lanes.py` ⇒ **EXIT=0** |
+| **日志** | `/tmp/g2run/g2-regress4.log`（**权威轮**）· `/tmp/g2run/g2-regress3.log`（瞬态轮）· `/tmp/g2run/g2-redis-flake.log`（隔离复跑）—— 三份均在**仓外** ⇒ 不可复算 ⇒ **结论以本台账 + 上面两条复算命令为准** |
+
+#### 复算命令（可复算）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+
+# ① 本轮改动的两处（改后）
+grep -n "gorm.io/gorm@v1.31.1/schema/field.go"   service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeDomainFactSchemaParityTest.java
+grep -n "service/like/common/errmsg/errmsg.go:51"   service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeTaskProgressPublisher.java
+
+# ② 瞬态的隔离复跑（⇒ 2/2 绿）
+mvn -o -B -DargLine=-Xmx2g -pl service/task/task-rpc -am   -Dtest='TaskRedisDisconnectFastRejectGateTest' -Dsurefire.failIfNoSpecifiedTests=false test
+
+# ③ 域级回归（权威轮）
+mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end clean test \
+  -pl service/message/message-api,service/message/message-rpc,service/message/message-common,\
+service/like/like-api,service/like/like-rpc,service/like/like-common,service/task/task-api,service/task/task-rpc -am
+```

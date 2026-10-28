@@ -1671,3 +1671,44 @@ sed -n '44,47p;188p;284p;339p' "$G/service/task/rpc/internal/sink/like_sink.go"
 #   ⇒ :188 SetNX task:init 90*24h / :284 Set like:total 90*24h / :339 SetNX task:done 90*24h
 ```<br>⚠️ **只报实测值，不做差值归因**：第二十四轮那个 **134 是【推算】（129 + 5）不是实测** ⇒ ⇒ **不得**把「137 − 3（本轮新增类）= 134」当成「推算被证实」⇒ 推算**仍然只是推算**；本轮**唯一权威数 = 137** |
 | **日志** | `/tmp/g2run/g2-regress.log`（**仓外**，不可复算 ⇒ 结论以台账 + 复算命令为准） |
+
+---
+
+## 2026-10-29 · G2 开工轮（Jason「继续」批准）· 🟢 **§8.7 候选清单里 task-rpc 的 4 条 `processor.go:82` = 守门假阳性 ⇒ 一行都不用改**（**逐条实测**）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `b432740`（开工前置回执）· **核对日期** 2026-10-29
+> **批准**：Jason 在会话内「继续」⇒ 批准开工（**调度员不得代批准**）
+> **证据强度**：**E4**（真源**逐字比对** —— 注释里引用的代码与真身 `:82` **一字不差**）
+> **性质**：**登记**（**非缺陷**）· **不阻断**阶段 1
+
+`docs/CLOSEOUT-2026-10-29.md` §8.7 把本域 **4 条**列为 `EMPTY_LINE` 真错 ⇒「`processor.go:82` 落在 **go-redis v9.20.0 `push/processor.go`** 的**空行**上」⇒ **经逐条核对，这 4 条引用本身是正确 的**：
+
+| # | 位置 | 引用原文 | 清单判定 | **实测真身** | 判定 |
+|---|---|---|---|---|---|
+| 1 | `mq/TaskCountStore.java:32` | `// goka@v1.1.16 processor.go:82`（**下一行把代码逐字抄了出来**） | EMPTY_LINE | `~/go/pkg/mod/github.com/lovoo/goka@v1.1.16/processor.go`（**1072 行**）的 `:82` ＝ `WithStorageBuilder(storage.DefaultBuilder(DefaultProcessorStoragePath(gg.Group()))),` ⇒ **与注释 `:33` 抄出来的代码逐字一致** | 🟢 **引用正确 ⇒ 不改** |
+| 2 | `mq/TaskArticleCountConsumer.java:91` | `（goka processor.go:82 按 group 名分 LevelDB 目录）` | EMPTY_LINE | 同上 `:82` ⇒ `DefaultProcessorStoragePath(gg.Group())` ⇒ **「按 group 名分目录」成立** | 🟢 **引用正确 ⇒ 不改** |
+| 3 | `mq/TaskUserCountConsumer.java:91` | 同 #2 | EMPTY_LINE | 同上 | 🟢 **引用正确 ⇒ 不改** |
+| 4 | `src/test/.../mq/TaskSinkConsumeTest.java:312` | `（goka processor.go:82 按 group 名分目录）` | EMPTY_LINE | 同上 | 🟢 **引用正确 ⇒ 不改** |
+
+**⇒ 根因**：守门 `tools/g3-anchor-check/` 的 `PINNED` **缺 `github.com/lovoo/goka v1.1.16`** ⇒ 带版本前缀的路径解析不到 ⇒ **回退裸文件名匹配** ⇒ **撞上 go-redis 的同名 `push/processor.go`**（它的 `:82` 恰好是空行）⇒ ⇒ **报「行号落在空行」**。
+⇒ 与 `docs/CLOSEOUT-2026-10-29.md` §8.7 里 `postgres.go`（19 条）/ `goka`（10 条）两簇**同款根因**。
+⇒ ⚠️ **落点不在本 lane**：`tools/g3-anchor-check/` 是 **G3 私有目录** ⇒ **补 `PINNED` 两行**属 G3 ⇒ **本 lane 不越权落码**，只登记。
+
+⚠️ **这 4 条与本 lane 上一轮坐实的判据失效模式是「同一个候选解析缺陷的两面」**（`docs/DRIFT/like/rpc.md` §12.2）：
+上次是「**真身不满足、干扰项满足 ⇒ 判过**」（**假绿**）· 这次是「**真身满足、干扰项不满足 ⇒ 报错**」（**假错**）⇒ ⇒ **候选解析规则必须按域消歧 ＋ 命中后必须回真源读那一行** ⇒ ⇒ **同一个缺陷，两个方向都会出错**。
+
+### 复算命令（可复算）
+
+```bash
+GOMOD="$HOME/go/pkg/mod"
+# ① 真身在 goka（不是 go-redis）：:82 非空，且与注释逐字一致
+sed -n '82p' "$GOMOD/github.com/lovoo/goka@v1.1.16/processor.go"
+wc -l  "$GOMOD/github.com/lovoo/goka@v1.1.16/processor.go"
+# ⇒ WithStorageBuilder(storage.DefaultBuilder(DefaultProcessorStoragePath(gg.Group()))),   / 1072
+
+# ② go-redis 的同名文件（守门撞错的那个）—— :82 确是空行
+sed -n '80,84p' "$GOMOD/github.com/redis/go-redis/v9@v9.20.0/push/processor.go"
+# ⇒ :81 break / :82（空行）/ :83 // Read the push notification
+```
+
+⚠️ **连带记录（同一轮）**：本轮（2026-10-29 开工轮）全量回归里，本域 `TaskRedisDisconnectFastRejectGateTest` ③ **B 组对照组** **第二次复现**已登记瞬态（`actual 0L / expected ≥ 2000L`）⇒ 隔离复跑 **2/2 绿** ＋ 再跑一轮全量 **BUILD SUCCESS · 730 / 0F / 0E / 0S** ⇒ ⇒ **处置口径不变：只登记、不改断言**（改断言让它绿 ＝ 掩盖现象）⇒ 完整机制与证据 ⇒ `docs/DRIFT/like/rpc.md` §13.4。
