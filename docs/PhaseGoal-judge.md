@@ -313,7 +313,7 @@
 | `tools/probe-gate/favorite/*.sh` | 探针**基建**正确性（PG 就绪 / 端口归属） | **不产生任何语义结论** |
 | `tools/difftest/{run.sh,run-hot.sh,comment/run_diff.sh,run-task-*.sh,run-hot-rpc-difftest.sh,run-message-ddl-parity.sh}` | **编排器**（起栈 + 前置健康校验） | 自身不判定；**结论强度取决于被它调用的脚本** |
 
-### 6.3 本轮实跑结果（2026-10-28 · **22 项命令** · 14 行）
+### 6.3 本轮实跑结果（2026-10-28 · **23 项命令** · 15 行）
 
 | 命令 | EXIT | 备注 |
 |---|---|---|
@@ -331,10 +331,11 @@
 | `check-jar-executable.sh` | **0** | ⚠️ **只实际检查 5/20 模块**（15 个「未构建」被跳过） |
 | **`check-surface-parity.py`（本次新增）** | **0** | HTTP 端点 Go 72 ≡ RAG 72 · gRPC 方法 Go 71 ≡ RAG 71 · 2 个签字偏离域单列 |
 | **`check-phasegoal-consistency.py`（本次新增）** | **0** | **本文件自身的内部一致性自检**：矩阵 ↔ 聚合 ↔ 计数 ↔ 判定命令路径存在性（15 组检查） |
+| **`check-phasegoal-lanes.py`（本次新增）** | **0** | **由本文件生成/校验 per-lane 分摊矩阵**（`docs/PhaseGoal/g{1..4}.md`）：lane 组件数 · lane 判定 = MIN · 归属表覆盖无重无漏 · §5 命令路径存在性 |
 
 > ⚠️ **本轮未跑**（**既不算通过，也不算失败** ⇒ 一律按「**未复核**」处理）：
 > `check-flyway-concurrent.sh`（真 PG 三进程并发 ⇒ 需起栈）· `check-plaintext400-headers.sh`（真 Tomcat 400 头 ⇒ 需起栈）· `check-merge-tree-content.py`（**需 ref 参数**且会向 `.git` 写对象）。
-> ⇒ 仓内守门脚本共 **25 个** ⇒ 本轮**实跑 22**、**未跑 3**。
+> ⇒ 仓内守门脚本共 **26 个** ⇒ 本轮**实跑 23**、**未跑 3**。
 
 ---
 
@@ -560,6 +561,10 @@ done
 # ── ⭐ 本文件自身的内部一致性自检（矩阵 ↔ 聚合 ↔ 计数 ↔ 路径存在性）──
 python3 tools/difftest/check-phasegoal-consistency.py
 
+# ── ⭐ 由本文件生成/校验 per-lane 分摊矩阵（docs/PhaseGoal/g{1..4}.md）──
+python3 tools/difftest/check-phasegoal-lanes.py --write   # 重新生成 4 份 lane 矩阵
+python3 tools/difftest/check-phasegoal-lanes.py           # 只校验（不改文件）⇒ EXIT=0
+
 # ── DDL 逐域（裸跑只查 users 域！索引/约束/触发器需 --indexes）────
 python3 tools/difftest/check-ddl-static.py --domain <域>
 python3 tools/difftest/check-ddl-static.py --domain <域> --indexes
@@ -604,6 +609,12 @@ docs/twoStage.md    §5.6（四种结论）────────────�
 docs/twoStage.md    §10 （阶段归属 A/B/C/D）────────────────────→ §十一
 docs/twoStage.md    §9  （故障矩阵）────────────────────────────→ 本文件不覆盖（阶段 2）
 ```
+
+> ⭐ **本文件 → per-lane 分摊矩阵（`docs/PhaseGoal/g{1..4}.md`）** —— 把「按域/组件」的基线
+> **按 lane 归属（G1/G2/G3/G4，AGENTS.md §5.3d·§5.3f）** 切成 4 份 lane 视角的阶段一验收矩阵：
+> 组件行 + 本域自修项 + **转派 G4 反馈单** + P0 分摊 + 矩阵 C 分摊 + 收口命令 + lane 判定。
+> **机器生成、勿手改** ⇒ `python3 tools/difftest/check-phasegoal-lanes.py --write`（生成）/ `--check`（校验）。
+> ⚠️ **lane 判定只覆盖组件层**；矩阵 C 与 P0 是**收口执行者**的判定 ⇒ **某 lane 绿 ≠ 阶段一绿**。
 
 > ⚠️ **本文件不替代任何一份上游文件。** 若与 `docs/PhasedGoal.md` / `docs/twoStage.md` 冲突，
 > **以上游为准**（准入线以 `PhasedGoal.md` §二 / `twoStage.md` §2.1 为准），并把冲突登记为一条待修项。

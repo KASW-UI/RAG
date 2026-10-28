@@ -23,6 +23,18 @@
 
 ## 二、验收等级
 
+> 📌 **本节（语言描述）的可判定版在这里** ⇒ 别拿本节当验收清单用：
+>
+> | 你要什么 | 去哪 |
+> |---|---|
+> | **可判定的阶段一终点指标**（38 组件矩阵 + 12 条跨组件不变量 + 域级聚合 + 阶段结论） | [`docs/PhaseGoal-judge.md`](PhaseGoal-judge.md) |
+> | **你这棵 lane 的分摊矩阵**（G1/G2/G3/G4 各一份：组件行 + 自修项 + 转派 G4 + P0 分摊 + 矩阵 C 分摊 + 收口命令） | [`docs/PhaseGoal/g{1..4}.md`](PhaseGoal/g1.md) |
+> | **lane 归属与写权边界** | `AGENTS.md` §5.3d / §5.3e / §5.3f |
+>
+> ⚠️ `docs/PhaseGoal/g{1..4}.md` 是**机器生成**（`python3 tools/difftest/check-phasegoal-lanes.py --write`）
+> ⇒ **不要手改**；改判定请改 `PhaseGoal-judge.md`，然后重跑生成器 + 校验器
+> （`python3 tools/difftest/check-phasegoal-lanes.py` ⇒ EXIT=0）。
+
 ### P0：简历项目准入要求
 
 以下要求必须满足，或存在明确、有限且不影响核心正确性的已知例外：
