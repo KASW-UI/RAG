@@ -31,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import com.rag.users.admin.rpc.support.RealGrpcPort;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -141,7 +142,11 @@ class AdminRpcGrpcInterceptorWiringTest {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        // ⚠️ 不能用 forPort(0)：那是 **OS 盲选口**（macOS 临时段 49152–65535）
+        //    ⇒ 与 Docker 随机发布口**同段** ⇒ 可能落到别的容器已发布的口号上
+        //    ⇒ 邻居占 127.0.0.1:P 时我们通配绑定照样成功、lsof 两个监听者并存
+        //    ⇒ 客户端被更具体的那个抢走 ⇒ **静默假红**（机制与实测见 support/RealGrpcPort）。
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);                  // ← 被测的那一行（接口其实是 Consumer<ServerBuilder<?>>）
         SlowHandlerProbe probe = new SlowHandlerProbe();
         Server server = builder.addService(slowAdminService(probe)).build().start();
@@ -195,7 +200,11 @@ class AdminRpcGrpcInterceptorWiringTest {
         AtomicReference<String> handlerThread = new AtomicReference<>("<未进入>");
         SlowHandlerProbe probe = new SlowHandlerProbe();
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        // ⚠️ 不能用 forPort(0)：那是 **OS 盲选口**（macOS 临时段 49152–65535）
+        //    ⇒ 与 Docker 随机发布口**同段** ⇒ 可能落到别的容器已发布的口号上
+        //    ⇒ 邻居占 127.0.0.1:P 时我们通配绑定照样成功、lsof 两个监听者并存
+        //    ⇒ 客户端被更具体的那个抢走 ⇒ **静默假红**（机制与实测见 support/RealGrpcPort）。
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);
         Server server = builder.addService(slowAdminService(probe, observedRemaining, handlerThread)).build().start();
 

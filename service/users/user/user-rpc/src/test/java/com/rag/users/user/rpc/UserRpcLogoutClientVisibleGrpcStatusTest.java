@@ -25,6 +25,7 @@ import java.net.ServerSocket;
 import java.util.concurrent.TimeUnit;
 
 import com.rag.users.user.rpc.support.GoStyleRedisDisconnectProxy;
+import com.rag.users.user.rpc.support.RealGrpcPort;
 import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -213,11 +214,10 @@ class UserRpcLogoutClientVisibleGrpcStatusTest {
 
     /** 挑一个当前空闲的端口（挑完立即释放 ⇒ 应用 bind 时若被抢 ⇒ 大声失败，不静默）。 */
     private static int pickFreePort() {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            socket.setReuseAddress(true);
-            return socket.getLocalPort();
-        } catch (IOException e) {
-            throw new IllegalStateException("挑不到空闲端口", e);
-        }
+        // ⚠️ 原来用 `new ServerSocket(0)`：那是 **OS 盲选口**（macOS 临时段 49152–65535）
+        //    ⇒ 与 Docker 随机发布口**同段** ⇒ 「挑到没人监听的口」这个前提**直接失效**
+        //    ⇒ 邻居占 127.0.0.1:P 时我们的通配绑定照样成功、lsof 两个监听者并存
+        //    ⇒ 客户端被更具体的那个抢走 ⇒ **静默假红**（机制与实测见 support/RealGrpcPort）。
+        return RealGrpcPort.pick();
     }
 }

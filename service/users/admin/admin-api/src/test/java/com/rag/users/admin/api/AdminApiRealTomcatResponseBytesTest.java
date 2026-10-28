@@ -15,6 +15,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import com.rag.users.admin.api.support.RealTomcatPort;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -111,7 +114,7 @@ import static org.mockito.Mockito.when;
  */
 @SpringBootTest(
         classes = AdminApiApplication.class,
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT,
         properties = {
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "grpc.client.admin-rpc.address=static://127.0.0.1:65535",
@@ -130,6 +133,15 @@ import static org.mockito.Mockito.when;
                 "logging.level.com.alibaba.nacos=WARN"
         })
 class AdminApiRealTomcatResponseBytesTest {
+
+    @DynamicPropertySource
+    static void fixedServerPort(DynamicPropertyRegistry r) {
+        // ⚠️ 原来用 RANDOM_PORT：那是 **OS 盲选口**（macOS 临时段 49152–65535）
+        //    ⇒ 与 Docker 随机发布口**同段** ⇒ 邻居占 127.0.0.1:P 时 Tomcat 通配绑定
+        //    ⇒ 照样成功、客户端却被更具体的那个抢走 ⇒ **静默假红**（机制与实测见
+        //    support/RealTomcatPort 类注释）⇒ 改走本模块专用端口段的固定口。
+        r.add("server.port", RealTomcatPort::pick);
+    }
 
     /**
      * Go: httpTimeoutBody = "Request Timeout"（http.go:22）。

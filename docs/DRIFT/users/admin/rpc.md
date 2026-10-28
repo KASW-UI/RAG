@@ -4351,3 +4351,26 @@ if (connectTimeout != null) {                                     // :16
     ⇒ **本轮已独立复核**：G3 树实测域内 12 模块**全部有 surefire 报告**（`service/{article,comment,favorite,hot}/*-{api,rpc,common}`）⇒ 「12 模块」成立 ⇒ 原「29」作废。
     ⇒ ⚠️ **不影响错峰结论本身**（时间点仍对：本域确实等 G3 跑完才起）⇒ 只订正**数字**，不改**结论**。
     ⇒ 📌 **同款串台的另一处** ⇒ [`../user/rpc.md` §9](../user/rpc.md) 同步订正。
+
+
+---
+
+## 🔴 `DRIFT-ARPC-014` · **「OS 盲选口」族** · 本组件 **5 处**（2026-10-28 · G1 lane）
+
+> 📌 **机制 / 本机实测（Q3·Q6·Q7·Q8）/ 守门细节 / 效力边界 ⇒ [`docs/DRIFT/users/vs-common.md` §65](../vs-common.md)**
+> ⇒ 本条只记**本组件那一份**（不抄机制表，避免两处漂移）。
+
+| 族 | 位置（**改造后**行号） | 状态 |
+|---|---|---|
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `AdminRpcGrpcInterceptorWiringTest.java:149` | 已改 |
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `AdminRpcGrpcInterceptorWiringTest.java:207` | 已改 |
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `AdminRpcSlowThresholdGateTest.java:240` | 已改 |
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `AdminRpcLogoutClientVisibleGrpcStatusTest.java:171` | 已改 |
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `AdminRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest.java:185` | 已改 |
+
+- **危害**：`forPort(0)` / `new ServerSocket(0)` / `RANDOM_PORT` 三种写法都是**让 OS 从临时端口段（49152–65535）里盲选** ⇒ ⇒ 与 Docker 随机发布口**同段**
+  ⇒ ⇒ 邻居占**更具体地址** `127.0.0.1:P` 时我方**通配绑定照样成功**（实测：两个监听者并存）⇒ ⇒ 客户端被抢 ⇒ **静默假红**（看着像被测代码炸了，其实压根没被请求到）。
+- **修法**：全部改走**域内私有** `support/RealGrpcPort`（`support/RealTomcatPort`）⇒ **段**：`22260–22279`（users 域段的子段）⇒ 段内挑口 ＋ **双地址 bind 探针**（只探通配**检不出**「更具体的占用者」）。
+- **段来源**：共享层已预分配给本域的段（`docs/DRIFT/global/vs-common.md` §4.10.19.3）⇒ **共享层台账零改动**（写权归 G4）。
+- **守门**：域级 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java`）**5 条** ⇒ 一并覆盖本组件 ⇒ **本组件不单独建守门**（避免两份规则漂移）。
+- **边界**：**本组件生产代码零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务）。

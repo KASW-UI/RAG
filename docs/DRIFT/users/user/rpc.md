@@ -2596,3 +2596,26 @@ span 状态恒为 **`Unset`** ⇒ ⇒ **RAG 侧多置一个 `ERROR`** 就是**�
 `docs/DRIFT/global/vs-common.md` §4.10.64 ⑤ 断言「Go 的 `span.RecordError(...)` **会把 status 置 ERROR** ⇒ Java 必须显式补」
 ⇒ ⇒ **与上面 SDK 注释原文正好相反** ⇒ ⇒ **已发信给 G4 订正**（并提醒 G3 别照它加 `setStatus`，否则是在 G3 域**新造**漂移）。
 ⇒ ⇒ 域级台账 ⇒ [`../vs-common.md` §59](../vs-common.md)。
+
+
+---
+
+## 🔴 `DRIFT-USERRPC-V-016` · **「OS 盲选口」族** · 本组件 **5 处**（2026-10-28 · G1 lane）
+
+> 📌 **机制 / 本机实测（Q3·Q6·Q7·Q8）/ 守门细节 / 效力边界 ⇒ [`docs/DRIFT/users/vs-common.md` §65](../vs-common.md)**
+> ⇒ 本条只记**本组件那一份**（不抄机制表，避免两处漂移）。
+
+| 族 | 位置（**改造后**行号） | 状态 |
+|---|---|---|
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `UserRpcSlowThresholdGateTest.java:304` | 已改 |
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `UserRpcSlowThresholdGateTest.java:331` | 已改 |
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `UserRpcGrpcInterceptorWiringTest.java:139` | 已改 |
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `UserRpcLogoutClientVisibleGrpcStatusTest.java:221` | 已改 |
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `UserRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest.java:225` | 已改 |
+
+- **危害**：`forPort(0)` / `new ServerSocket(0)` / `RANDOM_PORT` 三种写法都是**让 OS 从临时端口段（49152–65535）里盲选** ⇒ ⇒ 与 Docker 随机发布口**同段**
+  ⇒ ⇒ 邻居占**更具体地址** `127.0.0.1:P` 时我方**通配绑定照样成功**（实测：两个监听者并存）⇒ ⇒ 客户端被抢 ⇒ **静默假红**（看着像被测代码炸了，其实压根没被请求到）。
+- **修法**：全部改走**域内私有** `support/RealGrpcPort`（`support/RealTomcatPort`）⇒ **段**：`22220–22239`（共享层预分配的 users 域段 22200–22299 的子段）⇒ 段内挑口 ＋ **双地址 bind 探针**（只探通配**检不出**「更具体的占用者」）。
+- **段来源**：共享层已预分配给本域的段（`docs/DRIFT/global/vs-common.md` §4.10.19.3）⇒ **共享层台账零改动**（写权归 G4）。
+- **守门**：域级 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java`）**5 条** ⇒ 一并覆盖本组件 ⇒ **本组件不单独建守门**（避免两份规则漂移）。
+- **边界**：**本组件生产代码零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务）。

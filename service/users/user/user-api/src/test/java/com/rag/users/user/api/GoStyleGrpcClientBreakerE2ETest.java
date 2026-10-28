@@ -28,6 +28,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import com.rag.users.user.api.support.RealTomcatPort;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -91,7 +92,7 @@ import static com.rag.users.user.api.support.GoStyleHostPortPinning.pinContainer
 @SpringBootTest(
         classes = {UserApiApplication.class,
                 GoStyleGrpcClientBreakerE2ETest.FaultyRpcServer.class},
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT,
         properties = {
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "spring.cloud.nacos.discovery.enabled=false",
@@ -119,6 +120,7 @@ class GoStyleGrpcClientBreakerE2ETest {
 
     @DynamicPropertySource
     static void redis(DynamicPropertyRegistry r) {
+        r.add("server.port", RealTomcatPort::pick);
         r.add("spring.data.redis.host", REDIS::getHost);
         r.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
         r.add("spring.data.redis.password", () -> "");

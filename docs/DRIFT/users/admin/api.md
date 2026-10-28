@@ -2350,3 +2350,25 @@ Sea-RideTheWind_golang/service/common/observability/http.go:88  → http.Error(w
 
 ⇒ `mvn -B -o -DargLine=-Xmx2g -am -pl service/users/admin/admin-api test` ⇒ **BUILD SUCCESS · EXIT=0**
 ⇒ ⚠️ **本轮只跑了 admin-api 单模块**（不是域级 6 模块全量）⇒ **域级全量留到波末 C7 收口回归重测**。
+
+
+---
+
+## 🔴 `DRIFT-ADMINAPI-013` · **「OS 盲选口」族** · 本组件 **3 处**（2026-10-28 · G1 lane）
+
+> 📌 **机制 / 本机实测（Q3·Q6·Q7·Q8）/ 守门细节 / 效力边界 ⇒ [`docs/DRIFT/users/vs-common.md` §65](../vs-common.md)**
+> ⇒ 本条只记**本组件那一份**（不抄机制表，避免两处漂移）。
+
+| 族 | 位置（**改造后**行号） | 状态 |
+|---|---|---|
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `AdminApiStartupFailFastTest.java:101` | 已改 |
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `AdminApiStartupFailFastTest.java:263` | 已改 |
+| D 族（`RANDOM_PORT` ⇒ `DEFINED_PORT` ＋ 固定口） | `AdminApiRealTomcatResponseBytesTest.java:143` | 已改 |
+| D 族（`RANDOM_PORT` ⇒ `DEFINED_PORT` ＋ 固定口） | `AdminApiRealTomcatResponseBytesTest.java:143` | 已改 |
+
+- **危害**：`forPort(0)` / `new ServerSocket(0)` / `RANDOM_PORT` 三种写法都是**让 OS 从临时端口段（49152–65535）里盲选** ⇒ ⇒ 与 Docker 随机发布口**同段**
+  ⇒ ⇒ 邻居占**更具体地址** `127.0.0.1:P` 时我方**通配绑定照样成功**（实测：两个监听者并存）⇒ ⇒ 客户端被抢 ⇒ **静默假红**（看着像被测代码炸了，其实压根没被请求到）。
+- **修法**：全部改走**域内私有** `support/RealGrpcPort`（`support/RealTomcatPort`）⇒ **段**：gRPC `22240–22249` ／ Tomcat `22250–22259`（users 域段的子段）⇒ 段内挑口 ＋ **双地址 bind 探针**（只探通配**检不出**「更具体的占用者」）。
+- **段来源**：共享层已预分配给本域的段（`docs/DRIFT/global/vs-common.md` §4.10.19.3）⇒ **共享层台账零改动**（写权归 G4）。
+- **守门**：域级 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java`）**5 条** ⇒ 一并覆盖本组件 ⇒ **本组件不单独建守门**（避免两份规则漂移）。
+- **边界**：**本组件生产代码零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务）。

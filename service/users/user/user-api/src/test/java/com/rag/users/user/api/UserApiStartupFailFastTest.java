@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.List;
+import com.rag.users.user.api.support.RealGrpcPort;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -84,11 +85,11 @@ class UserApiStartupFailFastTest {
      * 而「连不上」正是本测试要制造的输入。
      */
     private static int findClosedPort() {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        } catch (IOException e) {
-            throw new IllegalStateException("找不到空闲端口", e);
-        }
+        // ⚠️ 原来用 `new ServerSocket(0)`：那是 **OS 盲选口**（macOS 临时段 49152–65535）
+        //    ⇒ 与 Docker 随机发布口**同段** ⇒ 「挑到没人监听的口」这个前提**直接失效**
+        //    ⇒ 邻居占 127.0.0.1:P 时我们的通配绑定照样成功、lsof 两个监听者并存
+        //    ⇒ 客户端被更具体的那个抢走 ⇒ **静默假红**（机制与实测见 support/RealGrpcPort）。
+        return RealGrpcPort.pick();
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -250,7 +251,11 @@ class UserApiStartupFailFastTest {
      */
     private static Server startRealGrpcServer() {
         try {
-            return NettyServerBuilder.forPort(0).build().start();
+            // ⚠️ 不能用 forPort(0)：那是 **OS 盲选口**（macOS 临时段 49152–65535）
+            //    ⇒ 与 Docker 随机发布口**同段** ⇒ 可能落到别的容器已发布的口号上
+            //    ⇒ 邻居占 127.0.0.1:P 时我们通配绑定照样成功、lsof 两个监听者并存
+            //    ⇒ 客户端被更具体的那个抢走 ⇒ **静默假红**（机制与实测见 support/RealGrpcPort）。
+            return NettyServerBuilder.forPort(RealGrpcPort.pick()).build().start();
         } catch (IOException e) {
             throw new IllegalStateException("起不了本地 gRPC server", e);
         }

@@ -980,3 +980,23 @@ go-zero@v1.10.2/rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Ha
 5. ⚠️ **follow 的黑名单 key 前缀是 `user:jwt_blacklist:`**（**不是** follow 自己的）
    —— Go `checkblacklistmiddleware.go:39` 的原样 ⇒ 与 user-rpc 的登出写入端**共用一份**黑名单
    ⇒ 本域的 Redis 依赖面**跨域**，改前缀会同时影响 user 域 ⇒ **未动**。
+
+
+---
+
+## 🔴 `DRIFT-FOLLOW-013` · **「OS 盲选口」族** · 本组件 **2 处**（2026-10-28 · G1 lane）
+
+> 📌 **机制 / 本机实测（Q3·Q6·Q7·Q8）/ 守门细节 / 效力边界 ⇒ [`docs/DRIFT/users/vs-common.md` §65](../users/vs-common.md)**
+> ⇒ 本条只记**本组件那一份**（不抄机制表，避免两处漂移）。
+
+| 族 | 位置（**改造后**行号） | 状态 |
+|---|---|---|
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `FollowApiStartupFailFastTest.java:92` | 已改 |
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `FollowApiStartupFailFastTest.java:258` | 已改 |
+
+- **危害**：`forPort(0)` / `new ServerSocket(0)` / `RANDOM_PORT` 三种写法都是**让 OS 从临时端口段（49152–65535）里盲选** ⇒ ⇒ 与 Docker 随机发布口**同段**
+  ⇒ ⇒ 邻居占**更具体地址** `127.0.0.1:P` 时我方**通配绑定照样成功**（实测：两个监听者并存）⇒ ⇒ 客户端被抢 ⇒ **静默假红**（看着像被测代码炸了，其实压根没被请求到）。
+- **修法**：全部改走**域内私有** `support/RealGrpcPort`（`support/RealTomcatPort`）⇒ **段**：`22300–22319`（follow 域段的子段）⇒ 段内挑口 ＋ **双地址 bind 探针**（只探通配**检不出**「更具体的占用者」）。
+- **段来源**：共享层已预分配给本域的段（`docs/DRIFT/global/vs-common.md` §4.10.19.3）⇒ **共享层台账零改动**（写权归 G4）。
+- **守门**：域级 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java`）**5 条** ⇒ 一并覆盖本组件 ⇒ **本组件不单独建守门**（避免两份规则漂移）。
+- **边界**：**本组件生产代码零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务）。

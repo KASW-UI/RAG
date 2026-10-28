@@ -23,6 +23,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.util.concurrent.TimeUnit;
+import com.rag.users.user.api.support.RealGrpcPort;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -93,11 +94,11 @@ class UserApiGrpcNegotiationTest {
     private static volatile boolean called;
 
     private static int freePort() {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        } catch (IOException e) {
-            throw new IllegalStateException("找不到空闲端口", e);
-        }
+        // ⚠️ 原来用 `new ServerSocket(0)`：那是 **OS 盲选口**（macOS 临时段 49152–65535）
+        //    ⇒ 与 Docker 随机发布口**同段** ⇒ 「挑到没人监听的口」这个前提**直接失效**
+        //    ⇒ 邻居占 127.0.0.1:P 时我们的通配绑定照样成功、lsof 两个监听者并存
+        //    ⇒ 客户端被更具体的那个抢走 ⇒ **静默假红**（机制与实测见 support/RealGrpcPort）。
+        return RealGrpcPort.pick();
     }
 
     /**

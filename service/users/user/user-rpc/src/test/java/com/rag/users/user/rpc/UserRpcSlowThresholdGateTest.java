@@ -42,6 +42,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import com.rag.users.user.rpc.support.RealGrpcPort;
 
 import static com.rag.common.observability.ObservabilityConstants.ATTR_DURATION;
 import static com.rag.common.observability.ObservabilityConstants.ATTR_SLOW;
@@ -296,7 +297,11 @@ class UserRpcSlowThresholdGateTest {
     private void warmUp() throws Exception {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        // ⚠️ 不能用 forPort(0)：那是 **OS 盲选口**（macOS 临时段 49152–65535）
+        //    ⇒ 与 Docker 随机发布口**同段** ⇒ 可能落到别的容器已发布的口号上
+        //    ⇒ 邻居占 127.0.0.1:P 时我们通配绑定照样成功、lsof 两个监听者并存
+        //    ⇒ 客户端被更具体的那个抢走 ⇒ **静默假红**（机制与实测见 support/RealGrpcPort）。
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);
         SlowHandlerProbe warm = new SlowHandlerProbe();
         warm.release.countDown();                 // 闸门直接开 ⇒ 立即返回
@@ -319,7 +324,11 @@ class UserRpcSlowThresholdGateTest {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        // ⚠️ 不能用 forPort(0)：那是 **OS 盲选口**（macOS 临时段 49152–65535）
+        //    ⇒ 与 Docker 随机发布口**同段** ⇒ 可能落到别的容器已发布的口号上
+        //    ⇒ 邻居占 127.0.0.1:P 时我们通配绑定照样成功、lsof 两个监听者并存
+        //    ⇒ 客户端被更具体的那个抢走 ⇒ **静默假红**（机制与实测见 support/RealGrpcPort）。
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);                  // ← 整条链（recover→breaker→shedding→业务拦截器）
         SlowHandlerProbe probe = new SlowHandlerProbe();
         Server server = builder.addService(slowUserService(probe, holdMillis)).build().start();

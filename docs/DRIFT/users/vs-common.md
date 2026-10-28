@@ -2407,6 +2407,15 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
 | **裸连型**（Kafka×3 / Nacos×2 / etcd / beanstalkd×2 / milvus / Sea-user-api） | 10 | **10/10 「超时无字节」** |
 
 ⇒ ⇒ **裸连判据在我这台上把 10 个**完全健康**的服务判成失效** ⇒ ⇒ ⇒ **这就是 G3 那条推断的断点**。
+> 🔴 **订正注记（2026-10-28 12:2x · G3 来信订正【归属】· 保留上文原文不改写）**
+>
+> **G3 已明确**：上文 §37.1 引的那封「机器级阻塞」信**确实是 G3 发给我域的**，但信里引用的
+> ① **裸 socket 探 PG**（`create_connection` → `sendall(b'\x00')` → `recv`）与
+> ② **JVM 卡在 `doAuthentication` 的线程栈** —— **这两件实测都是【G4 侧】的**
+> ⇒ ⇒ **G3 域从未上报过机器级阻塞** ⇒ ⇒ **我域台账里「G3 那条推断」「按 G3 同款判据」这两处归属要改口**：
+> - **「那封信的发出方」＝ G3**（原文不误）⇒ ⇒ **「探针与栈的产出方」＝ G4**（本条订正）⇒ ⇒ **§37 的结论不变**（转发完好、机器级阻塞不成立、我域反证成立）⇒ ⇒ **只有归属被更正**。
+> - ⇒ ⇒ **教训（已记 memory）**：「转述里夹带的【证据出处】」也可能被安到**错的人头上** ⇒ ⇒ **回信里点名「某某的探针」时，要核它到底是谁做的** —— 我域当时是**照着 G3 的信**复现的，**没去问那两件东西是谁做的** ⇒ ⇒ **不是 G3 冒领，是我没核**。
+
 
 **第 2 步 · 改用「发协议正确请求 ⇒ 要协议级应答」**（同一批 10 个 + 2 个补探）：
 
@@ -2648,6 +2657,20 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
 - ⇒ ⇒ **建议写进 C7 收口协议的两条**（我采纳并已固化进本 lane 的固定命令）：
   ① **域级回归命令必须带 `-am`**（且在报告里写明 **reactor 实跑了几个模块** ⇒ 才能证明 `users-common` 用的是本树源码）；
   ② **域级数字 = 本域模块的 surefire 目录逐文件求和**（我 669 / G2 668）⇒ **共享层单列**（两边共享层都 327）⇒ ⇒ **reactor 总数（996 / 995）不是域级数** ⇒ ⇒ **两边共享层同为 327 ⇒ 域级差的那 1 条与共享层无关**。
+> 🔴 **订正注记（2026-10-28 12:2x · G2 来信订正【互校基线】· 保留上文原文不改写）**
+>
+> **上文 ② 里的数字（我 669 / G2 668 · 共享层两边都 327 · reactor 996 / 995）＝ 那一轮的快照，现在已过期**：
+> - G2 侧**当前权威值**（2026-10-28 实测）：域侧 8 模块 **677** ＋ 共享层 **330** ⇒ **9 模块 = 1007**；
+>   共享层随后在 C7 复跑（并入 G4 `a38ad75` 之后）＝ **331**。
+> - 我域 §54 记录的共享层 `service/common` = **333**（2026-10-28 实测）⇒ ⇒ **两棵树的共享层数不等（333 vs 331）**
+>   ⇒ ⇒ **根因候选 = 两棵树并入的 G4 尖端不同**（`service/common` 是 G4 的 EXCLUSIVE 面 ⇒ 它的条数**随 G4 提交变**）
+>   ⇒ ⇒ **不推算**，归 G4 复核。
+> - ⇒ ⇒ **「两边共享层同为 327 ⇒ 域级差的那 1 条与共享层无关」这条结论在【当前】数字下不再成立**
+>   （共享层已不等 ⇒ 那 1 条的归属**不能**再靠「共享层相同」排除）⇒ ⇒ **保留原文 + 标注失效边界**。
+> - ⇒ ⇒ **仍然成立的**：**「reactor 总数不是域级数」**（域级数 = 本域模块的 surefire 目录逐文件求和）
+>   ＋ **「域级回归命令必须带 `-am`」**（`users-common` 是 G4 EXCLUSIVE ⇒ 8 个 api + 2 个 rpc 跨 4 条 lane）
+>   ⇒ ⇒ **我域每轮命令都带 `-am`**（§42.1 的固定命令未变，**变的只是基线数字**）。
+
 
 ### 42.2 🔴 **`check-tomcat-limits.py` 的根因定位被推翻**（G2 / G3 / 我此前都报成「落点 `tools/difftest/**` 无人拥有 ⇒ 需合并收口执行者」⇒ ⇒ **错**）
 
@@ -2658,7 +2681,17 @@ G3 报（观测窗口 13:50~13:58）：本机 Docker「宿主→容器」端口�
     （`user-api`=`raw` / `admin-api`=`raw` / `follow-api`=`envelope` ⇒ **与权威表逐条一致**）。
 - 🟢 **配对已机器实证**（同一套假 ROOT，只把 `task-api` 的 yml 改成守门要求的写法 ⇒ **我树仍 0 改动**）：
   `mode: raw` ⇒ `mode: "off"` ⇒ ⇒ **守门 EXIT=0** ⇒ ⇒ ⇒ **「G2 那半 + G4 那半 = 全绿」已被机器跑出来，不是推断。**
-- ⇒ ⇒ **真正剩下的唯一缺口 = `service/task/task-api/src/main/resources/application.yml` ⇒ 【G2 写权内】** ⇒ ⇒ **不需要合并收口执行者** ⇒ ⇒ ⇒ **三条 lane 之前都把这事推给合并收口执行者 ⇒ ⇒ 根因被误定位 ⇒ 代价是多绕了好几轮** ⇒ ⇒ ⇒ **⇒ 这条要以「根因纠正」而不是「再推一次」的方式落地。**
+- ⇒ ⇒ **真正剩下的唯一缺口 = `service/task/task-api/src/main/resources/application.yml` ⇒ 【G2 写权内】**
+> 🟢 **订正注记（2026-10-28 12:2x · G2 来信 + 我域独立核实 · 保留上文原文不改写）**
+>
+> **「我树 `check-tomcat-limits.py` 红」的真实原因已核实 ＝ 上游修法未并入我树（不是我域缺陷）**：
+> - G2 侧已落 **`4786eb5`**（`service/task/task-api/src/main/resources/application.yml`：`mode: raw` ⇒ `mode: "off"`，
+>   提交时间 **2026-10-27 04:20**，**早于** G4 落 `d4e4745`）⇒ ⇒ **顺序天然正确**（先改 yml、再合守门）。
+> - 我域**独立核实**（不采信转述）：`git merge-base --is-ancestor 4786eb5 HEAD` ⇒ **不在我树** ⇒
+>   ⇒ ⇒ **我树那道红 =「G2 的 task 域修法尚未并入我树」** ⇒ ⇒ **并入即绿**（G2 侧已实测 `check-tomcat-limits.py` **EXIT=0** · 10/10 api 四旋钮 ✅）。
+> - ⇒ ⇒ **对我域的意义**：我域那 3 个 api（`user-api` / `admin-api` / `follow-api`）**四旋钮本就全 ✅**
+>   ⇒ ⇒ **不必等「整合者」**，等 G2 的提交并入我树即可 ⇒ ⇒ **域级全量必须继续带 `-am`**（`-am` 才是「并入后重跑」）。
+ ⇒ ⇒ **不需要合并收口执行者** ⇒ ⇒ ⇒ **三条 lane 之前都把这事推给合并收口执行者 ⇒ ⇒ 根因被误定位 ⇒ 代价是多绕了好几轮** ⇒ ⇒ ⇒ **⇒ 这条要以「根因纠正」而不是「再推一次」的方式落地。**
 - ⚠️ **语法坑（守门自己写明的）**：`off` **必须带引号** —— YAML 1.1 会把未加引号的 `off` 解析成**布尔 false** ⇒ ⇒ 正确写法 `mode: "off"`。
 - ⇒ ⇒ **§41 的「持住不合并」由「等 G2 进来」升级为「配对条件已实证」** ⇒ ⇒ **解除条件不变**：G2 的 yml 订正进我树 ⇒ ⇒ 再成对合 `d4e4745` ⇒ ⇒ 届时我树 10 个 api 进程全 ✅。
 
@@ -3053,6 +3086,26 @@ python3 /tmp/g1_gozeroref.py    # 138 条唯一引用
 > ⇒ ⇒ **这是【活的路由句】不是历史记述** ⇒ ⇒ 它指向的角色**根本不存在** ⇒ ⇒ **正是 §47.4 要根除的那个失败模式**（读到「归整合者」就去找「整合者」）
 > ⇒ ⇒ **该改，且该由域侧自己改**（我域零落码 —— 7 份不在我写权面）。
 > ⇒ ⇒ **已分别告知 G2 / G3**（各 1 行，指明位置）＋ **孤儿项登记给合并收口那一步**（§51.2 表已补一行）。
+
+> 🔴 **订正注记（2026-10-28 12:1x · 故障处置会话来信 ② 的「改判」＋ 我域独立复核 · 保留上表原文不改写）**
+>
+> **上表 ③ 的「需 Jason 拍板」作废 ⇒ 改判转派 G4**（独立核实，**不采信转述**）：
+> - `tools/check-ledger-selfcheck.py` 在 G4 侧有 **2 笔实质提交**（`9037a2b` 提取器补 `@` ＋ `139b428` 第 5 层分子/分母口径）
+>   ⇒ ⇒ **G4 是该文件的实质持有者** ⇒ ⇒ 「两张表都查不到 ⇒ 写权孤儿」这个前提
+>   **只对「不在任何 lane 白名单」成立，对「不在 13 项 SHARED 清单」不成立** ⇒ ⇒ **改判 ＝ 归 G4**
+>   ⇒ ⇒ **本项不再是「等 Jason 拍板」项**（台账登记类事项不占用拍板额度）。
+> - ⚠️ **但活还没干**：G4 树里 `LEDGER_FILES` **仍是 `task` / `users` / `users-admin` 三个键**
+>   ⇒ ⇒ **follow 等域还没加进去** ⇒ ⇒ 「已转派」≠「已完成」⇒ ⇒ **回执未到前不得记成已闭合**。
+> - ⚠️ **口径问题（必须与「补域键」一起给 G4，否则补完仍不算数）**：
+>   `docs/DRIFT` 下共 **86** 份，守门 `LEDGER_FILES` **只覆盖 10 份**
+>   ⇒ ⇒ **未被覆盖的 76 份**里有 394 个路径引用、**真缺失 1 个**
+>   （`tools/difftest/check-ddl-static.py` 被 `docs/DRIFT/global/_README.md` ＋ `docs/DRIFT/like/rpc.md`
+>   引用时**少一级 `difftest/`**）
+>   ⇒ ⇒ **补 `LEDGER_FILES` 只解决「这些域被扫到」，不解决「层 1 的去噪口径对不对」**
+>   ⇒ ⇒ 我域那 8 处判定落在「去噪那 19 条」还是「层 4 的 Go 锚点/行号面」，
+>   需按 `--print` **全量取一次**再定 ⇒ ⇒ **只补一条不够**。
+> - ⇒ ⇒ **已发信 G4**（2026-10-28 12:1x · 消息 ⑤）⇒ ⇒ **本项归 G4，回执待收**。
+
 
 ### 47.6 🟢 **本轮提交清单**
 
@@ -4432,3 +4485,170 @@ mvn -B -o -DargLine=-Xmx1g -am -pl service/users/user/user-rpc,service/users/adm
   ⇒ ⇒ 实测：**我树 0 个 maven 进程** ✔ ⇒ ⇒ **窗口确已让出**；同时实测到 **G4 的全量在跑**（pid `34244`）
 - ⚠️ **这已是本会话第 4 次撞上这一族**（我域 §55.8「命令替换覆盖 `$?`」· G4 的等待脚本 5.7 小时自匹配 · G4 刚才认错的自匹配 · 本条）
   ⇒ ⇒ **判据的命令行里出现被匹配的串 ⇒ 它就会匹配自己** ⇒ ⇒ **占位类判据必须写成「只认进程类名 / 用括号技巧 / 写进独立脚本」**
+
+---
+
+## 65. 🔴 新立 5 条：**「OS 盲选口」族**（A/C/D 三形态 · 我域 **21 处**）⇒ 已修 ＋ 新守门 5 条（2026-10-28 · G1 lane）
+
+**新立条目**：`DRIFT-USERRPC-V-016`（user-rpc）· `DRIFT-USERAPI-017`（user-api）· `DRIFT-ARPC-014`（admin-rpc）· `DRIFT-ADMINAPI-013`（admin-api）· `DRIFT-FOLLOW-013`（follow 域）
+
+### 65.1 起因（G2 的波级报点 ⇒ 但**口径不全** ⇒ 我域自核后修正）
+
+G2 在 2026-10-28 的 r30 全量实测踩中「客户端连上了邻居的协议」（收到 Redis 的 `-ERR ` 前缀，而不是 gRPC 的 SETTINGS 帧），并给出波级报点：全仓 `forPort(0)` 真实代码 **34** 处，其中 **G1 域 9** 处。
+
+**本 lane 自核（逐文件 grep ＋ 逐条核对）⇒ 差 2 处**：
+
+| 组件 | G2 报点 | **G1 自数** | 差 |
+|---|---|---|---|
+| follow | 2 | **3**（follow-api 1 ＋ follow-rpc 2） | **+1** |
+| user | 3（只算 user-rpc） | **4**（user-rpc 3 ＋ user-api 1） | **+1** |
+| admin-rpc | 3 | **3** | 0 |
+| admin-api | 1 | **1** | 0 |
+| **合计** | **9** | **11** | **+2** |
+
+⇒ 漏的两处都是 **`NettyServerBuilder.forPort(0)`**（`FollowApiStartupFailFastTest:253` ＋ `UserApiStartupFailFastTest:253`）
+⇒ ⇒ **按 `ServerBuilder.forPort(0)` 文本搜会漏掉 `NettyServerBuilder.forPort(0)`** ⇒ 已回报 G2（波级复扫建议两种前缀都吃）。
+⇒ ⚠️ **这正是「不采信转述、自己重数」的又一处实例**：转述数字不是错的，是**口径漏了一种写法**。
+
+### 65.2 🔴 自扫同族 ⇒ 我域不止 A 族（**三族 21 处**）
+
+| 族 | 写法 | 我域处数 | 有没有客户端连上去 | 危害形态 |
+|---|---|---|---|---|
+| **A** | `forPort(0)` | **11** | **有**（测试自己起 server 再连回去） | **静默被抢** |
+| **C** | `new ServerSocket(0)` | **8** | 间接（要「没人监听」这个**前提**） | **前提直接失效** |
+| **D** | `RANDOM_PORT`（Tomcat） | **2** | **有**（`@LocalServerPort` ＋ 真 HTTP client） | **静默被抢** |
+| B | `grpc.server.port=0` | 24 | **无**（我域**零** `@LocalGrpcPort` 用法） | 无（被抢也无所谓）⇒ **不落码**，已报 G4（段表口径缺口） |
+
+⇒ ⇒ **A ＋ C ＋ D = 21 处**全部落在**我域写权面内**，且**全部只改测试代码**
+⇒ ⇒ **我域生产代码零改动** ⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务，见 §65.7）。
+
+### 65.3 🔴 机制（**本机实测 · 真 jar 跑出来 · 非推理**）
+
+探针：`/tmp/g1_port_probe/Probe.java`（Q1–Q5）＋ `Probe2.java`（Q6–Q8）· classpath 取自
+`mvn -o -pl service/users/user/user-rpc dependency:build-classpath`（**真 `grpc-netty-shaded`**）。
+
+| # | 场景 | 实测结果 | 含义 |
+|---|---|---|---|
+| Q3 | 邻居占**通配** `0.0.0.0:P` ⇒ 我方 `NettyServerBuilder.forPort(P)` | **FAILED**：`BindException: Address already in use` ／ `Failed to bind to address 0.0.0.0/0.0.0.0:P` | 通配撞通配 ＝ **响亮失败**（好查） |
+| **Q6** | 邻居占**具体** `127.0.0.1:P` ⇒ 我方 `forPort(P)` | **SUCCESS**；`lsof` 显示**两个监听者并存**：`TCP 127.0.0.1:P (LISTEN)` ＋ `TCP *:P (LISTEN)` | ⇒ **危害方向 ＝ 更具体的地址** ⇒ 客户端连 `127.0.0.1:P` **命中更具体的那个** ⇒ 请求打到邻居 ⇒ **静默假红** |
+| Q8 | 只探 `0.0.0.0:P`（邻居占 `127.0.0.1:P` 时） | **SUCCESS（检不出）** | ⇒ 通配探针**不够** |
+| Q7 | 探 `127.0.0.1:P`（同上） | **FAILED BindException（能检出）** | ⇒ 必须**双地址**探针 |
+| Q4 | `forPort(0)` 实取口 | **52934**（落在 **49152–65535** 内） | ⇒ 与 Docker 随机发布口**同段** |
+
+⇒ ⇒ **两句结论**：
+1. **危害方向是「更具体的地址」，不是「通配」** ⇒ ⇒ **只探通配的端口选取类挡不住真正的危害形态**
+   ⇒ ⇒ 已提醒 **G2**（`GrpcTestPort`）与 **G4**（共享层 `RealTomcatPort` / `RealGrpcPort`）复核；
+2. **本机 Docker 发布口是「混」的**：`com.docke` 同时持 `*:port`（通配）**与** `127.0.0.1:port`（具体）⇒ ⇒ **两类都要防**。
+
+### 65.4 修法（域内自闭合 · **共享层零改动**）
+
+**① 段**：用**共享层已预分配**给本域的段（§4.10.19.3）⇒ **不改共享层台账**（那在 G4 写权面内）：
+
+| 组件 | 类 | 段 | 段来源 |
+|---|---|---|---|
+| user-api | `RealGrpcPort` / `RealTomcatPort` | 22200–22209 / 22210–22219 | users 域 22200–22299 |
+| user-rpc | `RealGrpcPort` | 22220–22239 | 同上 |
+| admin-api | `RealGrpcPort` / `RealTomcatPort` | 22240–22249 / 22250–22259 | 同上 |
+| admin-rpc | `RealGrpcPort` | 22260–22279 | 同上 |
+| follow-api | `RealGrpcPort` | 22300–22319 | follow 域 22300–22399 |
+| follow-rpc | `RealGrpcPort` | 22320–22339 | 同上 |
+
+（22280–22299 ／ 22340–22399 ＝ 域内预留 ⇒ 守门拿它当「脚手架段」，**不与生产段抢**）
+
+**② 类形状**：沿用 **G3 域 comment-rpc 的 `support/RealGrpcPort`**（段内挑口 ＋ **双地址 bind 探针** ＋ `lsof` 诊断 `holders()`）⇒ 跨域形状一致 ⇒ 波末好统一。
+⚠️ **不引用 G2 域的 `GrpcTestPort`**（跨域不可见 ＋ 共享层只读）⇒ **域内私有副本**。
+
+**③ 21 处调用点**：
+- A 11 处：`forPort(0)` ⇒ `forPort(RealGrpcPort.pick())`
+- C 8 处：`new ServerSocket(0)` 探针 ⇒ `RealGrpcPort.pick()`（段内空闲口 ⇒ **同样满足「没人监听」**，且不会落到 Docker 已发布口上 ⇒ **前提不失效**）
+- D 2 处：`RANDOM_PORT` ⇒ `DEFINED_PORT` ＋ `@DynamicPropertySource` 注册 `server.port = RealTomcatPort.pick()`（G3 favorite-api 同款）
+
+### 65.5 新守门 `BlindPortGateTest`（user-rpc · **5 条**）
+
+| # | 断言 | 判别力来源 |
+|---|---|---|
+| ① | 我域 6 模块 `src/test/java` **零**盲选口（A/C/D 三形态） | **剥注释后**再扫；并断言**扫过文件数 ≥ 100** ＋ 6 个模块都被扫到 ⇒ 「零命中」不可空转 |
+| ② | 8 个端口类的段落在**本域预分配段**内 ＋ **子段两两不重叠** ＋ 不在 49152–65535 ＋ 不撞 Testcontainers 段 22700–22999 | 源扫 8 个类的 `FIRST`/`LAST` 常量 ＋ 两两区间比对 |
+| ③ | 挑到的口**真能起 gRPC server** 且客户端 **READY** | 真起 server ＋ 真 channel（**不是 mock**） |
+| ④ | **判据自检**：造假源码含 `forPort(0)` ⇒ 扫描器必须报出；**注释里的字面量必须不报** | 「零命中是假信号」的解药 |
+| ⑤ | **探针判别力**：占住 `127.0.0.1:P` ⇒ `isFree(P)` 必须判为**不可用** | 这正是「静默被抢」的检出点（Q7） |
+
+### 65.6 📌 顺手记一个**自踩**：改完之后源扫报「17 处残留」
+
+改造后 `grep forPort(0)` 报 **17**、`grep new ServerSocket(0)` 报 **8**
+⇒ ⇒ **剥注释后实得 0** ⇒ ⇒ **那 17 / 8 全是我自己写进注释里的字面量**（每处改动都配了「为什么不能这么写」的注释）
+⇒ ⇒ **守门若不剥注释，就会对着 javadoc 假阳性** ⇒ ⇒ ①⑤ 一律按「剥注释后」实现。
+
+### 65.7 效力边界（如实登记，不夸大）
+
+- 本节只覆盖**我域 6 个模块的测试树**；`service/common/**` 与 `service/users/users-common/**` 是**共享层**（写权归 G4）⇒ **不纳入本守门**。
+- **我域生产代码零改动** ⇒ 不影响任何对外行为 ⇒ **不构成 Go 对照项**（Go 侧无对应物）。
+- 「B 族 24 处不落码」的依据是**我域的实测事实**（零 `@LocalGrpcPort`）⇒ **不外推到别的域**。
+- 段号取自**共享层已预分配**的段 ⇒ 共享层段表那两行「🟡 预分配 · 域侧未落码」**需要 G4 更新**（已报）⇒ **我域不改共享层台账**。
+- 机制结论来自**本机 macOS** 的 socket 语义实测 ⇒ ⇒ **不外推到别的 OS**（Linux 的「更具体地址优先」语义需另测）。
+
+### 65.8 附带：清理 `/tmp/difftest5k` 的**我域 8 个孤儿进程**
+
+`etime` ＝ **1 天 14 小时 50 分**、全部 `ppid=1`（孤儿）⇒ 8 个是我域组件（go-user-rpc / go-admin-rpc / go-user-api / go-admin-api ＋ java user-rpc / admin-rpc / user-api / admin-api）
+⇒ ⇒ **本 lane 处置权内** ⇒ ⇒ SIGTERM 后 4 个 java 进程**未退** ⇒ 补 SIGKILL
+⇒ ⇒ **终态：我域 8 个全清，12 个口释放**（64210 / 63081 / 64900 / 63889 / 24004 / 24094 / 23081 / 24097 / 24095 / 23888 / 24096 / 23889）
+⇒ ⇒ **G2 的 3 个 message 侧进程原封未动**（非我域 ⇒ 不碰）。
+
+### 65.9 🟢 **本轮验证（2026-10-28 12:0x~12:5x · 域级 6 模块全量 · 单批次）**
+
+**命令**（**带 `-am`** ⇒ `users-common` / `service/common` 用的是**本树源码** ⇒ 不是 `~/.m2` 旧 jar）：
+```
+mvn -B -o -DargLine=-Xmx2g -am -pl service/users/user/user-api,service/users/user/user-rpc,service/users/admin/admin-api,service/users/admin/admin-rpc,service/follow/follow-api,service/follow/follow-rpc clean test   -Dtest='!GoStyleParamLimitOffModeGateTest' -Dsurefire.failIfNoSpecifiedTests=false
+```
+
+> ⚠️ **排除口径（透明登记，不冒充「全绿」）**：排除了 **1 个共享层用例**
+> `com.rag.common.http.GoStyleParamLimitOffModeGateTest#manyNonEmptyValuesPassThroughWhenGateIsOff`
+> ⇒ ⇒ **理由**（实测取证，见 §65.10）：该用例在 `service/common` 全套件里**间歇红**（1/2 轮），
+> **单跑 2/2 绿** ⇒ ⇒ **共享层域内 flake**（`service/common` ＝ **G4 写权**）⇒ ⇒ **我域不碰，已发信 G4**。
+> ⇒ ⇒ **本轮数字是「排除这 1 条共享层间歇红」的域级数**（连带 `service/common` 由 333 变 329）。
+
+| 组件 | 路径 A（maven `Results:` 汇总行）| 路径 B（surefire XML 求和）|
+|---|---|---|
+| `user-api` | **127** | **127** |
+| `user-rpc` | **162** | **162** |
+| `admin-api` | **149** | **149** |
+| `admin-rpc` | **122** | **122** |
+| `follow-api` | **74** | **74** |
+| `follow-rpc` | **83** | **83** |
+| **合计** | **717** | **717** |
+
+- **两条独立路径逐模块相等** ⇒ ⇒ 互证「同一批用例**没被数两次**」（若被数两次，两条路径会**同时**偏大）。
+- **reactor 实跑 18 个模块**（目标 6 ＋ 非目标 `common` 329 ＋ `users-common` 39 ＋ `follow-common` 37）⇒ ⇒ **域级 717 ＋ 非目标 405 = 1122 逐字相等** ✔
+  ⇒ ⇒ **第三方对账**：reactor 全部模块的 surefire XML 求和 = **1122**（与上式**逐字相等**）⇒ ⇒ 零重复计数。
+- **增量归因（712 → 717 = +5）**：**user-rpc 157 → 162** ＝ **新守门 `BlindPortGateTest` 的 5 条** ⇒ ⇒ **逐条可指名、无余量** ✔
+  ⇒ ⇒ **共享层 333 → 329 ＝ −4** ＝ **被排除的那个共享层用例类正好 4 条**（`GoStyleParamLimitOffModeGateTest`）⇒ ⇒ **排除口径可复算** ✔
+- **BUILD = SUCCESS** · **0 失败 / 0 错误 / 0 跳过** · **0 次撞口症状**
+  （`Address already in use` / `port is already allocated` / `http2 exception` 命中 **0**）
+  ⇒ ⇒ **本轮 21 处改造没有引入新的环境性抖动**。
+- **新守门 `BlindPortGateTest` 5 条全绿**（单跑 `mvn -pl service/users/user/user-rpc test -Dtest='BlindPortGateTest'` ⇒ **EXIT=0**）。
+
+### 65.10 🔴 **共享层一条【间歇红】卡住域级回归 —— 取证 4 次 + 归属 G4（我域不碰）**
+
+**现象**：`service/common` 的 `com.rag.common.http.GoStyleParamLimitOffModeGateTest#manyNonEmptyValuesPassThroughWhenGateIsOff`
+⇒ `Raw[status=-1, body=, head=] ==> expected: <200> but was: <-1>`（**`-1` ＝ 客户端整体异常，不是 400**）
+⇒ ⇒ **`-am` 构建在 `service/common` 就停 ⇒ 我域 6 模块根本没跑到**（⇒ 域级数字取不到）。
+
+**取证（4 次跑批，2026-10-28 12:0x）**：
+
+| 跑法 | 结果 |
+|---|---|
+| 域级全量 第 1 轮（`clean test` · `-am`） | `service/common` **绿** ⇒ 跑到 user-rpc 才红（那次红的是**我自己的守门**，已修） |
+| 域级全量 第 2 轮（`clean test` · `-am`） | `service/common` **红**（本条）⇒ **构建停在 common** |
+| `service/common` 单跑该类（第 1 次） | **绿**（4/4 · EXIT=0） |
+| `service/common` 单跑该类（第 2 次） | **绿**（4/4 · EXIT=0） |
+
+⇒ ⇒ **单跑 2/2 绿 · 全量套件里 1/2 轮红** ⇒ ⇒ **间歇红**（顺序 / 环境相关）⇒ ⇒ **不是确定性缺陷**。
+
+**不是我引入（源码级）**：我本轮 diff 里 **`service/common` 路径命中数 = 0**
+（`git diff --cached --name-only | grep -c service/common` ⇒ **0**）⇒ ⇒ 本条**与我域改动无关**。
+
+**归属**：`service/common/**` ＝ **G4 写权（EXCLUSIVE）** ⇒ ⇒ **我域不碰** ⇒ ⇒ **已发信 G4**（附上表取证 ＋ 复现建议 ＋ 提醒「它会卡住**所有 lane** 的 `-am` 回归 ⇒ ⇒ 波末 C7 收口会被它卡死，除非它恰好不红 —— 那是赌运气，不可作为收口口径」）。
+
+**我域本轮处置（透明登记）**：第 3 轮域级全量用 `-Dtest='!GoStyleParamLimitOffModeGateTest' -Dsurefire.failIfNoSpecifiedTests=false`
+**显式排除这一条** ⇒ ⇒ **该轮数字是「排除 1 条共享层间歇红」的域级数**（§65.9）⇒ ⇒ **不冒充「全绿」**。
+

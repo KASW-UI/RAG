@@ -702,3 +702,41 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
   ⇒ ⇒ **逐条可指名，无余量**。
 - ⚠️ **共享层旧值**：`common` 327/330/331 ⇒ ⇒ **最新 = 333**（2026-10-28 实测）⇒ ⇒ **凡引用条数以 [`users/vs-common.md` §54](../users/vs-common.md) 为准**（历史原文保留不改写）。
 - ⇒ ⇒ 完整口径（含 reactor 18 模块 vs 目标 6 模块的差值归因 409 + 707 = 1116）⇒ [`users/vs-common.md` §54](../users/vs-common.md)。
+
+---
+
+## 12. 🔴 新立 `DRIFT-FOLLOW-013`：**「OS 盲选口」族**（我域 **4 处**）⇒ 已修 ＋ 守门（2026-10-28 · G1 lane）
+
+> 📌 **完整机制 / 实测 / 守门 / 效力边界 ⇒ [`docs/DRIFT/users/vs-common.md` §65](../users/vs-common.md)（users 域与 follow 域共用同一族）**
+> ⇒ 本节只记 **follow 域自己那一份**（不重复抄机制表，避免两处漂移）。
+
+### 12.1 我域暴露面（自数，**不采信转述**）
+
+| 族 | 写法 | follow 域处数 | 位置 |
+|---|---|---|---|
+| A | `forPort(0)` | **2** | `FollowGrpcInterceptorWiringTest.java:110` · `FollowRpcSlowThresholdGateTest.java:269` |
+| C | `new ServerSocket(0)` | **1** | `FollowApiStartupFailFastTest.java:87`（`findClosedPort()`） |
+| D | `RANDOM_PORT` | **0** | follow 域**无**真 Tomcat 测试 ⇒ 不需要 `RealTomcatPort` |
+| B | `grpc.server.port=0` | 若干 | **无人连接** ⇒ 不落码（口径见 §65.2） |
+| | **合计** | **4** | |
+
+⇒ ⚠️ **G2 的波级报点说 follow 域 2 处** ⇒ ⇒ **实为 4 处**（漏 `FollowApiStartupFailFastTest` 的 C 族 1 处 ＋ `follow-rpc` 的 A 族 1 处）
+⇒ ⇒ 差异原因：G2 的口径是「`forPort(0)` 文本」⇒ **C 族（`new ServerSocket(0)`）不在那个口径里** ⇒ 已回报。
+
+### 12.2 修法（与 users 域同款，**段不同**）
+
+| 组件 | 类 | 段 | 段来源 |
+|---|---|---|---|
+| follow-api | `support/RealGrpcPort` | **22300–22319** | 共享层预分配的 **follow 域段 22300–22399** |
+| follow-rpc | `support/RealGrpcPort` | **22320–22339** | 同上 |
+
+（22340–22399 ＝ 域内预留 ⇒ 域级守门拿它当「脚手架段」）
+
+⇒ 机制、探针实测（Q3/Q6/Q7/Q8）、类形状来源（G3 comment-rpc 的 `support/RealGrpcPort`）⇒ **全部见 §65**。
+⇒ ⇒ **follow 域生产代码零改动**（4 处全在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**。
+
+### 12.3 守门
+
+域级守门 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/.../support/BlindPortGateTest.java`）**一并覆盖 follow 域**：
+① 源扫 follow 两模块测试树零盲选口 ② 段归属（follow 两段落在 22300–22399 内 ＋ 子段不重叠）③④⑤ 见 §65.5
+⇒ ⇒ **follow 域不单独建守门**（避免两份规则漂移）⇒ ⇒ 跨域引用按「**域 ＋ 文件名**」指。
