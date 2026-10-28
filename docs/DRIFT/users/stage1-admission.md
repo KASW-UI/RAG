@@ -367,6 +367,10 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | 13 | `check-ledger-count.py` | **0** | 索引条目计数与仓库现状一致 |
 | 14 | `check-doc-links.py` | **1** | 🔴 **1 项锚点失效（既存，非本轮引入）**：`docs/PhaseGoal-judge.md:99` 自指锚点 `#三矩阵-a终点指标与当前判定39-行` ⇒ **主工作区同样 FAIL** ⇒ **属基线文件 ⇒ 不在 G1 写权面 ⇒ 上报收口** |
 | 15 | `check-agents-budget.py` | **0** | `AGENTS.md` 32,721 B / 279 行 ⇒ 在预算内（余量 47 B）|
+| 🆕 16 | `mvn … -DskipTests … package`（**先决**：§5.4 的 `check-jar-executable.sh` 必须先有 fat jar） | **0** | **BUILD SUCCESS · 12.484 s** ⇒ **8 个 jar 产出**（user-api/user-rpc/admin-api/admin-rpc/users-common/follow-api/follow-rpc/follow-common）|
+| 🆕 17 | `bash tools/difftest/check-jar-executable.sh` | **0** | 🟢 **本 lane 的 6 个 api+rpc 模块全部 ✅**（`follow-api` 80M · `follow-rpc` 64M · `admin-api` 80M · `admin-rpc` 79M · `user-api` 80M · `user-rpc` 79M，均含 `Main-Class: org.springframework.boot.loader.launch.JarLauncher`）⇒ ⚠️ 其余 14 个 api/rpc 模块报「没有产物（未构建？）」= **别的 lane 的模块**，**不算失败也不计通过** ⇒ 基线 §九 `G-10` 的「未构建 ⇒ 跳过且不计失败」缺口**在本 lane 已闭合**（本 lane 覆盖 6/6）|
+| 🆕 18 | `bash tools/difftest/exp-difftest-grpc-user9.sh --no-build`（**双侧活体对拍**） | **1** | 🔴 **43 场景 / 39 等价 / 4 处差异** ⇒ **4 处全部是 N-2 已签字的 Go 源码乱码文案**（`鐢ㄦ埛涓嶅瓨鍦?` ×3 + `澶村儚鍘嗗彶涓嶅瓨鍦?` ×1）⇒ **无新漂移**；与 2026-10-24 基线（`users/user/rpc.md` §9.1.2「43 场景 / 39 等价 / 4 处差异」）**逐条同形** ⇒ **本轮 = 独立复现**（详见 §5.4bis）|
+| 🆕 19 | `check-no-prod-secrets.py`（**G4 新增守门** `19b2edf`，脚本取自 `align/g4-service-common`） | **1** | 🔴 **6 条未豁免命中，全部在 `service/users/users-common/**`** ⇒ **G4 写权面**（该脚本明写 users-common **永不可豁免**）⇒ **我域（G1 白名单内）未豁免命中 = 0** ✅；已豁免 **91** 条（我域 25 条，落在 `src/test/**` 夹具面 + `src/main/java/**` javadoc 面 + `application.yml` 默认值面）⇒ ⚠️ **6 条红是「树间版本差」**：G4 分支已把 `users-common/…/JwtUtil.java` 去明文（`git diff` = **5 insertions / 13 deletions**）⇒ **合并后应归零** ⇒ 登记为**合并收口回归时复验项**，**不是本域缺陷**（见 §6.3 `S1-USERS-013`）|
 
 ### 5.4 ⛔ 本轮**明确未跑**的命令（诚实边界）
 
@@ -374,12 +378,33 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 |---|---|---|
 | `bash tools/difftest/run.sh`（users 双侧活体 HTTP wire 对拍） | 需 **Go 栈 + RAG 栈双栈编排**（起 etcd / PG / Redis + 两个 Go 二进制 + 两个 RAG jar）⇒ 本轮未起 | **沿用台账既有记录**（2026-10-24/27 的 52/52 等）⇒ **本轮未复验** ⇒ 证据强度**不提升** |
 | `python3 tools/difftest/matrix.py`（users DTO 字段笛卡尔） | 同上（需双栈在跑）⇒ 未跑 | 同上 |
-| `bash tools/difftest/exp-difftest-grpc-user9.sh` | 同上 | 同上 |
-| `bash tools/difftest/exp-difftest-grpc-admin-errors.sh --stacks-up` | 同上 | 同上 |
-| `bash tools/difftest/exp-difftest-redis-blacklist.sh` | 同上 | 同上 |
-| `bash tools/difftest/check-jar-executable.sh` | 需**先 `mvn package`**（本轮只跑了 `test` ⇒ 无 fat jar）⇒ 未跑 ⇒ ⚠️ 基线 §九 `G-10` 记的「未构建 ⇒ 跳过且不计失败」缺口**对本轮同样成立** | — |
+| ✅ `bash tools/difftest/exp-difftest-grpc-user9.sh --no-build` | ✅ **本轮已跑**（2026-10-29 02:4x）⇒ **43 场景 / 39 等价 / 4 处差异**（4 处全是 N-2 已签字的 Go 乱码文案）⇒ 见 §5.4bis | **本轮已复验** ⇒ 证据强度**提升**（用户域双侧活体：**可复算**）|
+| `bash tools/difftest/exp-difftest-grpc-admin-errors.sh --stacks-up` | 需**双栈编排**（沿用 `run.sh` 的两套 admin-rpc）⇒ 本轮未跑。⚠️ **资产在版本控制内**（`exp-difftest-grpc-admin-errors.sh` + `GrpcAdminDualPortRunner.java` 均 `git ls-files` 命中）⇒ **可复算**，只是本轮未复跑 | 沿用台账既有记录（2026-10-23 的 18 cases）⇒ 本轮未复验 ⇒ 证据强度**不提升** |
+| `bash tools/difftest/exp-difftest-redis-blacklist.sh` | 需双栈 + **故障注入**（停 Redis / `CLIENT PAUSE`）⇒ 本轮未跑。⚠️ **资产在版本控制内** ⇒ 可复算 | 同上 |
+| ✅ `bash tools/difftest/check-jar-executable.sh` | ✅ **本轮已跑**（**先 `mvn package`** ⇒ 8 个 jar 产出）⇒ **本 lane 6/6 模块全 ✅**（详见 §5.3 第 17 行）| — |
 
-⇒ ⚠️ **口径**：以上命令的结论**一律按台账原有日期与证据强度读**，**不得因本轮回归全绿而说成「本轮已复验」**。
+⇒ ⚠️ **口径**：以上命令**未跑**者的结论**一律按台账原有日期与证据强度读**，**不得因本轮回归全绿而说成「本轮已复验」**。
+
+### 5.4bis ✅ **订正上一轮的一处推论错误**：「本轮未跑」**不等于**「域内未取证」（2026-10-29 · G1 lane）
+
+**上一轮我写的**：「双侧活体六条命令未跑 ⇒ users 域「真实运行 + 行为等价」**未取证**」⇒ **这个推论过重了**。
+
+**逐条核「探针是否在版本控制内」（`git ls-files`）**：
+
+| 双侧活体命令 | 资产是否在库 | 本轮是否跑 | 真实状态 |
+|---|---|---|---|
+| `exp-difftest-grpc-user9.sh` + `grpc-user9-dual-port-runner.java` | ✅ **都在库** | ✅ **已跑** | 🟢 **可复算 + 本轮复现 43 场景**（含 4/4 变异验证记录，`users/user/rpc.md` §9.1.5）⇒ **R4 的 ⑦⑧ 均成立** |
+| `run.sh` + `diff.py`（users HTTP wire） | ✅ 在库 | ❌ 未跑 | 🟡 可复算，本轮未复验 |
+| `matrix.py`（users DTO 笛卡尔） | ✅ 在库 | ❌ 未跑 | 🟡 同上 |
+| `exp-difftest-grpc-admin-errors.sh` + `GrpcAdminDualPortRunner.java` | ✅ 在库 | ❌ 未跑 | 🟡 同上 |
+| `exp-difftest-redis-blacklist.sh` | ✅ 在库 | ❌ 未跑 | 🟡 同上 |
+| **follow 域 52/52 探针**（`/tmp/probe.sh` + `/tmp/probe_data.sh` + `/tmp/probe_ext.sh`） | ❌ **不在库**（且 **本轮实测 `/tmp` 里已消失** ⇒ `/tmp/gofollow` 与 `/tmp/userstub` 现为空目录）| ❌ 无法跑 | 🔴 **不可复算** ⇒ 这才是基线 §九 `G-1` 的**真正落点**（`follow-api`/`follow-rpc` 的 R4 不成立）|
+
+⇒ **订正后的准确表述**：
+- **users 域**（user-rpc 43 场景 + 其余 4 条在库脚本）⇒ **双侧活体证据链在版本控制内、可复算**；本轮**复现了 user-rpc 那条** ⇒ 用户域「真实运行 + 行为等价」**已取证**（原结论「未取证」**过重**，撤回）。
+- **follow 域** ⇒ 0 个落仓入口且 `/tmp` 探针**已消失** ⇒ **不可复算**（事实比上一轮记录的更硬：上一轮只说「不在版本控制内」，本轮实测**连源头都没了**）⇒ 但基线 A-2 已按 **R3** 计入 ⇒ **不改变组件判定，也不阻塞阶段一**。
+- ⇒ **基线措辞需订正**：基线 P0#1 现状栏写「`like` / `follow` / `users-common` 的双侧活体探针不在版本控制内（G-1/G-2/G-4）」—— **该句本身没点名 users 域**，但 `docs/PhaseGoal/g1.md` §3 把它读成「users 域双侧活体未取证」⇒ **本节 §5.4bis 是订正后的权威口径** ⇒ 登记 `S1-USERS-012`（基线措辞订正，收口执行者）。
+
 
 ---
 
@@ -404,6 +429,27 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | 所有已知缺陷和关键风险是否已记录 | ✅ **是**（§3 差异清单 + §6.1 上报 + 域台账 + vs-common 9 轴） | §3 + §6 |
 | 暂缓项是否具备明确的阶段 2 处理方案 | ✅ **是**（每条都有第 9/10 项） | §3 |
 
+### 6.0.1 🆕 **P0 九条逐条对照（2026-10-29 收敛核验轮 · 按本轮实测证据重判）**
+
+> 判据原文 = `docs/PhasedGoal.md:38-52`；职责分摊 = `docs/PhaseGoal/g1.md` §3。
+> ⚠️ **口径**：「✅ 域内」= 本 lane 写权面内已闭合且有证据；「🟡」= 域内部分闭合，残余在域外；「🔴」= 域内不成立。
+
+| P0 | 内容 | 本 lane 责任 | 本轮证据 | **域内判定** |
+|---|---|---|---|---|
+| **1** | 核心业务链路**真实运行** | 协作 | 🟢 **users 域双侧活体证据链在版本控制内**（`exp-difftest-grpc-user9.sh` + runner 均 `git ls-files` 命中）⇒ **本轮实跑 43 场景 / 39 等价 / 4 处差异（全为已签字 N-2）**；其余 4 条对拍脚本同样在库；🟢 **6 个 api/rpc 模块 fat jar 全部可执行**（§5.3 第 16/17 行）<br>🔴 **follow 域**：探针**不在库**且 **`/tmp` 源头已消失** ⇒ 不可复算（§5.4bis） | 🟡 **域内部分闭合**（users ✅ / follow 🔴）⇒ **不改变组件判定**（follow-api 已按 R3 计入 ✅） |
+| **2** | 参数校验 / 业务规则 / 认证 / 权限**四项**有效 | **主责** | 🟢 **follow 域本轮闭合**（`T11`：**62 条**失败路径矩阵，真 Tomcat，8 端点 × 4 类失败 + 7 条单点）⇒ 域台账 §4.6 / §5.2.1<br>🟢 users 域既有域内断言链<br>🟡 `article`/`task`/`hot` **无独立失败路径矩阵** ⇒ **域外**（G3/G2） | ✅ **域内闭合**（follow 的缺口已补）· ⚠️ **P0#2 本身仍非 ✅**（其余 3 域未补 ⇒ 不因此判成 ✅） |
+| **3** | 持久化 / 事务边界 / 无数据丢失重复状态错误 | **主责** | 🟢 `check-ddl-static.py --domain users --indexes` ⇒ **16 处**（类型/长度 **0** · 可空性 1 · DEFAULT 8 · 索引 7）**逐项对得上** `AGENTS.md` §0 第 2 条 ⇒ **无新增漂移**；`--domain follow --indexes` ⇒ **0 处**<br>🟢 **约束集合两侧完全一致**（4 个唯一约束 ≡ 唯一索引，仅载体不同）<br>🟡 残余：该脚本比的是**活库**不是仓库 `.sql`（基线原话）⇒ **工具性质 ⇒ 域外** | ✅ **域内闭合**（索引/唯一约束/触发器三面已机器核过） |
+| **4** | 核心失败路径有明确行为，不无声吞异常 / 返回误导性成功 | 协作 | 🟢 follow 62 条矩阵（**含 Redis fail-open、404/405 逐字节、拦截器顺序**）⇒ §5.2.1 | ✅ **域内闭合** |
+| **5** | 项目能按**实际项目说明**构建、配置、启动 | —（收口） | 🔴 `README.md` 7 字节 · `Infrastructure.md` 与事实全面矛盾 · compose 要 `.env` 而仓内无 `.env`/`.env.example` ⇒ **项目级不成立** ⇒ **根级文件无人拥有** | 🔴 **域外**（`S1-USERS-001`） |
+| **6** | 核心业务有可执行自动化测试，且断言真实业务结果 | **主责** | 🟢 域级回归（**带 `clean`**）**两轮**：EXIT=0 · BUILD SUCCESS · 08:56 / 10:01 min · **1195 条 / 0F / 0E / 0S**（逐模块一致）<br>🟢 定向复验 7 条 + 矩阵 62 条全绿 + 域台账的**变异实测**记录 | ✅ **域内闭合** |
+| **7** | 清晰的主要模块职责，可追踪核心调用链 | —（收口） | — | —（收口判定） |
+| **8** | 关键配置与敏感信息无明显不安全处理 | **主责** | 🟡 **9 处 datasource 口令 fallback 未取消**（跨 8 域 ⇒ 收口统一改）<br>🟡 `.gitignore` **未排 `.env`**（根级 ⇒ 收口）<br>🟢 **本轮新守门 `check-no-prod-secrets.py`：我域未豁免命中 = 0**（25 条豁免在夹具面/javadoc 面/默认值面）<br>🔴 **口径订正**：取消 fallback ⇒ **RAG 比 Go 更严**（Go 真源 yaml 是**字面量默认值**，恒能起栈）⇒ 属**有意偏离**（需签字），**不是纯域侧自修** ⇒ 订正 `S1-USERS-002` 的归属表述 | 🟡 **域内无新增缺陷**（残余全在域外） |
+| **9** | 已知严重缺陷 / 无法验证的关键能力 / 运行前提**已明确记录** | —（收口） | 🟢 §3 差异清单 + §6.1 上报项 + §6.2 有限例外 + 域台账（`vs-common.md` 9 轴 + `stage1-admission.md`）| ✅ **域内闭合** |
+
+⇒ **域内收敛结论**：**P0 九条里，域内主责/协作项全部有证据且无新增缺陷**；
+⇒ **域内唯一未达标项 = `follow-rpc` 的 `DRIFT-FOLLOW-006`**（5 个 `follow_rpc_*` 指标无抓取出口 ⇒ **C 类阶段 2 建设项** ⇒ 用户 2026-10-24 已定「本轮不落地」⇒ **待重新拍板**）
+⇒ **域外未闭合项 8 条**（§6.1 + §6.3）⇒ **G1 lane 判定维持 🟡**（口径 = 基线 §8.1 的 `MIN(本 lane 组件状态)`；**判据未被本轮改动**）。
+
 ### 6.1 需**域外**处理的上报项（不在 G1 写权面 ⇒ 交合并收口执行者）
 
 | 编号 | 事项 | 为什么必须域外 | 影响 |
@@ -424,8 +470,8 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | **E1** | **项目说明缺失**（`README.md` 7 字节 · `Infrastructure.md` 与事实全面矛盾 · compose 要 `.env` 而仓内无模板） | **项目级**（全 10 域） | **外部无法按说明复现启动** ⇒ 阶段 1「核心业务链路能真实运行」**只能靠内部台账自证**，不能被外部复现 | **A 类** · 收口 |
 | **E2** | **空签名密钥可起栈**（10 处 yaml 带明文 JWT secret 默认值 + 根级 compose 缺 `:?`） | **跨域** | token 可伪造 ⇒ P0#8 强命中 | **B 类**（基线 `D-01`）· 收口（根级）＋ 各域（yaml） |
 | **E3** | **`follow-rpc` 的 5 个 `follow_rpc_*` 指标无抓取出口** | follow 域 | 可观察性缺一环 ⇒ **`follow-rpc` = 🟡** ⇒ **G1 lane 判定 = 🟡** | **C 类**（阶段 2 建设项）· ⚠️ **用户 2026-10-24 已定「本轮不落地」⇒ 本轮登记待重新拍板** |
-| **E4** | **双侧活体对拍在本轮未复验**（§5.4 六条命令需双栈编排 ⇒ 未跑） | users + follow | 台账既有 L3/L4 结论**沿用原日期** ⇒ 证据强度**不提升**、**不降** | **B 类**（补跑手段）· 可解除 |
-| **E5** | **`follow` 域 0 个落仓双侧对拍入口**（探针仍在 `/tmp` ⇒ 已不可复算）· 基线 §九 `G-1` | follow 域 | `follow-api`/`follow-rpc` 的 **R4 不成立**（已按 R3 计入） | **B 类**（非阻断）· 收口或域内 |
+| **E4** | ~~**双侧活体对拍在本轮未复验**~~ → 🟢 **部分已复验**（2026-10-29） | users + follow | ✅ **user-rpc 43 场景本轮实跑**（39 等价 + 4 处已签字 N-2）⇒ **users 域证据强度提升**；🟡 其余 4 条（`run.sh`/`matrix.py`/`admin-errors`/`redis-blacklist`）**资产在库但本轮未跑** ⇒ 沿用原日期 | **B 类**（补跑手段）· **可解除**（跑一次即销）|
+| **E5** | **`follow` 域 0 个落仓双侧对拍入口** —— 探针在 `/tmp` 且 **本轮实测 `/tmp` 源头已消失**（`/tmp/probe.sh` 等 3 个不存在，`/tmp/gofollow` 与 `/tmp/userstub` 现为空目录）⇒ **不可复算**（比上一轮记录的更硬）· 基线 §九 `G-1` | follow 域 | `follow-api`/`follow-rpc` 的 **R4 不成立**（已按 **R3** 计入 ⇒ 组件判定仍是 ✅）<br>🟡 要恢复可复算 = **重写 52 条探针 + 编排落仓**（`tools/difftest/follow/`，用户 2026-10-27 已授权该子目录）⇒ **本轮判定「不值得」**：组件判定 ✅ R3 已达标、**不阻塞阶段一** ⇒ 记为**阶段 2 建设项** | **B 类**（非阻断）· 收口或域内 |
 | **E6** | **proto「消费方式」未取证**（`optional` presence 的**构造点**语义）· 基线 §九 `G-19` | 全 10 proto | **取证缺口 ⇒ 不降 R**（§1.1 ⑥）| **B 类** · 各域 |
 | 🆕 **E7** | ~~**follow 域无独立失败路径矩阵**~~ · 基线 §九 `G-13` | follow 域 | ✅ **本轮闭合（`T11`）** —— 8 端点 × 4 类失败 × **真 Tomcat** = **62 条**全绿（§4.6 / §5.2.1）；⚠️ **P0#2 本身仍受其余 3 域未补的制约 ⇒ 不因此判成 ✅** | ✅ **本轮闭合** |
 
@@ -450,6 +496,11 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | 🆕 `S1-FOLLOW-012` | **follow 域无独立失败路径矩阵** · 基线 §九 `G-13` | **P1**（P0#2 的证据面） | **D**（已实现） | ✅ **本轮闭合**（`T11` · 8 端点 × 4 类失败 × **真 Tomcat** = **62 条**全绿）⇒ ⚠️ **P0#2 本身仍受其余 3 域未补的制约 ⇒ 不因此判成 ✅** |
 | 🆕 `S1-FOLLOW-013` | **follow 域本轮新增文件自己的断言消息写着「全长 20 字节」**（`FollowApiFailurePathMatrixTest.java:417`）⇒ **躲过了 G1 第一轮自查**（模式选错 + `head -40` 截断）⇒ 已二次订正并重扫 | **P3**（仅文案） | **D**（已实现） | ✅ **本轮自修**（矩阵 62/62 绿）|
 | 🆕 `S1-USERS-010` | **`admin-api` 的注释把 503 body 的字节数写成 15，断言用的是 16** —— `AdminApiRealTomcatResponseBytesTest.java:266` 写「线上是 Content-Length: **15**」，而紧邻的断言用 `GO_TIMEOUT_CONTENT_LENGTH = "Request Timeout".length() + 1` = **16** ⇒ 注释**漏算了 `fmt.Fprintln` 补的那个 `\n`** ⇒ 与 follow 域的「20 vs 19」**同族**（字节数少算尾随换行） | **P3**（**仅注释**，断言本身正确 ⇒ 一直绿） | **D**（已实现） | ✅ **本轮自修并复跑**（`AdminApiRealTomcatResponseBytesTest` **3/3 绿**）|
+| 🆕 `S1-USERS-011` | 🔴 **本轮的一次误判（已撤回）**：把 Go 真源乱码字面量当「**新发现 + 需新签字**」⇒ 差点去登记一条**已签字**的偏离 | **P3**（**零代码影响** · 未改任何代码） | **D**（已澄清） | ✅ **已撤回** —— 依据：`docs/Pitfalls/users/user/rpc.md:127` **P-05**（明写「已登记为 **N-2（用户 2026-10-21 签字：RAG 保留正确中文）**」+「**下一个 agent 不要把它当新发现再「修」一遍**」）· admin 域同型 = `SD-2026-10-23-07` ⇒ **不需新签字、不动代码**；本轮 43 场景对拍的 4 处差异**就是这条签字项** ⇒ **复现，不是缺陷** |
+| 🆕 `S1-USERS-012` | **基线措辞订正**：基线 P0#1 现状栏 + 机器生成的 `docs/PhaseGoal/g1.md` §3 把「双侧活体未取证」读成**含 users 域** ⇒ 与事实不符（users 域探针**在版本控制内**，且本轮**实跑复现**） | P2（**仅文档面**） | **B** | 🔴 OPEN · **上报收口**（基线 + 机器生成物）⇒ 权威口径见 §5.4bis |
+| 🆕 `S1-USERS-013` | **`check-no-prod-secrets.py` 的 6 条未豁免命中**（`service/users/users-common/**` 的 `JwtUtil` 3 处 + 2 个测试类 3 处）⇒ 该脚本明写 users-common **永不可豁免** ⇒ **G4 写权面** | **P1**（**密钥泄露面**） | **B** | 🟡 **树间版本差** —— G4 分支已把 `users-common/…/JwtUtil.java` 去明文（`git diff` = **+5/−13**）⇒ **合并后应归零** ⇒ **不是本域缺陷**；**我域未豁免命中 = 0** ✅ ⇒ 合并收口回归时复验 |
+| 🆕 `S1-USERS-014` | **台账陈旧引用**：`admin/rpc.md` 多处按**现在时**描述 `RpcInterceptor` 的 `deadlineEpochMs` ⇒ G4 `1f62a24`（DRIFT-COMMON-005 结案）后**该变量已移除**（改 `DeadlineState` 单调钟 + 纳秒精度）⇒ 合并后这些引用会过期 | **P3**（**仅文档面**） | **D**（已实现） | ✅ **本轮订正**（在 `admin/rpc.md` 加订正注）⇒ ⚠️ **合并后**需再核一次行号/符号名 |
+| 🆕 `S1-USERS-015` | **`admin/rpc.md` 两张表：表头声明 4 列，但多数表体行是 5 格** ⇒ GFM 多渲染出一列**无名列**（表A `:1364` 起 21 行中 11 行为 5 格 · 表B `:1580` 起 27 行中 5 行为 5 格）⇒ **既存**（HEAD 已有）⇒ 本轮**自建结构校验**时顺带查出 | **P3**（**仅渲染面** · 不影响任何判定） | **D**（已实现） | 🟡 **已登记 · 本轮不修** —— 第 4 格的语义**不统一**（表A 有 3 行第 4 格有内容、表B 全部为空）⇒ **补表头名 = 猜语义** ⇒ 不猜；修法：统一第 4 格的用法后补表头列名（**收口或下一轮域内自修均可**）|
 
 ---
 
@@ -458,9 +509,9 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | §5.7 要求 | 本轮的值 |
 |---|---|
 | **实际代码状态及版本标识** | 分支 `align/g1-users-follow` · 基线 `29a0bce`（= `do-my-own-gh`）· **首轮提交 `e18ef72`（38 文件 +1660/−70）** ＋ **🆕 本轮增量（`T11`）= 2 个新增源文件（`RealTomcatPort` ＋ `FollowApiFailurePathMatrixTest`）+ 1 个修改文件（`BlindPortGateTest`）+ 5 份台账** ⇒ **提交后以 commit hash 为准**（见 §7 末） |
-| **构建和测试结果** | **域级回归**：`mvn … clean test` ⇒ **EXIT=0 · BUILD SUCCESS · 08:56 min（第二轮 10:01 min · 同一批代码 · 逐模块一致）· 1195 条 / 0F / 0E / 0S**（§5.1 · 🆕 较上一轮 **+62** ＝ 失败路径矩阵）· **定向复验 7 条全绿**（§5.2）＋ 🆕 **矩阵复验 62 条全绿**（§5.2.1）· **收口验收命令 15 条**：13 条 EXIT=0、1 条 EXIT=1（**既存**锚点失效）、1 条 EXIT=1（**users DDL 16 处已知差异**，非缺陷） |
-| **核心业务链路的验收结果** | `user-api → user-rpc → PG/Redis` 与 `admin-api → admin-rpc → PG/Redis` 两条链路的**域内实测**沿用域台账（`user/rpc.md` §6.4 / `admin/rpc.md` §15，L3/L4）⇒ **本轮未起真栈复跑**（§5.4）⇒ **按原日期读** |
-| **P0 / P1 / P2 最终状态** | **P0**：域内 ✅ 8/9 · 项目级 🔴 1 项（`S1-USERS-001`）· **P1**：✅ 至少 5 个机制闭环（RPC 超时 / 事务并发 / 鉴权与黑名单 / 错误码契约 / proto wire 契约）· **P2**：6 项登记（其中 1 项已销号、1 项已修） |
+| **构建和测试结果** | **域级回归**：`mvn … clean test` ⇒ **EXIT=0 · BUILD SUCCESS · 08:56 min（第二轮 10:01 min · 同一批代码 · 逐模块一致）· 1195 条 / 0F / 0E / 0S**（§5.1 · 🆕 较上一轮 **+62** ＝ 失败路径矩阵）· **定向复验 7 条全绿**（§5.2）＋ 🆕 **矩阵复验 62 条全绿**（§5.2.1）· **收口验收命令 15 条**：13 条 EXIT=0、1 条 EXIT=1（**既存**锚点失效）、1 条 EXIT=1（**users DDL 16 处已知差异**，非缺陷）<br>🆕 **收敛核验轮（本轮）**：**`mvn … package` ⇒ BUILD SUCCESS · 12.484 s · 8 个 jar** · **`check-jar-executable.sh` ⇒ EXIT=0 · 本 lane 6/6 模块 ✅** · **`exp-difftest-grpc-user9.sh --no-build` ⇒ 43 场景 / 39 等价 / 4 处差异（全为已签字 N-2）** · **`check-no-prod-secrets.py` ⇒ 我域未豁免命中 0**（6 条红在 `users-common` = G4 面 = 树间版本差）|
+| **核心业务链路的验收结果** | `user-api → user-rpc → PG/Redis` 与 `admin-api → admin-rpc → PG/Redis` 两条链路的**域内实测**沿用域台账（`user/rpc.md` §6.4 / `admin/rpc.md` §15，L3/L4）<br>🆕 **本轮新增**：`user-rpc` 的**双侧活体对拍已实跑**（43 场景，与 2026-10-24 基线逐条同形 ⇒ **证据强度提升**）；`admin-rpc` 的对拍脚本**在库但本轮未跑** ⇒ 按原日期读（§5.4bis）|
+| **P0 / P1 / P2 最终状态** | **P0**：域内 ✅ 8/9 · 项目级 🔴 1 项（`S1-USERS-001`）· **P1**：✅ 至少 5 个机制闭环（RPC 超时 / 事务并发 / 鉴权与黑名单 / 错误码契约 / proto wire 契约）· **P2**：6 项登记（其中 1 项已销号、1 项已修）<br>🆕 **P0 九条逐条对照见 §6.0.1**（本轮实测重判）⇒ **域内主责/协作项全部有证据且无新增缺陷**；**域内唯一未达标 = `follow-rpc` 的 `DRIFT-FOLLOW-006`**（C 类阶段 2 项，待用户重新拍板）⇒ **lane 判定维持 🟡** |
 | **全部已知缺陷和未验证风险** | §3 差异清单（`S1-USERS-001~005` + `S1-FOLLOW-001~009`）＋ §6.1 的 `S1-USERS-009` + §6.2 六条例外 + 域台账 + [`vs-common.md`](vs-common.md) 9 轴 + 基线 §九 20 条缺口（**G1 相关：G-1 / G-4 / G-6 / G-8 / ~~G-13~~ / G-19** ⇒ 🆕 **`G-13` 在 follow 域已闭合**，其余 3 域归 G2 / G3） |
 | **完整的差异与暂缓项清单** | 本文件 §3（users 5 条 + follow 9 条，**每条 11 项齐全**） |
 | **阶段 2 任务及其依赖** | ① `S1-FOLLOW-001` 指标出口方案（**待用户重新拍板**，依赖：全仓 rpc 统一方案）② `S1-USERS-004` 事务边界上移（依赖：阶段 1 不动已验证边界）③ `S1-USERS-001` 说明书（依赖：**收口**）④ `S1-FOLLOW-007/008/009`（依赖：**收口 / G2 / G3**）⑤ 🆕 基线 `G-13` 的其余 **3 域**（`article` / `task` / `hot`）补失败路径矩阵（依赖：**G3 / G2**，本轮已把 follow 域那一份做完，**矩阵形态可直接复用**）⑥ 🆕 `S1-FOLLOW-010` / `S1-FOLLOW-011` 两处错数注释订正（依赖：**G4 / G2**） |
@@ -473,7 +524,8 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 
 | 结论 | 证据强度 | 说明 |
 |---|---|---|
-| P0#1 / #2 / #3 / #4 / #6 / #7 判定 | **L4**（活体） | 真 PG / 真 Redis / 真 Nacos / 真进程 / 真 Tomcat；Go↔RAG 逐字对照 + 双侧对拍<br>⚠️ **本轮未复跑双侧活体**（§5.4 六条命令需双栈编排）⇒ **沿用台账原日期**，**不提升** |
+| P0#1 / #2 / #3 / #4 / #6 / #7 判定 | **L4**（活体） | 真 PG / 真 Redis / 真 Nacos / 真进程 / 真 Tomcat；Go↔RAG 逐字对照 + 双侧对拍<br>🆕 **本轮：`user-rpc` 的双侧活体已实跑复现**（43 场景）⇒ 该条**证据强度提升**；**其余 4 条**（`run.sh`/`matrix.py`/`admin-errors`/`redis-blacklist`）**本轮未跑** ⇒ **沿用台账原日期**，**不提升**（§5.4bis）|
+| 🆕 **本轮新增：`user-rpc` 双侧活体对拍复现** | **L4**（**双侧活体** · 真进程 + 真 PG + 真 Redis） | **43 场景 / 39 等价 / 4 处差异**（4 处**全部**是已签字的 **N-2** Go 源码乱码文案）⇒ **无新漂移**；与 2026-10-24 基线**逐条同形** ⇒ **独立复现**<br>⚠️ **探针与 runner 均在版本控制内**（`git ls-files` 命中）⇒ 基线 §1.1 **R4 的 ⑦⑧ 均成立**（⑦ 可复算 · ⑧ 变异 4/4 记录在 `users/user/rpc.md` §9.1.5）⇒ **这是本轮对「用户域双侧活体」的结论升级点** |
 | P0#5 域内判定 | **L4** | 2026-10-27 真启动（6.4s / 9.7s）· **本轮未复跑真启动**（§5.4）⇒ 按原日期读 |
 | P0#5 项目级判定 | **L2**（静态可证） | README 7 字节 / 路径实测不存在 / compose `:?` 强制 ⇒ 静态即可证「说明不存在」 |
 | P0#8 判定 | **L2** | 9 处默认值逐文件枚举 + go-zero `os.ExpandEnv` 语义（源码级）|
@@ -505,3 +557,9 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | **R13** | `mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest='FollowApiFailurePathMatrixTest' -pl service/follow/follow-api -am test` | `EXIT=0` · **Tests run: 62, Failures: 0, Errors: 0, Skipped: 0** ⇒ **8 端点 × 4 类失败**的矩阵全绿（§4.6 / §5.2.1）|
 | **R14** | `grep -n 'public static final int FIRST\|public static final int LAST' service/follow/follow-api/src/test/java/com/rag/follow/follow/api/support/RealTomcatPort.java` | **22340 / 22359** ⇒ 落在 follow 域预分配段 **22300–22399** 内、且**不与** `follow-api` 的 `RealGrpcPort`（22300–22319）/ `follow-rpc` 的（22320–22339）重叠 |
 | **R15** | `printf '404 page not found\n' \| wc -c` | **19**（**不是 20**）⇒ `S1-FOLLOW-010` / `S1-FOLLOW-011` / `S1-USERS-009` 的**错数来源** |
+| **R16** | `mvn -o -B -DskipTests -Dmaven.test.skip=true -pl <本 lane 8 模块> -am package` | `BUILD SUCCESS` · **12.484 s** · **8 个 jar 产出**（R17 的前置） |
+| **R17** | `bash tools/difftest/check-jar-executable.sh` | `EXIT=0` ⇒ **本 lane 6 个 api+rpc 模块全 ✅**（`follow-api` 80M · `follow-rpc` 64M · `admin-api` 80M · `admin-rpc` 79M · `user-api` 80M · `user-rpc` 79M）<br>⚠️ **其余 14 个 api/rpc 模块报「没有产物（未构建？）」** —— 那是**别的 lane 的模块**，本树没构建 ⇒ **不计失败也不计通过**（基线 §九 `G-10` 的已知口径）|
+| **R18** | `bash tools/difftest/exp-difftest-grpc-user9.sh --no-build` | **43 场景 / 39 等价 / 4 处差异** ⇒ 4 处**全是 N-2 已签字的 Go 乱码文案**（`鐢ㄦ埛涓嶅瓨鍦?`×3 · `澶村儚鍘嗗彶涓嶅瓨鍦?`×1）⇒ **无新漂移**<br>⚠️ **脚本自带容器/库/端口**（`uudifftest-postgres:55434` / `uudifftest-redis:56382` / `uu_go_db` / `uu_rag_db` / 19005 / 59211）⇒ **不碰共享 `go_db`/`rag_db`** ⇒ 可与其他 lane 并行 |
+| **R19** | `git ls-files tools/difftest/exp-difftest-grpc-user9.sh tools/difftest/grpc-user9-dual-port-runner.java` | **两行都命中** ⇒ **探针与 runner 在版本控制内** ⇒ 基线 §1.1 **R4 的 ⑦**（探针在库且现在可复算）成立（⑧ 变异 4/4 见 `users/user/rpc.md` §9.1.5）|
+| **R20** | `ls -l /tmp/probe.sh /tmp/probe_data.sh /tmp/probe_ext.sh` | **3 个都不存在**（`/tmp/gofollow` 与 `/tmp/userstub` 现为空目录）⇒ **follow 域 52/52 探针的源头已消失** ⇒ 不可复算（`S1-FOLLOW-010` 口径，见 follow 档）|
+| **R21** | `git show align/g4-service-common:tools/difftest/check-no-prod-secrets.py > tools/difftest/check-no-prod-secrets.py && python3 tools/difftest/check-no-prod-secrets.py; rm -f tools/difftest/check-no-prod-secrets.py` | `EXIT=1`（**6 条未豁免命中，全部在 `service/users/users-common/**`**）⇒ **我域（G1 白名单内）未豁免命中 = 0** ✅；已豁免 **91** 条（我域 25 条）<br>⚠️ **脚本落在 `tools/`（G4 写权面）⇒ 只可临时复制 + 跑完即删**（`mavis-trash`）⇒ **不得提交** |

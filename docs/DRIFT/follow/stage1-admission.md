@@ -321,11 +321,11 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 |---|---|---|
 | `bash tools/difftest/run.sh`（users 双侧活体 HTTP wire 对拍） | 需 **Go 栈 + RAG 栈双栈编排**（etcd / PG / Redis + Go 二进制 + RAG jar）⇒ 未起 | **沿用台账既有记录**（2026-10-24/27）⇒ **本轮未复验** |
 | `python3 tools/difftest/matrix.py`（DTO 字段笛卡尔） | 同上 | 同上 |
-| `bash tools/difftest/exp-difftest-grpc-user9.sh` | 同上 | 同上 |
-| `bash tools/difftest/exp-difftest-grpc-admin-errors.sh --stacks-up` | 同上 | 同上 |
-| `bash tools/difftest/exp-difftest-redis-blacklist.sh` | 同上 | 同上 |
-| `bash tools/difftest/check-jar-executable.sh` | 需**先 `mvn package`**（本轮只跑 `test`）⇒ 未跑 ⇒ 基线 `G-10` 的缺口对本轮同样成立 | — |
-| **follow 域双侧对拍**（基线 §九 `G-1`：`/tmp/probe.sh` 等 7 个脚本**未进版本控制、已不可复算**） | 需重建双侧探针 + 双栈 ⇒ **本轮未做**（基线判 🟡 **不阻断**）⇒ **如实登记为未闭合项**（见 §6.0.1 E3） | **基线 §九 `G-1`** |
+| ✅ `bash tools/difftest/exp-difftest-grpc-user9.sh --no-build` | ✅ **本轮已跑**（2026-10-29）⇒ **43 场景 / 39 等价 / 4 处差异**（4 处**全是已签字 N-2** 的 Go 乱码文案）⇒ **与 2026-10-24 基线逐条同形** ⇒ users 域双侧活体**可复算**（详见 users 档 §5.4bis）| **本轮已复验**（users 域侧）|
+| `bash tools/difftest/exp-difftest-grpc-admin-errors.sh --stacks-up` | 同上 ⇒ 未跑（⚠️ **资产在版本控制内** ⇒ 可复算）| 沿用台账既有记录 |
+| `bash tools/difftest/exp-difftest-redis-blacklist.sh` | 同上 ⇒ 未跑（同上）| 沿用台账既有记录 |
+| ✅ `bash tools/difftest/check-jar-executable.sh` | ✅ **本轮已跑**（**先 `mvn package`** ⇒ 8 个 jar）⇒ **本 lane 6/6 api+rpc 模块全 ✅**（含 `follow-api` 80M · `follow-rpc` 64M）⇒ 基线 `G-10` 在**本 lane** 已闭合 | — |
+| 🔴 **follow 域双侧对拍**（基线 §九 `G-1`） | 需重建双侧探针 + 双栈 ⇒ **本轮未做**（基线判 🟡 **不阻断**）<br>🔴 **本轮实测补强**：`/tmp/probe.sh` / `/tmp/probe_data.sh` / `/tmp/probe_ext.sh` **三个都不存在**，`/tmp/gofollow` 与 `/tmp/userstub` **现为空目录** ⇒ **不只是「未进版本控制」，是**源头已消失** ⇒ 「52/52 逐字节一致」**今天完全不可复算** | **基线 §九 `G-1`** · 阶段 2 建设项（见 §6.0.1 E3）|
 
 ⇒ ⚠️ **口径**：以上命令的结论**一律按台账原有日期与证据强度读**，**不得因本轮回归全绿而说成「本轮已复验」**。
 
@@ -337,7 +337,8 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 
 > ⚠️ **不是「通过」** —— 本域有 **1 条 🟡 未闭合**（`S1-FOLLOW-001` 指标无出口 ⇒ `follow-rpc` = 🟡 ⇒ **G1 lane 判定 = 🟡**），
 > 且 **1 条 A 类项目级阻断**（`S1-USERS-001` 说明书缺失 ⇒ 域外）。
-> ⚠️ **也不是「未通过」** —— 本域**能做的都做完了**：域内 P0 全满足、域级回归 1133 条全绿、域内两条缺陷已自修并验证。
+> ⚠️ **也不是「未通过」** —— 本域**能做的都做完了**：域内 P0 全满足、域级回归 **1195 条**全绿（两轮一致 · 含本轮新增的 62 条失败路径矩阵）、域内两条缺陷已自修并验证。
+> 🆕 **2026-10-29 收敛核验轮**：域内**无新增未闭合项**；唯一未达标仍是 `S1-FOLLOW-001`（`follow-rpc` 指标出口 · **待用户重新拍板**）⇒ **G1 lane 判定维持 🟡**（口径 = 基线 §8.1）⇒ 详见 users 档 §6.0.1 与 `users/vs-common.md` §70.5。
 
 | §5.6 检查项 | 结论 | 依据 |
 |---|---|---|
@@ -357,11 +358,12 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 |---|---|---|---|---|
 | **E1** | **项目说明缺失**（`README.md` 7 字节 · compose 要 `.env` 而仓内无模板） | **项目级** | 外部无法按说明复现启动 ⇒ 阶段 1 的「真实运行」只能靠内部台账自证 | **A 类** · 收口（users 档 `S1-USERS-001`）|
 | **E2** | **`follow-rpc` 的 5 个 `follow_rpc_*` 指标无抓取出口**（Go DevServer `:16065/metrics` 有 · RAG 纯 gRPC 进程无 HTTP 口） | follow 域（**同款 5 处**：`favorite-rpc` / `message-rpc` / `like-rpc` / `user-rpc` / `admin-rpc`） | 可观察性缺一环 ⇒ **`follow-rpc` = 🟡** ⇒ **G1 lane 判定 = 🟡** | **C 类**（阶段 2 建设项）· ⚠️ **用户 2026-10-24 已定「本轮不落地」⇒ 登记待重新拍板** |
-| **E3** | **`follow` 域 0 个落仓双侧对拍入口**（探针在 `/tmp` ⇒ 已不可复算）· 基线 §九 `G-1` | follow 域 | `follow-api`/`follow-rpc` 的 **R4 不成立**（已按 R3 计入）⇒ 「52/52 逐字节一致」**今天不可复算** | **B 类**（非阻断）|
+| **E3** | 🔴 **`follow` 域 0 个落仓双侧对拍入口** —— 探针在 `/tmp` 且 **本轮实测源头已消失**（`/tmp/probe.sh` 等 3 个不存在 · `/tmp/gofollow` 与 `/tmp/userstub` 现为空目录）⇒ **不只是「未进版本控制」，是连源头都没了** ⇒ 「52/52 逐字节一致」**今天完全不可复算** · 基线 §九 `G-1` | follow 域 | `follow-api`/`follow-rpc` 的 **R4 不成立**（已按 **R3** 计入 ⇒ **组件判定仍是 ✅**）⇒ **不阻塞阶段一**<br>🟡 要恢复 = **重写 52 条探针 + 编排落仓**（`tools/difftest/follow/`，用户 2026-10-27 已授权该子目录）⇒ **本轮判定「不值得」**：① 组件判定 ✅ R3 已达标；② 属**阶段 2 建设项**（探针工程量 ≈ 重写 52 条断言 + 双栈编排）⇒ **不预支** ⇒ 记为阶段 2 待办 | **B 类**（非阻断）· 阶段 2 建设项 |
 | **E4** | ~~**本域无独立失败路径矩阵** · 基线 §九 `G-13`（4 域无：article / follow / task / hot）~~ | follow 域 | ✅ **本轮闭合（`T11`）** —— 8 端点 × 4 类失败 × **真 Tomcat** = **62 条**用例全绿（§4.2 / §5.2.1）⇒ **follow 域的 P0#2 证据覆盖已补齐**；⚠️ **但 P0#2 本身仍受其余 3 域未补的制约 ⇒ 不因本条判成 ✅** | ✅ **本轮闭合** |
 | **E5** | **`check-proto-static.sh` 不覆盖 follow** · 基线 §九 `G-6` | follow 域 | ⇒ **本轮已由 🆕 `FollowProtoContractTest` 补上字段级断言** ⇒ 该项**本轮已闭合**（功能上）| ✅ **本轮闭合** |
 | **E6** | **proto「消费方式」未取证**（`optional` presence 的构造点语义）· 基线 §九 `G-19` | 全 10 proto | **取证缺口 ⇒ 不降 R**；⚠️ **follow 的 proto 无 `optional` 字段 ⇒ 该边界在本域不适用** | **B 类**（不适用）|
-| **E7** | **双侧活体对拍本轮未复验**（§5.4） | follow 域 | 台账既有 L3/L4 结论**沿用原日期** ⇒ 证据强度**不提升**、**不降** | **B 类** |
+| **E7** | **双侧活体对拍本轮未复验** —— 🟡 **users 域侧已复验**（`exp-difftest-grpc-user9.sh` 43 场景，4 处差异全是已签字 N-2）；🔴 **follow 域侧不可复算**（探针源头已消失 ⇒ 见 **E3**） | follow 域 | follow 域台账既有 L3/L4 结论**沿用原日期** ⇒ 证据强度**不提升**、**不降** | **B 类**（阶段 2 建设项）|
+| 🆕 **E8** | 🟢 **本轮的一次误判已撤回**：把 Go 真源乱码字面量当「新发现 + 需新签字」⇒ 真相是 **N-2**（2026-10-21 用户签字）+ `docs/Pitfalls/users/user/rpc.md:127` **P-05**（明写「下一个 agent 不要把它当新发现再「修」一遍」）⇒ **不需新签字、不动代码** | **零影响**（本轮未改任何业务码） | 本轮那 4 处差异 = **签字项的复现**，不是缺陷 ⇒ **不构成任何阶段一缺口** | ✅ **已澄清**（P3 · 零代码影响）· 详见 users 档 `S1-USERS-011` + `users/vs-common.md` §70.2 |
 
 ### 6.1 需**域外**处理的上报项
 
