@@ -749,13 +749,41 @@ public class MessageDomainService {
         }
 
         // ④ mark read
+        // ⚠️⚠️ DB 失败必须**原样上抛**，不得改写成 INTERNAL + 5008（2026-10-28 阶段 1 修 · E59）
+        //
+        // 【Go 出处（消费点，不是声明点）】markconversationreadlogic.go:59-62
+        //     if err = ...MarkConversationRead(...); err != nil {
+        //         metrics.ObserveDBError("conversation", "mark_read")
+        //         return nil, err              ← 裸 error，不包 status
+        //     }
+        // ⇒ grpc-go v1.81.1 的 processUnaryRPC 走 status.FromContextError(appErr)
+        //   ⇒ codes.Unknown（+ 原始错误文本）。
+        //
+        // 【为什么不能改成 INTERNAL】go-zero v1.10.2 的熔断判据
+        //   zrpc/internal/codes/accept.go:9-17 与本仓共享层
+        //   GoStyleGrpcClientBreakerInterceptor.isAcceptable（:340-348）**完全同一份名单**：
+        //     {DEADLINE_EXCEEDED, INTERNAL, UNAVAILABLE, DATA_LOSS, UNIMPLEMENTED, RESOURCE_EXHAUSTED}
+        //     判「失败」；其余（含 UNKNOWN）判「成功」。
+        //   ⇒ 同一个 DB 故障：Go 记「成功」（不开路），RAG 若给 INTERNAL 则记「失败」（开路）
+        //   ⇒ **两侧开路决策分岔**。
+        //
+        // 【Go 的 5008 是「声明但从不用」】Go service/message/common/errmsg.go:39 定义了
+        //   ErrorDbUpdate = 5008，但**全仓没有任何 logic 路径引用它**
+        //   （5007 ErrorDbSelect 同款）⇒ Go 的 DB 失败从来不是 5008
+        //   ⇒ 本仓这 3 处自创的 5008 用法属于**表达层漂移**，本轮删除。
+        //
+        // 【本方法内的自洽性】同一个方法的「② find conversation」路径（:731-736）
+        //   早就是 `throw e;`（裸上抛）⇒ 修后两条 DB 路径语义一致。
+        //
+        // 【上抛后由谁接管】MessageRpcServiceImpl 的兜底 catch (RuntimeException e)
+        //   ⇒ Status.UNKNOWN.withCause(e)（DRIFT-MSG-V-024，2026-10-24 已修）
+        //   ⇒ 客户端看到 UNKNOWN、api 侧业务码 1015（Go 的 CodeServerBusy）⇒ 与 Go 一致。
         try {
             atomicService.markConversationReadTx(in.getConversationId(), in.getOperatorId(),
                     in.getOperatorRole().getNumber(), OffsetDateTime.now(ZoneOffset.UTC));
         } catch (RuntimeException e) {
             metrics.observeDbError("conversation", "mark_read");
-            throw MessageRpcSupport.grpcRuntimeError(Status.Code.INTERNAL,
-                    MessageErrorCode.ERROR_DB_UPDATE.getCode());
+            throw e;
         }
 
         return MessageRpcSupport.successBaseResp();
@@ -868,12 +896,18 @@ public class MessageDomainService {
         // 修复前这里是 selectById 校验 + updateById 写入两条语句（TOCTOU 竞态），
         // 且 updateById 生成的 WHERE 只有 id、不含 recipient_id。
         int affected;
+        // ⚠️⚠️ DB 失败必须**原样上抛**，不得改写成 INTERNAL + 5008（2026-10-28 阶段 1 修 · E59）
+        // 【Go 出处】marknotificationreadlogic.go:50-51
+        //     metrics.ObserveDBError("notification", "mark_read"); return nil, err   ← 裸 error
+        // 【为什么不能改成 INTERNAL】见本文件 doMarkConversationRead 的同名注释：
+        //   INTERNAL 落在 Go codes.Acceptable（accept.go:9-17 = 本仓共享层 isAcceptable 同名单）
+        //   的 6 码**失败**名单里，而 Go 的 UNKNOWN 不在 ⇒ 两侧开路决策会分岔。
+        // 【Go 的 5008 是「声明但从不用」】见本文件 doMarkConversationRead 的同名注释。
         try {
             affected = atomicService.markNotificationReadTx(in.getNotificationId(), in.getUserId(), OffsetDateTime.now(ZoneOffset.UTC));
         } catch (RuntimeException e) {
             metrics.observeDbError("notification", "mark_read");
-            throw MessageRpcSupport.grpcRuntimeError(Status.Code.INTERNAL,
-                    MessageErrorCode.ERROR_DB_UPDATE.getCode());
+            throw e;
         }
 
         // Go: if res.RowsAffected == 0 { return ErrRecordNotFound } → logic 映射成
@@ -916,12 +950,15 @@ public class MessageDomainService {
                     MessageErrorCode.ERROR_INVALID_PARAM.getCode());
         }
 
+        // ⚠️⚠️ DB 失败必须**原样上抛**，不得改写成 INTERNAL + 5008（2026-10-28 阶段 1 修 · E59）
+        // 【Go 出处】markallnotificationsreadlogic.go:42-44
+        //     metrics.ObserveDBError("notification", "mark_all_read"); return nil, err   ← 裸 error
+        // 【为什么不能改成 INTERNAL】见本文件 doMarkConversationRead 的同名注释。
         try {
             atomicService.markAllNotificationsReadTx(in.getUserId(), 0, 0, OffsetDateTime.now(ZoneOffset.UTC));
         } catch (RuntimeException e) {
             metrics.observeDbError("notification", "mark_all_read");
-            throw MessageRpcSupport.grpcRuntimeError(Status.Code.INTERNAL,
-                    MessageErrorCode.ERROR_DB_UPDATE.getCode());
+            throw e;
         }
 
         return MessageRpcSupport.successBaseResp();

@@ -1659,3 +1659,547 @@ global 第三十三轮的 **E47 原定性已被第三十六轮全面订正**：*
 > ① **Boot 4 的 Lettuce 池「开不开」不由 yml 决定，而由 `commons-pool2` 在不在 classpath 决定**（`Pool.enabled` 未配时为 `null` ⇒ Boot 自动判定）⇒ ⇒ **加/减一个依赖 ⇒ 池形态静默变化** ⇒ **池形态必须同时查 pom 依赖，不能只断言 yml**；
 > ② **Boot 4 没有独立的 `LettuceProperties`**（已并入 `DataRedisProperties$Lettuce`）且 Redis 自动配置**已拆到 `spring-boot-data-redis` 模块** ⇒ 查 Boot 4 源码别在老 jar 里找。
 
+---
+
+## 2026-10-29 · G2 收工轮 · like-rpc 阶段一收口（**4 条销案 + 3 条订正 + 1 条新建台账**）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `29a0bce` · **核对日期** 2026-10-29
+> **证据强度分级**：本节每条**单独标注**（E3 / E4）· ⚠️ **未做双侧活体对拍**的条目**不写 L4**
+> **阶段归属**：每条按 `twoStage.md` §10 标 **P0~P3 + A/B/C/D**
+
+### §0 本轮落点清单（先看这个）
+
+| # | 事项 | 落点 | 证据 | 判定 |
+|---|---|---|---|---|
+| 1 | **E60**（`currentUserLikeTotal` 双失败少传 error） | `LikeDomainService.java` + `LikeTaskProgressPublisher.java` + 🆕 `LikeUserLikeTotalDoubleFailureGateTest.java` | **E4**（真 publisher + 真 `LoggerFactoryBean` + Logback `ListAppender` 捕获**真实日志行**） | 🔴→✅ **销案** |
+| 2 | **`DRIFT-LIKE-003`** authority 侧语义 | 🆕 `LikeAuthorityLookupService.java`（407 行）+ 🆕 `LikeAuthorityLookupServiceGateTest.java`（11 条） | **E3**（Go `fact_authority.go` 逐字翻译 + 仓内守门实跑） | 🟡 **语义段闭环**；暴露形态段**上报待拍板** |
+| 3 | **`L-U11`**（`rpcInterceptorConfigurer` 未验真接线） | `LikeRpcGrpcInterceptorWiringTest.java`（**仓内既有**，非本轮新建） | **E4**（真 gRPC server + 真链 + 判别式断言） | 🟢 **闭合** |
+| 4 | **`L-U9`**（真 Kafka 活体） | — | — | 🟡 **取证缺口**（**不阻断**） |
+| 5 | **D-08**（8 条错误断言 A~H） | — | **源码逐条复核** | ✅ **全销** |
+| 6 | **like-proto 契约网** | 🆕 `docs/DRIFT/like/proto.md` + `LikeProtoContractTest.java`（4 条） | **E3** | 🟢 **新建台账 + R2→R3** |
+
+---
+
+### §1 🔴→✅ **E60 已修并销案**（`currentUserLikeTotal` 双失败少传 error）
+
+#### ① Go 侧事实（**逐字回源核过，不采信 global 转述**）
+
+`service/like/rpc/internal/logic/likeactionlogic.go`：
+
+```go
+// :311-320  syncTaskProgress 的「路 1（用户进度）」
+totalLikesGiven, err := l.currentUserLikeTotal(in.UserId, in.TargetType, userListKey)
+if err != nil {
+    logger.LogBusinessErr(l.ctx, errmsg.ErrorRedisSelect, fmt.Errorf("sync task user progress failed: %w", err))
+} else if totalLikesGiven > 0 {
+    …PushWithKey(…)
+}
+// :327-343  「路 2（文章进度）」—— 独立判空，**与路 1 的 err 无 return 隔断**
+```
+
+```go
+// :345-364  currentUserLikeTotal —— 返回的是 (int64, error) 二元组
+total, err := l.svcCtx.BizRedis.ZcardCtx(l.ctx, userListKey)
+if err != nil { total = 0 }                                   // Redis 失败 ⇒ 记 0，继续
+dbTotal, dbErr := l.svcCtx.LikeModel.GetUserActiveLikeCount(l.ctx, userID, targetType)
+if dbErr != nil {
+    if err == nil { return int64(total), nil }                // Redis 成功 + DB 失败 ⇒ 降级，error = nil
+    return 0, dbErr                                           // 双失败 ⇒ error **必须传出去**
+}
+if dbTotal > int64(total) { return dbTotal, nil }
+return int64(total), nil
+```
+
+⇒ **error 只在「Redis 与 DB 同时失败」时才存在**；业务码 `ErrorRedisSelect = 5011`（`service/like/common/errmsg/errmsg.go:51`）。
+
+#### ② RAG 侧修前的问题（**真漂移**）
+
+`currentUserLikeTotal` 双失败时只 `LOG.warn(...)` + `return 0L` ⇒ **Go 的 `dbErr` 被吞掉** ⇒
+① **双失败没有任何 5011 业务错误记录**（Go 有）；② user 路「不推」这件事**只靠下游 `totalLikesGiven > 0` 这个巧合守卫**兜住 ⇒ 一旦守卫被改，双失败会把 `0` 当进度推出去。
+
+#### ③ 修法（**关键决定：补业务错误记录，而不是把 error 抛出去**）
+
+| 曾经的错误直觉 | 为什么错 |
+|---|---|
+| 「把 error 抛出去，让上层处理」 | Go 侧是 `LogBusinessErr`（**记日志**），**既不抛、也不中断点赞主流程**、**也不短路路 2** ⇒ 抛异常 ⇒ **比 Go 更严** ⇒ **制造新漂移** |
+| 「在调用点分流」 | 分流若留在 `likeAction` 调用点 ⇒ err 分支会**连路 2 一起跳过** ⇒ Go 的路 2 在 err 时**照走** ⇒ **又一处漂移** |
+
+⇒ **错误分流必须落在 `publish` 内部**。
+
+#### ④ §5.4「执行实际改造」九项
+
+| # | 项 | 内容 |
+|---|---|---|
+| 1 | **修改前的实现和行为** | `currentUserLikeTotal` 返回 `long`；双失败 ⇒ `LOG.warn` + `0L` ⇒ **无 5011 记录**、**user 路与 article 路都不推**（user 路是「被 `> 0` 守卫挡下」） |
+| 2 | **具体问题** | ① Go 的 `dbErr` 被吞（**行为层漂移**：缺 5011 业务错误记录）；② javadoc 声称「与 Go 一致」但**实现与 Go 不一致** ⇒ 违反 AGENTS.md §3.2「idiomatization 必须能回答『语义还一样吗』」 |
+| 3 | **修改后的实现** | ① `LikeTaskProgressPublisher` 新增 `public record UserLikeTotal(long total, Throwable error)`（`ok()` / `failed()` 两个工厂）；② `publish(...)` 签名改接 `UserLikeTotal`；③ **路 1 按 Go 三段式分流**：`error != null` ⇒ `logger.logBusinessErr(Context.current(), LikeErrorCode.ERROR_REDIS_SELECT.getCode(), new IllegalStateException("sync task user progress failed: " + msg, err))`（复刻 Go 的 `%w` 包裹语义）且**不推 user 路**；`else if total > 0` ⇒ 推；④ **路 2 不变、不受路 1 的 err 影响**；⑤ `currentUserLikeTotal` 改返回 `UserLikeTotal`（Redis 成功+DB 失败 ⇒ `ok(total)`；**双失败 ⇒ `failed(e)`**） |
+| 4 | **修改理由** | AGENTS.md §3.1（Go 是唯一真源）+ §3.2（留痕必须带 Go 出处）+ §3.3（机制必须**验证实际生效** ⇒ ⇒ 守门必须断言**真实日志行**，不是「Bean 存在」） |
+| 5 | **实际变更文件** | `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeDomainService.java`（`currentUserLikeTotal` 返回类型 + 调用点 + javadoc 全面订正）· `.../service/LikeTaskProgressPublisher.java`（`UserLikeTotal` 记录 + `publish` 三段式分流）· 🆕 `.../src/test/java/com/rag/like/like/rpc/service/LikeUserLikeTotalDoubleFailureGateTest.java` |
+| 6 | **测试场景和断言** | **4 条**（**驱动完整 `likeAction` 路径** + **真 publisher** + **真 `LoggerFactoryBean`** + Logback `ListAppender` 捕获**真实日志行**）：① 🔴 **双失败 ⇒ 记 5011 + user 路不推 + article 路照走** ② 🔴 对照组：Redis 成功 + DB 失败 ⇒ **不记 5011** 且 user 路照推（Go 降级用 Redis 值） ③ 🔴 对照组：两侧都成功 ⇒ 不记 5011 且 user 路照推 ④ 🔴 双失败且 `articleLikes=0` ⇒ article 路也不推（Go：`articleLikes <= 0` 直接 return） |
+| 7 | **实际执行结果** | `mvn -o -B -pl service/like/like-rpc -am -Dtest='LikeUserLikeTotalDoubleFailureGateTest' test` ⇒ **`Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`** · **BUILD SUCCESS**（日志 `/tmp/g2run/g2-proto2.log`）<br>⇒ **真实日志行实证**：`error_code="5011"` · `error_reason="sync task user progress failed: db down"` · `message=business_error` |
+| 8 | **尚未解决的问题** | ① **未做双侧活体对拍**（Go 侧真 server 与 RAG 侧真 server 同一次双失败的日志/推送行为逐条比对）⇒ 证据止于 **E4**（本仓真组件 + 真实日志），**不写 L4**；② Go 侧的 `LogBusinessErr` 与 RAG 侧 `LoggerFactoryBean.logBusinessErr` 的**字段全集**是否逐字段一致 ⇒ 属共享层对照面（见 [`like/vs-common.md`](vs-common.md)），本轮**只对齐了本域这 3 个字段** |
+| 9 | **对阶段 2 的影响** | **无回退需求**（本轮把 RAG 改回 Go 的行为）⇒ 阶段 2 补**双侧活体**把 E4 升 L4 + 补 `logBusinessErr` 字段全集对照 |
+
+#### ⑤ §10「问题归属」十一项
+
+| # | 项 | 内容 |
+|---|---|---|
+| 1 | **唯一编号** | **`E60`**（沿用 global 台账编号） |
+| 2 | **问题类型和优先级** | **P1** —— 行为层漂移（缺业务错误记录 + 靠巧合守卫兜底）· 非 P0（不造成数据损坏：user 路只是「没推」而非「推错」） |
+| 3 | **阶段归属** | **B 类**（阶段 1 竞争力补强项）—— 不阻断阶段 1 准入 |
+| 4 | **涉及文件与实际证据** | Go：`service/like/rpc/internal/logic/likeactionlogic.go:311-320`（路 1 三段式）· `:327-343`（路 2 独立）· `:345-364`（二元组 + 双失败语义）· `service/like/common/errmsg/errmsg.go:51`（`ErrorRedisSelect = 5011`）<br>RAG：`LikeDomainService.java` `currentUserLikeTotal` · `LikeTaskProgressPublisher.java` `publish` |
+| 5 | **触发场景** | 点赞动作同时踩到 **Redis 不可用** + **DB 不可用**（或两者其一 + 另一侧查询异常） |
+| 6 | **当前行为与预期行为** | 修前：双失败**无 5011 记录**、user 路不推（靠 `> 0` 守卫）、article 路不推；修后：**有 5011 记录**、user 路**不推**（Go 三段式）、**article 路照走** |
+| 7 | **对简历展示准入的影响** | **不阻断**；但修前「点赞失败路径的行为与 Go 一致」这条主张**站不住** |
+| 8 | **对最终工程目标的影响** | **正向** ⇒ 双侧失败语义一致；⚠️ 缺双侧活体 |
+| 9 | **修复方向** | ✅ **已修**（**补业务错误记录 + 错误分流落在 `publish` 内部**） |
+| 10 | **验收条件和测试方案** | ① 双失败 ⇒ 真实日志出现 `error_code=5011` + `error_reason` 前缀 `sync task user progress failed:`；② user 路不推、article 路照走；③ 两组对照组不记 5011；④ 复算命令见下 |
+| 11 | **当前处理状态** | ✅ **已修 + 已守门 + 已实跑（4/4 绿）**（2026-10-29）⇒ **E60 销案** |
+
+#### ⑥ 复算命令（可复算）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+mvn -o -B -DargLine=-Xmx2g -pl service/like/like-rpc -am \
+  -Dtest='LikeUserLikeTotalDoubleFailureGateTest' -Dsurefire.failIfNoSpecifiedTests=false test
+# 期望：Tests run: 4, Failures: 0, Errors: 0 · BUILD SUCCESS
+```
+
+---
+
+### §2 🔴 `DRIFT-LIKE-003` **三段拆分订正**（台账原文「6 个 4 行骨架」**已实测过时**）
+
+#### ① 台账原文哪里过时了
+
+原文（§0 速览 + §5 摘要）称「事实投递链路 6 个骨架文件逐个复核，**仍是 4 行**」。
+⇒ **2026-10-29 实测：不成立。**
+
+| 原台账的说法 | 实测（2026-10-29，源码级） | 判定 |
+|---|---|---|
+| 投递侧（写库 + 认领 + 调度）＝ 骨架 | `LikeFactDispatchService`（275 行）· `LikeDeliveryValidator`（383 行）· `LikeFactDispatchScheduler`（138 行）—— **三个都已实现**（global 域**第二十轮 X-4** 落地，并配 **5 个专属守门测试**） | 🔴 **台账过时**（漏读了 X-4 那一轮） |
+| 剩余 3 个骨架 = 投递侧 | 实际剩下的 3 个骨架是 **`LikeFactProcessLogging`**（日志）· **`LikeAuthorityEndpointConfig`**（暴露形态）· **`LikeAuthorityLookupService`**（权威读语义）⇒ **没有一个是投递侧** | 🔴 **台账过时** |
+
+⇒ **订正后的三段划分**（下表即本轮 §5.3 的登记主体）：
+
+#### ② 三段逐条登记（§5.3「差异与暂缓项」十一项 × 3）
+
+| 项 | **段 1：投递链路** | **段 2：权威读语义** | **段 3：权威读暴露形态** |
+|---|---|---|---|
+| **① 唯一编号** | `DRIFT-LIKE-003-A` | `DRIFT-LIKE-003-B` | `DRIFT-LIKE-003-C` |
+| **② 原项目文件/契约** | Go `service/like/rpc/internal/logic/fact_delivery.go:52-126`（SKIP LOCKED 认领 / BLOCKED / FAILED） | Go `service/like/rpc/internal/model/fact_authority.go:12-146`（12 道全链路重放校验） | Go `service/like/rpc/cmd/fact-authority/main.go:52-80`（**独立进程**）+ `service/common/communityfact/authority_http.go`（`GET /internal/v1/community/facts` · Bearer token） |
+| **③ 原始行为** | 认领 → 投递 → 回写 `delivery_status` / `technical_*` | 按 `event_id` 重放校验，产出 `AuthorityFact`（含 `TechnicalReceipt`） | **独立 HTTP 进程**：`LIKE_DATABASE_URL` + `LIKE_FACT_AUTHORITY_LISTEN` + `LIKE_FACT_AUTHORITY_TOKEN`（**token 长度 ≥ 32**，否则启动失败）；`NewAuthorityHandler("rtw.like-mq", token, …)` |
+| **④ 阶段 1 当前行为** | ✅ **已实现**（X-4 落地 + 5 守门） | ✅ **本轮 Java 化**：`LikeAuthorityLookupService`（407 行）逐字翻译 12 道校验 | ⬜ **未做**（本轮只做语义层） |
+| **⑤ 具体差异** | **无**（本轮未动） | 本轮**修复前**：`LikeAuthorityLookupService` 是 4 行骨架 ⇒ 权威读**返回不了事实** | RAG 侧**没有**独立进程 ⇒ **HTTP 端点不存在** ⇒ 「谁能问权威」无对应物 |
+| **⑥ 暂缓/简化理由** | — | — | ⬜ **不是「不想做」，是「做不了」**：① 共享层 `AuthorityHandler` / `AuthorityHandlerFactory` **依赖 servlet** ⇒ like-rpc classpath **无 servlet-api** ⇒ `implements AuthorityHandler.AuthorityLookup` 会让 Spring 上下文**起不来**；② 加 `spring-boot-starter-web` 会让本模块 **4 个未声明 `webEnvironment` 的 `@SpringBootTest`** 默认起 Tomcat ⇒ 为形态变更拿既有测试面冒险**不值**；③ 新建独立模块 `service/like/like-fact-authority/**` **不在 G2 写权白名单** ⇒ 须改共享面 `tools/difftest/check-wave-lane-ownership.py` + 根级 `docker-compose.yml` ⇒ **G2 不可写** ⇒ **转派** |
+| **⑦ 对业务正确性/安全性/数据一致性/可靠性的影响** | — | **正向**：权威读从「返回不了」变成「12 道校验逐条对齐」⇒ 事实校验面**闭合** | 🔴 **安全性方向 = RAG 更严**（**没有**一个未鉴权的 HTTP 端点 ⇒ 少一个越权面）⇒ **不是安全洞**；可靠性：调用方拿不到权威事实 ⇒ **受影响链路暂不可用** |
+| **⑧ 是否阻断阶段 1** | ❌ **否** | ❌ **否** | ❌ **否**（**P2 · C 类**）—— ⚠️ 但它是「事实投递链路端到端真实运行」的**最后一环** ⇒ 收口执行者若要判 **P0 第 1 条**，**本段是唯一的缺口** ⇒ **必须由收口方拍板形态** |
+| **⑨ 阶段 2 恢复/替换方案** | — | 阶段 2 补**双侧活体对拍**（Go 侧真进程 + RAG 侧真进程，同一 `event_id` 逐字段比对 `AuthorityFact`）⇒ 把 E3 升 L4 | **二选一（待拍板）**：① **独立进程**（与 Go 同形）—— 需新增模块 + 改 2 处共享面；② **同进程独立 HTTP 端口** —— 需给 like-rpc 加 servlet 依赖（会动既有测试面）⇒ **两者都是「阶段 2 的工程形态决策」，不是阶段 1 的行为对齐项** |
+| **⑩ 阶段 2 测试场景与通过标准** | — | 同一条 `event_id` ⇒ 两侧 `AuthorityFact` 的 `Event` / `SubjectRef` / `TechnicalReceipt` / `SourceEventHash` **逐字段相等**；12 道校验的**每一条否定用例**（缺字段 / hash 不符 / 状态机非法 / revision 不合法 …）两侧**同拒** | ① 端点**必须鉴权**（无 token ⇒ 401/403）；② token 长度 < 32 ⇒ **启动失败**（Go `main.go:54`）；③ 查询不存在的事件 ⇒ **404**；④ 依赖不可用 ⇒ **503** |
+| **⑪ 当前证据及剩余证据缺口** | **E4**（5 个专属守门 + 真容器） | **E3**（`LikeAuthorityLookupServiceGateTest` **11 条**实跑全绿；Go 侧 `fact_authority.go` 逐字对照）<br>**缺口**：**未做双侧活体对拍** ⇒ **不写 L4**；**未取证 3 项**（P-U-1/2/3，见 [`like/proto.md`](proto.md) 与本节 §7） | **证据缺口 = 全部**（本轮**零**端点实现 ⇒ 无可测物） |
+
+#### ③ 本轮新增的「段 2」实现要点（**逐字对照 Go，不采信台账转述**）
+
+| Go 位置 | RAG 实现 | 备注 |
+|---|---|---|
+| `fact_authority.go:12-45` `deliveredLikeAuthority` | `LikeAuthorityLookupService.deliveredLikeAuthority`（`:227`） | **12 道校验按 Go 的短路顺序**逐条翻译 |
+| `:48-53` `validLikeRevision` | `:311` | `revision == nil ⇒ status == "unknown"`；否则 `revision != "" && status == "resolved"` |
+| `:53-119` `AuthoritativeFact` → `lookup` | `:109` `public Wire.AuthorityFact lookup(Context ctx, String producer, String eventId)` | 签名与 Go 一致；**只依赖零 servlet 依赖的共享层 `Wire`** |
+| `fact_authority.go:60-66` 的 `ParseRTWSubject` / `ValidHash` / `CanonicalHash` / `StrictDecode` | 复用共享层 `Wire`（**只读**，本轮**零改动**） | ⇒ **不碰共享层** |
+| — | 🆕 `LikeRecordMapper.selectOneByUserAndTarget(userId, targetType, targetId)` | ⚠️ **无 `FOR UPDATE`**（与既有 `selectForUpdateIncludingDeleted` **语义不同** ⇒ **勿合并**） |
+| — | `LikeDeliveryValidator.parseGoRfc3339` 由 `private static` ⇒ **package-private**（同包复用） | 表达层改动，行为不变 |
+| Go `time.Time.IsZero()` | `LocalDateTime.of(1,1,1,0,0,0).toInstant(ZoneOffset.UTC)` | ⚠️ **Go 的零值是公元 1 年，不是 epoch** ⇒ 修掉了 `java.time.Instant.isEqual`（该方法**不存在**，是 `java.sql.Timestamp` 的） |
+
+#### ④ 守门（**11 条**，实跑全绿）
+
+`service/like/like-rpc/src/test/java/com/rag/like/like/rpc/service/LikeAuthorityLookupServiceGateTest.java`
+⇒ **`Tests run: 11, Failures: 0, Errors: 0, Skipped: 0`** · **BUILD SUCCESS**（日志 `/tmp/g2run/g2-auth2.log`）。
+⚠️ **夹具约束**：`MSG_ID` 必须是**纯数字**（如 `2115499282914717696`）⇒ 否则 Go 的 `strconv.ParseInt(operationId)` 必失败 ⇒ 用例会因夹具而非被测行为变红。
+
+#### ⑤ 复算命令（可复算）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+mvn -o -B -DargLine=-Xmx2g -pl service/like/like-rpc -am \
+  -Dtest='LikeAuthorityLookupServiceGateTest' -Dsurefire.failIfNoSpecifiedTests=false test
+# 期望：Tests run: 11, Failures: 0, Errors: 0 · BUILD SUCCESS
+```
+
+---
+
+### §3 🟢 **`L-U11` 闭合**（`rpcInterceptorConfigurer` 真挂进 gRPC 调用链）
+
+#### ① 台账原文哪里过时了
+
+§5 的 `L-U11` 写「**仍缺** `rpcInterceptorConfigurer` 的守门测试」，且 2026-10-24 审计补了一条「留着的理由已过时」。
+⇒ **2026-10-29 实测：守门已在仓内** ⇒ `LikeRpcGrpcInterceptorWiringTest`（`service/like/like-rpc/src/test/java/com/rag/like/like/rpc/`，**`git log` 可见**：随 `bebf30d` / `e9c3946` 入仓）⇒ **台账条目过时**。
+
+#### ② 它为什么满足 AGENTS.md §3.3（「注解存在」≠「机制生效」）
+
+| 维度 | 本测试的做法 |
+|---|---|
+| **真链** | 用容器里的 **`GrpcServerConfigurer`**（bean 名 `rpcInterceptorConfigurer`）**真装配**一个 `Server` ⇒ 走的是**生产同一条装配路径** |
+| **真调用** | 注册一个「**处理函数一直不返回**」的服务 ⇒ 用 **latch**（不是 `sleep`）⇒ 客户端 5s deadline 调用 |
+| **判别式断言（缺一不可）** | ① 断言客户端拿到 `DEADLINE_EXCEEDED`；② 断言**耗时 < 3s**（服务端超时 300ms ⇒ 若接近 5s 说明只有**客户端** deadline 生效 ⇒ `server.intercept(...)` 没挂上）；③ 断言 **handler 确实被调用过**（`probe.entered`）；④ 断言**取消发生时 handler 仍在跑**（`!probe.completed`）<br>⇒ ③④ 是关键：只看 status + 耗时，在「handler 压根没被派发」时**同样成立** ⇒ 那就只是「服务端能取消一个**空调用**」 |
+| **标准派发入口** | 用 `ServerCalls.asyncUnaryCall` ⇒ grpc-java **会**派发 `onHalfClose`（裸 `ServerCallHandler` **不会**） |
+| **生产值也钉住** | 第 3 条断言生产 `application.yml` 的 `observability.rpc-timeout: 2s` = Go 的 go-zero `zrpc/config.go` `Timeout int64 json:",default=2000"` |
+
+#### ③ 实跑结果（**活体证据**）
+
+```bash
+mvn -o -B -DargLine=-Xmx2g -pl service/like/like-rpc -am \
+  -Dtest='LikeRpcGrpcInterceptorWiringTest' -Dsurefire.failIfNoSpecifiedTests=false test
+# ⇒ Tests run: 3, Failures: 0, Errors: 0, Skipped: 0 · BUILD SUCCESS（日志 /tmp/g2run/g2-lu11.log）
+```
+
+⇒ **证据强度 E4**（真 gRPC server + 真链 + 判别式断言 + 真实耗时读数）⇒ **`L-U11` 闭合**。
+⚠️ **未做**：Go 侧真 server 的同场景对照 ⇒ **不写 L4**。
+
+---
+
+### §4 🟡 **`L-U9` 性质订正**（真 Kafka 活体）—— 从「环境受阻」改为「取证缺口」，**不阻断**
+
+#### ① 台账原文哪里过时了
+
+原文理由：「`spring-kafka-test` / `testcontainers-kafka` **不在本地 m2** ⇒ 要联网拉依赖」。
+⇒ **2026-10-29 实测**：`~/.m2/repository/org/testcontainers/testcontainers-kafka` **在**（2.0.5）⇒
+⇒ **「环境受阻」这个理由已不成立** ⇒ 本条**降级为「尚未实现」**（与 `L-U11` 同一类订正：AGENTS.md §3.3「『配置里没写』≠『没开』，也≠『没做』」）。
+
+#### ② 但它**仍不是**「必相对齐项」
+
+| 判据 | 依据 |
+|---|---|
+| `L-U9` 要验的是 | 「**失败消息之后，后续消息是否真的被继续处理**」（真 broker 上的位点推进） |
+| 源码链**已钉死** | `LikeUpdateKafkaListener.goAlignedErrorHandler()` = `new DefaultErrorHandler(recoverer, **new FixedBackOff(0, 0)**)` ⇒ 第一次失败即 `nextBackOff == STOP` ⇒ `FailedRecordTracker.recovered` 返回 `true` ⇒ `SeekUtils.doSeeks` **不 seek** ⇒ 容器继续处理后续消息、位点随之推进 ⇒ **丢弃 + 继续**（= Go 的 `ForceCommit=true`） |
+| 同类定性先例 | `like-api` 的 `U-01~U-08` 就是「**取证缺口**（非必对齐）」而组件判 ✅ ⇒ 本条**同类** |
+| ⇒ 结论 | 🟡 **取证缺口** ⇒ **不计入「必相对齐项」** ⇒ **不阻断 like-rpc 判 ✅**（基线 §1.3） |
+
+#### ③ 登记（§5.3 十一项 · 浓缩）
+
+| 项 | 内容 |
+|---|---|
+| **① 编号** | `L-U9`（沿用） |
+| **② 原项目契约** | Go `go-queue@v1.2.2/kq/queue.go:230-243` + `kq/config.go:24`（`ForceCommit bool json:",default=true"`）+ `service/like/rpc/internal/mq/etc/mq.yaml`（**未覆盖该字段**）⇒ **Consume 返回 error ⇒ 位点照样推进 ⇒ 丢弃 + 继续** |
+| **③ 原始行为** | 失败消息**永久丢弃、不重投**，循环**继续处理下一条** |
+| **④ 阶段 1 当前行为** | Java 侧 `FixedBackOff(0, 0)` ⇒ 语义**源码级已对齐**；**但未在真 broker 上观测过** |
+| **⑤ 具体差异** | **无行为差异**；缺的是**活体证据** |
+| **⑥ 理由** | 需真 Kafka broker（testcontainers-kafka 2.0.5 **已可离线用**）⇒ **本轮未做**（§3.5 工作量控制：阶段 1 不无限扩大范围） |
+| **⑦ 影响** | 可靠性面：若 `FixedBackOff` 被后人改回单参构造（= `FixedBackOff(0,9)`）⇒ **新增 9 次进程内重试**（Go 是 0 次）⇒ **卡死分区**风险 ⇒ ⚠️ **需要守门**，但**不是**当前的行为漂移 |
+| **⑧ 是否阻断阶段 1** | ❌ **否**（取证缺口，非必相对齐项） |
+| **⑨ 阶段 2 方案** | 加 `testcontainers-kafka` 依赖（**like-rpc 的 pom 在 G2 写权面** ⇒ 阶段 2 可直接做）+ 真 broker 活体：投「坏消息 + 好消息」⇒ 断言**好消息被消费**、**坏消息零重试**（listener 只跑 1 次）、**位点推进过坏消息** |
+| **⑩ 阶段 2 通过标准** | ① 坏消息后 listener **只被调用 1 次**（不是 9 次）② 好消息**确实被消费** ③ 位点**越过**坏消息 ④ 异常链与 Go 的 `ForceCommit=true` 结论一致 |
+| **⑪ 证据/缺口** | 源码级 **E3**；**活体 = 0** ⇒ **不写 L4** |
+
+#### ④ 复算命令（可复算 · 阶段 2 的入口）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+# 静态判据（阶段 1 已有）：错误处理器必须是 FixedBackOff(0, 0)，不能是单参构造
+grep -n "new FixedBackOff(0, 0)\|new DefaultErrorHandler" \
+  service/like/like-rpc/src/main/java/com/rag/like/like/rpc/mq/LikeUpdateKafkaListener.java
+# 期望：命中 `new FixedBackOff(0, 0)`，且 DefaultErrorHandler 是**双参**构造
+```
+
+---
+
+### §5 ✅ **D-08 复核：8 条错误断言 A~H 全部销号**
+
+§「Java 侧 8 条错误断言」原文（2026-10-22 首轮）称「**仍然全部在位**」⇒ **2026-10-29 逐条回源码复核**：
+
+| 断言 | 原文 | 复核结果（**源码级**，2026-10-29） |
+|---|---|---|
+| **A** | 「GORM 扫 `created_at` 取 `data.Unix()` ⇒ 秒/毫秒刻度不一致，原样保留」 | ✅ **已销号** —— `LikeDomainService.java` 已重写为毫秒；台账 §2.10 已记「前提不成立，描述的是不可达路径」 |
+| **B** | 「Go 的 `Updates` 用 map 形式不会带上 `updated_at`」 | ✅ **已销号** —— `LikeRecordMapper.java:231` 有「⚠️ 2026-10-23 修正错误断言 B」 |
+| **C** | 「`kq.Pusher.Push` **不带 key**」 | ✅ **已销号** —— `LikeDomainService.java:1200-1203`「⚠️ 2026-10-23 修正错误断言：原文写『**不带 key**』是错的」 |
+| **D** | 「Go `Push` 是**同步**阻塞写，所以选 acks=1 + 异步」 | ✅ **已销号** —— 同上注释续行：「另：Go 的 Push 默认挂 ChunkExecutor ⇒ 只入队即返回」 |
+| **E** | 「不做进程内重试……加 `FixedBackOff` 做 N 次重试是**新增行为**」 | ✅ **已销号** —— `LikeUpdateKafkaListener.java` 的 javadoc 章节「**Java 侧必须显式关掉进程内重试**」+ `goAlignedErrorHandler()` 显式 `new FixedBackOff(0, 0)` |
+| **F** | 「这五个装配点**每一条都有对应的 wiring 测试锁死**」（点名 `LikeGrpcInterceptorWiringTest`） | ✅ **已销号** —— `LikeRpcApplication.java:44`「⚠️ 2026-10-23 修正错误断言 F」；且该类名当时**全仓不存在**（台账 §1272 已记）⇒ 现由 `LikeRpcSpringContextWiringTest` + `LikeRpcGrpcInterceptorWiringTest` 等承担 |
+| **G** | outbox relay「`Push` **不带 key**」 | ✅ **已销号** —— `LikeHotEventOutboxRelay.java:83`「——『**不带 key**』这半句**是错的**（Go 的 Push 内部即 PushWithKey(UnixNano)，pusher.go:123-125）」 |
+| **H** | 「Go 侧 etcd 注册失败会让 `MustNewServer` **panic** ⇒ 进程退出」 | ✅ **已销号** —— `NacosRegistration.java:91`「⚠️ 2026-10-23 修正错误断言 H：**结论对、机制说错了**」（是 `logx.Must` ⇒ `os.Exit(1)`，`panic` 只是 `ExitOnFatal=false` 时的次生路径） |
+
+⇒ **D-08 全部 8 条（A~H）已销号** ⇒ 台账 §891「**首轮 8 条错误断言：仍然全部在位**」**已过时**，本节以本表为准（原文保留不改写，AGENTS.md 台账纪律）。
+⚠️ **本轮为源码级复核（E3）**，**未做变异验证**（把注释改回错误断言、确认某条测试转红）⇒ 故写「**源码级销号**」而不是「**回归网已锁死**」。
+
+---
+
+### §6 🟢 **like-proto 契约网已落**（R2 → R3）
+
+| 项 | 内容 |
+|---|---|
+| **原状态** | `docs/PhaseGoal/g2.md` §1：`like-proto` = 🟡 · **R2 / E2** · 「**无台账** + 消费方式未验 ⇒ R3 不成立」 |
+| **本轮落码** | ① 🆕 `service/like/like-rpc/src/test/resources/proto-contract/generate.py`（从 **hot-rpc 复制**，**不碰 G3 文件**）⇒ 从 **Go 真源** `Sea-RideTheWind_golang/proto/like.proto`（sha256 `347301dbb4ed90265fcd3813be54701537901f9908d117e61615c73bdb8a447e`）生成基准 `like-proto-contract.expected.txt`（22 行）<br>② 🆕 `service/like/like-rpc/src/test/java/com/rag/like/like/rpc/proto/LikeProtoContractTest.java`（**4 条**）<br>③ 🆕 **专属台账** `docs/DRIFT/like/proto.md`（7137 B） |
+| **4 条守门** | ① **基准 ↔ 生成码 `FileDescriptor` 逐条比对**（**排除 `package` 行** —— 依 `docs/Intentional_Deviations/like/proto.md` `SD-2026-10-23-05` 明文要求，否则把已签字偏离判成回退）② **RAG package 必须 = 签字值 `like`**（⇒ 把偏离**钉成签字项**，而不是静默忽略）③ **proto3 `optional` 字段集合为空**（presence 语义与 Go 一致）④ **源码扫描字段号硬编码** |
+| **判据自匹配的处理** | 字段号扫描**只扫 `src/main/java`**（判据自身在 `src/test/java` ⇒ 天然不重叠；生成码的 `*_FIELD_NUMBER` 是 protoc 产物）⇒ 且**扫描根找不到时直接失败**（防假绿） |
+| **实跑** | **`Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`** · **BUILD SUCCESS**（日志 `/tmp/g2run/g2-proto2.log`） |
+| **证据强度** | **E3**（仓内可复算的基准 + 守门）· ⚠️ **未做 wire 字节级双侧对拍** ⇒ **不写 L4** |
+| **未取证项** | `P-U-1` / `P-U-2` / `P-U-3`（见 [`like/proto.md`](proto.md) §未取证） |
+
+---
+
+### §7 本域**未闭合项清单**（阶段一收工口径）
+
+| # | 未闭合项 | 性质 | 优先级 | 阶段归属 | 是否**阻断**本域判 ✅ | 归谁 |
+|---|---|---|---|---|---|---|
+| 1 | **`DRIFT-LIKE-003-C`**（权威读的**暴露形态**：独立进程 / 同进程独立 HTTP 端口） | **形态决策**（不是行为漂移） | **P2** | **C 类** | ❌ 否 | **收口执行者 / 用户拍板**（落地需改 2 处共享面） |
+| 2 | **`L-U9`**（真 Kafka 活体：失败消息之后后续消息真被继续处理） | **取证缺口** | P2 | C 类 | ❌ 否 | 本域（阶段 2） |
+| 3 | **`DRIFT-LIKE-003-B` 的双侧活体**（同一条 `event_id` 两侧 `AuthorityFact` 逐字段相等） | **取证缺口** | P2 | C 类 | ❌ 否 | 本域（阶段 2） |
+| 4 | **`P-U-1/2/3`**（like-proto 未取证项，见 [`like/proto.md`](proto.md)） | **取证缺口** | P3 | C 类 | ❌ 否 | 本域（阶段 2） |
+| 5 | **`D-08` 的变异验证**（把注释改回错误断言、确认某条测试转红） | **证据强度缺口**（源码级销号 ≠ 回归网锁死） | P3 | B 类 | ❌ 否 | 本域（阶段 2） |
+| 6 | **`DRIFT-LIKE-RPC-REDIS-POOL` 的 `max-active` 残留**（64 vs Go 本机 100） | **性能面**（机器相关 ⇒ 无法逐值对齐） | P3 | D 类 | ❌ 否 | — |
+| 7 | **`message-api` 的 `-010`/`-011`/`-013`** | 落点**共享层** | P2 | B 类 | ❌ 否（不属本域） | **G4**（反馈单已发；用户 2026-10-24 已拍板「保持登记，本轮不做」） |
+
+⇒ **本域必相对齐项 = 0** ⇒ like-rpc 可判 **✅**（基线 §1.3 口径；`like-proto` 判 ✅ 需收口执行者把基线 `docs/PhaseGoal-judge.md` 的对应行从 🟡 改 ✅ —— **该文件属共享面，G2 不写**）。
+
+---
+
+### §8 ⚠️ **跨域工具的可复现性缺陷**：`check-surface-parity.py` 在**工作树**里会**假红**（影响本 lane 三个域的收口验收命令）
+
+> 🆕 本轮实测（2026-10-29）· **不是**本域缺陷，是**工具的默认路径假设**问题 ⇒ **归属 = 收口执行者 / `tools/` 共享面**（G2 无写权）。
+
+#### ① 现象
+
+| 场景 | 命令 | 结果 |
+|---|---|---|
+| **主树** `/Users/pr/Documents/java&golang/RAG` | `python3 tools/difftest/check-surface-parity.py --domain like` | ✅ **EXIT=0**（Go=6/RAG=6 · gRPC 6/6） |
+| **工作树** `.../RAG.worktrees/g2-message-like-task` | **同一条命令** | 🔴 **EXIT=1** + 「`- like: Go routes.go 缺失`」+ 合计 **Go=0 / RAG=0** ⇒ **假红**（Go 仓其实就在旁边） |
+
+#### ② 根因（**消费点，不是声明点**）
+
+`tools/difftest/check-surface-parity.py:70`
+```python
+GO_REPO = os.environ.get("GO_REPO", os.path.join(os.path.dirname(REPO), "Sea-RideTheWind_golang"))
+```
+⇒ `REPO` = 脚本所在仓根 ⇒ **工作树**的 `dirname` = `.../RAG.worktrees` ⇒ 默认 `GO_REPO` = `.../RAG.worktrees/Sea-RideTheWind_golang` ⇒ **不存在** ⇒ 报「Go routes.go 缺失」。
+
+#### ③ 🔴 为什么这条必须上报（**别把它读成「本域路由不一致」**）
+
+| 陷阱 | 说明 |
+|---|---|
+| **报的是「缺失」不是「不一致」** | 输出是 `✗ 1 项不一致： - like: Go routes.go 缺失` ⇒ **字面像**「两侧路由对不上」⇒ **实际是「Go 侧根本没读到」** |
+| **合计是 `Go=0 / RAG=0`** | ⇒ 「0 差异」也是 0 差异的**假象**（两边都没数）⇒ **不能拿它当「已对齐」** |
+| **管道会吞退出码** | `python3 … \| tail -6; echo $?` ⇒ `$?` 是 **`tail` 的**退出码 ⇒ 打印出 **EXIT=0** ⇒ **本轮第一次实测就被这个骗过** ⇒ 判退出码**必须不经管道** |
+| **登记位置** | `docs/PhaseGoal/g2.md` §5 的「收口验收命令」块**直接列了这条命令**（且该文件是**机器生成**的 ⇒ **G2 不可手改**）⇒ ⇒ **上报收口执行者**：要么在基线里补 `GO_REPO=...`，要么让脚本**按「向上找同级 Go 仓」兜底** |
+
+#### ④ 正确写法（本轮实测 3 域全绿）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+for d in message like task; do
+  GO_REPO="/Users/pr/Documents/java&golang/Sea-RideTheWind_golang" \
+    python3 tools/difftest/check-surface-parity.py --domain "$d"
+done
+# ⇒ message: HTTP 端点 Go=13 / RAG=13 · gRPC 方法 Go=9  / RAG=9   （EXIT=0）
+# ⇒ like:    HTTP 端点 Go=6  / RAG=6  · gRPC 方法 Go=6  / RAG=6   （EXIT=0）
+# ⇒ task:    HTTP 端点 Go=1  / RAG=1  · gRPC 方法 Go=1  / RAG=1   （EXIT=0）
+```
+
+⚠️ **路径里的 `&` 必须加引号** ⇒ `GO_REPO=/Users/pr/Documents/java&golang/...`（不加引号）会被 shell 拆成 `&` 后台符 ⇒ 报 `golang/Sea-RideTheWind_golang: No such file or directory` + **EXIT=127**。
+⚠️ **判据边界（脚本自己印在输出里）**：本脚本**只覆盖契约面**（路径 / 方法 / rpc 方法名）⇒ 请求体 / 响应体 / 错误码 / 事务 / 并发**不在范围** ⇒ **不得用它的绿灯推导「组件行为等价」**。
+
+---
+
+### §9 ✅ 本轮**域级回归**（`twoStage.md` §5.5「执行必要验证」）
+
+| 项 | 内容 |
+|---|---|
+| **命令** | `mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end clean test -pl service/message/message-api,service/message/message-rpc,service/message/message-common,service/like/like-api,service/like/like-rpc,service/like/like-common,service/task/task-api,service/task/task-rpc -am` |
+| **退出状态** | **BUILD SUCCESS** · **09:03 min** · 23 个反应堆模块全 SUCCESS |
+| **条数（权威口径）** | 逐 `TEST-*.xml` 的 `testsuite` 属性求和 ⇒ **G2 三域 8 模块合计 = 730 tests / 0F / 0E / 0S**<br>· `like-api` **94** · `like-rpc` **151** · `like-common` **18** · `message-api` **107** · `message-rpc` **100** · `message-common` **21** · `task-api` **102** · `task-rpc` **137** |
+| **本轮新增/改动的守门在全量回归里的实跑** | `LikeProtoContractTest` **4/4** · `LikeRpcGrpcInterceptorWiringTest` **3/3** · `LikeMessageHashCrossLanguageParityTest` **3/3**（**真实执行，未跳过**）· `LikeAuthorityLookupServiceGateTest` **11/11** · `LikeUserLikeTotalDoubleFailureGateTest` **4/4** · `MessageDomainServiceDbFailureStatusTest` **4/4** · `TaskRpcKafkaListenerRegistryGateTest` **3/3** |
+| **⚠️ 口径纪律** | ① 本轮**带 `clean`** ⇒ 报告目录已清空重写 ⇒ 条数**不是** stale 报告的残留；② 条数在**构建收工后**采（`BUILD SUCCESS` + maven 进程退出**两个条件都满足**才采）⇒ **不是**构建中途的半成品；③ **跨树比条数必须同口径**（都带 `clean`、都跑成功）⇒ G1/G3/G4 的数**不可**与本数直接相比 |
+| **环境前置** | 需要 **Docker**（like-rpc / task-rpc / message-rpc 的若干真 PG 容器 + 固定宿主口）⇒ 无 Docker 时**不是**「代码有问题」，而是**环境未满足** |
+| **日志** | `/tmp/g2run/g2-regress.log`（**仓外**，不可复算 ⇒ 只作当次实跑的原始记录，**结论以台账 + 复算命令为准**） |
+
+
+---
+
+### §10 🔴→✅ **Go 出处行号订正**（**新的一族**：「数字与真源对不上」，与「字节数错」同族但落点不同）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `46ae663` · **核对日期** 2026-10-29
+> **证据强度**：**E3**（Go 真源**逐行核验** + 改后**逐条回验**）
+> **性质**：**P2 · B 类**（**不阻断**阶段 1 准入）
+> **发现路径**：G1 lane 的「同族注释漂移」排查 → G2 用**更宽口径**重扫 → 顺手扫到**行号族**
+
+#### ① 现象
+
+`service/like/like-rpc` 里 **21 处 `main.go:` 出处引用**（`cmd/fact-dispatch/main.go` 侧）⇒
+**其中 14 处的行号或文件指错**，且其中 **4 处引用的代码根本不在 `main.go` 里**。
+
+| # | RAG 原文（位置） | 原文标的 | **真源实况** | 性质 |
+|---|---|---|---|---|
+| 1 | `LikeFactDispatchScheduler.java:78` | `cmd/fact-dispatch/main.go:58` `if dsn == "" \|\| endpoint == "" \|\| len(token) < 32` | **`main.go:55`** | 行号错 3 |
+| 2 | `LikeFactDispatchScheduler.java:82` | 「同一处是 `return errors.New(...)`」 | **`main.go:56`** | 行号错 2 |
+| 3 | `LikeFactDispatchScheduler.java:85` | 「对应 Go …main.go:58 的进程退出条件」 | **`main.go:55-56`** | 行号错 |
+| 4 | `LikeFactDispatchScheduler.java:91` | `main.go:74` 的 `&http.Client{Timeout: 8 * time.Second}` | **`main.go:72`** | 行号错 2 |
+| 5 | `LikeFactDispatchScheduler.java:17` | `main.go:54-77` | **`main.go:51-77`**（`func run` 起点是 51） | 起点错 |
+| 6 | `LikeFactDispatchScheduler.java:33` | 「Go main.go:74 `for i := 0; i < 16; i++`」 | 🔴 **该代码不在 `main.go`** ⇒ 在 **`service/common/communityfact/process.go:44`** | **文件指错 + 行号错** |
+| 7 | `LikeFactDispatchScheduler.java:34` | 「Go main.go:67 `time.NewTicker(time.Second)`」 | 🔴 ⇒ **`communityfact/process.go:41`** | 同上 |
+| 8 | `LikeFactDispatchScheduler.java:35` | 「Go main.go:71 `context.WithTimeout(ctx, 10*time.Second)`」 | 🔴 ⇒ **`communityfact/process.go:28`**（且变量名是 **`attempt`** 不是 `ctx`） | 同上 + 代码文本也不精确 |
+| 9 | `LikeFactDispatchScheduler.java:36` | 「Go main.go:75-79（单条失败即 break）」 | 🔴 ⇒ **`communityfact/process.go:46-51`** | 同上 |
+| 10 | `LikeFactDispatchScheduler.java:120` | 「`cmd/fact-dispatch/main.go:76-79`（`ctx.Done()` 分支）」 | 🔴 ⇒ **`communityfact/process.go:56-60`** | 同上 |
+| 11 | `LikeFactDispatchContractGateTest.java:58` | `main.go:67-79` | **`main.go:51-77`** | 范围错 |
+| 12 | `LikeFactDispatchContractGateTest.java:71` | `cmd/fact-dispatch/main.go:56`（`DC_PLATFORM_EVENT_URL`） | **`main.go:53`** | 行号错 3 |
+| 13 | `LikeFactDispatchContractGateTest.java:74/77/80/235/252/255/265`（7 处） | `main.go:67` / `:74` / `:75-79` | ⇒ **`communityfact/process.go:41` / `:44` / `:46-51`** | **文件指错 + 行号错** |
+| 14 | `LikeFactDispatchContractGateTest.java:127` | `main.go:58`（`len(token) >= 32`） | **`main.go:55`** | 行号错 3 |
+| 15 | `LikeRpcProperties.java:130` | `cmd/fact-dispatch/main.go:24` 的 `-once` flag | **`main.go:25`** | 行号错 1 |
+
+#### ② 🔴 根因（**为什么这族特别危险**）
+
+| 事实 | 证据 |
+|---|---|
+| **两个 `main.go` 结构几乎一样** | `cmd/fact-dispatch/main.go` 与 `cmd/fact-authority/main.go` 都有 `dsn/token/env` 检查块 ⇒ **`gorm.Open` 在 fact-dispatch 是 `:58`、在 fact-authority 也是 `:58`** ⇒ ⇒ **行号从另一个文件串过来，肉眼看不出** |
+| **「文件指错」最难自查** | 标 `main.go:67` 的 `time.NewTicker` **确实存在于某个 main.go 附近** ⇒ 但它**不在 `main.go` 里** ⇒ 读 RAG 注释的人**按图索骥会找不到**，却**不会怀疑出处本身** ⇒ ⇒ **出处不可核 = AGENTS.md §3.3「每个 Go 事实必须带 `文件:行号`」失效** |
+| **断言照常绿** | 这 14 处全在**注释 / `@DisplayName` / 断言消息**里 ⇒ **不改任何断言 ⇒ 一行红都不会有** ⇒ ⇒ 与「字节数错」完全同族（**绿测试守着一个错的事实**） |
+
+#### ③ §5.4「执行实际改造」九项（浓缩）
+
+| # | 项 | 内容 |
+|---|---|---|
+| 1 | **修改前的实现和行为** | 14 处 Go 出处引用**行号或文件指错**；**产品行为零影响**（全是注释） |
+| 2 | **具体问题** | 违反 AGENTS.md §3.1（逐字对照）/ §3.3（**每个 Go 事实必须带 `文件:行号`**，且 §3.3.2 要求「以『Go: …』措辞出现的断言」必须可核）⇒ **出处不可核** |
+| 3 | **修改后的实现** | 15 处引用**逐条改成真源实况**（文件 + 行号）；`:8` 那条的**代码文本**也从 `context.WithTimeout(ctx, …)` 订正为 `context.WithTimeout(attempt, …)` |
+| 4 | **修改理由** | 出处是「行为层对照」的唯一凭据 ⇒ **出处错 ⇒ 对照链条断** ⇒ 阶段一要求「逐条有证据」⇒ 必须修 |
+| 5 | **实际变更文件** | `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/mq/LikeFactDispatchScheduler.java` · `.../config/LikeRpcProperties.java` · `.../src/test/java/com/rag/like/like/rpc/LikeFactDispatchContractGateTest.java` · `.../src/test/java/com/rag/like/like/rpc/LikeFactDispatchSchedulerStartupTest.java` · `.../mq/LikeAuthorityEndpointConfig.java`（**骨架注释补指路**，见 §11）<br>⚠️ **全部落在 G2 写权面**（`service/like/like-rpc/**`）⇒ **共享层 `service/common` 一个字没改**（只**引用**它的行号） |
+| 6 | **测试场景和断言** | **断言未改一字** ⇒ 相关守门须仍全绿（见 ⑦） |
+| 7 | **实际执行结果** | `mvn -o -B -pl service/like/like-rpc -am -Dtest='LikeFactDispatchContractGateTest,LikeFactDispatchSchedulerStartupTest,LikeAuthorityLookupServiceGateTest' test` ⇒ **`Tests run: 19, Failures: 0, Errors: 0, Skipped: 0`** · **BUILD SUCCESS**（日志 `/tmp/g2run/g2-cite.log`） |
+| 8 | **尚未解决的问题** | ① **本轮只扫了 `main.go:` 这一族**（G2 三域共 21 处）⇒ **其它形式的 Go 出处引用**（`xxx.go:NN` 泛指）**未全量核** ⇒ 阶段 2 可做一次「全仓 `\.go:[0-9]` 出处抽验」；② **`service/common/**` 内部的注释**（G4 面）**未核** ⇒ 不在我写权内 |
+| 9 | **对阶段 2 的影响** | **无回退需求**（纯注释）⇒ 阶段 2 只需**补「出处自动校验」**（见 §10.④） |
+
+#### ④ 📌 可复用的判定式（**这一族比字节数那族更值钱**）
+
+> **凡 RAG 注释里以「Go: …」措辞断言一个行为，⇒ 该出处的 `文件:行号` 必须能指向真源里**「那一行内容」**，而不是「某个看起来差不多的行」。**
+> **复核动作（一行命令）**：把 `文件:行号` 拿回 Go 文件 `sed -n 'NNp' 文件` ⇒ **看打印出来的那行是不是它声称的那件事**。
+> ⚠️ **「结构相似的两个文件」是这族的高发区** ⇒ 本例 `fact-dispatch/main.go` 与 `fact-authority/main.go` 的 `gorm.Open` **都在 `:58`** ⇒ 行号串了**肉眼不可见**。
+> ⇒ ⇒ **建议阶段 2 建一个「出处抽验」脚本**：抽出 RAG 注释里的 `文件:行号` 引用 ⇒ 回 Go 文件读那一行 ⇒ **不要求内容匹配**（太严），**只要求「那一行存在且非空」** ⇒ 就能挡住「文件指错 + 行号越界」这两类。
+
+#### ⑤ 复算命令（可复算）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+
+# ① 逐条回验（把 RAG 现在引用的行号拿回 Go 文件看那一行是什么）
+G="/Users/pr/Documents/java&golang/Sea-RideTheWind_golang"
+sed -n '55p;56p' "$G/service/like/rpc/cmd/fact-dispatch/main.go"     # ⇒ len(token) < 32 / errors.New
+sed -n '41p;44p;46p;50p' "$G/service/common/communityfact/process.go" # ⇒ NewTicker / for i<16 / break
+
+# ② 相关守门（19 条）
+mvn -o -B -DargLine=-Xmx2g -pl service/like/like-rpc -am \
+  -Dtest='LikeFactDispatchContractGateTest,LikeFactDispatchSchedulerStartupTest,LikeAuthorityLookupServiceGateTest' \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+# 期望：Tests run: 19, Failures: 0, Errors: 0 · BUILD SUCCESS
+```
+
+---
+
+### §11 🟢 `LikeAuthorityEndpointConfig` 骨架**补指路**（语义层已实现，别再重做一遍）
+
+| 项 | 内容 |
+|---|---|
+| **改前** | 4 行骨架：`// [骨架占位 · 未实现] AuthorityHandlerFactory.register("rtw.like-mq", …)；…（wire 面变更，待拍板）` ⇒ 读起来像「**权威读整个都没做**」 |
+| **改后** | 仍是骨架（**形态那一半本就不该预支**）⇒ 但**明确写出**：① **语义层已实现**于 `LikeAuthorityLookupService`（Go `fact_authority.go:12-146` 的 12 道校验逐字翻译 · 零 servlet 依赖 · 守门 11 条全绿）；② 为什么**本文件仍然不做**（三条硬约束：共享层 `AuthorityHandler`/`AuthorityHandlerFactory` 依赖 servlet ⇒ like-rpc 无 servlet-api ⇒ implements 会让上下文起不来 ／ 加 web starter 会让 4 个未声明 `webEnvironment` 的 `@SpringBootTest` 默认起 Tomcat ／ Go 形态是独立进程 ⇒ 选「同进程独立端口」= wire 面变更）；③ **形态决策待用户/收口执行者拍板**（`DRIFT-LIKE-003-C`） |
+| **为什么值得改** | ⚠️ **「骨架」这个词会误导**：它让人以为**语义层也没做** ⇒ **可能有人重做一遍**（而那 407 行已经写好且有守门）⇒ ⇒ 骨架注释的首要职责是**指路**，不是描述「没做」 |
+| **验证** | 编译通过（`LikeAuthorityLookupServiceGateTest` 11/11 仍绿） |
+
+---
+
+## 2026-10-29 · G2 收工轮（第二轮）· 🔴→✅ **Go 出处行号订正 · 第二批 60 处**（like-rpc）+ 🟡 **判据本身的失效模式已坐实**（「多候选任一通过 ⇒ 假绿」）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `5fa8558` · **核对日期** 2026-10-29
+> **证据强度**：**E3**（Go 真源**逐行核验** + 改后**逐条回验**）
+> **性质**：**P2 · B 类**（**不阻断**阶段 1 准入；**纯注释面**，产品行为零影响）
+> **发现路径**：调度员（跨会话）给出「本域 5 条 Go 出处行号错」清单 ⇒ G2 **按 go-zero v1.10.2 + Sea 真源逐条复核** ⇒ **清单本身有 2 条的「结束行」多 1**（见 §12.2 末注）⇒ 顺手用**更宽口径**（**域上下文消歧 + 大小写敏感 + 不静默吞多候选**）重扫 ⇒ **浮出 60 处**
+> ⚠️ **本轮跑在「停止令」下** ⇒ 做到「**可提交、可汇报**」即止 ⇒ **不扩范围、不接新任务**
+
+### §12.0 本轮落点清单（like-rpc 60 处 / 7 个文件）
+
+| 组 | 目标真源 | 引用点 | 处数 | 根因 |
+|---|---|---|---|---|
+| **A** | `fact_delivery.go` **函数体边界** | `LikeDeliveryValidator.java:23,140` · `LikeFactDispatchService.java:20,83` | **4** | 起止行都错（`:22-58` 应为 `:23-50`；`:60-127` 应为 `:52-126`，且 `:127` **越界**） |
+| **B** | `fact_delivery.go` **子行号** | `LikeDeliveryValidator.java`(9) · `LikeFactDispatchService.java`(15) · `LikeDomainFactOutboxMapper.java:129` · `LikeFactDispatchContractGateTest.java:222` · `LikeFactDeliveryGoSemanticsGateTest.java:228,244,402` | **29** | **系统性偏移**（见 §12.2 表） |
+| **C** | `fact_authority.go` | `LikeAuthorityLookupService.java`(22) · `LikeAuthorityLookupServiceGateTest.java`(3) · `LikeRecordMapper.java:62` | **26** | **系统性偏移** + 1 处**文件指错** |
+| **D** | go-zero `zrpc/server.go` | `NacosRegistration.java:95` | **1** | 起点多 1（`:41` 是空行） |
+
+> **⚠️ 组 B / C 是本轮最值得记的**：它们**不是零星手误**，而是**整段系统性偏移** ⇒ 说明这批引用**当初就没有逐行回真源核过**。
+
+### §12.1 调度员给的 5 条 —— 复核后**真值与清单不完全一致**（**逐条回真源核**）
+
+| # | 清单给的区间 | **G2 复核后的真值** | 差异 |
+|---|---|---|---|
+| 1 | `core/mapping/unmarshaler.go:664-716` | **`:664-715`** | 结束行**多 1**（`:715` = 闭合括号，`:716` = 空行） |
+| 2 | `rest/token/tokenparser.go:81-87` | **`:81-86`** | 结束行**多 1**（`:86` = 闭合括号，`:87` = 空行） |
+| 3 | `zrpc/server.go:42-46` | **`:42-46`** | ✅ 一致 |
+| 4 | `fact_delivery.go:23-51` | **`:23-50`** | 结束行**多 1**（`:50` = 闭合括号，`:51` = 空行） |
+| 5 | `fact_delivery.go:52-126` | **`:52-126`** | ✅ 一致 |
+
+⇒ **判定式**：**「结束行」最容易被写成「下一个空行 / 下一个函数的起点」** ⇒ 复核时**优先看那一行是不是闭合括号 `}`**，再回退一行确认。
+
+### §12.2 🔴 判据本身的失效模式（本轮**最重要的产出** —— 直接影响别的 lane 的「零错」结论）
+
+抽验脚本从 v2 升到 v3（**加域上下文消歧 + 大小写敏感 + 不静默吞多候选**）后，**浮出 5 条 v2 判成 OK 的真错**：
+
+| # | 引用 | v2 判 | **真源实况** | 为什么 v2 判错 |
+|---|---|---|---|---|
+| 1 | `fact_authority.go:52`（eventID 长度上限） | OK | like 版 `:52` 是**空行**；真身在 **`:54`**（`len(eventID) > 128`） | **comment 版同名文件 `:52` 恰好有同款代码 ⇒ 干扰项顶包 ⇒ 假绿** |
+| 2 | `fact_authority.go:52-57`（`validLikeRevision`） | OK | 真身 **`:46-51`** | 同上 |
+| 3 | `fact_authority.go:40`（EventID 前缀恒等式） | OK | 真身 **`:32`** | `:40` 非空 ⇒ 「行存在且非空」判据看不出**语义不符** |
+| 4 | `metrics.go:39` / `:46`（`LikeApiMetrics`） | OK | like-api 的 `metrics.go` **只有 21 行**（计数器定义）⇒ **文件指错**；真身在 `logic/like/likeactionlogic.go:39-40 / :46-47` | 别的域的 `metrics.go` 恰好够长 ⇒ 顶包 |
+| 5 | `types.go:34-35`（task-api） | OK | `:34` 是**空行**；拒绝点在 **`:35`** | 空行被「非空」判据挡住，但**跨域同名文件**顶包后判过 |
+
+⇒ **三条判定式（可直接搬到别的 lane）**：
+
+1. 🔴 **「多候选任一通过 ⇒ 算过」是假绿源** ⇒ Sea 仓 `fact_delivery.go` 有**两个**（like 版 126 行 = 真身 / comment 版 135 行 = 干扰项）⇒ 越界的 `:60-127` 会被 comment 版**救活** ⇒ **凡「同域同名文件」存在多份，必须按域消歧后再判**。
+2. 🔴 **「大小写不敏感兜底」会掩盖真实路径错误** ⇒ task 域 `model/taskModel.go` 的真身目录是**大写 M**（`service/task/rpc/internal/Model/`）⇒ macOS 不敏感 ⇒ 判过；**Linux CI 会找不到** ⇒ **路径判据必须大小写敏感**。
+3. 🟡 **「行存在且非空」只能挡「越界 / 指空」，挡不住「语义不符」** ⇒ 第 3 条（`fact_authority.go:40`）就是**行号完全合法但内容完全不对** ⇒ ⇒ **凡引用带「声称了什么」的语义，必须回真源读那一行**（§12.4 的复算命令）。
+
+> ⚠️ **对 G1 的影响（已在 §12.2 里坐实的反向风险）**：若 G1 的「849/849 零错」用的是「多候选任一通过」判据 ⇒ **那份结论可能含同类假绿** ⇒ G1 域有 **56 个裸文件名引用** ⇒ **建议 G1 用「域上下文消歧 + 大小写敏感」重跑一遍**（**G2 不越界去跑 G1 的域**）。
+
+### §12.3 §10「问题归属」十一项（浓缩）
+
+| 项 | 内容 |
+|---|---|
+| **问题** | G2 三域 **73 处** Go 出处引用行号错 / 文件指错（like-rpc 60 · like-api 3 · message-api 2 · task-rpc 7 · task-api 1）⇒ **纯注释面**，产品行为零影响 ⇒ 但违反 AGENTS.md §3.3（每个 Go 事实必须带可核的 `文件:行号`）⇒ **对照链条断** |
+| **性质** | **P2 · B 类** ⇒ **不阻断**阶段 1 准入 |
+| **修法** | 73 处**逐条回真源读那一行**后再改 ⇒ **不改任何断言** ⇒ 相关守门须仍全绿 |
+| **写权** | **73 处全部落在 G2 写权面**（`service/{message,like,task}/**`）⇒ **共享层 `service/common` 一个字没改**（只**引用**它的行号） |
+| **未闭合** | ① **462 条「多候选」引用仍是弱证据**（本轮只对**语义带断言**的族做了人工核）⇒ 阶段 2 可做全量人工核；② **抽验脚本落在 `/tmp` ⇒ 未落仓 ⇒ 结论属「声明的，不是可复算的」** ⇒ 落仓位置属 `tools/**` 共享面 ⇒ **G2 无写权** ⇒ 登记给合并收口执行者 |
+
+### §12.4 复算命令（可复算）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+G="/Users/pr/Documents/java&golang/Sea-RideTheWind_golang"
+
+# ① 逐条回验（把改后的行号拿回 Go 文件，看那一行是不是它声称的那件事）
+sed -n '23p;50p;52p;126p' "$G/service/like/rpc/internal/model/fact_delivery.go"
+#   ⇒ :23 func validLikeDelivery / :50 } / :52 func DispatchFactOnce / :126 }
+sed -n '13,15p;30,32p;35,38p;46,51p;54p;106,109p' "$G/service/like/rpc/internal/model/fact_authority.go"
+
+# ② 抽验（脚本在 /tmp ⇒ 仓外 ⇒ 结论以本台账 + 上面 ① 为准）
+grep -rnE "\.go:[0-9]+" service/message service/like service/task --include='*.java' \
+  | grep -v "/target/" > /tmp/g2-gocite.txt        # ⇒ 1079 行命中
+python3 /tmp/g2run/gocite_check3.py /tmp/g2-gocite.txt
+# 期望：引用 1162 条 ⇒ OK 1158 / CASE_MISMATCH 0 / NOT_FOUND 4
+#   ⇒ 4 条 NOT_FOUND 全是**解析器限制或有意不改**（见下），**零真错**
+
+# ③ 域级回归（带 clean ⇒ 条数不是半成品）
+mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end clean test \
+  -pl service/message/message-api,service/message/message-rpc,service/message/message-common,\
+service/like/like-api,service/like/like-rpc,service/like/like-common,service/task/task-api,service/task/task-rpc -am
+```
+
+> **4 条 NOT_FOUND 的逐条定性（**已手工回真源核 ⇒ 行号正确**）**：
+> ① `gorm.io/driver/postgres@v1.6.0/postgres.go:251-255`（`schema.Time` ⇒ `timestamptz`）✅ · ② 同文件 `:231-234`（`size <= 32` ⇒ `integer`）✅ · ③ `gorm.io/gorm@v1.31.1/callbacks/update.go:201`（`case map[string]interface{}:`）✅
+> ⇒ **三条都是「解析器不覆盖 `gorm.io/...` 模块路径形态」**，**不是真错**；
+> ④ `Sea-RideTheWind_golang/service/common/observability/http.go:22` ⇒ **行号正确**（`httpTimeoutBody = "Request Timeout"`）⇒ 只是**路径形态冗余**（多写仓库名一层）⇒ **不改**：G1/G4 域也用同一形态 ⇒ 改 G2 一家会造成**跨域不一致**。
+
+### §12.5 本轮**域级回归**（`twoStage.md` §5.5「执行必要验证」）
+
+| 项 | 内容 |
+|---|---|
+| **命令** | `mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end clean test -pl <G2 三域 8 模块> -am` |
+| **退出状态** | **BUILD SUCCESS** · **09:33 min** · **23 个反应堆模块全 SUCCESS** |
+| **条数（权威口径）** | 逐 `TEST-*.xml` 的 `testsuite` 属性求和 ⇒ **G2 三域 8 模块合计 = 730 tests / 0F / 0E / 0S**；其中 `message-api` **107** · `message-rpc` **100** · `message-common` **21** · `like-api` **94** · `like-rpc` **151** · `like-common` **18** · `task-api` **102** · `task-rpc` **137** |
+| **与上轮（`46ae663`）的关系** | **条数完全相同（730）** ⇒ **符合预期**：本轮 73 处改动**全部在注释面** ⇒ **断言未改一字** ⇒ **测试数不变** ⇒ ⇒ **条数不变本身就是「没碰到断言」的旁证** |
+| **守门（随改动一起复跑）** | `LikeAuthorityLookupServiceGateTest`（11）· `LikeFactDispatchContractGateTest`（3）· `LikeFactDispatchSchedulerStartupTest`（5）· `LikeFactDeliveryGoSemanticsGateTest` · `LikeDomainFactSchemaParityTest` · `LikeApiGoAlignmentTest` · `GetTaskReqParsingTest` · `TaskSinkPropertiesBindingTest` —— **全部含在上表 730 条内**（真实执行，非跳过） |
+| **写权守门** | `check-wave-lane-ownership.py` ⇒ **EXIT=0** · `check-phasegoal-lanes.py` ⇒ **EXIT=0** |
+| **⚠️ 口径纪律** | ① 本轮**带 `clean`** ⇒ 报告已清空重写；② 条数在 **BUILD SUCCESS + maven 进程退出**两个条件都满足后采 ⇒ **不是**构建中途的半成品；③ **跨树比条数必须同口径** ⇒ 不可与 G1/G3/G4 的数直接相比 |
+| **日志** | `/tmp/g2run/g2-regress2.log`（**仓外**，不可复算 ⇒ 结论以台账 + 复算命令为准） |

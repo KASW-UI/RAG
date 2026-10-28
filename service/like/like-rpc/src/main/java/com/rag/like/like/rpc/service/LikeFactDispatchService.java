@@ -17,7 +17,7 @@ import java.time.ZoneOffset;
 
 /**
  * 单条事实投递 —— 对应 Go 端
- * {@code service/like/rpc/internal/model/fact_delivery.go:60-127} 的 {@code DispatchFactOnce}。
+ * {@code service/like/rpc/internal/model/fact_delivery.go:52-126} 的 {@code DispatchFactOnce}。
  *
  * <h2>🔴🔴 为什么用 {@link TransactionTemplate} 而不是 {@code @Transactional}</h2>
  *
@@ -55,7 +55,7 @@ import java.time.ZoneOffset;
  * 由 {@code common.Dispatcher} 施加，Java 侧沿用同一条路径）。这是等式的一部分，不做优化。
  *
  * <h2>⚠️ 发出去的是<b>信封列</b>的原始字节</h2>
- * <p>Go {@code fact_delivery.go:99}：{@code sender.Send(ctx, event, json.RawMessage(*row.DeliveryEnvelope))}
+ * <p>Go {@code fact_delivery.go:92}：{@code sender.Send(ctx, event, json.RawMessage(*row.DeliveryEnvelope))}
  * ⇒ 发的是 {@code delivery_envelope} 列的字节，<b>不是</b>「解码后再序列化」的字节
  * ⇒ DC 算出的 {@code input_hash} 与权威读重算的 {@code input_hash} 才必然相同。
  *
@@ -80,7 +80,7 @@ public class LikeFactDispatchService implements Dispatcher.DispatcherImpl {
     }
 
     /**
-     * 对应 Go {@code DispatchFactOnce}（{@code fact_delivery.go:60-127}）：领一条 → 校验 → 投递 → 落回执。
+     * 对应 Go {@code DispatchFactOnce}（{@code fact_delivery.go:52-126}）：领一条 → 校验 → 投递 → 落回执。
      *
      * <p>本类<b>显式实现</b> {@link Dispatcher.DispatcherImpl}（{@code dispatchFactOnce(ctx, sender, logger)}）
      * ⇒ 由 {@code mq.LikeFactDispatchScheduler} 用 {@code Dispatcher.run(...)} 驱动
@@ -111,21 +111,21 @@ public class LikeFactDispatchService implements Dispatcher.DispatcherImpl {
             throw new IllegalStateException("like fact dispatcher is not configured");
         }
 
-        // Go: fact_delivery.go:64-65 —— tx := Begin(); defer tx.Rollback()
+        // Go: fact_delivery.go:57-61 —— tx := Begin(); defer tx.Rollback()
         // ⚠️ 显式编程式事务：见类注释「为什么用 TransactionTemplate」
         TransactionTemplate template = new TransactionTemplate(transactionManager);
         DispatchResult result = template.execute(status -> {
             // --- ① 取件（FOR UPDATE SKIP LOCKED + 前序屏障，锁持有到本方法返回）
-            //     Go: fact_delivery.go:68-73
+            //     Go: fact_delivery.go:62-69
             LikeDomainFactOutboxEntity row = outboxMapper.claimNextDeliverable();
             if (row == null) {
-                // Go: fact_delivery.go:71-73 —— ErrRecordNotFound ⇒ (false, nil)：队列空，不是错误
+                // Go: fact_delivery.go:70-72 —— ErrRecordNotFound ⇒ (false, nil)：队列空，不是错误
                 status.setRollbackOnly();   // 只读事务，无写入 ⇒ 回滚即可（Go 的 defer Rollback）
                 return DispatchResult.of(DispatchOutcome.EMPTY, null);
             }
 
             // --- ② 校验冻结信封
-            //     Go: fact_delivery.go:75-77（StrictDecode 失败或 validLikeDelivery 为假 ⇒ 一律 BLOCKED）
+            //     Go: fact_delivery.go:77-88（StrictDecode 失败或 validLikeDelivery 为假 ⇒ 一律 BLOCKED）
             // 🔴🔴 下面三个写状态分支都**刻意不调用** status.setRollbackOnly()：
             //   Go 在这三处是 `tx.Commit()`，不是 `tx.Rollback()`。
             //   标 blocked / 记重试次数 / 结算回执这三件事**必须落库** ——
@@ -149,11 +149,11 @@ public class LikeFactDispatchService implements Dispatcher.DispatcherImpl {
                     "like.fact_delivery.started", event.eventId, event.producer, event.aggregateVersion);
 
             // --- ③ 投递 + 回执校验（持锁期间）
-            //     Go: fact_delivery.go:99-101
+            //     Go: fact_delivery.go:92-93
             Wire.TechnicalReceipt receipt = null;
             Exception sendErr = null;
             try {
-                // 🔴 发的是**信封列**的原始字节（Go fact_delivery.go:99），不是重新序列化的字节
+                // 🔴 发的是**信封列**的原始字节（Go fact_delivery.go:92），不是重新序列化的字节
                 receipt = sender.send(ctx, event, rawBytes(row.getDeliveryEnvelope()));
             } catch (Exception e) {
                 sendErr = e;
@@ -163,8 +163,8 @@ public class LikeFactDispatchService implements Dispatcher.DispatcherImpl {
                     : Wire.validateReceipt(event, receipt);
 
             if (sendErr != null || !validated.isOk()) {
-                // Go: fact_delivery.go:102-113 —— sendErr == nil 时才**合成**一句文案；
-                //      sendErr != nil 时**原样返回**那个错误（fact_delivery.go:113 `return false, sendErr`）。
+                // Go: fact_delivery.go:95-97 / :109 —— sendErr == nil 时才**合成**一句文案；
+                //      sendErr != nil 时**原样返回**那个错误（fact_delivery.go:109 `return false, sendErr`）。
                 //      ⇒ 这里必须把原始错误带出去，不能一律换成通用文案（那是把排障信息丢了）。
                 if (sendErr == null) {
                     sendErr = new IllegalStateException(
@@ -179,10 +179,10 @@ public class LikeFactDispatchService implements Dispatcher.DispatcherImpl {
             }
 
             // --- ④ 落技术回执
-            //     Go: fact_delivery.go:115-122
+            //     Go: fact_delivery.go:111-120
             // 🔴 technical_received_at 必须是 **DC 回执里的 received_at**，不是本地投递时刻。
-            //    Go: fact_delivery.go:100 `received, receiptOK := ValidateReceipt(event, receipt)`
-            //        → :119 `"technical_received_at": received`
+            //    Go: fact_delivery.go:93 `received, receiptOK := ValidateReceipt(event, receipt)`
+            //        → :114 `"technical_received_at": received`
             OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
             OffsetDateTime receivedAt = validated.get().atOffset(ZoneOffset.UTC);
             outboxMapper.markDelivered(row.getEventId(), receipt.receiptId, receipt.inputHash,
@@ -197,12 +197,12 @@ public class LikeFactDispatchService implements Dispatcher.DispatcherImpl {
         if (result == null) {
             return false;
         }
-        // Go: fact_delivery.go:89 / :113 —— 在 Commit 之后才把错误交出去（保证状态变更已落库）
+        // Go: fact_delivery.go:89 / :109 —— 在 Commit 之后才把错误交出去（保证状态变更已落库）
         if (result.outcome == DispatchOutcome.BLOCKED) {
             throw Wire.ERR_FROZEN_ENVELOPE_BLOCKED;
         }
         if (result.outcome == DispatchOutcome.FAILED) {
-            // 🔴 保留原始错误作为 cause：Go 的 fact_delivery.go:113 是 `return false, sendErr`（原样交出），
+            // 🔴 保留原始错误作为 cause：Go 的 fact_delivery.go:109 是 `return false, sendErr`（原样交出），
             //    排障时靠它判断是超时、连接被拒、还是回执不匹配。
             Exception cause = result.error;
             throw new DeliveryDeferredException(cause.getMessage(), cause);
@@ -220,7 +220,7 @@ public class LikeFactDispatchService implements Dispatcher.DispatcherImpl {
      * {@code INVALID_FROZEN_ENVELOPE}。
      *
      * <p>⚠️ <b>原始投递错误必须挂在 {@code cause} 上</b>：
-     * Go 的 {@code fact_delivery.go:113} 是 {@code return false, sendErr}（原样交出），
+     * Go 的 {@code fact_delivery.go:109} 是 {@code return false, sendErr}（原样交出），
      * 不是换成一句通用文案 ⇒ 排障时能看出到底是超时、拒连还是回执不匹配。
      */
     public static class DeliveryDeferredException extends RuntimeException {

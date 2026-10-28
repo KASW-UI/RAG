@@ -86,7 +86,7 @@ public class LikeJwtSignatureVerifier {
      * @param uri        请求路径（只用于日志）
      */
     public VerificationResult verify(String authHeader, String uri) {
-        // Go: rest/token/tokenparser.go:80-84 doParseToken → request.ParseFromRequest(r,
+        // Go: rest/token/tokenparser.go:81-86 doParseToken → request.ParseFromRequest(r,
         //     request.AuthorizationHeaderExtractor, ...)。头缺失时 extractor 返回 errNoAuthParam
         //     → ParseToken 返回 err → authhandler.go:56 unauthorized()。
         if (authHeader == null || authHeader.isEmpty()) {

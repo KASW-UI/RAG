@@ -1754,3 +1754,28 @@ message-api：84 + 2（MessageApiTimeoutRealTomcatTest）= 86 tests / 0 failures
 ⚠️ **顺带提醒（别当「无关改动」误删）**：本树该文件相对主树还有**正常改动** ——
 `RANDOM_PORT` → `DEFINED_PORT` ＋ `RealTomcatPort` 支撑类 ＋ 端口段注释
 （属 commit `c6fdc1f`「A5 · 真容器测试端口段治理」，**不是** `ce81c5f`）⇒ 合并时**两处都要带**。
+
+---
+
+## 2026-10-29 · G2 收工轮（第二轮）· 🔴→✅ **Go 出处行号订正 · message-api 2 处**
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `5fa8558` · **核对日期** 2026-10-29
+> **证据强度**：**E3**（go-zero v1.10.2 **逐行核验** + 改后逐条回验）
+> **性质**：**P2 · B 类**（**不阻断**阶段 1 准入；**纯注释面**，产品行为零影响）
+
+| # | 位置 | 改前 | **改后（真源实况）** | 性质 |
+|---|---|---|---|---|
+| 1 | `config/GoStyleMapStringValueDeserializer.java:16` | `core/mapping/unmarshaler.go:663-715` | **`:664-715`** | 起点多 1（`:663` 是空行）· 终点 `:715` 是 `processFieldPrimitiveWithJSONNumber` 的**闭合括号**（`:716` 空行 · `:717` 下一个 func） |
+| 2 | `auth/MessageJwtSignatureVerifier.java:132` | `rest/token/tokenparser.go:80-84` | **`:81-86`** | 起止行错（`:80` 空行 · `:86` 闭合括号 · `:85` 是 `request.WithParser(newParser())`） |
+
+> ⚠️ **与 like-api 的同一处是同款**（`LikeJwtSignatureVerifier.java:89`）⇒ **同一族、跨两个域** ⇒ 已一并修。
+> ⚠️ **「结束行」最易写成「下一个空行 / 下一个函数起点」** ⇒ 复核动作 = **先看那一行是不是 `}`**，再回退一行确认 ⇒ 详见 `docs/DRIFT/like/rpc.md` §12.1。
+
+### 复算命令
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+GZ="$HOME/go/pkg/mod/github.com/zeromicro/go-zero@v1.10.2"
+sed -n '664p;715,717p' "$GZ/core/mapping/unmarshaler.go"   # ⇒ func 起点 / } / 空行
+sed -n '80,87p'  "$GZ/rest/token/tokenparser.go"            # ⇒ 空行 / func doParseToken / } / 空行
+```

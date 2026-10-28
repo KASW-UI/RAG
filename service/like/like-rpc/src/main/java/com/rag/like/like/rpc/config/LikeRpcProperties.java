@@ -127,7 +127,7 @@ public class LikeRpcProperties {
         private Duration dcTimeout = Duration.ofSeconds(8);
 
         /**
-         * Go {@code cmd/fact-dispatch/main.go:24} 的 {@code -once} flag（默认 false）：
+         * Go {@code cmd/fact-dispatch/main.go:25} 的 {@code -once} flag（默认 false）：
          * 「只投递至多一条待发事实」。
          *
          * <p>🔴 <b>2026-10-25（第二十轮）新增</b> —— Go 侧它是<b>独立进程的命令行 flag</b>

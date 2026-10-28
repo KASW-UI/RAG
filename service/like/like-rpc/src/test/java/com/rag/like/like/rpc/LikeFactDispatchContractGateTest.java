@@ -55,8 +55,8 @@ import com.rag.like.like.rpc.support.RealContainerPort;
 
 /**
  * 🔴🔴 四条调度契约的**端到端**守门（真 HTTP 服务器当真 DC，**不 mock**）
- * —— 对应 Go 端 {@code service/like/rpc/cmd/fact-dispatch/main.go:67-79} 与
- * {@code service/common/communityfact/process.go:41-53}。
+ * —— 对应 Go 端 {@code service/like/rpc/cmd/fact-dispatch/main.go:51-77} 与
+ * {@code service/common/communityfact/process.go:41-54}。
  *
  * <h2>为什么是「端到端」而不是「测共享层」</h2>
  * <p>四条契约由**共享层** {@link Dispatcher} 承担，而**接线**在 like 域
@@ -68,16 +68,16 @@ import com.rag.like.like.rpc.support.RealContainerPort;
  *   <caption>四条契约与 Go 出处</caption>
  *   <tr><th>#</th><th>契约</th><th>Go 出处</th><th>本类怎么验</th></tr>
  *   <tr><td>①</td><td>投递端点 {@code POST /v1/events}</td>
- *       <td>Go {@code cmd/fact-dispatch/main.go:56}（{@code DC_PLATFORM_EVENT_URL}）</td>
+ *       <td>Go {@code cmd/fact-dispatch/main.go:53}（{@code DC_PLATFORM_EVENT_URL}）</td>
  *       <td>真 HTTP 服务器记录<b>方法 / 路径 / 头 / body</b></td></tr>
  *   <tr><td>②</td><td>节奏 <b>1s</b></td>
- *       <td>Go {@code main.go:67} {@code time.NewTicker(time.Second)}</td>
+ *       <td>Go {@code communityfact/process.go:41} {@code time.NewTicker(time.Second)}</td>
  *       <td>第 17 条与第 16 条的投递时刻差 ∈ [0.8s, 3s]</td></tr>
  *   <tr><td>③</td><td>每轮 <b>16 条</b></td>
- *       <td>Go {@code main.go:74} {@code for i := 0; i &lt; 16; i++}</td>
+ *       <td>Go {@code communityfact/process.go:44} {@code for i := 0; i &lt; 16; i++}</td>
  *       <td>前 16 条<b>连续</b>投递完，第 17 条<b>必须等下一轮</b>（时刻差 ≥ 0.8s）</td></tr>
  *   <tr><td>④</td><td><b>单条失败即 break</b></td>
- *       <td>Go {@code main.go:75-79}</td>
+ *       <td>Go {@code communityfact/process.go:46-51}</td>
  *       <td>第 1 条投递失败 ⇒ <b>同轮内第 2 条一次都不许被尝试</b></td></tr>
  * </table>
  *
@@ -124,7 +124,7 @@ class LikeFactDispatchContractGateTest {
     private static final String SUBJECT_REF = "rtw.identity/platform/9001";
     private static final String OCCURRED_AT = "2026-10-25T06:00:00Z";
     private static final String AVAILABLE_AT = "2026-10-25T06:00:01Z";
-    /** Go 要求 {@code len(token) >= 32}（{@code main.go:58}）。 */
+    /** Go 要求 {@code len(token) >= 32}（{@code main.go:55}）。 */
     private static final String TOKEN = "t".repeat(32);
 
     private static JdbcTemplate jdbc;
@@ -219,7 +219,7 @@ class LikeFactDispatchContractGateTest {
         assertThat(rec.path).isEqualTo("/v1/events");
         assertThat(rec.authorization).isEqualTo("Bearer " + TOKEN);
         assertThat(rec.contentType).isEqualTo("application/json");
-        // 🔴 Go: fact_delivery.go:99 `sender.Send(ctx, event, json.RawMessage(*row.DeliveryEnvelope))`
+        // 🔴 Go: fact_delivery.go:92 `sender.Send(ctx, event, json.RawMessage(*row.DeliveryEnvelope))`
         //    ⇒ 发的是**信封列**的字节，不是「解码后再序列化」的字节
         //    ⇒ 否则 DC 算出的 input_hash 与权威读重算的 input_hash 必然不同。
         assertThat(new String(rec.body, StandardCharsets.UTF_8))
@@ -232,7 +232,7 @@ class LikeFactDispatchContractGateTest {
     // ====================================================================================
 
     @Test
-    @DisplayName("🔴 契约②③：每轮最多 16 条（Go main.go:74），节奏 1s（Go main.go:67）")
+    @DisplayName("🔴 契约②③：每轮最多 16 条（Go communityfact/process.go:44），节奏 1s（Go communityfact/process.go:41）")
     void dispatcherDeliversSixteenPerRoundWithOneSecondTick() throws Exception {
         for (int i = 1; i <= 17; i++) {
             insertValidFact(String.format("msg-%02d", i));
@@ -249,10 +249,10 @@ class LikeFactDispatchContractGateTest {
         long gapMillis = seventhGapMillis(sixteenth, seventeenth);
 
         assertThat(gapMillis)
-                .as("第 16 条与第 17 条之间必须隔一个 tick（Go main.go:67 的 1s）")
+                .as("第 16 条与第 17 条之间必须隔一个 tick（Go communityfact/process.go:41 的 1s）")
                 .isGreaterThanOrEqualTo(800L);
         assertThat(gapMillis)
-                .as("tick 不是 1s 就是漂了（Go main.go:67 time.NewTicker(time.Second)）")
+                .as("tick 不是 1s 就是漂了（Go communityfact/process.go:41 time.NewTicker(time.Second)）")
                 .isLessThan(5000L);
         assertThat(received).hasSizeGreaterThanOrEqualTo(17);
     }
@@ -262,7 +262,7 @@ class LikeFactDispatchContractGateTest {
     // ====================================================================================
 
     @Test
-    @DisplayName("🔴 契约④：单条投递失败 ⇒ 内层批次立即 break（Go main.go:75-79）⇒ 同一轮里**只试一次**")
+    @DisplayName("🔴 契约④：单条投递失败 ⇒ 内层批次立即 break（Go communityfact/process.go:46-51）⇒ 同一轮里**只试一次**")
     void failedDeliveryBreaksTheInnerBatchImmediately() throws Exception {
         // msg-01 = 毒丸（DC 永远回 500）；msg-02 = 正常
         insertValidFact("msg-01");

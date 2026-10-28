@@ -53,10 +53,10 @@ public class LikeApiMetrics {
      */
     public static final String ROUTE_LABEL_GO_HARDCODED = "/like/likeaction";
 
-    /** Go {@code metrics.go:39}：{@code ctx userId is not json.Number} 分支。 */
+    /** Go {@code logic/like/likeactionlogic.go:39-40}：{@code ctx userId is not json.Number} 分支。 */
     public static final String REASON_TOKEN_INVALID = "token_invalid";
 
-    /** Go {@code metrics.go:46}：{@code userId.Int64()} 解析失败分支。 */
+    /** Go {@code logic/like/likeactionlogic.go:46-47}：{@code userId.Int64()} 解析失败分支。 */
     public static final String REASON_TOKEN_PARSE_ERROR = "token_parse_error";
 
     private final MeterRegistry registry;

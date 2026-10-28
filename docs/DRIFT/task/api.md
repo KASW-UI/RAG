@@ -579,3 +579,26 @@ KEEP_UP=1 ./tools/difftest/run-task-http-parity.sh # 跑完不拆服务与容器
 ⇒ **判据是守门脚本**：`tools/difftest/check-jar-executable.sh`
 （逐个 api 模块解包 `META-INF/MANIFEST.MF` 看 `Main-Class`）
 ⇒ **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）。
+
+---
+
+## 2026-10-29 · G2 收工轮（第二轮）· 🔴→✅ **Go 出处行号订正 · task-api 1 处**
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `5fa8558` · **核对日期** 2026-10-29
+> **证据强度**：**E3**（Sea 真源**逐行核验** + 改后逐条回验）
+> **性质**：**P2 · B 类**（**不阻断**阶段 1 准入；**纯注释面**，产品行为零影响）
+
+| 位置 | 改前 | **改后（真源实况）** | 性质 |
+|---|---|---|---|
+| `dto/GetTaskReq.java:149` | `types.go:34-35` | **`types.go:35`** | `:34` 是**空行**；「Boolean / 数组 / 对象」被拒绝的那一行是 `:35` 的 `return errors.New("id must be a string or integer")` |
+
+> ⚠️ **本条是「大小写不敏感 + 多候选任一通过 ⇒ 假绿」的又一个实例**：task 域的 `types.go` 真身只有 36 行 ⇒ `:34-35` 里 `:34` 是空行 ⇒ **朴素判据（行存在 + 非空）本该报错**，但因为**别的域的同名 `types.go` 恰好满足** ⇒ 被判过 ⇒ **检出靠「域上下文消歧」** ⇒ 详见 `docs/DRIFT/like/rpc.md` §12.2。
+
+### 复算命令
+
+```bash
+G="/Users/pr/Documents/java&golang/Sea-RideTheWind_golang"
+wc -l "$G/service/task/api/internal/types/types.go"        # ⇒ 36
+sed -n '29,36p' "$G/service/task/api/internal/types/types.go"
+#   ⇒ :30-33 数字解析 / :34（空行）/ :35 return errors.New("id must be a string or integer")
+```

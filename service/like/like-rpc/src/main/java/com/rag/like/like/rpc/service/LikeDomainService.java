@@ -758,7 +758,14 @@ public class LikeDomainService {
             finalLikeCount = currentArticleLikeTotal(request.getTargetType(), request.getTargetId(), finalLikeCount);
 
             // Go: l.syncTaskProgress(in, userListKey, finallikeCount)
-            long userLikesGiven = currentUserLikeTotal(request.getUserId(), request.getTargetType(), userListKey);
+            // ⚠️ Go 的 currentUserLikeTotal 返回的是 **(int64, error)** 二元组
+            //   ⇒ 这里必须把**失败原因一起**带下去，交给 LikeTaskProgressPublisher
+            //     按 Go 的 `if err != nil / else if total > 0` 结构分流：
+            //     双失败 ⇒ 记业务错误 5011（ErrorRedisSelect）+ **不推 user 路**；路 2 照走。
+            //   ⚠️ 不能在这里分流（写成「有错就不调 publish」）⇒ 那会连 **路 2 一起跳过**，
+            //     而 Go 的 syncTaskProgress 在路 1 之后**没有 return** ⇒ 制造新漂移。
+            LikeTaskProgressPublisher.UserLikeTotal userLikesGiven =
+                    currentUserLikeTotal(request.getUserId(), request.getTargetType(), userListKey);
             taskProgressPublisher.publish(request.getUserId(), request.getAuthorId(),
                     request.getTargetId(), userLikesGiven, finalLikeCount);
         }
@@ -796,7 +803,7 @@ public class LikeDomainService {
     }
 
     /**
-     * 对应 Go {@code currentUserLikeTotal}。
+     * 对应 Go {@code currentUserLikeTotal} —— 返回 Go 的 {@code (int64, error)} <b>二元组</b>。
      *
      * <p>⚠️ Go 这里的错误处理有个容易看错的分支：
      * <pre>
@@ -807,11 +814,23 @@ public class LikeDomainService {
      *     if err == nil { return int64(total), nil }   // 只有 Redis 成功、DB 失败才返回 total
      *     return 0, dbErr                                // 两者都失败才返回错误
      * }
+     * if dbTotal > int64(total) { return dbTotal, nil }
+     * return int64(total), nil
      * </pre>
      * 即：Redis 与 DB **同时**失败才算失败，且此时返回 {@code 0} + error。
-     * 调用方 {@code syncTaskProgress} 只在出错时记日志，不影响点赞结果。
+     * 调用方 {@code syncTaskProgress} 只在出错时记日志（业务码 {@code ErrorRedisSelect}=5011），
+     * <b>不影响点赞结果</b>（Go 侧该分支既不抛、也不中断路 2 的 article 推送）。
+     *
+     * <p>🔴 <b>2026-10-29 G2 修 · global E60</b>：改前本方法双失败时只
+     * {@code LOG.warn(...)} + {@code return 0L} ⇒ <b>error 被吞掉</b>（Go 的 {@code dbErr} 没传出去），
+     * 双失败<b>没有 5011 业务错误记录</b>，也只能靠下游 {@code userLikesGiven > 0} 这个巧合守卫
+     * 才没把 {@code 0} 当进度推出去。
+     * ⇒ 现改为返回 {@link LikeTaskProgressPublisher.UserLikeTotal}，把失败原因传给调用方。
+     *
+     * <p>⚠️ <b>不用异常代替 error</b>：Go 侧这里是<b>返回</b> error 而非 panic；
+     * 若改成抛异常 ⇒ 双失败会让整个点赞 RPC 失败 ⇒ 比 Go 更严 ⇒ 制造新漂移。
      */
-    private long currentUserLikeTotal(long userId, String targetType, String userListKey) {
+    private LikeTaskProgressPublisher.UserLikeTotal currentUserLikeTotal(long userId, String targetType, String userListKey) {
         long total = 0L;
         boolean redisOk = true;
         try {
@@ -827,13 +846,17 @@ public class LikeDomainService {
             dbTotal = recordMapper.countActiveLikeByUserAndType(userId, targetType);
         } catch (Exception e) {
             if (redisOk) {
-                return total;
+                // Go: if err == nil { return int64(total), nil }
+                // ⇒ Redis 成功、DB 失败 ⇒ 降级用 Redis 值，**不算失败**（error 为 nil）
+                return LikeTaskProgressPublisher.UserLikeTotal.ok(total);
             }
-            LOG.warn("both redis and db failed for user like total: userId={} type={}", userId, targetType);
-            return 0L;
+            // Go: return 0, dbErr ⇒ 双失败 ⇒ error **必须传出去**，
+            // 由 LikeTaskProgressPublisher 记业务错误 5011（ErrorRedisSelect）并跳过 user 路推送。
+            return LikeTaskProgressPublisher.UserLikeTotal.failed(e);
         }
 
-        return dbTotal > total ? dbTotal : total;
+        // Go: if dbTotal > int64(total) { return dbTotal, nil }; return int64(total), nil
+        return LikeTaskProgressPublisher.UserLikeTotal.ok(dbTotal > total ? dbTotal : total);
     }
 
     // ==================================================================================

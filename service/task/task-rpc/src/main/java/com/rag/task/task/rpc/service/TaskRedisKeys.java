@@ -192,7 +192,7 @@ public final class TaskRedisKeys {
      */
     public static final Duration EMPTY_PROGRESS_CACHE_TTL = Duration.ofSeconds(30);
 
-    /** 点赞路的 init / done / like:total TTL —— Go {@code like_sink.go:47,188,284,339}：{@code 90*24h}。 */
+    /** 点赞路的 init / done / like:total TTL —— Go {@code like_sink.go:188,284,339}：{@code 90*24h}。 */
     public static final Duration LIKE_TASK_TTL = Duration.ofDays(90);
 
     /** 文章路的 init TTL —— Go {@code article_sink.go:23} {@code articleInitTTL = 24h}。 */

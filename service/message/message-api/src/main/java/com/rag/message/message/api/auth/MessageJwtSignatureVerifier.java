@@ -129,7 +129,7 @@ public class MessageJwtSignatureVerifier {
     public VerificationResult verify(RouteGroup group, String authHeader, String uri) {
         SecretKey key = group == RouteGroup.ADMIN ? adminKey : userKey;
 
-        // Go: rest/token/tokenparser.go:80-84 doParseToken → request.ParseFromRequest(r,
+        // Go: rest/token/tokenparser.go:81-86 doParseToken → request.ParseFromRequest(r,
         //     request.AuthorizationHeaderExtractor, ...)。头缺失时 extractor 返回 errNoAuthParam
         //     → ParseToken 返回 err → authhandler.go:56 unauthorized()。
         if (authHeader == null || authHeader.isEmpty()) {

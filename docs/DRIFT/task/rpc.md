@@ -1556,3 +1556,118 @@ KEEP_UP=1 ./tools/difftest/run-task-offset-oldest.sh # 跑完保留服务与容�
 **④ 写权与归属**
 本段全部落在 G2 写权面（`service/task/**` ＋ `docs/DRIFT/task/**`）⇒ ⇒ **不涉共享层、不涉 G4 面**。
 ⚠️ **G4 面仍有 2 处旧类名未改**（`docs/DRIFT/global/lanes/L13-rpcboot-message-task.md` · `docs/DRIFT/global/_README.md`）⇒ ⇒ **属 G4 写权 ⇒ 已通知 G4，本 lane 不越权改**。
+
+---
+
+## 2026-10-29 · G2 收工轮 · 🟢 **task-rpc 的 Kafka listener 装配守门已补**（全仓唯一缺口）· ⚠️ **判据自身被修过一次**（第一版对 concurrent 容器**必然假红**）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `29a0bce` · **核对日期** 2026-10-29
+> **证据强度**：**E4（真 Spring 上下文 + 真 registry 读数 + Go 契约逐条对照）** · ⚠️ **Kafka broker 指向不可达地址**（只验「装配」，**不验「真消费」**）⇒ **不写 L4**
+> **阶段归属**：**P0 · A 类**（阶段 1 准入**阻断项**：本域是纯消息消费域 ⇒ listener 没装配 ⇒ 整域业务不成立）
+
+### ① 为什么这是 A 类（阶段 1 准入阻断）
+
+- **本域的全部业务价值** = 「消费 like 域投递的 Kafka 事实 ⇒ 折算点赞累计数 ⇒ 推进任务进度」。
+- ⇒ **listener 没真装配 ⇒ 消息一条都不会被消费 ⇒ 整域业务不成立** ⇒ P0 第 1 条「核心业务链路能够真实运行」的直接抓手。
+- ⚠️ **已有守门抓不到**：本域唯一的 listener 契约测试 `TaskKafkaOffsetResetContractTest:185-195` 是**反射读注解**（遍历 6 个类的 `@KafkaListener` 取 `properties`）⇒ 它证明的是「**声明了什么**」，不是「**装配了什么**」⇒ 若某次重构摘掉 `spring-boot-kafka`、或改坏 `containerFactory`，那条守门**照样是绿的**，而消息**一条都不会被消费**（AGENTS.md §3.3 的教科书案例：like-rpc / hot-rpc 都曾「测试全绿、组件根本起不来」）。
+- ⇒ 本轮新增 `TaskRpcKafkaListenerRegistryGateTest`：**不 mock 域服务**、真 Spring 上下文、**真 `KafkaListenerEndpointRegistry` 读数**。
+
+### ② §5.4「执行实际改造」九项
+
+| # | 项 | 内容 |
+|---|---|---|
+| 1 | **修改前的实现和行为** | **task-rpc 没有任何 listener 装配层守门** ⇒ 唯一相关测试是 `TaskKafkaOffsetResetContractTest`（**反射读注解**）⇒ 「**注解声明**」被当成了「**实际装配**」的证据 |
+| 2 | **具体问题** | ① **断言层级错位**（AGENTS.md §3.3.3：「凡用 `@KafkaListener` 必须有装配层测试断言 listener **真进了容器的 registry**（非「方法存在」）」）；② 本域是该要求的**全仓唯一缺口**（like-rpc `LikeRpcSpringContextWiringTest:180-181` 有、hot-rpc `HotRpcSpringContextWiringTest:134-137` 有） |
+| 3 | **修改后的实现** | 🆕 `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskRpcKafkaListenerRegistryGateTest.java`（**3 条**）：<br>① `everyListenerIsActuallyRegisteredInTheContainerRegistry` —— **6 个 listener id 全部在 registry 里**；<br>② `everyListenerBindsGoTopicsAndGroups` —— 每个 listener 的 **topic / groupId** 与 Go 真源**逐字一致**；<br>③ `everyListenerBindsGoOffsetReset` —— **`auto.offset.reset`** 与 Go 一致（goka 三组 `earliest` / kq 三组 `latest`） |
+| 4 | **修改理由** | ① AGENTS.md §3.3.3 硬要求；② P0 第 1 条；③ **契约值全部回 Go 真源逐字核过**（§3.1：不采信转述）—— topic/group 字面量 `service/task/rpc/etc/task.yaml:17-32`；绑定关系 `internal/Init/initGoKa.go:123-127/164-168/198-202`、`initKafkaRaw.go:24-30`、`initUserFilter.go:29-30`、`initArticleFilter.go:29-30`；offset `initGoKa.go:131/173/207` = `sarama.OffsetOldest` vs `task.yaml:34` 的 `Offset: latest` |
+| 5 | **实际变更文件** | 🆕 `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskRpcKafkaListenerRegistryGateTest.java`（**仅新增测试类**；**产品代码零改动**） |
+| 6 | **测试场景和断言** | ⚠️ **绕过 Kafka 的方式是「指向不可达地址」**（`spring.kafka.bootstrap-servers=127.0.0.1:1`），**不是** `exclude` 自动配置 —— 后者会把 listener 容器一起排除掉 ⇒ 断言必然假红。同理接**真 PostgreSQL**（本模块用 Flyway + MyBatis-Plus ⇒ 没有 DataSource 就起不来上下文），宿主口固定 **22826**（task 域段 22820–22849 内，避开 OS 临时段 49152–65535 的 Docker 发布段） |
+| 7 | **实际执行结果** | `mvn -o -B -pl service/task/task-rpc -am -Dtest='TaskRpcKafkaListenerRegistryGateTest' test` ⇒ **`Tests run: 3, Failures: 0, Errors: 0, Skipped: 0`** · **BUILD SUCCESS**（日志 `/tmp/g2run/g2-task.log` · `/tmp/g2run/g2-msg-task.log`） |
+| 8 | **尚未解决的问题** | ① **只验「装配」，不验「真消费」** —— broker 指向不可达地址 ⇒ 「消息真被消费、位点真推进、失败消息之后后续消息真被继续处理」**仍无活体证据** ⇒ 即 **L-U9 那类取证缺口在本域同样存在**（本轮**未做**，见下）；② **`auto.offset.reset` 读的是 `ContainerProperties.getKafkaConsumerProperties()`**（Boot 归一后的值），**不是** broker 上第一次消费的实际起点 ⇒ 二者等价但**不是同一层** |
+| 9 | **对阶段 2 的影响** | **正向** ⇒ 阶段 2 的「真 Kafka 活体」可以直接复用本类的上下文装配（只需把 broker 地址换成真容器）⇒ **不需重写**；⚠️ 阶段 2 需补**真消费**层（位点推进 / 失败后续继续） |
+
+### ③ ⚠️ 判据自身的假红与修法（**本轮踩到并修掉的坑 · 值得写死**）
+
+| 项 | 内容 |
+|---|---|
+| **现象** | 第一版判据写 `assertThat(container).isInstanceOf(KafkaMessageListenerContainer.class)` ⇒ **对每一个 listener 都红** |
+| **归因** | Spring Boot 的默认工厂是 **`ConcurrentKafkaListenerContainerFactory`** ⇒ 它**永远**产出 **`ConcurrentMessageListenerContainer`**（`concurrency=1` 时它只是**只有一个子容器**，类型仍是 concurrent）⇒ 而 `ConcurrentMessageListenerContainer` 与 `KafkaMessageListenerContainer` 在 Spring Kafka 里是**兄弟**（都 extends `AbstractMessageListenerContainer`，**不是**父子）⇒ 原断言**必然**失败 |
+| **判据性质** | 🔴 **红的是判据、不是被测代码**（AGENTS.md §3.3「跑绿 ≠ 对」的镜像：**跑红 ≠ 被测对象坏**）⇒ 处置是**修判据、不改产品** |
+| **修法** | 新增 `effectiveConsumer(MessageListenerContainer)`：**类型无关**地解析「**真正跑消费者**的那个容器」—— concurrent ⇒ 取**第 1 个子容器**（子容器才持有 consumer）；单线程 ⇒ 就是它自己。断言放宽为 `isInstanceOfAny(KafkaMessageListenerContainer.class, ConcurrentMessageListenerContainer.class)`；**契约（topic / groupId / offset）仍从「消费者所在的那一层」读** ⇒ **守门强度不降**（读的是真正生效的配置），且不再有假红 |
+| **附带踩到** | ① `ConcurrentMessageListenerContainer` 有 **2** 个类型参数 ⇒ `ConcurrentMessageListenerContainer<?, ?>`；② `List<KafkaMessageListenerContainer<?,?>>` **不能**直接接 `getContainers()`（capture 转换编译错）⇒ 须写 `List<? extends KafkaMessageListenerContainer<?,?>>` |
+| **可推广的判据纪律** | 写「凡是 X ⇒ 必须走 Y」这类守恒规则时，**Y 只是实现方式之一，不是唯一合法出口** ⇒ ⇒ 写判据前先问「**还有没有别的合法写法？**」⇒ 否则守门**假红** ⇒ **红的第一反应应是「命中项本身是否合规」**，而不是改产品代码 |
+
+### ④ §10「问题归属」十一项
+
+| # | 项 | 内容 |
+|---|---|---|
+| 1 | **唯一编号** | `DRIFT-TASK-RPC-KAFKA-REGISTRY`（🆕 本轮新造，域内唯一） |
+| 2 | **问题类型和优先级** | **P0** —— 测试/装配层缺口，直接对应「核心业务链路真实运行」 |
+| 3 | **阶段归属** | **A 类**（阶段 1 准入阻断项）⇒ 本轮**已消除** |
+| 4 | **涉及文件与实际证据** | Go：`service/task/rpc/etc/task.yaml:17-32` · `internal/Init/initGoKa.go:123-127/131/164-168/173/198-202/207` · `initKafkaRaw.go:24-30` · `initUserFilter.go:29-30` · `initArticleFilter.go:29-30`<br>RAG：🆕 `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskRpcKafkaListenerRegistryGateTest.java` |
+| 5 | **触发场景** | 任何一次重构动到 `spring-boot-kafka` 依赖 / `containerFactory` / `@KafkaListener` 的 `containerFactory` 属性 / listener 的 topic 或 group ⇒ **消息静默不消费**，而当时的测试**全绿** |
+| 6 | **当前行为与预期行为** | 修前：**无任何判据**能发现「listener 没装配」；修后：**6 个 listener 的容器 id 必须全部在 registry 里**，且 topic / groupId / offset 与 Go 逐字一致 |
+| 7 | **对简历展示准入的影响** | 修前：整域业务价值（消费 → 折算 → 推进进度）**不可证** ⇒ 属准入阻断；修后：**可证** |
+| 8 | **对最终工程目标的影响** | **正向**（装配层闭环）⇒ ⚠️ 仍缺**真消费**活体 |
+| 9 | **修复方向** | ✅ **已修**（补装配层守门 + 修判据假红） |
+| 10 | **验收条件和测试方案** | ① 6 个 listener id 全在 registry；② 6×2 格 topic/group 与 Go 一致；③ 6 格 offset 与 Go 一致；④ 复算命令见下 |
+| 11 | **当前处理状态** | ✅ **已补 + 已实跑（3/3 绿）**（2026-10-29）⇒ **装配层闭环**；「真消费活体」**未做** ⇒ 登记为未闭合项（**不阻断**组件 ✅，与 `like-api` 的 `U-01~U-08`、like-rpc 的 `L-U9` 同类定性） |
+
+### ⑤ 复算命令（可复算）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+mvn -o -B -DargLine=-Xmx2g -pl service/task/task-rpc -am \
+  -Dtest='TaskRpcKafkaListenerRegistryGateTest' -Dsurefire.failIfNoSpecifiedTests=false test
+# 期望：Tests run: 3, Failures: 0, Errors: 0 · BUILD SUCCESS
+```
+
+⚠️ **环境前置**：本类要 **Docker**（真 PostgreSQL 容器，宿主口 **22826**）⇒ 无 Docker 时**不是**「代码有问题」，而是**环境未满足** ⇒ 按 `twoStage.md` §5.5 记「无法执行 + 前置条件」，**不得**写「通过」。
+
+### ⑥ 本轮**域级回归**（`twoStage.md` §5.5「执行必要验证」）
+
+| 项 | 内容 |
+|---|---|
+| **命令** | `mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end clean test -pl service/message/message-api,service/message/message-rpc,service/message/message-common,service/like/like-api,service/like/like-rpc,service/like/like-common,service/task/task-api,service/task/task-rpc -am` |
+| **退出状态** | **BUILD SUCCESS** · **09:03 min** · 23 个反应堆模块全 SUCCESS |
+| **条数（权威口径）** | 逐 `TEST-*.xml` 的 `testsuite` 属性求和 ⇒ **G2 三域 8 模块合计 = 730 tests / 0F / 0E / 0S**；其中本域 = `task-api` **102** · `task-rpc` **137** |
+| **本轮新增守门** | `TaskRpcKafkaListenerRegistryGateTest` **3/3**（在全量回归里**真实执行**，非跳过） |
+| **⚠️ 口径纪律** | ① 本轮**带 `clean`** ⇒ 报告已清空重写；② 条数在 **BUILD SUCCESS + maven 进程退出**两个条件都满足后采 ⇒ **不是**构建中途的半成品；③ **跨树比条数必须同口径** ⇒ 不可与 G1/G3/G4 的数直接相比 |
+| **⚠️ 与本域既有台账数字的关系** | 本域第二十四轮记的「task-rpc 测试数 = 129」是**上一轮**的数，且已自标「**已过期，待一次 `clean test` 全量复跑后替换**」⇒ ⇒ **本轮 = 该复跑的正式结果（137 tests / 0F / 0E / 0S）** ⇒ **两个数字并列，不删原值**（台账纪律）
+
+---
+
+## 2026-10-29 · G2 收工轮（第二轮）· 🔴→✅ **Go 出处行号订正 · task-rpc 7 处**（**其中 3 处是「目录名大小写错」· macOS 掩盖 ⇒ Linux CI 会找不到**）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `5fa8558` · **核对日期** 2026-10-29
+> **证据强度**：**E3**（Sea 真源**逐行核验** + 改后逐条回验）
+> **性质**：**P2 · B 类**（**不阻断**阶段 1 准入；**纯注释面**，产品行为零影响）
+
+| # | 位置 | 改前 | **改后（真源实况）** | 性质 |
+|---|---|---|---|---|
+| 1 | `service/TaskDefs.java:13` | `model/taskModel.go:22-25` | **`internal/Model/taskModel.go:22-25`** | 🔴 **目录名大小写错** |
+| 2 | `service/TaskDefs.java:23` | `model/taskModel.go:6-14` | **`internal/Model/taskModel.go:6-14`** | 同上 |
+| 3 | `service/TaskDefs.java:51` | `model/taskModel.go:15-20` | **`internal/Model/taskModel.go:15-20`** | 同上 |
+| 4 | `config/TaskSinkProperties.java:10` | `internal/sink/like_sink.go:31-34, 47, 64-75` | **`internal/sink/like_sink.go:31-34, 64-75`** | `:47` **不是 TTL**（`:47` 是 `type LikeSinkConsumer struct{}` 里的**空行**；`:44` = struct 头 · `:45` = `rdb *redis.Client` · `:46` = `gdb *gorm.DB`）⇒ **去掉 `:47`** |
+| 5 | `service/TaskRedisKeys.java:195` | `like_sink.go:47,188,284,339` | **`like_sink.go:188,284,339`** | 同上 |
+| 6 | `config/TaskSinkPropertiesBindingTest.java:47` | `like_sink.go:47,188,284,339` | **`like_sink.go:188,284,339`** | 同上 |
+| 7 | `config/TaskSinkPropertiesBindingTest.java:87` | `like_sink.go:47,188,284,339` | **`like_sink.go:188,284,339`** | 同上 |
+
+> 🔴 **第 1~3 条为什么特别危险**：Go 真源目录是 **`service/task/rpc/internal/Model/`（大写 M）**
+> ⇒ **macOS 文件系统大小写不敏感 ⇒ 本地按图索骥「找得到」⇒ 永远查不出** ⇒
+> **Linux CI 上按 `model/` 找会 `No such file or directory`** ⇒ **本地绿 ≠ CI 绿**。
+> ⇒ **判定式**：**凡出处里的目录段，必须用 `ls` 看真实大小写**（`ls -d .../internal/*/`），**不能靠「点开路径能打开」来判断**。
+> ⚠️ 同一文件 `:6` 已经写对了 `internal/Model/taskModel.go:15-25` ⇒ **文件内自相矛盾**，无任何测试会因此变红。
+
+### 复算命令
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+G="/Users/pr/Documents/java&golang/Sea-RideTheWind_golang"
+ls -d "$G/service/task/rpc/internal/"*/          # ⇒ Model/（大写 M）
+sed -n '6,14p;15,20p;22,25p' "$G/service/task/rpc/internal/Model/taskModel.go"
+sed -n '44,47p;188p;284p;339p' "$G/service/task/rpc/internal/sink/like_sink.go"
+#   ⇒ :44 type LikeSinkConsumer struct { / :45 rdb / :46 gdb / :47（空行）
+#   ⇒ :188 SetNX task:init 90*24h / :284 Set like:total 90*24h / :339 SetNX task:done 90*24h
+```<br>⚠️ **只报实测值，不做差值归因**：第二十四轮那个 **134 是【推算】（129 + 5）不是实测** ⇒ ⇒ **不得**把「137 − 3（本轮新增类）= 134」当成「推算被证实」⇒ 推算**仍然只是推算**；本轮**唯一权威数 = 137** |
+| **日志** | `/tmp/g2run/g2-regress.log`（**仓外**，不可复算 ⇒ 结论以台账 + 复算命令为准） |

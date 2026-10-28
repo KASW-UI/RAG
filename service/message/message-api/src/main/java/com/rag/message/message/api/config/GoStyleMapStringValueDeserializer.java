@@ -13,7 +13,7 @@ import tools.jackson.databind.ValueDeserializer;
  *
  * <pre>
  *   顶层标量字段 → processFieldPrimitiveWithJSONNumber
- *                  （core/mapping/unmarshaler.go:663-715）
+ *                  （core/mapping/unmarshaler.go:664-715）
  *                  switch typeKind 无 reflect.Bool 分支 ⇒ default ⇒ 一律 type mismatch
  *
  *   map 的值     → generateMap 的 default 分支

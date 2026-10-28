@@ -2778,3 +2778,99 @@ RAG: message_notification.created_at | timestamptz | 可空 | DEFAULT CURRENT_TI
 | 全我域 `grep -rn "destroyForcibly" service/{like,task,message} --include=*.java` | **1 命中**（`LikeRpcRuntimeBootGateTest`）⇒ **message-rpc 不命中** |
 | `message-rpc` 有无 `*RuntimeBootGate*` 类 | **无** ⇒ 真进程层守门形态在本模块**不存在** ⇒ G3 报的 flake **不适用本域** |
 
+---
+
+## 2026-10-29 · G2 收工轮 · 🔴→✅ **E59 已修**：DB 失败**原样上抛**，不再改写成 `INTERNAL` + `ERROR_DB_UPDATE`（**销案**）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `29a0bce` · **核对日期** 2026-10-29
+> **证据强度**：**E3**（Go 侧**消费点**行号 + 仓内守门实跑）· ⚠️ **未做双侧活体对拍** ⇒ **不写 L4**
+> **阶段归属**：**P1 · B 类**（**不阻断**阶段 1 准入）
+
+### ① §5.4「执行实际改造」九项
+
+| # | 项 | 内容 |
+|---|---|---|
+| 1 | **修改前的实现和行为** | `MessageDomainService` 三处 DB 失败分支一律 `catch (RuntimeException e) { metrics.observeDbError(...); throw MessageRpcSupport.grpcRuntimeError(Status.Code.INTERNAL, MessageErrorCode.ERROR_DB_UPDATE.getCode()); }` ⇒ 客户端拿到 **`INTERNAL` + 业务码 5008** |
+| 2 | **具体问题** | ① **Go 侧不糊**：`return nil, err`（裸 error）⇒ grpc-go v1.81.1 `processUnaryRPC` 走 `status.FromContextError` ⇒ **`UNKNOWN`**；② **熔断开路决策分岔**：go-zero v1.10.2 `zrpc/internal/codes/accept.go:9-17` 与本仓共享层 `GoStyleGrpcClientBreakerInterceptor.isAcceptable` 是**同一份名单**（`DEADLINE_EXCEEDED / INTERNAL / UNAVAILABLE / DATA_LOSS / UNIMPLEMENTED / RESOURCE_EXHAUSTED` 判「失败」，其余含 `UNKNOWN` 判「成功」）⇒ 同一个 DB 故障，**Go 记「成功」不开路、RAG 记「失败」开路**；③ Go 的 `ErrorDbUpdate = 5008`（`service/message/common/errmsg.go:39`）**全仓无任何 logic 引用**（`5007 ErrorDbSelect` 同款）⇒ RAG 这 3 处自创的 5008 是**表达层漂移** |
+| 3 | **修改后的实现** | 三处一律 `throw e;`（**原样上抛同一个异常实例**）⇒ 由 `MessageRpcServiceImpl` 的兜底 `catch (RuntimeException e)` ⇒ `Status.UNKNOWN.withCause(e)`（`DRIFT-MSG-V-024`，2026-10-24 已修）⇒ 客户端看到 **`UNKNOWN`**、api 侧业务码 **`1015`**（= Go 的 `CodeServerBusy`）⇒ **业务码与 status code 均与 Go 一致** |
+| 4 | **修改理由** | AGENTS.md §3.1「出现行为差异默认判 RAG 错」+ §3.2「idiomatization 必须标 Go 出处 + 证语义等价」⇒ 本轮 Go 出处**全部取消费点**（不是声明点）；⚠️ **不采信** global 台账的转述，独立回 Go 源文件逐行核过 |
+| 5 | **实际变更文件** | `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageDomainService.java`（**仅 3 处 catch 块 + 注释**）· 🆕 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageDomainServiceDbFailureStatusTest.java`（**236 行 / 新建**） |
+| 6 | **测试场景和断言** | **不 mock 域服务**：真 `MessageDomainService` + 真 `MessageRpcServiceImpl` + **真 in-process gRPC 往返** ⇒ 断言的是**客户端在 wire 上真正看到的 status**。4 条：① `markNotificationRead` 的 DB 失败 ⇒ `UNKNOWN`（**不是** `INTERNAL`、**不是** 5008）② `markConversationRead` 同款 ③ `markAllNotificationsRead` 同款 ④ **原始错误文本不得进 wire**（`DRIFT-MSG-V-003` 签字保留的那一半） |
+| 7 | **实际执行结果** | `mvn -o -B -pl service/message/message-rpc -am -Dtest='MessageDomainServiceDbFailureStatusTest' test` ⇒ **`Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`** · **BUILD SUCCESS**（日志 `/tmp/g2run/g2-msg-task.log`） |
+| 8 | **尚未解决的问题** | ① **未做双侧活体对拍**（Go 侧真 server 与 RAG 侧真 server 同一条 DB 故障的 status 逐字节比对）⇒ 证据止于 **E3**，**不写 L4**；② `MessageRpcSupport.grpcRuntimeError` 在**本域其它调用点**是否还有「把业务错误改写成 status code」的同类用法 ⇒ **本轮只核 E59 点名的 3 处**，全量扫描留给阶段 2；③ `DRIFT-MSG-V-003` 的签字范围**仍收窄为「envelope 不回显原始错误文本」这一半** ⇒ 本轮**不撤销**该签字 |
+| 9 | **对阶段 2 的影响** | **无回退需求**（本轮把 RAG 改回 Go 的行为）⇒ 阶段 2 只需**补证据**（双侧活体把 E3 升 L4）+ **补审计**（`grpcRuntimeError` 全调用点） |
+
+### ② §10「问题归属」十一项
+
+| # | 项 | 内容 |
+|---|---|---|
+| 1 | **唯一编号** | **`E59`**（沿用 global 台账编号，**不新造** ⇒ 跨域可检索） |
+| 2 | **问题类型和优先级** | **P1** —— wire 可见的 gRPC status 漂移 + **熔断开路决策分岔**（可靠性面）· ⚠️ **非 P0**：DB 失败本身仍会失败，漂的是**失败形态**与**开路决策**，不造成数据损坏或安全洞 |
+| 3 | **阶段归属** | **B 类**（阶段 1 竞争力补强项）—— **不阻断**阶段 1 准入 |
+| 4 | **涉及文件与实际证据** | **Go**：`service/message/rpc/internal/logic/markconversationreadlogic.go:59-62` · `marknotificationreadlogic.go:50-51` · `markallnotificationsreadlogic.go:42-44` · `service/message/common/errmsg.go:39`（`ErrorDbUpdate = 5008`，**声明但从不用**）· `zrpc/internal/codes/accept.go:9-17`（熔断名单）<br>**RAG**：`MessageDomainService.java` 三处 catch（修前 `:757-760` / `:875-878` / `:923-926`） |
+| 5 | **触发场景** | 会话已读 / 通知已读 / 全部通知已读 —— **DB 写失败**（PG 不可用 / 事务回滚 / 连接池耗尽） |
+| 6 | **当前行为与预期行为** | 修前 RAG = `INTERNAL` + `5008`；修后 = **`UNKNOWN` + `1015`**（= Go）⇒ ⚠️ 预期行为 = **Go 的行为**，**不是**「RAG 自己选一个更好的码」 |
+| 7 | **对简历展示准入的影响** | **不阻断** ⇒ 但修前会让「gRPC 错误码 + 熔断策略与 Go 对齐」这条主张**站不住**（同一故障两侧开路决策相反） |
+| 8 | **对最终工程目标的影响** | **正向** ⇒ 熔断开路决策两侧一致，故障语义可信；⚠️ 仍缺**双侧活体**证据 |
+| 9 | **修复方向** | ✅ **已修**：三处 catch 改 `throw e;`（原样上抛）⇒ **不做**「换成另一个业务码」 |
+| 10 | **验收条件和测试方案** | ① 三处 DB 失败抛出的是**原始异常实例**且**不是** `INTERNAL` / `5008`；② 仓内守门实跑全绿；③ 复算命令见下 |
+| 11 | **当前处理状态** | ✅ **已修 + 已守门 + 已实跑（4/4 绿）**（2026-10-29）⇒ **E59 销案**（§5.4 第 8 项的「双侧活体」仍列为阶段 2 缺口） |
+
+### ③ 复算命令（可复算）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+
+# ① 守门（4 条）
+mvn -o -B -DargLine=-Xmx2g -pl service/message/message-rpc -am \
+  -Dtest='MessageDomainServiceDbFailureStatusTest' -Dsurefire.failIfNoSpecifiedTests=false test
+# 期望：Tests run: 4, Failures: 0, Errors: 0 · BUILD SUCCESS
+
+# ② 静态判据：三处 DB 失败分支已不再使用 5008
+grep -n "ERROR_DB_UPDATE" \
+  service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageDomainService.java
+# 期望：**0 命中**（本轮实测 0）
+```
+
+⚠️ **判据口径**：`ERROR_DB_UPDATE` 在本文件已 **0 命中** ⇒ 可直接当静态判据；
+⚠️ **不要**把「`grpcRuntimeError` 命中 20 处」读成回归 —— 那些命中**全是** `INVALID_ARGUMENT` / `PERMISSION_DENIED` / `FAILED_PRECONDITION` 等**参数/权限类**改写，**与 E59 的 DB 失败路径无关** ⇒ **不在本轮范围**。
+
+### ④ 本轮**域级回归**（`twoStage.md` §5.5）
+
+| 项 | 内容 |
+|---|---|
+| **命令** | `mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end clean test -pl service/message/message-api,service/message/message-rpc,service/message/message-common,service/like/like-api,service/like/like-rpc,service/like/like-common,service/task/task-api,service/task/task-rpc -am` |
+| **退出状态** | **BUILD SUCCESS** · **09:03 min** · 23 个反应堆模块全 SUCCESS |
+| **条数（权威口径）** | 逐 `TEST-*.xml` 的 `testsuite` 属性求和 ⇒ **G2 三域 8 模块合计 = 730 tests / 0F / 0E / 0S**；其中本域三块 = `message-api` **107** · `message-rpc` **100** · `message-common` **21** |
+| **本轮新增守门** | `MessageDomainServiceDbFailureStatusTest` **4/4**（在全量回归里**真实执行**，非跳过） |
+| **⚠️ 口径纪律** | ① 本轮**带 `clean`** ⇒ 报告已清空重写；② 条数在 **BUILD SUCCESS + maven 进程退出**两个条件都满足后采 ⇒ **不是**构建中途的半成品；③ **跨树比条数必须同口径** ⇒ 不可与 G1/G3/G4 的数直接相比 |
+| **日志** | `/tmp/g2run/g2-regress.log`（**仓外**，不可复算 ⇒ 结论以台账 + 复算命令为准） |
+
+---
+
+## 2026-10-29 · G2 收工轮（第二轮）· 🟡 **出处抽验的 4 条 NOT_FOUND · 逐条定性（**零真错**）**
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `5fa8558` · **核对日期** 2026-10-29
+> **性质**：**登记**（非缺陷）· **不阻断**阶段 1
+
+抽验脚本（`/tmp` · 仓外）把 G2 三域的 **1162 条** Go 出处引用跑了一遍 ⇒ 报出 **4 条 NOT_FOUND** ⇒ **逐条回真源手工核**：
+
+| # | 引用 | 定位 | 定性 |
+|---|---|---|---|
+| 1 | `gorm.io/driver/postgres@v1.6.0/postgres.go:251-255`（`MessageRpcTimeColumnParityTest.java:39`） | 解析器**不覆盖 `gorm.io/...` 模块路径形态** | ✅ **行号正确**（`:251-255` = `case schema.Time:` ⇒ `timestamptz`）⇒ **非缺陷** |
+| 2 | `gorm.io/driver/postgres@v1.6.0/postgres.go:231-234`（`LikeDomainFactSchemaParityTest.java:39`，like 域） | 同上 | ✅ **行号正确**（`:231-234` = `case size <= 32:` ⇒ `integer`）⇒ **非缺陷** |
+| 3 | `gorm.io/gorm@v1.31.1/callbacks/update.go:201`（`LikeRecordMapper.java:238`，like 域） | 同上 | ✅ **行号正确**（`:201` = `case map[string]interface{}:`）⇒ **非缺陷** |
+| 4 | `Sea-RideTheWind_golang/service/common/observability/http.go:22`（`MessageApiTimeoutRealTomcatTest.java:34`） | **路径形态冗余**（多写仓库名一层） | ✅ **行号正确**（`:22` = `httpTimeoutBody = "Request Timeout"`）⇒ **不改**：G1/G4 域也用同一形态 ⇒ 单改 G2 一家会造成**跨域不一致** |
+
+> ⇒ **结论**：本轮 **G2 三域的 Go 出处引用 = 1162 条全部核实**，其中 **73 条行号/文件错已修**、**4 条非 OK 全部定性为非缺陷**、**余下 1085 条由廉价判据判过**（⚠️ 见 `docs/DRIFT/like/rpc.md` §12.2 —— **廉价判据挡不住「语义不符」**，那 462 条「多候选」属**弱证据**，留待阶段 2 人工核）。
+
+### 复算命令
+
+```bash
+GOMOD="$HOME/go/pkg/mod"
+sed -n '251,255p' "$GOMOD/gorm.io/driver/postgres@v1.6.0/postgres.go"
+sed -n '231,234p' "$GOMOD/gorm.io/driver/postgres@v1.6.0/postgres.go"
+sed -n '201p'     "$GOMOD/gorm.io/gorm@v1.31.1/callbacks/update.go"
+sed -n '22p'      "/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/common/observability/http.go"
+```
+

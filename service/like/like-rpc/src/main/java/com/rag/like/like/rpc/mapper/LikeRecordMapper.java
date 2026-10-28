@@ -59,6 +59,40 @@ public interface LikeRecordMapper {
     long countActiveLikeByUserAndType(@Param("userId") long userId, @Param("targetType") String targetType);
 
     /**
+     * 对应 Go {@code fact_authority.go:108-109} 的源库状态核对查询：
+     * {@code WHERE user_id = ? AND target_type = ? AND target_id = ? LIMIT 1}。
+     *
+     * <p>🔴 <b>为什么权威读需要它</b>：Go 的 {@code AuthoritativeFact} 最后一步要拿
+     * {@code like_record} 的<b>当前行</b>与「重放出来的状态」对账
+     * （{@code record.State == 重放末态} · {@code record.LastOperationID >= payload.OperationID}
+     * · {@code record.UserID == uid}）⇒ 对不上就回答「不可用」。
+     *
+     * <p>⚠️ <b>注意：不带 {@code state = 1} 也不带 {@code delete_at IS NULL}</b> ——
+     * Go 侧这条查询<b>没有</b>这两个过滤条件（要拿的是「当前行的真实状态」，
+     * 含已取消的赞），照抄 Go 才是行为层一致。
+     *
+     * <p>⚠️ {@code LIMIT 1}：Go 用 {@code .Limit(1).Find(&record)} +
+     * {@code RowsAffected != 1} 判「恰好一行」⇒ 本方法返回 {@code null} 表示「没有行」，
+     * 「多于一行」由调用方按 Go 的语义另行判定（{@code (user_id,target_type,target_id)}
+     * 上有唯一约束，正常只会有一行）。
+     *
+     * <p>🔴 <b>与 {@link #selectForUpdateIncludingDeleted} 的区别：没有 {@code FOR UPDATE}</b>。
+     * Go 的权威读是<b>无锁只读</b>（{@code .Limit(1).Find(&record)}，无 {@code clause.Locking}）
+     * ⇒ 给权威读加行锁会把「DC 回查」变成一个会阻塞写链路的操作
+     * ⇒ <b>两条 SQL 看起来几乎一样，但语义不同，不要合并</b>。
+     */
+    @Select("""
+            SELECT id, user_id, target_type, target_id, author_id, state, last_operation_id,
+                   created_at, updated_at, delete_at
+            FROM like_record
+            WHERE user_id = #{userId} AND target_type = #{targetType} AND target_id = #{targetId}
+            LIMIT 1
+            """)
+    LikeRecordEntity selectOneByUserAndTarget(@Param("userId") long userId,
+                                               @Param("targetType") String targetType,
+                                               @Param("targetId") String targetId);
+
+    /**
      * 对应 Go {@code GetTargetActiveLikeCount}：
      * {@code WHERE target_type = ? AND target_id = ? AND state = 1} 计数。
      *

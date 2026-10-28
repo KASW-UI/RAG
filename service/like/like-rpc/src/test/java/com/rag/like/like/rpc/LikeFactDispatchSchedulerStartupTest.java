@@ -24,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * 🔴🔴 事实投递调度器的<b>真启动</b>守门 —— 对应 Go 端
- * {@code service/like/rpc/cmd/fact-dispatch/main.go:54-77} 的进程启动条件。
+ * {@code service/like/rpc/cmd/fact-dispatch/main.go:51-77} 的进程启动条件。
  *
  * <h2>为什么必须「真启动」而不是 mock 掉</h2>
  * <p>本类要抓的缺陷是<b>启动阻塞</b>：
@@ -56,14 +56,14 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <ol>
  *   <li>默认关闭 ⇒ <b>完全不启动任何线程</b>（Go：缺 DC 配置的独立进程不启动）；</li>
  *   <li>默认配置（不显式设置）⇒ 事实投递默认关闭；</li>
- *   <li>配置不全（token &lt; 32）⇒ 不启动（Go {@code main.go:58}）；</li>
+ *   <li>配置不全（token &lt; 32）⇒ 不启动（Go {@code main.go:55}）；</li>
  *   <li>开启 ⇒ <b>上下文刷新不被阻塞</b>（本类的核心断言）；</li>
  *   <li>开启 ⇒ 后台线程<b>真的在投递</b>，且容器关闭后<b>真的停</b>。</li>
  * </ol>
  */
 class LikeFactDispatchSchedulerStartupTest {
 
-    /** Go {@code cmd/fact-dispatch/main.go:58} 要求 {@code len(token) >= 32}。 */
+    /** Go {@code cmd/fact-dispatch/main.go:55} 要求 {@code len(token) >= 32}。 */
     private static final String VALID_TOKEN = "t".repeat(32);
 
     /** 刷新超时：够慢也够快（阻塞的实现会在这个时限内被抓住）。 */
@@ -132,11 +132,11 @@ class LikeFactDispatchSchedulerStartupTest {
     }
 
     // ====================================================================================
-    // ③ 配置不全 ⇒ 不启动（Go main.go:58 的进程退出条件）
+    // ③ 配置不全 ⇒ 不启动（Go main.go:55-56 的进程退出条件）
     // ====================================================================================
 
     @Test
-    @DisplayName("🔴 配置不全（dc-token < 32 字节）⇒ 不启动（Go main.go:58）")
+    @DisplayName("🔴 配置不全（dc-token < 32 字节）⇒ 不启动（Go main.go:55）")
     void incompleteConfigurationDoesNotStart() {
         AtomicInteger calls = new AtomicInteger();
         // 单 JVM 里不能像 Go 那样「进程退出」（会带走 gRPC 与 Kafka 消费）⇒ 告警后保持停用。
