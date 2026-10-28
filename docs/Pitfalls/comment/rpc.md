@@ -611,6 +611,126 @@ Go 侧**每一条 DB 错误路径都改写成业务码**，**不区分 deadline*
 
 ---
 
+## PIT-COMMENT-RPC-14 🔴 · 「Go 侧某文件里零命中」**推不出「整条链路不用 X」** —— 链路的另一半在**共享层**
+
+### 一句话
+
+**在 Go 侧某个**域内文件**里 grep「零命中」，只能证明那个文件没有；
+证明不了**整条链路**没有 —— 链路的一半收口在**共享层**（`service/common/…`），
+而共享层那一段**通常不在你第一眼 grep 的范围里** ⇒ ⇒
+只查域内文件就下「整条链路零 X」的断言 ⇒ **结论可能整个方向反过来**。
+
+### 形态（2026-10-27 实测 · D10 的依据差点写错）
+
+本域 fact 投递链路的两个 span 属性（`comment.fact.event_id` / `comment.fact.aggregate_version`）
+⇒ 初判写的是「**Go 侧 comment 的 fact 投递链路根本不用 span**」，
+依据是 `service/comment/rpc/internal/model/fact_delivery.go` 里 `span`/`Span`/`trace`/`Trace` **零命中**。
+
+⇒ **那个文件确实零命中**（这条断言本身是真的）⇒ ⇒ **但结论错了**：
+Go 侧**有**这个 span —— 它建在**共享层** `service/common/communityfact/process.go:26`：
+
+```go
+attempt, span := otel.Tracer("sea.rtw.communityfact").Start(ctx, "community.fact_delivery.dispatch")
+```
+
+（该文件全文 **69** 行、**零** `SetAttributes` ⇒ ⇒ span **不带属性**）
+⇒ 且 RAG 侧**等价 span 也在共享层**（`service/common/.../communityfact/Dispatcher.java:186`，**同名**同 tracer）
+⇒ ⇒ **span 拓扑两侧其实是对齐的**，差的只是那两个属性。
+
+⇒ 🔴 **真正的根因在共享层的实现细节里**，不在域内文件里：
+共享层把 span 放进 **Context**（`Dispatcher.java:189` `ctx.with(span)`）而**从不 `makeCurrent`**，
+且投递跑在**另一个线程**（`:172-176` `communityfact-dispatch` 单线程池 ＋ `:190` `supplyAsync`）
+⇒ OTel 默认 `ThreadLocalContextStorage` 用的是**普通** `ThreadLocal`（**不继承**）
+⇒ ⇒ 投递线程上 `Span.current()` 恒为 **invalid span**
+⇒ ⇒ 域内那两行 `setAttribute` **永远写不进去**（`if (span != null)` 恒真 ⇒ 落到 invalid span ⇒ 静默丢弃）。
+
+### 可复用的判据
+
+> **判据 1：「零命中」只对**被 grep 的那个作用域**成立。**
+> 要断言「整条链路零 X」，必须把**链路的每一段**都核过 —— 包括**共享层**那一段。
+> ⇒ 域内文件是链路的**一段**，不是**整条** ⇒ ⇒ 「某文件零命中」⇒ **不等于**「链路零命中」。
+>
+> **判据 2：链路常在**共享层**收口 ⇒ 查链路先查**收口点 / 入口点**。**
+> 本例的收口点是共享层的 `Dispatcher`（域侧只提供 `dispatchOnce` 实现）
+> ⇒ 「span 叫什么」「span 是不是 current」「投递跑在哪个线程」**全在收口点**
+> ⇒ ⇒ **不看收口点 ⇒ 根因必然找错**（本例就会把「根因在共享层的 ctx 传播方式」写成「Go 侧不用 span」）。
+>
+> **判据 3：断言「X 从来不生效」之前，先确认 X **可能**生效的那条路径真的被堵死了。**
+> 本例若只查到「域内 `Span.current()` 够不到共享层那个 span」就收工 ⇒ **方向对**；
+> 但若把依据写成「Go 侧不用 span」⇒ ⇒ **依据本身是假的**
+> ⇒ ⇒ 一旦有人后来在共享层补了 `makeCurrent`，那两行属性就会**真的**生效
+> ⇒ ⇒ **假依据会掩盖真回归**（而且会让后人以为「Go 根本没有这个 span ⇒ 加了也没关系」）。
+
+### 对应本轮的漂移
+
+[`../../DRIFT/comment/rpc.md`](../../DRIFT/comment/rpc.md) §3.7（**D10**）⇒
+**结论不变**（那两个属性是 RAG 侧独有的、且写不进去 ⇒ 删掉是**零行为变化**的清理，不是改语义），
+**但依据整条换掉**（§3.7 内已订正，并写明「未提交过 ⇒ 直接改正，不是事后翻案」）
+⇒ ⇒ **本条是「差点把依据写错」的记录，不是缺陷**。
+
+---
+
+## PIT-COMMENT-RPC-15 🔴 · **「把池打开」会引入比 Go 更糟的行为** —— 池耗尽的等待上限（`max-wait`）**不可省**
+
+**症状**：本域 Go 侧 Redis 客户端**池耗尽时 4s 就失败**；RAG 侧改成「有池」之后，**池耗尽变成无限等**
+⇒ 请求永久挂起（连超时都没有）⇒ **比改之前更糟**。
+
+**根因（三段都要查，缺一段就会掉坑）**：
+
+1. **Go 侧有上限** —— `go-redis@v9.20.0/internal/pool/pool.go:1113`
+   `err := p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)`
+   ⇒ `PoolTimeout` 未设 ⇒ `options.go:380-386` `= ReadTimeout + 1s` ⇒ ReadTimeout 3s ⇒ **4s**
+   ⇒ 池耗尽 ⇒ 4s 后报 `ErrPoolTimeout`。
+2. **RAG 侧默认无上限** —— 不配 `max-wait` ⇒ commons-pool2 2.12.1
+   `BaseObjectPoolConfig:59,68` `DEFAULT_MAX_WAIT = Duration.ofMillis(-1L)`
+   ⇒ 消费点 `GenericObjectPool.java:306`
+   `p = negativeDuration ? idleObjects.takeFirst() : idleObjects.pollFirst(remainingWaitDuration)`
+   ⇒ **负值 ⇒ `takeFirst()` ⇒ 阻塞到有人还连接为止**。
+3. 🔴 **「命令超时会兜住」是错的** —— `CommandExpiryWriter.write(command)` **才起算**计时器
+   （实测 lettuce-core 6.8.2 字节码），而**借连接发生在写命令之前**
+   ⇒ ⇒ **池耗尽时，3s 命令超时根本还没开始** ⇒ ⇒ **无限挂起**。
+
+⇒ **修法**：`spring.data.redis.lettuce.pool.max-wait: 4s`（**必配**，与 `enabled` 同级）。
+
+⚠️ **本域还踩到第二个坑**：`min-idle` 原先写 **4**，而本域 Go 侧走 **go-redis 直连**
+（`service/comment/rpc/internal/cache/redis.go:17-19` 只设 `Addr`）
+⇒ `MinIdleConns` 未设 ⇒ `options.go:218-222` **无 default** ⇒ **0**
+⇒ ⇒ **4 是对 Go 的偏离**（go-zero 的 `idleConns = 8` 只适用于**走 go-zero** 的域）
+⇒ ⇒ ⚠️ **别把别域的池参数当本域的基准**（AGENTS.md §3.1：不得拿「现有 RAG 代码」当对照基准）。
+
+⇒ **通用教训**：① **「打开一个池」不是单点改动** —— 至少同时改了「并发度 / 总量上限 / **耗尽时的等待语义**」三件事
+⇒ ⇒ 改之前**逐轴对着上游库的默认值**核；② **「超时兜底」要查它从什么时候开始计时** ——
+超时机制存在 ≠ 它在这个场景下生效（**差一个阶段 ⇒ 兜底失效**）。
+📌 **同款机制在 G3 的另一域已落码**（`hot-rpc`：形态对齐 + `max-wait` + 守门 4 条 + 变异 5 条全红）
+⇒ **完整机制与坑档** ⇒ [`../../Pitfalls/hot/rpc.md` 的 P-HOTRPC-21](../../Pitfalls/hot/rpc.md)。
+
+## PIT-COMMENT-RPC-16 🔴 · **Redis 断连活体对拍**在本域的**适配点** —— 照抄别的域的配方 ⇒ **上下文起不来**
+
+**背景**：本域要证明共享层那份 `REJECT_COMMANDS`「**在 comment-rpc 里真的生效**」⇒ ⇒ 必须**活体断连**。
+⇒ **配方本体（三处易错点）见 [`../../Pitfalls/hot/rpc.md` 的 P-HOTRPC-24](../../Pitfalls/hot/rpc.md)**，
+本条只记**本域特有的适配差异** —— ⇒ 🔴 **照抄 hot 域那份 ⇒ 本域上下文起不来**。
+
+| 项 | hot-rpc | **comment-rpc（本域）** | 为什么不一样 |
+|---|---|---|---|
+| **排 Flyway** | 🔴 **不能** `spring.autoconfigure.exclude=…FlywayAutoConfiguration`（**本模块无 Flyway 依赖** ⇒ 排一个 **classpath 上不存在**的自动配置类 ⇒ **Boot 直接启动失败**）⇒ ⇒ 只能 `spring.flyway.enabled=false` | ✅ **可以** exclude（**本模块有** Flyway 依赖）⇒ ⇒ 排除后 `CommentSchemaGate` 仍会打一条「表不存在」错误日志，但它**只 log 不阻断** ⇒ ⇒ **上下文仍能起** | ⇒ **「排 Flyway」不是通用配方** ⇒ ⇒ **先看该模块 classpath 上有没有** ⇒ ⇒ **各域不能照抄** |
+| **出向 gRPC client** | 本域**无**出向 gRPC 调用 ⇒ 无需处理 | 🔴 **两个出向 client 必须提前指向不可达地址**：`grpc.client.message-rpc.address=static://127.0.0.1:1` ＋ `grpc.client.article-rpc.address=static://127.0.0.1:1` ⇒ ⇒ **devh 在 Bean 初始化期就建 channel** ⇒ ⇒ 不覆盖则**上下文起不来** | ⇒ ⇒ **「不需要出向依赖」的域**与**需要**的域，**测试注解写法不同** |
+| **PG** | 本域无 PG | 本域有 PG ⇒ ⇒ 用 `POSTGRES_HOST=127.0.0.1` / `POSTGRES_PORT=1` 指向**不可达端口** ⇒ ⇒ **任何摸库都快速失败**（不挂起）⇒ ⇒ 不需要 Testcontainers | ⇒ ⇒ **「摸库要挂起」会让活体对拍变成超时测试** ⇒ ⇒ 用不可达端口 |
+
+⇒ **可复用判据**：**同一个活体对拍配方，不同模块的「适配点」不同** ⇒ ⇒
+① **排自动配置前先确认它在不在 classpath 上**（不在 ⇒ 排它 = 启动失败）；
+② **有出向 client 的模块要在 Bean 初始化期就把它指向不可达地址**；
+③ **有 DB 的模块要把数据源指向不可达端口**（快速失败 ≫ 挂起）。
+
+⇒ **本域实测（本轮现跑）**：RAG 腿 **A(REJECT_COMMANDS) = 1 ms** vs **B(DEFAULT) = 3005 ms** ⇒ 差 **3004 ms**；
+Go 腿 **1708–1776 ms**（4 轮）⇒ ⇒ **两侧都是「快速失败」，语义等价**（Go 的 `MaxRetries=3` 重试面另属他档 ⇒ **不混**）。
+⇒ **守门** `CommentRedisDisconnectFastRejectGateTest`（**2 条**）· **本域台账** ⇒ [`../../DRIFT/comment/rpc.md` §十二](../../DRIFT/comment/rpc.md)。
+⇒ ⚠️ **仍待验**：**gRPC 响应层**（断连时客户端到底看到什么 ⇒ 要真发一次 gRPC 调用）；
+⚠️ **Go 探针未入仓**（`tools/**` 属 G4 写权面 ⇒ 已派单 ⇒ ⇒ 仓内**不可复现** ⇒ 证据强度只能写「L4-一次性」）。
+〔📌 **2026-10-28 G3 更新**：**规格已入仓** ⇒ [`hot/rpc.md` §十二.9](../../DRIFT/hot/rpc.md#十二9-🔴-toolsredis-disconnect-probe-的完整落码规格2026-10-28--g3--自包含照此即可落码)
+（含**可直接复制**的 Go 探针源码 ＋ 真源 Options 逐条出处 ＋ 时序 ＋ 编排 ＋ 实测基线 ＋ 输出格式 ＋ 退出码）
+⇒ ⇒ **别再让规格活在聊天里** ⇒ ⇒ 聊天会截断、会过期、会被略读 ⇒ ⇒ **规格落仓才是可交付的形态**
+⇒ ⇒ 待 `tools/redis-disconnect-probe/` 落地 ⇒ **仓内即可复现** ⇒ ⇒ 证据强度可升为「**L4（仓内可复现）**」⇒ **原句保留不改写**〕
+
 ## 与既有台账的关系
 
 | 文件 | 关系 |

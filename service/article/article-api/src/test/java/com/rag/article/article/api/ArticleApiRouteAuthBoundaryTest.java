@@ -61,7 +61,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
                 "grpc.client.user-rpc.address=static://127.0.0.1:65535",
                 "grpc.client.user-rpc.negotiation-type=plaintext",
                 "management.otlp.tracing.export.enabled=false",
-                "logging.level.com.alibaba.nacos=WARN"
+                "logging.level.com.alibaba.nacos=WARN",
+                // 让判据**只**取决于「本类要验的那条路径」，不被 CPU 自适应降载抢先返回：
+                // 降载命中时 GoStyleCpuSheddingFilter#doFilter 走 `response.setStatus(503)` 并**直接 return**
+                // ⇒ **裸 503、无 body、无业务信封** ⇒ 本类要验的「HTTP 200 + 业务信封」判据被抢先盖掉
+                // ⇒ ⇒ 机器一忙就**红在错的地方**（判据与被测路径无关）。
+                // ⚠️ 这是**测试专用**覆盖，不改生产默认值：默认 true 对齐 Go 侧
+                //    rest/config.go:22 `Middlewares.Shedding bool json:",default=true"`
+                //    （默认值与 Go 出处见 GoStyleProtectionProperties.CpuShedding#enabled）。
+                "rag.protection.cpu-shedding.enabled=false"
         })
 @AutoConfigureMockMvc
 class ArticleApiRouteAuthBoundaryTest {

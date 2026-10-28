@@ -3,6 +3,7 @@ package com.rag.hot.hot.rpc.service;
 import java.util.List;
 
 import com.rag.hot.hot.rpc.mq.HotRedisSnapshotStore;
+import com.rag.hot.hot.rpc.support.RealContainerHostPort;
 import com.rag.hot.hot.proto.HotArticleItem;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,7 +66,8 @@ class HotRankingQueryServiceRedisGateTest {
     @Container
     @SuppressWarnings("resource")
     static final GenericContainer<?> REDIS =
-            new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379);
+            new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379)
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindRedis(RealContainerHostPort.HOT_RANKING_QUERY_REDIS_GATE));
 
     private static StringRedisTemplate redis;
     private static HotRankingQueryService service;

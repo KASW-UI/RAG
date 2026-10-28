@@ -182,8 +182,11 @@
 
 > ⚠️ **第 7 条是本组件最反直觉的 L1 契约**：`POST /v1/upload` **不带 JWT**。
 > 「上传图片要登录」凭直觉一定会加，但 Go 侧第三段 `AddRoutes` 没有 `rest.WithJwt`。
-> RAG 侧靠 `JwtAuthInterceptor.PROTECTED_ROUTES`（4 条，`JwtAuthInterceptor.java:117-121`）
-> 精确排除它 —— 这张表必须**同时带 method**，否则 `/v1/article/{id}` 会把公开的 GET 一起拦掉。
+> RAG 侧靠 `ArticleJwtProtectedRoutes`（4 条，`article-api/.../auth/ArticleJwtProtectedRoutes.java`
+> —— **2026-10-27（DRIFT-USERAPI-009②）从 `JwtAuthInterceptor` 搬出来**）精确排除它 ——
+> 这张表必须**同时带 method**，否则 `/v1/article/{id}` 会把公开的 GET 一起拦掉。
+> ⚠️ **搬家的原因不是「好看」**：验签搬进 Servlet Filter 后，**Filter 与 interceptor 必须共用同一份判据**
+> ⇒ 否则要么 public 端点被误伤，要么受保护端点落进兜底分支（验签退回 70s 预算之内 ⇒ ②静默不闭环）。
 
 ### 1.2 「briefing 提到的黑名单中间件」在本组件**不存在**（已核实，非遗漏）
 
@@ -323,7 +326,7 @@ article-rpc.UploadFile 失败 → return nil, err → ErrorCtx → ⚠️ 状态
 | 维度 | RAG 实现 | 与 Go 的关系 |
 |---|---|---|
 | 路由 | `@RestController @RequestMapping("/v1")` + 7 个 mapping | EQUIVALENT |
-| 鉴权 | `JwtAuthInterceptor`（`HandlerInterceptor`）+ 4 条 `ProtectedRoute`(method+PathPattern) | EQUIVALENT（DRIFT-004 上游已修 path.Clean 后的匹配一致性） |
+| 鉴权 | `JwtAuthInterceptor`（`HandlerInterceptor`，**只消费**验签结果）＋ `auth/GoStyleJwtAuthFilter`（`@Order(+6)` Servlet Filter，**只验签**）＋ 4 条 `ProtectedRoute`(method+PathPattern，**已搬进 `ArticleJwtProtectedRoutes`**，两侧共用） | EQUIVALENT（DRIFT-004 上游已修 path.Clean 后的匹配一致性；⚠️ **验签已搬出 3s 预算** ⇒ 对齐 Go `engine.go:108` vs `:110-112` 的链序，见 `vs-common.md` §3-L-8） |
 | 身份解析 | `ArticleApiSupport.userId(req)`（`req.getAttribute("userId")`） | EQUIVALENT |
 | 响应成形 | `GlobalResponseAdvice`（`ResponseBodyAdvice`）统一包信封 | EQUIVALENT（Go 是 6 份手写重复） |
 | 错误成形 | `GlobalExceptionHandler`（9 个 `@ExceptionHandler`） | **部分不等价 → §7 DRIFT-001 / 004** |
@@ -358,7 +361,7 @@ Result 仅取 `EQUIVALENT / IMPLEMENTATION DIFFERENCE / OBSERVABLE DIFFERENCE / 
 | Operation | Semantic Dimension | Go | RAG | Result | Evidence |
 |---|---|---|---|---|---|
 | 全局 | 路由表（7 端点 method+path） | `routes.go:19-73` | `ArticleController` | EQUIVALENT | 静态源码 |
-| 全局 | public 路径集合（含 upload 公开） | 第二/三段无 `WithJwt` | `PROTECTED_ROUTES` 4 条 | EQUIVALENT | 静态源码 |
+| 全局 | public 路径集合（含 upload 公开） | 第二/三段无 `WithJwt` | `ArticleJwtProtectedRoutes` 4 条（**Filter 与 interceptor 共用**） | EQUIVALENT | 静态源码 |
 | 全局 | 业务码表（15 条） | `errmsg.go:3-37` | `ErrorCode` | EQUIVALENT | 静态源码 |
 | 全局 | 未知码回落 | `errmsg.go:39-45` → `FAIL` | `ErrorCode.getMsg` | EQUIVALENT | 静态源码 |
 | 全局 | 信封字段名 | `response.Response` | `Response{code,msg,data}` | EQUIVALENT | 静态源码 |
@@ -491,6 +494,7 @@ RAG 的 `res == null` 检查已保留（`ArticleListService.java:109-112`）。
 | Resource ownership | api 层 `AuthorId != uid ⇒ 1006`（OP-02/03/05） | 同 | EQUIVALENT |
 | Failure mapping | 401 **空 body** | `ResponseEntity.status(401).build()` | EQUIVALENT |
 | 黑名单 | **两侧都没有**（§1.2） | — | EQUIVALENT |
+| **HTTP 预算作用域（验签在预算之外）** | 计时器在 Authorize **之后**起算 ⇒ 验签**不计入**预算（`rest/engine.go:108` vs `:110-112`） | `auth/GoStyleJwtAuthFilter.java:101` `@Order(+6)` ⇒ 落在 `+7 HttpMiddlewareFilter`（预算起算）**之外** | 🔴 → ✅ **2026-10-27 已修**（见 `vs-common.md` §3-L-8）<br>⚠️ **本域预算是 70s**（`application.yml:234` `http-timeout: 70s` ≡ Go `etc/article.yaml:4` `Timeout: 70000`）⇒ **全仓唯一不是 3s 的域** |
 
 ### 6.4 Transaction Semantics（§15）
 api 层无事务。Go 的「先读后写」（OP-02/03）**不是**事务，是两次独立 RPC。
@@ -2432,3 +2436,24 @@ vt                     in=0b                       out=225c7622
 ⇒ **判据是守门脚本**：`tools/difftest/check-jar-executable.sh`
 （逐个 api 模块解包 `META-INF/MANIFEST.MF` 看 `Main-Class`）
 ⇒ **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）。
+---
+
+## 附录 · 🧹 U+FFFD 复核结论（2026-10-27）—— **本域 2 处**是**故意保留**，**不修**
+
+> 🔴🔴 **2026-10-27 第三十轮订正（G1 反馈）**：本节标题原写「**本域 1 处**」⇒ ⇒ **与下表不符 —— 下表本来就是 2 行**（`:1143` ＋ `:1159`，**同一份文件里的两处**，两处**都是故意**）⇒ ⇒ 标题改成「**2 处**」⇒ ⇒ **别让下一个人以为只处理了一处、把 `:1159` 当漏网的去「修」** ⇒ ⇒ **改它会直接破坏那条测试的语义**。
+
+| 文件:行 | 表象 | 结论 |
+|---|---|---|
+| `src/test/java/com/rag/article/article/api/ArticleApiMvcPipelineTest.java:1143` | `.putExtInfo("` + **U+FFFD** + `", "4")` | 🟢 **故意的测试数据** |
+| 同文件 `:1159` | `body.indexOf("\"" + **U+FFFD** + "\"")` | 🟢 同上 |
+
+**为什么不能改**：该用例（`@DisplayName`：🔴 DRIFT-007：ext_info 的 key 含**非 BMP**字符时仍按码点序输出）
+把 U+FFFD 当作 `ext_info` 的 **key** 来用，钉死「按**码点序**（= Go 的 UTF-8 字节序）输出」：
+
+```
+a < 中 < U+E000 < **U+FFFD** < 😀（U+1F600，非 BMP 代理对）
+```
+
+⇒ 这里的 U+FFFD 是**被测对象**，不是编码损坏 ⇒ **改它会直接破坏该测试的语义**
+⇒ **本轮刻意不动** ⇒ ⚠️ 「全仓 U+FFFD 归零」这条目标**在本域不成立**（也不该成立）——
+**扫描 U+FFFD 时必须先判断它是不是测试数据**。

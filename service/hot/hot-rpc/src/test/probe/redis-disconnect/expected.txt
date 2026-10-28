@@ -1,0 +1,11 @@
+# redis-disconnect 探针的**冻结基线**（Go 腿的归一化结论行）
+#
+# ⚠️ 只 diff **归一化结论**（class / err_present）⇒ 不含毫秒数 ⇒ 可逐字节比
+# ⚠️ 毫秒数是**观测量不是判据**（Go 腿随机器/负载浮动 ⇒ §12.9.7 实测 1669–1808 ms）
+# ⇒ ⇒ 判据是**语义**（快速失败 vs 排队到命令超时），不是毫秒数
+#
+# 阈值口径：Lettuce 侧 commandTimeout: 3s ⇒ 「排队到超时」形态 ≈ 3007 ms
+#            ⇒ 分界取 2500 ms（落在 Go 实测上界 1808 与 3007 之间）
+PROBE-VERDICT mode=hot class=fast-fail err_present=true
+PROBE-VERDICT mode=comment class=fast-fail err_present=true
+PROBE-VERDICT mode=zeroway class=fast-fail err_present=true

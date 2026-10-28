@@ -22,6 +22,7 @@ import com.rag.article.article.rpc.mapper.JsonbTypeHandler;
 import com.rag.article.article.rpc.metrics.ArticleRpcMetrics;
 import com.rag.article.article.rpc.mq.ArticleSyncEventTypes;
 import com.rag.common.spring.SnowflakeBean;
+import io.opentelemetry.api.trace.Span;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -106,8 +107,36 @@ public class ArticleDomainService {
      * （人工/补偿可恢复），<b>不要"顺手"加上事务</b>。
      */
     public CreateArticleResponse createArticle(CreateArticleRequest in) {
-        long id = snowflake.nextId();
+        // 🔴 L-10（Go 出处：create_article_logic.go:42-48）——Go 在方法开头手写：
+        //     tracer := otel.Tracer("article-rpc")
+        //     ctx, span := tracer.Start(l.ctx, "CreateArticle", trace.WithAttributes(
+        //         attribute.String("author_id", in.AuthorId),
+        //         attribute.String("title", in.Title),
+        //     ))
+        //     defer span.End()
+        // ⇒ 业务体抽成 createArticleBody 只为**不把整段缩进**；span 仍覆盖整个业务体（行为等价）。
+        return ArticleSpans.traced(ArticleSpans.CREATE_ARTICLE,
+                span -> {
+                    span.setAttribute(ArticleSpans.ATTR_AUTHOR_ID, in.getAuthorId());
+                    span.setAttribute(ArticleSpans.ATTR_TITLE, in.getTitle());
+                },
+                span -> createArticleBody(in, span));
+    }
+
+    /** {@link #createArticle} 的业务体（span 由调用方持有）。 */
+    private CreateArticleResponse createArticleBody(CreateArticleRequest in, Span span) {
+        long id;
+        try {
+            id = snowflake.nextId();
+        } catch (RuntimeException e) {
+            // Go create_article_logic.go:50-54：雪花 ID 失败 ⇒ span.RecordError(err) 后返回 Internal。
+            // ⚠️ 这里**原样上抛**（不改错误码）—— 错误码语义不是 span 工作能改的东西。
+            ArticleSpans.record(span, e);
+            throw e;
+        }
         String articleId = String.valueOf(id);
+        // Go create_article_logic.go:57：span.SetAttributes(attribute.String("article_id", articleID))（**后续**属性）
+        span.setAttribute(ArticleSpans.ATTR_ARTICLE_ID, articleId);
 
         // ① MinIO 写正文（Go: objectName = ArticlePath + articleID + ".md"，注意<b>无哈希</b>）
         String objectName = storage.getObjectNamePrefixForArticle() + articleId + ".md";
@@ -117,6 +146,8 @@ public class ArticleDomainService {
                     "text/markdown", null);
         } catch (Exception e) {
             metrics.minioError("put");
+            // Go create_article_logic.go:70-75：MinIO put 失败 ⇒ span.RecordError(err)
+            ArticleSpans.record(span, e);
             throw ArticleExceptions.raw(e);
         }
         metrics.observeMinio("put", System.nanoTime() - start);
@@ -148,7 +179,14 @@ public class ArticleDomainService {
         article.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
         article.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
 
-        articleMapper.insert(article);
+        try {
+            articleMapper.insert(article);
+        } catch (RuntimeException e) {
+            // Go create_article_logic.go:109-113：插入失败 ⇒ span.RecordError(err) 后返回 Internal。
+            // ⚠️ 原样上抛（RAG 现状就是让 MyBatis-Plus 的运行时异常逃出）—— 不改错误码。
+            ArticleSpans.record(span, e);
+            throw e;
+        }
         metrics.article("create");
         metrics.articleStatus("reviewing");
 
@@ -159,6 +197,8 @@ public class ArticleDomainService {
             kafkaTemplate.send(reviewTopic(), articleId, JsonbTypeHandler.writeJson(msg)).get();
         } catch (Exception e) {
             metrics.kafkaPushError("article_review");
+            // Go create_article_logic.go:125-130：推送失败 ⇒ span.RecordError(err) + Internal（**行不回滚**）
+            ArticleSpans.record(span, e);
             // Go: status.Error(codes.Internal, err.Error()) —— 注意行不回滚
             throw ArticleExceptions.internal(e.getMessage(), e);
         }
@@ -185,6 +225,8 @@ public class ArticleDomainService {
      */
     public GetArticleResponse getArticle(GetArticleRequest in) {
         // ① 公开读走独立路径（读者视角：冻结 revision）
+        //    🔴 L-10（Go 出处：get_article_logic.go:41-43）：Go 的公开分支在 tracer.Start **之前**就 return
+        //       ⇒ **这条路径根本不存在 span** ⇒ 本实现也**不得**建 span。
         if (in.getPublicOnly()) {
             ArticlePublicDomainService.PublicArticleView view =
                     publicService.getPublicArticle(in.getArticleId(), in.getIncrView());
@@ -194,23 +236,53 @@ public class ArticleDomainService {
         }
 
         // ② 作者身份 + 计阅读量 = 非法组合
+        //    🔴 Go 出处：get_article_logic.go:44-46 —— 同样在 span **之前** ⇒ 这条路径也**没有 span**。
         if (!in.getRequesterId().isEmpty() && in.getIncrView()) {
             throw ArticleExceptions.authorReadCannotIncrementView();
         }
 
+        // 🔴 L-10（Go 出处：get_article_logic.go:47-51）：span 从这里才开始
+        //     tracer := otel.Tracer("article-rpc")
+        //     ctx, span := tracer.Start(l.ctx, "GetArticle", trace.WithAttributes(attribute.String("article_id", in.ArticleId)))
+        //     defer span.End()
+        return ArticleSpans.traced(ArticleSpans.GET_ARTICLE,
+                span -> span.setAttribute(ArticleSpans.ATTR_ARTICLE_ID, in.getArticleId()),
+                span -> getArticleBody(in, span));
+    }
+
+    /** {@link #getArticle} 的业务体（span 由调用方持有）。 */
+    private GetArticleResponse getArticleBody(GetArticleRequest in, Span span) {
         // ③ 作者视角：读当前源行
-        ArticleEntity article = articleMapper.selectById(in.getArticleId());
+        //    🔴 Go get_article_logic.go:53：span.AddEvent("start find article") —— 在 FindOne **之前**
+        ArticleSpans.event(span, ArticleSpans.EV_START_FIND_ARTICLE);
+        ArticleEntity article;
+        try {
+            article = articleMapper.selectById(in.getArticleId());
+        } catch (RuntimeException e) {
+            // Go get_article_logic.go:59-62：FindOne 的**非** NotFound 错误 ⇒ span.RecordError(err) + 原样返回
+            ArticleSpans.record(span, e);
+            throw e;
+        }
         if (article == null) {
+            // Go get_article_logic.go:56-58：ErrRecordNotFound ⇒ span.SetAttributes(article_found=false)
+            //    ⚠️ **不 RecordError**（业务失败，Go 侧不记）⇒ 本实现也不记。
+            span.setAttribute(ArticleSpans.ATTR_ARTICLE_FOUND, false);
             throw ArticleExceptions.articleNotFound();
         }
+        // Go get_article_logic.go:64-65
+        ArticleSpans.event(span, ArticleSpans.EV_FIND_ARTICLE_SUCCESS);
+        span.setAttribute(ArticleSpans.ATTR_ARTICLE_FOUND, true);
 
         // ④ 作者校验（仅当传了 requesterId）
+        //    🔴 Go get_article_logic.go:66-68：PermissionDenied ⇒ **不 RecordError**（Go 侧不记）
         if (!in.getRequesterId().isEmpty() && !article.getAuthorId().equals(in.getRequesterId())) {
             throw ArticleExceptions.articleAuthorDiffers();
         }
 
         // ⑤ 浏览量自增：🔴 best-effort，失败只记日志（Go :72-75）
         if (in.getIncrView()) {
+            // Go get_article_logic.go:71：span.AddEvent("start incr view count")
+            ArticleSpans.event(span, ArticleSpans.EV_START_INCR_VIEW_COUNT);
             try {
                 articleMapper.incrViewCount(in.getArticleId());
             } catch (Exception e) {
@@ -220,20 +292,36 @@ public class ArticleDomainService {
                 //    并且 Go 这条路径的该计数器永远是 0。
                 LOG.warn("increment article view count failed (best-effort, ignored): articleId={} err={}",
                         in.getArticleId(), e.getMessage());
+                // Go get_article_logic.go:73：span.RecordError(err) —— 🔴 **记了但不返回**（继续往下走）
+                ArticleSpans.record(span, e);
             }
             article.setViewCount(article.getViewCount() + 1);
+            // Go get_article_logic.go:77：span.AddEvent("incr view count success")
+            ArticleSpans.event(span, ArticleSpans.EV_INCR_VIEW_COUNT_SUCCESS);
         }
 
         // ⑥ 读正文（MinIO）
+        //    🔴 L-10：Go 把「取对象」与「读对象」分成**两阶段**，各带一对事件
+        //       （get_article_logic.go:82 / :93 与 :95 / :102）；
+        //       而 RAG 的 storage.readString 是**一次**调用（= readAll(get(...))）⇒
+        //       ⇒ 成功路径按 Go 的**事件顺序**发全 4 个（保持事件集合一致）；
+        //       ⇒ 失败路径无法区分是哪一阶段失败 ⇒ 只发第 1 个（与 Go「get 阶段失败」同形）。
+        ArticleSpans.event(span, ArticleSpans.EV_START_GET_MINIO_OBJECT);
         String markdown;
         long start = System.nanoTime();
         try {
             markdown = storage.readString(article.getContent());
         } catch (Exception e) {
             metrics.minioError("get");
+            // Go get_article_logic.go:86 / :98：读对象失败 ⇒ span.RecordError(err)
+            ArticleSpans.record(span, e);
             throw ArticleExceptions.raw(e);
         }
         metrics.observeMinio("get", System.nanoTime() - start);
+        // Go get_article_logic.go:93 / :95 / :102
+        ArticleSpans.event(span, ArticleSpans.EV_GET_MINIO_OBJECT_SUCCESS);
+        ArticleSpans.event(span, ArticleSpans.EV_START_READ_MINIO_OBJECT);
+        ArticleSpans.event(span, ArticleSpans.EV_READ_MINIO_OBJECT_SUCCESS);
 
         return GetArticleResponse.newBuilder()
                 .setArticle(toAuthorProtoArticle(article, markdown))
@@ -302,20 +390,49 @@ public class ArticleDomainService {
      * {@code pending && lastSyncEventID != ""} 为 false ⇒ 新一轮审核可以正常入队。
      */
     public UpdateArticleResponse updateArticle(UpdateArticleRequest in) {
+        // 🔴 L-10（Go 出处：update_article_logic.go:46-51）：
+        //     tracer := otel.Tracer("article-rpc")
+        //     ctx, span := tracer.Start(l.ctx, "UpdateArticle", trace.WithAttributes(attribute.String("article_id", in.ArticleId)))
+        //     defer span.End()
+        return ArticleSpans.traced(ArticleSpans.UPDATE_ARTICLE,
+                span -> span.setAttribute(ArticleSpans.ATTR_ARTICLE_ID, in.getArticleId()),
+                span -> updateArticleBody(in, span));
+    }
+
+    /** {@link #updateArticle} 的业务体（span 由调用方持有）。 */
+    private UpdateArticleResponse updateArticleBody(UpdateArticleRequest in, Span span) {
         // ⚠️ Go 这里是**裸返回**（update_article_logic.go:53-63），不是 NotFound：
         //    model/article.go:81-88 的 FindOne 在找不到时返回 (nil, gorm.ErrRecordNotFound)，
         //    而 err.Error() 的字面量就是 "record not found" ⇒ grpc-go 包成 UNKNOWN + 该文案。
         //    注意 Go 里那个 `if article == nil { NotFound }` 分支**不可达**（FindOne 从不返回 (nil, nil)）。
         //    ⇒ 本处用 articleNotFoundMessage() 返回 **UNKNOWN + "record not found"**，
         //      既保住 code（→ api default → 1015），又把文案对齐。
-        ArticleEntity article = articleMapper.selectById(in.getArticleId());
+        ArticleEntity article;
+        try {
+            article = articleMapper.selectById(in.getArticleId());
+        } catch (RuntimeException e) {
+            // Go update_article_logic.go:54-58：FindOne 失败 ⇒ span.RecordError(err) + 原样返回
+            ArticleSpans.record(span, e);
+            throw e;
+        }
         if (article == null) {
-            throw ArticleExceptions.articleNotFoundRaw();
+            RuntimeException notFound = ArticleExceptions.articleNotFoundRaw();
+            // Go update_article_logic.go:59-63：article == nil ⇒ span.RecordError(NotFound 错误)
+            //    🔴 **注意与 get_article 不同**：Go 在这里**记了** NotFound ⇒ 本实现也记。
+            ArticleSpans.record(span, notFound);
+            throw notFound;
         }
         int prevStatus = article.getStatus();
         boolean prevPublished = prevStatus == ArticleStatus.PUBLISHED_VALUE;
 
-        boolean sourceChanged = applySourceUpdates(article, in);
+        boolean sourceChanged;
+        try {
+            sourceChanged = applySourceUpdates(article, in);
+        } catch (RuntimeException e) {
+            // Go update_article_logic.go:66-70：applySourceUpdates 失败 ⇒ span.RecordError(err)
+            ArticleSpans.record(span, e);
+            throw e;
+        }
 
         int requestedStatus = prevStatus;
         if (in.hasStatus() && in.getStatus() != ArticleStatus.ARTICLE_STATUS_UNSPECIFIED) {
@@ -329,14 +446,21 @@ public class ArticleDomainService {
 
         if (prevPublished && explicitNonPublish) {
             // ---------- 分支 A：已发布 → 显式降级 ----------
-            String eventId = newEventId();
-            article.setStatus(requestedStatus);
-            Map<String, String> extInfo = ArticleSyncEventTypes.ensureExtInfo(article.getExtInfo());
-            article.setExtInfo(extInfo);
-            ArticleSyncEventTypes.setSyncState(extInfo, "source_only", "pending",
-                    ArticleSyncEventTypes.REASON_STATUS_CHANGE, eventId, nowMs, "");
-            atomicService.retractAndUpdate(article, eventId, nowMs,
-                    ArticleSyncEventTypes.REASON_STATUS_CHANGE);
+            //    🔴 Go update_article_logic.go:81-85：整个 updatePublishedToSourceOnly 的错误
+            //       （**含内部 newEventID 失败**）都在 :83 一处 RecordError ⇒ 本实现把整块包起来。
+            try {
+                String eventId = newEventId();
+                article.setStatus(requestedStatus);
+                Map<String, String> extInfo = ArticleSyncEventTypes.ensureExtInfo(article.getExtInfo());
+                article.setExtInfo(extInfo);
+                ArticleSyncEventTypes.setSyncState(extInfo, "source_only", "pending",
+                        ArticleSyncEventTypes.REASON_STATUS_CHANGE, eventId, nowMs, "");
+                atomicService.retractAndUpdate(article, eventId, nowMs,
+                        ArticleSyncEventTypes.REASON_STATUS_CHANGE);
+            } catch (RuntimeException e) {
+                ArticleSpans.record(span, e);
+                throw e;
+            }
         } else if (prevPublished && sourceChanged) {
             // ---------- 分支 B：已发布 + 源变更 → 重审 ----------
             Map<String, String> extInfo = ArticleSyncEventTypes.ensureExtInfo(article.getExtInfo());
@@ -344,9 +468,23 @@ public class ArticleDomainService {
             ArticleSyncEventTypes.setSyncState(extInfo, "queued", "pending_review",
                     ArticleSyncEventTypes.REASON_UPDATE, "", nowMs, "");
             article.setStatus(ArticleStatus.REVIEWING_VALUE);
+            // ⚠️ Go update_article_logic.go:89-91：setReviewNonce 失败 ⇒ **直接 return，不 RecordError**
+            //    ⇒ 这是 Go「不记这个错误」的三处缺口之一 ⇒ 本实现也**不记**。
             setReviewNonce(article);
-            articleMapper.updateById(article);
-            enqueueReview(article);
+            try {
+                articleMapper.updateById(article);
+            } catch (RuntimeException e) {
+                // Go update_article_logic.go:92-96：Update 失败 ⇒ span.RecordError(err)
+                ArticleSpans.record(span, e);
+                throw e;
+            }
+            try {
+                enqueueReview(article);
+            } catch (RuntimeException e) {
+                // Go update_article_logic.go:97-100：enqueueReview 失败 ⇒ span.RecordError(err)
+                ArticleSpans.record(span, e);
+                throw e;
+            }
         } else {
             // ---------- 分支 C：其余 ----------
             if (explicitNonPublish) {
@@ -355,11 +493,24 @@ public class ArticleDomainService {
             boolean review = article.getStatus() == ArticleStatus.REVIEWING_VALUE
                     && (sourceChanged || prevStatus != ArticleStatus.REVIEWING_VALUE);
             if (review) {
+                // ⚠️ Go update_article_logic.go:107-111：setReviewNonce 失败 ⇒ **不 RecordError**（同上）
                 setReviewNonce(article);
             }
-            articleMapper.updateById(article);
+            try {
+                articleMapper.updateById(article);
+            } catch (RuntimeException e) {
+                // Go update_article_logic.go:112-116：Update 失败 ⇒ span.RecordError(err)
+                ArticleSpans.record(span, e);
+                throw e;
+            }
             if (review) {
-                enqueueReview(article);
+                try {
+                    enqueueReview(article);
+                } catch (RuntimeException e) {
+                    // Go update_article_logic.go:117-122：enqueueReview 失败 ⇒ span.RecordError(err)
+                    ArticleSpans.record(span, e);
+                    throw e;
+                }
             }
         }
 
@@ -483,19 +634,58 @@ public class ArticleDomainService {
      * </ol>
      */
     public DeleteArticleResponse deleteArticle(DeleteArticleRequest in) {
-        ArticleEntity article = articleMapper.selectById(in.getArticleId());
+        // 🔴 L-10（Go 出处：delete_article_logic.go:40-45）：
+        //     tracer := otel.Tracer("article-rpc")
+        //     spanCtx, span := tracer.Start(l.ctx, "DeleteArticle", trace.WithAttributes(attribute.String("article_id", in.ArticleId)))
+        //     defer span.End()
+        return ArticleSpans.traced(ArticleSpans.DELETE_ARTICLE,
+                span -> span.setAttribute(ArticleSpans.ATTR_ARTICLE_ID, in.getArticleId()),
+                span -> deleteArticleBody(in, span));
+    }
+
+    /** {@link #deleteArticle} 的业务体（span 由调用方持有）。 */
+    private DeleteArticleResponse deleteArticleBody(DeleteArticleRequest in, Span span) {
+        ArticleEntity article;
+        try {
+            article = articleMapper.selectById(in.getArticleId());
+        } catch (RuntimeException e) {
+            // Go delete_article_logic.go:48-52：FindOne 失败 ⇒ span.RecordError(err)
+            ArticleSpans.record(span, e);
+            throw e;
+        }
         if (article == null) {
+            RuntimeException notFound = ArticleExceptions.articleNotFoundRaw();
+            // Go delete_article_logic.go:53-57：article == nil ⇒ span.RecordError(NotFound 错误)
+            //    🔴 Go 在这里**记了业务失败** ⇒ 本实现也记（与 get_article 的 NotFound 不同）。
+            ArticleSpans.record(span, notFound);
             // ⚠️ 同 update：Go 这里也是裸返回（delete_article_logic.go:47-57）⇒ UNKNOWN + "record not found"
-            throw ArticleExceptions.articleNotFoundRaw();
+            throw notFound;
         }
         // ⚠️ 空 operator_id 与非作者合并为同一个错误（Go: || 短路）
         if (in.getOperatorId().isEmpty() || !in.getOperatorId().equals(article.getAuthorId())) {
-            throw ArticleExceptions.forbidden();
+            RuntimeException forbidden = ArticleExceptions.forbidden();
+            // Go delete_article_logic.go:58-62：PermissionDenied ⇒ span.RecordError(err)
+            //    🔴 Go 在这里**记了业务失败** ⇒ 本实现也记。
+            ArticleSpans.record(span, forbidden);
+            throw forbidden;
         }
 
-        String eventId = newEventId();
+        String eventId;
+        try {
+            eventId = newEventId();
+        } catch (RuntimeException e) {
+            // Go delete_article_logic.go:68-72：newDeleteEventID 失败 ⇒ span.RecordError(err) + Internal
+            ArticleSpans.record(span, e);
+            throw e;
+        }
         long versionMs = System.currentTimeMillis();
-        atomicService.retractAndDelete(in.getArticleId(), eventId, versionMs);
+        try {
+            atomicService.retractAndDelete(in.getArticleId(), eventId, versionMs);
+        } catch (RuntimeException e) {
+            // Go delete_article_logic.go:92-96：事务失败 ⇒ span.RecordError(err)
+            ArticleSpans.record(span, e);
+            throw e;
+        }
 
         metrics.article("delete");
         return DeleteArticleResponse.newBuilder().setSuccess(true).build();
@@ -524,7 +714,32 @@ public class ArticleDomainService {
      * 照搬：改成真正文需要额外的 MinIO 读取，会让列表响应体暴涨。
      */
     public ListArticlesResponse listArticles(ListArticlesRequest in) {
+        // 🔴 L-10（Go 出处：list_articles_logic.go:30-38）：
+        //     tracer := otel.Tracer("article-rpc")
+        //     ctx, span := tracer.Start(l.ctx, "ListArticles", trace.WithAttributes(
+        //         attribute.Int64("page", int64(in.Page)),
+        //         attribute.Int64("page_size", int64(in.PageSize)),
+        //         attribute.String("sort_by", in.SortBy),
+        //         attribute.Bool("desc", in.Desc),
+        //     ))
+        //     defer span.End()
+        //    🔴 与 get_article **不同**：这里的 span 在 PublicOnly 判定**之前**创建
+        //       ⇒ **公开分支也有 span**（只有这 4 个起始属性，没有后续属性/事件）。
+        return ArticleSpans.traced(ArticleSpans.LIST_ARTICLES,
+                span -> {
+                    span.setAttribute(ArticleSpans.ATTR_PAGE, (long) in.getPage());
+                    span.setAttribute(ArticleSpans.ATTR_PAGE_SIZE, (long) in.getPageSize());
+                    span.setAttribute(ArticleSpans.ATTR_SORT_BY, in.getSortBy());
+                    span.setAttribute(ArticleSpans.ATTR_DESC, in.getDesc());
+                },
+                span -> listArticlesBody(in, span));
+    }
+
+    /** {@link #listArticles} 的业务体（span 由调用方持有）。 */
+    private ListArticlesResponse listArticlesBody(ListArticlesRequest in, Span span) {
         if (in.getPublicOnly()) {
+            // Go list_articles_logic.go:46-48：公开分支直接 return
+            //    ⇒ **后续那三个条件属性一个都不设** ⇒ 本实现也一个都不设。
             return publicService.listPublicArticles(in);
         }
 
@@ -533,20 +748,43 @@ public class ArticleDomainService {
         String manualTypeTag = in.hasManualTypeTag() ? in.getManualTypeTag() : null;
         String secondaryTag = in.hasSecondaryTag() ? in.getSecondaryTag() : null;
         String authorId = in.hasAuthorId() ? in.getAuthorId() : null;
+        // Go list_articles_logic.go:49-60：三个属性**条件设置**（且都在公开分支**之后**）
+        if (manualTypeTag != null) {
+            span.setAttribute(ArticleSpans.ATTR_MANUAL_TYPE_TAG, manualTypeTag);
+        }
+        if (secondaryTag != null) {
+            span.setAttribute(ArticleSpans.ATTR_SECONDARY_TAG, secondaryTag);
+        }
+        if (authorId != null) {
+            span.setAttribute(ArticleSpans.ATTR_AUTHOR_ID, authorId);
+        }
         String secondaryTagJson = (secondaryTag == null || secondaryTag.isEmpty())
                 ? null
                 : JsonbTypeHandler.writeJson(List.of(secondaryTag));
 
-        long total = articleMapper.countAuthorView(manualTypeTag, secondaryTagJson, authorId);
+        // Go list_articles_logic.go:62：span.AddEvent("start db list")
+        ArticleSpans.event(span, ArticleSpans.EV_START_DB_LIST);
+        long total;
+        List<ArticleEntity> articles;
+        try {
+            total = articleMapper.countAuthorView(manualTypeTag, secondaryTagJson, authorId);
 
-        long offset = (long) (page - 1) * size;
-        if (offset < 0) {
-            offset = 0;
+            long offset = (long) (page - 1) * size;
+            if (offset < 0) {
+                offset = 0;
+            }
+
+            articles = articleMapper.selectAuthorView(
+                    manualTypeTag, secondaryTagJson, authorId,
+                    in.getSortBy(), in.getDesc(), size, offset);
+        } catch (RuntimeException e) {
+            // Go list_articles_logic.go:65-69：db list 失败 ⇒ span.RecordError(err)
+            ArticleSpans.record(span, e);
+            throw e;
         }
-
-        List<ArticleEntity> articles = articleMapper.selectAuthorView(
-                manualTypeTag, secondaryTagJson, authorId,
-                in.getSortBy(), in.getDesc(), size, offset);
+        // Go list_articles_logic.go:70-71
+        ArticleSpans.event(span, ArticleSpans.EV_DB_LIST_SUCCESS);
+        span.setAttribute(ArticleSpans.ATTR_TOTAL_ARTICLES, total);
 
         List<Article> pbArticles = new ArrayList<>();
         if (articles != null) {
@@ -590,7 +828,27 @@ public class ArticleDomainService {
      * 且 imagePath 带尾斜杠（见 {@code ArticleObjectStorageClient} 的类级说明）。
      */
     public UploadFileResponse uploadFile(UploadFileRequest in) {
-        long id = snowflake.nextId();
+        // 🔴 L-10（Go 出处：upload_file_logic.go:40-45）：
+        //     tracer := otel.Tracer("article-rpc")
+        //     ctx, span := tracer.Start(l.ctx, "UploadFile", trace.WithAttributes(attribute.String("file_name", in.FileName)))
+        //     defer span.End()
+        return ArticleSpans.traced(ArticleSpans.UPLOAD_FILE,
+                span -> span.setAttribute(ArticleSpans.ATTR_FILE_NAME, in.getFileName()),
+                span -> uploadFileBody(in, span));
+    }
+
+    /** {@link #uploadFile} 的业务体（span 由调用方持有）。 */
+    private UploadFileResponse uploadFileBody(UploadFileRequest in, Span span) {
+        long id;
+        try {
+            id = snowflake.nextId();
+        } catch (RuntimeException e) {
+            // Go upload_file_logic.go:47-52：雪花 ID 失败 ⇒ span.RecordError(err)
+            ArticleSpans.record(span, e);
+            throw e;
+        }
+        // Go upload_file_logic.go:53：span.SetAttributes(attribute.Int64("file_id", id))（**后续**属性 · Int64）
+        span.setAttribute(ArticleSpans.ATTR_FILE_ID, id);
         String fileName = in.getFileName();
         // Go: filepath.Ext —— 取最后一个点之后的部分（含点）；无点则空串
         String ext = "";
@@ -601,18 +859,27 @@ public class ArticleDomainService {
         String objectName = storage.getObjectNamePrefixForImage() + id + ext;
 
         String contentType = guessContentType(ext);
+        // Go upload_file_logic.go:62：span.SetAttributes(content_type, object_name)（**后续**属性）
+        span.setAttribute(ArticleSpans.ATTR_CONTENT_TYPE, contentType);
+        span.setAttribute(ArticleSpans.ATTR_OBJECT_NAME, objectName);
 
         byte[] content = in.getContent().toByteArray();
         long start = System.nanoTime();
+        // Go upload_file_logic.go:66：span.AddEvent("start upload to minio")
+        ArticleSpans.event(span, ArticleSpans.EV_START_UPLOAD_TO_MINIO);
         try {
             storage.put(objectName, content, contentType,
                     "public, max-age=31536000, immutable");
         } catch (Exception e) {
             metrics.minioError("put");
+            // Go upload_file_logic.go:75-80：MinIO put 失败 ⇒ span.RecordError(err)
+            ArticleSpans.record(span, e);
             throw ArticleExceptions.raw(e);
         }
         metrics.observeMinio("put", System.nanoTime() - start);
         metrics.fileUpload("image");
+        // Go upload_file_logic.go:82：span.AddEvent("upload to minio success")
+        ArticleSpans.event(span, ArticleSpans.EV_UPLOAD_TO_MINIO_SUCCESS);
 
         return UploadFileResponse.newBuilder()
                 .setFileUrl(storage.buildPublicFileURL(objectName))

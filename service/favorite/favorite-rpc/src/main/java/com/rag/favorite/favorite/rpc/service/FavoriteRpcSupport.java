@@ -67,7 +67,7 @@ public final class FavoriteRpcSupport {
      * 而 RFC 8785 对这些字符的规范形式<b>唯一</b> ⇒ 两侧 hash 必然相同。
      * <p>⚠️ <b>但不要因此去改本 mapper 加 HTML 转义</b>：那会让
      * 「写入时转义」与「投递/权威读时用同一份字节」之间多一次不必要的转换，
-     * 且 Jackson 没有与 Go 逐字等价�� HTML 转义开关（要用自定义
+     * 且 Jackson 没有与 Go 逐字等价的 HTML 转义开关（要用自定义
      * {@code CharacterEscapes} 覆盖）。当前形态是正确的最小实现。
      */
     public static final com.fasterxml.jackson.databind.ObjectMapper STRICT_JSON =

@@ -177,7 +177,7 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 
 | 条目 | 原状态 | **核对结果（2026-10-26）** | 证据 |
 |---|---|---|---|
-| **D14** nosniff | 🔁 跨域移交 common 域 | ✅ **已实现**（不是「待移交」） | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:692` `resp.setHeader("X-Content-Type-Options", "nosniff")` |
+| **D14** nosniff | 🔁 跨域移交 common 域 | ✅ **已实现**（不是「待移交」） | 共享层 `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java` 的 `resp.setHeader("X-Content-Type-Options", "nosniff")`（**锚点 = 这行调用形态**；**行号以合并后的树为准** —— G1/G3/G4 三树当前均为 **728**）|
 | **D25** 499 | 🔁 跨域移交 common 域 | ✅ **已闭合**（与 T-13 一并解决） | `docs/DRIFT/global/cross-domain.md` §二·十（T-13 响应撕裂/状态码被抢） |
 | **D27** MaxConns 作用域 | 🔁 跨域移交 common 域 | 🏷 **已签字为有意偏离**（**不是待办**） | `SD-2026-10-25-01`（global 台账 T-2 / T-5）⇒ `docs/Intentional_Deviations/global/common-tails.md` |
 | **D21** relaxed-query-chars | ⏸ 待拍板 | ✅ **第十三轮已落地 10/10** | `server.tomcat.relaxed-query-chars: ["[", "]"]` |
@@ -186,6 +186,18 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | **DRIFT-HOTAPI-024** Content-Type charset | — | ✅ **第二十五轮已修**（global T-6） | 共享层 `GoStyleJsonContentTypeAdvice` ⇒ 10 个 api 全生效 |
 
 ⇒ **hot-api 域内已无可修的语义漂移**（`DRIFT-HOTAPI-014` 亦为跨域移交，且 nosniff 已实现）。
+
+### 📌 D14 的**证据强度** = 已是 **wire 级 L4**（2026-10-28 10:3x · G3 补记）
+
+⇒ **G1 通报 admin 域落了一个「真 Tomcat + 真 `java.net.http.HttpClient`」的字节级 nosniff 探针 ⇒ 问我域要不要照落同款**
+⇒ ⇒ **我域【早就有】** —— `service/hot/hot-api/src/test/java/com/rag/hot/hot/api/HotApiRealTomcatGateTest.java`
+（**真 Tomcat · `RANDOM_PORT` · 真 HTTP 客户端**）⇒ **`:229-230` 直接断言 `X-Content-Type-Options == "nosniff"`**
+（用例名「🔴 U6 —— 404 在真 Tomcat 下是裸响应 + text/plain + nosniff」，`:221`）⇒ ⇒ **D14 不是「静态对照」，是 wire 级实测** ✅
+⇒ ⇒ **Go 侧出处**：Go 全仓 `grep -rn "X-Content-Type-Options" service/ --include=*.go` ⇒ **零命中**
+⇒ ⇒ **nosniff 是 Go `net/http` 标准库 `http.Error` 自动加的**（不是显式代码）⇒ ⇒ 故断言写的是「**Go 的 `http.Error` 会加 nosniff**」
+⇒ ⇒ ⇒ **本域不需要再落同款探针**（已闭合）⇒ ⇒ 已回函 G1 说明，避免它重复落码。
+⇒ ⇒ 📌 **与 G1 的 admin 域那条的关系**：admin 域探针覆盖的是 **400 缺必填字段** 形态；我域覆盖的是 **404 `http.NotFound`** 形态
+⇒ ⇒ **两域形态不同、但结论同源**（都落到 `net/http` 的自动加头）⇒ ⇒ 共享机制这一条**已有两个域的独立 wire 级证据**。
 
 ## 尚未处理
 
@@ -938,7 +950,7 @@ SEMANTICALLY NOT EQUIVALENT
 
 - **Go 行为**：`httpx/requests.go:66-68` 的 `ParseJsonBody` 在 `Parse` 里**无条件**执行；
   `httpx/requests.go:153-155` 的 `withJsonBody(r)` = `r.ContentLength > 0 && strings.Contains(Content-Type, "application/json")`；
-  `core/mapping/jsonunmarshaler.go:45-53` 先 `jsonx.UnmarshalFromReader`（**JSON 语法校验**）再按 json tag 填字段。
+  `core/mapping/jsonunmarshaler.go:45-52` 先 `jsonx.UnmarshalFromReader`（**JSON 语法校验**）再按 json tag 填字段。
 - **Go 活体探针实测**（Content-Type: application/json）：
 
   | body | Go | RAG 修前 | RAG 修后 |
@@ -1694,7 +1706,7 @@ RAG：`--rag.protection.max-conns=8`），16 个请求**完全重叠**（两侧�
 ### 现象
 
 在「桩切 `article-slow-short` ⇒ 补全拖过 3s HTTP 超时」的场景下打 HTTP 级熔断
-（`breakerhandler.go:19-44`，判别器 = **503 且 body 为空** vs **503 且 body = `Request Timeout\n`**）：
+（`breakerhandler.go:22-29`，**503 裸写在 `:27`** ⇒ body 为空；判别器 = **503 且 body 为空** vs **503 且 body = `Request Timeout\n`**）：
 
 | 轮次 | Go 真源 | RAG |
 |---|---|---|
@@ -1743,10 +1755,23 @@ Go 侧 zrpc 的超时是 `zrpc/client.go:70-71` + `TimeoutInterceptor` ⇒ **min
 | **MaxBytes** | `rest/handler/maxbyteshandler.go:10-25` | 两侧**默认阈值**下：超限 → **413 + 空 body + 无 Content-Type**（逐字节相同）；**恰好等于阈值** → 两侧都放行（200 + 同一份 1112B 信封） | ✅ **EQUIVALENT**（连接层有一处已记录差异 ⇒ **DRIFT-HOTAPI-026**） |
 | **MaxConns** | `rest/handler/maxconnshandler.go:12-36` | 两侧**同阈值 8** + 16 并发 → **各 8 个裸 503（空 body）**，拒绝数恰等于阈值 | ✅ 机制 **EQUIVALENT**；⚠️ **默认阈值 10000 下 RAG 侧结构性不可达**（Tomcat 200 线程 / 8192 连接）⇒ **DRIFT-HOTAPI-027** |
 | **CpuShedding** | `rest/handler/sheddinghandler.go:20-52` + `core/load/adaptiveshedder.go` | 🔴 **darwin 上 Go 侧结构性不可达**：`core/stat/internal/cpu_other.go` 带 `//go:build !linux` ⇒ `RefreshCpu()` 恒 0 ⇒ `stat.CpuUsage()` 恒 0 ⇒ `systemOverloaded()` 恒 false ⇒ `shouldDrop()` 永假。**活体佐证**：Go 自己的 stat 行打 `CPU: 0m` | 🟡 **无法双侧活体对拍**（平台事实，非实现缺陷）⇒ 证据降级为：① 源码逐条对照；② **go-zero 上游自带测试**（`core/load` / `core/breaker`，从 module cache 复制到 /tmp 跑，**真源仓库零改动**）全绿；③ RAG 侧 `GoStyleAdaptiveShedderTest` 10 例覆盖**同一组场景**（含 `overloadedAndHighInFlightSheds`） |
-| **Breaker** | `rest/handler/breakerhandler.go:19-44` | 两侧都能**真的打开**，拒绝形态 = **裸 503 + 空 body**（与超时的「503 + `Request Timeout\n`」可区分） | ✅ 机制 **EQUIVALENT**；⚠️ 当时「打开时机不稳定」⇒ **U5-OPEN-1** ⇒ **第十一轮已定性并修复**（根因 = 补全预算取样时刻 ⇒ **DRIFT-HOTAPI-029**）⇒ 修后两侧**逐波完全一致** |
+| **Breaker** | `rest/handler/breakerhandler.go:18-42`（**503 裸写在 `:27`**；判别器 `cw.Code < 500` 在 `:33`） | 两侧都能**真的打开**，拒绝形态 = **裸 503 + 空 body**（与超时的「503 + `Request Timeout\n`」可区分） | ✅ 机制 **EQUIVALENT**；⚠️ 当时「打开时机不稳定」⇒ **U5-OPEN-1** ⇒ **第十一轮已定性并修复**（根因 = 补全预算取样时刻 ⇒ **DRIFT-HOTAPI-029**）⇒ 修后两侧**逐波完全一致** |
 
 > **证据强度**：MaxBytes / MaxConns / Breaker 三闸 = **双侧活体**（最强档）；
 > CpuShedding = **静态 + 上游参考测试**（本机不可能更强）。
+
+### 📌 订正注记（2026-10-27 · G3 · 21:0x）：本域 **3 处引用行号越界**已实修（**结论一个字未改**）
+
+⚠️ **本块是「加注记」，不是「改原值」** ⇒ 上文那些**机制结论**全部**原样有效** ⇒ 本轮只改**引用指针**。
+
+| 位置 | 原引用 | 事实 | 实修 |
+|---|---|---|---|
+| 上文 `DRIFT-HOTAPI-013` 段 | `core/mapping/jsonunmarshaler.go:45-53` | go-zero v1.10.2 该文件**只有 52 行** ⇒ `53` 越界 | ⇒ 改为 **`core/mapping/jsonunmarshaler.go:45-52`**（`unmarshalJsonReader` 全函数；`jsonx.UnmarshalFromReader` 在 `:47`，按 json tag 填字段在 `:51`）|
+| 本节「现象」段 | `breakerhandler.go:19-44` | 同上 ⇒ 该文件**只有 42 行** ⇒ `44` 越界 | ⇒ 改为 **`breakerhandler.go:22-29`**（`if err != nil` 分支；**503 裸写在 `:27`**）|
+| 本节 Breaker 行 | `rest/handler/breakerhandler.go:19-44` | 同上 ⇒ `44` 越界 | ⇒ 改为 **`rest/handler/breakerhandler.go:18-42`**（`BreakerHandler` 全函数；**503 裸写在 `:27`**；判别器 `cw.Code < 500` 在 `:33`，`promise.Accept()` 在 `:34`，`promise.Reject(...)` 在 `:36`，`next.ServeHTTP` 在 `:39`）|
+
+⇒ **G2 通报来源**：`docs/DRIFT/global/_README.md:569` 已把这条登记为 **hot 域漂移**（「🔴 行号越界 —— go-zero `rest/handler/breakerhandler.go` 只有 42 行 ⇒ `44` 越界」）⇒ ⇒ **owner = G3** ⇒ 本域自修。
+⇒ **顺带记一条方法论**：**真源的 api 入口文件名【逐域不同】，不能按 go-zero 惯例推** —— 实测 `service/article/api/article.go` · `service/favorite/api/favorite.go`（**无 center**）· 但 `service/hot/api/hotcenter.go` · `service/comment/api/commentservice.go`（**有 center/service**）⇒ ⇒ **按惯例猜文件名 ⇒ 必错** ⇒ ⇒ **必须逐个 `ls` 真源**。
 
 ---
 
@@ -2154,6 +2179,25 @@ go-zero 的 `maxFormParamCount` 数的是**非空值个数** ⇒ **两层语义�
 | **2049 个 `a=`（全空值）** | **200 + `{code:200}`** | **200 + `{code:5001}`** | 🔴 **不同** |
 | **3000 个 `a=`** | **200 + `{code:200}`** | **200 + `{code:5001}`** | 🔴 **不同** |
 | 10001 个 `a=`（段数超 Go 的 10000） | 200 + `{code:5001}` | 200 + `{code:5001}` | ✅ 相同（**巧合**：Tomcat 的 2048 总数上限先拒） |
+
+### 📌 订正注记（2026-10-27 · G3 · 22:5x）—— 上表**已过期**（共享层把容器上限**无条件**抬到 10001 之后）
+
+⚠️ **上表原样保留不改写**（它是 2026-10-25 的历史实测）⇒ ⇒ **但它的 RAG 列已不是现状**：
+共享层 `GoStyleTomcatParameterLimitCustomizer`（G4 落码 `cd893d1`）现在**无条件**把容器上限抬到
+`MAX_PARAMETER_COUNT = 10001` ⇒ ⇒ **Tomcat 的「2048 总数上限」不再是运行期上限** ⇒ ⇒ 上表三行各自变成：
+
+| 输入 | 2026-10-25 记的 RAG | **2026-10-27 的现状** | 与 Go |
+|---|---|---|---|
+| 2049 个 `a=`（全空值） | 200 + `{code:5001}`（被拒） | 🔴 **200 + 业务结果（放行）**（容器上限 10001 ⇒ 不抛 ⇒ 应用层数**非空值** = 0 ⇒ 放行） | ✅ **已一致**（该窗口**闭合**） |
+| 3000 个 `a=` | 200 + `{code:5001}`（被拒） | 🔴 **200 + 业务结果（放行）** | ✅ **已一致**（同上） |
+| **10001 个 `a=`** | 200 + `{code:5001}`（被拒） | 🔴 **200 + 业务结果（放行）** ⇒ ⇒ **Go 200 + `{code:5001}` / RAG 放行 ⇒ 两侧不一致** | 🔴 **新的差一格** |
+
+⇒ ⇒ **残留窗口从「2049~10000 且非空值 ≤2048」收窄成「恰好 10001 段」**
+⇒ ⇒ **favorite 域已 L4 实测坐实**（真 Tomcat，2026-10-27）：**首个翻转点 = Go 10001 段 / RAG 10002 段**
+⇒ ⇒ 顺带**证伪**了「Go 侧拒绝形状 = 400」这个前提（真源 handler 写的是 **200 + 5003**）
+⇒ ⇒ **修法 = 共享层 `MAX_PARAMETER_COUNT` `10001 → 10000`**（改后 RAG 翻转点 = 10001 ⇒ 与 Go **同形**）
+⇒ ⇒ 逐条证据 + 修法 + 前提 ⇒ **`docs/DRIFT/favorite/api.md` §18**（favorite 域本轮 L4 实测）
+⇒ ⇒ ⚠️ **本域不擅自改**：`service/common/**` 是共享面（AGENTS.md §5.3c）⇒ ⇒ 已派单 G4。
 
 ### 根因：两层限制的**语义不同**
 

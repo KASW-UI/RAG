@@ -25,7 +25,7 @@
 | 项 | 值 |
 |---|---|
 | 落地 | **36 个 Java 文件 / 7,571 行 / 7 个迁移脚本**（V7 为第十轮前新增的时钟源对齐脚本）<br>⚠️ **核对 2026-10-25（第十轮）**：行数首轮记 7,057 ⇒ 现 **7,571**，增量 514 行**全部是各轮的纯注释增量**（可执行逻辑零改动）（本轮前：34 个文件全 0 字节、`pom.xml` 零依赖零插件、6 个 `.sql` 全 0 字节） |
-| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §26**（favorite-rpc：**20 个测试类 / 110 例**（含 3 skip）—— ⚠️ **第二十轮实测**：新增的 `FavoriteSqlStatementParityTest` 在**没有探针环境变量**时按设计 skip ⇒ skip 数 2 → 3；⚠️ **第二十三轮实测**：新增 `FavoriteFolderItemTimeColumnTest` **5 例**（真 PG）⇒ 100 → **105**；⚠️ **第二十五轮实测**：新增 `FavoriteSqlTimeoutProductionPathTest` **4 例**（真 PG + 真 HikariCP + 真 MyBatis 链）⇒ 105 → **109**；⚠️ **第二十七轮实测**：该守门把「代理层秒数」与「驱动内部原始毫秒」**拆成两个测试方法**（同方法内第一条失败会遮住第二条）⇒ 4 → **5 例** ⇒ 109 → **110**） |
+| 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §26**（favorite-rpc：**22 个测试类 / 126 例**（⚠️ **第二十九轮实测**：新增 `FavoriteRpcSpanWiringTest` **12 例**（**零 Docker / 零真 PG**）⇒ 110 → **126**；⇒ 含 3 skip ⇒ **123 例绿**）（含 3 skip）—— ⚠️ **第二十轮实测**：新增的 `FavoriteSqlStatementParityTest` 在**没有探针环境变量**时按设计 skip ⇒ skip 数 2 → 3；⚠️ **第二十三轮实测**：新增 `FavoriteFolderItemTimeColumnTest` **5 例**（真 PG）⇒ 100 → **105**；⚠️ **第二十五轮实测**：新增 `FavoriteSqlTimeoutProductionPathTest` **4 例**（真 PG + 真 HikariCP + 真 MyBatis 链）⇒ 105 → **109**；⚠️ **第二十七轮实测**：该守门把「代理层秒数」与「驱动内部原始毫秒」**拆成两个测试方法**（同方法内第一条失败会遮住第二条）⇒ 4 → **5 例** ⇒ 109 → **110**） |
 | 构建 | `mvn -o -pl service/favorite/favorite-rpc -am install` ⇒ **BUILD SUCCESS** |
 | 本轮发现并修复 | **6 处 L2 语义偏差**（§2）+ **2 处实现期真 bug**（§3） |
 | 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选已签字**（2026-10-25）：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK）⇒ **本域已无 🏷 候选**，见 §13.2<br>✅ **U8（第十五轮新增 · 域内可动的最后一条）已于第十六轮闭合**：create / create_item 的**成功路径** + `ensureUserExists` 五分支 + **落库等价性**全部拿到双侧活体证据（**15 case 全 SAME**）⇒ **§25**（盘点全表 ⇒ §24.1）⇒ ~~域内「未知项」归零~~（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认）<br>🔴🔴 **第二十轮翻案**：「域内『未知项』归零」是**提前收口** —— 当时**没查 SQL 语句层**（DDL / 错误码 / 事务语义三层闭了，**语句层是第四层，没做**）⇒ 第二十轮补上那一层 ⇒ **当场抓出 3 处 L1 可观察的漂移**（RAG 侧 INSERT / UPDATE **少绑时间列** ⇒ 落库 `NULL` ⇒ 对外时间戳 = **0**）⇒ **§29**<br>🔴 **U9（第十七轮新增 · 部署形态类 · 待拍板）**：Go 生产形态有 **16062** 那个 HTTP 面（`etc/favorite.yaml:23-30` 的 DevServer + `internal/devserver/server.go:79-82` 的 `if !c.Enabled { return }` ⇒ **与 mode 无关，生产也开**），RAG 侧 `web-application-type: none` ⇒ **没有** ⇒ 要么 RAG 侧也开（**部署形态变更**，需引 servlet 容器），要么**签字接受**⇒ **§26.8** |
@@ -1660,6 +1660,10 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 | 写入方盘点 | `python3 tools/outbox-writer-audit/favorite/check-outbox-writers.py` ⇒ **EXIT=0**（扩面后复跑） |
 | Tomcat 三旋钮 / Flyway 账本 / proto 静态 / jar 可执行性 | 全 **EXIT=0** |
 | 共享面（`docs/DRIFT/_INDEX.md` / `_MANIFEST.json` / `docs/Intentional_Deviations/_INDEX.md` / `docs/Pitfalls/_INDEX.md` / `AGENTS.md` / `docs/DRIFT/_cross/`） | **零改动** |
+> 🔴🔴 **2026-10-27 第二十九轮订正（本条是「某一轮」的声明，不是「分支永远零改动」的声明）**：
+> ⇒ ⇒ 本表的「**零改动**」说的是**第十四轮那一轮** ⇒ ⇒ **仍然成立**。
+> ⇒ ⇒ 但 `tools/ledger-lint/favorite/check-ledger-vs-reality.py` 的「共享面零改动」门禁
+> ⇒ ⇒ 是**按 git 判**的：`git diff --name-only $(git merge-base HEAD do-my-own-gh)..HEAD` ⇒ ⇒ **它量的是「本分支相对主干的累计 diff」**，⇒ ⇒ **合并 G4 共享层（`e18fd52` ⇒ `cd893d1`）之后必然含 `service/common/**`** ⇒ ⇒ **该门禁在这套「域 lane 合并共享层」的波次模型下结构性地不可能为绿** ⇒ ⇒ **改台账文字修不好它**（工具的判据是 git，不是文字）⇒ ⇒ **本条按「已知、已归因、不修」登记** ⇒ ⇒ ⇒ **不要**因为它红就以为本域偷偷改了共享层 ⇒ ⇒ 真实口径 = 「**本域的每一轮**对共享层零改动」（本轮实测：`git status` 只有域内文件 + 域内台账 ⇒ 共享面零改动成立）。
 
 ### 22.7 ⚠️ 合并后需主会话统一更新的共享面（本域**未碰**）
 
@@ -3626,3 +3630,276 @@ python3 /tmp/global-selfcheck.py --entity-all \
 | **§36.5 四条动作** | ✅ 全部执行（守门改写 + 台账订正 + 坑档补状态 + 重新量一次） |
 | **守门** | ✅ 毫秒版共享层上 **5 例全绿** · 旧秒级版上**转红且报得准**（§39.3） |
 | **共享面** | ✅ **零改动**（本域只改**自己域的**守门测试 + 台账 + 坑档；`service/common` 的毫秒版是 **global 的**） |
+---
+
+## 10. 🧹 U+FFFD 清理（2026-10-27 · G3 域）—— **4 处真损坏**
+
+### 10.1 逐处取证与重建依据
+
+| 文件:行 | 损坏形态 | 重建 | **依据（不猜）** |
+|---|---|---|---|
+| `config/FavoriteRpcLabels.java:9` | `拼成两个` + **3×U+FFFD** + `」` | `拼成两个值` | 本类自身的类注释写明「favorite-rpc 的 Prometheus label **取值**常量」⇒ 术语即「取值」；且 3×U+FFFD = **1 个汉字**（UTF-8 3 字节逐字节替换） |
+| `mapper/FavoriteItemMapper.java:78` | `变成「有` + **2×U+FFFD** + `空修订的修订」` | `变成「有一个空修订」` | **同包 `domain/FavoriteItemEntity.java` 的类注释第 ① 条**（**干净、未损坏**）已确证措辞：「把『没有修订』误判成『**有一个空修订**』」⇒ 照此措辞重建，**不引入新事实** |
+| `service/FavoriteRpcSupport.java:70` | `逐字等价` + **2×U+FFFD** + ` HTML` | `逐字等价的 HTML` | 同句唯一自然的一字填充；且 2×U+FFFD = 3 字节汉字**丢末字节**的形态（与本仓其它处一致） |
+| `test/…/FavoriteFactSemanticsTest.java:37` | `每一` + **3×U+FFFD** + `用例都必须能说清` | `每一个用例都必须能说清` | 3×U+FFFD = 1 个汉字 ⇒ 只能是「个」 |
+
+### 10.2 方法与结论
+
+| 项 | 结论 |
+|---|---|
+| 损坏是否可从 git 历史还原 | **不能**：最早的干净提交 `e1b9288` **没有这几句**（这三句是 `d27791e`「add sth」**新增**的行）⇒ 损坏发生在**该次写入当时**，无前版可取 |
+| 原始写入会话是否留存 | **不留存**：10-23 的会话快照里**已经是坏的** ⇒ 全仓无原始字符可取 ⇒ 只能**按语义重建** |
+| 重建是否引入假事实 | **否**：重建后的措辞与**同包干净文件**（`FavoriteItemEntity`）逐条一致；且**只改注释**，不改任何行为 |
+| 回归 | ✅ **favorite-rpc 114 条**（skipped 3）全绿 · favorite-api 105 条（skipped 1）全绿 ⇒ **四域 12 模块合计 919 条**（0 failures / 0 errors / 4 skipped · 9:44 min · BUILD SUCCESS · 基线 `eb4d1d2` + 本轮改动 · 核对日期 2026-10-27 · 两口径逐模块一致） |
+| 回归（**本轮 · D10 落码后 · 2026-10-27**） | ✅ **favorite-rpc 114 条**（skipped 3）全绿 · favorite-api 105 条（skipped 1）全绿 ⇒ **四域 12 模块合计 922 条**（0 failures / 0 errors / 4 skipped · **10:17 min** · BUILD SUCCESS · 基线 `deeeb8d` + 本轮文档改动 · 核对日期 2026-10-27 · 两口径逐模块一致）<br>⚠️ **上一行的 919 保留原值不改写**（那是基线 `eb4d1d2` 的口径）⇒ ⇒ **两个数不在同一条基线上 ⇒ 不可相加**；本轮本域 **favorite 三个模块逐条不变**（29 / 105 / 114）⇒ ⇒ 差额 **+3 全部来自 comment-rpc**（D10 新增 3 条守门，commit `deeeb8d`） |
+> 🔴 **2026-10-27 · 订正注记（承 G1 的 ③：「0 failures」必须带**跑次与时间戳**，否则下轮会被当现状）**：本行的 **919 / 922 条 ＋ 0 failures / 0 errors** 属于**它标注的那个跑次**（**919 = D10 落码前** · **922 = D10 落码后**）⇒ ⇒ **两个数都不是口径差，是不同跑次** ⇒ **当前数 = 922**（G1 侧「域内 12 模块」口径正确）⇒ ⇒ **但当前不是全绿**。<br>**当前实测（2026-10-27 17:21 · G3 树 · 域内 12 模块 · 129 份 surefire XML 逐文件求和）**：合计 **922 条 / skipped 4** ⇒ **与上表 922 一致** ⇒ ⇒ **但有 3 份报告带失败/错误**：<br>① `17:21:19` `FavoriteApiRealTomcatGateTest`（**3 errors**）＋ ② `17:21:40` `FavoriteApiEnvelopeParityTest`（**1 error**）⇒ 根因 = `java.net.ProtocolException: Too many interim responses received: 9 > 8`（**JDK HttpClient 对 Tomcat 多次 100-Continue 的上限**）⇒ ⇒ **根因在共享层 `cd893d1` 抬容器上限到 10001**（Tomcat 不再在 2048 拒 ⇒ 继续读大 body）⇒ ⇒ **不是域内问题** ⇒ 已转派 G4；<br>③ `13:08:29` `CommentRpcRuntimeBootGateTest`（**1 error** · `realFatJarProcessBootsAndListens`）⇒ ⇒ **就绪探测 flake 族**（article-rpc / comment-rpc / like-rpc 同款）⇒ ⚠️ **与 G1 域那款「连接预算」根因不同 ⇒ 分开记，不并成「同款 flake」**。<br>⇒ ⇒ **读本表的人以本注记为准**：上表的绿是**那一跑次**的绿，**当前域内 12 模块有 5 条红**（favorite 4 条 ＋ comment-rpc 1 条）。
+
+### 10.3 ⚠️ 一条**误报**（G2 给的清单里有一条**不能改**）
+
+| 文件 | 结论 |
+|---|---|
+| `service/article/article-api/src/test/…/ArticleApiMvcPipelineTest.java:1143` / `:1159` | 🟢 **故意保留 U+FFFD** —— 该测试用 U+FFFD 作为 `ext_info` 的 **key**，用来钉死「按**码点序**输出」（`a` < `中` < U+E000 < **U+FFFD** < 😀，见 `@DisplayName` 与断言消息）⇒ 这里的 U+FFFD 是**测试数据**，不是损坏 ⇒ **改它会破坏测试语义** ⇒ **不动**（已在 article 域台账留痕） |
+---
+
+### 附录 · 📌 G4 侧共享层基线与影响面订正（2026-10-27 · 来自 G4 第七次全量回归）
+
+**① G4 第七次全量回归口径**（**共享层基线** ⇒ 本域下次合并 G4 分支时的对照物）：
+
+| 项 | 值 |
+|---|---|
+| 命令 | `mvn -B clean verify`（**全量**，不是 `-pl` 子集） |
+| 结果 | **BUILD SUCCESS / MVN_EXIT=0** |
+| 规模 | **52 模块 · 2457 条**（29 个有测试的模块**逐模块求和**，不按行序 tail） |
+| 计数 | **failures 0 · errors 0 · skipped 4** |
+| 耗时 | **20:28 min** |
+| 相对上次 | 第五次 2448 ⇒ **+9**（本轮新增 3×3 条守门：关闭路径 / 遮蔽契约 / 池自愈） |
+| 双侧探针 | `run-parity.sh` **EXIT=0**（56 例：一致 54 / 不一致 0 / 已签字偏离 2）＋ `run-rpc-timeout-parity.sh` **EXIT=0**（3 例） |
+| 三门禁 | `wave-lane-ownership` / `wave-role-model` / `wave-coupling` ⇒ **0/0/0** |
+| 来源 | G4 commit `5564c27`（基线含单 4 的 `a1a2e05`） |
+
+**② 🟡 影响面订正注记（**保留原值不改写** + 加注记）**：
+G4 在共享层 `docs/DRIFT/global/vs-common.md` §2 的 **A2 行**逐个 rpc **自核**（`@GrpcClient` 计数 ＋
+**六种出向方式**交叉核：`newBlockingStub` / `newFutureStub` / `newStub` / `ManagedChannel` /
+`RestTemplate` / `WebClient`）后给出**全局**口径：
+
+| 口径 | 内容 |
+|---|---|
+| **全局**（G4 自核） | **可观测 6 个**（article-rpc · comment-rpc · favorite-rpc · like-rpc · message-rpc · follow-rpc）＋ **N/A 4 个**（**hot-rpc** · task-rpc · user-rpc · admin-rpc）⇒ **6/10 可观测 ＋ 4/10 N/A** |
+| **本域面**（G3 自核） | **3/4**（article-rpc · comment-rpc · favorite-rpc 有出向面；**hot-rpc = 0 ⇒ N/A**） |
+
+⇒ ⚠️ **本域面 ≠ 全局面**：**「3/4」只覆盖本域四个 rpc 组件** ⇒ **不得被读成全局口径**。
+⇒ **可复用判据**：「**共享层缺位**」是**全域事实**，「**本域受害**」是**逐域事实** ⇒
+写影响面必须**逐域实测**（并用**多种检索方式交叉核**），且**不得把域内结论外推**。
+
+**③ G4-4 反馈单已闭合**（本域 2026-10-27 登记的共享层 U+FFFD）：
+G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）⇒ 纯注释，零行为变化」
+⇒ **本域的反馈单已落、零行为变化** ⇒ **无需再跟进**。
+
+---
+
+### 附录 · 📌 订正注记（2026-10-27 · G3）：G4 **第八次**全量口径（**保留上文第七次原值不改写**）
+
+**① G4 第八次全量回归口径**（来源 G4 commit `23d1c2a` §4.10.11）：
+
+| 项 | 值 |
+|---|---|
+| 命令 | `mvn -B clean verify`（**全量**，不是 `-pl` 子集） |
+| 结果 | **BUILD SUCCESS / EXIT=0** |
+| 规模 | **52 模块 · 2461 条**（29 个有测试的模块**逐模块求和**，不按行序 tail） |
+| 计数 | **failures 0 · errors 0 · skipped 4** |
+| 耗时 | **20:21 min** |
+| 相对上次 | 第七次 2457 ⇒ **+4** |
+| 双侧探针 | `run-parity.sh` **EXIT=0**（56 例）＋ `run-rpc-timeout-parity.sh` **EXIT=0**（3 例） |
+| 三门禁 ＋ 台账三门禁 | **0/0/0 ＋ 0/0/0** |
+
+⚠️ **「+4」的归因是【推断】**：依据 = G4 `23d1c2a` 的 §4.10.9 记「FB-04（A9）落码 … **守门 4 条** / 变异 4-4」⇒ **条数吻合**；
+（同轮的 §4.10.10 是 **U+FFFD 纯注释**自修 ⇒ 不产生测试条数。）
+
+⚠️ **口径边界（不可相加）**：**2461 是 G4 树的口径**（基线含 G4 单 4 的 `0c72969`）⇒
+**本域的 919 条是 G3 树的口径**（4 域 × 3 组件）⇒ **两个数不在同一条基线上 ⇒ 不可相加**；
+合并后总数会变 ⇒ **波末收口回归才是最终口径**。
+
+⚠️ **本块是「加注记」，不是「改原值」**：上文第七次口径（2457 条 / 20:28 min / `5564c27`）**原样保留** ⇒
+读本域历史结论的人**以两块并列为准** ⇒ ⇒ **不要把第八次误读成「第七次作废」**。
+
+**② 🔴 `docs/Pitfalls/_INDEX.md` 计数漂移 **+1**（本域这一波的产物 ⇒ 登记给合并方）**
+
+- `python3 tools/check-ledger-count.py` ⇒ 索引称 **315 条**、实测 **317 条**（差 **+2**）⇒ **守门 EXIT=1**。
+- **成因已定位**：本波新增 **2 条**编号式坑位 —— `PIT-FAV-RPC-038`（U+FFFD 分类）与 `PIT-FAV-RPC-039`（Go 顶层 `Timeout` 的绑定归属）
+  （均在 `docs/Pitfalls/favorite/rpc.md`）⇒ 编号式条目 **315 → 317**。
+- **四棵树实测**：**G3 = 317（红）**；G1 / G2 / G4 树均 **315**（与索引一致 ⇒ 绿）⇒ ⇒ **先例由 G3 开**。
+- **本域不自行改 `docs/Pitfalls/_INDEX.md`**（AGENTS.md §5.3b：共享索引**合并后统一更新**）⇒ ⇒
+  **合并后请统一跑一次 `python3 tools/check-ledger-count.py --fix`**。
+- 📌 **2026-10-27 订正与更新（+13 的根因已定位 ⇒ 不是漂移）**：上面「实测 317 / 差 +2 / G3=317、G1·G2·G4=315」是**当时的快照**
+  （**原值保留不改写**）⇒ ⇒ **现在的实测**：我树（HEAD `0d5691a`）= **328** / 索引仍 **315** ⇒ **差 +13**。
+  ⇒ ⇒ **根因（三条判据，逐条可复算）**：① merge-base `cd893d1` 处实测 **315** ⇒ **基线本来就 PASS**；
+  ② **G4 有我无 = 0 条** ⇒ ⇒ **纯增、无减、无改写** ⇒ ⇒ **不存在「删条目 / 编号撞号」**；
+  ③ G4 树**不含本 lane 任何提交** ⇒ ⇒ **315 在它树里对、328 在我树里也对** ⇒ ⇒ **两边都不该「修」**。
+  ⇒ ⇒ **13 条明细（本域占 2 条 = `PIT-FAV-RPC-038` / `-039`）见 [`hot/rpc.md` §十二.6](../hot/rpc.md#十二6-📌-台账计数差-13-的根因定位2026-10-27--g3)**。
+  ⇒ ⇒ **收口动作不变：合并后统一跑一次 `--fix`（315 → 328）** ⇒ ⇒ **本 lane 仍不自行改** ⇒ ⇒ **代码零改动**。
+- ⚠️ **若各 lane 各自 `--fix`** ⇒ 同一行被多个分支改 ⇒ **合并必撞** ⇒ 建议明确「**只在合并后统一 `--fix` 一次**」这条口径。
+- ⚠️ 顺带**纪律订正**：本条纪律 ⑤ 要求「引用损坏形态用可见转义（`␦`）」，而**本条目自身 3 处引用却用了真字节**
+  ⇒ **已自纠**（`␦`）⇒ ⇒ **「写完必须验」比「照着纪律写」更可靠**。
+
+---
+
+## 🔴 favorite-rpc 的 **9 个业务 span**（Go 侧 `FavoriteRPC.*` 7 个 ＋ `Dependency.*` 2 个）已落码 —— 2026-10-27（G3 · L-4）
+
+| 项 | 值 |
+|---|---|
+| 落点 | `FavoriteDomainService` 的 **7 个方法**（`createFavoriteFolder` / `createFavorite` / `deleteFavoriteFolder` / `deleteFavorite` / `getFavoriteFolders` / `getFavoritesByFolder` / `updateFavoriteFolderName`）＋ `FavoriteUserGuard#ensureExists`（= `Dependency.User.GetUser`）＋ `FavoriteArticleSnapshotResolver#resolve`（= `Dependency.Article.GetArticle`） |
+| 工具类 | `service/favorite/favorite-common/.../span/FavoriteSpans.java`（域内私有，api/rpc 共用） |
+| 判据 | 🔴 **三类，与 comment 域不同**（详见 [`api.md` §16.2](api.md#162-🔴-三类错误判据逐字保留-go-侧的不一致未套用-comment-域的判据)）⇒ rpc 侧 = **凡错都记**（含业务失败）· 两个依赖 span = **只记下游 RPC 失败**，业务判定失败**不记** |
+| 证据强度 | 🟢 **L3**（Go 侧 **L1 逐行对照** `Sea-RideTheWind_golang/service/favorite/rpc/**` ＋ RAG 侧 **L4 运行证据**：`FavoriteRpcSpanWiringTest` 自装 OTel SDK ＋ 收集型 exporter ＋ **真 in-process gRPC 下游** ⇒ 断言**导出的 9 个 span** ⇒ **12 条全绿** ＋ **4 个变异精确转红**）⚠️ **边界**：**Go 侧无同时跑的探针** ⇒ ⇒ **不是「双侧活体对拍」** ⇒ 详见 [`api.md` §16.5](api.md#165-实测可复算) ＋ [`api.md` §16.6](api.md#166-✅-变异验证--7-个变异全部精确转红第二十九轮) |
+| 核对日期 | 2026-10-27 |
+
+⚠️ **依赖 span 的两段式改造要点**（改这两处时别弄错）：「下游调用」与「调用后的业务判定」必须**拆成两个函数段**（`tracedDependency` 的 `call` 与 `after`）⇒ 否则会**多记** Go 侧那三条**没有** `RecordError` 的业务分支（`helper.go:109-111` / `:113-115` / `:117-119`）。
+⚠️ **「其它异常原样上抛」的语义逐字保留**：原实现只 catch `StatusRuntimeException` ⇒ 其它异常**不被翻译** ⇒ 落码里保留（**不**顺手「改成 Go 的 `status.FromError` 语义」）⇒ 见 `FavoriteUserGuard#onDownstreamFailure` / `FavoriteArticleSnapshotResolver#onDownstreamFailure` 的注释。
+
+## 📌 指针 · 🔴🟢 **Testcontainers 宿主口钉口**（本域已落码 · 2026-10-28）
+
+⇒ ⇒ **canonical 全文在** [`docs/DRIFT/article/rpc.md`](../article/rpc.md) 的「**二十三、🔴🟢 Testcontainers 宿主口钉口**」一节
+⇒ ⇒ 本域那一段：模块 `favorite/favorite-rpc` · 域段 `22910–22939`（域段横跨两模块 ⇒ 取**下半段**） · 本模块宿主口段 `22910–22919` · 脚手架段 `22920–22929` · **8** 个 PG 个容器
+⇒ ⇒ 落点：`service/favorite/favorite-rpc/src/test/java/.../support/RealContainerHostPort.java` ＋ 同名 `RealContainerHostPortTest.java`（守门 **5** 条）
+⇒ ⇒ **与 Go 侧的一致性：N/A**（测试基础设施，不涉及运行时行为）
+
+## 📌 快照 · 🔴 **G4 共享层合并（`ae218df`）后的本域回归**（2026-10-28 · G3）
+
+**合并**：option D（**单一 merge 源 · 不 cherry-pick**）⇒ `git merge --no-ff align/g4-service-common`
+（G4 @ `188e995`）⇒ ⇒ **`git merge-tree --write-tree` 预演 0 冲突** ⇒ ⇒
+**G4 未触碰本域任何路径**（`git diff --stat` 空）⇒ ⇒ **本域代码零改动 ⇒ ⇒ 本域结论不受影响**。
+
+**合并后本域 3 模块回归**（`mvn -B -o --fail-at-end -am test -pl <3 模块>`，`-DargLine=-Xmx2g`）：
+
+| 模块 | 条数 | 备注 |
+|---|---|---|
+| `service/favorite/favorite-rpc` | 131 | —— |
+| `service/favorite/favorite-api` | **131** | ⚠️ **这一数【已经含】段数闸门那 +5 条真 Tomcat 守门**（守门类当轮 **13** 条）⇒ ⇒ 见下方「📌 订正」 |
+| `service/favorite/favorite-common` | 29 | —— |
+| **本域小计** | **291** | —— |
+
+**📌 订正（2026-10-28 · G3 · 我自己记账时踩的）**：本条初稿写的是
+「favorite-api 131 ⇒ 落码后 +5 ⇒ **136** ⇒ 本域 296 ⇒ 全量 **1392** ⇒ 须在合并收口前重跑一次全量」
+⇒ ⇒ **那半句是错的**，订正如下：
+
+| 项 | 初稿（错） | 实测（对） |
+|---|---|---|
+| 合并 commit 的时间 | —— | `ae218df` = **2026-10-28 03:18:21** |
+| 12 模块回归的时间 | —— | **03:34 起 · 15:30 min** ⇒ ⇒ **在合并之后** |
+| 该轮 `FavoriteApiRealTomcatGateTest` | —— | **13 条 / 0 failures / 0 errors**（日志 `… -- in com.rag.favorite.favorite.api.FavoriteApiRealTomcatGateTest`）⇒ ⇒ **已含 +5** |
+| favorite-api 模块 | 「131 → 136」 | **131（已含 +5）** ⇒ ⇒ 落码**前**是 **126** ⇒ ⇒ 那个 126 **从未出现在合并后那轮里** |
+| 全量 | 「1387 → 1392，须重跑」 | **1387 就是最新值**（1015 域侧 + 333 common + 39 users-common）⇒ ⇒ **不需要重跑** |
+
+⇒ ⇒ **教训**：**「合并后回归」不等于「合并前 + 落码」的加法** ⇒ ⇒ 落码与合并**同窗**时，
+**必须去日志里数那一次的实际条数**（`… -- in <测试类>` 行），⇒ ⇒ **不许用「前一次 + 新增条数」推算**
+⇒ ⇒ 同族 = 「**你用来下结论的那个数，不度量你以为的那个量**」。
+
+
+**全量口径**（12 域模块 ＋ `-am` 带进来的共享层）：**1387 条 / 0 failures / 0 errors / 4 skipped**
+· BUILD SUCCESS · **15:30 min**（2026-10-28）⇒ ⇒ **拆账（可复算）**：
+`service/common` **333** ＋ `service/users/users-common` **39** ＋ **四域合计 1015**
+⇒ ⇒ **1015 + 333 + 39 = 1387**（逐字相等）。
+⇒ ⇒ ⚠️ **本域段数闸门（Go `net/url` 的 `defaultMaxParams = 10000`）是合并之后落的码**
+⇒ ⇒ +5 条真 Tomcat 守门 ⇒ ⇒ **本域最新口径 = 296**（131 + **136** + 29）⇒ ⇒ **全量最新 = 1392**
+⇒ ⇒ **须在合并收口前重跑一次全量**取权威值（**不推算**）。
+
+**门禁快照（20 条）**：**canonical 在** [`docs/DRIFT/article/rpc.md`](../article/rpc.md) 的
+「**二十四、🔴 G4 共享层合并后的门禁快照（20 条）**」一节 ⇒ ⇒ **15 绿 / 4 红 / 1 用法错（EXIT=2，不是红项），四条红都不在本域**。
+
+**🔴 同域的段数闸门（Go `net/url` 段数上限）**：canonical 在
+[`docs/DRIFT/favorite/api.md`](../favorite/api.md) **§21**（含 §21.3 的
+「`MAX_PARAMETER_COUNT = 10001` 是设计值」订正）。
+
+## 📌 NUL 转义（2026-10-28 · G3）—— 真 NUL 字节换成 Java 源码转义，零行为变化，且让文件变回【文本】
+
+### 起因
+
+G4 通报（2026-10-28）：`service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteDdlParityTest.java`
+含 **4 个真 NUL 字节** ⇒ ⇒ git 按**二进制**处理 ⇒ ⇒ **三方合并不做文本合并** ⇒ ⇒
+`git merge-tree --write-tree` 产出**「揉出来」的第三版**且**不报冲突** ⇒ ⇒ **「零冲突」推不出「内容完整」**。
+
+#### 🔴 订正（2026-10-28 10:4x · G3）—— 上面这段 G4 转述里**有两处措辞被实测推翻**（原文保留不改写）
+
+⇒ ⇒ **决定性实验已做**（五组对照 · git 2.50.1）⇒ ⇒ 逐条见
+[`PIT-FAV-RPC-040` 订正第二轮](../../Pitfalls/favorite/rpc.md#🔴-订正第二轮--2026-10-28-104x--g3-决定性实验已做不报冲突与揉出第三版两处措辞被实测推翻)：
+
+| 上面那句 | 实测 | 订正 |
+|---|---|---|
+| 「产出**「揉出来」的第三版**」 | ❌ **不成立** ⇒ 预演树里该文件**取 `ours`**（实测 A/D/E 三组结果 blob **== ours**）⇒ ⇒ **「结果 ≠ ours 且 ≠ theirs」不能当损坏判据**（B 组反证：文本合并下这是**正常形态**）| ⇒ **换成**「结果取 ours ⇒ **另一侧的改动丢失**」 |
+| 「且**不报冲突**」 | ❌ **不成立** ⇒ git **报** `warning: Cannot merge binary files` ＋ `CONFLICT (content): Merge conflict in <file>` ＋ **退出码 1**（A/D/E/C 四组一致）| ⇒ **「零冲突推不出内容完整」这句在本案例上不适用**（本案例从未出现零冲突）⇒ ⇒ **但它作为一般性断言仍成立** |
+
+⇒ ⇒ **真正的危害形态 ＝「报冲突但【不产生冲突标记】」** ⇒ 二进制文件 git 无法生成 `<<<<<<<` marker ⇒ ⇒ 工作区文件**保留 HEAD 侧内容**（实测：真 NUL 4 个 ＋ 含 theirs 的改动 ＋ **不含** ours 的改动）⇒ ⇒ **看起来「正常」** ⇒ ⇒ 人若直接 `git add` ＋ commit ⇒ **另一侧改动被丢掉** ⇒ ⇒ **不是「git 静默提交坏内容」**（真合并实测：index 留 **stage 1/2/3** ⇒ `git commit` 被拒 · `You have unmerged paths`）。
+⚠️ **D 组是最危险的一条**：**只要 merge-base 那侧还含真 NUL，即使 ours / theirs 两侧都已去 NUL，这次合并仍走二进制路径** ⇒ ⇒ **「我这边修了 NUL」不足以保证合并安全** ⇒ ⇒ 必须等**该 NUL 修复进入共同祖先**之后再合并。
+
+### 本域处置（已落码 · 零行为变化）
+
+| 项 | 值 |
+|---|---|
+| 改法 | 4 处字符串字面量里的**真 NUL 字节** ⇒ 换成 **Java 源码转义 `"\0"`**（八进制转义 ＝ `U+0000`）⇒ ⇒ **运行时字节完全一致** ⇒ **被测语义不变**（Redis 复合 key 的分隔符不变） |
+| 字节计数 | `b'\x00'` **4 → 0**（改后文件**变回文本**）⇒ ⇒ `git diff --numstat` 恢复输出行数（不再是 `-  -`） |
+| 改法边界 | ⛔ **不改被测语义**（key 的字节内容不能变）⇒ ⇒ **只改源码里的写法** |
+| 守门 | `mvn -B -o --fail-at-end -pl service/favorite/favorite-rpc -am test -Dtest='FavoriteDdlParityTest'` ⇒ **1 条 / 0 failures / 0 errors / 0 skipped / BUILD SUCCESS**（8.7 s，**真 PG + Testcontainers 活体** ⇒ 不是「编译过」而已）|
+| 脚本化改法 | 字节级替换（`b'"\x00"'` → `b'"\\0"'`）＋ **守恒断言**（除目标替换外其余字节必须一致）＋ **停手条件**（命中数不等于预期 ⇒ 不改）⇒ ⇒ 脚本见 `/tmp/g3_fix_nul.py`（仓外）|
+| ⚠️ **注意行号漂移** | 插入 3 行说明注释 ⇒ ⇒ 该文件 NUL 位置由 `:138`/`:185` 变为 `:141`/`:188` ⇒ ⇒ **引用必须带 commit** |
+
+### 🔴 订正我自己原来写错的一条
+
+[`PIT-FAV-RPC-040`](../../Pitfalls/favorite/rpc.md#🔴-订正2026-10-28-102x--g3-第-2-条处置的理由是错的且真-nul-的真正代价不是语义)
+原写「🔴 **不要「修」** ⇒ ⇒ 把它换成 `\0` 转义、或删掉 ⇒ ⇒ **会改变被测语义**」⇒ ⇒ **该理由是错的**（`"\0"` 运行时等价 ⇒ 语义不变）⇒ ⇒
+并且原写「本条与 `PIT-FAV-RPC-038`（U+FFFD 那条）同款处置 ⇒ 保持原样 ⇒ 不许「修」」⇒ ⇒ **过度推广** ⇒ ⇒
+**判据**：「**值**不许改」（题材 / 被测对象）vs 「**写法**可以改」（可改写法的夹具）⇒ 二者别混。
+⇒ ⇒ 原结论（① `binary file matches` ≠ 编码损坏 · ② 4 个 NUL 是故意夹具 · ③ 字节往返安全）**全部保留**。
+
+### ⚠️ 顺带：G1 域那 2 处真 NUL（G1 写权面 · G3 只登记）
+
+`docs/DRIFT/users/admin/rpc.md:1329` / `:1334` 含 **2 个真 NUL**（引述 `extra_info = {"k":"«NUL»"}` 的 payload）⇒ ⇒
+按 **G1 自己在 `docs/DRIFT/users/admin/rpc.md:2483-2487` 定的记号约定**（「凡要在文档里展示损坏字节，一律用 `⟪U+FFFD×n⟫` 之类的可见记号」）⇒ ⇒
+**这 2 处也该换成可见记号** ⇒ ⇒ ⛔ **G1 写权面，G3 不代改** ⇒ ⇒ **已通知 G1**（否则 G4 的「文档零 NUL」守门一落地就会红在 G1 域）。
+
+#### 📌 订正注记（2026-10-28 10:3x · G3）—— 上面最后那句「**会红在 G1 域**」【已被 G4 的豁免证伪】
+
+⇒ ⇒ **实测**：G4 的 `tools/difftest/check-no-nul-bytes.py`（**G4 写权面**，已在我树）⇒ **EXIT=0** ⇒ 输出明确写：
+- 「含真 NUL 的文件: 1 个（**豁免 1 · 未豁免 0**）」⇒ ⇒ **守门不会红**；
+- 「已豁免 · `docs/DRIFT/users/admin/rpc.md`（NUL x2）· 理由：**G1 写权面** … 等 G1 把台账里的真字节改成可见转义（U+0000）后即可删除本条」⇒ ⇒ **G4 已把 G1 那条也纳入白名单**；
+- 「🟡 **白名单条目已【无 NUL】⇒ 可删除（修完了）**: `FavoriteDdlParityTest.java`」⇒ ⇒ **我那条白名单可以删了**（白名单在 `tools/**` = G4 写权面 ⇒ ⇒ **G3 不代改，已回函请 G4 删**）。
+⇒ ⇒ ⇒ **G1 那 2 处仍是 G1 的活**（G4 的白名单理由已写明「等 G1 改完即可删」）⇒ ⇒ 但**不是「紧急挡守门」**（守门已豁免 ⇒ EXIT=0）⇒ ⇒ **已双通道更正 G1**（我第五封的措辞「会红在你域」⇒ 改为「不紧急，但白名单挂着」）。
+
+#### 📌 后续（2026-10-28 10:3x · G3）—— G4 订正「揉坏」归因 + 一条**诚实的边界**
+
+**G4 已推翻自己上一封的归因**（时间错位 ⇒ 不是二进制揉坏）⇒ ⇒ **G3 独立核实：G4 是对的** ——
+- 实测 `git rev-parse 11f96dd:<该文件>` = **`6077498eb6cc`** ⇒ ⇒ **合并树里的那个 blob ＝ G3 旧版**（`11f96dd` 早于 G3 的宿主口钉口提交 `31a5d5d`）⇒ ⇒ **合并树缺 PG 那半边，是【建树时用了旧版 G3】**，不是被揉坏；
+- 同理 `PIT-FAV-RPC-040`（G3 在 `ebdccbe` 才加 ⇒ 晚于建树用的 `44a913e`）⇒ ⇒ **合并树里没有它是【对的】**。
+⇒ ⇒ **G3 自己也更正一条**：我第九封写「『揉坏』发生在 `merge-tree` 预演上，不在真合并上」⇒ ⇒ **本次案例的直接原因是【时间错位】** ⇒ ⇒ **二元机制（多方都改同一含 NUL 文件 ⇒ 揉坏）依然成立**（G4 已用原案例证明），但**本轮未触发**。
+📌 **订正（2026-10-28 10:4x · G3）—— 上面最后半句「二元机制…揉坏」的措辞也被实测推翻**：决定性实验（五组对照 · git 2.50.1）⇒ ⇒ **git【报】`CONFLICT (content)`**（不是「不报冲突」）⇒ ⇒ 预演树里该文件**取 ours**（不是「揉出第三版」）⇒ ⇒ 真合并留下 **stage 1/2/3** ⇒ `git commit` 被拒 ⇒ ⇒ **不是「静默提交坏内容」**⇒ ⇒ 危害形态 ＝「**报冲突但【不产生冲突标记】** ⇒ 工作区看起来正常 ⇒ 人若直接 `git add` 提交 ⇒ 另一侧改动被丢」⇒ ⇒ 逐条 ⇒ [`PIT-FAV-RPC-040` 订正第二轮](../../Pitfalls/favorite/rpc.md#🔴-订正第二轮--2026-10-28-104x--g3-决定性实验已做不报冲突与揉出第三版两处措辞被实测推翻)。
+
+⚠️ **一条必须诚实标注的边界（别把「没出事」当「已被证明」）**：
+本轮合并（`ee8dc41`，并入 G4 尖端 `e22d2bd`）实测 **base ＝ `9a0609fc1394` ＝ theirs** ⇒ ⇒ **只有我一方改** ⇒ ⇒ git **直接取 ours**（合并后 blob ＝ `7d22bbfd2cf4` = 我那版 ✅）⇒ ⇒ **本次【未真正触发三方内容合并】** ⇒ ⇒ **「去 NUL 后三方内容合并能正确进行」这条机制断言【本轮未被实测证明】** ⇒ ⇒ **仍属 L1 机制推断**（依据 = git 对二进制不做文本合并）⇒ ⇒ **不得据此宣布该机制已验证**。
+⇒ ⇒ ⇒ **下一步该做而本轮没做的实验**：构造一个 **base / ours / theirs 三方各异**的合并，对比「改前（含 NUL）」与「改后（文本）」⇒ ⇒ 那才是决定性证据。
+
+#### ✅ 上面那条边界【已于 2026-10-28 10:4x 解除】—— 决定性实验已做（实测 · 五组对照）
+
+| 项 | 值 |
+|---|---|
+| 构造 | **base ＝ `31a5d5d`**（含 4 个真 NUL）· **ours ＝ 去 NUL 文本版**（`7d22bbfd2cf4`）· **theirs ＝ base 上开头追加一行** ⇒ ⇒ **两侧改动不重叠 ⇒ 按文本本该合并成功** |
+| 工具 | `git merge-tree --write-tree`（预演）＋ 临时 worktree 里的**真** `git merge` · git **2.50.1 (Apple Git-155)** · 脚本 `/tmp/g3_exp_merge_nul.py`（仓外）· **只碰 git 对象层 ⇒ 不改工作区、不占 maven 窗口** |
+| **A 组**（base 含 NUL） | 退出码 **1** · `Cannot merge binary files` ＋ `CONFLICT (content)` ⇒ 结果 **== ours** ⇒ ❌ **theirs 的改动丢失** |
+| **B 组**（三方全文本 · 对照） | 退出码 **0** · 无 warning 无 CONFLICT ⇒ ✅ **两处改动都在**（结果 ≠ ours ≠ theirs ＝ 文本合并的**正常形态**）|
+| **D 组**（base 含 NUL · **两侧都去 NUL**） | 退出码 **1** · 同样冲突 ⇒ 结果 == ours ⇒ ❌ **theirs 的改动丢失** ⇒ ⇒ 🔴 **只要 merge-base 还含 NUL，合并就退化** |
+| **E 组**（base 全文本 · **仅 theirs 含 NUL**） | 退出码 **1** · 同样冲突 ⇒ ⇒ **任一侧含 NUL 即退化** |
+| **C 组**（真 `git merge`） | 退出码 **1** · `CONFLICT (content)` ＋ `Automatic merge failed` ⇒ HEAD 未动 · index 留 **stage 1/2/3** ⇒ `git commit` **被拒**（`You have unmerged paths`）⇒ ⇒ **git 不会静默提交坏内容** |
+
+⇒ ⇒ ⇒ **「去 NUL 后三方合并能正确进行」这条断言【已由 B 组实测证明】**（不再是 L1 推断）⇒ ⇒ ⇒ **上面那条「本轮未触发 ⇒ 不得宣布已验证」的边界，到此解除**。
+⇒ ⇒ ⇒ 逐条结论 + 判读纪律 ⇒ [`PIT-FAV-RPC-040` 订正第二轮](../../Pitfalls/favorite/rpc.md#🔴-订正第二轮--2026-10-28-104x--g3-决定性实验已做不报冲突与揉出第三版两处措辞被实测推翻)。
+
+#### ✅ 合并预演（2026-10-28 10:5x · G3）—— 我树 × G4 尖端 ＝ **零冲突**，且合并树里该文件**已是文本版**
+
+| 项 | 实测值 |
+|---|---|
+| 命令 | `git merge-tree --write-tree align/g4-service-common HEAD` ⇒ **EXIT=0**（**只有 1 行输出 = 合并树哈希 · 零冲突条目**）|
+| merge-base | **`e22d2bd`**（＝ G4 尖端本身 ⇒ 我树已含它 ⇒ **线性**）|
+| 合并树 | `347e5b66e2e3c977624f184e017dd8a69426903f` |
+| 合并树里 `FavoriteDdlParityTest.java` | blob **`7d22bbfd2cf4`** ⇒ **真 NUL ＝ 0** · 10590 B ⇒ ⇒ **已是文本版** |
+| 合并树全仓真 NUL 扫描 | **只剩 1 个文件**：`docs/DRIFT/users/admin/rpc.md`（**2 个**）⇒ ⇒ **我域那个文件已彻底归零**（`users/admin/rpc.md` 是 **G1 写权面** ⇒ 已在 G4 白名单 ⇒ 不阻塞）|
+| 合并树含本轮新台账 | ✅ `PIT-FAV-RPC-040`「订正（第二轮）」在 · `favorite/rpc.md`「决定性实验已做」**5 处**在 |
+
+⇒ ⇒ ⇒ **⇒ 合并收口侧的实际收益**：只要用**我树 `97af041` 或更新**建合并树 ⇒ ⇒ **该文件不会走二进制路径** ⇒ ⇒ **D 组那条「base 含 NUL ⇒ 合并退化」的隐患在收口树上已消除** ⇒ ⇒ **G4 的 `check-no-nul-bytes.py` 那条白名单届时即可删**。

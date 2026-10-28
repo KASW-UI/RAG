@@ -10,6 +10,8 @@ import com.rag.article.article.rpc.mq.ArticleSyncEventTypes;
 import com.rag.article.article.rpc.service.ArticleAtomicService;
 import com.rag.article.article.rpc.service.ArticlePublicDomainService;
 import com.rag.article.article.rpc.service.ArticlePublicDomainService.PublicArticleView;
+import com.rag.article.article.rpc.support.RealContainerHostPort;
+import com.rag.article.article.rpc.support.RealGrpcPort;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -61,7 +63,6 @@ import static org.junit.jupiter.api.Assertions.*;
         classes = ArticleRpcApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "grpc.server.port=0",
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "management.otlp.tracing.export.enabled=false",
                 "logging.level.com.alibaba.nacos=WARN",
@@ -89,10 +90,19 @@ class ArticleTransactionWiringTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("article_rpc_tx_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.TRANSACTION_WIRING));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        // 🔴 2026-10-28（G3）：gRPC server 端口走**本域专用段**（global 段表预分配给 article 域的 22400–22479）
+        //    ⇒ 不用 `grpc.server.port=0`（0 ⇒ OS 从**临时端口段** 49152–65535 里挑
+        //    ⇒ 而那是 **Docker 随机发布容器端口用的同一段** ⇒ 别的会话的容器先占住
+        //    ⇒ `0.0.0.0:P` ⇒ 本类起 server 时 **EADDRINUSE** ⇒ **整个测试类启动失败**）
+        //    ⇒ ⚠️ 这里**扩展已有的** @DynamicPropertySource 方法（不新增方法）
+        //    ⇒ ⇒ `@DynamicPropertySource` 的**值**不进 Spring 的 context cache key
+        //    ⇒ ⇒ 方法集合不变 ⇒ **上下文共享关系与迁移前逐字相同**（零行为变化）。
+        r.add("grpc.server.port", RealGrpcPort::pick);
         // ⚠️ ApplicationName 是**锁序探针**（lockOrderIsArticleThenPublication）的抓手：
         //    它要从 pg_stat_activity 里挑出「本测试卡住的后端」。
         //    同容器实例上只有本测试会卡在 FOR UPDATE 上 ⇒ 加上标记就不会误抓别的会话。

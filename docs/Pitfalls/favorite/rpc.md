@@ -355,9 +355,14 @@ v2 权威读端点返回的 `subject_ref` 是 **v1 的三字段**（`authority_i
 
 | # | 要钉住什么 | 本域的答案 |
 |---|---|---|
-| 1 | **真源 schema 的来源与执行顺序** | AutoMigrate（应用启动）**之后**才是运维手工跑 4 个 `.sql`？还是之前？⇒ 由真源文档（`DELIVORY_ACCEPTANCE.md:7`）判定 |
+| 1 | **真源 schema 的来源与执行顺序** | AutoMigrate（应用启动）**之后**才是运维手工跑 4 个 `.sql`？还是之前？⇒ 由真源文档判定（`doc/工程成熟度审查报告.md:410`：**22 个 `.sql` 无自动执行路径**，须上线前手工执行 ⇒ ⇒ **与 AutoMigrate 的先后不由程序保证** ⇒ 属运维顺序问题） |
 | 2 | **哪些语句在 no-op 时会丢** | 只有**内联**在 `CREATE TABLE` 里的约束会丢；独立的 `CREATE INDEX` / `ALTER` 不会 |
 | 3 | **ORM 自己会改什么** | AutoMigrate 会删 DEFAULT、会重排列序 ⇒ 「DBA 手写的表」经过 ORM 之后**不等于**手写的样子 |
+
+> 📌 **订正注记（2026-10-27 · G3 · 21:0x）：上表第 1 行的引用已实修**（**原引用 `DELIVORY_ACCEPTANCE.md:7` 指向的文件【在真源与本仓都不存在】** ⇒ 悬空）⇒ ⇒ 已改为**真源真实存在的**出处 `doc/工程成熟度审查报告.md:410` ⇒ ⇒ **原文引用保留在本注记里**（不删历史）。
+> ⇒ **真源原文（`:410`）**：「**无启动依赖就绪等待**：entrypoint 启动二进制前不等待 etcd/PG/Redis/Kafka 就绪，也**不执行数据库迁移**（**22 个 `.sql` 无自动执行路径**；knowledge 的 `Migrate: false` 明确要求上线前手工执行）」⇒ ⇒ **答案 = 与 AutoMigrate 的先后不由程序保证，属运维顺序问题** ⇒ ⇒ 上表第 1 行的问号**现在有答案了**。
+> ⇒ **另一条相关真源出处**：同文件 `:262`「**迁移机制弱**：22 个 `.sql` 为一次性脚本（部分带 `IF NOT EXISTS` 可重复执行），**无 golang-migrate/goose 等版本化迁移框架**，无迁移历史表，无法追踪已执行到哪一版」⇒ ⇒ 与 `:410` 互为佐证。
+> ⇒ **核对来源**：G2 lane 通报（2026-10-27 14:10）＋ 本域**自建核对器全量扫**（本域 **1262** 处「文件:行号」引用逐条核「文件存在 + 行号在范围内」）⇒ ⇒ **真缺陷 7 处已全部实修**。
 
 ⇒ **探针必须把「顺序」当成变量**：本探针同时跑 `sql-first` 与 `app-first` 两个场景，
 **并把两者的差**原样打印出来 ⇒ 「顺序是行为的一部分」这句话才**有证据**。
@@ -1777,3 +1782,242 @@ AuthorityLookup（实际在 service/common/communityfact/authority_http.go）
 - `PIT-FAV-RPC-033`：**符号存在 ≠ 符号决定你要论证的那个量**（本轮是它的**镜像**：符号**不在**那里 ≠ 锚点指错了文件）
 - `PIT-FAV-RPC-035`：**别人的「我这边是干净的」会过期一轮**（本轮是它的**同型**：FileTree 文档里两句「当时为真」的陈述已过期）
 - `PIT-FAV-RPC-031`：**恒绿的信号不携带信息**（本轮是它的**同型**：门禁「跑绿」≠「判据活着」⇒ 要做**牙齿检查**）
+---
+
+## PIT-FAV-RPC-038 · 🕳️ **「U+FFFD」不一定是编码损坏 —— 有的是「被测对象」；而且损坏的那个汉字常常「不可考」**
+
+### 现象
+
+本轮扫 `grep -rln $'\xef\xbf\xbd'` 得 6 处命中 ⇒ **逐行看上下文**后发现 **5 处真损坏 ＋ 1 处是故意的**：
+
+| 形态 | 例子 | 真相 |
+|---|---|---|
+| **故意的** | `article-api/…/ArticleApiMvcPipelineTest.java:1143` 的 `.putExtInfo("␦", "4")` | 该用例用 U+FFFD 当 `ext_info` 的 **key**，钉死「按**码点序**（= Go 的 UTF-8 字节序）输出」（`a < 中 < U+E000 < **U+FFFD** < 😀`）⇒ **改它直接破坏测试语义** |
+| **故意的** | `users/user/user-api/…/UserApiGoStyleBodyContentTypeTest.java:376` 的 `assertFalse(body.contains("␦"))` | U+FFFD 是**断言的被测对象**（G1 域） |
+| **故意的** | `docs/Pitfalls/message/rpc.md:911` 的 `CONTAINER␦: unbound variable` | **文档在记录故障现象本身**（UTF-8 locale 下 bash 把多字节字符吞进变量名）⇒ 替换符就是**病症样本** |
+| **真损坏** | `FavoriteRpcLabels.java:9` · `FavoriteItemMapper.java:78` · `FavoriteRpcSupport.java:70` · `FavoriteFactSemanticsTest.java:37` · `CommentAuditPublisher.java:19` | 各丢 **1 个汉字** |
+
+### 为什么会踩
+
+① **「扫描到 U+FFFD ⇒ 一定是编码损坏」是错的** ⇒ **「全仓 U+FFFD 归零」不是合法目标** ——
+有些 U+FFFD 是**被测对象**、是**故障样本**、是**文档刻意引用的病症**。
+② **损坏的那个汉字常常「不可考」**：本轮 5 处里 4 处的原始字符**无法还原** ——
+最早的干净提交**根本没有那几句**（是某次「新增行」引入的）⇒ **无前版可取**；
+而会话快照里**已经是坏的** ⇒ ⇒ **「搜到了」≠「有原文」**。
+③ **字节数能告诉你「丢了几个字」，但告诉不了你「是哪个字」**：
+**3×FFFD = 1 个完整汉字**（UTF-8 3 字节被逐字节替换）；
+**2×FFFD = 3 字节汉字丢了末字节**（本仓两种形态都出现过）。
+
+### 怎么不再踩
+
+① **先逐行看上下文，再决定动不动手** —— 判据：它是**被测对象 / 故障样本 / 文档引用**吗？是 ⇒ **不动**。
+② **找干净前版**：`git log --all -- <file>` ⇒ 逐提交 `git show <c>:<file> | grep -c FFFD`
+⇒ 定位**从哪一版开始坏**。⚠️ 若是**新增行** ⇒ **无前版可取** ⇒ 只能**按语义重建**。
+③ **重建依据的优先级**：
+① **同包干净文件**的同款措辞（本例：`FavoriteItemMapper` 那处照同包 `FavoriteItemEntity` 类注释的「有一个空修订」重建）
+② 本文件自身的术语（本例：`FavoriteRpcLabels` 的类注释写明「label **取值**常量」⇒「拼成两个**值**」）
+③ 唯一自然填充 ⇒ ⇒ **只改注释、不改行为**。
+④ **别把 git 历史 / 会话目录当「原文来源」的保证**：`/Users/pr/.minimax/v2/sessions/` 里 grep 目标短语
+**可能命中已经损坏的快照** ⇒ 命中 ≠ 有原文。
+⑤ **引用损坏形态作证据时用可见转义写法**（`␦␦` / `\uFFFD`），**不要**把真 U+FFFD 字节写进台账 ——
+否则后续「全仓 U+FFFD 扫描」会把**证据**也标成待修项（噪声）。
+🆕 **实证（G4 层 · 2026-10-27 · 本条的 ⑤ 是它踩出来的）**：G4 在台账里**引用病症样本**时，
+把我回信里**带替换符的原文原样抄了进去** ⇒ ⇒ **它自己的台账里多了 10 个真 U+FFFD**
+（字节级扫描当场抓到）⇒ ⇒ **「修 U+FFFD」的动作本身可以引入新的 U+FFFD** ⇒ ⇒
+**引用一律用描述**（写 `〈FFFD×3〉`，连着几个写几）⇒ **文件里不留真替换符**。
+⚠️ **与「故意保留」是两回事，别混**：
+**故意保留** = **被测对象**（U+FFFD 本身是被断言的东西 ⇒ 改了直接废测试 ⇒ 必须留）
+· **引用** = **台账叙述**（把病症写进文档 ⇒ 完全可以写成描述 ⇒ **不该留**）
+⇒ ⇒ **两者都不该在「台账叙述」里留真替换符** —— 前者留的是**测试代码**，后者留的是**文档**。
+⑥ **「扫描 ⇒ 归零」这类目标，要先问「这个目标合法吗」**：本例答案是**不合法** ⇒ ⇒ **登记 ≠ 缺陷**：先分类，再决定修不修。
+
+---
+
+## PIT-FAV-RPC-039 · 🕳️ Go 的 yaml **顶层 `Timeout`** 绑的是 **zrpc 服务端超时**（**不是** rest 的 HTTP 预算）—— 而且它**不靠「同名遮蔽」成立**
+
+### 现象
+
+写 RAG 域的 timeout 对照时，我第一反应是：「`RpcServerConf` 内嵌了 `service.ServiceConf`，而 `ServiceConf` 里也有 `Timeout`
+⇒ **同名遮蔽** ⇒ yaml 顶层 `Timeout` 绑到**外层**那个（= 服务端 70s）」。
+
+🔴 **这个机制解释是错的**：`core/service/serviceconf.go:32-40` 的 `ServiceConf`
+**根本没有 `Timeout` 字段**（只有 `Name` / `Log` / `Mode` / `MetricsUrl` / `Prometheus` / `Telemetry` / `DevServer`）
+⇒ **不存在同名遮蔽** ⇒ yaml 顶层 `Timeout` **直接**绑到 `RpcServerConf.Timeout`（`zrpc/config.go:46`，默认 2000ms）。
+
+### 为什么会踩
+
+① **「内嵌结构体同名遮蔽」是 Go 的通识 ⇒ 不查就套上去** —— 但**遮蔽的前提是「两边真有同名字段」** ⇒
+本例**下层压根没有那个字段** ⇒ ⇒ 套上去就变成**错的机制解释**。
+② ⚠️ **两种解释在结论上碰巧一致**（都得出「顶层 `Timeout` ⇒ 服务端 70s」）⇒ ⇒
+**错机制不会在结论上暴露** ⇒ 只有**把推导链一步步写出来**才会发现 ⇒ ⇒
+**「结论对」不等于「推导对」**。
+③ ⚠️ **同类易混**：service / rpc 组件的 yaml 里可能有多处 `Timeout`：
+`article/rpc/etc/article.yaml:3`（顶层 70000 = **zrpc 服务端**）与 `:90`
+（落在 `SecurityConf` 段 = **security-rpc 客户端** 10000）⇒ **两处语义完全不同** ⇒ 别混。
+
+### 怎么不再踩
+
+① **凡要说「某某遮蔽了某某」，必须把「被遮蔽的那个字段确实存在」也指出来（`文件:行号`）** ——
+指不出来 ⇒ **不是遮蔽，是结构不同** ⇒ ⇒ **写不出那个行号，就说明机制没查清**。
+② **写 Go 事实要带消费点**（AGENTS.md §3.3.1）：本例声明点 = `zrpc/config.go:46`，
+**真源侧消费点** = `service/favorite/rpc/favorite.go:40` `DisableNativeRpcTimeout(&c.RpcServerConf)`
+＋ `:49` `NewUnaryServerInterceptor(rpcTimeout, ...)` ⇒ **声明点 + 消费点两条都有**才算坐实。
+③ **⚠️ 本条的适用范围**：Go 侧 **rpc 组件**的 yaml **顶层** `Timeout` ⇒ **zrpc 服务端超时**；
+**api 组件**的 yaml 顶层 `Timeout` ⇒ **rest HTTP 预算**（`rest/config.go:55` 默认 3000ms）。
+**两者不是同一个字段** ⇒ ⇒ 「api 是 3s ⇒ rpc 也是 3s」这种推断**不成立**，必须各自去 yaml 查。
+
+## PIT-FAV-RPC-040 · 🕳️ `grep` 说「binary file matches」⇒ **不一定是编码损坏** —— 可能只是**故意夹具里的真实 NUL 字节**（且**不可「修」**）
+
+> **登记时间**：2026-10-28 · G3 lane（落码 Testcontainers 宿主口钉口时**顺手撞到**）
+> ⚠️ **本条与 `PIT-FAV-RPC-038`（U+FFFD 那条）同款处置**：**故意夹具 ⇒ 保持原样 ⇒ 不许「修」**。
+>
+> 📌 **订正注记（2026-10-28 10:2x · G3）—— 上面那句「不许修」【过度推广】，且下面第 2 条处置的【理由】是错的**：逐条见「🔴 订正」一节。**原结论（① `binary file matches` ≠ 编码损坏 · ② 4 个 NUL 是故意夹具 · ③ 字节往返安全）全部保留不改写**。
+
+### 现象
+
+`grep -rl "new PostgreSQLContainer" service/favorite/favorite-rpc/src/test/java` 有一条输出是
+
+```
+Binary file service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteDdlParityTest.java matches
+```
+
+⇒ ⇒ 而 `grep` 的同行其它文件都正常列出 ⇒ ⇒ **看起来像「这个文件坏了」**。
+
+### 实测（三步，逐层排除「损坏」这个解释）
+
+| 判据 | 实测 | 结论 |
+|---|---|---|
+| 字节级 UTF-8 解码 | **OK**（无 `UnicodeDecodeError`） | **不是编码损坏** |
+| `U+FFFD`（`b'\xef\xbf\xbd'`）计数 | **0** | **不是 U+FFFD 那类替换符** |
+| `b'\x00'` 计数 | **4**（第 136 / 183 行，各 2 个） | ⇒ ⇒ **真实 NUL 字节** |
+| 字节上下文 | `names.put(p[1] + "<NUL>" + p[2] + "<NUL>" + payload, p[3]);` | ⇒ ⇒ **Redis 复合 key 的分隔符** |
+
+⇒ ⇒ **结论**：这 4 个 NUL 字节是**故意的测试夹具**（用 `\0` 拼复合 Redis key）⇒ ⇒ **不是缺陷**。
+
+### 🔴 后果与处置
+
+1. **`grep` 会把该文件判成 binary** ⇒ ⇒ `grep -n` 打不出行号、`git diff` 按二进制处理（只报「Binary files differ」）
+   ⇒ ⇒ **排查时要先想到这一条**，别以为是「文件损坏」。
+2. 🔴 **不要「修」** ⇒ ⇒ 把它换成 `\\0` 转义、或删掉 ⇒ ⇒ **会改变被测语义**（Redis key 的字节内容变了）
+   ⇒ ⇒ 同 `PIT-FAV-RPC-038` 的处置：**故意测试数据 ⇒ 保持原样**。
+3. ⚠️ **但脚本化改文本时必须按字节往返**
+   ⇒ ⇒ 用 UTF-8 读写（`read_text(encoding="utf-8")` / `write_text(..., encoding="utf-8")`）**能**逐字节往返（U+0000 是合法 UTF-8 码位）⇒ ⇒ **不会**引入新的损坏
+   ⇒ ⇒ 本轮迁移脚本已加**断言「NUL 字节数不变」** ⇒ ⇒ 改完回读校验，命中 0 处异常。
+
+### 🔴 订正（2026-10-28 10:2x · G3）—— 第 2 条处置的**理由是错的**，且真 NUL 的**真正代价不是语义**
+
+⚠️ **本节是订正，上面原文一律保留不改写**（按「改旧判断 ⇒ 保留原值 + 加订正注记」纪律）。
+
+1. 🔴 **「不要把它换成 `\0` 转义 ⇒ 会改变被测语义」⇒ 这条【错】** ——
+   **Java 源码里的 `"\0"` 是八进制转义 = `U+0000` 字符** ⇒ ⇒ **运行时字节与真 NUL 完全一致** ⇒ ⇒ **被测语义不变**（Redis 复合 key 的字节内容不变）⇒ ⇒ **零行为变化**。
+   **实测（2026-10-28 10:2x）**：改成 `"\0"` 后跑
+   `mvn -B -o --fail-at-end -pl service/favorite/favorite-rpc -am test -Dtest='FavoriteDdlParityTest'`
+   ⇒ **1 条 / 0 failures / 0 errors / 0 skipped / BUILD SUCCESS**（8.7 s，**真 PG + Testcontainers 活体** ⇒ 不是「编译过」而已）。
+2. ⚠️ **开头那句「本条与 `PIT-FAV-RPC-038`（U+FFFD 那条）同款处置 ⇒ 保持原样 ⇒ 不许「修」」⇒ 【过度推广】** ——
+   两条的**处置不同**：
+   - **U+FFFD 那条（PIT-FAV-RPC-038）** ＝ **题材 / 被测对象** ⇒ 真字节**必须留**（改了断言永远为真 ⇒ 静默失效；改了载荷永远找不到 ⇒ 假红）⇒ **不许动**；
+   - **真 NUL 这条（本条）** ＝ **可改「写法」的夹具** ⇒ ⇒ **值不动、只把写法从真字节换成源码转义** ⇒ ⇒ **该改**。
+   ⇒ ⇒ **判据**：「**值**不许改」（题材）vs 「**写法**可以改」（夹具）⇒ 二者别混。
+3. 🔴 **真 NUL 的真正代价不是语义，是【git 把文件当二进制】** —— 这是本条**最该记**的一半
+   （2026-10-28 由 G4 通报 ⇒ G3 实测确认）：
+   - git 对含 NUL 的文件按**二进制**处理 ⇒ ⇒ **三方合并不做文本合并** ⇒ ⇒ `git merge-tree --write-tree` 会产出**「揉出来」的第三版**且**不报冲突** ⇒ ⇒ **「零冲突」推不出「内容完整」**；
+   - 实证（G4 的预演合并树）：该文件 blob 三方 ＝ `9a0609fc1394`（9565 B）· G3 HEAD ＝ `8648028bbc47`（10296 B）· **合并树 ＝ `6077498eb6cc`（10103 B）** ⇒ ⇒ **三方都不是合并树那个** ⇒ ⇒ 被「揉」掉的正是 G3 的 PG 钉口那半边（`import …RealContainerHostPort` / `bindPg(FAVORITE_DDL_PARITY)` / `.withPassword("password")`）；
+   - ⇒ ⇒ **正确处置 ＝ 把真 NUL 换成源码转义**（让文件变回文本 ⇒ 三方合并才能正确进行）⇒ **不是**「不许修」；
+   - ⚠️ **自测判据**：`git diff --numstat <A> <B> -- <文件>` 输出 `-  -` ⇒ ⇒ git 已把它当二进制 ⇒ ⇒ 那个文件在合并里**不可信**。
+4. 📌 **行号订正**：上面表里「第 136 / 183 行」**是错的** ⇒ ⇒ 实测（改前 · HEAD `cf55cff`）NUL 在 **`:138` / `:185`**（各 2 个）⇒ ⇒ **行号是快照，不是锚点**（同族：共享层文件被后续提交挪长 ⇒ 引用集体过期）。
+5. ✅ **G3 树的实际状态（供下一棒对账）**：我树 `git merge`（真合并，merge commit `a9c3e38`）**没有**揉坏这个文件 ⇒ blob 从 `31a5d5d` 到 HEAD 恒为 `8648028bbc47`（10296 B），且 `import`/`bindPg`/`.withPassword` 三行**全在** ⇒ ⇒ **「揉坏」发生在 `merge-tree`【预演】上，不发生在真合并上**（因为合并时两边该文件无差异 ⇒ 不需三方内容合并 ⇒ 直接取己方）⇒ ⇒ **但这不等于隐患不存在**：一旦对方真的改了这个文件 ⇒ 真合并同样会走二进制路径。
+   📌 **订正（2026-10-28 10:3x · G3）—— 上面最后那句归因要收窄**：G4 已推翻自己上一封的「揉坏」归因，**G3 独立核实 G4 是对的** ⇒ 本案例里**合并树缺 PG 那半边的直接原因是【建树时用了旧版 G3】**（实测 `git rev-parse 11f96dd:<该文件>` = `6077498eb6cc` = G3 旧版 ⇒ `11f96dd` 早于 G3 的宿主口钉口提交 `31a5d5d`）⇒ ⇒ **不是被揉坏** ⇒ ⇒ 但**二元机制本身（多方都改同一含 NUL 文件 ⇒ 揉坏）依然成立**（G4 已用原案例证明）⇒ ⇒ **本轮未触发**。
+6. ⚠️ **改完之后，`git diff --numstat` 仍会显示 `-  -` —— 这是【易误读点】，别据此以为没修好**：
+   - git 的 `buffer_is_binary()` 是**逐 blob** 判定的 ⇒ ⇒ **diff 的任一侧**是二进制 ⇒ ⇒ **整个 diff 按二进制处理** ⇒ ⇒ 「**跨越这一次修改**」的那次 diff（**旧 blob 仍含 NUL** ⇒ 二进制）仍输出 `-  -` ＋「Binary files differ」；
+   - ⇒ ⇒ **正确的自测方式 = 拿【两个都是新 blob】的版本比**（2026-10-28 实测）：
+     ```bash
+     F=service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteDdlParityTest.java
+     git cat-file blob $(git rev-parse HEAD:$F) > /tmp/newblob.java
+     python3 -c "b=open('/tmp/newblob.java','rb').read(); open('/tmp/tmpblob.java','wb').write(b.replace(b'FAVORITE_DDL_PARITY',b'FAVORITE_DDL_PARITY2',1))"
+     TB=$(git hash-object -w /tmp/tmpblob.java)
+     git diff --numstat $(git rev-parse HEAD:$F) $TB   # ⇒ 期望输出「1	1」（文本）
+     ```
+     实测：**`1	1`** ✅（对照：旧 blob vs 新 blob ⇒ `-	-`）⇒ ⇒ **新 blob 已是文本** ⇒ ⇒ **从下一次改动起**，该文件的三方合并才能正确进行 ⇒ ⇒ **隐患已消除**；
+   - ⇒ ⇒ 另一条更快的旁证：`file <blob>` ⇒ 旧 blob = `data` · 新 blob = `Unicode text, UTF-8 text` ✅。
+7. ⚠️ **一条必须诚实标注的边界：「本轮没出事」≠「机制已被证明」** ——
+   - 本轮合并（`ee8dc41`，并入 G4 尖端 `e22d2bd`）实测 **base ＝ `9a0609fc1394` ＝ theirs** ⇒ ⇒ **只有我一方改** ⇒ ⇒ git **直接取 ours**（合并后 blob ＝ `7d22bbfd2cf4` = 我那版 ✅）⇒ ⇒ **本次【未真正触发三方内容合并】**；
+   - ⇒ ⇒ **「去 NUL 后三方内容合并能正确进行」这条断言【本轮未被实测证明】** ⇒ ⇒ 仍属 **L1 机制推断**（依据 = git 对二进制不做文本合并）⇒ ⇒ **不得据此宣布该机制已验证**；
+   - ⇒ ⇒ **决定性实验（尚未做）**：构造 **base / ours / theirs 三方各异**的合并，对比「改前（含 NUL）」与「改后（文本）」⇒ ⇒ 那才是证明。
+   - ⇒ ⇒ **同族教训**：**「没触发」与「不可能触发」是两件事** ⇒ ⇒ 报告时必须分开写（AGENTS.md §0：「已改」≠「已验证」）。
+
+### 🔴 订正（第二轮 · 2026-10-28 10:4x · G3）—— 决定性实验已做：「不报冲突」与「揉出第三版」两处措辞【被实测推翻】
+
+⚠️ **本节是订正，上面第 3 / 5 / 7 条的机制措辞一律保留不改写**（按「改旧判断 ⇒ 保留原值 + 加订正注记」纪律）⇒ ⇒ **第 7 条那条「诚实边界」已被本次实验解除**。
+
+#### 实验构造（全部只碰 git 对象层 + 一个临时 worktree ⇒ 不改工作区、不跑 maven）
+
+- 被测文件：`service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteDdlParityTest.java`
+- **base ＝ `31a5d5d`**（含 **4 个真 NUL** 的生产态）· **ours ＝ 去 NUL 文本版**（blob `7d22bbfd2cf4`）· **theirs ＝ 在 base 上开头追加一行** ⇒ ⇒ **两侧改动不重叠 ⇒ 按文本本该合并成功**
+- 工具：`git merge-tree --write-tree`（预演）＋ 临时 worktree 里的**真** `git merge` · git 版本 **2.50.1 (Apple Git-155)** · 脚本 `/tmp/g3_exp_merge_nul.py`（**仓外** ⇒ 见下方「复现」小节：**命令内嵌** ⇒ 不依赖该路径仍可复算）
+
+#### 五组对照（实测 · 2026-10-28 10:4x）
+
+| 组 | base | ours | theirs | 退出码 | git 说了什么 | 结果 blob | 判读 |
+|---|---|---|---|---|---|---|---|
+| **A** | 含 NUL | 去 NUL 文本 | 含 NUL ＋ 追加行 | **1** | `warning: Cannot merge binary files` ＋ `CONFLICT (content)` | **== ours** | ❌ **theirs 的改动丢失** |
+| **B** | 全文本 | 文本 ＋ 末尾行 | 文本 ＋ 开头行 | **0** | **无 warning · 无 CONFLICT** | ≠ ours ≠ theirs | ✅ **两处改动都在**（文本合并的**正常形态**） |
+| **D** | **含 NUL** | **去 NUL 文本** | **去 NUL 文本 ＋ 追加行** | **1** | 同 A | **== ours** | ❌ **theirs 的改动丢失** |
+| **E** | 全文本 | 文本 ＋ 追加行 | **含 NUL** ＋ 追加行 | **1** | 同 A | == ours | ❌ theirs 的改动丢失 |
+| **C** | 真 `git merge`（HEAD 侧含 NUL） | — | — | **1** | `CONFLICT (content)` ＋ `Automatic merge failed; fix conflicts and then commit the result.` | — | index 留 **stage 1/2/3** ⇒ `git commit` **被拒**（`You have unmerged paths`） |
+
+#### 结论（5 条 · 逐条订正上面的旧措辞）
+
+1. 🔴 **不是「静默揉坏」—— git 【报】冲突** ⇒ A/D/E/C 四组一致：`warning: Cannot merge binary files` ＋ `CONFLICT (content): Merge conflict in <file>` ＋ **退出码 1** ⇒ ⇒ **G4「不报冲突」的措辞不成立** ⇒ ⇒ **「零冲突推不出内容完整」这句在本案例上【不适用】**（本案例从未出现零冲突）⇒ ⇒ **但它作为一般性断言仍成立**（B 组证明退出码 0 时结果 ≠ ours ≠ theirs 是正常形态 ⇒ 「≠」不是损坏判据）。
+2. 🔴 **预演树里该文件取【ours】，不是「揉出来的第三版」** ⇒ ⇒ 上面第 3 条那个判据（「三方都不是合并树那个 ⇒ 被揉坏」）**不成立** ⇒ ⇒ ⚠️ **我上一轮把它读成「第三版」是自己的判据 bug**：`blob_of()` 对 40 位十六进制短路 ⇒ 把 **commit OID 当成了 blob**（⇒ 读到的是树对象 ⇒ 打印出「行数 1」的荒谬读数）⇒ ⇒ **B 组同时反证**：「结果 ≠ ours 且 ≠ theirs」在文本合并下是**正常形态**（两处改动都在）⇒ ⇒ **这条不能当损坏判据**。
+3. 🔴 **真正的危害形态 ＝ 「报冲突但【不产生冲突标记】」** ⇒ 二进制文件 git 无法生成 `<<<<<<<` marker ⇒ ⇒ 工作区文件**保留 HEAD 侧内容**（实测：真 NUL 4 个 ＋ 含 theirs 的改动 ＋ **不含** ours 的改动）⇒ ⇒ **看起来「正常」** ⇒ ⇒ 人若**直接 `git add` ＋ commit** ⇒ **另一侧的改动被丢掉** ⇒ ⇒ 这才是真危害（不是「git 静默提交坏内容」）。
+4. 🔴 **最危险的一条（D 组）** ⇒ **只要 merge-base 那侧还含真 NUL，即使 ours / theirs 两侧都已经去 NUL，这次合并仍然走二进制路径** ⇒ ⇒ **「我这边修了 NUL」不足以保证合并安全** ⇒ ⇒ 必须等 **该 NUL 修复本身进入共同祖先**之后再合并 ⇒ ⇒ **合并顺序 / 窗口要按这个排**。
+5. ✅ **触发条件 ＝ 三方中任一侧含 NUL 即退化** ⇒ 实测到 **base 侧**（A/D 组）与 **theirs 侧**（E 组）单独含 NUL 均退化；**ours 侧单独含 NUL 未单独构造**（git 的 binary 判定是逐 blob 的 ⇒ 机理同源）。
+6. ✅ **「去 NUL 后三方合并能正确进行」这条断言【已被实测证明】** ⇒ B 组：三方全文本 ⇒ **退出码 0 · 两处改动都在** ⇒ ⇒ **第 7 条那条「本轮未触发 ⇒ 不得据此宣布已验证」的边界，本轮解除**。
+
+#### 由此得出的判读纪律（3 条）
+
+- 报「合并损坏」时**必须同时报 git 的退出码与 warning 原文**（本案例 ＝ 退出码 1 ＋ `Cannot merge binary files`）⇒ ⇒ 否则会被读成「静默损坏」⇒ ⇒ **而那会引出错误的修法**。
+- **别信「工作区文件里没有冲突标记」** ⇒ ⇒ 二进制冲突**本来就没有** marker ⇒ ⇒ 必须 `git show :1:<file>` / `:2:` / `:3:` **三方逐字节比**。
+- 判「合并结果对不对」**看改动的标记还在不在** ⇒ ⇒ **不看 blob 是否等于 ours / theirs**。
+
+#### 复现（命令内嵌 ⇒ 不依赖任何仓外脚本）
+
+```bash
+# 变量（都在本仓对象层 ⇒ 不改工作区、不占 maven 窗口）
+F=service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteDdlParityTest.java
+BASE=31a5d5d                       # 含 4 个真 NUL 的生产态
+OURS=7d22bbfd2cf4d0ed41a0efe7ea5317d8897377f4   # 去 NUL 后的文本版
+I1=/tmp/g3_repro_i1 ; I2=/tmp/g3_repro_i2       # 两个独立 index（免 rm）
+
+# ① 造 theirs（base 内容 + 末尾追加一行 ⇒ 与 ours 的改动不重叠）
+BASEBLOB=$(git rev-parse $BASE:$F)              # ⚠️ BASE 是 commit ⇒ 必须先解析成 blob
+THEIRS=$(git cat-file blob $BASEBLOB | { cat; echo "// theirs-only line (experiment)"; } | git hash-object -w --stdin)
+
+# ② 造两个「提交」（都挂在 BASE 下 ⇒ BASE 就是 merge-base）
+GIT_INDEX_FILE=$I1 git read-tree $BASE^{tree}
+GIT_INDEX_FILE=$I1 git update-index --add --cacheinfo 100644,$OURS,$F
+OURS_COMMIT=$(git commit-tree $(GIT_INDEX_FILE=$I1 git write-tree) -p $BASE -m exp-ours)
+GIT_INDEX_FILE=$I2 git read-tree $BASE^{tree}
+GIT_INDEX_FILE=$I2 git update-index --add --cacheinfo 100644,$THEIRS,$F
+THEIRS_COMMIT=$(git commit-tree $(GIT_INDEX_FILE=$I2 git write-tree) -p $BASE -m exp-theirs)
+
+# ③ A 组：merge-tree 预演（base 含 NUL）⇒ 期望：退出码 1 + Cannot merge binary files + CONFLICT (content)
+git merge-tree --write-tree $OURS_COMMIT $THEIRS_COMMIT; echo "EXIT=$?"
+# ⇒ 结果 blob 取 ours ⇒ theirs 的追加行不在结果里（用 git rev-parse <结果树>:$F 比）
+# ⚠️ 冲突时 merge-tree 把【冲突树 + stage 1/2/3 + warning + CONFLICT】整段写在 stdout
+#    ⇒ 别在「非 0 就抛异常」的 helper 里丢 stdout（那会把证据本身丢掉）
+
+# ④ C 组：真 `git merge`（临时 worktree）⇒ 期望：退出码 1 + Automatic merge failed + index 留 stage 1/2/3
+git worktree add --detach /tmp/g3-exp-merge-wt $THEIRS_COMMIT
+git -C /tmp/g3-exp-merge-wt merge --no-edit $OURS_COMMIT; echo "EXIT=$?"
+git -C /tmp/g3-exp-merge-wt ls-files -u $F          # ⇒ 期望 3 行（stage 1/2/3）
+git -C /tmp/g3-exp-merge-wt commit --no-edit --dry-run   # ⇒ 期望被拒：You have unmerged paths
+git worktree remove --force /tmp/g3-exp-merge-wt
+```
+
+⇒ ⇒ **本节命令已于 2026-10-28 10:4x 在本树实测跑通**（A 组：退出码 1 ＋ warning ＋ CONFLICT ＋ 结果 blob ＝ ours；C 组：退出码 1 ＋ `Automatic merge failed` ＋ `ls-files -u` 三行 stage ＋ `commit --dry-run` 被拒「You have unmerged paths」＋ 工作区文件仍含 4 个真 NUL 且**无冲突标记**）。
+⇒ ⇒ **判读要点**：**第 ③ 步的 stdout 必须整段留档**（`Cannot merge binary files` 与 `CONFLICT (content)` 都只出现在 stdout）⇒ ⇒ 只看退出码会把它读成「普通冲突」。
+
+### 适用范围
+
+**只**适用于「源码里以**真实控制字符**当分隔符的测试夹具」这一形态 ⇒ ⇒ **不适用于**真正的编码损坏（那种会解码失败或出现 `U+FFFD`）。

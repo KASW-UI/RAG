@@ -31,7 +31,7 @@ public class UserRpcClient {
     private UserServiceGrpc.UserServiceBlockingStub userServiceBlockingStub;
 
     /**
-     * 返回<b>已套上请求级 deadline</b> 的 stub。
+     * 返回<b>已套上「请求级 deadline ＋ 2s 客户端封顶」</b> 的 stub。
      *
      * <p>Go 侧靠 {@code observability} 的 unary interceptor 给整条服务端链路加超时
      * （{@code service/common/observability/rpc.go:19}），
@@ -41,8 +41,18 @@ public class UserRpcClient {
      *
      * <p>⚠️ <b>不要把返回值缓存到字段上</b>：{@code withDeadlineAfter} 每次返回新实例，
      * 缓存会把「第一次调用时的预算」固化下来，之后每个请求都带着过期 deadline。
+     *
+     * <p>🔴 <b>2s 客户端封顶（2026-10-27 G3 域侧自修 · A1）</b>：
+     * Go 侧 {@code zrpc.MustNewClient(c.UserRpc)} 的客户端<b>无条件</b>装
+     * {@code TimeoutInterceptor}（{@code zrpc/internal/client.go:113-117} ＋
+     * {@code zrpc/internal/config.go:15} 的 {@code default=true}）⇒ 每次调用都有
+     * <b>2000ms</b> 上限（{@code zrpc/config.go:31} 的 {@code json:",default=2000"}；
+     * Go 侧 {@code etc/favorite.yaml} 未配 {@code Timeout} ⇒ 走这个默认值）。
+     * <br>⇒ 原先只有 {@code applyTo}（无预算时<b>原样返回</b>）⇒ 本域是纯 gRPC 进程
+     * （ThreadLocal 永不被 set）⇒ **出向调用零期限** ⇒ 与 Go 可观察行为分叉。
      */
     public UserServiceGrpc.UserServiceBlockingStub userRpc() {
-        return GoStyleRequestDeadline.applyTo(userServiceBlockingStub);
+        return GoStyleClientCallTimeout.capByClientTimeout(
+                GoStyleRequestDeadline.applyTo(userServiceBlockingStub));
     }
 }

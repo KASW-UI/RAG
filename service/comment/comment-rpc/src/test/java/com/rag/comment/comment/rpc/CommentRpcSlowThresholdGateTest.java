@@ -37,6 +37,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import com.rag.comment.comment.rpc.support.RealGrpcPort;
+import com.rag.comment.comment.rpc.support.RealContainerHostPort;
 
 import static com.rag.common.observability.ObservabilityConstants.ATTR_DURATION;
 import static com.rag.common.observability.ObservabilityConstants.ATTR_SLOW;
@@ -117,7 +119,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
                 //    「各类的 properties 恰好不同」—— 谁改一下 properties 就可能撞上。
                 "rag.test.gate.context-key=comment-slow-threshold",
 
-                "grpc.server.port=0",
+                // 🔴 gRPC server 端口走**本域专用段**（RealGrpcPort），**不用 `port=0`**：
+                //    port=0 会让 OS 从临时端口段（macOS 49152–65535）里挑，而那是
+                //    **Docker 随机发布容器端口用的同一段** ⇒ 别的会话的容器先占住
+                //    ⇒ EADDRINUSE ⇒ 整个测试类启动失败（表现为「偶尔红、换个时间又绿」的抖动）。
+                //    ⇒ 本域专用段 = **22600–22699**（global 段表预分配给 comment 域），
+                //    原先的裸硬编码 21500 **落在 favorite 域的探针段 21400–21599 内**
+                //    ⇒ ⇒ 两边都以为对方不在自己段里 ⇒ ⇒ 2026-10-27 一并迁出。
+                //    ⇒ 端口在 @DynamicPropertySource 里注册（**不进 context cache key**）。
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "grpc.client.message-rpc.address=static://127.0.0.1:1",
                 "grpc.client.article-rpc.address=static://127.0.0.1:1",
@@ -141,10 +150,17 @@ class CommentRpcSlowThresholdGateTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("comment_rpc_slow_threshold_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag")
+                    .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.COMMENT_RPC_SLOW_THRESHOLD_GATE));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        // 🔴 gRPC server 端口走**本域专用段**（22600–22699），不用 `port=0`
+        //    （port=0 落 OS 临时段 ⇒ 与 Docker 发布口同段 ⇒ 环境性抖动）。
+        //    ⚠️ **@DynamicPropertySource 的值不进 Spring 的 context cache key**
+        //    ⇒ ⇒ 各测试类的**专属 context key**（rag.test.gate.context-key=*）仍是必需的
+        //    ⇒ ⇒ 两处都要留：一个是「端口不撞段」，一个是「上下文不共享」。
+        r.add("grpc.server.port", RealGrpcPort::pick);
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);
@@ -266,7 +282,7 @@ class CommentRpcSlowThresholdGateTest {
     private void warmUp() throws Exception {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);
         Server server = builder.addService(slowCommentService(0L)).build().start();
         ManagedChannel ch = io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
@@ -284,7 +300,7 @@ class CommentRpcSlowThresholdGateTest {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);                  // ← 整条链（recover→breaker→shedding→业务拦截器）
         Server server = builder.addService(slowCommentService(sleepMillis)).build().start();
 

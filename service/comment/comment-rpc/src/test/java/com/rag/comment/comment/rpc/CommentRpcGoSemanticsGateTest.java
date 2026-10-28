@@ -14,12 +14,24 @@ import com.rag.comment.comment.rpc.mapper.CommentDomainFactOutboxMapper;
 import com.rag.comment.comment.rpc.mapper.CommentIndexMapper;
 import com.rag.comment.comment.rpc.service.CommentDeliveryValidator;
 import com.rag.comment.comment.rpc.service.CommentFactDeliveryService;
+import com.rag.comment.comment.rpc.support.RealContainerHostPort;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
+import io.opentelemetry.sdk.common.CompletableResultCode;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import io.opentelemetry.sdk.trace.data.SpanData;
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
+import io.opentelemetry.sdk.trace.export.SpanExporter;
 import org.apache.ibatis.mapping.Environment;
 import org.apache.ibatis.session.Configuration;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -39,6 +51,11 @@ import javax.sql.DataSource;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -85,12 +102,39 @@ class CommentRpcGoSemanticsGateTest {
     static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("first_db")
             .withUsername("admin")
-            .withPassword("password");
+            .withPassword("password")
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.COMMENT_RPC_GO_SEMANTICS_GATE));
 
     /** 本类独立账本（不与 {@code CommentSchemaPgGateTest} 的账本撞号）。 */
     private static final String LEDGER = "flyway_schema_history_comment_go_gate";
 
     private static final Logger LOG = LoggerFactory.getLogger(CommentRpcGoSemanticsGateTest.class);
+
+    /**
+     * 自建收集型 exporter —— <b>不引 {@code opentelemetry-sdk-testing}</b>
+     * （只为测试引入它反而扩大依赖面；范式照抄同域 {@code CommentSpanWiringTest}）。
+     */
+    static final class CollectingExporter implements SpanExporter {
+        final List<SpanData> spans = Collections.synchronizedList(new ArrayList<>());
+
+        @Override
+        public CompletableResultCode export(Collection<SpanData> batch) {
+            spans.addAll(batch);
+            return CompletableResultCode.ofSuccess();
+        }
+
+        @Override
+        public CompletableResultCode flush() {
+            return CompletableResultCode.ofSuccess();
+        }
+
+        @Override
+        public CompletableResultCode shutdown() {
+            return CompletableResultCode.ofSuccess();
+        }
+    }
+
+    private static final CollectingExporter EXPORTER = new CollectingExporter();
 
     /** Go 侧 {@code domain_fact.go:97} 的 {@code OccurredAt = EventTime} ⇒ 载荷与信封必须同一时刻。 */
     private static final String OCCURRED_AT = "2026-10-24T06:00:00Z";
@@ -153,6 +197,95 @@ class CommentRpcGoSemanticsGateTest {
                 outboxMapper,
                 new CommentDeliveryValidator(sharedMapper),
                 new DataSourceTransactionManager(dataSource));
+
+        // 🔴 把 GlobalOpenTelemetry 指向本测试的收集器（范式照抄同域 CommentSpanWiringTest）。
+        //    不装 SDK ⇒ GlobalOpenTelemetry.getTracer(...) 是 no-op ⇒ `Span.current()` 永远是 invalid
+        //    ⇒ 下面的守门会「平凡通过」⇒ 装它是**守门能生效**的前提。
+        //    ⚠️ 同域已有两个类这么装（CommentSpanWiringTest / CommentRpcSlowThresholdGateTest）
+        //    ⇒ surefire 顺序执行 + 各自 setup/teardown ⇒ 不打架。
+        GlobalOpenTelemetry.resetForTest();
+        GlobalOpenTelemetry.set(OpenTelemetrySdk.builder()
+                .setTracerProvider(SdkTracerProvider.builder()
+                        .addSpanProcessor(SimpleSpanProcessor.create(EXPORTER))
+                        .build())
+                .build());
+    }
+
+    @AfterAll
+    static void uninstallSdk() {
+        GlobalOpenTelemetry.resetForTest();
+    }
+
+    // ====================================================================================
+    // ③ span 契约：fact 投递链路**不产生** span 属性（与 Go 侧一致）
+    //
+    //    根因（逐条实测 · 2026-10-27 订正过一处早期误判）：
+    //    ⚠️ 此前注记写「Go 侧 fact 投递链路根本不用 span」⇒ **不准确** ⇒ Go 侧**有**这个 span，
+    //       但建在**共享层**且**不带属性**：
+    //       `service/common/communityfact/process.go:26`
+    //         `otel.Tracer("sea.rtw.communityfact").Start(ctx, "community.fact_delivery.dispatch")`
+    //       （全文 69 行、**零** `SetAttributes`）；域内 `service/comment/rpc/internal/model/`
+    //       整包 10 个非测试文件**零** span 命中 ⇒ Go 的 `DispatchFactOnce` 从不写 span 属性。
+    //    · RAG 侧等价 span 也在**共享层**（`service/common/.../communityfact/Dispatcher.java:186`
+    //      同名同 tracer）⇒ **span 拓扑两侧已对齐**。
+    //    · RAG 域内那句 `Span.current().setAttribute` 为何**够不到**那个 span：
+    //      共享层把 span 放进 **Context**（`Dispatcher.java:189` `ctx.with(span)`）而**从不 `makeCurrent`**，
+    //      且 `dispatchFactOnce` 跑在**另一个线程**（`:172-176` `communityfact-dispatch` 单线程池 `:190` `supplyAsync`）
+    //      ⇒ OTel 默认 `ThreadLocalContextStorage` 是**普通** `ThreadLocal`（**不继承**）
+    //      ⇒ 投递线程上 `Span.current()` 恒为 **invalid span**（非 null）⇒ `if (span != null)` 恒真
+    //      ⇒ `setAttribute` 落到 invalid span ⇒ **静默丢弃**（otel-java 的 invalid span 是 no-op）
+    //      ⇒ 即「看起来在工作、实际永远不生效」⇒ 已删（2026-10-27），本类钉住不变量。
+    //
+    //    🔴 断言 ② 是**牙齿检查**：span 挂在投递**外面** ⇒ 若实现又写 `Span.current().setAttribute`
+    //       ⇒ 那个 span 会带上属性 ⇒ 断言红 ⇒ ⇒ 「改回去必红、改完必绿」。
+    //       ⚠️ 前提（已核）：`dispatchOnce` 自己不开 span，且它收到的 `Context.root()` 只是参数、
+    //          **不会** makeCurrent ⇒ `Span.current()` 仍取决于线程作用域。
+    // ====================================================================================
+
+    @Test
+    @DisplayName("🔴 装置活性：同线程挂的真 span **能**收到属性（否则下面那条会平凡通过）")
+    void spanCollectorIsAliveOnThisThread() {
+        Span probe = GlobalOpenTelemetry.getTracer("gate").spanBuilder("gate.probe").startSpan();
+        try (Scope ignored = probe.makeCurrent()) {
+            probe.setAttribute("gate.probe.attr", "v");
+        } finally {
+            probe.end();
+        }
+        assertThat(EXPORTER.spans)
+                .as("观测装置必须活着：能导出的 span 上要真能看到人为写的属性")
+                .anyMatch(s -> "gate.probe".equals(s.getName())
+                        && s.getAttributes().asMap().containsKey(AttributeKey.stringKey("gate.probe.attr")));
+    }
+
+    @Test
+    @DisplayName("🔴 span 契约：投递链路**不**向 span 写 comment.fact.* 属性（与 Go 侧零 span 属性一致）")
+    void factDeliveryDoesNotWriteSpanAttributes() throws Exception {
+        String aggregateId = "7101";
+        insertValidFact(aggregateId);
+
+        Span observed = GlobalOpenTelemetry.getTracer("gate").spanBuilder("gate.delivery").startSpan();
+        try (Scope ignored = observed.makeCurrent()) {
+            assertThat(deliveryService.dispatchOnce(Context.root(), acceptedSender("2026-10-24T06:00:09Z"), LOG))
+                    .isTrue();
+        } finally {
+            observed.end();
+        }
+
+        SpanData exported = EXPORTER.spans.stream()
+                .filter(s -> "gate.delivery".equals(s.getName()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("gate.delivery span 未被导出 ⇒ 观测装置有问题"));
+        assertThat(exported.getAttributes().asMap().keySet())
+                .as("投递链路不得向 span 写 comment.fact.* 属性（Go 侧的 fact 投递 span 不带这两个属性）")
+                .noneMatch(k -> k.getKey().startsWith("comment.fact."));
+    }
+
+    @Test
+    @DisplayName("🔴 根因：不挂作用域时线程上 Span.current() 无效 ⇒ 原实现写不进去（它永远不生效的原因）")
+    void currentSpanIsInvalidWithoutScope() {
+        assertThat(Span.current().getSpanContext().isValid())
+                .as("没有作用域时 Span.current() 必须是 invalid span ⇒ 这正是原实现写不进属性的原因")
+                .isFalse();
     }
 
     @AfterEach

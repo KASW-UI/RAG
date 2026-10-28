@@ -54,6 +54,24 @@ public class ArticleRpcClient {
     private ArticleServiceGrpc.ArticleServiceBlockingStub stub;
 
     /**
+     * 返回<b>已套上「min(2s, 请求剩余预算)」deadline</b> 的 stub。
+     *
+     * <p>🔴 <b>为什么必须有这一层</b>（2026-10-27 G3 域侧自修 · A1）：
+     * Go 侧 {@code zrpc.MustNewClient(c.ArticleRpc)} 的客户端<b>无条件</b>装
+     * {@code TimeoutInterceptor}（{@code zrpc/internal/client.go:113-117} ＋
+     * {@code zrpc/internal/config.go:15} 的 {@code default=true}）⇒ 每次调用都有
+     * <b>2000ms</b> 上限（{@code zrpc/config.go:31} 的 {@code json:",default=2000"}）。
+     * <br>⇒ 而本类原先<b>直接用注入的 stub 发起调用</b> ⇒ <b>零期限**
+     * ⇒ 下游挂死时 RAG 侧会一路等到底，Go 侧 2s 就返回
+     * ⇒ **可观察行为分叉**（调用耗时 + 失败时机都不同）。
+     *
+     * <p>⚠️ **不要把返回值缓存到字段上**：{@code withDeadlineAfter} 每次返回新实例。
+     */
+    private ArticleServiceGrpc.ArticleServiceBlockingStub articleRpc() {
+        return GoStyleClientCallTimeout.withDeadline(stub);
+    }
+
+    /**
      * 对应 Go {@code resolveSubjectFallback} 里的 {@code GetArticle} 调用。
      *
      * @return {@code null} = 任何形式的失败（RPC 异常 / resp 空 / article 空 /
@@ -62,7 +80,7 @@ public class ArticleRpcClient {
     public Long fetchAuthorId(String articleId) {
         GetArticleResponse response;
         try {
-            response = stub.getArticle(GetArticleRequest.newBuilder()
+            response = articleRpc().getArticle(GetArticleRequest.newBuilder()
                     .setArticleId(articleId)
                     // Go: IncrView: false
                     .setIncrView(false)

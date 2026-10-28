@@ -44,10 +44,17 @@ public class ArticleRpcClient {
     private ArticleServiceGrpc.ArticleServiceBlockingStub articleServiceBlockingStub;
 
     /**
-     * 返回<b>已套上请求级 deadline</b> 的 stub（理由同 {@code UserRpcClient#userRpc}）。
+     * 返回<b>已套上「请求级 deadline ＋ 2s 客户端封顶」</b> 的 stub
+     * （理由同 {@code UserRpcClient#userRpc}）。
+     *
+     * <p>🔴 <b>2s 客户端封顶（2026-10-27 G3 域侧自修 · A1）</b>：Go 侧
+     * {@code zrpc.MustNewClient(c.ArticleRpc)} 的客户端<b>无条件</b>装
+     * {@code TimeoutInterceptor}（{@code zrpc/internal/client.go:113-117}）⇒ 2000ms 上限；
+     * 原先只有 {@code applyTo} ⇒ 本域出向调用<b>零期限</b> ⇒ 与 Go 分叉。
      */
     public ArticleServiceGrpc.ArticleServiceBlockingStub articleRpc() {
-        return GoStyleRequestDeadline.applyTo(articleServiceBlockingStub);
+        return GoStyleClientCallTimeout.capByClientTimeout(
+                GoStyleRequestDeadline.applyTo(articleServiceBlockingStub));
     }
 
     /**

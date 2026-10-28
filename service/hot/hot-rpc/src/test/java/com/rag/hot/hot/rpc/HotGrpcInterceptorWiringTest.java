@@ -4,6 +4,7 @@ import com.rag.common.observability.RpcInterceptor.DeadlineState;
 import com.rag.hot.hot.proto.GetHotArticlesRequest;
 import com.rag.hot.hot.proto.GetHotArticlesResponse;
 import com.rag.hot.hot.proto.HotServiceGrpc;
+import com.rag.hot.hot.rpc.support.RealGrpcPort;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
 import io.grpc.Server;
@@ -120,7 +121,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         classes = HotRpcApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "grpc.server.port=0",
+                "grpc.server.port=22501",
                 // 绕过 Nacos：devh 的 @GrpcClient 在 Bean 初始化期就建 channel（不是懒建），
                 // 测试环境没有 Nacos ⇒ discovery:// 解析失败 ⇒ 上下文起不来。
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
@@ -152,7 +153,7 @@ class HotGrpcInterceptorWiringTest {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);                  // ← 被测的那一行（接口其实是 Consumer<ServerBuilder<?>>）
         SlowHandlerProbe probe = new SlowHandlerProbe();
         Server server = builder.addService(slowHotService(probe)).build().start();
@@ -210,7 +211,7 @@ class HotGrpcInterceptorWiringTest {
         AtomicReference<String> handlerThread = new AtomicReference<>("<未进入>");
         SlowHandlerProbe probe = new SlowHandlerProbe();
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        ServerBuilder<?> builder = ServerBuilder.forPort(RealGrpcPort.pick());
         configurer.accept(builder);
         Server server = builder.addService(slowHotService(probe, observedRemaining, handlerThread)).build().start();
 

@@ -8,6 +8,7 @@ import com.rag.favorite.favorite.api.dto.FavoriteFolder;
 import com.rag.favorite.favorite.api.dto.FavoriteItem;
 import com.rag.favorite.favorite.api.dto.GetFavoriteFoldersResp;
 import com.rag.favorite.favorite.api.support.RealTomcatPort;
+import com.rag.favorite.favorite.api.support.RealTomcatHttp;
 import com.rag.favorite.favorite.common.errmsg.FavoriteErrorCode;
 import com.rag.favorite.favorite.common.errmsg.FavoriteErrorMessages;
 import com.rag.users.common.jwt.JwtUtil;
@@ -367,6 +368,55 @@ class FavoriteApiEnvelopeParityTest {
         assertEquals(expectedLine("CASE", "err_too_many_form_params"), actual);
     }
 
+    /**
+     * 🔴 <b>「差 1 格」：总数 2049 但<b>非空值只有 1</b> ⇒ 必须【放行】，不得被参数个数判据拒掉。</b>
+     *
+     * <h2>为什么这是「唯一能判别两套计数语义」的一格</h2>
+     * <table border="1">
+     *   <caption>Go 数「非空值」vs Tomcat 数「总参数个数」</caption>
+     *   <tr><th>侧</th><th>本格（1 非空 + 2048 空）</th><th>上一格（2049 非空）</th></tr>
+     *   <tr><td>Go（go-zero）</td>
+     *       <td><b>非空值 = 1</b> ⇒ ≤ 2048 ⇒ <b>放行</b>（{@code GetFormValues} 数的是非空值）</td>
+     *       <td>非空值 = 2049 ⇒ &gt; 2048 ⇒ <b>拒</b>（5003 参数错误）</td></tr>
+     *   <tr><td>RAG（Tomcat）</td>
+     *       <td><b>总参数 = 2049</b> ⇒ 须 ≤ 容器上限 ⇒ 共享层已把上限抬到 <b>10001</b> ⇒ <b>放行</b></td>
+     *       <td>总参数 = 2049 ⇒ &lt; 10001 ⇒ 容器放行 ⇒ 由<b>应用层</b>按 Go 的非空值规则拒 ⇒ 5003</td></tr>
+     * </table>
+     *
+     * <h2>这一格钉住什么</h2>
+     * <ul>
+     *   <li>🔴 <b>钉住「不能过度拒绝」</b>：若谁把 Go 的 2048 判据实现成「<b>总参数个数</b> ≤ 2048」
+     *       ⇒ 本格就会被拒 ⇒ ⇒ <b>测试红</b> ⇒ ⇒ 与上一格（钉住「超过必须拒」）构成<b>双向守卫</b>；
+     *   <li>🔴 <b>钉住「容器上限必须 ≥ 2049」</b>：若 Tomcat 的参数上限停在 yaml 的 <b>2048</b>
+     *       ⇒ 本格会被 Tomcat 拒（<b>400 + HTML 错误页</b>，不是 envelope）⇒ ⇒ <b>测试红</b>
+     *       ⇒ ⇒ 这一格就是「共享层把上限抬到 10001」的<b>必要性判据</b>（= {@code DRIFT-HOTAPI-030}）；
+     *   <li>⚠️ <b>不比具体业务码</b>：Go 侧这格放行后走的是<b>真实 handler</b>（会带业务数据 / 依赖真 favorite-rpc）
+     *       ⇒ ⇒ 两侧都<b>不可逐字节比较</b>（与 Go 腿那个「2048 恰在界内」的对照组同款处置）
+     *       ⇒ ⇒ 本格只判「<b>没有被参数个数判据拒掉</b>」这一<b>可判定的结果</b>。
+     * </ul>
+     *
+     * <h2>期望值的来源（oracle 不取自被测代码）</h2>
+     * <p>被排除的那个 body = <b>Go 腿实测写进 {@code expected.txt} 的那一条</b>
+     * （{@code err_too_many_form_params}）⇒ ⇒ 是<b>外部 oracle</b>，不是本测试自己算的。
+     */
+    @Test
+    @DisplayName("🔴 「差 1 格」：1 个非空 + 2048 个空（总数 2049）⇒ 必须放行，不得被参数个数判据拒掉")
+    void oneNonEmptyPlus2048EmptyFormParamsMustNotBeRejected() throws Exception {
+        // ⚠️ 总参数 2049 > 2048，但**非空值只有 1 个**（folderId=123）
+        //    ⇒ Go 侧（数非空值）放行；Tomcat 侧（数总数）靠「上限抬到 10001」放行
+        //    ⇒ 两侧一致 ⇒ 这一格必须**不**被参数个数判据拒掉。
+        HttpResponse<String> resp = getWithToken(ITEM_LIST + "?" + oneNonEmptyPlusEmptyFormParams(2048));
+
+        assertEquals(200, resp.statusCode(),
+                "参数个数判据若把【总数 2049】当超限 ⇒ Tomcat 会回 400（不是 envelope）"
+                        + " ⇒ ⇒ 状态码必须是 200（应用层语义）；body=[" + resp.body() + "]");
+
+        String tooManyBody = expectedLine("CASE", "err_too_many_form_params").split("\\|", 5)[4];
+        assertNotEquals(tooManyBody, resp.body(),
+                "本格的非空值只有 1 个 ⇒ Go 侧【放行】⇒ 绝不能落到 Go 侧「非空值 >2048」那个 5003 参数错误"
+                        + " ⇒ 若相等 ⇒ 说明有人把 Go 的 2048 判据实现成了「总数 ≤ 2048」");
+    }
+
     @Test
     @DisplayName("✅ 「advice + 容器 mapper」== 真实管线（用真 HTTP 的 401 反证等价关系）")
     void advicePlusMapperEqualsRealPipeline() throws Exception {
@@ -415,13 +465,6 @@ class FavoriteApiEnvelopeParityTest {
 
     // ══════════════════ 真 HTTP 辅助 ══════════════════
 
-    private HttpClient client() {
-        return HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .version(HttpClient.Version.HTTP_1_1)
-                .build();
-    }
-
     /**
      * 发请求；<b>把「一个字节都没读到」的传输层失败翻译成人能读懂的诊断</b>
      * （端口号 + 占用者）⇒ 免得下次又要查一轮「到底谁占了这个端口」。
@@ -432,7 +475,13 @@ class FavoriteApiEnvelopeParityTest {
      */
     private HttpResponse<String> send(HttpRequest req) throws Exception {
         try {
-            return client().send(req, HttpResponse.BodyHandlers.ofString());
+            // 🔴 走 RealTomcatHttp：**只用 JDK HttpClient，不回落**。
+            //    ⚠️ 订正（2026-10-28 · G3）：1xx **不是「Tomcat 连发」的**，是**共享层断连探针**写的
+            //    （GoStyleClientDisconnectProbe.java:234 裸写 103 Early Hints · 已签字偏离 SD-2026-10-25-04）
+            //    ⇒ 共享层已把 1xx 行数设为每请求 ≤ 4（15cf93a）< JDK 客户端上限 8 ⇒ 现在读得到最终响应
+            //    ⇒ 再看到「Too many interim responses received」= **共享层上界回归** ⇒ 修共享层，别在本域加回落
+            //    ⇒ 详见 RealTomcatHttp 的类注释（裸 socket 实测 + 共享层订正取证）。
+            return RealTomcatHttp.send(req);
         } catch (IOException e) {
             throw new IOException("端口 " + port + " 上读到了 0 字节（本请求没打到本测试的 Tomcat？）"
                     + "；该端口的监听者=[" + RealTomcatPort.holders(port) + "]"
@@ -475,6 +524,25 @@ class FavoriteApiEnvelopeParityTest {
         StringBuilder b = new StringBuilder("folderId=123");
         for (int i = 1; i < n; i++) {
             b.append("&p").append(i).append("=v");
+        }
+        return b.toString();
+    }
+
+    /**
+     * 造「1 个非空值（folderId）+ n 个<b>空</b>值」的 query 串。
+     *
+     * ⚠️ 与 {@link #manyFormParams(int)} 的关键区别：那个造的是 n 个<b>非空</b>值（{@code p1=v}）
+     *    ⇒ 触发 Go 的 2048 判据；这个造的是<b>空值</b>（{@code p1=} ⇒ 值长度为 0）
+     *    ⇒ Go 的 {@code GetFormValues} <b>数非空值</b>（空值不计入）⇒ ⇒ <b>放行</b>。
+     * ⚠️ 必须带一个合法的 folderId：{@code form:"folderId,string"} 是必填
+     *    ⇒ 缺了它会被「字段未设置」先拒掉 ⇒ ⇒ 那测的就不是参数个数判据了。
+     * ⚠️ 总参数个数 = 1 + n ⇒ 调 n=2048 ⇒ 总数 **2049**（&gt; 2048）⇒
+     *    ⇒ 这一格就是「Go 数非空 / Tomcat 数总数」两套语义**唯一**的判别格。
+     */
+    private static String oneNonEmptyPlusEmptyFormParams(int emptyCount) {
+        StringBuilder b = new StringBuilder("folderId=123");
+        for (int i = 1; i <= emptyCount; i++) {
+            b.append("&p").append(i).append("=");
         }
         return b.toString();
     }

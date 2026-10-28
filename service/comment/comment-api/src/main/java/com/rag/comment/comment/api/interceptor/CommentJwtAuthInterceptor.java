@@ -1,30 +1,19 @@
 package com.rag.comment.comment.api.interceptor;
 
-import com.rag.comment.comment.api.config.CommentApiProperties;
-import com.rag.comment.comment.common.errmsg.CommentErrorCode;
-import com.rag.comment.comment.common.errmsg.CommentErrorMessages;
-import com.rag.common.exception.AuthenticationException;
-import com.rag.users.common.jwt.BearerTokenExtractor;
-import com.rag.users.common.jwt.JwtUtil;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jws;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
-import java.time.Instant;
-import java.util.Date;
-
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import com.rag.comment.comment.api.auth.CommentJwtSignatureVerifier;
+import com.rag.comment.comment.api.auth.CommentJwtVerificationResult;
+import com.rag.comment.comment.api.auth.GoStyleJwtAuthFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import javax.crypto.SecretKey;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 /**
- * comment-api 的 JWT 鉴权拦截器 —— Go 端 {@code rest.WithJwt(secret)} 的等价物。
+ * comment-api 的 JWT 鉴权拦截器 —— Go 端 {@code rest.WithJwt(secret)} 的<b>响应面</b>。
  *
  * <p><b>Go 出处</b>：{@code service/comment/api/internal/handler/routes.go:54} 的
  * {@code rest.WithJwt(serverCtx.Config.UserAuth.AccessSecret)}
@@ -40,7 +29,7 @@ import javax.crypto.SecretKey;
  *   <li>Authorization 头缺失 → 401（{@code authhandler.go:55} → {@code unauthorized()}）</li>
  *   <li>Bearer 前缀剥离后为空 → 401
  *       （Go: {@code golang-jwt/jwt/v4/request/oauth2.go} 的
- *       {@code stripBearerPrefixFromTokenString}，规则见 {@link BearerTokenExtractor}）</li>
+ *       {@code stripBearerPrefixFromTokenString}，规则见 {@code BearerTokenExtractor}）</li>
  *   <li>签名错 / 过期 / 格式错 → 401（{@code authhandler.go:60-68}）</li>
  *   <li>验签成功后：把 claim {@code userId} 的<b>原始对象</b>写进 request attribute
  *       （Go {@code authhandler.go:71-79} 把所有非标准 claim 塞进 ctx）</li>
@@ -56,6 +45,17 @@ import javax.crypto.SecretKey;
  * <p><b>⚠️ 与 users 域「401 + 完整 envelope」不同</b>：Go 的 {@code unauthorized()}
  * 只 {@code WriteHeader(401)}，<b>不写任何 body 字节</b>，
  * 所以本模块的 401 是<b>空 body</b>。写成 envelope 会给客户端多出 Go 从未输出过的字节。
+ *
+ * <h3>🔴 验签与响应被拆成两段（DRIFT-USERAPI-009②）</h3>
+ * <p>Go 侧 3s 预算<b>不覆盖</b>验签（计时器在 {@code Authorize} 之后起算），
+ * 而 RAG 侧验签原本内联在本类里（{@code HandlerInterceptor} ⇒ DispatcherServlet <b>内</b>）
+ * ⇒ 验签<b>被计入</b> 3s 预算 ⇒ 与 Go 相反。
+ * <p>⇒ 修法（与 users/admin/favorite 域同款配方）：<b>验签</b>搬进
+ * {@code GoStyleJwtAuthFilter}（{@code @Order(+6)} 的 Servlet Filter ⇒ 在 3s 预算的
+ * {@code +7} <b>之外</b>），本类只<b>消费</b>它的结果、失败<b>原样重抛</b>。
+ * <p>⇒ 401 的<b>空 body 形状逐字不变</b>（异常对象由 Filter 产出 ⇒
+ * {@code @ExceptionHandler} 仍然管得到）；「413 压过 401」也不变
+ * （本 Filter <b>绝不写响应</b> ⇒ 401 仍发生在所有 Filter 之后）。
  */
 @Component
 public class CommentJwtAuthInterceptor implements HandlerInterceptor {
@@ -68,11 +68,10 @@ public class CommentJwtAuthInterceptor implements HandlerInterceptor {
      */
     public static final String CLAIM_ATTRIBUTE = "userId";
 
-    private final SecretKey key;
+    private final CommentJwtSignatureVerifier verifier;
 
-    public CommentJwtAuthInterceptor(CommentApiProperties properties) {
-        this.key = Keys.hmacShaKeyFor(
-                JwtUtil.padToHmacKeySize(properties.getUserAuth().getAccessSecret()));
+    public CommentJwtAuthInterceptor(CommentJwtSignatureVerifier verifier) {
+        this.verifier = verifier;
     }
 
     @Override
@@ -85,82 +84,44 @@ public class CommentJwtAuthInterceptor implements HandlerInterceptor {
         // ⚠️ Spring 侧默认**做不到**：静态资源处理器匹配 /**，未注册路径也拿到了 handler，
         //    mappedHandler != null ⇒ 拦截器照跑 ⇒ 404 被鉴权遮蔽成 401。
         //    判据用 `handler instanceof HandlerMethod`：精确对应 Go 那句「有没有匹配上处理方法」。
+        //
+        // ⚠️ 本条判据**只管「要不要拦」**；「要不要验签」是另一条判据
+        //    （{@code CommentJwtAuthPaths#isProtected}，由 Filter 使用）⇒ 两者刻意不同源。
         if (!(handler instanceof HandlerMethod)) {
             return true;
         }
 
-        String authHeader = request.getHeader("Authorization");
-        if (authHeader == null || authHeader.isEmpty()) {
-            log.warn("path {} with missing Authorization header", request.getRequestURI());
-            throw unauthorized();
+        String uri = request.getRequestURI();
+
+        // ================= 阶段 1：JWT 验签 =================
+        // 结果由 GoStyleJwtAuthFilter 在 3s 预算**之外**产出（本类只消费，不自己验签）。
+        CommentJwtVerificationResult result = (CommentJwtVerificationResult) request.getAttribute(
+                GoStyleJwtAuthFilter.VERIFICATION_ATTRIBUTE);
+        if (result == null) {
+            // 🔴 兜底：Filter 未命中（路径判据不一致 / Filter 未被注册）⇒ 就地验签。
+            //   行为与 DRIFT-USERAPI-009② 修复前完全一致（401 照常）⇒ **不会造成鉴权绕过**；
+            //   但验签落回 3s 预算**之内** ⇒ 该路径上 ② 未闭环 ⇒ 必须大声记日志。
+            log.warn("comment JWT 验签未命中 filter 缓存 ⇒ 就地验签（DRIFT-USERAPI-009② 在此路径未闭环）: {}", uri);
+            request.setAttribute(GoStyleJwtAuthFilter.VERIFICATION_SOURCE_ATTRIBUTE,
+                    GoStyleJwtAuthFilter.SOURCE_INLINE);
+            result = verifier.verify(request.getHeader("Authorization"), uri);
+        } else {
+            request.setAttribute(GoStyleJwtAuthFilter.VERIFICATION_SOURCE_ATTRIBUTE,
+                    GoStyleJwtAuthFilter.SOURCE_FILTER);
         }
 
-        // Go: golang-jwt/v4 request/oauth2.go stripBearerPrefixFromTokenString
-        //     —— 大小写不敏感、不匹配时原样返回整串。三条规则都在 BearerTokenExtractor 里。
-        String token = BearerTokenExtractor.tokenForSignatureVerification(authHeader);
-        if (token.isEmpty()) {
-            log.warn("path {} with empty Bearer token", request.getRequestURI());
-            throw unauthorized();
-        }
-
-        Claims claims;
-        try {
-            Jws<Claims> jws = Jwts.parser()
-                    .verifyWith(key)
-                    .build()
-                    .parseSignedClaims(token);
-            claims = jws.getPayload();
-        } catch (Throwable t) {
-            // 签名错 / 过期 / 格式错 —— Go 侧同样只走到 unauthorized()，不区分原因
-            log.warn("JWT verify failed on {} : {}", request.getRequestURI(), t.getMessage());
-            throw unauthorized();
-        }
-
-        // ⚠️⚠️ **iat 校验**：jjwt **不校验** iat，Go 的 jwt 库**校验** ⇒ 这里必须自己补。
-        //
-        // 【Go 出处】golang-jwt/jwt/v4@v4.5.2：
-        //   map_claims.go:124-141  MapClaims.Valid() → VerifyIssuedAt(now, false)
-        //   map_claims.go:63-85    VerifyIssuedAt：iat 缺失 ⇒ !req ⇒ 有效；
-        //                            iat 是数字 ⇒ verifyIat(iat, now)；
-        //                            iat 是**其它类型** ⇒ 直接 return false（**拒绝**）
-        //   claims.go:250-255      verifyIat：now >= iat 才有效（**无时钟偏移容忍**）
-        //
-        // 【为什么这一条很要紧】jjwt 只校验 exp / nbf，**不校验 iat**
-        // ⇒ 修复前 RAG 会接受「iat 在未来」的 token，而 Go 侧会拒绝
-        // ⇒ **RAG 比 Go 松**（安全面更宽）⇒ 与 AGENTS.md §3 的「差异默认判 RAG 错」一致 ⇒ 必须修。
-        //
-        // 【精度对齐】Go 比较的是**秒**（time.Unix(cmp,0) vs newNumericDateFromSeconds(iat)）；
-        //   jjwt 的 getIssuedAt() 返回毫秒精度的 Date，但 token 里的 iat 是整秒
-        //   ⇒ issuedAt.toInstant() 的毫秒部分恒为 0 ⇒ 与 Go 的秒级比较**等价**
-        //   （iat == 当前秒 ⇒ 两侧都判有效；iat == 当前秒+1 ⇒ 两侧都判无效）。
-        Date issuedAt = claims.getIssuedAt();
-        if (issuedAt != null && issuedAt.toInstant().isAfter(Instant.now())) {
-            // Go: MapClaims.Valid() → "Token used before issued" ⇒ authhandler 走 unauthorized()
-            log.warn("JWT issued-at in the future on {}", request.getRequestURI());
-            throw unauthorized();
+        // 验签失败 ⇒ **原样重抛**（异常对象由 Filter 产出 ⇒ @ExceptionHandler 仍管得到
+        // ⇒ 401 + **空 body** 的形状逐字不变）。
+        if (result.failed()) {
+            throw result.failure();
         }
 
         // Go: authhandler.go:63-72 遍历 claims，把非标准 claim（aud/exp/jti/iat/iss/nbf/sub 除外）
         //     逐个塞进 ctx。comment 域只有 helper.go 的 extractUserID 读 "userId"，
         //     其余 claim 无消费者，故这里只落这一个。
-        request.setAttribute(CLAIM_ATTRIBUTE, claims.get(CLAIM_ATTRIBUTE));
+        // ⚠️ 落的是 claim 的**原始对象**（不是 long）⇒ 解析成 int64 是业务层的事
+        //    （CommentApiSupport#userId，失败落 HTTP 200 + {code:1006}，**不是 401**）。
+        request.setAttribute(CLAIM_ATTRIBUTE, result.claims().get(CLAIM_ATTRIBUTE));
         return true;
-    }
-
-    /**
-     * 统一构造鉴权失败。
-     *
-     * <p>业务码用 {@code ERROR_TOKEN_RUNTIME}（<b>1006</b>）——
-     * comment 域与 message 域在这里<b>不一样</b>：message 域用 {@code ERROR_UNAUTHORIZED}（5004）。
-     * 1006 对应 Go {@code errmsg.go:56 ErrorTokenRuntime}，是 comment-api 6 个 logic
-     * 的 {@code extractUserID} 失败分支所引用的码。
-     *
-     * <p><b>body 不会被写出去</b> —— 见 {@code CommentGlobalExceptionHandler#handleAuthentication}
-     * 对 Go {@code authhandler.go:106 unauthorized()} 的逐字还原。
-     */
-    private static AuthenticationException unauthorized() {
-        return new AuthenticationException(
-                CommentErrorCode.ERROR_TOKEN_RUNTIME.getCode(),
-                CommentErrorMessages.getMsg(CommentErrorCode.ERROR_TOKEN_RUNTIME.getCode()));
     }
 }

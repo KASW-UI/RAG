@@ -76,8 +76,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 否则测试会「因为错误的原因而绿」。
  *
  * <h2>🧬 变异实测</h2>
- * <p>把拦截器里的 {@code iat} 校验整段删掉（= 修复前）
+ * <p>把验签器里的 {@code iat} 校验整段删掉（= 修复前）
  * ⇒ {@link #issuedAtInTheFutureIsRejected()} 变红 ⇒ 守门网不是假绿。
+ * <p>⚠️ 2026-10-27：{@code iat} 校验随验签一起搬进了
+ * {@code auth/CommentJwtSignatureVerifier}（DRIFT-USERAPI-009②）⇒ 变异点同步位移。
  */
 class CommentJwtTokenMatrixGateTest {
 
@@ -90,7 +92,13 @@ class CommentJwtTokenMatrixGateTest {
         com.rag.comment.comment.api.config.CommentApiProperties props =
                 new com.rag.comment.comment.api.config.CommentApiProperties();
         props.getUserAuth().setAccessSecret(SECRET);
-        interceptor = new CommentJwtAuthInterceptor(props);
+        // ⚠️ 2026-10-27（DRIFT-USERAPI-009② 落码）：验签已从拦截器搬进
+        //    `auth/CommentJwtSignatureVerifier`（由 `auth/GoStyleJwtAuthFilter` 在 3s 预算之外调用），
+        //    拦截器改成**消费**验签结果 ⇒ 构造器改为注入 verifier。
+        // ⇒ 本类直接 new 拦截器、**不经过 Filter** ⇒ 走的是拦截器的**兜底（inline）分支**
+        //    ⇒ 顺带把「兜底路径」也纳入这张 token 矩阵的覆盖（不是缺陷，是额外收益）。
+        interceptor = new CommentJwtAuthInterceptor(
+                new com.rag.comment.comment.api.auth.CommentJwtSignatureVerifier(props));
     }
 
     // ====================================================================================

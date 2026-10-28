@@ -152,7 +152,7 @@
 
 ---
 
-## 3. OBSERVABLE DIFFERENCE（**9 条** —— 行为等价，但实现路径 / 部署形态不同）
+## 3. OBSERVABLE DIFFERENCE（**10 条** —— 行为等价，但实现路径 / 部署形态不同）
 
 | # | 判定点 | Go 侧事实 | RAG 侧现状 | 性质 |
 |---|---|---|---|---|
@@ -165,6 +165,8 @@
 | **D7** | **回填 Redis 失败**时的读路径 | `comment_subject_cache.go:59` `_ = c.SetSubjectCache(...)` ⇒ **显式忽略错误** ⇒ Redis 挂掉时读路径**照常返回 DB 回源的结果** | **修复前** `CommentCacheService` 的 `writeSubjectCache` 抛 `IllegalStateException` ⇒ 整个 `getSubjectWithCache` 失败 ⇒ **对外 500** |
 | **D8** | 🔴 **出向 gRPC 调用不继承请求 deadline**（= global **E65**，2026-10-26 新增） | `subject_fallback.go:17` `articleRPC.GetArticle(ctx, …)` ⇒ **吃 `ctx`** ⇒ deadline 到点**立刻中止** | `ArticleRpcClient.java:54/65` = **裸 stub** ⇒ **零期限** ⇒ deadline 到点**照跑不误** | 🔴 **待修法拍板 + 待共享层**（详见下方 **§3.5**） |
 | **D9** | 🔴 **Redis 调用不感知 deadline**（= global **E66**，2026-10-26 新增） | `internal/cache/*.go` **全部**带 `ctx`（`rdb.Get/Set/Scan`）⇒ deadline 到点缓存操作**立即中止** | `CommentCacheService.java` 全部 `redis.opsForValue()…`（**含写** `:279`/`:331`/`:433`/`:528` 的 `set`、`:619` 的 `delete`）**零 deadline 检查** ⇒ **照写不误** | 🔴 **待共享层**（详见下方 **§3.6**） | ✅ **已修**（2026-10-24，详见下方 §3.4） |
+
+| **D10** | 🔴 **fact 投递链路的 span 属性 = RAG 侧独有的「无效代码」**（2026-10-27 新增 · G4 通报） | `service/comment/rpc/internal/model/fact_delivery.go` 里 `span`/`Span`/`trace`/`Trace` **零命中** ⇒ Go 侧**根本不用 span** | 原实现 `CommentFactDeliveryService.java:148` `Span.current()` ＋ `:193-194` 写 `comment.fact.event_id` / `comment.fact.aggregate_version` ⇒ ⚠️ **唯一调用方是 `bootstrap/CommentFactDispatchScheduler.java:50`（调度线程）** ⇒ `Span.current()` 返回 **invalid span** ⇒ `if (span != null)` **恒真**但 `setAttribute` **静默丢弃** | 🟡 **行为层两侧一致**（Go 也没有这些属性 ⇒ 可观测行为无差）⇒ ⇒ **不是语义漂移，是 RAG 侧独有的无效代码** ⇒ **2026-10-27 已删**（连 `import io.opentelemetry.api.trace.Span`）＋ 原地留注记防复活；⚠️ **本笔提交不含代码**（守门未跑 ⇒ 未验证 ⇒ 不进 PR）⇒ **待窗口跑绿后单独提交** |
 
 ### 3.1 🟢 D1 撤销：Go 的 `default:` 标签会**吃掉** GORM 的 `autoCreateTime`
 
@@ -273,6 +275,62 @@
 | **证据强度** | ⚠️ **源码级**（全量扫描）—— global 已如实标注「**未经双侧活体验证**」⇒ **本域也未做活体验证**（Redis 侧要复现「deadline 到点后写不再发生」，需要在真 Redis 上掐断连接/观察写计数） |
 | **修法方向（**待 Jason 拍板，本轮未实施**）** | global 的判断：**共同根因只有一个 —— RAG 没有 ctx 传播** ⇒ 共享层补一个**统一的「请求期限载体」**（现在两个互不相通的载体才是病根）⇒ Redis 调用点也能查到期限。<br>⇒ **本域那半**：Redis 调用点前查一次期限 ⇒ **依赖共享层先有 Redis 可查的载体** ⇒ **共享层未落地前，本域无法实施** ⇒ **本域不擅自加临时机制**（那会引入第三种载体，与「统一载体」方向相反） |
 | **⚠️ 本域现状登记** | 🟡 **未修** —— 与 D8 不同，本条**没有任何一侧能在本域单方面闭环** ⇒ 完整闭环**必须**等 global 的共享层那半 |
+
+---
+
+
+### 3.7 🔴 D10：fact 投递链路的 span 属性 = RAG 侧独有的**无效代码**（**不是语义漂移**）
+
+**通报来源**：G4 在其 **FB-04**（让 gRPC 业务 handler 执行期能拿到当前 server span）之后查出，**报给 G3**（G3 写权，G4 不代改）。
+⚠️ **一条线索**：FB-04 修好后「**有 span 的线程**」变多了 ⇒ ⇒ 原本「到处都没 span ⇒ 没人发现」变成
+「**handler 有、调度线程没有** ⇒ 差异显形」⇒ ⇒ **这条很可能是被 FB-04 照出来的，不是新引入的**。
+
+**核验（四条逐条实测，不采信转述）**
+
+> ⚠️ **本节含一处早期误判的订正**（2026-10-27，**未提交过 ⇒ 直接改正，不是事后翻案**）：
+> 最初写的是「Go 侧 fact 投递链路**根本不用 span**」⇒ **不准确** ⇒ Go 侧**有**这个 span，
+> 只是建在**共享层**且**不带属性** ⇒ ⇒ **结论不变**（那两个属性是 RAG 侧独有的、且写不进去），
+> **但依据整条换掉** ⇒ ⇒ 教训见坑档 [`PIT-COMMENT-RPC-14`](../../Pitfalls/comment/rpc.md)。
+
+| 判据 | 实测 |
+|---|---|
+| Go 侧用不用 span | ⚠️ **不是「不用」** —— Go 侧**有** fact 投递 span，但**建在共享层**且**不带属性**：`service/common/communityfact/process.go:26` `otel.Tracer("sea.rtw.communityfact").Start(ctx, "community.fact_delivery.dispatch")`（全文 69 行、**零** `SetAttributes`）⇒ ⇒ 域内 `service/comment/rpc/internal/model/` 整包（**10** 个非测试文件）**零** span 命中 ⇒ ⇒ Go 的 `DispatchFactOnce`（`fact_delivery.go:53`）**从不写 span 属性** ⇒ ⇒ **那两个属性确实是 RAG 侧独有的** |
+| RAG 侧对应的 span 在哪 | **共享层** `service/common/.../communityfact/Dispatcher.java:186`（**同名** `community.fact_delivery.dispatch` ＋ **同 tracer** `sea.rtw.communityfact`）⇒ ⇒ **span 拓扑两侧已对齐**，差的只是这两个属性 |
+| 为什么 RAG 侧也写不进去 | 共享层把 span 放进 **Context**（`Dispatcher.java:189` `ctx.with(span)`）而**从不 `makeCurrent`**（该文件**零** `makeCurrent`）＋ `dispatchFactOnce` 跑在**另一个线程**（`:172-176` `communityfact-dispatch` 单线程池、`:190` `supplyAsync`）⇒ ⇒ OTel 默认 `ThreadLocalContextStorage` 用的是**普通** `ThreadLocal`（**不继承**）⇒ ⇒ 投递线程上 `Span.current()` 恒为 **invalid span**（**非 null**）⇒ ⇒ `if (span != null)` **恒真** ⇒ ⇒ `setAttribute` 落到 invalid span ⇒ **静默丢弃**（otel-java 的 invalid span 是 no-op） |
+| RAG 侧谁在调 | 唯一调用方 = `bootstrap/CommentFactDispatchScheduler.java:95`（把 `deliveryService::dispatchOnce` 交给共享层 `Dispatcher.runAsync`）⇒ ⇒ **必走**上面那条 `communityfact-dispatch` 线程 ⇒ ⇒ 上面那条推理对本域**恒成立**（无旁路） |
+
+**⇒ 定性（重要，别写成「语义漂移」）**：**行为层两侧一致**（Go 侧**也没有**这两个属性 ⇒ 可观测行为无差）⇒ ⇒
+**这不是语义漂移**，是 **RAG 侧独有的「看起来在工作、实际永远不生效」的代码** ⇒ ⇒
+属 AGENTS.md §3.3.3「注解 / 写法存在 ≠ 机制生效」那一族。
+
+**修法（2026-10-27 已改）**：删**改动前** `CommentFactDeliveryService.java:148` 的 `Span span = Span.current();`
+＋ `:192` 的 `if (span != null) {` ＋ `:193-194` 的两个 `span.setAttribute(…)` ＋ 随之失效的 `:6` `import io.opentelemetry.api.trace.Span`
+⇒ **零业务行为变化**（那两个属性本来就写不进去）⇒ **信息不丢**（`:146-147` 的 `logger.info` 已打 `event_id` / `aggregate_version`）
+⇒ **原地留注记**（写明「Go 侧那两属性不存在」＋「RAG 侧为什么也写不进去」）⇒ **防复活**。
+
+**守门（3 条 · 加进 `CommentRpcGoSemanticsGateTest`，与该类既有装置同跑）**
+
+| # | 断言 | 作用 |
+|---|---|---|
+| ① **装置活性** | 同线程挂的真 span **能**收到人为写的属性 | ⇒ **排除平凡通过**（否则 ② 会因为「根本没有 span」而恒绿） |
+| ② **对齐** | 把一个**真 span 挂在投递外面**（`makeCurrent` 作用域内跑 `dispatchOnce`）⇒ 断言那个 span 上**无** `comment.fact.*` 属性 | ⇒ **牙齿检查**：若实现又写 `Span.current().setAttribute` ⇒ 该 span 会带上属性 ⇒ **必红** ⇒ 「**改回去必红、改完必绿**」 |
+| ③ **根因** | 不挂作用域时 `Span.current().getSpanContext().isValid() == false` | ⇒ 钉住「原实现写不进去」这个根因 |
+
+⚠️ **② 的前提（已核，写在这里防后人误改）**：`dispatchOnce` **自己不开 span**（**改动前**该类 `Span` 引用仅 2 处：取值 ＋ 写属性），
+且它收到的 `Context.root()` 只是**参数**、**不会** `makeCurrent` ⇒ ⇒ `Span.current()` 仍取决于**线程作用域**。
+
+**范式出处（照抄，不发明第三种写法）**：OTel 装配层 = 同域 `CommentSpanWiringTest`（自建 `CollectingExporter`，
+**不引 `opentelemetry-sdk-testing`** ⇒ **零新依赖**）· 投递装置 = 本类既有装置（真 PG ＋ Flyway ＋ 真 MyBatis ＋ fake sender）。
+
+**🔴 当前状态（2026-10-27 已跑绿 · 核对日期 2026-10-27）**：代码 + 守门**已改且已验证** ⇒
+
+| 项 | 值 |
+|---|---|
+| **落码 commit** | **`deeeb8d`**（代码 + 守门**同一笔**；文档另起一笔）⇒ ⇒ 台账里的行号均指**改动前**的行号（`:6` / `:148` / `:192-194`） |
+| 门禁跑通 | `mvn -o -pl service/comment/comment-rpc -am test -Dtest=CommentRpcGoSemanticsGateTest` ⇒ **EXIT=0** · **14** 条（既有 **11** ＋ 新增 **3**）· 0 failures / 0 errors / 0 skipped ⇒ ⇒ surefire 报告里 **3 条新用例名逐条在列**（⇒ 不是「被过滤掉的绿」） |
+| **变异验证** | 把 `Span span = Span.current();`（原 `:148`）＋ `if (span != null) { … }`（原 `:192-194`）**原样加回**（行号与改动前**逐条对齐**）⇒ ⇒ **14 条里恰好 1 条红**：`factDeliveryDoesNotWriteSpanAttributes`；另两条（① 装置活性、③ 根因）**仍绿** ⇒ ⇒ **精确变红**（不是全红 ⇒ 判据没被别的因素带偏）⇒ ⇒ 失败断言原文点名 `comment.fact.event_id` / `comment.fact.aggregate_version` ⇒ ⇒ **「改回去必红、改完必绿」成立** ⇒ ⇒ 回滚后本域回归恢复全绿 |
+| 本域回归 | `mvn -o --fail-at-end -pl service/comment/comment-rpc,service/comment/comment-api,service/comment/comment-common -am test` ⇒ **BUILD SUCCESS** · **198** 条（common **27** / api **52** / rpc **119**）· **0 failures / 0 errors / 0 skipped** ⇒ ⇒ 两口径（模块汇总行 ≡ 逐类明细行）**逐模块一致** ⇒ ⚠️ rpc **119** = 旧 **116** ＋ 本轮新增 **3** |
+| 零行为变化 | 删掉的那几行**本来就写不进去**（投递线程上 `Span.current()` 恒为 invalid span）⇒ ⇒ 生产行为**零变化** ⇒ ⇒ 本轮净变化 = 删 **6** 行死代码（含 1 个 import）+ 增 **3** 条测试 |
 
 ---
 
@@ -392,6 +450,28 @@
    ⇒ harness 改用 `Offset: first` + **每轮删 topic**。
 2. **Go 侧 `consumers: 8` 但只发 1 条**：`kq` 的 `startConsumers` 用 `Processors`、`startProducers` 用 `Consumers` ⇒ 8 个消费者会**抢同一条**消息（只有一条时无所谓）。
 
+### 4.6.1-bis 📌 **本节已「交出」给 G1 lane**（2026-10-28）—— 交的是**隔离配方**，不是只有结果
+
+**为什么交**：G1 lane 的 `DRIFT-USERRPC-V-014` / `DRIFT-ARPC-013` 两条要升 **L4**，按其口径「**没有两侧同时跑的探针就不写 L4**」
+⇒ ⇒ 它需要的是**「怎么把两侧同时跑起来」的配方** ⇒ ⇒ 本节 §4.6.1 的隔离表正是那份配方。
+
+**交出的内容（要点，供 G1 复用）**：
+| 隔离维度 | 做法 | 不这么做会怎样 |
+|---|---|---|
+| 端口 | Go 侧 `19001` / `18888`、RAG 侧 `59001` / `58888` | 端口冲突 ⇒ 起不来 |
+| 数据库 | 同一 PG 容器、**两个库**（`go_comment` / `rag_comment`）| 共库 ⇒ 数据互相污染 ⇒ 假差异 |
+| Kafka | **两套 topic + 两套消费组**（`-go` / `-rag` 后缀）| 共用 topic ⇒ **互相消费对方的事实** ⇒ 全是假差异 |
+| Redis | **两个 db**（Go `db0` / RAG `db1`）| 两侧 key 格式**逐字一致** ⇒ 不分库必然串味 |
+| 下游 RPC | 两侧**同一个死端点** `127.0.0.1:19999` | 指向不同端点 ⇒ 超时路径不可比 ⇒ 假差异 |
+| 服务发现 | RAG 侧关 Nacos 注册（`SPRING_CLOUD_NACOS_DISCOVERY_REGISTER_ENABLED=false`）；Go 侧 yaml 里**整块删掉 etcd** | 本机无 Nacos / etcd ⇒ 启动卡住 |
+| 消息位点 | kafka-go 的 `Offset: last` 会**跳过消息** ⇒ harness 改 `Offset: first` ＋ **每轮删 topic** | 消费组无成员时消息被跳过 ⇒ 测了个空 |
+
+⚠️ **一条纪律**：这 7 条里**任何一条**没做到 ⇒ ⇒ **差异里会混进「串味」** ⇒ ⇒ 得到的不是「两侧差异」而是「两侧环境差异」⇒ ⇒ **对拍结论作废**。
+
+**🔴 断连活体对拍要「约窗口」吗？—— 本域**不需要**（2026-10-28 澄清）**
+- 本域的断连对拍（[`hot/rpc.md` §十二.9 规格](../hot/rpc.md) 与本文档 §十二）用的是**每组各自起一个 `redis:7-alpine` 的一次性容器**（`docker rm -f` 收尾）⇒ ⇒ **不碰 `difftest5k-redis`** ⇒ ⇒ **不动 G1 域 4 个进程在用的共享容器** ⇒ ⇒ **无需约窗口**。
+- ⇒ 只有当探针**改用**共享容器时，才需要「谁断 / 多久 / 谁恢复」的约定 ⇒ ⇒ **本域的配方里没有这一条**。
+
 ### 4.6.2 对拍抓出来的 **4 个真实缺陷**（单测全绿时测不出来）
 
 | # | 缺陷 | 症状 | 根因 | 修法 | 守门网 |
@@ -500,3 +580,555 @@
 | [`docs/DRIFT/comment/common.md`](./common.md) | `comment-common` 的独立台账 |
 | [`docs/DRIFT/comment/proto.md`](./proto.md) | `comment-proto` 的独立台账 |
 | [`docs/DRIFT/_cross/component-coverage-matrix.md`](../_cross/component-coverage-matrix.md) | 38 组件覆盖矩阵 —— **共享文件，合并后由主会话统一更新**（本工作树不碰） |
+---
+
+## 7. 🔴 Redis **TCP 连接超时**漂移（Go `DialTimeout` **5s** vs Lettuce 默认 **10s**）—— 2026-10-27 已修
+
+> ℹ️ **2026-10-27 编号订正**：本节原标题含 **`D10`**，与 §3 摘要表的 **`D10`**（fact 投递链路的无效 span 属性）**撞号** ⇒ **已去掉**。
+> ⇒ **本条不占 `D` 编号**：§3 的 `D1`~`D10` 体系 = 「**OBSERVABLE DIFFERENCE（行为等价，但实现路径 / 部署形态不同）**」；
+> 而本条是**真漂移**（连接超时 **10s** vs Go **5s** ⇒ 可观察的时序差异）⇒ **不属该体系** ⇒ 故留在 §7 自成一节。
+
+### 7.1 漂移事实（修前）
+
+| 项 | Go（真源，唯一基准） | RAG 修前 | RAG 修后 |
+|---|---|---|---|
+| **TCP 连接**超时<br>（`DialTimeout` / `SocketOptions.connectTimeout`） | **5s** | 🔴 **10s** | ✅ **5s** |
+| 命令超时<br>（`Read/WriteTimeout` / `commandTimeout`） | **3s** | ✅ 3s | ✅ 3s |
+
+**Go 出处（消费点，不是声明点）**：
+
+```
+service/comment/rpc/internal/cache/redis.go:17-19
+    rdb := redis.NewClient(&redis.Options{Addr: Host})   ← **只设了 Addr**
+  ⇒ DialTimeout 未设
+  → go-redis v9.20.0 options.go:338-340
+    if opt.DialTimeout == 0 { opt.DialTimeout = 5 * time.Second }
+    ⇒ DialTimeout = **5s**
+    （ReadTimeout/WriteTimeout 同理走 options.go:364-379 ⇒ 3s）
+```
+
+**RAG 侧为什么「不写就错」**（Spring Boot **4.0.8**，L3 字节码实测）：
+
+| 事实 | 证据 |
+|---|---|
+| `spring.data.redis.connect-timeout` **非空时**才设 `SocketOptions.connectTimeout` | `LettuceConnectionConfiguration.createClientOptions` 字节码 offset 9→31：`getConnectTimeout()` → `SocketOptions.builder().connectTimeout(...)` → `ClientOptions.Builder.socketOptions(...)` |
+| **不写 ⇒ 整段不设** ⇒ 落回 Lettuce 默认 | lettuce-core 6.8.2 `SocketOptions.DEFAULT_CONNECT_TIMEOUT = 10`（秒） |
+| `spring.data.redis.timeout` 只喂**命令**超时，**不再**兼管连接超时 | 同一自动配置里 `getTimeout()` → `LettuceClientConfigurationBuilder.commandTimeout(...)` ⇒ **Boot 2/3 才是同一个属性** |
+| 该属性确实存在（不是臆造的名字） | `spring-boot-data-redis-4.0.8.jar` 的 `spring-configuration-metadata.json`：`spring.data.redis.connect-timeout`（defaultValue = None） |
+
+⇒ **修前漂移 = 2 倍**。
+
+> 🔴 **本条在 comment-rpc 的可观察性比 api 域强**：comment-rpc 是**纯 gRPC 进程**
+> （**没有 HTTP 预算兜底**）⇒ 连接超时 10s vs 5s 会**直接**体现在 gRPC 调用耗时上。
+
+### 7.2 修法与守门
+
+| 项 | 内容 |
+|---|---|
+| 修法 | `application.yml` 的 `spring.data.redis` 下显式加 `connect-timeout: 5s`（**域内文件 ⇒ 域侧自修**，不依赖共享层） |
+| 为什么共享层不参与 | `service/common` 的 `GoStyleRedisClientAutoConfiguration` **只**设 `disconnectedBehavior(REJECT_COMMANDS)`、**不碰** `socketOptions` / `timeoutOptions`（其 javadoc「为什么不动命令超时」段已写明）⇒ 连接超时**完全由本域 yml 决定** ⇒ **不装副本、不重复收编**<br>🔴 **订正（2026-10-27 第十八轮 · 合并后）**：合并前这条是**跨树指针**（本树 `find service/common/src/main/java -iname "*redis*"` ⇒ 零命中）⇒ ⇒ 合并后**已在本树** ⇒ ⇒ **树内重验成立**：唯一的 builder 调用 = `disconnectedBehavior(REJECT_COMMANDS)`（`:131-132`）⇒ **不碰 `socketOptions` / `timeoutOptions`** ⇒ ⇒ **结论不变**（从跨树推断升级为树内事实） |
+| 守门 | 新增 1 个契约守门（**1 例**）—— 走**整条真实链路**：`ConfigDataApplicationContextInitializer` 加载本模块**真实的** `application.yml` → Boot **真实** `DataRedisAutoConfiguration`（它 `@Import` 了 `LettuceConnectionConfiguration`）→ 真 `LettuceConnectionFactory` → 断言**消费点** `getClientConfiguration().getClientOptions().get().getSocketOptions().getConnectTimeout()` 与 `getClientConfiguration().getCommandTimeout()` |
+| 为什么断言「消费点」而不是「yml 里有这个键」 | 后者挡不住「属性名写错 ⇒ Spring 静默用默认值」（§3.3.1） |
+
+### 🧪 变异验证（防假绿）
+
+| 步骤 | 结果 |
+|---|---|
+| 本轮跑守门 | ✅ **1/1 绿** |
+| **变异**：删掉 `connect-timeout: 5s` 一行（其余不动） | 🔴 **精确转红**：报「**expected: 5S but was: 10S**」⇒ 守门**真的**在读 Lettuce 的 socket 连接超时，不是恒绿 |
+| 还原 | ✅ **1/1 绿** · `sha256` 与变异前备份**逐字一致** |
+| 整域回归 | ✅ **四域 12 模块 = 919 条**（article-common 15 / article-api 99 / article-rpc 155 / comment-common 27 / comment-api 52 / comment-rpc 116 / favorite-common 29 / favorite-api 105 / favorite-rpc 114 / hot-common 14 / hot-api 96 / hot-rpc 97）⇒ **0 failures / 0 errors / 4 skipped** · 9:44 min · BUILD SUCCESS<br>口径：`mvn -o --fail-at-end -pl <12 模块> -am test`；基线 `eb4d1d2` + 本轮改动；核对日期 **2026-10-27**；两口径（模块汇总行求和 ≡ 逐类明细行求和）**逐模块一致** |
+| 整域回归（**本轮 · D10 落码后 · 2026-10-27**） | ✅ **四域 12 模块 = 922 条**（article-common 15 / article-api 99 / article-rpc 155 / comment-common 27 / comment-api 52 / **comment-rpc 119**（= 旧 116 ＋ D10 新增 3） / favorite-common 29 / favorite-api 105（skipped 1） / favorite-rpc 114（skipped 3） / hot-common 14 / hot-api 96 / hot-rpc 97）⇒ **0 failures / 0 errors / 4 skipped** · **10:17 min** · BUILD SUCCESS<br>口径：`mvn -o --fail-at-end -pl <12 模块> -am test`；基线 `deeeb8d` + 本轮文档改动；核对日期 **2026-10-27**；两口径（模块汇总行 ≡ 逐类明细行）**逐模块一致**<br>⚠️ **上一行的 919 保留原值不改写**（那是基线 `eb4d1d2` 的口径）⇒ ⇒ **两个数不在同一条基线上 ⇒ 不可相加**；本轮除 comment-rpc 外**其余 11 个模块逐条不变** ⇒ ⇒ 差额 **+3 全部来自 comment-rpc**（D10 新增 3 条守门，commit `deeeb8d`） |
+
+**证据强度**：L3 静态实测（Boot 4.0.8 **字节码** + Lettuce 6.8.2 常量 + go-redis v9.20.0 源码）
+＋ L4 **真容器**装配断言（`ApplicationContextRunner` + Boot 真实 `DataRedisAutoConfiguration`）。
+
+> ⚠️ 本域 yml 开了 `spring.data.redis.lettuce.pool.enabled: true` ⇒ pom **必须**引
+> `commons-pool2`（本域 pom 已显式声明并写了理由）⇒ 守门起真容器时不会踩
+> `NoClassDefFoundError: GenericObjectPoolConfig`。
+
+---
+
+## 8. 🧹 U+FFFD 清理（2026-10-27）—— **1 处真损坏**
+
+| 文件:行 | 损坏形态 | 重建 | 依据 |
+|---|---|---|---|
+| `service/CommentAuditPublisher.java:19` | `把它当` + **3×U+FFFD** + `<b>会失败</b>` | `把它当作<b>会失败</b>` | 3×U+FFFD = **1 个汉字**（UTF-8 3 字节逐字节替换）；同句语义「把它当作『会失败』的操作处理」是唯一自然读法；**只改注释**，不改行为 |
+
+⇒ 重建后本域 `grep -rln $'\xef\xbf\xbd'` **零命中**。
+
+---
+
+## 9. 🧹 启动守门 flake 修法（2026-10-27 · G4 登记）
+
+### 9.1 症状
+
+`CommentRpcRuntimeBootGateTest#realFatJarProcessBootsAndListens` 在 G4 的全量回归（2448 条）里**偶发红 1 条**。
+
+### 9.2 根因（**不是启动失败**）
+
+原逻辑：真进程 fat jar 起来 → `tcpProbe` 端口一连上就**立刻** `destroyForcibly()` ⇒
+**drain 线程还没读到**「gRPC Server started」那行日志 ⇒ 该断言**必然偶发红**。
+
+**辨识度**（为什么判定它是竞态而不是启动失败）：端口已监听 + 无 `NoClassDefFoundError`
+⇒ 进程**真的起来了** ⇒ 红的只是「断言与日志读取的竞态」。
+
+### 9.3 修法（对齐 G4 建议方向）
+
+| 步骤 | 内容 |
+|---|---|
+| ① 收摊前**先等日志行出现** | 轮询「gRPC Server started」标志行，上限 30s、间隔 200ms |
+| ② sink 改**线程安全** | `StringBuilder` → **`StringBuffer`**（sink 跨线程读写） |
+| ③ 建 happens-before | `drain.join(10s)` |
+
+### 9.4 验证
+
+| 项 | 结果 |
+|---|---|
+| 定向跑 | ✅ `CommentRpcRuntimeBootGateTest` **2/2 绿** |
+| 守门加固（**2026-10-27 · 照 G2 同款修复 `f57ff38` 的增强**） | 🟢 **标志串提为常量** `GRPC_STARTED_MARKER` ⇒ 消除「**等待循环**」（`:132`）与「**断言**」（`:145`）两处**各写字面量**的漂移隐患 ⇒ 若任一处被改而另一处没改 ⇒ 要么白等满 30s 上限后莫名失败，要么断言**平凡通过**（守门失效）⇒ **两处共用一个定义** ⇒ 不可能漂移。<br>**验证**：提取后 `CommentRpcRuntimeBootGateTest` **1/1 绿**（7.005s）· **变异 1/1 精确变红**（把常量值改成假串 ⇒ 等满 30s 上限 ⇒ 红在 `:159` 的**目标断言**、失败消息点名 `MUTANT` 且**带真实日志尾部** ⇒ 证明「进程真起来了、红的是标志串不匹配」⇒ **非假绿**）· 回滚后**字节一致**（md5 相同 ⇒ 与绿版同一份内容 ⇒ 先前那次绿即「还原后」的证明） |
+| 整域回归 | ✅ **comment-rpc 116 条**（skipped 0）全绿 ⇒ **四域 12 模块合计 919 条**（0 failures / 0 errors / 4 skipped · 9:44 min · BUILD SUCCESS · 基线 `eb4d1d2` + 本轮改动 · 核对日期 2026-10-27 · 两口径逐模块一致） |
+| 整域回归（**订正注记 · 2026-10-27**） | ⚠️ **上一行的 116 / 919 是基线 `eb4d1d2` 的口径，保留原值不改写** ⇒ ⇒ 本轮（D10 落码后）的最新口径 = **comment-rpc 119 条** ＋ **四域合计 922 条**（见本文件 §3.7 与上面那行「整域回归」）⇒ ⇒ **两个数不在同一条基线上 ⇒ 不可相加** |
+| 同款缺陷在本域另一组件 | 🔴 `ArticleRpcRuntimeBootGateTest` **同款** ⇒ 已在 **article 域**同批修（属 G3 写权面） |
+| 同款缺陷在 G2 域 | 🔴 `like/like-rpc/…/LikeRpcRuntimeBootGateTest.java` **同款** ⇒ **属 G2 写权面** ⇒ 已回报 G2，本域**不越权改**<br>✅ **订正（2026-10-27）**：G2 已在本域修完（commit `f57ff38`）⇒ 修法三步同款 ＋ **一处增强**（标志串提为常量 `GRPC_STARTED_MARKER`，消除「等待循环/断言两处字面量」的漂移隐患）⇒ ⇒ **本域的两个同款守门已照该增强加固**（见上一行） |
+---
+
+### 附录 · 📌 G4 侧共享层基线与影响面订正（2026-10-27 · 来自 G4 第七次全量回归）
+
+**① G4 第七次全量回归口径**（**共享层基线** ⇒ 本域下次合并 G4 分支时的对照物）：
+
+| 项 | 值 |
+|---|---|
+| 命令 | `mvn -B clean verify`（**全量**，不是 `-pl` 子集） |
+| 结果 | **BUILD SUCCESS / MVN_EXIT=0** |
+| 规模 | **52 模块 · 2457 条**（29 个有测试的模块**逐模块求和**，不按行序 tail） |
+| 计数 | **failures 0 · errors 0 · skipped 4** |
+| 耗时 | **20:28 min** |
+| 相对上次 | 第五次 2448 ⇒ **+9**（本轮新增 3×3 条守门：关闭路径 / 遮蔽契约 / 池自愈） |
+| 双侧探针 | `run-parity.sh` **EXIT=0**（56 例：一致 54 / 不一致 0 / 已签字偏离 2）＋ `run-rpc-timeout-parity.sh` **EXIT=0**（3 例） |
+| 三门禁 | `wave-lane-ownership` / `wave-role-model` / `wave-coupling` ⇒ **0/0/0** |
+| 来源 | G4 commit `5564c27`（基线含单 4 的 `a1a2e05`） |
+
+**② 🟡 影响面订正注记（**保留原值不改写** + 加注记）**：
+G4 在共享层 `docs/DRIFT/global/vs-common.md` §2 的 **A2 行**逐个 rpc **自核**（`@GrpcClient` 计数 ＋
+**六种出向方式**交叉核：`newBlockingStub` / `newFutureStub` / `newStub` / `ManagedChannel` /
+`RestTemplate` / `WebClient`）后给出**全局**口径：
+
+| 口径 | 内容 |
+|---|---|
+| **全局**（G4 自核） | **可观测 6 个**（article-rpc · comment-rpc · favorite-rpc · like-rpc · message-rpc · follow-rpc）＋ **N/A 4 个**（**hot-rpc** · task-rpc · user-rpc · admin-rpc）⇒ **6/10 可观测 ＋ 4/10 N/A** |
+| **本域面**（G3 自核） | **3/4**（article-rpc · comment-rpc · favorite-rpc 有出向面；**hot-rpc = 0 ⇒ N/A**） |
+
+⇒ ⚠️ **本域面 ≠ 全局面**：**「3/4」只覆盖本域四个 rpc 组件** ⇒ **不得被读成全局口径**。
+⇒ **可复用判据**：「**共享层缺位**」是**全域事实**，「**本域受害**」是**逐域事实** ⇒
+写影响面必须**逐域实测**（并用**多种检索方式交叉核**），且**不得把域内结论外推**。
+
+**③ G4-4 反馈单已闭合**（本域 2026-10-27 登记的共享层 U+FFFD）：
+G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）⇒ 纯注释，零行为变化」
+⇒ **本域的反馈单已落、零行为变化** ⇒ **无需再跟进**。
+---
+
+### 附录 · 📌 共享层静态池潜伏缺陷 ⇒ **「前五轮全量都绿」不等于「本来就对」**（2026-10-27 · G4 通报）
+
+- **第六次全量**里 `article-rpc` 的 2 条失败，根因在**共享层**：`RpcInterceptor` / `HttpMiddleware` 的三个**进程级静态池**是 `static final` ⇒ `shutdown()` **永久终止** ⇒ surefire **一模块一 JVM** ⇒ **模块内多个 Spring 上下文** ⇒ 前一个上下文关闭后，后续上下文里 `schedule()/submit()` **被拒** ⇒ 拦截器返回 **INTERNAL** 而不是 **DEADLINE_EXCEEDED** ⇒ ⇒ **G4 已修**（`AtomicReference` + CAS 自旋，**落 `service/common` ⇒ 本域零改动**）。
+- 🔴 **为什么前五轮全量都绿**：修 G1 派单 #8 之前，纯 gRPC 进程的 `@PreDestroy` **先抛 `NoClassDefFoundError`** ⇒ `shutdown()` **根本没机会执行** ⇒ 静态池**侥幸存活** ⇒ ⇒ **「绿」是因为那条路径根本没被执行过**。
+- ⇒ **本域（comment-rpc，同样用这三个共享池）的历史全量结论要按这条重新读**：不是「本来就对」，而是「**缺陷把保护罩挡住了**」⇒ ⇒ **教训**：拿到「一直绿」的结论时多问一句「**这条路径在本轮之前真的被执行过吗**」；**归属判定看根因落在哪一层，不看失败用例在哪个域**。
+---
+
+### 附录 · 📌 待验：rpc 侧 Redis 断连的**对外后果与 api 侧不同**（2026-10-27 · G1 通报 ＋ 本域自核）
+
+- **G1 的形态**（users 域已修并立了 2 例守门）：rpc 侧 Redis 断连 ⇒ 命令**排队到 `commandTimeout: 3s`**
+  ≫ rpc 组件的 `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ 客户端看到 **1015「服务繁忙」**；
+  而 Go 是**快速失败** ⇒ `INTERNAL「注销失败,Redis写入异常」` ⇒ ⇒ **api 侧与 rpc 侧后果不同**（503 vs RPC 撞超时）
+  ⇒ ⇒ **共享层收编时两侧要分别验，别只验 api 侧**。
+- **本域自核 ⇒ 同款形态成立**：
+  - **comment-rpc**：Redis 调用在 **gRPC 请求路径**（`CommentCacheService` 的 `opsForValue()` 读写）⇒ 断连 ⇒ 排队到 3s
+    > `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ 与 Go 的快速失败**后果不同** ⇒ 🔴 **待验**。
+  - **hot-rpc**：`get_hot_articles_logic.go:43` 的 `ZRevRangeWithScores` 在请求路径 ⇒ 同款 ⇒ 🔴 **待验**。
+  - ⚠️ **`mqs/hot_handler.go` 的 MQ 消费路径不属这一族**（ctx = Kafka 消费 ctx / `context.Background()`）⇒ **不修**。
+- **修法落点 = 共享层**（`service/common/.../redis/GoStyleRedisClientAutoConfiguration` 的 `REJECT_COMMANDS`）
+  ⇒ ⇒ **本域不装副本**（域内副本会**遮蔽**共享层那份 ⇒ **收编根本没发生**）
+  ⇒ ⇒ **等 G4 合进我树后**，按 G2 的配方做**断连活体对拍**（先连上 → 静默等待且**期间不发命令** → 外部 `docker stop`
+  ⇒ 量第一条命令挂多久）⇒ **本域零域侧改动**；⚠️ 但**「两侧后果分别验」要落进验的清单**，不能只验 api 侧。
+  - 🔴 **订正（2026-10-27 第十八轮 · 合并后）**：**「等 G4 合进我树后」这个前置已解除** —— merge `e18fd52` 把 `align/g4-service-common` @ `cd893d1` 合入 ⇒ ⇒ 共享层的 `GoStyleRedisClientAutoConfiguration` **已在本树** ⇒ ⇒ **「共享层那份必被创建」现在可以在树内验**（我四域仍是**零域侧副本** ⇒ **无遮蔽** ⇒ 收编在技术上成立）⇒ ⇒ ⚠️ **但活体对拍本身仍被机器级环境阻塞**：本机 Docker 的「宿主→容器」端口转发对多数容器失效（映射口「TCP 连上但读不到字节」，而容器内 `psql` 正常 ⇒ 坏的是转发路径）⇒ ⇒ **本条维持「🔴 待验」**，待 Docker 恢复后按 G2 的配方重跑（**零域内配置**，量第一条命令挂多久）⇒ ⇒ **本域零域侧改动**这一条**不变**。
+- ✅ **本域无遮蔽风险（已自核）**：`grep -rn "LettuceClientOptionsBuilderCustomizer|RedisDisconnectedBehaviorConfig|DisconnectedBehavior"`
+  在 `service/{favorite,comment,hot,article}` 的**源码**里 ⇒ **0 命中** ⇒ 共享层那份**必被创建**
+  （三模块都引 `spring-boot-starter-data-redis` ⇒ `@ConditionalOnClass` 命中）⇒ **零域侧动作** ✅
+- ✅ **前提已坐实（本轮自核 · 补出处）**：上文说的「`rpc-timeout: 2s`」指的是**服务端**超时（不是客户端封顶），
+  Go 侧出处 = go-zero v1.10.2 `zrpc/config.go:46`
+  `RpcServerConf.Timeout int64 \`json:",default=2000"\`` ⇒ **服务端**默认 2000ms；
+  ⚠️ **`:31` 那个 `Timeout` 是 `RpcClientConf.Timeout`（客户端）** ⇒ **两个字段默认同值但语义不同** ⇒ 别混。
+  ⇒ Go 侧 `service/comment/rpc/etc/comment.yaml` **零顶层 `Timeout` 键** ⇒ 走默认 **2000ms = 2s** ⇒ 两侧同为 2s。
+  ⇒ **真源侧消费点（唯一超时执行者）**：`service/comment/rpc/comment.go:33` `DisableNativeRpcTimeout(&c.RpcServerConf)`
+  ＋ `service/comment/rpc/comment.go:54` `NewUnaryServerInterceptor(rpcTimeout, ...)` ⇒ **框架自带超时被关掉、由真源自建接管**。
+  ⇒ RAG 侧等价物 = `observability.rpc-timeout` ⇒ 消费点 `service/common/.../spring/RpcServerInterceptorFactory.java:80-81`
+  ⇒ **已在 docs/DRIFT/comment/vs-common.md 的 A1 行结案（服务端一致）**。
+  ⚠️ **因此**：上文「断连 ⇒ 命令排队到 `commandTimeout: 3s` ≫ `rpc-timeout: 2s` ⇒ **RPC 先超时**」里的 2s，
+  指的就是**这个服务端预算** ⇒ **不是**客户端 2s 封顶那一条 ⇒ 别拿客户端那条来解释服务端先超时。
+
+### 附录 · 📌 **订正注记（2026-10-27 · G3 · 20:15）：上面「🔴 待验」的**机制格已验完**（新增 §十二）
+
+⚠️ **本块是「加注记」，不是「改原值」** ⇒ 上文「🔴 **待验**」**原样保留** ⇒ 读本域历史结论的人**以两块并列为准**。
+
+- **已验的格**：**「共享层那份 `REJECT_COMMANDS` 在本域真的生效吗」** ⇒ ✅ **已验**（§十二：仓内守门 2 条 ＋ **活体 A/B** 实测 **A=1ms / B=3005ms** ＋ **Go 腿 1708–1776ms**）
+- **仍未验的格**：**「断连时客户端（api 侧）到底看到什么」** ⇒ 仍 🔴 **待验**（那是 **gRPC 响应层**的问题：断连 ⇒ 命令是**毫秒级拒单**（不是排 3s）⇒ ⇒ **RPC 不再撞 2s 服务端超时** ⇒ ⇒ 客户端看到的**不再是 1015「服务繁忙」**，而是域内的业务错误 ⇒ **但这条要真发一次 gRPC 调用才测得到** ⇒ **未做**）
+- ⇒ 🔴 **上文那条「机器级 Docker 端口转发故障 ⇒ 活体对拍被阻塞」的订正（第十八轮）已被本轮实测覆盖** —— 本轮**活体对拍真的跑通了**（真 Redis 容器 → 连上 → PING → 静默 1s → `docker stop` → 量第一条命令）⇒ ⇒ **那个阻塞前提彻底消失** ⇒ ⇒ ⚠️ **但上文原值不改写**（按纪律：登记 + 注记，不改写历史）⇒ ⇒ **以本块为准**。
+- ⇒ ⚠️ **上文的「修法落点 = 共享层」这句现在有了实测支撑**：共享层那份**确实**在 comment-rpc 里生效（无域内副本 ⇒ `size == 1` ＋ bean 名对得上）⇒ ⇒ **comment-rpc 零域侧改动**这条结论成立 ✅。
+
+
+---
+
+### 附录 · 📌 订正注记（2026-10-27 · G3）：G4 **第八次**全量口径（**保留上文第七次原值不改写**）
+
+**① G4 第八次全量回归口径**（来源 G4 commit `23d1c2a` §4.10.11）：
+
+| 项 | 值 |
+|---|---|
+| 命令 | `mvn -B clean verify`（**全量**，不是 `-pl` 子集） |
+| 结果 | **BUILD SUCCESS / EXIT=0** |
+| 规模 | **52 模块 · 2461 条**（29 个有测试的模块**逐模块求和**，不按行序 tail） |
+| 计数 | **failures 0 · errors 0 · skipped 4** |
+| 耗时 | **20:21 min** |
+| 相对上次 | 第七次 2457 ⇒ **+4** |
+| 双侧探针 | `run-parity.sh` **EXIT=0**（56 例）＋ `run-rpc-timeout-parity.sh` **EXIT=0**（3 例） |
+| 三门禁 ＋ 台账三门禁 | **0/0/0 ＋ 0/0/0** |
+
+⚠️ **「+4」的归因是【推断】**：依据 = G4 `23d1c2a` 的 §4.10.9 记「FB-04（A9）落码 … **守门 4 条** / 变异 4-4」⇒ **条数吻合**；
+（同轮的 §4.10.10 是 **U+FFFD 纯注释**自修 ⇒ 不产生测试条数。）
+
+⚠️ **口径边界（不可相加）**：**2461 是 G4 树的口径**（基线含 G4 单 4 的 `0c72969`）⇒
+**本域的 919 条是 G3 树的口径**（4 域 × 3 组件）⇒ **两个数不在同一条基线上 ⇒ 不可相加**；
+合并后总数会变 ⇒ **波末收口回归才是最终口径**。
+
+⚠️ **本块是「加注记」，不是「改原值」**：上文第七次口径（2457 条 / 20:28 min / `5564c27`）**原样保留** ⇒
+读本域历史结论的人**以两块并列为准** ⇒ ⇒ **不要把第八次误读成「第七次作废」**。
+---
+
+### 附录 · 📌 拍板落地注记（2026-10-27 · Jason）＋ 订正一处「既有先例」（U15 / D8 = global E65）
+
+**① 方向已定**：**走 global 统一载体**（`GoStyleRequestDeadline.applyTo(stub)`）⇒ **本轮不改** ⇒ 共享层那半落地后本域照做。
+⇒ **被否决的备选** = 用 `DeadlineState.remainingMillis()` 直接构造出向 stub deadline（理由：会引入第二种载体 ＋ 偏离 Go 的单载体语义 ＋ 需 global 改探针期望值）
+⇒ 完整理由与影响面见 [`vs-common.md`](vs-common.md) **§4.2**。
+
+**② 🔴 订正一处「同仓既有先例」**：本文件 §3.5 与 U15 行原引
+「`users/admin/AdminDomainService.java:140` · `users/user/UserDomainService.java:145` 已用 `DeadlineState.isExpired()`」⇒
+**实测不成立** —— 那两处是**本地超时检查**（`if (Thread.currentThread().isInterrupted() || DeadlineState.isExpired())`）
+⇒ **不是「用 `DeadlineState` 构造出向 gRPC deadline」** ⇒ ⇒ **不得据它论证「仓内已有第二种载体的出向用法」**；
+⚠️ 且该判断的**行号已漂移**（实测命中在 `AdminDomainService.java:178`）⇒ **引用前须重新定位**
+⇒ **保留原值不改写**（本条即订正注记）。
+
+---
+
+## 10. 🟡 Redis **连接池形态**：**形态已对齐**，仅**数值**不同 —— 2026-10-27 登记（G2 挖出 · 本域**独立复核**）
+
+> **公共证据链（Boot 4.0.8 字节码判据 · classpath 探测 · 处置理由 · 复开触发条件）见 [`favorite/api.md` §15](../favorite/api.md#15-🔴-redis-连接池形态漂移go-有池-vs-rag-无池-2026-10-27-登记g2-挖出--本域独立复核--只登记不落码)** ⇒ 本节**只记本域特有**的部分。
+
+### 10.1 本域结论
+
+| 项 | Go 真源 | RAG（本树 HEAD `18aa012`） | 判定 |
+|---|---|---|---|
+| **连接池形态** | ✅ **有池** | ✅ **有池** | 🟢 **形态一致** |
+| 池容量 / 活跃上限 | `PoolSize = 10 × GOMAXPROCS(0)`（**运行时值**） | `max-active: 64`（**固定**） | 🟡 **数值不对齐** |
+| 空闲连接下限 | `MinIdleConns = 0`（本域走**直连**路径） | `min-idle: 4` | 🟡 **数值不对齐** |
+| 空闲连接保留上限 | ⛔ **go-redis 无对应概念**（只存 `PoolSize` + `MinIdleConns`） | `max-idle: 16` | ⛔ **语义无对应 ⇒ 不可 1:1** |
+| **证据强度** | **L1** | **L3**（字节码 + `dependency:tree` 实测） | ⚠️ 不是 L4（无活体并发对拍） |
+| 核对日期 | 2026-10-27 | 2026-10-27 | — |
+
+### 10.2 两侧证据
+
+1. **Go 侧（直连 go-redis）**：`service/comment/rpc/internal/cache/redis.go:17-19` `redis.NewClient(&redis.Options{Addr: Host})` ⇒ **只设了 Addr** ⇒ `PoolSize` 未设 ⇒ go-redis v9.20.0 `options.go:350-351` ⇒ **`PoolSize = 10 × GOMAXPROCS` 生效**；`MinIdleConns` 未设 ⇒ **= 0**。
+2. **Go yaml**：`service/comment/rpc/etc/comment.yaml:37-40` `BizRedis: {Host, Type, Pass}` ⇒ **无池字段**。
+3. **RAG 侧**：`service/comment/comment-rpc/src/main/resources/application.yml:138-143` ⇒ `lettuce.pool.enabled: true` ＋ `max-active: 64` ＋ `max-idle: 16` ＋ `min-idle: 4` ⇒ ⇒ `Pool.enabled = true` ⇒ **有池**（走 `PoolBuilderFactory` 分支）。
+4. **classpath 实测**：`mvn -B -o -pl service/comment/comment-rpc -am dependency:tree -Dincludes=org.apache.commons:commons-pool2` ⇒ EXIT=0 ⇒ **1 命中**：`org.apache.commons:commons-pool2:jar:2.12.1:compile` ⇒ ⇒ `PoolBuilderFactory` 需要的 `GenericObjectPoolConfig` **可用** ⇒ ⇒ 池**真的开得起来**（不是「配了但起不来」）。
+   ⚠️ **这正是本域 pom 里显式声明 `commons-pool2` 的原因**（`service/comment/comment-rpc/pom.xml:181-191`）⇒ **Boot 4 的 starter 不传递 `commons-pool2`** ⇒ 缺它 ⇒ `NoClassDefFoundError: GenericObjectPoolConfig` ⇒ **组件起不来**（先例：`like-rpc`）⇒ ⇒ **本域这条是「配了 + 依赖在位」的完整闭环**，不是「只配了一半」。
+
+### 10.3 处置
+
+**形态已对齐 ⇒ 不必动**；**数值不对齐 ⇒ 登记**（**不落码**）⇒ 理由与复开触发条件见 [`favorite/api.md` §15.3](../favorite/api.md#153-处置只登记不落码写死复开触发条件)（① 可观察行为 ② `10 × GOMAXPROCS` 是运行时推导值 ③ 两套池语义无一一对应 ④ 需并发活体对拍 ⑤ 连带影响断连/重试语义）。
+⇒ ⚠️ **本域是三个用 Redis 的域里唯一「有池」的那个** ⇒ ⇒ 若共享层未来要加**池形态**维度的守门，**本域是唯一能提供正样本的域**（`favorite-api` / `hot-rpc` 都是无池）⇒ 记一笔给 **G4**。
+
+### 10.4 📌 **订正注记（2026-10-27 · G3）：§10 的「数值不对齐」已落码修复** —— 上文原样保留不改写
+
+⚠️ **本块是「加注记」，不是「改原值」** ⇒ §10.1 的表（含「`min-idle: 4`」与「⛔ go-redis 无对应概念」两处）与 §10.3 的「**不落码**」**原样保留** ⇒
+读本域历史结论的人**以两块并列为准** ⇒ ⇒ **不要**把 §十一 误读成「§10 作废」。
+
+1. **§10.1 表里「空闲连接下限 = `min-idle: 4`」这一行已过期** ⇒ 现行口径 = **`min-idle: 0`**（**精确对齐 Go**）⇒ 落码与守门见 **§十一**。
+2. 🔴 **§10.1 表里「⛔ go-redis 无对应概念（只存 `PoolSize` + `MinIdleConns`）」这句措辞不准确** ——
+   **go-redis v9.20.0 有 `MaxIdleConns`**（`options.go:224-228`，**无 default 赋值** ⇒ **0**）
+   ⇒ 消费点 `internal/pool/pool.go:1257`
+   `if p.cfg.MaxIdleConns == 0 || p.idleConnsLen.Load() < p.cfg.MaxIdleConns` ⇒ **0 = 无上限**
+   ⇒ ⇒ 所以正确的表述是：**「有对应项，Go 侧取值 = 0（无上限）」**，而不是「无对应概念」
+   ⇒ ⇒ RAG 侧的 `max-idle: 16` 是**表达层取值（比 Go 更严）**，属**可登记的残留差异**，不是「语义无对应 ⇒ 不可 1:1」。
+   ⚠️ **同款措辞错误也出现在 G2 的 `task/vs-common.md` A1 ⑦** ⇒ 已一并通报（见 §十一.4）。
+3. **§10.3 写的「不落码」已被本轮推翻** ⇒ **落码**（域侧自修）⇒ 见 **§十一**。
+
+---
+
+## 十一、✅ Redis **连接池参数口径** —— **已落码**（2026-10-27 · G3 · 修 §10 的「数值不对齐」）
+
+### 十一.1 一句话
+
+**形态本来就对**（§10）⇒ 本轮只修**参数**：`min-idle` **4 → 0**（**精确对齐 Go**）＋ **新增 `max-wait: 4s`**（池耗尽的等待上限）⇒
+守门 **4 条** ＋ **变异 4 条全部精确转红**。
+
+### 十一.2 落码清单
+
+| # | 文件 | 位置 | 改了什么 |
+|---|---|---|---|
+| 1 | `service/comment/comment-rpc/src/main/resources/application.yml` | `:159-165` | `min-idle: 4` → **`0`**；**新增** `max-wait: 4s`（`enabled` / `max-active` / `max-idle` 未动） |
+| 2 | `service/comment/comment-rpc/src/test/java/com/rag/comment/comment/rpc/config/CommentRpcRedisPoolContractTest.java` | **新增** | 守门 **4 条**（读**真装配**，不读 yml 文本） |
+
+⚠️ **pom 无需改**：`commons-pool2` 早已显式声明（`service/comment/comment-rpc/pom.xml:181-191`）⇒ 本域**不存在** `hot-rpc` 那条「pom 必须补依赖否则启动期 `NoClassDefFoundError`」的风险。
+
+### 十一.3 取值依据（逐项对着 Go 的真值，不拿「现有 RAG 代码」当基准 · AGENTS.md §3.1）
+
+| 语义 | Go 真值（消费点） | 本域取值 | 对齐度 |
+|---|---|---|---|
+| 有没有池 | ✅ `service/comment/rpc/internal/cache/redis.go:17-19` `redis.NewClient(&redis.Options{Addr: Host})` ⇒ `PoolSize` 未设 ⇒ `go-redis@v9.20.0/options.go:350-351` `= 10 × GOMAXPROCS` ⇒ **有池** | `enabled: true` ＋ pom 有 `commons-pool2` | ✅ 形态一致（§10 已记，本轮未动） |
+| 总量上限 | 🟡 `MaxActiveConns` 未设 ⇒ `options.go:230-235` ⇒ Go **无总量硬上限**；`PoolSize` = 10×核数（机器相关） | `max-active: 64` | 🟡 数量级（性能面残留） |
+| **最少空闲** | ✅ `MinIdleConns` 未设 ⇒ `options.go:218-222` **无 default** ⇒ **0**（本域 Go **直连 go-redis**，**不走** go-zero ⇒ 不是 8） | **`min-idle: 0`** | ✅ **精确对齐（本轮修复项）** |
+| 最多空闲 | 🟡 `MaxIdleConns` 未设 ⇒ `options.go:224-228` **无 default** ⇒ **0** ⇒ 消费点 `internal/pool/pool.go:1257` ⇒ **0 = 无上限** | `max-idle: 16` | 🟡 表达层取值（比 Go 更严） |
+| **池耗尽等待** | ✅ `PoolTimeout` 未设 ⇒ `options.go:380-386` `= ReadTimeout + 1s` = **4s**；消费点 `internal/pool/pool.go:1113` `p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)` | **`max-wait: 4s`** | ✅ **语义对齐（本轮新增项）** |
+
+#### 📌 订正注记（2026-10-27 · G3 · 21:1x）：**`PoolSize` 是「基准连接数」，不是「连接数硬上限」**（G1 lane 提出 · 本域**独立读源码复核后确认**）
+
+⚠️ **本块是「加注记」，不是「改原值」** ⇒ 上表**结论一个字未改**（本域原表的「总量上限」行**本来就写对了**）⇒ 本轮只是把**口径**写得更准。
+
+- **G1 的订正（原始出处）**：**别把「Go 最多 `10×核数` 条连接」写进台账** ⇒ ⇒ 那会把**基准值**当成**上限**。
+- **本域独立复核（go-redis v9.20.0 `options.go:200-206` 字段注释原文）**：
+  `// PoolSize is the base number of socket connections.`
+  ＋ `// If there is not enough connections in the pool, new connections will be allocated in excess of PoolSize,`
+  ＋ `// you can limit it through MaxActiveConns`
+  ⇒ ⇒ **池不够时连接数会「超出 `PoolSize`」** ⇒ ⇒ **真正的总量上限是 `MaxActiveConns`**
+  ⇒ ⇒ 本域 Go 侧 `MaxActiveConns` **未设** ⇒ **Go 无总量硬上限** ✅（上表「总量上限」行**原本就写对了**）。
+- **更精确的说法（本轮补）**：`PoolSize` 的真正作用是**「信号量容量」** ——
+  `internal/pool/pool.go:421` `semaphore: internal.NewFastSemaphore(opt.PoolSize)`
+  ⇒ ⇒ **池耗尽的上限 = `PoolSize` 这个信号量容量**
+  ⇒ ⇒ `pool.go:1098` `func (p *ConnPool) waitTurn(ctx context.Context) error` ⇒ 抢不到就
+  `pool.go:1113` `p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)`
+  ⇒ ⇒ `pool.go:1124` `case ErrPoolTimeout:` ⇒ **错误身份 = `redis: connection pool timeout`**
+  ⇒ ⇒ **并发命令数 > `PoolSize` ⇒ 必然进等待 ⇒ 上限 4s**（与上表「池耗尽等待」行**一致**）。
+⇒ **证据强度**：**L1**（两侧源码逐行）⇒ ⇒ **未做并发压测 ⇒ 不写 L4**。
+
+🔴 **`max-wait` 为什么是「必配」而不是「优化」**：不配 ⇒ commons-pool2 2.12.1 `BaseObjectPoolConfig:59,68`
+`DEFAULT_MAX_WAIT = Duration.ofMillis(-1L)` ⇒ 消费点 `GenericObjectPool:306`
+`p = negativeDuration ? idleObjects.takeFirst() : idleObjects.pollFirst(remainingWaitDuration)`
+⇒ **负值 ⇒ 阻塞到有人还连接为止（无上限）**；
+🔴 且 **Lettuce 的 3s 命令超时救不了场** —— `CommandExpiryWriter.write(command)` 才起算计时器
+（实测 lettuce-core 6.8.2 字节码），而**借连接发生在写命令之前**
+⇒ ⇒ 池耗尽时 **3s 超时根本没开始** ⇒ ⇒ **无限挂起**（Go 是 4s 失败）⇒ ⇒ **光有池反而比 Go 更糟**。
+
+### 十一.4 守门 + 变异验证（**4 条全部精确转红** ⇒ 守门非假绿）
+
+**守门**：`CommentRpcRedisPoolContractTest`（**4 条**，零 Docker / 零 Testcontainers / 零真 Redis）——
+起**真** `ApplicationContextRunner` ＋ Boot **真** `DataRedisAutoConfiguration` ⇒ 断言**真装配**的
+`LettucePoolingClientConfiguration.getPoolConfig()`：
+① 池必须启用 · ② `maxTotal=64` / `maxIdle=16` / **`minIdle=0`** · ③ **`maxWait=4s`** · ④ 阳性对照（commons-pool2 默认 = -1ms）。
+
+**变异**：① `min-idle: 0→4`（**回到本轮修之前的值**）⇒ 红在 ② 的 `minIdle`；② 删 `max-wait` ⇒ 红在 ③；
+③ `max-active: 64→65` ⇒ 红在 ② 的 `maxTotal`；④ `enabled: true→false` ⇒ 红在 ①。
+
+**实测结果（4 条全部精确转红 · 2026-10-27）**
+
+| 变异 | 手法 | 结果 |
+|---|---|---|
+| **MUT-A** | yml `pool.min-idle: 0` → `4`（**回到本轮修之前的值**） | ✅ **1 红**（`expected: 0 but was: 4`） |
+| **MUT-B** | yml 删掉 `pool.max-wait` | ✅ **1 红**（`expected: 4S but was: -0.001S` ⇒ **实测到「无限等」**） |
+| **MUT-C** | yml `pool.max-active: 64` → `65` | ✅ **1 红**（`expected: 64 but was: 65`） |
+| **MUT-D** | yml `pool.enabled: true` → `false` | ✅ **3 红**（① ＋ ② ＋ ③，全部红在「池必须已启用」这条**前置断言**上 ⇒ **红点精确**） |
+
+🔴 **一条必须记下的方法论**：变异跑**故意跑红的报告会留在 `target/surefire-reports/` 里**
+⇒ ⇒ 跑完变异**必须再做一次覆盖性全量回归**，否则任何「读 `target/` 的判据」读到的是**上一次跑剩的产物**
+⇒ ⇒ **本轮实测踩到了**：变异跑完后 XML 求和显示 comment-rpc「3 failures」，而 maven 汇总行是 123/0/0/0
+⇒ ⇒ **以 maven 汇总行为准、以 XML 求和复核**，两者不一致时**先查报告新鲜度**。
+
+### 十一.5 证据强度与边界
+
+| 项 | 值 |
+|---|---|
+| **证据强度** | **L3** —— Go 侧 **L1 逐行对照** ＋ RAG 侧**真装配运行证据** ＋ 变异 |
+| ⚠️ **不是 L4** | Go 侧无同时跑的探针 ⇒ **不是双侧活体对拍** |
+| ⚠️ **未覆盖** | 并发活体对拍（p99 口径）⇒ ⚠️ **原记的阻塞理由「机器级 Docker 端口转发故障」已于 2026-10-27 19:2x 实测不成立**（四个探针全通，见 [`hot/rpc.md` §十一.8](../hot/rpc.md)）⇒ ⇒ **阻塞前提已消失** ⇒ 现在只差「Go 侧同时跑的探针」 |
+| ⚠️ **守门不证明** | SQL / DDL / 事务（本域有库，守门只起 Redis 自动配置）· Kafka · 断连语义 |
+
+### 十一.6 跨域影响（本轮实测 · 已通报 G2 / G4）
+
+| 组件 | 原状 | 结论 |
+|---|---|---|
+| **`comment-rpc`** | 本域 | ✅ **已修**（本节） |
+| **`hot-rpc`** | 本域（G3） | ✅ **已修**（[`hot/rpc.md` §十一](../hot/rpc.md)）⇒ **形态 ＋ 参数 ＋ `max-wait` 三项全修** |
+| **`task-rpc`** | G2 | 🔴 **缺 `max-wait`** ⇒ 池耗尽**无限等**（Go 4s）⇒ 已通报 |
+| **`like-rpc`** | G2 | 🔴 **缺 `max-wait`** ＋ `min-idle: 4`（Go 侧走 go-zero ⇒ 应 **8**）⇒ 已通报 |
+| **`favorite-api`** | 本域（G3） | 🟡 **无池** ⇒ 池形态本身仍是漂移 ⇒ 见 [`favorite/api.md` §15.7](../favorite/api.md#157-🆕-落码清单本域-favorite-域--尚未落码--待排期) 的落码清单（**`min-idle` 应为 8**，与本域不同） |
+
+---
+
+## 十二、✅ Redis **断连活体对拍**（共享层的 `REJECT_COMMANDS` 在本域**真的生效**）—— 2026-10-27 · G3
+
+### 十二.1 一句话
+
+**共享层那份 `REJECT_COMMANDS` 在 comment-rpc 里真的生效** ⇒ 断连后第一条命令 **1 ms 失败**（不是排队到 3s 命令超时）
+⇒ **Go 腿同场景 1708–1776 ms（4 轮）** ⇒ ⇒ **两侧都是「快速失败」，语义等价**；
+⇒ 对照组（Lettuce 默认 `DEFAULT`）**3005 ms** ⇒ ⇒ **机制是承重的**（不是「反正都快」）。
+
+### 十二.2 三段判据（守门 = `CommentRedisDisconnectFastRejectGateTest`，**2 条**，零真 PG）
+
+| 判据 | 内容 | 为什么这么判 |
+|---|---|---|
+| **①** | 共享层那份 customizer **在场且没被域内副本遮蔽**：`getBeansOfType(LettuceClientOptionsBuilderCustomizer.class)` 的 **size == 1** ＋ bean 名含 `goStyleRedisClientOptionsCustomizer` | 共享层那份带 `@ConditionalOnMissingBean` ⇒ **域内若自己声明一个，共享层就退让** ⇒ 那时 size 可能是 1 但不是共享层那个 ⇒ **size == 1 ＋ 名字对得上两条合起来**才证明「用的就是共享层那份」 |
+| **②** | 断连行为**消费点** = `connectionFactory.getNativeClient().getOptions().getDisconnectedBehavior()` == `REJECT_COMMANDS` | **不是读配置项**（那是「声明」）、也不是读 `ClientConfiguration` ⇒ 必须读**真在跑的客户端**的选项 |
+| **③** | **活体 A/B**：真 Redis 容器 ⇒ 连上 ⇒ PING ⇒ **静默等待 1s（期间不发任何命令）** ⇒ 外部 `docker stop`（**优雅 FIN**，不是 kill 的 RST）⇒ 量**第一条命令**的耗时 | **A 组** = 共享层产出的那套 ClientOptions；**B 组** = 同一套**只**把断连行为换成 Lettuce 默认 `DEFAULT` ⇒ ⇒ **A 快 / B 排队到命令超时** ⇒ ⇒ 唯一差别就是那条机制 |
+
+### 十二.3 实测数字（**2026-10-27 20:0x–20:1x · 本轮现跑**）
+
+| 侧 | 场景 | 实测 | 判读 |
+|---|---|---|---|
+| **Go 腿**（真源 go-redis v9.20.0 ＋ **comment 域真源 `Options`** = `service/comment/rpc/internal/cache/redis.go:17-19` 的 `{Addr}` —— **只设 1 个字段** ⇒ 其余全走库默认） | 断连后第一条命令 | **1708 / 1776 / 1741 / 1753 ms**（**4 轮**） | **快速失败**（go-redis 的 `MaxRetries` 默认 3 ＋ 重试退避 ⇒ 拒连重试若干次后失败）⇒ 与 G2 台账记的 **1694 ms** 同量级 ✅；err = `dial tcp … connect: connection refused` |
+| **Go 腿**（hot 域真源 `Options` = `{Addr, Password}`，**同一支探针换参数跑**） | 同上 | **1669 / 1808 / 1710 / 1771 ms**（**4 轮**） | 同量级 ⇒ ⇒ **两套真源 `Options` 的断连行为一致** |
+| **RAG A 组**（共享层 `REJECT_COMMANDS`） | 同上 | **1 ms** | **毫秒级拒单** ⇒ 不排队 ⇒ **绝不撞 3s 命令超时** |
+| **RAG B 组**（Lettuce 默认 `DEFAULT`） | 同上 | **3005 ms** | **排队到 3s 命令超时** ⇒ ⇒ 这是**对照组** |
+
+⇒ **A/B 差 = 3004 ms** ⇒ ⇒ **机制是承重的**。
+⇒ **两侧对比**：Go **~1.7 s** vs RAG(A) **1 ms** ⇒ ⇒ **量级不同（Go 的重试退避 vs Lettuce 立即拒单），
+但语义相同：都是「快速失败」，都不是「挂到命令超时」** ⇒ ⇒ ⇒ **Go 的 `MaxRetries=3` 重试面**另属他档（**Lettuce 无重试**）⇒ **本条不覆盖那一条**（不混）。
+
+### 十二.4 ⚠️ 口径边界（三条，逐条读）
+
+1. 🔴 **Go 腿是「本轮现跑的一次性探针」，源文件不在仓内** ⇒ ⇒ **不可从仓复现**
+   ⇒ ⇒ **证据强度**：RAG 腿 = **L4（仓内可复现的活体 A/B）**；Go 腿 = **L4-一次性（实测但仓外）**
+   ⇒ ⇒ ⇒ **本轴整体不能写成「仓内可复现的双侧活体对拍」** ⇒ ⇒ 要长期可复现 ⇒ **需把 Go 探针入 `tools/`**
+   （**`tools/**` 是 G4 写权面** ⇒ 已派单给 G4）。
+   ⇒ **探针的等价规格**（可据此重建，**不依赖原探针文件**）：
+   - **真源 `Options`**：`service/comment/rpc/internal/cache/redis.go:17-19` 的 `{Addr}`
+     （hot 域 = `service/hot/rpc/internal/svc/service_context.go:17-20` 的 `{Addr, Password}`）
+   - **其余全部走 go-redis v9.20.0 库默认**（`ReadTimeout 3s` / `DialTimeout 5s` /
+     `PoolSize 10×GOMAXPROCS` / `PoolTimeout = ReadTimeout+1s`）
+   - **时序**：**连上 → PING → 静默 1000ms（期间不发任何命令）→ `docker stop`（SIGTERM ⇒ 优雅 FIN）→ 量第一条命令**
+   - **编排**：每组**各自**取一个空闲端口（不能复用同一个：容器还在占着）⇒ 起 `redis:7-alpine` ⇒ 等就绪 ⇒ 跑探针 ⇒ `docker rm -f` 收尾
+2. **RAG 腿测的是「池里有空闲连接」这一形态**（本域现在**有池**）⇒ **不是**「池耗尽」那形态
+   ⇒ ⇒ 两者**必须分开判**（池耗尽那形态由 §十一 的 `max-wait` 那条覆盖）⇒ ⚠️ **别把两条混为一谈**。
+3. **不外推**：like / task / hot / users / admin 各域的域上下文不同 ⇒ customizer 数量可能不同
+   ⇒ 行为可能不同 ⇒ ⇒ **每个域自己跑一遍**才是证据（**G3 的 hot 域自己跑了一份** ⇒ **两域互不代替**）。
+
+### 十二.5 回归与门禁（**2026-10-27 20:23 · 本轮现跑**）
+
+| 项 | 结果 |
+|---|---|
+| **comment-rpc 全量** | **125 / 0 failures / 0 errors / 0 skipped** ⇒ **BUILD SUCCESS**（exit 0，Finished at `2026-10-27T20:23:37+08:00`）⇒ 基线 **123** ＋ 本轮新守门 **2** = **125** ✅ |
+| **comment-rpc surefire 复核** | **23 份 XML**（基线 22 ＋ 新增 1 个测试类）⇒ **求和 125/0/0/0** ⇒ **与 maven 汇总行一致** ⇒ **0 孤儿报告** |
+| **新守门自身** | `CommentRedisDisconnectFastRejectGateTest` = **2 / 0 / 0 / 0**，**Skipped = 0** ⇒ ⇒ **docker 路径真跑到了**（不是被 `assumeTrue` 跳过）⇒ 耗时 **10.85 s** |
+| **hot-rpc 全量**（同轮） | **103 / 0 / 0 / 0** ⇒ 基线 101 ＋ 2 = 103 ✅（详见 [`hot/rpc.md` §十二](../hot/rpc.md#十二✅-redis-断连活体对拍共享层的-reject_commands-在本域真的生效-2026-10-27--g3)） |
+| **service/common 全量**（同轮 reactor） | **324 / 0 / 0 / 0** ⇒ **三模块合计 552 / 0 红** |
+| **本轮改动文件** | `CommentRedisDisconnectFastRejectGateTest.java`（新增 310 行 / 2 条）· 本档两处段落 |
+| **门禁（本轮终检）** | `tools/check-ledger-tables` **EXIT=0** · `tools/check-ledger-selfcheck` **EXIT=0** · `tools/check-ledger-count` **EXIT=1**（索引称 **315** / 实测 **328** ⇒ 差 **+13** ⇒ 索引在 `docs/DRIFT/_INDEX.md` = **合并收口执行者写权面** ⇒ **合并后统一 `--fix`**；本轮 **+2** 来自两域各增的 **§十二**）〔📌 **2026-10-27 订正**：**索引路径写错了** ⇒ 被改的是 **`docs/Pitfalls/_INDEX.md`**（不是 `docs/DRIFT/_INDEX.md`）⇒ **根因与闭合动作见 [`hot/rpc.md` §十二.6](../hot/rpc.md#十二6-📌-台账计数差-13-的根因定位2026-10-27--g3)** ⇒ **原值保留不改写**〕· `tools/check-doc-links` **EXIT=0**（本轮**实修 18 处**失效锚点 ⇒ 全部改用门禁自己的 `slug()` **实算值** ⇒ ⚠️ **锚点不要手写**）· `tools/difftest/check-wave-{lane-ownership,coupling,role-model}` **全 0** · `tools/ledger-lint/favorite/{tables,selfcheck,vs-reality}` = **0 / 1 / 1** ⇒ **与本轮改动前完全相同**（selfcheck 仍 **5 条**，**全在本轮 diff 之外**；vs-reality 那 1 条 = 「共享面零改动」，**结构性**）⇒ ⇒ **本轮零新增门禁级问题** |
+| **U+FFFD 字节级扫描** | 本轮改动文件 **8 份全部 0 命中** · 本域台账＋坑档全量（**33 份**，已剔 `target/`）**0 命中** |
+| **全仓 `check-*.py` 巡检** | **18 个脚本 ⇒ 17 个 EXIT=0 / 1 个 EXIT=1** ⇒ 那 1 个是 `tools/difftest/check-ddl-static.py` ⇒ **是 `users` 域的 9 处既知差异**（`users_user.status` 可空性 1 处 ＋ `DEFAULT CURRENT_TIMESTAMP` 残留 8 处）⇒ ⇒ **不在本域** ⇒ ⇒ **与本轮改动无因果关系** |
+
+---
+
+## 🔴 **阈值类结论的「共享层依赖」声明**（2026-10-27 · 按 G2 [3] 的要求做的重核）
+
+⚠️ **凡本档写了「**运行期上限 / 阈值 / 池形态**」类结论，必须标「依赖共享层哪个版本」** ⇒ ⇒ **共享层一改 ⇒ 那条要重核**（重核，不是重写）。
+
+| 本档结论 | 依赖面 | 当前实测（2026-10-27 重核） | 共享层一改会怎样 |
+|---|---|---|---|
+| **§10 的 Redis 池形态 = 有池**（comment-rpc） | **依赖共享层的 dependency 状态**（`isPoolEnabled` 在 `enabled == null` 时**回落到「classpath 上有没有 `commons-pool2`」**） | ✅ 本域 `enabled: true` ⇒ **显式配置 ⇒ 不依赖 classpath 探测**；且实测 classpath **1 命中**（`commons-pool2:2.12.1`）⇒ ⇒ **有池结论成立（且比 favorite/hot 更稳）** | ⚠️ 共享层若把 `enabled` 的默认值**改成 true** ⇒ ⇒ 本域会**静默多出**一份池配置语义 ⇒ ⇒ §10 要重核 |
+| **`min-idle: 4` vs Go 的 `0`**（数值轴） | **不依赖**共享层（域内 yml） | 🔴 仍偏离（Go 侧 go-redis 直连 ⇒ `MinIdleConns` 未设 ⇒ **0**）—— ⚠️ **这是「落码前」的实测** ⇒ ⇒ ✅ **已修**（§十一 · 2026-10-27：`min-idle: 4 → 0` ＋ 补 `max-wait: 4s`） | 不受影响 |
+| **Redis connect-timeout = 5s** | **不依赖**共享层（共享层只设 `disconnectedBehavior(REJECT_COMMANDS)`） | ✅ 域内 yml 显式配 5s | 共享层开始碰 `socketOptions` 时才变 |
+| **🆕 §十一 的池参数 = `min-idle 0` ＋ `max-wait 4s`**（comment-rpc） | **不依赖**共享层**（域内 yml 显式配 ⇒ 共享层依赖树变化**不会**翻转本域的池参数）** —— ⚠️ 但**域内 pom 的 `commons-pool2`** 是 load-bearing 依赖 | ✅ **2026-10-27 实测**：`enabled: true` / `max-active: 64` / `max-idle: 16` / `min-idle: 0` / **`max-wait: 4s`** ⇒ 守门 4 条全绿 ＋ 变异 4 条全精确转红 ⇒ ⇒ **域内 pom 已有 `commons-pool2`（`:181-191`）⇒ 不存在 hot-rpc 那条「缺依赖 ⇒ 启动期失败」的风险** | 🔴 **域内 pom**：删掉 `commons-pool2` ⇒ ⇒ 启动期 `NoClassDefFoundError` ⇒ ⇒ **组件起不来**（不是「静默变无池」）⇒ ⇒ **这正是想要的形状** |
+| **🆕 §十二 的断连行为 = `REJECT_COMMANDS`**（comment-rpc） | **完全依赖共享层那份 `GoStyleRedisClientAutoConfiguration`**（域内**零副本** ⇒ 共享层那份带 `@ConditionalOnMissingBean` ⇒ **域内一旦自己声明一个，共享层就退让**） | ✅ **2026-10-27 20:1x 实测**：`getBeansOfType(LettuceClientOptionsBuilderCustomizer.class)` **size == 1** ＋ bean 名含 `goStyleRedisClientOptionsCustomizer` ⇒ **无域内副本遮蔽**；**消费点** `connectionFactory.getNativeClient().getOptions().getDisconnectedBehavior()` == `REJECT_COMMANDS`；**活体 A/B** = **A(REJECT_COMMANDS) 1 ms** vs **B(DEFAULT) 3005 ms** ⇒ 差 **3004 ms** | 🔴 **共享层若删掉/改名那份 customizer** ⇒ ⇒ 本域**静默回落**到 Lettuce 默认 `DEFAULT` ⇒ ⇒ 断连从 **1 ms** 变成 **~3005 ms**（排队到命令超时）⇒ ⇒ **重新撞 2s 服务端超时** ⇒ ⇒ **§十二 必须重核**；<br>ℹ️ **域内侧无风险**：本域**零副本** ⇒ 域内改代码**不会**翻转这条 ⇒ ⇒ **这条的写权全在共享层** |
+
+> 📌 **订正注记（2026-10-27 · G3）**：上表**第二行**（「`min-idle: 4` vs Go 的 `0`」的「🔴 仍偏离」）是**落码前**的重核结论 ⇒ **原样保留不改写** ⇒
+> ⇒ 读本域历史结论的人**以「第二行 + 🆕 两行」并列为准** ⇒ ⇒ **不要**把 🆕 行误读成「第二行作废」⇒
+> ⇒ 落码后的权威口径 = **§十一**（池参数）＋ **§十二**（断连行为），二者均带守门与活体证据。
+
+⇒ **共享的判据明细表在 [`favorite/api.md` §17](../favorite/api.md#17-🔴-阈值类结论的共享层依赖声明2026-10-27--按-g2-3-的要求做的重核)（同款机制，三域共用一条判据）** ⇒ ⇒ 改一处要三域一起重核。
+
+## 📌 指针 · 🔴🟢 **Testcontainers 宿主口钉口**（本域已落码 · 2026-10-28）
+
+⇒ ⇒ **canonical 全文在** [`docs/DRIFT/article/rpc.md`](../article/rpc.md) 的「**二十三、🔴🟢 Testcontainers 宿主口钉口**」一节
+⇒ ⇒ 本域那一段：模块 `comment/comment-rpc` · 域段 `22880–22909` · 本模块宿主口段 `22880–22899` · 脚手架段 `22900–22909` · **11** 个 PG + **1** 个 Redis 个容器
+⇒ ⇒ 落点：`service/comment/comment-rpc/src/test/java/.../support/RealContainerHostPort.java` ＋ 同名 `RealContainerHostPortTest.java`（守门 **6** 条）
+⇒ ⇒ **与 Go 侧的一致性：N/A**（测试基础设施，不涉及运行时行为）
+
+## 📌 指针 · 🔴🟢 **redis-disconnect 探针（Go 腿 · comment 模式）**（2026-10-28）
+
+⇒ ⇒ **canonical 全文在** [`docs/DRIFT/hot/rpc.md`](../hot/rpc.md) 的「**§十二.9**」一节（含两条订正注记）
+⇒ ⇒ 本域那一档：真源 Options = `service/comment/rpc/internal/cache/redis.go:17-19` ⇒ **`redis.Options{Addr}`**（Password 留空）
+⇒ ⇒ **实测**：`first_command_ms` = **1679 ms** · 归一化结论 `class=fast-fail err_present=true` ⇒ ⇒ **与冻结基线 `expected.txt` 逐字节一致** ✔
+⇒ ⇒ **落点（仓内，可复现）**：`service/hot/hot-rpc/src/test/probe/redis-disconnect/`（`main.go` · `run.sh` · `expected.txt` · `README.md`）
+⇒ ⇒ ⚠️ **归口**：`tools/redis-disconnect-probe/` 是**共享层**写法（`tools/**` 归 G4）⇒ ⇒ 本探针落在**域侧** ⇒ ⇒ **两份实现不要同时存在**
+⇒ ⇒ **RAG 腿不重复造**：域内既有 `CommentRedisDisconnectFastRejectGateTest`（守 RAG 腿）⇒ ⇒ 本探针只守 **Go 腿 ＋ 双侧对照**
+⇒ ⇒ **与 Go 侧的一致性：语义一致（两侧都「快速失败」）· 毫秒数不一致（Go ~1.7 s vs RAG 1 ms）⇒ 只主张语义那一层**
+
+## 📌 快照 · 🔴 **G4 共享层合并（`ae218df`）后的本域回归**（2026-10-28 · G3）
+
+**合并**：option D（**单一 merge 源 · 不 cherry-pick**）⇒ `git merge --no-ff align/g4-service-common`
+（G4 @ `188e995`）⇒ ⇒ **`git merge-tree --write-tree` 预演 0 冲突** ⇒ ⇒
+**G4 未触碰本域任何路径**（`git diff --stat` 空）⇒ ⇒ **本域代码零改动 ⇒ ⇒ 本域结论不受影响**。
+
+**合并后本域 3 模块回归**（`mvn -B -o --fail-at-end -am test -pl <3 模块>`，`-DargLine=-Xmx2g`）：
+
+| 模块 | 条数 |
+|---|---|
+| `service/comment/comment-rpc` | 136 |
+| `service/comment/comment-api` | 52 |
+| `service/comment/comment-common` | 27 |
+| **本域小计** | **215** |
+
+**全量口径**（12 域模块 ＋ `-am` 带进来的共享层）：**1387 条 / 0 failures / 0 errors / 4 skipped**
+· BUILD SUCCESS · **15:30 min**（2026-10-28）
+⇒ ⇒ **拆账（可复算）**：`service/common` **333** ＋ `service/users/users-common` **39** ＋ **四域合计 1015**
+⇒ ⇒ **1015 + 333 + 39 = 1387**（逐字相等）。
+⇒ ⇒ **本域 Redis 连接超时那条**（`CommentRpcRedisTimeoutContractTest`）⇒ ⇒ **已在 `0c6295c` 闭合**
+（`connect-timeout: 5s`）⇒ ⇒ **G4 的 R6 派单是过期基线** ⇒ ⇒ 详见
+[`docs/DRIFT/comment/vs-common.md`](../comment/vs-common.md) 的 **C-7**。
+
+**门禁快照（20 条）**：**canonical 在** [`docs/DRIFT/article/rpc.md`](../article/rpc.md) 的
+「**二十四、🔴 G4 共享层合并后的门禁快照（20 条）**」一节 ⇒ ⇒ **15 绿 / 4 红 / 1 用法错（EXIT=2，不是红项），四条红都不在本域**
+（`check-ledger-count` = 合并收口执行者 · `check-ddl-static` = users 域 · `check-tomcat-limits` = G2 域 ·
+`check-wave-coupling` = G4-9 共享矩阵）。
+
+### 📌 指针（2026-10-28 · G3）—— G4 §4.10.64 ⑤ 的「域内 status 漂移」警告【对 comment 域不成立】
+
+⇒ G4 在共享面写「域内 span 若只调 `recordException` ⇒ status 恒 UNSET ⇒ **与 Go 的 `RecordError` 漂移**」⇒ ⇒ **中间那一步是错的**：Go otel-go **v1.44.0** 的 `RecordError` **【不改】status**（接口契约 `go.opentelemetry.io/otel/trace@v1.44.0/span.go:47-51`「**as this method does not change the Span status**」＋ SDK 实现 `go.opentelemetry.io/otel/sdk@v1.44.0/trace/span.go:626-630` javadoc ＋ `:631-655` 实现**全程无 `SetStatus` 调用**）⇒ ⇒ **Go 侧只 `RecordError` 的业务 span status 本就恒 UNSET ⇒ 两侧一致 ⇒ 不漂移** ⇒ ⇒ **域侧零改动**（**不补 `setStatus`** —— 补了反而是引入 Go 侧不存在的 ERROR）。
+⇒ ⚠️ **唯一需要显式 `SetStatus` 的是 `GetComment`，本域【已经逐字复刻了】**：Go `service/comment/rpc/internal/logic/get_comment_logic.go:85-86` / `:101-102` / `:110-111` / `:117-118` 四个错误分支**各自** `RecordError` ＋ `SetStatus(codes.Error, err.Error())` ⇒ ⇒ RAG `CommentSpans.tracedWithErrorStatus(...)`（**只给 `GetComment` 用**，其余走 `traced` ⇒ 无 `setStatus`）⇒ 逐条对应 ✅ ⇒ 且守门 `CommentSpanWiringTest.java:237-238`（业务失败 ⇒ **断言 `StatusCode.UNSET`**）／`:390-392`（GetComment 系统失败 ⇒ **断言 `StatusCode.ERROR`**）**两条判别式断言已把两侧 status 语义钉死** ⇒ ⇒ **网已张、语义已对齐**。
+⇒ 逐条证据 ⇒ [`favorite/api.md` §16.4.1](../favorite/api.md#1641-🟢-补证2026-10-28-go-侧-recorderror-也不改-status--两侧-status-语义同构--status-漂移不成立) ＋ [`comment/vs-common.md`](./vs-common.md) A9 行。
+
+## 十三、🟢🔴 **gRPC 真进程端口补齐到「OS 临时段之外」**（**5 处**：`forPort(0)` ×4 ＋ 裸 `new ServerSocket(0)` 死口 ×1 ⇒ 本域专用段 `22600–22699`）· 2026-10-28 10:5x · G3
+
+**本域的机制类与 Spring 上下文形态的口**在**上一轮**已落（`support/RealGrpcPort.java` · `FIRST=22600` / `LAST=22699`）⇒ ⇒ **本节补的是剩下的两类形态**：**进程内 gRPC server**（`ServerBuilder.forPort(0)`）与**裸取临时口**（`new ServerSocket(0)`）。
+
+#### 起因（与 article / hot 两域同款）
+
+⚠️ **OS 临时段 `49152–65535` ＝ Docker 随机发布容器端口用的同一段** ⇒ ⇒ 别的会话的容器先占住 ⇒ ⇒ `EADDRINUSE` ⇒ ⇒ **长得像「被测行为坏了」，实为环境撞口**
+⇒ ⇒ **实证（G2 lane 2026-10-28）**：`BindException: Address already in use (/0.0.0.0:49992)`（49992 = 本机 `Sea-kafka` 容器发布口 · `Up 7 天`）⇒ ⇒ **不是被测代码的错**。
+⇒ ⇒ global 段表 §4.10.19.3 **早就把 `22600–22699` 预分配给 comment-rpc 域**（状态「本层预分配 · 域侧未落码」）⇒ ⇒ **本项本就是域侧自修**（AGENTS.md §5.3d）。
+
+#### 落码（5 处全迁 ＋ 守门 +2 条）
+
+| 项 | 值 |
+|---|---|
+| 迁 ① | **4 处** `ServerBuilder.forPort(0)` ⇒ `forPort(RealGrpcPort.pick())`（`CommentRpcGrpcInterceptorWiringTest` 2 ＋ `CommentRpcSlowThresholdGateTest` 2）|
+| 迁 ② | **1 处** 裸 `new ServerSocket(0)`（`service/CommentCacheRedisMetricGateTest.java` 的**死口**样本：故意占一个没人听的端口 ⇒ 用来验「连不上时的行为」）⇒ ⇒ `deadPort = RealGrpcPort.pick()` |
+| 守门 | **扩** `support/RealGrpcPortTest.java` ⇒ **+2 条源扫**（5 种「OS 盲选口」形态禁止清单 ＋ **守恒**：提到端口就必须引用 `RealGrpcPort`）|
+
+⚠️ **迁 ② 为什么不能用「随便一个数」**：死口样本的作用是「**确保这个端口没人听**」⇒ ⇒ 用 `RealGrpcPort.pick()`（先 bind 自检、再返回）⇒ ⇒ **既避开 OS 临时段，又保证确实是死口** ⇒ ⇒ 比原来更准（原来 `new ServerSocket(0)` 只是「借一个临时号」，**没有保证它此刻没人听** ⇒ ⇒ 属**弱断言**）。
+
+#### 证据强度与边界
+
+- **L3**（源码扫描：迁后本域 `grpc.server.port=0` / `forPort(0)` / `new ServerSocket(0)` **各 0 处**）**＋ L4**（本轮真回归，见 hot 域同款「本轮回归」表）。
+- ⚠️ **TOCTOU 窗口诚实标注**：`pick()` 只能**压低**概率、**不能归零** ⇒ ⇒ 本段独占给本域 ⇒ 别的域/别的会话不占这一段。
+- ⚠️ **本节只治「端口从哪来」，不改「测什么」** ⇒ ⇒ 用例语义零变化。
+
+#### 本轮回归（与 hot 域同跑）
+
+| 项 | 值 |
+|---|---|
+| 第 1 跑（12:1x）| `comment-rpc` **138 / 0 / 0 / 0** ✅（`service/common` 同轮 **333 / 0 / 0 / 0**）|
+| 第 2 跑（12:40）| 🔴 `comment-rpc` **编译失败**（判据改动时我误插常量 ⇒ 缺 `GRPC_PORT_KEY` / `REAL_PORT_USAGE`）⇒ ⇒ **已修** ⇒ ⇒ **12:4x 编译验证 EXIT=0**（`mvn -o -B --fail-at-end -pl … -am test-compile`）|
+| 🔴 **诚实边界** | 本域**新守门判据**只到「编译通过」，**测试未重跑**（Jason 2026-10-28 插队指令：**不起回归**）⇒ ⇒ **不得宣布「comment 守门已绿」** |
+
+#### 🟡 **口径订正（2026-10-28 · G3）**：G2 报的本域数字与本树实测**不一致**
+
+⇒ ⇒ **G2 报的「comment = 2 处」** vs **本树实测「5 处」（本轮迁的）** ⇒ ⇒ 两边数的**树不同**（本树另有上一轮已迁的 `grpc.server.port` 形态）⇒ ⇒ ⇒ **不是谁数错，是「比的不是同一份」** ⇒ ⇒ **口径**：迁**前**以本树实测为准，迁**后**以「各形态 = 0」为准。

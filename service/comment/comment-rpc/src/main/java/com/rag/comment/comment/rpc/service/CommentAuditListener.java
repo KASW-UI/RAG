@@ -53,6 +53,16 @@ public class CommentAuditListener {
     /** Go {@code audit_consumer.go:122-132} 的截断长度：40 个 rune。 */
     private static final int PREVIEW_RUNE_LIMIT = 40;
 
+    /**
+     * Go {@code audit_consumer.go:34} 传给 {@code commentMessageAttrs} 的那个<b>逻辑名</b> ——
+     * 即 span 上 {@code messaging.destination} 的取值。
+     *
+     * <p>⚠️ <b>它不是 Kafka topic 名</b>：Go 的真 topic 是 {@code comment-audit-topic}
+     * （{@code service/comment/rpc/etc/comment.yaml:26,32}），而 Go 写进 span 的是这个
+     * {@code "comment_audit"} ⇒ 逐字对齐（理由见 {@link #onMessage} 里的注释块）。
+     */
+    static final String AUDIT_SPAN_DESTINATION = "comment_audit";
+
     private final ObjectMapper objectMapper;
     private final CommentTransactionalService transactionalService;
     private final CommentCacheService cacheService;
@@ -93,7 +103,35 @@ public class CommentAuditListener {
     public void onMessage(String key, String value) {
         Map<String, Object> attrs = new LinkedHashMap<>();
         attrs.put("messaging.system", "kafka");
-        attrs.put("messaging.destination", "${comment.kafka.audit-topic}");
+        // 🔴 **取值口径 = Go 的字面量 `"comment_audit"`，不是真 topic 名**（2026-10-27 G3 域侧自修）。
+        //
+        // 【Go 出处（消费点，不是声明点）】
+        //   service/comment/rpc/internal/mqs/audit_consumer.go:34
+        //       observability.TraceConsumer(ctx, "comment-rpc", "AuditConsumer.Consume",
+        //           commentMessageAttrs("comment_audit", key), func(ctx context.Context) error {...})
+        //   service/comment/rpc/internal/mqs/audit_consumer.go:70-77
+        //       func commentMessageAttrs(topic, key string) []attribute.KeyValue {
+        //           return []attribute.KeyValue{
+        //               attribute.String("messaging.system", "kafka"),
+        //               attribute.String("messaging.destination", topic),   // ← "comment_audit"
+        //               attribute.String("messaging.operation", "consume"),
+        //               attribute.String("messaging.message.key", key),
+        //           }
+        //       }
+        //
+        // 【为什么不是真 topic 名】
+        //   Go 的真 topic 是 `comment-audit-topic`（service/comment/rpc/etc/comment.yaml:26,32），
+        //   但 Go 传给 span 的是**另一个写死的逻辑名** `"comment_audit"` ⇒
+        //   ⇒ **span 属性的取值属于可观察行为**（Jaeger 里的 span 结构）⇒ 必须逐字对齐 Go，
+        //     不能「顺手改成更合理的真 topic 名」（那会与 Go 分叉）。
+        //   ⇒ 同款做法在仓内已有先例：task-rpc 的 `TaskTraceAttributes`（同样是「逻辑名 ≠ topic 名」）。
+        //
+        // 【修之前的形态（真漂移）】
+        //   原写法 `attrs.put("messaging.destination", "${comment.kafka.audit-topic}")` 是
+        //   **Java 字面量** ⇒ `${...}` 只在 `@Value` / yaml 绑定时才会被解析，
+        //   放在普通字符串里**永远不会被求值** ⇒ span 上真的带着这串占位符文本
+        //   ⇒ 既不是 Go 的 `"comment_audit"`，也不是真 topic 名 ⇒ 两侧遥测不可比。
+        attrs.put("messaging.destination", AUDIT_SPAN_DESTINATION);
         attrs.put("messaging.operation", "consume");
         attrs.put("messaging.message.key", key == null ? "" : key);
 

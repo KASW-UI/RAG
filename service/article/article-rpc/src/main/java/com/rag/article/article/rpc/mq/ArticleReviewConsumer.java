@@ -7,7 +7,10 @@ import com.rag.article.article.rpc.domain.ArticleEntity;
 import com.rag.article.article.rpc.mapper.ArticleMapper;
 import com.rag.article.article.rpc.metrics.ArticleRpcMetrics;
 import com.rag.article.article.rpc.service.ArticleAtomicService;
+import com.rag.article.article.rpc.service.ArticleSpans;
+import com.rag.common.observability.MqConsumer;
 import com.rag.common.spring.SnowflakeBean;
+import io.opentelemetry.context.Context;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -108,6 +111,50 @@ public class ArticleReviewConsumer {
             groupId = "${article-rpc.kq-consumer-conf.group}",
             containerFactory = "articleKafkaListenerContainerFactory")
     public void onMessage(ConsumerRecord<String, String> record, String value) {
+        // 🔴 L-10（Go 出处：article_consumer.go:44-45）：
+        //     func (l *ArticleConsumer) Consume(ctx context.Context, key, val string) error {
+        //         return observability.TraceConsumer(ctx, "article-rpc", "ArticleConsumer.Consume",
+        //             articleMessageAttrs("article_review", key), func(ctx context.Context) error { … })
+        //     }
+        //    ⇒ 共享层 MqConsumer.traceConsumer 与 Go 的 TraceConsumer **逐项同构**
+        //      （SpanKind=CONSUMER · attrs · 错误分档 · finally span.end()）⇒ 纯域侧接线，不动共享层。
+        //    ⚠️ messaging.destination 是**逻辑名** "article_review"，**不是** kafka topic
+        //      （真源 topic 是 article-creation-topic）⇒ 不可用 record.topic()。
+        Map<String, Object> attrs = ArticleSpans.consumerAttrs(
+                ArticleSpans.DESTINATION_REVIEW, record == null ? null : record.key());
+        Throwable outcome = MqConsumer.traceConsumer(Context.current(), ArticleSpans.TRACER_NAME,
+                ArticleSpans.CONSUMER_REVIEW, attrs, ctx -> consume(value));
+        if (outcome != null) {
+            // Go 的 kq：Consume 返回 error ⇒ 不确认位点 ⇒ 重投。
+            // 这里必须**抛出**而不是吞掉，否则失败的消息会被当成已处理（位点被提交）。
+            throw toRuntime(outcome);
+        }
+    }
+
+    /**
+     * 消费主体；返回非 null 即代表「失败，要重投」。
+     *
+     * <p>🔴 <b>为什么把异常「转成返回值」而不是直接抛</b>：
+     * Go 的 {@code TraceConsumer} 收 {@code fn func(ctx) error}，
+     * 在 {@code err != nil} 时 <b>既</b> {@code MarkSystemError}（或 {@code MarkTimeout}）
+     * <b>又</b> {@code return err} ⇒ 错误<b>既进 span 又出方法</b>。
+     * ⇒ 本实现：lambda 内把异常转成返回值（⇒ 共享层才能标 system error，对齐 Go），
+     * lambda 外再<b>原样抛出</b>（⇒ 保持「失败 ⇒ 重投」的语义）。
+     */
+    private Throwable consume(String value) {
+        try {
+            doConsume(value);
+            return null;
+        } catch (RuntimeException e) {
+            return e;
+        }
+    }
+
+    private RuntimeException toRuntime(Throwable t) {
+        return (t instanceof RuntimeException re) ? re : new IllegalStateException(t);
+    }
+
+    private void doConsume(String value) {
         // ---------- 分支 1：JSON 解析失败 ⇒ 丢弃（Go :49-52）----------
         ArticleSyncEventTypes.ArticleReviewMessage msg;
         try {

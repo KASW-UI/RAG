@@ -45,6 +45,11 @@
 | **MISMATCH-API-02** | `CommentApiSupport.userId` 对 `Double` / `Float` / `BigDecimal` / `BigInteger` 一律判 **1006**（不再截断 / 回绕）；并订正了把事实说反的 javadoc | **新增** `CommentApiBehaviorTest` 3 例（真 MockMvc 管线 + 真 JWT 签名） | ✅ 回退后 **2/15 变红**：`expected:<1006> but was:<5001>` —— 截断出的错误身份会让下游报错并退化成 5001 |
 | **MISMATCH-API-03** | `CommentRpcClient.commentRpc()` 叠 **2 秒** per-call deadline 上限（照抄同仓 `task-api/TaskRpcClient.java:66,105-112` 的 `min(2s, 请求剩余预算)`；预算耗尽给 1ms） | **新增** `CommentApiRpcDeadlineGateTest` 4 例（**真 in-process gRPC server**） | ✅ 回退后 **3/4 变红**，症状精确：①② 拿到 `OK`（= 根本没 deadline）、③ 实测 **3017ms**（= 用的是 3s HTTP 预算而非 2s 上限） |
 | **D4**（§3.1） | `CommentJwtAuthInterceptor` 补 **`iat` 在未来** ⇒ 401（此前 jjwt 不校验 `iat` ⇒ **RAG 比 Go 松**） | **新增** `CommentJwtTokenMatrixGateTest` 11 例（真 jjwt + 真拦截器，锁住双侧探针对拍出来的 11 种 token 形态） | ✅ 删掉 `iat` 校验 ⇒ `issuedAtInTheFutureIsRejected` 变红 |
+| **C-6**（2026-10-27 · §3-C-6） | **JWT 验签搬出 3s 预算**（Go 的计时器在 Authorize **之后**起算 ⇒ 验签在预算**之外**）：新增 `comment-api/.../auth/` 4 个类（`CommentJwtAuthPaths` / `CommentJwtVerificationResult` / `CommentJwtSignatureVerifier` / `GoStyleJwtAuthFilter`(`@Order(+6)`)）＋ `CommentJwtAuthInterceptor` 改成**消费**验签结果、失败**原样重抛** | **新增** `CommentApiJwtVerificationScopeTest` 7 例（真 Spring 上下文 ＋ **容器装配层** `ServletContextInitializerBeans` ＋ 行为层来源标记） | ✅ **3/3 精确变红**：① `@Order(+6)`→`+8` ⇒ **1 条红**（顺序断言，其余 6 例仍绿）② Filter 验签失败**自己写 401** ⇒ **2 条红**（413→401 / 404→401）③ 摘掉 `@Component` ⇒ **1 failure + 2 errors**（来源标记 `filter`→`inline`） |
+
+> 📌 **C-6 的守门与 favorite 域的差异（如实记录）**：本域 401 是**空 body** ⇒ 变异 ② 里「Filter 裸写 401」**恰好也是空 body** ⇒ 「401 空 body」那条断言**不区分**（它只能证明「形状没变」，不能证明「谁写的」）⇒ ⇒ **本域判「Filter 不写响应」靠的是 413-over-401 与 404 两条**（favorite 域的「401 三字段信封」那条也能作证）。⚠️ **本域无真 Tomcat 门禁** ⇒ 「413 压过 401」的**响应头层**语义**只有 MockMvc 级证据** ⇒ 该残余边界已写进 `vs-common.md` §3-C-6 的证据强度栏。
+>
+> ⚠️ **C-6 顺带改了既有守门的构造器**：`CommentJwtTokenMatrixGateTest`（11 例）原本直接 `new CommentJwtAuthInterceptor(props)` ⇒ 验签搬进验签器后构造器改为注入 verifier ⇒ 该类**不经过 Filter** ⇒ 它现在走拦截器的**兜底（inline）分支** ⇒ **顺带把兜底路径纳入覆盖**（额外收益，已在测试 javadoc 写明）；其 `iat` 变异点也随验签位移到验签器（javadoc 已同步）。
 
 > 📌 **D4 的修复同时被活体对拍确认**：矩阵新增的 **T23-iat-in-future** 步骤在**修复后**两侧**一致**（Go 401 / RAG 401）⇒ 不只是单测绿。
 
@@ -125,8 +130,19 @@
 | **D2** | Bearer 前缀剥离的**长度边界** | `golang-jwt/jwt/v4/request/oauth2.go:8-14`：`len(tok) > 6 && ToUpper(tok[0:7]) == "BEARER "` | `users-common/.../BearerTokenExtractor.java:74-81`：判据 `length() > 7` | 长度恰为 7 的头（`"Bearer "`）：Go 剥成空串→解析失败→**401**；RAG 保留整串→解析失败→**401**。**结局相同**，仅错误文本不同 ⇒ 当前不可观察，可对齐为 `> 6` 以消除隐患 |
 | **D3** | 熔断**隔离键** | `zrpc/internal/clientinterceptors/breakerinterceptor.go:13-18` `path.Join(cc.Target(), method)` | `common/protection/GoStyleGrpcClientBreakerInterceptor.java:193` `method.getFullMethodName()`（**无 target 前缀**） | 单 channel 下不可观察；将来多 target 会把计数合并。⚠️ 该类在 `service/common` 下，**改动影响多域** ⇒ 只登记不改 |
 | **D4** | **`iat` 在未来**的 token | `golang-jwt/jwt/v4@v4.5.2/map_claims.go:124-141` `MapClaims.Valid()` → `:63-85` `VerifyIssuedAt` → `claims.go:250-255` `verifyIat`：**`now >= iat` 才有效**（**无时钟偏移容忍**）⇒ **拒绝** | **修复前** jjwt 0.12.6 **不校验 iat** ⇒ **接受** | ✅ **已修**（2026-10-24，详见 §3.1）—— 修复前 **RAG 比 Go 松**（安全面更宽） |
-| **D5** | **HS384 / HS512** 的 token | `jwt/v4/hmac.go:49-74` `SigningMethodHMAC.Verify` **不限制 alg**；go-zero 的 `rest/token/tokenparser.go:127-129` `newParser()` 也**没有** `WithValidMethods` ⇒ **接受** | jjwt 的 `verifyWith(key)` 把 key **绑死**在一个算法上（`Keys.hmacShaKeyFor` 对 32 字节 ⇒ `HmacSHA256`）⇒ 头写 HS384/HS512 ⇒ **`WeakKeyException`** ⇒ **拒绝** | ✅ **已签字偏离**（2026-10-24 用户 Jason，`SD-2026-10-24-CAND-07`）—— **RAG 更严一侧** ⇒ 代码不动 |
+| **D5** | **HS384 / HS512** 的 token | `jwt/v4/hmac.go:49-74` `SigningMethodHMAC.Verify` **不限制 alg**；go-zero 的 `rest/token/tokenparser.go:122-124` `newParser()` 也**没有** `WithValidMethods` ⇒ **接受** | jjwt 的 `verifyWith(key)` 把 key **绑死**在一个算法上（`Keys.hmacShaKeyFor` 对 32 字节 ⇒ `HmacSHA256`）⇒ 头写 HS384/HS512 ⇒ **`WeakKeyException`** ⇒ **拒绝** | ✅ **已签字偏离**（2026-10-24 用户 Jason，`SD-2026-10-24-CAND-07`）—— **RAG 更严一侧** ⇒ 代码不动 |
 | **D6** | ✅ **已签字偏离**（2026-10-24 用户 Jason）—— **保护层的覆盖范围**：未注册路径上的 **MaxBytes** | go-zero v1.10.2 `rest/engine.go:105` —— chain 只在 `bindRoute` 内拼装 ⇒ **未注册的路径根本不经 MaxBytes** ⇒ 服务端**从不返回 413**（客户端表现为 `Broken pipe`） | 4 个保护是**全局 servlet Filter** ⇒ **未注册路径也经过 MaxBytes** ⇒ **413** | ✅ **已签字**（`docs/Intentional_Deviations/comment/api.md` 的 `SD-2026-10-24-CAND-08`）⇒ **RAG 是更严/更安全的一侧** ⇒ 代码不动 ⇒ 详见 §3.2 |
+
+### 📌 订正注记（2026-10-27 · G3 · 21:0x）：D5 行 **1 处引用行号越界**已实修（**结论与签字一个字未改**）
+
+⚠️ **本块是「加注记」，不是「改原值」** ⇒ 上表 D5 的**判定与签字（`SD-2026-10-24-CAND-07`）原样有效** ⇒ 本轮只改**引用指针**。
+
+| 位置 | 原引用 | 事实 | 实修 |
+|---|---|---|---|
+| 上表 **D5** 行 | `rest/token/tokenparser.go:127-129` | go-zero v1.10.2 该文件**只有 124 行** ⇒ `127-129` 越界 | ⇒ 改为 **`rest/token/tokenparser.go:122-124`**（`func newParser() *jwt.Parser` 全函数；`:123` = `jwt.NewParser(jwt.WithJSONNumber())`）|
+
+⇒ **断言本身复核通过**：`grep -rn "WithValidMethods" go-zero@v1.10.2/rest/token/ go-zero@v1.10.2/core/jwtx/` ⇒ **0 命中** ⇒ ⇒ **「`newParser()` 没有 `WithValidMethods`」这个事实成立** ⇒ ⇒ 只有行号错，**结论不用改**。
+⇒ **核对来源**：G2 lane 通报（2026-10-27 14:10）＋ 本域**自建核对器全量扫**（覆盖 go-zero / go-redis / Go stdlib / 全模块缓存 / 真源仓 / RAG 树 ⇒ 本域 **1262** 处「文件:行号」引用逐条核「文件存在 + 行号在范围内」）⇒ ⇒ **真缺陷 7 处已全部实修**（本域 1 + hot 3 + article 1 + favorite 1 + 坑档 1）⇒ ⇒ **残留 10 项全为误报或「台账在记述历史纠错」**。
 
 ### 3.1 ✅ D4 已修：`iat` 在未来的 token ⇒ 401（此前 RAG 接受、Go 拒绝）
 
@@ -223,15 +239,16 @@
 | 保护范围 | `routes.go:54` **单段** `rest.WithJwt` ⇒ **7/7 全保护** | `WebMvcConfig.java:73-76` `/comment/v1/**` ⇒ 7/7 | ✅ |
 | public 路径 | **无**（含只读的 `/comment/list`） | **无** | ✅ |
 | 密钥 | `etc/commentservice.yaml:6` `ae0536f9-…505da0` | `application.yml:64` 同值（可 env 覆盖） | ✅ |
-| claim 名 | `helper.go:11` `ctx.Value("userId")` | `CommentJwtAuthInterceptor.java:66` `CLAIM_ATTRIBUTE = "userId"` | ✅ |
+| claim 名 | `helper.go:11` `ctx.Value("userId")` | `CommentJwtAuthInterceptor.java:69` `CLAIM_ATTRIBUTE = "userId"` | ✅ |
 | userId 来源 | **仅 JWT**（6 个 Req 均无 `user_id` 字段） | **仅 JWT** | ✅ body 无法指定操作人 |
-| 缺失 / 非法 token ⇒ **401 + 空 body** | `authhandler.go:106-121` `WriteHeader(401)`，不写字节 | `CommentJwtAuthInterceptor.java:90-93` → `CommentGlobalExceptionHandler.java:79-83` `ResponseEntity.status(401).build()` | ✅ |
-| **不校验 claim 取值** | `authhandler.go:71-79` 只验签、原样透传 | `CommentJwtAuthInterceptor.java:46-51` 明确不校验 | ✅ claim 缺失 ⇒ **200 + 1006** 而非 401 |
+| 缺失 / 非法 token ⇒ **401 + 空 body** | `authhandler.go:106-121` `WriteHeader(401)`，不写字节 | 验签在 `auth/CommentJwtSignatureVerifier.java:101-125`（**2026-10-27 起搬出拦截器**）→ `CommentGlobalExceptionHandler.java:79-83` `ResponseEntity.status(401).build()` | ✅ |
+| **不校验 claim 取值** | `authhandler.go:71-79` 只验签、原样透传 | `CommentJwtAuthInterceptor.java` 类注释明确不校验 | ✅ claim 缺失 ⇒ **200 + 1006** 而非 401 |
 | `/comment/list` **不取身份** | `getcommentlogic.go` 全篇无 `extractUserID` | `CommentController.java:127` 不传 `HttpServletRequest` | ✅ 与其余 6 个端点的不对称被保留 |
-| 鉴权 vs 路由匹配顺序 | go-zero `rest/engine.go:101-116`：未注册路径不进 auth | `CommentJwtAuthInterceptor.java:85-87` 只在 `HandlerMethod` 上鉴权 | ✅ 404 不被遮蔽成 401 |
+| 鉴权 vs 路由匹配顺序 | go-zero `rest/engine.go:101-116`：未注册路径不进 auth | `CommentJwtAuthInterceptor.java:90` 只在 `HandlerMethod` 上鉴权 | ✅ 404 不被遮蔽成 401 |
 | `uid <= 0` **不拒绝** | Go 的 `extractUserID` 不判 | `CommentApiSupport.userId` 也不判 | ✅ uid=0 原样透传给 rpc |
 | 身份失败 ⇒ 1006 | 6 处 logic 首行 | `CommentApiSupport.java:100-107/166-169` | ✅ |
 | 校验顺序 | 6 个 logic：**先身份、后 rpc**；`GetComment`：**先入参、后 rpc、无身份** | 对应 6 个 Service + `GetCommentService` | ✅ 错误码优先级一致 |
+| **3s 预算作用域（验签在预算之外）** | 计时器在 Authorize **之后**起算 ⇒ 验签**不计入**预算（`rest/engine.go:108` vs `:110-112`） | `auth/GoStyleJwtAuthFilter.java:93` `@Order(+6)` ⇒ 落在 `+7 HttpMiddlewareFilter`（3s 预算起算）**之外** | 🔴 → ✅ **2026-10-27 已修**（见 `vs-common.md` §3-C-6） |
 
 ### 4.4 gRPC client
 

@@ -3,6 +3,7 @@ package com.rag.favorite.favorite.api.service;
 import com.rag.favorite.favorite.api.client.FavoriteRpcClient;
 import com.rag.favorite.favorite.api.dto.DeleteFavoriteReq;
 import com.rag.favorite.favorite.api.dto.DeleteFavoriteResp;
+import com.rag.favorite.favorite.common.span.FavoriteSpans;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Service;
 
@@ -37,24 +38,38 @@ public class FavoriteDeleteItemService {
     }
 
     public DeleteFavoriteResp deleteFavorite(DeleteFavoriteReq req, HttpServletRequest httpRequest) {
-        long userId = support.userId(httpRequest);
+        // 🔴 Go 出处（api/internal/logic/favorite/delete_favorite_logic.go:33-45）：
+        //     ctx, span := otel.Tracer("favorite-api").Start(l.ctx, "FavoriteAPI.DeleteFavorite")
+        //     defer span.End()
+        //     userID, err := extractUserID(ctx)      ← 失败 ⇒ 直接 return（**不 RecordError**、不设属性）
+        //     span.SetAttributes(attribute.Int64("biz.user_id", userID),
+        //                         attribute.Int64("biz.favorite_id", req.FavoriteId))
+        return FavoriteSpans.tracedApi(
+                FavoriteSpans.API_DELETE_FAVORITE,
+                () -> support.userId(httpRequest),
+                (span, userId) -> {
+                    span.setAttribute(FavoriteSpans.ATTR_USER_ID, userId);
+                    span.setAttribute(FavoriteSpans.ATTR_FAVORITE_ID,
+                            FavoriteApiSupport.nullToZero(req.getFavoriteId()));
+                },
+                userId -> {
+                    com.rag.favorite.favorite.proto.DeleteFavoriteReq rpcReq =
+                            com.rag.favorite.favorite.proto.DeleteFavoriteReq.newBuilder()
+                                    .setUserId(userId)
+                                    .setFavoriteId(FavoriteApiSupport.nullToZero(req.getFavoriteId()))
+                                    .build();
 
-        com.rag.favorite.favorite.proto.DeleteFavoriteReq rpcReq =
-                com.rag.favorite.favorite.proto.DeleteFavoriteReq.newBuilder()
-                        .setUserId(userId)
-                        .setFavoriteId(FavoriteApiSupport.nullToZero(req.getFavoriteId()))
-                        .build();
+                    com.rag.favorite.favorite.proto.DeleteFavoriteResp rpcResp =
+                            support.invokeRpc(() -> rpcClient.favoriteRpc().deleteFavorite(rpcReq), userId, null);
 
-        com.rag.favorite.favorite.proto.DeleteFavoriteResp rpcResp =
-                support.invokeRpc(() -> rpcClient.favoriteRpc().deleteFavorite(rpcReq), userId, null);
+                    // Go: delete_favorite_logic.go:57-62 —— rpcResp == nil || !rpcResp.Success ⇒ 5001
+                    if (rpcResp == null || !rpcResp.getSuccess()) {
+                        throw support.nullOrUnsuccessfulResponse(userId, null);
+                    }
 
-        // Go: delete_favorite_logic.go:57-62 —— rpcResp == nil || !rpcResp.Success ⇒ 5001
-        if (rpcResp == null || !rpcResp.getSuccess()) {
-            throw support.nullOrUnsuccessfulResponse(userId, null);
-        }
-
-        support.logInfo(String.format("delete favorite success, favorite_id=%d", req.getFavoriteId()),
-                userId, null);
-        return new DeleteFavoriteResp(true);
+                    support.logInfo(String.format("delete favorite success, favorite_id=%d", req.getFavoriteId()),
+                            userId, null);
+                    return new DeleteFavoriteResp(true);
+                });
     }
 }

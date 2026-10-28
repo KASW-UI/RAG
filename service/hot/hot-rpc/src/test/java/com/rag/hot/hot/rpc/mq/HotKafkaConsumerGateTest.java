@@ -15,6 +15,7 @@ import java.util.function.BooleanSupplier;
 
 import com.rag.hot.hot.rpc.HotRpcApplication;
 import com.rag.hot.hot.rpc.domain.HeavyKeeper;
+import com.rag.hot.hot.rpc.support.RealContainerHostPort;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -114,7 +115,7 @@ import static org.junit.jupiter.api.Assertions.fail;
         classes = {HotRpcApplication.class, HotKafkaConsumerGateTest.ProbeConfig.class},
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "grpc.server.port=0",
+                "grpc.server.port=22504",
                 // 绕过 Nacos：devh 的 @GrpcClient 在 Bean 初始化期就建 channel（不是懒建）
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "management.otlp.tracing.export.enabled=false",
@@ -158,7 +159,8 @@ class HotKafkaConsumerGateTest {
     @Container
     @SuppressWarnings("resource")
     static final GenericContainer<?> REDIS =
-            new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379);
+            new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379)
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindRedis(RealContainerHostPort.HOT_KAFKA_CONSUMER_GATE));
 
     @DynamicPropertySource
     static void infra(DynamicPropertyRegistry registry) {

@@ -2,6 +2,7 @@ package com.rag.comment.comment.rpc;
 
 import com.rag.comment.comment.rpc.mapper.CommentIndexMapper;
 import com.rag.comment.comment.rpc.mapper.SubjectMapper;
+import com.rag.comment.comment.rpc.support.RealContainerHostPort;
 import org.apache.ibatis.mapping.Environment;
 import org.apache.ibatis.session.Configuration;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -48,7 +49,8 @@ class CommentTransactionalSqlGateTest {
     static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("first_db")
             .withUsername("admin")
-            .withPassword("password");
+            .withPassword("password")
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.COMMENT_TRANSACTIONAL_SQL_GATE));
 
     private static final String LEDGER = "flyway_schema_history_comment_sql_gate";
 

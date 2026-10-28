@@ -3,6 +3,7 @@ package com.rag.favorite.favorite.api.service;
 import com.rag.favorite.favorite.api.client.FavoriteRpcClient;
 import com.rag.favorite.favorite.api.dto.DeleteFavoriteFolderReq;
 import com.rag.favorite.favorite.api.dto.DeleteFavoriteFolderResp;
+import com.rag.favorite.favorite.common.span.FavoriteSpans;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Service;
 
@@ -34,24 +35,38 @@ public class FavoriteDeleteFolderService {
     }
 
     public DeleteFavoriteFolderResp deleteFavoriteFolder(DeleteFavoriteFolderReq req, HttpServletRequest httpRequest) {
-        long userId = support.userId(httpRequest);
+        // 🔴 Go 出处（api/internal/logic/favorite/delete_favorite_folder_logic.go:33-45）：
+        //     ctx, span := otel.Tracer("favorite-api").Start(l.ctx, "FavoriteAPI.DeleteFavoriteFolder")
+        //     defer span.End()
+        //     userID, err := extractUserID(ctx)      ← 失败 ⇒ 直接 return（**不 RecordError**、不设属性）
+        //     span.SetAttributes(attribute.Int64("biz.user_id", userID),
+        //                         attribute.Int64("biz.folder_id", req.FolderId))
+        return FavoriteSpans.tracedApi(
+                FavoriteSpans.API_DELETE_FAVORITE_FOLDER,
+                () -> support.userId(httpRequest),
+                (span, userId) -> {
+                    span.setAttribute(FavoriteSpans.ATTR_USER_ID, userId);
+                    span.setAttribute(FavoriteSpans.ATTR_FOLDER_ID,
+                            FavoriteApiSupport.nullToZero(req.getFolderId()));
+                },
+                userId -> {
+                    com.rag.favorite.favorite.proto.DeleteFavoriteFolderReq rpcReq =
+                            com.rag.favorite.favorite.proto.DeleteFavoriteFolderReq.newBuilder()
+                                    .setUserId(userId)
+                                    .setFolderId(FavoriteApiSupport.nullToZero(req.getFolderId()))
+                                    .build();
 
-        com.rag.favorite.favorite.proto.DeleteFavoriteFolderReq rpcReq =
-                com.rag.favorite.favorite.proto.DeleteFavoriteFolderReq.newBuilder()
-                        .setUserId(userId)
-                        .setFolderId(FavoriteApiSupport.nullToZero(req.getFolderId()))
-                        .build();
+                    com.rag.favorite.favorite.proto.DeleteFavoriteFolderResp rpcResp =
+                            support.invokeRpc(() -> rpcClient.favoriteRpc().deleteFavoriteFolder(rpcReq), userId, null);
 
-        com.rag.favorite.favorite.proto.DeleteFavoriteFolderResp rpcResp =
-                support.invokeRpc(() -> rpcClient.favoriteRpc().deleteFavoriteFolder(rpcReq), userId, null);
+                    // Go: delete_favorite_folder_logic.go:57-62 —— rpcResp == nil || !rpcResp.Success ⇒ 5001
+                    if (rpcResp == null || !rpcResp.getSuccess()) {
+                        throw support.nullOrUnsuccessfulResponse(userId, null);
+                    }
 
-        // Go: delete_favorite_folder_logic.go:57-62 —— rpcResp == nil || !rpcResp.Success ⇒ 5001
-        if (rpcResp == null || !rpcResp.getSuccess()) {
-            throw support.nullOrUnsuccessfulResponse(userId, null);
-        }
-
-        support.logInfo(String.format("delete favorite folder success, folder_id=%d", req.getFolderId()),
-                userId, null);
-        return new DeleteFavoriteFolderResp(true);
+                    support.logInfo(String.format("delete favorite folder success, folder_id=%d", req.getFolderId()),
+                            userId, null);
+                    return new DeleteFavoriteFolderResp(true);
+                });
     }
 }

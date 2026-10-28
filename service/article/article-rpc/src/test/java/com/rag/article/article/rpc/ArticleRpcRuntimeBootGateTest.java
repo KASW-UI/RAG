@@ -1,5 +1,7 @@
 package com.rag.article.article.rpc;
 
+import com.rag.article.article.rpc.support.RealContainerHostPort;
+import com.rag.article.article.rpc.support.RealGrpcPort;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -8,7 +10,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -64,18 +65,38 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Testcontainers(disabledWithoutDocker = true)
 class ArticleRpcRuntimeBootGateTest {
 
+    /**
+     * 🔴 devh 打印「gRPC Server started」的那一行标志串 —— <b>提为常量</b>（2026-10-27）。
+     *
+     * <p><b>为什么必须提常量</b>：本类的「<b>等这行出现</b>」（收摊前的等待循环）与
+     * 「<b>断言这行在</b>」（最终断言）<b>两处都要用到同一个字面量</b> ⇒
+     * 若任一处被改而另一处没改 ⇒ <b>等待与断言就不再配套</b> ⇒
+     * 要么白等满 30s 上限后莫名失败，要么断言<b>平凡通过</b>（守门失效）。
+     * ⇒ 提为常量 ⇒ <b>两处共用一个定义</b> ⇒ 不可能漂移。
+     *
+     * <p>（做法照 G2 同款修复 {@code f57ff38}：like-rpc 的真启动守门同款。）
+     */
+    private static final String GRPC_STARTED_MARKER = "gRPC Server started";
+
+
     @Container
     @SuppressWarnings("resource")
     static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("first_db")
             .withUsername("admin")
-            .withPassword("password");
+            .withPassword("password")
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.RUNTIME_BOOT_GATE));
 
     @Test
     @DisplayName("真 fat jar 起真 ArticleRpcApplication：gRPC 端口真的在监听（生产 classpath + 生产 yaml）")
     void realFatJarProcessBootsAndListens() throws Exception {
         Path jar = ArticleRpcArtifactClasspathGateTest.fatJar();
-        int port = freePort();
+        // 🔴 2026-10-28（G3）：原先这里是 `freePort()`（`new ServerSocket(0)` ⇒ **OS 临时端口段
+        //    49152–65535** ⇒ 与 Docker 随机发布容器端口**同段** ⇒ 别的会话的容器先占住
+        //    `0.0.0.0:P` ⇒ 本用例 **EADDRINUSE** ⇒ 真启动守门**偶发红**）
+        //    ⇒ ⇒ 现改走本域**专用段**（global 段表预分配给 article 域的 `22400–22479`）
+        //    ⇒ ⇒ 详见 `support/RealGrpcPort`。
+        int port = RealGrpcPort.pick();
 
         List<String> command = new ArrayList<>(List.of(
                 "java", "-jar", jar.toAbsolutePath().toString(),
@@ -99,7 +120,9 @@ class ArticleRpcRuntimeBootGateTest {
         env.put("REDIS_PORT", "6379");
 
         Process process = builder.start();
-        StringBuilder log = new StringBuilder();
+        // ⚠️ 用 StringBuffer（同步）而不是 StringBuilder：本类的 sink 会被
+        //    「drain 线程」写、被「测试线程」读 ⇒ StringBuilder 不是线程安全的。
+        StringBuffer log = new StringBuffer();
         Thread drain = new Thread(() -> drain(process.getInputStream(), log));
         drain.setDaemon(true);
         drain.start();
@@ -116,14 +139,32 @@ class ArticleRpcRuntimeBootGateTest {
             }
             Thread.sleep(500);
         }
+
+        // 🔴 **收摊前先等日志行出现**（2026-10-27 · G4 在 comment-rpc 的同款用例上抓到 1 次偶发红）：
+        //   gRPC 端口 **bind 成功** 早于 devh 把「gRPC Server started」写进 stdout
+        //   ⇒ 探活一成功就 `destroyForcibly()` ⇒ drain 线程**可能还没读到**那一行
+        //   ⇒ 「日志里没有 gRPC Server started」这条断言**偶发红**。
+        // ⚠️ 注意症状的辨识度：同一用例里「gRPC 端口已在监听」与「无 NoClassDefFoundError」
+        //   两条**都通过** ⇒ 进程**真的起来了** ⇒ 是**断言与日志读取的竞态**，不是启动失败。
+        // ⇒ 故这里**等日志行出现（带上限）再收摊**，而不是加长整体启动超时。
+        long logDeadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(30);
+        while (System.currentTimeMillis() < logDeadline
+                && process.isAlive()
+                && !log.toString().contains(GRPC_STARTED_MARKER)) {
+            Thread.sleep(200);
+        }
+
         process.destroyForcibly();
         process.waitFor(30, TimeUnit.SECONDS);
+        // ⚠️ 必须 join drain 线程：它可能还没把最后一段 stdout 读完
+        //    ⇒ join 同时建立 happens-before（否则测试线程读到的 sink 是**残缺的**）。
+        drain.join(TimeUnit.SECONDS.toMillis(10));
         String output = log.toString();
 
         assertTrue(listening,
                 "真 fat jar 起不来（gRPC 端口 " + port + " 没有在监听）—— 进程日志尾部：\n" + tail(output));
-        assertTrue(output.contains("gRPC Server started"),
-                "日志里没有 devh 的「gRPC Server started」⇒ 不能算真 gRPC server 起来了。日志尾部：\n"
+        assertTrue(output.contains(GRPC_STARTED_MARKER),
+                "日志里没有 devh 的「" + GRPC_STARTED_MARKER + "」⇒ 不能算真 gRPC server 起来了。日志尾部：\n"
                         + tail(output));
         assertFalse(output.contains("NoClassDefFoundError"),
                 "日志里有 NoClassDefFoundError ⇒ 运行时 classpath 缺依赖（grpc-inprocess?）"
@@ -147,14 +188,7 @@ class ArticleRpcRuntimeBootGateTest {
         }
     }
 
-    private static int freePort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            socket.setReuseAddress(true);
-            return socket.getLocalPort();
-        }
-    }
-
-    private static void drain(InputStream in, StringBuilder sink) {
+    private static void drain(InputStream in, StringBuffer sink) {
         try (InputStream stream = in) {
             byte[] buffer = new byte[8192];
             int read;

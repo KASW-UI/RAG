@@ -2,6 +2,7 @@ package com.rag.comment.comment.rpc;
 
 import com.rag.comment.comment.rpc.domain.CommentIndexEntity;
 import com.rag.comment.comment.rpc.mapper.CommentIndexMapper;
+import com.rag.comment.comment.rpc.support.RealContainerHostPort;
 import com.rag.common.observability.RpcInterceptor.DeadlineState;
 import com.rag.common.persistence.DeadlineQueryTimeoutInjector;
 import com.rag.common.persistence.SqlTimeoutStatusTranslator;
@@ -85,7 +86,8 @@ class CommentSqlDeadlinePrecisionGateTest {
     static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("first_db")
             .withUsername("admin")
-            .withPassword("password");
+            .withPassword("password")
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.COMMENT_SQL_DEADLINE_PRECISION_GATE));
 
     /** 独立账本表 ⇒ 不与同模块其它测试类的 Flyway 账本撞号。 */
     private static final String LEDGER = "flyway_schema_history_comment_deadline_gate";

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rag.comment.comment.rpc.mapper.CommentDomainFactOutboxMapper;
 import com.rag.comment.comment.rpc.mapper.CommentFactStreamMapper;
 import com.rag.comment.comment.rpc.service.CommentDomainFactService;
+import com.rag.comment.comment.rpc.support.RealContainerHostPort;
 import org.apache.ibatis.mapping.Environment;
 import org.apache.ibatis.session.Configuration;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -69,7 +70,8 @@ class CommentFactEventTimeGateTest {
     static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("first_db")
             .withUsername("admin")
-            .withPassword("password");
+            .withPassword("password")
+            .withCreateContainerCmdModifier(RealContainerHostPort.bindPg(RealContainerHostPort.COMMENT_FACT_EVENT_TIME_GATE));
 
     /** 本类独立账本（不与其它 gate test 的账本撞号）。 */
     private static final String LEDGER = "flyway_schema_history_comment_eventtime_gate";

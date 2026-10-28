@@ -3,7 +3,6 @@ package com.rag.comment.comment.rpc.service;
 import com.rag.common.communityfact.Wire;
 import com.rag.comment.comment.rpc.domain.CommentDomainFactOutboxEntity;
 import com.rag.comment.comment.rpc.mapper.CommentDomainFactOutboxMapper;
-import io.opentelemetry.api.trace.Span;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -145,7 +144,6 @@ public class CommentFactDeliveryService {
 
             logger.info("comment fact delivery started: event={} event_id={} producer={} aggregate_version={}",
                     "comment.fact_delivery.started", event.eventId, event.producer, event.aggregateVersion);
-            Span span = Span.current();
 
             // --- ③ 投递 + 回执校验（持锁期间）
             Wire.TechnicalReceipt receipt = null;
@@ -189,10 +187,29 @@ public class CommentFactDeliveryService {
                             + "outcome={} duration_ms={} receipt_id={} offset={}",
                     "comment.fact_delivery.accepted", event.eventId, event.producer, "succeeded",
                     millisSince(started), receipt.receiptId, receipt.offset);
-            if (span != null) {
-                span.setAttribute("comment.fact.event_id", event.eventId);
-                span.setAttribute("comment.fact.aggregate_version", event.aggregateVersion);
-            }
+            // ⚠️ 这里**刻意不写 span 属性**（2026-10-27 删掉原先的 `Span.current().setAttribute` 两行）。
+            //    ⚠️ **订正一处早期误判**：此前注记写「Go 侧 fact 投递链路根本不用 span」⇒ **不准确**：
+            //       Go 侧**有**这个 span，只是建在**共享层**、且**不带属性**：
+            //       `service/common/communityfact/process.go:26`
+            //         `otel.Tracer("sea.rtw.communityfact").Start(ctx, "community.fact_delivery.dispatch")`
+            //       （全文 69 行、**零** `SetAttributes`）⇒ Go 的 `DispatchFactOnce` 从不写 span 属性
+            //       （域内 `service/comment/rpc/internal/model/` 整包 10 个非测试文件**零** span 命中）。
+            //    · RAG 侧等价 span 同样在**共享层**：`service/common/.../communityfact/Dispatcher.java:186`
+            //      （同名 `community.fact_delivery.dispatch` ＋ 同 tracer `sea.rtw.communityfact`）
+            //      ⇒ **span 拓扑两侧已对齐**，差的只是这两个属性。
+            //    · 为什么 RAG 侧这两个属性**也**写不进去（这才是删它的真正理由）：
+            //      共享层把 span 放进 **Context**（`Dispatcher.java:189` `ctx.with(span)`）而**从不 `makeCurrent`**
+            //      （该文件零 `makeCurrent`）⇒ 且 `dispatchFactOnce` 跑在**另一个线程**
+            //      （`Dispatcher.java:172-176` `communityfact-dispatch` 单线程池 `:190` `supplyAsync`）
+            //      ⇒ OTel 默认 `ThreadLocalContextStorage` 用的是**普通** `ThreadLocal`（**不继承**）
+            //      ⇒ 投递线程上 `Span.current()` 恒为 **invalid span**
+            //      ⇒ `if (span != null)` 恒真、`setAttribute` 落到 invalid span ⇒ **静默丢弃**（otel-java 的 no-op）。
+            //    ⇒ ⇒ 两侧可观测行为一致（**都没有** `comment.fact.event_id` / `comment.fact.aggregate_version`）
+            //      ⇒ 删掉是**零行为变化**的清理，**不是**改语义。
+            // ⇒ 关键信息（`event_id` / `aggregate_version`）已在上面的 `logger.info` 里 ⇒ 不丢信息。
+            // ⇒ 守门见 `CommentRpcGoSemanticsGateTest` 的
+            //    `factDeliveryDoesNotWriteSpanAttributes`（钉住「不产生 span 属性」）
+            //    + `spanCollectorIsAliveOnThisThread`（钉住装置活性，排除平凡通过）。
             return DispatchResult.of(DispatchOutcome.SENT, null);
         });
 

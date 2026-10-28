@@ -3,6 +3,7 @@ package com.rag.favorite.favorite.api.service;
 import com.rag.favorite.favorite.api.client.FavoriteRpcClient;
 import com.rag.favorite.favorite.api.dto.CreateFavoriteFolderReq;
 import com.rag.favorite.favorite.api.dto.CreateFavoriteFolderResp;
+import com.rag.favorite.favorite.common.span.FavoriteSpans;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Service;
 
@@ -34,26 +35,41 @@ public class FavoriteCreateFolderService {
     }
 
     public CreateFavoriteFolderResp createFavoriteFolder(CreateFavoriteFolderReq req, HttpServletRequest httpRequest) {
-        long userId = support.userId(httpRequest);
+        // 🔴 Go 出处（api/internal/logic/favorite/create_favorite_folder_logic.go:33-45）：
+        //     ctx, span := otel.Tracer("favorite-api").Start(l.ctx, "FavoriteAPI.CreateFavoriteFolder")
+        //     defer span.End()
+        //     userID, err := extractUserID(ctx)      ← 失败 ⇒ 直接 return（**不 RecordError**、不设属性）
+        //     span.SetAttributes(attribute.Int64("biz.user_id", userID),
+        //                         attribute.String("biz.folder_name", req.Name))   ← **未 trim 的原值**
+        return FavoriteSpans.tracedApi(
+                FavoriteSpans.API_CREATE_FAVORITE_FOLDER,
+                () -> support.userId(httpRequest),
+                (span, userId) -> {
+                    span.setAttribute(FavoriteSpans.ATTR_USER_ID, userId);
+                    // 🔴 Go 记的是 req.Name 的**原值**（不 trim）—— 与落库用的 normalizeFolderName 不同
+                    span.setAttribute(FavoriteSpans.ATTR_FOLDER_NAME,
+                            FavoriteApiSupport.nullToEmpty(req.getName()));
+                },
+                userId -> {
+                    com.rag.favorite.favorite.proto.CreateFavoriteFolderReq rpcReq =
+                            com.rag.favorite.favorite.proto.CreateFavoriteFolderReq.newBuilder()
+                                    .setUserId(userId)
+                                    .setName(FavoriteApiSupport.nullToEmpty(req.getName()))
+                                    .build();
 
-        com.rag.favorite.favorite.proto.CreateFavoriteFolderReq rpcReq =
-                com.rag.favorite.favorite.proto.CreateFavoriteFolderReq.newBuilder()
-                        .setUserId(userId)
-                        .setName(FavoriteApiSupport.nullToEmpty(req.getName()))
-                        .build();
+                    com.rag.favorite.favorite.proto.CreateFavoriteFolderResp rpcResp =
+                            support.invokeRpc(() -> rpcClient.favoriteRpc().createFavoriteFolder(rpcReq), userId, null);
 
-        com.rag.favorite.favorite.proto.CreateFavoriteFolderResp rpcResp =
-                support.invokeRpc(() -> rpcClient.favoriteRpc().createFavoriteFolder(rpcReq), userId, null);
+                    // Go: create_favorite_folder_logic.go:57-62 —— rpcResp == nil ⇒ 5001
+                    // ⚠️ Go 这一支【只判 nil】（响应消息里没有 success 字段）⇒ 用 nullResponse，
+                    //    不是 nullOrUnsuccessfulResponse。
+                    if (rpcResp == null) {
+                        throw support.nullResponse(userId, null);
+                    }
 
-        // Go: create_favorite_folder_logic.go:57-62 —— rpcResp == nil ⇒ 5001
-        // ⚠️ Go 这一支【只判 nil】（响应消息里没有 success 字段）⇒ 用 nullResponse，
-        //    不是 nullOrUnsuccessfulResponse。
-        if (rpcResp == null) {
-            throw support.nullResponse(userId, null);
-        }
-
-        support.logInfo(String.format("create favorite folder success, folder_id=%d", rpcResp.getFolderId()),
-                userId, null);
-        return new CreateFavoriteFolderResp(rpcResp.getFolderId());
+                    support.logInfo(String.format("create favorite folder success, folder_id=%d", rpcResp.getFolderId()),
+                            userId, null);
+                    return new CreateFavoriteFolderResp(rpcResp.getFolderId());
+                });
     }
 }

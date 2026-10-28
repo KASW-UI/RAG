@@ -1922,3 +1922,398 @@ readValue("  ", List)   => 抛异常: MismatchedInputException
 > 中间任何一层的「无 presence」语义都可能把它**自动抹平**。
 > ⇒ 反过来：**没有 presence 的字段（proto3 的 `repeated`/`map`、可空标量）会把空与缺混为一谈** ——
 > 想区分它们，就必须在**更靠近存储的那一层**去判。
+---
+
+## 附录 · 🧹 启动守门 flake 修法（2026-10-27 · G4 登记 · G3 域内同款）
+
+| 项 | 内容 |
+|---|---|
+| 症状 | `ArticleRpcRuntimeBootGateTest#realFatJarProcessBootsAndListens` 偶发红（G4 全量回归 2448 条里 1 failure） |
+| 根因 | **不是启动失败**：真进程 fat jar 起来 → `tcpProbe` 端口一连上就立刻 `destroyForcibly()` ⇒ **drain 线程还没读到**「gRPC Server started」⇒ 断言与日志读取**竞态**。辨识度：端口已监听 + 无 `NoClassDefFoundError` ⇒ 进程真的起来了 |
+| 修法 | ① 收摊前**先等日志标志行出现**（上限 30s、间隔 200ms）② sink `StringBuilder` → **`StringBuffer`**（跨线程读写）③ `drain.join(10s)` 建 happens-before |
+| 验证 | ✅ `ArticleRpcRuntimeBootGateTest` **1/1 绿** |
+| 守门加固（**2026-10-27 · 照 G2 同款修复 `f57ff38` 的增强**） | 🟢 **标志串提为常量** `GRPC_STARTED_MARKER` ⇒ 消除「**等待循环**」与「**断言**」两处**各写字面量**的漂移隐患（任一处被改 ⇒ 等待与断言不再配套 ⇒ 要么白等满 30s 上限后莫名失败，要么断言**平凡通过**）⇒ **两处共用一个定义** ⇒ 不可能漂移。<br>**验证**：提取后 `ArticleRpcRuntimeBootGateTest` **1/1 绿**（10.40s）· **变异 1/1 精确变红**（把常量值改成假串 ⇒ 等满 30s 上限 ⇒ 红在 `:159` 的**目标断言**、失败消息点名 `MUTANT` 且**带真实日志尾部** ⇒ 证明「进程真起来了、红的是标志串不匹配」⇒ **非假绿**）· 回滚后**字节一致**（md5 相同 ⇒ 与绿版同一份内容） |
+| 整域回归 | ✅ **article-rpc 155 条**（skipped 0）全绿 ⇒ **四域 12 模块合计 919 条**（0 failures / 0 errors / 4 skipped · 9:44 min · BUILD SUCCESS · 基线 `eb4d1d2` + 本轮改动 · 核对日期 2026-10-27 · 两口径逐模块一致） |
+| 整域回归（**本轮 · D10 落码后 · 2026-10-27**） | ✅ **article-rpc 155 条**（skipped 0）全绿 ⇒ **四域 12 模块合计 922 条**（0 failures / 0 errors / 4 skipped · **10:17 min** · BUILD SUCCESS · 基线 `deeeb8d` + 本轮文档改动 · 核对日期 2026-10-27 · 两口径逐模块一致）<br>⚠️ **上一行的 919 保留原值不改写**（那是基线 `eb4d1d2` 的口径）⇒ ⇒ **两个数不在同一条基线上 ⇒ 不可相加**；本轮本域 **article 三个模块逐条不变**（15 / 99 / 155）⇒ ⇒ 差额 **+3 全部来自 comment-rpc**（D10 新增 3 条守门，commit `deeeb8d`） |
+| 同款缺陷 | 🔴 `comment-rpc` 同款（**同属 G3 写权面** ⇒ 已在 comment 域同批修）· 🔴 `like-rpc` 同款（**属 G2 写权面** ⇒ 已回报 G2，本域**不越权改**） |
+---
+
+### 附录 · 📌 G4 侧共享层基线与影响面订正（2026-10-27 · 来自 G4 第七次全量回归）
+
+**① G4 第七次全量回归口径**（**共享层基线** ⇒ 本域下次合并 G4 分支时的对照物）：
+
+| 项 | 值 |
+|---|---|
+| 命令 | `mvn -B clean verify`（**全量**，不是 `-pl` 子集） |
+| 结果 | **BUILD SUCCESS / MVN_EXIT=0** |
+| 规模 | **52 模块 · 2457 条**（29 个有测试的模块**逐模块求和**，不按行序 tail） |
+| 计数 | **failures 0 · errors 0 · skipped 4** |
+| 耗时 | **20:28 min** |
+| 相对上次 | 第五次 2448 ⇒ **+9**（本轮新增 3×3 条守门：关闭路径 / 遮蔽契约 / 池自愈） |
+| 双侧探针 | `run-parity.sh` **EXIT=0**（56 例：一致 54 / 不一致 0 / 已签字偏离 2）＋ `run-rpc-timeout-parity.sh` **EXIT=0**（3 例） |
+| 三门禁 | `wave-lane-ownership` / `wave-role-model` / `wave-coupling` ⇒ **0/0/0** |
+| 来源 | G4 commit `5564c27`（基线含单 4 的 `a1a2e05`） |
+
+**② 🟡 影响面订正注记（**保留原值不改写** + 加注记）**：
+G4 在共享层 `docs/DRIFT/global/vs-common.md` §2 的 **A2 行**逐个 rpc **自核**（`@GrpcClient` 计数 ＋
+**六种出向方式**交叉核：`newBlockingStub` / `newFutureStub` / `newStub` / `ManagedChannel` /
+`RestTemplate` / `WebClient`）后给出**全局**口径：
+
+| 口径 | 内容 |
+|---|---|
+| **全局**（G4 自核） | **可观测 6 个**（article-rpc · comment-rpc · favorite-rpc · like-rpc · message-rpc · follow-rpc）＋ **N/A 4 个**（**hot-rpc** · task-rpc · user-rpc · admin-rpc）⇒ **6/10 可观测 ＋ 4/10 N/A** |
+| **本域面**（G3 自核） | **3/4**（article-rpc · comment-rpc · favorite-rpc 有出向面；**hot-rpc = 0 ⇒ N/A**） |
+
+⇒ ⚠️ **本域面 ≠ 全局面**：**「3/4」只覆盖本域四个 rpc 组件** ⇒ **不得被读成全局口径**。
+⇒ **可复用判据**：「**共享层缺位**」是**全域事实**，「**本域受害**」是**逐域事实** ⇒
+写影响面必须**逐域实测**（并用**多种检索方式交叉核**），且**不得把域内结论外推**。
+
+**③ G4-4 反馈单已闭合**（本域 2026-10-27 登记的共享层 U+FFFD）：
+G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）⇒ 纯注释，零行为变化」
+⇒ **本域的反馈单已落、零行为变化** ⇒ **无需再跟进**。
+---
+
+### 附录 · 📌 第六次全量回归的 `article-rpc` 2 条失败 ⇒ **根因在共享层，本域零改动**（2026-10-27 · G4 通报）
+
+| 项 | 内容 |
+|---|---|
+| 现象 | `ArticleGrpcInterceptorWiringTest.serverSideTimeoutIsActuallyEnforced` ⇒ `actual status=INTERNAL description=panic: Task … rejected from ScheduledThreadPoolExecutor[Terminated, …]`；另一条 **`handler` 根本没被调用** |
+| **归属** | 🔴 **根因在共享层**（`service/common`）⇒ **本域零改动、那两条用例不用改**（G4 已修）⇒ ⚠️ **别把它读成「article-rpc 有缺陷」** |
+| 根因 | `RpcInterceptor` / `HttpMiddleware` 的三个**进程级静态池**是 `static final` ⇒ `shutdown()` **永久终止** ⇒ surefire **一模块一 JVM** ⇒ **模块内多个 Spring 上下文** ⇒ 前一个上下文关闭后，后续上下文里 `schedule()/submit()` **被拒** ⇒ 拦截器返回 **INTERNAL** 而不是 **DEADLINE_EXCEEDED** |
+| 🔴 **为什么前五轮全量都绿** | 修 G1 派单 #8 之前，纯 gRPC 进程的 `@PreDestroy` **先抛 `NoClassDefFoundError`** ⇒ `RpcInterceptor.shutdown()` **根本没机会执行** ⇒ 三个静态池**侥幸存活** ⇒ ⇒ **那不是「本来就对」，是「缺陷把保护罩挡住了」** |
+| 修法 | 三个池改 `AtomicReference` + CAS 自旋 ⇒ **终止后按需重建** ⇒ 落 `service/common`（**G4 写权**）⇒ **本域不用改** |
+| 实测 | `article-rpc` **154 条 / 0 失败**（修前同模块 2 条失败）⇒ 已转绿 |
+| **教训（可复用）** | ① **「跑绿 ≠ 对」的第四种形态：绿是因为那条路径根本没被执行过** ⇒ 拿到「一直绿」的结论时多问一句「**这条路径在本轮之前真的被执行过吗**」——不只问「测试绿不绿」，还要问「**有没有被另一个缺陷挡在前面**」。<br>② **归属判定看「根因落在哪一层」，不看「失败用例在哪个域」** ⇒ 失败用例在别人域、根因在共享层 ⇒ **修共享层，域侧零改动**（用例不用改）。<br>③ **「修好一个缺陷 ⇒ 另一个潜伏缺陷显形」不是意外而是常态** ⇒ 修缺陷前先想「**它挡住了什么**」⇒ 修完要准备接住新暴露的问题，而不是把它当成「回归失败」。 |
+
+---
+
+### 附录 · 📌 订正注记（2026-10-27 · G3）：G4 **第八次**全量口径（**保留上文第七次原值不改写**）
+
+**① G4 第八次全量回归口径**（来源 G4 commit `23d1c2a` §4.10.11）：
+
+| 项 | 值 |
+|---|---|
+| 命令 | `mvn -B clean verify`（**全量**，不是 `-pl` 子集） |
+| 结果 | **BUILD SUCCESS / EXIT=0** |
+| 规模 | **52 模块 · 2461 条**（29 个有测试的模块**逐模块求和**，不按行序 tail） |
+| 计数 | **failures 0 · errors 0 · skipped 4** |
+| 耗时 | **20:21 min** |
+| 相对上次 | 第七次 2457 ⇒ **+4** |
+| 双侧探针 | `run-parity.sh` **EXIT=0**（56 例）＋ `run-rpc-timeout-parity.sh` **EXIT=0**（3 例） |
+| 三门禁 ＋ 台账三门禁 | **0/0/0 ＋ 0/0/0** |
+
+⚠️ **「+4」的归因是【推断】**：依据 = G4 `23d1c2a` 的 §4.10.9 记「FB-04（A9）落码 … **守门 4 条** / 变异 4-4」⇒ **条数吻合**；
+（同轮的 §4.10.10 是 **U+FFFD 纯注释**自修 ⇒ 不产生测试条数。）
+
+⚠️ **口径边界（不可相加）**：**2461 是 G4 树的口径**（基线含 G4 单 4 的 `0c72969`）⇒
+**本域的 919 条是 G3 树的口径**（4 域 × 3 组件）⇒ **两个数不在同一条基线上 ⇒ 不可相加**；
+合并后总数会变 ⇒ **波末收口回归才是最终口径**。
+
+⚠️ **本块是「加注记」，不是「改原值」**：上文第七次口径（2457 条 / 20:28 min / `5564c27`）**原样保留** ⇒
+读本域历史结论的人**以两块并列为准** ⇒ ⇒ **不要把第八次误读成「第七次作废」**。
+
+## 二十三、🔴🟢 **Testcontainers 宿主口钉口** —— 把 `PF-ARTICLE-RPC-016` 的**根因**治掉（核对日期 2026-10-28 02:4x）
+
+> **起因**：G4 台账 §4.10.58 分配了「Testcontainers 宿主口段」并**明写两句**：
+> ① 「Testcontainers **没有「宿主口段」这个概念** ⇒ 实测 `TestcontainersConfiguration` 的配置项里**零个** `port` 相关项 ⇒ ⇒ 「指定一段」**只能逐容器固定口**」；
+> ② 「**本层未实测的两层**：① `PostgreSQLContainer` **不能**直接换成 `FixedHostPortGenericContainer`（后者不带 PG 的初始化/JDBC 支持）⇒ ⇒ 正确形态应是 `PostgreSQLContainer` ＋ `withCreateContainerCmdModifier(...)` 显式绑口；② **「显式绑口后 `getMappedPort()` 是否返回那个固定口」未实测** ⇒ ⇒ **域侧落地时必须先写一条探针验证，不能照抄**」。
+> ⇒ ⇒ 本节就是那个「**域侧探针 + 落码**」⇒ ⇒ **G4 的未知项由本域实测回答**。
+
+### 二十三.1 🔴 先答 G4 那个未知项（**实测，不是推断**）
+
+**探针**（临时落码，跑完即删；正式守门已接管该职责）：`service/article/article-rpc/src/test/java/com/rag/article/article/rpc/support/HostPortMechanismProbeTest.java`
+（**Testcontainers 2.0.5** · `docker-java-api 3.7.1`）
+
+| 机制 | 做法 | `getMappedPort()` | `getFirstMappedPort()` | 那个固定口上**是谁** |
+|---|---|---|---|---|
+| **A** | `withCreateContainerCmdModifier(cmd -> cmd.getHostConfig().withPortBindings(new PortBinding(Ports.Binding.bindPort(pin), new ExposedPort(5432))))` | **22850（== 钉的口）** ✔ | 22850 ✔ | **JDBC 连 22850 成功** · `current_database()`=`probe_db` · `inet_server_port()`=**5432** ✔ |
+| **B** | 子类暴露 `addFixedExposedPort(pin, 5432)`（= `FixedHostPortGenericContainer` 同款） | **22851（== 钉的口）** ✔ | 22851 ✔ | **JDBC 连 22851 成功** · 同上 ✔ |
+
+⇒ ⇒ **「显式绑口后 `getMappedPort()` 是否返回那个固定口」＝ 是**（两条机制都成立）⇒ ⇒ **G4 的未知项有答案了**。
+⇒ ⇒ **落码用机制 A**（G4 台账指定的那个形态）；**机制 B 一并留档** ⇒ 「不止一条路可行」⇒ ⇒ 避免后来人以为只有 A、或反过来去写 `PostgreSQLContainer` 的子类。
+
+⚠️ **口径**：只断言「数字相等」**不够** ⇒ ⇒ 数字相等也可能是「我读到了自己的期望值」⇒ ⇒ 必须**真连一次**：
+JDBC 连**固定口** + `inet_server_port()` 回报**容器内口** ⇒ ⇒ 才证明「那个口上不是别的 PG」。
+（Redis 同款：`PING\r\n` ⇒ 期望 `+PONG`。）
+
+### 二十三.2 落码清单（**4 个模块 · 28 个测试类**）
+
+| 模块 | 域段（G4 分配） | 本模块宿主口段 | 脚手架段 | 容器数 | 落点 |
+|---|---|---|---|---|---|
+| `article-rpc` | `22850–22879` | `22850–22869` | `22870–22879` | **9** 个 PG | `service/article/article-rpc/src/test/java/.../support/RealContainerHostPort.java` |
+| `comment-rpc` | `22880–22909` | `22880–22899` | `22900–22909` | **11** 个 PG + **1** 个 Redis | `.../comment/rpc/support/RealContainerHostPort.java` |
+| `favorite-rpc` | `22910–22939`（域段横跨两模块 ⇒ 取**下半段**） | `22910–22919` | `22920–22929` | **8** 个 PG | `.../favorite/rpc/support/RealContainerHostPort.java` |
+| `favorite-api` | 同上 ⇒ 取**上半段** | `22930–22934` | `22935–22939` | **1** 个 Redis | `.../favorite/api/support/RealContainerHostPort.java` |
+| `hot-rpc` | `22940–22969` | `22940–22959` | `22960–22969` | **3** 个 Redis | `.../hot/rpc/support/RealContainerHostPort.java` |
+
+⇒ ⇒ **切法沿用 comment 域已定的约定**（见 `comment-rpc` 的 `support/RealGrpcPortTest` 的脚手架段说明）：
+**下段 = Testcontainers 宿主口 · 上段 = 守门脚手架段** ⇒ ⇒ **两者零重叠**。
+⚠️ **favorite 域段横跨两个模块** ⇒ ⇒ 必须**再按模块切一刀** ⇒ ⇒ 否则 `favorite-rpc` 与 `favorite-api` 同跑时**会撞同一个口**。
+⚠️ **`hot-rpc` 的 Redis 容器**原本也吃随机口（`new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))`）⇒ ⇒ **同类根因** ⇒ ⇒ 一并钉。
+⚠️ **`hot-rpc` / `comment-rpc` 的 `docker run -p 127.0.0.1:<port>:6379` 那两处**（断连对拍）⇒ ⇒ **本来就是显式口** ⇒ ⇒ 不在本次范围内。
+
+### 二十三.3 三条纪律（本轮踩出来的，别重踩）
+
+1. 🔴 **源扫必须先剥注释**（状态机实现，**不动字符串字面量**）
+   ⇒ ⇒ 本轮守门第一版**把 javadoc 里的示例** `RealContainerHostPort.bindPg(RealContainerHostPort.XXX)` **当成了真代码**
+   ⇒ ⇒ 报了一条**假红**（「`XXX` 没登记」）⇒ ⇒ 修法 = 扫之前先剥注释（注释内容替换成**等长空格** ⇒ 行号不变）。
+2. 🔴 **登记册必须按「常量名」登记，不能按「值」**
+   ⇒ ⇒ 段的边界常量 `FIRST = 22850` 与第一个登记口 `GRPC_INTERCEPTOR_WIRING = 22850` **同值**
+   ⇒ ⇒ 若按值反查名字，会把 `FIRST` 当成登记项 ⇒ ⇒ 守门对不上账 ⇒ ⇒ 只能按名字登记。
+3. 🟡 **「每个测试类一个专属口」而不是「全模块共用一个口」**
+   ⇒ ⇒ surefire 默认 1 fork、无 parallel 配置 ⇒ ⇒ 模块内**串行** ⇒ ⇒ 理论上共用一个口也能跑
+   ⇒ ⇒ 但那样有「上一个类刚停、下一个类立刻抢同一个口」的**释放窗口** ⇒ ⇒ 撞上 = `EADDRINUSE`（响亮的失败，但仍是抖动）
+   ⇒ ⇒ ⇒ 每个测试类一个专属口，**全域不复用**。
+
+### 二十三.4 守门 + 变异验证
+
+**守门**（每模块一份 `support/RealContainerHostPortTest.java`）：**5 条**（article / favorite-rpc / favorite-api / hot-rpc）＋ **6 条**（comment，多一条 Redis 活体）
+
+| # | 断言 | 守的是什么 |
+|---|---|---|
+| ① | `registeredPortsAreInsideTheSegmentUniqueAndOutOfTheEphemeralRange` | 分配合规：段内 · 唯一 · **不落进 OS 临时端口段** |
+| ② | `segmentsDoNotOverlapAndStayInsideTheDomainSegment` | 宿主口段与脚手架段**零重叠**、都在域段内 |
+| ③ | `everyContainerDeclaringTestClassIsPinned` | **守恒**：每个「起容器」的测试类都钉了口（漏钉 ⇒ 抓出来） |
+| ④ | `everyPinnedPortIsRegisteredAndUsedExactlyOnce` | **守恒**：引用的口在白名单里 · 每个登记口**恰好被引用一次**（重复 ⇒ 抓出来） |
+| ⑤ | `pinnedPostgresReportsTheFixedHostPortAndServesPostgresOnIt` / `pinnedRedisReportsTheFixedHostPortAndAnswersPing` | **机制生效（活体）**：`getMappedPort()` == 固定口 ＋ 那个口上就是我的容器 |
+
+**变异验证**（`article-rpc` 那份，5 轮，**每轮只翻一个变量**）：
+
+| 变异 | 预期 | 实测 |
+|---|---|---|
+| **M1** 删掉一个测试类的钉口调用 | 红在 ③ | ✔ 红在 `everyContainerDeclaringTestClassIsPinned` |
+| **M2** 两个类用同一个口 | 红在 ④ | ✔ 红在 `everyPinnedPortIsRegisteredAndUsedExactlyOnce` |
+| **M3** 登记册删一项 | 红在 ④ | ✔ 同上 |
+| **M4** 登记口改成 `22899`（越段） | 红在 ① | ✔ 红在 `registeredPortsAreInsideTheSegmentUniqueAndOutOfTheEphemeralRange` |
+| **M5** 绑定到 `0`（机制失效） | 红在 ⑤ | ✔ 红在 `pinnedContainerReportsTheFixedHostPortAndServesPostgresOnIt` |
+
+⇒ ⇒ **5/5**：每轮**编译通过** ＋ **红在目标断言** ＋ 还原后 **sha256 逐字节一致**。
+
+### 二十三.4-bis 📌 **补齐（2026-10-28 · G3）**：「裸 `docker run` 起容器」原先落在守门的**盲区**里
+
+**原文保留**：§二十三 的落码范围写的是「**Testcontainers** 宿主口钉口」⇒ ⇒ 它的守门特征
+（`CONTAINER_DECL`）也只认 Testcontainers 的两种容器声明（`new PostgreSQLContainer` / `new GenericContainer`）。
+
+**📌 订正（2026-10-28）**：「起容器」**不止 Testcontainers 一种** ⇒ ⇒ hot 域的
+`HotRedisDisconnectFastRejectGateTest` 用**裸 `docker run -p 127.0.0.1:<port>:6379`** 起 Redis
+⇒ ⇒ 它**没有** `bindRedis(...)` 调用 ⇒ ⇒ **守门特征数不到它的钉口** ⇒ ⇒
+**它原先落在「起容器 ⇒ 必须钉口」这条机械约束的盲区里** ⇒ ⇒ **缺口就是这么漏过去的**
+（而 comment 域那一份**已经**用 `RealGrpcPort.pick()` 钉段 ⇒ ⇒ **同类不同命**）。
+
+**⇒⇒ 本轮补齐（域侧自修 · 不派单）**：
+
+| # | 落点 | 内容 |
+|---|---|---|
+| ① | `service/hot/hot-rpc/.../support/RealContainerHostPort.java` | 新增两个**登记口** `HOT_RD_REJECT_GATE = 22943`（A 组）/ `HOT_RD_DEFAULT_GATE = 22944`（B 组）⇒ ⇒ **两组各占一个口**（不能复用：容器还在占着）⇒ ⇒ 并登记进 `TEST_CLASS_PORT_NAMES`；新增 `pinned(int)`（校验 ＋ 原样返回）供**非 Testcontainers** 形态使用 |
+| ② | `service/hot/hot-rpc/.../HotRedisDisconnectFastRejectGateTest.java` | 宿主口由 `freePort()`（**OS 临时端口段**）⇒ 改为 `RealContainerHostPort.pinned(RealContainerHostPort.HOT_RD_*_GATE)`；**删掉 `freePort()`** 与相关 import |
+| ③ | `service/hot/hot-rpc/.../support/RealContainerHostPortTest.java` | 🔴 **守门形态扩展（这才是「堵住」的关键）**：`CONTAINER_DECL` **一并识别裸 `docker run`**；`PIN_CALL` **一并识别 `pinned(...)`** ⇒ ⇒ ⇒ **缺口被机械堵住，不靠人记得** |
+
+**验证（2026-10-28）**：
+
+- `RealContainerHostPortTest` **5 条 / 0 failures / 0 errors**（新增 2 个登记口后仍绿 ⇒ 段内 · 唯一 · 不落 OS 临时段 · 引用恰好一次 全过）；
+- `HotRedisDisconnectFastRejectGateTest` **2 条 / 0 failures / 0 errors**，实测 **A(REJECT_COMMANDS) = 0 ms · B(DEFAULT) = 3009 ms**（差 3009 ms）
+  ⇒ ⇒ **钉口没有改变被测行为**（钉口前 A=1 ms / B=3007 ms ⇒ 同量级）⇒ ⇒ **这次只动「口从哪来」，不动「测什么」**；
+- **变异（M1）**：把钉口退回 OS 临时端口字面量 ⇒ ⇒ **红 2 条**
+  ⇒ `everyContainerDeclaringTestClassIsPinned`（「起容器但没钉口」）
+  ＋ `everyPinnedPortIsRegisteredAndUsedExactlyOnce`（登记口成孤儿）
+  ⇒ ⇒ **守门有判别力，不是恒真**；还原后 sha 复原 ✔。
+
+**⇒⇒ 口径订正（下一轮照这个读）**：§二十三 的覆盖范围是「**Testcontainers 容器**的宿主口」；
+**裸 `docker run` 起的容器不在其中** ⇒ ⇒ **凡用裸 docker 起容器的探针，都要自己钉段**
+（comment 域已做 · hot 域本轮补上）⇒ ⇒ **下一轮若再出现裸 docker 起容器，先查它钉没钉口**。
+
+### 二十三.5 证据强度（**分层读，别混**）
+
+| 事项 | 强度 | 说明 |
+|---|---|---|
+| 「钉口机制可用（两条都成立）」 | **L4**（本域活体） | 探针 + 守门都真起过容器、真连过 |
+| 「本域 28 个测试类不再把宿主口放进 OS 临时端口段」 | **L4**（结构事实 ＋ 源扫守恒） | 段号 `22850–22969` 全在 `49152–65535` 之外 ⇒ **这是结构事实，不是「跑绿了」** |
+| 「宿主口撞口这类 flake 今后不再发生」 | 🟡 **推断** | 一次全量绿**证明不了复发概率** ⇒ 判据是上面的**结构事实** |
+| 与 Go 侧的一致性 | **N/A** | 这是**测试基础设施**，**不涉及任何运行时行为** ⇒ ⇒ **不属于 §3.1 的语义对齐范围** |
+
+### 二十三.6 📌 顺带留档：`FavoriteDdlParityTest.java` 里的 **4 个真实 NUL 字节**（**不是损坏**）
+
+⇒ ⇒ 该文件第 136 / 183 行是 `"\0"`（**真实 NUL 字节**，不是转义序列）⇒ ⇒ 用途 = **Redis 复合 key 的分隔符**（**故意的夹具**）
+⇒ ⇒ **后果**：`grep` 把该文件判成 **binary** ⇒ `git diff` 也按二进制处理 ⇒ ⇒ **不是 U+FFFD、不是编码损坏**
+⇒ ⇒ 🔴 **不要「修」**（与 `article-api` 的 `ArticleApiMvcPipelineTest` 那 2 处 U+FFFD **同款**处置：故意测试数据 ⇒ 保持原样）
+⇒ ⇒ ⚠️ 但**脚本化改文本时要注意**：读写必须**按 UTF-8 逐字节往返** ⇒ ⇒ 本轮迁移脚本已加断言「**NUL 字节数不变**」。
+
+#### 📌 订正注记（2026-10-28 10:2x · G3）—— 上面那句「**不要「修」**」【过度推广】，且「同款处置」**不成立**
+
+⇒ **已改（2026-10-28）**：那 4 个真 NUL **已换成 Java 源码转义 `"\0"`**（八进制转义 ＝ `U+0000`）⇒ ⇒ 文件**变回文本**（`b'\x00'` 计数 **4 → 0**）⇒ ⇒ **零行为变化**（实测 `FavoriteDdlParityTest` **1 条 / 0f / 0e / 0s / BUILD SUCCESS**，真 PG 活体）⇒ ⇒ **上面的行号（第 136 / 183 行）也是错的** ⇒ 实测（改前）NUL 在 **`:138` / `:185`**。
+⇒ ⇒ **为什么「同款处置」不成立**：
+- **`ArticleApiMvcPipelineTest` 那 2 处 U+FFFD** ＝ **测试载荷本身**（**被测对象**）⇒ 真字节**必须留**（改了永远找不到 ⇒ 假红）⇒ **不许动**；
+- **本条那 4 个真 NUL** ＝ **可改「写法」的夹具**（值是 Redis 复合 key 的分隔符）⇒ ⇒ **值不动、只把写法从真字节换成源码转义** ⇒ ⇒ **该改**。
+⇒ ⇒ 🔴 **但真正该记的是另一半**（G4 通报 · G3 确认）：**真 NUL 的真正代价不是语义，是【git 把该文件当二进制】⇒ 三方合并不做文本合并 ⇒ `git merge-tree --write-tree` 产出「揉出来」的第三版且【不报冲突】⇒ ⇒「零冲突」推不出「内容完整」** ⇒ ⇒ 这才是必须改写法的理由 ⇒ ⇒ 逐条 ⇒ [`favorite/rpc.md` 的 NUL 转义一节](../favorite/rpc.md#📌-nul-转义2026-10-28--g3-真-nul-字节换成-java-源码转义零行为变化且让文件变回文本) ＋ [`PIT-FAV-RPC-040` 订正节](../../Pitfalls/favorite/rpc.md#🔴-订正2026-10-28-102x--g3-第-2-条处置的理由是错的且真-nul-的真正代价不是语义)。
+📌 **订正（2026-10-28 10:4x · G3）—— 上面那段里的「产出『揉出来』的第三版且【不报冲突】」两处措辞【被实测推翻】**（原文保留不改写）：决定性实验（五组对照 · git 2.50.1 · base/ours/theirs 三方各异）⇒ ⇒ **git 报 `warning: Cannot merge binary files` ＋ `CONFLICT (content)` ＋ 退出码 1**（**不**是不报冲突）⇒ ⇒ 预演树里该文件**取 ours**（**不是**「揉出来的第三版」）⇒ ⇒ 真合并留 **stage 1/2/3** ⇒ `git commit` 被拒 ⇒ ⇒ **不是「静默提交坏内容」**⇒ ⇒ 真正的危害 ＝「**报冲突但【不产生冲突标记】** ⇒ 工作区看起来正常 ⇒ 人若直接 `git add` 提交 ⇒ 另一侧改动被丢」⇒ ⇒ 🔴 **最危险的一条（D 组）**：**只要 merge-base 还含真 NUL，即使两侧都已去 NUL，这次合并仍走二进制路径** ⇒ ⇒ **「我这边修了 NUL」不足以保证合并安全** ⇒ ⇒ 逐条 ⇒ [`PIT-FAV-RPC-040` 订正第二轮](../../Pitfalls/favorite/rpc.md#🔴-订正第二轮--2026-10-28-104x--g3-决定性实验已做不报冲突与揉出第三版两处措辞被实测推翻)。
+
+### 📌 订正注记（2026-10-28 03:0x）—— **上面那两笔提交信息里的「门禁 16/18、红 2」是错的**
+
+| 项 | 提交信息里写的 | **实测（正确）** |
+|---|---|---|
+| 门禁 | 「**16/18 EXIT=0**（红 2）」 | **15/18 EXIT=0 · 红 3** |
+| 红的那几条 | 只列了 `check-ledger-count` ＋ `check-wave-coupling` | ⇒ **漏了第三条 `check-ddl-static`**（users 域**既知**的 9 处类型差异 ⇒ **不在本域** ⇒ 预期内红） |
+
+⇒ ⇒ **三条红的成因各不相同，别混**：
+① `check-ledger-count`（索引 315 / 实测 **331**）⇒ **预期内** ⇒ 合并后**统一** `--fix`（⛔ 不要各 lane 各自 `--fix`）；
+   📌 **订正（2026-10-28 10:3x · G3）—— 这里的 331 已过期**（台账条目数在波次中持续增长）⇒ ⇒ **同节 §24.2 的表已更新为 332**，而 §24.2 之后又变了 ⇒ ⇒ **当前实测 = 333（差 +18）** ⇒ ⇒ **原 331 保留不改写**。
+② `check-ddl-static`（users 域既知 9 处）⇒ **不在本域** ⇒ 本域零改动；
+③ `check-wave-coupling`（`common_radiation` 快照）⇒ = **G4-9** ⇒ 等 G4 更新共享矩阵。
+
+⇒ ⇒ **纪律**：回执里的门禁口径**必须逐条点名红的那几条** ⇒ ⇒ 只报「几个红」不给成因 ⇒ ⇒ 下一轮的人分不清「真红」与「预期红」。
+
+### 二十三.7 🟢🔴 **gRPC 真进程端口也迁出 OS 临时段**（**13 处** ⇒ 本域专用段 `22400–22479`）· 2026-10-28 10:5x · G3
+
+**13 处的形态拆解**：`grpc.server.port=0`（**属性形态**）**7** ＋ `--grpc.server.port=0`（**进程参数形态**）**1** ＋ `freePort()`（**裸取临时口**）**1** ＋ `forPort(0)`（**进程内 gRPC server**）**4**。
+
+**§二十三 治的是「容器宿主口」；这一节治的是另一类口 —— 「被测进程自己 listen 的 gRPC 口」。**
+
+#### 起因（域侧台账早就记着，我先前只当它是「等 G4 派单」⇒ **误判**）
+
+`docs/DRIFT/article/vs-common.md` 的 **A5 行**（2026-10-27 G3 实测补登）已写明：本域**测试面**有 **9 处**落 **OS 临时段 49152–65535**（＝ **Docker 随机发布容器端口用的同一段** ⇒ 别的会话的容器先占住 ⇒ `EADDRINUSE` ⇒ 环境性抖动）—— **8 处** `@SpringBootTest` 写 `"grpc.server.port=0"` ＋ **1 处** `ArticleRpcRuntimeBootGateTest.java:185` 的 `new ServerSocket(0)`（真 fat jar 进程口）。
+⚠️ **那一行当时写着「需要 global 段表先分配一段（预留池 `22200–22599` 里挑一段）」⇒ ⇒ 我把它列成「⛔ 等 G4 分配」⇒ ⇒ 那是误判** ⇒ ⇒ **global 段表 §4.10.19.3 早就把 `22400–22499` 预分配给 article 域**（状态「本层预分配 · **域侧未落码**」）⇒ ⇒ **本项本来就是域侧自己的活**（AGENTS.md §5.3d「域侧能自修的域侧修」）。
+
+#### 落码（9 处全迁 ＋ 1 个机制类 ＋ 1 份守门）
+
+| 项 | 值 |
+|---|---|
+| 机制类 | **新增** `service/article/article-rpc/src/test/java/.../support/RealGrpcPort.java`（`FIRST=22400` / `LAST=22479` ＋ **双地址 bind 自检** `0.0.0.0` ＋ `127.0.0.1` ＋ `holders(port)` 诊断）|
+| 守门 | **新增** `support/RealGrpcPortTest.java` ⇒ **6 条** = 选取逻辑 **4 条** ＋ **源扫 2 条** |
+| 迁 ① | **7 处** `@SpringBootTest` 的**属性形态** `"grpc.server.port=0"` ⇒ 从 `properties` 里**删掉**该行 ＋ 在**已有的** `@DynamicPropertySource` 方法里注册 `r.add("grpc.server.port", RealGrpcPort::pick)` |
+| 迁 ② | **1 处** `ArticleRpcRuntimeBootGateTest.java` 的 `freePort()` ⇒ `RealGrpcPort.pick()`；**删掉 `freePort()` 方法与 `java.net.ServerSocket` import** |
+| 迁 ③ | **1 处** `ArticleSchemaGateStartupOrderTest.java`（**进程参数形态**：`app.run("--grpc.server.port=0", …)`）⇒ `"--grpc.server.port=" + RealGrpcPort.pick()` |
+| 迁 ④ | **4 处** `ServerBuilder.forPort(0)` ⇒ `forPort(RealGrpcPort.pick())`（`ArticleGrpcInterceptorWiringTest` 2 ＋ `ArticleRpcSlowThresholdGateTest` 2）|
+
+🔴 **为什么是「扩展已有的 `@DynamicPropertySource` 方法」而不是新增一个** ——
+Spring 的 **context cache key** 包含 `properties`、但**不含 `@DynamicPropertySource` 的值** ⇒ ⇒
+若本类的 properties 与同模块另一个 `@SpringBootTest` **恰好相同** ⇒ ⇒ 两者**共享同一个 Spring 上下文** ⇒ ⇒
+共享上下文里只会有**一个** gRPC server（端口由**先建上下文的那个类**的 `@DynamicPropertySource` 决定）。
+⇒ ⇒ **本轮刻意把 8 个类的 properties 里的 `port=0` 那一行【同时删掉】** ⇒ ⇒ 它们的 properties **互相仍然相同** ⇒ ⇒
+**上下文共享关系与迁移前逐字相同**（零行为变化）⇒ ⇒ 端口由**第一个建上下文的类**从本域专用段挑一个 ⇒ ⇒ **全程零 OS 临时端口**。
+⚠️ **踩过的坑（已修）**：迁移脚本的守恒断言第一版写的是「改完源码里不得再出现 `grpc.server.port=0` 这个**子串**」⇒ ⇒ **它把自己新写的说明注释也判成违规** ⇒ ⇒ 改成只认**属性字面量形态**（带引号+逗号）⇒ ⇒ **判据要能区分「代码」与「散文」**。
+
+#### 段内再切一刀（与 comment 域同款约定）
+
+| 段 | 用途 | 谁用 |
+|---|---|---|
+| `22400–22479`（80 口） | **真进程 gRPC server 端口** | `RealGrpcPort.FIRST/LAST` |
+| `22480–22499`（20 口） | **守门脚手架段**（造「已被占」样本）| `RealGrpcPortTest.SCRATCH_FIRST/LAST` |
+
+⇒ ⇒ **必须不相交的理由**：全量套件里**上一个测试类的 gRPC server 还活着**（Spring 缓存测试上下文）⇒ ⇒ 若守门去占**生产段里的**口 ⇒ 就可能撞上那个还活着的 server ⇒ ⇒ **守门自己的样本会 `BindException`** ⇒ ⇒ 守门被环境左右 ⇒ ⇒ 所以守门段与生产段**零重叠**（同 comment 域的 `RealGrpcPortTest`）。
+⇒ ⇒ 与本域**容器宿主口段 `22850–22879`**（§二十三.2）**零重叠** ⇒ ⇒ 两个机制互不抢口。
+⇒ ⇒ **零跨域协调**：全部落在 global 段表**已预分配给 article 域**的那一段内。
+
+#### 📌 口径订正（2026-10-28 · G3）：**A5 行那「9 处」只数了「Spring 上下文形态」** ⇒ 本域实迁 = **13 处**
+
+⚠️ **被订正的是 `docs/DRIFT/article/vs-common.md` 的 **A5 行**（2026-10-27 G3 实测补登 · 已提交）——**那一行保留不改写** ⇒ ⇒ **它写的「9 处」要按本注记读**。
+⇒ ⇒ **A5 行那 9 处** = **8 处** `"grpc.server.port=0"` ＋ **1 处** `freePort()`（`ArticleRpcRuntimeBootGateTest.java`）⇒ ⇒ **漏了 4 处同域、同一个 OS 临时段的** `ServerBuilder.forPort(0)`（**进程内**起 gRPC server，不是 Spring 上下文）
+⇒ ⇒ 实测 4 处 = `ArticleGrpcInterceptorWiringTest.java` **2 处** ＋ `ArticleRpcSlowThresholdGateTest.java` **2 处**
+⇒ ⇒ ⇒ **本域本轮实迁 = 9 + 4 = 13 处**（本节标题与上表按 **13** 写）。
+⚠️ **上表「迁 ①」的口径**（A5 行表述略含糊，此处钉死）：**7 处**是 `@SpringBootTest(properties=…)` 里的**属性形态**
+（`ArticleGrpcInterceptorWiringTest` · `ArticleJsonbResultMapWiringTest` · `ArticleNotNullUpdateStrategyWiringTest` ·
+`ArticleRpcSlowThresholdGateTest` · `ArticleSpringContextWiringTest` · `ArticleTransactionWiringTest` ·
+`service/ArticleNullJsonbToProtoMappingTest`）**＋ 1 处**是**进程参数形态**（`ArticleSchemaGateStartupOrderTest` 的 `--grpc.server.port=0` ⇒ 归「迁 ③」）。
+⚠️ **为什么这条订正重要**：若按 A5 行去核「清零了没有」⇒ ⇒ **会漏掉这 4 处** ⇒ ⇒ **A5 行需按本注记读**。
+
+#### 🔴 守门最后两条是「源扫」—— 才是真正**堵住缺口**的部分
+
+| 守门 | 断言 |
+|---|---|
+| `noTestSourceFallsBackToTheEphemeralPortSegment` | 本模块测试源码（**剥注释后**）不许再出现 **`grpc.server.port=0`** / **`--grpc.server.port=0`** / **`new ServerSocket(0)`** / **`freePort(`** ⇒ ⇒ **三种回潮形态一次堵住**（属性形态 / 进程参数形态 / 辅助方法形态）|
+| `everyGrpcServerPortDeclarationGoesThroughRealGrpcPort` | 凡（剥注释后）提到 `grpc.server.port` 的文件**必须**引用 `RealGrpcPort` ⇒ ⇒ 「新增一个测试类却忘了走专用段」会被抓住（**守恒**）|
+
+⚠️ **禁止清单刻意用拼接构造**（`"grpc.server.port=" + "0"`）⇒ ⇒ 这些字面量**不会连续出现在守门文件里** ⇒ ⇒ **源扫不会把自己扫成违规**（否则守门会永远红在自己身上）。
+⇒ ⇒ 复用同包的 `RealContainerHostPortTest.stripComments(...)`（**剥注释的状态机**，**不动字符串字面量** ⇒ §二十三.3 纪律 ①）⇒ ⇒ **不重复实现**。
+
+⚠️ **一条诚实的边界（TOCTOU）**：`pick()` 返回时口是空闲的，但**被测进程真正 bind 它之前**存在窗口 ⇒ ⇒ 本类**只能把概率压低、不能归零** ⇒ ⇒ 这正是「本段独占给本域」的意义（而不是「大家共用一个大段、各自碰运气」）。
+
+**证据强度**：**L3**（源码静态 ＋ 守门用例 ＋ 源扫）⇒ ⇒ 与 Go 侧的一致性 **N/A**（**测试基础设施**，不涉及任何运行时行为 ⇒ 不属 §3.1 语义对齐范围）。
+📌 **2026-10-28 升 L4（本域侧）**：本域新守门（`support/RealGrpcPortTest` **6 条**）在两轮真回归里**全绿** —— 第 1 跑（12:1x）`article-rpc` **183 / 0 / 0 / 0**；第 2 跑（12:40）**判据改动后仍 183 / 0 / 0 / 0** ⇒ ⇒ 「源扫 + 守恒」这条新判据**在 article 域已跑绿并被验过**（⇒ ⇒ 改判据这一步本身有 L4 支撑，不是「改完就信」）。
+
+---
+
+## 二十四、🔴 **G4 共享层合并后的门禁快照（20 条）**（2026-10-28 · G3）
+
+> **canonical 就在本节**（本域写权面 ⇒ 本节即权威）· 核对日期 **2026-10-28**
+> · 合并 commit **`ae218df`**（option D · 单一 merge 源 · **不 cherry-pick** · `git merge-tree --write-tree` 预演 **0 冲突**）
+> · G4 源 = `align/g4-service-common` @ **`188e995`** ⇒ ⇒ **G4 未触碰四域任何路径**（`git diff --stat` 空）
+
+### 24.1 合并后全量回归（12 域模块 ＋ `-am` 带进来的共享层）
+
+**1387 条 / 0 failures / 0 errors / 4 skipped** · BUILD SUCCESS · **15:30 min**（2026-10-28）
+
+| 归属 | 模块 | 条数 |
+|---|---|---|
+| **域侧（4 域 12 模块）** | `article-rpc` 177 · `article-api` 99 · `article-common` 15 · `comment-rpc` 136 · `comment-api` 52 · `comment-common` 27 · `favorite-rpc` 131 · `favorite-api` 131 · `favorite-common` 29 · `hot-rpc` 108 · `hot-api` 96 · `hot-common` 14 | **1015** |
+| **共享层** | `service/common` **333** ＋ `service/users/users-common` **39** | **372** |
+| **合计** | | **1387** ✅ 逐字相等（`1015 + 372 = 1387`）|
+
+📌 **这一轮 1387 【已经含】favorite-api 段数闸门那 +5 条真 Tomcat 守门**（时间线：`ae218df` = **03:18:21** ⇒ 回归 **03:34 起** ⇒ 同一轮里 `FavoriteApiRealTomcatGateTest` = **13 条**）
+⇒ ⇒ ⇒ **不需要为了落码再重跑一次全量**（落码**前**的 favorite-api = 126，那个数**从未**出现在合并后那轮里）
+⇒ ⇒ **纪律**：「合并后回归」**不等于**「合并前 + 落码」的加法 ⇒ ⇒ **要去日志里数那一次的实际条数**
+（`… -- in <测试类>` 行）⇒ ⇒ **不许用「前一次 + 新增条数」推算**。
+
+⚠️ **聚合口径的两个坑**（写进台账是因为下一轮还会踩）：
+
+1. **`-am` 会把依赖闭包一起带进 reactor** ⇒ 本次目标 12 个模块，reactor 实测 **23** 个
+   （`users-common` / 各域 pom 聚合模块都被带进来）⇒ ⇒ **拿 reactor 全量求和 ⇒ 得 1061，不是 1387**
+   ⇒ ⇒ **聚合前必须把「目标模块清单」显式写死**，并把非目标模块单列；
+2. **maven 的 `Tests run: N, …` 有两种行**：**模块级汇总行**（前面是 `[INFO] Results:`）与
+   **每类用例行**（形如 `… -- in com.rag.Foo`）⇒ ⇒ 过滤条件写成 `- in `（单横线）⇒ ⇒
+   **每类行被当成模块级汇总行 ⇒ 得 2122（= 1061 × 2）** ⇒ ⇒ **过滤必须用 `-- in `**；
+3. **自检规则**：**总数恰好是真实数的整数倍 ⇒ 必是重复计数**。
+
+### 24.2 门禁 20 条：**15 绿 / 4 红 / 1 用法错**（**四条红都不在四域**，逐条点名）
+
+> 📌 **订正（2026-10-28 · G3 · 我自己记账时踩的）**：本节初稿写的是「**16 绿 / 4 红**」⇒ ⇒ **错**
+> ⇒ ⇒ 那个 16 是「20 − 4」**减出来的** ⇒ ⇒ 它把 **`check-merge-tree-content.py` 的 `EXIT=2`（无参数 ⇒ 用法错）
+> 当成了绿** ⇒ ⇒ **EXIT=2 既不是绿也不是红**（**根本没跑**）⇒ ⇒ 正确口径 = **15 绿 / 4 红 / 1 用法错**。
+> ⇒ ⇒ **教训**：「总数 − 红数」**不等于**「绿数」⇒ ⇒ 必须**逐条数 `EXIT=0` 的个数**（同族 = 「总数变了不是结论」）。
+
+#### 📌 ⚠️ **两个「333」是【不同的量】—— 收口时别混**（2026-10-28 10:3x · G3）
+
+| 口径 | 值 | 怎么测的 | 谁负责 |
+|---|---|---|---|
+| **① 台账编号式条目数** | **333** | `python3 tools/check-ledger-count.py` ⇒「条目（编号式）: 333」⇒ 索引仍称 315 ⇒ **差 +18** | **合并收口执行者**统一 `--fix`（⛔ 各 lane 不各自 fix） |
+| **② `service/common` 的测试条数** | **333** | G2 的波末权威数字（9 模块 = 1022 = 域侧 689 + 共享层 333）⇒ **独立复核通过** | 共享层（G4 面） |
+
+⇒ ⇒ **两者数值恰好相同、但含义完全无关** ⇒ ⇒ **台账里凡出现 333，必须标明是哪一个** ⇒ ⇒ 否则下一棒会以为「台账条目数 = 共享层测试条数」而推错账。
+⇒ ⇒ **G2 的权威值（共享层 333）与本域 12 模块拆账逐字自洽**：`1015`（域侧 12 模块）＋ `333`（`service/common`）＋ `39`（`users-common`）＝ **`1387`** ✅ ⇒ ⇒ **本域口径【不需要】改**（原 **331** / **332** 皆为**台账条目数**的旧值，已各自加订正注记；**与 ① 无关**）。
+
+| 门禁 | EXIT | 归谁 | 成因（必须点名，否则下一轮分不清「真红」与「预期红」）|
+|---|---|---|---|
+| `check-ledger-count` | 🔴 1 | **合并收口执行者** | 索引 **315** vs 本树实测 **332**（差 **+17** ⇒ 台账条目数在波次中持续增长）⇒ ⇒ **合并收口时统一 `--fix`** ⇒ ⛔ **各 lane 不各自 `--fix`**（会互相覆盖）⇒ 📌 **订正（2026-10-28 10:3x · G3）—— 332 已过期**：本轮 G3 又新增了台账内容（`PIT-FAV-API-016` + `PIT-FAV-RPC-040` 订正节 + 2 个子节）⇒ ⇒ **重测 = 333（差 +18）** ⇒ ⇒ **原 332 保留不改写**（§24.2 表内）|
+| `check-ddl-static` | 🔴 1 | **users 域** | users 域既知 **9** 处 DDL 差异（**类型/长度 0 差异**，其余为可空性 / `DEFAULT CURRENT_TIMESTAMP` 残留 / 缺 3 条非唯一索引）⇒ ⇒ **不在四域** ⇒ ⇒ 本域零改动 |
+| `check-tomcat-limits` | 🔴 1 | **G2 域（task-api）** | `task-api` 的 `mode=raw` 应为 `off` ⇒ ⇒ **不在四域** ⇒ ⇒ 本域零改动 |
+| `check-wave-coupling` | 🔴 1 | **G4-9（共享矩阵）** | `MqConsumer` 快照 `['comment','hot','task']` vs 现状 `['article','comment','hot','task']` ⇒ ⇒ **只差 `article` 一项** ⇒ ⇒ 落点 `docs/DRIFT/_cross/cross-domain-coupling.md` ⇒ ⛔ **G3 不写（共享面）** ⇒ ⇒ **等 G4 更新** |
+| `check-merge-tree-content` | ⚪ **2（用法错）** | —— | **无参数运行** ⇒ `EXIT=2`（用法错）⇒ ⇒ **不是红项** ⇒ ⇒ 带四个 lane 参数运行 = **EXIT=0 / 问题 0 / 不可信 0**（合并树内容完整）⇒ ⇒ 判定时**先看有没有带 lane 参数** |
+| 其余 **15** 条 | ✅ **EXIT=0** | 本域 | —— |
+
+⚠️ **`tools/difftest/check-merge-tree-content.py`（G4 新增）**：按四 lane 顺序合并 ⇒
+**EXIT=0 · 问题 0 · 不可信 0** ⇒ ⇒ **合并树内容完整**（逐文件 blob 比对 = 三方并集）
+⇒ ⚠️ **无参数运行 = EXIT=2（用法错）**，**不是红项** ⇒ ⇒ 判定时先看有没有带 lane 参数。
+
+### 24.3 🔴 `MAX_PARAMETER_COUNT = 10001` 是【设计值】，不是漂移（**订正一则期待**）
+
+⇒ ⇒ canonical 论证（含 Go `net/url/url.go:1001/1004/1020` 逐行 · 共享层 javadoc 出处 · 域侧修法）
+⇒ ⇒ 见 [`docs/DRIFT/favorite/api.md`](../favorite/api.md) **§21.3**
+⇒ ⇒ **一句话**：Go 放行 **10000** 段、第 **10001** 段报错 ⇒ ⇒ 容器上限取 **10001**（= 上限 + 1）
+才能让**应用层**先按 Go 语义拒 ⇒ ⇒ **改成 10000 会让 Tomcat 比 Go 更早拒 ⇒ 反而制造漂移**
+⇒ ⇒ **「等共享层改 10000」的期待作废** ⇒ ⇒ **残差那一格归 favorite 域侧自装判据**（已落码，见 §21.4）。
+
+### 24.4 📌 四域指针（各域台账里那一节）
+
+| 域 | 台账里的那一节 | 本域 3 模块条数 |
+|---|---|---|
+| article | [`docs/DRIFT/article/rpc.md`](./rpc.md) 本节 | 177 + 99 + 15 = **291** |
+| comment | [`docs/DRIFT/comment/rpc.md`](../comment/rpc.md)「📌 快照 · 🔴 G4 共享层合并（`ae218df`）后的本域回归」 | 136 + 52 + 27 = **215** |
+| favorite | [`docs/DRIFT/favorite/rpc.md`](../favorite/rpc.md)「📌 快照 · 🔴 G4 共享层合并（`ae218df`）后的本域回归」 | 131 + 131 + 29 = **291** |
+| hot | [`docs/DRIFT/hot/rpc.md`](../hot/rpc.md)「📌 快照 · 🔴 G4 共享层合并（`ae218df`）后的本域回归」 | 108 + 96 + 14 = **218** |
+| | **四域合计** | **1015** ✅（+ 372 共享层 = 1387）|
+
+### 📌 指针（2026-10-28 · G3）—— G4 §4.10.64 ⑤ 的「域内 status 漂移」警告【对 article 域不成立】
+
+⇒ G4 在共享面写「域内 span 若只调 `recordException` ⇒ status 恒 UNSET ⇒ **与 Go 的 `RecordError` 漂移**」⇒ ⇒ **中间那一步是错的**：Go otel-go **v1.44.0** 的 `RecordError` **【不改】status**（接口契约 `go.opentelemetry.io/otel/trace@v1.44.0/span.go:47-51`「**as this method does not change the Span status**」＋ SDK 实现 `go.opentelemetry.io/otel/sdk@v1.44.0/trace/span.go:626-630` javadoc ＋ `:631-655` 实现**全程无 `SetStatus` 调用**）⇒ ⇒ **Go 侧 `service/article/**` 的 `SetStatus` 零命中 ⇒ Go 侧业务 span status 本就恒 UNSET** ⇒ ⇒ **RAG 侧 `ArticleSpans` 零 `setStatus`（类注释 `:81`「本类**不得**调 `setStatus`」）⇒ 两侧一致 ⇒ 不漂移** ⇒ ⇒ **域侧零改动**（**不补 `setStatus`** —— 补了反而是引入 Go 侧不存在的 ERROR）。
+⇒ 且守门 `ArticleSpanWiringTest.java:448-449` **已把这条钉成断言**（⇒ 断言 `StatusCode.UNSET`，注释「Go 侧无 `SetStatus` ⇒ 状态保持 UNSET」）⇒ ⇒ **网已张、语义已对齐**（L-10 落码明细 ⇒ [`article/vs-common.md` §3.2](./vs-common.md#32-✅-l-10-已落码2026-10-28--g3-8-个-span6-logic--2-consumer全部补齐)）。
+⇒ 逐条证据 ⇒ [`favorite/api.md` §16.4.1](../favorite/api.md#1641-🟢-补证2026-10-28-go-侧-recorderror-也不改-status--两侧-status-语义同构--status-漂移不成立)。
+

@@ -2,6 +2,7 @@ package com.rag.favorite.favorite.rpc.service;
 
 import com.rag.common.logger.LogOption;
 import com.rag.favorite.favorite.common.errmsg.FavoriteErrorCode;
+import com.rag.favorite.favorite.common.span.FavoriteSpans;
 import com.rag.favorite.favorite.rpc.client.UserRpcClient;
 import com.rag.favorite.favorite.rpc.config.FavoriteRpcLabels;
 import com.rag.favorite.favorite.rpc.exception.FavoriteExceptions;
@@ -71,24 +72,68 @@ public class FavoriteUserGuard {
      * @param logOptions 传给业务日志的选项（Go 侧各 logic 的 {@code userLogOption(...)}）
      */
     public void ensureExists(long userId, LogOption... logOptions) {
-        GetUserResp resp;
-        try {
-            // Go: svcCtx.UserRpc.GetUser(depCtx, &userservice.GetUserReq{Uid: userID})  (helper.go:98)
-            resp = userRpcClient.userRpc().getUser(GetUserReq.newBuilder().setUid(userId).build());
-        } catch (StatusRuntimeException e) {
-            // Go: service/favorite/rpc/internal/logic/helper.go:100-107
-            if (e.getStatus().getCode() == Status.Code.NOT_FOUND) {
-                metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
-                        FavoriteRpcLabels.ACTION_USER_GET, FavoriteRpcLabels.RESULT_FAIL);
-                throw FavoriteExceptions.userNotFound();
-            }
-            metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
-                    FavoriteRpcLabels.ACTION_USER_GET, FavoriteRpcLabels.RESULT_FAIL);
-            LOG.error("user-rpc GetUser failed: user_id={} code={} message={}",
-                    userId, e.getStatus().getCode(), e.getStatus().getDescription());
-            throw FavoriteExceptions.internalServerCommon();
-        }
+        // 🔴 Go 出处（rpc/internal/logic/helper.go:92-124）：
+        //     depCtx, span := otel.Tracer("favorite-rpc").Start(ctx, "Dependency.User.GetUser")
+        //     defer span.End()
+        //     span.SetAttributes(attribute.Int64("biz.user_id", userID))
+        //     resp, err := svcCtx.UserRpc.GetUser(depCtx, &userservice.GetUserReq{Uid: userID})
+        //     if err != nil {
+        //         span.RecordError(err)          ← **只有这一处**记错（helper.go:100）
+        //         ...
+        //     }
+        //     if resp == nil || !resp.Found || resp.User == nil { ... }   ← :109-111 **不记**
+        //     if resp.User.Uid != userID || resp.User.Status == nil { ... } ← :113-115 **不记**
+        //     if resp.User.GetStatus() != 0 { ... }                        ← :117-119 **不记**
+        //
+        // ⇒ 用 FavoriteSpans.tracedDependency 的两段式表达同一个时序：
+        //    「下游调用失败 ⇒ 记错」/「调用后的业务判定失败 ⇒ 不记」。
+        FavoriteSpans.tracedDependency(
+                FavoriteSpans.DEPENDENCY_USER_GET_USER,
+                span -> span.setAttribute(FavoriteSpans.ATTR_USER_ID, userId),
+                // Go: helper.go:98 —— svcCtx.UserRpc.GetUser(depCtx, &userservice.GetUserReq{Uid: userID})
+                () -> userRpcClient.userRpc().getUser(GetUserReq.newBuilder().setUid(userId).build()),
+                // Go: helper.go:100-107 —— **这里**是唯一记错的地方（记的是原始 gRPC 错误）
+                e -> onDownstreamFailure(userId, e),
+                // Go: helper.go:109-122 —— 三条业务性失败分支 + 成功分支，**都不记错**
+                resp -> {
+                    verifyIdentity(userId, resp, logOptions);
+                    return null;
+                });
+    }
 
+    /**
+     * Go {@code helper.go:100-107} 的错误分支 —— <b>唯一</b>会 {@code span.RecordError(err)} 的地方。
+     *
+     * <p>⚠️ <b>顺序必须与 Go 一致</b>：Go 是 {@code span.RecordError(err)} → {@code metrics.ObserveOp(...resultFail)}
+     * → 再按 status 分支 ⇒ 本方法里 metrics 的观察发生在「翻译成业务码」之前。
+     * <br>（{@code FavoriteSpans.tracedDependency} 已经在那之前完成了 {@code recordException}。）
+     */
+    private RuntimeException onDownstreamFailure(long userId, Throwable e) {
+        if (!(e instanceof StatusRuntimeException sre)) {
+            // ⚠️ 原实现只 catch StatusRuntimeException ⇒ 其它异常原样上抛（不被翻译成 5001）。
+            //    这里逐字保留该行为，**不**在本次落码里顺手「改成 Go 的 status.FromError 语义」。
+            if (e instanceof RuntimeException re) {
+                throw re;
+            }
+            throw new IllegalStateException(e);
+        }
+        metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,
+                FavoriteRpcLabels.ACTION_USER_GET, FavoriteRpcLabels.RESULT_FAIL);
+        if (sre.getStatus().getCode() == Status.Code.NOT_FOUND) {
+            return FavoriteExceptions.userNotFound();
+        }
+        LOG.error("user-rpc GetUser failed: user_id={} code={} message={}",
+                userId, sre.getStatus().getCode(), sre.getStatus().getDescription());
+        return FavoriteExceptions.internalServerCommon();
+    }
+
+    /**
+     * Go {@code helper.go:109-122} 的业务判定 —— <b>三条失败分支都不记错</b>。
+     *
+     * <p>⚠️ 这三条分支在 Go 侧<b>没有</b> {@code span.RecordError} ⇒ 本方法抛出的异常
+     * <b>不会</b>出现在 span 的事件列表里（只有 status 保持 UNSET）。
+     */
+    private void verifyIdentity(long userId, GetUserResp resp, LogOption... logOptions) {
         // Go: service/favorite/rpc/internal/logic/helper.go:109-112 —— resp == nil || !resp.Found || resp.User == nil
         if (resp == null || !resp.getFound() || !resp.hasUser()) {
             metrics.observeOp(FavoriteRpcLabels.MODULE_DEPENDENCY,

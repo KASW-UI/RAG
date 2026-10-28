@@ -75,7 +75,7 @@ public interface FavoriteItemMapper {
      * <p>🔴 {@code target_revision} 写的是 <b>可为 null</b> 的原值
      * （{@code #{targetRevision}}，MyBatis 对 {@code null} 走
      * {@code setNull(..., Types.VARCHAR)}）。绝不能写成 {@code COALESCE(#{targetRevision}, '')} ——
-     * 那是把「无修订」变成「有��空修订的修订」，见 {@code FavoriteItemEntity} 的类注释第 ① 条。
+     * 那是把「无修订」变成「有一个空修订」，见 {@code FavoriteItemEntity} 的类注释第 ① 条。
      *
      * <p>⚠️ 23505（唯一冲突）在此抛出，由 {@code FavoriteRpcSupport.isUniqueViolation}
      * 识别并翻译成 {@code AlreadyExists/5302}（create_favorite_logic.go:157-161）。

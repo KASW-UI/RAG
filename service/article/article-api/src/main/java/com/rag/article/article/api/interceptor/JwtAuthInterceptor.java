@@ -1,33 +1,22 @@
 package com.rag.article.article.api.interceptor;
 
-import com.rag.article.article.api.config.ArticleApiProperties;
-import com.rag.common.exception.AuthenticationException;
-import com.rag.users.common.jwt.BearerTokenExtractor;
-import com.rag.users.common.jwt.JwtUtil;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jws;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import com.rag.article.article.api.auth.ArticleJwtProtectedRoutes;
+import com.rag.article.article.api.auth.ArticleJwtSignatureVerifier;
+import com.rag.article.article.api.auth.ArticleJwtVerificationResult;
+import com.rag.article.article.api.auth.GoStyleJwtAuthFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.server.PathContainer;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
-import org.springframework.web.util.pattern.PathPattern;
-import org.springframework.web.util.pattern.PathPatternParser;
-
-import javax.crypto.SecretKey;
-import java.util.List;
 
 /**
  * article-api 的 JWT 鉴权 —— Go 端第一段 {@code server.AddRoutes(..., rest.WithJwt(secret), ...)}
  * 的等价物。
  *
- * <h2>Go 出处（{@code internal/handler/routes.go:19-38}）</h2>
+ * <h2>Go 出处（{@code internal/handler/routes.go:19-47}）</h2>
  * <pre>
  *   server.AddRoutes([]rest.Route{
  *       {POST,   "/article",        CreateArticleHandler},        ← 第一段：带 WithJwt
@@ -58,9 +47,8 @@ import java.util.List;
  *                               Go:     该路由未注册 → 405，且**不进鉴权链**
  * </pre>
  * ⇒ 凭空多出一条「401 压过 405」的路径。
- * 所以本类持有 {@link ProtectedRoute}（method + PathPattern）表，在
- * {@code preHandle} 里自行判定；{@code WebMvcConfig} 只需把本拦截器
- * 挂在 {@code /v1/**} 上。
+ * 所以判据是 {@link ArticleJwtProtectedRoutes} 里的「method + PathPattern」表；
+ * {@code WebMvcConfig} 只需把本拦截器挂在 {@code /v1/**} 上。
  *
  * <h2>「路由匹配先于鉴权」这条守卫也要保留</h2>
  * <pre>
@@ -94,6 +82,21 @@ import java.util.List;
  * ⇒ {@code GlobalExceptionHandler#handleAuthentication} 返回
  * {@code ResponseEntity.status(401).build()}（<b>不能</b>是 {@code .body(...)}，
  * 否则容器会补一个 {@code Content-Type}，多出一项响应头）。
+ *
+ * <h3>🔴 验签与响应被拆成两段（DRIFT-USERAPI-009②）</h3>
+ * <p>Go 侧 70s 预算<b>不覆盖</b>验签（计时器在 {@code Authorize} 之后起算），
+ * 而 RAG 侧验签原本内联在本类里（{@code HandlerInterceptor} ⇒ DispatcherServlet <b>内</b>）
+ * ⇒ 验签<b>被计入</b> 70s 预算 ⇒ 与 Go 相反。
+ * <p>⇒ 修法（与 users/admin/comment/favorite 域同款配方）：<b>验签</b>搬进
+ * {@code GoStyleJwtAuthFilter}（{@code @Order(+6)} 的 Servlet Filter ⇒ 在 70s 预算的
+ * {@code +7} <b>之外</b>），本类只<b>消费</b>它的结果、失败<b>原样重抛</b>。
+ * <p>⚠️ <b>本域的受保护路由表也一并搬到了 {@link ArticleJwtProtectedRoutes}</b> ——
+ * 因为<b>Filter 与 interceptor 必须共用同一份判据</b>，否则会出现
+ * 「Filter 判为受保护、interceptor 判为放行」的缝隙（前者 ⇒ ②静默不闭环；
+ * 后者 ⇒ <b>鉴权被绕过</b>）。
+ * <p>⇒ 401 的<b>空 body 形状逐字不变</b>（异常对象由 Filter 产出 ⇒
+ * {@code @ExceptionHandler} 仍然管得到）；「413 压过 401」也不变
+ * （本 Filter <b>绝不写响应</b> ⇒ 401 仍发生在所有 Filter 之后）。
  */
 @Component
 public class JwtAuthInterceptor implements HandlerInterceptor {
@@ -107,24 +110,14 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
     public static final String CLAIM_ATTRIBUTE = "userId";
 
     /**
-     * article-api 的<b>全部</b>受保护路由，逐条对应 Go {@code routes.go} 第一段。
-     *
-     * <p>用 {@link PathPattern} 而不是字符串前缀比较：{@code /v1/article} 与
-     * {@code /v1/articles} 在前缀语义下会互相命中，而 Go 的 router 是
-     * <b>逐段精确匹配</b>（{@code /v1/articles} <b>不是</b> {@code /v1/article} 的匹配）。
-     * 前缀式判断会把两个不同的路由合并成一个安全边界 —— 而它们一个要鉴权一个不要。
+     * 验签器 —— 🔴 **2026-10-27（DRIFT-USERAPI-009②）：验签已从本类搬进
+     * {@link ArticleJwtSignatureVerifier}**（由 {@link GoStyleJwtAuthFilter} 在 70s 预算之外调用），
+     * 本类改成<b>消费</b>它的结果。
      */
-    private static final List<ProtectedRoute> PROTECTED_ROUTES = List.of(
-            new ProtectedRoute(HttpMethod.POST, "/v1/article"),
-            new ProtectedRoute(HttpMethod.PUT, "/v1/article/{id}"),
-            new ProtectedRoute(HttpMethod.DELETE, "/v1/article/{id}"),
-            new ProtectedRoute(HttpMethod.GET, "/v1/me/article/{id}"));
+    private final ArticleJwtSignatureVerifier verifier;
 
-    private final SecretKey key;
-
-    public JwtAuthInterceptor(ArticleApiProperties properties) {
-        this.key = Keys.hmacShaKeyFor(
-                JwtUtil.padToHmacKeySize(properties.getAuth().getAccessSecret()));
+    public JwtAuthInterceptor(ArticleJwtSignatureVerifier verifier) {
+        this.verifier = verifier;
     }
 
     @Override
@@ -136,49 +129,46 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         // ── 守卫 2：只有「method + path」双双命中受保护表才鉴权 ──
         //    public 端点（GET /v1/article/:id、GET /v1/articles、POST /v1/upload）
         //    以及「路径像但 method 不对」的组合都在这里放行。
+        // ⚠️ 判据与 `GoStyleJwtAuthFilter` **共用同一份**（ArticleJwtProtectedRoutes）
+        //    ⇒ 两侧不会单侧漂移（DRIFT-USERAPI-009② 的前提）。
         if (!isProtected(request)) {
             return true;
         }
 
-        // Go: rest/token/tokenparser.go doParseToken → request.ParseFromRequest(r,
-        //     request.AuthorizationHeaderExtractor, ...)。头缺失时 extractor 返回 errNoAuthParam
-        //     → parser.ParseToken 返回 err → authhandler.go:100 unauthorized()。
-        String authHeader = request.getHeader("Authorization");
-        if (authHeader == null || authHeader.isEmpty()) {
-            log.warn("article-api path {} with missing Authorization header", request.getRequestURI());
-            throw unauthorized();
+        String uri = request.getRequestURI();
+
+        // ================= 阶段 1：JWT 验签 =================
+        // 结果由 GoStyleJwtAuthFilter 在 70s 预算**之外**产出（本类只消费，不自己验签）。
+        ArticleJwtVerificationResult result = (ArticleJwtVerificationResult) request.getAttribute(
+                GoStyleJwtAuthFilter.VERIFICATION_ATTRIBUTE);
+        if (result == null) {
+            // 🔴 兜底：Filter 未命中（路径判据不一致 / Filter 未被注册）⇒ 就地验签。
+            //   行为与 DRIFT-USERAPI-009② 修复前完全一致（401 照常）⇒ **不会造成鉴权绕过**；
+            //   但验签落回 70s 预算**之内** ⇒ 该路径上 ② 未闭环 ⇒ 必须大声记日志。
+            log.warn("article-api JWT 验签未命中 filter 缓存 ⇒ 就地验签（DRIFT-USERAPI-009② 在此路径未闭环）: {}", uri);
+            request.setAttribute(GoStyleJwtAuthFilter.VERIFICATION_SOURCE_ATTRIBUTE,
+                    GoStyleJwtAuthFilter.SOURCE_INLINE);
+            result = verifier.verify(request.getHeader("Authorization"), uri);
+        } else {
+            request.setAttribute(GoStyleJwtAuthFilter.VERIFICATION_SOURCE_ATTRIBUTE,
+                    GoStyleJwtAuthFilter.SOURCE_FILTER);
         }
 
-        // Go: golang-jwt/v4 request/oauth2.go stripBearerPrefixFromTokenString
-        //     —— 大小写不敏感、不匹配时原样返回整串。三条规则都在 BearerTokenExtractor 里。
-        String token = BearerTokenExtractor.tokenForSignatureVerification(authHeader);
-        if (token.isEmpty()) {
-            log.warn("article-api path {} with empty Bearer token", request.getRequestURI());
-            throw unauthorized();
-        }
-
-        Claims claims;
-        try {
-            Jws<Claims> jws = Jwts.parser()
-                    .verifyWith(key)
-                    .build()
-                    .parseSignedClaims(token);
-            claims = jws.getPayload();
-        } catch (Throwable t) {
-            // 签名错 / 过期 / 格式错 —— Go 侧同样只走到 unauthorized()，不区分原因
-            log.warn("article-api JWT verify failed on {} : {}", request.getRequestURI(), t.getMessage());
-            throw unauthorized();
+        // 验签失败 ⇒ **原样重抛**（异常对象由 Filter 产出 ⇒ @ExceptionHandler 仍管得到
+        // ⇒ 401 + **空 body** 的形状逐字不变）。
+        if (result.failed()) {
+            throw result.failure();
         }
 
         // Go: authhandler.go:63-78 遍历 claims，把非标准 claim（aud/exp/jti/iat/iss/nbf/sub 除外）
         //     逐个塞进 ctx。article-api 侧只有 helper.go:18 的 extractCurrentUserID 读
         //     "userId"，其余 claim 无消费者，故这里只落这一个。
-        request.setAttribute(CLAIM_ATTRIBUTE, claims.get(CLAIM_ATTRIBUTE));
+        request.setAttribute(CLAIM_ATTRIBUTE, result.claims().get(CLAIM_ATTRIBUTE));
         return true;
     }
 
     /**
-     * 请求是否命中受保护路由。
+     * 请求是否命中受保护路由 —— 判据<b>共用</b> {@link ArticleJwtProtectedRoutes}。
      *
      * <p>⚠️ 取的是 {@code requestURI - contextPath}：Go 的 router 看到的是<b>剥掉前缀之后</b>的路径
      * （{@code rest.WithPrefix("/v1")} 已在注册时拼好）。本模块的 context-path 是 {@code /}，
@@ -187,43 +177,7 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
      * （比报错更危险：所有写接口变公开）。
      */
     private boolean isProtected(HttpServletRequest request) {
-        String path = request.getRequestURI();
-        String contextPath = request.getContextPath();
-        if (contextPath != null && !contextPath.isEmpty() && path.startsWith(contextPath)) {
-            path = path.substring(contextPath.length());
-        }
-        // ⚠️ PathPattern.matches 只接受 PathContainer（Spring 7 的签名），
-        //    不是 String —— 传 String 编译不过。
-        PathContainer pathContainer = PathContainer.parsePath(path);
-        for (ProtectedRoute route : PROTECTED_ROUTES) {
-            if (route.method().matches(request.getMethod())
-                    && route.pattern().matches(pathContainer)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * 统一构造鉴权失败。
-     *
-     * <p>业务码填 {@code 1005}（article 域的 {@code ErrorUnauthorized}）
-     * <b>只是为了让日志可读</b>：{@code GlobalExceptionHandler#handleAuthentication}
-     * 返回的是<b>空 body 的 401</b>，这个码<b>不会</b>出现在响应里。
-     * ⚠️ 别把这个码当成「客户端能看到 1005」—— 能看到 1005 的路径是
-     * {@code extractCurrentUserID} 取不到 userId 的<b>另一条</b>（见类注释）。
-     */
-    private static AuthenticationException unauthorized() {
-        return new AuthenticationException(
-                com.rag.article.article.common.errmsg.ErrorCode.ERROR_UNAUTHORIZED.getCode(),
-                com.rag.article.article.common.errmsg.ErrorCode.getMsg(
-                        com.rag.article.article.common.errmsg.ErrorCode.ERROR_UNAUTHORIZED.getCode()));
-    }
-
-    /** 一条受保护路由 = {@code method} + {@code path} 模板。缺一不可（见类注释）。 */
-    private record ProtectedRoute(HttpMethod method, PathPattern pattern) {
-        ProtectedRoute(HttpMethod method, String pattern) {
-            this(method, PathPatternParser.defaultInstance.parse(pattern));
-        }
+        return ArticleJwtProtectedRoutes.isProtected(
+                request.getMethod(), ArticleJwtProtectedRoutes.pathWithinContext(request));
     }
 }

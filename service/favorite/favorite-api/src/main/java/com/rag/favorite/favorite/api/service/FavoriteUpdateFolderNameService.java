@@ -3,6 +3,7 @@ package com.rag.favorite.favorite.api.service;
 import com.rag.favorite.favorite.api.client.FavoriteRpcClient;
 import com.rag.favorite.favorite.api.dto.UpdateFavoriteFolderNameReq;
 import com.rag.favorite.favorite.api.dto.UpdateFavoriteFolderNameResp;
+import com.rag.favorite.favorite.common.span.FavoriteSpans;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Service;
 
@@ -34,25 +35,43 @@ public class FavoriteUpdateFolderNameService {
 
     public UpdateFavoriteFolderNameResp updateFavoriteFolderName(UpdateFavoriteFolderNameReq req,
                                                                 HttpServletRequest httpRequest) {
-        long userId = support.userId(httpRequest);
+        // 🔴 Go 出处（api/internal/logic/favorite/update_favorite_folder_name_logic.go:33-46）：
+        //     ctx, span := otel.Tracer("favorite-api").Start(l.ctx, "FavoriteAPI.UpdateFavoriteFolderName")
+        //     defer span.End()
+        //     userID, err := extractUserID(ctx)      ← 失败 ⇒ 直接 return（**不 RecordError**、不设属性）
+        //     span.SetAttributes(attribute.Int64("biz.user_id", userID),
+        //                         attribute.Int64("biz.folder_id", req.FolderId),
+        //                         attribute.String("biz.folder_name", req.Name))   ← **未 trim 的原值**
+        return FavoriteSpans.tracedApi(
+                FavoriteSpans.API_UPDATE_FAVORITE_FOLDER_NAME,
+                () -> support.userId(httpRequest),
+                (span, userId) -> {
+                    span.setAttribute(FavoriteSpans.ATTR_USER_ID, userId);
+                    span.setAttribute(FavoriteSpans.ATTR_FOLDER_ID,
+                            FavoriteApiSupport.nullToZero(req.getFolderId()));
+                    // 🔴 Go 记的是 req.Name 的**原值**（不 trim）—— 与落库用的 normalizeFolderName 不同
+                    span.setAttribute(FavoriteSpans.ATTR_FOLDER_NAME,
+                            FavoriteApiSupport.nullToEmpty(req.getName()));
+                },
+                userId -> {
+                    com.rag.favorite.favorite.proto.UpdateFavoriteFolderNameReq rpcReq =
+                            com.rag.favorite.favorite.proto.UpdateFavoriteFolderNameReq.newBuilder()
+                                    .setUserId(userId)
+                                    .setFolderId(FavoriteApiSupport.nullToZero(req.getFolderId()))
+                                    .setName(FavoriteApiSupport.nullToEmpty(req.getName()))
+                                    .build();
 
-        com.rag.favorite.favorite.proto.UpdateFavoriteFolderNameReq rpcReq =
-                com.rag.favorite.favorite.proto.UpdateFavoriteFolderNameReq.newBuilder()
-                        .setUserId(userId)
-                        .setFolderId(FavoriteApiSupport.nullToZero(req.getFolderId()))
-                        .setName(FavoriteApiSupport.nullToEmpty(req.getName()))
-                        .build();
+                    com.rag.favorite.favorite.proto.UpdateFavoriteFolderNameResp rpcResp =
+                            support.invokeRpc(() -> rpcClient.favoriteRpc().updateFavoriteFolderName(rpcReq), userId, null);
 
-        com.rag.favorite.favorite.proto.UpdateFavoriteFolderNameResp rpcResp =
-                support.invokeRpc(() -> rpcClient.favoriteRpc().updateFavoriteFolderName(rpcReq), userId, null);
+                    // Go: update_favorite_folder_name_logic.go:59-64 —— nil || !Success ⇒ 5001
+                    if (rpcResp == null || !rpcResp.getSuccess()) {
+                        throw support.nullOrUnsuccessfulResponse(userId, null);
+                    }
 
-        // Go: update_favorite_folder_name_logic.go:59-64 —— nil || !Success ⇒ 5001
-        if (rpcResp == null || !rpcResp.getSuccess()) {
-            throw support.nullOrUnsuccessfulResponse(userId, null);
-        }
-
-        support.logInfo(String.format("update favorite folder name success, folder_id=%d", req.getFolderId()),
-                userId, null);
-        return new UpdateFavoriteFolderNameResp(true);
+                    support.logInfo(String.format("update favorite folder name success, folder_id=%d", req.getFolderId()),
+                            userId, null);
+                    return new UpdateFavoriteFolderNameResp(true);
+                });
     }
 }

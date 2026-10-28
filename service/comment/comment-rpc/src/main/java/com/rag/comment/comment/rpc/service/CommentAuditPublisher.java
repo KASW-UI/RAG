@@ -16,7 +16,7 @@ import java.util.concurrent.TimeoutException;
  *
  * <h2>⚠️ 同步还是异步：这是本域的一条 L1 行为，必须同步</h2>
  * <p>Go 的 {@code kq.Pusher.Push} 是<b>同步阻塞</b>写，而
- * {@code create_comment_logic.go:126-132} 把它当���<b>会失败</b>的操作处理：
+ * {@code create_comment_logic.go:126-132} 把它当作<b>会失败</b>的操作处理：
  * <pre>
  * if err = l.svcCtx.KqPusherClient.Push(ctx, string(msgBytes)); err != nil {
  *     result = "sys_fail"

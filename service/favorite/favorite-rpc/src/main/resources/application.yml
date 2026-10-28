@@ -86,6 +86,26 @@ spring:
   flyway:
     enabled: true
     baseline-on-migrate: true
+    # 🔴 **baseline-version 必须显式钉 0**（2026-10-27 G3 域侧自修 · 与 comment/like/task/follow/message 同款）
+    #
+    # 【现象】本模块与其它 rpc 模块**连同一个库**（first_db / rag_db），
+    #         各自用**独立的账本表**（本模块 = flyway_schema_history_favorite）
+    #         ⇒ **先启动的模块已经把 public schema 弄非空**
+    #         ⇒ 本模块启动时 Flyway 看到「非空 schema + 没有自己的账本」
+    #         ⇒ 因 baseline-on-migrate=true ⇒ **在 V1 处打 baseline 标记**（默认 baseline-version=1）
+    #         ⇒ **V1 的 SQL 从未执行** ⇒ `favorite_folder` 表永远建不出来
+    #         ⇒ 后续依赖它的迁移报 `relation "favorite_folder" does not exist` ⇒ **服务起不来**。
+    #
+    # 【为什么 0 而不是关掉 baseline-on-migrate】
+    #         baseline-on-migrate=false 时，非空 schema 且无账本 ⇒ Flyway **直接抛异常退出**
+    #         （"Found non-empty schema(s) … but no schema history table"）⇒ 更糟（起不来且无修复路径）。
+    #         baseline-version=0 ⇒ baseline 标记打在 version 0 ⇒ **V1 之后全部迁移照常执行**
+    #         ⇒ 既能在共享库里安全启动，又不丢任何迁移。
+    #
+    # 【为什么「全新空库」的测试测不出来】
+    #         多数单测用**全新空库** + 只有本模块一个进程 ⇒ schema 是空的 ⇒ baseline 根本不触发
+    #         ⇒ V1 正常执行 ⇒ 「测试全绿」与「生产拓扑下起不来」同时成立（§3.3 的经典形态）。
+    baseline-version: 0
     locations: classpath:db/migration
     schemas: public
     table: flyway_schema_history_favorite
