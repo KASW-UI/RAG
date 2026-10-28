@@ -3535,3 +3535,60 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
    ⇒ ⇒ 三个依据文件 blob 逐字相同 ⇒ ⇒ 红因在**被扫描侧** ⇒ ⇒ 「红 = 快照滞后」而非「红 = 判据错」
 3. **回信里给结论要给「可复跑的判据」，不是「我这边是绿的」**
    ⇒ ⇒ 本节每条都带 **blob / 行号 / 原文摘录 / 探针输出** ⇒ ⇒ 对方不必信我，自己能重跑一遍
+
+#### 4.10.64 🔴🟢 **G3 转派「favorite-api 4 条真 Tomcat 用例红（JDK HttpClient interim 上限 8）」⇒ 根因 = 共享层 1xx 探针（`15cf93a` 已修）· 归属 = 域内 (b) · G3 已自行落地 ⇒ 本层零落码**（核对日期 2026-10-28 09:4x · 本层 HEAD `a5a8619`）
+
+> **信的时效**：G3 这封**信上日期是 2026-10-27**（迟到约一天）⇒ ⇒ 按纪律**不采信转述**，逐条按**当前状态**重核。
+> ⚠️ **本节最重要的一条不是落码，是【把「现象」与「根因」分开采信】** —— 现象（4 条红）**当时为真**，根因（Tomcat 连发 9 次 100-Continue）**当时为假**。
+
+**① 现象复核 ⇒ 4 条现在全绿**
+
+| 项 | 实测 |
+|---|---|
+| 树 | G3 树 `align/g3-article-comment-favorite-hot` @ **`b28326c`** |
+| 证据 | `service/favorite/favorite-api/target/surefire-reports/`（**报告时间 09:36–09:37 今天**）⇒ `FavoriteApiRealTomcatGateTest` = **13 条 / 0 failures / 0 errors / 0 skipped** · `FavoriteApiEnvelopeParityTest` = **6 条 / 0f / 0e / 0s** |
+| 4 条目标用例 | `nonEmptyFormValueCountOverLimitIsRejected` **PASS** · `nonEmptyFormValueCountAtLimitIsPassedThrough` **PASS** · `containerParameterLimitIsSurfacedAsGoParseError` **PASS** · `tooManyFormParamsMatchGoByteForByte` **PASS** |
+
+**② 根因（**不是** Tomcat，**不是**容器上限）⇒ 是共享层自己的 1xx 探针**
+
+| 项 | 实测 |
+|---|---|
+| 真源 | `service/common/src/main/java/com/rag/common/observability/GoStyleClientDisconnectProbe.java:234` ⇒ 直接写裸字节 `"HTTP/1.1 103 Early Hints\r\n\r\n"` ⇒ ⇒ 1xx 行数 ≈ 耗时 ÷ 探测间隔 ⇒ **原本无上界** ⇒ ⇒ 任何耗时 > ~4s 的请求都能让 JDK `java.net.http` 客户端抛 `ProtocolException: Too many interim responses received: 9 > 8` ⇒ ⇒ **客户端读不到最终响应** |
+| **已修** | **`15cf93a`**（共享层）—— 1xx 探针**每请求**上界 **4**（**取客户端硬上限 8 的一半留余量**）⇒ ⇒ 祖先关系：**四棵 lane 树 IN** · 主干 **OUT** ⇒ ⇒ **合并主干时自动带上** |
+| **G3 信里 ③ 的推断【机制上不成立】** | 「Tomcat 发了 9 次 **100-Continue**」⇒ ⇒ Tomcat **只在收到 `Expect: 100-continue` 时**才发 100-Continue ⇒ ⇒ **全仓 `expectContinue` 零命中** ⇒ ⇒ ⇒ **且与 G3 自己的 javadoc 自相矛盾**（其 javadoc 写的是「103 Early Hints，**不是** 100 Continue」）|
+| **G3 javadoc 的归因【错】** | `RealTomcatHttp` 类注释 + `FavoriteApiRealTomcatGateTest:178-180` 写「**Tomcat 11.0.24** 在这类请求上连发 103 Early Hints」⇒ ⇒ **真源是共享层探针** ⇒ ⇒ ⚠️ **同一个归因错误在共享层已于 `15cf93a` 订正过一次**（`GoStyleTimeoutResponseRaceGateTest` 注释：Tomcat `sendEarlyHints` **只有定义、无内部调用方**；**401 路径实测零 1xx** ⇒ 若是容器自发，401 也该有）⇒ ⇒ **域内又犯一次** ⇒ ⇒ **建议 G3 订正**（域侧文件 ⇒ 域侧改）|
+
+**③ 归属与修法 ⇒ (b) 是对的方向，且 G3 已自行落地 ⇒ 本层零落码 · 不派单**
+
+| 方案 | 裁定 |
+|---|---|
+| (a) 共享层压下 Tomcat 的 1xx 次数 | ❌ **不可取** —— 要改**容器行为**去迁就**测试客户端的硬上限** ⇒ 反而偏离 Go；且根因根本不在这条路径上 |
+| (b) 域内改传输层（不改断言语义） | ✅ **对的方向** —— 且 **G3 已自行落地**：`service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/support/RealTomcatHttp.java` ⇒ ⇒ ⚠️ **是域内测试类、不是共享层产物** ⇒ ⇒ **零写权冲突 · 本层零动作** |
+| (c) 回退 favorite 的容器上限 | ❌ **不取** —— 与「容器上限一律 10001」（§4.10.15.5）的论证直接冲突 ⇒ ⇒ 把漂移留在原地 |
+
+**④ 🟡 残留风险（**域内决定**，本层不代改，但必须让 G3 知道）**
+
+- 4 条目标用例**全是 bodyless GET**（都走 `getWithToken` ⇒ `HttpRequest.BodyPublisher` 为空）⇒ ⇒ `RealTomcatHttp` 的回落（`bodyPublisher().isPresent()` ⇒ 原样上抛 ⇒ **只有无体请求才回落**）⇒ ⇒ **回落对这 4 条 100% 生效**。
+- ⇒ ⇒ **若共享层的行数上界回归（1xx > 8 条），这 4 条会回落 `HttpURLConnection` 并【继续绿】** ⇒ ⇒ **共享层回归就此失去跨域证人**。
+- ⇒ ⇒ 兜底只剩共享层自己的 `GoStyleClientDisconnectProbeBudgetGateTest` ②（**真 JDK HttpClient** · `service/common/src/test/.../GoStyleClientDisconnectProbeBudgetGateTest.java:186-206`）⇒ ⇒ 系统**不是全盲**，但**域侧独立证人没了**。
+- ⇒ ⇒ **建议（二选一，域内裁定）**：**删掉回落**（让域侧重新成为独立证人）**或**保留但在 javadoc 写明「**本回落会吞掉共享层 1xx 上界回归 ⇒ 那一层只有共享层守门兜底**」。
+
+**⑤ 🟢 G3 ⑥ 的跨域事实（登记）⇒ 与共享层现状【一致】，但带出一条对域内的警告**
+
+| 项 | 实测 |
+|---|---|
+| G3 的断言 | 「Java `recordException` **不改** status」⇒ ⇒ 可直接采信（字节码实测无 `setStatus` 调用）|
+| 共享层现状 | `service/common/src/main/java/com/rag/common/observability/Observability.java:108-109` 与 `:131-132` ⇒ **=`recordException(...)` ＋【显式】`setStatus(StatusCode.ERROR, msg)`** ⇒ ⇒ **共享层是对的**（Go 侧 `observability.go:103` 的 `span.RecordError(...)` 会把 status 置 ERROR ⇒ Java 必须显式补）|
+| ⚠️ **对域内的警告** | **域内 span 若只调 `recordException` ⇒ status 恒 UNSET ⇒ 与 Go 的 `RecordError` 漂移** ⇒ ⇒ ⇒ **这是域内写权 ⇒ G3 自查**（本层不代改）|
+
+**⑥ G3 其余进展登记（证据强度按 G3 自述，不当作已闭环）**
+
+- favorite 域 **16 个业务 span 已落码**（Go 侧 api 7 ＋ rpc 9，含 2 个 `Dependency.*`）· 域侧私有 `FavoriteSpans` 放 `favorite-common`（api/rpc 共用）⇒ ⇒ **共享层零改动**。
+- 三类判据**逐字保留 Go 侧的不一致**（api 鉴权失败不记错 / rpc 凡错都记 / 依赖 span 只记下游失败）⇒ ⇒ **没有套用 comment 域的「码段 ≥5000 才记」**。
+- 🔴 **守门未写**（`FavoriteApiSpanWiringTest` / `FavoriteRpcSpanWiringTest` ＋ 变异待补）⇒ ⇒ **不得读作已闭环**。
+
+**⑦ 🆕 本轮新增纪律**
+
+1. **跨会话来信里的「现象」与「根因」要【分开采信】** —— 本轮现象**当时为真**、根因**当时为假** ⇒ ⇒ **来信自带根因推断时，必须用当前状态 + 共享层真源独立复核**（同族：§4.10.63 ⑤ ①「按 commit 重核」）
+2. **修法方向对了 ≠ 归因对了** —— G3 的 (b) 修法**正确且有效**，但它把归因写进了 javadoc ⇒ ⇒ **错误归因一旦写进代码注释，下一个人会照着它去改错的地方** ⇒ ⇒ **归因订正必须单独提出来，不能被「修好了」盖过去**
+3. **域内加的「回落 / 兜底」要问一句：它会不会把被测缺陷吞掉** —— 本例 4 条**全是 bodyless GET** ⇒ 回落 100% 生效 ⇒ ⇒ **共享层回归失去跨域证人**（兜底只剩共享层自己的真 HttpClient 守门）
