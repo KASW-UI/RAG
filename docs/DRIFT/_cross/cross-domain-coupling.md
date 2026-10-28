@@ -467,7 +467,8 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
       "task"
     ],
     "GoStyleFormValues": [
-      "article"
+      "article",
+      "favorite"
     ],
     "GoStyleGrpcClientBreakerInterceptor": [
       "article",

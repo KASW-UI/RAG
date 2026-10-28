@@ -4,7 +4,7 @@
 > 每个微服务 / 组件**复刻到什么程度**才算阶段一完成，**用什么命令判定**，**今天到哪一步了**。
 >
 > **版本**：**修订版 v3**（2026-10-28 基线一致性审查后重写；v3 = v2 + **机器自检后**的评级订正）
-> **核对时间**：2026-10-28（基线 commit `7ec6fc6` + 本次新增 `tools/difftest/check-{surface-parity,phasegoal-consistency}.py`）
+> **核对时间**：2026-10-28（基线 commit `7ec6fc6` + 本次新增 `tools/difftest/check-{surface-parity,phasegoal-consistency}.py`）｜ **2026-10-29 增补**：R3 ⑥ 边界补**第 4 条**（C 类阶段二暂缓项不计入 · Jason 裁定）＋ `DRIFT-COMMON-005` 已修的**四处订正**（§1.1 ⑥ · A-2 `service/common` 行 · 域级卡 · §六 C-2 · §十 D-06）；**矩阵评级未重算**（Jason 明示「按现矩阵判」）
 > **真源**：`/Users/pr/Documents/java&golang/Sea-RideTheWind_golang`（冻结，只读）
 > **上一版**：v1（2026-10-28）—— **v1 的 13 处结论在本版被修订**，逐条见 [§十 变更记录](#十变更记录原结论--问题--修订后结论--依据)。
 
@@ -46,14 +46,15 @@
 | **R0** | 范围外 | Go 侧无对应件 ⇒ 本仓不实现（`knowledge` / `points` / `security` 三域） |
 | **R1** | 骨架 | 有端点 / 方法，但业务逻辑是桩、硬编码成功或返回模拟数据 |
 | **R2** | **契约面已复刻** | ① wire 契约（HTTP 路径+方法集合 / gRPC 方法集合 / proto 字段号 / DB 列）**逐条对齐**；② **有守门可复算**（脚本或测试能自动判定）；③ 业务分支**未**逐条对照 |
-| **R3** | **语义面已复刻** | R2 **＋** ④ Go 侧每个业务决策点有 `文件:行号` 出处；⑤ RAG 侧有**自动化测试断言该行为**；⑥ **归属本组件**的「必须对齐 / 语义 MISMATCH / 真漂移」分歧项 **= 0** |
+| **R3** | **语义面已复刻** | R2 **＋** ④ Go 侧每个业务决策点有 `文件:行号` 出处；⑤ RAG 侧有**自动化测试断言该行为**；⑥ **归属本组件**的「必须对齐 / 语义 MISMATCH / 真漂移」分歧项 **= 0**（**C 类阶段二暂缓项不计入** ⇒ 见下方「⑥ 的精确边界」第 4 条 · **Jason 2026-10-29 裁定**） |
 | **R4** | **运行面已复刻** | R3 **＋** ⑦ **双侧同时运行**的探针对拍通过，**且该探针在版本控制内、现在可复算**；⑧ 有**变异验证**记录（改实现 ⇒ 探针必红） |
 | **未评级** | 从未对照 | 该组件**既无专属台账，也无任何仓内可复算的 Go↔RAG 对照产物**（守门脚本 / 契约测试类 / 双侧探针）⇒ 从未与 Go 逐条对照过 ⇒ **不得据此判任何等级**，组件状态直接 🔴<br>⚠️ **「无专属台账」≠「从未对照」**（v3 修订）：若存在**仓内可复算的对照产物**或**跨域对照记录**（`docs/DRIFT/_cross/proto-verification.md`），则**不算未评级**；此时「**判定记录位置不统一**」计入 [§九](#九证据缺口清单)，**不因此降 R**（降 R 会把「记录在哪」伪装成「行为没对齐」） |
 
-> **⑥ 的精确边界（v2 澄清）** —— 下列三类**不计入**「归属本组件的必相对齐项」，但**必须**登记到 [§九 证据缺口清单](#九证据缺口清单)：
+> **⑥ 的精确边界（v2 澄清 · 2026-10-29 补第 4 条）** —— 下列**四**类**不计入**「归属本组件的必相对齐项」；前 3 类**必须**登记到 [§九 证据缺口清单](#九证据缺口清单)，第 4 类按其自身口径登记：
 > - **已签字偏离**（决策，不是缺陷）⇒ 记入 §11.4；
 > - **落点在共享层 / 别的域**的跨组件残留 ⇒ 不计入组件 R，但**计入域级聚合**与[矩阵 C](#五矩阵-c跨组件不变量12-条)；
 > - **取证缺口**（台账写「为什么仍然 Unknown」，而**不是**「已断言不一致」）⇒ 计入 §九。
+> - **按 `docs/twoStage.md` §10 定级为 C 类**（阶段二暂缓 · 语义等价）的**差异与暂缓项** ⇒ **不计入**本条（C 类 = **已登记的已知差异**，既不是「必须对齐」、也不是「语义 MISMATCH / 真漂移」）⇒ 但**必须**逐条保留在 `docs/twoStage.md` §5.3 的「差异与暂缓项清单」（11 字段）**并**在组件台账可查 ⇒ ⚠️ **不得据此宣称该组件「已对齐」**（C 类 ≠ 零差异）。<br>**裁定**：Jason 2026-10-29（调度员落码）⇒ 口径**封死** ⇒ 此后**不再**因「C 类算不算真漂移」重算任何矩阵。
 >
 > ⚠️ **R 与 E 不可互相推导**：R4 的组件可能只有 E4（无生产环境）；反过来 E3 的组件可能只有 R2。
 
@@ -214,7 +215,7 @@
 | `users` | `users-common` | 【COMMON 型】全 3 条 | `mvn -pl service/users/users-common -am test` ⇒ `JwtUtilParityTest`（**Go 出处写进 javadoc**：`jwt.go:12`·`:14`）＋ `PasswordUtilGoCompatibilityTest`（`password.go:15-18`）＋ `GoStyleRequiredFieldGateTest` | **R3** ↓ | E4\* | `docs/DRIFT/users/common.md:551`（判定已升级 EQUIVALENT）· `:21-22`（探针位置）· `:522-525`（3 条 UNRESOLVED）· `service/users/users-common/src/test/java/com/rag/users/common/jwt/JwtUtilParityTest.java:20-26` | **0 条必对齐项** · `UNRESOLVED-002`/`004`/`005`（**取证缺口**，任一取证即重开判定）· ⚠️ **双侧对拍探针已消失 ⇒ 不可复算 ⇒ R4 不成立**（§九 G-4） | ✅ |
 | `users` | `user-proto` | 【PROTO 型】①–⑤ | `bash tools/difftest/check-proto-static.sh`（user 段 ⇒ **逐字节比对字段名 / 字段号 / message 名 / rpc 签名**，本轮实跑 EXIT=0）＋ `python3 tools/difftest/check-surface-parity.py --domain user` | **R3** ↑ | E3 | `docs/DRIFT/_cross/proto-verification.md:24`（`user`→`users` **0 行**行为层 diff · 20=20 message+enum · 47=47 字段号）· `:44`（**「有网」档** ⇒ 改坏即红）· `docs/DRIFT/users/user/rpc.md:219` | **0 条行为差异** · ⚠️ **消费方式未验**（`optional` presence / 字段号硬编码 / Jackson）⇒ **取证缺口** ⇒ §九 G-19，**不计入 ⑥、不降 R** · ⚠️ **无专属台账**（记录在 `_cross/proto-verification.md`） | ✅ |
 | `users` | `admin-proto` | 【PROTO 型】①–⑤ | `bash tools/difftest/check-proto-static.sh`（**admin 段** ⇒ 逐字节 diff，本轮实跑 EXIT=0）＋ `python3 tools/difftest/check-surface-parity.py --domain admin` | **R3** ↑ | E3 | `docs/DRIFT/_cross/proto-verification.md:19`（`admin` **0 行**行为层 diff · 28=28 message+enum · 61=61 字段号）· `:44`（**「有网」档**）· `docs/DRIFT/users/admin/rpc.md:46` | **0 条行为差异** · ⚠️ **消费方式未验** ⇒ **取证缺口** ⇒ §九 G-19，**不降 R** · ⚠️ **无专属台账** | ✅ |
-| **共享层** | `service/common` | 【COMMON 型】全 3 条 | `bash tools/breaker-probe/run-parity.sh` ＋ `bash tools/semantic-probe/deadline-downstream/run-deadline-downstream-parity.sh` | **R2** | E3 | `docs/DRIFT/common/alignment-2026-10-23.md:36`·`:637-643`·`:645` | **27 条编号未修**（`DRIFT-COMMON` 2 + `DRIFT-CF` 15 + `DRIFT-LOG` 7 + `DRIFT-SF` 3）＋ 5 项未编号 ＋ 10 条外部尾巴；**`DRIFT-COMMON-005` 是唯一硬阻塞**（破坏性变更，需用户裁定）⇒ 🔴 | 🔴 |
+| **共享层** | `service/common` | 【COMMON 型】全 3 条 | `bash tools/breaker-probe/run-parity.sh` ＋ `bash tools/semantic-probe/deadline-downstream/run-deadline-downstream-parity.sh` | **R2** | E3 | `docs/DRIFT/common/alignment-2026-10-23.md:36`·`:637-643`·`:645` | **27 条编号未修**（`DRIFT-COMMON` 2 + `DRIFT-CF` 15 + `DRIFT-LOG` 7 + `DRIFT-SF` 3）＋ 5 项未编号 ＋ 10 条外部尾巴；⚠️ **2026-10-29 订正**：`DRIFT-COMMON-005`（`DeadlineState` 墙钟→**单调钟** + 毫秒→**纳秒**）**已随 `6f39bea` 修复** ⇒ 原「破坏性变更，需用户裁定」的**唯一硬阻塞已消解**；另 **25 条 CF/LOG/SF 属 C 类** ⇒ 按 §1.1 ⑥ 第 4 条**不计入 R3 ⑥**（Jason 2026-10-29 裁定）⇒ ⇒ **仍需实修 = 2 条 `DRIFT-COMMON` + 5 项未编号 + 10 条外部尾巴**，且本组件仍 **R2**（未达 R3，与 ⑥ 无关）⇒ **R / 状态维持不变**，非判据歧义所致 ⇒ 🔴 | 🔴 |
 
 > **图例**：`↑` = v3 上调，`↓` = v3 下调（逐条理由见 §十）。
 > ⚠️ **组件状态与 R 不等价**：`R3` + 「仍开放项 = 取证缺口」⇒ **组件状态仍可判 ✅**（如 `like-api`）；`R3` + 「仍开放项 = 真实差异」⇒ **判 🟡/🔴**（如 `like-rpc`）。
@@ -238,7 +239,7 @@
 | `message` | 4 | api ✅ · rpc ✅ · common ✅ · proto ✅ | **✅** | `-010`/`-011`/`-013`（**`service/common`**）· `MSG-008`/`MSG-V-001`（跨域） |
 | `task` | 3 | api ✅ · rpc ✅ · proto ✅ | **✅** | `DRIFT-TASK-API-004` / `otel.*`（**全域共性**） |
 | `users` | 7 | user-api ✅ · user-rpc ✅ · admin-api ✅ · admin-rpc ✅ · users-common ✅ · user-proto ✅ · admin-proto ✅ | **✅** | `DRIFT-USERAPI-013`（**`service/common`**）· `V-002`/`V-011`（**销号签字不在写权面**）· **两个 proto 的「消费方式」未取证**（§九 G-19） |
-| **共享层** `service/common` | 1 | 🔴 | **🔴** | **27 条编号未修** ＋ 10 条外部尾巴 ⇒ **阻塞全仓** |
+| **共享层** `service/common` | 1 | 🔴 | **🔴** | **27 条编号未修** ＋ 10 条外部尾巴 ⇒ **阻塞全仓**（⚠️ 2026-10-29 订正：`DRIFT-COMMON-005` 硬阻塞**已消解**；R3 ⑥ 的 C 类口径**已封死**；但本组件仍 **R2** ⇒ **状态不变**，不是判据歧义所致） |
 
 ---
 
@@ -385,7 +386,7 @@
 | 条件 | 判据 | 当前 |
 |---|---|---|
 | **C-1 核心域达标** | 9 个微服务域中**核心 6 域**（`favorite` `comment` `message` `task` `article` `users`）**全部 ✅ 达标** | 🟡 **5/6**（favorite ✅ · comment ✅ · message ✅ · task ✅ · users ✅；**article 🟡**） |
-| **C-2 无 🔴 组件** | 全仓 **0** 个 🔴 未达标组件 | ❌ **不满足** —— 共享层 `service/common` 🔴（**唯一**；`like-common` 已由 v3 复核修正为 R3 ✅ ⇒ §十 #18） |
+| **C-2 无 🔴 组件** | 全仓 **0** 个 🔴 未达标组件 | ❌ **不满足** —— 共享层 `service/common` 🔴（**唯一**；`like-common` 已由 v3 复核修正为 R3 ✅ ⇒ §十 #18）<br>⚠️ **2026-10-29**：R3 ⑥ 的「C 类阶段二暂缓项」口径**已封死**（Jason 裁定 ⇒ §1.1 ⑥ 第 4 条）⇒ **本条仍不满足，但原因已不是判据歧义** —— `service/common` 的 🔴 来自 **R2 未达 R3** ＋ **2 条 `DRIFT-COMMON`** ＋ 5 项未编号 ＋ 10 条外部尾巴（`DRIFT-COMMON-005` 硬阻塞已于 2026-10-29 消解）⇒ ⇒ **阶段一仍未通过，缺口在「共享层实修」而非口径** |
 | **C-3 跨组件不变量** | 矩阵 C 的 12 条中 **X-1~X-10 无 🔴** | ✅ **不满足 X-11 / X-12**（属 P0 #8 / #5）<br>🟡 X-2 / X-4 / X-7 / X-8 / X-10 均为「部分满足」 |
 | **C-4 P0 九条** | P0 无 🔴 | ❌ **不满足**（#5 #8 🔴） |
 
@@ -497,7 +498,7 @@
 | **D-03** | **`like-rpc` 事实投递链路是 6 个 4 行骨架**（`DRIFT-LIKE-003`） | `service/like/like-rpc` | 点赞是否真记上、消息是否真发出 ⇒ 未取证 | like 域（台账记「有意不碰」，需拍板） |
 | **D-04** | **`like-rpc` 双失败时少传 error**（global `E60`，**真漂移**，待 like 域 owner 接手） | `service/like/like-rpc` | 业务正确性 | like 域 |
 | **D-05** | **`follow-rpc` 的 5 个 `follow_rpc_*` 指标无任何抓取出口**（Go 有 DevServer `/metrics`） | `service/follow/follow-rpc`（同款 5 处：favorite/message/like/user-user/user-admin） | 可观察差异 ⇒ `follow-rpc` 降 R2 | 用户 2026-10-24 定「本轮不落地」⇒ 需重新拍板 |
-| **D-06** | **共享层 27 条编号未修**（`DRIFT-COMMON` 2 + `DRIFT-CF` 15 + `DRIFT-LOG` 7 + `DRIFT-SF` 3）+ 5 项未编号 + 10 条外部尾巴 | `service/common` | **阻塞全仓**；`DRIFT-COMMON-005` 是唯一硬阻塞（破坏性变更，需用户裁定） | **G4 共享层单写权** |
+| **D-06** | **共享层 27 条编号未修**（`DRIFT-COMMON` 2 + `DRIFT-CF` 15 + `DRIFT-LOG` 7 + `DRIFT-SF` 3）+ 5 项未编号 + 10 条外部尾巴 | `service/common` | **阻塞全仓**；⚠️ **2026-10-29 订正**：`DRIFT-COMMON-005`（`DeadlineState` 单调钟 + 纳秒）**已随 `6f39bea` 修复** ⇒ 原「唯一硬阻塞（破坏性变更，需用户裁定）」**已消解**；另 **25 条 CF/LOG/SF 属 C 类 ⇒ 按 §1.1 ⑥ 第 4 条不计入 R3 ⑥**（Jason 2026-10-29 裁定）⇒ **仍需实修 = 2 条 `DRIFT-COMMON` + 5 项未编号 + 10 条外部尾巴**，且组件仍 **R2** | **G4 共享层单写权** |
 | **D-07** | **comment 域 2 条「仅 RAG 有」的 DDL**（`report_record.user_id` / `target_type`） | comment 域迁移脚本 | DDL 两侧不对齐 | comment 域（**未签字**） |
 | **D-08** | **`like` 域首轮 8 条错误断言 A~H 仍全部在位**（源码注释里的假断言） | `service/like/like-rpc` 源码注释 | 文档性缺陷（会误导后续读者） | like 域 |
 
