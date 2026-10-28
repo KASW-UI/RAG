@@ -92,7 +92,7 @@ public class NacosRegistration {
             //  Go 侧服务注册确实会让**进程退出**，但走的不是 panic：
             //    like.go:34                      s := zrpc.MustNewServer(c.RpcServerConf, …)
             //    zrpc/server.go:23-27             server, err := NewServer(...); logx.Must(err); return server
-            //    zrpc/server.go:41-46             HasEtcd ⇒ internal.NewRpcPubServer(…)；err ⇒ return nil, err
+            //    zrpc/server.go:42-46             HasEtcd ⇒ internal.NewRpcPubServer(…)；err ⇒ return nil, err
             //    core/logx/logs.go:232-242        Must(err) ⇒ 打印堆栈 ⇒ if ExitOnFatal.True() { os.Exit(1) }
             //    core/logx/vars.go:72             ExitOnFatal = syncx.ForAtomicBool(true)  ← 默认 true
             //  原文写的「panic」不准确（那是 ExitOnFatal 被设为 false 时的次生路径：

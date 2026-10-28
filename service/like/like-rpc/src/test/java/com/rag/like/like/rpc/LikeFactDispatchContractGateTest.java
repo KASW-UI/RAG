@@ -219,7 +219,7 @@ class LikeFactDispatchContractGateTest {
         assertThat(rec.path).isEqualTo("/v1/events");
         assertThat(rec.authorization).isEqualTo("Bearer " + TOKEN);
         assertThat(rec.contentType).isEqualTo("application/json");
-        // 🔴 Go: fact_delivery.go:99 `sender.Send(ctx, event, json.RawMessage(*row.DeliveryEnvelope))`
+        // 🔴 Go: fact_delivery.go:92 `sender.Send(ctx, event, json.RawMessage(*row.DeliveryEnvelope))`
         //    ⇒ 发的是**信封列**的字节，不是「解码后再序列化」的字节
         //    ⇒ 否则 DC 算出的 input_hash 与权威读重算的 input_hash 必然不同。
         assertThat(new String(rec.body, StandardCharsets.UTF_8))

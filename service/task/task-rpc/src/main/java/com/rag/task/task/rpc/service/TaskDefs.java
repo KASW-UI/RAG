@@ -10,7 +10,7 @@ import java.util.List;
  * <table border="1">
  *   <caption>三处硬编码常量</caption>
  *   <tr><th>常量</th><th>Go 出处</th><th>谁在读</th></tr>
- *   <tr><td>{@code AllTaskDefs}</td><td>{@code model/taskModel.go:22-25}</td>
+ *   <tr><td>{@code AllTaskDefs}</td><td>{@code internal/Model/taskModel.go:22-25}</td>
  *       <td><b>只有 {@code GetTask}</b>（{@code get_task_logic.go:84}）</td></tr>
  *   <tr><td>{@code taskID=1902, target=5}</td><td>{@code sink/like_sink.go:31-34}</td>
  *       <td>点赞 sink 的全部写入</td></tr>
@@ -20,7 +20,7 @@ import java.util.List;
  * </table>
  *
  * <p>Go <b>从未</b>校验这三处一致，也没有从数据库读任务定义
- * （{@code TaskDef} 的表 {@code task_def} 在 {@code model/taskModel.go:6-14} 里整段被注释，
+ * （{@code TaskDef} 的表 {@code task_def} 在 {@code internal/Model/taskModel.go:6-14} 里整段被注释，
  * 且不在 {@code service_context.go:47} 的 {@code AutoMigrate} 列表里 ⇒ 该表在真实库里不存在）。
  *
  * <p>⇒ Java 侧<b>保留同样的"两套真相"</b>：
@@ -48,7 +48,7 @@ public final class TaskDefs {
     /**
      * 一条任务定义。
      *
-     * <p>对应 Go {@code Model.TaskDef}（{@code model/taskModel.go:15-20}）——
+     * <p>对应 Go {@code Model.TaskDef}（{@code internal/Model/taskModel.go:15-20}）——
      * 注意这是<b>注释掉 gorm tag 之后</b>的版本：Go 刻意去掉了 {@code TableName}
      * 与全部 {@code gorm:"column:..."}，因此它<b>不是</b>一个可持久化的模型，
      * 只是一份内存里的常量表。

@@ -59,7 +59,7 @@ public interface LikeRecordMapper {
     long countActiveLikeByUserAndType(@Param("userId") long userId, @Param("targetType") String targetType);
 
     /**
-     * 对应 Go {@code fact_authority.go:118-120} 的源库状态核对查询：
+     * 对应 Go {@code fact_authority.go:108-109} 的源库状态核对查询：
      * {@code WHERE user_id = ? AND target_type = ? AND target_id = ? LIMIT 1}。
      *
      * <p>🔴 <b>为什么权威读需要它</b>：Go 的 {@code AuthoritativeFact} 最后一步要拿

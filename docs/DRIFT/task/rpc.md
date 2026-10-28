@@ -1633,5 +1633,41 @@ mvn -o -B -DargLine=-Xmx2g -pl service/task/task-rpc -am \
 | **条数（权威口径）** | 逐 `TEST-*.xml` 的 `testsuite` 属性求和 ⇒ **G2 三域 8 模块合计 = 730 tests / 0F / 0E / 0S**；其中本域 = `task-api` **102** · `task-rpc` **137** |
 | **本轮新增守门** | `TaskRpcKafkaListenerRegistryGateTest` **3/3**（在全量回归里**真实执行**，非跳过） |
 | **⚠️ 口径纪律** | ① 本轮**带 `clean`** ⇒ 报告已清空重写；② 条数在 **BUILD SUCCESS + maven 进程退出**两个条件都满足后采 ⇒ **不是**构建中途的半成品；③ **跨树比条数必须同口径** ⇒ 不可与 G1/G3/G4 的数直接相比 |
-| **⚠️ 与本域既有台账数字的关系** | 本域第二十四轮记的「task-rpc 测试数 = 129」是**上一轮**的数，且已自标「**已过期，待一次 `clean test` 全量复跑后替换**」⇒ ⇒ **本轮 = 该复跑的正式结果（137 tests / 0F / 0E / 0S）** ⇒ **两个数字并列，不删原值**（台账纪律）<br>⚠️ **只报实测值，不做差值归因**：第二十四轮那个 **134 是【推算】（129 + 5）不是实测** ⇒ ⇒ **不得**把「137 − 3（本轮新增类）= 134」当成「推算被证实」⇒ 推算**仍然只是推算**；本轮**唯一权威数 = 137** |
+| **⚠️ 与本域既有台账数字的关系** | 本域第二十四轮记的「task-rpc 测试数 = 129」是**上一轮**的数，且已自标「**已过期，待一次 `clean test` 全量复跑后替换**」⇒ ⇒ **本轮 = 该复跑的正式结果（137 tests / 0F / 0E / 0S）** ⇒ **两个数字并列，不删原值**（台账纪律）
+
+---
+
+## 2026-10-29 · G2 收工轮（第二轮）· 🔴→✅ **Go 出处行号订正 · task-rpc 7 处**（**其中 3 处是「目录名大小写错」· macOS 掩盖 ⇒ Linux CI 会找不到**）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `5fa8558` · **核对日期** 2026-10-29
+> **证据强度**：**E3**（Sea 真源**逐行核验** + 改后逐条回验）
+> **性质**：**P2 · B 类**（**不阻断**阶段 1 准入；**纯注释面**，产品行为零影响）
+
+| # | 位置 | 改前 | **改后（真源实况）** | 性质 |
+|---|---|---|---|---|
+| 1 | `service/TaskDefs.java:13` | `model/taskModel.go:22-25` | **`internal/Model/taskModel.go:22-25`** | 🔴 **目录名大小写错** |
+| 2 | `service/TaskDefs.java:23` | `model/taskModel.go:6-14` | **`internal/Model/taskModel.go:6-14`** | 同上 |
+| 3 | `service/TaskDefs.java:51` | `model/taskModel.go:15-20` | **`internal/Model/taskModel.go:15-20`** | 同上 |
+| 4 | `config/TaskSinkProperties.java:10` | `internal/sink/like_sink.go:31-34, 47, 64-75` | **`internal/sink/like_sink.go:31-34, 64-75`** | `:47` **不是 TTL**（`:47` 是 `type LikeSinkConsumer struct{}` 里的**空行**；`:44` = struct 头 · `:45` = `rdb *redis.Client` · `:46` = `gdb *gorm.DB`）⇒ **去掉 `:47`** |
+| 5 | `service/TaskRedisKeys.java:195` | `like_sink.go:47,188,284,339` | **`like_sink.go:188,284,339`** | 同上 |
+| 6 | `config/TaskSinkPropertiesBindingTest.java:47` | `like_sink.go:47,188,284,339` | **`like_sink.go:188,284,339`** | 同上 |
+| 7 | `config/TaskSinkPropertiesBindingTest.java:87` | `like_sink.go:47,188,284,339` | **`like_sink.go:188,284,339`** | 同上 |
+
+> 🔴 **第 1~3 条为什么特别危险**：Go 真源目录是 **`service/task/rpc/internal/Model/`（大写 M）**
+> ⇒ **macOS 文件系统大小写不敏感 ⇒ 本地按图索骥「找得到」⇒ 永远查不出** ⇒
+> **Linux CI 上按 `model/` 找会 `No such file or directory`** ⇒ **本地绿 ≠ CI 绿**。
+> ⇒ **判定式**：**凡出处里的目录段，必须用 `ls` 看真实大小写**（`ls -d .../internal/*/`），**不能靠「点开路径能打开」来判断**。
+> ⚠️ 同一文件 `:6` 已经写对了 `internal/Model/taskModel.go:15-25` ⇒ **文件内自相矛盾**，无任何测试会因此变红。
+
+### 复算命令
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+G="/Users/pr/Documents/java&golang/Sea-RideTheWind_golang"
+ls -d "$G/service/task/rpc/internal/"*/          # ⇒ Model/（大写 M）
+sed -n '6,14p;15,20p;22,25p' "$G/service/task/rpc/internal/Model/taskModel.go"
+sed -n '44,47p;188p;284p;339p' "$G/service/task/rpc/internal/sink/like_sink.go"
+#   ⇒ :44 type LikeSinkConsumer struct { / :45 rdb / :46 gdb / :47（空行）
+#   ⇒ :188 SetNX task:init 90*24h / :284 Set like:total 90*24h / :339 SetNX task:done 90*24h
+```<br>⚠️ **只报实测值，不做差值归因**：第二十四轮那个 **134 是【推算】（129 + 5）不是实测** ⇒ ⇒ **不得**把「137 − 3（本轮新增类）= 134」当成「推算被证实」⇒ 推算**仍然只是推算**；本轮**唯一权威数 = 137** |
 | **日志** | `/tmp/g2run/g2-regress.log`（**仓外**，不可复算 ⇒ 结论以台账 + 复算命令为准） |

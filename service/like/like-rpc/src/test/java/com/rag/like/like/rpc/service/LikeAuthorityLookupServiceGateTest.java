@@ -118,7 +118,7 @@ class LikeAuthorityLookupServiceGateTest {
         assertThat(fact.technicalReceipt.receiptId).isEqualTo("receipt-1");
         assertThat(fact.technicalReceipt.offset).isEqualTo(1L);
         assertThat(fact.sourceEventHash).isEqualTo(canonicalHash(row.getDeliveryEnvelope()));
-        // old_state == 0 ⇒ 不是「改状态」的事实 ⇒ 没有前驱（Go fact_authority.go:96-101）
+        // old_state == 0 ⇒ 不是「改状态」的事实 ⇒ 没有前驱（Go fact_authority.go:96-98）
         assertThat(fact.predecessorEventId).isNull();
     }
 
@@ -145,7 +145,7 @@ class LikeAuthorityLookupServiceGateTest {
     }
 
     // ==================================================================================
-    // 行自身的技术回执完整性（Go fact_authority.go:15-19）
+    // 行自身的技术回执完整性（Go fact_authority.go:13-15）
     // ==================================================================================
 
     @Test
@@ -219,7 +219,7 @@ class LikeAuthorityLookupServiceGateTest {
     }
 
     // ==================================================================================
-    // 源库状态核对（Go fact_authority.go:106-123）
+    // 源库状态核对（Go fact_authority.go:106-117）
     // ==================================================================================
 
     @Test

@@ -146,7 +146,7 @@ public class GetTaskReq {
         if (raw instanceof Number n) {
             return numberLiteral(n);                // Go types.go:29-33
         }
-        // Boolean / 数组 / 对象：Go types.go:34-35
+        // Boolean / 数组 / 对象：Go types.go:35
         throw new BadIdTypeException(ID_MUST_BE_STRING_OR_INTEGER);
     }
 

@@ -7,7 +7,7 @@ import java.time.Duration;
 /**
  * 两个 sink 的运行参数 —— 对应 Go 端两处<b>互相独立</b>的常量块：
  * <ul>
- *   <li>{@code internal/sink/like_sink.go:31-34, 47, 64-75}</li>
+ *   <li>{@code internal/sink/like_sink.go:31-34, 64-75}</li>
  *   <li>{@code internal/sink/article_sink.go:18-31, 76-87}</li>
  * </ul>
  *

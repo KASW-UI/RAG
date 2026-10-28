@@ -225,7 +225,7 @@ class LikeFactDeliveryGoSemanticsGateTest {
         assertThatThrownBy(() -> deliveryService.dispatchFactOnce(Context.root(), mustNotBeCalled(), LOG))
                 .isInstanceOf(Wire.FrozenEnvelopeBlockedException.class);
 
-        // 🔴 这一行才是本测试的全部意义：Go 在 fact_delivery.go:79-89 是「UPDATE 后 Commit」。
+        // 🔴 这一行才是本测试的全部意义：Go 在 fact_delivery.go:78-88 是「UPDATE 后 Commit」。
         assertThat(deliveryStatus()).isEqualTo(3);
     }
 
@@ -241,7 +241,7 @@ class LikeFactDeliveryGoSemanticsGateTest {
         IllegalStateException cause = new IllegalStateException("DC endpoint refused the connection");
         assertThatThrownBy(() -> deliveryService.dispatchFactOnce(Context.root(), senderFailingWith(cause), LOG))
                 .isInstanceOf(LikeFactDispatchService.DeliveryDeferredException.class)
-                // Go 的 fact_delivery.go:113 是 `return false, sendErr` ⇒ 原始错误必须带出来
+                // Go 的 fact_delivery.go:109 是 `return false, sendErr` ⇒ 原始错误必须带出来
                 .hasCause(cause);
 
         assertThat(deliveryStatus()).isEqualTo(2);
@@ -399,7 +399,7 @@ class LikeFactDeliveryGoSemanticsGateTest {
 
     // ====================================================================================
     // ⑬ 前序屏障：同 aggregate 的高版本事实必须等低版本先被 ACCEPTED
-    //     （Go fact_delivery.go:68-70 的 NOT EXISTS 子句）
+    //     （Go fact_delivery.go:65-68 的 NOT EXISTS 子句）
     // ====================================================================================
 
     @Test

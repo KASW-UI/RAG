@@ -2846,3 +2846,31 @@ grep -n "ERROR_DB_UPDATE" \
 | **⚠️ 口径纪律** | ① 本轮**带 `clean`** ⇒ 报告已清空重写；② 条数在 **BUILD SUCCESS + maven 进程退出**两个条件都满足后采 ⇒ **不是**构建中途的半成品；③ **跨树比条数必须同口径** ⇒ 不可与 G1/G3/G4 的数直接相比 |
 | **日志** | `/tmp/g2run/g2-regress.log`（**仓外**，不可复算 ⇒ 结论以台账 + 复算命令为准） |
 
+---
+
+## 2026-10-29 · G2 收工轮（第二轮）· 🟡 **出处抽验的 4 条 NOT_FOUND · 逐条定性（**零真错**）**
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `5fa8558` · **核对日期** 2026-10-29
+> **性质**：**登记**（非缺陷）· **不阻断**阶段 1
+
+抽验脚本（`/tmp` · 仓外）把 G2 三域的 **1162 条** Go 出处引用跑了一遍 ⇒ 报出 **4 条 NOT_FOUND** ⇒ **逐条回真源手工核**：
+
+| # | 引用 | 定位 | 定性 |
+|---|---|---|---|
+| 1 | `gorm.io/driver/postgres@v1.6.0/postgres.go:251-255`（`MessageRpcTimeColumnParityTest.java:39`） | 解析器**不覆盖 `gorm.io/...` 模块路径形态** | ✅ **行号正确**（`:251-255` = `case schema.Time:` ⇒ `timestamptz`）⇒ **非缺陷** |
+| 2 | `gorm.io/driver/postgres@v1.6.0/postgres.go:231-234`（`LikeDomainFactSchemaParityTest.java:39`，like 域） | 同上 | ✅ **行号正确**（`:231-234` = `case size <= 32:` ⇒ `integer`）⇒ **非缺陷** |
+| 3 | `gorm.io/gorm@v1.31.1/callbacks/update.go:201`（`LikeRecordMapper.java:238`，like 域） | 同上 | ✅ **行号正确**（`:201` = `case map[string]interface{}:`）⇒ **非缺陷** |
+| 4 | `Sea-RideTheWind_golang/service/common/observability/http.go:22`（`MessageApiTimeoutRealTomcatTest.java:34`） | **路径形态冗余**（多写仓库名一层） | ✅ **行号正确**（`:22` = `httpTimeoutBody = "Request Timeout"`）⇒ **不改**：G1/G4 域也用同一形态 ⇒ 单改 G2 一家会造成**跨域不一致** |
+
+> ⇒ **结论**：本轮 **G2 三域的 Go 出处引用 = 1162 条全部核实**，其中 **73 条行号/文件错已修**、**4 条非 OK 全部定性为非缺陷**、**余下 1085 条由廉价判据判过**（⚠️ 见 `docs/DRIFT/like/rpc.md` §12.2 —— **廉价判据挡不住「语义不符」**，那 462 条「多候选」属**弱证据**，留待阶段 2 人工核）。
+
+### 复算命令
+
+```bash
+GOMOD="$HOME/go/pkg/mod"
+sed -n '251,255p' "$GOMOD/gorm.io/driver/postgres@v1.6.0/postgres.go"
+sed -n '231,234p' "$GOMOD/gorm.io/driver/postgres@v1.6.0/postgres.go"
+sed -n '201p'     "$GOMOD/gorm.io/gorm@v1.31.1/callbacks/update.go"
+sed -n '22p'      "/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/common/observability/http.go"
+```
+

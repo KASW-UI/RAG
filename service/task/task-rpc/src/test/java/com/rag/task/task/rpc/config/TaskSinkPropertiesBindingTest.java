@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  *
  * <h2>Go 出处（断言 1 的依据）</h2>
  * <ul>
- *   <li>点赞路 init / done / like:total TTL = {@code 90*24h} —— {@code like_sink.go:47,188,284,339}</li>
+ *   <li>点赞路 init / done / like:total TTL = {@code 90*24h} —— {@code like_sink.go:188,284,339}</li>
  *   <li>文章路 init TTL = {@code articleInitTTL = 24h} —— {@code article_sink.go:23}</li>
  *   <li>文章路 done / like:cnt TTL = {@code articleDoneTTL = 90*24h + 30*24h = 120d} —— {@code article_sink.go:22}</li>
  * </ul>
@@ -84,7 +84,7 @@ class TaskSinkPropertiesBindingTest {
         assertEquals(190L, p.getArticle().getTaskId());
         assertEquals(3L, p.getArticle().getTarget());
 
-        // Go like_sink.go:47,188,284,339 —— 90*24h
+        // Go like_sink.go:188,284,339 —— 90*24h
         assertEquals(Duration.ofDays(90), p.getLike().getInitTtl());
         // Go article_sink.go:23 —— articleInitTTL = 24h == Duration.ofDays(1)
         assertEquals(Duration.ofHours(24), p.getArticle().getInitTtl());

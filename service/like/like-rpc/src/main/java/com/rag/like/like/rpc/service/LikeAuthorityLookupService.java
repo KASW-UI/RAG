@@ -75,13 +75,13 @@ public class LikeAuthorityLookupService {
     /** Go {@code fact_delivery.go:17} {@code const likeFactProducer = "rtw.like-mq"}。 */
     private static final String PRODUCER = LikeEventContracts.FACT_PRODUCER;
 
-    /** Go {@code fact_authority.go:36} 的事件类型判据。 */
+    /** Go {@code fact_authority.go:30} 的事件类型判据。 */
     private static final String EVENT_TYPE_INTERACTION = LikeEventContracts.FACT_EVENT_TYPE;
 
-    /** Go {@code fact_authority.go:40} {@code payload.EventID != "rtw.like." + payload.OperationID}。 */
+    /** Go {@code fact_authority.go:32} {@code payload.EventID != "rtw.like." + payload.OperationID}。 */
     private static final String EVENT_ID_PREFIX = "rtw.like.";
 
-    /** Go {@code fact_authority.go:52} 的 eventID 长度上限。 */
+    /** Go {@code fact_authority.go:54} 的 eventID 长度上限。 */
     private static final int MAX_EVENT_ID_LENGTH = 128;
 
     private final LikeDomainFactOutboxMapper outboxMapper;
@@ -97,7 +97,7 @@ public class LikeAuthorityLookupService {
     }
 
     /**
-     * 对应 Go {@code AuthoritativeFact(ctx, producer, eventID)}（{@code fact_authority.go:53-124}）。
+     * 对应 Go {@code AuthoritativeFact(ctx, producer, eventID)}（{@code fact_authority.go:53-119}）。
      *
      * <p>🔴 <b>签名与 Go 逐字一致</b>（{@code (ctx, producer, eventID)} → {@code AuthorityFact}）
      * ⇒ 未来的独立进程模块用<b>方法引用</b>（{@code lookupService::lookup}）接到
@@ -113,7 +113,7 @@ public class LikeAuthorityLookupService {
             throw Wire.ERR_AUTHORITY_UNAVAILABLE;
         }
 
-        // --- ① 按 event_id 取那一行（fact_authority.go:58-63）
+        // --- ① 按 event_id 取那一行（fact_authority.go:57-64）
         // ⚠️ Go 侧 DB 出错 ⇒ 返回原始 error（⇒ 503）；查不到 ⇒ ErrAuthorityUnavailable（⇒ 404）
         LikeDomainFactOutboxEntity requested = outboxMapper.selectByEventId(eventId);
         if (requested == null) {
@@ -134,7 +134,7 @@ public class LikeAuthorityLookupService {
         List<LikeDomainFactOutboxEntity> rows =
                 outboxMapper.selectByAggregateIdOrderByVersion(requested.getAggregateId());
 
-        // --- ④ 逐行重放（fact_authority.go:74-97）—— 12 道校验的主体
+        // --- ④ 逐行重放（fact_authority.go:74-102）—— 12 道校验的主体
         int state = 0;
         String previous = "";
         boolean found = false;
@@ -148,7 +148,7 @@ public class LikeAuthorityLookupService {
                 throw Wire.ERR_AUTHORITY_UNAVAILABLE;
             }
 
-            // ④-2 信封必须能严格解码且与行自洽（fact_authority.go:81-86）
+            // ④-2 信封必须能严格解码且与行自洽（fact_authority.go:81-85）
             Wire.Event event;
             try {
                 event = validator.decodeEnvelope(candidate.getDeliveryEnvelope());
@@ -159,7 +159,7 @@ public class LikeAuthorityLookupService {
                 throw Wire.ERR_AUTHORITY_UNAVAILABLE;
             }
 
-            // ④-3 载荷必须能严格解码，且与「上一行重放出来的状态」衔接（fact_authority.go:87-95）
+            // ④-3 载荷必须能严格解码，且与「上一行重放出来的状态」衔接（fact_authority.go:86-93）
             LikeDeliveryValidator.LikeFact current = validator.decodePayload(event);
             if (current == null
                     || current.oldState != state
@@ -171,7 +171,7 @@ public class LikeAuthorityLookupService {
                 throw Wire.ERR_AUTHORITY_UNAVAILABLE;
             }
 
-            // ④-4 找到被问的那一行，并记下它的前驱（fact_authority.go:96-101）
+            // ④-4 找到被问的那一行，并记下它的前驱（fact_authority.go:94-99）
             if (eq(candidate.getEventId(), eventId)) {
                 found = true;
                 if (current.oldState != 0) {
@@ -187,7 +187,7 @@ public class LikeAuthorityLookupService {
             throw Wire.ERR_AUTHORITY_UNAVAILABLE;
         }
 
-        // --- ⑥ 源库状态核对（fact_authority.go:106-123）
+        // --- ⑥ 源库状态核对（fact_authority.go:106-117）
         long uid = subjectIdFromRef(authority.subjectRef);
         LikeRecordEntity record = recordMapper.selectOneByUserAndTarget(uid, payload.targetType, payload.targetId);
         if (record == null) {
@@ -210,22 +210,22 @@ public class LikeAuthorityLookupService {
     }
 
     /**
-     * 对应 Go {@code deliveredLikeAuthority(row)}（{@code fact_authority.go:14-50}）。
+     * 对应 Go {@code deliveredLikeAuthority(row)}（{@code fact_authority.go:12-44}）。
      *
      * <p>判据分三组，顺序即短路顺序：
      * <ol>
-     *   <li><b>行自身的技术回执完整性</b>（{@code :15-19}）：已投递 / 有投递时间 /
+     *   <li><b>行自身的技术回执完整性</b>（{@code :13-15}）：已投递 / 有投递时间 /
      *       有接收时间 / 有回执 ID / 位点 ≥ 1 / 输入哈希合法 / 信封非空；</li>
-     *   <li><b>信封 ⇔ 载荷 ⇔ 行 的交叉校验</b>（{@code :20-38}）：严格解码 + 交付合法性 +
+     *   <li><b>信封 ⇔ 载荷 ⇔ 行 的交叉校验</b>（{@code :19-34}）：严格解码 + 交付合法性 +
      *       载荷各项恒等式；</li>
-     *   <li><b>哈希对账</b>（{@code :39-41}）：信封原始字节的规范化哈希必须等于行的
+     *   <li><b>哈希对账</b>（{@code :35-38}）：信封原始字节的规范化哈希必须等于行的
      *       {@code technical_input_hash}。</li>
      * </ol>
      *
      * @return 校验通过时返回「权威事实 + 载荷」；任何一项不过 ⇒ {@code null}
      */
     private Delivered deliveredLikeAuthority(LikeDomainFactOutboxEntity row) {
-        // --- ① 行自身的技术回执完整性（Go fact_authority.go:15-19）
+        // --- ① 行自身的技术回执完整性（Go fact_authority.go:13-15）
         if (row.getDeliveryStatus() != Wire.DeliveryStatus.DELIVERY_ACCEPTED.code()
                 || row.getDeliveredAt() == null
                 || row.getTechnicalReceivedAt() == null
@@ -236,7 +236,7 @@ public class LikeAuthorityLookupService {
             return null;
         }
 
-        // --- ② 信封严格解码 + 交付合法性（Go fact_authority.go:20-23）
+        // --- ② 信封严格解码 + 交付合法性（Go fact_authority.go:19-22）
         Wire.Event event;
         try {
             event = validator.decodeEnvelope(row.getDeliveryEnvelope());
@@ -247,13 +247,13 @@ public class LikeAuthorityLookupService {
             return null;
         }
 
-        // --- ②-2 载荷严格解码（Go fact_authority.go:24-26）
+        // --- ②-2 载荷严格解码（Go fact_authority.go:24-25）
         LikeDeliveryValidator.LikeFact payload = validator.decodePayload(event);
         if (payload == null) {
             return null;
         }
 
-        // --- ②-3 载荷各项恒等式（Go fact_authority.go:27-38）
+        // --- ②-3 载荷各项恒等式（Go fact_authority.go:27-33）
         Wire.Result subjectResult = Wire.parseRTWSubject(payload.subjectRef);
         if (!subjectResult.isOk()
                 || !validLikeRevision(payload.targetRevision, payload.revisionStatus)
@@ -267,7 +267,7 @@ public class LikeAuthorityLookupService {
             return null;
         }
 
-        // --- ③ 哈希对账（Go fact_authority.go:39-41）
+        // --- ③ 哈希对账（Go fact_authority.go:35-38）
         // ⚠️ 算的是**信封列的原始字节**，不是重新序列化的字节
         //   （Go: CanonicalHash([]byte(*row.DeliveryEnvelope))）
         String hash;
@@ -303,7 +303,7 @@ public class LikeAuthorityLookupService {
     }
 
     /**
-     * 对应 Go {@code validLikeRevision(revision, status)}（{@code fact_authority.go:52-57}）。
+     * 对应 Go {@code validLikeRevision(revision, status)}（{@code fact_authority.go:46-51}）。
      *
      * <p>Go：{@code revision == nil} ⇒ 要求 {@code status == "unknown"}；
      * 否则要求 revision 非空 <b>且</b> {@code status == "resolved"}。
@@ -316,7 +316,7 @@ public class LikeAuthorityLookupService {
     }
 
     /**
-     * 对应 Go {@code validLikeTransition(operation, oldState, newState)}（{@code fact_authority.go:126-138}）。
+     * 对应 Go {@code validLikeTransition(operation, oldState, newState)}（{@code fact_authority.go:121-134}）。
      *
      * <p>⚠️ <b>状态取值域</b>：{@code newState} 用的是 {@code like_record.state} 的取值域
      * （0 无 / 1 已点赞 / 2 已点踩），<b>不是</b> Kafka 消息里的 action 编码（1~4）。
@@ -340,7 +340,7 @@ public class LikeAuthorityLookupService {
     }
 
     /**
-     * 对应 Go {@code sameLikeRevision(left, right)}（{@code fact_authority.go:140-142}）。
+     * 对应 Go {@code sameLikeRevision(left, right)}（{@code fact_authority.go:136-141}）。
      *
      * <p>Go 是<b>指针比较</b>：两个都是 nil ⇒ 相等；只有一个是 nil ⇒ 不等；
      * 都不是 nil ⇒ 比<b>字符串内容</b>。

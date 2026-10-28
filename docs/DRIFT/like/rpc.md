@@ -2098,3 +2098,108 @@ mvn -o -B -DargLine=-Xmx2g -pl service/like/like-rpc -am \
 | **改后** | 仍是骨架（**形态那一半本就不该预支**）⇒ 但**明确写出**：① **语义层已实现**于 `LikeAuthorityLookupService`（Go `fact_authority.go:12-146` 的 12 道校验逐字翻译 · 零 servlet 依赖 · 守门 11 条全绿）；② 为什么**本文件仍然不做**（三条硬约束：共享层 `AuthorityHandler`/`AuthorityHandlerFactory` 依赖 servlet ⇒ like-rpc 无 servlet-api ⇒ implements 会让上下文起不来 ／ 加 web starter 会让 4 个未声明 `webEnvironment` 的 `@SpringBootTest` 默认起 Tomcat ／ Go 形态是独立进程 ⇒ 选「同进程独立端口」= wire 面变更）；③ **形态决策待用户/收口执行者拍板**（`DRIFT-LIKE-003-C`） |
 | **为什么值得改** | ⚠️ **「骨架」这个词会误导**：它让人以为**语义层也没做** ⇒ **可能有人重做一遍**（而那 407 行已经写好且有守门）⇒ ⇒ 骨架注释的首要职责是**指路**，不是描述「没做」 |
 | **验证** | 编译通过（`LikeAuthorityLookupServiceGateTest` 11/11 仍绿） |
+
+---
+
+## 2026-10-29 · G2 收工轮（第二轮）· 🔴→✅ **Go 出处行号订正 · 第二批 60 处**（like-rpc）+ 🟡 **判据本身的失效模式已坐实**（「多候选任一通过 ⇒ 假绿」）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `5fa8558` · **核对日期** 2026-10-29
+> **证据强度**：**E3**（Go 真源**逐行核验** + 改后**逐条回验**）
+> **性质**：**P2 · B 类**（**不阻断**阶段 1 准入；**纯注释面**，产品行为零影响）
+> **发现路径**：调度员（跨会话）给出「本域 5 条 Go 出处行号错」清单 ⇒ G2 **按 go-zero v1.10.2 + Sea 真源逐条复核** ⇒ **清单本身有 2 条的「结束行」多 1**（见 §12.2 末注）⇒ 顺手用**更宽口径**（**域上下文消歧 + 大小写敏感 + 不静默吞多候选**）重扫 ⇒ **浮出 60 处**
+> ⚠️ **本轮跑在「停止令」下** ⇒ 做到「**可提交、可汇报**」即止 ⇒ **不扩范围、不接新任务**
+
+### §12.0 本轮落点清单（like-rpc 60 处 / 7 个文件）
+
+| 组 | 目标真源 | 引用点 | 处数 | 根因 |
+|---|---|---|---|---|
+| **A** | `fact_delivery.go` **函数体边界** | `LikeDeliveryValidator.java:23,140` · `LikeFactDispatchService.java:20,83` | **4** | 起止行都错（`:22-58` 应为 `:23-50`；`:60-127` 应为 `:52-126`，且 `:127` **越界**） |
+| **B** | `fact_delivery.go` **子行号** | `LikeDeliveryValidator.java`(9) · `LikeFactDispatchService.java`(15) · `LikeDomainFactOutboxMapper.java:129` · `LikeFactDispatchContractGateTest.java:222` · `LikeFactDeliveryGoSemanticsGateTest.java:228,244,402` | **29** | **系统性偏移**（见 §12.2 表） |
+| **C** | `fact_authority.go` | `LikeAuthorityLookupService.java`(22) · `LikeAuthorityLookupServiceGateTest.java`(3) · `LikeRecordMapper.java:62` | **26** | **系统性偏移** + 1 处**文件指错** |
+| **D** | go-zero `zrpc/server.go` | `NacosRegistration.java:95` | **1** | 起点多 1（`:41` 是空行） |
+
+> **⚠️ 组 B / C 是本轮最值得记的**：它们**不是零星手误**，而是**整段系统性偏移** ⇒ 说明这批引用**当初就没有逐行回真源核过**。
+
+### §12.1 调度员给的 5 条 —— 复核后**真值与清单不完全一致**（**逐条回真源核**）
+
+| # | 清单给的区间 | **G2 复核后的真值** | 差异 |
+|---|---|---|---|
+| 1 | `core/mapping/unmarshaler.go:664-716` | **`:664-715`** | 结束行**多 1**（`:715` = 闭合括号，`:716` = 空行） |
+| 2 | `rest/token/tokenparser.go:81-87` | **`:81-86`** | 结束行**多 1**（`:86` = 闭合括号，`:87` = 空行） |
+| 3 | `zrpc/server.go:42-46` | **`:42-46`** | ✅ 一致 |
+| 4 | `fact_delivery.go:23-51` | **`:23-50`** | 结束行**多 1**（`:50` = 闭合括号，`:51` = 空行） |
+| 5 | `fact_delivery.go:52-126` | **`:52-126`** | ✅ 一致 |
+
+⇒ **判定式**：**「结束行」最容易被写成「下一个空行 / 下一个函数的起点」** ⇒ 复核时**优先看那一行是不是闭合括号 `}`**，再回退一行确认。
+
+### §12.2 🔴 判据本身的失效模式（本轮**最重要的产出** —— 直接影响别的 lane 的「零错」结论）
+
+抽验脚本从 v2 升到 v3（**加域上下文消歧 + 大小写敏感 + 不静默吞多候选**）后，**浮出 5 条 v2 判成 OK 的真错**：
+
+| # | 引用 | v2 判 | **真源实况** | 为什么 v2 判错 |
+|---|---|---|---|---|
+| 1 | `fact_authority.go:52`（eventID 长度上限） | OK | like 版 `:52` 是**空行**；真身在 **`:54`**（`len(eventID) > 128`） | **comment 版同名文件 `:52` 恰好有同款代码 ⇒ 干扰项顶包 ⇒ 假绿** |
+| 2 | `fact_authority.go:52-57`（`validLikeRevision`） | OK | 真身 **`:46-51`** | 同上 |
+| 3 | `fact_authority.go:40`（EventID 前缀恒等式） | OK | 真身 **`:32`** | `:40` 非空 ⇒ 「行存在且非空」判据看不出**语义不符** |
+| 4 | `metrics.go:39` / `:46`（`LikeApiMetrics`） | OK | like-api 的 `metrics.go` **只有 21 行**（计数器定义）⇒ **文件指错**；真身在 `logic/like/likeactionlogic.go:39-40 / :46-47` | 别的域的 `metrics.go` 恰好够长 ⇒ 顶包 |
+| 5 | `types.go:34-35`（task-api） | OK | `:34` 是**空行**；拒绝点在 **`:35`** | 空行被「非空」判据挡住，但**跨域同名文件**顶包后判过 |
+
+⇒ **三条判定式（可直接搬到别的 lane）**：
+
+1. 🔴 **「多候选任一通过 ⇒ 算过」是假绿源** ⇒ Sea 仓 `fact_delivery.go` 有**两个**（like 版 126 行 = 真身 / comment 版 135 行 = 干扰项）⇒ 越界的 `:60-127` 会被 comment 版**救活** ⇒ **凡「同域同名文件」存在多份，必须按域消歧后再判**。
+2. 🔴 **「大小写不敏感兜底」会掩盖真实路径错误** ⇒ task 域 `model/taskModel.go` 的真身目录是**大写 M**（`service/task/rpc/internal/Model/`）⇒ macOS 不敏感 ⇒ 判过；**Linux CI 会找不到** ⇒ **路径判据必须大小写敏感**。
+3. 🟡 **「行存在且非空」只能挡「越界 / 指空」，挡不住「语义不符」** ⇒ 第 3 条（`fact_authority.go:40`）就是**行号完全合法但内容完全不对** ⇒ ⇒ **凡引用带「声称了什么」的语义，必须回真源读那一行**（§12.4 的复算命令）。
+
+> ⚠️ **对 G1 的影响（已在 §12.2 里坐实的反向风险）**：若 G1 的「849/849 零错」用的是「多候选任一通过」判据 ⇒ **那份结论可能含同类假绿** ⇒ G1 域有 **56 个裸文件名引用** ⇒ **建议 G1 用「域上下文消歧 + 大小写敏感」重跑一遍**（**G2 不越界去跑 G1 的域**）。
+
+### §12.3 §10「问题归属」十一项（浓缩）
+
+| 项 | 内容 |
+|---|---|
+| **问题** | G2 三域 **73 处** Go 出处引用行号错 / 文件指错（like-rpc 60 · like-api 3 · message-api 2 · task-rpc 7 · task-api 1）⇒ **纯注释面**，产品行为零影响 ⇒ 但违反 AGENTS.md §3.3（每个 Go 事实必须带可核的 `文件:行号`）⇒ **对照链条断** |
+| **性质** | **P2 · B 类** ⇒ **不阻断**阶段 1 准入 |
+| **修法** | 73 处**逐条回真源读那一行**后再改 ⇒ **不改任何断言** ⇒ 相关守门须仍全绿 |
+| **写权** | **73 处全部落在 G2 写权面**（`service/{message,like,task}/**`）⇒ **共享层 `service/common` 一个字没改**（只**引用**它的行号） |
+| **未闭合** | ① **462 条「多候选」引用仍是弱证据**（本轮只对**语义带断言**的族做了人工核）⇒ 阶段 2 可做全量人工核；② **抽验脚本落在 `/tmp` ⇒ 未落仓 ⇒ 结论属「声明的，不是可复算的」** ⇒ 落仓位置属 `tools/**` 共享面 ⇒ **G2 无写权** ⇒ 登记给合并收口执行者 |
+
+### §12.4 复算命令（可复算）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+G="/Users/pr/Documents/java&golang/Sea-RideTheWind_golang"
+
+# ① 逐条回验（把改后的行号拿回 Go 文件，看那一行是不是它声称的那件事）
+sed -n '23p;50p;52p;126p' "$G/service/like/rpc/internal/model/fact_delivery.go"
+#   ⇒ :23 func validLikeDelivery / :50 } / :52 func DispatchFactOnce / :126 }
+sed -n '13,15p;30,32p;35,38p;46,51p;54p;106,109p' "$G/service/like/rpc/internal/model/fact_authority.go"
+
+# ② 抽验（脚本在 /tmp ⇒ 仓外 ⇒ 结论以本台账 + 上面 ① 为准）
+grep -rnE "\.go:[0-9]+" service/message service/like service/task --include='*.java' \
+  | grep -v "/target/" > /tmp/g2-gocite.txt        # ⇒ 1079 行命中
+python3 /tmp/g2run/gocite_check3.py /tmp/g2-gocite.txt
+# 期望：引用 1162 条 ⇒ OK 1158 / CASE_MISMATCH 0 / NOT_FOUND 4
+#   ⇒ 4 条 NOT_FOUND 全是**解析器限制或有意不改**（见下），**零真错**
+
+# ③ 域级回归（带 clean ⇒ 条数不是半成品）
+mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end clean test \
+  -pl service/message/message-api,service/message/message-rpc,service/message/message-common,\
+service/like/like-api,service/like/like-rpc,service/like/like-common,service/task/task-api,service/task/task-rpc -am
+```
+
+> **4 条 NOT_FOUND 的逐条定性（**已手工回真源核 ⇒ 行号正确**）**：
+> ① `gorm.io/driver/postgres@v1.6.0/postgres.go:251-255`（`schema.Time` ⇒ `timestamptz`）✅ · ② 同文件 `:231-234`（`size <= 32` ⇒ `integer`）✅ · ③ `gorm.io/gorm@v1.31.1/callbacks/update.go:201`（`case map[string]interface{}:`）✅
+> ⇒ **三条都是「解析器不覆盖 `gorm.io/...` 模块路径形态」**，**不是真错**；
+> ④ `Sea-RideTheWind_golang/service/common/observability/http.go:22` ⇒ **行号正确**（`httpTimeoutBody = "Request Timeout"`）⇒ 只是**路径形态冗余**（多写仓库名一层）⇒ **不改**：G1/G4 域也用同一形态 ⇒ 改 G2 一家会造成**跨域不一致**。
+
+### §12.5 本轮**域级回归**（`twoStage.md` §5.5「执行必要验证」）
+
+| 项 | 内容 |
+|---|---|
+| **命令** | `mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end clean test -pl <G2 三域 8 模块> -am` |
+| **退出状态** | **BUILD SUCCESS** · **09:33 min** · **23 个反应堆模块全 SUCCESS** |
+| **条数（权威口径）** | 逐 `TEST-*.xml` 的 `testsuite` 属性求和 ⇒ **G2 三域 8 模块合计 = 730 tests / 0F / 0E / 0S**；其中 `message-api` **107** · `message-rpc` **100** · `message-common` **21** · `like-api` **94** · `like-rpc` **151** · `like-common` **18** · `task-api` **102** · `task-rpc` **137** |
+| **与上轮（`46ae663`）的关系** | **条数完全相同（730）** ⇒ **符合预期**：本轮 73 处改动**全部在注释面** ⇒ **断言未改一字** ⇒ **测试数不变** ⇒ ⇒ **条数不变本身就是「没碰到断言」的旁证** |
+| **守门（随改动一起复跑）** | `LikeAuthorityLookupServiceGateTest`（11）· `LikeFactDispatchContractGateTest`（3）· `LikeFactDispatchSchedulerStartupTest`（5）· `LikeFactDeliveryGoSemanticsGateTest` · `LikeDomainFactSchemaParityTest` · `LikeApiGoAlignmentTest` · `GetTaskReqParsingTest` · `TaskSinkPropertiesBindingTest` —— **全部含在上表 730 条内**（真实执行，非跳过） |
+| **写权守门** | `check-wave-lane-ownership.py` ⇒ **EXIT=0** · `check-phasegoal-lanes.py` ⇒ **EXIT=0** |
+| **⚠️ 口径纪律** | ① 本轮**带 `clean`** ⇒ 报告已清空重写；② 条数在 **BUILD SUCCESS + maven 进程退出**两个条件都满足后采 ⇒ **不是**构建中途的半成品；③ **跨树比条数必须同口径** ⇒ 不可与 G1/G3/G4 的数直接相比 |
+| **日志** | `/tmp/g2run/g2-regress2.log`（**仓外**，不可复算 ⇒ 结论以台账 + 复算命令为准） |

@@ -1398,3 +1398,30 @@ grep -rn "padToHmacKeySize" service/ --include=*.java | grep -v "/target/" | hea
 ① 优先用 `grep -c` 计数、或**按目录分别 grep**（`service/message` / `service/like` / `service/task` 各跑一次）⇒ 计数不受截断影响；
 ② 截断存在时 ⇒ 「没出现」只能读作「**没出现在前 N 行**」，**不能**读作「不存在」；
 ③ ⇒ 与「零命中是假信号」「定位失败伪装成内容不一致」「管道把失败伪装成成功」**同族** —— 都是「**你以为你量的是 A，实际量的是 B**」，本条补的是第四个 B：**「你以为你没量到，实际是你只看了前几行」**。
+
+---
+
+## 2026-10-29 · G2 收工轮（第二轮）· 🔴→✅ **Go 出处行号订正 · like-api 3 处**（**其中 2 处是「文件指错」**）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `5fa8558` · **核对日期** 2026-10-29
+> **证据强度**：**E3**（Go 真源 / go-zero v1.10.2 **逐行核验** + 改后逐条回验）
+> **性质**：**P2 · B 类**（**不阻断**阶段 1 准入；**纯注释面**，产品行为零影响）
+
+| # | 位置 | 改前 | **改后（真源实况）** | 性质 |
+|---|---|---|---|---|
+| 1 | `LikeJwtSignatureVerifier.java:89` | `rest/token/tokenparser.go:80-84` | **`:81-86`**（`doParseToken` 函数体：`:80` 是空行，`:86` 是闭合括号，`:85` 是 `request.WithParser(newParser())`） | 起止行错（**起多 1 · 止少 1**） |
+| 2 | `LikeApiMetrics.java:56` | `metrics.go:39` | **`logic/like/likeactionlogic.go:39-40`** | 🔴 **文件指错**：like-api 的 `internal/metrics/metrics.go` **只有 21 行**（只是 Prometheus 计数器定义）⇒ `:39` 根本不在那个文件里；真身在 4 个 logic 文件的 `:39-40`（`token_invalid` 计数 + `ctx userId is not json.Number` 的 `LogBusinessErr`） |
+| 3 | `LikeApiMetrics.java:59` | `metrics.go:46` | **`logic/like/likeactionlogic.go:46-47`** | 同上（`token_parse_error` 计数 + `parse userId to int64 failed`） |
+
+> ⚠️ **第 2/3 条为什么之前没被发现**：类注释 `:26-29` **已经**正确列出了 4 个 logic 文件的 `:39,46` ⇒ **文件内的注释自相矛盾**，但**没有任何测试会因此变红** ⇒ 与「注释里的字节数写错」完全同族（**绿测试守着一个错的事实**）。
+> ⚠️ **第 2/3 条的检出靠「大小写敏感 + 域上下文消歧」** ⇒ 别的域的 `metrics.go` 恰好够长 ⇒ 朴素判据会判过 ⇒ **详见 `docs/DRIFT/like/rpc.md` §12.2**。
+
+### 复算命令
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+GZ="$HOME/go/pkg/mod/github.com/zeromicro/go-zero@v1.10.2"
+sed -n '81,86p' "$GZ/rest/token/tokenparser.go"    # ⇒ doParseToken 函数体
+wc -l "/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/like/api/internal/metrics/metrics.go"  # ⇒ 21
+sed -n '39,40p;46,47p' "/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/like/api/internal/logic/like/likeactionlogic.go"
+```
