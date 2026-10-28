@@ -4469,6 +4469,40 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 2. **裸文件名 `.go:行` 引用（消歧）**：本层两份台账里 **91 条**，其中 **39 条**的文件名有多候选（见 §4.17.8 末）
    ⇒ ⇒ **本轮只消歧 1 条**（`types.go` → `service/message/api/internal/types/types.go`）⇒ ⇒ **剩余 38 条 = 阶段二规模**。
 
+### 4.17.11 ✅ 本轮合并树回归（**带 `clean`** · 2026-10-29 04:3x · 两轮串行）
+
+**Round A · users 域**（`user-rpc` ＋ `admin-rpc`）
+```bash
+mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
+  -pl service/users/user/user-rpc,service/users/admin/admin-rpc -am clean test
+```
+⇒ **BUILD SUCCESS · EXIT=0** ⇒ **user-rpc 162 ＋ admin-rpc 122 = 284 / 0 fail / 0 err / 0 skipped**
+⇒ ⇒ **与合并前的 284 完全一致** ⇒ ⇒ 合并 ＋ 本轮改动**未破坏** users 域。
+⚠️ **首跑曾失败**（根因 = 与 G1 并发撞 22700 段）⇒ ⇒ 见 §4.17.10 第 1 条 ⇒ ⇒ **失败根因必须是「port is already allocated」，不是代码缺陷**。
+
+**Round B · 共享层 6 模块**
+```bash
+mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
+  -pl service/common,service/users/users-common,service/comment/comment-rpc,service/favorite/favorite-rpc,service/like/like-rpc,service/message/message-rpc -am clean test
+```
+⇒ **BUILD SUCCESS · EXIT=0**
+
+| 模块 | XML | tests | fail | err | skip | 与上一轮（913）对比 |
+|---|---|---|---|---|---|---|
+| `service/common` | 67 | **357** | 0 | 0 | 0 | **+3** = 新守门 `GoCitationAnchorGateTest` 的 3 条 |
+| `service/users/users-common` | 4 | 39 | 0 | 0 | 0 | 0 |
+| `service/comment/comment-rpc` | 25 | 138 | 0 | 0 | 0 | 0 |
+| `service/favorite/favorite-rpc` | 23 | 131 | 0 | 0 | **3** | 0（3 skipped 既有）|
+| `service/like/like-rpc` | 28 | 151 | 0 | 0 | 0 | 0 |
+| `service/message/message-rpc` | 24 | 100 | 0 | 0 | 0 | 0 |
+| **合计** | **171** | **916** | **0** | **0** | **3** | **+3**（**恰好 = 新守门 3 条 ⇒ 零回归**）|
+
+- ⚠️ **计数口径**：逐 `TEST-*.xml` 的 `testsuite` 属性求和，且**必须带 `clean`** ⇒ ⇒ **陈旧 surefire 报告会静默抬高计数**。
+- ⇒ ⇒ **本轮回归 = users 284 ＋ 共享层 916 = 1200 条 / 0 fail / 0 err / 3 skipped**。
+- ⇒ ⇒ ⚠️ **这个 1200 仍是「G4 树上的合并态」** ⇒ **不含 G1/G3 在主干之后的后续修复** ⇒ ⇒ **波末收口回归仍须在全部 lane 合入后重跑一次**（与调度员 §10.5 的登记一致）。
+- 🟢 **守门复跑（全部 EXIT=0）**：`check-phasegoal-consistency` · `check-phasegoal-lanes` · `check-wave-lane-ownership`
+  · `check-ledger-{tables,selfcheck,count}` · `check-surface-parity` · `check-no-prod-secrets` · `check-agents-budget`。
+
 ## 开工前置回执
 
 > ⚠️ **本节由 lane 自己写（`docs/Worktree.md` §二·五 ③）**。**⑤ 由调度员代填** —— 回执人**不得自批**（回执落笔时 ⑤ 留空；**已于 2026-10-29 03:45 依据 Jason 在本 lane 会话内的明示代填** ⇒ 见本节末尾 ⑤ 行）。
