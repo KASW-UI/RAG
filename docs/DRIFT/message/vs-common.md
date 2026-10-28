@@ -1333,3 +1333,63 @@ Go `service/message/api/messagecenter.go:53` ⇒ `httpx.SetErrorHandler` ⇒ `co
 **⑥ 顺带落档的两条实缺陷（本域写权面，已修/已订正）**
 - `docs/DRIFT/task/rpc.md` 的标题测试数 **129 ⇒ 134**（实测 134，三口径相等）⇒ ⇒ `check-ledger-selfcheck.py --domain task` 由红转绿。
 - `check-ledger-selfcheck.py` 的 `LEDGER_FILES` **只注册了 `task` / `users` / `users-admin`** ⇒ `--domain message` / `--domain like` 报「找不到台账文件」⇒ ⇒ **这是工具注册表缺项**（`tools/**` **非本 lane 写权**）⇒ ⇒ 只登记 + 通报，不越权落码。
+
+---
+
+## 开工前置回执
+
+> **落点**：`align/g2-message-like-task` 工作树 · **基线 commit** `d877b82` · **日期** 2026-10-29
+> ⚠️ **本节只是「读完了」的回执** ⇒ **尚未获批 ⇒ 本 lane 不得开工**（`AGENTS.md` §五·3b-0 ④「经用户批准」＋「调度员不得代批准」）
+> ⚠️ **三份 `vs-common.md` 的本节内容逐字相同**（模板要求「会话 + 台账各一份，**同一份内容**」）
+
+【开工前置回执 · G2 · 2026-10-29】
+
+**① 任务范围**
+
+本 lane 本轮**候选任务 = 修 §8.7 登记的 G2 侧 6 条出处真缺陷**（1 条 `gorm@v1.31.2` 版本写错 ＋ 4 条 `processor.go:82` ＋ 1 条 `like/common/errmsg.go` 路径不精确）⇒ 全部落在 `service/{like,task}/**` 的**注释面**（不改任何断言 ⇒ 不影响产品行为）。
+
+**不做**：① 共享面（`service/common/**` ＋ `service/users/users-common/**`）⇒ 缺陷走反馈单转 G4；② `tools/**`（`tools/g3-anchor-check/` 归 G3）；③ `docs/PhaseGoal-judge.md` / `docs/PhaseGoal/g2.md` / `AGENTS.md` / 三个 `_INDEX.md` / `docs/DRIFT/_cross/**` / 根 `docker-compose.yml`；④ **阶段二不碰、不预支**；⑤ **本轮只出回执，那 6 条一行不动**。
+
+**② 已读四档（本 lane 面）**
+
+| 档 | 路径 | 读到的关键结论（可核） |
+|---|---|---|
+| `docs/DRIFT/` | `message/{api,rpc,common,proto}.md` | `SD-2026-10-23-03`（`affected`：Go 返 `int64` 数字 / RAG 出字符串）**已签字** ⇒ 对拍必红、**不得单方面改回数字**；`message/rpc.md` 的 **E59 已销案**（DB 失败原样上抛 ⇒ `UNKNOWN`＋1015 ＝ Go）；`-010`/`-011`/`-013` 落点共享层 ⇒ 已在 `docs/DRIFT/message/feedback-to-g4.md` 转派 G4（7 项格式 × 4 条），`-012` 属容器层框架限制**不可修**；`common.md`/`proto.md` = `CodeError` Jackson 序列化**无断言** ＋ **台账未见变异验证** ⇒ R4 不成立 |
+| | `like/{api,rpc,proto}.md` | `like/rpc.md` §12（本轮 73 处出处订正）：**`DRIFT-LIKE-003` 拆三段** = A 投递链路已闭环 ＋ B 权威读语义 Java 化（`LikeAuthorityLookupService` 407 行 · 守门 11/11）＋ **C 暴露形态待拍板**；**`E60` 已销案**（`LikeTaskProgressPublisher.publish` 内三段式分流 ⇒ 真日志 `error_code=5011`）；**`L-U11` 已闭合**（`LikeRpcGrpcInterceptorWiringTest` 3/3）；**`L-U9` 定性为取证缺口**（非必相对齐项 ⇒ 不阻塞组件 ✅）；`like/api.md`：`404 body` ＝ **19** 字节（`printf '404 page not found\n' \| wc -c`）⇒ `DRIFT-LIKE-API-404-BODYLEN`（P3）＋ 同族「字节数注释漂移」三域扫描 = **零残留**；`like/proto.md`（本轮新建）：`LikeProtoContractTest` 4/4，期望值由 `generate.py` 从 Go 真源 `proto/like.proto`（sha256 `347301db…8a447e`）生成 |
+| | `task/{api,rpc,proto}.md` | `task/rpc.md`：`TaskRpcKafkaListenerRegistryGateTest` 3/3（listener **真进容器 registry**，非「方法存在」）；`DRIFT-TASK-RPC-008` 已落码（`:449` 池启用 ＋ 池参数 64/16/0）；`task/api.md`：`DRIFT-TASK-API-004`（charset/空白）＝ **全域共性**，不在本域单修 |
+| `docs/Intentional_Deviations/`（**最危险的一档：漏读会把签字偏离当新回归「顺手修回 Go 行为」**） | `message/{api,rpc}.md` | `message/api.md`：**`SD-2026-10-23-03`**（`affected` 类型）＋ `:28-34` 记着「`DRIFT/message/api.md` §7 曾把 `-009` 列为未修 ⇒ 已改正为签字」；`message/rpc.md`：**7 条**（`SD-07` 已撤销）= `-01` 索引**名**不同（列相同）· `-02` 直方图桶**零交集**（**两侧都不是「对的那个」**）· `-03` `errors.As` 穿透 vs `instanceof` 不穿透 · `-04` 6 个 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧**多出来的** · `SD-2026-10-23-08` CPU 采样 fail-open · `SD-2026-10-23-06` 索引列数 1 vs 2 ⇒ ⇒ **这 6 条见到「不一致」不得当新回归去修** |
+| | `like/{api,proto,rpc}.md` | `like/proto.md`：**`SD-2026-10-23-05`**（proto `package` 由 `pb` 归一为 `like`）⇒ **wire 层可见**（`/pb.LikeService/*` vs `/like.LikeService/*`）⇒ 本轮 `LikeProtoContractTest` 据此排除 `package` 行比对，但**单独钉住 RAG package=`like`**；`like/api.md`：**4 条待签字候选**（`SD-2026-10-23-08` charset · `-09` 裸 503 · `SD-2026-10-24-10` 毫秒粒度 · `-11` 多暴露一个指标）⇒ **是候选不是决策**，既别当缺陷也别当签字；`like/rpc.md`：**`SD-2026-10-23-06`**（gRPC 业务码迁到自定义 trailer `rag-like-biz-code`，**框架限制**）· **`SD-2026-10-23-07`**（Nacos 注册失败**不退出进程**，Go 是 `os.Exit(1)`）⇒ ⇒ **不得「顺手改回 Go 行为」** |
+| | `task/rpc.md` | **`SD-2026-10-23-TASK-01`**（PG 连接最大生存时间：Go 30 **纳秒** → RAG 30 分钟；Go 侧是**笔误不是设计**）· **`SD-2026-10-24-TASK-01`**（topic 缺失时 Go 进程退出 vs RAG 服务存活）⇒ 另有 **4 项「不是偏离、但容易被误当成偏离」**（奖励流 `stream:task:reward` 只写不读 · `score` vs `add_score` · 任务定义是**两份独立硬编码** · 读/写路径 Redis key **本来就不一致**）；`task/api.md` ＋ `task/proto.md` = **0 字节坑位**（勿建空壳） |
+| `docs/PhaseGoal/` | `g2.md` ＋ `PhaseGoal-judge.md` | `judge:200`（`like-rpc`）＝ **🟡**（`R2`/`E3`），开放项仍写 `DRIFT-LIKE-003`「6 个 4 行骨架 ⇒ UNRESOLVED」＋ `E60`「真漂移待接手」⇒ ⚠️ **这两条已被本 lane 处置** ⇒ **基线推理链对 G2 已不成立 ⇒ 须收口按新状态重读**；`judge:395-396`/`:408`/`:416` 把二者列为「**未通过** ⇒ 业务正确性未修」，`:416` 明写「③ 销 `like-rpc` 的 `DRIFT-LIKE-003` / `E60`」⇒ **收口的销号动作正是这一项**；`judge:495-496`（§十 阶段归属）＝ `D-03` 003 归 like 域（需拍板）· `D-04` E60 归 like 域；`g2.md:21-31` ＝ 11 组件矩阵（9 ✅ ＋ `like-proto`/`like-rpc` 🟡）⇒ **机器生成**，权威源是 judge；`g2.md:58-63`（P0 分摊）＝ **P0-1** 本 lane 主责（like 域投递链路 ＋ 双侧活体探针**不在版本控制内** ⇒ 「真实运行＋行为等价」**未取证**）· **P0-3** `check-ddl-static.py` **默认不开 `--indexes`** ⇒ 索引/唯一约束/触发器**至今没有机器核过** · **P0-6** 全量回归 2860 条 / 0F / 0E / **4S** ⇒ 必须带 `clean`；`g2.md:73-83`（矩阵 C）＝ **X-10**「落仓静态守门只覆盖 4/10 ⇒ `follow`/`like`/`hot` 连静态守门都没有；**消费方式在 10 个 proto 上全部未取证**」⇒ ⇒ 本轮 `LikeProtoContractTest` 正是 like 侧这条的落仓入口（**只覆盖 like-proto 一个**） |
+| `docs/PhasedGoal.md` | `:38-52`（P0 九条） | **P0-1**「核心业务链路**真实运行**，不存在关键功能仅有接口骨架」· **P0-4**「核心失败路径有明确行为，不无声吞异常」· **P0-6**「核心业务有可执行自动化测试且断言真实业务结果」· **P0-9**「已知严重缺陷、**无法验证的关键能力和运行前提**得到明确记录」⇒ ⇒ `003-C` 与 `L-U9` 属 P0-1/P0-9 的「运行前提」面 ⇒ 台账必须写「**未取证**」而不是「已对齐」 |
+| `docs/twoStage.md` | §4（`:258-313`）· §5.3（`:359-380`）· §5.4（`:381-398`）· §10（`:941-976`） | §4 ＝ 阶段 0「项目事实收集与基线建立」（4.1 事实调查 / 4.2 核心业务链路 / 4.3 差异基线）⇒ 本 lane 台账就是 4.3 的载体；§5.3 ＝ 差异与暂缓项**每项至少 11 条**（编号/原始契约/原始行为/阶段一当前行为/具体差异/暂缓理由/影响/是否阻断/阶段二恢复方案/阶段二测试场景/证据缺口）⇒ **「不得只写『后续优化』」** ⇒ 本 lane 台账的 11 项格式即依此；§5.4 ＝ 每次改造记录 **9 条**（改前/问题/改后/理由/变更文件/测试场景与断言/执行结果/未解决/对阶段二影响）⇒ ⇒「**必须实际修改项目，而不是只输出建议**」；§10 ＝ **P0–P3 是严重程度、A–D 是阶段归属，两者不能互相替代**；每问题必含 12 项；**必须区分已确认缺陷与待验证风险** ⇒ ⇒ 「出处行号错」按 **P2 · B** 登记，与 `DRIFT-LIKE-003-C`（形态待拍板）分开 |
+| `docs/Pitfalls/` | `message/{api,rpc}.md` | `P-MSGAPI-001`（同组件同形态**第二次**「绿测试守卫错误答案」）· `P-MSGAPI-004`（Go 对 **map 元素**的类型判据与**顶层标量字段**不是同一段代码）· `P-MSGAPI-007`（否定式断言 ＋「默认值藏在 tag 里」）· `P-MSGAPI-008`（「Bean 存在 / 注解在 / 依赖有」≠「机制生效」）；`PITFALL-MSG-R-001`（「**测试全绿**」与「**一次没起过**」可同时成立）· `-004`（注释里的**默认行为**必须读到**消费点**）· `-006`（Boot 4 拆模块后**依赖在 ≠ 能力在，且不报错**）· `-010`（跨组件不变量**无法单侧验完** ＝ Flyway 账本）· `-013`（判「有没有等价实现」必须 grep **实现**） |
+| | `like/{api,rpc}.md` | `PIT-LIKEAPI-001`（go-zero 解析层**不对称**，只学一半必然漏）· `-005`（「**应用入口类的 javadoc**」是最高杠杆的错误传播点）· `-006`（**同一个文件里会自相矛盾**）· `-010`/`-011`（直接单测判据函数 ＝ 永远绿的回归网 / **恒真断言 ＝ 主动制造假绿**）；`like/rpc.md`：`P-05`（「**注释里写着 Go 的行为**」≠ Go 的行为）· `P-07`（只跑 RAG 侧探针**只能证明「代码写成了这样」**）· `PIT-LIKE-RPC-013`（「**『错误断言已清理』这句话，本身也是一条需要被核的断言**」）· `-014`（共享组件 javadoc 与各域 javadoc **可以互相矛盾**） |
+| | `task/{api,rpc,proto}.md` | `PITFALL-TASK-RPC-01`（`@EnabledIfDockerAvailable` 把「拉不到镜像」压成「Docker 不可用」⇒ **15 条真 PG 用例静默全跳**）· `-06`（Go `Pipeline()` 不是事务、Spring `executePipelined` 也不开 MULTI ⇒ **两边都理解错了**，整条链路静默死掉）· `-07`（81 条测试**零真 Redis** 覆盖 ⇒「跑绿」证明不了 Redis 路径）· `-11`（方法签名对了 ≠ 方法会被调到，**调用时机**更致命） |
+| | `_cross/`（**四棵都要读**） | `testing-pitfalls.md`（证据分级 E0–E5 · 变异测试是另一半）· `fix-round-lessons.md`（「**跑绿 ≠ 判据活着**」· 修漂移**先改/删错误断言再改实现**）· `flyway-ledger-collision.md`（**共享面修法 ⇒ G4 落码**）· `signed-deviations.md`（**签字偏离不得当新发现再修一遍**）· `framework-mechanism-evidence.md`（**框架机制必须验证实际生效**）· `open-items.md` · `message-domain-wide.md` |
+| `docs/DRIFT/_cross/`（**四棵都要读**） | `component-coverage-matrix.md` · `cross-domain-coupling.md` · `ddl-type-divergences.md` · `go-anchors.md` · `decisions.md` · `open-items.md` · `domain-common-lanes.md` | `component-coverage-matrix.md:60-70` ＝ G2 三域 11 组件的「台账 ↔ 双侧活体对拍」矩阵；`:84-87` 明确「**台账齐 ≠ 已对齐**」＋「8 个 `*-proto` 只有 §3.4 的**复制忠实** ⇒ 消费方式未验」；`cross-domain-coupling.md` ＝ G1~G4 波次表 ＋ **共享层写权规则**（`service/common` ＋ `users-common` **只有 G4 能写**）＋ 依赖 DAG；`ddl-type-divergences.md` ＝ 类型/长度 **9 域 0 差异**，`hot` ＝ **N/A** ⇒ 不许写成「已对齐」；`go-anchors.md` ＝ 路由/事务/行锁/身份/JWT/建表 + message 域 9 个 RPC 的锚点；`decisions.md` ＝ 问题 1「**直接丢掉 Flyway**，users 域改 `SchemaInitializer` 幂等重放」＋ 问题 4「**每模块独立账本表**」 |
+
+**③ 待批准项**
+
+1. **候选清单的 6 条里，我域内核对后只有 2 条是真错**（另 4 条 `processor.go:82` 是**守门假阳性** ⇒ 一行都不用改）⇒ 详见下一节 ⇒ **若按原清单派 6 条工单，会有 4 条返工**。
+2. **`DRIFT-LIKE-003-C`**（权威读暴露形态：Go 是**独立进程** `cmd/fact-authority/main.go`（`LIKE_DATABASE_URL` ＋ `LIKE_FACT_AUTHORITY_LISTEN` ＋ `LIKE_FACT_AUTHORITY_TOKEN`，token ≥ 32），RAG 侧无 HTTP 端点）⇒ 落地需改 **2 处共享面**（新建模块要动 `check-wave-lane-ownership.py` 白名单 ＋ 根 `docker-compose.yml`）⇒ **G2 不可写** ⇒ 形态决策（**独立进程** vs 同进程独立 HTTP 端口）**须拍板**。
+3. **`docs/PhaseGoal-judge.md:200`/`:202`**（`like-rpc` / `like-proto` 仍 🟡）＋ `:395-396`/`:408`/`:416`（把 `E60`/`003` 列为「未通过」）⇒ **该文件是 4 lane 共用唯一数据源 ⇒ G2 不写** ⇒ 须收口按新状态重读 ＋ 销号。
+4. **`tools/g3-anchor-check/` 的 `PINNED` 缺 `gorm.io/driver/postgres v1.6.0` ＋ `github.com/lovoo/goka v1.1.16`** ⇒ 守门假阳性率 **52%** ⇒ 补 `PINNED` 的落点属 G3 私有目录（**可安全补**，不触发 §6.3 守门计数漂移）；但若要把该守门**搬进 `tools/difftest/` 提升为全仓守门** ⇒ **必须同时改 `docs/PhaseGoal-judge.md` §6.3**，否则立刻制造 **B14**。
+
+**④ 等批准 ⇒ 批准后才开工**（本轮只出回执；⑤ 留空，由**调度员代填** —— 回执人**不得自批**）
+
+**⑤ 批准记录栏（本栏留空 · 待获批后由调度员代填；填入时须保留核验命令所匹配的字样，见 `docs/Worktree.md` §二·五）**：<批准人> · <批准时间> · <批准范围>　← 回执人**不得自批**
+
+---
+
+### ⚠️ 候选任务界定与我域内实情不符（调度员点名要写的地方）
+
+| # | 候选清单条目 | 清单定性 | **我域内实测（逐条回真源核）** | 判定 |
+|---|---|---|---|---|
+| 1 | `gorm@v1.31.2` 版本写错<br>`service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeDomainFactSchemaParityTest.java:38` | 真错 —— 引到**另一份内容不同的副本** | 引用原文 = `{@code gorm@v1.31.2/schema/field.go:330-341}`（给 int32 算 `Size = 32`）；真源 `go.mod:28` pin 的是 **`gorm.io/gorm v1.31.1`** ⇒ **版本号确实是错的**。但实测 `gorm.io/gorm@v1.31.1` = **1004 行** / `v1.31.2` = **1011 行**，而**两版的 `:330-341` 内容逐字相同**（`case reflect.Int32, reflect.Uint32: field.Size = 32`）⇒ ⇒ **行号不用动，只需改版本号**；实际风险是「引用了**非真源副本** ⇒ 未来 v1.31.1 演进时这行会漂」 | ✅ **真错（定性需精确化）** —— 修法 = **只改版本号，不动行号** |
+| 2 | **4 条** `processor.go:82` 指向空行<br>`TaskArticleCountConsumer.java:91` · `TaskCountStore.java:32` · `TaskUserCountConsumer.java:91` · `TaskSinkConsumeTest.java:312`（全在 task-rpc） | 真错 —— 落在 **go-redis v9.20.0 `push/processor.go`** 的空行上 | 4 条引用的原文分别是 `goka processor.go:82` 与 `goka@v1.1.16 processor.go:82` ⇒ **指向的是 goka，不是 go-redis**。实测真身 `~/go/pkg/mod/github.com/lovoo/goka@v1.1.16/processor.go`（**1072 行**）的 `:82` ＝ `WithStorageBuilder(storage.DefaultBuilder(DefaultProcessorStoragePath(gg.Group()))),` ⇒ **非空，且正是注释声称的「按 group 名分 LevelDB 目录」**。而 `go-redis@v9.20.0/push/processor.go:82` 确是空行 —— **但那是另一个文件**（go-redis 的 push 订阅处理器，与 goka 无关） | 🔴 **假阳性 × 4** —— **真身引用是对的，一行都不用改**；根因 ＝ 守门 `PINNED` 缺 `github.com/lovoo/goka v1.1.16` ⇒ 回退裸文件名匹配 ⇒ **撞上 go-redis 的同名 `processor.go`**（与 `docs/CLOSEOUT-2026-10-29.md` §8.7 里 `postgres.go` / `goka` 两簇**同款根因**） |
+| 3 | `like/common/errmsg.go` 路径不精确<br>`service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeTaskProgressPublisher.java:141` | 真错 —— 真身是 `service/like/common/errmsg/errmsg.go`（少写了 `errmsg/`） | 引用原文 = `Go like/common/errmsg.go:51 ErrorRedisSelect = 5011`；真身 `Sea/service/like/common/errmsg/errmsg.go:51` ＝ `ErrorRedisSelect = 5011` ⇒ **行号正确、路径少一段目录**；同域另 4 处（`LikeErrorMessages.java:9` · `LikeErrorCode.java:4` · `LikeGrpcError.java:10` · `CodeError.java:7`）**都已写对完整路径** ⇒ **域内自相矛盾** | ✅ **真错** —— 修法 = **补 `errmsg/` 段，行号不动** |
+
+⇒ **净结论**：G2 侧 6 条候选里**只有 2 条是真错**（① 版本号 · ③ 路径）⇒ **另 4 条经核对是守门假阳性 ⇒ 一行都不用改** ⇒ ⇒ **建议：候选清单收敛为 2 条**；并把「**补 `PINNED`（`gorm.io/driver/postgres v1.6.0` ＋ `github.com/lovoo/goka v1.1.16`）**」作为**独立的一件事**处理（落点属 G3 私有目录 `tools/g3-anchor-check/`）。
+
+⚠️ **这 4 条的假阳性判定本身也留痕**：它们与本 lane 上一轮在 `docs/DRIFT/like/rpc.md` §12.2 坐实的「**多候选任一通过 ⇒ 假绿**」是**同一个根因的两面** —— 上次是「**真身不满足、干扰项满足 ⇒ 判过**」（假绿），这次是「**真身满足、干扰项不满足 ⇒ 报错**」（假错）⇒ ⇒ **同一个候选解析缺陷，两个方向都会出错** ⇒ ⇒ **候选解析必须按域消歧 ＋ 命中后必须回真源读那一行**（该结论已由调度员转述进 `docs/CLOSEOUT-2026-10-29.md` §8.3；本回执只做**我域内的逐条核对**）。
