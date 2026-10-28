@@ -152,7 +152,7 @@ public class ArticleKafkaChannelValidator {
                 + "但该值**不会生效**。\n"
                 + "  原因：Go 侧每个通道各自用自己的 Brokers —— 字段声明点 go-queue@v1.2.2/kq/config.go:12，"
                 + "消费点 kq/pusher.go:44-47（生产）/ kq/queue.go:121（消费），"
-                + "仓内调用点 internal/svc/service_context.go:65,66 / internal/article.go:58,60；"
+                + "仓内调用点 internal/svc/service_context.go:65,66 / service/article/rpc/article.go:58,60；"
                 + "而 Spring Kafka 的 KafkaTemplate / ConsumerFactory 是**全局单例**，"
                 + "本模块的四个通道共用 spring.kafka.bootstrap-servers。\n"
                 + "  出路：① 把该通道的 brokers 改成与全局一致（当前 yml 四个通道都写成 "

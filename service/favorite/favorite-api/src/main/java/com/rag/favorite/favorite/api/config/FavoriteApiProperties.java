@@ -1,5 +1,6 @@
 package com.rag.favorite.favorite.api.config;
 
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
 
@@ -54,6 +55,44 @@ public class FavoriteApiProperties {
 
     public void setUserAuth(UserAuth userAuth) {
         this.userAuth = userAuth;
+    }
+
+    /**
+     * 🔴 **启动期强制：验签密钥不得为空**（2026-10-29 · G3 阶段 1 · P0 #8）。
+     *
+     * <h3>为什么这一条不能省（Spring 的坑）</h3>
+     * <p>yaml 里写的是 {@code ${FAVORITE_JWT_SECRET}}（**无默认值**）⇒ 分两种情况：
+     * <ol>
+     *   <li><b>变量没设</b> ⇒ Spring 的 placeholder <b>不可解析</b> ⇒ 绑定期直接炸
+     *       ⇒ 已经是 fail-closed ✔；</li>
+     *   <li><b>变量设了但值是空串</b> ⇒ Spring 的
+     *       {@code PropertyPlaceholderHelper} 会把<b>空串当合法值</b>
+     *       （<b>不走默认值、也不报错</b>）⇒ ⇒ 属性绑成 {@code ""}
+     *       ⇒ ⇒ <b>应用带着空签名密钥正常起来</b> ⇒ ⇒ 🔴 <b>token 可伪造</b>。</li>
+     * </ol>
+     * ⇒ ⇒ 所以「去掉 yaml 默认值」只堵住第 ① 条 ⇒ ⇒ **第 ② 条必须由代码堵** ⇒ 即本方法。
+     * <p>⚠️ <b>空串 ⇒ 启动失败</b>（而不是「启动成功但验签永远失败」）⇒ 因为
+     * 「用空密钥签发的 token」是<b>可被任何人算出来的</b>（HMAC 空密钥）⇒ ⇒ 属于**静默的安全降级**。
+     *
+     * <h3>为什么用 {@code @PostConstruct} 而不是 {@code @Validated + @NotBlank}</h3>
+     * <p>后者要引入 {@code spring-boot-starter-validation}（<b>新增依赖</b>）⇒ ⇒ 本模块
+     * <b>零新增依赖</b>更稳；且这里的判据是「<b>不得为空</b>」而不是「长度/格式」⇒ 显式抛异常更直白。
+     *
+     * <h3>Go 出处</h3>
+     * <p>Go 侧 {@code service/favorite/api/etc/favorite.yaml:11} 写的是<b>字面量</b>
+     * {@code ae0536f9-6450-4606-8e13-5a19ed505da0} ⇒ ⇒ <b>Go 侧同样有「公开默认密钥」这个问题</b>
+     * ⇒ ⇒ 本条属 <b>RAG 侧更严</b>的一侧（AGENTS.md §0 的共性：「RAG 做了更严/更安全的那一侧」
+     * ⇒ 对拍看到它不同**先确认是不是签字项**）⇒ ⇒ **登记为有意偏离**，不是「RAG 抄错了 Go」。
+     */
+    @PostConstruct
+    void verifyAccessSecret() {
+        String secret = userAuth == null ? null : userAuth.getAccessSecret();
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException(
+                    "favorite-api.user-auth.access-secret 不能为空："
+                            + "请设置环境变量 FAVORITE_JWT_SECRET（与签发方 user-api 一致）"
+                            + "—— 本模块只验签、不签发，空密钥会让任何人都能伪造 JWT");
+        }
     }
 
     /** 对应 Go {@code UserAuth} 段（{@code favorite.yaml:10-12}）。 */

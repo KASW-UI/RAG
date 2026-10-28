@@ -84,7 +84,7 @@ import static org.mockito.Mockito.when;
  *   <li>{@code service/hot/api/internal/metrics/metrics.go:24-29} ——
  *       {@code APIRequestDuration} 是 {@code prometheus.HistogramVec}，
  *       {@code Buckets: prometheus.DefBuckets}，标签 {@code route}；</li>
- *   <li>{@code prometheus/client_golang@v1.21.1/prometheus/histogram.go:271} ——
+ *   <li>{@code prometheus/client_golang@v1.23.2/prometheus/histogram.go:271} ——
  *       {@code DefBuckets = []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}}（<b>源码取值</b>）；</li>
  *   <li>{@code service/hot/api/internal/metrics/metrics.go:14-16} ——
  *       {@code Subsystem: "hot_api"} + {@code Name: "request_total"} ⇒ Prometheus 全名
@@ -116,7 +116,7 @@ import static org.mockito.Mockito.when;
 class HotApiRealTomcatGateTest {
 
     /**
-     * Go {@code prometheus.DefBuckets}（{@code client_golang@v1.21.1/prometheus/histogram.go:271}）
+     * Go {@code prometheus.DefBuckets}（{@code client_golang@v1.23.2/prometheus/histogram.go:271}）
      * 的<b>源码取值</b> —— 不是从 RAG 侧的 {@code GO_DEF_BUCKETS} 反抄的。
      */
     private static final double[] GO_DEF_BUCKETS = {

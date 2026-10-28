@@ -422,6 +422,22 @@
 | **9 处时间列的 NOT NULL + DEFAULT** | 🔴 **不一致**（Go 可空无 DEFAULT / RAG `NOT NULL DEFAULT CURRENT_TIMESTAMP`）⇒ **10 处是「RAG 更严」** ⇒ 🟡 **仍待签字**（`SD-2026-10-24-CAND-01`），见 `docs/Intentional_Deviations/comment/rpc.md` |
 | `report_record` 表在 Go 侧**根本不存在**（`db.go:15` 的 AutoMigrate 列表不含它，3 个手写脚本也不建） | 🔴 RAG V5 建了 ⇒ Go 侧全新部署上 `ReportComment` **必然 5004** ⇒ RAG 侧是「更全」⇒ ✅ **2026-10-24 已签字**（`SD-2026-10-24-CAND-02`） |
 
+> 📌 **2026-10-29 · G3 补机器证据 + 订正基线归类**（基线 `docs/PhaseGoal-judge.md` §十一 **D-07**）
+>
+> · **机器证据（可复算）**：`python3 tools/difftest/check-ddl-static.py --domain comment --indexes`
+>   ⇒ **EXIT=2**，输出逐条列出**仅 RAG 有**的 **8 列**（`report_record` 的 `id` / `user_id` / `comment_id` /
+>   `target_type` / `target_id` / `reason` / `detail` / `created_at`）⇒ ⇒ **差异单位是「一整张表 8 列」**，
+>   **不是**基线 D-07 写的「2 条（`user_id` / `target_type`）」⇒ ⇒ **D-07 的计数口径有误**。
+>   ⇒ 同一次运行里**其余 6 张共享表**的类型/长度 **0 差异** · 可空性 **0 差异** · DEFAULT **0 差异** ·
+>   索引 **Go 16 ≡ RAG 16**（2 处仅命名形态差）· 约束逐条一致 ⇒ ⇒ **除 `report_record` 外两侧一致**。
+> · **归类订正**：D-07 把本项列进「§11.1 🔴 **真实实现缺陷**（代码/配置层面有确凿差异，**必须修**）」并标注「**未签字**」
+>   ⇒ ⇒ **与既有签字偏离矛盾**：`docs/Intentional_Deviations/comment/rpc.md` 的 **`SD-2026-10-24-CAND-02`**
+>   （2026-10-24 用户 Jason 签字）已覆盖**整张 `report_record` 表** ⇒ ⇒ **本项是「决策」不是「缺陷」**
+>   ⇒ ⇒ 与 AGENTS.md §0 的共性完全一致（「RAG 做了更严/更安全的那一侧」⇒ 对拍看到它变红**先确认是不是签字项**）。
+> · **处置**：**不删 V5**（删了 = 让 `ReportComment` 在全新部署上必然 5004 ⇒ 制造一个 Go 侧才有的部署缺口）
+>   ⇒ **保留现状**；基线的归类订正属**共享面**（`docs/PhaseGoal-judge.md` 是 4 条 lane 矩阵的**唯一数据源**）
+>   ⇒ ⇒ **本工作树不碰** ⇒ 记在这里，留给**合并收口执行者**订正。
+
 ---
 
 ## 4.6 🟢 双侧活体对拍（2026-10-24）—— 证据强度的最后一档

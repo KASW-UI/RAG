@@ -293,6 +293,10 @@ comment 域的 `CommentSpans` 用的是「异常逃出 ⇒ 按业务码段判一
 
 | **G4-9** | 🔴 **跨域耦合矩阵的 `common_radiation` 快照过期**（本轮 L-10 落码带来的**真实新共享层依赖** ⇒ 只更新快照，不改代码） | `docs/DRIFT/_cross/cross-domain-coupling.md` 的 `common_radiation` 段（**共享面 ⇒ G3 不写**）⇒ 守门 `tools/difftest/check-wave-coupling.py` | **现象**：`article-rpc` 本轮接了共享层 `MqConsumer`（2 个 consumer span ⇒ `MqConsumer.traceConsumer`）⇒ ⇒ `service/common` 里 **`MqConsumer` 这一类**的跨域引用域从 `['comment','hot','task']` 变成 `['article','comment','hot','task']` ⇒ ⇒ 守门红（`❌ common_radiation 漂移 · MqConsumer`）⇒ ⇒ **这不是缺陷，是依赖拓扑的真变化**（且方向是**向 Go 靠**：Go 侧 article-rpc 的两个 consumer 本来就用共享层那座 `TraceConsumer`）⇒ ⇒ **只更新文档快照**（跑 `python3 tools/difftest/check-wave-coupling.py --print` 取新值）⇒ **不改代码、不改守门**。<br>**Go 出处**：`service/common/observability/mq.go:12-27` 的 `TraceConsumer` ⇒ Go 侧 `internal/mqs/article_consumer.go:45` ＋ `internal/mqs/article_sync_result_consumer.go:40` **本来就调它** ⇒ ⇒ 本次落码 ＝ **把 RAG 补到与 Go 一致**，不是新增架构耦合。<br>**RAG 侧现状**：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mq/ArticleReviewConsumer.java:9` ＋ `ArticleSyncResultConsumer.java:8`（两处 `import com.rag.common.observability.MqConsumer;`）<br>**证据强度**：**L4**（守门实测红：`python3 tools/difftest/check-wave-coupling.py` ⇒ 恰好 **1** 项漂移）<br>**🔴 影响面比本条标题更大（2026-10-28 补正）**：**不止我这一条** —— G1 lane 在其树（已并入 G4 尖端）实测到**另一条**同类漂移：`GoStyleRedisClientAutoConfiguration` 的辐射度快照过期 ⇒ ⇒ ⇒ **两棵树各红 1 条、但红在不同类上** ⇒ ⇒ **只补我这一条不够** ⇒ ⇒ **修法必须是「跑 `--print` 取**全量**快照 ⇒ 一次性补齐」**（合并后的树会把两条一起暴露出来）⇒ ⇒ **波末收口前必须做，否则收口门禁红**。<br>**本域侧复核**：另一条（`GoStyleRedisClientAutoConfiguration`）**与本轮落码无关** ⇒ 它是**先前就存在**的快照过期 ⇒ ⇒ 两条**互不覆盖**、都要补。<br>**附带发现（守门口径）**：该守门按 **import 语句**判定（`check-wave-coupling.py:168` / `:190`）⇒ ⇒ **全限定名（FQN）的用法它看不见** —— 例如既有的 `ArticleDomainServiceSemanticsTest` 用 FQN 调 `SnowflakeProperties` ⇒ **不计** ⇒ ⇒ **矩阵的辐射度是「import 边」不是「真实引用边」** ⇒ ⇒ 本轮我因此把守门测试里的 `SnowflakeProperties` import 改成 **mock `SnowflakeBean`**（顺带让 `article_id` / `file_id` 的断言变成**精确值**而不是「> 0」）⇒ 那条边就没了 ⇒ ⇒ **本域只引入 1 条（`MqConsumer`）** |
 
+| **G4-10** | 🔴 **共享脚本 `check-surface-parity.py` 在工作树里指错 Go 真源 ⇒ 假红 / 假绿**（**跨 G1~G4 全域** · 2026-10-29 · G3 实测） | **现象**：在**工作树**（`../RAG.worktrees/<lane>`）里跑 `python3 tools/difftest/check-surface-parity.py --domain hot` ⇒ 报 `[hot] 🔴 Go routes.go 不存在: …/RAG.worktrees/Sea-RideTheWind_golang/service/hot/api/internal/handler/routes.go` ⇒ **EXIT=1**（**假红**）；且脚本继续跑出「**合计：HTTP 端点 Go=0 / RAG=0 · gRPC 方法 Go=0 / RAG=0**」⇒ ⇒ **它把「找不到 Go 仓」当成了「Go 侧 0 个端点」** ⇒ ⇒ 对**能读到 routes.go 的域**就会变成 **0 vs 0 的「逐条相等」⇒ 假绿**。<br>**Go 侧 `文件:行号`**：**不适用**（这是 RAG 侧**共享脚本**的缺陷，不是 Go 行为差异）<br>**RAG 侧现状**：`tools/difftest/check-surface-parity.py:69-70` —— `GO_REPO = os.environ.get("GO_REPO", os.path.join(os.path.dirname(REPO), "Sea-RideTheWind_golang"))` ⇒ `REPO` = 工作树 ⇒ `dirname(REPO)` = `…/java&golang/RAG.worktrees` ⇒ ⇒ 默认路径恒指错（**主工作区**才对）<br>**证据强度**：**L4**（G3 工作树内实测：`hot` EXIT=1 + 报「routes.go 不存在」；**显式带 `GO_REPO=/Users/pr/Documents/java&golang/Sea-RideTheWind_golang` 后 EXIT=0**，且 **HTTP Go=1 ≡ RAG=1**（Go 侧 JWT 保护 **0** 条 ⇒ hot-api 两侧都匿名）· **gRPC 方法 Go=5 ≡ RAG=5**）⇒ ⇒ **同一份代码，两种跑法，两个结论**<br>**建议修法**：① **找不到 Go 仓时显式报错退出**（不得当成「Go 侧 0 个端点」继续比）；② 默认路径改为**向上搜索** `Sea-RideTheWind_golang`（主工作区 = `../Sea-RideTheWind_golang`，工作树 = `../../Sea-RideTheWind_golang` ⇒ 两种形态都能命中）；③ `docs/PhaseGoal/g{1..4}.md §5` 的收口命令要注明带 `GO_REPO`（**否则收口跑法本身产出假结论**）<br>**影响面**：**G1~G4 全域**的 X-8（HTTP 契约面）/ X-9（gRPC 方法集）判定命令<br>**是否阻塞本波**：**否**（G3 已用显式 `GO_REPO` 取得四域真结论：article HTTP 7≡7 + gRPC 6≡6 · comment 7≡7 + 7≡7 · favorite 7≡7 + 7≡7 · hot 1≡1 + 5≡5，**全 EXIT=0**）⇒ ⇒ **阻塞的是「不带 `GO_REPO` 的收口跑法」**，不是本域结论 |
+| **G4-11** | 🟡 **article 域「双侧活体 0 条」的**受阻前提**已过期**（基线 §九 **G-3**）⇒ 从「环境受阻」降为「**可做但本轮未做**」 | **现象**：基线 §九 G-3 写「Go 侧需 `etcd:2379`（容器在跑但**宿主端口未映射**）⇒ 0 条」⇒ **2026-10-29 实测该前提已不成立**：`docker ps` ⇒ `Sea-etcd \| 0.0.0.0:49319->2379/tcp` ⇒ **宿主端口已映射** ⇒ ⇒ 「可解除」的条件**已经具备**<br>**Go 侧 `文件:行号`**：`service/article/api/etc/article-api.yaml:9-11`（`ArticleRpcConf.Etcd.Hosts: [etcd:2379]`）+ `:14-24`（`SecurityRpcConf` / `UserRpcConf` 同样指向 `etcd:2379`）⇒ ⇒ Go 侧 api 启动**强依赖 etcd 可达**（`zrpc.MustNewClient` ⇒ 不可达即启动 panic）⇒ ⇒ 起 Go 侧必须**先解决主机名**：用**副本配置**把 `etcd:2379` 改成 `127.0.0.1:49319`（**冻结的 Go 仓一个字都不能改**）<br>**RAG 侧现状**：本域 A1~A9 全轴结论**最高只到 L3/L4-装配面**，**没有一条双侧活体证据**；基线 §一 A-2 的 `article-api` = **R3**、`article-rpc` = **R2**（E3）⇒ ⇒ 差的就是这一块<br>**证据强度**：**L3**（环境侧实测 `docker ps` 端口映射在）＋ **L1**（Go 侧配置逐行）⇒ ⇒ **未取证**（不是「已对齐」，是「还没做」）<br>**建议修法**：起 Go 侧 article-api（副本配置 + `127.0.0.1:49319`）＋ 起 RAG article-api ⇒ 跑**失败路径矩阵**（article 域失败路径最密：下载/上传/审核/`S-5`）⇒ **落点两可**：域内 JUnit（G3 可写；先例 `service/favorite/favorite-rpc/src/test/java/…/proto/FavoriteProtoWireParityTest.java`＝「JUnit 版双侧活体」· 基线 §六 6.1 已把它列为真·双侧活体证据）**或** `tools/**`（**共享面 ⇒ G3 只登记**）⇒ ⇒ **本轮 G3 未做**（起 Go 服务的环境编排风险高于阶段一剩余预算）⇒ **登记为下一轮 G3 的活**<br>**影响面**：article 域 R3→R4 的最后一块 ＋ P0 #1 / P0 #4<br>**是否阻塞本波**：**否**（基线 G-3 自己标「不属『环境不可得』」） |
+| **G4-12** | 🟡 **基线 `docs/PhaseGoal-judge.md` 有三处归类/口径需订正**（**共享面**：它是 4 条 lane 矩阵的**唯一数据源** ⇒ G3 不写 ⇒ 交合并收口执行者） | **现象**：① **§十一 D-07** 把 `comment` 域的 `report_record` 归进「🔴 **真实实现缺陷**（必须修）」并标「**未签字**」⇒ ⇒ **与既有签字偏离矛盾**（`docs/Intentional_Deviations/comment/rpc.md` 的 `SD-2026-10-24-CAND-02`，2026-10-24 用户 Jason 签字）⇒ ⇒ **决策不是缺陷**；且 D-07 写的「**2 条**（`user_id` / `target_type`）」**计数也有误** —— 机器实测是**整张表 8 列**（见 `docs/DRIFT/comment/rpc.md` 的 2026-10-29 补记）。② **§九 G-13 + §七 P0 #4** 写「`article` 域**没有失败路径探针**」⇒ ⇒ **口径漏统计**：article 的失败路径覆盖在**域内 JUnit**（`ArticleApiMvcPipelineTest` ~40 例 + `ArticleApiFormParamLimitTest` 8 例 + `ArticleApiRouteAuthBoundaryTest` ~20 例 + `ArticleApiAssemblyWiringTest` ~14 例 + `ArticleApiJsonBodyLimitCaseTest` 4 例 + `ArticleApiJwtVerificationScopeTest` ~8 例，**真 Tomcat · 400 text/plain 逐字断言**）⇒ ⇒ 而 §六 6.1 的「真·双侧活体」表**只统计 `tools/**` 脚本** ⇒ ⇒ **域内 JUnit 被漏掉** ⇒ ⇒ 「域覆盖不全」的**真正缺口是「双侧活体」，不是「失败路径用例」**。③ **§九 G-18**（`hot-proto` 判定记录位置不统一）**已由 G3 本轮在 `docs/DRIFT/hot/proto.md` 落位**（见该文件 §4）⇒ ⇒ 只需把 §九 G-18 行改成「已闭合 + 落点」<br>**Go 侧 `文件:行号`**：**不适用**（这是**基线文件**的归类问题，非 Go 行为差异）<br>**RAG 侧现状**：`docs/PhaseGoal-judge.md:351`（P0 #3 行提到「comment 2 条仅 RAG 有（未签字）」）· `:352`（P0 #4 行）· `:443`（G-13）· `:447`（G-18）· `:499`（D-07）<br>**证据强度**：**L4**（机器：`python3 tools/difftest/check-ddl-static.py --domain comment --indexes` ⇒ EXIT=2 且逐条列出 8 列；域内 JUnit 计数见上）<br>**建议修法**：改这 3 处 ⇒ **重跑** `python3 tools/difftest/check-phasegoal-lanes.py --write`（4 条 lane 矩阵是机器生成的 ⇒ 改基线必须重跑生成器）＋ `python3 tools/difftest/check-phasegoal-consistency.py`（基线自检）<br>**影响面**：4 条 lane 的**分摊矩阵**（P0 汇总 + 缺口清单）<br>**是否阻塞本波**：**否**（G3 本域结论已用**自取证据**取得，不依赖这三处的措辞） |
+
 ### 4.1 §4 派单闭合状态（2026-10-27 · G4 第七次回执 4 项规格）
 
 | 本域派单 | G4 回执对应 | 状态 | 证据 |
@@ -335,3 +339,150 @@ comment 域的 `CommentSpans` 用的是「异常逃出 ⇒ 按业务码段判一
 > - ⚠️ 共享层 `service/common/**` **不是 G3 的写权**（只有 G4 能写）⇒ 本条只作**记录**，修复动作（若有）在 G4 侧。
 
 > ℹ️ **G4 回执核账（2026-10-27）**：单 1 / 单 2 / 单 4 **全部已落码、零域侧改动**；G4 已确认我方「波及 16 个消费者」的顾虑**不成立**（那是 `grep pom.xml` 命中文本注释的**假阳性**，权威口径是 `mvn dependency:list` ⇒ 有效 classpath 上有 MP 的**只有那 9 个 rpc**）⇒ 我方「删域侧 9 份桥」时**直接删即可、不需改写**（共享层那份用字符串形式 `afterName`/`beforeName`）。⚠️ **单 4 的全量回归数字（基线 `a1a2e05`）待 G4 补** ⇒ 本表 §4 的收口口径暂记「待补」。
+
+---
+
+## 6. 🔴 域内未闭合项清单（2026-10-29 · G3 域内收敛自查 A · 全量盘点）
+
+> **盘点口径**：把本域**全部**台账（`api.md` / `rpc.md` / `common.md` / `proto.md` ＋ 本文件）里
+> 所有「未闭合 / 开放 / 待办 / 未修 / 仍 OPEN」条目**逐条**取出 ⇒ 定状态
+> （**已闭 / 仍开 / 范围外 / 归属他方**）＋ 是否阻塞阶段 1 ＋ 证据指针。
+> ⚠️ **本清单是「现状面」**；各轮的「判定变化」表是**历史记录**（AGENTS.md §6.3 状态表纪律）。
+> ⚠️ **登记类事项不进本清单**：已进 `docs/Intentional_Deviations/` 的候选（🏷 候选，建议签）
+> **按 AGENTS.md §5.3c「登记完就躺着，不升级为拍板」** ⇒ 不重复列出、不推拍板。
+
+| # | 项 | 状态 | 归属 | 阻塞阶段 1？ | 证据 |
+|---|---|---|---|---|---|
+| **A-1** | **双侧活体对拍**（article-api / article-rpc **两侧同时起**） | 🔴 **仍开** —— **本域唯一的实质缺口** | 🟢 **G3（本域）** | **否**（基线已按 🟡 计入） | [`api.md` §8.3 第 1 项](api.md)（CASE-17/18）· [`rpc.md` §「判定不变的理由」](rpc.md)<br>⚠️ **环境侧阻塞已解除**（2026-10-29 实测 `nc -z 127.0.0.1 49319` ⇒ **TCP OPEN**，宿主 `Sea-etcd` 的 `49319→2379` 转发在跑）⇒ 但 Go 真源 `service/article/api/etc/article-api.yaml:9-24` 的**三个 etcd 客户端全写死 `etcd:2379`** ⇒ 需给副本配置 ⇒ ⇒ **仍开，但已不是「环境不可达」** |
+| **A-2** | **`UNRESOLVED-002` 跨栈活体对拍**（依赖 article-rpc 的响应语义） | 🟡 **部分关闭**（rpc 侧已核 `public_only` / `status` 的消费方式；仍缺跨栈活体） | 🟢 G3 | 否 | [`api.md` §9 `UNRESOLVED-002`](api.md) |
+| **A-3** | **`DRIFT-HOTAPI-030` 后续格**（判定权口径差 1：总「值」数超过 Go 的 10000 段上限） | 🔴 **仍 OPEN** | 🔴 **global / G4**（共享层的段数闸门；本域 = `OFF` ⇒ 闸门不装） | 否 | [`favorite/vs-common.md` §「仍未闭合的下一格」](../favorite/vs-common.md) |
+| **A-4** | **P0 #8 的共享面半边**（根级 compose 的 `:?` ＋ 根 README 的 `.env.example`） | 🔴 **仍开**（**域侧那半已修**：`application.yml` 去明文默认值 ＋ `@PostConstruct verifyAccessSecret()` ＋ test scope `application.properties` ＋ **3 例真 `ApplicationContextRunner`** 守门） | 🔴 **合并收口执行者**（根级文件**无人拥有** ⇒ 根因**并入 G1 的 `S1-USERS-001`** ⇒ **不另开编号**） | **否**（域侧已修 ⇒ P0 #8 的**域侧部分**闭合；⚠️ **P0 #8 整体仍不能判 ✅**） | [`favorite/api.md` §24](../favorite/api.md) 第 6/8/11 项 · [`comment/api.md` §「根级半边」](../comment/api.md) |
+| **A-5** | **rpc 域的其余明文默认值**（`${POSTGRES_PASSWORD:password}` / `${MINIO_SECRET_KEY:minioadmin}` / `${*_AUTHORITY_TOKEN:}`） | 🟡 **已登记，本轮未动** | 🔴 **G4**（共享层 `service/common` 单写权 ⇒ 需**单独单据**） | 否（实际不可达：compose 已用 `:?` 强制 `POSTGRES_PASSWORD`） | [`favorite/api.md` §24.2 第 8 项第 ③ 条](../favorite/api.md) |
+| **A-6** | **跨域待办**：其它域 rpc 的 `*SchemaGate` 走**同一套** `@EventListener(ApplicationReadyEvent.class)` 写法 ⇒ 校验发生在「server 已起来之后」 | 🟡 **已登记，不修** | ⬜ **各域自行判断**（本工作树只写自己域的台账 ⇒ AGENTS.md §5.3） | 否 | [`rpc.md` §「跨域待办」](rpc.md) |
+
+⇒ **article 域的「域内可动」未闭合项 = A-1 / A-2 两条**（其余为跨域 / 根级 / 归属 G4）⇒ ⇒ **本域阶段一判定不变**。
+
+---
+
+## 7. 🔴 Go 出处引用漂移自查（2026-10-29 · G3 域内收敛自查 B）
+
+> **为什么这是缺陷而不是笔误**：以「Go: …」措辞写在 javadoc / `@DisplayName` / 断言消息里的断言
+> **改一行不会让任何测试变红** ⇒ ⇒ **绿测试可能守着一个错的事实**（AGENTS.md §3.3.2）。
+> ⇒ ⇒ 本轮**机器扫 + 逐条核 + 落一个守门**，判据 = **把 `文件:行号` 拿回真源读那一行**。
+
+| # | 落点 | 原引用 | 订正为 | 缺陷类型 |
+|---|---|---|---|---|
+| 1 | `article-common/.../errmsg/ErrorCode.java:46` | `get_article_handler.go:35-40` | `get_article_handler.go:28-32` | **行号越界**（该文件**仅 34 行**） |
+| 2 | `article-rpc/.../domain/ArticleEntity.java:79` | `list_articles_logic.go:184` | `update_article_logic.go:184` | **文件指错**（行号对、文件错 ⇒ **同目录兄弟文件**，最毒的一类） |
+| 3 | `article-rpc/.../config/ArticleKafkaChannelValidator.java:155` ＋ `ArticleKafkaChannelValidatorTest.java:21` | `internal/article.go:58,60` | `service/article/rpc/article.go:58,60` | **域段错** |
+| 4 | `article-rpc/.../config/ArticleMetaObjectHandler.java:21` ＋ `ArticleTransactionWiringTest.java:849` | `gorm@v1.31.2/callbacks/update.go:243-259` ＋ `:279-281` | `gorm@**v1.31.1**/callbacks/update.go:**238-241**` ＋ `:276-281` | **版本错**（真源 `go.mod` pin 的是 **v1.31.1** ⇒ 原引用指到**另一份内容不同的副本**）＋ 行号错 |
+| 5 | `article-api/.../ArticleApiJwtVerificationScopeTest.java:33` | `application.yml:234` | `application.yml:238` | **行号错**（`http-timeout: 70s` 实际在 `:238`） |
+| 6 | `article-api/.../ArticleApiJwtVerificationScopeTest.java:34` | `service/article/api/etc/article.yaml:4` | `service/article/api/etc/**article-api.yaml**:4` | **文件指错** |
+
+⇒ **本域 6 处已订正（零行为变更：全是注释 / `@DisplayName`）** ⇒ 守门见 §7.1。
+
+### 7.1 守门（**四域共用**，G3 域侧落码）
+
+| 项 | 内容 |
+|---|---|
+| **落点** | `tools/g3-anchor-check/check-anchors.py` ＋ `tools/g3-anchor-check/mutate-anchors.sh`（**新目录 ⇒ 按 AGENTS.md §5.3f「共享判据 = 依赖度数」＝ 真私有 ⇒ G3 域侧落码合法**） |
+| **判据** | 抽出 RAG 注释里的 `*.go / *.sql / *.yaml / *.yml:行号` ⇒ **回真源读那一行** ⇒ **只要求「该行存在且非空」** ⇒ ⇒ **零内容匹配 ⇒ 零误报** |
+| **覆盖的真源根** | Go 真源仓 · Go **标准库**（`$GOROOT/src`）· **module cache**（按真源 `go.mod` pin 的版本）· **RAG 自己的** 文件（`application.yml` / `db/migration/*.sql`）⇒ ⚠️ 少一个就会把「**我解析不了**」伪装成「**引用是错的**」 |
+| **分类** | `OK` / `AMBIGUOUS`（同名多文件，机器判不了）· `LINE_OOB`（行号越界）· `FILE_MISSING`（文件找不到 / 出处缺文件名）· `EMPTY_LINE` · **`VERSION_MISMATCH`**（引的不是真源 pin 的那一份 ⇒ 指到**另一份内容不同的副本** ⇒ 行号照样「在范围内」⇒ 别的判据抓不到） |
+| **当前实测**（2026-10-29） | **EXIT=0** —— 440 份 java（main+test）· **2951 条**引用 · 真源索引 11369 个文件 ⇒ `OK=1849` · `AMBIGUOUS=1102` · **`LINE_OOB=0` · `FILE_MISSING=0` · `EMPTY_LINE=0` · `VERSION_MISMATCH=0`** |
+| **变异验证**（**非假绿**） | `bash tools/g3-anchor-check/mutate-anchors.sh` ⇒ **MUT_EXIT=0**：**M1 行号越界 ✅ 精确转红（LINE_OOB）** · **M2 文件指错 ✅ 精确转红（LINE_OOB）** · **M3 版本写错 ✅ 精确转红（VERSION_MISMATCH）** · **M4 出处缺文件名 ✅ 精确转红（FILE_MISSING）** · **还原后重新转绿 ✅** |
+| **🔴 效力边界（必须随结论一起读）** | 判据是「**那一行存在且非空**」⇒ ⇒ **查不出「行号存在、但内容不是它声称的那件事」** ⇒ ⇒ **内容级错配不在本守门覆盖内**（如「引用了 `sdk/trace/span.go:631-655` 但那一段讲的不是本件事」）⇒ ⇒ **这类必须人读**，不得因为守门绿了就认为出处全对 |
+
+---
+
+## 8. 🔴 台账内部矛盾 / 过期结论订正（2026-10-29 · G3 域内收敛自查 C）
+
+> **扫描口径**：把本域台账里**同一个 ID 在不同行**同时出现「已闭」与「仍开」措辞的**候选**全部取出
+> ⇒ 再逐条**人读**核实 ⇒ 只保留**前提真的失效**的。
+> ⚠️ **本轮踩到的第一版误报（记下来）**：扫描器最初**没有排除「同一行里『修复前 → 修复后』两列」**
+> ⇒ ⇒ 把 18 条**表格内的正常对照**误判成矛盾 ⇒ ⇒ 改成「**只比不同行**」后，候选降到 3 条 ⇒ ⇒
+> **2 条是「未闭合项」字样误命中** ⇒ **真矛盾 = 下面这一条**。
+
+| # | 落点 | 矛盾 | 订正 |
+|---|---|---|---|
+| 1 | [`api.md` §8.3](api.md) | 「**建议补的探针（本轮未做，列为待办）**」的 **4 项**里，**3 项早已被后续轮次消解**，状态列却没回填 ⇒ ⇒ 读者会以为它们还开着。<br>⚠️ 其中第 2 项「真实 Tomcat 探针 ⇒ **用于关闭 §9 `UNRESOLVED-001`**」—— **`UNRESOLVED-001` 本身已在第二轮关闭** ⇒ ⇒ **前提直接失效**（不是「还没做」，是「要关的那条早就关了」） | ✅ **改写为「活状态」表**（逐条补时间坐标）：<br>① **双侧活体对拍 —— 仍开**，但「**修 `DRIFT-001` 的前置**」这个理由已失效（`DRIFT-ARTICLE-API-001` **已修**：F-1 ＋ `ArticleApiMvcPipelineTest` × 3 ＋ 变异 3/3 转红）⇒ 现在它是**证据缺口**（归属 G-3，**不阻塞阶段 1**）<br>② **真 Tomcat 探针 —— 已消解**（`UNRESOLVED-001` 已关闭 ＋ 本域**已有 2 个 `RANDOM_PORT` 真容器测试**：`ArticleApiAssemblyWiringTest` / `ArticleApiFormParamLimitTest`）<br>③ **user-rpc 慢响应探针 —— 已消解**（`DRIFT-ARTICLE-API-002` **已修**：F-2 ＋ 守门 `UserRpcClientDeadlineTest` × 5 ＋ 变异 2/2 转红）<br>④ **重复 query key 探针 —— 已消解**（`DRIFT-ARTICLE-API-003` **已修**：F-3 ＋ 守门 `ArticleApiMvcPipelineTest` × 3 ＋ 变异 2/2 转红） |
+
+⇒ **article 域真矛盾 = 1 条，已订正** ⇒ ⇒ **本域台账的「现状面」从此只有一处权威**（§6 未闭合清单 ＋ §7 出处订正 ＋ 本节）。
+
+---
+
+## 开工前置回执
+
+> ⚠️ **本节是 AGENTS.md §五·3b-0 第 ③ 步的「开工前置回执」**（模板 ⇒ `docs/Worktree.md` §二·五）⇒
+> **本 lane 的每个域台账都要有这一节**（收口时才能一眼看出「这个域开工前到底读没读」）。
+> ⚠️ **回执人不得自批**：⑤ 由**调度员**在 Jason 批准后代填；本节**不构成开工批准**。
+
+【开工前置回执 · G3 · 2026-10-29】
+
+**① 任务范围**（本 lane = `article` + `comment` + `favorite` + `hot`，**阶段 1**）：
+
+- 候选任务（**待 Jason 批准，本轮只确认、不动手**）：
+  1. **H-A1** —— hot proto **消息体** wire 字节的双侧对拍探针落码（`tools/proto-wire-probe/hot/`，照 favorite 域 `tools/proto-wire-probe/favorite/{run.sh,go/main.go}` 骨架复制）。
+  2. **A-1** —— `article` 域**双侧活体对拍**（Go 侧需 `etcd` 宿主端口映射；实测 `Sea-etcd` 的 `49319→2379` 转发已在跑 ⇒ **`judge` §九 `G-3` 写「⚫ 受阻（宿主端口未映射）」的前提已过期**）。
+  3. **F-1** —— `favorite-rpc` **整域**双侧活体对拍（Go 侧 `etcd` / Kafka 仍不可拉起 ⇒ 环境受限）。
+- **不做**（明确边界）：
+  - **阶段 2**（`docs/twoStage.md` §1.3 / §2.2 / §6 / §7 · §9 故障矩阵 · 生产流量 / SLO）⇒ 收口执行者的事，**不预支**。
+  - **共享层** `service/common/**` ＋ `service/users/users-common/**` ⇒ **只有 G4 能写**，本 lane 只读。
+  - **共享索引面**：`AGENTS.md` / 三个 `_INDEX.md` / `docs/DRIFT/_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/Worktree.md` / `docs/PhaseGoal-judge.md` / `docs/PhaseGoal/g3.md`（**机器生成物**）⇒ 不写。
+  - **根级文件**（`docker-compose.yaml` / 根 `README.md` / `.env.example`）⇒ **无人拥有 ⇒ 归「合并收口执行者」**（根因并入 G1 的 `S1-USERS-001`，**不另开编号**）。
+  - **已登记的签字偏离候选**（`docs/Intentional_Deviations/` 的 `CAND` 族）⇒ 按 AGENTS.md §5.3c「登记完就躺着，**不升级为拍板**」⇒ 不重复质疑、不推拍板。
+
+**② 已读四档**（**具体路径 ＋ 读到的关键结论**）：
+
+- `docs/DRIFT/article/api.md` ⇒ 权威现状面 = **§7 状态表（`:556`）+ §9 UNRESOLVED（`:878`）**（文件头 `:17-24` 有读取指针表；⚠️ 组件判定行 `:26` 是**首轮**判定，**不可直接引用** —— 见 `PhaseGoal-judge.md:104-108`「5 份台账头已被正文推翻」）；§8.3（`:858`）四条「待补探针」经核对 **3 条早已消解**（`DRIFT-001/002/003` 已修 + 守门在位）⇒ 本轮已改写为「活状态」表；`UNRESOLVED-002`（`:886`）跨组件、仍缺跨栈活体。
+- `docs/DRIFT/article/rpc.md` ⇒ 权威面 = §7（`:343`）+ §9（`:654`）；**`S-5`（`:95` / `:318`）content security 被 security 域阻塞 ⇒ 外部客户端恒抛、审核链路不可用 ⇒ ⛔ 本项目内不可闭环**；`U-3`（`:658` 真 Kafka 失败位点）· `U-4`（`:659`）· `U-9`（`:664`）· `U-4'`（`:666`）**四项取证缺口仍 OPEN**；「跨域待办」（`:1271` / `:1789`）= 其它域 `*SchemaGate` 同款写法 ⇒ **只登记不修**。
+- `docs/DRIFT/article/common.md` ⇒ ✅ Go↔Java **sha256 逐字节一致**（`cad5cb4f…`，49 行，`:50`）+ 契约测试 15 条（`:51`）+ 变异 **8/8 全红**（`:52`）⇒ **无编号未决项**；⚠️ `:22` / `:74-77` 的「消费侧仍是空骨架 / 零生产调用方」描述**已被现状推翻**（覆盖矩阵 `:40-41` 记 `article-api` 41 文件 5759 LOC）⇒ **一条未被本文件自身订正的过期描述**（见 ③ 待批准项 #5）。
+- `docs/DRIFT/article/proto.md` ⇒ ✅ 行为层一致、**唯一差异是 option 块**（`:51-62`）；§3.4 三项效力边界（presence / 字段号硬编码 / Jackson）**逐条已验**（`:23-27`）；`P-U-1` 跨栈 gRPC 活体**仍 OPEN**（`:175`）。
+- `docs/DRIFT/article/vs-common.md` ⇒ §2 **9 条机制面轴 A1~A9 逐轴结论**（`:36-49`，核对日期 2026-10-27）；§6 **域内未闭合项清单**（`:345-363`，本轮新增）⇒ 域内可动 = **A-1 / A-2 两条**，均不阻塞阶段一；§4 派单仍挂 `G4-2`（MP 自动收集无运行证据，**阻塞本波** `:276`）· `G4-10`（`check-surface-parity.py` 路径指错 ⇒ **假红/假绿** `:296`）· `G4-11`（双侧活体受阻前提已过期 `:297`）。
+- `docs/DRIFT/comment/api.md` ⇒ §5 未决 `U1~U11`（`:330-345`）：**`U4`（`:337`）共享台账 `_cross/new-domains-2026-10-23.md:43-45` 的「熔断缺失」结论已被实测推翻 ⇒ 🔴 需收口执行者更正共享台账**；`U10`（`:343`）机制待查（**可观察行为已定**）；判定行 `:24` 注明 3 条 MISMATCH 全修 ⇒ 当前无「必须对齐」分歧项。
+- `docs/DRIFT/comment/rpc.md` ⇒ §5 `U1~U16`（`:566-585`）：**`U15`（`:584`）= global `E65` 出向 gRPC 不继承 deadline ⇒ 待修法拍板 + 待共享层** · **`U16`（`:585`）= `E66` Redis 不感知 deadline ⇒ 待共享层**（域侧不擅自引入第三种载体）· `U13`（`:582`）跨栈 `grpc-status:1012` **协议层不可修** · `U10`（`:579`）**销账待 global 合回** · `U4`（`:573`）Go 侧 `t.Skip` 真源缺口 · `U11`（`:580`）Go 侧潜伏缺陷；⚠️ `:1146` 诚实边界：**本域新守门只到「编译通过」、测试未重跑 ⇒ 不得宣布「comment 守门已绿」**。
+- `docs/DRIFT/comment/common.md` ⇒ ✅ **SEMANTICALLY EQUIVALENT**（错误码契约层，`:20-33`），MISMATCH 0 条、OBS 1 条；§4 三条 `U1/U2/U3` 全闭（`:123-125`）；⚠️ 同表 `:110`（🔴 RAG 现状）与 `:112`（🟢 2026-10-24 已修复并活体验证）**两行口径不同 ⇒ 读 `:110` 会误判为仍断**。
+- `docs/DRIFT/comment/proto.md` ⇒ ✅ 消费方式层 EQUIVALENT（`:15-24`），`U4` 跨栈业务码不可传输 = 协议层（`:112`）。
+- `docs/DRIFT/comment/vs-common.md` ⇒ §2 九轴（`:39-51`）＋ §6 未闭合清单（`:207-228`，本轮新增）⇒ 域内可动 = **C-5 / C-7**；§4.2 拍板结论（`:110-119`）：`C-3`/`U15` 方向 = **走 global 统一载体**，本域不擅自选边；`:126-137` `:9091` metrics 暴露面 = **登记类、不占拍板额度**。
+- `docs/DRIFT/favorite/api.md` ⇒ §24 **P0 #8 域侧已修**（yaml 去明文默认值 ＋ `@PostConstruct verifyAccessSecret()` ＋ test scope `application.properties` ＋ **3 例真 `ApplicationContextRunner`**）⇒ **域侧半边闭合**；根级半边（compose `:?` ＋ 根 README `.env.example`）⇒ **归合并收口执行者**（`:1550-1579`）；`U9`（`:316-325`）Go 16062 DevServer HTTP 面 ⇒ **待拍板**；405 多一个 `Content-Type` ⇒ 落点 `service/common`（`:25`）。
+- `docs/DRIFT/favorite/rpc.md` ⇒ §9.3 **`U7`（`:268`）rpc 层整域双侧活体 = 本域最大缺口**（错误码契约层已双侧对拍，但**那是 `favorite-common`，不是 rpc 层**）；`U1~U6` 逐条复核结论（`:260-268`）；§10-D1 3s deadline 已修（复用 `DeadlineQueryTimeoutInjector`）。
+- `docs/DRIFT/favorite/common.md` / `favorite/proto.md` ⇒ 无未闭合项；proto 行为层 **0 行差异**。
+- `docs/DRIFT/favorite/vs-common.md` ⇒ §2 九轴；§4「仍未闭合的下一格」= **`DRIFT-HOTAPI-030` 后续格**（总段数 > Go 的 10000 段上限，**显式登记不假装闭合**）；§5 第 0 步「组件真的启动一次」**仍未完成**（DDL 探针是 `psql` 直跑迁移脚本，**全程不启 Java 进程** ⇒ 证明的是 DDL 一致，不是「组件启动过」）。
+- `docs/DRIFT/hot/api.md` ⇒ 「未闭合 / 已知差异」表（`:119-206`）`D1~D24`；本轮**订正三处过期状态列**：`D9`（状态列停在「静态确认」而同行备注已是「活体坐实」）· `D14`（停在「已移交 common 域」，实际 2026-10-26 已实现 ⇒ wire 级 L4）· **`D15`（写「🟡 需登记」但早已「✅ 已修」）**；§6 残余 `DRIFT-HOTAPI-031`（`:1238`，已登记 `SD-2026-10-25-CAND-10` ⇒ **登记类**）。
+- `docs/DRIFT/hot/rpc.md` ⇒ 域内未闭合项清单为空（`:932`）；`DRIFT-HOTRPC-005`（已取证未签字）· `DRIFT-HOTRPC-006`（保持不修、已登记）。
+- `docs/DRIFT/hot/common.md` ⇒ 无未闭合差异（`:73`）；§「2026-10-29 · G3 阶段 1 回填：**G-5 闭合**」= 错误码探针落仓 `tools/errmsg-probe/hot/`（**EXIT=0** ＋ 变异 **4/4** 精确转红）⇒ **`hot-common` 的 R 判定由 R3 升 R4** ⇒ `judge` §九 `G-5` **可撤**。
+- `docs/DRIFT/hot/proto.md` ⇒ §3 未决：**`H-3`**（proto 消息体 wire 探针，仍开）· **`G-19`**（proto **消费方式**未取证：`optional` presence / 字段号硬编码 / Jackson 配置）· `G-15`·`G-18`（台账矛盾与位置不统一）**本轮已订正**。
+- `docs/DRIFT/hot/vs-common.md` ⇒ §2 九轴；§3 `H-1`（proto 契约网已落码，基准由真源脚本生成、sha256 `4ede7100…`）· **`H-2` 已闭合**（本轮）· **`H-3` 归属已订正**（按 §5.3f，hot-only 探针目录 = **真私有 ⇒ G3 可写**）；§5 交付物清单。
+- `docs/DRIFT/_cross/open-items.md` ⇒ §6.2 已知未修按优先级：**`DRIFT-HOTAPI-030`**（`:15`，2049~10000 参数区间两侧不一致，**跨域待拍板**）· **`DRIFT-HOTAPI-031`**（`:16`，超长请求行 400 vs 431 ⇒ 候选 `SD-2026-10-25-CAND-10` **未签字**）· DDL **9 域已做**（`hot` = **N/A** ⇒ **不许写成「已对齐」**）· users 域 8 处 `DEFAULT CURRENT_TIMESTAMP` 残留（`SD-2026-10-25-CAND-16` 未签）· `DRIFT-INFRA-001`（`:59-93`）Flyway 账本撞号（配置层已修；**`FlywayLedgerIsolationTest` 全仓不存在** ⇒ 文档误称其存在）；⚠️ `:65` 的「article-rpc 按指示未动」**仍是 2026-10-23 的旧状态**。
+- `docs/DRIFT/_cross/component-coverage-matrix.md` ⇒ **「当前态」节（`:23-78`）才是现状**，历史节（2026-10-23 快照）只作追溯（`:5-14`）；⚠️ 其「当前态」节是 **2026-10-25** ⇒ `article-api` 残留 `-007`（`:40`）已被 `article/api.md:696` 推翻、计数 86 已被 **102** 推翻 ⇒ **共享面落后于域台账**；仍有效的是「**rpc 必须先于 api**」的排序约束（`:13-14`）。
+- `docs/DRIFT/_cross/proto-verification.md` ⇒ 三档回归网：**user/admin 有 `check-proto-static.sh`**；其余 8 个「只有一次性实测」⇒ 但 `:45` 的「脚本一个都没覆盖」**已过期**（实际已覆盖 5 个）⇒ 共享面待收口订正；`comment`/`like` 的 `package` 归一**已签字**。
+- `docs/DRIFT/_cross/domain-common-lanes.md` ⇒ **A1~A9 九条机制面轴的定义**（`:77-85`）＋ 写权边界（§3）＋ 跨 2+ 域未闭合项（§4）⇒ 我域的逐轴结论写在各域 `vs-common.md` §2。
+- `docs/Intentional_Deviations/article/rpc.md` ⇒ 已签 **2 条**：`SD-2026-10-24-01`（`:16` 全局锁序统一 `article → publication`）· `SD-2026-10-24-02`（`:147` Kafka 四通道不能逐通道切 broker）⇒ 倾向 = **全局一致性优先于逐字复刻**（两处都写了「为什么**不修回去**」）；`article/{api,common}.md` = **0 字节空档**（非漏写）。
+- `docs/Intentional_Deviations/comment/` ⇒ 已签 5 条：`SD-2026-10-23-04`（proto `package` 归一，`proto.md:11`）· `CAND-02`（`report_record` 表 Go 侧不存在，`rpc.md:67`）· `CAND-06`（Go 的 `manage` 清位 SQL **必然报错**，`rpc.md:202`）· `CAND-07`（HS384/HS512 Go 接受 RAG 拒，`api.md:79`）· `CAND-08`（保护层覆盖范围 RAG 更严，`api.md:127`）；**未签字候选 3 条**：`CAND-01`（9 处 `NOT NULL DEFAULT`，`rpc.md:22`）· `CAND-03`（authority/dispatch 默认关闭，`rpc.md:169`）· `CAND-09`（DDL 更严，`rpc.md:121`）⇒ **登记类，不推拍板**；`CAND-04` ⛔ **前提已被实测推翻 ⇒ 作废**（`api.md:18`）。
+- `docs/Intentional_Deviations/favorite/` ⇒ 已签 **9 条**（`DEV-FAV-API-001/002` · `DEV-FAV-COMMON-001/002` · `DEV-FAV-RPC-001/003/004/006/007`）⇒ 倾向 = **表达层/部署面为主**，仅 1 条是「RAG 更严」（`DEV-FAV-RPC-007` 的 CHECK）；**已撤销 2 条**（`DEV-FAV-RPC-002` / `-005` ⇒ 前提被逐行核对证伪）⇒ **登记 ≠ 签字的前提必须先复核**；`favorite/proto.md:11`「本域暂无条目」。
+- `docs/Intentional_Deviations/hot/` ⇒ 已签 **17 条**（`SD-HOT-RPC-001~004` + `SD-1/2/3` + `SD-HOT-API-001~005/007~010`）⇒ 倾向 = **「RAG 更稳 / 更保守 / 单向增强」占多数**；`SD-HOT-API-006` ⛔ 2026-10-25 已撤销（`api.md:22`）；**未签字候选 1 条** = `SD-2026-10-25-CAND-10`（`api.md:332`）⇒ 登记类；`hot/common.md:7`「本组件无单独登记的签字偏离」＋ `:22-34` 两条「看起来像偏离、实际不是」。
+- `docs/Intentional_Deviations/_INDEX.md` ⇒ **CAND 族共 14 条未签字** ⇒ 按 §5.3c **不升级为拍板**；⚠️ `SD-` 编号**存在跨域撞号** ⇒ 引用必须给「**文件 + 域**」，不能只写编号。
+- `docs/PhaseGoal/g3.md` ⇒ **lane 判定 🟡**（16 组件：✅15 · 🟡1 · 🔴0）；**差距 = `article-rpc` 一个组件**；**§2.1「本 lane 自修」只有 `article-rpc` 一行**（`S-5` + `U-3/U-4/U-9/U-4′`）；**§2.2 转派 G4** = comment-rpc `D8/D9/U13` · favorite-api `U9/405/B2` · favorite-rpc `U7/U9/E65`；**§3 P0 主责 = #4**，协作 #1/#2/#3/#6/#8，不涉及 #5/#7/#9；§5 收口验收命令全可复算。
+- `docs/PhaseGoal-judge.md` ⇒ **§1.3** ✅ 判据 = `R ≥ R3` **且** 归属本组件的必相对齐项 = 0 **且** 有**可复算**判定命令；**§1.5 判定权威层模型**（`:93-108`）= **L0 台账「条目级最新状态」是唯一权威** ⇒ **不得引用台账头的「组件判定」行**；**§8.4 阶段一准入 = ❌ 未通过**，三类硬阻断 = **X-11 密钥链（P0 #8）** · **X-12 项目说明（P0 #5）** · like-rpc `DRIFT-LIKE-003` + global `E60` + 共享层 27 条；**§九 证据缺口**：`G-3`（article 双侧活体 0 条，⚫ **可解除**）· `G-5`（hot-common 探针在 `/tmp` ⇒ **本轮已闭合，可撤**）· `G-6` / `G-7` / `G-13`（4 域无失败路径矩阵，含 **article + hot**）· `G-15` / `G-18`（**本轮已订正**）· **`G-19`**（proto 消费方式未取证，10 个 proto 全部）· `G-20`（共享面 `:45` 已过期）。
+- `docs/PhasedGoal.md` ⇒ `:38-52` **P0 九条**（准入）· `:54-68` **P1**（至少 2~3 个机制形成闭环）· `:70-78` **P2**（生产级 SLO / 容量规划 / 灾备 / 灰度 / 穷尽故障组合 ⇒ **不阻塞**）；`:26-36` 明确「本节是语言描述，**可判定版在 `PhaseGoal-judge.md`**」。
+- `docs/twoStage.md` ⇒ **§4 阶段 0 事实基线**（`:258-310`：事实调查 / 三条核心链路 / 差异基线 9 字段，**必须保留到阶段 2 验收完成**）· **§5.3 差异与暂缓项 11 项必填**（`:359-379`，明写「不得只写『后续优化』」）· **§5.4 改造记录 9 项必填**（`:381-397`，「必须根据计划**实际修改**项目，而不是只输出建议」）· **§10 阶段归属 A/B/C/D**（`:941-975`：**A 类 = 阶段 1 准入阻断项**；**P0–P3 是严重度、A–D 是阶段归属，两者不能互相替代**）。
+- `docs/Pitfalls/article/api.md` ⇒ **P-1**（`:11`「没有 error handler ⇒ 一律 400」只走了一半推理）· **P-4**（`:141`「注解存在 ≠ 机制生效」）· **P-5**（`:171`「代码里写了 ≠ 客户端收到」）· **P-15**（`:516` 变异模块没重编 ⇒ **假的仍全绿**）· **P-21**（`:789`「仍全绿」的第一嫌疑是「**变异没打中**」）· **P-22**（`:830`「**javadoc 写了 Go 出处是待核实的断言，不是证据**」）。
+- `docs/Pitfalls/article/rpc.md` ⇒ 16 条 `PF-ARTICLE-RPC-001~016`：`007`（`:244` javadoc 里写的「锁死用例」可能根本不存在）· `008`（`:290` 改的是 bean 读的是 Environment ⇒ 不会变红的假绿）· `016`（`:875` `EOFException` 出现在 `PGStream.receiveChar` ⇒ **不是「PG 挂了」**）。
+- `docs/Pitfalls/comment/` ⇒ **PIT-COMMENT-RPC-02**（`:69`「**javadoc 里『对应 Go xxx.go:行号』的断言本身可能与真源相反**」）· `PIT-COMMENT-API-03`（`:101`「**自己的 javadoc 会成为『证据』**」）· `PIT-COMMENT-RPC-05`（`:192`「因错误原因而绿」的假守卫）· `PIT-COMMENT-RPC-13`（`:563`「某域把异常改写了」这类登记**必须逐条核 Go 侧**）。
+- `docs/Pitfalls/favorite/` ⇒ **PIT-FAV-API-001**（`:11`「javadoc 里的『Go: …』断言会变成**免检通道**」）· `PIT-FAV-API-007`（`:227`「读源码判定」不是「已验」）· `PIT-FAV-API-008`（`:271` `RANDOM_PORT` 挑的端口可能根本不是你的）· `PIT-FAV-API-017`（`:836`「全仓 grep 零命中」⇒ 模式选错时零命中什么也不证明）· **PIT-FAV-RPC-010**（`:384` 注释里的 Go 断言会「指错行」—— **没有任何测试会红**）· `PIT-FAV-RPC-030`（`:1338` 新写了带 Go 锚点的文件 ⇒ **必须跑「管它的那个门禁」**）· `PIT-FAV-RPC-033`（`:1488` 引用 `文件:行号` 前先确认该符号在**本分支**存在）· `PIT-FAV-RPC-037`（`:1714`「盘点归零」的口径外还有一层从未被机检覆盖）。
+- `docs/Pitfalls/hot/api.md` ⇒ **P8**（`:296` 读 go-zero 源码前先确认版本 —— 同一台机器的 module cache 里有三个版本）· **P15**（`:512`「变异没红」的第一反应应是「我的变异脚本错了」）· **P16**（`:561` MockMvc 不是「真 Tomcat」）· **P19**（`:674` 单模块跑会用 `~/.m2` 的 jar）· `P-HOTAPI-25`（`:965` `git add -A` 撞上后台正在改工作区的任务 ⇒ **变异代码被提交进 HEAD**）；`docs/Pitfalls/hot/rpc.md` ⇒ **P-HOTRPC-19**（`:623` 变异打在 `target/classes` 会被 `mvn test` 的资源拷贝覆盖 ⇒ 守门**假绿**）· `P-HOTRPC-22`（`:724` **Boot 2/3 的行号在 Boot 4 上对不上**）· `P-HOTRPC-16`（`:519`「缺陷在别的域的台账里」**跨域登记 ≠ 域内认领**）。
+- `docs/Pitfalls/_cross/` ⇒ `domain-common-lanes.md` **PIT-LANE-01~07**（`:17` lane 基点早于脚手架那次提交 ⇒ 回并撞 add/add · `:59`「改一处受益全域」**不是**「可以并行改」⇒ 共享层只有一条写权 · `:168` 守门登记了一条**已不存在**的 lane = 恒绿假绿 · `:196` 守门用**全文 grep** 判措辞 ⇒ 改掉**锚点那一行**后守门恒绿）· `testing-pitfalls.md`（`:35` 绿测试可能是「错误答案的守卫」⇒ 修漂移**先改/删错误断言，再改实现**；`:55` **陈旧 surefire 报告会静默抬高测试计数**；`:108` 守门的**排除清单是架构假设** ⇒ 架构一变就假阳性）· `flyway-ledger-collision.md`（`:5` 唯一例外 = `favorite-rpc` 缺 `baseline-version: 0` ⇒ 只记账不修）· `framework-mechanism-evidence.md`（`:3` 四类**静默失效**的实证：`@Transactional` self-invocation / `@ResponseBodyAdvice` 二次包裹 / `@TableField(typeHandler)` 丢类型信息 / 命令行注入的属性前缀写错）· `fix-round-lessons.md`（`:3-110` 11 条元教训；`:64` **第一轮+第二轮 8 条里 6 条是「跑绿 ≠ 对」**的证据）。
+
+**③ 待批准项**（需 Jason 拍板；**回执人不得自批**）：
+
+1. 🔴 **候选任务与权威基线不一致（本轮最需要裁定的一条）** —— `docs/PhaseGoal/g3.md` **§2.1「本 lane 自修」只有 `article-rpc` 一行**（`S-5` + `U-3/U-4/U-9/U-4′`），而调度员给的候选三条（H-A1 / A-1 / F-1）**一条都不在 §2.1 里**；反过来 §2.1 那 5 项在候选任务里**一条也没有** ⇒ ⇒ **两处对不上**。⇒ **本 lane 不自行改任务范围**，请裁定以哪一份为准（另注：`S-5` 的阻塞源在 Go 侧 `security` 域 ⇒ 按 AGENTS.md §一「`knowledge`/`points`/`security` **范围外 ⇒ 不是待办**」⇒ **`S-5` 本 lane 内不可闭环**）。
+2. **H-A1 是否本轮做** —— 归属已按 §5.3f 订正为**域侧自修项**（`tools/proto-wire-probe/hot/` 只被 hot 域引用 ⇒ 真私有）；成本低（hot.proto **无 `optional` / 无 `map`** ⇒ 形态比 favorite 简单）。
+3. **A-1 的前提已变** —— `judge` §九 `G-3` 写「⚫ 受阻（宿主端口未映射）」，但实测 `Sea-etcd` 的 `49319→2379` **已在跑** ⇒ **已不是「环境不可得」**，而是「需给 Go 真源副本配 `etcd:2379`（真源 yaml 写死、冻结不可改）」⇒ 是否本轮补跑请裁定。
+4. **F-1 环境受限** —— Go 侧 `etcd` / Kafka 仍不可拉起 ⇒ 需裁定「是否仍尝试 / 是否维持登记为最大缺口」。
+5. 🟡 **读档时发现的新增台账缺陷（本轮不修，待批准后处理）** —— ① `docs/DRIFT/article/common.md:22` 与 `:74-77` 仍称「消费侧是空骨架 / 本模块零生产调用方」⇒ **与现状冲突**（覆盖矩阵 `:40-41` 记 41 文件 / 5759 LOC）⇒ **未被本文件自身订正**；② `docs/DRIFT/comment/common.md:110` 与 `:112` 同表两行口径相反 ⇒ 读 `:110` 会误判为仍断；③ `docs/DRIFT/_cross/open-items.md:65` 的「article-rpc 按指示未动」仍是 **2026-10-23** 旧状态 ⇒ 与 `article/vs-common.md:319`（`L-1` 补 `baseline-version: 0`）冲突（⇒ **共享面，不在 G3 写权面**）。
+6. **登记类事项不占拍板额度** —— `CAND` 族 14 条（`_INDEX.md`）+ `hot` 的 `SD-HOT-API-001~005/007~010` 等已签字项 + `SD-2026-10-25-CAND-10` ⇒ 按 §5.3c **不推拍板、不重复质疑** ⇒ 本回执**无相关待批准项**。
+7. ℹ️ **共享面已过期项（登记 ⇒ 归合并收口执行者）** —— `docs/DRIFT/_cross/component-coverage-matrix.md` 当前态节（2026-10-25）落后于域台账 · `docs/DRIFT/_cross/proto-verification.md:45` 仍写「脚本一个都没覆盖」 · `docs/DRIFT/_cross/open-items.md:65` 旧状态 ⇒ **三处均属 SHARED 面 ⇒ 不在 G3 写权面**。
+
+**④ 等批准** ⇒ **批准后才开工**；本轮除本回执小节外**不写任何代码、不改任何台账**（已读动作仅限只读：四档台账 + `_cross` + 阶段标准 + 回执模板）。
+
+**⑤ Jason 批准记录**：　← **由调度员代填，回执人不得自批**

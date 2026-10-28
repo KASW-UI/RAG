@@ -171,7 +171,7 @@ class HotEventConsumerDropTest {
     void unknownFieldsAreIgnored() {
         consumer.onPartitionsAssigned(List.of(0));
 
-        // test/cmd/producer.go:18-23 实测发送的就是 4 字段
+        // service/hot/test/cmd/producer/producer.go:14-19 实测发送的就是 4 字段
         assertThatCode(() -> send(0,
                 "{\"article_id\":\"a1\",\"type\":\"like\",\"user_id\":\"u9\",\"timestamp\":123456}"))
                 .doesNotThrowAnyException();

@@ -134,7 +134,7 @@ class HotArticleQueryServiceTest {
     }
 
     @Test
-    @DisplayName("Go _test.go:62-94 —— 空结果时仍返回默认值 page=1 / page_size=20 / scope=rolling")
+    @DisplayName("Go getHotArticlesLogic_test.go:62-94 —— 空结果时仍返回默认值 page=1 / page_size=20 / scope=rolling")
     void appliesDefaultsAndScopeForEmptyWindow() {
         when(hotRpcClient.getHotArticles(anyInt(), anyLong()))
                 .thenReturn(GetHotArticlesResponse.getDefaultInstance());
@@ -153,7 +153,7 @@ class HotArticleQueryServiceTest {
     }
 
     @Test
-    @DisplayName("Go _test.go:97-148 —— 过滤后 total、按下标保序、跨页稠密 rank")
+    @DisplayName("Go getHotArticlesLogic_test.go:97-148 —— 过滤后 total、按下标保序、跨页稠密 rank")
     void filtersKeepsOrderAndPaginatesAfterFiltering() {
         when(hotRpcClient.getHotArticles(anyInt(), anyLong()))
                 .thenReturn(hotResponse(item("a", 99), item("b", 88), item("c", 77), item("d", 66)));
@@ -172,7 +172,7 @@ class HotArticleQueryServiceTest {
     }
 
     @Test
-    @DisplayName("Go _test.go:150-183 —— article-rpc 失败只少一条，整包仍 200")
+    @DisplayName("Go getHotArticlesLogic_test.go:150-183 —— article-rpc 失败只少一条，整包仍 200")
     void articleRpcFailureShrinksResultInsteadOfFailing() {
         when(hotRpcClient.getHotArticles(anyInt(), anyLong()))
                 .thenReturn(hotResponse(item("a", 100), item("b", 90)));

@@ -13,11 +13,14 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -129,6 +132,12 @@ class FavoriteApiRealTomcatGateTest {
     private static final String FOLDER_CREATE = "/favorite/v1/folder/create";
     private static final String ITEM_LIST = "/favorite/v1/item/list";
 
+    /** Go 路由表（service/favorite/api/internal/handler/routes.go:16-59）的其余 4 个端点。 */
+    private static final String FOLDER_DELETE = "/favorite/v1/folder/delete";
+    private static final String FOLDER_UPDATE = "/favorite/v1/folder/update";
+    private static final String ITEM_CREATE = "/favorite/v1/item/create";
+    private static final String ITEM_DELETE = "/favorite/v1/item/delete";
+
     /**
      * Go 侧 {@code GetFavoriteFoldersReq} 是<b>空结构体</b>
      * （{@code service/favorite/api/internal/types/types.go:59}）⇒ ⇒ 无必填字段干扰
@@ -136,7 +145,7 @@ class FavoriteApiRealTomcatGateTest {
      */
     private static final String FOLDER_LIST = "/favorite/v1/folder/list";
 
-    /** favorite-api 的默认 AccessSecret（application.yml:94 的默认值，测试未覆盖它）。 */
+    /** favorite-api 的 AccessSecret 取值 —— ⚠️ 主 yaml 的**明文默认值已于 2026-10-29 去掉**（P0 #8 域侧修）⇒ 这里不再是「默认值」，而是 **test scope** 的 `src/test/resources/application.properties`（**不进产物 jar** ⇒ 生产拿不到）。 */
     private static final String ACCESS_SECRET = "ae0536f9-6450-4606-8e13-5a19ed505da0";
 
     @LocalServerPort
@@ -443,6 +452,241 @@ class FavoriteApiRealTomcatGateTest {
                 "Go 侧解析失败走 httpx.OkJsonCtx ⇒ HTTP 恒 200；实际 body=[" + resp.body() + "]");
         assertTrue(resp.body() != null && resp.body().contains("\"code\":5003"),
                 "query 里出现 ';' 必须触发 Go 的分号规则 ⇒ 5003；实际 body=[" + resp.body() + "]");
+    }
+
+    // ══════════════════ Go 的 maxFormParamCount=2048 在【全部 7 个端点】上的覆盖面（2026-10-28 · G3 阶段 1）══════════
+
+    /**
+     * Go 侧 7 个 favorite handler <b>全部</b>调 {@code httpx.Parse(r, &req)}
+     * ⇒ ⇒ {@code httpx.GetFormValues} 对<b>每个</b>请求都做「非空值个数」计数
+     * ⇒ ⇒ Go 的 {@code maxFormParamCount = 2048} 对 <b>7/7 端点</b>都成立。
+     *
+     * <p>本域原先只有 {@code GET /favorite/v1/item/list} 走 form 通道
+     * （{@code FavoriteApiSupport#goFormFirstValue}）⇒ ⇒ <b>另外 6 个 JSON body 端点从不计数</b>
+     * （本域自己的注释已写明，见 {@code FavoriteGoQueryLimitInterceptor} 的类注释）
+     * ⇒ ⇒ 「<b>Go 拒（200＋5003）/ RAG 放行进业务层</b>」⇒ 本组用例把这条漂移钉死。
+     *
+     * <p>⚠️ <b>body 必须合法</b>：否则「5003」可能来自 body 解析失败（缺必填字段）
+     * ⇒ ⇒ 断言就分不清「被值数闸门拒」与「被 body 校验拒」⇒ ⇒ 断言落在
+     * 「<b>被闸门拒 ⇒ 5003</b>」与「<b>没被拒 ⇒ 进业务层（业务信封，非 5003）</b>」的可观察差异上。
+     */
+    @Test
+    @DisplayName("🔴 Go 的 maxFormParamCount=2048：2049 个非空 query 值 ⇒ 【7 个端点全部】5003")
+    void nonEmptyFormValueLimitAppliesToEveryEndpoint() throws Exception {
+        for (String[] ep : ALL_ENDPOINTS) {
+            HttpResponse<String> resp = sendWithToken(ep[0], ep[1], ep[2], manyFormParams(2049));
+
+            assertEquals(200, resp.statusCode(),
+                    ep[0] + " " + ep[1] + "：应用层拒绝也必须 HTTP 200 + 业务信封（Go httpx.OkJsonCtx 语义）；body=["
+                            + resp.body() + "]");
+            assertTrue(resp.body() != null && resp.body().contains("\"code\":5003"),
+                    ep[0] + " " + ep[1] + "：第 2049 个非空 query 值必须触发 Go 的 maxFormParamCount（"
+                            + "go-zero@v1.10.2/rest/httpx/util.go:15,48）⇒ 5003；实际 body=[" + resp.body() + "]");
+        }
+    }
+
+    @Test
+    @DisplayName("🔴 Go 的 maxFormParamCount=2048：恰好 2048 个非空 query 值 ⇒ 放行进业务层（不是 5003）")
+    void nonEmptyFormValueLimitBoundaryIsGoExact() throws Exception {
+        // 判别点用 FOLDER_LIST：Go 侧 GetFavoriteFoldersReq 是**空结构体**（types.go:59）
+        // ⇒ ⇒ 无必填字段干扰 ⇒ 「不是 5003」只能来自「闸门没触发」。
+        HttpResponse<String> resp = sendWithToken("GET", FOLDER_LIST, null, manyFormParams(2048));
+
+        assertEquals(200, resp.statusCode());
+        assertFalse(resp.body() != null && resp.body().contains("\"code\":5003"),
+                "恰好 2048 个非空值必须放行（Go httpx/util.go:48 的 `if n < maxFormParamCount`）；"
+                        + "若这里也报 5003，说明上限被改小或计数口径漂移。实际 body=[" + resp.body() + "]");
+        assertTrue(isBusinessEnvelope(resp),
+                "放行后必须进业务层并返回业务信封（Go httpx.OkJsonCtx 语义）。实际 body=[" + resp.body() + "]");
+    }
+
+    @Test
+    @DisplayName("🔴 Go 的 net/url 非法转义（%zz）⇒ 5003（ParseForm 的 error 传播到 httpx.Parse）")
+    void invalidPercentEscapeIsRejectedLikeGo() throws Exception {
+        // Go 1.25.11 src/net/url/url.go 的 unescape：`%` 后必须跟两个十六进制
+        // ⇒ 否则 EscapeError ⇒ url.ParseQuery 记 error ⇒ Request.ParseForm 返回 error
+        // ⇒ go-zero httpx.GetFormValues:23 直接返回该 error ⇒ httpx.Parse 失败 ⇒ 5003。
+        // ⚠️ Tomcat 的 query 解码对非法转义是**宽容**的（原样保留）⇒ 不查这一条就会漏。
+        //
+        // 🔴 为什么必须用**裸 socket**（2026-10-29 · G3 实测）：
+        //   JDK `java.net.http.HttpClient` 与 `HttpURLConnection` 都在**客户端 URI 解析阶段**
+        //   就把 `%zz` 拒了（`java.net.URI.create` ⇒ `IllegalArgumentException: Malformed escape pair`）
+        //   ⇒ ⇒ 请求**根本没发出去** ⇒ ⇒ 用它们断言只会量到「客户端的严格性」，不是服务端的行为
+        //   ⇒ ⇒ 这类输入只能用裸 socket 送（服务端收到的就是字面量 `?a=%zz`）。
+        RawResponse resp = sendRawSocket("GET", FOLDER_LIST, "a=%zz", null);
+
+        assertEquals(200, resp.status(),
+                "Go 侧解析失败也走 HTTP 200 + 业务信封；实际 body=[" + resp.body() + "] raw=["
+                        + resp.raw() + "]");
+        assertTrue(resp.body() != null && resp.body().contains("\"code\":5003"),
+                "非法 % 转义必须触发 Go 的 ParseForm error ⇒ 5003；实际 body=[" + resp.body() + "] raw=["
+                        + resp.raw() + "]");
+    }
+
+    /**
+     * 7 个端点：{@code {method, path, body}}。
+     *
+     * <p>body 一律取 Go 侧必填字段齐全的<b>合法</b>形态（与
+     * {@code tools/api-full-parity-probe/favorite/} 的请求矩阵同款）
+     * ⇒ ⇒ 保证「5003」只可能来自<b>值数闸门</b>，而不是 body 校验。
+     */
+    private static final String[][] ALL_ENDPOINTS = {
+            {"POST", FOLDER_CREATE, "{\"name\":\"g3-probe\"}"},
+            {"DELETE", FOLDER_DELETE, "{\"folderId\":\"9001\"}"},
+            {"GET", FOLDER_LIST, null},
+            {"POST", FOLDER_UPDATE, "{\"folderId\":\"9001\",\"name\":\"g3-probe\"}"},
+            {"POST", ITEM_CREATE, "{\"folderId\":\"9001\",\"targetId\":\"t-1\",\"targetType\":\"post\"}"},
+            {"DELETE", ITEM_DELETE, "{\"favoriteId\":\"7001\"}"},
+            {"GET", ITEM_LIST, null},
+    };
+
+    /**
+     * 带 JWT 的任意方法请求 —— 鉴权在 controller 之前 ⇒ 无 token 时永远到不了应用层闸门。
+     *
+     * @param query 非空时拼成 {@code ?query}
+     */
+    private HttpResponse<String> sendWithToken(String method, String path, String body, String query)
+            throws Exception {
+        String url = "http://127.0.0.1:" + port + path + ((query == null || query.isEmpty()) ? "" : "?" + query);
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
+                .timeout(Duration.ofSeconds(30))
+                .header("Authorization", "Bearer " + token());
+        if (body == null) {
+            builder.method(method, HttpRequest.BodyPublishers.noBody());
+        } else {
+            builder.header("Content-Type", "application/json")
+                    .method(method, HttpRequest.BodyPublishers.ofString(body));
+        }
+        return send(builder.build());
+    }
+
+    /**
+     * 🔴 <b>裸 socket</b> 发一个请求 —— 拿到**未经客户端加工**的原始响应。
+     *
+     * <p><b>为什么需要它</b>：JDK {@code HttpClient} / {@code HttpURLConnection} 都会先过
+     * {@code java.net.URI} ⇒ ⇒ 像 {@code ?a=%zz} 这种**非法转义**在**客户端**就被拒
+     * （{@code Malformed escape pair}）⇒ ⇒ 请求根本发不出去 ⇒ ⇒ 那些输入只能用裸 socket 送。
+     * <p>⚠️ 响应里可能夹着共享层写的 {@code 103 Early Hints}（1xx）⇒ ⇒ 解析时要取
+     * <b>最后一个</b> 状态行与<b>最后一个</b> header 结束符，不能用第一个。
+     *
+     * @param query 原始 query 串（<b>不做任何转义</b>）
+     */
+    private RawResponse sendRawSocket(String method, String path, String query, String body) throws Exception {
+        String target = path + ((query == null || query.isEmpty()) ? "" : "?" + query);
+        StringBuilder req = new StringBuilder();
+        req.append(method).append(' ').append(target).append(" HTTP/1.1\r\n");
+        req.append("Host: 127.0.0.1:").append(port).append("\r\n");
+        req.append("Authorization: Bearer ").append(token()).append("\r\n");
+        if (body != null) {
+            req.append("Content-Type: application/json\r\n");
+            req.append("Content-Length: ").append(body.getBytes(StandardCharsets.UTF_8).length).append("\r\n");
+        }
+        req.append("Connection: close\r\n\r\n");
+        if (body != null) {
+            req.append(body);
+        }
+
+        try (Socket sock = new Socket("127.0.0.1", port)) {
+            sock.setSoTimeout(30000);
+            sock.getOutputStream().write(req.toString().getBytes(StandardCharsets.ISO_8859_1));
+            sock.getOutputStream().flush();
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = sock.getInputStream().read(buf)) > 0) {
+                bos.write(buf, 0, n);
+            }
+            return RawResponse.parse(bos.toString(StandardCharsets.ISO_8859_1));
+        }
+    }
+
+    /** 裸 socket 响应的最小解析结果（状态码 + body + 原始字节）。 */
+    private record RawResponse(int status, String body, String raw) {
+
+        /**
+         * 🔴 解析**真实响应形态**（2026-10-29 实测踩出来的三点）：
+         * <ol>
+         *   <li><b>多个 103 Early Hints</b>：共享层的 {@code GoStyleClientDisconnectProbe}
+         *       会连写 <b>4 个</b> {@code 103 Early Hints} ⇒ ⇒ 状态码必须取**最后一个**
+         *       {@code HTTP/1.1 <code>}（1xx 不是最终响应）；</li>
+         *   <li><b>chunked 编码</b>：最终响应是 {@code Transfer-Encoding: chunked}
+         *       ⇒ ⇒ body 要**解块**，不能按「最后一个 \r\n\r\n」切（那切到的是块的终止符
+         *       {@code 0\r\n\r\n} ⇒ body 变空）；</li>
+         *   <li><b>字节 vs 字符</b>：body 是 UTF-8 ⇒ 先按 ISO-8859-1 逐字节读（1:1 无损）
+         *       ⇒ 再把 body 段按 UTF-8 解码 ⇒ 否则中文文案是乱码。</li>
+         * </ol>
+         */
+        static RawResponse parse(String raw) {
+            int status = -1;
+            int lastStatusAt = -1;
+            int idx = 0;
+            while (true) {
+                int at = raw.indexOf("HTTP/1.1 ", idx);
+                if (at < 0) {
+                    break;
+                }
+                int codeEnd = raw.indexOf(' ', at + 9);
+                if (codeEnd > 0) {
+                    try {
+                        status = Integer.parseInt(raw.substring(at + 9, codeEnd).trim());
+                        lastStatusAt = at;
+                    } catch (NumberFormatException ignored) {
+                        // 不是合法状态行 ⇒ 继续找下一个
+                    }
+                }
+                idx = at + 9;
+            }
+            if (lastStatusAt < 0) {
+                // 没有状态行 ⇒ 整个 raw 都当 body（便于断言时看到真实内容）
+                return new RawResponse(status, raw, raw);
+            }
+            int headerEnd = raw.indexOf("\r\n\r\n", lastStatusAt);
+            if (headerEnd < 0) {
+                return new RawResponse(status, "", raw);
+            }
+            String headers = raw.substring(lastStatusAt, headerEnd);
+            String bodyRaw = raw.substring(headerEnd + 4);
+            if (headers.toLowerCase(java.util.Locale.ROOT).contains("transfer-encoding: chunked")) {
+                bodyRaw = dechunk(bodyRaw);
+            }
+            // 先按 ISO-8859-1 逐字节取回，再按 UTF-8 解码（中文文案）
+            String body = new String(bodyRaw.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
+            return new RawResponse(status, body, raw);
+        }
+
+        /** 最小 chunked 解码器：读块长（十六进制）⇒ 取数据 ⇒ 直到 {@code 0} 块。 */
+        private static String dechunk(String s) {
+            StringBuilder out = new StringBuilder();
+            int i = 0;
+            while (i < s.length()) {
+                int lineEnd = s.indexOf("\r\n", i);
+                if (lineEnd < 0) {
+                    break;
+                }
+                String sizeLine = s.substring(i, lineEnd).trim();
+                int semi = sizeLine.indexOf(';');
+                if (semi >= 0) {
+                    sizeLine = sizeLine.substring(0, semi).trim();
+                }
+                int size;
+                try {
+                    size = Integer.parseInt(sizeLine, 16);
+                } catch (NumberFormatException e) {
+                    break;
+                }
+                i = lineEnd + 2;
+                if (size == 0) {
+                    break;
+                }
+                if (i + size > s.length()) {
+                    out.append(s, i, s.length());
+                    break;
+                }
+                out.append(s, i, i + size);
+                i += size + 2;
+            }
+            return out.toString();
+        }
     }
 
     // ══════════════════ 辅助 ══════════════════

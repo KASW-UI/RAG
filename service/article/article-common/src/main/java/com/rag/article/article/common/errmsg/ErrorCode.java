@@ -43,7 +43,7 @@ import java.util.Map;
  *   <li><b>api 层 → HTTP 信封</b>：Go logic 返回 {@code (resp, code int)}，
  *       handler 侧统一包成 {@code response.Response{Code: code, Msg: GetErrMsg(code), Data: resp}}
  *       并用 {@code httpx.OkJson} 写出 ⇒ <b>恒 HTTP 200</b>，业务码只在 body 的 {@code code} 字段里。
- *       例：{@code get_article_handler.go:35-40}。</li>
+ *       例：{@code get_article_handler.go:28-32}。</li>
  *   <li><b>rpc / mq 层 → 结构化日志字段</b>：{@code logger.LogBusinessErr(ctx, code, err, opts…)}
  *       只把 code 当作 {@code error_code} 这个<b>日志字段</b>写出去
  *       （{@code service/common/logger/logger.go:145}），<b>该路径从不调用 GetErrMsg</b>。

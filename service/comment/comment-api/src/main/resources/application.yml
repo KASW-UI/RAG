@@ -74,7 +74,12 @@ grpc:
 # ⚠️ comment-api 只验签、不签发：Go 侧本服务没有 login / register 端点。
 comment-api:
   user-auth:
-    access-secret: ${USER_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}
+    # 🔴 2026-10-29 · G3 阶段 1（P0 #8）：**明文默认值已去掉** ⇒ 缺变量 ⇒ 启动失败；
+    #    变量为空串 ⇒ 也启动失败（CommentApiProperties#verifyAccessSecret 的 @PostConstruct 校验）
+    #    ⇒ 两条路都 fail-closed（不再有「悄悄用仓里的公开 UUID 起来 ⇒ token 可伪造」）。
+    #    ⚠️ Go 侧写的是**字面量**（comment api 的 yaml 的 Auth/AccessSecret）⇒ 本条属「RAG 更严」的一侧。
+    #    ⚠️ 根级 compose 需注入 USER_JWT_SECRET（共享面 ⇒ 已登记反馈单）。
+    access-secret: ${USER_JWT_SECRET}
     access-expire: ${USER_JWT_EXPIRE:31536000}
   comment-rpc:
     target: ${COMMENT_RPC_TARGET:127.0.0.1:9001}
