@@ -82,6 +82,22 @@ public final class RealContainerHostPort {
     /** HotRankingQueryServiceRedisGateTest 的 Redis 宿主口。 */
     public static final int HOT_RANKING_QUERY_REDIS_GATE = 22942;
 
+    /**
+     * 🔴 **HotRedisDisconnectFastRejectGateTest 的 A 组宿主口**（共享层 {@code REJECT_COMMANDS}）。
+     *
+     * <p>🔴 **2026-10-28 补登记**：这组探针用<b>裸 {@code docker run -p 127.0.0.1:<port>:6379}</b>
+     * 起 Redis（**不是 Testcontainers**）⇒ ⇒ 它的宿主口<b>同样是「容器发布到宿主机的口」**
+     * ⇒ ⇒ 同样必须落在本域段内 ⇒ ⇒ 原先走 {@code freePort()}（**OS 临时端口段**）⇒ **本轮改正**。
+     */
+    public static final int HOT_RD_REJECT_GATE = 22943;
+
+    /**
+     * 同上，**B 组**（Lettuce 默认 {@code DEFAULT}）的宿主口。
+     *
+     * <p>⚠️ **两组不能复用同一个口** ⇒ ⇒ 「容器还在占着端口」⇒ ⇒ 必须各占一个。
+     */
+    public static final int HOT_RD_DEFAULT_GATE = 22944;
+
     /** 守门自己起容器用的口（脚手架段第一口）⇒ <b>不与任何测试类复用</b>。 */
     public static final int GATE_LIVE = SCRATCH_FIRST;
 
@@ -99,6 +115,8 @@ public final class RealContainerHostPort {
         "HOT_REDIS_LUA_GATE",
         "HOT_KAFKA_CONSUMER_GATE",
         "HOT_RANKING_QUERY_REDIS_GATE",
+        "HOT_RD_REJECT_GATE",
+        "HOT_RD_DEFAULT_GATE",
     };
 
     /**
@@ -186,5 +204,27 @@ public final class RealContainerHostPort {
                     + " 落在 OS 临时端口段 " + OS_EPHEMERAL_BEGIN + "-" + OS_EPHEMERAL_END
                     + " ⇒ 会与别的进程抢口 ⇒ 这正是本类要消灭的那类抖动");
         }
+    }
+
+    /**
+     * 🔴 **校验一个「登记口」并把它交回调用方** —— 供<b>裸 {@code docker run -p}</b> 这类
+     * <b>不走 Testcontainers 的 {@code bind*}</b> 形态使用。
+     *
+     * <p>⚠️ **为什么需要它（2026-10-28 · G3）**：{@code HotRedisDisconnectFastRejectGateTest}
+     * 起 Redis 用的是<b>裸 {@code docker run}</b> ⇒ ⇒ 它<b>没有</b> {@code bindRedis(...)} 调用
+     * ⇒ ⇒ 守门的「钉口调用」特征（{@code PIN_CALL}）<b>识别不到它</b>
+     * ⇒ ⇒ 那条「起容器 ⇒ 必须钉口」的机械约束<b>对它失效</b> ⇒ ⇒ **缺口就是这么漏过去的**。
+     * ⇒ ⇒ 现在这个形态被守门特征<b>一并识别</b>（见 {@code RealContainerHostPortTest#PIN_CALL}）
+     * ⇒ ⇒ <b>缺口被机械堵住</b>，而不是靠人记得。
+     *
+     * <p>⚠️ **用法形态必须与守门特征逐字一致**：{@code RealContainerHostPort.pinned(RealContainerHostPort.XXX)}
+     * ⇒ ⇒ 否则守门数不到引用 ⇒ ⇒ 会把登记口判成「登记了但没人用」的孤儿。
+     *
+     * @param hostPort 待校验的**登记口**
+     * @return 原样返回该口（校验通过时）
+     */
+    public static int pinned(int hostPort) {
+        requireAllocatable(hostPort);
+        return hostPort;
     }
 }

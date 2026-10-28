@@ -1,5 +1,6 @@
 package com.rag.hot.hot.rpc;
 
+import com.rag.hot.hot.rpc.support.RealContainerHostPort;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
@@ -12,8 +13,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 
-import java.io.IOException;
-import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -153,8 +152,10 @@ class HotRedisDisconnectFastRejectGateTest {
                 .socketOptions(sharedOptions.getSocketOptions())
                 .build();
 
-        long rejectMs = measureFirstCommandAfterDisconnect(sharedOptions, "g3-hot-redis-reject");
-        long defaultMs = measureFirstCommandAfterDisconnect(defaultOptions, "g3-hot-redis-default");
+        long rejectMs = measureFirstCommandAfterDisconnect(sharedOptions, "g3-hot-redis-reject",
+                RealContainerHostPort.pinned(RealContainerHostPort.HOT_RD_REJECT_GATE));
+        long defaultMs = measureFirstCommandAfterDisconnect(defaultOptions, "g3-hot-redis-default",
+                RealContainerHostPort.pinned(RealContainerHostPort.HOT_RD_DEFAULT_GATE));
 
         // 📊 实测值打印出来（台账要引**实测**，不引「预期」）
         System.out.println("[G3-REJECT-PROBE] hot A(REJECT_COMMANDS)=" + rejectMs
@@ -178,14 +179,13 @@ class HotRedisDisconnectFastRejectGateTest {
      * 连上 → PING → <b>静默等待</b>（期间不发命令，否则 watchdog 重连会掩盖排队窗口）
      * → {@code docker stop}（优雅 FIN）→ 量第一条命令的耗时。
      */
-    private long measureFirstCommandAfterDisconnect(ClientOptions options, String containerName) {
-        // 🔴 每组**各自**取一个空闲端口（不能复用同一个：容器还在占着）
-        int port;
-        try {
-            port = freePort();
-        } catch (IOException e) {
-            throw new IllegalStateException("取空闲端口失败", e);
-        }
+    private long measureFirstCommandAfterDisconnect(ClientOptions options, String containerName, int hostPort) {
+        // 🔴 **宿主口来自本域登记口**（`RealContainerHostPort.pinned(...)` ⇒ 已校验落在
+        //    hot 域段 22940–22969 内、且不落进 OS 临时端口段）
+        // ⇒ ⇒ 原先这里是 `freePort()`（**OS 临时端口段**）⇒ ⇒ 与别的会话的容器发布口同段
+        // ⇒ ⇒ **2026-10-28 改正**（登记口 22943 / 22944）
+        // ⚠️ **两组各占一个口**（不能复用同一个：容器还在占着）
+        int port = hostPort;
         String name = containerName + "-" + port;
         // 起容器给本组用
         String out = docker("run", "-d", "--rm", "--name", name,
@@ -284,12 +284,6 @@ class HotRedisDisconnectFastRejectGateTest {
             if (client != null) {
                 client.shutdown();
             }
-        }
-    }
-
-    private static int freePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
         }
     }
 

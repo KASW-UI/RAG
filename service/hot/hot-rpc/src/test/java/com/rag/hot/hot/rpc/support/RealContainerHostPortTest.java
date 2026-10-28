@@ -61,13 +61,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class RealContainerHostPortTest {
 
-    /** 识别「本模块起容器」的源码特征。 */
+    /**
+     * 识别「本模块起容器」的源码特征。
+     *
+     * <p>🔴 **2026-10-28 扩展**：原来只认 Testcontainers 的两种容器声明
+     * ⇒ ⇒ <b>漏掉了「裸 {@code docker run -p}」这一形态</b>
+     * ⇒ ⇒ 而 {@code HotRedisDisconnectFastRejectGateTest} 正是用裸 {@code docker run} 起 Redis
+     * ⇒ ⇒ 它原先落在「起容器但没钉口」这条机械约束的**盲区**里 ⇒ ⇒ **缺口就是这么漏过去的**。
+     * ⇒ ⇒ 现在把裸 docker 形态**一并识别** ⇒ ⇒ 缺口被机械堵住（不靠人记得）。
+     */
     private static final Pattern CONTAINER_DECL =
-            Pattern.compile("new\\s+(?:PostgreSQLContainer|GenericContainer)\\b");
+            Pattern.compile("(?:new\\s+(?:PostgreSQLContainer|GenericContainer)\\b|docker\\(\\s*\"run\")");
 
-    /** 识别「钉口调用」：{@code RealContainerHostPort.bindPg(RealContainerHostPort.XXX)} 这种形态。 */
+    /**
+     * 识别「钉口调用」：{@code RealContainerHostPort.bindPg(RealContainerHostPort.XXX)} 这种形态。
+     *
+     * <p>🔴 **2026-10-28 扩展**：增加 {@code pinned(...)} 形态
+     * ⇒ ⇒ 它是<b>裸 {@code docker run -p}</b> 场景的钉口写法
+     * （{@code RealContainerHostPort.pinned(RealContainerHostPort.XXX)}）
+     * ⇒ ⇒ 不加它 ⇒ 那条探针的钉口<b>数不到引用</b> ⇒ ⇒ 会被判成「登记了但没人用」的孤儿。
+     */
     private static final Pattern PIN_CALL = Pattern.compile(
-            "RealContainerHostPort\\.bind(?:Pg|Redis|To)?\\(\\s*RealContainerHostPort\\.([A-Z][A-Z0-9_]*)\\s*\\)");
+            "RealContainerHostPort\\.(?:bind(?:Pg|Redis|To)?|pinned)\\(\\s*RealContainerHostPort\\.([A-Z][A-Z0-9_]*)\\s*\\)");
 
     // ── ① 分配合规 ─────────────────────────────────────────────────────────────
 

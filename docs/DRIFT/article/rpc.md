@@ -2089,6 +2089,39 @@ JDBC 连**固定口** + `inet_server_port()` 回报**容器内口** ⇒ ⇒ 才�
 
 ⇒ ⇒ **5/5**：每轮**编译通过** ＋ **红在目标断言** ＋ 还原后 **sha256 逐字节一致**。
 
+### 二十三.4-bis 📌 **补齐（2026-10-28 · G3）**：「裸 `docker run` 起容器」原先落在守门的**盲区**里
+
+**原文保留**：§二十三 的落码范围写的是「**Testcontainers** 宿主口钉口」⇒ ⇒ 它的守门特征
+（`CONTAINER_DECL`）也只认 Testcontainers 的两种容器声明（`new PostgreSQLContainer` / `new GenericContainer`）。
+
+**📌 订正（2026-10-28）**：「起容器」**不止 Testcontainers 一种** ⇒ ⇒ hot 域的
+`HotRedisDisconnectFastRejectGateTest` 用**裸 `docker run -p 127.0.0.1:<port>:6379`** 起 Redis
+⇒ ⇒ 它**没有** `bindRedis(...)` 调用 ⇒ ⇒ **守门特征数不到它的钉口** ⇒ ⇒
+**它原先落在「起容器 ⇒ 必须钉口」这条机械约束的盲区里** ⇒ ⇒ **缺口就是这么漏过去的**
+（而 comment 域那一份**已经**用 `RealGrpcPort.pick()` 钉段 ⇒ ⇒ **同类不同命**）。
+
+**⇒⇒ 本轮补齐（域侧自修 · 不派单）**：
+
+| # | 落点 | 内容 |
+|---|---|---|
+| ① | `service/hot/hot-rpc/.../support/RealContainerHostPort.java` | 新增两个**登记口** `HOT_RD_REJECT_GATE = 22943`（A 组）/ `HOT_RD_DEFAULT_GATE = 22944`（B 组）⇒ ⇒ **两组各占一个口**（不能复用：容器还在占着）⇒ ⇒ 并登记进 `TEST_CLASS_PORT_NAMES`；新增 `pinned(int)`（校验 ＋ 原样返回）供**非 Testcontainers** 形态使用 |
+| ② | `service/hot/hot-rpc/.../HotRedisDisconnectFastRejectGateTest.java` | 宿主口由 `freePort()`（**OS 临时端口段**）⇒ 改为 `RealContainerHostPort.pinned(RealContainerHostPort.HOT_RD_*_GATE)`；**删掉 `freePort()`** 与相关 import |
+| ③ | `service/hot/hot-rpc/.../support/RealContainerHostPortTest.java` | 🔴 **守门形态扩展（这才是「堵住」的关键）**：`CONTAINER_DECL` **一并识别裸 `docker run`**；`PIN_CALL` **一并识别 `pinned(...)`** ⇒ ⇒ ⇒ **缺口被机械堵住，不靠人记得** |
+
+**验证（2026-10-28）**：
+
+- `RealContainerHostPortTest` **5 条 / 0 failures / 0 errors**（新增 2 个登记口后仍绿 ⇒ 段内 · 唯一 · 不落 OS 临时段 · 引用恰好一次 全过）；
+- `HotRedisDisconnectFastRejectGateTest` **2 条 / 0 failures / 0 errors**，实测 **A(REJECT_COMMANDS) = 0 ms · B(DEFAULT) = 3009 ms**（差 3009 ms）
+  ⇒ ⇒ **钉口没有改变被测行为**（钉口前 A=1 ms / B=3007 ms ⇒ 同量级）⇒ ⇒ **这次只动「口从哪来」，不动「测什么」**；
+- **变异（M1）**：把钉口退回 OS 临时端口字面量 ⇒ ⇒ **红 2 条**
+  ⇒ `everyContainerDeclaringTestClassIsPinned`（「起容器但没钉口」）
+  ＋ `everyPinnedPortIsRegisteredAndUsedExactlyOnce`（登记口成孤儿）
+  ⇒ ⇒ **守门有判别力，不是恒真**；还原后 sha 复原 ✔。
+
+**⇒⇒ 口径订正（下一轮照这个读）**：§二十三 的覆盖范围是「**Testcontainers 容器**的宿主口」；
+**裸 `docker run` 起的容器不在其中** ⇒ ⇒ **凡用裸 docker 起容器的探针，都要自己钉段**
+（comment 域已做 · hot 域本轮补上）⇒ ⇒ **下一轮若再出现裸 docker 起容器，先查它钉没钉口**。
+
 ### 二十三.5 证据强度（**分层读，别混**）
 
 | 事项 | 强度 | 说明 |

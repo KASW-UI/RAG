@@ -2482,6 +2482,7 @@ func main() {
 ⇒ ⇒ 本域那一段：模块 `hot/hot-rpc` · 域段 `22940–22969` · 本模块宿主口段 `22940–22959` · 脚手架段 `22960–22969` · **3** 个 Redis 个容器
 ⇒ ⇒ 落点：`service/hot/hot-rpc/src/test/java/.../support/RealContainerHostPort.java` ＋ 同名 `RealContainerHostPortTest.java`（守门 **5** 条）
 ⇒ ⇒ **与 Go 侧的一致性：N/A**（测试基础设施，不涉及运行时行为）
+⇒ ⇒ 📌 **补齐（2026-10-28）**：本域的 **redis-disconnect 探针**用**裸 `docker run`** 起 Redis ⇒ ⇒ 它**不在** Testcontainers 的守门特征里 ⇒ ⇒ 原先落在「起容器必须钉口」的**盲区** ⇒ ⇒ 本轮已把它钉到登记口 `HOT_RD_REJECT_GATE=22943` / `HOT_RD_DEFAULT_GATE=22944` ⇒ ⇒ **并把守门形态扩到能识别裸 docker + `pinned(...)`** ⇒ ⇒ **缺口被机械堵住** ⇒ ⇒ 详见 canonical 的 **§二十三.4-bis**。
 
 ## 📌 快照 · 🔴 **G4 共享层合并（`ae218df`）后的本域回归**（2026-10-28 · G3）
 
