@@ -198,7 +198,7 @@
 | `hot` | `hot-common` | 【COMMON 型】全 3 条 | `mvn -pl service/hot/hot-common -am test` ⇒ `HotErrorCodeContractTest`（**期望值逐条抄自 Go `errmsg.go:34-46`** const 块，断言 11 个码 + 顺序 + 重复）＋ `HotErrorMessagesContractTest` | **R3** ↓ | E4\* | `docs/DRIFT/hot/common.md:11-12`·`:55`（探针放 `/tmp`，不入 Go 仓）· `:57-58`（变异 11/11）· `service/hot/hot-common/src/test/java/com/rag/hot/hot/common/errmsg/HotErrorCodeContractTest.java:18-27`（**Go 出处**） | **0 条** · ⚠️ **双侧对拍探针在 `/tmp` ⇒ 不可复算 ⇒ R4 不成立**（§九 G-5） | ✅ |
 | `hot` | `hot-proto` | 【PROTO 型】①–⑤ | `mvn -o -pl service/hot/hot-rpc test -Dtest=HotProtoContractTest`（**期望值由 `generate.py` 从 Go 真源 `proto/hot.proto` 生成**，记录真源 sha256）＋ `python3 tools/difftest/check-surface-parity.py --domain hot` | **R3** ↑ | E3 | `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/proto/HotProtoContractTest.java:38-45`（期望值**由真源生成**）· `service/hot/hot-rpc/src/test/resources/proto-contract/{hot-proto-contract.expected.txt,generate.py}`（**已入库**）· `docs/DRIFT/hot/vs-common.md:67`（`H-1` 已落码）· `docs/DRIFT/_cross/proto-verification.md:21`（`hot` 0 行 diff · 11=11 · 18=18） | **0 条行为差异** · ⚠️ **判定记录在 `hot/vs-common.md` 而非 `hot/proto.md`**（**位置不统一** ⇒ §九 G-18，**不降 R**）· ⚠️ `hot/vs-common.md:59` 与 `:67` **自相矛盾**（§九 G-15） | ✅ |
 | `like` | `like-api` | 【API 型】全 5 条 | `mvn -pl service/like/like-api -am test` ⇒ `LikeApiGoAlignmentTest` / `LikeApiMvcPipelineTest` 等（**Go 出处写进用例**）＋ `python3 tools/difftest/check-surface-parity.py --domain like`（**仅契约面**）<br>⚠️ **双侧对拍探针 `/tmp/likeprobe/*` 已消失** ⇒ 仓内**无双侧对拍入口** ⇒ **R4 不成立** | **R3** | E3 | `docs/DRIFT/like/api.md:37-38`（6 条 MISMATCH 全修）· `:18-19`（探针位置）· `:761-768`（U-01~U-08）· `service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiGoAlignmentTest.java` | **0 条必对齐项**（012~017 全修）· 4 条待签字候选（021/022/SD-10/SD-11）· `U-01`~`U-08`（**取证缺口**，非必对齐）· ⚠️ 双侧对拍不可复算（§九 G-2） | ✅ |
-| `like` | `like-rpc` | 【RPC 型】全 5 条 | ⚠️ **无落仓入口** | **R2** ↓ | E3 | `docs/DRIFT/like/rpc.md:35-39`·`:1538`（global `E60`）· `:1572` | **`DRIFT-LIKE-003`**（事实投递链路 6 个 4 行骨架 ⇒ `UNRESOLVED`，**有意不碰**）· **`E60`**（`currentUserLikeTotal` 双失败少传 error ⇒ **真漂移，待 like 域 owner 接手**）· `L-U9`/`L-U11` | 🟡 |
+| `like` | `like-rpc` | 【RPC 型】全 5 条 | ⚠️ **无落仓入口** | **R2** ↓ | E3 | `docs/DRIFT/like/rpc.md:35-39`·`:1538`（global `E60`）· `:1572` | **`DRIFT-LIKE-003`**（**三段拆分：A 投递链路已闭环 · B 权威读语义 Java 化已闭环** ⇒ 仅剩 **C 暴露形态待拍板**；台账旧述「6 个 4 行骨架 ⇒ `UNRESOLVED`」**已于 2026-10-29 实测过时**）· ⚠️ **`E60` 已于 2026-10-29 修并销案**（`currentUserLikeTotal` 双失败少传 error ⇒ 已修 + 已守门 + 已实跑 4/4 绿）· `L-U9`/`L-U11` ⇒ ⚠️ **本行 R2 / 🟡 未重算**（Jason 2026-10-29 裁定「阶段一按现矩阵判」） | 🟡 |
 | `like` | `like-common` | 【COMMON 型】全 3 条 | `mvn -pl service/like/like-common -am test` ⇒ `LikeErrorContractTest`（**29 个码逐条 1:1** · 文案表 29 条 · 未知码回落 `FAIL` · `CodeError` 格式与 JSON 序列化 · `newCode`/`newCodeMsg` 区分）＋ `LikeGrpcErrorTest` | **R3** ↑ | E3 | `service/like/like-common/src/test/java/com/rag/like/like/common/errmsg/LikeErrorContractTest.java:28-29`（**Go 出处写进 javadoc**：`errmsg.go:37-67` / `:69-99` / `:101-107`）· `:77-83`（29 条计数） | **0 条行为差异**（逐条钉死）· ⚠️ **无专属台账 ⇒ 判定记录缺失**（**证据记录**缺口，**不是**行为缺口 ⇒ §九 G-17，**不降 R**） | ✅ |
 | `like` | `like-proto` | 【PROTO 型】①–⑤ | `python3 tools/difftest/check-surface-parity.py --domain like` | **R2** ↓ | E2 | `docs/DRIFT/_cross/component-coverage-matrix.md:63`（**无专属台账** · 「消费方式未验」）· `docs/Intentional_Deviations/like/proto.md` | **无台账** + 消费方式未验 ⇒ R3 不成立 | 🟡 |
 | `message` | `message-api` | 【API 型】全 5 条 | `bash tools/semantic-probe/run-parity.sh` ＋ `bash tools/difftest/run.sh` | **R4** | E4 | `docs/DRIFT/message/api.md:1151`·`:1148-1150` | `-010`/`-011`/`-013`（**落点共享层**）· `-012`（**不可修**：Tomcat 序列化吃空格） | ✅ |
@@ -235,7 +235,7 @@
 | `favorite` | 4 | api ✅ · rpc ✅ · common ✅ · proto ✅ | **✅** | `U9`（部署形态，待拍板）· `E65`（**`service/common`**） |
 | `follow` | 4 | api ✅ · rpc 🟡 · common ✅ · proto 🟡 | **🟡** | `DRIFT-FOLLOW-006`（**本域**，指标无出口）· `-008`（**`service/common`**） |
 | `hot` | 4 | api ✅ · rpc ✅ · common ✅ · proto ✅ | **✅** | `DRIFT-HOTAPI-031`（框架限制，候选未签字）· `DRIFT-HOTRPC-006`（已取证未签字）· **hot-proto 的判定记录在 `hot/vs-common.md` 而非 `hot/proto.md`**（位置不统一 ⇒ §九 G-18） |
-| `like` | 4 | api ✅ · rpc 🟡 · common ✅ · proto 🟡 | **🟡** | **`DRIFT-LIKE-003`**（事实投递链路，本域，有意不碰）· **`E60`**（真漂移，待接手）· **like-common 无专属台账**（**记录缺口**，非行为缺口 ⇒ §九 G-17） |
+| `like` | 4 | api ✅ · rpc 🟡 · common ✅ · proto 🟡 | **🟡** | **`DRIFT-LIKE-003-C`**（暴露形态待拍板；**A/B 两段已闭环**）· ⚠️ **`E60` 已销案**（2026-10-29）· **like-common 无专属台账**（**记录缺口**，非行为缺口 ⇒ §九 G-17）· ⚠️ 域状态 **🟡 未重算**（Jason 裁定） |
 | `message` | 4 | api ✅ · rpc ✅ · common ✅ · proto ✅ | **✅** | `-010`/`-011`/`-013`（**`service/common`**）· `MSG-008`/`MSG-V-001`（跨域） |
 | `task` | 3 | api ✅ · rpc ✅ · proto ✅ | **✅** | `DRIFT-TASK-API-004` / `otel.*`（**全域共性**） |
 | `users` | 7 | user-api ✅ · user-rpc ✅ · admin-api ✅ · admin-rpc ✅ · users-common ✅ · user-proto ✅ · admin-proto ✅ | **✅** | `DRIFT-USERAPI-013`（**`service/common`**）· `V-002`/`V-011`（**销号签字不在写权面**）· **两个 proto 的「消费方式」未取证**（§九 G-19） |
@@ -395,8 +395,8 @@
 | 结论 | 触发条件 | 当前 |
 |---|---|---|
 | **通过** | C-1 ∧ C-2 ∧ C-3 ∧ C-4 ∧ P0 九条全满足 | ❌ 不满足 |
-| **有条件通过** | 存在**明确、有限**的例外，且**不破坏核心正确性、安全性、数据完整性** | ❌ **不满足** —— X-11 密钥链**属安全**；`like-rpc` 的 `DRIFT-LIKE-003` / `E60` 属**业务正确性**；共享层 27 条编号未修 ⇒ 均不属「有限例外」 |
-| **未通过** | 存在破坏核心正确性 / 安全 / 数据完整性的未修项 | ✅ **命中** —— X-11（安全）＋ `like-rpc` 的 `DRIFT-LIKE-003` / `E60`（业务正确性）＋ 共享层 `DRIFT-COMMON-005`（数据/可靠性） |
+| **有条件通过** | 存在**明确、有限**的例外，且**不破坏核心正确性、安全性、数据完整性** | ❌ **不满足** —— X-11 密钥链**属安全**；`like-rpc` 的 `DRIFT-LIKE-003-C`（`E60` 已销案 · A/B 已闭环）属**业务正确性**；共享层 27 条编号未修 ⇒ 均不属「有限例外」 |
+| **未通过** | 存在破坏核心正确性 / 安全 / 数据完整性的未修项 | ✅ **命中** —— X-11（安全）＋ `like-rpc` 的 `DRIFT-LIKE-003-C`（业务正确性；⚠️ `E60` **已销案**、`003` 的 A/B **已闭环**）＋ 共享层 `DRIFT-COMMON-005`（数据/可靠性；⚠️ **已于 2026-10-29 修复** ⇒ 此子项已消解，但共享层仍 **R2**） |
 | **受阻** | 缺必要环境或证据 | ⚪ **不适用**（中间件全部可用 ⇒ 无环境借口；缺的是**证据载体**与**台账**，归 §九） |
 
 ### 8.4 ⭐ 阶段一准入结论（v3）
@@ -408,7 +408,7 @@
 > **三类硬阻断**：
 > 1. **安全** —— X-11 密钥链：空签名密钥可起栈（E4 实测）⇒ **P0 #8 不满足**。
 > 2. **可构建性** —— X-12 项目说明：README 21 字节、无 `.env.example` ⇒ **P0 #5 不满足**。
-> 3. **业务正确性** —— `like-rpc` 的 `DRIFT-LIKE-003`（事实投递链路 `UNRESOLVED`）与 global `E60`（双失败少传 error，**真漂移待接手**）仍开放；共享层 `service/common` **27 条编号未修**。
+> 3. **业务正确性** —— `like-rpc` 的 `DRIFT-LIKE-003`（**三段拆分：A 投递链路 · B 权威读语义 已闭环** ⇒ **仅剩 C 暴露形态待拍板**；台账旧述「事实投递链路 `UNRESOLVED`」**已实测过时**）仍开放；global `E60`（双失败少传 error）**已于 2026-10-29 修并销案** ⇒ **不再计入本条**；共享层 `service/common` **27 条编号未修**（**25 条 CF/LOG/SF 属 C 类 ⇒ 按 §1.1 ⑥ 第 4 条不计入 R3 ⑥**；**`DRIFT-COMMON-005` 已于 2026-10-29 修复** ⇒ 剩余 **2 条 `DRIFT-COMMON` + 5 项未编号 + 10 条外部尾巴**）。
 >    （⚠️ `like-common` **不再计入本条**：v3 复核发现它有**仓内 Go 派生的契约测试** ⇒ 「从未与 Go 对照」的判定**不成立** ⇒ 降为**证据缺口** G-17，见 §十 #18。）
 >
 > **另有 4 条 P0 为「部分满足」**（#1 #2 #3 #4）⇒ 它们的证据不足以支撑 ✅，须补齐后才能复判（清单见 §九）。
@@ -416,7 +416,7 @@
 > **⇒ 达到「阶段一通过」的最短路径**：
 > ① 修 X-11 + X-12（P0 硬阻断，各 1~2 人日）；
 > ② 落仓 `like` / `follow` / `users-common` 的**双侧**探针（把这 3 域的 R3→R4，并让 P0 #1/#2/#4 的证据覆盖补齐）；**另补 `like-common` / `hot-proto` 的专属台账**（**记录缺口**，不阻断阶段一）；
-> ③ 销 `like-rpc` 的 `DRIFT-LIKE-003` / `E60`；
+> ③ ~~销 `like-rpc` 的 `DRIFT-LIKE-003` / `E60`~~ ⇒ ⚠️ **2026-10-29 已销**：`E60` 已修并销案 · `DRIFT-LIKE-003` 的 **A/B 已闭环** ⇒ **本条只剩 `003-C` 暴露形态待拍板**（拍板后本项即可勾销）；
 > ④ G4 落共享层 27 条（或按 §5.3 登记为**明确的阶段 2 暂缓项**并写明恢复方案）。
 >
 > **估算**：① 1~2 人日 · ② 2~3 人日 · ③ 1~2 人日 · ④ 3~5 人日（共享层）⇒ **合计 ≈ 7~12 人日**（不含阶段 2）。
@@ -495,8 +495,8 @@
 |---|---|---|---|---|
 | **D-01** | **空签名密钥可起栈** —— 10 处 yaml 带明文默认值（`like-api:62` 是裸字面量）；compose `:146`/`:193` 缺 `:?` | 10 个 api/rpc 的 `application.yml` + `docker-compose.yml` | **token 可伪造** ⇒ P0 #8 🔴 | 域侧 10 处 + 根级 compose（**共享面**） |
 | **D-02** | **README 21 字节 + 无 `.env.example` + `Infrastructure.md` 描述旧架构** | 仓库根 | **无法按说明构建启动** ⇒ P0 #5 🔴 | 共享面 |
-| **D-03** | **`like-rpc` 事实投递链路是 6 个 4 行骨架**（`DRIFT-LIKE-003`） | `service/like/like-rpc` | 点赞是否真记上、消息是否真发出 ⇒ 未取证 | like 域（台账记「有意不碰」，需拍板） |
-| **D-04** | **`like-rpc` 双失败时少传 error**（global `E60`，**真漂移**，待 like 域 owner 接手） | `service/like/like-rpc` | 业务正确性 | like 域 |
+| **D-03** | **`like-rpc` 事实投递链路是 6 个 4 行骨架**（`DRIFT-LIKE-003`） | `service/like/like-rpc` | ⚠️ **2026-10-29 订正**：台账原述「6 个 4 行骨架」**已实测过时** ⇒ **三段拆分**：**A 投递链路已闭环** · **B 权威读语义 Java 化已闭环** ⇒ **仅剩 C 暴露形态待拍板**（⇒ 「有意不碰」的理由已从「scope 过大」变为「**等部署形态拍板**」） | like 域（**待 Jason 拍板 `003-C`**） |
+| **D-04** | **`like-rpc` 双失败时少传 error**（global `E60`，**真漂移**，待 like 域 owner 接手） | `service/like/like-rpc` | ✅ **已销案**（2026-10-29：`LikeTaskProgressPublisher.publish` 三段式分流 ⇒ 真日志 `error_code=5011` ⇒ 已修 + 已守门 + 已实跑 4/4 绿 ⇒ **E60 销案**） | like 域（**已完成**） |
 | **D-05** | **`follow-rpc` 的 5 个 `follow_rpc_*` 指标无任何抓取出口**（Go 有 DevServer `/metrics`） | `service/follow/follow-rpc`（同款 5 处：favorite/message/like/user-user/user-admin） | 可观察差异 ⇒ `follow-rpc` 降 R2 | 用户 2026-10-24 定「本轮不落地」⇒ 需重新拍板 |
 | **D-06** | **共享层 27 条编号未修**（`DRIFT-COMMON` 2 + `DRIFT-CF` 15 + `DRIFT-LOG` 7 + `DRIFT-SF` 3）+ 5 项未编号 + 10 条外部尾巴 | `service/common` | **阻塞全仓**；⚠️ **2026-10-29 订正**：`DRIFT-COMMON-005`（`DeadlineState` 单调钟 + 纳秒）**已随 `6f39bea` 修复** ⇒ 原「唯一硬阻塞（破坏性变更，需用户裁定）」**已消解**；另 **25 条 CF/LOG/SF 属 C 类 ⇒ 按 §1.1 ⑥ 第 4 条不计入 R3 ⑥**（Jason 2026-10-29 裁定）⇒ **仍需实修 = 2 条 `DRIFT-COMMON` + 5 项未编号 + 10 条外部尾巴**，且组件仍 **R2** | **G4 共享层单写权** |
 | **D-07** | **comment 域 2 条「仅 RAG 有」的 DDL**（`report_record.user_id` / `target_type`） | comment 域迁移脚本 | DDL 两侧不对齐 | comment 域（**未签字**） |
