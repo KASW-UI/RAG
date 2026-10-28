@@ -2223,3 +2223,9 @@ JDBC 连**固定口** + `inet_server_port()` 回报**容器内口** ⇒ ⇒ 才�
 | hot | [`docs/DRIFT/hot/rpc.md`](../hot/rpc.md)「📌 快照 · 🔴 G4 共享层合并（`ae218df`）后的本域回归」 | 108 + 96 + 14 = **218** |
 | | **四域合计** | **1015** ✅（+ 372 共享层 = 1387）|
 
+### 📌 指针（2026-10-28 · G3）—— G4 §4.10.64 ⑤ 的「域内 status 漂移」警告【对 article 域不成立】
+
+⇒ G4 在共享面写「域内 span 若只调 `recordException` ⇒ status 恒 UNSET ⇒ **与 Go 的 `RecordError` 漂移**」⇒ ⇒ **中间那一步是错的**：Go otel-go **v1.44.0** 的 `RecordError` **【不改】status**（接口契约 `go.opentelemetry.io/otel/trace@v1.44.0/span.go:47-51`「**as this method does not change the Span status**」＋ SDK 实现 `go.opentelemetry.io/otel/sdk@v1.44.0/trace/span.go:626-630` javadoc ＋ `:631-655` 实现**全程无 `SetStatus` 调用**）⇒ ⇒ **Go 侧 `service/article/**` 的 `SetStatus` 零命中 ⇒ Go 侧业务 span status 本就恒 UNSET** ⇒ ⇒ **RAG 侧 `ArticleSpans` 零 `setStatus`（类注释 `:81`「本类**不得**调 `setStatus`」）⇒ 两侧一致 ⇒ 不漂移** ⇒ ⇒ **域侧零改动**（**不补 `setStatus`** —— 补了反而是引入 Go 侧不存在的 ERROR）。
+⇒ 且守门 `ArticleSpanWiringTest.java:448-449` **已把这条钉成断言**（⇒ 断言 `StatusCode.UNSET`，注释「Go 侧无 `SetStatus` ⇒ 状态保持 UNSET」）⇒ ⇒ **网已张、语义已对齐**（L-10 落码明细 ⇒ [`article/vs-common.md` §3.2](./vs-common.md#32-✅-l-10-已落码2026-10-28--g3-8-个-span6-logic--2-consumer全部补齐)）。
+⇒ 逐条证据 ⇒ [`favorite/api.md` §16.4.1](../favorite/api.md#1641-🟢-补证2026-10-28-go-侧-recorderror-也不改-status--两侧-status-语义同构--status-漂移不成立)。
+

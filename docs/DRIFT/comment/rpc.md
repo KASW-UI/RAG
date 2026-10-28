@@ -1088,3 +1088,9 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 「**二十四、🔴 G4 共享层合并后的门禁快照（20 条）**」一节 ⇒ ⇒ **15 绿 / 4 红 / 1 用法错（EXIT=2，不是红项），四条红都不在本域**
 （`check-ledger-count` = 合并收口执行者 · `check-ddl-static` = users 域 · `check-tomcat-limits` = G2 域 ·
 `check-wave-coupling` = G4-9 共享矩阵）。
+
+### 📌 指针（2026-10-28 · G3）—— G4 §4.10.64 ⑤ 的「域内 status 漂移」警告【对 comment 域不成立】
+
+⇒ G4 在共享面写「域内 span 若只调 `recordException` ⇒ status 恒 UNSET ⇒ **与 Go 的 `RecordError` 漂移**」⇒ ⇒ **中间那一步是错的**：Go otel-go **v1.44.0** 的 `RecordError` **【不改】status**（接口契约 `go.opentelemetry.io/otel/trace@v1.44.0/span.go:47-51`「**as this method does not change the Span status**」＋ SDK 实现 `go.opentelemetry.io/otel/sdk@v1.44.0/trace/span.go:626-630` javadoc ＋ `:631-655` 实现**全程无 `SetStatus` 调用**）⇒ ⇒ **Go 侧只 `RecordError` 的业务 span status 本就恒 UNSET ⇒ 两侧一致 ⇒ 不漂移** ⇒ ⇒ **域侧零改动**（**不补 `setStatus`** —— 补了反而是引入 Go 侧不存在的 ERROR）。
+⇒ ⚠️ **唯一需要显式 `SetStatus` 的是 `GetComment`，本域【已经逐字复刻了】**：Go `service/comment/rpc/internal/logic/get_comment_logic.go:85-86` / `:101-102` / `:110-111` / `:117-118` 四个错误分支**各自** `RecordError` ＋ `SetStatus(codes.Error, err.Error())` ⇒ ⇒ RAG `CommentSpans.tracedWithErrorStatus(...)`（**只给 `GetComment` 用**，其余走 `traced` ⇒ 无 `setStatus`）⇒ 逐条对应 ✅ ⇒ 且守门 `CommentSpanWiringTest.java:237-238`（业务失败 ⇒ **断言 `StatusCode.UNSET`**）／`:390-392`（GetComment 系统失败 ⇒ **断言 `StatusCode.ERROR`**）**两条判别式断言已把两侧 status 语义钉死** ⇒ ⇒ **网已张、语义已对齐**。
+⇒ 逐条证据 ⇒ [`favorite/api.md` §16.4.1](../favorite/api.md#1641-🟢-补证2026-10-28-go-侧-recorderror-也不改-status--两侧-status-语义同构--status-漂移不成立) ＋ [`comment/vs-common.md`](./vs-common.md) A9 行。

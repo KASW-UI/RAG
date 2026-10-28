@@ -925,6 +925,32 @@ service/favorite/api/internal/svc/service_context.go:20
 - ⇒ ⇒ **本域 16 个 span 一律不调 `setStatus`** ⇒ 若调了 ⇒ **才是**引入 Go 侧不存在的 `StatusCode.ERROR`。
 ⇒ ⚠️ 顺带订正了一条**被广泛相信的误解**：「Java `recordException` 会把 span 置 ERROR」**是错的** ⇒ 已入 agent memory。
 
+### 16.4.1 🟢 **补证（2026-10-28）—— Go 侧 `RecordError` 也不改 status ⇒ 两侧 status 语义同构 ⇒ 「status 漂移」不成立**
+
+⚠️ **背景**：G4 在 `docs/DRIFT/global/vs-common.md` §2 A9 行 ＋ §4.10.64 ⑤ 提出「**Java `recordException` 不改 status ⇒ 域内 span status 恒 UNSET ⇒ 与 Go 的 `RecordError` 漂移**」⇒ ⇒ 本节为此**补 Go 侧实测**。
+⚠️ **§16.4 原文只核了 Java 侧字节码** ⇒ 「与 Go 的 `RecordError` 语义一致」那半句属**推断**（违反 AGENTS.md §3.3「每个 Go 事实都必须带 `文件:行号`」）⇒ ⇒ 现补实 ⇒ **原 §16.4 原文保留不改写**。
+
+| # | 证据 | 实测 | 结论 |
+|---|---|---|---|
+| 1 | Go otel-go **接口契约** | `go.opentelemetry.io/otel/trace@v1.44.0/span.go:47-51` ⇒「RecordError will record err as an exception span event for this span. An additional call to SetStatus is required if the Status of the Span should be set to Error, **as this method does not change the Span status**」 | ⇒ **`RecordError` 不改 status**（契约级） |
+| 2 | Go otel-go **SDK 实现** | `go.opentelemetry.io/otel/sdk@v1.44.0/trace/span.go:626-630`（javadoc 同义）＋ `:631-655`（实现 = 拼 exception attributes ⇒ `s.addEvent(semconv.ExceptionEventName, opts...)` ⇒ **全程无 `SetStatus` 调用**） | ⇒ **实现级也不改 status** |
+| 3 | Go 侧 favorite 域 | `service/favorite/**` 的 `SetStatus` ⇒ **零命中**；`RecordError` ⇒ **59 处**；16 个 span 起点 = 7 `FavoriteAPI.*` ＋ 7 `FavoriteRPC.*` ＋ 2 `Dependency.*`（`otel.Tracer("favorite-api"/"favorite-rpc").Start(...)`） | ⇒ **Go 侧 favorite 的 span status 恒 `UNSET`** |
+| 4 | Go 侧 favorite **不经**共享层 `Mark*` | `service/favorite/**` ⇒ `MarkBusinessError` / `MarkSystemError` / `MarkTimeout` **零调用**（只 import 了 `observability.NewHTTPMiddleware` / `NewUnaryServerInterceptor`） | ⇒ **域内 span 的 status 归域内代码独占**（共享层的 `SetStatus` 作用在 SERVER span 上，碰不到子 span） |
+| 5 | RAG 侧 favorite 域 | `FavoriteSpans.java` ⇒ `setStatus` **零调用**（类注释 `:117-127` 已写明「刻意不提供该入口」）· `recordException` **3 处**（`:311` / `:347` / `:409`）· span 创建 = `tracer.spanBuilder(spanName).startSpan()`（`:295` / `:341` / `:400` ⇒ **隐式取 `Context.current()` ⇒ 成为 SERVER span 的子 span**） | ⇒ **RAG 侧 favorite 的 span status 恒 `UNSET`** |
+
+⇒ ⇒ **两侧 status 语义同构**（Go 恒 UNSET ⇔ RAG 恒 UNSET）⇒ ⇒ **G4 的「status 漂移」警告【对本域不成立】** ⇒ ⇒ **域侧零改动**（**不改 `FavoriteSpans`**）。
+
+#### ⚠️ 共享层是【相反】的 —— 两侧【一致】；G4 的结论保留、**只有理由要订正**
+
+| 共享层 | Go 侧 `service/common/observability/observability.go` | RAG 侧 `service/common/.../observability/Observability.java` | 一致？ |
+|---|---|---|---|
+| 业务错误 | `MarkBusinessError` `:64` ⇒ `SetAttributes` `:82` ＋ `SetStatus(Error,msg)` `:83`（**无 `RecordError`**） | `markBusinessError` `:68` ⇒ `setStatus(ERROR,msg)` `:83`（**无 `recordException`**） | ✅ 一致 |
+| 系统错误 | `MarkSystemError` `:86` ⇒ `RecordError` `:103` ＋ `SetAttributes` `:104` ＋ `SetStatus` `:105` | `markSystemError` `:89` ⇒ `recordException` `:108` ＋ `setStatus(ERROR,msg)` `:109` | ✅ 一致 |
+| 超时 | `MarkTimeout` `:108` ⇒ `RecordError` `:126` ＋ `SetAttributes` `:127` ＋ `SetStatus` `:128` | `markTimeout` `:115` ⇒ `recordException` `:131` ＋ `setStatus(ERROR,msg)` `:132` | ✅ 一致 |
+| 慢调用 | `MarkDurationAndSlow` `:131` ⇒ 只 `SetAttributes` `:143`（**无 status**） | `markDurationAndSlow` `:138` ⇒ 同 | ✅ 一致 |
+
+⇒ ⇒ **共享层的显式 `setStatus(ERROR)` 【必须保留】** —— 因为 **Go 侧共享层自己就显式调 `SetStatus`**（`observability.go:83` / `:105` / `:128`）⇒ ⇒ ⚠️ **G4 §4.10.64 ⑤ 的理由「Go 侧 `observability.go:103` 的 `span.RecordError(...)` 会把 status 置 ERROR ⇒ Java 必须显式补」是错的**（`RecordError` 不改 status）⇒ 但**结论「共享层是对的」是对的** ⇒ ⇒ ⛔ **切勿因理由被订正就删掉共享层的 `setStatus(ERROR)`** —— 删了才是真回归（Go 侧 SERVER span 恒 ERROR ⇔ RAG 侧变 UNSET ⇒ **反向漂移**）。
+
 ### 16.5 实测（可复算）
 
 | 项 | 值 |
