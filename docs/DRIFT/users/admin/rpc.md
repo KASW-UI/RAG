@@ -1326,18 +1326,27 @@ Username="zzz_null_status_go"
 `admin_admin.extra_info` 在 Go 侧是 **`text`** 列（`serializer:json` 写 JSON 串），
 在 RAG 侧是 **`jsonb`** 列（`JsonbTypeHandler` → `ps.setObject(…, Types.OTHER)`）。
 
-2026-10-23 双侧活体对拍（同一份请求体，`extra_info = {"k":" "}`；
+2026-10-23 双侧活体对拍（同一份请求体，`extra_info = {"k":"U+0000"}`；
 `encoding/json` 把 U+0000 转义成 6 个 ASCII 字符 `\u0000` ⇒ **不是**裸 NUL 字节）：
 
 | | 结果 | 落库 |
 |---|---|---|
-| **Go** admin-api `POST /admincenter/v1/admin/create` | **HTTP 200 `{code:200,…,"uid":"…"}`** | ✅ 行已落库：`extra_info = {"k":" "}`（**text 列照收**） |
+| **Go** admin-api `POST /admincenter/v1/admin/create` | **HTTP 200 `{code:200,…,"uid":"…"}`** | ✅ 行已落库：`extra_info = {"k":"U+0000"}`（**text 列照收**） |
 | **RAG** admin-api `POST /admin/v1/create` | **HTTP 200 `{code:5001,"msg":"系统内部错误"}`** | ❌ **无行**；PG 报 `ERROR: unsupported Unicode escape sequence`（**22P02**，jsonb 列拒收） |
 
 ⇒ **确认是 OBSERVABLE DIFFERENCE**（Go 成功 / RAG 失败）。
 且 **错误码分类正确**：22P02 ≠ 23505 ⇒ 没被 `AdminExceptions.isUniqueViolation`
 误判成 ALREADY_EXISTS ⇒ 落在 `INTERNAL` → api 层 `5001`（与 Go 的 `Internal→5001` 一致，
 见 `admin/_shared.md` §6.2.2 DRIFT-004 的不对称映射表）。
+
+> ⚠️ **写法说明（2026-10-28 · G1）**：本条两处 `{"k":"U+0000"}` 里的 `U+0000` 是**可见写法**，
+> 表示该 JSON 字符串值里含 **U+0000 这个字符**（U+0000 = NUL），**不是** 6 个 ASCII 字符的 JSON 转义形态。
+> ⇒ 原先此处直接写**真 NUL 字节** ⇒ ⇒ 使本文件被 git 按**二进制**处理 ⇒ ⇒ 三方合并【不报冲突、只取一边/逐块揉】
+> ⇒ ⇒ **“零冲突”推不出“内容完整”** ⇒ ⇒ 故改为可见写法；**本条记录的事实一字未改**（仍是「`extra_info` 的值含 U+0000」）。
+> ⇒ ⚠️ 别把它与上面第 1330 行给出的 **6 字符 JSON 转义形态**混为一谈：
+> 那是**存储形态**，与此处表示的**字符本身**不是同一回事。
+> ⇒ 守门：`tools/difftest/check-no-nul-bytes.py` 的 `docs/**` 零 NUL 口径 ⇒ 本文件修完后**恒绿**
+> ⇒ ⇒ 该工具**不在 G1 写权面** ⇒ ⇒ 白名单里本文件的条目由 **G4 / 合并收口执行者**清空。
 
 ### 修法与归属
 
