@@ -63,6 +63,27 @@ public final class Snowflake {
     /** 对应 bwmarrin {@code timeShift = NodeBits + StepBits} = 22。 */
     static final long TIMESTAMP_SHIFT = SEQUENCE_BITS + WORKER_ID_BITS;
 
+    /**
+     * 墙钟读数（epoch 毫秒）—— <b>包级私有 · 只允许测试改</b>。
+     *
+     * <p>🔴 <b>为什么是包级可见的可变字段</b>：本条修复的<b>唯一可观察行为</b>是
+     * 「墙钟跳变后 ID 时间戳不倒退」⇒ ⇒ 而墙钟<b>改不了</b>（改系统时间要 root、
+     * 且会污染整台机器）⇒ ⇒ 只能<b>注入</b> ⇒ ⇒ 守门用它模拟一次 NTP 后跳 / 前跳。
+     *
+     * <p>与 {@code RpcInterceptor.DeadlineState.wallClockMillis}（同模块内既有约定）同款形态。
+     *
+     * <p>⚠️ <b>声明位置不可后移</b>：{@link #STATE} 是 {@code static final} ⇒ 类加载时即构造
+     * ⇒ ⇒ 本字段与 {@link #monotonicNanos} <b>必须在 {@code STATE} 之前声明</b>
+     * ⇒ 否则 {@link State} 构造时读到的 supplier 仍是 {@code null} ⇒ NPE。
+     */
+    static java.util.function.LongSupplier wallClockMillis = System::currentTimeMillis;
+
+    /**
+     * 单调钟读数（纳秒）—— 与 {@link #wallClockMillis} 同款（<b>包级私有 · 只允许测试改</b>），
+     * 用途是让守门<b>确定性地推进时间</b>（不必 {@code sleep}，也不受 CI 负载影响）。
+     */
+    static java.util.function.LongSupplier monotonicNanos = System::nanoTime;
+
     // =========================================================================
     // 进程级唯一状态（对应 Go 版的包级变量 sf / once / sfErr）
     // =========================================================================
@@ -105,6 +126,61 @@ public final class Snowflake {
         long lastTimestamp;
         /** bwmarrin {@code n.step}：当前毫秒内的序号（0~4095）。 */
         long sequence;
+
+        /**
+         * <b>锚点 A</b>：Node 创建时刻「距 epoch 的纳秒数」——
+         * 对应 Go 侧 {@code curTime.Add(time.Unix(...).Sub(curTime))} 里的<b>墙钟偏移量</b>
+         * （{@code snowflake.go:126}）。
+         *
+         * <p>🔴 <b>为什么必须含 epoch 偏移</b>（AGENTS.md §3.3.1 的「读消费点」纪律）：
+         * Go 的 {@code n.epoch} 的<b>墙钟分量</b>就是 epoch 时刻本身 ⇒ {@code time.Since(n.epoch)}
+         * 读出来的是「<b>距 epoch 时刻</b>的毫秒数」，<b>不是</b>「距进程启动的毫秒数」
+         * ⇒ ⇒ 若这里只存「相对进程启动」，产出的 ID 时间戳分量会整体偏掉约 16 年
+         * ⇒ ⇒ 落在 epoch 之前 ⇒ 与 Go 的位布局语义不符。
+         */
+        final long anchorEpochNanos;
+
+        /**
+         * <b>锚点 B</b>：Node 创建时刻的单调钟读数（纳秒）——
+         * 对应 Go 侧 {@code curTime} 自带的<b>单调读数</b>（{@code snowflake.go:124}）。
+         *
+         * <p>Go 侧 {@code time.Since(n.epoch)} 之所以<b>免疫墙钟回拨</b>，靠的就是它：
+         * 两个时间点都带单调读数 ⇒ {@code Time.Sub}（{@code $GOROOT/src/time/time.go:1194}）
+         * 走 {@code subMono}（{@code :1210}）⇒ 只比单调读数，墙钟分量完全不参与。
+         */
+        final long anchorMonotonicNanos;
+
+        /**
+         * 构造即取锚点 —— 对应 Go 侧 {@code snowflake.NewNode(...)}（{@code snowflake.go:112}）
+         * 里的 {@code var curTime = time.Now()}（{@code :124}）：<b>每个 Node 一份锚点</b>。
+         */
+        public State() {
+            // Go: time.Unix(Epoch/1000, (Epoch%1000)*1000000).Sub(curTime)
+            //   ⇒ 墙钟分量 = epoch 时刻 - 创建时刻 ⇒ 取负后即「距 epoch 的偏移」
+            this.anchorEpochNanos = (wallClockMillis.getAsLong() - EPOCH) * 1_000_000L;
+            this.anchorMonotonicNanos = monotonicNanos.getAsLong();
+        }
+
+        /**
+         * 当前「距 epoch 时刻的毫秒数」—— 与 Go 侧
+         * {@code time.Since(n.epoch).Nanoseconds() / 1000000}（{@code snowflake.go:139}）同构。
+         *
+         * <p><b>语义等价论证</b>：Go 侧 {@code time.Since(n.epoch)} 在两个时间点都带单调读数时
+         * 走 {@code subMono} ⇒ 结果 = 「创建时刻的墙钟偏移」+「创建至今的单调流逝量」
+         * ⇒ ⇒ 本实现的 {@code (anchorEpochNanos + 单调流逝纳秒) / 1e6} 与之<b>逐项同构</b>：
+         * <ul>
+         *   <li>墙钟跳变（NTP 校正 / {@code setSystemTime} / 虚拟机快照恢复）<b>只影响锚点 A</b>
+         *       ⇒ 而锚点 A 在 <b>Node 创建时一次性取定</b> ⇒ 之后<b>不再读墙钟</b>
+         *       ⇒ ⇒ <b>回拨不会让时间戳倒退</b>（这正是 Go 的性质）；</li>
+         *   <li>墙钟<b>前跳</b>同样只影响锚点 ⇒ 与 Go 一致（Go 也不因前跳而跳号）；</li>
+         *   <li>纳秒精度 + <b>最后一次整除</b>（{@code /1e6}）⇒ 与 Go 的
+         *       {@code .Nanoseconds() / 1000000} 截断位置一致。</li>
+         * </ul>
+         */
+        long nowMillisSinceEpoch() {
+            long sinceAnchorNanos = monotonicNanos.getAsLong() - anchorMonotonicNanos;
+            return (anchorEpochNanos + sinceAnchorNanos) / 1_000_000L;
+        }
     }
 
     /**
@@ -228,10 +304,31 @@ public final class Snowflake {
      * </ul>
      * 现按 v0.3.0 原文实现。
      *
-     * <p><b>继承自 Go 的已知风险（不修，如实留档）</b>：时钟回拨时 {@code n.time} 回退且 {@code step}
-     * 归零，若恰好与回拨前某毫秒重合，会产出重复 ID。这是 bwmarrin v0.3.0 自带的性质，
-     * RAG 作为复刻<b>不擅自加保护</b> —— 加了就与 Go 不等价。
-     * 若将来要加，须按 AGENTS.md §3.4 走「有意偏离」留档并单独评审。
+     * <p><b>🔴 DRIFT-SF-001 修复（2026-10-29 · G4 lane）：时钟源从墙钟改为「锚点 + 单调流逝」。</b>
+     * <ul>
+     *   <li><b>Go 出处（逐条可核）</b>：{@code bwmarrin/snowflake@v0.3.0/snowflake.go}
+     *       <ul>
+     *         <li>{@code :124} {@code var curTime = time.Now()} —— <b>带单调读数</b>的当前时刻；</li>
+     *         <li>{@code :126} {@code n.epoch = curTime.Add(time.Unix(Epoch/1000, (Epoch%1000)*1000000).Sub(curTime))}
+     *             —— 库注释原文：<i>"to make sure we use the monotonic clock if available"</i>
+     *             ⇒ <b>epoch 时刻</b>被挂上<b>单调读数</b>；</li>
+     *         <li>{@code :139} {@code now := time.Since(n.epoch).Nanoseconds() / 1000000}
+     *             —— 两个时间点都带单调读数 ⇒ {@code Time.Sub}
+     *             （{@code $GOROOT/src/time/time.go:1194}）走 {@code subMono}（{@code :1210}）
+     *             ⇒ <b>纯单调</b>，墙钟分量完全不参与。</li>
+     *       </ul></li>
+     *   <li><b>旧实现的问题</b>：{@code System.currentTimeMillis() - EPOCH} 是<b>纯墙钟</b>
+     *       ⇒ NTP 校正 / {@code setSystemTime} / 虚拟机快照恢复一旦<b>倒退</b>
+     *       ⇒ {@code now &lt; lastTimestamp} ⇒ 落进 {@code else} 分支把 {@code sequence} 归零
+     *       ⇒ 若与回拨前某毫秒重合 ⇒ <b>产出完全相同的 ID</b>
+     *       ⇒ 命中 {@code docs/PhasedGoal.md} <b>P0 #3「重复处理」</b>。</li>
+     *   <li><b>⚠️ 订正旧 javadoc 的一处说反</b>：本方法上一版写「继承自 Go 的已知风险（时钟回拨）」——
+     *       <b>说反了</b>：Go 恰恰<b>免疫</b>回拨（上面三条出处），
+     *       <b>「不免疫」是 RAG 侧纯墙钟实现独有的</b> ⇒ 故本条不是「为 Go 加保护」，
+     *       而是<b>把 RAG 改成 Go 已有行为</b>。</li>
+     *   <li><b>位布局与回绕逻辑一字未动</b>（41 位时间戳 + 10 位 workerId + 12 位 sequence），
+     *       仍逐条对齐 {@code snowflake.go:135-160}。</li>
+     * </ul>
      *
      * <p>{@code synchronized (state)} 对应 bwmarrin 的 {@code n.mu.Lock()}。
      *
@@ -239,18 +336,25 @@ public final class Snowflake {
      */
     public static long nextIdInternal(long workerIdArg, State state) {
         synchronized (state) {
-            long now = System.currentTimeMillis() - EPOCH;
+            // Go: now := time.Since(n.epoch).Nanoseconds() / 1000000
+            //   ⇒ 距【epoch 时刻】的毫秒数（不是距进程启动）
+            long now = state.nowMillisSinceEpoch();
 
             if (now == state.lastTimestamp) {
                 state.sequence = (state.sequence + 1) & SEQUENCE_MASK;
                 if (state.sequence == 0) {
                     // 当前毫秒序号耗尽：自旋到下一毫秒（对齐 v0.3.0 的 for now <= n.time）
+                    // 🔴 DRIFT-SF-001：这里**也必须**用同一个时钟源（原实现是墙钟）
+                    //    ⇒ 否则墙钟回拨时自旋会**永远转下去**（墙钟不再前进）⇒ 线程挂死。
                     while (now <= state.lastTimestamp) {
-                        now = System.currentTimeMillis() - EPOCH;
+                        now = state.nowMillisSinceEpoch();
                     }
                 }
             } else {
-                // 含 now < lastTimestamp（时钟回拨）：v0.3.0 与 now > lastTimestamp 走同一分支
+                // Go: v0.3.0 的 else 分支同时覆盖 now > n.time 与 now < n.time（后者在 Go 里不可达，
+                //   因为 time.Since(n.epoch) 走 subMono ⇒ 纯单调 ⇒ now 永不倒退）。
+                // 🔴 DRIFT-SF-001：本实现的 now 同样单调 ⇒ 此分支实际只覆盖 now > lastTimestamp
+                //   ⇒ 与 Go 的可达路径逐条一致（不再有「回拨 ⇒ sequence 归零 ⇒ 重复 ID」）。
                 state.sequence = 0L;
             }
 
