@@ -3903,3 +3903,51 @@ G4 通报（2026-10-28）：`service/favorite/favorite-rpc/src/test/java/com/rag
 | 合并树含本轮新台账 | ✅ `PIT-FAV-RPC-040`「订正（第二轮）」在 · `favorite/rpc.md`「决定性实验已做」**5 处**在 |
 
 ⇒ ⇒ ⇒ **⇒ 合并收口侧的实际收益**：只要用**我树 `97af041` 或更新**建合并树 ⇒ ⇒ **该文件不会走二进制路径** ⇒ ⇒ **D 组那条「base 含 NUL ⇒ 合并退化」的隐患在收口树上已消除** ⇒ ⇒ **G4 的 `check-no-nul-bytes.py` 那条白名单届时即可删**。
+
+---
+
+## 📌 指针 · 🔴 **静态 DDL 对照的 4 处「差异」是【活库陈旧】，不是漂移**（2026-10-29 · G3 阶段 1）
+
+**归属**：`align/g3-article-comment-favorite-hot` 工作树产出；基线 = `do-my-own-gh` @ `29a0bce`。
+**核对日期**：2026-10-29
+
+### 现象（本轮实测）
+
+`python3 tools/difftest/check-ddl-static.py --domain favorite --indexes` ⇒ **EXIT=1**，报 **4 处**差异：
+
+| # | 差异 | 机器判定 |
+|---|---|---|
+| 1 | `favorite_fact_outbox` 时间列 `DEFAULT now()`（RAG 活库）vs Go 的**无 DEFAULT** | 🔴 报真漂移 |
+| 2 | 同上，另一处时间列 | 🔴 报真漂移 |
+| 3 | `favorite_fact_outbox` 的 `CHECK (aggregate_version IN (1,2))` —— **仅 RAG 有** | 🔴 报真漂移 |
+| 4 | `favorite_item` 的 `target_revision` CHECK —— **仅 RAG 有** | 🔴 报真漂移 |
+
+⚠️ 这与本档 **§13.2** 的冻结结论（「EXIT=0 · MAIN 指纹一致 + 13 条 OBS 逐条一致」）**直接矛盾** ⇒ ⇒ 必须定性，**不得**当新回归去「修」。
+
+### 定性（用 L4 真 Flyway 探针复核）
+
+`bash tools/ddl-parity-probe/favorite/run.sh`（**真 PG + Go 真源 AutoMigrate/手写 SQL vs RAG 真 Flyway V1..V7**，两侧共用同一份 dump 查询）⇒ **2026-10-29 实测 EXIT=0**：
+
+- **MAIN 指纹一致**：`MAIN|fd69ec7e5854b1cc37734c706fcdebf8c39bcf45a1b9765384d6725b4e6854ab`（与冻结 `expected.txt` **逐字相同**）⇒ ⇒ **两侧共同的语义内容零差异**；
+- **OBS 段逐条一致（13 条）** ⇒ ⇒ 差异**全部落在已登记的有意偏离里**。
+
+⇒ ⇒ **那 4 处「差异」逐条归位**：
+
+| # | 真实归属 |
+|---|---|
+| 1、2 | 🔴 **活库陈旧** —— `ddl-favorite-pg` 里的表**还没跑过 V7**（V7 `align_favorite_outbox_time_columns_with_go` 已 `DROP DEFAULT`）⇒ ⇒ 探针**从零建库**（V1..V7 全跑）⇒ 默认值自然与 Go 一致 ⇒ ⇒ **不是漂移** |
+| 3、4 | ✅ **已签字 OBS** —— `favorite_fact_outbox` 的 `aggregate_version` CHECK（**登记为 `DEV-FAV-RPC-007`「RAG 更严的那道 CHECK」**）+ `favorite_item` 的 `target_revision` CHECK ⇒ ⇒ 两条都在冻结 `expected.txt` 的 OBS 段里 ⇒ ⇒ **不是漂移** |
+
+### ⇒ 结论（写清楚，免得下一轮又去「修」）
+
+1. **favorite 域 DDL 两侧一致（L4）**：EXIT=0 · MAIN 指纹一致 · OBS 13/13 ⇒ ⇒ **无未登记的列级差异**。
+2. 🔴 **`check-ddl-static.py` 比的是【活库】、不是仓库里的 `.sql`** —— 这正是基线 §六 6.2 自己写的那条「**比的是活库不是仓库 `.sql` 文件**」⇒ ⇒ **活库陈旧 ⇒ 假红** ⇒ ⇒ **看到红色先问「活库是不是陈旧」**，别直接当缺陷改代码。
+3. ⚠️ **可执行动作**：本机 `ddl-favorite-pg` 需**重跑一次真 Flyway 迁移**（或重建容器）才能让静态对照与 L4 结论一致 ⇒ ⇒ 这是**环境动作**，不是代码缺陷 ⇒ 登记为**未闭合项（不阻塞阶段一）**。
+
+### 证据强度
+
+| 层 | 手段 | 强度 |
+|---|---|---|
+| DDL 逐列 | `tools/ddl-parity-probe/favorite/run.sh`（**真 PG · 两侧同时建库 · 逐行 dump 比对 · MAIN 指纹 + OBS 段**） | **L4** |
+| 静态对照 | `tools/difftest/check-ddl-static.py --domain favorite --indexes` | ⚠️ **L3**（比活库 ⇒ 陈旧即假红） |
+| 域内 | `FavoriteSchemaParityTest`（13 例真 PG） | L3 |

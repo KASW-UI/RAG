@@ -11,6 +11,60 @@
 **当前状态**：✅ **双侧对拍 sha256 逐字节一致**（`f23fe570…`）· 14 条契约测试全绿 ·
 **变异验证 11/11 全部变红**（第四轮 7 个 + 第十一轮 4 个）· **无未闭合差异**
 
+---
+
+## 🟢 2026-10-29 · G3 阶段 1 回填：**G-5 闭合 —— 双侧对拍探针从 `/tmp` 落仓**
+
+**归属**：`align/g3-article-comment-favorite-hot` 工作树产出（`RAG.worktrees/g3-article-comment-favorite-hot`）；基线 = `do-my-own-gh` @ `29a0bce`。
+**核对日期**：2026-10-29
+**基线关联**：`docs/PhaseGoal-judge.md` §九 **G-5**（`hot-common` 的 R4 判定）· §1 组件行 `hot-common`
+
+### 闭合的是什么
+
+基线 G-5 写：「`hot-common` 的对拍探针在 `/tmp`（`f23fe570…`）⇒ **不可复算**」⇒ 该组件的 **R4 判定降为 R3**。
+
+**本轮实测确认了基线的判断，且比它更糟**：`/tmp` 下**已无**该探针（`/tmp/commonprobe/go`、`/tmp/hkparity/go` 均为空目录）⇒ ⇒ 那次结论**今天既跑不出来、也没了载体** ⇒ 属 AGENTS.md §3.3 意义上的「**声明的结论，不是可复算的**」。
+
+⇒ ⇒ **本轮把探针落仓**：`tools/errmsg-probe/hot/`（`run-parity.sh` + `mutate-parity.sh` + `go/` + `java/` + `README.md`）。
+
+### 实测证据（2026-10-29）
+
+| 项 | 值 |
+|---|---|
+| 对拍命令 | `bash tools/errmsg-probe/hot/run-parity.sh`（**不需**手工带 `GO_REPO`） |
+| 结果 | **EXIT=0** · Go sha256 = Java sha256 = `bc1db3bf4c9090ce100a2bc76ec6e932f47ecb236c4379ee4fb1129686481bb3` |
+| 行数 | 34（CONST 11 + TABLE 11 + FALLBACK 12） |
+| 真源 sha256 | `f7ce1f812b2547c491d10369b0da779043d8c8cf92a8e9d7b0dc7d5d53f8c976`（`service/hot/common/errmsg.go`，复制件逐字节一致） |
+| 变异验证 | `bash tools/errmsg-probe/hot/mutate-parity.sh` ⇒ **4/4 精确转红**（exit 1）：M1 码值漂移 · M2 文案漂移 · M3 回落语义漂移 · M4 表多一条；**还原后重新转绿** ⇒ **非假绿** |
+| 证据强度 | **L4**（两侧**同时运行**、逐字节比对；期望值**不是手抄的** —— Go 腿跑的是真源编译产物，Java 腿跑的是 `hot-common/target/classes`） |
+
+⚠️ **与旧结论的 sha256 不同（`f23fe570…` vs `bc1db3bf…`）是正常的**：两次 dump 的**用例集不同**（旧 12 个未知码的具体取值未留档，本次是 12 个跨域撞车码）⇒ ⇒ **旧结论无法逐字复算**这件事本身，就是 G-5 成立的原因；本次是**重新取证的**，不是「复现旧结论」。
+
+### 探针的三条设计约束（不可删）
+
+1. **Go 腿不抄期望值**：把真源 `errmsg.go` **逐字节复制**到临时模块（同包编译 ⇒ 能读到未导出的 `codeMsg`）+ **sha256 校验复制件 == 真源**（不一致直接 exit 2）⇒ Go 侧改名/删常量 ⇒ **编译失败**；加常量 ⇒ Go 自检（const 集合 vs 表键集合）报错。
+2. **Java 腿不抄期望值**：调**真实的** `HotErrorCode` / `HotErrorMessages`（`hot-common/target/classes`），自己不持有任何码值/文案常量 ⇒ 否则就是「拿 RAG 的值验 RAG 的值」⇒ 必然假绿。
+3. **两侧表键独立枚举**：Go 腿枚举 `codeMsg` 的键，Java 腿枚举 `HotErrorMessages.MSG_BY_CODE` 的键（**不是**枚举值）⇒ ⇒ 「表多一条 / 少一条」也能被逐字节比对抓到。
+
+⚠️ **本探针只覆盖错误码层**（码值 / 文案 / 未知码回落）⇒ **不覆盖** HTTP 响应体形状、gRPC 错误码、事务边界。
+
+### ⚠️ 顺带发现并修掉的同类缺陷（工作树路径）
+
+本探针初版把 `GO_REPO` 默认值写成「RAG 的同级兄弟目录」⇒ 在 **worktree** 里解析成 `RAG.worktrees/Sea-RideTheWind_golang` ⇒ **不存在** ⇒ 探针 **exit 2**。
+⇒ **已改为「向上逐层找 6 层」**（与 `tools/ddl-parity-probe/favorite/run.sh` 的 `default_go_repo` 同款）⇒ ⇒ 在工作树里**不带 `GO_REPO` 也能跑**。
+
+⇒ 这是 §九 **G-4 / G4-10 / G4-19** 那一族缺陷的**第 3 例**（共享脚本 `check-surface-parity.py` 的 `GO_REPO` 默认路径同样在 worktree 里指错）⇒ ⇒ **该族缺陷已确认跨 G1~G4 全域**，已在 [`vs-common.md`](vs-common.md) 的 G4-19 里补记。
+
+### 与域内契约测试的关系（不重复）
+
+| 层 | 手段 | 覆盖 |
+|---|---|---|
+| **跨语言逐字节** | **本探针** | Go 运行时 ↔ Java 运行时的**输出字节** |
+| 域内契约 | `HotErrorCodeContractTest` / `HotErrorMessagesContractTest` | 码值 / 声明顺序 / 唯一性 / 总数 / 文案 / 双射 / 表内顺序 / 未知码回退 / 文案互异 / 跨域守卫 |
+| 变异 | 域内契约测试另有 **11/11 全红** | 守门自身有效性 |
+
+⇒ 域内契约测试的期望值是**抄自 Go 源码的静态文本**；本探针是**真的把 Go 那份源码编译起来跑** ⇒ ⇒ 两边都不是抄的，才谈得上「双侧」。
+
 ### ✅ `service/hot/hot-common`：已落地，Go ↔ Java 双侧对拍 **sha256 逐字节一致**（2026-10-22）
 
 > **⚠️ 复核批注（2026-10-24，第四轮）**：本文件的三处边界里，**边界 #2 与边界 #3 的原结论都已被推翻** ——

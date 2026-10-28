@@ -2457,3 +2457,86 @@ a < 中 < U+E000 < **U+FFFD** < 😀（U+1F600，非 BMP 代理对）
 ⇒ 这里的 U+FFFD 是**被测对象**，不是编码损坏 ⇒ **改它会直接破坏该测试的语义**
 ⇒ **本轮刻意不动** ⇒ ⚠️ 「全仓 U+FFFD 归零」这条目标**在本域不成立**（也不该成立）——
 **扫描 U+FFFD 时必须先判断它是不是测试数据**。
+
+---
+
+## 📌 指针 · 🔴 P0 #8 域侧：**yaml 明文默认验签密钥**已去掉 ⇒ 缺变量/空串 ⇒ **启动失败**（2026-10-29 · G3 阶段 1）
+
+> **阶段归属（`twoStage.md` §10）**：**A 类**（P0 #8）⇒ **域侧已修** ⇒ 不阻断阶段 1（共享面半边已转派 G4）。
+> **完整记录在** [`docs/DRIFT/favorite/api.md` §24](../../DRIFT/favorite/api.md) —— **按 AGENTS.md「一条问题只在一个档里落笔」的纪律**，本域只留指针。
+
+| 项 | 本域情况 |
+|---|---|
+| **落点** | `service/article/article-api/src/main/resources/application.yml`（`article-api.auth.access-secret`，**修前** = `${USER_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}`）＋ `…/config/ArticleApiProperties.java`（新增 `@PostConstruct verifyAccessSecret()`）＋ **新增** `…/src/test/resources/application.properties`（test scope 提供密钥 ⇒ 测试不依赖环境变量 ⇒ 且**不进产物 jar**） |
+| **Go 出处** | `service/article/api/etc/article-api.yaml:26-29`（`Auth.AccessSecret` = **字面量**）⇒ ⇒ **Go 侧同样把密钥写在仓里** ⇒ ⇒ 本条属「**RAG 更严**」的一侧（**不是**抄错 Go）⇒ 登记为有意偏离 |
+| **为什么必须代码校验（不能只去默认值）** | Spring 的 `PropertyPlaceholderHelper`：**属性存在但为空串 ⇒ 解析为空串、不走默认值、也不报错** ⇒ ⇒ 「变量没设」被 placeholder 挡住，**「变量是空串」挡不住** ⇒ ⇒ 必须由 `@PostConstruct` 显式抛 `IllegalStateException` ⇒ ⇒ **两条路都 fail-closed** |
+| **守门** | **新增** `service/article/article-api/src/test/java/com/rag/article/article/api/config/ArticleApiPropertiesSecretGuardTest.java`（**3 例** · **真 `ApplicationContextRunner`**）：① 空串 ⇒ **上下文起不来**（`hasFailed()`）② 未设 ⇒ **上下文起不来** ③ 正常密钥 ⇒ **上下文正常起**（对照组）＋ 判据边界（`null`/`""`/`"   "` ⇒ 抛） |
+| **证据强度** | **L4**（真容器装配 ⇒ 上下文起不来/起得来，**不是**「方法存在」的源码断言） |
+| **共享面半边（已转派 G4）** | 根级 `docker-compose.yaml` 的 `USER_JWT_SECRET` 缺 `:?` ⇒ ⇒ 修后容器会 **crash-loop**（安全上 fail-closed ✔）⇒ ⇒ 运维侧要 compose 级清晰报错 ⇒ **共享面 ⇒ G4 落码**（反馈单 `G4-14`）＋ 根 README **无 `.env.example`**（P0 #5 共享面） |
+
+---
+
+## 📌 指针 · 🔴 **P0 #4 主责**：`article` 域的失败路径覆盖 —— **基线口径订正 + 双侧活体缺口**（2026-10-29 · G3 阶段 1）
+
+**归属**：`align/g3-article-comment-favorite-hot` 工作树产出；基线 = `do-my-own-gh` @ `29a0bce`。
+**核对日期**：2026-10-29
+**基线关联**：`docs/PhaseGoal-judge.md` §五 P0 **#4**（**本 lane 主责**）· §六 6.1 / 6.2 · §九 **G-3**
+
+### 一、基线原文的**内部矛盾**（先摆出来，否则没法判）
+
+> P0 #4 行原文：「上述探针**只覆盖 5 个域**（**article** / message / hot / shared-layer / favorite）；**`article` 域**（失败路径最密集的域：下载/上传/审核/S-5）**没有失败路径探针**」
+
+⇒ ⇒ **同一句话里，article 既在「已覆盖的 5 个域」里，又在「没有失败路径探针」里**。
+
+**拆开就清楚了** —— 基线把**两个不同维度**混在了一个「域覆盖」计数里：
+
+| 维度 | article 域的覆盖 | 基线怎么写的 |
+|---|---|---|
+| ① **错误码层**（码值/文案/未知码回落） | ✅ `tools/errmsg-probe/run-parity.sh`（**真·双侧逐字节**，19 个未登记码） | 算进「5 个域」了 |
+| ② **失败路径**（4xx/5xx/解析失败/上限/鉴权） | 🟡 **域内**有大量覆盖（见下表）· 但**双侧活体 = 0 条** | 写成「**没有失败路径探针**」 |
+
+⇒ ⇒ **「没有失败路径探针」这句话，对「②的【双侧活体】」成立；对「②的【用例存在性】」不成立** ⇒ ⇒ 需订正的是**口径**，不是行为。
+
+### 二、机器取证：article 域的失败路径覆盖**不是 0**（2026-10-29 实测）
+
+`service/article/**/src/test/java/**` ⇒ **33 个测试类 / 294 个 `@Test`**；其中失败路径特征命中（`isBadRequest`/`isUnauthorized`/`isNotFound`/`isPayloadTooLarge`/`assertThrows`/`error_reason`/错误码字面量）**91 处**。
+
+`article-api` 单模块（**权威计数**：`mvn -o -B -pl service/article/article-api -am clean test` ⇒ **BUILD SUCCESS**，**构建收工后**逐 `TEST-*.xml` 求和）⇒ **9 个测试类 / 102 条 / 0F / 0E / 0S**：
+
+| 测试类 | 覆盖的失败路径 |
+|---|---|
+| `ArticleApiRouteAuthBoundaryTest`（17 例） | **401**（无 token / 非法 token / 过期 / `alg=none` / 签名不符 / HS384 密钥过短）· **404**（路由不存在）· **413**（超 `MaxBytes`）· **400**（`text/plain` 形状逐字断言 + 换行符）· 路径规范化 |
+| `ArticleApiMvcPipelineTest`（39 例） | 业务失败分支的响应码与信封 |
+| `ArticleApiFormParamLimitTest`（9 例） | 表单参数上限（Go 的 `maxFormParamCount=2048` 同款判据） |
+| `ArticleApiJsonBodyLimitCaseTest`（3 例） | JSON body 读取判据的边界 |
+| `ArticleApiJwtVerificationScopeTest`（7 例） | JWT 验签的**保护面**（哪些路径免鉴权） |
+| `ArticleApiPropertiesSecretGuardTest`（3 例 · **本轮新增**） | 空验签密钥 ⇒ **启动失败**（fail-closed） |
+| `ArticleErrorCodeContractTest`（15 例） | 码值 / 顺序 / 未知码回落 |
+
+⚠️ **这些是【单侧】证据**（只跑 RAG）⇒ 按基线 §六 6.2 的口径，**不能当运行面证据** ⇒ ⇒ 它们**证明「失败路径有实现、且期望值有 Go 出处」**，**不证明「两侧行为相同」**。
+
+### 三、🔴 真正没闭的那一条：**双侧活体失败路径对拍 = 0 条**（基线 §九 G-3）
+
+**为什么现在能做了**（基线的受阻前提**已过期**）：
+
+- 基线写「Go 侧需 `etcd:2379`，宿主 `2379` **未映射**」⇒ ⇒ **2026-10-29 实测：宿主 `Sea-etcd` 的 `49319→2379` 映射已存在**（`nc -z 127.0.0.1 49319` ⇒ **TCP OPEN**）⇒ ⇒ **环境阻塞已解除**；
+- Go 真源 `service/article/api/etc/article-api.yaml:9-24` 的**三个** etcd 客户端（`ArticleRpcConf` / `SecurityRpcConf` / `UserRpcConf`）**全部写死 `etcd:2379`**（docker 网络内的主机名）⇒ ⇒ 真源仓**冻结不可改**（AGENTS.md §一）⇒ ⇒ 必须用**副本配置**改成 `127.0.0.1:49319`；
+- ⚠️ **`SecurityRpcConf` 在 Go 侧「配了但无消费者」**（`internal/svc/service_context.go:17,25` 只装配、**没有任何 logic 读它**）⇒ ⇒ 这一条**不构成启动前置条件**（已在 `ArticleApiProperties` 的类注释里留档）⇒ ⇒ 副本配置只需改 `ArticleRpcConf` + `UserRpcConf` 两个。
+
+**本轮为何没做**：用户已拍板本轮范围 = 「**域内自修 6 项**」，**明确不含** article 的**双侧活体 / 真 Kafka**（`etcd` 可达只是解除了环境阻塞，不改变本轮范围）⇒ ⇒ **登记为下一轮的活**，本轮**不预支**。
+
+**阶段归属（`twoStage.md` §10）**：**A 类**（P0 #4 主责）⇒ **不阻塞阶段 1**（基线已按 🟡 计入）⇒ 但**必须留在未闭合清单里**，不许被「口径订正」顺手抹平。
+
+### 四、⇒ 结论（写清楚，免得下一轮重复劳动）
+
+1. **P0 #4 在 article 域的「用例存在性」维度已达标**（域内 91 处失败路径断言 · 期望值有 Go 出处）⇒ **基线「article 域没有失败路径探针」的措辞需订正**（**基线文件属共享面 ⇒ 本 lane 只在域内台账留记录，交合并收口执行者改**）。
+2. **P0 #4 在 article 域的「双侧活体」维度仍为 0** ⇒ **G-3 未闭**，且**环境阻塞已解除**（`49319` 可达）⇒ ⇒ 下一轮可直接做，只需解决「真源冻结 ⇒ 副本配置」这一步。
+3. ⚠️ **口径订正 ≠ 降级**：两个维度必须**分开记** —— 否则会出现「用单侧用例数把双侧缺口顶掉」的假闭环（这正是 §六 6.2 要防的）。
+
+**判定命令（下一轮）**：
+```bash
+# Go 侧副本配置（真源零改动）
+#   cp -R <GO_REPO>/service/article/api <TMP>/ && sed -i 's|etcd:2379|127.0.0.1:49319|g' <TMP>/etc/article-api.yaml
+# 两侧同时跑同一批失败路径请求 ⇒ 逐字节比对（参考 tools/api-full-parity-probe/favorite/run.sh 的形状）
+bash tools/api-full-parity-probe/favorite/run.sh   # 现成骨架
+```

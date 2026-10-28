@@ -1501,3 +1501,79 @@ favorite-api **7/7 handler** 都调 `httpx.Parse` ⇒ ⇒ **7/7 端点都该在�
 
 - **L1**（共享层源码 `文件:行号` ＋ 共享层自己的订正取证）**＋ L4**（本轮真 Tomcat 回归 ⇒ 4 条用例在**新共享层**下绿 ⇒ ⇒ 「删回落后仍读得到最终响应」已被实测证明）。
 - ⚠️ **诚实边界**：本条**不**证明「共享层上界将来不会回归」⇒ ⇒ 它证明的是「**当前这 4 条用例不再依赖回落**」⇒ ⇒ 回归时它们会**红**（这正是我们要的）。
+
+---
+
+## 23. 🔴 Go 的 `maxFormParamCount=2048` **非空值计数** ＋ `net/url` **非法转义**：在 **6 个 JSON body 端点不生效** ⇒ 已修（**域侧自修** · 2026-10-29 · G3 阶段 1）
+
+> **阶段归属（`twoStage.md` §10）**：**A 类**（阶段 1 准入阻断项 · P0 #4「核心失败路径具有明确行为」在 favorite 域的那一半）⇒ **已修** ⇒ **不阻断阶段 1**。
+> **产出归属**：`align/g3-article-comment-favorite-hot` 工作树 · 基线 commit `29a0bce` · 落码 commit **`83e5bae`** · 核对日期 **2026-10-29**。
+
+### 23.1 §5.3 差异与暂缓项（**11 项**）
+
+| # | 项 | 内容 |
+|---|---|---|
+| **1** | **唯一编号** | `DRIFT-FAV-API-003`（**新登记** · 域内 · 本域台账） |
+| **2** | **原始项目中的文件 / 方法 / 业务契约** | Go 真源：`Sea-RideTheWind_golang/service/favorite/api/internal/handler/favorite/` 下 **7 个 handler** 的**第一行**都是 `httpx.Parse(r, &req)`（`create_favorite_folder_handler.go:18` · `create_favorite_handler.go:18` · `delete_favorite_folder_handler.go:18` · `delete_favorite_handler.go:18` · `get_favorite_folders_handler.go:18` · `get_favorites_by_folder_handler.go:18` · `update_favorite_folder_name_handler.go:18`）⇒ 落到 go-zero v1.10.2：`rest/httpx/requests.go:50-68`（`Parse` → `ParseForm` → `ParseJsonBody`）＋ `rest/httpx/requests.go:85-92`（`ParseForm` → `GetFormValues`）＋ `rest/httpx/util.go:22-65`（`GetFormValues`） |
+| **3** | **原始行为** | ① **非空值计数**：`rest/httpx/util.go:15` `maxFormParamCount = 2048`；`:44-45` `if len(v) == 0 { continue }`（**空值不计数**）；`:48-53` `if n < maxFormParamCount { … n++ } else { return nil, fmt.Errorf("too many form values, …") }` ⇒ **计数器 `n` 跨所有 key 共享**（`:33` 的 `var n int` 在 key 循环之外）⇒ 放行 2048 个非空值、**第 2049 个报错** ⇒ `httpx.Parse` 失败 ⇒ handler 自己捕获 ⇒ **`httpx.OkJsonCtx` ＋ `{Code: ErrorInvalidParam}`** ⇒ **HTTP 200 + `{"code":5003,"msg":"参数错误","data":null}`**（`errmsg.go:16` 码值 ＋ `:51` 文案）。<br>② **非法转义**：`util.go:23-25` `if err := r.ParseForm(); err != nil { return nil, err }` ⇒ Go 1.25 `net/url/url.go` 的 `ParseQuery` 遇 `%zz` 记 error ⇒ 传播到 `httpx.Parse` ⇒ 失败 ⇒ **同一个 200 + 5003**。<br>⚠️ **覆盖面 = 7/7 端点**（与端点读不读 query 无关） |
+| **4** | **阶段 1 当前行为（修前）** | 域内那套 Go 口径判据挂在 `FavoriteApiSupport#goFormFirstValue`（`:369-392`，逐字复刻了 `util.go:37-53` 的「滤空值 → 跨 key 计数 → 取首值」），而它**只被 form 通道那一个端点**调用（`FavoriteController.java:197`，即 `GET /favorite/v1/item/list`）⇒ ⇒ **另外 6 个 JSON body 端点从不计数** ⇒ ⇒ 且 `net/url` 的**非法转义**这条**任何端点都没实现**（域内拦截器只抄了「段数上限」与「分号」两条）⇒ ⇒ **Go 拒（200+5003）/ RAG 放行进业务层** |
+| **5** | **具体差异** | ① 6 个端点（`POST /folder/create` · `DELETE /folder/delete` · `GET /folder/list` · `POST /folder/update` · `POST /item/create` · `DELETE /item/delete`）带 **2049 个非空 query 值** ⇒ **Go = 200 + `{code:5003}`**；**RAG（修前）= 200 + 业务结果**（实测落到 `{"code":1015,"msg":"服务繁忙"}`）⇒ ⇒ **同一输入、两种可观察结果**。<br>② `?a=%zz` ⇒ **Go = 200 + `{code:5003}`**；**RAG（修前）= 200 + 业务结果**（Tomcat 的 query 解码对非法转义**宽容**，原样保留）。<br>③ ⚠️ **根因不是「抄错一条规则」，是「手写 Go 规则 ⇒ 只抄到一半，且漏在覆盖面上」** |
+| **6** | **暂缓或简化理由** | **不适用 —— 已修**（不是暂缓项）。修法见 §23.2：判据改为**调共享层那份**（只读），⇒ 「只抄到一半」的根因被消除，而不是再手写两条 |
+| **7** | **对业务正确性 / 安全性 / 数据一致性 / 可靠性的影响** | **业务正确性**：越限请求被**放行**进业务层 ⇒ ① 下游 RPC 被无谓地调用（**放大下游压力**）② 本域的 7 个 handler 全部**本该**返回 5003 却返回业务码 ⇒ **错误码契约破**。<br>**安全性**：不直接引入数据损坏或越权（下游仍会校验参数）⇒ 但 **「解析失败」与「业务失败」被混为一谈** ⇒ 客户端无法区分「我参数写错了」与「服务繁忙」⇒ ⇒ **可观察的语义漂移**（AGENTS.md §3.1 的「错误码语义」在对照清单里）。<br>**数据一致性 / 可靠性**：不涉及（无写入路径差异） |
+| **8** | **是否阻断阶段 1** | **否**（已修 ⇒ 直接闭合）。⚠️ 修前若未修 ⇒ 属 P0 #4「核心失败路径具有明确行为」的**域内缺口** ⇒ ⇒ **A 类** |
+| **9** | **阶段 2 的恢复或替换方案** | **不需要恢复** —— RAG 修后**与 Go 同形**（不是「RAG 另走一条路」）⇒ ⇒ 阶段 2 **保持现状**即可。<br>⚠️ 阶段 2 唯一要补的是 **wire 级双侧活体**（本条目前是 **L4 真 Tomcat 单侧** ＋ **L1 真源逐行**）⇒ ⇒ 见第 10 项 |
+| **10** | **阶段 2 的测试场景和通过标准** | ① **双侧活体**：Go 侧 favorite-api 起进程（`etcd` 宿主口 `49319` 已映射 ⇒ 条件已具备）＋ RAG 侧起进程 ⇒ 对 **7 个端点 × {2048 非空值 · 2049 非空值 · `%zz` · `;` · 10000 段 · 10001 段}** ⇒ **HTTP 状态 + body 逐字节相同** ⇒ **通过标准：42/42 逐字节一致**。<br>② **域内守门（已落地，阶段 2 继续用）**：`FavoriteGoQueryLimitInterceptorTest`（判据层 10 例）＋ `FavoriteApiRealTomcatGateTest`（真 Tomcat 16 例）⇒ **通过标准：全绿 ＋ 变异精确转红** |
+| **11** | **当前证据及剩余证据缺口** | **已有**：**L1** 真源逐行（go-zero v1.10.2 `rest/httpx/util.go:15,23-25,33-54` ＋ `requests.go:50-68,85-92` ＋ Go 1.25 `net/url/url.go:1019-1054` ＋ 7 个 handler 的 `:18`）＋ **L4** 真 Tomcat（`FavoriteApiRealTomcatGateTest` **16/16 绿**，含 3 条新用例）＋ **L4 变异**（**M-A 恒放行 ⇒ 8/10 转红** · **M-B 退回旧实现 ⇒ 5/10 转红**（精确命中本次修的两条规则）＋ 端到端 **2/2 转红** ⇒ ⇒ **守门非假绿**）。<br>**剩余缺口**：① **双侧 wire 字节**（第 10 项 · 未做）；② `net/url` 规则**跨域**是否还有别的域同类漂移（**共享面 ⇒ 已登记**，见 `docs/DRIFT/global/vs-common.md` 的消费者清单建议） |
+
+### 23.2 §5.4 实际改造记录（**8 项**）
+
+| # | 项 | 内容 |
+|---|---|---|
+| **1** | **修改前的实现和行为** | ① `service/favorite/favorite-api/src/main/java/…/interceptor/FavoriteQuerySegmentLimitInterceptor.java`：**手写** Go `net/url` 的**两条**规则（段数 `Count("&")+1 > 10000` ＋ rawQuery 含 `;`）⇒ 抛 `IllegalArgumentException` ⇒ 本域 `GlobalExceptionHandler#handleIllegalArgument` ⇒ 200 + 5003。<br>② `service/favorite/favorite-api/src/main/java/…/service/FavoriteApiSupport.java:369-392`（`goFormFirstValue`）：**手写** go-zero 的**非空值计数**（2048）⇒ 但**只在 form 通道那一个端点**被调用。 |
+| **2** | **具体问题** | ① 「非空值 2048 计数」在 **6/7 端点**不生效 ⇒ Go 拒 / RAG 放行。<br>② 「非法转义」**任何端点**都不生效 ⇒ 同上。<br>③ **根因**：域内手写 Go 规则 ⇒ 抄漏 + 覆盖面错位 ⇒ ⇒ 每加一条规则都得在**域内**再抄一遍（10 个域 ⇒ 10 份可能抄漏的副本） |
+| **3** | **修改后的实现** | ① **重命名** `FavoriteQuerySegmentLimitInterceptor` → **`FavoriteGoQueryLimitInterceptor`**（名字不再只说「段数」；**全仓只有 4 处引用**（2 处源码 + 1 处测试 + 1 处台账）⇒ **无悬空引用**）⇒ 判据改为**只读调用共享层** `com.rag.common.http.GoStyleFormValues#goParseViolation(request.getQueryString())`（它已按 **Go 的次序**实现 4 条规则：段数 10000 → 分号 → 非法转义 → 非空值 2048）⇒ 非空即抛 `IllegalArgumentException` ⇒ **本域**渲染 200 + `{code:5003,"msg":"参数错误"}`。<br>② `WebMvcConfig` 的注册同步改（**`order = 1` 不变** ⇒ 仍在鉴权之后 ⇒ 401 优先，与 Go 的「解析在 handler 内」一致）。<br>③ **不动** `FavoriteApiSupport#goFormFirstValue` 的取值语义（那是 form 通道的**取值**逻辑，不是闸门） |
+| **4** | **修改理由** | **判据只有一份**（共享层那份已被其它域在真 Tomcat 上验过）⇒ ⇒ **根因治理**（不再在域内抄 Go 规则）⇒ ⇒ 覆盖面问题（6/7 裸奔）自然消失。<br>⚠️ **不能开共享层那道闸门**（`GoStyleFormValueLimitInterceptor`）：它在 `ENVELOPE` 档渲染的是 **5001**，而 favorite 要的是 **5003**（7 个 handler **各自捕获** `httpx.Parse` 的错 ⇒ 形状由域自己定）；且 favorite 的 yaml **不得**声明 `rag.http.go-form-limit.mode`（`tools/difftest/check-tomcat-limits.py:163-165` 的 `FORBIDDEN_FORM_LIMIT_MODE_MODULES` 明确列了 `service/favorite/favorite-api` ⇒ **必须不存在**）⇒ ⇒ **域内自装闸门是唯一正确形态** |
+| **5** | **实际变更文件** | ① **新增** `service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/interceptor/FavoriteGoQueryLimitInterceptor.java`（域内 · **不改共享层**）<br>② **删除** `…/interceptor/FavoriteQuerySegmentLimitInterceptor.java`（`git rm` ⇒ 可从 git 历史取回）<br>③ **改** `…/config/WebMvcConfig.java`（import ＋ 字段 ＋ 注册注释）<br>④ **新增** `…/src/test/java/com/rag/favorite/favorite/api/FavoriteGoQueryLimitInterceptorTest.java`（判据层 10 例）<br>⑤ **改** `…/src/test/java/com/rag/favorite/favorite/api/FavoriteApiRealTomcatGateTest.java`（+3 例；`%zz` 那条改用**裸 socket**） |
+| **6** | **测试场景和断言** | ① `FavoriteGoQueryLimitInterceptorTest`（**10 例**）：规则①段数（10000 放行 / 10001 拒）· 规则②分号（拒 / `%3B` 不触发）· 规则③非法转义（`%zz` 拒）· 规则④非空值计数（2048 放行 / 2049 拒 / 空值不计数 / 跨 key 共享）· **次序**（段数先于分号；段数先于计数）· 空 query 放行 · 异常类型必须是 `IllegalArgumentException`（本域兜底 handler 据此渲染 5003）。<br>② `FavoriteApiRealTomcatGateTest`（**+3 例**，真 Tomcat ＋ 真 JWT ＋ 真 HTTP/裸 socket）：**2049 个非空 query 值 ⇒ 7 个端点全部 200+5003** · **恰好 2048 ⇒ 放行进业务层** · **`?a=%zz` ⇒ 200+5003** |
+| **7** | **实际执行结果** | `mvn -o -B -DargLine=-Xmx2g -pl service/favorite/favorite-api test -Dtest=FavoriteApiRealTomcatGateTest` ⇒ **16/16 绿**（92.71 s）<br>`… -Dtest=FavoriteGoQueryLimitInterceptorTest` ⇒ **10/10 绿**（0.87 s）<br>**变异验证**：**M-A**（恒放行）⇒ **8/10 转红** · **M-B**（退回旧实现：只判段数＋分号）⇒ **5/10 转红**（精确命中新修的两条规则）＋ 端到端 **2/2 转红**（失败信息即原缺陷形态：`{"code":1015,"msg":"服务繁忙"}` = RAG 放行进业务层）⇒ ⇒ **守门非假绿**（AGENTS.md §3.3.3）<br>⚠️ 变异跑完已 `git checkout` 还原 |
+| **8** | **尚未解决的问题 / 对阶段 2 的影响** | ① **双侧 wire 字节**未做（见 §23.1 第 10/11 项）⇒ ⇒ 阶段 2 补。<br>② **共享层的消费者清单**：favorite-api 现在**直接消费** `GoStyleFormValues` ⇒ ⇒ 若 G4 改那个类的规则 ⇒ **会改 favorite 的可观察行为** ⇒ ⇒ 已发**反馈单**（`docs/DRIFT/favorite/vs-common.md` §4.4 **G4-13**）⇒ 建议共享层 javadoc 加**消费者清单**。<br>③ **跨域同款漂移待查**：`net/url` 的规则在**别的域**是否也被抄漏 ⇒ **共享面 ⇒ 已登记**（G3 只读） |
+
+> ⚠️ **本条登记位置说明**：本条是 **favorite 域**的差异 ⇒ 落本域台账（`docs/DRIFT/favorite/api.md`）；**不重复**登记进 `docs/Intentional_Deviations/`（本条**不是**偏离 —— 是**修到与 Go 一致**）⇒ ⇒ 三档之间不互相搬运（AGENTS.md §二·五 的硬边界 2）。
+
+---
+
+## 24. 🔴 P0 #8 **域侧部分**：yaml 里的**明文默认验签密钥** ⇒ 已修（**域侧自修** · 2026-10-29 · G3 阶段 1）
+
+> **阶段归属（`twoStage.md` §10）**：**A 类**（P0 #8「关键配置和敏感信息没有明显的不安全处理方式」）⇒ **域侧已修**（fail-closed）⇒ **共享面半边（compose 的 `:?`）已转派 G4** ⇒ ⇒ **不阻断阶段 1**。
+> **产出归属**：`align/g3-article-comment-favorite-hot` 工作树 · 基线 commit `29a0bce` · 核对日期 **2026-10-29**。
+
+### 24.1 §5.3 差异与暂缓项（**11 项**）
+
+| # | 项 | 内容 |
+|---|---|---|
+| **1** | **唯一编号** | `DRIFT-FAV-API-004`（**新登记** · 域内）+ **跨域同款**：`DRIFT-ARTICLE-API-00x` / `DRIFT-COMMENT-API-00x`（见各域台账的指针） |
+| **2** | **原始项目中的文件 / 方法 / 业务契约** | Go 真源：`service/favorite/api/etc/favorite.yaml:10-12`（`UserAuth.AccessSecret = ae0536f9-6450-4606-8e13-5a19ed505da0`）⇒ ⇒ **Go 侧同样把密钥写成仓里的字面量**（⇒ 本条属「**RAG 更严**」的一侧，不是「RAG 抄错了 Go」）。<br>RAG 侧：`service/favorite/favorite-api/src/main/resources/application.yml:153`（修前：`access-secret: ${FAVORITE_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}`） |
+| **3** | **原始行为** | Go：**字面量** ⇒ 部署时不改也能起 ⇒ 但**任何拿到仓库的人都能用它签出合法 JWT** ⇒ ⇒ 该域的**鉴权等于没有**（除非运维记得改） |
+| **4** | **阶段 1 当前行为（修前）** | 同上（yaml 默认值 = 仓里的公开 UUID）⇒ ⇒ ① 不设环境变量 ⇒ **用公开密钥正常起来** ⇒ 🔴 **token 可伪造**；② 设成空串 ⇒ Spring 把空串当合法值 ⇒ **空签名密钥正常起来** ⇒ 🔴 **token 可伪造**（HMAC 空密钥谁都能算） |
+| **5** | **具体差异** | 修前：**两条路径都会「静默地不安全地起来」**。<br>修后：① **不设变量 ⇒ 启动失败**（Spring placeholder 不可解析 ⇒ 绑定期炸）② **设成空串 ⇒ 启动失败**（`@PostConstruct` 校验）⇒ ⇒ **两条路都 fail-closed** |
+| **6** | **暂缓或简化理由** | **不适用 —— 已修**。⚠️ **但有一处不能域侧单做**：根级 `docker-compose.yaml:146`/`:193` 的 `USER_JWT_SECRET: ${USER_JWT_SECRET}` **缺 `:?`** ⇒ ⇒ 不设变量时 compose 会把**空串**注入容器 ⇒ ⇒ 修后容器会**启动失败**（安全上是 fail-closed ✔）⇒ ⇒ 但运维会看到 crash-loop 而不是 compose 级的清晰报错 ⇒ ⇒ **该半边属共享面 ⇒ 已转派 G4**（反馈单 `G4-14`） |
+| **7** | **对业务正确性 / 安全性 / 数据一致性 / 可靠性的影响** | **安全性**：**正面**（核心）—— 从「可静默用公开密钥起来」变成「起不来」⇒ ⇒ 消除「token 可伪造」。<br>**业务正确性**：**无影响**（密钥不变时行为完全一致）。<br>**数据一致性 / 可靠性**：**无影响**。⚠️ **运维**：**缺变量 ⇒ 起不来** ⇒ ⇒ 部署说明必须同步（⇒ 根 README 无 `.env.example` 属 **P0 #5**，**共享面**，不在本域） |
+| **8** | **是否阻断阶段 1** | **否**（域侧已修 ⇒ P0 #8 的**域侧部分**闭合）。⚠️ 共享面半边（compose `:?` ＋ 根 README `.env.example`）**仍开** ⇒ ⇒ P0 #8 **整体**仍不能判 ✅ ⇒ ⇒ **收口执行者的事** |
+| **9** | **阶段 2 的恢复或替换方案** | **不需要恢复**（这是「更严」的一侧，不是简化）。阶段 2 要做的是**把密钥管理做完整**：① 根级 `.env.example`（列出**全部**必填变量）② 密钥轮换 ③ 部署期校验清单 ⇒ ⇒ **共享面 ⇒ 阶段 2 / 收口** |
+| **10** | **阶段 2 的测试场景和通过标准** | ① **compose 侧**：`docker compose config` 在**不设** `USER_JWT_SECRET` 时**必须报错**（`:?` 生效）⇒ **通过标准：非零退出 + 明确报错**。② **空变量起栈实测**：`USER_JWT_SECRET= docker compose up` ⇒ 容器**必须起不来**（fail-closed）⇒ **通过标准：日志里出现本域的 `IllegalStateException`**。③ **域侧回归**：三个 api 模块的 `@SpringBootTest` 全绿（密钥由 test scope 提供） |
+| **11** | **当前证据及剩余证据缺口** | **已有**：**L4**（域内守门 `FavoriteApiPropertiesSecretGuardTest`：**真 ApplicationContextRunner** ⇒ 空串 / 未设 ⇒ **上下文起不来**（`hasFailed()`）＋ 正常密钥 ⇒ 上下文正常起（对照组）＋ 判据边界 3 例 ⇒ **3/3 绿**）＋ 三域 api 模块全量回归 **BUILD SUCCESS**。<br>**剩余缺口**：① **compose 侧**未验证（**共享面 ⇒ 已转派**）② **根 README 无 `.env.example`** ⇒ 部署方**不知道要设哪些变量** ⇒ ⇒ **P0 #5 的共享面半边**（已登记） |
+
+### 24.2 §5.4 实际改造记录（**8 项**）
+
+| # | 项 | 内容 |
+|---|---|---|
+| **1** | **修改前的实现和行为** | `favorite-api/src/main/resources/application.yml:153`：`access-secret: ${FAVORITE_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}` ⇒ **有默认值** ⇒ 不设变量也能起 ⇒ 用仓里的公开 UUID 验签 |
+| **2** | **具体问题** | 「仓里写死的公开密钥」＋「Spring 把空串当合法值」⇒ ⇒ **两条路都能静默地不安全地起来** ⇒ ⇒ **P0 #8 的域侧缺口** |
+| **3** | **修改后的实现** | ① yaml：`access-secret: ${FAVORITE_JWT_SECRET}`（**去默认值**）＋ 注释写明「为什么」与「测试从哪来」。<br>② `FavoriteApiProperties`：**新增 `@PostConstruct verifyAccessSecret()`** ⇒ 密钥为 `null`/空串/全空白 ⇒ 抛 `IllegalStateException` ⇒ **启动失败**。<br>③ 新增 `service/favorite/favorite-api/src/test/resources/application.properties`：**test scope** 提供同名变量（值 = 测试里签 token 的常量）⇒ ⇒ **测试不依赖环境变量** ＋ **不进产物 jar** ⇒ 生产拿不到默认值 |
+| **4** | **修改理由** | ① 去默认值只能堵「变量没设」⇒ 堵不住「变量是空串」（**Spring 的 `PropertyPlaceholderHelper` 实测行为：存在但为空串 ⇒ 解析为空串、不走默认值**）⇒ ⇒ 必须**代码校验**才真正 fail-closed。<br>② 用 `@PostConstruct` 而不是 `@Validated + @NotBlank` ⇒ **零新增依赖**（不引入 `spring-boot-starter-validation`）。<br>③ 测试用 test scope 的 `application.properties` 而不是改 15 个 `@SpringBootTest` 类 ⇒ ⇒ **一处改动** ＋ **不污染主配置**（test scope 不进 jar） |
+| **5** | **实际变更文件** | ① 改 `service/favorite/favorite-api/src/main/resources/application.yml`（+注释）<br>② 改 `…/config/FavoriteApiProperties.java`（+`@PostConstruct` 校验）<br>③ **新增** `…/src/test/resources/application.properties`<br>④ **新增** `…/src/test/java/com/rag/favorite/favorite/api/config/FavoriteApiPropertiesSecretGuardTest.java`（3 例）<br>⑤ **同款改动复制到** `service/article/article-api` ＋ `service/comment/comment-api`（yaml ＋ 属性类 ＋ test properties ＋ 守门测试） |
+| **6** | **测试场景和断言** | ① **空串 / 未设 ⇒ 上下文起不来**（`ApplicationContextRunner` ＋ `hasFailed()`）② **正常密钥 ⇒ 上下文正常起**（对照组 ⇒ 证明不是「无脑拒绝启动」）③ **判据边界**：`null` / `""` / `"   "` ⇒ 抛；正常值 ⇒ 不抛 |
+| **7** | **实际执行结果** | `mvn -o -B -pl service/favorite/favorite-api test -Dtest=FavoriteApiPropertiesSecretGuardTest` ⇒ **3/3 绿**<br>`mvn -o -B -pl service/article/article-api,service/comment/comment-api,service/favorite/favorite-api clean test` ⇒ **BUILD SUCCESS**（三域 api 模块全量） |
+| **8** | **尚未解决的问题 / 对阶段 2 的影响** | ① **compose 侧 `:?`**（共享面 ⇒ 反馈单 `G4-14`）② **根 README 的 `.env.example`**（P0 #5 共享面）③ **rpc 域**的其它明文默认值（`${POSTGRES_PASSWORD:password}` / `${MINIO_SECRET_KEY:minioadmin}` / `${*_AUTHORITY_TOKEN:}`）⇒ **本轮未动** ⇒ ⇒ **登记**（不在本轮范围：它们的落点是**部署凭据**而非 JWT 签名密钥，且 compose 已用 `:?` 强制 `POSTGRES_PASSWORD` ⇒ 实际不可达）④ **阶段 2**：完整的密钥管理（轮换 ＋ `.env.example` ＋ 部署清单） |
+
+> ⚠️ **本条的跨域性**：同一类改动落在 **favorite / article / comment 三个域的 api 组件** ⇒ ⇒ 按 AGENTS.md「一条问题只在一个档里落笔」的纪律 ⇒ **完整记录在本节**（favorite 域）⇒ ⇒ **article / comment 两域只留指针**（见各自台账）。

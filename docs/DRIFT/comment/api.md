@@ -378,3 +378,19 @@
 ⇒ **判据是守门脚本**：`tools/difftest/check-jar-executable.sh`
 （逐个 api 模块解包 `META-INF/MANIFEST.MF` 看 `Main-Class`）
 ⇒ **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）。
+
+---
+
+## 📌 指针 · 🔴 P0 #8 域侧：**yaml 明文默认验签密钥**已去掉 ⇒ 缺变量/空串 ⇒ **启动失败**（2026-10-29 · G3 阶段 1）
+
+> **阶段归属（`twoStage.md` §10）**：**A 类**（P0 #8）⇒ **域侧已修** ⇒ 不阻断阶段 1（共享面半边已转派 G4）。
+> **完整记录在** [`docs/DRIFT/favorite/api.md` §24](../../DRIFT/favorite/api.md) —— **按 AGENTS.md「一条问题只在一个档里落笔」的纪律**，本域只留指针。
+
+| 项 | 本域情况 |
+|---|---|
+| **落点** | `service/comment/comment-api/src/main/resources/application.yml`（`comment-api.user-auth.access-secret`，**修前** = `${USER_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}`）＋ `…/config/CommentApiProperties.java`（新增 `@PostConstruct verifyAccessSecret()`）＋ **新增** `…/src/test/resources/application.properties`（test scope 提供密钥） |
+| **Go 出处** | Go 侧 comment api 的 yaml 的 `Auth/AccessSecret` 同样是**字面量** ⇒ ⇒ 本条属「**RAG 更严**」的一侧 ⇒ 登记为有意偏离 |
+| **为什么必须代码校验** | 同上：Spring 把**空串**当合法值 ⇒ 「去默认值」挡不住「变量是空串」⇒ ⇒ 必须 `@PostConstruct` 显式抛 ⇒ **两条路都 fail-closed** |
+| **守门** | **新增** `service/comment/comment-api/src/test/java/com/rag/comment/comment/api/config/CommentApiPropertiesSecretGuardTest.java`（**3 例** · **真 `ApplicationContextRunner`**） |
+| **证据强度** | **L4**（真容器装配 ⇒ 上下文起不来/起得来） |
+| **共享面半边（已转派 G4）** | 根级 compose 的 `USER_JWT_SECRET` 缺 `:?` ＋ 根 README 无 `.env.example`（P0 #5 共享面）⇒ 见 `docs/DRIFT/favorite/api.md` §24.2 第 8 项 |
