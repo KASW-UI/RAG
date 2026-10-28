@@ -1249,3 +1249,33 @@ mvn -o -B -DargLine=-Xmx2g -am -pl service/common,service/message/message-api,se
 - 波级隐患面（已通报 G1 / G3 / G4）：全仓 **67** 个真实测试类写 `grpc.server.port=0`；我域 3 个 rpc 共 **21** 个已修
   ⇒ ⇒ **仍待修 46**（article 8 · comment 2 · favorite 8 · follow 3 · hot 5 · admin 11 · user 9）
   ⇒ ⚠️ 我第一版统计说「70」是**错的**（多算了 3 个 `GrpcTestPort` helper 的 javadoc 文字）⇒ **原值保留不改写**，详见 `message/vs-common.md` 第二十五轮 ⑤。
+
+### 🟢 第二十五轮 · **波末收口回归实测：9 模块 = 1030（域侧 697 ＋ 共享层 333）· 全绿**（2026-10-28 10:04）
+
+**① 口径与出处**
+- 跑在 **`b5910dc`**（工作树干净）⇒ ⇒ **本轮数只对这个 commit 成立**。
+- 命令：`mvn -o -B -DargLine=-Xmx2g -am -pl <9 个目标模块> clean test`（**`clean test` 不是 `verify`**、**必须带 `-am`**）。
+- 日志 `/tmp/g2-r29-regression.log` · 跑批脚本 `/tmp/g2-r29-run.sh`（**含三道起跑前体检**）。
+
+**② 本域三个模块的实测**
+
+| 模块 | 条数 | F | E | S | 相对第二十三轮 |
+|---|---|---|---|---|---|
+| `service/like/like-api` | **94** | 0 | 0 | 0 | 94 ⇒ 0 |
+| `service/like/like-rpc` | **129** | 0 | 0 | 0 | 129 ⇒ **0** |
+| `service/like/like-common` | **18** | 0 | 0 | 0 | 18 ⇒ 0 |
+
+**③ 域侧小计与增量归因**
+- 域侧 8 模块小计 = **697**（第二十三轮 689 ⇒ **+8**）⇒ ⇒ **+8 全部来自第二十四轮的落码**：
+  **message-rpc +3**（新增产物层守门 `MessageRpcArtifactClasspathGateTest` 的 3 条）＋ **task-rpc +5**
+  （`TaskRpcFatJarArtifactGateTest` 由 `*IT` 改名 ⇒ 进 `clean test` 口径）⇒ ⇒ **like 域贡献 0** ✔
+- ⚠️ **like-rpc 129 ⇒ 129 是【预期且已实测】的**：本轮 `isStale` 把**共享层**算进新鲜度输入集
+  ⇒ ⇒ **那是行为改动、不是断言增量** ⇒ ⇒ **条数应当不变** ⇒ ⇒ 实测**确未变** ✔
+
+**④ 交叉核对**
+- XML 侧（9 个目标模块 `<testsuite>` 属性求和）= **1030**；maven 模块级汇总行 = **1069**
+  ⇒ ⇒ **差 39 = `service/users/users-common`**（`-am` 带出的**非目标**模块，不属收口口径）⇒ ⇒ **1030 + 39 = 1069 逐字相等** ✔
+- ✅ **含 IT / 不含 IT 两口径都是 1030** ⇒ ⇒ **我域已无 `*IT` 类** ⇒ ⇒ `test` 与 `verify` 两口径**重合** ✔
+
+**⑤ 原值保留不改写**
+第二十三轮的 **1022 / 689 / 333** 等**全部原样保留**；**1030 / 697 / 333** 为**当前权威值**。

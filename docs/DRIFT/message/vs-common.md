@@ -960,3 +960,89 @@ Failed to load ApplicationContext
 `GoStyleClientDisconnectProbeBudgetGateTest` · `GoStyleTimeoutResponseRaceGateTest` · `HttpClientDisconnectRealTomcatTest`）
 ⇒ 同样落在 OS 临时段 ⇒ **同样会撞 Docker 发布口** ⇒ ⇒ 已于第二十四轮通报 G4（请其落码）。
 ⇒ ⚠️ **口径提醒**：另有 **29 个** api 侧测试类用 `RANDOM_PORT`（Tomcat 侧等价形态 = `r.add("server.port", 探测口)`）⇒ 属同一族隐患。
+
+**⑧ 🔴 r28 那次失败 =【自伤】，不是缺陷、不是跨 lane 撞车**（留档 · 教训）
+r28（`/tmp/g2-r28-regression.log`）在 `MessageRpcTimeColumnParityTest` 上报
+`Bind for 0.0.0.0:22768 failed: port is already allocated` ⇒ ⇒ **BUILD FAILURE · `MVN_EXIT=1`**。
+
+- **根因**：**我自己 kill 掉的一个 stale run 泄漏了 Testcontainers 容器** ⇒ 该容器占住了
+  **我域 message 段的固定宿主口 22768** ⇒ ⇒ r28 起跑时绑不上。
+- **证据链（为什么断定是「自伤」而不是「跨 lane 撞车」）**：
+  ① 泄漏容器 `festive_nobel`（`postgres:16-alpine`，`0.0.0.0:22768->5432`）的 `Created` =
+     **09:42:21** ⇒ ⇒ **比 r28 自己起跑（09:42:23）还早 2 秒** ⇒ ⇒ **不可能是 r28 自己建的**；
+ ② 09:42:21 那时正在跑的是**我 kill 掉的 stale `rerun.sh`**（它的 maven 09:40:20 起跑 ⇒ +2 min 到建容器 ⇒ 时序吻合）；
+ ③ **全局段表零重叠**（message `22760–22789` · like `22790–22819` · task `22820–22849` ·
+     article `22850–22879` · comment `22880–22909` · favorite `22910–22939` · hot `22940–22969`）
+     ⇒ ⇒ 同段另有 G3 的 `agitated_lighterman`（**22858** = G3 `RealContainerHostPort.TRANSACTION_WIRING`）
+     ⇒ ⇒ **跨 lane 的那个我没动**（只删了 22768 那个我自己的）；
+ ④ `22768` 在**我域 message 段**内 ⇒ ⇒ 按段表归属，它**只可能是我域的**容器。
+- **处置**：只 `docker rm -f festive_nobel`（**我自己的孤儿**）⇒ ⇒ **未碰任何长期容器**
+  （`Sea-*` / `ddl-*` / `difftest5k-*` / `g2-pool-redis` 全部保持原样）。
+- **教训（可复用到任何 lane）**：**kill 一个 maven 会泄漏它的 Testcontainers 容器**
+  （Ryuk 随 JVM 一起死）⇒ ⇒ **下一个 run 在同域会撞固定宿主口** ⇒ ⇒
+  **表现像「被测行为坏了」，实为「上一轮被我 kill 的 run 的残骸挡住了本轮」** ⇒ ⇒
+  ⚠️ 与 ① 的 `BindException` 是**同一种误读形态**（环境起不来 ≠ 被测行为坏）。
+- **⇒ 已加的机械防护**：r29 的跑批脚本加**两道起跑前体检** ——
+  ① 我域三段（`22760–22849`）内**若还有容器 ⇒ 直接判失败、不硬跑**；
+  ② 等待窗口结束后**再查一次**（防止等待期间别的 run 又漏容器）。
+  ⇒ 📌 这道体检属**波级通用**形态 ⇒ ⇒ **已通报 G4 / G1 / G3，建议各 lane 的跑批脚本都加**。
+- ⚠️ **写权说明**：「kill maven ⇒ 泄漏容器 ⇒ 下一轮撞固定宿主口」这条**踩坑**按规矩该进
+  `docs/Pitfalls/**` ⇒ ⇒ 但**该目录不在 G2 写权面** ⇒ ⇒ **本 lane 只登记 + 通报，不越权写**。
+
+### 🟢 第二十五轮 · **波末收口回归实测：9 模块 = 1030（域侧 697 ＋ 共享层 333）· 全绿**（2026-10-28 10:04）
+
+**① 回归命令与口径（与第二十三轮同款，**只换了日志**）**
+```
+mvn -o -B -DargLine=-Xmx2g -am -pl service/common,service/message/message-api,service/message/message-rpc,service/message/message-common,service/like/like-api,service/like/like-rpc,service/like/like-common,service/task/task-api,service/task/task-rpc clean test
+```
+- **必须是 `clean test`（不是 `verify`）**、**必须带 `-am`**（理由同第二十三轮，不重复论证）。
+- 日志：`/tmp/g2-r29-regression.log` · 跑批脚本：`/tmp/g2-r29-run.sh`（含**三道起跑前体检**，见 ⑧）。
+- **跑在哪个 HEAD 上**：`b5910dc`（工作树干净）⇒ ⇒ **本轮数只对这个 commit 成立**。
+
+**② 实测（`BUILD SUCCESS` · `MVN_EXIT=0` · 10:37 min · 09:53:24 → 10:04:03）**
+
+| 模块 | 条数 | F | E | S | 相对第二十三轮（1022） |
+|---|---|---|---|---|---|
+| `service/common`（共享层） | **333** | 0 | 0 | 0 | 333 ⇒ **0** |
+| `service/message/message-api` | **103** | 0 | 0 | 0 | 103 ⇒ 0 |
+| `service/message/message-rpc` | **96** | 0 | 0 | 0 | 93 ⇒ **+3** |
+| `service/message/message-common` | **21** | 0 | 0 | 0 | 21 ⇒ 0 |
+| `service/like/like-api` | **94** | 0 | 0 | 0 | 94 ⇒ 0 |
+| `service/like/like-rpc` | **129** | 0 | 0 | 0 | 129 ⇒ **0** |
+| `service/like/like-common` | **18** | 0 | 0 | 0 | 18 ⇒ 0 |
+| `service/task/task-api` | **102** | 0 | 0 | 0 | 102 ⇒ 0 |
+| `service/task/task-rpc` | **134** | 0 | 0 | 0 | 129 ⇒ **+5** |
+| **域侧 8 模块小计** | **697** | 0 | 0 | 0 | 689 ⇒ **+8** |
+| **9 模块合计** | **1030** | **0** | **0** | **0** | 1022 ⇒ **+8** |
+
+**③ 交叉核对（两条独立路径 · 差值逐字归因）**
+- **XML 侧**：9 个目标模块 `target/surefire-reports/TEST-*.xml` 的 `<testsuite>` 属性**逐模块求和** ⇒ ⇒ **1030**（F/E/S = 0/0/0）。
+- **maven 侧**：模块级 `Results:` 汇总行合计 ⇒ ⇒ **1069**
+  ⇒ ⇒ **差 39 = `service/users/users-common`**（`-am` 带出的**非目标**模块，**不属收口口径**）
+  ⇒ ⇒ **1030 + 39 = 1069 ⇒ 逐字相等** ✔
+- ⚠️ 收口口径**只算 9 个目标模块** —— reactor 实测 **23** 个模块 ⇒ ⇒ 拿 reactor 全量当收口数字会得 **1069**，不是 1030。
+- ⚠️ maven 的 `Tests run:` 有**两种行**（模块级汇总行 / 每类用例行 `-- in <class>`）⇒ ⇒ 过滤必须是 `-- in `（**双横线**）
+  ⇒ ⇒ 本轮排除 **172** 条每类用例行，取 **10** 条模块级汇总行。
+- ✅ **含 IT / 不含 IT 两口径都是 1030** ⇒ ⇒ **我域已无任何 `*IT` 类** ⇒ ⇒ `test` 与 `verify` 两口径**重合** ✔
+  （全仓 `TEST-*IT.xml` 实测 = **0 个**）。
+
+**④ 增量归因（+8 的每一处都有出处，逐条可核）**
+- **message-rpc 93 ⇒ 96（+3）** ⇒ ⇒ **第二十四轮**新增的产物层守门 `MessageRpcArtifactClasspathGateTest` 的 **3 条**断言
+  ⇒ ⇒ **与本轮端口修法无关**（端口修法**不改条数**，只把原来 error 的那 3 条变成真跑起来的绿）。
+- **task-rpc 129 ⇒ 134（+5）** ⇒ ⇒ `TaskRpcFatJarArtifactGateTest` 由 `*IT` **改名为 `*Test`**（第二十四轮）
+  ⇒ ⇒ 它从「只在 `verify` 阶段跑、不计入 `clean test`」变成「**进 `clean test` 口径**」⇒ ⇒ **正好 +5**。
+- **like-rpc 129 ⇒ 129（0）** ⇒ ⇒ `isStale` 把**共享层**算进新鲜度输入集（第二十四轮）⇒ ⇒ **是行为改动，不是断言增量** ⇒ ⇒ 条数**应当不变**，实测**也确不变** ✔
+- ⇒ ⇒ **域侧 +8 全部来自第二十四轮的落码，端口修法贡献 0 条** ⇒ ⇒ ⇒ **⇒ 相对第二十三轮：+8 全部有出处**。
+
+**⑤ 原值保留不改写**
+第二十三轮的 **1022 / 689 / 333**、第二十轮 **1007 / 677 / 330**、第二十一轮 **689**、第二十二轮 **331 / 332** ——
+**全部原样保留**；本段的 **1030 / 697 / 333** 为**当前权威值**。
+
+**⑥ 端口修法的效果（与 ⑧ 配套）**
+- 本轮 **0 次** `Address already in use` / `0 次** `port is already allocated`
+  ⇒ ⇒ `GrpcTestPort` 的**探测式**分配（21 个类注入）**在收口口径里真生效** ✔
+- ⚠️ r28 那轮的失败**不是**端口修法的锅 ⇒ 是**自伤**（我 kill 掉的 stale run 泄漏的容器挡住了固定宿主口 22768）⇒ ⇒ 详见 ⑧。
+
+**⑦ 判绿红只看两项**
+本轮日志里同样满屏 `nacos register FAILED` / `kafka NetworkClient` / `otel exporter 装配失败` / `logger-test-fatal` 等 **ERROR 级日志行**
+⇒ ⇒ **那些不是失败** ⇒ ⇒ **唯一判据 = surefire 的 `Failures`/`Errors`/`Skipped`（0/0/0）＋ `MVN_EXIT=0` ＋ `BUILD SUCCESS`** ✔
