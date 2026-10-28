@@ -43,7 +43,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   404: router/patrouter.go:73,93-97 → http.NotFound → http.Error(w,"404 page not found",404)
  *        net/http.Error: Del("Content-Length") / Set("Content-Type","text/plain; charset=utf-8")
  *                        / Set("X-Content-Type-Options","nosniff") / WriteHeader / Fprintln
- *        ⇒ body = "404 page not found\n"，含尾随换行，全长 20 字节
+ *        ⇒ body = "404 page not found\n"，含尾随换行，全长 19 字节
+ *          （"404 page not found" = 18 字符 + 尾随 '\n' = 1 ⇒ 共 19；
+ *            ⚠️ 2026-10-29 订正：原写「20 字节」是**错的** ⇒ 已由 G1 跨域发现并上报，
+ *            本域**独立复算**确认（printf '404 page not found\n' | wc -c ⇒ 19）后才改）
  *
  *   405: router/patrouter.go:79-82 → w.Header().Set("Allow", allows); w.WriteHeader(405)
  *        ⇒ 裸状态码，**无 body、无 Content-Type**
@@ -184,7 +187,7 @@ class LikeApiRouterErrorRealTomcatTest {
     }
 
     @Test
-    @DisplayName("Content-Length 与实际 body 长度一致（20）")
+    @DisplayName("Content-Length 与实际 body 长度一致（404 body = \"404 page not found\\n\" = 19 字节）")
     void notFoundContentLengthMatchesBody() throws Exception {
         HttpResponse<String> r = call("GET", "/like/v1/nope2");
         String cl = r.headers().firstValue("Content-Length").orElse(null);

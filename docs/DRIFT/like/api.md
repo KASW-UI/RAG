@@ -1293,3 +1293,74 @@ return likeServiceBlockingStub.withDeadlineAfter(effectiveNanos, TimeUnit.NANOSE
 ⇒ **判据是守门脚本**：`tools/difftest/check-jar-executable.sh`
 （逐个 api 模块解包 `META-INF/MANIFEST.MF` 看 `Main-Class`）
 ⇒ **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）。
+
+---
+
+## 2026-10-29 · G2 收工轮 · 🟡 **P3 文档面订正**：404 body 字节数「20」⇒ **19**（G1 跨域上报 · 本域独立复算后才改）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `46ae663` · **核对日期** 2026-10-29
+> **来源**：**G1 lane 跨域上报**（`align/g1-users-follow`，commit `1879635` 途中撞到）⇒ **G1 无权改 `service/like`** ⇒ 登记给 G2 ⇒ **G2 域侧自修**（AGENTS.md §5.3e「域侧能自修的域侧修」）
+> **性质**：**P3 · 文档面**（注释 + `@DisplayName`）· **不阻塞任何一波**
+
+### ① 现象与两侧事实
+
+| 项 | 事实 |
+|---|---|
+| **Go 侧** | `net/http.Error` ⇒ `fmt.Fprintln(w, "404 page not found")` ⇒ body = `"404 page not found\n"` |
+| **字节数** | `"404 page not found"` = **18** 字符 + 尾随 `'\n'` = 1 ⇒ **共 19 字节**<br>⇒ ⚠️ **RAG 侧注释/显示名写的是「20」** ⇒ **错 1** |
+| **RAG 侧原文** | `service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiRouterErrorRealTomcatTest.java`<br>· `:46` javadoc「⇒ body = `"404 page not found\n"`，含尾随换行，**全长 20 字节**」<br>· `:187` `@DisplayName("Content-Length 与实际 body 长度一致（20）")` |
+| **⚠️ 断言本身是对的** | `:195` 的断言是 `assertEquals(r.body().getBytes(UTF_8).length, Integer.parseInt(cl))` ⇒ **按实际 body 字节长度比**，**不是写死 20** ⇒ ⇒ **一直绿** ⇒ 只有注释与显示名错 ⇒ **不是产品缺陷** |
+
+### ② 🔴 为什么这条值得修（**它已经造成过一次真实误判**）
+
+**G1 lane 在写 follow 域失败路径矩阵时照抄了「20」并写死断言 ⇒ 当场红才发现** ⇒ ⇒
+**这个错数不是无害的注释噪音**：它**跨类目传播**成了**错误的测试期望值**。
+⇒ ⇒ 故按「**已产生实际误判**」的强度修，而不是按「注释笔误」修。
+
+### ③ §5.4「执行实际改造」九项（浓缩版）
+
+| # | 项 | 内容 |
+|---|---|---|
+| 1 | **修改前的实现和行为** | javadoc + `@DisplayName` 各写「20」；**断言不变、一直绿** |
+| 2 | **具体问题** | 文档面**错数 20 vs 实际 19** ⇒ 且**已被 G1 误抄** |
+| 3 | **修改后的实现** | `:46` ⇒ 「全长 **19** 字节」并**补上复算依据**（18 字符 + `'\n'` = 1 ⇒ 19）+ 标注订正来源与日期；`:187` ⇒ 「Content-Length 与实际 body 长度一致（404 body = `"404 page not found\n"` = **19** 字节）」 |
+| 4 | **修改理由** | AGENTS.md §3.1（Go 是唯一真源）+ §3.3（错数会变成错误的期望值 ⇒ 必须消） |
+| 5 | **实际变更文件** | **仅 1 个**：`service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiRouterErrorRealTomcatTest.java`（**注释 + `@DisplayName` 各 1 处**；**断言、逻辑、产品代码零改动**） |
+| 6 | **测试场景和断言** | **断言本身未改** ⇒ 该类 **5 条**断言原样继续成立（其中 `:195` 那条正是「Content-Length == 实际 body 字节数」） |
+| 7 | **实际执行结果** | `mvn -o -B -pl service/like/like-api -am -Dtest='LikeApiRouterErrorRealTomcatTest' test` ⇒ **`Tests run: 5, Failures: 0, Errors: 0, Skipped: 0`** · **BUILD SUCCESS**（日志 `/tmp/g2run/g2-likeapi-404.log`） |
+| 8 | **尚未解决的问题** | ① **共享层同款错数**：`service/common/.../GoStyleRouterErrorResponses.java:83` ⇒ **不在 G2 写权内** ⇒ **G1 已单独登记给 G4**（本域**不越权改**）；② 本轮**只扫了 G2 三域**（`service/{message,like,task}/**`）的 `"404 page not found"` 出现处 ⇒ **其余 7 个域**（users/admin/follow/article/comment/favorite/hot）**未扫** ⇒ 建议各 lane 顺手扫一遍 |
+| 9 | **对阶段 2 的影响** | **无**（纯文档面）⇒ 阶段 2 不需要「恢复」旧文案 |
+
+### ④ §10「问题归属」十一项（浓缩版）
+
+| # | 项 | 内容 |
+|---|---|---|
+| 1 | **唯一编号** | `DRIFT-LIKE-API-404-BODYLEN`（🆕 本轮新造） |
+| 2 | **问题类型和优先级** | **P3**（文档面；⚠️ 但**已产生一次跨 lane 的实际误判** ⇒ 优先级高于「纯笔误」） |
+| 3 | **阶段归属** | **B 类**（阶段 1 竞争力补强项）—— **不阻断**阶段 1 准入 |
+| 4 | **涉及文件与实际证据** | Go：`net/http.Error` ⇒ `fmt.Fprintln(w, "404 page not found")`<br>RAG：`LikeApiRouterErrorRealTomcatTest.java:46` / `:187`（修前）<br>复算：`printf '404 page not found\n' \| wc -c` ⇒ **19** |
+| 5 | **触发场景** | 任何**照抄注释当期望值**的下游用例 ⇒ G1 已中招一次 |
+| 6 | **当前行为与预期行为** | 修前：注释/显示名 **20**；修后：**19**（= 实际） |
+| 7 | **对简历展示准入的影响** | **无影响**（断言本来就对） |
+| 8 | **对最终工程目标的影响** | **正向** ⇒ 消除一个会传播成错误期望值的注释 |
+| 9 | **修复方向** | ✅ **已修**（只改注释 + 显示名；**不写死数字进断言**） |
+| 10 | **验收条件和测试方案** | ① 该类 **5 条**仍全绿；② 注释与显示名里的数字 = **19**；③ **断言仍是「按实际字节数比」**（⇒ 以后 body 变了也不会再错） |
+| 11 | **当前处理状态** | ✅ **已修 + 已复跑（5/5 绿）**（2026-10-29） |
+
+### ⑤ 复算命令（可复算）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+
+# ① 字节数复算（应为 19）
+printf '404 page not found\n' | wc -c
+
+# ② 守门（5 条）
+mvn -o -B -DargLine=-Xmx2g -pl service/like/like-api -am \
+  -Dtest='LikeApiRouterErrorRealTomcatTest' -Dsurefire.failIfNoSpecifiedTests=false test
+# 期望：Tests run: 5, Failures: 0, Errors: 0 · BUILD SUCCESS
+
+# ③ 静态判据：G2 三域内不得再有「20 字节 / （20）」这组错数
+grep -rn "全长 20\|长度一致（20）" service/message service/like service/task --include=*.java | grep -v "/target/"
+# 期望：**0 命中**
+```
