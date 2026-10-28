@@ -12,7 +12,7 @@ import java.io.InputStream;
 import java.util.List;
 
 /**
- * 复刻 go-zero {@code rest/httpx/requests.go:117-125,153-155} 的
+ * 复刻 go-zero {@code rest/httpx/requests.go:117-124,153-155} 的
  * <b>「什么时候才读请求体」</b>判据 —— 这是 415 漂移的真正根因。
  *
  * <h2>Go 侧的判据（逐字）</h2>

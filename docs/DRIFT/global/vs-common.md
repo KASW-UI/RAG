@@ -4226,6 +4226,168 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
   ⇒ **`回执=1` 且 `批准=1` 才算该域已开工**；**任何只匹配「Jason 批准」二字的判据一律作废**。
 - ⚠️ **仍属共享面**（`docs/Worktree.md` §二·五 不在任何 lane 白名单）⇒ ⇒ **本层只登记 + 上报，不改该文件** ⇒ 收口那一步按上面那条命令替换。
 
+## 4.17 🟡 共享层「类 → 轴」覆盖映射（2026-10-29 04:1x）—— 补齐「9 轴都有结论 ≠ 共享层全覆盖」这条缺口
+
+### 4.17.1 缺口的事实（本层实测 · 2026-10-29）
+
+- `service/common` 共 **73 个类**（子包：`protection` 22 · `http` 13 · `observability` 11 · `spring` 9 · `logger` 6 · `communityfact` 4 · `persistence` 3 · `exception` 2 · `redis` 1 · `response` 1 · `snowflake` 1）。
+- §2 的 9 轴表**逐字点名**的共享层类 = **18 个**；机制密集区（`protection/` 22 ＋ `http/` 13 = **35 个**）里**有 6 个在 §2 轴表与本台账全文中出现次数 = 0**：
+  `GoStyleCpuReader` · `GoStyleRpcFailurePolicy` · `GoStyleSheddingStat` · `GoStyleStatusCapturingResponse` · `GoStyleJsonBodyConverter` · `GoStyleJsonBodyConverterConfig`。
+- ⇒ ⇒ **「9 条轴都写了结论」≠「共享层机制全覆盖」** ⇒ ⇒ 这是**本 lane 交付主体上的一条覆盖缺口**（**不是行为缺陷**）。
+- ⚠️ **方法边界**：判据 = 「类名在 `docs/DRIFT/global/vs-common.md` 全文出现次数 = 0」⇒ 这是**存在性检查** ⇒ **只能抓「完全没提」**，抓不到「提了但结论错」⇒ ⇒ 与 §4.16 的**内容锚定**是**两层**，缺一不可。
+- ⚠️ **本节只做 `protection/` ＋ `http/` 两个机制密集区（35 类）** ⇒ 其余 38 个类（`observability`/`spring`/`logger`/`communityfact`/`persistence`/`exception`/`redis`/`response`/`snowflake`）本轮**只做轴级归位，未逐类核** ⇒ 见 §4.17.7 诚实边界。
+
+### 4.17.2 6 个零提及类 · 逐条结论（本层补）
+
+| # | 类 | 机制 | Go 出处（**内容锚定后**） | 证据强度 | 结论 |
+|---|---|---|---|---|---|
+| 1 | `GoStyleCpuReader` | 整机 CPU 千分比采样 | `core/stat/usage.go:51-53` · `core/load/sheddingstat.go:59` · `core/load/adaptiveshedder.go:41-43` | **L1**（**无专属测试** ⇒ 无运行期证据）| ✅ 等价（含**哨兵值差异**的显式论证，见 §4.17.5 第 4 条）|
+| 2 | `GoStyleRpcFailurePolicy` | zrpc 服务端熔断「失败判据」`serverSideAcceptable` | `zrpc/internal/serverinterceptors/breakerinterceptor.go:53-58` · `zrpc/internal/codes/accept.go:9-17` | **L1**（`GoStyleRpcFailurePolicyTest` 断言 6 码白名单 ⇒ **单测级**，非活体对拍）| ✅ 一致 |
+| 3 | `GoStyleSheddingStat` | 降载三计数 ＋ 每分钟一行统计日志 | `core/load/sheddingstat.go:37-49` · `:51-68` · `zrpc/.../sheddinginterceptor.go:17-20,51-57,28,33,42` | **L1**（`GoStyleSheddingStatTest` **单测级**）| ✅ 一致 |
+| 4 | `GoStyleStatusCapturingResponse` | 只观测状态码的响应包装器（喂 breaker） | `rest/internal/response/withcoderesponsewriter.go:23-26`（`Code: http.StatusOK`）· `rest/handler/breakerhandler.go:33`（`cw.Code < 500`）| **L1**（**无专属测试**）| ✅ 一致 |
+| 5 | `GoStyleJsonBodyConverter` | Go「<b>何时才读请求体</b>」判据（415 漂移根因）| `rest/httpx/requests.go:117-124`（`ParseJsonBody`）· `:153-155`（`withJsonBody`）· `:17-22`（`maxBodyLen` const）| **L3**（`GoStyleJsonBodyRawHeaderTomcatTest` = **真 Tomcat** ＋ 2 个单测）| ✅ 一致 |
+| 6 | `GoStyleJsonBodyConverterConfig` | 该转换器的**注册顺序**（插在 Boot Jackson 之前）| **无 Go 对应物**（Spring 侧装配 ⇒ 表达层）| **L1**（顺序论证写在 javadoc；**无专属测试**）| ✅ 表达层 idiomatization，**无行为面** |
+
+### 4.17.3 「类 → 轴」覆盖映射（`protection/` 22 ＋ `http/` 13 = **35 类**逐类）
+
+| 包 | 类 | 归轴 | 本轮状态 |
+|---|---|---|---|
+| `protection` | `GoStyleAdaptiveShedder` | **A3** | ✅ 本轮补（Go 出处 2 处订正）|
+| `protection` | `GoStyleBreaker` | **A3** | ✅ 轴内 |
+| `protection` | `GoStyleBreakerFilter` | **A3** | ✅ 轴内 |
+| `protection` | `GoStyleBreakerRouteTemplateAutoConfiguration` | **A3** | ✅ 轴内 |
+| `protection` | `GoStyleCircuitOpenException` | **A3** | ✅ 轴内 |
+| `protection` | `GoStyleCpuReader` | **A3** | 🆕 **本轮补入** |
+| `protection` | `GoStyleCpuSheddingFilter` | **A3** | ✅ 轴内 |
+| `protection` | `GoStyleGrpcClientBreakerConfiguration` | **A2** | ✅ 轴内 |
+| `protection` | `GoStyleGrpcClientBreakerInterceptor` | **A2** | ✅ 轴内 |
+| `protection` | `GoStyleMaxBytesFilter` | **A3** | ✅ 轴内 |
+| `protection` | `GoStyleMaxConnsFilter` | **A3** | ✅ 轴内（MaxConns 半边 = **已签字偏离** `SD-2026-10-25-01`）|
+| `protection` | `GoStyleProtectionProperties` | **A3** | ✅ 轴内 |
+| `protection` | `GoStyleRouteResolution` | **A3** | ✅ 轴内 |
+| `protection` | `GoStyleRouteTemplateResolver` | **A3** | ✅ 轴内 |
+| `protection` | `GoStyleRouteTemplateSource` | **A3** | ✅ 轴内 |
+| `protection` | `GoStyleRpcBreakerInterceptor` | **A2** | ✅ 轴内 |
+| `protection` | `GoStyleRpcFailurePolicy` | **A2** | 🆕 **本轮补入** |
+| `protection` | `GoStyleRpcProtectionChain` | **A2** | ✅ 轴内 |
+| `protection` | `GoStyleRpcSheddingInterceptor` | **A2** | ✅ 轴内 |
+| `protection` | `GoStyleSheddingStat` | **A2** ＋ **A3** | 🆕 **本轮补入** |
+| `protection` | `GoStyleStatusCapturingResponse` | **A3** | 🆕 **本轮补入** |
+| `http` | `GoStyleFormLimitExceededException` | **A3** | ✅ 轴内 |
+| `http` | `GoStyleFormLimitMode` | **A3** | ✅ 轴内 |
+| `http` | `GoStyleFormLimitWebMvcConfig` | **A3** | ✅ 轴内 |
+| `http` | `GoStyleFormValueLimitInterceptor` | **A3** | ✅ 轴内 |
+| `http` | `GoStyleFormValues` | **A3** | ✅ 轴内（`G4-13` javadoc 已补消费者清单）|
+| `http` | `GoStyleJsonBodyConverter` | **🔴 轴外** | 🆕 本轮补入 ⇒ 见 §4.17.4 |
+| `http` | `GoStyleJsonBodyConverterConfig` | **🔴 轴外** | 🆕 本轮补入 ⇒ 见 §4.17.4 |
+| `http` | `GoStyleJsonContentTypeAdvice` | **A4** | ✅ 轴内 |
+| `http` | `GoStylePathNormalizingAutoConfiguration` | **A3** | ✅ 轴内 |
+| `http` | `GoStylePathNormalizingFilter` | **A3** | ✅ 轴内 |
+| `http` | `GoStyleRouterErrorResponses` | **A4** | ✅ 轴内（**共享层零自有测试** ⇒ 见 §4.17.7）|
+| `http` | `GoStyleTomcatParameterLimitCustomizer` | **A3** ＋ **A5** | ✅ 轴内 |
+| `http` | `GoStyleTraceparentFilter` | **A9** | ✅ 轴内 |
+
+### 4.17.4 🔴 轴覆盖映射的结论：**9 轴装不下「HTTP 请求体读取判据」**
+
+- `GoStyleJsonBodyConverter` ＋ `GoStyleJsonBodyConverterConfig` 实现的是 Go `rest/httpx/requests.go:117-124` 的
+  **`withJsonBody` 判据**（`ContentLength > 0 && Content-Type 含 "application/json"` ⇒ 否则**整个请求体被丢弃**）
+  ⇒ 这是 **415 漂移的根因机制** ⇒ ⇒ **9 条轴里没有任何一条以它为落点**：
+  - A3 是「HTTP **保护链**」（form 值上限 / breaker / maxConns / maxBytes / cpuShedding / 路径归一）；
+  - A4 是「错误码 / envelope」（404/405 字节形状）；
+  - A7（proto 契约）标的是 **N/A（共享层无落点）**，而本机制**不是** proto3 JSON 语义（`optional` presence / 字段号），
+    **是**「请求体何时被读取」⇒ ⇒ **不能塞进 A7**。
+- ⇒ ⇒ **建议给轴表加一条 A10「HTTP 请求体读取判据（Go `withJsonBody` / 415）」**
+  ⇒ ⇒ ⚠️ **轴表在 `docs/DRIFT/_cross/domain-common-lanes.md`（共享面，不在任何 lane 白名单）**
+  ⇒ ⇒ **本层只登记 ＋ 上报，不改该文件** ⇒ ⇒ 收口那一步定夺。
+- ⇒ ⇒ **顺带订正 A7 的措辞**：A7 现在的 N/A 理由是「共享层无落点」⇒ ⇒ 但共享层**有** `GoStyleJsonBodyConverter` 这个
+  HTTP 体读取落点 ⇒ ⇒ **A7 的 N/A 只对「proto3 JSON 语义」成立**（`optional` presence / 字段号 / Jackson 差异），
+  **不能被读成「共享层与 proto/JSON 无关」** ⇒ ⇒ 建议在 A7 行加一句边界说明。
+
+### 4.17.5 本轮修的 **10 处 Go 出处缺陷**（**内容锚定核验器逐条抓出** · 生产代码零行为改动）
+
+> 全部在 **`service/common/**`（本 lane 写权面）** · **只改 javadoc** ⇒ ⇒ **零行为改动**。
+> 抓出它们的不是 `tools/g3-anchor-check/check-anchors.py`（**它不扫 `service/common`**，且只做存在性/越界检查），
+> 而是**内容锚定**（被引区间里必须含有 javadoc 声称的那段内容）。
+
+| # | 位置 | 原引用（错） | 订正为 | 性质 |
+|---|---|---|---|---|
+| 1 | `GoStyleCpuReader.java:7` | `core/stat.CpuUsage()`（**无 `文件:行号`**）| `core/stat/usage.go:51` | 缺出处 |
+| 2 | `GoStyleCpuReader.java:11` | `core/load/sheddingstat.go:64` | `:59` | **行号错**（`:64` 是 `logx.Statf(...)`）|
+| 3 | `GoStyleCpuReader.java:13` | Go 引用被抄成 `func() bool { … > threshold }` | 真值 `func(cpuThreshold int64) bool { … >= cpuThreshold }` | **比较符差一个临界点**（`>` vs `>=`）|
+| 4 | `GoStyleCpuReader.java`（新增段）| （无）| 补 Go 侧 `cpuUsage` **初值 0**（`core/stat/usage.go:22`）+ **移动平均**（`:35-39`，250ms/β=0.95 ⇒ ≈5s 窗口）| **论证补强**（Go **从不返回负数** ⇒ 本实现的 `-1` 哨兵是 RAG 自定 ⇒ 行为等价、哨兵值不等价）|
+| 5 | `GoStyleSheddingStat.java:17` | `core/load/sheddingstat.go:37-47` | `:37-49` | 区间**少含** `IncrementDrop` 的函数体 |
+| 6 | `GoStyleSheddingStat.java:22` | `core/load/sheddingstat.go:52-70  loop()` | `:51-68  loop()` | `:70` 是 `reset()`，**不是** `loop()` |
+| 7 | `GoStyleSheddingStat.java:31` | `sheddinginterceptor.go:19-21,28-29,37` | `:17-20`（包级单例＋锁）· `:51-57`（`ensureSheddingStat`）· `:28`/`:33`/`:42`（三个计数消费点）| **三段全错**：`:19-21` 是 struct 字段 · `:29` 与计数无关 · **`:37` 是空行** |
+| 8 | `GoStyleAdaptiveShedder.java:163` | `adaptiveshedder.go:245-256` | `:245-252` | 区间**多含** `WithBuckets` |
+| 9 | `GoStyleAdaptiveShedder.java:179` | `adaptiveshedder.go:237-244` | `:237-242` | `:244` 是空行 |
+| 10 | `GoStyleJsonBodyConverter.java:15` | `rest/httpx/requests.go:117-125` | `:117-124` | 多含 1 行 |
+| 11 | `GoStyleStatusCapturingResponse.java:23-25` | Go 侧事实**无 `文件:行号`** | ＋ `rest/internal/response/withcoderesponsewriter.go:23-26` ＋ `rest/handler/breakerhandler.go:33` | 缺出处 |
+
+- ⇒ ⇒ **本轮 10 处缺陷里，存在性/越界/空行检查只能抓 1 处**（第 7 条的 `:37` 是空行）
+  ⇒ ⇒ **其余 9 处只有内容锚定能抓** ⇒ ⇒ 「有牙齿 ≠ 判得准」的又一例：**判据选错层 ⇒ 9/10 静默通过**。
+- ⚠️ **「10 处」是<b>下界</b>，不是全量**：这 7 个文件里共有 **47 条** `.go:行` 引用，本轮**只锚定了 21 条**
+  ⇒ ⇒ **另有 26 条未锚定**（其中 5 条引的是**未纳入已验表**的文件：`googlebreaker.go:121` · `core/stat/metrics.go:20` ·
+  `collection/rollingwindow.go:70` · `rest/config.go:53` · `rest/engine.go:163`）
+  ⇒ ⇒ **「已修 10 处」不可读成「这批文件的引用已查清」** ⇒ ⇒ 剩余量已登记（§4.17.8 同族）。
+- ⇒ ⇒ **第 3 条要特别说清**：**实现是对的** —— `GoStyleAdaptiveShedder.java:170` 写的是 `cpu < cpuThresholdPermille`
+  ⇒ ⇒ 过载条件 = `cpu >= threshold` ⇒ ⇒ **与 Go 的 `>=` 一致** ⇒ ⇒ **错的只是 javadoc 里抄给 Go 的那句话** ⇒ ⇒ **零行为改动**。
+
+### 4.17.6 新增守门（**共享层 · 真正能触发**）
+
+- **`service/common/src/test/java/com/rag/common/verify/GoCitationAnchorGateTest.java`**（**新增**）—— **三道门**：
+
+  | # | 门 | 判据 | 依赖外部输入？| 作用 |
+  |---|---|---|---|---|
+  | 1 | **引用锁** `correctedGoCitationsAreLocked` | 断言「已订正的 **13** 处引用形态**在**」＋「已知写错的 **8** 处形态**不在**」| **无**（自包含，只读本仓源码文本）| **防回退**（判红）|
+  | 2 | **白名单报告** `everyJavadocCitationIsCoveredByTheVerifiedTable` | 把这 7 个文件里**每一条** `.go:行` 引用列出来，标出哪些**不在已验表** | **无** | **如实报数**（**刻意不判红**，见下）|
+  | 3 | **内容锚定** `goCitationsAreContentAnchored` | **21** 条引用逐条回 **Go 真源** 比对区间内容 | **是**（真源 ＋ 模块缓存）| 证明「引用指到了声称的那一段」|
+
+- ⚠️ **第 3 道门输入不可见时 = skipped**（surefire 报告里可见 skipped 计数）⇒ ⇒ **skip ≠ 已验**。
+  ⇒ ✅ **版本不写死**：go-zero 版本从**真源 `go.mod` 现读**（`GO_REPO` 环境变量优先）⇒ ⇒ 真源升版时本门自动跟着走，**不会对着旧副本验**。
+- 🟢 **变异证明有牙齿（2026-10-29 实跑）**：把 `GoStyleCpuReader.java` 的 `sheddingstat.go:59` **改回 `:64`**
+  ⇒ ⇒ **BUILD FAILURE · 1 failure**（第 1 道门抓住）⇒ ⇒ 恢复后 **3 tests / 0f / 0e / 0 skipped / BUILD SUCCESS**。
+- 🔴 **本轮自己踩了一次「跑绿 ≠ 判据活着」**：第 3 道门**第一版把版本捕获成 `1.10.2`（漏了 `v`）**
+  ⇒ ⇒ 模块目录拼成 `go-zero@1.10.2` ⇒ ⇒ **永远走 skip 分支** ⇒ ⇒ 报告上写着「绿（skipped）」，**实际一次都没跑过**
+  ⇒ ⇒ **修正**：目录名补 `@v` 前缀 ⇒ ⇒ 现已实跑（`[G4] 内容锚定已实跑：21 条引用逐条比对 go-zero@v1.10.2`）
+  ⇒ ⇒ **教训**：**「skipped」不能读成「通过」** ⇒ ⇒ 本门把 skip 理由**显式打到 stdout**，不靠 surefire 的 XML（它不记 `message`）。
+- 🟡 **第 2 道门刻意「留痕不判红」**：这 7 个文件里共有 **21 + 21 + 5 = 47 条** `.go:行` 引用，
+  其中只有 **21 条**进了已验表（被内容锚定过）⇒ ⇒ **其余 26 条未锚定**
+  ⇒ ⇒ 若对「未纳入表」一律判红 ⇒ **本仓当前就是红的** ⇒ ⇒ 守门会变成「常红的摆设」⇒ ⇒ **无意义**
+  ⇒ ⇒ 所以：**判红的责任交给第 1 道门**（本轮修过的 11 处），第 2 道门只负责**把没核过的引用如实报出来**
+  ⇒ ⇒ ⚠️ **因此不能把本门读成「这 7 个文件的引用全有网」** ⇒ ⇒ **26 条未锚定引用**已登记为剩余项（§4.17.8 同族）。
+- ⇒ ⇒ **这是本轮第一条「直接读 javadoc」的网** ⇒ ⇒ 在此之前，**Go 出处写错不会让任何测试变红**。
+
+### 4.17.7 🟡 本节的诚实边界（AGENTS.md §0：「已改」≠「已验证」）
+
+1. **6 个补入类的证据强度多数只有 L1**（源码对照 ＋ 内容锚定）⇒ ⇒ **其中 3 个无专属测试**
+   （`GoStyleCpuReader` / `GoStyleStatusCapturingResponse` / `GoStyleJsonBodyConverterConfig`）⇒ ⇒ **无运行期证据**。
+2. **内容锚定只能证明「引用指到了声称的那一段」** ⇒ ⇒ **不能证明「RAG 的实现与 Go 等价」** ⇒ ⇒ 后者仍需逐条语义论证（本轮已对 4 条做了，见 §4.17.5 第 3/4 条与 §4.17.2 第 1 条）。
+3. **本节只覆盖 `protection/` ＋ `http/` 两个机制密集区（35/73 类）** ⇒ ⇒ 其余 **38 个类**本轮**只做轴级归位、未逐类核**
+   ⇒ ⇒ **「9 轴都有结论」仍不等于「73 个类都逐类核过」** ⇒ ⇒ 这是**下一轮**的事（**阶段二范围，本层不预支**）。
+4. ⚠️ **第 4 条（哨兵值差异）是一条「行为等价、值不等价」的边** ⇒ ⇒ 它**不是**已签字偏离（`docs/Intentional_Deviations/**` 里没有这一条）
+   ⇒ ⇒ **但它也不构成行为漂移**（Go 侧 `cpuUsage` 初值 0 ⇒ 同样判「未过载」）⇒ ⇒ **本层按「表达层差异」登记在此，不另开偏离单**
+   ⇒ ⇒ 若收口认为需要显式登记，**由收口执行者决定**（**G4 不自行扩权**）。
+
+### 4.17.8 🟡 本层两份台账的「裸文件名 `.go:行`」引用 —— 一条**可量化的剩余项**（本层实测 · 2026-10-29）
+
+- **口径**：本层两份台账（`docs/DRIFT/common/*.md` ＋ `docs/DRIFT/global/vs-common.md`）里
+  **文件部分不含 `/`** 的 `.go:行` 引用 = **91 条**（去重后 63 个 `(文件,行)`）。
+- **消歧索引**：**真源 Go 仓 ＋ go-zero v1.10.2 ＋ GOROOT/src** 三个 root 全量 `.go` 文件名索引。
+  ⚠️ **第一轮只索引了前两个 root ⇒ 报出「`context.go`/`time.go` 同名候选 = 0」⇒ 这是「我没找对」，不是「真源里没有」**
+  ⇒ ⇒ 补上 GOROOT 后重算（**这正是「判定『找不到』之前先确认『我找的方式对不对』」那条教训的现场复现**）。
+
+| 分类 | 条数 | 含义 |
+|---|---|---|
+| 文件名**唯一** | **52** | ✅ 裸写**不构成歧义**（可留）|
+| 文件名**多候选** | **39** | 🟡 **消歧待办** ⇒ 需补全路径（如 `types.go` → `service/message/api/internal/types/types.go`）|
+| 文件名**找不到** | **0** | ✅ **无「真源里不存在」的情形** ⇒ ⇒ **这 39 条不是「错误」，是「不够唯一」** |
+
+- ⇒ ⇒ **机器守门只能报 AMBIGUOUS**（`tools/g3-anchor-check/check-anchors.py` 的 `AMBIGUOUS` 桶）
+  ⇒ ⇒ **不能当错误处理** ⇒ ⇒ **本层只量化 + 登记，不在本轮逐条消歧**（39 条 × 内容核 = **阶段二规模**）。
+- ⇒ ⇒ **本轮已消歧 1 条**：`docs/DRIFT/common/http.md` 的 `types.go:101-105`
+  ⇒ ⇒ 内容锚定 = `service/message/api/internal/types/types.go:101-105`（**`PageReq` 结构体本体**：`Offset/Limit/UnreadOnly` 三字段全 `,optional`）
+  ⇒ ⇒ ⚠️ **原裸名有 13 个同名候选**，而**像域**那个 `types.go` 只有 87 行 ⇒ **裸写会指到越界的那个** ⇒ ⇒ **这正是「裸文件名 + 行号」最危险的一种形态**。
+
 ## 开工前置回执
 
 > ⚠️ **本节由 lane 自己写（`docs/Worktree.md` §二·五 ③）**。**⑤ 由调度员代填** —— 回执人**不得自批**（回执落笔时 ⑤ 留空；**已于 2026-10-29 03:45 依据 Jason 在本 lane 会话内的明示代填** ⇒ 见本节末尾 ⑤ 行）。

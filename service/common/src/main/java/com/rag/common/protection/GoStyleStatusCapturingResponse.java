@@ -21,8 +21,11 @@ import java.io.IOException;
  * <p><b>默认值 200 的依据</b>：servlet 规范下，应用若<b>从未</b>调用
  * {@code setStatus} 而直接写 body，最终状态码就是 200。
  * Go 侧的 {@code response.NewWithCodeResponseWriter} 同样以
- * {@code http.StatusOK} 为初值（{@code cw.Code < http.StatusInternalServerError} 这一句
- * 依赖该初值才能把「没显式设过码」判成成功）。
+ * {@code http.StatusOK} 为初值（{@code rest/internal/response/withcoderesponsewriter.go:23-26}
+ * 的 {@code Code: http.StatusOK}），
+ * 而 {@code rest/handler/breakerhandler.go:33} 的
+ * {@code cw.Code < http.StatusInternalServerError} 这一句
+ * 依赖该初值才能把「没显式设过码」判成成功。
  * ⇒ 两边的「未显式设码」都等价于 <b>成功</b>，不是 unknown。
  */
 final class GoStyleStatusCapturingResponse extends HttpServletResponseWrapper {
