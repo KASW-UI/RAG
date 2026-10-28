@@ -194,7 +194,40 @@ follow-api (HTTP :8891)  ──gRPC plaintext──▶  follow-rpc (:8082)  ─�
 | **尚未解决的问题** | `users` / `admin` 侧端口仍硬编码（`49210` / `8081` / `8889` / `49900`）⇒ 阶段 2 统一（`S1-FOLLOW-005` 第 9 项） |
 | **对阶段 2 的影响** | 无冲突；阶段 2 可把 6 个组件的端口统一为可覆盖 |
 
-### 4.2 阶段 1D 中**本轮明确没做**的事（诚实边界）
+### 4.2 `T11` · 🆕 **本轮落码 · 域侧自修** · 补齐**独立失败路径矩阵** ⇒ 基线 §九 `G-13` 在本域**闭合**
+
+> **背景**：`docs/PhaseGoal-judge.md` P0 #2 的判据原文（「存在失败路径处理」推不出「参数校验 / 业务规则 / 认证 / 权限四项都有效」；且失败路径**域覆盖不全**）＋ §九 `G-13`（`article` / `follow` / `task` / `hot` 四域无独立失败路径矩阵）。
+> ⇒ 本轮**在 follow 域补齐那份矩阵**，且**用真 Tomcat 跑**（原先 10 个测试类**全部** `webEnvironment = MOCK` ⇒ **真容器覆盖率为零**）。
+
+| 落点 | 内容 | Go 出处（期望值逐条抄自 Go 源码） |
+|---|---|---|
+| 🆕 `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/support/RealTomcatPort.java` | 真 Tomcat 的**端口选取 + 双地址 bind 自检**（通配 `0.0.0.0` **与** 具体 `127.0.0.1` **两个都要探** ⇒ 只探一个会漏「静默被抢」）· 段 = **22340–22359**（follow 域预分配段 22300–22399 内、且**不与** `follow-api` 的 `RealGrpcPort` 22300–22319 / `follow-rpc` 的 22320–22339 重叠） | **测试设施** ⇒ Go 侧无对应物 ⇒ **不存在语义对照义务**（只影响测试能否稳定跑到被测代码，不影响任何对外行为）|
+| 🆕 `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiFailurePathMatrixTest.java` | **62 条**失败路径矩阵用例（**8 端点 × 4 类失败** + 基础设施类 + 路由字节级） | 见下表 |
+| 🆕 `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java` | ② 段的「端口类个数」断言 **8 → 9**（新增 follow-api 的 `RealTomcatPort`）⇒ **同批更新，不留雷** | — |
+
+**矩阵的四个失败类 × 8 端点（期望值逐条带 Go `文件:行号`，写在测试的 `Endpoint` 表里）**：
+
+| 类 | 判据（Go 出处） | 可观察形态 | 覆盖 |
+|---|---|---|---|
+| **认证** | `rest/handler/authhandler.go:106`（401 空 body）· `middleware/checkblacklistmiddleware.go:42-48`（401 两字段）· `logic/follow/helper.go:13-33`（claim 取不到 ⇒ **5004**）| ① 无 token ⇒ **401 + 空 body + 无 Content-Type** ② 黑名单 ⇒ **401 + `{"code":5004,"msg":"unauthorized"}` + `application/json;charset=utf-8`**（**逐字节**）③ claim 缺失 ⇒ **HTTP 200 + `{code:5004}`**（**不是 401**）| **8 × 3 = 24** |
+| **权限** | `getblocklistlogic.go:45-50` 与 `getrecommendationslogic.go:45-50`（**只有这两个**有 Forbidden 分支）| 查别人 ⇒ **200 + `{code:5005,msg:"forbidden"}`**，且 **RPC 完全不被调用**；`getfollowlistlogic.go:45` / `getfollowerlistlogic.go:45` **没有**该分支 ⇒ **公开可查** | **8** |
+| **参数校验** | `types/types.go:25-27`（`RelationActionReq.target_id` **无 optional ⇒ 必填**）vs `types/types.go:6-10`（`FollowListReq` 三字段**全 optional**）| 动作端点缺必填 ⇒ **200 + `{code:5001}`**（**不是 400** —— follow api 注册了 `httpx.SetErrorHandler`）；list 端点 ⇒ 按**零值**继续 | **8** |
+| **业务规则** | 8 个 logic 里逐条相同的 `if rpcResp.Code != int32(followcommon.Success) { return nil, followcommon.NewErrCodeMsg(int(rpcResp.Code), rpcResp.Msg) }` | **原样透传** rpc 的 code + msg | **8** |
+| **基础设施** | `common/errmsg.go` `BizCodeFromError`（描述文本优先 → 再按 gRPC code 映射 → 兜底 1015）| rpc 抛 `UNAVAILABLE` ⇒ **200 + `{code:1015,msg:"service busy"}`** | **8** |
+
+**另有 7 条单点用例**：404 逐字节（`"404 page not found\n"` ＋ `text/plain;charset=utf-8` ＋ `nosniff`）· 405 裸状态码（**无 body、无 Content-Type**、带 `Allow`）· 404/405 **不经过鉴权** · 拦截器顺序（**JWT 在外、黑名单在内** ⇒ 签名无效的 token 恒 401 空 body 且**不查 Redis**）· Redis 故障 **fail-open** · 端口段自检（防止 `webEnvironment` 被改回 `RANDOM_PORT`）。
+
+⚠️ **证据强度口径**：本类的期望值**全部抄自 Go 源码**（每条带 `文件:行号`）⇒ 满足基线 §1.1 **R3** 的 ④⑤⑥ ⇒ **按 R3 计入**；
+⚠️ **不按 R4 计**（R4 要求**双侧活体对拍 + 变异**）⇒ 本类**不是**双侧对拍，**不得**据此宣称「与 Go 逐字节一致」。
+⇒ ⚠️ **P0#2 的证据覆盖因此提升**（4 域中 **follow 域已补**），但 **P0#2 本身仍受其余 3 域（article / task / hot）未补的制约** ⇒ **不因本条把 P0#2 判成 ✅**。
+
+⚠️ **本轮没在 `tools/` 落脚本（主动选择 · 不是遗漏）**：用户已授权可写 `tools/difftest/follow/`（域专属子目录），但本轮**判定为不值得写**，三条理由：
+① **价值近零** —— 矩阵的入口就是一条 `mvn -Dtest=…` 命令（§5.2.1 ＋ R14），再包一层 shell 脚本**不增加任何能力**；
+② **会造第二份真源** —— `docs/PhaseGoal/g1.md` §5 已经是「本 lane 的收口命令清单」，再写一份 `run-*.sh` ⇒ **两份清单会漂移**（且 `g1.md` 是**机器生成物** ⇒ 由收口执行者重生成 ⇒ 手写脚本必然对不上）；
+③ **写权归属模糊** —— `tools/difftest/follow/` **不在任何 lane 的白名单里**（`check-wave-lane-ownership.py` 的 `ACTIVE` 只声明了 `service/**` 与 `docs/DRIFT/<域>/**`）⇒ 落进去就是一个**无人拥有**的文件，落在共享工具树里 ⇒ 与 AGENTS.md §5.3c 的「共享面只有 G4 / 收口能写」冲突。
+⇒ ⇒ **结论**：可复算入口写进**本域台账**（§5.2.1 ＋ §9 的 R14）⇒ **够复算、零漂移、不占共享面**。
+
+### 4.3 阶段 1D 中**本轮明确没做**的事（诚实边界）
 
 | # | 没做 | 原因 |
 |---|---|---|
@@ -225,9 +258,10 @@ service/follow/follow-rpc,service/follow/follow-common \
 
 | 项 | 值 |
 |---|---|
-| **退出码 / 结果** | **0** · `BUILD SUCCESS` · **09:18 min** · 18 个 reactor 模块**全部 SUCCESS** |
-| **用例总数** | **1133** 条（**0 失败 / 0 错误 / 0 跳过**）· 来自 **192** 个 `TEST-*.xml`（构建收工后求和） |
-| **本域三模块** | `follow-api` **74** · `follow-rpc` **86** · `follow-common` **37** ⇒ **197 条** |
+| **退出码 / 结果** | **0** · `BUILD SUCCESS` · **08:56 min** · 18 个 reactor 模块**全部 SUCCESS** |
+| **用例总数** | **1195** 条（**0 失败 / 0 错误 / 0 跳过**）· 来自 **193** 个 `TEST-*.xml`（构建收工后求和）|
+| **本域三模块** | `follow-api` **136** · `follow-rpc` **86** · `follow-common` **37** ⇒ **259 条** |
+| 🆕 **与上一轮比** | **1133 → 1195（正好 +62）** ⇒ 增量**全部**来自本轮新增的 `FollowApiFailurePathMatrixTest`（§5.2.1）⇒ **既有 1133 条一条没退化**；`follow-api` **74 → 136**（+62）⇒ 逐模块核对：`user-api` 127 · `user-rpc` 162 · `admin-api` 149 · `admin-rpc` 122 · `users-common` 39 · `common` 337 **均与上一轮逐字相同** |
 | ⚠️ **首轮曾整类红** | 首轮 `follow-api` 的 `FollowApiRedisDisconnectedFastFailTest` / `…DefaultBehaviorTest` **整类 error**（`Can't get Docker image: testcontainers/ryuk:0.14.0`）⇒ 根因 = **本模块 pom 缺 `TESTCONTAINERS_RYUK_DISABLED`**（全仓 52 个模块里只有它会去拉 ryuk）⇒ **已修（T9）· 本轮复验 2+2 绿** |
 
 ### 5.2 定向复验（本轮两处改动）
@@ -245,6 +279,24 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false \
 | `FollowApiRedisDisconnectedDefaultBehaviorTest` | **2/2 绿**（修前：**整类 error**）|
 | `FollowProtoContractTest`（🆕 本轮新增） | **3/3 绿**（0.107 s）⇒ ① 契约逐条一致 ② 嵌套 message 单独成行 ③ 变异自检 |
 | 日志中 ryuk 拉取记录 | **0 条** |
+
+### 5.2.1 🆕 失败路径矩阵复验（**真 Tomcat** · 本轮新增 `T11`）
+
+```bash
+cd /Users/pr/Documents/java&golang/RAG.worktrees/g1-users-follow
+mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false \
+    -Dtest='FollowApiFailurePathMatrixTest' -pl service/follow/follow-api -am test
+```
+
+| 项 | 值 |
+|---|---|
+| **退出码 / 结果** | **0** · `BUILD SUCCESS` · `follow-api` **Tests run: 62, Failures: 0, Errors: 0, Skipped: 0** · 5.471 s |
+| **覆盖** | **8 端点 × 4 类失败 + 基础设施类 + 7 条单点**（详见 §4.2 的矩阵表）|
+| **容器** | **真 Tomcat**（`DEFINED_PORT` + `RealTomcatPort.pick()` ⇒ 落在 **22340–22359**）⇒ **follow-api 的真容器覆盖率从 0 变成 62 条** |
+| ⚠️ **首轮曾 12 条红** | 首轮 = **62 条 / 12 失败** ⇒ **两条都是判据自身的错**，**不是产品缺陷**：① `assertEnvelope` 对**成功**信封也要求 `data:null`（成功信封的 `data` 是载荷）⇒ 已拆成 `assertErrorEnvelope`（`data` 必须 null）/ `assertSuccessEnvelope`（`data` 非 null）② 404 的 `Content-Length` 被我写死成 **20**，实测 **19** ⇒ 已改成「按实际 body 字节数比」（与 like-api 同法）|
+
+> ⚠️ **首轮那 12 条红的性质要说清楚**：它们**不是**「产品行为与 Go 不一致」，而是**我新写的判据过严 / 复述了一个错数** ⇒
+> ⇒ 处置是**改判据**（不是改产品）⇒ 这正是 AGENTS.md §3.3 规则 ③ 的应用：**先改/删错误断言，再看实现**。
 
 ### 5.3 收口验收命令（本域相关，逐条实跑）
 
@@ -305,7 +357,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false \
 | **E1** | **项目说明缺失**（`README.md` 7 字节 · compose 要 `.env` 而仓内无模板） | **项目级** | 外部无法按说明复现启动 ⇒ 阶段 1 的「真实运行」只能靠内部台账自证 | **A 类** · 收口（users 档 `S1-USERS-001`）|
 | **E2** | **`follow-rpc` 的 5 个 `follow_rpc_*` 指标无抓取出口**（Go DevServer `:16065/metrics` 有 · RAG 纯 gRPC 进程无 HTTP 口） | follow 域（**同款 5 处**：`favorite-rpc` / `message-rpc` / `like-rpc` / `user-rpc` / `admin-rpc`） | 可观察性缺一环 ⇒ **`follow-rpc` = 🟡** ⇒ **G1 lane 判定 = 🟡** | **C 类**（阶段 2 建设项）· ⚠️ **用户 2026-10-24 已定「本轮不落地」⇒ 登记待重新拍板** |
 | **E3** | **`follow` 域 0 个落仓双侧对拍入口**（探针在 `/tmp` ⇒ 已不可复算）· 基线 §九 `G-1` | follow 域 | `follow-api`/`follow-rpc` 的 **R4 不成立**（已按 R3 计入）⇒ 「52/52 逐字节一致」**今天不可复算** | **B 类**（非阻断）|
-| **E4** | **本域无独立失败路径矩阵** · 基线 §九 `G-13`（4 域无：article / follow / task / hot） | follow 域 | P0#2/#4 的**证据覆盖**不足（不影响「域内已满足」的判定）| **B 类**（非阻断）|
+| **E4** | ~~**本域无独立失败路径矩阵** · 基线 §九 `G-13`（4 域无：article / follow / task / hot）~~ | follow 域 | ✅ **本轮闭合（`T11`）** —— 8 端点 × 4 类失败 × **真 Tomcat** = **62 条**用例全绿（§4.2 / §5.2.1）⇒ **follow 域的 P0#2 证据覆盖已补齐**；⚠️ **但 P0#2 本身仍受其余 3 域未补的制约 ⇒ 不因本条判成 ✅** | ✅ **本轮闭合** |
 | **E5** | **`check-proto-static.sh` 不覆盖 follow** · 基线 §九 `G-6` | follow 域 | ⇒ **本轮已由 🆕 `FollowProtoContractTest` 补上字段级断言** ⇒ 该项**本轮已闭合**（功能上）| ✅ **本轮闭合** |
 | **E6** | **proto「消费方式」未取证**（`optional` presence 的构造点语义）· 基线 §九 `G-19` | 全 10 proto | **取证缺口 ⇒ 不降 R**；⚠️ **follow 的 proto 无 `optional` 字段 ⇒ 该边界在本域不适用** | **B 类**（不适用）|
 | **E7** | **双侧活体对拍本轮未复验**（§5.4） | follow 域 | 台账既有 L3/L4 结论**沿用原日期** ⇒ 证据强度**不提升**、**不降** | **B 类** |
@@ -326,6 +378,8 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false \
 | 🆕 **`S1-FOLLOW-007`** | **基线仍把已签字偏离记成开放缺陷** —— `docs/PhaseGoal-judge.md` 的 A-2 `follow-api` 行仍写「`DRIFT-FOLLOW-008`（MaxConns 闸门粒度 ⇒ 落点 `service/common`）」⇒ 机器生成的 `docs/PhaseGoal/g1.md` 由此产出一行「**→ G4**」的派单指令 ⇒ ⇒ **照它执行就会让 G4 去改掉一个用户已决定保留的行为** | `docs/PhaseGoal-judge.md` 是**阶段一终点指标的唯一数据源**，`docs/PhaseGoal/g*.md` 由它**机器生成** ⇒ **不在 G1 写权面** ⇒ 交**合并收口执行者**订正 + 重跑生成器（`python3 tools/difftest/check-phasegoal-lanes.py --write`）⇒ 校验器 `EXIT=0` | 🔴 **A 类风险**（派单错误 ⇒ 共享层被改坏）· 🟡 证据面 | `grep -n "DRIFT-FOLLOW-008" docs/PhaseGoal-judge.md docs/PhaseGoal/g1.md` |
 | 🆕 **`S1-FOLLOW-008`** | **`check-surface-parity.py` 有两个「静默假绿」口子** ① **未知域名不报错**：`--domain users`（真名是 `user` / `admin`）⇒ **匹配不到任何域** ⇒ 输出「HTTP 端点 Go=0 / RAG=0」却 **EXIT=0** ⇒ **空跑即通过**；⚠️ `docs/PhaseGoal/g1.md` §5 的收口命令**正是这条错名命令** ② **`GO_REPO` 默认值按「仓库的同级目录」推导** ⇒ 在 **worktree**（`RAG.worktrees/<lane>`）里会算成 `RAG.worktrees/Sea-RideTheWind_golang` ⇒ 找不到 Go 真源 ⇒ `follow` 域**假红**（EXIT=1，报「Go routes.go 不存在」） | `tools/difftest/**` 属**共享工具**（`tools/difftest/README.md` 明确归**合并收口执行者**）⇒ **不在 G1 写权面** ⇒ 上报 | 🟡 **证据面**（判据自身不可信 ⇒ 所有 lane 的「契约面一致」结论都带这个洞）<br>⚠️ **注意**：`--domain users` 的假绿**不会让任何错误结论通过**，但它**让「未跑」长得像「跑过」** ⇒ 与「零命中是假信号」同族 | 在 worktree 内：`python3 tools/difftest/check-surface-parity.py --domain users` ⇒ **EXIT=0 + 0/0**<br>正确用法：`GO_REPO="<Go 真源绝对路径>" python3 tools/difftest/check-surface-parity.py --domain user --domain admin --domain follow` |
 | 🆕 **`S1-FOLLOW-009`** | **另外 5 个 api 模块缺 `TESTCONTAINERS_RYUK_DISABLED`** —— 全仓「凡真跑 Testcontainers 的模块」都注入了它（`like-rpc` / `comment-rpc` / `message-rpc` / `message-api` / `favorite-rpc` / `favorite-api` / `hot-rpc` / `task-rpc` / `article-rpc` / `common` / **`follow-rpc`** / `user-api` / `user-rpc` / `admin-api` / `admin-rpc`），**唯独 5 个 api 模块没有**：`article-api`（G3）· `comment-api`（G3）· `hot-api`（G3）· `like-api`（G2）· `task-api`（G2）⇒ **在 Docker Hub 不可达的环境里，这些模块的 Testcontainers 用例会整类 error**（`Can't get Docker image: testcontainers/ryuk:0.14.0`）⇒ **本轮 G1 的 `follow-api` 就是这样整类红的** | 各归 G2 / G3 ⇒ **不在 G1 写权面** ⇒ **登记 + 上报**（本域 `follow-api` 已自修并留证） | 🟡 **B 类**（测试基础设施 ⇒ 不影响产品行为）<br>⚠️ **但会伪造「域级回归红」** ⇒ 判据可信度面 | `for f in $(find service -name pom.xml -not -path '*/target/*'); do grep -q TESTCONTAINERS_RYUK_DISABLED "$f" \|\| echo "$f"; done`<br>（**排除** `*-proto` / `*-common` / 聚合 pom —— 它们不跑 Testcontainers） |
+| 🆕 **`S1-FOLLOW-011`** | **like 域的真 Tomcat 测试沿用了同一个错数** —— `service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiRouterErrorRealTomcatTest.java:46` 的 javadoc 与 `:187` 的 `@DisplayName` 都写「20」⇒ ⚠️ **它的断言本身是对的**（按**实际 body 字节长度**比，不是写死 20）⇒ **一直绿** ⇒ 只有**注释与显示名**错 | `service/like/**` ⇒ **G2 写权** ⇒ G1 **只登记 + 上报** | 🟡 **文档面**（P3）<br>⇒ **建议**：与 `S1-FOLLOW-010` 一并订正（同一处错数的两个副本）| `grep -n '20' service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiRouterErrorRealTomcatTest.java` |
+| 🆕 **`S1-FOLLOW-010`** | **共享层 `GoStyleRouterErrorResponses` 的 javadoc 把 404 body 写成「全长 20 字节」，实测是 19** —— `service/common/src/main/java/com/rag/common/http/GoStyleRouterErrorResponses.java:83` 的注释说「{@code fmt.Fprintln} 写出，所以**带一个尾随换行**，全长 {@code 20} 字节」⇒ 实际 `"404 page not found\n"` = 18 + 1 = **19 字节**（`printf '404 page not found\n' \| wc -c` ⇒ **19**）⇒ **注释差 1**。⚠️ **不影响行为**（常量 `NOT_FOUND_BODY` 本身是对的 ⇒ 真容器实测 `Content-Length: 19`）⇒ 只是一处**会误导后来者写断言**的注释 | `service/common/**` ⇒ **G4 写权** ⇒ G1 **只登记 + 上报** | 🟡 **文档面**（P3）<br>⚠️ **值得修的原因**：like 域那条真 Tomcat 断言的 `@DisplayName` 也照抄了这个「20」⇒ 若后来者照它写死 `assertEquals("20", …)` ⇒ **当场红**（本轮就踩过一次）⇒ 该注释**已经产生过一次实际误判** | `printf '404 page not found\n' \| wc -c` ⇒ **19**<br>`grep -n '全长' service/common/src/main/java/com/rag/common/http/GoStyleRouterErrorResponses.java` |
 
 ### 6.2 G1 → G4：派单（**反馈单 7 项**，缺项不进排期）
 
@@ -359,15 +413,15 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false \
 
 | §5.7 要求 | 本轮的值 |
 |---|---|
-| **实际代码状态及版本标识** | 分支 `align/g1-users-follow` · 基线 `29a0bce`（= `do-my-own-gh`）· **本轮改动**：1 个配置行（`follow-rpc` 端口 env 覆盖）＋ 1 个 pom 段（ryuk env）＋ 3 个新增文件（proto 契约测试 ＋ 基准 ＋ 生成脚本）＋ 5 份台账订正 ⇒ **提交后以 commit hash 为准** |
-| **构建和测试结果** | 域级回归 **EXIT=0 · BUILD SUCCESS · 09:18 min · 1133 条 / 0F / 0E / 0S**（本域 **197** 条）· 定向复验 **7 条全绿** · 收口验收命令 **9 条**：8 条 EXIT=0、1 条 EXIT=1（**既存**锚点失效） |
+| **实际代码状态及版本标识** | 分支 `align/g1-users-follow` · 基线 `29a0bce`（= `do-my-own-gh`）· **本轮改动**：1 个配置行（`follow-rpc` 端口 env 覆盖）＋ 1 个 pom 段（ryuk env）＋ 3 个新增文件（proto 契约测试 ＋ 基准 ＋ 生成脚本）＋ **🆕 2 个新增文件（`RealTomcatPort` ＋ `FollowApiFailurePathMatrixTest`）＋ 1 个修改文件（`BlindPortGateTest` ② 段 8→9）** ＋ 5 份台账订正 ⇒ **提交后以 commit hash 为准** |
+| **构建和测试结果** | 域级回归 **EXIT=0 · BUILD SUCCESS · 08:56 min · 1195 条 / 0F / 0E / 0S**（本域 **259** 条 · 🆕 较上一轮 **+62** ＝ 失败路径矩阵）· 定向复验 **7 条全绿** ＋ 🆕 矩阵复验 **62 条全绿** · 收口验收命令 **9 条**：8 条 EXIT=0、1 条 EXIT=1（**既存**锚点失效） |
 | **核心业务链路的验收结果** | `follow-api → follow-rpc → PG` ＋ `follow-rpc → user-rpc（用户存在性校验）` ⇒ **域内实测沿用台账**（2026-10-24 的 **52/52 逐字节一致**、2026-10-27 的真启动 A/B/C）⇒ **本轮未起真栈复跑** ⇒ **按原日期读，不提升** |
 | **P0 / P1 / P2 最终状态** | **P0**：域内 ✅ 8/9（#5 项目级 🔴）· **P1**：✅ 至少 5 个机制闭环 · **P2**：3 项登记（1 项已销号 · 1 项已修 · 1 项待重新拍板） |
-| **全部已知缺陷和未验证风险** | §3（`S1-FOLLOW-001~009`）· §6.1 上报项 · §6.2 例外 · 域台账（`api.md` / `rpc.md` / `common.md` / `proto.md`）· [`vs-common.md`](vs-common.md) 9 轴 · 基线 §九 `G-1`（双侧探针未落仓）/ `G-6`（proto 静态守门只覆盖 3 域）/ `G-13`（本域无独立失败路径矩阵）/ `G-19`（消费方式未取证） |
-| **完整的差异与暂缓项清单** | 本文件 §3（**9 条，每条 11 项齐全**） |
+| **全部已知缺陷和未验证风险** | §3（`S1-FOLLOW-001~009`）· §6.1 上报项 · §6.2 例外 · 域台账（`api.md` / `rpc.md` / `common.md` / `proto.md`）· [`vs-common.md`](vs-common.md) 9 轴 · 基线 §九 `G-1`（双侧探针未落仓）/ `G-6`（proto 静态守门只覆盖 3 域 ⇒ **本域已由 `FollowProtoContractTest` 补上**）/ **`G-13`（本域无独立失败路径矩阵 ⇒ 🆕 **本轮已闭合**）** / `G-19`（消费方式未取证）|
+| **完整的差异与暂缓项清单** | 本文件 §3（**9 条，每条 11 项齐全**）＋ §6.1.1 的 2 条上报项（`S1-FOLLOW-010` / `S1-FOLLOW-011`）|
 | **阶段 2 任务及其依赖** | ① `S1-FOLLOW-001` 指标出口（**待用户重新拍板**；依赖：全仓 rpc 层统一方案 ⇒ **非 G1 单方面可定**）② `S1-FOLLOW-003` 共享层关闭路径解耦（依赖：**G4 落码**）③ `S1-FOLLOW-004` compose 编排（依赖：**收口**）④ `S1-FOLLOW-007` 基线订正（依赖：**收口**）⑤ `S1-FOLLOW-008/009`（依赖：**收口 / G2 / G3**）|
 | **尚未处理的原始业务行为** | ① Go DevServer 的 `/metrics` 出口（RAG 侧 rpc 组件**零出口**）② MaxConns 的 per-route 语义（**用户已签字不修 ⇒ 是「决定不处理」，不是「尚未处理」**）③ `follow-proto` 的「消费方式」取证（follow 无 `optional` 字段 ⇒ 该边界**不适用**）|
-| **下一次执行应从哪里开始** | ① **收口**：`S1-USERS-001` 说明书 + `S1-FOLLOW-007` 基线订正（**A 类，阻断阶段 1**）② **G4**：收 §6.2 的 F1 / F2 反馈单 ③ **G2/G3**：5 个 api 模块补 ryuk-disabled ④ **用户拍板**：是否重开 `S1-FOLLOW-001`（决定 `follow-rpc` 能否从 🟡 升 ✅）⑤ **G1 自身**：若要闭合基线 `G-1`（follow 双侧对拍落仓）⇒ 需重建探针 + 双栈 ⇒ **属阶段 1 的证据补强，非阻断** |
+| **下一次执行应从哪里开始** | ① **收口**：`S1-USERS-001` 说明书 + `S1-FOLLOW-007` 基线订正（**A 类，阻断阶段 1**）② **G4**：收 §6.2 的 F1 / F2 反馈单 ＋ `S1-FOLLOW-010`（404 字节数注释）③ **G2/G3**：5 个 api 模块补 ryuk-disabled ＋ `S1-FOLLOW-011`（like 域同一处错数）④ **用户拍板**：是否重开 `S1-FOLLOW-001`（决定 `follow-rpc` 能否从 🟡 升 ✅）⑤ **G1 自身**：若要闭合基线 `G-1`（follow 双侧对拍落仓）⇒ 需重建探针 + 双栈 ⇒ **属阶段 1 的证据补强，非阻断**；⚠️ **`G-13` 的其余 3 域（article / task / hot）不在 G1 写权面 ⇒ 由 G2 / G3 补** |
 
 ---
 
@@ -378,10 +432,11 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false \
 | P0#1 / #2 / #3 / #4 判定 | **L4** | 双侧活体对拍 52/52 逐字节一致 + 受控故障注入（超时/断连/挂死） |
 | P0#5 域内判定 | **L4**（2026-10-27 真启动 A/B/C 对照）· ⚠️ **本轮未复跑真启动**（§5.4）⇒ 按原日期读 | 真 PG + 真 Redis + 真 Nacos + 真进程 + 真 Tomcat |
 | P0#8 判定 | **L2** | 9 处默认值逐文件枚举（排除 `target/` 副本） |
-| **本轮新增：域级回归全绿** | **L3**（测试证据 · 本域 197 条 / 全域 1133 条 / 0F / 0E / 0S） | ⚠️ **这是「测试证据」，不是「运行面等价证据」** ⇒ 全绿只证明「已写的断言都成立」|
+| **本轮新增：域级回归全绿** | **L3**（测试证据 · 本域 **259** 条 / 全域 **1195** 条 / 0F / 0E / 0S） | ⚠️ **这是「测试证据」，不是「运行面等价证据」** ⇒ 全绿只证明「已写的断言都成立」|
 | **本轮新增：`follow-proto` 契约回归网** | **L3**（测试证据 · 3/3 绿 · 含变异自检） | 期望值**由 Go 真源生成**（记录 sha256）⇒ 比对**生成码描述符** ⇒ 证**编译产物**的契约；⚠️ **不覆盖 wire 字节级 / 不覆盖「消费方式」** |
 | **本轮新增：ryuk env 补齐** | **L3**（测试证据 · 2+2 绿） | 原整类 error 的两个类**真跑起来**（不是跳过、不是 0 断言）|
 | **本轮新增：端口 env 覆盖** | **L1**（静态可证） | 默认端口**逐字不变**（8082）⇒ 行为零变化；⚠️ 「改 env 后真启动 + Nacos 注册地址一致」**未做行为级实测** ⇒ 按 L1 记 |
+| **本轮新增：失败路径矩阵（`T11`）** | **L3**（测试证据 · **62 条 / 0F / 0E / 0S** · **真 Tomcat**） | 期望值**逐条抄自 Go 源码**（每条带 `文件:行号`）⇒ 满足基线 §1.1 **R3** 的 ④⑤⑥；⚠️ **不按 R4 计**（R4 要双侧活体 + 变异）⇒ **不得**据此宣称「与 Go 逐字节一致」；⚠️ **首轮 12 条红是判据自身的错**（过严的 `data:null` 断言 + 复述了错数「20」）⇒ **已改判据，不是改产品** |
 | 本文件全部「一致」类断言 | 按各域台账的「证据强度」列 | **不是已闭环**（AGENTS.md §0） |
 
 ---
@@ -402,4 +457,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false \
 | **R10** | `GO_REPO="<Go 真源绝对路径>" python3 tools/difftest/check-surface-parity.py --domain follow` | `EXIT=0` ⇒ HTTP **8 ≡ 8** · gRPC **8 ≡ 8**<br>⚠️ **必须设 `GO_REPO`**（worktree 下默认值算错 ⇒ 假红）|
 | **R11** | `python3 tools/difftest/check-ddl-static.py --domain follow --indexes` | `EXIT=0` ⇒ **0 处实质差异** |
 | **R12** | `grep -rn "DRIFT-FOLLOW-008" docs/DRIFT/follow/` | **命中处全部标「已签字偏离」或「已撤销」** ⇒ **不得再有「🔴 未修 ⇒ 派单」**（那会把用户已决定保留的行为派给 G4 去「修」）|
-| **R13** | `python3 - <<'EOF'` 逐个 `TEST-*.xml` 的 `testsuite` 属性求和（**构建收工后**） | 全域 **1133** 条 / 0F / 0E / 0S；本域 `follow-api` **74** + `follow-rpc` **86** + `follow-common` **37** = **197**<br>⚠️ **不要数日志** · ⚠️ **不要在构建中途采** |
+| **R13** | `python3 - <<'EOF'` 逐个 `TEST-*.xml` 的 `testsuite` 属性求和（**构建收工后**） | 全域 **1195** 条 / 0F / 0E / 0S；本域 `follow-api` **136** + `follow-rpc` **86** + `follow-common` **37** = **259**<br>⚠️ **不要数日志** · ⚠️ **不要在构建中途采** |
+| **R14** | `mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest='FollowApiFailurePathMatrixTest' -pl service/follow/follow-api -am test` | `EXIT=0` · **Tests run: 62, Failures: 0, Errors: 0, Skipped: 0**<br>⇒ **8 端点 × 4 类失败**的矩阵全绿（§4.2 / §5.2.1）|
+| **R15** | `grep -n "public static final int FIRST\|public static final int LAST" service/follow/follow-api/src/test/java/com/rag/follow/follow/api/support/RealTomcatPort.java` | **22340 / 22359** ⇒ 落在 follow 域预分配段 **22300–22399** 内、且**不与** `follow-api` 的 `RealGrpcPort`（22300–22319）/ `follow-rpc` 的（22320–22339）重叠 |
+| **R16** | `printf '404 page not found\n' \| wc -c` | **19**（**不是 20**）⇒ `S1-FOLLOW-010`（共享层 javadoc）/ `S1-FOLLOW-011`（like 域 DisplayName）的**错数来源** |

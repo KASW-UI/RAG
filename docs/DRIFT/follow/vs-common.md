@@ -719,7 +719,7 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
 |---|---|---|---|
 | A | `forPort(0)` | **2** | `FollowGrpcInterceptorWiringTest.java:110` · `FollowRpcSlowThresholdGateTest.java:269` |
 | C | `new ServerSocket(0)` | **1** | `FollowApiStartupFailFastTest.java:87`（`findClosedPort()`） |
-| D | `RANDOM_PORT` | **0** | follow 域**无**真 Tomcat 测试 ⇒ 不需要 `RealTomcatPort` |
+| D | `RANDOM_PORT` | **0** | 🆕 **2026-10-29 `T11` 订正**：本域**已有**真 Tomcat 测试（`FollowApiFailurePathMatrixTest`）⇒ **仍然 0** ⇒ 它用的是 **`DEFINED_PORT` + `RealTomcatPort.pick()`** ⇒ **不引入 `RANDOM_PORT`** |
 | B | `grpc.server.port=0` | 若干 | **无人连接** ⇒ 不落码（口径见 §65.2） |
 | | **合计** | **4** | |
 
@@ -732,8 +732,10 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
 |---|---|---|---|
 | follow-api | `support/RealGrpcPort` | **22300–22319** | 共享层预分配的 **follow 域段 22300–22399** |
 | follow-rpc | `support/RealGrpcPort` | **22320–22339** | 同上 |
+| follow-api | `support/RealTomcatPort` | **22340–22359** | 同上（🆕 **2026-10-29 `T11` 新增** ⇒ 本域**首次**有真 Tomcat 测试）|
 
-（22340–22399 ＝ 域内预留 ⇒ 域级守门拿它当「脚手架段」）
+⇒ 🆕 **订正（2026-10-29）**：本节原写「（22340–22399 ＝ 域内预留 ⇒ 域级守门拿它当「脚手架段」）」⇒ **那是错的** ⇒ 域级守门 `BlindPortGateTest` 的**脚手架段实测是 `SCRATCH_FIRST=22280` / `SCRATCH_LAST=22299`**（落在 **users** 段 22200–22299 内）⇒ ⇒ 域级守门的脚手架段**不在 follow 段内**。
+⇒ ⇒ 现状：follow 段 **22300–22359 已占 3 段**，**22360–22399 仍空**（域内备用）。
 
 ⇒ 机制、探针实测（Q3/Q6/Q7/Q8）、类形状来源（G3 comment-rpc 的 `support/RealGrpcPort`）⇒ **全部见 §65**。
 ⇒ ⇒ **follow 域生产代码零改动**（4 处全在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**。
@@ -743,3 +745,71 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
 域级守门 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/.../support/BlindPortGateTest.java`）**一并覆盖 follow 域**：
 ① 源扫 follow 两模块测试树零盲选口 ② 段归属（follow 两段落在 22300–22399 内 ＋ 子段不重叠）③④⑤ 见 §65.5
 ⇒ ⇒ **follow 域不单独建守门**（避免两份规则漂移）⇒ ⇒ 跨域引用按「**域 ＋ 文件名**」指。
+⇒ 🆕 **2026-10-29 `T11` 订正**：② 段的「端口类个数」断言 **8 → 9**（follow-api 新增 `RealTomcatPort`）⇒ **同批更新，不留雷**。
+
+---
+
+## 13. 🟢 新立 `T11`：**follow 域独立失败路径矩阵**（8 端点 × 4 类失败 × **真 Tomcat**）⇒ 基线 §九 `G-13` 在本域**闭合**（2026-10-29 · G1 lane）
+
+### 13.1 起因（基线原文）
+
+`docs/PhaseGoal-judge.md` P0 **#2** 的判据：
+> 「存在失败路径处理」**推不出**「参数校验 / 业务规则 / 认证 / 权限四项都有效」；且失败路径**域覆盖不全**
+
+＋ §九 **`G-13`**：「**4 域无独立失败路径矩阵**（`article` / `follow` / `task` / `hot`）」⇒ 🟡 **否**（P0 #2/#4 因此为 🟡）。
+⇒ **follow 是这 4 域之一** ⇒ 本轮补齐。
+
+### 13.2 落点（3 个文件）
+
+| 文件 | 动作 | 内容 |
+|---|---|---|
+| `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/support/RealTomcatPort.java` | **新增** | 真 Tomcat 的端口选取 + **双地址** bind 自检（`0.0.0.0` **与** `127.0.0.1` **两个都要探**）· 段 **22340–22359** |
+| `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiFailurePathMatrixTest.java` | **新增** | **62 条**：8 端点 × 4 类失败 ＋ 基础设施类 ＋ 7 条单点 |
+| `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java` | **修改** | ② 段「端口类个数」断言 **8 → 9** |
+
+⇒ ⚠️ **follow 域生产代码零改动** ⇒ ⇒ **不构成 Go 对照项**（与 §12 同款口径）。
+
+### 13.3 为什么**必须真 Tomcat**（不是 MockMvc）
+
+本域原先 **10 个测试类全部是 `webEnvironment = MOCK`** ⇒ **真容器覆盖率为零**。MockMvc 有三处**系统性**测不到：
+
+1. **Content-Type 的容器归一化** —— 真 Tomcat 把 `text/plain; charset=utf-8` 归一化成 `text/plain;charset=utf-8`（分号后无空格）⇒ **MockMvc 里断言「带空格」的写法会绿、真容器下会红** ⇒ 这正是 **DRIFT-024**（`text/plain 400 丢 Content-Type`）当初漏网的机制；
+2. **`Content-Length`** —— 由容器依据实际写入字节数计算，MockMvc 不参与；
+3. **body 是否被容器补写** —— 405 这类「body 为 null」的响应，容器会不会自作主张补空 body 或补 Content-Type，**只有真容器说了算**。
+
+### 13.4 矩阵（期望值逐条带 Go `文件:行号`）
+
+| 类 | Go 出处 | 形态 | 条数 |
+|---|---|---|---|
+| **认证** | `rest/handler/authhandler.go:106` · `middleware/checkblacklistmiddleware.go:42-48` · `logic/follow/helper.go:13-33` | ① 401 **空 body** ＋ **无 Content-Type** ② 401 **两字段** ＋ `application/json;charset=utf-8`（**逐字节**）③ **HTTP 200** ＋ `{code:5004}`（**不是 401**）| 8×3 |
+| **权限** | `getblocklistlogic.go:45-50` · `getrecommendationslogic.go:45-50`（**只有这两个**有 Forbidden 分支） | 200 ＋ `{code:5005}` ＋ **RPC 未被调用**；`getfollowlistlogic.go:45` / `getfollowerlistlogic.go:45` **没有** ⇒ **公开可查** | 8 |
+| **参数校验** | `types/types.go:25-27`（`target_id` **必填**）vs `:6-10`（三字段**全 optional**） | 动作端点 **200 ＋ `{code:5001}`**（**不是 400**）；list 端点按**零值**继续 | 8 |
+| **业务规则** | 8 个 logic 里逐条相同的 `NewErrCodeMsg(int(rpcResp.Code), rpcResp.Msg)` | **原样透传** code ＋ msg | 8 |
+| **基础设施** | `common/errmsg.go` `BizCodeFromError` | rpc 抛 `UNAVAILABLE` ⇒ **200 ＋ `{code:1015,msg:"service busy"}`** | 8 |
+
+### 13.5 ⚠️ 首轮 12 条红：**是判据自身的错，不是产品缺陷**
+
+| # | 错在哪 | 处置 |
+|---|---|---|
+| ① | `assertEnvelope` 对**成功**信封也要求 `"data":null` —— 而**成功**信封的 `data` 是**载荷**（`{"success":true}` / `{"user_ids":null}` / `{"users":[]}`）⇒ **11 条**假红 | 拆成 `assertErrorEnvelope`（`data` 必须 null）/ `assertSuccessEnvelope`（`data` 非 null）⇒ **改判据，不是改产品** |
+| ② | 404 的 `Content-Length` 被我**写死成 20** —— 实测 **19**（`"404 page not found\n"` = 18 + 1）⇒ **1 条**假红 | 改成「按**实际 body 字节数**比」（与 like-api 同法）⇒ ⇒ 并**顺带查出两处陈旧注释**（见 §13.6）|
+
+⇒ 📌 **这正是 AGENTS.md §3.3 规则 ③ 的应用**：**先改/删错误断言，再改实现** ⇒ 否则会先撞「测试红了」而误判自己改错。
+
+### 13.6 🆕 顺带查出的**两处陈旧注释**（**域外 ⇒ 只登记上报**）
+
+| 编号 | 位置 | 内容 | 归属 |
+|---|---|---|---|
+| `S1-FOLLOW-010` | `service/common/src/main/java/com/rag/common/http/GoStyleRouterErrorResponses.java:83` | javadoc 写「全长 **`20`** 字节」⇒ 实测 **19** ⇒ ⚠️ **常量本身是对的**（真容器实测 `Content-Length: 19`）⇒ 只是**注释**错 | **G4**（`service/common/**`）|
+| `S1-FOLLOW-011` | `service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiRouterErrorRealTomcatTest.java:46` 与 `:187` | javadoc 与 `@DisplayName` 都写「20」⇒ ⚠️ **断言本身是对的**（按实际长度比）⇒ **一直绿** ⇒ 只有注释与显示名错 | **G2**（`service/like/**`）|
+
+⇒ ⇒ **判据**：① 本域**不复述**那个错数（改按实际长度比）；② **不擅自改**别家写权面的文件 ⇒ 只登记 + 上报。
+
+### 13.7 效力边界（如实登记，不夸大）
+
+| 边界 | 内容 |
+|---|---|
+| **证据强度** | **L3 / R3**（期望值逐条抄自 Go 源码 + 有 RAG 侧自动化断言）⇒ 满足基线 §1.1 **R3** 的 ④⑤⑥ |
+| ⛔ **不是 R4** | R4 要求**双侧活体对拍 ＋ 变异** ⇒ 本类**不是**双侧对拍 ⇒ ⇒ **不得**据此宣称「与 Go 逐字节一致」 |
+| ⚠️ **P0#2 仍不是 ✅** | 其余 **3 域**（`article` / `task` / `hot`）**仍无**独立失败路径矩阵 ⇒ 本条只闭合 **follow 域** ⇒ **不因本条把 P0#2 判成 ✅** |
+| ⚠️ **双侧对拍缺口不受影响** | 基线 §九 `G-1`（follow 域探针在 `/tmp` ⇒ 已不可复算）**本轮未动** ⇒ `follow-api` / `follow-rpc` 仍按 **R3** 计 |

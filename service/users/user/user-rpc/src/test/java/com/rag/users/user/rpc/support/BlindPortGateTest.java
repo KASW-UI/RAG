@@ -76,7 +76,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <ol>
  *   <li><b>源扫</b>：我域 6 个模块的 {@code src/test/java} 里<b>零</b>盲选口写法
  *       ⇒ ⚠️ <b>必须先剥注释</b>，否则 javadoc 里引用 {@code forPort(0)} 会假阳性；</li>
- *   <li><b>段归属</b>：8 个端口类的段必须落在<b>共享层预分配给本域</b>的段里
+ *   <li><b>段归属</b>：9 个端口类的段必须落在<b>共享层预分配给本域</b>的段里
  *       （users 22200–22299 / follow 22300–22399）⇒ 子段互不重叠
  *       ⇒ 不在临时段 ⇒ 不与 Testcontainers 段 22700–22999 重叠；</li>
  *   <li><b>运行期</b>：挑到的口<b>真的能起一个 gRPC server</b>且客户端连得上
@@ -159,7 +159,7 @@ class BlindPortGateTest {
     // ==================================================================
 
     @Test
-    @DisplayName("② 段归属：8 个端口类的段落在本域预分配段内、子段互不重叠、不在临时段、不撞 Testcontainers 段")
+    @DisplayName("② 段归属：9 个端口类的段落在本域预分配段内、子段互不重叠、不在临时段、不撞 Testcontainers 段")
     void portClassesStayInsideDomainBand() throws IOException {
         Map<String, int[]> bands = new LinkedHashMap<>();
         for (String module : DOMAIN_MODULE_DIRS) {
@@ -167,15 +167,16 @@ class BlindPortGateTest {
                 Path f = repoRoot().resolve(module).resolve("src/test/java").resolve(
                         moduleToPackagePath(module)).resolve("support").resolve(cls + ".java");
                 if (!Files.isRegularFile(f)) {
-                    continue; // 该模块不需要这一类（例如 follow 域没有真 Tomcat 测试）
+                    continue; // 该模块不需要这一类
                 }
                 bands.put(module + "/" + cls, readBand(f));
             }
         }
 
         assertThat(bands)
-                .as("至少要有 6 个 RealGrpcPort + 2 个 RealTomcatPort（user-api/admin-api 各要一个 Tomcat 口）")
-                .hasSize(8);
+                .as("要有 6 个 RealGrpcPort + 3 个 RealTomcatPort"
+                        + "（user-api / admin-api / follow-api 各要一个 Tomcat 口）")
+                .hasSize(9);
 
         List<int[]> ranges = new ArrayList<>();
         for (Map.Entry<String, int[]> e : bands.entrySet()) {

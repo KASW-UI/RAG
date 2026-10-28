@@ -1028,6 +1028,24 @@ go-zero@v1.10.2/rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Ha
 - **危害**：`forPort(0)` / `new ServerSocket(0)` / `RANDOM_PORT` 三种写法都是**让 OS 从临时端口段（49152–65535）里盲选** ⇒ ⇒ 与 Docker 随机发布口**同段**
   ⇒ ⇒ 邻居占**更具体地址** `127.0.0.1:P` 时我方**通配绑定照样成功**（实测：两个监听者并存）⇒ ⇒ 客户端被抢 ⇒ **静默假红**（看着像被测代码炸了，其实压根没被请求到）。
 - **修法**：全部改走**域内私有** `support/RealGrpcPort`（`support/RealTomcatPort`）⇒ **段**：`22300–22319`（follow 域段的子段）⇒ 段内挑口 ＋ **双地址 bind 探针**（只探通配**检不出**「更具体的占用者」）。
+  ⇒ 🆕 **2026-10-29 `T11` 订正**：本组件**现在真的有** `support/RealTomcatPort`（**22340–22359**）⇒ 括号里那句**当时是「尚未存在」的预留说法** ⇒ ⇒ **今天有两段**：`RealGrpcPort` **22300–22319** ＋ `RealTomcatPort` **22340–22359** ⇒ **互不重叠**。
 - **段来源**：共享层已预分配给本域的段（`docs/DRIFT/global/vs-common.md` §4.10.19.3）⇒ **共享层台账零改动**（写权归 G4）。
 - **守门**：域级 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java`）**5 条** ⇒ 一并覆盖本组件 ⇒ **本组件不单独建守门**（避免两份规则漂移）。
 - **边界**：**本组件生产代码零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务）。
+
+---
+
+## 🟢 `T11` · **本组件的独立失败路径矩阵**（8 端点 × 4 类失败 × **真 Tomcat**）⇒ 基线 §九 `G-13` 在 follow 域**闭合**（2026-10-29 · G1 lane）
+
+> 📌 **矩阵逐条表 + 证据强度 + 效力边界 ⇒ [`docs/DRIFT/follow/vs-common.md` §13](vs-common.md)**；**落码与验证记录 ⇒ [`docs/DRIFT/follow/stage1-admission.md` §4.2 / §5.2.1](stage1-admission.md)**。
+> ⇒ 本条只记**本组件这一份**（不抄矩阵表，避免两处漂移）。
+
+| 项 | 内容 |
+|---|---|
+| **改前** | 本组件 **10 个测试类全部 `webEnvironment = MOCK`** ⇒ **真 Tomcat 覆盖率 = 0** ⇒ ① Content-Type 的**容器归一化** / `Content-Length` / **容器会不会补 body** 三处一律测不到 ② 失败路径只覆盖了**部分端点**（认证只测 `/follow/list`、业务规则只测 `/follow`）⇒ 基线 P0#2 的**四项推不出来** |
+| **改后** | 新增 `support/RealTomcatPort.java`（段 **22340–22359** · **双地址** bind 自检）＋ `FollowApiFailurePathMatrixTest.java`（**62 条**）|
+| **Go 出处** | 8 个端点 × 四类失败的期望值**逐条抄自 Go 源码**（每条带 `文件:行号`，写在测试的 `Endpoint` 表里）⇒ `routes.go:20-63` · `types/types.go:6-10,25-27` · 8 个 logic 的 Forbidden / `NewErrCodeMsg` 分支 · `common/errmsg.go` `BizCodeFromError` |
+| **实测** | ✅ **62/62 绿**（`Tests run: 62, Failures: 0, Errors: 0, Skipped: 0` · 5.471 s · **真 Tomcat**）|
+| ⚠️ **首轮 12 条红 = 判据自身的错** | ① `assertEnvelope` 对**成功**信封也要求 `data:null`（**11 条**假红）② 404 的 `Content-Length` 被写死成 **20**（实测 **19**，**1 条**假红）⇒ **改判据**，不是改产品（AGENTS.md §3.3 规则 ③）|
+| **效力边界** | **L3 / R3** ⇒ ⚠️ **不是 R4**（R4 要双侧活体 + 变异）⇒ **不得**据此宣称「与 Go 逐字节一致」；⚠️ **P0#2 本身仍不是 ✅**（其余 3 域未补）|
+| **生产代码** | **零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项** |

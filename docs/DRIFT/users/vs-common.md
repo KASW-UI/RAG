@@ -4715,3 +4715,35 @@ mvn -B -o -DargLine=-Xmx2g -am -pl service/users/user/user-api,service/users/use
 **我域本轮处置（透明登记）**：第 3 轮域级全量用 `-Dtest='!GoStyleParamLimitOffModeGateTest' -Dsurefire.failIfNoSpecifiedTests=false`
 **显式排除这一条** ⇒ ⇒ **该轮数字是「排除 1 条共享层间歇红」的域级数**（§65.9）⇒ ⇒ **不冒充「全绿」**。
 
+
+---
+
+## 67. 🟢 `T11` 带来的**域级守门改动**：② 段「端口类个数」断言 **8 → 9**（2026-10-29 · G1 lane）
+
+### 67.1 起因
+
+本轮（`T11`）在 **follow-api** 新增了真 Tomcat 测试 ⇒ 需要 `support/RealTomcatPort` ⇒
+⇒ 域级守门 `BlindPortGateTest` 的 ② 段（**段归属**：端口类的段必须落在本域预分配段内、子段互不重叠）**枚举到的端口类从 8 个变 9 个**。
+
+### 67.2 改了什么（同批更新，**不留雷**）
+
+| 项 | 改前 | 改后 |
+|---|---|---|
+| `BlindPortGateTest.java` ② 段的 `hasSize(...)` | **8** | **9** |
+| 该断言的说明文字 | 「至少要有 6 个 RealGrpcPort + **2** 个 RealTomcatPort（user-api/admin-api 各要一个 Tomcat 口）」 | 「要有 6 个 RealGrpcPort + **3** 个 RealTomcatPort（user-api / admin-api / **follow-api** 各要一个 Tomcat 口）」 |
+| `@DisplayName` 里的「8 个端口类」 | 「8 个端口类」 | 「**9** 个端口类」 |
+| 类 javadoc ② 条 | 「**8** 个端口类的段」 | 「**9** 个端口类的段」 |
+| 「该模块不需要这一类」的注释 | 括注「例如 follow 域没有真 Tomcat 测试」 | 去掉该括注（**该前提已不成立**） |
+
+⇒ ⚠️ **为什么必须同批改**：守门的 `hasSize` 是**精确值**断言 ⇒ 新增一个端口类而不改它 ⇒ **守门当场红** ⇒
+⇒ ⇒ **凡「新增一个 `RealGrpcPort` / `RealTomcatPort`」的改动，都必须同时改这一行**（本条就是该规则的第一个实例）。
+
+### 67.3 新增端口类的段
+
+| 组件 | 类 | 段 | 是否与既有段重叠 |
+|---|---|---|---|
+| follow-api | `support/RealTomcatPort` | **22340–22359** | ❌ 不与 `follow-api` 的 `RealGrpcPort`（22300–22319）、`follow-rpc` 的（22320–22339）重叠 |
+
+⇒ 段归属仍落在共享层预分配的 **follow 域段 22300–22399** 内 ⇒ ② 段其余判据（**不落 OS 临时段 49152–65535**、**不撞 Testcontainers 段 22700–22999**、子段互不重叠）**全部满足** ⇒ ② 段**实跑通过**。
+
+⇒ 详细矩阵与证据 ⇒ [`docs/DRIFT/follow/vs-common.md` §13](../follow/vs-common.md) ＋ [`docs/DRIFT/follow/stage1-admission.md` §4.2](../follow/stage1-admission.md)。
