@@ -6,19 +6,29 @@
 
 #### Go 侧真源（判据只有三行，但每一条都产生可观察差异）
 
+> 下列代码块为 **go-zero v1.10.2** 的**逐字**摘录（版本钉住见真源 `go.mod:17`）⇒
+> **2026-10-29 订正**：`ParseJsonBody` 的区间原写 `:117-125` ⇒ **实为 `:117-124`**（`:125` 是空行）。
+
 ```go
-rest/httpx/requests.go:117-125
+rest/httpx/requests.go:117-124
     func ParseJsonBody(r *http.Request, v any) error {
         if withJsonBody(r) {
-            return mapping.UnmarshalJsonReader(io.LimitReader(r.Body, maxBodyLen), v)  // 真读
+            reader := io.LimitReader(r.Body, maxBodyLen)
+            return mapping.UnmarshalJsonReader(reader, v)   // 真读
         }
-        return mapping.UnmarshalJsonMap(nil, v)                                       // ⭐ 完全不看 body
+
+        return mapping.UnmarshalJsonMap(nil, v)             // ⭐ 完全不看 body
     }
 rest/httpx/requests.go:153-155
     func withJsonBody(r *http.Request) bool {
-        return r.ContentLength > 0 && strings.Contains(r.Header.Get("Content-Type"), "application/json")
+        return r.ContentLength > 0 && strings.Contains(r.Header.Get(header.ContentType), header.ApplicationJson)
     }
 ```
+
+> **两个常量的出处**（原代码块把它们写成了字面量 `"Content-Type"` / `"application/json"`，**语义对、但不是逐字**）：
+> `header.ContentType = "Content-Type"` ⇒ `rest/internal/header/headers.go:15`；
+> `header.ApplicationJson = "application/json"` ⇒ `rest/internal/header/headers.go:5`。
+> ⇒ ⇒ 判据的**字面子串性质**正来自这两个常量 ⇒ **不是** Spring 的媒体类型兼容判定。
 
 #### 🔴 关键：Go 不是「宽松接受非 JSON」，而是**丢弃整个请求体**
 
@@ -38,7 +48,7 @@ rest/httpx/requests.go:153-155
 #### 🔴 原签字理由「两侧都是拒绝」**不成立**
 
 `message-api` 当初对 415 的签字理由是「两侧都是拒绝、都无业务副作用」；`like-api` 沿用了同一结论。
-**实测反例**：`PageReq`（`types.go:101-105`，字段全 `,optional`）与 `GetUserTotalLikeReq`（空结构体）
+**实测反例**：`PageReq`（`service/message/api/internal/types/types.go:101-105`，字段全 `,optional`）与 `GetUserTotalLikeReq`（空结构体）
 在 Go 侧遇到非 JSON Content-Type 会**成功**，不是拒绝。
 ⇒ 与 DRIFT-MSGAPI-004 是同款病灶：**「无害」判断建立在一个只验证了有必填字段那批端点的观察上**。
 
@@ -86,7 +96,7 @@ rest/httpx/requests.go:153-155
 #### ⚠️ 写测试时我自己犯的一个错（已订正）
 
 `MessageApiGoStyleBodyContentTypeTest` 的夹具最初写成 `{"offset":"10"}`，测试红了。
-查 Go `types.go:101-105` 后确认：`PageReq.Offset` 是 `json:"offset,optional"`，
+查 Go `service/message/api/internal/types/types.go:101-105` 后确认：`PageReq.Offset` 是 `json:"offset,optional"`，
 **没有 `,string`** ⇒ 字符串本来就该 type mismatch ⇒ **两侧都返回 5001，是一致的**。
 ⇒ 是**夹具写错**，不是实现坏了。已改为数字，并把这段查证过程写进夹具注释。
 **教训**：测试红了先怀疑夹具，但**必须回去查 Go 源码**才能下这个结论——

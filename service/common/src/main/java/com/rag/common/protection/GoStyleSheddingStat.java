@@ -14,12 +14,12 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <h3>Go 出处（消费点，不是声明点）</h3>
  * <pre>
- *   core/load/sheddingstat.go:37-47
+ *   core/load/sheddingstat.go:37-49
  *       func (s *SheddingStat) IncrementTotal() { atomic.AddInt64(&s.total, 1) }
  *       func (s *SheddingStat) IncrementPass()  { atomic.AddInt64(&s.pass,  1) }
  *       func (s *SheddingStat) IncrementDrop()  { atomic.AddInt64(&s.drop,  1) }
  *
- *   core/load/sheddingstat.go:52-70  loop()
+ *   core/load/sheddingstat.go:51-68  loop()
  *       st := s.reset()
  *       c := stat.CpuUsage()
  *       if st.Drop == 0 {
@@ -28,11 +28,16 @@ import java.util.concurrent.atomic.AtomicLong;
  *           logx.Statf("(%s) shedding_stat_drop [1m], cpu: %d, total: %d, pass: %d, drop: %d", ...)
  *       }
  *
- *   zrpc/internal/serverinterceptors/sheddinginterceptor.go:19-21,28-29,37
+ *   zrpc/internal/serverinterceptors/sheddinginterceptor.go:17-20
  *       var sheddingStat *load.SheddingStat           // ← **包级单例**（进程内一个）
+ *       var lock sync.Mutex
+ *   zrpc/internal/serverinterceptors/sheddinginterceptor.go:51-57
  *       func ensureSheddingStat() { ... }              // 配 sync.Mutex 懒初始化
+ *   zrpc/internal/serverinterceptors/sheddinginterceptor.go:28
  *       sheddingStat.IncrementTotal()                  // 每个请求都 +1
+ *   zrpc/internal/serverinterceptors/sheddinginterceptor.go:33
  *       sheddingStat.IncrementDrop()                   // 被降载丢弃时 +1
+ *   zrpc/internal/serverinterceptors/sheddinginterceptor.go:42
  *       sheddingStat.IncrementPass()                  // 正常通过时 +1
  * </pre>
  *

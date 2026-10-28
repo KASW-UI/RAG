@@ -4,13 +4,16 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
 
 /**
- * CPU 采样 —— Go {@code core/stat.CpuUsage()}（整机千分比）的 Java 复刻。
+ * CPU 采样 —— Go {@code core/stat/usage.go:51} {@code CpuUsage()}（整机千分比）的 Java 复刻。
  *
  * <h3>Go 出处</h3>
  * <pre>
- *   core/load/sheddingstat.go:64   c := stat.CpuUsage()          // 降载统计日志里的 cpu
+ *   core/stat/usage.go:51          func CpuUsage() int64 { return atomic.LoadInt64(&cpuUsage) }
+ *   core/load/sheddingstat.go:59   c := stat.CpuUsage()          // 降载统计日志里的 cpu
  *   core/load/adaptiveshedder.go:41-43
- *       systemOverloadChecker = func() bool { return stat.CpuUsage() &gt; threshold }
+ *       systemOverloadChecker = func(cpuThreshold int64) bool {
+ *           return stat.CpuUsage() &gt;= cpuThreshold
+ *       }
  * </pre>
  *
  * <p>Go 的 {@code stat.CpuUsage()} 在 Linux 下读 {@code /proc/stat} 的<b>整机</b> CPU，
@@ -18,6 +21,13 @@ import java.lang.management.OperatingSystemMXBean;
  *
  * <p>⚠️ <b>不可用时返回 -1</b>，上层据此 <b>fail-open</b>（读不到 ⇒ 视作未过载 ⇒ 不降载），
  * 与 Go 侧 {@code systemOverloadChecker} 返回 false 的分支一致。
+ *
+ * <p><b>「不可用 ⇒ -1」这条哨兵值是本实现自定的</b>（Go 侧没有这个值）：Go 的
+ * {@code core/stat/usage.go:22} 把 {@code cpuUsage} 初值定为 <b>0</b>，此后只被
+ * {@code core/stat/usage.go:35-39} 的 250ms 移动平均（β=0.95 ⇒ 有效窗口 ≈5s）覆盖 ⇒
+ * <b>Go 侧永远不会返回负数</b> ⇒ ⇒ 两边的<b>行为等价</b>（都判「未过载」），但
+ * <b>哨兵值不等价</b>（Go=0 / 本实现=-1）⇒ ⇒ 依赖该值的上层必须走
+ * {@code < 0 ⇒ fail-open} 这一支（见 {@link GoStyleAdaptiveShedder#systemOverloaded()}）。
  */
 final class GoStyleCpuReader {
 

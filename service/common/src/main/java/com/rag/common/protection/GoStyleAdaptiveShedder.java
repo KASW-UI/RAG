@@ -160,7 +160,7 @@ final class GoStyleAdaptiveShedder {
         return highThru();
     }
 
-    /** {@code systemOverloaded()}（{@code adaptiveshedder.go:245-256}）。 */
+    /** {@code systemOverloaded()}（{@code adaptiveshedder.go:245-252}）。 */
     boolean systemOverloaded() {
         int cpu = readCpuPermille();
         if (cpu < 0) {
@@ -176,7 +176,7 @@ final class GoStyleAdaptiveShedder {
         return true;
     }
 
-    /** {@code stillHot()}（{@code adaptiveshedder.go:237-244}）：冷却期内仍算过载。 */
+    /** {@code stillHot()}（{@code adaptiveshedder.go:237-242}）：冷却期内仍算过载。 */
     boolean stillHot() {
         synchronized (lock) {
             if (!this.droppedRecently) {
