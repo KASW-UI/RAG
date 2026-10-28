@@ -1,0 +1,22 @@
+# proto 契约基准 —— **由脚本从 Go 真源生成，勿手工编辑**
+# 生成脚本：同目录 generate.py（用法见脚本头部）
+# 真源：Sea-RideTheWind_golang/proto/like.proto
+# 真源 sha256：347301dbb4ed90265fcd3813be54701537901f9908d117e61615c73bdb8a447e
+package pb
+enum|ActionType|ACTION_UNSPECIFIED=0|ACTION_LIKE=1|ACTION_UNLIKE=2|ACTION_DISLIKE=3|ACTION_UNDISLIKE=4
+message|LikeActionReq|target_type=1:string|target_id=2:string|user_id=3:int64|action_type=4:ActionType|author_id=5:int64|weight=6:float|client_ip=7:string|promotion_id=8:string
+message|LikeActionResp|success=1:bool|message=2:string|like_count=3:int64|dislike_count=4:int64
+message|GetLikeCountReq|target_type=1:string|target_ids=2:repeated string
+message|LikeCountItem|like_count=1:int64|dislike_count=2:int64
+message|GetLikeCountResp|counts=1:map<string, LikeCountItem>
+message|GetLikeStateReq|target_type=1:string|user_id=2:int64|target_ids=3:repeated string
+message|GetLikeStateResp|states=1:map<string, int32>
+message|GetUserLikeListReq|target_type=1:string|user_id=2:int64|cursor=3:int64|page_size=4:int32
+message|LikeRecordItem|target_type=1:string|target_id=2:string|timestamp=3:int64
+message|GetUserLikeListResp|list=1:repeated LikeRecordItem|is_end=2:bool|next_cursor=3:int64
+message|GetTargetLikerListReq|target_type=1:string|target_id=2:string|cursor=3:int64|page_size=4:int32
+message|LikeItem|user_id=1:int64|timestamp=2:int64
+message|GetTargetLikerListResp|list=1:repeated LikeItem|is_end=2:bool|next_cursor=3:int64
+message|GetUserTotalLikeReq|user_id=1:int64
+message|GetUserTotalLikeResp|total_like_count=1:int64
+service|LikeService|LikeAction(LikeActionReq)->LikeActionResp|GetLikeCount(GetLikeCountReq)->GetLikeCountResp|GetLikeState(GetLikeStateReq)->GetLikeStateResp|GetUserLikeList(GetUserLikeListReq)->GetUserLikeListResp|GetTargetLikerList(GetTargetLikerListReq)->GetTargetLikerListResp|GetUserTotalLike(GetUserTotalLikeReq)->GetUserTotalLikeResp

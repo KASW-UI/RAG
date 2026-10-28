@@ -356,7 +356,7 @@ public class LikeDeliveryValidator {
      *
      * @return 解析成功返回瞬时；失败返回 {@code null}（调用方据此判非法）
      */
-    private static Instant parseGoRfc3339(String value) {
+    static Instant parseGoRfc3339(String value) {
         if (value == null || value.isEmpty()) {
             return null;
         }
