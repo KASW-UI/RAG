@@ -829,3 +829,50 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
 | **元教训** | 注释里的「事实」有**两类载体**：**数字**（§13.6 的字节数族）与 **坐标**（本节的出处族）⇒ **两类都会错、且都不会让测试变红** ⇒ ⇒ **「全绿」不能证明注释是对的** ⇒ 必须**单独建判据**去核 |
 
 ⇒ ⇒ **推论**：**基线 G-1（follow 双侧探针未落仓）仍未闭合** —— 本节证明的是**「出处坐标是对的」**，**不是**「行为逐字节等价」⇒ **不因此提升 R 档**。
+---
+
+## 开工前置回执
+
+【开工前置回执 · G1（`align/g1-users-follow`）· 2026-10-29】
+
+**① 任务范围（本 lane 本轮做什么）**
+候选下一件 = 修 `docs/CLOSEOUT-2026-10-29.md` §8.7 登记的 **G1 21 条「Go 出处」真缺陷**：15 处引用写 `gorm@v1.31.2`（真源 `go.mod:28` pin 的是 **`v1.31.1`**）+ 5 处 `schema/field.go:1009` 越界（**v1.31.1 的 `schema/field.go` 只有 1004 行**）+ 1 处 `createadminlogic.go` 引用路径不精确。
+⇒ **本轮只读，不动手**（未获批准）。
+
+**不做（明确边界）**
+① 阶段二（`docs/twoStage.md` §1.3 / §2.2 / §6 / §7）；
+② 共享面：`service/common/**` + `service/users/users-common/**` + `tools/**` + `docs/DRIFT/_cross/**` + `AGENTS.md` + 三个 `_INDEX.md` + `docs/PhaseGoal-judge.md` + `docs/PhaseGoal/**`（⇒ 归 G4 / 合并收口执行者）；
+③ `S1-FOLLOW-001`（follow-rpc 指标出口）—— **用户 2026-10-24 已定「本轮不落地」⇒ 不当新缺陷重提**；
+④ 改我域 §69 的结论表述（§8.4 已登记给收口执行者）；
+⑤ 探针落仓（`tools/difftest/follow/`）—— 阶段 2 建设项，**本轮不预支**。
+
+**② 已读四档（具体路径 → 读到的关键结论）**
+
+| 档 | 具体路径 | 关键结论 |
+|---|---|---|
+| `docs/DRIFT/users/` | `stage1-admission.md`（565 行）· `user/api.md`（3498）· `user/rpc.md`（2621）· `admin/api.md`（2374）· `admin/rpc.md`（4385）· `admin/_shared.md`（222）· `common.md`（649）· `_shared.md`（1158）· `vs-common.md`（4945） | 阶段一域级判定 = **🟡 有条件通过**（P0 域内 8/9；#5 项目级不成立 ⇒ 根级文件**无人拥有** ⇒ 域外）；域内唯一未达标 = `S1-FOLLOW-001`；`user/rpc.md` §9.1.2 / §9.1.4 记着 **43 场景 / 39 等价 / 4 处差异（全为已签字 N-2）** 与「首轮 2 处假漂移」的辨伪记录（⇒ 对拍**不清状态**就会产出假漂移）；`admin/api.md:1323` 明写 `DRIFT-ADMINAPI-001` 的「未签字」判定**已作废**（⇒ 台账结论会被后续推翻，别按旧结论重开）；`admin/rpc.md:1778` 记着**新发现** `admin_invite.update_time` 不推进；`admin/_shared.md` §2 记着「本轮推翻的三条既有结论（均在本域内）」⇒ **读台账要看最后结论，不是最早那条** |
+| `docs/DRIFT/follow/` | `stage1-admission.md`（467）· `api.md`（1051）· `rpc.md`（473）· `common.md`（53）· `proto.md`（80）· `vs-common.md`（831） | `DRIFT-FOLLOW-001/005/009/010/011/012` 全部 **✅ 已修**；**`DRIFT-FOLLOW-006`（5 个 `follow_rpc_*` 指标无抓取出口）= lane 🟡 的唯一原因**；`DRIFT-FOLLOW-002/003/004`（运行时 classpath 缺 `grpc-inprocess` / `discovery:` 须三斜杠 / `NACOS_ADDR` 在 api 与 rpc 两侧语义不一致）= **派 G4 / 跨域**；`DRIFT-FOLLOW-013`「OS 盲选口」族 2 处已修 |
+| `docs/DRIFT/_cross/` | `cross-domain-coupling.md`（832）· `domain-common-lanes.md`（180）· `open-items.md`（133）· `ddl-type-divergences.md`（188）· `component-coverage-matrix.md`（286）· `proto-verification.md`（73）· `decisions.md`（68）· `fix-round-2026-10-23.md`（42）· `fix-round-2026-10-28.md`（78）· `go-anchors.md`（37）· `truth-source-switches.md`（24）· `user-qa-verbatim.md`（15）· `human-only-status.md`（44）· `status-snapshot-2026-10-22.md`（65）· `new-domains-2026-10-23.md`（126）· `message-domain-wide.md`（457） | 波次 DAG（**rpc 必须先于 api**）＋ `users-common` 归属**按类判定**；9 轴（A1~A9）逐轴对账 = lane 交付物；**`open-items.md` 记着 users 域 8 处 `DEFAULT CURRENT_TIMESTAMP` = `SD-2026-10-25-CAND-16`（未签字）**、`users_user.status` 可空性 = `CAND-17`（未签字）⇒ **这两条正是我上轮 DDL 实测 16 处的来源**；`ddl-type-divergences.md` §三 明写「`AGENTS.md` §〇 item 2 那条清单**已过期**」⇒ **以台账为准，不要照抄 AGENTS.md 的数字** |
+| `docs/Intentional_Deviations/users/` | `user/api.md`（`SD-USERAPI-001/002/003`）· `admin/api.md`（`SD-2026-10-23-08` / `-01`）· `admin/rpc.md`（`SD-2026-10-23-06` / `-07`）· `common.md`（`SD-USERSCOMMON-001`）· `_shared.md`（**`CAND-16` / `CAND-17` 待签字候选**）· `user/rpc.md`（**0 行空占位**） | 签字项 = ① 500 与 401 **带 envelope** 不复刻 Go 空 body ② 401 **计入观测面** ③ 黑名单 401 **业务码 1006** ④ **严格校验** JWT claim ⑤ 保留空 `default-password` 守卫 ⑥ **`status.description` 保留正常中文**（乱码那条 = 本轮差点重犯的那条）⑦ bcrypt **只认 `$2a$` / `$2b$` / `$2y$`**；⚠️ `user/rpc.md` 与 `docs/Intentional_Deviations/follow/*.md`（4 个）**全是 0 行空占位** ⇒ **follow 域零签字偏离**、users/user/rpc 无签字项（⚠️ **空占位 ≠「已签字」**，见 `Pitfalls/users/admin/rpc.md` **P-9**）|
+| `docs/PhaseGoal/` | `g1.md`（**机器生成的 per-lane 投影**）＋ `docs/PhaseGoal-judge.md`（**权威源**）的 users/follow 行 | `g1.md`：10 组件（✅ 8 · 🟡 2）· **lane 判定 🟡**；§3 P0 分摊（主责 #2/#3/#6/#8 · 协作 #1/#4）；§5 收口命令清单 —— ⚠️ **第 93 行 `--domain users` 是错名命令 ⇒ 0/0 静默假绿**（G4 `e73cbf3` 已修实现并重跑生成器）；`judge.md` §1.1 的 **R4 ⑦ 要求探针在版本控制内且现在可复算** · ⑧ 要变异记录；A-2 的 users/follow 行（`follow-api` R3↓ · `follow-proto` R2↓ · `follow-rpc` R2↓ · 其余 R3~R4）；§九 缺口 G-1/G-4/G-6/G-8/G-13/G-19；§十一 D-01~D-08 |
+| `docs/PhasedGoal.md` + `docs/twoStage.md` §4/§5.3/§5.4/§10 | `PhasedGoal.md:38-52`（P0 九条）· `:54-68`（P1 ≥2~3 个机制闭环）· `:70-82`（P2 不阻塞）· `twoStage.md:258-313`（§4 阶段 0 事实基线：4.1 事实调查 / 4.2 **三条**核心链路 / 4.3 差异基线 9 字段）· `:359-380`（§5.3 **差异与暂缓项 11 项齐全**）· `:381-398`（§5.4 改造记录 9 项）· `:941-976`（§十 **P0–P3 × A/B/C/D · 每问题 11 字段**）| 阶段一准入线 = P0 九条；**我的 `S1-*` 清单就是 §5.3 的 11 项格式**，§6.3 的「P0–P3 + A/B/C/D」就是 §十 的两轴；**A 类 = 阶段 1 准入阻断** ⇒ 我域唯一的 A 类是**根级 `README.md` 缺失**（域外） |
+| `docs/Pitfalls/users/` | `_shared.md`（**16 条** PIT-USERS-SHARED-001~016）· `user/api.md`（P-1~P-7）· `user/rpc.md`（**P-05 乱码** · P-06 假出处 · P-07「不要动清单」）· `admin/api.md`（P-ADMINAPI-001~016）· `admin/rpc.md`（P-1~P-16）· `common.md`（4 条）| ① **P-05** = 「Go 源码里的错误文案是乱码 ⇒ 拿它当基准前先把字节打印出来」+ **已登记 N-2** + 「**下一个 agent 不要把它当新发现再「修」一遍**」⇒ 本轮我正是差点重犯；② `admin/rpc.md` **P-2** = `FieldStrategy.NEVER` + `LambdaUpdateWrapper` 让 `update_time` 永不推进 ⇒「**user-rpc 修过、admin-rpc 漏修**」⇒ 对应 `admin/rpc.md:1778` 的新发现；③ **P-9** = 签字档里的**空占位文件**会让人把「已签字」误判成「未签字」；④ **P-4** = `@Import` 只让 Bean 存在（≠ 机制生效）；⑤ **P-15** = 跨域「销账通知」要**自己核**（已修可能还没提交 / 修文案 ≠ 修语义）；⑥ `_shared.md` **-006** 变异脚本把「没跑」当「红了」· **-007** 对拍不清状态 ⇒ 假漂移 · **-016** 陈旧 surefire 报告静默多算测试数 |
+| `docs/Pitfalls/follow/` | `api.md`（PITFALL-FOLLOW-006/007/008/009/010/011/012/015/016）· `rpc.md`（001/002/003/004/005/013/014） | ① **FOLLOW-005** = 共享 `service/common` 在**纯 gRPC 进程**里缺 servlet-api ⇒ 正是我的 `S1-FOLLOW-003`（⇒ 派 G4）；② **FOLLOW-001** = 测试把生产地址覆盖成 `static://` ⇒ **生产配置从未被跑过**；③ **FOLLOW-010** = 探针用**固定 `-o` 文件** ⇒ 请求失败时读到的是**上一次的残留 body**；④ **FOLLOW-011** = 故障模拟器**不完成 HTTP/2 握手** ⇒ 测的是「连不上」不是「挂住」；⑤ **FOLLOW-016** = **对拍装置自身会骗人**（端口撞车 / 时钟跳变 / 启动时序 / 端口未释放） |
+| `docs/Pitfalls/_cross/` | `domain-common-lanes.md`（PIT-LANE-01~07）· `flyway-ledger-collision.md` · `testing-pitfalls.md` · `fix-round-lessons.md` · `framework-mechanism-evidence.md` | ① **PIT-LANE-01** = lane 的基点早于「脚手架落地那次提交」⇒ 回并撞 **add/add**；② **PIT-LANE-03** = 「共享层已验」≠「本域已验」；③ **PIT-LANE-06** = 守门登记了**已不存在的 lane** ⇒ **恒绿假绿**；④ **PIT-LANE-07** = 守门用**全文 grep** 判措辞 ⇒ 改掉锚点那一行后**恒绿**；⑤ `testing-pitfalls.md` = **绿测试可能是「错误答案的守卫」** + 陈旧 surefire 报告**静默抬高**计数 + 守门的**排除清单是架构假设** ⇒ 架构一变就假阳性 |
+
+**③ 待批准项（需 Jason / 调度员拍板）**
+
+1. 🔴 **候选任务的第 ③ 条要扩到 3 条**（**与 §8.7 的「1 条」不符 ⇒ 域内实测**）：清单只列 1 条，我域 grep 命中 **3 处** —— `admin-rpc/…/AdminSemanticDriftRegressionTest.java:340` 与 `admin-rpc/…/AdminDomainService.java:439`（均**多写了 `admin/`**）+ **`admin-api/…/AdminCreateService.java:20`**（引 `service/user/admin/api/internal/logic/admin/createadminlogic.go` ⇒ **该文件在 Go 仓不存在**；真身只在 **rpc 侧** `service/user/admin/rpc/internal/logic/createadminlogic.go`（**126 行** · `:44-46` = 两行 `strings.TrimSpace`）⇒ 这一条**指向了不存在的 api 侧文件**，修法要先定 admin-api 的 createAdmin 对应 Go 的哪个入口（⇒ 可能是 api↔rpc 边界问题）。
+2. ✅ **15 + 5 条的计数与落点已独立复核，与 §8.7 分布一致**：15 处 `gorm@v1.31.2` 全在 `service/users/**`（`user-rpc` 12 + `admin-rpc` 3）· 5 处 `schema/field.go:1009` **全在 `user-rpc`**（`UserDomainService.java:192` / `:447` · `UserDomainServiceTest.java:699` · `UserRpcLoginNullStatusReadsAsZeroTest.java:45` · `UserEntity.java:65`）⇒ 并已核真源：`go.mod:28` = **`gorm.io/gorm v1.31.1`** · `gorm@v1.31.1/schema/field.go` = **1004 行**（`v1.31.2` 是 **1011 行** ⇒ **旧引用在错的版本下看起来合法** ⇒ 这正是「引到另一份内容不同的副本」的隐蔽性）。
+3. 🟡 **§8.4 与我域 §69 的关系**：§8.4 说「849/849 在严格口径下不成立」⇒ 但我域 §69.4 / §69.5 **已自行披露**了判据的两条失效模式（同名文件「多候选都试」+ 核验脚本自身的失效模式），并写明「**属『声明的，不是可复算的』**」⇒ ⇒ 建议收口把 §69 结论**限定表述**为「**在该判据口径下未发现错误**」；而 §8.7 的 21 条是**另一件事**（实测真欠账）⇒ **两者不冲突，不必整体推翻**（本轮**未改** §69 表述 ⇒ 交收口执行者）。
+4. 🟡 **`admin-rpc` 的 `admin_invite.update_time` 不推进**（`admin/rpc.md:1778` 新发现 · 与 `Pitfalls/users/admin/rpc.md` **P-2** 同款形状：**user-rpc 修过、admin-rpc 漏修**）⇒ **域侧可自修** ⇒ 是否纳入本候选任务？
+5. 🟡 **`S1-FOLLOW-001`**（follow-rpc 指标出口）—— 仍是唯一待**你重新拍板**项（**不在本轮候选任务内**；重开 = 全仓 8 个 rpc 组件的统一方案 ⇒ 非 G1 单方可定）。
+6. 🔴 **官方核验命令的「批准」列判据有缺陷**（**共享面 ⇒ 本 lane 不改 ⇒ 只登记**）：`docs/Worktree.md` §二·五 的核验命令里，**批准列 = 第 2 个 `grep -c`**，其模式串是 **「Jason」+「批准」两词连续**（原文见该节「核验命令」代码块）⇒ 而**回执模板自带的 ⑤ 标题就含这串** ⇒ **任何只要写了回执的 lane，该列天然 ≥ 1** ⇒ ⇒ **「两列都要 ≥ 1 才算已开工」的判据对本 lane 天然满足** ⇒ **收口会把未获批准的 lane 误判为已开工**。
+   ⇒ **本回执的 ⑤ 标题刻意写成「⑤ 批准记录」**（不含那串）⇒ 批准列 = **0** ⇒ 如实反映「未获批准」。
+   ⇒ **建议收口把判据改成「⑤ 冒号后有内容」**（把该 `grep -c` 换成带 `E` 的行首锚定写法，匹配 `批准记录：` 后有非空字符的行）⇒ **属共享面 ⇒ 交收口执行者**。
+
+**④ 等批准 ⇒ 批准后才开工**
+本轮**只读 + 写本回执**；未获批准前**不写任何代码、不改任何台账**（本小节除外）。
+⚠️ **本节 ⑤ 留空 = 未获批准**（**留空不等于已批准**）。
+
+**⑤ 批准记录**（留空 ⇒ 由**调度员**代填 · 回执人**不得自批**）：
