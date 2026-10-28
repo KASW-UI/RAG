@@ -1,0 +1,12 @@
+# proto 契约基准 —— **由脚本从 Go 真源生成，勿手工编辑**
+# 生成脚本：同目录 generate.py（用法见脚本头部）
+# 真源：Sea-RideTheWind_golang/proto/follow.proto
+# 真源 sha256：9dc0103cbabe24ba0fb2ee92f8fbfd465f9fcbbbafee9dd7bcb48dd24a334ae5
+package follow
+message|RelationReq|user_id=1:int64|target_id=2:int64
+message|BaseResp|code=1:int32|msg=2:string
+message|ListReq|user_id=1:int64|offset=2:int32|limit=3:int32
+message|UserListResp|code=1:int32|msg=2:string|user_ids=3:repeated int64
+message|RecommendResp|code=1:int32|msg=2:string|users=3:repeated RecommendUser
+message|RecommendResp.RecommendUser|target_id=1:int64|mutual_score=2:int32
+service|FollowService|Follow(RelationReq)->BaseResp|Unfollow(RelationReq)->BaseResp|Block(RelationReq)->BaseResp|Unblock(RelationReq)->BaseResp|GetFollowList(ListReq)->UserListResp|GetBlockList(ListReq)->UserListResp|GetFollowerList(ListReq)->UserListResp|GetRecommendations(ListReq)->RecommendResp

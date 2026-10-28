@@ -60,7 +60,9 @@ spring:
 # ===== 3. HTTP server 监听端口（对齐 Go 端 etc/admincenter.yaml: Host=0.0.0.0, Port=8889）=====
 # Java 版端口按实际部署填写（与 user-api 段同款，按 Infrastructure.md §3）
 server:
-  port: 8889
+  # ⚠️ 默认端口**一字不变**（8889）。加 env 覆盖是为了与其余 5 个组件的**可覆盖策略一致**
+  #    （见 `docs/DRIFT/users/stage1-admission.md` §4.1 T3），并解除「端口被占 ⇒ 无法真启动」的死结。
+  port: ${ADMIN_API_PORT:8889}
   address: 0.0.0.0
   servlet:
     context-path: /

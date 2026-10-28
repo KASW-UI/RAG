@@ -195,6 +195,35 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+
+            <!--
+                集成测试必须关掉 Ryuk，否则在本机/CI 上起不了任何容器。
+                原因与恢复方式见 follow-rpc/pom.xml 同款注释（Testcontainers 2.x 的
+                ResourceReaper 只读环境变量 TESTCONTAINERS_RYUK_DISABLED）。
+
+                🆕 2026-10-29 · G1 lane（阶段 1 回归实测）：
+                本模块原先**没有**这段配置 ⇒ 整仓 52 个模块里只有它会去拉 ryuk
+                ⇒ 2026-10-29 的域级回归里，follow-api 的两个 Testcontainers 类
+                （FollowApiRedisDisconnectedFastFailTest /
+                FollowApiRedisDisconnectedDefaultBehaviorTest）**整类 error**：
+                    ContainerFetchException: Can't get Docker image:
+                    RemoteDockerImage(imageName=testcontainers/ryuk:0.14.0)
+                —— 根因 = ryuk 镜像要**从 Docker Hub 拉**，而本机 registry-1.docker.io
+                不可达（实测 curl 15s 超时）⇒ **不是代码缺陷，是测试基础设施缺一段配置**。
+                ⚠️ 判据自证：同一次回归里 **users / admin / follow-rpc 等 8 个模块的
+                Testcontainers 用例全绿**（它们都有这段 env）⇒ ⇒ 变量就是这一段。
+                ⚠️ 同一缺口还存在于 article-api / comment-api / hot-api / like-api /
+                task-api（各归 G2 / G3 lane）⇒ **不在 G1 写权面 ⇒ 登记 + 上报**。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 </project>

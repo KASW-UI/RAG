@@ -45,11 +45,38 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <b>成功</b>，{@code lsof} 显示<b>两个监听者并存</b>（{@code 127.0.0.1:P} 与 {@code *:P}）；
  * 只探 {@code 0.0.0.0:P} <b>检不出</b> ⇒ ⇒ 必须探<b>两个地址</b>。
  *
+ * <h2>🆕 第四种形态：{@code grpc.server.port=0}（2026-10-28 实测炸过）</h2>
+ * <p>本守门原先只扫三种写法（{@code forPort(0)} / {@code new ServerSocket(0)} /
+ * {@code RANDOM_PORT}）⇒ ⇒ <b>漏掉了 Spring 属性形态</b>
+ * {@code properties = {"grpc.server.port=0", ...}} —— 它让 devh 把 0 交给 Netty
+ * ⇒ ⇒ <b>同样是 OS 盲选口</b>，只是换了个入口。
+ * <p>⚠️ <b>它真的炸过</b>（2026-10-28 · G1 lane 的阶段 1E 回归）：
+ * {@code AdminRpcUpdateTimeAdvanceWiringTest} 5 条用例全 error，根因链是
+ * {@code Failed to bind to address 0.0.0.0/0.0.0.0:36379} → {@code BindException: Address already in use}
+ * ⇒ ⇒ 而 36379 当时被 <b>Docker 的 redis 容器发布代理</b>占着（{@code *:36379}）。
+ * <p>📌 <b>机制（为什么内核会挑到一个「已被占」的端口）</b>：macOS 内核的临时口挑选
+ * <b>只查 IPv4 占用</b>，而 Docker 的发布代理常把宿主口占在 <b>IPv6 通配</b>
+ * ⇒ ⇒ 内核认为该口「IPv4 空闲」而挑中它 ⇒ 我们随后绑 IPv4 通配 ⇒ {@code EADDRINUSE}。
+ * ⇒ ⇒ 这与上面「更具体地址被占」的形态<b>互为镜像</b>：一个是<b>挑不到</b>，
+ * 一个是<b>挑到但绑不上</b> ⇒ ⇒ <b>都必须用域内 {@code RealGrpcPort.pick()} 取代</b>。
+ * <p>⇒ 2026-10-28 起，本守门的扫描面<b>扩到 Spring 属性形态</b>，
+ * 且域内 23 个测试类的 {@code grpc.server.port=0} 已全部改为
+ * {@code r.add("grpc.server.port", () -> String.valueOf(RealGrpcPort.pick()))}。
+ *
+ * <h2>合法出口只有两个（写别的不算合法）</h2>
+ * <ol>
+ *   <li><b>动态挑口</b>：{@code RealGrpcPort.pick()} / {@code RealTomcatPort.pick()}
+ *       ⇒ 域内专用段 + 双地址探针；</li>
+ *   <li><b>段内字面量固定口</b>：字面量必须落在该域预分配段内
+ *       （users 22200–22299 / follow 22300–22399）⇒ 本守门第 ② 条会逐个核。</li>
+ * </ol>
+ * ⇒ ⚠️ <b>判据只认这两种</b>：第三种写法（随便找个口 / 用 env 变量塞随机值）一律判违规。
+ *
  * <h2>本守门守什么</h2>
  * <ol>
  *   <li><b>源扫</b>：我域 6 个模块的 {@code src/test/java} 里<b>零</b>盲选口写法
  *       ⇒ ⚠️ <b>必须先剥注释</b>，否则 javadoc 里引用 {@code forPort(0)} 会假阳性；</li>
- *   <li><b>段归属</b>：8 个端口类的段必须落在<b>共享层预分配给本域</b>的段里
+ *   <li><b>段归属</b>：9 个端口类的段必须落在<b>共享层预分配给本域</b>的段里
  *       （users 22200–22299 / follow 22300–22399）⇒ 子段互不重叠
  *       ⇒ 不在临时段 ⇒ 不与 Testcontainers 段 22700–22999 重叠；</li>
  *   <li><b>运行期</b>：挑到的口<b>真的能起一个 gRPC server</b>且客户端连得上
@@ -113,7 +140,7 @@ class BlindPortGateTest {
     // ==================================================================
 
     @Test
-    @DisplayName("① 源扫：我域 6 个模块的测试树里零盲选口（forPort(0) / new ServerSocket(0) / RANDOM_PORT）")
+    @DisplayName("① 源扫：我域 6 个模块的测试树里零盲选口（forPort(0) / new ServerSocket(0) / RANDOM_PORT / grpc.server.port=0）")
     void domainHasNoBlindPortLeft() throws IOException {
         ScanResult scan = scanForBlindPorts(repoRoot());
         assertThat(scan.visitedFiles)
@@ -132,7 +159,7 @@ class BlindPortGateTest {
     // ==================================================================
 
     @Test
-    @DisplayName("② 段归属：8 个端口类的段落在本域预分配段内、子段互不重叠、不在临时段、不撞 Testcontainers 段")
+    @DisplayName("② 段归属：9 个端口类的段落在本域预分配段内、子段互不重叠、不在临时段、不撞 Testcontainers 段")
     void portClassesStayInsideDomainBand() throws IOException {
         Map<String, int[]> bands = new LinkedHashMap<>();
         for (String module : DOMAIN_MODULE_DIRS) {
@@ -140,15 +167,16 @@ class BlindPortGateTest {
                 Path f = repoRoot().resolve(module).resolve("src/test/java").resolve(
                         moduleToPackagePath(module)).resolve("support").resolve(cls + ".java");
                 if (!Files.isRegularFile(f)) {
-                    continue; // 该模块不需要这一类（例如 follow 域没有真 Tomcat 测试）
+                    continue; // 该模块不需要这一类
                 }
                 bands.put(module + "/" + cls, readBand(f));
             }
         }
 
         assertThat(bands)
-                .as("至少要有 6 个 RealGrpcPort + 2 个 RealTomcatPort（user-api/admin-api 各要一个 Tomcat 口）")
-                .hasSize(8);
+                .as("要有 6 个 RealGrpcPort + 3 个 RealTomcatPort"
+                        + "（user-api / admin-api / follow-api 各要一个 Tomcat 口）")
+                .hasSize(9);
 
         List<int[]> ranges = new ArrayList<>();
         for (Map.Entry<String, int[]> e : bands.entrySet()) {
@@ -235,7 +263,7 @@ class BlindPortGateTest {
     // ==================================================================
 
     @Test
-    @DisplayName("④ 判据自检：造假源码含 forPort(0) ⇒ 扫描器必须报出；注释里的字面量必须不报")
+    @DisplayName("④ 判据自检：造假源码含 forPort(0) / grpc.server.port=0 ⇒ 扫描器必须报出；注释里的字面量必须不报")
     void scannerActuallyReportsBlindPorts() throws IOException {
         Path fakeRoot = Files.createTempDirectory("g1-blind-port-selftest");
         Path javaDir = fakeRoot.resolve("service/users/user/user-rpc/src/test/java/com/rag/fake");
@@ -248,26 +276,46 @@ class BlindPortGateTest {
                         + "    }\n"
                         + "}\n",
                 StandardCharsets.UTF_8);
+        // 🆕 2026-10-28：Spring 属性形态的假样本 —— **必须换名**（排除规则是按文件名的）
+        //    ⚠️ 字面量必须写在**代码**里（不能放注释）⇒ 扫描器会先剥注释 ⇒ 放注释等于「测不到」
+        Files.writeString(javaDir.resolve("FakeSpringProp.java"),
+                "package com.rag.fake;\n"
+                        + "class FakeSpringProp {\n"
+                        + "    String f() {\n"
+                        + "        return \"grpc.server.port=0\";\n"
+                        + "    }\n"
+                        + "}\n",
+                StandardCharsets.UTF_8);
 
         ScanResult result = scanForBlindPorts(fakeRoot);
-        assertThat(result.visitedFiles).isEqualTo(1);
+        assertThat(result.visitedFiles).isEqualTo(2);
         assertThat(result.hits)
-                .as("扫描器必须报出假源码里的那一处（否则本守门是空转 ⇒ 零命中是假信号）")
-                .hasSize(1);
-        assertThat(result.hits.get(0)).contains("Fake.java");
+                .as("扫描器必须报出假源码里的两处（否则本守门是空转 ⇒ 零命中是假信号）")
+                .hasSize(2);
+        // ⚠️ **顺序无关**断言：`Files.walk` 的遍历顺序**不由文件系统保证** ⇒
+        //    `hits.get(0)` 到底是谁**不可假设**（2026-10-28 实测踩中：一次跑里 get(0) 是另一个样本）
+        assertThat(result.hits)
+                .as("api/SDK 形态的假样本必须被报出")
+                .anyMatch(h -> h.contains("Fake.java"));
+        assertThat(result.hits)
+                .as("🆕 Spring 属性形态 grpc.server.port=0 也必须被报出（这正是 2026-10-28 漏掉的那一类）")
+                .anyMatch(h -> h.contains("FakeSpringProp.java"));
 
         // ⚠️ 反例自检：把同一处写进**注释**里 ⇒ 必须**不**报（否则 javadoc 引用会假阳性）
         Files.writeString(javaDir.resolve("CommentOnly.java"),
                 "package com.rag.fake;\n"
                         + "/** 说明：原来写的是 ServerBuilder.forPort(0) —— 见 §65。 */\n"
                         + "// ServerBuilder.forPort(0)\n"
+                        + "/** 原来是 grpc.server.port=0 */\n"
                         + "class CommentOnly { }\n",
                 StandardCharsets.UTF_8);
         ScanResult result2 = scanForBlindPorts(fakeRoot);
         assertThat(result2.hits)
                 .as("注释里的字面量必须被剥掉（否则本守门会对着 javadoc 假阳性）")
-                .hasSize(1);
-        assertThat(result2.hits.get(0)).doesNotContain("CommentOnly.java");
+                .hasSize(2);
+        assertThat(result2.hits)
+                .as("CommentOnly.java 里只有注释 ⇒ 必须零命中")
+                .noneMatch(h -> h.contains("CommentOnly.java"));
     }
 
     // ==================================================================
@@ -314,7 +362,10 @@ class BlindPortGateTest {
     }
 
     private static final Pattern BLIND_PORT = Pattern.compile(
-            "forPort\\(0\\)|new ServerSocket\\(0\\)|WebEnvironment\\.RANDOM_PORT");
+            "forPort\\(0\\)|new ServerSocket\\(0\\)|WebEnvironment\\.RANDOM_PORT"
+                    // 🆕 2026-10-28：Spring 属性形态（devh 把 0 交给 Netty ⇒ 同样是 OS 盲选口）
+                    //    ⇒ admin-rpc 上真实炸过（36379 被 Docker 发布代理占在 IPv6 通配）
+                    + "|grpc\\.server\\.port=0|server\\.port=0");
 
     private static final Pattern FIRST_CONST = Pattern.compile("public static final int FIRST = (\\d+);");
     private static final Pattern LAST_CONST = Pattern.compile("public static final int LAST = (\\d+);");

@@ -133,7 +133,6 @@ import static com.rag.follow.follow.rpc.support.GoStyleHostPortPinning.pinContai
                 //    「各类的 properties 恰好不同」—— 谁改一下 properties 就可能撞上。
                 "rag.test.gate.context-key=follow-slow-threshold",
 
-                "grpc.server.port=0",
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "management.otlp.tracing.export.enabled=false",
                 "logging.level.com.alibaba.nacos=WARN",
@@ -159,6 +158,7 @@ class FollowRpcSlowThresholdGateTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", () -> String.valueOf(RealGrpcPort.pick()));
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

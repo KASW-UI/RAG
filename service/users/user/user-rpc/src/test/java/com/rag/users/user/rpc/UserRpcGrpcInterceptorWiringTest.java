@@ -87,7 +87,6 @@ import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainer
         properties = {
                 // grpc-server-spring-boot-starter 3.1.0 的 GrpcServerLifecycle 没有
                 // @ConditionalOnProperty("grpc.server.enabled")，实测写 false 仍会起 server。
-                "grpc.server.port=0",
                 // 指到必然拒连的地址：NacosRegistration 捕获 NacosException 只记日志不中断启动。
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 // OTLP 指向不可达端点，只会在后台重试刷日志，关掉。
@@ -115,6 +114,7 @@ class UserRpcGrpcInterceptorWiringTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", () -> String.valueOf(RealGrpcPort.pick()));
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

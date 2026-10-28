@@ -17,7 +17,7 @@
 | DRIFT-FOLLOW-001 | 空列表出参 Go=`"user_ids":null` / RAG=`"user_ids":[]` | **可观察（L1 wire）** | ✅ 已修 |
 | DRIFT-FOLLOW-005 | recommend 出参**字段顺序** Go=`target_id` 在前 / RAG=`mutual_score` 在前 | **可观察（L1 wire 字节序）** | ✅ 已修 |
 | DRIFT-FOLLOW-007 | 指标文本层：多一个 `application` tag / 直方图**零桶** | 可观察（抓取侧） | ✅ **已修**（tag + 桶）· ⚠️ 残留 = **框架限制** · ✅ **已定性（用户 2026-10-27 拍板：不修，登记为框架限制）** |
-| DRIFT-FOLLOW-008 | MaxConns 闸门：**每路由一个**（Go）vs **全局一个**（RAG） | 可观察（并发行为） | 🔴 **未修**（`service/common` 共享模块 ⇒ 派单） |
+| DRIFT-FOLLOW-008 | MaxConns 闸门：**每路由一个**（Go）vs **全局一个**（RAG） | 可观察（并发行为） | ✅ **已签字偏离 ⇒ 不修**（`SD-2026-10-25-01`，2026-10-25 用户拍板）· ⚠️ **2026-10-29 订正**：原记「🔴 未修 ⇒ 派单」**是陈旧的**（签字在先，本条登记晚于签字）⇒ 已按 §5.3b 硬边界 2 **移出 DRIFT 侧** ⇒ 见下方「已移出 DRIFT 侧」块 |
 | DRIFT-FOLLOW-009 | 下游挂死时：Go **2s ⇒ 200+1015**；RAG **3s ⇒ 503 "Request Timeout"** | **可观察（状态码 + 时刻）** | ✅ 已修 |
 | **DRIFT-FOLLOW-010** | **3s 预算的作用域**：Go 的计时器在 Authorize **之后**起算（**验签不计入**）/ RAG 的计时器在 Filter 外层（**验签计入**） | 可观察（**超时边界**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内推广 `DRIFT-USERAPI-009②`） |
 | **DRIFT-FOLLOW-011** | **Redis 超时口径**：`timeout: 2s` ≠ Go 的 `ReadTimeout` **3s**，且**缺 `connect-timeout: 5s`** | 可观察（**Redis 挂住形态**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内自闭环） |
@@ -485,17 +485,37 @@ PITFALL-FOLLOW-011 / PITFALL-FOLLOW-012。）
 
 ⇒ **算法等价 + 运行时形状等价 ⇒ U3 关闭，无漂移。**
 
-## DRIFT-FOLLOW-008 🔴 MaxConns 闸门：Go 每路由一个，RAG 全局一个（跨域待办）
+## DRIFT-FOLLOW-008 ✅ **已移出 DRIFT 侧** ⇒ 决策见签字档 `SD-2026-10-25-01`（**不修**）
 
-**现象（U2：把两侧阈值都压到 1 后实测）**
+> ⚠️ **2026-10-29 · G1 lane（阶段 1 复核）订正**：本条目原先登记为
+> 「🔴 **未修**（`service/common` 共享模块 ⇒ **派单**）」⇒ **该登记是陈旧的**。
+>
+> **事实**：该差异已于 **2026-10-25 经用户签字**为**有意偏离** ⇒
+> 落 [`docs/Intentional_Deviations/global/common-tails.md`](../../Intentional_Deviations/global/common-tails.md)
+> 的 **`SD-2026-10-25-01`**（签字决定 = **保留 RAG 的全局闸门，不改成 per-route**）。
+> 该签字档的「对应的 DRIFT 条目」栏**明写 = T-2（`follow` 域 `DRIFT-FOLLOW-008`）**。
+> ⇒ ⇒ **本条不再是「待修的漂移」**，**不派单**（派过去 = 让 G4 去改掉一个用户已决定保留的行为）。
+>
+> 📌 **依据链（逐条可复算）**：
+> - 共享层代码 javadoc 已指向签字档：`service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java:67-72`
+>   （含「**不要**因为『Go 是 per-route』就把它当缺陷顺手改回」的明文）；
+> - global 收口档已销账：`docs/DRIFT/global/_README.md:88`（T-2 = ✅ 已签字 ⇒ 已移出本档）；
+> - 同族域已对齐：`docs/DRIFT/hot/vs-common.md:31`（hot 的 `D27` = 同一条，✅ 已闭合）；
+> - users 侧已注明：`docs/DRIFT/users/vs-common.md:2735`（「MaxConns 半边 = 已签字偏离 `SD-2026-10-25-01`」）。
+> ⇒ **三处已对齐，只有 follow 域台账落后** ⇒ 本轮订正。
+>
+> ⚠️ **按 §5.3b 硬边界 2**（「不要在 `docs/DRIFT/` 里记『决定不对齐』的偏离」）⇒
+> **决策本体在签字档**，此处只保留**指针 + 现象证据摘要**（现象证据本身有效，留作审计线索）。
+
+**现象（U2：把两侧阈值都压到 1 后实测）—— 证据仍然有效，但结论已不是「待修」**
 
 | 场景（max-conns=1） | Go | RAG |
 |---|---|---|
 | A 占住 routeA 的名额后打**同**路由 | 503 | 503 ✅ |
-| B 占住 routeA 的名额后打**异**路由 | **200** | **503** ❌ |
+| B 占住 routeA 的名额后打**异**路由 | **200** | **503** ❌（**＝已签字保留的偏离**）|
 | C 释放后再打 | 200 | 200 ✅ |
 
-**根因**
+**根因（仍然成立）**
 
 - Go：`go-zero@v1.10.2/rest/engine.go:146` 在 **`bindRoute` 的每条路由链里**各建一次
   `handler.MaxConnsHandler(ng.conf.MaxConns)`；`go-zero@v1.10.2/rest/handler/maxconnshandler.go:20`
@@ -504,15 +524,20 @@ PITFALL-FOLLOW-011 / PITFALL-FOLLOW-012。）
 - RAG：`com.rag.common.protection.GoStyleMaxConnsFilter` 是 **一个全局 Semaphore**
   ⇒ routeA 占满 ⇒ **routeB 也被连带拒绝**。
 
-**可观察后果**：一个慢路由能把**其它所有路由**一起拖垮（503）。
-Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述差异。
+**为什么不修（2026-10-25 用户签字的三条理由，见签字档）**
 
-**为什么本轮没修**：实现位于 **`service/common` 共享模块**
-（`GoStyleMaxConnsFilter`），而 `service/common` 被 10 个微服务共用
-⇒ 按 `docs/Worktree.md`，**域外改动要交主会话派单**（并发写会撞）。
-**修法一句话**：把 `GoStyleMaxConnsFilter` 的 Semaphore 改成
-**按 `method://path` 分桶的 Map**（与 Go 的 `breaker.NewBreaker(WithName(method+"://"+path))`
-同一思路，`GoStyleBreakerFilter` 已经是这么做的，可直接照抄它的 `breakers` map 结构）。
+1. **实际影响接近零**：Tomcat 默认 `max-threads=200` ⇒ 请求**先在容器层排队** ⇒ 理论上到不了 10000 在途
+   ⇒ 两种口径在当前部署下**不可观察**；
+2. **改成 per-route 不是「改一行」**：Servlet Filter 是**按注册一次、作用于全部路由**的
+   ⇒ 要实现 per-route，得按 `HttpServletRequest#getRequestURI()` 分桶计闸门
+   ⇒ 是**一次非平凡改造**，且会引入新的「分桶键语义」问题（同一路由多前缀？带 context path？）；
+3. **方向上 RAG 更严**（全局总量受限 vs 单路由受限）⇒ 不是「放宽」类风险。
+
+⇒ ⇒ **签字为有意偏离，不修。**
+
+> ⚠️ **如果将来要重开这条**：必须先**撤销签字**（用户拍板），再按「两侧都应是 Y =
+> 每路由一个 latch」落码 ⇒ **且必须与 `DRIFT-USERAPI-013` 的 breaker 键空间半边同批**。
+> ⚠️ **不要**因为「Go 是 per-route」就把它当缺陷顺手改回（AGENTS.md §5.3b：签字偏离不重复质疑）。
 
 ## DRIFT-FOLLOW-007 🟡 指标文本层：多一个 tag + 直方图零桶（已修 + 框架限制残留）
 
@@ -706,8 +731,14 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 1. ~~修订 `GlobalExceptionHandler` 里那段过期的「已知偏离（415）」注释~~ ——
    ✅ **已修**（2026-10-24，commit `d50750e`）：注释已改为「本分支在 `GoStyleJsonBodyConverter`
    生效时不可达 + 何时会重新变成偏离 + 守住它的回归网是哪两条测试」。
-2. **DRIFT-FOLLOW-008（MaxConns 每路由 vs 全局）需派单到 `service/common`** ——
-   实现位于共享模块，本域不得改（并发写会撞）。修法见该条目。
+2. ~~**DRIFT-FOLLOW-008（MaxConns 每路由 vs 全局）需派单到 `service/common`**~~ ——
+   ✅ **已撤销（2026-10-29 · G1 lane 阶段 1 复核）**：该差异已于 **2026-10-25 用户签字**
+   为**有意偏离** ⇒ [`SD-2026-10-25-01`](../../Intentional_Deviations/global/common-tails.md)
+   ⇒ **不是缺陷、不派单**。本条**原先的「需派单」登记是陈旧的**（签字在先、本登记晚于签字）
+   ⇒ 详见上文「`DRIFT-FOLLOW-008` 已移出 DRIFT 侧」块的依据链。
+   ⚠️ **教训（留给下一轮）**：域台账的「抽取快照 / 待办」**不是真源** ——
+   **签字档（`docs/Intentional_Deviations/**`）才是决策真源** ⇒ **派单前必须先查签字档**，
+   否则会把**已签字决定保留的行为**当成缺陷派给 G4 去「修」（AGENTS.md §0 第 1 条 / §5.3b）。
 3. **DRIFT-FOLLOW-007 的框架限制残留：拍板点已收窄，~~待用户定~~ ⇒ ✅ 已拍板（2026-10-27）** ——
    残留分三条（详见该条目）：**A 桶数并集**（Micrometer 层，可修）、
    **B `le="1.0"` 渲染**（client_java 层，**绕过 Micrometer 也修不掉**）、
@@ -997,6 +1028,24 @@ go-zero@v1.10.2/rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Ha
 - **危害**：`forPort(0)` / `new ServerSocket(0)` / `RANDOM_PORT` 三种写法都是**让 OS 从临时端口段（49152–65535）里盲选** ⇒ ⇒ 与 Docker 随机发布口**同段**
   ⇒ ⇒ 邻居占**更具体地址** `127.0.0.1:P` 时我方**通配绑定照样成功**（实测：两个监听者并存）⇒ ⇒ 客户端被抢 ⇒ **静默假红**（看着像被测代码炸了，其实压根没被请求到）。
 - **修法**：全部改走**域内私有** `support/RealGrpcPort`（`support/RealTomcatPort`）⇒ **段**：`22300–22319`（follow 域段的子段）⇒ 段内挑口 ＋ **双地址 bind 探针**（只探通配**检不出**「更具体的占用者」）。
+  ⇒ 🆕 **2026-10-29 `T11` 订正**：本组件**现在真的有** `support/RealTomcatPort`（**22340–22359**）⇒ 括号里那句**当时是「尚未存在」的预留说法** ⇒ ⇒ **今天有两段**：`RealGrpcPort` **22300–22319** ＋ `RealTomcatPort` **22340–22359** ⇒ **互不重叠**。
 - **段来源**：共享层已预分配给本域的段（`docs/DRIFT/global/vs-common.md` §4.10.19.3）⇒ **共享层台账零改动**（写权归 G4）。
 - **守门**：域级 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java`）**5 条** ⇒ 一并覆盖本组件 ⇒ **本组件不单独建守门**（避免两份规则漂移）。
 - **边界**：**本组件生产代码零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务）。
+
+---
+
+## 🟢 `T11` · **本组件的独立失败路径矩阵**（8 端点 × 4 类失败 × **真 Tomcat**）⇒ 基线 §九 `G-13` 在 follow 域**闭合**（2026-10-29 · G1 lane）
+
+> 📌 **矩阵逐条表 + 证据强度 + 效力边界 ⇒ [`docs/DRIFT/follow/vs-common.md` §13](vs-common.md)**；**落码与验证记录 ⇒ [`docs/DRIFT/follow/stage1-admission.md` §4.2 / §5.2.1](stage1-admission.md)**。
+> ⇒ 本条只记**本组件这一份**（不抄矩阵表，避免两处漂移）。
+
+| 项 | 内容 |
+|---|---|
+| **改前** | 本组件 **10 个测试类全部 `webEnvironment = MOCK`** ⇒ **真 Tomcat 覆盖率 = 0** ⇒ ① Content-Type 的**容器归一化** / `Content-Length` / **容器会不会补 body** 三处一律测不到 ② 失败路径只覆盖了**部分端点**（认证只测 `/follow/list`、业务规则只测 `/follow`）⇒ 基线 P0#2 的**四项推不出来** |
+| **改后** | 新增 `support/RealTomcatPort.java`（段 **22340–22359** · **双地址** bind 自检）＋ `FollowApiFailurePathMatrixTest.java`（**62 条**）|
+| **Go 出处** | 8 个端点 × 四类失败的期望值**逐条抄自 Go 源码**（每条带 `文件:行号`，写在测试的 `Endpoint` 表里）⇒ `routes.go:20-63` · `types/types.go:6-10,25-27` · 8 个 logic 的 Forbidden / `NewErrCodeMsg` 分支 · `common/errmsg.go` `BizCodeFromError` |
+| **实测** | ✅ **62/62 绿**（`Tests run: 62, Failures: 0, Errors: 0, Skipped: 0` · 5.471 s · **真 Tomcat**）|
+| ⚠️ **首轮 12 条红 = 判据自身的错** | ① `assertEnvelope` 对**成功**信封也要求 `data:null`（**11 条**假红）② 404 的 `Content-Length` 被写死成 **20**（实测 **19**，**1 条**假红）⇒ **改判据**，不是改产品（AGENTS.md §3.3 规则 ③）|
+| **效力边界** | **L3 / R3** ⇒ ⚠️ **不是 R4**（R4 要双侧活体 + 变异）⇒ **不得**据此宣称「与 Go 逐字节一致」；⚠️ **P0#2 本身仍不是 ✅**（其余 3 域未补）|
+| **生产代码** | **零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项** |

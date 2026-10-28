@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainerPort;
+import com.rag.users.user.rpc.support.RealGrpcPort;
 
 /**
  * <p><b>关闭 {@code DRIFT-USERRPC-V-006}</b>：两张表的 {@code id} 取值来源
@@ -56,17 +57,24 @@ import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainer
  * ⇒ 两个 {@code id} 列都<b>永远不进入任何 proto 字段</b>，所以取值来源不同**不可观察**。
  * 本类把这个结论从「推断」升级为「真 PG 实证」。
  *
- * <p><b>⚠️ 为什么必须 {@code grpc.server.port=0}</b>：{@code application.yaml:81} 把 gRPC 端口
- * 钉死在 {@code 49210}，而本仓库有多条并行 worktree 会话 + 外部 difftest 容器，
- * 实测该端口被 <b>Docker（别的会话的栈）</b>占着 ⇒
+ * <p><b>⚠️ 为什么端口走 {@code RealGrpcPort.pick()} 而不是 {@code grpc.server.port=0}</b>：
+ * {@code application.yaml:81} 把 gRPC 端口钉死在 {@code 49210}，而本仓库有多条并行 worktree 会话
+ * + 外部 difftest 容器，实测该端口被 <b>Docker（别的会话的栈）</b>占着 ⇒
  * {@code Failed to bind to address 0.0.0.0/0.0.0.0:49210 / BindException} ⇒
  * 整个 {@code ApplicationContext} 起不来（4 条用例全部变成
  * {@code ApplicationContext failure threshold exceeded}，<b>一条真实断言都没跑到</b>）。
- * 本类只关心 DDL 与主键来源，<b>不需要真的监听端口</b> ⇒ 用临时端口（0 由内核分配）。
+ * <p>改用 {@code 0} 让内核盲选也只是<b>把同一个洞从「固定口」搬到「随机口」</b>：
+ * 内核的临时段挑选**只查 IPv4 占用**，而 Docker 的发布代理常把宿主口占在 <b>IPv6 通配</b>
+ * （实测 {@code *:36379}）⇒ 内核挑中它 ⇒ 我们绑 IPv4 通配时撞 {@code EADDRINUSE}
+ * ⇒ <b>2026-10-28 在 admin-rpc 上真实炸过</b>（5 条用例 error，根因
+ * {@code Failed to bind to address 0.0.0.0/0.0.0.0:36379}）。
+ * <p>⇒ 现在统一走 {@code support/RealGrpcPort.pick()}：从<b>本域专用段</b>（22220–22239）
+ * 挑口 ＋ <b>双地址 bind 探针</b>（通配 + 具体地址各探一次 ⇒ 连「更具体地址的占用者」也查得出）
+ * ⇒ 既不随机、也不撞邻居、也不撞 Docker 发布口。
  */
 @Testcontainers
 @SpringBootTest(classes = UserRpcApplication.class,
-        properties = "grpc.server.port=0")
+        properties = {})
 class UserRpcPrimaryKeySourceParityTest {
 
     @Container
@@ -78,6 +86,7 @@ class UserRpcPrimaryKeySourceParityTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", () -> String.valueOf(RealGrpcPort.pick()));
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);

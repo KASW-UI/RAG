@@ -43,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContainerPort;
+import com.rag.users.admin.rpc.support.RealGrpcPort;
 
 /**
  * 🔴 DRIFT-ARPC-007 / DRIFT-ARPC-008 守门测试 —— admin-rpc 的 **gRPC wire 层**与 Go 真源逐条对齐。
@@ -81,7 +82,6 @@ import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContaine
         classes = AdminRpcApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "grpc.server.port=0",
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "management.otlp.tracing.export.enabled=false",
                 "logging.level.com.alibaba.nacos=WARN"
@@ -99,6 +99,7 @@ class AdminRpcGoWireParityTest {
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", () -> String.valueOf(RealGrpcPort.pick()));
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);
