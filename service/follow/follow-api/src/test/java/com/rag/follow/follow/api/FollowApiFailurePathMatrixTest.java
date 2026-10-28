@@ -414,7 +414,8 @@ class FollowApiFailurePathMatrixTest {
 
         assertEquals(404, r.statusCode());
         assertEquals("404 page not found\n", r.body(),
-                "Go 是 http.Error + fmt.Fprintln ⇒ body 带尾随换行、全长 20 字节");
+                "Go 是 http.Error + fmt.Fprintln ⇒ body 带尾随换行、全长 **19** 字节"
+                        + "（\"404 page not found\" 18 + 尾随 \\n 1）");
         String ctRaw = r.headers().firstValue("content-type").orElse(null);
         assertNotNull(ctRaw, "Go 的 http.Error 无条件写 Content-Type: text/plain; charset=utf-8");
         // ⚠️ 比**解析后**的值：真 Tomcat 把 "text/plain; charset=utf-8" 归一化成
@@ -423,10 +424,17 @@ class FollowApiFailurePathMatrixTest {
                 "Go 的 http.Error 写死 text/plain + charset=utf-8；charset 整个丢掉或退化成 text/html 都是回归");
         assertEquals("nosniff", r.headers().firstValue("X-Content-Type-Options").orElse(null),
                 "net/http.Error 无条件写 X-Content-Type-Options: nosniff");
-        // ⚠️ **不写死 20**：body = "404 page not found\n" 是 18 + 1 = **19** 字节。
-        //    共享层 GoStyleRouterErrorResponses 的 javadoc 与 like 域的 DisplayName 都写「20 字节」
-        //    ⇒ 那两处**注释差 1**（断言本身是按实际长度比的，所以它们一直绿）。
-        //    本域写**按实际 body 字节数**比（与 like-api 的断言同法）⇒ 不复述那个错数。
+        // ⚠️ **不写死数字**：body = "404 page not found\n" 是 18 + 1 = **19** 字节。
+        //    ⚠️ **2026-10-29 二次订正**：本类的**断言消息**上一版也写了「全长 20 字节」
+        //    ⇒ **它自己就是同族错数的那一处**（我改了下面这条 Content-Length 断言，
+        //    却漏了上面那条消息）⇒ 而且它躲过了我第一轮的自查：
+        //    ① 那轮 grep 的模式是 body 字面量 `"404 page not found"` ⇒ 这一行**不含**它 ⇒ 零命中；
+        //    ② 那轮「字节」扫描**带了 `head -40`** ⇒ 249 条命中被截到前 40 条 ⇒ 这一条在第 210 条。
+        //    ⇒ ⇒ **「某目录没命中」必须先确认命令没被截断**，且**模式要选对**
+        //    （扫「错数」要搜「数字 + 字节」，不是搜 body 字面量）。
+        //    ⇒ 现状：共享层 javadoc 仍写「20」（G4 写权 ⇒ 已登记 S1-FOLLOW-010）；
+        //    like 域已由 G2 订正为 19（commit `aee9b0c`）⇒ **本域不复述那个错数**。
+        //    本域写**按实际 body 字节数**比（与 like-api 的断言同法）。
         assertEquals(r.body().getBytes(StandardCharsets.UTF_8).length,
                 Integer.parseInt(r.headers().firstValue("Content-Length").orElse("-1")),
                 "Content-Length 必须等于实际写入字节数，否则分块编码/截断会让客户端读错");

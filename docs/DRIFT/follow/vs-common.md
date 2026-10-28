@@ -802,6 +802,7 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
 |---|---|---|---|
 | `S1-FOLLOW-010` | `service/common/src/main/java/com/rag/common/http/GoStyleRouterErrorResponses.java:83` | javadoc 写「全长 **`20`** 字节」⇒ 实测 **19** ⇒ ⚠️ **常量本身是对的**（真容器实测 `Content-Length: 19`）⇒ 只是**注释**错 | **G4**（`service/common/**`）|
 | `S1-FOLLOW-011` | `service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiRouterErrorRealTomcatTest.java:46` 与 `:187` | javadoc 与 `@DisplayName` 都写「20」⇒ ⚠️ **断言本身是对的**（按实际长度比）⇒ **一直绿** ⇒ 只有注释与显示名错 | **G2**（`service/like/**`）|
+| `S1-FOLLOW-013` | **本轮新增文件自己的断言消息也写了「全长 20 字节」** —— `FollowApiFailurePathMatrixTest.java:417`（**G1 自己写的**）⇒ **断言本身是对的**（比 body 字面量）⇒ **错数只在文案里** ⇒ ⚠️ 且它**躲过了 G1 的第一轮自查**（模式选错 ＋ `head -40` 截断，两个漏洞叠加 ⇒ 详见 users 档 §68.2bis）⇒ **已二次订正** | **G1 自修**（`service/follow/**`）|
 
 ⇒ ⇒ **判据**：① 本域**不复述**那个错数（改按实际长度比）；② **不擅自改**别家写权面的文件 ⇒ 只登记 + 上报。
 

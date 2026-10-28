@@ -4759,6 +4759,7 @@ mvn -B -o -DargLine=-Xmx2g -am -pl service/users/user/user-api,service/users/use
 | ① | 共享层 `service/common/.../GoStyleRouterErrorResponses.java:83` | 「全长 **20** 字节」 | **19**（`"404 page not found\n"` = 18 + 1） | 🔴 **G4 写权** ⇒ 已登记 `S1-FOLLOW-010`，**G1 不碰** |
 | ② | like 域 `LikeApiRouterErrorRealTomcatTest.java:46` / `:187` | 「全长 **20** 字节」/「一致（**20**）」 | **19** | ✅ **G2 已修**（commit `aee9b0c`）· G2 独立复算过才改 |
 | ③ | **admin 域** `AdminApiRealTomcatResponseBytesTest.java:266` | 「线上是 Content-Length: **15**」 | **16**（`"Request Timeout".length() + 1`） | ✅ **G1 本轮自捕并修**（`S1-USERS-010`） |
+| ④ | **follow 域** `FollowApiFailurePathMatrixTest.java:417`（**本轮新增文件里**） | 断言消息写「全长 **20** 字节」 | **19** | ✅ **G1 本轮二次自捕并修**（`S1-FOLLOW-013`）⇒ ⚠️ **这一处就是 G1 自己写的** ⇒ 说明「自查必须先查自己的新文件」|
 
 ### 68.2 ③ 的成因（**与 ①② 不是同一个 body，但同一族的错法**）
 
@@ -4770,17 +4771,41 @@ mvn -B -o -DargLine=-Xmx2g -am -pl service/users/user/user-api,service/users/use
 ⇒ 📌 **判定式（可复用）**：凡注释里出现「N 字节」而 body 来自 Go 的 `http.Error` / `fmt.Fprintln` ⇒ **N 必须含那个尾随 `\n`**；
 ⇒ 只数**正文**（`len`）是这族错误的**唯一成因** ⇒ ⇒ 复核时**先看断言用的那个数**，别只读注释。
 
+### 68.2bis 🔴 **G1 自己写的文件里也有一处**（④）—— 且**躲过了 G1 的第一轮自查**
+
+④ 在 **G1 本轮新增的 `FollowApiFailurePathMatrixTest.java:417`**：那行是 `assertEquals` 的**断言消息**，
+写「Go 是 http.Error + fmt.Fprintln ⇒ body 带尾随换行、全长 **20** 字节」⇒ **断言本身是对的**
+（比的是 body 字面量），**错数只在文案里** ⇒ 与 ①③ 同族。
+
+⚠️ **它躲过了我第一轮自查，两个漏洞叠在一起**：
+
+| # | 漏洞 | 细节 |
+|---|---|---|
+| ① | **模式选错** | 我那轮 grep 的模式是 **body 字面量** `"404 page not found"` ⇒ ④ 那行**不含**这个字面量（它在**上一行**）⇒ 零命中 ⇒ **「模式选错 ⇒ 扫不到」** |
+| ② | **命令被截断** | 那轮「字节」扫描**带了 `head -40`** ⇒ 全域 **249** 条命中被截到前 40 条 ⇒ ④ 落在**第 210** 条 ⇒ **「零命中是假信号」**（G2 来信提醒的那一族）|
+
+⇒ ⇒ **判定式（两条合并）**：**扫「错数」这类问题时 ⇒ 模式要选「**数字 + 字节**」（不是 body 字面量）＋ 命令不得带 `head`/`tail`/分页 ＋ 命中数先落文件再逐条看**。
+⇒ ⇒ **推论**：**「我域零残留」这种结论，只有在「模式对 + 无截断」两条同时成立时才敢说** ⇒ 本轮两条都曾不成立 ⇒ **结论被推翻并已重扫**。
+
 ### 68.3 本轮处置
 
 - **域侧能自修的域侧修**（AGENTS.md §5.3c）⇒ ③ 在 **G1 写权内**（`service/users/admin/**`）⇒ **已修**
 - ① 在 **G4 写权** ⇒ **只登记上报**，不动（`S1-FOLLOW-010`）
 - ② 在 **G2 写权** ⇒ G2 **已自行修好**（`aee9b0c`）⇒ G1 **不重复派单**
-- ⚠️ **本轮我域自查命令**（G2 来信建议，各 lane 自查用）：
+- ⚠️ **本轮我域自查命令**（**已按 §68.2bis 的教训重做** ⇒ 无 `head`、模式选对、命中落文件）：
   ```
-  grep -rn "404 page not found" service/<你的域> --include='*.java' | grep -v "/target/"
+  # ✅ 正确口径：模式 = 「数字 + 字节」，不截断，命中落文件再逐条看
+  grep -rnE "[0-9]+ ?字节" service/users service/follow --include='*.java' | grep -v "/target/" > /tmp/scan.txt
+  wc -l /tmp/scan.txt          # ⇒ 74 行（全域「数字+字节」命中）
+  # ⚠️ 再逐条**复算**（权威）：
+  printf '404 page not found\n' | wc -c          # ⇒ 19
+  printf 'Request Timeout\n'     | wc -c          # ⇒ 16
+  printf 'field "username" is not set\n' | wc -c # ⇒ 28
+  printf 'field "uid" is not set\n'       | wc -c # ⇒ 23
   ```
-  ⇒ **我域（users + follow）命中仅 3 处，全部在 G1 本轮新增的 `FollowApiFailurePathMatrixTest.java` 内，且已写 19（正确）** ⇒ **零残留**；
-  ⇒ 另扫了「Content-Length」的全部出现处 ⇒ 其余命中都是**别的 body**（400 / 503 / 空 body）或 **curl 观测原文**（`AdminApiPlainText400HeaderProbeTest.java:30` 的「Content-Length: 95」是 2026-10-22 逐字抄的 Go 侧响应，**不是计算值** ⇒ 无需改）
+  ⇒ **我域（users + follow）现在零残留**：① 19 ✓ ② 16 ✓ ③ 28 ✓ ④ 23 ✓（逐条复算对上）
+  ⇒ 另有 `AdminApiPlainText400HeaderProbeTest.java:30` 的「Content-Length: 95」⇒ 那是 2026-10-22 **逐字抄的 Go 侧响应**（观测原文，**不是计算值**）⇒ 无需改
+  ⇒ 「数字 + 字节」其余命中全是**别的族**：bcrypt 72 字节上限 · 字节码扫描阈值 · 密钥长度（15 / 36 字节）· 落库字节数 · hex 长度 ⇒ 与本族（**HTTP body 尾随换行**）无关
 
 ### 68.4 复验
 
