@@ -4463,6 +4463,9 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
      `Bind for 0.0.0.0:22700 failed: port is already allocated`（占用方 = G1 的并发运行）
      ⇒ ⇒ 连锁表现 = `ContainerLaunch Container startup failed for image postgres:16-alpine` ⇒ 依赖真 PG/Redis 的测试全挂 ⇒ Spring 上下文加载失败
    - ⇒ ⇒ **这是环境争用，不是代码缺陷** ⇒ ⇒ **判读回归结果前必须先看根因是不是 `port is already allocated`**。
+   - ✅ **重跑已闭环（2026-10-29 04:1x）**：G1 的 `follow-api` 段跑完后 22700 段释放 ⇒ 本层重跑同一条命令
+     ⇒ ⇒ **BUILD SUCCESS · EXIT=0** ⇒ ⇒ **user-rpc 162 + admin-rpc 122 = 284 / 0 fail / 0 err / 0 skipped**
+     ⇒ ⇒ **与合并前（284）的数字完全一致** ⇒ ⇒ **合并 + 本轮 javadoc/新守门改动未破坏 users 域**。
 2. **裸文件名 `.go:行` 引用（消歧）**：本层两份台账里 **91 条**，其中 **39 条**的文件名有多候选（见 §4.17.8 末）
    ⇒ ⇒ **本轮只消歧 1 条**（`types.go` → `service/message/api/internal/types/types.go`）⇒ ⇒ **剩余 38 条 = 阶段二规模**。
 
