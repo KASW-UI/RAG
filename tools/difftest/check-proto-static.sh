@@ -69,6 +69,16 @@ src = re.sub(r'//[^\n]*', '', src)
 # 删侧 specific option 整行
 for opt in ('option go_package', 'option java_package', 'option java_multiple_files'):
     src = re.sub(rf'^\s*{re.escape(opt)}[^\n]*\n', '', src, flags=re.M)
+# 🔴 删 `package` 行 —— **这是已签字偏离的明文要求**，不是「放过漂移」：
+#   · `like`   ⇒ SD-2026-10-23-05（`docs/Intentional_Deviations/like/proto.md`）
+#   · `comment`⇒ SD-2026-10-23-04（`docs/Intentional_Deviations/comment/proto.md`）
+#   两域的 Go 侧是遗留包名 `package pb;`，RAG 侧归一成域名（`like` / `comment`）
+#   ⇒ **gRPC 方法路径前缀不同**（`/pb.LikeService/*` vs `/like.LikeService/*`）⇒ wire 层可见。
+#   签字文件原文：「`check-proto-static.sh` 若扩到 `like`，其 `verdict` **必须排除 `package` 行**，
+#   否则会把本条已签字偏离判成回退」⇒ 本行照此办理。
+#   ⚠️ **排除 ≠ 静默忽略** ⇒ 排除的同时**单独钉住** RAG 侧的 package 必须是签字值
+#   （见下面的 `pkg_pin` 判定）⇒ 偏离被**钉成「签字偏离」**，改动它仍会转红。
+src = re.sub(r'^\s*package\s+[A-Za-z0-9_.]+\s*;[^\n]*\n', '', src, flags=re.M)
 # 折叠空白(每行压成单个空格)
 out = []
 for line in src.splitlines():
@@ -98,15 +108,68 @@ verdict() {
   rm -f /tmp/check-proto-static.$$
 }
 
-echo "== user(9 RPC) =="
-verdict "$USER_GO" "$USER_RAG" "user.proto ↔ users.proto"
-echo "== admin(13 RPC) =="
-verdict "$ADMIN_GO" "$ADMIN_RAG" "admin.proto ↔ admin.proto"
-echo "== task(1 RPC) =="
-verdict "$TASK_GO" "$TASK_RAG" "task.proto ↔ task.proto"
+# 🔴 G-6（2026-10-29 · R3·T-3.3）：本守门原先只覆盖 **4 个域**（user / admin / task / comment）
+#    ⇒ **`follow` / `like` / `hot` / `article` / `message` / `favorite` 连静态守门都没有**
+#    ⇒ 「proto 漂了**不会红**」⇒ 现扩到 **10 个域**（= RAG 侧全部 proto 组件）。
+#
+# ⚠️ **`points` / `security` 不在范围内** —— Go 侧**范围内外**（AGENTS.md §一：Go 侧这三个域范围外
+#    ⇒ 不是待办）⇒ 本表**不列**它们 ⇒ **不是「漏了」，是「不在范围内」**。
+#
+# ⚠️ `user.proto` 在 RAG 侧改名 `users.proto`（AGENTS.md §3.4：**唯一**允许的改名）⇒ 表里显式标注。
+DOMAINS=(
+  "user|users|service/users/user/user-proto/src/main/proto/users.proto|user.proto ↔ users.proto（RAG 侧改名）"
+  "admin|admin|service/users/admin/admin-proto/src/main/proto/admin.proto|admin.proto ↔ admin.proto"
+  "task|task|service/task/task-proto/src/main/proto/task.proto|task.proto ↔ task.proto"
+  "comment|comment|service/comment/comment-proto/src/main/proto/comment.proto|comment.proto ↔ comment.proto"
+  "favorite|favorite|service/favorite/favorite-proto/src/main/proto/favorite.proto|favorite.proto ↔ favorite.proto"
+  "follow|follow|service/follow/follow-proto/src/main/proto/follow.proto|follow.proto ↔ follow.proto"
+  "hot|hot|service/hot/hot-proto/src/main/proto/hot.proto|hot.proto ↔ hot.proto"
+  "like|like|service/like/like-proto/src/main/proto/like.proto|like.proto ↔ like.proto"
+  "message|message|service/message/message-proto/src/main/proto/message.proto|message.proto ↔ message.proto"
+  "article|article|service/article/article-proto/src/main/proto/article.proto|article.proto ↔ article.proto"
+)
+
+# 🔴 **钉住 RAG 侧的 proto `package`** —— 「排除 package 行」≠「放过 package 漂移」。
+#    每条都带**签字出处**（无出处 ⇒ 不许豁免）。
+#    · `like` / `comment` ⇒ **已签字偏离**（Go 侧 `pb` 是遗留包名 ⇒ 归一为域名）⇒ 钉住**签字值**
+#    · 其余 8 域 ⇒ 两侧本就逐字相同 ⇒ 钉住**与 Go 一致**这个事实（防有人把它改回 `pb`）
+pkg_pin() {
+  local rag_file=$1 expect=$2 why=$3
+  local got
+  got="$(grep -m1 -E '^[[:space:]]*package[[:space:]]+[A-Za-z0-9_.]+[[:space:]]*;' "$rag_file" 2>/dev/null | sed -E 's/.*package[[:space:]]+([A-Za-z0-9_.]+)[[:space:]]*;.*/\1/')"
+  if [[ -z "$got" ]]; then
+    echo "  ✗ proto package 钉住失败：$(basename "$(dirname "$rag_file")")/$(basename "$rag_file") 读不到 package 行"
+    FAILED=1
+  elif [[ "$got" == "$expect" ]]; then
+    echo "  ✓ package = ${got}（${why}）"
+  else
+    echo "  ✗ package = ${got}，**应为 ${expect}**（${why}）⇒ 改动会破坏该域的 gRPC 方法路径前缀"
+    FAILED=1
+  fi
+}
+
+echo "== proto wire 契约逐字节对照（10 个域）=="
+for row in "${DOMAINS[@]}"; do
+  IFS='|' read -r _go _rag _rag_path _label <<< "$row"
+  go_file="$GO_PROTO_DIR/${_go}.proto"
+  rag_file="$ROOT/${_rag_path}"
+  echo "== ${_go} =="
+  if [[ ! -f "$go_file" || ! -f "$rag_file" ]]; then
+    echo "  ✗ ${_label}: 文件缺失（go=$go_file rag=$rag_file）"
+    FAILED=1
+    continue
+  fi
+  verdict "$go_file" "$rag_file" "$_label"
+  case "$_go" in
+    like)    pkg_pin "$rag_file" "like"    "SD-2026-10-23-05 已签字偏离 · Go 侧的 pb 是遗留包名" ;;
+    comment) pkg_pin "$rag_file" "comment" "SD-2026-10-23-04 已签字偏离 · Go 侧的 pb 是遗留包名" ;;
+    *)       pkg_pin "$rag_file" "$_go"    "两侧逐字相同（Go 侧即此值）" ;;
+  esac
+done
 
 cat <<'NOTE'
 NOTE:
+  覆盖 10 个域（= RAG 侧全部 proto 组件）；`points` / `security` **不在范围内**（Go 侧范围外）。
   上面 diff 排除的是侧特定 option / 注释 / 空白 ——
   field 名、字段号、message 名、rpc 签名一律做了字节级比对。
   §3.1 静态两半(字段号 / message 名)正式关闭。
@@ -119,4 +182,4 @@ if [ "$FAILED" != "0" ]; then
   echo "✗ 至少一个域的 proto wire 契约存在差异" >&2
   exit 1
 fi
-echo "✓ 全部域的 proto wire 契约逐字节一致"
+echo "✓ 全部 ${#DOMAINS[@]} 个域的 proto wire 契约逐字节一致"

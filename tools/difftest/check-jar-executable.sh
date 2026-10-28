@@ -30,13 +30,24 @@
 #   bash tools/difftest/check-jar-executable.sh                  # 检查全部 api + rpc 模块
 #   bash tools/difftest/check-jar-executable.sh service/like/like-api    # 只查指定模块
 #   bash tools/difftest/check-jar-executable.sh service/task/task-rpc    # 只查指定 rpc 模块
+#   bash tools/difftest/check-jar-executable.sh --allow-unbuilt  # 允许「未构建」跳过（**不计入判绿**）
 #
-# 退出码：0 = 全部可执行；1 = 至少一个模块的 jar 不可执行（不可部署）
+# 退出码：0 = 全部已检查且可执行；1 = 至少一个模块的 jar 不可执行（不可部署）**或** 至少一个模块未构建
 # =============================================================================
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
+
+# 🔴 **未构建 ⇒ 跳过且不计失败** 是本脚本原先的假绿口子（G-10 · 2026-10-29 实测）：
+#   实跑**只检查了 5/20 个模块**却返回「全部 api + rpc 模块的 jar 均可执行 ✓」＋ EXIT=0
+#   ⇒ ⇒ 「没查」被读成「查过且没问题」⇒ ⇒ **正是「零命中是假信号 / 跑绿 ≠ 判据活着」同族**。
+#   ⇒ 修法（两条一起做）：① **永远打印「已检查 N/M」**；② **未构建 ⇒ 判红**（除非显式 `--allow-unbuilt`）。
+ALLOW_UNBUILT=0
+if [[ "${1:-}" == "--allow-unbuilt" ]]; then
+  ALLOW_UNBUILT=1
+  shift
+fi
 
 # 全部 api + rpc 模块（含 users 域的二级路径）
 # ⚠️ **不要**把 `service/common` 加进来 —— 它是 library 模块，repackage 会污染下游依赖（见上）。
@@ -50,13 +61,23 @@ else
 fi
 
 fail=0
-printf '检查 %d 个 api + rpc 模块的产物可执行性\n' "${#MODULES[@]}"
+checked=0
+unbuilt=0
+total="${#MODULES[@]}"
+printf '检查 %d 个 api + rpc 模块的产物可执行性\n' "$total"
 for d in "${MODULES[@]}"; do
   jar="$(ls "$d"/target/*.jar 2>/dev/null | grep -v -- '-original' | head -1)"
   if [[ -z "$jar" ]]; then
-    printf '  ⚠️  %-42s 没有产物（未构建？）\n' "$d"
+    unbuilt=$((unbuilt + 1))
+    if [[ "$ALLOW_UNBUILT" -eq 1 ]]; then
+      printf '  ⚠️  %-42s 没有产物（未构建？）—— **未检查**（--allow-unbuilt）\n' "$d"
+    else
+      printf '  ❌  %-42s 没有产物（未构建？）—— **未检查 ⇒ 不算通过**\n' "$d"
+      fail=1
+    fi
     continue
   fi
+  checked=$((checked + 1))
   main="$(unzip -p "$jar" META-INF/MANIFEST.MF 2>/dev/null | tr -d '\r' | grep -E '^Main-Class:' | head -1)"
   size="$(du -h "$jar" | cut -f1)"
   if [[ "$main" == *"JarLauncher"* || "$main" == *"Start-Class"* ]]; then
@@ -66,6 +87,9 @@ for d in "${MODULES[@]}"; do
     fail=1
   fi
 done
+
+# 🔴 **「已检查 N/M」必须打印出来** ⇒ ⇒ 读者不会把「没查」读成「查过且没问题」。
+printf '已检查 %d/%d 个模块（未构建 %d 个）\n' "$checked" "$total" "$unbuilt"
 
 if [[ $fail -ne 0 ]]; then
   cat <<'EOF'
@@ -86,5 +110,9 @@ EOF
   exit 1
 fi
 
-echo "全部 api + rpc 模块的 jar 均可执行 ✓"
+if [[ "$unbuilt" -eq 0 ]]; then
+  echo "全部 $total 个 api + rpc 模块的 jar 均可执行 ✓（已检查 $checked/$total）"
+else
+  echo "已检查的 $checked 个模块 jar 均可执行 ✓；⚠️ **另有 $unbuilt 个模块未构建 ⇒ 未检查**（不是「已通过」）"
+fi
 exit 0
